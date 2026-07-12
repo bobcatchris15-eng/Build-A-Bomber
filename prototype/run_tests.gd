@@ -69,6 +69,7 @@ func _init():
 	success = success and await test_balance_report_covers_every_catalog_entry()
 	success = success and await test_screenshot_diff_tolerance()
 	success = success and await test_no_energy_deficit_at_match_start()
+	success = success and await test_energy_damage_class_reclassification()
 
 	print("\n==============================================")
 	if success:
@@ -130,13 +131,16 @@ func test_stats_calculations() -> bool:
 	# Weight: Weight * wt_mult (1.0) * thickness (1.5) * faction_armor_weight_reduction (0.8) = 96.0
 	var expected_weight = 96.0
 	
-	# Expected Thresholds:
+	# Expected Thresholds (from DamageResolver.ARMOR_TABLE's hardened_steel
+	# row - the sidebar reads this directly now, not a separate hardcoded
+	# copy; "E" is a real Energy threshold as of this pass, not the
+	# Explosive value mislabeled):
 	# Kinetic (K): Base K (15.0) * thickness (1.5) = 22.5
 	# Thermal (T): Base T (5.0) * thickness (1.5) = 7.5
-	# Explosive (E): Base E (10.0) * thickness (1.5) = 15.0
+	# Energy (E): Base Energy (8.0) * thickness (1.5) = 12.0
 	var expected_k_thresh = 22.5
 	var expected_t_thresh = 7.5
-	var expected_e_thresh = 15.0
+	var expected_e_thresh = 12.0
 	
 	# Retrieve calculated values from labels
 	var hp_label_text = stat_ui.hp_label.text
@@ -2455,9 +2459,17 @@ func test_repair_array_heals_allies_only() -> bool:
 	var w_data = ModuleData.new()
 	w_data.type_id = "repair_array"
 	w_data.base_weight = 70.0
-	w_data.base_dps = 30.0
+	w_data.base_heal_rate = 30.0
 	weapon.set_meta("module_data", w_data)
 	weapon._ready()
+	if weapon.heal_rate <= 0.0:
+		print("  [FAIL] repair_array should have a nonzero heal_rate (dedicated stat, not dps), got ", weapon.heal_rate)
+		healer.queue_free()
+		return false
+	if weapon.dps != 0.0:
+		print("  [FAIL] repair_array should deal zero real damage now that heal_rate is its own stat, got dps=", weapon.dps)
+		healer.queue_free()
+		return false
 	if not weapon.targets_allies:
 		print("  [FAIL] repair_array should have targets_allies=true")
 		healer.queue_free()
@@ -2947,4 +2959,55 @@ func test_no_energy_deficit_at_match_start() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Both teams start with a non-deficit Energy baseline (HQ's own power plant offsets default static-building upkeep).")
+	return true
+
+func test_energy_damage_class_reclassification() -> bool:
+	print("Running Test Suite: heavy_laser/plasma_lobber/pd_laser Reclassified To Energy Damage (not capacitor-limited)...")
+	# damage_resolver.gd previously had no "energy" row in ARMOR_TABLE at
+	# all, so anything dealing damage_class=="energy" silently fell back to
+	# resolving as EXPLOSIVE damage (row.get(damage_type, row["explosive"])) -
+	# a real bug, not just a missing feature. Fixed with a genuine energy
+	# row, then these three thematically-energy weapons were reclassified
+	# for real (see DECISIONS_NEEDED.md for the concrete threshold-swing
+	# numbers this changes against ablative_ceramic/energy_shielding).
+	var AutoWeaponScript = load("res://scripts/auto_weapon.gd")
+
+	# 1. A real energy row must exist and be genuinely distinct from explosive.
+	var steel_energy = DamageResolverScript.get_material_threshold("hardened_steel", "energy", 1.0)
+	var steel_explosive = DamageResolverScript.get_material_threshold("hardened_steel", "explosive", 1.0)
+	if steel_energy == steel_explosive:
+		print("  [FAIL] 'energy' damage_type should resolve to its own real threshold, not silently fall back to explosive, got ", steel_energy, " == ", steel_explosive)
+		return false
+	# energy_shielding should be the strongest defense specifically against
+	# energy damage - its own name is the thematic justification.
+	var shield_energy = DamageResolverScript.get_material_threshold("energy_shielding", "energy", 1.0)
+	var steel_energy_thresh = steel_energy.x
+	if shield_energy.x <= steel_energy_thresh:
+		print("  [FAIL] energy_shielding should have a stronger energy threshold than hardened_steel, got shield=", shield_energy.x, " steel=", steel_energy_thresh)
+		return false
+
+	for type_id in ["heavy_laser", "plasma_lobber", "pd_laser"]:
+		var weapon = Node3D.new()
+		weapon.set_script(AutoWeaponScript)
+		root.add_child(weapon)
+		var w_data = ModuleData.new()
+		w_data.type_id = type_id
+		w_data.base_weight = 60.0
+		w_data.base_dps = 20.0
+		weapon.set_meta("module_data", w_data)
+		weapon._ready()
+		if weapon.damage_class != "energy":
+			print("  [FAIL] ", type_id, " should be reclassified to damage_class 'energy', got '", weapon.damage_class, "'")
+			weapon.queue_free()
+			return false
+		# Must NOT pick up the capacitor-cost/drain mechanic - that's
+		# scoped to tesla_coil/arc_projector/ion_cannon only.
+		if weapon.energy_cost_per_shot != 0.0:
+			print("  [FAIL] ", type_id, " should NOT cost the shooter's own Energy pool to fire (that's only tesla_coil/arc_projector/ion_cannon), got cost=", weapon.energy_cost_per_shot)
+			weapon.queue_free()
+			return false
+		weapon.queue_free()
+
+	await process_frame
+	print("  [PASS] damage_resolver.gd has a real energy armor row; heavy_laser/plasma_lobber/pd_laser deal energy damage but stay capacitor-free.")
 	return true

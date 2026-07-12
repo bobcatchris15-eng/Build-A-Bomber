@@ -11,6 +11,7 @@ const GlobalConfig = preload("res://scripts/global_config.gd")
 @export var cost_metal: int = 10
 @export var cost_crystal: int = 0
 @export var base_dps: float = 0.0
+@export var base_heal_rate: float = 0.0
 @export var base_energy_capacity: float = 0.0
 @export var base_energy_regen: float = 0.0
 @export var tweaks: Dictionary = {}
@@ -96,6 +97,18 @@ func get_energy_regen() -> float:
 	var vol = _get_volume_mult()
 	var regen = base_energy_regen + (base_energy_regen * (vol - 1.0) * GlobalConfig.hp_scale_factor)
 	return GlobalConfig.round_to_half(regen)
+
+# Dedicated stat, not a reuse of dps (see DECISIONS_NEEDED.md for why that
+# was a deliberate stopgap) - repair_array's heal-per-second, kept out of
+# the Design Lab's "Total DPS" aggregate. Reuses welder_count's existing
+# scaling shape ("adding more arms speeds up construction exponentially",
+# Arsenal_Weapons_List.md) since that's the one tweak repair_array has.
+func get_heal_rate() -> float:
+	var vol = _get_volume_mult()
+	var heal = base_heal_rate + (base_heal_rate * (vol - 1.0) * GlobalConfig.dps_scale_factor)
+	if tweaks.has("welder_count"):
+		heal *= (tweaks["welder_count"] / 2.0)
+	return GlobalConfig.round_to_half(heal)
 
 func get_dps() -> float:
 	var vol = _get_volume_mult()

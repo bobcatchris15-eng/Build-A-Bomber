@@ -362,6 +362,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		m_data.cost_metal = mod_catalog_data.metal
 		m_data.cost_crystal = mod_catalog_data.crystal
 		m_data.base_dps = mod_catalog_data.dps
+		m_data.base_heal_rate = mod_catalog_data.get("heal_rate", 0.0)
 		m_data.base_energy_capacity = mod_catalog_data.get("energy_capacity", 0.0)
 		m_data.base_energy_regen = mod_catalog_data.get("energy_regen", 0.0)
 		if mod.has("tweaks"):

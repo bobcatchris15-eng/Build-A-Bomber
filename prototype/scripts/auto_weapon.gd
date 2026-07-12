@@ -9,6 +9,7 @@ var fire_rate: float = 1.0 # Shot interval
 var time_since_last_shot: float = 0.0
 
 var dps: float = 10.0
+var heal_rate: float = 0.0
 var laser_color: Color = Color.RED
 var type_id: String = ""
 
@@ -30,6 +31,19 @@ var targets_allies: bool = false
 const ENERGY_WEAPON_TYPES = ["tesla_coil", "arc_projector", "ion_cannon"]
 var energy_cost_per_shot: float = 0.0
 var energy_drain_per_shot: float = 0.0
+
+# damage_class reclassification (DECISIONS_NEEDED.md - deliberately
+# deferred, then revisited once damage_resolver.gd actually had a real
+# "energy" armor-table row to resolve against): heavy_laser/plasma_lobber/
+# pd_laser are thematically directed-energy weapons, reclassified to
+# damage_class "energy" for real armor-matchup purposes. Deliberately kept
+# OUT of ENERGY_WEAPON_TYPES above - they don't cost the shooter's own
+# Energy pool to fire or drain the target's, only tesla_coil/arc_projector/
+# ion_cannon (this pass's new weapons) have that mechanic. Mixing the two
+# lists would have silently turned three week-old weapons into
+# capacitor-limited ones, which is a much bigger change than "which armor
+# threshold they resolve against."
+const ENERGY_DAMAGE_CLASS_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "heavy_laser", "plasma_lobber", "pd_laser"]
 
 # Helper to find all colliders recursively
 func _get_colliders_recursive(node: Node, list: Array):
@@ -102,6 +116,7 @@ func _ready():
 		var data = get_meta("module_data")
 		type_id = data.type_id
 		dps = data.get_dps()
+		heal_rate = data.get_heal_rate()
 		
 		# Calculate traverse speed based on weight
 		var weight = data.get_weight()
@@ -121,15 +136,10 @@ func _ready():
 			damage_class = "kinetic"
 		elif type_id in ["heavy_howitzer", "mortar_array", "spigot_mortar", "guided_missile", "dual_stage_missile", "missile_pod", "cluster_dispenser", "flak_cannon"]:
 			damage_class = "explosive"
-		elif type_id in ENERGY_WEAPON_TYPES:
-			# New this pass - the armor system's "Energy" damage-type
-			# threshold (K:/T:/E: in the Design Lab sidebar) existed since
-			# early this week but nothing ever actually dealt "energy"
-			# damage_class, so it was cosmetic-only. Deliberately NOT
-			# reclassifying heavy_laser/plasma_lobber/pd_laser (they stay
-			# "thermal" via the else branch below) - that would silently
-			# change their existing balance against energy_shielding armor,
-			# which wasn't asked for and isn't worth the risk unattended.
+		elif type_id in ENERGY_DAMAGE_CLASS_TYPES:
+			# See ENERGY_DAMAGE_CLASS_TYPES's own comment for the full
+			# reasoning and DECISIONS_NEEDED.md for the concrete
+			# before/after threshold numbers this reclassification changes.
 			damage_class = "energy"
 		else:
 			damage_class = "thermal"
@@ -1194,7 +1204,7 @@ func _fire_repair_array_beam():
 	st.finished.connect(func(): spark.queue_free())
 	
 	if is_instance_valid(target) and target.has_method("repair_hp"):
-		target.repair_hp(dps * fire_rate)
+		target.repair_hp(heal_rate * fire_rate)
 
 	var timer = get_tree().create_timer(0.08)
 	timer.timeout.connect(func(): if is_instance_valid(beam): beam.queue_free())

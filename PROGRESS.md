@@ -4,6 +4,34 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 7) — Doc cleanup, repair_array heal_rate, energy damage-type reclassification (found + fixed a deeper bug)
+
+Start of a new batch. First pass: documentation hygiene, then two of the "rest of the open items."
+
+### DECISIONS_NEEDED.md reconciled against what actually shipped
+
+Chris asked for a real pass, not just the one example he named. Found the armor-related entries were genuinely stale: "Armor-module combat integration scoped to aggregate (non-directional)" and "Directional/facing armor thresholds are documented but not implemented" were both written before the same-day armor pass, which built exactly the directional/facet-aware resolution they'd scoped away from (confirmed via `damage_resolver.gd`'s `resolve()` signature and the four directional-armor tests). Both marked RESOLVED with what shipped. Everything else checked against current code state - the rest were still accurate as written.
+
+### Grid-snap struck from Design_Lab_UI_UX.md
+
+The doc's "Surface Grid" section described a hex/square snap-grid that was never built and isn't going to be (freeform placement is the confirmed final direction). Rewrote the section to describe freeform placement directly, with a note on why the earlier grid draft was superseded, instead of leaving the doc silently wrong. Also fixed an adjacent inaccuracy while in there: the "Key Stats" line listed "Damage Thresholds (Kinetic/Thermal/Explosive)" - the real third category is Energy, not Explosive.
+
+### repair_array gets a real heal_rate stat
+
+Previously reused the generic `dps` field as a stopgap (logged as a known wart). `module_data.gd` gained `base_heal_rate`/`get_heal_rate()` (own getter, reuses `welder_count`'s existing scaling), `repair_array`'s catalog entry is back to an honest `dps: 0.0`, and the Design Lab's floating stat popup shows "Heal Rate: X/s" instead of "DPS: X" for modules with one. `tools/balance_report.gd` also gained a dedicated `HEAL_RATE_WEIGHT`.
+
+### Energy damage_class reclassification - and a deeper bug found while checking it
+
+Chris asked me to use the balance tool to check this carefully first. Doing that surfaced something the tool couldn't see but the check itself revealed: `damage_resolver.gd`'s `ARMOR_TABLE` never had a real `"energy"` row at all - every weapon dealing `damage_class == "energy"` (including this session's own tesla_coil/arc_projector/ion_cannon) was silently resolving as EXPLOSIVE damage via a fallback, and the Design Lab's "E:" armor-threshold label was a separately-hardcoded, mislabeled copy of the explosive value. Both predate today; not introduced by the energy-weapon work, just not caught until now.
+
+Fixed with a genuine energy row per material (energy_shielding gets the strongest defense against it, matching its name) and made `stat_calculator.gd` read K/T/E directly from `DamageResolver` instead of a second hardcoded table. Then did the real reclassification analysis: `heavy_laser`/`plasma_lobber`/`pd_laser` reclassified from `thermal` to `energy` - a real, meaningful swing (notably stronger vs `ablative_ceramic`, notably weaker vs `energy_shielding`), logged with the concrete before/after numbers in DECISIONS_NEEDED.md rather than applied silently. `flamethrower`/`drone_carrier` deliberately left alone (no real energy identity). The three reclassified weapons stay outside `ENERGY_WEAPON_TYPES` - they deal energy damage but don't cost/drain the Energy resource, keeping that mechanic scoped to this session's three new weapons only.
+
+**Verified:** 47/47 tests green (2 new this chunk). Visual regression: baselines updated to reflect the corrected (no longer mislabeled) Energy threshold display - confirmed by screenshot the sidebar now reads "E: 8.0" for hardened_steel instead of the old "E: 10.0" (which was silently the explosive value).
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 (cont'd 6) — Build-legality gate, balance tooling, screenshot-diff testing (found 2 real bugs)
 
 Final three pieces of the big Energy/balance/modules batch. (Between this and the previous entry, also fixed a real pre-existing bug found while verifying the repair/drone work - `_setup_weapons()` never attached auto_weapon.gd to repair_array/drone_carrier in real gameplay at all, only in synthetic tests - see the DECISIONS_NEEDED.md entry and commit `7faa28b`.)

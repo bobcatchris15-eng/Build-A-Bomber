@@ -9,11 +9,23 @@ class_name DamageResolver
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 
 # damage_type -> [base_threshold, reduction] per armor material.
+#
+# "energy" row added this pass (ENERGY_AND_BALANCE_SPEC.md #4 follow-up):
+# previously there was no "energy" key at all, so any weapon dealing
+# damage_class=="energy" (tesla_coil/arc_projector/ion_cannon) silently fell
+# through get_material_threshold()'s row.get(damage_type, row["explosive"])
+# fallback and actually resolved as EXPLOSIVE damage - a real bug, not just
+# a missing feature, found while scoping the energy-weapon-reclassification
+# work. energy_shielding gets a genuinely strong energy threshold (its own
+# name is the thematic justification); hardened_steel/reactive_armor are
+# weak against it (plate steel and reactive plates don't stop directed
+# energy); ablative_ceramic is moderate (ablative/heat-resistant materials
+# have some real answer to it, just not a dedicated one).
 const ARMOR_TABLE = {
-	"hardened_steel": {"kinetic": [15.0, 0.7], "thermal": [5.0, 0.9], "explosive": [10.0, 0.8]},
-	"reactive_armor": {"kinetic": [10.0, 0.8], "thermal": [10.0, 0.8], "explosive": [30.0, 0.4]},
-	"ablative_ceramic": {"kinetic": [8.0, 0.9], "thermal": [25.0, 0.3], "explosive": [10.0, 0.7]},
-	"energy_shielding": {"kinetic": [20.0, 0.5], "thermal": [20.0, 0.5], "explosive": [20.0, 0.5]},
+	"hardened_steel": {"kinetic": [15.0, 0.7], "thermal": [5.0, 0.9], "explosive": [10.0, 0.8], "energy": [8.0, 0.85]},
+	"reactive_armor": {"kinetic": [10.0, 0.8], "thermal": [10.0, 0.8], "explosive": [30.0, 0.4], "energy": [8.0, 0.85]},
+	"ablative_ceramic": {"kinetic": [8.0, 0.9], "thermal": [25.0, 0.3], "explosive": [10.0, 0.7], "energy": [15.0, 0.6]},
+	"energy_shielding": {"kinetic": [20.0, 0.5], "thermal": [20.0, 0.5], "explosive": [20.0, 0.5], "energy": [35.0, 0.3]},
 }
 
 static func get_material_threshold(material: String, damage_type: String, thickness: float) -> Vector2:

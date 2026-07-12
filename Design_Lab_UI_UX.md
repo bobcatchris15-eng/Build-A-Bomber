@@ -10,7 +10,7 @@ The Design Lab is an out-of-match experience (accessed between Operations or fro
    - A scrollable, categorized list of modules (Weapons, Support, Armor Materials). Selecting a category expands it to show the Base Archetypes. 
 3. **Right Panel (The Stat Block):**
    - The overarching stats of the entire construct. As parts are added or tweaked, these numbers flash and update dynamically.
-   - *Key Stats:* Total HP, Resource Cost, Top Speed, Overall DPS, Damage Thresholds (Kinetic/Thermal/Explosive), and Weight.
+   - *Key Stats:* Total HP, Resource Cost, Top Speed, Overall DPS, Damage Thresholds (Kinetic/Thermal/Energy), and Weight.
 4. **Top Bar (Admin Tools):**
    - Blueprint Name input field, Save/Load buttons, Undo/Redo, and the **Symmetry Toggle**.
    - *Symmetry Toggle:* An absolute necessity. Players can turn on bilateral symmetry so placing a missile pod on the starboard side automatically places an identical, mirrored pod on the port side. This can be toggled off for asymmetrical designs.
@@ -26,13 +26,11 @@ When the player clicks on a module that has already been placed on the hull:
 
 *Spore* allows you to stick a leg inside an eyeball and the game doesn't care. In an RTS, physical placement dictates functionality. If you place a Gatling Gun directly behind a massive smokestack, it physically shouldn't be able to shoot forward. 
 
-To give players maximum freedom *without* them accidentally designing broken, useless units, the game uses a hybrid approach of **Grid-Snapping** and **Arc Visualization**:
+To give players maximum freedom *without* them accidentally designing broken, useless units, the game relies on fully **freeform placement** (raycast against the hull surface, position and orientation unconstrained) paired with **Arc Visualization** and **Collision/Clipping Checks** to make the consequences of a bad placement immediately visible, rather than restricting placement itself:
 
-### 1. The Surface Grid (Constraining Placement)
-Instead of completely unrestricted freeform (which leads to clipping nightmares), when a player selects a module to place, a subtle **hex-grid or square-grid** appears across the surface of the Hull. 
-- Modules snap cleanly to this grid.
-- Scaling the hull up physically adds more grid squares, granting more surface area to mount weapons.
-- You cannot place a weapon overlapping another weapon.
+### 1. Freeform Placement (No Snap-Grid)
+Placement is fully continuous - a module can sit anywhere a raycast hits the hull surface, at any position and rotation, not locked to a grid of discrete points. This is deliberate: where exactly a weapon sits is itself a differentiation axis (it changes the module's firing arc and exposure), and a snap-grid would flatten that into a handful of interchangeable slots, working against the game's own Spore-style continuous-tweaking philosophy (see DESIGN_VISION.md). An earlier draft of this doc described a hex/square surface grid; that direction was superseded before it was built - freeform is the final, permanent placement model.
+- You cannot place a weapon overlapping another weapon or the hull's own collision volume (see Collision/Clipping Checks, below) - that's what actually prevents "broken" placements, not a grid.
 
 ### 2. Dynamic Firing Arc Visualization (The "Radar Sweep")
 To ensure players understand their firing arcs without reading spreadsheets, the UI relies on immediate visual feedback.

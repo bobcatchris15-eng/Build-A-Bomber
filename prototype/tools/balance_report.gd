@@ -19,6 +19,12 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 # something even at equal DPS). Energy stats use their own weights since
 # they're not directly comparable to DPS/HP at all.
 const DPS_WEIGHT: float = 3.0
+# Slightly below DPS_WEIGHT - healing is situational (only matters when
+# something's already hurt) where damage always counts, per the "shaky
+# areas" note this tool already prints. Added once repair_array got its
+# own dedicated heal_rate stat (previously reused dps, which accidentally
+# gave it full DPS_WEIGHT - this is more honest, not less generous).
+const HEAL_RATE_WEIGHT: float = 2.5
 const HP_WEIGHT: float = 0.3
 const ENERGY_CAPACITY_WEIGHT: float = 1.2
 const ENERGY_REGEN_WEIGHT: float = 4.0
@@ -57,9 +63,9 @@ func _init():
 	print("  long a weapon can sustain fire, independent of its Metal/Crystal price.")
 	print("  A cheap-to-build energy weapon that drains the capacitor instantly")
 	print("  isn't actually cheap to USE - this report can't see that tradeoff.")
-	print("* repair_array's 'dps' is a heal rate, not damage - it's scored here")
-	print("  as if it were a weapon's DPS, which overstates its raw \"value\" versus")
-	print("  a weapon of equal dps (healing is situational, damage is not).")
+	print("* repair_array now has its own heal_rate stat (HEAL_RATE_WEIGHT, set")
+	print("  slightly below DPS_WEIGHT since healing is situational and damage")
+	print("  isn't) - still an estimate, not a measured playtest value.")
 
 	quit(0)
 
@@ -68,6 +74,7 @@ func _init():
 # running this whole script as the SceneTree main loop.
 static func compute_score(data: Dictionary) -> Dictionary:
 	var value = data.get("dps", 0.0) * DPS_WEIGHT + data.get("hp", 0.0) * HP_WEIGHT
+	value += data.get("heal_rate", 0.0) * HEAL_RATE_WEIGHT
 	value += data.get("energy_capacity", 0.0) * ENERGY_CAPACITY_WEIGHT
 	value += data.get("energy_regen", 0.0) * ENERGY_REGEN_WEIGHT
 	var cost = float(data.get("metal", 0)) + float(data.get("crystal", 0)) * CRYSTAL_WEIGHT + data.get("weight", 0.0) * WEIGHT_TAX

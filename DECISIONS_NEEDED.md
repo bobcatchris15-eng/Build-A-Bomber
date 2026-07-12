@@ -4,6 +4,18 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Correction: "energy" damage_class had no real armor-table row at all, silently fell back to explosive
+
+**Not blocking - fixed immediately, correction to an earlier claim.**
+
+A previous entry in this log ("Energy weapons: didn't reclassify existing thermal weapons") claimed tesla_coil/arc_projector/ion_cannon "give the previously-dead Energy armor damage-type threshold its first real use." That was wrong. `damage_resolver.gd`'s `ARMOR_TABLE` never actually had an `"energy"` key for any material - only `kinetic`/`thermal`/`explosive`. `get_material_threshold()`'s fallback (`row.get(damage_type, row["explosive"])`) meant every weapon dealing `damage_class == "energy"` was silently resolving as EXPLOSIVE damage instead, with no error or warning. Found while scoping today's energy-weapon-reclassification work, when I went looking for the real energy thresholds to compare against and discovered there weren't any.
+
+Separately, but for the same root cause: the Design Lab sidebar's "Armor Thresholds: K: _, T: _, E: _" label had its own hardcoded `e_base` table in `stat_calculator.gd`, completely disconnected from `damage_resolver.gd` - and its values were an exact copy of the EXPLOSIVE thresholds, just mislabeled as Energy. This predates this session entirely; it's not something the energy-weapon work introduced.
+
+**Fixed:** real `"energy"` row added to `ARMOR_TABLE` for all four materials (energy_shielding gets the strongest energy defense, matching its name; hardened_steel/reactive_armor are weak against it; ablative_ceramic is moderate). `stat_calculator.gd`'s sidebar now reads K/T/E directly from `DamageResolver.get_material_threshold()` instead of a second hardcoded table, so it can't drift again. New test (`test_energy_damage_class_reclassification`) asserts energy resolves to a genuinely distinct threshold from explosive.
+
+---
+
 ## 2026-07-12 — Visual regression pass: one false alarm (clipping working correctly), one real bug (Energy deficit at match start)
 
 **Not blocking - both resolved during the pass itself, not left open.**
@@ -33,6 +45,8 @@ While verifying the repair_array/drone_carrier fixes with a test that goes throu
 
 ## 2026-07-12 — repair_array's heal rate reuses the generic "dps" catalog field
 
+**RESOLVED 2026-07-12 (same day) — built the real heal_rate field.** Chris asked for this specifically. `module_data.gd` gained `base_heal_rate`/`get_heal_rate()` (its own getter, reusing `welder_count`'s existing scaling shape rather than dps's), `module_catalog.gd`'s repair_array entry is back to an honest `dps: 0.0` with a separate `heal_rate: 30.0`, `auto_weapon.gd`'s `_fire_repair_array_beam()` now calls `heal_rate * fire_rate`, and the Design Lab's floating stat popup shows "Heal Rate: X/s" instead of "DPS: X" for modules with a nonzero heal rate. `tools/balance_report.gd` also gained a `HEAL_RATE_WEIGHT` so repair_array scores fairly instead of via a leftover dps number. Original reasoning kept below for context on why the dps-reuse was a reasonable stopgap at the time.
+
 **Not blocking.**
 
 Fixing repair_array's real heal logic needed SOME numeric rate for `repair_hp(dps * fire_rate)` to use. Rather than inventing a parallel `heal_rate` stat field (its own catalog key, its own ModuleData getter, its own tweak-scaling plumbing in three places) just to keep it out of the "Total DPS" aggregate, I reused the existing `dps` field/pipeline - it already has weight/cost/tweak scaling fully wired (the `welder_count` tweak already multiplies it, matching the doc's "adding more arms speeds up construction exponentially").
@@ -44,6 +58,23 @@ Fixing repair_array's real heal logic needed SOME numeric rate for `repair_hp(dp
 ---
 
 ## 2026-07-12 — Energy weapons: didn't reclassify existing thermal weapons to "energy" damage_class
+
+**RESOLVED 2026-07-12 (same day) — reclassified `heavy_laser`/`plasma_lobber`/`pd_laser`, with the concrete swing logged below.** Chris explicitly greenlit this in a later batch, asking me to use the balance tooling to check it carefully first.
+
+**What "using the balance tooling" actually meant here:** `tools/balance_report.gd` scores cost-efficiency (dps/hp/energy vs metal/crystal/weight) - damage_class isn't part of that formula at all, so re-running it on these three weapons shows no change (correctly - reclassification doesn't touch their dps or cost). The tool confirmed there's nothing to see on THAT axis. The real risk Chris was pointing at is armor-matchup swings, which needed a different check: comparing `damage_resolver.gd`'s ARMOR_TABLE thermal row against a real energy row, which **didn't exist until this pass** - `get_material_threshold()` silently fell back to the EXPLOSIVE row for any unrecognized damage_type, so these three weapons (and the earlier tesla_coil/arc_projector/ion_cannon) were actually resolving as explosive damage this whole time, and the Design Lab's "E:" armor-threshold label had always been a mislabeled copy of the explosive value, not a real energy number. Fixed both first (see the `damage_resolver.gd`/`stat_calculator.gd` changes), then did the real matchup analysis:
+
+| Material | Thermal (old) | Energy (new) | Effect on heavy_laser/plasma_lobber/pd_laser |
+|---|---|---|---|
+| hardened_steel | 5.0 thresh, 0.9 reduction | 8.0 thresh, 0.85 reduction | Roughly a wash, very slightly weaker |
+| reactive_armor | 10.0, 0.8 | 8.0, 0.85 | Slightly stronger |
+| ablative_ceramic | 25.0, 0.3 | 15.0, 0.6 | **Meaningfully stronger** - was the best anti-thermal material (r=0.3), now lets through 2x the damage (r=0.6) |
+| energy_shielding | 20.0, 0.5 | 35.0, 0.3 | **Meaningfully weaker** - was an average defense, now specifically hard-counters these weapons (higher threshold + r=0.3) |
+
+**Why I did it anyway despite the real swing:** the swing is thematically *correct*, not just numerically different - `ablative_ceramic` (heat-ablative material) has no real reason to be the best defense against a directed-energy laser, and `energy_shielding` (a material literally named for this) had no mechanical reason to be merely average against them. The old thermal classification was masking a real design gap: materials weren't actually differentiated by damage type the way the game's own fiction implies. Logging the concrete before/after numbers here so Chris can feel out whether the swing is too strong once he can playtest it - this is exactly the kind of change I'd want caught in an interactive pass, not reverted blind.
+
+**Deliberately NOT touched:** `flamethrower` (fire/fuel-based, not directed energy - correctly stays thermal), `drone_carrier` (drone-strike damage has no strong energy identity either way). `ENERGY_DAMAGE_CLASS_TYPES` (auto_weapon.gd) is kept explicitly separate from `ENERGY_WEAPON_TYPES` - these three reclassified weapons deal energy damage but do NOT cost the shooter's own Energy pool to fire or drain the target's; only tesla_coil/arc_projector/ion_cannon have that capacitor mechanic. Mixing the two would have been a much bigger change than "which armor threshold this resolves against."
+
+Original reasoning for deferring kept below for context on why the aggregate-only version was the reasonable starting scope at the time.
 
 **Not blocking.**
 
@@ -149,6 +180,8 @@ MOUNTING_AND_ARMOR_SPEC.md #3 describes distinct visual treatments per hull face
 
 ## 2026-07-12 — Armor-module combat integration scoped to aggregate (non-directional), not full per-facet hit resolution
 
+**RESOLVED 2026-07-12 (same day) — superseded.** The later armor pass built exactly the full directional version this entry scoped away from: `damage_resolver.gd`'s `resolve()` grew optional `defender`/`hit_origin` params that classify which facet actually faces the attacker and resolve armor/threshold against only that facet's covering plate (falling back to aggregate when either is omitted), plus a real raycast-based sloped-armor angle-of-incidence multiplier (`compute_slope_multiplier()`) and AI flanking that targets a defender's actual weakest facet. See `test_directional_armor_facet_resolution`, `test_per_module_armor_material`, `test_sloped_armor_angle_of_incidence`, `test_ai_flanking_targets_weakest_facet`. Original reasoning kept below for context on why the aggregate-only version was the reasonable starting scope at the time.
+
 **Not blocking.**
 
 Implementing MOUNTING_AND_ARMOR_SPEC.md #2 (armor as a facet-fitting module) for real combat effect would ideally mean: a hit from a given direction resolves against the armor module actually covering that facet. Building that properly requires threading hit-direction (attacker position relative to defender, or the weapon's aim vector) through `battle_unit.gd`'s `take_damage(amount, damage_type)`, which currently takes no direction/position argument at all and is called from multiple sites across combat/AI code. That's the same underlying gap as the "directional/facing armor thresholds" item logged earlier today (still not implemented) — this isn't a new problem, it's the same one, now more visible because the new armor system makes it matter more.
@@ -160,6 +193,8 @@ Implementing MOUNTING_AND_ARMOR_SPEC.md #2 (armor as a facet-fitting module) for
 ---
 
 ## 2026-07-12 — Directional/facing armor thresholds are documented but not implemented (deprioritized this week)
+
+**RESOLVED 2026-07-12 (same day) — built.** Same-day armor pass implemented real directional/facing thresholds via `damage_resolver.gd`'s facet-aware `resolve()` plus a genuine raycast-based sloped-armor angle-of-incidence check — see the resolution note on the "Armor-module combat integration scoped to aggregate" entry above for the specifics and test names. The counter-play Damage_And_Armor_Model.md describes ("drive circles around the heavy unit, attack the weaker rear armor") is now real, and AI flanking (`_weakest_facet_normal`/`_compute_flank_point` in `battle_unit.gd`) exploits it too. Original reasoning kept below for context on why this was deprioritized at the time it was written.
 
 **Not blocking — deferred, not forgotten.**
 
@@ -176,6 +211,8 @@ Damage_And_Armor_Model.md's counter-play section explicitly describes weaker rea
 ---
 
 ## 2026-07-12 — Keeping freeform module placement (not adding grid-snap)
+
+**RESOLVED 2026-07-12 (same day) — doc updated to match.** Chris confirmed freeform is the final direction and asked for the grid-snap concept to be struck from Design_Lab_UI_UX.md itself, not just left as a decision-log note describing a doc tension. Done - the doc's "Surface Grid" section now describes freeform placement directly and explains why the earlier grid draft was superseded. Original reasoning kept below for context.
 
 **Not blocking.**
 

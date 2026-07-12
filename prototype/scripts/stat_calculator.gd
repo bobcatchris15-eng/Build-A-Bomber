@@ -21,6 +21,7 @@ const ModuleData = preload("res://scripts/module_data.gd")
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
+const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 var current_selected_module: Node3D = null
 var is_updating_sliders: bool = false
 var module_tweaks_container: VBoxContainer
@@ -430,14 +431,11 @@ func update_stats(hull: Node3D):
 				
 	var hp_mult = 1.0
 	var wt_mult = 1.0
-	var k_base = 15.0
-	var t_base = 5.0
-	var e_base = 10.0
-	
+
 	var armor_material = "hardened_steel"
 	var armor_thickness = 1.0
 	var faction = "industrialists"
-	
+
 	if hull:
 		if hull.has_meta("armor_material"):
 			armor_material = hull.get_meta("armor_material")
@@ -445,43 +443,37 @@ func update_stats(hull: Node3D):
 			armor_thickness = hull.get_meta("armor_thickness")
 		if hull.has_meta("faction"):
 			faction = hull.get_meta("faction")
-			
+
 	match armor_material:
 		"hardened_steel":
 			hp_mult = 1.0
 			wt_mult = 1.0
-			k_base = 15.0
-			t_base = 5.0
-			e_base = 10.0
 		"reactive_armor":
 			hp_mult = 1.3
 			wt_mult = 1.2
-			k_base = 10.0
-			t_base = 10.0
-			e_base = 30.0
 		"ablative_ceramic":
 			hp_mult = 1.6
 			wt_mult = 0.9
-			k_base = 8.0
-			t_base = 25.0
-			e_base = 10.0
 		"energy_shielding":
 			hp_mult = 2.0
 			wt_mult = 0.5
-			k_base = 20.0
-			t_base = 20.0
-			e_base = 20.0
-			
+
 	# Faction Passive Bonus: Industrialists get 20% less armor weight
 	if faction == "industrialists":
 		wt_mult *= 0.8
-		
+
 	total_hp = total_hp * hp_mult * armor_thickness
 	total_weight = total_weight * wt_mult * armor_thickness
-	
-	var k_thresh = k_base * armor_thickness
-	var t_thresh = t_base * armor_thickness
-	var e_thresh = e_base * armor_thickness
+
+	# Read straight from DamageResolver.ARMOR_TABLE (single source of truth,
+	# same as combat) instead of a second hardcoded k_base/t_base/e_base
+	# table - the two had drifted: "E:" here used to be a copy-paste of the
+	# EXPLOSIVE threshold mislabeled as Energy (damage_resolver.gd had no
+	# real "energy" row at all until this pass). Found while scoping the
+	# energy-weapon damage_class reclassification work.
+	var k_thresh = DamageResolverScript.get_material_threshold(armor_material, "kinetic", armor_thickness).x
+	var t_thresh = DamageResolverScript.get_material_threshold(armor_material, "thermal", armor_thickness).x
+	var e_thresh = DamageResolverScript.get_material_threshold(armor_material, "energy", armor_thickness).x
 
 	# Stat rounding: total_hp/total_weight/total_dps are sums of
 	# module_data.gd getters that already round to the nearest 0.5 at the
@@ -550,7 +542,9 @@ func on_module_selected(module: Node3D):
 		var wt = data.get_weight()
 		var cost = data.get_cost()
 		var dps = data.get_dps()
-		popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\nDPS: %.1f" % [hp, wt, cost.x, cost.y, dps]
+		var heal = data.get_heal_rate()
+		var last_line = "Heal Rate: %.1f/s" % heal if heal > 0.0 else "DPS: %.1f" % dps
+		popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s" % [hp, wt, cost.x, cost.y, last_line]
 		
 	if data.category != "locomotion":
 		locomotion_tweaks.visible = false
@@ -767,7 +761,9 @@ func _on_tweak_changed():
 				var wt = data.get_weight()
 				var cost = data.get_cost()
 				var dps = data.get_dps()
-				popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\nDPS: %.1f" % [hp, wt, cost.x, cost.y, dps]
+				var heal = data.get_heal_rate()
+				var last_line = "Heal Rate: %.1f/s" % heal if heal > 0.0 else "DPS: %.1f" % dps
+				popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s" % [hp, wt, cost.x, cost.y, last_line]
 		var placer = root.get_node_or_null("ModulePlacer") if root else null
 		if placer:
 			placer.check_all_clipping()

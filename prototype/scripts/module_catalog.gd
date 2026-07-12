@@ -285,14 +285,14 @@ static func get_catalog() -> Dictionary:
 			"weight": 70.0,
 			"metal": 40,
 			"crystal": 20,
-			# Reused as a heal-per-second rate (auto_weapon.gd's
-			# _fire_repair_array_beam calls repair_hp(dps*fire_rate) instead
-			# of take_damage) - not literal damage. Known minor wart: this
-			# also feeds the generic "Total DPS" aggregate in the Design Lab
-			# sidebar, mislabeling a heal rate as DPS. Accepted rather than
-			# building a parallel heal_rate stat pipeline just to avoid a
-			# cosmetic label - see DECISIONS_NEEDED.md.
-			"dps": 30.0,
+			# Real dps: 0.0 - repair_array deals no damage. Its heal-per-
+			# second rate is its own dedicated "heal_rate" stat (see
+			# module_data.gd's get_heal_rate()), not a reuse of dps, so it
+			# no longer pollutes the Design Lab's "Total DPS" aggregate.
+			# Previously reused dps as a stopgap - see DECISIONS_NEEDED.md
+			# for that history.
+			"dps": 0.0,
+			"heal_rate": 30.0,
 			"targets_allies": true,
 			"size": Vector3(0.8, 0.8, 1.0),
 			"color": Color.DARK_TURQUOISE
