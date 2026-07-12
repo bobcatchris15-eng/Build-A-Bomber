@@ -37,6 +37,19 @@ A placed armor plate can now carry its own material (Hardened Steel / Reactive /
 - Visual: `progress_captures/2026-07-12/armor_material_ui/` — the new per-plate dropdown, distinct from the existing hull-level Armor Material control.
 - Full suite: **28/28 green.**
 
+### Armor Phase 4: true angle-of-incidence sloped armor (raycast)
+
+Real ballistics: a shot that grazes a surface at a shallow angle is more survivable than one that hits square-on, independent of what material or plate is there.
+
+- `DamageResolver.compute_slope_multiplier(defender, hit_origin)`: casts a real ray from the attacker to the defender's hull collider (Layer 1, same convention used everywhere else) and reads the *actual* surface normal at impact — not an analytical shortcut off the facet's canonical axis. Effective threshold = base / cos(angle), the standard sloped-armor formula, clamped so a razor-thin grazing angle doesn't produce an absurd multiplier.
+- Deliberately raycasts against real collision geometry rather than computing the angle analytically (which would give an identical result today, since hull collision is currently a single axis-aligned box — see the "Known architecture constraint" in MOUNTING_AND_ARMOR_SPEC.md). This means the moment hull collision ever becomes mesh-accurate (a genuinely sloped glacis plate, say), this system starts reflecting that automatically, with no code changes needed here.
+- Applied to `threshold` only, not `reduction` — slope is about whether a hit penetrates at all, not how much of the damage that does get through is mitigated.
+
+**Verified:**
+- New test `test_sloped_armor_angle_of_incidence()`: a real `StaticBody3D` + `BoxShape3D` collider, two shots at the same face — one dead-on, one from an oblique angle. The oblique hit resolves to threshold 18.3 vs. the perpendicular hit's 15.0, matching the hand-calculated expected value (15.0 × 1/cos(35°) ≈ 18.3) almost exactly.
+- Full skirmish simulation re-run clean with real raycasts firing on every hit; ~27s runtime for a 110s simulated battle, no meaningful performance regression. (HQ survival numbers shift run-to-run now, since slope depends on actual unit positioning/geometry rather than a pure lookup — expected, not a bug.)
+- Full suite: **29/29 green.**
+
 ---
 
 ## 2026-07-12 (cont'd) — New scope from Chris: mounting/armor/hull-tweak rework

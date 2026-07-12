@@ -45,6 +45,7 @@ func _init():
 	success = success and await test_hull_nose_taper()
 	success = success and await test_directional_armor_facet_resolution()
 	success = success and await test_per_module_armor_material()
+	success = success and await test_sloped_armor_angle_of_incidence()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1621,6 +1622,54 @@ func test_per_module_armor_material() -> bool:
 
 	defender.queue_free()
 	print("  [PASS] A plate's own material choice overrides the hull baseline for hits landing on that specific plate.")
+	return true
+
+func test_sloped_armor_angle_of_incidence() -> bool:
+	print("Running Test Suite: Sloped Armor - Angle of Incidence via Raycast (Armor phase 4)...")
+	# A real physics collider this time (StaticBody3D + BoxShape3D on the
+	# Hull collision layer), so compute_slope_multiplier() has real
+	# geometry to raycast against. Two shots at the same front face: one
+	# dead-on (perpendicular), one from an oblique angle - the oblique shot
+	# should resolve to a HIGHER effective threshold (more survivable),
+	# matching real sloped-armor ballistics.
+	var defender = StaticBody3D.new()
+	defender.collision_layer = 1 # Hull layer, matches the convention used everywhere else
+	defender.collision_mask = 0
+	root.add_child(defender)
+	defender.global_position = Vector3.ZERO
+
+	var col = CollisionShape3D.new()
+	var box = BoxShape3D.new()
+	box.size = Vector3(2.0, 2.0, 2.0)
+	col.shape = box
+	defender.add_child(col)
+
+	var hull = Node3D.new()
+	hull.name = "Hull"
+	hull.set_meta("armor_material", "hardened_steel")
+	hull.set_meta("armor_thickness", 1.0)
+	defender.add_child(hull)
+
+	await process_frame # let the physics server register the new collider
+
+	var perpendicular_origin = Vector3(0, 0.1, -5.0)
+	var oblique_origin = Vector3(3.5, 0.1, -5.0)
+
+	var resolved_perp = DamageResolverScript.resolve(hull, [], "kinetic", defender, perpendicular_origin)
+	var resolved_oblique = DamageResolverScript.resolve(hull, [], "kinetic", defender, oblique_origin)
+
+	if abs(resolved_perp.x - 15.0) > 1.0:
+		print("  [FAIL] A perpendicular hit should be close to the unmodified baseline threshold (~15.0), got ", resolved_perp.x)
+		defender.queue_free()
+		return false
+
+	if resolved_oblique.x <= resolved_perp.x + 1.0:
+		print("  [FAIL] An oblique hit on the same face should resolve to a HIGHER effective threshold than a perpendicular hit (more survivable) - perp: ", resolved_perp.x, ", oblique: ", resolved_oblique.x)
+		defender.queue_free()
+		return false
+
+	defender.queue_free()
+	print("  [PASS] Oblique hits are more survivable than perpendicular ones on the same face (perp threshold: %.1f, oblique: %.1f)." % [resolved_perp.x, resolved_oblique.x])
 	return true
 
 # --- Skirmish mode test suites ---

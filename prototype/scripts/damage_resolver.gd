@@ -62,6 +62,14 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 				if plate_material == "":
 					reduction = clamp(reduction * 0.9, 0.2, 1.0)
 				break # a facet only ever has one plate (see mirror-centering skip logic)
+
+		# Phase 4: true angle-of-incidence sloped armor. A shot that grazes
+		# the surface at a shallow angle is more survivable than one that
+		# hits square-on (real tank-armor ballistics) - multiplies
+		# threshold, since slope is about whether the hit penetrates at
+		# all, not how much of the damage that does get through is
+		# mitigated (that's what `reduction` represents).
+		threshold *= compute_slope_multiplier(defender, hit_origin as Vector3)
 	else:
 		var armor_module_hp = 0.0
 		for m in active_modules:
@@ -73,3 +81,32 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 			reduction = clamp(reduction * 0.9, 0.2, 1.0)
 
 	return Vector2(threshold, reduction)
+
+# Real raycast from the attacker to the defender's hull, reading the actual
+# surface normal at impact - not an analytical shortcut off the facet's
+# canonical axis. This matters because hull placement/collision is
+# currently a single BoxShape3D (see MOUNTING_AND_ARMOR_SPEC.md's "Known
+# architecture constraint"), so today this produces the same result as the
+# canonical-normal shortcut would - but a real raycast against the hull's
+# actual collision geometry means this starts reflecting true sloped
+# surfaces automatically the moment hull collision becomes mesh-accurate,
+# with no changes needed here. Effective thickness = base / cos(angle),
+# the standard sloped-armor formula; clamped so a razor-thin grazing angle
+# doesn't produce an absurd multiplier.
+static func compute_slope_multiplier(defender: Node3D, hit_origin: Vector3) -> float:
+	if not is_instance_valid(defender):
+		return 1.0
+	var world = defender.get_world_3d()
+	if not world:
+		return 1.0
+	var space_state = world.direct_space_state
+	var target_point = defender.global_position + Vector3(0, 0.1, 0)
+	var query = PhysicsRayQueryParameters3D.create(hit_origin, target_point)
+	query.collision_mask = 1 # Hull layer
+	var result = space_state.intersect_ray(query)
+	if result.is_empty() or not result.has("normal"):
+		return 1.0
+	var incoming_dir = (target_point - hit_origin).normalized()
+	var hit_normal = result.normal as Vector3
+	var cos_angle = clamp(abs(hit_normal.dot(-incoming_dir)), 0.15, 1.0)
+	return 1.0 / cos_angle
