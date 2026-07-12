@@ -12,5 +12,9 @@ prototype/.godot/
 prototype/log.txt
 prototype/test_output.txt
 
+# Visual regression: baselines/ is the checked-in reference set; captures/
+# is regenerated fresh every run and would just be diff noise.
+prototype/visual_regression/captures/
+
 # Local tool config (not project source)
 .antigravitycli/

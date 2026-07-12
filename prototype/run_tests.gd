@@ -67,6 +67,8 @@ func _init():
 	success = success and await test_support_modules_get_combat_script_in_real_spawn()
 	success = success and await test_build_legality_gate()
 	success = success and await test_balance_report_covers_every_catalog_entry()
+	success = success and await test_screenshot_diff_tolerance()
+	success = success and await test_no_energy_deficit_at_match_start()
 
 	print("\n==============================================")
 	if success:
@@ -2866,4 +2868,83 @@ func test_balance_report_covers_every_catalog_entry() -> bool:
 		return false
 
 	print("  [PASS] Balance report scores all ", checked, " catalog entries with finite, non-negative value/cost/ratio.")
+	return true
+
+func test_screenshot_diff_tolerance() -> bool:
+	print("Running Test Suite: Screenshot-Diff Comparison Logic (headless, synthetic images)...")
+	# The actual screenshot CAPTURE needs windowed rendering (headless
+	# Godot's dummy renderer doesn't rasterize - confirmed earlier this
+	# week), so that lives in visual_regression/run_visual_regression.gd.
+	# This tests the comparison algorithm itself against synthetic Image
+	# objects, which works fine headlessly.
+	var ScreenshotDiffScript = preload("res://scripts/screenshot_diff.gd")
+
+	var size = Vector2i(64, 64)
+	var base = Image.create(size.x, size.y, false, Image.FORMAT_RGB8)
+	base.fill(Color(0.4, 0.5, 0.6))
+
+	# Identical images must match.
+	var identical = base.duplicate()
+	var r1 = ScreenshotDiffScript.compare_images(base, identical)
+	if not r1.match:
+		print("  [FAIL] Identical images should match, got ", r1)
+		return false
+
+	# Small scattered noise (simulating anti-aliasing/font-hinting jitter)
+	# within tolerance must still match.
+	var noisy = base.duplicate()
+	for i in range(20): # ~0.5% of 4096 pixels
+		noisy.set_pixel(i % size.x, i / size.x, Color(0.42, 0.52, 0.61))
+	var r2 = ScreenshotDiffScript.compare_images(base, noisy)
+	if not r2.match:
+		print("  [FAIL] A small amount of scattered near-identical noise should still match within tolerance, got ", r2)
+		return false
+
+	# A large solid differing region (simulating a missing panel/wrong
+	# color/moved element) must NOT match.
+	var broken = base.duplicate()
+	broken.fill_rect(Rect2i(0, 0, 40, 40), Color(1.0, 0.0, 0.0))
+	var r3 = ScreenshotDiffScript.compare_images(base, broken)
+	if r3.match:
+		print("  [FAIL] A large solid differing region should be flagged as a mismatch, got ", r3)
+		return false
+
+	# Different sizes must never match, with a clear reason.
+	var wrong_size = Image.create(32, 32, false, Image.FORMAT_RGB8)
+	var r4 = ScreenshotDiffScript.compare_images(base, wrong_size)
+	if r4.match or r4.reason == "":
+		print("  [FAIL] Different-sized images should never match and should explain why, got ", r4)
+		return false
+
+	print("  [PASS] Screenshot-diff tolerance correctly absorbs small rendering noise while catching large regressions and size mismatches.")
+	return true
+
+func test_no_energy_deficit_at_match_start() -> bool:
+	print("Running Test Suite: No Automatic Energy Deficit At Match Start...")
+	# Real bug found via the visual regression pass (skirmish_hud capture
+	# showed "Energy: 0/0 (DEFICIT: builds slower!)" in the very first
+	# frame of a match, before any real gameplay) - without a baseline HQ
+	# contribution, every match started in automatic deficit (0 capacity
+	# vs. 3 starting static buildings' upkeep), applying the factory
+	# build-speed penalty before a player had any chance to build a
+	# generator. Fixed with ENERGY_HQ_BASELINE_CAPACITY; this guards it
+	# doesn't silently regress.
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	if skirmish.is_energy_deficit(skirmish.PLAYER_TEAM):
+		print("  [FAIL] A freshly-started match should not begin in Energy deficit, got capacity=", skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity)
+		skirmish.queue_free()
+		return false
+	if skirmish.is_energy_deficit(skirmish.ENEMY_TEAM):
+		print("  [FAIL] The enemy team should also not begin in Energy deficit")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Both teams start with a non-deficit Energy baseline (HQ's own power plant offsets default static-building upkeep).")
 	return true

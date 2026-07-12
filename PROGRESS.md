@@ -4,6 +4,34 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 6) — Build-legality gate, balance tooling, screenshot-diff testing (found 2 real bugs)
+
+Final three pieces of the big Energy/balance/modules batch. (Between this and the previous entry, also fixed a real pre-existing bug found while verifying the repair/drone work - `_setup_weapons()` never attached auto_weapon.gd to repair_array/drone_carrier in real gameplay at all, only in synthetic tests - see the DECISIONS_NEEDED.md entry and commit `7faa28b`.)
+
+### Build-legality gate
+
+`ModuleCatalog.validate_build_legality(blueprint_data)`: a design needs a hull, a weapon or a legitimate support/utility purpose (generator, repair_array, drone_carrier, resource_harvester, sensor_suite, logistics_tank), and locomotion or intentional staticness (a foundation hull) - otherwise it's rejected before resources are spent, with a clear reason shown via the existing `_flash_status()` toast. Wired into both unit-queue and defense-placement paths in Skirmish, plus defensively into the enemy AI's roster filtering.
+
+### Balance tooling
+
+New `tools/balance_report.gd` (headless, run standalone) scores every catalog entry's value-per-cost (weighted dps/hp/energy vs metal/crystal/weight), grouped by category, flagging outliers relative to their category average. Actually used it, not just built it: three real outliers got cost adjustments (`spigot_mortar`, `flamethrower` - both way underpriced for their output; `ion_cannon` - this pass's own new weapon, the single worst value/cost weapon in the entire catalog even before counting its energy-drain utility). Deliberately did NOT chase every flagged entry - point-defense specialists and utility modules score low because the model can't see their real value (interception, economy throughput), and "fixing" that would break their actual role. Full reasoning and the exact before/after numbers are in ENERGY_AND_BALANCE_SPEC.md #7.
+
+### Screenshot-diff testing, greenlit and built - then actually used to find bugs
+
+New `scripts/screenshot_diff.gd` (pixel comparison, 6% per-channel / 2% of sampled pixels tolerance - tuned to absorb anti-aliasing/font-hinting noise without missing real regressions, headlessly unit-tested against synthetic images) plus `visual_regression/run_visual_regression.gd`, a windowed harness covering 5 scenarios: empty Design Lab UI, module placement, armor facet-fitting, the floating module-stat popup, and the Skirmish HUD. Baselines checked into `visual_regression/baselines/`.
+
+Per Chris's explicit instruction not to just wire it up and move on, I reviewed the first-run captures by eye and found two things:
+- The armor-facet scenario initially rendered as a giant red block - traced to the *existing* clipping-detection system correctly flagging genuinely overlapping armor plates in my test scenario (wrong assumed hull size), not a bug. Fixed the scenario, confirmed clean rendering.
+- **A real bug**: the Skirmish HUD showed "Energy: 0/0 (DEFICIT: builds slower!)" in the very first frame of a brand new match, before the player has done anything - every match started in automatic Energy deficit (no generators built yet, but static buildings already owe upkeep), applying the factory build-speed penalty for the whole early game by default. Fixed with a baseline HQ power-plant contribution (`ENERGY_HQ_BASELINE_CAPACITY`); a fresh match now starts at a small surplus instead. New headless test guards this specifically.
+
+Full reasoning for both findings in DECISIONS_NEEDED.md.
+
+**Verified:** 46/46 tests green (headless suite). Visual regression: 5/5 scenarios pass against their baselines after the fixes above.
+
+**Commit checkpoint:** see git log. This closes out the big Energy/balance/modules batch - all 8 items from the original ask are done (Energy resource, repair array, drone carrier, build-legality gate, energy drain weapons + silliness, logistics sharing, balance tooling, screenshot-diff testing) plus the stat-rounding fix.
+
+---
+
 ## 2026-07-12 (cont'd 5) — Repair array + drone carrier fixed for real, 3 new energy weapons, logistics sharing aura
 
 Second chunk of the big Energy/balance/modules batch (see ENERGY_AND_BALANCE_SPEC.md for the design reasoning; the Energy resource itself + stat rounding landed in the previous checkpoint). This chunk: the two "fake" modules, and the new Energy-tied combat mechanics.

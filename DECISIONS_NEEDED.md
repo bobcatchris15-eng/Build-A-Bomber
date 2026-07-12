@@ -4,6 +4,21 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Visual regression pass: one false alarm (clipping working correctly), one real bug (Energy deficit at match start)
+
+**Not blocking - both resolved during the pass itself, not left open.**
+
+Per Chris's explicit instruction to actually hunt for regressions with the new screenshot-diff tool rather than just wire it up, I reviewed all 5 first-run captures by eye:
+
+1. **`mainlab_armor_facet_fitting` initially showed a giant solid red block instead of visible armor plates.** Traced to `check_all_clipping()` correctly flagging genuine overlapping armor geometry - my test scenario placed two full-facet-covering armor plates (right+mirrored-left, plus back) on the Design Lab's small default hull (interceptor_hull, not the medium_hull I'd assumed), which legitimately overlap near the hull's corners. This is the existing clipping-detection system working exactly as designed, not a rendering bug. Fixed by simplifying the test scenario to a single non-overlapping top-facet plate; confirmed it now renders correctly.
+2. **`skirmish_hud` showed "⚡ Energy: 0/0 (DEFICIT: builds slower!)" in the very first frame of a brand new match**, before the player has done anything. Root cause: no generator modules exist at match start (nobody's built one yet), so team Energy capacity was 0, while the 3 starting static buildings (HQ/Factory/Refinery) already owe upkeep (9.0 total) - every match started in automatic deficit, applying the 1.5x factory build-speed penalty for the entire early game by default, regardless of anything the player does. This was a genuine, unintended consequence of the Energy design landing earlier this session, only caught because the visual QA pass actually looked at the HUD in a fresh match rather than just checking the mechanism worked in isolation.
+
+**Fix:** `skirmish.gd` gained `ENERGY_HQ_BASELINE_CAPACITY = 10.0` - the HQ has its own baseline power plant, offsetting default starting upkeep so a fresh match begins at a small surplus (1.0) instead of an immediate, unearned deficit warning. Generators remain a genuine optional upgrade (more energy for energy weapons, more upkeep tolerance for extra static buildings) rather than a mandatory tax just to avoid a penalty nobody caused. New headless test (`test_no_energy_deficit_at_match_start`) guards this doesn't silently regress.
+
+**Why this matters beyond the specific fix:** this is the exact class of bug the screenshot-diff tool was built to catch that the cheap headless UI-audit checks structurally can't - not a layout/overflow problem, but "the numbers are technically correct and nothing crashed, but what a player actually sees on first glance is wrong." Worth Chris knowing the visual QA pass earned its cost on the very first real run.
+
+---
+
 ## 2026-07-12 — Found and fixed a real pre-existing bug: repair_array/drone_carrier never actually fired in real gameplay
 
 **Not blocking - fixed immediately, not just logged.**
@@ -59,6 +74,8 @@ Chris's scoping guidance named four things: facet-aware flanking extended to ran
 ---
 
 ## 2026-07-12 — Screenshot-diffing for visual regression testing: investigated, not built
+
+**RESOLVED 2026-07-12 (same day) — built.** Chris greenlit it this pass. See PROGRESS.md's "Screenshot-diff testing built + real visual QA pass" entry for what shipped, and for two real bugs the QA pass itself found (one turned out to be the clipping-detection system correctly doing its job, the other was a genuine Energy-deficit-at-match-start bug, fixed). Original cost/benefit reasoning below kept for context.
 
 **Not blocking.**
 

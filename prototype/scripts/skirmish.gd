@@ -31,6 +31,17 @@ var energy_pool = {
 }
 const ENERGY_TICK_INTERVAL: float = 3.0
 const ENERGY_UPKEEP_PER_STATIC_BUILDING: float = 3.0
+# The HQ has its own baseline power plant - without this, every match
+# starts in automatic Energy deficit from frame one (0 capacity vs. 3
+# starting static buildings' upkeep = 9.0), applying the factory
+# build-speed penalty before a player has had any chance to build a
+# generator. Found via the visual regression pass (skirmish_hud capture
+# showed "DEFICIT: builds slower!" at match start, before any real
+# gameplay) - sized to roughly offset default starting upkeep so a team is
+# breakeven-to-slightly-ahead by default, and generators become a genuine
+# optional upgrade (more energy for energy weapons) rather than a
+# mandatory tax just to avoid a permanent penalty.
+const ENERGY_HQ_BASELINE_CAPACITY: float = 10.0
 var energy_tick_timer: float = 0.0
 var player_faction: String = "industrialists"
 var enemy_faction: String = "technocrats"
@@ -106,6 +117,9 @@ func _recalc_energy_economy():
 	if game_over: return
 	for team in [PLAYER_TEAM, ENEMY_TEAM]:
 		var capacity = 0.0
+		var hq = player_hq if team == PLAYER_TEAM else enemy_hq
+		if is_instance_valid(hq) and not hq.is_dead:
+			capacity += ENERGY_HQ_BASELINE_CAPACITY
 		for u in get_team_units(team):
 			for m in u.get_active_modules():
 				if m.has_meta("module_data") and m.get_meta("module_data").category == "generator":
