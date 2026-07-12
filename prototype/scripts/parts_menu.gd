@@ -12,14 +12,6 @@ func _ready():
 	for type_id in catalog.keys():
 		var data = catalog[type_id]
 
-		# Armor is deliberately hull-level only (Damage_And_Armor_Model.md:
-		# individual plate placement was explicitly rejected as tedious and
-		# visually messy). "armor_plating" is a leftover catalog entry with
-		# no tweaks and no dedicated visual - skip it here so the parts menu
-		# doesn't expose a half-working option that contradicts the design.
-		if data.get("category", "module") == "armor":
-			continue
-
 		var btn = Button.new()
 		btn.set_script(preload("res://scripts/part_button.gd"))
 		btn.module_type_id = type_id

@@ -37,6 +37,8 @@ func _init():
 	success = success and await test_design_to_battle_integration()
 	success = success and await test_firing_arc_visualization()
 	success = success and await test_free_rotation_ring()
+	success = success and await test_armor_module_facet_fitting()
+	success = success and await test_armor_module_combat_bonus()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1158,6 +1160,141 @@ func test_free_rotation_ring() -> bool:
 
 	placer.queue_free()
 	print("  [PASS] Rotation ring applies a free-form (non-snapped) angle delta and mirrors it correctly.")
+	return true
+
+func test_armor_module_facet_fitting() -> bool:
+	print("Running Test Suite: Armor-as-Module Facet Fitting + Mirroring (MOUNTING_AND_ARMOR_SPEC.md #2)...")
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await process_frame
+
+	placer._place_hull_from_ui("medium_hull") # size 4 x 1 x 6
+	await process_frame
+
+	# Top facet: should auto-fit to hull_size.x x hull_size.z, center on the
+	# facet (x=0, z=0), and NOT mirror (top is already on the symmetry plane).
+	placer._place_weapon_from_ui("armor_plating", Vector3(0.7, 0.5, -0.3), Vector3.UP)
+	await process_frame
+
+	var top_plate = null
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "armor_plating":
+			top_plate = child
+			break
+	if not top_plate:
+		print("  [FAIL] Top-facet armor plate was not placed")
+		placer.queue_free()
+		return false
+
+	var catalog_data = ModuleCatalog.get_module_data("armor_plating")
+	var fitted_x = top_plate.scale.x * catalog_data.size.x
+	var fitted_z = top_plate.scale.z * catalog_data.size.z
+	if abs(fitted_x - 4.0) > 0.1 or abs(fitted_z - 6.0) > 0.1:
+		print("  [FAIL] Top plate should auto-fit to 4.0 x 6.0 (hull footprint), got ", fitted_x, " x ", fitted_z)
+		placer.queue_free()
+		return false
+	var local_pos = placer.hull.to_local(top_plate.global_position)
+	if abs(local_pos.x) > 0.05 or abs(local_pos.z) > 0.05:
+		print("  [FAIL] Top plate should be centered on its facet regardless of click position, got local pos ", local_pos)
+		placer.queue_free()
+		return false
+	if top_plate.has_meta("mirrored_counterpart"):
+		print("  [FAIL] Top-facet armor (on the symmetry plane) should NOT be mirrored")
+		placer.queue_free()
+		return false
+
+	# Right-side facet: SHOULD mirror to the left side.
+	placer._place_weapon_from_ui("armor_plating", Vector3(2.0, 0.5, 1.0), Vector3.RIGHT)
+	await process_frame
+
+	var right_plate = null
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "armor_plating":
+			var lp = placer.hull.to_local(child.global_position)
+			if lp.x > 0.1:
+				right_plate = child
+				break
+	if not right_plate:
+		print("  [FAIL] Right-facet armor plate was not placed")
+		placer.queue_free()
+		return false
+	if not right_plate.has_meta("mirrored_counterpart"):
+		print("  [FAIL] Side-facet armor should be mirrored to the opposite side")
+		placer.queue_free()
+		return false
+	var mirror_plate = right_plate.get_meta("mirrored_counterpart")
+	var mirror_local = placer.hull.to_local(mirror_plate.global_position)
+	if mirror_local.x > -0.1:
+		print("  [FAIL] Mirrored armor plate should be on the opposite (left) side, got local x=", mirror_local.x)
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Armor modules auto-fit and center on their facet; only side facets mirror.")
+	return true
+
+func test_armor_module_combat_bonus() -> bool:
+	print("Running Test Suite: Armor Module Combat Bonus (aggregate, see DECISIONS_NEEDED.md)...")
+	# Same pattern as test_damage_mitigation(). Two setups compared:
+	# A) no modules at all - deterministic (subsystem stripping can't trigger
+	#    on an empty module list), baseline threshold 15.0 (hardened_steel,
+	#    kinetic) is punched through by an 18.0 hit -> HP drops.
+	# B) one armor module present - EITHER it resolves through the raised
+	#    threshold (18.0 < 15.0+50.0, fully negated) OR the 35% subsystem-
+	#    stripping roll picks the armor module itself as the target instead
+	#    (which also leaves player.hp untouched, since stripping damages the
+	#    module's own HP pool, not the vehicle HP). Both branches leave HP
+	#    at 1000.0, so this comparison is deterministic either way - no flakiness.
+	var baseline = CharacterBody3D.new()
+	baseline.set_script(PlayerVehicleScript)
+	baseline._ready()
+	root.add_child(baseline)
+	var baseline_hull = Node3D.new()
+	baseline_hull.name = "Hull"
+	baseline_hull.set_meta("armor_material", "hardened_steel")
+	baseline_hull.set_meta("armor_thickness", 1.0)
+	baseline.add_child(baseline_hull)
+	baseline.max_hp = 1000.0
+	baseline.hp = 1000.0
+	baseline.is_dead = false
+	baseline.take_damage(18.0, "kinetic")
+	var hp_without_armor_module = baseline.hp
+	baseline.queue_free()
+
+	if abs(hp_without_armor_module - 1000.0) < 0.01:
+		print("  [FAIL] Baseline (no armor module) should NOT fully negate 18.0 kinetic damage against threshold 15.0, HP stayed ", hp_without_armor_module)
+		return false
+
+	var player = CharacterBody3D.new()
+	player.set_script(PlayerVehicleScript)
+	player._ready()
+	root.add_child(player)
+	var mock_hull = Node3D.new()
+	mock_hull.name = "Hull"
+	mock_hull.set_meta("armor_material", "hardened_steel")
+	mock_hull.set_meta("armor_thickness", 1.0)
+	player.add_child(mock_hull)
+	var armor_module = Node3D.new()
+	var armor_data = ModuleData.new()
+	armor_data.type_id = "armor_plating"
+	armor_data.category = "armor"
+	armor_data.base_hp = 500.0
+	armor_module.set_meta("module_data", armor_data)
+	mock_hull.add_child(armor_module)
+	player.max_hp = 1000.0
+	player.hp = 1000.0
+	player.is_dead = false
+	player.take_damage(18.0, "kinetic")
+	var hp_with_armor_module = player.hp
+	player.queue_free()
+
+	if abs(hp_with_armor_module - 1000.0) > 0.01:
+		print("  [FAIL] With an armor module present, 18.0 kinetic damage should be fully negated (raised threshold) or absorbed by the module itself (stripping), HP: ", hp_with_armor_module)
+		return false
+
+	print("  [PASS] Placed armor modules raise the effective damage threshold in combat (without: HP ", hp_without_armor_module, ", with: HP ", hp_with_armor_module, ").")
 	return true
 
 # --- Skirmish mode test suites ---

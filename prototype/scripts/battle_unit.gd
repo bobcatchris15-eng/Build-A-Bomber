@@ -360,6 +360,22 @@ func take_damage(amount: float, damage_type: String = "kinetic"):
 				threshold = 20.0 * thick
 				reduction = 0.5
 
+	# Placed armor modules (MOUNTING_AND_ARMOR_SPEC.md #2) add an aggregate
+	# bonus on top of the hull-level baseline above. Not direction-specific
+	# yet (see DECISIONS_NEEDED.md "Armor-module combat integration scoped
+	# to aggregate" - take_damage() has no hit-direction input to resolve
+	# per-facet coverage against). A bigger auto-fit plate already means a
+	# bigger get_hp() via the existing volume-based ModuleData formula, so
+	# armor placed on a larger hull's facets naturally contributes more.
+	var armor_module_hp = 0.0
+	for m in get_active_modules():
+		var m_data = m.get_meta("module_data")
+		if m_data and m_data.category == "armor":
+			armor_module_hp += m_data.get_hp()
+	if armor_module_hp > 0.0:
+		threshold += armor_module_hp * 0.1
+		reduction = clamp(reduction * 0.9, 0.2, 1.0)
+
 	# Subsystem stripping: 35% of hits land on an exposed module
 	var active_modules = get_active_modules()
 	if not active_modules.is_empty() and randf() < 0.35:

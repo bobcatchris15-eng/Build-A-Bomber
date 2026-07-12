@@ -6,13 +6,23 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ## 2026-07-12 — Armor "mass distribution" example in DESIGN_VISION.md conflicts with an existing, deliberate design decision
 
-**Not blocking — proceeding on the documented default, flagging for confirmation.**
+**RESOLVED 2026-07-12 (same day) — Chris confirmed the spatial/module side of this tension directly.** See MOUNTING_AND_ARMOR_SPEC.md #2: armor is now placed as a facet-fitting module, superseding the hull-level-only approach this entry defaulted to. Left the original reasoning below for context on why it was ambiguous in the first place.
 
 `DESIGN_VISION.md` (from this week's conversation) uses "how armor mass is distributed" as an example of the kind of continuous tweak that should let two players' builds diverge. But [Damage_And_Armor_Model.md](Damage_And_Armor_Model.md) — an existing repo doc, presumably from an earlier deliberate design pass — explicitly rejects individual/spatial armor plate placement: *"Placing individual armor plates manually is tedious, often results in visually messy designs, and slows down the player. To solve this, base armoring is handled at the Hull level rather than as individual placeable modules."*
 
-**Default I'm proceeding with:** I am NOT building a spatial/per-zone armor placement system this week. The existing hull-level Armor Material (4-choice dropdown) × Armor Thickness (continuous 0.5–3.0x slider) already gives two real axes of differentiation, just not a spatial one. I'm treating that as "good enough" for the differentiation test rather than overriding a considered prior decision on a guess.
+**Superseded default:** hull-level Armor Material × Armor Thickness only, no spatial placement. No longer in effect.
 
-**Why flagged rather than just decided:** this is a genuine values conflict between two of Chris's own docs, not an implementation detail — worth 30 seconds of his confirmation when he's back rather than me picking a side permanently.
+---
+
+## 2026-07-12 — Armor-module combat integration scoped to aggregate (non-directional), not full per-facet hit resolution
+
+**Not blocking.**
+
+Implementing MOUNTING_AND_ARMOR_SPEC.md #2 (armor as a facet-fitting module) for real combat effect would ideally mean: a hit from a given direction resolves against the armor module actually covering that facet. Building that properly requires threading hit-direction (attacker position relative to defender, or the weapon's aim vector) through `battle_unit.gd`'s `take_damage(amount, damage_type)`, which currently takes no direction/position argument at all and is called from multiple sites across combat/AI code. That's the same underlying gap as the "directional/facing armor thresholds" item logged earlier today (still not implemented) — this isn't a new problem, it's the same one, now more visible because the new armor system makes it matter more.
+
+**Default I'm proceeding with:** armor modules contribute an aggregate (not directional) threshold/reduction bonus to `take_damage()`, on top of the existing hull-level material+thickness baseline — computed from the sum of placed armor modules' own `get_hp()` (which already scales with the facet area they auto-fit, via the existing volume-based `ModuleData` formula, so a bigger plate = a bigger bonus). This means armor modules are NOT cosmetic — placing more of them measurably helps in combat — without taking on the larger, riskier project of rewiring `take_damage()`'s call signature across the whole combat system unattended.
+
+**Why not the full directional version:** changing a core combat function's signature that's called from multiple sites, unattended, without being able to playtest-verify the balance, is a bigger risk than the value justifies this pass. Logging it as the natural next step once someone can iterate on it interactively.
 
 ---
 
@@ -28,11 +38,7 @@ Damage_And_Armor_Model.md's counter-play section explicitly describes weaker rea
 
 ## 2026-07-12 — Firing arc visualization (Design_Lab_UI_UX.md) is unimplemented; deferring behind tweak-depth work
 
-**Not blocking.**
-
-Design_Lab_UI_UX.md calls the firing-arc cone visualization ("Radar Sweep") "an absolute necessity," but it doesn't exist in the current build — placement is freeform (raycast onto hull surface) with a clipping/collision check (which *does* work and blocks saving), but no arc-of-fire feedback. This is a UX-legibility gap, not a differentiation-mechanics gap.
-
-**Default I'm proceeding with:** treating this as a stretch goal for later in the week (Wed/Thu) if the higher-priority tweak-depth and mesh-gap work leaves runway, per Chris's explicit "highest-leverage gap first" instruction. Not skipping it forever — just sequencing it after the things DESIGN_VISION.md actually asked to be audited for.
+**RESOLVED 2026-07-12 (same day) — implemented.** Chris moved this from deferred to explicit priority (MOUNTING_AND_ARMOR_SPEC.md #1); see PROGRESS.md's "Item 1 shipped" entry for what was built.
 
 ---
 

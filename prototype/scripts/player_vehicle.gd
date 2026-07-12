@@ -98,7 +98,20 @@ func take_damage(amount: float, damage_type: String = "kinetic"):
 				else: # explosive
 					threshold = 20.0 * thick
 					reduction = 0.5
-					
+
+	# Placed armor modules (MOUNTING_AND_ARMOR_SPEC.md #2) add an aggregate
+	# bonus on top of the hull-level baseline above - mirrors the same logic
+	# in battle_unit.gd's take_damage() so Test Range and Skirmish combat
+	# agree. See DECISIONS_NEEDED.md for why this is aggregate, not per-facet.
+	var armor_module_hp = 0.0
+	for m in get_active_modules():
+		var m_data = m.get_meta("module_data")
+		if m_data and m_data.category == "armor":
+			armor_module_hp += m_data.get_hp()
+	if armor_module_hp > 0.0:
+		threshold += armor_module_hp * 0.1
+		reduction = clamp(reduction * 0.9, 0.2, 1.0)
+
 	# 35% chance to hit a random exposed module (subsystem stripping)
 	var active_modules = get_active_modules()
 	if not active_modules.is_empty() and randf() < 0.35:

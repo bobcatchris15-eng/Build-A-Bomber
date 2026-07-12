@@ -42,6 +42,27 @@ MOUNTING_AND_ARMOR_SPEC.md #3: rotation should be free-form via a grab-handle ri
 
 ---
 
+### Item 3 shipped: armor becomes a facet-fitting module
+
+MOUNTING_AND_ARMOR_SPEC.md #2 — resolves the hull-level-only vs. spatial-armor tension from earlier today. Genuinely surprising discovery mid-implementation: `_place_weapon`'s "Auto-scale armor to fit facet" block **already existed in the codebase**, computing the correct target dimensions per facet — but it was dormant (armor was hidden from the parts menu since Tuesday) and had two real bugs that would have surfaced the moment it was exposed to a player:
+1. It scaled the plate to match the facet's dimensions but never repositioned it to the facet's center — a plate clicked off-center would auto-fit to full size while poking out past the hull edge.
+2. Mirroring was unconditional (inherited from the generic weapon-mirroring path), so a top/bottom/front/back plate — already centered on the symmetry plane — would get an identical duplicate stacked exactly on top of itself. Only left/right plates have a real mirror position.
+
+**Shipped:**
+- Un-hid `armor_plating` from the parts menu (reverses Tuesday's exclusion, now safe since the feature is complete).
+- Fixed both bugs above: plates now center on their facet regardless of click position, and mirroring only fires for left/right facets.
+- **Combat integration, deliberately scoped down** (see DECISIONS_NEEDED.md "Armor-module combat integration scoped to aggregate"): armor modules add an aggregate threshold/reduction bonus to `take_damage()` in both `battle_unit.gd` (Skirmish) and `player_vehicle.gd` (Test Range) — proportional to the modules' own `get_hp()`, which already scales with facet area via the existing volume-based `ModuleData` formula. Full per-facet directional hit resolution would need `take_damage()`'s signature changed to carry hit-direction, called from multiple sites — judged too large a change to make unattended without playtesting the balance, so logged as a follow-up rather than attempted.
+
+**Verified:**
+- New test `test_armor_module_facet_fitting()`: places a top-facet plate (clicked off-center) and confirms it auto-fits to the hull's exact footprint, centers regardless of click position, and does NOT mirror. Places a side-facet plate and confirms it DOES mirror to the opposite side.
+- New test `test_armor_module_combat_bonus()`: confirms a hit that would normally punch through the baseline threshold is negated once an armor module's bonus applies. Ran 5x to confirm the subsystem-stripping RNG branch doesn't introduce flakiness (both possible branches converge on the same outcome by construction).
+- Visual: `progress_captures/2026-07-12/armor_module/` — top plate exactly matches hull footprint, side plates visible as mirrored strips on both edges.
+- Full suite: **22/22 green.**
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 — v1.0-beta tagged (Sun-Thu work completed in one continuous session)
 
 Chris asked me to push through as much of the week's plan as possible in a single extended session rather than waiting on cron cycles that turned out not to be available in this environment. Completed the full Sunday-through-Thursday plan; tagging `v1.0-beta` here rather than padding out Friday/Saturday with manufactured busywork, since the actual beta bar (defined in the original plan) is met:

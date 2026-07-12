@@ -464,7 +464,17 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 	else:
 		# Standard weapon/armor placement
 		var primary = _place_weapon(type_id, pos, normal)
-		if mirror_enabled:
+		var should_mirror = mirror_enabled
+		if category == "armor":
+			# Armor auto-fits and centers on its whole facet (see
+			# _place_weapon's "Auto-scale armor to fit facet" block, below).
+			# Only left/right facets have a distinct mirror position -
+			# top/bottom/front/back are already centered on the symmetry
+			# plane, so mirroring them would stack an identical duplicate
+			# plate directly on top of the original (MOUNTING_AND_ARMOR_SPEC.md #2).
+			var abs_n = normal.abs()
+			should_mirror = mirror_enabled and abs_n.x > abs_n.y and abs_n.x > abs_n.z
+		if should_mirror:
 			var mirrored_pos = Vector3(-pos.x, pos.y, pos.z)
 			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
 			var mirror = _place_weapon(type_id, mirrored_pos, mirrored_normal)
@@ -741,7 +751,23 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 			# The module's base size is catalog_data.size, so we scale by ratio
 			new_weapon.scale.x = target_x / catalog_data.size.x
 			new_weapon.scale.z = target_z / catalog_data.size.z
-		
+
+			# Center on the facet rather than leaving it at the clicked
+			# point: a plate that auto-fits the WHOLE face but stays
+			# positioned wherever the player happened to click would poke
+			# out past the hull edge on one side. Snap the two in-plane
+			# axes to hull-center (0) and keep only the surface-normal axis.
+			var local_normal = hull.global_transform.basis.inverse() * normal
+			var centered_local = Vector3.ZERO
+			var abs_ln = local_normal.abs()
+			if abs_ln.x > abs_ln.y and abs_ln.x > abs_ln.z:
+				centered_local = Vector3(sign(local_normal.x) * hull_size.x / 2.0, 0, 0)
+			elif abs_ln.z > abs_ln.y:
+				centered_local = Vector3(0, 0, sign(local_normal.z) * hull_size.z / 2.0)
+			else:
+				centered_local = Vector3(0, sign(local_normal.y) * hull_size.y / 2.0, 0)
+			new_weapon.global_position = hull.to_global(centered_local)
+
 	# Notify the UI that a module was added
 	get_tree().call_group("stat_ui", "update_stats", hull)
 	check_all_clipping()
