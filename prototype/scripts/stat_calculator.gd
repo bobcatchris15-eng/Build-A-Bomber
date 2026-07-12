@@ -495,6 +495,12 @@ func on_module_selected(module: Node3D):
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
+	elif type_id == "hover_engine":
+		size_label.text = "Hover Pad Size:"
+		count_container.visible = false
+		size_slider.min_value = 0.5
+		size_slider.max_value = 2.5
+		size_slider.value = settings.get("size", 1.0)
 	else:
 		locomotion_tweaks.visible = false
 		
@@ -540,7 +546,11 @@ func _apply_tweaks():
 		new_settings = {
 			"size": size_slider.value
 		}
-		
+	elif type_id == "hover_engine":
+		new_settings = {
+			"size": size_slider.value
+		}
+
 	if root.has_method("update_locomotion"):
 		# Update positions/scales immediately
 		root.update_locomotion(type_id, new_settings)

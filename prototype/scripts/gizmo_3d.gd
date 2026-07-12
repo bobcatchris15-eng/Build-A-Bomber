@@ -187,6 +187,12 @@ func get_tweak_for_axis(type_id: String, axis: Vector3) -> String:
 				return "mast_height"
 			"logistics_tank":
 				return "tank_capacity"
+			"mortar_array":
+				return "tube_count"
+			"cluster_dispenser":
+				return "dispersion"
+			"missile_pod":
+				return "grid_size"
 	elif abs_axis.z > 0.9:
 		match type_id:
 			"basic_cannon":

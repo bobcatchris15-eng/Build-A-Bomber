@@ -498,9 +498,10 @@ func update_locomotion(type_id: String, settings: Dictionary):
 					spawned_wheels.append(rotor)
 					
 	elif type_id == "hover_engine":
-		var x_offset = hull_size.x / 2.0
+		var size = settings.get("size", 1.0)
+		var x_offset = (hull_size.x / 2.0) * size
 		var y_offset = -hull_size.y / 2.0
-		var z_offset = hull_size.z * 0.35
+		var z_offset = (hull_size.z * 0.35) * size
 		var points = [
 			Vector3(-x_offset, y_offset, z_offset),
 			Vector3(x_offset, y_offset, z_offset),
@@ -510,34 +511,42 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		for p in points:
 			var hover = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN)
 			if hover:
+				hover.scale = Vector3(size, 1.0, size)
+				if hover.has_meta("module_data"):
+					hover.get_meta("module_data").scale_multiplier = hover.scale
 				spawned_wheels.append(hover)
-				
+
 	elif type_id == "legs":
+		var size = settings.get("size", 1.0)
 		var count = settings.get("count", 4)
 		if count < 2: count = 2
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
-		
+
 		var x_offset = hull_size.x / 2.0
 		var z_limit = hull_size.z * 0.35
-		
+
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
 			for i in range(half_count):
 				var z_pos = 0.0
 				if half_count > 1:
 					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
-				
+
 				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0, z_pos)
 				var leg = _place_weapon(type_id, pos, side_normal)
 				if leg:
 					leg.rotation = Vector3.ZERO
+					leg.scale = Vector3(1.0, size, 1.0)
+					if leg.has_meta("module_data"):
+						leg.get_meta("module_data").scale_multiplier = leg.scale
 					spawned_wheels.append(leg)
-					
+
 	elif type_id == "anti_grav":
-		var x_offset = hull_size.x / 2.2
+		var size = settings.get("size", 1.0)
+		var x_offset = (hull_size.x / 2.2) * size
 		var y_offset = -hull_size.y / 2.0
-		var z_offset = hull_size.z * 0.35
+		var z_offset = (hull_size.z * 0.35) * size
 		var points = [
 			Vector3(-x_offset, y_offset, z_offset),
 			Vector3(x_offset, y_offset, z_offset),
@@ -547,6 +556,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		for p in points:
 			var ag = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN)
 			if ag:
+				ag.scale = Vector3(size, 1.0, size)
+				if ag.has_meta("module_data"):
+					ag.get_meta("module_data").scale_multiplier = ag.scale
 				spawned_wheels.append(ag)
 				
 	# Adjust hull Y position in the editor to make wheels rest on floor
@@ -555,9 +567,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		var size = settings.get("size", 1.0)
 		wheels_offset = 0.8 * size
 	elif type_id == "legs":
-		wheels_offset = 1.6
+		wheels_offset = 1.6 * settings.get("size", 1.0)
 	elif type_id == "anti_grav":
-		wheels_offset = 0.4
+		wheels_offset = 0.4 * settings.get("size", 1.0)
 		
 	var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
 	var hull_catalog_data = ModuleCatalog.get_module_data(hull_type)

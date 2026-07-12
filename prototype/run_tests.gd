@@ -28,6 +28,7 @@ func _init():
 	success = success and await test_traverse_limit()
 	success = success and await test_subsystem_stripping()
 	success = success and await test_rotation_popup_and_deforms()
+	success = success and await test_locomotion_tweak_parity()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -505,6 +506,77 @@ func test_rotation_popup_and_deforms() -> bool:
 	await process_frame
 
 	print("  [PASS] Module rotation, hovering stats popup, and mesh deformations verified.")
+	return true
+
+func test_locomotion_tweak_parity() -> bool:
+	print("Running Test Suite: Locomotion Tweak Parity (DESIGN_VISION.md audit)...")
+	# Regression test for a real bug found during the Sunday audit: the "legs" and
+	# "anti_grav" locomotion UI sliders updated settings but update_locomotion()
+	# never read the "size" key, so dragging the slider had zero effect on the
+	# resulting unit. "hover_engine" had no tweak UI at all. All three are fixed
+	# to respond to a continuous "size" setting like wheels/treads/rotors already did.
+	var gizmo_probe = Node3D.new()
+	gizmo_probe.set_script(preload("res://scripts/gizmo_3d.gd"))
+	root.add_child(gizmo_probe)
+
+	for type_id in ["legs", "anti_grav", "hover_engine"]:
+		var hull = StaticBody3D.new()
+		hull.name = "Hull"
+		root.add_child(hull)
+		var placer = Node3D.new()
+		placer.set_script(preload("res://scripts/module_placer.gd"))
+		placer.hull = hull
+		root.add_child(placer)
+		await process_frame
+
+		placer.update_locomotion(type_id, {"size": 1.0, "count": 4})
+		await process_frame
+		var small_scale_mult = Vector3.ONE
+		for child in hull.get_children():
+			if child.has_meta("module_data") and child.get_meta("module_data").type_id == type_id:
+				small_scale_mult = child.get_meta("module_data").scale_multiplier
+				break
+
+		placer.update_locomotion(type_id, {"size": 2.0, "count": 4})
+		await process_frame
+		var big_scale_mult = Vector3.ONE
+		var found_big = false
+		for child in hull.get_children():
+			if child.has_meta("module_data") and child.get_meta("module_data").type_id == type_id:
+				big_scale_mult = child.get_meta("module_data").scale_multiplier
+				found_big = true
+				break
+
+		if not found_big:
+			print("  [FAIL] %s: no locomotion part spawned" % type_id)
+			placer.queue_free(); hull.queue_free()
+			return false
+		if (big_scale_mult - small_scale_mult).length() < 0.5:
+			print("  [FAIL] %s: size=2.0 did not change scale_multiplier (still %s vs %s) - slider is dead" % [type_id, small_scale_mult, big_scale_mult])
+			placer.queue_free(); hull.queue_free()
+			return false
+
+		placer.queue_free()
+		hull.queue_free()
+		await process_frame
+
+	# Gizmo-drag axis mapping: these three weapons had TWEAK_SPECS (slider-tweakable)
+	# but no 3D gizmo-handle mapping, so the tactile Spore-style drag didn't work on them.
+	var axis_checks = {
+		"mortar_array": "tube_count",
+		"cluster_dispenser": "dispersion",
+		"missile_pod": "grid_size"
+	}
+	for type_id in axis_checks:
+		var expected = axis_checks[type_id]
+		var got = gizmo_probe.get_tweak_for_axis(type_id, Vector3.RIGHT)
+		if got != expected:
+			print("  [FAIL] %s: expected gizmo x-axis to map to '%s', got '%s'" % [type_id, expected, got])
+			gizmo_probe.queue_free()
+			return false
+
+	gizmo_probe.queue_free()
+	print("  [PASS] Locomotion size tweaks (legs/anti_grav/hover_engine) and gizmo axis mappings verified.")
 	return true
 
 # --- Skirmish mode test suites ---
