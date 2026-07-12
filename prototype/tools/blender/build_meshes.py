@@ -561,6 +561,38 @@ def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
 	return obj
 
 
+def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0.36), greebles=None):
+	"""Long, low defensive rampart: a battered (wider-at-base) wall face
+	topped with alternating battlement merlons - a wall segment, not a
+	bunker or tower, meant to read as long and thin rather than squat."""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	bm = bmesh.new()
+
+	base_pts = [
+		(-hx * 1.05, -hy, -hz * 1.1), (hx * 1.05, -hy, -hz * 1.1),
+		(-hx * 1.05, -hy, hz * 1.1), (hx * 1.05, -hy, hz * 1.1),
+		(-hx, hy * 0.55, -hz), (hx, hy * 0.55, -hz),
+		(-hx, hy * 0.55, hz), (hx, hy * 0.55, hz),
+	]
+	verts = [bm.verts.new(GV(*p)) for p in base_pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	# Battlements: alternating merlon teeth along the top edge, evenly
+	# spaced with gaps (crenels) between them for the classic wall silhouette.
+	merlon_w = (size_x * 0.94) / (merlons * 2 - 1)
+	for i in range(merlons):
+		mx = -hx * 0.94 + merlon_w * (2 * i + 0.5)
+		add_box(bm, (mx, hy * 0.55 + hy * 0.24, 0), (merlon_w * 0.9, hy * 0.24, hz * 0.8), bevel=0.02)
+
+	if greebles:
+		greebles(bm, hx, hy, hz)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.4, roughness=0.7)
+	return obj
+
+
 def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.44), greebles=None):
 	"""Tall stepped defensive tower: tiers stacked wide-to-narrow."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
@@ -722,6 +754,17 @@ def _tower_greebles(bm, hx, hy, hz):
 	pass  # railing posts / spotlights / antenna already added in build_tower_hull
 
 
+def _wall_greebles(bm, hx, hy, hz):
+	# Arrow slits: thin dark recesses set into the outward face.
+	slit_count = 5
+	for i in range(slit_count):
+		t = (i + 0.5) / slit_count - 0.5
+		sx = t * hx * 1.7
+		add_box(bm, (sx, hy * 0.05, hz * 0.95), (0.05, hy * 0.45, 0.1))
+	greeble_rivet_row(bm, (-hx * 0.92, -hy * 0.75, hz * 0.98), (hx * 0.92, -hy * 0.75, hz * 0.98), 10)
+	greeble_antenna(bm, (hx * 0.85, hy * 0.9, 0), height=0.4)
+
+
 def generate_hulls():
 	print("--- Building hull library ---")
 
@@ -750,6 +793,9 @@ def generate_hulls():
 
 	export_and_cleanup(build_tower_hull("tower_foundation", 3.0, 4.0, 3.0,
 		tiers=3, color=(0.5, 0.48, 0.44), greebles=_tower_greebles), HULLS_DIR, "tower_foundation")
+
+	export_and_cleanup(build_wall_hull("fortress_wall_foundation", 6.0, 2.2, 1.3,
+		merlons=5, color=(0.42, 0.4, 0.36), greebles=_wall_greebles), HULLS_DIR, "fortress_wall_foundation")
 
 	print("--- Hull library done ---")
 

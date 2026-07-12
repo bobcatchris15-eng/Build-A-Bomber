@@ -35,6 +35,7 @@ func _init():
 	success = success and await test_locomotion_tweak_parity()
 	success = success and await test_undo_redo()
 	success = success and await test_foundation_design_lab_parity()
+	success = success and await test_fortress_wall_foundation_spawns_correctly()
 	success = success and await test_design_to_battle_integration()
 	success = success and await test_firing_arc_visualization()
 	success = success and await test_free_rotation_ring()
@@ -952,6 +953,50 @@ func test_foundation_design_lab_parity() -> bool:
 
 	placer.queue_free()
 	print("  [PASS] Foundation hulls get full placement/mirror/rotate/undo/serialize parity with vehicle hulls, including locomotion (no longer hard-blocked).")
+	return true
+
+func test_fortress_wall_foundation_spawns_correctly() -> bool:
+	print("Running Test Suite: Fortress Wall Foundation - Real Spawn Pipeline (Factions_and_Buildings.md's third foundation type)...")
+	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
+	root.add_child(bp_manager)
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var bp = {
+		"version": 1.0, "hull_type": "fortress_wall_foundation",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "", "settings": {}},
+		"modules": [
+			{"type_id": "rotary_cannon", "name": "Rotary Cannon", "position": {"x": 0.0, "y": 1.4, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.setup(bp, 0, bp_manager)
+
+	if not is_instance_valid(unit.hull_node):
+		print("  [FAIL] fortress_wall_foundation should reconstruct a real hull via the authored .glb mesh, got no hull_node")
+		unit.queue_free()
+		return false
+	if unit.max_hp <= 0.0:
+		print("  [FAIL] fortress_wall_foundation should carry real HP from the catalog, got ", unit.max_hp)
+		unit.queue_free()
+		return false
+	if unit.vision_range <= 0.0:
+		print("  [FAIL] fortress_wall_foundation should have a real base_vision, got ", unit.vision_range)
+		unit.queue_free()
+		return false
+	if not ModuleCatalog.is_foundation("fortress_wall_foundation"):
+		print("  [FAIL] fortress_wall_foundation should classify as a foundation (static, no locomotion required)")
+		unit.queue_free()
+		return false
+	if not ModuleCatalog.validate_build_legality(bp).valid:
+		print("  [FAIL] A fortress_wall_foundation with a weapon should be a legal build (static defense, no locomotion required)")
+		unit.queue_free()
+		return false
+
+	unit.queue_free()
+	print("  [PASS] fortress_wall_foundation reconstructs via the real spawn pipeline with a working mesh, real HP/vision, and passes the build-legality gate as a static defense.")
 	return true
 
 func test_design_to_battle_integration() -> bool:

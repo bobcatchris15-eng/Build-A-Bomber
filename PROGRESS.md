@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 11) — Fortress Wall: the third foundation type named in Factions_and_Buildings.md
+
+Previously deferred twice (see DECISIONS_NEEDED.md) for needing new Blender-authored geometry through the fragile headless-import pipeline. Greenlit this pass.
+
+### The build
+
+`module_catalog.gd` gained `fortress_wall_foundation` (category "hull", `is_foundation: true`) - a long, low rampart rather than a squat bunker (`pillbox_foundation`) or a tall tiered tower (`tower_foundation`): 1100 HP, 140 metal / 10 crystal, base_vision 14 (a wall doesn't see far the way a watchtower does). `tools/blender/build_meshes.py` gained `build_wall_hull()` - a battered wall face (wider at the base than the top, like a real rampart) topped with 5 alternating battlement merlons, plus arrow-slit and rivet-row greebles for detail - deliberately a different silhouette from both existing foundations.
+
+### Import, carefully
+
+Found two already-hung `--headless --editor --import` processes from earlier this session still holding the real project (visible via `tasklist`/process inspection) - exactly the scenario the existing memory gotcha warns about. Didn't touch them: imported into an isolated temp copy of the project instead (`--path <tmp> --headless --editor --import`), then copied just the new asset's `.import` sidecar, its `.godot/imported/*` cache entries, and `uid_cache.bin` back into the real project. Verified the mesh actually loads at runtime with a small headless probe before moving on.
+
+### Why this was low-risk despite being new art
+
+Every system that needs to know about hull/foundation types already keys off `category`/`is_foundation` rather than a hardcoded type_id list - the Design Lab's hull palette, the build-legality gate, the balance report, and the foundation-parity mechanics (placement/mirror/rotate/undo/serialize) all picked up the new entry automatically. This was a pure content addition, not a code-path change.
+
+**Verified:** 56/56 tests green (1 new: `test_fortress_wall_foundation_spawns_correctly`, exercising the real spawn pipeline - mesh load, HP, vision, build-legality). Windowed-screenshot verified in the Design Lab - `progress_captures/2026-07-12/fortress_wall/` shows the wall's battlement silhouette from two angles, same visual-verification discipline as the nose-taper work.
+
+---
+
 ## 2026-07-12 (cont'd 10) — Real pathfinding (NavigationServer3D) + a lake for naval terrain to route around
 
 Previously deferred (see DECISIONS_NEEDED.md's "Unit AI scope" entry) since the map was flat and open with nothing to path around. Greenlit this pass, along with adding real water terrain.
