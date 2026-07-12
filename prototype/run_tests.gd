@@ -28,6 +28,7 @@ func _init():
 	success = success and await test_traverse_limit()
 	success = success and await test_subsystem_stripping()
 	success = success and await test_rotation_popup_and_deforms()
+	success = success and await test_designer_camera_pan()
 	success = success and await test_locomotion_tweak_parity()
 	success = success and await test_undo_redo()
 	success = success and await test_headless_combat_simulation()
@@ -507,6 +508,52 @@ func test_rotation_popup_and_deforms() -> bool:
 	await process_frame
 
 	print("  [PASS] Module rotation, hovering stats popup, and mesh deformations verified.")
+	return true
+
+func test_designer_camera_pan() -> bool:
+	print("Running Test Suite: Designer Camera Pan (was entirely missing - orbit+zoom only)...")
+	var parent = Node3D.new()
+	root.add_child(parent)
+	var cam = Camera3D.new()
+	cam.set_script(preload("res://scripts/designer_camera.gd"))
+	parent.add_child(cam)
+	await process_frame
+	await process_frame
+
+	var pivot = null
+	for c in parent.get_children():
+		if c != cam:
+			pivot = c
+			break
+	if not pivot:
+		print("  [FAIL] Camera did not create its orbit pivot")
+		parent.queue_free()
+		return false
+
+	var before = pivot.position
+	var delta = cam._compute_pan_delta(Vector2(50, 0))
+	if delta.length() < 0.001:
+		print("  [FAIL] Panning right produced zero movement")
+		parent.queue_free()
+		return false
+	pivot.position += delta
+	if (pivot.position - before).length() < 0.001:
+		print("  [FAIL] Pivot position did not change after applying pan delta")
+		parent.queue_free()
+		return false
+
+	# Panning should scale with zoom distance (tight zoom = fine control,
+	# zoomed out = coarse control), not be a fixed screen-space speed.
+	var close_delta = cam._compute_pan_delta(Vector2(50, 0)).length()
+	cam._distance = 30.0
+	var far_delta = cam._compute_pan_delta(Vector2(50, 0)).length()
+	if far_delta <= close_delta:
+		print("  [FAIL] Pan distance should scale up when zoomed out, got close=", close_delta, " far=", far_delta)
+		parent.queue_free()
+		return false
+
+	parent.queue_free()
+	print("  [PASS] Designer camera pan math verified (middle-drag, distance-scaled).")
 	return true
 
 func test_locomotion_tweak_parity() -> bool:
