@@ -19,6 +19,8 @@ Design_Lab_UI_UX.md's Top Bar spec explicitly lists "Undo/Redo" as part of the A
 - Real-scene integration smoke test (not just synthetic test scaffolding) via `scratch/MainLabSmoke.tscn`: placed a railgun pair + wheels on a real hull, called `undo()`/`redo()` on the actual running MainLab scene, screenshotted all three states. Confirms the real UI buttons render and the absolute `/root/MainLab` node-path lookups used by `gizmo_3d.gd` actually resolve outside of synthetic tests. See `progress_captures/2026-07-12/undo_redo_integration/` — wheels visibly present → gone after undo → back after redo, with HP/weight/DPS stat panel numbers updating correctly at each step (640/448/220 → 240/288/220 → back).
 - Full suite: **13/13 green.**
 
+**Also shipped today:** Design Lab camera was orbit+zoom only — Design_Lab_UI_UX.md explicitly specs "rotate, pan, and zoom" but pan didn't exist, so there was no way to recenter on a large hull without zooming out. Added middle-drag pan (matches the Skirmish camera's documented convention), distance-scaled. Pan math pulled into a pure `_compute_pan_delta()` function and unit tested directly — headless Godot can't simulate held mouse-button state via `Input.parse_input_event` (confirmed empirically: `is_mouse_button_pressed` stayed false after a parsed press event), so a real end-to-end input test wasn't possible; the math itself is fully covered instead. Suite now **14/14 green.**
+
 **Commit checkpoint:** see git log.
 
 ---
