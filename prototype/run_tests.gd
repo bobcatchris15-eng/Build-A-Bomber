@@ -47,6 +47,7 @@ func _init():
 	success = success and await test_per_module_armor_material()
 	success = success and await test_sloped_armor_angle_of_incidence()
 	success = success and await test_ai_flanking_targets_weakest_facet()
+	success = success and await test_trait_system_composability()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1738,6 +1739,51 @@ func test_ai_flanking_targets_weakest_facet() -> bool:
 	attacker.queue_free()
 	target.queue_free()
 	print("  [PASS] Attacking units compute a flank point toward the target's weakest facet, not a straight line to its armored front.")
+	return true
+
+func test_trait_system_composability() -> bool:
+	print("Running Test Suite: Unit-Class Trait System (composable tags, no hard-blocking)...")
+	# Traits union from whatever hull+locomotion combo is actually present -
+	# no validation anywhere. Chris's explicit constraint: a player can put
+	# treads on a naval hull if they want; this test only checks that
+	# traits compose correctly, not that any combination is rejected
+	# (nothing rejects combinations, by design).
+	var wheels_traits = ModuleCatalog.get_traits("medium_hull", "wheels")
+	if "ground_contact" not in wheels_traits or "high_speed" not in wheels_traits:
+		print("  [FAIL] medium_hull + wheels should carry ground_contact and high_speed traits, got ", wheels_traits)
+		return false
+
+	var heli_traits = ModuleCatalog.get_traits("light_hull", "helicopter_rotors")
+	if "airborne" not in heli_traits or "rotary_wing" not in heli_traits or "hovering" not in heli_traits:
+		print("  [FAIL] light_hull + helicopter_rotors should carry airborne/rotary_wing/hovering traits, got ", heli_traits)
+		return false
+
+	# A foundation hull should carry "static" automatically, derived from
+	# the existing is_foundation() mechanism rather than needing its own
+	# separate flag.
+	var foundation_traits = ModuleCatalog.get_traits("pillbox_foundation", "")
+	if "static" not in foundation_traits:
+		print("  [FAIL] pillbox_foundation should carry the 'static' trait (derived from is_foundation), got ", foundation_traits)
+		return false
+
+	# No hard-blocking: nothing prevents combining traits/locomotion that
+	# might seem to make no sense (e.g. legs on a foundation - foundations
+	# already block locomotion PLACEMENT at the design-lab level for a
+	# different, pre-existing reason, but get_traits() itself must never
+	# validate or throw - it just describes whatever's asked of it).
+	var weird_traits = ModuleCatalog.get_traits("pillbox_foundation", "anti_grav")
+	if "static" not in weird_traits or "hovering" not in weird_traits:
+		print("  [FAIL] get_traits() should compose even an unusual combination without rejecting it, got ", weird_traits)
+		return false
+
+	# All 7 hull types default to turreted_capable=true (nothing overrides
+	# it yet) - confirms the default doesn't silently break existing mounting.
+	for hull_id in ["light_hull", "medium_hull", "heavy_hull", "interceptor_hull", "assault_hull", "pillbox_foundation", "tower_foundation"]:
+		if not ModuleCatalog.is_turreted_capable(hull_id):
+			print("  [FAIL] ", hull_id, " should default to turreted_capable=true")
+			return false
+
+	print("  [PASS] Traits compose from whatever hull+locomotion is present, derive 'static' from is_foundation, and never block a combination.")
 	return true
 
 # --- Skirmish mode test suites ---

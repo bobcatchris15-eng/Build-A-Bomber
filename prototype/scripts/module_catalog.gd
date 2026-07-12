@@ -280,7 +280,8 @@ static func get_catalog() -> Dictionary:
 			"crystal": 0,
 			"dps": 0.0,
 			"size": Vector3(0.8, 0.8, 0.8),
-			"color": Color.BLACK
+			"color": Color.BLACK,
+			"traits": ["ground_contact", "high_speed"]
 		},
 		"tracked_treads": {
 			"name": "Tracked Treads",
@@ -291,7 +292,8 @@ static func get_catalog() -> Dictionary:
 			"crystal": 0,
 			"dps": 0.0,
 			"size": Vector3(1.0, 0.8, 3.0),
-			"color": Color.DARK_OLIVE_GREEN
+			"color": Color.DARK_OLIVE_GREEN,
+			"traits": ["ground_contact"]
 		},
 		"helicopter_rotors": {
 			"name": "Helicopter Rotors",
@@ -302,7 +304,8 @@ static func get_catalog() -> Dictionary:
 			"crystal": 10,
 			"dps": 0.0,
 			"size": Vector3(4.0, 0.2, 4.0),
-			"color": Color.SILVER
+			"color": Color.SILVER,
+			"traits": ["airborne", "rotary_wing", "hovering"]
 		},
 		"hover_engine": {
 			"name": "Hover Pad",
@@ -313,7 +316,8 @@ static func get_catalog() -> Dictionary:
 			"crystal": 40,
 			"dps": 0.0,
 			"size": Vector3(1.5, 0.4, 1.5),
-			"color": Color.CYAN
+			"color": Color.CYAN,
+			"traits": ["hovering"]
 		},
 		"legs": {
 			"name": "Mechanical Legs",
@@ -324,7 +328,8 @@ static func get_catalog() -> Dictionary:
 			"crystal": 10,
 			"dps": 0.0,
 			"size": Vector3(0.6, 1.8, 0.6),
-			"color": Color.DARK_RED
+			"color": Color.DARK_RED,
+			"traits": ["ground_contact"]
 		},
 		"anti_grav": {
 			"name": "Anti-Grav Rings",
@@ -335,7 +340,8 @@ static func get_catalog() -> Dictionary:
 			"crystal": 80,
 			"dps": 0.0,
 			"size": Vector3(1.6, 0.3, 1.6),
-			"color": Color.MEDIUM_BLUE
+			"color": Color.MEDIUM_BLUE,
+			"traits": ["hovering", "airborne"]
 		},
 
 		# --- HULL SIZE CLASSES ---
@@ -426,6 +432,43 @@ static func is_foundation(type_id: String) -> bool:
 	var data = get_module_data(type_id)
 	return data.get("is_foundation", false)
 
+# --- Unit-class traits (MOUNTING_AND_ARMOR_SPEC.md addendum) ---
+# Composable tags, not a hard ship/land/air/building enum, so a helicopter
+# that behaves like a ground vehicle at scale and three different fixed-wing
+# archetypes aren't forced into one box. DELIBERATELY NO VALIDATION HERE -
+# traits describe whatever combination of hull+locomotion is actually
+# present and let simulation code (movement, mounting, AI) branch on that;
+# they never block a placement. A player can put treads on a naval hull if
+# they want to - the traits would just describe a "ground_contact" trait on
+# a hull that (once naval hulls exist) might also carry a "buoyant" trait,
+# and whatever movement/behavior code reads those traits decides what to do
+# with the combination. See DECISIONS_NEEDED.md.
+static func get_traits(hull_type_id: String, locomotion_type_id: String = "") -> Array:
+	var traits = []
+	var hull_data = get_module_data(hull_type_id)
+	for t in hull_data.get("traits", []):
+		if t not in traits:
+			traits.append(t)
+	if is_foundation(hull_type_id) and "static" not in traits:
+		traits.append("static")
+	if locomotion_type_id != "":
+		var loco_data = get_module_data(locomotion_type_id)
+		for t in loco_data.get("traits", []):
+			if t not in traits:
+				traits.append(t)
+	return traits
+
+# Whether a hull supports independent weapon traverse (turrets/pintles/
+# sponsons that aim separately from the hull) vs. everything mounted on it
+# being fixed-forward, whole-vehicle-aims (see get_mount_style()'s
+# "frame_built" - this is what generalizes that from weapon-type-gated to
+# trait-gated). Defaults to true so every hull that exists today keeps its
+# current mounting behavior unchanged; future hull types (e.g. a fixed-wing
+# airframe) can set "turreted_capable": false in their catalog entry.
+static func is_turreted_capable(hull_type_id: String) -> bool:
+	var data = get_module_data(hull_type_id)
+	return data.get("turreted_capable", true)
+
 # Single source of truth for weapon traverse limits, shared between the
 # runtime combat AI (auto_weapon.gd) and the Design Lab firing-arc
 # visualization (module_placer.gd) - they must never drift apart, since the
@@ -440,7 +483,18 @@ static func is_foundation(type_id: String) -> bool:
 #   "pintle_top"   - pintle base on the hull, weapon sits level on top
 #   "pintle_bottom" - inverted: pintle reaches down from the hull, weapon hangs below
 #   "sponson"     - embedded into the hull body, only the muzzle projects out
-static func get_mount_style(type_id: String, facet: String) -> String:
+#
+# hull_type_id (optional) generalizes "frame_built" from weapon-type-gated
+# to turreted_capable-trait-gated (MOUNTING_AND_ARMOR_SPEC.md addendum): on
+# a hull that doesn't support independent traverse, EVERYTHING mounts
+# frame_built, including basic_cannon - nothing should carry visible
+# independent-traverse hardware on a unit that can't actually traverse
+# weapons independently. Omitting hull_type_id (or every hull that exists
+# today, which all default turreted_capable=true) keeps the original
+# weapon-type-only behavior unchanged.
+static func get_mount_style(type_id: String, facet: String, hull_type_id: String = "") -> String:
+	if hull_type_id != "" and not is_turreted_capable(hull_type_id):
+		return "frame_built"
 	if type_id == "basic_cannon":
 		return "turret"
 	if type_id in ["gauss_railgun", "heavy_howitzer"]:

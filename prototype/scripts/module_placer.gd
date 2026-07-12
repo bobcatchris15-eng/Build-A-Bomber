@@ -798,7 +798,8 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 	# turret, left unchanged - handled by get_mount_style() returning "turret").
 	if category == "weapon":
 		var facet = _classify_hull_facet(normal)
-		var mount_style = ModuleCatalog.get_mount_style(type_id, facet)
+		var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
+		var mount_style = ModuleCatalog.get_mount_style(type_id, facet, hull_type_for_mount)
 		# Stored as meta (not just applied once) so rebuild_visual() - called
 		# on every gizmo tweak-drag frame, which clears and rebuilds all
 		# MeshInstance3D children - knows to re-add the mount hardware
