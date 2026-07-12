@@ -9,6 +9,7 @@ signal died(unit)
 signal resources_delivered(team, metal, crystal)
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 
 var team: int = 0
 var max_hp: float = 400.0
@@ -338,46 +339,12 @@ func get_active_modules() -> Array:
 func take_damage(amount: float, damage_type: String = "kinetic"):
 	if is_dead: return
 
-	var threshold = 0.0
-	var reduction = 1.0
-	if is_instance_valid(hull_node) and hull_node.has_meta("armor_material") and hull_node.has_meta("armor_thickness"):
-		var mat = hull_node.get_meta("armor_material")
-		var thick = hull_node.get_meta("armor_thickness")
-		match mat:
-			"hardened_steel":
-				if damage_type == "kinetic": threshold = 15.0 * thick; reduction = 0.7
-				elif damage_type == "thermal": threshold = 5.0 * thick; reduction = 0.9
-				else: threshold = 10.0 * thick; reduction = 0.8
-			"reactive_armor":
-				if damage_type == "kinetic": threshold = 10.0 * thick; reduction = 0.8
-				elif damage_type == "thermal": threshold = 10.0 * thick; reduction = 0.8
-				else: threshold = 30.0 * thick; reduction = 0.4
-			"ablative_ceramic":
-				if damage_type == "kinetic": threshold = 8.0 * thick; reduction = 0.9
-				elif damage_type == "thermal": threshold = 25.0 * thick; reduction = 0.3
-				else: threshold = 10.0 * thick; reduction = 0.7
-			"energy_shielding":
-				threshold = 20.0 * thick
-				reduction = 0.5
-
-	# Placed armor modules (MOUNTING_AND_ARMOR_SPEC.md #2) add an aggregate
-	# bonus on top of the hull-level baseline above. Not direction-specific
-	# yet (see DECISIONS_NEEDED.md "Armor-module combat integration scoped
-	# to aggregate" - take_damage() has no hit-direction input to resolve
-	# per-facet coverage against). A bigger auto-fit plate already means a
-	# bigger get_hp() via the existing volume-based ModuleData formula, so
-	# armor placed on a larger hull's facets naturally contributes more.
-	var armor_module_hp = 0.0
-	for m in get_active_modules():
-		var m_data = m.get_meta("module_data")
-		if m_data and m_data.category == "armor":
-			armor_module_hp += m_data.get_hp()
-	if armor_module_hp > 0.0:
-		threshold += armor_module_hp * 0.1
-		reduction = clamp(reduction * 0.9, 0.2, 1.0)
+	var active_modules = get_active_modules()
+	var resolved = DamageResolverScript.resolve(hull_node, active_modules, damage_type)
+	var threshold = resolved.x
+	var reduction = resolved.y
 
 	# Subsystem stripping: 35% of hits land on an exposed module
-	var active_modules = get_active_modules()
 	if not active_modules.is_empty() and randf() < 0.35:
 		var target_module = active_modules.pick_random()
 		var m_data = target_module.get_meta("module_data")

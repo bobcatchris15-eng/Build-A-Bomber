@@ -1,5 +1,7 @@
 extends CharacterBody3D
 
+const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
+
 var max_hp: float = 400.0
 var hp: float = 400.0
 var is_dead: bool = false
@@ -50,70 +52,12 @@ func take_damage(amount: float, damage_type: String = "kinetic"):
 	
 	# Fetch armor properties from hull metadata if present
 	var hull = get_node_or_null("Hull")
-	var threshold = 0.0
-	var reduction = 1.0
-	
-	if hull and hull.has_meta("armor_material") and hull.has_meta("armor_thickness"):
-		var mat = hull.get_meta("armor_material")
-		var thick = hull.get_meta("armor_thickness")
-		
-		match mat:
-			"hardened_steel":
-				if damage_type == "kinetic":
-					threshold = 15.0 * thick
-					reduction = 0.7
-				elif damage_type == "thermal":
-					threshold = 5.0 * thick
-					reduction = 0.9
-				else: # explosive
-					threshold = 10.0 * thick
-					reduction = 0.8
-			"reactive_armor":
-				if damage_type == "kinetic":
-					threshold = 10.0 * thick
-					reduction = 0.8
-				elif damage_type == "thermal":
-					threshold = 10.0 * thick
-					reduction = 0.8
-				else: # explosive
-					threshold = 30.0 * thick
-					reduction = 0.4
-			"ablative_ceramic":
-				if damage_type == "kinetic":
-					threshold = 8.0 * thick
-					reduction = 0.9
-				elif damage_type == "thermal":
-					threshold = 25.0 * thick
-					reduction = 0.3
-				else: # explosive
-					threshold = 10.0 * thick
-					reduction = 0.7
-			"energy_shielding":
-				if damage_type == "kinetic":
-					threshold = 20.0 * thick
-					reduction = 0.5
-				elif damage_type == "thermal":
-					threshold = 20.0 * thick
-					reduction = 0.5
-				else: # explosive
-					threshold = 20.0 * thick
-					reduction = 0.5
-
-	# Placed armor modules (MOUNTING_AND_ARMOR_SPEC.md #2) add an aggregate
-	# bonus on top of the hull-level baseline above - mirrors the same logic
-	# in battle_unit.gd's take_damage() so Test Range and Skirmish combat
-	# agree. See DECISIONS_NEEDED.md for why this is aggregate, not per-facet.
-	var armor_module_hp = 0.0
-	for m in get_active_modules():
-		var m_data = m.get_meta("module_data")
-		if m_data and m_data.category == "armor":
-			armor_module_hp += m_data.get_hp()
-	if armor_module_hp > 0.0:
-		threshold += armor_module_hp * 0.1
-		reduction = clamp(reduction * 0.9, 0.2, 1.0)
+	var active_modules = get_active_modules()
+	var resolved = DamageResolverScript.resolve(hull, active_modules, damage_type)
+	var threshold = resolved.x
+	var reduction = resolved.y
 
 	# 35% chance to hit a random exposed module (subsystem stripping)
-	var active_modules = get_active_modules()
 	if not active_modules.is_empty() and randf() < 0.35:
 		var target_module = active_modules.pick_random()
 		var m_data = target_module.get_meta("module_data")
