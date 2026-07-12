@@ -287,9 +287,9 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		var wheel_size = settings.get("size", 1.0)
 		wheels_offset = 0.8 * wheel_size
 	elif loc_type == "legs":
-		wheels_offset = 1.6
+		wheels_offset = 1.6 * settings.get("size", 1.0)
 	elif loc_type == "anti_grav":
-		wheels_offset = 0.4
+		wheels_offset = 0.4 * settings.get("size", 1.0)
 		
 	hull.position = Vector3(0, (catalog_data.size.y * hull_scale.y) / 2.0 + wheels_offset, 0)
 	
