@@ -47,13 +47,13 @@ func _spawn_module_explosion(pos: Vector3):
 		tween_p.parallel().tween_property(particle, "scale", Vector3.ZERO, 0.5)
 		tween_p.finished.connect(func(): particle.queue_free())
 
-func take_damage(amount: float, damage_type: String = "kinetic"):
+func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = null):
 	if is_dead: return
-	
+
 	# Fetch armor properties from hull metadata if present
 	var hull = get_node_or_null("Hull")
 	var active_modules = get_active_modules()
-	var resolved = DamageResolverScript.resolve(hull, active_modules, damage_type)
+	var resolved = DamageResolverScript.resolve(hull, active_modules, damage_type, self, hit_origin)
 	var threshold = resolved.x
 	var reduction = resolved.y
 

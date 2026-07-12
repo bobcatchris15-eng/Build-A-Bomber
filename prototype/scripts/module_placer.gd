@@ -496,18 +496,10 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 				mirror.set_meta("mirrored_counterpart", primary)
 
 func _classify_hull_facet(normal: Vector3) -> String:
-	# Facet = one of the hull's 6 axis-aligned box faces (see
-	# MOUNTING_AND_ARMOR_SPEC.md's "Known architecture constraint" - hull
-	# placement/collision is a single BoxShape3D regardless of the true
-	# authored mesh silhouette). "front" matches the -Z barrel-forward
-	# convention used throughout the rest of the codebase.
-	var abs_n = normal.abs()
-	if abs_n.x > abs_n.y and abs_n.x > abs_n.z:
-		return "right" if normal.x > 0 else "left"
-	elif abs_n.z > abs_n.y:
-		return "back" if normal.z > 0 else "front"
-	else:
-		return "top" if normal.y > 0 else "bottom"
+	# Now a thin wrapper - the actual classification moved to
+	# ModuleCatalog.classify_facet() so combat (damage_resolver.gd) can
+	# share the exact same facet convention as placement.
+	return ModuleCatalog.classify_facet(normal)
 
 func update_locomotion(type_id: String, settings: Dictionary):
 	if not hull: return
@@ -785,15 +777,20 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 			# out past the hull edge on one side. Snap the two in-plane
 			# axes to hull-center (0) and keep only the surface-normal axis.
 			var local_normal = hull.global_transform.basis.inverse() * normal
+			var armor_facet = ModuleCatalog.classify_facet(local_normal)
 			var centered_local = Vector3.ZERO
-			var abs_ln = local_normal.abs()
-			if abs_ln.x > abs_ln.y and abs_ln.x > abs_ln.z:
-				centered_local = Vector3(sign(local_normal.x) * hull_size.x / 2.0, 0, 0)
-			elif abs_ln.z > abs_ln.y:
-				centered_local = Vector3(0, 0, sign(local_normal.z) * hull_size.z / 2.0)
-			else:
-				centered_local = Vector3(0, sign(local_normal.y) * hull_size.y / 2.0, 0)
+			match armor_facet:
+				"left", "right":
+					centered_local = Vector3(sign(local_normal.x) * hull_size.x / 2.0, 0, 0)
+				"front", "back":
+					centered_local = Vector3(0, 0, sign(local_normal.z) * hull_size.z / 2.0)
+				_:
+					centered_local = Vector3(0, sign(local_normal.y) * hull_size.y / 2.0, 0)
 			new_weapon.global_position = hull.to_global(centered_local)
+			# Stored so combat (damage_resolver.gd) can resolve which
+			# specific armor module covers a given hit's facet, instead of
+			# treating all placed armor as one undifferentiated pool.
+			new_weapon.set_meta("facet", armor_facet)
 
 	# Face-based weapon mounting (MOUNTING_AND_ARMOR_SPEC.md #3): sponson-
 	# embed on side/front/back faces, pintle stand on top/bottom, except

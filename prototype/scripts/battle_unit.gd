@@ -336,11 +336,11 @@ func get_active_modules() -> Array:
 				list.append(child)
 	return list
 
-func take_damage(amount: float, damage_type: String = "kinetic"):
+func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = null):
 	if is_dead: return
 
 	var active_modules = get_active_modules()
-	var resolved = DamageResolverScript.resolve(hull_node, active_modules, damage_type)
+	var resolved = DamageResolverScript.resolve(hull_node, active_modules, damage_type, self, hit_origin)
 	var threshold = resolved.x
 	var reduction = resolved.y
 

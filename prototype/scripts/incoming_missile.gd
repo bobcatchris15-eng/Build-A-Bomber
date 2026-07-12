@@ -37,7 +37,7 @@ func _physics_process(delta):
 	if global_position.distance_to(dest) < 1.2:
 		# Hit player!
 		if target_node.has_method("take_damage"):
-			target_node.take_damage(damage_amount, "explosive")
+			target_node.take_damage(damage_amount, "explosive", global_position)
 		destroy_missile(false)
 
 func destroy_missile(intercepted: bool):

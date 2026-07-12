@@ -450,6 +450,22 @@ static func get_mount_style(type_id: String, facet: String) -> String:
 		"bottom": return "pintle_bottom"
 		_: return "sponson"
 
+# Facet = one of the hull's 6 axis-aligned box faces (see
+# MOUNTING_AND_ARMOR_SPEC.md's "Known architecture constraint"). Shared
+# between placement (module_placer.gd - armor centering, mount style) and
+# combat (damage_resolver.gd - directional armor hit resolution), so both
+# always agree on what "the front" or "the left side" means for a given
+# local-space direction vector. "front" matches the -Z barrel-forward
+# convention used throughout the codebase.
+static func classify_facet(local_direction: Vector3) -> String:
+	var abs_n = local_direction.abs()
+	if abs_n.x > abs_n.y and abs_n.x > abs_n.z:
+		return "right" if local_direction.x > 0 else "left"
+	elif abs_n.z > abs_n.y:
+		return "back" if local_direction.z > 0 else "front"
+	else:
+		return "top" if local_direction.y > 0 else "bottom"
+
 static func get_traverse_limit_angle(type_id: String) -> float:
 	if type_id in ["basic_cannon", "ciws", "pd_laser"]:
 		return PI # 360 degrees

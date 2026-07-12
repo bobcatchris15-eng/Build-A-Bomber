@@ -42,6 +42,25 @@ Resolves the hull-level-only vs. spatial tension flagged 2026-07-12.
 4. Face-based weapon mounting (top pintle-level / side sponson-embed / bottom inverted-pintle / railgun+howitzer frame-built exceptions).
 5. Hull SIZE scale control confirmation + per-hull custom deform rigging (scoped incrementally, see DECISIONS_NEEDED.md).
 
+## Addendum, 2026-07-12: full directional armor + trait-based unit classes
+
+Chris's follow-up call, after reviewing the phased-plan writeup: go as far as possible on BOTH the full armor phase list and the full trait/unit-class system, not just the cheap tiers.
+
+**Armor, full phase list:**
+1. Dedupe `take_damage()`'s armor math (was in `battle_unit.gd`, `player_vehicle.gd`, and `building.gd`) into one shared function.
+2. Facet-level resolution — armor only protects the facet it's actually on, no raycast needed (cheap angle classification, same convention as placement).
+3. Per-module armor material choice (a plate can be reactive on the front, ablative on the sides — not just one global hull material).
+4. True angle-of-incidence sloped armor via raycast (real WWII-tank-style: a glancing hit is more survivable than a perpendicular one).
+5. AI facing-awareness so flanking is something the *enemy* can also do to you in Skirmish, not just something a human player can exploit in Test Range.
+
+**Traits/unit classes, full scope, with one hard constraint:**
+- Formalize a composable trait system (`hovering`, `fixed_wing`, `rotary_wing`, `ground_contact`, `airborne`, `static`, `turreted_capable`, etc.) — tags that combine, not a rigid ship/land/air/building enum, so "helicopter that behaves like a ground vehicle at scale" and "three different fixed-wing archetypes" aren't forced into a box.
+- **Explicit constraint: no hard-blocking.** A player can put treads on a naval hull if they want to. Traits compose and drive simulation behavior — whatever that produces, including janky/suboptimal outcomes — never validation logic that prevents "weird" combinations. This is a deliberate design philosophy, not a placeholder for validation to be added later; revisit only if it causes real problems in play.
+- Generalize `frame_built` mounting from weapon-type-gated (railgun/howitzer only) to `turreted_capable`-trait-gated (any weapon, when the unit lacks independent-traverse capability).
+- New movement models: fixed-wing flight (banking, stall speed, minimum airspeed) and naval (buoyancy/surface movement) — genuinely new `CharacterBody3D` behavior, not reskinned existing locomotion.
+- New AI behavior: strafing/approach-and-peel-off for aircraft, distinct from the current ground-unit approach-and-engage pattern.
+- New Blender-authored hull geometry for airframes/ships as needed — understood to be the most expensive and fragile part of this whole scope (same reimport pipeline risk flagged elsewhere in this doc).
+
 ## Known architecture constraint carried into this work
 
 Hull placement/collision currently uses a single axis-aligned `BoxShape3D` per hull (see `module_placer.gd`), regardless of the hull's actual authored mesh silhouette (which can be wedged/aerodynamic/octagonal). "Facet" for both armor-fitting and mount-leveling purposes means one of that box's 6 axis-aligned faces, not the true sloped mesh surface, unless/until a mesh-accurate placement system is built. This is a deliberate scope simplification, not an oversight — flagged here so it isn't mistaken for one later.

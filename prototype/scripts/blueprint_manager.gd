@@ -45,6 +45,7 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 				"scale": {"x": child.scale.x, "y": child.scale.y, "z": child.scale.z},
 				"yaw_offset": child.get_meta("yaw_offset", 0.0),
 				"mount_style": child.get_meta("mount_style", ""),
+				"facet": child.get_meta("facet", ""),
 				"tweaks": data.tweaks if "tweaks" in data else {},
 				"stats": {
 					"hp": data.get_hp(),
@@ -384,6 +385,8 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		new_module.set_meta("yaw_offset", mod.get("yaw_offset", 0.0))
 		if mod.get("mount_style", "") != "":
 			new_module.set_meta("mount_style", mod["mount_style"])
+		if mod.get("facet", "") != "":
+			new_module.set_meta("facet", mod["facet"])
 		# Force mesh deformation rebuild (also re-applies mount hardware,
 		# see rebuild_visual()'s mount_style check)
 		VisualBuilder.rebuild_visual(new_module)

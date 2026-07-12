@@ -516,7 +516,7 @@ func _fire_kinetic_projectile(radius: float, length: float, duration: float, col
 	tween.finished.connect(func():
 		if is_instance_valid(tracer): tracer.queue_free()
 		if is_instance_valid(target):
-			target.take_damage(dps * fire_rate, damage_class)
+			target.take_damage(dps * fire_rate, damage_class, global_position)
 			if explode_on_hit:
 				_spawn_explosion_visual(end, 0.4, color)
 	)
@@ -562,7 +562,7 @@ func _fire_railgun_beam():
 		stween.finished.connect(func(): spark.queue_free())
 		
 	if is_instance_valid(target):
-		target.take_damage(dps * fire_rate, damage_class)
+		target.take_damage(dps * fire_rate, damage_class, global_position)
 		_spawn_explosion_visual(target.global_position, 0.6, Color.BLUE_VIOLET)
 		
 	var tween = create_tween()
@@ -597,7 +597,7 @@ func _fire_heavy_howitzer():
 	tween.finished.connect(func():
 		if is_instance_valid(shell): shell.queue_free()
 		if is_instance_valid(target):
-			target.take_damage(dps * fire_rate, damage_class)
+			target.take_damage(dps * fire_rate, damage_class, global_position)
 			_spawn_explosion_visual(end, 1.2, Color.ORANGE)
 	)
 
@@ -635,7 +635,7 @@ func _fire_mortar_salvo():
 			tween.finished.connect(func():
 				if is_instance_valid(shell): shell.queue_free()
 				if is_instance_valid(target):
-					target.take_damage((dps * fire_rate) / count, damage_class)
+					target.take_damage((dps * fire_rate) / count, damage_class, global_position)
 					_spawn_explosion_visual(end, 0.5, Color.YELLOW)
 			)
 		)
@@ -670,7 +670,7 @@ func _fire_spigot_mortar():
 	tween.finished.connect(func():
 		if is_instance_valid(bomb): bomb.queue_free()
 		if is_instance_valid(target):
-			target.take_damage(dps * fire_rate, damage_class)
+			target.take_damage(dps * fire_rate, damage_class, global_position)
 			_spawn_explosion_visual(end, 1.8, Color.CRIMSON)
 	)
 
@@ -746,7 +746,7 @@ func _fire_missile_projectile(is_top_attack: bool):
 				move_t.finished.connect(func():
 					if is_instance_valid(missile): missile.queue_free()
 					if is_instance_valid(target):
-						target.take_damage(dps * fire_rate, damage_class)
+						target.take_damage(dps * fire_rate, damage_class, global_position)
 						_spawn_explosion_visual(target.global_position, 0.8, Color.YELLOW_GREEN)
 				)
 			else:
@@ -758,7 +758,7 @@ func _fire_missile_projectile(is_top_attack: bool):
 		tween.finished.connect(func():
 			if is_instance_valid(missile): missile.queue_free()
 			if is_instance_valid(target):
-				target.take_damage(dps * fire_rate, damage_class)
+				target.take_damage(dps * fire_rate, damage_class, global_position)
 				_spawn_explosion_visual(end, 0.7, Color.YELLOW)
 		)
 
@@ -810,7 +810,7 @@ func _fire_swarm_missiles():
 			tween.finished.connect(func():
 				if is_instance_valid(missile): missile.queue_free()
 				if is_instance_valid(target):
-					target.take_damage((dps * fire_rate) / count, damage_class)
+					target.take_damage((dps * fire_rate) / count, damage_class, global_position)
 					_spawn_explosion_visual(end, 0.3, Color.DARK_ORANGE)
 			)
 		)
@@ -863,7 +863,7 @@ func _fire_drone_swarm():
 				lt.tween_interval(0.08)
 				lt.finished.connect(func(): laser.queue_free())
 				
-				target.take_damage((dps * fire_rate) / 2.0, damage_class)
+				target.take_damage((dps * fire_rate) / 2.0, damage_class, global_position)
 				
 				var return_t = create_tween()
 				return_t.tween_property(drone, "global_position", global_position, 0.3)
@@ -915,7 +915,7 @@ func _fire_cluster_dispenser():
 			st.finished.connect(func():
 				if is_instance_valid(sub): sub.queue_free()
 				if is_instance_valid(target):
-					target.take_damage((dps * fire_rate) / 5.0, damage_class)
+					target.take_damage((dps * fire_rate) / 5.0, damage_class, global_position)
 					_spawn_explosion_visual(scatter_dest, 0.3, Color.CHOCOLATE)
 			)
 	)
@@ -944,7 +944,7 @@ func _fire_flame_spray():
 		tween.finished.connect(func():
 			flame.queue_free()
 			if is_instance_valid(target) and i == 0:
-				target.take_damage(dps * fire_rate, damage_class)
+				target.take_damage(dps * fire_rate, damage_class, global_position)
 		)
 
 func _fire_continuous_beam():
@@ -967,7 +967,7 @@ func _fire_continuous_beam():
 	beam.rotate_object_local(Vector3.RIGHT, PI/2)
 	
 	if is_instance_valid(target):
-		target.take_damage(dps * fire_rate, damage_class)
+		target.take_damage(dps * fire_rate, damage_class, global_position)
 		
 	var timer = get_tree().create_timer(0.06)
 	timer.timeout.connect(func(): if is_instance_valid(beam): beam.queue_free())
@@ -997,7 +997,7 @@ func _fire_plasma_lobber():
 	tween.finished.connect(func():
 		if is_instance_valid(plasma): plasma.queue_free()
 		if is_instance_valid(target):
-			target.take_damage(dps * fire_rate, damage_class)
+			target.take_damage(dps * fire_rate, damage_class, global_position)
 			_spawn_explosion_visual(end, 0.8, Color.MEDIUM_SPRING_GREEN)
 			
 			var puddle = MeshInstance3D.new()
@@ -1058,7 +1058,7 @@ func _fire_flak_cannon():
 		st.finished.connect(func(): smoke.queue_free())
 		
 		if is_instance_valid(target):
-			target.take_damage(dps * fire_rate, damage_class)
+			target.take_damage(dps * fire_rate, damage_class, global_position)
 	)
 
 func _fire_resource_harvester_tether():
@@ -1081,7 +1081,7 @@ func _fire_resource_harvester_tether():
 	tether.rotate_object_local(Vector3.RIGHT, PI/2)
 	
 	if is_instance_valid(target):
-		target.take_damage(dps * fire_rate, damage_class)
+		target.take_damage(dps * fire_rate, damage_class, global_position)
 		
 	var tween = create_tween()
 	tween.tween_property(tether, "scale", Vector3(0, 1, 0), 0.08)
@@ -1123,7 +1123,7 @@ func _fire_repair_array_beam():
 	st.finished.connect(func(): spark.queue_free())
 	
 	if is_instance_valid(target):
-		target.take_damage(dps * fire_rate, damage_class)
+		target.take_damage(dps * fire_rate, damage_class, global_position)
 		
 	var timer = get_tree().create_timer(0.08)
 	timer.timeout.connect(func(): if is_instance_valid(beam): beam.queue_free())
@@ -1166,7 +1166,7 @@ func _fire_standard_laser():
 	laser.rotate_object_local(Vector3.RIGHT, PI/2)
 	
 	if is_instance_valid(target):
-		target.take_damage(dps * fire_rate, damage_class)
+		target.take_damage(dps * fire_rate, damage_class, global_position)
 	
 	var timer = get_tree().create_timer(0.08)
 	timer.timeout.connect(func(): if is_instance_valid(laser): laser.queue_free())

@@ -13,6 +13,7 @@ const ModuleData = preload("res://scripts/module_data.gd")
 const PlayerVehicleScript = preload("res://scripts/player_vehicle.gd")
 const TargetDummyScript = preload("res://scripts/target_dummy.gd")
 const IncomingMissileScript = preload("res://scripts/incoming_missile.gd")
+const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 
 func _init():
 	print("\n==============================================")
@@ -42,6 +43,7 @@ func _init():
 	success = success and await test_face_based_weapon_mounting()
 	success = success and await test_centerline_placement_does_not_self_mirror()
 	success = success and await test_hull_nose_taper()
+	success = success and await test_directional_armor_facet_resolution()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1510,6 +1512,64 @@ func _count_mesh_vertices(mesh: Mesh) -> int:
 		var arrays = mesh.surface_get_arrays(surf)
 		total += (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
 	return total
+
+func test_directional_armor_facet_resolution() -> bool:
+	print("Running Test Suite: Directional Armor Facet Resolution (Armor phase 2)...")
+	# An armor module on the FRONT facet only should protect against a hit
+	# arriving from the front, but NOT against an identical hit from the
+	# back - this is the actual point of directional armor: flanking should
+	# matter. Uses DamageResolver directly (defender + hit_origin), the same
+	# path battle_unit.gd/player_vehicle.gd/building.gd now all call through.
+	var defender = Node3D.new()
+	root.add_child(defender)
+	defender.global_position = Vector3.ZERO
+
+	var hull = Node3D.new()
+	hull.name = "Hull"
+	hull.set_meta("armor_material", "hardened_steel") # kinetic threshold 15.0
+	hull.set_meta("armor_thickness", 1.0)
+	defender.add_child(hull)
+
+	var front_armor = Node3D.new()
+	front_armor.set_meta("facet", "front")
+	var front_data = ModuleData.new()
+	front_data.type_id = "armor_plating"
+	front_data.category = "armor"
+	front_data.base_hp = 500.0 # contributes +50.0 threshold (500 * 0.1) when it applies
+	front_armor.set_meta("module_data", front_data)
+	hull.add_child(front_armor)
+
+	var active_modules = [front_armor]
+
+	# Hit from the front (-Z, matching the barrel-forward convention): the
+	# attacker sits in -Z, so the vector FROM the defender TO the attacker
+	# points toward -Z, which classify_facet() reads as "front".
+	var hit_from_front = defender.global_position + Vector3(0, 0, -5.0)
+	var resolved_front = DamageResolverScript.resolve(hull, active_modules, "kinetic", defender, hit_from_front)
+	if abs(resolved_front.x - 65.0) > 0.5: # 15.0 baseline + 50.0 from the front plate
+		print("  [FAIL] Hit from the front should get the front plate's bonus (expected threshold ~65.0), got ", resolved_front.x)
+		defender.queue_free()
+		return false
+
+	# Hit from the back (+Z): the front-only plate should NOT apply.
+	var hit_from_back = defender.global_position + Vector3(0, 0, 5.0)
+	var resolved_back = DamageResolverScript.resolve(hull, active_modules, "kinetic", defender, hit_from_back)
+	if abs(resolved_back.x - 15.0) > 0.5: # baseline only, no plate bonus
+		print("  [FAIL] Hit from the back should NOT get the front plate's bonus (expected threshold ~15.0), got ", resolved_back.x)
+		defender.queue_free()
+		return false
+
+	# No hit_origin at all (AoE/unknown direction) should fall back to the
+	# old aggregate-everything behavior, not silently drop the bonus.
+	var resolved_unknown = DamageResolverScript.resolve(hull, active_modules, "kinetic")
+	if abs(resolved_unknown.x - 65.0) > 0.5:
+		print("  [FAIL] Omitting hit_origin should fall back to aggregate (expected ~65.0), got ", resolved_unknown.x)
+		defender.queue_free()
+		return false
+
+	defender.queue_free()
+	print("  [PASS] Armor only protects the facet it's actually mounted on; unknown-direction damage still falls back to aggregate.")
+	return true
 
 # --- Skirmish mode test suites ---
 

@@ -4,6 +4,29 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 2) — New direction: full directional armor + trait-based unit classes, no hard gating
+
+Chris reviewed the phased-plan writeup and gave the call: go as far as possible on both the full armor phase list (including sloped-armor raycast math and AI facing-awareness) and the full trait system (including new movement models and strafing AI), not just the cheap tiers. Explicit constraint: **traits/hulls/locomotion must never hard-block each other** — a player can put treads on a naval hull if they want; bad combinations should produce janky emergent behavior, not a validation wall. This is now the priority, sequenced as: Armor (dedupe → facet resolution → per-module material → sloped armor → AI facing) then Traits (formalize → generalize mounting → new movement models → new AI → new hull art).
+
+### Armor Phase 1 (dedupe) + Phase 2 (facet-level resolution) shipped
+
+**Phase 1:** `take_damage()`'s armor math was duplicated identically across THREE places (`battle_unit.gd`, `player_vehicle.gd`, and — found while doing this — `building.gd`'s defense structures, which is why this was worth doing before building on top of it: it had already drifted once today). Extracted into `damage_resolver.gd`'s `DamageResolver.resolve()`, a single source of truth all three now call. Verified behavior-preserving (identical HP numbers before/after). Bonus find: `building.gd` never got the armor-module aggregate bonus at all — a real parity gap between vehicles and defenses, fixed as part of the same pass.
+
+**Phase 2:** Armor is now genuinely directional, not just aggregate.
+- `ModuleCatalog.classify_facet()`: moved the facet-classification logic (previously private to `module_placer.gd`'s placement code) to a shared location so combat can use the exact same convention.
+- Armor modules now store which facet they're mounted on (`facet` meta, persisted through save/load same as `mount_style`).
+- `DamageResolver.resolve()` grew optional `defender`/`hit_origin` params: when both are given, it classifies which facet actually faces the attacker and only counts armor modules covering *that* facet — armor on the far side of the hull no longer helps. Omitting either (AoE, or callers that don't care) falls back to the old aggregate-everything behavior, so nothing breaks that doesn't opt in.
+- `take_damage()`'s signature grew an optional `hit_origin` parameter (defaults to `null`, fully backward compatible) across all three implementations, plus `auto_weapon.gd` (17 call sites, one per weapon type) and `incoming_missile.gd` now pass their own `global_position` as the hit origin.
+
+**Verified:**
+- New test `test_directional_armor_facet_resolution()`: confirms a front-only armor plate protects against a hit from the front but NOT an identical hit from the back, and confirms omitting `hit_origin` still falls back to aggregate.
+- Full skirmish simulation re-run clean after the 17-call-site change in `auto_weapon.gd`.
+- Full suite: **27/27 green.**
+
+**Commit checkpoints:** see git log.
+
+---
+
 ## 2026-07-12 (cont'd) — New scope from Chris: mounting/armor/hull-tweak rework
 
 Chris reviewed the beta report and gave new direction covering 4 areas (firing arcs, armor-as-module, face-based weapon mounting, per-hull deform rigging). Written up in full in [MOUNTING_AND_ARMOR_SPEC.md](MOUNTING_AND_ARMOR_SPEC.md) — this supersedes the "keep armor hull-level-only" decision logged 2026-07-12 earlier today. Treating this as the priority for the rest of the sprint, sequenced by risk/dependency rather than the order it was listed in.

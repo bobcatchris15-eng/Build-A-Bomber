@@ -229,7 +229,7 @@ func get_active_modules() -> Array:
 				list.append(child)
 	return list
 
-func take_damage(amount: float, damage_type: String = "kinetic"):
+func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = null):
 	if is_dead: return
 	var threshold = 5.0
 	var reduction = 0.85
@@ -238,7 +238,7 @@ func take_damage(amount: float, damage_type: String = "kinetic"):
 		# do for vehicle hulls (battle_unit.gd/player_vehicle.gd) - defense
 		# buildings previously didn't get this at all, a real parity gap
 		# found while deduping the armor math into damage_resolver.gd.
-		var resolved = DamageResolverScript.resolve(defense_hull, get_active_modules(), damage_type)
+		var resolved = DamageResolverScript.resolve(defense_hull, get_active_modules(), damage_type, self, hit_origin)
 		threshold = resolved.x
 		reduction = resolved.y
 	if amount < threshold:
