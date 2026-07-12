@@ -4,6 +4,20 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (Thu) — Integration pass: full design→battle pipeline verified
+
+**Shipped:**
+- Ran the existing `scratch/sim_skirmish.gd` headless probe (~110s of simulated Skirmish time) against the real bundled rosters — economy ticks, enemy AI launches waves, HQ damage/destruction and game-over all fire correctly with the week's changes in place. No script errors.
+- New test `test_design_to_battle_integration()`: designs a unit combining three of this week's fixes at once (legs at a non-default size, `gauss_railgun`'s now-working `rail_length` gizmo tweak, `sensor_suite`'s now-correctly-targeted `mast_height` tweak), serializes it, and reconstructs it through the *exact* code path Skirmish/Battlefield use to spawn real battle units (`reconstruct_vehicle(..., is_designer=false)`) — confirming none of this week's fixes are designer-only and silently lost on spawn.
+- **Safety note:** this test deliberately avoids calling `save_blueprint()` — that writes to `user://blueprints/`, Chris's real save directory with ~30 real saved designs in it. Used `serialize_hull()` + `reconstruct_vehicle()` directly instead (the same underlying code save/load calls) to prove the pipeline without touching disk. Verified via file timestamps that no blueprint files were created or modified by this session.
+
+**Verified:**
+- Full suite: **18/18 green.**
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 (Wed) — Foundation/defense design-lab parity: confirmed, not built
 
 **Audit finding (third day in a row the "gap" turned out mostly not to exist):** placement, tweaking, mirroring, undo/redo, and blueprint serialization are all hull-type-agnostic code paths — the only foundation-specific special case anywhere in the codebase is a single locomotion block in `module_placer.gd`. Everything else (gizmo drag, TWEAK_SPECS sliders, symmetry, undo history, save/load) already applies identically to a `pillbox_foundation`/`tower_foundation` hull as to a vehicle hull, confirmed by cross-referencing every `is_foundation` usage in the codebase (there are exactly 3, one of which is the deliberate locomotion block).

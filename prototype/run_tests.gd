@@ -34,6 +34,7 @@ func _init():
 	success = success and await test_locomotion_tweak_parity()
 	success = success and await test_undo_redo()
 	success = success and await test_foundation_design_lab_parity()
+	success = success and await test_design_to_battle_integration()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -908,6 +909,117 @@ func test_foundation_design_lab_parity() -> bool:
 
 	placer.queue_free()
 	print("  [PASS] Foundation hulls get full placement/mirror/rotate/undo/serialize parity with vehicle hulls.")
+	return true
+
+func test_design_to_battle_integration() -> bool:
+	print("Running Test Suite: Design -> Serialize -> Battle-Spawn Integration...")
+	# Thursday integration pass: design a unit using several of this week's
+	# fixes together (legs at a non-default size, gauss_railgun's rail_length
+	# gizmo tweak, sensor_suite's mast_height tweak), then push it through the
+	# EXACT same reconstruct_vehicle() path Skirmish/Battlefield use to spawn
+	# real battle units, and confirm nothing was lost or silently reset.
+	#
+	# Deliberately does NOT call save_blueprint() / touch user://blueprints -
+	# that's Chris's real save directory with ~24 real designs in it, and
+	# this test doesn't need the disk round-trip to prove the pipeline works;
+	# serialize_hull() + reconstruct_vehicle() is the same code save/load uses.
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	var bm = Node.new()
+	bm.name = "BlueprintManager"
+	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
+	placer.add_child(bm)
+	await process_frame
+
+	placer._place_hull_from_ui("heavy_hull")
+	await process_frame
+	placer._place_weapon_from_ui("gauss_railgun", Vector3(0, 0.75, -1.0), Vector3.UP)
+	await process_frame
+	placer._place_weapon_from_ui("sensor_suite", Vector3(1.5, 0.75, 1.5), Vector3.UP)
+	await process_frame
+	placer._place_weapon_from_ui("legs", Vector3.ZERO, Vector3.DOWN)
+	await process_frame
+
+	# Apply this week's fixed tweaks directly (mirrors what the gizmo-drag /
+	# slider UI would write into module_data.tweaks / locomotion settings).
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data"):
+			var data = child.get_meta("module_data")
+			if data.type_id == "gauss_railgun":
+				data.tweaks["rail_length"] = 1.8
+			elif data.type_id == "sensor_suite":
+				data.tweaks["mast_height"] = 1.6
+	placer.update_locomotion("legs", {"size": 1.7, "count": 4})
+	await process_frame
+
+	var snapshot = bm.serialize_hull(placer.hull)
+	if snapshot.is_empty():
+		print("  [FAIL] serialize_hull produced an empty snapshot")
+		placer.queue_free()
+		return false
+
+	# Confirm the tweaks actually made it into the snapshot before we even
+	# get to reconstruction, so a failure below is unambiguous about which
+	# stage broke.
+	var found_rail_length = false
+	var found_mast_height = false
+	for mod in snapshot.get("modules", []):
+		if mod.get("type_id", "") == "gauss_railgun" and abs(mod.get("tweaks", {}).get("rail_length", 0.0) - 1.8) < 0.01:
+			found_rail_length = true
+		if mod.get("type_id", "") == "sensor_suite" and abs(mod.get("tweaks", {}).get("mast_height", 0.0) - 1.6) < 0.01:
+			found_mast_height = true
+	if not found_rail_length or not found_mast_height:
+		print("  [FAIL] Snapshot lost tweaks before reconstruction (rail_length=", found_rail_length, " mast_height=", found_mast_height, ")")
+		placer.queue_free()
+		return false
+
+	# Now spawn it the way Skirmish/Battlefield actually do: is_designer=false,
+	# into a plain parent, not the MainLab hull path.
+	var battle_parent = Node3D.new()
+	root.add_child(battle_parent)
+	var battle_hull = bm.reconstruct_vehicle(snapshot, battle_parent, false)
+	await process_frame
+
+	if not battle_hull:
+		print("  [FAIL] reconstruct_vehicle returned null for battle spawn")
+		placer.queue_free()
+		battle_parent.queue_free()
+		return false
+
+	var legs_found = false
+	var legs_scale_ok = false
+	var railgun_tweak_ok = false
+	var sensor_tweak_ok = false
+	for child in battle_hull.get_children():
+		if not child.has_meta("module_data"): continue
+		var data = child.get_meta("module_data")
+		if data.type_id == "legs":
+			legs_found = true
+			if abs(child.scale.y - 1.7) < 0.05:
+				legs_scale_ok = true
+		elif data.type_id == "gauss_railgun":
+			if abs(data.tweaks.get("rail_length", 0.0) - 1.8) < 0.01:
+				railgun_tweak_ok = true
+		elif data.type_id == "sensor_suite":
+			if abs(data.tweaks.get("mast_height", 0.0) - 1.6) < 0.01:
+				sensor_tweak_ok = true
+
+	placer.queue_free()
+	battle_parent.queue_free()
+
+	if not legs_found or not legs_scale_ok:
+		print("  [FAIL] Battle-spawned legs lost their size tweak (found=", legs_found, " scale_ok=", legs_scale_ok, ")")
+		return false
+	if not railgun_tweak_ok:
+		print("  [FAIL] Battle-spawned gauss_railgun lost its rail_length tweak")
+		return false
+	if not sensor_tweak_ok:
+		print("  [FAIL] Battle-spawned sensor_suite lost its mast_height tweak")
+		return false
+
+	print("  [PASS] A unit designed with this week's fixed mechanics survives the full design -> serialize -> battle-spawn pipeline intact.")
 	return true
 
 # --- Skirmish mode test suites ---
