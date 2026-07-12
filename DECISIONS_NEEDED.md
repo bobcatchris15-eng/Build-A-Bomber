@@ -172,6 +172,16 @@ Chris explicitly asked me not to default to the most expensive version of visual
 
 ---
 
+## 2026-07-12 — Visual regression baselines updated for the grown hull palette
+
+**Not blocking.**
+
+Final-verification pass for this whole batch ran the windowed `visual_regression` suite (built earlier this week) as a broader QA sweep beyond the headless test suite. 4 of 5 MainLab scenarios failed (~3.47% pixel diff, just over the 2% tolerance) - traced to exactly what you'd expect: the hull palette grew from 7 to 11 buttons this batch (`fortress_wall_foundation`, `naval_hull`, `flying_wing_hull`, `sponson_hull`), shifting pixels in that region of every MainLab screenshot. Confirmed this is expected content growth, not a bug, by inspecting the captures directly (palette renders correctly, no overflow - matching the already-passing headless `test_ui_overflow_audit` for the same scene) and cross-checking against `skirmish_hud` (unaffected, still passed at 1.594% diff - proof the diff tool itself didn't get less strict).
+
+**Fixed:** updated the 4 affected baselines to the new captures. This is the intended use of baseline updates (documented in `run_visual_regression.gd`'s own header) - a deliberate, verified UI change, not silently suppressing a real regression.
+
+---
+
 ## 2026-07-12 — Hull library expansion: 3 new hull types, built and verified one at a time
 
 **Not blocking.**
@@ -201,6 +211,8 @@ Chris asked for genuinely new hull geometry, not just deform handles on the exis
 **Also fixed along the way, not just for this feature:** `blueprint_manager.gd`'s `reconstruct_vehicle()` never used the authored `.glb` hull meshes at all — every loaded/battle-spawned hull was a plain `BoxMesh` regardless of type, meaning the nice hull shapes only ever showed up in the Design Lab. Found because the nose taper would otherwise have been invisible the moment a design was saved or fielded. Fixed to match `update_hull_appearance()`'s mesh-selection logic, and the taper now survives the full save → reconstruct → battle-spawn round-trip (verified with a test).
 
 **Why not all 7:** each hull needs a real design decision about what "the interesting region" is, not just mechanical repetition of the same code pattern — doing that well for 6 more hulls without being able to interactively iterate on how each one looks isn't a good use of unattended time. Flagging as the natural next step once someone can look at each hull and decide.
+
+**Updated 2026-07-12 (later same day):** the hull/foundation count this applies to grew from 7 to 11 (`fortress_wall_foundation`, `naval_hull`, `flying_wing_hull`, `sponson_hull` added - see their own entries). Still only `interceptor_hull` has deform rigging; the other 10 remain candidates. Not extended to the new ones this pass - Chris's own sequencing note said the library should exist before deform work extends to it, not that one pass needed to do both.
 
 ---
 
