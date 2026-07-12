@@ -24,6 +24,24 @@ Previously a fixed decorative cone (always the same size, always blue, not deriv
 
 ---
 
+### Item 2 shipped: free-form rotation ring (replaces 90°-only snap)
+
+MOUNTING_AND_ARMOR_SPEC.md #3: rotation should be free-form via a grab-handle ring, Spore/KSP style — done ahead of the face-based mounting work since that depends on it.
+
+- New `gizmo_rotate_ring.gd` + a `HandleRotate` torus node added to `Gizmo3D.tscn`. Converts continuous mouse drag around the ring into a per-frame angle delta (not an absolute angle — this means it doesn't need to reconcile reference frames, just `rotate_object_local(UP, delta)` each frame).
+- `gizmo_3d.gd`'s `_on_rotated()` applies the delta, updates `yaw_offset` meta (same bookkeeping the old 90° system used, so save/load/undo all keep working unchanged), and mirrors the rotation to the module's symmetry counterpart at `-delta` — same convention the old system used, just continuous instead of stepped.
+- The old R-key / "Rotate 90°" button still exist as a quick-align convenience — this adds free rotation, it doesn't remove the snap option.
+- Ring only appears for weapon/module categories (matches where the X/Z scale handles already applied) — hidden for hull, locomotion, and armor, none of which make sense to freely yaw-rotate as a placed part.
+
+**Verified:**
+- New test `test_free_rotation_ring()`: applies a deliberately non-90°-divisible angle (0.37 rad), confirms the module rotates by exactly that delta (proving it isn't secretly still snapping), `yaw_offset` tracks it, and the mirrored counterpart rotates by `-delta`.
+- Visual: `progress_captures/2026-07-12/rotation_ring/` — gold ring visible around the selected cannon alongside the existing scale handles.
+- Full suite: **20/20 green.**
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 — v1.0-beta tagged (Sun-Thu work completed in one continuous session)
 
 Chris asked me to push through as much of the week's plan as possible in a single extended session rather than waiting on cron cycles that turned out not to be available in this environment. Completed the full Sunday-through-Thursday plan; tagging `v1.0-beta` here rather than padding out Friday/Saturday with manufactured busywork, since the actual beta bar (defined in the original plan) is met:

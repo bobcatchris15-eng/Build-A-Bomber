@@ -309,21 +309,28 @@ func _select_module(module: Node3D):
 			var hx = new_gizmo.get_node_or_null("HandleX")
 			var hy = new_gizmo.get_node_or_null("HandleY")
 			var hz = new_gizmo.get_node_or_null("HandleZ")
-			
+			var hrot = new_gizmo.get_node_or_null("HandleRotate")
+
 			if cat == "locomotion":
 				if hx: hx.queue_free()
 				if hy: hy.queue_free()
 				if hz: hz.queue_free()
+				if hrot: hrot.queue_free()
 			elif cat == "armor":
-				# Armor only scales in thickness (Y axis)
+				# Armor only scales in thickness (Y axis); facet-fitted, not
+				# freely rotatable (see MOUNTING_AND_ARMOR_SPEC.md #2).
 				if hx: hx.queue_free()
 				if hz: hz.queue_free()
+				if hrot: hrot.queue_free()
 			elif cat == "weapon" or cat == "module":
-				# Weapons/Modules scale in X and Z, but not thickness (Y)
+				# Weapons/Modules scale in X and Z, but not thickness (Y).
+				# Free-form yaw rotation ring (MOUNTING_AND_ARMOR_SPEC.md #3)
+				# replaces the old fixed-90-degree-only rotation for these.
 				if hy: hy.queue_free()
 			elif cat == "hull":
-				# Hull scales in all 3 directions
-				pass
+				# Hull scales in all 3 directions; whole-vehicle orientation
+				# isn't a placement tweak, so no rotation ring.
+				if hrot: hrot.queue_free()
 				
 		# Firing Arc Visualization ("Radar Sweep", Design_Lab_UI_UX.md): a
 		# horizontal wedge spanning the weapon's actual traverse_limit_angle

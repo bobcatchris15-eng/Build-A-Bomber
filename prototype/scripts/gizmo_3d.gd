@@ -10,13 +10,43 @@ var start_tweaks: Dictionary = {}
 
 func _ready():
 	target_module = get_parent()
-	
-	# Connect to all 3 handles
+
+	# Connect to the 3 linear handles (X/Y/Z scale/tweak drag)
 	for child in get_children():
+		if child.name == "HandleRotate":
+			continue # wired separately below - no .axis, different signal shape
 		if child.has_signal("drag_started"):
 			child.drag_started.connect(_on_drag_started)
 			child.dragged.connect(_on_dragged.bind(child.axis))
 			child.drag_ended.connect(_on_drag_ended)
+
+	# Free-form rotation ring (Spore/KSP style, MOUNTING_AND_ARMOR_SPEC.md #3)
+	var ring = get_node_or_null("HandleRotate")
+	if ring:
+		ring.drag_started.connect(_on_drag_started)
+		ring.rotated.connect(_on_rotated)
+		ring.drag_ended.connect(_on_drag_ended)
+
+func _on_rotated(delta_angle: float):
+	# Free-form yaw rotation from the ring handle - continuous, not snapped
+	# to 90 degrees like the old Rotate button/R-key (still available as a
+	# quick-align convenience, this doesn't replace it).
+	if not target_module or target_module.name == "Hull": return
+
+	target_module.rotate_object_local(Vector3.UP, delta_angle)
+	var yaw = wrapf(target_module.get_meta("yaw_offset", 0.0) + delta_angle, 0.0, 2.0 * PI)
+	target_module.set_meta("yaw_offset", yaw)
+
+	if target_module.has_meta("mirrored_counterpart"):
+		var mirror = target_module.get_meta("mirrored_counterpart")
+		if mirror and is_instance_valid(mirror):
+			mirror.rotate_object_local(Vector3.UP, -delta_angle)
+			var mirror_yaw = wrapf(mirror.get_meta("yaw_offset", 0.0) - delta_angle, 0.0, 2.0 * PI)
+			mirror.set_meta("yaw_offset", mirror_yaw)
+
+	var root = get_node_or_null("/root/MainLab")
+	if root and root.has_method("check_all_clipping"):
+		root.check_all_clipping()
 
 func _on_drag_started():
 	var root = get_node_or_null("/root/MainLab")

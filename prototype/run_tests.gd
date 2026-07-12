@@ -36,6 +36,7 @@ func _init():
 	success = success and await test_foundation_design_lab_parity()
 	success = success and await test_design_to_battle_integration()
 	success = success and await test_firing_arc_visualization()
+	success = success and await test_free_rotation_ring()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1097,6 +1098,66 @@ func test_firing_arc_visualization() -> bool:
 
 	placer.queue_free()
 	print("  [PASS] Firing arc correctly shows red toward a real obstruction and blue toward clear space (", red_count, " blocked / ", blue_count, " clear of ", expected_segments, " segments).")
+	return true
+
+func test_free_rotation_ring() -> bool:
+	print("Running Test Suite: Free-Form Rotation Ring (MOUNTING_AND_ARMOR_SPEC.md #3, replaces 90-degree-only snap)...")
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await process_frame
+
+	placer._place_hull_from_ui("medium_hull")
+	await process_frame
+	placer._place_weapon_from_ui("basic_cannon", Vector3(1.0, 0.5, 0.0), Vector3.UP)
+	await process_frame
+
+	var cannon = null
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "basic_cannon" and child.position.x > 0.0:
+			cannon = child
+			break
+	var mirror = cannon.get_meta("mirrored_counterpart")
+
+	placer._select_module(cannon)
+	await process_frame
+
+	var gizmo = cannon.get_node_or_null("Gizmo3D")
+	if not gizmo:
+		print("  [FAIL] Selecting a weapon should attach a Gizmo3D")
+		placer.queue_free()
+		return false
+	var ring = gizmo.get_node_or_null("HandleRotate")
+	if not ring:
+		print("  [FAIL] Weapon gizmo should include a HandleRotate ring")
+		placer.queue_free()
+		return false
+
+	# Non-90-degree angle is the whole point: proves this isn't secretly
+	# still snapping to fixed increments.
+	var arbitrary_angle = 0.37
+	var start_yaw = cannon.rotation.y
+	gizmo._on_rotated(arbitrary_angle)
+	await process_frame
+
+	if abs((cannon.rotation.y - start_yaw) - arbitrary_angle) > 0.001:
+		print("  [FAIL] Ring rotation should apply the exact delta (", arbitrary_angle, "), got ", cannon.rotation.y - start_yaw)
+		placer.queue_free()
+		return false
+	if abs(cannon.get_meta("yaw_offset", -99.0) - arbitrary_angle) > 0.001:
+		print("  [FAIL] yaw_offset meta should track the free-form angle, got ", cannon.get_meta("yaw_offset", -99.0))
+		placer.queue_free()
+		return false
+
+	# Mirror should rotate the opposite direction by the same magnitude.
+	if not mirror or abs(mirror.rotation.y - (-arbitrary_angle)) > 0.001:
+		print("  [FAIL] Mirrored counterpart should rotate by -delta, got ", mirror.rotation.y if mirror else "null")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Rotation ring applies a free-form (non-snapped) angle delta and mirrors it correctly.")
 	return true
 
 # --- Skirmish mode test suites ---
