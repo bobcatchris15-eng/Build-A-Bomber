@@ -567,6 +567,56 @@ static func get_catalog() -> Dictionary:
 			"size": Vector3(3.0, 4.0, 3.0),
 			"color": Color(0.5, 0.48, 0.44)
 		},
+		"naval_hull": {
+			"name": "Naval Hull",
+			"category": "hull",
+			# Purpose-built ship hull for naval_propeller - a wedge hull
+			# floating at the waterline worked mechanically but had nothing
+			# boat-shaped to actually show for it.
+			"hp": 550.0,
+			"weight": 380.0,
+			"metal": 145,
+			"crystal": 25,
+			"dps": 0.0,
+			"base_energy": 70.0,
+			"base_vision": 17.0,
+			"size": Vector3(3.5, 1.6, 9.0),
+			"color": Color(0.35, 0.38, 0.4)
+		},
+		"flying_wing_hull": {
+			"name": "Flying Wing Hull",
+			"category": "hull",
+			# Blended-wing-body airframe for fixed_wing_engine - lightweight
+			# and fast like interceptor_hull, but a genuinely different
+			# silhouette rather than the same wedge-hull shape used on the
+			# ground.
+			"hp": 230.0,
+			"weight": 140.0,
+			"metal": 55,
+			"crystal": 15,
+			"dps": 0.0,
+			"base_energy": 30.0,
+			"base_vision": 24.0,
+			"size": Vector3(5.0, 0.7, 3.6),
+			"color": Color(0.5, 0.52, 0.56)
+		},
+		"sponson_hull": {
+			"name": "Sponson Hull",
+			"category": "hull",
+			# Heavy ground hull with sponson stubs baked into the base
+			# silhouette (wider mid-body, narrower fore/aft) rather than
+			# sponsons being purely a mount-hardware visual added at
+			# placement time - a genuinely different base shape to build on.
+			"hp": 800.0,
+			"weight": 650.0,
+			"metal": 210,
+			"crystal": 40,
+			"dps": 0.0,
+			"base_energy": 105.0,
+			"base_vision": 17.0,
+			"size": Vector3(6.5, 1.6, 7.5),
+			"color": Color(0.38, 0.36, 0.32)
+		},
 		"fortress_wall_foundation": {
 			"name": "Fortress Wall Foundation",
 			"category": "hull",

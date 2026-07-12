@@ -4,6 +4,32 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 12) — Hull library expansion: naval, blended-wing-body, and sponson hulls
+
+Chris's ask was explicit: not just deform handles on the existing 7 hulls, but genuinely new base geometry - "some ship-like hulls..., a blended-wing-body type hull, and hulls with more interesting base geometry... like built-in sponson stubs already part of the hull silhouette." Built one at a time, each fully authored/imported/screenshot-verified before starting the next, per Chris's explicit caution.
+
+### naval_hull
+
+Pointed bow, flat stern, shallow-draft keel, bridge superstructure, portholes. Gives `naval_propeller` a real boat to sit on - it previously worked correctly on any generic wedge hull (e.g. `heavy_hull`), floating at a fixed waterline with no visual distinction from a land vehicle.
+
+### flying_wing_hull
+
+Swept delta/manta-ray planform authored as a single blended silhouette (no fuselage-vs-wing break, a shallow dorsal ridge instead of the wedge hulls' raised spine). Top-down screenshot confirms a clean swept-delta outline.
+
+### sponson_hull
+
+Heavier ground hull with two box-like sponson blisters fused onto the mid-body sides. **First version was visually too subtle** - built purely from convex-hull point placement (narrower fore/aft, wider mid-band), which just produced a smooth taper reading as a chamfered octagon, not a distinct stub. Caught by the mandatory screenshot check before moving to the next hull. Fixed by keeping a narrower slab-sided core and fusing two separate box volumes onto the sides at the mid-body band instead - now reads as a genuine stepped protrusion.
+
+### Balance and verification
+
+Stats hand-targeted to match each new hull's weight class against existing hulls, then confirmed (not discovered) via `tools/balance_report.gd`: `naval_hull` 0.77, `flying_wing_hull` 0.75, `sponson_hull` 0.74 value/cost - all inside the existing mobile-hull range (0.72-0.80), no outliers. Every generic hull-aware system (Design Lab palette, build-legality gate, balance report) picked up all 3 new catalog entries automatically - no code changes needed beyond the catalog entries themselves, same as Fortress Wall.
+
+**Verified:** 56/56 tests green. Two rounds of windowed screenshots per hull (isometric + top-down) in `progress_captures/2026-07-12/new_hulls/`, including the sponson before/after that shows the caught-and-fixed silhouette issue.
+
+**Not done:** extending per-hull deform rigging (still only `interceptor_hull`) to these 3 or the 6 pre-existing hulls without it - out of scope for "build the library," logged as the natural next increment.
+
+---
+
 ## 2026-07-12 (cont'd 11) — Fortress Wall: the third foundation type named in Factions_and_Buildings.md
 
 Previously deferred twice (see DECISIONS_NEEDED.md) for needing new Blender-authored geometry through the fragile headless-import pipeline. Greenlit this pass.

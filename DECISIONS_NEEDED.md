@@ -160,6 +160,8 @@ Chris explicitly asked me not to default to the most expensive version of visual
 
 ## 2026-07-12 — New airframe/ship hull geometry (Traits B5) deferred
 
+**RESOLVED 2026-07-12 (later same day) — built, plus two more new hull types beyond just airframe/ship.** Chris explicitly greenlit a larger hull-library expansion this pass. See the "Hull library expansion" entry below for what shipped (`naval_hull`, `flying_wing_hull`, `sponson_hull`) and how each was verified. Original reasoning kept below for context on why this was deferred at the time.
+
 **Not blocking.**
 
 `fixed_wing_engine` and `naval_propeller` (new locomotion types, Traits B3) work correctly on the existing 7 hulls today — tested `fixed_wing_engine` on `light_hull` and `naval_propeller` on `heavy_hull`, both function with procedural part visuals and no placement issues, since no-hard-blocking means any hull accepts any locomotion.
@@ -167,6 +169,24 @@ Chris explicitly asked me not to default to the most expensive version of visual
 **Default I'm proceeding with:** not authoring new purpose-built airframe/ship hull silhouettes this session. Same reasoning as every other new-art decision this week (the deferred "Fortress Wall" foundation type, 6 of 7 hulls still lacking custom deform rigging): new Blender-authored geometry needs the headless-import pipeline, which is fragile enough (see the memory gotcha about isolated-copy imports) that I don't want to risk it unattended without being able to iterate on how it actually looks. The mechanics (traits, movement models, mounting) all work today without it — this is a visual layer on top of working systems, not a blocker for them.
 
 **Why this is lower-risk to defer than the armor/trait work:** unlike the movement-model code (which needed to exist for the mechanics to be real), a purpose-built jet/ship silhouette is purely cosmetic — the generic hulls already carry the new locomotion types functionally correctly.
+
+---
+
+## 2026-07-12 — Hull library expansion: 3 new hull types, built and verified one at a time
+
+**Not blocking.**
+
+Chris asked for genuinely new hull geometry, not just deform handles on the existing 7: "some ship-like hulls..., a blended-wing-body type hull, and hulls with more interesting base geometry to build on top of — things like built-in sponson stubs already part of the hull silhouette." Built three, each authored/imported/screenshot-verified individually before starting the next (per Chris's explicit instruction, same discipline as the nose-taper work):
+
+- **`naval_hull`** — pointed bow, flat transom stern, shallow-draft keel below the waterline, raised bridge superstructure, porthole greebles. `naval_propeller` previously had nothing purpose-built to sit on (it worked on any generic wedge hull, e.g. `heavy_hull`, floating at a fixed waterline) - this gives it a real boat silhouette.
+- **`flying_wing_hull`** — swept delta/manta-ray planform, no distinct fuselage-vs-wing break (a shallow dorsal blend ridge instead of the wedge hulls' raised spine). Confirmed via a top-down screenshot showing a clean swept-delta outline, distinct from every wedge-based hull.
+- **`sponson_hull`** — heavier ground hull with two box-like sponson blisters fused onto the mid-body sides, baked into the base mesh rather than being mount-time hardware. **First attempt was too subtle to read as intended**: initial version used only convex-hull point placement (narrow fore/aft, wider mid-band), which produced a smooth continuous taper - visually just a chamfered octagon, not a distinct "stub." Caught via the mandatory screenshot check before moving to the next hull (exactly why the one-at-a-time verification discipline matters). Fixed by keeping a narrower slab-sided core hull and fusing two separate box volumes onto its sides at the mid-body band - now reads as a real stepped protrusion, confirmed in a second round of screenshots.
+
+**Balance check:** ran `tools/balance_report.gd` after adding all three - `naval_hull` (0.77), `flying_wing_hull` (0.75), `sponson_hull` (0.74) all land inside the existing mobile-hull cluster's value/cost range (0.72-0.80 across light/medium/heavy/interceptor/assault), no outliers flagged. Stats were hand-targeted to this range before running the tool (matching each new hull's weight class to a comparable existing hull), then confirmed rather than discovered after the fact.
+
+**Verified:** 56/56 tests green (no new hull-specific test suite - the existing generic mechanisms, category/is_foundation-driven palette population, build-legality gate, and balance report all picked up the 3 new catalog entries automatically with no code changes needed, same as Fortress Wall). Two rounds of windowed screenshots per hull (isometric + top-down/end-on) in `progress_captures/2026-07-12/new_hulls/`.
+
+**Not done this pass:** extending the per-hull custom deform rigging (currently only `interceptor_hull` has it) to any of these 3 new hulls, or to the 6 pre-existing hulls that still lack it - Chris's sequencing note said the new hull library should exist before deform work extends to it, not that this pass needed to do both. Logged as the natural next step whenever deform rigging work resumes.
 
 ---
 

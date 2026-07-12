@@ -593,6 +593,101 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 	return obj
 
 
+def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.38, 0.4), greebles=None):
+	"""Naval hull: pointed bow, flat transom stern, shallow-draft keel below
+	the waterline, and a raised bridge superstructure - purpose-built for
+	naval_propeller rather than a generic wedge hull floating on water."""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	bm = bmesh.new()
+
+	deck_pts = [
+		(0.0, hy, -hz),
+		(-hx, hy, -hz * (1.0 - bow_frac)), (hx, hy, -hz * (1.0 - bow_frac)),
+		(-hx, hy, hz), (hx, hy, hz),
+	]
+	keel_pts = [
+		(0.0, -hy * 0.6, -hz * 0.85),
+		(-hx * 0.3, -hy * 0.6, -hz * 0.2), (hx * 0.3, -hy * 0.6, -hz * 0.2),
+		(-hx * 0.35, -hy * 0.6, hz * 0.8), (hx * 0.35, -hy * 0.6, hz * 0.8),
+	]
+	verts = [bm.verts.new(GV(*p)) for p in deck_pts + keel_pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	# Bridge superstructure, offset toward the stern.
+	add_box(bm, (0, hy * 1.3, hz * 0.35), (hx * 0.42, hy * 0.35, hz * 0.26), bevel=0.03)
+
+	if greebles:
+		greebles(bm, hx, hy, hz)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.55, roughness=0.45)
+	return obj
+
+
+def build_flying_wing_hull(name, size_x, size_y, size_z, sweep=0.55, color=(0.5, 0.52, 0.56), greebles=None):
+	"""Blended-wing-body hull: a swept flying-wing planform with no
+	distinct fuselage/wing break - a shallow dorsal blend ridge instead of
+	the wedge hulls' raised spine, cockpit and body smoothly faired into
+	the wing rather than sitting on top of it."""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	bm = bmesh.new()
+
+	pts = [
+		(0.0, -hy * 0.3, -hz),                                    # nose apex
+		(-hx, -hy * 0.3, hz * sweep), (hx, -hy * 0.3, hz * sweep),  # wingtips, swept back
+		(-hx * 0.45, -hy * 0.3, hz), (hx * 0.45, -hy * 0.3, hz),    # trailing edge corners
+		(0.0, hy, -hz * 0.35),                                     # dorsal blend apex near nose
+		(-hx * 0.4, hy * 0.75, hz * 0.25), (hx * 0.4, hy * 0.75, hz * 0.25),  # blend shoulders
+		(0.0, hy * 0.45, hz * 0.85),                               # tail blend fade-out
+	]
+	verts = [bm.verts.new(GV(*p)) for p in pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	if greebles:
+		greebles(bm, hx, hy, hz)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.35)
+	return obj
+
+
+def build_sponson_hull(name, size_x, size_y, size_z, sponson_bulge=1.3, sponson_span=0.4,
+		sponson_height=0.65, color=(0.38, 0.36, 0.32), greebles=None):
+	"""Ground hull with built-in sponson stubs baked directly into the
+	silhouette: a slab-sided tapered core hull with two distinct box-like
+	sponson blisters fused onto the sides at a mid-body band, protruding
+	past the core's flat sides - a real stepped stub, not just a smooth
+	taper - rather than sponsons being separately-applied mount hardware."""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	bm = bmesh.new()
+	core_x = hx * 0.78
+
+	pts = [
+		(-core_x, -hy, -hz), (core_x, -hy, -hz), (-core_x, -hy, hz), (core_x, -hy, hz),
+		(-core_x * 0.85, hy, -hz * 0.9), (core_x * 0.85, hy, -hz * 0.9),
+		(-core_x * 0.85, hy, hz * 0.9), (core_x * 0.85, hy, hz * 0.9),
+	]
+	verts = [bm.verts.new(GV(*p)) for p in pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	sp_z = hz * sponson_span
+	sp_x = hx * sponson_bulge
+	sp_reach = sp_x - core_x
+	for side in (-1, 1):
+		add_box(bm, (side * (core_x + sp_reach * 0.5), -hy * (1.0 - sponson_height * 0.5), 0),
+			(sp_reach, hy * sponson_height, sp_z * 2.0), bevel=0.04)
+
+	if greebles:
+		greebles(bm, hx, hy, hz)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.55, roughness=0.5)
+	return obj
+
+
 def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.44), greebles=None):
 	"""Tall stepped defensive tower: tiers stacked wide-to-narrow."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
@@ -754,6 +849,33 @@ def _tower_greebles(bm, hx, hy, hz):
 	pass  # railing posts / spotlights / antenna already added in build_tower_hull
 
 
+def _ship_hull_greebles(bm, hx, hy, hz):
+	for side in (-1, 1):
+		for i in range(4):
+			t = (i + 0.5) / 4.0 - 0.5
+			pos = (side * hx * 0.98, hy * 0.15, t * hz * 1.3)
+			add_cyl_axis(bm, pos, 0.06, 0.05, 'x', segments=10)
+	greeble_antenna(bm, (0, hy * 1.65, hz * 0.35), height=0.6)
+	greeble_vent(bm, (0, hy * 1.05, -hz * 0.1), (0.3, 0.12, 0.5), slats=3)
+
+
+def _flying_wing_hull_greebles(bm, hx, hy, hz):
+	add_box(bm, (0, hy * 1.05, -hz * 0.3), (hx * 0.22, hy * 0.12, hz * 0.35), bevel=0.02)  # canopy bump
+	for side in (-1, 1):
+		greeble_vent(bm, (side * hx * 0.55, hy * 0.5, hz * 0.6), (0.1, 0.25, 0.4), slats=3)
+	greeble_antenna(bm, (0, hy * 0.9, hz * 0.6), height=0.16)
+
+
+def _sponson_hull_greebles(bm, hx, hy, hz):
+	greeble_headlight_pair(bm, hx * 0.55, -hy * 0.6, -hz * 0.97, radius=0.1)
+	sp_z = hz * 0.4
+	for side in (-1, 1):
+		greeble_hatch(bm, (side * hx * 0.85, hy * 0.1, sp_z), (0.4, 0.05, 0.35))
+	greeble_hatch(bm, (0, hy * 1.02, 0), (0.6, 0.06, 0.55))
+	greeble_rivet_row(bm, (-hx * 0.9, -hy * 0.3, -hz * 0.85), (-hx * 0.9, -hy * 0.3, hz * 0.85), 6)
+	greeble_rivet_row(bm, (hx * 0.9, -hy * 0.3, -hz * 0.85), (hx * 0.9, -hy * 0.3, hz * 0.85), 6)
+
+
 def _wall_greebles(bm, hx, hy, hz):
 	# Arrow slits: thin dark recesses set into the outward face.
 	slit_count = 5
@@ -796,6 +918,15 @@ def generate_hulls():
 
 	export_and_cleanup(build_wall_hull("fortress_wall_foundation", 6.0, 2.2, 1.3,
 		merlons=5, color=(0.42, 0.4, 0.36), greebles=_wall_greebles), HULLS_DIR, "fortress_wall_foundation")
+
+	export_and_cleanup(build_ship_hull("naval_hull", 3.5, 1.6, 9.0,
+		bow_frac=0.35, color=(0.35, 0.38, 0.4), greebles=_ship_hull_greebles), HULLS_DIR, "naval_hull")
+
+	export_and_cleanup(build_flying_wing_hull("flying_wing_hull", 5.0, 0.7, 3.6,
+		sweep=0.55, color=(0.5, 0.52, 0.56), greebles=_flying_wing_hull_greebles), HULLS_DIR, "flying_wing_hull")
+
+	export_and_cleanup(build_sponson_hull("sponson_hull", 6.5, 1.6, 7.5,
+		sponson_bulge=1.18, sponson_span=0.4, color=(0.38, 0.36, 0.32), greebles=_sponson_hull_greebles), HULLS_DIR, "sponson_hull")
 
 	print("--- Hull library done ---")
 
