@@ -34,6 +34,16 @@ var scenes = [
 	["interceptor_hull", [
 		["heavy_laser", Vector3(0, 0.4, -0.5)],
 	]],
+	["light_hull", [
+		["heavy_machine_gun", Vector3(0, 0.5, -0.5)],
+		["guided_missile", Vector3(0.8, 0.5, 0.8)],
+	]],
+	["assault_hull", [
+		["mortar_array", Vector3(0, 0.65, -1.0)],
+		["cluster_dispenser", Vector3(1.8, 0.65, 1.5)],
+		["plasma_lobber", Vector3(-1.8, 0.65, 1.5)],
+		["logistics_tank", Vector3(0, 0.65, 2.5)],
+	]],
 ]
 
 func _ready():

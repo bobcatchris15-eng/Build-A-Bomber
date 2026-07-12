@@ -4,6 +4,24 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (Tue) — Mesh/part kit audit: coverage is actually complete; fixed real quality bugs instead
+
+**Audit finding (another pleasant surprise): there are no missing part meshes.** Cross-referenced every `_part("...")` call in `visual_builder.gd` against the authored `.glb` files in `assets/models/parts/` and `assets/models/hulls/` — every weapon/module type that requests an authored mesh has one, and all 7 hull/foundation catalog entries have a matching hull mesh. The planned "gap-fill" premise didn't hold up, so today's work shifted to quality/consistency issues found via a visual QA sweep instead of new mesh authoring.
+
+**Shipped:**
+1. **`armor_plating` removed from the placeable parts menu.** It's a leftover catalog entry (category "armor") that was still clickable in the Modules tab despite Damage_And_Armor_Model.md's explicit, deliberate decision to keep armor hull-level-only (logged in [DECISIONS_NEEDED.md](DECISIONS_NEEDED.md) yesterday). It had no tweaks and no dedicated visual — exposing it just contradicted the documented design and confused the parts bin. No bundled loadout referenced it, so this was safe to hide with zero save-compat risk.
+2. **Sensor mast dish was absurdly disproportionate** — a fixed 0.7-radius disc (1.4 diameter) mounted on a module with a 0.5-wide footprint, nearly 3x oversized. Screenshotted during the hull-variety QA pass (`progress_captures/2026-07-12/hull_variety_qa/`) and was obviously wrong at a glance. Now scales with the module's own footprint.
+3. **The "Radar Mast Height" slider was mislabeled** — it scaled the *dish's* thickness (`children[1]`), not the *mast's* height (`children[0]`). The slider visibly did something (the flat dish got very slightly thicker) so it wasn't obviously broken, but it didn't do what its label said, and didn't move the dish to match. This is exactly the kind of "looks tweakable but isn't" bug the DESIGN_VISION.md differentiation test is meant to catch. Fixed to scale the mast and reposition the dish to ride its top.
+
+**Verified:**
+- New test `test_sensor_mast_tweak_and_proportions()`: checks dish radius stays proportional to module footprint, and that `mast_height` scales the mast (not the dish) with the dish correctly repositioned. Caught a real scope bug of my own while writing it — `_apply_tweak_deformations()` didn't have `base_size` in scope, a straight compile error, fixed by threading it through as a parameter.
+- Extended `scratch/VisualVerify.tscn` to cover all 7 hull types (previously 5) for a full-coverage visual sweep, screenshots in `progress_captures/2026-07-12/hull_variety_qa/`.
+- Full suite: **15/15 green.**
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 (Mon) — Undo/Redo implemented (was entirely missing)
 
 Design_Lab_UI_UX.md's Top Bar spec explicitly lists "Undo/Redo" as part of the Admin Tools row, but there was zero implementation of it — no history stack, no keybinding, no button.

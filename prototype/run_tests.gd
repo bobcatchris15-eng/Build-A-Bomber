@@ -28,6 +28,7 @@ func _init():
 	success = success and await test_traverse_limit()
 	success = success and await test_subsystem_stripping()
 	success = success and await test_rotation_popup_and_deforms()
+	success = success and await test_sensor_mast_tweak_and_proportions()
 	success = success and await test_designer_camera_pan()
 	success = success and await test_locomotion_tweak_parity()
 	success = success and await test_undo_redo()
@@ -508,6 +509,64 @@ func test_rotation_popup_and_deforms() -> bool:
 	await process_frame
 
 	print("  [PASS] Module rotation, hovering stats popup, and mesh deformations verified.")
+	return true
+
+func test_sensor_mast_tweak_and_proportions() -> bool:
+	print("Running Test Suite: Sensor Mast Dish Proportions + Tweak Target (visual QA fix)...")
+	# Regression test for two bugs found during the Tuesday visual QA pass:
+	# 1) the radar dish was a fixed 0.7 radius regardless of hull/module size,
+	#    towering over the sensor_suite's actual 0.5-wide footprint.
+	# 2) the "mast_height" tweak scaled the DISH's thickness (children[1]),
+	#    not the MAST's height (children[0]) - the slider's label was a lie.
+	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
+	var catalog_data = ModuleCatalog.get_module_data("sensor_suite")
+
+	var node_default = Node3D.new()
+	root.add_child(node_default)
+	VisualBuilderScript.build_visual("sensor_suite", node_default, catalog_data.size, catalog_data.color, {})
+	await process_frame
+
+	var default_children = node_default.get_children().filter(func(c): return c is MeshInstance3D)
+	if default_children.size() < 2:
+		print("  [FAIL] sensor_suite should build a mast + dish, got ", default_children.size(), " mesh children")
+		node_default.queue_free()
+		return false
+
+	var dish_default = default_children[1]
+	var dish_radius = (dish_default.mesh as CylinderMesh).top_radius if dish_default.mesh is CylinderMesh else -1.0
+	if dish_radius > catalog_data.size.x * 1.5:
+		print("  [FAIL] Dish radius (", dish_radius, ") is still disproportionate to module footprint (", catalog_data.size.x, ")")
+		node_default.queue_free()
+		return false
+	var default_mast_scale_y = default_children[0].scale.y
+	node_default.queue_free()
+
+	var node_tweaked = Node3D.new()
+	root.add_child(node_tweaked)
+	VisualBuilderScript.build_visual("sensor_suite", node_tweaked, catalog_data.size, catalog_data.color, {"mast_height": 2.0})
+	await process_frame
+
+	# Compare against the untweaked baseline rather than asserting an absolute
+	# value: the authored-mesh path's baseline scale.y already equals base_size.y
+	# (from _fit_scale), so mast_height=2.0 correctly produces scale.y=2x that
+	# baseline, not literally 2.0.
+	var tweaked_children = node_tweaked.get_children().filter(func(c): return c is MeshInstance3D)
+	var mast_scale_y = tweaked_children[0].scale.y
+	var ratio = mast_scale_y / default_mast_scale_y if default_mast_scale_y != 0.0 else 0.0
+	if abs(ratio - 2.0) > 0.05:
+		print("  [FAIL] mast_height=2.0 should scale the MAST (children[0]) to 2x its baseline, got ratio=", ratio, " (baseline=", default_mast_scale_y, ", tweaked=", mast_scale_y, ")")
+		node_tweaked.queue_free()
+		return false
+
+	var dish_y = tweaked_children[1].position.y
+	var expected_dish_y = catalog_data.size.y * 2.0
+	if abs(dish_y - expected_dish_y) > 0.05:
+		print("  [FAIL] Dish should ride the mast top at y=", expected_dish_y, ", got y=", dish_y)
+		node_tweaked.queue_free()
+		return false
+
+	node_tweaked.queue_free()
+	print("  [PASS] Sensor mast dish is proportionate and mast_height tweak now scales the mast, not the dish.")
 	return true
 
 func test_designer_camera_pan() -> bool:

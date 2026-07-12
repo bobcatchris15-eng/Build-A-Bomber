@@ -847,9 +847,13 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		var dish = MeshInstance3D.new()
 		dish.name = "RadarDish"
 		var dish_cyl = CylinderMesh.new()
-		dish_cyl.top_radius = 0.7
-		dish_cyl.bottom_radius = 0.7
-		dish_cyl.height = 0.1
+		# Proportional to the mast's own footprint, not a fixed absolute size -
+		# the old hardcoded 0.7 radius towered over the thin 0.5-wide mast base
+		# (nearly 3x its footprint), reading as a broken oversized disc rather
+		# than a dish.
+		dish_cyl.top_radius = base_size.x * 0.6
+		dish_cyl.bottom_radius = base_size.x * 0.6
+		dish_cyl.height = 0.06
 		dish.mesh = dish_cyl
 		var dish_mat = StandardMaterial3D.new()
 		dish_mat.albedo_color = base_color
@@ -953,7 +957,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		_build_anti_grav(parent_node, base_size, base_color)
 
 	# Apply deformations to the newly constructed meshes based on the tweaks
-	_apply_tweak_deformations(type_id, parent_node, tweaks)
+	_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
 
 
 static func _build_wheels(parent_node: Node3D, base_size: Vector3):
@@ -1195,7 +1199,7 @@ static func rebuild_visual(module: Node3D):
 	if catalog_data:
 		build_visual(data.type_id, module, catalog_data.size, catalog_data.color, data.tweaks)
 
-static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: Dictionary):
+static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: Dictionary, base_size: Vector3):
 	var children = parent.get_children().filter(func(c): return c is MeshInstance3D)
 	if children.is_empty(): return
 
@@ -1270,9 +1274,17 @@ static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: D
 				var ext = tweaks.get("extractor_size", 1.0)
 				children[1].scale = Vector3(ext, ext, ext)
 		"sensor_suite":
-			if children.size() > 1:
-				var mast = tweaks.get("mast_height", 1.0)
-				children[1].scale.y = mast
+			# children[0] = mast, children[1] = dish. The "mast_height" tweak
+			# was scaling the dish's thickness instead of the mast's height -
+			# the slider looked like it did something but the label was a lie.
+			# Multiply (not overwrite) the existing scale, since build_visual()
+			# already scaled the mast to base_size.y via _fit_scale before this
+			# runs. Dish rides the mast top proportionally to mast_h.
+			if children.size() > 0:
+				var mast_h = tweaks.get("mast_height", 1.0)
+				children[0].scale.y *= mast_h
+				if children.size() > 1:
+					children[1].position.y = base_size.y * mast_h
 		"logistics_tank":
 			if children.size() > 0:
 				var cap = tweaks.get("tank_capacity", 1.0)
