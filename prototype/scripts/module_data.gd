@@ -11,6 +11,8 @@ const GlobalConfig = preload("res://scripts/global_config.gd")
 @export var cost_metal: int = 10
 @export var cost_crystal: int = 0
 @export var base_dps: float = 0.0
+@export var base_energy_capacity: float = 0.0
+@export var base_energy_regen: float = 0.0
 @export var tweaks: Dictionary = {}
 
 var scale_multiplier: Vector3 = Vector3(1, 1, 1)
@@ -24,7 +26,7 @@ func get_hp() -> float:
 	var hp = base_hp + (base_hp * (vol - 1.0) * GlobalConfig.hp_scale_factor)
 	if tweaks.has("cooling_jacket"):
 		hp *= tweaks["cooling_jacket"]
-	return hp
+	return GlobalConfig.round_to_half(hp)
 
 func get_weight() -> float:
 	var vol = _get_volume_mult()
@@ -45,8 +47,8 @@ func get_weight() -> float:
 			weight *= (val / 4.0)
 		elif tweak_name == "welder_count":
 			weight *= (val / 2.0)
-			
-	return weight
+
+	return GlobalConfig.round_to_half(weight)
 	
 func get_cost() -> Vector2i:
 	var vol = _get_volume_mult()
@@ -75,6 +77,16 @@ func get_cost() -> Vector2i:
 			
 	return Vector2i(m, c)
 
+func get_energy_capacity() -> float:
+	var vol = _get_volume_mult()
+	var cap = base_energy_capacity + (base_energy_capacity * (vol - 1.0) * GlobalConfig.hp_scale_factor)
+	return GlobalConfig.round_to_half(cap)
+
+func get_energy_regen() -> float:
+	var vol = _get_volume_mult()
+	var regen = base_energy_regen + (base_energy_regen * (vol - 1.0) * GlobalConfig.hp_scale_factor)
+	return GlobalConfig.round_to_half(regen)
+
 func get_dps() -> float:
 	var vol = _get_volume_mult()
 	var dps = base_dps + (base_dps * (vol - 1.0) * GlobalConfig.dps_scale_factor)
@@ -94,5 +106,5 @@ func get_dps() -> float:
 			dps *= (val / 4.0)
 		elif tweak_name == "welder_count":
 			dps *= (val / 2.0)
-			
-	return dps
+
+	return GlobalConfig.round_to_half(dps)

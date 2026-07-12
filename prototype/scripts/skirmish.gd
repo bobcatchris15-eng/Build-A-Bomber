@@ -17,6 +17,21 @@ var economy = {
 	PLAYER_TEAM: {"metal": 450, "crystal": 150},
 	ENEMY_TEAM: {"metal": 450, "crystal": 150},
 }
+# Energy resource (ENERGY_AND_BALANCE_SPEC.md #1) - deliberately NOT a
+# spendable currency like metal/crystal (can_afford/spend/blueprint_cost
+# keep their existing 2-resource signatures, see the spec for why). Instead
+# a live meter, recomputed every ENERGY_TICK_INTERVAL: "energy" is the
+# team's current net generation (capacity minus static-building upkeep,
+# floored at 0 - it's a gauge, not an accumulating battery), "capacity" is
+# the live sum of every generator module currently mounted on that team's
+# active units+buildings.
+var energy_pool = {
+	PLAYER_TEAM: {"energy": 0.0, "capacity": 0.0, "deficit": false},
+	ENEMY_TEAM: {"energy": 0.0, "capacity": 0.0, "deficit": false},
+}
+const ENERGY_TICK_INTERVAL: float = 3.0
+const ENERGY_UPKEEP_PER_STATIC_BUILDING: float = 3.0
+var energy_tick_timer: float = 0.0
 var player_faction: String = "industrialists"
 var enemy_faction: String = "technocrats"
 
@@ -68,12 +83,55 @@ func _ready():
 	add_child(trickle)
 	trickle.timeout.connect(_on_trickle)
 
+	var energy_timer = Timer.new()
+	energy_timer.wait_time = ENERGY_TICK_INTERVAL
+	energy_timer.autostart = true
+	add_child(energy_timer)
+	energy_timer.timeout.connect(_recalc_energy_economy)
+	_recalc_energy_economy() # populate before the first tick so the HUD isn't blank
+
 func _on_trickle():
 	if game_over: return
 	if player_faction == "expansionists" and is_instance_valid(player_hq) and not player_hq.is_dead:
 		add_resources(PLAYER_TEAM, 8, 2)
 	if enemy_faction == "expansionists" and is_instance_valid(enemy_hq) and not enemy_hq.is_dead:
 		add_resources(ENEMY_TEAM, 8, 2)
+
+# Energy resource team-level economy (ENERGY_AND_BALANCE_SPEC.md #1). A
+# static building is any prefab (hq/refinery/factory are always static) or
+# a "defense" building on a foundation hull - each drains a flat upkeep
+# just for existing, UNLESS the team's faction is Expansionists (their
+# static buildings are entirely self-powered, per Factions_and_Buildings.md).
+func _recalc_energy_economy():
+	if game_over: return
+	for team in [PLAYER_TEAM, ENEMY_TEAM]:
+		var capacity = 0.0
+		for u in get_team_units(team):
+			for m in u.get_active_modules():
+				if m.has_meta("module_data") and m.get_meta("module_data").category == "generator":
+					capacity += m.get_meta("module_data").get_energy_capacity()
+		var faction = player_faction if team == PLAYER_TEAM else enemy_faction
+		var upkeep = 0.0
+		for b in get_tree().get_nodes_in_group("buildings"):
+			if not is_instance_valid(b) or b.is_dead or b.team != team: continue
+			# A building's own generators always contribute to capacity,
+			# independent of whether it also owes upkeep - Expansionists'
+			# perk is "our static buildings don't drain," not "our
+			# generators don't count."
+			for m in b.get_active_modules():
+				if m.has_meta("module_data") and m.get_meta("module_data").category == "generator":
+					capacity += m.get_meta("module_data").get_energy_capacity()
+			var is_static_building = b.kind in ["hq", "refinery", "factory"] or (b.kind == "defense" and is_instance_valid(b.defense_hull) and ModuleCatalog.is_foundation(b.defense_hull.get_meta("type_id", "pillbox_foundation")))
+			if not is_static_building: continue
+			if faction == "expansionists": continue
+			upkeep += ENERGY_UPKEEP_PER_STATIC_BUILDING
+		energy_pool[team].capacity = capacity
+		energy_pool[team].energy = clamp(capacity - upkeep, 0.0, max(capacity, 1.0))
+		energy_pool[team].deficit = (capacity - upkeep) < 0.0
+	_update_resource_ui()
+
+func is_energy_deficit(team: int) -> bool:
+	return energy_pool[team].deficit
 
 # --- Rosters ---
 
@@ -348,7 +406,9 @@ func _add_build_button(text: String, color: Color, callback: Callable):
 
 func _update_resource_ui():
 	if resource_label:
-		resource_label.text = "💰 Metal: %d   💎 Crystal: %d" % [economy[PLAYER_TEAM].metal, economy[PLAYER_TEAM].crystal]
+		var e = energy_pool[PLAYER_TEAM]
+		var energy_str = "⚡ Energy: %d/%d%s" % [int(e.energy), int(e.capacity), " (DEFICIT: builds slower!)" if e.deficit else ""]
+		resource_label.text = "💰 Metal: %d   💎 Crystal: %d   %s" % [economy[PLAYER_TEAM].metal, economy[PLAYER_TEAM].crystal, energy_str]
 
 func _flash_status(msg: String):
 	if status_label:
@@ -368,8 +428,11 @@ func _queue_player_unit(entry: Dictionary):
 	if not spend(PLAYER_TEAM, entry.cost_metal, entry.cost_crystal):
 		_flash_status("Not enough resources for %s!" % entry.name)
 		return
-	factory.queue_unit(entry.blueprint, build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal)))
-	_flash_status("Building %s..." % entry.name)
+	var build_time = build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal))
+	if is_energy_deficit(PLAYER_TEAM):
+		build_time *= 1.5
+	factory.queue_unit(entry.blueprint, build_time)
+	_flash_status("Building %s... (low power, slower build)" % entry.name if is_energy_deficit(PLAYER_TEAM) else "Building %s..." % entry.name)
 
 # --- Building placement ---
 

@@ -25,6 +25,12 @@ var faction: String = "industrialists"
 var defense_hull: Node3D = null
 var armor_material: String = "hardened_steel"
 var armor_thickness: float = 1.0
+# Energy resource (ENERGY_AND_BALANCE_SPEC.md #1) - only meaningful for
+# "defense" kind buildings, which are the only kind that can mount weapon
+# or generator modules (hq/refinery/factory are fixed prefabs).
+var max_energy: float = 0.0
+var current_energy: float = 0.0
+var energy_regen_rate: float = 0.0
 
 # Factory production queue: array of {blueprint: Dictionary, time_left: float, total_time: float}
 var production_queue: Array = []
@@ -145,6 +151,18 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 					child.set_physics_process(true)
 					child._ready()
 
+		var bonus_capacity = 0.0
+		var bonus_regen = 0.0
+		for child in defense_hull.get_children():
+			if child.has_meta("module_data") and not child.is_queued_for_deletion():
+				var gen_data = child.get_meta("module_data")
+				if gen_data.category == "generator":
+					bonus_capacity += gen_data.get_energy_capacity()
+					bonus_regen += gen_data.get_energy_regen()
+		max_energy = ModuleCatalog.get_base_energy(hull_type) + bonus_capacity
+		current_energy = max_energy
+		energy_regen_rate = max_energy * 0.08 + bonus_regen
+
 		_create_hp_bar(base_size.y + 2.0)
 		_create_selection_ring(max(base_size.x, base_size.z) * 0.72)
 
@@ -194,6 +212,8 @@ func _update_hp_bar():
 
 func _physics_process(delta):
 	if is_dead: return
+	if current_energy < max_energy:
+		current_energy = min(max_energy, current_energy + energy_regen_rate * delta)
 	if kind == "factory" and not production_queue.is_empty():
 		var job = production_queue[0]
 		job.time_left -= delta
@@ -247,6 +267,21 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	_update_hp_bar()
 	if hp <= 0.0:
 		die()
+
+func spend_energy(amount: float) -> bool:
+	if is_dead or current_energy < amount:
+		return false
+	current_energy -= amount
+	return true
+
+func drain_energy(amount: float):
+	if is_dead: return
+	current_energy = max(0.0, current_energy - amount)
+
+func repair_hp(amount: float):
+	if is_dead or hp >= max_hp: return
+	hp = min(max_hp, hp + amount)
+	_update_hp_bar()
 
 func die():
 	if is_dead: return

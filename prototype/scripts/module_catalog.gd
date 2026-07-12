@@ -155,6 +155,44 @@ static func get_catalog() -> Dictionary:
 		},
 
 		# --- ENERGY WEAPONS ---
+		# "energy" damage_class weapons (ENERGY_AND_BALANCE_SPEC.md #4) - the
+		# only weapons that cost the firing unit's own current_energy per
+		# shot and, for tesla_coil/ion_cannon, also drain the TARGET's
+		# energy pool alongside HP damage. arc_projector is the dedicated
+		# pure-drain "disable" weapon (near-zero HP damage, big drain).
+		"tesla_coil": {
+			"name": "Tesla Coil",
+			"category": "weapon",
+			"hp": 70.0,
+			"weight": 70.0,
+			"metal": 40,
+			"crystal": 45,
+			"dps": 60.0,
+			"size": Vector3(0.6, 1.6, 0.6),
+			"color": Color.LIGHT_SKY_BLUE
+		},
+		"arc_projector": {
+			"name": "Arc Projector",
+			"category": "weapon",
+			"hp": 55.0,
+			"weight": 45.0,
+			"metal": 25,
+			"crystal": 35,
+			"dps": 40.0,
+			"size": Vector3(0.5, 0.5, 1.2),
+			"color": Color.CYAN
+		},
+		"ion_cannon": {
+			"name": "Ion Cannon",
+			"category": "weapon",
+			"hp": 130.0,
+			"weight": 150.0,
+			"metal": 70,
+			"crystal": 90,
+			"dps": 75.0,
+			"size": Vector3(0.7, 0.7, 2.6),
+			"color": Color.SKY_BLUE
+		},
 		"heavy_laser": {
 			"name": "Continuous Laser",
 			"category": "weapon",
@@ -270,6 +308,38 @@ static func get_catalog() -> Dictionary:
 			"color": Color.SLATE_GRAY
 		},
 
+		# --- GENERATORS (Energy resource, ENERGY_AND_BALANCE_SPEC.md #1) ---
+		# "generator" is its own module category, not a weapon/utility
+		# variant - it contributes to a unit's max_energy (and a bit of
+		# energy_regen) exactly like armor contributes to a facet's
+		# threshold: a placeable design choice, not a fixed hull number.
+		"fusion_generator": {
+			"name": "Fusion Generator",
+			"category": "generator",
+			"hp": 140.0,
+			"weight": 160.0,
+			"metal": 90,
+			"crystal": 60,
+			"dps": 0.0,
+			"energy_capacity": 60.0,
+			"energy_regen": 8.0,
+			"size": Vector3(1.4, 1.2, 1.8),
+			"color": Color.ORANGE_RED
+		},
+		"capacitor_bank": {
+			"name": "Capacitor Bank",
+			"category": "generator",
+			"hp": 60.0,
+			"weight": 50.0,
+			"metal": 35,
+			"crystal": 25,
+			"dps": 0.0,
+			"energy_capacity": 25.0,
+			"energy_regen": 4.0,
+			"size": Vector3(0.8, 0.8, 1.0),
+			"color": Color.GOLD
+		},
+
 		# --- LOCOMOTION ARCHETYPES ---
 		"wheels": {
 			"name": "Wheels",
@@ -377,6 +447,7 @@ static func get_catalog() -> Dictionary:
 			"metal": 50,
 			"crystal": 10,
 			"dps": 0.0,
+			"base_energy": 40.0,
 			"size": Vector3(3.0, 1.0, 4.0),
 			"color": Color.LIGHT_GRAY
 		},
@@ -388,6 +459,7 @@ static func get_catalog() -> Dictionary:
 			"metal": 100,
 			"crystal": 20,
 			"dps": 0.0,
+			"base_energy": 70.0,
 			"size": Vector3(4.0, 1.0, 6.0),
 			"color": Color.GRAY
 		},
@@ -399,6 +471,7 @@ static func get_catalog() -> Dictionary:
 			"metal": 250,
 			"crystal": 50,
 			"dps": 0.0,
+			"base_energy": 130.0,
 			"size": Vector3(6.0, 1.5, 8.0),
 			"color": Color.DARK_GRAY
 		},
@@ -410,6 +483,7 @@ static func get_catalog() -> Dictionary:
 			"metal": 35,
 			"crystal": 8,
 			"dps": 0.0,
+			"base_energy": 35.0,
 			"size": Vector3(2.4, 0.8, 3.2),
 			"color": Color(0.55, 0.65, 0.78)
 		},
@@ -421,6 +495,7 @@ static func get_catalog() -> Dictionary:
 			"metal": 170,
 			"crystal": 35,
 			"dps": 0.0,
+			"base_energy": 90.0,
 			"size": Vector3(5.0, 1.3, 7.0),
 			"color": Color(0.4, 0.32, 0.28)
 		},
@@ -435,6 +510,7 @@ static func get_catalog() -> Dictionary:
 			"metal": 80,
 			"crystal": 0,
 			"dps": 0.0,
+			"base_energy": 60.0,
 			"size": Vector3(3.0, 1.2, 3.0),
 			"color": Color(0.45, 0.45, 0.4)
 		},
@@ -447,6 +523,7 @@ static func get_catalog() -> Dictionary:
 			"metal": 160,
 			"crystal": 20,
 			"dps": 0.0,
+			"base_energy": 100.0,
 			"size": Vector3(3.0, 4.0, 3.0),
 			"color": Color(0.5, 0.48, 0.44)
 		}
@@ -455,6 +532,14 @@ static func get_catalog() -> Dictionary:
 static func is_foundation(type_id: String) -> bool:
 	var data = get_module_data(type_id)
 	return data.get("is_foundation", false)
+
+# Energy resource (ENERGY_AND_BALANCE_SPEC.md #1): a hull's base_energy is
+# the starting point for max_energy before any generator modules are
+# mounted. Defaults to 0.0 for anything without a base_energy field
+# (weapons/locomotion/etc - only hull/foundation entries carry this stat).
+static func get_base_energy(hull_type_id: String) -> float:
+	var data = get_module_data(hull_type_id)
+	return data.get("base_energy", 0.0)
 
 # --- Unit-class traits (MOUNTING_AND_ARMOR_SPEC.md addendum) ---
 # Composable tags, not a hard ship/land/air/building enum, so a helicopter

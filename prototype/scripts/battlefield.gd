@@ -125,6 +125,28 @@ func _spawn_vehicle():
 		vehicle.add_child(col_shape)
 		
 		recalculate_move_speed()
+		recalculate_energy()
+
+func recalculate_energy():
+	if not is_instance_valid(vehicle_hull) or not is_instance_valid(vehicle):
+		return
+	var hull_type = vehicle_hull.get_meta("type_id") if vehicle_hull.has_meta("type_id") else "medium_hull"
+	var base = ModuleCatalog.get_base_energy(hull_type)
+	var bonus_capacity = 0.0
+	var bonus_regen = 0.0
+	for child in vehicle_hull.get_children():
+		if child.has_meta("module_data") and not child.is_queued_for_deletion():
+			var data = child.get_meta("module_data")
+			if data.category == "generator":
+				bonus_capacity += data.get_energy_capacity()
+				bonus_regen += data.get_energy_regen()
+	var prev_max = vehicle.max_energy
+	vehicle.max_energy = base + bonus_capacity
+	vehicle.energy_regen_rate = vehicle.max_energy * 0.08 + bonus_regen
+	if prev_max <= 0.0:
+		vehicle.current_energy = vehicle.max_energy
+	else:
+		vehicle.current_energy = clamp(vehicle.current_energy, 0.0, vehicle.max_energy)
 
 func _setup_weapons():
 	# Attach auto-tracking weapon scripts to all weapon modules
@@ -199,6 +221,9 @@ func _create_move_marker(pos: Vector3):
 	timer.timeout.connect(func(): marker.queue_free())
 
 func _physics_process(delta):
+	if is_instance_valid(vehicle) and vehicle.current_energy < vehicle.max_energy:
+		vehicle.current_energy = min(vehicle.max_energy, vehicle.current_energy + vehicle.energy_regen_rate * delta)
+
 	# Altitude / Gravity control
 	if is_instance_valid(vehicle):
 		if locomotion_type == "helicopter_rotors":

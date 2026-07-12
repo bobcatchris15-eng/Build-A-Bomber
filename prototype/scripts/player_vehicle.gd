@@ -5,6 +5,13 @@ const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 var max_hp: float = 400.0
 var hp: float = 400.0
 var is_dead: bool = false
+# Energy resource (ENERGY_AND_BALANCE_SPEC.md #1) - state lives here same as
+# hp/max_hp, but computation/regen-ticking is driven by battlefield.gd
+# (recalculate_energy()/_physics_process()), mirroring how max_hp itself is
+# computed there rather than in this script.
+var max_energy: float = 0.0
+var current_energy: float = 0.0
+var energy_regen_rate: float = 0.0
 
 func _ready():
 	add_to_group("player_vehicle")
@@ -150,6 +157,23 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 		
 	if hp <= 0.0:
 		die()
+
+func spend_energy(amount: float) -> bool:
+	if is_dead or current_energy < amount:
+		return false
+	current_energy -= amount
+	return true
+
+func drain_energy(amount: float):
+	if is_dead: return
+	current_energy = max(0.0, current_energy - amount)
+
+func repair_hp(amount: float):
+	if is_dead or hp >= max_hp: return
+	hp = min(max_hp, hp + amount)
+	var battlefield = get_parent()
+	if battlefield and battlefield.has_method("update_player_hp_ui"):
+		battlefield.update_player_hp_ui()
 
 func die():
 	is_dead = true

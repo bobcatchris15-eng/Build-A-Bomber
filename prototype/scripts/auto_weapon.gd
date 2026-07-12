@@ -1,6 +1,7 @@
 extends Node3D
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const GlobalConfig = preload("res://scripts/global_config.gd")
 
 var target: Node3D = null
 var fire_range: float = 12.0

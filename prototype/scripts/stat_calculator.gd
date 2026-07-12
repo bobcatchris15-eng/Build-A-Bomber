@@ -110,6 +110,7 @@ var armor_mat_btn: OptionButton
 var armor_thick_label: Label
 var armor_thick_slider: HSlider
 var armor_threshold_label: Label
+var energy_label: Label
 var nose_taper_label: Label
 var nose_taper_slider: HSlider
 
@@ -391,9 +392,11 @@ func update_stats(hull: Node3D):
 	var total_hp = 0.0
 	var total_weight = 0.0
 	var total_cost_metal = 0
+	var total_cost_crystal = 0
 	var total_dps = 0.0
-	
-	# Assume the hull itself has some base stats in a real implementation, 
+	var total_energy_capacity = 0.0
+
+	# Assume the hull itself has some base stats in a real implementation,
 	# but for the prototype we'll just sum the modules.
 	if hull:
 		for child in hull.get_children():
@@ -403,7 +406,10 @@ func update_stats(hull: Node3D):
 					total_hp += data.get_hp()
 					total_weight += data.get_weight()
 					total_cost_metal += data.get_cost().x
+					total_cost_crystal += data.get_cost().y
 					total_dps += data.get_dps()
+					if data.category == "generator":
+						total_energy_capacity += data.get_energy_capacity()
 				
 	var hp_mult = 1.0
 	var wt_mult = 1.0
@@ -460,11 +466,26 @@ func update_stats(hull: Node3D):
 	var t_thresh = t_base * armor_thickness
 	var e_thresh = e_base * armor_thickness
 
-	hp_label.text = "Total HP: " + str(total_hp)
-	weight_label.text = "Total Weight: " + str(total_weight)
-	cost_label.text = "Cost (Metal): " + str(total_cost_metal)
-	dps_label.text = "Total DPS: " + str(total_dps)
-	
+	# Stat rounding: total_hp/total_weight/total_dps are sums of
+	# module_data.gd getters that already round to the nearest 0.5 at the
+	# point they're computed (GlobalConfig.round_to_half), so what's shown
+	# here is exactly what combat uses - this %.1f is just consistent
+	# formatting (a sum of clean .5-stepped numbers is itself clean), not a
+	# second, independent rounding pass. Previously these 4 labels were the
+	# one place in this file using bare str() on a float, which is why they
+	# alone showed raw float precision (e.g. "14.723891...") while every
+	# other label here was already %.1f/%.2f/%d formatted.
+	hp_label.text = "Total HP: %.1f" % total_hp
+	weight_label.text = "Total Weight: %.1f" % total_weight
+	cost_label.text = "Cost: %d Metal, %d Crystal" % [total_cost_metal, total_cost_crystal]
+	dps_label.text = "Total DPS: %.1f" % total_dps
+
+	if not energy_label:
+		energy_label = Label.new()
+		$ScrollContainer/VBoxContainer.add_child(energy_label)
+	energy_label.text = "Energy Capacity: +%.1f" % total_energy_capacity
+	energy_label.visible = total_energy_capacity > 0.0
+
 	if not armor_threshold_label:
 		armor_threshold_label = Label.new()
 		# Found by the new headless UI-overflow audit: this label's natural

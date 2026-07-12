@@ -15,6 +15,16 @@ var team: int = 0
 var max_hp: float = 400.0
 var hp: float = 400.0
 var is_dead: bool = false
+# Energy resource (ENERGY_AND_BALANCE_SPEC.md #1): base_energy comes from
+# the hull, generator modules add capacity on top - a real placeable-module
+# design choice, not a fixed hull number. Regenerates over time; spent by
+# firing energy-classed weapons (auto_weapon.gd checks/deducts via
+# spend_energy() before it's allowed to fire) and can be drained directly
+# by an enemy's energy-drain weapon (drain_energy()).
+var max_energy: float = 0.0
+var current_energy: float = 0.0
+var energy_regen_rate: float = 0.0
+var _hull_type_for_energy: String = ""
 
 var hull_node: Node3D = null
 var locomotion_type: String = ""
@@ -114,8 +124,38 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	_setup_weapons()
 	_detect_harvester()
 	_recalculate_move_speed()
+	_recalculate_energy(hull_type)
 	_create_selection_ring(base_size)
 	_create_hp_bar()
+
+# Energy resource: base_energy from the hull + sum of mounted generator
+# modules' energy_capacity/energy_regen. Public (not just called at setup)
+# because losing a generator module mid-battle should shrink max_energy -
+# call sites that queue_free() a module should re-call this, same pattern
+# take_damage()'s subsystem-stripping branch uses for _recalculate_move_speed().
+func _recalculate_energy(hull_type_for_energy: String = ""):
+	if hull_type_for_energy != "":
+		_hull_type_for_energy = hull_type_for_energy
+	var base = ModuleCatalog.get_base_energy(_hull_type_for_energy)
+	var bonus_capacity = 0.0
+	var bonus_regen = 0.0
+	if is_instance_valid(hull_node):
+		for child in hull_node.get_children():
+			if child.has_meta("module_data") and not child.is_queued_for_deletion():
+				var data = child.get_meta("module_data")
+				if data.category == "generator":
+					bonus_capacity += data.get_energy_capacity()
+					bonus_regen += data.get_energy_regen()
+	var prev_max = max_energy
+	max_energy = base + bonus_capacity
+	# Base passive regen (a small % of max/sec) plus generators' own bonus -
+	# a unit with zero generators still trickle-regens off its base pool,
+	# gennies just make sustained energy-weapon fire actually viable.
+	energy_regen_rate = max_energy * 0.08 + bonus_regen
+	if prev_max <= 0.0:
+		current_energy = max_energy
+	else:
+		current_energy = clamp(current_energy, 0.0, max_energy)
 
 func _setup_weapons():
 	for child in hull_node.get_children():
@@ -232,6 +272,9 @@ func order_harvest(node: Node3D):
 
 func _physics_process(delta):
 	if is_dead: return
+
+	if current_energy < max_energy:
+		current_energy = min(max_energy, current_energy + energy_regen_rate * delta)
 
 	# Altitude / gravity / surface-lock
 	if is_flying:
@@ -546,9 +589,12 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 				if is_instance_valid(mirror):
 					mirror.remove_meta("mirrored_counterpart")
 			var was_locomotion = m_data.category == "locomotion"
+			var was_generator = m_data.category == "generator"
 			target_module.queue_free()
 			if was_locomotion:
 				call_deferred("_recalculate_move_speed")
+			if was_generator:
+				call_deferred("_recalculate_energy")
 		return
 
 	if amount < threshold:
@@ -560,6 +606,34 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	_flash_hull()
 	if hp <= 0.0:
 		die()
+
+# --- Energy resource (ENERGY_AND_BALANCE_SPEC.md #1/#4) ---
+
+# Checked by auto_weapon.gd before an energy-classed weapon is allowed to
+# fire. Returns false (and spends nothing) if the capacitor's dry - a real
+# soft-limit on sustained energy-weapon fire, not just a cosmetic number.
+func spend_energy(amount: float) -> bool:
+	if is_dead or current_energy < amount:
+		return false
+	current_energy -= amount
+	return true
+
+# Called by an enemy's energy-drain weapon (arc_projector/tesla_coil/
+# ion_cannon). Never restores HP, never goes negative - a target at 0
+# energy just can't fire its own energy weapons until it regens or gets a
+# logistics boost.
+func drain_energy(amount: float):
+	if is_dead: return
+	current_energy = max(0.0, current_energy - amount)
+
+# Called by repair_array's ally-targeting heal beam (auto_weapon.gd).
+# Duck-typed the same way take_damage()/drain_energy() are - any target
+# with a "hp"/"max_hp" pair and this method works, no repair_array-specific
+# knowledge needed on the receiving end.
+func repair_hp(amount: float):
+	if is_dead or hp >= max_hp: return
+	hp = min(max_hp, hp + amount)
+	_update_hp_bar()
 
 func _flash_shield():
 	var exp_mesh = MeshInstance3D.new()

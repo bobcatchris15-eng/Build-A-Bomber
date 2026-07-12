@@ -66,7 +66,10 @@ func _try_produce():
 		var entry = combat[(roster_index + i) % combat.size()]
 		if skirmish.can_afford(team, entry.cost_metal, entry.cost_crystal):
 			skirmish.spend(team, entry.cost_metal, entry.cost_crystal)
-			factory.queue_unit(entry.blueprint, skirmish.build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal)))
+			var build_time = skirmish.build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal))
+			if skirmish.is_energy_deficit(team):
+				build_time *= 1.5
+			factory.queue_unit(entry.blueprint, build_time)
 			roster_index = (roster_index + i + 1) % combat.size()
 			return
 
