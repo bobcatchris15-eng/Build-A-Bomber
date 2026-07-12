@@ -44,6 +44,7 @@ func _init():
 	success = success and await test_centerline_placement_does_not_self_mirror()
 	success = success and await test_hull_nose_taper()
 	success = success and await test_directional_armor_facet_resolution()
+	success = success and await test_per_module_armor_material()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1569,6 +1570,57 @@ func test_directional_armor_facet_resolution() -> bool:
 
 	defender.queue_free()
 	print("  [PASS] Armor only protects the facet it's actually mounted on; unknown-direction damage still falls back to aggregate.")
+	return true
+
+func test_per_module_armor_material() -> bool:
+	print("Running Test Suite: Per-Module Armor Material (Armor phase 3)...")
+	# A plate's OWN material choice should override the hull's baseline
+	# material for a hit that actually lands on that plate - e.g. a hull
+	# with hardened_steel armor but an energy_shielding plate bolted onto
+	# the front should resolve a front hit using energy_shielding's profile
+	# (threshold 20.0), not hardened_steel's (threshold 15.0).
+	var defender = Node3D.new()
+	root.add_child(defender)
+	defender.global_position = Vector3.ZERO
+
+	var hull = Node3D.new()
+	hull.name = "Hull"
+	hull.set_meta("armor_material", "hardened_steel") # kinetic threshold 15.0
+	hull.set_meta("armor_thickness", 1.0)
+	defender.add_child(hull)
+
+	var front_plate = Node3D.new()
+	front_plate.set_meta("facet", "front")
+	var plate_data = ModuleData.new()
+	plate_data.type_id = "armor_plating"
+	plate_data.category = "armor"
+	plate_data.base_hp = 100.0 # small, so the +10.0 HP bonus doesn't dominate the material swap
+	plate_data.tweaks = {"material": "energy_shielding"} # kinetic threshold 20.0
+	front_plate.set_meta("module_data", plate_data)
+	hull.add_child(front_plate)
+
+	var active_modules = [front_plate]
+	var hit_from_front = defender.global_position + Vector3(0, 0, -5.0)
+	var resolved = DamageResolverScript.resolve(hull, active_modules, "kinetic", defender, hit_from_front)
+
+	# Expected: energy_shielding's 20.0 base threshold (not hardened_steel's
+	# 15.0), plus the plate's own +10.0 HP-derived bonus = 30.0.
+	if abs(resolved.x - 30.0) > 0.5:
+		print("  [FAIL] Front hit should resolve via the plate's OWN energy_shielding material (expected threshold ~30.0), got ", resolved.x)
+		defender.queue_free()
+		return false
+
+	# A hit from the back (uncovered facet) should still use the hull's own
+	# hardened_steel baseline, unaffected by the front plate's material.
+	var hit_from_back = defender.global_position + Vector3(0, 0, 5.0)
+	var resolved_back = DamageResolverScript.resolve(hull, active_modules, "kinetic", defender, hit_from_back)
+	if abs(resolved_back.x - 15.0) > 0.5:
+		print("  [FAIL] Back hit should still use the hull's hardened_steel baseline (expected ~15.0), got ", resolved_back.x)
+		defender.queue_free()
+		return false
+
+	defender.queue_free()
+	print("  [PASS] A plate's own material choice overrides the hull baseline for hits landing on that specific plate.")
 	return true
 
 # --- Skirmish mode test suites ---

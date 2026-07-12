@@ -725,11 +725,45 @@ func _on_tweak_changed():
 		if placer:
 			placer.check_all_clipping()
 
+const ARMOR_MATERIALS = ["hardened_steel", "reactive_armor", "ablative_ceramic", "energy_shielding"]
+const ARMOR_MATERIAL_LABELS = ["Hardened Steel", "Reactive Armor", "Ablative Ceramic", "Energy Shielding"]
+
 func _generate_custom_tweaks(module: Node3D, data: ModuleData):
 	if not popup_tweaks_container: return
 	var type_id = data.type_id
+
+	# Per-module armor material (Armor phase 3, MOUNTING_AND_ARMOR_SPEC.md
+	# addendum): each placed armor plate can pick its own material - a
+	# front plate can be reactive while the sides are ablative, instead of
+	# one material for the whole hull. Not TWEAK_SPECS-driven since it's a
+	# material choice, not a numeric slider; stored in the same tweaks dict
+	# so it rides the existing save/load path for free.
+	if data.category == "armor":
+		var mat_container = VBoxContainer.new()
+		mat_container.add_theme_constant_override("separation", 2)
+		popup_tweaks_container.add_child(mat_container)
+
+		var mat_label = Label.new()
+		var current_mat = data.tweaks.get("material", "hardened_steel")
+		var current_idx = ARMOR_MATERIALS.find(current_mat)
+		if current_idx < 0: current_idx = 0
+		mat_label.text = "Plate Material: %s" % ARMOR_MATERIAL_LABELS[current_idx]
+		mat_container.add_child(mat_label)
+
+		var mat_btn = OptionButton.new()
+		for lbl in ARMOR_MATERIAL_LABELS:
+			mat_btn.add_item(lbl)
+		mat_btn.selected = current_idx
+		mat_container.add_child(mat_btn)
+		mat_btn.item_selected.connect(func(index: int):
+			_push_undo()
+			data.tweaks["material"] = ARMOR_MATERIALS[index]
+			mat_label.text = "Plate Material: %s" % ARMOR_MATERIAL_LABELS[index]
+			_on_tweak_changed()
+		)
+
 	if not TWEAK_SPECS.has(type_id): return
-	
+
 	var specs = TWEAK_SPECS[type_id]
 	for spec in specs:
 		var container = VBoxContainer.new()

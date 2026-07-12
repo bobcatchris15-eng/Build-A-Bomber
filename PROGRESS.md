@@ -25,6 +25,18 @@ Chris reviewed the phased-plan writeup and gave the call: go as far as possible 
 
 **Commit checkpoints:** see git log.
 
+### Armor Phase 3: per-module material choice
+
+A placed armor plate can now carry its own material (Hardened Steel / Reactive / Ablative / Energy Shielding), independent of the hull's global material — a front plate can be reactive while the sides are ablative.
+
+- New "Plate Material" dropdown in the per-module tweak popup, shown for `armor` category regardless of whether the type has `TWEAK_SPECS` entries (armor_plating has none). Stored in the existing `tweaks` dict (`tweaks["material"]`), so it rides the existing save/load path with zero new persistence code.
+- `DamageResolver.resolve()`: when a hit resolves to a facet with a covering plate, if that plate has its own material set, its threshold/reduction table **replaces** the hull baseline for that hit (the attack strikes the plate, not the bare hull under it) — the plate's HP still adds its flat bonus on top, same as phase 2. No material set → falls back to phase 2's behavior (hull baseline + flat bonus). No hit direction at all → phase 1's aggregate behavior, unchanged.
+
+**Verified:**
+- New test `test_per_module_armor_material()`: a hardened-steel hull with an energy-shielding front plate resolves a front hit using energy shielding's threshold (not the hull's), while a back hit (uncovered facet) still uses the hull's own hardened-steel baseline.
+- Visual: `progress_captures/2026-07-12/armor_material_ui/` — the new per-plate dropdown, distinct from the existing hull-level Armor Material control.
+- Full suite: **28/28 green.**
+
 ---
 
 ## 2026-07-12 (cont'd) — New scope from Chris: mounting/armor/hull-tweak rework
