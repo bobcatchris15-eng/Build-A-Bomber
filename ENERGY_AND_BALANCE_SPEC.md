@@ -54,6 +54,35 @@ Checked at the same point `blueprint_cost()` already walks `modules[]` (natural 
 
 Chris asked for a defensible cost-per-stat-point model, not just a mechanical-correctness check, and to flag where it's shaky. The approach: a headless scoring tool (`prototype/scratch`-adjacent but kept as a permanent `tools/` script, not throwaway) that, for every catalog entry, computes a **value score** from its stats (weighted sum: DPS, HP, energy_capacity, utility flags for support modules) and a **cost score** from Metal+Crystal (+ weight as a soft tax, since heavier parts already have an in-fiction cost via speed), then reports **value-per-cost** ratios so outliers (a weapon that's strictly better than another for less cost, a generator that's not worth its weight) are visible as a ranked list, not buried in a spreadsheet nobody opens. Full reasoning and the actual weight choices are in §7 of this doc once implemented — flagging now that DPS/HP/support-utility are fundamentally different currencies and the weighting between them is a judgment call, not a derived truth; treat the tool's output as a starting point for human tuning, not an authority.
 
+## 7. Balance tooling: what was actually built and found
+
+`prototype/tools/balance_report.gd` (headless, run with `Godot...exe --headless --script tools/balance_report.gd`) scores every catalog entry:
+
+```
+value = dps*3.0 + hp*0.3 + energy_capacity*1.2 + energy_regen*4.0
+cost  = metal + crystal*2.0 + weight*0.05
+ratio = value / cost
+```
+
+Grouped by category, sorted by ratio, flagged when a ratio is >1.5x or <0.5x its category's own average. The weights are a judgment call (documented in the tool's own header) - DPS is weighted highest since it's a weapon's primary purpose, HP a secondary survivability bonus, Crystal counts double since it starts scarcer than Metal (150 vs 450 in the default economy) and Weight gets a small tax since it already costs speed in-fiction.
+
+**Findings acted on** (first real pass, not exhaustive - see below for what wasn't touched and why): three weapon-category outliers were nudged based on the tool's own numbers, not gut feel:
+- `spigot_mortar` had the highest raw DPS in the game (130) at less than half the Metal+Crystal cost of comparable weapons - value/cost 6.31 against a 2.86 category average. Cost raised (metal 50→65, crystal 5→15); DPS/HP untouched.
+- `flamethrower` was similarly cheap for its output (5.49 ratio). Cost raised (metal 25→35, crystal 10→15).
+- `ion_cannon` (this pass's own new weapon) was the single worst value/cost weapon in the entire catalog (1.03) even before accounting for its energy-drain utility, which this cost model can't see at all - its heavy Crystal cost was effectively double-penalizing a flagship weapon that's supposed to be a real alternative to gauss_railgun/plasma_lobber. Crystal cost lowered (90→65).
+
+Re-running the tool after these three changes: `spigot_mortar` 6.31→4.15, `flamethrower` 5.49→3.87 (no longer flagged), `ion_cannon` 1.03→1.27. Deliberately stopped here rather than chasing every flagged entry to the category average - three changes I can reason about concretely is more trustworthy than a dozen changes made mechanically without being able to playtest the result.
+
+**Deliberately NOT touched, and why** (the model said "outlier" but the number is misleading, not the balance):
+- Point-defense specialists (`pd_laser` 0.37, `ciws` 0.72, `flak_cannon` 1.02) score low because their real value is *interception capability against missiles*, not raw DPS against normal targets - the model has no way to represent that. Buffing their DPS to satisfy a value/cost formula would break their actual role.
+- Utility modules with `dps: 0` (`resource_harvester` 0.22, `sensor_suite` 0.19) score near-zero because the model only understands DPS/HP - their real value (economy throughput, hypothetically vision once that system exists) isn't captured at all.
+- Locomotion and hull entries score almost entirely on HP, since neither DPS nor a "mobility" stat exists in the model - `anti_grav`'s low score (0.09) reflects that airborne/hovering capability isn't represented, not that it's overpriced.
+- Foundations (`pillbox_foundation` 3.00, `tower_foundation` 2.10) score high because they're pure-HP defensive structures by design - that's the intended tradeoff (stationary, no locomotion cost), not an accident.
+
+**What's shaky, flagged explicitly (per Chris's ask) rather than hidden:** the tool's own printed output states this every run - locomotion/hull scores are low-confidence (HP-only), energy weapons' true cost-to-use (capacitor drain limiting sustained fire) isn't captured by a one-time Metal/Crystal price, and `repair_array`'s heal-rate-as-"dps" overstates its raw value next to an equal-DPS weapon (healing is situational, damage isn't). This is a tool for surfacing candidates for a human to reason about, not an authority that should be trusted blindly - see `_report_category()`'s own header comment.
+
+**Verified:** `test_balance_report_covers_every_catalog_entry()` is a regression guard (the tool stays callable and produces finite, non-negative numbers as the catalog grows) - not a balance-correctness test, since balance is a playtest-feel judgment, not a mechanical property.
+
 ---
 
-*(This doc is extended with concrete formulas/values and the balance tool's actual weighting once each piece lands — see PROGRESS.md for the implementation log and DECISIONS_NEEDED.md for judgment calls made along the way.)*
+*(See PROGRESS.md for the implementation log and DECISIONS_NEEDED.md for judgment calls made along the way.)*

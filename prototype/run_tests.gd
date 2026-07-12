@@ -66,6 +66,7 @@ func _init():
 	success = success and await test_logistics_sharing_boosts_allies()
 	success = success and await test_support_modules_get_combat_script_in_real_spawn()
 	success = success and await test_build_legality_gate()
+	success = success and await test_balance_report_covers_every_catalog_entry()
 
 	print("\n==============================================")
 	if success:
@@ -2834,4 +2835,35 @@ func test_build_legality_gate() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] validate_build_legality() correctly gates hull/weapon-or-support/locomotion-or-static, and the match-queue path rejects illegal designs without spending resources.")
+	return true
+
+func test_balance_report_covers_every_catalog_entry() -> bool:
+	print("Running Test Suite: Balance Report Tool - Scores Every Catalog Entry Without Erroring...")
+	# Not a balance-correctness check (balance is subjective, tuned by
+	# playtest feel) - a regression guard that tools/balance_report.gd's
+	# scoring function stays callable and well-behaved (finite, non-
+	# negative) as the catalog grows, so it doesn't silently rot into an
+	# unusable tool nobody notices is broken.
+	var BalanceReportScript = load("res://tools/balance_report.gd")
+	var catalog = ModuleCatalog.get_catalog()
+	var checked = 0
+	for type_id in catalog.keys():
+		var data = catalog[type_id]
+		var score = BalanceReportScript.compute_score(data)
+		if not (score.has("value") and score.has("cost") and score.has("ratio")):
+			print("  [FAIL] compute_score() should return value/cost/ratio for ", type_id)
+			return false
+		if is_nan(score.value) or is_nan(score.cost) or is_nan(score.ratio):
+			print("  [FAIL] compute_score() produced NaN for ", type_id, ": ", score)
+			return false
+		if score.value < 0.0 or score.cost < 0.0:
+			print("  [FAIL] compute_score() produced a negative value/cost for ", type_id, ": ", score)
+			return false
+		checked += 1
+
+	if checked != catalog.size():
+		print("  [FAIL] Expected to score all ", catalog.size(), " catalog entries, only checked ", checked)
+		return false
+
+	print("  [PASS] Balance report scores all ", checked, " catalog entries with finite, non-negative value/cost/ratio.")
 	return true

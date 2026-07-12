@@ -77,8 +77,13 @@ static func get_catalog() -> Dictionary:
 			"category": "weapon",
 			"hp": 110.0,
 			"weight": 140.0,
-			"metal": 50,
-			"crystal": 5,
+			# Balance pass (tools/balance_report.gd, ENERGY_AND_BALANCE_SPEC.md
+			# #6): had the highest raw dps in the game at less than half the
+			# cost of comparable weapons (gauss_railgun/heavy_howitzer) -
+			# value/cost was 6.31 against a category average of 2.86, more
+			# than 2x an outlier. Cost raised, dps/hp untouched.
+			"metal": 65,
+			"crystal": 15,
 			"dps": 130.0,
 			"size": Vector3(1.0, 1.0, 1.0),
 			"color": Color.DARK_KHAKI
@@ -147,8 +152,12 @@ static func get_catalog() -> Dictionary:
 			"category": "weapon",
 			"hp": 70.0,
 			"weight": 50.0,
-			"metal": 25,
-			"crystal": 10,
+			# Balance pass: value/cost was 5.49 against a 2.86 category
+			# average - cheap for its dps relative to comparable short-range
+			# weapons (heavy_machine_gun aside, which is an intentionally
+			# cheap starter weapon and left alone).
+			"metal": 35,
+			"crystal": 15,
 			"dps": 80.0,
 			"size": Vector3(0.5, 0.5, 1.6),
 			"color": Color.CRIMSON
@@ -187,8 +196,14 @@ static func get_catalog() -> Dictionary:
 			"category": "weapon",
 			"hp": 130.0,
 			"weight": 150.0,
+			# Balance pass: was the single worst value/cost weapon in the
+			# game (1.03 vs 2.86 average) even before accounting for its
+			# energy-drain utility (which this cost-model can't see) - the
+			# heavy crystal cost was double-counted against a flagship
+			# "grounded energy heavy-hitter" that's supposed to be a real
+			# alternative to gauss_railgun/plasma_lobber, not strictly worse.
 			"metal": 70,
-			"crystal": 90,
+			"crystal": 65,
 			"dps": 75.0,
 			"size": Vector3(0.7, 0.7, 2.6),
 			"color": Color.SKY_BLUE
