@@ -4,6 +4,20 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 — v1.0-beta tagged (Sun-Thu work completed in one continuous session)
+
+Chris asked me to push through as much of the week's plan as possible in a single extended session rather than waiting on cron cycles that turned out not to be available in this environment. Completed the full Sunday-through-Thursday plan; tagging `v1.0-beta` here rather than padding out Friday/Saturday with manufactured busywork, since the actual beta bar (defined in the original plan) is met:
+
+- ✅ Full Design Lab loop: hull select/scale, all 6 locomotion archetypes (now all actually tweakable — 3 of 6 were silently non-functional at the start of this session), weapon/module placement + tweaking (now verified catalog-wide — no dead tweaks), symmetry, save/load.
+- ✅ Skirmish playable start to finish (verified via headless sim: economy, AI waves, HQ destruction, game-over).
+- ✅ Test Range functional (untouched this week, continuously regression-checked by the full suite).
+- ✅ Damage/armor model intact (untouched this week except removing a menu item that contradicted its own design doc).
+- ✅ Every part/hull archetype has a coherent, distinct authored mesh (audited Tuesday — coverage was already 100%, no gaps to fill).
+
+**Test suite grew from 11 to 18 suites this week**, every new one added because a real bug was found, not for coverage's sake. Full list of what shipped is in the dated entries below (Sun/Mon/Tue/Wed/Thu). `DECISIONS_NEEDED.md` has 6 logged judgment calls, none blocking, all with reasoning for whoever picks this up next.
+
+---
+
 ## 2026-07-12 (Thu) — Integration pass: full design→battle pipeline verified
 
 **Shipped:**
