@@ -23,6 +23,12 @@ var move_speed: float = 5.0
 var rotate_speed: float = 4.0
 var target_altitude: float = 0.0
 var is_flying: bool = false
+# Traits B3 (MOUNTING_AND_ARMOR_SPEC.md addendum): new movement paradigms,
+# distinct from the tank-like steer-and-stop model every ground/hover unit
+# uses. Derived from the trait system, not hardcoded type_id checks, so
+# they generalize to whatever hull+locomotion combo is actually present.
+var is_fixed_wing: bool = false
+var is_naval: bool = false
 
 # Orders
 enum OrderType { IDLE, MOVE, ATTACK, HARVEST }
@@ -55,7 +61,16 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	var locomotion = blueprint_data.get("locomotion", {})
 	locomotion_type = locomotion.get("type_id", "")
 	locomotion_settings = locomotion.get("settings", {})
-	is_flying = (locomotion_type == "helicopter_rotors")
+
+	# Traits B3: movement paradigm derived from the trait system (whatever
+	# hull+locomotion combo is actually present), not a hardcoded type_id
+	# check - this is what lets a future new hull automatically pick up the
+	# right movement behavior just by carrying the right locomotion trait.
+	var hull_type_for_traits = blueprint_data.get("hull_type", "medium_hull")
+	var unit_traits = ModuleCatalog.get_traits(hull_type_for_traits, locomotion_type)
+	is_flying = "airborne" in unit_traits
+	is_fixed_wing = "fixed_wing" in unit_traits
+	is_naval = "naval" in unit_traits
 	if is_flying:
 		target_altitude = 4.0
 
@@ -205,10 +220,17 @@ func order_harvest(node: Node3D):
 func _physics_process(delta):
 	if is_dead: return
 
-	# Altitude / gravity
+	# Altitude / gravity / surface-lock
 	if is_flying:
 		velocity.y = 0.0
 		global_position.y = lerp(global_position.y, target_altitude, 3.0 * delta)
+	elif is_naval:
+		# Traits B3: surface-locked like flying units, not affected by
+		# gravity/floor detection the way ground locomotion is - there's no
+		# terrain-height/water system in this prototype, so "the surface"
+		# is just a fixed low waterline.
+		velocity.y = 0.0
+		global_position.y = lerp(global_position.y, 0.3, 3.0 * delta)
 	else:
 		if not is_on_floor():
 			velocity.y -= 9.8 * delta
@@ -217,12 +239,24 @@ func _physics_process(delta):
 
 	match order:
 		OrderType.MOVE:
-			if _steer_towards(move_target, delta, 0.6):
+			if is_fixed_wing:
+				_steer_fixed_wing(move_target, delta)
+				if global_position.distance_to(move_target) < attack_range:
+					order = OrderType.IDLE
+			elif _steer_towards(move_target, delta, 0.6):
 				order = OrderType.IDLE
 		OrderType.ATTACK:
 			if not is_instance_valid(attack_target) or ("is_dead" in attack_target and attack_target.is_dead):
 				attack_target = null
 				order = OrderType.IDLE
+			elif is_fixed_wing:
+				# Strafing run, not approach-and-stop (a plane can't hover):
+				# continuously orbit the target so the flight path naturally
+				# brings it back within weapon range on each pass, instead
+				# of the ground-unit approach-and-engage pattern.
+				var orbit_phase = fmod(Time.get_ticks_msec() / 1000.0 * 0.3 + float(get_instance_id() % 100) * 0.1, TAU)
+				var orbit_offset = Vector3(cos(orbit_phase), 0, sin(orbit_phase)) * attack_range * 1.5
+				_steer_fixed_wing(attack_target.global_position + orbit_offset, delta)
 			else:
 				var dist = global_position.distance_to(attack_target.global_position)
 				if dist > attack_range:
@@ -241,8 +275,16 @@ func _physics_process(delta):
 		OrderType.HARVEST:
 			_process_harvest(delta)
 		_:
-			velocity.x = 0.0
-			velocity.z = 0.0
+			if is_fixed_wing:
+				# Can't stop - hold the current heading and keep cruising
+				# instead of zeroing velocity like ground/hover units do
+				# when idle (minimum airspeed).
+				var forward_dir = -global_transform.basis.z.normalized()
+				velocity.x = forward_dir.x * move_speed
+				velocity.z = forward_dir.z * move_speed
+			else:
+				velocity.x = 0.0
+				velocity.z = 0.0
 			if is_harvester:
 				_auto_find_harvest_work()
 
@@ -271,6 +313,34 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 	velocity.x = forward_dir.x * move_speed
 	velocity.z = forward_dir.z * move_speed
 	return false
+
+# Traits B3: fixed-wing flight is a genuinely different movement model from
+# _steer_towards(), not a reskin - never arrives-and-stops (minimum
+# airspeed/stall speed), and banks (rolls) into turns instead of just
+# yawing flat like a tank/hover unit turning in place.
+func _steer_fixed_wing(dest: Vector3, delta: float):
+	var pos_diff = dest - global_position
+	if pos_diff.length() < 0.1:
+		pos_diff = -global_transform.basis.z # avoid a degenerate look-at when already at the destination
+
+	var target_basis = Basis.looking_at(pos_diff, Vector3.UP)
+	var current_forward = -global_transform.basis.z
+	var desired_forward = -target_basis.z
+	var turn_amount = current_forward.signed_angle_to(desired_forward, Vector3.UP)
+
+	global_transform.basis = global_transform.basis.slerp(target_basis, rotate_speed * delta).orthonormalized()
+
+	# Bank (roll) into the turn, proportional to how sharply it's turning
+	# this frame - purely visual, recomputed fresh each frame so it doesn't
+	# accumulate error from the yaw slerp above.
+	var bank_angle = clamp(turn_amount * 3.0, -PI / 3.0, PI / 3.0)
+	global_transform.basis = global_transform.basis.rotated(current_forward.normalized(), bank_angle)
+
+	# Never stops: move_speed IS the minimum airspeed for this unit - there
+	# is no "arrive and halt" state like ground/hover locomotion has.
+	var forward_dir = -global_transform.basis.z.normalized()
+	velocity.x = forward_dir.x * move_speed
+	velocity.z = forward_dir.z * move_speed
 
 # --- Harvest loop ---
 

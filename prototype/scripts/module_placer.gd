@@ -447,7 +447,9 @@ var default_locomotion_settings = {
 	"wheels": {"size": 1.0, "count": 4},
 	"tracked_treads": {"width": 1.0},
 	"hover_engine": {},
-	"helicopter_rotors": {"size": 1.0, "count": 4}
+	"helicopter_rotors": {"size": 1.0, "count": 4},
+	"fixed_wing_engine": {"size": 1.0, "count": 2},
+	"naval_propeller": {"size": 1.0, "count": 2}
 }
 
 func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
@@ -456,10 +458,12 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 	var category = catalog_data.get("category", "module")
 
 	if category == "locomotion":
-		# Static defensive foundations can't take locomotion
-		if hull and hull.has_meta("type_id") and ModuleCatalog.is_foundation(hull.get_meta("type_id")):
-			_log("Foundations are static structures - locomotion not allowed.")
-			return
+		# Foundations CAN take locomotion now - per Chris's explicit
+		# no-hard-blocking constraint (MOUNTING_AND_ARMOR_SPEC.md addendum),
+		# this pre-existing validation gate was removed rather than kept as
+		# an exception. A mobile pillbox is exactly the kind of "janky or
+		# suboptimal" emergent outcome that's acceptable by design now -
+		# see DECISIONS_NEEDED.md.
 		var settings = default_locomotion_settings.get(type_id, {}).duplicate()
 		update_locomotion(type_id, settings)
 	else:
@@ -667,7 +671,46 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				if ag.has_meta("module_data"):
 					ag.get_meta("module_data").scale_multiplier = ag.scale
 				spawned_wheels.append(ag)
-				
+
+	elif type_id == "fixed_wing_engine":
+		# Wing-mounted engine pods, left/right - new movement paradigm
+		# (Traits B3, MOUNTING_AND_ARMOR_SPEC.md addendum): banking,
+		# minimum airspeed, no-hover flight, handled in battle_unit.gd.
+		var size = settings.get("size", 1.0)
+		var x_offset = (hull_size.x / 2.0 + 0.4 * size)
+		var y_offset = 0.0
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
+			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.1)
+			var engine = _place_weapon(type_id, pos, side_normal)
+			if engine:
+				engine.scale = Vector3(1.0, size, size)
+				engine.rotation = Vector3.ZERO
+				if engine.has_meta("module_data"):
+					engine.get_meta("module_data").scale_multiplier = engine.scale
+				spawned_wheels.append(engine)
+
+	elif type_id == "naval_propeller":
+		# Stern-mounted propeller(s) - new movement paradigm (Traits B3):
+		# surface-locked, no gravity/altitude falling, handled in
+		# battle_unit.gd via the "buoyant" trait.
+		var size = settings.get("size", 1.0)
+		var count = settings.get("count", 2)
+		if count < 1: count = 1
+		var half_count = max(1, int(count / 2)) if count > 1 else 1
+		var x_limit = hull_size.x * 0.3
+		for i in range(count):
+			var x_pos = 0.0
+			if count > 1:
+				x_pos = -x_limit + (2.0 * x_limit * i) / (count - 1)
+			var pos = hull.global_position + Vector3(x_pos, -hull_size.y * 0.2, hull_size.z / 2.0)
+			var prop = _place_weapon(type_id, pos, Vector3.BACK)
+			if prop:
+				prop.scale = Vector3(size, size, size)
+				if prop.has_meta("module_data"):
+					prop.get_meta("module_data").scale_multiplier = prop.scale
+				spawned_wheels.append(prop)
+
 	# Adjust hull Y position in the editor to make wheels rest on floor
 	var wheels_offset = 0.0
 	if type_id == "wheels":

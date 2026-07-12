@@ -343,6 +343,30 @@ static func get_catalog() -> Dictionary:
 			"color": Color.MEDIUM_BLUE,
 			"traits": ["hovering", "airborne"]
 		},
+		"fixed_wing_engine": {
+			"name": "Fixed-Wing Engine",
+			"category": "locomotion",
+			"hp": 70.0,
+			"weight": 60.0,
+			"metal": 60,
+			"crystal": 20,
+			"dps": 0.0,
+			"size": Vector3(1.2, 0.6, 2.0),
+			"color": Color.SLATE_BLUE,
+			"traits": ["airborne", "fixed_wing", "high_speed"]
+		},
+		"naval_propeller": {
+			"name": "Naval Propeller",
+			"category": "locomotion",
+			"hp": 90.0,
+			"weight": 70.0,
+			"metal": 35,
+			"crystal": 0,
+			"dps": 0.0,
+			"size": Vector3(0.6, 0.6, 1.0),
+			"color": Color.TEAL,
+			"traits": ["buoyant", "naval"]
+		},
 
 		# --- HULL SIZE CLASSES ---
 		"light_hull": {

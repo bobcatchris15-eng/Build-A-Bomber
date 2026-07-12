@@ -48,6 +48,7 @@ func _init():
 	success = success and await test_sloped_armor_angle_of_incidence()
 	success = success and await test_ai_flanking_targets_weakest_facet()
 	success = success and await test_trait_system_composability()
+	success = success and await test_fixed_wing_and_naval_movement()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -858,9 +859,12 @@ func test_foundation_design_lab_parity() -> bool:
 	# Factions_and_Buildings.md: "You design [defenses] in the Armory exactly
 	# like you design mobile units... Hardpoints & Tweaking: you snap weapons
 	# onto the bunker's hardpoints and tweak them." Placement/tweak/mirror/
-	# undo all run through the same hull-type-agnostic code paths as vehicles
-	# EXCEPT locomotion, which is deliberately blocked for foundations - this
-	# verifies that block works and everything else still has full parity.
+	# undo all run through the same hull-type-agnostic code paths as vehicles.
+	# Locomotion on foundations used to be hard-blocked; per Chris's explicit
+	# no-hard-blocking constraint (MOUNTING_AND_ARMOR_SPEC.md addendum) that
+	# gate was removed - a mobile pillbox is now a legitimate (if odd) thing
+	# a player can build. This test now asserts the OPPOSITE of what it used
+	# to: locomotion placement on a foundation succeeds, not rejected.
 	var placer = Node3D.new()
 	placer.name = "MainLab"
 	placer.set_script(preload("res://scripts/module_placer.gd"))
@@ -874,15 +878,15 @@ func test_foundation_design_lab_parity() -> bool:
 	placer._place_hull_from_ui("pillbox_foundation")
 	await process_frame
 
-	# Locomotion should be rejected on a foundation.
+	# Locomotion should now be ALLOWED on a foundation (no hard-blocking).
 	placer._place_weapon_from_ui("wheels", Vector3.ZERO, Vector3.DOWN)
 	await process_frame
 	var loco_count = 0
 	for child in placer.hull.get_children():
 		if child.has_meta("module_data") and child.get_meta("module_data").category == "locomotion":
 			loco_count += 1
-	if loco_count != 0:
-		print("  [FAIL] Foundation should reject locomotion, found ", loco_count, " locomotion parts")
+	if loco_count == 0:
+		print("  [FAIL] Foundation should now ACCEPT locomotion (no hard-blocking), found 0 locomotion parts")
 		placer.queue_free()
 		return false
 
@@ -921,7 +925,7 @@ func test_foundation_design_lab_parity() -> bool:
 		return false
 
 	placer.queue_free()
-	print("  [PASS] Foundation hulls get full placement/mirror/rotate/undo/serialize parity with vehicle hulls.")
+	print("  [PASS] Foundation hulls get full placement/mirror/rotate/undo/serialize parity with vehicle hulls, including locomotion (no longer hard-blocked).")
 	return true
 
 func test_design_to_battle_integration() -> bool:
@@ -1784,6 +1788,58 @@ func test_trait_system_composability() -> bool:
 			return false
 
 	print("  [PASS] Traits compose from whatever hull+locomotion is present, derive 'static' from is_foundation, and never block a combination.")
+	return true
+
+func test_fixed_wing_and_naval_movement() -> bool:
+	print("Running Test Suite: Fixed-Wing + Naval Movement Models (Traits B3)...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	# --- Fixed-wing: never stops, banks into turns ---
+	var plane = CharacterBody3D.new()
+	plane.set_script(BattleUnitScript)
+	root.add_child(plane)
+	plane.move_speed = 8.0
+	plane.rotate_speed = 3.0
+	plane.is_fixed_wing = true
+	plane.global_position = Vector3.ZERO
+	await process_frame
+
+	# A destination essentially at the plane's own position (already
+	# "arrived") - a ground unit would zero its velocity here; a fixed-wing
+	# unit must keep flying at minimum airspeed regardless.
+	plane._steer_fixed_wing(plane.global_position + Vector3(0, 0, -0.01), 0.1)
+	var horizontal_speed = Vector2(plane.velocity.x, plane.velocity.z).length()
+	if horizontal_speed < plane.move_speed - 0.5:
+		print("  [FAIL] Fixed-wing should never drop below minimum airspeed even when 'arrived', got speed ", horizontal_speed, " (min ", plane.move_speed, ")")
+		plane.queue_free()
+		return false
+
+	# A sharp turn should produce a non-trivial bank (roll) angle, not a
+	# flat yaw-only turn like ground/hover steering.
+	plane.global_transform = Transform3D.IDENTITY # facing -Z (default forward)
+	plane._steer_fixed_wing(Vector3(10, 0, 0), 0.1) # hard turn toward +X
+	var roll = plane.global_transform.basis.get_euler().z
+	if abs(roll) < 0.05:
+		print("  [FAIL] A sharp turn should produce a visible bank/roll angle, got ", roll)
+		plane.queue_free()
+		return false
+	plane.queue_free()
+
+	# --- Naval: surface-locked, unaffected by gravity ---
+	var ship = CharacterBody3D.new()
+	ship.set_script(BattleUnitScript)
+	root.add_child(ship)
+	ship.is_naval = true
+	ship.global_position = Vector3(0, 5.0, 0) # start well above the waterline
+	for i in range(30):
+		ship._physics_process(0.1)
+	if abs(ship.global_position.y - 0.3) > 1.0:
+		print("  [FAIL] A naval unit should settle near the fixed waterline (y~0.3) regardless of gravity, got y=", ship.global_position.y)
+		ship.queue_free()
+		return false
+	ship.queue_free()
+
+	print("  [PASS] Fixed-wing units never stop and bank into turns; naval units stay surface-locked, unaffected by gravity.")
 	return true
 
 # --- Skirmish mode test suites ---

@@ -4,6 +4,30 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Removed the pre-existing "no locomotion on foundations" hard-block
+
+**Not blocking.**
+
+`_place_weapon_from_ui` had a pre-existing gate (from earlier in the week, before today's trait-system direction) that rejected locomotion placement on foundation hulls, matching Factions_and_Buildings.md's "defenses don't need locomotion" framing. Chris's new instruction is explicit and general: "traits/hulls/locomotion must never hard-block each other... not from validation logic that prevents 'weird' combinations."
+
+**Default I'm proceeding with:** removed the gate. A foundation can now have locomotion placed on it — a mobile pillbox is exactly the kind of "janky or suboptimal" emergent outcome Chris said is acceptable, possibly desirable. Updated `test_foundation_design_lab_parity()` to assert the opposite of what it used to (locomotion succeeds, not rejected).
+
+**Why flagged rather than silently done:** this changes *established* behavior from earlier in the week, not just "declining to add a new block" — worth a clear record that it was a deliberate, instructed change, not an oversight, in case Chris wants to reconsider once he sees mobile foundations in practice.
+
+---
+
+## 2026-07-12 — New airframe/ship hull geometry (Traits B5) deferred
+
+**Not blocking.**
+
+`fixed_wing_engine` and `naval_propeller` (new locomotion types, Traits B3) work correctly on the existing 7 hulls today — tested `fixed_wing_engine` on `light_hull` and `naval_propeller` on `heavy_hull`, both function with procedural part visuals and no placement issues, since no-hard-blocking means any hull accepts any locomotion.
+
+**Default I'm proceeding with:** not authoring new purpose-built airframe/ship hull silhouettes this session. Same reasoning as every other new-art decision this week (the deferred "Fortress Wall" foundation type, 6 of 7 hulls still lacking custom deform rigging): new Blender-authored geometry needs the headless-import pipeline, which is fragile enough (see the memory gotcha about isolated-copy imports) that I don't want to risk it unattended without being able to iterate on how it actually looks. The mechanics (traits, movement models, mounting) all work today without it — this is a visual layer on top of working systems, not a blocker for them.
+
+**Why this is lower-risk to defer than the armor/trait work:** unlike the movement-model code (which needed to exist for the mechanics to be real), a purpose-built jet/ship silhouette is purely cosmetic — the generic hulls already carry the new locomotion types functionally correctly.
+
+---
+
 ## 2026-07-12 — Per-hull custom deform rigging built for interceptor_hull only, other 6 hulls deferred
 
 **Not blocking — Chris explicitly authorized scoping this and logging tradeoffs (MOUNTING_AND_ARMOR_SPEC.md #4).**

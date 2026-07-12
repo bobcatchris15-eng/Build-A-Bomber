@@ -66,6 +66,32 @@ Closes out the full armor phase list. Previously nothing evaluated target facing
 
 **This completes the full armor phase list** (dedupe → facet resolution → per-module material → sloped armor → AI facing), per Chris's "go as far as possible on both fronts" direction. Moving to the trait/unit-class system next.
 
+### Traits B1 + B2: composable trait system, generalized mounting
+
+- `ModuleCatalog.get_traits(hull, locomotion)`: unions traits from whatever hull+locomotion combo is actually present (`ground_contact`, `high_speed`, `airborne`, `rotary_wing`, `hovering`, `fixed_wing`, `naval`, `buoyant`, `static` derived from `is_foundation`). Composable tags, not a rigid ship/land/air/building enum — matches Chris's helicopter/jet/AC-130 example directly.
+- **No validation, anywhere, by explicit instruction.** A pre-existing gate (`_place_weapon_from_ui` rejected locomotion on foundation hulls) was removed as part of applying this consistently — a mobile pillbox is now a legitimate, if odd, thing a player can build. Logged as a deliberate judgment call in DECISIONS_NEEDED.md since it changes established (not new) behavior.
+- `ModuleCatalog.is_turreted_capable(hull)`: defaults `true` for every hull that exists today (unchanged mounting behavior). `get_mount_style()` generalized: when a hull isn't turreted-capable, *everything* mounts `frame_built` (including `basic_cannon`, previously the hardcoded exception) — nothing should carry independent-traverse hardware on a unit that structurally can't traverse weapons independently.
+
+### Traits B3 + B4: new movement models + strafing AI
+
+Genuinely new movement paradigms, not reskinned existing locomotion — built together since the strafing AI behavior is implemented as part of the fixed-wing steering function itself.
+
+- Two new locomotion catalog entries: `fixed_wing_engine` (traits: `airborne`, `fixed_wing`, `high_speed`) and `naval_propeller` (traits: `buoyant`, `naval`). Procedural visuals (nacelle pod + intake ring; propeller housing + blade cluster) — no new Blender-authored geometry (see B5 below).
+- `battle_unit.gd`'s `is_flying`/new `is_fixed_wing`/`is_naval` are now derived from `ModuleCatalog.get_traits()` at `setup()` time instead of a hardcoded `locomotion_type == "helicopter_rotors"` string check. **Side benefit:** this was a real, if minor, pre-existing bug — `anti_grav` was already tagged conceptually as true hovering flight in the design docs ("ignores terrain completely") but never actually got altitude/flight behavior before, since the old check only matched `helicopter_rotors` by name. It does now.
+- New `_steer_fixed_wing()`: genuinely different from `_steer_towards()` — never arrives-and-stops (`move_speed` acts as minimum airspeed, matching real stall-speed behavior), and banks/rolls into turns proportional to turn sharpness instead of just yawing flat like a tank pivoting.
+- Naval units are surface-locked (fixed low waterline, immune to gravity/floor detection) rather than using ground physics — there's no terrain-height/water system in this prototype, so "the surface" is a fixed Y.
+- **Strafing AI (B4):** for `ATTACK` orders, fixed-wing units continuously orbit the target at `attack_range * 1.5` instead of approaching and stopping (which a plane can't do) — the orbiting flight path naturally produces repeated firing passes as it swings back within weapon range, distinct from the ground-unit approach-and-engage pattern. Applies to both teams' units equally, same as the armor-phase-5 flanking behavior.
+
+**Verified:**
+- New test `test_fixed_wing_and_naval_movement()`: confirms a fixed-wing unit never drops below minimum airspeed even when "arrived" at its destination, confirms a sharp turn produces a real bank/roll angle, and confirms a naval unit settles at the fixed waterline regardless of starting altitude/gravity.
+- Updated `test_foundation_design_lab_parity()`: previously asserted locomotion was rejected on foundations; now asserts the opposite, since that gate was removed.
+- Visual: `progress_captures/2026-07-12/new_locomotion/` — both new locomotion types render correctly on existing hulls.
+- Full suite: **32/32 green.**
+
+### B5 (new Blender-authored hull geometry for airframes/ships): deferred
+
+Consistent with every other new-art decision this week (the extra foundation type, 6 of 7 hull deforms) — the mechanics work today on the *existing* 7 hulls (I tested `fixed_wing_engine` on `light_hull` and `naval_propeller` on `heavy_hull`, both work correctly with no dedicated airframe/ship silhouette needed, since no-hard-blocking means any hull accepts any locomotion). Purpose-built hull *shapes* for aircraft/ships are a visual layer on top of working mechanics, not a blocker for the mechanics themselves. Logged in DECISIONS_NEEDED.md.
+
 ---
 
 ## 2026-07-12 (cont'd) — New scope from Chris: mounting/armor/hull-tweak rework

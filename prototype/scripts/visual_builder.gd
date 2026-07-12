@@ -955,6 +955,10 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		_build_legs(parent_node, base_size, base_color)
 	elif type_id == "anti_grav":
 		_build_anti_grav(parent_node, base_size, base_color)
+	elif type_id == "fixed_wing_engine":
+		_build_fixed_wing_engine(parent_node, base_size, base_color)
+	elif type_id == "naval_propeller":
+		_build_naval_propeller(parent_node, base_size, base_color)
 
 	# Apply deformations to the newly constructed meshes based on the tweaks
 	_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
@@ -1190,6 +1194,69 @@ static func _build_anti_grav(parent_node: Node3D, base_size: Vector3, base_color
 			ring.material_override = ring_mat
 			ring.position = Vector3(0, base_size.y / 2.0 + r * 0.05, 0)
 			parent_node.add_child(ring)
+
+
+static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# Tapered nacelle pod, oriented along local Z (forward). No authored
+	# asset yet (Traits B3 proof-of-concept, procedural like several other
+	# fallback visuals) - see DECISIONS_NEEDED.md on why new Blender-
+	# authored geometry is deferred.
+	var nacelle = MeshInstance3D.new()
+	var cyl = CylinderMesh.new()
+	cyl.top_radius = base_size.y * 0.55
+	cyl.bottom_radius = base_size.y * 0.4
+	cyl.height = base_size.z
+	nacelle.mesh = cyl
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = base_color
+	mat.metallic = 0.6
+	mat.roughness = 0.3
+	nacelle.material_override = mat
+	nacelle.rotation = Vector3(PI / 2.0, 0, 0)
+	parent_node.add_child(nacelle)
+
+	var intake = MeshInstance3D.new()
+	var intake_cyl = CylinderMesh.new()
+	intake_cyl.top_radius = base_size.y * 0.35
+	intake_cyl.bottom_radius = base_size.y * 0.35
+	intake_cyl.height = 0.08
+	intake.mesh = intake_cyl
+	var intake_mat = StandardMaterial3D.new()
+	intake_mat.albedo_color = Color(0.05, 0.05, 0.05)
+	intake.material_override = intake_mat
+	intake.rotation = Vector3(PI / 2.0, 0, 0)
+	intake.position = Vector3(0, 0, -base_size.z / 2.0 - 0.02)
+	parent_node.add_child(intake)
+
+
+static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# Stern housing + a small blade cluster - new movement paradigm
+	# proof-of-concept (Traits B3), procedural like the fixed-wing engine.
+	var housing = MeshInstance3D.new()
+	var housing_cyl = CylinderMesh.new()
+	housing_cyl.top_radius = base_size.x * 0.4
+	housing_cyl.bottom_radius = base_size.x * 0.5
+	housing_cyl.height = base_size.z * 0.7
+	housing.mesh = housing_cyl
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = base_color.darkened(0.2)
+	mat.metallic = 0.7
+	mat.roughness = 0.4
+	housing.material_override = mat
+	housing.rotation = Vector3(PI / 2.0, 0, 0)
+	parent_node.add_child(housing)
+
+	for i in range(3):
+		var blade = MeshInstance3D.new()
+		var blade_box = BoxMesh.new()
+		blade_box.size = Vector3(0.04, base_size.x * 0.7, 0.12)
+		blade.mesh = blade_box
+		var blade_mat = StandardMaterial3D.new()
+		blade_mat.albedo_color = Color.SILVER
+		blade.material_override = blade_mat
+		blade.position = Vector3(0, 0, base_size.z * 0.4)
+		blade.rotate_z(i * (TAU / 3.0))
+		parent_node.add_child(blade)
 
 
 # MOUNTING_AND_ARMOR_SPEC.md #3: generic (not per-weapon-type-bespoke) mount
