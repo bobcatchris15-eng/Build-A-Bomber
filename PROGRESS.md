@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 3) — Gap analysis, headless UI-bug detection (found + fixed a real bug), starting AI/pathfinding
+
+Chris asked for three things: an honest gap analysis against all 6 design docs, a green light to start real unit AI/pathfinding/attack-behavior work, and an investigation (build-if-feasible) into automated visual/UI bug detection. Full gap analysis and feasibility findings are in the conversation transcript / relayed to Chris directly — summary of what shipped from it:
+
+### UI overflow/off-screen detection: built, and it immediately found a real bug
+
+Verified two techniques empirically against the real game UI (not assumed):
+- **The naive approach doesn't work here.** Comparing a `Label`'s own `.size` to its own `get_minimum_size()` is meaningless in this codebase, because the UI is `VBoxContainer`-heavy and auto-sizing — a control's size trivially always equals its own minimum. Proved this by trying it and watching it fail a forced sanity check.
+- **The real signal:** compare a genuinely fixed-size ancestor (a `ScrollContainer` anchored to a real screen region) against its content's natural combined minimum size. Also learned (the hard way, debugging a false-negative in my own sanity test) that Godot enforces an internal floor where most Container types can never have `.size` smaller than their own minimum — `ScrollContainer` is specifically the exception, which is *why* the real bug below used one.
+- New `scripts/ui_audit.gd`: `find_overflowing_panels()` and `find_offscreen_controls()`, both pure functions, no windowed rendering needed, fast enough for the existing suite.
+- **Found a real, pre-existing bug on the first real run:** the "Armor Thresholds: K: 15.0, T: 5.0, E: 10.0" label needs 305px but its panel is 210px wide — this is the exact text-clipping artifact visible in several of today's *own* verification screenshots that I never flagged as a bug. Fixed with `autowrap_mode = AUTOWRAP_WORD_SMART` (wraps to 2 lines instead of a fixed truncation width, so it stays correct as threshold values grow more digits). Verified visually — `progress_captures/2026-07-12/ui_overflow_fix/`.
+- Two new tests: `test_ui_no_overflow_or_offscreen()` (regression-guards the real `MainLab.tscn` scene, now clean) and `test_ui_audit_has_real_teeth()` (sanity-checks the tool itself against an injected overflow and an injected off-screen control, so a future refactor can't silently turn it into a no-op).
+- **Screenshot-diffing was investigated but not built** — it needs windowed rendering (headless Godot doesn't rasterize), a maintained baseline-image directory, and tolerance for legitimate rendering variance. Logged as a documented option, not the default, per Chris's explicit instruction not to default to the most expensive version.
+
+**Verified:** Full suite: **34/34 green.**
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 (cont'd 2) — New direction: full directional armor + trait-based unit classes, no hard gating
 
 Chris reviewed the phased-plan writeup and gave the call: go as far as possible on both the full armor phase list (including sloped-armor raycast math and AI facing-awareness) and the full trait system (including new movement models and strafing AI), not just the cheap tiers. Explicit constraint: **traits/hulls/locomotion must never hard-block each other** — a player can put treads on a naval hull if they want; bad combinations should produce janky emergent behavior, not a validation wall. This is now the priority, sequenced as: Armor (dedupe → facet resolution → per-module material → sloped armor → AI facing) then Traits (formalize → generalize mounting → new movement models → new AI → new hull art).

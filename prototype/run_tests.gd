@@ -49,6 +49,8 @@ func _init():
 	success = success and await test_ai_flanking_targets_weakest_facet()
 	success = success and await test_trait_system_composability()
 	success = success and await test_fixed_wing_and_naval_movement()
+	success = success and await test_ui_no_overflow_or_offscreen()
+	success = success and await test_ui_audit_has_real_teeth()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1840,6 +1842,107 @@ func test_fixed_wing_and_naval_movement() -> bool:
 	ship.queue_free()
 
 	print("  [PASS] Fixed-wing units never stop and bank into turns; naval units stay surface-locked, unaffected by gravity.")
+	return true
+
+func test_ui_no_overflow_or_offscreen() -> bool:
+	print("Running Test Suite: UI Overflow + Off-Screen Audit (headless, no windowed rendering needed)...")
+	# Validated technique (see PROGRESS.md): compare each fixed-size panel's
+	# actual size against its content's natural combined minimum size -
+	# NOT a control's own size vs its own minimum, which is meaningless in
+	# this codebase's auto-sizing VBoxContainer-heavy layout.
+	var UIAuditScript = preload("res://scripts/ui_audit.gd")
+
+	# Force the real project resolution - headless mode's default viewport
+	# is a tiny 64x64 unless explicitly set, which would make every anchor-
+	# based layout calculation meaningless. Confirmed empirically that this
+	# needs to be re-asserted after a frame (the first assignment doesn't
+	# reliably stick before the scene's own _ready() runs).
+	root.size = Vector2i(1280, 720)
+	var scene = load("res://scenes/MainLab.tscn").instantiate()
+	root.add_child(scene)
+	await process_frame
+	root.size = Vector2i(1280, 720)
+	await process_frame
+	root.size = Vector2i(1280, 720)
+	await process_frame
+
+	var overflow = UIAuditScript.find_overflowing_panels(scene)
+	if not overflow.is_empty():
+		for o in overflow:
+			print("  [FAIL] UI overflow: ", o.path, " fixed_size=", o.fixed_size, " content_min=", o.content_min_size, " culprit=", o.culprit)
+		scene.queue_free()
+		return false
+
+	var viewport_rect = Rect2(Vector2.ZERO, root.get_visible_rect().size)
+	var offscreen = UIAuditScript.find_offscreen_controls(scene, viewport_rect)
+	if not offscreen.is_empty():
+		for o in offscreen:
+			print("  [FAIL] Off-screen control: ", o.path, " rect=", o.rect, " (viewport=", viewport_rect, ")")
+		scene.queue_free()
+		return false
+
+	scene.queue_free()
+	print("  [PASS] No UI panels have content wider/taller than their fixed size, and nothing is positioned off-screen (MainLab.tscn).")
+	return true
+
+func test_ui_audit_has_real_teeth() -> bool:
+	print("Running Test Suite: UI Audit Tool Sanity Check (does it actually catch bugs?)...")
+	# Guards against a future refactor silently making the checker a no-op -
+	# the MainLab.tscn regression test above only proves today's UI is
+	# clean, not that the tool would notice if it stopped being clean.
+	var UIAuditScript = preload("res://scripts/ui_audit.gd")
+
+	# --- Overflow: a fixed-size panel with a child that needs more room ---
+	# Must use ScrollContainer, not PanelContainer/VBoxContainer: Godot
+	# enforces an internal floor where a Container's own .size can never be
+	# set smaller than its own computed minimum size, UNLESS that container
+	# type is specifically designed to allow oversized content (that's the
+	# entire point of ScrollContainer - clip/scroll rather than grow).
+	# Confirmed empirically: a PanelContainer's forced .size silently
+	# snapped back to its content's exact minimum on every attempt. This is
+	# also *why* the real bug this tool caught used a ScrollContainer.
+	var panel = ScrollContainer.new()
+	panel.size = Vector2(100, 40)
+	root.add_child(panel)
+	var wide_label = Label.new()
+	wide_label.text = "This label is deliberately far too wide for a 100px panel"
+	panel.add_child(wide_label)
+	await process_frame
+	await process_frame
+	panel.size = Vector2(100, 40)
+
+	var overflow = UIAuditScript.find_overflowing_panels(panel)
+	if overflow.is_empty():
+		print("  [FAIL] UI audit tool failed to catch a deliberately injected overflow - it has no teeth")
+		panel.queue_free()
+		return false
+
+	# A panel that's actually big enough should NOT be flagged.
+	panel.size = Vector2(600, 40)
+	await process_frame
+	var no_overflow = UIAuditScript.find_overflowing_panels(panel)
+	if not no_overflow.is_empty():
+		print("  [FAIL] UI audit tool false-positived on a panel that's actually large enough for its content: ", no_overflow)
+		panel.queue_free()
+		return false
+	panel.queue_free()
+
+	# --- Off-screen: a control positioned entirely outside the viewport ---
+	var offscreen_control = ColorRect.new()
+	offscreen_control.position = Vector2(5000, 5000)
+	offscreen_control.size = Vector2(50, 50)
+	root.add_child(offscreen_control)
+	await process_frame
+
+	var viewport_rect = Rect2(Vector2.ZERO, root.get_visible_rect().size)
+	var offscreen_results = UIAuditScript.find_offscreen_controls(offscreen_control, viewport_rect)
+	if offscreen_results.is_empty():
+		print("  [FAIL] UI audit tool failed to catch a control positioned at (5000,5000), off-screen")
+		offscreen_control.queue_free()
+		return false
+	offscreen_control.queue_free()
+
+	print("  [PASS] UI audit tool correctly catches injected overflow/off-screen bugs and doesn't false-positive on legitimately-sized panels.")
 	return true
 
 # --- Skirmish mode test suites ---

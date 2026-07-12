@@ -4,6 +4,18 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Screenshot-diffing for visual regression testing: investigated, not built
+
+**Not blocking.**
+
+Chris explicitly asked me not to default to the most expensive version of visual-bug detection without laying out the cost/benefit. The two cheap, headless-feasible techniques (panel-overflow detection, off-screen-control detection) are built and already found a real bug. Screenshot-diffing is the natural next tier — it would catch things the cheap checks structurally can't (a missing/wrong texture, actual pixel-level layout drift, a mesh clipping through UI) — but:
+
+**Cost:** needs windowed rendering (confirmed via memory/this week's own experience: headless Godot's dummy renderer doesn't rasterize), so it can't live in the fast headless suite — it needs its own slower windowed pass. It also needs a maintained baseline-image directory (checked into git or stored separately) and a tolerance threshold tuned to avoid false positives from legitimate minor rendering variance (anti-aliasing, driver differences).
+
+**Default I'm proceeding with:** not building it now. Logged as an available, well-understood option rather than attempted speculatively.
+
+---
+
 ## 2026-07-12 — Removed the pre-existing "no locomotion on foundations" hard-block
 
 **Not blocking.**

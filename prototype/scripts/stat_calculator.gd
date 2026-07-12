@@ -467,6 +467,15 @@ func update_stats(hull: Node3D):
 	
 	if not armor_threshold_label:
 		armor_threshold_label = Label.new()
+		# Found by the new headless UI-overflow audit: this label's natural
+		# single-line width (305px, "Armor Thresholds: K: 15.0, T: 5.0,
+		# E: 10.0") exceeds the sidebar's fixed 210px width - it was
+		# silently clipping/spilling past the panel edge (visible in
+		# several of today's own verification screenshots as a stray
+		# trailing character, never flagged as a bug until now). Word-wrap
+		# instead of a hardcoded width, since threshold values can grow to
+		# more digits than today's baseline numbers.
+		armor_threshold_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		$ScrollContainer/VBoxContainer.add_child(armor_threshold_label)
 	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
 
