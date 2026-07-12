@@ -41,6 +41,7 @@ func _init():
 	success = success and await test_armor_module_combat_bonus()
 	success = success and await test_face_based_weapon_mounting()
 	success = success and await test_centerline_placement_does_not_self_mirror()
+	success = success and await test_hull_nose_taper()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1431,6 +1432,84 @@ func test_centerline_placement_does_not_self_mirror() -> bool:
 	placer.queue_free()
 	print("  [PASS] Centerline-placed modules no longer mirror onto their own position.")
 	return true
+
+func test_hull_nose_taper() -> bool:
+	print("Running Test Suite: Interceptor Hull Nose Taper (MOUNTING_AND_ARMOR_SPEC.md #4 proof-of-concept)...")
+	var MeshAssetLoaderScript = preload("res://scripts/mesh_asset_loader.gd")
+	var HullDeformScript = preload("res://scripts/hull_deform.gd")
+
+	var cached_before = MeshAssetLoaderScript.get_hull_mesh("interceptor_hull")
+	if not cached_before:
+		print("  [FAIL] interceptor_hull has no authored mesh - can't test deform")
+		return false
+	var cached_vertex_count_before = _count_mesh_vertices(cached_before)
+
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	var bm = Node.new()
+	bm.name = "BlueprintManager"
+	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
+	placer.add_child(bm)
+	await process_frame
+
+	placer._place_hull_from_ui("interceptor_hull")
+	await process_frame
+
+	var mesh_inst = placer.hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
+	var default_mesh = mesh_inst.mesh
+
+	placer.hull.set_meta("nose_taper", 0.4)
+	placer.update_hull_appearance()
+	await process_frame
+
+	if mesh_inst.mesh == default_mesh:
+		print("  [FAIL] Applying a nose_taper should produce a different mesh resource than the default")
+		placer.queue_free()
+		return false
+
+	# The shared cached asset must never be mutated by the deform - only a
+	# fresh copy should change.
+	var cached_after = MeshAssetLoaderScript.get_hull_mesh("interceptor_hull")
+	var cached_vertex_count_after = _count_mesh_vertices(cached_after)
+	if cached_vertex_count_after != cached_vertex_count_before:
+		print("  [FAIL] MeshAssetLoader's cached interceptor_hull mesh was mutated by the deform (vertex count changed)")
+		placer.queue_free()
+		return false
+
+	# Round-trip through save->battle-spawn: the taper must survive, not
+	# silently reset to the default nose shape (this was a real gap found
+	# while implementing - reconstruct_vehicle() never used authored hull
+	# meshes at all before this fix, always falling back to a plain box).
+	var snapshot = bm.serialize_hull(placer.hull)
+	if abs(snapshot.get("nose_taper", 1.0) - 0.4) > 0.001:
+		print("  [FAIL] nose_taper should be captured in the serialized snapshot")
+		placer.queue_free()
+		return false
+
+	var battle_parent = Node3D.new()
+	root.add_child(battle_parent)
+	var battle_hull = bm.reconstruct_vehicle(snapshot, battle_parent, false)
+	await process_frame
+	var battle_mesh_inst = battle_hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
+	if not battle_mesh_inst or not battle_mesh_inst.mesh or battle_mesh_inst.mesh is BoxMesh:
+		print("  [FAIL] Battle-spawned interceptor_hull should use the authored (tapered) mesh, not a plain box")
+		placer.queue_free()
+		battle_parent.queue_free()
+		return false
+
+	placer.queue_free()
+	battle_parent.queue_free()
+	print("  [PASS] Nose taper deforms a fresh mesh copy (cache untouched) and survives the battle-spawn round-trip.")
+	return true
+
+func _count_mesh_vertices(mesh: Mesh) -> int:
+	var total = 0
+	for surf in range(mesh.get_surface_count()):
+		var arrays = mesh.surface_get_arrays(surf)
+		total += (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+	return total
 
 # --- Skirmish mode test suites ---
 

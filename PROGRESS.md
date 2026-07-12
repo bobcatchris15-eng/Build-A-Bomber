@@ -83,6 +83,23 @@ MOUNTING_AND_ARMOR_SPEC.md #3. **Scoping choice, logged upfront:** implemented a
 
 ---
 
+### Item 5 shipped: hull tweakability beyond uniform scaling
+
+MOUNTING_AND_ARMOR_SPEC.md #4, the final item.
+
+- **Overall SIZE control: verified, not built.** The existing hull gizmo already provides independent X/Y/Z scale handles (confirmed working throughout every test today) — this already satisfies "an overall size scale control for the whole hull."
+- **Per-hull custom deform rigging: proof-of-concept for `interceptor_hull` only** (see DECISIONS_NEEDED.md for why the other 6 are deferred — this needs a real design decision per hull about what region is interesting to deform, not just mechanical repetition). Added a "Nose Taper" slider that reshapes just the nose region of the *actual authored mesh* via `MeshDataTool` — genuine runtime per-vertex editing (region-selected by local Z position with linear falloff into the untouched hull body), not a preset-shape swap or a second mesh layered on top. New `hull_deform.gd`.
+- **Real bug found and fixed along the way:** `blueprint_manager.gd`'s `reconstruct_vehicle()` never used the authored `.glb` hull meshes at all — every loaded blueprint or battle-spawned unit rendered as a plain box regardless of hull type, meaning the nice hull shapes only ever appeared in the Design Lab. Found because it would have made the nose taper invisible outside the Design Lab. Fixed to match the Design Lab's own mesh-selection logic — this improves the visual fidelity of every hull type in Skirmish/Test Range, not just interceptor_hull.
+
+**Verified:**
+- New test `test_hull_nose_taper()`: confirms the deform produces a different mesh resource, confirms `MeshAssetLoader`'s shared cached mesh is never mutated (deform always returns a fresh copy), and confirms the taper survives serialize → reconstruct_vehicle → battle-spawn.
+- Visual: `progress_captures/2026-07-12/nose_taper/` — default vs. 0.35x sharp taper vs. 1.4x flared, clearly distinct silhouettes, no mesh corruption/artifacts.
+- Full suite: **25/25 green.**
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 — v1.0-beta tagged (Sun-Thu work completed in one continuous session)
 
 Chris asked me to push through as much of the week's plan as possible in a single extended session rather than waiting on cron cycles that turned out not to be available in this environment. Completed the full Sunday-through-Thursday plan; tagging `v1.0-beta` here rather than padding out Friday/Saturday with manufactured busywork, since the actual beta bar (defined in the original plan) is met:

@@ -110,6 +110,8 @@ var armor_mat_btn: OptionButton
 var armor_thick_label: Label
 var armor_thick_slider: HSlider
 var armor_threshold_label: Label
+var nose_taper_label: Label
+var nose_taper_slider: HSlider
 
 func _ready():
 	add_to_group("stat_ui")
@@ -164,7 +166,27 @@ func _ready():
 	$ScrollContainer/VBoxContainer.add_child(armor_thick_slider)
 	armor_thick_slider.value_changed.connect(_on_armor_thickness_changed)
 	armor_thick_slider.drag_started.connect(_push_undo)
-	
+
+	# Per-hull-type custom deform proof-of-concept (MOUNTING_AND_ARMOR_SPEC.md
+	# #4) - only shown for interceptor_hull, see DECISIONS_NEEDED.md for why
+	# the other 6 hulls don't have this yet. Reshapes the nose region of the
+	# actual mesh (HullDeform.apply_nose_taper via MeshDataTool), distinct
+	# from the uniform hull-scale handles which stretch the whole hull evenly.
+	nose_taper_label = Label.new()
+	nose_taper_label.text = "Nose Taper"
+	$ScrollContainer/VBoxContainer.add_child(nose_taper_label)
+
+	nose_taper_slider = HSlider.new()
+	nose_taper_slider.min_value = 0.3
+	nose_taper_slider.max_value = 1.5
+	nose_taper_slider.step = 0.05
+	nose_taper_slider.value = 1.0
+	$ScrollContainer/VBoxContainer.add_child(nose_taper_slider)
+	nose_taper_slider.value_changed.connect(_on_nose_taper_changed)
+	nose_taper_slider.drag_started.connect(_push_undo)
+	nose_taper_slider.visible = false
+	nose_taper_label.visible = false
+
 	# Create Module Tweaks container
 	module_tweaks_container = VBoxContainer.new()
 	module_tweaks_container.name = "ModuleTweaksContainer"
@@ -317,6 +339,15 @@ func sync_hull_ui(hull: Node3D):
 		armor_thick_slider.value = thick
 		if armor_thick_label:
 			armor_thick_label.text = "Armor Thickness: %.1f" % thick
+	if nose_taper_slider and nose_taper_label:
+		var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
+		var is_interceptor = hull_type == "interceptor_hull"
+		nose_taper_slider.visible = is_interceptor
+		nose_taper_label.visible = is_interceptor
+		if is_interceptor:
+			var taper = hull.get_meta("nose_taper") if hull.has_meta("nose_taper") else 1.0
+			nose_taper_slider.value = taper
+			nose_taper_label.text = "Nose Taper: %.2fx" % taper
 	var faction_btn = $ScrollContainer/VBoxContainer.get_node_or_null("FactionDropdown") as OptionButton
 	if faction_btn:
 		var fac = hull.get_meta("faction") if hull.has_meta("faction") else "industrialists"
@@ -626,6 +657,20 @@ func _on_armor_thickness_changed(value: float):
 	hull.set_meta("armor_thickness", value)
 	if armor_thick_label:
 		armor_thick_label.text = "Armor Thickness: %.1f" % value
+	if root.has_method("update_hull_appearance"):
+		root.update_hull_appearance()
+	update_stats(hull)
+
+func _on_nose_taper_changed(value: float):
+	if is_updating_sliders: return
+	var root = get_node_or_null("/root/MainLab")
+	if not root: return
+	var hull = root.get_node_or_null("Hull")
+	if not hull: return
+
+	hull.set_meta("nose_taper", value)
+	if nose_taper_label:
+		nose_taper_label.text = "Nose Taper: %.2fx" % value
 	if root.has_method("update_hull_appearance"):
 		root.update_hull_appearance()
 	update_stats(hull)

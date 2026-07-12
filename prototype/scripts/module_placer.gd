@@ -4,6 +4,7 @@ const ModuleData = preload("res://scripts/module_data.gd")
 const Gizmo3D = preload("res://scenes/Gizmo3D.tscn")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
+const HullDeformScript = preload("res://scripts/hull_deform.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -832,6 +833,15 @@ func update_hull_appearance():
 	var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
 	var authored_mesh = MeshAssetLoader.get_hull_mesh(type_id)
 	if authored_mesh:
+		# Per-hull-type custom deform (MOUNTING_AND_ARMOR_SPEC.md #4),
+		# proof-of-concept for interceptor_hull only. Genuine regional
+		# reshaping of the actual authored mesh via MeshDataTool, not a mesh
+		# swap - apply_nose_taper() returns a fresh ArrayMesh each time, so
+		# this never mutates MeshAssetLoader's cached shared resource.
+		if type_id == "interceptor_hull" and hull.has_meta("nose_taper"):
+			var taper = hull.get_meta("nose_taper")
+			if abs(taper - 1.0) > 0.001:
+				authored_mesh = HullDeformScript.apply_nose_taper(authored_mesh, taper)
 		mesh_inst.mesh = authored_mesh
 		mesh_inst.scale = hull_scale * armor_bulk
 	else:

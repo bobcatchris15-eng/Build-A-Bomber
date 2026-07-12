@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Per-hull custom deform rigging built for interceptor_hull only, other 6 hulls deferred
+
+**Not blocking — Chris explicitly authorized scoping this and logging tradeoffs (MOUNTING_AND_ARMOR_SPEC.md #4).**
+
+"Per-hull-type custom deform rigging that reshapes different parts of that specific hull differently" is, done exhaustively, a bespoke-rigging task for all 7 hull/foundation types — each needs its own thought about which regions make sense to deform and how. That's a much bigger scope than fits in one pass alongside everything else today.
+
+**What I built:** a genuine proof-of-concept on `interceptor_hull` — a "Nose Taper" slider that reshapes just the nose region of the *actual authored mesh* via `MeshDataTool` (runtime per-vertex editing, region-selected by local Z position, with linear falloff so it blends into the untouched hull body), not a swap between preset shapes and not a second mesh layered on top. This is the real technique the other 6 hulls would use too, once someone decides what "the interesting region to deform" means for each of them (e.g. pillbox_foundation's dome height, assault_hull's front glacis angle).
+
+**Also fixed along the way, not just for this feature:** `blueprint_manager.gd`'s `reconstruct_vehicle()` never used the authored `.glb` hull meshes at all — every loaded/battle-spawned hull was a plain `BoxMesh` regardless of type, meaning the nice hull shapes only ever showed up in the Design Lab. Found because the nose taper would otherwise have been invisible the moment a design was saved or fielded. Fixed to match `update_hull_appearance()`'s mesh-selection logic, and the taper now survives the full save → reconstruct → battle-spawn round-trip (verified with a test).
+
+**Why not all 7:** each hull needs a real design decision about what "the interesting region" is, not just mechanical repetition of the same code pattern — doing that well for 6 more hulls without being able to interactively iterate on how each one looks isn't a good use of unattended time. Flagging as the natural next step once someone can look at each hull and decide.
+
+---
+
 ## 2026-07-12 — Face-based mounting implemented generically, not as bespoke visuals per weapon type
 
 **Not blocking.**

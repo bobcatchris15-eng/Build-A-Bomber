@@ -1,5 +1,8 @@
 extends Node
 
+const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
+const HullDeformScript = preload("res://scripts/hull_deform.gd")
+
 func serialize_hull(hull: Node3D) -> Dictionary:
 	if not hull:
 		return {}
@@ -18,6 +21,7 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 		"hull_size": {"x": hull_size.x, "y": hull_size.y, "z": hull_size.z},
 		"armor_material": hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel",
 		"armor_thickness": hull.get_meta("armor_thickness") if hull.has_meta("armor_thickness") else 1.0,
+		"nose_taper": hull.get_meta("nose_taper") if hull.has_meta("nose_taper") else 1.0,
 		"faction": hull.get_meta("faction") if hull.has_meta("faction") else "industrialists",
 		"locomotion": {
 			"type_id": locomotion_type,
@@ -240,22 +244,38 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	var armor_thick = blueprint_data.get("armor_thickness", 1.0)
 	var armor_mat_name = blueprint_data.get("armor_material", "hardened_steel")
 	var faction_name = blueprint_data.get("faction", "industrialists")
+	var nose_taper = blueprint_data.get("nose_taper", 1.0)
 	hull.set_meta("armor_thickness", armor_thick)
 	hull.set_meta("armor_material", armor_mat_name)
 	hull.set_meta("faction", faction_name)
+	hull.set_meta("nose_taper", nose_taper)
 	hull.set_meta("blueprint_id", blueprint_data.get("id", ""))
 	hull.set_meta("blueprint_name", blueprint_data.get("name", "Untitled Design"))
-	
+
 	# Bulk size based on thickness
 	var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
-	
-	# Re-create Hull's MeshInstance3D
+
+	# Re-create Hull's MeshInstance3D. Prefer the authored .glb (matches what
+	# the Design Lab shows via module_placer.gd's update_hull_appearance())
+	# over a plain box - this was previously always a box regardless of
+	# authored-mesh availability, meaning every loaded/battle-spawned hull
+	# looked different from how it was designed. Found while wiring up the
+	# nose-taper hull deform (MOUNTING_AND_ARMOR_SPEC.md #4): without this
+	# fix, a tapered nose would only ever be visible in the Design Lab and
+	# silently vanish the moment the design was saved, loaded, or fielded.
 	var mesh_inst = MeshInstance3D.new()
 	mesh_inst.name = "MeshInstance3D"
-	var box = BoxMesh.new()
-	box.size = catalog_data.size * hull_scale * armor_bulk
-	mesh_inst.mesh = box
-	
+	var authored_hull_mesh = MeshAssetLoader.get_hull_mesh(hull_type)
+	if authored_hull_mesh:
+		if hull_type == "interceptor_hull" and abs(nose_taper - 1.0) > 0.001:
+			authored_hull_mesh = HullDeformScript.apply_nose_taper(authored_hull_mesh, nose_taper)
+		mesh_inst.mesh = authored_hull_mesh
+		mesh_inst.scale = hull_scale * armor_bulk
+	else:
+		var box = BoxMesh.new()
+		box.size = catalog_data.size * hull_scale * armor_bulk
+		mesh_inst.mesh = box
+
 	var mat = StandardMaterial3D.new()
 	if armor_mat_name == "hardened_steel":
 		mat.albedo_color = Color.GRAY
