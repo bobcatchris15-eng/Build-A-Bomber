@@ -573,6 +573,47 @@ static func needs_combat_script(type_id: String) -> bool:
 		return true
 	return type_id in ["repair_array", "drone_carrier"]
 
+# Categories that count as a "legitimate non-combat purpose" - a design
+# with one of these and no weapon is intentionally support/utility, not an
+# accident. Anything else with zero weapons and none of these categories
+# is a motionless, harmless brick the player almost certainly forgot to
+# finish, not a deliberate build.
+const SUPPORT_CATEGORIES = ["generator"]
+const SUPPORT_TYPE_IDS = ["repair_array", "drone_carrier", "resource_harvester", "sensor_suite", "logistics_tank"]
+
+# Build-legality gate (ENERGY_AND_BALANCE_SPEC.md #3/DECISIONS_NEEDED.md):
+# a design must have a hull, must have a weapon or a legitimate support/
+# utility purpose, and must have locomotion or be intentionally static
+# (a foundation). Returns {"valid": bool, "reason": String} - reason is
+# empty when valid, a player-facing explanation otherwise. Pure/static so
+# both the Skirmish match-queue gate and (if ever needed) the Design Lab
+# can call the exact same check.
+static func validate_build_legality(blueprint_data: Dictionary) -> Dictionary:
+	var hull_type = blueprint_data.get("hull_type", "")
+	if hull_type == "" or not get_catalog().has(hull_type):
+		return {"valid": false, "reason": "No hull selected."}
+
+	var has_weapon = false
+	var has_support = false
+	var has_locomotion = false
+	for mod in blueprint_data.get("modules", []):
+		var type_id = mod.get("type_id", "")
+		if type_id == "": continue
+		var data = get_module_data(type_id)
+		var category = data.get("category", "")
+		if category == "weapon":
+			has_weapon = true
+		elif category in SUPPORT_CATEGORIES or type_id in SUPPORT_TYPE_IDS:
+			has_support = true
+		if category == "locomotion":
+			has_locomotion = true
+
+	if not has_weapon and not has_support:
+		return {"valid": false, "reason": "No weapon or support module - this design doesn't do anything."}
+	if not has_locomotion and not is_foundation(hull_type):
+		return {"valid": false, "reason": "No locomotion - this design can't move (use a foundation hull for a static build)."}
+	return {"valid": true, "reason": ""}
+
 # --- Unit-class traits (MOUNTING_AND_ARMOR_SPEC.md addendum) ---
 # Composable tags, not a hard ship/land/air/building enum, so a helicopter
 # that behaves like a ground vehicle at scale and three different fixed-wing

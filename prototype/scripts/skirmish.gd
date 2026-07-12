@@ -425,6 +425,10 @@ func _queue_player_unit(entry: Dictionary):
 	if not factory:
 		_flash_status("No factory! Build one first.")
 		return
+	var legality = ModuleCatalog.validate_build_legality(entry.blueprint)
+	if not legality.valid:
+		_flash_status("%s can't be built: %s" % [entry.name, legality.reason])
+		return
 	if not spend(PLAYER_TEAM, entry.cost_metal, entry.cost_crystal):
 		_flash_status("Not enough resources for %s!" % entry.name)
 		return
@@ -438,6 +442,11 @@ func _queue_player_unit(entry: Dictionary):
 
 func _begin_placement(info: Dictionary):
 	if game_over: return
+	if info.kind == "defense":
+		var legality = ModuleCatalog.validate_build_legality(info.blueprint)
+		if not legality.valid:
+			_flash_status("Can't build this: %s" % legality.reason)
+			return
 	if not can_afford(PLAYER_TEAM, info.cost_metal, info.cost_crystal):
 		_flash_status("Not enough resources!")
 		return

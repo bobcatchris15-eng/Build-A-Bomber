@@ -65,6 +65,7 @@ func _init():
 	success = success and await test_energy_weapons_cost_and_drain()
 	success = success and await test_logistics_sharing_boosts_allies()
 	success = success and await test_support_modules_get_combat_script_in_real_spawn()
+	success = success and await test_build_legality_gate()
 
 	print("\n==============================================")
 	if success:
@@ -2755,4 +2756,82 @@ func test_support_modules_get_combat_script_in_real_spawn() -> bool:
 		return false
 
 	print("  [PASS] repair_array and drone_carrier both receive auto_weapon.gd through the real spawn pipeline (battle_unit.gd/battlefield.gd/building.gd all use ModuleCatalog.needs_combat_script()).")
+	return true
+
+func test_build_legality_gate() -> bool:
+	print("Running Test Suite: Build-Legality Gate (hull + weapon-or-support + locomotion-or-static)...")
+
+	var no_hull = {"hull_type": "", "modules": []}
+	if ModuleCatalog.validate_build_legality(no_hull).valid:
+		print("  [FAIL] A blueprint with no hull should be invalid")
+		return false
+
+	var brick = {"hull_type": "medium_hull", "modules": []}
+	if ModuleCatalog.validate_build_legality(brick).valid:
+		print("  [FAIL] A hull with no weapon/support and no locomotion should be invalid (accidental brick)")
+		return false
+
+	var weapon_no_loco = {"hull_type": "medium_hull", "modules": [{"type_id": "basic_cannon"}]}
+	var weapon_no_loco_result = ModuleCatalog.validate_build_legality(weapon_no_loco)
+	if weapon_no_loco_result.valid:
+		print("  [FAIL] A weapon alone doesn't excuse missing locomotion on a non-foundation hull")
+		return false
+	if "locomotion" not in weapon_no_loco_result.reason.to_lower():
+		print("  [FAIL] The rejection reason should mention locomotion, got: ", weapon_no_loco_result.reason)
+		return false
+
+	var full_mobile = {"hull_type": "medium_hull", "modules": [{"type_id": "basic_cannon"}, {"type_id": "tracked_treads"}]}
+	if not ModuleCatalog.validate_build_legality(full_mobile).valid:
+		print("  [FAIL] Hull + weapon + locomotion should be a valid mobile design")
+		return false
+
+	# Support-only (no weapon) on a foundation - a static sensor tower or
+	# generator outpost - is a legitimate intentional build, not a brick.
+	var static_support = {"hull_type": "pillbox_foundation", "modules": [{"type_id": "sensor_suite"}]}
+	if not ModuleCatalog.validate_build_legality(static_support).valid:
+		print("  [FAIL] A foundation with a support module (no weapon) should be a valid intentional static build")
+		return false
+
+	# Support-only on a MOBILE hull with no locomotion is still a brick -
+	# support doesn't excuse missing locomotion any more than a weapon does.
+	var mobile_support_no_loco = {"hull_type": "medium_hull", "modules": [{"type_id": "sensor_suite"}]}
+	if ModuleCatalog.validate_build_legality(mobile_support_no_loco).valid:
+		print("  [FAIL] A non-foundation hull with only a support module and no locomotion should still be invalid")
+		return false
+
+	# drone_carrier alone (no "weapon"-category module) counts as a real
+	# combat purpose, not an accidental brick.
+	var drone_only = {"hull_type": "light_hull", "modules": [{"type_id": "drone_carrier"}, {"type_id": "wheels"}]}
+	if not ModuleCatalog.validate_build_legality(drone_only).valid:
+		print("  [FAIL] A drone_carrier-only combat design should be valid")
+		return false
+
+	# --- Integration: the match-queue gate actually rejects, and never spends resources ---
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	var illegal_entry = {
+		"blueprint": {"hull_type": "medium_hull", "modules": []},
+		"name": "Accidental Brick",
+		"cost_metal": 50,
+		"cost_crystal": 0,
+	}
+	skirmish._queue_player_unit(illegal_entry)
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != metal_before:
+		print("  [FAIL] Queuing an illegal design should never spend resources")
+		skirmish.queue_free()
+		return false
+	var factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM)
+	if factory and not factory.production_queue.is_empty():
+		print("  [FAIL] An illegal design should never enter the production queue")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] validate_build_legality() correctly gates hull/weapon-or-support/locomotion-or-static, and the match-queue path rejects illegal designs without spending resources.")
 	return true

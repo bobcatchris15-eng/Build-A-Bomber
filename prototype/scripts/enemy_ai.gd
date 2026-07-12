@@ -42,10 +42,16 @@ func _physics_process(delta):
 		# Small pity trickle so the AI never fully stalls
 		skirmish.add_resources(team, 10, 3)
 
+const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+
 func _combat_roster() -> Array:
 	var list = []
 	for entry in skirmish.enemy_roster:
 		if entry.is_defense: continue
+		# Defensive - the bundled enemy blueprints are legal by construction,
+		# but the AI should never waste resources building a design that
+		# can't actually do anything, same gate the player is held to.
+		if not ModuleCatalog.validate_build_legality(entry.blueprint).valid: continue
 		var is_harv = false
 		for mod in entry.blueprint.get("modules", []):
 			if mod.get("type_id", "") == "resource_harvester":
