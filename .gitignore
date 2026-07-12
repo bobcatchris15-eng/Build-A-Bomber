@@ -1,0 +1,16 @@
+# Bundled engine binaries (large, static, not source)
+prototype/Godot_v4.3-stable_win64.exe
+prototype/Godot_v4.3-stable_win64_console.exe
+prototype/godot.exe
+prototype/godot.zip
+prototype/UPBGE-0.30-windows-x86_64/
+
+# Godot editor cache (regenerable; import artifacts committed separately when needed)
+prototype/.godot/
+
+# Transient
+prototype/log.txt
+prototype/test_output.txt
+
+# Local tool config (not project source)
+.antigravitycli/

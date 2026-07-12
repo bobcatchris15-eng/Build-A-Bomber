@@ -1,0 +1,49 @@
+[gd_scene load_steps=9 format=3 uid="uid://cxabskirmish123"]
+
+[ext_resource type="Script" path="res://scripts/skirmish.gd" id="1_skirmish"]
+[ext_resource type="Script" path="res://scripts/rts_camera.gd" id="2_rtscam"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sk"]
+sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+ground_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+
+[sub_resource type="Sky" id="Sky_sk"]
+sky_material = SubResource("ProceduralSkyMaterial_sk")
+
+[sub_resource type="Environment" id="Environment_sk"]
+background_mode = 2
+sky = SubResource("Sky_sk")
+tonemap_mode = 2
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
+size = Vector3(160, 1, 160)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground"]
+size = Vector3(160, 1, 160)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.2, 0.26, 0.21, 1)
+
+[node name="Skirmish" type="Node3D"]
+script = ExtResource("1_skirmish")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_sk")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 20, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 26, 52)
+script = ExtResource("2_rtscam")
+
+[node name="Ground" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("BoxShape3D_ground")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
+material_override = SubResource("StandardMaterial3D_ground")
+mesh = SubResource("BoxMesh_ground")

@@ -1,0 +1,28 @@
+[gd_scene load_steps=6 format=3 uid="uid://cxabvisualverify1"]
+
+[ext_resource type="Script" path="res://scratch/visual_verify.gd" id="1_verify"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_vv"]
+sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+ground_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+
+[sub_resource type="Sky" id="Sky_vv"]
+sky_material = SubResource("ProceduralSkyMaterial_vv")
+
+[sub_resource type="Environment" id="Environment_vv"]
+background_mode = 2
+sky = SubResource("Sky_vv")
+tonemap_mode = 2
+
+[node name="VisualVerify" type="Node3D"]
+script = ExtResource("1_verify")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_vv")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.7, -0.5, 0.3, 0, 0.6, 0.8, -0.7, 0.6, -0.4, 4, 8, 4)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866, 0.5, 0, -0.5, 0.866, 8, 6, 10)

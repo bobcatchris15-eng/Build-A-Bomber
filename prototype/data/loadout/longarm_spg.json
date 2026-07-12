@@ -1,0 +1,47 @@
+{
+	"version": 1.0,
+	"id": "default_longarm_spg",
+	"name": "Longarm SPG",
+	"hull_type": "medium_hull",
+	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+	"hull_size": {"x": 4.0, "y": 1.0, "z": 6.0},
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.0,
+	"faction": "industrialists",
+	"locomotion": {
+		"type_id": "tracked_treads",
+		"settings": {"width": 1.0}
+	},
+	"modules": [
+		{
+			"type_id": "heavy_howitzer",
+			"name": "Heavy Howitzer",
+			"position": {"x": 0.0, "y": 0.5, "z": 0.5},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"tweaks": {"elevation": 1.2}
+		},
+		{
+			"type_id": "ciws",
+			"name": "CIWS Gatling PD",
+			"position": {"x": 0.0, "y": 0.5, "z": -2.25},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"tweaks": {}
+		},
+		{
+			"type_id": "tracked_treads", "name": "Tracked Treads",
+			"position": {"x": 2.3, "y": -0.25, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 2.0}, "yaw_offset": 0.0, "tweaks": {}
+		},
+		{
+			"type_id": "tracked_treads", "name": "Tracked Treads",
+			"position": {"x": -2.3, "y": -0.25, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 2.0}, "yaw_offset": 0.0, "tweaks": {}
+		}
+	]
+}

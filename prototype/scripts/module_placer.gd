@@ -1,0 +1,879 @@
+extends Node3D
+
+const ModuleData = preload("res://scripts/module_data.gd")
+const Gizmo3D = preload("res://scenes/Gizmo3D.tscn")
+const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
+
+@export var hull_path: NodePath
+var hull: Node3D
+
+var mirror_enabled: bool = true
+var selected_module: Node3D = null
+var clipping_detected: bool = false
+var log_mutex: Mutex = Mutex.new()
+
+var drag_pending: bool = false
+var is_dragging_module: bool = false
+var drag_start_mouse_pos: Vector2
+var drag_start_module: Node3D = null
+var drag_original_transform: Transform3D
+var drag_original_mirror_transform: Transform3D
+var drag_has_mirror: bool = false
+
+func _ready():
+	if has_node("Hull"):
+		hull = get_node("Hull")
+		if hull:
+			if not hull.has_meta("base_hull_size"):
+				hull.set_meta("base_hull_size", Vector3(4.0, 1.0, 6.0))
+			if not hull.has_meta("hull_scale"):
+				hull.set_meta("hull_scale", Vector3(1.0, 1.0, 1.0))
+			if not hull.has_meta("type_id"):
+				hull.set_meta("type_id", "medium_hull")
+			if not hull.has_meta("armor_material"):
+				hull.set_meta("armor_material", "hardened_steel")
+			if not hull.has_meta("armor_thickness"):
+				hull.set_meta("armor_thickness", 1.0)
+			update_hull_appearance()
+		
+func set_mirror_enabled(enabled: bool):
+	mirror_enabled = enabled
+	_log("Mirror toggled via UI: " + str(mirror_enabled))
+		
+func _log(msg: String):
+	print(msg)
+	WorkerThreadPool.add_task(Callable(self, "_async_write_log").bind(msg))
+
+func _async_write_log(msg: String):
+	log_mutex.lock()
+	var file = FileAccess.open("user://game_log.txt", FileAccess.READ_WRITE)
+	if not file:
+		file = FileAccess.open("user://game_log.txt", FileAccess.WRITE)
+	if file:
+		file.seek_end()
+		file.store_line(msg)
+		file.close()
+	log_mutex.unlock()
+
+func _unhandled_input(event):
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_M:
+			mirror_enabled = not mirror_enabled
+			_log("Mirror toggled: " + str(mirror_enabled))
+			var tree = get_tree()
+			if tree: tree.call_group("stat_ui", "set_mirror_toggle", mirror_enabled)
+		elif event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
+			delete_selected_module()
+		elif event.keycode == KEY_R:
+			rotate_selected_module()
+		elif event.keycode == KEY_ESCAPE:
+			if is_dragging_module:
+				is_dragging_module = false
+				selected_module.transform = drag_original_transform
+				if drag_has_mirror:
+					var mirror = selected_module.get_meta("mirrored_counterpart")
+					if mirror and is_instance_valid(mirror):
+						mirror.transform = drag_original_mirror_transform
+				_select_module(selected_module)
+				check_all_clipping()
+				_log("Module dragging cancelled.")
+
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_log("Left click detected in module_placer.gd!")
+			
+			if not hull:
+				_log("ERROR: Hull is null! Cannot proceed.")
+				return
+				
+			var camera = get_viewport().get_camera_3d()
+			if not camera: 
+				_log("ERROR: Camera is null! Cannot raycast.")
+				return
+			
+			var space_state = get_world_3d().direct_space_state
+			
+			var mouse_pos = event.position
+			var ray_origin = camera.project_ray_origin(mouse_pos)
+			var ray_end = ray_origin + camera.project_ray_normal(mouse_pos) * 1000.0
+			
+			_log("Casting ray from " + str(ray_origin) + " to " + str(ray_end))
+			
+			var query = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
+			query.collision_mask = 7 # Layer 1 (Hull), Layer 2 (Modules), Layer 3 (Gizmos)
+			query.collide_with_areas = true
+			var result = space_state.intersect_ray(query)
+			
+			if result:
+				_log("Raycast hit! Collider: " + str(result.collider.name))
+				if result.collider.has_method("start_drag"):
+					# We clicked a Gizmo Handle!
+					result.collider.start_drag(event, result.position)
+				elif result.collider.collision_layer & 1:
+					# Hit the Hull
+					_select_module(result.collider)
+				else:
+					# We clicked a Module!
+					var module = result.collider.get_parent()
+					_select_module(module)
+					
+					# Initialize drag movement if not locomotion
+					if module and module.has_meta("module_data"):
+						var data = module.get_meta("module_data")
+						if data.category != "locomotion":
+							drag_pending = true
+							drag_start_mouse_pos = event.position
+							drag_start_module = module
+							drag_original_transform = module.transform
+							drag_has_mirror = module.has_meta("mirrored_counterpart")
+							if drag_has_mirror:
+								var mirror = module.get_meta("mirrored_counterpart")
+								if mirror and is_instance_valid(mirror):
+									drag_original_mirror_transform = mirror.transform
+			else:
+				_log("Raycast missed. Deselecting.")
+				_select_module(null)
+		else:
+			# Left click released
+			if is_dragging_module:
+				is_dragging_module = false
+				_select_module(selected_module)
+				get_tree().call_group("stat_ui", "update_stats", hull)
+				check_all_clipping()
+				_log("Module dragging finished.")
+			drag_pending = false
+			drag_start_module = null
+
+	if event is InputEventMouseMotion:
+		if drag_pending and drag_start_module and is_instance_valid(drag_start_module):
+			if event.position.distance_to(drag_start_mouse_pos) > 8:
+				is_dragging_module = true
+				drag_pending = false
+				var old_gizmo = selected_module.get_node_or_null("Gizmo3D")
+				if old_gizmo:
+					old_gizmo.queue_free()
+				_log("Module dragging started.")
+				
+		if is_dragging_module and selected_module and is_instance_valid(selected_module):
+			var camera = get_viewport().get_camera_3d()
+			if camera:
+				var space_state = get_world_3d().direct_space_state
+				var mouse_pos = event.position
+				var ray_origin = camera.project_ray_origin(mouse_pos)
+				var ray_end = ray_origin + camera.project_ray_normal(mouse_pos) * 1000.0
+				
+				var exclude_list = []
+				_get_colliders_recursive(selected_module, exclude_list)
+				if selected_module.has_meta("mirrored_counterpart"):
+					var mirror = selected_module.get_meta("mirrored_counterpart")
+					if mirror and is_instance_valid(mirror):
+						_get_colliders_recursive(mirror, exclude_list)
+						
+				var query = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
+				query.collision_mask = 1 # Only hit the Hull
+				query.exclude = exclude_list
+				
+				var result = space_state.intersect_ray(query)
+				if result:
+					_update_module_placement(selected_module, result.position, result.normal)
+					check_all_clipping()
+
+func rotate_selected_module():
+	if not selected_module or selected_module == hull: return
+	
+	var yaw = selected_module.get_meta("yaw_offset", 0.0)
+	yaw += PI / 2.0
+	if yaw >= 2.0 * PI - 0.01:
+		yaw = 0.0
+	selected_module.set_meta("yaw_offset", yaw)
+	
+	selected_module.rotate_object_local(Vector3.UP, PI / 2.0)
+	
+	if selected_module.has_meta("mirrored_counterpart"):
+		var mirror = selected_module.get_meta("mirrored_counterpart")
+		if mirror and is_instance_valid(mirror):
+			mirror.set_meta("yaw_offset", -yaw)
+			mirror.rotate_object_local(Vector3.UP, -PI / 2.0)
+			
+	check_all_clipping()
+	_log("Rotated module to yaw_offset: " + str(yaw))
+	
+	# Trigger UI updates
+	get_tree().call_group("stat_ui", "on_module_selected", selected_module)
+	get_tree().call_group("stat_ui", "update_stats", hull)
+
+func _select_module(module: Node3D):
+	if selected_module:
+		_deselect_module()
+		# Deselect old
+		var old_gizmo = selected_module.get_node_or_null("Gizmo3D")
+		if old_gizmo:
+			old_gizmo.queue_free()
+		
+	selected_module = module
+	get_tree().call_group("stat_ui", "on_module_selected", selected_module)
+	
+	if selected_module:
+		var new_gizmo = Gizmo3D.instantiate()
+		new_gizmo.name = "Gizmo3D"
+		selected_module.add_child(new_gizmo)
+		
+		# Show/hide handles based on module category
+		if selected_module.has_meta("module_data") or selected_module == hull:
+			var cat = "module"
+			if selected_module == hull:
+				cat = "hull"
+			elif selected_module.has_meta("module_data"):
+				var data = selected_module.get_meta("module_data")
+				cat = data.get("category") if "category" in data else "module"
+			
+			var hx = new_gizmo.get_node_or_null("HandleX")
+			var hy = new_gizmo.get_node_or_null("HandleY")
+			var hz = new_gizmo.get_node_or_null("HandleZ")
+			
+			if cat == "locomotion":
+				if hx: hx.queue_free()
+				if hy: hy.queue_free()
+				if hz: hz.queue_free()
+			elif cat == "armor":
+				# Armor only scales in thickness (Y axis)
+				if hx: hx.queue_free()
+				if hz: hz.queue_free()
+			elif cat == "weapon" or cat == "module":
+				# Weapons/Modules scale in X and Z, but not thickness (Y)
+				if hy: hy.queue_free()
+			elif cat == "hull":
+				# Hull scales in all 3 directions
+				pass
+				
+		# Firing Arc Visual Cone
+		if selected_module.has_meta("module_data"):
+			var m_data = selected_module.get_meta("module_data")
+			if m_data and m_data.category == "weapon":
+				var arc_cone = MeshInstance3D.new()
+				arc_cone.name = "ArcCone"
+				var cyl_mesh = CylinderMesh.new()
+				cyl_mesh.top_radius = 2.0
+				cyl_mesh.bottom_radius = 0.1
+				cyl_mesh.height = 4.0
+				arc_cone.mesh = cyl_mesh
+				
+				var mat = StandardMaterial3D.new()
+				mat.albedo_color = Color(0.2, 0.6, 1.0, 0.25)
+				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				mat.emission_enabled = true
+				mat.emission = Color(0.2, 0.6, 1.0)
+				mat.emission_energy_multiplier = 0.5
+				arc_cone.material_override = mat
+				
+				arc_cone.position = Vector3(0, 0.4, -2.0)
+				arc_cone.rotation = Vector3(-PI/2, 0, 0)
+				selected_module.add_child(arc_cone)
+
+func delete_selected_module():
+	if selected_module:
+		_log("Deleting selected module")
+		_deselect_module()
+		var is_hull = (selected_module == hull)
+		
+		# Symmetrical Deletion
+		if selected_module.has_meta("mirrored_counterpart"):
+			var mirror = selected_module.get_meta("mirrored_counterpart")
+			if is_instance_valid(mirror):
+				_log("Deleting mirrored counterpart as well")
+				mirror.queue_free()
+				
+		# Locomotion Group Symmetrical Deletion
+		if selected_module.has_meta("locomotion_group"):
+			var group = selected_module.get_meta("locomotion_group")
+			for wheel in group:
+				if is_instance_valid(wheel) and wheel != selected_module:
+					_log("Deleting locomotion group member")
+					wheel.queue_free()
+					
+			if hull:
+				var hull_scale = Vector3(1, 1, 1)
+				if hull.has_meta("hull_scale"):
+					hull_scale = hull.get_meta("hull_scale")
+				var hull_catalog_data = ModuleCatalog.get_module_data(hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull")
+				hull.position.y = (hull_catalog_data.size.y * hull_scale.y) / 2.0
+				hull.remove_meta("locomotion_type")
+				hull.remove_meta("locomotion_settings")
+		
+		if is_hull:
+			hull = null
+		selected_module.queue_free()
+		selected_module = null
+		get_tree().call_group("stat_ui", "update_stats", hull)
+		check_all_clipping()
+	
+func clear_hull():
+	# Used by the Blueprint Library to swap the active design out entirely.
+	if selected_module:
+		_select_module(null)
+	if hull and is_instance_valid(hull):
+		var parent = hull.get_parent()
+		if parent:
+			parent.remove_child(hull)
+		hull.free()
+	hull = null
+	clipping_detected = false
+	get_tree().call_group("stat_ui", "update_stats", null)
+
+func _place_hull_from_ui(type_id: String):
+	if hull:
+		_log("Hull already exists, cannot place another until deleted.")
+		return
+		
+	var catalog_data = ModuleCatalog.get_module_data(type_id)
+	
+	hull = StaticBody3D.new()
+	hull.name = "Hull"
+	hull.collision_layer = 1
+	hull.collision_mask = 0
+	hull.position = Vector3(0, catalog_data.size.y / 2.0, 0)
+	
+	hull.set_meta("base_hull_size", catalog_data.size)
+	hull.set_meta("hull_scale", Vector3(1, 1, 1))
+	hull.set_meta("type_id", type_id)
+	
+	var mesh_inst = MeshInstance3D.new()
+	mesh_inst.name = "MeshInstance3D"
+	var authored_mesh = MeshAssetLoader.get_hull_mesh(type_id)
+	if authored_mesh:
+		mesh_inst.mesh = authored_mesh
+	else:
+		var box = BoxMesh.new()
+		box.size = catalog_data.size
+		mesh_inst.mesh = box
+	
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = catalog_data.color
+	mesh_inst.material_override = mat
+	
+	hull.add_child(mesh_inst)
+	
+	var col = CollisionShape3D.new()
+	col.name = "CollisionShape3D"
+	var col_box = BoxShape3D.new()
+	col_box.size = catalog_data.size
+	col.shape = col_box
+	hull.add_child(col)
+	
+	add_child(hull)
+	_log("New hull spawned: " + type_id)
+	get_tree().call_group("stat_ui", "update_stats", hull)
+
+var default_locomotion_settings = {
+	"wheels": {"size": 1.0, "count": 4},
+	"tracked_treads": {"width": 1.0},
+	"hover_engine": {},
+	"helicopter_rotors": {"size": 1.0, "count": 4}
+}
+
+func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
+	var catalog_data = ModuleCatalog.get_module_data(type_id)
+	var category = catalog_data.get("category", "module")
+	
+	if category == "locomotion":
+		# Static defensive foundations can't take locomotion
+		if hull and hull.has_meta("type_id") and ModuleCatalog.is_foundation(hull.get_meta("type_id")):
+			_log("Foundations are static structures - locomotion not allowed.")
+			return
+		var settings = default_locomotion_settings.get(type_id, {}).duplicate()
+		update_locomotion(type_id, settings)
+	else:
+		# Standard weapon/armor placement
+		var primary = _place_weapon(type_id, pos, normal)
+		if mirror_enabled:
+			var mirrored_pos = Vector3(-pos.x, pos.y, pos.z)
+			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
+			var mirror = _place_weapon(type_id, mirrored_pos, mirrored_normal)
+			if primary and mirror:
+				primary.set_meta("mirrored_counterpart", mirror)
+				mirror.set_meta("mirrored_counterpart", primary)
+
+func update_locomotion(type_id: String, settings: Dictionary):
+	if not hull: return
+	
+	# Save settings on hull metadata
+	hull.set_meta("locomotion_type", type_id)
+	hull.set_meta("locomotion_settings", settings)
+	
+	# Delete any existing locomotion parts first
+	for child in hull.get_children():
+		if child.has_meta("module_data"):
+			var m_data = child.get_meta("module_data")
+			if m_data and m_data.category == "locomotion":
+				child.queue_free()
+				
+	var catalog_data = ModuleCatalog.get_module_data(type_id)
+	
+	# Get actual hull size
+	var hull_size = Vector3(4.0, 1.0, 6.0)
+	var hull_scale = Vector3(1.0, 1.0, 1.0)
+	if hull.has_meta("hull_scale"):
+		hull_scale = hull.get_meta("hull_scale")
+	var hull_shape = hull.get_node_or_null("CollisionShape3D")
+	if hull_shape and hull_shape.shape is BoxShape3D:
+		hull_size = hull_shape.shape.size
+		
+	var spawned_wheels = []
+	
+	if type_id == "wheels":
+		var size = settings.get("size", 1.0)
+		var count = settings.get("count", 4)
+		if count < 2: count = 2
+		if count % 2 != 0: count += 1
+		var half_count = int(count / 2)
+		
+		# Tucked slightly underneath the hull side
+		var x_offset = hull_size.x / 2.0 - (0.4 * size)
+		var z_limit = hull_size.z * 0.35
+		
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
+			for i in range(half_count):
+				var z_pos = 0.0
+				if half_count > 1:
+					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
+				
+				# Place using Vector3.DOWN normal, then override position and rotation to point forward
+				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0, z_pos)
+				var wheel = _place_weapon(type_id, pos, Vector3.DOWN)
+				if wheel:
+					wheel.scale = Vector3(size, size, size)
+					# Override position to be underneath (bottom Y) and rotation to be forward (0)
+					wheel.position = Vector3(x_offset * side, -hull_size.y / 2.0 - (0.8 * size), z_pos)
+					wheel.rotation = Vector3.ZERO
+					if wheel.has_meta("module_data"):
+						wheel.get_meta("module_data").scale_multiplier = wheel.scale
+					spawned_wheels.append(wheel)
+					
+	elif type_id == "tracked_treads":
+		var width = settings.get("width", 1.0)
+		
+		# Always 2 treads
+		var x_offset = hull_size.x / 2.0
+		var y_offset = -hull_size.y / 4.0
+		var tread_length = hull_size.z
+		
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
+			var pos = hull.global_position + Vector3((x_offset + (catalog_data.size.x * width / 2.0) - 0.2) * side, y_offset, 0.0)
+			var tread = _place_weapon(type_id, pos, side_normal)
+			if tread:
+				tread.scale = Vector3(width, 1.0, tread_length / catalog_data.size.z)
+				tread.rotation = Vector3.ZERO
+				if tread.has_meta("module_data"):
+					tread.get_meta("module_data").scale_multiplier = tread.scale
+				spawned_wheels.append(tread)
+				
+	elif type_id == "helicopter_rotors":
+		var size = settings.get("size", 1.0)
+		var count = settings.get("count", 4)
+		if count < 2: count = 2
+		if count % 2 != 0: count += 1
+		var half_count = int(count / 2)
+		
+		var x_offset = hull_size.x / 2.0 + 1.2
+		var y_offset = hull_size.y / 2.0 + 0.3
+		var z_limit = hull_size.z * 0.35
+		
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.UP
+			for i in range(half_count):
+				var z_pos = 0.0
+				if half_count > 1:
+					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
+					
+				var pos = hull.global_position + Vector3(x_offset * side, y_offset, z_pos)
+				var rotor = _place_weapon(type_id, pos, side_normal)
+				if rotor:
+					rotor.scale = Vector3(size, 1.0, size)
+					rotor.rotation = Vector3.ZERO
+					if rotor.has_meta("module_data"):
+						rotor.get_meta("module_data").scale_multiplier = rotor.scale
+					spawned_wheels.append(rotor)
+					
+	elif type_id == "hover_engine":
+		var x_offset = hull_size.x / 2.0
+		var y_offset = -hull_size.y / 2.0
+		var z_offset = hull_size.z * 0.35
+		var points = [
+			Vector3(-x_offset, y_offset, z_offset),
+			Vector3(x_offset, y_offset, z_offset),
+			Vector3(-x_offset, y_offset, -z_offset),
+			Vector3(x_offset, y_offset, -z_offset)
+		]
+		for p in points:
+			var hover = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN)
+			if hover:
+				spawned_wheels.append(hover)
+				
+	elif type_id == "legs":
+		var count = settings.get("count", 4)
+		if count < 2: count = 2
+		if count % 2 != 0: count += 1
+		var half_count = int(count / 2)
+		
+		var x_offset = hull_size.x / 2.0
+		var z_limit = hull_size.z * 0.35
+		
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
+			for i in range(half_count):
+				var z_pos = 0.0
+				if half_count > 1:
+					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
+				
+				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0, z_pos)
+				var leg = _place_weapon(type_id, pos, side_normal)
+				if leg:
+					leg.rotation = Vector3.ZERO
+					spawned_wheels.append(leg)
+					
+	elif type_id == "anti_grav":
+		var x_offset = hull_size.x / 2.2
+		var y_offset = -hull_size.y / 2.0
+		var z_offset = hull_size.z * 0.35
+		var points = [
+			Vector3(-x_offset, y_offset, z_offset),
+			Vector3(x_offset, y_offset, z_offset),
+			Vector3(-x_offset, y_offset, -z_offset),
+			Vector3(x_offset, y_offset, -z_offset)
+		]
+		for p in points:
+			var ag = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN)
+			if ag:
+				spawned_wheels.append(ag)
+				
+	# Adjust hull Y position in the editor to make wheels rest on floor
+	var wheels_offset = 0.0
+	if type_id == "wheels":
+		var size = settings.get("size", 1.0)
+		wheels_offset = 0.8 * size
+	elif type_id == "legs":
+		wheels_offset = 1.6
+	elif type_id == "anti_grav":
+		wheels_offset = 0.4
+		
+	var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
+	var hull_catalog_data = ModuleCatalog.get_module_data(hull_type)
+	hull.position.y = (hull_catalog_data.size.y * hull_scale.y) / 2.0 + wheels_offset
+				
+	# Link them in a group
+	for w in spawned_wheels:
+		w.set_meta("locomotion_group", spawned_wheels)
+		
+	get_tree().call_group("stat_ui", "update_stats", hull)
+	
+func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
+	var catalog_data = ModuleCatalog.get_module_data(type_id)
+	var category = catalog_data.get("category", "module")
+	
+	var new_weapon = Node3D.new()
+	
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	VisualBuilder.build_visual(type_id, new_weapon, catalog_data.size, catalog_data.color)
+	
+	var static_body = StaticBody3D.new()
+	static_body.collision_layer = 2 # Modules layer
+	static_body.collision_mask = 0
+	static_body.position = Vector3(0, catalog_data.size.y / 2.0, 0)
+	var collision_shape = CollisionShape3D.new()
+	var col_box = BoxShape3D.new()
+	col_box.size = catalog_data.size
+	collision_shape.shape = col_box
+	static_body.add_child(collision_shape)
+	new_weapon.add_child(static_body)
+	
+	var data = ModuleData.new()
+	data.type_id = type_id
+	data.module_name = catalog_data.name
+	data.category = category
+	data.base_hp = catalog_data.hp
+	data.base_weight = catalog_data.weight
+	data.cost_metal = catalog_data.metal
+	data.cost_crystal = catalog_data.crystal
+	data.base_dps = catalog_data.dps
+	new_weapon.set_meta("module_data", data)
+	
+	hull.add_child(new_weapon)
+	
+	# Snap to 0.25m grid relative to hull local space
+	var final_pos = pos
+	if hull:
+		var local_pos = hull.to_local(pos)
+		var local_normal = hull.global_transform.basis.inverse() * normal
+		
+		var snap_interval = 0.25
+		if abs(local_normal.x) < 0.9:
+			local_pos.x = round(local_pos.x / snap_interval) * snap_interval
+		if abs(local_normal.y) < 0.9:
+			local_pos.y = round(local_pos.y / snap_interval) * snap_interval
+		if abs(local_normal.z) < 0.9:
+			local_pos.z = round(local_pos.z / snap_interval) * snap_interval
+			
+		final_pos = hull.to_global(local_pos)
+		
+	new_weapon.global_position = final_pos
+	
+	# Align to surface normal if not perfectly up/down
+	if abs(normal.dot(Vector3.UP)) < 0.999:
+		new_weapon.look_at(final_pos + normal, Vector3.UP)
+		new_weapon.rotate_object_local(Vector3.RIGHT, -PI/2)
+		
+	# Auto-scale armor to fit facet
+	if category == "armor":
+		if hull:
+			var hull_size = Vector3(4.0, 1.0, 6.0)
+			var hull_shape = hull.get_node_or_null("CollisionShape3D")
+			if hull_shape and hull_shape.shape is BoxShape3D:
+				hull_size = hull_shape.shape.size
+				
+			# Determine which axis of the hull aligns with local X and Z of the module
+			var local_x = new_weapon.global_transform.basis.x.abs()
+			var local_z = new_weapon.global_transform.basis.z.abs()
+			
+			var target_x = 1.0
+			var target_z = 1.0
+			
+			if local_x.x > 0.5: target_x = hull_size.x
+			elif local_x.y > 0.5: target_x = hull_size.y
+			elif local_x.z > 0.5: target_x = hull_size.z
+			
+			if local_z.x > 0.5: target_z = hull_size.x
+			elif local_z.y > 0.5: target_z = hull_size.y
+			elif local_z.z > 0.5: target_z = hull_size.z
+			
+			# The module's base size is catalog_data.size, so we scale by ratio
+			new_weapon.scale.x = target_x / catalog_data.size.x
+			new_weapon.scale.z = target_z / catalog_data.size.z
+		
+	# Notify the UI that a module was added
+	get_tree().call_group("stat_ui", "update_stats", hull)
+	check_all_clipping()
+	return new_weapon
+
+func update_hull_appearance():
+	if not hull: return
+	var mesh_inst = hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
+	if not mesh_inst: return
+	
+	var type_id = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
+	var catalog_data = ModuleCatalog.get_module_data(type_id)
+	
+	var hull_scale = hull.get_meta("hull_scale") if hull.has_meta("hull_scale") else Vector3(1,1,1)
+	var armor_thick = hull.get_meta("armor_thickness") if hull.has_meta("armor_thickness") else 1.0
+	var armor_mat_name = hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel"
+	
+	# Bulk size based on thickness
+	var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
+	var authored_mesh = MeshAssetLoader.get_hull_mesh(type_id)
+	if authored_mesh:
+		mesh_inst.mesh = authored_mesh
+		mesh_inst.scale = hull_scale * armor_bulk
+	else:
+		var box = BoxMesh.new()
+		box.size = catalog_data.size * hull_scale * armor_bulk
+		mesh_inst.mesh = box
+		mesh_inst.scale = Vector3.ONE
+	
+	# Apply material
+	var mat = StandardMaterial3D.new()
+	if armor_mat_name == "hardened_steel":
+		mat.albedo_color = Color.GRAY
+		mat.roughness = 0.2
+		mat.metallic = 0.8
+	elif armor_mat_name == "reactive_armor":
+		mat.albedo_color = Color(0.18, 0.24, 0.18)
+		mat.roughness = 0.7
+		mat.metallic = 0.1
+	elif armor_mat_name == "ablative_ceramic":
+		mat.albedo_color = Color(0.85, 0.8, 0.7)
+		mat.roughness = 0.5
+		mat.metallic = 0.0
+	elif armor_mat_name == "energy_shielding":
+		mat.albedo_color = Color(0.3, 0.6, 1.0, 0.7)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.roughness = 0.1
+		mat.emission_enabled = true
+		mat.emission = Color(0.3, 0.6, 1.0)
+		mat.emission_energy_multiplier = 0.5
+	mesh_inst.material_override = mat
+	
+	# Also update collision shape size in the designer
+	var col = hull.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if col:
+		var col_box = BoxShape3D.new()
+		col_box.size = catalog_data.size * hull_scale * armor_bulk
+		col.shape = col_box
+	# Recalculate stats
+	get_tree().call_group("stat_ui", "update_stats", hull)
+	check_all_clipping()
+
+func _deselect_module():
+	if selected_module:
+		for child in selected_module.get_children():
+			if child.name == "ArcCone":
+				child.queue_free()
+
+func _get_parent_space_aabb(module: Node3D, size: Vector3) -> AABB:
+	var extents = size / 2.0
+	var local_corners = [
+		Vector3(-extents.x, -extents.y, -extents.z),
+		Vector3(-extents.x, -extents.y, extents.z),
+		Vector3(-extents.x, extents.y, -extents.z),
+		Vector3(-extents.x, extents.y, extents.z),
+		Vector3(extents.x, -extents.y, -extents.z),
+		Vector3(extents.x, -extents.y, extents.z),
+		Vector3(extents.x, extents.y, -extents.z),
+		Vector3(extents.x, extents.y, extents.z)
+	]
+	
+	var t = module.transform
+	var first = t * local_corners[0]
+	var min_p = first
+	var max_p = first
+	
+	for i in range(1, 8):
+		var p = t * local_corners[i]
+		min_p.x = min(min_p.x, p.x)
+		min_p.y = min(min_p.y, p.y)
+		min_p.z = min(min_p.z, p.z)
+		max_p.x = max(max_p.x, p.x)
+		max_p.y = max(max_p.y, p.y)
+		max_p.z = max(max_p.z, p.z)
+		
+	return AABB(min_p, max_p - min_p)
+
+func check_all_clipping():
+	clipping_detected = false
+	if not hull:
+		return
+		
+	var modules = []
+	for child in hull.get_children():
+		if child.has_meta("module_data") and not child.is_queued_for_deletion():
+			modules.append(child)
+			
+	var clipping_set = {}
+	for m in modules:
+		clipping_set[m] = false
+		
+	for i in range(modules.size()):
+		var my_module = modules[i]
+		var my_data = my_module.get_meta("module_data")
+		var my_catalog = ModuleCatalog.get_module_data(my_data.type_id)
+		var my_size = my_catalog.size * my_module.scale
+		var aabb_a = _get_parent_space_aabb(my_module, my_size)
+		
+		for j in range(i + 1, modules.size()):
+			var other_module = modules[j]
+			
+			if my_module == other_module:
+				continue
+			if my_module.is_ancestor_of(other_module) or other_module.is_ancestor_of(my_module):
+				continue
+			if my_module.has_meta("mirrored_counterpart") and my_module.get_meta("mirrored_counterpart") == other_module:
+				continue
+			if my_module.has_meta("locomotion_group") and other_module in my_module.get_meta("locomotion_group"):
+				continue
+				
+			var other_data = other_module.get_meta("module_data")
+			var other_catalog = ModuleCatalog.get_module_data(other_data.type_id)
+			var other_size = other_catalog.size * other_module.scale
+			var aabb_b = _get_parent_space_aabb(other_module, other_size)
+			
+			# Shrink AABB slightly to allow touching/adjacent modules
+			if aabb_a.grow(-0.05).intersects(aabb_b.grow(-0.05)):
+				clipping_set[my_module] = true
+				clipping_set[other_module] = true
+				clipping_detected = true
+				
+	# Apply visual changes to each module
+	for m in modules:
+		var is_clipping = clipping_set[m]
+		var my_data = m.get_meta("module_data")
+		var my_catalog = ModuleCatalog.get_module_data(my_data.type_id)
+		
+		var meshes = []
+		_find_meshes_recursive(m, meshes)
+		
+		for mesh in meshes:
+			if mesh.name == "ArcCone":
+				continue
+			var mat = mesh.material_override as StandardMaterial3D
+			if not mat:
+				mat = StandardMaterial3D.new()
+				mesh.material_override = mat
+			if is_clipping:
+				mat.albedo_color = Color(1.0, 0.0, 0.0) # bright RED
+				mat.emission_enabled = true
+				mat.emission = Color(1.0, 0.0, 0.0)
+				mat.emission_energy_multiplier = 1.0
+			else:
+				mat.albedo_color = my_catalog.color
+				if my_data.type_id == "hover_engine":
+					mat.emission_enabled = true
+					mat.emission = my_catalog.color
+					mat.emission_energy_multiplier = 1.0
+				else:
+					mat.emission_enabled = false
+
+func _find_meshes_recursive(node: Node, result: Array):
+	if node is MeshInstance3D:
+		result.append(node)
+	for child in node.get_children():
+		_find_meshes_recursive(child, result)
+
+func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector3):
+	if not module or not is_instance_valid(module): return
+	
+	var data = module.get_meta("module_data")
+	var catalog_data = ModuleCatalog.get_module_data(data.type_id)
+	
+	var offset = normal * (catalog_data.size.y / 2.0)
+	var local_pos = hull.to_local(world_pos) + offset
+	
+	var snap_interval = 0.25
+	var local_normal = hull.global_transform.basis.inverse() * normal
+	
+	if abs(local_normal.x) < 0.9:
+		local_pos.x = round(local_pos.x / snap_interval) * snap_interval
+	if abs(local_normal.y) < 0.9:
+		local_pos.y = round(local_pos.y / snap_interval) * snap_interval
+	if abs(local_normal.z) < 0.9:
+		local_pos.z = round(local_pos.z / snap_interval) * snap_interval
+		
+	module.position = local_pos
+	
+	module.rotation = Vector3.ZERO
+	if abs(normal.dot(Vector3.UP)) < 0.999:
+		module.look_at(module.global_position + normal, Vector3.UP)
+		module.rotate_object_local(Vector3.RIGHT, -PI/2.0)
+		
+	var yaw_offset = module.get_meta("yaw_offset", 0.0)
+	module.rotate_object_local(Vector3.UP, yaw_offset)
+		
+	if module.has_meta("mirrored_counterpart"):
+		var mirror = module.get_meta("mirrored_counterpart")
+		if mirror and is_instance_valid(mirror):
+			var mirrored_local_pos = Vector3(-local_pos.x, local_pos.y, local_pos.z)
+			mirror.position = mirrored_local_pos
+			
+			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
+			mirror.rotation = Vector3.ZERO
+			if abs(mirrored_normal.dot(Vector3.UP)) < 0.999:
+				mirror.look_at(mirror.global_position + mirrored_normal, Vector3.UP)
+				mirror.rotate_object_local(Vector3.RIGHT, -PI/2.0)
+			
+			mirror.rotate_object_local(Vector3.UP, -yaw_offset)
+
+func _get_colliders_recursive(node: Node, list: Array):
+	if node is CollisionObject3D:
+		list.append(node.get_rid())
+	for child in node.get_children():
+		_get_colliders_recursive(child, list)

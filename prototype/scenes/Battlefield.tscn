@@ -1,0 +1,77 @@
+[gd_scene load_steps=8 format=3 uid="uid://cxabbattlefield123"]
+
+[ext_resource type="Script" path="res://scripts/battlefield.gd" id="1_battlefield"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_x3k"]
+sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+ground_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+
+[sub_resource type="Sky" id="Sky_x3k"]
+sky_material = SubResource("ProceduralSkyMaterial_x3k")
+
+[sub_resource type="Environment" id="Environment_x3k"]
+background_mode = 2
+sky = SubResource("Sky_x3k")
+tonemap_mode = 2
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
+size = Vector3(100, 1, 100)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground"]
+size = Vector3(100, 1, 100)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.18, 0.22, 0.2, 1)
+
+[node name="Battlefield" type="Node3D"]
+script = ExtResource("1_battlefield")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_x3k")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 10, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 15, 15)
+
+[node name="Ground" type="StaticBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("BoxShape3D_ground")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
+material_override = SubResource("StandardMaterial3D_ground")
+mesh = SubResource("BoxMesh_ground")
+
+[node name="VehicleSpawnPoint" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 10)
+
+[node name="UI" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="ReturnButton" type="Button" parent="UI"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 20.0
+offset_right = 180.0
+offset_bottom = 60.0
+theme_override_font_sizes/font_size = 18
+text = "Return to Lab"
+
+[node name="ResetDummiesButton" type="Button" parent="UI"]
+layout_mode = 0
+offset_left = 200.0
+offset_top = 20.0
+offset_right = 360.0
+offset_bottom = 60.0
+theme_override_font_sizes/font_size = 18
+text = "Reset Targets"

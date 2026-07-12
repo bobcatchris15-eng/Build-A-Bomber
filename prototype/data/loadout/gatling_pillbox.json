@@ -1,0 +1,35 @@
+{
+	"version": 1.0,
+	"id": "default_gatling_pillbox",
+	"name": "Gatling Pillbox",
+	"hull_type": "pillbox_foundation",
+	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+	"hull_size": {"x": 3.0, "y": 1.2, "z": 3.0},
+	"armor_material": "hardened_steel",
+	"armor_thickness": 2.0,
+	"faction": "industrialists",
+	"locomotion": {
+		"type_id": "",
+		"settings": {}
+	},
+	"modules": [
+		{
+			"type_id": "rotary_cannon",
+			"name": "Rotary Gatling",
+			"position": {"x": 0.75, "y": 0.6, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"tweaks": {"barrel_count": 6}
+		},
+		{
+			"type_id": "rotary_cannon",
+			"name": "Rotary Gatling",
+			"position": {"x": -0.75, "y": 0.6, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"tweaks": {"barrel_count": 6}
+		}
+	]
+}

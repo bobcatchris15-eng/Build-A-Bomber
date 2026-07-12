@@ -1,0 +1,66 @@
+[gd_scene load_steps=8 format=3 uid="uid://cxabmain1234"]
+
+[ext_resource type="Script" path="res://scripts/module_placer.gd" id="1_placer"]
+[ext_resource type="Script" path="res://scripts/designer_camera.gd" id="2_camera"]
+[ext_resource type="PackedScene" uid="uid://cxabstat123" path="res://scenes/UI_StatBlock.tscn" id="3_ui"]
+[ext_resource type="PackedScene" uid="uid://cxabpartsmenu123" path="res://scenes/UI_PartsMenu.tscn" id="4_parts"]
+[ext_resource type="Script" path="res://scripts/drag_drop_manager.gd" id="5_drop"]
+[ext_resource type="Script" path="res://scripts/blueprint_manager.gd" id="6_blueprint"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_x3k"]
+sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+ground_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+
+[sub_resource type="Sky" id="Sky_x3k"]
+sky_material = SubResource("ProceduralSkyMaterial_x3k")
+
+[sub_resource type="Environment" id="Environment_x3k"]
+background_mode = 2
+sky = SubResource("Sky_x3k")
+tonemap_mode = 2
+
+[sub_resource type="BoxMesh" id="BoxMesh_hull"]
+size = Vector3(4, 1, 6)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hull"]
+size = Vector3(4, 1, 6)
+
+[node name="MainLab" type="Node3D"]
+script = ExtResource("1_placer")
+hull_path = NodePath("Hull")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_x3k")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 0, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 5, 10)
+script = ExtResource("2_camera")
+
+[node name="Hull" type="StaticBody3D" parent="."]
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Hull"]
+mesh = SubResource("BoxMesh_hull")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Hull"]
+shape = SubResource("BoxShape3D_hull")
+
+[node name="DragDropOverlay" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("5_drop")
+
+[node name="UI_StatBlock" parent="." instance=ExtResource("3_ui")]
+
+[node name="UI_PartsMenu" parent="." instance=ExtResource("4_parts")]
+
+[node name="BlueprintManager" type="Node" parent="."]
+script = ExtResource("6_blueprint")
