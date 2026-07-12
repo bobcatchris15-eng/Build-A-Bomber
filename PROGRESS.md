@@ -4,6 +4,21 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (Wed) — Foundation/defense design-lab parity: confirmed, not built
+
+**Audit finding (third day in a row the "gap" turned out mostly not to exist):** placement, tweaking, mirroring, undo/redo, and blueprint serialization are all hull-type-agnostic code paths — the only foundation-specific special case anywhere in the codebase is a single locomotion block in `module_placer.gd`. Everything else (gizmo drag, TWEAK_SPECS sliders, symmetry, undo history, save/load) already applies identically to a `pillbox_foundation`/`tower_foundation` hull as to a vehicle hull, confirmed by cross-referencing every `is_foundation` usage in the codebase (there are exactly 3, one of which is the deliberate locomotion block).
+
+**Verified, not fixed** (nothing was broken):
+- New test `test_foundation_design_lab_parity()`: places a pillbox foundation, confirms locomotion is correctly rejected, places a mirrored weapon pair, rotates, undoes, and serializes — all matching vehicle-hull behavior.
+- Visual spot-check of the bundled `gatling_pillbox.json` loadout (octagonal bunker + twin rotary gatling turrets) in `progress_captures/2026-07-12/hull_variety_qa/verify_shot_2.png` — coherent, no clipping, no broken meshes.
+- Full suite: **17/17 green.**
+
+**Found and deferred (logged in [DECISIONS_NEEDED.md](DECISIONS_NEEDED.md)):** Factions_and_Buildings.md names a third example foundation type ("Fortress Wall") that doesn't exist in the catalog. Not fixing this week — it needs new Blender-authored geometry and the headless-import pipeline is fragile enough that I don't want to risk it unattended, and it reads as illustrative example text rather than a hard requirement.
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 (Tue) — Mesh/part kit audit: coverage is actually complete; fixed real quality bugs instead
 
 **Audit finding (another pleasant surprise): there are no missing part meshes.** Cross-referenced every `_part("...")` call in `visual_builder.gd` against the authored `.glb` files in `assets/models/parts/` and `assets/models/hulls/` — every weapon/module type that requests an authored mesh has one, and all 7 hull/foundation catalog entries have a matching hull mesh. The planned "gap-fill" premise didn't hold up, so today's work shifted to quality/consistency issues found via a visual QA sweep instead of new mesh authoring.

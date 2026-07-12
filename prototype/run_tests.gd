@@ -33,6 +33,7 @@ func _init():
 	success = success and await test_designer_camera_pan()
 	success = success and await test_locomotion_tweak_parity()
 	success = success and await test_undo_redo()
+	success = success and await test_foundation_design_lab_parity()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -836,6 +837,77 @@ func test_undo_redo() -> bool:
 
 	placer.queue_free()
 	print("  [PASS] Undo/Redo restores prior hull state correctly (place -> undo -> redo verified).")
+	return true
+
+func test_foundation_design_lab_parity() -> bool:
+	print("Running Test Suite: Foundation/Defense Design Lab Parity (Factions_and_Buildings.md)...")
+	# Factions_and_Buildings.md: "You design [defenses] in the Armory exactly
+	# like you design mobile units... Hardpoints & Tweaking: you snap weapons
+	# onto the bunker's hardpoints and tweak them." Placement/tweak/mirror/
+	# undo all run through the same hull-type-agnostic code paths as vehicles
+	# EXCEPT locomotion, which is deliberately blocked for foundations - this
+	# verifies that block works and everything else still has full parity.
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	var bm = Node.new()
+	bm.name = "BlueprintManager"
+	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
+	placer.add_child(bm)
+	await process_frame
+
+	placer._place_hull_from_ui("pillbox_foundation")
+	await process_frame
+
+	# Locomotion should be rejected on a foundation.
+	placer._place_weapon_from_ui("wheels", Vector3.ZERO, Vector3.DOWN)
+	await process_frame
+	var loco_count = 0
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").category == "locomotion":
+			loco_count += 1
+	if loco_count != 0:
+		print("  [FAIL] Foundation should reject locomotion, found ", loco_count, " locomotion parts")
+		placer.queue_free()
+		return false
+
+	# Weapon placement + mirror should work identically to a vehicle hull.
+	placer._place_weapon_from_ui("rotary_cannon", Vector3(0.75, 0.6, 0.0), Vector3.UP)
+	await process_frame
+	var weapon_count = 0
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").category == "weapon":
+			weapon_count += 1
+	if weapon_count != 2:
+		print("  [FAIL] Expected mirrored weapon pair on foundation, got ", weapon_count)
+		placer.queue_free()
+		return false
+
+	# Rotate + undo/redo should work identically to a vehicle hull.
+	placer._select_module(placer.hull.get_children().filter(func(c): return c.has_meta("module_data"))[0])
+	placer.rotate_selected_module()
+	await process_frame
+	if not placer.can_undo():
+		print("  [FAIL] Foundation mutations should populate undo history same as vehicles")
+		placer.queue_free()
+		return false
+	placer.undo()
+	await process_frame
+
+	# Serialization should correctly round-trip and be classifiable as a defense.
+	var snapshot = bm.serialize_hull(placer.hull)
+	if not ModuleCatalog.is_foundation(snapshot.get("hull_type", "")):
+		print("  [FAIL] Serialized foundation blueprint should classify as is_foundation")
+		placer.queue_free()
+		return false
+	if snapshot.get("modules", []).is_empty():
+		print("  [FAIL] Serialized foundation blueprint lost its weapons")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Foundation hulls get full placement/mirror/rotate/undo/serialize parity with vehicle hulls.")
 	return true
 
 # --- Skirmish mode test suites ---
