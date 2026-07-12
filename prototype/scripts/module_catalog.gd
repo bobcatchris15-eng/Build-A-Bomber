@@ -558,6 +558,21 @@ static func targets_allies(type_id: String) -> bool:
 	var data = get_module_data(type_id)
 	return data.get("targets_allies", false)
 
+# Real bug found while fixing repair_array/drone_carrier for real (Energy
+# batch): every _setup_weapons()-equivalent (battle_unit.gd, battlefield.gd,
+# building.gd) only attaches auto_weapon.gd when category=="weapon" -
+# repair_array and drone_carrier are catalogued as category="module" (like
+# resource_harvester/sensor_suite/logistics_tank, which don't need the
+# script - they're driven by other systems entirely). That meant neither
+# module EVER got its firing/targeting script in real gameplay, only in
+# synthetic tests that manually attached it, bypassing this gate. Single
+# source of truth so the three spawn paths can't drift on this again.
+static func needs_combat_script(type_id: String) -> bool:
+	var data = get_module_data(type_id)
+	if data.get("category", "") == "weapon":
+		return true
+	return type_id in ["repair_array", "drone_carrier"]
+
 # --- Unit-class traits (MOUNTING_AND_ARMOR_SPEC.md addendum) ---
 # Composable tags, not a hard ship/land/air/building enum, so a helicopter
 # that behaves like a ground vehicle at scale and three different fixed-wing

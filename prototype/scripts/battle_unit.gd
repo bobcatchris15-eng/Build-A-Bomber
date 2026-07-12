@@ -182,7 +182,7 @@ func _setup_weapons():
 	for child in hull_node.get_children():
 		if child.has_meta("module_data"):
 			var data = child.get_meta("module_data")
-			if data.category == "weapon":
+			if ModuleCatalog.needs_combat_script(data.type_id):
 				var weapon_script = load("res://scripts/auto_weapon.gd")
 				child.set_script(weapon_script)
 				child.set_physics_process(true)

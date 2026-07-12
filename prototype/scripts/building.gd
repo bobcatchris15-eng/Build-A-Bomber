@@ -145,7 +145,7 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 		for child in defense_hull.get_children():
 			if child.has_meta("module_data"):
 				var data = child.get_meta("module_data")
-				if data.category == "weapon":
+				if ModuleCatalog.needs_combat_script(data.type_id):
 					var weapon_script = load("res://scripts/auto_weapon.gd")
 					child.set_script(weapon_script)
 					child.set_physics_process(true)

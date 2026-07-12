@@ -153,7 +153,7 @@ func _setup_weapons():
 	for child in vehicle_hull.get_children():
 		if child.has_meta("module_data"):
 			var data = child.get_meta("module_data")
-			if data.category == "weapon":
+			if ModuleCatalog.needs_combat_script(data.type_id):
 				var weapon_script = load("res://scripts/auto_weapon.gd")
 				if weapon_script:
 					child.set_script(weapon_script)

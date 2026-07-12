@@ -4,6 +4,18 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Found and fixed a real pre-existing bug: repair_array/drone_carrier never actually fired in real gameplay
+
+**Not blocking - fixed immediately, not just logged.**
+
+While verifying the repair_array/drone_carrier fixes with a test that goes through the REAL `setup()`/`reconstruct_vehicle()` spawn pipeline (rather than my other synthetic tests, which manually attach `auto_weapon.gd` to a bare `Node3D` - a shortcut that works for testing the weapon's internal logic but silently bypasses how it actually gets attached in a real match), I found that `_setup_weapons()` and its two equivalents (`battlefield.gd`, `building.gd`) all gate script-attachment on `data.category == "weapon"` - and `repair_array`/`drone_carrier` are both catalogued as `category: "module"` (like `resource_harvester`/`sensor_suite`/`logistics_tank`, which correctly don't need the script since they're driven by other systems). This meant **neither module has ever actually fired/healed/targeted anything in real Skirmish or Test Range play** - the elaborate type_id-specific handling already built for them in `auto_weapon.gd` (fire_range/fire_rate/color, muzzle-flash suppression, unique fire functions) has been dead code since it was written, because the script attachment gate silently excluded them the whole time.
+
+**Fixed:** new `ModuleCatalog.needs_combat_script(type_id)` (category=="weapon" OR type_id in [repair_array, drone_carrier]), single source of truth used by all three spawn paths. New test specifically exercises the real pipeline (not a manually-scripted synthetic node) so this exact class of bug can't silently reappear.
+
+**Why worth flagging distinctly:** this predates this session's work entirely - it's not something my repair/drone fixes introduced, it's a bug that made the ORIGINAL (fake) repair_array/drone_carrier implementations unreachable too. Worth Chris knowing this was silently broken since whenever these modules were first added, not just today.
+
+---
+
 ## 2026-07-12 — repair_array's heal rate reuses the generic "dps" catalog field
 
 **Not blocking.**

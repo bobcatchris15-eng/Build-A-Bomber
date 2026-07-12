@@ -64,6 +64,7 @@ func _init():
 	success = success and await test_drone_carrier_spawns_real_drones()
 	success = success and await test_energy_weapons_cost_and_drain()
 	success = success and await test_logistics_sharing_boosts_allies()
+	success = success and await test_support_modules_get_combat_script_in_real_spawn()
 
 	print("\n==============================================")
 	if success:
@@ -2703,4 +2704,55 @@ func test_logistics_sharing_boosts_allies() -> bool:
 	ally.queue_free()
 	stranger.queue_free()
 	print("  [PASS] logistics_tank shares surplus energy with nearby allies only, boosting them beyond their own passive regen.")
+	return true
+
+func test_support_modules_get_combat_script_in_real_spawn() -> bool:
+	print("Running Test Suite: repair_array/drone_carrier Actually Get Scripted Through The Real Spawn Pipeline...")
+	# Real bug found while verifying the repair/drone fixes: every
+	# _setup_weapons()-equivalent only attached auto_weapon.gd when
+	# category=="weapon", but repair_array/drone_carrier are catalogued as
+	# category="module" - so in actual gameplay (setup()/reconstruct_vehicle(),
+	# not a synthetic test that manually attaches the script) neither module
+	# ever got its firing/targeting logic at all. This test goes through the
+	# REAL pipeline specifically to make sure that gap stays closed.
+	await process_frame
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
+	root.add_child(bp_manager)
+
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "repair_array", "name": "Repair Welder Array", "position": {"x": 0.0, "y": 0.5, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}},
+			{"type_id": "drone_carrier", "name": "Drone Carrier Bay", "position": {"x": 2.0, "y": 0.5, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.setup(bp, 0, bp_manager)
+
+	var repair_scripted = false
+	var drone_scripted = false
+	for child in unit.hull_node.get_children():
+		if not child.has_meta("module_data"): continue
+		var data = child.get_meta("module_data")
+		if data.type_id == "repair_array" and "targets_allies" in child:
+			repair_scripted = true
+		if data.type_id == "drone_carrier" and "fire_range" in child:
+			drone_scripted = true
+
+	unit.queue_free()
+	bp_manager.queue_free()
+
+	if not repair_scripted:
+		print("  [FAIL] repair_array should get auto_weapon.gd attached through the real setup() pipeline, not just in synthetic tests")
+		return false
+	if not drone_scripted:
+		print("  [FAIL] drone_carrier should get auto_weapon.gd attached through the real setup() pipeline, not just in synthetic tests")
+		return false
+
+	print("  [PASS] repair_array and drone_carrier both receive auto_weapon.gd through the real spawn pipeline (battle_unit.gd/battlefield.gd/building.gd all use ModuleCatalog.needs_combat_script()).")
 	return true
