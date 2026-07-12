@@ -1,0 +1,47 @@
+{
+	"version": 1.0,
+	"id": "enemy_tide_corvette",
+	"name": "Tide Corvette",
+	"hull_type": "heavy_hull",
+	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+	"hull_size": {"x": 6.0, "y": 1.5, "z": 8.0},
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.1,
+	"faction": "technocrats",
+	"locomotion": {
+		"type_id": "naval_propeller",
+		"settings": {"size": 1.0, "count": 2}
+	},
+	"modules": [
+		{
+			"type_id": "basic_cannon",
+			"name": "Deck Cannon",
+			"position": {"x": 0.0, "y": 0.75, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"tweaks": {}
+		},
+		{
+			"type_id": "flak_cannon",
+			"name": "Flak Mount",
+			"position": {"x": 0.0, "y": 0.75, "z": 2.5},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"tweaks": {}
+		},
+		{
+			"type_id": "naval_propeller", "name": "Naval Propeller",
+			"position": {"x": -1.8, "y": -0.3, "z": 4.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+		},
+		{
+			"type_id": "naval_propeller", "name": "Naval Propeller",
+			"position": {"x": 1.8, "y": -0.3, "z": 4.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+		}
+	]
+}

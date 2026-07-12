@@ -544,7 +544,16 @@ static func classify_facet(local_direction: Vector3) -> String:
 	else:
 		return "top" if local_direction.y > 0 else "bottom"
 
-static func get_traverse_limit_angle(type_id: String) -> float:
+# facet/hull_type_id (optional, mirrors get_mount_style()'s signature): a
+# frame_built weapon (AI/unit-AI pass, MOUNTING_AND_ARMOR_SPEC.md addendum)
+# has ZERO independent traverse by definition - "built into the vehicle
+# frame" means the barrel is fixed relative to the hull, and the WHOLE
+# VEHICLE has to turn to aim it (see battle_unit.gd's whole-vehicle-aim
+# logic). Omitting facet/hull_type_id keeps the original weapon-type-only
+# angle (used by any call site that doesn't yet know the mount context).
+static func get_traverse_limit_angle(type_id: String, facet: String = "", hull_type_id: String = "") -> float:
+	if (facet != "" or hull_type_id != "") and get_mount_style(type_id, facet, hull_type_id) == "frame_built":
+		return 0.0
 	if type_id in ["basic_cannon", "ciws", "pd_laser"]:
 		return PI # 360 degrees
 	elif type_id == "heavy_howitzer":

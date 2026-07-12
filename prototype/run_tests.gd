@@ -49,6 +49,9 @@ func _init():
 	success = success and await test_ai_flanking_targets_weakest_facet()
 	success = success and await test_trait_system_composability()
 	success = success and await test_fixed_wing_and_naval_movement()
+	success = success and await test_frame_built_whole_vehicle_aim()
+	success = success and await test_ranged_unit_kiting()
+	success = success and await test_enemy_roster_new_movement_archetypes()
 	success = success and await test_ui_no_overflow_or_offscreen()
 	success = success and await test_ui_audit_has_real_teeth()
 	success = success and await test_headless_combat_simulation()
@@ -1842,6 +1845,219 @@ func test_fixed_wing_and_naval_movement() -> bool:
 	ship.queue_free()
 
 	print("  [PASS] Fixed-wing units never stop and bank into turns; naval units stay surface-locked, unaffected by gravity.")
+	return true
+
+func test_frame_built_whole_vehicle_aim() -> bool:
+	print("Running Test Suite: Frame-Built Weapons - Zero Traverse + Whole-Vehicle-Aim AI...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	# gauss_railgun is always frame_built per get_mount_style() - verify the
+	# traverse angle collapses to zero once facet/hull_type are supplied
+	# (omitting them keeps the old weapon-type-only angle, unaffected).
+	var angle = ModuleCatalog.get_traverse_limit_angle("gauss_railgun", "front", "medium_hull")
+	if angle > 0.001:
+		print("  [FAIL] gauss_railgun should have zero traverse when mount-aware, got ", angle)
+		return false
+	var turret_angle = ModuleCatalog.get_traverse_limit_angle("basic_cannon", "top", "medium_hull")
+	if turret_angle < PI - 0.01:
+		print("  [FAIL] basic_cannon should keep its full 360-degree traverse on a turreted-capable hull, got ", turret_angle)
+		return false
+
+	# auto_weapon.gd should read this mount context and never rotate its own
+	# local transform, regardless of where the target is.
+	var hull = Node3D.new()
+	hull.name = "Hull"
+	hull.set_meta("type_id", "medium_hull")
+	root.add_child(hull)
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	hull.add_child(weapon)
+	weapon.set_meta("facet", "front")
+	var w_data = ModuleData.new()
+	w_data.type_id = "gauss_railgun"
+	w_data.base_weight = 300.0
+	w_data.base_dps = 40.0
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+	if weapon.traverse_limit_angle > 0.001:
+		print("  [FAIL] auto_weapon.gd should derive a zero traverse_limit_angle for a frame_built mount")
+		hull.queue_free()
+		return false
+
+	var los_target = Node3D.new()
+	los_target.add_to_group("damageable")
+	root.add_child(los_target)
+	los_target.global_position = weapon.global_position + Vector3(5, 0, 0) # off to the side, not straight ahead
+	var resting_before = weapon.resting_transform.basis
+	weapon.target = los_target
+	for i in range(20):
+		weapon._physics_process(0.1)
+	if not weapon.transform.basis.is_equal_approx(resting_before):
+		print("  [FAIL] A frame_built weapon's local transform should never rotate away from resting, regardless of target position")
+		hull.queue_free()
+		los_target.queue_free()
+		return false
+	hull.queue_free()
+	los_target.queue_free()
+
+	# Whole-vehicle-aim: a unit whose active weapon is frame_built should
+	# keep turning its whole hull to face the target while in range, not
+	# just stop and leave the weapon (which can't aim itself) pointed
+	# wherever the hull happened to be facing on arrival.
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.rotate_speed = 4.0
+	unit.attack_range = 20.0
+	unit.has_frame_built_weapon = true
+	unit.global_transform = Transform3D.IDENTITY # facing -Z
+	var side_target = Node3D.new()
+	root.add_child(side_target)
+	side_target.global_position = Vector3(10, 0, 0) # +X, 90 degrees off the current -Z facing, within range
+	unit.order_attack(side_target)
+	var initial_forward = -unit.global_transform.basis.z
+	var initial_angle = initial_forward.angle_to((side_target.global_position - unit.global_position).normalized())
+	for i in range(40):
+		unit._physics_process(0.05)
+	var final_forward = -unit.global_transform.basis.z
+	var final_angle = final_forward.angle_to((side_target.global_position - unit.global_position).normalized())
+	if final_angle >= initial_angle:
+		print("  [FAIL] A frame_built unit should keep turning to face its target while in range, not hold its arrival heading (initial angle ", initial_angle, ", final ", final_angle, ")")
+		unit.queue_free()
+		side_target.queue_free()
+		return false
+	var horizontal_speed = Vector2(unit.velocity.x, unit.velocity.z).length()
+	if horizontal_speed > 0.01:
+		print("  [FAIL] A frame_built unit turning in place while in range should not be translating, got horizontal speed ", horizontal_speed)
+		unit.queue_free()
+		side_target.queue_free()
+		return false
+
+	unit.queue_free()
+	side_target.queue_free()
+	print("  [PASS] frame_built weapons never independently traverse; the whole vehicle turns in place to aim them.")
+	return true
+
+func test_ranged_unit_kiting() -> bool:
+	print("Running Test Suite: Ranged Unit Kiting - Backs Off Once An Enemy Closes Past Standoff...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.move_speed = 6.0
+	unit.rotate_speed = 4.0
+	unit.attack_range = 20.0
+	unit.has_frame_built_weapon = false # turreted - independent aim, free to kite
+	unit.global_position = Vector3.ZERO
+	var target = Node3D.new()
+	root.add_child(target)
+	target.global_position = Vector3(0, 0, -3) # well inside 0.45*20=9, the kiting threshold
+	unit.order_attack(target)
+
+	var initial_dist = unit.global_position.distance_to(target.global_position)
+	for i in range(20):
+		unit._physics_process(0.1)
+	var final_dist = unit.global_position.distance_to(target.global_position)
+	if final_dist <= initial_dist + 0.5:
+		print("  [FAIL] A turreted ranged unit should back away once an enemy closes past its standoff distance, dist went from ", initial_dist, " to ", final_dist)
+		unit.queue_free()
+		target.queue_free()
+		return false
+	unit.queue_free()
+	target.queue_free()
+
+	# A frame_built unit must NOT kite - it needs to hold position and turn
+	# to keep its fixed weapon on target instead of backing away from it.
+	var fb_unit = CharacterBody3D.new()
+	fb_unit.set_script(BattleUnitScript)
+	root.add_child(fb_unit)
+	fb_unit.move_speed = 6.0
+	fb_unit.attack_range = 20.0
+	fb_unit.has_frame_built_weapon = true
+	fb_unit.global_position = Vector3.ZERO
+	var target2 = Node3D.new()
+	root.add_child(target2)
+	target2.global_position = Vector3(0, 0, -3)
+	fb_unit.order_attack(target2)
+	for i in range(20):
+		fb_unit._physics_process(0.1)
+	var fb_horizontal_speed = Vector2(fb_unit.velocity.x, fb_unit.velocity.z).length()
+	if fb_horizontal_speed > 0.01:
+		print("  [FAIL] A frame_built unit should hold position (turn in place) instead of kiting/retreating, got horizontal speed ", fb_horizontal_speed)
+		fb_unit.queue_free()
+		target2.queue_free()
+		return false
+	fb_unit.queue_free()
+	target2.queue_free()
+
+	print("  [PASS] Turreted ranged units back off once an enemy closes past standoff distance; frame_built units hold and turn instead.")
+	return true
+
+func test_enemy_roster_new_movement_archetypes() -> bool:
+	print("Running Test Suite: Enemy Roster - New Movement Archetypes Exercised By Real AI Units...")
+	# Armor phase / Traits B3 built fixed_wing_engine and naval_propeller as
+	# generic mechanics usable by any hull, but nothing in the actual enemy
+	# roster used them - the new strafing/surface-lock AI only ever ran in
+	# synthetic tests, never a real AI-controlled Skirmish unit. These two
+	# bundled blueprints (data/enemy/raptor_striker.json, tide_corvette.json)
+	# close that gap.
+	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
+	bp_manager.name = "BlueprintManager"
+	root.add_child(bp_manager)
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var raptor_data = bp_manager.load_blueprint("res://data/enemy/raptor_striker.json")
+	if raptor_data.is_empty():
+		print("  [FAIL] raptor_striker.json failed to parse")
+		bp_manager.queue_free()
+		return false
+	var raptor = CharacterBody3D.new()
+	raptor.set_script(BattleUnitScript)
+	root.add_child(raptor)
+	raptor.global_position = Vector3(50, 4, 50)
+	raptor.setup(raptor_data, 1, bp_manager)
+	if not raptor.is_fixed_wing:
+		print("  [FAIL] raptor_striker should derive is_fixed_wing from its fixed_wing_engine locomotion trait")
+		raptor.queue_free()
+		bp_manager.queue_free()
+		return false
+	for i in range(10):
+		raptor._physics_process(0.1)
+	var raptor_speed = Vector2(raptor.velocity.x, raptor.velocity.z).length()
+	if raptor_speed < 1.0:
+		print("  [FAIL] A fixed-wing enemy unit should be cruising (never stopped) after a few physics ticks, got speed ", raptor_speed)
+		raptor.queue_free()
+		bp_manager.queue_free()
+		return false
+	raptor.queue_free()
+
+	var corvette_data = bp_manager.load_blueprint("res://data/enemy/tide_corvette.json")
+	if corvette_data.is_empty():
+		print("  [FAIL] tide_corvette.json failed to parse")
+		bp_manager.queue_free()
+		return false
+	var corvette = CharacterBody3D.new()
+	corvette.set_script(BattleUnitScript)
+	root.add_child(corvette)
+	corvette.global_position = Vector3(30, 5.0, 30) # start above the waterline
+	corvette.setup(corvette_data, 1, bp_manager)
+	if not corvette.is_naval:
+		print("  [FAIL] tide_corvette should derive is_naval from its naval_propeller locomotion trait")
+		corvette.queue_free()
+		bp_manager.queue_free()
+		return false
+	for i in range(30):
+		corvette._physics_process(0.1)
+	if abs(corvette.global_position.y - 0.3) > 1.0:
+		print("  [FAIL] tide_corvette should settle to the surface waterline regardless of its spawn height, got y=", corvette.global_position.y)
+		corvette.queue_free()
+		bp_manager.queue_free()
+		return false
+	corvette.queue_free()
+
+	bp_manager.queue_free()
+	print("  [PASS] New enemy roster entries (fixed-wing raptor, naval corvette) reconstruct correctly and exercise the new movement traits.")
 	return true
 
 func test_ui_no_overflow_or_offscreen() -> bool:

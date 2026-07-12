@@ -4,6 +4,24 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Unit AI scope: whole-vehicle-aim + kiting + new-roster entries built; real pathfinding and naval terrain routing deferred
+
+**Not blocking.**
+
+Chris's scoping guidance named four things: facet-aware flanking extended to ranged positioning/kiting/retreat, whether fixed-wing/naval AI needs more depth, turreted-vs-frame-built whole-vehicle-aim, and mixed AI compositions. I sequenced by concreteness and direct connection to work already built this week, in this order:
+
+1. **Frame-built whole-vehicle-aim** — the most concrete gap: `get_mount_style()` already classified some weapons as `frame_built` ("whole vehicle aims, not the weapon") but nothing enforced it — the weapon still independently traversed within its arc. Fixed at the root (`get_traverse_limit_angle()` now mount-aware) plus the AI consequence (`battle_unit.gd` turns the whole hull in place). See PROGRESS.md for detail.
+2. **Kiting** — distance-based standoff only (back off once an enemy closes past 45% of attack_range), not the more ambitious "detect I'm exposing my weak facet to the attacker and reposition" version. The latter would need per-frame self-facet-vs-attacker-bearing computation on top of the existing target-facet flanking logic — a real feature, but a second layer past what fit in this pass. Logged as the natural next depth increment on kiting, not abandoned.
+3. **Mixed AI compositions** — the roster already had 4 varied archetypes (not one-unit-type spam), so the real gap was narrower than the phrasing suggested: none of them exercised this week's new movement types. Closed that specific gap with two new blueprints rather than redesigning the roster system itself.
+
+**What I did NOT build, and why:**
+
+- **Real pathfinding / obstacle avoidance (NavigationServer3D, baked navmeshes, `NavigationAgent3D`).** Checked the actual Skirmish map: it's a flat, mostly open 160×160 ground plane with scattered resource-node props, not a maze of buildings units would path around. The current straight-line/flank-point steering already produces reasonable-looking movement on this terrain. Building a full navmesh-baking + per-unit-agent pipeline is a genuinely large subsystem (bake step, agent avoidance radii, dynamic re-bake if buildings get placed mid-match) for a benefit that's currently mostly theoretical given the map's actual geometry. If maps grow more complex (maze-like chokepoints, dense building placement blocking direct paths), this becomes worth it — flagging as the trigger condition rather than a fixed timeline.
+- **Naval terrain-aware routing (water vs. land).** There is no water/land distinction anywhere in the map — naval units are purely Y-locked to a fixed waterline (`y≈0.3`) regardless of what's underneath them, a pre-existing simplification from when `naval_propeller` was first built (Traits B3). "Route around land, stay on water" has no map data to route against; building it now would mean inventing a fictional water-boundary system nobody asked for yet, not implementing the feature described. This is a map/world-building gap, not an AI gap — worth flagging separately if naval combat becomes a real focus.
+- **Deeper fixed-wing strafing AI.** The existing orbit-and-strafe pattern (built earlier this week) already produces the core "can't hover, passes through and comes back around" behavior. Chris's question was "does it need more depth" rather than a specific ask — I judged the existing baseline reasonable for now (a real AI-controlled fixed-wing unit now exists to exercise it, see `raptor_striker.json`) and didn't add altitude-varying passes, formation flying, or break-off-under-fire behavior, which would be genuine new scope rather than a bug fix. Flagging as available future depth, not a gap in what exists.
+
+---
+
 ## 2026-07-12 — Screenshot-diffing for visual regression testing: investigated, not built
 
 **Not blocking.**

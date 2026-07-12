@@ -96,7 +96,12 @@ func _ready():
 		# Traverse limit angle: shared with the Design Lab's firing-arc
 		# visualization via ModuleCatalog.get_traverse_limit_angle() so the
 		# two can never drift apart.
-		traverse_limit_angle = ModuleCatalog.get_traverse_limit_angle(type_id)
+		var mount_facet = get_meta("facet", "")
+		var mount_hull_type = ""
+		var mount_parent = get_parent()
+		if mount_parent and mount_parent.has_meta("type_id"):
+			mount_hull_type = mount_parent.get_meta("type_id")
+		traverse_limit_angle = ModuleCatalog.get_traverse_limit_angle(type_id, mount_facet, mount_hull_type)
 			
 		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws"]:
 			damage_class = "kinetic"
@@ -253,19 +258,27 @@ func _physics_process(delta):
 			target_pos += Vector3(0, 0.5, 0)
 			
 		var dir_to_target = (target_pos - global_position).normalized()
-		
-		# Target local direction relative to weapon parent (the Hull)
-		var target_local_pos = get_parent().to_local(target_pos)
-		var local_dir = target_local_pos.normalized()
-		var target_local_basis = Basis.looking_at(local_dir, Vector3.UP)
-		
-		# Gradually rotate local basis towards target using Quaternions
-		var q_current = transform.basis.get_rotation_quaternion()
-		var q_target = target_local_basis.get_rotation_quaternion()
-		var q_next = q_current.slerp(q_target, traverse_speed * delta)
-		var local_scale = transform.basis.get_scale()
-		transform.basis = Basis(q_next).scaled(local_scale)
-		
+
+		# frame_built (traverse_limit_angle == 0): the barrel is fixed
+		# relative to the hull by definition - skip the independent-aim
+		# slerp entirely and stay at resting_transform. The whole vehicle
+		# has to turn to bring it to bear (battle_unit.gd's
+		# _has_frame_built_weapon/whole-vehicle-aim handles that), and the
+		# angle_to_target check just below naturally reflects that since
+		# global_transform now tracks the hull's own facing 1:1.
+		if traverse_limit_angle > 0.001:
+			# Target local direction relative to weapon parent (the Hull)
+			var target_local_pos = get_parent().to_local(target_pos)
+			var local_dir = target_local_pos.normalized()
+			var target_local_basis = Basis.looking_at(local_dir, Vector3.UP)
+
+			# Gradually rotate local basis towards target using Quaternions
+			var q_current = transform.basis.get_rotation_quaternion()
+			var q_target = target_local_basis.get_rotation_quaternion()
+			var q_next = q_current.slerp(q_target, traverse_speed * delta)
+			var local_scale = transform.basis.get_scale()
+			transform.basis = Basis(q_next).scaled(local_scale)
+
 		# Check if pointing close enough to fire
 		var current_dir = -global_transform.basis.z.normalized()
 		var angle_to_target = current_dir.angle_to(dir_to_target)

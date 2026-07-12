@@ -4,6 +4,45 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 4) — Unit AI phase 1: whole-vehicle-aim, kiting, new-movement-type enemy roster
+
+Chris's green light: "start real work on unit AI, pathfinding, and attack behavior — for both player-controlled and enemy units." Scoped this to the concrete, well-bounded pieces that directly extend today's mounting/trait work into actual combat behavior, rather than attempting full pathfinding in one pass (see DECISIONS_NEEDED.md for why).
+
+### Frame-built weapons now really are fixed to the hull, and the AI drives accordingly
+
+Found a real gap while reviewing `auto_weapon.gd`: `get_mount_style()` already classified `gauss_railgun`/`heavy_howitzer` (and anything on a non-turreted-capable hull) as `"frame_built"` — meant to mean "built into the vehicle frame, whole vehicle aims, not the weapon" — but `get_traverse_limit_angle()` never knew about mount style at all, so a frame_built weapon still independently traversed within its own arc like a turret. That contradicted the concept the mounting system was built to express.
+
+- `ModuleCatalog.get_traverse_limit_angle()` grew optional `facet`/`hull_type_id` params (mirrors `get_mount_style()`'s signature); when supplied and the mount resolves to `frame_built`, it returns `0.0`. Omitting them keeps the old weapon-type-only angle, so any call site that doesn't yet know its mount context is unaffected.
+- `auto_weapon.gd` now passes its own `facet` meta + parent hull's `type_id` into that call, and skips the independent-aim slerp entirely when the resulting angle is ~0 — the weapon just stays at `resting_transform`, so its `global_transform` tracks the hull's own facing 1:1.
+- `battle_unit.gd` caches `has_frame_built_weapon` at setup (reusing the angle `auto_weapon.gd` already computed, not re-deriving mount style). In the ATTACK order, once in range, a frame_built unit now keeps turning its whole hull toward the target (`_turn_toward()`, a stationary-rotation variant of the existing `_steer_towards()`) instead of just stopping wherever it happened to be facing on arrival.
+- The Design Lab's firing-arc visualization (`module_placer.gd`'s `_build_firing_arc`) now passes the same facet/hull_type context, so a frame_built weapon shows a collapsed (effectively zero-width) arc instead of a wedge that was never actually true to combat — keeping the documented "never drift apart" invariant between the visualization and the sim.
+- Verified both with a unit test (`test_frame_built_whole_vehicle_aim`) and visually: `progress_captures/2026-07-12/ai_phase1/before_whole_vehicle_aim.png` vs `after_whole_vehicle_aim.png` — a railgun tank starts facing away from a target placed 90° off its nose, and after a few seconds of the ATTACK order has visibly rotated in place to bring the fixed barrel to bear.
+
+### Ranged units now back off when something closes past their comfortable range
+
+Previously every unit (turreted or not, artillery or not) used the same "approach to 90% of attack_range, then stand still" pattern — a long-range unit that got closed on (or that started an engagement already close) had no way to reopen distance and just traded at melee range, giving up the advantage its weapon range was supposed to provide.
+
+- New branch in `battle_unit.gd`'s ATTACK order: when a **turreted** (not frame_built — see below) unit's target is closer than `KITE_STANDOFF_FRACTION` (0.45) of `attack_range`, it steers away from the target instead of holding position. The turret keeps tracking/firing independently of hull facing the whole time, since that's how independent traverse already works.
+- Frame_built units explicitly do **not** kite — retreating would point their fixed weapon away from the only thing it can hit. They hold and turn instead (previous section).
+- Simplification, logged rather than hidden: the retreat steers via the same code as normal movement, which turns to face the direction of travel — it does not attempt to reverse while keeping a strong facet toward the threat. Real added value (avoiding getting stuck at melee range) without inventing a new reverse-driving primitive this pass.
+- Verified with `test_ranged_unit_kiting()`.
+
+### New enemy roster entries exercise the new movement models in real AI play
+
+The existing enemy roster (`data/enemy/*.json`) already fielded 4 varied unit archetypes, not one-unit-type spam — but none of them used this week's new `fixed_wing_engine`/`naval_propeller` locomotion types, so the strafing-run and surface-lock AI built earlier this week had only ever run in synthetic tests, never a real AI-controlled Skirmish unit.
+
+- `data/enemy/raptor_striker.json`: `interceptor_hull` + `fixed_wing_engine` + nose-mounted `rotary_cannon` — a strafing fighter.
+- `data/enemy/tide_corvette.json`: `heavy_hull` + `naval_propeller` (×2) + `basic_cannon` + `flak_cannon` — a surface unit.
+- Both are picked up automatically (enemy roster is directory-scanned, no registration code needed) and confirmed via `test_enemy_roster_new_movement_archetypes()` plus a headless Skirmish sim (`sim_ai_phase1.gd`, since deleted per the usual scratch-cleanup practice) that force-queued both plus a player-side frame_built unit and ran 190 real physics ticks with no errors. Also screenshotted: `progress_captures/2026-07-12/ai_phase1/new_enemy_roster_raptor_corvette.png`.
+
+**Not built this pass** — see DECISIONS_NEEDED.md for the reasoning on each: real pathfinding/obstacle-avoidance (NavigationServer3D), naval terrain-aware routing (no water/land distinction exists in the map at all yet), and further depth on fixed-wing strafing AI beyond the existing orbit pattern.
+
+**Verified:** Full suite: **36/36 green** (33 pre-existing + 3 new this pass). Headless Skirmish sim: 190 physics ticks, no crashes, correct trait derivation on both new archetypes.
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 (cont'd 3) — Gap analysis, headless UI-bug detection (found + fixed a real bug), starting AI/pathfinding
 
 Chris asked for three things: an honest gap analysis against all 6 design docs, a green light to start real unit AI/pathfinding/attack-behavior work, and an investigation (build-if-feasible) into automated visual/UI bug detection. Full gap analysis and feasibility findings are in the conversation transcript / relayed to Chris directly — summary of what shipped from it:

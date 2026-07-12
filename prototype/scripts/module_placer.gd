@@ -935,7 +935,9 @@ func _build_firing_arc(module: Node3D, data) -> Node3D:
 	container.name = "ArcCone"
 	container.position = Vector3(0, 0.35, 0)
 
-	var limit = ModuleCatalog.get_traverse_limit_angle(data.type_id)
+	var arc_facet = module.get_meta("facet", "")
+	var arc_hull_type = hull.get_meta("type_id", "") if hull else ""
+	var limit = ModuleCatalog.get_traverse_limit_angle(data.type_id, arc_facet, arc_hull_type)
 	var full_circle = limit >= PI - 0.01
 	var angle_span = 2.0 * PI if full_circle else limit * 2.0
 	var segments = 32 if full_circle else max(6, int(32.0 * angle_span / (2.0 * PI)))

@@ -1,0 +1,38 @@
+{
+	"version": 1.0,
+	"id": "enemy_raptor_striker",
+	"name": "Raptor Strike Fighter",
+	"hull_type": "interceptor_hull",
+	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+	"hull_size": {"x": 2.4, "y": 0.8, "z": 3.2},
+	"armor_material": "hardened_steel",
+	"armor_thickness": 0.6,
+	"faction": "technocrats",
+	"locomotion": {
+		"type_id": "fixed_wing_engine",
+		"settings": {"size": 1.0}
+	},
+	"modules": [
+		{
+			"type_id": "rotary_cannon",
+			"name": "Nose Cannon",
+			"position": {"x": 0.0, "y": 0.4, "z": -1.6},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"tweaks": {}
+		},
+		{
+			"type_id": "fixed_wing_engine", "name": "Fixed-Wing Engine",
+			"position": {"x": 1.6, "y": 0.0, "z": 0.32},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+		},
+		{
+			"type_id": "fixed_wing_engine", "name": "Fixed-Wing Engine",
+			"position": {"x": -1.6, "y": 0.0, "z": 0.32},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+		}
+	]
+}

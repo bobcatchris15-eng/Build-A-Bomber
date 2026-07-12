@@ -29,6 +29,12 @@ var is_flying: bool = false
 # they generalize to whatever hull+locomotion combo is actually present.
 var is_fixed_wing: bool = false
 var is_naval: bool = false
+# AI phase 1 (whole-vehicle-aim): true when any active weapon is frame_built
+# (fixed relative to the hull, no independent traverse - see
+# module_catalog.gd's get_traverse_limit_angle/get_mount_style). Cached at
+# setup instead of recomputed every physics frame, same pattern as
+# is_flying/is_fixed_wing/is_naval above.
+var has_frame_built_weapon: bool = false
 
 # Orders
 enum OrderType { IDLE, MOVE, ATTACK, HARVEST }
@@ -44,6 +50,9 @@ var cargo_crystal: int = 0
 var cargo_capacity: int = 50
 var harvest_timer: float = 0.0
 const HARVEST_TIME: float = 3.0
+# AI phase 2: back off once the enemy has closed inside this fraction of
+# attack_range (see the kiting branch of the ATTACK order below).
+const KITE_STANDOFF_FRACTION: float = 0.45
 
 var selection_ring: MeshInstance3D = null
 var attack_range: float = 12.0
@@ -120,6 +129,10 @@ func _setup_weapons():
 				# Track the longest-ranged weapon for attack-order standoff distance
 				if "fire_range" in child:
 					attack_range = max(attack_range, child.fire_range * 0.85)
+				# Reuse the traverse angle auto_weapon.gd just computed (single
+				# source of truth) rather than re-deriving mount_style here.
+				if "traverse_limit_angle" in child and child.traverse_limit_angle <= 0.001:
+					has_frame_built_weapon = true
 
 func _detect_harvester():
 	for child in hull_node.get_children():
@@ -269,6 +282,27 @@ func _physics_process(delta):
 					# enemy units, no AI-only special case.
 					var approach_point = _compute_flank_point(attack_target)
 					_steer_towards(approach_point, delta, attack_range * 0.9)
+				elif has_frame_built_weapon:
+					# AI phase 1 (whole-vehicle-aim): a frame_built weapon
+					# can't aim itself - the whole hull has to keep turning
+					# to bring it to bear, even after arriving in range,
+					# like a casemate tank destroyer traversing by driving.
+					velocity.x = 0.0
+					velocity.z = 0.0
+					_turn_toward(attack_target.global_position, delta)
+				elif dist < attack_range * KITE_STANDOFF_FRACTION:
+					# AI phase 2 (kiting): a turreted weapon aims
+					# independently of hull facing, so a ranged unit that's
+					# been closed on past its comfortable standoff distance
+					# can back off to restore it while still tracking/
+					# firing - instead of standing still and eating hits at
+					# melee range that its weapon range was meant to avoid.
+					# Simplification (logged in DECISIONS_NEEDED.md): backs
+					# straight away and turns to face the retreat direction,
+					# same as normal steering - it doesn't try to reverse
+					# while keeping a strong facet toward the threat.
+					var retreat_point = global_position + (global_position - attack_target.global_position).normalized() * attack_range
+					_steer_towards(retreat_point, delta, 0.5)
 				else:
 					velocity.x = 0.0
 					velocity.z = 0.0
@@ -313,6 +347,18 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 	velocity.x = forward_dir.x * move_speed
 	velocity.z = forward_dir.z * move_speed
 	return false
+
+# AI phase 1: rotates the whole hull to face a point without moving toward
+# it - same yaw math as _steer_towards() but no velocity, since this is used
+# by a frame_built unit that has already arrived and just needs to keep its
+# fixed-forward weapon bearing on a target that may still be moving.
+func _turn_toward(dest: Vector3, delta: float):
+	var pos_diff = dest - global_position
+	pos_diff.y = 0.0
+	if pos_diff.length() < 0.05:
+		return
+	var target_basis = Basis.looking_at(pos_diff, Vector3.UP)
+	global_transform.basis = global_transform.basis.slerp(target_basis, rotate_speed * delta).orthonormalized()
 
 # Traits B3: fixed-wing flight is a genuinely different movement model from
 # _steer_towards(), not a reskin - never arrives-and-stops (minimum
