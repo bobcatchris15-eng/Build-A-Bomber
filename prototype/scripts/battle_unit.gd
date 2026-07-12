@@ -363,12 +363,26 @@ func _physics_process(delta):
 					# can back off to restore it while still tracking/
 					# firing - instead of standing still and eating hits at
 					# melee range that its weapon range was meant to avoid.
-					# Simplification (logged in DECISIONS_NEEDED.md): backs
-					# straight away and turns to face the retreat direction,
-					# same as normal steering - it doesn't try to reverse
-					# while keeping a strong facet toward the threat.
-					var retreat_point = global_position + (global_position - attack_target.global_position).normalized() * attack_range
-					_steer_towards(retreat_point, delta, 0.5)
+					#
+					# Kiting phase 2 (facet-aware): always reposition to
+					# keep the STRONGEST facet toward the attacker while
+					# retreating, rather than a plain straight-back retreat
+					# (which turns to face the travel direction and leaves
+					# whichever facet ends up opposite entirely to chance -
+					# it could be the weakest one). _kite_reposition()
+					# recomputes its target every frame from whichever
+					# facet is currently strongest, so it's self-
+					# stabilizing once achieved - an earlier version tried
+					# to hand off to plain _steer_towards() once the good
+					# facet was reached, but that immediately undid the
+					# positioning (steer_towards has its own, different
+					# idea of what to face: the travel direction, not the
+					# attacker). When every facet is equal (no armor
+					# modules), "strongest" is an arbitrary tie-break
+					# (front), which just means facing the attacker while
+					# backing away - still a reasonable default, not a
+					# regression from plain retreat.
+					_kite_reposition(delta)
 				else:
 					velocity.x = 0.0
 					velocity.z = 0.0
@@ -425,6 +439,41 @@ func _turn_toward(dest: Vector3, delta: float):
 		return
 	var target_basis = Basis.looking_at(pos_diff, Vector3.UP)
 	global_transform.basis = global_transform.basis.slerp(target_basis, rotate_speed * delta).orthonormalized()
+
+# Kiting phase 2: strafes directly away from the attacker (translation)
+# while independently rotating (like _turn_toward) toward whatever heading
+# would put the unit's STRONGEST facet between it and the attacker,
+# instead of _steer_towards()'s coupled behavior where facing is always
+# whatever direction the unit happens to be moving. The two are decoupled
+# on purpose - a ground vehicle "strafing" isn't realistic tread physics,
+# but this codebase already treats janky-but-functional emergent movement
+# as acceptable (see the no-hard-blocking trait philosophy), and the
+# alternative (a literal reverse-gear drive mode) is a bigger addition for
+# the same practical outcome.
+func _kite_reposition(delta: float):
+	var dir_to_attacker = attack_target.global_position - global_position
+	dir_to_attacker.y = 0.0
+	if dir_to_attacker.length() < 0.05:
+		return
+	dir_to_attacker = dir_to_attacker.normalized()
+
+	var extremes = _my_facet_extremes()
+	var facet_normal = FACET_NORMALS[extremes.strongest]
+	# Same yaw that rotates facet_normal onto dir_to_attacker, applied to
+	# FORWARD too (both live in the same local frame, so one rotation
+	# solves both) - see PROGRESS.md for the derivation.
+	var yaw = facet_normal.signed_angle_to(dir_to_attacker, Vector3.UP)
+	var desired_forward = Vector3.FORWARD.rotated(Vector3.UP, yaw)
+	var target_basis = Basis.looking_at(desired_forward, Vector3.UP)
+	global_transform.basis = global_transform.basis.slerp(target_basis, rotate_speed * delta).orthonormalized()
+
+	if move_speed > 0.0:
+		var away_dir = -dir_to_attacker
+		velocity.x = away_dir.x * move_speed
+		velocity.z = away_dir.z * move_speed
+	else:
+		velocity.x = 0.0
+		velocity.z = 0.0
 
 # Traits B3: fixed-wing flight is a genuinely different movement model from
 # _steer_towards(), not a reskin - never arrives-and-stops (minimum
@@ -546,28 +595,20 @@ func _get_target_hull(target: Node3D) -> Node3D:
 
 # Estimates each of the 4 horizontal facets' effective kinetic threshold
 # (hull baseline, or a covering plate's own material+HP bonus if one
-# exists - same resolution DamageResolver would use for a real hit) and
-# returns the WORLD-space direction of the weakest one. Top/bottom are
-# deliberately excluded - not meaningful to "approach from above" with
-# ground-based steering.
-func _weakest_facet_normal(target: Node3D) -> Vector3:
-	var hull = _get_target_hull(target)
-	if not hull:
-		return Vector3.ZERO
-
+# exists - same resolution DamageResolver would use for a real hit).
+# Generalized (Kiting phase, facet-aware) from what used to be inlined only
+# for a target's weakest facet, so the exact same estimate can be applied
+# to the unit's OWN hull for kiting decisions - a single source of truth
+# for "how tough is this hull's facet" regardless of who's asking.
+func _facet_thresholds(hull: Node3D, modules: Array) -> Dictionary:
 	var hull_mat = hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel"
 	var hull_thick = hull.get_meta("armor_thickness") if hull.has_meta("armor_thickness") else 1.0
 	var baseline = DamageResolverScript.get_material_threshold(hull_mat, "kinetic", hull_thick).x
 
-	var target_modules = []
-	if target.has_method("get_active_modules"):
-		target_modules = target.get_active_modules()
-
-	var best_facet = "front"
-	var best_threshold = INF
+	var result = {}
 	for facet in FACET_NORMALS.keys():
 		var t = baseline
-		for m in target_modules:
+		for m in modules:
 			if not m.has_meta("module_data"): continue
 			var m_data = m.get_meta("module_data")
 			if m_data.category == "armor" and m.get_meta("facet", "") == facet:
@@ -576,11 +617,49 @@ func _weakest_facet_normal(target: Node3D) -> Vector3:
 					t = DamageResolverScript.get_material_threshold(plate_mat, "kinetic", 1.0).x
 				t += m_data.get_hp() * 0.1
 				break
-		if t < best_threshold:
-			best_threshold = t
+		result[facet] = t
+	return result
+
+# Top/bottom are deliberately excluded - not meaningful to "approach from
+# above" with ground-based steering. Returns the WORLD-space direction of
+# the weakest one.
+func _weakest_facet_normal(target: Node3D) -> Vector3:
+	var hull = _get_target_hull(target)
+	if not hull:
+		return Vector3.ZERO
+
+	var target_modules = []
+	if target.has_method("get_active_modules"):
+		target_modules = target.get_active_modules()
+
+	var thresholds = _facet_thresholds(hull, target_modules)
+	var best_facet = "front"
+	var best_threshold = INF
+	for facet in thresholds:
+		if thresholds[facet] < best_threshold:
+			best_threshold = thresholds[facet]
 			best_facet = facet
 
 	return FACET_NORMALS[best_facet]
+
+# Facet-aware kiting (Kiting phase 2): my own weakest and strongest
+# facets, same estimate as _weakest_facet_normal but applied to myself.
+func _my_facet_extremes() -> Dictionary:
+	if not is_instance_valid(hull_node):
+		return {"weakest": "front", "strongest": "front"}
+	var thresholds = _facet_thresholds(hull_node, get_active_modules())
+	var weakest = "front"
+	var weakest_t = INF
+	var strongest = "front"
+	var strongest_t = -INF
+	for facet in thresholds:
+		if thresholds[facet] < weakest_t:
+			weakest_t = thresholds[facet]
+			weakest = facet
+		if thresholds[facet] > strongest_t:
+			strongest_t = thresholds[facet]
+			strongest = facet
+	return {"weakest": weakest, "strongest": strongest}
 
 func _compute_flank_point(target: Node3D) -> Vector3:
 	var weak_normal_local = _weakest_facet_normal(target)

@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 8) — Facet-aware kiting (with a real mid-implementation bug found and fixed)
+
+Kiting now factors in facet strength, not just distance, per Chris's ask.
+
+### What shipped
+
+`battle_unit.gd`'s kiting always repositions to keep its own STRONGEST facet toward the attacker while retreating, instead of a plain straight-back retreat that turns to face the travel direction and leaves whichever facet ends up opposite entirely to chance. Reused the existing per-facet-threshold estimate (`_weakest_facet_normal()`, built for target-flanking) by generalizing it into a new `_facet_thresholds()` helper callable on any hull+modules, then added `_my_facet_extremes()` (self-analysis) and `_kite_reposition()` (rotate toward presenting the strongest facet + strafe directly away from the attacker, decoupled rotation/translation).
+
+### A real bug found mid-implementation, not just in review
+
+First version tried to be clever: only reposition while the CURRENTLY-facing facet was the weakest, with a "sticky" flag to keep committing through a turn once started, then hand off to plain retreat once the strongest facet was achieved. Traced with a debug print through the real headless test environment (a standalone scratch probe gave garbage results - the CharacterBody3D never properly entered a physics-ready tree state outside the established test harness, a good reminder that "reproduce in isolation" isn't always faster than instrumenting the real path) and found the handoff itself was the bug: the moment repositioning correctly achieved the target facet and switched to `_steer_towards()` for the retreat, that function immediately started rotating toward ITS OWN idea of the correct heading (the travel direction), undoing the just-achieved positioning within a few frames - the unit would end up facing directly away from the attacker (exposing its back) regardless of which facet was actually strongest.
+
+Fixed by simplifying rather than patching: `_kite_reposition()` recomputes its target every frame from whichever facet is currently strongest, so it's self-stabilizing once achieved - there's no need for a second competing steering mode at all. Always using it for kiting (no more branching on "is the weakest facet currently exposed") also handles the case where every facet is equal (no armor modules) sensibly: "strongest" becomes an arbitrary tie-break (front), which just means facing the attacker while backing away - a reasonable default, not a regression from the old plain retreat.
+
+**Verified:** 47/47 tests green (1 new - `test_facet_aware_kiting`, which sets up a hull with a reinforced right-facet plate, positions the weak front facet toward the attacker, and confirms the unit both increases distance AND ends up presenting its strongest facet, not just whichever one a plain retreat would have produced).
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 (cont'd 7) — Doc cleanup, repair_array heal_rate, energy damage-type reclassification (found + fixed a deeper bug)
 
 Start of a new batch. First pass: documentation hygiene, then two of the "rest of the open items."

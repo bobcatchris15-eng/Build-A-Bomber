@@ -70,6 +70,7 @@ func _init():
 	success = success and await test_screenshot_diff_tolerance()
 	success = success and await test_no_energy_deficit_at_match_start()
 	success = success and await test_energy_damage_class_reclassification()
+	success = success and await test_facet_aware_kiting()
 
 	print("\n==============================================")
 	if success:
@@ -3010,4 +3011,88 @@ func test_energy_damage_class_reclassification() -> bool:
 
 	await process_frame
 	print("  [PASS] damage_resolver.gd has a real energy armor row; heavy_laser/plasma_lobber/pd_laser deal energy damage but stay capacitor-free.")
+	return true
+
+func test_facet_aware_kiting() -> bool:
+	print("Running Test Suite: Facet-Aware Kiting - Repositions To Present Its Strongest Facet...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.move_speed = 6.0
+	unit.rotate_speed = 4.0
+	unit.attack_range = 20.0
+	unit.has_frame_built_weapon = false # turreted - kiting is only for these
+	unit.global_transform = Transform3D.IDENTITY # facing -Z ("front")
+	unit.global_position = Vector3.ZERO
+
+	# Real hull_node with a reinforced RIGHT facet - front/left/back stay at
+	# baseline (weaker). classify_facet's "right" normal is (1,0,0), not the
+	# 180-degree-opposite of "front" - deliberately NOT reinforcing "back",
+	# since a strongest-facet-is-back scenario degenerates to the same
+	# heading a plain retreat would already produce and wouldn't actually
+	# exercise the decoupled rotate-while-strafing behavior this test needs
+	# to distinguish from the older plain-retreat kiting.
+	var hull = Node3D.new()
+	hull.name = "Hull"
+	hull.set_meta("armor_material", "hardened_steel")
+	hull.set_meta("armor_thickness", 1.0)
+	unit.add_child(hull)
+	unit.hull_node = hull
+
+	var right_plate = Node3D.new()
+	right_plate.set_meta("facet", "right")
+	var plate_data = ModuleData.new()
+	plate_data.type_id = "armor_plating"
+	plate_data.category = "armor"
+	plate_data.base_hp = 500.0
+	right_plate.set_meta("module_data", plate_data)
+	hull.add_child(right_plate)
+
+	# Attacker directly in front (matches "front" facet's own normal,
+	# (0,0,-1)) - "front" has no reinforcement, so it's tied-weakest and
+	# selected deterministically (FACET_NORMALS iterates front first).
+	var attacker = Node3D.new()
+	root.add_child(attacker)
+	attacker.global_position = Vector3(0, 0, -3)
+	unit.attack_range = 20.0 # well outside 0.45x standoff (9.0), so distance(3) triggers kiting
+	unit.order_attack(attacker)
+
+	var extremes = unit._my_facet_extremes()
+	if extremes.strongest != "right" or extremes.weakest != "front":
+		print("  [FAIL] Setup sanity check failed - expected strongest=right/weakest=front, got ", extremes)
+		unit.queue_free(); attacker.queue_free()
+		return false
+
+	var initial_dist = unit.global_position.distance_to(attacker.global_position)
+	for i in range(50):
+		unit._physics_process(0.05)
+		# No floor collider in this synthetic test, so is_on_floor() is
+		# always false and gravity would free-fall the unit indefinitely,
+		# contaminating the facet math with a huge Y offset that never
+		# happens in a real level (which always has a floor). Keep it
+		# grounded, same as move_and_slide() would with a real floor.
+		unit.global_position.y = 0.0
+		unit.velocity.y = 0.0
+	var final_dist = unit.global_position.distance_to(attacker.global_position)
+
+	if final_dist <= initial_dist + 0.5:
+		print("  [FAIL] Facet-aware kiting should still increase distance from the attacker, went from ", initial_dist, " to ", final_dist)
+		unit.queue_free(); attacker.queue_free()
+		return false
+
+	# The real behavioral difference from plain kiting: the facet now
+	# facing the attacker should be the STRONGEST one, not still the
+	# weakest one it started with.
+	var final_local_dir = unit.global_transform.basis.inverse() * (attacker.global_position - unit.global_position)
+	var final_facing_facet = ModuleCatalog.classify_facet(final_local_dir)
+	if final_facing_facet != "right":
+		print("  [FAIL] After repositioning, the unit's STRONGEST facet (right) should face the attacker, got '", final_facing_facet, "' facing instead")
+		unit.queue_free(); attacker.queue_free()
+		return false
+
+	unit.queue_free()
+	attacker.queue_free()
+	print("  [PASS] A unit whose weakest facet initially faces the attacker repositions (rotate + strafe, not just retreat) to present its strongest facet instead, while still increasing distance.")
 	return true
