@@ -47,6 +47,16 @@ func get_weight() -> float:
 			weight *= (val / 4.0)
 		elif tweak_name == "welder_count":
 			weight *= (val / 2.0)
+		elif tweak_name == "hangar_size":
+			# "Increases active drone count but takes up massive chassis
+			# real estate" (Arsenal_Weapons_List.md) - weight scales with
+			# drone count, same shape as barrel_count/tube_count above.
+			weight *= (val / 2.0)
+		elif tweak_name == "launch_catapult":
+			# Faster launches need heavier catapult machinery - also
+			# ensures this tweak actually changes a stat (test_no_dead_tweaks),
+			# not just fire_rate deep inside auto_weapon.gd.
+			weight *= val
 
 	return GlobalConfig.round_to_half(weight)
 	

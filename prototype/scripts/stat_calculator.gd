@@ -102,6 +102,23 @@ const TWEAK_SPECS = {
 	],
 	"logistics_tank": [
 		{"name": "tank_capacity", "label": "Fuel/Power Capacity", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	# Previously documented in Arsenal_Weapons_List.md but missing from this
+	# dict entirely - drone_carrier rendered zero tweak sliders in the
+	# Design Lab (ENERGY_AND_BALANCE_SPEC.md #3).
+	"drone_carrier": [
+		{"name": "hangar_size", "label": "Hangar Size (Drone Count)", "min": 1.0, "max": 5.0, "step": 1.0, "default": 2.0},
+		{"name": "launch_catapult", "label": "Launch Catapult", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	# Energy weapons (ENERGY_AND_BALANCE_SPEC.md #5)
+	"tesla_coil": [
+		{"name": "caliber", "label": "Coil Charge Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"arc_projector": [
+		{"name": "containment", "label": "Arc Containment Field", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"ion_cannon": [
+		{"name": "lens_aperture", "label": "Ion Focusing Lens", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	]
 }
 

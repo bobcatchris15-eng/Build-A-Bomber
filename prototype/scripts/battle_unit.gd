@@ -25,6 +25,11 @@ var max_energy: float = 0.0
 var current_energy: float = 0.0
 var energy_regen_rate: float = 0.0
 var _hull_type_for_energy: String = ""
+# Logistics sharing aura (ENERGY_AND_BALANCE_SPEC.md #5)
+var has_logistics_tank: bool = false
+var logistics_tank_strength: float = 0.0
+const LOGISTICS_SHARE_RADIUS: float = 15.0
+const LOGISTICS_SHARE_RATE: float = 6.0
 
 var hull_node: Node3D = null
 var locomotion_type: String = ""
@@ -125,8 +130,24 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	_detect_harvester()
 	_recalculate_move_speed()
 	_recalculate_energy(hull_type)
+	_detect_logistics_tank()
 	_create_selection_ring(base_size)
 	_create_hp_bar()
+
+# Logistics sharing aura (ENERGY_AND_BALANCE_SPEC.md #5): "not just
+# self-sufficiency" per Chris's instruction - logistics_tank does nothing
+# for the carrying unit beyond its existing capacity contribution, its
+# whole value is boosting nearby allies' energy regen.
+func _detect_logistics_tank():
+	has_logistics_tank = false
+	logistics_tank_strength = 0.0
+	if not is_instance_valid(hull_node): return
+	for child in hull_node.get_children():
+		if child.has_meta("module_data"):
+			var data = child.get_meta("module_data")
+			if data.type_id == "logistics_tank":
+				has_logistics_tank = true
+				logistics_tank_strength += data.tweaks.get("tank_capacity", 1.0)
 
 # Energy resource: base_energy from the hull + sum of mounted generator
 # modules' energy_capacity/energy_regen. Public (not just called at setup)
@@ -275,6 +296,8 @@ func _physics_process(delta):
 
 	if current_energy < max_energy:
 		current_energy = min(max_energy, current_energy + energy_regen_rate * delta)
+	if has_logistics_tank:
+		_share_energy_with_allies(delta)
 
 	# Altitude / gravity / surface-lock
 	if is_flying:
@@ -590,11 +613,14 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 					mirror.remove_meta("mirrored_counterpart")
 			var was_locomotion = m_data.category == "locomotion"
 			var was_generator = m_data.category == "generator"
+			var was_logistics = m_data.type_id == "logistics_tank"
 			target_module.queue_free()
 			if was_locomotion:
 				call_deferred("_recalculate_move_speed")
 			if was_generator:
 				call_deferred("_recalculate_energy")
+			if was_logistics:
+				call_deferred("_detect_logistics_tank")
 		return
 
 	if amount < threshold:
@@ -634,6 +660,27 @@ func repair_hp(amount: float):
 	if is_dead or hp >= max_hp: return
 	hp = min(max_hp, hp + amount)
 	_update_hp_bar()
+
+# Called on THIS unit's own allies by their logistics_tank aura -
+# distinct from passive regen (energy_regen_rate) so a logistics-boosted
+# unit visibly charges faster than its own generators alone would produce.
+func receive_energy_share(amount: float):
+	if is_dead: return
+	current_energy = min(max_energy, current_energy + amount)
+
+# Logistics sharing aura: scans nearby allies every physics frame, same
+# O(n) scan pattern auto_weapon.gd's targeting already uses. Skirmish
+# battles are modest-scale (tens of units), not thousands, so this is
+# cheap enough without needing a spatial partition.
+func _share_energy_with_allies(delta: float):
+	for u in get_tree().get_nodes_in_group("units"):
+		if u == self or not is_instance_valid(u): continue
+		if "is_dead" in u and u.is_dead: continue
+		if not ("team" in u) or u.team != team: continue
+		if not (u.has_method("receive_energy_share") and "current_energy" in u and "max_energy" in u): continue
+		if u.current_energy >= u.max_energy: continue
+		if global_position.distance_to(u.global_position) <= LOGISTICS_SHARE_RADIUS:
+			u.receive_energy_share(LOGISTICS_SHARE_RATE * logistics_tank_strength * delta)
 
 func _flash_shield():
 	var exp_mesh = MeshInstance3D.new()

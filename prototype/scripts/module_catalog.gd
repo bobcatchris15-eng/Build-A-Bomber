@@ -270,7 +270,15 @@ static func get_catalog() -> Dictionary:
 			"weight": 70.0,
 			"metal": 40,
 			"crystal": 20,
-			"dps": 0.0,
+			# Reused as a heal-per-second rate (auto_weapon.gd's
+			# _fire_repair_array_beam calls repair_hp(dps*fire_rate) instead
+			# of take_damage) - not literal damage. Known minor wart: this
+			# also feeds the generic "Total DPS" aggregate in the Design Lab
+			# sidebar, mislabeling a heal rate as DPS. Accepted rather than
+			# building a parallel heal_rate stat pipeline just to avoid a
+			# cosmetic label - see DECISIONS_NEEDED.md.
+			"dps": 30.0,
+			"targets_allies": true,
 			"size": Vector3(0.8, 0.8, 1.0),
 			"color": Color.DARK_TURQUOISE
 		},
@@ -540,6 +548,15 @@ static func is_foundation(type_id: String) -> bool:
 static func get_base_energy(hull_type_id: String) -> float:
 	var data = get_module_data(hull_type_id)
 	return data.get("base_energy", 0.0)
+
+# Whether this weapon-slot module's targeting should invert to same-team,
+# HP-deficit candidates instead of hostiles (repair_array's real fix -
+# previously it reused the universal hostile-only targeting and could never
+# select an ally at all). Single source of truth so auto_weapon.gd doesn't
+# need a hardcoded type_id check.
+static func targets_allies(type_id: String) -> bool:
+	var data = get_module_data(type_id)
+	return data.get("targets_allies", false)
 
 # --- Unit-class traits (MOUNTING_AND_ARMOR_SPEC.md addendum) ---
 # Composable tags, not a hard ship/land/air/building enum, so a helicopter

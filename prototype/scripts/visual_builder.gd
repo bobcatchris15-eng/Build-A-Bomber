@@ -930,6 +930,55 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		arm.rotation = Vector3(PI / 2 - 0.3, 0, 0)
 		parent_node.add_child(arm)
 
+	elif type_id == "tesla_coil":
+		# Chris explicitly invited some fun/silly weapons alongside the
+		# grounded ones (ENERGY_AND_BALANCE_SPEC.md #4) - a literal wound
+		# coil with a glowing discharge ball on top, distinct from the
+		# generic box fallback every other unhandled type gets.
+		var base = MeshInstance3D.new()
+		var base_cyl = CylinderMesh.new()
+		base_cyl.top_radius = base_size.x * 0.45
+		base_cyl.bottom_radius = base_size.x * 0.55
+		base_cyl.height = base_size.y * 0.15
+		base.mesh = base_cyl
+		var base_mat = StandardMaterial3D.new()
+		base_mat.albedo_color = Color(0.2, 0.2, 0.22)
+		base.material_override = base_mat
+		base.position = Vector3(0, base_cyl.height / 2.0, 0)
+		parent_node.add_child(base)
+
+		var coil_segments = 8
+		var coil_height = base_size.y * 0.75
+		var coil_radius = base_size.x * 0.32
+		for i in range(coil_segments):
+			var ring = MeshInstance3D.new()
+			var torus = TorusMesh.new()
+			torus.inner_radius = coil_radius - 0.03
+			torus.outer_radius = coil_radius
+			ring.mesh = torus
+			var ring_mat = StandardMaterial3D.new()
+			ring_mat.albedo_color = base_color
+			ring_mat.emission_enabled = true
+			ring_mat.emission = base_color
+			ring_mat.emission_energy_multiplier = 0.4
+			ring.material_override = ring_mat
+			ring.position = Vector3(0, base_size.y * 0.2 + (coil_height * i / float(coil_segments - 1)), 0)
+			parent_node.add_child(ring)
+
+		var orb = MeshInstance3D.new()
+		var sphere = SphereMesh.new()
+		sphere.radius = base_size.x * 0.4
+		sphere.height = sphere.radius * 2.0
+		orb.mesh = sphere
+		var orb_mat = StandardMaterial3D.new()
+		orb_mat.albedo_color = Color.WHITE
+		orb_mat.emission_enabled = true
+		orb_mat.emission = base_color
+		orb_mat.emission_energy_multiplier = 1.5
+		orb.material_override = orb_mat
+		orb.position = Vector3(0, base_size.y * 0.2 + coil_height + sphere.radius * 0.6, 0)
+		parent_node.add_child(orb)
+
 	else:
 		# Fallback: Simple box mesh for armor and basic parts
 		var mesh_inst = MeshInstance3D.new()

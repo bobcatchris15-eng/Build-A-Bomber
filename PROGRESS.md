@@ -4,6 +4,37 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 5) — Repair array + drone carrier fixed for real, 3 new energy weapons, logistics sharing aura
+
+Second chunk of the big Energy/balance/modules batch (see ENERGY_AND_BALANCE_SPEC.md for the design reasoning; the Energy resource itself + stat rounding landed in the previous checkpoint). This chunk: the two "fake" modules, and the new Energy-tied combat mechanics.
+
+### Repair/Construction Array: real heal, real ally-targeting
+
+Previously `_fire_repair_array_beam()` called `take_damage()` on whatever `_find_nearest_target()` returned - and since team-mode targeting unconditionally skips same-team candidates, it could never select an ally at all, and its catalog `dps` was `0.0` besides. It was a beam that cosmetically "welded" a hostile for zero effect.
+
+- `ModuleCatalog.targets_allies(type_id)`: new single-source-of-truth flag (only `repair_array` sets it).
+- `auto_weapon.gd`'s `_find_nearest_target()` grew an ally-targeting branch: same-team, HP-deficit (`hp < max_hp`) candidates, inverted from every other weapon's hostile-only filter.
+- `battle_unit.gd`/`player_vehicle.gd`/`building.gd` all gained `repair_hp(amount)` (duck-typed like `take_damage`) - `_fire_repair_array_beam()` now calls that instead of `take_damage`.
+- Catalog `dps` for repair_array is now `30.0`, reused as a heal-per-second rate (not damage) - known minor wart, logged in DECISIONS_NEEDED.md, that this also feeds the generic "Total DPS" aggregate.
+
+### Drone Carrier Bay: real autonomous drones, not tweened meshes
+
+`_fire_drone_swarm()` used to spawn two throwaway `MeshInstance3D` prisms, tween them to an orbit point and back, and apply damage in the tween's `finished` callback - no persistent entity, no independent physics, no AI. New `scripts/drone_unit.gd` is a real standalone node (modeled on `incoming_missile.gd`'s shape): its own `_physics_process` state machine (LAUNCH → ATTACK → RETURN), registers in the `"missiles"` group so existing point-defense code can shoot it down mid-flight, single lump-sum damage hit on arrival (not a per-frame tick, which would have rolled subsystem-stripping dozens of times per pass). Also added the two `TWEAK_SPECS` entries ("Hangar Size" → drone count, "Launch Catapult" → launch cooldown) that were documented in Arsenal_Weapons_List.md but never existed in code at all.
+
+### Three new energy weapons + a little silliness
+
+`tesla_coil` (a genuinely silly one per Chris's explicit invitation - a zigzag chain-lightning bolt visual and a literal wound-coil mesh, not a straight beam), `arc_projector` (the dedicated pure energy-drain "disable" weapon, minor HP damage), `ion_cannon` (the grounded energy heavy-hitter, full damage + drain). All three cost the firing unit's own `current_energy` per shot (a real capacitor-empty gate - the weapon just can't fire without charge) and drain the target's energy pool on hit. This also gives the previously-dead "Energy" armor damage-type threshold (shown in the Design Lab sidebar since early this week, never actually used by any weapon) its first real meaning - deliberately did NOT reclassify existing thermal weapons (heavy_laser etc.) to avoid silently changing their established balance.
+
+### Logistics Tank: real energy-sharing aura
+
+Previously a pure stat-bearing module (its `tank_capacity` tweak scaled weight/cost but did nothing functionally). Now shares surplus energy with nearby allies (15-unit radius) every physics tick, scaled by tank_capacity - "not just self-sufficiency" per Chris's instruction, it does nothing for its own carrier beyond existing capacity.
+
+**Verified:** 5 new tests (41/41 total green): base-pool+generator capacity, repair-targets-allies-not-enemies, drone-carrier-spawns-real-independently-flying-entities, energy-weapons-spend-and-drain-and-cant-fire-empty, logistics-aura-boosts-allies-only.
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 (cont'd 4) — Unit AI phase 1: whole-vehicle-aim, kiting, new-movement-type enemy roster
 
 Chris's green light: "start real work on unit AI, pathfinding, and attack behavior — for both player-controlled and enemy units." Scoped this to the concrete, well-bounded pieces that directly extend today's mounting/trait work into actual combat behavior, rather than attempting full pathfinding in one pass (see DECISIONS_NEEDED.md for why).

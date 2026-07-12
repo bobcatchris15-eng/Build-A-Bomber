@@ -59,7 +59,12 @@ func _init():
 	success = success and await test_blueprint_cost_and_rosters()
 	success = success and await test_skirmish_economy_and_production()
 	success = success and await test_win_condition()
-	
+	success = success and await test_energy_pool_and_generators()
+	success = success and await test_repair_array_heals_allies_only()
+	success = success and await test_drone_carrier_spawns_real_drones()
+	success = success and await test_energy_weapons_cost_and_drain()
+	success = success and await test_logistics_sharing_boosts_allies()
+
 	print("\n==============================================")
 	if success:
 		print("    ALL AUTOMATED TESTS PASSED SUCCESSFULLY!")
@@ -2372,3 +2377,330 @@ func test_win_condition() -> bool:
 		return true
 	print("  [FAIL] Game over not triggered by HQ destruction.")
 	return false
+
+func test_energy_pool_and_generators() -> bool:
+	print("Running Test Suite: Energy Resource - Base Pool + Generator Modules...")
+	await process_frame # let any deferred queue_free()s from prior tests actually clear
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
+	root.add_child(bp_manager)
+
+	var bp_no_gen = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": []
+	}
+	var unit_no_gen = CharacterBody3D.new()
+	unit_no_gen.set_script(BattleUnitScript)
+	root.add_child(unit_no_gen)
+	unit_no_gen.setup(bp_no_gen, 0, bp_manager)
+	var base_only = unit_no_gen.max_energy
+	if base_only <= 0.0:
+		print("  [FAIL] medium_hull should carry a nonzero base_energy pool even with no generators, got ", base_only)
+		bp_manager.queue_free()
+		return false
+	unit_no_gen.queue_free()
+
+	var bp_with_gen = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "fusion_generator", "name": "Fusion Generator", "position": {"x": 0.0, "y": 0.5, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var unit_with_gen = CharacterBody3D.new()
+	unit_with_gen.set_script(BattleUnitScript)
+	root.add_child(unit_with_gen)
+	unit_with_gen.setup(bp_with_gen, 0, bp_manager)
+	if unit_with_gen.max_energy <= base_only:
+		print("  [FAIL] A mounted fusion_generator should raise max_energy above the hull's base_energy alone (base=", base_only, ", with generator=", unit_with_gen.max_energy, ")")
+		bp_manager.queue_free()
+		return false
+
+	unit_with_gen.current_energy = 0.0
+	for i in range(20):
+		unit_with_gen._physics_process(0.1)
+	if unit_with_gen.current_energy <= 0.0:
+		print("  [FAIL] Energy should regenerate over time from 0, got ", unit_with_gen.current_energy)
+		bp_manager.queue_free()
+		return false
+
+	unit_with_gen.queue_free()
+	bp_manager.queue_free()
+	print("  [PASS] Hulls carry a base energy pool; generator modules raise max_energy above it; energy regenerates over time.")
+	return true
+
+func test_repair_array_heals_allies_only() -> bool:
+	print("Running Test Suite: Repair Array - Real Ally-Targeting Heal (not damage)...")
+	await process_frame # let any deferred queue_free()s from prior tests actually clear
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var healer = CharacterBody3D.new()
+	healer.set_script(BattleUnitScript)
+	root.add_child(healer)
+	healer.team = 0
+	healer.set_meta("team", 0)
+	healer.add_to_group("damageable")
+
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	healer.add_child(weapon)
+	var w_data = ModuleData.new()
+	w_data.type_id = "repair_array"
+	w_data.base_weight = 70.0
+	w_data.base_dps = 30.0
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+	if not weapon.targets_allies:
+		print("  [FAIL] repair_array should have targets_allies=true")
+		healer.queue_free()
+		return false
+
+	var damaged_ally = CharacterBody3D.new()
+	damaged_ally.set_script(BattleUnitScript)
+	root.add_child(damaged_ally)
+	damaged_ally.team = 0
+	damaged_ally.set_meta("team", 0)
+	damaged_ally.add_to_group("damageable")
+	damaged_ally.max_hp = 200.0
+	damaged_ally.hp = 100.0
+	damaged_ally.global_position = weapon.global_position + Vector3(0, 0, -3) # -Z: within the weapon's default forward-facing traverse cone
+
+	var enemy = CharacterBody3D.new()
+	enemy.set_script(BattleUnitScript)
+	root.add_child(enemy)
+	enemy.team = 1
+	enemy.set_meta("team", 1)
+	enemy.add_to_group("damageable")
+	enemy.max_hp = 200.0
+	enemy.hp = 50.0 # also damaged, but hostile - must never be selected
+	enemy.global_position = weapon.global_position + Vector3(0, 0, -1) # closer than the ally, same forward cone
+
+	weapon._find_nearest_target()
+	if weapon.target != damaged_ally:
+		print("  [FAIL] repair_array should target the damaged ALLY, not the closer damaged enemy, got ", weapon.target)
+		healer.queue_free(); damaged_ally.queue_free(); enemy.queue_free()
+		return false
+
+	weapon.target = damaged_ally
+	# _fire_repair_array_beam() spawns cosmetic visuals via
+	# get_tree().current_scene.add_child() - current_scene must be a direct
+	# child of the tree's actual root, not root itself.
+	var scene_stub = Node3D.new()
+	root.add_child(scene_stub)
+	current_scene = scene_stub
+	var hp_before = damaged_ally.hp
+	weapon._fire_repair_array_beam()
+	if damaged_ally.hp <= hp_before:
+		print("  [FAIL] repair_array's beam should have healed the ally, hp went from ", hp_before, " to ", damaged_ally.hp)
+		healer.queue_free(); damaged_ally.queue_free(); enemy.queue_free()
+		return false
+
+	healer.queue_free()
+	damaged_ally.queue_free()
+	enemy.queue_free()
+	print("  [PASS] repair_array targets same-team HP-deficit allies (never hostiles) and its beam actually heals.")
+	return true
+
+func test_drone_carrier_spawns_real_drones() -> bool:
+	print("Running Test Suite: Drone Carrier Bay - Real Autonomous Drones (not tweened fakery)...")
+	await process_frame # let any deferred queue_free()s from prior tests actually clear
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var carrier_unit = CharacterBody3D.new()
+	carrier_unit.set_script(BattleUnitScript)
+	root.add_child(carrier_unit)
+	carrier_unit.team = 0
+	carrier_unit.set_meta("team", 0)
+	carrier_unit.add_to_group("damageable")
+
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	carrier_unit.add_child(weapon)
+	var w_data = ModuleData.new()
+	w_data.type_id = "drone_carrier"
+	w_data.base_weight = 350.0
+	w_data.base_dps = 85.0
+	w_data.tweaks = {"hangar_size": 3.0}
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+
+	var enemy = CharacterBody3D.new()
+	enemy.set_script(BattleUnitScript)
+	root.add_child(enemy)
+	enemy.team = 1
+	enemy.set_meta("team", 1)
+	enemy.add_to_group("damageable")
+	enemy.max_hp = 300.0
+	enemy.hp = 300.0
+	enemy.global_position = Vector3(10, 0, 0)
+
+	var scene_stub = Node3D.new()
+	root.add_child(scene_stub)
+	current_scene = scene_stub # _fire_drone_swarm() spawns via get_tree().current_scene.add_child()
+	weapon.target = enemy
+	weapon._fire_drone_swarm()
+
+	var drones = []
+	for n in get_nodes_in_group("missiles"):
+		if is_instance_valid(n) and "carrier" in n and n.carrier == carrier_unit:
+			drones.append(n)
+	if drones.size() != 3:
+		print("  [FAIL] hangar_size=3.0 should spawn exactly 3 real drone_unit.gd nodes, got ", drones.size())
+		carrier_unit.queue_free(); enemy.queue_free()
+		return false
+	for d in drones:
+		if d.team != 0:
+			print("  [FAIL] Spawned drone should carry the carrier's team, got ", d.team)
+			carrier_unit.queue_free(); enemy.queue_free()
+			return false
+		if d.target != enemy:
+			print("  [FAIL] Spawned drone's target should be the enemy, got ", d.target)
+			carrier_unit.queue_free(); enemy.queue_free()
+			return false
+
+	# A real drone has independent physics-driven flight, not a canned
+	# tween - verify it actually moves under its own _physics_process.
+	var sample_drone = drones[0]
+	var start_pos = sample_drone.global_position
+	for i in range(10):
+		sample_drone._physics_process(0.1)
+	if sample_drone.global_position.distance_to(start_pos) < 0.5:
+		print("  [FAIL] A drone should be flying (independent _physics_process movement) toward its target, but barely moved")
+		carrier_unit.queue_free(); enemy.queue_free()
+		return false
+
+	for d in drones:
+		if is_instance_valid(d): d.queue_free()
+	carrier_unit.queue_free()
+	enemy.queue_free()
+	print("  [PASS] drone_carrier spawns real, independently-flying drone_unit.gd entities (count driven by Hangar Size), not tweened decorative meshes.")
+	return true
+
+func test_energy_weapons_cost_and_drain() -> bool:
+	print("Running Test Suite: Energy Weapons - Cost To Fire + Target Energy Drain...")
+	await process_frame # let any deferred queue_free()s from prior tests actually clear
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var shooter = CharacterBody3D.new()
+	shooter.set_script(BattleUnitScript)
+	root.add_child(shooter)
+	shooter.team = 0
+	shooter.set_meta("team", 0)
+	shooter.add_to_group("damageable")
+	shooter.max_energy = 100.0
+	shooter.current_energy = 100.0
+	shooter.energy_regen_rate = 0.0 # isolate the spend, no regen muddying the assertion
+
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	shooter.add_child(weapon)
+	var w_data = ModuleData.new()
+	w_data.type_id = "arc_projector"
+	w_data.base_weight = 45.0
+	w_data.base_dps = 40.0
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+	if weapon.energy_cost_per_shot <= 0.0:
+		print("  [FAIL] An energy weapon should have a nonzero energy_cost_per_shot, got ", weapon.energy_cost_per_shot)
+		shooter.queue_free()
+		return false
+
+	var target_unit = CharacterBody3D.new()
+	target_unit.set_script(BattleUnitScript)
+	root.add_child(target_unit)
+	target_unit.team = 1
+	target_unit.set_meta("team", 1)
+	target_unit.add_to_group("damageable")
+	target_unit.max_hp = 500.0
+	target_unit.hp = 500.0
+	target_unit.max_energy = 50.0
+	target_unit.current_energy = 50.0
+	target_unit.global_position = weapon.global_position + Vector3(0, 0, -5) # within the default forward-facing traverse cone, nonzero distance
+
+	weapon.target = target_unit
+	var scene_stub = Node3D.new()
+	root.add_child(scene_stub)
+	current_scene = scene_stub # _fire_arc_projector() spawns visuals via get_tree().current_scene.add_child()
+	var energy_before = shooter.current_energy
+	var target_energy_before = target_unit.current_energy
+	weapon.time_since_last_shot = weapon.fire_rate # ready to fire immediately
+	for i in range(30):
+		weapon._physics_process(0.1)
+		if shooter.current_energy < energy_before:
+			break
+	if shooter.current_energy >= energy_before:
+		print("  [FAIL] Firing an energy weapon should spend the shooter's own current_energy, stayed at ", shooter.current_energy)
+		shooter.queue_free(); target_unit.queue_free()
+		return false
+	if target_unit.current_energy >= target_energy_before:
+		print("  [FAIL] arc_projector should drain the TARGET's energy pool, stayed at ", target_unit.current_energy)
+		shooter.queue_free(); target_unit.queue_free()
+		return false
+
+	# Capacitor-empty gate: with current_energy forced to 0, the weapon must not fire.
+	shooter.current_energy = 0.0
+	var target_hp_before = target_unit.hp
+	var target_energy_before2 = target_unit.current_energy
+	weapon.time_since_last_shot = weapon.fire_rate
+	weapon._physics_process(0.1)
+	if target_unit.hp != target_hp_before or target_unit.current_energy != target_energy_before2:
+		print("  [FAIL] An energy weapon with an empty capacitor should not be able to fire")
+		shooter.queue_free(); target_unit.queue_free()
+		return false
+
+	shooter.queue_free()
+	target_unit.queue_free()
+	print("  [PASS] Energy weapons spend the shooter's own capacitor per shot, drain the target's energy pool, and can't fire with an empty capacitor.")
+	return true
+
+func test_logistics_sharing_boosts_allies() -> bool:
+	print("Running Test Suite: Logistics Tank - Energy-Sharing Aura (not just self-sufficiency)...")
+	await process_frame # let any deferred queue_free()s from prior tests actually clear
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var supporter = CharacterBody3D.new()
+	supporter.set_script(BattleUnitScript)
+	root.add_child(supporter)
+	supporter.team = 0
+	supporter.global_position = Vector3.ZERO
+	supporter.has_logistics_tank = true
+	supporter.logistics_tank_strength = 1.0
+
+	var ally = CharacterBody3D.new()
+	ally.set_script(BattleUnitScript)
+	root.add_child(ally)
+	ally.team = 0
+	ally.global_position = Vector3(5, 0, 0) # within LOGISTICS_SHARE_RADIUS
+	ally.max_energy = 100.0
+	ally.current_energy = 10.0
+	ally.energy_regen_rate = 0.0 # isolate the aura's contribution from passive regen
+
+	var stranger = CharacterBody3D.new()
+	stranger.set_script(BattleUnitScript)
+	root.add_child(stranger)
+	stranger.team = 1 # enemy - must NOT receive the share
+	stranger.global_position = Vector3(-5, 0, 0)
+	stranger.max_energy = 100.0
+	stranger.current_energy = 10.0
+	stranger.energy_regen_rate = 0.0
+
+	for i in range(20):
+		supporter._physics_process(0.1)
+
+	if ally.current_energy <= 10.0:
+		print("  [FAIL] An ally within range of a logistics_tank-equipped unit should have its energy boosted, stayed at ", ally.current_energy)
+		supporter.queue_free(); ally.queue_free(); stranger.queue_free()
+		return false
+	if stranger.current_energy != 10.0:
+		print("  [FAIL] The logistics sharing aura should never boost an enemy, got ", stranger.current_energy)
+		supporter.queue_free(); ally.queue_free(); stranger.queue_free()
+		return false
+
+	supporter.queue_free()
+	ally.queue_free()
+	stranger.queue_free()
+	print("  [PASS] logistics_tank shares surplus energy with nearby allies only, boosting them beyond their own passive regen.")
+	return true

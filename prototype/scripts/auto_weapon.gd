@@ -18,6 +18,19 @@ var traverse_speed: float = 4.0
 var resting_transform: Transform3D
 var spin_up_timer: float = 0.0
 
+# repair_array's real fix (ENERGY_AND_BALANCE_SPEC.md #3): inverts
+# targeting to same-team/HP-deficit candidates instead of hostiles.
+var targets_allies: bool = false
+
+# Energy weapons (ENERGY_AND_BALANCE_SPEC.md #4/#5): cost the FIRING unit's
+# own current_energy per shot (checked/spent via spend_energy() on the
+# vehicle root, duck-typed) and, for tesla_coil/ion_cannon, drain the
+# TARGET's energy pool alongside HP damage. arc_projector is the dedicated
+# pure-drain weapon.
+const ENERGY_WEAPON_TYPES = ["tesla_coil", "arc_projector", "ion_cannon"]
+var energy_cost_per_shot: float = 0.0
+var energy_drain_per_shot: float = 0.0
+
 # Helper to find all colliders recursively
 func _get_colliders_recursive(node: Node, list: Array):
 	if node is CollisionObject3D:
@@ -108,8 +121,20 @@ func _ready():
 			damage_class = "kinetic"
 		elif type_id in ["heavy_howitzer", "mortar_array", "spigot_mortar", "guided_missile", "dual_stage_missile", "missile_pod", "cluster_dispenser", "flak_cannon"]:
 			damage_class = "explosive"
+		elif type_id in ENERGY_WEAPON_TYPES:
+			# New this pass - the armor system's "Energy" damage-type
+			# threshold (K:/T:/E: in the Design Lab sidebar) existed since
+			# early this week but nothing ever actually dealt "energy"
+			# damage_class, so it was cosmetic-only. Deliberately NOT
+			# reclassifying heavy_laser/plasma_lobber/pd_laser (they stay
+			# "thermal" via the else branch below) - that would silently
+			# change their existing balance against energy_shielding armor,
+			# which wasn't asked for and isn't worth the risk unattended.
+			damage_class = "energy"
 		else:
 			damage_class = "thermal"
+
+		targets_allies = ModuleCatalog.targets_allies(type_id)
 			
 		# Configure stats and colors by type_id
 		if type_id == "basic_cannon":
@@ -172,6 +197,18 @@ func _ready():
 			fire_range = 24.0
 			fire_rate = 2.2
 			laser_color = Color.MEDIUM_SPRING_GREEN
+		elif type_id == "tesla_coil":
+			fire_range = 14.0
+			fire_rate = 1.4
+			laser_color = Color.LIGHT_SKY_BLUE
+		elif type_id == "arc_projector":
+			fire_range = 10.0
+			fire_rate = 0.9
+			laser_color = Color.CYAN
+		elif type_id == "ion_cannon":
+			fire_range = 32.0
+			fire_rate = 3.2
+			laser_color = Color.SKY_BLUE
 		elif type_id == "ciws":
 			fire_range = 14.0
 			fire_rate = 0.06
@@ -233,7 +270,21 @@ func _ready():
 			fire_rate *= (data.tweaks["grid_size"] / 4.0)
 		if data.tweaks.has("pressure_valve") and data.tweaks["pressure_valve"] > 0.0:
 			fire_rate /= data.tweaks["pressure_valve"]
-			
+		if data.tweaks.has("launch_catapult") and data.tweaks["launch_catapult"] > 0.0:
+			fire_rate /= data.tweaks["launch_catapult"]
+
+		# Energy weapons: cost to fire scales with the weapon's own damage
+		# output (dps*fire_rate is the per-shot damage), so a bigger/harder-
+		# hitting energy weapon also drains the capacitor faster per shot -
+		# no separate catalog field needed, it falls out of existing stats.
+		if type_id in ENERGY_WEAPON_TYPES:
+			var per_shot_damage = dps * fire_rate
+			energy_cost_per_shot = per_shot_damage * 0.4
+			if type_id == "arc_projector":
+				energy_drain_per_shot = per_shot_damage * 1.5
+			else:
+				energy_drain_per_shot = per_shot_damage * 0.5
+
 	# Desynchronize initial reload timers
 	time_since_last_shot = randf_range(0.0, fire_rate)
 
@@ -303,8 +354,19 @@ func _physics_process(delta):
 					return # still spinning up!
 					
 			if time_since_last_shot >= fire_rate:
-				time_since_last_shot = 0.0
-				_fire_at_target()
+				# Energy weapons need a charged capacitor to fire - a real
+				# soft-limit on sustained fire, not just a stat number. If
+				# the shooter has no current_energy field at all (a legacy/
+				# test-harness node), fire freely rather than hard-blocking
+				# on a duck-typed method that doesn't exist.
+				var can_fire = true
+				if type_id in ENERGY_WEAPON_TYPES:
+					var root_vehicle = get_vehicle_root()
+					if root_vehicle and root_vehicle.has_method("spend_energy"):
+						can_fire = root_vehicle.spend_energy(energy_cost_per_shot)
+				if can_fire:
+					time_since_last_shot = 0.0
+					_fire_at_target()
 		else:
 			# Not pointing at target, spin down
 			if type_id == "rotary_cannon":
@@ -327,6 +389,26 @@ func _find_nearest_target():
 	# --- TEAM MODE (Skirmish): target any hostile "damageable" construct ---
 	var my_team = get_team()
 	if my_team >= 0:
+		# repair_array's real fix: same-team, HP-deficit candidates instead
+		# of hostiles - the opposite filter from every other weapon below.
+		if targets_allies:
+			var ally_candidates = get_tree().get_nodes_in_group("damageable")
+			var closest_ally: Node3D = null
+			var closest_ally_dist: float = fire_range
+			for c in ally_candidates:
+				if not is_instance_valid(c) or not c.has_method("repair_hp"): continue
+				var c_team = c.get_meta("team") if c.has_meta("team") else -1
+				if c_team != my_team: continue
+				if "is_dead" in c and c.is_dead: continue
+				if not ("hp" in c and "max_hp" in c) or c.hp >= c.max_hp: continue
+				var dist = global_position.distance_to(c.global_position)
+				if dist < closest_ally_dist:
+					var dir = (c.global_position - global_position).normalized()
+					if resting_forward.angle_to(dir) <= traverse_limit_angle:
+						closest_ally = c
+						closest_ally_dist = dist
+			target = closest_ally
+			return
 		# Point defense still prioritizes missiles aimed at friendlies
 		if type_id in ["ciws", "pd_laser", "flak_cannon"]:
 			var missiles = get_tree().get_nodes_in_group("missiles")
@@ -478,6 +560,12 @@ func _fire_at_target():
 			_fire_resource_harvester_tether()
 		"repair_array":
 			_fire_repair_array_beam()
+		"tesla_coil":
+			_fire_tesla_coil()
+		"arc_projector":
+			_fire_arc_projector()
+		"ion_cannon":
+			_fire_ion_cannon()
 		_:
 			_fire_standard_laser()
 
@@ -830,61 +918,30 @@ func _fire_swarm_missiles():
 		)
 
 func _fire_drone_swarm():
-	for i in range(2):
-		var drone = MeshInstance3D.new()
-		var prism = PrismMesh.new()
-		prism.size = Vector3(0.18, 0.08, 0.18)
-		drone.mesh = prism
-		
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = Color.NAVY_BLUE
-		mat.emission_enabled = true
-		mat.emission = Color.CYAN
-		drone.material_override = mat
+	# Real autonomous drones (drone_unit.gd), not tweened throwaway meshes -
+	# see ENERGY_AND_BALANCE_SPEC.md #3. Count driven by the "Hangar Size"
+	# tweak (previously documented in Arsenal_Weapons_List.md but missing
+	# from TWEAK_SPECS entirely).
+	var count = 2
+	if has_meta("module_data"):
+		var data = get_meta("module_data")
+		count = int(data.tweaks.get("hangar_size", 2.0))
+	count = max(1, count)
+	var per_drone_damage = (dps * fire_rate) / count
+	var my_team = get_team()
+	var vehicle_root = get_vehicle_root()
+	var carrier = vehicle_root if is_instance_valid(vehicle_root) else self
+	for i in range(count):
+		var drone = Node3D.new()
+		drone.set_script(load("res://scripts/drone_unit.gd"))
 		get_tree().current_scene.add_child(drone)
-		
-		var start = global_position + Vector3(randf_range(-0.5, 0.5), 1.0, randf_range(-0.5, 0.5))
-		drone.global_position = start
-		
-		var end = target.global_position
-		var tween = create_tween()
-		
-		var offset_angle = randf_range(0, 2*PI)
-		var orbit_center = end + Vector3(0, 1.5, 0)
-		var orbit_pos = orbit_center + Vector3(cos(offset_angle) * 1.5, 0, sin(offset_angle) * 1.5)
-		
-		tween.tween_property(drone, "global_position", orbit_pos, 0.3)
-		tween.finished.connect(func():
-			if not is_instance_valid(drone): return
-			if is_instance_valid(target):
-				var laser = MeshInstance3D.new()
-				var cyl = CylinderMesh.new()
-				cyl.top_radius = 0.01
-				cyl.bottom_radius = 0.01
-				cyl.height = drone.global_position.distance_to(target.global_position)
-				laser.mesh = cyl
-				var lmat = StandardMaterial3D.new()
-				lmat.albedo_color = Color.CYAN
-				lmat.emission_enabled = true
-				lmat.emission = Color.CYAN
-				laser.material_override = lmat
-				get_tree().current_scene.add_child(laser)
-				laser.global_position = drone.global_position.lerp(target.global_position, 0.5)
-				laser.look_at(target.global_position, Vector3.UP)
-				laser.rotate_object_local(Vector3.RIGHT, PI/2)
-				
-				var lt = create_tween()
-				lt.tween_interval(0.08)
-				lt.finished.connect(func(): laser.queue_free())
-				
-				target.take_damage((dps * fire_rate) / 2.0, damage_class, global_position)
-				
-				var return_t = create_tween()
-				return_t.tween_property(drone, "global_position", global_position, 0.3)
-				return_t.finished.connect(func(): drone.queue_free())
-			else:
-				drone.queue_free()
-		)
+		drone.global_position = global_position + Vector3(randf_range(-0.5, 0.5), 1.0, randf_range(-0.5, 0.5))
+		drone.carrier = carrier
+		drone.target = target
+		drone.speed = 14.0
+		drone.damage_per_hit = per_drone_damage
+		drone.damage_class = damage_class
+		drone.team = my_team
 
 func _fire_cluster_dispenser():
 	var canister = MeshInstance3D.new()
@@ -1136,11 +1193,115 @@ func _fire_repair_array_beam():
 	st.tween_property(spark, "scale", Vector3.ZERO, 0.1)
 	st.finished.connect(func(): spark.queue_free())
 	
-	if is_instance_valid(target):
-		target.take_damage(dps * fire_rate, damage_class, global_position)
-		
+	if is_instance_valid(target) and target.has_method("repair_hp"):
+		target.repair_hp(dps * fire_rate)
+
 	var timer = get_tree().create_timer(0.08)
 	timer.timeout.connect(func(): if is_instance_valid(beam): beam.queue_free())
+
+# --- Energy weapons (ENERGY_AND_BALANCE_SPEC.md #4/#5) ---
+# All three drain the TARGET's current_energy (duck-typed via
+# has_method("drain_energy")) on top of whatever HP damage they deal -
+# energy_drain_per_shot/energy_cost_per_shot are computed once in _ready()
+# from the weapon's own dps*fire_rate, see there for the formula.
+
+func _fire_tesla_coil():
+	# A little silly on purpose (Chris's explicit invitation) - a zigzag
+	# chain-lightning bolt built from a handful of jittered segments,
+	# rather than a straight beam like every other weapon.
+	var segments = 5
+	var prev_pos = global_position + Vector3(0, 0.5, 0)
+	var end_pos = target.global_position
+	for i in range(1, segments + 1):
+		var t = float(i) / float(segments)
+		var pos = global_position.lerp(end_pos, t)
+		if i < segments:
+			pos += Vector3(randf_range(-0.4, 0.4), randf_range(-0.3, 0.3), randf_range(-0.4, 0.4))
+		var bolt = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = 0.025
+		cyl.bottom_radius = 0.025
+		cyl.height = prev_pos.distance_to(pos)
+		bolt.mesh = cyl
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = laser_color
+		mat.emission_enabled = true
+		mat.emission = laser_color
+		mat.emission_energy_multiplier = 1.5
+		bolt.material_override = mat
+		get_tree().current_scene.add_child(bolt)
+		bolt.global_position = prev_pos.lerp(pos, 0.5)
+		bolt.look_at(pos, Vector3.UP)
+		bolt.rotate_object_local(Vector3.RIGHT, PI / 2)
+		var bt = create_tween()
+		bt.tween_interval(0.1)
+		bt.finished.connect(func(): if is_instance_valid(bolt): bolt.queue_free())
+		prev_pos = pos
+
+	if is_instance_valid(target):
+		target.take_damage(dps * fire_rate, damage_class, global_position)
+		if target.has_method("drain_energy"):
+			target.drain_energy(energy_drain_per_shot)
+		_spawn_explosion_visual(end_pos, 0.5, laser_color)
+
+func _fire_arc_projector():
+	# The dedicated pure-drain "disable" weapon - minor HP damage, big
+	# energy drain (see _ready()'s energy_drain_per_shot formula).
+	var beam = MeshInstance3D.new()
+	var cyl = CylinderMesh.new()
+	cyl.top_radius = 0.02
+	cyl.bottom_radius = 0.05
+	cyl.height = global_position.distance_to(target.global_position)
+	beam.mesh = cyl
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = laser_color
+	mat.emission_enabled = true
+	mat.emission = laser_color
+	mat.emission_energy_multiplier = 2.0
+	beam.material_override = mat
+	get_tree().current_scene.add_child(beam)
+	beam.global_position = global_position.lerp(target.global_position, 0.5)
+	beam.look_at(target.global_position, Vector3.UP)
+	beam.rotate_object_local(Vector3.RIGHT, PI / 2)
+
+	if is_instance_valid(target):
+		target.take_damage((dps * fire_rate) * 0.2, damage_class, global_position)
+		if target.has_method("drain_energy"):
+			target.drain_energy(energy_drain_per_shot)
+
+	var timer = get_tree().create_timer(0.1)
+	timer.timeout.connect(func(): if is_instance_valid(beam): beam.queue_free())
+
+func _fire_ion_cannon():
+	# The "grounded" energy heavy-hitter - single strong beam, full HP
+	# damage plus a real energy drain alongside it.
+	var beam = MeshInstance3D.new()
+	var cyl = CylinderMesh.new()
+	cyl.top_radius = 0.06
+	cyl.bottom_radius = 0.06
+	var dist = global_position.distance_to(target.global_position)
+	cyl.height = dist
+	beam.mesh = cyl
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = laser_color
+	mat.emission_enabled = true
+	mat.emission = laser_color
+	mat.emission_energy_multiplier = 1.2
+	beam.material_override = mat
+	get_tree().current_scene.add_child(beam)
+	beam.global_position = global_position.lerp(target.global_position, 0.5)
+	beam.look_at(target.global_position, Vector3.UP)
+	beam.rotate_object_local(Vector3.RIGHT, PI / 2)
+
+	if is_instance_valid(target):
+		target.take_damage(dps * fire_rate, damage_class, global_position)
+		if target.has_method("drain_energy"):
+			target.drain_energy(energy_drain_per_shot)
+		_spawn_explosion_visual(target.global_position, 0.7, laser_color)
+
+	var tween = create_tween()
+	tween.tween_property(beam, "scale", Vector3(0.0, 1.0, 0.0), 0.15)
+	tween.finished.connect(func(): if is_instance_valid(beam): beam.queue_free())
 
 func _spawn_explosion_visual(pos: Vector3, custom_scale: float = 0.6, color: Color = Color.ORANGE):
 	var exp = MeshInstance3D.new()

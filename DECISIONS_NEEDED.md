@@ -4,6 +4,30 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — repair_array's heal rate reuses the generic "dps" catalog field
+
+**Not blocking.**
+
+Fixing repair_array's real heal logic needed SOME numeric rate for `repair_hp(dps * fire_rate)` to use. Rather than inventing a parallel `heal_rate` stat field (its own catalog key, its own ModuleData getter, its own tweak-scaling plumbing in three places) just to keep it out of the "Total DPS" aggregate, I reused the existing `dps` field/pipeline - it already has weight/cost/tweak scaling fully wired (the `welder_count` tweak already multiplies it, matching the doc's "adding more arms speeds up construction exponentially").
+
+**Cost of this shortcut:** repair_array's heal-per-second rate is now also summed into the Design Lab's "Total DPS" stat, mislabeling a heal as damage output on any hull that mounts one. Cosmetic, not a mechanics bug - the actual repair behavior in combat is correct.
+
+**Why I judged this acceptable:** support modules already show `0.0` DPS harmlessly everywhere else; making repair_array's rate visible-but-mislabeled is a smaller wart than a whole parallel stat pipeline built just to avoid one misleading number in a sidebar. Flagging as a clean future fix (add a real `heal_rate` field, exclude `category != "weapon"` modules from the DPS sum) if the mislabeling ever actually confuses a player.
+
+---
+
+## 2026-07-12 — Energy weapons: didn't reclassify existing thermal weapons to "energy" damage_class
+
+**Not blocking.**
+
+The armor system already had an "Energy" damage-type threshold (`E:` in the Design Lab sidebar, `energy_shielding` armor material) since early this week, but nothing in `auto_weapon.gd` ever actually set `damage_class = "energy"` - it was cosmetic-only. The three new energy weapons (tesla_coil/arc_projector/ion_cannon) now use it for real.
+
+**Default I'm proceeding with:** left `heavy_laser`, `plasma_lobber`, `pd_laser`, `flamethrower`, `drone_carrier`, and everything else that currently falls into the `damage_class = "thermal"` catch-all exactly where it was, rather than reclassifying anything with "laser" or "plasma" in the name to "energy" for thematic consistency.
+
+**Why:** reclassifying an existing weapon's damage_class silently changes its effectiveness against every armor material's existing threshold table - a real balance change to weapons that have been live all week, made unattended, with no way to interactively verify the new numbers feel right. Chris asked for new energy-drain weapons, not a damage-type audit of the existing arsenal. Flagging as a reasonable follow-up for a session where balance can be iterated on interactively - see also the balance-tooling section of ENERGY_AND_BALANCE_SPEC.md.
+
+---
+
 ## 2026-07-12 — Unit AI scope: whole-vehicle-aim + kiting + new-roster entries built; real pathfinding and naval terrain routing deferred
 
 **Not blocking.**
