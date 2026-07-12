@@ -16,7 +16,13 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 **Verified:**
 - New test `test_sensor_mast_tweak_and_proportions()`: checks dish radius stays proportional to module footprint, and that `mast_height` scales the mast (not the dish) with the dish correctly repositioned. Caught a real scope bug of my own while writing it — `_apply_tweak_deformations()` didn't have `base_size` in scope, a straight compile error, fixed by threading it through as a parameter.
 - Extended `scratch/VisualVerify.tscn` to cover all 7 hull types (previously 5) for a full-coverage visual sweep, screenshots in `progress_captures/2026-07-12/hull_variety_qa/`.
-- Full suite: **15/15 green.**
+
+**Follow-on finding (same session, same bug class, bigger scope):** finding one mislabeled tweak (sensor mast) prompted checking whether *any* tweak across the whole catalog does literally nothing. It's a direct test of DESIGN_VISION.md's differentiation goal at the single-tweak level. Found and fixed three:
+- `cluster_dispenser`'s "Dispersion Matrix Size" was **completely dead** — no visual case existed in `visual_builder.gd`'s deform switch at all, and `dispersion` wasn't in `module_data.gd`'s weight/dps/cost whitelists either. Slider moved, number changed, nothing else happened. Now scales the dispenser's footprint and contributes to weight.
+- `gauss_railgun`'s "Electromagnetic Rail Length" was **silently dead specifically in the authored-mesh path** (which is the path actually used, since `rail_array.glb` exists) — the deform loop assumed a multi-child procedural layout that only exists in the never-taken fallback branch. Fixed to branch on child count.
+- `heavy_howitzer`'s "elevation" and `flak_cannon`'s "fuse_setting" had visuals but zero stat effect (missing from `module_data.gd`'s weight whitelist) — added.
+- Wrote `test_no_dead_tweaks()`: a systematic regression test that pushes every numeric tweak in `TWEAK_SPECS` to its max value and asserts it changes *either* the visual mesh transforms *or* weight/dps/cost. This is now a standing guardrail against this entire bug class, not just the three instances found today.
+- Full suite: **16/16 green.**
 
 **Commit checkpoint:** see git log.
 

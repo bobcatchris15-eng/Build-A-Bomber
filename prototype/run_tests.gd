@@ -29,6 +29,7 @@ func _init():
 	success = success and await test_subsystem_stripping()
 	success = success and await test_rotation_popup_and_deforms()
 	success = success and await test_sensor_mast_tweak_and_proportions()
+	success = success and await test_no_dead_tweaks()
 	success = success and await test_designer_camera_pan()
 	success = success and await test_locomotion_tweak_parity()
 	success = success and await test_undo_redo()
@@ -568,6 +569,85 @@ func test_sensor_mast_tweak_and_proportions() -> bool:
 	node_tweaked.queue_free()
 	print("  [PASS] Sensor mast dish is proportionate and mast_height tweak now scales the mast, not the dish.")
 	return true
+
+func test_no_dead_tweaks() -> bool:
+	print("Running Test Suite: No Dead Tweaks (every slider must change something)...")
+	# Systematic version of the sensor_suite/gauss_railgun/cluster_dispenser
+	# bugs found during Tuesday's audit: for every numeric tweak in
+	# stat_calculator.gd's TWEAK_SPECS, pushing it to its max value must
+	# change EITHER the visual mesh transforms OR at least one of
+	# weight/dps/cost.x/cost.y. A tweak that changes neither is pure UI
+	# theater - exactly the "Forged Battalion trap" DESIGN_VISION.md warns
+	# about, just at the single-tweak level instead of whole-part level.
+	var StatCalcScript = preload("res://scripts/stat_calculator.gd")
+	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
+	var TWEAK_SPECS = StatCalcScript.TWEAK_SPECS
+
+	var dead_tweaks = []
+
+	for type_id in TWEAK_SPECS.keys():
+		var catalog_data = ModuleCatalog.get_module_data(type_id)
+		for spec in TWEAK_SPECS[type_id]:
+			if spec.get("type", "") == "bool":
+				continue # bool tweaks (multi_barrel) are special-cased separately, skip here
+
+			var probe_val = spec.max
+
+			# --- Visual comparison ---
+			var node_a = Node3D.new()
+			root.add_child(node_a)
+			VisualBuilderScript.build_visual(type_id, node_a, catalog_data.size, catalog_data.color, {})
+			await process_frame
+			var snap_a = _snapshot_mesh_transforms(node_a)
+			node_a.queue_free()
+
+			var node_b = Node3D.new()
+			root.add_child(node_b)
+			VisualBuilderScript.build_visual(type_id, node_b, catalog_data.size, catalog_data.color, {spec.name: probe_val})
+			await process_frame
+			var snap_b = _snapshot_mesh_transforms(node_b)
+			node_b.queue_free()
+
+			var visual_changed = snap_a != snap_b
+
+			# --- Stat comparison ---
+			var data_a = ModuleData.new()
+			data_a.base_hp = catalog_data.hp
+			data_a.base_weight = catalog_data.weight
+			data_a.cost_metal = catalog_data.metal
+			data_a.cost_crystal = catalog_data.crystal
+			data_a.base_dps = catalog_data.dps
+
+			var data_b = ModuleData.new()
+			data_b.base_hp = catalog_data.hp
+			data_b.base_weight = catalog_data.weight
+			data_b.cost_metal = catalog_data.metal
+			data_b.cost_crystal = catalog_data.crystal
+			data_b.base_dps = catalog_data.dps
+			data_b.tweaks = {spec.name: probe_val}
+
+			var stat_changed = (
+				abs(data_a.get_weight() - data_b.get_weight()) > 0.001 or
+				abs(data_a.get_dps() - data_b.get_dps()) > 0.001 or
+				data_a.get_cost() != data_b.get_cost()
+			)
+
+			if not visual_changed and not stat_changed:
+				dead_tweaks.append("%s.%s" % [type_id, spec.name])
+
+	if not dead_tweaks.is_empty():
+		print("  [FAIL] Dead tweaks found (change neither visuals nor stats): ", dead_tweaks)
+		return false
+
+	print("  [PASS] Every numeric tweak across the catalog changes visuals and/or stats.")
+	return true
+
+func _snapshot_mesh_transforms(node: Node3D) -> Array:
+	var result = []
+	for child in node.get_children():
+		if child is MeshInstance3D:
+			result.append([child.position, child.scale, child.rotation])
+	return result
 
 func test_designer_camera_pan() -> bool:
 	print("Running Test Suite: Designer Camera Pan (was entirely missing - orbit+zoom only)...")

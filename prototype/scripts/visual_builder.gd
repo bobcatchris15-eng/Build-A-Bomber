@@ -1220,9 +1220,28 @@ static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: D
 			for i in range(1, children.size()):
 				children[i].scale = Vector3(cal, 1.0, cal)
 		"gauss_railgun":
+			# When the authored "rail_array" mesh is present (it is - it ships
+			# in assets/models/parts/), build_visual() adds exactly ONE child
+			# (the combined assembly), not a separate base+rails like the
+			# procedural fallback. The old "skip children[0], stretch the
+			# rest" loop was a no-op whenever children.size() == 1, so this
+			# tweak was silently dead in the actual running game.
 			var rail_len = tweaks.get("rail_length", 1.0)
-			for i in range(1, children.size()):
-				children[i].scale.z = rail_len
+			if children.size() == 1:
+				# Authored assembly: baseline scale.z already encodes
+				# base_size.z via _fit_scale, so multiply, don't overwrite.
+				children[0].scale.z *= rail_len
+			else:
+				for i in range(1, children.size()):
+					children[i].scale.z = rail_len
+		"cluster_dispenser":
+			# Was entirely absent from this switch - the "Dispersion Matrix
+			# Size" slider changed the stored value but affected nothing:
+			# no visual, and (until module_data.gd's whitelist fix) no stat
+			# either. Scale the dispenser body's footprint to at least give
+			# it a visible, physically-sensible effect.
+			var dispersion = tweaks.get("dispersion", 1.0)
+			children[0].scale = Vector3(dispersion, 1.0, dispersion)
 		"heavy_howitzer":
 			if children.size() > 1:
 				var elev = tweaks.get("elevation", 1.0)
