@@ -305,6 +305,12 @@ static func get_catalog() -> Dictionary:
 			"metal": 30,
 			"crystal": 30,
 			"dps": 0.0,
+			# Fog-of-war (built this pass): "Pushes back fog of war...
+			# Mast Height: Drastically increases line-of-sight"
+			# (Arsenal_Weapons_List.md) - previously stat-only cosmetic
+			# flavor text with no actual vision system behind it. Scales
+			# with the existing mast_height tweak in get_vision_bonus().
+			"vision_bonus": 25.0,
 			"size": Vector3(0.5, 2.5, 0.5),
 			"color": Color.MEDIUM_PURPLE
 		},
@@ -471,6 +477,7 @@ static func get_catalog() -> Dictionary:
 			"crystal": 10,
 			"dps": 0.0,
 			"base_energy": 40.0,
+			"base_vision": 22.0,
 			"size": Vector3(3.0, 1.0, 4.0),
 			"color": Color.LIGHT_GRAY
 		},
@@ -483,6 +490,7 @@ static func get_catalog() -> Dictionary:
 			"crystal": 20,
 			"dps": 0.0,
 			"base_energy": 70.0,
+			"base_vision": 20.0,
 			"size": Vector3(4.0, 1.0, 6.0),
 			"color": Color.GRAY
 		},
@@ -495,6 +503,7 @@ static func get_catalog() -> Dictionary:
 			"crystal": 50,
 			"dps": 0.0,
 			"base_energy": 130.0,
+			"base_vision": 18.0,
 			"size": Vector3(6.0, 1.5, 8.0),
 			"color": Color.DARK_GRAY
 		},
@@ -507,6 +516,10 @@ static func get_catalog() -> Dictionary:
 			"crystal": 8,
 			"dps": 0.0,
 			"base_energy": 35.0,
+			# Fast scout archetype gets the best base vision of any hull -
+			# thematically consistent with its role even before a
+			# sensor_suite is ever mounted.
+			"base_vision": 26.0,
 			"size": Vector3(2.4, 0.8, 3.2),
 			"color": Color(0.55, 0.65, 0.78)
 		},
@@ -519,6 +532,7 @@ static func get_catalog() -> Dictionary:
 			"crystal": 35,
 			"dps": 0.0,
 			"base_energy": 90.0,
+			"base_vision": 18.0,
 			"size": Vector3(5.0, 1.3, 7.0),
 			"color": Color(0.4, 0.32, 0.28)
 		},
@@ -534,6 +548,7 @@ static func get_catalog() -> Dictionary:
 			"crystal": 0,
 			"dps": 0.0,
 			"base_energy": 60.0,
+			"base_vision": 16.0,
 			"size": Vector3(3.0, 1.2, 3.0),
 			"color": Color(0.45, 0.45, 0.4)
 		},
@@ -547,6 +562,8 @@ static func get_catalog() -> Dictionary:
 			"crystal": 20,
 			"dps": 0.0,
 			"base_energy": 100.0,
+			# A watchtower should see far - height is the whole point of it.
+			"base_vision": 28.0,
 			"size": Vector3(3.0, 4.0, 3.0),
 			"color": Color(0.5, 0.48, 0.44)
 		}
@@ -563,6 +580,13 @@ static func is_foundation(type_id: String) -> bool:
 static func get_base_energy(hull_type_id: String) -> float:
 	var data = get_module_data(hull_type_id)
 	return data.get("base_energy", 0.0)
+
+# Fog-of-war (built this pass, see PROGRESS.md): a hull's base_vision is
+# the starting sight radius before any sensor_suite modules are mounted -
+# same "hull base + module bonus" shape as Energy's base_energy.
+static func get_base_vision(hull_type_id: String) -> float:
+	var data = get_module_data(hull_type_id)
+	return data.get("base_vision", 20.0)
 
 # Whether this weapon-slot module's targeting should invert to same-team,
 # HP-deficit candidates instead of hostiles (repair_array's real fix -

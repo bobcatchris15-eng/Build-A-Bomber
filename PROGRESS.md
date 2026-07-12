@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 9) — Fog-of-war built from scratch, Technocrats' vision passive finally means something
+
+No prior infrastructure existed for this at all - confirmed by an earlier gap-analysis pass this week. Built real vision-radius + fog-of-war:
+
+### Vision stat
+
+`base_vision` added to every hull/foundation catalog entry, `vision_bonus` added to `sensor_suite` (previously pure stat-flavor text - "Pushes back fog of war... Mast Height: Drastically increases line-of-sight" with nothing behind it). Per-unit `vision_range` computed the same "hull base + module bonus" shape as Energy (`_recalculate_vision()` in `battle_unit.gd`, mirrored in `building.gd` for defense structures; prefab buildings get a flat default). Technocrats' faction passive (+15% vision, `Factions_and_Buildings.md`) applied on top - the first time this passive has ever had anything to modify.
+
+### The fog itself
+
+Deliberately **one-directional**: `skirmish.gd`'s periodic scan (`_recalc_fog_of_war()`, every 0.3s) only ever toggles visibility on ENEMY constructs, never the player's own - this is a single shared 3D scene, not per-client rendering, so hiding player units whenever they left an enemy's vision would make them vanish from the player's own screen too, which isn't what fog-of-war means. `set_fog_visible()` on `battle_unit.gd`/`building.gd` toggles `.visible` (cascades to mesh/HP bar/everything) and sets a `fog_hidden` flag that `auto_weapon.gd`'s targeting now checks - an enemy that hasn't been scouted can't be auto-targeted, not just invisible cosmetically.
+
+**Deliberate scope cut, logged not hidden:** the enemy AI keeps its existing omniscient targeting - fog only gates the player's own experience (what renders, what the player's own weapons can hit). A fully symmetric fog (AI also can't see/target unscouted player units) would be more "real" but risks making the AI feel broken (can't find harvesters, doesn't react to threats) without being able to interactively verify the balance. Also not built: the fuller "explored but not currently visible, stays dimly revealed" tier some RTS games have - this is "currently visible only," a simpler two-state model.
+
+**Verified:** 50/50 tests green (3 new: vision computation including the Technocrats passive, a full hide/reveal/never-hide-own-team integration test against a real Skirmish scene, and a targeting-exclusion test). Also windowed-screenshot verified in a real match - `progress_captures/2026-07-12/fog_of_war/` shows an enemy unit literally not rendered until a player scout's vision reaches it.
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 (cont'd 8) — Facet-aware kiting (with a real mid-implementation bug found and fixed)
 
 Kiting now factors in facet strength, not just distance, per Chris's ask.

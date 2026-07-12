@@ -31,6 +31,16 @@ var logistics_tank_strength: float = 0.0
 const LOGISTICS_SHARE_RADIUS: float = 15.0
 const LOGISTICS_SHARE_RATE: float = 6.0
 
+# Fog-of-war (built this pass): hull base_vision + sensor_suite bonus,
+# Technocrats-boosted. fog_hidden is set by skirmish.gd's periodic
+# visibility scan (not computed locally - "am I visible" depends on every
+# construct on the OPPOSING team, which only the match controller can see
+# in one place) and gates both rendering (set_fog_visible()) and whether
+# the opposing team's weapons can target this unit at all.
+var vision_range: float = 0.0
+var _hull_type_for_vision: String = ""
+var fog_hidden: bool = false
+
 var hull_node: Node3D = null
 var locomotion_type: String = ""
 var locomotion_settings: Dictionary = {}
@@ -130,9 +140,32 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	_detect_harvester()
 	_recalculate_move_speed()
 	_recalculate_energy(hull_type)
+	_recalculate_vision(hull_type)
 	_detect_logistics_tank()
 	_create_selection_ring(base_size)
 	_create_hp_bar()
+
+# Fog-of-war (built this pass): base_vision from the hull + sum of mounted
+# sensor_suite modules' vision bonus, with the Technocrats faction passive
+# (+15%, Factions_and_Buildings.md - previously unimplementable since no
+# vision system existed at all) applied on top. Public for the same reason
+# _recalculate_energy() is - losing a sensor_suite mid-battle should
+# shrink vision_range.
+func _recalculate_vision(hull_type_for_vision: String = ""):
+	if hull_type_for_vision != "":
+		_hull_type_for_vision = hull_type_for_vision
+	var base = ModuleCatalog.get_base_vision(_hull_type_for_vision)
+	var bonus = 0.0
+	if is_instance_valid(hull_node):
+		for child in hull_node.get_children():
+			if child.has_meta("module_data") and not child.is_queued_for_deletion():
+				var data = child.get_meta("module_data")
+				if data.type_id == "sensor_suite":
+					bonus += data.get_vision_bonus()
+	vision_range = base + bonus
+	var faction = hull_node.get_meta("faction", "industrialists") if is_instance_valid(hull_node) else "industrialists"
+	if faction == "technocrats":
+		vision_range *= 1.15
 
 # Logistics sharing aura (ENERGY_AND_BALANCE_SPEC.md #5): "not just
 # self-sufficiency" per Chris's instruction - logistics_tank does nothing
@@ -275,6 +308,16 @@ func _update_hp_bar():
 func set_selected(selected: bool):
 	if is_instance_valid(selection_ring):
 		selection_ring.visible = selected
+
+# Fog-of-war: toggles rendering only (.visible cascades to every child -
+# hull mesh, HP bar, selection ring). Physics/processing/take_damage all
+# keep working normally while hidden; a fog-hidden unit still exists and
+# can still be hit by something that already has a lock on it (e.g. a
+# missile mid-flight), it just can't be newly targeted or seen. fog_hidden
+# itself is set by skirmish.gd's periodic visibility scan.
+func set_fog_visible(is_visible: bool):
+	fog_hidden = not is_visible
+	visible = is_visible
 
 func order_move(dest: Vector3):
 	order = OrderType.MOVE

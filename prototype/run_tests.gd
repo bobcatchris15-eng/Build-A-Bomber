@@ -71,6 +71,9 @@ func _init():
 	success = success and await test_no_energy_deficit_at_match_start()
 	success = success and await test_energy_damage_class_reclassification()
 	success = success and await test_facet_aware_kiting()
+	success = success and await test_vision_range_computation()
+	success = success and await test_fog_of_war_hides_reveals_and_never_hides_own_team()
+	success = success and await test_fog_hidden_excluded_from_targeting()
 
 	print("\n==============================================")
 	if success:
@@ -3095,4 +3098,182 @@ func test_facet_aware_kiting() -> bool:
 	unit.queue_free()
 	attacker.queue_free()
 	print("  [PASS] A unit whose weakest facet initially faces the attacker repositions (rotate + strafe, not just retreat) to present its strongest facet instead, while still increasing distance.")
+	return true
+
+func test_vision_range_computation() -> bool:
+	print("Running Test Suite: Fog-of-War - Vision Range (hull base + sensor_suite bonus + Technocrats passive)...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
+	root.add_child(bp_manager)
+
+	var bp_no_sensor = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"faction": "industrialists",
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": []
+	}
+	var unit_no_sensor = CharacterBody3D.new()
+	unit_no_sensor.set_script(BattleUnitScript)
+	root.add_child(unit_no_sensor)
+	unit_no_sensor.setup(bp_no_sensor, 0, bp_manager)
+	var base_only = unit_no_sensor.vision_range
+	if base_only <= 0.0:
+		print("  [FAIL] medium_hull should carry a nonzero base vision range even with no sensor_suite, got ", base_only)
+		bp_manager.queue_free()
+		return false
+	unit_no_sensor.queue_free()
+
+	var bp_with_sensor = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"faction": "industrialists",
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "sensor_suite", "name": "Radar Mast", "position": {"x": 0.0, "y": 1.0, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var unit_with_sensor = CharacterBody3D.new()
+	unit_with_sensor.set_script(BattleUnitScript)
+	root.add_child(unit_with_sensor)
+	unit_with_sensor.setup(bp_with_sensor, 0, bp_manager)
+	if unit_with_sensor.vision_range <= base_only:
+		print("  [FAIL] A mounted sensor_suite should raise vision_range above the hull's base alone (base=", base_only, ", with sensor=", unit_with_sensor.vision_range, ")")
+		unit_with_sensor.queue_free(); bp_manager.queue_free()
+		return false
+	unit_with_sensor.queue_free()
+
+	# Technocrats passive: +15% vision (Factions_and_Buildings.md) - was
+	# unimplementable before this pass since no vision system existed.
+	var bp_technocrat = bp_no_sensor.duplicate(true)
+	bp_technocrat["faction"] = "technocrats"
+	var unit_technocrat = CharacterBody3D.new()
+	unit_technocrat.set_script(BattleUnitScript)
+	root.add_child(unit_technocrat)
+	unit_technocrat.setup(bp_technocrat, 0, bp_manager)
+	var expected = base_only * 1.15
+	if abs(unit_technocrat.vision_range - expected) > 0.5:
+		print("  [FAIL] Technocrats should get +15% vision range, expected ~", expected, " got ", unit_technocrat.vision_range)
+		unit_technocrat.queue_free(); bp_manager.queue_free()
+		return false
+
+	unit_technocrat.queue_free()
+	bp_manager.queue_free()
+	print("  [PASS] Hulls carry a base vision range; sensor_suite modules extend it; Technocrats get their +15% passive.")
+	return true
+
+func test_fog_of_war_hides_reveals_and_never_hides_own_team() -> bool:
+	print("Running Test Suite: Fog-of-War - Hides Unscouted Enemies, Reveals Scouted Ones, Never Hides Own Team...")
+	await process_frame
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var enemy = CharacterBody3D.new()
+	enemy.set_script(BattleUnitScript)
+	skirmish.add_child(enemy)
+	enemy.team = skirmish.ENEMY_TEAM
+	enemy.set_meta("team", skirmish.ENEMY_TEAM)
+	enemy.add_to_group("units")
+	enemy.add_to_group("damageable")
+	enemy.vision_range = 5.0
+	enemy.global_position = Vector3(200, 0, 200) # far from any existing base/unit
+
+	var far_player = CharacterBody3D.new()
+	far_player.set_script(BattleUnitScript)
+	skirmish.add_child(far_player)
+	far_player.team = skirmish.PLAYER_TEAM
+	far_player.set_meta("team", skirmish.PLAYER_TEAM)
+	far_player.add_to_group("units")
+	far_player.add_to_group("damageable")
+	far_player.vision_range = 10.0
+	far_player.global_position = Vector3(-200, 0, -200) # nowhere near the enemy
+
+	skirmish._recalc_fog_of_war()
+	if far_player.fog_hidden:
+		print("  [FAIL] The player's own unit should never be fog_hidden, regardless of distance from any enemy")
+		skirmish.queue_free()
+		return false
+	if not enemy.fog_hidden or enemy.visible:
+		print("  [FAIL] An enemy far from every player construct should be fog_hidden and invisible, got fog_hidden=", enemy.fog_hidden, " visible=", enemy.visible)
+		skirmish.queue_free()
+		return false
+
+	# Bring a player construct within the enemy's own vicinity (vision_range
+	# is the OBSERVER's, not the observed's, so what matters is a player
+	# unit's own vision_range reaching the enemy, not the enemy's).
+	var near_player = CharacterBody3D.new()
+	near_player.set_script(BattleUnitScript)
+	skirmish.add_child(near_player)
+	near_player.team = skirmish.PLAYER_TEAM
+	near_player.set_meta("team", skirmish.PLAYER_TEAM)
+	near_player.add_to_group("units")
+	near_player.add_to_group("damageable")
+	near_player.vision_range = 20.0
+	near_player.global_position = Vector3(205, 0, 200) # within 20 units of the enemy at (200,0,200)
+
+	skirmish._recalc_fog_of_war()
+	if enemy.fog_hidden or not enemy.visible:
+		print("  [FAIL] An enemy scouted by a nearby player unit should become visible, got fog_hidden=", enemy.fog_hidden, " visible=", enemy.visible)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Fog-of-war hides unscouted enemies, reveals them once a player construct's vision reaches them, and never hides the player's own units.")
+	return true
+
+func test_fog_hidden_excluded_from_targeting() -> bool:
+	print("Running Test Suite: Fog-of-War - Hidden Enemies Can't Be Auto-Targeted...")
+	await process_frame
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var shooter = CharacterBody3D.new()
+	shooter.set_script(BattleUnitScript)
+	root.add_child(shooter)
+	shooter.team = 0
+	shooter.set_meta("team", 0)
+	shooter.add_to_group("damageable")
+
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	shooter.add_child(weapon)
+	var w_data = ModuleData.new()
+	w_data.type_id = "basic_cannon" # 360-degree traverse, no arc filtering to worry about
+	w_data.base_weight = 80.0
+	w_data.base_dps = 40.0
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+
+	var hidden_enemy = CharacterBody3D.new()
+	hidden_enemy.set_script(BattleUnitScript)
+	root.add_child(hidden_enemy)
+	hidden_enemy.team = 1
+	hidden_enemy.set_meta("team", 1)
+	hidden_enemy.add_to_group("damageable")
+	hidden_enemy.global_position = weapon.global_position + Vector3(3, 0, 0)
+	hidden_enemy.fog_hidden = true
+
+	weapon._find_nearest_target()
+	if weapon.target == hidden_enemy:
+		print("  [FAIL] A fog_hidden enemy should never be auto-targeted")
+		shooter.queue_free(); hidden_enemy.queue_free()
+		return false
+
+	# Once scouted (fog_hidden cleared), it becomes a valid target again.
+	hidden_enemy.fog_hidden = false
+	weapon._find_nearest_target()
+	if weapon.target != hidden_enemy:
+		print("  [FAIL] Once no longer fog_hidden, the enemy should be a valid target again, got ", weapon.target)
+		shooter.queue_free(); hidden_enemy.queue_free()
+		return false
+
+	shooter.queue_free()
+	hidden_enemy.queue_free()
+	print("  [PASS] fog_hidden enemies are excluded from auto-targeting; becoming visible makes them targetable again.")
 	return true

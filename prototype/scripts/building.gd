@@ -32,6 +32,12 @@ var max_energy: float = 0.0
 var current_energy: float = 0.0
 var energy_regen_rate: float = 0.0
 
+# Fog-of-war (built this pass) - prefab buildings (hq/refinery/factory) get
+# a flat default; "defense" buildings compute it same as vehicles (base +
+# sensor_suite bonus), see setup_defense().
+var vision_range: float = 15.0
+var fog_hidden: bool = false
+
 # Factory production queue: array of {blueprint: Dictionary, time_left: float, total_time: float}
 var production_queue: Array = []
 var rally_point: Vector3 = Vector3.ZERO
@@ -109,6 +115,9 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 	_create_selection_ring(max(stats.size.x, stats.size.z) * 0.72)
 	rally_point = global_position + Vector3(0, 0, 10 if team == 0 else -10)
 
+	if faction == "technocrats":
+		vision_range *= 1.15
+
 func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node):
 	kind = "defense"
 	team = building_team
@@ -153,15 +162,26 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 
 		var bonus_capacity = 0.0
 		var bonus_regen = 0.0
+		var bonus_vision = 0.0
 		for child in defense_hull.get_children():
 			if child.has_meta("module_data") and not child.is_queued_for_deletion():
 				var gen_data = child.get_meta("module_data")
 				if gen_data.category == "generator":
 					bonus_capacity += gen_data.get_energy_capacity()
 					bonus_regen += gen_data.get_energy_regen()
+				if gen_data.type_id == "sensor_suite":
+					bonus_vision += gen_data.get_vision_bonus()
 		max_energy = ModuleCatalog.get_base_energy(hull_type) + bonus_capacity
 		current_energy = max_energy
 		energy_regen_rate = max_energy * 0.08 + bonus_regen
+		vision_range = ModuleCatalog.get_base_vision(hull_type) + bonus_vision
+		# setup_defense() never populates self.faction from the blueprint
+		# (a pre-existing gap, not introduced here) - read it from
+		# defense_hull's own meta instead, same as armor_material/
+		# armor_thickness just above.
+		var defense_faction = defense_hull.get_meta("faction", "industrialists")
+		if defense_faction == "technocrats":
+			vision_range *= 1.15
 
 		_create_hp_bar(base_size.y + 2.0)
 		_create_selection_ring(max(base_size.x, base_size.z) * 0.72)
@@ -194,6 +214,14 @@ func _create_selection_ring(radius: float):
 func set_selected(selected: bool):
 	if is_instance_valid(selection_ring):
 		selection_ring.visible = selected
+
+# Fog-of-war: see battle_unit.gd's set_fog_visible() for the full
+# reasoning - same "currently visible only" model applies to buildings too
+# (not the fuller "revealed once explored, stays dimly visible after"
+# tier some RTS games have - a deliberate simplification for this pass).
+func set_fog_visible(is_visible: bool):
+	fog_hidden = not is_visible
+	visible = is_visible
 
 func _update_hp_bar():
 	if not is_instance_valid(hp_bar): return

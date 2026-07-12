@@ -445,6 +445,13 @@ func _find_nearest_target():
 			var c_team = c.get_meta("team") if c.has_meta("team") else -1
 			if c_team == my_team: continue
 			if "is_dead" in c and c.is_dead: continue
+			# Fog-of-war: can't target what hasn't been scouted. Only ever
+			# true for enemy-team constructs (skirmish.gd's fog scan never
+			# hides the player's own units), so this is a safe universal
+			# check regardless of which team's weapon is doing the
+			# targeting - it only ever filters out something that was
+			# already going to be a hostile candidate.
+			if "fog_hidden" in c and c.fog_hidden: continue
 			var dist = global_position.distance_to(c.global_position)
 			if dist < closest_c_dist:
 				var dir = (c.global_position - global_position).normalized()

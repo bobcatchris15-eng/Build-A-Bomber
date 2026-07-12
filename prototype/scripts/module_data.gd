@@ -14,6 +14,7 @@ const GlobalConfig = preload("res://scripts/global_config.gd")
 @export var base_heal_rate: float = 0.0
 @export var base_energy_capacity: float = 0.0
 @export var base_energy_regen: float = 0.0
+@export var base_vision_bonus: float = 0.0
 @export var tweaks: Dictionary = {}
 
 var scale_multiplier: Vector3 = Vector3(1, 1, 1)
@@ -109,6 +110,17 @@ func get_heal_rate() -> float:
 	if tweaks.has("welder_count"):
 		heal *= (tweaks["welder_count"] / 2.0)
 	return GlobalConfig.round_to_half(heal)
+
+# Fog-of-war (see PROGRESS.md): sensor_suite's vision contribution, scaled
+# by the existing mast_height tweak ("Drastically increases line-of-sight",
+# Arsenal_Weapons_List.md) - previously mast_height only affected the
+# visual mesh, this is its first real functional effect.
+func get_vision_bonus() -> float:
+	var vol = _get_volume_mult()
+	var bonus = base_vision_bonus + (base_vision_bonus * (vol - 1.0) * GlobalConfig.hp_scale_factor)
+	if tweaks.has("mast_height"):
+		bonus *= tweaks["mast_height"]
+	return GlobalConfig.round_to_half(bonus)
 
 func get_dps() -> float:
 	var vol = _get_volume_mult()

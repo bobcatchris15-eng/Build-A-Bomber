@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Fog-of-war: asymmetric (player-only), two-state, not the fuller version
+
+**Not blocking.**
+
+Built real fog-of-war from scratch (no prior infrastructure existed at all - see PROGRESS.md). Two scope cuts worth flagging explicitly rather than leaving implicit:
+
+**Asymmetric - the enemy AI keeps full omniscient targeting.** Fog only ever hides ENEMY constructs from the PLAYER (rendering + the player's own weapons' targeting); the player's own units are never hidden from the enemy AI. A fully symmetric fog (AI also can't see/target unscouted player units) is more "real" and would be the natural next step, but risks making the AI feel broken - unable to find a harvester it should intercept, slow to react to a real threat - in ways I can't verify by feel without an interactive playtest pass. This is also a lower-risk default: a broken/too-generous player experience is annoying, a broken/too-blind AI can make the whole mode feel unfinished.
+
+**Two-state (currently-visible / hidden), not three-state.** Some RTS games have a third "explored but not currently visible" state - a scouted area stays dimly revealed (terrain/last-known-position visible) even after vision moves away, rather than snapping back to fully hidden. This implementation snaps back to fully hidden the instant a construct leaves vision range. The three-state version is a real, reasonable enhancement but needs its own persistent per-tile/per-construct "have I ever seen this" state, which is more infrastructure than the core mechanic needed to ship.
+
+**Why worth building at all despite the scope cuts:** Technocrats' "+15% sensor/radar vision" passive has been unimplementable since this project started (confirmed via an earlier gap-analysis pass) for lack of anything to modify - this closes that gap for real, and gives `sensor_suite`'s flavor text ("pushes back fog of war") actual mechanical teeth for the first time.
+
+---
+
 ## 2026-07-12 — Correction: "energy" damage_class had no real armor-table row at all, silently fell back to explosive
 
 **Not blocking - fixed immediately, correction to an earlier claim.**

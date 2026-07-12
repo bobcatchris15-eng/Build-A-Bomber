@@ -43,6 +43,16 @@ const ENERGY_UPKEEP_PER_STATIC_BUILDING: float = 3.0
 # mandatory tax just to avoid a permanent penalty.
 const ENERGY_HQ_BASELINE_CAPACITY: float = 10.0
 var energy_tick_timer: float = 0.0
+
+# Fog-of-war (built this pass): real vision-radius system, no supporting
+# infrastructure existed before this - Technocrats' "+15% sensor/radar
+# vision" passive (Factions_and_Buildings.md) was unimplementable until
+# now for exactly that reason. Faster tick than Energy's (units move
+# continuously, so vision needs to feel responsive) but still a fixed
+# interval, not per-frame - a few hundred ms of stale fog is imperceptible
+# and this scan is O(player constructs x enemy constructs) every tick.
+const FOG_TICK_INTERVAL: float = 0.3
+
 var player_faction: String = "industrialists"
 var enemy_faction: String = "technocrats"
 
@@ -101,6 +111,13 @@ func _ready():
 	energy_timer.timeout.connect(_recalc_energy_economy)
 	_recalc_energy_economy() # populate before the first tick so the HUD isn't blank
 
+	var fog_timer = Timer.new()
+	fog_timer.wait_time = FOG_TICK_INTERVAL
+	fog_timer.autostart = true
+	add_child(fog_timer)
+	fog_timer.timeout.connect(_recalc_fog_of_war)
+	_recalc_fog_of_war() # populate before the first tick so enemies aren't briefly visible at match start
+
 func _on_trickle():
 	if game_over: return
 	if player_faction == "expansionists" and is_instance_valid(player_hq) and not player_hq.is_dead:
@@ -146,6 +163,29 @@ func _recalc_energy_economy():
 
 func is_energy_deficit(team: int) -> bool:
 	return energy_pool[team].deficit
+
+# Fog-of-war: deliberately ONE-DIRECTIONAL (only ever toggles ENEMY
+# constructs' visibility, never the player's own). This is a single shared
+# 3D scene, not per-client rendering - if this also hid player units
+# whenever they left an ENEMY unit's vision, they'd vanish from the
+# player's own screen too, which is never what "fog of war" means. The
+# enemy AI keeps its existing omniscient targeting (a deliberate scope cut,
+# see DECISIONS_NEEDED.md) - only the player's own experience (what
+# renders, what the player's own weapons can target) is fog-gated.
+func _recalc_fog_of_war():
+	if game_over: return
+	var player_constructs = get_team_units(PLAYER_TEAM) + get_team_buildings(PLAYER_TEAM)
+	var enemy_constructs = get_team_units(ENEMY_TEAM) + get_team_buildings(ENEMY_TEAM)
+	for c in enemy_constructs:
+		if not is_instance_valid(c) or not c.has_method("set_fog_visible"): continue
+		var seen = false
+		for o in player_constructs:
+			if not is_instance_valid(o): continue
+			var vision = o.vision_range if "vision_range" in o else 0.0
+			if c.global_position.distance_to(o.global_position) <= vision:
+				seen = true
+				break
+		c.set_fog_visible(seen)
 
 # --- Rosters ---
 
@@ -325,6 +365,13 @@ func get_team_units(team: int, combat_only: bool = false) -> Array:
 		if is_instance_valid(u) and not u.is_dead and u.team == team:
 			if combat_only and u.is_harvester: continue
 			list.append(u)
+	return list
+
+func get_team_buildings(team: int) -> Array:
+	var list = []
+	for b in get_tree().get_nodes_in_group("buildings"):
+		if is_instance_valid(b) and not b.is_dead and b.team == team:
+			list.append(b)
 	return list
 
 # --- UI ---
