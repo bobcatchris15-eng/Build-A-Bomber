@@ -47,6 +47,11 @@ var locomotion_settings: Dictionary = {}
 var move_speed: float = 5.0
 var rotate_speed: float = 4.0
 var target_altitude: float = 0.0
+# Real pathfinding (built this pass) - null unless a real Skirmish match
+# controller was found at setup() (see _setup_navigation()), so every
+# existing synthetic test that builds a battle_unit standalone keeps
+# working with plain direct-line steering, unchanged.
+var nav_agent: NavigationAgent3D = null
 var is_flying: bool = false
 # Traits B3 (MOUNTING_AND_ARMOR_SPEC.md addendum): new movement paradigms,
 # distinct from the tank-like steer-and-stop model every ground/hover unit
@@ -142,8 +147,28 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	_recalculate_energy(hull_type)
 	_recalculate_vision(hull_type)
 	_detect_logistics_tank()
+	_setup_navigation()
 	_create_selection_ring(base_size)
 	_create_hp_bar()
+
+# Real pathfinding (built this pass): looks for a match controller
+# (duck-typed via get_ground_nav_map()/get_water_nav_map(), so this stays
+# a no-op fallback to plain direct-line steering for every existing
+# synthetic test that constructs a battle_unit outside a real Skirmish
+# scene - no test needed to change). Flying/fixed-wing units skip this
+# entirely (open air, nothing to route around).
+func _setup_navigation():
+	if is_flying or is_fixed_wing:
+		return
+	var controller = get_parent()
+	if not controller or not controller.has_method("get_ground_nav_map") or not controller.has_method("get_water_nav_map"):
+		return
+	nav_agent = NavigationAgent3D.new()
+	add_child(nav_agent)
+	nav_agent.path_desired_distance = 1.5
+	nav_agent.target_desired_distance = 1.5
+	nav_agent.avoidance_enabled = false
+	nav_agent.set_navigation_map(controller.get_water_nav_map() if is_naval else controller.get_ground_nav_map())
 
 # Fog-of-war (built this pass): base_vision from the hull + sum of mounted
 # sensor_suite modules' vision bonus, with the Technocrats faction passive
@@ -454,7 +479,11 @@ func _physics_process(delta):
 				if child.get_child_count() > 0 and is_instance_valid(child.get_child(0)):
 					child.get_child(0).rotate_y(15.0 * delta)
 
-# Returns true when arrived
+# Returns true when arrived. The "arrived" check always uses the real
+# final destination; the per-frame STEERING direction uses the navmesh's
+# next waypoint when a nav_agent is set up (real pathfinding, built this
+# pass), falling back to the old direct-line behavior otherwise (flying
+# units, or any synthetic/test context with no real Skirmish controller).
 func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 	var pos_diff = dest - global_position
 	pos_diff.y = 0.0
@@ -464,7 +493,19 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 		return true
 	if move_speed <= 0.0:
 		return false
-	var target_basis = Basis.looking_at(pos_diff, Vector3.UP)
+
+	var steer_diff = pos_diff
+	if is_instance_valid(nav_agent):
+		if nav_agent.target_position.distance_to(dest) > 0.1:
+			nav_agent.target_position = dest
+		if not nav_agent.is_navigation_finished():
+			var next_point = nav_agent.get_next_path_position()
+			var candidate = next_point - global_position
+			candidate.y = 0.0
+			if candidate.length() > 0.05:
+				steer_diff = candidate
+
+	var target_basis = Basis.looking_at(steer_diff, Vector3.UP)
 	global_transform.basis = global_transform.basis.slerp(target_basis, rotate_speed * delta).orthonormalized()
 	var forward_dir = -global_transform.basis.z.normalized()
 	velocity.x = forward_dir.x * move_speed

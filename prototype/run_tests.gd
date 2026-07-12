@@ -74,6 +74,9 @@ func _init():
 	success = success and await test_vision_range_computation()
 	success = success and await test_fog_of_war_hides_reveals_and_never_hides_own_team()
 	success = success and await test_fog_hidden_excluded_from_targeting()
+	success = success and await test_navmesh_routes_around_the_lake()
+	success = success and await test_ground_and_naval_units_use_different_nav_maps()
+	success = success and await test_unit_order_move_actually_navigates_around_the_lake()
 
 	print("\n==============================================")
 	if success:
@@ -3276,4 +3279,187 @@ func test_fog_hidden_excluded_from_targeting() -> bool:
 	shooter.queue_free()
 	hidden_enemy.queue_free()
 	print("  [PASS] fog_hidden enemies are excluded from auto-targeting; becoming visible makes them targetable again.")
+	return true
+
+func test_navmesh_routes_around_the_lake() -> bool:
+	print("Running Test Suite: Real Pathfinding - Navmesh Routes Around The Lake...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	if not skirmish.ground_nav_map.is_valid() or not skirmish.water_nav_map.is_valid():
+		print("  [FAIL] Skirmish should bake valid ground/water navigation maps at _ready()")
+		skirmish.queue_free()
+		return false
+
+	# Query straight across the lake (LAKE_CENTER=(18,0,0), half-extents
+	# 7x7 -> bounds x:[11,25] z:[-7,7]) - a real ground path must detour
+	# around it, not cut straight through.
+	var start = Vector3(0, 0, 0)
+	var end = Vector3(35, 0, 0)
+	var path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, start, end, true)
+	if path.size() < 2:
+		print("  [FAIL] Expected a real multi-point path across the map, got ", path.size(), " points")
+		skirmish.queue_free()
+		return false
+	var crosses_lake = false
+	for p in path:
+		if p.x > 11.0 and p.x < 25.0 and p.z > -7.0 and p.z < 7.0:
+			crosses_lake = true
+	if crosses_lake:
+		print("  [FAIL] Ground navmesh path should detour around the lake, not cross through its bounds")
+		skirmish.queue_free()
+		return false
+
+	# The water navmesh, conversely, should ONLY have geometry inside the
+	# lake bounds - a path query from land to land on the water map
+	# should be empty/degenerate (there's simply no connected water there).
+	var water_path = NavigationServer3D.map_get_path(skirmish.water_nav_map, Vector3(18, 0, 0), Vector3(18, 0, 3), true)
+	if water_path.size() < 2:
+		print("  [FAIL] A short path fully inside the lake should resolve on the water navmesh, got ", water_path.size(), " points")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Ground navmesh correctly detours around the lake; water navmesh correctly covers the lake interior.")
+	return true
+
+func test_ground_and_naval_units_use_different_nav_maps() -> bool:
+	print("Running Test Suite: Real Pathfinding - Ground/Naval Units Get The Correct Nav Map, Flying Units Skip It...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var bp_manager = skirmish.bp_manager
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var ground_bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": []
+	}
+	var ground_unit = CharacterBody3D.new()
+	ground_unit.set_script(BattleUnitScript)
+	skirmish.add_child(ground_unit)
+	ground_unit.setup(ground_bp, 0, bp_manager)
+	if not is_instance_valid(ground_unit.nav_agent):
+		print("  [FAIL] A ground unit spawned in a real Skirmish match should get a nav_agent")
+		skirmish.queue_free()
+		return false
+	if ground_unit.nav_agent.get_navigation_map() != skirmish.ground_nav_map:
+		print("  [FAIL] A ground unit's nav_agent should be assigned to the ground nav map")
+		skirmish.queue_free()
+		return false
+
+	var naval_bp = {
+		"version": 1.0, "hull_type": "heavy_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "naval_propeller", "settings": {"size": 1.0, "count": 2}},
+		"modules": []
+	}
+	var naval_unit = CharacterBody3D.new()
+	naval_unit.set_script(BattleUnitScript)
+	skirmish.add_child(naval_unit)
+	naval_unit.setup(naval_bp, 0, bp_manager)
+	if not is_instance_valid(naval_unit.nav_agent):
+		print("  [FAIL] A naval unit spawned in a real Skirmish match should get a nav_agent")
+		skirmish.queue_free()
+		return false
+	if naval_unit.nav_agent.get_navigation_map() != skirmish.water_nav_map:
+		print("  [FAIL] A naval unit's nav_agent should be assigned to the water nav map, not the ground one")
+		skirmish.queue_free()
+		return false
+
+	var flying_bp = {
+		"version": 1.0, "hull_type": "light_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "helicopter_rotors", "settings": {}},
+		"modules": []
+	}
+	var flying_unit = CharacterBody3D.new()
+	flying_unit.set_script(BattleUnitScript)
+	skirmish.add_child(flying_unit)
+	flying_unit.setup(flying_bp, 0, bp_manager)
+	if is_instance_valid(flying_unit.nav_agent):
+		print("  [FAIL] A flying unit should skip navigation entirely (open air, nothing to route around)")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Ground units path on the ground map, naval units path on the water map, flying units skip navigation entirely.")
+	return true
+
+# End-to-end check that a unit given a real order_move() actually translates
+# and actually detours around the lake, not just that the underlying navmesh
+# query and nav_agent assignment are individually correct in isolation. This
+# test exists because an earlier debug session found that a battle_unit's
+# move_speed depends on the hull having an actual locomotion MODULE child
+# (category "locomotion", added to "modules") - the top-level "locomotion"
+# field alone (type_id/settings) is not enough on its own, it's only used to
+# pick movement traits/count_contrib. Real saved blueprints always carry both
+# (serialize_hull() emits every hull child with module_data, which includes
+# the locomotion part placed via update_locomotion()) - this test's blueprint
+# mirrors that real shape rather than the top-level-field-only shorthand used
+# by nav_agent-assignment-only tests above.
+func test_unit_order_move_actually_navigates_around_the_lake() -> bool:
+	print("Running Test Suite: Real Pathfinding - order_move() Actually Moves A Unit Around The Lake...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "tracked_treads", "name": "Tracked Treads", "position": {"x": 0.0, "y": -0.4, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	skirmish.add_child(unit)
+	unit.global_position = Vector3(0, 0.5, 0)
+	unit.setup(bp, 0, skirmish.bp_manager)
+
+	if unit.move_speed <= 0.0:
+		print("  [FAIL] Unit with a real locomotion module should have nonzero move_speed, got ", unit.move_speed)
+		skirmish.queue_free()
+		return false
+
+	var start_pos = unit.global_position
+	unit.order_move(Vector3(35, 0.5, 0))
+
+	var crossed_lake = false
+	for i in range(140):
+		unit._physics_process(1.0 / 60.0)
+		unit.move_and_slide()
+		if unit.global_position.x > 11.0 and unit.global_position.x < 25.0 and unit.global_position.z > -7.0 and unit.global_position.z < 7.0:
+			crossed_lake = true
+
+	var moved_dist = start_pos.distance_to(unit.global_position)
+	if moved_dist < 5.0:
+		print("  [FAIL] Unit given order_move() across the map barely moved (", moved_dist, " units) - pathfinding/steering integration is not producing real movement")
+		skirmish.queue_free()
+		return false
+	if crossed_lake:
+		print("  [FAIL] Unit's real movement path cut through the lake bounds instead of detouring around it")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A real order_move() across the map produces real movement (", moved_dist, " units) that detours around the lake.")
 	return true

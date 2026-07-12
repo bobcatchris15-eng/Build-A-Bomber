@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 10) — Real pathfinding (NavigationServer3D) + a lake for naval terrain to route around
+
+Previously deferred (see DECISIONS_NEEDED.md's "Unit AI scope" entry) since the map was flat and open with nothing to path around. Greenlit this pass, along with adding real water terrain.
+
+### The map now has water
+
+A rectangular lake (`LAKE_CENTER=(18,0,0)`, half-extents 7x7) added to `skirmish.gd`, with a visible blue semi-transparent water plane. Two separate `NavigationServer3D` maps are baked at match start (raw low-level API, not `NavigationRegion3D` nodes, specifically so ground and water can be two genuinely different navigable areas rather than one shared default map): the ground navmesh has the lake baked out as a hole (4-quad band around it), the water navmesh covers only the lake's interior.
+
+### Per-unit navigation
+
+`battle_unit.gd` gains a `NavigationAgent3D` for every non-flying unit (`_setup_navigation()`, called from `setup()`), assigned to the ground or water map based on the unit's `is_naval` trait. Flying/fixed-wing units skip this entirely - open air has nothing to route around. `_steer_towards()` now asks the agent for its next path point and steers toward that instead of the raw destination whenever an agent is present, falling back to the old straight-line steering for any context without a real match controller (duck-typed via `get_ground_nav_map()`/`get_water_nav_map()` on the parent) - every existing synthetic test that builds a `battle_unit` outside a real `Skirmish` scene keeps working unchanged.
+
+### A real bug found (and fixed) while verifying this end-to-end
+
+All unit tests passed first try, including two dedicated pathfinding tests (direct `NavigationServer3D.map_get_path()` queries proving the ground map detours around the lake and the water map covers its interior; nav_agent-to-map assignment for ground/naval/flying units). But a first windowed capture showed a unit given `order_move()` not moving at all. Root cause was NOT the new pathfinding code - it was a pre-existing gap in how `_recalculate_move_speed()` detects locomotion: it only counts a hull child module tagged `category == "locomotion"`, never the blueprint's top-level `"locomotion": {type_id, settings}` field (which only feeds movement-trait lookups). Real saved blueprints always carry both - the Design Lab's `update_locomotion()` places locomotion as an actual module child, and `serialize_hull()` serializes every such child into `"modules"`. But the synthetic test blueprints used throughout `run_tests.gd` (mine included) only ever set the top-level field with an empty `"modules": []`, so `move_speed` silently computed to `0.0` in that specific fixture shape - a test-fixture gap that happened to never matter until a test actually needed real movement to occur. Full root-cause trace and the fix logged in DECISIONS_NEEDED.md.
+
+**Verified:** 55/55 tests green (1 new: `test_unit_order_move_actually_navigates_around_the_lake`, using a blueprint shaped like a real saved one, asserting both real movement and that the path never enters the lake bounds). Windowed-screenshot verified in a real match - `progress_captures/2026-07-12/pathfinding/` shows a unit hugging the lake's edge mid-transit and fully past it at the end.
+
+---
+
 ## 2026-07-12 (cont'd 9) — Fog-of-war built from scratch, Technocrats' vision passive finally means something
 
 No prior infrastructure existed for this at all - confirmed by an earlier gap-analysis pass this week. Built real vision-radius + fog-of-war:

@@ -53,6 +53,26 @@ var energy_tick_timer: float = 0.0
 # and this scan is O(player constructs x enemy constructs) every tick.
 const FOG_TICK_INTERVAL: float = 0.3
 
+# Real pathfinding + naval terrain (built this pass - previously deferred:
+# the map was flat and open with nothing to route around, and naval units
+# were purely Y-locked to a fixed waterline with no actual water/land
+# distinction anywhere). Two SEPARATE NavigationServer3D maps (not layers
+# on one map) - simpler to reason about than layer bitmasks: ground units
+# path on ground_nav_map (full terrain minus a hole where the lake is),
+# naval units path on water_nav_map (just the lake). Flying units ignore
+# navigation entirely (open air, nothing to route around). See
+# battle_unit.gd's _setup_navigation()/_steer_towards() for how units
+# actually consume this.
+var ground_nav_map: RID
+var water_nav_map: RID
+var _ground_nav_region: RID
+var _water_nav_region: RID
+# Positioned clear of every resource-node/base spot in _spawn_resource_nodes()/
+# _spawn_bases() below - verified by hand against their coordinates.
+const LAKE_CENTER: Vector3 = Vector3(18, 0, 0)
+const LAKE_HALF_EXTENTS: Vector2 = Vector2(7, 7) # x, z half-size
+const MAP_HALF_EXTENTS: float = 80.0 # matches Ground's 160x160 size
+
 var player_faction: String = "industrialists"
 var enemy_faction: String = "technocrats"
 
@@ -86,6 +106,7 @@ func _ready():
 	bp_manager.name = "BlueprintManager"
 	add_child(bp_manager)
 
+	_setup_navigation()
 	_load_rosters()
 	_spawn_resource_nodes()
 	_spawn_bases()
@@ -284,6 +305,86 @@ func _on_resources_delivered(team: int, metal: int, crystal: int):
 
 # --- Map setup ---
 
+# Two separate NavigationServer3D maps, built procedurally at runtime (no
+# editor navmesh resource - everything here is code-generated, consistent
+# with how the rest of the map is built). Ground navmesh = the full 160x160
+# terrain minus a rectangular hole where the lake is (4 quad "bands" around
+# the hole, since baking needs real polygon geometry, not a shape-with-a-
+# hole description). Water navmesh = just the lake rectangle. Verified
+# feasible with a headless scratch probe before building this in - a real
+# runtime-baked navmesh correctly routes around a hole, confirmed via
+# NavigationServer3D.map_get_path() before ever touching battle_unit.gd.
+func _setup_navigation():
+	ground_nav_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_active(ground_nav_map, true)
+	water_nav_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_active(water_nav_map, true)
+
+	var lx0 = LAKE_CENTER.x - LAKE_HALF_EXTENTS.x
+	var lx1 = LAKE_CENTER.x + LAKE_HALF_EXTENTS.x
+	var lz0 = LAKE_CENTER.z - LAKE_HALF_EXTENTS.y
+	var lz1 = LAKE_CENTER.z + LAKE_HALF_EXTENTS.y
+	var m = MAP_HALF_EXTENTS
+
+	var ground_verts = PackedVector3Array()
+	_add_nav_quad(ground_verts, Vector3(-m, 0, lz1), Vector3(m, 0, lz1), Vector3(m, 0, m), Vector3(-m, 0, m)) # north band
+	_add_nav_quad(ground_verts, Vector3(-m, 0, -m), Vector3(m, 0, -m), Vector3(m, 0, lz0), Vector3(-m, 0, lz0)) # south band
+	_add_nav_quad(ground_verts, Vector3(lx1, 0, lz0), Vector3(m, 0, lz0), Vector3(m, 0, lz1), Vector3(lx1, 0, lz1)) # east band
+	_add_nav_quad(ground_verts, Vector3(-m, 0, lz0), Vector3(lx0, 0, lz0), Vector3(lx0, 0, lz1), Vector3(-m, 0, lz1)) # west band
+
+	var ground_nav_mesh = NavigationMesh.new()
+	var ground_source = NavigationMeshSourceGeometryData3D.new()
+	ground_source.add_faces(ground_verts, Transform3D.IDENTITY)
+	NavigationServer3D.bake_from_source_geometry_data(ground_nav_mesh, ground_source)
+	_ground_nav_region = NavigationServer3D.region_create()
+	NavigationServer3D.region_set_map(_ground_nav_region, ground_nav_map)
+	NavigationServer3D.region_set_navigation_mesh(_ground_nav_region, ground_nav_mesh)
+
+	var water_verts = PackedVector3Array()
+	_add_nav_quad(water_verts, Vector3(lx0, 0, lz0), Vector3(lx1, 0, lz0), Vector3(lx1, 0, lz1), Vector3(lx0, 0, lz1))
+	var water_nav_mesh = NavigationMesh.new()
+	var water_source = NavigationMeshSourceGeometryData3D.new()
+	water_source.add_faces(water_verts, Transform3D.IDENTITY)
+	NavigationServer3D.bake_from_source_geometry_data(water_nav_mesh, water_source)
+	_water_nav_region = NavigationServer3D.region_create()
+	NavigationServer3D.region_set_map(_water_nav_region, water_nav_map)
+	NavigationServer3D.region_set_navigation_mesh(_water_nav_region, water_nav_mesh)
+
+	_spawn_lake_visual(lx0, lx1, lz0, lz1)
+
+# Raw NavigationServer3D RIDs (map_create()/region_create()) aren't owned by
+# the scene tree the way child nodes are - they leak unless explicitly
+# freed. Found via a real RID-leak warning at engine exit during the
+# headless test suite (which instantiates+frees a fresh Skirmish scene per
+# test, many times per run).
+func _exit_tree():
+	if _ground_nav_region.is_valid():
+		NavigationServer3D.free_rid(_ground_nav_region)
+	if _water_nav_region.is_valid():
+		NavigationServer3D.free_rid(_water_nav_region)
+	if ground_nav_map.is_valid():
+		NavigationServer3D.free_rid(ground_nav_map)
+	if water_nav_map.is_valid():
+		NavigationServer3D.free_rid(water_nav_map)
+
+func _add_nav_quad(verts: PackedVector3Array, a: Vector3, b: Vector3, c: Vector3, d: Vector3):
+	verts.append(a); verts.append(b); verts.append(c)
+	verts.append(a); verts.append(c); verts.append(d)
+
+func _spawn_lake_visual(lx0: float, lx1: float, lz0: float, lz1: float):
+	var water = MeshInstance3D.new()
+	var plane = PlaneMesh.new()
+	plane.size = Vector2(lx1 - lx0, lz1 - lz0)
+	water.mesh = plane
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.15, 0.35, 0.55, 0.85)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.emission_enabled = true
+	mat.emission = Color(0.1, 0.25, 0.4)
+	water.material_override = mat
+	add_child(water)
+	water.global_position = Vector3(LAKE_CENTER.x, 0.05, LAKE_CENTER.z)
+
 func _spawn_resource_nodes():
 	var spots = [
 		[Vector3(-22, 0, 18), "metal", 1200], [Vector3(-28, 0, 12), "metal", 1000],
@@ -373,6 +474,16 @@ func get_team_buildings(team: int) -> Array:
 		if is_instance_valid(b) and not b.is_dead and b.team == team:
 			list.append(b)
 	return list
+
+# Duck-typed lookup for battle_unit.gd's _setup_navigation() - existence of
+# these two methods is what tells a unit "I'm in a real match with real
+# navigation maps," vs. every synthetic test constructing a battle_unit
+# standalone, which falls back to plain direct-line steering unchanged.
+func get_ground_nav_map() -> RID:
+	return ground_nav_map
+
+func get_water_nav_map() -> RID:
+	return water_nav_map
 
 # --- UI ---
 
