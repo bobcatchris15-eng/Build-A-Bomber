@@ -1,22 +1,9 @@
 extends Node
 
-func save_blueprint() -> bool:
-	var root = get_node("/root/MainLab")
-	if root and root.get("clipping_detected") == true:
-		var ui = get_tree().get_first_node_in_group("stat_ui")
-		if ui and ui.has_node("ScrollContainer/VBoxContainer/Title"):
-			ui.get_node("ScrollContainer/VBoxContainer/Title").text = "SAVE FAILED: Clipping!"
-			get_tree().create_timer(2.5).timeout.connect(func():
-				if is_instance_valid(ui) and ui.has_node("ScrollContainer/VBoxContainer/Title"):
-					ui.get_node("ScrollContainer/VBoxContainer/Title").text = "Blueprint Stats"
-			)
-		return false
-		
-	var hull = root.get_node_or_null("Hull")
+func serialize_hull(hull: Node3D) -> Dictionary:
 	if not hull:
-		print("No hull found to save.")
-		return false
-		
+		return {}
+
 	var hull_size = Vector3(4.0, 1.0, 6.0)
 	if hull.has_meta("base_hull_size") and hull.has_meta("hull_scale"):
 		hull_size = hull.get_meta("base_hull_size") * hull.get_meta("hull_scale")
@@ -38,11 +25,11 @@ func save_blueprint() -> bool:
 		},
 		"modules": []
 	}
-	
+
 	for child in hull.get_children():
 		if child is StaticBody3D: continue # Hull's own collider
 		if child is MeshInstance3D: continue # Hull's own mesh
-		
+
 		# Assume this is a module Node3D
 		if child.has_meta("module_data"):
 			var data = child.get_meta("module_data")
@@ -63,7 +50,32 @@ func save_blueprint() -> bool:
 				}
 			}
 			blueprint["modules"].append(mod_dict)
-			
+
+	if hull.has_meta("blueprint_id"):
+		blueprint["id"] = hull.get_meta("blueprint_id")
+	blueprint["name"] = hull.get_meta("blueprint_name") if hull.has_meta("blueprint_name") and hull.get_meta("blueprint_name") != "" else "Untitled Design"
+
+	return blueprint
+
+func save_blueprint() -> bool:
+	var root = get_node("/root/MainLab")
+	if root and root.get("clipping_detected") == true:
+		var ui = get_tree().get_first_node_in_group("stat_ui")
+		if ui and ui.has_node("ScrollContainer/VBoxContainer/Title"):
+			ui.get_node("ScrollContainer/VBoxContainer/Title").text = "SAVE FAILED: Clipping!"
+			get_tree().create_timer(2.5).timeout.connect(func():
+				if is_instance_valid(ui) and ui.has_node("ScrollContainer/VBoxContainer/Title"):
+					ui.get_node("ScrollContainer/VBoxContainer/Title").text = "Blueprint Stats"
+			)
+		return false
+
+	var hull = root.get_node_or_null("Hull")
+	if not hull:
+		print("No hull found to save.")
+		return false
+
+	var blueprint = serialize_hull(hull)
+
 	var bp_id = ""
 	if hull.has_meta("blueprint_id"):
 		bp_id = hull.get_meta("blueprint_id")

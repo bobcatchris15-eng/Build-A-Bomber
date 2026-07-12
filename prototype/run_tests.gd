@@ -29,6 +29,7 @@ func _init():
 	success = success and await test_subsystem_stripping()
 	success = success and await test_rotation_popup_and_deforms()
 	success = success and await test_locomotion_tweak_parity()
+	success = success and await test_undo_redo()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -515,9 +516,11 @@ func test_locomotion_tweak_parity() -> bool:
 	# never read the "size" key, so dragging the slider had zero effect on the
 	# resulting unit. "hover_engine" had no tweak UI at all. All three are fixed
 	# to respond to a continuous "size" setting like wheels/treads/rotors already did.
+	var gizmo_probe_parent = Node3D.new()
+	root.add_child(gizmo_probe_parent)
 	var gizmo_probe = Node3D.new()
 	gizmo_probe.set_script(preload("res://scripts/gizmo_3d.gd"))
-	root.add_child(gizmo_probe)
+	gizmo_probe_parent.add_child(gizmo_probe)
 
 	for type_id in ["legs", "anti_grav", "hover_engine"]:
 		var hull = StaticBody3D.new()
@@ -572,11 +575,81 @@ func test_locomotion_tweak_parity() -> bool:
 		var got = gizmo_probe.get_tweak_for_axis(type_id, Vector3.RIGHT)
 		if got != expected:
 			print("  [FAIL] %s: expected gizmo x-axis to map to '%s', got '%s'" % [type_id, expected, got])
-			gizmo_probe.queue_free()
+			gizmo_probe_parent.queue_free()
 			return false
 
-	gizmo_probe.queue_free()
+	gizmo_probe_parent.queue_free()
 	print("  [PASS] Locomotion size tweaks (legs/anti_grav/hover_engine) and gizmo axis mappings verified.")
+	return true
+
+func test_undo_redo() -> bool:
+	print("Running Test Suite: Undo/Redo (Design_Lab_UI_UX.md top-bar spec, previously entirely missing)...")
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	var bm = Node.new()
+	bm.name = "BlueprintManager"
+	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
+	placer.add_child(bm)
+	await process_frame
+
+	placer._place_hull_from_ui("medium_hull")
+	await process_frame
+
+	if placer.can_undo():
+		print("  [FAIL] Undo history should be empty before any mutation")
+		placer.queue_free()
+		return false
+
+	placer._place_weapon_from_ui("basic_cannon", Vector3(1.0, 0.5, 0.0), Vector3.UP)
+	await process_frame
+
+	var module_count = 0
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data"):
+			module_count += 1
+	if module_count != 2: # primary + mirror
+		print("  [FAIL] Expected 2 modules (primary + mirror) after placement, got ", module_count)
+		placer.queue_free()
+		return false
+
+	if not placer.can_undo():
+		print("  [FAIL] Undo history should be populated after placing a module")
+		placer.queue_free()
+		return false
+
+	placer.undo()
+	await process_frame
+
+	module_count = 0
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data"):
+			module_count += 1
+	if module_count != 0:
+		print("  [FAIL] Undo should have reverted to the pre-placement empty hull, found ", module_count, " modules")
+		placer.queue_free()
+		return false
+
+	if not placer.can_redo():
+		print("  [FAIL] Redo history should be populated after an undo")
+		placer.queue_free()
+		return false
+
+	placer.redo()
+	await process_frame
+
+	module_count = 0
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data"):
+			module_count += 1
+	if module_count != 2:
+		print("  [FAIL] Redo should have restored the cannon placement, found ", module_count, " modules")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Undo/Redo restores prior hull state correctly (place -> undo -> redo verified).")
 	return true
 
 # --- Skirmish mode test suites ---

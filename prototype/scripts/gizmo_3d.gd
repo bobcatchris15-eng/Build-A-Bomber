@@ -19,6 +19,9 @@ func _ready():
 			child.drag_ended.connect(_on_drag_ended)
 
 func _on_drag_started():
+	var root = get_node_or_null("/root/MainLab")
+	if root and root.has_method("push_undo_snapshot"):
+		root.push_undo_snapshot()
 	if target_module:
 		if target_module.name == "Hull" and target_module.has_meta("hull_scale"):
 			start_scale = target_module.get_meta("hull_scale")

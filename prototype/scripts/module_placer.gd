@@ -21,6 +21,78 @@ var drag_original_transform: Transform3D
 var drag_original_mirror_transform: Transform3D
 var drag_has_mirror: bool = false
 
+# --- Undo/Redo (Design_Lab_UI_UX.md top-bar spec) ---
+# Snapshot-based: each entry is a full serialized-hull dictionary (same shape
+# blueprint_manager.gd saves to disk), captured just before a mutation. Undo
+# restores the previous snapshot by tearing down and reconstructing the hull.
+const MAX_UNDO_HISTORY = 50
+var undo_stack: Array = []
+var redo_stack: Array = []
+
+func push_undo_snapshot():
+	if not hull:
+		return
+	var bm = get_node_or_null("BlueprintManager")
+	if not bm:
+		return
+	var snapshot = bm.serialize_hull(hull)
+	if snapshot.is_empty():
+		return
+	undo_stack.append(snapshot.duplicate(true))
+	if undo_stack.size() > MAX_UNDO_HISTORY:
+		undo_stack.pop_front()
+	redo_stack.clear()
+
+func can_undo() -> bool:
+	return undo_stack.size() > 0
+
+func can_redo() -> bool:
+	return redo_stack.size() > 0
+
+func undo():
+	if undo_stack.is_empty():
+		return
+	var bm = get_node_or_null("BlueprintManager")
+	if not bm:
+		return
+	var current = bm.serialize_hull(hull) if hull else {}
+	if not current.is_empty():
+		redo_stack.append(current.duplicate(true))
+	var snapshot = undo_stack.pop_back()
+	_reconstruct_from_snapshot(snapshot)
+	_log("Undo applied. History remaining: " + str(undo_stack.size()))
+
+func redo():
+	if redo_stack.is_empty():
+		return
+	var bm = get_node_or_null("BlueprintManager")
+	if not bm:
+		return
+	var current = bm.serialize_hull(hull) if hull else {}
+	if not current.is_empty():
+		undo_stack.append(current.duplicate(true))
+	var snapshot = redo_stack.pop_back()
+	_reconstruct_from_snapshot(snapshot)
+	_log("Redo applied. Redo remaining: " + str(redo_stack.size()))
+
+func _reconstruct_from_snapshot(snapshot: Dictionary):
+	var bm = get_node_or_null("BlueprintManager")
+	if not bm:
+		return
+	if selected_module:
+		_select_module(null)
+	if hull and is_instance_valid(hull):
+		var parent = hull.get_parent()
+		if parent:
+			parent.remove_child(hull)
+		hull.free()
+	hull = null
+	clipping_detected = false
+	hull = bm.reconstruct_vehicle(snapshot, self, true)
+	get_tree().call_group("stat_ui", "update_stats", hull)
+	get_tree().call_group("stat_ui", "sync_hull_ui", hull)
+	check_all_clipping()
+
 func _ready():
 	if has_node("Hull"):
 		hull = get_node("Hull")
@@ -67,6 +139,10 @@ func _unhandled_input(event):
 			delete_selected_module()
 		elif event.keycode == KEY_R:
 			rotate_selected_module()
+		elif event.keycode == KEY_Z and event.ctrl_pressed and not event.shift_pressed:
+			undo()
+		elif (event.keycode == KEY_Y and event.ctrl_pressed) or (event.keycode == KEY_Z and event.ctrl_pressed and event.shift_pressed):
+			redo()
 		elif event.keycode == KEY_ESCAPE:
 			if is_dragging_module:
 				is_dragging_module = false
@@ -148,6 +224,7 @@ func _unhandled_input(event):
 	if event is InputEventMouseMotion:
 		if drag_pending and drag_start_module and is_instance_valid(drag_start_module):
 			if event.position.distance_to(drag_start_mouse_pos) > 8:
+				push_undo_snapshot()
 				is_dragging_module = true
 				drag_pending = false
 				var old_gizmo = selected_module.get_node_or_null("Gizmo3D")
@@ -181,7 +258,8 @@ func _unhandled_input(event):
 
 func rotate_selected_module():
 	if not selected_module or selected_module == hull: return
-	
+	push_undo_snapshot()
+
 	var yaw = selected_module.get_meta("yaw_offset", 0.0)
 	yaw += PI / 2.0
 	if yaw >= 2.0 * PI - 0.01:
@@ -273,6 +351,10 @@ func _select_module(module: Node3D):
 
 func delete_selected_module():
 	if selected_module:
+		# Deleting the hull itself would leave nothing to snapshot; only guard
+		# undo history for module deletions (the common case).
+		if selected_module != hull:
+			push_undo_snapshot()
 		_log("Deleting selected module")
 		_deselect_module()
 		var is_hull = (selected_module == hull)
@@ -373,9 +455,10 @@ var default_locomotion_settings = {
 }
 
 func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
+	push_undo_snapshot()
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var category = catalog_data.get("category", "module")
-	
+
 	if category == "locomotion":
 		# Static defensive foundations can't take locomotion
 		if hull and hull.has_meta("type_id") and ModuleCatalog.is_foundation(hull.get_meta("type_id")):

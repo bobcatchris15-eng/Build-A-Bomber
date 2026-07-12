@@ -122,6 +122,8 @@ func _ready():
 	
 	size_slider.value_changed.connect(_on_size_value_changed)
 	count_slider.value_changed.connect(_on_count_value_changed)
+	size_slider.drag_started.connect(_push_undo)
+	count_slider.drag_started.connect(_push_undo)
 	
 	# Dynamically create Armor Material dropdown
 	armor_mat_label = Label.new()
@@ -161,6 +163,7 @@ func _ready():
 	armor_thick_slider.value = 1.0
 	$ScrollContainer/VBoxContainer.add_child(armor_thick_slider)
 	armor_thick_slider.value_changed.connect(_on_armor_thickness_changed)
+	armor_thick_slider.drag_started.connect(_push_undo)
 	
 	# Create Module Tweaks container
 	module_tweaks_container = VBoxContainer.new()
@@ -221,6 +224,29 @@ func _ready():
 	popup_tweaks_container.add_theme_constant_override("separation", 6)
 	popup_vbox.add_child(popup_tweaks_container)
 	
+	# Undo/Redo (Design_Lab_UI_UX.md top-bar spec: also bound to Ctrl+Z / Ctrl+Y)
+	var undo_redo_row = HBoxContainer.new()
+	undo_redo_row.add_theme_constant_override("separation", 6)
+	$ScrollContainer/VBoxContainer.add_child(undo_redo_row)
+
+	var undo_btn = Button.new()
+	undo_btn.text = "↶ Undo"
+	undo_btn.pressed.connect(func():
+		var root = get_node_or_null("/root/MainLab")
+		if root and root.has_method("undo"):
+			root.undo()
+	)
+	undo_redo_row.add_child(undo_btn)
+
+	var redo_btn = Button.new()
+	redo_btn.text = "↷ Redo"
+	redo_btn.pressed.connect(func():
+		var root = get_node_or_null("/root/MainLab")
+		if root and root.has_method("redo"):
+			root.redo()
+	)
+	undo_redo_row.add_child(redo_btn)
+
 	# Navigation back to the main menu
 	var menu_btn = Button.new()
 	menu_btn.text = "◀ Main Menu"
@@ -229,6 +255,11 @@ func _ready():
 
 	# Initial sync of armor UI
 	call_deferred("_initial_sync")
+
+func _push_undo():
+	var root = get_node_or_null("/root/MainLab")
+	if root and root.has_method("push_undo_snapshot"):
+		root.push_undo_snapshot()
 
 func _on_delete_pressed():
 	var root = get_node("/root/MainLab")
@@ -571,7 +602,8 @@ func _on_armor_material_selected(index: int):
 	if not root: return
 	var hull = root.get_node_or_null("Hull")
 	if not hull: return
-	
+	_push_undo()
+
 	var mat_name = "hardened_steel"
 	match index:
 		0: mat_name = "hardened_steel"
@@ -604,7 +636,8 @@ func _on_faction_selected(index: int):
 	if not root: return
 	var hull = root.get_node_or_null("Hull")
 	if not hull: return
-	
+	_push_undo()
+
 	var fac_name = "industrialists"
 	match index:
 		0: fac_name = "industrialists"
@@ -670,6 +703,7 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleData):
 			label.text = "%s: %s" % [spec.label, "ENABLED" if check.button_pressed else "DISABLED"]
 			
 			check.toggled.connect(func(pressed):
+				_push_undo()
 				data.tweaks[spec.name] = pressed
 				label.text = "%s: %s" % [spec.label, "ENABLED" if pressed else "DISABLED"]
 				_on_tweak_changed()
@@ -681,12 +715,13 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleData):
 			slider.step = spec.step
 			slider.value = data.tweaks.get(spec.name, spec.default)
 			container.add_child(slider)
-			
+
 			if spec.step == 1.0:
 				label.text = "%s: %d" % [spec.label, int(slider.value)]
 			else:
 				label.text = "%s: %.2fx" % [spec.label, slider.value]
-				
+
+			slider.drag_started.connect(_push_undo)
 			slider.value_changed.connect(func(val):
 				data.tweaks[spec.name] = val
 				if spec.step == 1.0:
