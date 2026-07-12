@@ -46,6 +46,7 @@ func _init():
 	success = success and await test_directional_armor_facet_resolution()
 	success = success and await test_per_module_armor_material()
 	success = success and await test_sloped_armor_angle_of_incidence()
+	success = success and await test_ai_flanking_targets_weakest_facet()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1670,6 +1671,73 @@ func test_sloped_armor_angle_of_incidence() -> bool:
 
 	defender.queue_free()
 	print("  [PASS] Oblique hits are more survivable than perpendicular ones on the same face (perp threshold: %.1f, oblique: %.1f)." % [resolved_perp.x, resolved_oblique.x])
+	return true
+
+func test_ai_flanking_targets_weakest_facet() -> bool:
+	print("Running Test Suite: AI Flanking - Approaches the Target's Weakest Facet (Armor phase 5)...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var target = CharacterBody3D.new()
+	target.set_script(BattleUnitScript)
+	root.add_child(target)
+	target.global_position = Vector3(20, 0, 20) # away from the attacker's default facet-relative math
+	target.attack_range = 10.0
+
+	var target_hull = Node3D.new()
+	target_hull.name = "Hull"
+	target_hull.set_meta("armor_material", "hardened_steel")
+	target_hull.set_meta("armor_thickness", 1.0)
+	target.add_child(target_hull)
+	target.hull_node = target_hull
+
+	# Heavily armor the front specifically, leaving back/left/right at baseline.
+	var front_plate = Node3D.new()
+	front_plate.set_meta("facet", "front")
+	var plate_data = ModuleData.new()
+	plate_data.type_id = "armor_plating"
+	plate_data.category = "armor"
+	plate_data.base_hp = 500.0
+	front_plate.set_meta("module_data", plate_data)
+	target_hull.add_child(front_plate)
+
+	var attacker = CharacterBody3D.new()
+	attacker.set_script(BattleUnitScript)
+	root.add_child(attacker)
+	attacker.attack_range = 10.0
+
+	var weak_normal = attacker._weakest_facet_normal(target)
+	# front is FACET_NORMALS["front"] = (0,0,-1); the heavily-armored front
+	# must NOT be picked as the weak facet.
+	if weak_normal.is_equal_approx(Vector3(0, 0, -1)):
+		print("  [FAIL] The heavily-armored front facet should not be selected as the weakest, got normal ", weak_normal)
+		attacker.queue_free()
+		target.queue_free()
+		return false
+	if weak_normal == Vector3.ZERO:
+		print("  [FAIL] Should have resolved SOME weak facet normal for a target with a real hull_node")
+		attacker.queue_free()
+		target.queue_free()
+		return false
+
+	# The resulting flank point should sit on the opposite side of the
+	# target from the armored front, not just be the target's raw position
+	# (which is what the old straight-line approach used).
+	var flank_point = attacker._compute_flank_point(target)
+	if flank_point.distance_to(target.global_position) < 1.0:
+		print("  [FAIL] Flank point should be offset from the target, not collapse to the target's own position")
+		attacker.queue_free()
+		target.queue_free()
+		return false
+	var to_flank = (flank_point - target.global_position).normalized()
+	if to_flank.dot(Vector3(0, 0, -1)) > 0.3: # not biased toward the armored front
+		print("  [FAIL] Flank point should be biased away from the armored front, got direction ", to_flank)
+		attacker.queue_free()
+		target.queue_free()
+		return false
+
+	attacker.queue_free()
+	target.queue_free()
+	print("  [PASS] Attacking units compute a flank point toward the target's weakest facet, not a straight line to its armored front.")
 	return true
 
 # --- Skirmish mode test suites ---

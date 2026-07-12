@@ -50,6 +50,22 @@ Real ballistics: a shot that grazes a surface at a shallow angle is more surviva
 - Full skirmish simulation re-run clean with real raycasts firing on every hit; ~27s runtime for a 110s simulated battle, no meaningful performance regression. (HQ survival numbers shift run-to-run now, since slope depends on actual unit positioning/geometry rather than a pure lookup — expected, not a bug.)
 - Full suite: **29/29 green.**
 
+### Armor Phase 5: AI facing-awareness — flanking matters in Skirmish, not just Test Range
+
+Closes out the full armor phase list. Previously nothing evaluated target facing at all — units walked straight at whatever they were attacking. Now attacking units path toward the target's *weakest* facet instead.
+
+- `battle_unit.gd` gains `_weakest_facet_normal(target)`: estimates each of the 4 horizontal facets' effective kinetic threshold (hull baseline, or a covering plate's own material+HP if one exists — the same resolution `DamageResolver` would use for a real hit) and returns the world-space direction of the weakest one. Top/bottom deliberately excluded — not meaningful for ground-based steering to "approach from above."
+- `_compute_flank_point(target)` turns that into an actual waypoint the existing `_steer_towards()` steers toward, replacing the old "walk straight at `target.global_position`" behavior in the `ATTACK` order.
+- Duck-typed target lookup (`_get_target_hull`) works for both `battle_unit.gd` (`hull_node`) and `building.gd` (`defense_hull`) targets.
+- **Applies to both teams equally** — same steering code runs for player-issued and AI-issued attack orders, no AI-only special case. A player who manually attacks a heavily-armored-front enemy will also path toward its weak side automatically.
+
+**Verified:**
+- New test `test_ai_flanking_targets_weakest_facet()`: a target with a heavily armored front resolves its weakest facet to something other than front, and the computed flank point is directionally biased away from the armored side.
+- Full skirmish simulation re-run clean with real units now flanking during combat.
+- Full suite: **30/30 green.**
+
+**This completes the full armor phase list** (dedupe → facet resolution → per-module material → sloped armor → AI facing), per Chris's "go as far as possible on both fronts" direction. Moving to the trait/unit-class system next.
+
 ---
 
 ## 2026-07-12 (cont'd) — New scope from Chris: mounting/armor/hull-tweak rework

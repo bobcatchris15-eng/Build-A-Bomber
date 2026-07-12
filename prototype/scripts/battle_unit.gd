@@ -226,7 +226,15 @@ func _physics_process(delta):
 			else:
 				var dist = global_position.distance_to(attack_target.global_position)
 				if dist > attack_range:
-					_steer_towards(attack_target.global_position, delta, attack_range * 0.9)
+					# Armor phase 5: approach the target's weakest facet
+					# instead of walking straight at it, so a player's
+					# directional armor design decisions actually matter in
+					# Skirmish (previously only a human in Test Range could
+					# exploit facing; the AI never tried). Applies to both
+					# teams equally - same steering code runs for player and
+					# enemy units, no AI-only special case.
+					var approach_point = _compute_flank_point(attack_target)
+					_steer_towards(approach_point, delta, attack_range * 0.9)
 				else:
 					velocity.x = 0.0
 					velocity.z = 0.0
@@ -335,6 +343,69 @@ func get_active_modules() -> Array:
 			if child.has_meta("module_data") and not child.is_queued_for_deletion():
 				list.append(child)
 	return list
+
+# --- Flanking (Armor phase 5) ---
+
+const FACET_NORMALS = {
+	"front": Vector3(0, 0, -1),
+	"back": Vector3(0, 0, 1),
+	"left": Vector3(-1, 0, 0),
+	"right": Vector3(1, 0, 0),
+}
+
+# Duck-typed: works for both battle_unit.gd (hull_node) and building.gd
+# (defense_hull) targets, whichever the attack_target happens to be.
+func _get_target_hull(target: Node3D) -> Node3D:
+	if "hull_node" in target and is_instance_valid(target.hull_node):
+		return target.hull_node
+	if "defense_hull" in target and is_instance_valid(target.defense_hull):
+		return target.defense_hull
+	return null
+
+# Estimates each of the 4 horizontal facets' effective kinetic threshold
+# (hull baseline, or a covering plate's own material+HP bonus if one
+# exists - same resolution DamageResolver would use for a real hit) and
+# returns the WORLD-space direction of the weakest one. Top/bottom are
+# deliberately excluded - not meaningful to "approach from above" with
+# ground-based steering.
+func _weakest_facet_normal(target: Node3D) -> Vector3:
+	var hull = _get_target_hull(target)
+	if not hull:
+		return Vector3.ZERO
+
+	var hull_mat = hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel"
+	var hull_thick = hull.get_meta("armor_thickness") if hull.has_meta("armor_thickness") else 1.0
+	var baseline = DamageResolverScript.get_material_threshold(hull_mat, "kinetic", hull_thick).x
+
+	var target_modules = []
+	if target.has_method("get_active_modules"):
+		target_modules = target.get_active_modules()
+
+	var best_facet = "front"
+	var best_threshold = INF
+	for facet in FACET_NORMALS.keys():
+		var t = baseline
+		for m in target_modules:
+			if not m.has_meta("module_data"): continue
+			var m_data = m.get_meta("module_data")
+			if m_data.category == "armor" and m.get_meta("facet", "") == facet:
+				var plate_mat = m_data.tweaks.get("material", "") if "tweaks" in m_data else ""
+				if plate_mat != "":
+					t = DamageResolverScript.get_material_threshold(plate_mat, "kinetic", 1.0).x
+				t += m_data.get_hp() * 0.1
+				break
+		if t < best_threshold:
+			best_threshold = t
+			best_facet = facet
+
+	return FACET_NORMALS[best_facet]
+
+func _compute_flank_point(target: Node3D) -> Vector3:
+	var weak_normal_local = _weakest_facet_normal(target)
+	if weak_normal_local == Vector3.ZERO:
+		return target.global_position
+	var world_normal = (target.global_transform.basis * weak_normal_local).normalized()
+	return target.global_position + world_normal * (attack_range * 0.8)
 
 func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = null):
 	if is_dead: return
