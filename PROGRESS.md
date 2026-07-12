@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd) — New scope from Chris: mounting/armor/hull-tweak rework
+
+Chris reviewed the beta report and gave new direction covering 4 areas (firing arcs, armor-as-module, face-based weapon mounting, per-hull deform rigging). Written up in full in [MOUNTING_AND_ARMOR_SPEC.md](MOUNTING_AND_ARMOR_SPEC.md) — this supersedes the "keep armor hull-level-only" decision logged 2026-07-12 earlier today. Treating this as the priority for the rest of the sprint, sequenced by risk/dependency rather than the order it was listed in.
+
+### Item 1 shipped: real firing arc visualization
+
+Previously a fixed decorative cone (always the same size, always blue, not derived from anything). Now:
+- `ModuleCatalog.get_traverse_limit_angle(type_id)` extracted as a single source of truth, shared between `auto_weapon.gd` (actual combat behavior) and the new visualization — they can't drift apart, which matters since the whole point is showing players what will actually happen in a fight.
+- The arc is a real wedge spanning the weapon's actual traverse limit, built from per-segment raycasts against the hull and other modules. Segments read blue where clear, red where blocked — matching Design_Lab_UI_UX.md's "Radar Sweep" spec exactly (previously just aspirational text).
+- Stays live: rebuilds via `_refresh_firing_arc()` hooked into `check_all_clipping()`, which already runs after every placement/rotation/drag/tweak mutation, so the arc updates without needing changes at each individual call site.
+
+**Verified:**
+- New test `test_firing_arc_visualization()`: places a 360°-traverse cannon with a mast directly in its forward line, confirms both red (blocked) and blue (clear) segments exist, and confirms segment count matches the expected full-circle sweep.
+- Visual: `progress_captures/2026-07-12/firing_arc/` — top-down and angled screenshots show a small red wedge exactly where the mast blocks line of sight, rest of the 360° disc blue.
+- Full suite: **19/19 green.**
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 — v1.0-beta tagged (Sun-Thu work completed in one continuous session)
 
 Chris asked me to push through as much of the week's plan as possible in a single extended session rather than waiting on cron cycles that turned out not to be available in this environment. Completed the full Sunday-through-Thursday plan; tagging `v1.0-beta` here rather than padding out Friday/Saturday with manufactured busywork, since the actual beta bar (defined in the original plan) is met:

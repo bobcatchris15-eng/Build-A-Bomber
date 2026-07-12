@@ -325,29 +325,17 @@ func _select_module(module: Node3D):
 				# Hull scales in all 3 directions
 				pass
 				
-		# Firing Arc Visual Cone
+		# Firing Arc Visualization ("Radar Sweep", Design_Lab_UI_UX.md): a
+		# horizontal wedge spanning the weapon's actual traverse_limit_angle
+		# (shared with combat via ModuleCatalog.get_traverse_limit_angle),
+		# raycast per-segment against the hull/other modules so blocked
+		# angles read red and clear angles read blue - not a fixed decorative
+		# cone. Kept live via _refresh_firing_arc(), called from
+		# check_all_clipping() so it updates after drags/tweaks/rotation.
 		if selected_module.has_meta("module_data"):
 			var m_data = selected_module.get_meta("module_data")
 			if m_data and m_data.category == "weapon":
-				var arc_cone = MeshInstance3D.new()
-				arc_cone.name = "ArcCone"
-				var cyl_mesh = CylinderMesh.new()
-				cyl_mesh.top_radius = 2.0
-				cyl_mesh.bottom_radius = 0.1
-				cyl_mesh.height = 4.0
-				arc_cone.mesh = cyl_mesh
-				
-				var mat = StandardMaterial3D.new()
-				mat.albedo_color = Color(0.2, 0.6, 1.0, 0.25)
-				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-				mat.emission_enabled = true
-				mat.emission = Color(0.2, 0.6, 1.0)
-				mat.emission_energy_multiplier = 0.5
-				arc_cone.material_override = mat
-				
-				arc_cone.position = Vector3(0, 0.4, -2.0)
-				arc_cone.rotation = Vector3(-PI/2, 0, 0)
-				selected_module.add_child(arc_cone)
+				selected_module.add_child(_build_firing_arc(selected_module, m_data))
 
 func delete_selected_module():
 	if selected_module:
@@ -815,6 +803,84 @@ func _deselect_module():
 			if child.name == "ArcCone":
 				child.queue_free()
 
+func _build_firing_arc(module: Node3D, data) -> Node3D:
+	var container = Node3D.new()
+	container.name = "ArcCone"
+	container.position = Vector3(0, 0.35, 0)
+
+	var limit = ModuleCatalog.get_traverse_limit_angle(data.type_id)
+	var full_circle = limit >= PI - 0.01
+	var angle_span = 2.0 * PI if full_circle else limit * 2.0
+	var segments = 32 if full_circle else max(6, int(32.0 * angle_span / (2.0 * PI)))
+	var angle_start = -angle_span / 2.0
+	var step = angle_span / segments
+	var radius = 3.0
+
+	var exclude_list = []
+	_get_colliders_recursive(module, exclude_list)
+	var space_state = get_world_3d().direct_space_state
+	var origin = module.global_position + Vector3(0, 0.35, 0)
+
+	for i in range(segments):
+		var a0 = angle_start + i * step
+		var a1 = a0 + step
+		var mid_angle = (a0 + a1) / 2.0
+		var local_dir = Vector3(sin(mid_angle), 0, -cos(mid_angle))
+		var world_dir = (module.global_transform.basis * local_dir).normalized()
+
+		var query = PhysicsRayQueryParameters3D.create(origin, origin + world_dir * radius)
+		query.collision_mask = 3 # Layer 1 (Hull) + Layer 2 (Modules)
+		query.exclude = exclude_list
+		var result = space_state.intersect_ray(query)
+		var blocked = not result.is_empty()
+
+		var seg = MeshInstance3D.new()
+		seg.name = "ArcSeg%d" % i
+		seg.mesh = _build_wedge_mesh(a0, a1, radius)
+		var mat = StandardMaterial3D.new()
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.emission_enabled = true
+		if blocked:
+			mat.albedo_color = Color(1.0, 0.15, 0.15, 0.4)
+			mat.emission = Color(1.0, 0.15, 0.15)
+		else:
+			mat.albedo_color = Color(0.2, 0.6, 1.0, 0.25)
+			mat.emission = Color(0.2, 0.6, 1.0)
+		mat.emission_energy_multiplier = 0.5
+		seg.material_override = mat
+		container.add_child(seg)
+
+	return container
+
+static func _build_wedge_mesh(angle_start: float, angle_end: float, radius: float) -> ArrayMesh:
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var p0 = Vector3.ZERO
+	var p1 = Vector3(sin(angle_start) * radius, 0, -cos(angle_start) * radius)
+	var p2 = Vector3(sin(angle_end) * radius, 0, -cos(angle_end) * radius)
+	st.add_vertex(p0)
+	st.add_vertex(p1)
+	st.add_vertex(p2)
+	return st.commit()
+
+func _refresh_firing_arc():
+	if not selected_module or not is_instance_valid(selected_module): return
+	if not selected_module.has_meta("module_data"): return
+	var data = selected_module.get_meta("module_data")
+	if data.category != "weapon": return
+	var old = selected_module.get_node_or_null("ArcCone")
+	if old:
+		# Immediate free (not queue_free): this can be called multiple times
+		# within the same frame during a drag, and queue_free's deferred
+		# removal would leave a stale same-named node around long enough to
+		# cause the new one to be auto-renamed "ArcCone2", breaking the
+		# name-based lookup/cleanup used everywhere else in this file.
+		selected_module.remove_child(old)
+		old.free()
+	selected_module.add_child(_build_firing_arc(selected_module, data))
+
 func _get_parent_space_aabb(module: Node3D, size: Vector3) -> AABB:
 	var extents = size / 2.0
 	var local_corners = [
@@ -900,6 +966,9 @@ func check_all_clipping():
 		for mesh in meshes:
 			if mesh.name == "ArcCone":
 				continue
+			var mesh_parent = mesh.get_parent()
+			if mesh_parent and mesh_parent.name == "ArcCone":
+				continue # per-segment wedge meshes nested under the ArcCone container
 			var mat = mesh.material_override as StandardMaterial3D
 			if not mat:
 				mat = StandardMaterial3D.new()
@@ -917,6 +986,12 @@ func check_all_clipping():
 					mat.emission_energy_multiplier = 1.0
 				else:
 					mat.emission_enabled = false
+
+	# Keep the firing-arc visualization live: placement/rotation/drag/tweak
+	# changes all route through check_all_clipping(), so refreshing here
+	# covers all of them without needing a call at every individual mutation
+	# site.
+	_refresh_firing_arc()
 
 func _find_meshes_recursive(node: Node, result: Array):
 	if node is MeshInstance3D:

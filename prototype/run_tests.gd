@@ -35,6 +35,7 @@ func _init():
 	success = success and await test_undo_redo()
 	success = success and await test_foundation_design_lab_parity()
 	success = success and await test_design_to_battle_integration()
+	success = success and await test_firing_arc_visualization()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1020,6 +1021,82 @@ func test_design_to_battle_integration() -> bool:
 		return false
 
 	print("  [PASS] A unit designed with this week's fixed mechanics survives the full design -> serialize -> battle-spawn pipeline intact.")
+	return true
+
+func test_firing_arc_visualization() -> bool:
+	print("Running Test Suite: Firing Arc Visualization (was a fixed decorative cone, now a real live-obstruction check)...")
+	# Design_Lab_UI_UX.md's "Radar Sweep": select a weapon and see a wedge
+	# spanning its actual traverse_limit_angle, colored red where something
+	# blocks line of sight and blue where it's clear. Set up a hull with a
+	# 360-degree-traverse cannon (basic_cannon) and a tall blocking module
+	# placed directly in front of it, so we can assert both a red (blocked)
+	# and a blue (clear) segment exist in the same build.
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await process_frame
+
+	placer._place_hull_from_ui("heavy_hull")
+	await process_frame
+
+	# The cannon that will be selected and inspected for its firing arc.
+	placer._place_weapon_from_ui("basic_cannon", Vector3(0, 0.75, 0), Vector3.UP)
+	await process_frame
+	var cannon = null
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "basic_cannon":
+			cannon = child
+			break
+	if not cannon:
+		print("  [FAIL] Cannon was not placed")
+		placer.queue_free()
+		return false
+
+	# A tall sensor mast placed directly in the cannon's forward (-Z) line,
+	# close enough to guarantee a blocked ray in that direction.
+	placer._place_weapon_from_ui("sensor_suite", Vector3(0, 0.75, -1.2), Vector3.UP)
+	await process_frame
+
+	placer._select_module(cannon)
+	await process_frame
+
+	var arc = cannon.get_node_or_null("ArcCone")
+	if not arc:
+		print("  [FAIL] Selecting a weapon should build an ArcCone firing-arc container")
+		placer.queue_free()
+		return false
+
+	var red_count = 0
+	var blue_count = 0
+	for seg in arc.get_children():
+		if not seg is MeshInstance3D: continue
+		var mat = seg.material_override as StandardMaterial3D
+		if not mat: continue
+		if mat.albedo_color.r > 0.8 and mat.albedo_color.g < 0.3:
+			red_count += 1
+		elif mat.albedo_color.b > 0.8:
+			blue_count += 1
+
+	if red_count == 0:
+		print("  [FAIL] Expected at least one blocked (red) segment toward the mast placed directly in front, got 0")
+		placer.queue_free()
+		return false
+	if blue_count == 0:
+		print("  [FAIL] Expected at least one clear (blue) segment (basic_cannon has 360-degree traverse), got 0")
+		placer.queue_free()
+		return false
+
+	# basic_cannon has a full 360-degree traverse_limit_angle - confirm the
+	# arc actually spans the full circle rather than some other angle.
+	var expected_segments = 32
+	if arc.get_child_count() != expected_segments:
+		print("  [FAIL] Full-circle traverse should build ", expected_segments, " segments, got ", arc.get_child_count())
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Firing arc correctly shows red toward a real obstruction and blue toward clear space (", red_count, " blocked / ", blue_count, " clear of ", expected_segments, " segments).")
 	return true
 
 # --- Skirmish mode test suites ---

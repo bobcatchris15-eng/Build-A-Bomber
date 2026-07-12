@@ -93,15 +93,10 @@ func _ready():
 		var weight = data.get_weight()
 		traverse_speed = clamp(200.0 / weight, 0.6, 6.0)
 		
-		# Set traverse limit angle and damage class by type_id
-		if type_id == "basic_cannon" or type_id == "ciws" or type_id == "pd_laser":
-			traverse_limit_angle = PI # 360 degrees
-		elif type_id == "heavy_howitzer":
-			traverse_limit_angle = PI / 3.0 # 60 degrees
-		elif type_id == "mortar_array" or type_id == "spigot_mortar":
-			traverse_limit_angle = PI / 6.0 # 30 degrees
-		else:
-			traverse_limit_angle = PI / 4.0 # 45 degrees
+		# Traverse limit angle: shared with the Design Lab's firing-arc
+		# visualization via ModuleCatalog.get_traverse_limit_angle() so the
+		# two can never drift apart.
+		traverse_limit_angle = ModuleCatalog.get_traverse_limit_angle(type_id)
 			
 		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws"]:
 			damage_class = "kinetic"

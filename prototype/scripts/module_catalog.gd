@@ -426,6 +426,21 @@ static func is_foundation(type_id: String) -> bool:
 	var data = get_module_data(type_id)
 	return data.get("is_foundation", false)
 
+# Single source of truth for weapon traverse limits, shared between the
+# runtime combat AI (auto_weapon.gd) and the Design Lab firing-arc
+# visualization (module_placer.gd) - they must never drift apart, since the
+# whole point of the visualization is to show players what the weapon will
+# actually do in combat.
+static func get_traverse_limit_angle(type_id: String) -> float:
+	if type_id in ["basic_cannon", "ciws", "pd_laser"]:
+		return PI # 360 degrees
+	elif type_id == "heavy_howitzer":
+		return PI / 3.0 # 60 degrees
+	elif type_id in ["mortar_array", "spigot_mortar"]:
+		return PI / 6.0 # 30 degrees
+	else:
+		return PI / 4.0 # 45 degrees
+
 static func get_module_data(type_id: String) -> Dictionary:
 	var cat = get_catalog()
 	if cat.has(type_id):
