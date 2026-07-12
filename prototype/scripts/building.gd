@@ -6,6 +6,7 @@ signal died(building)
 signal unit_produced(unit)
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 
 const PREFAB_STATS = {
 	"hq":       {"hp": 3000.0, "size": Vector3(7, 4, 7),  "color": Color(0.75, 0.72, 0.55), "cost_metal": 0,   "cost_crystal": 0},
@@ -220,27 +221,26 @@ func _spawn_unit(blueprint_data: Dictionary):
 	unit.order_move(rally_point)
 	emit_signal("unit_produced", unit)
 
+func get_active_modules() -> Array:
+	var list = []
+	if is_instance_valid(defense_hull):
+		for child in defense_hull.get_children():
+			if child.has_meta("module_data") and not child.is_queued_for_deletion():
+				list.append(child)
+	return list
+
 func take_damage(amount: float, damage_type: String = "kinetic"):
 	if is_dead: return
 	var threshold = 5.0
 	var reduction = 0.85
 	if kind == "defense":
-		match armor_material:
-			"hardened_steel":
-				if damage_type == "kinetic": threshold = 15.0 * armor_thickness; reduction = 0.7
-				elif damage_type == "thermal": threshold = 5.0 * armor_thickness; reduction = 0.9
-				else: threshold = 10.0 * armor_thickness; reduction = 0.8
-			"reactive_armor":
-				if damage_type == "kinetic": threshold = 10.0 * armor_thickness; reduction = 0.8
-				elif damage_type == "thermal": threshold = 10.0 * armor_thickness; reduction = 0.8
-				else: threshold = 30.0 * armor_thickness; reduction = 0.4
-			"ablative_ceramic":
-				if damage_type == "kinetic": threshold = 8.0 * armor_thickness; reduction = 0.9
-				elif damage_type == "thermal": threshold = 25.0 * armor_thickness; reduction = 0.3
-				else: threshold = 10.0 * armor_thickness; reduction = 0.7
-			"energy_shielding":
-				threshold = 20.0 * armor_thickness
-				reduction = 0.5
+		# Placed armor modules now add the same aggregate bonus here as they
+		# do for vehicle hulls (battle_unit.gd/player_vehicle.gd) - defense
+		# buildings previously didn't get this at all, a real parity gap
+		# found while deduping the armor math into damage_resolver.gd.
+		var resolved = DamageResolverScript.resolve(defense_hull, get_active_modules(), damage_type)
+		threshold = resolved.x
+		reduction = resolved.y
 	if amount < threshold:
 		return
 	hp = max(0.0, hp - amount * reduction)
