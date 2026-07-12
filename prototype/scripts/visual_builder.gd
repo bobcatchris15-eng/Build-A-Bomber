@@ -1192,12 +1192,77 @@ static func _build_anti_grav(parent_node: Node3D, base_size: Vector3, base_color
 			parent_node.add_child(ring)
 
 
+# MOUNTING_AND_ARMOR_SPEC.md #3: generic (not per-weapon-type-bespoke) mount
+# hardware, added on top of whatever build_visual() already constructed for
+# this type_id. "turret" and "frame_built" add nothing extra - the tank
+# cannon's existing enclosed-turret look is correct as-is, and a frame-built
+# weapon's differentiation comes entirely from being embedded deep into the
+# hull (handled by module_placer.gd's embed_depth position offset), not from
+# extra geometry.
+static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_size: Vector3):
+	var old = parent_node.get_node_or_null("MountHardware")
+	if old:
+		parent_node.remove_child(old)
+		old.free()
+
+	if mount_style == "turret" or mount_style == "frame_built":
+		return
+
+	var hardware = Node3D.new()
+	hardware.name = "MountHardware"
+	parent_node.add_child(hardware)
+
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.12, 0.12, 0.12)
+
+	if mount_style == "pintle_top":
+		# A visible post between the hull surface (local Y=0, where this
+		# module's origin sits) and the weapon body sitting on top of it.
+		var post = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = base_size.x * 0.22
+		cyl.bottom_radius = base_size.x * 0.28
+		cyl.height = max(0.1, base_size.y * 0.25)
+		post.mesh = cyl
+		post.material_override = mat
+		post.position = Vector3(0, cyl.height * 0.4, 0)
+		hardware.add_child(post)
+
+	elif mount_style == "pintle_bottom":
+		# Inverted: the pintle reaches DOWN from the hull (above) to the
+		# weapon (below) instead of up from the hull to the weapon on top -
+		# Chris called this out as useful for under-hull/rotor-style mounts.
+		var post = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = base_size.x * 0.28
+		cyl.bottom_radius = base_size.x * 0.22
+		cyl.height = max(0.1, base_size.y * 0.25)
+		post.mesh = cyl
+		post.material_override = mat
+		post.position = Vector3(0, base_size.y - cyl.height * 0.4, 0)
+		hardware.add_child(post)
+
+	elif mount_style == "sponson":
+		# A collar ring at the hull surface where the embedded weapon body
+		# penetrates - reads as "this rotates inside the hull," not "this
+		# sits on top of it."
+		var collar = MeshInstance3D.new()
+		var torus = TorusMesh.new()
+		torus.inner_radius = max(0.05, base_size.x * 0.45)
+		torus.outer_radius = max(0.1, base_size.x * 0.62)
+		collar.mesh = torus
+		collar.material_override = mat
+		collar.rotation = Vector3(PI / 2.0, 0, 0)
+		hardware.add_child(collar)
+
 static func rebuild_visual(module: Node3D):
 	if not module or not module.has_meta("module_data"): return
 	var data = module.get_meta("module_data")
 	var catalog_data = preload("res://scripts/module_catalog.gd").get_module_data(data.type_id)
 	if catalog_data:
 		build_visual(data.type_id, module, catalog_data.size, catalog_data.color, data.tweaks)
+		if module.has_meta("mount_style"):
+			add_mount_hardware(module, module.get_meta("mount_style"), catalog_data.size)
 
 static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: Dictionary, base_size: Vector3):
 	var children = parent.get_children().filter(func(c): return c is MeshInstance3D)

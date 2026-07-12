@@ -431,6 +431,25 @@ static func is_foundation(type_id: String) -> bool:
 # visualization (module_placer.gd) - they must never drift apart, since the
 # whole point of the visualization is to show players what the weapon will
 # actually do in combat.
+# MOUNTING_AND_ARMOR_SPEC.md #3: how a weapon/device physically sits
+# depends on which hull facet it's mounted on. Single source of truth so
+# module_placer.gd (positioning/embedding) and visual_builder.gd (mount
+# hardware) agree on the same classification.
+#   "turret"      - existing enclosed-turret visual, unchanged (basic_cannon only)
+#   "frame_built" - built into the vehicle frame; the whole vehicle aims, not the weapon
+#   "pintle_top"   - pintle base on the hull, weapon sits level on top
+#   "pintle_bottom" - inverted: pintle reaches down from the hull, weapon hangs below
+#   "sponson"     - embedded into the hull body, only the muzzle projects out
+static func get_mount_style(type_id: String, facet: String) -> String:
+	if type_id == "basic_cannon":
+		return "turret"
+	if type_id in ["gauss_railgun", "heavy_howitzer"]:
+		return "frame_built"
+	match facet:
+		"top": return "pintle_top"
+		"bottom": return "pintle_bottom"
+		_: return "sponson"
+
 static func get_traverse_limit_angle(type_id: String) -> float:
 	if type_id in ["basic_cannon", "ciws", "pd_laser"]:
 		return PI # 360 degrees

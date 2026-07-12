@@ -474,6 +474,18 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 			# plate directly on top of the original (MOUNTING_AND_ARMOR_SPEC.md #2).
 			var abs_n = normal.abs()
 			should_mirror = mirror_enabled and abs_n.x > abs_n.y and abs_n.x > abs_n.z
+		elif should_mirror and hull:
+			# Same class of bug, general case: placing ANY module dead-center
+			# (local x ~= 0, e.g. a railgun/howitzer mounted on the front/
+			# back centerline - a very natural placement for "frame_built"
+			# weapons specifically) would otherwise mirror it onto its own
+			# position, producing a fully-overlapping duplicate that reads
+			# as a clipping-red bug. Surfaced by testing frame_built weapons
+			# for MOUNTING_AND_ARMOR_SPEC.md #3, but the underlying issue
+			# isn't mount-style-specific - skip mirroring for ANY module
+			# placed on the centerline.
+			var local_x = hull.to_local(pos).x
+			should_mirror = abs(local_x) > 0.15
 		if should_mirror:
 			var mirrored_pos = Vector3(-pos.x, pos.y, pos.z)
 			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
@@ -481,6 +493,20 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 			if primary and mirror:
 				primary.set_meta("mirrored_counterpart", mirror)
 				mirror.set_meta("mirrored_counterpart", primary)
+
+func _classify_hull_facet(normal: Vector3) -> String:
+	# Facet = one of the hull's 6 axis-aligned box faces (see
+	# MOUNTING_AND_ARMOR_SPEC.md's "Known architecture constraint" - hull
+	# placement/collision is a single BoxShape3D regardless of the true
+	# authored mesh silhouette). "front" matches the -Z barrel-forward
+	# convention used throughout the rest of the codebase.
+	var abs_n = normal.abs()
+	if abs_n.x > abs_n.y and abs_n.x > abs_n.z:
+		return "right" if normal.x > 0 else "left"
+	elif abs_n.z > abs_n.y:
+		return "back" if normal.z > 0 else "front"
+	else:
+		return "top" if normal.y > 0 else "bottom"
 
 func update_locomotion(type_id: String, settings: Dictionary):
 	if not hull: return
@@ -767,6 +793,23 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 			else:
 				centered_local = Vector3(0, sign(local_normal.y) * hull_size.y / 2.0, 0)
 			new_weapon.global_position = hull.to_global(centered_local)
+
+	# Face-based weapon mounting (MOUNTING_AND_ARMOR_SPEC.md #3): sponson-
+	# embed on side/front/back faces, pintle stand on top/bottom, except
+	# railgun/howitzer (frame-built) and basic_cannon (existing enclosed
+	# turret, left unchanged - handled by get_mount_style() returning "turret").
+	if category == "weapon":
+		var facet = _classify_hull_facet(normal)
+		var mount_style = ModuleCatalog.get_mount_style(type_id, facet)
+		# Stored as meta (not just applied once) so rebuild_visual() - called
+		# on every gizmo tweak-drag frame, which clears and rebuilds all
+		# MeshInstance3D children - knows to re-add the mount hardware
+		# instead of silently losing it on the first tweak.
+		new_weapon.set_meta("mount_style", mount_style)
+		if mount_style == "sponson" or mount_style == "frame_built":
+			var embed_depth = catalog_data.size.y * (0.75 if mount_style == "frame_built" else 0.45)
+			new_weapon.global_position -= normal * embed_depth
+		VisualBuilder.add_mount_hardware(new_weapon, mount_style, catalog_data.size)
 
 	# Notify the UI that a module was added
 	get_tree().call_group("stat_ui", "update_stats", hull)

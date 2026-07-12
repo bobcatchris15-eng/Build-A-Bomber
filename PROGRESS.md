@@ -63,6 +63,26 @@ MOUNTING_AND_ARMOR_SPEC.md #2 — resolves the hull-level-only vs. spatial-armor
 
 ---
 
+### Item 4 shipped: face-based weapon mounting
+
+MOUNTING_AND_ARMOR_SPEC.md #3. **Scoping choice, logged upfront:** implemented as a generic, type-agnostic treatment layer (facet classification → mount style → position/hardware adjustment) rather than bespoke per-weapon-type visual reconstruction for all ~20 weapon types — the latter would be a much larger art-authoring undertaking than fits this pass with consistent quality. The mechanical differentiation (embed depth, mount hardware, the frame-built/turret exceptions) is real and type-agnostic; a fully bespoke sponson/turret mesh per weapon type is a natural future art pass, not attempted here.
+
+- `ModuleCatalog.get_mount_style(type_id, facet)`: single source of truth. `basic_cannon` → `"turret"` (existing enclosed-turret visual, explicitly left unchanged per Chris's instruction). `gauss_railgun`/`heavy_howitzer` → `"frame_built"` (embedded deep into the hull, no extra hardware — the whole vehicle aims, not the weapon). Top facet → `"pintle_top"`. Bottom facet → `"pintle_bottom"` (inverted pintle). Everything else (front/back/left/right) → `"sponson"`.
+- `module_placer.gd`: new `_classify_hull_facet()` helper (reused pattern from armor's facet classification). Sponson and frame-built weapons get pushed inward along the surface normal (embed depth scaled by mount style) so they read as embedded rather than surface-mounted.
+- `visual_builder.gd`: new `add_mount_hardware()` adds a generic pintle-post (top/bottom) or sponson collar ring (side/front/back) on top of whatever the weapon's own type-specific visual already builds — turret and frame-built styles get nothing extra.
+- **Real bug caught mid-implementation, not by a test but by looking at the screenshot:** placing a module dead-center (local x ≈ 0 — a very natural placement for a "frame_built" railgun/howitzer on the front/back centerline) mirrored it onto its own exact position, producing a fully-overlapping duplicate that read as a false clipping-red flag. This is the *same underlying bug class* as the armor mirror-centering fix earlier today, but the earlier fix only covered the `armor` category — generalized the fix to any module placed on the centerline, since the failure mode isn't mount-style-specific.
+- **Persistence caught proactively (before it could bite):** `visual_builder.gd`'s `rebuild_visual()` — called on every gizmo tweak-drag frame — clears all `MeshInstance3D` children and rebuilds from scratch. Mount hardware would have silently vanished on the first tweak of a mounted weapon. Fixed by storing `mount_style` as module metadata (and persisting it through save/load in `blueprint_manager.gd`) so `rebuild_visual()` and `reconstruct_vehicle()` both know to re-add it.
+
+**Verified:**
+- New test `test_face_based_weapon_mounting()`: confirms `basic_cannon`/`gauss_railgun` get their exception treatment (no hardware), a top-facet weapon gets `pintle_top` hardware, a side-facet weapon gets `sponson` hardware and is embedded inward from the clicked point, and mount hardware survives a `rebuild_visual()` call (the tweak-drag persistence risk above).
+- New test `test_centerline_placement_does_not_self_mirror()`: regression-guards the dead-center mirror-overlap fix.
+- Visual: `progress_captures/2026-07-12/mounting/` — pintle stand visible under the top-mounted weapon, sponson collar visible for the side-mounted weapon, railgun correctly shows its normal purple emissive color (not clipping-red) after the centerline fix.
+- Full suite: **24/24 green.**
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-12 — v1.0-beta tagged (Sun-Thu work completed in one continuous session)
 
 Chris asked me to push through as much of the week's plan as possible in a single extended session rather than waiting on cron cycles that turned out not to be available in this environment. Completed the full Sunday-through-Thursday plan; tagging `v1.0-beta` here rather than padding out Friday/Saturday with manufactured busywork, since the actual beta bar (defined in the original plan) is met:

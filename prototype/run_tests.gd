@@ -39,6 +39,8 @@ func _init():
 	success = success and await test_free_rotation_ring()
 	success = success and await test_armor_module_facet_fitting()
 	success = success and await test_armor_module_combat_bonus()
+	success = success and await test_face_based_weapon_mounting()
+	success = success and await test_centerline_placement_does_not_self_mirror()
 	success = success and await test_headless_combat_simulation()
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
@@ -1295,6 +1297,139 @@ func test_armor_module_combat_bonus() -> bool:
 		return false
 
 	print("  [PASS] Placed armor modules raise the effective damage threshold in combat (without: HP ", hp_without_armor_module, ", with: HP ", hp_with_armor_module, ").")
+	return true
+
+func test_face_based_weapon_mounting() -> bool:
+	print("Running Test Suite: Face-Based Weapon Mounting (MOUNTING_AND_ARMOR_SPEC.md #3)...")
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await process_frame
+
+	placer._place_hull_from_ui("heavy_hull")
+	await process_frame
+
+	# basic_cannon: "turret" mount style, no extra hardware, existing
+	# enclosed-turret visual explicitly left unchanged.
+	placer._place_weapon_from_ui("basic_cannon", Vector3(0, 0.75, -1.0), Vector3.UP)
+	await process_frame
+	var cannon = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "basic_cannon":
+			cannon = c
+			break
+	if not cannon or cannon.get_meta("mount_style", "") != "turret" or cannon.get_node_or_null("MountHardware"):
+		print("  [FAIL] basic_cannon should be mount_style 'turret' with no MountHardware, got '", cannon.get_meta("mount_style", "") if cannon else "null", "'")
+		placer.queue_free()
+		return false
+
+	# gauss_railgun: "frame_built", no hardware, but embedded deeper into
+	# the hull (whole vehicle aims, not the weapon).
+	placer._place_weapon_from_ui("gauss_railgun", Vector3(0, 0.75, 1.0), Vector3.UP)
+	await process_frame
+	var railgun = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "gauss_railgun":
+			railgun = c
+			break
+	if not railgun or railgun.get_meta("mount_style", "") != "frame_built" or railgun.get_node_or_null("MountHardware"):
+		print("  [FAIL] gauss_railgun should be mount_style 'frame_built' with no MountHardware")
+		placer.queue_free()
+		return false
+
+	# heavy_machine_gun on the TOP facet: "pintle_top" with visible hardware.
+	placer._place_weapon_from_ui("heavy_machine_gun", Vector3(1.5, 0.75, -1.5), Vector3.UP)
+	await process_frame
+	var top_mg = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun":
+			top_mg = c
+			break
+	if not top_mg or top_mg.get_meta("mount_style", "") != "pintle_top" or not top_mg.get_node_or_null("MountHardware"):
+		print("  [FAIL] Top-facet heavy_machine_gun should be 'pintle_top' with MountHardware present")
+		placer.queue_free()
+		return false
+
+	# heavy_machine_gun on a SIDE facet: "sponson", embedded inward, with a collar.
+	var pre_embed_pos = placer.hull.global_position + Vector3(3.0, 0.5, 0.0)
+	placer._place_weapon_from_ui("heavy_machine_gun", pre_embed_pos, Vector3.RIGHT)
+	await process_frame
+	var side_mg = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun" and c != top_mg:
+			var lp = placer.hull.to_local(c.global_position)
+			if lp.x > 0.1:
+				side_mg = c
+				break
+	if not side_mg or side_mg.get_meta("mount_style", "") != "sponson" or not side_mg.get_node_or_null("MountHardware"):
+		print("  [FAIL] Side-facet heavy_machine_gun should be 'sponson' with MountHardware (collar) present")
+		placer.queue_free()
+		return false
+	var side_local = placer.hull.to_local(side_mg.global_position)
+	if side_local.x >= 3.0:
+		print("  [FAIL] Sponson-mounted weapon should be embedded inward from the clicked surface point, local x=", side_local.x, " (clicked at ~3.0)")
+		placer.queue_free()
+		return false
+
+	# Mount hardware must survive a tweak-driven rebuild_visual() call, not
+	# just the initial placement (this was a real risk: build_visual() clears
+	# MeshInstance3D children on every rebuild).
+	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
+	var mg_data = top_mg.get_meta("module_data")
+	mg_data.tweaks["drum_size"] = 1.8
+	VisualBuilderScript.rebuild_visual(top_mg)
+	await process_frame
+	if not top_mg.get_node_or_null("MountHardware"):
+		print("  [FAIL] MountHardware should survive rebuild_visual() (tweak-drag), but was lost")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Face-based mounting: turret/frame_built exceptions correct, pintle_top/sponson hardware present, sponson embeds inward, hardware survives tweak rebuilds.")
+	return true
+
+func test_centerline_placement_does_not_self_mirror() -> bool:
+	print("Running Test Suite: Centerline Placement Doesn't Mirror Onto Itself (found while visually verifying face-based mounting)...")
+	# A module placed dead-center (local x ~= 0) - e.g. a frame_built railgun
+	# mounted on the front/back centerline, a very natural placement for
+	# that weapon type - would previously mirror onto its own position,
+	# producing a fully-overlapping duplicate that read as a clipping-red
+	# bug. Not mount-style-specific: any module placed on the centerline
+	# hit this.
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await process_frame
+
+	placer._place_hull_from_ui("heavy_hull")
+	await process_frame
+	placer._place_weapon_from_ui("gauss_railgun", Vector3(0, 0.75, 2.0), Vector3.UP)
+	await process_frame
+
+	var railguns = []
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "gauss_railgun":
+			railguns.append(c)
+
+	if railguns.size() != 1:
+		print("  [FAIL] Centerline placement should produce exactly 1 module, not mirror onto itself, got ", railguns.size())
+		placer.queue_free()
+		return false
+	if railguns[0].has_meta("mirrored_counterpart"):
+		print("  [FAIL] Centerline-placed module should not have a mirrored_counterpart at all")
+		placer.queue_free()
+		return false
+
+	placer.check_all_clipping()
+	if placer.clipping_detected:
+		print("  [FAIL] Centerline placement should not trigger a false-positive clipping flag")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Centerline-placed modules no longer mirror onto their own position.")
 	return true
 
 # --- Skirmish mode test suites ---
