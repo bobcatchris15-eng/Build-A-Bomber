@@ -33,7 +33,7 @@ func _ready():
 	_add_button(vbox, "🔧  Design Lab", "Design and tweak unit & defense blueprints", func():
 		get_tree().change_scene_to_file("res://scenes/MainLab.tscn"))
 	_add_button(vbox, "⚔️  Skirmish", "C&C-style battle: build a base, produce your designs, destroy the enemy HQ", func():
-		get_tree().change_scene_to_file("res://scenes/Skirmish.tscn"))
+		get_tree().change_scene_to_file("res://scenes/MapSelect.tscn"))
 	_add_button(vbox, "🎯  Test Range", "Drive your latest saved design against target dummies", func():
 		get_tree().change_scene_to_file("res://scenes/Battlefield.tscn"))
 	_add_button(vbox, "🚪  Quit", "", func():

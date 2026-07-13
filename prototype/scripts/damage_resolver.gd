@@ -8,6 +8,19 @@ class_name DamageResolver
 
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 
+# Elevation combat advantage (multi-map pass): shooting down at a target on
+# meaningfully lower ground pierces more easily - real armor doesn't
+# protect top-down as well as face-on, and it gives holding a hill a real
+# combat payoff on top of the vision bonus (skirmish.gd's
+# _recalc_fog_of_war()). Threshold-based (lowers how much armor blocks
+# entirely), not a flat damage multiplier, so it composes with everything
+# else resolve() already does. Reads directly off hit_origin/defender's
+# real Y coordinates - no map/zone awareness needed here, since
+# terrain_builder.gd's terrain_height_at() is the only place elevation Y
+# ever gets set in the first place.
+const ELEVATION_COMBAT_THRESHOLD: float = 2.0
+const ELEVATION_COMBAT_PIERCE_MULTIPLIER: float = 0.85
+
 # damage_type -> [base_threshold, reduction] per armor material.
 #
 # "energy" row added this pass (ENERGY_AND_BALANCE_SPEC.md #4 follow-up):
@@ -91,6 +104,11 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 		if armor_module_hp > 0.0:
 			threshold += armor_module_hp * 0.1
 			reduction = clamp(reduction * 0.9, 0.2, 1.0)
+
+	if defender != null and hit_origin != null:
+		var height_advantage = (hit_origin as Vector3).y - defender.global_position.y
+		if height_advantage >= ELEVATION_COMBAT_THRESHOLD:
+			threshold *= ELEVATION_COMBAT_PIERCE_MULTIPLIER
 
 	return Vector2(threshold, reduction)
 

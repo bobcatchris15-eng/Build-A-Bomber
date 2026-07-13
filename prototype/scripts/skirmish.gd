@@ -8,6 +8,8 @@ const BattleUnitScript = preload("res://scripts/battle_unit.gd")
 const BuildingScript = preload("res://scripts/building.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const EnemyAIScript = preload("res://scripts/enemy_ai.gd")
+const MapCatalog = preload("res://scripts/map_catalog.gd")
+const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
 
 const PLAYER_TEAM = 0
 const ENEMY_TEAM = 1
@@ -53,25 +55,32 @@ var energy_tick_timer: float = 0.0
 # and this scan is O(player constructs x enemy constructs) every tick.
 const FOG_TICK_INTERVAL: float = 0.3
 
-# Real pathfinding + naval terrain (built this pass - previously deferred:
-# the map was flat and open with nothing to route around, and naval units
-# were purely Y-locked to a fixed waterline with no actual water/land
-# distinction anywhere). Two SEPARATE NavigationServer3D maps (not layers
-# on one map) - simpler to reason about than layer bitmasks: ground units
-# path on ground_nav_map (full terrain minus a hole where the lake is),
-# naval units path on water_nav_map (just the lake). Flying units ignore
-# navigation entirely (open air, nothing to route around). See
-# battle_unit.gd's _setup_navigation()/_steer_towards() for how units
-# actually consume this.
+# Real pathfinding + naval terrain (built two passes ago - the map was
+# flat and open with nothing to route around, and naval units were purely
+# Y-locked to a fixed waterline with no actual water/land distinction
+# anywhere). Two SEPARATE NavigationServer3D maps (not layers on one map)
+# - simpler to reason about than layer bitmasks: ground units path on
+# ground_nav_map (full terrain minus holes for water/obstacles/elevation
+# footprints - see terrain_builder.gd), naval units path on water_nav_map
+# (just the water areas). Flying units ignore navigation entirely (open
+# air, nothing to route around). See battle_unit.gd's
+# _setup_navigation()/_steer_towards() for how units actually consume this.
 var ground_nav_map: RID
 var water_nav_map: RID
 var _ground_nav_region: RID
 var _water_nav_region: RID
-# Positioned clear of every resource-node/base spot in _spawn_resource_nodes()/
-# _spawn_bases() below - verified by hand against their coordinates.
-const LAKE_CENTER: Vector3 = Vector3(18, 0, 0)
-const LAKE_HALF_EXTENTS: Vector2 = Vector2(7, 7) # x, z half-size
-const MAP_HALF_EXTENTS: float = 80.0 # matches Ground's 160x160 size
+
+# Multi-map architecture (this pass): the map itself - terrain layout,
+# resources, start points - is now data (MapCatalog), not hardcoded here.
+# map_id defaults to the original lake map so every pre-existing test/
+# save that doesn't care about map selection keeps working unchanged.
+# Read from the MatchConfig autoload if present (set by a real map-select
+# screen before the scene change) - duck-typed via get_node_or_null so
+# this has zero dependency on the autoload existing at all (every headless
+# test that instantiates Skirmish.tscn directly, with no autoload
+# registered, just falls back to the default map, same as before).
+var map_id: String = MapCatalog.DEFAULT_MAP_ID
+var current_map: Dictionary = {}
 
 var player_faction: String = "industrialists"
 var enemy_faction: String = "technocrats"
@@ -105,6 +114,11 @@ func _ready():
 	bp_manager = BlueprintManagerScript.new()
 	bp_manager.name = "BlueprintManager"
 	add_child(bp_manager)
+
+	var match_config = get_node_or_null("/root/MatchConfig")
+	if match_config and "selected_map_id" in match_config and match_config.selected_map_id != "":
+		map_id = match_config.selected_map_id
+	current_map = MapCatalog.get_map(map_id)
 
 	_setup_navigation()
 	_load_rosters()
@@ -193,6 +207,17 @@ func is_energy_deficit(team: int) -> bool:
 # enemy AI keeps its existing omniscient targeting (a deliberate scope cut,
 # see DECISIONS_NEEDED.md) - only the player's own experience (what
 # renders, what the player's own weapons can target) is fog-gated.
+# Elevation vision bonus (multi-map pass): a ground construct standing on
+# an elevation zone sees further, scaling with how high it's actually
+# standing (terrain_height_at(), the same single source of truth
+# battle_unit.gd uses to snap Y) - a real, if modest, reward for holding
+# high ground, not just a cosmetic hill. Capped so a very tall future map
+# doesn't make vision meaningless, and skipped for flying units (already
+# airborne regardless of what's on the ground below - this is about
+# holding terrain, not altitude).
+const ELEVATION_VISION_BONUS_PER_UNIT: float = 0.02
+const ELEVATION_VISION_CAP: float = 12.0
+
 func _recalc_fog_of_war():
 	if game_over: return
 	var player_constructs = get_team_units(PLAYER_TEAM) + get_team_buildings(PLAYER_TEAM)
@@ -203,6 +228,9 @@ func _recalc_fog_of_war():
 		for o in player_constructs:
 			if not is_instance_valid(o): continue
 			var vision = o.vision_range if "vision_range" in o else 0.0
+			if not ("is_flying" in o and o.is_flying):
+				var elevation = terrain_height_at(o.global_position)
+				vision *= 1.0 + min(elevation, ELEVATION_VISION_CAP) * ELEVATION_VISION_BONUS_PER_UNIT
 			if c.global_position.distance_to(o.global_position) <= vision:
 				seen = true
 				break
@@ -305,52 +333,44 @@ func _on_resources_delivered(team: int, metal: int, crystal: int):
 
 # --- Map setup ---
 
-# Two separate NavigationServer3D maps, built procedurally at runtime (no
-# editor navmesh resource - everything here is code-generated, consistent
-# with how the rest of the map is built). Ground navmesh = the full 160x160
-# terrain minus a rectangular hole where the lake is (4 quad "bands" around
-# the hole, since baking needs real polygon geometry, not a shape-with-a-
-# hole description). Water navmesh = just the lake rectangle. Verified
-# feasible with a headless scratch probe before building this in - a real
-# runtime-baked navmesh correctly routes around a hole, confirmed via
-# NavigationServer3D.map_get_path() before ever touching battle_unit.gd.
+# Terrain is now data (MapCatalog) + a shared builder (TerrainBuilder),
+# not hardcoded per-scene - see terrain_builder.gd's own header comment
+# for the navmesh technique (multi-hole ground grid + plateau/ramp bridge
+# geometry). This function's job is just: bake the navmeshes, resize/tint
+# the flat Ground node to match the map, and spawn the decorative terrain
+# (water/obstacles/elevation).
 func _setup_navigation():
-	ground_nav_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_active(ground_nav_map, true)
-	water_nav_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_active(water_nav_map, true)
+	var nav = TerrainBuilder.build_navmeshes(current_map)
+	ground_nav_map = nav.ground_map
+	water_nav_map = nav.water_map
+	_ground_nav_region = nav.ground_region
+	_water_nav_region = nav.water_region
 
-	var lx0 = LAKE_CENTER.x - LAKE_HALF_EXTENTS.x
-	var lx1 = LAKE_CENTER.x + LAKE_HALF_EXTENTS.x
-	var lz0 = LAKE_CENTER.z - LAKE_HALF_EXTENTS.y
-	var lz1 = LAKE_CENTER.z + LAKE_HALF_EXTENTS.y
-	var m = MAP_HALF_EXTENTS
+	var half: float = current_map.get("map_half_extents", 80.0)
+	var ground = get_node_or_null("Ground")
+	if ground:
+		var size = Vector3(half * 2.0, 1.0, half * 2.0)
+		# Duplicate before mutating - Ground's BoxMesh/BoxShape3D are scene
+		# sub-resources that could otherwise be shared across every
+		# Skirmish instance (same footgun as the hull nose-taper work,
+		# which duplicates its mesh for the same reason), which would leak
+		# one map's size/color into another's, particularly noticeable
+		# across the many Skirmish instantiate/free cycles in the test suite.
+		var mesh_inst: MeshInstance3D = ground.get_node_or_null("MeshInstance3D")
+		if mesh_inst and mesh_inst.mesh is BoxMesh:
+			var box: BoxMesh = mesh_inst.mesh.duplicate()
+			box.size = size
+			mesh_inst.mesh = box
+			var tinted = StandardMaterial3D.new()
+			tinted.albedo_color = current_map.get("ground_color", Color(0.2, 0.26, 0.21))
+			mesh_inst.material_override = tinted
+		var col_shape: CollisionShape3D = ground.get_node_or_null("CollisionShape3D")
+		if col_shape and col_shape.shape is BoxShape3D:
+			var box_shape: BoxShape3D = col_shape.shape.duplicate()
+			box_shape.size = size
+			col_shape.shape = box_shape
 
-	var ground_verts = PackedVector3Array()
-	_add_nav_quad(ground_verts, Vector3(-m, 0, lz1), Vector3(m, 0, lz1), Vector3(m, 0, m), Vector3(-m, 0, m)) # north band
-	_add_nav_quad(ground_verts, Vector3(-m, 0, -m), Vector3(m, 0, -m), Vector3(m, 0, lz0), Vector3(-m, 0, lz0)) # south band
-	_add_nav_quad(ground_verts, Vector3(lx1, 0, lz0), Vector3(m, 0, lz0), Vector3(m, 0, lz1), Vector3(lx1, 0, lz1)) # east band
-	_add_nav_quad(ground_verts, Vector3(-m, 0, lz0), Vector3(lx0, 0, lz0), Vector3(lx0, 0, lz1), Vector3(-m, 0, lz1)) # west band
-
-	var ground_nav_mesh = NavigationMesh.new()
-	var ground_source = NavigationMeshSourceGeometryData3D.new()
-	ground_source.add_faces(ground_verts, Transform3D.IDENTITY)
-	NavigationServer3D.bake_from_source_geometry_data(ground_nav_mesh, ground_source)
-	_ground_nav_region = NavigationServer3D.region_create()
-	NavigationServer3D.region_set_map(_ground_nav_region, ground_nav_map)
-	NavigationServer3D.region_set_navigation_mesh(_ground_nav_region, ground_nav_mesh)
-
-	var water_verts = PackedVector3Array()
-	_add_nav_quad(water_verts, Vector3(lx0, 0, lz0), Vector3(lx1, 0, lz0), Vector3(lx1, 0, lz1), Vector3(lx0, 0, lz1))
-	var water_nav_mesh = NavigationMesh.new()
-	var water_source = NavigationMeshSourceGeometryData3D.new()
-	water_source.add_faces(water_verts, Transform3D.IDENTITY)
-	NavigationServer3D.bake_from_source_geometry_data(water_nav_mesh, water_source)
-	_water_nav_region = NavigationServer3D.region_create()
-	NavigationServer3D.region_set_map(_water_nav_region, water_nav_map)
-	NavigationServer3D.region_set_navigation_mesh(_water_nav_region, water_nav_mesh)
-
-	_spawn_lake_visual(lx0, lx1, lz0, lz1)
+	TerrainBuilder.spawn_visuals(current_map, self)
 
 # Raw NavigationServer3D RIDs (map_create()/region_create()) aren't owned by
 # the scene tree the way child nodes are - they leak unless explicitly
@@ -367,48 +387,33 @@ func _exit_tree():
 	if water_nav_map.is_valid():
 		NavigationServer3D.free_rid(water_nav_map)
 
-func _add_nav_quad(verts: PackedVector3Array, a: Vector3, b: Vector3, c: Vector3, d: Vector3):
-	verts.append(a); verts.append(b); verts.append(c)
-	verts.append(a); verts.append(c); verts.append(d)
-
-func _spawn_lake_visual(lx0: float, lx1: float, lz0: float, lz1: float):
-	var water = MeshInstance3D.new()
-	var plane = PlaneMesh.new()
-	plane.size = Vector2(lx1 - lx0, lz1 - lz0)
-	water.mesh = plane
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.15, 0.35, 0.55, 0.85)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.emission_enabled = true
-	mat.emission = Color(0.1, 0.25, 0.4)
-	water.material_override = mat
-	add_child(water)
-	water.global_position = Vector3(LAKE_CENTER.x, 0.05, LAKE_CENTER.z)
+# Duck-typed lookup, same pattern as get_ground_nav_map()/get_water_nav_map()
+# - battle_unit.gd/building.gd call this every tick (units) or once at
+# spawn (buildings) to snap their Y onto elevated terrain. The single
+# source of truth for elevation Y lives in terrain_builder.gd; this is
+# just the map-aware wrapper around it.
+func terrain_height_at(pos: Vector3) -> float:
+	return TerrainBuilder.terrain_height_at(current_map, pos)
 
 func _spawn_resource_nodes():
-	var spots = [
-		[Vector3(-22, 0, 18), "metal", 1200], [Vector3(-28, 0, 12), "metal", 1000],
-		[Vector3(22, 0, -18), "metal", 1200], [Vector3(28, 0, -12), "metal", 1000],
-		[Vector3(0, 0, 0), "crystal", 800],
-		[Vector3(-30, 0, -25), "crystal", 700], [Vector3(30, 0, 25), "crystal", 700],
-		[Vector3(-5, 0, -8), "metal", 900], [Vector3(5, 0, 8), "metal", 900],
-	]
-	for s in spots:
+	for s in current_map.get("resource_nodes", []):
 		var node = StaticBody3D.new()
 		node.set_script(ResourceNodeScript)
 		add_child(node)
-		node.global_position = s[0]
-		node.setup(s[1], s[2])
+		node.global_position = s.position
+		node.setup(s.type, s.amount)
 
 func _spawn_bases():
-	# Player base (south), enemy base (north)
-	player_hq = _spawn_prefab("hq", PLAYER_TEAM, Vector3(0, 0, 34), player_faction)
-	_spawn_prefab("factory", PLAYER_TEAM, Vector3(-10, 0, 30), player_faction)
-	_spawn_prefab("refinery", PLAYER_TEAM, Vector3(9, 0, 28), player_faction)
+	var p_start = current_map.player_start
+	var e_start = current_map.enemy_start
 
-	enemy_hq = _spawn_prefab("hq", ENEMY_TEAM, Vector3(0, 0, -34), enemy_faction)
-	_spawn_prefab("factory", ENEMY_TEAM, Vector3(10, 0, -30), enemy_faction)
-	_spawn_prefab("refinery", ENEMY_TEAM, Vector3(-9, 0, -28), enemy_faction)
+	player_hq = _spawn_prefab("hq", PLAYER_TEAM, p_start.hq, player_faction)
+	_spawn_prefab("factory", PLAYER_TEAM, p_start.factory, player_faction)
+	_spawn_prefab("refinery", PLAYER_TEAM, p_start.refinery, player_faction)
+
+	enemy_hq = _spawn_prefab("hq", ENEMY_TEAM, e_start.hq, enemy_faction)
+	_spawn_prefab("factory", ENEMY_TEAM, e_start.factory, enemy_faction)
+	_spawn_prefab("refinery", ENEMY_TEAM, e_start.refinery, enemy_faction)
 
 	player_hq.died.connect(_on_hq_died)
 	enemy_hq.died.connect(_on_hq_died)
@@ -416,10 +421,10 @@ func _spawn_bases():
 	# Starting harvesters
 	var harv_bp = _find_harvester_blueprint(roster)
 	if not harv_bp.is_empty():
-		spawn_unit(harv_bp, PLAYER_TEAM, Vector3(6, 0.5, 24))
+		spawn_unit(harv_bp, PLAYER_TEAM, p_start.harvester)
 	var e_harv = _find_harvester_blueprint(enemy_roster)
 	if not e_harv.is_empty():
-		spawn_unit(e_harv, ENEMY_TEAM, Vector3(-6, 0.5, -24))
+		spawn_unit(e_harv, ENEMY_TEAM, e_start.harvester)
 
 func _find_harvester_blueprint(from_roster: Array) -> Dictionary:
 	for entry in from_roster:
@@ -432,7 +437,7 @@ func _spawn_prefab(kind: String, team: int, pos: Vector3, faction: String) -> St
 	var b = StaticBody3D.new()
 	b.set_script(BuildingScript)
 	add_child(b)
-	b.global_position = pos
+	b.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
 	b.setup_prefab(kind, team, faction)
 	b.bp_manager = bp_manager
 	return b
@@ -441,7 +446,7 @@ func spawn_unit(blueprint_data: Dictionary, team: int, pos: Vector3) -> Node:
 	var unit = CharacterBody3D.new()
 	unit.set_script(BattleUnitScript)
 	add_child(unit)
-	unit.global_position = pos
+	unit.global_position = Vector3(pos.x, terrain_height_at(pos) + pos.y, pos.z)
 	unit.setup(blueprint_data, team, bp_manager)
 	unit.resources_delivered.connect(_on_resources_delivered)
 	return unit
@@ -450,7 +455,7 @@ func spawn_defense(blueprint_data: Dictionary, team: int, pos: Vector3) -> Stati
 	var b = StaticBody3D.new()
 	b.set_script(BuildingScript)
 	add_child(b)
-	b.global_position = pos
+	b.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
 	b.setup_defense(blueprint_data, team, bp_manager)
 	return b
 
@@ -646,13 +651,25 @@ func _cancel_placement():
 
 func _try_place_building(pos: Vector3):
 	if placing.is_empty(): return
-	# Must be near your base (within 28m of any friendly building)
+	# Terrain check first (water/obstacles/ramp slopes are never buildable,
+	# regardless of proximity to a friendly building) - a real check added
+	# alongside multi-map terrain; previously nothing stopped a building
+	# from being placed inside the lake since there was no terrain data to
+	# check against at all.
+	if TerrainBuilder.is_position_blocked(current_map, pos):
+		_flash_status("Can't build on water or terrain obstacles!")
+		return
+	# Must be near your base (within 28m of any friendly building) and
+	# clear of the enemy's (their base being reachable at all doesn't mean
+	# it's "yours" to build next to).
 	var near_base = false
 	for b in get_tree().get_nodes_in_group("buildings"):
-		if is_instance_valid(b) and not b.is_dead and b.team == PLAYER_TEAM:
-			if b.global_position.distance_to(pos) < 28.0:
-				near_base = true
-				break
+		if not is_instance_valid(b) or b.is_dead: continue
+		if b.team == PLAYER_TEAM and b.global_position.distance_to(pos) < 28.0:
+			near_base = true
+		elif b.team != PLAYER_TEAM and b.global_position.distance_to(pos) < 20.0:
+			_flash_status("Too close to enemy territory!")
+			return
 	if not near_base:
 		_flash_status("Too far from your base!")
 		return
@@ -681,7 +698,8 @@ func _unhandled_input(event):
 		if not placing.is_empty() and is_instance_valid(placement_ghost):
 			var hit = _raycast_ground(event.position)
 			if hit != null:
-				placement_ghost.global_position = hit + Vector3(0, placement_ghost.mesh.size.y / 2.0, 0)
+				var ground_y = terrain_height_at(hit)
+				placement_ghost.global_position = Vector3(hit.x, ground_y + placement_ghost.mesh.size.y / 2.0, hit.z)
 		if is_drag_selecting:
 			_update_selection_rect(event.position)
 		return

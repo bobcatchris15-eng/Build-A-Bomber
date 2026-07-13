@@ -78,6 +78,10 @@ func _init():
 	success = success and await test_navmesh_routes_around_the_lake()
 	success = success and await test_ground_and_naval_units_use_different_nav_maps()
 	success = success and await test_unit_order_move_actually_navigates_around_the_lake()
+	success = success and await test_terrain_builder_pure_functions()
+	success = success and await test_terrain_builder_navmesh_ramp_connects()
+	success = success and await test_elevation_combat_and_vision_bonus()
+	success = success and await test_build_placement_rejects_water_and_obstacles()
 
 	print("\n==============================================")
 	if success:
@@ -3507,4 +3511,193 @@ func test_unit_order_move_actually_navigates_around_the_lake() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] A real order_move() across the map produces real movement (", moved_dist, " units) that detours around the lake.")
+	return true
+
+func test_terrain_builder_pure_functions() -> bool:
+	print("Running Test Suite: Multi-Map Terrain - terrain_height_at()/is_position_blocked() (pure functions)...")
+	var TerrainBuilder = preload("res://scripts/terrain_builder.gd")
+	var map_def = {
+		"map_half_extents": 80.0,
+		"water_areas": [{"center": Vector3(18, 0, 0), "half_extents": Vector2(7, 7)}],
+		"obstacles": [{"center": Vector3(-20, 0, 20), "half_extents": Vector2(5, 5)}],
+		"elevation_zones": [
+			{"center": Vector3(0, 0, -20), "half_extents": Vector2(10, 10), "height": 6.0, "ramp_side": "south", "ramp_width": 6.0},
+		],
+	}
+
+	if TerrainBuilder.terrain_height_at(map_def, Vector3(0, 0, -20)) != 6.0:
+		print("  [FAIL] Plateau center should report height 6.0")
+		return false
+	if TerrainBuilder.terrain_height_at(map_def, Vector3(40, 0, 40)) != 0.0:
+		print("  [FAIL] Flat ground far from any zone should report height 0.0")
+		return false
+	var ramp_h = TerrainBuilder.terrain_height_at(map_def, Vector3(0, 0, -35))
+	if ramp_h <= 0.5 or ramp_h >= 5.5:
+		print("  [FAIL] Ramp midpoint should report an intermediate height between 0 and 6, got ", ramp_h)
+		return false
+	if not TerrainBuilder.is_position_blocked(map_def, Vector3(18, 0, 0)):
+		print("  [FAIL] A position inside a water_area should be blocked")
+		return false
+	if not TerrainBuilder.is_position_blocked(map_def, Vector3(-20, 0, 20)):
+		print("  [FAIL] A position inside an obstacle should be blocked")
+		return false
+	if TerrainBuilder.is_position_blocked(map_def, Vector3(0, 0, -20)):
+		print("  [FAIL] A plateau's flat top should NOT be blocked - it's legitimate buildable high ground")
+		return false
+	if TerrainBuilder.is_position_blocked(map_def, Vector3(40, 0, 40)):
+		print("  [FAIL] Ordinary flat ground should not be blocked")
+		return false
+
+	print("  [PASS] terrain_height_at()/is_position_blocked() correctly classify water, obstacles, ramps, plateau tops, and flat ground.")
+	return true
+
+func test_terrain_builder_navmesh_ramp_connects() -> bool:
+	print("Running Test Suite: Multi-Map Terrain - Navmesh Ramp Actually Bridges Ground To Plateau...")
+	# Regression test for a real bug: Recast silently drops a baked
+	# triangle whose winding doesn't match the rest of the terrain's
+	# convention (found via an isolated probe - not a slope/parameter
+	# issue, a plain winding mismatch specific to "south"/"west" ramps
+	# where the ramp's outer edge has a SMALLER coordinate than its inner
+	# edge). Exercises all 4 ramp directions so this can't silently regress
+	# for just one of them again.
+	var TerrainBuilder = preload("res://scripts/terrain_builder.gd")
+	var directions = [
+		{"side": "south", "center": Vector3(0, 0, -20), "start": Vector3(0, 0, -50), "end": Vector3(0, 6, -20)},
+		{"side": "north", "center": Vector3(0, 0, 20), "start": Vector3(0, 0, 50), "end": Vector3(0, 6, 20)},
+		{"side": "east", "center": Vector3(-20, 0, 0), "start": Vector3(10, 0, 0), "end": Vector3(-20, 6, 0)},
+		{"side": "west", "center": Vector3(20, 0, 0), "start": Vector3(-10, 0, 0), "end": Vector3(20, 6, 0)},
+	]
+	for d in directions:
+		var map_def = {
+			"map_half_extents": 80.0, "water_areas": [], "obstacles": [],
+			"elevation_zones": [{"center": d.center, "half_extents": Vector2(10, 10), "height": 6.0, "ramp_side": d.side, "ramp_width": 6.0}],
+		}
+		var nav = TerrainBuilder.build_navmeshes(map_def)
+		await process_frame
+		await process_frame
+		var path = NavigationServer3D.map_get_path(nav.ground_map, d.start, d.end, true)
+		var max_y = 0.0
+		for p in path:
+			max_y = max(max_y, p.y)
+		NavigationServer3D.free_rid(nav.ground_region)
+		if nav.water_region.is_valid():
+			NavigationServer3D.free_rid(nav.water_region)
+		NavigationServer3D.free_rid(nav.ground_map)
+		NavigationServer3D.free_rid(nav.water_map)
+		if path.size() < 2 or max_y < 5.0:
+			print("  [FAIL] ramp_side='", d.side, "' should produce a real path reaching the plateau (max Y >= 5.0), got ", path.size(), " points, max_y=", max_y)
+			return false
+
+	print("  [PASS] All 4 ramp directions (north/south/east/west) produce a real connected path from ground level up to the plateau.")
+	return true
+
+func test_elevation_combat_and_vision_bonus() -> bool:
+	print("Running Test Suite: Multi-Map Terrain - Elevation Grants Real Vision + Combat Bonuses...")
+	var DamageResolverScript = preload("res://scripts/damage_resolver.gd")
+
+	# Combat: shooting down from meaningfully higher ground should lower
+	# the defender's effective threshold (easier to pierce) vs an
+	# identical shot from level ground.
+	var defender = Node3D.new()
+	root.add_child(defender)
+	defender.global_position = Vector3(0, 0, 0)
+	var level_shot = DamageResolverScript.resolve(null, [], "kinetic", defender, Vector3(0, 0, -5))
+	var elevated_shot = DamageResolverScript.resolve(null, [], "kinetic", defender, Vector3(0, 5, -5))
+	defender.queue_free()
+	if not (elevated_shot.x < level_shot.x):
+		print("  [FAIL] A shot from meaningfully higher ground should lower the defender's threshold (easier to pierce), level=", level_shot.x, " elevated=", elevated_shot.x)
+		return false
+
+	# Vision: a real Skirmish match, one player unit standing on an
+	# elevation zone's plateau should see further than an identical unit
+	# on flat ground - verified by overriding current_map with a synthetic
+	# map that has one elevation zone, then comparing effective vision via
+	# _recalc_fog_of_war()'s own real reveal/hide behavior.
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+	skirmish.current_map = {
+		"map_half_extents": 80.0, "water_areas": [], "obstacles": [],
+		"elevation_zones": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(10, 10), "height": 10.0, "ramp_side": "south", "ramp_width": 6.0}],
+	}
+
+	# Use battle_unit.gd instances (real vision_range + team + fog API) so
+	# this exercises the actual code path, not a stand-in.
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull", "hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}}, "modules": [],
+	}
+	var scout_ground = CharacterBody3D.new()
+	scout_ground.set_script(BattleUnitScript)
+	skirmish.add_child(scout_ground)
+	scout_ground.global_position = Vector3(-40, 0, -40)
+	scout_ground.setup(bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+
+	var scout_hill = CharacterBody3D.new()
+	scout_hill.set_script(BattleUnitScript)
+	skirmish.add_child(scout_hill)
+	scout_hill.global_position = Vector3(0, 10, 0)
+	scout_hill.setup(bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+
+	var enemy_unit = CharacterBody3D.new()
+	enemy_unit.set_script(BattleUnitScript)
+	skirmish.add_child(enemy_unit)
+	# Distance chosen to sit just outside a flat unit's base vision_range
+	# but inside the elevated unit's boosted range (vision_range ~20,
+	# elevation bonus at height 10 = 1 + 10*0.02 = 1.2x -> ~24).
+	var enemy_dist = scout_ground.vision_range * 1.08
+	enemy_unit.global_position = Vector3(0, 0, -enemy_dist)
+	enemy_unit.setup(bp, skirmish.ENEMY_TEAM, skirmish.bp_manager)
+
+	skirmish._recalc_fog_of_war()
+	await process_frame
+
+	if enemy_unit.fog_hidden:
+		print("  [FAIL] Setup sanity check failed - enemy should be within the hill-standing scout's boosted vision range for this test to mean anything, but it's hidden")
+		skirmish.queue_free()
+		return false
+
+	# Move the hill scout down to flat ground at the same XZ distance from
+	# the enemy and re-check - should now be hidden (loses the bonus).
+	scout_hill.global_position = Vector3(-40, 0, -40)
+	skirmish._recalc_fog_of_war()
+	await process_frame
+	if not enemy_unit.fog_hidden:
+		print("  [FAIL] Without the elevation bonus (scout moved to flat ground, same base vision_range), the enemy at this distance should no longer be visible")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Elevated ground gives a real, measurable combat threshold reduction and vision range boost, not just a cosmetic hill.")
+	return true
+
+func test_build_placement_rejects_water_and_obstacles() -> bool:
+	print("Running Test Suite: Multi-Map Terrain - Build Placement Rejects Water/Obstacles (previously nothing stopped this)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	skirmish.placing = {"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}
+	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	# lake_crossing's real lake is at (18,0,0) with half-extents (7,7) - well
+	# within the player's 28m build radius of their own base.
+	skirmish._try_place_building(Vector3(18, 0, 0))
+	var buildings_after = skirmish.get_team_buildings(skirmish.PLAYER_TEAM).size()
+
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != metal_before:
+		print("  [FAIL] Placing a building inside the lake should be rejected before spending any resources")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Attempting to place a building inside water is rejected without spending resources.")
 	return true

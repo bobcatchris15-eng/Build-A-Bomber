@@ -4,6 +4,32 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 13) — Multi-map architecture built (terrain data + navmesh integration + elevation vision/combat bonus)
+
+New batch from Chris: build out a variety of distinct Skirmish maps, with real elevation/water/obstacle variation that actually affects vision, combat, and pathing - not palette swaps. Since there was only ever one hardcoded map, this pass built the underlying architecture first; the actual map content is being built one at a time on top of it (see forthcoming per-map entries).
+
+### The architecture
+
+`map_catalog.gd` - a plain Dictionary catalog of maps (same convention as `module_catalog.gd`), each entry describing water areas, obstacles, elevation zones, resource nodes, and player/enemy start points. `terrain_builder.gd` - the shared code that turns a map Dictionary into: baked `NavigationServer3D` ground/water maps (a generalized multi-hole grid, replacing the old single-lake-specific 4-band technique), decorative terrain meshes, and two pure query functions - `terrain_height_at()` and `is_position_blocked()` - that are now the single source of truth for elevation Y and buildability. `skirmish.gd` was refactored to read from a `current_map` dictionary (defaulting to the original map, `lake_crossing`, kept byte-identical for backward compatibility) instead of hardcoded constants.
+
+### Elevation
+
+Discrete raised rectangular plateaus with one ramp each, not a full heightmap - real navmesh consequence (a unit must actually route through the ramp to reach the top; the other three sides are a hard cliff, no bridging geometry). Y-positioning is analytic (`terrain_height_at()`, lerped each tick for moving ground units) rather than physical collision, specifically to avoid rotated-`CollisionShape3D` ramp math and `CharacterBody3D` stair-stepping risk. Holding a plateau now gives a real vision bonus (fog-of-war) and a real combat bonus (`damage_resolver.gd` lowers the defender's effective armor threshold when shot from meaningfully higher ground) - both driven directly off real Y coordinates, no map-awareness needed in either system.
+
+### A real bug, found and fixed
+
+Verifying the ramp actually let a unit reach the plateau (not just "bakes without error") surfaced a genuine bug: Recast was silently dropping the ramp's baked triangles because of a winding-direction mismatch specific to "south"/"west" ramps, where the ramp's outer edge has a smaller coordinate than its inner edge. Traced via several wrong hypotheses (slope angle, climb height, region-size filtering) before isolating it to plain triangle winding with a minimal single-quad repro. Fixed and now covered by a test that exercises all 4 ramp directions.
+
+### Map selection
+
+A `MatchConfig` autoload carries the player's map choice from a new `MapSelect.tscn` screen (MainMenu's "Skirmish" button now routes there first) into `Skirmish.tscn` - read defensively, so every existing headless test that instantiates `Skirmish.tscn` directly keeps using the default map unchanged.
+
+**Verified:** 60/60 tests green (4 new: pure terrain-query correctness, all-4-directions ramp connectivity, elevation vision+combat bonus, and water/obstacle build-placement rejection). Windowed-screenshot verified the map-select screen renders correctly.
+
+**Next:** building the actual map content (3 new maps beyond `lake_crossing`) one at a time on this architecture, each with its own screenshot + smoke-test verification pass before moving to the next.
+
+---
+
 ## 2026-07-12 (cont'd 12) — Hull library expansion: naval, blended-wing-body, and sponson hulls
 
 Chris's ask was explicit: not just deform handles on the existing 7 hulls, but genuinely new base geometry - "some ship-like hulls..., a blended-wing-body type hull, and hulls with more interesting base geometry... like built-in sponson stubs already part of the hull silhouette." Built one at a time, each fully authored/imported/screenshot-verified before starting the next, per Chris's explicit caution.

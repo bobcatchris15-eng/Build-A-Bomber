@@ -379,7 +379,22 @@ func _physics_process(delta):
 		velocity.y = 0.0
 		global_position.y = lerp(global_position.y, 0.3, 3.0 * delta)
 	else:
-		if not is_on_floor():
+		var terrain_controller = get_parent()
+		if terrain_controller and terrain_controller.has_method("terrain_height_at"):
+			# Real multi-map terrain: elevation Y is analytic
+			# (terrain_builder.gd's terrain_height_at()), not physics-
+			# collided - ramps/plateaus have no real CollisionShape3D (see
+			# that file's header for why), so gravity/is_on_floor() would
+			# just free-fall a unit standing on one. Smoothly lerps toward
+			# the correct height instead, decoupled from gravity entirely
+			# so the two systems can't fight over ground that has no real
+			# collision floor. Duck-typed same as get_ground_nav_map() -
+			# every synthetic test without a real match controller falls
+			# through to the old gravity-only behavior below, unchanged.
+			velocity.y = 0.0
+			var target_y = terrain_controller.terrain_height_at(global_position)
+			global_position.y = lerp(global_position.y, target_y, 8.0 * delta)
+		elif not is_on_floor():
 			velocity.y -= 9.8 * delta
 		else:
 			velocity.y = -1.0
