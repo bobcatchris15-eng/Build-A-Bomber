@@ -10,6 +10,7 @@ signal resources_delivered(team, metal, crystal)
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 var team: int = 0
 var max_hp: float = 400.0
@@ -156,7 +157,8 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	if mat == "reactive_armor": mat_mult = 1.3
 	elif mat == "ablative_ceramic": mat_mult = 1.6
 	elif mat == "energy_shielding": mat_mult = 2.0
-	max_hp = catalog_data.hp * thick * mat_mult
+	var faction_for_hp = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
+	max_hp = catalog_data.hp * thick * mat_mult * FactionCatalog.get_passive(faction_for_hp, "hp_mult", 1.0)
 	hp = max_hp
 
 	# Collision shape matching the hull
@@ -227,8 +229,7 @@ func _recalculate_vision(hull_type_for_vision: String = ""):
 					bonus += data.get_vision_bonus()
 	vision_range = base + bonus
 	var faction = hull_node.get_meta("faction", "industrialists") if is_instance_valid(hull_node) else "industrialists"
-	if faction == "technocrats":
-		vision_range *= 1.15
+	vision_range *= FactionCatalog.get_passive(faction, "vision_mult", 1.0)
 
 # Logistics sharing aura (ENERGY_AND_BALANCE_SPEC.md #5): "not just
 # self-sufficiency" per Chris's instruction - logistics_tank does nothing
@@ -380,10 +381,11 @@ func _recalculate_move_speed():
 		var overload_ratio = total_weight / total_weight_capacity
 		var overload_multiplier = clamp(1.0 - (overload_ratio - 1.0) * 0.6, 0.25, 1.0)
 		move_speed *= overload_multiplier
-	# Faction passive: Technocrats +5% speed
+	# Faction passive - table-driven (FactionCatalog.get_passive), covers
+	# every faction's own speed_mult (only technocrats/berserkers set one;
+	# everyone else falls through to the 1.0 default, unchanged).
 	var faction = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
-	if faction == "technocrats":
-		move_speed *= 1.05
+	move_speed *= FactionCatalog.get_passive(faction, "speed_mult", 1.0)
 
 # Terrain variety task: surface terrain (marsh/rocky/snow_mud/sand) slows or
 # favors specific locomotion types - this looks up the CURRENT tile every
@@ -805,7 +807,9 @@ func _process_harvest(delta):
 		if harvest_timer >= HARVEST_TIME:
 			harvest_timer = 0.0
 			var want = cargo_capacity - (cargo_metal + cargo_crystal)
-			var got = harvest_node.harvest(min(25, want))
+			var faction_for_harvest = hull_node.get_meta("faction") if is_instance_valid(hull_node) and hull_node.has_meta("faction") else "industrialists"
+			var harvest_chunk = int(25 * FactionCatalog.get_passive(faction_for_harvest, "harvest_rate_mult", 1.0))
+			var got = harvest_node.harvest(min(harvest_chunk, want))
 			if harvest_node.resource_type == "crystal":
 				cargo_crystal += got
 			else:
@@ -1040,8 +1044,20 @@ func _flash_shield():
 func _flash_hull():
 	if not is_instance_valid(hull_node): return
 	var mesh_inst = hull_node.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if mesh_inst and mesh_inst.material_override:
-		var mat_over = mesh_inst.material_override as StandardMaterial3D
+	if not mesh_inst or not mesh_inst.material_override: return
+	var mat_over = mesh_inst.material_override
+	# Hull materials are now the shared faction ShaderMaterial (see
+	# hull_material_builder.gd) - flash via its flash_amount uniform instead
+	# of mutating albedo_color, which only ever existed on the old
+	# StandardMaterial3D. Falls back to the old approach for any material
+	# that isn't the shader (e.g. a future non-hull caller).
+	if mat_over is ShaderMaterial:
+		mat_over.set_shader_parameter("flash_amount", 1.0)
+		get_tree().create_timer(0.12).timeout.connect(func():
+			if is_instance_valid(mat_over):
+				mat_over.set_shader_parameter("flash_amount", 0.0)
+		)
+	elif mat_over is StandardMaterial3D:
 		var prev_color = mat_over.albedo_color
 		mat_over.albedo_color = Color.RED
 		get_tree().create_timer(0.12).timeout.connect(func():

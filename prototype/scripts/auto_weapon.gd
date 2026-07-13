@@ -2,6 +2,7 @@ extends Node3D
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const GlobalConfig = preload("res://scripts/global_config.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 var target: Node3D = null
 var fire_range: float = 12.0
@@ -115,7 +116,8 @@ func _ready():
 	if has_meta("module_data"):
 		var data = get_meta("module_data")
 		type_id = data.type_id
-		dps = data.get_dps()
+		var mount_faction = get_parent().get_meta("faction", "industrialists") if get_parent() and get_parent().has_meta("faction") else "industrialists"
+		dps = data.get_dps() * FactionCatalog.get_passive(mount_faction, "dps_mult", 1.0)
 		heal_rate = data.get_heal_rate()
 		
 		# Calculate traverse speed based on weight, then apply this weapon
@@ -340,6 +342,8 @@ func _ready():
 				energy_drain_per_shot = per_shot_damage * 1.5
 			else:
 				energy_drain_per_shot = per_shot_damage * 0.5
+
+		fire_range *= FactionCatalog.get_passive(mount_faction, "range_mult", 1.0)
 
 	# Desynchronize initial reload timers
 	time_since_last_shot = randf_range(0.0, fire_rate)

@@ -138,17 +138,28 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	var final_damage = amount * reduction
 	hp = max(0.0, hp - final_damage)
 	
-	# Red camera flash or flash color on vehicle
+	# Red camera flash or flash color on vehicle - hull materials are now
+	# the shared faction ShaderMaterial (hull_material_builder.gd), so this
+	# flashes via its flash_amount uniform instead of albedo_color (which
+	# never existed on a ShaderMaterial), same fix as battle_unit.gd's
+	# _flash_hull().
 	if hull:
 		var mesh_inst = hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
 		if mesh_inst and mesh_inst.material_override:
-			var mat_over = mesh_inst.material_override as StandardMaterial3D
-			var prev_color = mat_over.albedo_color
-			mat_over.albedo_color = Color.RED
-			get_tree().create_timer(0.12).timeout.connect(func():
-				if is_instance_valid(mat_over):
-					mat_over.albedo_color = prev_color
-			)
+			var mat_over = mesh_inst.material_override
+			if mat_over is ShaderMaterial:
+				mat_over.set_shader_parameter("flash_amount", 1.0)
+				get_tree().create_timer(0.12).timeout.connect(func():
+					if is_instance_valid(mat_over):
+						mat_over.set_shader_parameter("flash_amount", 0.0)
+				)
+			elif mat_over is StandardMaterial3D:
+				var prev_color = mat_over.albedo_color
+				mat_over.albedo_color = Color.RED
+				get_tree().create_timer(0.12).timeout.connect(func():
+					if is_instance_valid(mat_over):
+						mat_over.albedo_color = prev_color
+				)
 			
 	# Update battlefield UI
 	var battlefield = get_parent()

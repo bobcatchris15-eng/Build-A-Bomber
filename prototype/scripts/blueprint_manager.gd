@@ -2,6 +2,7 @@ extends Node
 
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
+const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 
 func _vec3_to_dict(v: Vector3) -> Dictionary:
 	return {"x": v.x, "y": v.y, "z": v.z}
@@ -281,28 +282,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		box.size = catalog_data.size * hull_scale * armor_bulk
 		mesh_inst.mesh = box
 
-	var mat = StandardMaterial3D.new()
-	if armor_mat_name == "hardened_steel":
-		mat.albedo_color = Color.GRAY
-		mat.roughness = 0.2
-		mat.metallic = 0.8
-	elif armor_mat_name == "reactive_armor":
-		mat.albedo_color = Color(0.18, 0.24, 0.18)
-		mat.roughness = 0.7
-		mat.metallic = 0.1
-	elif armor_mat_name == "ablative_ceramic":
-		mat.albedo_color = Color(0.85, 0.8, 0.7)
-		mat.roughness = 0.5
-		mat.metallic = 0.0
-	elif armor_mat_name == "energy_shielding":
-		mat.albedo_color = Color(0.3, 0.6, 1.0, 0.7)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.roughness = 0.1
-		mat.emission_enabled = true
-		mat.emission = Color(0.3, 0.6, 1.0)
-		mat.emission_energy_multiplier = 0.5
-		
-	mesh_inst.material_override = mat
+	mesh_inst.material_override = HullMaterialBuilderScript.build_hull_material(armor_mat_name, faction_name)
 	hull.add_child(mesh_inst)
 	
 	# Re-create Hull's CollisionShape3D (only in designer)

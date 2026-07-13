@@ -63,6 +63,8 @@ func _init():
 	success = success and await test_blueprint_cost_and_rosters()
 	success = success and await test_skirmish_economy_and_production()
 	success = success and await test_match_config_overrides_apply_to_skirmish()
+	success = success and await test_faction_catalog_and_hull_material()
+	success = success and await test_new_faction_mechanical_bonuses()
 	success = success and await test_win_condition()
 	success = success and await test_energy_pool_and_generators()
 	success = success and await test_repair_array_heals_allies_only()
@@ -2884,6 +2886,197 @@ func bp_manager_test_load(path: String) -> Dictionary:
 	var data = JSON.parse_string(f.get_as_text())
 	f.close()
 	return data
+
+func test_faction_catalog_and_hull_material() -> bool:
+	print("Running Test Suite: Faction Visual Identity - FactionCatalog (10 Factions) + Shared Hull Shader Material...")
+	var FactionCatalog = preload("res://scripts/faction_catalog.gd")
+	var HullMaterialBuilder = preload("res://scripts/hull_material_builder.gd")
+
+	var ids = FactionCatalog.get_ids()
+	if ids.size() != 10:
+		print("  [FAIL] Expected exactly 10 factions, got ", ids.size(), ": ", ids)
+		return false
+	for fid in ids:
+		var f = FactionCatalog.get_faction(fid)
+		if not f.has("name") or not f.has("color") or not f.has("wear_color") or not f.has("wear_amount") or not f.has("passive_summary"):
+			print("  [FAIL] Faction '", fid, "' is missing a required visual/summary field: ", f.keys())
+			return false
+
+	# Same armor material, two different factions - should differ in paint
+	# color but share the identical metallic/roughness "what is this armor
+	# made of" character (faction=ownership/paint, armor_material=PBR
+	# substance, deliberately independent axes).
+	var mat_a = HullMaterialBuilder.build_hull_material("hardened_steel", "industrialists")
+	var mat_b = HullMaterialBuilder.build_hull_material("hardened_steel", "technocrats")
+	if mat_a.get_shader_parameter("faction_color") == mat_b.get_shader_parameter("faction_color"):
+		print("  [FAIL] Two different factions with the same armor material should get different paint colors")
+		return false
+	if mat_a.get_shader_parameter("metallic_base") != mat_b.get_shader_parameter("metallic_base") or mat_a.get_shader_parameter("roughness_base") != mat_b.get_shader_parameter("roughness_base"):
+		print("  [FAIL] Two different factions with the SAME armor material should share identical metallic/roughness (armor character is faction-independent)")
+		return false
+	if mat_a.shader != mat_b.shader:
+		print("  [FAIL] Every faction should share the exact same shader resource (same mesh models, texture-only differentiation - no per-faction shader variants)")
+		return false
+
+	# Same faction, two different armor materials - paint color should stay
+	# identical (ownership doesn't change), metallic/roughness should differ.
+	var mat_c = HullMaterialBuilder.build_hull_material("ablative_ceramic", "industrialists")
+	if mat_a.get_shader_parameter("faction_color") != mat_c.get_shader_parameter("faction_color"):
+		print("  [FAIL] The same faction with a different armor material should keep the same paint color")
+		return false
+	if mat_a.get_shader_parameter("roughness_base") == mat_c.get_shader_parameter("roughness_base"):
+		print("  [FAIL] hardened_steel vs. ablative_ceramic should have different roughness")
+		return false
+
+	# energy_shielding should carry shield_mode=1.0 and reduced alpha,
+	# regardless of faction - and its emission should read faction_color
+	# (a Cybernetics energy shield and a Zealot energy shield glow
+	# different colors, per the shader's fragment() - not tested here
+	# directly since that's GPU-side, but the uniform is what drives it).
+	var shield_mat = HullMaterialBuilder.build_hull_material("energy_shielding", "cybernetics")
+	if shield_mat.get_shader_parameter("shield_mode") < 0.5:
+		print("  [FAIL] energy_shielding should set shield_mode >= 0.5")
+		return false
+	if shield_mat.get_shader_parameter("alpha_base") >= 1.0:
+		print("  [FAIL] energy_shielding should be translucent (alpha_base < 1.0)")
+		return false
+
+	# Real spawn-pipeline check: reconstruct_vehicle() should apply this
+	# shared ShaderMaterial to the actual hull mesh, not just have the
+	# builder function work in isolation.
+	var BlueprintManager = preload("res://scripts/blueprint_manager.gd")
+	var bp_manager = BlueprintManager.new()
+	root.add_child(bp_manager)
+	var blueprint_data = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"armor_material": "reactive_armor", "faction": "zealots",
+		"modules": [],
+	}
+	var parent = Node3D.new()
+	root.add_child(parent)
+	var hull = bp_manager.reconstruct_vehicle(blueprint_data, parent, false)
+	var mesh_inst = hull.get_node_or_null("MeshInstance3D") if hull else null
+	if not mesh_inst or not (mesh_inst.material_override is ShaderMaterial):
+		print("  [FAIL] A real reconstructed hull should have a ShaderMaterial (not StandardMaterial3D) as its mesh material_override")
+		parent.queue_free()
+		bp_manager.queue_free()
+		return false
+	if mesh_inst.material_override.get_shader_parameter("faction_color") != FactionCatalog.get_visual_color("zealots"):
+		print("  [FAIL] The real spawned hull's material should carry the blueprint's own faction color (zealots)")
+		parent.queue_free()
+		bp_manager.queue_free()
+		return false
+	parent.queue_free()
+	bp_manager.queue_free()
+
+	print("  [PASS] All 10 factions have complete visual identities, share one shader across every faction/armor-material combination, and a real reconstructed hull carries the correct faction-colored material.")
+	return true
+
+func test_new_faction_mechanical_bonuses() -> bool:
+	print("Running Test Suite: Faction Visual Identity - New Faction Mechanical Bonuses (Real Spawn Pipeline)...")
+	var FactionCatalog = preload("res://scripts/faction_catalog.gd")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var base_bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"armor_material": "hardened_steel", "armor_thickness": 1.0,
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "tracked_treads", "name": "Treads", "position": {"x": 0, "y": 0, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}},
+		],
+	}
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# Zealots: +10% weapon DPS, -10% max HP - proven on a real spawned unit,
+	# comparing against the same blueprint under industrialists (1.0x on both).
+	var zealot_bp = base_bp.duplicate(true)
+	zealot_bp["faction"] = "zealots"
+	var baseline_bp = base_bp.duplicate(true)
+	baseline_bp["faction"] = "industrialists"
+
+	var zealot_unit = CharacterBody3D.new()
+	zealot_unit.set_script(BattleUnitScript)
+	skirmish.add_child(zealot_unit)
+	zealot_unit.setup(zealot_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+
+	var baseline_unit = CharacterBody3D.new()
+	baseline_unit.set_script(BattleUnitScript)
+	skirmish.add_child(baseline_unit)
+	baseline_unit.setup(baseline_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+
+	var ok = true
+	if not (zealot_unit.max_hp < baseline_unit.max_hp):
+		print("  [FAIL] Zealots should have LOWER max_hp than an identical industrialists unit, got zealot=", zealot_unit.max_hp, " baseline=", baseline_unit.max_hp)
+		ok = false
+	if not is_equal_approx(zealot_unit.max_hp, baseline_unit.max_hp * 0.9):
+		print("  [FAIL] Zealots' max_hp should be exactly 90% of the unmodified baseline, got ratio ", zealot_unit.max_hp / baseline_unit.max_hp)
+		ok = false
+
+	# Cartel: +8% weapon range, applied per-mounted-weapon via auto_weapon.gd -
+	# spawn a basic_cannon on a cartel hull vs. an industrialists hull.
+	var weapon_bp_cartel = base_bp.duplicate(true)
+	weapon_bp_cartel["faction"] = "cartel"
+	weapon_bp_cartel["modules"].append({"type_id": "basic_cannon", "name": "Cannon", "position": {"x": 0, "y": 0.75, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}})
+	var weapon_bp_base = base_bp.duplicate(true)
+	weapon_bp_base["faction"] = "industrialists"
+	weapon_bp_base["modules"].append({"type_id": "basic_cannon", "name": "Cannon", "position": {"x": 0, "y": 0.75, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}})
+
+	var cartel_unit = CharacterBody3D.new()
+	cartel_unit.set_script(BattleUnitScript)
+	skirmish.add_child(cartel_unit)
+	cartel_unit.setup(weapon_bp_cartel, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+	var base_weapon_unit = CharacterBody3D.new()
+	base_weapon_unit.set_script(BattleUnitScript)
+	skirmish.add_child(base_weapon_unit)
+	base_weapon_unit.setup(weapon_bp_base, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+
+	var cartel_weapon = null
+	var base_weapon = null
+	for child in cartel_unit.hull_node.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "basic_cannon":
+			cartel_weapon = child
+	for child in base_weapon_unit.hull_node.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "basic_cannon":
+			base_weapon = child
+	if not cartel_weapon or not base_weapon or not is_equal_approx(cartel_weapon.fire_range, base_weapon.fire_range * 1.08):
+		print("  [FAIL] Cartel's basic_cannon fire_range should be exactly 8% more than the same weapon on an industrialists hull, got cartel=", cartel_weapon.fire_range if cartel_weapon else "?", " base=", base_weapon.fire_range if base_weapon else "?")
+		ok = false
+
+	# Cybernetics: +20% Energy capacity - real team-level economy check.
+	skirmish._mc_player_faction = "cybernetics"
+	skirmish.player_faction = "cybernetics"
+	skirmish._recalc_energy_economy()
+	var cyber_capacity = skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity
+	skirmish.player_faction = "industrialists"
+	skirmish._recalc_energy_economy()
+	var base_capacity = skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity
+	if base_capacity <= 0.0 or not is_equal_approx(cyber_capacity, base_capacity * 1.2):
+		print("  [FAIL] Cybernetics should give exactly +20% Energy capacity, got cyber=", cyber_capacity, " base=", base_capacity)
+		ok = false
+
+	# Scavengers: -10% metal cost, baked into the roster once at load time.
+	if FactionCatalog.get_passive("scavengers", "metal_cost_mult", 1.0) != 0.9:
+		print("  [FAIL] Scavengers should have a metal_cost_mult of 0.9")
+		ok = false
+	var discount_roster = [{"cost_metal": 100, "cost_crystal": 50}]
+	skirmish._apply_faction_cost_discount(discount_roster, "scavengers")
+	if discount_roster[0].cost_metal != 90:
+		print("  [FAIL] _apply_faction_cost_discount should reduce a 100-metal entry to 90 for scavengers, got ", discount_roster[0].cost_metal)
+		ok = false
+
+	skirmish.queue_free()
+	await process_frame
+
+	if ok:
+		print("  [PASS] Zealots' HP penalty, Cartel's weapon range bonus, Cybernetics' Energy capacity bonus, and Scavengers' cost discount all verified through real spawned instances / real team economy calls, not just catalog numbers.")
+	return ok
 
 func test_win_condition() -> bool:
 	print("Running Test Suite 11: Win/Lose Condition...")

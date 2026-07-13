@@ -13,9 +13,13 @@ extends Control
 # defaults, it doesn't replace them.
 
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
-const FACTIONS = ["auto", "industrialists", "technocrats", "expansionists"]
-const FACTION_LABELS = ["Auto (from roster)", "Heavy Industrialists", "Technocrats", "Expansionists"]
+# Built in _ready() from FactionCatalog.get_ids() (all 10 factions), not a
+# hardcoded 3-item const - adding an 11th faction later needs zero changes
+# here.
+var FACTIONS: Array = []
+var FACTION_LABELS: Array = []
 const DIFFICULTIES = ["easy", "normal", "hard"]
 const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard"]
 # (metal, crystal); -1 means "use Skirmish's own default" (Standard reproduces
@@ -33,6 +37,12 @@ var bp_manager: Node
 func _ready():
 	bp_manager = BlueprintManagerScript.new()
 	add_child(bp_manager)
+
+	FACTIONS = ["auto"]
+	FACTION_LABELS = ["Auto (from roster)"]
+	for fac_id in FactionCatalog.get_ids():
+		FACTIONS.append(fac_id)
+		FACTION_LABELS.append("%s - %s" % [FactionCatalog.get_faction_name(fac_id), FactionCatalog.get_passive(fac_id, "passive_summary", "")])
 
 	var bg = ColorRect.new()
 	bg.color = Color(0.07, 0.09, 0.12)
@@ -64,7 +74,9 @@ func _ready():
 
 	player_faction_btn = _add_dropdown(grid, "Your Faction", FACTION_LABELS)
 	enemy_faction_btn = _add_dropdown(grid, "Enemy Faction", FACTION_LABELS)
-	enemy_faction_btn.selected = 2 # default: Technocrats, matches the old hardcoded enemy default
+	var default_enemy_idx = FACTIONS.find("technocrats") # matches the old hardcoded enemy default
+	if default_enemy_idx >= 0:
+		enemy_faction_btn.selected = default_enemy_idx
 	difficulty_btn = _add_dropdown(grid, "AI Difficulty", DIFFICULTY_LABELS)
 	difficulty_btn.selected = 1 # Normal
 	resources_btn = _add_dropdown(grid, "Starting Resources", RESOURCE_LABELS)

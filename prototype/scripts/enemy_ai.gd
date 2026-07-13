@@ -4,6 +4,8 @@ extends Node
 # - queues affordable units from its roster
 # - launches attack waves at the player HQ on a ramping timer
 
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+
 var skirmish: Node3D = null
 var team: int = 1
 
@@ -96,6 +98,7 @@ func _try_produce():
 		if skirmish.can_afford(team, entry.cost_metal, entry.cost_crystal):
 			skirmish.spend(team, entry.cost_metal, entry.cost_crystal)
 			var build_time = skirmish.build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal))
+			build_time *= FactionCatalog.get_passive(skirmish.enemy_faction, "build_time_mult", 1.0)
 			if skirmish.is_energy_deficit(team):
 				build_time *= 1.5
 			factory.queue_unit(entry.blueprint, build_time)
@@ -112,7 +115,7 @@ func _ensure_harvester():
 	var factory = skirmish.get_team_factory(team)
 	if factory and skirmish.can_afford(team, cost.x, cost.y):
 		skirmish.spend(team, cost.x, cost.y)
-		factory.queue_unit(harv_bp, skirmish.build_time_for_cost(cost))
+		factory.queue_unit(harv_bp, skirmish.build_time_for_cost(cost) * FactionCatalog.get_passive(skirmish.enemy_faction, "build_time_mult", 1.0))
 
 func _launch_wave():
 	wave_number += 1

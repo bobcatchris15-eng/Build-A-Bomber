@@ -2,6 +2,7 @@ extends Node3D
 
 const BlueprintManager = preload("res://scripts/blueprint_manager.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 @onready var vehicle_spawn_point = $VehicleSpawnPoint
 @onready var camera = $Camera3D
@@ -297,12 +298,9 @@ func update_player_hp_ui():
 		for i in range(bar_length - filled):
 			bar_str += "□"
 			
-		var faction_str = "Industrialists"
+		var faction_str = FactionCatalog.get_faction_name(FactionCatalog.DEFAULT_FACTION)
 		if is_instance_valid(vehicle_hull) and vehicle_hull.has_meta("faction"):
-			var fac = vehicle_hull.get_meta("faction")
-			if fac == "industrialists": faction_str = "Heavy Industrialists"
-			elif fac == "technocrats": faction_str = "Technocrats"
-			elif fac == "expansionists": faction_str = "Expansionists"
+			faction_str = FactionCatalog.get_faction_name(vehicle_hull.get_meta("faction"))
 			
 		hp_label.text = "Player HP: %d/%d [%s] (%s)" % [int(vehicle.hp), int(vehicle.max_hp), bar_str, faction_str]
 		hp_label.modulate = Color.GREEN.lerp(Color.RED, 1.0 - hp_pct)
@@ -346,9 +344,10 @@ func recalculate_move_speed():
 	if total_weight > 0.0:
 		move_speed = clamp((motor_thrust / total_weight) * 5.0, 2.0, 15.0)
 		
-	# Faction Passive Bonus: Technocrats get a 5% Speed Boost
+	# Faction Passive Bonus - table-driven, matches battle_unit.gd's own
+	# _recalculate_move_speed() (this Test Range scene keeps its own
+	# separate copy of the move-speed formula, not shared code).
 	var faction = vehicle_hull.get_meta("faction") if vehicle_hull.has_meta("faction") else "industrialists"
-	if faction == "technocrats":
-		move_speed *= 1.05
+	move_speed *= FactionCatalog.get_passive(faction, "speed_mult", 1.0)
 		
 	print("Recalculated speed: ", move_speed)

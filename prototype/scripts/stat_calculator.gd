@@ -1,6 +1,7 @@
 extends Control
 
 const ModuleData = preload("res://scripts/module_data.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 @onready var hp_label = $ScrollContainer/VBoxContainer/HPLabel
 @onready var weight_label = $ScrollContainer/VBoxContainer/WeightLabel
@@ -165,9 +166,8 @@ func _ready():
 	$ScrollContainer/VBoxContainer.add_child(faction_label)
 	
 	var faction_btn = OptionButton.new()
-	faction_btn.add_item("Heavy Industrialists")
-	faction_btn.add_item("Technocrats")
-	faction_btn.add_item("Expansionists")
+	for fac_id in FactionCatalog.get_ids():
+		faction_btn.add_item(FactionCatalog.get_faction_name(fac_id))
 	faction_btn.name = "FactionDropdown"
 	$ScrollContainer/VBoxContainer.add_child(faction_btn)
 	faction_btn.item_selected.connect(_on_faction_selected)
@@ -370,10 +370,9 @@ func sync_hull_ui(hull: Node3D):
 	var faction_btn = $ScrollContainer/VBoxContainer.get_node_or_null("FactionDropdown") as OptionButton
 	if faction_btn:
 		var fac = hull.get_meta("faction") if hull.has_meta("faction") else "industrialists"
-		match fac:
-			"industrialists": faction_btn.selected = 0
-			"technocrats": faction_btn.selected = 1
-			"expansionists": faction_btn.selected = 2
+		var idx = FactionCatalog.get_ids().find(fac)
+		if idx >= 0:
+			faction_btn.selected = idx
 	is_updating_sliders = false
 	update_stats(hull)
 
@@ -458,9 +457,9 @@ func update_stats(hull: Node3D):
 			hp_mult = 2.0
 			wt_mult = 0.5
 
-	# Faction Passive Bonus: Industrialists get 20% less armor weight
-	if faction == "industrialists":
-		wt_mult *= 0.8
+	# Faction Passive Bonus - table-driven (FactionCatalog), not a hardcoded
+	# per-faction if-chain, so this scales to all 10 factions unchanged.
+	wt_mult *= FactionCatalog.get_passive(faction, "armor_weight_mult", 1.0)
 
 	total_hp = total_hp * hp_mult * armor_thickness
 	total_weight = total_weight * wt_mult * armor_thickness
@@ -746,13 +745,12 @@ func _on_faction_selected(index: int):
 	if not hull: return
 	_push_undo()
 
-	var fac_name = "industrialists"
-	match index:
-		0: fac_name = "industrialists"
-		1: fac_name = "technocrats"
-		2: fac_name = "expansionists"
-		
+	var ids = FactionCatalog.get_ids()
+	var fac_name = ids[index] if index >= 0 and index < ids.size() else FactionCatalog.DEFAULT_FACTION
+
 	hull.set_meta("faction", fac_name)
+	if root.has_method("update_hull_appearance"):
+		root.update_hull_appearance()
 	update_stats(hull)
 
 func _initial_sync():

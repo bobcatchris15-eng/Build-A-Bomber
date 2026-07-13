@@ -7,6 +7,7 @@ signal unit_produced(unit)
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 const PREFAB_STATS = {
 	"hq":       {"hp": 3000.0, "size": Vector3(7, 4, 7),  "color": Color(0.75, 0.72, 0.55), "cost_metal": 0,   "cost_crystal": 0},
@@ -115,8 +116,7 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 	_create_selection_ring(max(stats.size.x, stats.size.z) * 0.72)
 	rally_point = global_position + Vector3(0, 0, 10 if team == 0 else -10)
 
-	if faction == "technocrats":
-		vision_range *= 1.15
+	vision_range *= FactionCatalog.get_passive(faction, "vision_mult", 1.0)
 
 func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node):
 	kind = "defense"
@@ -180,8 +180,7 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 		# defense_hull's own meta instead, same as armor_material/
 		# armor_thickness just above.
 		var defense_faction = defense_hull.get_meta("faction", "industrialists")
-		if defense_faction == "technocrats":
-			vision_range *= 1.15
+		vision_range *= FactionCatalog.get_passive(defense_faction, "vision_mult", 1.0)
 
 		_create_hp_bar(base_size.y + 2.0)
 		_create_selection_ring(max(base_size.x, base_size.z) * 0.72)

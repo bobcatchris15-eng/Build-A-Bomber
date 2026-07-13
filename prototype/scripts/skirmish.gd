@@ -4,6 +4,7 @@ extends Node3D
 
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const BattleUnitScript = preload("res://scripts/battle_unit.gd")
 const BuildingScript = preload("res://scripts/building.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
@@ -196,10 +197,10 @@ func _ready():
 
 func _on_trickle():
 	if game_over: return
-	if player_faction == "expansionists" and is_instance_valid(player_hq) and not player_hq.is_dead:
-		add_resources(PLAYER_TEAM, 8, 2)
-	if enemy_faction == "expansionists" and is_instance_valid(enemy_hq) and not enemy_hq.is_dead:
-		add_resources(ENEMY_TEAM, 8, 2)
+	if is_instance_valid(player_hq) and not player_hq.is_dead:
+		add_resources(PLAYER_TEAM, FactionCatalog.get_passive(player_faction, "hq_trickle_metal", 0), FactionCatalog.get_passive(player_faction, "hq_trickle_crystal", 0))
+	if is_instance_valid(enemy_hq) and not enemy_hq.is_dead:
+		add_resources(ENEMY_TEAM, FactionCatalog.get_passive(enemy_faction, "hq_trickle_metal", 0), FactionCatalog.get_passive(enemy_faction, "hq_trickle_crystal", 0))
 
 # Energy resource team-level economy (ENERGY_AND_BALANCE_SPEC.md #1). A
 # static building is any prefab (hq/refinery/factory are always static) or
@@ -230,8 +231,9 @@ func _recalc_energy_economy():
 					capacity += m.get_meta("module_data").get_energy_capacity()
 			var is_static_building = b.kind in ["hq", "refinery", "factory"] or (b.kind == "defense" and is_instance_valid(b.defense_hull) and ModuleCatalog.is_foundation(b.defense_hull.get_meta("type_id", "pillbox_foundation")))
 			if not is_static_building: continue
-			if faction == "expansionists": continue
+			if FactionCatalog.get_passive(faction, "energy_upkeep_exempt", false): continue
 			upkeep += ENERGY_UPKEEP_PER_STATIC_BUILDING
+		capacity *= FactionCatalog.get_passive(faction, "energy_capacity_mult", 1.0)
 		energy_pool[team].capacity = capacity
 		energy_pool[team].energy = clamp(capacity - upkeep, 0.0, max(capacity, 1.0))
 		energy_pool[team].deficit = (capacity - upkeep) < 0.0
@@ -348,6 +350,21 @@ func _load_rosters():
 		enemy_faction = _mc_enemy_faction
 	elif not enemy_roster.is_empty():
 		enemy_faction = enemy_roster[0].blueprint.get("faction", "technocrats")
+
+	# Scavengers' "-10% metal cost on everything built" - a TEAM-level
+	# passive (the match's chosen faction, not each individual blueprint's
+	# own faction tag), applied once here so every consumer of cost_metal
+	# (build-bar button labels, can_afford/spend) sees the same discounted
+	# number - baking it into the roster entry rather than discounting only
+	# at spend-time, which would make the displayed cost lie.
+	_apply_faction_cost_discount(roster, player_faction)
+	_apply_faction_cost_discount(enemy_roster, enemy_faction)
+
+func _apply_faction_cost_discount(entries: Array, faction: String):
+	var mult = FactionCatalog.get_passive(faction, "metal_cost_mult", 1.0)
+	if mult == 1.0: return
+	for e in entries:
+		e.cost_metal = int(e.cost_metal * mult)
 
 func _make_roster_entry(data: Dictionary) -> Dictionary:
 	var cost = blueprint_cost(data)
@@ -720,6 +737,7 @@ func _queue_player_unit(entry: Dictionary):
 		_flash_status("Not enough resources for %s!" % entry.name)
 		return
 	var build_time = build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal))
+	build_time *= FactionCatalog.get_passive(player_faction, "build_time_mult", 1.0)
 	if is_energy_deficit(PLAYER_TEAM):
 		build_time *= 1.5
 	factory.queue_unit(entry.blueprint, build_time)

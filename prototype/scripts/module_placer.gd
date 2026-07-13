@@ -5,6 +5,7 @@ const Gizmo3D = preload("res://scenes/Gizmo3D.tscn")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
+const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -1048,6 +1049,7 @@ func update_hull_appearance():
 	var hull_scale = hull.get_meta("hull_scale") if hull.has_meta("hull_scale") else Vector3(1,1,1)
 	var armor_thick = hull.get_meta("armor_thickness") if hull.has_meta("armor_thickness") else 1.0
 	var armor_mat_name = hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel"
+	var faction_name = hull.get_meta("faction") if hull.has_meta("faction") else "industrialists"
 	
 	# Bulk size based on thickness
 	var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
@@ -1070,28 +1072,8 @@ func update_hull_appearance():
 		mesh_inst.mesh = box
 		mesh_inst.scale = Vector3.ONE
 	
-	# Apply material
-	var mat = StandardMaterial3D.new()
-	if armor_mat_name == "hardened_steel":
-		mat.albedo_color = Color.GRAY
-		mat.roughness = 0.2
-		mat.metallic = 0.8
-	elif armor_mat_name == "reactive_armor":
-		mat.albedo_color = Color(0.18, 0.24, 0.18)
-		mat.roughness = 0.7
-		mat.metallic = 0.1
-	elif armor_mat_name == "ablative_ceramic":
-		mat.albedo_color = Color(0.85, 0.8, 0.7)
-		mat.roughness = 0.5
-		mat.metallic = 0.0
-	elif armor_mat_name == "energy_shielding":
-		mat.albedo_color = Color(0.3, 0.6, 1.0, 0.7)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.roughness = 0.1
-		mat.emission_enabled = true
-		mat.emission = Color(0.3, 0.6, 1.0)
-		mat.emission_energy_multiplier = 0.5
-	mesh_inst.material_override = mat
+	# Apply material - shared faction+armor shader (see hull_material_builder.gd)
+	mesh_inst.material_override = HullMaterialBuilderScript.build_hull_material(armor_mat_name, faction_name)
 	
 	# Also update collision shape size in the designer
 	var col = hull.get_node_or_null("CollisionShape3D") as CollisionShape3D
