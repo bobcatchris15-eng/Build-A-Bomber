@@ -281,6 +281,52 @@ const MAPS = {
 			"harvester": Vector3(-6, 0.5, -66),
 		},
 	},
+
+	# Map variety batch: "two contested points" as its own genuinely
+	# different pattern from highland_chokepoint's single dominant hill.
+	# Rather than one hill both teams must equally fight over, this map
+	# has TWO separate hills, each sitting closer to one team's own
+	# territory - each team can grab their own quickly, but holding both
+	# means pushing into the enemy's half. The overall layout stays
+	# 180-degree point-symmetric (each hill's position/ramp direction
+	# mirrors the other's under (x,z)->(-x,-z), same as every other
+	# point-symmetric map here), so despite each individual hill being
+	# off-center, the map as a whole is fair. No water. Single ramp per
+	# hill (not highland's dual-ramp trick) facing the open central lane,
+	# since a separate hill doesn't need to be equally approachable from
+	# both the north AND south the way ONE shared hill does.
+	"twin_summits": {
+		"name": "Twin Summits",
+		"description": "Two hills, not one - each sits closer to one side's own territory. Grab yours quickly, then decide whether to contest the other deep in enemy ground. No water; open lanes connect everything.",
+		"map_half_extents": 78.0,
+		"ground_color": Color(0.25, 0.24, 0.19),
+		"water_areas": [],
+		"obstacles": [],
+		"elevation_zones": [
+			{"center": Vector3(-28, 0, 18), "half_extents": Vector2(9, 9), "height": 7.0, "ramp_side": "east", "ramp_width": 8.0},
+			{"center": Vector3(28, 0, -18), "half_extents": Vector2(9, 9), "height": 7.0, "ramp_side": "west", "ramp_width": 8.0},
+		],
+		"resource_nodes": [
+			{"position": Vector3(-38, 0, 10), "type": "metal", "amount": 900},
+			{"position": Vector3(-38, 0, 26), "type": "crystal", "amount": 700},
+			{"position": Vector3(38, 0, -10), "type": "metal", "amount": 900},
+			{"position": Vector3(38, 0, -26), "type": "crystal", "amount": 700},
+			{"position": Vector3(-15, 0, 50), "type": "metal", "amount": 1100},
+			{"position": Vector3(15, 0, 50), "type": "metal", "amount": 1100},
+			{"position": Vector3(0, 0, 55), "type": "crystal", "amount": 800},
+			{"position": Vector3(15, 0, -50), "type": "metal", "amount": 1100},
+			{"position": Vector3(-15, 0, -50), "type": "metal", "amount": 1100},
+			{"position": Vector3(0, 0, -55), "type": "crystal", "amount": 800},
+		],
+		"player_start": {
+			"hq": Vector3(0, 0, 60), "factory": Vector3(-10, 0, 55), "refinery": Vector3(9, 0, 53),
+			"harvester": Vector3(6, 0.5, 48),
+		},
+		"enemy_start": {
+			"hq": Vector3(0, 0, -60), "factory": Vector3(10, 0, -55), "refinery": Vector3(-9, 0, -53),
+			"harvester": Vector3(-6, 0.5, -48),
+		},
+	},
 }
 
 const DEFAULT_MAP_ID: String = "lake_crossing"
