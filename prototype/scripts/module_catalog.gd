@@ -23,6 +23,11 @@ static func get_catalog() -> Dictionary:
 			"metal": 15,
 			"crystal": 0,
 			"dps": 25.0,
+			# Pintle-mount eligibility (MOUNTING_AND_ARMOR_SPEC.md #3 second
+			# correction - see PINTLE_MIN_UP_ALIGNMENT_DEFAULT's comment): a
+			# small, light, classic pintle weapon in real life - bolts onto
+			# almost anything short of a genuinely vertical wall.
+			"pintle_min_up_alignment": 0.15,
 			"size": Vector3(0.4, 0.4, 1.2),
 			"color": Color.SLATE_GRAY
 		},
@@ -34,6 +39,9 @@ static func get_catalog() -> Dictionary:
 			"metal": 45,
 			"crystal": 5,
 			"dps": 75.0,
+			# Compact gatling housing, same "bolts on anywhere" logic as
+			# heavy_machine_gun.
+			"pintle_min_up_alignment": 0.15,
 			"size": Vector3(0.7, 0.7, 1.8),
 			"color": Color(0.2, 0.2, 0.2) # Charcoal
 		},
@@ -69,6 +77,11 @@ static func get_catalog() -> Dictionary:
 			"metal": 40,
 			"crystal": 0,
 			"dps": 50.0,
+			# Indirect-fire arc trajectory is calculated off a baseline
+			# elevation - a mortar bolted onto a steep slope would be lobbing
+			# shells at an already-skewed angle before the tube even elevates,
+			# so this wants a much closer-to-level base than a direct-fire gun.
+			"pintle_min_up_alignment": 0.55,
 			"size": Vector3(1.2, 0.6, 1.2),
 			"color": Color.OLIVE
 		},
@@ -77,6 +90,7 @@ static func get_catalog() -> Dictionary:
 			"category": "weapon",
 			"hp": 110.0,
 			"weight": 140.0,
+			"pintle_min_up_alignment": 0.55, # same indirect-fire reasoning as mortar_array
 			# Balance pass (tools/balance_report.gd, ENERGY_AND_BALANCE_SPEC.md
 			# #6): had the highest raw dps in the game at less than half the
 			# cost of comparable weapons (gauss_railgun/heavy_howitzer) -
@@ -98,6 +112,10 @@ static func get_catalog() -> Dictionary:
 			"metal": 30,
 			"crystal": 15,
 			"dps": 55.0,
+			# A single-rail launcher whose own guidance corrects for a
+			# less-than-level launch angle mid-flight, so it tolerates a
+			# steeper mounting slope than an unguided arcing weapon would.
+			"pintle_min_up_alignment": 0.25,
 			"size": Vector3(0.6, 0.4, 1.6),
 			"color": Color.GOLD
 		},
@@ -109,6 +127,7 @@ static func get_catalog() -> Dictionary:
 			"metal": 35,
 			"crystal": 25,
 			"dps": 70.0,
+			"pintle_min_up_alignment": 0.25, # guided - same reasoning as guided_missile
 			"size": Vector3(0.7, 0.5, 1.8),
 			"color": Color.YELLOW_GREEN
 		},
@@ -120,6 +139,11 @@ static func get_catalog() -> Dictionary:
 			"metal": 50,
 			"crystal": 10,
 			"dps": 60.0,
+			# A boxy multi-tube launcher, unguided at launch (swarm-fire, not
+			# precision-guided per shot) - wants a more level base than a
+			# single guided missile does, but nowhere near as strict as a
+			# mortar's ballistic-arc requirement.
+			"pintle_min_up_alignment": 0.35,
 			"size": Vector3(1.2, 0.8, 1.5),
 			"color": Color.DARK_ORANGE
 		},
@@ -144,6 +168,11 @@ static func get_catalog() -> Dictionary:
 			"metal": 45,
 			"crystal": 10,
 			"dps": 65.0,
+			# Lobs submunitions in an area pattern - close enough to
+			# mortar_array's ballistic-arc reasoning to want a fairly level
+			# base, though the shorter lob range makes it a bit more
+			# forgiving than a dedicated indirect-fire mortar.
+			"pintle_min_up_alignment": 0.45,
 			"size": Vector3(1.4, 0.8, 1.4),
 			"color": Color.CHOCOLATE
 		},
@@ -152,6 +181,9 @@ static func get_catalog() -> Dictionary:
 			"category": "weapon",
 			"hp": 70.0,
 			"weight": 50.0,
+			# A hose-fed nozzle, not a rigid ballistic tube - shrugs off a
+			# steep mounting angle same as the light autoguns.
+			"pintle_min_up_alignment": 0.15,
 			# Balance pass: value/cost was 5.49 against a 2.86 category
 			# average - cheap for its dps relative to comparable short-range
 			# weapons (heavy_machine_gun aside, which is an intentionally
@@ -177,6 +209,11 @@ static func get_catalog() -> Dictionary:
 			"metal": 40,
 			"crystal": 45,
 			"dps": 60.0,
+			# Tall and top-heavy (size.y=1.6 vs a 0.6x0.6 footprint) - a real
+			# structure this slender wants a level base to not look/feel like
+			# it's about to topple, so it's less tolerant of a steep slope
+			# than the compact autoguns.
+			"pintle_min_up_alignment": 0.4,
 			"size": Vector3(0.6, 1.6, 0.6),
 			"color": Color.LIGHT_SKY_BLUE
 		},
@@ -188,6 +225,8 @@ static func get_catalog() -> Dictionary:
 			"metal": 25,
 			"crystal": 35,
 			"dps": 40.0,
+			# Compact, low-profile emitter - tolerant like the light autoguns.
+			"pintle_min_up_alignment": 0.2,
 			"size": Vector3(0.5, 0.5, 1.2),
 			"color": Color.CYAN
 		},
@@ -196,6 +235,10 @@ static func get_catalog() -> Dictionary:
 			"category": "weapon",
 			"hp": 130.0,
 			"weight": 150.0,
+			# The heaviest, longest energy weapon (2.6 long, 150kg) - wants a
+			# more stable base than the compact energy emitters, similar
+			# reasoning to the heavier kinetic guns.
+			"pintle_min_up_alignment": 0.4,
 			# Balance pass: was the single worst value/cost weapon in the
 			# game (1.03 vs 2.86 average) even before accounting for its
 			# energy-drain utility (which this cost-model can't see) - the
@@ -216,6 +259,10 @@ static func get_catalog() -> Dictionary:
 			"metal": 30,
 			"crystal": 20,
 			"dps": 80.0,
+			# A precision continuous beam over a long (2.5) housing benefits
+			# from a stable base for sustained aim - same logic as heavy_laser's
+			# kinetic-precision cousins.
+			"pintle_min_up_alignment": 0.4,
 			"size": Vector3(0.6, 0.6, 2.5),
 			"color": Color.DARK_RED
 		},
@@ -227,6 +274,9 @@ static func get_catalog() -> Dictionary:
 			"metal": 50,
 			"crystal": 60,
 			"dps": 95.0,
+			# "Lobber" is in the name - an arcing projectile weapon, same
+			# ballistic-baseline reasoning as mortar_array/cluster_dispenser.
+			"pintle_min_up_alignment": 0.5,
 			"size": Vector3(0.8, 0.8, 2.0),
 			"color": Color.MEDIUM_SPRING_GREEN
 		},
@@ -240,6 +290,9 @@ static func get_catalog() -> Dictionary:
 			"metal": 40,
 			"crystal": 15,
 			"dps": 10.0, # Visual DPS low, specialized vs ammo
+			# Real-world CIWS mounts are routinely bolted to steeply angled
+			# deck/superstructure positions and still track fine - tolerant.
+			"pintle_min_up_alignment": 0.15,
 			"size": Vector3(0.8, 1.0, 0.8),
 			"color": Color.WHITE_SMOKE
 		},
@@ -250,6 +303,9 @@ static func get_catalog() -> Dictionary:
 			"weight": 35.0,
 			"metal": 20,
 			"crystal": 30,
+			# Small, light PD turret - tolerant like the other compact
+			# point-defense/autogun weapons.
+			"pintle_min_up_alignment": 0.15,
 			"dps": 5.0,
 			"size": Vector3(0.4, 0.5, 0.4),
 			"color": Color.LIGHT_CORAL
@@ -262,6 +318,11 @@ static func get_catalog() -> Dictionary:
 			"metal": 45,
 			"crystal": 10,
 			"dps": 15.0,
+			# Bulkier than the other PD weapons (110kg, boxier housing) but
+			# still an anti-air mount that needs to swing to steep elevations
+			# routinely - moderate tolerance, between the light PD guns and
+			# the heavier precision/ballistic weapons.
+			"pintle_min_up_alignment": 0.3,
 			"size": Vector3(0.7, 0.7, 1.8),
 			"color": Color.DARK_GOLDENROD
 		},
@@ -797,17 +858,24 @@ static func get_mount_style(type_id: String, facet: String, hull_type_id: String
 		"right": normal = Vector3.RIGHT
 	return get_mount_style_for_normal(type_id, normal, hull_type_id)
 
-# Slope-from-horizontal at which a mount stops being "close enough to
-# level for a gun to sit on a stand" and becomes "close enough to a
-# vertical wall that only an embedded sponson makes sense." dot(normal,
-# UP) = cos(angle between the surface normal and straight up) - 0.3 =
-# cos(~72.5 deg), so a surface can be sloped as steeply as ~72.5 degrees
-# from horizontal (a real glacis plate, not just a mathematically flat
-# deck) and still get the pintle treatment; only the last ~17.5 degrees
-# approaching a genuine vertical wall falls back to sponson. Deliberately
-# permissive per Chris's correction - "anything with a meaningful
-# upward-facing component... is a candidate," not just a perfect flat top.
-const PINTLE_MIN_UP_ALIGNMENT: float = 0.3
+# Fallback slope-from-horizontal threshold for any weapon that doesn't
+# carry its own "pintle_min_up_alignment" catalog entry (see
+# get_pintle_min_up_alignment() below - every real weapon type_id has one
+# as of this pass; this only matters for a future weapon someone forgets
+# to set it on). 0.3 = cos(~72.5 deg) - a reasonable generic middle ground
+# between the light-autogun (0.15) and ballistic-arc (0.5+) ends of the
+# real per-type range.
+const PINTLE_MIN_UP_ALIGNMENT_DEFAULT: float = 0.3
+
+# Per-weapon-type pintle eligibility (MOUNTING_AND_ARMOR_SPEC.md #3,
+# second correction): Chris's point was that a single geometric threshold
+# applied to every weapon uniformly is wrong - a compact machine gun
+# reasonably bolts onto almost any surface short of dead vertical, while a
+# mortar's ballistic arc math wants a much closer-to-level base, and that's
+# a judgment call about the WEAPON, not a property of the surface alone.
+# Each weapon's own reasoning is logged as a comment on its catalog entry.
+static func get_pintle_min_up_alignment(type_id: String) -> float:
+	return get_module_data(type_id).get("pintle_min_up_alignment", PINTLE_MIN_UP_ALIGNMENT_DEFAULT)
 
 # Continuous alternative to get_mount_style()'s discrete facet matching,
 # for real mount-hardware decisions (module_placer.gd's actual weapon
@@ -816,9 +884,10 @@ const PINTLE_MIN_UP_ALIGNMENT: float = 0.3
 # (angled base plate conforming to the true local surface, world-vertical
 # post, weapon level on top - see visual_builder.gd's add_mount_hardware())
 # is available anywhere the surface has a meaningful upward OR downward
-# component, not just an exactly-flat top/bottom - this is what makes a
-# sloped glacis plate (interceptor_hull's nose, e.g.) a legitimate pintle
-# mount instead of forcing it into an embedded sponson.
+# component RELATIVE TO THIS SPECIFIC WEAPON'S OWN TOLERANCE - this is what
+# makes a sloped glacis plate (interceptor_hull's nose, e.g.) a legitimate
+# pintle mount for a compact machine gun instead of forcing it into an
+# embedded sponson, while the same slope might still sponson-mount a mortar.
 static func get_mount_style_for_normal(type_id: String, normal: Vector3, hull_type_id: String = "") -> String:
 	if hull_type_id != "" and not is_turreted_capable(hull_type_id):
 		return "frame_built"
@@ -826,10 +895,11 @@ static func get_mount_style_for_normal(type_id: String, normal: Vector3, hull_ty
 		return "turret"
 	if type_id in ["gauss_railgun", "heavy_howitzer"]:
 		return "frame_built"
+	var min_up_alignment = get_pintle_min_up_alignment(type_id)
 	var up_alignment = normal.normalized().dot(Vector3.UP) if normal.length() > 0.001 else 0.0
-	if up_alignment >= PINTLE_MIN_UP_ALIGNMENT:
+	if up_alignment >= min_up_alignment:
 		return "pintle_top"
-	elif up_alignment <= -PINTLE_MIN_UP_ALIGNMENT:
+	elif up_alignment <= -min_up_alignment:
 		return "pintle_bottom"
 	else:
 		return "sponson"

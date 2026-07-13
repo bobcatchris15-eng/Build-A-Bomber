@@ -4,6 +4,22 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 16) — Pintle eligibility is now per-weapon-type, not one uniform angle rule
+
+Follow-up correction from Chris on the angled-pintle work below: the sponson/pintle boundary shouldn't be a single geometric threshold applied to every weapon - some weapons realistically tolerate a pintle mount on a much steeper slope than others.
+
+### What changed
+
+`module_catalog.gd` gained a new catalog field, `pintle_min_up_alignment`, set per weapon type_id (17 weapons individually reasoned about, ranging 0.15 for compact/self-contained guns like `heavy_machine_gun` and `rotary_cannon` up to 0.55 for ballistic-arc weapons like `mortar_array` and `spigot_mortar` that need a near-level base to aim their arc). `get_mount_style_for_normal()` reads this via a new `ModuleCatalog.get_pintle_min_up_alignment(type_id)` accessor instead of the old flat constant, which is kept as `PINTLE_MIN_UP_ALIGNMENT_DEFAULT` for any weapon without an explicit entry.
+
+### Verification
+
+New test asserts `heavy_machine_gun` and `mortar_array` land on opposite mount styles at the identical slope - direct proof the system differentiates by weapon type rather than just having plausible-looking numbers. Also tightened a pre-existing test vector in `test_angled_pintle_mount()` that was uncomfortably close to the new `heavy_machine_gun` threshold. 64/64 tests green. Screenshot showing a machine gun pintle-mounted next to a mortar sponson-mounted, same hull, same slope, in `progress_captures/2026-07-12/pintle_per_weapon_type/`.
+
+Full reasoning per weapon type logged in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-12 (cont'd 15) — Angled pintle mount: gun-on-a-stand now works on sloped surfaces, not just a flat top
 
 Design correction from Chris after seeing the pintle mount demo: it should work on angled surfaces too - a sloped glacis plate (interceptor_hull's nose was the example), not just a mathematically flat deck.

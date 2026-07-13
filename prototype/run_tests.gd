@@ -1489,11 +1489,27 @@ func test_angled_pintle_mount() -> bool:
 	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3(0, 0.7, -0.7).normalized(), "interceptor_hull") != "pintle_top":
 		print("  [FAIL] A 45-degree sloped-upward normal should still resolve to pintle_top")
 		return false
-	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3(0, 0.15, -0.99).normalized(), "interceptor_hull") != "sponson":
+	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3(0, 0.05, -0.999).normalized(), "interceptor_hull") != "sponson":
 		print("  [FAIL] A near-vertical normal (small up component) should still resolve to sponson")
 		return false
 	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3.RIGHT, "interceptor_hull") != "sponson":
 		print("  [FAIL] A pure side normal should still resolve to sponson (regression check)")
+		return false
+
+	# The actual correction: eligibility is PER WEAPON TYPE, not one
+	# uniform angle for every weapon. At a shared, moderately-steep slope
+	# (dot~0.4, between the light-autogun and ballistic-arc thresholds), a
+	# compact machine gun should still pintle-mount while a mortar (whose
+	# arc trajectory math wants a much more level base) should not.
+	var moderate_slope = Vector3(0, 0.4, -0.92).normalized()
+	if ModuleCatalogScript.get_mount_style_for_normal("heavy_machine_gun", moderate_slope, "interceptor_hull") != "pintle_top":
+		print("  [FAIL] heavy_machine_gun (low pintle_min_up_alignment) should still pintle-mount at a moderate slope")
+		return false
+	if ModuleCatalogScript.get_mount_style_for_normal("mortar_array", moderate_slope, "interceptor_hull") != "sponson":
+		print("  [FAIL] mortar_array (high pintle_min_up_alignment - needs a level base for its arc) should sponson-mount at the SAME moderate slope a machine gun tolerates")
+		return false
+	if ModuleCatalogScript.get_pintle_min_up_alignment("heavy_machine_gun") >= ModuleCatalogScript.get_pintle_min_up_alignment("mortar_array"):
+		print("  [FAIL] heavy_machine_gun should have a lower (more permissive) pintle threshold than mortar_array")
 		return false
 
 	# Real placement: a weapon on a sloped (not exactly flat) upward

@@ -4,6 +4,28 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Pintle eligibility made per-weapon-type instead of one uniform angle threshold
+
+**Not blocking.**
+
+Chris's correction to the angled-pintle work above: whether a weapon pintle-mounts on a sloped surface or falls back to sponson shouldn't be one geometric threshold (`dot(normal, UP) >= 0.3`) applied uniformly to every weapon - it's a per-weapon-type judgment call. Replaced the flat `PINTLE_MIN_UP_ALIGNMENT` constant with a catalog field, `pintle_min_up_alignment`, set individually per weapon type_id in `module_catalog.gd` (renamed the old constant to `PINTLE_MIN_UP_ALIGNMENT_DEFAULT`, kept only as a fallback for any weapon missing the field). `get_mount_style_for_normal()` now reads the threshold via `ModuleCatalog.get_pintle_min_up_alignment(type_id)` instead of the constant.
+
+**The actual per-type reasoning**, grouped by why a weapon tolerates (or doesn't) a steep pintle angle:
+
+- **0.15 (most permissive - works on steep slopes):** `heavy_machine_gun`, `rotary_cannon`, `flamethrower`, `ciws`, `pd_laser` - compact, self-contained weapons with no long recoil path or delicate internal mechanism that cares about being level; a pintle gun on a stand is realistically fine even close to a near-vertical mount.
+- **0.2:** `arc_projector` - compact emitter, same reasoning, slightly more conservative since it's a heavier housing.
+- **0.25:** `guided_missile`, `dual_stage_missile` - guided munitions correct their own flight path after launch, so the launch rail doesn't need to be level; more tolerant than an unguided weapon would be.
+- **0.3 (the old uniform default, now just the middle of the range):** left as the default for any weapon without an explicit entry.
+- **0.3-0.35:** `flak_cannon` (0.3, bulkier point-defense piece), `missile_pod` (0.35, unguided multi-tube - each tube's launch angle matters more without post-launch correction).
+- **0.4:** `tesla_coil`, `ion_cannon`, `heavy_laser` - tall, heavy, precision-aimed weapons where a steep mount starts to look and behave wrong.
+- **0.45-0.55 (least permissive - needs a near-level base):** `cluster_dispenser` (0.45, lobs on an arc), `plasma_lobber` (0.5), `mortar_array` and `spigot_mortar` (0.55) - all ballistic-arc/indirect-fire weapons where the mount's own level base is part of how the arc is aimed; these fall back to sponson well before the old uniform 0.3 threshold would have allowed a pintle mount.
+
+`basic_cannon` (turret override), `gauss_railgun`/`heavy_howitzer` (frame_built override), and `drone_carrier`/`repair_array` (category="module", never reach this code path) don't get a field - the threshold is meaningless for them since their mount style is decided earlier in the function.
+
+**Verified:** added a test asserting `heavy_machine_gun` and `mortar_array` resolve to opposite mount styles (`pintle_top` vs `sponson`) at the *same* moderate slope (`dot≈0.4`) - the concrete proof the system is now genuinely per-type rather than uniform, not just individually-plausible numbers. 64/64 tests green. Also fixed a pre-existing fragile assertion in `test_angled_pintle_mount()` whose "near-vertical" test vector computed to `dot≈0.1498`, dangerously close to rotary_cannon's new 0.15 threshold - moved it further from vertical (`dot≈0.05`) so it can't accidentally start failing from an unrelated future tweak to that weapon's threshold. Screenshot confirming both mount styles side by side on the same hull at the same angle in `progress_captures/2026-07-12/pintle_per_weapon_type/`.
+
+---
+
 ## 2026-07-12 — Angled pintle mount: where exactly the sponson/pintle boundary sits, and how the tilt is expressed
 
 **Not blocking.**
