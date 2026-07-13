@@ -523,7 +523,18 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	var hull_shape = hull.get_node_or_null("CollisionShape3D")
 	if hull_shape and hull_shape.shape is BoxShape3D:
 		hull_size = hull_shape.shape.size
-		
+
+	# Visual bug pass finding: several hulls' visual mesh doesn't fill its
+	# collision box symmetrically (ship hulls' tapered keel, airship_hull's
+	# curved envelope) - underside-mounted locomotion (wheels/legs/
+	# hover_engine/anti_grav) computed purely from -hull_size.y/2.0 floated
+	# visibly below the actual hull on those. Raises the underside mount
+	# point by however much that specific hull needs (0.0 for every
+	# box-ish hull, unaffected).
+	var underside_y_bias = 0.0
+	if hull.has_meta("type_id"):
+		underside_y_bias = ModuleCatalog.get_underside_y_bias(hull.get_meta("type_id"))
+
 	var spawned_wheels = []
 	
 	if type_id == "wheels":
@@ -545,12 +556,12 @@ func update_locomotion(type_id: String, settings: Dictionary):
 					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
 				
 				# Place using Vector3.DOWN normal, then override position and rotation to point forward
-				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0, z_pos)
+				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias, z_pos)
 				var wheel = _place_weapon(type_id, pos, Vector3.DOWN)
 				if wheel:
 					wheel.scale = Vector3(size, size, size)
 					# Override position to be underneath (bottom Y) and rotation to be forward (0)
-					wheel.position = Vector3(x_offset * side, -hull_size.y / 2.0 - (0.8 * size), z_pos)
+					wheel.position = Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias - (0.8 * size), z_pos)
 					wheel.rotation = Vector3.ZERO
 					if wheel.has_meta("module_data"):
 						wheel.get_meta("module_data").scale_multiplier = wheel.scale
@@ -605,7 +616,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	elif type_id == "hover_engine":
 		var size = settings.get("size", 1.0)
 		var x_offset = (hull_size.x / 2.0) * size
-		var y_offset = -hull_size.y / 2.0
+		var y_offset = -hull_size.y / 2.0 + underside_y_bias
 		var z_offset = (hull_size.z * 0.35) * size
 		var points = [
 			Vector3(-x_offset, y_offset, z_offset),
@@ -638,7 +649,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				if half_count > 1:
 					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
 
-				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0, z_pos)
+				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias, z_pos)
 				var leg = _place_weapon(type_id, pos, side_normal)
 				if leg:
 					leg.rotation = Vector3.ZERO
@@ -650,7 +661,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	elif type_id == "anti_grav":
 		var size = settings.get("size", 1.0)
 		var x_offset = (hull_size.x / 2.2) * size
-		var y_offset = -hull_size.y / 2.0
+		var y_offset = -hull_size.y / 2.0 + underside_y_bias
 		var z_offset = (hull_size.z * 0.35) * size
 		var points = [
 			Vector3(-x_offset, y_offset, z_offset),
@@ -697,7 +708,16 @@ func update_locomotion(type_id: String, settings: Dictionary):
 			var x_pos = 0.0
 			if count > 1:
 				x_pos = -x_limit + (2.0 * x_limit * i) / (count - 1)
-			var pos = hull.global_position + Vector3(x_pos, -hull_size.y * 0.2, hull_size.z / 2.0)
+			# Visual bug pass finding: naval_hull's stern is a convex-hull
+			# taper (build_ship_hull's keel reaches only to z=hz*0.8 before
+			# fairing up to the deck-level transom at the true z=hz edge) -
+			# a propeller placed at the exact stern edge (z=hz) sat well
+			# outside the hull's real underwater volume, floating visibly
+			# behind/below it. z=hz*0.82 keeps it just inside the keel's
+			# full-depth region (still reads as stern-mounted); y=-0.28x
+			# full height stays just short of the keel's own -0.3x depth
+			# so it doesn't clip through on the shallower hulls either.
+			var pos = hull.global_position + Vector3(x_pos, -hull_size.y * 0.12, hull_size.z * 0.36)
 			var prop = _place_weapon(type_id, pos, Vector3.BACK)
 			if prop:
 				prop.scale = Vector3(size, size, size)

@@ -4,6 +4,38 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 — Systematic visual bug pass: locomotion mounting gaps fixed on ship/airship hulls
+
+Chris asked for a real, systematic visual audit across the module/hull library (not spot-checking) - locomotion orientation, mounting gaps, floating parts, checked broadly across hull x locomotion combinations since the no-hard-gating philosophy means players can and will try unusual pairings.
+
+### Method
+
+Rendered 24 locomotion x hull combinations in one windowed pass (every locomotion type on its natural hull + deliberately weird cross-combos) and actually reviewed every screenshot, not just the placement math.
+
+### What was found
+
+Both `wheels`/`legs`/`hover_engine`/`anti_grav` (underside-mounted locomotion) and `naval_propeller` (stern-mounted) assume a hull's visual mesh fills its collision box symmetrically - true for every wedge/box hull, false for the 3 ship hulls (whose keel intentionally sits shallower than the box and doesn't reach the true stern edge) and `airship_hull` (an ellipsoid, narrower at the sides than the box implies). Locomotion mounted on these 4 hulls floated visibly below/behind the real mesh. Notably, this hit `naval_propeller` on `naval_hull` - the hulls' own NATURAL, purpose-built pairing - not just nonsensical combos.
+
+### The fix
+
+A new `underside_y_bias` catalog field (0.0 default, nonzero only on the 4 affected hulls, values derived from `build_ship_hull`'s own keel-depth constant for the 3 ship hulls) raises the underside mount point to match where the hull's real mesh actually is. `naval_propeller`'s stern position moved off the exact box edge to where the keel still has real depth. Iterated the naval_propeller fix twice against real renders before it looked properly attached.
+
+### Also checked, found clean
+
+Weapon/module mounting on the newer hull surfaces (naval hulls' sloped bow, airship's curved envelope, fuselage's cylindrical body) - already correct, since the pintle base-plate system was built around real surface normals from the start.
+
+### Deliberately not fixed (logged, not silently dropped)
+
+Locomotion visuals having a fixed absolute size regardless of hull dimensions causes real proportion mismatches on extreme hull sizes (giant legs on paper-thin wings, tiny rotors on a huge cruiser) - a genuine visual issue but a different category (scale, not gap/orientation), and fixing it properly would mean retrofitting every locomotion visual's scale logic - out of scope for this pass. Also didn't chase pixel-perfect attachment on combos nobody would seriously design around (wheels on a boat/blimp) once they were "no longer floating in obvious empty space."
+
+### Verification
+
+74/74 tests green (1 new - a real end-to-end check that wheels/naval_propeller mount measurably differently than the old buggy formula, through the actual `module_placer.gd` code path). Before/after screenshots for every fixed combo in `progress_captures/2026-07-13/visual_bug_pass/`.
+
+Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (cont'd 2) — Final verification: terrain variety batch
 
 Wraps up the terrain variety batch (surface speed multipliers + hull-draught shallow water blocking - see the two entries below this one).

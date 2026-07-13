@@ -4,6 +4,28 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 — Systematic visual bug pass: real gaps found on ship/airship hulls, plus what I deliberately left alone
+
+**Not blocking.**
+
+**Method:** rendered 24 locomotion x hull combinations (every locomotion type on its natural hull plus deliberately weird cross-combos - wheels on a boat, legs on a flying wing, naval_propeller on a ground hull, etc.) in one windowed pass, then actually looked at every screenshot rather than trusting the placement math. This is the right way to catch this class of bug - the underlying formulas all looked reasonable on paper; the problem only showed up as pixels.
+
+**Root cause found:** `module_placer.gd`'s underside-mount locomotion (wheels/legs/hover_engine/anti_grav) and `naval_propeller`'s stern mount both assume a hull's visual mesh fills its collision box symmetrically - true for every wedge/box-ish hull (medium_hull, sponson_hull, interceptor_hull, etc.), false for the 3 ship hulls (`build_ship_hull`'s keel intentionally dips to only `-0.6 * halfHeight`, not the box's full `-halfHeight`, and doesn't reach the true stern edge at all - it fairs up to the deck well before `z=hz`) and `airship_hull` (an ellipsoid's Y-extent shrinks well before its box edge). Locomotion mounted from the naive box-relative formula floated visibly below/behind the actual mesh on all 4.
+
+**This affected the NATURAL pairing, not just weird combos** - `naval_propeller` on `naval_hull` (purpose-built for each other) showed the same detached-stern gap as `wheels` on a boat. That's what made this a real bug worth fixing carefully, not just a "someone tried something silly" cosmetic footnote.
+
+**Fix: a per-hull `underside_y_bias` catalog field** (0.0 default, nonzero only on the 4 affected hulls) added to the mount Y calculation, plus moving `naval_propeller`'s Z position off the exact stern edge (`hull_size.z*0.36` instead of `/2.0`) and its Y closer to the keel's real depth. Values for the 3 ship hulls are exact (`0.4 * halfHeight`, derived directly from `build_ship_hull`'s own keel-depth constant); `airship_hull`'s is an approximation (a curved ellipsoid doesn't have one exact "gap" the way a hard-edged keel taper does) - explicitly not worth exact-fitting given wheels/legs on a dirigible is a nonsensical combo to begin with. The bar I used throughout: "no longer floating in obvious empty space," not "physically perfect attachment on every conceivable combo" - iterated the naval_propeller fix twice against real renders (first pass reduced but didn't fully close the gap) rather than accepting a partial fix on the natural-pairing case specifically.
+
+**Deliberately NOT fixed, and why:**
+- **Locomotion proportions on extreme hull sizes** (legs looking gigantic on the paper-thin `flying_wing_hull`/`fuselage_hull`; `helicopter_rotors`/treads looking tiny on `heavy_cruiser_hull`) - a real visual issue, but a different category than what was asked (a *scale* mismatch from locomotion visuals having a fixed absolute size regardless of hull dimensions, not a gap/orientation/floating bug). Retrofitting every locomotion visual to scale with hull proportions is a substantially bigger job than this pass's scope. Flagging it here rather than silently leaving it out of the write-up.
+- **wheels/legs/hover_engine/anti_grav on naval_hull/airship_hull specifically** - after the bias fix these are much closer to the hull but not pixel-perfect (a wheel's tire still shows a sliver of visible gap on the ship hulls). Given these are combos nobody would seriously design around (a boat on wheels, a dirigible on legs), "meaningfully closer, no longer looking broken" was the target, not exact geometric matching - chasing the last few percent for a combo this nonsensical isn't a good use of further iteration.
+
+**Weapon/module mounting checked separately** on the newer hull surfaces (naval hulls' sloped bow, airship's curved envelope, fuselage's cylindrical body) - came back clean; the pintle base-plate system (built and tested during the earlier mounting work) already handles non-flat surfaces correctly since it was designed around a real surface normal from the start, unlike the locomotion placement code's box-relative assumption.
+
+**Verified:** 74/74 tests green (1 new) - a real end-to-end check that wheels/naval_propeller mount measurably differently (higher / off the exact stern edge) than the old buggy formula would produce, run through the actual `module_placer.gd` code path, not just asserting the catalog field exists. Before/after screenshots for every fixed combo in `progress_captures/2026-07-13/visual_bug_pass/`.
+
+---
+
 ## 2026-07-13 — Terrain variety mechanism: speed multipliers vs. hard blocks, and where the line falls
 
 **Not blocking.**

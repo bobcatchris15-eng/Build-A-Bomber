@@ -885,6 +885,13 @@ static func get_catalog() -> Dictionary:
 			# destroyer-class draught, under the shallow-water threshold -
 			# can still work close to shore, unlike heavy_cruiser_hull.
 			"draught": 0.9,
+			# Visual bug pass finding (see get_underside_y_bias() below): the
+			# hull's real keel bottom sits at -0.6*halfHeight, not the
+			# collision box's exact -halfHeight - wheels/legs/hover_engine/
+			# anti_grav mounted at the naive box-bottom offset floated
+			# visibly below the actual hull mesh. Bias = the gap between
+			# the two (0.4 * halfHeight = 0.4 * 0.8).
+			"underside_y_bias": 0.32,
 			"hp": 550.0,
 			"weight": 380.0,
 			"metal": 145,
@@ -940,6 +947,9 @@ static func get_catalog() -> Dictionary:
 			# is working close to shore/in shallows a bigger warship can't
 			# reach, well under SHALLOW_WATER_DRAUGHT_THRESHOLD.
 			"draught": 0.35,
+			# Same keel-vs-box-bottom gap as naval_hull (build_ship_hull's
+			# shared geometry) - see get_underside_y_bias().
+			"underside_y_bias": 0.2,
 			"hp": 220.0,
 			"weight": 130.0,
 			"metal": 55,
@@ -962,6 +972,9 @@ static func get_catalog() -> Dictionary:
 			# shallow water at all (see get_hull_draught()), not just
 			# penalized for trying.
 			"draught": 1.8,
+			# Same keel-vs-box-bottom gap as naval_hull (build_ship_hull's
+			# shared geometry) - see get_underside_y_bias().
+			"underside_y_bias": 0.38,
 			"hp": 900.0,
 			"weight": 680.0,
 			"metal": 255,
@@ -1000,6 +1013,17 @@ static func get_catalog() -> Dictionary:
 			# so it wants a locomotion flavor with a very high
 			# base_weight_capacity and a low thrust_coefficient, not just a
 			# reskinned fixed-wing airframe.
+			# Visual bug pass finding: the ellipsoid envelope's Y-extent at
+			# the sides (where underside-mounted locomotion like wheels
+			# actually attaches) is far less than at center - a naive box-
+			# bottom mount floated visibly below the envelope. Approximated
+			# with the same 0.4x-halfHeight gap the ship hulls use (a
+			# curved-envelope silhouette has a similar "less depth away
+			# from center" shape) - this combo (wheels/legs on an airship)
+			# is nonsensical enough that an exact ellipse fit isn't worth
+			# the complexity, "no longer floating in obvious empty space"
+			# is the actual bar.
+			"underside_y_bias": 0.6,
 			"hp": 480.0,
 			"weight": 260.0,
 			"metal": 95,
@@ -1345,6 +1369,16 @@ const SHALLOW_WATER_DRAUGHT_THRESHOLD: float = 1.0
 
 static func get_hull_draught(hull_type_id: String) -> float:
 	return get_module_data(hull_type_id).get("draught", HULL_DRAUGHT_DEFAULT)
+
+# Visual bug pass finding: module_placer.gd's underside-mount locomotion
+# placement (wheels/legs/hover_engine/anti_grav) assumes a hull's visual
+# bottom sits exactly at its collision box's -halfHeight - true for the
+# wedge/box-ish hulls (medium_hull, sponson_hull, etc.) but not for hulls
+# whose mesh doesn't fill its box symmetrically (ship hulls' tapered keel,
+# airship_hull's curved envelope). Default 0.0 - only the 4 hulls that
+# actually need it carry a nonzero value; every box-ish hull is unaffected.
+static func get_underside_y_bias(hull_type_id: String) -> float:
+	return get_module_data(hull_type_id).get("underside_y_bias", 0.0)
 
 # Continuous alternative to get_mount_style()'s discrete facet matching,
 # for real mount-hardware decisions (module_placer.gd's actual weapon

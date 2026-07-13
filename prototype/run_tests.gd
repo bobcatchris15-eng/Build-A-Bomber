@@ -34,6 +34,7 @@ func _init():
 	success = success and await test_designer_camera_pan()
 	success = success and await test_locomotion_tweak_parity()
 	success = success and await test_new_locomotion_types_spawn_and_differentiate()
+	success = success and await test_ship_hull_locomotion_mount_gap_fix()
 	success = success and await test_undo_redo()
 	success = success and await test_foundation_design_lab_parity()
 	success = success and await test_fortress_wall_foundation_spawns_correctly()
@@ -870,6 +871,84 @@ func test_new_locomotion_types_spawn_and_differentiate() -> bool:
 		return false
 
 	print("  [PASS] buoyant_envelope and screw_drive both spawn real matched pairs via update_locomotion(), and their catalog stats/traits reflect their real-world distinct character.")
+	return true
+
+func test_ship_hull_locomotion_mount_gap_fix() -> bool:
+	print("Running Test Suite: Visual Bug Pass - Ship/Airship Hull Locomotion No Longer Floats Below The Mesh...")
+
+	# Catalog-level: only the 4 hulls whose mesh doesn't fill its collision
+	# box symmetrically (ship taper, airship ellipsoid) carry a nonzero
+	# bias; every box-ish hull is untouched.
+	for hull_id in ["naval_hull", "small_boat_hull", "heavy_cruiser_hull", "airship_hull"]:
+		if ModuleCatalog.get_underside_y_bias(hull_id) <= 0.0:
+			print("  [FAIL] %s should carry a nonzero underside_y_bias (visual bug pass fix)." % hull_id)
+			return false
+	if ModuleCatalog.get_underside_y_bias("medium_hull") != 0.0:
+		print("  [FAIL] medium_hull (a plain box-ish hull) should NOT have a bias - the fix shouldn't touch hulls that were already fine.")
+		return false
+
+	# End-to-end: placing wheels on naval_hull via the real module_placer.gd
+	# path should mount them measurably HIGHER than the naive box-bottom
+	# calculation would put them - the actual regression this bug pass fixed.
+	var hull = StaticBody3D.new()
+	hull.name = "Hull"
+	root.add_child(hull)
+	hull.set_meta("type_id", "naval_hull")
+	var col_shape = CollisionShape3D.new()
+	var box = BoxShape3D.new()
+	box.size = ModuleCatalog.get_module_data("naval_hull").size
+	col_shape.shape = box
+	hull.add_child(col_shape)
+
+	var placer = Node3D.new()
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	placer.hull = hull
+	root.add_child(placer)
+	await process_frame
+
+	placer.update_locomotion("wheels", {})
+	await process_frame
+	var wheel_y = 0.0
+	var found_wheel = false
+	for child in hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "wheels":
+			wheel_y = child.position.y
+			found_wheel = true
+			break
+	var naive_y = -box.size.y / 2.0 - 0.8
+	if not found_wheel:
+		print("  [FAIL] wheels should spawn on naval_hull.")
+		placer.queue_free(); hull.queue_free()
+		return false
+	if wheel_y <= naive_y:
+		print("  [FAIL] wheels on naval_hull should mount higher than the naive box-bottom calculation (", naive_y, "), got ", wheel_y, " - the underside_y_bias fix isn't being applied.")
+		placer.queue_free(); hull.queue_free()
+		return false
+
+	# naval_propeller's stern position should no longer sit at the exact
+	# hull_size.z/2.0 edge (past the keel's real taper) - the other half of
+	# this bug pass's fix.
+	placer.update_locomotion("naval_propeller", {})
+	await process_frame
+	var prop_z = 0.0
+	var found_prop = false
+	for child in hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "naval_propeller":
+			prop_z = child.position.z
+			found_prop = true
+			break
+	if not found_prop:
+		print("  [FAIL] naval_propeller should spawn on naval_hull.")
+		placer.queue_free(); hull.queue_free()
+		return false
+	if abs(prop_z - box.size.z / 2.0) < 0.01:
+		print("  [FAIL] naval_propeller should no longer mount at the exact stern edge (hull_size.z/2.0=", box.size.z / 2.0, ") - got ", prop_z, ", which is the old buggy position past the keel's real taper.")
+		placer.queue_free(); hull.queue_free()
+		return false
+
+	placer.queue_free()
+	hull.queue_free()
+	print("  [PASS] Wheels/naval_propeller on ship-shaped hulls now mount measurably closer to the real hull mesh instead of floating below/behind it.")
 	return true
 
 func test_terrain_types_differentiate_locomotion() -> bool:
