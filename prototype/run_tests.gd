@@ -98,6 +98,7 @@ func _init():
 	success = success and await test_map_twin_bridges_smoke()
 	success = success and await test_map_twin_summits_smoke()
 	success = success and await test_map_close_quarters_smoke()
+	success = success and await test_map_urban_sprawl_smoke()
 	success = success and await test_weapon_traverse_and_range_differentiation()
 	success = success and await test_weight_vs_locomotion_capacity_penalty()
 	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
@@ -4553,6 +4554,13 @@ func test_map_close_quarters_smoke() -> bool:
 	var ok = await _smoke_test_map("close_quarters")
 	if ok:
 		print("  [PASS] Close Quarters: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
+	return ok
+
+func test_map_urban_sprawl_smoke() -> bool:
+	print("Running Test Suite: Map Smoke Test - Urban Sprawl (start points legal, resources reachable through the street grid, HQs mutually reachable, economy loop works)...")
+	var ok = await _smoke_test_map("urban_sprawl")
+	if ok:
+		print("  [PASS] Urban Sprawl: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
 	return ok
 
 func test_weapon_traverse_and_range_differentiation() -> bool:

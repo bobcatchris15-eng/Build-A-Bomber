@@ -365,6 +365,56 @@ const MAPS = {
 			"harvester": Vector3(-5, 0.5, -22),
 		},
 	},
+
+	# Map variety batch: the urban/city map. A loose street grid of
+	# "building" obstacles (see terrain_builder.gd's _spawn_building_
+	# obstacle()) fills the central band between the two bases - real
+	# cover that blocks both movement (navmesh hole, same as any obstacle)
+	# and sightlines (skirmish.gd's new _has_line_of_sight() raycast,
+	# since buildings are StaticBody3D on the same collision layer 1 every
+	# obstacle already uses). 10-unit streets between every building (>=
+	# 2 grid cells, comfortable navmesh room) so the grid is a genuine
+	# maze of corridors, not a solid unwalkable block. The center row
+	# deliberately skips x=0 (an open plaza) so there's always at least
+	# one direct lane through the middle, and a resource node sits in
+	# that plaza specifically BECAUSE it's not visible from either base
+	# past the surrounding buildings - has to be scouted/fought for, the
+	# actual point of the sightline-blocking mechanic.
+	"urban_sprawl": {
+		"name": "Urban Sprawl",
+		"description": "A city block grid fills the middle of the map - real buildings that block movement AND sightlines, not just decoration. Fight street to street; a contested resource sits in the central plaza, hidden from both bases until someone scouts it.",
+		"map_half_extents": 68.0,
+		"ground_color": Color(0.2, 0.2, 0.22),
+		"water_areas": [],
+		"elevation_zones": [],
+		"obstacles": [
+			{"center": Vector3(-20, 0, -20), "half_extents": Vector2(5, 5), "type": "building", "building_height": 6.0},
+			{"center": Vector3(0, 0, -20), "half_extents": Vector2(5, 5), "type": "building", "building_height": 7.0},
+			{"center": Vector3(20, 0, -20), "half_extents": Vector2(5, 5), "type": "building", "building_height": 5.0},
+			{"center": Vector3(-20, 0, 0), "half_extents": Vector2(5, 5), "type": "building", "building_height": 8.0},
+			{"center": Vector3(20, 0, 0), "half_extents": Vector2(5, 5), "type": "building", "building_height": 6.0},
+			{"center": Vector3(-20, 0, 20), "half_extents": Vector2(5, 5), "type": "building", "building_height": 5.0},
+			{"center": Vector3(0, 0, 20), "half_extents": Vector2(5, 5), "type": "building", "building_height": 7.0},
+			{"center": Vector3(20, 0, 20), "half_extents": Vector2(5, 5), "type": "building", "building_height": 6.0},
+		],
+		"resource_nodes": [
+			{"position": Vector3(-15, 0, 55), "type": "metal", "amount": 1100},
+			{"position": Vector3(15, 0, 55), "type": "metal", "amount": 1100},
+			{"position": Vector3(0, 0, 60), "type": "crystal", "amount": 800},
+			{"position": Vector3(15, 0, -55), "type": "metal", "amount": 1100},
+			{"position": Vector3(-15, 0, -55), "type": "metal", "amount": 1100},
+			{"position": Vector3(0, 0, -60), "type": "crystal", "amount": 800},
+			{"position": Vector3(0, 0, 0), "type": "crystal", "amount": 900},
+		],
+		"player_start": {
+			"hq": Vector3(0, 0, 50), "factory": Vector3(-10, 0, 44), "refinery": Vector3(9, 0, 42),
+			"harvester": Vector3(6, 0.5, 36),
+		},
+		"enemy_start": {
+			"hq": Vector3(0, 0, -50), "factory": Vector3(10, 0, -44), "refinery": Vector3(-9, 0, -42),
+			"harvester": Vector3(-6, 0.5, -36),
+		},
+	},
 }
 
 const DEFAULT_MAP_ID: String = "lake_crossing"
