@@ -14,6 +14,9 @@ extends Control
 
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const UITheme = preload("res://scripts/ui_theme.gd")
+
+var bg_rect: ColorRect
 
 # Built in _ready() from FactionCatalog.get_ids() (all 10 factions), not a
 # hardcoded 3-item const - adding an 11th faction later needs zero changes
@@ -44,10 +47,9 @@ func _ready():
 		FACTIONS.append(fac_id)
 		FACTION_LABELS.append("%s - %s" % [FactionCatalog.get_faction_name(fac_id), FactionCatalog.get_passive(fac_id, "passive_summary", "")])
 
-	var bg = ColorRect.new()
-	bg.color = Color(0.07, 0.09, 0.12)
-	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(bg)
+	bg_rect = ColorRect.new()
+	bg_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(bg_rect)
 
 	var root_vbox = VBoxContainer.new()
 	root_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -73,6 +75,10 @@ func _ready():
 	root_vbox.add_child(grid)
 
 	player_faction_btn = _add_dropdown(grid, "Your Faction", FACTION_LABELS)
+	# Live UI re-theme: the whole screen's brushed-aluminum chrome shifts to
+	# match whichever faction the player picks, right in this dropdown -
+	# the most direct possible proof the theme is faction-driven, not fixed.
+	player_faction_btn.item_selected.connect(func(_i): _refresh_theme())
 	enemy_faction_btn = _add_dropdown(grid, "Enemy Faction", FACTION_LABELS)
 	var default_enemy_idx = FACTIONS.find("technocrats") # matches the old hardcoded enemy default
 	if default_enemy_idx >= 0:
@@ -134,6 +140,18 @@ func _ready():
 	start_btn.modulate = Color(0.5, 1.0, 0.5)
 	start_btn.pressed.connect(_on_start_pressed)
 	button_row.add_child(start_btn)
+
+	_refresh_theme()
+
+func _refresh_theme():
+	var idx = player_faction_btn.selected
+	var faction = FACTIONS[idx] if idx >= 0 and idx < FACTIONS.size() else "auto"
+	if faction == "auto":
+		var match_config = get_node_or_null("/root/MatchConfig")
+		faction = FactionCatalog.DEFAULT_FACTION
+		if match_config and "player_faction" in match_config and match_config.player_faction != "":
+			faction = match_config.player_faction
+	UITheme.apply_brushed_panel(bg_rect, faction)
 
 func _add_dropdown(parent: Control, label_text: String, labels: PackedStringArray) -> OptionButton:
 	var label = Label.new()

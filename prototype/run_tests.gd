@@ -64,6 +64,7 @@ func _init():
 	success = success and await test_skirmish_economy_and_production()
 	success = success and await test_match_config_overrides_apply_to_skirmish()
 	success = success and await test_faction_catalog_and_hull_material()
+	success = success and await test_brushed_aluminum_ui_theme()
 	success = success and await test_new_faction_mechanical_bonuses()
 	success = success and await test_win_condition()
 	success = success and await test_energy_pool_and_generators()
@@ -2971,6 +2972,70 @@ func test_faction_catalog_and_hull_material() -> bool:
 	bp_manager.queue_free()
 
 	print("  [PASS] All 10 factions have complete visual identities, share one shader across every faction/armor-material combination, and a real reconstructed hull carries the correct faction-colored material.")
+	return true
+
+func test_brushed_aluminum_ui_theme() -> bool:
+	print("Running Test Suite: Faction Visual Identity - Brushed-Aluminum UI Theme...")
+	var UITheme = preload("res://scripts/ui_theme.gd")
+	var FactionCatalog = preload("res://scripts/faction_catalog.gd")
+
+	var panel = Panel.new()
+	root.add_child(panel)
+	UITheme.apply_brushed_panel(panel, "industrialists")
+	var mat_a = panel.material as ShaderMaterial
+	if not mat_a:
+		print("  [FAIL] apply_brushed_panel should assign a ShaderMaterial to the node's .material")
+		panel.queue_free()
+		return false
+	if mat_a.get_shader_parameter("faction_tint") != FactionCatalog.get_visual_color("industrialists"):
+		print("  [FAIL] Panel's faction_tint should match industrialists' catalog color")
+		panel.queue_free()
+		return false
+
+	# Re-theming the SAME panel to a different faction should reuse the
+	# existing ShaderMaterial (not allocate a new one each call) and update
+	# its tint - this is what match_setup.gd's live dropdown re-theme relies on.
+	UITheme.apply_brushed_panel(panel, "cybernetics")
+	var mat_b = panel.material as ShaderMaterial
+	if mat_b != mat_a:
+		print("  [FAIL] Re-theming the same panel should reuse its existing ShaderMaterial instance, not replace it")
+		panel.queue_free()
+		return false
+	if mat_b.get_shader_parameter("faction_tint") != FactionCatalog.get_visual_color("cybernetics"):
+		print("  [FAIL] After re-theming, faction_tint should now match cybernetics' catalog color, got ", mat_b.get_shader_parameter("faction_tint"))
+		panel.queue_free()
+		return false
+
+	# Real screen check: MatchSetup.tscn's background should carry the
+	# brushed shader from the moment it loads (not just when a helper is
+	# called in isolation).
+	var setup_scene = preload("res://scenes/MatchSetup.tscn").instantiate()
+	root.add_child(setup_scene)
+	current_scene = setup_scene
+	await process_frame
+	await process_frame
+	if not (setup_scene.bg_rect.material is ShaderMaterial):
+		print("  [FAIL] MatchSetup.tscn's background should have the brushed-aluminum ShaderMaterial applied on load")
+		panel.queue_free()
+		setup_scene.queue_free()
+		return false
+	# Switching the faction dropdown should re-theme the background live.
+	var before_tint = setup_scene.bg_rect.material.get_shader_parameter("faction_tint")
+	var zealots_idx = setup_scene.FACTIONS.find("zealots")
+	setup_scene.player_faction_btn.selected = zealots_idx
+	setup_scene.player_faction_btn.item_selected.emit(zealots_idx)
+	await process_frame
+	var after_tint = setup_scene.bg_rect.material.get_shader_parameter("faction_tint")
+	if before_tint == after_tint or after_tint != FactionCatalog.get_visual_color("zealots"):
+		print("  [FAIL] Picking 'Zealots' in the faction dropdown should live-retint MatchSetup's background to zealots' color, got before=", before_tint, " after=", after_tint)
+		panel.queue_free()
+		setup_scene.queue_free()
+		return false
+
+	panel.queue_free()
+	setup_scene.queue_free()
+	await process_frame
+	print("  [PASS] Brushed-aluminum panels apply faction-correct shader params, reuse their ShaderMaterial on re-theme, and MatchSetup's background live-retints when the faction dropdown changes.")
 	return true
 
 func test_new_faction_mechanical_bonuses() -> bool:

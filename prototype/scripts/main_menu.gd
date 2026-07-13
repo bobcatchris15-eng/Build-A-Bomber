@@ -2,11 +2,21 @@ extends Control
 # Title screen tying the game loop together:
 # Design Lab (build blueprints) -> Skirmish (fight with them) -> repeat.
 
+const UITheme = preload("res://scripts/ui_theme.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+
 func _ready():
 	var bg = ColorRect.new()
-	bg.color = Color(0.07, 0.09, 0.12)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
+	# Brushed-aluminum chrome, tinted to whichever faction the player last
+	# configured a match with (MatchConfig persists across scene changes) -
+	# falls back to the default faction if no match has been set up yet.
+	var match_config = get_node_or_null("/root/MatchConfig")
+	var faction = FactionCatalog.DEFAULT_FACTION
+	if match_config and "player_faction" in match_config and match_config.player_faction != "":
+		faction = match_config.player_faction
+	UITheme.apply_brushed_panel(bg, faction)
 
 	var vbox = VBoxContainer.new()
 	vbox.set_anchors_preset(Control.PRESET_CENTER)

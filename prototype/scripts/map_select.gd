@@ -14,12 +14,18 @@ extends Control
 # already exists to avoid.
 
 const MapCatalog = preload("res://scripts/map_catalog.gd")
+const UITheme = preload("res://scripts/ui_theme.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 func _ready():
 	var bg = ColorRect.new()
-	bg.color = Color(0.07, 0.09, 0.12)
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
+	var match_config = get_node_or_null("/root/MatchConfig")
+	var faction = FactionCatalog.DEFAULT_FACTION
+	if match_config and "player_faction" in match_config and match_config.player_faction != "":
+		faction = match_config.player_faction
+	UITheme.apply_brushed_panel(bg, faction)
 
 	var root_vbox = VBoxContainer.new()
 	root_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)

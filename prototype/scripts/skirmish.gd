@@ -5,6 +5,7 @@ extends Node3D
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const UITheme = preload("res://scripts/ui_theme.gd")
 const BattleUnitScript = preload("res://scripts/battle_unit.gd")
 const BuildingScript = preload("res://scripts/building.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
@@ -624,6 +625,17 @@ func _build_ui():
 	ui.name = "UI"
 	add_child(ui)
 
+	# Brushed-aluminum chrome behind the top info strip, tinted to the
+	# player's own faction - added first so it renders behind the labels.
+	var top_bar_bg = PanelContainer.new()
+	top_bar_bg.anchor_left = 0.0
+	top_bar_bg.anchor_right = 1.0
+	top_bar_bg.anchor_top = 0.0
+	top_bar_bg.anchor_bottom = 0.0
+	top_bar_bg.offset_bottom = 68
+	ui.add_child(top_bar_bg)
+	UITheme.apply_brushed_panel(top_bar_bg, player_faction, 0.4)
+
 	resource_label = Label.new()
 	resource_label.position = Vector2(20, 14)
 	resource_label.add_theme_font_size_override("font_size", 22)
@@ -650,6 +662,7 @@ func _build_ui():
 	bar_bg.anchor_right = 1.0
 	bar_bg.offset_top = -96
 	ui.add_child(bar_bg)
+	UITheme.apply_brushed_panel(bar_bg, player_faction, 0.4)
 
 	var scroll = ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO

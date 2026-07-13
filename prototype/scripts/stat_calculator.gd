@@ -2,6 +2,9 @@ extends Control
 
 const ModuleData = preload("res://scripts/module_data.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const UITheme = preload("res://scripts/ui_theme.gd")
+
+@onready var sidebar_panel: Panel = $Panel
 
 @onready var hp_label = $ScrollContainer/VBoxContainer/HPLabel
 @onready var weight_label = $ScrollContainer/VBoxContainer/WeightLabel
@@ -135,6 +138,8 @@ var nose_taper_slider: HSlider
 
 func _ready():
 	add_to_group("stat_ui")
+	if sidebar_panel:
+		UITheme.apply_brushed_panel(sidebar_panel, FactionCatalog.DEFAULT_FACTION)
 	mirror_checkbox.toggled.connect(_on_mirror_toggled)
 	delete_button.pressed.connect(_on_delete_pressed)
 	save_button.pressed.connect(_on_save_pressed)
@@ -406,6 +411,14 @@ func set_mirror_toggle(enabled: bool):
 		mirror_checkbox.set_pressed_no_signal(enabled)
 
 func update_stats(hull: Node3D):
+	# Brushed-aluminum sidebar chrome, re-tinted to whatever faction the
+	# hull currently carries - refreshed here (not just once in _ready())
+	# since update_stats() is exactly the function _on_faction_selected()
+	# already calls after every faction change.
+	var faction_for_theme = hull.get_meta("faction", FactionCatalog.DEFAULT_FACTION) if hull else FactionCatalog.DEFAULT_FACTION
+	if sidebar_panel:
+		UITheme.apply_brushed_panel(sidebar_panel, faction_for_theme)
+
 	var total_hp = 0.0
 	var total_weight = 0.0
 	var total_cost_metal = 0
