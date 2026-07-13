@@ -705,6 +705,43 @@ func update_locomotion(type_id: String, settings: Dictionary):
 					prop.get_meta("module_data").scale_multiplier = prop.scale
 				spawned_wheels.append(prop)
 
+	elif type_id == "buoyant_envelope":
+		# Twin small cruise-motor nacelles slung under the envelope, left/
+		# right - same wing-mounted-pod shape as fixed_wing_engine, but
+		# smaller and centered lower since it's steering/cruise thrust for
+		# a buoyant hull, not the sole source of lift.
+		var size = settings.get("size", 1.0)
+		var x_offset = hull_size.x * 0.15
+		var y_offset = -hull_size.y * 0.4
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
+			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.1)
+			var envelope_motor = _place_weapon(type_id, pos, side_normal)
+			if envelope_motor:
+				envelope_motor.scale = Vector3(1.0, size, size)
+				envelope_motor.rotation = Vector3.ZERO
+				if envelope_motor.has_meta("module_data"):
+					envelope_motor.get_meta("module_data").scale_multiplier = envelope_motor.scale
+				spawned_wheels.append(envelope_motor)
+
+	elif type_id == "screw_drive":
+		# Twin helical auger drums, one per side, mounted the same way
+		# tracked_treads is - replaces wheels/treads entirely.
+		var width = settings.get("width", 1.0)
+		var x_offset = hull_size.x / 2.0
+		var y_offset = -hull_size.y / 4.0
+		var drum_length = hull_size.z
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
+			var pos = hull.global_position + Vector3((x_offset + (catalog_data.size.x * width / 2.0) - 0.15) * side, y_offset, 0.0)
+			var drum = _place_weapon(type_id, pos, side_normal)
+			if drum:
+				drum.scale = Vector3(width, 1.0, drum_length / catalog_data.size.z)
+				drum.rotation = Vector3.ZERO
+				if drum.has_meta("module_data"):
+					drum.get_meta("module_data").scale_multiplier = drum.scale
+				spawned_wheels.append(drum)
+
 	# Adjust hull Y position in the editor to make wheels rest on floor
 	var wheels_offset = 0.0
 	if type_id == "wheels":

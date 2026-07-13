@@ -4,6 +4,33 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 — Air/sea hull + locomotion library expansion, part 1: 4 new hulls, buoyant airship drive, amphibious screw drive
+
+New batch: expand the hull/module library with an air and sea theme. This entry covers the hull and locomotion half; modules (wings, thrusters, props, paddle wheels, ship screws) are a following entry.
+
+### 4 new hulls
+
+- **`small_boat_hull`** - a fast patrol boat, naval_hull's smaller/sleeker sibling (sharper bow, ~55% the footprint).
+- **`heavy_cruiser_hull`** - naval_hull's bigger/heavier sibling, layered superstructure, twin funnels, real warship bulk.
+- **`fuselage_hull`** - a traditional plane: tapered fuselage tube + a separate attached wing slab, genuinely different from `flying_wing_hull`'s single blended-wing-body convex hull (no fuselage/wing break at all).
+- **`airship_hull`** - a rigid dirigible: cigar/teardrop gasbag envelope, slung gondola on struts, tail fin cross. The only hull silhouette in the roster implying buoyant lift.
+
+All four built via `tools/blender/build_meshes.py` (two new builder functions, `build_fuselage_hull`/`build_airship_hull`, plus two new size variants of the existing `build_ship_hull`), balance-checked (all land in the existing 0.69-0.86 hull value/cost band, no outliers), and verified one at a time with real 3/4-angle screenshots. See DECISIONS_NEEDED.md for a real "is it a bug?" detour on `heavy_cruiser_hull`'s first render (it wasn't a bug - the Design Lab's default camera angle just isn't representative).
+
+### Buoyant airship locomotion
+
+New `buoyant_envelope` locomotion type, deliberately NOT a reskin of `fixed_wing_engine` - an airship's lift is buoyancy, not thrust, so it gets its own catalog character: very high `base_weight_capacity` (1100, highest in the roster) and a new low `thrust_coefficient` (55.0). This required generalizing `battle_unit.gd`'s previously-hardcoded universal `150.0` thrust constant into a per-locomotion-type catalog lookup (`ModuleCatalog.get_thrust_coefficient()`), mirroring the `base_weight_capacity` pattern - every existing locomotion type is unaffected (same 150.0 default).
+
+### Amphibious screw-drive locomotion
+
+New `screw_drive` locomotion type - a real historical screw-propelled vehicle (twin helical auger drums, new authored Blender part) that drives on land AND crosses water using the same drums. This needed a genuinely new capability, not just a flag: `terrain_builder.gd` now bakes a third navmesh (`amphibious_map`, alongside the existing ground/water maps) where water is walkable terrain instead of a hole, and `screw_drive` carries a new `"amphibious"` trait that routes it there via a duck-typed `get_amphibious_nav_map()` (same pattern as the existing ground/water getters). Verified with a real path-length comparison proving the amphibious map lets a unit cross a lake directly while the ground-only map is forced into a detour - not just "no error was thrown."
+
+### Verification
+
+69/69 tests green (5 new this entry). A real RID leak this work introduced (a test that calls `build_navmeshes()` directly, bypassing Skirmish's own cleanup, hadn't been updated for the new amphibious map/region) was caught and fixed the same way past navmesh leaks in this project have been - by the test suite itself, not silently. Screenshots: `progress_captures/2026-07-13/new_air_sea_hulls/` and `progress_captures/2026-07-13/new_locomotion/`.
+
+---
+
 ## 2026-07-13 (cont'd 2) — Final verification: pintle correction + traverse/range/weight batch
 
 Wraps up the four-item batch Chris queued while the angled-pintle-mount work was mid-flight: the per-weapon-type pintle correction, traverse rate differentiation, range tweak coverage, and vehicle weight capacity - see the three entries below this one for each item's own detail.

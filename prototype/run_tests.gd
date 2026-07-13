@@ -33,6 +33,7 @@ func _init():
 	success = success and await test_no_dead_tweaks()
 	success = success and await test_designer_camera_pan()
 	success = success and await test_locomotion_tweak_parity()
+	success = success and await test_new_locomotion_types_spawn_and_differentiate()
 	success = success and await test_undo_redo()
 	success = success and await test_foundation_design_lab_parity()
 	success = success and await test_fortress_wall_foundation_spawns_correctly()
@@ -81,6 +82,7 @@ func _init():
 	success = success and await test_unit_order_move_actually_navigates_around_the_lake()
 	success = success and await test_terrain_builder_pure_functions()
 	success = success and await test_terrain_builder_navmesh_ramp_connects()
+	success = success and await test_amphibious_navmesh_crosses_water()
 	success = success and await test_elevation_combat_and_vision_bonus()
 	success = success and await test_build_placement_rejects_water_and_obstacles()
 	success = success and await test_map_open_plains_smoke()
@@ -820,6 +822,50 @@ func test_locomotion_tweak_parity() -> bool:
 
 	gizmo_probe_parent.queue_free()
 	print("  [PASS] Locomotion size tweaks (legs/anti_grav/hover_engine) and gizmo axis mappings verified.")
+	return true
+
+func test_new_locomotion_types_spawn_and_differentiate() -> bool:
+	print("Running Test Suite: New Locomotion Types (buoyant_envelope/screw_drive) Spawn + Differentiate...")
+
+	for type_id in ["buoyant_envelope", "screw_drive"]:
+		var hull = StaticBody3D.new()
+		hull.name = "Hull"
+		root.add_child(hull)
+		var placer = Node3D.new()
+		placer.set_script(preload("res://scripts/module_placer.gd"))
+		placer.hull = hull
+		root.add_child(placer)
+		await process_frame
+
+		placer.update_locomotion(type_id, {})
+		await process_frame
+		var count = 0
+		for child in hull.get_children():
+			if child.has_meta("module_data") and child.get_meta("module_data").type_id == type_id:
+				count += 1
+		placer.queue_free(); hull.queue_free()
+		if count < 2:
+			print("  [FAIL] %s: update_locomotion() should spawn a real left/right pair, got %d" % [type_id, count])
+			return false
+
+	# buoyant_envelope: real buoyant-lift character (task/DECISIONS_NEEDED.md
+	# judgment call) - low thrust (small cruise motors, buoyancy does the
+	# lifting) but very high weight_capacity (buoyancy scales generously),
+	# opposite of a thrust-driven flyer like fixed_wing_engine.
+	if ModuleCatalog.get_thrust_coefficient("buoyant_envelope") >= ModuleCatalog.get_thrust_coefficient("fixed_wing_engine"):
+		print("  [FAIL] buoyant_envelope should have a lower thrust_coefficient than fixed_wing_engine (buoyancy does the lifting, not the motors).")
+		return false
+	if ModuleCatalog.get_base_weight_capacity("buoyant_envelope") <= ModuleCatalog.get_base_weight_capacity("fixed_wing_engine"):
+		print("  [FAIL] buoyant_envelope should have a higher base_weight_capacity than fixed_wing_engine (buoyancy scales generously with envelope size).")
+		return false
+
+	# screw_drive: genuinely amphibious trait composition, not hard-gated.
+	var screw_traits = ModuleCatalog.get_traits("medium_hull", "screw_drive")
+	if "ground_contact" not in screw_traits or "amphibious" not in screw_traits:
+		print("  [FAIL] screw_drive should carry BOTH ground_contact and amphibious traits, got ", screw_traits)
+		return false
+
+	print("  [PASS] buoyant_envelope and screw_drive both spawn real matched pairs via update_locomotion(), and their catalog stats/traits reflect their real-world distinct character.")
 	return true
 
 func test_undo_redo() -> bool:
@@ -3717,13 +3763,63 @@ func test_terrain_builder_navmesh_ramp_connects() -> bool:
 		NavigationServer3D.free_rid(nav.ground_region)
 		if nav.water_region.is_valid():
 			NavigationServer3D.free_rid(nav.water_region)
+		NavigationServer3D.free_rid(nav.amphibious_region)
 		NavigationServer3D.free_rid(nav.ground_map)
 		NavigationServer3D.free_rid(nav.water_map)
+		NavigationServer3D.free_rid(nav.amphibious_map)
 		if path.size() < 2 or max_y < 5.0:
 			print("  [FAIL] ramp_side='", d.side, "' should produce a real path reaching the plateau (max Y >= 5.0), got ", path.size(), " points, max_y=", max_y)
 			return false
 
 	print("  [PASS] All 4 ramp directions (north/south/east/west) produce a real connected path from ground level up to the plateau.")
+	return true
+
+func test_amphibious_navmesh_crosses_water() -> bool:
+	print("Running Test Suite: Amphibious Navmesh - screw_drive Crosses Water In One Continuous Path...")
+	var map_def = {
+		"map_half_extents": 80.0,
+		"water_areas": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(15, 40)}],
+		"obstacles": [], "elevation_zones": [],
+	}
+	var nav = TerrainBuilder.build_navmeshes(map_def)
+	await process_frame
+	await process_frame
+
+	var start = Vector3(-30, 0, 0)
+	var goal = Vector3(30, 0, 0)
+	var ground_path = NavigationServer3D.map_get_path(nav.ground_map, start, goal, true)
+	var amphibious_path = NavigationServer3D.map_get_path(nav.amphibious_map, start, goal, true)
+
+	NavigationServer3D.free_rid(nav.ground_region)
+	if nav.water_region.is_valid():
+		NavigationServer3D.free_rid(nav.water_region)
+	NavigationServer3D.free_rid(nav.amphibious_region)
+	NavigationServer3D.free_rid(nav.ground_map)
+	NavigationServer3D.free_rid(nav.water_map)
+	NavigationServer3D.free_rid(nav.amphibious_map)
+
+	# On ground_map (the water area is a hole), a straight line through the
+	# 30-unit-wide lake isn't available - any real path has to detour a long
+	# way around, or navigation may not even find a full route depending on
+	# map bounds. On amphibious_map (water is walkable), the direct route
+	# straight across is available - proof this is a genuinely different,
+	# wider-terrain map, not a copy of ground_map.
+	var ground_dist = 0.0
+	for i in range(1, ground_path.size()):
+		ground_dist += ground_path[i - 1].distance_to(ground_path[i])
+	var amphibious_dist = 0.0
+	for i in range(1, amphibious_path.size()):
+		amphibious_dist += amphibious_path[i - 1].distance_to(amphibious_path[i])
+	var direct_dist = start.distance_to(goal)
+
+	if amphibious_path.size() < 2 or amphibious_dist > direct_dist * 1.1:
+		print("  [FAIL] Amphibious path should go essentially straight across the water (direct=", direct_dist, "), got ", amphibious_dist, " over ", amphibious_path.size(), " points.")
+		return false
+	if ground_path.size() >= 2 and ground_dist < amphibious_dist * 1.5:
+		print("  [FAIL] Ground-only path should detour meaningfully around the water instead of cutting through it like the amphibious path did. ground_dist=", ground_dist, " amphibious_dist=", amphibious_dist)
+		return false
+
+	print("  [PASS] Amphibious navmesh lets a screw_drive unit cross water directly (", amphibious_dist, " units), while the ground-only map can't take the same shortcut.")
 	return true
 
 func test_elevation_combat_and_vision_bonus() -> bool:

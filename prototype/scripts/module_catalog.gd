@@ -617,6 +617,60 @@ static func get_catalog() -> Dictionary:
 			"color": Color.TEAL,
 			"traits": ["buoyant", "naval"]
 		},
+		"buoyant_envelope": {
+			"name": "Buoyant Envelope Drive",
+			"category": "locomotion",
+			# Airship judgment call (see DECISIONS_NEEDED.md): a rigid
+			# airship's lift comes from displacing air with a lighter-than-
+			# air gasbag, not from a propeller/engine actively fighting
+			# gravity like every other airborne locomotion type - so it
+			# gets its own distinct locomotion flavor rather than reusing
+			# fixed_wing_engine, specifically so that distinction can show
+			# up in the two systems that just got built to care about it:
+			# a very high base_weight_capacity (buoyancy scales generously
+			# with envelope size, so it can carry proportionally far more
+			# before the overload penalty) and a low thrust_coefficient
+			# (small cruise/steering motors only - lift is free, so it
+			# never needed big engines, and it's slow as a direct
+			# consequence, not a hand-tuned speed stat).
+			"hp": 40.0,
+			"weight": 35.0,
+			"metal": 25,
+			"crystal": 15,
+			"dps": 0.0,
+			"base_weight_capacity": 1100.0,
+			"thrust_coefficient": 55.0,
+			"size": Vector3(1.0, 0.5, 1.0),
+			"color": Color(0.75, 0.72, 0.6),
+			"traits": ["airborne", "buoyant"]
+		},
+		"screw_drive": {
+			"name": "Amphibious Screw Drive",
+			"category": "locomotion",
+			# Real historical "screw-propelled vehicle" (SPV) locomotion -
+			# Soviet ZIL screw-drive trucks, the Fordson "Snow Devil" - twin
+			# helical auger drums replace wheels/tracks entirely, letting
+			# the vehicle churn through mud, snow, swamp, AND open water
+			# using the exact same drums. Genuinely amphibious per the
+			# no-hard-gating trait philosophy: carries BOTH "ground_contact"
+			# (it drives on land like any tracked vehicle) and "amphibious"
+			# (it also crosses water - routed onto a real combined
+			# ground+water navmesh, see terrain_builder.gd's
+			# build_navmeshes()/skirmish.gd's get_amphibious_nav_map()).
+			# Slower and heavier than plain tracked_treads (churning
+			# through mud/water is not a speed proposition) but tolerates
+			# real payload like a tracked vehicle would.
+			"hp": 160.0,
+			"weight": 150.0,
+			"metal": 55,
+			"crystal": 15,
+			"dps": 0.0,
+			"base_weight_capacity": 600.0,
+			"thrust_coefficient": 110.0,
+			"size": Vector3(1.1, 0.9, 3.4),
+			"color": Color(0.32, 0.3, 0.24),
+			"traits": ["ground_contact", "amphibious"]
+		},
 
 		# --- HULL SIZE CLASSES ---
 		"light_hull": {
@@ -767,6 +821,77 @@ static func get_catalog() -> Dictionary:
 			"base_vision": 17.0,
 			"size": Vector3(6.5, 1.6, 7.5),
 			"color": Color(0.38, 0.36, 0.32)
+		},
+		"small_boat_hull": {
+			"name": "Small Boat Hull",
+			"category": "hull",
+			# A fast patrol boat - naval_hull's little sibling. Sharper bow
+			# (bow_frac=0.5 vs naval_hull's 0.35) and a much smaller
+			# footprint for a genuinely different niche (scout/raider) than
+			# just a smaller version of the same silhouette.
+			"hp": 220.0,
+			"weight": 130.0,
+			"metal": 55,
+			"crystal": 10,
+			"dps": 0.0,
+			"base_energy": 30.0,
+			"base_vision": 22.0,
+			"size": Vector3(2.0, 1.0, 5.0),
+			"color": Color(0.4, 0.42, 0.44)
+		},
+		"heavy_cruiser_hull": {
+			"name": "Heavy Cruiser Hull",
+			"category": "hull",
+			# naval_hull's big sibling - layered superstructure, twin
+			# funnels, real warship bulk. Sits above naval_hull in the same
+			# way heavy_hull sits above medium_hull.
+			"hp": 900.0,
+			"weight": 680.0,
+			"metal": 255,
+			"crystal": 50,
+			"dps": 0.0,
+			"base_energy": 110.0,
+			"base_vision": 15.0,
+			"size": Vector3(4.4, 1.9, 10.5),
+			"color": Color(0.3, 0.32, 0.34)
+		},
+		"fuselage_hull": {
+			"name": "Fuselage Hull",
+			"category": "hull",
+			# Traditional plane: a tapered fuselage tube + separate attached
+			# wing slab, unlike flying_wing_hull's blended-wing-body (no
+			# fuselage/wing break at all). Positioned as the tougher/heavier
+			# fixed-wing airframe - flying_wing_hull is the fast/light
+			# interceptor-style airframe, this is the bomber/cargo-style one.
+			"hp": 300.0,
+			"weight": 210.0,
+			"metal": 80,
+			"crystal": 18,
+			"dps": 0.0,
+			"base_energy": 45.0,
+			"base_vision": 20.0,
+			"size": Vector3(4.2, 1.2, 6.2),
+			"color": Color(0.6, 0.6, 0.62)
+		},
+		"airship_hull": {
+			"name": "Airship Hull",
+			"category": "hull",
+			# Rigid dirigible: cigar/teardrop gasbag envelope + slung
+			# gondola. Pairs with the new buoyant_envelope locomotion (see
+			# its own catalog comment and DECISIONS_NEEDED.md) rather than
+			# fixed_wing_engine - buoyant lift, not thrust fighting gravity,
+			# so it wants a locomotion flavor with a very high
+			# base_weight_capacity and a low thrust_coefficient, not just a
+			# reskinned fixed-wing airframe.
+			"hp": 480.0,
+			"weight": 260.0,
+			"metal": 95,
+			"crystal": 30,
+			"dps": 0.0,
+			"base_energy": 55.0,
+			"base_vision": 24.0,
+			"size": Vector3(4.0, 3.0, 9.5),
+			"color": Color(0.72, 0.7, 0.6)
 		},
 		"fortress_wall_foundation": {
 			"name": "Fortress Wall Foundation",
@@ -1019,6 +1144,22 @@ const BASE_WEIGHT_CAPACITY_DEFAULT: float = 400.0
 # penalty if the vehicle's total weight exceeds the sum.
 static func get_base_weight_capacity(type_id: String) -> float:
 	return get_module_data(type_id).get("base_weight_capacity", BASE_WEIGHT_CAPACITY_DEFAULT)
+
+# Per-locomotor-type thrust output. Every existing locomotion type used the
+# same flat 150.0-per-scaled-unit coefficient in battle_unit.gd's
+# _recalculate_move_speed() - fine when every locomotor's propulsion was
+# "an engine/motor fighting for speed," but buoyant_envelope's lift is
+# free (buoyancy, not thrust), so its actual engines are small
+# cruise/steering motors, not speed engines - it needed a genuinely lower
+# coefficient to read as "slow but can carry a lot" rather than identical
+# speed to everything else at the same weight. Defaults to the original
+# universal 150.0 for every locomotion type that doesn't set its own
+# (i.e. everything except buoyant_envelope/screw_drive) so this is a pure
+# generalization, not a behavior change for the existing roster.
+const THRUST_COEFFICIENT_DEFAULT: float = 150.0
+
+static func get_thrust_coefficient(type_id: String) -> float:
+	return get_module_data(type_id).get("thrust_coefficient", THRUST_COEFFICIENT_DEFAULT)
 
 # Continuous alternative to get_mount_style()'s discrete facet matching,
 # for real mount-hardware decisions (module_placer.gd's actual weapon

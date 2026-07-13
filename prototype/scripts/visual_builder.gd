@@ -1008,6 +1008,10 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		_build_fixed_wing_engine(parent_node, base_size, base_color)
 	elif type_id == "naval_propeller":
 		_build_naval_propeller(parent_node, base_size, base_color)
+	elif type_id == "buoyant_envelope":
+		_build_buoyant_envelope(parent_node, base_size, base_color)
+	elif type_id == "screw_drive":
+		_build_screw_drive(parent_node, base_size, base_color)
 
 	# Apply deformations to the newly constructed meshes based on the tweaks
 	_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
@@ -1306,6 +1310,81 @@ static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base
 		blade.position = Vector3(0, 0, base_size.z * 0.4)
 		blade.rotate_z(i * (TAU / 3.0))
 		parent_node.add_child(blade)
+
+
+static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# One small cruise-motor nacelle on an outrigger strut - deliberately
+	# modest (buoyancy does the actual lifting, this is just steering/
+	# cruise thrust), distinct from fixed_wing_engine's bigger nacelle. One
+	# instance per call, same convention as fixed_wing_engine/tracked_treads
+	# - update_locomotion() places a matched pair (left/right) so the
+	# vehicle's real weight/thrust contribution reflects two physical
+	# motors, not one asymmetric one.
+	var strut_mat = StandardMaterial3D.new()
+	strut_mat.albedo_color = base_color.darkened(0.3)
+	var nacelle_mat = StandardMaterial3D.new()
+	nacelle_mat.albedo_color = base_color.darkened(0.15)
+	nacelle_mat.metallic = 0.6
+	nacelle_mat.roughness = 0.35
+	var blade_mat = StandardMaterial3D.new()
+	blade_mat.albedo_color = Color.SILVER
+
+	var strut = MeshInstance3D.new()
+	var strut_box = BoxMesh.new()
+	strut_box.size = Vector3(base_size.x * 0.5, 0.04, 0.04)
+	strut.mesh = strut_box
+	strut.material_override = strut_mat
+	strut.position = Vector3(base_size.x * 0.25, 0, 0)
+	parent_node.add_child(strut)
+
+	var nacelle = MeshInstance3D.new()
+	var nacelle_cyl = CylinderMesh.new()
+	nacelle_cyl.top_radius = base_size.y * 0.3
+	nacelle_cyl.bottom_radius = base_size.y * 0.25
+	nacelle_cyl.height = base_size.z * 0.6
+	nacelle.mesh = nacelle_cyl
+	nacelle.material_override = nacelle_mat
+	nacelle.rotation = Vector3(PI / 2.0, 0, 0)
+	nacelle.position = Vector3(base_size.x * 0.5, 0, 0)
+	parent_node.add_child(nacelle)
+
+	for i in range(2):
+		var blade = MeshInstance3D.new()
+		var blade_box = BoxMesh.new()
+		blade_box.size = Vector3(0.02, base_size.y * 0.55, 0.08)
+		blade.mesh = blade_box
+		blade.material_override = blade_mat
+		blade.position = Vector3(base_size.x * 0.5, 0, -base_size.z * 0.35)
+		blade.rotate_z(i * (TAU / 2.0))
+		parent_node.add_child(blade)
+
+
+static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# One helical auger drum - the real distinguishing silhouette of an
+	# amphibious screw-propelled vehicle (see screw_drum's own comment in
+	# tools/blender/build_meshes.py for the historical reference). One
+	# instance per call, same convention as tracked_treads - update_
+	# locomotion() places a matched left/right pair.
+	var drum_mesh = _part("screw_drum")
+	var drum: MeshInstance3D
+	if drum_mesh:
+		# Authored along local Z already (tools/blender/build_meshes.py's
+		# build_screw_drum) - no runtime rotation needed, unlike
+		# wheel_hub/hover_ring which are authored Y-vertical.
+		drum = _mesh_inst(drum_mesh, base_color)
+		drum.scale = _fit_scale(Vector3(base_size.y * 0.85, base_size.y * 0.85, base_size.z), Vector3(0.29, 0.29, 1.6))
+	else:
+		drum = MeshInstance3D.new()
+		var drum_cyl = CylinderMesh.new()
+		drum_cyl.top_radius = base_size.y * 0.4
+		drum_cyl.bottom_radius = base_size.y * 0.4
+		drum_cyl.height = base_size.z
+		drum.mesh = drum_cyl
+		var drum_mat = StandardMaterial3D.new()
+		drum_mat.albedo_color = base_color
+		drum.material_override = drum_mat
+		drum.rotation = Vector3(PI / 2.0, 0, 0)
+	parent_node.add_child(drum)
 
 
 # MOUNTING_AND_ARMOR_SPEC.md #3: generic (not per-weapon-type-bespoke) mount

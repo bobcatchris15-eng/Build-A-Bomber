@@ -67,8 +67,14 @@ const FOG_TICK_INTERVAL: float = 0.3
 # _setup_navigation()/_steer_towards() for how units actually consume this.
 var ground_nav_map: RID
 var water_nav_map: RID
+# Amphibious (screw_drive locomotion) units path here instead - the same
+# ground grid PLUS water areas as walkable terrain, so a screw-drive unit
+# can cross a lake in one continuous route instead of being confined to
+# ground_nav_map like every other ground/legged type.
+var amphibious_nav_map: RID
 var _ground_nav_region: RID
 var _water_nav_region: RID
+var _amphibious_nav_region: RID
 
 # Multi-map architecture (this pass): the map itself - terrain layout,
 # resources, start points - is now data (MapCatalog), not hardcoded here.
@@ -343,8 +349,10 @@ func _setup_navigation():
 	var nav = TerrainBuilder.build_navmeshes(current_map)
 	ground_nav_map = nav.ground_map
 	water_nav_map = nav.water_map
+	amphibious_nav_map = nav.amphibious_map
 	_ground_nav_region = nav.ground_region
 	_water_nav_region = nav.water_region
+	_amphibious_nav_region = nav.amphibious_region
 
 	var half: float = current_map.get("map_half_extents", 80.0)
 	var ground = get_node_or_null("Ground")
@@ -382,10 +390,14 @@ func _exit_tree():
 		NavigationServer3D.free_rid(_ground_nav_region)
 	if _water_nav_region.is_valid():
 		NavigationServer3D.free_rid(_water_nav_region)
+	if _amphibious_nav_region.is_valid():
+		NavigationServer3D.free_rid(_amphibious_nav_region)
 	if ground_nav_map.is_valid():
 		NavigationServer3D.free_rid(ground_nav_map)
 	if water_nav_map.is_valid():
 		NavigationServer3D.free_rid(water_nav_map)
+	if amphibious_nav_map.is_valid():
+		NavigationServer3D.free_rid(amphibious_nav_map)
 
 # Duck-typed lookup, same pattern as get_ground_nav_map()/get_water_nav_map()
 # - battle_unit.gd/building.gd call this every tick (units) or once at
@@ -489,6 +501,11 @@ func get_ground_nav_map() -> RID:
 
 func get_water_nav_map() -> RID:
 	return water_nav_map
+
+# Same duck-typed pattern - only screw_drive (amphibious) units call this
+# (see battle_unit.gd's is_amphibious branch in _setup_navigation()).
+func get_amphibious_nav_map() -> RID:
+	return amphibious_nav_map
 
 # --- UI ---
 

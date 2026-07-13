@@ -188,11 +188,58 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 			_add_nav_quad(verts, q[0], q[1], q[2], q[3])
 	return verts
 
+# Same grid-quad sweep as _build_ground_faces(), but water is walkable
+# terrain here instead of a hole - only real obstacles and elevation-zone
+# footprints block it. This is what makes screw_drive locomotion (the
+# amphibious auger-drum type) genuinely different from a plain ground
+# unit: it can path straight across a lake in one continuous route instead
+# of being confined to ground_nav_map like every other ground/legged type.
+static func _build_amphibious_faces(map_def: Dictionary) -> PackedVector3Array:
+	var verts = PackedVector3Array()
+	var half: float = map_def.get("map_half_extents", 80.0)
+	var holes = []
+	for o in map_def.get("obstacles", []):
+		holes.append(_rect_from(o.center, o.half_extents))
+	for e in map_def.get("elevation_zones", []):
+		holes.append(_rect_from(e.center, e.half_extents))
+		var rg = _ramp_geometry(e, half)
+		holes.append({"x0": rg.x0, "x1": rg.x1, "z0": rg.z0, "z1": rg.z1})
+
+	var x = -half
+	while x < half:
+		var x1 = min(x + GRID_CELL, half)
+		var z = -half
+		while z < half:
+			var z1 = min(z + GRID_CELL, half)
+			var blocked = false
+			for h in holes:
+				if _rect_overlaps(x, x1, z, z1, h):
+					blocked = true
+					break
+			if not blocked:
+				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
+			z = z1
+		x = x1
+
+	for e in map_def.get("elevation_zones", []):
+		var c: Vector3 = e.center
+		var he: Vector2 = e.half_extents
+		var h: float = e.height
+		_add_nav_quad(verts,
+			Vector3(c.x - he.x, h, c.z - he.y), Vector3(c.x + he.x, h, c.z - he.y),
+			Vector3(c.x + he.x, h, c.z + he.y), Vector3(c.x - he.x, h, c.z + he.y))
+		var rg = _ramp_geometry(e, half)
+		for q in _ramp_quads(rg, h):
+			_add_nav_quad(verts, q[0], q[1], q[2], q[3])
+	return verts
+
 static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 	var ground_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_active(ground_map, true)
 	var water_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_active(water_map, true)
+	var amphibious_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_active(amphibious_map, true)
 
 	var ground_verts = _build_ground_faces(map_def)
 	var ground_nav_mesh = NavigationMesh.new()
@@ -218,7 +265,17 @@ static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 		NavigationServer3D.region_set_map(water_region, water_map)
 		NavigationServer3D.region_set_navigation_mesh(water_region, water_nav_mesh)
 
-	return {"ground_map": ground_map, "water_map": water_map, "ground_region": ground_region, "water_region": water_region}
+	var amphibious_verts = _build_amphibious_faces(map_def)
+	var amphibious_nav_mesh = NavigationMesh.new()
+	var amphibious_source = NavigationMeshSourceGeometryData3D.new()
+	amphibious_source.add_faces(amphibious_verts, Transform3D.IDENTITY)
+	NavigationServer3D.bake_from_source_geometry_data(amphibious_nav_mesh, amphibious_source)
+	var amphibious_region = NavigationServer3D.region_create()
+	NavigationServer3D.region_set_map(amphibious_region, amphibious_map)
+	NavigationServer3D.region_set_navigation_mesh(amphibious_region, amphibious_nav_mesh)
+
+	return {"ground_map": ground_map, "water_map": water_map, "amphibious_map": amphibious_map,
+		"ground_region": ground_region, "water_region": water_region, "amphibious_region": amphibious_region}
 
 # --- Visuals ---
 

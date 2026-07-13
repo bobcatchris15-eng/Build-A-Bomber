@@ -59,6 +59,13 @@ var is_flying: bool = false
 # they generalize to whatever hull+locomotion combo is actually present.
 var is_fixed_wing: bool = false
 var is_naval: bool = false
+# screw_drive locomotion (real historical screw-propelled vehicles) - a
+# ground unit that ALSO crosses water, routed onto a combined ground+water
+# navmesh (see get_amphibious_nav_map()) instead of being confined to
+# ground_nav_map like every other ground/legged type. Deliberately not
+# folded into is_naval: it's not buoyant/surface-locked like a naval hull,
+# it drives normally on land and just isn't blocked by water.
+var is_amphibious: bool = false
 # AI phase 1 (whole-vehicle-aim): true when any active weapon is frame_built
 # (fixed relative to the hull, no independent traverse - see
 # module_catalog.gd's get_traverse_limit_angle/get_mount_style). Cached at
@@ -110,6 +117,7 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	is_flying = "airborne" in unit_traits
 	is_fixed_wing = "fixed_wing" in unit_traits
 	is_naval = "naval" in unit_traits
+	is_amphibious = "amphibious" in unit_traits
 	if is_flying:
 		target_altitude = 4.0
 
@@ -168,7 +176,12 @@ func _setup_navigation():
 	nav_agent.path_desired_distance = 1.5
 	nav_agent.target_desired_distance = 1.5
 	nav_agent.avoidance_enabled = false
-	nav_agent.set_navigation_map(controller.get_water_nav_map() if is_naval else controller.get_ground_nav_map())
+	if is_naval:
+		nav_agent.set_navigation_map(controller.get_water_nav_map())
+	elif is_amphibious and controller.has_method("get_amphibious_nav_map"):
+		nav_agent.set_navigation_map(controller.get_amphibious_nav_map())
+	else:
+		nav_agent.set_navigation_map(controller.get_ground_nav_map())
 
 # Fog-of-war (built this pass): base_vision from the hull + sum of mounted
 # sensor_suite modules' vision bonus, with the Technocrats faction passive
@@ -281,7 +294,7 @@ func _recalculate_move_speed():
 					count_contrib = float(locomotion_settings.get("count", 4)) / 4.0
 				elif locomotion_type == "tracked_treads":
 					count_contrib = locomotion_settings.get("width", 1.0)
-				motor_thrust += 150.0 * child.scale.x * child.scale.z * count_contrib
+				motor_thrust += ModuleCatalog.get_thrust_coefficient(data.type_id) * child.scale.x * child.scale.z * count_contrib
 				# Weight capacity scales with the same size/count factors as
 				# thrust (a bigger/wider tread or a 6-wheel setup carries
 				# more than a stock 4-wheel one), per-locomotor-type base

@@ -473,6 +473,33 @@ def build_tread_plate(name, width=1.0, length=1.0, links=6, color=(0.16, 0.16, 0
 	return obj
 
 
+def build_screw_drum(name, length=1.6, shaft_radius=0.13, fin_reach=0.16, turns=3.0,
+		color=(0.35, 0.32, 0.28)):
+	"""Helical auger/screw drum for amphibious screw-drive locomotion (real
+	historical screw-propelled vehicles - Soviet ZIL screw-drive trucks, the
+	Fordson 'Snow Devil') - a tapered-cap core shaft with a continuous
+	helical fin approximated by many short radial blade segments advancing
+	in both angle and length together, along Godot +Z (matches the
+	runtime mounting convention: the drum's own length lies parallel to the
+	vehicle's travel direction, one drum per side)."""
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), shaft_radius, length, 'z', segments=14)
+	add_cyl_axis(bm, (0, 0, -length * 0.5 - length * 0.05), 0.02, length * 0.1, 'z', segments=14, radius2=shaft_radius)
+	add_cyl_axis(bm, (0, 0, length * 0.5 + length * 0.05), shaft_radius, length * 0.1, 'z', segments=14, radius2=0.02)
+
+	segments = 40
+	r_mid = shaft_radius + fin_reach / 2.0
+	for i in range(segments):
+		t = i / float(segments)
+		z = -length * 0.5 + length * 0.1 + t * length * 0.8
+		angle = t * turns * 2.0 * math.pi
+		pos = (math.cos(angle) * r_mid, math.sin(angle) * r_mid, z)
+		add_box(bm, pos, (fin_reach, 0.045, (length * 0.8 / segments) * 2.4), rot_axis='z', rot_angle=angle)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.65, roughness=0.55)
+	return obj
+
+
 def build_accessory(name, kind, color, **kwargs):
 	"""Standalone small greeble accessories - also usable directly as weapon
 	sub-parts (headlight cluster, exhaust, antenna, hatch, vent, toolbox)."""
@@ -688,6 +715,93 @@ def build_sponson_hull(name, size_x, size_y, size_z, sponson_bulge=1.3, sponson_
 	return obj
 
 
+def build_fuselage_hull(name, size_x, size_y, size_z, nose_frac=0.16, tail_frac=0.24,
+		wing_span_frac=1.0, wing_chord_frac=0.3, wing_pos_frac=0.05,
+		color=(0.6, 0.6, 0.62), greebles=None):
+	"""Traditional plane: a slender tapered fuselage tube along Z (nose cone
+	forward, tail taper aft) with a separate flat wing slab crossing at
+	mid-body and tail control surfaces - a genuine fuselage/wing break,
+	unlike flying_wing_hull's single blended-wing-body convex hull with no
+	distinct fuselage at all."""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	body_r = min(hx, hy) * 0.62
+	bm = bmesh.new()
+
+	nose_len = size_z * nose_frac
+	tail_len = size_z * tail_frac
+	body_len = size_z - nose_len - tail_len
+	nose_z0 = -hz
+	body_z0 = nose_z0 + nose_len
+	tail_z0 = body_z0 + body_len
+
+	add_cyl_axis(bm, (0, 0, body_z0 + body_len / 2.0), body_r, body_len, 'z', segments=14)
+	add_cyl_axis(bm, (0, 0, nose_z0 + nose_len / 2.0), 0.02, nose_len, 'z', segments=14, radius2=body_r)
+	add_cyl_axis(bm, (0, 0, tail_z0 + tail_len / 2.0), body_r, tail_len, 'z', segments=14, radius2=body_r * 0.22)
+
+	# Wings: a flat slab crossing the body near mid-fuselage - the defining
+	# "attached wing" break this hull exists to demonstrate.
+	wing_z = -hz * wing_pos_frac
+	add_box(bm, (0, 0, wing_z), (size_x * wing_span_frac, hy * 0.16, size_z * wing_chord_frac), bevel=0.03)
+
+	# Tail control surfaces: vertical fin + horizontal tailplane
+	add_box(bm, (0, hy * 0.5, tail_z0 + tail_len * 0.55), (0.05, hy * 0.85, size_z * 0.1), bevel=0.02)
+	add_box(bm, (0, 0, tail_z0 + tail_len * 0.5), (size_x * 0.55, hy * 0.1, size_z * 0.09), bevel=0.02)
+
+	if greebles:
+		greebles(bm, hx, hy, hz)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.35)
+	return obj
+
+
+def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
+		color=(0.72, 0.7, 0.6), greebles=None):
+	"""Rigid airship: a stretched teardrop/cigar gasbag envelope (blunt nose,
+	tapered tail) with a gondola slung underneath on struts and a 4-way tail
+	fin cross - the only hull silhouette in the roster implying buoyant lift
+	rather than an engine actively fighting gravity (see buoyant_envelope's
+	own catalog comment in module_catalog.gd for the gameplay consequence)."""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	bm = bmesh.new()
+
+	ret = bmesh.ops.create_uvsphere(bm, u_segments=18, v_segments=12, radius=1.0)
+	verts = ret['verts']
+	bmesh.ops.scale(bm, verts=verts, vec=GS(hx, hy, hz))
+	# Taper the tail half (raw Blender +Y = Godot +Z, per GV/GS convention)
+	# narrower for a teardrop silhouette rather than a plain ellipsoid.
+	for v in verts:
+		if v.co.y > 0:
+			t = v.co.y / hz
+			shrink = 1.0 - t * tail_taper
+			v.co.x *= shrink
+			v.co.z *= shrink
+
+	# Gondola slung underneath on struts, biased toward the nose for balance.
+	gon_w, gon_h, gon_l = hx * 0.5, hy * 0.35, hz * 0.6
+	add_box(bm, (0, -hy * 0.85, -hz * 0.15), (gon_w, gon_h, gon_l), bevel=0.04)
+	for side in (-1, 1):
+		for z_frac in (-0.35, 0.25):
+			add_cyl_y(bm, (side * gon_w * 0.35, -hy * 0.6, z_frac * hz * 0.3), 0.03, hy * 0.7, segments=6)
+
+	# Tail fin cross near the tail taper.
+	fin_z = hz * 0.75
+	fin_span = min(hx, hy) * 0.9
+	add_box(bm, (0, fin_span * 0.5, fin_z), (0.04, fin_span, hz * 0.18), bevel=0.02)
+	add_box(bm, (0, -fin_span * 0.5, fin_z), (0.04, fin_span, hz * 0.18), bevel=0.02)
+	add_box(bm, (fin_span * 0.5, 0, fin_z), (fin_span, 0.04, hz * 0.18), bevel=0.02)
+	add_box(bm, (-fin_span * 0.5, 0, fin_z), (fin_span, 0.04, hz * 0.18), bevel=0.02)
+
+	if greebles:
+		greebles(bm, hx, hy, hz)
+
+	obj = make_object_from_bmesh(bm, name)
+	# Canvas/aluminum-skin envelope reads wrong with the ground vehicles'
+	# metallic paint - flatter, less reflective finish instead.
+	finalize(obj, name, color=color, metallic=0.15, roughness=0.5)
+	return obj
+
+
 def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.44), greebles=None):
 	"""Tall stepped defensive tower: tiers stacked wide-to-narrow."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
@@ -763,6 +877,7 @@ def generate_parts():
 	export_and_cleanup(build_hover_ring("hover_ring", major_radius=0.5, minor_radius=0.1, color=(0.2, 0.6, 0.9)), PARTS_DIR, "hover_ring")
 	export_and_cleanup(build_hover_ring("antigrav_ring", major_radius=0.5, minor_radius=0.07, color=(0.3, 0.5, 1.0)), PARTS_DIR, "antigrav_ring")
 	export_and_cleanup(build_tread_plate("tread_plate", color=(0.16, 0.16, 0.17)), PARTS_DIR, "tread_plate")
+	export_and_cleanup(build_screw_drum("screw_drum", color=(0.35, 0.32, 0.28)), PARTS_DIR, "screw_drum")
 
 	export_and_cleanup(build_accessory("headlight_cluster", "spotlight", (0.9, 0.9, 0.75), radius=0.07, metallic=0.3, roughness=0.2), PARTS_DIR, "headlight_cluster")
 	export_and_cleanup(build_accessory("exhaust_stack", "exhaust", (0.15, 0.15, 0.15), height=0.35, metallic=0.7, roughness=0.5), PARTS_DIR, "exhaust_stack")
@@ -859,6 +974,47 @@ def _ship_hull_greebles(bm, hx, hy, hz):
 	greeble_vent(bm, (0, hy * 1.05, -hz * 0.1), (0.3, 0.12, 0.5), slats=3)
 
 
+def _small_boat_greebles(bm, hx, hy, hz):
+	# Sparse - a fast patrol boat, not a warship draped in gear.
+	greeble_antenna(bm, (0, hy * 1.5, hz * 0.4), height=0.4)
+	greeble_spotlight(bm, (0, hy * 1.15, -hz * 0.5), radius=0.08)
+	for side in (-1, 1):
+		add_cyl_axis(bm, (side * hx * 0.97, hy * 0.1, hz * 0.5), 0.05, 0.04, 'x', segments=8)
+
+
+def _heavy_cruiser_greebles(bm, hx, hy, hz):
+	# A real warship silhouette: layered superstructure, twin funnels, gun
+	# deck greebles, portholes - deliberately busier than naval_hull.
+	add_box(bm, (0, hy * 1.6, hz * 0.15), (hx * 0.3, hy * 0.3, hz * 0.2), bevel=0.02)  # upper bridge deck
+	greeble_exhaust_stack(bm, (-hx * 0.12, hy * 1.35, hz * 0.55), radius=0.18, height=0.7)
+	greeble_exhaust_stack(bm, (hx * 0.12, hy * 1.35, hz * 0.55), radius=0.18, height=0.7)
+	add_box(bm, (0, hy * 1.02, -hz * 0.55), (hx * 0.35, hy * 0.22, hz * 0.3), bevel=0.03)  # foredeck turret housing
+	for side in (-1, 1):
+		for i in range(6):
+			t = (i + 0.5) / 6.0 - 0.5
+			pos = (side * hx * 0.98, hy * 0.3, t * hz * 1.5)
+			add_cyl_axis(bm, pos, 0.07, 0.05, 'x', segments=10)
+	greeble_antenna(bm, (0, hy * 1.85, hz * 0.15), height=0.7)
+	greeble_rivet_row(bm, (-hx * 0.9, hy * 1.0, -hz * 0.9), (-hx * 0.9, hy * 1.0, hz * 0.9), 8)
+	greeble_rivet_row(bm, (hx * 0.9, hy * 1.0, -hz * 0.9), (hx * 0.9, hy * 1.0, hz * 0.9), 8)
+
+
+def _fuselage_hull_greebles(bm, hx, hy, hz):
+	add_box(bm, (0, hy * 0.35, -hz * 0.55), (hx * 0.18, hy * 0.16, hz * 0.3), bevel=0.02)  # cockpit canopy bump
+	greeble_vent(bm, (hx * 0.28, 0, -hz * 0.05), (0.1, 0.22, 0.3), slats=3)
+	greeble_vent(bm, (-hx * 0.28, 0, -hz * 0.05), (0.1, 0.22, 0.3), slats=3)
+	greeble_antenna(bm, (0, hy * 0.55, hz * 0.5), height=0.2)
+	greeble_rivet_row(bm, (0, hy * 0.3, -hz * 0.75), (0, hy * 0.3, hz * 0.55), 8, axis='y')
+
+
+def _airship_hull_greebles(bm, hx, hy, hz):
+	greeble_antenna(bm, (0, hy * 0.3, -hz * 0.85), height=0.35)
+	# Riding-off panel seams along the envelope, evenly spaced rings.
+	for i in range(4):
+		t = (i + 0.5) / 4.0 - 0.5
+		add_cyl_axis(bm, (0, 0, t * hz * 1.2), min(hx, hy) * 1.01, 0.02, 'z', segments=18)
+
+
 def _flying_wing_hull_greebles(bm, hx, hy, hz):
 	add_box(bm, (0, hy * 1.05, -hz * 0.3), (hx * 0.22, hy * 0.12, hz * 0.35), bevel=0.02)  # canopy bump
 	for side in (-1, 1):
@@ -927,6 +1083,18 @@ def generate_hulls():
 
 	export_and_cleanup(build_sponson_hull("sponson_hull", 6.5, 1.6, 7.5,
 		sponson_bulge=1.18, sponson_span=0.4, color=(0.38, 0.36, 0.32), greebles=_sponson_hull_greebles), HULLS_DIR, "sponson_hull")
+
+	export_and_cleanup(build_ship_hull("small_boat_hull", 2.0, 1.0, 5.0,
+		bow_frac=0.5, color=(0.4, 0.42, 0.44), greebles=_small_boat_greebles), HULLS_DIR, "small_boat_hull")
+
+	export_and_cleanup(build_ship_hull("heavy_cruiser_hull", 4.4, 1.9, 10.5,
+		bow_frac=0.28, color=(0.3, 0.32, 0.34), greebles=_heavy_cruiser_greebles), HULLS_DIR, "heavy_cruiser_hull")
+
+	export_and_cleanup(build_fuselage_hull("fuselage_hull", 4.2, 1.2, 6.2,
+		color=(0.6, 0.6, 0.62), greebles=_fuselage_hull_greebles), HULLS_DIR, "fuselage_hull")
+
+	export_and_cleanup(build_airship_hull("airship_hull", 4.0, 3.0, 9.5,
+		tail_taper=0.4, color=(0.72, 0.7, 0.6), greebles=_airship_hull_greebles), HULLS_DIR, "airship_hull")
 
 	print("--- Hull library done ---")
 
