@@ -386,6 +386,10 @@ func _recalculate_move_speed():
 	# everyone else falls through to the 1.0 default, unchanged).
 	var faction = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
 	move_speed *= FactionCatalog.get_passive(faction, "speed_mult", 1.0)
+	# Aerodrome Cartel passive: only applies to genuinely airborne units -
+	# a ground vehicle designed under this faction gets no speed change.
+	if is_flying:
+		move_speed *= FactionCatalog.get_passive(faction, "air_speed_mult", 1.0)
 
 # Terrain variety task: surface terrain (marsh/rocky/snow_mud/sand) slows or
 # favors specific locomotion types - this looks up the CURRENT tile every
@@ -422,6 +426,16 @@ func _recalculate_terrain_speed_multiplier():
 		var width = locomotion_settings.get("width", 1.0)
 		var width_delta = (width - 1.0) * 0.25
 		terrain_speed_multiplier = clamp(terrain_speed_multiplier + width_delta, 0.15, 1.2)
+
+	# Glacier Syndicate passive: negates a fraction of whatever terrain
+	# penalty is currently in effect (a multiplier BELOW 1.0 - a bonus above
+	# 1.0, e.g. screw_drive's marsh bonus, is left untouched, since "reduced
+	# penalty" only means something for an actual penalty).
+	if terrain_speed_multiplier < 1.0 and is_instance_valid(hull_node):
+		var terrain_faction = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
+		var reduction = FactionCatalog.get_passive(terrain_faction, "terrain_penalty_reduction", 0.0)
+		if reduction > 0.0:
+			terrain_speed_multiplier = 1.0 - (1.0 - terrain_speed_multiplier) * (1.0 - reduction)
 
 func _create_selection_ring(base_size: Vector3):
 	selection_ring = MeshInstance3D.new()

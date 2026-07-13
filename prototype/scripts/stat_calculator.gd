@@ -171,6 +171,12 @@ func _ready():
 	$ScrollContainer/VBoxContainer.add_child(faction_label)
 	
 	var faction_btn = OptionButton.new()
+	# clip_text - the roster grew from 3 factions to 10, some with longer
+	# names ("The Aerodrome Cartel") than any of the old 3 - without this,
+	# OptionButton auto-sizes to fit its longest item and was just barely
+	# pushing the whole sidebar past its fixed width (caught by the UI
+	# overflow audit test, not just eyeballing it).
+	faction_btn.clip_text = true
 	for fac_id in FactionCatalog.get_ids():
 		faction_btn.add_item(FactionCatalog.get_faction_name(fac_id))
 	faction_btn.name = "FactionDropdown"

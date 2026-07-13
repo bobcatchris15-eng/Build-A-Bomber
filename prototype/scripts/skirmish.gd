@@ -283,6 +283,17 @@ func _has_line_of_sight(from_pos: Vector3, to_pos: Vector3) -> bool:
 	var result = space_state.intersect_ray(query)
 	return result.is_empty()
 
+
+# Duck-typed faction lookup for a construct that might be a battle_unit
+# (whose faction lives on its hull_node's meta) or a building (which
+# already carries a plain .faction field directly).
+func _get_construct_faction(c) -> String:
+	if "faction" in c and c.faction != "":
+		return c.faction
+	if "hull_node" in c and is_instance_valid(c.hull_node) and c.hull_node.has_meta("faction"):
+		return c.hull_node.get_meta("faction")
+	return FactionCatalog.DEFAULT_FACTION
+
 func _recalc_fog_of_war():
 	if game_over: return
 	var player_constructs = get_team_units(PLAYER_TEAM) + get_team_buildings(PLAYER_TEAM)
@@ -291,6 +302,10 @@ func _recalc_fog_of_war():
 		if not is_instance_valid(c) or not c.has_method("set_fog_visible"): continue
 		var seen = false
 		var c_flying = "is_flying" in c and c.is_flying
+		# Bayou Irregulars passive: shrinks the effective distance at which
+		# ANY observer can spot this specific construct - camouflage is a
+		# property of the thing being looked at, not the viewer.
+		var detection_mult = FactionCatalog.get_passive(_get_construct_faction(c), "detection_range_mult", 1.0)
 		for o in player_constructs:
 			if not is_instance_valid(o): continue
 			var vision = o.vision_range if "vision_range" in o else 0.0
@@ -298,7 +313,7 @@ func _recalc_fog_of_war():
 			if not o_flying:
 				var elevation = terrain_height_at(o.global_position)
 				vision *= 1.0 + min(elevation, ELEVATION_VISION_CAP) * ELEVATION_VISION_BONUS_PER_UNIT
-			if c.global_position.distance_to(o.global_position) <= vision:
+			if c.global_position.distance_to(o.global_position) <= vision * detection_mult:
 				# Flying viewers/targets skip the terrain-obstacle raycast
 				# entirely - already airborne regardless of what's on the
 				# ground below, same reasoning the elevation bonus above

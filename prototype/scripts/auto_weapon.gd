@@ -10,6 +10,12 @@ var fire_rate: float = 1.0 # Shot interval
 var time_since_last_shot: float = 0.0
 
 var dps: float = 10.0
+# Crimson Concordat's passive (dps rises the closer this weapon's own
+# vehicle is to death) needs a per-tick recompute, unlike every other
+# faction dps/range bonus which is a fixed one-time value set in _ready() -
+# base_dps is that fixed value; `dps` itself becomes the live, possibly-
+# boosted number every _fire_*() function already reads.
+var base_dps: float = 10.0
 var heal_rate: float = 0.0
 var laser_color: Color = Color.RED
 var type_id: String = ""
@@ -117,7 +123,8 @@ func _ready():
 		var data = get_meta("module_data")
 		type_id = data.type_id
 		var mount_faction = get_parent().get_meta("faction", "industrialists") if get_parent() and get_parent().has_meta("faction") else "industrialists"
-		dps = data.get_dps() * FactionCatalog.get_passive(mount_faction, "dps_mult", 1.0)
+		base_dps = data.get_dps() * FactionCatalog.get_passive(mount_faction, "dps_mult", 1.0)
+		dps = base_dps
 		heal_rate = data.get_heal_rate()
 		
 		# Calculate traverse speed based on weight, then apply this weapon
@@ -348,6 +355,22 @@ func _ready():
 	# Desynchronize initial reload timers
 	time_since_last_shot = randf_range(0.0, fire_rate)
 
+# Crimson Concordat's passive: desperation damage that ramps up as this
+# weapon's own vehicle approaches death (linear 0 at full HP -> bonus_max at
+# 0 HP) - recomputed every tick since HP changes constantly, unlike every
+# other faction dps/range bonus which is a fixed value set once in _ready().
+func _recalculate_low_hp_dps_bonus():
+	dps = base_dps
+	var vehicle = get_vehicle_root()
+	if not vehicle or not ("hp" in vehicle) or not ("max_hp" in vehicle) or vehicle.max_hp <= 0.0:
+		return
+	var mount_faction = get_parent().get_meta("faction", "industrialists") if get_parent() and get_parent().has_meta("faction") else "industrialists"
+	var bonus_max = FactionCatalog.get_passive(mount_faction, "low_hp_dps_bonus_max", 0.0)
+	if bonus_max <= 0.0:
+		return
+	var hp_ratio = clamp(vehicle.hp / vehicle.max_hp, 0.0, 1.0)
+	dps = base_dps * (1.0 + bonus_max * (1.0 - hp_ratio))
+
 func _physics_process(delta):
 	# Spin radar mast dish
 	if type_id == "sensor_suite":
@@ -361,6 +384,7 @@ func _physics_process(delta):
 		return
 
 	time_since_last_shot += delta
+	_recalculate_low_hp_dps_bonus()
 	_find_nearest_target()
 	
 	if target and is_instance_valid(target):

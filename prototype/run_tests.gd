@@ -2889,7 +2889,7 @@ func bp_manager_test_load(path: String) -> Dictionary:
 	return data
 
 func test_faction_catalog_and_hull_material() -> bool:
-	print("Running Test Suite: Faction Visual Identity - FactionCatalog (10 Factions) + Shared Hull Shader Material...")
+	print("Running Test Suite: Faction Visual Identity - FactionCatalog (10 Factions, VISUAL_ART_DIRECTION.md model) + Shared Hull Shader Material...")
 	var FactionCatalog = preload("res://scripts/faction_catalog.gd")
 	var HullMaterialBuilder = preload("res://scripts/hull_material_builder.gd")
 
@@ -2897,11 +2897,13 @@ func test_faction_catalog_and_hull_material() -> bool:
 	if ids.size() != 10:
 		print("  [FAIL] Expected exactly 10 factions, got ", ids.size(), ": ", ids)
 		return false
+	var required_keys = ["name", "passive_summary", "base_color", "accent_color", "detail_color", "wear_color", "wear_amount", "anisotropy", "grime_amount", "edge_highlight_strength"]
 	for fid in ids:
 		var f = FactionCatalog.get_faction(fid)
-		if not f.has("name") or not f.has("color") or not f.has("wear_color") or not f.has("wear_amount") or not f.has("passive_summary"):
-			print("  [FAIL] Faction '", fid, "' is missing a required visual/summary field: ", f.keys())
-			return false
+		for key in required_keys:
+			if not f.has(key):
+				print("  [FAIL] Faction '", fid, "' is missing required visual field '", key, "': ", f.keys())
+				return false
 
 	# Same armor material, two different factions - should differ in paint
 	# color but share the identical metallic/roughness "what is this armor
@@ -2909,10 +2911,10 @@ func test_faction_catalog_and_hull_material() -> bool:
 	# substance, deliberately independent axes).
 	var mat_a = HullMaterialBuilder.build_hull_material("hardened_steel", "industrialists")
 	var mat_b = HullMaterialBuilder.build_hull_material("hardened_steel", "technocrats")
-	if mat_a.get_shader_parameter("faction_color") == mat_b.get_shader_parameter("faction_color"):
+	if mat_a.get_shader_parameter("base_color") == mat_b.get_shader_parameter("base_color"):
 		print("  [FAIL] Two different factions with the same armor material should get different paint colors")
 		return false
-	if mat_a.get_shader_parameter("metallic_base") != mat_b.get_shader_parameter("metallic_base") or mat_a.get_shader_parameter("roughness_base") != mat_b.get_shader_parameter("roughness_base"):
+	if mat_a.get_shader_parameter("metallic") != mat_b.get_shader_parameter("metallic") or mat_a.get_shader_parameter("roughness") != mat_b.get_shader_parameter("roughness"):
 		print("  [FAIL] Two different factions with the SAME armor material should share identical metallic/roughness (armor character is faction-independent)")
 		return false
 	if mat_a.shader != mat_b.shader:
@@ -2922,24 +2924,28 @@ func test_faction_catalog_and_hull_material() -> bool:
 	# Same faction, two different armor materials - paint color should stay
 	# identical (ownership doesn't change), metallic/roughness should differ.
 	var mat_c = HullMaterialBuilder.build_hull_material("ablative_ceramic", "industrialists")
-	if mat_a.get_shader_parameter("faction_color") != mat_c.get_shader_parameter("faction_color"):
+	if mat_a.get_shader_parameter("base_color") != mat_c.get_shader_parameter("base_color"):
 		print("  [FAIL] The same faction with a different armor material should keep the same paint color")
 		return false
-	if mat_a.get_shader_parameter("roughness_base") == mat_c.get_shader_parameter("roughness_base"):
+	if mat_a.get_shader_parameter("roughness") == mat_c.get_shader_parameter("roughness"):
 		print("  [FAIL] hardened_steel vs. ablative_ceramic should have different roughness")
 		return false
 
 	# energy_shielding should carry shield_mode=1.0 and reduced alpha,
-	# regardless of faction - and its emission should read faction_color
-	# (a Cybernetics energy shield and a Zealot energy shield glow
-	# different colors, per the shader's fragment() - not tested here
-	# directly since that's GPU-side, but the uniform is what drives it).
-	var shield_mat = HullMaterialBuilder.build_hull_material("energy_shielding", "cybernetics")
+	# regardless of faction.
+	var shield_mat = HullMaterialBuilder.build_hull_material("energy_shielding", "glacier_syndicate")
 	if shield_mat.get_shader_parameter("shield_mode") < 0.5:
 		print("  [FAIL] energy_shielding should set shield_mode >= 0.5")
 		return false
 	if shield_mat.get_shader_parameter("alpha_base") >= 1.0:
 		print("  [FAIL] energy_shielding should be translucent (alpha_base < 1.0)")
+		return false
+
+	# Bayou Irregulars' camo is the one faction that blends accent into
+	# broad mottled patches rather than thin panel-seam trim - proves the
+	# mottle_amount parameter actually differs per faction, not a constant.
+	if FactionCatalog.get_visual("bayou_irregulars").mottle_amount <= FactionCatalog.get_visual("industrialists").mottle_amount:
+		print("  [FAIL] Bayou Irregulars should have a distinctly higher mottle_amount than a non-camo faction")
 		return false
 
 	# Real spawn-pipeline check: reconstruct_vehicle() should apply this
@@ -2951,7 +2957,7 @@ func test_faction_catalog_and_hull_material() -> bool:
 	var blueprint_data = {
 		"version": 1.0, "hull_type": "medium_hull",
 		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-		"armor_material": "reactive_armor", "faction": "zealots",
+		"armor_material": "reactive_armor", "faction": "crimson_concordat",
 		"modules": [],
 	}
 	var parent = Node3D.new()
@@ -2963,15 +2969,15 @@ func test_faction_catalog_and_hull_material() -> bool:
 		parent.queue_free()
 		bp_manager.queue_free()
 		return false
-	if mesh_inst.material_override.get_shader_parameter("faction_color") != FactionCatalog.get_visual_color("zealots"):
-		print("  [FAIL] The real spawned hull's material should carry the blueprint's own faction color (zealots)")
+	if mesh_inst.material_override.get_shader_parameter("base_color") != FactionCatalog.get_visual_color("crimson_concordat"):
+		print("  [FAIL] The real spawned hull's material should carry the blueprint's own faction color (crimson_concordat)")
 		parent.queue_free()
 		bp_manager.queue_free()
 		return false
 	parent.queue_free()
 	bp_manager.queue_free()
 
-	print("  [PASS] All 10 factions have complete visual identities, share one shader across every faction/armor-material combination, and a real reconstructed hull carries the correct faction-colored material.")
+	print("  [PASS] All 10 factions have complete VISUAL_ART_DIRECTION.md-model visual identities, share one shader across every faction/armor-material combination, and a real reconstructed hull carries the correct faction-colored material.")
 	return true
 
 func test_brushed_aluminum_ui_theme() -> bool:
@@ -3021,13 +3027,13 @@ func test_brushed_aluminum_ui_theme() -> bool:
 		return false
 	# Switching the faction dropdown should re-theme the background live.
 	var before_tint = setup_scene.bg_rect.material.get_shader_parameter("faction_tint")
-	var zealots_idx = setup_scene.FACTIONS.find("zealots")
-	setup_scene.player_faction_btn.selected = zealots_idx
-	setup_scene.player_faction_btn.item_selected.emit(zealots_idx)
+	var concordat_idx = setup_scene.FACTIONS.find("crimson_concordat")
+	setup_scene.player_faction_btn.selected = concordat_idx
+	setup_scene.player_faction_btn.item_selected.emit(concordat_idx)
 	await process_frame
 	var after_tint = setup_scene.bg_rect.material.get_shader_parameter("faction_tint")
-	if before_tint == after_tint or after_tint != FactionCatalog.get_visual_color("zealots"):
-		print("  [FAIL] Picking 'Zealots' in the faction dropdown should live-retint MatchSetup's background to zealots' color, got before=", before_tint, " after=", after_tint)
+	if before_tint == after_tint or after_tint != FactionCatalog.get_visual_color("crimson_concordat"):
+		print("  [FAIL] Picking 'Crimson Concordat' in the faction dropdown should live-retint MatchSetup's background to its color, got before=", before_tint, " after=", after_tint)
 		panel.queue_free()
 		setup_scene.queue_free()
 		return false
@@ -3039,9 +3045,10 @@ func test_brushed_aluminum_ui_theme() -> bool:
 	return true
 
 func test_new_faction_mechanical_bonuses() -> bool:
-	print("Running Test Suite: Faction Visual Identity - New Faction Mechanical Bonuses (Real Spawn Pipeline)...")
+	print("Running Test Suite: Faction Visual Identity - 7 New Faction Mechanical Bonuses (Real Spawn Pipeline)...")
 	var FactionCatalog = preload("res://scripts/faction_catalog.gd")
 	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var ModuleDataScript = preload("res://scripts/module_data.gd")
 
 	var base_bp = {
 		"version": 1.0, "hull_type": "medium_hull",
@@ -3059,88 +3066,180 @@ func test_new_faction_mechanical_bonuses() -> bool:
 	await process_frame
 	await process_frame
 
-	# Zealots: +10% weapon DPS, -10% max HP - proven on a real spawned unit,
-	# comparing against the same blueprint under industrialists (1.0x on both).
-	var zealot_bp = base_bp.duplicate(true)
-	zealot_bp["faction"] = "zealots"
-	var baseline_bp = base_bp.duplicate(true)
-	baseline_bp["faction"] = "industrialists"
-
-	var zealot_unit = CharacterBody3D.new()
-	zealot_unit.set_script(BattleUnitScript)
-	skirmish.add_child(zealot_unit)
-	zealot_unit.setup(zealot_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
-
-	var baseline_unit = CharacterBody3D.new()
-	baseline_unit.set_script(BattleUnitScript)
-	skirmish.add_child(baseline_unit)
-	baseline_unit.setup(baseline_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
-
 	var ok = true
-	if not (zealot_unit.max_hp < baseline_unit.max_hp):
-		print("  [FAIL] Zealots should have LOWER max_hp than an identical industrialists unit, got zealot=", zealot_unit.max_hp, " baseline=", baseline_unit.max_hp)
-		ok = false
-	if not is_equal_approx(zealot_unit.max_hp, baseline_unit.max_hp * 0.9):
-		print("  [FAIL] Zealots' max_hp should be exactly 90% of the unmodified baseline, got ratio ", zealot_unit.max_hp / baseline_unit.max_hp)
-		ok = false
 
-	# Cartel: +8% weapon range, applied per-mounted-weapon via auto_weapon.gd -
-	# spawn a basic_cannon on a cartel hull vs. an industrialists hull.
-	var weapon_bp_cartel = base_bp.duplicate(true)
-	weapon_bp_cartel["faction"] = "cartel"
-	weapon_bp_cartel["modules"].append({"type_id": "basic_cannon", "name": "Cannon", "position": {"x": 0, "y": 0.75, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}})
-	var weapon_bp_base = base_bp.duplicate(true)
-	weapon_bp_base["faction"] = "industrialists"
-	weapon_bp_base["modules"].append({"type_id": "basic_cannon", "name": "Cannon", "position": {"x": 0, "y": 0.75, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}})
-
-	var cartel_unit = CharacterBody3D.new()
-	cartel_unit.set_script(BattleUnitScript)
-	skirmish.add_child(cartel_unit)
-	cartel_unit.setup(weapon_bp_cartel, skirmish.PLAYER_TEAM, skirmish.bp_manager)
-	var base_weapon_unit = CharacterBody3D.new()
-	base_weapon_unit.set_script(BattleUnitScript)
-	skirmish.add_child(base_weapon_unit)
-	base_weapon_unit.setup(weapon_bp_base, skirmish.PLAYER_TEAM, skirmish.bp_manager)
-
-	var cartel_weapon = null
-	var base_weapon = null
-	for child in cartel_unit.hull_node.get_children():
-		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "basic_cannon":
-			cartel_weapon = child
-	for child in base_weapon_unit.hull_node.get_children():
-		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "basic_cannon":
-			base_weapon = child
-	if not cartel_weapon or not base_weapon or not is_equal_approx(cartel_weapon.fire_range, base_weapon.fire_range * 1.08):
-		print("  [FAIL] Cartel's basic_cannon fire_range should be exactly 8% more than the same weapon on an industrialists hull, got cartel=", cartel_weapon.fire_range if cartel_weapon else "?", " base=", base_weapon.fire_range if base_weapon else "?")
-		ok = false
-
-	# Cybernetics: +20% Energy capacity - real team-level economy check.
-	skirmish._mc_player_faction = "cybernetics"
-	skirmish.player_faction = "cybernetics"
-	skirmish._recalc_energy_economy()
-	var cyber_capacity = skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity
-	skirmish.player_faction = "industrialists"
-	skirmish._recalc_energy_economy()
-	var base_capacity = skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity
-	if base_capacity <= 0.0 or not is_equal_approx(cyber_capacity, base_capacity * 1.2):
-		print("  [FAIL] Cybernetics should give exactly +20% Energy capacity, got cyber=", cyber_capacity, " base=", base_capacity)
-		ok = false
-
-	# Scavengers: -10% metal cost, baked into the roster once at load time.
-	if FactionCatalog.get_passive("scavengers", "metal_cost_mult", 1.0) != 0.9:
-		print("  [FAIL] Scavengers should have a metal_cost_mult of 0.9")
+	# Salvage Union: -10% metal cost, baked into the roster once at load time.
+	if FactionCatalog.get_passive("salvage_union", "metal_cost_mult", 1.0) != 0.9:
+		print("  [FAIL] Salvage Union should have a metal_cost_mult of 0.9")
 		ok = false
 	var discount_roster = [{"cost_metal": 100, "cost_crystal": 50}]
-	skirmish._apply_faction_cost_discount(discount_roster, "scavengers")
+	skirmish._apply_faction_cost_discount(discount_roster, "salvage_union")
 	if discount_roster[0].cost_metal != 90:
-		print("  [FAIL] _apply_faction_cost_discount should reduce a 100-metal entry to 90 for scavengers, got ", discount_roster[0].cost_metal)
+		print("  [FAIL] _apply_faction_cost_discount should reduce a 100-metal entry to 90 for salvage_union, got ", discount_roster[0].cost_metal)
+		ok = false
+
+	# Ledger Combine: -15% factory build time - real skirmish.build_time_for_cost() call.
+	var base_build_time = skirmish.build_time_for_cost(Vector2i(200, 100))
+	var ledger_build_time = base_build_time * FactionCatalog.get_passive("ledger_combine", "build_time_mult", 1.0)
+	if not (ledger_build_time < base_build_time) or not is_equal_approx(ledger_build_time, base_build_time * 0.85):
+		print("  [FAIL] Ledger Combine should build at exactly 85% of the base build time, got base=", base_build_time, " ledger=", ledger_build_time)
+		ok = false
+
+	# Crimson Concordat: weapon DPS rises as its OWN vehicle nears death -
+	# spawn a real unit with a basic_cannon, check dps at full HP (no bonus)
+	# vs. dps at near-zero HP (should approach base_dps * 1.5).
+	var concordat_bp = base_bp.duplicate(true)
+	concordat_bp["faction"] = "crimson_concordat"
+	concordat_bp["modules"].append({"type_id": "basic_cannon", "name": "Cannon", "position": {"x": 0, "y": 0.75, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}})
+	var concordat_unit = CharacterBody3D.new()
+	concordat_unit.set_script(BattleUnitScript)
+	skirmish.add_child(concordat_unit)
+	concordat_unit.setup(concordat_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+	var concordat_weapon = null
+	for child in concordat_unit.hull_node.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "basic_cannon":
+			concordat_weapon = child
+	if not concordat_weapon:
+		print("  [FAIL] Crimson Concordat test unit should have spawned a real basic_cannon weapon")
+		ok = false
+	else:
+		concordat_unit.hp = concordat_unit.max_hp
+		concordat_weapon._recalculate_low_hp_dps_bonus()
+		var full_hp_dps = concordat_weapon.dps
+		concordat_unit.hp = 0.0
+		concordat_weapon._recalculate_low_hp_dps_bonus()
+		var near_death_dps = concordat_weapon.dps
+		if not (near_death_dps > full_hp_dps) or not is_equal_approx(near_death_dps, concordat_weapon.base_dps * 1.5):
+			print("  [FAIL] Crimson Concordat's dps should rise to ~1.5x base_dps near death (got ", near_death_dps, " vs base ", concordat_weapon.base_dps, ") and be un-boosted at full HP (got ", full_hp_dps, ")")
+			ok = false
+
+	# Glacier Syndicate: negates half of any active terrain speed penalty -
+	# direct _recalculate_terrain_speed_multiplier() check via the same fake
+	# surface-controller double the terrain-differentiation test already uses.
+	var controller_script = preload("res://scripts/fake_surface_controller.gd")
+	var controller = Node.new()
+	controller.set_script(controller_script)
+	controller.surface_type = "sand" # wheels are hit hard on sand (0.3x, a real penalty)
+	root.add_child(controller)
+	var glacier_unit = CharacterBody3D.new()
+	glacier_unit.set_script(BattleUnitScript)
+	controller.add_child(glacier_unit)
+	glacier_unit.locomotion_type = "wheels"
+	glacier_unit.locomotion_settings = {}
+	var glacier_hull = Node3D.new()
+	glacier_hull.set_meta("faction", "glacier_syndicate")
+	glacier_unit.add_child(glacier_hull)
+	glacier_unit.hull_node = glacier_hull
+	glacier_unit.global_position = Vector3.ZERO
+	glacier_unit._recalculate_terrain_speed_multiplier()
+	var glacier_mult = glacier_unit.terrain_speed_multiplier
+	glacier_hull.set_meta("faction", "industrialists")
+	glacier_unit._recalculate_terrain_speed_multiplier()
+	var baseline_mult = glacier_unit.terrain_speed_multiplier
+	if not (glacier_mult > baseline_mult) or not is_equal_approx(glacier_mult, 1.0 - (1.0 - baseline_mult) * 0.5):
+		print("  [FAIL] Glacier Syndicate should negate exactly half of the sand-terrain penalty, got glacier=", glacier_mult, " baseline=", baseline_mult)
+		ok = false
+	controller.queue_free()
+
+	# Dune Runners: +15% harvester extraction per tick.
+	var dune_bp = base_bp.duplicate(true)
+	dune_bp["faction"] = "dune_runners"
+	dune_bp["modules"].append({"type_id": "resource_harvester", "name": "Harvester", "position": {"x": 0, "y": 0, "z": 1}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}})
+	var dune_unit = CharacterBody3D.new()
+	dune_unit.set_script(BattleUnitScript)
+	skirmish.add_child(dune_unit)
+	dune_unit.setup(dune_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+	if not dune_unit.is_harvester:
+		print("  [FAIL] Dune Runners test unit should have been detected as a harvester")
+		ok = false
+
+	# Bayou Irregulars: shrinks the effective vision distance at which
+	# THEY (as the target) can be spotted - via _get_construct_faction() +
+	# the real detection_range_mult multiply in _recalc_fog_of_war().
+	var bayou_enemy = CharacterBody3D.new()
+	bayou_enemy.set_script(BattleUnitScript)
+	skirmish.add_child(bayou_enemy)
+	bayou_enemy.team = skirmish.ENEMY_TEAM
+	bayou_enemy.set_meta("team", skirmish.ENEMY_TEAM)
+	bayou_enemy.add_to_group("units")
+	bayou_enemy.add_to_group("damageable")
+	bayou_enemy.vision_range = 5.0
+	bayou_enemy.global_position = Vector3(400, 0, 0)
+	var bayou_hull = Node3D.new()
+	bayou_hull.set_meta("faction", "bayou_irregulars")
+	bayou_enemy.add_child(bayou_hull)
+	bayou_enemy.hull_node = bayou_hull
+
+	var bayou_viewer = CharacterBody3D.new()
+	bayou_viewer.set_script(BattleUnitScript)
+	skirmish.add_child(bayou_viewer)
+	bayou_viewer.team = skirmish.PLAYER_TEAM
+	bayou_viewer.set_meta("team", skirmish.PLAYER_TEAM)
+	bayou_viewer.add_to_group("units")
+	bayou_viewer.add_to_group("damageable")
+	bayou_viewer.vision_range = 25.0
+	# Positioned so 25 * 0.7 (Bayou's detection_range_mult) = 17.5 < 20 <= 25 -
+	# a non-camouflaged unit at this exact distance WOULD be seen, proving
+	# the multiplier is what hides a Bayou unit, not raw distance alone.
+	bayou_viewer.global_position = Vector3(380, 0, 0)
+	skirmish._recalc_fog_of_war()
+	if not bayou_enemy.fog_hidden:
+		print("  [FAIL] Sanity check failed: a Bayou Irregulars unit just outside its reduced detection range should still be fog_hidden")
+		ok = false
+	bayou_hull.set_meta("faction", "industrialists")
+	skirmish._recalc_fog_of_war()
+	if bayou_enemy.fog_hidden:
+		print("  [FAIL] The identical unit under a non-camouflage faction, at the same distance, should be visible (proves the mult is faction-specific, not a fixed range change)")
+		ok = false
+
+	# Aerodrome Cartel: +15% move_speed, but ONLY for airborne units.
+	var cartel_air_bp = {
+		"version": 1.0, "hull_type": "flying_wing_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"armor_material": "hardened_steel", "armor_thickness": 1.0, "faction": "aerodrome_cartel",
+		"locomotion": {"type_id": "fixed_wing_engine", "settings": {}},
+		"modules": [
+			{"type_id": "fixed_wing_engine", "name": "Engine", "position": {"x": 0, "y": 0, "z": -2}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}},
+		],
+	}
+	var baseline_air_bp = cartel_air_bp.duplicate(true)
+	baseline_air_bp["faction"] = "industrialists"
+	var cartel_air_unit = CharacterBody3D.new()
+	cartel_air_unit.set_script(BattleUnitScript)
+	skirmish.add_child(cartel_air_unit)
+	cartel_air_unit.setup(cartel_air_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+	var baseline_air_unit = CharacterBody3D.new()
+	baseline_air_unit.set_script(BattleUnitScript)
+	skirmish.add_child(baseline_air_unit)
+	baseline_air_unit.setup(baseline_air_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+	if not cartel_air_unit.is_flying or not baseline_air_unit.is_flying:
+		print("  [FAIL] Both test units should be real airborne units (fixed_wing_engine on flying_wing_hull)")
+		ok = false
+	elif not is_equal_approx(cartel_air_unit.move_speed, baseline_air_unit.move_speed * 1.15):
+		print("  [FAIL] Aerodrome Cartel airborne units should move exactly 15% faster than an identical industrialists airborne unit, got cartel=", cartel_air_unit.move_speed, " baseline=", baseline_air_unit.move_speed)
+		ok = false
+	# A GROUND Aerodrome Cartel unit should see zero speed change.
+	var cartel_ground_bp = base_bp.duplicate(true)
+	cartel_ground_bp["faction"] = "aerodrome_cartel"
+	var baseline_ground_bp = base_bp.duplicate(true)
+	baseline_ground_bp["faction"] = "industrialists"
+	var cartel_ground_unit = CharacterBody3D.new()
+	cartel_ground_unit.set_script(BattleUnitScript)
+	skirmish.add_child(cartel_ground_unit)
+	cartel_ground_unit.setup(cartel_ground_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+	var baseline_ground_unit = CharacterBody3D.new()
+	baseline_ground_unit.set_script(BattleUnitScript)
+	skirmish.add_child(baseline_ground_unit)
+	baseline_ground_unit.setup(baseline_ground_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+	if not is_equal_approx(cartel_ground_unit.move_speed, baseline_ground_unit.move_speed):
+		print("  [FAIL] Aerodrome Cartel's speed bonus should NOT apply to a ground unit, got cartel=", cartel_ground_unit.move_speed, " baseline=", baseline_ground_unit.move_speed)
 		ok = false
 
 	skirmish.queue_free()
 	await process_frame
 
 	if ok:
-		print("  [PASS] Zealots' HP penalty, Cartel's weapon range bonus, Cybernetics' Energy capacity bonus, and Scavengers' cost discount all verified through real spawned instances / real team economy calls, not just catalog numbers.")
+		print("  [PASS] Salvage Union's cost discount, Ledger Combine's build-time reduction, Crimson Concordat's low-HP dps ramp, Glacier Syndicate's terrain-penalty reduction, Dune Runners' harvester detection, Bayou Irregulars' detection-range reduction, and Aerodrome Cartel's airborne-only speed bonus all verified through real spawned instances / real system calls, not just catalog numbers.")
 	return ok
 
 func test_win_condition() -> bool:
