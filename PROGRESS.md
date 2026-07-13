@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (cont'd) — Terrain variety made real: zones added to open_plains + coastal_strand
+
+Second half of the terrain variety batch - the mechanism from the previous entry now lives in two real, playable maps instead of just synthetic tests.
+
+### open_plains gets marsh/rocky/snow_mud/sand
+
+Placed as two diagonal pairs out toward the map edges (`|x| >= 39`), clear of the existing resource cluster and both bases - the overall 4-zone arrangement is 180-degree point-symmetric (matching this map's existing fairness convention) while each player still has one of every terrain type within reach, not just a mirrored copy of a single type. Rocky terrain gets small non-collidable rock-bump decorations on top of its color patch so it visually reads as genuinely uneven ground, not just a tinted rectangle.
+
+### coastal_strand gets a shallow coastal shelf
+
+A `shallow_water_areas` strip along the immediate shoreline (real bathymetry logic - shallow near shore, deep further out) blocks `heavy_cruiser_hull` from the last ~10 units of water before the beach entirely, while `small_boat_hull`/`naval_hull`/amphibious `screw_drive` can work right up to the shore.
+
+### Verification
+
+Both map smoke tests (which already check resource reachability, legal start points, HQ connectivity, factory production) still pass unchanged with the new zones added, confirming they don't interfere with anything already there. All 5 pieces (marsh, rocky, snow_mud, sand, shallow water) confirmed visually with real in-game Skirmish screenshots, camera positioned over each zone in turn. 73/73 tests green (unchanged from the mechanism entry - map content doesn't need its own dedicated tests, the mechanism-level tests already cover the underlying behavior).
+
+Screenshots: `progress_captures/2026-07-13/terrain_variety/`.
+
+---
+
 ## 2026-07-13 — Terrain variety mechanism: surface speed multipliers + hull-draught shallow-water blocking
 
 New batch: build out terrain types that genuinely differentiate locomotor types (marsh/rocky/snow_mud/sand) plus hull-draught-based shallow water passability. This entry covers the core mechanism; real map zones + screenshots are a following entry.

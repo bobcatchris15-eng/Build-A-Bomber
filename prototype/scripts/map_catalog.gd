@@ -61,14 +61,30 @@ const MAPS = {
 	# to detour around means fights happen in the open rather than being
 	# funneled - a deliberately different pacing/tempo, not just a palette
 	# swap.
+	#
+	# Terrain variety task: also the natural home for the 4 surface-speed-
+	# multiplier zones (marsh/rocky/snow_mud/sand) - this map had zero
+	# water/obstacles/elevation before, so there's real room out toward the
+	# edges (|x|>=39) without disturbing the existing resource cluster
+	# (which stays within |x|<=26) or either base. Positioned as two
+	# diagonal pairs so the OVERALL arrangement is 180-degree point-
+	# symmetric (matching this map's existing fairness convention) while
+	# each player still has one of every terrain type within reach, not
+	# just a mirrored copy of one type.
 	"open_plains": {
 		"name": "Open Plains",
-		"description": "Fully open, no water or high ground - a tighter map with contested resources near the center. Fast, aggressive, no chokepoints to hide behind.",
+		"description": "Fully open, no water or high ground - a tighter map with contested resources near the center, plus marsh/rocky/snow-mud/sand patches further out that reward the right locomotion choice. Fast, aggressive, few chokepoints to hide behind.",
 		"map_half_extents": 70.0,
 		"ground_color": Color(0.28, 0.26, 0.16),
 		"water_areas": [],
 		"obstacles": [],
 		"elevation_zones": [],
+		"surface_zones": [
+			{"center": Vector3(48, 0, 30), "half_extents": Vector2(9, 9), "surface_type": "marsh"},
+			{"center": Vector3(-48, 0, -30), "half_extents": Vector2(9, 9), "surface_type": "sand"},
+			{"center": Vector3(-48, 0, 30), "half_extents": Vector2(9, 9), "surface_type": "rocky"},
+			{"center": Vector3(48, 0, -30), "half_extents": Vector2(9, 9), "surface_type": "snow_mud"},
+		],
 		"resource_nodes": [
 			{"position": Vector3(-20, 0, 20), "type": "metal", "amount": 1100},
 			{"position": Vector3(20, 0, -20), "type": "metal", "amount": 1100},
@@ -157,11 +173,20 @@ const MAPS = {
 	# as far as Highland Chokepoint's full corridor walls.
 	"coastal_strand": {
 		"name": "Coastal Strand",
-		"description": "Water runs the full eastern coastline instead of sitting in the middle - naval units get real open water to work with. Rocky outcrops inland, including one squarely between the two bases.",
+		"description": "Water runs the full eastern coastline instead of sitting in the middle - naval units get real open water to work with, though the shallow shelf right at the shore keeps deep-draught cruisers further out. Rocky outcrops inland, including one squarely between the two bases.",
 		"map_half_extents": 80.0,
 		"ground_color": Color(0.26, 0.28, 0.22),
 		"water_areas": [
 			{"center": Vector3(55, 0, 0), "half_extents": Vector2(25, 80)},
+		],
+		# Terrain variety task: a shallow coastal shelf along the immediate
+		# shoreline (the water zone's western edge, x=[30,40], nearest
+		# land) - real bathymetry logic (shallow near shore, deep further
+		# out). heavy_cruiser_hull (deep draught) is blocked from this
+		# strip entirely and has to stay past x=40; small_boat_hull/
+		# naval_hull/amphibious screw_drive can work right up to the beach.
+		"shallow_water_areas": [
+			{"center": Vector3(35, 0, 0), "half_extents": Vector2(5, 78)},
 		],
 		"obstacles": [
 			{"center": Vector3(-18, 0, 30), "half_extents": Vector2(6, 6)},
