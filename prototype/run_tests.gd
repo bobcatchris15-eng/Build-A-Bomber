@@ -78,12 +78,15 @@ func _init():
 	success = success and await test_vision_range_computation()
 	success = success and await test_fog_of_war_hides_reveals_and_never_hides_own_team()
 	success = success and await test_fog_hidden_excluded_from_targeting()
+	success = success and await test_vision_blocked_by_real_obstacle_cover()
 	success = success and await test_navmesh_routes_around_the_lake()
 	success = success and await test_ground_and_naval_units_use_different_nav_maps()
 	success = success and await test_hull_draught_routes_to_correct_water_nav_map()
 	success = success and await test_unit_order_move_actually_navigates_around_the_lake()
 	success = success and await test_terrain_builder_pure_functions()
 	success = success and await test_terrain_builder_navmesh_ramp_connects()
+	success = success and await test_bridges_carve_a_real_ground_crossing_through_water()
+	success = success and await test_building_obstacle_spawns_taller_real_cover_than_rock_cluster()
 	success = success and await test_amphibious_navmesh_crosses_water()
 	success = success and await test_deep_water_navmesh_blocks_shallow_draught_hulls()
 	success = success and await test_elevation_combat_and_vision_bonus()
@@ -3696,6 +3699,80 @@ func test_fog_hidden_excluded_from_targeting() -> bool:
 	print("  [PASS] fog_hidden enemies are excluded from auto-targeting; becoming visible makes them targetable again.")
 	return true
 
+func test_vision_blocked_by_real_obstacle_cover() -> bool:
+	print("Running Test Suite: Fog-of-War - Buildings/Obstacles Are Real Cover, Not Just Movement Blockers (Map Variety Batch)...")
+	await process_frame
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var enemy = CharacterBody3D.new()
+	enemy.set_script(BattleUnitScript)
+	skirmish.add_child(enemy)
+	enemy.team = skirmish.ENEMY_TEAM
+	enemy.set_meta("team", skirmish.ENEMY_TEAM)
+	enemy.add_to_group("units")
+	enemy.add_to_group("damageable")
+	enemy.vision_range = 5.0
+	enemy.global_position = Vector3(300, 0, 0) # far from the default map's lake/bases/obstacles
+
+	var viewer = CharacterBody3D.new()
+	viewer.set_script(BattleUnitScript)
+	skirmish.add_child(viewer)
+	viewer.team = skirmish.PLAYER_TEAM
+	viewer.set_meta("team", skirmish.PLAYER_TEAM)
+	viewer.add_to_group("units")
+	viewer.add_to_group("damageable")
+	viewer.vision_range = 30.0
+	viewer.global_position = Vector3(280, 0, 0)
+
+	skirmish._recalc_fog_of_war()
+	if enemy.fog_hidden or not enemy.visible:
+		print("  [FAIL] Sanity check failed: with clear line of sight and no obstacle, the enemy should already be visible")
+		skirmish.queue_free()
+		return false
+
+	# Real cover, built the exact same way TerrainBuilder's rock/building
+	# obstacles are (a StaticBody3D on collision layer 1), placed squarely
+	# between viewer and enemy - proves _has_line_of_sight() genuinely
+	# raycasts against that layer rather than the fog check being pure
+	# distance math with an obstacle just coincidentally nearby.
+	var cover = StaticBody3D.new()
+	cover.collision_layer = 1
+	cover.collision_mask = 0
+	var shape = CollisionShape3D.new()
+	var box_shape = BoxShape3D.new()
+	box_shape.size = Vector3(6.0, 6.0, 6.0)
+	shape.shape = box_shape
+	cover.add_child(shape)
+	skirmish.add_child(cover)
+	cover.global_position = Vector3(290, 3.0, 0)
+	await process_frame # let the physics server register the new collider before raycasting against it
+
+	skirmish._recalc_fog_of_war()
+	if not enemy.fog_hidden or enemy.visible:
+		print("  [FAIL] A real obstacle directly between viewer and enemy should block vision (fog_hidden should flip true) even though the enemy is still within vision_range")
+		skirmish.queue_free()
+		return false
+
+	cover.queue_free()
+	await process_frame
+	skirmish._recalc_fog_of_war()
+	if enemy.fog_hidden or not enemy.visible:
+		print("  [FAIL] Removing the obstacle should restore line of sight and reveal the enemy again")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Obstacles on the terrain collision layer genuinely block vision (a real LOS raycast, not just distance), and stop blocking once removed.")
+	return true
+
 func test_navmesh_routes_around_the_lake() -> bool:
 	print("Running Test Suite: Real Pathfinding - Navmesh Routes Around The Lake...")
 	await process_frame
@@ -4011,6 +4088,112 @@ func test_terrain_builder_navmesh_ramp_connects() -> bool:
 			return false
 
 	print("  [PASS] All 4 ramp directions (north/south/east/west) produce a real connected path from ground level up to the plateau.")
+	return true
+
+func test_bridges_carve_a_real_ground_crossing_through_water() -> bool:
+	print("Running Test Suite: Bridges - Ground Units Cross Via The Bridge, Blocked Without One (Map Variety Batch)...")
+	var TerrainBuilder = preload("res://scripts/terrain_builder.gd")
+	var half = 40.0
+	# Water spans the map's ENTIRE x-range (edge to edge) - with no bridge
+	# there is literally zero room to go around, so any successful crossing
+	# can only be explained by the bridge carve-out, not a lucky detour.
+	var water = [{"center": Vector3(0, 0, 0), "half_extents": Vector2(half, 6)}]
+	var map_no_bridge = {"map_half_extents": half, "water_areas": water, "obstacles": [], "elevation_zones": []}
+	var map_with_bridge = {
+		"map_half_extents": half, "water_areas": water, "obstacles": [], "elevation_zones": [],
+		"bridges": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(4, 6)}],
+	}
+	var start = Vector3(0, 0, -30)
+	var end = Vector3(0, 0, 30)
+
+	var nav_no_bridge = TerrainBuilder.build_navmeshes(map_no_bridge)
+	await process_frame
+	await process_frame
+	var path_no_bridge = NavigationServer3D.map_get_path(nav_no_bridge.ground_map, start, end, true)
+	var reached_no_bridge = path_no_bridge.size() >= 2 and path_no_bridge[path_no_bridge.size() - 1].distance_to(end) <= 3.0
+	for k in ["ground_region", "water_region", "amphibious_region", "deep_water_region"]:
+		if nav_no_bridge[k].is_valid(): NavigationServer3D.free_rid(nav_no_bridge[k])
+	for k in ["ground_map", "water_map", "amphibious_map", "deep_water_map"]:
+		NavigationServer3D.free_rid(nav_no_bridge[k])
+
+	var nav_with_bridge = TerrainBuilder.build_navmeshes(map_with_bridge)
+	await process_frame
+	await process_frame
+	var path_with_bridge = NavigationServer3D.map_get_path(nav_with_bridge.ground_map, start, end, true)
+	var reached_with_bridge = path_with_bridge.size() >= 2 and path_with_bridge[path_with_bridge.size() - 1].distance_to(end) <= 3.0
+	var crosses_via_bridge_strip = true
+	for p in path_with_bridge:
+		if p.z > -6.0 and p.z < 6.0 and abs(p.x) > 5.0: # outside the bridge's x=[-4,4] footprint (+1 slack)
+			crosses_via_bridge_strip = false
+	for k in ["ground_region", "water_region", "amphibious_region", "deep_water_region"]:
+		if nav_with_bridge[k].is_valid(): NavigationServer3D.free_rid(nav_with_bridge[k])
+	for k in ["ground_map", "water_map", "amphibious_map", "deep_water_map"]:
+		NavigationServer3D.free_rid(nav_with_bridge[k])
+
+	if reached_no_bridge:
+		print("  [FAIL] Without a bridge, a full-width water band should completely block ground crossing")
+		return false
+	if not reached_with_bridge:
+		print("  [FAIL] With a bridge carved through the water, ground crossing should succeed")
+		return false
+	if not crosses_via_bridge_strip:
+		print("  [FAIL] The crossing path should stay within the bridge's own x-footprint while passing through the water band, not some other route")
+		return false
+	if TerrainBuilder.terrain_height_at(map_with_bridge, Vector3(0, 0, 0)) <= 0.0:
+		print("  [FAIL] terrain_height_at() should report a real positive deck height on the bridge, not ground level 0.0")
+		return false
+
+	print("  [PASS] A bridge carves a genuine, narrow ground crossing through an otherwise fully-blocking water band, and reports a real deck height.")
+	return true
+
+func test_building_obstacle_spawns_taller_real_cover_than_rock_cluster() -> bool:
+	print("Running Test Suite: Urban Obstacles - 'building' Type Spawns Real, Taller Cover Distinct From Rock Clusters (Map Variety Batch)...")
+	var TerrainBuilder = preload("res://scripts/terrain_builder.gd")
+	var parent = Node3D.new()
+	root.add_child(parent)
+	var map_def = {
+		"map_half_extents": 80.0,
+		"obstacles": [
+			{"center": Vector3(0, 0, 0), "half_extents": Vector2(4, 4), "type": "rock"},
+			{"center": Vector3(30, 0, 0), "half_extents": Vector2(4, 4), "type": "building", "building_height": 7.0},
+		],
+	}
+	TerrainBuilder.spawn_visuals(map_def, parent)
+	await process_frame
+
+	var rock_body = null
+	var building_body = null
+	for child in parent.get_children():
+		if child is StaticBody3D:
+			if child.global_position.x < 15:
+				rock_body = child
+			else:
+				building_body = child
+	if not rock_body or not building_body:
+		print("  [FAIL] Expected one real StaticBody3D collider per obstacle, got rock=", rock_body, " building=", building_body)
+		parent.queue_free()
+		return false
+	# Code-generated nodes get anonymous engine names (e.g. "@CollisionShape3D@N")
+	# unless force_readable_name is passed to add_child(), so find the
+	# CollisionShape3D child by type rather than by name.
+	var rock_shape: BoxShape3D = null
+	for child in rock_body.get_children():
+		if child is CollisionShape3D: rock_shape = child.shape
+	var building_shape: BoxShape3D = null
+	for child in building_body.get_children():
+		if child is CollisionShape3D: building_shape = child.shape
+	if not is_equal_approx(rock_shape.size.y, 3.0):
+		print("  [FAIL] rock obstacle collider height should stay 3.0 (unchanged behavior), got ", rock_shape.size.y)
+		parent.queue_free()
+		return false
+	if building_shape.size.y < 6.9 or building_shape.size.y > 7.1:
+		print("  [FAIL] building obstacle collider height should honor building_height=7.0, got ", building_shape.size.y)
+		parent.queue_free()
+		return false
+
+	parent.queue_free()
+	await process_frame
+	print("  [PASS] 'building' obstacles spawn a real, taller StaticBody3D collider honoring building_height, distinct from 'rock' obstacles' fixed height.")
 	return true
 
 func test_deep_water_navmesh_blocks_shallow_draught_hulls() -> bool:

@@ -231,6 +231,27 @@ func is_energy_deficit(team: int) -> bool:
 const ELEVATION_VISION_BONUS_PER_UNIT: float = 0.02
 const ELEVATION_VISION_CAP: float = 12.0
 
+# Map variety batch: real sightline-blocking, the mechanical payoff of the
+# urban map's building obstacles (and, as a free side effect, every
+# existing rock-cluster obstacle too - both are StaticBody3D on collision
+# layer 1, same layer auto_weapon.gd's own LOS raycast already checks for
+# weapon fire, so this reuses that exact convention rather than inventing a
+# separate "is this a sightline blocker" flag). A fixed eye-height offset
+# (not each construct's real height) is a deliberate approximation, same
+# spirit as auto_weapon.gd's own "+0.5" target-center offset - good enough
+# for "does a building genuinely hide what's behind it," not meant to model
+# a crouching soldier peeking over a windowsill.
+const VISION_EYE_HEIGHT: float = 1.5
+
+func _has_line_of_sight(from_pos: Vector3, to_pos: Vector3) -> bool:
+	var space_state = get_world_3d().direct_space_state
+	var ray_start = from_pos + Vector3(0, VISION_EYE_HEIGHT, 0)
+	var ray_end = to_pos + Vector3(0, VISION_EYE_HEIGHT, 0)
+	var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
+	query.collision_mask = 1 # Ground/obstacle layer only - never blocked by other units (layer 4)
+	var result = space_state.intersect_ray(query)
+	return result.is_empty()
+
 func _recalc_fog_of_war():
 	if game_over: return
 	var player_constructs = get_team_units(PLAYER_TEAM) + get_team_buildings(PLAYER_TEAM)
@@ -238,15 +259,22 @@ func _recalc_fog_of_war():
 	for c in enemy_constructs:
 		if not is_instance_valid(c) or not c.has_method("set_fog_visible"): continue
 		var seen = false
+		var c_flying = "is_flying" in c and c.is_flying
 		for o in player_constructs:
 			if not is_instance_valid(o): continue
 			var vision = o.vision_range if "vision_range" in o else 0.0
-			if not ("is_flying" in o and o.is_flying):
+			var o_flying = "is_flying" in o and o.is_flying
+			if not o_flying:
 				var elevation = terrain_height_at(o.global_position)
 				vision *= 1.0 + min(elevation, ELEVATION_VISION_CAP) * ELEVATION_VISION_BONUS_PER_UNIT
 			if c.global_position.distance_to(o.global_position) <= vision:
-				seen = true
-				break
+				# Flying viewers/targets skip the terrain-obstacle raycast
+				# entirely - already airborne regardless of what's on the
+				# ground below, same reasoning the elevation bonus above
+				# already uses for flying viewers.
+				if o_flying or c_flying or _has_line_of_sight(o.global_position, c.global_position):
+					seen = true
+					break
 		c.set_fog_visible(seen)
 
 # --- Rosters ---

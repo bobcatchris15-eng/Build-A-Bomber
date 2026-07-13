@@ -50,6 +50,13 @@ const RAMP_RUN_PER_HEIGHT: float = 1.5
 # bands always did.
 const RAMP_PAD: float = GRID_CELL
 
+# Bridge deck height above water/ground level - just enough to read as a
+# real raised structure (and to keep the deck mesh visibly above the water
+# plane's own y=0.05) without needing a approach ramp of its own; bridges sit
+# flush with the surrounding ground on both banks, unlike an elevation zone's
+# plateau, so no ramp geometry is needed for units to walk onto it.
+const BRIDGE_DECK_HEIGHT: float = 0.6
+
 static func _snap_floor(coord: float, half: float) -> float:
 	return -half + floor((coord - (-half)) / GRID_CELL) * GRID_CELL
 
@@ -153,12 +160,43 @@ static func _collect_holes(map_def: Dictionary, half: float) -> Array:
 		holes.append({"x0": rg.x0, "x1": rg.x1, "z0": rg.z0, "z1": rg.z1})
 	return holes
 
+# Obstacles/elevation always block ground faces; water normally does too,
+# EXCEPT where a bridge crosses it - bridges carve a walkable strip straight
+# through the water hole so ground units get a real, narrow crossing point
+# flanked by water on both sides (a genuine tactical chokepoint), rather than
+# being a flag that just turns water off entirely. Not used by
+# _build_amphibious_faces() - water there is already walkable for every
+# amphibious unit, so a bridge carve-out would be a no-op - and deliberately
+# NOT used by _build_deep_water_faces()/water_map either, so naval units keep
+# floating and passing freely underneath, same as a real bridge over a river.
+static func _collect_bridges(map_def: Dictionary) -> Array:
+	var bridges = []
+	for b in map_def.get("bridges", []):
+		bridges.append(_rect_from(b.center, b.half_extents))
+	return bridges
+
+static func _cell_on_bridge(x0: float, x1: float, z0: float, z1: float, bridges: Array) -> bool:
+	for b in bridges:
+		if _rect_overlaps(x0, x1, z0, z1, b):
+			return true
+	return false
+
 # --- Navmesh source geometry ---
 
 static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 	var verts = PackedVector3Array()
 	var half: float = map_def.get("map_half_extents", 80.0)
-	var holes = _collect_holes(map_def, half)
+	var water_holes = []
+	for w in map_def.get("water_areas", []):
+		water_holes.append(_rect_from(w.center, w.half_extents))
+	var hard_holes = []
+	for o in map_def.get("obstacles", []):
+		hard_holes.append(_rect_from(o.center, o.half_extents))
+	for e in map_def.get("elevation_zones", []):
+		hard_holes.append(_rect_from(e.center, e.half_extents))
+		var rg = _ramp_geometry(e, half)
+		hard_holes.append({"x0": rg.x0, "x1": rg.x1, "z0": rg.z0, "z1": rg.z1})
+	var bridges = _collect_bridges(map_def)
 
 	var x = -half
 	while x < half:
@@ -167,10 +205,15 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 		while z < half:
 			var z1 = min(z + GRID_CELL, half)
 			var blocked = false
-			for h in holes:
+			for h in hard_holes:
 				if _rect_overlaps(x, x1, z, z1, h):
 					blocked = true
 					break
+			if not blocked:
+				for w in water_holes:
+					if _rect_overlaps(x, x1, z, z1, w) and not _cell_on_bridge(x, x1, z, z1, bridges):
+						blocked = true
+						break
 			if not blocked:
 				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
 			z = z1
@@ -336,6 +379,8 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 		_spawn_surface_zone(s, parent)
 	for sw in map_def.get("shallow_water_areas", []):
 		_spawn_shallow_water_marker(sw, parent)
+	for b in map_def.get("bridges", []):
+		_spawn_bridge(b, parent)
 
 # Flat colored patch, matte (unlike water's glossy transparency) - purely
 # cosmetic/informational, never a navmesh hole (see get_surface_type_at()'s
@@ -415,10 +460,41 @@ static func _spawn_water_plane(water: Dictionary, parent: Node3D):
 	mesh_inst.global_position = Vector3(water.center.x, 0.05, water.center.z)
 
 static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D):
-	# A rough rock cluster filling the footprint - primitive meshes, not a
-	# new Blender asset (avoids the fragile import pipeline for pure
-	# decoration). Seeded from position so a given map's obstacles always
-	# look the same run to run (deterministic for screenshot verification).
+	var obstacle_type = obstacle.get("type", "rock")
+	var collider_height = 3.0
+	if obstacle_type == "building":
+		collider_height = _spawn_building_obstacle(obstacle, parent)
+	else:
+		collider_height = _spawn_rock_obstacle(obstacle, parent)
+
+	# Real collision (same "Ground only" layer as the flat terrain) so units
+	# physically can't clip through even if steering pushes them off-path,
+	# and the build-placement raycast can't resolve a spot inside the
+	# footprint to a flat position either - belt-and-suspenders on top of
+	# the navmesh hole and the explicit is_position_blocked() reject. This
+	# is also what makes obstacles (rock clusters AND buildings alike) real
+	# COVER, not just movement blockers: auto_weapon.gd's own line-of-sight
+	# raycast already checks this same collision_layer (1) for weapon fire,
+	# and skirmish.gd's fog-of-war vision check now does too (see
+	# _recalc_fog_of_war()'s LOS raycast) - a tall obstacle on this layer
+	# blocks both automatically, no obstacle-type-specific wiring needed.
+	var body = StaticBody3D.new()
+	body.collision_layer = 1
+	body.collision_mask = 0
+	var shape = CollisionShape3D.new()
+	var box_shape = BoxShape3D.new()
+	box_shape.size = Vector3(obstacle.half_extents.x * 2.0, collider_height, obstacle.half_extents.y * 2.0)
+	shape.shape = box_shape
+	body.add_child(shape)
+	parent.add_child(body)
+	body.global_position = Vector3(obstacle.center.x, collider_height / 2.0, obstacle.center.z)
+
+# A rough rock cluster filling the footprint - primitive meshes, not a new
+# Blender asset (avoids the fragile import pipeline for pure decoration).
+# Seeded from position so a given map's obstacles always look the same run
+# to run (deterministic for screenshot verification). Returns the collider
+# height _spawn_obstacle() should use for this obstacle.
+static func _spawn_rock_obstacle(obstacle: Dictionary, parent: Node3D) -> float:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(obstacle.center)
 	for i in range(5):
@@ -437,22 +513,63 @@ static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D):
 		var oz = rng.randf_range(-obstacle.half_extents.y * 0.7, obstacle.half_extents.y * 0.7)
 		rock.global_position = Vector3(obstacle.center.x + ox, size.y / 2.0, obstacle.center.z + oz)
 		rock.rotation.y = rng.randf_range(0, TAU)
+	return 3.0
 
-	# Real collision (same "Ground only" layer as the flat terrain) so units
-	# physically can't clip through even if steering pushes them off-path,
-	# and the build-placement raycast can't resolve a spot inside the
-	# footprint to a flat position either - belt-and-suspenders on top of
-	# the navmesh hole and the explicit is_position_blocked() reject.
-	var body = StaticBody3D.new()
-	body.collision_layer = 1
-	body.collision_mask = 0
-	var shape = CollisionShape3D.new()
-	var box_shape = BoxShape3D.new()
-	box_shape.size = Vector3(obstacle.half_extents.x * 2.0, 3.0, obstacle.half_extents.y * 2.0)
-	shape.shape = box_shape
-	body.add_child(shape)
-	parent.add_child(body)
-	body.global_position = Vector3(obstacle.center.x, 1.5, obstacle.center.z)
+# A single boxy building filling the footprint - flat walls, a flat roof
+# cap, and a few window-slit/AC-unit greebles, deliberately a different
+# silhouette from the rock cluster's jumble of boulders (a single solid
+# structure, not a pile of debris) since it's meant to read as real urban
+# cover, not decoration. Taller than a rock cluster by default (real
+# buildings are taller than a rock pile, and a taller collider makes the
+# vision/weapon LOS-blocking this enables much more visually legible).
+static func _spawn_building_obstacle(obstacle: Dictionary, parent: Node3D) -> float:
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(obstacle.center)
+	var height = obstacle.get("building_height", rng.randf_range(5.0, 8.0))
+
+	var walls = MeshInstance3D.new()
+	var box = BoxMesh.new()
+	box.size = Vector3(obstacle.half_extents.x * 2.0, height, obstacle.half_extents.y * 2.0)
+	walls.mesh = box
+	var mat = StandardMaterial3D.new()
+	var shade = rng.randf_range(0.32, 0.42)
+	mat.albedo_color = Color(shade * 0.9, shade * 0.92, shade)
+	mat.roughness = 0.8
+	walls.material_override = mat
+	parent.add_child(walls)
+	walls.global_position = Vector3(obstacle.center.x, height / 2.0, obstacle.center.z)
+
+	var roof = MeshInstance3D.new()
+	var roof_box = BoxMesh.new()
+	roof_box.size = Vector3(obstacle.half_extents.x * 2.05, 0.3, obstacle.half_extents.y * 2.05)
+	roof.mesh = roof_box
+	var roof_mat = StandardMaterial3D.new()
+	roof_mat.albedo_color = Color(0.25, 0.24, 0.24)
+	roof_mat.roughness = 0.9
+	roof.material_override = roof_mat
+	parent.add_child(roof)
+	roof.global_position = Vector3(obstacle.center.x, height + 0.15, obstacle.center.z)
+
+	# Window-slit greebles on the two long faces - purely cosmetic, no
+	# collision of their own (the single wall box above already owns it).
+	var rows = int(height / 1.6)
+	var cols = 3
+	for row in range(rows):
+		for col in range(cols):
+			var window = MeshInstance3D.new()
+			var wbox = BoxMesh.new()
+			wbox.size = Vector3(0.6, 0.7, 0.05)
+			window.mesh = wbox
+			var wmat = StandardMaterial3D.new()
+			wmat.albedo_color = Color(0.55, 0.6, 0.45)
+			wmat.emission_enabled = true
+			wmat.emission = Color(0.4, 0.42, 0.3)
+			window.material_override = wmat
+			parent.add_child(window)
+			var wx = obstacle.center.x + (col - (cols - 1) / 2.0) * (obstacle.half_extents.x * 2.0 / (cols + 1))
+			var wy = 1.2 + row * 1.6
+			window.global_position = Vector3(wx, wy, obstacle.center.z + obstacle.half_extents.y + 0.03)
+	return height
 
 static func _spawn_elevation_zone(zone: Dictionary, parent: Node3D, half: float):
 	var c: Vector3 = zone.center
@@ -489,6 +606,48 @@ static func _spawn_elevation_zone(zone: Dictionary, parent: Node3D, half: float)
 	ramp_mesh_inst.material_override = ramp_mat
 	parent.add_child(ramp_mesh_inst)
 
+# A raised deck spanning the bridge's full footprint (real geometry, not
+# just a color patch - it's the visual proof the navmesh carve-out actually
+# corresponds to a walkable structure) plus two low guard-rail strips along
+# the long edges. The crossing axis is whichever of half_extents is larger
+# (a bridge is always longer than it is wide), so the rails run parallel to
+# travel regardless of whether the map orients the crossing along X or Z.
+static func _spawn_bridge(bridge: Dictionary, parent: Node3D):
+	var c: Vector3 = bridge.center
+	var he: Vector2 = bridge.half_extents
+	var deck_h: float = bridge.get("deck_height", BRIDGE_DECK_HEIGHT)
+
+	var deck = MeshInstance3D.new()
+	var box = BoxMesh.new()
+	box.size = Vector3(he.x * 2.0, deck_h, he.y * 2.0)
+	deck.mesh = box
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.5, 0.42, 0.32)
+	mat.roughness = 0.8
+	deck.material_override = mat
+	parent.add_child(deck)
+	deck.global_position = Vector3(c.x, deck_h / 2.0, c.z)
+
+	var long_axis_x = he.x >= he.y
+	var rail_h = 0.5
+	var rail_thickness = 0.3
+	for side in [-1.0, 1.0]:
+		var rail = MeshInstance3D.new()
+		var rail_box = BoxMesh.new()
+		if long_axis_x:
+			rail_box.size = Vector3(he.x * 2.0, rail_h, rail_thickness)
+			rail.mesh = rail_box
+			rail.global_position = Vector3(c.x, deck_h + rail_h / 2.0, c.z + side * (he.y - rail_thickness / 2.0))
+		else:
+			rail_box.size = Vector3(rail_thickness, rail_h, he.y * 2.0)
+			rail.mesh = rail_box
+			rail.global_position = Vector3(c.x + side * (he.x - rail_thickness / 2.0), deck_h + rail_h / 2.0, c.z)
+		var rail_mat = StandardMaterial3D.new()
+		rail_mat.albedo_color = Color(0.35, 0.32, 0.28)
+		rail_mat.roughness = 0.7
+		rail.material_override = rail_mat
+		parent.add_child(rail)
+
 # --- Queries (pure functions, no Node dependency - callable from tests
 # directly against a MapCatalog dictionary) ---
 
@@ -513,6 +672,9 @@ static func terrain_height_at(map_def: Dictionary, pos: Vector3) -> float:
 			if span != 0.0:
 				t = 1.0 - clamp((coord - rg.inner) / span, 0.0, 1.0)
 			return e.height * clamp(t, 0.0, 1.0)
+	for b in map_def.get("bridges", []):
+		if _point_in_rect(pos, _rect_from(b.center, b.half_extents)):
+			return b.get("deck_height", BRIDGE_DECK_HEIGHT)
 	return 0.0
 
 # Water, obstacles, and ramp slopes are all "can't stand/build here" -

@@ -7,14 +7,32 @@ class_name MapCatalog
 # maps are trivially diffable/testable the same way new modules already are.
 #
 # Field shapes:
-#   water_areas / obstacles: [{center: Vector3, half_extents: Vector2}, ...]
-#     (rectangular XZ footprints, Y ignored - both are flat-ground features)
+#   water_areas: [{center: Vector3, half_extents: Vector2}, ...]
+#     (rectangular XZ footprints, Y ignored - flat-ground features)
+#   obstacles: [{center, half_extents, type: "rock"/"building", building_height (opt)}, ...]
+#     "type" defaults to "rock" (a jumbled boulder cluster) if omitted;
+#     "building" is a single boxy structure with a flat roof and window
+#     greebles - both are equally real cover (StaticBody3D on collision
+#     layer 1), which is what makes them block weapon LOS (auto_weapon.gd)
+#     and vision LOS (TerrainBuilder/skirmish.gd's _has_line_of_sight())
+#     alike, not just movement.
 #   elevation_zones: [{center, half_extents, height, ramp_side, ramp_width}, ...]
 #     a raised rectangular plateau with ONE ramp on the given side
 #     ("north"/"south"/"east"/"west" = +Z/-Z/+X/-X ground-level approach).
 #     Ramp run length is derived (TerrainBuilder.RAMP_RUN_PER_HEIGHT), not
 #     authored per-zone, to keep map data terse and every ramp's slope angle
 #     consistently walkable.
+#   bridges: [{center, half_extents, deck_height (opt)}, ...]
+#     a rectangular strip carved through a water_areas hole, walkable for
+#     ground/legged locomotion ONLY (not naval/amphibious, which don't need
+#     it - see TerrainBuilder._collect_bridges()) - flanked by water on
+#     both sides that ISN'T carved, so it's a genuine narrow chokepoint, not
+#     a way to remove the water. Deliberately does not block water_map/
+#     deep_water_map - naval units still float and pass freely underneath,
+#     same as a real bridge over a river. A bridge's footprint should
+#     always fully span a water_areas rect along the crossing axis (so
+#     there's dry land - or at least the water's edge - on both ends);
+#     nothing enforces this automatically, it's a map-authoring convention.
 #   resource_nodes: [{position: Vector3, type: "metal"/"crystal", amount: int}, ...]
 #   player_start / enemy_start: {hq, factory, refinery, harvester: Vector3}
 
