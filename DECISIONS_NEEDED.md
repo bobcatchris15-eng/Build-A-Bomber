@@ -4,6 +4,42 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session, cont'd 3) — Rebuilding against VISUAL_ART_DIRECTION.md + size-tiered manufactories
+
+**Not blocking.**
+
+**No baked curvature/AO masks - procedural approximations instead.** VISUAL_ART_DIRECTION.md's section 2 calls for masks "baked ONCE per mesh/module" (curvature/edge-wear, cavity/AO, panel/trim). Given this week's Blender import pipeline has repeatedly been the most fragile part of this project (hung `--headless --editor --import` processes, axis-convention bugs, needing an isolated-copy workaround), adding a real per-mesh bake step for every existing hull was the one piece of this doc I deliberately didn't implement literally. Instead: wear uses `fwidth(world_normal)` (a screen-space curvature proxy - genuinely high at edges/corners, near-zero on flat panels, needing zero new assets) blended with noise for organic patchiness; grime uses a "low local-Y + noise" proxy instead of a real cavity map; panel-lines/trim use a world-space periodic seam grid instead of a baked trim mask. This keeps the doc's INTENT (wear concentrates on edges, not randomly; a shared "kit of parts" grammar; trim gets its own color) while adding zero new Blender-pipeline risk. Logged explicitly since it's the one place I diverged from the doc's literal mechanism, not just its parameter names.
+
+**decal_tint is a wired-but-inert placeholder.** The doc's shared stencil/hazard/mascot decal atlas needs real authored texture content (exactly the kind of hand-painted per-faction asset the whole shader system exists to avoid) - kept the uniform in the parameter model for forward-compatibility but it currently does nothing visually. Flagging so it isn't mistaken for a bug later.
+
+**World-space (not local/object-space) sampling for every procedural mask - a real bug caught by actually testing the stretch case**, not just reading the doc's warning. First implementation used raw `VERTEX` (local mesh space) for noise input; local space doesn't change when a Node's `scale` is applied via `MODEL_MATRIX`, so a stretched hull would have shown the SAME pattern enlarged/smeared, not more repetitions - the exact failure mode the doc calls out. Fixed with a `world_pos` vertex-shader varying (`MODEL_MATRIX * VERTEX`) and confirmed with a real screenshot (`stretch_invariance.png`) showing a 3x-stretched hull's panel-line grid repeating 3 times, not smearing into one blur.
+
+**Team-color problem (doc section 1.6) - not implemented this pass.** The doc correctly flags that faction-only identity gives two same-faction players no way to tell units apart. A real fix (a separate `team_color` parameter/decal layered on top) is a genuine scope addition beyond "rebuild the shader against the doc" - not attempted here, logged as the clear next increment if/when actual multiplayer or same-faction-vs-same-faction matches become relevant (currently every match is exactly 2 teams, each free to pick ANY of the 10 factions independently per MatchSetup, so this can already happen today).
+
+**7 invented factions from the previous commit were fully replaced, not kept alongside.** Chris's design-doc pass produced the "real" 7 (Salvage Union/Crimson Concordat/Glacier Syndicate/Dune Runners/Ledger Combine/Bayou Irregulars/Aerodrome Cartel) to replace my earlier placeholder guesses (Scavengers/Zealots/Nomads/Cartel/Engineers/Berserkers/Cybernetics) - not additive, since the roster is meant to stay at exactly 10. 3 of the 7 needed genuinely new mechanics (Crimson Concordat's live low-HP dps ramp, Glacier Syndicate's terrain-penalty reduction, Bayou Irregulars' detection-range reduction) rather than reusing what I'd already built; the other 4 renamed/reflavored mechanics I'd already implemented and tested (metal cost discount, build-time reduction, harvest rate, and a NEW airborne-only speed check for Aerodrome Cartel, since none of the original 7 had an "only applies to flying units" bonus).
+
+## 2026-07-13 (new session, cont'd 3) — Size-tiered manufactories: hull mapping, and why "start with all 3" instead of unlockable progression
+
+**Not blocking.**
+
+**Exact hull -> tier mapping** (weight breakpoints: light &le;150, medium &le;400, heavy &gt;400 - chosen to split the current 12 mobile hulls into even 4/4/4 groups, not a domain-specific rule):
+
+| Tier | Hulls (weight) |
+|---|---|
+| Light | interceptor_hull (65), light_hull (100), small_boat_hull (130), flying_wing_hull (140) |
+| Medium | fuselage_hull (210), medium_hull (250), airship_hull (260), naval_hull (380) |
+| Heavy | assault_hull (500), sponson_hull (650), heavy_cruiser_hull (680), heavy_hull (800) |
+
+Foundations (pillbox/tower/fortress_wall_foundation) aren't tiered at all (`get_hull_size_tier()` returns `""`) - static defenses are placed directly via the Armory/build-placement flow, never queued from any manufactory, so a production tier is meaningless for them. Deliberately cross-domain by design, per Chris's explicit correction: `small_boat_hull` (naval) and `flying_wing_hull` (air) share the Light tier with `interceptor_hull` (ground); `heavy_cruiser_hull` (naval) shares Heavy with `heavy_hull` (ground). `assault_hull` (500) landing in Heavy despite sitting numerically closer to `naval_hull` (380) than to `sponson_hull` (650) is the one slightly-arguable case from a pure quartile-split - kept it there since 500 is still well clear of the 400 breakpoint and "assault" reads as a heavy-hitter class thematically anyway.
+
+**Every match starts with all 3 manufactory tiers already built, rather than the player unlocking Medium/Heavy over time.** Chris's framing implied a real "which manufactory can you use right now" gameplay question, which could support either an unlockable-progression read or a "always-available, just costs more to build extras" read. Went with the latter for two concrete reasons: (1) `enemy_ai.gd` has never placed new buildings of any kind (it only ever produces units from buildings that already exist) - giving the AI a real "build a bigger manufactory when affordable" decision would be a genuinely new, untested AI capability, a much bigger and riskier addition than the tier-gating mechanic itself; starting with all 3 sidesteps that entirely while still making the tier-gate real (production of a given tier genuinely requires that specific building to exist and stay alive). (2) Every one of the 8 already-verified map start positions stays legal unchanged - the Light Manufactory keeps the map's exact original `factory` spawn point, Medium/Heavy are placed at fixed offsets from it, verified against all 8 maps' smoke tests rather than assumed safe.
+
+**A real balance side-effect, caught by the existing "no Energy deficit at match start" test, not just noticed by eye:** starting static buildings grew from 3 (hq/factory/refinery) to 5 (hq/refinery/3 manufactories), pushing baseline upkeep from 9.0 to 15.0 against the old `ENERGY_HQ_BASELINE_CAPACITY` of 10.0 - every match would have silently started in Energy deficit. Retuned to 16.0 (preserving the original ~1.0 headroom margin, just against the new 5-building baseline) rather than leaving the old value and hoping it didn't matter.
+
+**Other base-building variety Chris flagged (generator/power-plant building, radar/comms building tied to vision, repair depot) - deliberately NOT built this pass, logged here rather than silently dropped.** All three are real, well-scoped candidates for a future increment (a generator building would need its own PREFAB_STATS entry + Energy-capacity contribution, similar shape to how defense buildings already contribute capacity; a radar building is nearly a copy of the vision-bonus pattern `sensor_suite`/Technocrats already established; a repair depot would need a stationary-heal-aura mechanic distinct from the existing mobile `repair_array` module). Prioritized finishing the shader rework + faction replacement + the explicitly-corrected manufactory-tier system solidly (with real tests/screenshots for each) over starting 3 more new building types in the same pass - per Chris's own "use your judgment on what's worth building now vs. logging for later."
+
+---
+
 ## 2026-07-13 (new session, cont'd 2) — Faction visual identity + 10-faction expansion: scope calls
 
 **Not blocking.**

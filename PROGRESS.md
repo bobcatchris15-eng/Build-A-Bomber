@@ -4,6 +4,36 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (new session, cont'd 3) — Rebuild against VISUAL_ART_DIRECTION.md + size-tiered manufactories
+
+Chris commissioned a dedicated design pass (a design-focused agent, no code access) against the exact faction/UI brief from the previous session. Saved verbatim as `VISUAL_ART_DIRECTION.md` at the repo root, then used it as the concrete reference for a real rework - not just a read-and-file-away.
+
+### Shader rework (commit 609c93c)
+
+Rewrote `hull_faction_material.gdshader` to the doc's 13-parameter model (base/accent/detail color, metallic/roughness/anisotropy/brush_scale, wear/grime, edge highlight, emissive, mottle). Real technical fixes along the way, not just parameter renames:
+- **World-space sampling fix** - the first version's noise used local/object-space `VERTEX`, which doesn't stretch when a Design Lab hull_scale slider stretches the hull, meaning the pattern would smear/enlarge instead of repeating more (exactly the failure mode the doc warns about). Fixed with a `world_pos` vertex-shader varying; verified with a real screenshot showing a 3x-stretched hull's panel-line grid repeating 3 times, not blurring.
+- **Curvature-approximated wear** (`fwidth(world_normal)`) instead of pure noise - reads as edges/corners weathering first, like the doc's baked-curvature-mask intent, without needing a real per-mesh bake pipeline (deliberately skipped given how fragile the Blender import pipeline has been all week - see DECISIONS_NEEDED.md).
+- A world-space panel-line/rivet grid gives every faction the shared "kit of parts" look, doubling as where `accent_color` shows.
+- Godot's built-in `ANISOTROPY`/`ANISOTROPY_FLOW` shader outputs give the brushed-metal directional highlight.
+
+### Faction roster replaced with the design-approved 7 (same commit)
+
+Swapped last commit's invented 7 factions (Scavengers/Zealots/Nomads/Cartel/Engineers/Berserkers/Cybernetics) for the doc's real 7: **Salvage Union** (-10% metal cost), **Crimson Concordat** (weapon DPS ramps up as the unit nears death - a genuinely new per-tick mechanic in `auto_weapon.gd`), **Glacier Syndicate** (negates half of any active terrain speed penalty), **Dune Runners** (+15% harvest rate), **Ledger Combine** (-15% build time), **Bayou Irregulars** (shrinks the distance at which enemies can spot this unit - a new per-construct-faction hook in `skirmish.gd`'s fog-of-war), **Aerodrome Cartel** (+15% speed, airborne units only).
+
+Found and fixed a real UI regression along the way: 10 factions' longer names (vs. the old 3) tipped the Design Lab sidebar's faction dropdown 4px past its fixed width - caught by the existing UI overflow audit test, fixed with `clip_text`.
+
+### Size-tiered manufactories (commit 6aedf86)
+
+Chris corrected an earlier land/sea/air shipyard/airfield idea in favor of production gated by hull WEIGHT tier instead - a small boat and a light ground hull both only need the Light Manufactory. New `ModuleCatalog.get_hull_size_tier()` splits the 12 mobile hulls into even light/medium/heavy groups (breakpoints and full mapping in `DECISIONS_NEEDED.md`); the single old "factory" prefab became 3 (`light_manufactory`/`medium_manufactory`/`heavy_manufactory`), all pre-built at match start (not an unlockable progression - see decision log for why), with real tier-gated production in both the player's build-bar flow and `enemy_ai.gd`. Caught and fixed a real balance side-effect: starting static buildings grew from 3 to 5, which silently pushed every match into Energy deficit at frame one until `ENERGY_HQ_BASELINE_CAPACITY` was retuned (10 -> 16).
+
+### Verification
+
+91/91 automated tests green across all three pieces (rewrote the faction-specific tests for the new parameter names/faction ids/mechanics, added a dedicated manufactory-tier test). Windowed screenshots: all 10 factions' identical hull mesh with distinct paint/wear/trim, the stretch-invariance proof, and the 3-manufactory base cluster with its build-bar buttons.
+
+Other building variety Chris flagged (generator/power-plant, radar/comms, repair depot) logged as real next-increment candidates in `DECISIONS_NEEDED.md` rather than built this pass.
+
+---
+
 ## 2026-07-13 (new session, cont'd 2) — Faction visual identity system + 10-faction expansion
 
 Big pivot from Chris: from mechanics-only work into real visual polish, plus expanding the faction roster from 3 to 10. Three pieces, each committed separately.
