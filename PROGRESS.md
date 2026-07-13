@@ -4,6 +4,18 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (cont'd 2) — Final verification: terrain variety batch
+
+Wraps up the terrain variety batch (surface speed multipliers + hull-draught shallow water blocking - see the two entries below this one).
+
+**Full regression pass:** 73/73 automated tests green, including 6 new tests added across this batch - the core marsh/rocky/snow_mud/sand differentiation (real physics-tick movement comparison), the deep-water navmesh block (raw path-connectivity check), and the `battle_unit.gd` routing check (`heavy_cruiser_hull` vs. `small_boat_hull` land on different nav maps through the real `setup()` path).
+
+**All 5 terrain pieces verified with real in-game screenshots** (not just passing tests) - marsh, rocky, snow_mud, and sand on `open_plains`, shallow water on `coastal_strand` - camera positioned over each zone in the actual running Skirmish scene, one at a time.
+
+No blocking issues. Every piece Chris asked for is implemented: marsh/swamp (favors screw_drive, punishes wheels/treads), rocky (favors legs), deep snow/mud (bogs wheels hard, treads handle it), soft sand (wheels struggle, treads/legs better, hover/anti-grav structurally immune), and hull-draught shallow water (a real navmesh block, not a speed penalty, since Chris specifically called out that distinction).
+
+---
+
 ## 2026-07-13 (cont'd) — Terrain variety made real: zones added to open_plains + coastal_strand
 
 Second half of the terrain variety batch - the mechanism from the previous entry now lives in two real, playable maps instead of just synthetic tests.
