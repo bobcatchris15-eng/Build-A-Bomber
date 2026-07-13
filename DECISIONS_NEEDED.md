@@ -4,6 +4,26 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 — Hull-relative locomotion scaling: reference hull, per-part axis choice, and a clipping bug it surfaced
+
+**Not blocking.**
+
+Batch E item 1: fixed the scale mismatch flagged (not fixed) in the last visual bug pass - locomotion visuals (wheels/legs/rotors/hover pads/anti-grav/engine pods/props) were built purely from their OWN catalog `size` field, with zero dependency on the hull they're mounted to. Giant legs on `flying_wing_hull`, tiny `helicopter_rotors` on `heavy_cruiser_hull`, etc.
+
+**Fix:** two hull-relative multipliers computed once per `update_locomotion()` call, benchmarked against `medium_hull`'s own size (`ModuleCatalog.REFERENCE_HULL_SIZE = (4.0, 1.0, 6.0)` - the hull every part's absolute size was originally eyeballed against, so this is a no-op there):
+- **height factor** (`hull_size.y / 1.0`) applied to parts whose scale should track ground clearance/hull height: wheel radius, leg length (Y-axis only - leg thickness stays as-authored, since the "giant legs" complaint was specifically about length, not girth).
+- **footprint factor** (`sqrt(hull_x * hull_z / (4*6))`) applied to parts whose scale should track overall hull bulk: helicopter_rotors span, hover_engine/anti_grav pad size, fixed_wing_engine/buoyant_envelope pod size, naval_propeller size.
+
+Both clamped to `[0.45, 2.25]` so an extreme hull still gets a legible part instead of vanishing or ballooning absurdly. `tracked_treads`/`screw_drive` were left alone - they already scale their length off real hull Z via the existing `tread_length/catalog.size.z` ratio, and their remaining fixed-size axis (thickness) wasn't the complaint.
+
+**Verified two ways**, not just eyeballing renders: a numeric check (`leg.scale.y`/`rotor.scale` read directly off spawned instances for `medium_hull`/`flying_wing_hull`/`heavy_cruiser_hull`) confirmed the factors compute and apply exactly as designed (e.g. `heavy_cruiser_hull` legs: scale.y=1.9, matching its own height stat exactly), plus screenshots in `progress_captures/2026-07-13/hull_relative_scaling/` showing the size difference.
+
+**Bug surfaced along the way, fixed same pass:** the numeric check caught `helicopter_rotors` count=4 on `heavy_cruiser_hull` rendering all 4 blades bright clipping-red despite not actually overlapping once mounted. Root cause pre-dates this fix: `update_locomotion()` places every instance of a multi-part locomotion type one at a time via `_place_weapon()` (which runs its own `check_all_clipping()` after each placement), but only assigns the `locomotion_group` meta that EXEMPTS same-group instances from clipping AFTER all instances already exist as hull children - so the last instance's placement-time clipping check can flag a same-group pair red before the exemption is in place, and nothing re-checks afterward. This was always latent (same architecture for wheels/legs), just needed parts big enough to actually produce a transient AABB overlap during placement to become visible - which the scaling fix's bigger rotors/legs on bigger hulls made much more likely. Fixed by calling `check_all_clipping()` once more at the end of `update_locomotion()`, after the group meta is set; confirmed via a scripted check that `clipping_detected` flips from `true` (mid-placement, stale) to `false` (post-group-assignment, correct) on the exact repro case.
+
+**Verified:** 74/74 tests green (1 pre-existing test's hardcoded expected scale value updated to account for the new hull-relative factor, not a functional regression - see the comment on `test_design_to_battle_integration`'s legs assertion).
+
+---
+
 ## 2026-07-13 — Systematic visual bug pass: real gaps found on ship/airship hulls, plus what I deliberately left alone
 
 **Not blocking.**

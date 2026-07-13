@@ -4,6 +4,27 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 — Batch E item 1: locomotion visuals now scale relative to hull size
+
+Chris's next batch, item 1: fix the scale mismatch flagged (not fixed) in the visual bug pass below - locomotion visuals were built at a fixed absolute size regardless of the hull they're mounted to (giant legs on `flying_wing_hull`, tiny `helicopter_rotors` on `heavy_cruiser_hull`).
+
+### The fix
+
+Two hull-relative scale factors computed once per `update_locomotion()` call in `module_placer.gd`, benchmarked against `medium_hull`'s size (`ModuleCatalog.REFERENCE_HULL_SIZE`): a **height factor** for parts that should track ground clearance (wheel radius, leg length), and a **footprint factor** for parts that should track overall bulk (rotor span, hover/anti-grav pad size, engine pod size, prop size). Both clamped to `[0.45, 2.25]`. `tracked_treads`/`screw_drive` already scaled their length off real hull Z and didn't need this.
+
+### Bug surfaced and fixed along the way
+
+The verification check caught `helicopter_rotors` rendering falsely clipping-red on a wide hull - a pre-existing latent bug (locomotion_group clipping exemption is assigned after the per-instance clipping checks already ran during placement) that bigger hull-relative parts made much more likely to actually trigger. Fixed with one more `check_all_clipping()` call at the end of `update_locomotion()`, after the group meta is set.
+
+**Verified:**
+- Full suite: **74/74 green** (1 pre-existing test's hardcoded expected leg scale updated to the new hull-relative value - not a regression, see the comment on `test_design_to_battle_integration`).
+- Numeric: scale factors read directly off spawned instances for 3 hull types matched hand-calculated expectations exactly.
+- Visual: `progress_captures/2026-07-13/hull_relative_scaling/` - legs on `medium_hull` vs `flying_wing_hull`, rotors on `medium_hull` vs `heavy_cruiser_hull`.
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-13 — Systematic visual bug pass: locomotion mounting gaps fixed on ship/airship hulls
 
 Chris asked for a real, systematic visual audit across the module/hull library (not spot-checking) - locomotion orientation, mounting gaps, floating parts, checked broadly across hull x locomotion combinations since the no-hard-gating philosophy means players can and will try unusual pairings.

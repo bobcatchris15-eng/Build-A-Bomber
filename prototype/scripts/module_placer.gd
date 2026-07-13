@@ -535,6 +535,21 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	if hull.has_meta("type_id"):
 		underside_y_bias = ModuleCatalog.get_underside_y_bias(hull.get_meta("type_id"))
 
+	# Locomotion visuals were previously built at a fixed absolute size (each
+	# _build_X() in visual_builder.gd only ever sees the LOCOMOTION module's
+	# own catalog size field, never the hull's) - giant legs on a paper-thin
+	# wing, tiny rotors on a huge cruiser, etc. Two hull-relative factors,
+	# benchmarked against medium_hull (the size everything was originally
+	# eyeballed against, so this is a no-op there): a HEIGHT factor for parts
+	# whose scale should track hull height/ground-clearance (wheels radius,
+	# leg length), and a FOOTPRINT factor (sqrt of plan-view area) for parts
+	# whose scale should track overall hull bulk (rotor span, hover/anti-grav
+	# pad size, engine pod size, prop size). Clamped so an extreme hull
+	# (tiny drone / huge cruiser) still gets a legible part instead of a
+	# vanishing sliver or a comically oversized blob.
+	var hull_height_factor = clamp(hull_size.y / ModuleCatalog.REFERENCE_HULL_SIZE.y, 0.45, 2.25)
+	var hull_footprint_factor = clamp(sqrt((hull_size.x * hull_size.z) / (ModuleCatalog.REFERENCE_HULL_SIZE.x * ModuleCatalog.REFERENCE_HULL_SIZE.z)), 0.45, 2.25)
+
 	var spawned_wheels = []
 	
 	if type_id == "wheels":
@@ -559,9 +574,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias, z_pos)
 				var wheel = _place_weapon(type_id, pos, Vector3.DOWN)
 				if wheel:
-					wheel.scale = Vector3(size, size, size)
+					wheel.scale = Vector3(size, size, size) * hull_height_factor
 					# Override position to be underneath (bottom Y) and rotation to be forward (0)
-					wheel.position = Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias - (0.8 * size), z_pos)
+					wheel.position = Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias - (0.8 * size * hull_height_factor), z_pos)
 					wheel.rotation = Vector3.ZERO
 					if wheel.has_meta("module_data"):
 						wheel.get_meta("module_data").scale_multiplier = wheel.scale
@@ -607,7 +622,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				var pos = hull.global_position + Vector3(x_offset * side, y_offset, z_pos)
 				var rotor = _place_weapon(type_id, pos, side_normal)
 				if rotor:
-					rotor.scale = Vector3(size, 1.0, size)
+					rotor.scale = Vector3(size * hull_footprint_factor, 1.0, size * hull_footprint_factor)
 					rotor.rotation = Vector3.ZERO
 					if rotor.has_meta("module_data"):
 						rotor.get_meta("module_data").scale_multiplier = rotor.scale
@@ -627,7 +642,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		for p in points:
 			var hover = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN)
 			if hover:
-				hover.scale = Vector3(size, 1.0, size)
+				hover.scale = Vector3(size * hull_footprint_factor, 1.0, size * hull_footprint_factor)
 				if hover.has_meta("module_data"):
 					hover.get_meta("module_data").scale_multiplier = hover.scale
 				spawned_wheels.append(hover)
@@ -653,7 +668,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				var leg = _place_weapon(type_id, pos, side_normal)
 				if leg:
 					leg.rotation = Vector3.ZERO
-					leg.scale = Vector3(1.0, size, 1.0)
+					leg.scale = Vector3(1.0, size * hull_height_factor, 1.0)
 					if leg.has_meta("module_data"):
 						leg.get_meta("module_data").scale_multiplier = leg.scale
 					spawned_wheels.append(leg)
@@ -672,7 +687,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		for p in points:
 			var ag = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN)
 			if ag:
-				ag.scale = Vector3(size, 1.0, size)
+				ag.scale = Vector3(size * hull_footprint_factor, 1.0, size * hull_footprint_factor)
 				if ag.has_meta("module_data"):
 					ag.get_meta("module_data").scale_multiplier = ag.scale
 				spawned_wheels.append(ag)
@@ -689,7 +704,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.1)
 			var engine = _place_weapon(type_id, pos, side_normal)
 			if engine:
-				engine.scale = Vector3(1.0, size, size)
+				engine.scale = Vector3(1.0, size * hull_footprint_factor, size * hull_footprint_factor)
 				engine.rotation = Vector3.ZERO
 				if engine.has_meta("module_data"):
 					engine.get_meta("module_data").scale_multiplier = engine.scale
@@ -720,7 +735,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 			var pos = hull.global_position + Vector3(x_pos, -hull_size.y * 0.12, hull_size.z * 0.36)
 			var prop = _place_weapon(type_id, pos, Vector3.BACK)
 			if prop:
-				prop.scale = Vector3(size, size, size)
+				prop.scale = Vector3(size, size, size) * hull_footprint_factor
 				if prop.has_meta("module_data"):
 					prop.get_meta("module_data").scale_multiplier = prop.scale
 				spawned_wheels.append(prop)
@@ -738,7 +753,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.1)
 			var envelope_motor = _place_weapon(type_id, pos, side_normal)
 			if envelope_motor:
-				envelope_motor.scale = Vector3(1.0, size, size)
+				envelope_motor.scale = Vector3(1.0, size * hull_footprint_factor, size * hull_footprint_factor)
 				envelope_motor.rotation = Vector3.ZERO
 				if envelope_motor.has_meta("module_data"):
 					envelope_motor.get_meta("module_data").scale_multiplier = envelope_motor.scale
@@ -766,9 +781,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	var wheels_offset = 0.0
 	if type_id == "wheels":
 		var size = settings.get("size", 1.0)
-		wheels_offset = 0.8 * size
+		wheels_offset = 0.8 * size * hull_height_factor
 	elif type_id == "legs":
-		wheels_offset = 1.6 * settings.get("size", 1.0)
+		wheels_offset = 1.6 * settings.get("size", 1.0) * hull_height_factor
 	elif type_id == "anti_grav":
 		wheels_offset = 0.4 * settings.get("size", 1.0)
 		
@@ -779,7 +794,22 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	# Link them in a group
 	for w in spawned_wheels:
 		w.set_meta("locomotion_group", spawned_wheels)
-		
+
+	# Each _place_weapon() call above already ran check_all_clipping() as
+	# part of placing that single instance, but at that point locomotion_group
+	# wasn't set on ANY of the spawned instances yet (it's only assigned in
+	# the loop just above, after every instance already exists as a hull
+	# child) - so multi-instance types (wheels/legs/rotors/etc, count/width
+	# tweaks especially) could get a same-group pair flagged as clipping-red
+	# by that stale mid-placement check and never get re-evaluated, since
+	# nothing else here calls check_all_clipping() again. Surfaced by the
+	# Batch E hull-relative scaling fix - larger locomotion instances on
+	# large hulls made transient same-group overlaps during placement much
+	# more likely to actually happen. Re-checking now (with the group
+	# exemption finally in place) clears any false positive immediately
+	# instead of leaving it stuck red until the player's next click/drag.
+	check_all_clipping()
+
 	get_tree().call_group("stat_ui", "update_stats", hull)
 	
 func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:

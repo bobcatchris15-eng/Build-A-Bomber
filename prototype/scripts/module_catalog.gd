@@ -1359,6 +1359,12 @@ static func get_terrain_speed_multiplier(locomotion_type_id: String, surface_typ
 # shallow water by default, consistent with the no-hard-gating philosophy;
 # only hulls that explicitly opt into a real deep-draught number
 # (heavy_cruiser_hull) get the hard navmesh block.
+# Baseline hull footprint used to derive hull-relative scale factors for
+# locomotion visuals (module_placer.gd's underside_y_bias-style block below
+# get_underside_y_bias()) - medium_hull's own size, since that's the hull
+# every locomotion part's absolute size was originally eyeballed against.
+const REFERENCE_HULL_SIZE: Vector3 = Vector3(4.0, 1.0, 6.0)
+
 const HULL_DRAUGHT_DEFAULT: float = 0.5
 
 # Deep-draught-vs-shallow-water cutoff. naval_hull (0.9) and small_boat_hull

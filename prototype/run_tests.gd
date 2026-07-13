@@ -1317,7 +1317,13 @@ func test_design_to_battle_integration() -> bool:
 		var data = child.get_meta("module_data")
 		if data.type_id == "legs":
 			legs_found = true
-			if abs(child.scale.y - 1.7) < 0.05:
+			# Batch E hull-relative scaling fix: leg length is the "size"
+			# tweak (1.7) times heavy_hull's own height factor relative to
+			# medium_hull (heavy_hull.size.y=1.5 / REFERENCE_HULL_SIZE.y=1.0
+			# = 1.5), not the raw tweak value alone - see module_placer.gd's
+			# update_locomotion().
+			var expected_leg_scale = 1.7 * 1.5
+			if abs(child.scale.y - expected_leg_scale) < 0.05:
 				legs_scale_ok = true
 		elif data.type_id == "gauss_railgun":
 			if abs(data.tweaks.get("rail_length", 0.0) - 1.8) < 0.01:
