@@ -4,6 +4,28 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 — Weapon traverse rate is now per-type, and range/traverse tweak coverage is genuinely wired up
+
+New batch from Chris: differentiate weapon traversal rates per type (tweaks should meaningfully move it, not just nudge it within a narrow uniform curve), and audit/fix weapon range differentiation.
+
+### Audit first
+
+`fire_range`'s BASE values were already well-differentiated per weapon type (9.0-50.0 across the roster) - Chris's suspicion there didn't hold up. The real gaps: (1) roughly half the weapon roster's own player-facing tweaks (cross-checked against `stat_calculator.gd`'s `TWEAK_SPECS`) had zero wiring to range at all - `gauss_railgun`'s only tweak never touched its own range; (2) `traverse_speed` was a single uniform `clamp(200.0/weight, 0.6, 6.0)` formula with no type-specific input whatsoever - two weapons of similar weight but opposite real-world handling (a point-defense tracker vs. a mortar) traversed identically.
+
+### What changed
+
+- **`traverse_agility`** - new catalog field per weapon type (multiplier, default 1.0), reasoned the same way `pintle_min_up_alignment` was: point-defense fastest (ciws 1.8), light autoguns quick (~1.2-1.3), guided missiles moderate (~0.8-0.9, since the warhead self-corrects), indirect/ballistic-arc weapons slowest (~0.5-0.6). Applied on top of the weight-driven base formula, which was widened from `clamp(0.6, 6.0)` to `clamp(0.4, 8.0)` to give the multiplier real room to differentiate.
+- **Tweak-to-traverse coverage generalized** - previously only `barrel_length`/`elevation` moved traverse_speed directly; now every "part gets physically bigger" tweak does (`ModuleCatalog.LINEAR_SCALE_WEAPON_TWEAKS`, the same set `module_data.gd` already treats as weight-scaling), preserving the existing double-dip pattern rather than replacing it.
+- **Tweak-to-range coverage extended** - 6 more tweak names wired into `fire_range` where physically sensible (`caliber`, `rail_length`, `seeker_size`, `ascent_thruster`, `pressure_valve`, `fuse_setting`), each reasoned individually; count-type and non-reach tweaks deliberately left alone.
+
+### Verification
+
+New test isolates each fix from its confounds: ciws vs. mortar_array at identical weight get different traverse speeds (proves the type multiplier, not weight, is responsible); `gauss_railgun`'s `rail_length` now measurably extends range (a tweak with zero other stat connection, so a clean proof); `heavy_machine_gun`'s `drum_size` now costs MORE traverse than the weight formula alone would predict (computed and compared against an explicit weight-only baseline). 65/65 tests green.
+
+Full per-type reasoning logged in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-12 (cont'd 16) — Pintle eligibility is now per-weapon-type, not one uniform angle rule
 
 Follow-up correction from Chris on the angled-pintle work below: the sponson/pintle boundary shouldn't be a single geometric threshold applied to every weapon - some weapons realistically tolerate a pintle mount on a much steeper slope than others.

@@ -87,6 +87,7 @@ func _init():
 	success = success and await test_map_lake_crossing_smoke()
 	success = success and await test_map_highland_chokepoint_smoke()
 	success = success and await test_map_coastal_strand_smoke()
+	success = success and await test_weapon_traverse_and_range_differentiation()
 
 	print("\n==============================================")
 	if success:
@@ -3951,3 +3952,64 @@ func test_map_coastal_strand_smoke() -> bool:
 	if ok:
 		print("  [PASS] Coastal Strand: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
 	return ok
+
+func test_weapon_traverse_and_range_differentiation() -> bool:
+	print("Running Test Suite: Per-Weapon-Type Traverse Rate & Range Tweak Differentiation...")
+
+	var w_script = load("res://scripts/auto_weapon.gd")
+
+	var make_weapon = func(type_id: String, weight: float, tweaks: Dictionary) -> Node3D:
+		var parent = Node3D.new()
+		var weapon = Node3D.new()
+		weapon.set_script(w_script)
+		parent.add_child(weapon)
+		root.add_child(parent)
+		var data = ModuleData.new()
+		data.type_id = type_id
+		data.base_weight = weight
+		data.base_dps = 50.0
+		data.tweaks = tweaks
+		weapon.set_meta("module_data", data)
+		weapon._ready()
+		return weapon
+
+	# 1. Two weapons at the SAME weight but different archetypes should get
+	# genuinely different traverse speeds - direct proof the per-type
+	# traverse_agility multiplier is doing real work, not just weight (both
+	# ~90kg here: ciws is a fast point-defense tracker, mortar_array is a
+	# slow indirect-fire weapon that previously traversed identically).
+	var ciws = make_weapon.call("ciws", 90.0, {})
+	var mortar = make_weapon.call("mortar_array", 90.0, {})
+	if ciws.traverse_speed <= mortar.traverse_speed:
+		print("  [FAIL] ciws (fast point-defense tracker) should traverse meaningfully faster than mortar_array (slow indirect-fire) at the same weight. ciws=", ciws.traverse_speed, " mortar=", mortar.traverse_speed)
+		return false
+	ciws.get_parent().queue_free()
+	mortar.get_parent().queue_free()
+
+	# 2. gauss_railgun's only tweak (rail_length) previously had zero effect
+	# on its own fire_range - confirm a bigger rail now actually extends it.
+	var railgun_base = make_weapon.call("gauss_railgun", 180.0, {})
+	var railgun_long_rail = make_weapon.call("gauss_railgun", 180.0, {"rail_length": 1.8})
+	if railgun_long_rail.fire_range <= railgun_base.fire_range:
+		print("  [FAIL] gauss_railgun's rail_length tweak should extend fire_range. base=", railgun_base.fire_range, " long_rail=", railgun_long_rail.fire_range)
+		return false
+	railgun_base.get_parent().queue_free()
+	railgun_long_rail.get_parent().queue_free()
+
+	# 3. A weapon's own size tweak (not just barrel_length/elevation) should
+	# now cost EXTRA traverse_speed beyond what the weight increase alone
+	# would explain - heavy_machine_gun's drum_size previously only touched
+	# weight (an indirect effect), with zero direct traverse penalty.
+	var mg_big_drum_data = ModuleData.new()
+	mg_big_drum_data.type_id = "heavy_machine_gun"
+	mg_big_drum_data.base_weight = 40.0
+	mg_big_drum_data.tweaks = {"drum_size": 2.0}
+	var weight_only_traverse = clamp(200.0 / mg_big_drum_data.get_weight(), 0.4, 8.0) * ModuleCatalog.get_traverse_agility("heavy_machine_gun")
+	var mg_big_drum = make_weapon.call("heavy_machine_gun", 40.0, {"drum_size": 2.0})
+	if mg_big_drum.traverse_speed >= weight_only_traverse - 0.001:
+		print("  [FAIL] heavy_machine_gun's drum_size tweak should cost EXTRA traverse_speed beyond its weight effect alone. weight-only=", weight_only_traverse, " actual=", mg_big_drum.traverse_speed)
+		return false
+	mg_big_drum.get_parent().queue_free()
+
+	print("  [PASS] Weapon traverse rate is genuinely differentiated per type (not just weight), and tweaks that weren't previously wired to traverse/range now move them.")
+	return true

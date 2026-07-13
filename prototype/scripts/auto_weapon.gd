@@ -118,9 +118,17 @@ func _ready():
 		dps = data.get_dps()
 		heal_rate = data.get_heal_rate()
 		
-		# Calculate traverse speed based on weight
+		# Calculate traverse speed based on weight, then apply this weapon
+		# type's own agility character (ModuleCatalog.get_traverse_agility()
+		# - see its comment for the full per-type reasoning). Two weapons of
+		# similar weight but very different archetypes (a CIWS vs. a
+		# mortar_array, both ~90kg) previously got identical traverse speed
+		# since weight was the ONLY input. Base clamp widened from the old
+		# (0.6, 6.0) to (0.4, 8.0) so the per-type multiplier has real
+		# headroom to differentiate rather than being squashed back into a
+		# narrow shared band.
 		var weight = data.get_weight()
-		traverse_speed = clamp(200.0 / weight, 0.6, 6.0)
+		traverse_speed = clamp(200.0 / weight, 0.4, 8.0) * ModuleCatalog.get_traverse_agility(type_id)
 		
 		# Traverse limit angle: shared with the Design Lab's firing-arc
 		# visualization via ModuleCatalog.get_traverse_limit_angle() so the
@@ -263,12 +271,50 @@ func _ready():
 			fire_range /= data.tweaks["containment"]
 		if data.tweaks.has("radar_dish"):
 			fire_range *= data.tweaks["radar_dish"]
-			
-		if data.tweaks.has("barrel_length") and data.tweaks["barrel_length"] > 0.0:
-			traverse_speed /= data.tweaks["barrel_length"]
-		if data.tweaks.has("elevation") and data.tweaks["elevation"] > 0.0:
-			traverse_speed /= data.tweaks["elevation"]
-			
+		# Audit (task 47/49): several weapons' only tweaks previously had
+		# zero effect on fire_range at all - a bigger caliber round flies
+		# further, a longer railgun accelerator rail means more muzzle
+		# velocity (gauss_railgun's rail_length tweak did NOTHING to its own
+		# range before this), a bigger missile seeker locks on further out,
+		# a bigger ascent thruster gives a top-attack missile more reach,
+		# more fuel pressure pushes a flamethrower's stream further, and a
+		# flak shell's proximity fuse setting IS its effective engagement
+		# range. Left out deliberately: count-type tweaks (multi_barrel/
+		# barrel_count/tube_count/grid_size - "more copies," not "reaches
+		# further") and tweaks with no real range link (drum_size/motor_size
+		# are ammo capacity and spin torque, not reach; dispersion is spread
+		# pattern, not distance; cooling_jacket is sustained-fire capacity,
+		# not reach).
+		if data.tweaks.has("caliber"):
+			fire_range *= data.tweaks["caliber"]
+		if data.tweaks.has("rail_length"):
+			fire_range *= data.tweaks["rail_length"]
+		if data.tweaks.has("seeker_size"):
+			fire_range *= data.tweaks["seeker_size"]
+		if data.tweaks.has("ascent_thruster"):
+			fire_range *= data.tweaks["ascent_thruster"]
+		if data.tweaks.has("pressure_valve"):
+			fire_range *= data.tweaks["pressure_valve"]
+		if data.tweaks.has("fuse_setting"):
+			fire_range *= data.tweaks["fuse_setting"]
+
+		# Audit (task 47/48): previously only barrel_length/elevation nudged
+		# traverse_speed, leaving most weapon types' actual tweaks
+		# (drum_size, motor_size, rail_length, etc.) with zero direct
+		# traverse effect - they only moved traverse indirectly through the
+		# weight-driven base formula above. Generalized to every "single
+		# part gets physically bigger" tweak name (ModuleCatalog.
+		# LINEAR_SCALE_WEAPON_TWEAKS, shared with module_data.gd's
+		# weight-scaling list) so a bigger/heavier part now also directly
+		# costs some traverse speed on top of its weight effect - a real,
+		# type-relevant tweak-to-traverse link for nearly every weapon in
+		# the roster, not just the two that happened to share a tweak name
+		# with heavy_howitzer/basic_cannon.
+		for tweak_name in ModuleCatalog.LINEAR_SCALE_WEAPON_TWEAKS:
+			if data.tweaks.has(tweak_name) and data.tweaks[tweak_name] > 0.0:
+				traverse_speed /= data.tweaks[tweak_name]
+		traverse_speed = clamp(traverse_speed, 0.15, 20.0)
+
 		# Apply Fire Rate Tweak Modifiers (Shot Intervals)
 		if data.tweaks.has("caliber"):
 			fire_rate *= data.tweaks["caliber"]

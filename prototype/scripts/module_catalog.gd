@@ -12,6 +12,9 @@ static func get_catalog() -> Dictionary:
 			"metal": 30,
 			"crystal": 0,
 			"dps": 40.0,
+			# Baseline turret traverse - every other weapon's agility is
+			# reasoned relative to this 1.0 anchor.
+			"traverse_agility": 1.0,
 			"size": Vector3(0.6, 0.6, 2.0),
 			"color": Color.DIM_GRAY
 		},
@@ -28,6 +31,9 @@ static func get_catalog() -> Dictionary:
 			# small, light, classic pintle weapon in real life - bolts onto
 			# almost anything short of a genuinely vertical wall.
 			"pintle_min_up_alignment": 0.15,
+			# Small, light gun on a light mount - swings fast, same real-world
+			# intuition as its pintle tolerance above.
+			"traverse_agility": 1.3,
 			"size": Vector3(0.4, 0.4, 1.2),
 			"color": Color.SLATE_GRAY
 		},
@@ -42,6 +48,9 @@ static func get_catalog() -> Dictionary:
 			# Compact gatling housing, same "bolts on anywhere" logic as
 			# heavy_machine_gun.
 			"pintle_min_up_alignment": 0.15,
+			# Motor-driven gatling on a powered gimbal - agile but not as
+			# featherweight-quick as the single-barrel MG.
+			"traverse_agility": 1.2,
 			"size": Vector3(0.7, 0.7, 1.8),
 			"color": Color(0.2, 0.2, 0.2) # Charcoal
 		},
@@ -53,6 +62,11 @@ static func get_catalog() -> Dictionary:
 			"metal": 80,
 			"crystal": 40,
 			"dps": 110.0,
+			# Frame_built (see get_mount_style_for_normal below), so it never
+			# independently traverses in practice - this number only matters
+			# if that override is ever lifted, kept low for consistency with
+			# its long rigid accelerator rail.
+			"traverse_agility": 0.4,
 			"size": Vector3(0.4, 0.4, 3.0),
 			"color": Color.BLUE_VIOLET
 		},
@@ -66,6 +80,9 @@ static func get_catalog() -> Dictionary:
 			"metal": 100,
 			"crystal": 10,
 			"dps": 90.0,
+			# Frame_built like gauss_railgun - traverse is moot in practice,
+			# a low number matches its bulky fixed-elevation mount either way.
+			"traverse_agility": 0.4,
 			"size": Vector3(0.9, 0.9, 3.2),
 			"color": Color.SADDLE_BROWN
 		},
@@ -82,6 +99,9 @@ static func get_catalog() -> Dictionary:
 			# shells at an already-skewed angle before the tube even elevates,
 			# so this wants a much closer-to-level base than a direct-fire gun.
 			"pintle_min_up_alignment": 0.55,
+			# Indirect-fire tube array - traverses slowly and deliberately,
+			# same "needs a level, stable aim" character as its pintle stance.
+			"traverse_agility": 0.5,
 			"size": Vector3(1.2, 0.6, 1.2),
 			"color": Color.OLIVE
 		},
@@ -91,6 +111,7 @@ static func get_catalog() -> Dictionary:
 			"hp": 110.0,
 			"weight": 140.0,
 			"pintle_min_up_alignment": 0.55, # same indirect-fire reasoning as mortar_array
+			"traverse_agility": 0.5, # same slow-deliberate reasoning as mortar_array
 			# Balance pass (tools/balance_report.gd, ENERGY_AND_BALANCE_SPEC.md
 			# #6): had the highest raw dps in the game at less than half the
 			# cost of comparable weapons (gauss_railgun/heavy_howitzer) -
@@ -116,6 +137,9 @@ static func get_catalog() -> Dictionary:
 			# less-than-level launch angle mid-flight, so it tolerates a
 			# steeper mounting slope than an unguided arcing weapon would.
 			"pintle_min_up_alignment": 0.25,
+			# Self-correcting guidance means the launch rail doesn't need to
+			# snap-track a moving target the way a direct-fire gun does.
+			"traverse_agility": 0.9,
 			"size": Vector3(0.6, 0.4, 1.6),
 			"color": Color.GOLD
 		},
@@ -128,6 +152,7 @@ static func get_catalog() -> Dictionary:
 			"crystal": 25,
 			"dps": 70.0,
 			"pintle_min_up_alignment": 0.25, # guided - same reasoning as guided_missile
+			"traverse_agility": 0.85, # guided - same reasoning as guided_missile, slightly heavier launcher
 			"size": Vector3(0.7, 0.5, 1.8),
 			"color": Color.YELLOW_GREEN
 		},
@@ -144,6 +169,10 @@ static func get_catalog() -> Dictionary:
 			# single guided missile does, but nowhere near as strict as a
 			# mortar's ballistic-arc requirement.
 			"pintle_min_up_alignment": 0.35,
+			# Boxy multi-tube launcher, unguided at launch - needs to actually
+			# aim the whole pod rather than let guidance correct after the
+			# fact, so it traverses slower than the guided missiles above.
+			"traverse_agility": 0.8,
 			"size": Vector3(1.2, 0.8, 1.5),
 			"color": Color.DARK_ORANGE
 		},
@@ -173,6 +202,9 @@ static func get_catalog() -> Dictionary:
 			# base, though the shorter lob range makes it a bit more
 			# forgiving than a dedicated indirect-fire mortar.
 			"pintle_min_up_alignment": 0.45,
+			# Lobbing arc weapon like mortar_array/plasma_lobber, but a
+			# shorter lob range makes it a bit less deliberate to aim.
+			"traverse_agility": 0.6,
 			"size": Vector3(1.4, 0.8, 1.4),
 			"color": Color.CHOCOLATE
 		},
@@ -184,6 +216,9 @@ static func get_catalog() -> Dictionary:
 			# A hose-fed nozzle, not a rigid ballistic tube - shrugs off a
 			# steep mounting angle same as the light autoguns.
 			"pintle_min_up_alignment": 0.15,
+			# A free-swinging hose, not a rigid barrel - whips onto a target
+			# fast, forgiving of imprecise aim since it hits an area anyway.
+			"traverse_agility": 1.25,
 			# Balance pass: value/cost was 5.49 against a 2.86 category
 			# average - cheap for its dps relative to comparable short-range
 			# weapons (heavy_machine_gun aside, which is an intentionally
@@ -214,6 +249,9 @@ static func get_catalog() -> Dictionary:
 			# it's about to topple, so it's less tolerant of a steep slope
 			# than the compact autoguns.
 			"pintle_min_up_alignment": 0.4,
+			# Tall, top-heavy precision emitter - deliberate, controlled
+			# traverse rather than a fast snap-track.
+			"traverse_agility": 0.8,
 			"size": Vector3(0.6, 1.6, 0.6),
 			"color": Color.LIGHT_SKY_BLUE
 		},
@@ -227,6 +265,9 @@ static func get_catalog() -> Dictionary:
 			"dps": 40.0,
 			# Compact, low-profile emitter - tolerant like the light autoguns.
 			"pintle_min_up_alignment": 0.2,
+			# Compact, low-profile emitter, tolerant like the light autoguns -
+			# it needs to chase down a target to disable it, so agility matters.
+			"traverse_agility": 1.15,
 			"size": Vector3(0.5, 0.5, 1.2),
 			"color": Color.CYAN
 		},
@@ -239,6 +280,9 @@ static func get_catalog() -> Dictionary:
 			# more stable base than the compact energy emitters, similar
 			# reasoning to the heavier kinetic guns.
 			"pintle_min_up_alignment": 0.4,
+			# Heaviest, longest energy weapon - a stable, deliberate-aim
+			# platform rather than a fast tracker.
+			"traverse_agility": 0.75,
 			# Balance pass: was the single worst value/cost weapon in the
 			# game (1.03 vs 2.86 average) even before accounting for its
 			# energy-drain utility (which this cost-model can't see) - the
@@ -263,6 +307,9 @@ static func get_catalog() -> Dictionary:
 			# from a stable base for sustained aim - same logic as heavy_laser's
 			# kinetic-precision cousins.
 			"pintle_min_up_alignment": 0.4,
+			# Continuous-beam precision weapon over a long housing - benefits
+			# from a stable, deliberate traverse for sustained aim.
+			"traverse_agility": 0.75,
 			"size": Vector3(0.6, 0.6, 2.5),
 			"color": Color.DARK_RED
 		},
@@ -277,6 +324,9 @@ static func get_catalog() -> Dictionary:
 			# "Lobber" is in the name - an arcing projectile weapon, same
 			# ballistic-baseline reasoning as mortar_array/cluster_dispenser.
 			"pintle_min_up_alignment": 0.5,
+			# Arcing lob weapon, same slow-deliberate character as the
+			# mortars/cluster_dispenser.
+			"traverse_agility": 0.55,
 			"size": Vector3(0.8, 0.8, 2.0),
 			"color": Color.MEDIUM_SPRING_GREEN
 		},
@@ -293,6 +343,9 @@ static func get_catalog() -> Dictionary:
 			# Real-world CIWS mounts are routinely bolted to steeply angled
 			# deck/superstructure positions and still track fine - tolerant.
 			"pintle_min_up_alignment": 0.15,
+			# Point defense lives and dies by how fast it can snap onto a
+			# small, fast-moving threat - the quickest traverse in the roster.
+			"traverse_agility": 1.8,
 			"size": Vector3(0.8, 1.0, 0.8),
 			"color": Color.WHITE_SMOKE
 		},
@@ -306,6 +359,9 @@ static func get_catalog() -> Dictionary:
 			# Small, light PD turret - tolerant like the other compact
 			# point-defense/autogun weapons.
 			"pintle_min_up_alignment": 0.15,
+			# Small, light PD laser - the second-fastest tracker after CIWS,
+			# same reflex-driven point-defense logic.
+			"traverse_agility": 1.6,
 			"dps": 5.0,
 			"size": Vector3(0.4, 0.5, 0.4),
 			"color": Color.LIGHT_CORAL
@@ -323,6 +379,9 @@ static func get_catalog() -> Dictionary:
 			# routinely - moderate tolerance, between the light PD guns and
 			# the heavier precision/ballistic weapons.
 			"pintle_min_up_alignment": 0.3,
+			# Bulkier than the other PD weapons but still needs to swing to
+			# steep anti-air elevations routinely - fast, just not CIWS-fast.
+			"traverse_agility": 1.4,
 			"size": Vector3(0.7, 0.7, 1.8),
 			"color": Color.DARK_GOLDENROD
 		},
@@ -876,6 +935,41 @@ const PINTLE_MIN_UP_ALIGNMENT_DEFAULT: float = 0.3
 # Each weapon's own reasoning is logged as a comment on its catalog entry.
 static func get_pintle_min_up_alignment(type_id: String) -> float:
 	return get_module_data(type_id).get("pintle_min_up_alignment", PINTLE_MIN_UP_ALIGNMENT_DEFAULT)
+
+# Per-weapon-type traverse character (task: "differentiate and tune weapon
+# traversal rates per weapon type"). auto_weapon.gd's base traverse_speed
+# formula (200.0/weight, clamped) is driven purely by weight - two weapons
+# of similar weight but very different archetypes (a fast-tracking CIWS vs.
+# a slow-lobbing mortar_array, both ~90kg) got IDENTICAL traverse speed
+# despite being nothing alike in real-world handling. This multiplier is
+# the type-specific character layered on top of the weight-driven base:
+# point-defense weapons need to snap onto small fast targets (fastest,
+# ~1.4-1.8), light autoguns are quick (~1.15-1.3), guided munitions don't
+# need to snap-track since the warhead corrects after launch (~0.8-0.9),
+# precision energy weapons favor a stable deliberate aim (~0.75-0.8), and
+# indirect/ballistic-arc weapons traverse slowest since the arc itself
+# depends on a controlled, deliberate aim (~0.5-0.6) - the same real-world
+# intuition already used for get_pintle_min_up_alignment() above. Defaults
+# to 1.0 (no change from the base formula) for any weapon without an
+# explicit entry, and for non-weapon modules (resource_harvester,
+# repair_array, sensor_suite, logistics_tank, drone_carrier) which were
+# deliberately left out of this per-type pass since they're not combat
+# weapons being "aimed" in the same sense.
+static func get_traverse_agility(type_id: String) -> float:
+	return get_module_data(type_id).get("traverse_agility", 1.0)
+
+# Tweak names that scale a single part's physical size/mass (shared meaning
+# with module_data.gd's get_weight() tweak list, weapon-relevant subset only
+# - excludes non-weapon module tweaks like extractor_size/mast_height/
+# tank_capacity, and excludes count-type tweaks like multi_barrel/
+# barrel_count/tube_count/grid_size/hangar_size, which represent "more
+# copies of a part" rather than "one bigger part" and so already affect
+# traverse/range purely through the resulting weight change, not an
+# additional direct penalty/bonus). Used by auto_weapon.gd to apply a
+# consistent per-tweak traverse_speed effect across every weapon type that
+# has ANY such tweak, instead of only the two tweak names (barrel_length,
+# elevation) that happened to be wired up before.
+const LINEAR_SCALE_WEAPON_TWEAKS = ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "dispersion", "elevation", "fuse_setting"]
 
 # Continuous alternative to get_mount_style()'s discrete facet matching,
 # for real mount-hardware decisions (module_placer.gd's actual weapon
