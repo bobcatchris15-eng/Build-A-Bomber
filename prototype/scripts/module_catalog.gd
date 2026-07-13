@@ -498,6 +498,12 @@ static func get_catalog() -> Dictionary:
 			"metal": 20,
 			"crystal": 0,
 			"dps": 0.0,
+			# Weight capacity (task: "weight in excess of what a locomotor is
+			# built for slows the unit down" - see get_base_weight_capacity()
+			# below): a light, high-speed wheeled chassis handles poorly
+			# overloaded - a real overloaded car sags and struggles - so this
+			# tolerates less excess weight than the heavier ground types.
+			"base_weight_capacity": 350.0,
 			"size": Vector3(0.8, 0.8, 0.8),
 			"color": Color.BLACK,
 			"traits": ["ground_contact", "high_speed"]
@@ -510,6 +516,9 @@ static func get_catalog() -> Dictionary:
 			"metal": 40,
 			"crystal": 0,
 			"dps": 0.0,
+			# Heaviest, toughest ground locomotor - literally what tanks use
+			# to carry heavy armor. Highest ground-type capacity.
+			"base_weight_capacity": 700.0,
 			"size": Vector3(1.0, 0.8, 3.0),
 			"color": Color.DARK_OLIVE_GREEN,
 			"traits": ["ground_contact"]
@@ -522,6 +531,10 @@ static func get_catalog() -> Dictionary:
 			"metal": 30,
 			"crystal": 10,
 			"dps": 0.0,
+			# Real helicopters have a notoriously strict max-takeoff-weight -
+			# rotary lift is the most weight-sensitive locomotion in the
+			# roster, so this gets the lowest capacity of all.
+			"base_weight_capacity": 250.0,
 			"size": Vector3(4.0, 0.2, 4.0),
 			"color": Color.SILVER,
 			"traits": ["airborne", "rotary_wing", "hovering"]
@@ -534,6 +547,9 @@ static func get_catalog() -> Dictionary:
 			"metal": 20,
 			"crystal": 40,
 			"dps": 0.0,
+			# Ground-effect lift is weight-sensitive like a real hovercraft,
+			# though less extreme than a helicopter's rotor lift.
+			"base_weight_capacity": 300.0,
 			"size": Vector3(1.5, 0.4, 1.5),
 			"color": Color.CYAN,
 			"traits": ["hovering"]
@@ -546,6 +562,9 @@ static func get_catalog() -> Dictionary:
 			"metal": 40,
 			"crystal": 10,
 			"dps": 0.0,
+			# A mech walker's legs are built to bear real structural load,
+			# closer to tracked_treads than to a wheeled chassis.
+			"base_weight_capacity": 500.0,
 			"size": Vector3(0.6, 1.8, 0.6),
 			"color": Color.DARK_RED,
 			"traits": ["ground_contact"]
@@ -558,6 +577,10 @@ static func get_catalog() -> Dictionary:
 			"metal": 50,
 			"crystal": 80,
 			"dps": 0.0,
+			# Advanced repulsor tech rather than aerodynamic/ground-effect
+			# lift - more forgiving of extra weight than the other hovering/
+			# airborne types, though still not as tolerant as a grounded hull.
+			"base_weight_capacity": 450.0,
 			"size": Vector3(1.6, 0.3, 1.6),
 			"color": Color.MEDIUM_BLUE,
 			"traits": ["hovering", "airborne"]
@@ -570,6 +593,10 @@ static func get_catalog() -> Dictionary:
 			"metal": 60,
 			"crystal": 20,
 			"dps": 0.0,
+			# Fixed-wing lift scales with airspeed and wing area, giving it
+			# more payload tolerance than rotary/hover lift, but it's still
+			# a real aircraft weight budget, not a grounded vehicle's.
+			"base_weight_capacity": 380.0,
 			"size": Vector3(1.2, 0.6, 2.0),
 			"color": Color.SLATE_BLUE,
 			"traits": ["airborne", "fixed_wing", "high_speed"]
@@ -582,6 +609,10 @@ static func get_catalog() -> Dictionary:
 			"metal": 35,
 			"crystal": 0,
 			"dps": 0.0,
+			# Buoyancy carries the load, not the propeller - real ships
+			# routinely carry far more weight than any ground/air vehicle.
+			# Highest capacity in the roster.
+			"base_weight_capacity": 800.0,
 			"size": Vector3(0.6, 0.6, 1.0),
 			"color": Color.TEAL,
 			"traits": ["buoyant", "naval"]
@@ -970,6 +1001,24 @@ static func get_traverse_agility(type_id: String) -> float:
 # has ANY such tweak, instead of only the two tweak names (barrel_length,
 # elevation) that happened to be wired up before.
 const LINEAR_SCALE_WEAPON_TWEAKS = ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "dispersion", "elevation", "fuse_setting"]
+
+# Weight capacity fallback for any locomotion type_id missing its own
+# "base_weight_capacity" entry - a reasonable middle ground between the
+# most weight-sensitive type (helicopter_rotors, 250) and the most
+# tolerant (naval_propeller, 800).
+const BASE_WEIGHT_CAPACITY_DEFAULT: float = 400.0
+
+# Per-locomotor-type weight capacity (task: "make the overall vehicle
+# Weight stat actually matter" - build a formula, per locomotor type, for
+# how much weight it's "built for" carrying, with weight in excess of that
+# slowing the unit down). Real-world load-bearing intuition drives each
+# value - full reasoning logged as a comment on each locomotion type's own
+# catalog entry above. battle_unit.gd's _recalculate_move_speed() sums
+# this across every locomotion module actually present (scaled by the same
+# size/count factors already used for motor_thrust), then applies a speed
+# penalty if the vehicle's total weight exceeds the sum.
+static func get_base_weight_capacity(type_id: String) -> float:
+	return get_module_data(type_id).get("base_weight_capacity", BASE_WEIGHT_CAPACITY_DEFAULT)
 
 # Continuous alternative to get_mount_style()'s discrete facet matching,
 # for real mount-hardware decisions (module_placer.gd's actual weapon

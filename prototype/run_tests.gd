@@ -88,6 +88,7 @@ func _init():
 	success = success and await test_map_highland_chokepoint_smoke()
 	success = success and await test_map_coastal_strand_smoke()
 	success = success and await test_weapon_traverse_and_range_differentiation()
+	success = success and await test_weight_vs_locomotion_capacity_penalty()
 
 	print("\n==============================================")
 	if success:
@@ -4012,4 +4013,94 @@ func test_weapon_traverse_and_range_differentiation() -> bool:
 	mg_big_drum.get_parent().queue_free()
 
 	print("  [PASS] Weapon traverse rate is genuinely differentiated per type (not just weight), and tweaks that weren't previously wired to traverse/range now move them.")
+	return true
+
+func test_weight_vs_locomotion_capacity_penalty() -> bool:
+	print("Running Test Suite: Weight vs. Locomotion Capacity - Overload Slows The Unit...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	# Builds a minimal unit with a fake hull_node carrying a locomotion
+	# child (+ an optional heavy weapon child to push total weight up) and
+	# calls _recalculate_move_speed() directly - same "mock the exact
+	# fields the function reads" approach as test_traverse_limit's mock
+	# weapon, so the test controls weight/scale precisely instead of
+	# depending on the real blueprint pipeline's own scale decisions.
+	var make_unit = func(locomotion_id: String, loco_weight: float, extra_module_weight: float) -> Node:
+		var unit = CharacterBody3D.new()
+		unit.set_script(BattleUnitScript)
+		root.add_child(unit)
+		unit.locomotion_type = locomotion_id
+		unit.locomotion_settings = {}
+		var fake_hull = Node3D.new()
+		unit.add_child(fake_hull)
+		unit.hull_node = fake_hull
+
+		var loco_child = Node3D.new()
+		var loco_data = ModuleData.new()
+		loco_data.type_id = locomotion_id
+		loco_data.category = "locomotion"
+		loco_data.base_weight = loco_weight
+		loco_child.set_meta("module_data", loco_data)
+		fake_hull.add_child(loco_child)
+
+		if extra_module_weight > 0.0:
+			var extra_child = Node3D.new()
+			var extra_data = ModuleData.new()
+			extra_data.type_id = "heavy_howitzer"
+			extra_data.category = "weapon"
+			extra_data.base_weight = extra_module_weight
+			extra_child.set_meta("module_data", extra_data)
+			fake_hull.add_child(extra_child)
+
+		unit._recalculate_move_speed()
+		return unit
+
+	# wheels' own capacity is 350 (ModuleCatalog.get_base_weight_capacity) -
+	# a 400kg weapon on top of a 50kg wheel chassis (450 total) pushes it
+	# over. tracked_treads' capacity is 700 - the SAME 400kg weapon on a
+	# 120kg tread chassis (520 total) stays comfortably under. This is the
+	# core ask made concrete: heavier/tougher locomotion tolerates more
+	# excess weight before the penalty kicks in.
+	var overloaded_wheels = make_unit.call("wheels", 50.0, 400.0)
+	var loaded_treads = make_unit.call("tracked_treads", 120.0, 400.0)
+
+	# Prove the wheels case is ACTUALLY penalized, not just naturally slower
+	# from carrying more weight (which the pre-existing thrust/weight ratio
+	# already accounts for) - compute what the unpenalized formula alone
+	# would predict (motor_thrust=100+150 for one locomotion module,
+	# weight=450) and confirm the real value is meaningfully below it.
+	var wheels_motor_thrust = 100.0 + 150.0
+	var wheels_unpenalized = clamp((wheels_motor_thrust / 450.0) * 5.0, 2.0, 15.0)
+	if overloaded_wheels.move_speed >= wheels_unpenalized - 0.01:
+		print("  [FAIL] An overloaded wheeled unit (450kg vs. 350 capacity) should be penalized below the unpenalized thrust/weight prediction. unpenalized=", wheels_unpenalized, " actual=", overloaded_wheels.move_speed)
+		overloaded_wheels.queue_free()
+		loaded_treads.queue_free()
+		return false
+
+	# Prove the treads case gets NO penalty (matches the plain formula
+	# exactly, since it's under its own higher capacity).
+	var treads_motor_thrust = 100.0 + 150.0
+	var treads_unpenalized = clamp((treads_motor_thrust / 520.0) * 5.0, 2.0, 15.0)
+	if abs(loaded_treads.move_speed - treads_unpenalized) > 0.01:
+		print("  [FAIL] A tracked_treads unit under its own capacity (520kg vs. 700) should be unpenalized. expected=", treads_unpenalized, " actual=", loaded_treads.move_speed)
+		overloaded_wheels.queue_free()
+		loaded_treads.queue_free()
+		return false
+
+	# A lightly-loaded unit well under capacity should also see zero
+	# penalty (multiplier is a true no-op below the threshold, not just a
+	# small one).
+	var light_wheels = make_unit.call("wheels", 50.0, 0.0)
+	var light_unpenalized = clamp((wheels_motor_thrust / 50.0) * 5.0, 2.0, 15.0)
+	if abs(light_wheels.move_speed - light_unpenalized) > 0.01:
+		print("  [FAIL] A lightly-loaded wheeled unit (50kg vs. 350 capacity) should have zero overload penalty. expected=", light_unpenalized, " actual=", light_wheels.move_speed)
+		overloaded_wheels.queue_free()
+		loaded_treads.queue_free()
+		light_wheels.queue_free()
+		return false
+
+	overloaded_wheels.queue_free()
+	loaded_treads.queue_free()
+	light_wheels.queue_free()
+	print("  [PASS] Weight beyond a locomotor's own capacity measurably slows the unit; heavier locomotion types (tracked_treads) tolerate more excess weight before the penalty kicks in than lighter ones (wheels); units under capacity are unaffected.")
 	return true

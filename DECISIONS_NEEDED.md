@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 — Weight now actually matters: per-locomotor-type capacity, and the overload penalty curve
+
+**Not blocking.**
+
+Chris's ask: the vehicle Weight stat is displayed but has zero gameplay effect - build a per-locomotor-type "how much weight this is built for" formula, with excess weight slowing the unit down, heavier/tougher locomotion tolerating more before the penalty kicks in.
+
+**Capacity values, real-world load-bearing intuition** (matching the reasoning style already used for `pintle_min_up_alignment`/`traverse_agility`): `naval_propeller` highest (800 - buoyancy carries the load, ships routinely haul far more than any ground/air vehicle), `tracked_treads` (700 - literally what tanks use to carry heavy armor), `legs` (500 - a mech walker's legs bear real structural load, closer to treads than wheels), `anti_grav` (450 - repulsor tech rather than aerodynamic/ground-effect lift, more forgiving of extra weight than true hovering/flight), `fixed_wing_engine` (380 - lift scales with airspeed/wing area, more payload-tolerant than rotary/hover lift but still a real aircraft weight budget), `wheels` (350 - light and fast but handles poorly overloaded, like a real overloaded car), `hover_engine` (300 - ground-effect lift is weight-sensitive), `helicopter_rotors` lowest (250 - real helicopters have a notoriously strict max-takeoff-weight, the most weight-sensitive locomotion in the roster).
+
+**Capacity scales with the same size/count factors as thrust**, not just a flat per-type number - a 6-wheel setup or a wider tread already produces more `motor_thrust` in the existing formula (`battle_unit.gd`), so its weight capacity scales the same way (`ModuleCatalog.get_base_weight_capacity(type_id) * child.scale.x * child.scale.z * count_contrib`), reusing the exact `count_contrib` logic already computed for thrust rather than inventing a second, possibly-inconsistent scaling rule.
+
+**Penalty curve**: no penalty at or under capacity. Beyond it, `overload_multiplier = clamp(1.0 - (overload_ratio - 1.0) * 0.6, 0.25, 1.0)` - so 50% over capacity costs 30% of speed, 100% over costs 60%, floored at 25% of normal speed so a badly overloaded design is punishing but never literally frozen in place (a unit that can't move at all from overload alone would read as a bug, not a balance mechanic, and `has_locomotion=false` already owns the "genuinely can't move" case elsewhere in this same function). 0.6 as the penalty-per-100%-over coefficient and the 0.25 floor are both judgment calls, not derived from anything in the design docs - reasonable enough to feel like a real cost without needing a live-balance pass to validate exact numbers, which is out of scope here.
+
+**Verified with mock units built the same way `test_traverse_limit` mocks a weapon** (direct field control rather than the full blueprint-reconstruction pipeline, so the test can compute exact expected numbers): a 400kg weapon pushes a 50kg `wheels` chassis (450 total vs. 350 capacity) into a real, provable penalty (compared against the unpenalized thrust/weight formula directly, not just "got slower," since added weight already slows a unit via the pre-existing thrust/weight ratio on its own); the SAME 400kg weapon on a 120kg `tracked_treads` chassis (520 vs. 700 capacity) gets zero penalty - direct proof that heavier locomotion tolerates more excess weight before the mechanic kicks in, the core of what was asked. 66/66 tests green (1 new).
+
+---
+
 ## 2026-07-13 — Weapon traverse rate and range: what was actually broken vs. already fine, and how the fix was scoped
 
 **Not blocking.**

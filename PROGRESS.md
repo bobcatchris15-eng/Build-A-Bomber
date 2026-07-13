@@ -4,6 +4,23 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (cont'd) — Vehicle Weight now actually matters: per-locomotor-type capacity + overload speed penalty
+
+Weight was a displayed stat with zero gameplay effect until now. Chris's ask: a per-locomotor-type formula for how much weight it's built for, with excess weight slowing the unit - heavier/tougher locomotion tolerates more before the penalty.
+
+### What changed
+
+- **`base_weight_capacity`** - new catalog field on all 8 locomotion types, reasoned from real-world load-bearing character: `naval_propeller` highest (800, buoyancy), `tracked_treads` (700, built for heavy armor), `legs` (500), `anti_grav` (450), `fixed_wing_engine` (380), `wheels` (350, fast but not built for heavy loads), `hover_engine` (300), `helicopter_rotors` lowest (250, real helicopters have a strict max-takeoff-weight).
+- **`battle_unit.gd::_recalculate_move_speed()`** now sums a `total_weight_capacity` across whatever locomotion is actually present, scaled by the same size/count factors already used for `motor_thrust` (a 6-wheel setup or wider tread already carries more capacity, consistent with it already producing more thrust). If total vehicle weight exceeds that sum, a penalty multiplier applies on top of the existing thrust/weight speed formula: no penalty at or under capacity, `clamp(1.0 - (overload_ratio-1.0)*0.6, 0.25, 1.0)` beyond it (50% over costs 30% speed, 100% over costs 60%, floored at 25% so overload is punishing but never fully immobilizing).
+
+### Verification
+
+New test builds mock units (same "control the exact fields the function reads" approach as the existing `test_traverse_limit`) proving the differentiation directly: identical 400kg weapon added to a 50kg `wheels` chassis (450kg vs. 350 capacity) produces a real, measured penalty against the unpenalized formula prediction; the same weapon on a 120kg `tracked_treads` chassis (520kg vs. 700 capacity) produces zero penalty - the exact "heavier locomotion tolerates more" behavior that was asked for. 66/66 tests green.
+
+Full per-locomotor reasoning and the penalty-curve judgment call logged in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 — Weapon traverse rate is now per-type, and range/traverse tweak coverage is genuinely wired up
 
 New batch from Chris: differentiate weapon traversal rates per type (tweaks should meaningfully move it, not just nudge it within a narrow uniform curve), and audit/fix weapon range differentiation.

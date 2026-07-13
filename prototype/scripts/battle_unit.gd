@@ -268,6 +268,7 @@ func _recalculate_move_speed():
 		return
 	var total_weight = 0.0
 	var motor_thrust = 100.0
+	var total_weight_capacity = 0.0
 	var has_locomotion = false
 	for child in hull_node.get_children():
 		if child.has_meta("module_data") and not child.is_queued_for_deletion():
@@ -281,11 +282,27 @@ func _recalculate_move_speed():
 				elif locomotion_type == "tracked_treads":
 					count_contrib = locomotion_settings.get("width", 1.0)
 				motor_thrust += 150.0 * child.scale.x * child.scale.z * count_contrib
+				# Weight capacity scales with the same size/count factors as
+				# thrust (a bigger/wider tread or a 6-wheel setup carries
+				# more than a stock 4-wheel one), per-locomotor-type base
+				# from ModuleCatalog.get_base_weight_capacity().
+				total_weight_capacity += ModuleCatalog.get_base_weight_capacity(data.type_id) * child.scale.x * child.scale.z * count_contrib
 	if not has_locomotion:
 		move_speed = 0.0
 		return
 	if total_weight > 0.0:
 		move_speed = clamp((motor_thrust / total_weight) * 5.0, 2.0, 15.0)
+	# Overload penalty (task: "make the overall vehicle Weight stat actually
+	# matter"): weight beyond what the locomotion present is built for slows
+	# the unit down, on top of the thrust/weight ratio above. No penalty at
+	# or under capacity (multiplier 1.0). Beyond it, each 100% over capacity
+	# costs 60% of remaining speed, floored at 25% so overload is a real,
+	# punishing penalty without ever fully freezing a unit in place (that
+	# would look like a bug, not a balance mechanic).
+	if total_weight_capacity > 0.0 and total_weight > total_weight_capacity:
+		var overload_ratio = total_weight / total_weight_capacity
+		var overload_multiplier = clamp(1.0 - (overload_ratio - 1.0) * 0.6, 0.25, 1.0)
+		move_speed *= overload_multiplier
 	# Faction passive: Technocrats +5% speed
 	var faction = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
 	if faction == "technocrats":
