@@ -4,6 +4,34 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 14) — Four Skirmish maps built on the new architecture, each verified one at a time
+
+Built the actual map content on top of the multi-map architecture from the previous entry: `open_plains`, `highland_chokepoint`, and `coastal_strand` (new), plus `lake_crossing` (the original map, re-verified on the refactored code path). Each map covers a genuinely different play pattern rather than being a palette swap, per Chris's instruction.
+
+### The four maps
+
+- **Open Plains** - no water, no elevation, no obstacles, tighter (70 vs 80 half-extents), resources pulled toward the contested center. The "nothing to hide behind" baseline.
+- **Lake Crossing** - unchanged (a single lake splits the map; naval-vs-ground routing).
+- **Highland Chokepoint** - landlocked, a single dominant hill (real vision + combat bonus for holding it) flanked by rock walls that narrow the map to two lanes. The hill uses two `elevation_zones` sharing one footprint (north ramp + south ramp) so both teams get equally fair access to the top.
+- **Coastal Strand** - water runs the full length of one edge instead of sitting centrally, giving naval units real open water; the most obstacle-dense of the four, including a rock cluster sitting squarely on the direct HQ-to-HQ line.
+
+### Symmetry, chosen per map
+
+`lake_crossing`/`open_plains`/`highland_chokepoint` mirror every position through the map origin (180-degree point symmetry) since their terrain is itself point-symmetric. `coastal_strand` mirrors north/south instead, since its terrain is deliberately asymmetric east-west (water only borders one side) - point symmetry there would have put a "safe" resource in the ocean.
+
+### Two more real bugs, found by the verification process itself
+
+1. **`highland_chokepoint`'s smoke test failed on the first run** - the player factory's start position turned out to sit on the hill's ramp footprint, which `is_position_blocked()` correctly rejects. The bug was in my own hand-calculation of how far the ramp's *padded* footprint reaches (see the previous entry's Recast-winding-fix `RAMP_PAD`) - grid-snapping always rounds the padding boundary *outward*, so the real blocked zone is noticeably bigger than a naive estimate. Fixed by pushing that map's base positions back with real margin, confirmed by the automated smoke test rather than more hand math.
+2. **The map-select screen silently overflowed off both the top and bottom of the viewport** once all 4 maps existed - invisible with just 1 map present, since a screen-centered `VBoxContainer` only overflows symmetrically once its content actually exceeds the viewport height. No automated test covers this screen. Caught by the mandatory screenshot check before calling the batch done; fixed with a `ScrollContainer`, the same pattern the build bar already uses.
+
+### Verification, one map at a time
+
+Each map got its own top-down + in-scene windowed screenshot pair, plus a real scripted smoke test (`_smoke_test_map()`) - legal/unblocked start points, every resource node reachable by ground navmesh from its own side, the two HQs mutually reachable (no map accidentally splits the navmesh into disconnected islands), and a real factory build-queue production check - before moving to the next map, per Chris's one-at-a-time instruction.
+
+**Verified:** 63/63 tests green (4 new this entry - the per-map smoke tests; the terrain-architecture tests were added in the previous entry). Screenshot set for all four maps plus the final map-select screen in `progress_captures/2026-07-12/maps/`.
+
+---
+
 ## 2026-07-12 (cont'd 13) — Multi-map architecture built (terrain data + navmesh integration + elevation vision/combat bonus)
 
 New batch from Chris: build out a variety of distinct Skirmish maps, with real elevation/water/obstacle variation that actually affects vision, combat, and pathing - not palette swaps. Since there was only ever one hardcoded map, this pass built the underlying architecture first; the actual map content is being built one at a time on top of it (see forthcoming per-map entries).

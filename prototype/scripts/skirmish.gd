@@ -400,7 +400,7 @@ func _spawn_resource_nodes():
 		var node = StaticBody3D.new()
 		node.set_script(ResourceNodeScript)
 		add_child(node)
-		node.global_position = s.position
+		node.global_position = Vector3(s.position.x, terrain_height_at(s.position), s.position.z)
 		node.setup(s.type, s.amount)
 
 func _spawn_bases():

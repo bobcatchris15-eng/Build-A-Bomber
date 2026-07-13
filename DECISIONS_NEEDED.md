@@ -4,6 +4,27 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Four maps built: count, symmetry approach per map, and two more real bugs found while verifying
+
+**Not blocking.**
+
+Built 4 maps total on the new architecture (`lake_crossing` - the original, kept as the default/compatibility anchor - plus 3 new ones). Chris's instruction was "however many maps feels like a good starting set... aim for genuinely different play patterns." Landed on 4 as covering the explicitly-named patterns without padding the count with near-duplicates:
+
+- **`open_plains`** - no water, no elevation, no obstacles, tighter (70 vs 80 half-extents), resources pulled toward center. Deliberately the "nothing to hide behind" map, a clean baseline contrast to the other three.
+- **`lake_crossing`** - unchanged from before, kept as-is.
+- **`highland_chokepoint`** - landlocked (fulfills "some maps with no water at all"), one dominant contested hill with rock walls narrowing the map to two flanking lanes.
+- **`coastal_strand`** - water along one full edge rather than centered (fulfills "some coastal"), the most obstacle-dense of the four.
+
+**Symmetry approach chosen per map's own geometry, not one universal rule.** `lake_crossing`/`open_plains`/`highland_chokepoint` all use 180-degree point symmetry (mirror every position through the map origin) since their terrain is itself point-symmetric. `coastal_strand` uses a north/south (Z-axis) mirror instead, since its terrain is deliberately NOT east-west symmetric (water only borders one side) - point-symmetry would have put one team's "safe" resource in the water. Judgment call: match the fairness mechanism to the map's actual shape rather than forcing every map through the same symmetry formula.
+
+**A real bug found verifying `highland_chokepoint`, not just eyeballing it:** the automated smoke test (built for exactly this purpose) caught the player factory spawning ON the hill's ramp footprint - blocked, illegal terrain. My manual math for how far the ramp's footprint extends past its nominal `ramp_width`/`height` undercounted the effect of `terrain_builder.gd`'s grid-snap padding (RAMP_PAD, added while fixing the Recast winding bug logged in the entry below) - the padded/snapped ramp rect reaches noticeably further than a naive "width + 2×pad" estimate suggests, because snapping always rounds *outward* to the nearest grid line. Fixed by pushing that map's base positions further from center (z=32→40) with real margin, not by relying on hand-calculation again. This is exactly the class of bug the smoke test exists to catch before it ships as "the enemy can't build a factory on this map."
+
+**A second real bug found via the mandatory screenshot check, not the smoke test:** the map-select screen (`map_select.gd`) looked fine with 1 map present but silently ran content off *both* the top and bottom of a 720px viewport once all 4 existed - a `VBoxContainer` centered on screen overflows symmetrically around its center once content exceeds the viewport, unlike a top-anchored one which only overflows downward (so it's easy to miss until there's enough content to push past center in both directions). The automated tests have no way to catch this class of bug (`test_ui_overflow_audit` only covers `MainLab.tscn`) - only the screenshot did. Fixed with a `ScrollContainer` around the map list, same pattern the build bar (`skirmish.gd`) already uses for its own overflow risk.
+
+**Verified per-map, one at a time as instructed:** each map got its own windowed top-down + in-scene screenshot pair, plus a real scripted smoke test (`_smoke_test_map()` in run_tests.gd) checking start points are on legal/unblocked terrain, every resource node is reachable by ground navmesh from its own side's harvester spawn, the two HQs are mutually reachable (no map accidentally splits the navmesh into disconnected islands), and the factory build queue actually produces a unit - before moving on to the next map.
+
+---
+
 ## 2026-07-12 — Multi-map architecture: data shape, elevation approach, and a real Recast winding bug found while verifying it
 
 **Not blocking.**

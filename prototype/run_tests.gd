@@ -82,6 +82,10 @@ func _init():
 	success = success and await test_terrain_builder_navmesh_ramp_connects()
 	success = success and await test_elevation_combat_and_vision_bonus()
 	success = success and await test_build_placement_rejects_water_and_obstacles()
+	success = success and await test_map_open_plains_smoke()
+	success = success and await test_map_lake_crossing_smoke()
+	success = success and await test_map_highland_chokepoint_smoke()
+	success = success and await test_map_coastal_strand_smoke()
 
 	print("\n==============================================")
 	if success:
@@ -3701,3 +3705,120 @@ func test_build_placement_rejects_water_and_obstacles() -> bool:
 	await process_frame
 	print("  [PASS] Attempting to place a building inside water is rejected without spending resources.")
 	return true
+
+# Reusable per-map smoke test (per Chris's one-at-a-time verification
+# instruction: each map gets a real scripted playthrough, not just eyeball
+# screenshots) - real Skirmish spawn on the given map_id, checks:
+# start points are legal/unblocked, every resource node is actually
+# reachable from its own team's harvester spawn (no unreachable resources
+# from a bad hand-authored position), the two HQs are mutually reachable
+# on the ground navmesh (the AI can actually reach the player and vice
+# versa), and the economy/build-queue loop still produces a real unit.
+func _smoke_test_map(map_id: String) -> bool:
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	var map_def = MapCatalogScript.get_map(map_id)
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	skirmish.map_id = map_id
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+	await process_frame
+
+	if skirmish.map_id != map_id or skirmish.current_map.get("name", "") != map_def.name:
+		print("  [FAIL] Skirmish did not load the requested map '", map_id, "'")
+		skirmish.queue_free()
+		return false
+	if not is_instance_valid(skirmish.player_hq) or not is_instance_valid(skirmish.enemy_hq):
+		print("  [FAIL] Player/enemy HQ failed to spawn on map '", map_id, "'")
+		skirmish.queue_free()
+		return false
+
+	# Start points must be real, unblocked, buildable ground.
+	for start_name in ["player_start", "enemy_start"]:
+		var start = map_def[start_name]
+		for key in ["hq", "factory", "refinery"]:
+			if TerrainBuilderScript.is_position_blocked(map_def, start[key]):
+				print("  [FAIL] ", start_name, ".", key, " (", start[key], ") sits on blocked terrain (water/obstacle/ramp)")
+				skirmish.queue_free()
+				return false
+
+	# Every resource node must be reachable from ITS side's harvester spawn.
+	var player_start_pos = map_def.player_start.harvester
+	var enemy_start_pos = map_def.enemy_start.harvester
+	for node_data in map_def.get("resource_nodes", []):
+		var from_pos = player_start_pos if node_data.position.distance_to(player_start_pos) < node_data.position.distance_to(enemy_start_pos) else enemy_start_pos
+		var path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, from_pos, node_data.position, true)
+		if path.size() < 2 or path[path.size() - 1].distance_to(node_data.position) > 3.0:
+			print("  [FAIL] Resource node at ", node_data.position, " is not reachable by ground navmesh from the nearest base")
+			skirmish.queue_free()
+			return false
+
+	# The two HQs must be mutually reachable (AI can path to the player,
+	# player can path to the AI) - not stranded on disconnected navmesh
+	# islands by a badly-placed water/obstacle/elevation zone.
+	var hq_path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, map_def.player_start.hq, map_def.enemy_start.hq, true)
+	if hq_path.size() < 2 or hq_path[hq_path.size() - 1].distance_to(map_def.enemy_start.hq) > 5.0:
+		print("  [FAIL] Player and enemy HQs are not mutually reachable on the ground navmesh")
+		skirmish.queue_free()
+		return false
+
+	# Economy/build loop still works: queue a unit, tick past its build
+	# time, confirm the factory actually produced it.
+	var factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM)
+	if not factory:
+		print("  [FAIL] No player factory found on map '", map_id, "'")
+		skirmish.queue_free()
+		return false
+	var harv_bp = skirmish._find_harvester_blueprint(skirmish.roster)
+	if harv_bp.is_empty():
+		print("  [FAIL] No harvester blueprint found in the roster for map '", map_id, "'")
+		skirmish.queue_free()
+		return false
+	var units_before = skirmish.get_team_units(skirmish.PLAYER_TEAM).size()
+	factory.queue_unit(harv_bp, 0.05)
+	# Building.gd's production queue ticks in its own _physics_process(),
+	# which the engine calls automatically each real physics frame -
+	# awaiting enough frames here (well past the 0.05s build_time at any
+	# real frame rate) lets it complete without manually driving it.
+	for i in range(30):
+		await process_frame
+	var units_after = skirmish.get_team_units(skirmish.PLAYER_TEAM).size()
+	if units_after <= units_before:
+		print("  [FAIL] Factory did not produce a queued unit on map '", map_id, "' (before=", units_before, " after=", units_after, ")")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	return true
+
+func test_map_open_plains_smoke() -> bool:
+	print("Running Test Suite: Map Smoke Test - Open Plains (start points legal, resources reachable, HQs mutually reachable, economy loop works)...")
+	var ok = await _smoke_test_map("open_plains")
+	if ok:
+		print("  [PASS] Open Plains: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
+	return ok
+
+func test_map_lake_crossing_smoke() -> bool:
+	print("Running Test Suite: Map Smoke Test - Lake Crossing (same generic smoke test, run against the refactored default map)...")
+	var ok = await _smoke_test_map("lake_crossing")
+	if ok:
+		print("  [PASS] Lake Crossing: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
+	return ok
+
+func test_map_highland_chokepoint_smoke() -> bool:
+	print("Running Test Suite: Map Smoke Test - Highland Chokepoint (start points legal, resources reachable, HQs mutually reachable through the flanking lanes, economy loop works)...")
+	var ok = await _smoke_test_map("highland_chokepoint")
+	if ok:
+		print("  [PASS] Highland Chokepoint: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
+	return ok
+
+func test_map_coastal_strand_smoke() -> bool:
+	print("Running Test Suite: Map Smoke Test - Coastal Strand (start points legal, resources reachable, HQs mutually reachable around inland obstacles, economy loop works)...")
+	var ok = await _smoke_test_map("coastal_strand")
+	if ok:
+		print("  [PASS] Coastal Strand: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
+	return ok
