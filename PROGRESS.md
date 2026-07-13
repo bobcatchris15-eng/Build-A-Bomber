@@ -4,6 +4,30 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (new session, cont'd 4) — Alpha-cutout greeble/fin cards for 5 factions
+
+Follow-up to a technical Q&A with Chris about whether the material system could fake silhouette-extending detail (it can't - normal maps/roughness/anisotropy only affect shading, never the true mesh outline) versus what would need real (cheap, non-collidable) extra geometry (alpha-cutout cards, same technique games use for cheap foliage). Chris green-lit building it for 5 specific factions.
+
+### The build
+
+New `hull_greebles.gd`: alpha-cutout textures are generated PROCEDURALLY at runtime (a small `Image` drawn pixel-by-pixel, wrapped in an `ImageTexture`) rather than hand-painted assets - zero new dependency on the Blender import pipeline, consistent with the rest of the faction system. 4 shapes (scrap zigzag, camo net lattice, hanging pennant, swept streamer fin), each generated once and cached, tinted per-faction like everything else.
+
+- **Salvage Union** - 3 jagged scrap-antenna zigzags scattered across the roof at odd angles, in a high-contrast exposed-metal tone (their own dark worn paint color made the first pass nearly invisible).
+- **Bayou Irregulars** - 2 broad camo-netting cards (top + side), breaking up the whole silhouette.
+- **Crimson Concordat** - 2 hanging ceremonial banners trailing off the rear corners, past the hull's actual tail.
+- **Aerodrome Cartel** - 2 swept art-deco tailfins, raked back.
+- **Dune Runners** - 2 real water-barrel cylinders (not flat cards - a barrel needs to read as a solid volume from every angle) lashed along the flanks.
+
+Every other faction (Industrialists/Technocrats/Expansionists/Glacier Syndicate/Ledger Combine) gets a genuinely empty greeble container - a deliberate, explicit exception to VISUAL_ART_DIRECTION.md's "goofy lives in detail-scale, never silhouette-scale" rule for these 5 specifically, not a reversal of it for all 10 (full reasoning in `DECISIONS_NEEDED.md`).
+
+Wired into both hull-construction call sites (`blueprint_manager.gd`'s `reconstruct_vehicle()`, `module_placer.gd`'s `update_hull_appearance()`), scaled off the hull's real current footprint so a stretched/shrunk hull's greebles resize proportionally.
+
+### Verification
+
+92/92 automated tests green (1 new - every untreated faction confirmed empty, every treated faction confirmed exact expected child count/geometry type, re-theming replaces rather than accumulates, real spawn-pipeline check). Windowed screenshots: all 5 treated factions side by side with clearly distinct silhouette-extending shapes, all 5 untreated factions confirmed clean, individual close-ups of each treated faction.
+
+---
+
 ## 2026-07-13 (new session, cont'd 3) — Rebuild against VISUAL_ART_DIRECTION.md + size-tiered manufactories
 
 Chris commissioned a dedicated design pass (a design-focused agent, no code access) against the exact faction/UI brief from the previous session. Saved verbatim as `VISUAL_ART_DIRECTION.md` at the repo root, then used it as the concrete reference for a real rework - not just a read-and-file-away.

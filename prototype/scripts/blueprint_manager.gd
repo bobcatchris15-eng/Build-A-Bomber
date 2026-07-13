@@ -3,6 +3,7 @@ extends Node
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
+const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 
 func _vec3_to_dict(v: Vector3) -> Dictionary:
 	return {"x": v.x, "y": v.y, "z": v.z}
@@ -284,6 +285,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 
 	mesh_inst.material_override = HullMaterialBuilderScript.build_hull_material(armor_mat_name, faction_name)
 	hull.add_child(mesh_inst)
+	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
 	
 	# Re-create Hull's CollisionShape3D (only in designer)
 	if is_designer:

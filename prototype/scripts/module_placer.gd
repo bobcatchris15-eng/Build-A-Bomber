@@ -6,6 +6,7 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
+const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -1074,6 +1075,7 @@ func update_hull_appearance():
 	
 	# Apply material - shared faction+armor shader (see hull_material_builder.gd)
 	mesh_inst.material_override = HullMaterialBuilderScript.build_hull_material(armor_mat_name, faction_name)
+	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
 	
 	# Also update collision shape size in the designer
 	var col = hull.get_node_or_null("CollisionShape3D") as CollisionShape3D

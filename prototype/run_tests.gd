@@ -66,6 +66,7 @@ func _init():
 	success = success and await test_faction_catalog_and_hull_material()
 	success = success and await test_brushed_aluminum_ui_theme()
 	success = success and await test_new_faction_mechanical_bonuses()
+	success = success and await test_hull_greebles()
 	success = success and await test_size_tiered_manufactories()
 	success = success and await test_win_condition()
 	success = success and await test_energy_pool_and_generators()
@@ -3241,6 +3242,100 @@ func test_new_faction_mechanical_bonuses() -> bool:
 
 	if ok:
 		print("  [PASS] Salvage Union's cost discount, Ledger Combine's build-time reduction, Crimson Concordat's low-HP dps ramp, Glacier Syndicate's terrain-penalty reduction, Dune Runners' harvester detection, Bayou Irregulars' detection-range reduction, and Aerodrome Cartel's airborne-only speed bonus all verified through real spawned instances / real system calls, not just catalog numbers.")
+	return ok
+
+func test_hull_greebles() -> bool:
+	print("Running Test Suite: Faction Visual Identity - Alpha-Cutout Greeble Cards (5 Treated Factions, 5 Untreated)...")
+	var HullGreebles = preload("res://scripts/hull_greebles.gd")
+	var BlueprintManager = preload("res://scripts/blueprint_manager.gd")
+	var hull_size = Vector3(4.0, 1.0, 6.0)
+
+	var ok = true
+
+	# Every untreated faction should produce a real, empty container -
+	# proves the exclusivity is genuine (a deliberate no-op branch), not
+	# just "nobody bothered to add these 5 yet."
+	var untreated = ["industrialists", "technocrats", "expansionists", "glacier_syndicate", "ledger_combine"]
+	for fac in untreated:
+		var hull = Node3D.new()
+		root.add_child(hull)
+		HullGreebles.apply_greebles(hull, fac, hull_size)
+		var container = hull.get_node_or_null("HullGreebles")
+		if not container or container.get_child_count() != 0:
+			print("  [FAIL] Untreated faction '", fac, "' should get an empty HullGreebles container, got ", container.get_child_count() if container else "no container")
+			ok = false
+		hull.queue_free()
+
+	# Every treated faction should produce a non-empty container with a
+	# real, specific child count (not just "more than zero").
+	var treated_counts = {
+		"salvage_union": 3, "bayou_irregulars": 2, "crimson_concordat": 2,
+		"aerodrome_cartel": 2, "dune_runners": 2,
+	}
+	for fac in treated_counts:
+		var hull = Node3D.new()
+		root.add_child(hull)
+		HullGreebles.apply_greebles(hull, fac, hull_size)
+		var container = hull.get_node_or_null("HullGreebles")
+		if not container or container.get_child_count() != treated_counts[fac]:
+			print("  [FAIL] '", fac, "' should produce exactly ", treated_counts[fac], " greeble children, got ", container.get_child_count() if container else "no container")
+			ok = false
+		hull.queue_free()
+	await process_frame
+
+	# Re-applying (a faction change in the Design Lab) must replace, not
+	# accumulate - the classic "update function called twice" duplication bug.
+	var reuse_hull = Node3D.new()
+	root.add_child(reuse_hull)
+	HullGreebles.apply_greebles(reuse_hull, "salvage_union", hull_size)
+	HullGreebles.apply_greebles(reuse_hull, "bayou_irregulars", hull_size)
+	var reused_container = reuse_hull.get_node_or_null("HullGreebles")
+	if not reused_container or reused_container.get_child_count() != treated_counts["bayou_irregulars"]:
+		print("  [FAIL] Re-applying greebles for a different faction should REPLACE the old ones, not accumulate - got ", reused_container.get_child_count() if reused_container else "no container", " expected ", treated_counts["bayou_irregulars"])
+		ok = false
+	reuse_hull.queue_free()
+	await process_frame
+
+	# Dune Runners' barrels are real 3D geometry (CylinderMesh + 2 band
+	# children each), not flat alpha-cutout cards like the other 4.
+	var barrel_hull = Node3D.new()
+	root.add_child(barrel_hull)
+	HullGreebles.apply_greebles(barrel_hull, "dune_runners", hull_size)
+	var barrel_container = barrel_hull.get_node_or_null("HullGreebles")
+	var found_real_barrel = false
+	for child in barrel_container.get_children():
+		if child is MeshInstance3D and child.mesh is CylinderMesh and child.get_child_count() == 2:
+			found_real_barrel = true
+	if not found_real_barrel:
+		print("  [FAIL] Dune Runners should have real CylinderMesh barrel geometry (with 2 band children each), not flat cutout cards")
+		ok = false
+	barrel_hull.queue_free()
+	await process_frame
+
+	# Real spawn-pipeline check: reconstruct_vehicle() should apply greebles
+	# to the actual hull, sized off the real footprint - not just have the
+	# builder function work in isolation.
+	var bp_manager = BlueprintManager.new()
+	root.add_child(bp_manager)
+	var blueprint_data = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"armor_material": "hardened_steel", "faction": "crimson_concordat",
+		"modules": [],
+	}
+	var parent = Node3D.new()
+	root.add_child(parent)
+	var hull = bp_manager.reconstruct_vehicle(blueprint_data, parent, false)
+	var real_container = hull.get_node_or_null("HullGreebles") if hull else null
+	if not real_container or real_container.get_child_count() != 2:
+		print("  [FAIL] A real reconstructed Crimson Concordat hull should carry exactly 2 pennant greebles")
+		ok = false
+	parent.queue_free()
+	bp_manager.queue_free()
+	await process_frame
+
+	if ok:
+		print("  [PASS] All 5 untreated factions stay clean, all 5 treated factions produce the right greeble count/geometry type, re-theming replaces rather than accumulates, and a real reconstructed hull carries its faction's greebles.")
 	return ok
 
 func test_size_tiered_manufactories() -> bool:
