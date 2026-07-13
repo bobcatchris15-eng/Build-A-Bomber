@@ -4,6 +4,31 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (new session) — Map variety batch: bridges, urban buildings, real vision LOS, 4 new maps
+
+Picked up after a prior session got stuck on a blocking prompt with no one able to dismiss it (Chris was traveling). Checked first whether the map/terrain "bridges and cities can be data" exploration that session had reportedly confirmed was ever committed: it wasn't - `git log`, `PROGRESS.md`, and `DECISIONS_NEEDED.md` all show the batch ending at Batch E item 5 (omni_wheels), with nothing about bridges/cities anywhere, no stash, no uncommitted script changes. That analysis (if it happened at all) never left the stuck session's own context - starting the batch fresh here, not recovering anything.
+
+### New terrain mechanisms (commit 82f6419)
+
+- **Bridges** - a new `map_catalog.gd` "bridges" field carves a walkable strip through a `water_areas` hole in the ground navmesh only (naval/amphibious/deep-water maps untouched - boats still float and pass underneath, same as a real river bridge). Real deck+railing visual; `terrain_height_at()` reports the deck height so crossing units don't render underwater.
+- **Urban buildings** - `obstacles` gained a `type` field (`"rock"` default / `"building"`) - the latter a single boxy structure with a flat roof and window greebles, real taller collider, distinct silhouette from the existing boulder-jumble rock clusters.
+- **Real vision line-of-sight** - `skirmish.gd`'s fog-of-war was pure distance math with zero occlusion check, ever. Added a real raycast (`_has_line_of_sight()`, collision layer 1 - the same layer `auto_weapon.gd`'s weapon-fire LOS check already used) so obstacles/buildings are now genuine cover for VISION too, not just movement/weapons - a free upgrade for every existing rock-cluster obstacle on every existing map, not just the new city map.
+
+3 new tests (81 total after this commit).
+
+### Four new maps, one at a time, each screenshot-verified
+
+- **Twin Bridges** (commit 6432b84) - the new LARGEST map (half_extents=100). A river spans the map's entire width edge-to-edge with exactly two bridges crossing it, well apart - a genuine multi-lane bottleneck distinct from `highland_chokepoint`'s single hill-lane design.
+- **Twin Summits** (commit f961879) - "two contested points" as its own pattern, not a rehash of `highland_chokepoint`'s one dominant hill: two separate hills, each closer to one side's own territory, fair only as a mirrored pair.
+- **Close Quarters** (commit 62b9788) - the new SMALLEST map (half_extents=45). Two rock walls split it into a real 3-lane bottleneck (west/center/east), distinct from highland's 2-lane design. Deliberately resource-sparse - built for early aggression, not economic buildup.
+- **Urban Sprawl** (commit b802059) - an 8-building street grid between the two bases using the new "building" obstacle type; real cover blocking movement, weapons, AND sightlines. A resource sits in the central plaza specifically because it's hidden from both bases until scouted.
+
+Each map got its own smoke test (legal start points, every resource reachable, HQs mutually reachable, factory production works) plus real windowed top-down + in-scene screenshots before moving to the next, same discipline as the original 4-map batch. Final count: 85/85 automated tests green, 8 maps total in the roster.
+
+Judgment calls (bridge naval passability, LOS eye-height approximation, is_position_blocked left blocking bridge decks for building placement, why these 4 specific maps) logged in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 — Batch E item 5 (final): omni_wheels with real lateral strafing - Batch E complete
 
 Chris's batch, item 5 (last item): real mecanum/omni-wheel locomotion - genuine sideways movement, not just a new mesh, requiring real steering code changes.

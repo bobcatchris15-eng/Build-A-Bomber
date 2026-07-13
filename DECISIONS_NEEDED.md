@@ -4,6 +4,26 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session) — Map variety batch: what survived from the stuck session, and the new mechanism/map judgment calls
+
+**Not blocking.**
+
+**Nothing from the previous (stuck) session's map/bridges/cities exploration was recovered or reused.** Checked `git log`, `PROGRESS.md`, `DECISIONS_NEEDED.md`, `git stash list`, and the working tree for any trace of the "map_catalog.gd/terrain_builder.gd can support bridges and cities almost entirely as data" analysis that session reportedly reached - found nothing anywhere. Whatever conclusions it reached lived only in that session's own context, which a fresh session has no access to. Built the bridge/building mechanisms from scratch by reading the current `terrain_builder.gd`/`map_catalog.gd` directly rather than trying to reconstruct the prior session's reasoning.
+
+**Bridges don't block naval/amphibious passability underneath.** A bridge's navmesh carve-out only touches `_build_ground_faces()` - `water_map`/`deep_water_map`/`amphibious_map` are untouched, so naval units float and pass freely under a bridge, same as a real river bridge. Considered making bridges a hard block for naval units (real bridges have physical pylons a ship could plausibly hit), but that would need bridges to ALSO carve holes into water_map, which is more invasive for a benefit (blocking a boat under a bridge) nobody asked for - kept the simpler, more permissive default.
+
+**`is_position_blocked()` still treats a bridge's footprint as blocked** (it's still literally inside a `water_areas` rect) even though the ground navmesh now lets units walk across it - deliberately NOT special-cased to allow building placement on a bridge deck. A factory or refinery sitting on a narrow river crossing is a strange, fragile thing to allow by default with zero use case driving it; if this turns out to matter (e.g. wanting a defense turret guarding a bridge), it's a small follow-up (exempt bridge rects from the water check in `is_position_blocked()` specifically), not a redesign.
+
+**Vision LOS raycast uses a fixed eye-height offset (1.5), not each construct's real height**, mirroring `auto_weapon.gd`'s own existing "+0.5" target-center convention for its weapon-fire LOS check rather than inventing a more precise (and more expensive) per-construct height lookup. Good enough for "does a building genuinely hide what's behind it," not meant to model precise sightlines over a crouching-height wall.
+
+**Obstacles (ALL of them, not just new city buildings) now block vision, not just movement/weapons** - a deliberate generalization rather than a city-map-only special case, since existing rock-cluster obstacles are already real `StaticBody3D` colliders on the exact same collision layer (1) `auto_weapon.gd`'s weapon-fire LOS check already uses. Making vision consistent with that existing convention was more principled than inventing a separate "which obstacles count as vision-blockers" flag - and it's a free improvement to `highland_chokepoint`'s rock walls and `coastal_strand`'s rock clusters too, not scoped narrowly to `urban_sprawl`.
+
+**Why these 4 specific new maps** (`twin_bridges`/`twin_summits`/`close_quarters`/`urban_sprawl`), out of everything the task listed (larger map, smaller map, multi-lane bottleneck, two contested points, a bridge chokepoint, an urban map): rather than building 6 near-duplicate maps for 6 bullet points, paired up orthogonal traits that reinforce each other - `twin_bridges` is simultaneously the larger map AND the bridge chokepoint AND a multi-lane bottleneck (two lanes, via two bridges); `close_quarters` is simultaneously the smaller map AND a second, differently-shaped multi-lane bottleneck (three lanes, via rock walls, no water). `twin_summits` and `urban_sprawl` each cover their one remaining ask (two contested points, city cover) without needing a forced pairing. Four maps this way cover every bullet point Chris listed with genuinely distinct play patterns, not padding.
+
+**Scope not attempted this pass:** true N-player/FFA team count (see the next entry, logged separately since it belongs to the pre-match-settings half of this batch).
+
+---
+
 ## 2026-07-13 — Omniwheels: decoupling velocity from facing at the `_steer_towards()` level, and what "facing a fixed direction" means for a MOVE order
 
 **Not blocking.**
