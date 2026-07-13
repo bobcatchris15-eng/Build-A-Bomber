@@ -333,7 +333,7 @@ func _recalculate_move_speed():
 					var leg_count = float(locomotion_settings.get("count", 4))
 					capacity_contrib = leg_count / 4.0
 					thrust_contrib = 1.0 + (4.0 - leg_count) / 8.0
-				elif locomotion_type == "tracked_treads":
+				elif locomotion_type == "tracked_treads" or locomotion_type == "rhomboid_treads":
 					var width = locomotion_settings.get("width", 1.0)
 					capacity_contrib = width
 					thrust_contrib = 1.0 + (1.0 - width) * 0.5
@@ -408,7 +408,7 @@ func _recalculate_terrain_speed_multiplier():
 	# treads already has for this surface, doesn't grant terrain immunity
 	# (clamped at 1.2, so even a max-width tread stays "notably better",
 	# not "as good as being on pavement").
-	if locomotion_type == "tracked_treads":
+	if locomotion_type == "tracked_treads" or locomotion_type == "rhomboid_treads":
 		var width = locomotion_settings.get("width", 1.0)
 		var width_delta = (width - 1.0) * 0.25
 		terrain_speed_multiplier = clamp(terrain_speed_multiplier + width_delta, 0.15, 1.2)

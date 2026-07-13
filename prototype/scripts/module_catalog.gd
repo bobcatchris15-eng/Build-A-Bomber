@@ -625,6 +625,30 @@ static func get_catalog() -> Dictionary:
 			"color": Color.DARK_OLIVE_GREEN,
 			"traits": ["ground_contact"]
 		},
+		"rhomboid_treads": {
+			"name": "Rhomboid Tank Treads",
+			"category": "locomotion",
+			# Batch E task 4: WWI Mark IV-style track - the loop runs all
+			# the way around the entire hull (up and over the top, not just
+			# flanking the bottom sides like tracked_treads) - see
+			# _build_rhomboid_treads(). A genuinely different silhouette,
+			# and a genuinely different tradeoff: the full-body track loop
+			# is the toughest, highest-capacity ground locomotor in the
+			# roster (heavier than tracked_treads), at the cost of being
+			# the slowest (a real Mark IV topped out around 4mph) -
+			# reflected directly in a below-default thrust_coefficient
+			# rather than just a bigger/heavier part.
+			"hp": 260.0,
+			"weight": 160.0,
+			"metal": 55,
+			"crystal": 0,
+			"dps": 0.0,
+			"base_weight_capacity": 900.0,
+			"thrust_coefficient": 95.0,
+			"size": Vector3(1.1, 2.6, 6.5),
+			"color": Color(0.28, 0.26, 0.2),
+			"traits": ["ground_contact"]
+		},
 		"helicopter_rotors": {
 			"name": "Helicopter Rotors",
 			"category": "locomotion",
@@ -1368,10 +1392,18 @@ static func get_thrust_coefficient(type_id: String) -> float:
 #                   drive moderate (augers work best with real grip/water,
 #                   dry sand offers less than mud does).
 const TERRAIN_SPEED_MULTIPLIERS = {
-	"marsh": {"wheels": 0.25, "tracked_treads": 0.45, "legs": 0.6, "screw_drive": 1.1},
-	"rocky": {"wheels": 0.35, "tracked_treads": 0.75, "legs": 1.1, "screw_drive": 0.5},
-	"snow_mud": {"wheels": 0.2, "tracked_treads": 0.8, "legs": 0.75, "screw_drive": 0.7},
-	"sand": {"wheels": 0.3, "tracked_treads": 0.85, "legs": 0.8, "screw_drive": 0.6},
+	# rhomboid_treads: the real Mark IV's whole reason for existing was
+	# crossing WWI trenches/shell-cratered mud that stopped wheeled and
+	# even normal tracked vehicles - so it beats tracked_treads on
+	# marsh/snow_mud specifically, at the cost of being worse on rocky
+	# terrain (a long, heavy, low-ground-clearance full-body loop is
+	# less nimble scrambling over rock than tracked_treads' shorter,
+	# lower-profile track run). Its baseline slowness is already captured
+	# by its below-default thrust_coefficient, not by this table.
+	"marsh": {"wheels": 0.25, "tracked_treads": 0.45, "rhomboid_treads": 0.55, "legs": 0.6, "screw_drive": 1.1},
+	"rocky": {"wheels": 0.35, "tracked_treads": 0.75, "rhomboid_treads": 0.65, "legs": 1.1, "screw_drive": 0.5},
+	"snow_mud": {"wheels": 0.2, "tracked_treads": 0.8, "rhomboid_treads": 0.88, "legs": 0.75, "screw_drive": 0.7},
+	"sand": {"wheels": 0.3, "tracked_treads": 0.85, "rhomboid_treads": 0.85, "legs": 0.8, "screw_drive": 0.6},
 }
 
 static func get_terrain_speed_multiplier(locomotion_type_id: String, surface_type: String) -> float:

@@ -1009,6 +1009,8 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		_build_wheels(parent_node, base_size)
 	elif type_id == "tracked_treads":
 		_build_tracked_treads(parent_node, base_size, base_color)
+	elif type_id == "rhomboid_treads":
+		_build_rhomboid_treads(parent_node, base_size, base_color)
 	elif type_id == "helicopter_rotors":
 		_build_helicopter_rotors(parent_node, base_size)
 	elif type_id == "hover_engine":
@@ -1105,6 +1107,71 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		roller.position = Vector3(0, base_size.y * 0.1, z_pos)
 		roller.rotation = Vector3(0, 0, PI / 2)
 		parent_node.add_child(roller)
+
+
+static func _build_rhomboid_treads(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# Batch E task 4: WWI Mark IV silhouette - the track loop wraps all the
+	# way around the hull (up and over the top), not just the bottom sides
+	# like _build_tracked_treads' flat plate-plus-rollers. Built as a ring
+	# of link plates traced around an ellipse in the local Y-Z plane
+	# (base_size.y is deliberately much taller than a normal tread's, and
+	# base_size.z longer, so the loop genuinely extends above/below and
+	# fore/aft of the hull body it's mounted beside - see the catalog
+	# entry's size field).
+	var link_count = 22
+	var radius_y = base_size.y * 0.46
+	var radius_z = base_size.z * 0.46
+	var link_mesh = _part("tread_plate")
+	var mat: StandardMaterial3D
+	if not link_mesh:
+		mat = StandardMaterial3D.new()
+		mat.albedo_color = base_color
+
+	for i in range(link_count):
+		var angle = TAU * float(i) / float(link_count)
+		var y = sin(angle) * radius_y
+		var z = cos(angle) * radius_z
+		var link: MeshInstance3D
+		if link_mesh:
+			link = _mesh_inst(link_mesh, base_color)
+			link.scale = _fit_scale(Vector3(base_size.x * 0.85, base_size.y * 0.12, base_size.z * 0.16), Vector3(1.0, 0.3, 1.0))
+		else:
+			link = MeshInstance3D.new()
+			var box = BoxMesh.new()
+			box.size = Vector3(base_size.x * 0.85, base_size.y * 0.12, base_size.z * 0.16)
+			link.mesh = box
+			link.material_override = mat
+		link.position = Vector3(0, y, z)
+		# Tangent-to-the-loop orientation so each link plate faces along
+		# the belt's direction of travel rather than all facing the same
+		# way - an ellipse's exact tangent angle isn't simply angle+90deg
+		# once radius_y != radius_z, but it's a close enough approximation
+		# for a static, non-simulated part to read correctly.
+		link.rotation = Vector3(angle + PI / 2.0, 0, 0)
+		parent_node.add_child(link)
+
+	# Two idler drums at the fore/aft turning points (where the loop
+	# reverses direction) - breaks up the ring into a recognizable "track
+	# horn" shape at each end, echoing the real Mark IV's pointed track horns.
+	var drum_mesh = _part("wheel_hub")
+	for z_end in [radius_z, -radius_z]:
+		var drum: MeshInstance3D
+		if drum_mesh:
+			drum = _mesh_inst(drum_mesh, Color.DARK_SLATE_GRAY)
+			drum.scale = _fit_scale(Vector3(base_size.y * 0.55, base_size.x * 0.9, base_size.y * 0.55), Vector3(0.9, 0.35, 0.9))
+		else:
+			drum = MeshInstance3D.new()
+			var drum_cyl = CylinderMesh.new()
+			drum_cyl.top_radius = base_size.y * 0.28
+			drum_cyl.bottom_radius = base_size.y * 0.28
+			drum_cyl.height = base_size.x * 0.9
+			drum.mesh = drum_cyl
+			var drum_mat = StandardMaterial3D.new()
+			drum_mat.albedo_color = Color.DARK_SLATE_GRAY
+			drum.material_override = drum_mat
+		drum.position = Vector3(0, 0, z_end)
+		drum.rotation = Vector3(0, 0, PI / 2)
+		parent_node.add_child(drum)
 
 
 static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3):

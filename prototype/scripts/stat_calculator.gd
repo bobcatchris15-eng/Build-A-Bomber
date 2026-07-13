@@ -578,6 +578,12 @@ func on_module_selected(module: Node3D):
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("width", 1.0)
+	elif type_id == "rhomboid_treads":
+		size_label.text = "Track Width:"
+		count_container.visible = false
+		size_slider.min_value = 0.5
+		size_slider.max_value = 2.5
+		size_slider.value = settings.get("width", 1.0)
 	elif type_id == "helicopter_rotors":
 		size_label.text = "Rotor Size:"
 		count_container.visible = true
@@ -632,6 +638,10 @@ func _apply_tweaks():
 			"count": int(count_slider.value)
 		}
 	elif type_id == "tracked_treads":
+		new_settings = {
+			"width": size_slider.value
+		}
+	elif type_id == "rhomboid_treads":
 		new_settings = {
 			"width": size_slider.value
 		}

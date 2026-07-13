@@ -98,6 +98,7 @@ func _init():
 	success = success and await test_terrain_types_differentiate_locomotion()
 	success = success and await test_locomotion_tweaks_have_real_visual_and_stat_effects()
 	success = success and await test_ornithopter_wing_spawns_flaps_and_flies()
+	success = success and await test_rhomboid_treads_spawns_and_differentiates_from_tracked_treads()
 
 	print("\n==============================================")
 	if success:
@@ -4852,4 +4853,133 @@ func test_ornithopter_wing_spawns_flaps_and_flies() -> bool:
 		return false
 
 	print("  [PASS] ornithopter_wing spawns 2 real wing instances with a flap-animation pivot, carries the airborne-not-fixed_wing trait combo for simple hover-capable flight, and its flap motion genuinely oscillates over time.")
+	return true
+
+func test_rhomboid_treads_spawns_and_differentiates_from_tracked_treads() -> bool:
+	print("Running Test Suite: Rhomboid (MkIV) Treads - Real Placement, Tougher-But-Slower Tradeoff, and Terrain Differentiation...")
+	var ModulePlacerScript = preload("res://scripts/module_placer.gd")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var controller_script = preload("res://scripts/fake_surface_controller.gd")
+
+	# Real placement via module_placer.gd: 2 loop instances (left/right),
+	# same mount pattern as tracked_treads.
+	var hull = StaticBody3D.new()
+	hull.name = "Hull"
+	var col = CollisionShape3D.new()
+	var col_box = BoxShape3D.new()
+	col_box.size = Vector3(4.0, 1.0, 6.0)
+	col.shape = col_box
+	col.name = "CollisionShape3D"
+	hull.add_child(col)
+	hull.set_meta("base_hull_size", Vector3(4.0, 1.0, 6.0))
+	hull.set_meta("hull_scale", Vector3(1, 1, 1))
+	hull.set_meta("type_id", "medium_hull")
+	root.add_child(hull)
+	await process_frame
+
+	var placer = Node3D.new()
+	placer.set_script(ModulePlacerScript)
+	placer.hull = hull
+	root.add_child(placer)
+	await process_frame
+
+	placer.update_locomotion("rhomboid_treads", {"width": 1.0})
+	await process_frame
+
+	var loop_instances = []
+	for child in hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "rhomboid_treads":
+			loop_instances.append(child)
+	if loop_instances.size() != 2:
+		print("  [FAIL] expected 2 rhomboid_treads instances (left/right), found ", loop_instances.size())
+		placer.queue_free(); hull.queue_free()
+		return false
+	placer.queue_free(); hull.queue_free()
+	await process_frame
+
+	# Stat tradeoff at default settings: tougher (more weight capacity) but
+	# slower (lower thrust_coefficient) than tracked_treads - a real,
+	# distinct silhouette AND a real, distinct stat profile, not a
+	# reskinned tracked_treads.
+	var make_unit = func(loco_type: String, ballast_weight: float) -> Node:
+		var unit = CharacterBody3D.new()
+		unit.set_script(BattleUnitScript)
+		root.add_child(unit)
+		unit.locomotion_type = loco_type
+		unit.locomotion_settings = {"width": 1.0}
+		var fake_hull = Node3D.new()
+		unit.add_child(fake_hull)
+		unit.hull_node = fake_hull
+		var loco_child = Node3D.new()
+		var loco_data = ModuleData.new()
+		loco_data.type_id = loco_type
+		loco_data.category = "locomotion"
+		loco_data.base_weight = 50.0
+		loco_child.set_meta("module_data", loco_data)
+		fake_hull.add_child(loco_child)
+		var ballast_child = Node3D.new()
+		var ballast_data = ModuleData.new()
+		ballast_data.type_id = "armor_plating"
+		ballast_data.category = "armor"
+		ballast_data.base_weight = ballast_weight
+		ballast_child.set_meta("module_data", ballast_data)
+		fake_hull.add_child(ballast_child)
+		unit._recalculate_move_speed()
+		return unit
+
+	# Light load (no overload for either): rhomboid_treads should be
+	# SLOWER than tracked_treads (lower thrust_coefficient - the real
+	# Mark IV's ~4mph top speed).
+	var tracked_light = make_unit.call("tracked_treads", 50.0)
+	var rhomboid_light = make_unit.call("rhomboid_treads", 50.0)
+	if rhomboid_light.move_speed >= tracked_light.move_speed:
+		print("  [FAIL] rhomboid_treads should be slower than tracked_treads under light load. tracked=", tracked_light.move_speed, " rhomboid=", rhomboid_light.move_speed)
+		return false
+
+	# Heavy load (capacity matters): rhomboid_treads' higher base_weight_capacity
+	# (900 vs 700) should let it shrug off a load that overloads tracked_treads
+	# harder - closing the gap even though it's still the slower type at heart.
+	var overload_weight = 750.0
+	var tracked_heavy = make_unit.call("tracked_treads", overload_weight)
+	var rhomboid_heavy = make_unit.call("rhomboid_treads", overload_weight)
+	var tracked_ratio = tracked_heavy.move_speed / tracked_light.move_speed
+	var rhomboid_ratio = rhomboid_heavy.move_speed / rhomboid_light.move_speed
+	if rhomboid_ratio <= tracked_ratio:
+		print("  [FAIL] rhomboid_treads' higher capacity should mean it retains proportionally more speed under a heavy load than tracked_treads. tracked_ratio=", tracked_ratio, " rhomboid_ratio=", rhomboid_ratio)
+		return false
+
+	tracked_light.queue_free(); rhomboid_light.queue_free(); tracked_heavy.queue_free(); rhomboid_heavy.queue_free()
+
+	# Terrain: rhomboid_treads should beat tracked_treads on marsh (the
+	# whole reason the real Mark IV existed) but lose to it on rocky
+	# terrain (long, heavy, low-clearance loop is less nimble on rock).
+	var measure_terrain = func(loco_type: String, surface: String) -> float:
+		var controller = Node.new()
+		controller.set_script(controller_script)
+		controller.surface_type = surface
+		root.add_child(controller)
+		var unit = CharacterBody3D.new()
+		unit.set_script(BattleUnitScript)
+		controller.add_child(unit)
+		unit.locomotion_type = loco_type
+		unit.locomotion_settings = {"width": 1.0}
+		unit.global_position = Vector3.ZERO
+		unit._recalculate_terrain_speed_multiplier()
+		var result = unit.terrain_speed_multiplier
+		controller.queue_free()
+		return result
+
+	var tracked_marsh = measure_terrain.call("tracked_treads", "marsh")
+	var rhomboid_marsh = measure_terrain.call("rhomboid_treads", "marsh")
+	if rhomboid_marsh <= tracked_marsh:
+		print("  [FAIL] rhomboid_treads should handle marsh better than tracked_treads. tracked=", tracked_marsh, " rhomboid=", rhomboid_marsh)
+		return false
+
+	var tracked_rocky = measure_terrain.call("tracked_treads", "rocky")
+	var rhomboid_rocky = measure_terrain.call("rhomboid_treads", "rocky")
+	if rhomboid_rocky >= tracked_rocky:
+		print("  [FAIL] rhomboid_treads should handle rocky terrain worse than tracked_treads. tracked=", tracked_rocky, " rhomboid=", rhomboid_rocky)
+		return false
+
+	print("  [PASS] rhomboid_treads spawns 2 real full-loop instances distinct from tracked_treads, is genuinely slower but tougher (retains more speed under heavy load), and is genuinely better on marsh / worse on rocky terrain.")
 	return true

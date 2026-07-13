@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 — MkIV rhomboid treads: procedural loop geometry, mount point, and a genuine tougher-but-slower/terrain tradeoff
+
+**Not blocking.**
+
+Batch E item 4: a WWI Mark IV-style full-body track loop, distinct from `tracked_treads`' flat plate-plus-rollers. Built as a new locomotion type `rhomboid_treads` rather than a `tracked_treads` variant, since it needed its own catalog stats (see below) as well as its own visual.
+
+**Visual:** `_build_rhomboid_treads()` traces 22 track-link plates around an ellipse in the local Y-Z plane (catalog `size` deliberately much taller than `tracked_treads`' - `Vector3(1.1, 2.6, 6.5)` vs `(1.0, 0.8, 3.0)` - so the loop genuinely extends above and below the hull, not just flush with its underside), plus two idler drums at the fore/aft turning points echoing the real tank's pointed "track horns." Mounted in `module_placer.gd` centered on the hull's vertical middle (not `tracked_treads`' low/underside bias), since the loop's own geometry already provides the vertical reach. Verified visually: screenshots in `progress_captures/2026-07-13/rhomboid_treads/` show it towering well above the hull top compared to `tracked_treads` staying flush - the actual "wraps the entire body" ask, not just a reskinned tread.
+
+**Not just a reskin mechanically either** - gave it real stat differentiation instead of matching `tracked_treads`' numbers with new geometry: higher `base_weight_capacity` (900 vs 700 - literally the biggest, heaviest ground locomotor in the roster now) but a below-default `thrust_coefficient` (95 vs the 150 default `tracked_treads` uses), reflecting a real Mark IV's ~4mph top speed - tougher but slower, a genuine tradeoff rather than a strict upgrade. Terrain multipliers also differentiate it from `tracked_treads`: better on marsh/snow_mud (the real Mark IV's whole reason for existing was crossing WWI trench mud), worse on rocky terrain (a long, heavy, low-clearance loop is less nimble scrambling over rock than a shorter track run).
+
+Reused `tracked_treads`' width tweak mechanically (same `thrust_contrib`/`capacity_contrib`/terrain-multiplier-modulation formula from the wheels/legs/treads batch, just extended to also match `rhomboid_treads`) rather than inventing a separate tweak system, since the same "wider=more capacity/less speed" logic applies equally well here.
+
+**Verified:** 77/77 tests green (1 new: real spawn count via `module_placer.gd`, a direct stat comparison proving it's genuinely slower-but-tougher than `tracked_treads` at both light and heavy load, and a terrain-multiplier comparison proving the marsh-better/rocky-worse differentiation is real).
+
+---
+
 ## 2026-07-13 — Ornithopter wings: new locomotion type (not a variant/module), no "fixed_wing" trait
 
 **Not blocking.**

@@ -446,6 +446,7 @@ func _place_hull_from_ui(type_id: String):
 var default_locomotion_settings = {
 	"wheels": {"size": 1.0, "count": 4},
 	"tracked_treads": {"width": 1.0},
+	"rhomboid_treads": {"width": 1.0},
 	"hover_engine": {},
 	"helicopter_rotors": {"size": 1.0, "count": 4},
 	"fixed_wing_engine": {"size": 1.0, "count": 2},
@@ -602,13 +603,34 @@ func update_locomotion(type_id: String, settings: Dictionary):
 					tread.get_meta("module_data").scale_multiplier = tread.scale
 				spawned_wheels.append(tread)
 				
+	elif type_id == "rhomboid_treads":
+		# Batch E task 4: MkIV-style full-body loop. Unlike tracked_treads
+		# (which mounts low, hugging the underside), this mounts centered
+		# on the hull's vertical middle - the loop geometry itself (see
+		# _build_rhomboid_treads) already extends well above and below
+		# that center point, since it wraps the ENTIRE hull rather than
+		# just flanking the bottom.
+		var width = settings.get("width", 1.0)
+		var x_offset = hull_size.x / 2.0
+		var tread_length = hull_size.z
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
+			var pos = hull.global_position + Vector3((x_offset + (catalog_data.size.x * width / 2.0) - 0.1) * side, 0.0, 0.0)
+			var loop = _place_weapon(type_id, pos, side_normal)
+			if loop:
+				loop.scale = Vector3(width, 1.0, tread_length / catalog_data.size.z)
+				loop.rotation = Vector3.ZERO
+				if loop.has_meta("module_data"):
+					loop.get_meta("module_data").scale_multiplier = loop.scale
+				spawned_wheels.append(loop)
+
 	elif type_id == "helicopter_rotors":
 		var size = settings.get("size", 1.0)
 		var count = settings.get("count", 4)
 		if count < 2: count = 2
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
-		
+
 		var x_offset = hull_size.x / 2.0 + 1.2
 		var y_offset = hull_size.y / 2.0 + 0.3
 		var z_limit = hull_size.z * 0.35

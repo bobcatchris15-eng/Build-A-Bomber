@@ -4,6 +4,22 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 — Batch E item 4: rhomboid_treads, a new MkIV full-body-loop track type
+
+Chris's batch, item 4: WWI Mark IV-style tank track where the loop wraps up and over the entire body, not just flanking the bottom sides like `tracked_treads`.
+
+### The build
+
+New locomotion type `rhomboid_treads` - a procedural loop of 22 track-link plates traced around an ellipse tall enough to genuinely extend above/below the hull, plus idler drums at the fore/aft turning points. Mounted centered on hull height (not `tracked_treads`' low bias). Gave it its own stat profile too, not just new geometry: higher weight capacity (900 vs 700) but a below-default thrust coefficient (95 vs 150) - tougher but slower, plus better marsh/snow_mud terrain handling and worse rocky handling than `tracked_treads`. Reuses the width-tweak tradeoff mechanism built for tracked_treads earlier this batch.
+
+**Verified:**
+- Full suite: **77/77 green** (1 new: real spawn count, direct stat comparison proving the tougher-but-slower tradeoff, terrain-multiplier comparison).
+- Visual: `progress_captures/2026-07-13/rhomboid_treads/` - clearly towers above the hull vs. `tracked_treads` staying flush.
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-13 — Batch E item 5: ornithopter_wing, a new flapping-flight locomotion type
 
 Chris's batch, item 5: flapping-wing flight, distinct from `fixed_wing_engine` (prop/jet) and `buoyant_envelope` (airship), same "no aerodynamic lift simulation" standing rule.
