@@ -4,6 +4,18 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (cont'd 2) — Final verification: pintle correction + traverse/range/weight batch
+
+Wraps up the four-item batch Chris queued while the angled-pintle-mount work was mid-flight: the per-weapon-type pintle correction, traverse rate differentiation, range tweak coverage, and vehicle weight capacity - see the three entries below this one for each item's own detail.
+
+**Full regression pass:** 66/66 automated tests green (headless), including the 2 new tests added this batch (`test_weapon_traverse_and_range_differentiation`, `test_weight_vs_locomotion_capacity_penalty`) plus the earlier pintle-correction test, none of which existed before this batch started.
+
+**Live-game sanity check**, not just the test harness: spawned an `interceptor_hull` with a `ciws` and a `mortar_array` through the real Design Lab UI placement path (not synthetic mocks) at the same sloped-nose angle used for the original pintle-correction proof, confirming the whole pipeline - catalog data, mount-style resolution, weapon stat computation, and the Design Lab's own sidebar stats (Total HP/Weight/Cost/DPS) - still renders and computes correctly after touching three core shared scripts (`module_catalog.gd`, `auto_weapon.gd`, `battle_unit.gd`) that basically everything else in the game reads from. Screenshot: `progress_captures/2026-07-13/final_batch_verify/interceptor_ciws_mortar.png`.
+
+No new blocking issues. All four items are code-complete, tested, documented, and committed.
+
+---
+
 ## 2026-07-13 (cont'd) — Vehicle Weight now actually matters: per-locomotor-type capacity + overload speed penalty
 
 Weight was a displayed stat with zero gameplay effect until now. Chris's ask: a per-locomotor-type formula for how much weight it's built for, with excess weight slowing the unit - heavier/tougher locomotion tolerates more before the penalty.
