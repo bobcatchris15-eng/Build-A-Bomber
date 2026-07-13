@@ -930,6 +930,19 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		arm.rotation = Vector3(PI / 2 - 0.3, 0, 0)
 		parent_node.add_child(arm)
 
+	elif type_id == "wing":
+		_build_wing(parent_node, base_size, base_color)
+	elif type_id == "thruster":
+		_build_thruster(parent_node, base_size, base_color)
+	elif type_id == "propeller_prop":
+		_build_propeller(parent_node, base_size, base_color, false)
+	elif type_id == "pusher_prop":
+		_build_propeller(parent_node, base_size, base_color, true)
+	elif type_id == "paddle_wheel":
+		_build_paddle_wheel(parent_node, base_size, base_color)
+	elif type_id == "ship_screw":
+		_build_ship_screw(parent_node, base_size, base_color)
+
 	elif type_id == "tesla_coil":
 		# Chris explicitly invited some fun/silly weapons alongside the
 		# grounded ones (ENERGY_AND_BALANCE_SPEC.md #4) - a literal wound
@@ -1385,6 +1398,162 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 		drum.material_override = drum_mat
 		drum.rotation = Vector3(PI / 2.0, 0, 0)
 	parent_node.add_child(drum)
+
+
+static func _build_wing(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# Flat swept panel - no aerodynamic simulation, purely a weight_capacity
+	# attachment (see module_catalog.gd's "weight_capacity_bonus").
+	var panel = MeshInstance3D.new()
+	var panel_box = BoxMesh.new()
+	panel_box.size = Vector3(base_size.x, base_size.y * 0.6, base_size.z)
+	panel.mesh = panel_box
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = base_color
+	mat.metallic = 0.5
+	mat.roughness = 0.4
+	panel.material_override = mat
+	parent_node.add_child(panel)
+
+	# Swept tip - a smaller box fused near the outer edge to break up the
+	# plain rectangle silhouette.
+	var tip = MeshInstance3D.new()
+	var tip_box = BoxMesh.new()
+	tip_box.size = Vector3(base_size.x * 0.25, base_size.y * 0.45, base_size.z * 0.6)
+	tip.mesh = tip_box
+	tip.material_override = mat
+	tip.position = Vector3(base_size.x * 0.45, 0, -base_size.z * 0.15)
+	parent_node.add_child(tip)
+
+
+static func _build_thruster(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# Jet/rocket nacelle - no visible blades (reads as reaction thrust, not
+	# a propeller), distinct from propeller_prop/pusher_prop/ship_screw.
+	var nacelle = MeshInstance3D.new()
+	var cyl = CylinderMesh.new()
+	cyl.top_radius = base_size.y * 0.5
+	cyl.bottom_radius = base_size.y * 0.45
+	cyl.height = base_size.z * 0.75
+	nacelle.mesh = cyl
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = base_color
+	mat.metallic = 0.75
+	mat.roughness = 0.3
+	nacelle.material_override = mat
+	nacelle.rotation = Vector3(PI / 2.0, 0, 0)
+	parent_node.add_child(nacelle)
+
+	var exhaust = MeshInstance3D.new()
+	var exhaust_cyl = CylinderMesh.new()
+	exhaust_cyl.top_radius = base_size.y * 0.5
+	exhaust_cyl.bottom_radius = base_size.y * 0.35
+	exhaust_cyl.height = base_size.z * 0.3
+	exhaust.mesh = exhaust_cyl
+	var exhaust_mat = StandardMaterial3D.new()
+	exhaust_mat.albedo_color = Color(1.0, 0.5, 0.1)
+	exhaust_mat.emission_enabled = true
+	exhaust_mat.emission = Color(1.0, 0.4, 0.05)
+	exhaust_mat.emission_energy_multiplier = 1.2
+	exhaust.material_override = exhaust_mat
+	exhaust.rotation = Vector3(PI / 2.0, 0, 0)
+	exhaust.position = Vector3(0, 0, base_size.z * 0.55)
+	parent_node.add_child(exhaust)
+
+
+static func _build_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color, pusher: bool):
+	# Flat 3-blade fan on a hub, forward-facing (tractor) by default -
+	# pusher_prop passes pusher=true to flip which end the blades sit on,
+	# the "visually distinct placement/orientation" the task asked for,
+	# with zero extra mount-system code (purely which local Z the blades
+	# and hub are authored toward).
+	var facing = 1.0 if pusher else -1.0
+	var hub = MeshInstance3D.new()
+	var hub_cyl = CylinderMesh.new()
+	hub_cyl.top_radius = base_size.x * 0.25
+	hub_cyl.bottom_radius = base_size.x * 0.22
+	hub_cyl.height = base_size.z * 0.5
+	hub.mesh = hub_cyl
+	var hub_mat = StandardMaterial3D.new()
+	hub_mat.albedo_color = base_color.darkened(0.3)
+	hub_mat.metallic = 0.7
+	hub.material_override = hub_mat
+	hub.rotation = Vector3(PI / 2.0, 0, 0)
+	hub.position = Vector3(0, 0, facing * base_size.z * 0.3)
+	parent_node.add_child(hub)
+
+	var blade_mat = StandardMaterial3D.new()
+	blade_mat.albedo_color = Color.SILVER
+	for i in range(3):
+		var blade = MeshInstance3D.new()
+		var blade_box = BoxMesh.new()
+		blade_box.size = Vector3(0.03, base_size.x * 0.9, 0.1)
+		blade.mesh = blade_box
+		blade.material_override = blade_mat
+		blade.position = Vector3(0, 0, facing * base_size.z * 0.55)
+		blade.rotate_z(i * (TAU / 3.0))
+		parent_node.add_child(blade)
+
+
+static func _build_paddle_wheel(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# Steamship-style side paddle wheel: a disc whose face points sideways
+	# (matching a side hull mount) with flat paddle blades radiating from
+	# the rim - distinct from ship_screw's twisted blades or
+	# naval_propeller's stern fan.
+	var disc = MeshInstance3D.new()
+	var disc_cyl = CylinderMesh.new()
+	disc_cyl.top_radius = base_size.x * 0.45
+	disc_cyl.bottom_radius = base_size.x * 0.45
+	disc_cyl.height = base_size.y * 0.2
+	disc.mesh = disc_cyl
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = base_color.darkened(0.1)
+	mat.metallic = 0.5
+	mat.roughness = 0.6
+	disc.material_override = mat
+	disc.rotation = Vector3(0, 0, PI / 2.0)
+	parent_node.add_child(disc)
+
+	var paddle_mat = StandardMaterial3D.new()
+	paddle_mat.albedo_color = base_color.darkened(0.35)
+	for i in range(6):
+		var paddle = MeshInstance3D.new()
+		var paddle_box = BoxMesh.new()
+		paddle_box.size = Vector3(base_size.y * 0.18, base_size.x * 0.35, base_size.z * 0.85)
+		paddle.mesh = paddle_box
+		paddle.material_override = paddle_mat
+		paddle.rotation = Vector3(0, 0, PI / 2.0)
+		paddle.rotate_x(i * (TAU / 6.0))
+		parent_node.add_child(paddle)
+
+
+static func _build_ship_screw(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# Twisted (pitched) blade screw propeller - the real distinguishing
+	# "screw" look vs. paddle_wheel's flat radial paddles or
+	# naval_propeller's flat 3-blade fan.
+	var hub = MeshInstance3D.new()
+	var hub_cyl = CylinderMesh.new()
+	hub_cyl.top_radius = base_size.x * 0.15
+	hub_cyl.bottom_radius = base_size.x * 0.15
+	hub_cyl.height = base_size.z * 0.7
+	hub.mesh = hub_cyl
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = base_color
+	mat.metallic = 0.75
+	mat.roughness = 0.3
+	hub.material_override = mat
+	hub.rotation = Vector3(PI / 2.0, 0, 0)
+	parent_node.add_child(hub)
+
+	var blade_mat = StandardMaterial3D.new()
+	blade_mat.albedo_color = Color.SILVER
+	for i in range(4):
+		var blade = MeshInstance3D.new()
+		var blade_box = BoxMesh.new()
+		blade_box.size = Vector3(0.025, base_size.x * 0.55, base_size.x * 0.3)
+		blade.mesh = blade_box
+		blade.material_override = blade_mat
+		blade.rotation.x = 0.5
+		blade.rotate_z(i * (TAU / 4.0))
+		parent_node.add_child(blade)
 
 
 # MOUNTING_AND_ARMOR_SPEC.md #3: generic (not per-weapon-type-bespoke) mount

@@ -91,6 +91,7 @@ func _init():
 	success = success and await test_map_coastal_strand_smoke()
 	success = success and await test_weapon_traverse_and_range_differentiation()
 	success = success and await test_weight_vs_locomotion_capacity_penalty()
+	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
 
 	print("\n==============================================")
 	if success:
@@ -4199,4 +4200,78 @@ func test_weight_vs_locomotion_capacity_penalty() -> bool:
 	loaded_treads.queue_free()
 	light_wheels.queue_free()
 	print("  [PASS] Weight beyond a locomotor's own capacity measurably slows the unit; heavier locomotion types (tracked_treads) tolerate more excess weight before the penalty kicks in than lighter ones (wheels); units under capacity are unaffected.")
+	return true
+
+func test_mobility_addon_modules_boost_capacity_and_thrust() -> bool:
+	print("Running Test Suite: Mobility Add-On Modules (wing/thruster) Boost Capacity/Thrust...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var make_unit = func(extra_type_id: String) -> Node:
+		var unit = CharacterBody3D.new()
+		unit.set_script(BattleUnitScript)
+		root.add_child(unit)
+		unit.locomotion_type = "wheels"
+		unit.locomotion_settings = {}
+		var fake_hull = Node3D.new()
+		unit.add_child(fake_hull)
+		unit.hull_node = fake_hull
+
+		var loco_child = Node3D.new()
+		var loco_data = ModuleData.new()
+		loco_data.type_id = "wheels"
+		loco_data.category = "locomotion"
+		loco_data.base_weight = 50.0
+		loco_child.set_meta("module_data", loco_data)
+		fake_hull.add_child(loco_child)
+
+		# Heavy shared ballast (present in every case, including baseline) so
+		# total_weight is high enough that move_speed sits comfortably below
+		# the clamp(2.0, 15.0) ceiling - otherwise an already-maxed baseline
+		# would hide a real thrust_bonus increase behind the clamp.
+		var ballast_child = Node3D.new()
+		var ballast_data = ModuleData.new()
+		ballast_data.type_id = "armor_plating"
+		ballast_data.category = "armor"
+		ballast_data.base_weight = 400.0
+		ballast_child.set_meta("module_data", ballast_data)
+		fake_hull.add_child(ballast_child)
+
+		if extra_type_id != "":
+			var extra_child = Node3D.new()
+			var extra_data = ModuleData.new()
+			extra_data.type_id = extra_type_id
+			extra_data.category = "module"
+			extra_data.base_weight = 10.0
+			extra_child.set_meta("module_data", extra_data)
+			fake_hull.add_child(extra_child)
+
+		unit._recalculate_move_speed()
+		return unit
+
+	# The shared 400kg ballast pushes total_weight (450kg) past wheels' own
+	# 350 capacity for every case - baseline is genuinely overloaded, not
+	# just slow from raw weight, so a wing lifting it back under capacity
+	# (or a thruster/propeller adding raw thrust) shows up as a real,
+	# unclamped move_speed increase rather than being masked by the
+	# clamp(2.0, 15.0) ceiling a lighter baseline would hit.
+	var baseline = make_unit.call("")
+	var winged = make_unit.call("wing")
+	if winged.move_speed <= baseline.move_speed:
+		print("  [FAIL] wing's weight_capacity_bonus should raise move_speed above the overloaded baseline (by lifting total capacity closer to/above total weight). baseline=", baseline.move_speed, " with_wing=", winged.move_speed)
+		baseline.queue_free(); winged.queue_free()
+		return false
+
+	var thrusted = make_unit.call("thruster")
+	var propped = make_unit.call("propeller_prop")
+	if thrusted.move_speed <= baseline.move_speed:
+		print("  [FAIL] thruster's thrust_bonus should raise move_speed above the plain wheels-only baseline. baseline=", baseline.move_speed, " with_thruster=", thrusted.move_speed)
+		baseline.queue_free(); winged.queue_free(); thrusted.queue_free(); propped.queue_free()
+		return false
+	if propped.move_speed <= baseline.move_speed:
+		print("  [FAIL] propeller_prop's thrust_bonus should raise move_speed above the plain wheels-only baseline. baseline=", baseline.move_speed, " with_propeller=", propped.move_speed)
+		baseline.queue_free(); winged.queue_free(); thrusted.queue_free(); propped.queue_free()
+		return false
+
+	baseline.queue_free(); winged.queue_free(); thrusted.queue_free(); propped.queue_free()
+	print("  [PASS] Mobility add-on modules (wing/thruster/propeller_prop) each contribute a real, measurable capacity/thrust bonus beyond the base locomotion alone.")
 	return true

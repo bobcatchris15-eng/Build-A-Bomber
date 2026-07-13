@@ -300,6 +300,19 @@ func _recalculate_move_speed():
 				# more than a stock 4-wheel one), per-locomotor-type base
 				# from ModuleCatalog.get_base_weight_capacity().
 				total_weight_capacity += ModuleCatalog.get_base_weight_capacity(data.type_id) * child.scale.x * child.scale.z * count_contrib
+			# Mobility add-on modules (wing/thruster/propeller_prop/
+			# pusher_prop/paddle_wheel/ship_screw) - attachable, not a
+			# primary locomotion choice, so they contribute regardless of
+			# category: wings raise the weight budget before the overload
+			# penalty kicks in, the rest add real extra thrust on top of
+			# whatever the primary locomotion provides.
+			var mod_catalog = ModuleCatalog.get_module_data(data.type_id)
+			var wc_bonus = mod_catalog.get("weight_capacity_bonus", 0.0)
+			var thrust_bonus = mod_catalog.get("thrust_bonus", 0.0)
+			if wc_bonus > 0.0:
+				total_weight_capacity += wc_bonus * child.scale.x * child.scale.z
+			if thrust_bonus > 0.0:
+				motor_thrust += thrust_bonus * child.scale.x * child.scale.z
 	if not has_locomotion:
 		move_speed = 0.0
 		return

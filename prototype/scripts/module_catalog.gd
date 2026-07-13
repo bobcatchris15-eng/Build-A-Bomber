@@ -445,6 +445,108 @@ static func get_catalog() -> Dictionary:
 			"size": Vector3(1.2, 1.2, 1.8),
 			"color": Color.DARK_CYAN
 		},
+		# --- MOBILITY ADD-ONS ---
+		# Attachable modules (placed like any weapon/support module, not a
+		# primary locomotion choice) that boost the movement systems built
+		# for weight-capacity/thrust differentiation - see get_module_data()
+		# callers "weight_capacity_bonus"/"thrust_bonus" in battle_unit.gd's
+		# _recalculate_move_speed(). Deliberately NOT gated to only work on
+		# flying/naval hulls (no-hard-gating trait philosophy) - a wing
+		# bolted onto a tank is silly but harmless, not blocked.
+		"wing": {
+			"name": "Wing Panel",
+			"category": "module",
+			# No aerodynamic simulation (explicitly out of scope) - purely a
+			# weight_capacity-granting attachment for airborne/fixed_wing
+			# locomotion, same spirit as the real thing without modeling lift.
+			"hp": 45.0,
+			"weight": 30.0,
+			"metal": 25,
+			"crystal": 5,
+			"dps": 0.0,
+			"weight_capacity_bonus": 150.0,
+			"size": Vector3(1.6, 0.16, 0.6),
+			"color": Color(0.55, 0.56, 0.6)
+		},
+		"thruster": {
+			"name": "Auxiliary Thruster",
+			"category": "module",
+			# Generic reaction thrust - distinct from a locomotion engine
+			# (which defines the vehicle's whole movement paradigm) and from
+			# a propeller (no visible moving blades, reads as a jet/rocket).
+			"hp": 40.0,
+			"weight": 35.0,
+			"metal": 30,
+			"crystal": 10,
+			"dps": 0.0,
+			"thrust_bonus": 60.0,
+			"size": Vector3(0.5, 0.5, 0.9),
+			"color": Color(0.3, 0.3, 0.33)
+		},
+		"propeller_prop": {
+			"name": "Propeller (Tractor)",
+			"category": "module",
+			# Standard tractor/pulling orientation - blades face forward
+			# (local -Z), same convention as every weapon's own "forward."
+			"hp": 35.0,
+			"weight": 25.0,
+			"metal": 20,
+			"crystal": 5,
+			"dps": 0.0,
+			"thrust_bonus": 70.0,
+			"size": Vector3(0.5, 0.5, 0.5),
+			"color": Color(0.2, 0.2, 0.22)
+		},
+		"pusher_prop": {
+			"name": "Propeller (Pusher)",
+			"category": "module",
+			# Mechanically identical to propeller_prop (same thrust_bonus) -
+			# the whole point is the visual: blades face backward (local
+			# +Z) instead of forward, a real pusher-configuration aircraft
+			# mounting, not just a relabeled tractor prop.
+			"hp": 35.0,
+			"weight": 25.0,
+			"metal": 20,
+			"crystal": 5,
+			"dps": 0.0,
+			"thrust_bonus": 70.0,
+			"size": Vector3(0.5, 0.5, 0.5),
+			"color": Color(0.2, 0.2, 0.22)
+		},
+		"paddle_wheel": {
+			"name": "Paddle Wheel",
+			"category": "module",
+			# Steamship-style side paddle wheel - a distinct naval
+			# propulsion silhouette from ship_screw's twisted blades or
+			# naval_propeller's stern fan, side-mounted rather than stern-mounted.
+			"hp": 60.0,
+			"weight": 55.0,
+			"metal": 35,
+			"crystal": 0,
+			"dps": 0.0,
+			"thrust_bonus": 65.0,
+			"size": Vector3(0.5, 0.9, 0.9),
+			"color": Color(0.32, 0.24, 0.16)
+		},
+		"ship_screw": {
+			"name": "Ship's Screw",
+			"category": "module",
+			# Real twisted-blade screw propeller (see visual_builder.gd's
+			# _build_ship_screw) - naval_propeller's existing visual is a
+			# flat 3-blade fan (a reasonable stern housing, but not an
+			# actual pitched/twisted screw); this is the genuine article,
+			# and unlike naval_propeller it's a stackable module rather
+			# than the primary locomotion choice.
+			"hp": 30.0,
+			"weight": 20.0,
+			"metal": 20,
+			"crystal": 5,
+			"dps": 0.0,
+			"thrust_bonus": 75.0,
+			"size": Vector3(0.4, 0.4, 0.5),
+			"color": Color(0.5, 0.5, 0.52)
+		},
+
 		"armor_plating": {
 			"name": "Armor Plating",
 			"category": "armor",

@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 — Six new mobility modules: wing/thruster/prop/pusher-prop/paddle-wheel/ship-screw
+
+**Not blocking.**
+
+**Mechanical design - a flat additive bonus, not a scaled-per-locomotor-type one.** The weight-capacity/thrust-coefficient systems from two sessions ago are keyed per LOCOMOTION type (the vehicle's primary movement paradigm). These six are ATTACHABLE modules (placed like any weapon, stackable, not a primary choice) - giving them the same per-type-scaled treatment would be overengineered for what's conceptually "one more part bolted on." Instead: `weight_capacity_bonus`/`thrust_bonus` catalog fields, added flatly to the vehicle's existing totals in `battle_unit.gd`'s `_recalculate_move_speed()`, scaled only by the module's own size (`child.scale.x * child.scale.z`, same convention as everything else in that loop) - not gated to only apply on airborne/naval hulls (no-hard-gating philosophy: a wing bolted onto a tank is silly but harmless, not blocked).
+
+**`ship_screw` vs. `naval_propeller`'s existing visual - genuinely different, not a rename.** Checked before building anything: `naval_propeller`'s existing visual (`_build_naval_propeller`) is a housing + 3 flat rectangular blades - a reasonable stern-mount silhouette, but not an actual pitched/twisted screw. `ship_screw` gets a real distinguishing feature: each blade is rotated around its own length axis (`blade.rotation.x = 0.5` before the radial sweep) for a genuine twisted-blade look, and it's a stackable MODULE rather than the primary locomotion choice - two real differences, not just a new name on the same mesh.
+
+**`propeller_prop`/`pusher_prop` share one mesh-building function, differing only by a `pusher: bool` flag** that flips which end of the local Z axis the hub/blades sit on - the "visually distinct placement/orientation" the task asked for, achieved with zero extra mount-system code (the module's own forward-facing convention already does the work; only the authored geometry's own facing direction changes).
+
+**Verified:** balance_report.gd flags several of these as "low value/cost, consider a buff or discount" - checked against the ALREADY-EXISTING `fixed_wing_engine` locomotion entry, which the same tool flags identically (0.20 vs. e.g. thruster's 0.23) - the tool's own header already notes locomotion/mobility value-per-cost is inherently hard to quantify (it doesn't weigh capacity/thrust bonuses at all, only hp/dps/heal_rate), so this is a known, already-accepted limitation for this whole category of item, not a new outlier needing a special pass. Mechanically verified with a real overload scenario: a wheeled unit loaded past its own capacity is genuinely slow (overload-penalized); the same unit with a `wing` attached shows a real, unclamped `move_speed` increase (capacity raised, penalty reduced) and the same with `thruster`/`propeller_prop` (raw thrust increase) - not just "a bigger number appeared somewhere," a real speed change traced through the actual formula. All 6 modules confirmed visually distinct up close. 70/70 tests green (1 new).
+
+---
+
 ## 2026-07-13 — Air/sea hull batch: sizing (heavy_cruiser_hull's near-black first render), and the airship's locomotion pairing
 
 **Not blocking.**

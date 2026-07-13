@@ -4,6 +4,30 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (cont'd) — Air/sea library expansion, part 2: 6 new mobility modules
+
+Second half of the air/sea batch: attachable mobility modules that hook into the weight-capacity/thrust systems built two sessions ago, rather than full locomotion types.
+
+### The 6 modules
+
+- **`wing`** - flat swept panel, no aerodynamic simulation (explicitly out of scope per the task) - grants a flat `weight_capacity_bonus` (150) to whatever it's attached to.
+- **`thruster`** - generic jet/rocket nacelle (no visible blades), `thrust_bonus` 60.
+- **`propeller_prop`** / **`pusher_prop`** - share one mesh-building function (`_build_propeller`, a `pusher: bool` flag flips which end of local Z the hub/blades face), same `thrust_bonus` (70) - the ask was a visually distinct orientation, not a different mechanic.
+- **`paddle_wheel`** - steamship-style side-mounted disc with radiating paddle blades, `thrust_bonus` 65.
+- **`ship_screw`** - a genuinely twisted/pitched blade propeller (each blade rotated about its own length axis before the radial sweep), `thrust_bonus` 75 - checked first whether this would just be `naval_propeller` under a different name; it isn't (naval_propeller's existing visual is flat blades, not pitched, and it's the primary locomotion choice rather than a stackable module).
+
+### Mechanical hook
+
+`battle_unit.gd`'s `_recalculate_move_speed()` now reads `weight_capacity_bonus`/`thrust_bonus` off ANY module (not just `category == "locomotion"`), scaled by the module's own size - a flat additive bonus on top of whatever the primary locomotion already provides, not gated to airborne/naval hulls only.
+
+### Verification
+
+New test proves a real, unclamped `move_speed` change from each bonus type using an intentionally overloaded baseline (so the effect isn't hidden behind the speed formula's clamp ceiling) - a `wing` measurably reduces the overload penalty, `thruster`/`propeller_prop` measurably add raw thrust. All 6 modules confirmed visually distinct up close. 70/70 tests green.
+
+Full reasoning (including the `ship_screw` vs. `naval_propeller` differentiation check) in `DECISIONS_NEEDED.md`. Screenshots: `progress_captures/2026-07-13/new_mobility_modules/`.
+
+---
+
 ## 2026-07-13 — Air/sea hull + locomotion library expansion, part 1: 4 new hulls, buoyant airship drive, amphibious screw drive
 
 New batch: expand the hull/module library with an air and sea theme. This entry covers the hull and locomotion half; modules (wings, thrusters, props, paddle wheels, ship screws) are a following entry.
