@@ -97,6 +97,7 @@ func _init():
 	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
 	success = success and await test_terrain_types_differentiate_locomotion()
 	success = success and await test_locomotion_tweaks_have_real_visual_and_stat_effects()
+	success = success and await test_ornithopter_wing_spawns_flaps_and_flies()
 
 	print("\n==============================================")
 	if success:
@@ -4761,4 +4762,94 @@ func test_locomotion_tweaks_have_real_visual_and_stat_effects() -> bool:
 		return false
 
 	print("  [PASS] Wheels axle-count, legs leg-count, and tracked_treads width tweaks all produce real spawned-geometry changes and real, correctly-directioned move_speed/terrain effects - not just sliders.")
+	return true
+
+func test_ornithopter_wing_spawns_flaps_and_flies() -> bool:
+	print("Running Test Suite: Ornithopter Wing - Real Placement, Flap Animation, and Hover-Capable Flight...")
+	var ModulePlacerScript = preload("res://scripts/module_placer.gd")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	# Traits: airborne (flies) but NOT fixed_wing - simple hover-arrival
+	# flight like helicopter_rotors/hover_engine/anti_grav, not the
+	# banking/minimum-airspeed paradigm. The mechanical similarity to
+	# existing flight locomotion Chris explicitly asked for; the visual/
+	# flavor (flapping motion, distinct silhouette) is the real differentiator.
+	var loco_traits = ModuleCatalog.get_traits("medium_hull", "ornithopter_wing")
+	if not ("airborne" in loco_traits):
+		print("  [FAIL] ornithopter_wing should carry the airborne trait")
+		return false
+	if "fixed_wing" in loco_traits:
+		print("  [FAIL] ornithopter_wing should NOT carry fixed_wing (simple hover flight, not banking/airspeed)")
+		return false
+
+	# Real placement via module_placer.gd: 2 wing instances (left/right),
+	# each with a WingPivot node (the flap-animation target).
+	var hull = StaticBody3D.new()
+	hull.name = "Hull"
+	var col = CollisionShape3D.new()
+	var col_box = BoxShape3D.new()
+	col_box.size = Vector3(4.0, 1.0, 6.0)
+	col.shape = col_box
+	col.name = "CollisionShape3D"
+	hull.add_child(col)
+	hull.set_meta("base_hull_size", Vector3(4.0, 1.0, 6.0))
+	hull.set_meta("hull_scale", Vector3(1, 1, 1))
+	hull.set_meta("type_id", "medium_hull")
+	root.add_child(hull)
+	await process_frame
+
+	var placer = Node3D.new()
+	placer.set_script(ModulePlacerScript)
+	placer.hull = hull
+	root.add_child(placer)
+	await process_frame
+
+	placer.update_locomotion("ornithopter_wing", {"size": 1.0, "count": 2})
+	await process_frame
+
+	var wing_instances = []
+	for child in hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "ornithopter_wing":
+			wing_instances.append(child)
+	if wing_instances.size() != 2:
+		print("  [FAIL] expected 2 ornithopter_wing instances (left/right), found ", wing_instances.size())
+		placer.queue_free(); hull.queue_free()
+		return false
+	for w in wing_instances:
+		if not w.has_node("WingPivot"):
+			print("  [FAIL] ornithopter_wing instance missing WingPivot (flap-animation target)")
+			placer.queue_free(); hull.queue_free()
+			return false
+
+	placer.queue_free()
+	await process_frame
+
+	# Flap animation: real oscillation over time, driven by battle_unit.gd's
+	# per-physics-tick update, not a static authored pose.
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.locomotion_type = "ornithopter_wing"
+	unit.locomotion_settings = {}
+	unit.is_flying = true
+	hull.get_parent().remove_child(hull)
+	unit.add_child(hull)
+	unit.hull_node = hull
+	unit.global_position = Vector3.ZERO
+	await process_frame
+
+	var pivot = wing_instances[0].get_node("WingPivot")
+	unit._physics_process(1.0 / 60.0)
+	var rot_a = pivot.rotation.x
+	await process_frame
+	await process_frame
+	await process_frame
+	unit._physics_process(1.0 / 60.0)
+	var rot_b = pivot.rotation.x
+	unit.queue_free()
+	if is_equal_approx(rot_a, rot_b):
+		print("  [FAIL] ornithopter wing flap animation isn't changing over time (rot_a=", rot_a, " rot_b=", rot_b, ")")
+		return false
+
+	print("  [PASS] ornithopter_wing spawns 2 real wing instances with a flap-animation pivot, carries the airborne-not-fixed_wing trait combo for simple hover-capable flight, and its flap motion genuinely oscillates over time.")
 	return true

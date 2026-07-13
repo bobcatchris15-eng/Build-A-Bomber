@@ -1019,6 +1019,8 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		_build_anti_grav(parent_node, base_size, base_color)
 	elif type_id == "fixed_wing_engine":
 		_build_fixed_wing_engine(parent_node, base_size, base_color)
+	elif type_id == "ornithopter_wing":
+		_build_ornithopter_wing(parent_node, base_size, base_color)
 	elif type_id == "naval_propeller":
 		_build_naval_propeller(parent_node, base_size, base_color)
 	elif type_id == "buoyant_envelope":
@@ -1293,6 +1295,74 @@ static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, ba
 	intake.rotation = Vector3(PI / 2.0, 0, 0)
 	intake.position = Vector3(0, 0, -base_size.z / 2.0 - 0.02)
 	parent_node.add_child(intake)
+
+
+static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	# Batch E task 3: flapping-wing flight, deliberately a different
+	# silhouette from both fixed_wing_engine (a cylindrical nacelle - no
+	# wing surface at all, just an engine pod) and the flat glider "wing"
+	# add-on module (_build_wing, above - a plain rectangular panel).
+	# A bat/pterosaur-style angled membrane: a small shoulder joint block
+	# close to the hull, then a tapered, dihedral-angled (raised) membrane
+	# with visible rib struts, tapering to a swept tip - reads as an
+	# organic wing shape even static, since there's no real flap animation
+	# baked into the mesh itself (the actual flapping motion is a runtime
+	# rotation in battle_unit.gd, not a rigged/animated mesh).
+	var shoulder = MeshInstance3D.new()
+	var shoulder_box = BoxMesh.new()
+	shoulder_box.size = Vector3(base_size.x * 0.35, base_size.y * 0.7, base_size.z * 0.35)
+	shoulder.mesh = shoulder_box
+	var joint_mat = StandardMaterial3D.new()
+	joint_mat.albedo_color = Color(0.3, 0.28, 0.25)
+	joint_mat.metallic = 0.4
+	joint_mat.roughness = 0.5
+	shoulder.material_override = joint_mat
+	parent_node.add_child(shoulder)
+
+	# The membrane itself lives under a pivot node so battle_unit.gd's
+	# flap animation has a single, clean rotation target (same pattern as
+	# helicopter_rotors spinning its own first child).
+	var pivot = Node3D.new()
+	pivot.name = "WingPivot"
+	pivot.position = Vector3(base_size.x * 0.2, base_size.y * 0.15, 0)
+	parent_node.add_child(pivot)
+
+	var membrane = MeshInstance3D.new()
+	var membrane_box = BoxMesh.new()
+	membrane_box.size = Vector3(base_size.x * 0.75, base_size.y * 0.15, base_size.z * 0.85)
+	membrane.mesh = membrane_box
+	var mem_mat = StandardMaterial3D.new()
+	mem_mat.albedo_color = base_color
+	mem_mat.metallic = 0.05
+	mem_mat.roughness = 0.85
+	membrane.material_override = mem_mat
+	membrane.position = Vector3(base_size.x * 0.42, 0, 0)
+	membrane.rotation = Vector3(0, 0, deg_to_rad(12.0))
+	pivot.add_child(membrane)
+
+	var tip = MeshInstance3D.new()
+	var tip_box = BoxMesh.new()
+	tip_box.size = Vector3(base_size.x * 0.35, base_size.y * 0.1, base_size.z * 0.45)
+	tip.mesh = tip_box
+	tip.material_override = mem_mat
+	tip.position = Vector3(base_size.x * 0.85, base_size.y * 0.12, -base_size.z * 0.1)
+	tip.rotation = Vector3(0, 0, deg_to_rad(20.0))
+	pivot.add_child(tip)
+
+	# Rib struts - thin diagonal bars across the membrane, the visual cue
+	# that reads as "wing bones under skin" rather than a solid panel.
+	for i in range(3):
+		var rib = MeshInstance3D.new()
+		var rib_box = BoxMesh.new()
+		rib_box.size = Vector3(base_size.x * 0.7, base_size.y * 0.04, base_size.z * 0.06)
+		rib.mesh = rib_box
+		var rib_mat = StandardMaterial3D.new()
+		rib_mat.albedo_color = Color(0.22, 0.17, 0.12)
+		rib.material_override = rib_mat
+		var z_pos = -base_size.z * 0.3 + i * base_size.z * 0.3
+		rib.position = Vector3(base_size.x * 0.42, base_size.y * 0.08, z_pos)
+		rib.rotation = Vector3(0, 0, deg_to_rad(12.0))
+		pivot.add_child(rib)
 
 
 static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color):

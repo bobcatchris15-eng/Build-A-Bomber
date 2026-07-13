@@ -703,6 +703,34 @@ static func get_catalog() -> Dictionary:
 			"color": Color.SLATE_BLUE,
 			"traits": ["airborne", "fixed_wing", "high_speed"]
 		},
+		"ornithopter_wing": {
+			"name": "Ornithopter Wing",
+			"category": "locomotion",
+			# Batch E task 3: a genuinely different airborne flavor -
+			# flapping motion instead of a spinning prop/jet (fixed_wing_
+			# engine) or a lighter-than-air gasbag (buoyant_envelope). Still
+			# no aerodynamic lift simulation (standing rule) - mechanically
+			# it's a simple hover-capable flier like helicopter_rotors/
+			# hover_engine/anti_grav (deliberately NOT given the "fixed_wing"
+			# trait, so it skips the banking/minimum-airspeed movement
+			# paradigm and just arrives-and-stops like the rest of that
+			# group) - the differentiation here is visual/flavor, per
+			# Chris's explicit framing of this task, not a new physics model.
+			"hp": 65.0,
+			"weight": 55.0,
+			"metal": 45,
+			"crystal": 25,
+			"dps": 0.0,
+			# Between helicopter_rotors' strict hover-lift budget (250) and
+			# fixed_wing_engine's generous airspeed-assisted one (380) - a
+			# flapping wing generates real lift like a fixed wing, but not
+			# as efficiently as one built for sustained forward flight.
+			"base_weight_capacity": 300.0,
+			"thrust_coefficient": 120.0,
+			"size": Vector3(1.6, 0.5, 2.2),
+			"color": Color(0.42, 0.32, 0.22),
+			"traits": ["airborne", "flapping_wing"]
+		},
 		"naval_propeller": {
 			"name": "Naval Propeller",
 			"category": "locomotion",

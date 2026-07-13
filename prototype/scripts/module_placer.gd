@@ -449,6 +449,7 @@ var default_locomotion_settings = {
 	"hover_engine": {},
 	"helicopter_rotors": {"size": 1.0, "count": 4},
 	"fixed_wing_engine": {"size": 1.0, "count": 2},
+	"ornithopter_wing": {"size": 1.0, "count": 2},
 	"naval_propeller": {"size": 1.0, "count": 2}
 }
 
@@ -709,6 +710,25 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				if engine.has_meta("module_data"):
 					engine.get_meta("module_data").scale_multiplier = engine.scale
 				spawned_wheels.append(engine)
+
+	elif type_id == "ornithopter_wing":
+		# Batch E task 3: mirrors fixed_wing_engine's wing-mounted-pod
+		# placement pattern (left/right, forward-biased), since the two
+		# share a mount shape even though the flight paradigm underneath
+		# differs (no "fixed_wing" trait - see the catalog entry).
+		var size = settings.get("size", 1.0)
+		var x_offset = (hull_size.x / 2.0 + 0.3 * size)
+		var y_offset = hull_size.y * 0.1
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
+			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.05)
+			var wing = _place_weapon(type_id, pos, side_normal)
+			if wing:
+				wing.scale = Vector3(1.0, size * hull_footprint_factor, size * hull_footprint_factor)
+				wing.rotation = Vector3.ZERO
+				if wing.has_meta("module_data"):
+					wing.get_meta("module_data").scale_multiplier = wing.scale
+				spawned_wheels.append(wing)
 
 	elif type_id == "naval_propeller":
 		# Stern-mounted propeller(s) - new movement paradigm (Traits B3):

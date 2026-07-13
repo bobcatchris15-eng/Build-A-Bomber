@@ -614,9 +614,20 @@ func _physics_process(delta):
 	# Spin rotors
 	if is_flying and is_instance_valid(hull_node):
 		for child in hull_node.get_children():
-			if child.has_meta("module_data") and child.get_meta("module_data").type_id == "helicopter_rotors":
+			if not child.has_meta("module_data"): continue
+			var child_type_id = child.get_meta("module_data").type_id
+			if child_type_id == "helicopter_rotors":
 				if child.get_child_count() > 0 and is_instance_valid(child.get_child(0)):
 					child.get_child(0).rotate_y(15.0 * delta)
+			elif child_type_id == "ornithopter_wing":
+				# Flapping motion: an oscillating (not continuous) rotation
+				# on the WingPivot node visual_builder.gd built the membrane/
+				# tip/ribs under - a sine wave rather than rotate_y's steady
+				# spin, since a wing flaps back and forth, it doesn't rotate
+				# through a full circle like a rotor blade.
+				var pivot = child.get_node_or_null("WingPivot")
+				if pivot:
+					pivot.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 8.0) * 0.35
 
 # Returns true when arrived. The "arrived" check always uses the real
 # final destination; the per-frame STEERING direction uses the navmesh's

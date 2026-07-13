@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 — Ornithopter wings: new locomotion type (not a variant/module), no "fixed_wing" trait
+
+**Not blocking.**
+
+Batch E item 5 left the "own locomotion type vs. flapping variant of an existing one" call to my judgment. Went with a **new locomotion type** (`ornithopter_wing`), not a variant flag on `fixed_wing_engine` or a new attachable module, because it needs to be a primary propulsion CHOICE a player picks (like `fixed_wing_engine`/`buoyant_envelope`/`helicopter_rotors` already are) rather than an add-on stacked on top of one - matching how the existing three airborne types are structured, and avoiding a special-case branch inside `fixed_wing_engine`'s already-complex banking/minimum-airspeed movement code.
+
+**Mechanically**, gave it `traits: ["airborne", "flapping_wing"]` - deliberately WITHOUT `"fixed_wing"`, so `battle_unit.gd`'s existing `is_fixed_wing` derivation makes it fall through to the same simple hover-arrival movement as `helicopter_rotors`/`hover_engine`/`anti_grav`, not fixed_wing_engine's banking/minimum-airspeed paradigm. This directly matches Chris's framing ("functions similarly to existing flight locomotion mechanically... a genuinely different visual/flavor propulsion option") - no new movement code needed, no aerodynamic simulation added (standing rule intact).
+
+**Visually**, a bat/pterosaur-style angled membrane (shoulder joint + dihedral-swept panel + tapered tip + rib struts) under a `WingPivot` node, deliberately different from both `fixed_wing_engine` (a plain cylindrical engine nacelle, no wing surface at all) and the flat rectangular `_build_wing` add-on module. `battle_unit.gd`'s per-physics-tick update oscillates `WingPivot.rotation.x` with a sine wave (real flapping motion, not a static pose or a continuous spin like the rotor animation) - verified this is a genuine over-time effect, not baked into the mesh, with a scripted before/after rotation check.
+
+base_weight_capacity (300) sits between `helicopter_rotors` (250, strict hover budget) and `fixed_wing_engine` (380, airspeed-assisted) - a flapping wing generates real lift like a fixed wing but less efficiently than one built for sustained forward flight.
+
+**Verified:** 76/76 tests green (1 new: real placement via `module_placer.gd` spawns exactly 2 instances each with a `WingPivot`, trait check confirms airborne-without-fixed_wing, and a scripted before/after rotation check proves the flap animation genuinely changes over time). Screenshots in `progress_captures/2026-07-13/ornithopter_wing/` - `flying_wing_hull` in particular reads as a distinctly bat/pterosaur-like silhouette, clearly differentiated from the other two flight types.
+
+---
+
 ## 2026-07-13 — Wheels/legs/treads tweaks: what was already real, what needed a genuine thrust-vs-capacity tradeoff, and the exact tradeoff shape chosen
 
 **Not blocking.**

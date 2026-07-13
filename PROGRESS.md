@@ -4,6 +4,22 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 — Batch E item 5: ornithopter_wing, a new flapping-flight locomotion type
+
+Chris's batch, item 5: flapping-wing flight, distinct from `fixed_wing_engine` (prop/jet) and `buoyant_envelope` (airship), same "no aerodynamic lift simulation" standing rule.
+
+### The build
+
+New locomotion type `ornithopter_wing` (judgment call: own type, not a variant/module - see DECISIONS_NEEDED.md), `traits: ["airborne", "flapping_wing"]` (no `"fixed_wing"`, so it reuses the existing simple hover-arrival movement `helicopter_rotors`/`hover_engine`/`anti_grav` already share - no new physics code needed). Bat/pterosaur-style angled membrane visual with a `WingPivot` node that `battle_unit.gd` oscillates each physics tick for a real flapping motion.
+
+**Verified:**
+- Full suite: **76/76 green** (1 new: real spawn count + trait check + scripted flap-oscillation check).
+- Visual: `progress_captures/2026-07-13/ornithopter_wing/` - reads as a distinctly bat-like silhouette on `flying_wing_hull`, clearly differentiated from the other two flight types.
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-13 — Batch E items 2-4: wheels/legs/treads tweaks now have real, tradeoff-shaped stat effects
 
 Chris's batch, items 2-4: axle-count, leg-count, and tread-width tweaks needed to actually move stats, not just geometry.
