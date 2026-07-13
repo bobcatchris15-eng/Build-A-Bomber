@@ -327,6 +327,44 @@ const MAPS = {
 			"harvester": Vector3(-6, 0.5, -48),
 		},
 	},
+
+	# Map variety batch: the SMALLER map (45 vs the existing 70-100 range),
+	# and a genuine 3-lane bottleneck - two parallel rock-wall obstacles
+	# split the map into west/center/east corridors, distinct from
+	# highland_chokepoint's 2-lane hill-flanking design (a hill in the
+	# middle vs. two walls with three gaps). Deliberately sparse on
+	# resources (7 nodes vs. the other maps' 9-14) - a tight, fast map is
+	# about early aggression along 3 real chokepoints, not a long
+	# economic buildup.
+	"close_quarters": {
+		"name": "Close Quarters",
+		"description": "A tight, small map - two rock walls split it into three lanes (west/center/east). No room for a long buildup; whoever controls the lanes controls the fight. A single contested resource sits exactly at the map's center.",
+		"map_half_extents": 45.0,
+		"ground_color": Color(0.24, 0.22, 0.2),
+		"water_areas": [],
+		"obstacles": [
+			{"center": Vector3(-12, 0, 0), "half_extents": Vector2(4, 18)},
+			{"center": Vector3(12, 0, 0), "half_extents": Vector2(4, 18)},
+		],
+		"elevation_zones": [],
+		"resource_nodes": [
+			{"position": Vector3(-25, 0, 22), "type": "metal", "amount": 1000},
+			{"position": Vector3(25, 0, 22), "type": "metal", "amount": 1000},
+			{"position": Vector3(0, 0, 15), "type": "crystal", "amount": 700},
+			{"position": Vector3(25, 0, -22), "type": "metal", "amount": 1000},
+			{"position": Vector3(-25, 0, -22), "type": "metal", "amount": 1000},
+			{"position": Vector3(0, 0, -15), "type": "crystal", "amount": 700},
+			{"position": Vector3(0, 0, 0), "type": "crystal", "amount": 900},
+		],
+		"player_start": {
+			"hq": Vector3(0, 0, 32), "factory": Vector3(-8, 0, 28), "refinery": Vector3(7, 0, 26),
+			"harvester": Vector3(5, 0.5, 22),
+		},
+		"enemy_start": {
+			"hq": Vector3(0, 0, -32), "factory": Vector3(8, 0, -28), "refinery": Vector3(-7, 0, -26),
+			"harvester": Vector3(-5, 0.5, -22),
+		},
+	},
 }
 
 const DEFAULT_MAP_ID: String = "lake_crossing"

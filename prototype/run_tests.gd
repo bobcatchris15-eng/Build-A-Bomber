@@ -97,6 +97,7 @@ func _init():
 	success = success and await test_map_coastal_strand_smoke()
 	success = success and await test_map_twin_bridges_smoke()
 	success = success and await test_map_twin_summits_smoke()
+	success = success and await test_map_close_quarters_smoke()
 	success = success and await test_weapon_traverse_and_range_differentiation()
 	success = success and await test_weight_vs_locomotion_capacity_penalty()
 	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
@@ -4545,6 +4546,13 @@ func test_map_twin_summits_smoke() -> bool:
 	var ok = await _smoke_test_map("twin_summits")
 	if ok:
 		print("  [PASS] Twin Summits: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
+	return ok
+
+func test_map_close_quarters_smoke() -> bool:
+	print("Running Test Suite: Map Smoke Test - Close Quarters (start points legal, resources reachable through the 3 lanes, HQs mutually reachable, economy loop works)...")
+	var ok = await _smoke_test_map("close_quarters")
+	if ok:
+		print("  [PASS] Close Quarters: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
 	return ok
 
 func test_weapon_traverse_and_range_differentiation() -> bool:
