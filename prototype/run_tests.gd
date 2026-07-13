@@ -95,6 +95,7 @@ func _init():
 	success = success and await test_map_lake_crossing_smoke()
 	success = success and await test_map_highland_chokepoint_smoke()
 	success = success and await test_map_coastal_strand_smoke()
+	success = success and await test_map_twin_bridges_smoke()
 	success = success and await test_weapon_traverse_and_range_differentiation()
 	success = success and await test_weight_vs_locomotion_capacity_penalty()
 	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
@@ -4529,6 +4530,13 @@ func test_map_coastal_strand_smoke() -> bool:
 	var ok = await _smoke_test_map("coastal_strand")
 	if ok:
 		print("  [PASS] Coastal Strand: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
+	return ok
+
+func test_map_twin_bridges_smoke() -> bool:
+	print("Running Test Suite: Map Smoke Test - Twin Bridges (start points legal, resources reachable, HQs mutually reachable via a real bridge crossing, economy loop works)...")
+	var ok = await _smoke_test_map("twin_bridges")
+	if ok:
+		print("  [PASS] Twin Bridges: legal start points, all resources reachable, HQs mutually reachable across the river via a bridge, factory production works.")
 	return ok
 
 func test_weapon_traverse_and_range_differentiation() -> bool:

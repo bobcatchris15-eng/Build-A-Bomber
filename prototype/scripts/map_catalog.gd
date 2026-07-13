@@ -231,6 +231,56 @@ const MAPS = {
 			"harvester": Vector3(-5, 0.5, -23),
 		},
 	},
+
+	# Map variety batch: the LARGER map (100 vs the existing 70-80 range),
+	# and the home for the new bridge mechanism. A river runs the map's
+	# full width (edge to edge - no way around it at all) with exactly two
+	# bridges carved through it, well apart from each other - a genuine
+	# multi-lane bottleneck (fight for either crossing, or split forces
+	# between both) rather than the single central chokepoint highland_
+	# chokepoint already covers. Economy stays entirely on each side of the
+	# river (no resource requires a crossing to reach), same convention
+	# lake_crossing/coastal_strand already use - the bridges matter for
+	# military movement, not harvesting.
+	"twin_bridges": {
+		"name": "Twin Bridges",
+		"description": "A river spans the entire map with exactly two bridges crossing it, well apart - fight for one crossing or split your force across both. The largest map in the roster; resources stay on your own bank, but taking a bridge means taking the fight to the enemy's.",
+		"map_half_extents": 100.0,
+		"ground_color": Color(0.22, 0.25, 0.2),
+		"water_areas": [
+			{"center": Vector3(0, 0, 0), "half_extents": Vector2(100, 10)},
+		],
+		"bridges": [
+			{"center": Vector3(-40, 0, 0), "half_extents": Vector2(7, 10)},
+			{"center": Vector3(40, 0, 0), "half_extents": Vector2(7, 10)},
+		],
+		"obstacles": [],
+		"elevation_zones": [],
+		"resource_nodes": [
+			{"position": Vector3(-25, 0, 60), "type": "metal", "amount": 1200},
+			{"position": Vector3(25, 0, 60), "type": "metal", "amount": 1200},
+			{"position": Vector3(-45, 0, 40), "type": "metal", "amount": 900},
+			{"position": Vector3(45, 0, 40), "type": "metal", "amount": 900},
+			{"position": Vector3(0, 0, 30), "type": "crystal", "amount": 800},
+			{"position": Vector3(-15, 0, 75), "type": "crystal", "amount": 700},
+			{"position": Vector3(15, 0, 75), "type": "crystal", "amount": 700},
+			{"position": Vector3(25, 0, -60), "type": "metal", "amount": 1200},
+			{"position": Vector3(-25, 0, -60), "type": "metal", "amount": 1200},
+			{"position": Vector3(45, 0, -40), "type": "metal", "amount": 900},
+			{"position": Vector3(-45, 0, -40), "type": "metal", "amount": 900},
+			{"position": Vector3(0, 0, -30), "type": "crystal", "amount": 800},
+			{"position": Vector3(15, 0, -75), "type": "crystal", "amount": 700},
+			{"position": Vector3(-15, 0, -75), "type": "crystal", "amount": 700},
+		],
+		"player_start": {
+			"hq": Vector3(0, 0, 80), "factory": Vector3(-12, 0, 74), "refinery": Vector3(10, 0, 72),
+			"harvester": Vector3(6, 0.5, 66),
+		},
+		"enemy_start": {
+			"hq": Vector3(0, 0, -80), "factory": Vector3(12, 0, -74), "refinery": Vector3(-10, 0, -72),
+			"harvester": Vector3(-6, 0.5, -66),
+		},
+	},
 }
 
 const DEFAULT_MAP_ID: String = "lake_crossing"
