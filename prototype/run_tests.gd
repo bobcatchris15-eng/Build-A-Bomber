@@ -99,6 +99,7 @@ func _init():
 	success = success and await test_locomotion_tweaks_have_real_visual_and_stat_effects()
 	success = success and await test_ornithopter_wing_spawns_flaps_and_flies()
 	success = success and await test_rhomboid_treads_spawns_and_differentiates_from_tracked_treads()
+	success = success and await test_omni_wheels_can_strafe_sideways_without_turning()
 
 	print("\n==============================================")
 	if success:
@@ -4982,4 +4983,97 @@ func test_rhomboid_treads_spawns_and_differentiates_from_tracked_treads() -> boo
 		return false
 
 	print("  [PASS] rhomboid_treads spawns 2 real full-loop instances distinct from tracked_treads, is genuinely slower but tougher (retains more speed under heavy load), and is genuinely better on marsh / worse on rocky terrain.")
+	return true
+
+func test_omni_wheels_can_strafe_sideways_without_turning() -> bool:
+	print("Running Test Suite: Omni Wheels - Real Lateral Strafing (Not Just Cosmetic)...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var controller_script = preload("res://scripts/fake_surface_controller.gd")
+
+	# Trait check first: omni_wheels should carry the "omni" trait that
+	# actually drives battle_unit.gd's is_omni derivation.
+	var loco_traits = ModuleCatalog.get_traits("medium_hull", "omni_wheels")
+	if not ("omni" in loco_traits):
+		print("  [FAIL] omni_wheels should carry the omni trait")
+		return false
+
+	var make_unit = func(loco_type: String) -> Node:
+		var controller = Node.new()
+		controller.set_script(controller_script)
+		controller.surface_type = ""
+		root.add_child(controller)
+
+		var unit = CharacterBody3D.new()
+		unit.set_script(BattleUnitScript)
+		controller.add_child(unit)
+		unit.locomotion_type = loco_type
+		unit.locomotion_settings = {}
+		unit.is_omni = (loco_type == "omni_wheels")
+		var fake_hull = Node3D.new()
+		unit.add_child(fake_hull)
+		unit.hull_node = fake_hull
+		var loco_data = ModuleData.new()
+		loco_data.type_id = loco_type
+		loco_data.category = "locomotion"
+		loco_data.base_weight = 80.0
+		var loco_child = Node3D.new()
+		loco_child.set_meta("module_data", loco_data)
+		fake_hull.add_child(loco_child)
+		unit._recalculate_move_speed()
+		unit.global_position = Vector3.ZERO
+		unit.global_rotation = Vector3.ZERO
+		return unit
+
+	var omni_unit = make_unit.call("omni_wheels")
+	var wheels_unit = make_unit.call("wheels")
+
+	# Sideways destination: directly along +X, perpendicular to both units'
+	# initial forward (-Z, the default CharacterBody3D orientation) - a
+	# normal wheeled unit has to turn ~90 degrees before it can make real
+	# progress toward this; an omni unit structurally shouldn't need to.
+	var sideways_target = Vector3(1000, 0, 0)
+	omni_unit.order_move(sideways_target)
+	wheels_unit.order_move(sideways_target)
+
+	var initial_rot_y = omni_unit.rotation.y
+	for i in range(60):
+		omni_unit._physics_process(1.0 / 60.0)
+		omni_unit.move_and_slide()
+		wheels_unit._physics_process(1.0 / 60.0)
+		wheels_unit.move_and_slide()
+
+	var omni_rot_change = abs(wrapf(omni_unit.rotation.y - initial_rot_y, -PI, PI))
+	var wheels_rot_change = abs(wrapf(wheels_unit.rotation.y - initial_rot_y, -PI, PI))
+
+	var omni_controller = omni_unit.get_parent()
+	var wheels_controller = wheels_unit.get_parent()
+
+	if omni_rot_change > 0.05:
+		print("  [FAIL] omni_wheels unit rotated while strafing sideways (rot_change=", omni_rot_change, ") - should hold a fixed facing")
+		omni_controller.queue_free(); wheels_controller.queue_free()
+		return false
+
+	if wheels_rot_change < 0.3:
+		print("  [FAIL] plain wheels unit should have turned substantially to face the sideways destination (rot_change=", wheels_rot_change, ") - the contrast case isn't behaving as expected")
+		omni_controller.queue_free(); wheels_controller.queue_free()
+		return false
+
+	if omni_unit.global_position.x < 5.0:
+		print("  [FAIL] omni_wheels unit should have made real lateral progress toward the sideways destination (x=", omni_unit.global_position.x, ")")
+		omni_controller.queue_free(); wheels_controller.queue_free()
+		return false
+
+	# The actual comparative claim: having spent zero ticks turning, the
+	# omni unit should out-pace the plain wheeled unit toward a purely
+	# sideways target over the same tick count, since the wheeled unit
+	# burns part of those ticks rotating before it can move efficiently
+	# toward it.
+	if omni_unit.global_position.x <= wheels_unit.global_position.x:
+		print("  [FAIL] omni_wheels should out-pace plain wheels toward a purely-sideways target (it doesn't need to turn first). omni_x=", omni_unit.global_position.x, " wheels_x=", wheels_unit.global_position.x)
+		omni_controller.queue_free(); wheels_controller.queue_free()
+		return false
+
+	omni_controller.queue_free()
+	wheels_controller.queue_free()
+	print("  [PASS] omni_wheels unit genuinely strafes sideways while holding a fixed facing (near-zero rotation change), out-pacing a plain wheeled unit toward the same sideways destination since it doesn't have to turn first.")
 	return true

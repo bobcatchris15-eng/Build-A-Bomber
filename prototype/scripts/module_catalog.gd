@@ -610,6 +610,29 @@ static func get_catalog() -> Dictionary:
 			"color": Color.BLACK,
 			"traits": ["ground_contact", "high_speed"]
 		},
+		"omni_wheels": {
+			"name": "Omni Wheels",
+			"category": "locomotion",
+			# Batch E task 5: real mecanum/omni-wheel locomotion - the
+			# "omni" trait (battle_unit.gd's is_omni) is what actually
+			# unlocks genuine lateral/strafing movement (see
+			# _steer_towards()'s is_omni branch), not just a new mesh.
+			# Stat-wise: the extra rollers/mechanism that make the
+			# sideways translation possible cost some raw efficiency and
+			# ruggedness relative to plain wheels - slightly less thrust,
+			# slightly less weight capacity - the strafing capability
+			# itself is the actual upside, not a stat advantage.
+			"hp": 90.0,
+			"weight": 55.0,
+			"metal": 25,
+			"crystal": 10,
+			"dps": 0.0,
+			"base_weight_capacity": 300.0,
+			"thrust_coefficient": 130.0,
+			"size": Vector3(0.8, 0.8, 0.8),
+			"color": Color(0.15, 0.15, 0.18),
+			"traits": ["ground_contact", "omni"]
+		},
 		"tracked_treads": {
 			"name": "Tracked Treads",
 			"category": "locomotion",
@@ -1400,10 +1423,16 @@ const TERRAIN_SPEED_MULTIPLIERS = {
 	# less nimble scrambling over rock than tracked_treads' shorter,
 	# lower-profile track run). Its baseline slowness is already captured
 	# by its below-default thrust_coefficient, not by this table.
-	"marsh": {"wheels": 0.25, "tracked_treads": 0.45, "rhomboid_treads": 0.55, "legs": 0.6, "screw_drive": 1.1},
-	"rocky": {"wheels": 0.35, "tracked_treads": 0.75, "rhomboid_treads": 0.65, "legs": 1.1, "screw_drive": 0.5},
-	"snow_mud": {"wheels": 0.2, "tracked_treads": 0.8, "rhomboid_treads": 0.88, "legs": 0.75, "screw_drive": 0.7},
-	"sand": {"wheels": 0.3, "tracked_treads": 0.85, "rhomboid_treads": 0.85, "legs": 0.8, "screw_drive": 0.6},
+	# omni_wheels: still fundamentally wheels (rolling contact, not
+	# tracks/legs), and the diagonal rollers that make strafing possible
+	# have an even smaller/harder contact patch than a plain tire - worse
+	# than wheels across the board, not just a sideways-move sidegrade.
+	# The strafing capability itself is the payoff, not off-road terrain
+	# performance.
+	"marsh": {"wheels": 0.25, "omni_wheels": 0.18, "tracked_treads": 0.45, "rhomboid_treads": 0.55, "legs": 0.6, "screw_drive": 1.1},
+	"rocky": {"wheels": 0.35, "omni_wheels": 0.28, "tracked_treads": 0.75, "rhomboid_treads": 0.65, "legs": 1.1, "screw_drive": 0.5},
+	"snow_mud": {"wheels": 0.2, "omni_wheels": 0.15, "tracked_treads": 0.8, "rhomboid_treads": 0.88, "legs": 0.75, "screw_drive": 0.7},
+	"sand": {"wheels": 0.3, "omni_wheels": 0.22, "tracked_treads": 0.85, "rhomboid_treads": 0.85, "legs": 0.8, "screw_drive": 0.6},
 }
 
 static func get_terrain_speed_multiplier(locomotion_type_id: String, surface_type: String) -> float:

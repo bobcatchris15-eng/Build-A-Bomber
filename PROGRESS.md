@@ -4,6 +4,24 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 — Batch E item 5 (final): omni_wheels with real lateral strafing - Batch E complete
+
+Chris's batch, item 5 (last item): real mecanum/omni-wheel locomotion - genuine sideways movement, not just a new mesh, requiring real steering code changes.
+
+### The build
+
+New locomotion type `omni_wheels` (mecanum-style wheel visual with diagonal rollers) plus a new `is_omni` flag/trait that gates a branch in `battle_unit.gd`'s `_steer_towards()`: every other locomotion type couples facing to travel direction (rotates the hull, then moves along its own forward); the omni branch sets velocity directly toward the destination and never touches hull rotation - reusing the decoupled-rotation-vs-velocity pattern `_kite_reposition()` already established for facet-aware kiting. Stat-wise it's a tradeoff, not an upgrade: lower thrust/capacity than plain wheels and a worse terrain-multiplier row across the board - the strafing capability is the payoff.
+
+**Verified:**
+- Full suite: **78/78 green** (1 new: spawns an omni unit and a plain wheels unit side by side, orders both to a purely-sideways destination, and proves the omni unit holds its facing (<0.05 rad rotation change) while genuinely out-pacing the wheeled unit (which has to turn first) toward the same target over the same tick count - a real behavioral proof, not a visual-only check).
+- Visual: `progress_captures/2026-07-13/omni_wheels/` - diagonal roller ring distinct from a plain wheel_hub.
+
+**Batch E is now complete** - all 5 items (hull-relative locomotion scaling, wheels/legs/treads tweak mechanics, ornithopter wings, rhomboid treads, omniwheels) shipped and verified. Final wrap-up (full suite re-run, doc review) next.
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-13 — Batch E item 4: rhomboid_treads, a new MkIV full-body-loop track type
 
 Chris's batch, item 4: WWI Mark IV-style tank track where the loop wraps up and over the entire body, not just flanking the bottom sides like `tracked_treads`.

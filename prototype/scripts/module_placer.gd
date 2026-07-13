@@ -445,6 +445,7 @@ func _place_hull_from_ui(type_id: String):
 
 var default_locomotion_settings = {
 	"wheels": {"size": 1.0, "count": 4},
+	"omni_wheels": {"size": 1.0, "count": 4},
 	"tracked_treads": {"width": 1.0},
 	"rhomboid_treads": {"width": 1.0},
 	"hover_engine": {},
@@ -583,7 +584,38 @@ func update_locomotion(type_id: String, settings: Dictionary):
 					if wheel.has_meta("module_data"):
 						wheel.get_meta("module_data").scale_multiplier = wheel.scale
 					spawned_wheels.append(wheel)
-					
+
+	elif type_id == "omni_wheels":
+		# Batch E task 5: same axle-pair mounting pattern as wheels - the
+		# real mechanical difference (genuine strafing) lives entirely in
+		# battle_unit.gd's steering code via the "omni" trait, not in how
+		# these are placed.
+		var size = settings.get("size", 1.0)
+		var count = settings.get("count", 4)
+		if count < 2: count = 2
+		if count % 2 != 0: count += 1
+		var half_count = int(count / 2)
+
+		var x_offset = hull_size.x / 2.0 - (0.4 * size)
+		var z_limit = hull_size.z * 0.35
+
+		for side in [-1.0, 1.0]:
+			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
+			for i in range(half_count):
+				var z_pos = 0.0
+				if half_count > 1:
+					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
+
+				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias, z_pos)
+				var wheel = _place_weapon(type_id, pos, Vector3.DOWN)
+				if wheel:
+					wheel.scale = Vector3(size, size, size) * hull_height_factor
+					wheel.position = Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias - (0.8 * size * hull_height_factor), z_pos)
+					wheel.rotation = Vector3.ZERO
+					if wheel.has_meta("module_data"):
+						wheel.get_meta("module_data").scale_multiplier = wheel.scale
+					spawned_wheels.append(wheel)
+
 	elif type_id == "tracked_treads":
 		var width = settings.get("width", 1.0)
 		
@@ -821,7 +853,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 
 	# Adjust hull Y position in the editor to make wheels rest on floor
 	var wheels_offset = 0.0
-	if type_id == "wheels":
+	if type_id == "wheels" or type_id == "omni_wheels":
 		var size = settings.get("size", 1.0)
 		wheels_offset = 0.8 * size * hull_height_factor
 	elif type_id == "legs":

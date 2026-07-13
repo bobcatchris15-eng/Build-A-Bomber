@@ -1007,6 +1007,8 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 	# Locomotion & remaining categories, split out for readability
 	if type_id == "wheels":
 		_build_wheels(parent_node, base_size)
+	elif type_id == "omni_wheels":
+		_build_omni_wheels(parent_node, base_size)
 	elif type_id == "tracked_treads":
 		_build_tracked_treads(parent_node, base_size, base_color)
 	elif type_id == "rhomboid_treads":
@@ -1067,6 +1069,54 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3):
 	hub.position = Vector3(0, base_size.y / 2.0, 0)
 	hub.rotation = Vector3(0, 0, PI / 2)
 	parent_node.add_child(hub)
+
+
+static func _build_omni_wheels(parent_node: Node3D, base_size: Vector3):
+	# Batch E task 5: mecanum-style wheel - a real mecanum wheel's tell is
+	# a ring of small diagonal rollers around its circumference (that's
+	# literally what lets it push sideways), so this is deliberately built
+	# to look different from a plain wheel_hub, not just a recolor.
+	var hub = MeshInstance3D.new()
+	var hub_cyl = CylinderMesh.new()
+	hub_cyl.top_radius = base_size.y * 0.42
+	hub_cyl.bottom_radius = base_size.y * 0.42
+	hub_cyl.height = base_size.x * 0.55
+	hub.mesh = hub_cyl
+	var hub_mat = StandardMaterial3D.new()
+	hub_mat.albedo_color = Color(0.15, 0.15, 0.18)
+	hub_mat.metallic = 0.6
+	hub_mat.roughness = 0.4
+	hub.material_override = hub_mat
+	hub.position = Vector3(0, base_size.y / 2.0, 0)
+	hub.rotation = Vector3(0, 0, PI / 2)
+	parent_node.add_child(hub)
+
+	# Ring of small diagonal rollers around the hub's circumference - each
+	# one angled ~45 degrees to its own tangent, the actual mecanum-wheel
+	# look.
+	var roller_count = 9
+	var roller_mat = StandardMaterial3D.new()
+	roller_mat.albedo_color = Color.SILVER
+	roller_mat.metallic = 0.7
+	roller_mat.roughness = 0.3
+	for i in range(roller_count):
+		var angle = TAU * float(i) / float(roller_count)
+		var y = sin(angle) * base_size.y * 0.4
+		var z = cos(angle) * base_size.y * 0.4
+		var roller = MeshInstance3D.new()
+		var roller_cyl = CylinderMesh.new()
+		roller_cyl.top_radius = base_size.y * 0.12
+		roller_cyl.bottom_radius = base_size.y * 0.12
+		roller_cyl.height = base_size.y * 0.28
+		roller.mesh = roller_cyl
+		roller.material_override = roller_mat
+		roller.position = Vector3(0, base_size.y / 2.0 + y, z)
+		# Tangent-ish orientation (angle offset by 45deg) plus the tilt
+		# that makes each roller's own axis diagonal to the wheel's
+		# rotation axis - the actual mechanical trick a real mecanum
+		# wheel uses, reproduced here as a static visual cue.
+		roller.rotation = Vector3(angle, 0, deg_to_rad(45.0))
+		parent_node.add_child(roller)
 
 
 static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color):

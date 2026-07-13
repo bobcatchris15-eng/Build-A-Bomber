@@ -572,6 +572,13 @@ func on_module_selected(module: Node3D):
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 		count_slider.value = settings.get("count", 4)
+	elif type_id == "omni_wheels":
+		size_label.text = "Wheel Size:"
+		count_container.visible = true
+		size_slider.min_value = 0.5
+		size_slider.max_value = 2.5
+		size_slider.value = settings.get("size", 1.0)
+		count_slider.value = settings.get("count", 4)
 	elif type_id == "tracked_treads":
 		size_label.text = "Tread Width:"
 		count_container.visible = false
@@ -633,6 +640,11 @@ func _apply_tweaks():
 	var new_settings = {}
 	
 	if type_id == "wheels":
+		new_settings = {
+			"size": size_slider.value,
+			"count": int(count_slider.value)
+		}
+	elif type_id == "omni_wheels":
 		new_settings = {
 			"size": size_slider.value,
 			"count": int(count_slider.value)

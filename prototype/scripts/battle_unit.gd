@@ -74,6 +74,13 @@ var is_naval: bool = false
 # folded into is_naval: it's not buoyant/surface-locked like a naval hull,
 # it drives normally on land and just isn't blocked by water.
 var is_amphibious: bool = false
+# Batch E task 5: real mecanum/omni-wheel locomotion - unlike every other
+# ground locomotion type, an omni unit can translate in ANY direction
+# without first rotating to face it (see _steer_towards()'s is_omni
+# branch, which decouples velocity direction from hull facing entirely -
+# every other ground type couples the two, always turning to face its
+# direction of travel).
+var is_omni: bool = false
 # Terrain variety task: hull-level draught (ModuleCatalog.get_hull_draught()),
 # only meaningful for is_naval units - see _setup_navigation() for where
 # this routes a deep-draught hull onto deep_water_map instead of
@@ -131,6 +138,7 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	is_fixed_wing = "fixed_wing" in unit_traits
 	is_naval = "naval" in unit_traits
 	is_amphibious = "amphibious" in unit_traits
+	is_omni = "omni" in unit_traits
 	hull_draught = ModuleCatalog.get_hull_draught(hull_type_for_traits)
 	if is_flying:
 		target_altitude = 4.0
@@ -325,7 +333,7 @@ func _recalculate_move_speed():
 				# of boosting both together.
 				var thrust_contrib = 1.0
 				var capacity_contrib = 1.0
-				if locomotion_type == "wheels" or locomotion_type == "helicopter_rotors":
+				if locomotion_type == "wheels" or locomotion_type == "omni_wheels" or locomotion_type == "helicopter_rotors":
 					var c = float(locomotion_settings.get("count", 4)) / 4.0
 					thrust_contrib = c
 					capacity_contrib = c
@@ -654,6 +662,22 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 			candidate.y = 0.0
 			if candidate.length() > 0.05:
 				steer_diff = candidate
+
+	if is_omni:
+		# The real mechanical difference (task 5): every other ground type
+		# rotates the hull to face its travel direction, then moves along
+		# its own local forward - facing and velocity direction are the
+		# same vector. An omni unit's rollers let it push in any direction
+		# regardless of which way the chassis is pointed, so velocity is
+		# set directly from the (nav-agent-adjusted) direction to the
+		# destination and the hull's rotation is left untouched entirely -
+		# it can drive straight sideways while still facing whatever way
+		# it already was, which a normal wheeled/tracked/legged unit
+		# structurally cannot do.
+		var omni_dir = steer_diff.normalized()
+		velocity.x = omni_dir.x * move_speed * terrain_speed_multiplier
+		velocity.z = omni_dir.z * move_speed * terrain_speed_multiplier
+		return false
 
 	var target_basis = Basis.looking_at(steer_diff, Vector3.UP)
 	global_transform.basis = global_transform.basis.slerp(target_basis, rotate_speed * delta).orthonormalized()

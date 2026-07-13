@@ -4,6 +4,24 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 — Omniwheels: decoupling velocity from facing at the `_steer_towards()` level, and what "facing a fixed direction" means for a MOVE order
+
+**Not blocking.**
+
+Batch E item 5 (final item), the one Chris flagged as needing real steering code changes, not just a new mesh. Found the right seam by first reading `_kite_reposition()` (built earlier this project for facet-aware kiting) - it ALREADY rotates the hull toward one direction while setting velocity toward a completely different one (retreat direction vs. best-facet-facing direction), which is exactly the decoupling primitive omni movement needed. Reused that pattern rather than inventing a new one.
+
+**The change:** a new `is_omni` flag (derived from a new `"omni"` trait, same mechanism as `is_flying`/`is_naval`/etc.) gates a branch inside `_steer_towards()` - every other ground/hover locomotion type slerps the hull's rotation toward the travel direction and then moves along its own local forward (facing and velocity are the same vector, structurally coupled). The omni branch instead sets velocity directly from the raw (nav-agent-adjusted) direction to the destination and **never touches hull rotation at all**.
+
+**What "facing a fixed direction" means here:** for a plain MOVE order, an omni unit holds whatever heading it already had before the order was given - it doesn't rotate to face the destination, and it doesn't rotate to face the direction of travel either. This is the literal real-world mecanum behavior (a warehouse robot can strafe sideways down an aisle while its front-mounted sensor keeps facing forward) and matches Chris's test description exactly ("facing a fixed direction"). ATTACK-order kiting/flanking logic was left untouched - an omni unit in combat still uses the existing facet-aware kiting system, which already has its own (different) facing logic; this pass only changed plain-MOVE steering, which was the explicit ask.
+
+**Stat/terrain tradeoff, not a pure upgrade:** `omni_wheels` gets a below-default `thrust_coefficient` (130 vs 150) and lower `base_weight_capacity` (300 vs wheels' 350), plus a worse terrain-multiplier row than plain `wheels` across all 4 surface types (real mecanum wheels have a smaller/harder contact patch from the diagonal rollers, and are notoriously bad off-road) - the strafing capability itself is the payoff, not an all-around stat upgrade over plain wheels.
+
+**Verified mechanically, not just visually** (per Chris's explicit ask): a scripted test spawns an omni unit and a plain wheels unit side by side, orders both to a destination directly perpendicular to their shared starting facing, runs 60 physics ticks, and asserts (a) the omni unit's rotation barely changes (<0.05 rad) while the plain wheels unit's does substantially (>0.3 rad - it has to turn to face the target), (b) the omni unit makes real measured lateral progress, and (c) the omni unit actually outpaces the wheeled unit toward that sideways target over the same tick count, since the wheeled unit burns part of its ticks turning. All three passed on the real steering code path, not a mocked one.
+
+**Verified:** 78/78 tests green (1 new, the strafing-comparison test above). Mecanum-look visual (a ring of diagonal rollers around the hub, distinct from a plain wheel_hub) in `progress_captures/2026-07-13/omni_wheels/`.
+
+---
+
 ## 2026-07-13 — MkIV rhomboid treads: procedural loop geometry, mount point, and a genuine tougher-but-slower/terrain tradeoff
 
 **Not blocking.**
