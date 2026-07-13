@@ -79,10 +79,12 @@ func _init():
 	success = success and await test_fog_hidden_excluded_from_targeting()
 	success = success and await test_navmesh_routes_around_the_lake()
 	success = success and await test_ground_and_naval_units_use_different_nav_maps()
+	success = success and await test_hull_draught_routes_to_correct_water_nav_map()
 	success = success and await test_unit_order_move_actually_navigates_around_the_lake()
 	success = success and await test_terrain_builder_pure_functions()
 	success = success and await test_terrain_builder_navmesh_ramp_connects()
 	success = success and await test_amphibious_navmesh_crosses_water()
+	success = success and await test_deep_water_navmesh_blocks_shallow_draught_hulls()
 	success = success and await test_elevation_combat_and_vision_bonus()
 	success = success and await test_build_placement_rejects_water_and_obstacles()
 	success = success and await test_map_open_plains_smoke()
@@ -92,6 +94,7 @@ func _init():
 	success = success and await test_weapon_traverse_and_range_differentiation()
 	success = success and await test_weight_vs_locomotion_capacity_penalty()
 	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
+	success = success and await test_terrain_types_differentiate_locomotion()
 
 	print("\n==============================================")
 	if success:
@@ -867,6 +870,98 @@ func test_new_locomotion_types_spawn_and_differentiate() -> bool:
 		return false
 
 	print("  [PASS] buoyant_envelope and screw_drive both spawn real matched pairs via update_locomotion(), and their catalog stats/traits reflect their real-world distinct character.")
+	return true
+
+func test_terrain_types_differentiate_locomotion() -> bool:
+	print("Running Test Suite: Terrain Variety - marsh/rocky/snow_mud/sand Genuinely Differentiate Locomotor Types...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	# Fake controller: only get_surface_type_at() exists (no get_ground_nav_map),
+	# so _setup_navigation() never creates a real nav_agent and _steer_towards()
+	# falls back to plain direct-line steering - a real, deterministic distance
+	# per fixed physics tick count, driven by the exact same _recalculate_
+	# terrain_speed_multiplier() -> _steer_towards() code path a real match uses.
+	var controller_script = preload("res://scripts/fake_surface_controller.gd")
+
+	var measure = func(locomotion_type_id: String, surface_type: String) -> float:
+		var controller = Node.new()
+		controller.set_script(controller_script)
+		controller.surface_type = surface_type
+		root.add_child(controller)
+
+		var unit = CharacterBody3D.new()
+		unit.set_script(BattleUnitScript)
+		controller.add_child(unit)
+		unit.locomotion_type = locomotion_type_id
+		unit.locomotion_settings = {}
+		var fake_hull = Node3D.new()
+		unit.add_child(fake_hull)
+		unit.hull_node = fake_hull
+
+		var loco_data = ModuleData.new()
+		loco_data.type_id = locomotion_type_id
+		loco_data.category = "locomotion"
+		loco_data.base_weight = 80.0
+		var loco_child = Node3D.new()
+		loco_child.set_meta("module_data", loco_data)
+		fake_hull.add_child(loco_child)
+		unit._recalculate_move_speed()
+
+		unit.global_position = Vector3.ZERO
+		unit._setup_navigation()
+		unit.order_move(Vector3(0, 0, -1000))
+		# Matches test_unit_order_move_actually_navigates_around_the_lake's
+		# established pattern: CharacterBody3D.move_and_slide() reads the
+		# real engine physics delta internally regardless of what's passed
+		# to _physics_process(), so an explicit move_and_slide() call after
+		# each manual tick (with delta matching the real physics_fps) is
+		# needed for a synthetic, non-scene-tree-driven loop to produce
+		# real, comparable distances.
+		for i in range(140):
+			unit._physics_process(1.0 / 60.0)
+			unit.move_and_slide()
+		var dist = unit.global_position.length()
+		controller.queue_free()
+		return dist
+
+	# marsh: screw_drive should outpace wheels by a wide margin (favored vs.
+	# punished), not just a marginal difference.
+	var marsh_wheels = measure.call("wheels", "marsh")
+	var marsh_screw = measure.call("screw_drive", "marsh")
+	if marsh_screw <= marsh_wheels * 1.5:
+		print("  [FAIL] marsh: screw_drive should cross noticeably faster than wheels. wheels=", marsh_wheels, " screw_drive=", marsh_screw)
+		return false
+
+	# rocky: legs should outpace wheels.
+	var rocky_wheels = measure.call("wheels", "rocky")
+	var rocky_legs = measure.call("legs", "rocky")
+	if rocky_legs <= rocky_wheels * 1.5:
+		print("  [FAIL] rocky: legs should cross noticeably faster than wheels. wheels=", rocky_wheels, " legs=", rocky_legs)
+		return false
+
+	# snow_mud: tracked_treads should outpace wheels hard.
+	var mud_wheels = measure.call("wheels", "snow_mud")
+	var mud_treads = measure.call("tracked_treads", "snow_mud")
+	if mud_treads <= mud_wheels * 2.0:
+		print("  [FAIL] snow_mud: tracked_treads should cross far faster than wheels (wheels bog down hard). wheels=", mud_wheels, " treads=", mud_treads)
+		return false
+
+	# sand: tracked_treads should outpace wheels.
+	var sand_wheels = measure.call("wheels", "sand")
+	var sand_treads = measure.call("tracked_treads", "sand")
+	if sand_treads <= sand_wheels * 1.5:
+		print("  [FAIL] sand: tracked_treads should cross noticeably faster than wheels. wheels=", sand_wheels, " treads=", sand_treads)
+		return false
+
+	# Sanity: plain ground (no surface_type) should be unaffected by any of
+	# this - same locomotion type covers the same distance on "" as it does
+	# with a 1.0 multiplier explicitly, proving the default fallback works.
+	var plain_wheels = measure.call("wheels", "")
+	if abs(plain_wheels - marsh_wheels) < 0.01:
+		print("  [FAIL] plain ground and marsh gave wheels the identical distance (", plain_wheels, ") - the multiplier isn't actually being applied.")
+		return false
+
+	print("  [PASS] marsh favors screw_drive over wheels, rocky favors legs over wheels, snow_mud and sand both favor tracked_treads over wheels - all measured via real physics-tick movement, not just catalog numbers.")
 	return true
 
 func test_undo_redo() -> bool:
@@ -3629,6 +3724,57 @@ func test_ground_and_naval_units_use_different_nav_maps() -> bool:
 	print("  [PASS] Ground units path on the ground map, naval units path on the water map, flying units skip navigation entirely.")
 	return true
 
+func test_hull_draught_routes_to_correct_water_nav_map() -> bool:
+	print("Running Test Suite: Hull Draught - Deep vs. Shallow Naval Hulls Route To The Correct Nav Map...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var bp_manager = skirmish.bp_manager
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var shallow_bp = {
+		"version": 1.0, "hull_type": "small_boat_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "naval_propeller", "settings": {"size": 1.0, "count": 2}},
+		"modules": []
+	}
+	var shallow_unit = CharacterBody3D.new()
+	shallow_unit.set_script(BattleUnitScript)
+	skirmish.add_child(shallow_unit)
+	shallow_unit.setup(shallow_bp, 0, bp_manager)
+	if shallow_unit.nav_agent.get_navigation_map() != skirmish.water_nav_map:
+		print("  [FAIL] small_boat_hull (shallow draught) should route to the plain water map, which still includes shallow water.")
+		skirmish.queue_free()
+		return false
+
+	var deep_bp = {
+		"version": 1.0, "hull_type": "heavy_cruiser_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "naval_propeller", "settings": {"size": 1.0, "count": 2}},
+		"modules": []
+	}
+	var deep_unit = CharacterBody3D.new()
+	deep_unit.set_script(BattleUnitScript)
+	skirmish.add_child(deep_unit)
+	deep_unit.setup(deep_bp, 0, bp_manager)
+	if deep_unit.nav_agent.get_navigation_map() != skirmish.deep_water_nav_map:
+		print("  [FAIL] heavy_cruiser_hull (deep draught) should route to deep_water_nav_map, not the plain water map that still includes shallow water.")
+		skirmish.queue_free()
+		return false
+	if deep_unit.hull_draught <= ModuleCatalog.SHALLOW_WATER_DRAUGHT_THRESHOLD:
+		print("  [FAIL] heavy_cruiser_hull's own draught stat should exceed the shallow-water threshold. draught=", deep_unit.hull_draught, " threshold=", ModuleCatalog.SHALLOW_WATER_DRAUGHT_THRESHOLD)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] small_boat_hull (shallow draught) routes to the shallow-capable water map; heavy_cruiser_hull (deep draught) routes to the deep-only map that excludes shallow water entirely.")
+	return true
+
 # End-to-end check that a unit given a real order_move() actually translates
 # and actually detours around the lake, not just that the underlying navmesh
 # query and nav_agent assignment are individually correct in isolation. This
@@ -3765,14 +3911,73 @@ func test_terrain_builder_navmesh_ramp_connects() -> bool:
 		if nav.water_region.is_valid():
 			NavigationServer3D.free_rid(nav.water_region)
 		NavigationServer3D.free_rid(nav.amphibious_region)
+		if nav.deep_water_region.is_valid():
+			NavigationServer3D.free_rid(nav.deep_water_region)
 		NavigationServer3D.free_rid(nav.ground_map)
 		NavigationServer3D.free_rid(nav.water_map)
 		NavigationServer3D.free_rid(nav.amphibious_map)
+		NavigationServer3D.free_rid(nav.deep_water_map)
 		if path.size() < 2 or max_y < 5.0:
 			print("  [FAIL] ramp_side='", d.side, "' should produce a real path reaching the plateau (max Y >= 5.0), got ", path.size(), " points, max_y=", max_y)
 			return false
 
 	print("  [PASS] All 4 ramp directions (north/south/east/west) produce a real connected path from ground level up to the plateau.")
+	return true
+
+func test_deep_water_navmesh_blocks_shallow_draught_hulls() -> bool:
+	print("Running Test Suite: Hull Draught - Shallow Water Genuinely Blocks Deep-Draught Naval Hulls...")
+	# A shallow_water_areas strip spans the FULL width of the lake, splitting
+	# it into north/south halves - a deep-draught hull has no way around it
+	# (this IS the entire body of water), so deep_water_map should have NO
+	# connection between the two halves at all, while water_map (which
+	# still includes shallow water as walkable) connects them fine.
+	var map_def = {
+		"map_half_extents": 80.0,
+		"water_areas": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(15, 40)}],
+		"shallow_water_areas": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(15, 3)}],
+		"obstacles": [], "elevation_zones": [],
+	}
+	var nav = TerrainBuilder.build_navmeshes(map_def)
+	await process_frame
+	await process_frame
+
+	var north = Vector3(0, 0, 20)
+	var south = Vector3(0, 0, -20)
+	var shallow_capable_path = NavigationServer3D.map_get_path(nav.water_map, north, south, true)
+	var deep_draught_path = NavigationServer3D.map_get_path(nav.deep_water_map, north, south, true)
+
+	NavigationServer3D.free_rid(nav.ground_region)
+	if nav.water_region.is_valid():
+		NavigationServer3D.free_rid(nav.water_region)
+	NavigationServer3D.free_rid(nav.amphibious_region)
+	if nav.deep_water_region.is_valid():
+		NavigationServer3D.free_rid(nav.deep_water_region)
+	NavigationServer3D.free_rid(nav.ground_map)
+	NavigationServer3D.free_rid(nav.water_map)
+	NavigationServer3D.free_rid(nav.amphibious_map)
+	NavigationServer3D.free_rid(nav.deep_water_map)
+
+	var shallow_dist = 0.0
+	for i in range(1, shallow_capable_path.size()):
+		shallow_dist += shallow_capable_path[i - 1].distance_to(shallow_capable_path[i])
+	var direct_dist = north.distance_to(south)
+	if shallow_capable_path.size() < 2 or shallow_dist > direct_dist * 1.2:
+		print("  [FAIL] A shallow-draught-capable path (water_map) should connect the two halves almost directly. size=", shallow_capable_path.size(), " dist=", shallow_dist, " direct=", direct_dist)
+		return false
+
+	# NavigationServer3D.map_get_path() on a disconnected map returns
+	# either an empty/degenerate path or one that doesn't actually reach
+	# the goal - either way, it must NOT be a real corridor answer close to
+	# the direct distance.
+	var deep_dist = 0.0
+	for i in range(1, deep_draught_path.size()):
+		deep_dist += deep_draught_path[i - 1].distance_to(deep_draught_path[i])
+	var deep_reaches_goal = deep_draught_path.size() > 0 and deep_draught_path[deep_draught_path.size() - 1].distance_to(south) < 2.0
+	if deep_reaches_goal and deep_dist < direct_dist * 1.2:
+		print("  [FAIL] A deep-draught hull (deep_water_map) should NOT be able to cross the shallow strip splitting the lake - it's the only water there, no way around. got a path of dist=", deep_dist)
+		return false
+
+	print("  [PASS] A deep-draught hull's navmesh has no route across the shallow-water strip splitting the lake (genuinely blocked, not just slowed), while a shallow-draught-capable path crosses it directly.")
 	return true
 
 func test_amphibious_navmesh_crosses_water() -> bool:
@@ -3795,9 +4000,12 @@ func test_amphibious_navmesh_crosses_water() -> bool:
 	if nav.water_region.is_valid():
 		NavigationServer3D.free_rid(nav.water_region)
 	NavigationServer3D.free_rid(nav.amphibious_region)
+	if nav.deep_water_region.is_valid():
+		NavigationServer3D.free_rid(nav.deep_water_region)
 	NavigationServer3D.free_rid(nav.ground_map)
 	NavigationServer3D.free_rid(nav.water_map)
 	NavigationServer3D.free_rid(nav.amphibious_map)
+	NavigationServer3D.free_rid(nav.deep_water_map)
 
 	# On ground_map (the water area is a hole), a straight line through the
 	# 30-unit-wide lake isn't available - any real path has to detour a long

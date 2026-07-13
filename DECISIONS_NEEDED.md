@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 — Terrain variety mechanism: speed multipliers vs. hard blocks, and where the line falls
+
+**Not blocking.**
+
+Chris's framing already drew most of the line: speed multipliers for marsh/rocky/snow_mud/sand (passable-but-harder), a real navmesh block only for shallow-water-vs-draught ("genuinely different mechanic... about hull-level draught"), with marsh-as-impassable-for-heavy-locomotion floated as optional ("if it feels right"). Decision: **kept marsh (and rocky/snow_mud/sand) as pure speed multipliers, no hard blocks, for any locomotor type.** Reasoning: a wheeled vehicle bogging down to 25% speed in a marsh is a real, provable penalty; a wheeled vehicle being LITERALLY UNABLE to enter marsh would be a hard-gate on a "weird but not impossible" design, which is exactly what the standing no-hard-gating philosophy (traits compose, never block a combination) argues against. A deep-draught hull floating in shin-deep water is a real physical impossibility (it would run aground); a heavy tank slogging through a swamp at a crawl is not - that distinction is why draught got the navmesh treatment and terrain type didn't.
+
+**Mechanism: a per-tick multiplier, not a baked-in stat.** `move_speed` (recomputed only when the design changes - weight/thrust/tweaks) stays untouched; a new `terrain_speed_multiplier` is recomputed every physics tick from the unit's CURRENT position and applied only where velocity is actually set. This was the only correct option - a unit's terrain multiplier has to change as it physically crosses zone boundaries mid-match, unlike every other move_speed input which is fixed per-design.
+
+**Airborne locomotion types get no explicit multiplier rows at all** (helicopter_rotors/hover_engine/anti_grav/fixed_wing_engine/buoyant_envelope) - not because they're all listed at 1.0, but because `is_flying` units skip ground navigation and the terrain-multiplier recompute entirely already (`_recalculate_terrain_speed_multiplier()` returns early). This is what "hover/anti-grav ignore terrain" means mechanically - a structural consequence of them already not touching the ground, not a special case bolted on for this task.
+
+**Draught default (0.5, under the shallow-water threshold) for any hull without an explicit "draught" field** - deliberately permissive: if someone bolts `naval_propeller` onto a non-naval hull (already possible, no-hard-gating), that hull is NOT blocked from shallow water by default. Only the 3 purpose-built naval hulls carry real draught numbers; `heavy_cruiser_hull`'s (1.8) is the only one that actually exceeds the threshold (1.0) and gets the hard block.
+
+**Verified with real physics-tick movement, not catalog-number comparisons alone**, per Chris's explicit ask: a synthetic test spawns two units with different locomotion, orders both across a fixed surface type, runs 140 real physics ticks each (matching the exact `_physics_process()`+`move_and_slide()` pattern the existing lake-crossing pathfinding test already established), and compares actual distance covered. Hit a real methodology bug while building this: a synthetic unit with no floor collision free-falls under gravity indefinitely (no `terrain_height_at()` method on the bare test double to lerp Y toward), and that unbounded fall measurably dampened horizontal `move_and_slide()` distance in a way that shrank the measured differentiation ratio far below the catalog multiplier ratio - fixed by giving the test's fake controller a flat-ground `terrain_height_at()` too, matching how every real unit's Y is actually handled (lerped, never gravity-fallen). Draught blocking is verified two ways: a raw navmesh path-connectivity check (a shallow strip splitting a lake in half has literally no deep-water route across it) and a full `battle_unit.gd` routing check (`heavy_cruiser_hull` vs. `small_boat_hull` land on different nav maps through the real `setup()` path). 73/73 tests green (4 new).
+
+---
+
 ## 2026-07-13 — Six new mobility modules: wing/thruster/prop/pusher-prop/paddle-wheel/ship-screw
 
 **Not blocking.**

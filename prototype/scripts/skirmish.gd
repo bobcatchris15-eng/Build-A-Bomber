@@ -72,9 +72,16 @@ var water_nav_map: RID
 # can cross a lake in one continuous route instead of being confined to
 # ground_nav_map like every other ground/legged type.
 var amphibious_nav_map: RID
+# Deep-draught-only naval units (heavy_cruiser_hull) path here instead of
+# water_nav_map - the same water footprint minus shallow_water_areas as
+# holes, a real physical block (a deep hull literally can't float in
+# shallow water) rather than a speed penalty. See battle_unit.gd's
+# hull_draught/_setup_navigation().
+var deep_water_nav_map: RID
 var _ground_nav_region: RID
 var _water_nav_region: RID
 var _amphibious_nav_region: RID
+var _deep_water_nav_region: RID
 
 # Multi-map architecture (this pass): the map itself - terrain layout,
 # resources, start points - is now data (MapCatalog), not hardcoded here.
@@ -350,9 +357,11 @@ func _setup_navigation():
 	ground_nav_map = nav.ground_map
 	water_nav_map = nav.water_map
 	amphibious_nav_map = nav.amphibious_map
+	deep_water_nav_map = nav.deep_water_map
 	_ground_nav_region = nav.ground_region
 	_water_nav_region = nav.water_region
 	_amphibious_nav_region = nav.amphibious_region
+	_deep_water_nav_region = nav.deep_water_region
 
 	var half: float = current_map.get("map_half_extents", 80.0)
 	var ground = get_node_or_null("Ground")
@@ -392,12 +401,16 @@ func _exit_tree():
 		NavigationServer3D.free_rid(_water_nav_region)
 	if _amphibious_nav_region.is_valid():
 		NavigationServer3D.free_rid(_amphibious_nav_region)
+	if _deep_water_nav_region.is_valid():
+		NavigationServer3D.free_rid(_deep_water_nav_region)
 	if ground_nav_map.is_valid():
 		NavigationServer3D.free_rid(ground_nav_map)
 	if water_nav_map.is_valid():
 		NavigationServer3D.free_rid(water_nav_map)
 	if amphibious_nav_map.is_valid():
 		NavigationServer3D.free_rid(amphibious_nav_map)
+	if deep_water_nav_map.is_valid():
+		NavigationServer3D.free_rid(deep_water_nav_map)
 
 # Duck-typed lookup, same pattern as get_ground_nav_map()/get_water_nav_map()
 # - battle_unit.gd/building.gd call this every tick (units) or once at
@@ -406,6 +419,12 @@ func _exit_tree():
 # just the map-aware wrapper around it.
 func terrain_height_at(pos: Vector3) -> float:
 	return TerrainBuilder.terrain_height_at(current_map, pos)
+
+# Duck-typed lookup, same pattern as terrain_height_at() - battle_unit.gd
+# calls this every physics tick to look up its current surface-terrain
+# speed multiplier (marsh/rocky/snow_mud/sand).
+func get_surface_type_at(pos: Vector3) -> String:
+	return TerrainBuilder.get_surface_type_at(current_map, pos)
 
 func _spawn_resource_nodes():
 	for s in current_map.get("resource_nodes", []):
@@ -506,6 +525,11 @@ func get_water_nav_map() -> RID:
 # (see battle_unit.gd's is_amphibious branch in _setup_navigation()).
 func get_amphibious_nav_map() -> RID:
 	return amphibious_nav_map
+
+# Same duck-typed pattern - only deep-draught naval units call this (see
+# battle_unit.gd's hull_draught branch in _setup_navigation()).
+func get_deep_water_nav_map() -> RID:
+	return deep_water_nav_map
 
 # --- UI ---
 

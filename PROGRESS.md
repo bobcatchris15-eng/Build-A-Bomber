@@ -4,6 +4,28 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 — Terrain variety mechanism: surface speed multipliers + hull-draught shallow-water blocking
+
+New batch: build out terrain types that genuinely differentiate locomotor types (marsh/rocky/snow_mud/sand) plus hull-draught-based shallow water passability. This entry covers the core mechanism; real map zones + screenshots are a following entry.
+
+### Surface speed multipliers (marsh/rocky/snow_mud/sand)
+
+New `surface_zones` map data shape (`{center, half_extents, surface_type}`), a pure-function query (`TerrainBuilder.get_surface_type_at()`), and a per-locomotor-type x per-surface-type multiplier table (`ModuleCatalog.TERRAIN_SPEED_MULTIPLIERS`/`get_terrain_speed_multiplier()`). `battle_unit.gd` recomputes a `terrain_speed_multiplier` every physics tick from the unit's current position and applies it wherever velocity is actually set - `move_speed` itself (the design-time stat) is untouched. Airborne locomotion types never consult this at all (they already skip ground navigation via `is_flying`), which is the actual mechanism behind "hover/anti-grav ignore terrain."
+
+Tuned per real-world handling: marsh favors `screw_drive` (1.1x, a genuine bonus) and punishes `wheels` (0.25x); rocky favors `legs` (1.1x) over `wheels` (0.35x); snow_mud and sand both favor `tracked_treads` (0.8x/0.85x) hardest over `wheels` (0.2x/0.3x).
+
+### Hull-draught shallow water blocking
+
+A genuinely different mechanic per Chris's framing - a new `deep_water_map` (built alongside the existing ground/water/amphibious maps) treats `shallow_water_areas` as real navmesh holes, so a deep-draught hull has NO route through shallow water at all, not just a speed penalty. New `draught` catalog field on the 3 naval hulls (`small_boat_hull` 0.35, `naval_hull` 0.9, `heavy_cruiser_hull` 1.8) and a `SHALLOW_WATER_DRAUGHT_THRESHOLD` (1.0) - only `heavy_cruiser_hull` exceeds it and gets routed to the blocked map.
+
+### Verification
+
+Real physics-tick movement comparison (140 ticks, same pattern the existing lake-crossing pathfinding test already used), not catalog-number checks alone - caught and fixed a real test-methodology bug along the way (a synthetic unit with no floor collision free-falls indefinitely, which measurably distorted movement distance until the test's fake controller also got a flat-ground `terrain_height_at()`). Draught blocking verified both at the raw navmesh level (a shallow strip splitting a lake has no deep-water route across) and the real `battle_unit.gd` routing level. 73/73 tests green (4 new).
+
+Full reasoning (including why marsh stays a speed penalty rather than a hard block, unlike shallow water) in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (cont'd 2) — Final verification: air/sea hull + module library expansion
 
 Wraps up the air/sea library batch (4 hulls, 2 locomotion types, 6 mobility modules - see the two entries below this one).

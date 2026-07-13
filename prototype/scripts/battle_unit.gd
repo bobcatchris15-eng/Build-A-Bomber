@@ -45,6 +45,14 @@ var hull_node: Node3D = null
 var locomotion_type: String = ""
 var locomotion_settings: Dictionary = {}
 var move_speed: float = 5.0
+# Terrain variety task: current surface's speed multiplier for this unit's
+# locomotion type (marsh/rocky/snow_mud/sand - see ModuleCatalog.
+# get_terrain_speed_multiplier()), recomputed every physics tick in
+# _recalculate_terrain_speed_multiplier(). Stays 1.0 (no-op) for flying/
+# naval units and for any synthetic test with no real match controller -
+# move_speed itself is left untouched (the base/display stat) so this is
+# purely a per-tick multiplier applied where velocity is actually set.
+var terrain_speed_multiplier: float = 1.0
 var rotate_speed: float = 4.0
 var target_altitude: float = 0.0
 # Real pathfinding (built this pass) - null unless a real Skirmish match
@@ -66,6 +74,11 @@ var is_naval: bool = false
 # folded into is_naval: it's not buoyant/surface-locked like a naval hull,
 # it drives normally on land and just isn't blocked by water.
 var is_amphibious: bool = false
+# Terrain variety task: hull-level draught (ModuleCatalog.get_hull_draught()),
+# only meaningful for is_naval units - see _setup_navigation() for where
+# this routes a deep-draught hull onto deep_water_map instead of
+# water_map, blocking it from shallow_water_areas entirely.
+var hull_draught: float = 0.0
 # AI phase 1 (whole-vehicle-aim): true when any active weapon is frame_built
 # (fixed relative to the hull, no independent traverse - see
 # module_catalog.gd's get_traverse_limit_angle/get_mount_style). Cached at
@@ -118,6 +131,7 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	is_fixed_wing = "fixed_wing" in unit_traits
 	is_naval = "naval" in unit_traits
 	is_amphibious = "amphibious" in unit_traits
+	hull_draught = ModuleCatalog.get_hull_draught(hull_type_for_traits)
 	if is_flying:
 		target_altitude = 4.0
 
@@ -177,7 +191,10 @@ func _setup_navigation():
 	nav_agent.target_desired_distance = 1.5
 	nav_agent.avoidance_enabled = false
 	if is_naval:
-		nav_agent.set_navigation_map(controller.get_water_nav_map())
+		if hull_draught > ModuleCatalog.SHALLOW_WATER_DRAUGHT_THRESHOLD and controller.has_method("get_deep_water_nav_map"):
+			nav_agent.set_navigation_map(controller.get_deep_water_nav_map())
+		else:
+			nav_agent.set_navigation_map(controller.get_water_nav_map())
 	elif is_amphibious and controller.has_method("get_amphibious_nav_map"):
 		nav_agent.set_navigation_map(controller.get_amphibious_nav_map())
 	else:
@@ -334,6 +351,30 @@ func _recalculate_move_speed():
 	if faction == "technocrats":
 		move_speed *= 1.05
 
+# Terrain variety task: surface terrain (marsh/rocky/snow_mud/sand) slows or
+# favors specific locomotion types - this looks up the CURRENT tile every
+# physics tick (position changes constantly, unlike move_speed which is
+# only recomputed when the design changes) and stores the multiplier for
+# the velocity-setting code below to apply. Flying/naval units never touch
+# ground surface terrain (is_flying skips this entirely; is_naval's
+# "surface" is water, which has no surface_zones), so both stay at the
+# default 1.0. Duck-typed like get_ground_nav_map()/terrain_height_at() -
+# every synthetic test without a real match controller falls through to
+# the harmless 1.0 default, unchanged.
+func _recalculate_terrain_speed_multiplier():
+	if is_flying or is_naval:
+		terrain_speed_multiplier = 1.0
+		return
+	var controller = get_parent()
+	if not controller or not controller.has_method("get_surface_type_at"):
+		terrain_speed_multiplier = 1.0
+		return
+	var surface_type = controller.get_surface_type_at(global_position)
+	if surface_type == "":
+		terrain_speed_multiplier = 1.0
+		return
+	terrain_speed_multiplier = ModuleCatalog.get_terrain_speed_multiplier(locomotion_type, surface_type)
+
 func _create_selection_ring(base_size: Vector3):
 	selection_ring = MeshInstance3D.new()
 	var torus = TorusMesh.new()
@@ -404,6 +445,8 @@ func order_harvest(node: Node3D):
 
 func _physics_process(delta):
 	if is_dead: return
+
+	_recalculate_terrain_speed_multiplier()
 
 	if current_energy < max_energy:
 		current_energy = min(max_energy, current_energy + energy_regen_rate * delta)
@@ -566,8 +609,8 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 	var target_basis = Basis.looking_at(steer_diff, Vector3.UP)
 	global_transform.basis = global_transform.basis.slerp(target_basis, rotate_speed * delta).orthonormalized()
 	var forward_dir = -global_transform.basis.z.normalized()
-	velocity.x = forward_dir.x * move_speed
-	velocity.z = forward_dir.z * move_speed
+	velocity.x = forward_dir.x * move_speed * terrain_speed_multiplier
+	velocity.z = forward_dir.z * move_speed * terrain_speed_multiplier
 	return false
 
 # AI phase 1: rotates the whole hull to face a point without moving toward
@@ -611,8 +654,8 @@ func _kite_reposition(delta: float):
 
 	if move_speed > 0.0:
 		var away_dir = -dir_to_attacker
-		velocity.x = away_dir.x * move_speed
-		velocity.z = away_dir.z * move_speed
+		velocity.x = away_dir.x * move_speed * terrain_speed_multiplier
+		velocity.z = away_dir.z * move_speed * terrain_speed_multiplier
 	else:
 		velocity.x = 0.0
 		velocity.z = 0.0

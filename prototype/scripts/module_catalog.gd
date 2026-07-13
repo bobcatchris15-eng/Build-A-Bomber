@@ -880,6 +880,11 @@ static func get_catalog() -> Dictionary:
 			# Purpose-built ship hull for naval_propeller - a wedge hull
 			# floating at the waterline worked mechanically but had nothing
 			# boat-shaped to actually show for it.
+			# Draught (terrain variety task - see get_hull_draught() and
+			# SHALLOW_WATER_DRAUGHT_THRESHOLD below): a real mid-size
+			# destroyer-class draught, under the shallow-water threshold -
+			# can still work close to shore, unlike heavy_cruiser_hull.
+			"draught": 0.9,
 			"hp": 550.0,
 			"weight": 380.0,
 			"metal": 145,
@@ -931,6 +936,10 @@ static func get_catalog() -> Dictionary:
 			# (bow_frac=0.5 vs naval_hull's 0.35) and a much smaller
 			# footprint for a genuinely different niche (scout/raider) than
 			# just a smaller version of the same silhouette.
+			# Shallow draught by design - a real patrol boat's whole point
+			# is working close to shore/in shallows a bigger warship can't
+			# reach, well under SHALLOW_WATER_DRAUGHT_THRESHOLD.
+			"draught": 0.35,
 			"hp": 220.0,
 			"weight": 130.0,
 			"metal": 55,
@@ -947,6 +956,12 @@ static func get_catalog() -> Dictionary:
 			# naval_hull's big sibling - layered superstructure, twin
 			# funnels, real warship bulk. Sits above naval_hull in the same
 			# way heavy_hull sits above medium_hull.
+			# Deep draught - the whole point of "genuinely different, not
+			# just slower" for this hull class: well over
+			# SHALLOW_WATER_DRAUGHT_THRESHOLD, physically can't enter
+			# shallow water at all (see get_hull_draught()), not just
+			# penalized for trying.
+			"draught": 1.8,
 			"hp": 900.0,
 			"weight": 680.0,
 			"metal": 255,
@@ -1262,6 +1277,74 @@ const THRUST_COEFFICIENT_DEFAULT: float = 150.0
 
 static func get_thrust_coefficient(type_id: String) -> float:
 	return get_module_data(type_id).get("thrust_coefficient", THRUST_COEFFICIENT_DEFAULT)
+
+# Per-locomotor-type x per-surface-type speed multiplier (terrain variety
+# task: "genuinely differentiate locomotor types" via terrain, not just
+# elevation/water/obstacles). Only ground-contact locomotion types that
+# actually touch the surface are listed - airborne types (helicopter_rotors/
+# hover_engine/anti_grav/fixed_wing_engine/buoyant_envelope) skip ground
+# navigation entirely already (battle_unit.gd's is_flying branch), so they
+# never consult this table at all; that's what "hover/anti-grav ignore it"
+# means mechanically, not a row of 1.0s here. naval_propeller doesn't touch
+# land surface zones either (is_naval routes to water_map only). Any
+# (locomotion_type, surface_type) pair not listed defaults to 1.0
+# (unaffected) via get_terrain_speed_multiplier()'s fallback - covers those
+# irrelevant types automatically and any future locomotion type added
+# without terrain tuning.
+#
+# Real-world handling reasoning per surface, consistent across all four:
+#   marsh/swamp   - screw_drive is BUILT for this (real screw-propelled
+#                   vehicles are marketed on exactly this capability), gets
+#                   a genuine bonus (1.1), not just "unaffected." wheels
+#                   sink hardest, treads better but still bog, legs pick
+#                   through reasonably (worst of the three, best-off).
+#   rocky         - legs are the one locomotion type actually built for
+#                   uneven point-contact ground, gets a slight bonus (1.1).
+#                   treads spread load across broken rock reasonably.
+#                   wheels are worst (a wheel needs a continuous surface).
+#                   screw_drive's augers have nothing to dig into on solid
+#                   rock - a real penalty, not its best terrain.
+#   snow_mud      - wheels bog down hardest (per the task's explicit ask).
+#                   treads are the best-suited (wide flotation, historically
+#                   the reason tracked vehicles exist). legs sink less than
+#                   wheels but still worse than treads. screw_drive does
+#                   reasonably (augers grip mud/snow well, just not quite
+#                   tread-level flotation).
+#   sand          - same shape as snow_mud but slightly gentler penalties
+#                   (dry sand isn't as immobilizing as deep mud) - wheels
+#                   still worst, treads/legs both handle it well, screw_
+#                   drive moderate (augers work best with real grip/water,
+#                   dry sand offers less than mud does).
+const TERRAIN_SPEED_MULTIPLIERS = {
+	"marsh": {"wheels": 0.25, "tracked_treads": 0.45, "legs": 0.6, "screw_drive": 1.1},
+	"rocky": {"wheels": 0.35, "tracked_treads": 0.75, "legs": 1.1, "screw_drive": 0.5},
+	"snow_mud": {"wheels": 0.2, "tracked_treads": 0.8, "legs": 0.75, "screw_drive": 0.7},
+	"sand": {"wheels": 0.3, "tracked_treads": 0.85, "legs": 0.8, "screw_drive": 0.6},
+}
+
+static func get_terrain_speed_multiplier(locomotion_type_id: String, surface_type: String) -> float:
+	return TERRAIN_SPEED_MULTIPLIERS.get(surface_type, {}).get(locomotion_type_id, 1.0)
+
+# Hull draught (terrain variety task - "shallow water that doesn't allow
+# deep-draught hulls" is specifically a hull property, not a locomotor
+# one, since two hulls sharing the same naval_propeller locomotion can
+# have wildly different real-world draught). Default (0.5) is deliberately
+# UNDER the shallow-water threshold - a hull with no explicit "draught"
+# entry (i.e. any hull other than the 3 purpose-built naval ones, if
+# someone bolts naval_propeller onto a non-naval hull) is NOT blocked from
+# shallow water by default, consistent with the no-hard-gating philosophy;
+# only hulls that explicitly opt into a real deep-draught number
+# (heavy_cruiser_hull) get the hard navmesh block.
+const HULL_DRAUGHT_DEFAULT: float = 0.5
+
+# Deep-draught-vs-shallow-water cutoff. naval_hull (0.9) and small_boat_hull
+# (0.35) both stay under this; heavy_cruiser_hull (1.8) is well over it -
+# see battle_unit.gd's _setup_navigation() for where this actually routes
+# a unit onto deep_water_map instead of water_map.
+const SHALLOW_WATER_DRAUGHT_THRESHOLD: float = 1.0
+
+static func get_hull_draught(hull_type_id: String) -> float:
+	return get_module_data(hull_type_id).get("draught", HULL_DRAUGHT_DEFAULT)
 
 # Continuous alternative to get_mount_style()'s discrete facet matching,
 # for real mount-hardware decisions (module_placer.gd's actual weapon

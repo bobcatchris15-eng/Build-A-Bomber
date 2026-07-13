@@ -233,6 +233,38 @@ static func _build_amphibious_faces(map_def: Dictionary) -> PackedVector3Array:
 			_add_nav_quad(verts, q[0], q[1], q[2], q[3])
 	return verts
 
+# Deep-draught-only water: the same water_areas footprint as water_map,
+# grid-swept (like _build_ground_faces()) so shallow_water_areas sub-
+# regions can be carved out as holes - a deep-draught hull (heavy_
+# cruiser_hull) literally cannot float there, the real physical
+# impossibility the task called out as worth an actual navmesh block
+# rather than just a speed penalty. Shallow-draught naval hulls
+# (small_boat_hull, naval_hull) keep using the unmodified water_map, which
+# still includes these areas.
+static func _build_deep_water_faces(map_def: Dictionary) -> PackedVector3Array:
+	var verts = PackedVector3Array()
+	var shallow_holes = []
+	for sw in map_def.get("shallow_water_areas", []):
+		shallow_holes.append(_rect_from(sw.center, sw.half_extents))
+	for w in map_def.get("water_areas", []):
+		var rect = _rect_from(w.center, w.half_extents)
+		var x = rect.x0
+		while x < rect.x1:
+			var x1 = min(x + GRID_CELL, rect.x1)
+			var z = rect.z0
+			while z < rect.z1:
+				var z1 = min(z + GRID_CELL, rect.z1)
+				var blocked = false
+				for h in shallow_holes:
+					if _rect_overlaps(x, x1, z, z1, h):
+						blocked = true
+						break
+				if not blocked:
+					_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
+				z = z1
+			x = x1
+	return verts
+
 static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 	var ground_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_active(ground_map, true)
@@ -240,6 +272,8 @@ static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 	NavigationServer3D.map_set_active(water_map, true)
 	var amphibious_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_active(amphibious_map, true)
+	var deep_water_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_active(deep_water_map, true)
 
 	var ground_verts = _build_ground_faces(map_def)
 	var ground_nav_mesh = NavigationMesh.new()
@@ -274,8 +308,19 @@ static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 	NavigationServer3D.region_set_map(amphibious_region, amphibious_map)
 	NavigationServer3D.region_set_navigation_mesh(amphibious_region, amphibious_nav_mesh)
 
-	return {"ground_map": ground_map, "water_map": water_map, "amphibious_map": amphibious_map,
-		"ground_region": ground_region, "water_region": water_region, "amphibious_region": amphibious_region}
+	var deep_water_verts = _build_deep_water_faces(map_def)
+	var deep_water_region: RID = RID()
+	if deep_water_verts.size() > 0:
+		var deep_water_nav_mesh = NavigationMesh.new()
+		var deep_water_source = NavigationMeshSourceGeometryData3D.new()
+		deep_water_source.add_faces(deep_water_verts, Transform3D.IDENTITY)
+		NavigationServer3D.bake_from_source_geometry_data(deep_water_nav_mesh, deep_water_source)
+		deep_water_region = NavigationServer3D.region_create()
+		NavigationServer3D.region_set_map(deep_water_region, deep_water_map)
+		NavigationServer3D.region_set_navigation_mesh(deep_water_region, deep_water_nav_mesh)
+
+	return {"ground_map": ground_map, "water_map": water_map, "amphibious_map": amphibious_map, "deep_water_map": deep_water_map,
+		"ground_region": ground_region, "water_region": water_region, "amphibious_region": amphibious_region, "deep_water_region": deep_water_region}
 
 # --- Visuals ---
 
@@ -287,6 +332,73 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 		_spawn_obstacle(o, parent)
 	for e in map_def.get("elevation_zones", []):
 		_spawn_elevation_zone(e, parent, half)
+	for s in map_def.get("surface_zones", []):
+		_spawn_surface_zone(s, parent)
+	for sw in map_def.get("shallow_water_areas", []):
+		_spawn_shallow_water_marker(sw, parent)
+
+# Flat colored patch, matte (unlike water's glossy transparency) - purely
+# cosmetic/informational, never a navmesh hole (see get_surface_type_at()'s
+# own comment: every locomotor CAN physically enter, just at a different
+# speed). rocky terrain gets a few small non-collidable rock-bump
+# decorations on top so it reads as genuinely uneven, not just a color
+# swap - deliberately no StaticBody3D collision, unlike _spawn_obstacle()'s
+# real rock clusters, since this ground stays fully walkable.
+const SURFACE_ZONE_COLORS = {
+	"marsh": Color(0.22, 0.3, 0.2),
+	"rocky": Color(0.42, 0.4, 0.37),
+	"snow_mud": Color(0.58, 0.56, 0.5),
+	"sand": Color(0.76, 0.68, 0.45),
+}
+
+static func _spawn_surface_zone(zone: Dictionary, parent: Node3D):
+	var mesh_inst = MeshInstance3D.new()
+	var plane = PlaneMesh.new()
+	plane.size = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
+	mesh_inst.mesh = plane
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = SURFACE_ZONE_COLORS.get(zone.get("surface_type", ""), Color(0.5, 0.5, 0.5))
+	mat.roughness = 0.9
+	mesh_inst.material_override = mat
+	parent.add_child(mesh_inst)
+	mesh_inst.global_position = Vector3(zone.center.x, 0.03, zone.center.z)
+
+	if zone.get("surface_type", "") == "rocky":
+		var rng = RandomNumberGenerator.new()
+		rng.seed = hash(zone.center)
+		for i in range(10):
+			var rock = MeshInstance3D.new()
+			var box = BoxMesh.new()
+			var size = Vector3(rng.randf_range(0.3, 0.7), rng.randf_range(0.2, 0.5), rng.randf_range(0.3, 0.7))
+			box.size = size
+			rock.mesh = box
+			var rock_mat = StandardMaterial3D.new()
+			var shade = rng.randf_range(0.3, 0.45)
+			rock_mat.albedo_color = Color(shade, shade * 0.95, shade * 0.88)
+			rock_mat.roughness = 0.95
+			rock.material_override = rock_mat
+			parent.add_child(rock)
+			var ox = rng.randf_range(-zone.half_extents.x * 0.85, zone.half_extents.x * 0.85)
+			var oz = rng.randf_range(-zone.half_extents.y * 0.85, zone.half_extents.y * 0.85)
+			rock.global_position = Vector3(zone.center.x + ox, size.y / 2.0, zone.center.z + oz)
+			rock.rotation.y = rng.randf_range(0, TAU)
+
+# A lighter, sandier-toned marker over the shallow sub-area of a water
+# zone (drawn on top of the main water plane, slightly higher Y) - purely
+# a visual cue that this patch is shallow-draught-only; the real
+# passability distinction lives in the deep_water_map navmesh (see
+# build_navmeshes()).
+static func _spawn_shallow_water_marker(zone: Dictionary, parent: Node3D):
+	var mesh_inst = MeshInstance3D.new()
+	var plane = PlaneMesh.new()
+	plane.size = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
+	mesh_inst.mesh = plane
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.55, 0.6, 0.4, 0.75)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mesh_inst.material_override = mat
+	parent.add_child(mesh_inst)
+	mesh_inst.global_position = Vector3(zone.center.x, 0.06, zone.center.z)
 
 static func _spawn_water_plane(water: Dictionary, parent: Node3D):
 	var mesh_inst = MeshInstance3D.new()
@@ -406,6 +518,22 @@ static func terrain_height_at(map_def: Dictionary, pos: Vector3) -> float:
 # Water, obstacles, and ramp slopes are all "can't stand/build here" -
 # a plateau's flat TOP is deliberately excluded (legitimate, valuable
 # buildable high ground - the whole point of holding it).
+# Surface terrain type at a point ("" if not inside any surface_zones entry -
+# plain ground). Purely a speed-multiplier lookup (see ModuleCatalog.
+# get_terrain_speed_multiplier()) consulted every physics tick by
+# battle_unit.gd, NOT a navmesh/passability concern - unlike water/
+# obstacles/elevation, surface_zones never appear in _collect_holes() or
+# any navmesh build, since every locomotor type CAN physically enter marsh/
+# rock/mud/sand, just at a different speed. Overlapping zones resolve to
+# whichever is listed first (maps are expected to keep these non-
+# overlapping in practice; not worth a more elaborate blend for a cosmetic-
+# adjacent terrain-flavor system).
+static func get_surface_type_at(map_def: Dictionary, pos: Vector3) -> String:
+	for z in map_def.get("surface_zones", []):
+		if _point_in_rect(pos, _rect_from(z.center, z.half_extents)):
+			return z.get("surface_type", "")
+	return ""
+
 static func is_position_blocked(map_def: Dictionary, pos: Vector3) -> bool:
 	var half: float = map_def.get("map_half_extents", 80.0)
 	for w in map_def.get("water_areas", []):
