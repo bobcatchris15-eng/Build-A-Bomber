@@ -781,16 +781,58 @@ static func is_turreted_capable(hull_type_id: String) -> bool:
 # today, which all default turreted_capable=true) keeps the original
 # weapon-type-only behavior unchanged.
 static func get_mount_style(type_id: String, facet: String, hull_type_id: String = "") -> String:
+	# Legacy discrete-facet entry point - kept because get_traverse_limit_angle()
+	# only ever needs this for the turret/frame_built gate (not the pintle-
+	# vs-sponson distinction, which needs the continuous version below), so
+	# rewiring every call site wasn't necessary. Delegates to
+	# get_mount_style_for_normal() via a representative normal for whichever
+	# facet was named, so the actual style logic lives in exactly one place.
+	var normal = Vector3.ZERO
+	match facet:
+		"top": normal = Vector3.UP
+		"bottom": normal = Vector3.DOWN
+		"front": normal = Vector3.FORWARD
+		"back": normal = Vector3.BACK
+		"left": normal = Vector3.LEFT
+		"right": normal = Vector3.RIGHT
+	return get_mount_style_for_normal(type_id, normal, hull_type_id)
+
+# Slope-from-horizontal at which a mount stops being "close enough to
+# level for a gun to sit on a stand" and becomes "close enough to a
+# vertical wall that only an embedded sponson makes sense." dot(normal,
+# UP) = cos(angle between the surface normal and straight up) - 0.3 =
+# cos(~72.5 deg), so a surface can be sloped as steeply as ~72.5 degrees
+# from horizontal (a real glacis plate, not just a mathematically flat
+# deck) and still get the pintle treatment; only the last ~17.5 degrees
+# approaching a genuine vertical wall falls back to sponson. Deliberately
+# permissive per Chris's correction - "anything with a meaningful
+# upward-facing component... is a candidate," not just a perfect flat top.
+const PINTLE_MIN_UP_ALIGNMENT: float = 0.3
+
+# Continuous alternative to get_mount_style()'s discrete facet matching,
+# for real mount-hardware decisions (module_placer.gd's actual weapon
+# placement, which has the real continuous surface normal, not just a
+# coarse "top/bottom/front/back/left/right" bucket). A pintle-style mount
+# (angled base plate conforming to the true local surface, world-vertical
+# post, weapon level on top - see visual_builder.gd's add_mount_hardware())
+# is available anywhere the surface has a meaningful upward OR downward
+# component, not just an exactly-flat top/bottom - this is what makes a
+# sloped glacis plate (interceptor_hull's nose, e.g.) a legitimate pintle
+# mount instead of forcing it into an embedded sponson.
+static func get_mount_style_for_normal(type_id: String, normal: Vector3, hull_type_id: String = "") -> String:
 	if hull_type_id != "" and not is_turreted_capable(hull_type_id):
 		return "frame_built"
 	if type_id == "basic_cannon":
 		return "turret"
 	if type_id in ["gauss_railgun", "heavy_howitzer"]:
 		return "frame_built"
-	match facet:
-		"top": return "pintle_top"
-		"bottom": return "pintle_bottom"
-		_: return "sponson"
+	var up_alignment = normal.normalized().dot(Vector3.UP) if normal.length() > 0.001 else 0.0
+	if up_alignment >= PINTLE_MIN_UP_ALIGNMENT:
+		return "pintle_top"
+	elif up_alignment <= -PINTLE_MIN_UP_ALIGNMENT:
+		return "pintle_bottom"
+	else:
+		return "sponson"
 
 # Facet = one of the hull's 6 axis-aligned box faces (see
 # MOUNTING_AND_ARMOR_SPEC.md's "Known architecture constraint"). Shared

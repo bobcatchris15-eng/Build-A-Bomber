@@ -3,6 +3,9 @@ extends Node
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
 
+func _vec3_to_dict(v: Vector3) -> Dictionary:
+	return {"x": v.x, "y": v.y, "z": v.z}
+
 func serialize_hull(hull: Node3D) -> Dictionary:
 	if not hull:
 		return {}
@@ -45,6 +48,7 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 				"scale": {"x": child.scale.x, "y": child.scale.y, "z": child.scale.z},
 				"yaw_offset": child.get_meta("yaw_offset", 0.0),
 				"mount_style": child.get_meta("mount_style", ""),
+				"mount_normal": _vec3_to_dict(child.get_meta("mount_normal", Vector3.UP)),
 				"facet": child.get_meta("facet", ""),
 				"tweaks": data.tweaks if "tweaks" in data else {},
 				"stats": {
@@ -389,6 +393,9 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		new_module.set_meta("yaw_offset", mod.get("yaw_offset", 0.0))
 		if mod.get("mount_style", "") != "":
 			new_module.set_meta("mount_style", mod["mount_style"])
+		if mod.has("mount_normal"):
+			var mn = mod["mount_normal"]
+			new_module.set_meta("mount_normal", Vector3(mn.x, mn.y, mn.z))
 		if mod.get("facet", "") != "":
 			new_module.set_meta("facet", mod["facet"])
 		# Force mesh deformation rebuild (also re-applies mount hardware,

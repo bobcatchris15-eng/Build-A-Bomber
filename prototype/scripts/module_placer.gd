@@ -499,12 +499,6 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 				primary.set_meta("mirrored_counterpart", mirror)
 				mirror.set_meta("mirrored_counterpart", primary)
 
-func _classify_hull_facet(normal: Vector3) -> String:
-	# Now a thin wrapper - the actual classification moved to
-	# ModuleCatalog.classify_facet() so combat (damage_resolver.gd) can
-	# share the exact same facet convention as placement.
-	return ModuleCatalog.classify_facet(normal)
-
 func update_locomotion(type_id: String, settings: Dictionary):
 	if not hull: return
 	
@@ -785,12 +779,27 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 		final_pos = hull.to_global(local_pos)
 		
 	new_weapon.global_position = final_pos
-	
-	# Align to surface normal if not perfectly up/down
-	if abs(normal.dot(Vector3.UP)) < 0.999:
+
+	# Decided BEFORE the reorientation step below, since it changes that
+	# decision: a pintle-style mount (MOUNTING_AND_ARMOR_SPEC.md #3
+	# correction) keeps the WEAPON itself level regardless of the surface's
+	# slope - only its base-plate hardware tilts to conform to the actual
+	# local surface (added further down, see VisualBuilder.add_mount_hardware()).
+	# Previously only an exactly-flat top/bottom stayed level; a sloped
+	# glacis plate fell through to the generic surface-normal alignment
+	# below and tilted the whole weapon with it.
+	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
+	var pintle_style = ""
+	if category == "weapon":
+		pintle_style = ModuleCatalog.get_mount_style_for_normal(type_id, normal, hull_type_for_mount)
+	var stays_level = pintle_style == "pintle_top" or pintle_style == "pintle_bottom"
+
+	# Align to surface normal if not perfectly up/down (and not a
+	# pintle-style mount, which stays level by design - see above)
+	if not stays_level and abs(normal.dot(Vector3.UP)) < 0.999:
 		new_weapon.look_at(final_pos + normal, Vector3.UP)
 		new_weapon.rotate_object_local(Vector3.RIGHT, -PI/2)
-		
+
 	# Auto-scale armor to fit facet
 	if category == "armor":
 		if hull:
@@ -840,22 +849,27 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 			new_weapon.set_meta("facet", armor_facet)
 
 	# Face-based weapon mounting (MOUNTING_AND_ARMOR_SPEC.md #3): sponson-
-	# embed on side/front/back faces, pintle stand on top/bottom, except
-	# railgun/howitzer (frame-built) and basic_cannon (existing enclosed
-	# turret, left unchanged - handled by get_mount_style() returning "turret").
+	# embed on near-vertical faces, pintle stand on anything with a
+	# meaningful up/down component (INCLUDING sloped surfaces like a
+	# glacis plate, not just an exactly-flat top/bottom - see
+	# get_mount_style_for_normal()'s continuous check), except railgun/
+	# howitzer (frame-built) and basic_cannon (existing enclosed turret).
 	if category == "weapon":
-		var facet = _classify_hull_facet(normal)
-		var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
-		var mount_style = ModuleCatalog.get_mount_style(type_id, facet, hull_type_for_mount)
+		var mount_style = pintle_style
 		# Stored as meta (not just applied once) so rebuild_visual() - called
 		# on every gizmo tweak-drag frame, which clears and rebuilds all
 		# MeshInstance3D children - knows to re-add the mount hardware
-		# instead of silently losing it on the first tweak.
+		# instead of silently losing it on the first tweak. mount_normal is
+		# the actual local surface normal the base plate should conform to
+		# (identity-rotation weapon means world normal IS the local one
+		# here) - without it, a reload/rebuild would fall back to a flat
+		# plate and silently lose the tilt on a glacis-mounted weapon.
 		new_weapon.set_meta("mount_style", mount_style)
+		new_weapon.set_meta("mount_normal", normal)
 		if mount_style == "sponson" or mount_style == "frame_built":
 			var embed_depth = catalog_data.size.y * (0.75 if mount_style == "frame_built" else 0.45)
 			new_weapon.global_position -= normal * embed_depth
-		VisualBuilder.add_mount_hardware(new_weapon, mount_style, catalog_data.size)
+		VisualBuilder.add_mount_hardware(new_weapon, mount_style, catalog_data.size, normal)
 
 	# Notify the UI that a module was added
 	get_tree().call_group("stat_ui", "update_stats", hull)

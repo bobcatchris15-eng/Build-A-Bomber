@@ -4,6 +4,24 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-12 (cont'd 15) — Angled pintle mount: gun-on-a-stand now works on sloped surfaces, not just a flat top
+
+Design correction from Chris after seeing the pintle mount demo: it should work on angled surfaces too - a sloped glacis plate (interceptor_hull's nose was the example), not just a mathematically flat deck.
+
+### What changed
+
+Previously, `module_placer.gd` only skipped weapon reorientation (keeping it "level") when the placement normal was within ~0.03 degrees of dead vertical - anything else fell through to the generic surface-alignment code and tilted the WHOLE weapon to match the slope. Now: `module_catalog.gd` has a new continuous check, `get_mount_style_for_normal()` - any surface with `dot(normal, UP) >= 0.3` (surfaces sloped up to ~72.5 degrees from horizontal) resolves to a pintle-style mount and the weapon stays level; only the last ~17.5 degrees approaching a true vertical wall still falls back to the embedded sponson. The old discrete `get_mount_style(type_id, facet, hull_type_id)` stays as a thin wrapper (still used by `get_traverse_limit_angle()`, which only needs the turret/frame_built gate) delegating to the new function via a representative normal.
+
+The tilt itself now lives in a new base plate (`visual_builder.gd`'s `_build_pintle_base_plate()`) instead of the weapon: `Quaternion(Vector3.UP, surface_normal)` orients a greebled disc (bolt ring + raised center hub) to match the real local surface, embedded slightly backward into the hull skin rather than floating flush against it. The post and weapon are completely unaffected by this tilt - the post stays local-space vertical (unchanged code), and since the weapon's own rotation is never touched for a pintle-eligible mount, "local vertical" for the post is also world-vertical.
+
+### Persistence
+
+Added `mount_normal` alongside the existing `mount_style` in both `serialize_hull()` and `reconstruct_vehicle()` - without it, a saved glacis-mounted weapon would silently flatten back to a level plate on reload, since `rebuild_visual()` had no other source for the original placement angle.
+
+**Verified:** 64/64 tests green (1 new - continuous-threshold checks at 45°/near-vertical/pure-side, a real angled placement staying level with a correctly-tilted-and-embedded plate, the post remaining unrotated, and the tilt surviving a save/reconstruct round-trip). Windowed screenshots of a rotary_cannon mounted on interceptor_hull's sloped nose in `progress_captures/2026-07-12/angled_pintle_mount/`.
+
+---
+
 ## 2026-07-12 (cont'd 14) — Four Skirmish maps built on the new architecture, each verified one at a time
 
 Built the actual map content on top of the multi-map architecture from the previous entry: `open_plains`, `highland_chokepoint`, and `coastal_strand` (new), plus `lake_crossing` (the original map, re-verified on the refactored code path). Each map covers a genuinely different play pattern rather than being a palette swap, per Chris's instruction.

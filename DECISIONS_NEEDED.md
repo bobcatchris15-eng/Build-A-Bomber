@@ -4,6 +4,24 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-12 — Angled pintle mount: where exactly the sponson/pintle boundary sits, and how the tilt is expressed
+
+**Not blocking.**
+
+Chris's correction: a pintle-style mount (weapon level, sitting on a stand) should work on sloped surfaces like a glacis plate, not just an exactly-flat top - the tilt should live in a new angled base plate, not the weapon itself. Two real judgment calls in implementing this:
+
+**Where the sponson/pintle boundary sits.** Replaced `classify_facet()`'s discrete top/bottom/else check (which only fired within ~0.03 degrees of dead vertical) with a continuous threshold: `dot(normal, UP) >= 0.3`, i.e. `cos(~72.5°)`. That means a surface can be sloped as steeply as ~72.5 degrees from horizontal and still get the pintle treatment (angled plate, vertical post, level weapon); only the last ~17.5 degrees approaching a genuinely vertical wall falls back to sponson. Chosen deliberately permissive per Chris's own framing ("anything with a meaningful upward-facing component... is a candidate," "near-vertical side wall probably still wants sponson") - I didn't try to reverse-engineer the interceptor hull's exact glacis angle to calibrate this precisely; the threshold is a judgment call about where "gun on a stand" stops making visual sense, not a measurement.
+
+**Applied symmetrically to pintle_bottom too**, not just the top/glacis case Chris described. He didn't ask for this explicitly, but leaving the underside on the old exact-flat-only check while the top became continuous would have been an inconsistent, arbitrary asymmetry in the same mechanism - a sloped belly plate gets the same angled-base-plate treatment as a sloped glacis, for the same reason.
+
+**Mechanism:** the plate's orientation is `Quaternion(Vector3.UP, surface_normal)` - the shortest-arc rotation from "flat, facing up" to the real local surface normal. This is deliberately a single formula rather than a flat-case/tilted-case branch: when the normal IS up, the quaternion is identity and the plate is flat, exactly matching the pre-existing behavior - so the fix didn't need to special-case backward compatibility with every already-working flat-top mount, it just generalizes to cover it. The weapon's own transform never gets reoriented for a pintle-eligible surface (previously it always tilted to match any non-exactly-flat normal) - the tilt is fully absorbed by the new base plate, which also embeds slightly backward along the surface normal (Chris's "no gap/floating" note) and carries a ring of bolt greebles plus a raised hub.
+
+**Persistence:** added `mount_normal` to the saved-blueprint module dict (alongside the existing `mount_style`) - without it, `reconstruct_vehicle()` would default back to `Vector3.UP` on reload and silently flatten a saved glacis-mounted weapon's plate back to level, since `rebuild_visual()` has no other way to recover the original placement angle.
+
+**Verified:** 64/64 tests green (1 new - `test_angled_pintle_mount()`, covering the continuous threshold at 45°/near-vertical/pure-side angles, a real placement staying level with a correctly-tilted+embedded plate, the post remaining unrotated, and the tilt surviving a save/reconstruct round-trip). Windowed screenshots of a rotary_cannon mounted on `interceptor_hull`'s sloped nose in `progress_captures/2026-07-12/angled_pintle_mount/` - the wide shot shows it in context on the sloped nose, the close-up shows the tilted plate distinctly (visibly non-circular from this angle, unlike the flat-top case) with the post and bolt ring visible.
+
+---
+
 ## 2026-07-12 — Four maps built: count, symmetry approach per map, and two more real bugs found while verifying
 
 **Not blocking.**

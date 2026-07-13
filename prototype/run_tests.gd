@@ -42,6 +42,7 @@ func _init():
 	success = success and await test_armor_module_facet_fitting()
 	success = success and await test_armor_module_combat_bonus()
 	success = success and await test_face_based_weapon_mounting()
+	success = success and await test_angled_pintle_mount()
 	success = success and await test_centerline_placement_does_not_self_mirror()
 	success = success and await test_hull_nose_taper()
 	success = success and await test_directional_armor_facet_resolution()
@@ -1477,6 +1478,118 @@ func test_face_based_weapon_mounting() -> bool:
 
 	placer.queue_free()
 	print("  [PASS] Face-based mounting: turret/frame_built exceptions correct, pintle_top/sponson hardware present, sponson embeds inward, hardware survives tweak rebuilds.")
+	return true
+
+func test_angled_pintle_mount() -> bool:
+	print("Running Test Suite: Angled Pintle Mount (MOUNTING_AND_ARMOR_SPEC.md #3 correction - sloped surfaces like a glacis plate)...")
+	var ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
+	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
+
+	# Pure function checks first: the continuous threshold itself.
+	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3(0, 0.7, -0.7).normalized(), "interceptor_hull") != "pintle_top":
+		print("  [FAIL] A 45-degree sloped-upward normal should still resolve to pintle_top")
+		return false
+	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3(0, 0.15, -0.99).normalized(), "interceptor_hull") != "sponson":
+		print("  [FAIL] A near-vertical normal (small up component) should still resolve to sponson")
+		return false
+	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3.RIGHT, "interceptor_hull") != "sponson":
+		print("  [FAIL] A pure side normal should still resolve to sponson (regression check)")
+		return false
+
+	# Real placement: a weapon on a sloped (not exactly flat) upward
+	# surface should get pintle_top, stay level itself, and its
+	# MountHardware should contain a BasePlate tilted to match the slope.
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	var bm = Node.new()
+	bm.name = "BlueprintManager"
+	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
+	placer.add_child(bm)
+	await process_frame
+
+	placer._place_hull_from_ui("interceptor_hull")
+	await process_frame
+
+	var glacis_normal = Vector3(0, 0.7, -0.7).normalized()
+	placer._place_weapon_from_ui("rotary_cannon", Vector3(0, 0.6, -1.0), glacis_normal)
+	await process_frame
+
+	var gun = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "rotary_cannon":
+			gun = c
+			break
+	if not gun or gun.get_meta("mount_style", "") != "pintle_top":
+		print("  [FAIL] Weapon placed on a 45-degree sloped surface should be mount_style 'pintle_top', got '", gun.get_meta("mount_style", "") if gun else "null", "'")
+		placer.queue_free()
+		return false
+
+	# "Stays level" = the weapon's own basis.y is still world-up, not
+	# tilted to match the placement normal - that's the whole point of the
+	# correction (the TILT lives in the base plate, not the weapon).
+	if gun.global_transform.basis.y.dot(Vector3.UP) < 0.999:
+		print("  [FAIL] A pintle-mounted weapon on a sloped surface should stay level (basis.y ~= UP), got basis.y=", gun.global_transform.basis.y)
+		placer.queue_free()
+		return false
+
+	var hardware = gun.get_node_or_null("MountHardware")
+	var plate = hardware.get_node_or_null("BasePlate") if hardware else null
+	if not plate:
+		print("  [FAIL] pintle_top MountHardware should contain a BasePlate")
+		placer.queue_free()
+		return false
+	if plate.transform.basis.y.dot(Vector3.UP) > 0.99:
+		print("  [FAIL] BasePlate on a 45-degree sloped surface should be visibly tilted (not flat), basis.y=", plate.transform.basis.y)
+		placer.queue_free()
+		return false
+	# The plate should sit slightly INTO the hull (embedded backward along
+	# the surface normal), not flush/floating at exactly the origin.
+	if plate.position.dot(glacis_normal) >= 0.0:
+		print("  [FAIL] BasePlate should be embedded backward along the surface normal, not floating at/past the surface, position=", plate.position)
+		placer.queue_free()
+		return false
+
+	# Post itself must stay exactly local-vertical regardless of the
+	# plate's tilt - unaffected by any of the above.
+	var post = hardware.get_node_or_null("MeshInstance3D") if hardware else null
+	if not post:
+		for child in hardware.get_children():
+			if child is MeshInstance3D:
+				post = child
+				break
+	if post and abs(post.rotation.x) + abs(post.rotation.z) > 0.001:
+		print("  [FAIL] The post itself should remain unrotated (local-vertical) regardless of the base plate's tilt")
+		placer.queue_free()
+		return false
+
+	# Save -> reconstruct round-trip: the tilt must survive a reload, not
+	# just the live in-session placement - mount_normal meta specifically
+	# exists for this; without it, reconstruct_vehicle() would fall back
+	# to the default (flat) normal and silently flatten the plate.
+	var blueprint = bm.serialize_hull(placer.hull)
+	var reconstructed_root = Node3D.new()
+	root.add_child(reconstructed_root)
+	var new_hull = bm.reconstruct_vehicle(blueprint, reconstructed_root)
+	await process_frame
+
+	var reloaded_gun = null
+	for c in new_hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "rotary_cannon":
+			reloaded_gun = c
+			break
+	var reloaded_hardware = reloaded_gun.get_node_or_null("MountHardware") if reloaded_gun else null
+	var reloaded_plate = reloaded_hardware.get_node_or_null("BasePlate") if reloaded_hardware else null
+	if not reloaded_plate or reloaded_plate.transform.basis.y.dot(Vector3.UP) > 0.99:
+		print("  [FAIL] BasePlate tilt should survive a save/reconstruct round-trip via mount_normal meta, got ", (reloaded_plate.transform.basis.y if reloaded_plate else "no plate"))
+		placer.queue_free()
+		reconstructed_root.queue_free()
+		return false
+
+	placer.queue_free()
+	reconstructed_root.queue_free()
+	print("  [PASS] Angled pintle mount: sloped surfaces resolve to pintle_top (not sponson), the weapon stays level, the base plate tilts to match the real surface while embedding slightly into the hull, and the tilt survives a save/reload round-trip.")
 	return true
 
 func test_centerline_placement_does_not_self_mirror() -> bool:

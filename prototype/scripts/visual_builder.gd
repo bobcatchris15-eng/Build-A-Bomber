@@ -1315,7 +1315,20 @@ static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base
 # weapon's differentiation comes entirely from being embedded deep into the
 # hull (handled by module_placer.gd's embed_depth position offset), not from
 # extra geometry.
-static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_size: Vector3):
+#
+# surface_normal (local to parent_node's space) is the correction Chris
+# asked for: a pintle mount previously only existed for an exactly-flat
+# top/bottom (module_placer.gd used to skip weapon reorientation only when
+# the normal was within ~0.03 degrees of dead vertical). Now the WEAPON
+# stays level on ANY surface with a meaningful up/down component (a sloped
+# glacis plate included - see module_catalog.gd's get_mount_style_for_normal()),
+# and the tilt that surface actually has gets absorbed by a base plate here
+# instead - conforms to surface_normal, greebled, sitting slightly INTO the
+# hull skin rather than floating above it. The post itself is untouched by
+# any of this and stays local-space vertical exactly as before, which is
+# what keeps it world-vertical given the weapon module's own rotation is
+# never touched for a pintle-style mount.
+static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_size: Vector3, surface_normal: Vector3 = Vector3.UP):
 	var old = parent_node.get_node_or_null("MountHardware")
 	if old:
 		parent_node.remove_child(old)
@@ -1333,7 +1346,8 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 
 	if mount_style == "pintle_top":
 		# A visible post between the hull surface (local Y=0, where this
-		# module's origin sits) and the weapon body sitting on top of it.
+		# module's origin sits) and the weapon body sitting on top of it -
+		# always local-space vertical, regardless of the base plate's tilt.
 		var post = MeshInstance3D.new()
 		var cyl = CylinderMesh.new()
 		cyl.top_radius = base_size.x * 0.22
@@ -1343,6 +1357,7 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 		post.material_override = mat
 		post.position = Vector3(0, cyl.height * 0.4, 0)
 		hardware.add_child(post)
+		hardware.add_child(_build_pintle_base_plate(surface_normal, base_size, Vector3.ZERO))
 
 	elif mount_style == "pintle_bottom":
 		# Inverted: the pintle reaches DOWN from the hull (above) to the
@@ -1357,6 +1372,7 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 		post.material_override = mat
 		post.position = Vector3(0, base_size.y - cyl.height * 0.4, 0)
 		hardware.add_child(post)
+		hardware.add_child(_build_pintle_base_plate(surface_normal, base_size, Vector3(0, base_size.y, 0)))
 
 	elif mount_style == "sponson":
 		# A collar ring at the hull surface where the embedded weapon body
@@ -1371,6 +1387,70 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 		collar.rotation = Vector3(PI / 2.0, 0, 0)
 		hardware.add_child(collar)
 
+# A base plate that conforms to the actual local surface (flat for a
+# top/bottom deck, tilted for a sloped glacis or similar), with a ring of
+# bolt greebles and a raised center hub so it reads as a real mounting
+# bracket rather than a bare disc. Sits slightly INTO the hull skin at
+# flush_position (offset backward along the surface normal) rather than
+# floating flush against it, per Chris's "no gap" note.
+static func _build_pintle_base_plate(local_normal: Vector3, base_size: Vector3, flush_position: Vector3) -> Node3D:
+	var n = local_normal.normalized() if local_normal.length() > 0.001 else Vector3.UP
+	var embed_depth = max(0.02, base_size.y * 0.05)
+
+	var plate_root = Node3D.new()
+	plate_root.name = "BasePlate"
+	# Quaternion(UP, n) is the shortest-arc rotation taking the plate's
+	# default "face points up" orientation to point along the real
+	# surface normal - identity when n IS up (the original flat-deck
+	# case), smoothly tilted for anything angled. One formula covers both,
+	# no separate "is this exactly flat" branch needed.
+	plate_root.transform = Transform3D(Basis(Quaternion(Vector3.UP, n)), flush_position - n * embed_depth)
+
+	var plate_radius = max(0.12, base_size.x * 0.42)
+	var plate_thickness = max(0.04, base_size.y * 0.08)
+	var plate_mat = StandardMaterial3D.new()
+	plate_mat.albedo_color = Color(0.16, 0.16, 0.17)
+
+	var disc = MeshInstance3D.new()
+	var disc_cyl = CylinderMesh.new()
+	disc_cyl.top_radius = plate_radius
+	disc_cyl.bottom_radius = plate_radius
+	disc_cyl.height = plate_thickness
+	disc.mesh = disc_cyl
+	disc.material_override = plate_mat
+	plate_root.add_child(disc)
+
+	# Raised center hub - reads as the swivel bearing the post actually
+	# turns in, not just a flat washer.
+	var hub = MeshInstance3D.new()
+	var hub_cyl = CylinderMesh.new()
+	hub_cyl.top_radius = plate_radius * 0.38
+	hub_cyl.bottom_radius = plate_radius * 0.44
+	hub_cyl.height = plate_thickness * 1.6
+	hub.mesh = hub_cyl
+	hub.material_override = plate_mat
+	hub.position = Vector3(0, plate_thickness * 0.55, 0)
+	plate_root.add_child(hub)
+
+	# Bolt ring around the rim - the actual "this is bolted to the hull"
+	# greeble detail Chris asked for.
+	var bolt_mat = StandardMaterial3D.new()
+	bolt_mat.albedo_color = Color(0.24, 0.24, 0.26)
+	var bolt_count = 6
+	for i in range(bolt_count):
+		var angle = i * TAU / bolt_count
+		var bolt = MeshInstance3D.new()
+		var bolt_cyl = CylinderMesh.new()
+		bolt_cyl.top_radius = plate_radius * 0.09
+		bolt_cyl.bottom_radius = plate_radius * 0.09
+		bolt_cyl.height = plate_thickness * 1.8
+		bolt.mesh = bolt_cyl
+		bolt.material_override = bolt_mat
+		bolt.position = Vector3(cos(angle) * plate_radius * 0.78, plate_thickness * 0.2, sin(angle) * plate_radius * 0.78)
+		plate_root.add_child(bolt)
+
+	return plate_root
+
 static func rebuild_visual(module: Node3D):
 	if not module or not module.has_meta("module_data"): return
 	var data = module.get_meta("module_data")
@@ -1378,7 +1458,7 @@ static func rebuild_visual(module: Node3D):
 	if catalog_data:
 		build_visual(data.type_id, module, catalog_data.size, catalog_data.color, data.tweaks)
 		if module.has_meta("mount_style"):
-			add_mount_hardware(module, module.get_meta("mount_style"), catalog_data.size)
+			add_mount_hardware(module, module.get_meta("mount_style"), catalog_data.size, module.get_meta("mount_normal", Vector3.UP))
 
 static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: Dictionary, base_size: Vector3):
 	var children = parent.get_children().filter(func(c): return c is MeshInstance3D)
