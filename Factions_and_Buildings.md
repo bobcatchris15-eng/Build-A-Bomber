@@ -38,3 +38,38 @@ Factions in this game are primarily an **aesthetic choice**, determining the vis
 - **Aesthetic:** 1980s space-marine utility. Exaggerated shoulder pads on mechs, chunky standardized geometries, giant exposed power cables, and loud primary colors.
 - **Passive Bonus:** *Overbuilt Infrastructure.* All static buildings and foundations are entirely self-powered (they do not drain from the global Energy resource pool). Additionally, their core HQ slowly generates a steady drip of resources even if no nodes are actively captured.
 - **Playstyle:** Heavily favors "Turtling" and expansive base building, allowing them to construct massive, energy-hungry defensive batteries without crippling their economy.
+
+### 4. Faction D: The Scavengers
+- **Aesthetic:** Patchwork salvage culture. Mismatched rusty-brown armor plating stripped from a dozen other factions' wrecks, visible weld seams, and the heaviest wear/patina in the roster - nothing looks factory-fresh.
+- **Passive Bonus:** *10% reduction in Metal cost on everything built* (units, buildings, and defenses alike).
+- **Playstyle:** Out-produces opponents through sheer volume rather than per-unit quality - more hulls per resource node, more waves, more attrition.
+
+### 5. Faction E: The Zealots
+- **Aesthetic:** Fanatical crusader iconography in deep crimson and black with gold ceremonial trim - and, tellingly, almost no wear at all. Their hardware is maintained (or replaced) with religious devotion regardless of how fragile it actually is.
+- **Passive Bonus:** *10% increase to all weapon DPS, but 10% reduction in max HP.*
+- **Playstyle:** A glass-cannon faction - hits noticeably harder per engagement but can't out-tank a straight fight, rewarding aggressive alpha-strikes and punishing overextension.
+
+### 6. Faction F: The Nomads
+- **Aesthetic:** Desert-caravan wanderers - sandy tan hulls with turquoise trim, moderate weathering consistent with a culture that's always on the move rather than dug into one base.
+- **Passive Bonus:** *15% increase to Harvester extraction rate* (resources per trip, not movement speed).
+- **Playstyle:** Out-economizes rather than out-fights early, translating a faster-growing resource lead into a numbers advantage later in the match.
+
+### 7. Faction G: The Cartel
+- **Aesthetic:** Sleek smuggler's gloss - deep purple and black with a high-metallic, low-wear finish, like hardware that was never meant to be inspected too closely.
+- **Passive Bonus:** *8% increase to all weapon fire range.*
+- **Playstyle:** Wins engagements by opening fire first and disengaging before the enemy can close the distance - a kiting-and-poking playstyle rather than a brawling one.
+
+### 8. Faction H: The Engineers
+- **Aesthetic:** Safety-yellow-and-gray construction-crew utilitarian - hazard chevrons, exposed hydraulics, the look of hardware built by people who actually read the manual.
+- **Passive Bonus:** *15% reduction in Factory build time* for every queued unit.
+- **Playstyle:** Reinforces losses and reacts to the battlefield faster than anyone else - the same design queued twice arrives noticeably sooner.
+
+### 9. Faction I: The Berserkers
+- **Aesthetic:** Dark red-and-black war paint over battle-scarred plating - the heaviest wear in the roster alongside the Scavengers, but from combat damage left un-repaired on purpose rather than salvage.
+- **Passive Bonus:** *10% increase to move speed, but 10% reduction in vision range.*
+- **Playstyle:** Charges in faster than the enemy can react, at the cost of scouting - a Berserker force sees less of the map but closes distance before the opponent can set up a defense.
+
+### 10. Faction J: Cybernetics
+- **Aesthetic:** Clean electric-blue-and-white synthetic chrome - the lowest wear in the entire roster, hardware that looks less "built" than "grown."
+- **Passive Bonus:** *20% increase to team Energy capacity.*
+- **Playstyle:** Never worries about Energy deficit the way other factions do, freeing up design slots for energy-hungry weapons (tesla_coil/ion_cannon/arc_projector) and generators other factions would need to prioritize.

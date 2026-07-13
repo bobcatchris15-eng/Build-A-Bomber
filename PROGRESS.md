@@ -4,6 +4,32 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (new session, cont'd 2) — Faction visual identity system + 10-faction expansion
+
+Big pivot from Chris: from mechanics-only work into real visual polish, plus expanding the faction roster from 3 to 10. Three pieces, each committed separately.
+
+### 1. Shader-based faction material system (commit 1e17628)
+
+New `shaders/hull_faction_material.gdshader` - ONE spatial shader shared across every faction and every armor material, replacing two identical StandardMaterial3D-per-armor-material blocks that had been copy-pasted between `blueprint_manager.gd` and `module_placer.gd`. Faction (paint color + procedural wear/patina, no texture assets - a value-noise grunge mask instead) and armor material (metallic/roughness/shield character) are independent shader parameters, consolidated behind one shared `hull_material_builder.gd`. Chris's explicit steer: avoid hand-authored per-faction art given how fragile the Blender import pipeline has been all week - a shader took that risk off the table entirely. `energy_shielding`'s glow now tints to whichever faction wears it instead of a hardcoded blue, a nice side-unification.
+
+**Real regression found and fixed while verifying:** `battle_unit.gd`'s `_flash_hull()` and `player_vehicle.gd`'s equivalent both assumed the hull's `material_override` was a `StandardMaterial3D` and read/wrote `.albedo_color` directly for the "flash red on hit" feedback - silently broken (null-property errors) the instant hulls switched to the new ShaderMaterial. Fixed with a `flash_amount` shader uniform and a material-type branch in both call sites.
+
+### 2. 10-faction roster (same commit)
+
+New `faction_catalog.gd` is the single source of truth (visual identity + mechanical passive) for all 10 factions, replacing scattered `if faction == "technocrats": ...` branches duplicated across 6 files. 7 new factions, each with one small real bonus hooked into the actual gameplay system it touches (not just a Design Lab stat preview): **Scavengers** (-10% metal cost, baked into roster entries once faction is known), **Zealots** (+10% weapon DPS / -10% max HP, in `auto_weapon.gd`/`battle_unit.gd`'s real HP calc), **Nomads** (+15% harvester extraction per tick), **Cartel** (+8% weapon fire_range), **Engineers** (-15% factory build time, both player and enemy_ai queue paths), **Berserkers** (+10% speed / -10% vision), **Cybernetics** (+20% Energy capacity). `Factions_and_Buildings.md` documents all 7 in the existing Aesthetic/Passive Bonus/Playstyle format.
+
+### 3. Brushed-aluminum UI chrome (commit 6c2d5ca)
+
+New `shaders/brushed_aluminum_panel.gdshader` (2D counterpart to the hull shader, same procedural-noise approach) + `ui_theme.gd`'s single `apply_brushed_panel()` helper, applied to MainMenu/MapSelect backgrounds, the Design Lab sidebar panel, the Skirmish HUD's top info bar + build bar, and MatchSetup's background (which live-retints the instant the player changes their faction dropdown selection - the clearest possible proof the theme is faction-driven).
+
+### Verification
+
+89/89 automated tests green (3 new this batch: a material/shader test proving all 10 factions share one shader with correct params including a real reconstructed hull, a UI-theme test proving live re-theming through a real dropdown interaction, and a mechanical-bonus test proving Zealots/Cartel/Cybernetics/Scavengers' passives through real spawned units and team economy calls - not just catalog numbers). Windowed screenshots: 5 factions' identical `medium_hull` mesh side by side with visibly distinct paint+wear, and 6 screen/faction combinations showing the UI chrome shift color.
+
+Scope calls (why battlefield.gd's separate HP formula wasn't touched, why UI theming stopped at panel backgrounds rather than re-skinning every widget, why the pre-existing industrialists armor-weight bonus's real-vs-cosmetic scope was left alone) logged in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd) — Full Skirmish pre-match settings flow
 
 Second half of this session's batch: a real pre-match settings screen, not just the Design Lab's per-vehicle faction dropdown.
