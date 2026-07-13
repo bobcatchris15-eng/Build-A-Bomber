@@ -4,6 +4,18 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (cont'd 2) — Final verification: air/sea hull + module library expansion
+
+Wraps up the air/sea library batch (4 hulls, 2 locomotion types, 6 mobility modules - see the two entries below this one).
+
+**Full integration check**, not just the individual per-piece verifications: `airship_hull` + `buoyant_envelope` locomotion + `wing` + `ship_screw` modules placed together through the real Design Lab UI path in one design, confirming all three new-this-batch systems (buoyant/amphibious locomotion, mobility-bonus modules, the new hull) compose without conflict - 2 locomotion children (the buoyant_envelope pair) and 2 other module children (wing, ship_screw) all present simultaneously, real aggregated stats (155 HP, 96 weight, 95 metal/40 crystal). Screenshot: `progress_captures/2026-07-13/final_air_sea_batch/airship_buoyant_wing_screw.png`.
+
+**Final regression pass:** 70/70 automated tests green, including all 3 new tests added across this batch - per-hull verification didn't need dedicated tests (it's pure content), but every new mechanic did: the amphibious navmesh (a real path-length comparison proving water is genuinely crossable), the two new locomotion types' catalog differentiation (buoyant_envelope's thrust/capacity character vs. fixed_wing_engine, screw_drive's real spawn + trait composition), and the mobility-module capacity/thrust bonuses (an intentionally overloaded baseline so the bonus shows through unclamped).
+
+No blocking issues across the whole batch. Total new catalog entries this batch: 4 hulls, 2 locomotion types, 6 modules - 12 new placeable parts, all real spawn-pipeline verified.
+
+---
+
 ## 2026-07-13 (cont'd) — Air/sea library expansion, part 2: 6 new mobility modules
 
 Second half of the air/sea batch: attachable mobility modules that hook into the weight-capacity/thrust systems built two sessions ago, rather than full locomotion types.
