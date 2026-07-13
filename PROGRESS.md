@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 — Batch E items 2-4: wheels/legs/treads tweaks now have real, tradeoff-shaped stat effects
+
+Chris's batch, items 2-4: axle-count, leg-count, and tread-width tweaks needed to actually move stats, not just geometry.
+
+### What was found
+
+Wheels' axle-count was already fully wired (visual + stat). Legs' leg-count was visual-only (no stat effect). Treads' width boosted thrust and capacity together - not the "wider=more capacity/narrower=faster" tradeoff asked for.
+
+### The fix
+
+Split the shared `count_contrib` in `battle_unit.gd`'s `_recalculate_move_speed()` into separate `thrust_contrib`/`capacity_contrib` per type. Legs: more legs = more capacity, fewer legs = more thrust (agility tradeoff). Treads: width still drives capacity, but now ALSO drives thrust inversely (narrower = faster) and modulates the terrain-multiplier penalty directly (wider = less severe marsh/snow/sand penalty).
+
+**Verified:**
+- Full suite: **75/75 green** (1 new test - real spawned-instance counts via `module_placer.gd`, plus light-load/heavy-load stat scenarios proving the tradeoff actually flips the speed ranking depending on load, plus a terrain-multiplier check).
+- Visual: `progress_captures/2026-07-13/tweak_mechanics/` - wheels 2 vs 8, legs 2 vs 8, treads width 0.5 vs 2.5.
+
+**Commit checkpoint:** see git log.
+
+---
+
 ## 2026-07-13 — Batch E item 1: locomotion visuals now scale relative to hull size
 
 Chris's next batch, item 1: fix the scale mismatch flagged (not fixed) in the visual bug pass below - locomotion visuals were built at a fixed absolute size regardless of the hull they're mounted to (giant legs on `flying_wing_hull`, tiny `helicopter_rotors` on `heavy_cruiser_hull`).

@@ -306,17 +306,43 @@ func _recalculate_move_speed():
 			total_weight += data.get_weight()
 			if data.category == "locomotion":
 				has_locomotion = true
-				var count_contrib = 1.0
+				# Batch E: axle-count/leg-count/tread-width tweaks now carry
+				# a REAL tradeoff instead of a single shared multiplier -
+				# thrust and capacity can move in opposite directions.
+				# wheels/helicopter_rotors: more of them = proportionally
+				# more of both (a straightforward "bigger rig" scale-up,
+				# no tradeoff - matches how axle count already worked
+				# before this pass).
+				# legs: more legs = more capacity (broader stance, more
+				# load-bearing contact points) but LESS thrust per leg
+				# once you're past 4 (more mechanical mass/drag to
+				# coordinate) - fewer legs trades stability for agility,
+				# per Chris's ask.
+				# tracked_treads: width already drove capacity before
+				# (wider = more contact area = more capacity, kept as-is);
+				# now ALSO trades against thrust (wider = more friction/
+				# less top speed, narrower = lighter and faster) instead
+				# of boosting both together.
+				var thrust_contrib = 1.0
+				var capacity_contrib = 1.0
 				if locomotion_type == "wheels" or locomotion_type == "helicopter_rotors":
-					count_contrib = float(locomotion_settings.get("count", 4)) / 4.0
+					var c = float(locomotion_settings.get("count", 4)) / 4.0
+					thrust_contrib = c
+					capacity_contrib = c
+				elif locomotion_type == "legs":
+					var leg_count = float(locomotion_settings.get("count", 4))
+					capacity_contrib = leg_count / 4.0
+					thrust_contrib = 1.0 + (4.0 - leg_count) / 8.0
 				elif locomotion_type == "tracked_treads":
-					count_contrib = locomotion_settings.get("width", 1.0)
-				motor_thrust += ModuleCatalog.get_thrust_coefficient(data.type_id) * child.scale.x * child.scale.z * count_contrib
-				# Weight capacity scales with the same size/count factors as
-				# thrust (a bigger/wider tread or a 6-wheel setup carries
-				# more than a stock 4-wheel one), per-locomotor-type base
-				# from ModuleCatalog.get_base_weight_capacity().
-				total_weight_capacity += ModuleCatalog.get_base_weight_capacity(data.type_id) * child.scale.x * child.scale.z * count_contrib
+					var width = locomotion_settings.get("width", 1.0)
+					capacity_contrib = width
+					thrust_contrib = 1.0 + (1.0 - width) * 0.5
+				motor_thrust += ModuleCatalog.get_thrust_coefficient(data.type_id) * child.scale.x * child.scale.z * thrust_contrib
+				# Weight capacity scales with the size/count/width factor
+				# above (a bigger/wider tread, more legs, or a 6-wheel
+				# setup carries more than a stock 4-wheel one), per-
+				# locomotor-type base from ModuleCatalog.get_base_weight_capacity().
+				total_weight_capacity += ModuleCatalog.get_base_weight_capacity(data.type_id) * child.scale.x * child.scale.z * capacity_contrib
 			# Mobility add-on modules (wing/thruster/propeller_prop/
 			# pusher_prop/paddle_wheel/ship_screw) - attachable, not a
 			# primary locomotion choice, so they contribute regardless of
@@ -374,6 +400,18 @@ func _recalculate_terrain_speed_multiplier():
 		terrain_speed_multiplier = 1.0
 		return
 	terrain_speed_multiplier = ModuleCatalog.get_terrain_speed_multiplier(locomotion_type, surface_type)
+	# Batch E: tread width now also modulates the terrain multiplier itself,
+	# not just capacity/thrust - a wider track spreads weight over more
+	# contact area (real flotation, less sinking), so it eats further into
+	# whatever penalty the base table already assigns; a narrower track
+	# digs in more and eats further into it. Only shifts the number tracked_
+	# treads already has for this surface, doesn't grant terrain immunity
+	# (clamped at 1.2, so even a max-width tread stays "notably better",
+	# not "as good as being on pavement").
+	if locomotion_type == "tracked_treads":
+		var width = locomotion_settings.get("width", 1.0)
+		var width_delta = (width - 1.0) * 0.25
+		terrain_speed_multiplier = clamp(terrain_speed_multiplier + width_delta, 0.15, 1.2)
 
 func _create_selection_ring(base_size: Vector3):
 	selection_ring = MeshInstance3D.new()

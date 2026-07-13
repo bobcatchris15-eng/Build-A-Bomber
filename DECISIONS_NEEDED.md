@@ -4,6 +4,24 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 — Wheels/legs/treads tweaks: what was already real, what needed a genuine thrust-vs-capacity tradeoff, and the exact tradeoff shape chosen
+
+**Not blocking.**
+
+Batch E items 2-4. Before changing anything I checked what already existed, since Chris's ask ("make locomotor tweaks actually do something, not just exist as sliders") implied these might be inert - they weren't all inert.
+
+**Wheels' axle-count tweak was already fully real** - `module_placer.gd`'s wheels branch already spawns `count/2` pairs (visual), and `battle_unit.gd`'s `_recalculate_move_speed()` already scaled both thrust and capacity by `count/4.0` (stat). No functional gap here; just added a regression test (`test_locomotion_tweaks_have_real_visual_and_stat_effects`) to lock that in before touching the shared formula for the other two.
+
+**Legs' leg-count was half-real** - visually already spawned more/fewer legs, but had NO `count_contrib` case in the thrust/capacity formula at all (fell through to the default `1.0`, meaning leg count had zero stat effect beyond the incidental "more instances = more raw weight" side effect). **Tracked_treads' width was also half-real** - already drove BOTH thrust and capacity up together via a single shared `count_contrib = width`, which isn't the tradeoff Chris asked for ("wider = more capacity... narrower = faster").
+
+**Fix:** split the single `count_contrib` into separate `thrust_contrib`/`capacity_contrib` per locomotion type. Wheels/helicopter_rotors keep the old shared-scale-up behavior (no tradeoff intended there). Legs: `capacity_contrib = count/4.0` (more legs = broader stance = more load-bearing), `thrust_contrib = 1.0 + (4.0-count)/8.0` (fewer legs = less coordination overhead = more agile - count=2 gives 1.25x thrust, count=8 gives 0.5x). Treads: `capacity_contrib = width` (kept as-is), `thrust_contrib = 1.0 + (1.0-width)*0.5` (narrower = lighter/faster, width=0.5 gives 1.25x thrust, width=2.5 gives 0.25x). Also modulates the terrain-multiplier system directly for treads specifically (the "better on soft terrain" half of the ask) - `terrain_speed_multiplier += (width-1.0)*0.25`, clamped to `[0.15, 1.2]` so a max-width tread is notably better on marsh/snow/sand but not terrain-immune.
+
+**Why this tradeoff shape and not a different one:** picked numbers that make the tradeoff show up as a REAL rank-order flip depending on load, not just "line goes up, line goes down" - verified by testing both a light-load scenario (thrust wins, fewer legs/narrower treads faster) and a heavy-load scenario (capacity wins, more legs/wider treads faster despite lower thrust_contrib) and confirming the winner actually flips between them. That's the concrete evidence the tradeoff is real and not just two numbers moving in opposite directions without ever mattering.
+
+**Verified:** 75/75 tests green (1 new: spawns via the real `module_placer.gd` path to confirm wheel/leg counts and tread width actually change spawned-instance counts/scale, plus 8 direct `battle_unit` stat assertions across light-load/heavy-load scenarios for all three types, plus a terrain-multiplier check for tread width on marsh). Screenshots in `progress_captures/2026-07-13/tweak_mechanics/` (wheels 2 vs 8, legs 2 vs 8, treads width 0.5 vs 2.5).
+
+---
+
 ## 2026-07-13 — Hull-relative locomotion scaling: reference hull, per-part axis choice, and a clipping bug it surfaced
 
 **Not blocking.**

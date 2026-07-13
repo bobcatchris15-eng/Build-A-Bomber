@@ -96,6 +96,7 @@ func _init():
 	success = success and await test_weight_vs_locomotion_capacity_penalty()
 	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
 	success = success and await test_terrain_types_differentiate_locomotion()
+	success = success and await test_locomotion_tweaks_have_real_visual_and_stat_effects()
 
 	print("\n==============================================")
 	if success:
@@ -4567,4 +4568,197 @@ func test_mobility_addon_modules_boost_capacity_and_thrust() -> bool:
 
 	baseline.queue_free(); winged.queue_free(); thrusted.queue_free(); propped.queue_free()
 	print("  [PASS] Mobility add-on modules (wing/thruster/propeller_prop) each contribute a real, measurable capacity/thrust bonus beyond the base locomotion alone.")
+	return true
+
+func test_locomotion_tweaks_have_real_visual_and_stat_effects() -> bool:
+	print("Running Test Suite: Locomotion Tweaks (axle-count/leg-count/tread-width) Have Real Visual + Stat Effects...")
+	var ModulePlacerScript = preload("res://scripts/module_placer.gd")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var controller_script = preload("res://scripts/fake_surface_controller.gd")
+
+	# --- Visual: count/width tweaks actually change spawned geometry, not
+	# just the underlying stats - through the real module_placer.gd path. ---
+	var hull = StaticBody3D.new()
+	hull.name = "Hull"
+	var mesh_inst = MeshInstance3D.new()
+	var box = BoxMesh.new()
+	box.size = Vector3(4.0, 1.0, 6.0)
+	mesh_inst.mesh = box
+	mesh_inst.name = "MeshInstance3D"
+	hull.add_child(mesh_inst)
+	var col = CollisionShape3D.new()
+	var col_box = BoxShape3D.new()
+	col_box.size = Vector3(4.0, 1.0, 6.0)
+	col.shape = col_box
+	col.name = "CollisionShape3D"
+	hull.add_child(col)
+	hull.set_meta("base_hull_size", Vector3(4.0, 1.0, 6.0))
+	hull.set_meta("hull_scale", Vector3(1, 1, 1))
+	hull.set_meta("type_id", "medium_hull")
+	root.add_child(hull)
+	await process_frame
+
+	var placer = Node3D.new()
+	placer.set_script(ModulePlacerScript)
+	placer.hull = hull
+	root.add_child(placer)
+	await process_frame
+
+	var count_children = func(type_id: String) -> int:
+		var n = 0
+		for child in hull.get_children():
+			if child.has_meta("module_data") and child.get_meta("module_data").type_id == type_id:
+				n += 1
+		return n
+
+	placer.update_locomotion("wheels", {"size": 1.0, "count": 2})
+	await process_frame
+	var wheels_low_count = count_children.call("wheels")
+	placer.update_locomotion("wheels", {"size": 1.0, "count": 8})
+	await process_frame
+	var wheels_high_count = count_children.call("wheels")
+	if wheels_high_count <= wheels_low_count:
+		print("  [FAIL] wheels axle-count tweak didn't change the number of spawned wheel instances (low=", wheels_low_count, " high=", wheels_high_count, ")")
+		placer.queue_free(); hull.queue_free()
+		return false
+
+	placer.update_locomotion("legs", {"size": 1.0, "count": 2})
+	await process_frame
+	var legs_low_count = count_children.call("legs")
+	placer.update_locomotion("legs", {"size": 1.0, "count": 8})
+	await process_frame
+	var legs_high_count = count_children.call("legs")
+	if legs_high_count <= legs_low_count:
+		print("  [FAIL] legs leg-count tweak didn't change the number of spawned leg instances (low=", legs_low_count, " high=", legs_high_count, ")")
+		placer.queue_free(); hull.queue_free()
+		return false
+
+	placer.update_locomotion("tracked_treads", {"width": 0.5})
+	await process_frame
+	var tread_narrow_scale = 0.0
+	for child in hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "tracked_treads":
+			tread_narrow_scale = child.scale.x
+			break
+	placer.update_locomotion("tracked_treads", {"width": 2.5})
+	await process_frame
+	var tread_wide_scale = 0.0
+	for child in hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "tracked_treads":
+			tread_wide_scale = child.scale.x
+			break
+	if tread_wide_scale <= tread_narrow_scale:
+		print("  [FAIL] tracked_treads width tweak didn't visually widen the tread (narrow_scale=", tread_narrow_scale, " wide_scale=", tread_wide_scale, ")")
+		placer.queue_free(); hull.queue_free()
+		return false
+
+	placer.queue_free()
+	hull.queue_free()
+	await process_frame
+
+	# --- Stat: tweaks produce a real, correctly-directioned move_speed
+	# effect, using the mobility-addon test's ballast pattern to isolate
+	# thrust-only vs. capacity/overload-only effects. ---
+	var make_unit = func(loco_type: String, settings: Dictionary, ballast_weight: float) -> Node:
+		var unit = CharacterBody3D.new()
+		unit.set_script(BattleUnitScript)
+		root.add_child(unit)
+		unit.locomotion_type = loco_type
+		unit.locomotion_settings = settings
+		var fake_hull = Node3D.new()
+		unit.add_child(fake_hull)
+		unit.hull_node = fake_hull
+
+		var loco_child = Node3D.new()
+		var loco_data = ModuleData.new()
+		loco_data.type_id = loco_type
+		loco_data.category = "locomotion"
+		loco_data.base_weight = 50.0
+		loco_child.set_meta("module_data", loco_data)
+		fake_hull.add_child(loco_child)
+
+		var ballast_child = Node3D.new()
+		var ballast_data = ModuleData.new()
+		ballast_data.type_id = "armor_plating"
+		ballast_data.category = "armor"
+		ballast_data.base_weight = ballast_weight
+		ballast_child.set_meta("module_data", ballast_data)
+		fake_hull.add_child(ballast_child)
+
+		unit._recalculate_move_speed()
+		return unit
+
+	# Wheels regression check: axle count should still raise BOTH thrust and
+	# capacity together (no tradeoff) exactly like before this batch's
+	# thrust/capacity split refactor - same heavy-ballast overload pattern
+	# as test_mobility_addon_modules_boost_capacity_and_thrust so the
+	# capacity increase shows up as a real, unclamped speed gain.
+	var wheels_2 = make_unit.call("wheels", {"count": 2}, 400.0)
+	var wheels_8 = make_unit.call("wheels", {"count": 8}, 400.0)
+	if wheels_8.move_speed <= wheels_2.move_speed:
+		print("  [FAIL] more wheel axles should raise move_speed (more thrust AND more capacity, less overload). count=2:", wheels_2.move_speed, " count=8:", wheels_8.move_speed)
+		return false
+
+	# Legs, light load (no overload either way): fewer legs should be
+	# FASTER (higher thrust_contrib - agility tradeoff), proving the
+	# leg-count tweak now moves thrust, not just capacity.
+	var legs_2_light = make_unit.call("legs", {"count": 2}, 50.0)
+	var legs_8_light = make_unit.call("legs", {"count": 8}, 50.0)
+	if legs_2_light.move_speed <= legs_8_light.move_speed:
+		print("  [FAIL] fewer legs should be faster under light load (higher thrust_contrib). count=2:", legs_2_light.move_speed, " count=8:", legs_8_light.move_speed)
+		return false
+
+	# Legs, heavy load (overload isolation): MORE legs should win here
+	# despite lower thrust_contrib, because more legs means more weight
+	# capacity and the 2-leg case is badly overloaded at this weight.
+	# Proves the capacity side of the tradeoff is real too, not just thrust.
+	var legs_2_heavy = make_unit.call("legs", {"count": 2}, 600.0)
+	var legs_8_heavy = make_unit.call("legs", {"count": 8}, 600.0)
+	if legs_8_heavy.move_speed <= legs_2_heavy.move_speed:
+		print("  [FAIL] more legs should win under heavy load (more capacity outweighs lower thrust_contrib). count=2:", legs_2_heavy.move_speed, " count=8:", legs_8_heavy.move_speed)
+		return false
+
+	# Treads, light load: narrower should be FASTER (higher thrust_contrib).
+	var treads_narrow_light = make_unit.call("tracked_treads", {"width": 0.5}, 50.0)
+	var treads_wide_light = make_unit.call("tracked_treads", {"width": 2.5}, 50.0)
+	if treads_narrow_light.move_speed <= treads_wide_light.move_speed:
+		print("  [FAIL] narrower treads should be faster under light load. narrow=", treads_narrow_light.move_speed, " wide=", treads_wide_light.move_speed)
+		return false
+
+	# Treads, heavy load: WIDER should win here (more capacity, less/no
+	# overload penalty outweighs its lower thrust_contrib).
+	var treads_narrow_heavy = make_unit.call("tracked_treads", {"width": 0.5}, 600.0)
+	var treads_wide_heavy = make_unit.call("tracked_treads", {"width": 2.5}, 600.0)
+	if treads_wide_heavy.move_speed <= treads_narrow_heavy.move_speed:
+		print("  [FAIL] wider treads should win under heavy load (more capacity). narrow=", treads_narrow_heavy.move_speed, " wide=", treads_wide_heavy.move_speed)
+		return false
+
+	for u in [wheels_2, wheels_8, legs_2_light, legs_8_light, legs_2_heavy, legs_8_heavy, treads_narrow_light, treads_wide_light, treads_narrow_heavy, treads_wide_heavy]:
+		u.queue_free()
+
+	# --- Terrain multiplier: tread width should modulate the marsh
+	# penalty (wider = less severe), not just the flat catalog number. ---
+	var measure_terrain = func(width: float) -> float:
+		var controller = Node.new()
+		controller.set_script(controller_script)
+		controller.surface_type = "marsh"
+		root.add_child(controller)
+		var unit = CharacterBody3D.new()
+		unit.set_script(BattleUnitScript)
+		controller.add_child(unit)
+		unit.locomotion_type = "tracked_treads"
+		unit.locomotion_settings = {"width": width}
+		unit.global_position = Vector3.ZERO
+		unit._recalculate_terrain_speed_multiplier()
+		var result = unit.terrain_speed_multiplier
+		controller.queue_free()
+		return result
+
+	var marsh_narrow = measure_terrain.call(0.5)
+	var marsh_wide = measure_terrain.call(2.5)
+	if marsh_wide <= marsh_narrow:
+		print("  [FAIL] wider treads should suffer less of a marsh speed penalty than narrower ones. narrow_multiplier=", marsh_narrow, " wide_multiplier=", marsh_wide)
+		return false
+
+	print("  [PASS] Wheels axle-count, legs leg-count, and tracked_treads width tweaks all produce real spawned-geometry changes and real, correctly-directioned move_speed/terrain effects - not just sliders.")
 	return true
