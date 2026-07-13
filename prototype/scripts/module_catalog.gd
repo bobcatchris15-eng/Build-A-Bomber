@@ -1465,6 +1465,33 @@ const SHALLOW_WATER_DRAUGHT_THRESHOLD: float = 1.0
 static func get_hull_draught(hull_type_id: String) -> float:
 	return get_module_data(hull_type_id).get("draught", HULL_DRAUGHT_DEFAULT)
 
+# Size-tiered manufactories (base-building batch): which of the 3 production
+# tiers (light/medium/heavy) a mobile hull belongs to, by its own base
+# weight - domain-agnostic on purpose (a small_boat_hull and an
+# interceptor_hull both land in "light" despite one being naval and one
+# ground; a heavy_cruiser_hull and a heavy_hull both land in "heavy"), per
+# Chris's explicit correction away from an earlier land/sea/air-specific
+# shipyard/airfield idea. Foundations (pillbox/tower/fortress_wall) return
+# "" - static defenses are built directly via the Armory placement flow,
+# never queued from a manufactory at all, so a tier is meaningless for them.
+# Breakpoints chosen to split the current 12 mobile hulls into even
+# (4/4/4) groups - see DECISIONS_NEEDED.md for the exact per-hull mapping
+# and reasoning.
+const HULL_TIER_LIGHT_MAX_WEIGHT: float = 150.0
+const HULL_TIER_MEDIUM_MAX_WEIGHT: float = 400.0
+
+static func get_hull_size_tier(hull_type_id: String) -> String:
+	var data = get_module_data(hull_type_id)
+	if data.get("is_foundation", false):
+		return ""
+	var weight = data.get("weight", 0.0)
+	if weight <= HULL_TIER_LIGHT_MAX_WEIGHT:
+		return "light"
+	elif weight <= HULL_TIER_MEDIUM_MAX_WEIGHT:
+		return "medium"
+	else:
+		return "heavy"
+
 # Visual bug pass finding: module_placer.gd's underside-mount locomotion
 # placement (wheels/legs/hover_engine/anti_grav) assumes a hull's visual
 # bottom sits exactly at its collision box's -halfHeight - true for the

@@ -36,8 +36,7 @@ var energy_pool = {
 const ENERGY_TICK_INTERVAL: float = 3.0
 const ENERGY_UPKEEP_PER_STATIC_BUILDING: float = 3.0
 # The HQ has its own baseline power plant - without this, every match
-# starts in automatic Energy deficit from frame one (0 capacity vs. 3
-# starting static buildings' upkeep = 9.0), applying the factory
+# starts in automatic Energy deficit from frame one, applying the factory
 # build-speed penalty before a player has had any chance to build a
 # generator. Found via the visual regression pass (skirmish_hud capture
 # showed "DEFICIT: builds slower!" at match start, before any real
@@ -45,7 +44,12 @@ const ENERGY_UPKEEP_PER_STATIC_BUILDING: float = 3.0
 # breakeven-to-slightly-ahead by default, and generators become a genuine
 # optional upgrade (more energy for energy weapons) rather than a
 # mandatory tax just to avoid a permanent penalty.
-const ENERGY_HQ_BASELINE_CAPACITY: float = 10.0
+# Re-tuned for the base-building batch: starting static buildings grew from
+# 3 (hq/factory/refinery) to 5 (hq/refinery/light+medium+heavy manufactory,
+# see _spawn_starting_manufactories()) - 5 * ENERGY_UPKEEP_PER_STATIC_BUILDING
+# = 15.0, so this needed to rise from 10.0 to keep the same ~1.0 headroom
+# margin, not just the old 3-building value.
+const ENERGY_HQ_BASELINE_CAPACITY: float = 16.0
 var energy_tick_timer: float = 0.0
 
 # Fog-of-war (built this pass): real vision-radius system, no supporting
@@ -126,7 +130,7 @@ var drag_select_start: Vector2 = Vector2.ZERO
 var is_drag_selecting: bool = false
 
 # Building placement state
-var placing: Dictionary = {} # {kind: "refinery"/"factory"/"defense", blueprint (opt), cost_metal, cost_crystal}
+var placing: Dictionary = {} # {kind: "refinery"/"light_manufactory"/"medium_manufactory"/"heavy_manufactory"/"defense", blueprint (opt), cost_metal, cost_crystal}
 var placement_ghost: MeshInstance3D = null
 
 # UI
@@ -230,7 +234,7 @@ func _recalc_energy_economy():
 			for m in b.get_active_modules():
 				if m.has_meta("module_data") and m.get_meta("module_data").category == "generator":
 					capacity += m.get_meta("module_data").get_energy_capacity()
-			var is_static_building = b.kind in ["hq", "refinery", "factory"] or (b.kind == "defense" and is_instance_valid(b.defense_hull) and ModuleCatalog.is_foundation(b.defense_hull.get_meta("type_id", "pillbox_foundation")))
+			var is_static_building = b.kind in ["hq", "refinery", "light_manufactory", "medium_manufactory", "heavy_manufactory"] or (b.kind == "defense" and is_instance_valid(b.defense_hull) and ModuleCatalog.is_foundation(b.defense_hull.get_meta("type_id", "pillbox_foundation")))
 			if not is_static_building: continue
 			if FactionCatalog.get_passive(faction, "energy_upkeep_exempt", false): continue
 			upkeep += ENERGY_UPKEEP_PER_STATIC_BUILDING
@@ -541,11 +545,11 @@ func _spawn_bases():
 	var e_start = current_map.enemy_start
 
 	player_hq = _spawn_prefab("hq", PLAYER_TEAM, p_start.hq, player_faction)
-	_spawn_prefab("factory", PLAYER_TEAM, p_start.factory, player_faction)
+	_spawn_starting_manufactories(PLAYER_TEAM, p_start.factory, player_faction)
 	_spawn_prefab("refinery", PLAYER_TEAM, p_start.refinery, player_faction)
 
 	enemy_hq = _spawn_prefab("hq", ENEMY_TEAM, e_start.hq, enemy_faction)
-	_spawn_prefab("factory", ENEMY_TEAM, e_start.factory, enemy_faction)
+	_spawn_starting_manufactories(ENEMY_TEAM, e_start.factory, enemy_faction)
 	_spawn_prefab("refinery", ENEMY_TEAM, e_start.refinery, enemy_faction)
 
 	player_hq.died.connect(_on_hq_died)
@@ -558,6 +562,21 @@ func _spawn_bases():
 	var e_harv = _find_harvester_blueprint(enemy_roster)
 	if not e_harv.is_empty():
 		spawn_unit(e_harv, ENEMY_TEAM, e_start.harvester)
+
+# Base-building batch: size-tiered manufactories replace the single old
+# "factory" prefab. Every match starts with all 3 tiers already built in a
+# small cluster around the map's single authored `factory` start position
+# (deliberately NOT an unlockable progression - see DECISIONS_NEEDED.md for
+# why) - the Light Manufactory keeps the exact original spawn point (so
+# every map's already-verified factory position stays legal/unblocked
+# unchanged), Medium/Heavy are offset to either side of it. Players (and
+# the AI, which never places new buildings) can still build additional
+# manufactories of any tier via the build bar for parallel production
+# capacity, same as the old single "Factory" button already allowed.
+func _spawn_starting_manufactories(team: int, factory_pos: Vector3, faction: String):
+	_spawn_prefab("light_manufactory", team, factory_pos, faction)
+	_spawn_prefab("medium_manufactory", team, factory_pos + Vector3(8, 0, 0), faction)
+	_spawn_prefab("heavy_manufactory", team, factory_pos + Vector3(-8, 0, 0), faction)
 
 func _find_harvester_blueprint(from_roster: Array) -> Dictionary:
 	for entry in from_roster:
@@ -592,9 +611,18 @@ func spawn_defense(blueprint_data: Dictionary, team: int, pos: Vector3) -> Stati
 	b.setup_defense(blueprint_data, team, bp_manager)
 	return b
 
-func get_team_factory(team: int) -> Node:
+# tier: "" returns the first manufactory of ANY tier (backward-compatible
+# "just get me a factory" behavior, used by contexts that don't care which
+# tier - e.g. the map smoke test's generic production check); "light"/
+# "medium"/"heavy" returns only a manufactory of that exact tier, or null
+# if the team doesn't have one (e.g. it was destroyed mid-match).
+func get_team_factory(team: int, tier: String = "") -> Node:
 	for b in get_tree().get_nodes_in_group("buildings"):
-		if is_instance_valid(b) and not b.is_dead and b.team == team and b.kind == "factory":
+		if not is_instance_valid(b) or b.is_dead or b.team != team: continue
+		if tier == "":
+			if b.kind in ["light_manufactory", "medium_manufactory", "heavy_manufactory"]:
+				return b
+		elif b.kind == tier + "_manufactory":
 			return b
 	return null
 
@@ -688,8 +716,16 @@ func _build_ui():
 	build_bar.add_theme_constant_override("separation", 8)
 	scroll.add_child(build_bar)
 
-	_add_build_button("🏭 Factory\n200M 50C", Color(0.72, 0.55, 0.42), func():
-		_begin_placement({"kind": "factory", "cost_metal": 200, "cost_crystal": 50}))
+	# Size-tiered manufactories (base-building batch) - every match starts
+	# with one of each already built (_spawn_starting_manufactories()); these
+	# buttons let a player build MORE of a given tier for parallel production
+	# capacity, same as the old single "Factory" button already allowed.
+	_add_build_button("🏭 Light Manufactory\n150M 30C", Color(0.68, 0.6, 0.42), func():
+		_begin_placement({"kind": "light_manufactory", "cost_metal": 150, "cost_crystal": 30}))
+	_add_build_button("🏭 Medium Manufactory\n220M 55C", Color(0.72, 0.55, 0.42), func():
+		_begin_placement({"kind": "medium_manufactory", "cost_metal": 220, "cost_crystal": 55}))
+	_add_build_button("🏭 Heavy Manufactory\n320M 85C", Color(0.6, 0.42, 0.35), func():
+		_begin_placement({"kind": "heavy_manufactory", "cost_metal": 320, "cost_crystal": 85}))
 	_add_build_button("⛽ Refinery\n150M", Color(0.55, 0.62, 0.75), func():
 		_begin_placement({"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}))
 
@@ -753,9 +789,15 @@ func _flash_status(msg: String):
 
 func _queue_player_unit(entry: Dictionary):
 	if game_over: return
-	var factory = get_team_factory(PLAYER_TEAM)
+	# Size-tiered manufactories: which building this design can be queued
+	# from depends on its own hull's weight tier, not domain - a design on
+	# heavy_cruiser_hull needs a Heavy Manufactory exactly like one on
+	# heavy_hull would.
+	var hull_type = entry.blueprint.get("hull_type", "medium_hull")
+	var tier = ModuleCatalog.get_hull_size_tier(hull_type)
+	var factory = get_team_factory(PLAYER_TEAM, tier)
 	if not factory:
-		_flash_status("No factory! Build one first.")
+		_flash_status("Need a %s Manufactory to build %s!" % [tier.capitalize(), entry.name])
 		return
 	var legality = ModuleCatalog.validate_build_legality(entry.blueprint)
 	if not legality.valid:

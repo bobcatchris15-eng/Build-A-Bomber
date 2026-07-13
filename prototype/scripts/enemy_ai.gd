@@ -87,14 +87,18 @@ func _combat_roster() -> Array:
 	return list
 
 func _try_produce():
-	var factory = skirmish.get_team_factory(team)
-	if not factory or factory.production_queue.size() >= 2:
-		return
 	var combat = _combat_roster()
 	if combat.is_empty(): return
-	# Cycle through the roster; skip what we can't afford
+	# Cycle through the roster; skip what we can't afford OR don't have the
+	# right manufactory tier for yet (size-tiered manufactories - see
+	# ModuleCatalog.get_hull_size_tier()). Checked per-entry, not once
+	# upfront, since different roster entries can need different tiers.
 	for i in range(combat.size()):
 		var entry = combat[(roster_index + i) % combat.size()]
+		var tier = ModuleCatalog.get_hull_size_tier(entry.blueprint.get("hull_type", "medium_hull"))
+		var factory = skirmish.get_team_factory(team, tier)
+		if not factory or factory.production_queue.size() >= 2:
+			continue
 		if skirmish.can_afford(team, entry.cost_metal, entry.cost_crystal):
 			skirmish.spend(team, entry.cost_metal, entry.cost_crystal)
 			var build_time = skirmish.build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal))
@@ -112,7 +116,8 @@ func _ensure_harvester():
 	var harv_bp = skirmish._find_harvester_blueprint(skirmish.enemy_roster)
 	if harv_bp.is_empty(): return
 	var cost = skirmish.blueprint_cost(harv_bp)
-	var factory = skirmish.get_team_factory(team)
+	var tier = ModuleCatalog.get_hull_size_tier(harv_bp.get("hull_type", "medium_hull"))
+	var factory = skirmish.get_team_factory(team, tier)
 	if factory and skirmish.can_afford(team, cost.x, cost.y):
 		skirmish.spend(team, cost.x, cost.y)
 		factory.queue_unit(harv_bp, skirmish.build_time_for_cost(cost) * FactionCatalog.get_passive(skirmish.enemy_faction, "build_time_mult", 1.0))

@@ -1,6 +1,6 @@
 extends StaticBody3D
 # Prefab base structures (C&C style) plus custom-designed defensive structures.
-# kind: "hq" | "refinery" | "factory" | "defense"
+# kind: "hq" | "refinery" | "light_manufactory" | "medium_manufactory" | "heavy_manufactory" | "defense"
 
 signal died(building)
 signal unit_produced(unit)
@@ -12,8 +12,18 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const PREFAB_STATS = {
 	"hq":       {"hp": 3000.0, "size": Vector3(7, 4, 7),  "color": Color(0.75, 0.72, 0.55), "cost_metal": 0,   "cost_crystal": 0},
 	"refinery": {"hp": 1200.0, "size": Vector3(5, 3, 5),  "color": Color(0.55, 0.62, 0.75), "cost_metal": 150, "cost_crystal": 0},
-	"factory":  {"hp": 1800.0, "size": Vector3(6, 3, 8),  "color": Color(0.72, 0.55, 0.42), "cost_metal": 200, "cost_crystal": 50},
+	# Size-tiered manufactories (base-building batch) replace the old single
+	# "factory" - which tier a design can be QUEUED from depends on its own
+	# hull's weight tier (ModuleCatalog.get_hull_size_tier()), not domain
+	# (a small boat and a light ground hull both need only the Light
+	# Manufactory). Escalating cost/HP/footprint per tier, same convention
+	# refinery/factory already used for "bigger building = pricier."
+	"light_manufactory":  {"hp": 1400.0, "size": Vector3(5, 2.4, 6),  "color": Color(0.68, 0.6, 0.42), "cost_metal": 150, "cost_crystal": 30},
+	"medium_manufactory": {"hp": 1800.0, "size": Vector3(6, 3, 8),    "color": Color(0.72, 0.55, 0.42), "cost_metal": 220, "cost_crystal": 55},
+	"heavy_manufactory":  {"hp": 2400.0, "size": Vector3(7.5, 3.8, 10), "color": Color(0.6, 0.42, 0.35), "cost_metal": 320, "cost_crystal": 85},
 }
+
+const MANUFACTORY_KINDS = ["light_manufactory", "medium_manufactory", "heavy_manufactory"]
 
 var kind: String = "hq"
 var team: int = 0
@@ -28,7 +38,7 @@ var armor_material: String = "hardened_steel"
 var armor_thickness: float = 1.0
 # Energy resource (ENERGY_AND_BALANCE_SPEC.md #1) - only meaningful for
 # "defense" kind buildings, which are the only kind that can mount weapon
-# or generator modules (hq/refinery/factory are fixed prefabs).
+# or generator modules (hq/refinery/manufactories are fixed prefabs).
 var max_energy: float = 0.0
 var current_energy: float = 0.0
 var energy_regen_rate: float = 0.0
@@ -98,9 +108,9 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 			silo.height = 1.5
 			detail.mesh = silo
 			detail.position = Vector3(1.2, stats.size.y + 0.75, 1.2)
-		"factory":
+		"light_manufactory", "medium_manufactory", "heavy_manufactory":
 			var vent = BoxMesh.new()
-			vent.size = Vector3(4.0, 0.6, 1.2)
+			vent.size = Vector3(stats.size.x * 0.65, 0.6, 1.2)
 			detail.mesh = vent
 			detail.position = Vector3(0, stats.size.y + 0.3, 0)
 	add_child(detail)
@@ -230,7 +240,7 @@ func _update_hp_bar():
 	for i in range(filled): bar += "■"
 	for i in range(10 - filled): bar += "□"
 	var label_name = kind.to_upper()
-	if kind == "factory" and not production_queue.is_empty():
+	if kind in MANUFACTORY_KINDS and not production_queue.is_empty():
 		var job = production_queue[0]
 		var job_pct = 1.0 - (job.time_left / job.total_time)
 		label_name += " ⚙ %d%%" % int(job_pct * 100)
@@ -241,7 +251,7 @@ func _physics_process(delta):
 	if is_dead: return
 	if current_energy < max_energy:
 		current_energy = min(max_energy, current_energy + energy_regen_rate * delta)
-	if kind == "factory" and not production_queue.is_empty():
+	if kind in MANUFACTORY_KINDS and not production_queue.is_empty():
 		var job = production_queue[0]
 		job.time_left -= delta
 		_update_hp_bar()

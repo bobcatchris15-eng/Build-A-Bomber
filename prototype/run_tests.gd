@@ -66,6 +66,7 @@ func _init():
 	success = success and await test_faction_catalog_and_hull_material()
 	success = success and await test_brushed_aluminum_ui_theme()
 	success = success and await test_new_faction_mechanical_bonuses()
+	success = success and await test_size_tiered_manufactories()
 	success = success and await test_win_condition()
 	success = success and await test_energy_pool_and_generators()
 	success = success and await test_repair_array_heals_allies_only()
@@ -3240,6 +3241,87 @@ func test_new_faction_mechanical_bonuses() -> bool:
 
 	if ok:
 		print("  [PASS] Salvage Union's cost discount, Ledger Combine's build-time reduction, Crimson Concordat's low-HP dps ramp, Glacier Syndicate's terrain-penalty reduction, Dune Runners' harvester detection, Bayou Irregulars' detection-range reduction, and Aerodrome Cartel's airborne-only speed bonus all verified through real spawned instances / real system calls, not just catalog numbers.")
+	return ok
+
+func test_size_tiered_manufactories() -> bool:
+	print("Running Test Suite: Base-Building - Size-Tiered Manufactories (Light/Medium/Heavy By Hull Weight, Not Domain)...")
+	var ModuleCatalog = preload("res://scripts/module_catalog.gd")
+
+	# The exact per-hull tier mapping logged in DECISIONS_NEEDED.md - spot-
+	# check a few, including the cross-domain claim (a boat and a ground
+	# hull in the same tier).
+	var expectations = {
+		"interceptor_hull": "light", "small_boat_hull": "light", "flying_wing_hull": "light",
+		"medium_hull": "medium", "naval_hull": "medium", "airship_hull": "medium",
+		"heavy_hull": "heavy", "heavy_cruiser_hull": "heavy", "sponson_hull": "heavy", "assault_hull": "heavy",
+	}
+	for hull_type in expectations:
+		var got = ModuleCatalog.get_hull_size_tier(hull_type)
+		if got != expectations[hull_type]:
+			print("  [FAIL] ", hull_type, " should be tier '", expectations[hull_type], "', got '", got, "'")
+			return false
+	# Foundations (static defenses) aren't produced from a manufactory at all.
+	if ModuleCatalog.get_hull_size_tier("pillbox_foundation") != "":
+		print("  [FAIL] Foundation hulls should return an empty tier (never queued from a manufactory)")
+		return false
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var ok = true
+	# Every match should start with all 3 tiers already built, for both teams.
+	for team in [skirmish.PLAYER_TEAM, skirmish.ENEMY_TEAM]:
+		for tier in ["light", "medium", "heavy"]:
+			if not skirmish.get_team_factory(team, tier):
+				print("  [FAIL] Team ", team, " should start with a real ", tier, "_manufactory already built")
+				ok = false
+	# tier="" (backward-compatible "any tier") should still return something real.
+	if not skirmish.get_team_factory(skirmish.PLAYER_TEAM):
+		print("  [FAIL] get_team_factory(team) with no tier arg should still return a real manufactory (back-compat for generic callers like the map smoke test)")
+		ok = false
+
+	# Real tier-gating: queuing a heavy-tier design should use the Heavy
+	# Manufactory specifically, not just whichever one's queue is emptiest.
+	var heavy_manufactory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "heavy")
+	var light_manufactory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light")
+	var heavy_blueprint = {
+		"version": 1.0, "hull_type": "heavy_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"armor_material": "hardened_steel", "armor_thickness": 1.0,
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "tracked_treads", "name": "Treads", "position": {"x": 0, "y": 0, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}},
+			{"type_id": "basic_cannon", "name": "Cannon", "position": {"x": 0, "y": 0.75, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}},
+		],
+	}
+	var heavy_entry = {"blueprint": heavy_blueprint, "name": "Test Heavy Unit", "cost_metal": 300, "cost_crystal": 60, "is_defense": false}
+	skirmish.economy[skirmish.PLAYER_TEAM].metal = 5000
+	skirmish.economy[skirmish.PLAYER_TEAM].crystal = 5000
+	skirmish._queue_player_unit(heavy_entry)
+	if heavy_manufactory.production_queue.is_empty():
+		print("  [FAIL] A heavy_hull design should have been queued on the Heavy Manufactory")
+		ok = false
+	if not light_manufactory.production_queue.is_empty():
+		print("  [FAIL] A heavy_hull design should NOT be queued on the Light Manufactory")
+		ok = false
+
+	# If the required tier's manufactory doesn't exist (destroyed mid-match),
+	# queuing should fail gracefully rather than silently using another tier.
+	heavy_manufactory.is_dead = true
+	var units_before = skirmish.get_team_units(skirmish.PLAYER_TEAM).size()
+	skirmish._queue_player_unit(heavy_entry)
+	if heavy_manufactory.production_queue.size() > 1:
+		print("  [FAIL] With the Heavy Manufactory marked dead, a second heavy_hull queue attempt should NOT have gone through")
+		ok = false
+
+	skirmish.queue_free()
+	await process_frame
+
+	if ok:
+		print("  [PASS] Hull size tiers map correctly across domains (a boat and a ground hull share a tier by weight), every match starts with all 3 manufactories built for both teams, and queuing genuinely routes to the matching tier - not just any available factory.")
 	return ok
 
 func test_win_condition() -> bool:
