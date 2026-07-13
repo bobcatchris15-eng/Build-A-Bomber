@@ -98,6 +98,18 @@ var current_map: Dictionary = {}
 var player_faction: String = "industrialists"
 var enemy_faction: String = "technocrats"
 
+# Pre-match settings (MatchSetup.tscn, read the same defensive way map_id
+# already is): a player/enemy faction override skips the old "derive from
+# roster[0]'s own faction tag" heuristic entirely once explicitly chosen;
+# selected_blueprint_paths lets the player choose exactly which saved
+# designs enter their roster instead of the automatic "top 8 newest";
+# ai_difficulty is read by enemy_ai.gd's own setup(); starting_metal/
+# starting_crystal override the flat 450/150 default below if set.
+var _mc_player_faction: String = ""
+var _mc_enemy_faction: String = ""
+var _mc_blueprint_paths: Array = []
+var ai_difficulty: String = "normal"
+
 var player_hq: StaticBody3D = null
 var enemy_hq: StaticBody3D = null
 var game_over: bool = false
@@ -132,6 +144,22 @@ func _ready():
 	if match_config and "selected_map_id" in match_config and match_config.selected_map_id != "":
 		map_id = match_config.selected_map_id
 	current_map = MapCatalog.get_map(map_id)
+
+	if match_config:
+		if "player_faction" in match_config and match_config.player_faction != "":
+			_mc_player_faction = match_config.player_faction
+		if "enemy_faction" in match_config and match_config.enemy_faction != "":
+			_mc_enemy_faction = match_config.enemy_faction
+		if "selected_blueprint_paths" in match_config and not match_config.selected_blueprint_paths.is_empty():
+			_mc_blueprint_paths = match_config.selected_blueprint_paths
+		if "ai_difficulty" in match_config and match_config.ai_difficulty != "":
+			ai_difficulty = match_config.ai_difficulty
+		if "starting_metal" in match_config and match_config.starting_metal >= 0:
+			economy[PLAYER_TEAM].metal = match_config.starting_metal
+			economy[ENEMY_TEAM].metal = match_config.starting_metal
+		if "starting_crystal" in match_config and match_config.starting_crystal >= 0:
+			economy[PLAYER_TEAM].crystal = match_config.starting_crystal
+			economy[ENEMY_TEAM].crystal = match_config.starting_crystal
 
 	_setup_navigation()
 	_load_rosters()
@@ -280,12 +308,21 @@ func _recalc_fog_of_war():
 # --- Rosters ---
 
 func _load_rosters():
-	# Player: saved designs first, bundled defaults fill the gaps
-	var entries = bp_manager.list_blueprints()
-	for e in entries.slice(0, 8): # newest saved designs first, leave room for defaults
-		var data = bp_manager.load_blueprint(e.path)
-		if not data.is_empty():
-			roster.append(_make_roster_entry(data))
+	# Player: either the exact saved designs the pre-match screen selected
+	# (_mc_blueprint_paths), or the old automatic heuristic (newest 8 saved
+	# designs) if nothing was explicitly chosen. Bundled defaults always
+	# fill the remaining gaps either way, same as before.
+	if not _mc_blueprint_paths.is_empty():
+		for path in _mc_blueprint_paths:
+			var data = bp_manager.load_blueprint(path)
+			if not data.is_empty():
+				roster.append(_make_roster_entry(data))
+	else:
+		var entries = bp_manager.list_blueprints()
+		for e in entries.slice(0, 8): # newest saved designs first, leave room for defaults
+			var data = bp_manager.load_blueprint(e.path)
+			if not data.is_empty():
+				roster.append(_make_roster_entry(data))
 	for path in _list_json_files("res://data/loadout"):
 		var data = bp_manager.load_blueprint(path)
 		if not data.is_empty():
@@ -298,14 +335,18 @@ func _load_rosters():
 		if not trucker.is_empty():
 			roster.append(_make_roster_entry(trucker))
 
-	if not roster.is_empty():
+	if _mc_player_faction != "":
+		player_faction = _mc_player_faction
+	elif not roster.is_empty():
 		player_faction = roster[0].blueprint.get("faction", "industrialists")
 
 	for path in _list_json_files("res://data/enemy"):
 		var data = bp_manager.load_blueprint(path)
 		if not data.is_empty():
 			enemy_roster.append(_make_roster_entry(data))
-	if not enemy_roster.is_empty():
+	if _mc_enemy_faction != "":
+		enemy_faction = _mc_enemy_faction
+	elif not enemy_roster.is_empty():
 		enemy_faction = enemy_roster[0].blueprint.get("faction", "technocrats")
 
 func _make_roster_entry(data: Dictionary) -> Dictionary:

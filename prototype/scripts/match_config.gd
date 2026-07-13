@@ -13,3 +13,16 @@ extends Node
 # back to MapCatalog.DEFAULT_MAP_ID.
 
 var selected_map_id: String = ""
+
+# Pre-match settings (map variety batch, part 2): set by MatchSetup.tscn
+# after map selection, read defensively by skirmish.gd the same way
+# selected_map_id already is - every field here has an "unset" sentinel
+# ("" for strings, [] for the blueprint list, -1 for resource amounts) so
+# any headless test/direct-instantiation path that never touches this
+# autoload keeps getting Skirmish's own hardcoded defaults, unchanged.
+var player_faction: String = "" # "" = derive from roster[0], old behavior
+var enemy_faction: String = "" # "" = derive from enemy_roster[0], old behavior
+var selected_blueprint_paths: Array = [] # [] = automatic top-8-newest-saved, old behavior
+var ai_difficulty: String = "normal" # "easy" / "normal" / "hard"
+var starting_metal: int = -1 # -1 = Skirmish's own default (450)
+var starting_crystal: int = -1 # -1 = Skirmish's own default (150)

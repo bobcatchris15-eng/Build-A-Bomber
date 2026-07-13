@@ -62,6 +62,7 @@ func _init():
 	success = success and await test_team_targeting()
 	success = success and await test_blueprint_cost_and_rosters()
 	success = success and await test_skirmish_economy_and_production()
+	success = success and await test_match_config_overrides_apply_to_skirmish()
 	success = success and await test_win_condition()
 	success = success and await test_energy_pool_and_generators()
 	success = success and await test_repair_array_heals_allies_only()
@@ -2792,6 +2793,97 @@ func test_skirmish_economy_and_production() -> bool:
 		return true
 	print("  [FAIL] Starting harvester missing.")
 	return false
+
+func test_match_config_overrides_apply_to_skirmish() -> bool:
+	print("Running Test Suite: Pre-Match Settings - MatchConfig Overrides (Faction/Blueprint-Import/AI-Difficulty/Starting-Resources) Flow Into A Real Match...")
+	var match_config = root.get_node_or_null("MatchConfig")
+	if not match_config:
+		print("  [SKIP] MatchConfig autoload not present in this run context - nothing to verify.")
+		return true
+
+	# Save every field this test touches so no other test (which assumes
+	# MatchConfig's defaults) is affected by a leftover override - restored
+	# unconditionally at the end, on both the pass and fail paths.
+	var saved = {
+		"player_faction": match_config.player_faction,
+		"enemy_faction": match_config.enemy_faction,
+		"selected_blueprint_paths": match_config.selected_blueprint_paths.duplicate(),
+		"ai_difficulty": match_config.ai_difficulty,
+		"starting_metal": match_config.starting_metal,
+		"starting_crystal": match_config.starting_crystal,
+	}
+
+	# A deterministic test blueprint (independent of whatever the real
+	# %APPDATA% user:// blueprint folder happens to contain) so the
+	# blueprint-import override can be proven regardless of environment.
+	var test_bp_path = "user://blueprints/_test_matchconfig_override.json"
+	var source_bp = bp_manager_test_load("res://data/loadout/rattler_scout.json")
+	source_bp["name"] = "MatchConfigOverrideProbe"
+	var f = FileAccess.open(test_bp_path, FileAccess.WRITE)
+	f.store_string(JSON.stringify(source_bp))
+	f.close()
+
+	match_config.player_faction = "technocrats"
+	match_config.enemy_faction = "expansionists"
+	match_config.ai_difficulty = "hard"
+	match_config.starting_metal = 900
+	match_config.starting_crystal = 400
+	match_config.selected_blueprint_paths = [test_bp_path]
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var ok = true
+	if skirmish.player_faction != "technocrats":
+		print("  [FAIL] MatchConfig.player_faction should override the roster-derived default, got ", skirmish.player_faction)
+		ok = false
+	if skirmish.enemy_faction != "expansionists":
+		print("  [FAIL] MatchConfig.enemy_faction should override the roster-derived default, got ", skirmish.enemy_faction)
+		ok = false
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != 900 or skirmish.economy[skirmish.ENEMY_TEAM].metal != 900:
+		print("  [FAIL] MatchConfig.starting_metal should set both teams' starting metal, got ", skirmish.economy)
+		ok = false
+	if skirmish.economy[skirmish.PLAYER_TEAM].crystal != 400 or skirmish.economy[skirmish.ENEMY_TEAM].crystal != 400:
+		print("  [FAIL] MatchConfig.starting_crystal should set both teams' starting crystal, got ", skirmish.economy)
+		ok = false
+	if skirmish.ai_difficulty != "hard":
+		print("  [FAIL] MatchConfig.ai_difficulty should flow into skirmish.ai_difficulty, got ", skirmish.ai_difficulty)
+		ok = false
+	var found_imported_blueprint = false
+	for e in skirmish.roster:
+		if e.name == "MatchConfigOverrideProbe":
+			found_imported_blueprint = true
+	if not found_imported_blueprint:
+		print("  [FAIL] selected_blueprint_paths should import exactly the chosen saved design into the roster")
+		ok = false
+	var ai = skirmish.get_node_or_null("EnemyAI")
+	if not ai or ai.wave_interval >= ai.WAVE_INTERVAL or ai.produce_interval >= ai.PRODUCE_INTERVAL:
+		print("  [FAIL] 'hard' AI difficulty should scale enemy_ai.gd's timers below their normal defaults, got produce=", ai.produce_interval if ai else "?", " wave=", ai.wave_interval if ai else "?")
+		ok = false
+
+	skirmish.queue_free()
+	await process_frame
+	DirAccess.remove_absolute(test_bp_path)
+
+	match_config.player_faction = saved.player_faction
+	match_config.enemy_faction = saved.enemy_faction
+	match_config.selected_blueprint_paths = saved.selected_blueprint_paths
+	match_config.ai_difficulty = saved.ai_difficulty
+	match_config.starting_metal = saved.starting_metal
+	match_config.starting_crystal = saved.starting_crystal
+
+	if ok:
+		print("  [PASS] Player/enemy faction, blueprint-library import, starting resources, and AI difficulty overrides from MatchConfig all flow into a real Skirmish instance.")
+	return ok
+
+func bp_manager_test_load(path: String) -> Dictionary:
+	var f = FileAccess.open(path, FileAccess.READ)
+	var data = JSON.parse_string(f.get_as_text())
+	f.close()
+	return data
 
 func test_win_condition() -> bool:
 	print("Running Test Suite 11: Win/Lose Condition...")

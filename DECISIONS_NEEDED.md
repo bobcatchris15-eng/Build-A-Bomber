@@ -4,6 +4,26 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session, cont'd) — Pre-match settings flow: "configurable enemy/team count" scoped down to AI difficulty
+
+**Not blocking.**
+
+Chris's ask included "configurable enemy/team count" alongside faction selection, blueprint import, AI difficulty, and starting resources. Checked the architecture before committing to scope: `skirmish.gd`'s `PLAYER_TEAM`/`ENEMY_TEAM` are hardcoded to exactly 0/1 everywhere - `economy`/`energy_pool` are Dictionaries keyed by those two literal constants (not a generic per-team array), fog-of-war (`_recalc_fog_of_war()`) is written as "player constructs vs. enemy constructs" (two fixed groups, not N), there's exactly one `EnemyAI` instance and one pair of HQs, and every `MapCatalog` map has exactly one `player_start`/`enemy_start` pair (no third/fourth start position exists anywhere in map data). Genuinely supporting a 3rd+ team/opponent would mean reworking the economy/energy/fog-of-war data shape to a per-team array, spawning N `EnemyAI` instances, and adding N start positions to every map (all 8 of them) - a real architecture change, not a pre-match-screen feature, and far outside what a "settings flow" pass should touch.
+
+**Scoped down to AI Difficulty (Easy/Normal/Hard) instead** - a real, if narrower, answer to "make the single opponent configurable." `enemy_ai.gd` already had exactly the right hooks (three timers plus a pity-resource trickle) to scale meaningfully: Hard produces/attacks ~35% faster and recovers from a bad economy check nearly twice as fast; Easy is proportionately slower/more forgiving. This is a genuine gameplay difference (verified by asserting `produce_interval`/`wave_interval` actually differ after `setup()`), not a cosmetic label.
+
+**True N-team/FFA support is the natural next big increment** if Chris wants it - flagging it here explicitly rather than silently under-delivering on the literal ask.
+
+**Faction "Auto" as the actual default, not a specific faction**, for BOTH player and enemy dropdowns conceptually (though the enemy dropdown's initial `OptionButton.selected` is set to "Technocrats" for a friendlier first impression rather than defaulting to the "Auto" index) - "Auto" reproduces the exact old behavior (derive from `roster[0]`'s own faction tag) byte-for-byte, so a player who never touches this screen's dropdowns gets identical behavior to before this pass existed.
+
+**Blueprint Library import replaces the "top 8 newest" heuristic entirely when non-empty, not additively** - if the player checks 3 specific designs, exactly those 3 (plus bundled defaults filling remaining roster slots, same as before) go in, not those 3 PLUS the top-8-newest. Leaving zero checked reproduces the old automatic heuristic exactly. This felt like the more honest reading of "importing... into their match roster" - a deliberate selection, not an additional filter on top of the automatic one.
+
+**Starting Resources as 3 named presets (Standard/Low/High), not a free-text numeric field** - avoids input validation/sanitization work for a settings screen, and "Standard" maps to the sentinel `-1` (use Skirmish's own hardcoded default) rather than a hardcoded copy of 450/150, so a future balance change to those defaults doesn't silently desync from this screen's "Standard" preset.
+
+**Verified:** 86/86 automated tests green (1 new - a single consolidated test proving every MatchConfig override field actually reaches a real `Skirmish` instance: both factions, a deterministically-named imported blueprint appearing in the roster, starting metal/crystal on both teams, and `enemy_ai.gd`'s own timers measurably changing under "hard"). Windowed screenshot of the new `MatchSetup.tscn` screen confirms all 4 dropdowns, the real scrollable Blueprint Library checklist (pulling the user's actual saved designs), and the Back/Start Match buttons stay visible (not the same off-screen-overflow bug `MapSelect.tscn` had before its `ScrollContainer` fix - this screen's button row lives outside the scrolling list from the start).
+
+---
+
 ## 2026-07-13 (new session) — Map variety batch: what survived from the stuck session, and the new mechanism/map judgment calls
 
 **Not blocking.**

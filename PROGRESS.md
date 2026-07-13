@@ -4,6 +4,25 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (new session, cont'd) — Full Skirmish pre-match settings flow
+
+Second half of this session's batch: a real pre-match settings screen, not just the Design Lab's per-vehicle faction dropdown.
+
+### What changed
+
+- **`match_config.gd`** (the existing map-selection autoload) gained `player_faction`/`enemy_faction`/`selected_blueprint_paths`/`ai_difficulty`/`starting_metal`/`starting_crystal`, every one with an "unset" sentinel that reproduces the exact old hardcoded behavior.
+- **`skirmish.gd`** reads all of these the same defensive way `selected_map_id` already was - a faction override skips the old "derive from `roster[0]`'s own faction tag" heuristic; `selected_blueprint_paths` replaces the automatic "newest 8 saved designs" heuristic when non-empty (bundled defaults still fill remaining roster slots either way); starting resources override the flat 450/150 default.
+- **`enemy_ai.gd`** gained real AI Difficulty scaling (Easy/Normal/Hard) - production/wave timers and the pity-resource trickle all scale by a real multiplier, not a cosmetic label. See DECISIONS_NEEDED.md for why "configurable enemy/team count" got scoped down to this instead of true N-team support.
+- **New `MatchSetup.tscn`/`match_setup.gd`** - `MapSelect.tscn`'s map button now routes here instead of straight to `Skirmish.tscn`. 4 dropdowns (Your Faction/Enemy Faction/AI Difficulty/Starting Resources) plus a real scrollable Blueprint Library checklist (the player's actual saved designs, pulled via `blueprint_manager.gd`'s own `list_blueprints()`) with checkboxes - check none to keep the old automatic roster behavior, check specific ones to import exactly those. "Start Match" writes every selection into `MatchConfig` and continues to `Skirmish.tscn`, same relay pattern the map choice already used.
+
+### Verification
+
+86/86 automated tests green (1 new - a single consolidated test proving every MatchConfig override field actually reaches a real Skirmish instance, including a deterministically-created test blueprint proving the import mechanism works regardless of the real environment's saved-design folder contents, and `enemy_ai.gd`'s own timers measurably changing under "hard"). Windowed screenshot of the new `MatchSetup.tscn` screen confirms every control renders and the Back/Start Match buttons stay visible regardless of blueprint list length (learned from `MapSelect.tscn`'s earlier overflow bug - this screen's button row was built outside the scrolling list from the start, not retrofitted).
+
+This wraps both halves of the batch Chris queued (map variety + pre-match settings). Full session total: 86/86 tests, 8 skirmish maps, 3 new terrain mechanisms (bridges/urban buildings/vision LOS), and a real pre-match settings flow.
+
+---
+
 ## 2026-07-13 (new session) — Map variety batch: bridges, urban buildings, real vision LOS, 4 new maps
 
 Picked up after a prior session got stuck on a blocking prompt with no one able to dismiss it (Chris was traveling). Checked first whether the map/terrain "bridges and cities can be data" exploration that session had reportedly confirmed was ever committed: it wasn't - `git log`, `PROGRESS.md`, and `DECISIONS_NEEDED.md` all show the batch ending at Batch E item 5 (omni_wheels), with nothing about bridges/cities anywhere, no stash, no uncommitted script changes. That analysis (if it happened at all) never left the stuck session's own context - starting the batch fresh here, not recovering anything.

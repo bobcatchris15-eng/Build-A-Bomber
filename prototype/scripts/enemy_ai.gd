@@ -16,10 +16,33 @@ var wave_number: int = 0
 const PRODUCE_INTERVAL: float = 14.0
 const FIRST_WAVE_DELAY: float = 60.0
 const WAVE_INTERVAL: float = 55.0
+const PITY_METAL: int = 10
+const PITY_CRYSTAL: int = 3
+
+# Configurable enemy/team count (pre-match settings ask) was scoped down to
+# AI difficulty instead - see DECISIONS_NEEDED.md. Scales the same timers/
+# pity-trickle every difficulty level already had, rather than adding new
+# knobs: "hard" produces/attacks faster and recovers from a bad economy
+# quicker, "easy" does the opposite. Real effect, not cosmetic - these
+# multipliers directly drive _physics_process()'s own timer thresholds.
+const DIFFICULTY_TIMER_MULT = {"easy": 1.4, "normal": 1.0, "hard": 0.65}
+const DIFFICULTY_PITY_MULT = {"easy": 0.5, "normal": 1.0, "hard": 1.8}
+
+var produce_interval: float = PRODUCE_INTERVAL
+var wave_interval: float = WAVE_INTERVAL
+var pity_metal: int = PITY_METAL
+var pity_crystal: int = PITY_CRYSTAL
 
 func setup(skirmish_node: Node3D):
 	skirmish = skirmish_node
-	wave_timer = WAVE_INTERVAL - FIRST_WAVE_DELAY # first wave after FIRST_WAVE_DELAY
+	var difficulty = skirmish.ai_difficulty if "ai_difficulty" in skirmish else "normal"
+	var timer_mult = DIFFICULTY_TIMER_MULT.get(difficulty, 1.0)
+	produce_interval = PRODUCE_INTERVAL * timer_mult
+	wave_interval = WAVE_INTERVAL * timer_mult
+	var pity_mult = DIFFICULTY_PITY_MULT.get(difficulty, 1.0)
+	pity_metal = int(PITY_METAL * pity_mult)
+	pity_crystal = int(PITY_CRYSTAL * pity_mult)
+	wave_timer = wave_interval - FIRST_WAVE_DELAY * timer_mult # first wave after FIRST_WAVE_DELAY (scaled)
 
 func _physics_process(delta):
 	if not skirmish or skirmish.game_over: return
@@ -28,11 +51,11 @@ func _physics_process(delta):
 	wave_timer += delta
 	harvester_check_timer += delta
 
-	if produce_timer >= PRODUCE_INTERVAL:
+	if produce_timer >= produce_interval:
 		produce_timer = 0.0
 		_try_produce()
 
-	if wave_timer >= WAVE_INTERVAL:
+	if wave_timer >= wave_interval:
 		wave_timer = 0.0
 		_launch_wave()
 
@@ -40,7 +63,7 @@ func _physics_process(delta):
 		harvester_check_timer = 0.0
 		_ensure_harvester()
 		# Small pity trickle so the AI never fully stalls
-		skirmish.add_resources(team, 10, 3)
+		skirmish.add_resources(team, pity_metal, pity_crystal)
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 

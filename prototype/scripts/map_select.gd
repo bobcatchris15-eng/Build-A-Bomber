@@ -72,7 +72,7 @@ func _add_map_button(parent: Control, map_id: String, map_def: Dictionary):
 		var match_config = get_node_or_null("/root/MatchConfig")
 		if match_config:
 			match_config.selected_map_id = map_id
-		get_tree().change_scene_to_file("res://scenes/Skirmish.tscn"))
+		get_tree().change_scene_to_file("res://scenes/MatchSetup.tscn"))
 	parent.add_child(btn)
 
 	var desc = Label.new()
