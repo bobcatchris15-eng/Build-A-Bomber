@@ -4,6 +4,16 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session, cont'd 10) — Pintle mount plate fix + re-checked materials against the new bevel geometry (no changes needed)
+
+**Not blocking.**
+
+**Pintle/gimbal mount plate now genuinely embeds instead of relying on a thin flush fit** - Chris's specific ask, implemented in `_build_pintle_base_plate()` (visual_builder.gd). The disc is built asymmetrically (outer face stays where the hub/bolt ring already assume it is, inner face extends `plate_radius * 0.35` deeper) so its bulk genuinely intersects the hull regardless of local surface angle, rather than needing to be geometrically perfect against every possible mount-surface tilt. Verified on a flat-deck mount (screenshot shows the disc visibly buried, hub/bolts still reading on top); the angled-mount case shares the identical geometry in the rotated local frame (no orientation-conditional logic beyond the rotation itself), so it's covered by construction.
+
+**Re-examined the material/faction system specifically against the NEW bevel geometry from this session** (my earlier "already finished" review in cont'd 8 predates most of the hull bevel work, and predates discovering the reimport-cache bug, so it's worth a second look now that the underlying meshes are actually different). Finding: genuinely good news, not a problem to fix - the existing `fwidth(world_normal)` edge-wear shader has much more real geometric detail to key off now that hulls have actual bevel facets instead of hard flat-to-flat creases, and it visibly reads better as a result (checked industrialists and glacier_syndicate close-ups side by side). The two systems built in different sessions are compounding well together without needing any changes. Not manufacturing a fix where none is needed - noting this as a genuine "iterate and confirm" pass, per the instruction to keep checking rather than assume a system called "done" earlier stays done as everything else around it changes.
+
+---
+
 ## 2026-07-13 (new session, cont'd 9) — MAJOR: stale Godot import cache invalidated most of this session's screenshot verification; found and fixed a real geometry bug once it was resolved
 
 **Not blocking, but this is the single most important entry in this log today - read it before trusting any earlier "verified via screenshot" claim from this session.**
