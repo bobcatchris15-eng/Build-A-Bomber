@@ -161,31 +161,38 @@ def hull_reference_dim(size_x, size_y):
 	return min(size_x, size_y)
 
 
-def tiered_bevel_width(R, tier):
+def tiered_bevel_width(R, tier, pct=None, segments=None):
 	"""Returns (width, segments) for an edge-role tier:
 	  1 = primary structural silhouette edges (6-9% of R, 2 segments)
 	  2 = secondary edges - hatch frames, ring corners (3-4% of R, 1 segment)
 	  3 = cosmetic greeble/bolt-box edges (1-1.5% of R + a small fixed
 	      floor, since pure percentage would vanish on tiny parts)
-	An absolute world-unit floor keeps every tier visible/non-z-fighting
-	even at very small R."""
+	`pct`/`segments` let a caller tune within (or deliberately just outside)
+	a tier's band for per-archetype character - e.g. a heavy hull reading
+	chunkier at the wide end of tier 1, an interceptor reading sharper at
+	the narrow end. An absolute world-unit floor keeps every tier visible/
+	non-z-fighting even at very small R."""
 	if tier == 1:
-		width, segments = R * 0.075, 2
+		default_pct, default_segments = 0.075, 2
 	elif tier == 2:
-		width, segments = R * 0.035, 1
+		default_pct, default_segments = 0.035, 1
 	else:
-		width, segments = max(R * 0.0125, 0.012), 1
-	return max(width, 0.01), segments
+		default_pct, default_segments = 0.0125, 1
+	width = R * (pct if pct is not None else default_pct)
+	if tier == 3:
+		width = max(width, 0.012)
+	segs = segments if segments is not None else default_segments
+	return max(width, 0.01), segs
 
 
-def bevel_sharp_edges(bm, verts, R, tier=1, angle_deg=20.0, max_face_frac=0.3):
+def bevel_sharp_edges(bm, verts, R, tier=1, angle_deg=20.0, max_face_frac=0.3, pct=None, segments=None):
 	"""Bevels only the genuinely sharp edges among `verts`, selected by
 	dihedral angle - so a multi-slice taper loft's many near-coplanar
 	edges are left alone (a blanket bevel would chew into the curve
 	itself) while the real structural transitions (belly-to-deck, nose
 	tip, spine ridge) get the tiered treatment. Works on any convex-hull-
 	derived shape without hand-picking edge lists per hull."""
-	width, segments = tiered_bevel_width(R, tier)
+	width, segments = tiered_bevel_width(R, tier, pct=pct, segments=segments)
 	width = min(width, R * max_face_frac)
 	vert_set = set(verts)
 	angle_thresh = math.radians(angle_deg)
@@ -610,7 +617,15 @@ def build_accessory(name, kind, color, **kwargs):
 # ---------------------------------------------------------------------------
 
 def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, spine_h=1.1,
-		rear_flare=0.9, front_flare=1.0, color=(0.55, 0.56, 0.58), greebles=None, taper_slices=7):
+		rear_flare=0.9, front_flare=1.0, color=(0.55, 0.56, 0.58), greebles=None, taper_slices=7,
+		nose_region=0.35, height_taper=0.0, bevel_pct=None, bevel_segments=None, bevel_angle_deg=20.0):
+	"""height_taper (0..1): brings the deck down toward the nose too, for
+	archetypes wanting a dart/wedge silhouette rather than just narrowing
+	in width (interceptor_hull's "extreme taper in width AND height").
+	bevel_pct/bevel_segments let each archetype sit at a different point
+	within (or just outside) the tier-1 band - see Section 2 of the
+	design doc: light reads narrow/subtle, heavy reads wide/chunky,
+	interceptor reads narrow-and-sharp."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
 	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
@@ -625,11 +640,16 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 	for i in range(taper_slices):
 		t = i / float(taper_slices - 1)
 		z = -hz + t * size_z
-		scale = taper_profile(t, nose_frac, front_flare, rear_flare)
-		pts.append((-hx * scale, hy, z))
-		pts.append((hx * scale, hy, z))
+		scale = taper_profile(t, nose_frac, front_flare, rear_flare, nose_region=nose_region)
+		deck_y = hy
+		if height_taper > 0.0:
+			h_scale = taper_profile(t, nose_frac, 1.0 - height_taper, 1.0, nose_region=nose_region)
+			deck_y = hy * h_scale
+		pts.append((-hx * scale, deck_y, z))
+		pts.append((hx * scale, deck_y, z))
 	if nose_frac > 0.01:
-		pts.append((0.0, hy * 0.6, -hz))
+		nose_y = hy * 0.6 * (1.0 - height_taper) if height_taper > 0.0 else hy * 0.6
+		pts.append((0.0, nose_y, -hz))
 
 	pts += [(-hx * spine_w, hy * spine_h, hz * 0.1), (hx * spine_w, hy * spine_h, hz * 0.1)]
 	pts += [(-hx * spine_w, hy * spine_h, -hz * 0.3), (hx * spine_w, hy * spine_h, -hz * 0.3)]
@@ -641,7 +661,7 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 	# Tier-1 bevel on the hull's own real structural edges (belly-to-deck
 	# transition, nose tip, spine ridge) - applied BEFORE greebles are
 	# fused on so it only ever touches the primary silhouette.
-	bevel_sharp_edges(bm, verts, R, tier=1)
+	bevel_sharp_edges(bm, verts, R, tier=1, angle_deg=bevel_angle_deg, pct=bevel_pct, segments=bevel_segments)
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
@@ -1142,6 +1162,7 @@ def generate_hulls():
 
 	export_and_cleanup(build_wedge_hull("light_hull", 3.0, 1.0, 4.0,
 		nose_frac=0.6, spine_w=0.35, spine_h=1.08, rear_flare=0.85, front_flare=0.55,
+		nose_region=0.28, bevel_pct=0.06,
 		color=(0.72, 0.73, 0.75), greebles=_light_hull_greebles), HULLS_DIR, "light_hull")
 
 	export_and_cleanup(build_wedge_hull("medium_hull", 4.0, 1.0, 6.0,
@@ -1150,14 +1171,17 @@ def generate_hulls():
 
 	export_and_cleanup(build_wedge_hull("heavy_hull", 6.0, 1.5, 8.0,
 		nose_frac=0.08, spine_w=0.75, spine_h=1.2, rear_flare=1.0, front_flare=1.0,
+		nose_region=0.5, bevel_pct=0.09, bevel_segments=3,
 		color=(0.32, 0.32, 0.34), greebles=_heavy_hull_greebles), HULLS_DIR, "heavy_hull")
 
 	export_and_cleanup(build_wedge_hull("interceptor_hull", 2.4, 0.8, 3.2,
 		nose_frac=0.95, spine_w=0.22, spine_h=1.05, rear_flare=0.75, front_flare=0.3,
+		nose_region=0.22, height_taper=0.45, bevel_pct=0.05, bevel_segments=1,
 		color=(0.55, 0.65, 0.78), greebles=_interceptor_hull_greebles), HULLS_DIR, "interceptor_hull")
 
 	export_and_cleanup(build_wedge_hull("assault_hull", 5.0, 1.3, 7.0,
 		nose_frac=0.4, spine_w=0.7, spine_h=1.22, rear_flare=1.0, front_flare=0.9,
+		bevel_pct=0.085, bevel_segments=3,
 		color=(0.4, 0.32, 0.28), greebles=_assault_hull_greebles), HULLS_DIR, "assault_hull")
 
 	export_and_cleanup(build_bunker_hull("pillbox_foundation", 3.0, 1.2, 3.0,
