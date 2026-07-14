@@ -763,26 +763,49 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 	return obj
 
 
-def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.38, 0.4), greebles=None):
-	"""Naval hull: pointed bow, flat transom stern, shallow-draft keel below
-	the waterline, and a raised bridge superstructure - purpose-built for
-	naval_propeller rather than a generic wedge hull floating on water."""
+def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.38, 0.4), greebles=None,
+		deadrise=0.3, sheer=0.1, flare=0.0, stations=9, bevel_pct=None, bevel_segments=None):
+	"""Naval hull: pointed bow, flat transom stern, a real V-shaped deadrise
+	cross-section (via a per-station loft, not a boolean cut), sheer
+	(deck line rising toward the bow), optional topside flare above the
+	waterline, and a raised bridge superstructure.
+
+	deadrise: keel drop as a fraction of local beam (0=flat-bottomed,
+	  higher=sharper V) - small_boat wants this highest, heavy_cruiser
+	  lowest.
+	sheer: how much the deck rises toward the bow (0=dead flat deck).
+	flare: extra outward bell above the main deck edge, above the
+	  waterline - heavy_cruiser's "pronounced outward flare."
+	Both the bow taper and sheer reuse taper_profile()'s eased nose-
+	aggressive curve (bow = "nose" in the wedge-hull sense) so the entry
+	curves rather than kinking at a single hard bow cross-section."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
 
-	deck_pts = [
-		(0.0, hy, -hz),
-		(-hx, hy, -hz * (1.0 - bow_frac)), (hx, hy, -hz * (1.0 - bow_frac)),
-		(-hx, hy, hz), (hx, hy, hz),
-	]
-	keel_pts = [
-		(0.0, -hy * 0.6, -hz * 0.85),
-		(-hx * 0.3, -hy * 0.6, -hz * 0.2), (hx * 0.3, -hy * 0.6, -hz * 0.2),
-		(-hx * 0.35, -hy * 0.6, hz * 0.8), (hx * 0.35, -hy * 0.6, hz * 0.8),
-	]
-	verts = [bm.verts.new(GV(*p)) for p in deck_pts + keel_pts]
+	pts = []
+	for i in range(stations):
+		t = i / float(stations - 1)
+		z = -hz + t * size_z
+		beam_scale = taper_profile(t, bow_frac, 0.04, 1.0, nose_region=max(bow_frac, 0.3))
+		sheer_scale = taper_profile(t, 0.0, 1.0 + sheer, 1.0, nose_region=max(bow_frac, 0.3))
+		beam = hx * beam_scale
+		deck_y = hy * sheer_scale
+		keel_y = deck_y - beam * deadrise if beam > 0.001 else deck_y
+		pts.append((-beam, deck_y, z))
+		pts.append((beam, deck_y, z))
+		pts.append((0.0, keel_y, z))
+		if flare > 0.0 and beam > 0.001:
+			flare_beam = beam * (1.0 + flare)
+			flare_y = deck_y + hy * 0.15
+			pts.append((-flare_beam, flare_y, z))
+			pts.append((flare_beam, flare_y, z))
+
+	verts = [bm.verts.new(GV(*p)) for p in pts]
 	bmesh.ops.convex_hull(bm, input=verts)
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	bevel_sharp_edges(bm, verts, R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
 	# Bridge superstructure, offset toward the stern.
 	add_box(bm, (0, hy * 1.3, hz * 0.35), (hx * 0.42, hy * 0.35, hz * 0.26), bevel=0.03)
@@ -795,12 +818,20 @@ def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.
 	return obj
 
 
-def build_flying_wing_hull(name, size_x, size_y, size_z, sweep=0.55, color=(0.5, 0.52, 0.56), greebles=None):
+def build_flying_wing_hull(name, size_x, size_y, size_z, sweep=0.55, color=(0.5, 0.52, 0.56), greebles=None,
+		bevel_pct=0.085, bevel_segments=2):
 	"""Blended-wing-body hull: a swept flying-wing planform with no
 	distinct fuselage/wing break - a shallow dorsal blend ridge instead of
 	the wedge hulls' raised spine, cockpit and body smoothly faired into
-	the wing rather than sitting on top of it."""
+	the wing rather than sitting on top of it. The leading-edge thinning
+	taper the design doc asks for is already structurally implicit here -
+	the dorsal blend shoulders sit at +/-0.4*hx, short of the full-span
+	wingtips at +/-hx, so the convex hull already tapers the wing's own
+	thickness down to a single point at the tips rather than a constant-
+	thickness slab. Tier 1's own lever is the bevel - wide/max-segment,
+	per the doc's explicit call for the wing-root-to-body junction."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
 
 	pts = [
@@ -814,6 +845,8 @@ def build_flying_wing_hull(name, size_x, size_y, size_z, sweep=0.55, color=(0.5,
 	verts = [bm.verts.new(GV(*p)) for p in pts]
 	bmesh.ops.convex_hull(bm, input=verts)
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	bevel_sharp_edges(bm, verts, R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
@@ -860,13 +893,14 @@ def build_sponson_hull(name, size_x, size_y, size_z, sponson_bulge=1.3, sponson_
 
 def build_fuselage_hull(name, size_x, size_y, size_z, nose_frac=0.16, tail_frac=0.24,
 		wing_span_frac=1.0, wing_chord_frac=0.3, wing_pos_frac=0.05,
-		color=(0.6, 0.6, 0.62), greebles=None):
+		color=(0.6, 0.6, 0.62), greebles=None, bevel_pct=None, bevel_segments=None):
 	"""Traditional plane: a slender tapered fuselage tube along Z (nose cone
 	forward, tail taper aft) with a separate flat wing slab crossing at
 	mid-body and tail control surfaces - a genuine fuselage/wing break,
 	unlike flying_wing_hull's single blended-wing-body convex hull with no
 	distinct fuselage at all."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
 	body_r = min(hx, hy) * 0.62
 	bm = bmesh.new()
 
@@ -877,9 +911,19 @@ def build_fuselage_hull(name, size_x, size_y, size_z, nose_frac=0.16, tail_frac=
 	body_z0 = nose_z0 + nose_len
 	tail_z0 = body_z0 + body_len
 
-	add_cyl_axis(bm, (0, 0, body_z0 + body_len / 2.0), body_r, body_len, 'z', segments=14)
-	add_cyl_axis(bm, (0, 0, nose_z0 + nose_len / 2.0), 0.02, nose_len, 'z', segments=14, radius2=body_r)
-	add_cyl_axis(bm, (0, 0, tail_z0 + tail_len / 2.0), body_r, tail_len, 'z', segments=14, radius2=body_r * 0.22)
+	body_verts = add_cyl_axis(bm, (0, 0, body_z0 + body_len / 2.0), body_r, body_len, 'z', segments=14)
+	nose_verts = add_cyl_axis(bm, (0, 0, nose_z0 + nose_len / 2.0), 0.02, nose_len, 'z', segments=14, radius2=body_r)
+	tail_verts = add_cyl_axis(bm, (0, 0, tail_z0 + tail_len / 2.0), body_r, tail_len, 'z', segments=14, radius2=body_r * 0.22)
+
+	# The nose/body/tail cone segments are built as separate primitives
+	# whose end-caps coincide in space but aren't topologically joined -
+	# weld the coincident ring verts into one continuous mesh first, so
+	# there's a real shared edge at each join for the tiered bevel to
+	# smooth (previously masked only by shade_smooth, not real geometry).
+	fuselage_verts = body_verts + nose_verts + tail_verts
+	bmesh.ops.remove_doubles(bm, verts=fuselage_verts, dist=0.001)
+	fuselage_verts = list(bm.verts)
+	bevel_sharp_edges(bm, fuselage_verts, R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
 	# Wings: a flat slab crossing the body near mid-fuselage - the defining
 	# "attached wing" break this hull exists to demonstrate.
@@ -904,8 +948,19 @@ def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
 	tapered tail) with a gondola slung underneath on struts and a 4-way tail
 	fin cross - the only hull silhouette in the roster implying buoyant lift
 	rather than an engine actively fighting gravity (see buoyant_envelope's
-	own catalog comment in module_catalog.gd for the gameplay consequence)."""
+	own catalog comment in module_catalog.gd for the gameplay consequence).
+
+	The envelope itself (a smooth ellipsoid, no sharp edges at all) is
+	deliberately NOT touched by the tiered bevel system here - the design
+	doc explicitly budgets a real faceted-cross-section envelope as its
+	own separate Tier 3 mini-task, since it's a genuinely different
+	topology change, not a bevel/taper tuning one. This pass only swaps
+	the gondola/strut/fin's old fixed bevel numbers for the same R-keyed
+	tiered system the rest of the hull roster uses, for consistency."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
+	gon_bevel, _ = tiered_bevel_width(R, tier=2)
+	fin_bevel, _ = tiered_bevel_width(R, tier=3)
 	bm = bmesh.new()
 
 	ret = bmesh.ops.create_uvsphere(bm, u_segments=18, v_segments=12, radius=1.0)
@@ -922,7 +977,7 @@ def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
 
 	# Gondola slung underneath on struts, biased toward the nose for balance.
 	gon_w, gon_h, gon_l = hx * 0.5, hy * 0.35, hz * 0.6
-	add_box(bm, (0, -hy * 0.85, -hz * 0.15), (gon_w, gon_h, gon_l), bevel=0.04)
+	add_box(bm, (0, -hy * 0.85, -hz * 0.15), (gon_w, gon_h, gon_l), bevel=gon_bevel)
 	for side in (-1, 1):
 		for z_frac in (-0.35, 0.25):
 			add_cyl_y(bm, (side * gon_w * 0.35, -hy * 0.6, z_frac * hz * 0.3), 0.03, hy * 0.7, segments=6)
@@ -930,10 +985,10 @@ def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
 	# Tail fin cross near the tail taper.
 	fin_z = hz * 0.75
 	fin_span = min(hx, hy) * 0.9
-	add_box(bm, (0, fin_span * 0.5, fin_z), (0.04, fin_span, hz * 0.18), bevel=0.02)
-	add_box(bm, (0, -fin_span * 0.5, fin_z), (0.04, fin_span, hz * 0.18), bevel=0.02)
-	add_box(bm, (fin_span * 0.5, 0, fin_z), (fin_span, 0.04, hz * 0.18), bevel=0.02)
-	add_box(bm, (-fin_span * 0.5, 0, fin_z), (fin_span, 0.04, hz * 0.18), bevel=0.02)
+	add_box(bm, (0, fin_span * 0.5, fin_z), (0.04, fin_span, hz * 0.18), bevel=fin_bevel)
+	add_box(bm, (0, -fin_span * 0.5, fin_z), (0.04, fin_span, hz * 0.18), bevel=fin_bevel)
+	add_box(bm, (fin_span * 0.5, 0, fin_z), (fin_span, 0.04, hz * 0.18), bevel=fin_bevel)
+	add_box(bm, (-fin_span * 0.5, 0, fin_z), (fin_span, 0.04, hz * 0.18), bevel=fin_bevel)
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
@@ -1242,7 +1297,8 @@ def generate_hulls():
 		merlons=5, color=(0.42, 0.4, 0.36), greebles=_wall_greebles), HULLS_DIR, "fortress_wall_foundation")
 
 	export_and_cleanup(build_ship_hull("naval_hull", 3.5, 1.6, 9.0,
-		bow_frac=0.35, color=(0.35, 0.38, 0.4), greebles=_ship_hull_greebles), HULLS_DIR, "naval_hull")
+		bow_frac=0.35, deadrise=0.3, sheer=0.08, flare=0.0, bevel_pct=0.07,
+		color=(0.35, 0.38, 0.4), greebles=_ship_hull_greebles), HULLS_DIR, "naval_hull")
 
 	export_and_cleanup(build_flying_wing_hull("flying_wing_hull", 5.0, 0.7, 3.6,
 		sweep=0.55, color=(0.5, 0.52, 0.56), greebles=_flying_wing_hull_greebles), HULLS_DIR, "flying_wing_hull")
@@ -1251,10 +1307,12 @@ def generate_hulls():
 		sponson_bulge=1.18, sponson_span=0.4, color=(0.38, 0.36, 0.32), greebles=_sponson_hull_greebles), HULLS_DIR, "sponson_hull")
 
 	export_and_cleanup(build_ship_hull("small_boat_hull", 2.0, 1.0, 5.0,
-		bow_frac=0.5, color=(0.4, 0.42, 0.44), greebles=_small_boat_greebles), HULLS_DIR, "small_boat_hull")
+		bow_frac=0.5, deadrise=0.55, sheer=0.15, flare=0.0, bevel_pct=0.06, bevel_segments=1,
+		color=(0.4, 0.42, 0.44), greebles=_small_boat_greebles), HULLS_DIR, "small_boat_hull")
 
 	export_and_cleanup(build_ship_hull("heavy_cruiser_hull", 4.4, 1.9, 10.5,
-		bow_frac=0.28, color=(0.3, 0.32, 0.34), greebles=_heavy_cruiser_greebles), HULLS_DIR, "heavy_cruiser_hull")
+		bow_frac=0.28, deadrise=0.12, sheer=0.22, flare=0.35, bevel_pct=0.09, bevel_segments=3,
+		color=(0.3, 0.32, 0.34), greebles=_heavy_cruiser_greebles), HULLS_DIR, "heavy_cruiser_hull")
 
 	export_and_cleanup(build_fuselage_hull("fuselage_hull", 4.2, 1.2, 6.2,
 		color=(0.6, 0.6, 0.62), greebles=_fuselage_hull_greebles), HULLS_DIR, "fuselage_hull")
