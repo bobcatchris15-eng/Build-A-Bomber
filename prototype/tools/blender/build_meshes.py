@@ -425,9 +425,12 @@ def build_barrel(name, length=1.0, radius=0.1, muzzle_radius=None, segments=16,
 def build_cylinder_part(name, radius=0.15, height=0.15, segments=20, bevel=True,
 		bolts=True, color=(0.35, 0.35, 0.38)):
 	"""Squat drum along Godot Y (up), base at origin - ammo drums, canisters,
-	fuel tanks, turret base plates, muzzle brakes."""
+	fuel tanks, turret base plates, muzzle brakes. Turret bodies get a
+	tier-1 bevel per Section 3 (panel-line insets are Tier 2, deferred)."""
 	bm = bmesh.new()
-	add_cyl_y(bm, (0, height / 2.0, 0), radius, height, segments=segments)
+	verts = add_cyl_y(bm, (0, height / 2.0, 0), radius, height, segments=segments)
+	if bevel:
+		bevel_sharp_edges(bm, verts, radius * 2.0, tier=1, pct=0.06)
 	if bolts:
 		greeble_bolt_ring(bm, (0, height * 0.9, 0), radius * 0.82, count=max(6, segments // 2), axis='y')
 	obj = make_object_from_bmesh(bm, name)
@@ -470,21 +473,29 @@ def build_missile_body(name, length=1.0, radius=0.08, nose_frac=0.25, segments=1
 
 def build_pintle_mount(name, width=0.34, height=0.22, depth=0.22, wall=0.045,
 		color=(0.2, 0.2, 0.22)):
-	"""Small U-shaped yoke bracket: base plate + two side arms."""
+	"""Small U-shaped yoke bracket: base plate + two side arms. Mounting
+	hardware gets the LIGHTEST touch of anything in the roster per
+	Section 3 - tier-3 bevel only, no boolean greeble beyond the
+	existing bolt ring."""
 	bm = bmesh.new()
-	add_box(bm, (0, wall / 2.0, 0), (width, wall, depth), bevel=0.006)
+	mount_bevel, _ = tiered_bevel_width(hull_reference_dim(width, height), tier=3)
+	add_box(bm, (0, wall / 2.0, 0), (width, wall, depth), bevel=mount_bevel)
 	for side in (-1, 1):
-		add_box(bm, (side * (width / 2.0 - wall / 2.0), height / 2.0, 0), (wall, height, depth), bevel=0.006)
+		add_box(bm, (side * (width / 2.0 - wall / 2.0), height / 2.0, 0), (wall, height, depth), bevel=mount_bevel)
 	greeble_bolt_ring(bm, (0, wall * 0.5, 0), width * 0.32, count=4, axis='y')
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.6, roughness=0.5)
 	return obj
 
 
-def build_box_part(name, size=(0.5, 0.3, 0.4), bevel_amt=0.02, bolts=True,
+def build_box_part(name, size=(0.5, 0.3, 0.4), bevel_amt=None, bolts=True,
 		color=(0.3, 0.3, 0.33)):
-	"""Beveled box - turret bases, launcher frames, weapon housings."""
+	"""Beveled box - turret bases, launcher frames, weapon housings. A
+	turret body gets a tier-1 bevel by default (panel-line insets are
+	Tier 2, deferred); pass bevel_amt explicitly to override."""
 	bm = bmesh.new()
+	if bevel_amt is None:
+		bevel_amt, _ = tiered_bevel_width(hull_reference_dim(size[0], size[1]), tier=1, pct=0.06)
 	add_box(bm, (0, size[1] / 2.0, 0), size, bevel=bevel_amt)
 	if bolts:
 		for x_sign in (-1, 1):
