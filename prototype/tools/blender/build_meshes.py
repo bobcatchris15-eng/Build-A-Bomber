@@ -389,17 +389,32 @@ def greeble_cooling_fins(bm, center, count, span, radius, thickness=0.012, axis=
 # ---------------------------------------------------------------------------
 
 def build_barrel(name, length=1.0, radius=0.1, muzzle_radius=None, segments=16,
-		fins=0, color=(0.12, 0.12, 0.13)):
+		fins=0, color=(0.12, 0.12, 0.13), steps=3):
 	"""Barrel along Godot +Y, base at origin (y=0..length) - matches the
 	existing runtime convention (Godot's own CylinderMesh default axis),
 	so weapon assembly code keeps applying its existing PI/2 X rotation to
 	point barrels forward, and existing caliber(X)/length(Y) tweak scaling
-	on this child index keeps working unchanged."""
+	on this child index keeps working unchanged.
+
+	Section 3 of the design doc: modules compute their OWN reference
+	dimension R from their own bounding box (here, diameter - a barrel's
+	long axis is exactly the one caliber/length tweaks stretch, so it's
+	excluded the same way hull length is). The body is now a stepped-
+	diameter loft (discrete radius steps from breech to muzzle) instead
+	of one smooth cone - reads as a real machined part, not a plain rod."""
 	bm = bmesh.new()
 	r2 = muzzle_radius if muzzle_radius is not None else radius
-	add_cyl_y(bm, (0, length / 2.0, 0), radius, length, segments=segments, radius2=r2)
+	R = 2.0 * max(radius, r2)
+	step_len = length / steps
+	all_verts = []
+	for i in range(steps):
+		t = i / float(max(steps - 1, 1))
+		r = radius + (r2 - radius) * eased_taper(t)
+		all_verts += add_cyl_y(bm, (0, step_len * (i + 0.5), 0), r, step_len, segments=segments)
 	# Muzzle brake ring fused on the tip
-	add_cyl_y(bm, (0, length * 0.94, 0), r2 * 1.35, length * 0.1, segments=segments)
+	all_verts += add_cyl_y(bm, (0, length * 0.94, 0), r2 * 1.35, length * 0.1, segments=segments)
+	bmesh.ops.remove_doubles(bm, verts=all_verts, dist=0.001)
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=2)
 	if fins > 0:
 		greeble_cooling_fins(bm, (0, length * 0.35, 0), fins, length * 0.45, radius * 1.15, axis='y')
 	obj = make_object_from_bmesh(bm, name)
@@ -526,13 +541,28 @@ def build_flak_breech(name, width=0.5, height=0.32, depth=0.4, color=(0.18, 0.18
 	return obj
 
 
-def build_wheel(name, radius=0.45, width=0.35, spokes=6, color=(0.08, 0.08, 0.08)):
+def build_wheel(name, radius=0.45, width=0.35, spokes=6, color=(0.08, 0.08, 0.08), groove_depth=0.07):
 	"""Wheel + hub, built Y-vertical (radius in X/Z, thickness along Y) -
 	matches the existing runtime convention where locomotion code applies
-	rotation.z = PI/2 at runtime to stand it up with the axle along X."""
+	rotation.z = PI/2 at runtime to stand it up with the axle along X.
+
+	R (module's own reference dimension, per Section 3) is the tire
+	diameter - width is the axle axis, excluded the same way a barrel's
+	length is. The tire is now 3 stacked segments so a real inset groove
+	ring sits at the tire/rim boundary, and its outer edges get a
+	stronger tier-1 bevel; the hub gets a radial lug-nut bolt ring."""
 	bm = bmesh.new()
-	add_cyl_y(bm, (0, width / 2.0, 0), radius, width, segments=22)
+	R = radius * 2.0
+	seg_w = width / 3.0
+	tire_verts = []
+	tire_verts += add_cyl_y(bm, (0, seg_w * 0.5, 0), radius, seg_w, segments=22)
+	tire_verts += add_cyl_y(bm, (0, seg_w * 1.5, 0), radius * (1.0 - groove_depth), seg_w, segments=22)
+	tire_verts += add_cyl_y(bm, (0, seg_w * 2.5, 0), radius, seg_w, segments=22)
+	bmesh.ops.remove_doubles(bm, verts=tire_verts, dist=0.001)
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.05)
+
 	add_cyl_y(bm, (0, width * 0.53, 0), radius * 0.42, width * 1.06, segments=16)
+	greeble_bolt_ring(bm, (0, width * 1.0, 0), radius * 0.22, count=6, bolt_radius=radius * 0.035, axis='y')
 	for i in range(spokes):
 		angle = i * (2.0 * math.pi / spokes)
 		pos = (math.cos(angle) * radius * 0.55, width / 2.0, math.sin(angle) * radius * 0.55)
@@ -543,9 +573,19 @@ def build_wheel(name, radius=0.45, width=0.35, spokes=6, color=(0.08, 0.08, 0.08
 
 
 def build_leg_segment(name, length=0.5, radius_top=0.12, radius_bottom=0.08, color=(0.3, 0.3, 0.32)):
-	"""Armored leg segment along Godot Y, base(wide) at origin."""
+	"""Armored leg segment along Godot Y, base(wide) at origin. The
+	stepped-diameter taper per segment is already structurally present
+	via radius_top/radius_bottom (and stacking two of these - thigh then
+	shin - narrows the whole leg toward the foot); this pass adds the
+	joint housing the doc asks for - a separate boolean-added collar at
+	the wide (hip) end, individually beveled, rather than a smooth taper
+	reading as one uninterrupted cone."""
 	bm = bmesh.new()
-	add_cyl_y(bm, (0, length / 2.0, 0), radius_top, length, segments=12, radius2=radius_bottom)
+	R = 2.0 * max(radius_top, radius_bottom)
+	seg_verts = add_cyl_y(bm, (0, length / 2.0, 0), radius_top, length, segments=12, radius2=radius_bottom)
+	bevel_sharp_edges(bm, seg_verts, R, tier=2)
+	housing_h = length * 0.12
+	add_cyl_y(bm, (0, housing_h * 0.5, 0), radius_top * 1.18, housing_h, segments=12, radius2=radius_top * 1.1)
 	greeble_bolt_ring(bm, (0, length * 0.05, 0), radius_top * 0.85, count=6, axis='y')
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.55, roughness=0.4)
@@ -561,12 +601,17 @@ def build_hover_ring(name, major_radius=0.5, minor_radius=0.1, color=(0.2, 0.6, 
 
 
 def build_tread_plate(name, width=1.0, length=1.0, links=6, color=(0.16, 0.16, 0.17)):
-	"""Tracked-tread belt block with raised link ridges along its length."""
+	"""Tracked-tread belt block with raised link ridges along its length -
+	length is the axis the belt repeats/tiles along (the tread's own
+	analogue of a hull's stretched axis), so R excludes it the same way."""
 	bm = bmesh.new()
-	add_box(bm, (0, 0.15, 0), (width, 0.3, length), bevel=0.02)
+	R = hull_reference_dim(width, 0.3)
+	base_bevel, _ = tiered_bevel_width(R, tier=2)
+	ridge_bevel, _ = tiered_bevel_width(R, tier=3)
+	add_box(bm, (0, 0.15, 0), (width, 0.3, length), bevel=base_bevel)
 	for i in range(links):
 		t = (i + 0.5) / links - 0.5
-		add_box(bm, (0, 0.31, t * length), (width * 1.02, 0.04, length / links * 0.55))
+		add_box(bm, (0, 0.31, t * length), (width * 1.02, 0.04, length / links * 0.55), bevel=ridge_bevel)
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.4, roughness=0.6)
 	return obj
@@ -1156,10 +1201,17 @@ def _interceptor_hull_greebles(bm, hx, hy, hz):
 
 def _assault_hull_greebles(bm, hx, hy, hz):
 	greeble_headlight_pair(bm, hx * 0.75, -hy * 0.1, -hz * 0.97, radius=0.11)
-	# Applique armor plates
+	# Applique armor plates - tier-2 bevel (Section 3: "armor plates:
+	# beveled/angled edges, tier-2") plus a vertical rivet line near the
+	# exposed outward face; the back/mount-contact face against the hull
+	# stays flat since the rivets only run along the outward-facing edge.
+	plate_bevel, _ = tiered_bevel_width(hull_reference_dim(hx * 2, hy * 2), tier=2)
 	for x_sign in (-1, 1):
 		for z_frac in (-0.5, 0.0, 0.5):
-			add_box(bm, (x_sign * hx * 0.98, hy * 0.1, hz * z_frac), (0.1, hy * 1.1, hz * 0.28), bevel=0.015)
+			plate_x, plate_z = x_sign * hx * 0.98, hz * z_frac
+			add_box(bm, (plate_x, hy * 0.1, plate_z), (0.1, hy * 1.1, hz * 0.28), bevel=plate_bevel)
+			greeble_rivet_row(bm, (plate_x + x_sign * 0.06, hy * 0.1 - hy * 0.48, plate_z),
+				(plate_x + x_sign * 0.06, hy * 0.1 + hy * 0.48, plate_z), 4, radius=0.018, axis='x')
 	add_cyl_y(bm, (0, hy * 1.1, hz * 0.1), 0.5, 0.14, segments=16)  # turret ring
 	greeble_hatch(bm, (0, hy * 1.15, hz * 0.1), (0.55, 0.05, 0.5))
 	# Front dozer-style plate

@@ -1646,6 +1646,40 @@ static func _build_thruster(parent_node: Node3D, base_size: Vector3, base_color:
 	parent_node.add_child(exhaust)
 
 
+## Geometric Polish Pass (Section 3): a real thinning taper for
+## propeller/screw blades - thick chord at the hub, narrow at the tip -
+## instead of a constant-cross-section BoxMesh. Spans along local Y
+## (0=root, span=tip); tapers chord along local Z; thickness (local X)
+## stays constant along the span, matching how a real blade is built.
+static func _build_tapered_blade_mesh(thickness: float, root_chord: float, tip_chord: float, span: float) -> ArrayMesh:
+	var hx = thickness * 0.5
+	var hz0 = root_chord * 0.5
+	var hz1 = tip_chord * 0.5
+	var root_pts = [
+		Vector3(-hx, 0.0, -hz0), Vector3(hx, 0.0, -hz0),
+		Vector3(hx, 0.0, hz0), Vector3(-hx, 0.0, hz0),
+	]
+	var tip_pts = [
+		Vector3(-hx, span, -hz1), Vector3(hx, span, -hz1),
+		Vector3(hx, span, hz1), Vector3(-hx, span, hz1),
+	]
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in range(4):
+		var a = root_pts[i]
+		var b = root_pts[(i + 1) % 4]
+		var c = tip_pts[(i + 1) % 4]
+		var d = tip_pts[i]
+		st.add_vertex(a); st.add_vertex(b); st.add_vertex(c)
+		st.add_vertex(a); st.add_vertex(c); st.add_vertex(d)
+	st.add_vertex(root_pts[0]); st.add_vertex(root_pts[2]); st.add_vertex(root_pts[1])
+	st.add_vertex(root_pts[0]); st.add_vertex(root_pts[3]); st.add_vertex(root_pts[2])
+	st.add_vertex(tip_pts[0]); st.add_vertex(tip_pts[1]); st.add_vertex(tip_pts[2])
+	st.add_vertex(tip_pts[0]); st.add_vertex(tip_pts[2]); st.add_vertex(tip_pts[3])
+	st.generate_normals()
+	return st.commit()
+
+
 static func _build_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color, pusher: bool):
 	# Flat 3-blade fan on a hub, forward-facing (tractor) by default -
 	# pusher_prop passes pusher=true to flip which end the blades sit on,
@@ -1669,11 +1703,10 @@ static func _build_propeller(parent_node: Node3D, base_size: Vector3, base_color
 
 	var blade_mat = StandardMaterial3D.new()
 	blade_mat.albedo_color = Color.SILVER
+	var blade_mesh = _build_tapered_blade_mesh(0.03, 0.14, 0.045, base_size.x * 0.9)
 	for i in range(3):
 		var blade = MeshInstance3D.new()
-		var blade_box = BoxMesh.new()
-		blade_box.size = Vector3(0.03, base_size.x * 0.9, 0.1)
-		blade.mesh = blade_box
+		blade.mesh = blade_mesh
 		blade.material_override = blade_mat
 		blade.position = Vector3(0, 0, facing * base_size.z * 0.55)
 		blade.rotate_z(i * (TAU / 3.0))
@@ -1732,11 +1765,10 @@ static func _build_ship_screw(parent_node: Node3D, base_size: Vector3, base_colo
 
 	var blade_mat = StandardMaterial3D.new()
 	blade_mat.albedo_color = Color.SILVER
+	var blade_mesh = _build_tapered_blade_mesh(0.025, base_size.x * 0.38, base_size.x * 0.12, base_size.x * 0.55)
 	for i in range(4):
 		var blade = MeshInstance3D.new()
-		var blade_box = BoxMesh.new()
-		blade_box.size = Vector3(0.025, base_size.x * 0.55, base_size.x * 0.3)
-		blade.mesh = blade_box
+		blade.mesh = blade_mesh
 		blade.material_override = blade_mat
 		blade.rotation.x = 0.5
 		blade.rotate_z(i * (TAU / 4.0))

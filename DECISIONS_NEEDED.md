@@ -4,6 +4,24 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session, cont'd 7) — Module geometry wave 1: barrels/wheels/legs/armor-plates/prop taper
+
+**Not blocking.**
+
+**Module Tier 1 work is technically Tier 2 in the design doc's own Section 4 priority list** ("module bevel/detail pass reusing (1)'s function" is item 6, under Tier 2, not Tier 1). I've been tracking it as its own item since Chris's instruction was "keep rolling across the entire hull and module roster" without insisting on the doc's literal tier boundaries - the actual content (barrel stepped-loft, wheel rim groove, prop blade taper, armor-plate bevel+rivets) is unchanged either way. Flagging so the tier numbering in my own task list doesn't get confused with the doc's.
+
+**"Armor plates" has no dedicated builder - it's the existing applique-plate greebles on assault_hull (and similar per-hull greeble boxes elsewhere), not a generic kit part.** `armor_material`/`armor_thickness` are purely shader parameters on the hull's own material, not separate geometry. Rather than inventing a new generic armor-plate part (out of scope, would need module_catalog.gd + visual_builder.gd wiring beyond what was asked), I added the doc's "beveled edges (tier-2) + rivet-line strips" treatment to assault_hull's existing applique plates specifically, since that's the one place in the roster that already has literal "armor plate" geometry.
+
+**Prop/screw blade taper required a genuinely different code path than everything else this session** - propellers/paddle-wheels/ship-screws are built procedurally at runtime in `visual_builder.gd` (GDScript, SurfaceTool), not authored in Blender at all. Added a small shared `_build_tapered_blade_mesh()` helper (constant thickness along the span, chord tapering root-to-tip) and swapped it in for `propeller_prop`/`pusher_prop` and `ship_screw`'s flat `BoxMesh` blades. Left `paddle_wheel`'s blades untouched - the doc explicitly wants paddle blades to get a bevel+rib treatment, not a taper, and doing that would mean adding a rib/bevel step to a *different* shape (a flat radial paddle, not a tapered blade), which I'm deferring rather than bolting on halfway.
+
+**Wheel and ship_screw close-up screenshots didn't frame cleanly** (camera ended up below/beside the part rather than on it) despite two re-attempts at the wheel shot. Rather than keep burning cycles on camera angles for a secondary confirmation, I verified both by direct code/geometry review plus the automated test suite staying green - the propeller shot (same shared blade-mesh helper, different parameters) DID frame correctly and confirmed the taper renders as intended, which gives reasonable confidence the same code path works for ship_screw too.
+
+**Verified:** automated tests green after both the Blender-side changes (barrel/wheel/leg/assault_hull rebuild) and the GDScript-side prop taper change. Screenshots confirm the barrel's stepped-diameter loft (clearly visible discrete steps, reads as a real machined part) and the propeller's real tip-taper (wide at hub, narrow at blade tip) firsthand; wheel/ship_screw confirmed by code review + passing tests rather than a clean screenshot (noted above).
+
+**Tread plate's base slab and link ridges previously had inconsistent/no bevel** (base used a fixed `0.02` magic number, the raised link ridges had none at all) - both now use the same R-keyed tiered system (R excludes tread length, the axis the belt repeats/tiles along, same convention as everything else this session). Tests green after rebuild; this one is small/mechanical enough that I didn't spend a separate screenshot on it - the bevel function itself was already screenshot-verified on 10+ other parts by this point.
+
+---
+
 ## 2026-07-13 (new session, cont'd 6) — TripoSG feasibility read, then Geometric Polish Pass Tier 1 started on medium_hull
 
 **Not blocking.**
