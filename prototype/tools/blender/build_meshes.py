@@ -1408,6 +1408,7 @@ def generate_hulls():
 	export_and_cleanup(build_wedge_hull("light_hull", 3.0, 1.0, 4.0,
 		nose_frac=0.6, spine_w=0.35, spine_h=1.08, rear_flare=0.85, front_flare=0.55,
 		nose_region=0.28, bevel_pct=0.06,
+		waist_inset=0.05, waist_height_frac=0.6, deck_line=0.06,
 		color=(0.72, 0.73, 0.75), greebles=_light_hull_greebles), HULLS_DIR, "light_hull")
 
 	export_and_cleanup(build_wedge_hull("medium_hull", 4.0, 1.0, 6.0,
@@ -1418,6 +1419,7 @@ def generate_hulls():
 	export_and_cleanup(build_wedge_hull("heavy_hull", 6.0, 1.5, 8.0,
 		nose_frac=0.08, spine_w=0.75, spine_h=1.2, rear_flare=1.0, front_flare=1.0,
 		nose_region=0.5, bevel_pct=0.09, bevel_segments=3,
+		waist_inset=0.08, waist_height_frac=0.45, deck_line=0.3,
 		color=(0.32, 0.32, 0.34), greebles=_heavy_hull_greebles), HULLS_DIR, "heavy_hull")
 
 	export_and_cleanup(build_wedge_hull("interceptor_hull", 2.4, 0.8, 3.2,
@@ -1428,6 +1430,7 @@ def generate_hulls():
 	export_and_cleanup(build_wedge_hull("assault_hull", 5.0, 1.3, 7.0,
 		nose_frac=0.4, spine_w=0.7, spine_h=1.22, rear_flare=1.0, front_flare=0.9,
 		bevel_pct=0.085, bevel_segments=3,
+		waist_inset=0.07, waist_height_frac=0.45, deck_line=0.18,
 		color=(0.4, 0.32, 0.28), greebles=_assault_hull_greebles), HULLS_DIR, "assault_hull")
 
 	export_and_cleanup(build_bunker_hull("pillbox_foundation", 3.0, 1.2, 3.0,
