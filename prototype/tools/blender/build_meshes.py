@@ -290,6 +290,26 @@ def add_deck_line_step(bm, hx, hy, hz, height_frac=0.08, z_frac=(0.6, 0.95)):
 			v.co.z += raise_h
 
 
+def add_panel_line_groove(bm, hx, hy, hz, R, z_frac, depth_frac=0.015, width_frac=0.025):
+	"""A single shallow inset seam line running across the top deck at a
+	proportional Z position (0=nose, 1=tail) - real geometry via
+	bisect+push-in, not a texture, matching the design doc's 'inset face
+	along a line, push resulting strip in along normal.' depth_frac/
+	width_frac are fractions of R (not hull length) per the doc's
+	'depth ~1-2% R, width ~2-3% R' - grooves stay a consistently fine
+	detail-scale feature regardless of how long the hull is."""
+	z_center = -hz + hz * 2.0 * z_frac
+	band_half = R * width_frac * 0.5
+	z0, z1 = z_center - band_half, z_center + band_half
+	for plane_y in (z0, z1):
+		bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+			plane_co=(0, plane_y, 0), plane_no=(0, 1, 0), clear_inner=False, clear_outer=False)
+	push_in = R * depth_frac
+	for v in bm.verts:
+		if z0 - 1e-4 <= v.co.y <= z1 + 1e-4 and v.co.z > hy * 0.3:
+			v.co.z -= push_in
+
+
 def taper_profile(t, nose_frac, front_flare, rear_flare, nose_region=0.35, rear_region=0.8):
 	"""Non-linear width-scale multiplier along hull length: t=0 at the nose
 	(front, -Z) .. t=1 at the tail (rear, +Z). Narrows aggressively across
@@ -749,7 +769,8 @@ def build_accessory(name, kind, color, **kwargs):
 def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, spine_h=1.1,
 		rear_flare=0.9, front_flare=1.0, color=(0.55, 0.56, 0.58), greebles=None, taper_slices=7,
 		nose_region=0.35, height_taper=0.0, bevel_pct=None, bevel_segments=None, bevel_angle_deg=20.0,
-		waist_inset=0.0, waist_height_frac=0.5, deck_line=0.0, deck_line_z_frac=(0.6, 0.95)):
+		waist_inset=0.0, waist_height_frac=0.5, deck_line=0.0, deck_line_z_frac=(0.6, 0.95),
+		panel_line_fracs=None):
 	"""height_taper (0..1): brings the deck down toward the nose too, for
 	archetypes wanting a dart/wedge silhouette rather than just narrowing
 	in width (interceptor_hull's "extreme taper in width AND height").
@@ -797,6 +818,9 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 		add_waist_inset(bm, hx, hy, hz, depth_frac=waist_inset, height_frac=waist_height_frac)
 	if deck_line > 0.0:
 		add_deck_line_step(bm, hx, hy, hz, height_frac=deck_line, z_frac=deck_line_z_frac)
+	if panel_line_fracs:
+		for z_frac in panel_line_fracs:
+			add_panel_line_groove(bm, hx, hy, hz, R, z_frac)
 
 	# Tier-1 bevel on the hull's own real structural edges (belly-to-deck
 	# transition, nose tip, spine ridge, and any new waist/deck-line cuts)
@@ -1414,6 +1438,7 @@ def generate_hulls():
 	export_and_cleanup(build_wedge_hull("medium_hull", 4.0, 1.0, 6.0,
 		nose_frac=0.25, spine_w=0.6, spine_h=1.15, rear_flare=1.0, front_flare=0.85,
 		waist_inset=0.09, waist_height_frac=0.5, deck_line=0.16,
+		panel_line_fracs=[0.28, 0.48],
 		color=(0.5, 0.5, 0.52), greebles=_medium_hull_greebles), HULLS_DIR, "medium_hull")
 
 	export_and_cleanup(build_wedge_hull("heavy_hull", 6.0, 1.5, 8.0,

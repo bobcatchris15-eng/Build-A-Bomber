@@ -53,6 +53,7 @@ func _init():
 	DirAccess.make_dir_recursive_absolute(out_dir)
 
 	await _build([], Vector3(6, 3.5, 7), Vector3(0, 0.7, 0), "bare_hull_3q.png", out_dir)
+	await _build([], Vector3(1.5, 1.2, 1.8), Vector3(0, 0.55, -1.0), "panel_line_closeup.png", out_dir)
 	await _build([], Vector3(5, 2, -6), Vector3(0, 0.4, -2.5), "waist_side_closeup.png", out_dir)
 	await _build([], Vector3(3, 2, 5), Vector3(0, 0.6, 2.2), "deck_line_rear_closeup.png", out_dir)
 
