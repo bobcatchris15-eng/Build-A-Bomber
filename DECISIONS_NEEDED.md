@@ -22,6 +22,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session, cont'd 8) — Material/faction polish review: no code changes, genuinely already finished
+
+**Not blocking - a review pass, not a fix pass.**
+
+Surveyed all 10 factions on medium_hull (wide lineup + 5 individual close-ups: industrialists, ledger_combine, glacier_syndicate, salvage_union, crimson_concordat) plus checked `wear_amount`/`grime_amount` values across all 10 catalog entries directly. Conclusion: **the material/decal system is already in a genuinely finished state, not something needing more iteration right now.** All 10 factions read as clearly distinct at a glance (different base colors, different decal/greeble treatment, different wear intensity); the wear_amount/grime_amount spread (0.05-0.65) is clearly deliberate, not arbitrary - clean corporate factions (glacier_syndicate 0.08/0.03, ledger_combine 0.05/0.03) sit at one end, the scavenger faction (salvage_union 0.65/0.65) at the other, with the rest spread sensibly between. Decals (hazard stripes/stencils/mascot crests) render crisp and legibly per-faction.
+
+**One stale note from an earlier session's log is now corrected:** the 2026-07-13 (cont'd 3) entry said "`decal_tint` is a wired-but-inert placeholder." That was true AT THE TIME (before the decal/greeble work in cont'd 4-6 landed) but is no longer accurate - `hull_decals.gd` now genuinely re-tints the shared decal atlas per faction via `get_visual_decal_tint()`, confirmed both by reading the code and by the screenshots above showing distinctly-colored decals per faction. Not fixing anything here since there's nothing broken - just flagging so a future session doesn't waste time "fixing" something already working.
+
+**Not chasing invented problems.** Chris's instruction was to keep iterating "until it looks finished," not to keep touching things regardless. Since the actual finding is "already finished," the honest and correct move is to say so rather than make cosmetic tweaks to manufacture a sense of progress. Redirecting remaining effort to the Tier 2 geometry work (deck-line/waist-inset/panel-grooves) instead, since that's where the design doc's own priority list still has clear, undone, high-value work.
+
+**One pre-existing runtime warning noticed but not chased down:** `ERROR: Condition "!is_inside_tree()" is true` appeared a few times during the first faction-lineup capture (not the later ones). Screenshots and the automated test suite were unaffected either way, and nothing in this session's changes touches node-tree ordering in blueprint_manager.gd/visual_builder.gd's reconstruction path, so this reads as a pre-existing, non-fatal cosmetic warning rather than a regression - flagging for awareness, not treating as blocking.
+
+---
+
 ## 2026-07-13 (new session, cont'd 6) — TripoSG feasibility read, then Geometric Polish Pass Tier 1 started on medium_hull
 
 **Not blocking.**

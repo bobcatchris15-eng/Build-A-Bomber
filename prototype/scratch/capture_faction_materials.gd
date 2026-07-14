@@ -35,7 +35,7 @@ func _init():
 	var world = _make_world()
 	var cam = Camera3D.new()
 	world.add_child(cam)
-	cam.look_at_from_position(Vector3(0, 4, 9), Vector3(0, 1, 0), Vector3.UP)
+	cam.look_at_from_position(Vector3(0, 7, 16), Vector3(0, 1, 0), Vector3.UP)
 
 	var bp_manager = BlueprintManager.new()
 	world.add_child(bp_manager)
