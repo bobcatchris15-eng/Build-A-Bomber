@@ -67,6 +67,7 @@ func _init():
 	success = success and await test_brushed_aluminum_ui_theme()
 	success = success and await test_new_faction_mechanical_bonuses()
 	success = success and await test_hull_greebles()
+	success = success and await test_hull_decals()
 	success = success and await test_size_tiered_manufactories()
 	success = success and await test_win_condition()
 	success = success and await test_energy_pool_and_generators()
@@ -3242,6 +3243,103 @@ func test_new_faction_mechanical_bonuses() -> bool:
 
 	if ok:
 		print("  [PASS] Salvage Union's cost discount, Ledger Combine's build-time reduction, Crimson Concordat's low-HP dps ramp, Glacier Syndicate's terrain-penalty reduction, Dune Runners' harvester detection, Bayou Irregulars' detection-range reduction, and Aerodrome Cartel's airborne-only speed bonus all verified through real spawned instances / real system calls, not just catalog numbers.")
+	return ok
+
+func test_hull_decals() -> bool:
+	print("Running Test Suite: Faction Visual Identity - Shared Decal/Stencil Atlas (Hazard Stripes + Serial Stencils + Mascot Icons, All 10 Factions)...")
+	var HullDecals = preload("res://scripts/hull_decals.gd")
+	var FactionCatalog = preload("res://scripts/faction_catalog.gd")
+	var BlueprintManager = preload("res://scripts/blueprint_manager.gd")
+	var hull_size = Vector3(4.0, 1.0, 6.0)
+
+	var ok = true
+
+	# Unlike hull_greebles.gd, decals are UNIVERSAL - every one of the 10
+	# factions should get exactly 4 (2 hazard stripes + 1 serial + 1 mascot),
+	# never a no-op.
+	var ids = FactionCatalog.get_ids()
+	if ids.size() != 10:
+		print("  [FAIL] Expected 10 factions, got ", ids.size())
+		return false
+	for fac in ids:
+		var hull = Node3D.new()
+		root.add_child(hull)
+		HullDecals.apply_decals(hull, fac, hull_size)
+		var container = hull.get_node_or_null("HullDecals")
+		if not container or container.get_child_count() != 4:
+			print("  [FAIL] '", fac, "' should have exactly 4 decals (2 hazard + serial + mascot), got ", container.get_child_count() if container else "no container")
+			ok = false
+		hull.queue_free()
+	await process_frame
+
+	# decal_tint should track detail_color exactly (the accessor's whole
+	# point is to never silently drift from what the hull shader's own
+	# decal_tint uniform already carries).
+	for fac in ["industrialists", "crimson_concordat", "ledger_combine"]:
+		if FactionCatalog.get_visual_decal_tint(fac) != FactionCatalog.get_faction(fac).get("detail_color"):
+			print("  [FAIL] get_visual_decal_tint('", fac, "') should exactly match its detail_color")
+			ok = false
+
+	# Two different factions' mascot icons should be genuinely different
+	# shapes (different cached textures), not the same crest recolored -
+	# proves the per-faction simplification actually varies, not just tint.
+	var hull_a = Node3D.new()
+	root.add_child(hull_a)
+	HullDecals.apply_decals(hull_a, "industrialists", hull_size)
+	var hull_b = Node3D.new()
+	root.add_child(hull_b)
+	HullDecals.apply_decals(hull_b, "glacier_syndicate", hull_size)
+	var mascot_a = hull_a.get_node("HullDecals").get_children()[3].material_override.albedo_texture
+	var mascot_b = hull_b.get_node("HullDecals").get_children()[3].material_override.albedo_texture
+	if mascot_a == mascot_b:
+		print("  [FAIL] Industrialists and Glacier Syndicate should have genuinely different mascot icon shapes (gear vs. snowflake-star), not the same texture")
+		ok = false
+	# But their hazard-stripe texture (a shared, non-mascot element) SHOULD
+	# be the literal same cached texture resource - proves the "one shared
+	# atlas, re-tinted" model is real, not a fresh texture per faction.
+	var hazard_a = hull_a.get_node("HullDecals").get_children()[0].material_override.albedo_texture
+	var hazard_b = hull_b.get_node("HullDecals").get_children()[0].material_override.albedo_texture
+	if hazard_a != hazard_b:
+		print("  [FAIL] Every faction should share the identical cached hazard-stripe texture (only tint differs)")
+		ok = false
+	hull_a.queue_free()
+	hull_b.queue_free()
+	await process_frame
+
+	# Re-applying (a faction change in the Design Lab) must replace, not accumulate.
+	var reuse_hull = Node3D.new()
+	root.add_child(reuse_hull)
+	HullDecals.apply_decals(reuse_hull, "industrialists", hull_size)
+	HullDecals.apply_decals(reuse_hull, "technocrats", hull_size)
+	var reused_container = reuse_hull.get_node_or_null("HullDecals")
+	if not reused_container or reused_container.get_child_count() != 4:
+		print("  [FAIL] Re-applying decals for a different faction should REPLACE, not accumulate, got ", reused_container.get_child_count() if reused_container else "no container")
+		ok = false
+	reuse_hull.queue_free()
+	await process_frame
+
+	# Real spawn-pipeline check.
+	var bp_manager = BlueprintManager.new()
+	root.add_child(bp_manager)
+	var blueprint_data = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"armor_material": "hardened_steel", "faction": "dune_runners",
+		"modules": [],
+	}
+	var parent = Node3D.new()
+	root.add_child(parent)
+	var hull = bp_manager.reconstruct_vehicle(blueprint_data, parent, false)
+	var real_container = hull.get_node_or_null("HullDecals") if hull else null
+	if not real_container or real_container.get_child_count() != 4:
+		print("  [FAIL] A real reconstructed hull should carry exactly 4 decals regardless of faction")
+		ok = false
+	parent.queue_free()
+	bp_manager.queue_free()
+	await process_frame
+
+	if ok:
+		print("  [PASS] All 10 factions get the universal 4-decal set (hazard stripes share one cached texture, mascot icons genuinely differ in shape), re-theming replaces rather than accumulates, and a real reconstructed hull carries its decals.")
 	return ok
 
 func test_hull_greebles() -> bool:

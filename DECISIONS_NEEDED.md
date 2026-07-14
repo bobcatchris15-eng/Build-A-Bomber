@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas: mascot icons simplified to geometric crests, and a real placement bug found during verification
+
+**Not blocking.**
+
+**Mascot icons are plain geometric crests (gear, hexagon, star/sunburst, snowflake, diamond, cross, blade, lens/leaf), not illustrated mascot creatures.** Chris explicitly invited this call ("if something genuinely needs hand-authored art quality, simplify or flag it"). A detailed illustrated mascot (an animal, a face, a character) is exactly the kind of thing pixel-math can't reasonably fake - it would come out as an unrecognizable blob at 48x48px. A geometric crest (a gear, a hex, a star) is something real heraldry/insignia design already does with simple shapes, reads clearly at this resolution and at RTS distance, and stays fully within the "procedural, not hand-painted" approach the whole faction system has used all week. 8 distinct shape-drawing functions cover all 10 factions (2 factions share the reusable configurable-star function at different point-counts/proportions: Expansionists' compass star, Dune Runners' thin sunburst, Aerodrome Cartel's thick propeller all reuse one `_draw_star()` with different parameters, not 3 separate functions).
+
+**Hazard stripes ARE faction-tinted (via `decal_tint`/`detail_color`), per VISUAL_ART_DIRECTION.md 1.4's literal grouping of "hazard chevrons" into the "one decal atlas, re-tinted per faction" bucket** - I considered keeping them a fixed universal yellow/black (matching the terrain section's own "resource nodes/bridges stay neutral" convention) but the doc explicitly lists hazard chevrons alongside stencils/mascot as re-tinted elements, so followed it as written rather than importing terrain-section reasoning that wasn't written for this element.
+
+**Real bug found and fixed while verifying with screenshots, not just trusting the code:** every decal (hazard stripes, serial, mascot) was invisible in-game despite the debug inspector confirming the MeshInstance3D nodes, materials, and generated textures were all completely correct (texture pixel counts checked directly, node positions/rotations all as intended). Root cause: decals were positioned with only a razor-thin 0.03-unit clearance above the hull's NOMINAL top surface (`hull_size.y * 0.5`), but the medium_hull's real authored `.glb` mesh has a small dorsal ridge detail that actually peaks at `y=0.575`, not `0.5` - so the decal sat physically inside/under real hull geometry, fully occluded, on every hull that has any surface detail proud of its nominal catalog size (which is most of them). Fixed by using a much more generous proportional margin (`hull_size.y * 0.62` instead of `*0.5 + 0.03`) matching the clearance style `hull_greebles.gd`'s cards already used successfully. This is exactly the kind of bug pure code review wouldn't have caught - the geometry was provably present and correctly parameterized, it was just invisible - which is why "verify visually before calling it done" is a standing rule, not busywork.
+
+**Decal texture sampling uses `TEXTURE_FILTER_NEAREST`, not the default linear filter** - small on-screen alpha-cutout shapes (especially the stencil serial digits) were reading as a soft blurry blob under linear filtering; nearest-neighbor keeps the cutout edges crisp, which also happens to suit the "real cut stencil" aesthetic better than a smoothed edge would.
+
+**Verified:** 93/93 automated tests green (1 new - every faction gets exactly the universal 4-decal set, the hazard-stripe texture is confirmed to be the literal same cached resource across factions while mascot icons are confirmed genuinely different shapes, re-theming replaces rather than accumulates, real spawn-pipeline check). Windowed screenshots across all 10 factions confirm mascot icons, hazard stripes, and serial stencils all render, read distinctly per faction, and stay small enough to be genuinely detail-scale rather than competing with the silhouette.
+
+---
+
 ## 2026-07-13 (new session, cont'd 4) — Alpha-cutout greeble cards: the silhouette-scale exception, procedural textures instead of art assets, and per-faction style calls
 
 **Not blocking.**

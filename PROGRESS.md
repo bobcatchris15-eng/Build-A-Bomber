@@ -4,6 +4,24 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
+
+Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.
+
+### The build
+
+New `hull_decals.gd`, same procedural-at-runtime approach as the greeble cards: every shape (including the stencil serial number's actual digits, via a tiny hand-encoded 3x5 pixel font) is drawn into a small `Image` and cached - no hand-painted assets, no Blender pipeline dependency. Mascot icons were deliberately simplified to plain geometric crests (gear/hex/star/snowflake/diamond/cross/blade/leaf) rather than illustrated mascot creatures, per Chris's own invitation to simplify anything that would need real art quality - a detailed mascot at 48x48px procedural resolution would come out an unrecognizable blob.
+
+### A real bug, found by actually looking at the screenshot
+
+Every decal was invisible in-game despite the debug inspector confirming completely correct node/material/texture setup. Root cause: decals sat only 0.03 units above the hull's *nominal* catalog height, but the real authored `.glb` mesh has a small ridge detail proud of that nominal size - so the decal was physically buried under real geometry on most hulls. Fixed with a more generous proportional clearance, matching the greeble cards' already-successful approach. Also switched decal texture sampling to nearest-neighbor (linear filtering was blurring the small cutout shapes into soft blobs).
+
+### Verification
+
+93/93 automated tests green (1 new). Windowed screenshots across all 10 factions confirm mascot icons, hazard stripes, and stencil serials all actually render, read as genuinely different shapes per faction, and stay clearly detail-scale rather than fighting the silhouette.
+
+---
+
 ## 2026-07-13 (new session, cont'd 4) — Alpha-cutout greeble/fin cards for 5 factions
 
 Follow-up to a technical Q&A with Chris about whether the material system could fake silhouette-extending detail (it can't - normal maps/roughness/anisotropy only affect shading, never the true mesh outline) versus what would need real (cheap, non-collidable) extra geometry (alpha-cutout cards, same technique games use for cheap foliage). Chris green-lit building it for 5 specific factions.
