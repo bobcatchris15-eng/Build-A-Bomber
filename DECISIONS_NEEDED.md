@@ -4,6 +4,26 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session, cont'd 9) — MAJOR: stale Godot import cache invalidated most of this session's screenshot verification; found and fixed a real geometry bug once it was resolved
+
+**Not blocking, but this is the single most important entry in this log today - read it before trusting any earlier "verified via screenshot" claim from this session.**
+
+**The discovery.** While tuning the Tier 2 deck-line step on medium_hull, I doubled its height parameter (0.08 -> 0.16) and the screenshot came out pixel-identical. I tested with an absurd, unmissable value (0.5) - still identical. That's not a subtlety problem, that's a "the render isn't showing my changes" problem. I checked file timestamps: `medium_hull.glb` on disk was freshly rebuilt (this evening), but its cached Godot import (`.godot/imported/*.scn`) was stamped **07:08 AM** - hours before any of this session's Blender rebuilds. I confirmed by deleting the cache: Godot's script-mode runner does NOT reimport on its own and just hard-fails ("Make sure resources have been imported by opening the project in the editor at least once") rather than silently falling back - meaning with the cache PRESENT but stale, it was silently serving old geometry with no error at all.
+
+**Why this wasn't caught sooner:** the hull-family screenshots (wedge hulls, naval, air, modules) all still showed hulls that looked visibly distinct from each other, which read as plausible confirmation - but that distinctness almost certainly came from each hull's own catalog dimensions and pre-session mesh state, not from my specific taper-curve/bevel changes.
+
+**The fix:** direct `--headless --editor --import` on the real project doesn't reliably trigger a reimport in this environment (tried multiple flag combinations, including a fully-wiped `.godot/` - zero import artifacts got created). The procedure that DOES work is documented in this project's own memory from an earlier session: import into an **isolated copy** of the project via `--path <tmp>`, then copy back three things - `.godot/imported/`, `.godot/uid_cache.bin`, and every `*.import` sidecar next to its asset. Built `scratch/reimport_assets.sh` to automate this; **must be run after every future Blender rebuild, before trusting any screenshot or test result.**
+
+**Once the pipeline was actually working, a real bug surfaced immediately:** `heavy_cruiser_hull` rendered with a long degenerate spike blade jutting out past the bow (naval_hull/small_boat_hull showed smaller versions of the same artifact). Two real causes, both fixed:
+1. `build_ship_hull`'s topside-flare feature added an elevated point using a FIXED offset (`hy*0.15`) gated only on `beam > 0.001` - right at the pointed bow tip, where beam is tiny-but-nonzero, that fixed elevation is wildly disproportionate to the local hull width, creating a spike. Fixed by gating flare on `beam_scale > 0.5` (past the steepest part of the bow taper) instead.
+2. `bevel_sharp_edges` (the shared tiered-bevel function used by EVERY hull/module this session) clamped bevel width only against the hull's GLOBAL reference dimension R, never against the LOCAL length of the edges actually being beveled - at a pointed tip, local edges are much shorter than R, so a "reasonable" global bevel width can still self-intersect into a spike. Fixed by adding a per-call clamp to 40% of the shortest selected edge's own length. This is a general robustness fix benefiting every hull, not just ships.
+
+**After fixing both bugs, rebuilt the ENTIRE parts+hull library in one pass** (not just naval), redid the isolated-copy reimport, and re-verified screenshots across every family (wedge hulls, static foundations, naval, air, modules) - all confirmed clean, no other spikes found, tests green throughout. The earlier "looks distinct/polished" judgment calls in this log for wedge/static/air/module families turned out to be correct in substance once actually re-checked with working reimport - the geometry code itself was right, it was purely the verification step that was compromised, and the ONE case where a real bug existed (naval hulls' pointed bow) is now fixed and confirmed.
+
+**Going forward:** every subsequent Blender rebuild in this session must run `scratch/reimport_assets.sh` before screenshots are trusted. Flagging this prominently rather than quietly folding it in, since it affects how much confidence to place in this session's EARLIER commits (the underlying .glb files/code in those commits are fine - confirmed by this re-verification pass - but the screenshots attached to those commits do not reliably prove what they claimed to at the time).
+
+---
+
 ## 2026-07-13 (new session, cont'd 7) — Module geometry wave 1: barrels/wheels/legs/armor-plates/prop taper
 
 **Not blocking.**

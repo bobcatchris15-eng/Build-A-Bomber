@@ -219,6 +219,13 @@ def bevel_sharp_edges(bm, verts, R, tier=1, angle_deg=20.0, max_face_frac=0.3, p
 		if e.calc_face_angle() >= angle_thresh:
 			edges.append(e)
 	if edges:
+		# A global R-based width can still self-intersect/spike near a
+		# tapered tip (a pointed hull bow, a hull nose) where local edges
+		# are much shorter than R - a real bug found on heavy_cruiser_hull
+		# (see DECISIONS_NEEDED.md). Clamp to a safe fraction of the
+		# SHORTEST selected edge's own length too, not just global R.
+		min_edge_len = min(e.calc_length() for e in edges)
+		width = min(width, min_edge_len * 0.4)
 		bmesh.ops.bevel(bm, geom=edges, offset=width, segments=segments, affect='EDGES')
 	return edges
 
@@ -228,6 +235,59 @@ def eased_taper(t):
 	kink linearly from one slice to the next."""
 	t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
 	return t * t * (3.0 - 2.0 * t)
+
+
+# ---------------------------------------------------------------------------
+# Geometric Polish Pass (Section 1, Tier 2) - waist-inset and deck-line step.
+# Both are real concave/raised surface details, which a pure convex_hull
+# can't represent just by adding more points to its input cloud (any point
+# "inside" the hull of its neighbors is simply ignored). Rather than pull in
+# Blender's boolean modifier (new machinery, real non-manifold/perf risk),
+# both are done as bisect_plane (clean loop cuts, no geometry removed) +
+# a selective vertex shift within the cut band - bmesh-only, consistent
+# with how the rest of this file already builds geometry.
+#
+# NOTE ON AXES: these operate directly on existing bm.verts (raw Blender
+# coordinates), unlike most helpers above which take Godot-space args and
+# call GV()/GS() internally. Per that convention: raw Blender X = Godot X
+# (width, unchanged), raw Blender Y = Godot Z (length), raw Blender Z =
+# Godot Y (height).
+# ---------------------------------------------------------------------------
+
+def add_waist_inset(bm, hx, hy, hz, depth_frac=0.06, height_frac=0.5, band_frac=0.1):
+	"""Shallow horizontal recessed band cut into the hull's SIDE skin only
+	(not the top deck/bottom belly, and not the spine) - natural sponson-
+	mount nesting per the design doc. height_frac is the band's center as
+	a fraction of hull height; depth_frac/band_frac are fractions of
+	hx/hy for the inset depth and band thickness."""
+	band_z0 = -hy + 2.0 * hy * height_frac - hy * band_frac
+	band_z1 = -hy + 2.0 * hy * height_frac + hy * band_frac
+	for plane_z in (band_z0, band_z1):
+		bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+			plane_co=(0, 0, plane_z), plane_no=(0, 0, 1), clear_inner=False, clear_outer=False)
+	depth = hx * depth_frac
+	for v in bm.verts:
+		if band_z0 - 1e-4 <= v.co.z <= band_z1 + 1e-4:
+			if v.co.x > hx * 0.3:
+				v.co.x -= depth
+			elif v.co.x < -hx * 0.3:
+				v.co.x += depth
+
+
+def add_deck_line_step(bm, hx, hy, hz, height_frac=0.08, z_frac=(0.6, 0.95)):
+	"""Raises a secondary volume across part of the top deck's length
+	(rear portion by default, clear of the spine ridge's own Z position)
+	- real mount real estate per the design doc. z_frac is the raised
+	region's Z extent as a fraction of hull length."""
+	z0 = -hz + hz * 2.0 * z_frac[0]
+	z1 = -hz + hz * 2.0 * z_frac[1]
+	for plane_y in (z0, z1):
+		bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+			plane_co=(0, plane_y, 0), plane_no=(0, 1, 0), clear_inner=False, clear_outer=False)
+	raise_h = hy * height_frac
+	for v in bm.verts:
+		if z0 - 1e-4 <= v.co.y <= z1 + 1e-4 and v.co.z > hy * 0.3:
+			v.co.z += raise_h
 
 
 def taper_profile(t, nose_frac, front_flare, rear_flare, nose_region=0.35, rear_region=0.8):
@@ -688,7 +748,8 @@ def build_accessory(name, kind, color, **kwargs):
 
 def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, spine_h=1.1,
 		rear_flare=0.9, front_flare=1.0, color=(0.55, 0.56, 0.58), greebles=None, taper_slices=7,
-		nose_region=0.35, height_taper=0.0, bevel_pct=None, bevel_segments=None, bevel_angle_deg=20.0):
+		nose_region=0.35, height_taper=0.0, bevel_pct=None, bevel_segments=None, bevel_angle_deg=20.0,
+		waist_inset=0.0, waist_height_frac=0.5, deck_line=0.0, deck_line_z_frac=(0.6, 0.95)):
 	"""height_taper (0..1): brings the deck down toward the nose too, for
 	archetypes wanting a dart/wedge silhouette rather than just narrowing
 	in width (interceptor_hull's "extreme taper in width AND height").
@@ -728,10 +789,21 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 	bmesh.ops.convex_hull(bm, input=verts)
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
 
+	# Tier 2: waist-inset / deck-line step - pure silhouette shaping,
+	# applied AFTER the taper loft but BEFORE the bevel (which needs to
+	# smooth their new cut edges too) and well before greebles, per the
+	# design doc's mount-zone-aware ordering.
+	if waist_inset > 0.0:
+		add_waist_inset(bm, hx, hy, hz, depth_frac=waist_inset, height_frac=waist_height_frac)
+	if deck_line > 0.0:
+		add_deck_line_step(bm, hx, hy, hz, height_frac=deck_line, z_frac=deck_line_z_frac)
+
 	# Tier-1 bevel on the hull's own real structural edges (belly-to-deck
-	# transition, nose tip, spine ridge) - applied BEFORE greebles are
-	# fused on so it only ever touches the primary silhouette.
-	bevel_sharp_edges(bm, verts, R, tier=1, angle_deg=bevel_angle_deg, pct=bevel_pct, segments=bevel_segments)
+	# transition, nose tip, spine ridge, and any new waist/deck-line cuts)
+	# - applied BEFORE greebles are fused on so it only ever touches the
+	# primary silhouette. Uses the CURRENT vert set, not the original
+	# convex-hull input, since bisect_plane above may have added verts.
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, angle_deg=bevel_angle_deg, pct=bevel_pct, segments=bevel_segments)
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
@@ -851,7 +923,14 @@ def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.
 		pts.append((-beam, deck_y, z))
 		pts.append((beam, deck_y, z))
 		pts.append((0.0, keel_y, z))
-		if flare > 0.0 and beam > 0.001:
+		# Gated on beam_scale (not just beam > 0.001): the flare's elevation
+		# offset is a FIXED hy*0.15, not scaled with local beam, so adding
+		# it right at the pointed bow tip (where beam is tiny but nonzero)
+		# created a wildly disproportionate spike - a real bug caught by
+		# actually re-verifying screenshots after fixing the Godot import
+		# cache issue (see DECISIONS_NEEDED.md). Only flare past the
+		# steepest part of the bow taper, where the hull has real beam.
+		if flare > 0.0 and beam_scale > 0.5:
 			flare_beam = beam * (1.0 + flare)
 			flare_y = deck_y + hy * 0.15
 			pts.append((-flare_beam, flare_y, z))
@@ -1333,6 +1412,7 @@ def generate_hulls():
 
 	export_and_cleanup(build_wedge_hull("medium_hull", 4.0, 1.0, 6.0,
 		nose_frac=0.25, spine_w=0.6, spine_h=1.15, rear_flare=1.0, front_flare=0.85,
+		waist_inset=0.09, waist_height_frac=0.5, deck_line=0.16,
 		color=(0.5, 0.5, 0.52), greebles=_medium_hull_greebles), HULLS_DIR, "medium_hull")
 
 	export_and_cleanup(build_wedge_hull("heavy_hull", 6.0, 1.5, 8.0,
