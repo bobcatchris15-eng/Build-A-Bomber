@@ -185,13 +185,19 @@ def tiered_bevel_width(R, tier, pct=None, segments=None):
 	return max(width, 0.01), segs
 
 
-def bevel_sharp_edges(bm, verts, R, tier=1, angle_deg=20.0, max_face_frac=0.3, pct=None, segments=None):
+def bevel_sharp_edges(bm, verts, R, tier=1, angle_deg=20.0, max_face_frac=0.3, pct=None, segments=None,
+		preserve_axis=None, preserve_thresh=0.95):
 	"""Bevels only the genuinely sharp edges among `verts`, selected by
 	dihedral angle - so a multi-slice taper loft's many near-coplanar
 	edges are left alone (a blanket bevel would chew into the curve
 	itself) while the real structural transitions (belly-to-deck, nose
 	tip, spine ridge) get the tiered treatment. Works on any convex-hull-
-	derived shape without hand-picking edge lists per hull."""
+	derived shape without hand-picking edge lists per hull.
+
+	`preserve_axis` (0/1/2 for raw-Blender X/Y/Z) skips any edge touching
+	a face whose normal is nearly aligned with that axis - e.g. a wall
+	segment's flat end-cap faces, which must stay untouched so adjacent
+	tiled segments still line up edge-to-edge."""
 	width, segments = tiered_bevel_width(R, tier, pct=pct, segments=segments)
 	width = min(width, R * max_face_frac)
 	vert_set = set(verts)
@@ -202,6 +208,14 @@ def bevel_sharp_edges(bm, verts, R, tier=1, angle_deg=20.0, max_face_frac=0.3, p
 			continue
 		if len(e.link_faces) != 2:
 			continue
+		if preserve_axis is not None:
+			skip = False
+			for f in e.link_faces:
+				if abs(f.normal[preserve_axis]) >= preserve_thresh:
+					skip = True
+					break
+			if skip:
+				continue
 		if e.calc_face_angle() >= angle_thresh:
 			edges.append(e)
 	if edges:
@@ -673,8 +687,12 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 
 def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
 		color=(0.45, 0.45, 0.4), greebles=None):
-	"""Low static defensive bunker: tapered polygonal frustum + domed cap."""
+	"""Low static defensive bunker: tapered polygonal frustum + domed cap.
+	The taper itself (top narrower than base) already gives the battered/
+	inward-sloping wall read the design doc asks for - no new geometry
+	needed there, just a bevel."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
 	base_r = max(hx, hz)
 	top_r = base_r * taper
@@ -688,6 +706,10 @@ def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
 	verts = [bm.verts.new(GV(*p)) for p in all_pts]
 	bmesh.ops.convex_hull(bm, input=verts)
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	# Heavier, low-segment-count bevel - reads as blocky cast concrete
+	# rather than the "milled/cast metal" facet count used on vehicle hulls.
+	bevel_sharp_edges(bm, verts, R, tier=1, pct=0.09, segments=1)
 
 	# Domed roof cap
 	dome_verts = bmesh.ops.create_uvsphere(bm, u_segments=sides, v_segments=6, radius=top_r * 0.9)['verts']
@@ -707,6 +729,7 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 	topped with alternating battlement merlons - a wall segment, not a
 	bunker or tower, meant to read as long and thin rather than squat."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
 
 	base_pts = [
@@ -718,6 +741,12 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 	verts = [bm.verts.new(GV(*p)) for p in base_pts]
 	bmesh.ops.convex_hull(bm, input=verts)
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	# Bevel the batter/top transition, but preserve_axis=0 keeps the two
+	# flat end-cap faces (raw Blender +/-X, this wall's long axis) fully
+	# untouched - those cross-sections must stay identical and flat so
+	# adjacent wall segments still tile edge-to-edge with no visible seam.
+	bevel_sharp_edges(bm, verts, R, tier=1, pct=0.06, preserve_axis=0)
 
 	# Battlements: alternating merlon teeth along the top edge, evenly
 	# spaced with gaps (crenels) between them for the classic wall silhouette.
@@ -919,8 +948,10 @@ def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
 def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.44), greebles=None):
 	"""Tall stepped defensive tower: tiers stacked wide-to-narrow."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
 	tier_h = (size_y) / tiers
+	all_verts = []
 	for t in range(tiers):
 		shrink = 1.0 - (t * 0.22)
 		y0 = -hy + t * tier_h
@@ -932,8 +963,25 @@ def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.
 		]
 		verts = [bm.verts.new(GV(*p)) for p in pts]
 		bmesh.ops.convex_hull(bm, input=verts)
+		all_verts += verts
+
+	# Slight outward-flared base skirt - a shallow wider collar right at
+	# the foundation, before any bevel touches the main stepped body.
+	skirt_h = tier_h * 0.16
+	skirt_verts = [bm.verts.new(GV(*p)) for p in [
+		(-hx * 1.1, -hy - skirt_h, -hz * 1.1), (hx * 1.1, -hy - skirt_h, -hz * 1.1),
+		(-hx * 1.1, -hy - skirt_h, hz * 1.1), (hx * 1.1, -hy - skirt_h, hz * 1.1),
+		(-hx, -hy, -hz), (hx, -hy, -hz), (-hx, -hy, hz), (hx, -hy, hz),
+	]]
+	bmesh.ops.convex_hull(bm, input=skirt_verts)
+	all_verts += skirt_verts
 
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	# Tier-1 bevel across the stepped body's real structural edges
+	# (tier-to-tier shrink steps, skirt flare) - before railings/antenna
+	# are fused on so only the primary silhouette is touched.
+	bevel_sharp_edges(bm, all_verts, R, tier=1)
 
 	# Rooftop platform railing posts
 	top_shrink = 1.0 - ((tiers - 1) * 0.22)
