@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session, cont'd 6) — TripoSG feasibility read, then Geometric Polish Pass Tier 1 started on medium_hull
+
+**Not blocking.**
+
+**TripoSG (image-to-3D) rejected as the path for hull/module geometry.** Investigated Chris's local Modly install before doing anything else, as instructed. Reachability is genuinely fine - it's a real local FastAPI server (`127.0.0.1:8765`, confirmed live) with a documented REST API and a bundled MCP server, not a GUI-only tool, so "Chris is traveling and unavailable" would NOT have been a hard blocker if we'd gone this way. But the technical read is a clear no for now: the mount-zone system needs a flat facet at a *known* coordinate with a *known* normal, the hull_scale stretch system needs a known-oriented bounding box on our own X/Y/Z axes, and the procedural mask shader needs low-noise curvature off clean geometry (`fwidth(world_normal)`) - none of which an image-to-3D model's arbitrary, unoriented, non-semantic mesh output can guarantee, even with the API's built-in quad-remesh option. Going with the procedural Blender pipeline from the design doc exclusively; not using TripoSG for anything on the critical path. (Two corrections worth remembering if this is revisited later: the API's default model is `sf3d`, not TripoSG - `model_id` must be passed explicitly; and every generator returns a `.glb`, never `.obj`, so a format conversion step would be needed regardless.)
+
+**Applied the Tier-1 bevel + non-linear taper to the *shared* `build_wedge_hull()` function, but only rebuilt `medium_hull.glb` this pass.** `build_wedge_hull()` backs 5 hulls (light/medium/heavy/interceptor/assault) - editing the function updates the code path for all of them, but the design doc explicitly says "validate against medium ground hull first," so I only ran Blender against `medium_hull`'s own parameters (via a scratch one-off script, not by touching `generate_hulls()`'s real call list). Light/heavy/interceptor/assault's existing `.glb` files are untouched until each is reviewed individually - avoids shipping 4 unreviewed silhouette changes at once.
+
+**Bevel is sized at Blender-authoring time from each hull's static build dimensions (R = min(size_x, size_y)), not recomputed live against runtime `hull_scale` stretch.** The design doc's own "flagged as risky" section calls out live rebuild-on-stretch as a separate performance spike question, not a Tier-1 requirement - and no geometry anywhere in this project currently does a runtime mesh rebuild (every other bevel in `build_meshes.py` is likewise a fixed build-time value). Implementing that would be new infrastructure, not a Tier-1 tuning change.
+
+**Sharp edges for the tiered bevel are selected by dihedral angle (`calc_face_angle() >= 20°`), not by hand-picking edge indices.** `build_wedge_hull` produces its top deck as a `bmesh.ops.convex_hull()` over many loft-slice points now (up from 2 cross-sections), so a blanket bevel across every edge would chew into the smooth taper curve itself. Angle-based selection catches the real structural transitions (belly-to-deck, nose tip, spine ridge) and leaves the near-coplanar taper-slice edges alone - and works unmodified on every convex-hull-derived hull builder in the file, not just the wedge one.
+
+**Verified:** all automated tests still pass (headless run, same suite as before - no test targets hull mesh topology directly, so this is a "didn't break anything else" check, not mesh-shape verification). Windowed screenshots (`progress_captures/2026-07-13/medium_hull_polish/`) confirm the nose now tapers on a visible curve rather than a single hard wedge crease, bevel is visible along the primary edges without touching greebles, and a pintle-mounted weapon still sits flush on the deck with no clipping/floating against the new silhouette.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas: mascot icons simplified to geometric crests, and a real placement bug found during verification
 
 **Not blocking.**

@@ -147,6 +147,84 @@ def export_and_cleanup(obj, out_dir, filename):
 
 
 # ---------------------------------------------------------------------------
+# Geometric Polish Pass (Section 1) - shared tiered bevel + non-linear taper.
+# Bevel width is keyed to a per-mesh reference dimension R rather than ever
+# being a fixed world value, so the same three-tier vocabulary reads
+# consistently on a tiny greeble or a whole hull. R excludes hull length on
+# purpose - that's the axis under the heaviest runtime hull_scale stretch,
+# so nose-to-tail stretching should never dilate bevel width.
+# ---------------------------------------------------------------------------
+
+def hull_reference_dim(size_x, size_y):
+	"""R = min(width, height) - the design doc's reference dimension for
+	keying bevel width and taper proportions."""
+	return min(size_x, size_y)
+
+
+def tiered_bevel_width(R, tier):
+	"""Returns (width, segments) for an edge-role tier:
+	  1 = primary structural silhouette edges (6-9% of R, 2 segments)
+	  2 = secondary edges - hatch frames, ring corners (3-4% of R, 1 segment)
+	  3 = cosmetic greeble/bolt-box edges (1-1.5% of R + a small fixed
+	      floor, since pure percentage would vanish on tiny parts)
+	An absolute world-unit floor keeps every tier visible/non-z-fighting
+	even at very small R."""
+	if tier == 1:
+		width, segments = R * 0.075, 2
+	elif tier == 2:
+		width, segments = R * 0.035, 1
+	else:
+		width, segments = max(R * 0.0125, 0.012), 1
+	return max(width, 0.01), segments
+
+
+def bevel_sharp_edges(bm, verts, R, tier=1, angle_deg=20.0, max_face_frac=0.3):
+	"""Bevels only the genuinely sharp edges among `verts`, selected by
+	dihedral angle - so a multi-slice taper loft's many near-coplanar
+	edges are left alone (a blanket bevel would chew into the curve
+	itself) while the real structural transitions (belly-to-deck, nose
+	tip, spine ridge) get the tiered treatment. Works on any convex-hull-
+	derived shape without hand-picking edge lists per hull."""
+	width, segments = tiered_bevel_width(R, tier)
+	width = min(width, R * max_face_frac)
+	vert_set = set(verts)
+	angle_thresh = math.radians(angle_deg)
+	edges = []
+	for e in bm.edges:
+		if not (e.verts[0] in vert_set and e.verts[1] in vert_set):
+			continue
+		if len(e.link_faces) != 2:
+			continue
+		if e.calc_face_angle() >= angle_thresh:
+			edges.append(e)
+	if edges:
+		bmesh.ops.bevel(bm, geom=edges, offset=width, segments=segments, affect='EDGES')
+	return edges
+
+
+def eased_taper(t):
+	"""Smoothstep ease (0..1) so taper cross-sections blend rather than
+	kink linearly from one slice to the next."""
+	t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+	return t * t * (3.0 - 2.0 * t)
+
+
+def taper_profile(t, nose_frac, front_flare, rear_flare, nose_region=0.35, rear_region=0.8):
+	"""Non-linear width-scale multiplier along hull length: t=0 at the nose
+	(front, -Z) .. t=1 at the tail (rear, +Z). Narrows aggressively across
+	just the front `nose_region` fraction of length (the design doc's
+	'more aggressive near nose'), holds steady across the mid-hull waist,
+	then eases into the rear flare over the tail's last stretch."""
+	region = max(nose_frac, nose_region)
+	if t < region:
+		tip = front_flare * (1.0 - nose_frac) if nose_frac > 0.01 else front_flare
+		return tip + (1.0 - tip) * eased_taper(t / max(region, 0.001))
+	if t < rear_region:
+		return 1.0
+	return 1.0 + (rear_flare - 1.0) * eased_taper((t - rear_region) / (1.0 - rear_region))
+
+
+# ---------------------------------------------------------------------------
 # Greeble primitives - all operate on a caller-supplied bm using GODOT-space
 # center/size, so calling code never has to think about the Blender swap.
 # ---------------------------------------------------------------------------
@@ -532,22 +610,38 @@ def build_accessory(name, kind, color, **kwargs):
 # ---------------------------------------------------------------------------
 
 def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, spine_h=1.1,
-		rear_flare=0.9, front_flare=1.0, color=(0.55, 0.56, 0.58), greebles=None):
+		rear_flare=0.9, front_flare=1.0, color=(0.55, 0.56, 0.58), greebles=None, taper_slices=7):
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
 	pts = []
+	# Flat belly rectangle, unchanged/full-width - the taper below only
+	# reshapes the top-deck silhouette, matching the original wedge look.
 	pts += [(-hx, -hy, -hz), (hx, -hy, -hz), (-hx, -hy, hz), (hx, -hy, hz)]
-	pts += [(-hx * rear_flare, hy, hz), (hx * rear_flare, hy, hz)]
-	fx = hx * front_flare * (1.0 - nose_frac)
-	pts += [(-fx, hy, -hz), (fx, hy, -hz)]
+
+	# Top deck: a real multi-slice loft along Z with the non-linear
+	# (eased, nose-aggressive) taper curve instead of a single hard
+	# front/rear cross-section jump.
+	for i in range(taper_slices):
+		t = i / float(taper_slices - 1)
+		z = -hz + t * size_z
+		scale = taper_profile(t, nose_frac, front_flare, rear_flare)
+		pts.append((-hx * scale, hy, z))
+		pts.append((hx * scale, hy, z))
 	if nose_frac > 0.01:
 		pts.append((0.0, hy * 0.6, -hz))
+
 	pts += [(-hx * spine_w, hy * spine_h, hz * 0.1), (hx * spine_w, hy * spine_h, hz * 0.1)]
 	pts += [(-hx * spine_w, hy * spine_h, -hz * 0.3), (hx * spine_w, hy * spine_h, -hz * 0.3)]
 
 	verts = [bm.verts.new(GV(*p)) for p in pts]
 	bmesh.ops.convex_hull(bm, input=verts)
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	# Tier-1 bevel on the hull's own real structural edges (belly-to-deck
+	# transition, nose tip, spine ridge) - applied BEFORE greebles are
+	# fused on so it only ever touches the primary silhouette.
+	bevel_sharp_edges(bm, verts, R, tier=1)
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
