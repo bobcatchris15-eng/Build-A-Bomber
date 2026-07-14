@@ -1857,11 +1857,25 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 # A base plate that conforms to the actual local surface (flat for a
 # top/bottom deck, tilted for a sloped glacis or similar), with a ring of
 # bolt greebles and a raised center hub so it reads as a real mounting
-# bracket rather than a bare disc. Sits slightly INTO the hull skin at
-# flush_position (offset backward along the surface normal) rather than
-# floating flush against it, per Chris's "no gap" note.
+# bracket rather than a bare disc.
+#
+# Design refinement from Chris: rather than trying to fit the plate flush
+# against the local surface angle everywhere (a thin flush plate can show
+# a visible gap at the rim if the real surface deviates from the assumed
+# normal at all), the plate is a genuinely chunky disc/short-column whose
+# BULK extends deep into the hull - any angle mismatch gets absorbed
+# inside that intersection instead of showing as a gap, so the plate
+# doesn't need to be geometrically perfect against every surface angle.
+# The disc is built asymmetrically: its outer (visible) face stays right
+# at the nominal flush position exactly as before, but it extends much
+# further inward than its outer profile would suggest. The hub/bolt ring
+# stay anchored to that same nominal surface position, so they still read
+# as sitting on top of the mount, visible - only the disc's own body is
+# deliberately over-buried.
 static func _build_pintle_base_plate(local_normal: Vector3, base_size: Vector3, flush_position: Vector3) -> Node3D:
 	var n = local_normal.normalized() if local_normal.length() > 0.001 else Vector3.UP
+	# Small residual embed for the whole assembly - avoids a hairline
+	# z-fighting seam even in the perfectly-flat/no-mismatch case.
 	var embed_depth = max(0.02, base_size.y * 0.05)
 
 	var plate_root = Node3D.new()
@@ -1874,17 +1888,26 @@ static func _build_pintle_base_plate(local_normal: Vector3, base_size: Vector3, 
 	plate_root.transform = Transform3D(Basis(Quaternion(Vector3.UP, n)), flush_position - n * embed_depth)
 
 	var plate_radius = max(0.12, base_size.x * 0.42)
-	var plate_thickness = max(0.04, base_size.y * 0.08)
+	var plate_thickness = max(0.08, base_size.y * 0.14)
 	var plate_mat = StandardMaterial3D.new()
 	plate_mat.albedo_color = Color(0.16, 0.16, 0.17)
 
+	# Buried depth scales off the plate's own RADIUS, not hull size - the
+	# radius is what actually determines how big a rim gap an angle
+	# mismatch would create, so a wider plate needs proportionally deeper
+	# burial to keep that gap hidden.
+	var embed_extra = plate_radius * 0.35
 	var disc = MeshInstance3D.new()
 	var disc_cyl = CylinderMesh.new()
 	disc_cyl.top_radius = plate_radius
 	disc_cyl.bottom_radius = plate_radius
-	disc_cyl.height = plate_thickness
+	disc_cyl.height = plate_thickness + embed_extra
 	disc.mesh = disc_cyl
 	disc.material_override = plate_mat
+	# Shifted down by half the extra burial so the OUTER face stays at
+	# the same y=+thickness/2 the hub/bolts already assume, while the
+	# inner face reaches embed_extra deeper than before.
+	disc.position = Vector3(0, -embed_extra * 0.5, 0)
 	plate_root.add_child(disc)
 
 	# Raised center hub - reads as the swivel bearing the post actually
