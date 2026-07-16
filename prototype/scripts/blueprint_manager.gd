@@ -70,16 +70,52 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 
 	return blueprint
 
+# Real floating toast instead of temporarily overwriting the sidebar's
+# persistent "Blueprint Stats" title label - the old approach was both
+# easy to miss (2-2.5s, in a spot you're not necessarily looking at) and
+# a little confusing (the title itself appeared to change state, not just
+# show a transient notification).
+func _show_toast(msg: String, is_error: bool = false):
+	var root = get_node_or_null("/root/MainLab")
+	if not root:
+		return
+	var toast = PanelContainer.new()
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.55, 0.15, 0.15, 0.92) if is_error else Color(0.15, 0.45, 0.2, 0.92)
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	style.content_margin_left = 20
+	style.content_margin_right = 20
+	style.content_margin_top = 10
+	style.content_margin_bottom = 10
+	toast.add_theme_stylebox_override("panel", style)
+	toast.anchor_left = 0.5
+	toast.anchor_right = 0.5
+	toast.offset_left = -220
+	toast.offset_right = 220
+	toast.offset_top = 40
+	toast.offset_bottom = 76
+	toast.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(toast)
+
+	var label = Label.new()
+	label.text = msg
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 18)
+	label.add_theme_color_override("font_color", Color.WHITE)
+	toast.add_child(label)
+
+	get_tree().create_timer(2.6).timeout.connect(func():
+		if is_instance_valid(toast):
+			toast.queue_free()
+	)
+
 func save_blueprint() -> bool:
 	var root = get_node("/root/MainLab")
 	if root and root.get("clipping_detected") == true:
-		var ui = get_tree().get_first_node_in_group("stat_ui")
-		if ui and ui.has_node("ScrollContainer/VBoxContainer/Title"):
-			ui.get_node("ScrollContainer/VBoxContainer/Title").text = "SAVE FAILED: Clipping!"
-			get_tree().create_timer(2.5).timeout.connect(func():
-				if is_instance_valid(ui) and ui.has_node("ScrollContainer/VBoxContainer/Title"):
-					ui.get_node("ScrollContainer/VBoxContainer/Title").text = "Blueprint Stats"
-			)
+		_show_toast("SAVE FAILED: Clipping!", true)
 		return false
 
 	var hull = root.get_node_or_null("Hull")
@@ -121,13 +157,7 @@ func save_blueprint() -> bool:
 		legacy_file.store_string(json_string)
 		legacy_file.close()
 
-	var ui = get_tree().get_first_node_in_group("stat_ui")
-	if ui and ui.has_node("ScrollContainer/VBoxContainer/Title"):
-		ui.get_node("ScrollContainer/VBoxContainer/Title").text = "Saved '%s'!" % bp_name
-		get_tree().create_timer(2.0).timeout.connect(func():
-			if is_instance_valid(ui) and ui.has_node("ScrollContainer/VBoxContainer/Title"):
-				ui.get_node("ScrollContainer/VBoxContainer/Title").text = "Blueprint Stats"
-		)
+	_show_toast("Saved '%s'!" % bp_name)
 	return true
 
 func _generate_blueprint_id() -> String:
