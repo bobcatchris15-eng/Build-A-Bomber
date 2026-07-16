@@ -4,6 +4,16 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-16 — #18 blueprint version-check-on-load
+
+**Not blocking.**
+
+**Scope chosen: warn but still attempt the load, only when a save's version is NEWER than the game understands - not a hard block, and not a warning on every normal load.** The `"version": 1.0` field has been written into every save since it was added but never bumped and never read anywhere - so today it can't catch anything real against Chris's actual ~29 saved designs (all are 1.0). The actual gap this closes is forward-looking: nothing currently notices if a save were ever written by a newer build with an incompatible schema, and would just silently attempt reconstruction with unpredictable results. Added `CURRENT_BLUEPRINT_VERSION` to `blueprint_manager.gd` and a check in `load_blueprint_into_designer()`: if the save's version is greater than the constant, show the existing toast (reused from the #14 save-feedback fix) as a warning, then proceed with the load anyway - there's nothing more constructive to do with an otherwise-valid file in a single-player beta, and a hard block would only ever fire on a false positive today (an older save, or a hand-edited file) since no real schema-breaking bump has happened yet. Deliberately did NOT warn on an older-than-current version - every existing save is and will normally be "older," and reconstruct_vehicle already tolerates missing/older fields gracefully via `.get()` with defaults throughout, so that direction has no real risk to flag.
+
+**Verified via a headless scratch script** (deleted after use) that writes two synthetic saves directly to `user://blueprints/` (never touching Chris's real library): a normal current-version save produces no toast, and a synthetic version-99.0 save does. Both passed.
+
+---
+
 ## 2026-07-16 — #19 defense-building range-preview ring; #6 wrap-up caught and fixed a real parse-error regression
 
 **Not blocking.**

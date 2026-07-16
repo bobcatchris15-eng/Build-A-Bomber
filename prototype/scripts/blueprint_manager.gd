@@ -1,5 +1,14 @@
 extends Node
 
+# Bumped only when the blueprint JSON schema changes in a way that could
+# silently mis-load older saves (not for every new field - new fields
+# default gracefully via .get() everywhere in reconstruct_vehicle already).
+# Never bumped so far, so this can't fire against any of Chris's real
+# ~29 saved designs today - it exists so a FUTURE schema change doesn't
+# silently load stale data with zero indication, which was the actual gap
+# (every save/load path already tolerates a missing "version" key fine).
+const CURRENT_BLUEPRINT_VERSION: float = 1.0
+
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
@@ -234,6 +243,14 @@ func load_blueprint_into_designer(id: String) -> bool:
 	var root = get_node("/root/MainLab")
 	if not root:
 		return false
+
+	# A save written by a NEWER game version than this one may use a schema
+	# this build doesn't fully understand - warn but still attempt the load
+	# (best effort) rather than hard-block, since there's nothing else
+	# constructive to do with an otherwise-valid file for a single-player beta.
+	var save_version = data.get("version", CURRENT_BLUEPRINT_VERSION)
+	if save_version > CURRENT_BLUEPRINT_VERSION:
+		_show_toast("This design was saved by a newer version - some parts may not load correctly.", true)
 
 	if root.has_method("clear_hull"):
 		root.clear_hull()
