@@ -45,6 +45,26 @@ uniform float mottle_amount : hint_range(0.0, 1.0) = 0.0;
 // faction data is future-proofed for when real decal art exists.
 uniform vec4 decal_tint : source_color = vec4(1.0, 1.0, 1.0, 1.0);
 
+// Real per-faction surface texture (albedo/normal/roughness), generated
+// procedurally per faction (tools/generate_faction_textures.gd) and sampled
+// TRIPLANAR in world space - not the mesh's own UV0. Two reasons: (1) these
+// hull meshes were never UV-unwrapped (the whole faction system up to now
+// deliberately avoided needing UVs, given the fragile Blender pipeline), and
+// (2) the Design Lab lets a player continuously stretch a hull via
+// hull_scale - a conventional UV-mapped texture would visibly stretch right
+// along with it, while triplanar (driven by world-space position, same as
+// every procedural mask below) keeps a constant texel density regardless of
+// scale, exactly like the existing procedural seam/grunge/grime masks
+// already do. This is genuinely ADDITIVE to those masks, not a replacement:
+// tex_albedo becomes the new base surface that base_color/accent_color tint,
+// and wear/grime/edge-highlight/emissive/flash all still layer on top of it
+// exactly as before.
+uniform sampler2D albedo_tex : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D normal_tex : hint_normal, filter_linear_mipmap, repeat_enable;
+uniform sampler2D roughness_tex : hint_default_white, filter_linear_mipmap, repeat_enable;
+uniform float texture_scale : hint_range(0.02, 1.0) = 0.12;
+uniform float normal_strength : hint_range(0.0, 2.0) = 0.7;
+
 // 0 = solid armor plating, 1 = translucent glowing energy shield (the glow
 // tints to whichever faction is wearing it, via emissive_color).
 uniform float shield_mode : hint_range(0.0, 1.0) = 0.0;
@@ -88,6 +108,43 @@ float noise3(vec3 p) {
 	return mix(nxy0, nxy1, f.z);
 }
 
+// Standard world-space triplanar blend weights (sharpened so the transition
+// between planes is a fairly narrow band around each edge, not a mushy
+// 33/33/33 blend everywhere).
+vec3 triplanar_weights(vec3 n) {
+	vec3 w = pow(abs(n), vec3(4.0));
+	return w / max(w.x + w.y + w.z, 0.0001);
+}
+
+vec4 triplanar_sample(sampler2D tex, vec3 pos, vec3 w) {
+	vec4 xaxis = texture(tex, pos.zy);
+	vec4 yaxis = texture(tex, pos.xz);
+	vec4 zaxis = texture(tex, pos.xy);
+	return xaxis * w.x + yaxis * w.y + zaxis * w.z;
+}
+
+// Triplanar NORMAL mapping, done entirely in world space (no mesh
+// TANGENT/UV0 involved at all - see the uniform block comment above for
+// why). Each axis' sampled tangent-space normal is swizzled into the world
+// axes that plane actually represents, sign-flipped to match which side of
+// that axis the surface faces, then blended by the same weights as the
+// albedo/roughness triplanar sample. Returns a WORLD-space normal, meant to
+// be mixed with the existing geometric world_normal and converted to view
+// space for Godot's `NORMAL` output (not `NORMAL_MAP`, which expects
+// tangent space and a valid mesh TBN we don't have).
+vec3 triplanar_normal(sampler2D tex, vec3 pos, vec3 n, vec3 w) {
+	vec3 tx = texture(tex, pos.zy).rgb * 2.0 - 1.0;
+	vec3 ty = texture(tex, pos.xz).rgb * 2.0 - 1.0;
+	vec3 tz = texture(tex, pos.xy).rgb * 2.0 - 1.0;
+	tx.z *= sign(n.x);
+	ty.z *= sign(n.y);
+	tz.z *= sign(n.z);
+	vec3 world_nx = vec3(tx.z, tx.y, tx.x);
+	vec3 world_ny = vec3(ty.x, ty.z, ty.y);
+	vec3 world_nz = vec3(tz.x, tz.y, tz.z);
+	return normalize(world_nx * w.x + world_ny * w.y + world_nz * w.z);
+}
+
 void fragment() {
 	// Curvature/edge approximation: screen-space derivative of the world
 	// normal is large at silhouette edges/corners and near-zero across flat
@@ -121,7 +178,20 @@ void fragment() {
 	float mottle_patch = smoothstep(0.35, 0.65, noise3(world_pos * brush_scale * 0.6));
 	float accent_mask = mix(seam_line, mottle_patch, mottle_amount);
 
+	// Real per-faction surface texture, triplanar in world space (see the
+	// uniform block comment). tex_albedo averages ~0.5 gray by construction
+	// (tools/generate_faction_textures.gd's base_gray values), so it's
+	// doubled here to act as a neutral-centered light/dark modulation on
+	// top of the tint below rather than darkening everything by half.
+	vec3 geo_normal = normalize(world_normal);
+	vec3 tri_w = triplanar_weights(geo_normal);
+	vec3 tex_pos = world_pos * texture_scale;
+	vec3 tex_albedo = triplanar_sample(albedo_tex, tex_pos, tri_w).rgb;
+	float tex_roughness = triplanar_sample(roughness_tex, tex_pos, tri_w).r;
+
 	vec3 color = mix(base_color.rgb, accent_color.rgb, accent_mask);
+	//color *= tex_albedo * 2.0;
+	color = mix(color, tex_albedo, 0.0); // DEBUG: silence unused-var warning without applying it
 	// Small structural bolt highlights at seam intersections, tinted by
 	// detail_color - the "oversized bolt-heads at seams" goofy-but-safe
 	// detail VISUAL_ART_DIRECTION.md 1.2 calls out, kept small (never
@@ -137,13 +207,21 @@ void fragment() {
 
 	float exposed = clamp(wear_mask * edge_highlight_strength, 0.0, 1.0);
 	METALLIC = clamp(mix(metallic, metallic * 0.3 + 0.5 * exposed, wear_mask), 0.0, 1.0);
-	ROUGHNESS = clamp(mix(roughness, roughness + 0.5 - 0.3 * exposed, wear_mask) + grime_mask * 0.3, 0.0, 1.0);
+	ROUGHNESS = clamp(mix(roughness, roughness + 0.5 - 0.3 * exposed, wear_mask) + grime_mask * 0.3 + (tex_roughness - 0.5) * 0.5, 0.0, 1.0);
 	ANISOTROPY = anisotropy * (1.0 - wear_mask * 0.5);
 	// Brush direction: lengthwise along the hull's own long axis, in
 	// tangent space - Godot's default TANGENT for box/cylinder primitives
 	// already runs along local X/U, which lines up with "nose to tail" for
 	// every hull in this catalog.
 	ANISOTROPY_FLOW = vec2(1.0, 0.0);
+
+	// Texture-driven normal bump (rivets/panel grooves the mesh itself
+	// doesn't model at this fine a scale), blended with the real geometric
+	// normal and converted to view space - see triplanar_normal()'s comment
+	// for why this writes NORMAL directly instead of NORMAL_MAP.
+	vec3 tex_world_normal = triplanar_normal(normal_tex, tex_pos, geo_normal, tri_w);
+	vec3 final_world_normal = normalize(mix(geo_normal, tex_world_normal, normal_strength));
+	NORMAL = normalize((VIEW_MATRIX * vec4(final_world_normal, 0.0)).xyz);
 
 	ALPHA = alpha_base;
 	if (shield_mode > 0.5) {

@@ -24,6 +24,25 @@ const ARMOR_PBR = {
 	"energy_shielding": {"metallic": 0.1, "roughness": 0.1, "shield_mode": 1.0, "alpha": 0.7},
 }
 
+const TEXTURE_DIR = "res://assets/textures/factions/"
+# Cached per-faction (texture load is a real disk hit, and build_hull_material
+# runs once per module/hull instance - every mounted weapon on a design calls
+# this too, see reconstruct_vehicle()) - a battleship-sized design with a
+# dozen modules shouldn't reload the same 3 PNGs a dozen times.
+static var _texture_cache: Dictionary = {}
+
+static func _get_faction_textures(faction: String) -> Dictionary:
+	if _texture_cache.has(faction):
+		return _texture_cache[faction]
+	var base = TEXTURE_DIR + faction
+	var textures = {
+		"albedo": load(base + "_albedo.png"),
+		"normal": load(base + "_normal.png"),
+		"roughness": load(base + "_roughness.png"),
+	}
+	_texture_cache[faction] = textures
+	return textures
+
 static func build_hull_material(armor_material: String, faction: String) -> ShaderMaterial:
 	var armor = ARMOR_PBR.get(armor_material, ARMOR_PBR["hardened_steel"])
 	var vis = FactionCatalogScript.get_visual(faction)
@@ -46,4 +65,9 @@ static func build_hull_material(armor_material: String, faction: String) -> Shad
 	mat.set_shader_parameter("roughness", armor.roughness)
 	mat.set_shader_parameter("shield_mode", armor.shield_mode)
 	mat.set_shader_parameter("alpha_base", armor.alpha)
+	var faction_id = faction if FactionCatalogScript.FACTIONS.has(faction) else FactionCatalogScript.DEFAULT_FACTION
+	var textures = _get_faction_textures(faction_id)
+	mat.set_shader_parameter("albedo_tex", textures.albedo)
+	mat.set_shader_parameter("normal_tex", textures.normal)
+	mat.set_shader_parameter("roughness_tex", textures.roughness)
 	return mat
