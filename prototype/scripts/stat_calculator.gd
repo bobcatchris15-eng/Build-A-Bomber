@@ -22,6 +22,16 @@ const UITheme = preload("res://scripts/ui_theme.gd")
 @onready var size_slider = $ScrollContainer/VBoxContainer/LocomotionTweaks/SizeContainer/SizeSlider
 @onready var count_container = $ScrollContainer/VBoxContainer/LocomotionTweaks/CountContainer
 @onready var count_slider = $ScrollContainer/VBoxContainer/LocomotionTweaks/CountContainer/CountSlider
+@onready var count_label = $ScrollContainer/VBoxContainer/LocomotionTweaks/CountContainer/CountLabel
+
+# Locomotion Size/Count sliders previously showed only a static base label
+# ("Wheel Size:") with no live numeric readout, unlike every other slider
+# in the Design Lab (armor thickness, weapon tweaks) which all show the
+# current value - a real, noticed inconsistency. These track the base
+# name so _refresh_locomotion_labels() can append the live value on top
+# of whatever branch in on_module_selected() set it.
+var size_label_base: String = "Size"
+var count_label_base: String = "Count"
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
@@ -584,67 +594,75 @@ func on_module_selected(module: Node3D):
 	locomotion_tweaks.visible = true
 	
 	if type_id == "wheels":
-		size_label.text = "Wheel Size:"
+		size_label_base = "Wheel Size"
 		count_container.visible = true
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 		count_slider.value = settings.get("count", 4)
 	elif type_id == "omni_wheels":
-		size_label.text = "Wheel Size:"
+		size_label_base = "Wheel Size"
 		count_container.visible = true
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 		count_slider.value = settings.get("count", 4)
 	elif type_id == "tracked_treads":
-		size_label.text = "Tread Width:"
+		size_label_base = "Tread Width"
 		count_container.visible = false
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("width", 1.0)
 	elif type_id == "rhomboid_treads":
-		size_label.text = "Track Width:"
+		size_label_base = "Track Width"
 		count_container.visible = false
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("width", 1.0)
 	elif type_id == "helicopter_rotors":
-		size_label.text = "Rotor Size:"
+		size_label_base = "Rotor Size"
 		count_container.visible = true
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 		count_slider.value = settings.get("count", 4)
 	elif type_id == "legs":
-		size_label.text = "Leg Length:"
+		size_label_base = "Leg Length"
 		count_container.visible = true
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 		count_slider.value = settings.get("count", 4)
 	elif type_id == "anti_grav":
-		size_label.text = "Ring Size:"
+		size_label_base = "Ring Size"
 		count_container.visible = false
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 	elif type_id == "hover_engine":
-		size_label.text = "Hover Pad Size:"
+		size_label_base = "Hover Pad Size"
 		count_container.visible = false
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 	else:
 		locomotion_tweaks.visible = false
-		
+
+	_refresh_locomotion_labels()
 	is_updating_sliders = false
 
+func _refresh_locomotion_labels():
+	size_label.text = "%s: %.2fx" % [size_label_base, size_slider.value]
+	if count_container.visible:
+		count_label.text = "%s: %d" % [count_label_base, int(count_slider.value)]
+
 func _on_size_value_changed(value: float):
+	_refresh_locomotion_labels()
 	if is_updating_sliders or not current_selected_module: return
 	_apply_tweaks()
 
 func _on_count_value_changed(value: float):
+	_refresh_locomotion_labels()
 	if is_updating_sliders or not current_selected_module: return
 	_apply_tweaks()
 
