@@ -4,6 +4,14 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-16 — #17 map-select thumbnail preview: explicit skip, not implemented
+
+**Not blocking - this closes out the playtest audit as an explicit, reasoned skip rather than a silent drop.**
+
+Re-checked `map_select.gd` directly before deciding: each map button already shows its real name as the button label, its description both as a persistent label under the button AND as the button's tooltip. The actual gap a thumbnail would close is narrow - a player can't visually distinguish maps before picking one - but closing it for real needs either a pipeline for authored preview art (new asset type, needs updating every time a map's layout changes) or a live top-down minimap render (a real rendering feature, not a UI tweak). Both are disproportionate to the actual gap for a 4-map beta where text descriptions already exist and this isn't blocking or confusing anyone, just slightly less visually rich than it could be. Skipping rather than implementing - can revisit if Chris wants richer map-select presentation once there are more maps to actually need visual disambiguation between.
+
+---
+
 ## 2026-07-16 — #18 blueprint version-check-on-load
 
 **Not blocking.**
