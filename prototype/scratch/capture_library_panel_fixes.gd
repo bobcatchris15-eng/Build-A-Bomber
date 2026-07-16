@@ -32,6 +32,18 @@ func _init():
 				child.get_cancel_button().pressed.emit()
 		for i in range(2): await process_frame
 
+	# Rename dialog
+	if not panel.blueprint_manager.list_blueprints().is_empty():
+		var first_id = panel.blueprint_manager.list_blueprints()[0].get("id", "")
+		panel._on_rename_pressed(first_id, "Untitled Design")
+		for i in range(4): await process_frame
+		root.get_texture().get_image().save_png("%s/rename_dialog.png" % out_dir)
+		print("[CAPTURE] saved rename_dialog.png")
+		for child in panel.get_children():
+			if child is ConfirmationDialog:
+				child.get_cancel_button().pressed.emit()
+		for i in range(2): await process_frame
+
 	# Load-failure error dialog (bogus id that can't possibly load)
 	panel._on_load_pressed("definitely_not_a_real_blueprint_id_12345")
 	for i in range(4): await process_frame

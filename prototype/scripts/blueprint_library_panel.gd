@@ -115,6 +115,11 @@ func _add_row(entry: Dictionary):
 	load_btn.pressed.connect(_on_load_pressed.bind(entry.get("id", "")))
 	hbox.add_child(load_btn)
 
+	var rename_btn = Button.new()
+	rename_btn.text = "Rename"
+	rename_btn.pressed.connect(_on_rename_pressed.bind(entry.get("id", ""), entry.get("name", "Untitled Design")))
+	hbox.add_child(rename_btn)
+
 	var dup_btn = Button.new()
 	dup_btn.text = "Duplicate"
 	dup_btn.pressed.connect(_on_duplicate_pressed.bind(entry.get("id", "")))
@@ -138,6 +143,29 @@ func _on_load_pressed(id: String):
 		queue_free()
 	else:
 		_show_error("Couldn't load that blueprint - the save file may be corrupted.")
+
+func _on_rename_pressed(id: String, current_name: String):
+	# Previously the only way to rename a saved design was to Load it into
+	# the designer, edit the name field, and Save again - an undocumented
+	# workaround. This adds a real Rename action in the Library itself.
+	var dialog = ConfirmationDialog.new()
+	dialog.title = "Rename Blueprint"
+	dialog.dialog_text = "New name:"
+	add_child(dialog)
+	var line_edit = LineEdit.new()
+	line_edit.text = current_name
+	line_edit.custom_minimum_size = Vector2(300, 0)
+	dialog.add_child(line_edit)
+	dialog.confirmed.connect(func():
+		if blueprint_manager:
+			blueprint_manager.rename_blueprint(id, line_edit.text)
+		_refresh_list()
+	)
+	dialog.canceled.connect(func(): dialog.queue_free())
+	dialog.confirmed.connect(func(): dialog.queue_free())
+	dialog.popup_centered()
+	line_edit.grab_focus()
+	line_edit.select_all()
 
 func _on_duplicate_pressed(id: String):
 	if blueprint_manager:

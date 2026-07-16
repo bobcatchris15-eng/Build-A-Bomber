@@ -164,6 +164,20 @@ func delete_blueprint(id: String) -> void:
 		DirAccess.remove_absolute(path)
 		print("Deleted blueprint: ", id)
 
+func rename_blueprint(id: String, new_name: String) -> bool:
+	var path = "user://blueprints/%s.json" % id
+	var data = load_blueprint(path)
+	if data.is_empty():
+		return false
+	data["name"] = new_name if new_name.strip_edges() != "" else "Untitled Design"
+	data["modified_unix"] = Time.get_unix_time_from_system()
+	var file = FileAccess.open(path, FileAccess.WRITE)
+	if not file:
+		return false
+	file.store_string(JSON.stringify(data, "\t"))
+	file.close()
+	return true
+
 func duplicate_blueprint(id: String) -> String:
 	var path = "user://blueprints/%s.json" % id
 	var data = load_blueprint(path)
