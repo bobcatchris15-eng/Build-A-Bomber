@@ -18,6 +18,8 @@ func _init():
 	panel.set_script(LibraryPanelScript)
 	scene.add_child(panel)
 	for i in range(4): await process_frame
+	root.get_texture().get_image().save_png("%s/library_rows_with_timestamp.png" % out_dir)
+	print("[CAPTURE] saved library_rows_with_timestamp.png")
 
 	# Delete confirmation dialog
 	if not panel.blueprint_manager.list_blueprints().is_empty():

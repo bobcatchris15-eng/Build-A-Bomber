@@ -105,7 +105,7 @@ func _add_row(entry: Dictionary):
 	info.add_child(name_label)
 
 	var sub_label = Label.new()
-	sub_label.text = "%s | %s" % [_prettify(entry.get("hull_type", "")), _prettify(entry.get("faction", ""))]
+	sub_label.text = "%s | %s | %s" % [_prettify(entry.get("hull_type", "")), _prettify(entry.get("faction", "")), _format_modified(entry.get("modified_unix", 0))]
 	sub_label.modulate = Color(0.75, 0.75, 0.75)
 	info.add_child(sub_label)
 
@@ -194,6 +194,16 @@ func _show_error(msg: String):
 	dialog.confirmed.connect(func(): dialog.queue_free())
 	dialog.canceled.connect(func(): dialog.queue_free())
 	dialog.popup_centered()
+
+func _format_modified(unix_time: int) -> String:
+	# Was stored on every save/duplicate/rename but never actually shown
+	# anywhere - surfacing it here also solves the "duplicate names are
+	# indistinguishable" gap, since two "Untitled Design" rows at least
+	# show different save times now.
+	if unix_time <= 0:
+		return "Unknown date"
+	var dt = Time.get_datetime_dict_from_unix_time(unix_time)
+	return "%04d-%02d-%02d %02d:%02d" % [dt.year, dt.month, dt.day, dt.hour, dt.minute]
 
 func _prettify(id: String) -> String:
 	if id == "":
