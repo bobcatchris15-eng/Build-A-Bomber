@@ -513,9 +513,28 @@ func update_stats(hull: Node3D):
 	# alone showed raw float precision (e.g. "14.723891...") while every
 	# other label here was already %.1f/%.2f/%d formatted.
 	hp_label.text = "Total HP: %.1f" % total_hp
-	weight_label.text = "Total Weight: %.1f" % total_weight
 	cost_label.text = "Cost: %d Metal, %d Crystal" % [total_cost_metal, total_cost_crystal]
 	dps_label.text = "Total DPS: %.1f" % total_dps
+
+	# Manufactory tier is determined entirely by the hull TYPE (see
+	# ModuleCatalog.get_hull_size_tier() - the same function skirmish.gd's
+	# _queue_player_unit() uses), not by modules added - a player could
+	# previously only discover which manufactory they'd need via a failed
+	# build attempt mid-match. Appended onto the existing weight label
+	# (rather than a new row) since the sidebar has no vertical slack left -
+	# confirmed by the project's own automated UI-overflow test, which
+	# failed by a shrinking-but-still-nonzero margin through two earlier
+	# attempts at a dedicated label before this approach was tried.
+	weight_label.text = "Total Weight: %.1f" % total_weight
+	# A tooltip, not visible sidebar text - three attempts at a persistent
+	# label (a new row, then appending to this same label with autowrap)
+	# all tripped the project's own UI-overflow test; this sidebar
+	# genuinely has zero vertical/horizontal slack left. A tooltip adds no
+	# layout footprint at all, so it sidesteps the budget entirely while
+	# still surfacing which manufactory tier this design needs before the
+	# player ever tries to build it mid-match.
+	var tier = ModuleCatalog.get_hull_size_tier(hull.get_meta("type_id", "medium_hull")) if hull and hull.has_meta("type_id") else ""
+	weight_label.tooltip_text = "Needs a %s Manufactory to build this design." % tier.capitalize() if tier != "" else ""
 
 	if not energy_label:
 		energy_label = Label.new()

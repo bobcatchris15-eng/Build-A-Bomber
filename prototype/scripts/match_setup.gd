@@ -91,6 +91,12 @@ func _ready():
 		enemy_faction_btn.selected = default_enemy_idx
 	difficulty_btn = _add_dropdown(grid, "AI Difficulty", DIFFICULTY_LABELS)
 	difficulty_btn.selected = 1 # Normal
+	# Real, not cosmetic (enemy_ai.gd's own DIFFICULTY_TIMER_MULT/PITY_MULT) -
+	# explained here since the dropdown itself gives no hint what changes.
+	difficulty_btn.tooltip_text = "Changes how fast the AI builds/attacks and how quickly it recovers from a bad economy. Doesn't change unit stats - just AI pacing."
+	difficulty_btn.set_item_tooltip(0, "AI builds and attacks more slowly, and struggles longer if its economy falls behind.")
+	difficulty_btn.set_item_tooltip(1, "Balanced AI pacing.")
+	difficulty_btn.set_item_tooltip(2, "AI builds and attacks faster, and recovers quickly from economic setbacks.")
 	resources_btn = _add_dropdown(grid, "Starting Resources", RESOURCE_LABELS)
 
 	root_vbox.add_child(HSeparator.new())
