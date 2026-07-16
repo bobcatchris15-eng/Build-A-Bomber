@@ -591,8 +591,9 @@ func on_module_selected(module: Node3D):
 		var dps = data.get_dps()
 		var heal = data.get_heal_rate()
 		var last_line = "Heal Rate: %.1f/s" % heal if heal > 0.0 else "DPS: %.1f" % dps
-		popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s" % [hp, wt, cost.x, cost.y, last_line]
-		
+		var mount_line = _mount_style_line(module.get_meta("mount_style", ""))
+		popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s%s" % [hp, wt, cost.x, cost.y, last_line, mount_line]
+
 	if data.category != "locomotion":
 		locomotion_tweaks.visible = false
 		_generate_custom_tweaks(module, data)
@@ -839,10 +840,29 @@ func _on_tweak_changed():
 				var dps = data.get_dps()
 				var heal = data.get_heal_rate()
 				var last_line = "Heal Rate: %.1f/s" % heal if heal > 0.0 else "DPS: %.1f" % dps
-				popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s" % [hp, wt, cost.x, cost.y, last_line]
+				var mount_line = _mount_style_line(current_selected_module.get_meta("mount_style", ""))
+				popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s%s" % [hp, wt, cost.x, cost.y, last_line, mount_line]
 		var placer = root.get_node_or_null("ModulePlacer") if root else null
 		if placer:
 			placer.check_all_clipping()
+
+# mount_style (module_placer.gd/module_catalog.gd) drives real visible/
+# mechanical behavior (whether the weapon stays level, embeds into the
+# hull, or the whole vehicle aims instead) but was never named or
+# explained anywhere in the UI - a player just saw the result with no
+# indication these are 5 distinct categories with different rules.
+# Appended to the floating module popup (not the fixed sidebar, which has
+# zero layout slack left - see the manufactory-tier tooltip judgment call
+# above) since this only applies to weapons, not every module.
+func _mount_style_line(style: String) -> String:
+	var desc = ""
+	match style:
+		"turret": desc = "Turret mount (full traverse)"
+		"frame_built": desc = "Frame-built (fixed - whole vehicle aims)"
+		"pintle_top": desc = "Pintle mount (sits on top)"
+		"pintle_bottom": desc = "Pintle mount (hangs below)"
+		"sponson": desc = "Sponson mount (embedded in hull)"
+	return "\n%s" % desc if desc != "" else ""
 
 const ARMOR_MATERIALS = ["hardened_steel", "reactive_armor", "ablative_ceramic", "energy_shielding"]
 const ARMOR_MATERIAL_LABELS = ["Hardened Steel", "Reactive Armor", "Ablative Ceramic", "Energy Shielding"]
