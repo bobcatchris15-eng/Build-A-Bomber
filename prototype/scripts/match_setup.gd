@@ -29,6 +29,11 @@ const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard"]
 # the old hardcoded 450/150 exactly, not just a same-looking copy of it).
 const RESOURCE_PRESETS = [Vector2i(-1, -1), Vector2i(250, 75), Vector2i(900, 400)]
 const RESOURCE_LABELS = ["Standard", "Low (tight economy)", "High (build fast, fight fast)"]
+# Matches skirmish.gd's own hardcoded roster.slice(0, 12) - kept as a
+# separate constant here (not read from skirmish.gd, which isn't loaded
+# yet at this point in the flow) since this screen needs to warn BEFORE
+# the roster is ever built, not just match its cap after the fact.
+const ROSTER_CAP = 12
 
 var player_faction_btn: OptionButton
 var enemy_faction_btn: OptionButton
@@ -36,6 +41,7 @@ var difficulty_btn: OptionButton
 var resources_btn: OptionButton
 var blueprint_checks: Array = [] # [{path, check: CheckBox}, ...]
 var bp_manager: Node
+var selection_counter_label: Label
 
 func _ready():
 	bp_manager = BlueprintManagerScript.new()
@@ -95,6 +101,11 @@ func _ready():
 	library_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root_vbox.add_child(library_label)
 
+	selection_counter_label = Label.new()
+	selection_counter_label.add_theme_font_size_override("font_size", 12)
+	selection_counter_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root_vbox.add_child(selection_counter_label)
+
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -118,7 +129,9 @@ func _ready():
 			var check = CheckBox.new()
 			check.text = "%s  (%s | %s)" % [entry.get("name", "Untitled"), _prettify(entry.get("hull_type", "")), _prettify(entry.get("faction", ""))]
 			row.add_child(check)
+			check.toggled.connect(func(_pressed): _update_selection_counter())
 			blueprint_checks.append({"path": entry.path, "check": check})
+	_update_selection_counter()
 
 	root_vbox.add_child(HSeparator.new())
 
@@ -165,6 +178,27 @@ func _add_dropdown(parent: Control, label_text: String, labels: PackedStringArra
 		btn.add_item(l)
 	parent.add_child(btn)
 	return btn
+
+func _update_selection_counter():
+	var count = 0
+	for entry in blueprint_checks:
+		if entry.check.button_pressed:
+			count += 1
+	if count == 0:
+		selection_counter_label.text = ""
+	elif count >= ROSTER_CAP:
+		selection_counter_label.text = "%d / %d selected - only the first %d will make it into your roster" % [count, ROSTER_CAP, ROSTER_CAP]
+		selection_counter_label.modulate = Color(1.0, 0.55, 0.35)
+	else:
+		selection_counter_label.text = "%d / %d selected" % [count, ROSTER_CAP]
+		selection_counter_label.modulate = Color(0.65, 0.85, 0.65)
+	# Once the cap is hit, disable the remaining unchecked boxes rather
+	# than silently letting the player check more than will ever be used -
+	# this is what the earlier audit flagged as a real gap (checking 15
+	# designs with no feedback that only some subset actually gets in).
+	for entry in blueprint_checks:
+		if not entry.check.button_pressed:
+			entry.check.disabled = count >= ROSTER_CAP
 
 func _prettify(id: String) -> String:
 	if id == "":
