@@ -150,6 +150,16 @@ func _ready():
 	add_to_group("stat_ui")
 	if sidebar_panel:
 		UITheme.apply_brushed_panel(sidebar_panel, FactionCatalog.DEFAULT_FACTION)
+	# Real StyleBoxFlat button chrome instead of a plain default button with
+	# a raw `modulate` tint (which just washes the whole default gray button
+	# including its border/background in one flat color) - matches the
+	# rounded, bordered button look the Parts Catalog buttons already use,
+	# so the two sidebars read as one consistent UI instead of two
+	# differently-styled ones sitting side by side.
+	_style_action_button(delete_button, Color(0.75, 0.22, 0.2))
+	_style_action_button(save_button, Color(0.2, 0.6, 0.28))
+	_style_action_button(test_button, Color(0.2, 0.45, 0.75))
+	_style_action_button(library_button, Color(0.4, 0.38, 0.62))
 	mirror_checkbox.toggled.connect(_on_mirror_toggled)
 	delete_button.pressed.connect(_on_delete_pressed)
 	save_button.pressed.connect(_on_save_pressed)
@@ -317,6 +327,28 @@ func _ready():
 
 	# Initial sync of armor UI
 	call_deferred("_initial_sync")
+
+func _style_action_button(btn: Button, color: Color):
+	btn.modulate = Color.WHITE
+	var style = StyleBoxFlat.new()
+	style.bg_color = color
+	style.border_width_bottom = 3
+	style.border_color = color.darkened(0.35)
+	style.corner_radius_top_left = 5
+	style.corner_radius_top_right = 5
+	style.corner_radius_bottom_left = 5
+	style.corner_radius_bottom_right = 5
+	style.content_margin_top = 4
+	style.content_margin_bottom = 4
+	btn.add_theme_stylebox_override("normal", style)
+	var hover_style = style.duplicate()
+	hover_style.bg_color = color.lightened(0.15)
+	btn.add_theme_stylebox_override("hover", hover_style)
+	var pressed_style = style.duplicate()
+	pressed_style.bg_color = color.darkened(0.15)
+	btn.add_theme_stylebox_override("pressed", pressed_style)
+	btn.add_theme_color_override("font_color", Color.WHITE)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
 
 func _push_undo():
 	var root = get_node_or_null("/root/MainLab")

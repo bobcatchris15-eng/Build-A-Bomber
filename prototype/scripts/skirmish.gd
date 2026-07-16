@@ -696,6 +696,20 @@ func _build_ui():
 	var menu_btn = Button.new()
 	menu_btn.text = "Menu"
 	menu_btn.position = Vector2(1180, 14)
+	menu_btn.custom_minimum_size = Vector2(80, 40)
+	# Was a bare default-gray button, the one unstyled control sitting right
+	# next to the newly-styled build bar - consistent rounded chrome so the
+	# whole HUD reads as one designed system, not "everything except this."
+	var menu_style = StyleBoxFlat.new()
+	menu_style.bg_color = Color(0.3, 0.32, 0.36)
+	menu_style.corner_radius_top_left = 5
+	menu_style.corner_radius_top_right = 5
+	menu_style.corner_radius_bottom_left = 5
+	menu_style.corner_radius_bottom_right = 5
+	menu_btn.add_theme_stylebox_override("normal", menu_style)
+	var menu_hover = menu_style.duplicate()
+	menu_hover.bg_color = Color(0.3, 0.32, 0.36).lightened(0.2)
+	menu_btn.add_theme_stylebox_override("hover", menu_hover)
 	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 	ui.add_child(menu_btn)
 
@@ -1089,10 +1103,33 @@ func _on_hq_died(building):
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui.add_child(overlay)
 
+	# A framed card behind the text/button, not just text floating on the
+	# dimmed overlay - the same "real panel chrome, not bare Controls"
+	# upgrade the rest of the UI polish pass applied elsewhere.
+	var card = PanelContainer.new()
+	card.set_anchors_preset(Control.PRESET_CENTER)
+	var card_style = StyleBoxFlat.new()
+	card_style.bg_color = Color(0.12, 0.12, 0.14, 0.92)
+	card_style.border_color = Color.GOLD if victory else Color(0.7, 0.2, 0.2)
+	card_style.border_width_left = 3
+	card_style.border_width_top = 3
+	card_style.border_width_right = 3
+	card_style.border_width_bottom = 3
+	card_style.corner_radius_top_left = 10
+	card_style.corner_radius_top_right = 10
+	card_style.corner_radius_bottom_left = 10
+	card_style.corner_radius_bottom_right = 10
+	card_style.content_margin_left = 40
+	card_style.content_margin_right = 40
+	card_style.content_margin_top = 30
+	card_style.content_margin_bottom = 30
+	card.add_theme_stylebox_override("panel", card_style)
+	overlay.add_child(card)
+
 	var vbox = VBoxContainer.new()
-	vbox.set_anchors_preset(Control.PRESET_CENTER)
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	overlay.add_child(vbox)
+	vbox.add_theme_constant_override("separation", 14)
+	card.add_child(vbox)
 
 	var title = Label.new()
 	title.text = "🏆 VICTORY!" if victory else "💀 DEFEAT"
@@ -1110,5 +1147,15 @@ func _on_hq_died(building):
 	var btn = Button.new()
 	btn.text = "Return to Menu"
 	btn.custom_minimum_size = Vector2(220, 50)
+	var btn_style = StyleBoxFlat.new()
+	btn_style.bg_color = Color(0.3, 0.32, 0.36)
+	btn_style.corner_radius_top_left = 6
+	btn_style.corner_radius_top_right = 6
+	btn_style.corner_radius_bottom_left = 6
+	btn_style.corner_radius_bottom_right = 6
+	btn.add_theme_stylebox_override("normal", btn_style)
+	var btn_hover = btn_style.duplicate()
+	btn_hover.bg_color = Color(0.3, 0.32, 0.36).lightened(0.2)
+	btn.add_theme_stylebox_override("hover", btn_hover)
 	btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 	vbox.add_child(btn)

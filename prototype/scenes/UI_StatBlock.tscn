@@ -53,7 +53,6 @@ text = "Untitled Design"
 [node name="LibraryButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Blueprint Library..."
-modulate = Color(0.8, 0.8, 1, 1)
 
 [node name="MirrorCheckBox" type="CheckBox" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
@@ -131,15 +130,12 @@ layout_mode = 2
 [node name="DeleteButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Delete Selected Part"
-modulate = Color(1, 0.4, 0.4, 1)
 
 [node name="SaveButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Save Blueprint"
-modulate = Color(0.4, 1, 0.4, 1)
 
 [node name="TestButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Test in Arena"
-modulate = Color(0.4, 0.7, 1, 1)
 
