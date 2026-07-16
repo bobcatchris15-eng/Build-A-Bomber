@@ -310,6 +310,34 @@ def add_panel_line_groove(bm, hx, hy, hz, R, z_frac, depth_frac=0.015, width_fra
 			v.co.z -= push_in
 
 
+def add_speed_line_chamfer(bm, hx, hy, hz, angle_deg=35.0, z_frac_center=0.4, depth_frac=0.06, band_frac=0.1):
+	"""Tier 3 bespoke feature, interceptor_hull only: a single diagonal
+	chamfer facet cut across each flank, rising toward the tail - a real
+	styling cut (not a rounded edge-smooth) evoking the diagonal speed
+	lines on a fast jet or sports car, distinct from every other hull's
+	shared tiered-bevel vocabulary. Same bisect+selective-vertex-shift
+	technique as add_waist_inset above, except the cutting plane is tilted
+	between the length and height axes instead of purely axis-aligned, so
+	the resulting cut line runs diagonally across the flat flank face."""
+	angle = math.radians(angle_deg)
+	plane_no_v = mathutils.Vector((0.0, math.sin(angle), math.cos(angle))).normalized()
+	base_point = mathutils.Vector((0.0, -hz + 2.0 * hz * z_frac_center, 0.0))
+	band_half = hz * band_frac
+	for sign in (-1.0, 1.0):
+		plane_co = base_point + plane_no_v * (sign * band_half)
+		bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+			plane_co=(plane_co.x, plane_co.y, plane_co.z), plane_no=(plane_no_v.x, plane_no_v.y, plane_no_v.z),
+			clear_inner=False, clear_outer=False)
+	depth = hx * depth_frac
+	for v in bm.verts:
+		d = (v.co - base_point).dot(plane_no_v)
+		if -band_half - 1e-4 <= d <= band_half + 1e-4:
+			if v.co.x > hx * 0.3:
+				v.co.x -= depth
+			elif v.co.x < -hx * 0.3:
+				v.co.x += depth
+
+
 def taper_profile(t, nose_frac, front_flare, rear_flare, nose_region=0.35, rear_region=0.8):
 	"""Non-linear width-scale multiplier along hull length: t=0 at the nose
 	(front, -Z) .. t=1 at the tail (rear, +Z). Narrows aggressively across
@@ -770,7 +798,7 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 		rear_flare=0.9, front_flare=1.0, color=(0.55, 0.56, 0.58), greebles=None, taper_slices=7,
 		nose_region=0.35, height_taper=0.0, bevel_pct=None, bevel_segments=None, bevel_angle_deg=20.0,
 		waist_inset=0.0, waist_height_frac=0.5, deck_line=0.0, deck_line_z_frac=(0.6, 0.95),
-		panel_line_fracs=None):
+		panel_line_fracs=None, speed_line_chamfer=False):
 	"""height_taper (0..1): brings the deck down toward the nose too, for
 	archetypes wanting a dart/wedge silhouette rather than just narrowing
 	in width (interceptor_hull's "extreme taper in width AND height").
@@ -821,6 +849,8 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 	if panel_line_fracs:
 		for z_frac in panel_line_fracs:
 			add_panel_line_groove(bm, hx, hy, hz, R, z_frac)
+	if speed_line_chamfer:
+		add_speed_line_chamfer(bm, hx, hy, hz)
 
 	# Tier-1 bevel on the hull's own real structural edges (belly-to-deck
 	# transition, nose tip, spine ridge, and any new waist/deck-line cuts)
@@ -902,10 +932,19 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 
 	# Battlements: alternating merlon teeth along the top edge, evenly
 	# spaced with gaps (crenels) between them for the classic wall silhouette.
+	# Bespoke Tier 3 detail: each merlon is built as two flanking half-
+	# blocks with a narrow gap between them (a real arrow slit) instead of
+	# one solid box - built as two separate primitives, not a boolean cut,
+	# matching this file's established no-boolean convention (see
+	# add_waist_inset's own comment on why booleans were ruled out).
 	merlon_w = (size_x * 0.94) / (merlons * 2 - 1)
+	slit_w = merlon_w * 0.16
+	half_w = (merlon_w * 0.9 - slit_w) / 2.0
 	for i in range(merlons):
 		mx = -hx * 0.94 + merlon_w * (2 * i + 0.5)
-		add_box(bm, (mx, hy * 0.55 + hy * 0.24, 0), (merlon_w * 0.9, hy * 0.24, hz * 0.8), bevel=0.02)
+		for side in (-1, 1):
+			add_box(bm, (mx + side * (half_w + slit_w) / 2.0, hy * 0.55 + hy * 0.24, 0),
+				(half_w, hy * 0.24, hz * 0.8), bevel=0.02)
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
@@ -1109,20 +1148,25 @@ def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
 	rather than an engine actively fighting gravity (see buoyant_envelope's
 	own catalog comment in module_catalog.gd for the gameplay consequence).
 
-	The envelope itself (a smooth ellipsoid, no sharp edges at all) is
-	deliberately NOT touched by the tiered bevel system here - the design
-	doc explicitly budgets a real faceted-cross-section envelope as its
-	own separate Tier 3 mini-task, since it's a genuinely different
-	topology change, not a bevel/taper tuning one. This pass only swaps
-	the gondola/strut/fin's old fixed bevel numbers for the same R-keyed
-	tiered system the rest of the hull roster uses, for consistency."""
+	Tier 3 bespoke feature: the envelope's cross-section (u_segments=8,
+	down from a smooth-ellipsoid 18) is now genuinely faceted rather than
+	a round curve - a real rigid-frame airship's skin is paneled over a
+	polygonal girder frame, not a perfect balloon. 8 facets puts the
+	dihedral angle between adjacent panels at 45 degrees, safely above
+	finalize()'s 35-degree auto-smooth threshold, so the facets read as
+	real flat panels instead of being smoothed back into a curve;
+	v_segments (lengthwise rings) stays high so the teardrop taper along
+	the length still reads smooth - only the AROUND-the-tube cross-section
+	is faceted. This is a genuine topology change, not a bevel/taper
+	tuning one, which is why it sat apart from the rest of the shared
+	tiered-bevel work as its own separate Tier 3 item."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
 	R = hull_reference_dim(size_x, size_y)
 	gon_bevel, _ = tiered_bevel_width(R, tier=2)
 	fin_bevel, _ = tiered_bevel_width(R, tier=3)
 	bm = bmesh.new()
 
-	ret = bmesh.ops.create_uvsphere(bm, u_segments=18, v_segments=12, radius=1.0)
+	ret = bmesh.ops.create_uvsphere(bm, u_segments=8, v_segments=12, radius=1.0)
 	verts = ret['verts']
 	bmesh.ops.scale(bm, verts=verts, vec=GS(hx, hy, hz))
 	# Taper the tail half (raw Blender +Y = Godot +Z, per GV/GS convention)
@@ -1196,6 +1240,33 @@ def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.
 	# (tier-to-tier shrink steps, skirt flare) - before railings/antenna
 	# are fused on so only the primary silhouette is touched.
 	bevel_sharp_edges(bm, all_verts, R, tier=1)
+
+	# Bespoke Tier 3 feature: a corbelled machicolation ring - a real
+	# castle-defense projecting gallery, supported on angled brackets,
+	# sitting at the step between the second-to-last and top tier so the
+	# top tier reads as bridging out past its own (narrower) footprint on
+	# a shelf, rather than just another plain stepped-pyramid shrink. Sized
+	# to the tier BELOW the shelf (wider than the top tier it supports),
+	# which is what makes the overhang actually visible from outside.
+	if tiers >= 2:
+		# Sized to the tier TWO steps below the shelf (clamped to the base
+		# tier's own full footprint) - matching the tier directly below it
+		# (an earlier version's off-by-one) left zero overhang, since the
+		# shelf would then sit exactly flush with the very edge it was
+		# meant to project past.
+		shelf_shrink = 1.0 - (max(tiers - 3, 0) * 0.22)
+		shelf_tx, shelf_tz = hx * shelf_shrink, hz * shelf_shrink
+		shelf_y = -hy + (tiers - 1) * tier_h
+		shelf_th = tier_h * 0.09
+		add_box(bm, (0, shelf_y, -shelf_tz + shelf_th * 0.5), (shelf_tx * 2.0, shelf_th, shelf_th), bevel=0.015)
+		add_box(bm, (0, shelf_y, shelf_tz - shelf_th * 0.5), (shelf_tx * 2.0, shelf_th, shelf_th), bevel=0.015)
+		add_box(bm, (-shelf_tx + shelf_th * 0.5, shelf_y, 0), (shelf_th, shelf_th, shelf_tz * 2.0), bevel=0.015)
+		add_box(bm, (shelf_tx - shelf_th * 0.5, shelf_y, 0), (shelf_th, shelf_th, shelf_tz * 2.0), bevel=0.015)
+		for i in range(8):
+			angle = i * (math.pi / 4.0)
+			cx, cz = math.cos(angle) * shelf_tx * 0.92, math.sin(angle) * shelf_tz * 0.92
+			add_box(bm, (cx, shelf_y - shelf_th * 1.6, cz), (0.12, shelf_th * 1.4, 0.12),
+				rot_axis='x', rot_angle=0.6)
 
 	# Rooftop platform railing posts
 	top_shrink = 1.0 - ((tiers - 1) * 0.22)
@@ -1356,6 +1427,17 @@ def _ship_hull_greebles(bm, hx, hy, hz):
 	greeble_antenna(bm, (0, hy * 1.65, hz * 0.35), height=0.6)
 	greeble_vent(bm, (0, hy * 1.05, -hz * 0.1), (0.3, 0.12, 0.5), slats=3)
 
+	# Bespoke Tier 3 naval identity: naval_hull was the one ship hull with
+	# no silhouette feature of its own beyond the shared bridge block -
+	# small_boat_hull and heavy_cruiser_hull each already read distinctly
+	# via their own greebles. A single raked funnel (just aft of the
+	# bridge, slight outward flare at the cap) plus a foremast (just
+	# forward of the bridge) is the classic mast-bridge-funnel silhouette
+	# real mid-size warships read by, at real "massing" scale rather than
+	# small surface detail.
+	add_cyl_y(bm, (0, hy * 1.55, hz * 0.55), 0.22, hy * 1.1, segments=12, radius2=0.26)
+	add_cyl_y(bm, (0, hy * 1.85, hz * 0.05), 0.045, hy * 1.7, segments=8)
+
 
 def _small_boat_greebles(bm, hx, hy, hz):
 	# Sparse - a fast patrol boat, not a warship draped in gear.
@@ -1450,6 +1532,7 @@ def generate_hulls():
 	export_and_cleanup(build_wedge_hull("interceptor_hull", 2.4, 0.8, 3.2,
 		nose_frac=0.95, spine_w=0.22, spine_h=1.05, rear_flare=0.75, front_flare=0.3,
 		nose_region=0.22, height_taper=0.45, bevel_pct=0.05, bevel_segments=1,
+		speed_line_chamfer=True,
 		color=(0.55, 0.65, 0.78), greebles=_interceptor_hull_greebles), HULLS_DIR, "interceptor_hull")
 
 	export_and_cleanup(build_wedge_hull("assault_hull", 5.0, 1.3, 7.0,
