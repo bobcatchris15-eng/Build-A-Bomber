@@ -30,7 +30,7 @@ To give players maximum freedom *without* them accidentally designing broken, us
 
 ### 1. Freeform Placement (No Snap-Grid)
 Placement is fully continuous - a module can sit anywhere a raycast hits the hull surface, at any position and rotation, not locked to a grid of discrete points. This is deliberate: where exactly a weapon sits is itself a differentiation axis (it changes the module's firing arc and exposure), and a snap-grid would flatten that into a handful of interchangeable slots, working against the game's own Spore-style continuous-tweaking philosophy (see DESIGN_VISION.md). An earlier draft of this doc described a hex/square surface grid; that direction was superseded before it was built - freeform is the final, permanent placement model.
-- You cannot place a weapon overlapping another weapon or the hull's own collision volume (see Collision/Clipping Checks, below) - that's what actually prevents "broken" placements, not a grid.
+- Placement itself never blocks an overlap - you CAN drop a weapon on top of another weapon or the hull's own volume. What actually prevents "broken" designs from shipping is downstream: any overlapping parts are highlighted solid red in real time (see Collision/Clipping Checks, below), and Save/Test in Arena are both blocked outright while any clipping exists, forcing you to resolve it before the design leaves the Lab - not a placement-time restriction, not a grid.
 
 ### 2. Dynamic Firing Arc Visualization (The "Radar Sweep")
 To ensure players understand their firing arcs without reading spreadsheets, the UI relies on immediate visual feedback.
