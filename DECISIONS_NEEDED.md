@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-13 (new session, cont'd 11) — Playtest audit implementation begins: #1 drag-hint, correcting a real error from my own earlier audit
+
+**Not blocking.**
+
+**Correction to my own audit's Tier-1 finding #1:** I had written "the Design Lab opens to an empty 3D void, no hull exists yet." That's wrong - I verified directly (loaded `MainLab.tscn` in a scratch script and inspected the node tree + a screenshot) that a real `medium_hull` placeholder is already present and fully rendered at scene load, with default metadata already set (armor material, faction, etc). The actual friction is different and arguably worse: `_place_hull_from_ui()` (`module_placer.gd:405-408`) silently no-ops if a hull already exists ("Hull already exists, cannot place another until deleted"), and `drag_drop_manager.gd`'s `_can_drop_data` silently rejects a dropped hull the same way with zero message - so a player who tries to swap the default hull for a different type by dragging a new one gets total silence, with no indication they need to select-and-delete the existing hull first. Caught this by actually loading the scene and checking, rather than trusting the earlier static-code-reading finding at face value - a good reminder that even my own prior "verified" audit claims should be re-checked before building fixes on top of them.
+
+**Fix chosen: a persistent hint overlay in the 3D viewport, not a one-time dismissible prompt.** Chris left the exact mechanism to my judgment. A dismissible/one-time prompt would need new state-tracking (has the player seen this yet, where is that stored, does it reset per-session or per-install) for a genuinely low-risk, low-cost problem - a small always-present hint text is simpler, has zero state to get wrong, and remains useful as ambient reference for a returning player who forgot the rule, not just a first-timer. Placed as a new top-level Control in `MainLab.tscn` (not nested inside `UI_PartsMenu`'s sidebar) specifically to avoid the sidebar's already-tight vertical layout budget - my first attempt added a label inside the Parts Catalog panel and tripped the project's own automated UI-overflow test (`run_tests.gd`, `find_overflowing_panels`), since the Hulls tab's 15 buttons already nearly fill the allotted height. Moving the hint to the empty space above the hull in the 3D view sidesteps that budget entirely instead of trying to squeeze more text into an already-full sidebar.
+
+**Not touched:** whether hull-swapping should become "drag replaces automatically" instead of "delete then drag" - Chris asked me to pick between a hint and reconsidering the interaction model itself; I judged the hint as lower-risk (auto-replace-on-drop would need a decision about what happens to already-placed modules on the old hull, which is a real behavior change, not a UI-only fix) and stayed with informing the player of the existing rule rather than changing it.
+
+**Verified:** automated tests green (including the UI-overflow check, after relocating the hint). Screenshot confirms the hint reads clearly, doesn't overlap the sidebar or stat panel, and directly names the actual rule (delete before swapping hulls).
+
+---
+
 ## 2026-07-13 (new session, cont'd 10) — Pintle mount plate fix + re-checked materials against the new bevel geometry (no changes needed)
 
 **Not blocking.**
