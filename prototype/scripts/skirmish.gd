@@ -34,6 +34,8 @@ var energy_pool = {
 	ENEMY_TEAM: {"energy": 0.0, "capacity": 0.0, "deficit": false},
 }
 const ENERGY_TICK_INTERVAL: float = 3.0
+const GHOST_COLOR_VALID: Color = Color(0.3, 1.0, 0.4, 0.4)
+const GHOST_COLOR_INVALID: Color = Color(1.0, 0.25, 0.2, 0.45)
 const ENERGY_UPKEEP_PER_STATIC_BUILDING: float = 3.0
 # The HQ has its own baseline power plant - without this, every match
 # starts in automatic Energy deficit from frame one, applying the factory
@@ -836,7 +838,7 @@ func _begin_placement(info: Dictionary):
 		box.size = BuildingScript.PREFAB_STATS[info.kind].size
 	placement_ghost.mesh = box
 	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.3, 1.0, 0.4, 0.4)
+	mat.albedo_color = GHOST_COLOR_VALID
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	placement_ghost.material_override = mat
 	add_child(placement_ghost)
@@ -847,16 +849,19 @@ func _cancel_placement():
 		placement_ghost.queue_free()
 	placement_ghost = null
 
-func _try_place_building(pos: Vector3):
-	if placing.is_empty(): return
+# Shared by both the live ghost-color check (every mouse-move while
+# placing) and the actual placement attempt, so the two can never
+# disagree - position-dependent rules only (terrain/base-proximity), not
+# affordability, which doesn't change as the mouse moves and is checked
+# separately at _begin_placement/_try_place_building time.
+func _placement_validity(pos: Vector3) -> Dictionary:
 	# Terrain check first (water/obstacles/ramp slopes are never buildable,
 	# regardless of proximity to a friendly building) - a real check added
 	# alongside multi-map terrain; previously nothing stopped a building
 	# from being placed inside the lake since there was no terrain data to
 	# check against at all.
 	if TerrainBuilder.is_position_blocked(current_map, pos):
-		_flash_status("Can't build on water or terrain obstacles!")
-		return
+		return {"valid": false, "reason": "Can't build on water or terrain obstacles!"}
 	# Must be near your base (within 28m of any friendly building) and
 	# clear of the enemy's (their base being reachable at all doesn't mean
 	# it's "yours" to build next to).
@@ -866,10 +871,16 @@ func _try_place_building(pos: Vector3):
 		if b.team == PLAYER_TEAM and b.global_position.distance_to(pos) < 28.0:
 			near_base = true
 		elif b.team != PLAYER_TEAM and b.global_position.distance_to(pos) < 20.0:
-			_flash_status("Too close to enemy territory!")
-			return
+			return {"valid": false, "reason": "Too close to enemy territory!"}
 	if not near_base:
-		_flash_status("Too far from your base!")
+		return {"valid": false, "reason": "Too far from your base!"}
+	return {"valid": true, "reason": ""}
+
+func _try_place_building(pos: Vector3):
+	if placing.is_empty(): return
+	var validity = _placement_validity(pos)
+	if not validity.valid:
+		_flash_status(validity.reason)
 		return
 	if not spend(PLAYER_TEAM, placing.cost_metal, placing.cost_crystal):
 		_flash_status("Not enough resources!")
@@ -898,6 +909,11 @@ func _unhandled_input(event):
 			if hit != null:
 				var ground_y = terrain_height_at(hit)
 				placement_ghost.global_position = Vector3(hit.x, ground_y + placement_ghost.mesh.size.y / 2.0, hit.z)
+				# Live validity color - same _placement_validity() check the
+				# actual click uses, so the ghost never shows green over a
+				# spot that would then reject the click.
+				var validity = _placement_validity(placement_ghost.global_position)
+				placement_ghost.material_override.albedo_color = GHOST_COLOR_VALID if validity.valid else GHOST_COLOR_INVALID
 		if is_drag_selecting:
 			_update_selection_rect(event.position)
 		return
