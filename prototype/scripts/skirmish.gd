@@ -843,6 +843,42 @@ func _begin_placement(info: Dictionary):
 	placement_ghost.material_override = mat
 	add_child(placement_ghost)
 
+	# Range preview ring (audit #19): a defense building's real threat radius
+	# depends on its armed weapons' fire_range, which itself depends on
+	# per-weapon tweaks (barrel_length, caliber, etc. - see auto_weapon.gd)
+	# and can't be read off the catalog alone. Rather than duplicate that
+	# formula (and risk it drifting out of sync), reconstruct the actual
+	# vehicle off to the side just long enough to arm its weapons and read
+	# their real fire_range, exactly like building.gd's setup_defense()
+	# does for a real placed defense - then discard it. Only costs one
+	# reconstruct per placement-start, not per frame.
+	if info.kind == "defense":
+		var range_preview = 0.0
+		var temp_hull = bp_manager.reconstruct_vehicle(info.blueprint, self)
+		if temp_hull:
+			for child in temp_hull.get_children():
+				if child.has_meta("module_data"):
+					var data = child.get_meta("module_data")
+					if ModuleCatalog.needs_combat_script(data.type_id):
+						child.set_script(load("res://scripts/auto_weapon.gd"))
+						child._ready()
+						if "fire_range" in child:
+							range_preview = max(range_preview, child.fire_range * 0.85)
+			temp_hull.queue_free()
+		if range_preview > 0.0:
+			var ring = MeshInstance3D.new()
+			var torus = TorusMesh.new()
+			torus.inner_radius = max(range_preview - 0.3, 0.1)
+			torus.outer_radius = range_preview
+			ring.mesh = torus
+			ring.position = Vector3(0, -box.size.y / 2.0 + 0.05, 0)
+			var ring_mat = StandardMaterial3D.new()
+			ring_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.35)
+			ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			ring.material_override = ring_mat
+			placement_ghost.add_child(ring)
+
 func _cancel_placement():
 	placing = {}
 	if is_instance_valid(placement_ghost):

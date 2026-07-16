@@ -4,6 +4,16 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-16 — #19 defense-building range-preview ring; #6 wrap-up caught and fixed a real parse-error regression
+
+**Not blocking.**
+
+**#19 (range-preview ring for defense placement):** the placement ghost for a "defense" building now grows a flat, semi-transparent white torus ring sized to the design's real armed fire_range, live from `_begin_placement()` in `skirmish.gd`. Deliberately did NOT duplicate `auto_weapon.gd`'s fire_range formula (base range + up to ~8 different tweak multipliers) into a second copy for the preview - that's exactly the kind of two-implementations-that-can-drift-apart bug the codebase already avoids elsewhere (see `_placement_validity()`'s shared-by-both-checks comment from the #3 fix). Instead it reconstructs the actual vehicle off to the side via the same `bp_manager.reconstruct_vehicle()` + weapon-arming loop `building.gd`'s `setup_defense()` uses for a real placement, reads the resulting `fire_range` off each armed weapon, takes the max, then frees the temporary hull immediately. Costs one reconstruct at placement-start, not per frame. A support-only defense (sensor tower, no weapon) correctly shows no ring at all. Verified headlessly (`scratch` script, deleted after use): an armed pillbox+basic_cannon design produces a ring at outer_radius 21.25 (basic_cannon's base fire_range 25.0 × the same 0.85 standoff factor `battle_unit.gd` uses), and a support-only design produces zero rings.
+
+**#6 wrap-up also caught a real, live bug:** re-running the headless test suite before committing turned up a `SCRIPT ERROR: Parse Error` in `parts_menu.gd` - the hull domain-grouping `for` loop had been left dangling *after* `_stat_tooltip()`'s `return` statement (outside any function) during the mid-session edit that inserted the tooltip helper in between. `run_tests.gd`'s headless suite still printed "ALL AUTOMATED TESTS PASSED SUCCESSFULLY!" despite this, because none of its automated checks actually load `MainLab.tscn` and require `parts_menu.gd` to parse - but the Design Lab itself would have been completely broken at runtime (the whole script fails to load on any parse error). Moved the loop back inside `_ready()`, immediately after the button-population loop, where it originally belonged. This is worth flagging on its own: **the headless test suite passing is not proof every scene-attached script still parses** - only whichever scenes/scripts the suite happens to instantiate are covered. Re-verified #6's actual tooltip content afterward (hull grouping order + first tooltip line, a weapon's DPS line, a repair module's Heal Rate line, a locomotion part's HP/Weight/Cost) via a headless scratch script, since the windowed screenshot-capture channel had stalled indefinitely (three separate attempts over ~15 minutes, all producing 0-byte output) - switched to headless-only verification for both #6 and #19 rather than keep waiting on a channel that wasn't completing.
+
+---
+
 ## 2026-07-13 (new session, cont'd 11) — Playtest audit implementation begins: #1 drag-hint, correcting a real error from my own earlier audit
 
 **Not blocking.**

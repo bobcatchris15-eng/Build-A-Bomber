@@ -62,8 +62,13 @@ func _ready():
 				size.x, size.y, size.z]
 			hull_buttons_by_domain[domain].append(btn)
 		elif category == "locomotion":
+			# Same stat-preview treatment as hulls - previously only hulls
+			# had any tooltip at all, weapon/armor/locomotion buttons had
+			# zero explanatory text anywhere.
+			btn.tooltip_text = _stat_tooltip(data)
 			tab_loco.add_child(btn)
 		else:
+			btn.tooltip_text = _stat_tooltip(data)
 			tab_modules.add_child(btn)
 
 	# Grouped by domain via button ORDER only, no header row - a first
@@ -75,3 +80,14 @@ func _ready():
 	for domain in DOMAIN_ORDER:
 		for btn in hull_buttons_by_domain[domain]:
 			tab_hulls.add_child(btn)
+
+func _stat_tooltip(data: Dictionary) -> String:
+	var lines = ["HP: %.0f | Weight: %.0f" % [data.get("hp", 0.0), data.get("weight", 0.0)]]
+	lines.append("Cost: %d Metal, %d Crystal" % [data.get("metal", 0), data.get("crystal", 0)])
+	var dps = data.get("dps", 0.0)
+	if dps > 0.0:
+		lines.append("DPS: %.0f" % dps)
+	var heal_rate = data.get("heal_rate", 0.0)
+	if heal_rate > 0.0:
+		lines.append("Heal Rate: %.1f/s" % heal_rate)
+	return "\n".join(lines)
