@@ -441,6 +441,17 @@ func update_stats(hull: Node3D):
 	var total_cost_crystal = 0
 	var total_dps = 0.0
 	var total_energy_capacity = 0.0
+	# Approximates battle_unit.gd's _recalculate_move_speed() overload check
+	# (capacity-only - the thrust/move_speed side isn't needed for a
+	# design-time warning) so a player can see BEFORE combat that their
+	# design is overweight for its own locomotion, instead of only
+	# discovering it from a sluggish unit in an actual battle with no
+	# link back to why. Deliberately a simplified re-derivation, not a
+	# shared function with battle_unit.gd - this only needs to be "close
+	# enough to warn," not bit-for-bit identical to the real combat math.
+	var total_weight_capacity = 0.0
+	var locomotion_type = hull.get_meta("locomotion_type", "") if hull and hull.has_meta("locomotion_type") else ""
+	var locomotion_settings = hull.get_meta("locomotion_settings", {}) if hull and hull.has_meta("locomotion_settings") else {}
 
 	# Assume the hull itself has some base stats in a real implementation,
 	# but for the prototype we'll just sum the modules.
@@ -456,6 +467,17 @@ func update_stats(hull: Node3D):
 					total_dps += data.get_dps()
 					if data.category == "generator":
 						total_energy_capacity += data.get_energy_capacity()
+					if data.category == "locomotion":
+						var capacity_contrib = 1.0
+						if locomotion_type in ["wheels", "omni_wheels", "helicopter_rotors", "legs"]:
+							capacity_contrib = float(locomotion_settings.get("count", 4)) / 4.0
+						elif locomotion_type in ["tracked_treads", "rhomboid_treads"]:
+							capacity_contrib = locomotion_settings.get("width", 1.0)
+						total_weight_capacity += ModuleCatalog.get_base_weight_capacity(data.type_id) * child.scale.x * child.scale.z * capacity_contrib
+					var mod_catalog_data = ModuleCatalog.get_module_data(data.type_id)
+					var wc_bonus = mod_catalog_data.get("weight_capacity_bonus", 0.0)
+					if wc_bonus > 0.0:
+						total_weight_capacity += wc_bonus * child.scale.x * child.scale.z
 				
 	var hp_mult = 1.0
 	var wt_mult = 1.0
@@ -516,25 +538,31 @@ func update_stats(hull: Node3D):
 	cost_label.text = "Cost: %d Metal, %d Crystal" % [total_cost_metal, total_cost_crystal]
 	dps_label.text = "Total DPS: %.1f" % total_dps
 
-	# Manufactory tier is determined entirely by the hull TYPE (see
-	# ModuleCatalog.get_hull_size_tier() - the same function skirmish.gd's
-	# _queue_player_unit() uses), not by modules added - a player could
-	# previously only discover which manufactory they'd need via a failed
-	# build attempt mid-match. Appended onto the existing weight label
-	# (rather than a new row) since the sidebar has no vertical slack left -
-	# confirmed by the project's own automated UI-overflow test, which
-	# failed by a shrinking-but-still-nonzero margin through two earlier
-	# attempts at a dedicated label before this approach was tried.
 	weight_label.text = "Total Weight: %.1f" % total_weight
-	# A tooltip, not visible sidebar text - three attempts at a persistent
-	# label (a new row, then appending to this same label with autowrap)
-	# all tripped the project's own UI-overflow test; this sidebar
-	# genuinely has zero vertical/horizontal slack left. A tooltip adds no
-	# layout footprint at all, so it sidesteps the budget entirely while
-	# still surfacing which manufactory tier this design needs before the
-	# player ever tries to build it mid-match.
+
+	# Both the manufactory-tier note and the overweight warning below are
+	# tooltip-only, not visible sidebar text - this sidebar has zero
+	# vertical/horizontal layout slack left (confirmed by the project's
+	# own automated UI-overflow test, which failed on three separate
+	# attempts at a persistent label before landing on tooltips instead).
+	# Manufactory tier is determined entirely by the hull TYPE (see
+	# ModuleCatalog.get_hull_size_tier(), the same function skirmish.gd's
+	# _queue_player_unit() uses) - a player could previously only discover
+	# which manufactory they'd need via a failed build attempt mid-match.
 	var tier = ModuleCatalog.get_hull_size_tier(hull.get_meta("type_id", "medium_hull")) if hull and hull.has_meta("type_id") else ""
-	weight_label.tooltip_text = "Needs a %s Manufactory to build this design." % tier.capitalize() if tier != "" else ""
+	var tooltip_parts: Array = []
+	if tier != "":
+		tooltip_parts.append("Needs a %s Manufactory to build this design." % tier.capitalize())
+
+	# Overweight warning: same overload condition battle_unit.gd checks at
+	# combat time, so a player can see it BEFORE their unit turns out
+	# sluggish in an actual battle with no link back to why.
+	if total_weight_capacity > 0.0 and total_weight > total_weight_capacity:
+		weight_label.modulate = Color(1.0, 0.55, 0.35)
+		tooltip_parts.append("Overweight for its locomotion (capacity ~%.0f) - this design will move noticeably slower than one within capacity." % total_weight_capacity)
+	else:
+		weight_label.modulate = Color(1, 1, 1)
+	weight_label.tooltip_text = "\n".join(tooltip_parts)
 
 	if not energy_label:
 		energy_label = Label.new()
