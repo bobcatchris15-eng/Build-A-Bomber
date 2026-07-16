@@ -195,6 +195,19 @@ static func _draw_leaf(img: Image):
 			if p.distance_to(a) <= r and p.distance_to(b) <= r:
 				img.set_pixel(x, y, Color(1, 1, 1, 1))
 
+# Solid filled disc - the dark badge backing plate behind the mascot icon
+# (Chris's reference sprites: "a star icon in a dark circle," a bold
+# graphic badge, not a bare colored silhouette floating on nothing).
+static func _draw_circle_badge(img: Image):
+	var n = img.get_width()
+	var radius = 0.46
+	for x in range(n):
+		for y in range(n):
+			var dx = float(x) / n - 0.5
+			var dy = float(y) / n - 0.5
+			if sqrt(dx * dx + dy * dy) <= radius:
+				img.set_pixel(x, y, Color(1, 1, 1, 1))
+
 const MASCOT_SHAPES = {
 	"industrialists": "gear",
 	"technocrats": "hex",
@@ -288,9 +301,20 @@ static func apply_decals(hull: Node3D, faction: String, hull_size: Vector3):
 	# 1 mascot/insignia icon, small and fixed - never more than ~12% of the
 	# hull's own footprint width, well under the "silhouette-scale" line
 	# these are deliberately kept clear of (unlike hull_greebles.gd's 5
-	# treated factions).
+	# treated factions). A dark circular badge sits just behind it (offset
+	# slightly lower so the two cards don't z-fight) and slightly larger,
+	# so the mascot icon reads as a bold graphic badge - "a star icon in a
+	# dark circle" - instead of a bare tinted silhouette floating with
+	# nothing behind it. The badge itself is a fixed dark neutral color,
+	# not faction-tinted - every reference badge is dark regardless of the
+	# unit's own paint scheme, same convention a real insignia patch uses.
 	var mascot_tex = _get_mascot_texture(faction)
 	var mascot_size = Vector2(min(hull_size.x, hull_size.z) * 0.22, min(hull_size.x, hull_size.z) * 0.22)
+	var badge_tex = _get_texture("circle_badge", _draw_circle_badge)
+	var badge_size = mascot_size * 1.4
+	_add_decal(container, badge_tex, Color(0.07, 0.07, 0.08), badge_size,
+		Vector3(0, hull_size.y * 0.62 - 0.015, hull_size.z * 0.15),
+		Vector3(-PI / 2.0, 0, 0))
 	_add_decal(container, mascot_tex, tint, mascot_size,
 		Vector3(0, hull_size.y * 0.62, hull_size.z * 0.15),
 		Vector3(-PI / 2.0, 0, 0))

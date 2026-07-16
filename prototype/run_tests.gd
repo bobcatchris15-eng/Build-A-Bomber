@@ -3266,8 +3266,8 @@ func test_hull_decals() -> bool:
 		root.add_child(hull)
 		HullDecals.apply_decals(hull, fac, hull_size)
 		var container = hull.get_node_or_null("HullDecals")
-		if not container or container.get_child_count() != 4:
-			print("  [FAIL] '", fac, "' should have exactly 4 decals (2 hazard + serial + mascot), got ", container.get_child_count() if container else "no container")
+		if not container or container.get_child_count() != 5:
+			print("  [FAIL] '", fac, "' should have exactly 5 decals (2 hazard + serial + badge + mascot), got ", container.get_child_count() if container else "no container")
 			ok = false
 		hull.queue_free()
 	await process_frame
@@ -3289,8 +3289,8 @@ func test_hull_decals() -> bool:
 	var hull_b = Node3D.new()
 	root.add_child(hull_b)
 	HullDecals.apply_decals(hull_b, "glacier_syndicate", hull_size)
-	var mascot_a = hull_a.get_node("HullDecals").get_children()[3].material_override.albedo_texture
-	var mascot_b = hull_b.get_node("HullDecals").get_children()[3].material_override.albedo_texture
+	var mascot_a = hull_a.get_node("HullDecals").get_children()[4].material_override.albedo_texture
+	var mascot_b = hull_b.get_node("HullDecals").get_children()[4].material_override.albedo_texture
 	if mascot_a == mascot_b:
 		print("  [FAIL] Industrialists and Glacier Syndicate should have genuinely different mascot icon shapes (gear vs. snowflake-star), not the same texture")
 		ok = false
@@ -3312,7 +3312,7 @@ func test_hull_decals() -> bool:
 	HullDecals.apply_decals(reuse_hull, "industrialists", hull_size)
 	HullDecals.apply_decals(reuse_hull, "technocrats", hull_size)
 	var reused_container = reuse_hull.get_node_or_null("HullDecals")
-	if not reused_container or reused_container.get_child_count() != 4:
+	if not reused_container or reused_container.get_child_count() != 5:
 		print("  [FAIL] Re-applying decals for a different faction should REPLACE, not accumulate, got ", reused_container.get_child_count() if reused_container else "no container")
 		ok = false
 	reuse_hull.queue_free()
@@ -3331,8 +3331,8 @@ func test_hull_decals() -> bool:
 	root.add_child(parent)
 	var hull = bp_manager.reconstruct_vehicle(blueprint_data, parent, false)
 	var real_container = hull.get_node_or_null("HullDecals") if hull else null
-	if not real_container or real_container.get_child_count() != 4:
-		print("  [FAIL] A real reconstructed hull should carry exactly 4 decals regardless of faction")
+	if not real_container or real_container.get_child_count() != 5:
+		print("  [FAIL] A real reconstructed hull should carry exactly 5 decals regardless of faction")
 		ok = false
 	parent.queue_free()
 	bp_manager.queue_free()
