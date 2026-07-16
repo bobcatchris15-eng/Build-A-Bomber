@@ -123,25 +123,49 @@ func _add_row(entry: Dictionary):
 	var del_btn = Button.new()
 	del_btn.text = "Delete"
 	del_btn.modulate = Color(1, 0.4, 0.4, 1)
-	del_btn.pressed.connect(_on_delete_pressed.bind(entry.get("id", "")))
+	del_btn.pressed.connect(_on_delete_pressed.bind(entry.get("id", ""), entry.get("name", "Untitled Design")))
 	hbox.add_child(del_btn)
 
 	list_vbox.add_child(HSeparator.new())
 
 func _on_load_pressed(id: String):
-	if blueprint_manager:
-		blueprint_manager.load_blueprint_into_designer(id)
-	queue_free()
+	# load_blueprint_into_designer's bool return was previously ignored
+	# entirely here - a corrupted/unparseable save closed this panel with
+	# zero indication anything went wrong. Now the panel stays open and
+	# shows a real error so the player isn't left guessing.
+	var ok = blueprint_manager.load_blueprint_into_designer(id) if blueprint_manager else false
+	if ok:
+		queue_free()
+	else:
+		_show_error("Couldn't load that blueprint - the save file may be corrupted.")
 
 func _on_duplicate_pressed(id: String):
 	if blueprint_manager:
 		blueprint_manager.duplicate_blueprint(id)
 	_refresh_list()
 
-func _on_delete_pressed(id: String):
-	if blueprint_manager:
-		blueprint_manager.delete_blueprint(id)
-	_refresh_list()
+func _on_delete_pressed(id: String, display_name: String):
+	var confirm = ConfirmationDialog.new()
+	confirm.dialog_text = "Permanently delete \"%s\"? This can't be undone." % display_name
+	confirm.title = "Delete Blueprint"
+	add_child(confirm)
+	confirm.confirmed.connect(func():
+		if blueprint_manager:
+			blueprint_manager.delete_blueprint(id)
+		_refresh_list()
+	)
+	confirm.canceled.connect(func(): confirm.queue_free())
+	confirm.confirmed.connect(func(): confirm.queue_free())
+	confirm.popup_centered()
+
+func _show_error(msg: String):
+	var dialog = AcceptDialog.new()
+	dialog.dialog_text = msg
+	dialog.title = "Load Failed"
+	add_child(dialog)
+	dialog.confirmed.connect(func(): dialog.queue_free())
+	dialog.canceled.connect(func(): dialog.queue_free())
+	dialog.popup_centered()
 
 func _prettify(id: String) -> String:
 	if id == "":
