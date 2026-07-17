@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — assault_hull AFV conversion (spec item 4): dozer plate tied into the tub/glacis seam
+
+**Not blocking.**
+
+**`build_afv_hull` params chosen to read as a low casemate, not a turret platform** (`tub_frac=0.55, upper_w=0.82, glacis_len_frac=0.32`), per the spec's explicit distinction from medium_hull's turret-deck read. Left `turret_ring=False` on the `build_afv_hull` call itself - assault_hull's own greebles function (`_assault_hull_greebles`) already adds its own turret ring + hatch, and passing `turret_ring=True` too would have produced a duplicate, overlapping ring. Dropped the old `waist_inset`/`deck_line` params, same reasoning as medium_hull: the new tub/glacis seam already produces a real step there, so the old Tier-2 cuts would just double-cut the same location.
+
+**Tied the dozer plate into the tub/glacis seam, not just repositioned it.** The old dozer plate was a `add_box` floating in front of the wedge nose at a hand-picked `y=-hy*0.4`, unrelated to any real hull geometry. Since `build_afv_hull`'s tub height is a known function of `tub_frac` (`tub_top_y = -hy + 2*hy*tub_frac`), and I set `tub_frac=0.55` in the same commit, computed the matching `tub_top_y = 0.1*hy` by hand and sized the dozer plate to span the tub's full nose height (`center_y=-0.45*hy, height=1.05*hy`) so it visually fuses into the tub/glacis line instead of floating separately - the "one thick layered frontal assembly (dozer plate + glacis + appliqué)" the spec calls for. **This couples the greeble function to a hardcoded assumption about the hull's own `tub_frac` value** (documented in a comment at the call site) - the same kind of implicit coupling `_medium_hull_greebles`' louver placement already has to `build_afv_hull`'s deck height. If `assault_hull`'s `tub_frac` is ever retuned, this comment is the thing to check.
+
+**Kept the existing appliqué plates (tier-2 bevel + rivet lines) and turret ring/hatch entirely unchanged** - per the spec, these are "already right" and the best "assembled, up-armoured" detail already in the roster.
+
+**Wrote a reusable single-hull rebuild script** (`scratch/rebuild_single_hull.py`, replacing the one-off `rebuild_medium_hull_only.py` pattern from an earlier session) that extracts and re-runs just one hull's `export_and_cleanup(...)` call out of `generate_hulls()` by name, rather than hand-copying each hull's parameter list into a new throwaway script every time (as the medium_hull-only precedent did) or rebuilding the entire library (which is what produced the unrelated `airship_hull`/parts re-export noise the previous entry flagged). Keeps each hull's commit scoped to just that hull going forward. Also updated `scratch/reimport_assets.sh`'s `SCRATCH_ROOT` to this session's actual temp scratchpad path - the previous value pointed at a now-stale path from an earlier session.
+
+**Verified:** wide 3/4, side-profile, and extreme non-uniform stretch (2.5x/2.2x/0.35x) screenshots (`progress_captures/2026-07-13/afv_hulls/assault_hull_*`) confirm the tub/casemate/fender structure holds up proportionally with no self-intersection, and the applique plates + turret ring remain intact and correctly positioned relative to the new silhouette. Didn't chase a perfect nose-on framing of the dozer plate specifically after two attempts landed on ambiguous angles (top/rear views instead of the nose) - per this project's own established precedent (PROGRESS.md 2026-07-13 cont'd 7), verifying via the side profile + code review (the exact `tub_top_y` math above) plus the wide 3/4 shot's visible frontal step is sufficient rather than continuing to burn cycles on camera framing for a secondary confirmation. Headless tests green.
+
+---
+
 ## 2026-07-17 — light_hull + heavy_hull AFV conversion: finished and verified (picked up mid-flight from a prior session)
 
 **Not blocking.**

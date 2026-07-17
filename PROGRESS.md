@@ -12,6 +12,14 @@ Continuing top-down through the spec's punch-list (items 4-15: assault_hull, spo
 
 ---
 
+## 2026-07-17 (cont'd) — assault_hull converted (item 4): dozer plate fused into the tub/glacis seam
+
+`build_afv_hull` with a low-casemate parameter set (`tub_frac=0.55, upper_w=0.82`, no `turret_ring` since the hull's own greebles already add one) rather than medium_hull's turret-platform read. The real content move: the front dozer plate used to float as a separate box in front of the old wedge nose - now sized/positioned to span the tub's actual nose height (computed from `tub_frac`), so it visually fuses into the tub/glacis seam as one layered frontal assembly instead of a bolted-on-looking bump. Kept the existing appliqué plates and turret ring/hatch untouched (already good per the spec).
+
+Also built `scratch/rebuild_single_hull.py`, a reusable single-hull rebuild helper (extracts and re-runs one hull's `export_and_cleanup(...)` call by name out of `generate_hulls()`) to replace hand-copying each hull's params into a new throwaway script - keeps each hull's rebuild/commit properly scoped instead of touching the whole library. Verified with wide/side/extreme-stretch screenshots; headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.

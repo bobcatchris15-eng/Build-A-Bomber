@@ -1556,8 +1556,13 @@ def _assault_hull_greebles(bm, hx, hy, hz):
 				(plate_x + x_sign * 0.06, hy * 0.1 + hy * 0.48, plate_z), 4, radius=0.018, axis='x')
 	add_cyl_y(bm, (0, hy * 1.1, hz * 0.1), 0.5, 0.14, segments=16)  # turret ring
 	greeble_hatch(bm, (0, hy * 1.15, hz * 0.1), (0.55, 0.05, 0.5))
-	# Front dozer-style plate
-	add_box(bm, (0, -hy * 0.4, -hz * 1.0), (hx * 1.3, hy * 0.6, 0.15), bevel=0.03)
+	# Front dozer-style plate, sized to span the tub's full nose height
+	# (assumes tub_frac=0.55, matching the build_afv_hull call below, so
+	# tub_top_y = -hy + 2*hy*0.55 = 0.1*hy) so it fuses visually into the
+	# tub/glacis seam instead of floating in front of the hull as a
+	# separate bump - "one thick layered frontal assembly" per
+	# HULL_MASSING_SPEC.md's assault_hull section.
+	add_box(bm, (0, -hy * 0.45, -hz * 1.02), (hx * 1.3, hy * 1.05, 0.15), bevel=0.03)
 	greeble_exhaust_stack(bm, (-hx * 0.6, hy * 0.55, hz * 0.9), radius=0.1, height=0.4)
 
 
@@ -1695,10 +1700,10 @@ def generate_hulls():
 		speed_line_chamfer=True,
 		color=(0.55, 0.65, 0.78), greebles=_interceptor_hull_greebles), HULLS_DIR, "interceptor_hull")
 
-	export_and_cleanup(build_wedge_hull("assault_hull", 5.0, 1.3, 7.0,
-		nose_frac=0.4, spine_w=0.7, spine_h=1.22, rear_flare=1.0, front_flare=0.9,
+	export_and_cleanup(build_afv_hull("assault_hull", 5.0, 1.3, 7.0,
+		nose_frac=0.3, tub_frac=0.55, upper_w=0.82, glacis_len_frac=0.32,
+		spine_w=0.7, spine_h=1.22,
 		bevel_pct=0.085, bevel_segments=3,
-		waist_inset=0.07, waist_height_frac=0.45, deck_line=0.18,
 		color=(0.4, 0.32, 0.28), greebles=_assault_hull_greebles), HULLS_DIR, "assault_hull")
 
 	export_and_cleanup(build_bunker_hull("pillbox_foundation", 3.0, 1.2, 3.0,

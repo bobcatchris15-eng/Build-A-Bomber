@@ -19,7 +19,7 @@
 
 set -e
 REAL="$(pwd)"
-SCRATCH_ROOT="C:/Users/Chris/AppData/Local/Temp/claude/E--Build-A-Bomber/b3160d11-2715-442a-a590-096635206d92/scratchpad"
+SCRATCH_ROOT="C:/Users/Chris/AppData/Local/Temp/claude/E--Build-A-Bomber/b94dcdeb-5e12-4999-952a-291904b892f4/scratchpad"
 DST="$SCRATCH_ROOT/reimport_copy"
 
 mkdir -p "$DST"
