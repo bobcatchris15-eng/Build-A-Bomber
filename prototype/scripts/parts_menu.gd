@@ -9,6 +9,10 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 @onready var tab_loco = $PanelContainer/VBoxContainer/TabContainer/Locomotion/VBoxContainer
 @onready var panel_container = $PanelContainer
 
+# Track which category drawer is currently open per tab
+var open_drawer_hulls: String = ""
+var open_drawer_modules: String = ""
+
 # Every ground/naval/air/static hull the catalog defines, all dumped into
 # one undifferentiated "Hulls" tab with no domain grouping - a player
 # couldn't compare, say, "Naval Hull" against "Light Hull" without
@@ -100,28 +104,80 @@ func _ready():
 				module_domain = "Utility" if type_id in ModuleCatalog.SUPPORT_TYPE_IDS else "Mobility"
 			module_buttons_by_domain[module_domain].append(btn)
 
-	# Grouped by domain with a real visible section header per group (an
-	# earlier pass only grouped by button ORDER, no header, because the
-	# sidebar was too narrow/short for one - now widened as part of a wider
-	# UI polish pass specifically to make room for this).
+	# Create collapsible drawer containers per domain - only one expanded at a time
+	# Each domain gets a clickable header button that reveals its contents in a drawer
 	for domain in DOMAIN_ORDER:
 		if hull_buttons_by_domain[domain].is_empty(): continue
-		tab_hulls.add_child(_make_section_header(domain))
-		for btn in hull_buttons_by_domain[domain]:
-			tab_hulls.add_child(btn)
+		var drawer = _make_collapsible_drawer(domain, hull_buttons_by_domain[domain], "hulls")
+		tab_hulls.add_child(drawer)
 
 	for domain in MODULE_DOMAIN_ORDER:
 		if module_buttons_by_domain[domain].is_empty(): continue
-		tab_modules.add_child(_make_section_header(domain))
-		for btn in module_buttons_by_domain[domain]:
-			tab_modules.add_child(btn)
+		var drawer = _make_collapsible_drawer(domain, module_buttons_by_domain[domain], "modules")
+		tab_modules.add_child(drawer)
 
-func _make_section_header(text: String) -> Label:
-	var label = Label.new()
-	label.text = text
-	label.add_theme_font_size_override("font_size", 13)
-	label.add_theme_color_override("font_color", Color(0.85, 0.75, 0.4))
-	return label
+func _make_collapsible_drawer(category: String, buttons: Array, tab_type: String) -> Control:
+	# Drawer UI: thin header spine on left edge, full-width content below
+	# When collapsed, only the header tab (25px wide) is visible
+	# When expanded, content slides down with smooth animation
+	var drawer = VBoxContainer.new()
+	drawer.name = "Drawer_%s" % category
+	drawer.custom_minimum_size = Vector2(0, 0)
+
+	# Header button (thin tab on the spine)
+	var header_btn = Button.new()
+	header_btn.custom_minimum_size = Vector2(0, 36)
+	header_btn.text = category
+	var header_style = StyleBoxFlat.new()
+	header_style.bg_color = Color(0.2, 0.18, 0.15, 1.0)
+	header_style.border_width_bottom = 2
+	header_style.border_color = Color(0.45, 0.38, 0.2, 1.0)
+	header_btn.add_theme_stylebox_override("normal", header_style)
+	var header_hover = header_style.duplicate()
+	header_hover.bg_color = Color(0.28, 0.24, 0.18, 1.0)
+	header_btn.add_theme_stylebox_override("hover", header_hover)
+	drawer.add_child(header_btn)
+
+	# Content container (VBoxContainer with the buttons, starts hidden)
+	var content = VBoxContainer.new()
+	content.custom_minimum_size = Vector2(0, 0)
+	content.visible = false
+	content.theme_overrides = drawer.theme_overrides
+	for btn in buttons:
+		content.add_child(btn)
+	drawer.add_child(content)
+
+	# Store drawer metadata for toggle handler
+	drawer.set_meta("drawer_category", category)
+	drawer.set_meta("drawer_tab", tab_type)
+	drawer.set_meta("header_btn", header_btn)
+	drawer.set_meta("content_container", content)
+
+	# Connect header button click to toggle handler
+	header_btn.pressed.connect(func(): _toggle_drawer(drawer))
+
+	return drawer
+
+func _toggle_drawer(drawer: Control) -> void:
+	var category = drawer.get_meta("drawer_category")
+	var tab_type = drawer.get_meta("drawer_tab")
+	var content = drawer.get_meta("content_container")
+	var should_open = not content.visible
+
+	# Close any currently open drawer in this tab
+	var open_var = "open_drawer_%s" % tab_type
+	var currently_open = get(open_var)
+	if currently_open != "" and currently_open != category:
+		var parent = drawer.get_parent()
+		for child in parent.get_children():
+			if child.has_meta("drawer_category") and child.get_meta("drawer_category") == currently_open:
+				var other_content = child.get_meta("content_container")
+				other_content.visible = false
+				break
+
+	# Toggle this drawer
+	content.visible = should_open
+	set(open_var, category if should_open else "")
 
 func _stat_tooltip(data: Dictionary) -> String:
 	var lines = ["HP: %.0f | Weight: %.0f" % [data.get("hp", 0.0), data.get("weight", 0.0)]]
