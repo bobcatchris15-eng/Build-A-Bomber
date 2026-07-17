@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — naval_hull: real layered superstructure via a new superstructure_tiers param (spec item 6)
+
+**Not blocking.**
+
+**Generalized the single "bridge box glued onto the hull" into a real stepped stack**, per the spec's own framing of this as naval's core weakness (the hull loft itself was already good; the superstructure was the flat part). Added `superstructure_tiers`/`forecastle`/`quarterdeck` params to `build_ship_hull` (shared by all 3 naval hulls): a loop fuses `N` boxes of decreasing footprint (78% width/78% depth/85% height shrink per tier, each stacked with enough vertical overlap to fuse rather than float) using the same technique-#1 approach as `build_tower_hull`'s per-tier hulls. **`superstructure_tiers=1` reproduces the exact old single-box bridge** (same position/size), so `small_boat_hull`/`heavy_cruiser_hull` are completely unaffected by this change until their own punch-list items (9, 6) explicitly opt in - naval_hull is the only hull whose call site changed this pass (`superstructure_tiers=3, forecastle=True`).
+
+**Added `quarterdeck` now even though only `heavy_cruiser_hull` will use it (a later item)** - it's the same shape of change as `forecastle` (a single conditional box), so building both in one pass avoids touching `build_ship_hull`'s signature twice. Left it unused (`False` default) on every current call site; no behavior change from adding it.
+
+**Result reads as a real destroyer silhouette** - the side-profile screenshot shows a genuine stepped 3-tier bridge (visibly narrowing upward) plus the existing raked funnel and foremast, not a single flat box with greebles glued on. Didn't chase a dedicated close-up of the forecastle box specifically - it's a small, deliberately subtle freeboard step per the spec's own description ("cheap and reads instantly"), and the wide/side shots already show the overall silhouette is correct; a bow close-up would be the third camera-angle side-quest this session and the actual ask (layered superstructure) is unambiguously confirmed already.
+
+**Verified:** wide 3/4, side-profile (clear stepped tier read), extreme non-uniform stretch (funnel/mast/tiers all hold up, no self-intersection - the mast in particular gets dramatically taller under the Y=2.2x stretch, which is correct behavior since it's a real Y-keyed cylinder, not a bug). Headless tests green.
+
+---
+
 ## 2026-07-17 — sponson_hull AFV conversion (spec item 5): folded build_sponson_hull into build_afv_hull entirely
 
 **Not blocking.**

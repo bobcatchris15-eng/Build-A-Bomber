@@ -26,6 +26,12 @@ Also built `scratch/rebuild_single_hull.py`, a reusable single-hull rebuild help
 
 ---
 
+## 2026-07-17 (cont'd 3) — naval_hull converted (item 6): real layered bridge superstructure
+
+`build_ship_hull` gains a `superstructure_tiers` param that stacks N fused boxes of decreasing footprint (technique #1) instead of one flat bridge block - `naval_hull` now gets `superstructure_tiers=3` plus a `forecastle` freeboard step, reading as a genuine stepped destroyer bridge alongside the existing funnel/foremast, not a single box with greebles. `superstructure_tiers=1` (the default) reproduces the old single-box bridge exactly, so `small_boat_hull`/`heavy_cruiser_hull` are unaffected until their own punch-list items. Also added a `quarterdeck` param (unused for now, reserved for `heavy_cruiser_hull`'s item). Verified with wide/side/extreme-stretch screenshots; headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.

@@ -1112,7 +1112,8 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 
 
 def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.38, 0.4), greebles=None,
-		deadrise=0.3, sheer=0.1, flare=0.0, stations=9, bevel_pct=None, bevel_segments=None):
+		deadrise=0.3, sheer=0.1, flare=0.0, stations=9, bevel_pct=None, bevel_segments=None,
+		superstructure_tiers=1, forecastle=False, quarterdeck=False):
 	"""Naval hull: pointed bow, flat transom stern, a real V-shaped deadrise
 	cross-section (via a per-station loft, not a boolean cut), sheer
 	(deck line rising toward the bow), optional topside flare above the
@@ -1126,7 +1127,16 @@ def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.
 	  waterline - heavy_cruiser's "pronounced outward flare."
 	Both the bow taper and sheer reuse taper_profile()'s eased nose-
 	aggressive curve (bow = "nose" in the wedge-hull sense) so the entry
-	curves rather than kinking at a single hard bow cross-section."""
+	curves rather than kinking at a single hard bow cross-section.
+
+	superstructure_tiers: stacks this many fused boxes (technique #1) of
+	  decreasing footprint above the deck instead of one flat bridge block -
+	  foredeck house -> bridge -> open bridge, generalizing what used to be
+	  a single "bridge box glued onto the hull". 1 (default) reproduces the
+	  old single-box bridge exactly.
+	forecastle: adds a short raised-foredeck box near the bow (the classic
+	  freeboard step).
+	quarterdeck: adds a lower stern deck step for a layered-deck read."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
 	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
@@ -1162,8 +1172,23 @@ def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.
 
 	bevel_sharp_edges(bm, verts, R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
-	# Bridge superstructure, offset toward the stern.
-	add_box(bm, (0, hy * 1.3, hz * 0.35), (hx * 0.42, hy * 0.35, hz * 0.26), bevel=0.03)
+	# Bridge superstructure, offset toward the stern - a stack of
+	# `superstructure_tiers` fused boxes of decreasing footprint
+	# (technique #1, same as build_tower_hull's per-tier hulls), each
+	# overlapping the one below it so they read as fused rather than
+	# floating. tiers=1 reproduces the old single-box bridge exactly.
+	tier_y, tier_hy, tier_hx, tier_hz = hy * 1.3, hy * 0.35, hx * 0.42, hz * 0.26
+	for _tier_i in range(superstructure_tiers):
+		add_box(bm, (0, tier_y, hz * 0.35), (tier_hx, tier_hy, tier_hz), bevel=0.03)
+		tier_y += tier_hy * 1.6
+		tier_hx *= 0.78
+		tier_hy *= 0.85
+		tier_hz *= 0.78
+
+	if forecastle:
+		add_box(bm, (0, hy * (1.0 + sheer * 0.6), -hz * 0.62), (hx * 0.7, hy * 0.16, hz * 0.16), bevel=0.02)
+	if quarterdeck:
+		add_box(bm, (0, -hy * 0.15, hz * 0.72), (hx * 0.9, hy * 0.18, hz * 0.22), bevel=0.02)
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
@@ -1717,6 +1742,7 @@ def generate_hulls():
 
 	export_and_cleanup(build_ship_hull("naval_hull", 3.5, 1.6, 9.0,
 		bow_frac=0.35, deadrise=0.3, sheer=0.08, flare=0.0, bevel_pct=0.07,
+		superstructure_tiers=3, forecastle=True,
 		color=(0.35, 0.38, 0.4), greebles=_ship_hull_greebles), HULLS_DIR, "naval_hull")
 
 	export_and_cleanup(build_flying_wing_hull("flying_wing_hull", 5.0, 0.7, 3.6,
