@@ -486,6 +486,21 @@ def greeble_louver_panel(bm, hy, center, size, R, slats=4, recess_frac=0.05):
 		add_box(bm, c, (slat_w, size[1] * 0.5, size[2] * 0.85), rot_axis='x', rot_angle=0.3)
 
 
+def _bisect_z_band(bm, z0, z1):
+	for plane_z in (z0, z1):
+		bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+			plane_co=(0, 0, plane_z), plane_no=(0, 0, 1), clear_inner=False, clear_outer=False)
+
+
+def _bisect_x_band_and_recess(bm, x0, x1, z0, z1, recess, wall_gate):
+	for plane_x in (x0, x1):
+		bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+			plane_co=(plane_x, 0, 0), plane_no=(1, 0, 0), clear_inner=False, clear_outer=False)
+	for v in bm.verts:
+		if x0 - 1e-4 <= v.co.x <= x1 + 1e-4 and z0 - 1e-4 <= v.co.z <= z1 + 1e-4 and v.co.y > wall_gate:
+			v.co.y -= recess
+
+
 def add_recessed_embrasure(bm, center, size, R, depth_frac=0.06, taper_width_frac=0.55, wall_gate=0.0):
 	"""A recessed, splayed firing embrasure cut into an outward-facing
 	(+Z) wall - the vertical-wall counterpart to greeble_louver_panel's
@@ -500,25 +515,45 @@ def add_recessed_embrasure(bm, center, size, R, depth_frac=0.06, taper_width_fra
 	center/size (width, height) are Godot-space, matching greeble_vent's
 	signature. `wall_gate` restricts the inward push to verts on this
 	wall's outward side (an absolute Godot-Z threshold) so the cut
-	doesn't also carve into a wall on the opposite side of the hull."""
+	doesn't also carve into a wall on the opposite side of the hull.
+	For MULTIPLE embrasures sharing the same height band, use
+	add_recessed_embrasure_row instead - calling this once per slit at
+	an identical height re-bisects the same Z planes N times, which was
+	found (via direct bmesh inspection on a 5-slit wall) to produce
+	hundreds of degenerate zero-area faces."""
 	cx, cy, cz = GV(*center)
 	half_w, half_h = size[0] / 2.0, size[1] / 2.0
+	_bisect_z_band(bm, cz - half_h, cz + half_h)
+	_bisect_z_band(bm, cz - half_h * taper_width_frac, cz + half_h * taper_width_frac)
+	_bisect_x_band_and_recess(bm, cx - half_w, cx + half_w, cz - half_h, cz + half_h,
+		R * depth_frac, wall_gate)
+	hw2, hh2 = half_w * taper_width_frac, half_h * taper_width_frac
+	_bisect_x_band_and_recess(bm, cx - hw2, cx + hw2, cz - hh2, cz + hh2,
+		R * depth_frac * 1.8, wall_gate)
 
-	def _carve(hw, hh, recess):
-		x0, x1 = cx - hw, cx + hw
-		z0, z1 = cz - hh, cz + hh
-		for plane_x in (x0, x1):
-			bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
-				plane_co=(plane_x, 0, 0), plane_no=(1, 0, 0), clear_inner=False, clear_outer=False)
-		for plane_z in (z0, z1):
-			bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
-				plane_co=(0, 0, plane_z), plane_no=(0, 0, 1), clear_inner=False, clear_outer=False)
-		for v in bm.verts:
-			if x0 - 1e-4 <= v.co.x <= x1 + 1e-4 and z0 - 1e-4 <= v.co.z <= z1 + 1e-4 and v.co.y > wall_gate:
-				v.co.y -= recess
 
-	_carve(half_w, half_h, R * depth_frac)
-	_carve(half_w * taper_width_frac, half_h * taper_width_frac, R * depth_frac * 1.8)
+def add_recessed_embrasure_row(bm, x_centers, y_level, size, R, depth_frac=0.06,
+		taper_width_frac=0.55, wall_gate=0.0):
+	"""Multiple embrasures at different X positions sharing one height
+	band (build_wall_hull's arrow-slit row) - shares the height-bounding
+	Z bisect across the whole row (cut once) instead of add_recessed_
+	embrasure's per-call Z bisect (which would re-cut the identical
+	location once per slit). Each slit's width (X) bisect still happens
+	per-slit since those positions are always distinct, never coincident.
+	x_centers/y_level/size are Godot-space, same convention as
+	add_recessed_embrasure."""
+	half_h = size[1] / 2.0
+	half_h2 = half_h * taper_width_frac
+	z0, z1 = y_level - half_h, y_level + half_h
+	z0i, z1i = y_level - half_h2, y_level + half_h2
+	_bisect_z_band(bm, z0, z1)
+	_bisect_z_band(bm, z0i, z1i)
+	half_w = size[0] / 2.0
+	half_w2 = half_w * taper_width_frac
+	for cx in x_centers:
+		_bisect_x_band_and_recess(bm, cx - half_w, cx + half_w, z0, z1, R * depth_frac, wall_gate)
+		_bisect_x_band_and_recess(bm, cx - half_w2, cx + half_w2, z0i, z1i,
+			R * depth_frac * 1.8, wall_gate)
 
 
 def greeble_headlight_pair(bm, hx, y_level, front_z, radius=0.09):
@@ -1143,10 +1178,18 @@ def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
 	return obj
 
 
-def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0.36), greebles=None):
+def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0.36), greebles=None,
+		arrow_slit_count=0):
 	"""Long, low defensive rampart: a battered (wider-at-base) wall face
 	topped with alternating battlement merlons - a wall segment, not a
-	bunker or tower, meant to read as long and thin rather than squat."""
+	bunker or tower, meant to read as long and thin rather than squat.
+
+	arrow_slit_count: carves this many real recessed, splayed arrow slits
+	  (add_recessed_embrasure, shared with pillbox_foundation) into the
+	  +Z wall face before the bevel, replacing what used to be proud
+	  add_box slits in the greebles callback. Positions stay well clear
+	  of the +/-X end caps (see the bevel's own preserve_axis=0 comment
+	  below) - end-cap tiling must not be touched by any new feature."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
 	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
@@ -1161,11 +1204,23 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 	bmesh.ops.convex_hull(bm, input=verts)
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
 
+	if arrow_slit_count > 0:
+		# All slits share the same height band, so add_recessed_embrasure_row
+		# (not N separate add_recessed_embrasure calls) - re-bisecting an
+		# identical height plane once per slit was found, via direct bmesh
+		# inspection, to produce hundreds of degenerate zero-area faces.
+		slit_xs = [((i + 0.5) / arrow_slit_count - 0.5) * hx * 1.7 for i in range(arrow_slit_count)]
+		add_recessed_embrasure_row(bm, slit_xs, hy * 0.05, (R * 0.08, hy * 0.45), R,
+			depth_frac=0.05, wall_gate=0.0)
+
 	# Bevel the batter/top transition, but preserve_axis=0 keeps the two
 	# flat end-cap faces (raw Blender +/-X, this wall's long axis) fully
 	# untouched - those cross-sections must stay identical and flat so
 	# adjacent wall segments still tile edge-to-edge with no visible seam.
-	bevel_sharp_edges(bm, verts, R, tier=1, pct=0.06, preserve_axis=0)
+	# Runs on the CURRENT vert set so it also smooths the arrow slits'
+	# own cut edges (the slit positions are already well clear of the
+	# preserved end caps, so this doesn't risk the tiling guarantee).
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.06, preserve_axis=0)
 
 	# Battlements: alternating merlon teeth along the top edge, evenly
 	# spaced with gaps (crenels) between them for the classic wall silhouette.
@@ -1834,12 +1889,9 @@ def _sponson_hull_greebles(bm, hx, hy, hz):
 
 
 def _wall_greebles(bm, hx, hy, hz):
-	# Arrow slits: thin dark recesses set into the outward face.
-	slit_count = 5
-	for i in range(slit_count):
-		t = (i + 0.5) / slit_count - 0.5
-		sx = t * hx * 1.7
-		add_box(bm, (sx, hy * 0.05, hz * 0.95), (0.05, hy * 0.45, 0.1))
+	# Arrow slits are now a real recessed cut in the silhouette
+	# (build_wall_hull's arrow_slit_count param, carved before the
+	# bevel) instead of a proud add_box here - see HULL_MASSING_SPEC.md.
 	greeble_rivet_row(bm, (-hx * 0.92, -hy * 0.75, hz * 0.98), (hx * 0.92, -hy * 0.75, hz * 0.98), 10)
 	greeble_antenna(bm, (hx * 0.85, hy * 0.9, 0), height=0.4)
 
@@ -1889,7 +1941,8 @@ def generate_hulls():
 		tiers=3, color=(0.5, 0.48, 0.44), greebles=_tower_greebles), HULLS_DIR, "tower_foundation")
 
 	export_and_cleanup(build_wall_hull("fortress_wall_foundation", 6.0, 2.2, 1.3,
-		merlons=5, color=(0.42, 0.4, 0.36), greebles=_wall_greebles), HULLS_DIR, "fortress_wall_foundation")
+		merlons=5, arrow_slit_count=5,
+		color=(0.42, 0.4, 0.36), greebles=_wall_greebles), HULLS_DIR, "fortress_wall_foundation")
 
 	export_and_cleanup(build_ship_hull("naval_hull", 3.5, 1.6, 9.0,
 		bow_frac=0.35, deadrise=0.3, sheer=0.08, flare=0.0, bevel_pct=0.07,

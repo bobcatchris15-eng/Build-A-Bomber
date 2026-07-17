@@ -74,6 +74,12 @@ New `add_recessed_embrasure` helper - the vertical-wall counterpart to `greeble_
 
 ---
 
+## 2026-07-17 (cont'd 11) — fortress_wall_foundation converted (item 14): recessed arrow slits, and a real degenerate-geometry bug caught before committing
+
+`build_wall_hull` gains `arrow_slit_count`, carving real recessed/splayed slits (reusing pillbox's `add_recessed_embrasure`) before the bevel, replacing the old proud `add_box` slits. Caught a real bug in the first pass by not trusting a clean-looking screenshot alone: calling the embrasure helper once per slit re-bisected the same shared height plane 5 times, producing 812/1444 (56%) degenerate zero-area faces - invisible in these particular renders by luck of angle/lighting, but real non-manifold garbage. Split the helper into shared sub-pieces and added `add_recessed_embrasure_row` (shares the height bisect once across the whole row); re-verified via direct bmesh inspection - 0 degenerate faces after the fix, `pillbox_foundation` unaffected. End-cap tiling (`preserve_axis=0`) confirmed still intact. Headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.

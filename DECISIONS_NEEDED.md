@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — fortress_wall_foundation: recessed arrow slits, plus a real degenerate-geometry bug caught before committing (spec item 14)
+
+**Not blocking.**
+
+**Real bug caught by not trusting a clean-looking screenshot alone.** First implementation called `add_recessed_embrasure` once per slit (5 times), each carving its own height-bounding (Z) bisect at the identical shared height (since every arrow slit sits at the same vertical position on the wall). The very first render actually looked fine at a glance and even the extreme-stretch shot looked clean, but per this project's own standing lesson ("a render that looks right doesn't prove the geometry is right - a git-HEAD control test settles it"), I went one step further and directly inspected the exported bmesh face areas before trusting it. Found **812 of 1444 faces (56%) were degenerate zero-area slivers** - re-bisecting an already-existing cut line at the exact same location, once per slit, was producing massive topological garbage that happened to not be visually obvious in these particular screenshots (through luck of camera angle/lighting) but would be a real, fragile time bomb - non-manifold geometry that could break differently under a different light angle, a different Godot version's LOD generation, or downstream tooling. Root-caused it precisely (confirmed via a second bmesh check with `arrow_slit_count=0` as a clean baseline: 0 degenerate faces) before writing any fix, not just guessing.
+
+**Fix: split `add_recessed_embrasure` into shared sub-helpers (`_bisect_z_band`, `_bisect_x_band_and_recess`) and added `add_recessed_embrasure_row`** for the "N embrasures sharing one height band" case - cuts the height (Z) bisect ONCE for the whole row, then only the per-slit width (X) bisect (always at genuinely distinct positions, never coincident between slits) repeats. Re-verified via direct bmesh inspection: 0 degenerate faces on the 5-slit wall after the fix, and re-checked `pillbox_foundation` (which still calls single-embrasure `add_recessed_embrasure`, refactored but not behaviorally changed) is unaffected - 1 negligible degenerate face, matching this codebase's normal baseline noise level from ordinary bisect operations (`medium_hull`'s own louver+panel-line features produce 9/1328 for comparison).
+
+**The lingering "non-finite normal" reimport warning was a red herring, not evidence of this bug** - it was still present in Godot's reimport log even after the fix reduced degenerate faces to zero (confirmed directly via Blender-side bmesh inspection both before AND after), meaning it's an unrelated, pre-existing, harmless warning (likely from something else in the same batch reimport, or a downstream LOD-generation heuristic quirk) rather than a signal tied to this specific change. Didn't chase it further once the actual exported geometry was independently confirmed clean - the warning text alone isn't reliable evidence either way; the direct bmesh area check is.
+
+**End-cap tiling constraint verified, not just assumed** - all slit width-bisect positions (`sx = t*hx*1.7` for `t` in [-0.4, 0.4]) stay well clear of the `+/-hx*1.05` end-cap faces by construction; confirmed via the dedicated end-cap-facing screenshot (a perfectly flat, unbroken rectangle, matching the pre-existing tiling guarantee).
+
+**Verified:** wide 3/4, side/end-cap, extreme non-uniform stretch, and a dedicated close-up (found via the same "try a different angle before concluding it's broken" lesson from the medium_hull/assault_hull sessions - my first two close-up attempts happened to catch unfavorable lighting and looked like nothing had changed, until a third angle revealed the real recessed/splayed slits clearly). Headless tests green.
+
+---
+
 ## 2026-07-17 — pillbox_foundation: real recessed splayed embrasure, a new shared helper (spec item 13)
 
 **Not blocking.**
