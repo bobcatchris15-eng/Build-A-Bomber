@@ -486,6 +486,41 @@ def greeble_louver_panel(bm, hy, center, size, R, slats=4, recess_frac=0.05):
 		add_box(bm, c, (slat_w, size[1] * 0.5, size[2] * 0.85), rot_axis='x', rot_angle=0.3)
 
 
+def add_recessed_embrasure(bm, center, size, R, depth_frac=0.06, taper_width_frac=0.55, wall_gate=0.0):
+	"""A recessed, splayed firing embrasure cut into an outward-facing
+	(+Z) wall - the vertical-wall counterpart to greeble_louver_panel's
+	horizontal deck pocket. Same bisect+shift technique (technique #2),
+	just bounding width/height instead of width/depth, and pushing the
+	interior INWARD along Z instead of down along Y. Two nested cuts (an
+	outer wide pocket, then a narrower inner slit pushed further in)
+	approximate a real casemate opening that narrows toward the firing
+	position - "splayed wider on the outside" - without needing a
+	continuous taper loft. Must be called on the silhouette BEFORE the
+	tier-1 bevel pass, like every other bisect+shift feature.
+	center/size (width, height) are Godot-space, matching greeble_vent's
+	signature. `wall_gate` restricts the inward push to verts on this
+	wall's outward side (an absolute Godot-Z threshold) so the cut
+	doesn't also carve into a wall on the opposite side of the hull."""
+	cx, cy, cz = GV(*center)
+	half_w, half_h = size[0] / 2.0, size[1] / 2.0
+
+	def _carve(hw, hh, recess):
+		x0, x1 = cx - hw, cx + hw
+		z0, z1 = cz - hh, cz + hh
+		for plane_x in (x0, x1):
+			bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+				plane_co=(plane_x, 0, 0), plane_no=(1, 0, 0), clear_inner=False, clear_outer=False)
+		for plane_z in (z0, z1):
+			bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+				plane_co=(0, 0, plane_z), plane_no=(0, 0, 1), clear_inner=False, clear_outer=False)
+		for v in bm.verts:
+			if x0 - 1e-4 <= v.co.x <= x1 + 1e-4 and z0 - 1e-4 <= v.co.z <= z1 + 1e-4 and v.co.y > wall_gate:
+				v.co.y -= recess
+
+	_carve(half_w, half_h, R * depth_frac)
+	_carve(half_w * taper_width_frac, half_h * taper_width_frac, R * depth_frac * 1.8)
+
+
 def greeble_headlight_pair(bm, hx, y_level, front_z, radius=0.09):
 	for side in (-1, 1):
 		add_cyl_axis(bm, (side * hx * 0.55, y_level, front_z), radius, 0.09, 'z', segments=10)
@@ -1059,11 +1094,16 @@ def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, u
 
 
 def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
-		color=(0.45, 0.45, 0.4), greebles=None):
+		color=(0.45, 0.45, 0.4), greebles=None, embrasure=None):
 	"""Low static defensive bunker: tapered polygonal frustum + domed cap.
 	The taper itself (top narrower than base) already gives the battered/
 	inward-sloping wall read the design doc asks for - no new geometry
-	needed there, just a bevel."""
+	needed there, just a bevel.
+
+	embrasure: optional dict {"center":(x,y,z), "size":(w,h), "depth_frac":f}
+	  - a real recessed, splayed firing slit (add_recessed_embrasure)
+	  carved into the front wall before the bevel pass, replacing a proud
+	  greeble_vent box."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
 	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
@@ -1080,9 +1120,15 @@ def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
 	bmesh.ops.convex_hull(bm, input=verts)
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
 
+	if embrasure:
+		add_recessed_embrasure(bm, embrasure["center"], embrasure["size"], R,
+			depth_frac=embrasure.get("depth_frac", 0.06), wall_gate=hz * 0.15)
+
 	# Heavier, low-segment-count bevel - reads as blocky cast concrete
-	# rather than the "milled/cast metal" facet count used on vehicle hulls.
-	bevel_sharp_edges(bm, verts, R, tier=1, pct=0.09, segments=1)
+	# rather than the "milled/cast metal" facet count used on vehicle
+	# hulls. Runs on the CURRENT vert set (not just the original
+	# silhouette list) so it also smooths the embrasure cut's own edges.
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.09, segments=1)
 
 	# Domed roof cap
 	dome_verts = bmesh.ops.create_uvsphere(bm, u_segments=sides, v_segments=6, radius=top_r * 0.9)['verts']
@@ -1686,7 +1732,11 @@ def _pillbox_greebles(bm, hx, hy, hz):
 		angle = i * (2.0 * math.pi / 8.0) + math.pi / 8.0
 		pos = (math.cos(angle) * hx * 0.95, -hy * 0.75, math.sin(angle) * hz * 0.95)
 		add_box(bm, pos, (0.35, 0.35, 0.35), bevel=0.05)  # sandbag corner fillets
-	greeble_vent(bm, (0, hy * 0.55, hz * 0.9), (0.5, 0.15, 0.1), slats=5)
+	# The firing embrasure itself is now a real recessed, splayed cut in
+	# the silhouette (build_bunker_hull's `embrasure` param, carved before
+	# the bevel) - a proud greeble_vent box here would double up on the
+	# same location. Just the shallow casemate hood lintel above it.
+	add_box(bm, (0, hy * 0.63, hz * 0.87), (0.56, 0.06, 0.14), bevel=0.02)
 	greeble_antenna(bm, (hx * 0.3, hy * 1.15, hz * 0.3), height=0.5)
 	greeble_rivet_row(bm, (-hx * 0.85, -hy * 0.2, hz * 0.85), (hx * 0.85, -hy * 0.2, hz * 0.85), 5)
 
@@ -1831,7 +1881,9 @@ def generate_hulls():
 		color=(0.4, 0.32, 0.28), greebles=_assault_hull_greebles), HULLS_DIR, "assault_hull")
 
 	export_and_cleanup(build_bunker_hull("pillbox_foundation", 3.0, 1.2, 3.0,
-		sides=8, taper=0.7, color=(0.45, 0.45, 0.4), greebles=_pillbox_greebles), HULLS_DIR, "pillbox_foundation")
+		sides=8, taper=0.7,
+		embrasure={"center": (0, 0.33, 1.35), "size": (0.5, 0.15), "depth_frac": 0.08},  # hy*0.55, hz*0.9
+		color=(0.45, 0.45, 0.4), greebles=_pillbox_greebles), HULLS_DIR, "pillbox_foundation")
 
 	export_and_cleanup(build_tower_hull("tower_foundation", 3.0, 4.0, 3.0,
 		tiers=3, color=(0.5, 0.48, 0.44), greebles=_tower_greebles), HULLS_DIR, "tower_foundation")

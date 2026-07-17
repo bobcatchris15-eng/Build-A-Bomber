@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — pillbox_foundation: real recessed splayed embrasure, a new shared helper (spec item 13)
+
+**Not blocking.**
+
+**Built `add_recessed_embrasure`, a genuinely new helper rather than reusing `greeble_louver_panel` directly** - the spec calls this "a horizontal-slit variant of the louver pocket," but the two cut different axis pairs: the louver pocket bounds width+depth on a HORIZONTAL deck surface and pushes DOWN; an embrasure needs to bound width+height on a VERTICAL wall surface and push INWARD. Same bisect+shift technique (technique #2), different plane orientations - reusing the louver function's code directly wasn't possible without branching its own axis logic, which is exactly what I did instead as a new sibling helper (mirroring how `add_panel_line_groove` grew an `axis` param earlier this pass for the same reason).
+
+**"Splayed wider on the outside" implemented as two nested cuts, not a continuous taper loft** - an outer wide pocket, then a narrower inner slit pushed further in (`taper_width_frac=0.55`, `depth_frac` roughly doubled on the inner cut). This is a real, if approximate, casemate taper using only bisect+shift (still no booleans, no new construction machinery) - checked the close-up screenshot shows a genuinely two-stepped, narrowing dark recess, not a flat rectangular hole.
+
+**Wired as an `embrasure` param on `build_bunker_hull`** (dict: center/size/depth_frac), called on the silhouette BEFORE the tier-1 bevel - same ordering discipline as every other bisect+shift feature this pass. Removed the old proud `greeble_vent` embrasure from `_pillbox_greebles` (which ran after bevel, at the same location - would have doubled up on the same spot) and replaced it with just the "shallow casemate hood" lintel box the spec calls out as optional.
+
+**Verified the splay is actually visible, not just present** - the default wide/side screenshots at working distance don't clearly resolve a small recessed detail on an octagonal bunker's front facet, so did one dedicated close-up (deleted after use, per convention) that confirms a real two-stepped, narrowing dark slit with a hood shadow above it - a substantial visual upgrade from a flat proud vent box.
+
+**Verified:** wide 3/4, side, close-up, extreme non-uniform stretch (no self-intersection). Headless tests green.
+
+---
+
 ## 2026-07-17 — airship_hull: longitudinal keel battens (spec item 12)
 
 **Not blocking.**

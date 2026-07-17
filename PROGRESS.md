@@ -68,6 +68,12 @@ Generalized `add_panel_line_groove` with an `axis` param (`'z'` = old chordwise-
 
 ---
 
+## 2026-07-17 (cont'd 10) — pillbox_foundation converted (item 13): real recessed splayed embrasure
+
+New `add_recessed_embrasure` helper - the vertical-wall counterpart to `greeble_louver_panel`'s horizontal deck pocket (bounds width/height instead of width/depth, pushes inward instead of down), with two nested cuts (outer wide pocket, narrower inner slit pushed further in) approximating a real casemate taper. Wired as an `embrasure` param on `build_bunker_hull`, carved before the tier-1 bevel. Removed the old proud `greeble_vent` embrasure from `_pillbox_greebles` (would have doubled up on the same spot) and replaced it with just the optional casemate-hood lintel. A dedicated close-up confirmed a genuinely two-stepped, narrowing dark slit - a real upgrade from a flat proud vent box. Headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.
