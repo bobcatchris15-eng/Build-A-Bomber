@@ -17,12 +17,13 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 - **Discoverability:** Headers remain visible at all times (not hidden when collapsed), so a player can see "oh, there are Naval hulls available" without expanding. The old flat list made this obvious too, but wasted vertical space; the new design gains the same discoverability in 24% of the space.
 - **Tactile interaction:** Clicking headers to reveal contents matches the established Godot UI idiom (similar to ItemList groups, tree expansion, etc.). Feels intentional, not cramped.
 
-**What was verified:**
+**What was verified (real screenshots):**
 - ✅ Overflow tests pass - drawer UI stays within 300px panel width constraint
 - ✅ Both Hulls and Modules tabs have drawer-per-category (Locomotion tab stayed flat since it has no categorical breakdown)
 - ✅ Drawer toggle logic works: only one category open at a time, clicking a header closes previously open category
-- ✅ Visual state clear: headers styled distinctly (darker bg + accent border), hovered states show feedback
-- ✅ Screenshots captured showing three states: all collapsed, Ground expanded, Naval expanded (drawer switching)
+- ✅ Visual rendering verified: headers now clearly visible with golden text + accent borders (fixed styling issue where earlier headers were too dark against dark panel)
+- ✅ Screenshots verified showing actual working UI: drawer_fixed_collapsed.png (4 headers visible), drawer_fixed_ground_expanded.png (Ground drawer content revealed with hull buttons)
+- ⚠️ Earlier screenshots (drawer_ui_*.png) were false verification - showed empty panel due to invisible headers (styling issue). Deleted to avoid confusion.
 
 **Not implemented (intentional scope boundaries):**
 - Animated slide-out or width-expansion effects (deemed premature optimization; can add later if Chris wants tactile feedback)
