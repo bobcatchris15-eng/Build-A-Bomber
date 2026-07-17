@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-16 — Hull massing redesign: research spec + medium_hull flagship conversion
+
+**Not blocking.**
+
+**Spawned a creative-only design subagent** (opus, `HULL_MASSING_SPEC.md`) per Chris's explicit suggestion, matching how VISUAL_ART_DIRECTION.md was produced. Its core finding: `bmesh.ops.convex_hull()` over a single point cloud can never produce a re-entrant silhouette (any "inside" point is discarded) - this is *why* every hull reads as a beveled box no matter how the taper/bevel parameters get tuned, not a tuning problem. The fix reuses two techniques already proven elsewhere in this file (no new machinery, booleans still ruled out): multiple interpenetrating convex hulls in one `bm` (`build_tower_hull`'s per-tier hulls, `build_sponson_hull`'s fused blisters), and `bisect_plane` + selective vertex shift for concave pockets (the existing waist-inset/deck-line/panel-groove vocabulary).
+
+**Built `build_afv_hull()`** - a new shared ground-hull constructor: a full-width lower "tub" (Volume A, one convex hull), a narrower upper glacis/casemate structure (Volume B, a SECOND separate convex hull deliberately left interpenetrating - not welded, matching the tower/sponson precedent exactly), and flat fender shelves filling the gap between them (Volume C, fused boxes). Volume B's cross-section (sloped glacis -> flat deck -> vertical rear) comes from just 4 (Z,Y) station pairs convex-hulled together - no multi-slice lofting needed, since a hard-faceted glacis is more tank-authentic than a smoothly curved one anyway. Also built `greeble_louver_panel()` - a genuinely recessed engine-deck vent grate (crossed bisect bands + downward vertex shift, same technique as `add_panel_line_groove` but bounded in both length and width instead of running the full hull width) to replace the old proud `greeble_vent` box the spec called out.
+
+**Converted medium_hull first** (the spec's own recommended flagship/reference hull - most-used, most-scrutinized, mirrors the original Tier-1 "validate on medium first" precedent). Turned off the old Tier-2 waist-inset/deck-line-step for this hull - the new two-volume tub/glacis structure already produces a real seam/step at that location, so layering the old procedural cuts on top risked confusing double-cuts rather than adding anything.
+
+**Verification, and a real lesson about camera angle vs. geometry correctness:** my first two screenshot angles (default top-down-ish isometric, and a steep 3/4 pitch) made the new construction look almost like nothing had changed - a flat wedge, no visible tub/glacis/fender read. Before concluding the geometry was wrong, tried a genuinely low/horizontal 3/4 angle instead, which immediately showed the real tub+glacis+fender structure clearly. The geometry was correct the whole time; a squat hull's vertical volume distinctions are inherently hard to read from a steep top-down angle (true of a real tank too), which is a camera-choice lesson worth remembering before mistaking "my screenshot angle is unflattering" for "the feature didn't work." Also re-verified under an extreme non-uniform stretch (2.5x/2.2x/0.35x) - tub/glacis/fender structure holds up proportionally, no self-intersection or spiking, panel texture still tiles correctly rather than smearing. Headless tests green.
+
+---
+
 ## 2026-07-16 — Parts Catalog real sub-categories + a UI polish pass on Design Lab/Skirmish
 
 **Not blocking.**

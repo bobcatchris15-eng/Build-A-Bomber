@@ -432,6 +432,42 @@ def greeble_vent(bm, center, size, slats=4):
 		add_box(bm, c, (slat_w, size[1] * 1.2, size[2] * 0.85))
 
 
+def greeble_louver_panel(bm, hy, center, size, R, slats=4, recess_frac=0.05):
+	"""Engine-deck louvers as real recessed geometry (HULL_MASSING_SPEC.md)
+	instead of a proud greeble_vent box: crossed bisect bands (the same
+	bisect+shift technique as add_panel_line_groove, but bounded in BOTH
+	length AND width instead of running the full hull width) carve a
+	rectangular pocket, the interior is pushed down, then angled slat
+	add_boxes sit at the recessed floor depth. Must be called on the
+	silhouette BEFORE the tier-1 bevel pass (like every other bisect+shift
+	feature), not from a hull's `greebles` callback which only runs after.
+	center/size are Godot-space, matching greeble_vent's own signature.
+	`hy` gates the vertical shift to the upper hull only (same `v.co.z >
+	hy*0.3` convention add_deck_line_step/add_panel_line_groove already use),
+	so this can safely be called without accidentally denting the belly."""
+	cx, cy, cz = GV(*center)
+	half_w, half_l = size[0] / 2.0, size[2] / 2.0
+	x0, x1 = cx - half_w, cx + half_w
+	y0, y1 = cy - half_l, cy + half_l
+	for plane_x in (x0, x1):
+		bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+			plane_co=(plane_x, 0, 0), plane_no=(1, 0, 0), clear_inner=False, clear_outer=False)
+	for plane_y in (y0, y1):
+		bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+			plane_co=(0, plane_y, 0), plane_no=(0, 1, 0), clear_inner=False, clear_outer=False)
+	recess = R * recess_frac
+	for v in bm.verts:
+		if x0 - 1e-4 <= v.co.x <= x1 + 1e-4 and y0 - 1e-4 <= v.co.y <= y1 + 1e-4 and v.co.z > hy * 0.3:
+			v.co.z -= recess
+
+	slat_w = size[0] / (slats * 2.2)
+	floor_y = center[1] - recess
+	for i in range(slats):
+		t = (i + 0.5) / slats - 0.5
+		c = (center[0] + t * size[0] * 0.8, floor_y, center[2])
+		add_box(bm, c, (slat_w, size[1] * 0.5, size[2] * 0.85), rot_axis='x', rot_angle=0.3)
+
+
 def greeble_headlight_pair(bm, hx, y_level, front_z, radius=0.09):
 	for side in (-1, 1):
 		add_cyl_axis(bm, (side * hx * 0.55, y_level, front_z), radius, 0.09, 'z', segments=10)
@@ -858,6 +894,127 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 	# primary silhouette. Uses the CURRENT vert set, not the original
 	# convex-hull input, since bisect_plane above may have added verts.
 	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, angle_deg=bevel_angle_deg, pct=bevel_pct, segments=bevel_segments)
+
+	if greebles:
+		greebles(bm, hx, hy, hz)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.45)
+	return obj
+
+
+def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, upper_w=0.8,
+		glacis_len_frac=0.3, fender_frac=1.0, fender_height_frac=0.12,
+		spine_w=0.5, spine_h=1.1, color=(0.55, 0.56, 0.58), greebles=None,
+		bevel_pct=None, bevel_segments=None, turret_ring=False, louver_panel=None,
+		waist_inset=0.0, waist_height_frac=0.5, deck_line=0.0, deck_line_z_frac=(0.6, 0.95),
+		panel_line_fracs=None):
+	"""Ground AFV hull built from three genuinely separate, interpenetrating
+	volumes instead of one tapered loft - a `bmesh.ops.convex_hull()` over a
+	single point cloud can never produce a re-entrant silhouette (any point
+	"inside" the hull of its neighbours is discarded), so a real lower-hull-
+	tub-plus-separate-upper-glacis relationship is structurally impossible
+	with build_wedge_hull's single-loft approach no matter how the taper/
+	bevel parameters are tuned. This builder uses the same proven no-
+	boolean technique build_tower_hull (per-tier convex hulls) and
+	build_sponson_hull (fused blisters) already rely on: multiple convex
+	hulls fused into the same bmesh, left deliberately interpenetrating
+	(never welded - welding is where non-manifold geometry and bevel
+	spikes come from). See HULL_MASSING_SPEC.md for the full design
+	rationale and per-hull-type parameter reasoning.
+
+	Volume A (tub): full-width slab, flat belly, light nose taper only -
+	  the glacis slope lives entirely in Volume B, not here.
+	Volume B (upper structure): narrower, a SEPARATE convex hull left
+	  interpenetrating the tub. Its point cloud is just 4 distinct (Z, Y)
+	  stations (nose-bottom / deck-front / deck-rear / rear-bottom), which
+	  is enough for a convex hull to produce a real sloped-glacis ->
+	  flat-deck -> vertical-rear cross-section with no lofting needed.
+	Volume C (fenders): flat fused boxes filling the gap between the
+	  tub's full width and the upper structure's narrower footprint - the
+	  "over the tracks" read, and the best sponson-embed side-mount
+	  real estate in the roster.
+
+	tub_frac: tub roof height as a fraction of total height.
+	upper_w: upper structure half-width as a fraction of hx.
+	glacis_len_frac: how far back from the nose the glacis rises to meet
+	  the flat deck - smaller = steeper/shorter glacis.
+	fender_frac: fender outer edge as a fraction of hx (1.0 = flush with
+	  the tub's own full width; set to upper_w or below to skip fenders).
+	louver_panel: optional dict {"z_frac":f (position along length as a
+	  multiple of hz, e.g. 0.72 = toward the rear), "width_frac"/"depth_frac"
+	  (size as fractions of hx/hz), "slats":n, "recess_frac":f} - a
+	  recessed engine-deck vent grate, applied to the silhouette before
+	  the tier-1 bevel (see greeble_louver_panel)."""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
+	bm = bmesh.new()
+
+	tub_top_y = -hy + 2.0 * hy * tub_frac
+
+	# Volume A: lower hull tub.
+	nose_x_scale = 1.0 - nose_frac * 0.3
+	tub_pts = [
+		(-hx, -hy, -hz), (hx, -hy, -hz), (-hx, -hy, hz), (hx, -hy, hz),
+		(-hx * nose_x_scale, tub_top_y, -hz), (hx * nose_x_scale, tub_top_y, -hz),
+		(-hx, tub_top_y, hz), (hx, tub_top_y, hz),
+	]
+	tub_verts = [bm.verts.new(GV(*p)) for p in tub_pts]
+	bmesh.ops.convex_hull(bm, input=tub_verts)
+
+	# Volume B: upper structure (glacis + casemate/engine deck) - a
+	# separate convex hull, deliberately left interpenetrating Volume A.
+	uw = hx * upper_w
+	glacis_deck_z = -hz + size_z * glacis_len_frac
+	upper_pts = [
+		(-uw, tub_top_y, -hz), (uw, tub_top_y, -hz),
+		(-uw, hy, glacis_deck_z), (uw, hy, glacis_deck_z),
+		(-uw, hy, hz), (uw, hy, hz),
+		(-uw, tub_top_y, hz), (uw, tub_top_y, hz),
+	]
+	upper_verts = [bm.verts.new(GV(*p)) for p in upper_pts]
+	bmesh.ops.convex_hull(bm, input=upper_verts)
+
+	# Spine ridge along the deck (mount rail), same convention as the
+	# wedge-hull family's own spine.
+	spine_pts = [
+		(-hx * spine_w, hy * spine_h, hz * 0.1), (hx * spine_w, hy * spine_h, hz * 0.1),
+		(-hx * spine_w, hy * spine_h, -hz * 0.3), (hx * spine_w, hy * spine_h, -hz * 0.3),
+	]
+	spine_verts = [bm.verts.new(GV(*p)) for p in spine_pts]
+	bmesh.ops.convex_hull(bm, input=spine_verts)
+
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	# Volume C: flat fender/sponson shelves at the tub-roof seam.
+	fender_outer = hx * fender_frac
+	if fender_outer > uw + 0.02:
+		fender_reach = fender_outer - uw
+		fender_h = hy * fender_height_frac
+		for side in (-1, 1):
+			add_box(bm, (side * (uw + fender_reach * 0.5), tub_top_y + fender_h * 0.3, 0),
+				(fender_reach, fender_h, hz * 1.98), bevel=0.02)
+
+	if waist_inset > 0.0:
+		add_waist_inset(bm, hx, hy, hz, depth_frac=waist_inset, height_frac=waist_height_frac)
+	if deck_line > 0.0:
+		add_deck_line_step(bm, hx, hy, hz, height_frac=deck_line, z_frac=deck_line_z_frac)
+	if panel_line_fracs:
+		for z_frac in panel_line_fracs:
+			add_panel_line_groove(bm, hx, hy, hz, R, z_frac)
+	if louver_panel:
+		lv_center = (0, hy, hz * louver_panel.get("z_frac", 0.72))
+		lv_size = (hx * louver_panel.get("width_frac", 0.85), 0.1, hz * louver_panel.get("depth_frac", 0.3))
+		greeble_louver_panel(bm, hy, lv_center, lv_size, R,
+			slats=louver_panel.get("slats", 4), recess_frac=louver_panel.get("recess_frac", 0.05))
+	if turret_ring:
+		add_cyl_y(bm, (0, hy * 1.05, hz * 0.1), min(hx, hz) * 0.32, hy * 0.12, segments=16)
+
+	# Tier-1 bevel on the CURRENT vert set (picks up A/B/C's real seams -
+	# tub roof, glacis crease, fender edges, spine, plus any bisect+shift
+	# cuts above) - same dihedral-angle selection every other hull uses,
+	# no hand-picked edge lists needed even with 3 fused volumes.
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
@@ -1517,10 +1674,12 @@ def generate_hulls():
 		waist_inset=0.05, waist_height_frac=0.6, deck_line=0.06,
 		color=(0.72, 0.73, 0.75), greebles=_light_hull_greebles), HULLS_DIR, "light_hull")
 
-	export_and_cleanup(build_wedge_hull("medium_hull", 4.0, 1.0, 6.0,
-		nose_frac=0.25, spine_w=0.6, spine_h=1.15, rear_flare=1.0, front_flare=0.85,
-		waist_inset=0.09, waist_height_frac=0.5, deck_line=0.16,
-		panel_line_fracs=[0.28, 0.48],
+	export_and_cleanup(build_afv_hull("medium_hull", 4.0, 1.0, 6.0,
+		nose_frac=0.25, tub_frac=0.55, upper_w=0.78, glacis_len_frac=0.3,
+		spine_w=0.6, spine_h=1.15, turret_ring=True,
+		louver_panel={"z_frac": 0.72, "width_frac": 0.85, "depth_frac": 0.3, "slats": 5},
+		waist_inset=0.0, deck_line=0.0,
+		panel_line_fracs=[0.28],
 		color=(0.5, 0.5, 0.52), greebles=_medium_hull_greebles), HULLS_DIR, "medium_hull")
 
 	export_and_cleanup(build_wedge_hull("heavy_hull", 6.0, 1.5, 8.0,
