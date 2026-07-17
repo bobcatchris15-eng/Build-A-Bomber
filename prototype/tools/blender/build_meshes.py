@@ -290,24 +290,42 @@ def add_deck_line_step(bm, hx, hy, hz, height_frac=0.08, z_frac=(0.6, 0.95)):
 			v.co.z += raise_h
 
 
-def add_panel_line_groove(bm, hx, hy, hz, R, z_frac, depth_frac=0.015, width_frac=0.025):
+def add_panel_line_groove(bm, hx, hy, hz, R, frac, depth_frac=0.015, width_frac=0.025, axis='z'):
 	"""A single shallow inset seam line running across the top deck at a
-	proportional Z position (0=nose, 1=tail) - real geometry via
-	bisect+push-in, not a texture, matching the design doc's 'inset face
-	along a line, push resulting strip in along normal.' depth_frac/
-	width_frac are fractions of R (not hull length) per the doc's
-	'depth ~1-2% R, width ~2-3% R' - grooves stay a consistently fine
-	detail-scale feature regardless of how long the hull is."""
-	z_center = -hz + hz * 2.0 * z_frac
-	band_half = R * width_frac * 0.5
-	z0, z1 = z_center - band_half, z_center + band_half
-	for plane_y in (z0, z1):
-		bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
-			plane_co=(0, plane_y, 0), plane_no=(0, 1, 0), clear_inner=False, clear_outer=False)
-	push_in = R * depth_frac
-	for v in bm.verts:
-		if z0 - 1e-4 <= v.co.y <= z1 + 1e-4 and v.co.z > hy * 0.3:
-			v.co.z -= push_in
+	proportional position along `axis` - real geometry via bisect+push-in,
+	not a texture, matching the design doc's 'inset face along a line,
+	push resulting strip in along normal.' depth_frac/width_frac are
+	fractions of R (not hull length) per the doc's 'depth ~1-2% R, width
+	~2-3% R' - grooves stay a consistently fine detail-scale feature
+	regardless of how long the hull is.
+
+	axis='z' (default): a band running across the width at a Z position
+	  (0=nose, 1=tail) - the original chordwise deck-line use.
+	axis='x': a SPANWISE band running along the length at an X position
+	  (0=centreline, 1=wingtip) - implies real spars/ribs on a swept
+	  wing planform (flying_wing_hull) instead of fuselage panel lines."""
+	if axis == 'z':
+		center = -hz + hz * 2.0 * frac
+		band_half = R * width_frac * 0.5
+		lo, hi = center - band_half, center + band_half
+		for plane_pos in (lo, hi):
+			bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+				plane_co=(0, plane_pos, 0), plane_no=(0, 1, 0), clear_inner=False, clear_outer=False)
+		push_in = R * depth_frac
+		for v in bm.verts:
+			if lo - 1e-4 <= v.co.y <= hi + 1e-4 and v.co.z > hy * 0.3:
+				v.co.z -= push_in
+	else:
+		center = -hx + hx * 2.0 * frac
+		band_half = R * width_frac * 0.5
+		lo, hi = center - band_half, center + band_half
+		for plane_pos in (lo, hi):
+			bmesh.ops.bisect_plane(bm, geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+				plane_co=(plane_pos, 0, 0), plane_no=(1, 0, 0), clear_inner=False, clear_outer=False)
+		push_in = R * depth_frac
+		for v in bm.verts:
+			if lo - 1e-4 <= v.co.x <= hi + 1e-4 and v.co.z > hy * 0.3:
+				v.co.z -= push_in
 
 
 def add_speed_line_chamfer(bm, hx, hy, hz, angle_deg=35.0, z_frac_center=0.4, depth_frac=0.06, band_frac=0.1):
@@ -1242,7 +1260,19 @@ def build_flying_wing_hull(name, size_x, size_y, size_z, sweep=0.55, color=(0.5,
 	bmesh.ops.convex_hull(bm, input=verts)
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
 
-	bevel_sharp_edges(bm, verts, R, tier=1, pct=bevel_pct, segments=bevel_segments)
+	# Spanwise panel-line grooves (spars/ribs) - the axis='x' variant of
+	# the shared groove helper (add_panel_line_groove normally cuts
+	# chordwise bands across a fuselage's length; here the cut runs along
+	# the span instead), two symmetric ribs per wing. Applied before the
+	# bevel so the tiered bevel still smooths the cut's own edges, same
+	# ordering every other hull's bisect+shift details use.
+	for x_frac in (0.3, 0.4, 0.6, 0.7):
+		add_panel_line_groove(bm, hx, hy, hz, R, x_frac, axis='x')
+
+	# Bevel on the CURRENT vert set (not the original silhouette-only
+	# list) so it picks up the groove cuts' own new edges too - same
+	# reasoning as build_afv_hull's bevel call.
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
@@ -1722,7 +1752,10 @@ def _airship_hull_greebles(bm, hx, hy, hz):
 
 
 def _flying_wing_hull_greebles(bm, hx, hy, hz):
-	add_box(bm, (0, hy * 1.05, -hz * 0.3), (hx * 0.22, hy * 0.12, hz * 0.35), bevel=0.02)  # canopy bump
+	# Faired canopy blister (greeble_faired_canopy, shared with
+	# interceptor_hull/fuselage_hull) blended into the dorsal ridge
+	# instead of a proud box bump - low/wide, height clamped to hy alone.
+	greeble_faired_canopy(bm, (0, hy * 0.92, -hz * 0.3), (hx * 0.17, hy * 0.1, hz * 0.28))
 	for side in (-1, 1):
 		greeble_vent(bm, (side * hx * 0.55, hy * 0.5, hz * 0.6), (0.1, 0.25, 0.4), slats=3)
 	greeble_antenna(bm, (0, hy * 0.9, hz * 0.6), height=0.16)

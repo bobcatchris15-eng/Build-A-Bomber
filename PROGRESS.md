@@ -56,6 +56,12 @@ Three real additions to `build_fuselage_hull`: a fused fillet block at each wing
 
 ---
 
+## 2026-07-17 (cont'd 8) — flying_wing_hull converted (item 11): spanwise ribs + faired canopy
+
+Generalized `add_panel_line_groove` with an `axis` param (`'z'` = old chordwise-band behavior, byte-identical for every existing caller; new `'x'` = spanwise band along the wing) instead of writing a parallel groove function - one bisect+push-in mechanic, just cutting along a different axis. `flying_wing_hull` gets 4 symmetric spanwise grooves (2 per wing) applied before its tier-1 bevel, implying real spars/ribs on the swept planform. Canopy blister now reuses `greeble_faired_canopy`, blended low into the existing dorsal ridge apex. Verified with wide/extreme-stretch screenshots - the stretch shot clearly shows the groove lines converging along the wing sweep with no self-intersection. Headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.

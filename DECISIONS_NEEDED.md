@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — flying_wing_hull: spanwise panel grooves + faired canopy (spec item 11)
+
+**Not blocking.**
+
+**Generalized `add_panel_line_groove` with an `axis` param rather than writing a second, parallel groove function.** The existing helper's whole implementation was hardcoded to Blender-Y (Godot Z, the length axis) - cuts a chordwise band across a fuselage's width at a proportional length position. Spanwise ribs need the exact same bisect+push-in mechanic, just cutting along Blender-X (Godot X, the width/span axis) at a proportional span position instead. Rather than duplicate the whole function body for one axis swap, added `axis='z'` (default, unchanged old behavior byte-for-byte) / `axis='x'` (new) and branched the two coordinate references - confirmed the default-path branch is textually identical to the pre-existing code, so every existing caller (`medium_hull`/`heavy_hull`'s `panel_line_fracs`) is provably unaffected. Also renamed the position parameter `z_frac` -> `frac` since it no longer always means a Z-axis fraction - checked both call sites use positional args, not keyword, so this doesn't break anything.
+
+**4 spanwise grooves (2 symmetric per wing, `x_frac` 0.3/0.4/0.6/0.7), applied before the tier-1 bevel** - same "silhouette/cuts first, bevel last so it can smooth the cut's own edges" ordering `build_afv_hull` established. Had to also switch the bevel call from the original fixed `verts` list to `list(bm.verts)` (the current, grown set) for this same reason - the original code only ever needed the pre-cut list since it had no bisect cuts before its own bevel call.
+
+**Canopy blister reused `greeble_faired_canopy`** (from interceptor_hull), positioned low and blended into the existing dorsal ridge apex rather than proud, per the spec's explicit "faired blister... blended into the dorsal ridge" wording.
+
+**Verified:** wide 3/4 and extreme non-uniform stretch screenshots - the stretch shot clearly shows the spanwise groove lines (picking up the shader's accent-color panel-line treatment) converging toward the nose along the wing sweep, holding up cleanly with no self-intersection; the canopy blister is visible and blended at both scales. Headless tests green.
+
+---
+
 ## 2026-07-17 — small_boat_hull (spec item 10): confirmed the spec's own "trivial" prediction, no geometry change
 
 **Not blocking.**
