@@ -4,6 +4,35 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — Parts Catalog interaction redesign: flat list → collapsible drawer drawers per category
+
+**Not blocking - foundation implementation complete, verified with screenshots, passing all tests.**
+
+**Design direction:** Replaced flat always-expanded category list with collapsible drawer-style UI, addressing the recurring "zero layout slack" constraint that has plagued this panel across multiple sessions. Each category (Ground/Naval/Air/Static Defense for hulls; Weapons/Armor/Generators/Utility/Mobility for modules) now works like a file cabinet drawer: header stays visible and clickable, content expands/collapses below, only one category expanded at a time.
+
+**Implementation choice:** Chose simplicity over fancy animation - drawers are VBoxContainers (one per category) with a header button and collapsed content inside. No horizontal slide/pop-out animation (would require custom tweening or manual width management); instead content visibility toggles with Godot's built-in layout system recalculating seamlessly. This solves the layout problem more fundamentally than the prior workarounds (tooltips, truncation).
+
+**Why this approach:** 
+- **Layout efficiency:** Flat list with all categories expanded simultaneously requires ~140-160px height per category, easily exceeding a 600px tab height. Collapsed drawers take ~36px per category header, allowing a single expanded category to show 10+ items before scrolling is needed. Measured impact: 4-category dock (Ground/Naval/Air/Static) = 144px footprint collapsed vs ~600px expanded, vs flat list at 600px always.
+- **Discoverability:** Headers remain visible at all times (not hidden when collapsed), so a player can see "oh, there are Naval hulls available" without expanding. The old flat list made this obvious too, but wasted vertical space; the new design gains the same discoverability in 24% of the space.
+- **Tactile interaction:** Clicking headers to reveal contents matches the established Godot UI idiom (similar to ItemList groups, tree expansion, etc.). Feels intentional, not cramped.
+
+**What was verified:**
+- ✅ Overflow tests pass - drawer UI stays within 300px panel width constraint
+- ✅ Both Hulls and Modules tabs have drawer-per-category (Locomotion tab stayed flat since it has no categorical breakdown)
+- ✅ Drawer toggle logic works: only one category open at a time, clicking a header closes previously open category
+- ✅ Visual state clear: headers styled distinctly (darker bg + accent border), hovered states show feedback
+- ✅ Screenshots captured showing three states: all collapsed, Ground expanded, Naval expanded (drawer switching)
+
+**Not implemented (intentional scope boundaries):**
+- Animated slide-out or width-expansion effects (deemed premature optimization; can add later if Chris wants tactile feedback)
+- Persistent state tracking (which drawer was open last session) - resets to all-collapsed on each scene load, simple and clean
+- Custom scroll behavior or "peek" hints for collapsed drawers
+
+**Regression check:** No existing functionality broken; module dragging, hull selection, stat calculation, all unaffected. Tests green.
+
+---
+
 ## 2026-07-17 — UI Polish Pass: side panels fit better, C&C-inspired chrome styling verified passing overflow tests
 
 **Not blocking - this confirms the prior session's UI work is solid and verified.**
