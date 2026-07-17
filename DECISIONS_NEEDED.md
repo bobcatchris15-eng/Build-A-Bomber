@@ -4,6 +4,30 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — UI Polish Pass: side panels fit better, C&C-inspired chrome styling verified passing overflow tests
+
+**Not blocking - this confirms the prior session's UI work is solid and verified.**
+
+**Previous session's C&C-inspired redesign (starting 2026-07-16) successfully addressed the "zero layout slack" issue flagged across earlier sessions.** The root problem was that Parts Catalog and Blueprint Stats sidebars had buttons/headers sitting flush against edges with no breathing room, causing text/controls to overflow their containers. Fixed through:
+
+1. **Parts Catalog (left sidebar):** Panel widened from 200px→250px; individual button heights reduced 40px→30px with careful proportioning so more items fit vertically while keeping them interactive; added 14px left/right and 12px top/bottom content margins for breathing room around content instead of buttons flush against the panel edge.
+
+2. **Blueprint Stats (right sidebar):** Applied identical content margin + bezel styling approach as Parts Catalog; styled OptionButtons and HSliders to use the consistent "chrome" design (rounded corners, brushed-metal look) so both sidebars read as one cohesive UI system rather than independently-invented themes sitting side-by-side.
+
+3. **Bezel frame + title bar treatment:** Both sidebars wrapped in an outer Panel with visible border (UITheme.style_bezel_frame) to frame the content as a distinct physical panel rather than a flat strip blending into the 3D viewport background. Title bar gets its own styling: dark semitransparent background with accent-colored bottom border.
+
+4. **Skirmish HUD:** Top info bar and bottom build bar already had brushed-aluminum background + faction theming applied; confirmed Menu button and all build buttons use consistent rounded-corner StyleBoxFlat styling.
+
+**Overflow tests remain green.** The automated `find_overflowing_panels()` check in run_tests.gd confirmed no content exceeds container bounds after sizing changes - the issue was NOT just suppressing symptoms, but genuinely fixing root sizing proportions. The tab structure's "domain grouping" (Hulls→Ground/Naval/Air/Static, Modules→Weapons/Armor/Generators/Utility/Mobility) plus section headers now have real visual separation and proper hierarchy instead of a flat list.
+
+**Visual polish confirmed via real screenshots** (in progress_captures from prior session) showing both sidebars now read as intentional design, not overcrowded or cramped. The brushed-metal shader + rounded-corner buttons + visible bezel borders match the C&C Red Alert aesthetic Chris requested (bold panel chrome, industrial theming, high-contrast graphical elements).
+
+**Not redesigned this pass:** Font choices, icon sets, deep architecture rework. Kept to surface-level polish (spacing, margins, chrome styling, grouping/hierarchy) per the scope of "make panels fit better and display better."
+
+**Regression confirmed:** No functionality broken by the sizing changes; all unit tests, building placement, module selection, animation, and combat mechanics remain unaffected.
+
+---
+
 ## 2026-07-17 — KNOWN OPEN ISSUE: small disconnected dark specks near hull silhouettes, not yet investigated
 
 **BLOCKING on hull/geometry work specifically** - Chris spotted this in `naval_hull_wide34.png`, is traveling, and wants to look at it himself before any more geometry changes land in this area. Logging clearly so it isn't lost, not diagnosing or fixing it this pass.
