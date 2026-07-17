@@ -124,17 +124,18 @@ func _make_collapsible_drawer(category: String, buttons: Array, tab_type: String
 	drawer.name = "Drawer_%s" % category
 	drawer.custom_minimum_size = Vector2(0, 0)
 
-	# Header button (thin tab on the spine)
+	# Header button (drawer header - prominent and clickable)
 	var header_btn = Button.new()
 	header_btn.custom_minimum_size = Vector2(0, 36)
 	header_btn.text = category
 	var header_style = StyleBoxFlat.new()
-	header_style.bg_color = Color(0.2, 0.18, 0.15, 1.0)
-	header_style.border_width_bottom = 2
-	header_style.border_color = Color(0.45, 0.38, 0.2, 1.0)
+	header_style.bg_color = Color(0.3, 0.28, 0.22, 1.0)
+	header_style.border_width_bottom = 3
+	header_style.border_color = Color(0.85, 0.75, 0.4, 1.0)
 	header_btn.add_theme_stylebox_override("normal", header_style)
+	header_btn.add_theme_color_override("font_color", Color(0.9, 0.85, 0.6, 1.0))
 	var header_hover = header_style.duplicate()
-	header_hover.bg_color = Color(0.28, 0.24, 0.18, 1.0)
+	header_hover.bg_color = Color(0.35, 0.32, 0.25, 1.0)
 	header_btn.add_theme_stylebox_override("hover", header_hover)
 	drawer.add_child(header_btn)
 
