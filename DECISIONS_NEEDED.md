@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — KNOWN OPEN ISSUE: small disconnected dark specks near hull silhouettes, not yet investigated
+
+**BLOCKING on hull/geometry work specifically** - Chris spotted this in `naval_hull_wide34.png`, is traveling, and wants to look at it himself before any more geometry changes land in this area. Logging clearly so it isn't lost, not diagnosing or fixing it this pass.
+
+**What it looks like:** several small dark dot/speck marks, clearly disconnected from the hull mesh itself (not touching any hull surface), scattered in the empty space around/below the ship silhouette. Confirmed visible on `naval_hull` (`progress_captures/2026-07-13/naval_hulls/naval_hull_wide34.png` and a closer `naval_hull_floaters_close.png` taken to confirm) - specks sit below and slightly forward of the hull, at roughly waterline level and below.
+
+**Not naval_hull-specific - a quick non-invasive check (no code changes) found the same class of artifact on `medium_hull` too**, at the same camera angle, just in a different position (near the upper deck/spine silhouette edge rather than below the hull) - see `medium_hull_floaters_check.png`. An empty-scene control shot with no hull placed at all (`empty_scene_check.png`) is completely clean - rules out a skybox/background/lighting artifact. This means the issue is likely tied to hull rendering/geometry in general (possibly something silhouette-edge- or grazing-angle-related - both sightings were near a silhouette edge), not something specific to this session's naval_hull superstructure_tiers work, though that hasn't been confirmed either.
+
+**Not investigated further:** no theory has been tested (candidates not ruled in or out: rivet/greeble sub-meshes positioned slightly off-surface, decal system placement, antialiasing/specular artifacts at grazing angles, a UI overlay element). Deliberately stopping here per Chris's explicit request - he wants to inspect the geometry work in person before more changes land in this area, so this needs his eyes before further action, not a diagnosis-in-progress.
+
+**Diagnostic screenshots kept for reference** (no hull/build_meshes.py changes accompany this entry): `naval_hull_floaters_close.png`, `empty_scene_check.png`, `medium_hull_floaters_check.png`, all in `progress_captures/2026-07-13/naval_hulls/`.
+
+---
+
 ## 2026-07-17 — Hull massing punch-list complete: item 15 (tower_foundation) explicit skip, final regression pass
 
 **Not blocking - this closes out `HULL_MASSING_SPEC.md`'s full 15-item punch-list, items 1-14 implemented and committed individually across this and the prior session, item 15 an explicit reasoned skip.**
