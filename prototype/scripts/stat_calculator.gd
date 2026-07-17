@@ -176,20 +176,21 @@ func _ready():
 	armor_mat_label = Label.new()
 	armor_mat_label.text = "Armor Material"
 	$ScrollContainer/VBoxContainer.add_child(armor_mat_label)
-	
+
 	armor_mat_btn = OptionButton.new()
 	armor_mat_btn.add_item("Hardened Steel")
 	armor_mat_btn.add_item("Reactive Armor")
 	armor_mat_btn.add_item("Ablative Ceramic")
 	armor_mat_btn.add_item("Energy Shielding")
 	$ScrollContainer/VBoxContainer.add_child(armor_mat_btn)
+	UITheme.style_option_button(armor_mat_btn)
 	armor_mat_btn.item_selected.connect(_on_armor_material_selected)
 	
 	# Dynamically create Faction dropdown
 	var faction_label = Label.new()
 	faction_label.text = "Faction Selection"
 	$ScrollContainer/VBoxContainer.add_child(faction_label)
-	
+
 	var faction_btn = OptionButton.new()
 	# clip_text - the roster grew from 3 factions to 10, some with longer
 	# names ("The Aerodrome Cartel") than any of the old 3 - without this,
@@ -201,19 +202,21 @@ func _ready():
 		faction_btn.add_item(FactionCatalog.get_faction_name(fac_id))
 	faction_btn.name = "FactionDropdown"
 	$ScrollContainer/VBoxContainer.add_child(faction_btn)
+	UITheme.style_option_button(faction_btn)
 	faction_btn.item_selected.connect(_on_faction_selected)
-	
+
 	# Dynamically create Armor Thickness slider
 	armor_thick_label = Label.new()
 	armor_thick_label.text = "Armor Thickness"
 	$ScrollContainer/VBoxContainer.add_child(armor_thick_label)
-	
+
 	armor_thick_slider = HSlider.new()
 	armor_thick_slider.min_value = 0.5
 	armor_thick_slider.max_value = 3.0
 	armor_thick_slider.step = 0.1
 	armor_thick_slider.value = 1.0
 	$ScrollContainer/VBoxContainer.add_child(armor_thick_slider)
+	UITheme.style_slider(armor_thick_slider)
 	armor_thick_slider.value_changed.connect(_on_armor_thickness_changed)
 	armor_thick_slider.drag_started.connect(_push_undo)
 
@@ -232,6 +235,7 @@ func _ready():
 	nose_taper_slider.step = 0.05
 	nose_taper_slider.value = 1.0
 	$ScrollContainer/VBoxContainer.add_child(nose_taper_slider)
+	UITheme.style_slider(nose_taper_slider)
 	nose_taper_slider.value_changed.connect(_on_nose_taper_changed)
 	nose_taper_slider.drag_started.connect(_push_undo)
 	nose_taper_slider.visible = false
@@ -993,6 +997,7 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleData):
 			slider.step = spec.step
 			slider.value = data.tweaks.get(spec.name, spec.default)
 			container.add_child(slider)
+			UITheme.style_slider(slider)
 
 			if spec.step == 1.0:
 				label.text = "%s: %d" % [spec.label, int(slider.value)]

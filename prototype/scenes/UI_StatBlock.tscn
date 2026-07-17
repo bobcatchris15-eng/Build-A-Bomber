@@ -19,7 +19,7 @@ anchors_preset = 11
 anchor_left = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -250.0
+offset_left = -300.0
 grow_horizontal = 0
 grow_vertical = 2
 
@@ -29,69 +29,84 @@ anchors_preset = 11
 anchor_left = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -230.0
-offset_top = 20.0
-offset_right = -20.0
-offset_bottom = -20.0
+offset_left = -280.0
+offset_top = 12.0
+offset_right = -12.0
+offset_bottom = -12.0
 grow_horizontal = 0
 grow_vertical = 2
 
 [node name="VBoxContainer" type="VBoxContainer" parent="ScrollContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_overrides/separations/separation = 3
 
 [node name="Title" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 24
-text = "Blueprint Stats"
+theme_override_font_sizes/font_size = 18
+text = "BLUEPRINT STATS"
+custom_minimum_size = Vector2(0, 32)
 
 [node name="BlueprintNameEdit" type="LineEdit" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 placeholder_text = "Blueprint Name"
 text = "Untitled Design"
+custom_minimum_size = Vector2(0, 24)
 
 [node name="LibraryButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Blueprint Library..."
+custom_minimum_size = Vector2(0, 28)
 
 [node name="MirrorCheckBox" type="CheckBox" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 button_pressed = true
 text = "Mirror Placement [M]"
+custom_minimum_size = Vector2(0, 24)
 
 [node name="HSeparator" type="HSeparator" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
+custom_minimum_size = Vector2(0, 8)
 
 [node name="HPLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Total HP: 0.0"
+custom_minimum_size = Vector2(0, 20)
 
 [node name="WeightLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Total Weight: 0.0"
+custom_minimum_size = Vector2(0, 20)
 
 [node name="CostLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Cost (Metal): 0"
+custom_minimum_size = Vector2(0, 20)
 
 [node name="DPSLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Total DPS: 0.0"
+custom_minimum_size = Vector2(0, 20)
 
 [node name="HSeparator2" type="HSeparator" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
+custom_minimum_size = Vector2(0, 8)
 
 [node name="LocomotionTweaks" type="VBoxContainer" parent="ScrollContainer/VBoxContainer"]
 visible = false
 layout_mode = 2
+theme_overrides/separations/separation = 2
 
 [node name="TweaksTitle" type="Label" parent="ScrollContainer/VBoxContainer/LocomotionTweaks"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 16
 text = "Locomotion Tweaks"
+custom_minimum_size = Vector2(0, 24)
 
 [node name="SizeContainer" type="HBoxContainer" parent="ScrollContainer/VBoxContainer/LocomotionTweaks"]
 layout_mode = 2
+custom_minimum_size = Vector2(0, 24)
+theme_overrides/separations/separation = 4
 
 [node name="SizeLabel" type="Label" parent="ScrollContainer/VBoxContainer/LocomotionTweaks/SizeContainer"]
 layout_mode = 2
@@ -109,6 +124,8 @@ value = 1.0
 
 [node name="CountContainer" type="HBoxContainer" parent="ScrollContainer/VBoxContainer/LocomotionTweaks"]
 layout_mode = 2
+custom_minimum_size = Vector2(0, 24)
+theme_overrides/separations/separation = 4
 
 [node name="CountLabel" type="Label" parent="ScrollContainer/VBoxContainer/LocomotionTweaks/CountContainer"]
 layout_mode = 2
@@ -126,16 +143,20 @@ value = 4.0
 
 [node name="HSeparator3" type="HSeparator" parent="ScrollContainer/VBoxContainer/LocomotionTweaks"]
 layout_mode = 2
+custom_minimum_size = Vector2(0, 6)
 
 [node name="DeleteButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Delete Selected Part"
+custom_minimum_size = Vector2(0, 28)
 
 [node name="SaveButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Save Blueprint"
+custom_minimum_size = Vector2(0, 28)
 
 [node name="TestButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Test in Arena"
+custom_minimum_size = Vector2(0, 28)
 

@@ -25,3 +25,22 @@ static func apply_brushed_panel(node: CanvasItem, faction: String, tint_strength
 	mat.set_shader_parameter("faction_tint", FactionCatalogScript.get_visual_color(faction))
 	mat.set_shader_parameter("wear_amount", FactionCatalogScript.get_visual_wear_amount(faction))
 	mat.set_shader_parameter("tint_strength", tint_strength)
+
+static func style_option_button(btn: OptionButton) -> void:
+	var style = StyleBoxFlat.new()
+	style.bg_color = Color(0.2, 0.2, 0.2, 0.8)
+	style.set_border_enabled_all(true)
+	style.set_border_width_all(1)
+	style.border_color = Color(0.4, 0.4, 0.4, 1.0)
+	style.set_corner_radius_all(3)
+	btn.add_theme_stylebox_override("focus", style)
+	btn.add_theme_stylebox_override("normal", style)
+	btn.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
+
+static func style_slider(slider: HSlider) -> void:
+	var grabber = StyleBoxFlat.new()
+	grabber.bg_color = Color(0.5, 0.5, 0.5, 1.0)
+	grabber.set_border_enabled_all(true)
+	grabber.set_border_width_all(1)
+	grabber.border_color = Color(0.3, 0.3, 0.3, 1.0)
+	slider.add_theme_stylebox_override("grabber_area", grabber)
