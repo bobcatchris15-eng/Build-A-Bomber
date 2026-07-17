@@ -18,3 +18,4 @@ prototype/visual_regression/captures/
 
 # Local tool config (not project source)
 .antigravitycli/
+.claude/
