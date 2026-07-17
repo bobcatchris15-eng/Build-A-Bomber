@@ -4,6 +4,22 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — light_hull + heavy_hull AFV conversion: finished and verified (picked up mid-flight from a prior session)
+
+**Not blocking.**
+
+**Found already implemented in the working tree.** A prior session had already converted both hulls' `generate_hulls()` calls from `build_wedge_hull` to `build_afv_hull` (per `HULL_MASSING_SPEC.md` items 2–3) and rebuilt both `.glb` files, but left the work uncommitted with only a single cropped verification screenshot each. Reviewed the diff and the spec, confirmed the parameter choices matched the spec's per-hull guidance exactly (`light_hull`: `tub_frac=0.45`, `upper_w=0.82`, thin `fender_height_frac=0.05` for the clean scout-car read per the "skip heavy fenders" guidance; `heavy_hull`: `tub_frac=0.6`, `upper_w=0.9`, `turret_ring=True`, a `louver_panel` engine-deck grate for the slab-sided heavy-tank read) — nothing needed correcting, just finishing verification.
+
+**Re-verified with better screenshots, not just trusting the prior session's single cropped shot.** The original `heavy_hull_front34.png` had the camera too close (hull cropped off both edges), which isn't enough to judge full silhouette. Rewrote `scratch/capture_afv_light_heavy.gd` to pull the camera back (distance 7→11), add a true side-profile shot, and add an extreme non-uniform `hull_scale` stretch test (2.5x/2.2x/0.35x, mirroring the medium_hull verification precedent) — confirms the tub/glacis/fender structure holds up proportionally under extreme stretch with no self-intersection or spiking on either hull. All 6 new captures in `progress_captures/2026-07-13/afv_hulls/`.
+
+**Visual result matches the spec's intent:** light_hull now reads low/sleek/wedge-nosed with a nearly-merged glacis-to-hull slope and thin fender lips (scout-car silhouette, distinct from medium); heavy_hull reads tall/blunt/boxy with a near-vertical thick glacis, visible turret ring, and a real recessed louver grate on the engine deck (slab-sided heavy-tank silhouette). The two now read as clearly different weight classes at a glance, not just parameter variations of the same shape.
+
+**Mount-zone front-glacis note (per spec's own flagged risk) — checked, no issue found.** Both hulls' AABB facet system is unchanged (asset-only change, confirmed in the spec), and the front glacis on both hulls stays within a reasonable slope for a front sponson-embed muzzle to exit cleanly — heavy_hull's blunter glacis is if anything more forgiving here than medium's, matching the spec's own prediction. Not chasing this further; it's the same mechanism already verified working on medium_hull.
+
+**Headless test suite green** (no test targets hull mesh topology directly — this is a "didn't break anything else" check). Committed light_hull + heavy_hull separately from the still-unrelated pre-existing working-tree changes to `airship_hull.glb`/`antigrav_ring.glb`/`focal_lens.glb`/`hover_ring.glb`/`sensor_dome.glb` (byte-identical-size re-exports left over from an earlier session's full-library rebuild, unrelated to this pass — left untouched rather than folded into this commit; `airship_hull.glb` will be superseded properly when its own punch-list item comes up).
+
+---
+
 ## 2026-07-16 — Hull massing redesign: research spec + medium_hull flagship conversion
 
 **Not blocking.**

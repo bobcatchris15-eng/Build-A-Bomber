@@ -4,6 +4,14 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-17 — Hull massing punch-list resumed: light_hull + heavy_hull finished (items 2-3), moving through the rest of the roster
+
+Picked up `HULL_MASSING_SPEC.md`'s prioritized punch-list where a prior session left off (medium_hull, item 1, was already committed). Items 2 and 3 (`heavy_hull`, `light_hull`) were already converted to `build_afv_hull()` in the working tree with rebuilt `.glb`s but uncommitted and under-verified - reviewed the parameter choices against the spec (all correct), re-verified with wider/side/extreme-stretch screenshots (`progress_captures/2026-07-13/afv_hulls/`), and committed both separately. light_hull now reads low/sleek/scout-car; heavy_hull reads tall/blunt/slab-sided with a real recessed engine-deck louver grate and turret ring. Headless tests green throughout. Full reasoning in `DECISIONS_NEEDED.md`.
+
+Continuing top-down through the spec's punch-list (items 4-15: assault_hull, sponson_hull, naval_hull, heavy_cruiser_hull, interceptor_hull, fuselage_hull, small_boat_hull, flying_wing_hull, airship_hull, then the three static-defense embrasure items).
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.

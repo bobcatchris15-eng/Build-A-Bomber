@@ -1668,10 +1668,10 @@ def _wall_greebles(bm, hx, hy, hz):
 def generate_hulls():
 	print("--- Building hull library ---")
 
-	export_and_cleanup(build_wedge_hull("light_hull", 3.0, 1.0, 4.0,
-		nose_frac=0.6, spine_w=0.35, spine_h=1.08, rear_flare=0.85, front_flare=0.55,
-		nose_region=0.28, bevel_pct=0.06,
-		waist_inset=0.05, waist_height_frac=0.6, deck_line=0.06,
+	export_and_cleanup(build_afv_hull("light_hull", 3.0, 1.0, 4.0,
+		nose_frac=0.6, tub_frac=0.45, upper_w=0.82, glacis_len_frac=0.35,
+		spine_w=0.35, spine_h=1.08, fender_height_frac=0.05,
+		bevel_pct=0.06,
 		color=(0.72, 0.73, 0.75), greebles=_light_hull_greebles), HULLS_DIR, "light_hull")
 
 	export_and_cleanup(build_afv_hull("medium_hull", 4.0, 1.0, 6.0,
@@ -1682,10 +1682,11 @@ def generate_hulls():
 		panel_line_fracs=[0.28],
 		color=(0.5, 0.5, 0.52), greebles=_medium_hull_greebles), HULLS_DIR, "medium_hull")
 
-	export_and_cleanup(build_wedge_hull("heavy_hull", 6.0, 1.5, 8.0,
-		nose_frac=0.08, spine_w=0.75, spine_h=1.2, rear_flare=1.0, front_flare=1.0,
-		nose_region=0.5, bevel_pct=0.09, bevel_segments=3,
-		waist_inset=0.08, waist_height_frac=0.45, deck_line=0.3,
+	export_and_cleanup(build_afv_hull("heavy_hull", 6.0, 1.5, 8.0,
+		nose_frac=0.08, tub_frac=0.6, upper_w=0.9, glacis_len_frac=0.22,
+		spine_w=0.75, spine_h=1.2, turret_ring=True,
+		louver_panel={"z_frac": 0.75, "width_frac": 0.85, "depth_frac": 0.28, "slats": 6},
+		bevel_pct=0.09, bevel_segments=3,
 		color=(0.32, 0.32, 0.34), greebles=_heavy_hull_greebles), HULLS_DIR, "heavy_hull")
 
 	export_and_cleanup(build_wedge_hull("interceptor_hull", 2.4, 0.8, 3.2,
