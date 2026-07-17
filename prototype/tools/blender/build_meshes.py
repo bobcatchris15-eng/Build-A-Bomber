@@ -1326,6 +1326,32 @@ def build_fuselage_hull(name, size_x, size_y, size_z, nose_frac=0.16, tail_frac=
 	wing_z = -hz * wing_pos_frac
 	add_box(bm, (0, 0, wing_z), (size_x * wing_span_frac, hy * 0.16, size_z * wing_chord_frac), bevel=0.03)
 
+	# Wing-root fairing: today the wing slab crosses the tube with a hard
+	# intersection - a small fused fillet block at each root (technique
+	# #1, no boolean) bridges the tube's own surface into the wing root
+	# so the join reads as engineered rather than two shapes clipping.
+	for side in (-1, 1):
+		add_box(bm, (side * body_r * 0.85, -hy * 0.08, wing_z),
+			(body_r * 0.4, hy * 0.14, size_z * wing_chord_frac * 0.55), bevel=0.03)
+
+	# Circumferential formers/ribs along the body tube - same thin-ring
+	# technique the airship envelope's own seam rings already use
+	# (add_cyl_axis around the hull's long axis), just applied to the
+	# fuselage tube instead of an ellipsoid envelope.
+	for i in range(4):
+		t = (i + 0.5) / 4.0
+		add_cyl_axis(bm, (0, 0, body_z0 + t * body_len), body_r * 1.02, 0.02, 'z', segments=14)
+
+	# Dorsal hardpoint pad: the tube's real top surface sits at body_r,
+	# not at the AABB top facet (hy) - since body_r = min(hx,hy)*0.62 is
+	# always well short of hy, a top-mounted pintle placed at the facet
+	# would float above the round tube with a visible gap (the same class
+	# of bug the naval/airship hulls hit with underside mounts). A flat
+	# raised pad bridging body_r up toward hy gives a real mount surface
+	# instead of needing a second, hull-specific mount-offset fix.
+	add_box(bm, (0, (body_r + hy * 0.95) * 0.5, 0),
+		(body_r * 0.5, (hy * 0.95 - body_r) * 0.5, size_z * 0.12), bevel=0.02)
+
 	# Tail control surfaces: vertical fin + horizontal tailplane
 	add_box(bm, (0, hy * 0.5, tail_z0 + tail_len * 0.55), (0.05, hy * 0.85, size_z * 0.1), bevel=0.02)
 	add_box(bm, (0, 0, tail_z0 + tail_len * 0.5), (size_x * 0.55, hy * 0.1, size_z * 0.09), bevel=0.02)
@@ -1677,7 +1703,10 @@ def _heavy_cruiser_greebles(bm, hx, hy, hz):
 
 
 def _fuselage_hull_greebles(bm, hx, hy, hz):
-	add_box(bm, (0, hy * 0.35, -hz * 0.55), (hx * 0.18, hy * 0.16, hz * 0.3), bevel=0.02)  # cockpit canopy bump
+	# Real cockpit volume (see greeble_faired_canopy, introduced for
+	# interceptor_hull's identical need) instead of a proud box bump -
+	# height clamped to hy alone per the same extreme-stretch note.
+	greeble_faired_canopy(bm, (0, hy * 0.28, -hz * 0.55), (hx * 0.16, hy * 0.14, hz * 0.28))
 	greeble_vent(bm, (hx * 0.28, 0, -hz * 0.05), (0.1, 0.22, 0.3), slats=3)
 	greeble_vent(bm, (-hx * 0.28, 0, -hz * 0.05), (0.1, 0.22, 0.3), slats=3)
 	greeble_antenna(bm, (0, hy * 0.55, hz * 0.5), height=0.2)

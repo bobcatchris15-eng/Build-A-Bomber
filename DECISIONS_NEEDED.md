@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — fuselage_hull: wing-root fairing, circumferential ribs, real canopy, plus a mount-zone fix the spec flagged as worth checking (spec item 9)
+
+**Not blocking.**
+
+**Three of the spec's four suggested moves implemented directly:** wing-root fairing (a small fused box at each wing root, technique #1, bridging the tube surface into the wing slab rather than a hard clip), circumferential formers (4 rings via `add_cyl_axis`, reusing `airship_hull`'s own seam-ring technique verbatim, just applied to a cylindrical tube instead of an ellipsoid envelope), and a real canopy volume (reused `greeble_faired_canopy` from the interceptor_hull pass rather than writing fuselage-specific sphere code - exactly the reuse that helper was built for).
+
+**Also proactively fixed the mount-zone risk the spec flagged as "verify, may want a fix" rather than leaving it as an open question.** The spec's own note: "top pintle needs the pintle base to sit on the curve... may want a small flat hardpoint pad." Checked the actual numbers - `body_r = min(hx, hy) * 0.62` is always well short of `hy`, so a top-mounted pintle placed at the AABB top facet (`y=hy`) floats above the true round tube surface with a real, visible gap - the same class of bug the naval/airship hulls hit with underside mounts (fixed in an earlier session via `underside_y_bias`, a `module_placer.gd` catalog field). Rather than repeat that hull-specific mount-offset-field pattern, added a flat raised dorsal pad (technique #1, `add_box` bridging `body_r` up to `hy*0.95`) as real hull geometry instead - a top pintle now has an actual flat surface to sit against, no `module_placer.gd`/catalog changes needed (stays consistent with the spec's closing note that this whole pass is asset-only).
+
+**Verified the rib rings hold up correctly under extreme stretch, not just present** - the extreme non-uniform stretch screenshot shows the 4 rings staying evenly spaced along the stretched tube length (correct: constant fraction-of-body_len spacing, more visual repetition under a length stretch, not smearing into fewer/wider bands) - the same stretch-correctness property the spec calls out for `airship_hull`'s existing rings.
+
+**Verified:** wide 3/4, side-profile, extreme-stretch screenshots (`progress_captures/2026-07-13/air_hulls/fuselage_hull_*`) - wing-root fairings, formers, canopy, and dorsal pad all visible and holding up under stretch. Headless tests green.
+
+---
+
 ## 2026-07-17 — interceptor_hull: faired canopy volume, a new reusable helper (spec item 8)
 
 **Not blocking.**

@@ -44,6 +44,12 @@ Kept `interceptor_hull`'s existing `build_wedge_hull` construction entirely unto
 
 ---
 
+## 2026-07-17 (cont'd 6) — fuselage_hull converted (item 9): wing fairing, ribs, real canopy, and a real mount-zone fix
+
+Three real additions to `build_fuselage_hull`: a fused fillet block at each wing root (bridges the hard wing/tube intersection), 4 circumferential formers reusing `airship_hull`'s own ring technique, and the `greeble_faired_canopy` helper (from the interceptor_hull pass) for a real cockpit volume instead of a proud box. Also proactively fixed the mount-zone risk the spec flagged rather than leaving it open: `body_r` is always well short of `hy`, so a top pintle at the AABB facet would float above the round tube - added a flat raised dorsal hardpoint pad as real hull geometry (asset-only, no `module_placer.gd` changes needed) instead of a hull-specific mount-offset catalog field. Verified the rib rings stay evenly spaced (not smearing) under extreme non-uniform stretch. Headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.
