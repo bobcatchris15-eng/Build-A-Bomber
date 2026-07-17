@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — interceptor_hull: faired canopy volume, a new reusable helper (spec item 8)
+
+**Not blocking.**
+
+**Did NOT convert to the tub/glacis two-volume scheme, per the spec's own explicit warning.** interceptor's identity is the single sharp dart silhouette (`build_wedge_hull` + `height_taper` + the existing Tier-3 `speed_line_chamfer`) - the spec calls out forcing a slab tub on it as actively destructive to what differentiates it, so this hull kept its existing builder untouched and only got the one targeted addition the spec asks for.
+
+**Built `greeble_faired_canopy(bm, center, size)`, a new reusable helper** (a squashed uvsphere fused directly into the caller's own bmesh, same "second shell left interpenetrating" technique as `build_afv_hull`'s tub/upper split, just spherical instead of box-convex-hull) rather than one-off inline sphere code - `fuselage_hull`'s own canopy work (a later punch-list item) needs the identical "real cockpit volume, not a proud box" treatment, so building the shared helper now avoids writing the same bmesh sphere-fusion logic twice. Replaced the old proud `add_box` canopy bump with one call, sized `(hx*0.32, hy*0.24, hz*0.42)` - height explicitly the smallest fraction and independently keyed to `hy` alone (not a shared scalar), per the spec's own flagged risk that an unclamped squash ratio can invert into a "bubble" look under an extreme independent Y-stretch. Positioned slightly forward of centre (`-hz*0.1`) and low (`hy*0.78` vs the old box's `hy*1.0`) so it fairs into the hull rather than sitting proud.
+
+**Verified the fair/blend read specifically, not just "a dome exists"** - the wide 3/4 and side shots at working-distance made the canopy hard to judge (subtle by design), so did one dedicated close-up crop confirming a real smooth-curved dome silhouette distinct from the hull's own hard-faceted wedge planes (screenshot then deleted the one-off scratch script, per this project's "delete after use" convention). Extreme non-uniform stretch (2.5x/2.2x/0.35x) confirmed no bubble/inversion artifact - the height clamp holds.
+
+**Verified:** wide 3/4, side, close-up, extreme-stretch screenshots (`progress_captures/2026-07-13/afv_hulls/interceptor_hull_*`). Headless tests green.
+
+---
+
 ## 2026-07-17 — heavy_cruiser_hull: promoted its own greeble layering into real base massing (spec item 7)
 
 **Not blocking.**

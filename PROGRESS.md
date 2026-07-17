@@ -38,6 +38,12 @@ Also built `scratch/rebuild_single_hull.py`, a reusable single-hull rebuild help
 
 ---
 
+## 2026-07-17 (cont'd 5) — interceptor_hull converted (item 8): faired canopy volume via a new reusable helper
+
+Kept `interceptor_hull`'s existing `build_wedge_hull` construction entirely untouched (per the spec's explicit warning not to force the tub/glacis scheme onto its dart silhouette) and made the one targeted addition it asked for: a real cockpit VOLUME instead of a proud box bump. New `greeble_faired_canopy(bm, center, size)` helper fuses a squashed uvsphere directly into the caller's bmesh (same interpenetrating-shell technique as `build_afv_hull`'s tub/upper), built as a reusable helper since `fuselage_hull`'s upcoming canopy work needs the identical treatment. Height explicitly clamped to a fraction of `hy` alone (independent from width/length) to avoid the squash-ratio-inversion risk the spec flags under extreme non-uniform stretch. Verified with wide/side/close-up/extreme-stretch screenshots - a dedicated close-up confirmed the real smooth-domed silhouette, since it's subtle by design at working distance. Headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.

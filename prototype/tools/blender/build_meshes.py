@@ -489,6 +489,22 @@ def greeble_hatch(bm, center, size, rim=0.03):
 		(size[0] - rim, 0.015, size[2] - rim))
 
 
+def greeble_faired_canopy(bm, center, size, segments=12, rings=8):
+	"""A real cockpit/canopy VOLUME - a squashed uvsphere fused directly
+	into the hull's own bmesh (technique #1, same "second convex-hull-like
+	shell left interpenetrating" approach as build_afv_hull's tub/upper
+	split), replacing a proud add_box canopy bump. `size` is a (x, y, z)
+	half-extent tuple, keyed the same way build_dome's squash param is -
+	each axis independently, so a caller can clamp height to a fraction
+	of hy and let width/length follow hx/hz (per HULL_MASSING_SPEC.md's
+	interceptor_hull note: an unclamped squash ratio can invert under an
+	extreme non-uniform hull_scale stretch and read as a bubble)."""
+	ret = bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=rings, radius=1.0)
+	bmesh.ops.scale(bm, verts=ret['verts'], vec=GS(size[0], size[1], size[2]))
+	bmesh.ops.translate(bm, verts=ret['verts'], vec=GV(*center))
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+
 def greeble_corner_gusset(bm, x_sign, hx, hy, z_pos, size=(0.32, 0.28, 0.45)):
 	add_box(bm, (x_sign * (hx - size[0] * 0.35), -hy * 0.35, z_pos), size, bevel=0.02)
 
@@ -1557,8 +1573,14 @@ def _heavy_hull_greebles(bm, hx, hy, hz):
 
 
 def _interceptor_hull_greebles(bm, hx, hy, hz):
-	# Sleek - fewer greebles, small canopy bump + tail fins + intakes
-	add_box(bm, (0, hy * 1.0, hz * 0.15), (hx * 0.7, hy * 0.25, hz * 0.5), bevel=0.04)
+	# Sleek - fewer greebles, a small faired canopy (a real cockpit
+	# volume, technique #1 - see greeble_faired_canopy) + tail fins +
+	# intakes. Height clamped to hy, width/length to hx/hz per
+	# HULL_MASSING_SPEC.md's interceptor_hull stretch-safety note - keeps
+	# the dome from inverting its squash ratio under an extreme
+	# independent hull_scale.y stretch. Set slightly forward of centre
+	# and low/blended rather than the old proud add_box bump.
+	greeble_faired_canopy(bm, (0, hy * 0.78, -hz * 0.1), (hx * 0.32, hy * 0.24, hz * 0.42))
 	greeble_vent(bm, (hx * 0.85, 0, hz * 0.3), (0.08, 0.3, 0.6), slats=4)
 	greeble_vent(bm, (-hx * 0.85, 0, hz * 0.3), (0.08, 0.3, 0.6), slats=4)
 	for side in (-1, 1):
