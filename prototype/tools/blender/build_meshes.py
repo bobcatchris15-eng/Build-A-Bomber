@@ -1447,6 +1447,18 @@ def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
 	add_box(bm, (fin_span * 0.5, 0, fin_z), (fin_span, 0.04, hz * 0.18), bevel=fin_bevel)
 	add_box(bm, (-fin_span * 0.5, 0, fin_z), (fin_span, 0.04, hz * 0.18), bevel=fin_bevel)
 
+	# Longitudinal keel girders - 3 thin fused battens (technique #1,
+	# fused primitives left interpenetrating the envelope, same as every
+	# other hull's non-welded volumes) running most of the length along
+	# the belly, above the gondola. Thickness keyed to R, length to hz,
+	# per HULL_MASSING_SPEC.md's stretch-safety rules. Together with the
+	# existing ring seams (greebles) and the faceted envelope panels,
+	# this is the move that reads as a real girder-frame Zeppelin rather
+	# than a faceted balloon.
+	batten_size = R * 0.035
+	for x_off in (-hx * 0.32, 0.0, hx * 0.32):
+		add_box(bm, (x_off, -hy * 0.68, 0), (batten_size, batten_size, hz * 1.75), bevel=0.01)
+
 	if greebles:
 		greebles(bm, hx, hy, hz)
 

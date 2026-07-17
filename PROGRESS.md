@@ -62,6 +62,12 @@ Generalized `add_panel_line_groove` with an `axis` param (`'z'` = old chordwise-
 
 ---
 
+## 2026-07-17 (cont'd 9) — airship_hull converted (item 12): longitudinal keel battens complete the girder-frame read
+
+3 thin fused battens (technique #1, `R`-keyed thickness, spanning most of the length) run along the envelope's belly above the gondola, left deliberately interpenetrating rather than curve-fit to the ellipsoid's true local radius - same "approximate with a slightly-oversized straight primitive" convention the existing ring seams and `fuselage_hull`'s new formers already use. Checked under extreme stretch specifically to confirm the battens + existing ring seams genuinely cross into a visible girder grid, not just three separate lines - confirmed. This rebuild also resolves the `airship_hull.glb` leftover flagged two commits ago (an unrelated pre-existing uncommitted re-export from before this session, now properly superseded). Headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.

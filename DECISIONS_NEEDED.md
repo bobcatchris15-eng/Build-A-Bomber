@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — airship_hull: longitudinal keel battens (spec item 12)
+
+**Not blocking.**
+
+**3 thin fused battens** (technique #1, `R`-keyed thickness, `hz`-keyed length spanning most of the envelope, left deliberately interpenetrating the envelope surface rather than conforming exactly to its curve) running along the belly above the gondola. Chose a straight batten rather than trying to curve-fit each one to the ellipsoid's true local radius along its length - the existing rib/ring greebles elsewhere in the file (`airship`'s own ring seams, `fuselage_hull`'s new formers) already establish "approximate the curved surface with a slightly-oversized straight/simple primitive, let it interpenetrate" as the codebase's standing convention for this exact situation, so a curve-fit batten would be new, unrequested machinery rather than following the established pattern.
+
+**Result confirmed to genuinely read as a girder grid, not just three separate lines - checked under extreme stretch specifically because that's where the "long battens + rings = frame grid" claim is easiest to falsify.** The extreme non-uniform stretch screenshot shows the battens and the existing ring seams crossing into a real visible grid pattern on the envelope surface (picking up the shader's accent-color highlighting) - exactly the "faceted balloon -> girder ship" upgrade the spec names as the goal, not merely "three boxes exist." At default scale the battens are a subtle belly-line (correctly, since VISUAL_ART_DIRECTION's established convention keeps this kind of framing detail-scale, not silhouette-scale).
+
+**This rebuild also resolves a leftover flagged two commits ago** - `airship_hull.glb` had a pre-existing uncommitted, unrelated re-export sitting in the working tree since before this session started (noted in the light_hull/heavy_hull entry as "will be superseded properly when its own punch-list item comes up"). This commit is that supersession; the old dangling diff is gone.
+
+**Verified:** wide 3/4, side-profile (visible belly batten line), extreme non-uniform stretch (confirms the grid read, no self-intersection). Headless tests green.
+
+---
+
 ## 2026-07-17 — flying_wing_hull: spanwise panel grooves + faired canopy (spec item 11)
 
 **Not blocking.**
