@@ -1810,6 +1810,7 @@ def generate_hulls():
 
 	export_and_cleanup(build_ship_hull("small_boat_hull", 2.0, 1.0, 5.0,
 		bow_frac=0.5, deadrise=0.55, sheer=0.15, flare=0.0, bevel_pct=0.06, bevel_segments=1,
+		superstructure_tiers=1,  # one small pilothouse only - identity is sparseness, see HULL_MASSING_SPEC.md
 		color=(0.4, 0.42, 0.44), greebles=_small_boat_greebles), HULLS_DIR, "small_boat_hull")
 
 	export_and_cleanup(build_ship_hull("heavy_cruiser_hull", 4.4, 1.9, 10.5,

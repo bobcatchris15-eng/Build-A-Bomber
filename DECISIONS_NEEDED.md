@@ -4,6 +4,18 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — small_boat_hull (spec item 10): confirmed the spec's own "trivial" prediction, no geometry change
+
+**Not blocking.**
+
+**Genuinely a no-op, verified rather than assumed.** `superstructure_tiers` defaults to `1`, which already exactly reproduces the pre-existing single bridge box - and since that box's size is a FRACTION of the calling hull's own `hx/hy/hz` (not a fixed world size), it was already proportionally small on `small_boat_hull`'s small hull dimensions before this whole pass started. Passed `superstructure_tiers=1` explicitly at the call site (with a comment) purely for documentation/audit-trail clarity, not because it changes anything - confirmed the `.glb` is byte-identical (`git status` shows no diff) before treating this as done, rather than assuming the spec's own "trivial, set it to 1" prediction held without checking.
+
+**Verified anyway, not skipped.** Captured fresh wide/side/extreme-stretch screenshots to confirm the sparse-identity read still holds correctly now that `naval_hull`/`heavy_cruiser_hull` sit next to it with real multi-tier superstructures - `small_boat_hull` reads as clearly, deliberately sparser by comparison (single small pilothouse, sharp bow, minimal gear), which is the actual point of this hull's identity per the spec.
+
+**Verified:** wide 3/4, side, extreme-stretch screenshots (`progress_captures/2026-07-13/naval_hulls/small_boat_hull_*`). No `.glb` change; no rebuild/reimport needed. Headless tests unaffected (already green from the prior item, nothing here could regress them).
+
+---
+
 ## 2026-07-17 — fuselage_hull: wing-root fairing, circumferential ribs, real canopy, plus a mount-zone fix the spec flagged as worth checking (spec item 9)
 
 **Not blocking.**

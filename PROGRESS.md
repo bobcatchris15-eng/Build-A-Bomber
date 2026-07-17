@@ -50,6 +50,12 @@ Three real additions to `build_fuselage_hull`: a fused fillet block at each wing
 
 ---
 
+## 2026-07-17 (cont'd 7) — small_boat_hull (item 10): confirmed a genuine no-op
+
+`superstructure_tiers` (added for naval_hull) already defaults to 1, which exactly reproduces small_boat_hull's pre-existing single small pilothouse - and since the bridge box is sized as a fraction of the hull's own dimensions, it was already proportionally sparse on this hull before the pass started. Passed the param explicitly for documentation clarity; confirmed the `.glb` is byte-identical before calling this item done rather than assuming the spec's own "trivial" prediction held. Re-verified the sparse-identity read still holds correctly now that naval_hull/heavy_cruiser_hull carry real multi-tier superstructures next to it. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.
