@@ -2,6 +2,36 @@
 
 [ext_resource type="Script" path="res://scripts/parts_menu.gd" id="1_parts"]
 
+[sub_resource type="StyleBoxFlat" id="PanelStyle_Parts"]
+bg_color = Color(0.12, 0.12, 0.14, 0.95)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.35, 0.35, 0.38, 1.0)
+expand_margin_left = 1.0
+expand_margin_top = 1.0
+expand_margin_right = 1.0
+expand_margin_bottom = 1.0
+
+[sub_resource type="StyleBoxFlat" id="TabStyle_Selected"]
+bg_color = Color(0.25, 0.28, 0.32, 1.0)
+border_width_bottom = 3
+border_color = Color(0.6, 0.62, 0.65, 1.0)
+content_margin_left = 8.0
+content_margin_right = 8.0
+content_margin_top = 4.0
+content_margin_bottom = 4.0
+
+[sub_resource type="StyleBoxFlat" id="TabStyle_Unselected"]
+bg_color = Color(0.15, 0.15, 0.18, 1.0)
+border_width_bottom = 1
+border_color = Color(0.25, 0.25, 0.28, 1.0)
+content_margin_left = 8.0
+content_margin_right = 8.0
+content_margin_top = 4.0
+content_margin_bottom = 4.0
+
 [node name="UI_PartsMenu" type="Control"]
 layout_mode = 3
 anchors_preset = 9
@@ -19,6 +49,7 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_overrides/styles/panel = SubResource("PanelStyle_Parts")
 
 [node name="VBoxContainer" type="VBoxContainer" parent="PanelContainer"]
 layout_mode = 2
@@ -35,6 +66,11 @@ custom_minimum_size = Vector2(0, 36)
 layout_mode = 2
 size_flags_vertical = 3
 current_tab = 0
+theme_overrides/styles/tab_selected = SubResource("TabStyle_Selected")
+theme_overrides/styles/tab_unselected = SubResource("TabStyle_Unselected")
+theme_overrides/colors/font_selected_color = Color(1.0, 1.0, 1.0, 1.0)
+theme_overrides/colors/font_unselected_color = Color(0.65, 0.65, 0.65, 1.0)
+theme_overrides/constants/h_separation = 4
 
 [node name="Hulls" type="ScrollContainer" parent="PanelContainer/VBoxContainer/TabContainer"]
 layout_mode = 2
