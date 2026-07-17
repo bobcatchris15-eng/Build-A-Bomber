@@ -142,7 +142,6 @@ func _make_collapsible_drawer(category: String, buttons: Array, tab_type: String
 	var content = VBoxContainer.new()
 	content.custom_minimum_size = Vector2(0, 0)
 	content.visible = false
-	content.theme_overrides = drawer.theme_overrides
 	for btn in buttons:
 		content.add_child(btn)
 	drawer.add_child(content)
