@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — sponson_hull AFV conversion (spec item 5): folded build_sponson_hull into build_afv_hull entirely
+
+**Not blocking.**
+
+**Took the spec's "fold build_sponson_hull into build_afv_hull" option rather than the "leave standalone and add a tub/upper split" option.** `build_afv_hull`'s existing `fender_frac`/`fender_height_frac` params already ARE the "fused box blister past the tub's own width" mechanic `build_sponson_hull` was hand-rolling separately (technique #1, same as the spec itself points out) - once `fender_frac > 1.0`, the fender genuinely reads as a distinct bulging sponson rather than a flush shelf. No new parameters needed; `sponson_hull` is now a pure parameter call (`fender_frac=1.15, fender_height_frac=0.38` for a tall, clearly-distinct blister; `upper_w=0.7` so the narrow upper structure sits well inboard, making the sponson shelf read as a broad separate volume rather than a minor lip). `build_sponson_hull()` itself is left in the file, unused by `generate_hulls()` now but not deleted - it's still a documented, working technique-#1 precedent the spec's own header comment explicitly references for future hulls; removing it would be pure churn for no benefit.
+
+**Real, incidental improvement: `build_sponson_hull` never actually called `bevel_sharp_edges` at all** - the old hull was fully hard-faceted with zero bevel, an oversight that predates this pass (not something Chris asked to fix specifically here). Moving to `build_afv_hull` picks up the standard tier-1 bevel for free as a side effect of the conversion, consistent with every other ground hull. Flagging since it's a visible quality improvement nobody explicitly requested, not something to be surprised by later.
+
+**Existing greeble hatch positions (`_sponson_hull_greebles`, tuned for the old `core_x=hx*0.78`/`sponson_bulge=1.18` geometry) landed correctly on the new fender surface without needing retuning** - checked directly against the new geometry's actual coordinate ranges (`upper_w*hx=0.7hx` to `fender_frac*hx=1.15hx`) before assuming so, not just left alone on faith.
+
+**Verified:** wide 3/4, side-profile (clearly the widest flat side-shelf in the ground-hull roster, as intended - "best side-mount real estate"), and extreme stretch screenshots all clean, no self-intersection. Headless tests green.
+
+---
+
 ## 2026-07-17 — assault_hull AFV conversion (spec item 4): dozer plate tied into the tub/glacis seam
 
 **Not blocking.**

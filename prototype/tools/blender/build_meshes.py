@@ -1722,8 +1722,11 @@ def generate_hulls():
 	export_and_cleanup(build_flying_wing_hull("flying_wing_hull", 5.0, 0.7, 3.6,
 		sweep=0.55, color=(0.5, 0.52, 0.56), greebles=_flying_wing_hull_greebles), HULLS_DIR, "flying_wing_hull")
 
-	export_and_cleanup(build_sponson_hull("sponson_hull", 6.5, 1.6, 7.5,
-		sponson_bulge=1.18, sponson_span=0.4, color=(0.38, 0.36, 0.32), greebles=_sponson_hull_greebles), HULLS_DIR, "sponson_hull")
+	export_and_cleanup(build_afv_hull("sponson_hull", 6.5, 1.6, 7.5,
+		nose_frac=0.1, tub_frac=0.5, upper_w=0.7, glacis_len_frac=0.3,
+		fender_frac=1.15, fender_height_frac=0.38,
+		spine_w=0.6, spine_h=1.1,
+		color=(0.38, 0.36, 0.32), greebles=_sponson_hull_greebles), HULLS_DIR, "sponson_hull")
 
 	export_and_cleanup(build_ship_hull("small_boat_hull", 2.0, 1.0, 5.0,
 		bow_frac=0.5, deadrise=0.55, sheer=0.15, flare=0.0, bevel_pct=0.06, bevel_segments=1,

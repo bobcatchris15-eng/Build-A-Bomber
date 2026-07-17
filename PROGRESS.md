@@ -20,6 +20,12 @@ Also built `scratch/rebuild_single_hull.py`, a reusable single-hull rebuild help
 
 ---
 
+## 2026-07-17 (cont'd 2) — sponson_hull converted (item 5): folded the old standalone builder into build_afv_hull
+
+`build_afv_hull`'s own `fender_frac`/`fender_height_frac` params already do exactly what `build_sponson_hull`'s hand-rolled blister boxes did, so this pass folded sponson_hull into a pure `build_afv_hull` parameter call (`fender_frac=1.15, fender_height_frac=0.38, upper_w=0.7`) instead of writing a second variant - gets it the tub/upper core split the spec asked for, plus a real, clearly-distinct sponson shelf (still the widest side-mount real estate in the ground roster), plus a real tier-1 bevel the old builder never actually applied (an incidental fix, not something specifically requested). `build_sponson_hull()` itself left in the file unused, since it's still a documented reference precedent for the fused-blister technique. Verified with wide/side/extreme-stretch screenshots; headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.
