@@ -1635,9 +1635,12 @@ def _small_boat_greebles(bm, hx, hy, hz):
 
 
 def _heavy_cruiser_greebles(bm, hx, hy, hz):
-	# A real warship silhouette: layered superstructure, twin funnels, gun
-	# deck greebles, portholes - deliberately busier than naval_hull.
-	add_box(bm, (0, hy * 1.6, hz * 0.15), (hx * 0.3, hy * 0.3, hz * 0.2), bevel=0.02)  # upper bridge deck
+	# A real warship silhouette: layered superstructure (now real base
+	# massing via build_ship_hull's superstructure_tiers, not a hand-added
+	# greeble box - the old "upper bridge deck" add_box here duplicated
+	# what the tier stack now produces, so it was removed rather than
+	# double-layering the same structure), twin funnels, gun deck
+	# greebles, portholes - deliberately busier than naval_hull.
 	greeble_exhaust_stack(bm, (-hx * 0.12, hy * 1.35, hz * 0.55), radius=0.18, height=0.7)
 	greeble_exhaust_stack(bm, (hx * 0.12, hy * 1.35, hz * 0.55), radius=0.18, height=0.7)
 	add_box(bm, (0, hy * 1.02, -hz * 0.55), (hx * 0.35, hy * 0.22, hz * 0.3), bevel=0.03)  # foredeck turret housing
@@ -1760,6 +1763,7 @@ def generate_hulls():
 
 	export_and_cleanup(build_ship_hull("heavy_cruiser_hull", 4.4, 1.9, 10.5,
 		bow_frac=0.28, deadrise=0.12, sheer=0.22, flare=0.35, bevel_pct=0.09, bevel_segments=3,
+		superstructure_tiers=4, quarterdeck=True,
 		color=(0.3, 0.32, 0.34), greebles=_heavy_cruiser_greebles), HULLS_DIR, "heavy_cruiser_hull")
 
 	export_and_cleanup(build_fuselage_hull("fuselage_hull", 4.2, 1.2, 6.2,

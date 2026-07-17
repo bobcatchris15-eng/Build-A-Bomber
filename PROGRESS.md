@@ -32,6 +32,12 @@ Also built `scratch/rebuild_single_hull.py`, a reusable single-hull rebuild help
 
 ---
 
+## 2026-07-17 (cont'd 4) — heavy_cruiser_hull converted (item 7): promoted its own greeble layering into real massing
+
+`_heavy_cruiser_greebles` had already hand-added a second bridge-deck box on top of the shared single bridge block - a real, if informal, discovery of the same "stack more boxes" idea the naval_hull pass just built as real base massing. Removed that duplicate greeble box and set `superstructure_tiers=4, quarterdeck=True` on the `build_ship_hull` call instead, so the layering (now the tallest, busiest silhouette in the naval roster, correctly - it's the capital-ship end of the family) is real geometry rather than a bolted-on box. Preserved the `beam_scale > 0.5` flare-at-bow guard exactly untouched (the specific historical bug this hull already had). Verified with wide/side/extreme-stretch screenshots (funnels/turret-housing/portholes intact, no spike at the bow); headless tests green. Full reasoning in `DECISIONS_NEEDED.md`.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.

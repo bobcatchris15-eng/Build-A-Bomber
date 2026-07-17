@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — heavy_cruiser_hull: promoted its own greeble layering into real base massing (spec item 7)
+
+**Not blocking.**
+
+**Removed a real duplication, not just added a param.** `_heavy_cruiser_greebles` already hand-added a second "upper bridge deck" `add_box` on top of the shared single bridge block - i.e. this hull had already informally discovered the "stack more boxes for a layered look" idea at greeble scale, exactly the pattern the spec's item 6/7 pair asks to promote into real base massing. Deleted that greeble box and set `superstructure_tiers=4` on the `build_ship_hull` call instead, so the layering is now real massing (present before greebles run, part of the tiered bevel pass) rather than a separate hand-tuned box bolted on after. Also set `quarterdeck=True` (the param added but left unused in the naval_hull pass) for the stern deck step.
+
+**Preserved the flare-at-bow guard exactly, untouched** (`beam_scale > 0.5` gate on the topside flare) - this is the specific regression the spec calls out by name from an earlier session's real bug (`heavy_cruiser_hull`'s original spike-at-bow incident). Confirmed by code review (no lines in that guard touched) and by the extreme-stretch screenshot showing a clean bow under a heavy stretch, no spike.
+
+**Result is the most dramatically layered silhouette in the naval roster** (correctly, since heavy_cruiser is meant to read as the capital-ship end of the naval family) - the side-profile screenshot shows 4 clearly stepped tiers, visibly taller/busier than naval_hull's 3-tier bridge, with the twin funnels and foredeck turret housing greebles still reading correctly alongside it.
+
+**Verified:** wide 3/4, side-profile, extreme non-uniform stretch (tiers hold up proportionally, funnels/turret-housing/portholes intact, no spike at the bow). Headless tests green.
+
+---
+
 ## 2026-07-17 — naval_hull: real layered superstructure via a new superstructure_tiers param (spec item 6)
 
 **Not blocking.**
