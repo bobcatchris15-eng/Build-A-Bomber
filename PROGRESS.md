@@ -80,6 +80,28 @@ New `add_recessed_embrasure` helper - the vertical-wall counterpart to `greeble_
 
 ---
 
+## 2026-07-17 (cont'd 12) — Hull massing punch-list complete: 14 of 15 hulls converted, item 15 an explicit reasoned skip
+
+Wraps up the full `HULL_MASSING_SPEC.md` prioritized punch-list, picked up mid-flight from a prior session (medium_hull, item 1) and carried through to completion this session (items 2-14): `light_hull`, `heavy_hull`, `assault_hull`, `sponson_hull`, `naval_hull`, `heavy_cruiser_hull`, `interceptor_hull`, `fuselage_hull`, `small_boat_hull` (confirmed no-op), `flying_wing_hull`, `airship_hull`, `pillbox_foundation`, `fortress_wall_foundation`. **Item 15 (`tower_foundation`) skipped per the spec's own explicit recommendation** ("already the most-developed static hull... otherwise leave it") rather than implemented for the sake of closing out every line item.
+
+### What this pass actually built, beyond individual hull conversions
+
+Two new shared construction techniques, both reused across multiple hulls rather than written once-off:
+- **`greeble_faired_canopy`** (a squashed uvsphere fused into the caller's bmesh) - built for `interceptor_hull`, reused by `fuselage_hull` and `flying_wing_hull`.
+- **`add_recessed_embrasure` / `add_recessed_embrasure_row`** (a vertical-wall recessed, splayed slit via nested bisect+shift) - built for `pillbox_foundation`, reused by `fortress_wall_foundation`.
+
+Plus generalized two existing helpers rather than duplicating them: `add_panel_line_groove` gained an `axis` param (chordwise vs. spanwise), and `build_ship_hull` gained a `superstructure_tiers`/`forecastle`/`quarterdeck` param set (shared by all 3 naval hulls, default reproduces old behavior exactly).
+
+### Process notes worth carrying forward
+
+Built `scratch/rebuild_single_hull.py` (extracts and reruns one hull's `export_and_cleanup(...)` call by name) specifically to keep each hull's commit scoped to just that hull's `.glb` - avoided the "whole-library rebuild touches 5 unrelated files" noise the first two hulls in this pass inherited from before this session started. The one real bug caught this pass (fortress_wall's 812 degenerate faces) was invisible in screenshots and only found by directly inspecting exported bmesh face areas - worth remembering as a real backstop technique for future multi-call bisect+shift features, not just a one-off diagnostic.
+
+### Verification
+
+Every converted hull has its own dedicated screenshot set (wide 3/4, side profile, extreme non-uniform stretch, and a close-up wherever the feature was too subtle at working distance) committed alongside its own commit - not re-verified in aggregate here since nothing changed after each hull's own commit. Headless test suite green throughout every single commit in this pass, confirmed once more as a final regression check.
+
+---
+
 ## 2026-07-13 (new session, cont'd 5) — Shared decal/stencil atlas (hazard stripes, serial stencils, mascot icons) for all 10 factions
 
 Built VISUAL_ART_DIRECTION.md section 1.4's shared decal library: hazard chevrons, stencil serial numbers, and a small per-faction mascot icon, wired to `decal_tint` (mirrors `detail_color`) and rendering on every faction's units - unlike last commit's greeble cards (5 factions only, deliberately silhouette-scale), decals apply to all 10 factions uniformly and stay genuinely small/detail-scale.

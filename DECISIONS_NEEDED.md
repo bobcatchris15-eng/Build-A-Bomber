@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — Hull massing punch-list complete: item 15 (tower_foundation) explicit skip, final regression pass
+
+**Not blocking - this closes out `HULL_MASSING_SPEC.md`'s full 15-item punch-list, items 1-14 implemented and committed individually across this and the prior session, item 15 an explicit reasoned skip.**
+
+**tower_foundation (item 15): skipped, per the spec's own explicit recommendation, not silently dropped.** The spec's own punch-list entry for this hull reads "Very low payoff / None (risk/cost) - already the most-developed static hull. Optional embrasures only; otherwise leave it." `build_tower_hull` already has stepped tiers, a skirt, a corbelled machicolation ring, and railings from earlier Tier-3 work - genuinely the most-constructed hull in the roster already. Re-read the spec's reasoning rather than mechanically implementing "one more embrasure helper call" just to close out every line item - the spec is explicit that this is optional and the hull doesn't need it, so implementing it anyway would be scope-creep against the spec's own judgment, not diligence.
+
+**Final regression pass:** full headless test suite green (unchanged pass/fail status throughout every single-hull commit this pass - no test targets hull mesh topology directly, so this has consistently been a "didn't break anything else" check, not mesh-shape verification, same caveat noted in every earlier entry in this log). Every one of the 14 converted hulls has its own dedicated wide/side(/close-up)/extreme-non-uniform-stretch screenshot set already committed with its own entry above - not re-litigating each one here, just confirming none regressed by the time the punch-list closed out.
+
+**One real process lesson worth restating from this whole pass, not just the fortress_wall entry it originated in:** a visually-clean screenshot is necessary but not sufficient evidence a geometry change is correct - the fortress_wall degenerate-face bug (812/1444 faces) rendered with no visible artifact in three different camera angles before being caught by directly inspecting the exported bmesh. Every hull in this pass that used a NEW multi-call bisect+shift pattern (the embrasure row, in particular) is now the kind of feature worth a similar direct-inspection sanity check if it's ever extended further (e.g., a 4th static-defense hull reusing the row helper with more slits, or a much taller wall with more merlons) - screenshots alone caught real bugs elsewhere in this project's history (decal occlusion, machicolation off-by-one) but did NOT catch this one; the geometry-level check is the more reliable backstop for this specific class of bug.
+
+**Untouched, unrelated leftovers explicitly re-confirmed still harmless before finishing:** `airship_hull.glb`'s stray pre-existing diff (flagged in the light_hull/heavy_hull entry) was properly resolved by this pass's own airship_hull item. The remaining `antigrav_ring.glb`/`focal_lens.glb`/`hover_ring.glb`/`sensor_dome.glb` working-tree diffs are unrelated parts (not hulls, not part of this punch-list at all) left over from a session before this one - re-checked one final time that they're still byte-identical-size, unrelated re-exports (not something this pass touched or should fold in), and left alone.
+
+---
+
 ## 2026-07-17 — fortress_wall_foundation: recessed arrow slits, plus a real degenerate-geometry bug caught before committing (spec item 14)
 
 **Not blocking.**
