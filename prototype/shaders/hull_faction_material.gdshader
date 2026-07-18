@@ -78,7 +78,7 @@ uniform float flash_amount : hint_range(0.0, 1.0) = 0.0;
 // etc. are - deliberately NOT exposed through hull_material_builder.gd,
 // every material just uses this shared default. hint_range kept anyway so
 // it's tunable from the inspector during art passes without a recompile.
-uniform float edge_ink_strength : hint_range(0.0, 1.0) = 0.75;
+uniform float edge_ink_strength : hint_range(0.0, 1.0) = 0.95;
 
 varying vec3 world_pos;
 varying vec3 world_normal;
@@ -157,7 +157,8 @@ void fragment() {
 	// normal is large at silhouette edges/corners and near-zero across flat
 	// panel interiors - a real-time stand-in for a baked curvature map
 	// (VISUAL_ART_DIRECTION.md's "Mask B"), needing no per-mesh bake pass.
-	float curvature = clamp(length(fwidth(world_normal)) * 4.0, 0.0, 1.0);
+	float edge_raw = length(fwidth(world_normal));
+	float curvature = clamp(edge_raw * 4.0, 0.0, 1.0);
 	// Blend a little organic noise into the pure-curvature signal so wear
 	// doesn't look like a geometric edge-detect filter - real weathering is
 	// patchy, not a clean outline.
@@ -217,22 +218,31 @@ void fragment() {
 	// the Design Lab's hull_scale stretch and needs no per-object
 	// authoring or per-mesh bake pass. Two signals, combined with max()
 	// so either alone is enough to draw the line:
-	//   - curvature (already computed above for the wear mask) is a real
-	//     geometric edge/corner detector - catches hard creases/corners
-	//     regardless of view angle.
-	//   - a world-space Fresnel rim catches SILHOUETTE edges curvature
-	//     alone can miss at a grazing angle (a gently rounded bevel edge
-	//     viewed nearly edge-on has low curvature but a strong rim).
+	//   - edge_raw (the same fwidth(world_normal) driving curvature above,
+	//     but at a MUCH higher multiplier - a hard geometric edge is only
+	//     1-2 screen pixels wide, and curvature's own *4.0 tuning for the
+	//     wear mask left real box corners barely distinguishable from the
+	//     baked seam grid in a direct pixel-level check, see
+	//     DECISIONS_NEEDED.md) is a real geometric edge/corner detector -
+	//     catches hard creases/corners regardless of view angle.
+	//   - a world-space Fresnel rim catches SILHOUETTE edges the geometric
+	//     signal alone can miss at a grazing angle (a gently rounded bevel
+	//     edge viewed nearly edge-on has low curvature but a strong rim).
 	// Deliberately a SHARP smoothstep band, unlike wear_mask's wide/soft
 	// one - this needs to read as an intentional ink line, not another
-	// weathering gradient. Applied after wear/grime (the line shows on
-	// top of whatever weathering state the surface is in) but before the
-	// flash-red hit feedback, which still overrides everything.
+	// weathering gradient. Blends toward an ABSOLUTE near-black (not a
+	// fraction of the existing color) so it reads as real ink regardless
+	// of how bright/saturated the underlying panel color is - a multiply-
+	// based darken (the first version) was too easily lost against the
+	// already-dark baked seam lines. Applied after wear/grime (the line
+	// shows on top of whatever weathering state the surface is in) but
+	// before the flash-red hit feedback, which still overrides everything.
+	float edge_curvature = clamp(edge_raw * 12.0, 0.0, 1.0);
 	vec3 view_dir_world = normalize(CAMERA_POSITION_WORLD - world_pos);
-	float fresnel_rim = pow(1.0 - clamp(dot(view_dir_world, geo_normal), 0.0, 1.0), 3.0);
-	float edge_signal = max(curvature, fresnel_rim * 0.7);
-	float edge_ink = smoothstep(0.4, 0.62, edge_signal) * edge_ink_strength;
-	color = mix(color, color * 0.08, edge_ink);
+	float fresnel_rim = pow(1.0 - clamp(dot(view_dir_world, geo_normal), 0.0, 1.0), 2.0);
+	float edge_signal = max(edge_curvature, fresnel_rim * 0.85);
+	float edge_ink = smoothstep(0.12, 0.4, edge_signal) * edge_ink_strength;
+	color = mix(color, vec3(0.012), edge_ink);
 
 	color = mix(color, vec3(1.0, 0.05, 0.05), flash_amount);
 	ALBEDO = color;
