@@ -444,9 +444,16 @@ func _list_json_files(dir_path: String) -> Array:
 # debugging/inspection aid; it just isn't the authority on price anymore.
 func blueprint_cost(data: Dictionary) -> Vector2i:
 	var hull_type = data.get("hull_type", "medium_hull")
-	var hull_data = ModuleCatalog.get_module_data(hull_type)
-	var m = int(hull_data.metal)
-	var c = int(hull_data.crystal)
+	# Hull cost now includes armor material/thickness and hull scale
+	# (FABLE_REVIEW.md 1.2/1.3 - previously all three were free power).
+	var sc_dict = data.get("hull_scale", {"x": 1.0, "y": 1.0, "z": 1.0})
+	var hull_cost = ModuleCatalog.compute_hull_cost(
+		hull_type,
+		data.get("armor_thickness", 1.0),
+		data.get("armor_material", "hardened_steel"),
+		Vector3(sc_dict.x, sc_dict.y, sc_dict.z))
+	var m = hull_cost.x
+	var c = hull_cost.y
 	for mod in data.get("modules", []):
 		var type_id = mod.get("type_id", "")
 		if not ModuleCatalog.module_exists(type_id):

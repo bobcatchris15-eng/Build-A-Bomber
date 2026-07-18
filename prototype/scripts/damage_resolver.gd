@@ -38,7 +38,13 @@ const ARMOR_TABLE = {
 	"hardened_steel": {"kinetic": [15.0, 0.7], "thermal": [5.0, 0.9], "explosive": [10.0, 0.8], "energy": [8.0, 0.85]},
 	"reactive_armor": {"kinetic": [10.0, 0.8], "thermal": [10.0, 0.8], "explosive": [30.0, 0.4], "energy": [8.0, 0.85]},
 	"ablative_ceramic": {"kinetic": [8.0, 0.9], "thermal": [25.0, 0.3], "explosive": [10.0, 0.7], "energy": [15.0, 0.6]},
-	"energy_shielding": {"kinetic": [20.0, 0.5], "thermal": [20.0, 0.5], "explosive": [20.0, 0.5], "energy": [35.0, 0.3]},
+	# energy_shielding kinetic row weakened (FABLE_REVIEW.md 1.2): it used to
+	# be best-or-tied in EVERY damage class on top of the best HP-per-weight,
+	# making the material dropdown a solved choice. "Shields stop beams, not
+	# shells": now the WORST kinetic threshold in the table, completing a real
+	# rock-paper-scissors (steel=kinetic, reactive=explosive, ablative=thermal,
+	# shielding=energy).
+	"energy_shielding": {"kinetic": [10.0, 0.75], "thermal": [20.0, 0.5], "explosive": [20.0, 0.5], "energy": [35.0, 0.3]},
 }
 
 # --- Hit damage math (FABLE_REVIEW.md 1.1 / 3.6 / 2.5) ---

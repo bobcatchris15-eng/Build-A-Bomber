@@ -121,6 +121,7 @@ func _init():
 	success = success and await test_hull_modding_mod_hull_placeable()
 	success = success and await test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes()
 	success = success and await test_damage_model_rof_chip_strip_and_air_rules()
+	success = success and await test_hull_economy_and_scale_bounds()
 
 	print("\n==============================================")
 	if success:
@@ -173,14 +174,17 @@ func test_stats_calculations() -> bool:
 	# Calculate stats using stat_calculator.gd script attached to UI_StatBlock
 	stat_ui.update_stats(mock_hull)
 	
-	# Expected Calculations:
-	# Base Module HP = 100.0
-	# HP: HP * hp_mult (1.0) * thickness (1.5) = 150.0
-	var expected_hp = 150.0
-	
-	# Base Module Weight = 80.0
-	# Weight: Weight * wt_mult (1.0) * thickness (1.5) * faction_armor_weight_reduction (0.8) = 96.0
-	var expected_weight = 96.0
+	# Expected Calculations (FABLE_REVIEW.md 2.6: the sidebar now shows the
+	# COMBAT formulas via the shared ModuleCatalog.compute_hull_* functions,
+	# not its old display-only module-sum-times-material math):
+	# "Hull HP" = the unit's real combat max_hp (hull base * thickness *
+	# material mult * volume) - the mock module's own HP is a separate
+	# strip pool shown alongside, not part of this figure.
+	var expected_hp = ModuleCatalog.compute_hull_max_hp("medium_hull", 1.5, "hardened_steel", Vector3.ONE)
+
+	# "Total Weight" = hull combat weight (incl. the Industrialists 20%
+	# armor-weight discount, which is now REAL in combat too) + module sum.
+	var expected_weight = ModuleCatalog.compute_hull_weight("medium_hull", 1.5, "hardened_steel", Vector3.ONE, 0.8) + 80.0
 	
 	# Expected Thresholds (from DamageResolver.ARMOR_TABLE's hardened_steel
 	# row - the sidebar reads this directly now, not a separate hardcoded
@@ -2094,7 +2098,7 @@ func test_per_module_armor_material() -> bool:
 	plate_data.type_id = "armor_plating"
 	plate_data.category = "armor"
 	plate_data.base_hp = 100.0 # small, so the +10.0 HP bonus doesn't dominate the material swap
-	plate_data.tweaks = {"material": "energy_shielding"} # kinetic threshold 20.0
+	plate_data.tweaks = {"material": "energy_shielding"}
 	front_plate.set_meta("module_data", plate_data)
 	hull.add_child(front_plate)
 
@@ -2102,10 +2106,14 @@ func test_per_module_armor_material() -> bool:
 	var hit_from_front = defender.global_position + Vector3(0, 0, -5.0)
 	var resolved = DamageResolverScript.resolve(hull, active_modules, "kinetic", defender, hit_from_front)
 
-	# Expected: energy_shielding's 20.0 base threshold (not hardened_steel's
-	# 15.0), plus the plate's own +10.0 HP-derived bonus = 30.0.
-	if abs(resolved.x - 30.0) > 0.5:
-		print("  [FAIL] Front hit should resolve via the plate's OWN energy_shielding material (expected threshold ~30.0), got ", resolved.x)
+	# Expected: energy_shielding's OWN kinetic threshold (read from the
+	# armor table rather than hardcoded - the FABLE review pass deliberately
+	# weakened shielding's kinetic row to break its across-the-board
+	# dominance), plus the plate's +10.0 HP-derived bonus. The material-swap
+	# proof is that it differs from hardened_steel's 15.0 baseline + 10.0.
+	var expected_front = DamageResolverScript.get_material_threshold("energy_shielding", "kinetic", 1.0).x + 10.0
+	if abs(resolved.x - expected_front) > 0.5:
+		print("  [FAIL] Front hit should resolve via the plate's OWN energy_shielding material (expected threshold ~", expected_front, "), got ", resolved.x)
 		defender.queue_free()
 		return false
 
@@ -3259,8 +3267,13 @@ func test_new_faction_mechanical_bonuses() -> bool:
 			{"type_id": "fixed_wing_engine", "name": "Engine", "position": {"x": 0, "y": 0, "z": -2}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}},
 		],
 	}
+	# Baseline faction is ledger_combine (build-time passive only): the old
+	# industrialists baseline stopped being neutral once the FABLE review
+	# pass made their 20% armor-weight discount REAL in combat weight -
+	# an industrialists twin is now genuinely lighter/faster, which is
+	# correct behavior but ruins it as a speed-comparison control.
 	var baseline_air_bp = cartel_air_bp.duplicate(true)
-	baseline_air_bp["faction"] = "industrialists"
+	baseline_air_bp["faction"] = "ledger_combine"
 	var cartel_air_unit = CharacterBody3D.new()
 	cartel_air_unit.set_script(BattleUnitScript)
 	skirmish.add_child(cartel_air_unit)
@@ -3273,13 +3286,13 @@ func test_new_faction_mechanical_bonuses() -> bool:
 		print("  [FAIL] Both test units should be real airborne units (fixed_wing_engine on flying_wing_hull)")
 		ok = false
 	elif not is_equal_approx(cartel_air_unit.move_speed, baseline_air_unit.move_speed * 1.15):
-		print("  [FAIL] Aerodrome Cartel airborne units should move exactly 15% faster than an identical industrialists airborne unit, got cartel=", cartel_air_unit.move_speed, " baseline=", baseline_air_unit.move_speed)
+		print("  [FAIL] Aerodrome Cartel airborne units should move exactly 15% faster than an identical neutral-faction airborne unit, got cartel=", cartel_air_unit.move_speed, " baseline=", baseline_air_unit.move_speed)
 		ok = false
 	# A GROUND Aerodrome Cartel unit should see zero speed change.
 	var cartel_ground_bp = base_bp.duplicate(true)
 	cartel_ground_bp["faction"] = "aerodrome_cartel"
 	var baseline_ground_bp = base_bp.duplicate(true)
-	baseline_ground_bp["faction"] = "industrialists"
+	baseline_ground_bp["faction"] = "ledger_combine" # neutral-for-speed baseline, see above
 	var cartel_ground_unit = CharacterBody3D.new()
 	cartel_ground_unit.set_script(BattleUnitScript)
 	skirmish.add_child(cartel_ground_unit)
@@ -5442,24 +5455,34 @@ func test_weight_vs_locomotion_capacity_penalty() -> bool:
 		unit._recalculate_move_speed()
 		return unit
 
+	# The mock's hull_node has no type_id meta, so _recalculate_move_speed()
+	# falls back to medium_hull's hull weight - REAL as of the FABLE review
+	# pass (hull mass, incl. armor, now enters the combat weight total).
+	# Expectations below include it, plus the retuned x10 / 1.5-18 band.
+	# armor_weight_mult 0.8: the mock hull carries no faction meta, so
+	# _recalculate_move_speed() falls back to "industrialists" - whose 20%
+	# armor-weight discount is now real combat behavior.
+	var mock_hull_weight = ModuleCatalog.compute_hull_weight("medium_hull", 1.0, "hardened_steel", Vector3.ONE, 0.8)
+
 	# wheels' own capacity is 350 (ModuleCatalog.get_base_weight_capacity) -
-	# a 400kg weapon on top of a 50kg wheel chassis (450 total) pushes it
-	# over. tracked_treads' capacity is 700 - the SAME 400kg weapon on a
-	# 120kg tread chassis (520 total) stays comfortably under. This is the
+	# a 200kg weapon + 50kg wheel chassis + the hull's own 250kg (500 total)
+	# pushes it over. tracked_treads' capacity is 700 - the SAME loadout on
+	# a 120kg tread chassis (570 total) stays comfortably under. This is the
 	# core ask made concrete: heavier/tougher locomotion tolerates more
 	# excess weight before the penalty kicks in.
-	var overloaded_wheels = make_unit.call("wheels", 50.0, 400.0)
-	var loaded_treads = make_unit.call("tracked_treads", 120.0, 400.0)
+	var overloaded_wheels = make_unit.call("wheels", 50.0, 200.0)
+	var loaded_treads = make_unit.call("tracked_treads", 120.0, 200.0)
 
 	# Prove the wheels case is ACTUALLY penalized, not just naturally slower
 	# from carrying more weight (which the pre-existing thrust/weight ratio
 	# already accounts for) - compute what the unpenalized formula alone
-	# would predict (motor_thrust=100+150 for one locomotion module,
-	# weight=450) and confirm the real value is meaningfully below it.
+	# would predict (motor_thrust=100+150 for one locomotion module) and
+	# confirm the real value is meaningfully below it.
 	var wheels_motor_thrust = 100.0 + 150.0
-	var wheels_unpenalized = clamp((wheels_motor_thrust / 450.0) * 5.0, 2.0, 15.0)
+	var wheels_total = 250.0 + mock_hull_weight
+	var wheels_unpenalized = clamp((wheels_motor_thrust / wheels_total) * 10.0, 1.5, 18.0)
 	if overloaded_wheels.move_speed >= wheels_unpenalized - 0.01:
-		print("  [FAIL] An overloaded wheeled unit (450kg vs. 350 capacity) should be penalized below the unpenalized thrust/weight prediction. unpenalized=", wheels_unpenalized, " actual=", overloaded_wheels.move_speed)
+		print("  [FAIL] An overloaded wheeled unit (", wheels_total, "kg vs. 350 capacity) should be penalized below the unpenalized thrust/weight prediction. unpenalized=", wheels_unpenalized, " actual=", overloaded_wheels.move_speed)
 		overloaded_wheels.queue_free()
 		loaded_treads.queue_free()
 		return false
@@ -5467,9 +5490,10 @@ func test_weight_vs_locomotion_capacity_penalty() -> bool:
 	# Prove the treads case gets NO penalty (matches the plain formula
 	# exactly, since it's under its own higher capacity).
 	var treads_motor_thrust = 100.0 + 150.0
-	var treads_unpenalized = clamp((treads_motor_thrust / 520.0) * 5.0, 2.0, 15.0)
+	var treads_total = 320.0 + mock_hull_weight
+	var treads_unpenalized = clamp((treads_motor_thrust / treads_total) * 10.0, 1.5, 18.0)
 	if abs(loaded_treads.move_speed - treads_unpenalized) > 0.01:
-		print("  [FAIL] A tracked_treads unit under its own capacity (520kg vs. 700) should be unpenalized. expected=", treads_unpenalized, " actual=", loaded_treads.move_speed)
+		print("  [FAIL] A tracked_treads unit under its own capacity (", treads_total, "kg vs. 700) should be unpenalized. expected=", treads_unpenalized, " actual=", loaded_treads.move_speed)
 		overloaded_wheels.queue_free()
 		loaded_treads.queue_free()
 		return false
@@ -5478,9 +5502,9 @@ func test_weight_vs_locomotion_capacity_penalty() -> bool:
 	# penalty (multiplier is a true no-op below the threshold, not just a
 	# small one).
 	var light_wheels = make_unit.call("wheels", 50.0, 0.0)
-	var light_unpenalized = clamp((wheels_motor_thrust / 50.0) * 5.0, 2.0, 15.0)
+	var light_unpenalized = clamp((wheels_motor_thrust / (50.0 + mock_hull_weight)) * 10.0, 1.5, 18.0)
 	if abs(light_wheels.move_speed - light_unpenalized) > 0.01:
-		print("  [FAIL] A lightly-loaded wheeled unit (50kg vs. 350 capacity) should have zero overload penalty. expected=", light_unpenalized, " actual=", light_wheels.move_speed)
+		print("  [FAIL] A lightly-loaded wheeled unit (300kg vs. 350 capacity) should have zero overload penalty. expected=", light_unpenalized, " actual=", light_wheels.move_speed)
 		overloaded_wheels.queue_free()
 		loaded_treads.queue_free()
 		light_wheels.queue_free()
@@ -6516,4 +6540,89 @@ func test_damage_model_rof_chip_strip_and_air_rules() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Sub-threshold fire chips and strips, flak has a real anti-air identity, and air-to-ground fire doesn't collect the high-ground pierce bonus.")
+	return true
+
+func test_hull_economy_and_scale_bounds() -> bool:
+	print("Running Test Suite: FABLE review fixes - armor/hull economy (cost, weight, scale) and material rock-paper-scissors...")
+
+	# --- Armor material/thickness now has a real price ---
+	var c_baseline = ModuleCatalog.compute_hull_cost("medium_hull", 1.0, "hardened_steel", Vector3.ONE)
+	var c_fortress = ModuleCatalog.compute_hull_cost("medium_hull", 3.0, "energy_shielding", Vector3.ONE)
+	if c_fortress.x < int(c_baseline.x * 1.8) or c_fortress.y < c_baseline.y * 3:
+		print("  [FAIL] A thickness-3.0 energy_shielding hull should cost far more than the baseline (got ", c_fortress, " vs ", c_baseline, ") - armor is still free power.")
+		return false
+
+	# Superlinear thickness curve: 1.0 -> 2.0 costs less than 2.0 -> 3.0
+	var c1 = ModuleCatalog.compute_hull_cost("medium_hull", 1.0, "hardened_steel", Vector3.ONE)
+	var c2 = ModuleCatalog.compute_hull_cost("medium_hull", 2.0, "hardened_steel", Vector3.ONE)
+	var c3 = ModuleCatalog.compute_hull_cost("medium_hull", 3.0, "hardened_steel", Vector3.ONE)
+	if (c3.x - c2.x) <= (c2.x - c1.x):
+		print("  [FAIL] Thickness cost curve should be superlinear (step 2->3 pricier than 1->2), got ", c1.x, "/", c2.x, "/", c3.x)
+		return false
+
+	# --- Material rock-paper-scissors: energy_shielding no longer best-in-
+	# every-class (kinetic is now its weakness; steel keeps the kinetic crown)
+	var shield_k = DamageResolverScript.get_material_threshold("energy_shielding", "kinetic", 1.0).x
+	var steel_k = DamageResolverScript.get_material_threshold("hardened_steel", "kinetic", 1.0).x
+	if shield_k >= steel_k:
+		print("  [FAIL] energy_shielding's kinetic threshold (", shield_k, ") should now be WEAKER than hardened_steel's (", steel_k, ").")
+		return false
+
+	# --- Hull scale drives real stats, and blueprint cost includes all of it ---
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var small_bp = {
+		"hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"armor_material": "hardened_steel",
+		"armor_thickness": 1.0,
+		"faction": "ledger_combine",
+		"locomotion": {"type_id": "wheels", "settings": {"size": 1.0, "count": 4}},
+		"modules": [{"type_id": "wheels", "position": {"x": 0, "y": -0.5, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}}]
+	}
+	var big_bp = small_bp.duplicate(true)
+	big_bp["hull_scale"] = {"x": 2.0, "y": 1.0, "z": 2.0}
+
+	var small_cost = skirmish.blueprint_cost(small_bp)
+	var big_cost = skirmish.blueprint_cost(big_bp)
+	if big_cost.x <= small_cost.x:
+		print("  [FAIL] A 2x-footprint hull should cost more than the 1x baseline (got ", big_cost.x, " vs ", small_cost.x, ") - hull scale is still free real estate.")
+		skirmish.queue_free()
+		return false
+
+	var small_unit = skirmish.spawn_unit(small_bp, 0, Vector3(0, 0, 0))
+	var big_unit = skirmish.spawn_unit(big_bp, 0, Vector3(15, 0, 0))
+	await process_frame
+	if big_unit.max_hp <= small_unit.max_hp:
+		print("  [FAIL] A 2x-footprint hull should have more HP (got ", big_unit.max_hp, " vs ", small_unit.max_hp, ").")
+		skirmish.queue_free()
+		return false
+	if big_unit.move_speed >= small_unit.move_speed:
+		print("  [FAIL] A 2x-footprint hull on identical locomotion should be slower (got ", big_unit.move_speed, " vs ", small_unit.move_speed, ") - size still costs nothing.")
+		skirmish.queue_free()
+		return false
+
+	# --- Gizmo hull-scale clamp (bounded scaling, concept-doc requirement) ---
+	var gizmo = preload("res://scenes/Gizmo3D.tscn").instantiate()
+	var clamp_hull = Node3D.new()
+	clamp_hull.name = "Hull"
+	clamp_hull.set_meta("base_hull_size", Vector3(4, 1, 6))
+	clamp_hull.set_meta("hull_scale", Vector3.ONE)
+	skirmish.add_child(clamp_hull)
+	clamp_hull.add_child(gizmo)
+	await process_frame
+	gizmo._apply_scale_to_node(clamp_hull, Vector3(9.0, 0.01, 9.0))
+	var clamped = clamp_hull.get_meta("hull_scale")
+	if clamped.x > ModuleCatalog.HULL_SCALE_MAX + 0.001 or clamped.y < ModuleCatalog.HULL_SCALE_MIN - 0.001:
+		print("  [FAIL] Hull scale should clamp to [", ModuleCatalog.HULL_SCALE_MIN, ", ", ModuleCatalog.HULL_SCALE_MAX, "], got ", clamped)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Armor material/thickness and hull scale all carry real cost/weight/HP consequences, the thickness cost curve is superlinear, materials form a genuine rock-paper-scissors, and hull scaling is bounded.")
 	return true

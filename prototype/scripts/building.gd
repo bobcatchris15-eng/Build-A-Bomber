@@ -142,11 +142,10 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 		armor_thickness = defense_hull.get_meta("armor_thickness") if defense_hull.has_meta("armor_thickness") else 1.0
 		var hull_type = defense_hull.get_meta("type_id") if defense_hull.has_meta("type_id") else "pillbox_foundation"
 		var catalog_data = ModuleCatalog.get_module_data(hull_type)
-		var mat_mult = 1.0
-		if armor_material == "reactive_armor": mat_mult = 1.3
-		elif armor_material == "ablative_ceramic": mat_mult = 1.6
-		elif armor_material == "energy_shielding": mat_mult = 2.0
-		max_hp = catalog_data.hp * armor_thickness * mat_mult
+		# Shared hull-stat function (FABLE_REVIEW.md 2.6) - same formula as
+		# battle_unit.gd and the Design Lab sidebar, hull scale included.
+		var d_hull_scale = defense_hull.get_meta("hull_scale") if defense_hull.has_meta("hull_scale") else Vector3.ONE
+		max_hp = ModuleCatalog.compute_hull_max_hp(hull_type, armor_thickness, armor_material, d_hull_scale)
 		hp = max_hp
 		footprint = catalog_data.size
 

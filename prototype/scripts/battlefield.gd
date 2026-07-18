@@ -84,16 +84,14 @@ func _spawn_vehicle():
 	
 	if vehicle_hull:
 		var hull_type = vehicle_hull.get_meta("type_id") if vehicle_hull.has_meta("type_id") else "medium_hull"
-		var catalog_data = ModuleCatalog.get_module_data(hull_type)
-		var base_hp = catalog_data.hp
 		var thick = vehicle_hull.get_meta("armor_thickness") if vehicle_hull.has_meta("armor_thickness") else 1.0
 		var mat = vehicle_hull.get_meta("armor_material") if vehicle_hull.has_meta("armor_material") else "hardened_steel"
-		var mat_mult = 1.0
-		if mat == "reactive_armor": mat_mult = 1.3
-		elif mat == "ablative_ceramic": mat_mult = 1.6
-		elif mat == "energy_shielding": mat_mult = 2.0
-		
-		var final_max_hp = base_hp * thick * mat_mult
+		var hp_hull_scale = vehicle_hull.get_meta("hull_scale") if vehicle_hull.has_meta("hull_scale") else Vector3.ONE
+
+		# Shared hull-stat function (FABLE_REVIEW.md 2.6) - the Test Range's
+		# separate hand-rolled copy of the HP formula is gone, so it can't
+		# drift from Skirmish/sidebar again.
+		var final_max_hp = ModuleCatalog.compute_hull_max_hp(hull_type, thick, mat, hp_hull_scale)
 		vehicle.max_hp = final_max_hp
 		vehicle.hp = final_max_hp
 		
@@ -309,10 +307,18 @@ func recalculate_move_speed():
 	if not is_instance_valid(vehicle_hull) or not is_instance_valid(vehicle):
 		return
 		
-	var total_weight = 0.0
+	# Hull weight enters the total here too, same shared function as
+	# battle_unit.gd's _recalculate_move_speed() (FABLE_REVIEW.md 1.2).
+	var rms_hull_type = vehicle_hull.get_meta("type_id") if vehicle_hull.has_meta("type_id") else "medium_hull"
+	var rms_thick = vehicle_hull.get_meta("armor_thickness") if vehicle_hull.has_meta("armor_thickness") else 1.0
+	var rms_mat = vehicle_hull.get_meta("armor_material") if vehicle_hull.has_meta("armor_material") else "hardened_steel"
+	var rms_scale = vehicle_hull.get_meta("hull_scale") if vehicle_hull.has_meta("hull_scale") else Vector3.ONE
+	var rms_faction = vehicle_hull.get_meta("faction") if vehicle_hull.has_meta("faction") else "industrialists"
+	var rms_armor_wt = FactionCatalog.get_passive(rms_faction, "armor_weight_mult", 1.0)
+	var total_weight = ModuleCatalog.compute_hull_weight(rms_hull_type, rms_thick, rms_mat, rms_scale, rms_armor_wt)
 	var motor_thrust = 100.0 # Default base
 	var has_locomotion = false
-	
+
 	# Fetch settings from hull meta
 	var settings = {}
 	if vehicle_hull.has_meta("locomotion_settings"):
@@ -342,7 +348,9 @@ func recalculate_move_speed():
 		return
 		
 	if total_weight > 0.0:
-		move_speed = clamp((motor_thrust / total_weight) * 5.0, 2.0, 15.0)
+		# Same retuned constant/band as battle_unit.gd (hull weight now in
+		# the denominator).
+		move_speed = clamp((motor_thrust / total_weight) * 10.0, 1.5, 18.0)
 		
 	# Faction Passive Bonus - table-driven, matches battle_unit.gd's own
 	# _recalculate_move_speed() (this Test Range scene keeps its own

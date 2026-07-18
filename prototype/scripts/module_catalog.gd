@@ -1,6 +1,78 @@
 class_name ModuleCatalog
 
 const HullLoader = preload("res://scripts/hull_loader.gd")
+const GlobalConfigScript = preload("res://scripts/global_config.gd")
+
+# --- Hull-level derived stats (FABLE_REVIEW.md 1.2 / 1.3 / 2.6) ---
+# Single source of truth for what a hull's armor material, thickness slider,
+# and scale handles actually DO - shared by combat (battle_unit/building),
+# the economy (skirmish.blueprint_cost), and the Design Lab sidebar
+# (stat_calculator), so the number a player sees is the number the sim uses.
+# Before this, material/thickness multiplied HP for free (no cost, no combat
+# weight - the weight increase existed only in the sidebar display) and
+# hull_scale affected nothing but mounting area - both were solved dominant
+# choices, the exact Forged-Battalion failure DESIGN_VISION.md warns about.
+
+const ARMOR_MATERIAL_HP_MULT = {
+	"hardened_steel": 1.0, "reactive_armor": 1.3, "ablative_ceramic": 1.6, "energy_shielding": 2.0,
+}
+const ARMOR_MATERIAL_WEIGHT_MULT = {
+	"hardened_steel": 1.0, "reactive_armor": 1.2, "ablative_ceramic": 0.9, "energy_shielding": 0.5,
+}
+# Per-material cost multipliers - the advanced materials finally have a
+# price. energy_shielding is deliberately crystal-hungry (3x): it keeps the
+# best HP-per-weight in the roster, but now bottlenecks the scarcer
+# resource instead of being a free strict upgrade.
+const ARMOR_MATERIAL_COST_MULT = {
+	"hardened_steel": {"metal": 1.0, "crystal": 1.0},
+	"reactive_armor": {"metal": 1.3, "crystal": 1.6},
+	"ablative_ceramic": {"metal": 1.25, "crystal": 1.9},
+	"energy_shielding": {"metal": 1.5, "crystal": 3.0},
+}
+
+# Hull scale handle bounds (per axis). RTS_Unit_Designer_Concept.md always
+# specced bounded scaling ("the size class dictates the upper and lower
+# bounds of this scaling") - the gizmo previously only clamped the low end,
+# so an unbounded max-size hull was free mounting real estate.
+const HULL_SCALE_MIN: float = 0.5
+const HULL_SCALE_MAX: float = 2.0
+
+static func get_hull_volume_factor(hull_scale: Vector3) -> float:
+	return hull_scale.x * hull_scale.y * hull_scale.z
+
+# Sub-linear volume scaling, same GlobalConfig factors modules already use -
+# a 2x-per-axis hull (8x volume) gets ~6.6x HP, ~8x weight, ~7.3x cost.
+static func _volume_scaled(base: float, hull_scale: Vector3, factor: float) -> float:
+	var v = get_hull_volume_factor(hull_scale)
+	return base + base * (v - 1.0) * factor
+
+# Armor mass model: roughly half a hull's mass is structure (unaffected by
+# the armor sliders), half is armor (scales with thickness x material
+# density, and is what the Industrialists' armor_weight_mult discounts).
+static func compute_hull_max_hp(hull_type_id: String, thickness: float, material: String, hull_scale: Vector3 = Vector3.ONE) -> float:
+	var base = get_module_data(hull_type_id).get("hp", 400.0)
+	var hp_mult = ARMOR_MATERIAL_HP_MULT.get(material, 1.0)
+	return _volume_scaled(base, hull_scale, GlobalConfigScript.hp_scale_factor) * thickness * hp_mult
+
+static func compute_hull_weight(hull_type_id: String, thickness: float, material: String, hull_scale: Vector3 = Vector3.ONE, armor_weight_mult: float = 1.0) -> float:
+	var base = get_module_data(hull_type_id).get("weight", 250.0)
+	var wt_mult = ARMOR_MATERIAL_WEIGHT_MULT.get(material, 1.0)
+	var armor_fraction = 0.5 + 0.5 * thickness * wt_mult * armor_weight_mult
+	return _volume_scaled(base, hull_scale, GlobalConfigScript.weight_scale_factor) * armor_fraction
+
+# Armor cost curve is deliberately SUPERLINEAR in thickness (t^1.5): each
+# extra point of threshold/HP costs more than the last, so "max the slider"
+# stops being the automatic answer (Damage_And_Armor_Model.md's own
+# "drastically adding to weight and resource cost", implemented at last).
+static func compute_hull_cost(hull_type_id: String, thickness: float, material: String, hull_scale: Vector3 = Vector3.ONE) -> Vector2i:
+	var data = get_module_data(hull_type_id)
+	var mat_mult = ARMOR_MATERIAL_COST_MULT.get(material, ARMOR_MATERIAL_COST_MULT["hardened_steel"])
+	var armor_curve = 0.5 + 0.5 * pow(max(thickness, 0.0), 1.5)
+	var m = _volume_scaled(float(data.get("metal", 100)), hull_scale, GlobalConfigScript.cost_scale_factor)
+	var c = _volume_scaled(float(data.get("crystal", 0)), hull_scale, GlobalConfigScript.cost_scale_factor)
+	m *= 0.5 + 0.5 * armor_curve * mat_mult.metal
+	c *= 0.5 + 0.5 * armor_curve * mat_mult.crystal
+	return Vector2i(int(round(m)), int(round(c)))
 
 # Merged catalog cache (FABLE_REVIEW.md 3.5): get_catalog() used to rebuild
 # the entire ~60-entry dict literal on every call - and it's called from

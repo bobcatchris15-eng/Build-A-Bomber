@@ -515,9 +515,6 @@ func update_stats(hull: Node3D):
 					if wc_bonus > 0.0:
 						total_weight_capacity += wc_bonus * child.scale.x * child.scale.z
 				
-	var hp_mult = 1.0
-	var wt_mult = 1.0
-
 	var armor_material = "hardened_steel"
 	var armor_thickness = 1.0
 	var faction = "industrialists"
@@ -530,26 +527,27 @@ func update_stats(hull: Node3D):
 		if hull.has_meta("faction"):
 			faction = hull.get_meta("faction")
 
-	match armor_material:
-		"hardened_steel":
-			hp_mult = 1.0
-			wt_mult = 1.0
-		"reactive_armor":
-			hp_mult = 1.3
-			wt_mult = 1.2
-		"ablative_ceramic":
-			hp_mult = 1.6
-			wt_mult = 0.9
-		"energy_shielding":
-			hp_mult = 2.0
-			wt_mult = 0.5
-
-	# Faction Passive Bonus - table-driven (FactionCatalog), not a hardcoded
-	# per-faction if-chain, so this scales to all 10 factions unchanged.
-	wt_mult *= FactionCatalog.get_passive(faction, "armor_weight_mult", 1.0)
-
-	total_hp = total_hp * hp_mult * armor_thickness
-	total_weight = total_weight * wt_mult * armor_thickness
+	# FABLE_REVIEW.md 2.6 fix: this sidebar used to show numbers combat never
+	# used - "Total HP" was the MODULE hp sum scaled by material/thickness
+	# (an empty hull showed 0.0 but fielded at 400), and "Total Weight"
+	# applied material multipliers the combat weight sum didn't. Both now
+	# come from the same shared ModuleCatalog.compute_hull_* functions
+	# battle_unit.gd/building.gd/blueprint_cost() read, so what you see in
+	# the Design Lab is what the simulation runs.
+	var sidebar_hull_type = hull.get_meta("type_id", "medium_hull") if hull else "medium_hull"
+	var sidebar_hull_scale = hull.get_meta("hull_scale", Vector3.ONE) if hull else Vector3.ONE
+	var hull_hp = ModuleCatalog.compute_hull_max_hp(sidebar_hull_type, armor_thickness, armor_material, sidebar_hull_scale) \
+		* FactionCatalog.get_passive(faction, "hp_mult", 1.0)
+	var sidebar_armor_wt_mult = FactionCatalog.get_passive(faction, "armor_weight_mult", 1.0)
+	var hull_weight = ModuleCatalog.compute_hull_weight(sidebar_hull_type, armor_thickness, armor_material, sidebar_hull_scale, sidebar_armor_wt_mult)
+	var hull_cost = ModuleCatalog.compute_hull_cost(sidebar_hull_type, armor_thickness, armor_material, sidebar_hull_scale)
+	# total_hp so far is the MODULE pool (separate strip pools in combat);
+	# keep it visible as its own figure next to the hull's real HP.
+	var module_hp_pool = total_hp
+	total_hp = hull_hp
+	total_weight = hull_weight + total_weight
+	total_cost_metal += hull_cost.x
+	total_cost_crystal += hull_cost.y
 
 	# Read straight from DamageResolver.ARMOR_TABLE (single source of truth,
 	# same as combat) instead of a second hardcoded k_base/t_base/e_base
@@ -570,7 +568,8 @@ func update_stats(hull: Node3D):
 	# one place in this file using bare str() on a float, which is why they
 	# alone showed raw float precision (e.g. "14.723891...") while every
 	# other label here was already %.1f/%.2f/%d formatted.
-	hp_label.text = "Total HP: %.1f" % total_hp
+	hp_label.text = "Hull HP: %.1f (modules +%.1f)" % [total_hp, module_hp_pool]
+	hp_label.tooltip_text = "Hull HP is the unit's real health pool in combat.\nModule HP is each mounted part's own pool - parts get shot off (subsystem stripping) without draining hull HP."
 	cost_label.text = "Cost: %d Metal, %d Crystal" % [total_cost_metal, total_cost_crystal]
 	dps_label.text = "Total DPS: %.1f" % total_dps
 

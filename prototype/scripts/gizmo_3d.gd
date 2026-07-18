@@ -2,6 +2,7 @@ extends Node3D
 
 const StatCalculatorScript = preload("res://scripts/stat_calculator.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
+const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 
 var target_module: Node3D
 var start_scale: Vector3
@@ -140,21 +141,37 @@ func _on_dragged(offset_3d: Vector3, axis: Vector3):
 
 func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
 	if node.name == "Hull":
+		# Bounded scaling (FABLE_REVIEW.md 1.3): the concept doc always
+		# specced size-class bounds; the old code only clamped the low end,
+		# and since hull scale now drives real HP/weight/cost this needs a
+		# real ceiling too.
+		new_scale = new_scale.clamp(
+			Vector3.ONE * ModuleCatalogScript.HULL_SCALE_MIN,
+			Vector3.ONE * ModuleCatalogScript.HULL_SCALE_MAX)
 		# Scale Isolation: scale only the MeshInstance3D and CollisionShape3D directly.
 		# This keeps the parent Hull node scale at (1, 1, 1), avoiding module deformation.
 		node.set_meta("hull_scale", new_scale)
 		var base_size = Vector3(4.0, 1.0, 6.0)
 		if node.has_meta("base_hull_size"):
 			base_size = node.get_meta("base_hull_size")
-			
+
 		var target_size = base_size * new_scale
-		
-		# Resize MeshInstance3D
+
+		# Resize MeshInstance3D. Authored .glb hulls are ArrayMeshes - they
+		# scale via mesh_inst.scale (same as update_hull_appearance() /
+		# reconstruct_vehicle() do), not via BoxMesh.size; previously the
+		# non-BoxMesh path was simply missing, so dragging a scale handle on
+		# any authored hull moved the collision box and the stats but not
+		# the visible mesh until some later full rebuild (FABLE_REVIEW.md 3.8).
+		var armor_thick = node.get_meta("armor_thickness") if node.has_meta("armor_thickness") else 1.0
+		var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
 		var mesh_inst = node.get_node_or_null("MeshInstance3D")
 		if mesh_inst and mesh_inst.mesh is BoxMesh:
 			if not mesh_inst.mesh.resource_local_to_scene:
 				mesh_inst.mesh = mesh_inst.mesh.duplicate()
 			mesh_inst.mesh.size = target_size
+		elif mesh_inst:
+			mesh_inst.scale = new_scale * armor_bulk
 			
 		# Resize CollisionShape3D
 		var col_shape = node.get_node_or_null("CollisionShape3D")

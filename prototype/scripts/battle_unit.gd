@@ -149,17 +149,17 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	if not hull_node:
 		return
 
-	# HP model matches the test range: hull base HP * thickness * material multiplier
+	# HP via the shared hull-stat function (ModuleCatalog.compute_hull_max_hp,
+	# FABLE_REVIEW.md 2.6) so combat, defenses, and the Design Lab sidebar
+	# all read the same number - hull SCALE now genuinely scales HP too
+	# (previously stretching a hull changed nothing but mounting area).
 	var hull_type = hull_node.get_meta("type_id") if hull_node.has_meta("type_id") else "medium_hull"
 	var catalog_data = ModuleCatalog.get_module_data(hull_type)
 	var thick = hull_node.get_meta("armor_thickness") if hull_node.has_meta("armor_thickness") else 1.0
 	var mat = hull_node.get_meta("armor_material") if hull_node.has_meta("armor_material") else "hardened_steel"
-	var mat_mult = 1.0
-	if mat == "reactive_armor": mat_mult = 1.3
-	elif mat == "ablative_ceramic": mat_mult = 1.6
-	elif mat == "energy_shielding": mat_mult = 2.0
+	var unit_hull_scale = hull_node.get_meta("hull_scale") if hull_node.has_meta("hull_scale") else Vector3.ONE
 	var faction_for_hp = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
-	max_hp = catalog_data.hp * thick * mat_mult * FactionCatalog.get_passive(faction_for_hp, "hp_mult", 1.0)
+	max_hp = ModuleCatalog.compute_hull_max_hp(hull_type, thick, mat, unit_hull_scale) * FactionCatalog.get_passive(faction_for_hp, "hp_mult", 1.0)
 	hp = max_hp
 
 	# Collision shape matching the hull
@@ -306,7 +306,18 @@ func _detect_harvester():
 func _recalculate_move_speed():
 	if not is_instance_valid(hull_node):
 		return
-	var total_weight = 0.0
+	# Hull weight is REAL now (FABLE_REVIEW.md 1.2): the hull's own mass -
+	# including its armor material/thickness and the Industrialists'
+	# armor-weight discount, which was previously display-only - enters the
+	# same weight total the thrust and overload math read. Armoring up
+	# finally costs speed in combat, not just in the sidebar label.
+	var speed_hull_type = hull_node.get_meta("type_id", "medium_hull")
+	var speed_thick = hull_node.get_meta("armor_thickness") if hull_node.has_meta("armor_thickness") else 1.0
+	var speed_mat = hull_node.get_meta("armor_material") if hull_node.has_meta("armor_material") else "hardened_steel"
+	var speed_hull_scale = hull_node.get_meta("hull_scale") if hull_node.has_meta("hull_scale") else Vector3.ONE
+	var speed_faction = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
+	var armor_wt_mult = FactionCatalog.get_passive(speed_faction, "armor_weight_mult", 1.0)
+	var total_weight = ModuleCatalog.compute_hull_weight(speed_hull_type, speed_thick, speed_mat, speed_hull_scale, armor_wt_mult)
 	var motor_thrust = 100.0
 	var total_weight_capacity = 0.0
 	var has_locomotion = false
@@ -370,7 +381,14 @@ func _recalculate_move_speed():
 		move_speed = 0.0
 		return
 	if total_weight > 0.0:
-		move_speed = clamp((motor_thrust / total_weight) * 5.0, 2.0, 15.0)
+		# Constant retuned 5.0 -> 10.0 alongside hull weight entering the
+		# denominator (roughly doubles typical totals), so a baseline bundled
+		# design keeps close to its old speed. Band widened (was 2.0-15.0):
+		# light builds were all converging on the old 15.0 ceiling, erasing
+		# thrust/weight differences between "different fast scouts"
+		# (FABLE_REVIEW.md 1.4), and the floor drops so a grossly overbuilt
+		# brick is genuinely slower than a merely heavy one.
+		move_speed = clamp((motor_thrust / total_weight) * 10.0, 1.5, 18.0)
 	# Overload penalty (task: "make the overall vehicle Weight stat actually
 	# matter"): weight beyond what the locomotion present is built for slows
 	# the unit down, on top of the thrust/weight ratio above. No penalty at

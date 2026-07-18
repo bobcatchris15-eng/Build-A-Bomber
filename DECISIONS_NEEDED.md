@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk D: armor/hull economy (review items 1.2, 1.3, 2.6, 3.8, 1.7-partial)
+
+**Not blocking - implemented, all suites green (1 new, 3 updated), screenshots in progress_captures/2026-07-18_fable_fixes/.** Design calls:
+
+- **Hull-level stats now live in one place**: `ModuleCatalog.compute_hull_max_hp/weight/cost()`, consumed by battle_unit, building (defenses), battlefield (Test Range - its hand-rolled HP copy is deleted), skirmish.blueprint_cost, AND the sidebar. The review's 2.6 drift ("Total HP: 0.0" on a hull that fields at 400) is gone; the sidebar now reads "Hull HP: X (modules +Y)" with a tooltip explaining the strip-pool split.
+- **Armor mass model: half structure, half armor.** `hull_weight = base x volume x (0.5 + 0.5 x thickness x material_density x faction_armor_mult)` - so thickness 3.0 doubles a steel hull's mass but energy_shielding (density 0.5) keeps its light-armor identity. This weight now enters the REAL combat weight total (thrust ratio + overload penalty), which also makes the Industrialists' 20% armor-weight passive real combat behavior for the first time (review 1.7's "cosmetic passive" - resolved as a free consequence, not a special case).
+- **Armor cost: superlinear thickness curve (t^1.5) x per-material multipliers**, with energy_shielding deliberately crystal-hungry (3x crystal). Concrete anchor: medium_hull baseline 100M/20C -> thickness-3.0 energy_shielding 282M/103C (verified in the screenshot). Rationale: each extra point of threshold should cost more than the last so "max the slider" stops being automatic; shielding keeps the best HP-per-weight but now bottlenecks the scarce resource.
+- **energy_shielding's kinetic row weakened to the worst in the table** (threshold 20 -> 10, reduction 0.5 -> 0.75): "shields stop beams, not shells." Completes a real material rock-paper-scissors (steel=kinetic, reactive=explosive, ablative=thermal, shielding=energy) - it was previously best-or-tied in every class.
+- **Hull scale drives HP/weight/cost (sub-linear volume scaling, same GlobalConfig factors modules use) and is clamped to [0.5, 2.0] per axis** in the gizmo. One global bound rather than per-size-class bounds for now - the concept doc's per-class bounds need a real size-class design first; logged as a future refinement, not skipped silently. Also fixed review 3.8 en route: the gizmo's non-BoxMesh branch was missing, so scale-handle drags never visibly resized authored hulls until a later rebuild.
+- **Speed formula retuned x5 -> x10 with the band widened (2.0-15.0 -> 1.5-18.0)** to compensate for hull weight roughly doubling denominators - a baseline bundled MBT keeps close to its old speed. The wider ceiling also un-flattens light builds that were all pinned at the old 15.0 cap (review 1.4's convergence note).
+- **Test updates that changed meaning, not just numbers**: the Aerodrome Cartel speed test's baseline faction switched industrialists -> ledger_combine (industrialists stopped being weight-neutral the moment their passive became real); the capacity-penalty test's mock scenarios re-weighted for hull mass in the total.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk C: damage-model rework (review items 1.1, 2.5-partial, 3.6, 1.8)
 
 **Not blocking - implemented, all suites green (1 new, 2 updated).** This is the chunk with the most real DESIGN calls in it:
