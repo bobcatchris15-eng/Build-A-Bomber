@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk H: Power Plant building (2.7) - real supply-side Energy, placeholder geometry per Chris's explicit instruction
+
+**Not blocking - implemented, headless suite green (1 new test), Chris explicitly greenlit this item and explicitly said not to invest in bespoke mesh work since he's replacing every building mesh with authored art later.**
+
+Added `"power_plant"` as a new `building.gd` `PREFAB_STATS` entry (hp 1000, size 4.5x4.2x4.5, cost 180M/40C) buildable from the Skirmish build bar exactly like Refinery/Manufactory already are. It contributes `energy_capacity: 20.0` to its team's Energy pool (`skirmish.gd`'s `_recalc_energy_economy()`) while still owing the standard per-static-building upkeep (3.0) like every other prefab - net +17.0, a real, clearly-worth-it investment, same "contributes AND owes upkeep" pattern the HQ's own baseline already uses. Closes the review's flagged gap directly: previously the only way to raise team Energy capacity was a generator MODULE bolted onto a mobile unit or a defense hull, so "put a fusion_generator on a tank so the base builds faster, lose the tank, lose the base's power" was the actual optimal play - backwards for what's supposed to be base infrastructure.
+
+**Design/scope calls:**
+- **Generic field, not a hardcoded special case.** `energy_capacity` is a plain `PREFAB_STATS` field read the same way for every building kind (`building.gd`'s `setup_prefab()` sets it from the stats dict, defaulting to 0.0; `skirmish.gd` sums `b.energy_capacity` across all buildings unconditionally) - not an `if b.kind == "power_plant"` special case. Any future prefab building (Chris's own art pass might want more than one Energy building type) opts in for free with no further code changes.
+- **Placeholder box + a simple glowing-coil rooftop detail, matching the existing refinery/manufactory pattern exactly** (a plain `BoxMesh` + one small primitive "identifying detail," same convention every other prefab building already uses) - per Chris's explicit instruction not to invest real Blender-authored effort here since he's replacing every building mesh with his own externally-made models later. The origin/pivot convention matches every other prefab building automatically (box centered in X/Z at the origin, sitting on y=0, collision shape identical) since it reuses the exact same `setup_prefab()` code path rather than introducing a new one - nothing bespoke to get wrong here for a future mesh swap to build on.
+- **Cost/HP/capacity numbers are hand-picked**, anchored against the existing constants (`ENERGY_HQ_BASELINE_CAPACITY = 16.0`, `ENERGY_UPKEEP_PER_STATIC_BUILDING = 3.0`) rather than invented from nothing, but still a first-pass balance guess a real playtest could retune - flagging the same way chunk F's AoE radii were.
+- **Enemy AI doesn't build power plants (or any player-buildable building at all).** Traced `enemy_ai.gd` before assuming otherwise: it only ever queues UNITS from its roster (`_try_produce()`/`_ensure_harvester()`); it has never placed a refinery, manufactory, or defense building beyond its fixed match-start set, and nothing in this pass changes that scope. Not a regression specific to Power Plant - consistent with how every other player-buildable building already works today.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk G: enemy AI counter-picks the player's composition (2.1, scoped to the AI half only)
 
 **Not blocking - implemented, headless suite green (1 new test).**

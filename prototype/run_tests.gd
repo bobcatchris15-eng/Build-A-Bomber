@@ -127,6 +127,7 @@ func _init():
 	success = success and await test_hull_economy_and_scale_bounds()
 	success = success and await test_explosive_weapons_deal_real_aoe_damage()
 	success = success and await test_enemy_ai_counter_picks_the_players_composition()
+	success = success and await test_power_plant_building_supplies_real_team_energy_capacity()
 
 	print("\n==============================================")
 	if success:
@@ -7044,4 +7045,51 @@ func test_enemy_ai_counter_picks_the_players_composition() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Enemy AI reads the player's live composition (air/armor majority) and biases its next build toward a design that actually answers it, falling back to round-robin otherwise.")
+	return true
+
+func test_power_plant_building_supplies_real_team_energy_capacity() -> bool:
+	print("Running Test Suite: Power Plant Building - Real Supply-Side Energy Capacity (FABLE_REVIEW 2.7)...")
+	var BuildingScript = preload("res://scripts/building.gd")
+
+	# Catalog data itself, no scene needed.
+	var stats = BuildingScript.PREFAB_STATS.get("power_plant", {})
+	if stats.is_empty() or stats.get("energy_capacity", 0.0) <= 0.0 or stats.get("hp", 0.0) <= 0.0 or stats.get("cost_metal", 0) <= 0:
+		print("  [FAIL] power_plant should have a real PREFAB_STATS entry (hp/cost/energy_capacity all > 0), got ", stats)
+		return false
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var capacity_before = skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity
+	var energy_before = skirmish.energy_pool[skirmish.PLAYER_TEAM].energy
+
+	var plant = skirmish._spawn_prefab("power_plant", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(15, 0, 0), skirmish.player_faction)
+	await process_frame
+	skirmish._recalc_energy_economy()
+
+	var capacity_after = skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity
+	var energy_after = skirmish.energy_pool[skirmish.PLAYER_TEAM].energy
+
+	if capacity_after < capacity_before + stats.energy_capacity - 0.01:
+		print("  [FAIL] Building a power_plant should raise team Energy capacity by its own energy_capacity (", stats.energy_capacity, "), got capacity ", capacity_before, " -> ", capacity_after)
+		plant.queue_free()
+		skirmish.queue_free()
+		return false
+
+	# Net positive, not just a bigger number that's also a bigger drain -
+	# the whole point of a DEDICATED supply building (unlike a refinery/
+	# manufactory, which contribute 0 capacity but still owe upkeep).
+	if energy_after <= energy_before:
+		print("  [FAIL] A power_plant should be a net-positive Energy investment (its own upkeep shouldn't eat its whole contribution), got available energy ", energy_before, " -> ", energy_after)
+		plant.queue_free()
+		skirmish.queue_free()
+		return false
+
+	plant.queue_free()
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] power_plant is a real, buildable, net-positive supply-side Energy building - capacity ", capacity_before, " -> ", capacity_after, ", available energy ", energy_before, " -> ", energy_after, ".")
 	return true

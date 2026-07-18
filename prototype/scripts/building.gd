@@ -1,6 +1,6 @@
 extends StaticBody3D
 # Prefab base structures (C&C style) plus custom-designed defensive structures.
-# kind: "hq" | "refinery" | "light_manufactory" | "medium_manufactory" | "heavy_manufactory" | "defense"
+# kind: "hq" | "refinery" | "light_manufactory" | "medium_manufactory" | "heavy_manufactory" | "power_plant" | "defense"
 
 signal died(building)
 signal unit_produced(unit)
@@ -21,6 +21,17 @@ const PREFAB_STATS = {
 	"light_manufactory":  {"hp": 1400.0, "size": Vector3(5, 2.4, 6),  "color": Color(0.68, 0.6, 0.42), "cost_metal": 150, "cost_crystal": 30},
 	"medium_manufactory": {"hp": 1800.0, "size": Vector3(6, 3, 8),    "color": Color(0.72, 0.55, 0.42), "cost_metal": 220, "cost_crystal": 55},
 	"heavy_manufactory":  {"hp": 2400.0, "size": Vector3(7.5, 3.8, 10), "color": Color(0.6, 0.42, 0.35), "cost_metal": 320, "cost_crystal": 85},
+	# FABLE_REVIEW.md 2.7: a real supply-side building for team Energy -
+	# previously capacity only ever came from generator MODULES bolted onto
+	# units/defenses, so "put a fusion_generator on a tank so the base builds
+	# faster; lose the tank, lose the base's power" was the actual optimal
+	# play. energy_capacity is a generic PREFAB_STATS field (see
+	# setup_prefab() below and skirmish.gd's _recalc_energy_economy()) so any
+	# future prefab building can opt in the same way - not power_plant-only
+	# hardcoding. Placeholder box geometry deliberately - Chris is replacing
+	# every building mesh with authored art later, so this pass is data/
+	# wiring only, not a Blender pass (see DECISIONS_NEEDED.md).
+	"power_plant": {"hp": 1000.0, "size": Vector3(4.5, 4.2, 4.5), "color": Color(0.85, 0.65, 0.2), "cost_metal": 180, "cost_crystal": 40, "energy_capacity": 20.0},
 }
 
 const MANUFACTORY_KINDS = ["light_manufactory", "medium_manufactory", "heavy_manufactory"]
@@ -38,10 +49,20 @@ var armor_material: String = "hardened_steel"
 var armor_thickness: float = 1.0
 # Energy resource (ENERGY_AND_BALANCE_SPEC.md #1) - only meaningful for
 # "defense" kind buildings, which are the only kind that can mount weapon
-# or generator modules (hq/refinery/manufactories are fixed prefabs).
+# or generator modules (hq/refinery/manufactories are fixed prefabs). This
+# is a per-building CAPACITOR (spent/regenerated firing energy weapons) -
+# not the same thing as energy_capacity below.
 var max_energy: float = 0.0
 var current_energy: float = 0.0
 var energy_regen_rate: float = 0.0
+
+# This building's own flat contribution to its TEAM's shared energy_pool
+# capacity (skirmish.gd's _recalc_energy_economy()) - distinct from
+# max_energy above. Generic across every prefab kind (FABLE_REVIEW.md 2.7):
+# 0.0 for everything except power_plant today, but any future prefab
+# building can opt in via its own PREFAB_STATS "energy_capacity" entry with
+# no further code changes.
+var energy_capacity: float = 0.0
 
 # Fog-of-war (built this pass) - prefab buildings (hq/refinery/factory) get
 # a flat default; "defense" buildings compute it same as vehicles (base +
@@ -74,6 +95,7 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 	max_hp = stats.hp
 	hp = max_hp
 	footprint = stats.size
+	energy_capacity = stats.get("energy_capacity", 0.0)
 
 	var mesh_inst = MeshInstance3D.new()
 	mesh_inst.name = "MeshInstance3D"
@@ -108,6 +130,15 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 			silo.height = 1.5
 			detail.mesh = silo
 			detail.position = Vector3(1.2, stats.size.y + 0.75, 1.2)
+		"power_plant":
+			# Placeholder-simple by design (see PREFAB_STATS comment) - a
+			# glowing coil so it reads as "power" at a glance, nothing more.
+			var coil = CylinderMesh.new()
+			coil.top_radius = 0.6
+			coil.bottom_radius = 0.9
+			coil.height = 1.8
+			detail.mesh = coil
+			detail.position = Vector3(0, stats.size.y + 0.9, 0)
 		"light_manufactory", "medium_manufactory", "heavy_manufactory":
 			var vent = BoxMesh.new()
 			vent.size = Vector3(stats.size.x * 0.65, 0.6, 1.2)

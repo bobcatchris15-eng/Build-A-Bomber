@@ -237,7 +237,13 @@ func _recalc_energy_economy():
 			for m in b.get_active_modules():
 				if m.has_meta("module_data") and m.get_meta("module_data").category == "generator":
 					capacity += m.get_meta("module_data").get_energy_capacity()
-			var is_static_building = b.kind in ["hq", "refinery", "light_manufactory", "medium_manufactory", "heavy_manufactory"] or (b.kind == "defense" and is_instance_valid(b.defense_hull) and ModuleCatalog.is_foundation(b.defense_hull.get_meta("type_id", "pillbox_foundation")))
+			# FABLE_REVIEW.md 2.7: a dedicated supply-side building
+			# (power_plant) contributes here too - generic across any
+			# prefab kind via building.gd's energy_capacity field, not a
+			# power_plant-specific special case.
+			if "energy_capacity" in b:
+				capacity += b.energy_capacity
+			var is_static_building = b.kind in ["hq", "refinery", "light_manufactory", "medium_manufactory", "heavy_manufactory", "power_plant"] or (b.kind == "defense" and is_instance_valid(b.defense_hull) and ModuleCatalog.is_foundation(b.defense_hull.get_meta("type_id", "pillbox_foundation")))
 			if not is_static_building: continue
 			if FactionCatalog.get_passive(faction, "energy_upkeep_exempt", false): continue
 			upkeep += ENERGY_UPKEEP_PER_STATIC_BUILDING
@@ -795,6 +801,12 @@ func _build_ui():
 		_begin_placement({"kind": "heavy_manufactory", "cost_metal": 320, "cost_crystal": 85}))
 	_add_build_button("⛽ Refinery\n150M", Color(0.55, 0.62, 0.75), func():
 		_begin_placement({"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}))
+	# Real supply-side Energy building (FABLE_REVIEW.md 2.7) - previously
+	# capacity only ever came from generator modules bolted onto units/
+	# defenses, so losing the one tank carrying a fusion_generator meant
+	# losing the base's power. Cost/stats live in building.gd's PREFAB_STATS.
+	_add_build_button("⚡ Power Plant\n180M 40C", Color(0.85, 0.65, 0.2), func():
+		_begin_placement({"kind": "power_plant", "cost_metal": 180, "cost_crystal": 40}))
 
 	for entry in roster:
 		var e = entry
