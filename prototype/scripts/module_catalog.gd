@@ -1,8 +1,14 @@
 class_name ModuleCatalog
 
-# Returns a dictionary containing all module types
+const HullLoader = preload("res://scripts/hull_loader.gd")
+
+# Returns a dictionary containing all module types. Hull entries (category
+# "hull") are no longer hardcoded here - see hull_loader.gd, which lazily
+# scans same-stem .glb+.json pairs from res://assets/models/hulls (built-in)
+# and user://mods/hulls (player-added mods) once and caches the result, so
+# merging it in here on every call stays cheap (HULL_MODDING_PLAN.md §3).
 static func get_catalog() -> Dictionary:
-	return {
+	var catalog = {
 		# --- BALLISTIC & KINETIC ---
 		"basic_cannon": {
 			"name": "Main Cannon",
@@ -848,289 +854,31 @@ static func get_catalog() -> Dictionary:
 			"color": Color(0.32, 0.3, 0.24),
 			"traits": ["ground_contact", "amphibious"]
 		},
-
-		# --- HULL SIZE CLASSES ---
-		"light_hull": {
-			"name": "Light Hull",
-			"category": "hull",
-			"hp": 200.0,
-			"weight": 100.0,
-			"metal": 50,
-			"crystal": 10,
-			"dps": 0.0,
-			"base_energy": 40.0,
-			"base_vision": 22.0,
-			"size": Vector3(3.0, 1.0, 4.0),
-			"color": Color.LIGHT_GRAY
-		},
-		"medium_hull": {
-			"name": "Medium Hull",
-			"category": "hull",
-			"hp": 400.0,
-			"weight": 250.0,
-			"metal": 100,
-			"crystal": 20,
-			"dps": 0.0,
-			"base_energy": 70.0,
-			"base_vision": 20.0,
-			"size": Vector3(4.0, 1.0, 6.0),
-			"color": Color.GRAY
-		},
-		"heavy_hull": {
-			"name": "Heavy Hull",
-			"category": "hull",
-			"hp": 1000.0,
-			"weight": 800.0,
-			"metal": 250,
-			"crystal": 50,
-			"dps": 0.0,
-			"base_energy": 130.0,
-			"base_vision": 18.0,
-			"size": Vector3(6.0, 1.5, 8.0),
-			"color": Color.DARK_GRAY
-		},
-		"interceptor_hull": {
-			"name": "Interceptor Hull",
-			"category": "hull",
-			"hp": 130.0,
-			"weight": 65.0,
-			"metal": 35,
-			"crystal": 8,
-			"dps": 0.0,
-			"base_energy": 35.0,
-			# Fast scout archetype gets the best base vision of any hull -
-			# thematically consistent with its role even before a
-			# sensor_suite is ever mounted.
-			"base_vision": 26.0,
-			"size": Vector3(2.4, 0.8, 3.2),
-			"color": Color(0.55, 0.65, 0.78)
-		},
-		"assault_hull": {
-			"name": "Assault Hull",
-			"category": "hull",
-			"hp": 650.0,
-			"weight": 500.0,
-			"metal": 170,
-			"crystal": 35,
-			"dps": 0.0,
-			"base_energy": 90.0,
-			"base_vision": 18.0,
-			"size": Vector3(5.0, 1.3, 7.0),
-			"color": Color(0.4, 0.32, 0.28)
-		},
-
-		# --- DEFENSIVE FOUNDATIONS (static structures, no locomotion) ---
-		"pillbox_foundation": {
-			"name": "Pillbox Foundation",
-			"category": "hull",
-			"is_foundation": true,
-			"hp": 800.0,
-			"weight": 0.0,
-			"metal": 80,
-			"crystal": 0,
-			"dps": 0.0,
-			"base_energy": 60.0,
-			"base_vision": 16.0,
-			"size": Vector3(3.0, 1.2, 3.0),
-			"color": Color(0.45, 0.45, 0.4)
-		},
-		"tower_foundation": {
-			"name": "Tower Foundation",
-			"category": "hull",
-			"is_foundation": true,
-			"hp": 1400.0,
-			"weight": 0.0,
-			"metal": 160,
-			"crystal": 20,
-			"dps": 0.0,
-			"base_energy": 100.0,
-			# A watchtower should see far - height is the whole point of it.
-			"base_vision": 28.0,
-			"size": Vector3(3.0, 4.0, 3.0),
-			"color": Color(0.5, 0.48, 0.44)
-		},
-		"naval_hull": {
-			"name": "Naval Hull",
-			"category": "hull",
-			# Purpose-built ship hull for naval_propeller - a wedge hull
-			# floating at the waterline worked mechanically but had nothing
-			# boat-shaped to actually show for it.
-			# Draught (terrain variety task - see get_hull_draught() and
-			# SHALLOW_WATER_DRAUGHT_THRESHOLD below): a real mid-size
-			# destroyer-class draught, under the shallow-water threshold -
-			# can still work close to shore, unlike heavy_cruiser_hull.
-			"draught": 0.9,
-			# Visual bug pass finding (see get_underside_y_bias() below): the
-			# hull's real keel bottom sits at -0.6*halfHeight, not the
-			# collision box's exact -halfHeight - wheels/legs/hover_engine/
-			# anti_grav mounted at the naive box-bottom offset floated
-			# visibly below the actual hull mesh. Bias = the gap between
-			# the two (0.4 * halfHeight = 0.4 * 0.8).
-			"underside_y_bias": 0.32,
-			"hp": 550.0,
-			"weight": 380.0,
-			"metal": 145,
-			"crystal": 25,
-			"dps": 0.0,
-			"base_energy": 70.0,
-			"base_vision": 17.0,
-			"size": Vector3(3.5, 1.6, 9.0),
-			"color": Color(0.35, 0.38, 0.4)
-		},
-		"flying_wing_hull": {
-			"name": "Flying Wing Hull",
-			"category": "hull",
-			# Blended-wing-body airframe for fixed_wing_engine - lightweight
-			# and fast like interceptor_hull, but a genuinely different
-			# silhouette rather than the same wedge-hull shape used on the
-			# ground.
-			"hp": 230.0,
-			"weight": 140.0,
-			"metal": 55,
-			"crystal": 15,
-			"dps": 0.0,
-			"base_energy": 30.0,
-			"base_vision": 24.0,
-			"size": Vector3(5.0, 0.7, 3.6),
-			"color": Color(0.5, 0.52, 0.56)
-		},
-		"sponson_hull": {
-			"name": "Sponson Hull",
-			"category": "hull",
-			# Heavy ground hull with sponson stubs baked into the base
-			# silhouette (wider mid-body, narrower fore/aft) rather than
-			# sponsons being purely a mount-hardware visual added at
-			# placement time - a genuinely different base shape to build on.
-			"hp": 800.0,
-			"weight": 650.0,
-			"metal": 210,
-			"crystal": 40,
-			"dps": 0.0,
-			"base_energy": 105.0,
-			"base_vision": 17.0,
-			"size": Vector3(6.5, 1.6, 7.5),
-			"color": Color(0.38, 0.36, 0.32)
-		},
-		"small_boat_hull": {
-			"name": "Small Boat Hull",
-			"category": "hull",
-			# A fast patrol boat - naval_hull's little sibling. Sharper bow
-			# (bow_frac=0.5 vs naval_hull's 0.35) and a much smaller
-			# footprint for a genuinely different niche (scout/raider) than
-			# just a smaller version of the same silhouette.
-			# Shallow draught by design - a real patrol boat's whole point
-			# is working close to shore/in shallows a bigger warship can't
-			# reach, well under SHALLOW_WATER_DRAUGHT_THRESHOLD.
-			"draught": 0.35,
-			# Same keel-vs-box-bottom gap as naval_hull (build_ship_hull's
-			# shared geometry) - see get_underside_y_bias().
-			"underside_y_bias": 0.2,
-			"hp": 220.0,
-			"weight": 130.0,
-			"metal": 55,
-			"crystal": 10,
-			"dps": 0.0,
-			"base_energy": 30.0,
-			"base_vision": 22.0,
-			"size": Vector3(2.0, 1.0, 5.0),
-			"color": Color(0.4, 0.42, 0.44)
-		},
-		"heavy_cruiser_hull": {
-			"name": "Heavy Cruiser Hull",
-			"category": "hull",
-			# naval_hull's big sibling - layered superstructure, twin
-			# funnels, real warship bulk. Sits above naval_hull in the same
-			# way heavy_hull sits above medium_hull.
-			# Deep draught - the whole point of "genuinely different, not
-			# just slower" for this hull class: well over
-			# SHALLOW_WATER_DRAUGHT_THRESHOLD, physically can't enter
-			# shallow water at all (see get_hull_draught()), not just
-			# penalized for trying.
-			"draught": 1.8,
-			# Same keel-vs-box-bottom gap as naval_hull (build_ship_hull's
-			# shared geometry) - see get_underside_y_bias().
-			"underside_y_bias": 0.38,
-			"hp": 900.0,
-			"weight": 680.0,
-			"metal": 255,
-			"crystal": 50,
-			"dps": 0.0,
-			"base_energy": 110.0,
-			"base_vision": 15.0,
-			"size": Vector3(4.4, 1.9, 10.5),
-			"color": Color(0.3, 0.32, 0.34)
-		},
-		"fuselage_hull": {
-			"name": "Fuselage Hull",
-			"category": "hull",
-			# Traditional plane: a tapered fuselage tube + separate attached
-			# wing slab, unlike flying_wing_hull's blended-wing-body (no
-			# fuselage/wing break at all). Positioned as the tougher/heavier
-			# fixed-wing airframe - flying_wing_hull is the fast/light
-			# interceptor-style airframe, this is the bomber/cargo-style one.
-			"hp": 300.0,
-			"weight": 210.0,
-			"metal": 80,
-			"crystal": 18,
-			"dps": 0.0,
-			"base_energy": 45.0,
-			"base_vision": 20.0,
-			"size": Vector3(4.2, 1.2, 6.2),
-			"color": Color(0.6, 0.6, 0.62)
-		},
-		"airship_hull": {
-			"name": "Airship Hull",
-			"category": "hull",
-			# Rigid dirigible: cigar/teardrop gasbag envelope + slung
-			# gondola. Pairs with the new buoyant_envelope locomotion (see
-			# its own catalog comment and DECISIONS_NEEDED.md) rather than
-			# fixed_wing_engine - buoyant lift, not thrust fighting gravity,
-			# so it wants a locomotion flavor with a very high
-			# base_weight_capacity and a low thrust_coefficient, not just a
-			# reskinned fixed-wing airframe.
-			# Visual bug pass finding: the ellipsoid envelope's Y-extent at
-			# the sides (where underside-mounted locomotion like wheels
-			# actually attaches) is far less than at center - a naive box-
-			# bottom mount floated visibly below the envelope. Approximated
-			# with the same 0.4x-halfHeight gap the ship hulls use (a
-			# curved-envelope silhouette has a similar "less depth away
-			# from center" shape) - this combo (wheels/legs on an airship)
-			# is nonsensical enough that an exact ellipse fit isn't worth
-			# the complexity, "no longer floating in obvious empty space"
-			# is the actual bar.
-			"underside_y_bias": 0.6,
-			"hp": 480.0,
-			"weight": 260.0,
-			"metal": 95,
-			"crystal": 30,
-			"dps": 0.0,
-			"base_energy": 55.0,
-			"base_vision": 24.0,
-			"size": Vector3(4.0, 3.0, 9.5),
-			"color": Color(0.72, 0.7, 0.6)
-		},
-		"fortress_wall_foundation": {
-			"name": "Fortress Wall Foundation",
-			"category": "hull",
-			"is_foundation": true,
-			# A rampart, not a watchtower - tankier per-slot than the pillbox
-			# (long battlement face, deliberately no roof to defend), but
-			# doesn't see far like the tower.
-			"hp": 1100.0,
-			"weight": 0.0,
-			"metal": 140,
-			"crystal": 10,
-			"dps": 0.0,
-			"base_energy": 70.0,
-			"base_vision": 14.0,
-			"size": Vector3(6.0, 2.2, 1.3),
-			"color": Color(0.42, 0.4, 0.36)
-		}
 	}
+
+	# Hull entries (category "hull") are scanned from disk, not hardcoded -
+	# see HullLoader's class header. Merged in here so every existing call
+	# site (get_module_data(), validate_build_legality(), etc.) keeps
+	# reading hulls out of the exact same unified dict as before.
+	for hull_id in HullLoader.get_hulls():
+		catalog[hull_id] = HullLoader.get_hulls()[hull_id]
+
+	return catalog
 
 static func is_foundation(type_id: String) -> bool:
 	var data = get_module_data(type_id)
 	return data.get("is_foundation", false)
+
+# Real existence check for a hull id, distinct from get_module_data()'s
+# always-succeeds-with-a-fallback contract - needed now that hulls are
+# scanned from disk and a blueprint can reference a hull id that simply
+# isn't installed (mod uninstalled, typo, hand-edited save). Callers that
+# need to tell "this hull is really missing" apart from "this hull exists
+# and happens to have field X at its default" must use this, not
+# get_module_data(id).is_empty() (which is never empty - see get_module_data()).
+static func hull_exists(type_id: String) -> bool:
+	var cat = get_catalog()
+	return cat.has(type_id) and cat[type_id].get("category", "") == "hull"
 
 # Energy resource (ENERGY_AND_BALANCE_SPEC.md #1): a hull's base_energy is
 # the starting point for max_energy before any generator modules are

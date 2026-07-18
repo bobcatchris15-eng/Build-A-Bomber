@@ -1,0 +1,21 @@
+{
+	"base_energy": 70,
+	"base_vision": 14,
+	"color": [
+		0.419999986886978,
+		0.400000005960464,
+		0.360000014305115,
+		1
+	],
+	"crystal": 10,
+	"hp": 1100,
+	"is_foundation": true,
+	"metal": 140,
+	"name": "Fortress Wall Foundation",
+	"size": [
+		6,
+		2.20000004768372,
+		1.29999995231628
+	],
+	"weight": 0
+}

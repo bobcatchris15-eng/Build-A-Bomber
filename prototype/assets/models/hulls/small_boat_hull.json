@@ -1,0 +1,22 @@
+{
+	"base_energy": 30,
+	"base_vision": 22,
+	"color": [
+		0.400000005960464,
+		0.419999986886978,
+		0.439999997615814,
+		1
+	],
+	"crystal": 10,
+	"draught": 0.35,
+	"hp": 220,
+	"metal": 55,
+	"name": "Small Boat Hull",
+	"size": [
+		2,
+		1,
+		5
+	],
+	"underside_y_bias": 0.2,
+	"weight": 130
+}

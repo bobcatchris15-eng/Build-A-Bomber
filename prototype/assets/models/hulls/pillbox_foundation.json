@@ -1,0 +1,21 @@
+{
+	"base_energy": 60,
+	"base_vision": 16,
+	"color": [
+		0.449999988079071,
+		0.449999988079071,
+		0.400000005960464,
+		1
+	],
+	"crystal": 0,
+	"hp": 800,
+	"is_foundation": true,
+	"metal": 80,
+	"name": "Pillbox Foundation",
+	"size": [
+		3,
+		1.20000004768372,
+		3
+	],
+	"weight": 0
+}
