@@ -10,6 +10,7 @@ extends SceneTree
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const ModuleData = preload("res://scripts/module_data.gd")
+const HullLoader = preload("res://scripts/hull_loader.gd")
 const PlayerVehicleScript = preload("res://scripts/player_vehicle.gd")
 const TargetDummyScript = preload("res://scripts/target_dummy.gd")
 const IncomingMissileScript = preload("res://scripts/incoming_missile.gd")
@@ -114,6 +115,10 @@ func _init():
 	success = success and await test_ornithopter_wing_spawns_flaps_and_flies()
 	success = success and await test_rhomboid_treads_spawns_and_differentiates_from_tracked_treads()
 	success = success and await test_omni_wheels_can_strafe_sideways_without_turning()
+	success = success and await test_hull_modding_loader_scan_and_validation()
+	success = success and await test_hull_modding_parts_menu_two_buckets()
+	success = success and await test_hull_modding_hard_fail_on_unknown_hull()
+	success = success and await test_hull_modding_mod_hull_placeable()
 
 	print("\n==============================================")
 	if success:
@@ -6032,4 +6037,222 @@ func test_omni_wheels_can_strafe_sideways_without_turning() -> bool:
 	omni_controller.queue_free()
 	wheels_controller.queue_free()
 	print("  [PASS] omni_wheels unit genuinely strafes sideways while holding a fixed facing (near-zero rotation change), out-pacing a plain wheeled unit toward the same sideways destination since it doesn't have to turn first.")
+	return true
+
+# --- Hull Modding (HULL_MODDING_PLAN.md) ---
+
+func test_hull_modding_loader_scan_and_validation() -> bool:
+	print("Running Test Suite: Hull Modding - HullLoader Scan, Validation, Mod-Overrides-Builtin Precedence...")
+	var mods_dir = "user://mods/hulls"
+	DirAccess.make_dir_recursive_absolute(mods_dir)
+
+	var written_files = []
+	var write_file = func(fname: String, content: String):
+		var f = FileAccess.open(mods_dir + "/" + fname, FileAccess.WRITE)
+		f.store_string(content)
+		f.close()
+		written_files.append(mods_dir + "/" + fname)
+
+	# Malformed sidecars - must be skipped (with a warning), never fatal to
+	# the whole scan (HULL_MODDING_PLAN.md §3, validation points 1-3).
+	write_file.call("bad_missing_field.json", JSON.stringify({"name": "Bad", "hp": 1.0}))
+	write_file.call("bad_missing_field.glb", "")
+	write_file.call("bad_wrong_type.json", JSON.stringify({"name": "Bad2", "hp": "nope", "weight": 1.0, "metal": 1, "crystal": 1, "size": [1, 1, 1], "color": [1, 1, 1]}))
+	write_file.call("bad_wrong_type.glb", "")
+
+	var good_id = "run_tests_smoke_mod_hull"
+	write_file.call(good_id + ".json", JSON.stringify({"name": "Run Tests Smoke Mod Hull", "hp": 111.0, "weight": 22.0, "metal": 5, "crystal": 1, "size": [1, 1, 1], "color": [1, 0, 0]}))
+	write_file.call(good_id + ".glb", "")
+
+	HullLoader.reset_cache_for_tests()
+	var hulls = HullLoader.get_hulls()
+
+	var ok = true
+	if not hulls.has(good_id):
+		print("  [FAIL] valid mod sidecar was not picked up")
+		ok = false
+	if hulls.has("bad_missing_field"):
+		print("  [FAIL] sidecar missing a required field should have been skipped, not defaulted")
+		ok = false
+	if hulls.has("bad_wrong_type"):
+		print("  [FAIL] sidecar with a wrong-typed field should have been skipped")
+		ok = false
+	if not HullLoader.is_modded(good_id):
+		print("  [FAIL] valid mod hull should be flagged as sourced from user://mods/hulls")
+		ok = false
+	if not hulls.has("medium_hull") or hulls["medium_hull"]["hp"] != 400.0:
+		print("  [FAIL] medium_hull should still be present and unaffected by unrelated mod files")
+		ok = false
+
+	# Mod-overrides-built-in precedence: a mod file using a built-in's own
+	# id (e.g. a rebalance/reskin mod) wins, since it's a deliberate,
+	# nameable override, not an accidental collision (HULL_MODDING_PLAN.md
+	# §5's open question - see DECISIONS_NEEDED.md for the reasoning).
+	write_file.call("medium_hull.json", JSON.stringify({"name": "Modded Medium Hull", "hp": 999.0, "weight": 250.0, "metal": 100, "crystal": 20, "size": [4, 1, 6], "color": [1, 1, 1]}))
+	write_file.call("medium_hull.glb", "")
+	HullLoader.reset_cache_for_tests()
+	hulls = HullLoader.get_hulls()
+	if hulls.get("medium_hull", {}).get("hp", -1.0) != 999.0:
+		print("  [FAIL] a mod hull should override a built-in hull of the same id")
+		ok = false
+	if not HullLoader.is_modded("medium_hull"):
+		print("  [FAIL] the overridden medium_hull should be flagged as modded while the override is active")
+		ok = false
+
+	for path in written_files:
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
+	if FileAccess.file_exists(mods_dir + "/medium_hull.json"):
+		DirAccess.remove_absolute(mods_dir + "/medium_hull.json")
+	if FileAccess.file_exists(mods_dir + "/medium_hull.glb"):
+		DirAccess.remove_absolute(mods_dir + "/medium_hull.glb")
+	HullLoader.reset_cache_for_tests()
+
+	# Real protection against this test silently leaking state into every
+	# test that runs after it: confirm a rescan after cleanup goes straight
+	# back to the true on-disk state.
+	var fresh = HullLoader.get_hulls()
+	if fresh.get("medium_hull", {}).get("hp", -1.0) != 400.0:
+		print("  [FAIL] medium_hull did not revert to its real built-in value after test cleanup")
+		ok = false
+	if fresh.has(good_id):
+		print("  [FAIL] test mod hull should be gone after cleanup")
+		ok = false
+
+	if not ok:
+		return false
+	print("  [PASS] HullLoader scans both directories, skips malformed sidecars without failing the whole scan, and a mod hull correctly overrides a built-in of the same id (logged as a warning).")
+	return true
+
+func test_hull_modding_parts_menu_two_buckets() -> bool:
+	print("Running Test Suite: Hull Modding - Parts Catalog Collapses To 2 Buckets (Vehicle / Static Building)...")
+	var menu = preload("res://scenes/UI_PartsMenu.tscn").instantiate()
+	root.add_child(menu)
+	await process_frame
+
+	var tab_hulls = menu.get_node("PanelContainer/VBoxContainer/TabContainer/Hulls/VBoxContainer")
+	var drawer_categories = []
+	for child in tab_hulls.get_children():
+		if child.has_meta("drawer_category"):
+			drawer_categories.append(child.get_meta("drawer_category"))
+	drawer_categories.sort()
+
+	var ok = true
+	if drawer_categories != ["Static Building", "Vehicle"]:
+		print("  [FAIL] Expected exactly the drawers [Static Building, Vehicle], got ", drawer_categories)
+		ok = false
+
+	# Every hull button must land in the bucket matching its OWN
+	# is_foundation flag, not a hardcoded per-type_id table - this is what
+	# lets a modded hull sort correctly with zero code changes.
+	for child in tab_hulls.get_children():
+		if not child.has_meta("drawer_category"):
+			continue
+		var category = child.get_meta("drawer_category")
+		var content = child.get_meta("content_container")
+		for btn in content.get_children():
+			var data = ModuleCatalog.get_module_data(btn.module_type_id)
+			var expect_static = data.get("is_foundation", false)
+			var actual_static = category == "Static Building"
+			if expect_static != actual_static:
+				print("  [FAIL] %s (is_foundation=%s) landed in drawer '%s'" % [btn.module_type_id, expect_static, category])
+				ok = false
+
+	menu.queue_free()
+	if not ok:
+		return false
+	print("  [PASS] Every hull sorts into Vehicle/Static Building purely off its own is_foundation flag - no hardcoded per-type_id domain table.")
+	return true
+
+func test_hull_modding_hard_fail_on_unknown_hull() -> bool:
+	print("Running Test Suite: Hull Modding - Blueprint Load Hard-Fails On A Missing Hull (not a silent fallback)...")
+	var bm = Node.new()
+	bm.name = "BlueprintManager"
+	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
+	root.add_child(bm)
+	await process_frame
+
+	var fake_blueprint = {
+		"version": 1.0,
+		"hull_type": "totally_not_a_real_hull_xyz",
+		"name": "Broken Design",
+		"modules": [],
+	}
+
+	# reconstruct_vehicle() itself must refuse - this is the second line of
+	# defense that protects every non-Design-Lab caller (skirmish spawns,
+	# battlefield, defense buildings), not just the explicit Load button.
+	var parent = Node3D.new()
+	root.add_child(parent)
+	var result = bm.reconstruct_vehicle(fake_blueprint, parent)
+	if result != null:
+		print("  [FAIL] reconstruct_vehicle() should refuse (return null) for an unknown hull_type instead of building a hull off substitute data")
+		bm.queue_free()
+		parent.queue_free()
+		return false
+	parent.queue_free()
+
+	# The Design Lab's own Load button must refuse BEFORE ever calling
+	# reconstruct_vehicle(), and report which specific hull is missing.
+	DirAccess.make_dir_recursive_absolute("user://blueprints")
+	var bad_id = "test_hard_fail_missing_hull_bp"
+	var bp_to_save = fake_blueprint.duplicate()
+	bp_to_save["id"] = bad_id
+	var file = FileAccess.open("user://blueprints/%s.json" % bad_id, FileAccess.WRITE)
+	file.store_string(JSON.stringify(bp_to_save, "\t"))
+	file.close()
+
+	var ok = bm.load_blueprint_into_designer(bad_id)
+	DirAccess.remove_absolute("user://blueprints/%s.json" % bad_id)
+	bm.queue_free()
+
+	if ok:
+		print("  [FAIL] load_blueprint_into_designer() should return false for an unknown hull_type")
+		return false
+	if not "totally_not_a_real_hull_xyz" in bm.last_load_error:
+		print("  [FAIL] last_load_error should name the specific missing hull, got: ", bm.last_load_error)
+		return false
+
+	print("  [PASS] Both reconstruct_vehicle() and load_blueprint_into_designer() refuse to load a blueprint referencing a missing hull, with a specific user-facing reason naming it.")
+	return true
+
+func test_hull_modding_mod_hull_placeable() -> bool:
+	print("Running Test Suite: Hull Modding - Real user://mods/hulls Hull Loads And Is Placeable In The Design Lab...")
+	if not ModuleCatalog.hull_exists("prospectors_folly_hull"):
+		print("  [FAIL] prospectors_folly_hull not found in the catalog - is the committed test mod hull (.glb+.json) present under user://mods/hulls?")
+		return false
+
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	var bm = Node.new()
+	bm.name = "BlueprintManager"
+	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
+	placer.add_child(bm)
+	await process_frame
+
+	placer._place_hull_from_ui("prospectors_folly_hull")
+	await process_frame
+
+	var ok = true
+	if not placer.hull:
+		print("  [FAIL] Hull was not placed")
+		ok = false
+	elif not HullLoader.is_modded("prospectors_folly_hull"):
+		print("  [FAIL] expected prospectors_folly_hull to be sourced from user://mods/hulls, not res://")
+		ok = false
+	else:
+		var mesh_inst = placer.hull.get_node_or_null("MeshInstance3D")
+		if not mesh_inst or not mesh_inst.mesh:
+			print("  [FAIL] Mod hull mesh was not assigned (runtime glTF import failed?)")
+			ok = false
+		elif mesh_inst.mesh.get_surface_count() == 0:
+			print("  [FAIL] Mod hull mesh has no surfaces")
+			ok = false
+
+	placer.queue_free()
+	if not ok:
+		return false
+	print("  [PASS] A real user://mods/hulls hull (mesh + JSON sidecar, zero code changes) scans, merges into the catalog, and places successfully in the Design Lab via a runtime glTF import.")
 	return true
