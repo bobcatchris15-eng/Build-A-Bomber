@@ -419,7 +419,20 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	for mod in modules:
 		var type_id = mod.get("type_id", "")
 		if type_id == "": continue
-		
+
+		# Same "refuse rather than silently substitute" principle as the
+		# hull_exists() hard-fail above, at module granularity: an unknown
+		# module type_id (hand-edited save, uninstalled future mod) is
+		# SKIPPED with a warning instead of get_module_data()'s silent
+		# basic_cannon-weapon-data fallback, which would quietly arm a
+		# design with cannons it was never given (FABLE_REVIEW.md 3.4).
+		# Skip-not-refuse at module level: losing one part degrades the
+		# design visibly, refusing the whole blueprint over one bad module
+		# would be harsher than the hull case warrants.
+		if not ModuleCatalog.module_exists(type_id):
+			push_warning("BlueprintManager: skipping unknown module '%s' in '%s'" % [type_id, blueprint_data.get("name", "Untitled Design")])
+			continue
+
 		var mod_catalog_data = ModuleCatalog.get_module_data(type_id)
 		var category = mod_catalog_data.get("category", "module")
 		

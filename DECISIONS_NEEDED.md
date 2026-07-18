@@ -4,6 +4,16 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk B: catalog cache, unknown-module skip, honest blueprint costs (review items 3.5, 3.4, 3.10)
+
+**Not blocking - implemented, all suites green.** Judgment calls:
+
+- **Catalog cache invalidation keys off HullLoader's dict IDENTITY** (`is_same()`), not a generation counter or explicit reset call - HullLoader already rebuilds a brand-new Dictionary on every rescan/`reset_cache_for_tests()`, so identity comparison makes the merged cache self-invalidating with zero new coupling (hull_loader can't reference module_catalog back without a preload cycle). Consequence, documented in the code: catalog entries are shared, callers must treat them as read-only - which was already true for hull entries before this change.
+- **Unknown module type_ids are SKIPPED (with a warning), not a whole-blueprint refusal** - deliberately softer than the hull hard-fail. A missing hull means the whole design's identity/cost/size is unknowable; a missing module degrades the design visibly (a gap where the part was) without destroying an otherwise-valid save. `blueprint_cost()` doesn't charge for skipped modules, so cost and what actually spawns stay consistent.
+- **`blueprint_cost()` now recomputes from the current catalog + the design's own tweaks/scale instead of trusting the save file's baked "stats" block.** Two real effects: hand-editing a user:// JSON no longer sets arbitrary prices, and catalog repricing (like the earlier spigot_mortar/flamethrower balance pass) now applies to designs saved before it. Side effect worth knowing: costs shown for old saved designs can CHANGE from what they showed last week - that's the fix working, not a regression. The serialized stats block stays in the format as an inspection aid.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk A: targeting/placement bug fixes (review items 3.1, 3.3, 3.7, 3.9, 2.4)
 
 **Not blocking - implemented per Chris's green light on the review, all suites green (1 new).** Judgment calls:

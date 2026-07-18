@@ -2,12 +2,42 @@ class_name ModuleCatalog
 
 const HullLoader = preload("res://scripts/hull_loader.gd")
 
+# Merged catalog cache (FABLE_REVIEW.md 3.5): get_catalog() used to rebuild
+# the entire ~60-entry dict literal on every call - and it's called from
+# genuinely hot paths (per-hit damage resolution, per-tick terrain/draught
+# lookups). Built once and reused; invalidated automatically whenever
+# HullLoader's own cache is rebuilt (reset_cache_for_tests/rescan returns a
+# NEW Dictionary instance, detected by identity below), so the hull-modding
+# tests' reset flow keeps working unchanged. Callers must treat returned
+# entries as read-only - they're shared, not copies (that was already true
+# for hull entries before this change).
+static var _catalog_cache: Dictionary = {}
+static var _cached_hull_dict: Dictionary = {}
+
 # Returns a dictionary containing all module types. Hull entries (category
 # "hull") are no longer hardcoded here - see hull_loader.gd, which lazily
 # scans same-stem .glb+.json pairs from res://assets/models/hulls (built-in)
-# and user://mods/hulls (player-added mods) once and caches the result, so
-# merging it in here on every call stays cheap (HULL_MODDING_PLAN.md §3).
+# and user://mods/hulls (player-added mods) once and caches the result
+# (HULL_MODDING_PLAN.md §3).
 static func get_catalog() -> Dictionary:
+	var hulls = HullLoader.get_hulls()
+	if not _catalog_cache.is_empty() and is_same(hulls, _cached_hull_dict):
+		return _catalog_cache
+	var catalog = _build_catalog_literal()
+	for hull_id in hulls:
+		catalog[hull_id] = hulls[hull_id]
+	_catalog_cache = catalog
+	_cached_hull_dict = hulls
+	return _catalog_cache
+
+# Real existence check for any catalog entry (weapon/module/locomotion/hull),
+# mirroring hull_exists() below - reconstruct_vehicle uses this to SKIP an
+# unknown module type_id instead of get_module_data()'s silent
+# basic_cannon-weapon-data fallback (FABLE_REVIEW.md 3.4).
+static func module_exists(type_id: String) -> bool:
+	return get_catalog().has(type_id)
+
+static func _build_catalog_literal() -> Dictionary:
 	var catalog = {
 		# --- BALLISTIC & KINETIC ---
 		"basic_cannon": {
@@ -855,13 +885,6 @@ static func get_catalog() -> Dictionary:
 			"traits": ["ground_contact", "amphibious"]
 		},
 	}
-
-	# Hull entries (category "hull") are scanned from disk, not hardcoded -
-	# see HullLoader's class header. Merged in here so every existing call
-	# site (get_module_data(), validate_build_legality(), etc.) keeps
-	# reading hulls out of the exact same unified dict as before.
-	for hull_id in HullLoader.get_hulls():
-		catalog[hull_id] = HullLoader.get_hulls()[hull_id]
 
 	return catalog
 

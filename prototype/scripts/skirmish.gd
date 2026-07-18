@@ -4,6 +4,7 @@ extends Node3D
 
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const ModuleDataScript = preload("res://scripts/module_data.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
 const BattleUnitScript = preload("res://scripts/battle_unit.gd")
@@ -433,20 +434,34 @@ func _list_json_files(dir_path: String) -> Array:
 	results.sort()
 	return results
 
+# Recomputed from the CURRENT catalog + the blueprint's own tweaks/scale
+# every time (FABLE_REVIEW.md 3.10) - previously this trusted the "stats"
+# block baked into the save file, which (a) let a hand-edited user:// JSON
+# field units at arbitrary prices and (b) froze costs at whatever the
+# catalog said on the day the design was saved, so balance passes (e.g. the
+# spigot_mortar/flamethrower repricing) silently never applied to older
+# designs. The serialized stats block stays in the save format as a
+# debugging/inspection aid; it just isn't the authority on price anymore.
 func blueprint_cost(data: Dictionary) -> Vector2i:
 	var hull_type = data.get("hull_type", "medium_hull")
 	var hull_data = ModuleCatalog.get_module_data(hull_type)
 	var m = int(hull_data.metal)
 	var c = int(hull_data.crystal)
 	for mod in data.get("modules", []):
-		var stats = mod.get("stats", {})
-		if stats.has("cost_metal"):
-			m += int(stats.cost_metal)
-			c += int(stats.get("cost_crystal", 0))
-		else:
-			var cat = ModuleCatalog.get_module_data(mod.get("type_id", ""))
-			m += int(cat.metal)
-			c += int(cat.crystal)
+		var type_id = mod.get("type_id", "")
+		if not ModuleCatalog.module_exists(type_id):
+			continue # unknown module - reconstruct_vehicle skips it too, so don't charge for it
+		var cat = ModuleCatalog.get_module_data(type_id)
+		var md = ModuleDataScript.new()
+		md.type_id = type_id
+		md.cost_metal = cat.metal
+		md.cost_crystal = cat.crystal
+		md.tweaks = mod.get("tweaks", {})
+		var sc = mod.get("scale", {"x": 1.0, "y": 1.0, "z": 1.0})
+		md.scale_multiplier = Vector3(sc.x, sc.y, sc.z)
+		var cost = md.get_cost()
+		m += cost.x
+		c += cost.y
 	return Vector2i(m, c)
 
 func build_time_for_cost(cost: Vector2i) -> float:
