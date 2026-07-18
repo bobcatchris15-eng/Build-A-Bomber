@@ -4,6 +4,23 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — DESIGN DIRECTION (not decided, not implemented): collapse "turret" into a pintle-mount variant
+
+**Not blocking - Chris is still thinking this over, logging only so the idea isn't lost.** No investigation of feasibility done, no code touched.
+
+**Chris's proposed simplification:** the mount-style system currently has 5 distinct values (`"turret"`, `"frame_built"`, `"pintle_top"`, `"pintle_bottom"`, `"sponson"` - see `get_mount_style()`/`get_mount_style_for_normal()` in `module_catalog.gd:1275` and `:1516`), with `"turret"` handled as its own wholly separate case. His current thinking: a turret is mechanically just a `pintle_top` mount (central rotating column) with an enclosure built around it (walls + roof, muzzle poking through the front) - so instead of turret being a 5th independent mount style, it could become an optional "enclosure" toggle applicable to any pintle-eligible weapon, collapsing the system toward "pintle + enclosure flag" rather than 5 parallel styles.
+
+**Where the current turret-specific logic actually lives, for whoever picks this up:**
+- `module_catalog.gd`'s `get_mount_style_for_normal()` (~line 1519): `if type_id == "basic_cannon": return "turret"` - today `"turret"` is hardcoded to exactly one weapon type, not derived from anything continuous the way `pintle_top`/`pintle_bottom`/`sponson` are (those come from the surface normal's up-alignment against `get_pintle_min_up_alignment()`).
+- `visual_builder.gd`'s `add_mount_hardware()` (~line 1798-1805): `if mount_style == "turret" or mount_style == "frame_built": return` - turret is currently a deliberate NO-OP in the generic mount-hardware builder, because `basic_cannon`'s own `build_visual()` case already constructs a bespoke enclosed-turret look directly (unrelated to the generic pintle/sponson hardware system pintle_top/pintle_bottom/sponson all share).
+- `get_traverse_limit_angle()` (`module_catalog.gd:1555`) special-cases `"basic_cannon"`/`"ciws"`/`"pd_laser"` for full 360° traverse - tied to the current turret classification, would need to be revisited if turret becomes a toggle rather than a type-gated style.
+
+**What a "pintle + enclosure" model would actually need (not investigated, just what's visible from the current architecture):** a real enclosure mesh builder (walls+roof around the existing pintle post/base-plate, muzzle cutout) as a genuinely new piece of geometry - `add_mount_hardware()`'s pintle_top branch currently only builds a base plate + post, no enclosure at all. Would also need a decision on which pintle-eligible weapons get an "enclosure" option exposed (probably not every weapon - CIWS/point-defense mounts likely stay open per real-world convention) and whether the existing `basic_cannon`-specific turret geometry in `build_visual()` gets replaced by the new generic enclosure or coexists alongside it.
+
+**Not evaluated at all:** whether this is a net simplification in practice, whether existing turreted_capable/frame_built hull-trait logic interacts cleanly with an enclosure toggle, mount-zone/collision implications, or migration of any saved blueprints that reference the current 5-value mount_style strings. Purely a design-direction note for now.
+
+---
+
 ## 2026-07-17 — Parts Catalog interaction redesign: flat list → collapsible drawer drawers per category
 
 **Not blocking - foundation implementation complete, verified with screenshots, passing all tests.**
