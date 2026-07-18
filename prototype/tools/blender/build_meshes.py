@@ -111,6 +111,34 @@ def frontal_armor_predicate(hz, front_frac=0.3, exclude_belly_thresh=-0.6):
 	return predicate
 
 
+def outward_face_predicate(threshold=0.4):
+	"""For static defenses whose identity is "one hardened outward face,
+	one sheltered inward face" rather than a vehicle's nose-to-tail taper
+	(pillbox_foundation's embrasure and fortress_wall_foundation's arrow
+	slits both face Godot +Z, per those builders' own authoring convention -
+	NOT -Z like every vehicle hull's nose) - any face whose normal points
+	sufficiently toward Godot +Z (raw Blender +Y, see godot_forward_component())
+	is the exposed defensive face, armored; the sheltered back face, top,
+	and end caps stay structural."""
+	def predicate(f):
+		return godot_forward_component(f.normal) > threshold
+	return predicate
+
+
+def vertical_armor_predicate(hy, base_frac=0.4):
+	"""For a tall stepped tower with no distinct front/back (tiers stack
+	along Godot Y/up, roughly rotationally symmetric per tier) - real
+	castle-defense logic instead: the base/lower tiers facing ground-level
+	assault are the hardened ones, upper tiers are lighter structural
+	stonework. raw Blender Z carries Godot Y-up (see godot_forward_component()'s
+	own comment on the GV() axis swap), so a face center's raw .z IS its
+	Godot height directly."""
+	y_cutoff = -hy + 2.0 * hy * base_frac
+	def predicate(f):
+		return f.calc_center_median().z < y_cutoff
+	return predicate
+
+
 def mark_armor_faces(bm, predicate):
 	"""Sets material_index=1 (hard armor slot, see finalize_dual()) on
 	every CURRENT bm.face satisfying predicate(face), leaving everything
@@ -1040,7 +1068,7 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 		rear_flare=0.9, front_flare=1.0, color=(0.55, 0.56, 0.58), greebles=None, taper_slices=7,
 		nose_region=0.35, height_taper=0.0, bevel_pct=None, bevel_segments=None, bevel_angle_deg=20.0,
 		waist_inset=0.0, waist_height_frac=0.5, deck_line=0.0, deck_line_z_frac=(0.6, 0.95),
-		panel_line_fracs=None, speed_line_chamfer=False):
+		panel_line_fracs=None, speed_line_chamfer=False, armor_front_frac=0.4):
 	"""height_taper (0..1): brings the deck down toward the nose too, for
 	archetypes wanting a dart/wedge silhouette rather than just narrowing
 	in width (interceptor_hull's "extreme taper in width AND height").
@@ -1101,11 +1129,20 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 	# convex-hull input, since bisect_plane above may have added verts.
 	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, angle_deg=bevel_angle_deg, pct=bevel_pct, segments=bevel_segments)
 
+	# Hard-armor region: the nose taper's front arc, same frontal_armor_
+	# predicate() technique as the AFV/ship hulls - a wedge hull's own
+	# extreme nose taper (interceptor_hull's whole identity) makes the
+	# front region naturally small relative to the long tapered top deck
+	# and flat belly, so this stays a minority of area without needing a
+	# smaller front_frac than the boxier AFV hulls.
+	armor_frac = mark_armor_faces(bm, frontal_armor_predicate(hz, front_frac=armor_front_frac))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
+
 	if greebles:
 		greebles(bm, hx, hy, hz)
 
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.6, roughness=0.45)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
 	return obj
 
 
@@ -1249,7 +1286,7 @@ def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, u
 
 
 def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
-		color=(0.45, 0.45, 0.4), greebles=None, embrasure=None):
+		color=(0.45, 0.45, 0.4), greebles=None, embrasure=None, armor_threshold=0.2):
 	"""Low static defensive bunker: tapered polygonal frustum + domed cap.
 	The taper itself (top narrower than base) already gives the battered/
 	inward-sloping wall read the design doc asks for - no new geometry
@@ -1285,6 +1322,19 @@ def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
 	# silhouette list) so it also smooths the embrasure cut's own edges.
 	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.09, segments=1)
 
+	# Hard-armor region: the embrasure-facing wall (Godot +Z, where the
+	# firing slit itself sits, per the embrasure dict's own "center" Z
+	# coordinate convention every caller uses) plus its immediate
+	# neighboring facets - unlike a vehicle's frontal glacis or a flat
+	# defensive wall, an octagonal frustum has no single dominant "front"
+	# facet, so a looser threshold catches the 2-3 facets nearest +Z
+	# instead of just one, reading as a real reinforced firing position
+	# rather than a single oddly-isolated armored panel. Called before the
+	# roof dome so the cap stays structural (real bunker domes are cast
+	# concrete, not applied armor plate).
+	armor_frac = mark_armor_faces(bm, outward_face_predicate(threshold=armor_threshold))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
+
 	# Domed roof cap
 	dome_verts = bmesh.ops.create_uvsphere(bm, u_segments=sides, v_segments=6, radius=top_r * 0.9)['verts']
 	bmesh.ops.scale(bm, verts=dome_verts, vec=GS(1.0, 0.45, 1.0))
@@ -1294,12 +1344,12 @@ def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
 		greebles(bm, hx, hy, hz)
 
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.5, roughness=0.6)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
 	return obj
 
 
 def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0.36), greebles=None,
-		arrow_slit_count=0):
+		arrow_slit_count=0, armor_threshold=0.4):
 	"""Long, low defensive rampart: a battered (wider-at-base) wall face
 	topped with alternating battlement merlons - a wall segment, not a
 	bunker or tower, meant to read as long and thin rather than squat.
@@ -1342,6 +1392,14 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 	# preserved end caps, so this doesn't risk the tiling guarantee).
 	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.06, preserve_axis=0)
 
+	# Hard-armor region: the outward (Godot +Z, arrow-slit-bearing) wall
+	# face - the side facing attackers, vs. the sheltered inward face/top/
+	# end-caps staying structural masonry. Called before the merlons so the
+	# battlements read as lighter capstone atop the hardened wall face, not
+	# armor plate themselves.
+	armor_frac = mark_armor_faces(bm, outward_face_predicate(threshold=armor_threshold))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
+
 	# Battlements: alternating merlon teeth along the top edge, evenly
 	# spaced with gaps (crenels) between them for the classic wall silhouette.
 	# Bespoke Tier 3 detail: each merlon is built as two flanking half-
@@ -1362,7 +1420,7 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 		greebles(bm, hx, hy, hz)
 
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.4, roughness=0.7)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
 	return obj
 
 
@@ -1464,7 +1522,7 @@ def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.
 
 
 def build_flying_wing_hull(name, size_x, size_y, size_z, sweep=0.55, color=(0.5, 0.52, 0.56), greebles=None,
-		bevel_pct=0.085, bevel_segments=2):
+		bevel_pct=0.085, bevel_segments=2, armor_front_frac=0.4):
 	"""Blended-wing-body hull: a swept flying-wing planform with no
 	distinct fuselage/wing break - a shallow dorsal blend ridge instead of
 	the wedge hulls' raised spine, cockpit and body smoothly faired into
@@ -1505,11 +1563,16 @@ def build_flying_wing_hull(name, size_x, size_y, size_z, sweep=0.55, color=(0.5,
 	# reasoning as build_afv_hull's bevel call.
 	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
+	# Hard-armor region: the nose apex and leading-edge region - same
+	# frontal-arc reasoning as every other vehicle hull.
+	armor_frac = mark_armor_faces(bm, frontal_armor_predicate(hz, front_frac=armor_front_frac))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
+
 	if greebles:
 		greebles(bm, hx, hy, hz)
 
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.6, roughness=0.35)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
 	return obj
 
 
@@ -1550,7 +1613,7 @@ def build_sponson_hull(name, size_x, size_y, size_z, sponson_bulge=1.3, sponson_
 
 def build_fuselage_hull(name, size_x, size_y, size_z, nose_frac=0.16, tail_frac=0.24,
 		wing_span_frac=1.0, wing_chord_frac=0.3, wing_pos_frac=0.05,
-		color=(0.6, 0.6, 0.62), greebles=None, bevel_pct=None, bevel_segments=None):
+		color=(0.6, 0.6, 0.62), greebles=None, bevel_pct=None, bevel_segments=None, armor_front_frac=0.45):
 	"""Traditional plane: a slender tapered fuselage tube along Z (nose cone
 	forward, tail taper aft) with a separate flat wing slab crossing at
 	mid-body and tail control surfaces - a genuine fuselage/wing break,
@@ -1581,6 +1644,13 @@ def build_fuselage_hull(name, size_x, size_y, size_z, nose_frac=0.16, tail_frac=
 	bmesh.ops.remove_doubles(bm, verts=fuselage_verts, dist=0.001)
 	fuselage_verts = list(bm.verts)
 	bevel_sharp_edges(bm, fuselage_verts, R, tier=1, pct=bevel_pct, segments=bevel_segments)
+
+	# Hard-armor region: nose cone + forward body tube - real warplanes
+	# armor the engine/pilot compartment up front, same "frontal arc"
+	# reasoning as every other vehicle hull. Called before wings/fairings/
+	# formers/tail so those stay lightweight structural skin, not armor.
+	armor_frac = mark_armor_faces(bm, frontal_armor_predicate(hz, front_frac=armor_front_frac))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
 
 	# Wings: a flat slab crossing the body near mid-fuselage - the defining
 	# "attached wing" break this hull exists to demonstrate.
@@ -1621,12 +1691,12 @@ def build_fuselage_hull(name, size_x, size_y, size_z, nose_frac=0.16, tail_frac=
 		greebles(bm, hx, hy, hz)
 
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.6, roughness=0.35)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
 	return obj
 
 
 def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
-		color=(0.72, 0.7, 0.6), greebles=None):
+		color=(0.72, 0.7, 0.6), greebles=None, armor_front_frac=0.45):
 	"""Rigid airship: a stretched teardrop/cigar gasbag envelope (blunt nose,
 	tapered tail) with a gondola slung underneath on struts and a 4-way tail
 	fin cross - the only hull silhouette in the roster implying buoyant lift
@@ -1662,6 +1732,17 @@ def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
 			shrink = 1.0 - t * tail_taper
 			v.co.x *= shrink
 			v.co.z *= shrink
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	# Hard-armor region: the blunt nose - same frontal-arc reasoning as
+	# every other vehicle hull, called before the gondola/fins/keel
+	# additions so those stay lightweight structural fixtures, not part
+	# of the envelope's own armor plating. This shape never gets a
+	# bevel_sharp_edges() call (the uvsphere is already smooth), so
+	# recalc_face_normals() above is needed first - the taper loop directly
+	# mutates vertex coordinates without keeping face normals in sync.
+	armor_frac = mark_armor_faces(bm, frontal_armor_predicate(hz, front_frac=armor_front_frac))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
 
 	# Gondola slung underneath on struts, biased toward the nose for balance.
 	gon_w, gon_h, gon_l = hx * 0.5, hy * 0.35, hz * 0.6
@@ -1695,12 +1776,16 @@ def build_airship_hull(name, size_x, size_y, size_z, tail_taper=0.35,
 
 	obj = make_object_from_bmesh(bm, name)
 	# Canvas/aluminum-skin envelope reads wrong with the ground vehicles'
-	# metallic paint - flatter, less reflective finish instead.
-	finalize(obj, name, color=color, metallic=0.15, roughness=0.5)
+	# metallic paint - flatter, less reflective finish instead. (Preview-
+	# only, same as every other hull's finalize_dual() color args - the
+	# real runtime material is always the shared faction shader regardless
+	# of hull type, unaffected by this.)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color),
+		structural_metallic=0.1, structural_roughness=0.6, armor_metallic=0.3, armor_roughness=0.45)
 	return obj
 
 
-def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.44), greebles=None):
+def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.44), greebles=None, armor_base_frac=0.06):
 	"""Tall stepped defensive tower: tiers stacked wide-to-narrow."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
 	R = hull_reference_dim(size_x, size_y)
@@ -1737,6 +1822,16 @@ def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.
 	# (tier-to-tier shrink steps, skirt flare) - before railings/antenna
 	# are fused on so only the primary silhouette is touched.
 	bevel_sharp_edges(bm, all_verts, R, tier=1)
+
+	# Hard-armor region: the base/lower tiers, NOT a frontal arc - a tower
+	# has no distinct front/back (each tier is roughly rotationally
+	# symmetric), so real castle-defense logic applies instead: the
+	# ground-level tiers facing direct assault are hardened, upper tiers
+	# are lighter structural stonework. Called before the machicolation
+	# ring/railings/antenna/spotlights so those stay lightweight rooftop
+	# fixtures, not armor plate.
+	armor_frac = mark_armor_faces(bm, vertical_armor_predicate(hy, base_frac=armor_base_frac))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
 
 	# Bespoke Tier 3 feature: a corbelled machicolation ring - a real
 	# castle-defense projecting gallery, supported on angled brackets,
@@ -1780,7 +1875,7 @@ def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.
 		greebles(bm, hx, hy, hz)
 
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.55, roughness=0.5)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
 	return obj
 
 
