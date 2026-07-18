@@ -4,6 +4,23 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 cont'd — Pushed the contrast/ink-border fix much further, per Chris's explicit "don't be conservative" direction
+
+**Not blocking - pushed hard, reverified with the same rigorous pixel tests as the prior fix, all green.**
+
+Once the root cause was fixed (metallic's diffuse-suppression fighting the intended contrast - see the immediately preceding entry), the fix itself had only been pushed to "clearly visible and correctly directioned," not "unmistakable." Chris's direction this round was explicit: don't be conservative once the real root cause is known, push it until it's unmistakable. Re-ran the exact same pixel-level tests after each change rather than trusting a visual impression again:
+
+- Structural darken: 0.62 -> 0.8 (about as dark as this color family can go before it stops reading as "the same paint, duller" and starts reading as soot/damage instead of a deliberate finish - a real ceiling, not an arbitrary stopping point).
+- Structural metallic/roughness/anisotropy pushed further toward their floor/ceiling: 0.04->0.015 metallic, 0.93->0.97 roughness, the 0.08 anisotropy multiplier ->0.03.
+- Armor: metallic nudged back up 0.55->0.65 (more "premium shine" pop when a highlight lands) now that the color-value gap is strong enough to not depend on it; base_color/accent_color lightened 0.28->0.42 to compensate and then some. hardened_steel's roughness (0.42) deliberately left untouched again - that's the one value directly tied to the original anisotropic-hotspot regression this whole thread started from, and it has never needed to move to get real contrast.
+- Ink border: edge_curvature multiplier 12->20, Fresnel exponent 2->1.5 (wider rim), trigger band widened 0.12-0.4->0.05-0.32 (picks up sooner, covers more of the true edge), target blend color 0.012->0.0 (genuinely pure black, not near-black), and the METALLIC/ANISOTROPY suppression at the border strengthened (0.6/0.5->0.85/0.85) so the line itself reads completely flat/matte, not just darker.
+
+**Measured result** (same controlled two-box test as the prior entry): delta luminance 0.099 -> 0.134 (armor 0.307 vs. structural 0.176, ~75% relative brighter, up from ~50%). Ink border re-scan: the true geometric edge now bottoms out at 0.00-0.02 luminance versus the baked seam grid's own darkest points at 0.05-0.10 - a 5-10x gap, not the marginal one from the first fix. Both confirmed by looking at the actual rendered test images, not just the numbers: two boxes that read as silver-vs-charcoal at a glance, and a corner that reads as a genuinely bold ink line distinct from the regular panel grid.
+
+**Hull-level confirmation:** regenerated `gameplay_distance_heavy_hull.png` and `close_full_length_heavy_hull.png` (progress_captures/2026-07-17/contrast_and_ink_edges/AFTER/) at the new values - the split is now stark even in the fully-zoomed-out gameplay-distance shot, not just the close framing.
+
+---
+
 ## 2026-07-18 — The prior day's contrast/ink-border pass was genuinely too weak; root-caused with real pixel numbers and fixed for real this time
 
 **Not blocking - real problem found via rigorous measurement (not re-asserted from a visual impression), root-caused, fixed, and reverified with numbers. This directly walks back a claim from the immediately preceding session.**
