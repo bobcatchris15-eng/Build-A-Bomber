@@ -4,6 +4,52 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 cont'd — Hull armor/structural material split rolled out across all 15 hulls (Approach A)
+
+**Not blocking - full rollout complete, verified per-batch with screenshots and programmatic material checks, all headless tests green throughout.**
+
+**Ask:** implement the Approach A architecture from this session's earlier research answer (real mesh material slots, not mask-blending in one shader) so hulls show a genuinely different "hard armor" material (the existing anodized/brushed look) confined to armor-plate regions, and a new matte/satin "structural" material everywhere else, with armor capped at ~40% of surface area per hull for visual variety, not an even split.
+
+**GDScript plumbing (scripts/hull_material_builder.gd, blueprint_manager.gd, module_placer.gd):** `apply_hull_materials()` is now the single entry point both hull-spawn call sites use, assigning real per-surface materials via `set_surface_override_material()` (surface 0 = new `build_structural_material()`, low metallic/high roughness/near-zero anisotropy; surface 1+ = existing `build_hull_material()`, unchanged) instead of a single `material_override` for the whole mesh. Both still pull only from `FactionCatalog`'s existing per-faction color data - no new textures, no new per-faction assets, preserving the "one parametric shader x N factions, zero combinatorial texture re-authoring" property from the earlier research answer. A hull with only 1 surface (not yet re-authored, or the plain BoxMesh fallback) gets the armor material on that surface, matching prior behavior exactly.
+
+**Two real regressions found and fixed along the way**, both from `material_override` becoming permanently null for hulls:
+- `battle_unit.gd`'s `_flash_hull()` and `player_vehicle.gd`'s equivalent hit-flash both read `mesh_inst.material_override` directly - would have silently stopped flashing hulls red on every hit in the entire game. Fixed via a new shared `HullMaterialBuilder.flash_hull()` that sets `flash_amount` on every per-surface override a hull has.
+- A `run_tests.gd` integration test asserted directly against `material_override` too - updated to check `get_surface_override_material(0)`.
+
+**Blender plumbing (tools/blender/build_meshes.py) - a real, non-obvious bug found via direct .glb inspection:** `finalize_dual()`'s `obj.data.materials.clear()` call (added defensively, since the mesh is always freshly created with 0 slots anyway) was silently clamping every polygon's `material_index` back to 0 as a Blender data-integrity side effect - appending the 2 real materials afterward did NOT retroactively restore the original per-polygon split. The very first rebuild (medium_hull) exported only 1 glTF primitive despite the bmesh/mesh data being correctly split underneath (244/1380 polygons at index 1, confirmed by direct print). Trusting Blender's own export log or even Godot's importer alone didn't catch this cleanly - only inspecting the raw exported `.glb` JSON directly (scratch/inspect_glb_json.gd, parses the GLB chunk header and JSON payload by hand) gave an unambiguous answer. Removing the unnecessary `.clear()` fixed it. Also found `use_selection=True` + `export_apply=True/False` was NOT the cause (tested, ruled out) before finding the real culprit - logged so a future session doesn't re-tread that dead end.
+
+**Three different armor-region predicates were needed, not one universal rule** - `mark_armor_faces()` takes any predicate closure, tried and kept 3:
+1. **`frontal_armor_predicate(hz, front_frac)`** - front N% of hull length (Godot -Z = nose, matching `hull_deform.gd`'s own established nose convention), excluding the invisible belly. Used for every vehicle-shaped hull (AFVs, ships as a bow belt, wedge/flying-wing/fuselage/airship as nose/leading-edge armor). Position-based rather than pure normal-angle after an early attempt at threshold-based normal-angle selection plateaued at ~8% max area on medium_hull regardless of how permissive the angle threshold got - a convex-hull-derived glacis's actual face normals cluster at unpredictable, hull-specific angles, while "front fraction of length" is a single knob that behaves predictably across every hull's individual taper geometry.
+2. **`outward_face_predicate(threshold)`** - for pillbox_foundation/fortress_wall_foundation, structures whose real identity is "one hardened exposed face, one sheltered face" (the embrasure/arrow-slit wall), not a nose-to-tail taper. Normal-direction-based, matching each builder's own existing convention that the embrasure/arrow-slits face Godot +Z (the one hull family where "front" is +Z, not -Z like every vehicle).
+3. **`vertical_armor_predicate(hy, base_frac)`** - for tower_foundation, which has no distinct front/back at all (each tier is roughly rotationally symmetric) - real castle-defense logic instead: hardened base tiers facing ground assault, lighter upper tiers. Needed a MUCH smaller `base_frac` (0.06) than intuition suggested, since a stepped pyramid's surface area is heavily weighted toward its widest (base) tier - an initial guess of 0.4 landed at 66.9% of total area, nearly triple the ceiling, before tuning down to 34.8%.
+
+**Final per-hull area percentages** (all mechanically measured via `mark_armor_faces()`'s own returned fraction, not eyeballed):
+| Hull | % armor | Predicate |
+|---|---|---|
+| medium_hull | 34.1% | frontal (front_frac=0.55) |
+| heavy_hull | 31.6% | frontal (0.5) |
+| light_hull | 25.3% | frontal (0.5) |
+| assault_hull | 25.3% | frontal (0.5) |
+| sponson_hull | 22.5% | frontal (0.5) |
+| heavy_cruiser_hull | 20.7% | frontal/bow (0.55) |
+| naval_hull | 19.5% | frontal/bow (0.55) |
+| small_boat_hull | 16.2% | frontal/bow (0.55) |
+| airship_hull | 35.7% | frontal/nose (0.45) |
+| tower_foundation | 34.8% | vertical/base (0.06) |
+| fortress_wall_foundation | 25.0% | outward-face (0.4) |
+| fuselage_hull | 28.5% | frontal/nose (0.45) |
+| pillbox_foundation | 23.8% | outward-face (0.2) |
+| interceptor_hull | 20.5% | frontal (0.4) |
+| flying_wing_hull | 10.4% | frontal/nose (0.4) |
+
+flying_wing_hull's 10.4% is a real geometric ceiling for a thin blended-wing planform (roughly constant width at every length position, so a length-fraction cutoff can't catch much more area regardless of the threshold - confirmed 0.35 and 0.5 both landed at ~10-11%), not an undertuned value - accepted rather than inventing a 4th predicate for one hull.
+
+**Modules follow-on (the open question from the research pass) - decided: NOT extending this pass, flagged as a separate future decision.** Reasoning: modules already achieve real material-region variety today via `visual_builder.gd`'s existing pattern (separate `MeshInstance3D` children per functional part - barrel/base/mount/etc, each with its own `material_override`) - that's Approach A's "separate node" variant, already proven, already shipped. The specific "hard armor vs. structural body, capped near 40%" RATIO Chris asked for this pass is a hull-body-specific concept (a vehicle's armor plating vs. its structural monocoque) - a gun barrel or sensor mast doesn't have an analogous "armor vs. structural" distinction to apply a percentage ceiling to. If Chris wants matching material treatment on modules later, that's a real, separate design question (which module TYPES/PARTS would even read as "armored" vs "structural") rather than a mechanical extension of this pass's technique.
+
+**Verified per batch, not just at the end:** all 3 batches independently ran the full headless test suite green, took real screenshots through the actual game code path (`BlueprintManager.reconstruct_vehicle()`), and confirmed per-surface shader parameter values programmatically (not just surface count) via scratch/verify_armor_split_materials.gd. progress_captures/2026-07-17/armor_split/ holds screenshots for all 15 hulls.
+
+---
+
 ## 2026-07-17 cont'd — Fixed the disabled per-faction hull albedo texture; honest answer on what the earlier verification screenshots actually showed
 
 **Not blocking - real bug found, fixed, and verified with a rigorous before/after. This directly concerns work already reported to Chris as done and verified, so the full investigation is recorded here in detail rather than summarized.**
