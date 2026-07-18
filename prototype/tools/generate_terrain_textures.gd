@@ -27,6 +27,24 @@ extends SceneTree
 # and "blue_water" for the ordinary deep water_areas plane, as opposed to
 # shallow_water's shallow, see-through, sandy-bed look.
 #
+# 2026-07-17: base roughness values for the organic/dirt/rock types (marsh's
+# mud, rocky, snow_mud's snow, sand, grassland) raised further toward matte
+# (~0.93-0.95) as part of root-causing a report that the whole game looked
+# too shiny/glossy. A real-camera screenshot diagnostic (scratch/
+# diagnose_glossiness.gd/_wide.gd) found the Environment/DirectionalLight3D
+# setup completely unmodified from Godot's own defaults (no SSR, no glow, no
+# cranked light energy) - ruling out environment/lighting as the cause -
+# while these terrain roughness values, though already fairly high, weren't
+# as close to true matte as real dirt/grass/rock actually are. The genuinely
+# glossy hull hotspot the same diagnostic reproduced turned out to be a
+# SEPARATE, unrelated issue (hardened_steel armor's roughness, see
+# hull_material_builder.gd) - not a shared root cause between the two
+# systems after all, just two independent values tuned lower than the
+# intended matte-terrain/soft-highlight-metal look called for. Full
+# reasoning logged in DECISIONS_NEEDED.md. The deliberately glossy
+# exceptions (marsh's puddles, snow_mud's mud ruts, shallow_water,
+# blue_water) were NOT touched - those are supposed to read as wet/glossy.
+#
 # Re-run after changing TERRAIN_TEX_PARAMS below:
 #   ./Godot_v4.3-stable_win64_console.exe --headless --script tools/generate_terrain_textures.gd
 
@@ -93,7 +111,7 @@ static func _eval_marsh(x: int, y: int) -> Dictionary:
 	color = color.lightened(0.0) if grain >= 0.0 else color.darkened(-grain * 0.15)
 	color = color.lightened(grain * 0.1) if grain >= 0.0 else color
 	var height = mottle * 0.4 + grain * 0.15
-	var roughness = 0.88
+	var roughness = 0.94 # raised from 0.88, see file header comment
 
 	var puddle_noise = _periodic_noise2d(float(x) / 28.0, float(y) / 28.0, TEX_SIZE / 28, seed + 2)
 	var puddle_mask = smoothstep(0.62, 0.8, puddle_noise)
@@ -131,7 +149,7 @@ static func _eval_rocky(x: int, y: int) -> Dictionary:
 	var jitter = (_hash_periodic(fi, fj, facets_across, seed) - 0.5) * 2.0 * 0.14
 	var color = base.lightened(jitter) if jitter >= 0.0 else base.darkened(-jitter)
 	var height = jitter * 1.5
-	var roughness = 0.9
+	var roughness = 0.95 # raised from 0.9, see file header comment
 
 	var lx = wxi % facet_size
 	var ly = wyi % facet_size
@@ -160,7 +178,7 @@ static func _eval_snow_mud(x: int, y: int) -> Dictionary:
 	var grain = _periodic_noise2d(float(x) / 7.0, float(y) / 7.0, TEX_SIZE / 7, seed) - 0.5
 	color = color.lightened(grain * 0.08) if grain >= 0.0 else color.darkened(-grain * 0.08)
 	var height = grain * 0.2
-	var roughness = 0.75
+	var roughness = 0.92 # raised from 0.75, see file header comment
 
 	# Diagonal tread-rut bands: sample along a 45-degree-rotated axis so
 	# ruts read as tracks cutting across the drift, not a straight grid.
@@ -186,7 +204,7 @@ static func _eval_sand(x: int, y: int) -> Dictionary:
 	var grain = _periodic_noise2d(float(x) / 4.0, float(y) / 4.0, TEX_SIZE / 4, seed + 1) - 0.5
 	color = color.lightened(grain * 0.04) if grain >= 0.0 else color.darkened(-grain * 0.04)
 	height += grain * 0.08
-	return {"color": color, "height": height, "roughness": 0.88}
+	return {"color": color, "height": height, "roughness": 0.93} # raised from 0.88, see file header comment
 
 # Shallow water: lighter, more saturated teal-blue than deep water, with
 # visible sandy-bed mottling baked directly into the albedo so the tile
@@ -222,7 +240,7 @@ static func _eval_grassland(x: int, y: int) -> Dictionary:
 	var grain = _periodic_noise2d(float(x) / 4.0, float(y) / 4.0, TEX_SIZE / 4, seed + 1) - 0.5
 	color = color.lightened(grain * 0.07) if grain >= 0.0 else color.darkened(-grain * 0.07)
 	height += grain * 0.2
-	return {"color": color, "height": height, "roughness": 0.87}
+	return {"color": color, "height": height, "roughness": 0.95} # raised from 0.87 - the material Chris specifically called out as unnaturally shiny/smooth, see file header comment
 
 # Baseline deep water: darker, more saturated and DESATURATED-dark than
 # shallow_water (opaque/naval-only, per VISUAL_ART_DIRECTION.md section 4),
