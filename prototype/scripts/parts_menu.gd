@@ -13,21 +13,17 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 var open_drawer_hulls: String = ""
 var open_drawer_modules: String = ""
 
-# Every ground/naval/air/static hull the catalog defines, all dumped into
-# one undifferentiated "Hulls" tab with no domain grouping - a player
-# couldn't compare, say, "Naval Hull" against "Light Hull" without
-# already knowing which is which. Hardcoded here (not a new catalog
-# field) to keep this a UI-only, low-risk change rather than touching
-# module_catalog.gd's data schema.
-const HULL_DOMAINS = {
-	"light_hull": "Ground", "medium_hull": "Ground", "heavy_hull": "Ground",
-	"interceptor_hull": "Ground", "assault_hull": "Ground", "sponson_hull": "Ground",
-	"naval_hull": "Naval", "small_boat_hull": "Naval", "heavy_cruiser_hull": "Naval",
-	"flying_wing_hull": "Air", "fuselage_hull": "Air", "airship_hull": "Air",
-	"pillbox_foundation": "Static Defense", "tower_foundation": "Static Defense",
-	"fortress_wall_foundation": "Static Defense",
-}
-const DOMAIN_ORDER = ["Ground", "Naval", "Air", "Static Defense"]
+# Hull grouping (HULL_MODDING_PLAN.md, simplified per Chris's call): just
+# two buckets - "Vehicle" (any hull that moves, ground/naval/air all lumped
+# together with no further subdivision) and "Static Building" (is_foundation
+# == true - pillbox/tower/fortress_wall). Previously a 4-way Ground/Naval/
+# Air/Static Defense split hardcoded by type_id in a table here; that table
+# couldn't have generalized to a modded hull without a code change every
+# time (see HULL_MODDING_PLAN.md §4c). The 2-way split needs no such table -
+# it reads directly off the catalog's own is_foundation field (already
+# load-bearing elsewhere, e.g. manufactory-queue eligibility), so a modded
+# hull sorts correctly with zero code changes here.
+const DOMAIN_ORDER = ["Vehicle", "Static Building"]
 
 # Modules sub-categorization: weapon/armor/generator map directly off the
 # catalog's own `category` field. The generic "module" category is itself a
@@ -81,7 +77,7 @@ func _ready():
 			# has no layout slack, see the manufactory-tier tooltip judgment
 			# call) so a player can compare hulls before dragging one in.
 			var size = data.get("size", Vector3.ZERO)
-			var domain = HULL_DOMAINS.get(type_id, "Ground")
+			var domain = "Static Building" if data.get("is_foundation", false) else "Vehicle"
 			btn.tooltip_text = "%s hull\nHP: %.0f | Weight: %.0f\nCost: %d Metal, %d Crystal\nSize: %.1f x %.1f x %.1f" % [
 				domain, data.get("hp", 0.0), data.get("weight", 0.0),
 				data.get("metal", 0), data.get("crystal", 0),
