@@ -33,8 +33,15 @@ const HULL_SHADER = preload("res://shaders/hull_faction_material.gdshader")
 # ablative_ceramic were already reasonably matte, and energy_shielding's
 # low roughness is an intentional "active energy field" glow, one of the
 # few things that's supposed to read as glossy.
+#
+# hardened_steel's metallic nudged 0.8 -> 0.88 (2026-07-17, widening the
+# armor/structural contrast per Chris's follow-up that the split didn't
+# read strongly enough) - metallic alone (not roughness, which is what
+# actually drove the anisotropic hotspot bug above) gives a bit more
+# specular "pop" without reopening that exact regression, since anisotropic
+# GGX's peak sharpness is roughness-driven, not metallic-driven.
 const ARMOR_PBR = {
-	"hardened_steel": {"metallic": 0.8, "roughness": 0.42, "shield_mode": 0.0, "alpha": 1.0},
+	"hardened_steel": {"metallic": 0.88, "roughness": 0.42, "shield_mode": 0.0, "alpha": 1.0},
 	"reactive_armor": {"metallic": 0.1, "roughness": 0.7, "shield_mode": 0.0, "alpha": 1.0},
 	"ablative_ceramic": {"metallic": 0.0, "roughness": 0.5, "shield_mode": 0.0, "alpha": 1.0},
 	"energy_shielding": {"metallic": 0.1, "roughness": 0.1, "shield_mode": 1.0, "alpha": 0.7},
@@ -104,14 +111,26 @@ static func build_hull_material(armor_material: String, faction: String) -> Shad
 # composition based on which armor package is bolted on, same as a real
 # vehicle's hull monocoque staying the same steel regardless of add-on
 # armor kit.
+#
+# 2026-07-17 cont'd: pushed further toward matte (metallic 0.15->0.04,
+# roughness 0.82->0.93, anisotropy multiplier 0.25->0.08) after Chris's
+# follow-up that the armor/structural split didn't read strongly enough in
+# the first-pass screenshots. Also darkens base_color/accent_color via
+# Color.darkened() - a straight RGB scalar multiply toward black, which
+# preserves HUE exactly and only reduces value, per Chris's explicit "value/
+# saturation separation, not hue" ask - so structural reads as a genuinely
+# duller/darker version of the SAME faction color family, not a different
+# faction's paint job. detail_color (small stencil/bolt accents) is left
+# untouched on purpose - those should stay legible regardless of which
+# region they land on.
 static func build_structural_material(faction: String) -> ShaderMaterial:
 	var vis = FactionCatalogScript.get_visual(faction)
 	var mat = ShaderMaterial.new()
 	mat.shader = HULL_SHADER
-	mat.set_shader_parameter("base_color", vis.base_color)
-	mat.set_shader_parameter("accent_color", vis.accent_color)
+	mat.set_shader_parameter("base_color", vis.base_color.darkened(0.16))
+	mat.set_shader_parameter("accent_color", vis.accent_color.darkened(0.16))
 	mat.set_shader_parameter("detail_color", vis.detail_color)
-	mat.set_shader_parameter("anisotropy", vis.anisotropy * 0.25)
+	mat.set_shader_parameter("anisotropy", vis.anisotropy * 0.08)
 	mat.set_shader_parameter("brush_scale", vis.get("brush_scale", 2.0))
 	mat.set_shader_parameter("wear_amount", vis.wear_amount)
 	mat.set_shader_parameter("wear_color", vis.wear_color)
@@ -121,8 +140,8 @@ static func build_structural_material(faction: String) -> ShaderMaterial:
 	mat.set_shader_parameter("emissive_strength", vis.emissive_strength)
 	mat.set_shader_parameter("mottle_amount", vis.get("mottle_amount", 0.0))
 	mat.set_shader_parameter("decal_tint", vis.get("detail_color", Color.WHITE))
-	mat.set_shader_parameter("metallic", 0.15)
-	mat.set_shader_parameter("roughness", 0.82)
+	mat.set_shader_parameter("metallic", 0.04)
+	mat.set_shader_parameter("roughness", 0.93)
 	mat.set_shader_parameter("shield_mode", 0.0)
 	mat.set_shader_parameter("alpha_base", 1.0)
 	var faction_id = faction if FactionCatalogScript.FACTIONS.has(faction) else FactionCatalogScript.DEFAULT_FACTION

@@ -2970,12 +2970,18 @@ func test_faction_catalog_and_hull_material() -> bool:
 	# Hull materials are per-surface overrides now (HullMaterialBuilder.
 	# apply_hull_materials() - real material slots, not a single whole-mesh
 	# material_override, which is always null for a hull - see that
-	# function's own comment). Surface 0 always exists (structural on a
-	# multi-slot hull, or the sole armor surface on a not-yet-re-authored
-	# one) and carries the same per-faction base_color either way.
-	var surface_mat = mesh_inst.get_surface_override_material(0) if mesh_inst else null
+	# function's own comment). Surface count depends on which surface
+	# index is checked here: surface 0 (structural) deliberately DARKENS
+	# base_color a bit for armor/structural value contrast (2026-07-17),
+	# so it no longer carries the faction's exact raw color - check
+	# whichever is the LAST surface instead (the armor material, always
+	# unmodified/undarkened - both on a multi-slot hull's armor surface(s)
+	# and on a not-yet-re-authored hull's sole surface, which gets the
+	# undarkened armor material per apply_hull_materials()'s own fallback).
+	var check_surf = mesh_inst.mesh.get_surface_count() - 1 if mesh_inst and mesh_inst.mesh else 0
+	var surface_mat = mesh_inst.get_surface_override_material(check_surf) if mesh_inst else null
 	if not mesh_inst or not (surface_mat is ShaderMaterial):
-		print("  [FAIL] A real reconstructed hull should have a ShaderMaterial (not StandardMaterial3D) as its surface 0 override material")
+		print("  [FAIL] A real reconstructed hull should have a ShaderMaterial (not StandardMaterial3D) as its armor surface override material")
 		parent.queue_free()
 		bp_manager.queue_free()
 		return false
