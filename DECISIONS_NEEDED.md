@@ -4,6 +4,18 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk J: subsystem stripping gated by hit facet, not uniformly random (2.5)
+
+**Not blocking - implemented, headless suite green (1 new test).**
+
+`battle_unit.gd`'s `take_damage()` previously picked the strip target via `active_modules.pick_random()` - any module anywhere on the hull, including armor plates and modules on the far side from the shot. Damage_And_Armor_Model.md's swarm counter is explicitly *targeted* stripping ("target the radar dishes, treads"); the random version meant a howitzer could "whiff" a third of its shells into a wheel on the opposite side while the hull took nothing - reads as a phantom miss, not real counterplay, and gave the player zero control over what a flanking/positioning choice actually exposed.
+
+**Fix:** the strippable pool is now filtered two ways before the 35% roll: (1) armor-category modules are excluded entirely (armor already gets its own facet-aware resolution via `DamageResolver.resolve()`, called earlier in the same function - it doesn't need a second, redundant "random stray hit" exposure); (2) when `hit_origin` is available, only modules whose own local position classifies to the same facet as the hit direction are eligible - reuses `ModuleCatalog.classify_facet()`, the exact same function armor's placement-time facet meta already uses, applied to each module's own `position` instead of requiring a new per-module meta field. This covers every module category (weapon, locomotion, generator, sensor) uniformly with no per-type wiring, since it's a pure function of where the module actually sits on the hull. Falls back to the old "any non-armor module" pool when `hit_origin` is omitted (AoE hits, or any caller that doesn't supply one), so stripping doesn't silently stop working rather than becoming direction-aware.
+
+**Scope note:** `player_vehicle.gd` (the Test Range's own vehicle script) has an independent, near-duplicate copy of this same stripping logic and was NOT touched - the Test Range is a single-vehicle weapon-testing sandbox against stationary dummies, not the tactical flanking/positioning scenario this fix is about, and duplicating the facet-gating logic there didn't seem worth the risk this pass. Flagging in case Chris wants parity between the two copies later (same divergence risk noted for other take_damage()-adjacent fixes across this file).
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk I: match faction completely overrides the design's saved faction tag - stats AND looks (1.7, full resolution per Chris's explicit direction)
 
 **Not blocking - implemented per Chris's explicit, definitive answer (broader than the original "just re-tag the passive at spawn" framing chunk D left partially open). Headless suite green (1 new test, 1 pre-existing test updated to the new correct expectation).**

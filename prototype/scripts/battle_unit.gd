@@ -977,8 +977,37 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	# strip damage to zero - small sustained guns are now the module-stripper
 	# archetype the design docs promise, while a huge shell still wastes its
 	# overkill on a 100 HP module (action economy, working as intended).
-	if not active_modules.is_empty() and randf() < 0.35:
-		var target_module = active_modules.pick_random()
+	#
+	# FABLE_REVIEW.md 2.5: gated to the module actually facing the shot, and
+	# never an armor plate (armor already gets its own facet-aware
+	# resolution via DamageResolver.resolve() above). Previously any module
+	# ANYWHERE on the hull was an eligible target regardless of hit
+	# direction - a howitzer could "whiff" a third of its shells into a
+	# wheel on the far side while the hull took nothing, which read as a
+	# phantom miss rather than the design docs' targeted "shoot the treads/
+	# radar dish" counterplay. Uses each module's own local position (the
+	# same classify_facet() convention armor's placement-time facet meta
+	# already uses), not a separate per-module meta field, so every
+	# category - weapon, locomotion, generator, sensor - is covered
+	# uniformly with no per-type wiring. Falls back to every non-armor
+	# module (the old pool) when hit_origin isn't available, so a direct
+	# take_damage() call (tests, or any future caller that doesn't supply
+	# one) doesn't silently lose stripping entirely.
+	var hit_facet = ""
+	if hit_origin != null:
+		var local_dir = global_transform.basis.inverse() * ((hit_origin as Vector3) - global_position)
+		hit_facet = ModuleCatalog.classify_facet(local_dir)
+	var strippable = []
+	for m in active_modules:
+		var sm_data = m.get_meta("module_data")
+		if sm_data and sm_data.category == "armor":
+			continue
+		if hit_facet != "" and ModuleCatalog.classify_facet(m.position) != hit_facet:
+			continue
+		strippable.append(m)
+
+	if not strippable.is_empty() and randf() < 0.35:
+		var target_module = strippable.pick_random()
 		var m_data = target_module.get_meta("module_data")
 		var m_hp = target_module.get_meta("current_hp") if target_module.has_meta("current_hp") else m_data.get_hp()
 		var final_mod_damage = amount * DamageResolverScript.MODULE_STRIP_DAMAGE_FACTOR

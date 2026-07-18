@@ -129,6 +129,7 @@ func _init():
 	success = success and await test_enemy_ai_counter_picks_the_players_composition()
 	success = success and await test_power_plant_building_supplies_real_team_energy_capacity()
 	success = success and await test_match_faction_overrides_blueprint_faction_stats_and_looks()
+	success = success and await test_subsystem_stripping_is_gated_by_hit_facet()
 
 	print("\n==============================================")
 	if success:
@@ -7212,4 +7213,129 @@ func test_match_faction_overrides_blueprint_faction_stats_and_looks() -> bool:
 	free_all.call()
 	await process_frame
 	print("  [PASS] Match faction (not the design's saved tag) drives both combat passives and the actual rendered hull material - verified with two units from the identical blueprint fielded under two different match factions.")
+	return true
+
+func test_subsystem_stripping_is_gated_by_hit_facet() -> bool:
+	print("Running Test Suite: Subsystem Stripping Is Gated By Hit Facet, Not Uniformly Random (FABLE_REVIEW 2.5)...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var defender = CharacterBody3D.new()
+	defender.set_script(BattleUnitScript)
+	root.add_child(defender)
+	defender.global_position = Vector3.ZERO
+	defender.max_hp = 100000.0
+	defender.hp = 100000.0
+
+	var hull = Node3D.new()
+	hull.name = "Hull"
+	hull.set_meta("armor_material", "hardened_steel")
+	hull.set_meta("armor_thickness", 1.0)
+	defender.add_child(hull)
+	defender.hull_node = hull
+
+	# A weapon on the front facet (matching the -Z barrel-forward convention
+	# used throughout this codebase), a weapon on the back facet, and an
+	# armor plate ALSO on the front facet (should never be strippable at
+	# all, regardless of hit direction - armor gets its own facet-aware
+	# resolution, not the random-module pool).
+	var front_weapon = Node3D.new()
+	front_weapon.position = Vector3(0, 0, -2)
+	var front_data = ModuleData.new()
+	front_data.type_id = "heavy_machine_gun"
+	front_data.category = "weapon"
+	front_data.base_hp = 100.0
+	front_weapon.set_meta("module_data", front_data)
+	front_weapon.set_meta("current_hp", 100.0)
+	hull.add_child(front_weapon)
+
+	var back_weapon = Node3D.new()
+	back_weapon.position = Vector3(0, 0, 2)
+	var back_data = ModuleData.new()
+	back_data.type_id = "heavy_machine_gun"
+	back_data.category = "weapon"
+	back_data.base_hp = 100.0
+	back_weapon.set_meta("module_data", back_data)
+	back_weapon.set_meta("current_hp", 100.0)
+	hull.add_child(back_weapon)
+
+	var front_armor = Node3D.new()
+	front_armor.position = Vector3(0, 0, -2.5)
+	var armor_data = ModuleData.new()
+	armor_data.type_id = "armor_plating"
+	armor_data.category = "armor"
+	armor_data.base_hp = 500.0
+	front_armor.set_meta("module_data", armor_data)
+	front_armor.set_meta("current_hp", 500.0)
+	hull.add_child(front_armor)
+
+	# Reset every module's HP to full after each hit, so repeated strip
+	# rolls against the single eligible module can never accumulate toward
+	# destroying/queue_free()-ing it mid-loop (which would silently drop it
+	# out of get_active_modules() and invalidate the rest of the test) -
+	# each iteration only asks "did THIS hit move it", not "how much
+	# cumulative damage across N hits".
+	var reset_all = func():
+		front_weapon.set_meta("current_hp", 100.0)
+		back_weapon.set_meta("current_hp", 100.0)
+		front_armor.set_meta("current_hp", 500.0)
+
+	# Hit from the front (attacker at -Z), 20 times: only the front weapon
+	# should ever move, never the back weapon or the armor plate.
+	var hit_from_front = defender.global_position + Vector3(0, 0, -10.0)
+	var front_moved = false
+	for i in range(20):
+		reset_all.call()
+		defender.take_damage(20.0, "kinetic", hit_from_front)
+		if front_weapon.get_meta("current_hp") < 100.0:
+			front_moved = true
+		if back_weapon.get_meta("current_hp") < 100.0:
+			print("  [FAIL] The back weapon should NEVER be strippable by a hit arriving from the front, hp=", back_weapon.get_meta("current_hp"))
+			defender.queue_free()
+			return false
+		if front_armor.get_meta("current_hp") < 500.0:
+			print("  [FAIL] Armor plates should never be eligible for subsystem stripping regardless of facet, hp=", front_armor.get_meta("current_hp"))
+			defender.queue_free()
+			return false
+	if not front_moved:
+		print("  [FAIL] The front weapon (facing the hit) should have taken some strip damage across 20 front-facing hits (35% chance each)")
+		defender.queue_free()
+		return false
+
+	# Now hit from the back: only the back weapon should ever move.
+	var hit_from_back = defender.global_position + Vector3(0, 0, 10.0)
+	var back_moved = false
+	for i in range(20):
+		reset_all.call()
+		defender.take_damage(20.0, "kinetic", hit_from_back)
+		if back_weapon.get_meta("current_hp") < 100.0:
+			back_moved = true
+		if front_weapon.get_meta("current_hp") < 100.0:
+			print("  [FAIL] The front weapon should NOT be strippable once the hit is coming from the back, hp=", front_weapon.get_meta("current_hp"))
+			defender.queue_free()
+			return false
+	if not back_moved:
+		print("  [FAIL] The back weapon (facing the hit) should have taken some strip damage across 20 back-facing hits (35% chance each)")
+		defender.queue_free()
+		return false
+
+	# No hit_origin at all (AoE/unknown direction) should fall back to the
+	# old "any non-armor module" pool, not silently disable stripping -
+	# either weapon may move, but armor never should.
+	var either_moved = false
+	for i in range(20):
+		reset_all.call()
+		defender.take_damage(20.0, "kinetic")
+		if front_weapon.get_meta("current_hp") < 100.0 or back_weapon.get_meta("current_hp") < 100.0:
+			either_moved = true
+		if front_armor.get_meta("current_hp") < 500.0:
+			print("  [FAIL] Armor should stay excluded from the fallback pool too")
+			defender.queue_free()
+			return false
+	if not either_moved:
+		print("  [FAIL] Omitting hit_origin should still allow stripping (fallback to the full non-armor pool) across 20 hits, but neither module ever moved")
+		defender.queue_free()
+		return false
+
+	defender.queue_free()
+	print("  [PASS] Subsystem stripping only ever targets a module actually facing the shot, armor plates are never eligible, and stripping falls back to the full non-armor pool when hit direction is unknown.")
 	return true
