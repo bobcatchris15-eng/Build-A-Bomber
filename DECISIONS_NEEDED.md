@@ -4,6 +4,19 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk A: targeting/placement bug fixes (review items 3.1, 3.3, 3.7, 3.9, 2.4)
+
+**Not blocking - implemented per Chris's green light on the review, all suites green (1 new).** Judgment calls:
+
+- **Weapon LOS (3.1) blocks on world geometry (layer 1), module bodies (2), and buildings (8) - deliberately NOT on units (layer 4).** Firing through/past friendly and enemy units is standard RTS behavior; blocking on layer 4 would deadlock any grouped formation (front rank permanently masks the back rank). The target's own colliders are excluded so a building/unit never "blocks" the shot aimed at itself.
+- **Sponson-through-own-hull (the 2026-07-17 open question) is confirmed real but still DEFERRED**: battle-spawned hulls carry no StaticBody at all (`reconstruct_vehicle(is_designer=false)` skips collision entirely), so there is physically nothing for an own-hull LOS ray to hit in Skirmish. Fixing it means giving battle hulls real colliders, which touches unit collision layering (units are one CharacterBody box today) - too invasive to ride along in a bug-fix chunk. Logged, not silently dropped.
+- **Building overlap check is a plain XZ AABB with a 0.5 clearance margin, applied against BOTH teams' buildings.** Terrain-blocked + near-base + non-overlap together define placement validity; the check lives in `_placement_validity()` so the ghost preview and the click can't disagree (existing convention).
+- **Fog-hidden enemies now behave as empty ground for right-click orders** - previously the red attack marker on an invisible collider was a free wallhack sweep. Attack orders on fog-hidden targets acquired legitimately (e.g. a unit already engaged that then got hidden) are unaffected - this only gates fresh click-orders.
+- **`get_team_factory()` returns the least-busy matching manufactory** (shortest production queue) rather than tree order - makes extra manufactories real parallel capacity for both the player and the AI, exactly what the build-bar copy already promised.
+- **Drive-by fix: `ui_theme.gd` called Godot-3-only `StyleBoxFlat.set_border_enabled_all()`**, which errored at runtime and aborted the rest of the styling function - option-button/slider borders+corners have been silently unstyled the whole time (found via test-run error spam, 22 errors per run → 0). Border width > 0 is the Godot 4 way; the dead call is removed. This subtly changes dropdown/slider chrome (they now render the border/corners originally intended) - visual_regression baselines may need a refresh next time that windowed harness runs.
+
+---
+
 ## 2026-07-18 — Hull Modding implementation (HULL_MODDING_PLAN.md), judgment calls made per Chris's explicit direction to log real decisions
 
 **Not blocking - implemented, verified (byte-for-byte golden-snapshot diff, 4 new automated test suites, a real committed test mod hull placed in-game, real screenshots), all 99 run_tests.gd suites green.**

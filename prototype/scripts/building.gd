@@ -185,12 +185,13 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 		current_energy = max_energy
 		energy_regen_rate = max_energy * 0.08 + bonus_regen
 		vision_range = ModuleCatalog.get_base_vision(hull_type) + bonus_vision
-		# setup_defense() never populates self.faction from the blueprint
-		# (a pre-existing gap, not introduced here) - read it from
-		# defense_hull's own meta instead, same as armor_material/
-		# armor_thickness just above.
-		var defense_faction = defense_hull.get_meta("faction", "industrialists")
-		vision_range *= FactionCatalog.get_passive(defense_faction, "vision_mult", 1.0)
+		# FABLE_REVIEW.md 3.7 fix: populate self.faction for real (previously
+		# only a local var was read here, leaving .faction at the default -
+		# so faction-of-the-construct lookups like the Bayou Irregulars
+		# detection passive in skirmish.gd's _get_construct_faction() always
+		# saw "industrialists" for defense buildings).
+		faction = defense_hull.get_meta("faction", "industrialists")
+		vision_range *= FactionCatalog.get_passive(faction, "vision_mult", 1.0)
 
 		_create_hp_bar(base_size.y + 2.0)
 		_create_selection_ring(max(base_size.x, base_size.z) * 0.72)

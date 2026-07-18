@@ -29,7 +29,11 @@ static func apply_brushed_panel(node: CanvasItem, faction: String, tint_strength
 static func style_option_button(btn: OptionButton) -> void:
 	var style = StyleBoxFlat.new()
 	style.bg_color = Color(0.2, 0.2, 0.2, 0.8)
-	style.set_border_enabled_all(true)
+	# set_border_enabled_all() is a Godot 3 API that doesn't exist on 4.3's
+	# StyleBoxFlat - the invalid call errored out of this whole function at
+	# runtime, so the border/corner styling below silently never applied
+	# (found via test-run error spam). Border width > 0 is what enables
+	# borders in Godot 4; no separate "enabled" call exists.
 	style.set_border_width_all(1)
 	style.border_color = Color(0.4, 0.4, 0.4, 1.0)
 	style.set_corner_radius_all(3)
@@ -40,7 +44,7 @@ static func style_option_button(btn: OptionButton) -> void:
 static func style_slider(slider: HSlider) -> void:
 	var grabber = StyleBoxFlat.new()
 	grabber.bg_color = Color(0.5, 0.5, 0.5, 1.0)
-	grabber.set_border_enabled_all(true)
+	# Same Godot 3 API removal as style_option_button() above.
 	grabber.set_border_width_all(1)
 	grabber.border_color = Color(0.3, 0.3, 0.3, 1.0)
 	slider.add_theme_stylebox_override("grabber_area", grabber)

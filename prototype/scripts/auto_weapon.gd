@@ -21,6 +21,9 @@ var laser_color: Color = Color.RED
 var type_id: String = ""
 
 var damage_class: String = "kinetic"
+# Ray-start height for the LOS check - computed once from the catalog size in
+# _ready() instead of re-fetching catalog data every physics tick.
+var _los_height_offset: float = 0.5
 var traverse_limit_angle: float = PI / 4.0
 var traverse_speed: float = 4.0
 var resting_transform: Transform3D
@@ -75,29 +78,41 @@ func get_team() -> int:
 		return root_vehicle.get_meta("team")
 	return -1
 
-# Line of sight raycast check
+# Line of sight raycast check.
+#
+# FABLE_REVIEW.md 3.1 fix: the old logic only reported "blocked" when the ray
+# hit the weapon's OWN vehicle - a hit on a rock, urban building, or any other
+# world geometry fell through to "clear," so units fired straight through
+# cover the moment a target was team-spotted (the vision system blocked
+# sightlines, the weapons didn't). Now ANY non-excluded hit blocks: world
+# geometry (layer 1 - obstacles/rocks/urban buildings, the same layer
+# skirmish.gd's vision LOS already checks), module bodies (layer 2 - own
+# sibling masts etc., matching the Design Lab firing-arc visualization's
+# blocked-segment behavior), and buildings (layer 8). Units (layer 4)
+# deliberately do NOT block - firing through/past friendly units is standard
+# RTS behavior and blocking on it would deadlock any grouped formation.
+# The target's own colliders are excluded so the target can never "block"
+# the shot at itself. Own-hull blocking (the logged sponson-through-own-hull
+# question) is still structurally absent in Skirmish - battle-spawned hulls
+# carry no StaticBody at all (reconstruct_vehicle is_designer=false), so
+# there is nothing for the ray to hit; a real fix needs battle hull
+# colliders and is logged as deferred in DECISIONS_NEEDED.md.
 func _is_line_of_sight_blocked() -> bool:
 	if not target or not is_instance_valid(target): return true
-	
+
 	var space_state = get_world_3d().direct_space_state
 	# Weapons face forward along negative Z relative to their own local space
 	var muzzle_forward = -global_transform.basis.z.normalized()
-	
-	# Offset ray start to weapon barrel height to avoid clipping own hull/neighbors
-	var height_offset = 0.5
-	if type_id != "":
-		var catalog = ModuleCatalog.get_module_data(type_id)
-		if catalog:
-			height_offset = catalog.size.y * 0.7
-			
-	var ray_start = global_position + Vector3(0, height_offset, 0) + muzzle_forward * 0.8 # start in front of barrel
+
+	var ray_start = global_position + Vector3(0, _los_height_offset, 0) + muzzle_forward * 0.8 # start in front of barrel
 	var ray_end = target.global_position + Vector3(0, 0.5, 0) # target center
-	
+
 	var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
-	query.collision_mask = 1 + 2 + 4 + 8 # Ground (1), Modules (2), Vehicles (4), Targets (8)
+	query.collision_mask = 1 + 2 + 8 # Ground/obstacles (1), Modules (2), Buildings (8) - not units (4)
 	query.collide_with_areas = true
-	
-	# Exclude own weapon static body, main vehicle body, and the Hull static body
+
+	# Exclude own weapon static body, main vehicle body, the Hull static body,
+	# and everything belonging to the target itself.
 	var own_colliders = []
 	_get_colliders_recursive(self, own_colliders)
 	var vehicle = get_vehicle_root()
@@ -107,15 +122,11 @@ func _is_line_of_sight_blocked() -> bool:
 		var hull = vehicle.get_node_or_null("Hull")
 		if hull and hull is CollisionObject3D:
 			own_colliders.append(hull.get_rid())
+	_get_colliders_recursive(target, own_colliders)
 	query.exclude = own_colliders
-	
+
 	var result = space_state.intersect_ray(query)
-	if result:
-		var hit_collider = result.collider
-		var is_own = vehicle and (hit_collider == vehicle or vehicle.is_ancestor_of(hit_collider))
-		if is_own:
-			return true
-	return false
+	return not result.is_empty()
 
 func _ready():
 	resting_transform = transform
@@ -138,6 +149,7 @@ func _ready():
 		# narrow shared band.
 		var weight = data.get_weight()
 		traverse_speed = clamp(200.0 / weight, 0.4, 8.0) * ModuleCatalog.get_traverse_agility(type_id)
+		_los_height_offset = ModuleCatalog.get_module_data(type_id).size.y * 0.7
 		
 		# Traverse limit angle: shared with the Design Lab's firing-arc
 		# visualization via ModuleCatalog.get_traverse_limit_angle() so the

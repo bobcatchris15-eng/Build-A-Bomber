@@ -119,6 +119,7 @@ func _init():
 	success = success and await test_hull_modding_parts_menu_two_buckets()
 	success = success and await test_hull_modding_hard_fail_on_unknown_hull()
 	success = success and await test_hull_modding_mod_hull_placeable()
+	success = success and await test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes()
 
 	print("\n==============================================")
 	if success:
@@ -6255,4 +6256,130 @@ func test_hull_modding_mod_hull_placeable() -> bool:
 	if not ok:
 		return false
 	print("  [PASS] A real user://mods/hulls hull (mesh + JSON sidecar, zero code changes) scans, merges into the catalog, and places successfully in the Design Lab via a runtime glTF import.")
+	return true
+
+func test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes() -> bool:
+	print("Running Test Suite: FABLE review fixes - weapon LOS cover, factory load-balancing, building overlap, defense faction...")
+
+	# --- Part 1: weapon fire LOS is genuinely blocked by world geometry ---
+	# (FABLE_REVIEW.md 3.1: the old check only blocked on own-vehicle hits, so
+	# units fired straight through rocks/buildings.)
+	var weapon_rig = Node3D.new()
+	root.add_child(weapon_rig)
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	var w_data = ModuleData.new()
+	w_data.type_id = "basic_cannon"
+	weapon.set_meta("module_data", w_data)
+	weapon_rig.add_child(weapon)
+	# The LOS check is called directly below; per-tick targeting would crash
+	# against this synthetic rig (no vehicle root), so switch it off.
+	weapon.set_physics_process(false)
+	weapon.global_position = Vector3(0, 1.0, 0)
+
+	var los_target = StaticBody3D.new()
+	los_target.collision_layer = 8
+	los_target.collision_mask = 0
+	var t_col = CollisionShape3D.new()
+	var t_box = BoxShape3D.new()
+	t_box.size = Vector3(2, 2, 2)
+	t_col.shape = t_box
+	los_target.add_child(t_col)
+	root.add_child(los_target)
+	los_target.global_position = Vector3(0, 1.0, -14.0)
+	weapon.target = los_target
+	# Aim the weapon at the target so the muzzle-forward ray offset points the right way
+	weapon.look_at(los_target.global_position, Vector3.UP)
+
+	await process_frame
+
+	var clear_result = weapon._is_line_of_sight_blocked()
+
+	# Insert a wall (world-geometry layer 1) squarely between them
+	var wall = StaticBody3D.new()
+	wall.collision_layer = 1
+	wall.collision_mask = 0
+	var w_col = CollisionShape3D.new()
+	var w_box = BoxShape3D.new()
+	w_box.size = Vector3(6, 6, 1)
+	w_col.shape = w_box
+	wall.add_child(w_col)
+	root.add_child(wall)
+	wall.global_position = Vector3(0, 1.0, -7.0)
+
+	await process_frame
+
+	var blocked_result = weapon._is_line_of_sight_blocked()
+
+	weapon_rig.queue_free()
+	los_target.queue_free()
+	wall.queue_free()
+
+	if clear_result != false:
+		print("  [FAIL] LOS reported blocked with a clear line to the target (the target's own collider must not block the shot at itself).")
+		return false
+	if blocked_result != true:
+		print("  [FAIL] LOS reported clear with a wall between weapon and target - cover does not block weapon fire.")
+		return false
+
+	# --- Part 2: Skirmish-level fixes need a real match instance ---
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# Factory load-balancing (FABLE_REVIEW.md 2.4): a busy manufactory must
+	# lose to an idle one of the same tier.
+	var first_light = skirmish.get_team_factory(0, "light")
+	if not first_light:
+		print("  [FAIL] No starting light manufactory found.")
+		skirmish.queue_free()
+		return false
+	var second_light = skirmish._spawn_prefab("light_manufactory", 0, first_light.global_position + Vector3(0, 0, 14), skirmish.player_faction)
+	await process_frame
+	first_light.queue_unit({}, 60.0)
+	var chosen = skirmish.get_team_factory(0, "light")
+	if chosen != second_light:
+		print("  [FAIL] get_team_factory() did not pick the idle manufactory over the busy one - extra factories are still decorative.")
+		skirmish.queue_free()
+		return false
+	first_light.production_queue.clear()
+
+	# Building overlap rejection (FABLE_REVIEW.md 3.3): placing a refinery on
+	# top of an existing building must be invalid; a clear nearby spot valid.
+	skirmish.placing = {"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}
+	var stacked = skirmish._placement_validity(first_light.global_position)
+	var hq_pos = skirmish.player_hq.global_position
+	var clear_spot = hq_pos + Vector3(0, 0, -16)
+	var clear = skirmish._placement_validity(clear_spot)
+	skirmish.placing = {}
+	if stacked.valid:
+		print("  [FAIL] Placement on top of an existing building was accepted - buildings can still be stacked.")
+		skirmish.queue_free()
+		return false
+	if not clear.valid:
+		print("  [FAIL] A clear spot near the base was rejected (%s) - overlap check is too aggressive." % clear.reason)
+		skirmish.queue_free()
+		return false
+
+	# Defense buildings carry their real faction (FABLE_REVIEW.md 3.7)
+	var defense_bp = {
+		"hull_type": "pillbox_foundation",
+		"faction": "bayou_irregulars",
+		"armor_material": "hardened_steel",
+		"armor_thickness": 1.0,
+		"locomotion": {"type_id": "", "settings": {}},
+		"modules": [{"type_id": "heavy_machine_gun", "position": {"x": 0, "y": 1.2, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}}]
+	}
+	var defense = skirmish.spawn_defense(defense_bp, 0, hq_pos + Vector3(16, 0, 0))
+	await process_frame
+	if defense.faction != "bayou_irregulars":
+		print("  [FAIL] Defense building faction field is '%s', expected the blueprint's own 'bayou_irregulars'." % defense.faction)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Weapon fire is blocked by real cover, idle factories receive queue jobs, buildings can't stack, and defenses carry their faction.")
 	return true

@@ -633,20 +633,29 @@ func spawn_defense(blueprint_data: Dictionary, team: int, pos: Vector3) -> Stati
 	b.setup_defense(blueprint_data, team, bp_manager)
 	return b
 
-# tier: "" returns the first manufactory of ANY tier (backward-compatible
+# tier: "" returns a manufactory of ANY tier (backward-compatible
 # "just get me a factory" behavior, used by contexts that don't care which
 # tier - e.g. the map smoke test's generic production check); "light"/
 # "medium"/"heavy" returns only a manufactory of that exact tier, or null
 # if the team doesn't have one (e.g. it was destroyed mid-match).
+#
+# FABLE_REVIEW.md 2.4 fix: among matching manufactories, the LEAST-BUSY one
+# (shortest production queue) is returned rather than whichever happens to
+# come first in the scene tree - previously a second manufactory of the same
+# tier never received a single job, making the build bar's "parallel
+# production capacity" pitch false for both the player and the AI.
 func get_team_factory(team: int, tier: String = "") -> Node:
+	var best: Node = null
+	var best_queue := 1 << 30
 	for b in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(b) or b.is_dead or b.team != team: continue
-		if tier == "":
-			if b.kind in ["light_manufactory", "medium_manufactory", "heavy_manufactory"]:
-				return b
-		elif b.kind == tier + "_manufactory":
-			return b
-	return null
+		var matches = (tier == "" and b.kind in ["light_manufactory", "medium_manufactory", "heavy_manufactory"]) or b.kind == tier + "_manufactory"
+		if not matches: continue
+		var q = b.production_queue.size() if "production_queue" in b else 0
+		if q < best_queue:
+			best = b
+			best_queue = q
+	return best
 
 func get_team_units(team: int, combat_only: bool = false) -> Array:
 	var list = []
@@ -932,12 +941,23 @@ func _placement_validity(pos: Vector3) -> Dictionary:
 	# check against at all.
 	if TerrainBuilder.is_position_blocked(current_map, pos):
 		return {"valid": false, "reason": "Can't build on water or terrain obstacles!"}
+	# Footprint of what's being placed - buildings occupy real space now
+	# (FABLE_REVIEW.md 3.3: the placement ray only ever hit the ground layer,
+	# so nothing stopped stacking a new building inside an existing one).
+	var new_footprint = _placing_footprint()
 	# Must be near your base (within 28m of any friendly building) and
 	# clear of the enemy's (their base being reachable at all doesn't mean
 	# it's "yours" to build next to).
 	var near_base = false
 	for b in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(b) or b.is_dead: continue
+		# XZ footprint overlap against every existing building, either team -
+		# a small 0.5 clearance margin so buildings can't visually kiss.
+		var b_fp: Vector3 = b.footprint if "footprint" in b else Vector3(5, 3, 5)
+		var dx = abs(b.global_position.x - pos.x)
+		var dz = abs(b.global_position.z - pos.z)
+		if dx < (b_fp.x + new_footprint.x) / 2.0 + 0.5 and dz < (b_fp.z + new_footprint.z) / 2.0 + 0.5:
+			return {"valid": false, "reason": "Blocked by another building!"}
 		if b.team == PLAYER_TEAM and b.global_position.distance_to(pos) < 28.0:
 			near_base = true
 		elif b.team != PLAYER_TEAM and b.global_position.distance_to(pos) < 20.0:
@@ -945,6 +965,15 @@ func _placement_validity(pos: Vector3) -> Dictionary:
 	if not near_base:
 		return {"valid": false, "reason": "Too far from your base!"}
 	return {"valid": true, "reason": ""}
+
+# Footprint of the building currently being placed (ghost/click validity).
+func _placing_footprint() -> Vector3:
+	if placing.is_empty():
+		return Vector3(5, 3, 5)
+	if placing.kind == "defense":
+		var hull_data = ModuleCatalog.get_module_data(placing.blueprint.get("hull_type", "pillbox_foundation"))
+		return hull_data.size
+	return BuildingScript.PREFAB_STATS[placing.kind].size
 
 func _try_place_building(pos: Vector3):
 	if placing.is_empty(): return
@@ -1061,7 +1090,13 @@ func _issue_order(screen_pos: Vector2):
 					s.order_harvest(node)
 			_spawn_order_marker(node.global_position, Color.GOLD)
 			return
-		if (node.is_in_group("units") or node.is_in_group("buildings")) and node.get("team") != PLAYER_TEAM:
+		# Fog gate (FABLE_REVIEW.md 3.9): a fog-hidden enemy keeps its collision
+		# layers (only rendering is toggled), so without this check a player
+		# could right-click-sweep through unexplored fog and use the red attack
+		# marker as a free wallhack to find unscouted units. An unseen enemy
+		# under the cursor is treated exactly like empty ground.
+		var node_fog_hidden = "fog_hidden" in node and node.fog_hidden
+		if (node.is_in_group("units") or node.is_in_group("buildings")) and node.get("team") != PLAYER_TEAM and not node_fog_hidden:
 			for s in selected:
 				if is_instance_valid(s) and s.has_method("order_attack"):
 					s.order_attack(node)
