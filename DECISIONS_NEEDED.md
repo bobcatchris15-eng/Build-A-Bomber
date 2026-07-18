@@ -4,6 +4,21 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk M: systemic tweak-cost audit (1.5) - grounded in what an EARLIER pass had already fixed, not starting from zero
+
+**Not blocking - implemented per Chris's explicit go-ahead, using "real-world logical tradeoffs" as the stated north star. Headless suite green (1 new test).**
+
+Before touching anything, traced every tweak family through the actual current formulas (`module_data.gd`'s `get_weight()`/`get_cost()`/`get_dps()`, `auto_weapon.gd`'s fire_range/fire_rate/traverse blocks, and `module_placer.gd`'s locomotion mounting) rather than assuming the review's original text was still an accurate description of the code. Two things had already changed since FABLE_REVIEW.md was written, both from an unrelated prior commit (`c21d931`, "Per-weapon-type traverse rates, plus real range/traverse tweak coverage" - not a FABLE_REVIEW chunk, predates this session's involvement):
+
+1. **Weight and traverse already got a systematic pass.** `ModuleCatalog.LINEAR_SCALE_WEAPON_TWEAKS` (19 tweak names - every "single part gets physically bigger" tweak, e.g. `cooling_jacket`, `pressure_valve`) already divides `traverse_speed` directly, on top of the pre-existing indirect route (traverse's own base formula is `200.0/weight`, and every one of these tweaks already multiplies weight too). `auto_weapon.gd`'s fire_range block already covers nearly every tweak with a real range link.
+2. **Locomotion tweaks (axle-count/leg-count/tread-width) already have real cost consequences**, through two GENERIC mechanisms that don't need per-tweak wiring at all: "size" tweaks write to each module's `scale_multiplier` (which every stat formula already reads via `_get_volume_mult()`), and "count" tweaks work by literally spawning more module instances (each with its own real cost/weight through `blueprint_cost()`'s per-module loop). No gap here to fix.
+
+**What was still a real, concrete gap, grounded in the code:** `module_data.gd`'s `get_cost()` whitelist still had only 5 tweak names, while `get_weight()`'s whitelist (the list the traverse penalty above is keyed to) had 22 - so a tweak could already cost real weight AND real traverse speed and STILL cost zero extra metal/crystal. Expanded `get_cost()`'s whitelist to exactly match `get_weight()`'s (same 22 names, same "bigger part = proportionally pricier" logic, so weight and cost consequences can never drift out of sync with each other going forward), and added the two count-style tweaks (`hangar_size`, `launch_catapult` on `drone_carrier`) that had no cost coverage in either metal or crystal at all. Also fixed `barrel_count`/`tube_count`, which previously scaled only metal, to scale crystal too (matching `grid_size`/`welder_count`, which already did both).
+
+**Deliberately NOT changed - a real judgment call, not an oversight:** the review's specific complaint that `barrel_count`/`tube_count`/`grid_size` are "efficiency-invariant... a pure bigger-or-smaller dial" is still true after this pass - these already scale weight/cost/dps by the identical ratio (a real, physically-sensible tradeoff: more barrels really does cost proportionally more), and already indirectly cost traverse through the weight-driven base formula, satisfying Chris's literal north star ("bigger/heavier things traverse slower and weigh more"). I did not invent an ADDITIONAL non-linear traverse penalty specifically for count-tweaks to manufacture a "crossover" tradeoff beyond pure proportionality - doing so would be a genuinely new numeric invention with no formula to ground it in, rather than a fix grounded in what the codebase already establishes elsewhere. Flagging as a legitimate follow-up if Chris wants count-tweaks to feel more differentiated, not just proportionally bigger.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk L: base power is now genuinely separate from a vehicle's own energy budget (1.6, Chris's direct resolution)
 
 **Not blocking - implemented per Chris's explicit, no-ambiguity-left resolution. Headless suite green (1 new test).**

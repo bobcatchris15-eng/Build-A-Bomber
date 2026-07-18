@@ -132,6 +132,7 @@ func _init():
 	success = success and await test_subsystem_stripping_is_gated_by_hit_facet()
 	success = success and await test_enemy_intel_readout_respects_fog_of_war()
 	success = success and await test_base_power_is_separate_from_vehicle_energy_budget()
+	success = success and await test_every_weight_tweak_also_costs_real_resources()
 
 	print("\n==============================================")
 	if success:
@@ -7485,4 +7486,67 @@ func test_base_power_is_separate_from_vehicle_energy_budget() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] A mobile unit's own generator only powers that unit (never the team pool); only base infrastructure (HQ/power_plant/defense generators) feeds team base power; the HUD label reads as base power, not a universal resource.")
+	return true
+
+func test_every_weight_tweak_also_costs_real_resources() -> bool:
+	print("Running Test Suite: Systemic Tweak-Cost Audit - Every Weight/Range/DPS Tweak Also Costs Real Resources (FABLE_REVIEW 1.5)...")
+	# Before this fix, get_cost()'s whitelist covered only 5 of the ~22
+	# tweaks that already cost real weight (and, via the weight-driven
+	# traverse formula, real traverse speed too) - so most of the roster's
+	# "max every slider" sliders were free power in resource terms. Spot-
+	# checks a representative sample that was previously uncosted, across
+	# several different module categories (weapon/support), confirming
+	# cost now moves in the same direction weight already does.
+	var samples = [
+		{"type_id": "pd_laser", "tweak": "cooling_jacket", "max": 2.0},
+		{"type_id": "flamethrower", "tweak": "pressure_valve", "max": 2.0},
+		{"type_id": "resource_harvester", "tweak": "extractor_size", "max": 2.0},
+		{"type_id": "sensor_suite", "tweak": "mast_height", "max": 2.0},
+		{"type_id": "logistics_tank", "tweak": "tank_capacity", "max": 2.0},
+		{"type_id": "drone_carrier", "tweak": "hangar_size", "max": 5.0},
+		{"type_id": "gauss_railgun", "tweak": "rod_thickness", "max": 2.0}, # was on the weight list but not cost
+	]
+	for s in samples:
+		var catalog_data = ModuleCatalog.get_module_data(s.type_id)
+		var baseline = ModuleData.new()
+		baseline.type_id = s.type_id
+		baseline.cost_metal = catalog_data.metal
+		baseline.cost_crystal = catalog_data.crystal
+		baseline.base_weight = catalog_data.weight
+		var tweaked = ModuleData.new()
+		tweaked.type_id = s.type_id
+		tweaked.cost_metal = catalog_data.metal
+		tweaked.cost_crystal = catalog_data.crystal
+		tweaked.base_weight = catalog_data.weight
+		tweaked.tweaks = {s.tweak: s.max}
+
+		var base_cost = baseline.get_cost()
+		var tweaked_cost = tweaked.get_cost()
+		var base_weight = baseline.get_weight()
+		var tweaked_weight = tweaked.get_weight()
+
+		if tweaked_weight <= base_weight:
+			print("  [FAIL] Test assumption broken: '", s.tweak, "' on ", s.type_id, " should already raise weight at its max value, got ", base_weight, " -> ", tweaked_weight)
+			return false
+		if tweaked_cost.x <= base_cost.x and tweaked_cost.y <= base_cost.y:
+			print("  [FAIL] '", s.tweak, "' on ", s.type_id, " raises weight (", base_weight, " -> ", tweaked_weight, ") but its max value doesn't raise cost at all (", base_cost, " -> ", tweaked_cost, ")")
+			return false
+
+	# barrel_count/tube_count previously only scaled metal, not crystal -
+	# confirm both now move together (consistent with grid_size/
+	# welder_count, which already scaled both).
+	var rotary_catalog = ModuleCatalog.get_module_data("rotary_cannon")
+	if rotary_catalog.crystal > 0:
+		var rotary_base = ModuleData.new()
+		rotary_base.cost_metal = rotary_catalog.metal
+		rotary_base.cost_crystal = rotary_catalog.crystal
+		var rotary_tweaked = ModuleData.new()
+		rotary_tweaked.cost_metal = rotary_catalog.metal
+		rotary_tweaked.cost_crystal = rotary_catalog.crystal
+		rotary_tweaked.tweaks = {"barrel_count": 8.0}
+		if rotary_tweaked.get_cost().y <= rotary_base.get_cost().y:
+			print("  [FAIL] barrel_count should now scale crystal cost too, not just metal")
+			return false
+
+	print("  [PASS] Every tweak that already costs real weight (and thus real traverse) now also costs real metal/crystal - the cost model no longer whitelists only 5 of ~22 such tweaks.")
 	return true

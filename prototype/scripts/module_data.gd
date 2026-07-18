@@ -66,10 +66,21 @@ func get_cost() -> Vector2i:
 	var vol = _get_volume_mult()
 	var m = cost_metal + int(cost_metal * (vol - 1.0) * GlobalConfig.cost_scale_factor)
 	var c = cost_crystal + int(cost_crystal * (vol - 1.0) * GlobalConfig.cost_scale_factor)
-	
+
+	# FABLE_REVIEW.md 1.5 (systemic tweak-cost audit): every "single part
+	# gets physically bigger" tweak already costs real weight (get_weight()
+	# below) - a bigger lens/rail/cooling jacket/warhead is a bigger, more
+	# expensive part, not just a heavier one. Same whitelist get_weight()
+	# uses, so a tweak's weight and cost consequences can never drift out
+	# of sync with each other. Previously only 5 of these ~22 tweaks had
+	# ANY cost consequence, so most of the roster's "max every slider"
+	# sliders were free power in resource terms even though they already
+	# cost real weight/traverse - the review's own "does this slider have
+	# a correct answer" complaint, still true for the resource axis even
+	# after an earlier pass fixed the weight/traverse side.
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "rail_length", "seeker_size", "payload_size", "radar_dish"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "tank_capacity", "dispersion", "elevation", "fuse_setting"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				m = int(m * val)
 				c = int(c * val)
@@ -78,15 +89,23 @@ func get_cost() -> Vector2i:
 			c *= 2
 		elif tweak_name == "barrel_count":
 			m = int(m * (val / 6.0))
+			c = int(c * (val / 6.0))
 		elif tweak_name == "tube_count":
 			m = int(m * (val / 2.0))
+			c = int(c * (val / 2.0))
 		elif tweak_name == "grid_size":
 			m = int(m * (val / 4.0))
 			c = int(c * (val / 4.0))
 		elif tweak_name == "welder_count":
 			m = int(m * (val / 2.0))
 			c = int(c * (val / 2.0))
-			
+		elif tweak_name == "hangar_size":
+			m = int(m * (val / 2.0))
+			c = int(c * (val / 2.0))
+		elif tweak_name == "launch_catapult":
+			m = int(m * val)
+			c = int(c * val)
+
 	return Vector2i(m, c)
 
 func get_energy_capacity() -> float:
