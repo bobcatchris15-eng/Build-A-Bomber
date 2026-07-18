@@ -126,6 +126,7 @@ func _init():
 	success = success and await test_damage_model_rof_chip_strip_and_air_rules()
 	success = success and await test_hull_economy_and_scale_bounds()
 	success = success and await test_explosive_weapons_deal_real_aoe_damage()
+	success = success and await test_enemy_ai_counter_picks_the_players_composition()
 
 	print("\n==============================================")
 	if success:
@@ -6979,4 +6980,68 @@ func test_explosive_weapons_deal_real_aoe_damage() -> bool:
 
 	free_all.call()
 	print("  [PASS] AoE blast damage hits a real radius with distance falloff (center > off-center > zero outside the radius), hostiles only.")
+	return true
+
+func test_enemy_ai_counter_picks_the_players_composition() -> bool:
+	print("Running Test Suite: Enemy AI Counter-Picking - Scouts The Player's Composition (FABLE_REVIEW 2.1)...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var ai = skirmish.get_node_or_null("EnemyAI")
+	if not ai:
+		print("  [FAIL] Skirmish should have an EnemyAI child node")
+		skirmish.queue_free()
+		return false
+
+	# Pure classifier check first, no production side effects.
+	if ai._scout_player_threat() != "":
+		print("  [FAIL] With no player units at all, there should be no counter signal, got '", ai._scout_player_threat(), "'")
+		skirmish.queue_free()
+		return false
+
+	var flyers = []
+	for i in range(3):
+		var u = CharacterBody3D.new()
+		u.set_script(BattleUnitScript)
+		root.add_child(u)
+		u.team = 0
+		u.is_flying = true
+		u.add_to_group("units")
+		flyers.append(u)
+	await process_frame
+
+	if ai._scout_player_threat() != "air":
+		print("  [FAIL] 3 flying player units should read as an 'air' threat signal, got '", ai._scout_player_threat(), "'")
+		for u in flyers: u.queue_free()
+		skirmish.queue_free()
+		return false
+
+	# End-to-end: give the enemy team ample resources and confirm _try_produce()
+	# actually queues an anti-air-carrying design instead of whatever plain
+	# round-robin would have picked next.
+	skirmish.economy[skirmish.ENEMY_TEAM].metal = 100000
+	skirmish.economy[skirmish.ENEMY_TEAM].crystal = 100000
+	ai._try_produce()
+
+	var queued_counter = false
+	for b in skirmish.get_team_buildings(1):
+		if not ("production_queue" in b): continue
+		for job in b.production_queue:
+			for mod in job.blueprint.get("modules", []):
+				if mod.get("type_id", "") in ai.ANTI_AIR_WEAPONS:
+					queued_counter = true
+	if not queued_counter:
+		print("  [FAIL] Facing an all-air player force, the enemy AI's next build should be an anti-air-carrying design, but none was found in any factory queue")
+		for u in flyers: u.queue_free()
+		skirmish.queue_free()
+		return false
+
+	for u in flyers: u.queue_free()
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Enemy AI reads the player's live composition (air/armor majority) and biases its next build toward a design that actually answers it, falling back to round-robin otherwise.")
 	return true

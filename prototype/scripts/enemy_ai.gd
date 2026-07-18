@@ -86,26 +86,82 @@ func _combat_roster() -> Array:
 			list.append(entry)
 	return list
 
+# --- Counter-picking (FABLE_REVIEW.md 2.1) ---
+# A crude but real read of what the player is fielding, so the AI's next
+# build feels like a response instead of a fixed cycle - the review's own
+# suggested minimum viable version. Two clear signals only: lots of air,
+# lots of heavy armor. If either is a real majority of the player's live
+# combat units, bias toward an affordable roster entry that actually answers
+# it; otherwise (or if the roster has no such entry available right now)
+# fall through unchanged to the existing round-robin cycle below - this is a
+# bias layered on the existing production loop, not a replacement for it.
+const ANTI_AIR_WEAPONS = ["ciws", "flak_cannon", "pd_laser"]
+const ANTI_ARMOR_WEAPONS = ["gauss_railgun", "heavy_howitzer", "ion_cannon", "tesla_coil"]
+const COUNTER_SCOUT_MIN_UNITS = 2
+const COUNTER_SCOUT_MAJORITY = 0.4
+
+func _scout_player_threat() -> String:
+	var units = skirmish.get_team_units(0, true)
+	if units.size() < COUNTER_SCOUT_MIN_UNITS:
+		return ""
+	var flying = 0
+	var armored = 0
+	for u in units:
+		if not is_instance_valid(u): continue
+		if "is_flying" in u and u.is_flying:
+			flying += 1
+		if is_instance_valid(u.hull_node) and u.hull_node.has_meta("armor_thickness") and u.hull_node.get_meta("armor_thickness") >= 2.0:
+			armored += 1
+	# Air checked first: an armored flyer should still draw AA - air is the
+	# harder problem for this roster (auto-hit + the air-pierce bug 1.8 fixed
+	# were both about how dominant airborne already is).
+	if float(flying) / units.size() >= COUNTER_SCOUT_MAJORITY:
+		return "air"
+	if float(armored) / units.size() >= COUNTER_SCOUT_MAJORITY:
+		return "armor"
+	return ""
+
+func _entry_counters(entry, threat: String) -> bool:
+	var weapon_list = ANTI_AIR_WEAPONS if threat == "air" else ANTI_ARMOR_WEAPONS
+	for mod in entry.blueprint.get("modules", []):
+		if mod.get("type_id", "") in weapon_list:
+			return true
+	return false
+
+# Shared by both the counter-pick and round-robin paths: tier/factory/
+# affordability gate, then spend + queue. Returns whether it actually queued.
+func _queue_entry(entry) -> bool:
+	var tier = ModuleCatalog.get_hull_size_tier(entry.blueprint.get("hull_type", "medium_hull"))
+	var factory = skirmish.get_team_factory(team, tier)
+	if not factory or factory.production_queue.size() >= 2:
+		return false
+	if not skirmish.can_afford(team, entry.cost_metal, entry.cost_crystal):
+		return false
+	skirmish.spend(team, entry.cost_metal, entry.cost_crystal)
+	var build_time = skirmish.build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal))
+	build_time *= FactionCatalog.get_passive(skirmish.enemy_faction, "build_time_mult", 1.0)
+	if skirmish.is_energy_deficit(team):
+		build_time *= 1.5
+	factory.queue_unit(entry.blueprint, build_time)
+	return true
+
 func _try_produce():
 	var combat = _combat_roster()
 	if combat.is_empty(): return
+
+	var threat = _scout_player_threat()
+	if threat != "":
+		for entry in combat:
+			if _entry_counters(entry, threat) and _queue_entry(entry):
+				return
+
 	# Cycle through the roster; skip what we can't afford OR don't have the
 	# right manufactory tier for yet (size-tiered manufactories - see
 	# ModuleCatalog.get_hull_size_tier()). Checked per-entry, not once
 	# upfront, since different roster entries can need different tiers.
 	for i in range(combat.size()):
 		var entry = combat[(roster_index + i) % combat.size()]
-		var tier = ModuleCatalog.get_hull_size_tier(entry.blueprint.get("hull_type", "medium_hull"))
-		var factory = skirmish.get_team_factory(team, tier)
-		if not factory or factory.production_queue.size() >= 2:
-			continue
-		if skirmish.can_afford(team, entry.cost_metal, entry.cost_crystal):
-			skirmish.spend(team, entry.cost_metal, entry.cost_crystal)
-			var build_time = skirmish.build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal))
-			build_time *= FactionCatalog.get_passive(skirmish.enemy_faction, "build_time_mult", 1.0)
-			if skirmish.is_energy_deficit(team):
-				build_time *= 1.5
-			factory.queue_unit(entry.blueprint, build_time)
+		if _queue_entry(entry):
 			roster_index = (roster_index + i + 1) % combat.size()
 			return
 

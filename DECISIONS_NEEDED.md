@@ -4,6 +4,18 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk G: enemy AI counter-picks the player's composition (2.1, scoped to the AI half only)
+
+**Not blocking - implemented, headless suite green (1 new test).**
+
+The review's #4 "if I had to pick five" item was two increments: (a) an AI that picks counters, (b) a post-/mid-match intel readout surfacing enemy composition to the player. Built (a) only this pass - it's the review's own "smallest version of the actual game loop," a pure `enemy_ai.gd` change with no UI surface. `enemy_ai.gd` now has `_scout_player_threat()` (reads the player's live combat units each production tick: if flying units are >=40% of the force, "air"; if heavily-armored units (thickness >= 2.0) are >=40%, "armor"; else no signal - needs >=2 live units before it'll read anything, so it can't misfire off a single scout) and `_entry_counters()` (does a roster entry carry an anti-air weapon - ciws/flak_cannon/pd_laser - or an anti-armor one - gauss_railgun/heavy_howitzer/ion_cannon/tesla_coil). `_try_produce()` tries a countering, affordable, tier-buildable entry first when there's a signal, falling through to the existing round-robin cycle otherwise (so it degrades to today's behavior whenever there's no clear read or no roster entry that answers it - a bias layered on top of the existing loop, not a rewrite of it). Verified against the real bundled enemy roster: `lance_rail_platform` (gauss_railgun) answers "armor", `tide_corvette` (flak_cannon) answers "air" - both already exist, no new content needed.
+
+**Why (b) wasn't bundled in:** a real intel readout is a UI feature (HUD panel or post-match screen, new layout/data-plumbing from `skirmish.get_team_units()` to a Control node) - a meaningfully different kind of work from the AI-side scouting logic above, and the review itself describes them as two separate increments, not one. Flagging as the natural next follow-up to this chunk, not forgotten.
+
+**Not addressed by this pass, deliberately:** the counter table is exactly two signals (air, armor) with a hand-picked 40% majority threshold and weapon-list membership as its only classifier - a real "crude but real" table per the review's own framing, not a general threat-assessment system. Swarm-of-cheap-units and energy-drain-vulnerable compositions aren't scouted for at all; AoE-carrying designs aren't biased toward as a counter to swarms either (natural pairing with chunk F/2.3, but a third signal is a bigger judgment call about what counts as "swarm" than I wanted to make unattended). Logging as a reasonable next increment for whoever picks this back up.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk F: real AoE damage for explosive weapons (2.3) - blast radii picked by hand, friendly fire deliberately excluded
 
 **Not blocking - implemented, headless suite green (1 new test).**
