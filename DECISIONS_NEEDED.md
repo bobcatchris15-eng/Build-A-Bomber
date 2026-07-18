@@ -4,6 +4,33 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 cont'd — Fixed the disabled per-faction hull albedo texture; honest answer on what the earlier verification screenshots actually showed
+
+**Not blocking - real bug found, fixed, and verified with a rigorous before/after. This directly concerns work already reported to Chris as done and verified, so the full investigation is recorded here in detail rather than summarized.**
+
+**The bug:** hull_faction_material.gdshader (introduced in commit 724e221, "Add real per-faction texture maps... Verified: 5 factions' textures + an extreme hull_scale stretch confirmed via real screenshots") had:
+```
+vec3 color = mix(base_color.rgb, accent_color.rgb, accent_mask);
+//color *= tex_albedo * 2.0;
+color = mix(color, tex_albedo, 0.0); // DEBUG: silence unused-var warning without applying it
+```
+The real line was commented out and replaced with a no-op. `tex_roughness` (a few lines down, driving the `ROUGHNESS` output) was NOT disabled - only the albedo/color channel was. This was present in the very first commit that added the feature, not a later regression.
+
+**Was the earlier verification screenshot claim true or false? Neither cleanly - here's exactly what was and wasn't visible:**
+
+Rebuilt the precise before/after using `BlueprintManager.reconstruct_vehicle()` - the exact call MainLab.tscn's own runtime code makes, so the hull mesh/material is pixel-for-pixel what the real Design Lab shows - across 4 factions chosen to isolate the bug's visible reach: industrialists (no overlay, the shared baseline), salvage_union ("patch" overlay - touches BOTH albedo and roughness in generate_faction_textures.gd), bayou_irregulars ("blotch" overlay - touches ONLY albedo, the purest isolation case), glacier_syndicate ("frost" overlay - touches both). Screenshots in progress_captures/2026-07-17/hull_albedo_fix/{BEFORE,AFTER}/.
+
+- **What WAS genuinely visible and real in the earlier screenshots:** the shared "ink panel-lines + raised rivets" SHAPE, because it's carried by `tex_roughness` (modulates specular response per-pixel - rivets catch brighter highlights, seams look more matte/darker) and the texture's own NORMAL map (bump-shaded grooves/rivet domes) - neither of those was disabled. So "hulls show visible panel/rivet detail" was true, just for a narrower reason than believed.
+- **What was NEVER visible, from the very first commit, and is what the "bold painted-sprite" texture rework was actually FOR:** every bit of BAKED-IN COLOR - the directional-shading-baked ink darkening at seams, the corrosion/streak tinting, and especially any faction's overlay_style that's albedo-only. Confirmed directly: bayou_irregulars' BEFORE screenshot shows the SAME flat grey-brown hull as industrialists, with the camo cue coming ENTIRELY from the separate netting greeble card (hull_greebles.gd) laid on top - zero blotch color on the hull surface itself. Its AFTER screenshot shows real warm olive-green camo mottling actually on the hull surface, exactly as generate_faction_textures.gd's "blotch" overlay was designed to produce. Industrialists and glacier_syndicate both show a much bolder, darker, more graphic ink-panel-line contrast in AFTER vs. a flatter/washed-out BEFORE. salvage_union shows the smallest delta of the four, consistent with its overlay already leaking partial visibility through the (never-disabled) roughness channel.
+
+**So: the earlier "verified via real screenshots" claim wasn't fabricated - the screenshots really did show real, live rendering - but it verified less than it claimed to. It confirmed the shape/bump layer of the texture rework; it did NOT confirm the color layer, which is most of what that session's own commit message described as the point (bold ink lines, baked light/shadow, corrosion/patch/camo/frost color character). That distinction was not caught at the time.**
+
+**The fix:** removed the no-op debug line, restored `color *= tex_albedo * 2.0;`. No other change needed - `tex_roughness` was already correct, and this pass's earlier hardened_steel roughness fix (0.2 -> 0.42, see this file's other 2026-07-17 entry) is unrelated and unaffected by this one; a combined shot (progress_captures/2026-07-17/glossiness_diagnosis/close_hull_on_grass_both_fixes.png) confirms both fixes together still read as a soft, richly-detailed brushed-metal hull, not overly busy.
+
+**Verified:** the before/after screenshots above at identical camera framing per faction; a real-gameplay-distance shot (same file) confirming the fix reads clearly even from typical RTS camera distance, not just a close product shot; full headless test suite green.
+
+---
+
 ## 2026-07-17 cont'd — Root-caused the "whole game looks too shiny/glossy" report
 
 **Not blocking - real root cause found and fixed, verified with before/after screenshots, all headless tests green.**
