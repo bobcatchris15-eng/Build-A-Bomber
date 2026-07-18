@@ -1,0 +1,245 @@
+extends SceneTree
+# Generates real per-terrain-type albedo/normal/roughness texture maps,
+# entirely procedurally, headlessly, in pure Godot (Image + hand-rolled
+# periodic value noise) - same technique as generate_faction_textures.gd
+# (this project's established zero-external-asset pattern), pre-baked to
+# PNGs once rather than regenerated at runtime, for the same reason: a
+# per-pixel GDScript loop at usable resolution is too slow to repeat every
+# game boot.
+#
+# Unlike the faction pipeline (which bakes a NEUTRAL grayscale mask the
+# real-time shader re-tints per faction via base_color/accent_color), these
+# textures bake REAL COLOR directly into the albedo PNG - terrain doesn't
+# have a per-faction tint step, VISUAL_ART_DIRECTION.md section 4 already
+# specifies each terrain type's exact color, and terrain geometry is never
+# stretched at runtime the way a Design Lab hull is, so there's no
+# world-space/triplanar UV problem to solve either - a plain tiled
+# StandardMaterial3D (see terrain_builder.gd) is enough.
+#
+# Five terrain types, matching the surface_zones/shallow_water_areas types
+# TerrainBuilder/map_catalog.gd/module_catalog.gd already differentiate
+# mechanically (get_terrain_speed_multiplier()): marsh, rocky, snow_mud,
+# sand, shallow_water.
+#
+# Re-run after changing TERRAIN_TEX_PARAMS below:
+#   ./Godot_v4.3-stable_win64_console.exe --headless --script tools/generate_terrain_textures.gd
+
+const OUT_DIR = "res://assets/textures/terrain"
+const TEX_SIZE = 256
+
+# Same fixed "sun" as generate_faction_textures.gd's LIGHT_DIR - one baked
+# lighting rig for the whole game, so terrain's painted-in shading and
+# hulls' painted-in shading agree on where the light comes from.
+const LIGHT_DIR = Vector3(-0.45, -0.65, 0.6)
+
+func _init():
+	DirAccess.make_dir_recursive_absolute(OUT_DIR)
+	_generate("marsh", _eval_marsh)
+	_generate("rocky", _eval_rocky)
+	_generate("snow_mud", _eval_snow_mud)
+	_generate("sand", _eval_sand)
+	_generate("shallow_water", _eval_shallow_water)
+	quit(0)
+
+# --- Periodic value noise (tiles seamlessly at `period` lattice cells) ---
+# Identical technique to generate_faction_textures.gd - duplicated rather
+# than shared, matching this project's existing convention of each
+# generator tool script being a self-contained one-shot bake, not a shared
+# runtime dependency.
+
+static func _hash_periodic(ix: int, iy: int, period: int, seed: int) -> float:
+	var px = ((ix % period) + period) % period
+	var py = ((iy % period) + period) % period
+	var h = (px * 374761393 + py * 668265263 + seed * 2246822519) & 0x7FFFFFFF
+	h = (h ^ (h >> 13)) * 1274126177
+	h = (h ^ (h >> 16)) & 0x7FFFFFFF
+	return float(h) / float(0x7FFFFFFF)
+
+static func _periodic_noise2d(x: float, y: float, period: int, seed: int) -> float:
+	var ix = int(floor(x))
+	var iy = int(floor(y))
+	var fx = x - ix
+	var fy = y - iy
+	fx = fx * fx * (3.0 - 2.0 * fx)
+	fy = fy * fy * (3.0 - 2.0 * fy)
+	var n00 = _hash_periodic(ix, iy, period, seed)
+	var n10 = _hash_periodic(ix + 1, iy, period, seed)
+	var n01 = _hash_periodic(ix, iy + 1, period, seed)
+	var n11 = _hash_periodic(ix + 1, iy + 1, period, seed)
+	var nx0 = lerp(n00, n10, fx)
+	var nx1 = lerp(n01, n11, fx)
+	return lerp(nx0, nx1, fy)
+
+# --- Per-terrain-type surface evaluation ---
+# Each returns {"color": Color, "height": float, "roughness": float 0-1}.
+
+# Marsh/swamp: darker/cooler/murkier green-brown mud, mottled, with glossy
+# standing-water puddle pockets (sheen ONLY in the puddles, per
+# VISUAL_ART_DIRECTION.md section 4 - the mud itself stays matte).
+static func _eval_marsh(x: int, y: int) -> Dictionary:
+	var seed = 9001
+	var base = Color(0.15, 0.18, 0.125)
+	var mottle = _periodic_noise2d(float(x) / 20.0, float(y) / 20.0, TEX_SIZE / 20, seed) - 0.5
+	var color = base.lerp(Color(0.2, 0.21, 0.15), clamp(mottle + 0.5, 0.0, 1.0))
+	var grain = _periodic_noise2d(float(x) / 6.0, float(y) / 6.0, TEX_SIZE / 6, seed + 1) - 0.5
+	color = color.lightened(0.0) if grain >= 0.0 else color.darkened(-grain * 0.15)
+	color = color.lightened(grain * 0.1) if grain >= 0.0 else color
+	var height = mottle * 0.4 + grain * 0.15
+	var roughness = 0.88
+
+	var puddle_noise = _periodic_noise2d(float(x) / 28.0, float(y) / 28.0, TEX_SIZE / 28, seed + 2)
+	var puddle_mask = smoothstep(0.62, 0.8, puddle_noise)
+	if puddle_mask > 0.0:
+		color = color.lerp(Color(0.09, 0.16, 0.19), puddle_mask)
+		roughness = lerp(roughness, 0.12, puddle_mask)
+		height -= puddle_mask * 0.8
+	return {"color": color, "height": height, "roughness": roughness}
+
+# Rocky: cooler grey-brown, chunky faceted rock faces separated by dark
+# crevices - reuses the faction pipeline's panel-grid/ink-seam technique
+# (generate_faction_textures.gd's _eval_surface), themed as rock facets
+# instead of hull panels, for the "hard and blocky at a glance" read
+# VISUAL_ART_DIRECTION.md asks for.
+static func _eval_rocky(x: int, y: int) -> Dictionary:
+	var seed = 9101
+	var facet_size = 32
+	var base = Color(0.42, 0.4, 0.37)
+	var facets_across = TEX_SIZE / facet_size
+
+	# Domain-warp the lookup coordinates before bucketing into facets, so
+	# crack lines wiggle instead of forming a perfect square grid - a plain
+	# unwarped grid reads as floor tile/pavement, not broken rock. The warp
+	# noise itself is sampled at the SAME period as the facet grid so it
+	# still tiles seamlessly at the texture edge.
+	var warp_x = float(x) + (_periodic_noise2d(float(x) / 11.0, float(y) / 11.0, TEX_SIZE / 11, seed + 9) - 0.5) * 14.0
+	var warp_y = float(y) + (_periodic_noise2d(float(x) / 13.0, float(y) / 13.0, TEX_SIZE / 13, seed + 10) - 0.5) * 14.0
+	var wxi = int(floor(warp_x)) % TEX_SIZE
+	if wxi < 0: wxi += TEX_SIZE
+	var wyi = int(floor(warp_y)) % TEX_SIZE
+	if wyi < 0: wyi += TEX_SIZE
+
+	var fi = (wxi / facet_size) % facets_across
+	var fj = (wyi / facet_size) % facets_across
+	var jitter = (_hash_periodic(fi, fj, facets_across, seed) - 0.5) * 2.0 * 0.14
+	var color = base.lightened(jitter) if jitter >= 0.0 else base.darkened(-jitter)
+	var height = jitter * 1.5
+	var roughness = 0.9
+
+	var lx = wxi % facet_size
+	var ly = wyi % facet_size
+	var seam_width = max(facet_size * 0.16, 1.0)
+	var seam_dist = min(lx, min(facet_size - lx, min(ly, facet_size - ly)))
+	var seam_mask = clamp(1.0 - float(seam_dist) / seam_width, 0.0, 1.0)
+	seam_mask = pow(seam_mask, 0.6)
+	color = color.lerp(Color(0.08, 0.07, 0.06), seam_mask)
+	height -= seam_mask * 1.4
+	roughness += seam_mask * 0.08
+
+	var grain = _periodic_noise2d(float(x) / 5.0, float(y) / 5.0, TEX_SIZE / 5, seed + 1) - 0.5
+	color = color.lightened(grain * 0.1) if grain >= 0.0 else color.darkened(-grain * 0.1)
+	height += grain * 0.3
+	return {"color": color, "height": height, "roughness": clamp(roughness, 0.05, 0.98)}
+
+# Snow vs. mud, combined in one surface_type per map_catalog.gd's schema:
+# bright warm-white snow (never blue-white, ties to the game's warm-
+# aluminum temperature target - VISUAL_ART_DIRECTION.md section 1.1) cut
+# through by dark, GLOSSY mud-rut channels - the one deliberate matte-
+# terrain exception the direction doc calls out, since wet mud really is
+# reflective and the gloss itself reads as "this will slow you down."
+static func _eval_snow_mud(x: int, y: int) -> Dictionary:
+	var seed = 9201
+	var color = Color(0.8, 0.78, 0.72)
+	var grain = _periodic_noise2d(float(x) / 7.0, float(y) / 7.0, TEX_SIZE / 7, seed) - 0.5
+	color = color.lightened(grain * 0.08) if grain >= 0.0 else color.darkened(-grain * 0.08)
+	var height = grain * 0.2
+	var roughness = 0.75
+
+	# Diagonal tread-rut bands: sample along a 45-degree-rotated axis so
+	# ruts read as tracks cutting across the drift, not a straight grid.
+	var rx = (float(x) + float(y)) * 0.7071
+	var ry = (float(x) - float(y)) * 0.7071
+	var rut_noise = _periodic_noise2d(rx / 30.0, ry / 4.0, TEX_SIZE / 4, seed + 1)
+	var rut_mask = smoothstep(0.7, 0.86, rut_noise)
+	if rut_mask > 0.0:
+		color = color.lerp(Color(0.2, 0.15, 0.1), rut_mask)
+		roughness = lerp(roughness, 0.18, rut_mask)
+		height -= rut_mask * 1.0
+	return {"color": color, "height": height, "roughness": roughness}
+
+# Soft sand: warm light tan, matte, soft LOW-frequency dune-shaped ripples
+# (not chunky like rock) - amplitude deliberately kept gentle so the normal
+# map reads as rolling dunes, not gravel.
+static func _eval_sand(x: int, y: int) -> Dictionary:
+	var seed = 9301
+	var color = Color(0.74, 0.65, 0.45)
+	var ripple = _periodic_noise2d(float(x) / 44.0, float(y) / 14.0, TEX_SIZE / 44, seed) - 0.5
+	color = color.lightened(ripple * 0.1) if ripple >= 0.0 else color.darkened(-ripple * 0.1)
+	var height = ripple * 0.9
+	var grain = _periodic_noise2d(float(x) / 4.0, float(y) / 4.0, TEX_SIZE / 4, seed + 1) - 0.5
+	color = color.lightened(grain * 0.04) if grain >= 0.0 else color.darkened(-grain * 0.04)
+	height += grain * 0.08
+	return {"color": color, "height": height, "roughness": 0.88}
+
+# Shallow water: lighter, more saturated teal-blue than deep water, with
+# visible sandy-bed mottling baked directly into the albedo so the tile
+# itself communicates "crossable/amphibious-passable" per
+# VISUAL_ART_DIRECTION.md section 4 - the actual translucency/sheen still
+# comes from the StandardMaterial3D transparency terrain_builder.gd applies
+# on top, same as before.
+static func _eval_shallow_water(x: int, y: int) -> Dictionary:
+	var seed = 9401
+	var teal = Color(0.32, 0.52, 0.53)
+	var sandy_bed = Color(0.55, 0.53, 0.38)
+	var bed_noise = _periodic_noise2d(float(x) / 24.0, float(y) / 24.0, TEX_SIZE / 24, seed)
+	var bed_mask = smoothstep(0.4, 0.75, bed_noise) * 0.55
+	var color = teal.lerp(sandy_bed, bed_mask)
+	var ripple = _periodic_noise2d(float(x) / 30.0, float(y) / 9.0, TEX_SIZE / 30, seed + 1) - 0.5
+	var height = ripple * 0.5
+	return {"color": color, "height": height, "roughness": 0.3}
+
+# --- Bake: albedo (with directional shading pass) + normal + roughness ---
+# Same structural approach as generate_faction_textures.gd's
+# _generate_faction_textures(): build a per-pixel height field, derive a
+# normal map from it via wrapped central differences (tiles seamlessly),
+# and bake dot(normal, LIGHT_DIR) into the albedo as a fixed multiplier so
+# terrain reads with consistent light/shadow regardless of the real-time
+# light's actual direction - one baked lighting rig for the whole game.
+func _generate(type_id: String, eval_fn: Callable):
+	var albedo_img = Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGB8)
+	var rough_img = Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGB8)
+	var normal_img = Image.create(TEX_SIZE, TEX_SIZE, false, Image.FORMAT_RGB8)
+	var height_field = []
+	var color_field = []
+	height_field.resize(TEX_SIZE * TEX_SIZE)
+	color_field.resize(TEX_SIZE * TEX_SIZE)
+
+	for y in range(TEX_SIZE):
+		for x in range(TEX_SIZE):
+			var s = eval_fn.call(x, y)
+			color_field[y * TEX_SIZE + x] = s.color
+			height_field[y * TEX_SIZE + x] = s.height
+			var r = clamp(s.roughness, 0.05, 0.98)
+			rough_img.set_pixel(x, y, Color(r, r, r))
+
+	var strength = 2.5
+	var light_dir = LIGHT_DIR.normalized()
+	for y in range(TEX_SIZE):
+		for x in range(TEX_SIZE):
+			var x0 = (x - 1 + TEX_SIZE) % TEX_SIZE
+			var x1 = (x + 1) % TEX_SIZE
+			var y0 = (y - 1 + TEX_SIZE) % TEX_SIZE
+			var y1 = (y + 1) % TEX_SIZE
+			var dx = (height_field[y * TEX_SIZE + x1] - height_field[y * TEX_SIZE + x0]) * strength
+			var dy = (height_field[y1 * TEX_SIZE + x] - height_field[y0 * TEX_SIZE + x]) * strength
+			var n = Vector3(-dx, -dy, 1.0).normalized()
+			normal_img.set_pixel(x, y, Color(n.x * 0.5 + 0.5, n.y * 0.5 + 0.5, n.z * 0.5 + 0.5))
+
+			var ndotl = n.dot(light_dir)
+			var shade = clamp(0.55 + (ndotl * 0.5 + 0.5) * 0.85, 0.45, 1.35)
+			var c: Color = color_field[y * TEX_SIZE + x]
+			albedo_img.set_pixel(x, y, Color(clamp(c.r * shade, 0.0, 1.0), clamp(c.g * shade, 0.0, 1.0), clamp(c.b * shade, 0.0, 1.0)))
+
+	albedo_img.save_png(OUT_DIR + "/" + type_id + "_albedo.png")
+	normal_img.save_png(OUT_DIR + "/" + type_id + "_normal.png")
+	rough_img.save_png(OUT_DIR + "/" + type_id + "_roughness.png")
+	print("Generated textures for ", type_id)
