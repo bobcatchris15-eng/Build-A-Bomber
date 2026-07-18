@@ -382,6 +382,7 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 		_spawn_shallow_water_marker(sw, parent)
 	for b in map_def.get("bridges", []):
 		_spawn_bridge(b, parent)
+	_spawn_grassland_clutter(map_def, parent)
 
 # Real baked ground textures (see tools/generate_terrain_textures.gd) tiled
 # across each surface_zone's real-world footprint, replacing the old flat
@@ -411,16 +412,30 @@ static func _get_terrain_textures(surface_type: String) -> Dictionary:
 	_terrain_texture_cache[surface_type] = textures
 	return textures
 
-static func _build_terrain_material(surface_type: String, footprint: Vector2) -> StandardMaterial3D:
+static func _build_terrain_material(surface_type: String, footprint: Vector2, tint: Color = Color.WHITE) -> StandardMaterial3D:
 	var mat = StandardMaterial3D.new()
 	var tex = _get_terrain_textures(surface_type)
 	mat.albedo_texture = tex.albedo
+	mat.albedo_color = tint
 	mat.roughness_texture = tex.roughness
 	mat.roughness = 1.0
 	mat.normal_enabled = true
 	mat.normal_texture = tex.normal
 	mat.uv1_scale = Vector3(footprint.x / TERRAIN_TILE_WORLD_SIZE, footprint.y / TERRAIN_TILE_WORLD_SIZE, 1.0)
 	return mat
+
+# The baseline ground plane's material - called by skirmish.gd for the map-
+# wide Ground box mesh (everywhere that isn't a special surface_zone/water/
+# obstacle/elevation footprint). Unlike the 5 special-case types, this one
+# gets a real per-map TINT on top of the baked "grassland" texture: each
+# map's own ground_color (map_catalog.gd) used to be the ONLY visual
+# variation between maps' baseline ground, and dropping that entirely in
+# favor of one identical texture everywhere would flatten a real (if
+# subtle) piece of per-map identity. lightened() first so multiplying by
+# the baked texture's own mid-tone albedo doesn't compound into something
+# far darker than either color alone.
+static func build_ground_material(ground_color: Color, footprint: Vector2) -> StandardMaterial3D:
+	return _build_terrain_material("grassland", footprint, ground_color.lightened(0.55))
 
 static func _spawn_surface_zone(zone: Dictionary, parent: Node3D):
 	var mesh_inst = MeshInstance3D.new()
@@ -454,19 +469,28 @@ static func _spawn_shallow_water_marker(zone: Dictionary, parent: Node3D):
 
 	TerrainGreeblesScript.scatter_shallow_water(zone, parent)
 
+# Baseline deep water - the baked "blue_water" texture (deeper, more
+# desaturated, subtle current/glint - see generate_terrain_textures.gd)
+# replaces the old flat albedo_color, with a HIGHER alpha than
+# shallow_water's marker (0.93 vs 0.8) so it deliberately reads more
+# opaque/deep rather than shallow_water's see-through/sandy-bed look, per
+# the two types' whole point of contrast.
 static func _spawn_water_plane(water: Dictionary, parent: Node3D):
 	var mesh_inst = MeshInstance3D.new()
 	var plane = PlaneMesh.new()
-	plane.size = Vector2(water.half_extents.x * 2.0, water.half_extents.y * 2.0)
+	var footprint = Vector2(water.half_extents.x * 2.0, water.half_extents.y * 2.0)
+	plane.size = footprint
 	mesh_inst.mesh = plane
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.15, 0.35, 0.55, 0.85)
+	var mat = _build_terrain_material("blue_water", footprint)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(1, 1, 1, 0.93)
 	mat.emission_enabled = true
-	mat.emission = Color(0.1, 0.25, 0.4)
+	mat.emission = Color(0.06, 0.13, 0.22)
 	mesh_inst.material_override = mat
 	parent.add_child(mesh_inst)
 	mesh_inst.global_position = Vector3(water.center.x, 0.05, water.center.z)
+
+	TerrainGreeblesScript.scatter_blue_water(water, parent)
 
 static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D):
 	var obstacle_type = obstacle.get("type", "rock")
@@ -656,6 +680,73 @@ static func _spawn_bridge(bridge: Dictionary, parent: Node3D):
 		rail_mat.roughness = 0.7
 		rail.material_override = rail_mat
 		parent.add_child(rail)
+
+# Sparse grassland ground clutter (grass tufts/rocks/brush) scattered
+# across the WHOLE map's baseline ground - deliberately not per-area-dense
+# like the small surface_zone scatters (see terrain_greebles.gd's own
+# comment on why: hundreds of props across a 100+ half-extent map would be
+# a real, pointless cost). Count is capped low and rejects any point that
+# would land somewhere already visually claimed by something else: water/
+# obstacles/ramps (is_position_blocked - covers the common cases), bridges
+# (not covered by is_position_blocked, real decking shouldn't have grass
+# tufts through it), any surface_zone's own footprint (already gets its
+# OWN dedicated texture+greebles - stacking grassland clutter on top would
+# look like two terrain treatments fighting), and a fixed radius around
+# every start structure/resource node (keeps HQs/factories/harvester spots
+# visually clear). A point that survives all that still gets its real
+# terrain_height_at() Y, not an assumed 0 - a scattered point can legally
+# land on an elevation zone's plateau TOP (is_position_blocked deliberately
+# doesn't exclude that - see that function's own comment), and a grass
+# tuft placed at y=0 under a raised plateau would look buried.
+const GRASSLAND_CLUTTER_AVOID_RADIUS: float = 7.0
+
+static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D):
+	var half: float = map_def.get("map_half_extents", 80.0)
+	var area = (half * 2.0) * (half * 2.0)
+	var count = clamp(int(area / 2000.0), 20, 50)
+
+	var avoid_points: Array = []
+	for group_key in ["player_start", "enemy_start"]:
+		var group: Dictionary = map_def.get(group_key, {})
+		for key in group.keys():
+			avoid_points.append(group[key])
+	for r in map_def.get("resource_nodes", []):
+		avoid_points.append(r.position)
+
+	var bridge_rects = _collect_bridges(map_def)
+	var surface_rects = []
+	for s in map_def.get("surface_zones", []):
+		surface_rects.append(_rect_from(s.center, s.half_extents))
+
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(map_def.get("name", "grassland"))
+	var placed = 0
+	var attempts = 0
+	while placed < count and attempts < count * 8:
+		attempts += 1
+		var pos = Vector3(rng.randf_range(-half * 0.94, half * 0.94), 0, rng.randf_range(-half * 0.94, half * 0.94))
+		if is_position_blocked(map_def, pos):
+			continue
+		var rejected = false
+		for rect in bridge_rects:
+			if _point_in_rect(pos, rect):
+				rejected = true
+				break
+		if not rejected:
+			for rect in surface_rects:
+				if _point_in_rect(pos, rect):
+					rejected = true
+					break
+		if not rejected:
+			for a in avoid_points:
+				if Vector2(pos.x - a.x, pos.z - a.z).length() < GRASSLAND_CLUTTER_AVOID_RADIUS:
+					rejected = true
+					break
+		if rejected:
+			continue
+		pos.y = terrain_height_at(map_def, pos)
+		TerrainGreeblesScript.place_grassland_prop(pos, rng.randi(), parent)
+		placed += 1
 
 # --- Queries (pure functions, no Node dependency - callable from tests
 # directly against a MapCatalog dictionary) ---

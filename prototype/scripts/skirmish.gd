@@ -486,9 +486,8 @@ func _setup_navigation():
 			var box: BoxMesh = mesh_inst.mesh.duplicate()
 			box.size = size
 			mesh_inst.mesh = box
-			var tinted = StandardMaterial3D.new()
-			tinted.albedo_color = current_map.get("ground_color", Color(0.2, 0.26, 0.21))
-			mesh_inst.material_override = tinted
+			var ground_color = current_map.get("ground_color", Color(0.2, 0.26, 0.21))
+			mesh_inst.material_override = TerrainBuilder.build_ground_material(ground_color, Vector2(size.x, size.z))
 		var col_shape: CollisionShape3D = ground.get_node_or_null("CollisionShape3D")
 		if col_shape and col_shape.shape is BoxShape3D:
 			var box_shape: BoxShape3D = col_shape.shape.duplicate()

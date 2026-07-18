@@ -215,3 +215,102 @@ static func _scatter_tide_pool_rocks(zone: Dictionary, parent: Node3D):
 		var exposure = rng.randf_range(0.25, 0.75)
 		rock.global_position = Vector3(zone.center.x + p.x, size.y * exposure - size.y / 2.0 + 0.06, zone.center.z + p.y)
 		rock.rotation.y = rng.randf_range(0, TAU)
+
+# --- Baseline grassland/blue_water clutter ---
+# Unlike the 5 special-case types above, these two aren't confined to a
+# small hand-authored zone rect - grassland covers most of the map and
+# blue_water can be a huge lake/river footprint. Scattering at the SAME
+# per-area density the small zones use would mean hundreds of extra
+# MeshInstance3D nodes on a 100+ half-extent map, spawned fresh every
+# Skirmish load (and every headless map-smoke test) - a real cost for
+# clutter nobody's meant to consciously register. So both stay
+# deliberately SPARSE relative to their footprint: grassland is a capped
+# whole-map sprinkle (count computed and position-filtered by
+# terrain_builder.gd's _spawn_grassland_clutter(), which already knows
+# about obstacles/water/elevation/bridges/other surface zones/start
+# structures - this file just knows how to build one prop at a given
+# point), and blue_water gets a small fixed handful of flotsam per water
+# rect regardless of how large that rect is - real open water reads as
+# mostly empty, not littered.
+
+# One grassland prop at a caller-supplied, ALREADY-VALIDATED position (see
+# terrain_builder.gd._spawn_grassland_clutter() for the rejection logic -
+# this function has no map awareness of its own). pos.y is expected to
+# already be the correct terrain height at that point (e.g. an elevation
+# plateau's top), not assumed to be 0 - a grass tuft dropped at world y=0
+# under a raised plateau would look buried.
+static func place_grassland_prop(pos: Vector3, variant_seed: int, parent: Node3D):
+	var rng = RandomNumberGenerator.new()
+	rng.seed = variant_seed
+	var roll = rng.randf()
+	if roll < 0.5:
+		_place_grass_tuft(pos, rng, parent)
+	elif roll < 0.8:
+		_place_grassland_rock(pos, rng, parent)
+	else:
+		_place_brush_clump(pos, rng, parent)
+
+# A short tuft of upright blades - shorter and greener than marsh's reeds
+# (dry-ish open ground, not standing water), still enough of a cluster to
+# read as a real clump rather than a single blade of grass.
+static func _place_grass_tuft(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D):
+	var color = Color(0.3, 0.4, 0.17)
+	var blade_count = rng.randi_range(3, 5)
+	for i in range(blade_count):
+		var blade = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		var height = rng.randf_range(0.22, 0.42)
+		cyl.top_radius = 0.015
+		cyl.bottom_radius = 0.035
+		cyl.height = height
+		blade.mesh = cyl
+		blade.material_override = _flat_material(color.lightened(rng.randf_range(-0.1, 0.1)), 0.8)
+		parent.add_child(blade)
+		var jitter = Vector2(rng.randf_range(-0.12, 0.12), rng.randf_range(-0.12, 0.12))
+		blade.global_position = Vector3(pos.x + jitter.x, pos.y + height / 2.0, pos.z + jitter.y)
+		blade.rotation = Vector3(rng.randf_range(-0.2, 0.2), rng.randf_range(0, TAU), rng.randf_range(-0.2, 0.2))
+
+static func _place_grassland_rock(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D):
+	var rock = MeshInstance3D.new()
+	var box = BoxMesh.new()
+	var size = Vector3(rng.randf_range(0.25, 0.5), rng.randf_range(0.18, 0.35), rng.randf_range(0.25, 0.5))
+	box.size = size
+	rock.mesh = box
+	var shade = rng.randf_range(0.32, 0.42)
+	rock.material_override = _flat_material(Color(shade, shade * 0.95, shade * 0.85), 0.9)
+	parent.add_child(rock)
+	rock.global_position = Vector3(pos.x, pos.y + size.y / 2.0, pos.z)
+	rock.rotation.y = rng.randf_range(0, TAU)
+
+# A low scrubby clump of brush - a squashed sphere reads as a rounded bush
+# silhouette at RTS distance without needing real branch geometry.
+static func _place_brush_clump(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D):
+	var bush = MeshInstance3D.new()
+	var sphere = SphereMesh.new()
+	var radius = rng.randf_range(0.3, 0.55)
+	sphere.radius = radius
+	sphere.height = radius * 1.4
+	bush.mesh = sphere
+	bush.material_override = _flat_material(Color(0.27, 0.29, 0.15).lightened(rng.randf_range(-0.06, 0.06)), 0.85)
+	bush.scale = Vector3(1.0, 0.6, 1.0)
+	parent.add_child(bush)
+	bush.global_position = Vector3(pos.x, pos.y + radius * 0.3, pos.z)
+
+# Blue water: a small fixed handful of floating driftwood/flotsam planks
+# per water rect - deliberately NOT area-scaled (see this section's header
+# comment) since real open water should read as mostly empty.
+static func scatter_blue_water(zone: Dictionary, parent: Node3D):
+	var rng = _seeded_rng(zone.center)
+	var flotsam_color = Color(0.32, 0.26, 0.18)
+	var count = rng.randi_range(3, 6)
+	for i in range(count):
+		var p = _rand_point(rng, zone, 0.85)
+		var plank = MeshInstance3D.new()
+		var box = BoxMesh.new()
+		var length = rng.randf_range(0.8, 1.6)
+		box.size = Vector3(length, 0.06, rng.randf_range(0.18, 0.32))
+		plank.mesh = box
+		plank.material_override = _flat_material(flotsam_color.lightened(rng.randf_range(-0.05, 0.08)), 0.75)
+		parent.add_child(plank)
+		plank.global_position = Vector3(zone.center.x + p.x, 0.07, zone.center.z + p.y)
+		plank.rotation.y = rng.randf_range(0, TAU)
