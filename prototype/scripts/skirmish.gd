@@ -340,24 +340,32 @@ func _load_rosters():
 		for path in _mc_blueprint_paths:
 			var data = bp_manager.load_blueprint(path)
 			if not data.is_empty():
-				roster.append(_make_roster_entry(data))
+				var entry = _make_roster_entry(data)
+				if not entry.is_empty():
+					roster.append(entry)
 	else:
 		var entries = bp_manager.list_blueprints()
 		for e in entries.slice(0, 8): # newest saved designs first, leave room for defaults
 			var data = bp_manager.load_blueprint(e.path)
 			if not data.is_empty():
-				roster.append(_make_roster_entry(data))
+				var entry = _make_roster_entry(data)
+				if not entry.is_empty():
+					roster.append(entry)
 	for path in _list_json_files("res://data/loadout"):
 		var data = bp_manager.load_blueprint(path)
 		if not data.is_empty():
-			roster.append(_make_roster_entry(data))
+			var entry = _make_roster_entry(data)
+			if not entry.is_empty():
+				roster.append(entry)
 	roster = roster.slice(0, 12) # Loadout limit
 
 	# A skirmish without a harvester design is unwinnable - guarantee one
 	if _find_harvester_blueprint(roster).is_empty():
 		var trucker = bp_manager.load_blueprint("res://data/loadout/ore_trucker.json")
 		if not trucker.is_empty():
-			roster.append(_make_roster_entry(trucker))
+			var entry = _make_roster_entry(trucker)
+			if not entry.is_empty():
+				roster.append(entry)
 
 	if _mc_player_faction != "":
 		player_faction = _mc_player_faction
@@ -367,7 +375,9 @@ func _load_rosters():
 	for path in _list_json_files("res://data/enemy"):
 		var data = bp_manager.load_blueprint(path)
 		if not data.is_empty():
-			enemy_roster.append(_make_roster_entry(data))
+			var entry = _make_roster_entry(data)
+			if not entry.is_empty():
+				enemy_roster.append(entry)
 	if _mc_enemy_faction != "":
 		enemy_faction = _mc_enemy_faction
 	elif not enemy_roster.is_empty():
@@ -388,14 +398,25 @@ func _apply_faction_cost_discount(entries: Array, faction: String):
 	for e in entries:
 		e.cost_metal = int(e.cost_metal * mult)
 
+# Returns {} (never a half-built entry) if the blueprint's hull_type isn't
+# installed - same "refuse rather than silently corrupt" principle as
+# BlueprintManager's hard-fail-on-unknown-hull for the Design Lab's own Load
+# button (HULL_MODDING_PLAN.md's latent bug: get_module_data()'s fallback is
+# a WEAPON's data, not a hull's - a roster entry cost/tier built off that
+# would be silently wrong, not just cosmetically off). Every call site below
+# checks for an empty result before appending.
 func _make_roster_entry(data: Dictionary) -> Dictionary:
+	var hull_type = data.get("hull_type", "medium_hull")
+	if not ModuleCatalog.hull_exists(hull_type):
+		push_warning("Skirmish: dropping roster entry '%s' - hull '%s' is not installed" % [data.get("name", "Untitled"), hull_type])
+		return {}
 	var cost = blueprint_cost(data)
 	return {
 		"blueprint": data,
 		"name": data.get("name", "Untitled"),
 		"cost_metal": cost.x,
 		"cost_crystal": cost.y,
-		"is_defense": ModuleCatalog.is_foundation(data.get("hull_type", "medium_hull")),
+		"is_defense": ModuleCatalog.is_foundation(hull_type),
 	}
 
 func _list_json_files(dir_path: String) -> Array:

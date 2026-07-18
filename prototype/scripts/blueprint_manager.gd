@@ -14,6 +14,15 @@ const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
+const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
+
+# Set by load_blueprint_into_designer() whenever it returns false, so
+# callers (blueprint_library_panel.gd) can show a specific reason instead of
+# a generic "corrupted" message - most importantly for a blueprint whose
+# hull_type is no longer installed (mod uninstalled, typo, hand-edited
+# save), which is a real and correct file, just referencing a hull that
+# genuinely doesn't exist. Cleared at the start of every load attempt.
+var last_load_error: String = ""
 
 func _vec3_to_dict(v: Vector3) -> Dictionary:
 	return {"x": v.x, "y": v.y, "z": v.z}
@@ -234,10 +243,27 @@ func duplicate_blueprint(id: String) -> String:
 	return new_id
 
 func load_blueprint_into_designer(id: String) -> bool:
+	last_load_error = ""
 	var path = "user://blueprints/%s.json" % id
 	var data = load_blueprint(path)
 	if data.is_empty():
 		print("Could not load blueprint for designer: ", id)
+		last_load_error = "Couldn't load that blueprint - the save file may be corrupted."
+		return false
+
+	# Hard-fail, not a soft fallback: a blueprint whose hull_type isn't
+	# installed (mod uninstalled, typo, hand-edited save) must refuse to
+	# load rather than reconstruct with substitute/wrong data. Checked here,
+	# BEFORE reconstruct_vehicle() runs at all, so we can name the specific
+	# missing hull in the message the player actually sees - reconstruct_vehicle()
+	# itself also refuses (returns null) as a second line of defense for
+	# every other caller (skirmish spawns, battlefield, defense buildings),
+	# but only this path can say exactly which design and which hull.
+	var hull_type = data.get("hull_type", "medium_hull")
+	if not ModuleCatalogScript.hull_exists(hull_type):
+		var bp_name = data.get("name", "Untitled Design")
+		last_load_error = "Can't load '%s': hull '%s' is not installed. Reinstall the mod that adds it, or choose a different design." % [bp_name, hull_type]
+		_show_toast(last_load_error, true)
 		return false
 
 	var root = get_node("/root/MainLab")
@@ -287,13 +313,25 @@ func load_blueprint(file_path: String) -> Dictionary:
 func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_designer: bool = false) -> Node3D:
 	if blueprint_data.is_empty():
 		return null
-		
+
 	var ModuleCatalog = preload("res://scripts/module_catalog.gd")
 	var ModuleData = preload("res://scripts/module_data.gd")
-	
+
 	var hull_type = blueprint_data.get("hull_type", "medium_hull")
+
+	# Hard-fail, not ModuleCatalog.get_module_data()'s always-succeeds
+	# fallback (which returns basic_cannon's WEAPON data for an unknown
+	# id - previously latent since every built-in hull id always existed,
+	# now a real, easy-to-hit scenario the moment hulls are moddable).
+	# Refusing here (not just in the Design Lab's own Load button) covers
+	# every other caller too - skirmish roster spawns, battlefield, defense
+	# buildings - all of which already null-check this return value.
+	if not ModuleCatalog.hull_exists(hull_type):
+		push_warning("BlueprintManager: refusing to reconstruct '%s' - hull '%s' is not installed" % [blueprint_data.get("name", "Untitled Design"), hull_type])
+		return null
+
 	var catalog_data = ModuleCatalog.get_module_data(hull_type)
-	
+
 	var hull
 	if is_designer:
 		hull = StaticBody3D.new()

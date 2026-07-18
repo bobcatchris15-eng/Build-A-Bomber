@@ -137,12 +137,17 @@ func _on_load_pressed(id: String):
 	# load_blueprint_into_designer's bool return was previously ignored
 	# entirely here - a corrupted/unparseable save closed this panel with
 	# zero indication anything went wrong. Now the panel stays open and
-	# shows a real error so the player isn't left guessing.
+	# shows a real error so the player isn't left guessing. last_load_error
+	# carries a specific reason (e.g. "hull 'x' is not installed") when
+	# BlueprintManager has one; falls back to the generic message otherwise.
 	var ok = blueprint_manager.load_blueprint_into_designer(id) if blueprint_manager else false
 	if ok:
 		queue_free()
 	else:
-		_show_error("Couldn't load that blueprint - the save file may be corrupted.")
+		var msg = "Couldn't load that blueprint - the save file may be corrupted."
+		if blueprint_manager and blueprint_manager.last_load_error != "":
+			msg = blueprint_manager.last_load_error
+		_show_error(msg)
 
 func _on_rename_pressed(id: String, current_name: String):
 	# Previously the only way to rename a saved design was to Load it into
