@@ -190,8 +190,7 @@ void fragment() {
 	float tex_roughness = triplanar_sample(roughness_tex, tex_pos, tri_w).r;
 
 	vec3 color = mix(base_color.rgb, accent_color.rgb, accent_mask);
-	//color *= tex_albedo * 2.0;
-	color = mix(color, tex_albedo, 0.0); // DEBUG: silence unused-var warning without applying it
+	color *= tex_albedo * 2.0;
 	// Small structural bolt highlights at seam intersections, tinted by
 	// detail_color - the "oversized bolt-heads at seams" goofy-but-safe
 	// detail VISUAL_ART_DIRECTION.md 1.2 calls out, kept small (never
