@@ -120,6 +120,7 @@ func _init():
 	success = success and await test_hull_modding_hard_fail_on_unknown_hull()
 	success = success and await test_hull_modding_mod_hull_placeable()
 	success = success and await test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes()
+	success = success and await test_damage_model_rof_chip_strip_and_air_rules()
 
 	print("\n==============================================")
 	if success:
@@ -299,27 +300,47 @@ func test_damage_mitigation() -> bool:
 	player.hp = 400.0
 	player.is_dead = false
 	
-	# 1. Test Damage below threshold (Should be negated, HP remains 400)
+	# 1. Damage below threshold: mostly negated, but a small CHIP fraction
+	# bleeds through (FABLE_REVIEW.md 1.1 - full negation made every
+	# rapid-fire weapon deal literally zero damage to any armored hull).
+	# Expected: 50 * 0.4 (reduction) * CHIP_THROUGH_FACTOR.
 	player.take_damage(50.0, "explosive")
-	var hp_after_negated = player.hp
-	
-	# 2. Test Damage above threshold (Should apply reduction: 100 * 0.4 = 40 damage, HP becomes 360)
+	var expected_chip = 50.0 * 0.4 * DamageResolverScript.CHIP_THROUGH_FACTOR
+	var hp_after_chip = player.hp
+
+	# 2. Damage above threshold (normal band): plain reduction applies.
+	# 100 vs threshold 60 is under the brute-force ratio, so 100 * 0.4 = 40.
 	player.take_damage(100.0, "explosive")
 	var hp_after_applied = player.hp
-	
+
+	# 3. Brute Force Rule (Damage_And_Armor_Model.md, first implemented via
+	# the review pass): an overwhelming hit (>= 2x BRUTE_FORCE_RATIO x
+	# threshold) blends reduction BRUTE_FORCE_MAX_BLEND of the way to 1.0.
+	# 600 vs threshold 60 = 10x, fully past the blend window:
+	# eff_reduction = lerp(0.4, 1.0, 0.75) = 0.85 -> 510 damage.
+	var hp_before_brute = player.hp
+	player.max_hp = 1000.0
+	player.hp = 1000.0
+	player.take_damage(600.0, "explosive")
+	var brute_damage = 1000.0 - player.hp
+	var expected_brute = 600.0 * lerpf(0.4, 1.0, DamageResolverScript.BRUTE_FORCE_MAX_BLEND)
+
 	# Clean up
 	player.queue_free()
-	
-	var pass_negated = abs(hp_after_negated - 400.0) < 0.01
-	var pass_applied = abs(hp_after_applied - 360.0) < 0.01
-	
-	if not pass_negated:
-		print("  [FAIL] Damage below threshold was not negated. HP: ", hp_after_negated)
+
+	var pass_chip = abs(hp_after_chip - (400.0 - expected_chip)) < 0.01
+	var pass_applied = abs(hp_after_applied - (400.0 - expected_chip - 40.0)) < 0.01
+	var pass_brute = abs(brute_damage - expected_brute) < 0.01
+
+	if not pass_chip:
+		print("  [FAIL] Sub-threshold hit should chip for ", expected_chip, ". HP: ", hp_after_chip)
 	if not pass_applied:
-		print("  [FAIL] Damage above threshold applied incorrectly. HP: ", hp_after_applied, " (expected 360.0)")
-		
-	if pass_negated and pass_applied:
-		print("  [PASS] Threshold and reduction mathematical models verify correctly.")
+		print("  [FAIL] Damage above threshold applied incorrectly. HP: ", hp_after_applied)
+	if not pass_brute:
+		print("  [FAIL] Brute-force hit dealt ", brute_damage, ", expected ", expected_brute)
+
+	if pass_chip and pass_applied and pass_brute:
+		print("  [PASS] Threshold chip-through, normal reduction, and brute-force bands all verify correctly.")
 		return true
 	return false
 
@@ -1636,8 +1657,18 @@ func test_armor_module_combat_bonus() -> bool:
 	var hp_with_armor_module = player.hp
 	player.queue_free()
 
-	if abs(hp_with_armor_module - 1000.0) > 0.01:
-		print("  [FAIL] With an armor module present, 18.0 kinetic damage should be fully negated (raised threshold) or absorbed by the module itself (stripping), HP: ", hp_with_armor_module)
+	# Chip-through model (FABLE_REVIEW.md 1.1): a sub-threshold hit is no
+	# longer FULLY negated - it chips for amount * reduction * CHIP_THROUGH_
+	# FACTOR (or the 35% strip roll absorbs it into the module's own pool,
+	# leaving hull HP untouched). Either way the hull loses at most ~1.8 HP
+	# here, vs 12.6 without the armor module - the module's threshold bonus
+	# is still doing real, measurable work.
+	var max_chip = 18.0 * 1.0 * DamageResolverScript.CHIP_THROUGH_FACTOR
+	if hp_with_armor_module < 1000.0 - max_chip - 0.01:
+		print("  [FAIL] With an armor module present, 18.0 kinetic damage should at most chip (raised threshold) or be absorbed by the module itself (stripping), HP: ", hp_with_armor_module)
+		return false
+	if hp_with_armor_module <= hp_without_armor_module + 1.0:
+		print("  [FAIL] The armor module's raised threshold should leave meaningfully more HP than the unarmored baseline (with: ", hp_with_armor_module, ", without: ", hp_without_armor_module, ").")
 		return false
 
 	print("  [PASS] Placed armor modules raise the effective damage threshold in combat (without: HP ", hp_without_armor_module, ", with: HP ", hp_with_armor_module, ").")
@@ -6382,4 +6413,107 @@ func test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Weapon fire is blocked by real cover, idle factories receive queue jobs, buildings can't stack, and defenses carry their faction.")
+	return true
+
+func test_damage_model_rof_chip_strip_and_air_rules() -> bool:
+	print("Running Test Suite: FABLE review fixes - ROF chip damage, strip formula, PD anti-air, air pierce flattening...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	# --- Part 1: a rapid-fire-sized hit (under threshold) now chips instead
+	# of dealing literally zero, and sustained small fire can strip modules.
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var bp = {
+		"hull_type": "medium_hull",
+		"armor_material": "hardened_steel",
+		"armor_thickness": 1.0,
+		"faction": "industrialists",
+		"locomotion": {"type_id": "wheels", "settings": {"size": 1.0, "count": 4}},
+		"modules": [
+			{"type_id": "wheels", "position": {"x": 0, "y": -0.5, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}},
+			{"type_id": "sensor_suite", "position": {"x": 0, "y": 1.0, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}}
+		]
+	}
+	var unit = skirmish.spawn_unit(bp, 0, Vector3(0, 0, 0))
+	await process_frame
+	var start_hp = unit.hp
+	var start_module_count = unit.get_active_modules().size()
+
+	# 300 rotary-cannon-sized hits (4.0 each, far below the 15.0 kinetic
+	# threshold). Old model: exactly zero hull damage AND zero module damage
+	# (strip dealt max(0, 4-5) = 0). New model: hull chips down, and the 35%
+	# strip rolls at amount*0.75 destroy at least one module.
+	for i in range(300):
+		unit.take_damage(4.0, "kinetic")
+	await process_frame
+	await process_frame
+
+	var hull_chipped = unit.hp < start_hp - 1.0
+	var module_stripped = unit.get_active_modules().size() < start_module_count
+	if not hull_chipped:
+		print("  [FAIL] 300 sub-threshold hits dealt no hull chip damage (hp still ", unit.hp, ").")
+		skirmish.queue_free()
+		return false
+	if not module_stripped:
+		print("  [FAIL] 300 small hits stripped no modules - the strip formula still zeroes rapid-fire damage.")
+		skirmish.queue_free()
+		return false
+
+	# --- Part 2: PD anti-air multiplier - the same flak hit hurts a flying
+	# unit ~PD_ANTI_AIR_DAMAGE_MULT harder than the raw amount would.
+	var AutoWeapon = load("res://scripts/auto_weapon.gd")
+	var rig = Node3D.new()
+	skirmish.add_child(rig)
+	var flak = Node3D.new()
+	flak.set_script(AutoWeapon)
+	var flak_data = ModuleData.new()
+	flak_data.type_id = "flak_cannon"
+	flak.set_meta("module_data", flak_data)
+	rig.add_child(flak)
+	flak.set_physics_process(false)
+	flak.type_id = "flak_cannon"
+
+	var ground_target = skirmish.spawn_unit(bp, 1, Vector3(20, 0, 0))
+	var air_target = skirmish.spawn_unit(bp, 1, Vector3(30, 0, 0))
+	await process_frame
+	air_target.is_flying = true
+	var g0 = ground_target.hp
+	var a0 = air_target.hp
+	# Use a modest above-threshold amount; run several hits to average out
+	# the 35% strip rolls (strips skip hull damage entirely).
+	for i in range(40):
+		flak._deal_weapon_damage(ground_target, 20.0)
+		flak._deal_weapon_damage(air_target, 20.0)
+	var ground_dmg = g0 - ground_target.hp
+	var air_dmg = a0 - air_target.hp
+	if air_dmg < ground_dmg * 1.5:
+		print("  [FAIL] Flak vs air (", air_dmg, ") should substantially exceed flak vs ground (", ground_dmg, ").")
+		skirmish.queue_free()
+		return false
+
+	# --- Part 3: a flying attacker's hit origin is flattened to target
+	# height (no free high-ground pierce for air-to-ground fire).
+	var flyer = CharacterBody3D.new()
+	flyer.set_script(BattleUnitScript)
+	skirmish.add_child(flyer)
+	flyer.is_flying = true
+	flyer.global_position = Vector3(0, 6.0, 10)
+	var wing_gun = Node3D.new()
+	wing_gun.set_script(AutoWeapon)
+	flyer.add_child(wing_gun)
+	wing_gun.set_physics_process(false)
+	wing_gun.global_position = Vector3(0, 6.0, 10)
+	var origin = wing_gun._hit_origin(ground_target)
+	if origin.y > ground_target.global_position.y + 1.0:
+		print("  [FAIL] Flying attacker's hit origin was not flattened (y=", origin.y, ") - air still gets the terrain pierce bonus.")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Sub-threshold fire chips and strips, flak has a real anti-air identity, and air-to-ground fire doesn't collect the high-ground pierce bonus.")
 	return true

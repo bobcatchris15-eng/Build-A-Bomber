@@ -299,9 +299,8 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 		var resolved = DamageResolverScript.resolve(defense_hull, get_active_modules(), damage_type, self, hit_origin)
 		threshold = resolved.x
 		reduction = resolved.y
-	if amount < threshold:
-		return
-	hp = max(0.0, hp - amount * reduction)
+	# Shared chip-through + brute-force math (DamageResolver.compute_hull_damage)
+	hp = max(0.0, hp - DamageResolverScript.compute_hull_damage(amount, threshold, reduction))
 	_update_hp_bar()
 	if hp <= 0.0:
 		die()

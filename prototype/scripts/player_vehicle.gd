@@ -73,9 +73,10 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 		# Retrieve current health or initialize it
 		var m_hp = target_module.get_meta("current_hp") if target_module.has_meta("current_hp") else m_data.get_hp()
 		
-		# Modules don't have heavy hull armor, but apply a default minor threshold (say 5)
-		var minor_threshold = 5.0
-		var final_mod_damage = max(0.0, amount - minor_threshold)
+		# Modules are exposed hardware: threshold-exempt, damage is a fraction
+		# of the raw hit (shared constant with battle_unit.gd - the old flat
+		# `amount - 5.0` zeroed all rapid-fire strip damage).
+		var final_mod_damage = amount * DamageResolverScript.MODULE_STRIP_DAMAGE_FACTOR
 		
 		m_hp = max(0.0, m_hp - final_mod_damage)
 		target_module.set_meta("current_hp", m_hp)
@@ -114,9 +115,13 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 				battlefield.call_deferred("recalculate_move_speed")
 		return
 
-	# The Threshold Rule: If incoming attack is below threshold, it's negated!
+	# The Threshold Rule with chip-through + brute force (shared math with
+	# battle_unit.gd/building.gd via DamageResolver.compute_hull_damage):
+	# sub-threshold hits are mostly-but-not-entirely negated, overwhelming
+	# hits shrug off the reduction multiplier.
+	var final_damage = DamageResolverScript.compute_hull_damage(amount, threshold, reduction)
 	if amount < threshold:
-		# Negated! Play shield flash
+		# Mostly negated - play the shield flash
 		var exp = MeshInstance3D.new()
 		var sphere = SphereMesh.new()
 		sphere.radius = 0.8
@@ -133,17 +138,14 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 		var tween = create_tween()
 		tween.tween_property(exp, "scale", Vector3.ZERO, 0.1)
 		tween.finished.connect(func(): exp.queue_free())
-		return
-		
-	# Apply reduction multiplier to main hull
-	var final_damage = amount * reduction
 	hp = max(0.0, hp - final_damage)
 	
 	# Red camera flash or flash color on vehicle - hull materials are
 	# per-surface overrides now (HullMaterialBuilder.apply_hull_materials() -
 	# structural + armor slots), not a single mesh_inst.material_override,
-	# same fix as battle_unit.gd's _flash_hull().
-	if hull:
+	# same fix as battle_unit.gd's _flash_hull(). Penetrating hits only -
+	# chip hits already showed the shield flash above.
+	if hull and amount >= threshold:
 		var mesh_inst = hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
 		if mesh_inst:
 			HullMaterialBuilderScript.flash_hull(mesh_inst, 1.0)

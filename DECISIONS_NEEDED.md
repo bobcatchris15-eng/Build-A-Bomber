@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk C: damage-model rework (review items 1.1, 2.5-partial, 3.6, 1.8)
+
+**Not blocking - implemented, all suites green (1 new, 2 updated).** This is the chunk with the most real DESIGN calls in it:
+
+- **Sub-threshold chip-through at 0.15** (`DamageResolver.CHIP_THROUGH_FACTOR`): a hit below the armor threshold deals `amount × reduction × 0.15` instead of zero. Why 0.15: armor should still blank ~90% of small-arms fire (thresholds stay the dominant mechanic, heavy alpha still wins head-on) while massed rapid-fire genuinely grinds - a lone rotary_cannon now does ~8 dps against a baseline hardened-steel hull (vs its 75 nominal, vs literally 0 before), so 5 of them kill a bundled MBT in ~16s. That's the Damage_And_Armor_Model.md action-economy counter existing for the first time. Alternatives considered: restructuring per-shot damage away from dps×fire_rate (bigger blast radius of change, breaks every threshold interaction at once) or lowering all thresholds (guts the mechanic's identity). Chip keeps the threshold fantasy and fixes the degenerate zero.
+- **Subsystem-strip damage is `amount × 0.75`** (was `max(0, amount − 5)`, which zeroed every rapid-fire strip). Modules stay threshold-exempt (exposed hardware is the point). Consequence: sustained small guns are now the module-stripper archetype, big shells still waste overkill on a 100 HP wheel - both exactly per the doc. **Strip target selection stays uniformly random - facet-gating it is DEFERRED**: only armor modules carry facet metadata today; gating would need facet stamping on every placed module and a call-site signature change, and the gameplay win (strips only on the exposed side) is second-order next to strip damage existing at all.
+- **Brute Force Rule implemented** (was documented-but-absent since the original design doc): from 4× threshold the reduction multiplier blends linearly toward 1.0, capped at 75% of the way, fully blended by 8×. Keeps a light-armor scout from tickling a dreadnought (reduction still matters in the normal band) while a 16-inch-shell-vs-scout hit stops being mitigated like a fair fight.
+- **Air-to-ground fire no longer collects the high-ground pierce bonus**: flying attackers' hit origin is flattened to target height in `auto_weapon._hit_origin()`. The elevation bonus is a reward for holding terrain; getting it permanently for choosing wings (altitude 4.0 > threshold 2.0) was an unintended cross-system interaction. Ground units on real hills keep it. Chose origin-flattening at the weapon (one place) over teaching DamageResolver about flight state (new coupling) or raising the threshold above cruise altitude (breaks real tall-hill maps).
+- **PD anti-air is a flat ×3 damage multiplier vs airborne hulls for ciws/pd_laser/flak_cannon** - deliberately C&C-gamey rather than simulated (no flak-burst radius yet; that can fold into the AoE chunk later). This gives "flak = AA" mechanical truth without buffing PD's intentionally weak anti-ground numbers. Interacts with chip-through: flak's 18/shot → 54 vs air punches real thresholds; ciws/pd_laser stay primarily missile-interceptors.
+- **All weapon damage now routes through one `_deal_weapon_damage()` funnel** - groundwork the evasion model (next chunks) will hook into, and the only sane way to apply the two rules above without 18 copies.
+- **Test Range target dummies keep their own simplified damage math** (no chip) - they're a stationary tuning aid; changing their feel wasn't part of the ask. Flagged in case dummy-vs-skirmish damage discrepancy ever confuses a future balance pass.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk B: catalog cache, unknown-module skip, honest blueprint costs (review items 3.5, 3.4, 3.10)
 
 **Not blocking - implemented, all suites green.** Judgment calls:

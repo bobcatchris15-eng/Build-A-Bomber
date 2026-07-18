@@ -41,6 +41,43 @@ const ARMOR_TABLE = {
 	"energy_shielding": {"kinetic": [20.0, 0.5], "thermal": [20.0, 0.5], "explosive": [20.0, 0.5], "energy": [35.0, 0.3]},
 }
 
+# --- Hit damage math (FABLE_REVIEW.md 1.1 / 3.6 / 2.5) ---
+# Shared by battle_unit.gd / player_vehicle.gd / building.gd so the three
+# take_damage() implementations can't drift (same reason resolve() exists).
+#
+# CHIP_THROUGH_FACTOR: a hit below the armor threshold is no longer fully
+# negated - it deals a small "chip" fraction of its post-reduction damage.
+# This is the fix for the review's headline finding: per-shot damage is
+# dps*fire_rate, so every rapid-fire weapon (rotary/HMG/CIWS/laser/flamer)
+# landed under every real threshold and dealt literally zero damage to any
+# armored hull, deleting the whole sustained-fire archetype. At 0.15, armor
+# still blanks ~90% of sub-threshold fire (thresholds remain the dominant
+# mechanic and heavy alpha still rules head-on), but massed small guns now
+# grind - the Damage_And_Armor_Model.md action-economy counter actually
+# exists.
+const CHIP_THROUGH_FACTOR: float = 0.15
+# Brute Force Rule (Damage_And_Armor_Model.md, documented since the start
+# but never implemented): an overwhelmingly large hit "punches straight
+# through the mitigation multipliers." From BRUTE_FORCE_RATIO x threshold
+# upward, the reduction multiplier blends linearly toward 1.0 (full damage),
+# reaching at most BRUTE_FORCE_MAX_BLEND of the way there at 2x that ratio.
+const BRUTE_FORCE_RATIO: float = 4.0
+const BRUTE_FORCE_MAX_BLEND: float = 0.75
+# Subsystem strips deal a fraction of the raw hit instead of the old flat
+# `amount - 5.0` (which rounded rapid-fire strip damage to zero and made the
+# doc's "swarms strip exposed modules" counter impossible). Modules stay
+# threshold-exempt - they're exposed hardware, that's the whole point.
+const MODULE_STRIP_DAMAGE_FACTOR: float = 0.75
+
+static func compute_hull_damage(amount: float, threshold: float, reduction: float) -> float:
+	if threshold > 0.0 and amount < threshold:
+		return amount * reduction * CHIP_THROUGH_FACTOR
+	var eff_reduction = reduction
+	if threshold > 0.0 and amount >= threshold * BRUTE_FORCE_RATIO:
+		var brute_t = clamp((amount / threshold - BRUTE_FORCE_RATIO) / BRUTE_FORCE_RATIO, 0.0, 1.0)
+		eff_reduction = lerpf(reduction, 1.0, brute_t * BRUTE_FORCE_MAX_BLEND)
+	return amount * eff_reduction
+
 static func get_material_threshold(material: String, damage_type: String, thickness: float) -> Vector2:
 	var row = ARMOR_TABLE.get(material, ARMOR_TABLE["hardened_steel"])
 	var pair = row.get(damage_type, row["explosive"])

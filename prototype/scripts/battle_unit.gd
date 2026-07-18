@@ -953,12 +953,17 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	var threshold = resolved.x
 	var reduction = resolved.y
 
-	# Subsystem stripping: 35% of hits land on an exposed module
+	# Subsystem stripping: 35% of hits land on an exposed module. Damage is a
+	# fraction of the raw hit (DamageResolver.MODULE_STRIP_DAMAGE_FACTOR),
+	# not the old flat `amount - 5.0` which rounded every rapid-fire weapon's
+	# strip damage to zero - small sustained guns are now the module-stripper
+	# archetype the design docs promise, while a huge shell still wastes its
+	# overkill on a 100 HP module (action economy, working as intended).
 	if not active_modules.is_empty() and randf() < 0.35:
 		var target_module = active_modules.pick_random()
 		var m_data = target_module.get_meta("module_data")
 		var m_hp = target_module.get_meta("current_hp") if target_module.has_meta("current_hp") else m_data.get_hp()
-		var final_mod_damage = max(0.0, amount - 5.0)
+		var final_mod_damage = amount * DamageResolverScript.MODULE_STRIP_DAMAGE_FACTOR
 		m_hp = max(0.0, m_hp - final_mod_damage)
 		target_module.set_meta("current_hp", m_hp)
 		if m_hp <= 0.0:
@@ -979,13 +984,16 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 				call_deferred("_detect_logistics_tank")
 		return
 
+	# Chip-through + brute-force via the shared resolver math (see
+	# DamageResolver.compute_hull_damage) - sub-threshold hits are mostly
+	# (not entirely) negated, overwhelming hits shrug off reduction.
+	var final_damage = DamageResolverScript.compute_hull_damage(amount, threshold, reduction)
 	if amount < threshold:
 		_flash_shield()
-		return
-
-	hp = max(0.0, hp - amount * reduction)
+	else:
+		_flash_hull()
+	hp = max(0.0, hp - final_damage)
 	_update_hp_bar()
-	_flash_hull()
 	if hp <= 0.0:
 		die()
 
