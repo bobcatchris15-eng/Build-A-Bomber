@@ -16,10 +16,16 @@ extends SceneTree
 # world-space/triplanar UV problem to solve either - a plain tiled
 # StandardMaterial3D (see terrain_builder.gd) is enough.
 #
-# Five terrain types, matching the surface_zones/shallow_water_areas types
-# TerrainBuilder/map_catalog.gd/module_catalog.gd already differentiate
-# mechanically (get_terrain_speed_multiplier()): marsh, rocky, snow_mud,
-# sand, shallow_water.
+# Five special-case terrain types (matching the surface_zones/shallow_water_
+# areas types TerrainBuilder/map_catalog.gd/module_catalog.gd already
+# differentiate mechanically via get_terrain_speed_multiplier()): marsh,
+# rocky, snow_mud, sand, shallow_water. Plus the two BASELINE types every map
+# is mostly made of, which never had a get_surface_type_at() string of their
+# own (they're not part of the mechanical speed-multiplier system - that's
+# unaffected by this pass, this is cosmetic only): "grassland" for the flat
+# Ground box mesh under everything (map_catalog.gd's per-map ground_color),
+# and "blue_water" for the ordinary deep water_areas plane, as opposed to
+# shallow_water's shallow, see-through, sandy-bed look.
 #
 # Re-run after changing TERRAIN_TEX_PARAMS below:
 #   ./Godot_v4.3-stable_win64_console.exe --headless --script tools/generate_terrain_textures.gd
@@ -39,6 +45,8 @@ func _init():
 	_generate("snow_mud", _eval_snow_mud)
 	_generate("sand", _eval_sand)
 	_generate("shallow_water", _eval_shallow_water)
+	_generate("grassland", _eval_grassland)
+	_generate("blue_water", _eval_blue_water)
 	quit(0)
 
 # --- Periodic value noise (tiles seamlessly at `period` lattice cells) ---
@@ -196,6 +204,46 @@ static func _eval_shallow_water(x: int, y: int) -> Dictionary:
 	var ripple = _periodic_noise2d(float(x) / 30.0, float(y) / 9.0, TEX_SIZE / 30, seed + 1) - 0.5
 	var height = ripple * 0.5
 	return {"color": color, "height": height, "roughness": 0.3}
+
+# Baseline grassland: warm desaturated ochre-green, matte, two-scale noise
+# (coarse mottling + fine grain "for tread-track readability") per
+# VISUAL_ART_DIRECTION.md section 4's "open ground: the neutral baseline"
+# spec - no seams/facets/gloss-pockets like the 5 special-case types, this
+# is meant to disappear into the background most of the time. Baked as
+# absolute color (not a faction-style neutral mask) since, unlike the 5
+# special types, terrain_builder.gd DOES apply a light per-map tint on top
+# of this one (each map's own ground_color) - see build_ground_material().
+static func _eval_grassland(x: int, y: int) -> Dictionary:
+	var seed = 9501
+	var base = Color(0.32, 0.34, 0.17)
+	var mottle = _periodic_noise2d(float(x) / 40.0, float(y) / 40.0, TEX_SIZE / 40, seed) - 0.5
+	var color = base.lightened(mottle * 0.22) if mottle >= 0.0 else base.darkened(-mottle * 0.22)
+	var height = mottle * 0.5
+	var grain = _periodic_noise2d(float(x) / 4.0, float(y) / 4.0, TEX_SIZE / 4, seed + 1) - 0.5
+	color = color.lightened(grain * 0.07) if grain >= 0.0 else color.darkened(-grain * 0.07)
+	height += grain * 0.2
+	return {"color": color, "height": height, "roughness": 0.87}
+
+# Baseline deep water: darker, more saturated and DESATURATED-dark than
+# shallow_water (opaque/naval-only, per VISUAL_ART_DIRECTION.md section 4),
+# with a subtle current-streak pattern (gentle, unlike snow_mud's bold
+# ruts) plus sparse brighter glint blotches standing in for distant
+# wave-crest sparkle - low uniform roughness throughout (water sheen),
+# not just in pockets, since the whole surface is water here.
+static func _eval_blue_water(x: int, y: int) -> Dictionary:
+	var seed = 9601
+	var base = Color(0.07, 0.16, 0.27)
+	var current = _periodic_noise2d(float(x) / 50.0, float(y) / 9.0, TEX_SIZE / 9, seed) - 0.5
+	var color = base.lightened(current * 0.12) if current >= 0.0 else base.darkened(-current * 0.12)
+	var height = current * 0.6
+
+	var glint_noise = _periodic_noise2d(float(x) / 7.0, float(y) / 7.0, TEX_SIZE / 7, seed + 1)
+	var glint_mask = smoothstep(0.84, 0.95, glint_noise)
+	if glint_mask > 0.0:
+		color = color.lightened(glint_mask * 0.16)
+		height += glint_mask * 0.15
+
+	return {"color": color, "height": height, "roughness": 0.28}
 
 # --- Bake: albedo (with directional shading pass) + normal + roughness ---
 # Same structural approach as generate_faction_textures.gd's
