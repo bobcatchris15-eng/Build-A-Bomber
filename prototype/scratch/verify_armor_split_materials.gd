@@ -8,7 +8,7 @@ extends SceneTree
 const BlueprintManager = preload("res://scripts/blueprint_manager.gd")
 
 func _init():
-	for hull_type in ["light_hull", "medium_hull", "heavy_hull", "assault_hull", "sponson_hull"]:
+	for hull_type in ["naval_hull", "small_boat_hull", "heavy_cruiser_hull"]:
 		var bp_manager = BlueprintManager.new()
 		root.add_child(bp_manager)
 		var parent = Node3D.new()

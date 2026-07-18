@@ -50,9 +50,5 @@ func _capture_hull(hull_type: String, fname: String, cam_pos: Vector3, cam_look:
 
 func _init():
 	DirAccess.make_dir_recursive_absolute("res://progress_captures/2026-07-17/armor_split")
-	await _capture_hull("light_hull", "light_hull_close.png", Vector3(1.8, 1.3, 2.3), Vector3(0, 0.4, 0))
-	await _capture_hull("medium_hull", "medium_hull_close.png", Vector3(2.2, 1.6, 2.8), Vector3(0, 0.6, 0))
-	await _capture_hull("heavy_hull", "heavy_hull_close.png", Vector3(3.2, 2.0, 3.8), Vector3(0, 0.7, 0))
-	await _capture_hull("assault_hull", "assault_hull_close.png", Vector3(2.6, 1.7, 3.2), Vector3(0, 0.65, 0))
-	await _capture_hull("sponson_hull", "sponson_hull_close.png", Vector3(3.2, 2.0, 3.6), Vector3(0, 0.7, 0))
+	await _capture_hull("heavy_cruiser_hull", "heavy_cruiser_bow_close.png", Vector3(1.8, 1.2, -3.5), Vector3(0, 0.6, -4.5))
 	quit(0)

@@ -1368,7 +1368,7 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 
 def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.38, 0.4), greebles=None,
 		deadrise=0.3, sheer=0.1, flare=0.0, stations=9, bevel_pct=None, bevel_segments=None,
-		superstructure_tiers=1, forecastle=False, quarterdeck=False):
+		superstructure_tiers=1, forecastle=False, quarterdeck=False, armor_front_frac=0.55):
 	"""Naval hull: pointed bow, flat transom stern, a real V-shaped deadrise
 	cross-section (via a per-station loft, not a boolean cut), sheer
 	(deck line rising toward the bow), optional topside flare above the
@@ -1427,6 +1427,16 @@ def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.
 
 	bevel_sharp_edges(bm, verts, R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
+	# Hard-armor region: the bow belt - a real warship's most exposed
+	# ramming/torpedo-arc surface, and (per the same reasoning as the AFV
+	# hulls' frontal glacis) naturally a minority of total hull area for
+	# an elongated hull. Excludes the keel/bottom (never visible, a
+	# wasted area cost). Called BEFORE the bridge/forecastle/quarterdeck
+	# additions so those stay structural deck fixtures, not armor plate -
+	# a bridge superstructure isn't armor on a real ship either.
+	armor_frac = mark_armor_faces(bm, frontal_armor_predicate(hz, front_frac=armor_front_frac))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
+
 	# Bridge superstructure, offset toward the stern - a stack of
 	# `superstructure_tiers` fused boxes of decreasing footprint
 	# (technique #1, same as build_tower_hull's per-tier hulls), each
@@ -1449,7 +1459,7 @@ def build_ship_hull(name, size_x, size_y, size_z, bow_frac=0.35, color=(0.35, 0.
 		greebles(bm, hx, hy, hz)
 
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.55, roughness=0.45)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
 	return obj
 
 
