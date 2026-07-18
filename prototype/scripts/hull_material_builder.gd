@@ -40,8 +40,24 @@ const HULL_SHADER = preload("res://shaders/hull_faction_material.gdshader")
 # actually drove the anisotropic hotspot bug above) gives a bit more
 # specular "pop" without reopening that exact regression, since anisotropic
 # GGX's peak sharpness is roughness-driven, not metallic-driven.
+#
+# 2026-07-18: metallic brought back DOWN, 0.88 -> 0.55, after a rigorous
+# pixel-level check proved the 0.88 value was actively counterproductive:
+# sampled dead-center of a flat armor-material face under plain ambient
+# light (no specular highlight landing there), armor read DARKER than
+# structural despite having a lighter raw base_color - a real PBR
+# behavior, not a bug: diffuse reflectance scales with (1-metallic), so a
+# near-pure-metal surface has almost NO diffuse contribution and looks
+# black everywhere except where a highlight or bright reflection actually
+# lands. That's fine for a hero shot with the light in the right place,
+# but not for "reads as armor from any angle," which is the actual ask.
+# 0.55 keeps a real diffuse contribution alive while staying well above
+# structural's 0.04, so the color/value gap (see build_structural_
+# material()'s own note) reads reliably instead of being fought by metallic
+# suppression. base_color/accent_color also lightened in build_hull_
+# material() below to compensate further - see that function's comment.
 const ARMOR_PBR = {
-	"hardened_steel": {"metallic": 0.88, "roughness": 0.42, "shield_mode": 0.0, "alpha": 1.0},
+	"hardened_steel": {"metallic": 0.55, "roughness": 0.42, "shield_mode": 0.0, "alpha": 1.0},
 	"reactive_armor": {"metallic": 0.1, "roughness": 0.7, "shield_mode": 0.0, "alpha": 1.0},
 	"ablative_ceramic": {"metallic": 0.0, "roughness": 0.5, "shield_mode": 0.0, "alpha": 1.0},
 	"energy_shielding": {"metallic": 0.1, "roughness": 0.1, "shield_mode": 1.0, "alpha": 0.7},
@@ -71,8 +87,17 @@ static func build_hull_material(armor_material: String, faction: String) -> Shad
 	var vis = FactionCatalogScript.get_visual(faction)
 	var mat = ShaderMaterial.new()
 	mat.shader = HULL_SHADER
-	mat.set_shader_parameter("base_color", vis.base_color)
-	mat.set_shader_parameter("accent_color", vis.accent_color)
+	# Lightened 2026-07-18 alongside metallic being brought down (see
+	# ARMOR_PBR's own comment) - guarantees a real, reliable brightness
+	# gap against build_structural_material()'s darkened(0.62) even with
+	# metallic's diffuse-suppression working against it. Applies to every
+	# hull's armor material uniformly, including the un-migrated single-
+	# surface fallback (apply_hull_materials()) - a harmless, arguably
+	# fitting side effect there too (armor reading a bit brighter/more
+	# premium), and moot in practice since every hull in the current
+	# roster already has a real 2-surface split.
+	mat.set_shader_parameter("base_color", vis.base_color.lightened(0.28))
+	mat.set_shader_parameter("accent_color", vis.accent_color.lightened(0.28))
 	mat.set_shader_parameter("detail_color", vis.detail_color)
 	mat.set_shader_parameter("anisotropy", vis.anisotropy)
 	mat.set_shader_parameter("brush_scale", vis.get("brush_scale", 2.0))
@@ -123,12 +148,28 @@ static func build_hull_material(armor_material: String, faction: String) -> Shad
 # faction's paint job. detail_color (small stencil/bolt accents) is left
 # untouched on purpose - those should stay legible regardless of which
 # region they land on.
+#
+# 2026-07-18: darken amount raised again, 0.16 -> 0.62, after a rigorous
+# pixel-level check (not a visual read) proved 0.16 was nowhere near
+# enough - two identical boxes, one per material, side by side under
+# identical lighting, sampled dead center of each flat face (deliberately
+# far from any specular highlight or edge) came back within ~0.007
+# average RGB of each other, indistinguishable to the eye. That check also
+# exposed WHY: metallic/roughness differences are fundamentally VIEW- and
+# LIGHT-ANGLE-DEPENDENT (a shinier material only looks brighter where a
+# highlight actually lands; everywhere else, a HIGH-metallic surface can
+# look darker than a low-metallic one, since metals have near-zero diffuse
+# reflectance) - so the metallic/roughness gap alone, however wide, cannot
+# be trusted to read consistently regardless of camera/light angle. Color
+# VALUE is the only lever that's angle-independent (a darker diffuse
+# albedo reads darker under any lighting), hence pushing it hard here
+# rather than trying to further chase the PBR angle-dependent route.
 static func build_structural_material(faction: String) -> ShaderMaterial:
 	var vis = FactionCatalogScript.get_visual(faction)
 	var mat = ShaderMaterial.new()
 	mat.shader = HULL_SHADER
-	mat.set_shader_parameter("base_color", vis.base_color.darkened(0.16))
-	mat.set_shader_parameter("accent_color", vis.accent_color.darkened(0.16))
+	mat.set_shader_parameter("base_color", vis.base_color.darkened(0.62))
+	mat.set_shader_parameter("accent_color", vis.accent_color.darkened(0.62))
 	mat.set_shader_parameter("detail_color", vis.detail_color)
 	mat.set_shader_parameter("anisotropy", vis.anisotropy * 0.08)
 	mat.set_shader_parameter("brush_scale", vis.get("brush_scale", 2.0))

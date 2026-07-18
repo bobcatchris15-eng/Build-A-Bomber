@@ -2971,13 +2971,16 @@ func test_faction_catalog_and_hull_material() -> bool:
 	# apply_hull_materials() - real material slots, not a single whole-mesh
 	# material_override, which is always null for a hull - see that
 	# function's own comment). Surface count depends on which surface
-	# index is checked here: surface 0 (structural) deliberately DARKENS
-	# base_color a bit for armor/structural value contrast (2026-07-17),
-	# so it no longer carries the faction's exact raw color - check
-	# whichever is the LAST surface instead (the armor material, always
-	# unmodified/undarkened - both on a multi-slot hull's armor surface(s)
-	# and on a not-yet-re-authored hull's sole surface, which gets the
-	# undarkened armor material per apply_hull_materials()'s own fallback).
+	# index is checked here: surface 0 (structural) darkens base_color and
+	# the last surface (armor) LIGHTENS it (2026-07-18, widening the
+	# armor/structural value contrast) - neither carries the faction's raw,
+	# unmodified color anymore, so comparing against FactionCatalog.
+	# get_visual_color() directly (as this test originally did) breaks
+	# every time that tuning changes. Cross-check against build_hull_
+	# material()'s OWN output for the same inputs instead - proves the real
+	# spawn pipeline applies the same transform the builder function does,
+	# without hardcoding a lighten/darken amount that's expected to keep
+	# moving during tuning passes.
 	var check_surf = mesh_inst.mesh.get_surface_count() - 1 if mesh_inst and mesh_inst.mesh else 0
 	var surface_mat = mesh_inst.get_surface_override_material(check_surf) if mesh_inst else null
 	if not mesh_inst or not (surface_mat is ShaderMaterial):
@@ -2985,7 +2988,8 @@ func test_faction_catalog_and_hull_material() -> bool:
 		parent.queue_free()
 		bp_manager.queue_free()
 		return false
-	if surface_mat.get_shader_parameter("base_color") != FactionCatalog.get_visual_color("crimson_concordat"):
+	var expected_armor_mat = HullMaterialBuilder.build_hull_material("reactive_armor", "crimson_concordat")
+	if surface_mat.get_shader_parameter("base_color") != expected_armor_mat.get_shader_parameter("base_color"):
 		print("  [FAIL] The real spawned hull's material should carry the blueprint's own faction color (crimson_concordat)")
 		parent.queue_free()
 		bp_manager.queue_free()
