@@ -1,5 +1,6 @@
 extends Node
 class_name TerrainBuilder
+const TerrainGreeblesScript = preload("res://scripts/terrain_greebles.gd")
 # Turns a MapCatalog map Dictionary into: baked NavigationServer3D ground/
 # water maps, decorative terrain meshes (water planes, rock-cluster
 # obstacles, elevation plateaus+ramps), and pure query functions
@@ -382,51 +383,56 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 	for b in map_def.get("bridges", []):
 		_spawn_bridge(b, parent)
 
-# Flat colored patch, matte (unlike water's glossy transparency) - purely
-# cosmetic/informational, never a navmesh hole (see get_surface_type_at()'s
-# own comment: every locomotor CAN physically enter, just at a different
-# speed). rocky terrain gets a few small non-collidable rock-bump
-# decorations on top so it reads as genuinely uneven, not just a color
-# swap - deliberately no StaticBody3D collision, unlike _spawn_obstacle()'s
-# real rock clusters, since this ground stays fully walkable.
-const SURFACE_ZONE_COLORS = {
-	"marsh": Color(0.22, 0.3, 0.2),
-	"rocky": Color(0.42, 0.4, 0.37),
-	"snow_mud": Color(0.58, 0.56, 0.5),
-	"sand": Color(0.76, 0.68, 0.45),
-}
+# Real baked ground textures (see tools/generate_terrain_textures.gd) tiled
+# across each surface_zone's real-world footprint, replacing the old flat
+# albedo_color patches - one texture set per surface_type, cached the same
+# way HullMaterialBuilder caches per-faction textures (this runs once per
+# zone per map load, cheap either way, but no reason to reload the same 3
+# PNGs for every zone that shares a surface_type). Every zone plus the
+# shallow_water marker also gets non-collidable ground clutter scattered by
+# TerrainGreebles - see that file for why real 3D props, not flat cards.
+const TERRAIN_TEXTURE_DIR = "res://assets/textures/terrain/"
+# Texture repeats once per this many world units - fixed, not derived from
+# zone size, since (unlike a Design Lab hull) these zones are static map
+# geometry that's never scaled at runtime; a plain tiled UV is enough.
+const TERRAIN_TILE_WORLD_SIZE: float = 6.0
+
+static var _terrain_texture_cache: Dictionary = {}
+
+static func _get_terrain_textures(surface_type: String) -> Dictionary:
+	if _terrain_texture_cache.has(surface_type):
+		return _terrain_texture_cache[surface_type]
+	var base = TERRAIN_TEXTURE_DIR + surface_type
+	var textures = {
+		"albedo": load(base + "_albedo.png"),
+		"normal": load(base + "_normal.png"),
+		"roughness": load(base + "_roughness.png"),
+	}
+	_terrain_texture_cache[surface_type] = textures
+	return textures
+
+static func _build_terrain_material(surface_type: String, footprint: Vector2) -> StandardMaterial3D:
+	var mat = StandardMaterial3D.new()
+	var tex = _get_terrain_textures(surface_type)
+	mat.albedo_texture = tex.albedo
+	mat.roughness_texture = tex.roughness
+	mat.roughness = 1.0
+	mat.normal_enabled = true
+	mat.normal_texture = tex.normal
+	mat.uv1_scale = Vector3(footprint.x / TERRAIN_TILE_WORLD_SIZE, footprint.y / TERRAIN_TILE_WORLD_SIZE, 1.0)
+	return mat
 
 static func _spawn_surface_zone(zone: Dictionary, parent: Node3D):
 	var mesh_inst = MeshInstance3D.new()
 	var plane = PlaneMesh.new()
-	plane.size = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
+	var footprint = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
+	plane.size = footprint
 	mesh_inst.mesh = plane
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = SURFACE_ZONE_COLORS.get(zone.get("surface_type", ""), Color(0.5, 0.5, 0.5))
-	mat.roughness = 0.9
-	mesh_inst.material_override = mat
+	mesh_inst.material_override = _build_terrain_material(zone.get("surface_type", ""), footprint)
 	parent.add_child(mesh_inst)
 	mesh_inst.global_position = Vector3(zone.center.x, 0.03, zone.center.z)
 
-	if zone.get("surface_type", "") == "rocky":
-		var rng = RandomNumberGenerator.new()
-		rng.seed = hash(zone.center)
-		for i in range(10):
-			var rock = MeshInstance3D.new()
-			var box = BoxMesh.new()
-			var size = Vector3(rng.randf_range(0.3, 0.7), rng.randf_range(0.2, 0.5), rng.randf_range(0.3, 0.7))
-			box.size = size
-			rock.mesh = box
-			var rock_mat = StandardMaterial3D.new()
-			var shade = rng.randf_range(0.3, 0.45)
-			rock_mat.albedo_color = Color(shade, shade * 0.95, shade * 0.88)
-			rock_mat.roughness = 0.95
-			rock.material_override = rock_mat
-			parent.add_child(rock)
-			var ox = rng.randf_range(-zone.half_extents.x * 0.85, zone.half_extents.x * 0.85)
-			var oz = rng.randf_range(-zone.half_extents.y * 0.85, zone.half_extents.y * 0.85)
-			rock.global_position = Vector3(zone.center.x + ox, size.y / 2.0, zone.center.z + oz)
-			rock.rotation.y = rng.randf_range(0, TAU)
+	TerrainGreeblesScript.scatter(zone, parent)
 
 # A lighter, sandier-toned marker over the shallow sub-area of a water
 # zone (drawn on top of the main water plane, slightly higher Y) - purely
@@ -436,14 +442,17 @@ static func _spawn_surface_zone(zone: Dictionary, parent: Node3D):
 static func _spawn_shallow_water_marker(zone: Dictionary, parent: Node3D):
 	var mesh_inst = MeshInstance3D.new()
 	var plane = PlaneMesh.new()
-	plane.size = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
+	var footprint = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
+	plane.size = footprint
 	mesh_inst.mesh = plane
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.55, 0.6, 0.4, 0.75)
+	var mat = _build_terrain_material("shallow_water", footprint)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(1, 1, 1, 0.8)
 	mesh_inst.material_override = mat
 	parent.add_child(mesh_inst)
 	mesh_inst.global_position = Vector3(zone.center.x, 0.06, zone.center.z)
+
+	TerrainGreeblesScript.scatter_shallow_water(zone, parent)
 
 static func _spawn_water_plane(water: Dictionary, parent: Node3D):
 	var mesh_inst = MeshInstance3D.new()
