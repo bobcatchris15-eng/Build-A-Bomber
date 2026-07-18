@@ -1074,8 +1074,8 @@ func update_hull_appearance():
 		mesh_inst.mesh = box
 		mesh_inst.scale = Vector3.ONE
 	
-	# Apply material - shared faction+armor shader (see hull_material_builder.gd)
-	mesh_inst.material_override = HullMaterialBuilderScript.build_hull_material(armor_mat_name, faction_name)
+	# Apply materials - shared faction+armor shader (see hull_material_builder.gd)
+	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
 	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
 	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
 	

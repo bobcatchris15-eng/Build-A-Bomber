@@ -345,7 +345,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		box.size = catalog_data.size * hull_scale * armor_bulk
 		mesh_inst.mesh = box
 
-	mesh_inst.material_override = HullMaterialBuilderScript.build_hull_material(armor_mat_name, faction_name)
+	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
 	hull.add_child(mesh_inst)
 	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
 	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)

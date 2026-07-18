@@ -2967,12 +2967,19 @@ func test_faction_catalog_and_hull_material() -> bool:
 	root.add_child(parent)
 	var hull = bp_manager.reconstruct_vehicle(blueprint_data, parent, false)
 	var mesh_inst = hull.get_node_or_null("MeshInstance3D") if hull else null
-	if not mesh_inst or not (mesh_inst.material_override is ShaderMaterial):
-		print("  [FAIL] A real reconstructed hull should have a ShaderMaterial (not StandardMaterial3D) as its mesh material_override")
+	# Hull materials are per-surface overrides now (HullMaterialBuilder.
+	# apply_hull_materials() - real material slots, not a single whole-mesh
+	# material_override, which is always null for a hull - see that
+	# function's own comment). Surface 0 always exists (structural on a
+	# multi-slot hull, or the sole armor surface on a not-yet-re-authored
+	# one) and carries the same per-faction base_color either way.
+	var surface_mat = mesh_inst.get_surface_override_material(0) if mesh_inst else null
+	if not mesh_inst or not (surface_mat is ShaderMaterial):
+		print("  [FAIL] A real reconstructed hull should have a ShaderMaterial (not StandardMaterial3D) as its surface 0 override material")
 		parent.queue_free()
 		bp_manager.queue_free()
 		return false
-	if mesh_inst.material_override.get_shader_parameter("base_color") != FactionCatalog.get_visual_color("crimson_concordat"):
+	if surface_mat.get_shader_parameter("base_color") != FactionCatalog.get_visual_color("crimson_concordat"):
 		print("  [FAIL] The real spawned hull's material should carry the blueprint's own faction color (crimson_concordat)")
 		parent.queue_free()
 		bp_manager.queue_free()

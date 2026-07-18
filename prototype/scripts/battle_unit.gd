@@ -11,6 +11,7 @@ signal resources_delivered(team, metal, crystal)
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 
 var team: int = 0
 var max_hp: float = 400.0
@@ -1058,26 +1059,16 @@ func _flash_shield():
 func _flash_hull():
 	if not is_instance_valid(hull_node): return
 	var mesh_inst = hull_node.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if not mesh_inst or not mesh_inst.material_override: return
-	var mat_over = mesh_inst.material_override
-	# Hull materials are now the shared faction ShaderMaterial (see
-	# hull_material_builder.gd) - flash via its flash_amount uniform instead
-	# of mutating albedo_color, which only ever existed on the old
-	# StandardMaterial3D. Falls back to the old approach for any material
-	# that isn't the shader (e.g. a future non-hull caller).
-	if mat_over is ShaderMaterial:
-		mat_over.set_shader_parameter("flash_amount", 1.0)
-		get_tree().create_timer(0.12).timeout.connect(func():
-			if is_instance_valid(mat_over):
-				mat_over.set_shader_parameter("flash_amount", 0.0)
-		)
-	elif mat_over is StandardMaterial3D:
-		var prev_color = mat_over.albedo_color
-		mat_over.albedo_color = Color.RED
-		get_tree().create_timer(0.12).timeout.connect(func():
-			if is_instance_valid(mat_over):
-				mat_over.albedo_color = prev_color
-		)
+	if not mesh_inst: return
+	# Hull materials are per-surface overrides now (HullMaterialBuilder.
+	# apply_hull_materials() - structural + armor slots), not a single
+	# mesh_inst.material_override - flash_hull() sets flash_amount on
+	# every ShaderMaterial surface override this hull has.
+	HullMaterialBuilderScript.flash_hull(mesh_inst, 1.0)
+	get_tree().create_timer(0.12).timeout.connect(func():
+		if is_instance_valid(mesh_inst):
+			HullMaterialBuilderScript.flash_hull(mesh_inst, 0.0)
+	)
 
 func _spawn_explosion(pos: Vector3, size: float):
 	var scene = get_tree().current_scene
