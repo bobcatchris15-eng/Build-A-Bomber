@@ -17,8 +17,24 @@ const HULL_SHADER = preload("res://shaders/hull_faction_material.gdshader")
 # pale ceramic, energy_shielding's translucent glow) - only the ALBEDO COLOR
 # moved to being faction-driven instead of a fixed per-material color, since
 # color is now what distinguishes ownership, not armor type.
+#
+# hardened_steel's roughness raised 0.2 -> 0.42 (2026-07-17, root-caused a
+# "whole game looks glossy" report): under real-camera screenshots this
+# combined with the hull shader's own ANISOTROPY term (hull_faction_
+# material.gdshader) into a blown-out, near-mirror streak on every hull's
+# top/near face - anisotropic GGX's peak brightness AND sharpness both
+# scale up sharply as roughness drops, so a "shiny metal" value that looked
+# reasonable in isolation became a wet-chrome hotspot once anisotropy was
+# layered on top. 0.42 keeps hardened_steel the shiniest/most metallic of
+# the 4 armor types (still well below reactive_armor's 0.7) while actually
+# reading as "brushed anodized aluminum" (VISUAL_ART_DIRECTION.md 1.3's
+# "soft/broad highlight, not a sharp wet-looking one") rather than polished
+# chrome. The other 3 materials were NOT touched - reactive_armor/
+# ablative_ceramic were already reasonably matte, and energy_shielding's
+# low roughness is an intentional "active energy field" glow, one of the
+# few things that's supposed to read as glossy.
 const ARMOR_PBR = {
-	"hardened_steel": {"metallic": 0.8, "roughness": 0.2, "shield_mode": 0.0, "alpha": 1.0},
+	"hardened_steel": {"metallic": 0.8, "roughness": 0.42, "shield_mode": 0.0, "alpha": 1.0},
 	"reactive_armor": {"metallic": 0.1, "roughness": 0.7, "shield_mode": 0.0, "alpha": 1.0},
 	"ablative_ceramic": {"metallic": 0.0, "roughness": 0.5, "shield_mode": 0.0, "alpha": 1.0},
 	"energy_shielding": {"metallic": 0.1, "roughness": 0.1, "shield_mode": 1.0, "alpha": 0.7},
