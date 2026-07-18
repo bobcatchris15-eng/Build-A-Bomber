@@ -4,6 +4,30 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-17 — Open question (not investigated): sponson weapons may be able to shoot through their own hull
+
+**Not blocking - flagging only, no action taken.** Chris raised a possible edge case while this session was doing unrelated terrain work: a sponson-mounted weapon sitting behind a hull bulge/protrusion might have its fire-arc/line-of-sight calculation not correctly account for the hull's OWN geometry blocking its own shot - i.e. a weapon could compute a clear firing solution that would actually have to pass through part of its own vehicle first. This was explicitly called out as something to log, not fix, in this session. Worth a real look later: check whatever computes weapon fire-arc/LOS (likely auto_weapon.gd, given its own hull/obstacle LOS raycast noted elsewhere in this codebase) against sponson mount positions from module_placer.gd/visual_builder.gd, on a hull with a pronounced bulge.
+
+---
+
+## 2026-07-17 — Terrain textures + greebles: real 3D props over flat cutout cards, tuned procedural bakes over hand-authored art
+
+**Not blocking - implementation complete, verified with real screenshots, all headless tests green.**
+
+**Ask:** give each of the 5 mechanically-differentiated terrain types (marsh, rocky, snow_mud, sand, shallow_water - confirmed exact IDs from map_catalog.gd/module_catalog.gd's TERRAIN_SPEED_MULTIPLIERS) real ground textures and scattered greeble clutter, since before this pass every surface_zone/shallow_water_areas entry was a flat StandardMaterial3D.albedo_color patch (terrain_builder.gd's old SURFACE_ZONE_COLORS) with only rocky terrain getting any decoration at all (10 small non-collidable rock boxes).
+
+**Texture approach:** new tools/generate_terrain_textures.gd, following generate_faction_textures.gd's exact established pattern (pure Godot Image + hand-rolled periodic value noise, baked to PNG once, zero external asset dependency) but baking real RGB color directly into albedo rather than a faction-shader-tinted grayscale mask - terrain has no per-faction tint step and (unlike a Design Lab hull) is never stretched at runtime, so a plain tiled StandardMaterial3D with uv1_scale is enough; no triplanar shader needed. Rocky terrain's texture reuses the faction pipeline's panel-grid/ink-seam technique verbatim, themed as rock facets instead of hull panels, with an added domain-warp pass so facet boundaries wiggle instead of reading as a perfect tile grid (first pass without the warp looked like pavement, not broken rock - caught via real screenshot, fixed before wiring in). snow_mud's mud-rut density and marsh's tile-repeat scale (TERRAIN_TILE_WORLD_SIZE 3.0 -> 6.0) were both tuned down after a first-pass screenshot showed a too-dense zebra-stripe rut pattern and a too-obviously-gridded puddle layout respectively.
+
+**Greeble approach:** new scripts/terrain_greebles.gd, deliberately using REAL 3D primitive geometry (cylinders/boxes/spheres) rather than hull_greebles.gd's flat alpha-cutout cards - explicit judgment call, reasoned through in that file's own header comment: an RTS camera orbits/pans across scattered ground clutter from a much wider range of angles than it ever sees a hull silhouette from, and a flat card would visibly pop/flatten at a grazing angle in a way real geometry doesn't. This matches the OTHER existing precedent (HullGreebles' own dune_runners water barrels, terrain_builder.gd's rock-cluster obstacles) more than the cutout-card precedent. Per-type: marsh gets reed tufts + half-sunk driftwood logs, rocky gets upgraded boulder+rock-bump jumble, snow_mud gets snowdrift mounds + flush glossy mud-rut streaks, sand gets low ripple ridges + sun-bleached rock debris, shallow_water gets tide-pool rocks at varied exposure above the waterline. All purely decorative (no StaticBody3D, no navmesh awareness) - surface_zones must stay fully walkable at their speed-multiplier penalty, not become hard obstacles.
+
+**What was verified:** real windowed screenshots (scratch/capture_terrain_greebles.gd, saved to progress_captures/2026-07-17/terrain_textures_greebles/) of all 5 types confirming textures + greebles actually render and read as visually distinct from each other; full headless test suite (run_tests.gd) green both before and after the tuning pass, including the two map smoke tests that actually exercise this code path (Open Plains for the 4 surface_zones, Coastal Strand for shallow_water).
+
+**Incidental fix:** scratch/reimport_assets.sh had a hardcoded scratch-directory path left over from a prior session (a different session ID than this one) - updated it to this session's actual scratchpad path so the documented isolated-copy reimport procedure keeps working. Also fixed the capture script's own bugs from a first attempt: an invalid `get_viewport().set_size()` call that crashed mid-capture, and a hand-decomposed camera transform copied from skirmish.tscn's raw Camera3D transform that turned out to point away from the scene (that Camera3D transform is almost certainly overwritten at runtime by its RTSCam script anyway) - replaced with a plain `look_at_from_position()` call, which is what capture_faction_materials.gd already used successfully.
+
+**Not implemented (intentional scope boundary):** the default flat "open ground" plain (map ground_color, no surface_zone) was left untouched - it's not one of the mechanically-differentiated terrain types the task asked about, and giving it the same treatment would be a separate, larger task (it covers most of every map, not an 18x18 patch).
+
+---
+
 ## 2026-07-17 — DESIGN DIRECTION (not decided, not implemented): collapse "turret" into a pintle-mount variant
 
 **Not blocking - Chris is still thinking this over, logging only so the idea isn't lost.** No investigation of feasibility done, no code touched.
