@@ -125,6 +125,7 @@ func _init():
 	success = success and await test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes()
 	success = success and await test_damage_model_rof_chip_strip_and_air_rules()
 	success = success and await test_hull_economy_and_scale_bounds()
+	success = success and await test_explosive_weapons_deal_real_aoe_damage()
 
 	print("\n==============================================")
 	if success:
@@ -6881,4 +6882,101 @@ func test_hull_economy_and_scale_bounds() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Armor material/thickness and hull scale all carry real cost/weight/HP consequences, the thickness cost curve is superlinear, materials form a genuine rock-paper-scissors, and hull scaling is bounded.")
+	return true
+
+func test_explosive_weapons_deal_real_aoe_damage() -> bool:
+	print("Running Test Suite: Real AoE Damage - Explosive Weapons Hit A Radius, Not Just The Ordered Target (FABLE_REVIEW 2.3)...")
+	await process_frame # let any deferred queue_free()s from prior tests actually clear
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var shooter = CharacterBody3D.new()
+	shooter.set_script(BattleUnitScript)
+	root.add_child(shooter)
+	shooter.team = 0
+	shooter.set_meta("team", 0)
+	shooter.add_to_group("damageable") # so get_vehicle_root()/get_team() resolve the shooter's team
+
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	shooter.add_child(weapon)
+	weapon.type_id = "heavy_howitzer"
+	weapon.damage_class = "explosive"
+
+	var impact = Vector3(20, 0, 0)
+
+	var primary = CharacterBody3D.new() # at the impact point - full damage
+	primary.set_script(BattleUnitScript)
+	root.add_child(primary)
+	primary.team = 1
+	primary.set_meta("team", 1)
+	primary.add_to_group("damageable")
+	primary.max_hp = 1000.0
+	primary.hp = 1000.0
+	primary.global_position = impact
+
+	var nearby_enemy = CharacterBody3D.new() # inside the blast radius, off-center - reduced (falloff) damage
+	nearby_enemy.set_script(BattleUnitScript)
+	root.add_child(nearby_enemy)
+	nearby_enemy.team = 1
+	nearby_enemy.set_meta("team", 1)
+	nearby_enemy.add_to_group("damageable")
+	nearby_enemy.max_hp = 1000.0
+	nearby_enemy.hp = 1000.0
+	nearby_enemy.global_position = impact + Vector3(3.0, 0, 0)
+
+	var far_enemy = CharacterBody3D.new() # well outside the blast radius - untouched
+	far_enemy.set_script(BattleUnitScript)
+	root.add_child(far_enemy)
+	far_enemy.team = 1
+	far_enemy.set_meta("team", 1)
+	far_enemy.add_to_group("damageable")
+	far_enemy.max_hp = 1000.0
+	far_enemy.hp = 1000.0
+	far_enemy.global_position = impact + Vector3(50.0, 0, 0)
+
+	var nearby_ally = CharacterBody3D.new() # inside the radius but shooter's own team - excluded (no friendly fire this pass)
+	nearby_ally.set_script(BattleUnitScript)
+	root.add_child(nearby_ally)
+	nearby_ally.team = 0
+	nearby_ally.set_meta("team", 0)
+	nearby_ally.add_to_group("damageable")
+	nearby_ally.max_hp = 1000.0
+	nearby_ally.hp = 1000.0
+	nearby_ally.global_position = impact + Vector3(1.0, 0, 0)
+
+	var everyone = [primary, nearby_enemy, far_enemy, nearby_ally]
+	var free_all = func():
+		shooter.queue_free()
+		for u in everyone: u.queue_free()
+
+	weapon._deal_aoe_damage(impact, 6.0, 300.0)
+
+	if primary.hp >= 1000.0:
+		print("  [FAIL] The unit at the impact center should take full blast damage, hp=", primary.hp)
+		free_all.call()
+		return false
+	var primary_damage = 1000.0 - primary.hp
+
+	if nearby_enemy.hp >= 1000.0:
+		print("  [FAIL] A hostile unit inside the blast radius (but off-center) should still take reduced damage, hp=", nearby_enemy.hp)
+		free_all.call()
+		return false
+	var nearby_damage = 1000.0 - nearby_enemy.hp
+	if nearby_damage >= primary_damage:
+		print("  [FAIL] Off-center blast damage should fall off with distance, not match the center hit (center=", primary_damage, " off-center=", nearby_damage, ")")
+		free_all.call()
+		return false
+
+	if far_enemy.hp < 1000.0:
+		print("  [FAIL] A unit well outside the blast radius should take zero damage, hp=", far_enemy.hp)
+		free_all.call()
+		return false
+
+	if nearby_ally.hp < 1000.0:
+		print("  [FAIL] A friendly unit inside the blast radius should NOT take AoE damage this pass (friendly fire deliberately out of scope - see DECISIONS_NEEDED.md), hp=", nearby_ally.hp)
+		free_all.call()
+		return false
+
+	free_all.call()
+	print("  [PASS] AoE blast damage hits a real radius with distance falloff (center > off-center > zero outside the radius), hostiles only.")
 	return true

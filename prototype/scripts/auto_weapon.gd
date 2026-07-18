@@ -126,6 +126,34 @@ func _deal_weapon_damage(t: Node3D, amount: float):
 		amount *= PD_ANTI_AIR_DAMAGE_MULT
 	t.take_damage(amount, damage_class, _hit_origin(t))
 
+# Real AoE (FABLE_REVIEW.md 2.3) - the other missing leg of the counter-
+# triangle ("AoE beats swarm"). A shared radius query around an impact
+# point, called from the explosive weapons' hit callbacks instead of their
+# old single-target-only _deal_weapon_damage() call. Linear falloff from
+# full damage at the impact center to zero at the blast radius edge; each
+# hit still routes through _deal_weapon_damage() so evasion/PD-anti-air/
+# hit-origin-flattening all still apply per target. Hostiles only, matching
+# every other weapon's own team filter - friendly fire is a real, separate
+# design question (own units clustering would suddenly matter) deliberately
+# not bundled into this pass; see DECISIONS_NEEDED.md.
+func _deal_aoe_damage(center: Vector3, radius: float, amount: float):
+	var my_team = get_team()
+	for c in get_tree().get_nodes_in_group("damageable"):
+		if not is_instance_valid(c) or not c.has_method("take_damage"):
+			continue
+		if "is_dead" in c and c.is_dead:
+			continue
+		var c_team = c.get_meta("team") if c.has_meta("team") else -1
+		if my_team >= 0 and c_team == my_team:
+			continue
+		var dist = center.distance_to(c.global_position)
+		if dist > radius:
+			continue
+		var falloff = clamp(1.0 - (dist / radius), 0.0, 1.0)
+		if falloff <= 0.0:
+			continue
+		_deal_weapon_damage(c, amount * falloff)
+
 # FABLE_REVIEW.md 1.8 fix: flying units cruise at y=4.0, permanently above
 # DamageResolver's 2.0 elevation-advantage threshold - so every air-to-ground
 # shot silently collected the armor-pierce bonus meant to reward holding
@@ -885,9 +913,8 @@ func _fire_heavy_howitzer():
 	tween.tween_method(callable, 0.0, 1.0, 0.8)
 	tween.finished.connect(func():
 		if is_instance_valid(shell): shell.queue_free()
-		if is_instance_valid(target):
-			_deal_weapon_damage(target, dps * fire_rate)
-			_spawn_explosion_visual(end, 1.2, Color.ORANGE)
+		_deal_aoe_damage(end, 6.0, dps * fire_rate)
+		_spawn_explosion_visual(end, 1.2, Color.ORANGE)
 	)
 
 func _fire_mortar_salvo():
@@ -923,9 +950,8 @@ func _fire_mortar_salvo():
 			tween.tween_method(callable, 0.0, 1.0, 0.6)
 			tween.finished.connect(func():
 				if is_instance_valid(shell): shell.queue_free()
-				if is_instance_valid(target):
-					_deal_weapon_damage(target, (dps * fire_rate) / count)
-					_spawn_explosion_visual(end, 0.5, Color.YELLOW)
+				_deal_aoe_damage(end, 4.0, (dps * fire_rate) / count)
+				_spawn_explosion_visual(end, 0.5, Color.YELLOW)
 			)
 		)
 
@@ -958,9 +984,8 @@ func _fire_spigot_mortar():
 	tween.tween_method(callable, 0.0, 1.0, 0.7)
 	tween.finished.connect(func():
 		if is_instance_valid(bomb): bomb.queue_free()
-		if is_instance_valid(target):
-			_deal_weapon_damage(target, dps * fire_rate)
-			_spawn_explosion_visual(end, 1.8, Color.CRIMSON)
+		_deal_aoe_damage(end, 5.0, dps * fire_rate)
+		_spawn_explosion_visual(end, 1.8, Color.CRIMSON)
 	)
 
 const WeaponMissileScene = preload("res://scripts/weapon_missile.gd")
@@ -1065,9 +1090,8 @@ func _fire_cluster_dispenser():
 			st.tween_property(sub, "global_position", scatter_dest, 0.2)
 			st.finished.connect(func():
 				if is_instance_valid(sub): sub.queue_free()
-				if is_instance_valid(target):
-					_deal_weapon_damage(target, (dps * fire_rate) / 5.0)
-					_spawn_explosion_visual(scatter_dest, 0.3, Color.CHOCOLATE)
+				_deal_aoe_damage(scatter_dest, 3.0, (dps * fire_rate) / 5.0)
+				_spawn_explosion_visual(scatter_dest, 0.3, Color.CHOCOLATE)
 			)
 	)
 
@@ -1147,28 +1171,27 @@ func _fire_plasma_lobber():
 	tween.tween_method(callable, 0.0, 1.0, 0.6)
 	tween.finished.connect(func():
 		if is_instance_valid(plasma): plasma.queue_free()
-		if is_instance_valid(target):
-			_deal_weapon_damage(target, dps * fire_rate)
-			_spawn_explosion_visual(end, 0.8, Color.MEDIUM_SPRING_GREEN)
-			
-			var puddle = MeshInstance3D.new()
-			var cyl = CylinderMesh.new()
-			cyl.top_radius = 1.0
-			cyl.bottom_radius = 1.0
-			cyl.height = 0.05
-			puddle.mesh = cyl
-			var pmat = StandardMaterial3D.new()
-			pmat.albedo_color = Color(0.1, 0.8, 0.2, 0.4)
-			pmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			pmat.emission_enabled = true
-			pmat.emission = Color.MEDIUM_SPRING_GREEN
-			puddle.material_override = pmat
-			get_tree().current_scene.add_child(puddle)
-			puddle.global_position = end
-			
-			var pt = create_tween()
-			pt.tween_property(puddle, "scale", Vector3.ZERO, 1.5)
-			pt.finished.connect(func(): puddle.queue_free())
+		_deal_aoe_damage(end, 4.5, dps * fire_rate)
+		_spawn_explosion_visual(end, 0.8, Color.MEDIUM_SPRING_GREEN)
+
+		var puddle = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = 1.0
+		cyl.bottom_radius = 1.0
+		cyl.height = 0.05
+		puddle.mesh = cyl
+		var pmat = StandardMaterial3D.new()
+		pmat.albedo_color = Color(0.1, 0.8, 0.2, 0.4)
+		pmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		pmat.emission_enabled = true
+		pmat.emission = Color.MEDIUM_SPRING_GREEN
+		puddle.material_override = pmat
+		get_tree().current_scene.add_child(puddle)
+		puddle.global_position = end
+
+		var pt = create_tween()
+		pt.tween_property(puddle, "scale", Vector3.ZERO, 1.5)
+		pt.finished.connect(func(): puddle.queue_free())
 	)
 
 func _fire_flak_cannon():
@@ -1207,9 +1230,8 @@ func _fire_flak_cannon():
 		var st = create_tween()
 		st.tween_property(smoke, "scale", Vector3.ZERO, 0.4)
 		st.finished.connect(func(): smoke.queue_free())
-		
-		if is_instance_valid(target):
-			_deal_weapon_damage(target, dps * fire_rate)
+
+		_deal_aoe_damage(detonate_pos, 5.0, dps * fire_rate)
 	)
 
 func _fire_resource_harvester_tether():

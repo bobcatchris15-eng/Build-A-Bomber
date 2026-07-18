@@ -4,6 +4,18 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk F: real AoE damage for explosive weapons (2.3) - blast radii picked by hand, friendly fire deliberately excluded
+
+**Not blocking - implemented, headless suite green (1 new test).**
+
+Added a shared `_deal_aoe_damage(center, radius, amount)` in `auto_weapon.gd` (linear falloff from full damage at the impact center to zero at the radius edge, still routes each hit through `_deal_weapon_damage()` so evasion/PD-anti-air/hit-origin-flattening all still apply) and wired it into all 6 explosive weapons' impact callbacks (`heavy_howitzer`, `mortar_array` per shell, `spigot_mortar`, `cluster_dispenser` per submunition, `plasma_lobber`, `flak_cannon`), replacing their old single-target-only `_deal_weapon_damage(target, ...)` calls. This is the review's 2.3 - "AoE beats swarm," the other missing leg of the counter-triangle alongside PD-vs-missiles (2.2, done in chunk E).
+
+**Two real judgment calls:**
+- **Blast radii are hand-picked, not derived from anything existing.** The weapons' own cosmetic explosion-visual radii (`_spawn_explosion_visual`'s size argument, e.g. howitzer's 1.2) are flash-effect sizes, not blast radii - at 1.2m two units would need to be nearly stacked to both get hit, which doesn't match "AoE beats swarm" (swarms cluster at a few meters apart, not centimeters). Picked independently instead: heavy_howitzer 6.0, spigot_mortar/flak_cannon 5.0, plasma_lobber 4.5, mortar_array (per shell) 4.0, cluster_dispenser (per submunition) 3.0 - roughly scaled to each weapon's fire_range/role (siege gun widest, per-submunition smallest since 5 already spread damage across an area). No existing spec value to anchor these to; flagged as first-pass numbers a real playtest could retune. Left the cosmetic explosion visuals at their existing (smaller) sizes rather than blowing them up to match - they're flash/hit-marker effects, not a literal blast-radius indicator, and enlarging them is an art pass, not a mechanics one.
+- **Friendly fire deliberately excluded.** `_deal_aoe_damage` only ever hits the shooter's opposing team (same team filter every single-target weapon already uses), not simply "everything in the radius." A real AoE mechanic arguably SHOULD punish clustering your own units too - that's a genuine, separate design question (does "AoE beats swarm" apply to the player's own swarm-of-cheap-units as a real cost, or only the enemy's?) that changes army-composition incentives in a way I didn't want to bundle into "make AoE exist at all" without being able to playtest the balance interactively. Logging as a real follow-up candidate, not an oversight.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk E: evasion/interceptable missiles (1.4, 2.2) + drag-facet reclassification bug (3.2); windowed screenshot verification blocked by environment, not by the code
 
 **Not blocking - implemented, headless suite green (66 -> 69 tests, 3 new). Windowed screenshot verification could not be completed this pass - see below.**
