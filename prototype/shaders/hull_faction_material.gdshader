@@ -72,6 +72,13 @@ uniform float alpha_base : hint_range(0.0, 1.0) = 1.0;
 // Damage-flash feedback (battle_unit.gd's _flash_hull()) - briefly pushed to
 // 1.0 and back on a hit.
 uniform float flash_amount : hint_range(0.0, 1.0) = 0.0;
+// Cel-shaded ink border strength (2026-07-17) - a bold, graphic edge/
+// corner line, computed live from screen-space derivatives (see fragment()
+// below), not a per-faction identity knob the way base_color/wear_amount
+// etc. are - deliberately NOT exposed through hull_material_builder.gd,
+// every material just uses this shared default. hint_range kept anyway so
+// it's tunable from the inspector during art passes without a recompile.
+uniform float edge_ink_strength : hint_range(0.0, 1.0) = 0.75;
 
 varying vec3 world_pos;
 varying vec3 world_normal;
@@ -201,13 +208,43 @@ void fragment() {
 	color = mix(color, wear_color.rgb, wear_mask);
 	vec3 grime_color = vec3(0.08, 0.075, 0.07);
 	color = mix(color, grime_color, grime_mask);
+
+	// Cel-shaded ink border: a bold, graphic edge/corner line reinforcing
+	// the same "ink panel-line" look already baked into tex_albedo
+	// (generate_faction_textures.gd's own thick-seam technique - darken
+	// hard toward near-black, don't just dip albedo a little), computed
+	// live from screen-space derivatives instead of baked, so it survives
+	// the Design Lab's hull_scale stretch and needs no per-object
+	// authoring or per-mesh bake pass. Two signals, combined with max()
+	// so either alone is enough to draw the line:
+	//   - curvature (already computed above for the wear mask) is a real
+	//     geometric edge/corner detector - catches hard creases/corners
+	//     regardless of view angle.
+	//   - a world-space Fresnel rim catches SILHOUETTE edges curvature
+	//     alone can miss at a grazing angle (a gently rounded bevel edge
+	//     viewed nearly edge-on has low curvature but a strong rim).
+	// Deliberately a SHARP smoothstep band, unlike wear_mask's wide/soft
+	// one - this needs to read as an intentional ink line, not another
+	// weathering gradient. Applied after wear/grime (the line shows on
+	// top of whatever weathering state the surface is in) but before the
+	// flash-red hit feedback, which still overrides everything.
+	vec3 view_dir_world = normalize(CAMERA_POSITION_WORLD - world_pos);
+	float fresnel_rim = pow(1.0 - clamp(dot(view_dir_world, geo_normal), 0.0, 1.0), 3.0);
+	float edge_signal = max(curvature, fresnel_rim * 0.7);
+	float edge_ink = smoothstep(0.4, 0.62, edge_signal) * edge_ink_strength;
+	color = mix(color, color * 0.08, edge_ink);
+
 	color = mix(color, vec3(1.0, 0.05, 0.05), flash_amount);
 	ALBEDO = color;
 
 	float exposed = clamp(wear_mask * edge_highlight_strength, 0.0, 1.0);
-	METALLIC = clamp(mix(metallic, metallic * 0.3 + 0.5 * exposed, wear_mask), 0.0, 1.0);
-	ROUGHNESS = clamp(mix(roughness, roughness + 0.5 - 0.3 * exposed, wear_mask) + grime_mask * 0.3 + (tex_roughness - 0.5) * 0.5, 0.0, 1.0);
-	ANISOTROPY = anisotropy * (1.0 - wear_mask * 0.5);
+	METALLIC = clamp(mix(metallic, metallic * 0.3 + 0.5 * exposed, wear_mask) * (1.0 - edge_ink * 0.6), 0.0, 1.0);
+	// Ink border reads matte, same as the baked texture's own ink seams
+	// (generate_faction_textures.gd bumps roughness at its seam_mask too) -
+	// a graphic ink line with a shiny specular highlight running through it
+	// would look wrong, like a groove rather than a painted line.
+	ROUGHNESS = clamp(mix(roughness, roughness + 0.5 - 0.3 * exposed, wear_mask) + grime_mask * 0.3 + (tex_roughness - 0.5) * 0.5 + edge_ink * 0.3, 0.0, 1.0);
+	ANISOTROPY = anisotropy * (1.0 - wear_mask * 0.5) * (1.0 - edge_ink * 0.5);
 	// Brush direction: lengthwise along the hull's own long axis, in
 	// tangent space - Godot's default TANGENT for box/cylinder primitives
 	// already runs along local X/U, which lines up with "nose to tail" for
