@@ -237,24 +237,31 @@ void fragment() {
 	// already-dark baked seam lines. Applied after wear/grime (the line
 	// shows on top of whatever weathering state the surface is in) but
 	// before the flash-red hit feedback, which still overrides everything.
-	float edge_curvature = clamp(edge_raw * 12.0, 0.0, 1.0);
+	//
+	// 2026-07-18: pushed further still (edge_curvature multiplier 12->20,
+	// fresnel exponent 2->1.5 for a wider rim, trigger band widened
+	// 0.12-0.4 -> 0.05-0.32 so the line picks up sooner and covers more of
+	// the true edge's width, target color 0.012->0.0 for genuinely pure
+	// black) - per Chris's explicit "don't be conservative" direction,
+	// same round as the armor/structural contrast push above.
+	float edge_curvature = clamp(edge_raw * 20.0, 0.0, 1.0);
 	vec3 view_dir_world = normalize(CAMERA_POSITION_WORLD - world_pos);
-	float fresnel_rim = pow(1.0 - clamp(dot(view_dir_world, geo_normal), 0.0, 1.0), 2.0);
-	float edge_signal = max(edge_curvature, fresnel_rim * 0.85);
-	float edge_ink = smoothstep(0.12, 0.4, edge_signal) * edge_ink_strength;
-	color = mix(color, vec3(0.012), edge_ink);
+	float fresnel_rim = pow(1.0 - clamp(dot(view_dir_world, geo_normal), 0.0, 1.0), 1.5);
+	float edge_signal = max(edge_curvature, fresnel_rim);
+	float edge_ink = smoothstep(0.05, 0.32, edge_signal) * edge_ink_strength;
+	color = mix(color, vec3(0.0), edge_ink);
 
 	color = mix(color, vec3(1.0, 0.05, 0.05), flash_amount);
 	ALBEDO = color;
 
 	float exposed = clamp(wear_mask * edge_highlight_strength, 0.0, 1.0);
-	METALLIC = clamp(mix(metallic, metallic * 0.3 + 0.5 * exposed, wear_mask) * (1.0 - edge_ink * 0.6), 0.0, 1.0);
+	METALLIC = clamp(mix(metallic, metallic * 0.3 + 0.5 * exposed, wear_mask) * (1.0 - edge_ink * 0.85), 0.0, 1.0);
 	// Ink border reads matte, same as the baked texture's own ink seams
 	// (generate_faction_textures.gd bumps roughness at its seam_mask too) -
 	// a graphic ink line with a shiny specular highlight running through it
 	// would look wrong, like a groove rather than a painted line.
-	ROUGHNESS = clamp(mix(roughness, roughness + 0.5 - 0.3 * exposed, wear_mask) + grime_mask * 0.3 + (tex_roughness - 0.5) * 0.5 + edge_ink * 0.3, 0.0, 1.0);
-	ANISOTROPY = anisotropy * (1.0 - wear_mask * 0.5) * (1.0 - edge_ink * 0.5);
+	ROUGHNESS = clamp(mix(roughness, roughness + 0.5 - 0.3 * exposed, wear_mask) + grime_mask * 0.3 + (tex_roughness - 0.5) * 0.5 + edge_ink * 0.45, 0.0, 1.0);
+	ANISOTROPY = anisotropy * (1.0 - wear_mask * 0.5) * (1.0 - edge_ink * 0.85);
 	// Brush direction: lengthwise along the hull's own long axis, in
 	// tangent space - Godot's default TANGENT for box/cylinder primitives
 	// already runs along local X/U, which lines up with "nose to tail" for

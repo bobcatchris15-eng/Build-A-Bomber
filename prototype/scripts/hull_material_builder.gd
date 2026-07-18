@@ -56,8 +56,20 @@ const HULL_SHADER = preload("res://shaders/hull_faction_material.gdshader")
 # material()'s own note) reads reliably instead of being fought by metallic
 # suppression. base_color/accent_color also lightened in build_hull_
 # material() below to compensate further - see that function's comment.
+#
+# 2026-07-18 cont'd: nudged back up 0.55 -> 0.65 once the color-value gap
+# (the actually-reliable lever, see build_structural_material()'s note)
+# was pushed hard enough to stand on its own - metallic 0.65 gives the
+# "premium brushed metal" specular pop real weight WHEN a highlight lands,
+# without threatening the diffuse floor the way 0.88 did, now that
+# lightened() compensates by a larger amount too. Chris's explicit
+# direction this round: "don't be conservative, push it until it's
+# unmistakable" - so every knob in this file that has real headroom
+# without reopening the anisotropic-hotspot regression (see the roughness
+# comment above - that ONE value stays put) got pushed further, not just
+# nudged.
 const ARMOR_PBR = {
-	"hardened_steel": {"metallic": 0.55, "roughness": 0.42, "shield_mode": 0.0, "alpha": 1.0},
+	"hardened_steel": {"metallic": 0.65, "roughness": 0.42, "shield_mode": 0.0, "alpha": 1.0},
 	"reactive_armor": {"metallic": 0.1, "roughness": 0.7, "shield_mode": 0.0, "alpha": 1.0},
 	"ablative_ceramic": {"metallic": 0.0, "roughness": 0.5, "shield_mode": 0.0, "alpha": 1.0},
 	"energy_shielding": {"metallic": 0.1, "roughness": 0.1, "shield_mode": 1.0, "alpha": 0.7},
@@ -96,8 +108,8 @@ static func build_hull_material(armor_material: String, faction: String) -> Shad
 	# fitting side effect there too (armor reading a bit brighter/more
 	# premium), and moot in practice since every hull in the current
 	# roster already has a real 2-surface split.
-	mat.set_shader_parameter("base_color", vis.base_color.lightened(0.28))
-	mat.set_shader_parameter("accent_color", vis.accent_color.lightened(0.28))
+	mat.set_shader_parameter("base_color", vis.base_color.lightened(0.42))
+	mat.set_shader_parameter("accent_color", vis.accent_color.lightened(0.42))
 	mat.set_shader_parameter("detail_color", vis.detail_color)
 	mat.set_shader_parameter("anisotropy", vis.anisotropy)
 	mat.set_shader_parameter("brush_scale", vis.get("brush_scale", 2.0))
@@ -164,14 +176,25 @@ static func build_hull_material(armor_material: String, faction: String) -> Shad
 # VALUE is the only lever that's angle-independent (a darker diffuse
 # albedo reads darker under any lighting), hence pushing it hard here
 # rather than trying to further chase the PBR angle-dependent route.
+#
+# 2026-07-18 cont'd: pushed again, 0.62 -> 0.8, plus metallic/roughness/
+# anisotropy all pushed further toward their floor/ceiling (0.04->0.015,
+# 0.93->0.97, the 0.08 anisotropy multiplier ->0.03) - per Chris's explicit
+# "don't be conservative, push until unmistakable" direction. 0.62 already
+# measured as correctly-directioned and clearly visible in a real render,
+# but "clearly visible" and "unmistakable" are different bars - this is
+# most of the way to as dark as this color family can go before it stops
+# reading as "the same paint, duller" and starts reading as "black,"
+# which would cross into looking like damage/soot rather than a deliberate
+# structural finish.
 static func build_structural_material(faction: String) -> ShaderMaterial:
 	var vis = FactionCatalogScript.get_visual(faction)
 	var mat = ShaderMaterial.new()
 	mat.shader = HULL_SHADER
-	mat.set_shader_parameter("base_color", vis.base_color.darkened(0.62))
-	mat.set_shader_parameter("accent_color", vis.accent_color.darkened(0.62))
+	mat.set_shader_parameter("base_color", vis.base_color.darkened(0.8))
+	mat.set_shader_parameter("accent_color", vis.accent_color.darkened(0.8))
 	mat.set_shader_parameter("detail_color", vis.detail_color)
-	mat.set_shader_parameter("anisotropy", vis.anisotropy * 0.08)
+	mat.set_shader_parameter("anisotropy", vis.anisotropy * 0.03)
 	mat.set_shader_parameter("brush_scale", vis.get("brush_scale", 2.0))
 	mat.set_shader_parameter("wear_amount", vis.wear_amount)
 	mat.set_shader_parameter("wear_color", vis.wear_color)
@@ -181,8 +204,8 @@ static func build_structural_material(faction: String) -> ShaderMaterial:
 	mat.set_shader_parameter("emissive_strength", vis.emissive_strength)
 	mat.set_shader_parameter("mottle_amount", vis.get("mottle_amount", 0.0))
 	mat.set_shader_parameter("decal_tint", vis.get("detail_color", Color.WHITE))
-	mat.set_shader_parameter("metallic", 0.04)
-	mat.set_shader_parameter("roughness", 0.93)
+	mat.set_shader_parameter("metallic", 0.015)
+	mat.set_shader_parameter("roughness", 0.97)
 	mat.set_shader_parameter("shield_mode", 0.0)
 	mat.set_shader_parameter("alpha_base", 1.0)
 	var faction_id = faction if FactionCatalogScript.FACTIONS.has(faction) else FactionCatalogScript.DEFAULT_FACTION
