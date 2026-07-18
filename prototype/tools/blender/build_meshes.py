@@ -71,6 +71,69 @@ def GS(sx, sy, sz):
 	return (sx, sz, sy)
 
 
+def godot_forward_component(raw_normal):
+	"""A bmesh face's raw-Blender-space normal's component along Godot's own
+	-Z ("forward"/nose) axis - the inverse of GV()'s (x,y,z)->(x,z,y) swap,
+	i.e. raw Blender Y carries Godot's Z-depth. hull_deform.gd's own
+	"Forward convention is local -Z: the nose is the most-negative-Z tip"
+	comment is the convention this matches - a face whose raw_normal.y is
+	strongly negative faces the nose. Used to geometrically classify "hard
+	armor" faces (frontal glacis + corner facets) vs. "structural" ones
+	without needing to hand-track which named region a face belongs to
+	through a convex-hull/bevel/loft construction - see mark_armor_faces().
+	"""
+	return raw_normal.y
+
+
+def frontal_armor_predicate(hz, front_frac=0.3, exclude_belly_thresh=-0.6):
+	"""Builds a predicate for mark_armor_faces() selecting the frontal arc
+	of a hull: any face whose CENTER lies within the front `front_frac` of
+	the hull's total length (Godot -Z = nose, see godot_forward_component()'s
+	own comment - raw Blender Y carries Godot Z-depth, so a face center's
+	raw .y IS its Godot z position directly, no swap needed since this is
+	a coordinate VALUE not a normal), excluding belly/underside faces
+	(raw normal .z very negative = Godot -Y/downward - see the same axis
+	mapping) since those are never visually seen and armoring them would
+	be a wasted, invisible area cost against the ~40% ceiling.
+	Position-based rather than pure normal-angle: a convex-hull-derived
+	hull's glacis/corner faces cluster at unpredictable, hull-specific
+	normal angles (found empirically - medium_hull's own glacis+corners
+	only reached ~8% of area even at a very permissive normal-angle
+	threshold), while "front fraction of length" is a single, directly
+	tunable knob per hull that behaves predictably regardless of each
+	hull's individual taper geometry."""
+	front_z_cutoff = -hz + 2.0 * hz * front_frac
+	def predicate(f):
+		center = f.calc_center_median()
+		is_front = center.y < front_z_cutoff
+		is_belly = f.normal.z < exclude_belly_thresh
+		return is_front and not is_belly
+	return predicate
+
+
+def mark_armor_faces(bm, predicate):
+	"""Sets material_index=1 (hard armor slot, see finalize_dual()) on
+	every CURRENT bm.face satisfying predicate(face), leaving everything
+	else at the default 0 (structural). Call this AFTER the hull's primary
+	silhouette bevel but BEFORE greebles are fused on, so small appliqué
+	fixtures (hatches/vents/antennae) default to reading as structural
+	details bolted onto the hull, not armor plate, unless a specific
+	greeble helper explicitly marks its own faces afterward. Returns the
+	fraction of total face AREA marked armor (not face count - a handful of
+	large glacis faces vs. many tiny bevel/greeble faces would otherwise
+	misrepresent the actual visual area split) so callers can sanity-check
+	against the ~40% ceiling."""
+	total_area = 0.0
+	armor_area = 0.0
+	for f in bm.faces:
+		area = f.calc_area()
+		total_area += area
+		if predicate(f):
+			f.material_index = 1
+			armor_area += area
+	return armor_area / total_area if total_area > 0.0 else 0.0
+
+
 def rot_matrix(godot_axis, angle_rad):
 	"""Rotation matrix for a rotation of angle_rad around the given
 	GODOT-space axis ('x','y','z'), expressed for raw Blender-space geometry."""
@@ -121,6 +184,45 @@ def finalize(obj, name, color=(0.55, 0.56, 0.58), metallic=0.75, roughness=0.35)
 		obj.data.materials[0] = mat
 	else:
 		obj.data.materials.append(mat)
+
+
+def finalize_dual(obj, name, structural_color=(0.5, 0.5, 0.52), armor_color=(0.55, 0.56, 0.58),
+		structural_metallic=0.15, structural_roughness=0.82, armor_metallic=0.75, armor_roughness=0.4):
+	"""Same shading/smoothing setup as finalize(), but assigns TWO material
+	slots (0=structural, 1=hard armor) instead of one - see hull_material_
+	builder.gd's apply_hull_materials() for the runtime side of this
+	convention (surface 0 gets build_structural_material(), surface 1+
+	gets build_hull_material()). The actual color/metallic/roughness here
+	are Blender-preview-only, same as finalize()'s own color param already
+	was - Godot replaces BOTH slots' real materials entirely at runtime via
+	set_surface_override_material(), so these values never reach the game;
+	they just need to be two genuinely different material resources so
+	Blender's glTF exporter treats them as two separate primitives.
+	Requires mark_armor_faces() to have already set material_index=1 on
+	the relevant bm.faces before make_object_from_bmesh() was called -
+	this function only assigns the SLOTS, not which face uses which."""
+	obj.name = name
+	bpy.ops.object.select_all(action='DESELECT')
+	obj.select_set(True)
+	bpy.context.view_layer.objects.active = obj
+	bpy.ops.object.shade_smooth()
+	try:
+		obj.data.use_auto_smooth = True
+		obj.data.auto_smooth_angle = math.radians(35)
+	except Exception:
+		pass
+	# Deliberately NOT obj.data.materials.clear() first, even though the
+	# mesh is always freshly created with 0 slots at this point anyway (so
+	# clear() looks harmless/defensive) - empirically, clearing the list
+	# clamps every polygon's material_index back to 0 as a data-integrity
+	# side effect, and appending the 2 real materials afterward does NOT
+	# retroactively fix already-clamped indices. Found by a real "only 1
+	# glTF primitive exported despite 244/1380 polygons correctly split at
+	# the bmesh/bpy.Mesh level" bug - see DECISIONS_NEEDED.md.
+	structural_mat = new_material(name + "_structural_mat", structural_color, structural_metallic, structural_roughness)
+	armor_mat = new_material(name + "_armor_mat", armor_color, armor_metallic, armor_roughness)
+	obj.data.materials.append(structural_mat)
+	obj.data.materials.append(armor_mat)
 
 
 def export_glb(obj, filepath):
@@ -1012,7 +1114,7 @@ def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, u
 		spine_w=0.5, spine_h=1.1, color=(0.55, 0.56, 0.58), greebles=None,
 		bevel_pct=None, bevel_segments=None, turret_ring=False, louver_panel=None,
 		waist_inset=0.0, waist_height_frac=0.5, deck_line=0.0, deck_line_z_frac=(0.6, 0.95),
-		panel_line_fracs=None):
+		panel_line_fracs=None, armor_front_frac=0.5):
 	"""Ground AFV hull built from three genuinely separate, interpenetrating
 	volumes instead of one tapered loft - a `bmesh.ops.convex_hull()` over a
 	single point cloud can never produce a re-entrant silhouette (any point
@@ -1120,11 +1222,29 @@ def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, u
 	# no hand-picked edge lists needed even with 3 fused volumes.
 	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
+	# Hard-armor region (2026-07-17, Approach A multi-region rollout - see
+	# DECISIONS_NEEDED.md): the frontal glacis (Volume B's sloped nose-to-
+	# deck face) plus the tub's own nose-taper corner facets - the real
+	# highest-threat frontal arc on an AFV, per Chris's own "frontal
+	# glacis, corner facets" framing. Everything else (top deck, sides/
+	# fenders/side-skirts, rear, belly) stays structural/matte. Geometric
+	# criterion, not hand-picked faces: any CURRENT face whose normal
+	# faces sufficiently toward the nose (-Z in Godot terms, raw Blender
+	# -Y - see godot_forward_component()) - this naturally stays a minority
+	# of total area for an elongated hull without needing per-hull area
+	# bookkeeping, and correctly excludes the turret ring (its cylinder
+	# wall faces point radially outward in every direction, not just
+	# forward) even though that geometry already exists in bm by this
+	# point. Called BEFORE greebles so hatches/vents/antennae default to
+	# structural fixtures, not armor plate.
+	armor_frac = mark_armor_faces(bm, frontal_armor_predicate(hz, front_frac=armor_front_frac))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
+
 	if greebles:
 		greebles(bm, hx, hy, hz)
 
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.6, roughness=0.45)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
 	return obj
 
 
@@ -1910,7 +2030,7 @@ def generate_hulls():
 		spine_w=0.6, spine_h=1.15, turret_ring=True,
 		louver_panel={"z_frac": 0.72, "width_frac": 0.85, "depth_frac": 0.3, "slats": 5},
 		waist_inset=0.0, deck_line=0.0,
-		panel_line_fracs=[0.28],
+		panel_line_fracs=[0.28], armor_front_frac=0.55,
 		color=(0.5, 0.5, 0.52), greebles=_medium_hull_greebles), HULLS_DIR, "medium_hull")
 
 	export_and_cleanup(build_afv_hull("heavy_hull", 6.0, 1.5, 8.0,
