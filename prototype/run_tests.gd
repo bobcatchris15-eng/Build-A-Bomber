@@ -131,6 +131,7 @@ func _init():
 	success = success and await test_match_faction_overrides_blueprint_faction_stats_and_looks()
 	success = success and await test_subsystem_stripping_is_gated_by_hit_facet()
 	success = success and await test_enemy_intel_readout_respects_fog_of_war()
+	success = success and await test_base_power_is_separate_from_vehicle_energy_budget()
 
 	print("\n==============================================")
 	if success:
@@ -7408,4 +7409,80 @@ func test_enemy_intel_readout_respects_fog_of_war() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Enemy composition intel readout stays empty until something is actually scouted, then correctly categorizes what's currently visible (fog-gated, not omniscient).")
+	return true
+
+func test_base_power_is_separate_from_vehicle_energy_budget() -> bool:
+	print("Running Test Suite: Base Power Is Separate From A Vehicle's Own Energy Budget (FABLE_REVIEW 1.6)...")
+	# Chris's explicit resolution: team/base power (energy_pool, feeds only
+	# the production build-time penalty) comes from base infrastructure -
+	# HQ baseline, power_plant, and generators mounted on static defense
+	# buildings - NEVER from a generator module mounted on a mobile combat
+	# unit. A vehicle that wants more of ITS OWN energy (for its own
+	# energy-cost weapons) has to mount its own generator; that's a
+	# completely separate resource (battle_unit.gd's max_energy) that never
+	# feeds the team pool. This was previously backwards (a mobile unit's
+	# generator DID raise team capacity) - exactly the review's "put a
+	# fusion_generator on a tank so the base builds faster" complaint.
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+	skirmish._recalc_energy_economy()
+	var capacity_before = skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity
+
+	var bp_with_gen = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "fusion_generator", "name": "Fusion Generator", "position": {"x": 0.0, "y": 0.5, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var unit = skirmish.spawn_unit(bp_with_gen, skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(20, 0, 0))
+	await process_frame
+	skirmish._recalc_energy_economy()
+	var capacity_after_unit_generator = skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity
+
+	if abs(capacity_after_unit_generator - capacity_before) > 0.01:
+		print("  [FAIL] A generator module mounted on a mobile unit should NOT raise the team's base power capacity, went from ", capacity_before, " to ", capacity_after_unit_generator)
+		unit.queue_free()
+		skirmish.queue_free()
+		return false
+	if unit.max_energy <= 0.0:
+		print("  [FAIL] Test assumption broken: the unit's OWN energy budget should still be real and nonzero (fusion_generator should have raised it), got ", unit.max_energy)
+		unit.queue_free()
+		skirmish.queue_free()
+		return false
+
+	# A power_plant BUILDING, by contrast, should raise team capacity - the
+	# base/vehicle distinction is about WHERE the generator sits, not
+	# whether generators matter at all.
+	var plant = skirmish._spawn_prefab("power_plant", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(-20, 0, 0), skirmish.player_faction)
+	await process_frame
+	skirmish._recalc_energy_economy()
+	var capacity_after_plant = skirmish.energy_pool[skirmish.PLAYER_TEAM].capacity
+	if capacity_after_plant <= capacity_after_unit_generator:
+		print("  [FAIL] A power_plant BUILDING should raise team base power capacity, went from ", capacity_after_unit_generator, " to ", capacity_after_plant)
+		unit.queue_free()
+		plant.queue_free()
+		skirmish.queue_free()
+		return false
+
+	# HUD label should read as base power, not a bare/ambiguous "Energy".
+	skirmish._update_resource_ui()
+	if not "Base Power" in skirmish.resource_label.text:
+		print("  [FAIL] The HUD readout should clearly label this as base/team power, got '", skirmish.resource_label.text, "'")
+		unit.queue_free()
+		plant.queue_free()
+		skirmish.queue_free()
+		return false
+
+	unit.queue_free()
+	plant.queue_free()
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A mobile unit's own generator only powers that unit (never the team pool); only base infrastructure (HQ/power_plant/defense generators) feeds team base power; the HUD label reads as base power, not a universal resource.")
 	return true

@@ -28,8 +28,18 @@ var economy = {
 # a live meter, recomputed every ENERGY_TICK_INTERVAL: "energy" is the
 # team's current net generation (capacity minus static-building upkeep,
 # floored at 0 - it's a gauge, not an accumulating battery), "capacity" is
-# the live sum of every generator module currently mounted on that team's
-# active units+buildings.
+# the live sum of the team's BASE power sources only - the HQ baseline,
+# power_plant buildings, and generator modules mounted on static
+# buildings (defenses). This is deliberately a separate resource from any
+# individual vehicle's own energy budget (battle_unit.gd's max_energy/
+# current_energy, which powers only that vehicle's own energy-cost
+# weapons) - Chris's explicit resolution of FABLE_REVIEW.md 1.6: base
+# power is for the base (buildings/production), a vehicle that wants more
+# of its own energy has to mount its own generator module, full stop. A
+# mobile unit's generator module does NOT feed this team pool (see
+# _recalc_energy_economy() below) - it used to, which was exactly the
+# review's "put a fusion_generator on a tank so your factories build
+# faster; lose the tank, lose the base's power" complaint.
 var energy_pool = {
 	PLAYER_TEAM: {"energy": 0.0, "capacity": 0.0, "deficit": false},
 	ENEMY_TEAM: {"energy": 0.0, "capacity": 0.0, "deficit": false},
@@ -223,10 +233,12 @@ func _recalc_energy_economy():
 		var hq = player_hq if team == PLAYER_TEAM else enemy_hq
 		if is_instance_valid(hq) and not hq.is_dead:
 			capacity += ENERGY_HQ_BASELINE_CAPACITY
-		for u in get_team_units(team):
-			for m in u.get_active_modules():
-				if m.has_meta("module_data") and m.get_meta("module_data").category == "generator":
-					capacity += m.get_meta("module_data").get_energy_capacity()
+		# Deliberately NOT summing get_team_units(team)'s own generator
+		# modules here (FABLE_REVIEW.md 1.6, Chris's explicit resolution) -
+		# a mobile unit's generator powers only that unit's own energy-cost
+		# weapons (battle_unit.gd's max_energy), never the team's base pool.
+		# Only base/building power sources feed this loop: the HQ baseline
+		# above, and buildings' own generators/power_plant below.
 		var faction = player_faction if team == PLAYER_TEAM else enemy_faction
 		var upkeep = 0.0
 		for b in get_tree().get_nodes_in_group("buildings"):
@@ -909,7 +921,14 @@ func _add_build_button(text: String, color: Color, callback: Callable):
 func _update_resource_ui():
 	if resource_label:
 		var e = energy_pool[PLAYER_TEAM]
-		var energy_str = "⚡ Energy: %d/%d%s" % [int(e.energy), int(e.capacity), " (DEFICIT: builds slower!)" if e.deficit else ""]
+		# "Base Power" (not bare "Energy") - FABLE_REVIEW.md 3.9 flagged the
+		# old label as readable like a stored quantity when it's actually a
+		# net-margin gauge (capacity minus upkeep); 1.6's later resolution
+		# adds a second reason: this number is the BASE's power only (HQ/
+		# power_plant/defense generators), never a vehicle's own energy
+		# budget, and the label needs to say so or players will read it as
+		# some universal resource that should affect individual units too.
+		var energy_str = "⚡ Base Power: %d/%d%s" % [int(e.energy), int(e.capacity), " (DEFICIT: builds slower!)" if e.deficit else ""]
 		resource_label.text = "💰 Metal: %d   💎 Crystal: %d   %s" % [economy[PLAYER_TEAM].metal, economy[PLAYER_TEAM].crystal, energy_str]
 
 func _flash_status(msg: String):

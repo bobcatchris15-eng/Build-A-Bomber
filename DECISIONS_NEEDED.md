@@ -4,6 +4,20 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk L: base power is now genuinely separate from a vehicle's own energy budget (1.6, Chris's direct resolution)
+
+**Not blocking - implemented per Chris's explicit, no-ambiguity-left resolution. Headless suite green (1 new test).**
+
+Chris resolved 1.6 directly, rejecting the "make energy power more subsystems" direction the review floated: team/base power (`skirmish.gd`'s `energy_pool`, which only ever gates the production build-time penalty) is specifically for the base - buildings, production - and a vehicle that wants more of its OWN energy for its own energy-cost weapons has to mount its own generator module. Two separate resources by design, not one universal pool.
+
+**Found a real bug while checking whether the code already matched that design: it didn't.** `_recalc_energy_economy()` was still summing generator modules mounted on MOBILE UNITS (`get_team_units(team)`) into the team's base capacity - exactly the review's own "put a fusion_generator on a tank so your factories build faster; lose the tank, lose the base's power" complaint, still present even after chunk C's Power Plant fix (which added a second, correct supply source but never removed the old, backwards one). Removed that block entirely - only the HQ baseline, `power_plant` buildings, and generators mounted on static defense buildings feed the team pool now. A mobile unit's own generator continues to power only that unit's own `max_energy`/`current_energy` (unchanged), which was already correctly scoped.
+
+**Also fixed the HUD label** (closing review item 3.9's own flagged confusion at the same time): "⚡ Energy: X/Y" is now "⚡ Base Power: X/Y" - both because it's a net-margin gauge, not a stored quantity (3.9's original point), and because "Energy" alone reads like a resource that should affect individual vehicles, which it explicitly doesn't.
+
+**Confirmed clean, not touched:** `logistics_tank`'s ally-energy-sharing aura (unit-to-unit, never touches the team pool - already correctly scoped) and `is_energy_deficit()`'s only consumer (the production build-time penalty, already correctly base-only). No shield/traverse/sensor energy-draining subsystems were added - that's the direction Chris explicitly did not choose.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk K: enemy composition intel readout - the other half of 2.1
 
 **Not blocking - implemented, headless suite green (1 new test).**
