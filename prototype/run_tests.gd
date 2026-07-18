@@ -130,6 +130,7 @@ func _init():
 	success = success and await test_power_plant_building_supplies_real_team_energy_capacity()
 	success = success and await test_match_faction_overrides_blueprint_faction_stats_and_looks()
 	success = success and await test_subsystem_stripping_is_gated_by_hit_facet()
+	success = success and await test_enemy_intel_readout_respects_fog_of_war()
 
 	print("\n==============================================")
 	if success:
@@ -7338,4 +7339,73 @@ func test_subsystem_stripping_is_gated_by_hit_facet() -> bool:
 
 	defender.queue_free()
 	print("  [PASS] Subsystem stripping only ever targets a module actually facing the shot, armor plates are never eligible, and stripping falls back to the full non-armor pool when hit direction is unknown.")
+	return true
+
+func test_enemy_intel_readout_respects_fog_of_war() -> bool:
+	print("Running Test Suite: Enemy Composition Intel Readout - Fog-Gated, Not Omniscient (FABLE_REVIEW 2.1)...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	if not skirmish.intel_label:
+		print("  [FAIL] Skirmish should have created an intel_label in its UI setup")
+		skirmish.queue_free()
+		return false
+	if not "No enemies sighted" in skirmish.intel_label.text:
+		print("  [FAIL] With nothing scouted yet, the intel readout should say no enemies are sighted, got '", skirmish.intel_label.text, "'")
+		skirmish.queue_free()
+		return false
+
+	# A far, unscouted flying enemy - should NOT show up in the readout at
+	# all (fog-gated, not omniscient - the whole point of 2.1's other half).
+	var far_enemy = CharacterBody3D.new()
+	far_enemy.set_script(BattleUnitScript)
+	skirmish.add_child(far_enemy)
+	far_enemy.team = skirmish.ENEMY_TEAM
+	far_enemy.set_meta("team", skirmish.ENEMY_TEAM)
+	far_enemy.add_to_group("units")
+	far_enemy.add_to_group("damageable")
+	far_enemy.is_flying = true
+	far_enemy.global_position = Vector3(300, 0, 300)
+
+	skirmish._recalc_fog_of_war()
+	if not "No enemies sighted" in skirmish.intel_label.text:
+		print("  [FAIL] An unscouted enemy far from any player construct should not appear in the intel readout, got '", skirmish.intel_label.text, "'")
+		far_enemy.queue_free()
+		skirmish.queue_free()
+		return false
+
+	# Bring a player scout within vision range - the flying enemy should now
+	# be sighted and categorized correctly.
+	var scout = CharacterBody3D.new()
+	scout.set_script(BattleUnitScript)
+	skirmish.add_child(scout)
+	scout.team = skirmish.PLAYER_TEAM
+	scout.set_meta("team", skirmish.PLAYER_TEAM)
+	scout.add_to_group("units")
+	scout.add_to_group("damageable")
+	scout.vision_range = 20.0
+	scout.global_position = Vector3(295, 0, 300)
+
+	skirmish._recalc_fog_of_war()
+	if far_enemy.fog_hidden:
+		print("  [FAIL] Test setup: the enemy should be visible to the nearby scout for this check to mean anything")
+		scout.queue_free(); far_enemy.queue_free()
+		skirmish.queue_free()
+		return false
+	if "No enemies sighted" in skirmish.intel_label.text or not "1" in skirmish.intel_label.text or not "air" in skirmish.intel_label.text:
+		print("  [FAIL] A sighted flying enemy should show up in the intel readout as an air contact, got '", skirmish.intel_label.text, "'")
+		scout.queue_free(); far_enemy.queue_free()
+		skirmish.queue_free()
+		return false
+
+	scout.queue_free()
+	far_enemy.queue_free()
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Enemy composition intel readout stays empty until something is actually scouted, then correctly categorizes what's currently visible (fog-gated, not omniscient).")
 	return true

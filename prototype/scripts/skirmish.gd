@@ -139,6 +139,7 @@ var placement_ghost: MeshInstance3D = null
 # UI
 var resource_label: Label
 var status_label: Label
+var intel_label: Label
 var build_bar: HBoxContainer
 var selection_rect: Panel
 
@@ -335,6 +336,35 @@ func _recalc_fog_of_war():
 					seen = true
 					break
 		c.set_fog_visible(seen)
+	_update_enemy_intel()
+
+# Composition readout for whatever enemy constructs are CURRENTLY visible
+# (never fog-hidden ones - same one-directional, no-persistent-memory fog
+# model everything else the player sees already uses). Categories match
+# enemy_ai.gd's own _scout_player_threat() (flying, armor_thickness >= 2.0)
+# so the player's intel and the AI's own scouting read the battlefield the
+# same way - not a separate, arbitrary classification.
+func _update_enemy_intel():
+	if not intel_label: return
+	var visible_enemies = []
+	for c in get_team_units(ENEMY_TEAM) + get_team_buildings(ENEMY_TEAM):
+		if is_instance_valid(c) and not ("fog_hidden" in c and c.fog_hidden):
+			visible_enemies.append(c)
+	if visible_enemies.is_empty():
+		intel_label.text = "👁 No enemies sighted"
+		return
+	var flying = 0
+	var armored = 0
+	for c in visible_enemies:
+		if "is_flying" in c and c.is_flying:
+			flying += 1
+		if "hull_node" in c and is_instance_valid(c.hull_node) and c.hull_node.has_meta("armor_thickness") and c.hull_node.get_meta("armor_thickness") >= 2.0:
+			armored += 1
+	var detail = []
+	if flying > 0: detail.append("%d air" % flying)
+	if armored > 0: detail.append("%d armored" % armored)
+	var detail_str = " (%s)" % ", ".join(detail) if not detail.is_empty() else ""
+	intel_label.text = "👁 Enemy sighted: %d%s" % [visible_enemies.size(), detail_str]
 
 # --- Rosters ---
 
@@ -757,6 +787,23 @@ func _build_ui():
 	status_label.modulate = Color(0.8, 0.85, 0.9)
 	status_label.text = "Left-click/drag: select | Right-click: move / attack / harvest | Destroy the enemy HQ!"
 	ui.add_child(status_label)
+
+	# Enemy composition intel readout (FABLE_REVIEW.md 2.1, the other half
+	# of the counter-play loop alongside enemy_ai.gd's counter-picking) -
+	# previously "nothing surfaces enemy composition to the player," so the
+	# player's own counter-design decisions had no real input. Fog-gated
+	# like everything else the player sees (only currently-visible enemy
+	# constructs, no persistent "seen once, remembered" memory - matching
+	# the existing one-directional fog model's own scope, see
+	# _recalc_fog_of_war()'s comment), updated on the same tick as fog.
+	intel_label = Label.new()
+	intel_label.position = Vector2(700, 14)
+	intel_label.size = Vector2(460, 40)
+	intel_label.add_theme_font_size_override("font_size", 15)
+	intel_label.modulate = Color(0.85, 0.75, 0.6)
+	intel_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	ui.add_child(intel_label)
+	_update_enemy_intel()
 
 	var menu_btn = Button.new()
 	menu_btn.text = "Menu"

@@ -4,6 +4,18 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk K: enemy composition intel readout - the other half of 2.1
+
+**Not blocking - implemented, headless suite green (1 new test).**
+
+Completes 2.1 alongside chunk G's counter-picking AI: a small top-bar label in `skirmish.gd` ("👁 Enemy sighted: N (X air, Y armored)") giving the player's own counter-design decisions a real input, closing the review's "nothing surfaces enemy composition to the player" gap. Updated on the same tick as fog-of-war (`_recalc_fog_of_war()` now calls `_update_enemy_intel()` at the end), reading only currently-visible enemy units/buildings (`fog_hidden == false`) - never omniscient.
+
+**Deliberately reused the AI's own categories, not invented new ones.** Air (`is_flying`) and armored (`armor_thickness >= 2.0`) match `enemy_ai.gd`'s `_scout_player_threat()` exactly - the player's intel readout and the AI's own scouting now describe the battlefield with the same two signals, which also makes the readout legible as "here's roughly what would make the AI itself switch designs," not an arbitrary separate taxonomy.
+
+**Scope call: no persistent "seen once, remembered" intel memory.** The existing fog-of-war model is explicitly one-directional and non-persistent (a unit that leaves vision goes back to fully hidden, no "last known position/composition" ghost) - see `_recalc_fog_of_war()`'s own standing comment. Building a real intel-memory layer (remember what you've scouted even after losing vision) would be a genuinely bigger, separate feature - a data structure tracking last-seen composition per enemy construct, decay/staleness rules, etc. - not a natural extension of "add a label." Matched the existing fog model's scope instead: the readout reflects only what's visible *right now*, and empties out again the moment scouting is lost, same as everything else fog currently does. Flagging as a real, coherent follow-up if Chris wants the fuller "remembered intel" experience later.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk J: subsystem stripping gated by hit facet, not uniformly random (2.5)
 
 **Not blocking - implemented, headless suite green (1 new test).**
