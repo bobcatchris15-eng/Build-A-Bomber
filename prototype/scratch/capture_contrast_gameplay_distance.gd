@@ -83,4 +83,16 @@ func _init():
 	root.get_texture().get_image().save_png(OUT_DIR + "/AFTER/mid_distance_heavy_hull.png")
 	print("[CAPTURE] saved mid_distance_heavy_hull.png")
 
+	# A genuine close-up that still frames the WHOLE hull length (front
+	# armor arc through rear structural body in one shot) - the earlier
+	# close-up pass happened to crop in tight enough that a single frame
+	# showed almost entirely one material or the other, which is why a
+	# fresh look at that pair alone wasn't conclusive. This is the
+	# decisive close shot: same hull, same materials, framed so both
+	# regions and the ink border between them are unambiguous at once.
+	cam.look_at_from_position(Vector3(-1, 4.5, 15), Vector3(-6, 0.5, 10), Vector3.UP)
+	for i in range(6): await process_frame
+	root.get_texture().get_image().save_png(OUT_DIR + "/AFTER/close_full_length_heavy_hull.png")
+	print("[CAPTURE] saved close_full_length_heavy_hull.png")
+
 	quit(0)
