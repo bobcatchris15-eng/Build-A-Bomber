@@ -64,11 +64,63 @@ const PD_WEAPON_TYPES = ["ciws", "pd_laser", "flak_cannon"]
 # without touching its (intentionally weak) anti-ground numbers.
 const PD_ANTI_AIR_DAMAGE_MULT: float = 3.0
 
+# --- Evasion model (FABLE_REVIEW.md 1.4) ---
+# Speed finally has DEFENSIVE value: a shot can miss a fast-moving target,
+# scaled by the weapon's projectile class (ModuleCatalog.PROJECTILE_CLASS)
+# and the target's actual current horizontal velocity (not its design-time
+# move_speed - a fast unit standing still is an easy target). Bigger hulls
+# are easier to hit (footprint factor), so compact scouts genuinely dodge
+# better than stretched-out gun platforms. Hitscan beams and guided
+# munitions never miss from speed - guided's counter is PD interception.
+const MISS_SPEED_FACTOR = {"hitscan": 0.0, "ballistic": 0.035, "arc": 0.09, "guided": 0.0}
+const MISS_CHANCE_CAP: float = 0.75
+
+func _roll_hit(t: Node3D) -> bool:
+	var cls = ModuleCatalog.get_projectile_class(type_id)
+	var factor = MISS_SPEED_FACTOR.get(cls, 0.035)
+	if factor <= 0.0:
+		return true
+	var target_speed = 0.0
+	if t is CharacterBody3D:
+		target_speed = Vector3(t.velocity.x, 0.0, t.velocity.z).length()
+	if target_speed < 0.5:
+		return true # stationary (or a building) - can't dodge standing still
+	var size_factor = 1.0
+	if "hull_node" in t and is_instance_valid(t.hull_node) and t.hull_node.has_meta("base_hull_size") and t.hull_node.has_meta("hull_scale"):
+		var s = t.hull_node.get_meta("base_hull_size") * t.hull_node.get_meta("hull_scale")
+		size_factor = clamp(sqrt((s.x * s.z) / (4.0 * 6.0)), 0.6, 1.6)
+	var miss_chance = clamp(target_speed * factor / size_factor, 0.0, MISS_CHANCE_CAP)
+	return randf() >= miss_chance
+
+# Small dirt-puff visual where a missed shot lands, so a miss reads as a
+# miss instead of silent nothing.
+func _spawn_miss_puff(t: Node3D):
+	if not is_instance_valid(t) or not is_inside_tree():
+		return
+	var puff = MeshInstance3D.new()
+	var sphere = SphereMesh.new()
+	sphere.radius = 0.3
+	sphere.height = 0.6
+	puff.mesh = sphere
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.5, 0.45, 0.35, 0.7)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	puff.material_override = mat
+	get_tree().current_scene.add_child(puff)
+	var side = Vector3(randf_range(-1.0, 1.0), 0, randf_range(-1.0, 1.0)).normalized()
+	puff.global_position = t.global_position + side * randf_range(1.2, 2.2)
+	var tween = create_tween()
+	tween.tween_property(puff, "scale", Vector3.ZERO, 0.3)
+	tween.finished.connect(func(): if is_instance_valid(puff): puff.queue_free())
+
 # Single funnel for all weapon HP damage (every _fire_*() routes through
-# here). Centralizes: the PD anti-air bonus above, and the hit-origin
-# altitude flattening below. Also the natural seam for the evasion model.
+# here). Centralizes: the evasion roll, the PD anti-air bonus above, and
+# the hit-origin altitude flattening below.
 func _deal_weapon_damage(t: Node3D, amount: float):
 	if not is_instance_valid(t) or not t.has_method("take_damage"):
+		return
+	if not _roll_hit(t):
+		_spawn_miss_puff(t)
 		return
 	if type_id in PD_WEAPON_TYPES and "is_flying" in t and t.is_flying:
 		amount *= PD_ANTI_AIR_DAMAGE_MULT
@@ -911,145 +963,38 @@ func _fire_spigot_mortar():
 			_spawn_explosion_visual(end, 1.8, Color.CRIMSON)
 	)
 
+const WeaponMissileScene = preload("res://scripts/weapon_missile.gd")
+
+# Real, interceptable missile (FABLE_REVIEW.md 2.2/2.2) instead of a cosmetic
+# tween - see weapon_missile.gd. is_top_attack/target/damage must be set
+# before add_child() since _ready() reads them immediately.
 func _fire_missile_projectile(is_top_attack: bool):
+	if not is_instance_valid(target): return
 	var missile = Node3D.new()
-	var body = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = 0.06
-	cyl.bottom_radius = 0.06
-	cyl.height = 0.35
-	body.mesh = cyl
-	
-	var bmat = StandardMaterial3D.new()
-	bmat.albedo_color = Color.DARK_SLATE_GRAY
-	body.material_override = bmat
-	missile.add_child(body)
-	body.rotate_x(PI/2)
-	
-	var nose = MeshInstance3D.new()
-	var cone = CylinderMesh.new()
-	cone.top_radius = 0.0
-	cone.bottom_radius = 0.06
-	cone.height = 0.12
-	nose.mesh = cone
-	var nmat = StandardMaterial3D.new()
-	nmat.albedo_color = Color.RED
-	nmat.emission_enabled = true
-	nmat.emission = Color.RED
-	nose.material_override = nmat
-	missile.add_child(nose)
-	nose.position = Vector3(0, 0, -0.23)
-	nose.rotate_x(-PI/2)
-	
+	missile.set_script(WeaponMissileScene)
+	missile.position = global_position + Vector3(0, 0.5, 0)
+	missile.is_top_attack = is_top_attack
+	missile.setup(target, self, dps * fire_rate, damage_class, get_team())
 	get_tree().current_scene.add_child(missile)
-	var start = global_position + Vector3(0, 0.5, 0)
-	missile.global_position = start
-	
-	var end = target.global_position
-	
-	var trail_timer = Timer.new()
-	trail_timer.wait_time = 0.04
-	trail_timer.autostart = true
-	missile.add_child(trail_timer)
-	trail_timer.timeout.connect(func():
-		if not is_instance_valid(missile): return
-		var smoke = MeshInstance3D.new()
-		var sph = SphereMesh.new()
-		sph.radius = 0.08
-		sph.height = 0.16
-		smoke.mesh = sph
-		var smat = StandardMaterial3D.new()
-		smat.albedo_color = Color(0.6, 0.6, 0.6, 0.5)
-		smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		smoke.material_override = smat
-		get_tree().current_scene.add_child(smoke)
-		smoke.global_position = missile.global_position - missile.global_transform.basis.z * 0.2
-		var st = create_tween()
-		st.tween_property(smoke, "scale", Vector3.ZERO, 0.25)
-		st.finished.connect(func(): smoke.queue_free())
-	)
-	
-	var tween = create_tween()
-	if is_top_attack:
-		var peak = start + Vector3(0, 9.0, 0)
-		missile.look_at(peak, Vector3.UP)
-		tween.tween_property(missile, "global_position", peak, 0.35)
-		tween.finished.connect(func():
-			if not is_instance_valid(missile): return
-			if is_instance_valid(target):
-				missile.look_at(target.global_position, Vector3.UP)
-				var move_t = create_tween()
-				move_t.tween_property(missile, "global_position", target.global_position, 0.35)
-				move_t.finished.connect(func():
-					if is_instance_valid(missile): missile.queue_free()
-					if is_instance_valid(target):
-						_deal_weapon_damage(target, dps * fire_rate)
-						_spawn_explosion_visual(target.global_position, 0.8, Color.YELLOW_GREEN)
-				)
-			else:
-				missile.queue_free()
-		)
-	else:
-		missile.look_at(end, Vector3.UP)
-		tween.tween_property(missile, "global_position", end, 0.45)
-		tween.finished.connect(func():
-			if is_instance_valid(missile): missile.queue_free()
-			if is_instance_valid(target):
-				_deal_weapon_damage(target, dps * fire_rate)
-				_spawn_explosion_visual(end, 0.7, Color.YELLOW)
-		)
 
 func _fire_swarm_missiles():
 	var count = 4
 	if has_meta("module_data"):
 		var data = get_meta("module_data")
 		count = int(data.tweaks.get("grid_size", 4.0))
-		
+	count = max(1, count)
+	var per_missile_damage = (dps * fire_rate) / count
+
 	for i in range(count):
 		get_tree().create_timer(i * 0.08).timeout.connect(func():
 			if not is_instance_valid(target): return
-			
-			var missile = MeshInstance3D.new()
-			var box = BoxMesh.new()
-			box.size = Vector3(0.06, 0.06, 0.2)
-			missile.mesh = box
-			var mat = StandardMaterial3D.new()
-			mat.albedo_color = Color.DARK_ORANGE
-			mat.emission_enabled = true
-			mat.emission = Color.ORANGE
-			missile.material_override = mat
+			var missile = Node3D.new()
+			missile.set_script(WeaponMissileScene)
+			missile.position = global_position + Vector3(randf_range(-0.3, 0.3), 0.3, randf_range(-0.3, 0.3))
+			missile.speed = 20.0
+			missile.salvo_jitter = 1.2
+			missile.setup(target, self, per_missile_damage, damage_class, get_team())
 			get_tree().current_scene.add_child(missile)
-			
-			var start = global_position
-			var end = target.global_position
-			missile.global_position = start
-			
-			var dev_dir = Vector3(randf_range(-1.5, 1.5), randf_range(-0.5, 1.5), randf_range(-1.5, 1.5))
-			var mid = start.lerp(end, 0.5) + dev_dir
-			
-			var tween = create_tween()
-			var callable = func(val: float):
-				if not is_instance_valid(missile): return
-				var q0 = start.lerp(mid, val)
-				var mid_pos = mid.lerp(end, val)
-				var pos = q0.lerp(mid_pos, val)
-				
-				var next_val = val + 0.05
-				if next_val <= 1.0:
-					var next_q0 = start.lerp(mid, next_val)
-					var next_mid = mid.lerp(end, next_val)
-					var next_pos = next_q0.lerp(next_mid, next_val)
-					missile.look_at(next_pos, Vector3.UP)
-				
-				missile.global_position = pos
-				
-			tween.tween_method(callable, 0.0, 1.0, 0.5)
-			tween.finished.connect(func():
-				if is_instance_valid(missile): missile.queue_free()
-				if is_instance_valid(target):
-					_deal_weapon_damage(target, (dps * fire_rate) / count)
-					_spawn_explosion_visual(end, 0.3, Color.DARK_ORANGE)
-			)
 		)
 
 func _fire_drone_swarm():

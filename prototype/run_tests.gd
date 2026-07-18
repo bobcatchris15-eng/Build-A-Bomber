@@ -45,6 +45,7 @@ func _init():
 	success = success and await test_armor_module_facet_fitting()
 	success = success and await test_armor_module_combat_bonus()
 	success = success and await test_face_based_weapon_mounting()
+	success = success and await test_module_drag_reclassifies_facet_and_mount()
 	success = success and await test_angled_pintle_mount()
 	success = success and await test_centerline_placement_does_not_self_mirror()
 	success = success and await test_hull_nose_taper()
@@ -74,6 +75,8 @@ func _init():
 	success = success and await test_energy_pool_and_generators()
 	success = success and await test_repair_array_heals_allies_only()
 	success = success and await test_drone_carrier_spawns_real_drones()
+	success = success and await test_missile_weapons_spawn_real_interceptable_missiles()
+	success = success and await test_evasion_model_speed_defends_against_ballistic_not_hitscan()
 	success = success and await test_energy_weapons_cost_and_drain()
 	success = success and await test_logistics_sharing_boosts_allies()
 	success = success and await test_support_modules_get_combat_script_in_real_spawn()
@@ -1766,6 +1769,94 @@ func test_face_based_weapon_mounting() -> bool:
 
 	placer.queue_free()
 	print("  [PASS] Face-based mounting: turret/frame_built exceptions correct, pintle_top/sponson hardware present, sponson embeds inward, hardware survives tweak rebuilds.")
+	return true
+
+func test_module_drag_reclassifies_facet_and_mount() -> bool:
+	print("Running Test Suite: Dragging A Module To A New Face Reclassifies It (FABLE_REVIEW 3.2)...")
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await process_frame
+
+	placer._place_hull_from_ui("heavy_hull")
+	await process_frame
+
+	# Armor plate placed on the TOP facet, then dragged to the RIGHT facet -
+	# without the fix it would keep facet="top" and its top-fitted scale.
+	placer._place_weapon_from_ui("armor_plating", Vector3(0, 0.5, -1.0), Vector3.UP)
+	await process_frame
+	var plate = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "armor_plating":
+			plate = c
+			break
+	if not plate or plate.get_meta("facet", "") == "left" or plate.get_meta("facet", "") == "right":
+		print("  [FAIL] Setup: armor plate should start on the top facet, got '", plate.get_meta("facet", "") if plate else "null", "'")
+		placer.queue_free()
+		return false
+
+	var right_world_pos = placer.hull.global_position + Vector3(2.0, 0.5, 0.0)
+	placer._update_module_placement(plate, right_world_pos, Vector3.RIGHT)
+	placer._reclassify_module_after_drag(plate, Vector3.RIGHT)
+	await process_frame
+
+	if plate.get_meta("facet", "") != "right":
+		print("  [FAIL] Armor plate dragged to the right face should be reclassified facet='right', got '", plate.get_meta("facet", ""), "'")
+		placer.queue_free()
+		return false
+	var catalog_data = ModuleCatalog.get_module_data("armor_plating")
+	var hull_shape = placer.hull.get_node_or_null("CollisionShape3D")
+	var hull_size = hull_shape.shape.size
+	var fitted_y = plate.scale.z * catalog_data.size.z # local Z maps to hull Y on a side facet
+	if abs(fitted_y - hull_size.y) > 0.3 and abs(plate.scale.x * catalog_data.size.x - hull_size.y) > 0.3:
+		print("  [FAIL] Re-dragged plate should refit to the right facet's own dimensions, not keep its old top-facet size")
+		placer.queue_free()
+		return false
+	var local_pos = placer.hull.to_local(plate.global_position)
+	if local_pos.x < hull_size.x / 2.0 - 0.2:
+		print("  [FAIL] Re-dragged plate should re-center on the right facet, got local x=", local_pos.x)
+		placer.queue_free()
+		return false
+
+	# Weapon placed on TOP (pintle_top), dragged to a SIDE face - should
+	# become 'sponson' with hardware, not silently keep pintle_top gating.
+	placer._place_weapon_from_ui("heavy_machine_gun", Vector3(-1.5, 0.75, 1.5), Vector3.UP)
+	await process_frame
+	var mg = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun":
+			mg = c
+			break
+	if not mg or mg.get_meta("mount_style", "") != "pintle_top":
+		print("  [FAIL] Setup: heavy_machine_gun should start as pintle_top")
+		placer.queue_free()
+		return false
+
+	var side_world_pos = placer.hull.global_position + Vector3(0.0, 0.5, 3.0)
+	placer._update_module_placement(mg, side_world_pos, Vector3.BACK)
+	await process_frame
+	# _update_module_placement() (the per-drag-frame updater) always leaves
+	# the module flush with the surface, never embedded - capture that
+	# baseline before reclassifying so the embed check below measures what
+	# the embed step itself did, not the raw click coordinate (which
+	# _update_module_placement's own surface offset already shifts a little).
+	var flush_local_z = placer.hull.to_local(mg.global_position).z
+	placer._reclassify_module_after_drag(mg, Vector3.BACK)
+	await process_frame
+
+	if mg.get_meta("mount_style", "") != "sponson" or not mg.get_node_or_null("MountHardware"):
+		print("  [FAIL] Weapon dragged from top to a side face should reclassify to 'sponson' with hardware, got mount_style='", mg.get_meta("mount_style", ""), "'")
+		placer.queue_free()
+		return false
+	var mg_local = placer.hull.to_local(mg.global_position)
+	if mg_local.z >= flush_local_z - 0.05:
+		print("  [FAIL] Newly-sponson weapon should be pulled inward from its flush drag position, flush z=", flush_local_z, " embedded z=", mg_local.z)
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Dragging a module to a new face re-runs facet/mount classification: armor refits+recenters, weapons get the right mount_style/hardware/embed.")
 	return true
 
 func test_angled_pintle_mount() -> bool:
@@ -3814,6 +3905,171 @@ func test_drone_carrier_spawns_real_drones() -> bool:
 	carrier_unit.queue_free()
 	enemy.queue_free()
 	print("  [PASS] drone_carrier spawns real, independently-flying drone_unit.gd entities (count driven by Hangar Size), not tweened decorative meshes.")
+	return true
+
+func test_missile_weapons_spawn_real_interceptable_missiles() -> bool:
+	print("Running Test Suite: Missile Weapons - Real Interceptable Projectiles (FABLE_REVIEW 2.2)...")
+	await process_frame # let any deferred queue_free()s from prior tests actually clear
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var launcher = CharacterBody3D.new()
+	launcher.set_script(BattleUnitScript)
+	root.add_child(launcher)
+	launcher.team = 0
+	launcher.set_meta("team", 0)
+	launcher.add_to_group("damageable")
+
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	launcher.add_child(weapon)
+	var w_data = ModuleData.new()
+	w_data.type_id = "guided_missile"
+	w_data.base_weight = 200.0
+	w_data.base_dps = 40.0
+	w_data.tweaks = {}
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+
+	var enemy = CharacterBody3D.new()
+	enemy.set_script(BattleUnitScript)
+	root.add_child(enemy)
+	enemy.team = 1
+	enemy.set_meta("team", 1)
+	enemy.add_to_group("damageable")
+	enemy.max_hp = 300.0
+	enemy.hp = 300.0
+	enemy.global_position = Vector3(10, 0, 0)
+
+	var scene_stub = Node3D.new()
+	root.add_child(scene_stub)
+	current_scene = scene_stub # _fire_missile_projectile() spawns via get_tree().current_scene.add_child()
+	weapon.target = enemy
+	weapon._fire_missile_projectile(false)
+
+	var spawned = null
+	for n in get_nodes_in_group("missiles"):
+		if is_instance_valid(n) and n.has_method("destroy_missile") and n != enemy:
+			spawned = n
+	if not spawned:
+		print("  [FAIL] guided_missile should fire a real node registered in the 'missiles' group, found none")
+		launcher.queue_free(); enemy.queue_free(); scene_stub.queue_free()
+		return false
+	if spawned.get_meta("team", -1) != 0:
+		print("  [FAIL] Spawned missile should carry the launcher's team, got ", spawned.get_meta("team", -1))
+		launcher.queue_free(); enemy.queue_free(); scene_stub.queue_free()
+		return false
+	if spawned.target != enemy:
+		print("  [FAIL] Spawned missile's target should be the enemy, got ", spawned.target)
+		launcher.queue_free(); enemy.queue_free(); scene_stub.queue_free()
+		return false
+
+	# A real missile flies under its own _physics_process, not a canned tween.
+	var start_pos = spawned.global_position
+	for i in range(10):
+		spawned._physics_process(0.1)
+	if spawned.global_position.distance_to(start_pos) < 0.5:
+		print("  [FAIL] A guided_missile should be flying (independent _physics_process movement) toward its target, but barely moved")
+		launcher.queue_free(); enemy.queue_free(); scene_stub.queue_free()
+		return false
+
+	# Point defense must be able to intercept it (the whole point of 2.2 -
+	# PD had nothing real to shoot at before this).
+	var pd = CharacterBody3D.new()
+	pd.set_script(BattleUnitScript)
+	root.add_child(pd)
+	pd.team = 1
+	pd.set_meta("team", 1)
+	var pd_weapon = Node3D.new()
+	pd_weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	pd.add_child(pd_weapon)
+	var pd_data = ModuleData.new()
+	pd_data.type_id = "ciws"
+	pd_data.base_weight = 60.0
+	pd_data.base_dps = 10.0
+	pd_data.tweaks = {}
+	pd_weapon.set_meta("module_data", pd_data)
+	pd_weapon._ready()
+	pd_weapon.target = spawned
+	pd_weapon._fire_pd_at_missile()
+	if not spawned.is_destroyed:
+		print("  [FAIL] CIWS point defense should be able to destroy a real missile via destroy_missile(), but it survived")
+		launcher.queue_free(); enemy.queue_free(); pd.queue_free(); scene_stub.queue_free()
+		return false
+
+	launcher.queue_free()
+	enemy.queue_free()
+	pd.queue_free()
+	scene_stub.queue_free()
+	print("  [PASS] guided_missile fires a real, independently-flying, PD-interceptable projectile (weapon_missile.gd) instead of a cosmetic tween.")
+	return true
+
+func test_evasion_model_speed_defends_against_ballistic_not_hitscan() -> bool:
+	print("Running Test Suite: Evasion Model - Speed Has Real Defensive Value (FABLE_REVIEW 1.4)...")
+	seed(1234) # deterministic roll sequence for the statistical assertions below
+
+	var fast_target = CharacterBody3D.new()
+	fast_target.velocity = Vector3(15.0, 0.0, 0.0) # well above the 0.5 "stationary" floor
+
+	var stationary_target = CharacterBody3D.new()
+	stationary_target.velocity = Vector3.ZERO
+
+	var ballistic_weapon = Node3D.new()
+	ballistic_weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	ballistic_weapon.type_id = "rotary_cannon" # ballistic class
+
+	var hitscan_weapon = Node3D.new()
+	hitscan_weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	hitscan_weapon.type_id = "heavy_laser" # hitscan class
+
+	var guided_weapon = Node3D.new()
+	guided_weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	guided_weapon.type_id = "guided_missile" # guided class
+
+	# None of the 5 nodes above are ever added to the tree (this test only
+	# needs their scripts' pure functions, not a live scene) - Node is not
+	# RefCounted, so an un-parented, un-freed Node is a genuine engine-level
+	# leak, not just a GDScript reference dropped. Free them all through one
+	# path so every return below (pass or fail) cleans up.
+	var _to_free = [fast_target, stationary_target, ballistic_weapon, hitscan_weapon, guided_weapon]
+	var ok = true
+	var fail_msg = ""
+
+	# A fast mover should sometimes dodge a ballistic weapon - not a
+	# guarantee (that would make speed strictly dominant, same trap as the
+	# armor material dropdown in 1.2), but a real, non-trivial chance.
+	var misses = 0
+	var trials = 400
+	for i in range(trials):
+		if not ballistic_weapon._roll_hit(fast_target):
+			misses += 1
+	if ok and (misses < int(trials * 0.15) or misses > int(trials * 0.85)):
+		ok = false
+		fail_msg = "A fast target should have a real (but not near-0%% or near-100%%) miss chance against a ballistic weapon, got %d/%d misses" % [misses, trials]
+
+	# Hitscan and guided weapons never miss from speed - their counters are
+	# elsewhere (aim/traverse, PD interception), not target speed.
+	for i in range(50):
+		if ok and not hitscan_weapon._roll_hit(fast_target):
+			ok = false
+			fail_msg = "Hitscan weapons should never miss due to target speed"
+		if ok and not guided_weapon._roll_hit(fast_target):
+			ok = false
+			fail_msg = "Guided weapons should never miss due to target speed"
+
+	# A stationary target can't dodge anything - "fast but standing still"
+	# shouldn't accidentally read as evasive.
+	for i in range(50):
+		if ok and not ballistic_weapon._roll_hit(stationary_target):
+			ok = false
+			fail_msg = "A stationary target should never miss - it isn't moving to dodge anything"
+
+	for n in _to_free:
+		n.free()
+
+	if not ok:
+		print("  [FAIL] ", fail_msg)
+		return false
+	print("  [PASS] Ballistic fire can be dodged by a fast-moving target (", misses, "/", trials, " misses); hitscan/guided never miss from speed; stationary targets never dodge.")
 	return true
 
 func test_energy_weapons_cost_and_drain() -> bool:

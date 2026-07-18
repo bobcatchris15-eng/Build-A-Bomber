@@ -218,6 +218,9 @@ func _unhandled_input(event):
 			# Left click released
 			if is_dragging_module:
 				is_dragging_module = false
+				if selected_module and is_instance_valid(selected_module):
+					var final_normal = selected_module.get_meta("_last_drag_normal", Vector3.UP)
+					_reclassify_module_after_drag(selected_module, final_normal)
 				_select_module(selected_module)
 				get_tree().call_group("stat_ui", "update_stats", hull)
 				check_all_clipping()
@@ -1295,10 +1298,17 @@ func _find_meshes_recursive(node: Node, result: Array):
 
 func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector3):
 	if not module or not is_instance_valid(module): return
-	
+
 	var data = module.get_meta("module_data")
 	var catalog_data = ModuleCatalog.get_module_data(data.type_id)
-	
+
+	# Remembered so drag-end can re-run the same facet/mount classification
+	# _place_weapon() does at initial placement (FABLE_REVIEW.md 3.2) -
+	# without it, a plate/weapon dragged to a different face keeps whatever
+	# facet/mount_style it was placed with, which is silently wrong once
+	# combat resolves hits by facet.
+	module.set_meta("_last_drag_normal", normal)
+
 	var offset = normal * (catalog_data.size.y / 2.0)
 	var local_pos = hull.to_local(world_pos) + offset
 	
@@ -1335,6 +1345,81 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 				mirror.rotate_object_local(Vector3.RIGHT, -PI/2.0)
 			
 			mirror.rotate_object_local(Vector3.UP, -yaw_offset)
+
+# Re-runs the same facet/mount classification _place_weapon() does at initial
+# placement (FABLE_REVIEW.md 3.2). Without this, a module dragged to a
+# different face keeps whatever facet/mount_style it was placed with -
+# combat (damage_resolver.gd) then silently credits it to the wrong side of
+# the hull, and a weapon dragged deck-to-side keeps pintle hardware and the
+# wrong traverse gate. Called once on drag release, not per-frame - it's the
+# same cost as initial placement, not a per-tick tax.
+func _reclassify_module_after_drag(module: Node3D, normal: Vector3, _is_mirror_call: bool = false):
+	if not module or not is_instance_valid(module) or not module.has_meta("module_data"):
+		return
+	var data = module.get_meta("module_data")
+	var category = data.category
+	if category != "armor" and category != "weapon":
+		return
+	if not hull:
+		return
+	var catalog_data = ModuleCatalog.get_module_data(data.type_id)
+
+	var hull_size = Vector3(4.0, 1.0, 6.0)
+	var hull_shape = hull.get_node_or_null("CollisionShape3D")
+	if hull_shape and hull_shape.shape is BoxShape3D:
+		hull_size = hull_shape.shape.size
+	var local_normal = hull.global_transform.basis.inverse() * normal
+
+	if category == "armor":
+		# Same auto-fit-to-facet + re-center logic as _place_weapon()'s armor
+		# block, so a dragged plate doesn't keep its old facet's size/position.
+		var local_x = module.global_transform.basis.x.abs()
+		var local_z = module.global_transform.basis.z.abs()
+		var target_x = 1.0
+		var target_z = 1.0
+		if local_x.x > 0.5: target_x = hull_size.x
+		elif local_x.y > 0.5: target_x = hull_size.y
+		elif local_x.z > 0.5: target_x = hull_size.z
+		if local_z.x > 0.5: target_z = hull_size.x
+		elif local_z.y > 0.5: target_z = hull_size.y
+		elif local_z.z > 0.5: target_z = hull_size.z
+		module.scale.x = target_x / catalog_data.size.x
+		module.scale.z = target_z / catalog_data.size.z
+
+		var armor_facet = ModuleCatalog.classify_facet(local_normal)
+		var centered_local = Vector3.ZERO
+		match armor_facet:
+			"left", "right":
+				centered_local = Vector3(sign(local_normal.x) * hull_size.x / 2.0, 0, 0)
+			"front", "back":
+				centered_local = Vector3(0, 0, sign(local_normal.z) * hull_size.z / 2.0)
+			_:
+				centered_local = Vector3(0, sign(local_normal.y) * hull_size.y / 2.0, 0)
+		module.global_position = hull.to_global(centered_local)
+		module.set_meta("facet", armor_facet)
+
+	elif category == "weapon":
+		var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
+		# No "undo the old embed" step needed here: _update_module_placement()
+		# recomputes position fresh from the current raycast hit every drag
+		# frame (never relative to the module's own previous position), so by
+		# the time drag ends the module is already sitting at the flush,
+		# non-embedded surface position regardless of whatever mount_style it
+		# had before the drag started - there's nothing stale to undo.
+		var mount_style = ModuleCatalog.get_mount_style_for_normal(data.type_id, normal, hull_type_for_mount)
+		module.set_meta("mount_style", mount_style)
+		module.set_meta("mount_normal", normal)
+		if mount_style == "sponson" or mount_style == "frame_built":
+			var embed_depth = catalog_data.size.y * (0.75 if mount_style == "frame_built" else 0.45)
+			module.global_position -= normal * embed_depth
+		var VisualBuilder = preload("res://scripts/visual_builder.gd")
+		VisualBuilder.rebuild_visual(module)
+
+	if not _is_mirror_call and module.has_meta("mirrored_counterpart"):
+		var mirror = module.get_meta("mirrored_counterpart")
+		if mirror and is_instance_valid(mirror):
+			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
+			_reclassify_module_after_drag(mirror, mirrored_normal, true)
 
 func _get_colliders_recursive(node: Node, list: Array):
 	if node is CollisionObject3D:

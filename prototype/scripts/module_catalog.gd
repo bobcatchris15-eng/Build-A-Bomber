@@ -1173,6 +1173,30 @@ static func get_pintle_min_up_alignment(type_id: String) -> float:
 static func get_traverse_agility(type_id: String) -> float:
 	return get_module_data(type_id).get("traverse_agility", 1.0)
 
+# --- Projectile class (FABLE_REVIEW.md 1.4 - the evasion model) ---
+# How a weapon's shot travels, which decides whether target SPEED can make
+# it miss (auto_weapon.gd's _roll_hit()):
+#   "hitscan"   - beams/rails: effectively instant, speed can't dodge them
+#   "ballistic" - fast direct-fire shells: fast movers shake some hits
+#   "arc"       - slow lobbed trajectories: the easiest to simply drive out
+#                 from under - mortars are area/siege tools, not anti-scout
+#   "guided"    - self-correcting: never misses from speed; its counter is
+#                 point-defense interception (weapon_missile.gd), not dodging
+const PROJECTILE_CLASS = {
+	"gauss_railgun": "hitscan", "heavy_laser": "hitscan", "pd_laser": "hitscan",
+	"tesla_coil": "hitscan", "arc_projector": "hitscan", "ion_cannon": "hitscan",
+	"resource_harvester": "hitscan", "repair_array": "hitscan",
+	"basic_cannon": "ballistic", "heavy_machine_gun": "ballistic", "rotary_cannon": "ballistic",
+	"ciws": "ballistic", "flak_cannon": "ballistic", "flamethrower": "ballistic",
+	"heavy_howitzer": "arc", "mortar_array": "arc", "spigot_mortar": "arc",
+	"cluster_dispenser": "arc", "plasma_lobber": "arc",
+	"guided_missile": "guided", "dual_stage_missile": "guided", "missile_pod": "guided",
+	"drone_carrier": "guided",
+}
+
+static func get_projectile_class(type_id: String) -> String:
+	return PROJECTILE_CLASS.get(type_id, "ballistic")
+
 # Tweak names that scale a single part's physical size/mass (shared meaning
 # with module_data.gd's get_weight() tweak list, weapon-relevant subset only
 # - excludes non-weapon module tweaks like extractor_size/mast_height/
