@@ -4,6 +4,25 @@ Newest entries first. Each entry: the question, the default I'm proceeding with,
 
 ---
 
+## 2026-07-18 — FABLE_REVIEW fixes, chunk I: match faction completely overrides the design's saved faction tag - stats AND looks (1.7, full resolution per Chris's explicit direction)
+
+**Not blocking - implemented per Chris's explicit, definitive answer (broader than the original "just re-tag the passive at spawn" framing chunk D left partially open). Headless suite green (1 new test, 1 pre-existing test updated to the new correct expectation).**
+
+Chris resolved the open question from chunk D ("faction is per-blueprint in combat but per-match in the economy") completely: the match's chosen faction should drive BOTH the combat passives AND the visual hull material/greebles/decals, entirely replacing whatever faction the design was saved under - not just a stat sync. The Design Lab keeps its own faction preview/tag for the player's reference while designing; that choice just stops mattering the moment a design is actually fielded.
+
+**Single choke point, not scattered special cases.** Traced every consumer of `hull.get_meta("faction")` first - stats (`battle_unit.gd`'s hp/speed/vision/terrain calcs) and looks (`HullMaterialBuilder`/`HullGreebles`/`HullDecals`, all called from the same spot) both ultimately read whatever `blueprint_manager.gd`'s `reconstruct_vehicle()` set on the hull's `faction` meta at construction time - meaning ONE function already governed both concerns, it just always read the blueprint's own saved tag. Added a `match_faction_override` parameter to `reconstruct_vehicle()`: when non-empty, it replaces the blueprint's own tag before ANY downstream use (stats meta, material, greebles, decals) - a single local variable feeds everything that follows, so there was no risk of stats and looks drifting out of sync with each other.
+
+**Wired through every real battle-spawn path, explicitly NOT the Design Lab preview paths:**
+- `battle_unit.gd`'s `setup()` gained a `match_faction` parameter, threaded to `reconstruct_vehicle()`.
+- `building.gd`'s `_spawn_unit()` (every manufactory-queued unit, player AND enemy) passes its own `faction` field through - which is already the match faction a factory was built under (`skirmish.gd`'s `_spawn_starting_manufactories()`/`_spawn_prefab()` already pass `player_faction`/`enemy_faction` there).
+- `building.gd`'s `setup_defense()` gained the same parameter, threaded to its own `reconstruct_vehicle()` call.
+- `skirmish.gd`'s `spawn_unit()`/`spawn_defense()` (initial harvester spawns, player-placed defenses) compute `player_faction`/`enemy_faction` by team and pass it through; the defense-placement range-preview reconstruction (`_begin_placement()`) does too, for consistency.
+- **Deliberately NOT touched**: `blueprint_manager.gd`'s Design Lab load (`is_designer=true`), `module_placer.gd`'s undo/redo snapshot restore (also `is_designer=true`), and `battlefield.gd`'s Test Range (no match/opponent-faction concept exists there at all - the blueprint's own tag is the only sensible source of truth in a single-vehicle sandbox with no "match"). None of these pass the new override parameter, so they're byte-for-byte unchanged.
+
+**A pre-existing test needed updating, not just a new one added.** `test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes`'s defense-building check asserted the OLD behavior (a `bayou_irregulars`-tagged blueprint should keep `defense.faction == "bayou_irregulars"`) - that was exactly the 3.7-era behavior this chunk supersedes. Fixed the test to match the new correct behavior (deliberately mismatched blueprint tag vs. match faction, asserting the MATCH faction wins), rather than leaving a red test or quietly deleting the coverage. New dedicated test (`test_match_faction_overrides_blueprint_faction_stats_and_looks`) proves the full stats+looks override with one blueprint (tagged "technocrats") fielded by both teams under two OTHER factions (industrialists/expansionists) - checks the hull's faction meta, a concrete speed-passive comparison against an identically-blueprinted control unit, and the actual rendered shader material's `base_color`, not just a tag.
+
+---
+
 ## 2026-07-18 — FABLE_REVIEW fixes, chunk H: Power Plant building (2.7) - real supply-side Energy, placeholder geometry per Chris's explicit instruction
 
 **Not blocking - implemented, headless suite green (1 new test), Chris explicitly greenlit this item and explicitly said not to invest in bespoke mesh work since he's replacing every building mesh with authored art later.**

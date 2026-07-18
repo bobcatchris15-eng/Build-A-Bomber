@@ -128,6 +128,7 @@ func _init():
 	success = success and await test_explosive_weapons_deal_real_aoe_damage()
 	success = success and await test_enemy_ai_counter_picks_the_players_composition()
 	success = success and await test_power_plant_building_supplies_real_team_energy_capacity()
+	success = success and await test_match_faction_overrides_blueprint_faction_stats_and_looks()
 
 	print("\n==============================================")
 	if success:
@@ -6677,10 +6678,17 @@ func test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes() -> bool:
 		skirmish.queue_free()
 		return false
 
-	# Defense buildings carry their real faction (FABLE_REVIEW.md 3.7)
+	# Defense buildings carry a real faction field (FABLE_REVIEW.md 3.7) -
+	# updated by the later 1.7 fix to be the MATCH faction, not the
+	# blueprint's own saved tag (see
+	# test_match_faction_overrides_blueprint_faction_stats_and_looks for the
+	# full stats+looks proof). Blueprint deliberately tagged a DIFFERENT
+	# faction than the match here to prove it's really overridden, not just
+	# carried through by coincidence.
+	skirmish.player_faction = "bayou_irregulars"
 	var defense_bp = {
 		"hull_type": "pillbox_foundation",
-		"faction": "bayou_irregulars",
+		"faction": "industrialists",
 		"armor_material": "hardened_steel",
 		"armor_thickness": 1.0,
 		"locomotion": {"type_id": "", "settings": {}},
@@ -6689,7 +6697,7 @@ func test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes() -> bool:
 	var defense = skirmish.spawn_defense(defense_bp, 0, hq_pos + Vector3(16, 0, 0))
 	await process_frame
 	if defense.faction != "bayou_irregulars":
-		print("  [FAIL] Defense building faction field is '%s', expected the blueprint's own 'bayou_irregulars'." % defense.faction)
+		print("  [FAIL] Defense building faction field is '%s', expected the match faction 'bayou_irregulars' (not the blueprint's own 'industrialists' tag)." % defense.faction)
 		skirmish.queue_free()
 		return false
 
@@ -7092,4 +7100,116 @@ func test_power_plant_building_supplies_real_team_energy_capacity() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] power_plant is a real, buildable, net-positive supply-side Energy building - capacity ", capacity_before, " -> ", capacity_after, ", available energy ", energy_before, " -> ", energy_after, ".")
+	return true
+
+func test_match_faction_overrides_blueprint_faction_stats_and_looks() -> bool:
+	print("Running Test Suite: Match Faction Overrides The Design's Saved Faction Tag - Stats AND Looks (FABLE_REVIEW 1.7)...")
+	var HullMaterialBuilder = preload("res://scripts/hull_material_builder.gd")
+	var FactionCatalog = preload("res://scripts/faction_catalog.gd")
+
+	# One blueprint, deliberately tagged with a faction that matches NEITHER
+	# side's actual match faction below - if anything downstream still
+	# reflects "technocrats", the override isn't really total. Needs a real
+	# locomotion MODULE (not just the top-level "locomotion" field, which
+	# blueprint_manager.gd only reads for wheel-height positioning) so
+	# move_speed is actually nonzero - the speed check below needs a real
+	# number to compare, not two units both stuck at 0.
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull", "faction": "technocrats",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "wheels", "settings": {}},
+		"modules": [
+			{"type_id": "wheels", "name": "Wheels", "position": {"x": 0.0, "y": -1.0, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+	skirmish.player_faction = "industrialists"
+	skirmish.enemy_faction = "expansionists"
+
+	# Same blueprint content, but tagged "industrialists" - i.e. its saved
+	# tag happens to already agree with player_faction. Comparing this
+	# against bp (tagged "technocrats", also spawned under player_faction)
+	# is the real test: if the override works, these two should move at the
+	# IDENTICAL speed (the blueprint's own tag made no difference); if it
+	# doesn't, the "technocrats"-tagged one would be faster (real +5%
+	# speed_mult technocrats sets that industrialists doesn't).
+	var bp_matching_tag = bp.duplicate(true)
+	bp_matching_tag["faction"] = "industrialists"
+
+	var player_unit = skirmish.spawn_unit(bp, skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(20, 0, 0))
+	var player_unit_control = skirmish.spawn_unit(bp_matching_tag, skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(25, 0, 0))
+	var enemy_unit = skirmish.spawn_unit(bp, skirmish.ENEMY_TEAM, skirmish.enemy_hq.global_position + Vector3(-20, 0, 0))
+	await process_frame
+
+	var free_all = func():
+		player_unit.queue_free()
+		player_unit_control.queue_free()
+		enemy_unit.queue_free()
+		skirmish.queue_free()
+
+	# --- Stats: the hull's own faction meta (read by every passive lookup
+	# in battle_unit.gd - hp_mult, speed_mult, armor_weight_mult, etc.) ---
+	if player_unit.hull_node.get_meta("faction", "") != "industrialists":
+		print("  [FAIL] Player unit's combat faction should be the match's player_faction (industrialists), not the blueprint's saved tag (technocrats), got '", player_unit.hull_node.get_meta("faction", ""), "'")
+		free_all.call()
+		return false
+	if enemy_unit.hull_node.get_meta("faction", "") != "expansionists":
+		print("  [FAIL] Enemy unit's combat faction should be the match's enemy_faction (expansionists), not the blueprint's saved tag (technocrats), got '", enemy_unit.hull_node.get_meta("faction", ""), "'")
+		free_all.call()
+		return false
+
+	# Concrete behavioral proof, not just the meta tag: technocrats carries a
+	# real +5% speed_mult that industrialists doesn't set - confirm that
+	# advantage is real first, so this check actually means something.
+	var industrialists_speed_mult = FactionCatalog.get_passive("industrialists", "speed_mult", 1.0)
+	var technocrats_speed_mult = FactionCatalog.get_passive("technocrats", "speed_mult", 1.0)
+	if industrialists_speed_mult >= technocrats_speed_mult:
+		print("  [FAIL] Test assumption broken: technocrats should have a real speed_mult advantage over industrialists to make this a meaningful check")
+		free_all.call()
+		return false
+	# player_unit (blueprint tagged "technocrats") and player_unit_control
+	# (identical blueprint, tagged "industrialists") are BOTH fielded under
+	# player_faction="industrialists" - if the override is real, the
+	# blueprint's own tag shouldn't matter and these should move identically.
+	if abs(player_unit.move_speed - player_unit_control.move_speed) > 0.01:
+		print("  [FAIL] Two identical designs under the same match faction should move at the same speed regardless of their own saved faction tags, got ", player_unit.move_speed, " (tagged technocrats) vs ", player_unit_control.move_speed, " (tagged industrialists)")
+		free_all.call()
+		return false
+
+	# --- Looks: the hull's actual rendered material, not just a meta tag ---
+	var player_mesh = player_unit.hull_node.get_node_or_null("MeshInstance3D")
+	var enemy_mesh = enemy_unit.hull_node.get_node_or_null("MeshInstance3D")
+	if not player_mesh or not enemy_mesh:
+		print("  [FAIL] Reconstructed hulls should have a MeshInstance3D child")
+		free_all.call()
+		return false
+	var player_base_color = player_mesh.get_surface_override_material(0).get_shader_parameter("base_color")
+	var enemy_base_color = enemy_mesh.get_surface_override_material(0).get_shader_parameter("base_color")
+
+	var wrong_armor = HullMaterialBuilder.build_hull_material("hardened_steel", "technocrats").get_shader_parameter("base_color")
+	var wrong_structural = HullMaterialBuilder.build_structural_material("technocrats").get_shader_parameter("base_color")
+	if player_base_color == wrong_armor or player_base_color == wrong_structural:
+		print("  [FAIL] Player unit's hull material should NOT be painted in technocrats' colors (the blueprint's saved tag) - it should follow industrialists, the match faction")
+		free_all.call()
+		return false
+	if enemy_base_color == wrong_armor or enemy_base_color == wrong_structural:
+		print("  [FAIL] Enemy unit's hull material should NOT be painted in technocrats' colors (the blueprint's saved tag) - it should follow expansionists, the match faction")
+		free_all.call()
+		return false
+
+	var expected_player_armor = HullMaterialBuilder.build_hull_material("hardened_steel", "industrialists").get_shader_parameter("base_color")
+	var expected_player_structural = HullMaterialBuilder.build_structural_material("industrialists").get_shader_parameter("base_color")
+	if player_base_color != expected_player_armor and player_base_color != expected_player_structural:
+		print("  [FAIL] Player unit's hull material should match industrialists' actual paint colors")
+		free_all.call()
+		return false
+
+	free_all.call()
+	await process_frame
+	print("  [PASS] Match faction (not the design's saved tag) drives both combat passives and the actual rendered hull material - verified with two units from the identical blueprint fielded under two different match factions.")
 	return true

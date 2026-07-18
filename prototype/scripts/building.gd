@@ -159,7 +159,7 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 
 	vision_range *= FactionCatalog.get_passive(faction, "vision_mult", 1.0)
 
-func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node):
+func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node, match_faction: String = ""):
 	kind = "defense"
 	team = building_team
 	set_meta("team", team)
@@ -167,7 +167,7 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 	collision_mask = 0
 	bp_manager = manager
 
-	defense_hull = manager.reconstruct_vehicle(blueprint_data, self)
+	defense_hull = manager.reconstruct_vehicle(blueprint_data, self, false, match_faction)
 	if defense_hull:
 		armor_material = defense_hull.get_meta("armor_material") if defense_hull.has_meta("armor_material") else "hardened_steel"
 		armor_thickness = defense_hull.get_meta("armor_thickness") if defense_hull.has_meta("armor_thickness") else 1.0
@@ -219,7 +219,10 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 		# only a local var was read here, leaving .faction at the default -
 		# so faction-of-the-construct lookups like the Bayou Irregulars
 		# detection passive in skirmish.gd's _get_construct_faction() always
-		# saw "industrialists" for defense buildings).
+		# saw "industrialists" for defense buildings). Reads whatever
+		# reconstruct_vehicle() actually set on the hull above - which is the
+		# match_faction override when one was passed in (FABLE_REVIEW 1.7),
+		# not necessarily the blueprint's own saved tag.
 		faction = defense_hull.get_meta("faction", "industrialists")
 		vision_range *= FactionCatalog.get_passive(faction, "vision_mult", 1.0)
 
@@ -302,7 +305,12 @@ func _spawn_unit(blueprint_data: Dictionary):
 	var exit_offset = Vector3(0, 0.5, footprint.z / 2.0 + 3.0) * (1 if team == 0 else -1)
 	exit_offset.y = 0.5
 	unit.global_position = global_position + exit_offset
-	unit.setup(blueprint_data, team, bp_manager)
+	# The factory's own faction IS the match faction for this team (set at
+	# spawn from player_faction/enemy_faction - see skirmish.gd's
+	# _spawn_starting_manufactories()) - passing it through here is what
+	# makes a queued unit reskin/rebalance to the match faction regardless
+	# of whatever faction its design was saved under (FABLE_REVIEW 1.7).
+	unit.setup(blueprint_data, team, bp_manager, faction)
 	var scene_root = get_parent()
 	if scene_root and scene_root.has_method("_on_resources_delivered"):
 		unit.resources_delivered.connect(scene_root._on_resources_delivered)

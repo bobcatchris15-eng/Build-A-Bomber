@@ -310,7 +310,7 @@ func load_blueprint(file_path: String) -> Dictionary:
 		print("JSON Parse Error: ", json.get_error_message(), " in ", json_string, " at line ", json.get_error_line())
 	return {}
 
-func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_designer: bool = false) -> Node3D:
+func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_designer: bool = false, match_faction_override: String = "") -> Node3D:
 	if blueprint_data.is_empty():
 		return null
 
@@ -350,7 +350,19 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	
 	var armor_thick = blueprint_data.get("armor_thickness", 1.0)
 	var armor_mat_name = blueprint_data.get("armor_material", "hardened_steel")
+	# Match faction overrides the blueprint's own saved tag entirely - both
+	# stats (hull.set_meta("faction") below, read by battle_unit.gd's passive
+	# lookups) and looks (HullMaterialBuilder/Greebles/Decals below all take
+	# this same faction_name). Chris's explicit resolution of FABLE_REVIEW
+	# 1.7: whichever faction was selected in the Design Lab while designing
+	# has zero effect once a design is actually in a match - only real,
+	# non-designer callers pass a non-empty override (skirmish spawns,
+	# manufactory production, defense placement); the Design Lab's own
+	# preview reconstructions (is_designer=true) never do, so a player can
+	# still preview/tag a faction while designing without it sticking.
 	var faction_name = blueprint_data.get("faction", "industrialists")
+	if match_faction_override != "":
+		faction_name = match_faction_override
 	var nose_taper = blueprint_data.get("nose_taper", 1.0)
 	hull.set_meta("armor_thickness", armor_thick)
 	hull.set_meta("armor_material", armor_mat_name)

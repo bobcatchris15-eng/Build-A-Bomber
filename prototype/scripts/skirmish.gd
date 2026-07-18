@@ -649,7 +649,11 @@ func spawn_unit(blueprint_data: Dictionary, team: int, pos: Vector3) -> Node:
 	unit.set_script(BattleUnitScript)
 	add_child(unit)
 	unit.global_position = Vector3(pos.x, terrain_height_at(pos) + pos.y, pos.z)
-	unit.setup(blueprint_data, team, bp_manager)
+	# The match's chosen faction overrides whatever the design was saved
+	# under (FABLE_REVIEW 1.7) - stats AND looks both follow the team's real
+	# faction, not the blueprint's own tag.
+	var match_faction = player_faction if team == PLAYER_TEAM else enemy_faction
+	unit.setup(blueprint_data, team, bp_manager, match_faction)
 	unit.resources_delivered.connect(_on_resources_delivered)
 	return unit
 
@@ -658,7 +662,11 @@ func spawn_defense(blueprint_data: Dictionary, team: int, pos: Vector3) -> Stati
 	b.set_script(BuildingScript)
 	add_child(b)
 	b.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
-	b.setup_defense(blueprint_data, team, bp_manager)
+	# Always PLAYER_TEAM today (the only spawn_defense() call site), but
+	# written generically like spawn_unit() above rather than hardcoding
+	# player_faction, in case that changes.
+	var match_faction = player_faction if team == PLAYER_TEAM else enemy_faction
+	b.setup_defense(blueprint_data, team, bp_manager, match_faction)
 	return b
 
 # tier: "" returns a manufactory of ANY tier (backward-compatible
@@ -931,7 +939,9 @@ func _begin_placement(info: Dictionary):
 	# reconstruct per placement-start, not per frame.
 	if info.kind == "defense":
 		var range_preview = 0.0
-		var temp_hull = bp_manager.reconstruct_vehicle(info.blueprint, self)
+		# Player-only placement flow - match_faction is always player_faction
+		# here, same override reasoning as spawn_defense() below.
+		var temp_hull = bp_manager.reconstruct_vehicle(info.blueprint, self, false, player_faction)
 		if temp_hull:
 			for child in temp_hull.get_children():
 				if child.has_meta("module_data"):

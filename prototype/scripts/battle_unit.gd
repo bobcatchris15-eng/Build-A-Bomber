@@ -120,7 +120,7 @@ func _ready():
 	add_to_group("units")
 	add_to_group("damageable")
 
-func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void:
+func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node, match_faction: String = "") -> void:
 	team = unit_team
 	set_meta("team", team)
 	collision_layer = 4
@@ -145,7 +145,7 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node) -> void
 	if is_flying:
 		target_altitude = 4.0
 
-	hull_node = bp_manager.reconstruct_vehicle(blueprint_data, self)
+	hull_node = bp_manager.reconstruct_vehicle(blueprint_data, self, false, match_faction)
 	if not hull_node:
 		return
 
