@@ -1,0 +1,82 @@
+{
+  "hulls": {
+    "airship_hull": "A large, sleek sci-fi airship hull/gondola. Minimalist, clean, aerodynamic shape. Straight front 3/4 perspective. Solid white background, no engines, no propellers, no weapons. Just the clean main hull body.",
+    "assault_hull": "A central chassis of a modular sci-fi vehicle. Clean, simple, symmetrical design. Straight front 3/4 perspective. NO treads, NO wheels, NO legs, NO weapons. It should just be the heavy, armored central metal block/hull, floating against a solid white background.",
+    "flying_wing_hull": "A sci-fi flying wing aircraft hull. Flat, aerodynamic, triangular shape. Straight front 3/4 perspective. Solid white background, no engines, no cockpit glass, no weapons. Just the clean main hull body.",
+    "fortress_wall_foundation": "A heavy sci-fi fortress wall foundation block. Blocky, industrial, reinforced concrete and steel structure. Straight front 3/4 perspective. Solid white background. Just the foundation slab, no weapons, no turrets.",
+    "fuselage_hull": "A simple aerodynamic sci-fi vehicle fuselage hull. Cylindrical, tapered, clean panels. Straight front 3/4 perspective. Solid white background, no wings, no engines, no weapons.",
+    "heavy_cruiser_hull": "A large sci-fi cruiser spaceship hull. Heavy armored paneling, elongated warship design. Straight front 3/4 perspective. Solid white background, no thrusters, no weapons, no antennas. Just the clean hull chassis.",
+    "heavy_hull": "A massive, heavy armored ground vehicle chassis. Central hull only, blocky and reinforced. Straight front 3/4 perspective. Solid white background, no wheels, no treads, no legs, no weapons. Just the clean main hull body.",
+    "interceptor_hull": "A lightweight, pointed sci-fi interceptor jet hull. Sharp angles, sleek aerodynamic lines. Straight front 3/4 perspective. Solid white background, no wings, no thrusters, no weapons.",
+    "light_hull": "A light, agile sci-fi ground vehicle chassis. Small, compact central hull only. Straight front 3/4 perspective. Solid white background, no wheels, no treads, no legs, no weapons. Just the clean main hull body.",
+    "medium_hull": "A medium-sized modular sci-fi vehicle chassis. Balanced central hull only. Straight front 3/4 perspective. Solid white background, no wheels, no treads, no legs, no weapons. Just the clean main hull body.",
+    "naval_hull": "A modern naval warship hull. Sleek, pointed bow, flat stern, armored sides. Straight front 3/4 perspective. Solid white background, no superstructure, no weapons, no masts.",
+    "pillbox_foundation": "A low-profile reinforced concrete sci-fi pillbox bunker foundation. Octagonal or round defensive structure. Straight front 3/4 perspective. Solid white background. Just the base structure, no guns.",
+    "small_boat_hull": "A small utility speed boat hull. Sharp V-hull shape, open top deck. Straight front 3/4 perspective. Solid white background, no windshield, no motors.",
+    "sponson_hull": "A modular armored sponson hull attachment block. Angular protrusion designed to mount on the side of a larger vehicle. Straight front 3/4 perspective. Solid white background, no guns.",
+    "tower_foundation": "A tall, reinforced tower foundation block. Heavy industrial column base with steel support struts. Straight front 3/4 perspective. Solid white background."
+  },
+  "weapons": {
+    "basic_cannon": "A sci-fi vehicle basic tank cannon module. Simple armored turret base with a single straight barrel pointing forward. Straight front 3/4 perspective. Solid white background, isolated.",
+    "heavy_machine_gun": "A double-barreled sci-fi heavy machine gun module. Armored receiver block with two parallel barrels. Straight front 3/4 perspective. Solid white background, isolated.",
+    "rotary_cannon": "A multi-barrel rotary gattling cannon module. Cylindrical rotating barrel assembly attached to an armored mounting block. Straight front 3/4 perspective. Solid white background, isolated.",
+    "gauss_railgun": "A long, sleek sci-fi gauss railgun module. Parallel rails with magnetic coils along the barrel length, mounted on a base. Straight front 3/4 perspective. Solid white background, isolated.",
+    "heavy_howitzer": "A massive heavy howitzer artillery cannon module. Large muzzle brake, reinforced recoil mechanism, thick short barrel pointing slightly up. Straight front 3/4 perspective. Solid white background, isolated.",
+    "mortar_array": "A multi-tube mortar array launcher module. Group of short launching tubes pointing upward in a boxy frame. Straight front 3/4 perspective. Solid white background, isolated.",
+    "spigot_mortar": "A heavy spigot mortar launcher module. Single wide-mouth mortar launcher on a heavy rotating mount. Straight front 3/4 perspective. Solid white background, isolated.",
+    "guided_missile": "A single modern guided missile module sitting on a launch rail. Sleek rocket with steering fins. Straight front 3/4 perspective. Solid white background, isolated.",
+    "dual_stage_missile": "A dual-stage rocket missile module on a launching frame. Segmented rocket body with booster stage. Straight front 3/4 perspective. Solid white background, isolated.",
+    "missile_pod": "A boxy sci-fi missile pod module. Rectangular launcher container with multiple circular rocket tube openings on the front. Straight front 3/4 perspective. Solid white background, isolated.",
+    "cluster_dispenser": "A boxy cluster bomb dispenser module. Rectangular container with drop doors or venting ports. Straight front 3/4 perspective. Solid white background, isolated.",
+    "flamethrower": "A sci-fi flamethrower weapon module. Armored nozzle with an igniter tip and connected fuel line tube. Straight front 3/4 perspective. Solid white background, isolated.",
+    "heavy_laser": "A sleek sci-fi heavy laser emitter module. Cylindrical focusing lens barrel with glowing emitter rings on a mount. Straight front 3/4 perspective. Solid white background, isolated.",
+    "plasma_lobber": "A heavy plasma lobber cannon module. Bulbous energy chamber barrel with magnetic containment rings. Straight front 3/4 perspective. Solid white background, isolated.",
+    "ciws": "A rapid-fire CIWS turret module. Radome dome on top of a rotating base with an integrated gattling gun barrel. Straight front 3/4 perspective. Solid white background, isolated.",
+    "pd_laser": "A compact point-defense laser turret module. Small ball turret base with dual tiny emitter lenses. Straight front 3/4 perspective. Solid white background, isolated.",
+    "flak_cannon": "A double-barreled flak anti-aircraft cannon module. Dual heavy barrels with muzzle brakes on an armored rotating base. Straight front 3/4 perspective. Solid white background, isolated.",
+    "tesla_coil": "A vertical tesla coil generator module. Metallic tower with a large metal sphere at the top. Straight front 3/4 perspective. Solid white background, isolated.",
+    "arc_projector": "A sci-fi arc projector module. Dual pronged electrodes pointing forward from a power housing. Straight front 3/4 perspective. Solid white background, isolated.",
+    "ion_cannon": "A high-tech ion cannon turret module. Heavily detailed mechanical barrel with energy capacitors along the side. Straight front 3/4 perspective. Solid white background, isolated.",
+    "drone_carrier": "A modular drone carrier hangar module. Flat deck structure with open launching bays inside. Straight front 3/4 perspective. Solid white background, isolated."
+  },
+  "support": {
+    "resource_harvester": "A heavy sci-fi resource harvester drill module. Large industrial rotating drill bit or intake funnel assembly. Straight front 3/4 perspective. Solid white background, isolated.",
+    "repair_array": "A sci-fi repair robotic arm module. Multi-jointed mechanical arm with a welding laser tool head. Straight front 3/4 perspective. Solid white background, isolated.",
+    "sensor_suite": "A vertical sensor mast suite module. Tall antenna pole with rotating radar dish and sensor dome attachments. Straight front 3/4 perspective. Solid white background, isolated.",
+    "logistics_tank": "A large cylindrical metal cargo tank module with support straps and pipe connectors. Straight front 3/4 perspective. Solid white background, isolated.",
+    "wing": "A single modular aircraft wing segment. Clean aerodynamic paneling, slightly angled. Straight front 3/4 perspective. Solid white background, isolated.",
+    "thruster": "A sci-fi rocket thruster module. Cylindrical engine bell nozzle with fuel pipe connections. Straight front 3/4 perspective. Solid white background, isolated.",
+    "propeller_prop": "A classic aircraft propeller module. Spin hub with three blades. Straight front 3/4 perspective. Solid white background, isolated.",
+    "pusher_prop": "A rear-facing pusher propeller module. Spin hub with short wide blades inside a circular duct ring. Straight front 3/4 perspective. Solid white background, isolated.",
+    "paddle_wheel": "A classic industrial paddle wheel module. Cylindrical rotating wheel with flat paddles. Straight front 3/4 perspective. Solid white background, isolated.",
+    "ship_screw": "A marine ship screw propeller module. Spin hub with three curved bronze-like blades. Straight front 3/4 perspective. Solid white background, isolated."
+  },
+  "armor_and_generators": {
+    "armor_plating": "A flat, heavy sci-fi armor plate module. Rectangular steel plate with rivets and angled modular edges. Straight front 3/4 perspective. Solid white background, isolated.",
+    "fusion_generator": "A high-tech fusion reactor generator module. Cylindrical reactor core with glowing power conduits. Straight front 3/4 perspective. Solid white background, isolated.",
+    "capacitor_bank": "A blocky capacitor bank storage module. Rectangular battery housing with high-voltage connectors. Straight front 3/4 perspective. Solid white background, isolated."
+  },
+  "locomotion": {
+    "wheels": "A heavy off-road vehicle wheel module. Thick rubber tire with deep treads and a metal central hub. Straight front 3/4 perspective. Solid white background, isolated.",
+    "omni_wheels": "A modular omni-wheel mecanum wheel module. Specialized roller wheels around the main rim. Straight front 3/4 perspective. Solid white background, isolated.",
+    "tracked_treads": "A modular tank tread assembly module. Continuous tracks over a drive sprocket and road wheels. Straight front 3/4 perspective. Solid white background, isolated.",
+    "rhomboid_treads": "A large rhomboid-shaped heavy tank tread assembly module, style of WWI tanks. Straight front 3/4 perspective. Solid white background, isolated.",
+    "legs": "A modular multi-jointed robotic mech leg module. Heavy industrial hydraulic pistons and foot pad. Straight front 3/4 perspective. Solid white background, isolated.",
+    "hover_engine": "A flat hover engine module. Circular metallic pad with downward-pointing venting grilles. Straight front 3/4 perspective. Solid white background, isolated.",
+    "anti_grav": "A high-tech anti-gravity ring generator module. Circular metallic ring with glowing energy fields in the center. Straight front 3/4 perspective. Solid white background, isolated.",
+    "helicopter_rotors": "A helicopter rotor assembly module. Vertical shaft with four long, thin blades. Straight front 3/4 perspective. Solid white background, isolated.",
+    "fixed_wing_engine": "A turboprop fixed-wing aircraft jet engine module. Sleek nacelle housing a jet engine. Straight front 3/4 perspective. Solid white background, isolated.",
+    "ornithopter_wing": "A mechanical flapping wing module, insect-like structure. Straight front 3/4 perspective. Solid white background, isolated.",
+    "naval_propeller": "A marine propeller shaft assembly module. Extended metal shaft ending in a bronze propeller screw. Straight front 3/4 perspective. Solid white background, isolated.",
+    "buoyant_envelope": "A lightweight buoyant envelope float module. Cylindrical balloon-like bladder in a metal frame cage. Straight front 3/4 perspective. Solid white background, isolated.",
+    "screw_drive": "A heavy screw drive vehicle propulsion module. Large rotating metal cylinder with helical spiral treads. Straight front 3/4 perspective. Solid white background, isolated."
+  },
+  "buildings": {
+    "hq": "A command headquarters prefab building. Futuristic blocky building with a communications radar dish on the roof and armored windows. Straight front 3/4 perspective. Solid white background, isolated.",
+    "refinery": "An industrial resource refinery building. Modular structure with metal pipes, exhaust chimneys, and processing tanks. Straight front 3/4 perspective. Solid white background, isolated.",
+    "light_manufactory": "A low-profile light manufacturing assembly building. Flat modular warehouse with sliding cargo doors and solar panels on the roof. Straight front 3/4 perspective. Solid white background, isolated.",
+    "medium_manufactory": "A medium-sized factory building. Blocky industrial structure with crane arms on the exterior and loading docks. Straight front 3/4 perspective. Solid white background, isolated.",
+    "heavy_manufactory": "A large heavy vehicle manufactory hangar building. Tall blocky hangar structure with giant bay doors and exterior cooling towers. Straight front 3/4 perspective. Solid white background, isolated.",
+    "power_plant": "A clean power plant building. Compact high-tech structure with electrical transformers, generator units, and glowing panels. Straight front 3/4 perspective. Solid white background, isolated."
+  }
+}
