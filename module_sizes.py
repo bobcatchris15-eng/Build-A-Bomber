@@ -74,4 +74,12 @@ sizes = {
     "pillbox_foundation": (3.0, 2.0, 3.0),
     "tower_foundation": (3.0, 6.0, 3.0),
     "interceptor_hull": (3.0, 1.5, 5.0),
+
+    # Prefab Buildings (Width x Height x Length)
+    "hq": (7.0, 4.0, 7.0),
+    "refinery": (5.0, 3.0, 5.0),
+    "light_manufactory": (5.0, 2.4, 6.0),
+    "medium_manufactory": (6.0, 3.0, 8.0),
+    "heavy_manufactory": (7.5, 3.8, 10.0),
+    "power_plant": (4.5, 4.2, 4.5),
 }
