@@ -390,6 +390,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			authored_hull_mesh = HullDeformScript.apply_nose_taper(authored_hull_mesh, nose_taper)
 		mesh_inst.mesh = authored_hull_mesh
 		mesh_inst.scale = hull_scale * armor_bulk
+		mesh_inst.rotation.y = deg_to_rad(ModuleCatalogScript.get_hull_visual_yaw_offset_deg(hull_type))
 	else:
 		var box = BoxMesh.new()
 		box.size = catalog_data.size * hull_scale * armor_bulk

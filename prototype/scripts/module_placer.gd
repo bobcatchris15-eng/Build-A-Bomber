@@ -427,11 +427,12 @@ func _place_hull_from_ui(type_id: String):
 	var authored_mesh = MeshAssetLoader.get_hull_mesh(type_id)
 	if authored_mesh:
 		mesh_inst.mesh = authored_mesh
+		mesh_inst.rotation.y = deg_to_rad(ModuleCatalog.get_hull_visual_yaw_offset_deg(type_id))
 	else:
 		var box = BoxMesh.new()
 		box.size = catalog_data.size
 		mesh_inst.mesh = box
-	
+
 	var mat = StandardMaterial3D.new()
 	mat.albedo_color = catalog_data.color
 	mesh_inst.material_override = mat
@@ -1071,6 +1072,7 @@ func update_hull_appearance():
 				authored_mesh = HullDeformScript.apply_nose_taper(authored_mesh, taper)
 		mesh_inst.mesh = authored_mesh
 		mesh_inst.scale = hull_scale * armor_bulk
+		mesh_inst.rotation.y = deg_to_rad(ModuleCatalog.get_hull_visual_yaw_offset_deg(type_id))
 	else:
 		var box = BoxMesh.new()
 		box.size = catalog_data.size * hull_scale * armor_bulk

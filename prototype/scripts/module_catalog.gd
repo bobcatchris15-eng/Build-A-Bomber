@@ -975,6 +975,22 @@ static func hull_exists(type_id: String) -> bool:
 	var cat = get_catalog()
 	return cat.has(type_id) and cat[type_id].get("category", "") == "hull"
 
+# Every authored hull mesh (Chris confirmed, 2026-07-19) visually faces the
+# opposite way from the -Z front convention every other system in this
+# codebase already agrees on (weapon mounting, movement, facet
+# classification, AI targeting - none of that logic is wrong, only the
+# authored mesh's visual nose direction is). Rather than re-export/re-author
+# every .glb, this is a purely VISUAL yaw correction applied only to the
+# MeshInstance3D the mesh is displayed on - it never touches the hull's
+# collision shape, module local coordinates, or any gameplay-facing
+# direction math, all of which already work correctly. Defaults to the
+# 180-degree flip every current hull needs; a future hull authored with its
+# nose already at -Z can opt out via its own "visual_yaw_offset_deg" catalog
+# field (or JSON sidecar field, for HullLoader-scanned mod hulls).
+const HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG: float = 180.0
+static func get_hull_visual_yaw_offset_deg(hull_type_id: String) -> float:
+	return get_module_data(hull_type_id).get("visual_yaw_offset_deg", HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG)
+
 # Energy resource (ENERGY_AND_BALANCE_SPEC.md #1): a hull's base_energy is
 # the starting point for max_energy before any generator modules are
 # mounted. Defaults to 0.0 for anything without a base_energy field
