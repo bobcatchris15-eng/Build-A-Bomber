@@ -136,6 +136,7 @@ func _init():
 	success = success and await test_target_dummies_actually_take_damage_in_test_range()
 	success = success and await test_pintle_mounts_grant_full_traverse()
 	success = success and await test_design_lab_firing_arc_matches_real_pintle_traverse()
+	success = success and await test_firing_arc_disappears_after_dragging_the_weapon()
 
 	print("\n==============================================")
 	if success:
@@ -7770,4 +7771,76 @@ func test_design_lab_firing_arc_matches_real_pintle_traverse() -> bool:
 
 	scene.queue_free()
 	print("  [PASS] A pintle-mounted weapon's Design Lab firing arc visualization is a real full-circle cone (not narrow), and cleanly disappears once deselected.")
+	return true
+
+func test_firing_arc_disappears_after_dragging_the_weapon() -> bool:
+	print("Running Test Suite: Firing Arc Disappears After Dragging The Weapon To A New Spot...")
+	# Regression test for the reported repro: place a weapon (arc appears),
+	# drag it to a new spot, drop it. The mouse-release handler reselects
+	# the same module (_select_module(selected_module)), which calls
+	# _deselect_module() and then immediately adds a fresh "ArcCone" in the
+	# same frame. _deselect_module() used queue_free() (deferred) - the old
+	# node was still in the tree when the new one was added a moment
+	# later, so Godot auto-renamed the new one "ArcCone2" to avoid the name
+	# collision. Every later _deselect_module() call looks for a child
+	# named exactly "ArcCone" and never found the renamed one again - the
+	# arc was permanently orphaned from cleanup, visible forever after the
+	# first drag.
+	var scene = load("res://scenes/MainLab.tscn").instantiate()
+	root.add_child(scene)
+	current_scene = scene
+	await process_frame
+
+	scene._place_weapon_from_ui("rotary_cannon", Vector3(0, 1.0, 0), Vector3.UP)
+	await process_frame
+
+	var weapon = null
+	for child in scene.hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "rotary_cannon":
+			weapon = child
+			break
+	if not weapon:
+		print("  [FAIL] Weapon was not placed on the hull.")
+		scene.queue_free()
+		return false
+
+	scene._select_module(weapon)
+	await process_frame
+
+	# Drag it to a side facet and drop (the exact sequence _unhandled_input
+	# runs: reposition every drag-motion frame, then reclassify + reselect
+	# once the mouse button is released).
+	scene._update_module_placement(weapon, Vector3(2.0, 1.0, 0), Vector3.RIGHT)
+	scene.check_all_clipping()
+	weapon.set_meta("_last_drag_normal", Vector3.RIGHT)
+	scene._reclassify_module_after_drag(weapon, Vector3.RIGHT)
+	scene._select_module(weapon)
+	await process_frame
+
+	# There should be exactly one child literally named "ArcCone" right
+	# after the drop - if the old one got renamed to "ArcCone2" this would
+	# either be missing or duplicated.
+	var arc_children_after_drag = []
+	for child in weapon.get_children():
+		if String(child.name).begins_with("ArcCone"):
+			arc_children_after_drag.append(String(child.name))
+	if arc_children_after_drag != ["ArcCone"]:
+		print("  [FAIL] Expected exactly one child named 'ArcCone' right after the drag+reselect, got: ", arc_children_after_drag)
+		scene.queue_free()
+		return false
+
+	scene._select_module(null)
+	await process_frame
+
+	var leaked = []
+	for child in weapon.get_children():
+		if child.name.begins_with("ArcCone"):
+			leaked.append(child.name)
+	scene.queue_free()
+
+	if not leaked.is_empty():
+		print("  [FAIL] Firing arc is still present after deselecting a weapon that was previously dragged: ", leaked)
+		return false
+
+	print("  [PASS] Dragging a weapon to a new spot and deselecting it afterward doesn't orphan the firing arc visualization from cleanup.")
 	return true
