@@ -1108,64 +1108,36 @@ static func is_turreted_capable(hull_type_id: String) -> bool:
 	var data = get_module_data(hull_type_id)
 	return data.get("turreted_capable", true)
 
-# Single source of truth for weapon traverse limits, shared between the
-# runtime combat AI (auto_weapon.gd) and the Design Lab firing-arc
-# visualization (module_placer.gd) - they must never drift apart, since the
-# whole point of the visualization is to show players what the weapon will
-# actually do in combat.
-# MOUNTING_AND_ARMOR_SPEC.md #3: how a weapon/device physically sits
-# depends on which hull facet it's mounted on. Single source of truth so
-# module_placer.gd (positioning/embedding) and visual_builder.gd (mount
-# hardware) agree on the same classification.
+# Single source of truth for weapon mount style, shared between the runtime
+# combat AI (auto_weapon.gd), the Design Lab placement code (module_placer.gd),
+# and the mount-hardware mesh builder (visual_builder.gd) - they must never
+# drift apart, since the whole point is that they all agree on the same
+# classification. Collapsed from a 5-bucket system (turret / frame_built /
+# pintle_top / pintle_bottom / sponson) to 3 buckets. Sponson no longer
+# exists; a "pintle" is now the universal independent-traverse mount, drawn
+# as a chunky post running along whatever column axis the click put it on
+# (vertical post for a top click, horizontal arm for a side click, diagonal
+# post for a corner click) - see module_placer.gd's column-axis model.
 #   "turret"      - existing enclosed-turret visual, unchanged (basic_cannon only)
 #   "frame_built" - built into the vehicle frame; the whole vehicle aims, not the weapon
-#   "pintle_top"   - pintle base on the hull, weapon sits level on top
-#   "pintle_bottom" - inverted: pintle reaches down from the hull, weapon hangs below
-#   "sponson"     - embedded into the hull body, only the muzzle projects out
+#   "pintle"      - column-axis independent-traverse mount, 360 azimuth + 90 elevation
 #
-# hull_type_id (optional) generalizes "frame_built" from weapon-type-gated
-# to turreted_capable-trait-gated (MOUNTING_AND_ARMOR_SPEC.md addendum): on
-# a hull that doesn't support independent traverse, EVERYTHING mounts
+# hull_type_id generalizes "frame_built" from weapon-type-gated to
+# turreted_capable-trait-gated (MOUNTING_AND_ARMOR_SPEC.md addendum): on a
+# hull that doesn't support independent traverse, EVERYTHING mounts
 # frame_built, including basic_cannon - nothing should carry visible
 # independent-traverse hardware on a unit that can't actually traverse
-# weapons independently. Omitting hull_type_id (or every hull that exists
-# today, which all default turreted_capable=true) keeps the original
-# weapon-type-only behavior unchanged.
-static func get_mount_style(type_id: String, facet: String, hull_type_id: String = "") -> String:
-	# Legacy discrete-facet entry point - kept because get_traverse_limit_angle()
-	# only ever needs this for the turret/frame_built gate (not the pintle-
-	# vs-sponson distinction, which needs the continuous version below), so
-	# rewiring every call site wasn't necessary. Delegates to
-	# get_mount_style_for_normal() via a representative normal for whichever
-	# facet was named, so the actual style logic lives in exactly one place.
-	var normal = Vector3.ZERO
-	match facet:
-		"top": normal = Vector3.UP
-		"bottom": normal = Vector3.DOWN
-		"front": normal = Vector3.FORWARD
-		"back": normal = Vector3.BACK
-		"left": normal = Vector3.LEFT
-		"right": normal = Vector3.RIGHT
-	return get_mount_style_for_normal(type_id, normal, hull_type_id)
-
-# Fallback slope-from-horizontal threshold for any weapon that doesn't
-# carry its own "pintle_min_up_alignment" catalog entry (see
-# get_pintle_min_up_alignment() below - every real weapon type_id has one
-# as of this pass; this only matters for a future weapon someone forgets
-# to set it on). 0.3 = cos(~72.5 deg) - a reasonable generic middle ground
-# between the light-autogun (0.15) and ballistic-arc (0.5+) ends of the
-# real per-type range.
-const PINTLE_MIN_UP_ALIGNMENT_DEFAULT: float = 0.3
-
-# Per-weapon-type pintle eligibility (MOUNTING_AND_ARMOR_SPEC.md #3,
-# second correction): Chris's point was that a single geometric threshold
-# applied to every weapon uniformly is wrong - a compact machine gun
-# reasonably bolts onto almost any surface short of dead vertical, while a
-# mortar's ballistic arc math wants a much closer-to-level base, and that's
-# a judgment call about the WEAPON, not a property of the surface alone.
-# Each weapon's own reasoning is logged as a comment on its catalog entry.
-static func get_pintle_min_up_alignment(type_id: String) -> float:
-	return get_module_data(type_id).get("pintle_min_up_alignment", PINTLE_MIN_UP_ALIGNMENT_DEFAULT)
+# weapons independently. Omitting hull_type_id keeps the weapon-type-only
+# behavior (used by the few legacy call sites that don't yet know the
+# hull context).
+static func get_mount_style(type_id: String, hull_type_id: String = "") -> String:
+	if hull_type_id != "" and not is_turreted_capable(hull_type_id):
+		return "frame_built"
+	if type_id == "basic_cannon":
+		return "turret"
+	if type_id in ["gauss_railgun", "heavy_howitzer"]:
+		return "frame_built"
+	return "pintle"
 
 # Per-weapon-type traverse character (task: "differentiate and tune weapon
 # traversal rates per weapon type"). auto_weapon.gd's base traverse_speed
@@ -1179,13 +1151,12 @@ static func get_pintle_min_up_alignment(type_id: String) -> float:
 # need to snap-track since the warhead corrects after launch (~0.8-0.9),
 # precision energy weapons favor a stable deliberate aim (~0.75-0.8), and
 # indirect/ballistic-arc weapons traverse slowest since the arc itself
-# depends on a controlled, deliberate aim (~0.5-0.6) - the same real-world
-# intuition already used for get_pintle_min_up_alignment() above. Defaults
-# to 1.0 (no change from the base formula) for any weapon without an
-# explicit entry, and for non-weapon modules (resource_harvester,
-# repair_array, sensor_suite, logistics_tank, drone_carrier) which were
-# deliberately left out of this per-type pass since they're not combat
-# weapons being "aimed" in the same sense.
+# depends on a controlled, deliberate aim (~0.5-0.6). Defaults to 1.0
+# (no change from the base formula) for any weapon without an explicit
+# entry, and for non-weapon modules (resource_harvester, repair_array,
+# sensor_suite, logistics_tank, drone_carrier) which were deliberately
+# left out of this per-type pass since they're not combat weapons being
+# "aimed" in the same sense.
 static func get_traverse_agility(type_id: String) -> float:
 	return get_module_data(type_id).get("traverse_agility", 1.0)
 
@@ -1396,21 +1367,11 @@ static func get_underside_y_bias(hull_type_id: String) -> float:
 # makes a sloped glacis plate (interceptor_hull's nose, e.g.) a legitimate
 # pintle mount for a compact machine gun instead of forcing it into an
 # embedded sponson, while the same slope might still sponson-mount a mortar.
+# (Unused now: see column-axis model in module_placer.gd - we don't use a
+# per-frame surface-normal test anymore. Kept as a stub for legacy blueprint
+# reloads; new code should not call this.)
 static func get_mount_style_for_normal(type_id: String, normal: Vector3, hull_type_id: String = "") -> String:
-	if hull_type_id != "" and not is_turreted_capable(hull_type_id):
-		return "frame_built"
-	if type_id == "basic_cannon":
-		return "turret"
-	if type_id in ["gauss_railgun", "heavy_howitzer"]:
-		return "frame_built"
-	var min_up_alignment = get_pintle_min_up_alignment(type_id)
-	var up_alignment = normal.normalized().dot(Vector3.UP) if normal.length() > 0.001 else 0.0
-	if up_alignment >= min_up_alignment:
-		return "pintle_top"
-	elif up_alignment <= -min_up_alignment:
-		return "pintle_bottom"
-	else:
-		return "sponson"
+	return get_mount_style(type_id, hull_type_id)
 
 # Facet = one of the hull's 6 axis-aligned box faces (see
 # MOUNTING_AND_ARMOR_SPEC.md's "Known architecture constraint"). Shared
@@ -1428,64 +1389,35 @@ static func classify_facet(local_direction: Vector3) -> String:
 	else:
 		return "top" if local_direction.y > 0 else "bottom"
 
-# facet/hull_type_id (optional, mirrors get_mount_style()'s signature): a
-# frame_built weapon (AI/unit-AI pass, MOUNTING_AND_ARMOR_SPEC.md addendum)
-# has ZERO independent traverse by definition - "built into the vehicle
-# frame" means the barrel is fixed relative to the hull, and the WHOLE
-# VEHICLE has to turn to aim it (see battle_unit.gd's whole-vehicle-aim
-# logic). Omitting facet/hull_type_id keeps the original weapon-type-only
-# angle (used by any call site that doesn't yet know the mount context).
-static func get_traverse_limit_angle(type_id: String, facet: String = "", hull_type_id: String = "") -> float:
-	# Traverse limit is a function of MOUNT STYLE first, weapon type second
-	# (MOUNTING_AND_ARMOR_SPEC.md #3). The point of a pintle is that the
-	# post spins freely - a top-pintle machine gun that can only sweep 45
-	# degrees isn't a pintle, it's a fixed bracket. Conversely, a sponson
-	# is by definition an embedded mount with the weapon body rotating
-	# INSIDE the hull (only the muzzle projects), which physically can
-	# only sweep a narrow forward arc, not 360.
-	#
-	# Per-mount-style baseline:
-	#   frame_built    -> 0  (whole vehicle aims, the barrel is fixed)
-	#   turret         -> 2pi (basic_cannon's enclosed rotating structure
-	#                          - the existing tank-cannon visual is correct
-	#                          and stays, per spec)
-	#   pintle_top     -> 2pi (the whole point of a pintle - post + level top)
-	#   pintle_bottom  -> 2pi (inverted pintle, same freedom)
-	#   sponson        -> pi/3 (narrow forward arc, ~60 degrees)
-	#
-	# Per-weapon overrides below are a NARROWER cap layered on top: a
-	# mortar's lobbed arc wants even less traverse than the default sponson
-	# (~30 degrees), and a heavy_howitzer's long rigid barrel - already
-	# frame_built, so this is moot in practice - gets a small arc as a
-	# consistent fallback if it ever mounts elsewhere. ciws/pd_laser
-	# were previously hardcoded to 360; they're a pintle mount, so 360 is
-	# the correct answer, just now via the mount-style path instead of
-	# by weapon-id whitelist.
-	#
-	# Omitting facet/hull_type_id (the legacy weapon-type-only entry
-	# point) keeps the original per-type_id numbers so any call site that
-	# doesn't yet know the mount context still gets a meaningful angle.
-	if (facet != "" or hull_type_id != "") and get_mount_style(type_id, facet, hull_type_id) == "frame_built":
+# Single source of truth for weapon traverse limits, shared between the
+# runtime combat AI (auto_weapon.gd) and the Design Lab firing-arc
+# visualization (module_placer.gd) - they must never drift apart, since the
+# whole point of the visualization is to show players what the weapon will
+# actually do in combat. Per mount style (3 buckets, see get_mount_style()):
+#   frame_built -> 0  (whole vehicle aims, the barrel is fixed)
+#   turret      -> 2pi (basic_cannon's enclosed rotating structure - the
+#                        existing tank-cannon visual stays, per spec)
+#   pintle      -> 2pi (column-axis independent-traverse mount - 360 azimuth
+#                        + 90 elevation away from the hull. This replaces
+#                        the old per-facet dispatch where sponson got a
+#                        60-degree arc and top/bottom pintles got 360. Now
+#                        every independent-traverse mount is the same.)
+# hull_type_id (optional) generalizes "frame_built" from weapon-type-gated
+# to turreted_capable-trait-gated (MOUNTING_AND_ARMOR_SPEC.md addendum):
+# on a hull that doesn't support independent traverse, EVERYTHING gets zero
+# traverse - whole vehicle aims, no matter what the weapon type is.
+# Omitting hull_type_id keeps the original weapon-type-only behavior.
+# facet arg is kept for backward compat with any callers that still pass
+# it; it's ignored now since the new model is mount-style-only.
+static func get_traverse_limit_angle(type_id: String, _facet: String = "", hull_type_id: String = "") -> float:
+	if hull_type_id != "" and not is_turreted_capable(hull_type_id):
 		return 0.0
-	if facet == "" and hull_type_id == "":
-		if type_id in ["basic_cannon", "ciws", "pd_laser"]:
-			return PI # 360 degrees
-		elif type_id == "heavy_howitzer":
-			return PI / 3.0 # 60 degrees
-		elif type_id in ["mortar_array", "spigot_mortar"]:
-			return PI / 6.0 # 30 degrees
-		else:
-			return PI / 4.0 # 45 degrees
-	var style = get_mount_style(type_id, facet, hull_type_id)
-	if style in ["turret", "pintle_top", "pintle_bottom"]:
+	var style = get_mount_style(type_id, hull_type_id)
+	if style == "frame_built":
+		return 0.0
+	if style in ["turret", "pintle"]:
 		return PI # 360 degrees
-	# sponson: default 60-degree forward arc, with per-weapon narrow cap
-	# for indirect-fire weapons whose lobbed arc wants even less sweep.
-	if type_id in ["mortar_array", "spigot_mortar"]:
-		return PI / 6.0 # 30 degrees
-	elif type_id == "heavy_howitzer":
-		return PI / 3.0 # 60 degrees
-	return PI / 3.0 # 60 degrees
+	return PI # 360 degrees (every other mount is a pintle, all get 360)
 
 static func get_module_data(type_id: String) -> Dictionary:
 	var cat = get_catalog()
