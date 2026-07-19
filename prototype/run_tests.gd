@@ -137,6 +137,7 @@ func _init():
 	success = success and await test_pintle_mounts_grant_full_traverse()
 	success = success and await test_design_lab_firing_arc_matches_real_pintle_traverse()
 	success = success and await test_firing_arc_disappears_after_dragging_the_weapon()
+	success = success and await test_idle_units_auto_engage_sighted_enemies()
 
 	print("\n==============================================")
 	if success:
@@ -7843,4 +7844,74 @@ func test_firing_arc_disappears_after_dragging_the_weapon() -> bool:
 		return false
 
 	print("  [PASS] Dragging a weapon to a new spot and deselecting it afterward doesn't orphan the firing arc visualization from cleanup.")
+	return true
+
+func test_idle_units_auto_engage_sighted_enemies() -> bool:
+	print("Running Test Suite: Idle/Moving Units Auto-Engage Enemies In Sight...")
+	# Previously a unit only ever got an ATTACK order from an explicit
+	# external command (player right-click, or the enemy AI's wave-launch
+	# always targeting the player HQ specifically) - there was no logic for
+	# a unit to notice a nearby hostile on its own. An idle unit, or one
+	# marching toward an unrelated MOVE order, would walk right past an
+	# enemy, only getting whatever passive fire its own weapons' narrow
+	# traverse arcs happened to land, never actually maneuvering to fight.
+	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
+	root.add_child(bp_manager)
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "wheels", "settings": {"count": 4}},
+		"modules": [
+			{"type_id": "wheels", "position": {"x": 0, "y": 0, "z": 0}, "normal": {"x": 0, "y": 1, "z": 0}},
+			{"type_id": "basic_cannon", "position": {"x": 0.0, "y": 1.4, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+
+	var idle_unit = CharacterBody3D.new()
+	idle_unit.set_script(BattleUnitScript)
+	root.add_child(idle_unit)
+	idle_unit.setup(bp, 0, bp_manager)
+	idle_unit.global_position = Vector3(0, 1, 0)
+
+	var moving_unit = CharacterBody3D.new()
+	moving_unit.set_script(BattleUnitScript)
+	root.add_child(moving_unit)
+	moving_unit.setup(bp, 0, bp_manager)
+	moving_unit.global_position = Vector3(30, 1, 30)
+	moving_unit.order_move(Vector3(30, 1, 0)) # heading somewhere unrelated
+
+	var enemy = CharacterBody3D.new()
+	enemy.set_script(BattleUnitScript)
+	root.add_child(enemy)
+	enemy.setup(bp, 1, bp_manager)
+	# Within the idle unit's vision_range, well outside the moving unit's.
+	enemy.global_position = Vector3(0, 1, min(idle_unit.vision_range * 0.5, 10.0))
+
+	if idle_unit.vision_range <= 0.0:
+		print("  [FAIL] Test assumption broken: medium_hull should have a real vision_range.")
+		idle_unit.queue_free(); moving_unit.queue_free(); enemy.queue_free(); bp_manager.queue_free()
+		return false
+
+	# Advance past the throttled scan interval (0.5s).
+	for i in range(40):
+		await process_frame
+
+	var idle_engaged = idle_unit.order == idle_unit.OrderType.ATTACK and idle_unit.attack_target == enemy
+	var moving_still_moving = moving_unit.order == moving_unit.OrderType.MOVE
+
+	idle_unit.queue_free()
+	moving_unit.queue_free()
+	enemy.queue_free()
+	bp_manager.queue_free()
+
+	if not idle_engaged:
+		print("  [FAIL] An idle unit with an enemy within vision_range should have auto-engaged it, got order=", idle_unit.order, " attack_target=", idle_unit.attack_target)
+		return false
+	if not moving_still_moving:
+		print("  [FAIL] A unit with no enemy anywhere near its position should keep its existing MOVE order (auto-engage shouldn't fire on nothing), got order=", moving_unit.order)
+		return false
+
+	print("  [PASS] An idle unit with a hostile within vision_range automatically switches to attacking it, without disturbing a unit that has nothing nearby to engage.")
 	return true
