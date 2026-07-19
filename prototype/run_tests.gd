@@ -7569,10 +7569,49 @@ func test_target_dummies_actually_take_damage_in_test_range() -> bool:
 	# patrolling dummies at near-equal distance flip-flopped the target
 	# every frame, yanking the turret's aim back and forth so it could
 	# never converge within the firing angle tolerance at all.
+	# Battlefield._spawn_vehicle() fields whatever design is sitting in
+	# user://blueprint.json (falling back to a WEAPONLESS default hull if
+	# that file doesn't exist) - a real machine-state dependency that once
+	# silently broke this test (the file got clobbered by an unrelated
+	# diagnostic script during this same session). Write a known-good,
+	# weapon-equipped fixture and restore whatever was there before so this
+	# test never depends on - or damages - the player's actual last-active
+	# design again.
+	var bp_path = "user://blueprint.json"
+	var had_prior_bp = FileAccess.file_exists(bp_path)
+	var prior_bp_content = ""
+	if had_prior_bp:
+		var rf = FileAccess.open(bp_path, FileAccess.READ)
+		prior_bp_content = rf.get_as_text()
+		rf.close()
+	var fixture_bp = {
+		"version": 1.0,
+		"hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"faction": "industrialists",
+		"locomotion": {"type_id": "wheels", "settings": {"count": 4}},
+		"modules": [
+			{"type_id": "wheels", "position": {"x": 0, "y": 0, "z": 0}, "normal": {"x": 0, "y": 1, "z": 0}},
+			{"type_id": "heavy_laser", "position": {"x": 0, "y": 1.0, "z": -2.0}, "normal": {"x": 0, "y": 1, "z": 0}}
+		]
+	}
+	var wf = FileAccess.open(bp_path, FileAccess.WRITE)
+	wf.store_string(JSON.stringify(fixture_bp))
+	wf.close()
+
 	var battlefield_scene = preload("res://scenes/Battlefield.tscn").instantiate()
 	root.add_child(battlefield_scene)
 	current_scene = battlefield_scene
 	await process_frame
+
+	# Restore the player's real state immediately after spawning reads it -
+	# don't leave the fixture sitting there if the test fails/returns early.
+	if had_prior_bp:
+		var rwf = FileAccess.open(bp_path, FileAccess.WRITE)
+		rwf.store_string(prior_bp_content)
+		rwf.close()
+	else:
+		DirAccess.remove_absolute(bp_path)
 
 	var hull = battlefield_scene.vehicle_hull
 	if not hull:
