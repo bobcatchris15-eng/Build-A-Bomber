@@ -33,7 +33,7 @@ powershell.exe -NoProfile -Command "robocopy '$(cygpath -w "$REAL/assets")' '$(c
 # not just assets - only copy the rest if this is the isolated copy's first use.
 if [ ! -f "$DST/project.godot" ]; then
 	echo "=== First run: copying full project (excluding UPBGE/progress_captures/.godot) ==="
-	powershell.exe -NoProfile -Command "robocopy '$(cygpath -w "$REAL")' '$(cygpath -w "$DST")' /E /XD '$(cygpath -w "$REAL/UPBGE-0.30-windows-x86_64")' '$(cygpath -w "$REAL/progress_captures")' '$(cygpath -w "$REAL/.godot")' /NFL /NDL /NJH /NJS /NP; exit 0"
+	powershell.exe -NoProfile -Command "robocopy '$(cygpath -w "$REAL")' '$(cygpath -w "$DST")' /E /XD '$(cygpath -w "$REAL/UPBGE-0.30-windows-x86_64")' '$(cygpath -w "$REAL/progress_captures")' '$(cygpath -w "$REAL/.godot")' '$(cygpath -w "$REAL/.git")' '$(cygpath -w "$REAL/scratch/.reimport_root")' /NFL /NDL /NJH /NJS /NP; exit 0"
 fi
 
 echo "=== Running isolated reimport ==="
