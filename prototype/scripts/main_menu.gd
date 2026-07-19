@@ -18,11 +18,14 @@ func _ready():
 		faction = match_config.player_faction
 	UITheme.apply_brushed_panel(bg, faction)
 
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(center)
+
 	var vbox = VBoxContainer.new()
-	vbox.set_anchors_preset(Control.PRESET_CENTER)
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
 	vbox.add_theme_constant_override("separation", 14)
-	add_child(vbox)
+	center.add_child(vbox)
 
 	var title = Label.new()
 	title.text = "BUILD-A-BOMBER"
