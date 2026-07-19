@@ -1101,9 +1101,20 @@ func update_hull_appearance():
 
 func _deselect_module():
 	if selected_module:
+		# Immediate free (not queue_free) - same reasoning as
+		# _refresh_firing_arc()'s own old-arc cleanup: _select_module()
+		# calls this and then immediately adds a fresh "ArcCone" (e.g. the
+		# reselect-after-drag path in _unhandled_input's mouse-release
+		# handler, in the SAME frame). queue_free()'s deferred removal
+		# would leave the stale node around long enough for Godot to
+		# auto-rename the new one to "ArcCone2" to avoid the name
+		# collision - after that, this exact by-name lookup can never find
+		# it again, and the firing arc is permanently orphaned from
+		# cleanup (visible forever, even after later real deselects).
 		for child in selected_module.get_children():
 			if child.name == "ArcCone":
-				child.queue_free()
+				selected_module.remove_child(child)
+				child.free()
 
 func _build_firing_arc(module: Node3D, data) -> Node3D:
 	var container = Node3D.new()
