@@ -77,7 +77,7 @@ def generate_with_requests(api_key):
     import requests
     import base64
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:generateImages?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={api_key}"
     headers = {"Content-Type": "application/json"}
 
     for name, prompt in all_prompts.items():
@@ -88,17 +88,22 @@ def generate_with_requests(api_key):
             
         print(f"Generating image for {name}...")
         payload = {
-            "prompt": prompt,
-            "numberOfImages": 1,
-            "aspectRatio": "1:1",
-            "outputMimeType": "image/jpeg"
+            "instances": [
+                {
+                    "prompt": prompt
+                }
+            ],
+            "parameters": {
+                "sampleCount": 1,
+                "aspectRatio": "1:1"
+            }
         }
         
         try:
             response = requests.post(url, headers=headers, json=payload)
             if response.status_code == 200:
                 data = response.json()
-                img_b64 = data["generatedImages"][0]["image"]["imageBytes"]
+                img_b64 = data["predictions"][0]["bytesBase64Encoded"]
                 img_bytes = base64.b64decode(img_b64)
                 
                 with open(target_path, "wb") as f:
