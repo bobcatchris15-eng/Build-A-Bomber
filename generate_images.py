@@ -77,7 +77,7 @@ def generate_with_requests(api_key):
     import requests
     import base64
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
 
     for name, prompt in all_prompts.items():
@@ -88,14 +88,17 @@ def generate_with_requests(api_key):
             
         print(f"Generating image for {name}...")
         payload = {
-            "instances": [
+            "contents": [
                 {
-                    "prompt": prompt
+                    "parts": [
+                        {
+                            "text": prompt
+                        }
+                    ]
                 }
             ],
-            "parameters": {
-                "sampleCount": 1,
-                "aspectRatio": "1:1"
+            "generationConfig": {
+                "responseModalities": ["TEXT", "IMAGE"]
             }
         }
         
@@ -103,12 +106,23 @@ def generate_with_requests(api_key):
             response = requests.post(url, headers=headers, json=payload)
             if response.status_code == 200:
                 data = response.json()
-                img_b64 = data["predictions"][0]["bytesBase64Encoded"]
-                img_bytes = base64.b64decode(img_b64)
-                
-                with open(target_path, "wb") as f:
-                    f.write(img_bytes)
-                print(f"Saved: {target_path}")
+                # Parse candidates[0].content.parts[0].inlineData.data
+                try:
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            inline_data = parts[0].get("inlineData", {})
+                            img_b64 = inline_data.get("data", "")
+                            if img_b64:
+                                img_bytes = base64.b64decode(img_b64)
+                                with open(target_path, "wb") as f:
+                                    f.write(img_bytes)
+                                print(f"Saved: {target_path}")
+                                continue
+                    print(f"Failed to parse image from response for {name}: {data}")
+                except Exception as parse_err:
+                    print(f"Error parsing response for {name}: {parse_err}. Data: {data}")
             else:
                 print(f"Failed to generate {name}: HTTP {response.status_code} - {response.text}")
                 
