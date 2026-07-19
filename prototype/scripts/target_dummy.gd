@@ -24,7 +24,10 @@ var label: Label3D
 func _ready():
 	health = max_health
 	add_to_group("targets")
-	
+	add_to_group("damageable")
+	if not has_meta("team"):
+		set_meta("team", 1)
+
 	start_pos = global_position
 	is_patrolling = (randf() > 0.5)
 	is_combat_dummy = (randf() > 0.6) # 40% chance to be hostile
@@ -130,6 +133,7 @@ func take_damage(amount: float, damage_type: String = "kinetic", _hit_origin = n
 func die():
 	is_dead = true
 	remove_from_group("targets")
+	remove_from_group("damageable")
 	
 	if is_instance_valid(label):
 		label.visible = false

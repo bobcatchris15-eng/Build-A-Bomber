@@ -1873,10 +1873,8 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 		# Post spans from the hull surface to the weapon end. The weapon
 		# itself sits at distance effective_length along n from the hull
 		# surface; the post needs to span the SAME distance, with its
-		# center at effective_length/2 along n. The weapon's own local
-		# +Y points along n (set by module_placer.gd), so the post's
-		# local +Y must also point along n.
-		post.position = n * (effective_length * 0.5)
+		# center at effective_length/2 along -n.
+		post.position = -n * (effective_length * 0.5)
 		# Quaternion(UP, n) rotates the post's default up-axis to n -
 		# identity for n=UP (the original top-click case), 180 for
 		# n=DOWN (inverted post for a bottom click), smoothly tilted
@@ -1885,14 +1883,8 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 		hardware.add_child(post)
 
 		# Base plate at the hull end (the END the weapon is NOT at).
-		# For a top click that's at the hull top, weapon is above; for
-		# a bottom click the weapon is below, so the base plate is at
-		# the hull bottom (the far end of the column from the weapon).
-		# The base plate uses the existing _build_pintle_base_plate
-		# helper unchanged - it was already the right "chunky disc
-		# embedded into the hull" look, just called with the column
-		# axis as the flush normal.
-		hardware.add_child(_build_pintle_base_plate(n, base_size, Vector3.ZERO))
+		# Placed at -n * effective_length relative to the weapon.
+		hardware.add_child(_build_pintle_base_plate(n, base_size, -n * effective_length))
 	else:
 		# Horizontal/diagonal arm (side or corner click): the column
 		# axis lies mostly in the horizontal plane, so a single post
@@ -1909,26 +1901,13 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 		arm.mesh = cyl
 		arm.material_override = mat
 		# Same position+rotation logic as the vertical post, just
-		# driven by a horizontal n. Quaternion(UP, n) still works -
-		# it just rotates the cylinder's default up-axis to point
-		# along whatever direction n is.
-		arm.position = n * (effective_length * 0.5)
+		# driven by a horizontal n.
+		arm.position = -n * (effective_length * 0.5)
 		arm.transform.basis = Basis(Quaternion(Vector3.UP, n))
 		hardware.add_child(arm)
 
-		# Base plate at the hull end. For a horizontal column, the
-		# flush normal is the direction perpendicular to the column
-		# and to world-UP - i.e. the local "out" face of the hull
-		# the click landed on. For a perfect side click (n = RIGHT),
-		# the flush normal IS n; for a corner click, the flush normal
-		# is the cross of n and world-UP, normalized to be the
-		# component of world-UP perpendicular to n. Easier: the flush
-		# normal that the base plate was already designed around is
-		# "the hull surface normal" - and the click normal captured
-		# that. The simplest stand-in is n itself (the column points
-		# outward from the hull), which is correct for the common
-		# exactly-side case and acceptable for diagonals.
-		hardware.add_child(_build_pintle_base_plate(n, base_size, Vector3.ZERO))
+		# Base plate at the hull end.
+		hardware.add_child(_build_pintle_base_plate(n, base_size, -n * effective_length))
 
 # A base plate that conforms to the actual local surface (flat for a
 # top/bottom deck, tilted for a sloped glacis or similar), with a ring of

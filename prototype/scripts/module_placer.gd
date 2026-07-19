@@ -930,11 +930,19 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 	
 	hull.add_child(new_weapon)
 	
+	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
+	var pintle_style = ""
+	if category == "weapon":
+		pintle_style = ModuleCatalog.get_mount_style(type_id, hull_type_for_mount)
+	var stays_level = pintle_style == "pintle"
+
 	# Snap to 0.25m grid relative to hull local space
 	var final_pos = pos
+	var local_pos = Vector3.ZERO
+	var local_normal = Vector3.UP
 	if hull:
-		var local_pos = hull.to_local(pos)
-		var local_normal = hull.global_transform.basis.inverse() * normal
+		local_pos = hull.to_local(pos)
+		local_normal = hull.global_transform.basis.inverse() * normal
 		
 		var snap_interval = 0.25
 		if abs(local_normal.x) < 0.9:
@@ -947,20 +955,6 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 		final_pos = hull.to_global(local_pos)
 		
 	new_weapon.global_position = final_pos
-
-	# Decided BEFORE the reorientation step below, since it changes that
-	# decision: a pintle-style mount (MOUNTING_AND_ARMOR_SPEC.md #3
-	# correction) keeps the WEAPON itself level regardless of the surface's
-	# slope - only its base-plate hardware tilts to conform to the actual
-	# local surface (added further down, see VisualBuilder.add_mount_hardware()).
-	# Previously only an exactly-flat top/bottom stayed level; a sloped
-	# glacis plate fell through to the generic surface-normal alignment
-	# below and tilted the whole weapon with it.
-	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
-	var pintle_style = ""
-	if category == "weapon":
-		pintle_style = ModuleCatalog.get_mount_style_for_normal(type_id, normal, hull_type_for_mount)
-	var stays_level = pintle_style == "pintle_top" or pintle_style == "pintle_bottom"
 
 	# Align to surface normal if not perfectly up/down (and not a
 	# pintle-style mount, which stays level by design - see above)
@@ -1000,7 +994,6 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 			# positioned wherever the player happened to click would poke
 			# out past the hull edge on one side. Snap the two in-plane
 			# axes to hull-center (0) and keep only the surface-normal axis.
-			var local_normal = hull.global_transform.basis.inverse() * normal
 			var armor_facet = ModuleCatalog.classify_facet(local_normal)
 			var centered_local = Vector3.ZERO
 			match armor_facet:
@@ -1016,28 +1009,40 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 			# treating all placed armor as one undifferentiated pool.
 			new_weapon.set_meta("facet", armor_facet)
 
-	# Face-based weapon mounting (MOUNTING_AND_ARMOR_SPEC.md #3): sponson-
-	# embed on near-vertical faces, pintle stand on anything with a
-	# meaningful up/down component (INCLUDING sloped surfaces like a
-	# glacis plate, not just an exactly-flat top/bottom - see
-	# get_mount_style_for_normal()'s continuous check), except railgun/
-	# howitzer (frame-built) and basic_cannon (existing enclosed turret).
+	# Face-based weapon mounting (MOUNTING_AND_ARMOR_SPEC.md #3):
+	# turret and frame-built have no columns. pintle mount extends outward
+	# along the column direction by column_length.
 	if category == "weapon":
 		var mount_style = pintle_style
-		# Stored as meta (not just applied once) so rebuild_visual() - called
-		# on every gizmo tweak-drag frame, which clears and rebuilds all
-		# MeshInstance3D children - knows to re-add the mount hardware
-		# instead of silently losing it on the first tweak. mount_normal is
-		# the actual local surface normal the base plate should conform to
-		# (identity-rotation weapon means world normal IS the local one
-		# here) - without it, a reload/rebuild would fall back to a flat
-		# plate and silently lose the tilt on a glacis-mounted weapon.
 		new_weapon.set_meta("mount_style", mount_style)
 		new_weapon.set_meta("mount_normal", normal)
-		if mount_style == "sponson" or mount_style == "frame_built":
-			var embed_depth = catalog_data.size.y * (0.75 if mount_style == "frame_built" else 0.45)
-			new_weapon.global_position -= normal * embed_depth
-		VisualBuilder.add_mount_hardware(new_weapon, mount_style, catalog_data.size, normal)
+
+		if mount_style == "pintle":
+			var column_dir = Vector3.UP
+			if abs(local_normal.z) > 0.5:
+				column_dir = local_normal
+			else:
+				column_dir = Vector3(local_pos.x, local_pos.y, 0.0)
+				if column_dir.length() < 0.001:
+					column_dir = local_normal
+				else:
+					column_dir = column_dir.normalized()
+			var column_length = max(catalog_data.size.y * 1.5, 0.6)
+			
+			new_weapon.set_meta("column_dir", column_dir)
+			new_weapon.set_meta("column_length", column_length)
+			
+			local_pos += column_dir * column_length
+			final_pos = hull.to_global(local_pos)
+			new_weapon.global_position = final_pos
+			
+			VisualBuilder.add_mount_hardware(new_weapon, mount_style, catalog_data.size, column_dir, column_length)
+		else:
+			new_weapon.set_meta("column_length", 0.0)
+			if mount_style == "frame_built":
+				var embed_depth = catalog_data.size.y * 0.75
+				new_weapon.global_position -= normal * embed_depth
+			VisualBuilder.add_mount_hardware(new_weapon, mount_style, catalog_data.size, normal, 0.0)
 
 	# Notify the UI that a module was added
 	get_tree().call_group("stat_ui", "update_stats", hull)
@@ -1149,6 +1154,12 @@ func _build_firing_arc(module: Node3D, data) -> Node3D:
 	var space_state = get_world_3d().direct_space_state
 	var origin = module.global_position + Vector3(0, 0.35, 0)
 
+	var clear_mesh = ImmediateMesh.new()
+	var blocked_mesh = ImmediateMesh.new()
+
+	var clear_vertices = []
+	var blocked_vertices = []
+
 	for i in range(segments):
 		var a0 = angle_start + i * step
 		var a1 = a0 + step
@@ -1162,36 +1173,64 @@ func _build_firing_arc(module: Node3D, data) -> Node3D:
 		var result = space_state.intersect_ray(query)
 		var blocked = not result.is_empty()
 
-		var seg = MeshInstance3D.new()
-		seg.name = "ArcSeg%d" % i
-		seg.mesh = _build_wedge_mesh(a0, a1, radius)
-		var mat = StandardMaterial3D.new()
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.emission_enabled = true
+		var p0 = Vector3.ZERO
+		var p1 = Vector3(sin(a0) * radius, 0, -cos(a0) * radius)
+		var p2 = Vector3(sin(a1) * radius, 0, -cos(a1) * radius)
+
 		if blocked:
-			mat.albedo_color = Color(1.0, 0.15, 0.15, 0.4)
-			mat.emission = Color(1.0, 0.15, 0.15)
+			blocked_vertices.append(p0)
+			blocked_vertices.append(p1)
+			blocked_vertices.append(p2)
 		else:
-			mat.albedo_color = Color(0.2, 0.6, 1.0, 0.25)
-			mat.emission = Color(0.2, 0.6, 1.0)
-		mat.emission_energy_multiplier = 0.5
-		seg.material_override = mat
-		container.add_child(seg)
+			clear_vertices.append(p0)
+			clear_vertices.append(p1)
+			clear_vertices.append(p2)
+
+	if not clear_vertices.is_empty():
+		clear_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		for v in clear_vertices:
+			clear_mesh.surface_add_vertex(v)
+		clear_mesh.surface_end()
+		
+		var clear_mi = MeshInstance3D.new()
+		clear_mi.name = "ClearArc"
+		clear_mi.mesh = clear_mesh
+		
+		var clear_mat = StandardMaterial3D.new()
+		clear_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		clear_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		clear_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		clear_mat.emission_enabled = true
+		clear_mat.albedo_color = Color(0.2, 0.6, 1.0, 0.25)
+		clear_mat.emission = Color(0.2, 0.6, 1.0)
+		clear_mat.emission_energy_multiplier = 0.5
+		clear_mi.material_override = clear_mat
+		
+		container.add_child(clear_mi)
+
+	if not blocked_vertices.is_empty():
+		blocked_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		for v in blocked_vertices:
+			blocked_mesh.surface_add_vertex(v)
+		blocked_mesh.surface_end()
+		
+		var blocked_mi = MeshInstance3D.new()
+		blocked_mi.name = "BlockedArc"
+		blocked_mi.mesh = blocked_mesh
+		
+		var blocked_mat = StandardMaterial3D.new()
+		blocked_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		blocked_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		blocked_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		blocked_mat.emission_enabled = true
+		blocked_mat.albedo_color = Color(1.0, 0.15, 0.15, 0.4)
+		blocked_mat.emission = Color(1.0, 0.15, 0.15)
+		blocked_mat.emission_energy_multiplier = 0.5
+		blocked_mi.material_override = blocked_mat
+		
+		container.add_child(blocked_mi)
 
 	return container
-
-static func _build_wedge_mesh(angle_start: float, angle_end: float, radius: float) -> ArrayMesh:
-	var st = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var p0 = Vector3.ZERO
-	var p1 = Vector3(sin(angle_start) * radius, 0, -cos(angle_start) * radius)
-	var p2 = Vector3(sin(angle_end) * radius, 0, -cos(angle_end) * radius)
-	st.add_vertex(p0)
-	st.add_vertex(p1)
-	st.add_vertex(p2)
-	return st.commit()
 
 func _refresh_firing_arc():
 	if not selected_module or not is_instance_valid(selected_module): return
@@ -1332,36 +1371,74 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 
 	var data = module.get_meta("module_data")
 	var catalog_data = ModuleCatalog.get_module_data(data.type_id)
+	var category = data.category
 
 	# Remembered so drag-end can re-run the same facet/mount classification
-	# _place_weapon() does at initial placement (FABLE_REVIEW.md 3.2) -
-	# without it, a plate/weapon dragged to a different face keeps whatever
-	# facet/mount_style it was placed with, which is silently wrong once
-	# combat resolves hits by facet.
 	module.set_meta("_last_drag_normal", normal)
 
-	var offset = normal * (catalog_data.size.y / 2.0)
-	var local_pos = hull.to_local(world_pos) + offset
-	
-	var snap_interval = 0.25
+	var local_pos = hull.to_local(world_pos)
 	var local_normal = hull.global_transform.basis.inverse() * normal
 	
+	var snap_interval = 0.25
 	if abs(local_normal.x) < 0.9:
 		local_pos.x = round(local_pos.x / snap_interval) * snap_interval
 	if abs(local_normal.y) < 0.9:
 		local_pos.y = round(local_pos.y / snap_interval) * snap_interval
 	if abs(local_normal.z) < 0.9:
 		local_pos.z = round(local_pos.z / snap_interval) * snap_interval
-		
+
+	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
+	var pintle_style = ""
+	if category == "weapon":
+		pintle_style = ModuleCatalog.get_mount_style(data.type_id, hull_type_for_mount)
+	var stays_level = pintle_style == "pintle"
+
+	if category == "weapon":
+		module.set_meta("mount_style", pintle_style)
+		module.set_meta("mount_normal", normal)
+		if pintle_style == "pintle":
+			var column_dir = Vector3.UP
+			if abs(local_normal.z) > 0.5:
+				column_dir = local_normal
+			else:
+				column_dir = Vector3(local_pos.x, local_pos.y, 0.0)
+				if column_dir.length() < 0.001:
+					column_dir = local_normal
+				else:
+					column_dir = column_dir.normalized()
+			var column_length = max(catalog_data.size.y * 1.5, 0.6)
+			
+			module.set_meta("column_dir", column_dir)
+			module.set_meta("column_length", column_length)
+			local_pos += column_dir * column_length
+		else:
+			module.set_meta("column_length", 0.0)
+			if pintle_style == "frame_built":
+				var embed_depth = catalog_data.size.y * 0.75
+				local_pos -= local_normal * embed_depth
+	else:
+		var offset = normal * (catalog_data.size.y / 2.0)
+		local_pos = hull.to_local(world_pos) + offset
+		if abs(local_normal.x) < 0.9:
+			local_pos.x = round(local_pos.x / snap_interval) * snap_interval
+		if abs(local_normal.y) < 0.9:
+			local_pos.y = round(local_pos.y / snap_interval) * snap_interval
+		if abs(local_normal.z) < 0.9:
+			local_pos.z = round(local_pos.z / snap_interval) * snap_interval
+
 	module.position = local_pos
 	
 	module.rotation = Vector3.ZERO
-	if abs(normal.dot(Vector3.UP)) < 0.999:
+	if not stays_level and abs(normal.dot(Vector3.UP)) < 0.999:
 		module.look_at(module.global_position + normal, Vector3.UP)
 		module.rotate_object_local(Vector3.RIGHT, -PI/2.0)
 		
 	var yaw_offset = module.get_meta("yaw_offset", 0.0)
 	module.rotate_object_local(Vector3.UP, yaw_offset)
+	
+	if category == "weapon":
+		var VisualBuilder = preload("res://scripts/visual_builder.gd")
+		VisualBuilder.rebuild_visual(module)
 		
 	if module.has_meta("mirrored_counterpart"):
 		var mirror = module.get_meta("mirrored_counterpart")
@@ -1371,19 +1448,31 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 			
 			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
 			mirror.rotation = Vector3.ZERO
-			if abs(mirrored_normal.dot(Vector3.UP)) < 0.999:
+			if not stays_level and abs(mirrored_normal.dot(Vector3.UP)) < 0.999:
 				mirror.look_at(mirror.global_position + mirrored_normal, Vector3.UP)
 				mirror.rotate_object_local(Vector3.RIGHT, -PI/2.0)
 			
 			mirror.rotate_object_local(Vector3.UP, -yaw_offset)
+			if category == "weapon":
+				mirror.set_meta("mount_style", pintle_style)
+				mirror.set_meta("mount_normal", mirrored_normal)
+				if pintle_style == "pintle":
+					var m_column_dir = Vector3.UP
+					var local_mirrored_normal = hull.global_transform.basis.inverse() * mirrored_normal
+					if abs(local_mirrored_normal.z) > 0.5:
+						m_column_dir = local_mirrored_normal
+					else:
+						m_column_dir = Vector3(mirrored_local_pos.x, mirrored_local_pos.y, 0.0)
+						if m_column_dir.length() < 0.001:
+							m_column_dir = local_mirrored_normal
+						else:
+							m_column_dir = m_column_dir.normalized()
+					mirror.set_meta("column_dir", m_column_dir)
+					mirror.set_meta("column_length", module.get_meta("column_length", 0.0))
+				var VisualBuilder = preload("res://scripts/visual_builder.gd")
+				VisualBuilder.rebuild_visual(mirror)
 
-# Re-runs the same facet/mount classification _place_weapon() does at initial
-# placement (FABLE_REVIEW.md 3.2). Without this, a module dragged to a
-# different face keeps whatever facet/mount_style it was placed with -
-# combat (damage_resolver.gd) then silently credits it to the wrong side of
-# the hull, and a weapon dragged deck-to-side keeps pintle hardware and the
-# wrong traverse gate. Called once on drag release, not per-frame - it's the
-# same cost as initial placement, not a per-tick tax.
+# Re-runs the same facet/mount classification _place_weapon() does at initial placement.
 func _reclassify_module_after_drag(module: Node3D, normal: Vector3, _is_mirror_call: bool = false):
 	if not module or not is_instance_valid(module) or not module.has_meta("module_data"):
 		return
@@ -1402,8 +1491,6 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, _is_mirror_c
 	var local_normal = hull.global_transform.basis.inverse() * normal
 
 	if category == "armor":
-		# Same auto-fit-to-facet + re-center logic as _place_weapon()'s armor
-		# block, so a dragged plate doesn't keep its old facet's size/position.
 		var local_x = module.global_transform.basis.x.abs()
 		var local_z = module.global_transform.basis.z.abs()
 		var target_x = 1.0
@@ -1431,18 +1518,28 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, _is_mirror_c
 
 	elif category == "weapon":
 		var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
-		# No "undo the old embed" step needed here: _update_module_placement()
-		# recomputes position fresh from the current raycast hit every drag
-		# frame (never relative to the module's own previous position), so by
-		# the time drag ends the module is already sitting at the flush,
-		# non-embedded surface position regardless of whatever mount_style it
-		# had before the drag started - there's nothing stale to undo.
-		var mount_style = ModuleCatalog.get_mount_style_for_normal(data.type_id, normal, hull_type_for_mount)
+		var mount_style = ModuleCatalog.get_mount_style(data.type_id, hull_type_for_mount)
 		module.set_meta("mount_style", mount_style)
 		module.set_meta("mount_normal", normal)
-		if mount_style == "sponson" or mount_style == "frame_built":
-			var embed_depth = catalog_data.size.y * (0.75 if mount_style == "frame_built" else 0.45)
-			module.global_position -= normal * embed_depth
+		if mount_style == "pintle":
+			var local_pos = hull.to_local(module.global_position)
+			var column_dir = Vector3.UP
+			if abs(local_normal.z) > 0.5:
+				column_dir = local_normal
+			else:
+				column_dir = Vector3(local_pos.x, local_pos.y, 0.0)
+				if column_dir.length() < 0.001:
+					column_dir = local_normal
+				else:
+					column_dir = column_dir.normalized()
+			var column_length = max(catalog_data.size.y * 1.5, 0.6)
+			module.set_meta("column_dir", column_dir)
+			module.set_meta("column_length", column_length)
+		else:
+			module.set_meta("column_length", 0.0)
+			if mount_style == "frame_built":
+				var embed_depth = catalog_data.size.y * 0.75
+				module.global_position -= normal * embed_depth
 		var VisualBuilder = preload("res://scripts/visual_builder.gd")
 		VisualBuilder.rebuild_visual(module)
 

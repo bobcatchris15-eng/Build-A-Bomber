@@ -1,9 +1,7 @@
 extends Node3D
 
 const BlueprintManager = preload("res://scripts/blueprint_manager.gd")
-const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
-const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 
 @onready var vehicle_spawn_point = $VehicleSpawnPoint
 @onready var camera = $Camera3D
@@ -12,13 +10,7 @@ var vehicle: CharacterBody3D
 var vehicle_hull: Node3D
 var target_dummies: Array[Node] = []
 var target_destination: Vector3 = Vector3.ZERO
-var is_moving: bool = false
-var target_altitude: float = 0.0
-var locomotion_type: String = "wheels"
-
-# Movement parameters (derived from vehicle stats or defaults)
-var move_speed: float = 5.0
-var rotate_speed: float = 4.0
+var locomotion_type: String = "wheels" # still used for the rotor-spin cosmetic
 
 func _ready():
 	_spawn_vehicle()
@@ -42,25 +34,28 @@ func _ready():
 		add_child(tuning_panel)
 
 func _spawn_vehicle():
-	# Create CharacterBody3D container with player_vehicle script for physics movement
+	# Test Range's vehicle now runs the EXACT same battle_unit.gd script
+	# Skirmish units do (Chris's explicit ask: "the behavior of the unit
+	# there should match the behavior in the battle" - positioning to bring
+	# the strongest facet's weapons to bear, whole-vehicle-aim for
+	# frame_built weapons, kiting, and the auto-engage-on-sight added this
+	# pass). player_vehicle.gd was a hand-rolled parallel implementation
+	# with none of that AI - a player-driven vehicle could walk right past
+	# a dummy shooting at it with no attempt to maneuver, which never
+	# happens in a real match. setup() already does everything this
+	# function used to do by hand (hull reconstruction, HP, collision
+	# shape, weapons, move speed, energy, vision, nav, HP bar) - single
+	# source of truth, can't drift from Skirmish again.
 	vehicle = CharacterBody3D.new()
 	vehicle.name = "PlayerVehicle"
-	vehicle.collision_layer = 4 # Vehicle layer
-	vehicle.collision_mask = 9 # Hits ground (1) and targets (8)
-	vehicle.set_script(load("res://scripts/player_vehicle.gd"))
-	vehicle._ready()
+	vehicle.set_script(load("res://scripts/battle_unit.gd"))
 	add_child(vehicle)
-	
-	# Spawn ground vehicles slightly above the floor so they drop down safely without clipping
-	var spawn_pos = vehicle_spawn_point.global_position
-	if locomotion_type != "helicopter_rotors":
-		spawn_pos.y += 1.0
-	vehicle.global_position = spawn_pos
-	
+	vehicle.add_to_group("player_vehicle") # target_dummy.gd's missile-at-player targeting looks for this
+
 	# Instantiate a temporary BlueprintManager instance to access helpers
 	var bp_manager = BlueprintManager.new()
 	add_child(bp_manager)
-	
+
 	var blueprint_data = bp_manager.load_blueprint("user://blueprint.json")
 	if blueprint_data.is_empty():
 		blueprint_data = {
@@ -69,107 +64,45 @@ func _spawn_vehicle():
 			"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
 			"modules": []
 		}
-		
+
 	var locomotion = blueprint_data.get("locomotion", {})
-	locomotion_type = locomotion.get("type_id", "wheels")
-	var settings = locomotion.get("settings", {})
-	
-	if locomotion_type == "helicopter_rotors":
-		target_altitude = 4.0
-	else:
-		target_altitude = 0.0
-		
-	vehicle_hull = bp_manager.reconstruct_vehicle(blueprint_data, vehicle)
+	locomotion_type = locomotion.get("type_id", "wheels") # still used for the rotor-spin cosmetic below
+
+	vehicle.setup(blueprint_data, 0, bp_manager)
 	remove_child(bp_manager) # Clean up
 	bp_manager.queue_free()
-	
-	if vehicle_hull:
-		var hull_type = vehicle_hull.get_meta("type_id") if vehicle_hull.has_meta("type_id") else "medium_hull"
-		var thick = vehicle_hull.get_meta("armor_thickness") if vehicle_hull.has_meta("armor_thickness") else 1.0
-		var mat = vehicle_hull.get_meta("armor_material") if vehicle_hull.has_meta("armor_material") else "hardened_steel"
-		var hp_hull_scale = vehicle_hull.get_meta("hull_scale") if vehicle_hull.has_meta("hull_scale") else Vector3.ONE
 
-		# Shared hull-stat function (FABLE_REVIEW.md 2.6) - the Test Range's
-		# separate hand-rolled copy of the HP formula is gone, so it can't
-		# drift from Skirmish/sidebar again.
-		var final_max_hp = ModuleCatalog.compute_hull_max_hp(hull_type, thick, mat, hp_hull_scale)
-		vehicle.max_hp = final_max_hp
-		vehicle.hp = final_max_hp
-		
-		# Dynamic creation of Player HP Label in Battlefield UI
-		var ui_node = get_node_or_null("UI")
-		if ui_node:
-			var hp_label = Label.new()
-			hp_label.name = "PlayerHPLabel"
-			hp_label.position = Vector2(20, 20)
-			hp_label.add_theme_font_size_override("font_size", 24)
-			ui_node.add_child(hp_label)
-			update_player_hp_ui()
-			
-		_setup_weapons()
-		
-		# Set up vehicle collision shape
-		var col_shape = CollisionShape3D.new()
-		col_shape.name = "CollisionShape3D"
-		var base_size = Vector3(4.0, 1.0, 6.0)
-		var raw_size = base_size
-		var armor_thick = 1.0
-		var bulk = Vector3.ONE
-		if vehicle_hull.has_meta("base_hull_size") and vehicle_hull.has_meta("hull_scale"):
-			raw_size = vehicle_hull.get_meta("base_hull_size") * vehicle_hull.get_meta("hull_scale")
-			armor_thick = vehicle_hull.get_meta("armor_thickness") if vehicle_hull.has_meta("armor_thickness") else 1.0
-			bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
-			base_size = raw_size * bulk
-		
-		var authored_hull_mesh = MeshAssetLoader.get_hull_mesh(hull_type)
-		if authored_hull_mesh:
-			col_shape.shape = authored_hull_mesh.create_convex_shape()
-			var hs = vehicle_hull.get_meta("hull_scale") if vehicle_hull.has_meta("hull_scale") else Vector3.ONE
-			col_shape.scale = hs * bulk
-			col_shape.position = vehicle_hull.position
-		else:
-			col_shape.scale = Vector3.ONE
-			var box = BoxShape3D.new()
-			box.size = base_size
-			col_shape.shape = box
-			col_shape.position = Vector3(0, base_size.y / 2.0, 0)
-		vehicle.add_child(col_shape)
-		
-		recalculate_move_speed()
-		recalculate_energy()
-
-func recalculate_energy():
-	if not is_instance_valid(vehicle_hull) or not is_instance_valid(vehicle):
+	vehicle_hull = vehicle.hull_node
+	if not vehicle_hull:
 		return
-	var hull_type = vehicle_hull.get_meta("type_id") if vehicle_hull.has_meta("type_id") else "medium_hull"
-	var base = ModuleCatalog.get_base_energy(hull_type)
-	var bonus_capacity = 0.0
-	var bonus_regen = 0.0
-	for child in vehicle_hull.get_children():
-		if child.has_meta("module_data") and not child.is_queued_for_deletion():
-			var data = child.get_meta("module_data")
-			if data.category == "generator":
-				bonus_capacity += data.get_energy_capacity()
-				bonus_regen += data.get_energy_regen()
-	var prev_max = vehicle.max_energy
-	vehicle.max_energy = base + bonus_capacity
-	vehicle.energy_regen_rate = vehicle.max_energy * 0.08 + bonus_regen
-	if prev_max <= 0.0:
-		vehicle.current_energy = vehicle.max_energy
-	else:
-		vehicle.current_energy = clamp(vehicle.current_energy, 0.0, vehicle.max_energy)
 
-func _setup_weapons():
-	# Attach auto-tracking weapon scripts to all weapon modules
-	for child in vehicle_hull.get_children():
-		if child.has_meta("module_data"):
-			var data = child.get_meta("module_data")
-			if ModuleCatalog.needs_combat_script(data.type_id):
-				var weapon_script = load("res://scripts/auto_weapon.gd")
-				if weapon_script:
-					child.set_script(weapon_script)
-					child.set_physics_process(true)
-					child._ready() # Re-initialize with script
+	# Spawn ground vehicles slightly above the floor so they drop down
+	# safely without clipping; flying units start at their real cruise
+	# altitude (setup() already set target_altitude via the trait system).
+	var spawn_pos = vehicle_spawn_point.global_position
+	spawn_pos.y += vehicle.target_altitude if vehicle.is_flying else 1.0
+	vehicle.global_position = spawn_pos
+
+	vehicle.died.connect(_on_vehicle_died)
+
+	# Dynamic creation of Player HP Label in Battlefield UI
+	var ui_node = get_node_or_null("UI")
+	if ui_node:
+		var hp_label = Label.new()
+		hp_label.name = "PlayerHPLabel"
+		hp_label.position = Vector2(20, 20)
+		hp_label.add_theme_font_size_override("font_size", 24)
+		ui_node.add_child(hp_label)
+		update_player_hp_ui()
+
+func _on_vehicle_died(_unit):
+	# Same "restart battle scene after a short delay" UX player_vehicle.gd's
+	# die() used to own directly - battle_unit.gd's die() is Skirmish-
+	# generic (just frees the unit + emits the signal), so Test Range's
+	# own scene-reload behavior lives here instead.
+	get_tree().create_timer(2.0).timeout.connect(func():
+		get_tree().reload_current_scene()
+	)
 
 func _spawn_target_dummies():
 	# Clear old dummies
@@ -209,8 +142,9 @@ func _unhandled_input(event):
 			
 			if result:
 				target_destination = result.position
-				is_moving = true
-				
+				if is_instance_valid(vehicle):
+					vehicle.order_move(target_destination)
+
 				# Spawn a brief destination marker
 				_create_move_marker(target_destination)
 
@@ -232,46 +166,17 @@ func _create_move_marker(pos: Vector3):
 	timer.timeout.connect(func(): marker.queue_free())
 
 func _physics_process(delta):
-	if is_instance_valid(vehicle) and vehicle.current_energy < vehicle.max_energy:
-		vehicle.current_energy = min(vehicle.max_energy, vehicle.current_energy + vehicle.energy_regen_rate * delta)
+	# Movement, gravity/altitude, energy regen, and order-based combat
+	# maneuvering (approach/flank/kite/whole-vehicle-aim/auto-engage) are
+	# all owned by vehicle's own battle_unit.gd script now - it runs its
+	# own _physics_process (Godot calls it automatically, no manual
+	# invocation needed here) and already does everything the block that
+	# used to live here did by hand, plus the combat AI it never had.
+	if not is_instance_valid(vehicle):
+		return
 
-	# Altitude / Gravity control
-	if is_instance_valid(vehicle):
-		if locomotion_type == "helicopter_rotors":
-			# Flying rotors manually lerp altitude, no gravity
-			vehicle.velocity.y = 0.0
-			var target_y = target_altitude
-			vehicle.global_position.y = lerp(vehicle.global_position.y, target_y, 3.0 * delta)
-		else:
-			# Ground vehicles use gravity and snap to ground via physics
-			if not vehicle.is_on_floor():
-				vehicle.velocity.y -= 9.8 * delta
-			else:
-				vehicle.velocity.y = -1.0 # Press down slightly to keep grounded
+	update_player_hp_ui()
 
-	if is_moving and is_instance_valid(vehicle):
-		var pos_diff = target_destination - vehicle.global_position
-		pos_diff.y = 0.0 # Keep movement horizontal
-		
-		if pos_diff.length() < 0.5:
-			is_moving = false
-			vehicle.velocity.x = 0.0
-			vehicle.velocity.z = 0.0
-		else:
-			var target_basis = Basis.looking_at(pos_diff, Vector3.UP)
-			vehicle.global_transform.basis = vehicle.global_transform.basis.slerp(target_basis, rotate_speed * delta)
-			
-			var forward_dir = -vehicle.global_transform.basis.z.normalized()
-			vehicle.velocity.x = forward_dir.x * move_speed
-			vehicle.velocity.z = forward_dir.z * move_speed
-	else:
-		if is_instance_valid(vehicle):
-			vehicle.velocity.x = 0.0
-			vehicle.velocity.z = 0.0
-			
-	if is_instance_valid(vehicle):
-		vehicle.move_and_slide()
-			
 	# Spin helicopter rotors if present
 	if is_instance_valid(vehicle_hull):
 		for child in vehicle_hull.get_children():
@@ -283,12 +188,11 @@ func _physics_process(delta):
 						var mesh = child.get_child(0)
 						if is_instance_valid(mesh):
 							mesh.rotate_y(15.0 * delta)
-			
+
 	# Update Camera to follow vehicle
-	if is_instance_valid(vehicle):
-		var target_cam_pos = vehicle.global_position + Vector3(0, 12, 12)
-		camera.global_position = camera.global_position.lerp(target_cam_pos, 5.0 * delta)
-		camera.look_at(vehicle.global_position + Vector3(0, 0.5, 0), Vector3.UP)
+	var target_cam_pos = vehicle.global_position + Vector3(0, 12, 12)
+	camera.global_position = camera.global_position.lerp(target_cam_pos, 5.0 * delta)
+	camera.look_at(vehicle.global_position + Vector3(0, 0.5, 0), Vector3.UP)
 
 func _on_return_pressed():
 	get_tree().change_scene_to_file("res://scenes/MainLab.tscn")
@@ -314,60 +218,3 @@ func update_player_hp_ui():
 			
 		hp_label.text = "Player HP: %d/%d [%s] (%s)" % [int(vehicle.hp), int(vehicle.max_hp), bar_str, faction_str]
 		hp_label.modulate = Color.GREEN.lerp(Color.RED, 1.0 - hp_pct)
-
-func recalculate_move_speed():
-	if not is_instance_valid(vehicle_hull) or not is_instance_valid(vehicle):
-		return
-		
-	# Hull weight enters the total here too, same shared function as
-	# battle_unit.gd's _recalculate_move_speed() (FABLE_REVIEW.md 1.2).
-	var rms_hull_type = vehicle_hull.get_meta("type_id") if vehicle_hull.has_meta("type_id") else "medium_hull"
-	var rms_thick = vehicle_hull.get_meta("armor_thickness") if vehicle_hull.has_meta("armor_thickness") else 1.0
-	var rms_mat = vehicle_hull.get_meta("armor_material") if vehicle_hull.has_meta("armor_material") else "hardened_steel"
-	var rms_scale = vehicle_hull.get_meta("hull_scale") if vehicle_hull.has_meta("hull_scale") else Vector3.ONE
-	var rms_faction = vehicle_hull.get_meta("faction") if vehicle_hull.has_meta("faction") else "industrialists"
-	var rms_armor_wt = FactionCatalog.get_passive(rms_faction, "armor_weight_mult", 1.0)
-	var total_weight = ModuleCatalog.compute_hull_weight(rms_hull_type, rms_thick, rms_mat, rms_scale, rms_armor_wt)
-	var motor_thrust = 100.0 # Default base
-	var has_locomotion = false
-
-	# Fetch settings from hull meta
-	var settings = {}
-	if vehicle_hull.has_meta("locomotion_settings"):
-		settings = vehicle_hull.get_meta("locomotion_settings")
-		
-	for child in vehicle_hull.get_children():
-		if child.has_meta("module_data") and not child.is_queued_for_deletion():
-			var data = child.get_meta("module_data")
-			total_weight += data.get_weight()
-			if data.category == "locomotion":
-				has_locomotion = true
-				var count_contrib = 1.0
-				if locomotion_type == "wheels":
-					var count = settings.get("count", 4)
-					count_contrib = float(count) / 4.0
-				elif locomotion_type == "tracked_treads":
-					var width = settings.get("width", 1.0)
-					count_contrib = width
-				elif locomotion_type == "helicopter_rotors":
-					var count = settings.get("count", 4)
-					count_contrib = float(count) / 4.0
-				motor_thrust += 150.0 * child.scale.x * child.scale.z * count_contrib
-				
-	if not has_locomotion:
-		move_speed = 0.0
-		print("Player vehicle immobilized! All locomotion parts destroyed.")
-		return
-		
-	if total_weight > 0.0:
-		# Same retuned constant/band as battle_unit.gd (hull weight now in
-		# the denominator).
-		move_speed = clamp((motor_thrust / total_weight) * 10.0, 1.5, 18.0)
-		
-	# Faction Passive Bonus - table-driven, matches battle_unit.gd's own
-	# _recalculate_move_speed() (this Test Range scene keeps its own
-	# separate copy of the move-speed formula, not shared code).
-	var faction = vehicle_hull.get_meta("faction") if vehicle_hull.has_meta("faction") else "industrialists"
-	move_speed *= FactionCatalog.get_passive(faction, "speed_mult", 1.0)
-		
-	print("Recalculated speed: ", move_speed)
