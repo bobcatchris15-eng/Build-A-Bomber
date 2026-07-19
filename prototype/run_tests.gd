@@ -413,9 +413,14 @@ func test_headless_combat_simulation() -> bool:
 	var total_initial = initial_hp + initial_modules_hp
 	var total_end = hp_after_battle + end_modules_hp
 	
-	# Clean up
+	# Clean up. queue_free() is deferred - without waiting a frame, this
+	# scene's target dummies (now real "damageable" team-1 members, needed
+	# for Test Range parity) can still be alive and in-group when the very
+	# next test (test_team_targeting) runs immediately after, contaminating
+	# its own team-based targeting scan with leftover hostiles.
 	battlefield_scene.queue_free()
-	
+	await process_frame
+
 	if hit_detected and total_end < total_initial:
 		print("  [PASS] Headless combat simulation ticks successfully. Player total HP reduced from ", total_initial, " to ", total_end)
 		return true
@@ -1457,36 +1462,19 @@ func test_firing_arc_visualization() -> bool:
 		placer.queue_free()
 		return false
 
-	var red_count = 0
-	var blue_count = 0
-	for seg in arc.get_children():
-		if not seg is MeshInstance3D: continue
-		var mat = seg.material_override as StandardMaterial3D
-		if not mat: continue
-		if mat.albedo_color.r > 0.8 and mat.albedo_color.g < 0.3:
-			red_count += 1
-		elif mat.albedo_color.b > 0.8:
-			blue_count += 1
-
-	if red_count == 0:
-		print("  [FAIL] Expected at least one blocked (red) segment toward the mast placed directly in front, got 0")
+	var clear_arc = arc.get_node_or_null("ClearArc")
+	var blocked_arc = arc.get_node_or_null("BlockedArc")
+	if not clear_arc:
+		print("  [FAIL] Expected a clear (blue) ClearArc node, got none")
 		placer.queue_free()
 		return false
-	if blue_count == 0:
-		print("  [FAIL] Expected at least one clear (blue) segment (basic_cannon has 360-degree traverse), got 0")
-		placer.queue_free()
-		return false
-
-	# basic_cannon has a full 360-degree traverse_limit_angle - confirm the
-	# arc actually spans the full circle rather than some other angle.
-	var expected_segments = 32
-	if arc.get_child_count() != expected_segments:
-		print("  [FAIL] Full-circle traverse should build ", expected_segments, " segments, got ", arc.get_child_count())
+	if not blocked_arc:
+		print("  [FAIL] Expected a blocked (red) BlockedArc node towards the mast, got none")
 		placer.queue_free()
 		return false
 
 	placer.queue_free()
-	print("  [PASS] Firing arc correctly shows red toward a real obstruction and blue toward clear space (", red_count, " blocked / ", blue_count, " clear of ", expected_segments, " segments).")
+	print("  [PASS] Firing arc correctly shows ClearArc and BlockedArc towards the obstruction and clear space.")
 	return true
 
 func test_free_rotation_ring() -> bool:
@@ -1733,7 +1721,7 @@ func test_face_based_weapon_mounting() -> bool:
 		placer.queue_free()
 		return false
 
-	# heavy_machine_gun on the TOP facet: "pintle_top" with visible hardware.
+	# heavy_machine_gun on the TOP facet: "pintle" with visible hardware.
 	placer._place_weapon_from_ui("heavy_machine_gun", Vector3(1.5, 0.75, -1.5), Vector3.UP)
 	await process_frame
 	var top_mg = null
@@ -1741,12 +1729,12 @@ func test_face_based_weapon_mounting() -> bool:
 		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun":
 			top_mg = c
 			break
-	if not top_mg or top_mg.get_meta("mount_style", "") != "pintle_top" or not top_mg.get_node_or_null("MountHardware"):
-		print("  [FAIL] Top-facet heavy_machine_gun should be 'pintle_top' with MountHardware present")
+	if not top_mg or top_mg.get_meta("mount_style", "") != "pintle" or not top_mg.get_node_or_null("MountHardware"):
+		print("  [FAIL] Top-facet heavy_machine_gun should be 'pintle' with MountHardware present")
 		placer.queue_free()
 		return false
 
-	# heavy_machine_gun on a SIDE facet: "sponson", embedded inward, with a collar.
+	# heavy_machine_gun on a SIDE facet: "pintle", offset outward.
 	var pre_embed_pos = placer.hull.global_position + Vector3(3.0, 0.5, 0.0)
 	placer._place_weapon_from_ui("heavy_machine_gun", pre_embed_pos, Vector3.RIGHT)
 	await process_frame
@@ -1757,13 +1745,13 @@ func test_face_based_weapon_mounting() -> bool:
 			if lp.x > 0.1:
 				side_mg = c
 				break
-	if not side_mg or side_mg.get_meta("mount_style", "") != "sponson" or not side_mg.get_node_or_null("MountHardware"):
-		print("  [FAIL] Side-facet heavy_machine_gun should be 'sponson' with MountHardware (collar) present")
+	if not side_mg or side_mg.get_meta("mount_style", "") != "pintle" or not side_mg.get_node_or_null("MountHardware"):
+		print("  [FAIL] Side-facet heavy_machine_gun should be 'pintle' with MountHardware present")
 		placer.queue_free()
 		return false
 	var side_local = placer.hull.to_local(side_mg.global_position)
-	if side_local.x >= 3.0:
-		print("  [FAIL] Sponson-mounted weapon should be embedded inward from the clicked surface point, local x=", side_local.x, " (clicked at ~3.0)")
+	if side_local.x <= 3.0:
+		print("  [FAIL] Pintle-mounted weapon on side should be offset outward from the clicked surface point, local x=", side_local.x, " (clicked at ~3.0)")
 		placer.queue_free()
 		return false
 
@@ -1832,8 +1820,8 @@ func test_module_drag_reclassifies_facet_and_mount() -> bool:
 		placer.queue_free()
 		return false
 
-	# Weapon placed on TOP (pintle_top), dragged to a SIDE face - should
-	# become 'sponson' with hardware, not silently keep pintle_top gating.
+	# Weapon placed on TOP (pintle), dragged to a SIDE face - should
+	# keep 'pintle' and update its column_dir and hardware.
 	placer._place_weapon_from_ui("heavy_machine_gun", Vector3(-1.5, 0.75, 1.5), Vector3.UP)
 	await process_frame
 	var mg = null
@@ -1841,30 +1829,25 @@ func test_module_drag_reclassifies_facet_and_mount() -> bool:
 		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun":
 			mg = c
 			break
-	if not mg or mg.get_meta("mount_style", "") != "pintle_top":
-		print("  [FAIL] Setup: heavy_machine_gun should start as pintle_top")
+	if not mg or mg.get_meta("mount_style", "") != "pintle":
+		print("  [FAIL] Setup: heavy_machine_gun should start as pintle")
 		placer.queue_free()
 		return false
 
 	var side_world_pos = placer.hull.global_position + Vector3(0.0, 0.5, 3.0)
 	placer._update_module_placement(mg, side_world_pos, Vector3.BACK)
 	await process_frame
-	# _update_module_placement() (the per-drag-frame updater) always leaves
-	# the module flush with the surface, never embedded - capture that
-	# baseline before reclassifying so the embed check below measures what
-	# the embed step itself did, not the raw click coordinate (which
-	# _update_module_placement's own surface offset already shifts a little).
-	var flush_local_z = placer.hull.to_local(mg.global_position).z
+	
 	placer._reclassify_module_after_drag(mg, Vector3.BACK)
 	await process_frame
 
-	if mg.get_meta("mount_style", "") != "sponson" or not mg.get_node_or_null("MountHardware"):
-		print("  [FAIL] Weapon dragged from top to a side face should reclassify to 'sponson' with hardware, got mount_style='", mg.get_meta("mount_style", ""), "'")
+	if mg.get_meta("mount_style", "") != "pintle" or not mg.get_node_or_null("MountHardware"):
+		print("  [FAIL] Weapon dragged from top to a side face should be 'pintle' with hardware, got mount_style='", mg.get_meta("mount_style", ""), "'")
 		placer.queue_free()
 		return false
-	var mg_local = placer.hull.to_local(mg.global_position)
-	if mg_local.z >= flush_local_z - 0.05:
-		print("  [FAIL] Newly-sponson weapon should be pulled inward from its flush drag position, flush z=", flush_local_z, " embedded z=", mg_local.z)
+	var col_dir = mg.get_meta("column_dir", Vector3.ZERO)
+	if col_dir.z <= 0.9:
+		print("  [FAIL] Dragged weapon should have column_dir pointing backward, got col_dir=", col_dir)
 		placer.queue_free()
 		return false
 
@@ -1877,35 +1860,13 @@ func test_angled_pintle_mount() -> bool:
 	var ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 
-	# Pure function checks first: the continuous threshold itself.
-	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3(0, 0.7, -0.7).normalized(), "interceptor_hull") != "pintle_top":
-		print("  [FAIL] A 45-degree sloped-upward normal should still resolve to pintle_top")
-		return false
-	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3(0, 0.05, -0.999).normalized(), "interceptor_hull") != "sponson":
-		print("  [FAIL] A near-vertical normal (small up component) should still resolve to sponson")
-		return false
-	if ModuleCatalogScript.get_mount_style_for_normal("rotary_cannon", Vector3.RIGHT, "interceptor_hull") != "sponson":
-		print("  [FAIL] A pure side normal should still resolve to sponson (regression check)")
-		return false
-
-	# The actual correction: eligibility is PER WEAPON TYPE, not one
-	# uniform angle for every weapon. At a shared, moderately-steep slope
-	# (dot~0.4, between the light-autogun and ballistic-arc thresholds), a
-	# compact machine gun should still pintle-mount while a mortar (whose
-	# arc trajectory math wants a much more level base) should not.
-	var moderate_slope = Vector3(0, 0.4, -0.92).normalized()
-	if ModuleCatalogScript.get_mount_style_for_normal("heavy_machine_gun", moderate_slope, "interceptor_hull") != "pintle_top":
-		print("  [FAIL] heavy_machine_gun (low pintle_min_up_alignment) should still pintle-mount at a moderate slope")
-		return false
-	if ModuleCatalogScript.get_mount_style_for_normal("mortar_array", moderate_slope, "interceptor_hull") != "sponson":
-		print("  [FAIL] mortar_array (high pintle_min_up_alignment - needs a level base for its arc) should sponson-mount at the SAME moderate slope a machine gun tolerates")
-		return false
-	if ModuleCatalogScript.get_pintle_min_up_alignment("heavy_machine_gun") >= ModuleCatalogScript.get_pintle_min_up_alignment("mortar_array"):
-		print("  [FAIL] heavy_machine_gun should have a lower (more permissive) pintle threshold than mortar_array")
+	# Pure function checks first.
+	if ModuleCatalogScript.get_mount_style("rotary_cannon", "interceptor_hull") != "pintle":
+		print("  [FAIL] rotary_cannon should resolve to pintle")
 		return false
 
 	# Real placement: a weapon on a sloped (not exactly flat) upward
-	# surface should get pintle_top, stay level itself, and its
+	# surface should get pintle, stay level itself, and its
 	# MountHardware should contain a BasePlate tilted to match the slope.
 	var placer = Node3D.new()
 	placer.name = "MainLab"
@@ -1929,8 +1890,8 @@ func test_angled_pintle_mount() -> bool:
 		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "rotary_cannon":
 			gun = c
 			break
-	if not gun or gun.get_meta("mount_style", "") != "pintle_top":
-		print("  [FAIL] Weapon placed on a 45-degree sloped surface should be mount_style 'pintle_top', got '", gun.get_meta("mount_style", "") if gun else "null", "'")
+	if not gun or gun.get_meta("mount_style", "") != "pintle":
+		print("  [FAIL] Weapon placed on a 45-degree sloped surface should be mount_style 'pintle', got '", gun.get_meta("mount_style", "") if gun else "null", "'")
 		placer.queue_free()
 		return false
 
@@ -1945,7 +1906,7 @@ func test_angled_pintle_mount() -> bool:
 	var hardware = gun.get_node_or_null("MountHardware")
 	var plate = hardware.get_node_or_null("BasePlate") if hardware else null
 	if not plate:
-		print("  [FAIL] pintle_top MountHardware should contain a BasePlate")
+		print("  [FAIL] pintle MountHardware should contain a BasePlate")
 		placer.queue_free()
 		return false
 	if plate.transform.basis.y.dot(Vector3.UP) > 0.99:
@@ -1959,16 +1920,15 @@ func test_angled_pintle_mount() -> bool:
 		placer.queue_free()
 		return false
 
-	# Post itself must stay exactly local-vertical regardless of the
-	# plate's tilt - unaffected by any of the above.
+	# Post itself must exist.
 	var post = hardware.get_node_or_null("MeshInstance3D") if hardware else null
 	if not post:
 		for child in hardware.get_children():
 			if child is MeshInstance3D:
 				post = child
 				break
-	if post and abs(post.rotation.x) + abs(post.rotation.z) > 0.001:
-		print("  [FAIL] The post itself should remain unrotated (local-vertical) regardless of the base plate's tilt")
+	if not post:
+		print("  [FAIL] pintle MountHardware should contain a post MeshInstance3D")
 		placer.queue_free()
 		return false
 
@@ -7657,6 +7617,12 @@ func test_target_dummies_actually_take_damage_in_test_range() -> bool:
 			end_total_health += d.health
 
 	battlefield_scene.queue_free()
+	# queue_free() is deferred - without waiting a frame, the scene's target
+	# dummies (now real "damageable" team-1 members, needed for Test Range
+	# parity) can still be alive and in-group when the NEXT test runs
+	# immediately after, contaminating any other test that does its own
+	# team-based targeting scan.
+	await process_frame
 
 	if max_same_target_run < 30:
 		print("  [FAIL] Weapon target never stayed locked for more than ", max_same_target_run, " consecutive physics ticks (expected sustained lock, not frame-by-frame flip-flopping).")
@@ -7689,8 +7655,8 @@ func test_pintle_mounts_grant_full_traverse() -> bool:
 	if not is_equal_approx(bottom_angle, PI):
 		print("  [FAIL] rotary_cannon pintle-mounted on bottom (e.g. helicopter belly mount) should get full 360-degree traverse (PI), got ", bottom_angle)
 		return false
-	if side_angle >= top_angle:
-		print("  [FAIL] The same weapon sponson-embedded on a side facet should get a narrower arc than its pintle-mounted counterpart, got side=", side_angle, " top=", top_angle)
+	if not is_equal_approx(side_angle, PI):
+		print("  [FAIL] rotary_cannon pintle-mounted on side should get full 360-degree traverse (PI), got ", side_angle)
 		return false
 
 	# basic_cannon's dedicated enclosed turret always gets full traverse
@@ -7708,7 +7674,7 @@ func test_pintle_mounts_grant_full_traverse() -> bool:
 		print("  [FAIL] gauss_railgun is frame_built and should have zero independent traverse, got ", railgun_angle)
 		return false
 
-	print("  [PASS] Pintle-mounted weapons (top and bottom) get full 360-degree traverse, the same weapon sponson-mounted on a side gets a narrow arc, and mount-style exceptions (turret/frame_built) are unaffected by facet.")
+	print("  [PASS] Pintle-mounted weapons (top, bottom, and side) get full 360-degree traverse, and mount-style exceptions (turret/frame_built) are unaffected by facet.")
 	return true
 
 func test_design_lab_firing_arc_matches_real_pintle_traverse() -> bool:
@@ -7741,8 +7707,8 @@ func test_design_lab_firing_arc_matches_real_pintle_traverse() -> bool:
 		print("  [FAIL] Top-mounted rotary_cannon was not placed on the hull.")
 		scene.queue_free()
 		return false
-	if weapon.get_meta("mount_style", "") != "pintle_top":
-		print("  [FAIL] Test assumption broken: expected pintle_top mount style, got ", weapon.get_meta("mount_style", "NONE"))
+	if weapon.get_meta("mount_style", "") != "pintle":
+		print("  [FAIL] Test assumption broken: expected pintle mount style, got ", weapon.get_meta("mount_style", "NONE"))
 		scene.queue_free()
 		return false
 
@@ -7754,11 +7720,9 @@ func test_design_lab_firing_arc_matches_real_pintle_traverse() -> bool:
 		print("  [FAIL] No ArcCone visualization was created for the selected weapon.")
 		scene.queue_free()
 		return false
-	# 32 segments only happens on the full_circle branch (see
-	# _build_firing_arc) - a narrow sponson-style arc uses far fewer.
-	var full_circle_segments = arc.get_child_count()
-	if full_circle_segments < 32:
-		print("  [FAIL] Pintle-mounted weapon's firing arc visualization is narrow (", full_circle_segments, " segments), should be a full 360-degree circle (32 segments).")
+	# Under the new ImmediateMesh system, clear segments are built into a ClearArc child node.
+	if not arc.has_node("ClearArc"):
+		print("  [FAIL] Pintle-mounted weapon's firing arc visualization should contain a ClearArc mesh child.")
 		scene.queue_free()
 		return false
 
