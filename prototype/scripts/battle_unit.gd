@@ -117,6 +117,19 @@ const KITE_STANDOFF_FRACTION: float = 0.45
 var selection_ring: MeshInstance3D = null
 var attack_range: float = 12.0
 
+# Auto-engage: a unit sitting IDLE or marching toward a MOVE order previously
+# had no way to notice a hostile in sight at all - it would walk right past
+# an enemy, only getting whatever passive fire its own weapons' narrow
+# traverse arcs happened to land, never actually maneuvering to fight.
+# Throttled (not every physics tick) since it's an O(n) group scan per unit.
+# Deliberately does NOT touch units already under ATTACK order (leaves the
+# existing kiting/flanking/wave-target priority alone - retargeting an
+# already-engaged unit onto a closer distraction is a separate design
+# question) or HARVEST order (economy units keep working; don't turn every
+# harvester into an accidental skirmisher).
+var _auto_engage_scan_timer: float = 0.0
+const AUTO_ENGAGE_SCAN_INTERVAL: float = 0.5
+
 func _ready():
 	add_to_group("units")
 	add_to_group("damageable")
@@ -534,10 +547,39 @@ func order_harvest(node: Node3D):
 	harvest_node = node
 	harvest_timer = 0.0
 
+func _try_auto_engage(delta: float):
+	if is_harvester or order == OrderType.ATTACK or order == OrderType.HARVEST:
+		return
+	_auto_engage_scan_timer -= delta
+	if _auto_engage_scan_timer > 0.0:
+		return
+	_auto_engage_scan_timer = AUTO_ENGAGE_SCAN_INTERVAL
+
+	var closest: Node3D = null
+	var closest_dist: float = vision_range
+	for c in get_tree().get_nodes_in_group("damageable"):
+		if not is_instance_valid(c) or c == self:
+			continue
+		if "is_dead" in c and c.is_dead:
+			continue
+		var c_team = c.get_meta("team") if c.has_meta("team") else -1
+		if c_team == team:
+			continue
+		if "fog_hidden" in c and c.fog_hidden:
+			continue
+		var dist = global_position.distance_to(c.global_position)
+		if dist < closest_dist:
+			closest = c
+			closest_dist = dist
+
+	if closest:
+		order_attack(closest)
+
 func _physics_process(delta):
 	if is_dead: return
 
 	_recalculate_terrain_speed_multiplier()
+	_try_auto_engage(delta)
 
 	if current_energy < max_energy:
 		current_energy = min(max_energy, current_energy + energy_regen_rate * delta)
