@@ -82,10 +82,18 @@ uniform float edge_ink_strength : hint_range(0.0, 1.0) = 0.95;
 
 varying vec3 world_pos;
 varying vec3 world_normal;
+// Object-local vertex position for triplanar texture sampling. Using
+// world_pos here caused the texture to appear fixed in world-space while
+// the unit moved beneath it (the "sliding under the texture" bug). model_pos
+// moves WITH the mesh so the texture stays painted onto the hull surface.
+// Procedural masks (wear/grime/seams) deliberately keep world_pos for
+// scale-invariant behaviour - see VISUAL_ART_DIRECTION.md section 2.
+varying vec3 model_pos;
 
 void vertex() {
 	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	world_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	model_pos = VERTEX;
 }
 
 float hash3(vec3 p) {
@@ -193,7 +201,7 @@ void fragment() {
 	// top of the tint below rather than darkening everything by half.
 	vec3 geo_normal = normalize(world_normal);
 	vec3 tri_w = triplanar_weights(geo_normal);
-	vec3 tex_pos = world_pos * texture_scale;
+	vec3 tex_pos = model_pos * texture_scale; // model-local, not world — fixes texture sliding
 	vec3 tex_albedo = triplanar_sample(albedo_tex, tex_pos, tri_w).rgb;
 	float tex_roughness = triplanar_sample(roughness_tex, tex_pos, tri_w).r;
 
