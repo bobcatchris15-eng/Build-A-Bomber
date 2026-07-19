@@ -1110,7 +1110,20 @@ func _build_firing_arc(module: Node3D, data) -> Node3D:
 	container.name = "ArcCone"
 	container.position = Vector3(0, 0.35, 0)
 
+	# module.get_meta("facet") is only ever set for ARMOR modules (see
+	# where it's assigned above, in the armor auto-fit block) - weapons
+	# never carry it. Reading it here for a weapon silently returned "",
+	# which fed get_mount_style() a zero-length normal and misclassified
+	# every pintle-mounted weapon as "sponson" (narrow arc instead of the
+	# full 360 a pintle actually gets). Weapons DO carry their real
+	# placement normal as "mount_normal" (set at placement time, kept live
+	# across rebuild_visual() calls) - derive the facet from that instead,
+	# the same way the armor auto-fit path derives armor_facet from its
+	# own placement normal.
 	var arc_facet = module.get_meta("facet", "")
+	if arc_facet == "" and module.has_meta("mount_normal") and hull:
+		var local_mount_normal = hull.global_transform.basis.inverse() * module.get_meta("mount_normal")
+		arc_facet = ModuleCatalog.classify_facet(local_mount_normal)
 	var arc_hull_type = hull.get_meta("type_id", "") if hull else ""
 	var limit = ModuleCatalog.get_traverse_limit_angle(data.type_id, arc_facet, arc_hull_type)
 	var full_circle = limit >= PI - 0.01

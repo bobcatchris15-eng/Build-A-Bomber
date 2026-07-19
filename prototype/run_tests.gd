@@ -135,6 +135,7 @@ func _init():
 	success = success and await test_every_weight_tweak_also_costs_real_resources()
 	success = success and await test_target_dummies_actually_take_damage_in_test_range()
 	success = success and await test_pintle_mounts_grant_full_traverse()
+	success = success and await test_design_lab_firing_arc_matches_real_pintle_traverse()
 
 	print("\n==============================================")
 	if success:
@@ -7706,4 +7707,67 @@ func test_pintle_mounts_grant_full_traverse() -> bool:
 		return false
 
 	print("  [PASS] Pintle-mounted weapons (top and bottom) get full 360-degree traverse, the same weapon sponson-mounted on a side gets a narrow arc, and mount-style exceptions (turret/frame_built) are unaffected by facet.")
+	return true
+
+func test_design_lab_firing_arc_matches_real_pintle_traverse() -> bool:
+	print("Running Test Suite: Design Lab Firing Arc Visualization Matches Real Pintle Traverse...")
+	# Regression test: _build_firing_arc() read module.get_meta("facet", "")
+	# to decide the visualization's arc width, but that meta is only ever
+	# set on ARMOR modules (see the armor auto-fit block above it) -
+	# weapons never carry it. A freshly-placed pintle-mounted weapon's
+	# arc_facet was always "", which fed get_mount_style() a zero-length
+	# normal and silently misclassified it as "sponson" - every pintle
+	# weapon showed the narrow sponson arc in the Design Lab even though it
+	# actually has full 360-degree traverse in real combat (verified by
+	# test_pintle_mounts_grant_full_traverse above). Weapons DO carry their
+	# real placement normal as "mount_normal" - the fix derives the facet
+	# from that instead.
+	var scene = load("res://scenes/MainLab.tscn").instantiate()
+	root.add_child(scene)
+	current_scene = scene
+	await process_frame
+
+	scene._place_weapon_from_ui("rotary_cannon", Vector3(0, 1.0, 0), Vector3.UP)
+	await process_frame
+
+	var weapon = null
+	for child in scene.hull.get_children():
+		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "rotary_cannon":
+			weapon = child
+			break
+	if not weapon:
+		print("  [FAIL] Top-mounted rotary_cannon was not placed on the hull.")
+		scene.queue_free()
+		return false
+	if weapon.get_meta("mount_style", "") != "pintle_top":
+		print("  [FAIL] Test assumption broken: expected pintle_top mount style, got ", weapon.get_meta("mount_style", "NONE"))
+		scene.queue_free()
+		return false
+
+	scene._select_module(weapon)
+	await process_frame
+
+	var arc = weapon.get_node_or_null("ArcCone")
+	if not arc:
+		print("  [FAIL] No ArcCone visualization was created for the selected weapon.")
+		scene.queue_free()
+		return false
+	# 32 segments only happens on the full_circle branch (see
+	# _build_firing_arc) - a narrow sponson-style arc uses far fewer.
+	var full_circle_segments = arc.get_child_count()
+	if full_circle_segments < 32:
+		print("  [FAIL] Pintle-mounted weapon's firing arc visualization is narrow (", full_circle_segments, " segments), should be a full 360-degree circle (32 segments).")
+		scene.queue_free()
+		return false
+
+	scene._select_module(null)
+	await process_frame
+	var arc_after_deselect = weapon.get_node_or_null("ArcCone")
+	if arc_after_deselect:
+		print("  [FAIL] Firing arc visualization is still present after deselecting the weapon.")
+		scene.queue_free()
+		return false
+
+	scene.queue_free()
+	print("  [PASS] A pintle-mounted weapon's Design Lab firing arc visualization is a real full-circle cone (not narrow), and cleanly disappears once deselected.")
 	return true
