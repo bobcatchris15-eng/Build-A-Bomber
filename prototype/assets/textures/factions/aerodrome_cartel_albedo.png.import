@@ -3,15 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bvqepvm8g05kg"
-path="res://.godot/imported/aerodrome_cartel_albedo.png-7d443dca4a34247eafb7b48fa45edb5e.ctex"
-metadata={
-"vram_texture": false
-}
+valid=false
 
 [deps]
 
 source_file="res://assets/textures/factions/aerodrome_cartel_albedo.png"
-dest_files=["res://.godot/imported/aerodrome_cartel_albedo.png-7d443dca4a34247eafb7b48fa45edb5e.ctex"]
 
 [params]
 
