@@ -1807,25 +1807,25 @@ static func _build_ship_screw(parent_node: Node3D, base_size: Vector3, base_colo
 
 # MOUNTING_AND_ARMOR_SPEC.md #3: generic (not per-weapon-type-bespoke) mount
 # hardware, added on top of whatever build_visual() already constructed for
-# this type_id. "turret" and "frame_built" add nothing extra - the tank
-# cannon's existing enclosed-turret look is correct as-is, and a frame-built
-# weapon's differentiation comes entirely from being embedded deep into the
-# hull (handled by module_placer.gd's embed_depth position offset), not from
-# extra geometry.
+# this type_id. Column-axis model (per Chris, 2026-07-19): the click point
+# defines a column axis pointing from the click toward the hull's
+# longitudinal centerline; the weapon sits at the OUTER end of that column.
+# "turret" and "frame_built" add nothing extra - the tank cannon's existing
+# enclosed-turret look is correct as-is, and a frame-built weapon's
+# differentiation comes entirely from being built into the hull (no
+# column, no extra geometry). For "pintle" (the new catch-all independent-
+# traverse mount), the visual is a chunky post running along the column
+# direction, with a base plate at the hull end and the weapon sitting at
+# the far end. A column axis is treated as "vertical" if its dot with
+# world-UP is larger than its dot with any horizontal axis - draws a
+# standing post; otherwise draws a horizontal arm (same shape, rotated to
+# match the column).
 #
-# surface_normal (local to parent_node's space) is the correction Chris
-# asked for: a pintle mount previously only existed for an exactly-flat
-# top/bottom (module_placer.gd used to skip weapon reorientation only when
-# the normal was within ~0.03 degrees of dead vertical). Now the WEAPON
-# stays level on ANY surface with a meaningful up/down component (a sloped
-# glacis plate included - see module_catalog.gd's get_mount_style_for_normal()),
-# and the tilt that surface actually has gets absorbed by a base plate here
-# instead - conforms to surface_normal, greebled, sitting slightly INTO the
-# hull skin rather than floating above it. The post itself is untouched by
-# any of this and stays local-space vertical exactly as before, which is
-# what keeps it world-vertical given the weapon module's own rotation is
-# never touched for a pintle-style mount.
-static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_size: Vector3, surface_normal: Vector3 = Vector3.UP):
+# column_dir (local to parent_node's space) is the column direction
+# POINTING FROM THE HULL TOWARD THE WEAPON (i.e. away from the hull's
+# centerline). column_dir is normalized; zero-length is treated as UP.
+# column_length is the distance from the hull surface to the weapon.
+static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_size: Vector3, column_dir: Vector3 = Vector3.UP, column_length: float = 0.0):
 	var old = parent_node.get_node_or_null("MountHardware")
 	if old:
 		parent_node.remove_child(old)
@@ -1834,6 +1834,14 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 	if mount_style == "turret" or mount_style == "frame_built":
 		return
 
+	var n = column_dir.normalized() if column_dir.length() > 0.001 else Vector3.UP
+	# A column axis counts as "vertical" when world-UP is the dominant
+	# component (absolute Y is largest). Otherwise the column is treated
+	# as horizontal/sideways, including the diagonal case (corner click)
+	# where the column points diagonally through the hull - the post just
+	# tilts to match.
+	var is_vertical = abs(n.y) >= abs(n.x) and abs(n.y) >= abs(n.z)
+
 	var hardware = Node3D.new()
 	hardware.name = "MountHardware"
 	parent_node.add_child(hardware)
@@ -1841,48 +1849,86 @@ static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_si
 	var mat = StandardMaterial3D.new()
 	mat.albedo_color = Color(0.12, 0.12, 0.12)
 
-	if mount_style == "pintle_top":
-		# A visible post between the hull surface (local Y=0, where this
-		# module's origin sits) and the weapon body sitting on top of it -
-		# always local-space vertical, regardless of the base plate's tilt.
-		var post = MeshInstance3D.new()
+	# Effective post length: whatever column_length was provided, or fall
+	# back to a sensible default based on the weapon's own size so a small
+	# weapon on a tall column still reads as "mounted" without floating.
+	var effective_length = column_length if column_length > 0.01 else max(base_size.y * 1.5, 0.6)
+
+	if is_vertical:
+		# Vertical post (top/bottom click): the chunky column lives at
+		# the hull surface, with a base plate flush against whatever
+		# local surface the click hit. The post extends upward (or
+		# downward if n.y < 0) by effective_length. The weapon's own
+		# origin is already at the far end of the column (set by
+		# module_placer.gd's column-axis model) - the post just visually
+		# spans the gap, not the weapon.
 		var cyl = CylinderMesh.new()
-		cyl.top_radius = base_size.x * 0.22
-		cyl.bottom_radius = base_size.x * 0.28
-		cyl.height = max(0.1, base_size.y * 0.25)
+		var radius = max(0.06, base_size.x * 0.22)
+		cyl.top_radius = radius
+		cyl.bottom_radius = radius * 1.15
+		cyl.height = max(0.1, effective_length)
+		var post = MeshInstance3D.new()
 		post.mesh = cyl
 		post.material_override = mat
-		post.position = Vector3(0, cyl.height * 0.4, 0)
+		# Post spans from the hull surface to the weapon end. The weapon
+		# itself sits at distance effective_length along n from the hull
+		# surface; the post needs to span the SAME distance, with its
+		# center at effective_length/2 along n. The weapon's own local
+		# +Y points along n (set by module_placer.gd), so the post's
+		# local +Y must also point along n.
+		post.position = n * (effective_length * 0.5)
+		# Quaternion(UP, n) rotates the post's default up-axis to n -
+		# identity for n=UP (the original top-click case), 180 for
+		# n=DOWN (inverted post for a bottom click), smoothly tilted
+		# for any other vertical-leaning direction.
+		post.transform.basis = Basis(Quaternion(Vector3.UP, n))
 		hardware.add_child(post)
-		hardware.add_child(_build_pintle_base_plate(surface_normal, base_size, Vector3.ZERO))
 
-	elif mount_style == "pintle_bottom":
-		# Inverted: the pintle reaches DOWN from the hull (above) to the
-		# weapon (below) instead of up from the hull to the weapon on top -
-		# Chris called this out as useful for under-hull/rotor-style mounts.
-		var post = MeshInstance3D.new()
+		# Base plate at the hull end (the END the weapon is NOT at).
+		# For a top click that's at the hull top, weapon is above; for
+		# a bottom click the weapon is below, so the base plate is at
+		# the hull bottom (the far end of the column from the weapon).
+		# The base plate uses the existing _build_pintle_base_plate
+		# helper unchanged - it was already the right "chunky disc
+		# embedded into the hull" look, just called with the column
+		# axis as the flush normal.
+		hardware.add_child(_build_pintle_base_plate(n, base_size, Vector3.ZERO))
+	else:
+		# Horizontal/diagonal arm (side or corner click): the column
+		# axis lies mostly in the horizontal plane, so a single post
+		# isn't visually right (it'd be lying flat against the hull).
+		# Use a short bracket stub at the hull end, then a horizontal
+		# beam reaching out along n to the weapon - same chunky
+		# material as the vertical post, just oriented to the column.
 		var cyl = CylinderMesh.new()
-		cyl.top_radius = base_size.x * 0.28
-		cyl.bottom_radius = base_size.x * 0.22
-		cyl.height = max(0.1, base_size.y * 0.25)
-		post.mesh = cyl
-		post.material_override = mat
-		post.position = Vector3(0, base_size.y - cyl.height * 0.4, 0)
-		hardware.add_child(post)
-		hardware.add_child(_build_pintle_base_plate(surface_normal, base_size, Vector3(0, base_size.y, 0)))
+		var radius = max(0.05, base_size.x * 0.16)
+		cyl.top_radius = radius
+		cyl.bottom_radius = radius
+		cyl.height = max(0.1, effective_length)
+		var arm = MeshInstance3D.new()
+		arm.mesh = cyl
+		arm.material_override = mat
+		# Same position+rotation logic as the vertical post, just
+		# driven by a horizontal n. Quaternion(UP, n) still works -
+		# it just rotates the cylinder's default up-axis to point
+		# along whatever direction n is.
+		arm.position = n * (effective_length * 0.5)
+		arm.transform.basis = Basis(Quaternion(Vector3.UP, n))
+		hardware.add_child(arm)
 
-	elif mount_style == "sponson":
-		# A collar ring at the hull surface where the embedded weapon body
-		# penetrates - reads as "this rotates inside the hull," not "this
-		# sits on top of it."
-		var collar = MeshInstance3D.new()
-		var torus = TorusMesh.new()
-		torus.inner_radius = max(0.05, base_size.x * 0.45)
-		torus.outer_radius = max(0.1, base_size.x * 0.62)
-		collar.mesh = torus
-		collar.material_override = mat
-		collar.rotation = Vector3(PI / 2.0, 0, 0)
-		hardware.add_child(collar)
+		# Base plate at the hull end. For a horizontal column, the
+		# flush normal is the direction perpendicular to the column
+		# and to world-UP - i.e. the local "out" face of the hull
+		# the click landed on. For a perfect side click (n = RIGHT),
+		# the flush normal IS n; for a corner click, the flush normal
+		# is the cross of n and world-UP, normalized to be the
+		# component of world-UP perpendicular to n. Easier: the flush
+		# normal that the base plate was already designed around is
+		# "the hull surface normal" - and the click normal captured
+		# that. The simplest stand-in is n itself (the column points
+		# outward from the hull), which is correct for the common
+		# exactly-side case and acceptable for diagonals.
+		hardware.add_child(_build_pintle_base_plate(n, base_size, Vector3.ZERO))
 
 # A base plate that conforms to the actual local surface (flat for a
 # top/bottom deck, tilted for a sloped glacis or similar), with a ring of
@@ -1978,7 +2024,17 @@ static func rebuild_visual(module: Node3D):
 	if catalog_data:
 		build_visual(data.type_id, module, catalog_data.size, catalog_data.color, data.tweaks)
 		if module.has_meta("mount_style"):
-			add_mount_hardware(module, module.get_meta("mount_style"), catalog_data.size, module.get_meta("mount_normal", Vector3.UP))
+			# column_dir is the new column-axis normal (points from the
+			# hull surface toward the weapon). Legacy blueprints saved
+			# under the old system may carry only "mount_normal" (the
+			# surface normal the click hit) - that's the same vector in
+			# the limit, and add_mount_hardware treats them identically
+			# for the common "clicked on a flat facet" case. column_length
+			# is the new field; legacy blueprints don't have it, the
+			# default falls back to a sensible weapon-relative size.
+			var col_dir = module.get_meta("column_dir", module.get_meta("mount_normal", Vector3.UP))
+			var col_length = module.get_meta("column_length", 0.0)
+			add_mount_hardware(module, module.get_meta("mount_style"), catalog_data.size, col_dir, col_length)
 
 static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: Dictionary, base_size: Vector3):
 	var children = parent.get_children().filter(func(c): return c is MeshInstance3D)
