@@ -12,6 +12,7 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
+const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 
 var team: int = 0
 var max_hp: float = 400.0
@@ -164,14 +165,23 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node, match_f
 
 	# Collision shape matching the hull
 	var col_shape = CollisionShape3D.new()
-	var box = BoxShape3D.new()
+	col_shape.name = "CollisionShape3D"
 	var base_size = catalog_data.size
 	if hull_node.has_meta("base_hull_size") and hull_node.has_meta("hull_scale"):
 		base_size = hull_node.get_meta("base_hull_size") * hull_node.get_meta("hull_scale")
 	var bulk = Vector3(1.0 + (thick - 1.0) * 0.15, 1.0 + (thick - 1.0) * 0.15, 1.0)
-	box.size = base_size * bulk
-	col_shape.shape = box
-	col_shape.position = Vector3(0, box.size.y / 2.0, 0)
+	
+	var authored_hull_mesh = MeshAssetLoader.get_hull_mesh(hull_type)
+	if authored_hull_mesh:
+		col_shape.shape = authored_hull_mesh.create_convex_shape()
+		col_shape.scale = unit_hull_scale * bulk
+		col_shape.position = hull_node.position
+	else:
+		col_shape.scale = Vector3.ONE
+		var box = BoxShape3D.new()
+		box.size = base_size * bulk
+		col_shape.shape = box
+		col_shape.position = Vector3(0, box.size.y / 2.0, 0)
 	add_child(col_shape)
 
 	_setup_weapons()

@@ -3,6 +3,7 @@ extends Node3D
 const BlueprintManager = preload("res://scripts/blueprint_manager.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 
 @onready var vehicle_spawn_point = $VehicleSpawnPoint
 @onready var camera = $Camera3D
@@ -109,18 +110,29 @@ func _spawn_vehicle():
 		
 		# Set up vehicle collision shape
 		var col_shape = CollisionShape3D.new()
-		var box = BoxShape3D.new()
-		
-		# Set size matching the hull's size
+		col_shape.name = "CollisionShape3D"
 		var base_size = Vector3(4.0, 1.0, 6.0)
+		var raw_size = base_size
+		var armor_thick = 1.0
+		var bulk = Vector3.ONE
 		if vehicle_hull.has_meta("base_hull_size") and vehicle_hull.has_meta("hull_scale"):
-			var raw_size = vehicle_hull.get_meta("base_hull_size") * vehicle_hull.get_meta("hull_scale")
-			var armor_thick = vehicle_hull.get_meta("armor_thickness") if vehicle_hull.has_meta("armor_thickness") else 1.0
-			var bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
+			raw_size = vehicle_hull.get_meta("base_hull_size") * vehicle_hull.get_meta("hull_scale")
+			armor_thick = vehicle_hull.get_meta("armor_thickness") if vehicle_hull.has_meta("armor_thickness") else 1.0
+			bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
 			base_size = raw_size * bulk
-		box.size = base_size
-		col_shape.shape = box
-		col_shape.position = Vector3(0, base_size.y / 2.0, 0)
+		
+		var authored_hull_mesh = MeshAssetLoader.get_hull_mesh(hull_type)
+		if authored_hull_mesh:
+			col_shape.shape = authored_hull_mesh.create_convex_shape()
+			var hs = vehicle_hull.get_meta("hull_scale") if vehicle_hull.has_meta("hull_scale") else Vector3.ONE
+			col_shape.scale = hs * bulk
+			col_shape.position = vehicle_hull.position
+		else:
+			col_shape.scale = Vector3.ONE
+			var box = BoxShape3D.new()
+			box.size = base_size
+			col_shape.shape = box
+			col_shape.position = Vector3(0, base_size.y / 2.0, 0)
 		vehicle.add_child(col_shape)
 		
 		recalculate_move_speed()
