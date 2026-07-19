@@ -1,5 +1,7 @@
 extends StaticBody3D
 
+const DamageResolver = preload("res://scripts/damage_resolver.gd")
+
 @export var max_health: float = 100.0
 var health: float = 100.0
 var is_dead: bool = false
@@ -91,24 +93,20 @@ func _fire_missile_at_player():
 		missile.global_position = global_position + Vector3(0, 1.0, 0)
 		missile.target_node = player
 
-func take_damage(amount: float, damage_type: String = "kinetic"):
+func take_damage(amount: float, damage_type: String = "kinetic", _hit_origin = null):
 	if is_dead: return
-	
-	# Basic dummy armor stats (similar to a light hardened steel armor)
-	var threshold = 6.0
-	var reduction = 0.8
-	if damage_type == "thermal":
-		threshold = 2.0
-		reduction = 0.9
-	elif damage_type == "explosive":
-		threshold = 4.0
-		reduction = 0.7
-		
-	if amount < threshold:
-		# Negated!
+
+	# Same shared chip-through/brute-force armor model every real combatant
+	# uses (battle_unit.gd/player_vehicle.gd/building.gd) - a light hardened
+	# steel armor at thickness 0.5, roughly matching this dummy's old hand
+	# -rolled thresholds. The old inline version hard-negated any hit below
+	# its flat threshold instead of chip-through, so rapid-fire weapons
+	# (dps*fire_rate per shot, often single digits) dealt literal zero
+	# damage to test dummies forever.
+	var pair = DamageResolver.get_material_threshold("hardened_steel", damage_type, 0.5)
+	var final_damage = DamageResolver.compute_hull_damage(amount, pair.x, pair.y)
+	if final_damage <= 0.0:
 		return
-		
-	var final_damage = amount * reduction
 	health = max(0.0, health - final_damage)
 	_update_health_label()
 	

@@ -591,8 +591,47 @@ func _physics_process(delta):
 		if type_id == "rotary_cannon":
 			spin_up_timer = max(0.0, spin_up_timer - delta * 2.0)
 
+# Target stickiness: re-scanning "nearest" from scratch every physics tick
+# means two roughly-equidistant candidates (patrolling test dummies, two
+# enemies converging on a flank) flip which one is "nearest" every single
+# frame as they move, yanking the turret's slew back and forth and never
+# letting angle_to_target close enough to fire - weapons could visibly
+# track a target forever without ever landing a shot. Keeping the current
+# target as long as it's still a legal pick (alive, in range, in arc, not
+# fog-hidden, still the right kind of candidate for this weapon's mode)
+# avoids the thrash; only reacquire once it's actually no longer valid.
+func _is_current_target_still_valid(resting_forward: Vector3) -> bool:
+	if not target or not is_instance_valid(target):
+		return false
+	if "is_dead" in target and target.is_dead:
+		return false
+	if "health" in target and target.health <= 0.0:
+		return false
+	if target.is_in_group("missiles"):
+		return true # transient - PD logic re-validates range/team itself below
+	if targets_allies:
+		if not ("hp" in target and "max_hp" in target) or target.hp >= target.max_hp:
+			return false
+	else:
+		var my_team = get_team()
+		if my_team >= 0:
+			var t_team = target.get_meta("team") if target.has_meta("team") else -1
+			if t_team == my_team:
+				return false
+			if "fog_hidden" in target and target.fog_hidden:
+				return false
+	if global_position.distance_to(target.global_position) > fire_range:
+		return false
+	var dir = (target.global_position - global_position).normalized()
+	if resting_forward.angle_to(dir) > traverse_limit_angle:
+		return false
+	return true
+
 func _find_nearest_target():
 	var resting_forward = get_parent().global_transform.basis * resting_transform.basis * Vector3.FORWARD
+
+	if _is_current_target_still_valid(resting_forward):
+		return
 
 	# --- TEAM MODE (Skirmish): target any hostile "damageable" construct ---
 	var my_team = get_team()
