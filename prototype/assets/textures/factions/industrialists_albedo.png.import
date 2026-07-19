@@ -3,11 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://2lgkv15s1leq"
-valid=false
+path="res://.godot/imported/industrialists_albedo.png-454078a15d30dd0816405469e379ac7a.ctex"
+metadata={
+"vram_texture": false
+}
 
 [deps]
 
 source_file="res://assets/textures/factions/industrialists_albedo.png"
+dest_files=["res://.godot/imported/industrialists_albedo.png-454078a15d30dd0816405469e379ac7a.ctex"]
 
 [params]
 
