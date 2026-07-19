@@ -3,15 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cn4x6kwu7dgob"
-path="res://.godot/imported/glacier_syndicate_albedo.png-9e618eedab24a449a908f9dc46164644.ctex"
-metadata={
-"vram_texture": false
-}
+valid=false
 
 [deps]
 
 source_file="res://assets/textures/factions/glacier_syndicate_albedo.png"
-dest_files=["res://.godot/imported/glacier_syndicate_albedo.png-9e618eedab24a449a908f9dc46164644.ctex"]
 
 [params]
 

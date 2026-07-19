@@ -3,15 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://df64f7yldnom6"
-path="res://.godot/imported/expansionists_albedo.png-b8aec54a06f92aa3d8e757746fbe9102.ctex"
-metadata={
-"vram_texture": false
-}
+valid=false
 
 [deps]
 
 source_file="res://assets/textures/factions/expansionists_albedo.png"
-dest_files=["res://.godot/imported/expansionists_albedo.png-b8aec54a06f92aa3d8e757746fbe9102.ctex"]
 
 [params]
 
