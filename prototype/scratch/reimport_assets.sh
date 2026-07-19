@@ -19,7 +19,9 @@
 
 set -e
 REAL="$(pwd)"
-SCRATCH_ROOT="C:/Users/Chris/AppData/Local/Temp/claude/E--Build-A-Bomber/515c4c38-bcb4-4d28-839d-866d46eefd44/scratchpad"
+# Stable repo-local scratch dir (NOT a per-session temp path - persists across
+# runs so the "first run" full-project copy only happens once).
+SCRATCH_ROOT="$REAL/scratch/.reimport_root"
 DST="$SCRATCH_ROOT/reimport_copy"
 
 mkdir -p "$DST"

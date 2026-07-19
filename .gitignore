@@ -16,6 +16,14 @@ prototype/test_output.txt
 # is regenerated fresh every run and would just be diff noise.
 prototype/visual_regression/captures/
 
+# Stable repo-local scratchpad for tools/blender rebuilds + Godot reimport.
+# Reimport assets into an isolated copy here, then copy artifacts back into
+# the real project. Persistent on purpose - see scratch/reimport_assets.sh.
+prototype/scratch/.reimport_root/
+
 # Local tool config (not project source)
 .antigravitycli/
 .claude/
+
+# Python bytecode from top-level blender_cleanup.py / run_tripo.py
+__pycache__/
