@@ -38,7 +38,7 @@ def generate_with_google_genai(api_key):
         print(f"Generating image for {name}...")
         try:
             result = client.models.generate_images(
-                model='imagen-3.0-generate-002',
+                model='imagen-4.0-generate-001',
                 prompt=prompt,
                 config=types.GenerateImagesConfig(
                     number_of_images=1,
@@ -77,7 +77,7 @@ def generate_with_requests(api_key):
     import requests
     import base64
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key={api_key}"
     headers = {"Content-Type": "application/json"}
 
     for name, prompt in all_prompts.items():
