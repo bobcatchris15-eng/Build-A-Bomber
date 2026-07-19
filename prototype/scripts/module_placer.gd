@@ -1085,9 +1085,14 @@ func update_hull_appearance():
 	# Also update collision shape size in the designer
 	var col = hull.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if col:
-		var col_box = BoxShape3D.new()
-		col_box.size = catalog_data.size * hull_scale * armor_bulk
-		col.shape = col_box
+		if authored_mesh:
+			col.shape = authored_mesh.create_convex_shape()
+			col.scale = hull_scale * armor_bulk
+		else:
+			col.scale = Vector3.ONE
+			var col_box = BoxShape3D.new()
+			col_box.size = catalog_data.size * hull_scale * armor_bulk
+			col.shape = col_box
 	# Recalculate stats
 	get_tree().call_group("stat_ui", "update_stats", hull)
 	check_all_clipping()

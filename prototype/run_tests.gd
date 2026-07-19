@@ -2117,6 +2117,7 @@ func _count_mesh_vertices(mesh: Mesh) -> int:
 	return total
 
 func test_directional_armor_facet_resolution() -> bool:
+	await process_frame
 	print("Running Test Suite: Directional Armor Facet Resolution (Armor phase 2)...")
 	# An armor module on the FRONT facet only should protect against a hit
 	# arriving from the front, but NOT against an identical hit from the

@@ -81,14 +81,22 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		parent_node.add_child(barrel)
 
 	elif type_id == "heavy_machine_gun":
-		var base = MeshInstance3D.new()
-		var base_box = BoxMesh.new()
-		base_box.size = Vector3(base_size.x * 0.8, base_size.y * 0.5, base_size.z * 0.5)
-		base.mesh = base_box
-		var base_mat = StandardMaterial3D.new()
-		base_mat.albedo_color = base_color.darkened(0.1)
-		base.material_override = base_mat
-		base.position = Vector3(0, base_box.size.y / 2.0, 0)
+		var base_mesh = _part("pintle_mount")
+		var base: MeshInstance3D
+		var base_h = base_size.y * 0.5
+		if base_mesh:
+			base = _mesh_inst(base_mesh, base_color.darkened(0.1))
+			base.scale = _fit_scale(Vector3(base_size.x * 0.8, base_h, base_size.z * 0.5), Vector3(0.34, 0.22, 0.22))
+			base.position = Vector3(0, 0, 0)
+		else:
+			base = MeshInstance3D.new()
+			var base_box = BoxMesh.new()
+			base_box.size = Vector3(base_size.x * 0.8, base_h, base_size.z * 0.5)
+			base.mesh = base_box
+			var base_mat = StandardMaterial3D.new()
+			base_mat.albedo_color = base_color.darkened(0.1)
+			base.material_override = base_mat
+			base.position = Vector3(0, base_h / 2.0, 0)
 		parent_node.add_child(base)
 
 		# Single gun barrel
@@ -107,7 +115,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			var barrel_mat = StandardMaterial3D.new()
 			barrel_mat.albedo_color = Color.BLACK
 			barrel.material_override = barrel_mat
-		barrel.position = Vector3(0, base_box.size.y + 0.05, -base_size.z * 0.3)
+		barrel.position = Vector3(0, base_h + 0.05, -base_size.z * 0.3)
 		barrel.rotation = Vector3(PI / 2, 0, 0)
 		parent_node.add_child(barrel)
 
@@ -127,7 +135,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			var drum_mat = StandardMaterial3D.new()
 			drum_mat.albedo_color = Color.DARK_SLATE_GRAY
 			drum.material_override = drum_mat
-		drum.position = Vector3(0.18, base_box.size.y * 0.5, 0.0)
+		drum.position = Vector3(0.18, base_h * 0.5, 0.0)
 		drum.rotation = Vector3(0, 0, PI / 2)
 		parent_node.add_child(drum)
 
@@ -344,15 +352,22 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		parent_node.add_child(bomb)
 
 	elif type_id == "guided_missile":
-		# Launcher frame box
-		var frame = MeshInstance3D.new()
-		var frame_box = BoxMesh.new()
-		frame_box.size = Vector3(base_size.x, base_size.y * 0.4, base_size.z * 0.8)
-		frame.mesh = frame_box
-		var frame_mat = StandardMaterial3D.new()
-		frame_mat.albedo_color = base_color.darkened(0.2)
-		frame.material_override = frame_mat
-		frame.position = Vector3(0, frame_box.size.y / 2.0, 0)
+		var base_mesh = _part("pintle_mount")
+		var frame: MeshInstance3D
+		var frame_height = base_size.y * 0.4
+		if base_mesh:
+			frame = _mesh_inst(base_mesh, base_color.darkened(0.2))
+			frame.scale = _fit_scale(Vector3(base_size.x, frame_height, base_size.z * 0.8), Vector3(0.34, 0.22, 0.22))
+			frame.position = Vector3(0, 0, 0)
+		else:
+			frame = MeshInstance3D.new()
+			var frame_box = BoxMesh.new()
+			frame_box.size = Vector3(base_size.x, frame_height, base_size.z * 0.8)
+			frame.mesh = frame_box
+			var frame_mat = StandardMaterial3D.new()
+			frame_mat.albedo_color = base_color.darkened(0.2)
+			frame.material_override = frame_mat
+			frame.position = Vector3(0, frame_height / 2.0, 0)
 		parent_node.add_child(frame)
 
 		# Single long missile in launch guides
@@ -371,7 +386,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			var mis_mat = StandardMaterial3D.new()
 			mis_mat.albedo_color = Color.WHITE
 			missile.material_override = mis_mat
-		missile.position = Vector3(0, frame_box.size.y + 0.15, -base_size.z * 0.1)
+		missile.position = Vector3(0, frame_height + 0.15, -base_size.z * 0.1)
 		missile.rotation = Vector3(PI / 2, 0, 0)
 		parent_node.add_child(missile)
 
@@ -449,14 +464,22 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				parent_node.add_child(port)
 
 	elif type_id == "flamethrower":
-		var base = MeshInstance3D.new()
-		var base_box = BoxMesh.new()
-		base_box.size = Vector3(base_size.x * 0.8, base_size.y * 0.5, base_size.z * 0.4)
-		base.mesh = base_box
-		var base_mat = StandardMaterial3D.new()
-		base_mat.albedo_color = base_color.darkened(0.1)
-		base.material_override = base_mat
-		base.position = Vector3(0, base_box.size.y / 2.0, 0)
+		var base_mesh = _part("pintle_mount")
+		var base: MeshInstance3D
+		var base_h = base_size.y * 0.5
+		if base_mesh:
+			base = _mesh_inst(base_mesh, base_color.darkened(0.1))
+			base.scale = _fit_scale(Vector3(base_size.x * 0.8, base_h, base_size.z * 0.4), Vector3(0.34, 0.22, 0.22))
+			base.position = Vector3(0, 0, 0)
+		else:
+			base = MeshInstance3D.new()
+			var base_box = BoxMesh.new()
+			base_box.size = Vector3(base_size.x * 0.8, base_h, base_size.z * 0.4)
+			base.mesh = base_box
+			var base_mat = StandardMaterial3D.new()
+			base_mat.albedo_color = base_color.darkened(0.1)
+			base.material_override = base_mat
+			base.position = Vector3(0, base_h / 2.0, 0)
 		parent_node.add_child(base)
 
 		# Flame emitter nozzle cylinder
@@ -476,7 +499,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			var nozzle_mat = StandardMaterial3D.new()
 			nozzle_mat.albedo_color = Color(0.15, 0.15, 0.15)
 			nozzle.material_override = nozzle_mat
-		nozzle.position = Vector3(0, base_box.size.y + 0.1, -base_size.z * 0.35)
+		nozzle.position = Vector3(0, base_h + 0.1, -base_size.z * 0.35)
 		nozzle.rotation = Vector3(PI / 2, 0, 0)
 		parent_node.add_child(nozzle)
 
@@ -496,7 +519,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			var tank_mat = StandardMaterial3D.new()
 			tank_mat.albedo_color = Color.DARK_RED
 			tank.material_override = tank_mat
-		tank.position = Vector3(0, base_box.size.y * 0.4, base_size.z * 0.2)
+		tank.position = Vector3(0, base_h * 0.4, base_size.z * 0.2)
 		tank.rotation = Vector3(0, 0, PI / 2)
 		parent_node.add_child(tank)
 
@@ -536,15 +559,22 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		parent_node.add_child(orb)
 
 	elif type_id == "heavy_laser":
-		# Turret Base (Box)
-		var base = MeshInstance3D.new()
-		var base_box = BoxMesh.new()
-		base_box.size = Vector3(base_size.x, base_size.y * 0.4, base_size.z * 0.6)
-		base.mesh = base_box
-		var base_mat = StandardMaterial3D.new()
-		base_mat.albedo_color = base_color.darkened(0.3)
-		base.material_override = base_mat
-		base.position = Vector3(0, base_box.size.y / 2.0, 0)
+		var base_mesh = _part("pintle_mount")
+		var base: MeshInstance3D
+		var base_h = base_size.y * 0.4
+		if base_mesh:
+			base = _mesh_inst(base_mesh, base_color.darkened(0.3))
+			base.scale = _fit_scale(Vector3(base_size.x, base_h, base_size.z * 0.6), Vector3(0.34, 0.22, 0.22))
+			base.position = Vector3(0, 0, 0)
+		else:
+			base = MeshInstance3D.new()
+			var base_box = BoxMesh.new()
+			base_box.size = Vector3(base_size.x, base_h, base_size.z * 0.6)
+			base.mesh = base_box
+			var base_mat = StandardMaterial3D.new()
+			base_mat.albedo_color = base_color.darkened(0.3)
+			base.material_override = base_mat
+			base.position = Vector3(0, base_h / 2.0, 0)
 		parent_node.add_child(base)
 
 		# Dual Barrels
@@ -572,7 +602,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				barrel_mat.emission = Color.RED
 				barrel_mat.emission_energy_multiplier = 0.5
 				barrel.material_override = barrel_mat
-			barrel.position = Vector3(0.15 * side, base_box.size.y + 0.1, -base_size.z * 0.2)
+			barrel.position = Vector3(0.15 * side, base_h + 0.1, -base_size.z * 0.2)
 			barrel.rotation = Vector3(PI / 2, 0, 0)
 			parent_node.add_child(barrel)
 

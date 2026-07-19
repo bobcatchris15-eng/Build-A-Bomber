@@ -404,9 +404,14 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	if is_designer:
 		var col = CollisionShape3D.new()
 		col.name = "CollisionShape3D"
-		var col_box = BoxShape3D.new()
-		col_box.size = catalog_data.size * hull_scale * armor_bulk
-		col.shape = col_box
+		if authored_hull_mesh:
+			col.shape = authored_hull_mesh.create_convex_shape()
+			col.scale = hull_scale * armor_bulk
+		else:
+			col.scale = Vector3.ONE
+			var col_box = BoxShape3D.new()
+			col_box.size = catalog_data.size * hull_scale * armor_bulk
+			col.shape = col_box
 		hull.add_child(col)
 	
 	parent_node.add_child(hull)
