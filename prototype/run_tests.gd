@@ -134,6 +134,7 @@ func _init():
 	success = success and await test_base_power_is_separate_from_vehicle_energy_budget()
 	success = success and await test_every_weight_tweak_also_costs_real_resources()
 	success = success and await test_target_dummies_actually_take_damage_in_test_range()
+	success = success and await test_pintle_mounts_grant_full_traverse()
 
 	print("\n==============================================")
 	if success:
@@ -7624,4 +7625,46 @@ func test_target_dummies_actually_take_damage_in_test_range() -> bool:
 		return false
 
 	print("  [PASS] Weapon target locks stably (", max_same_target_run, "+ consecutive ticks) and target dummy total health genuinely drops from live fire: ", initial_total_health, " -> ", end_total_health)
+	return true
+
+func test_pintle_mounts_grant_full_traverse() -> bool:
+	print("Running Test Suite: Pintle Mounts Grant Full 360-Degree Traverse (MOUNTING_AND_ARMOR_SPEC.md #3)...")
+	# The whole point of a pintle mount is that the post spins freely - a
+	# top-pintle weapon that can only sweep a narrow arc isn't a pintle,
+	# it's a fixed bracket. get_traverse_limit_angle() used to only grant
+	# 360 degrees to a hardcoded whitelist of weapon type_ids (basic_cannon/
+	# ciws/pd_laser) regardless of where they were actually mounted; now it
+	# derives the limit from the real mount style, so ANY weapon mounted
+	# pintle-style (top or bottom) gets full traverse, while the same
+	# weapon sponson-embedded on a side facet gets a narrow forward arc.
+	var top_angle = ModuleCatalog.get_traverse_limit_angle("rotary_cannon", "top", "medium_hull")
+	var bottom_angle = ModuleCatalog.get_traverse_limit_angle("rotary_cannon", "bottom", "medium_hull")
+	var side_angle = ModuleCatalog.get_traverse_limit_angle("rotary_cannon", "right", "medium_hull")
+
+	if not is_equal_approx(top_angle, PI):
+		print("  [FAIL] rotary_cannon pintle-mounted on top should get full 360-degree traverse (PI), got ", top_angle)
+		return false
+	if not is_equal_approx(bottom_angle, PI):
+		print("  [FAIL] rotary_cannon pintle-mounted on bottom (e.g. helicopter belly mount) should get full 360-degree traverse (PI), got ", bottom_angle)
+		return false
+	if side_angle >= top_angle:
+		print("  [FAIL] The same weapon sponson-embedded on a side facet should get a narrower arc than its pintle-mounted counterpart, got side=", side_angle, " top=", top_angle)
+		return false
+
+	# basic_cannon's dedicated enclosed turret always gets full traverse
+	# regardless of facet - it's a different mount style entirely, not
+	# gated by top/bottom/side placement.
+	var cannon_side_angle = ModuleCatalog.get_traverse_limit_angle("basic_cannon", "right", "medium_hull")
+	if not is_equal_approx(cannon_side_angle, PI):
+		print("  [FAIL] basic_cannon's enclosed turret should get full traverse on any facet, got ", cannon_side_angle, " on the side")
+		return false
+
+	# frame_built weapons (gauss_railgun) still get zero independent
+	# traverse regardless of facet - the whole vehicle aims, not the barrel.
+	var railgun_angle = ModuleCatalog.get_traverse_limit_angle("gauss_railgun", "top", "medium_hull")
+	if railgun_angle != 0.0:
+		print("  [FAIL] gauss_railgun is frame_built and should have zero independent traverse, got ", railgun_angle)
+		return false
+
+	print("  [PASS] Pintle-mounted weapons (top and bottom) get full 360-degree traverse, the same weapon sponson-mounted on a side gets a narrow arc, and mount-style exceptions (turret/frame_built) are unaffected by facet.")
 	return true

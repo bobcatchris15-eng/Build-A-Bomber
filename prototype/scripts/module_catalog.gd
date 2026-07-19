@@ -1420,16 +1420,56 @@ static func classify_facet(local_direction: Vector3) -> String:
 # logic). Omitting facet/hull_type_id keeps the original weapon-type-only
 # angle (used by any call site that doesn't yet know the mount context).
 static func get_traverse_limit_angle(type_id: String, facet: String = "", hull_type_id: String = "") -> float:
+	# Traverse limit is a function of MOUNT STYLE first, weapon type second
+	# (MOUNTING_AND_ARMOR_SPEC.md #3). The point of a pintle is that the
+	# post spins freely - a top-pintle machine gun that can only sweep 45
+	# degrees isn't a pintle, it's a fixed bracket. Conversely, a sponson
+	# is by definition an embedded mount with the weapon body rotating
+	# INSIDE the hull (only the muzzle projects), which physically can
+	# only sweep a narrow forward arc, not 360.
+	#
+	# Per-mount-style baseline:
+	#   frame_built    -> 0  (whole vehicle aims, the barrel is fixed)
+	#   turret         -> 2pi (basic_cannon's enclosed rotating structure
+	#                          - the existing tank-cannon visual is correct
+	#                          and stays, per spec)
+	#   pintle_top     -> 2pi (the whole point of a pintle - post + level top)
+	#   pintle_bottom  -> 2pi (inverted pintle, same freedom)
+	#   sponson        -> pi/3 (narrow forward arc, ~60 degrees)
+	#
+	# Per-weapon overrides below are a NARROWER cap layered on top: a
+	# mortar's lobbed arc wants even less traverse than the default sponson
+	# (~30 degrees), and a heavy_howitzer's long rigid barrel - already
+	# frame_built, so this is moot in practice - gets a small arc as a
+	# consistent fallback if it ever mounts elsewhere. ciws/pd_laser
+	# were previously hardcoded to 360; they're a pintle mount, so 360 is
+	# the correct answer, just now via the mount-style path instead of
+	# by weapon-id whitelist.
+	#
+	# Omitting facet/hull_type_id (the legacy weapon-type-only entry
+	# point) keeps the original per-type_id numbers so any call site that
+	# doesn't yet know the mount context still gets a meaningful angle.
 	if (facet != "" or hull_type_id != "") and get_mount_style(type_id, facet, hull_type_id) == "frame_built":
 		return 0.0
-	if type_id in ["basic_cannon", "ciws", "pd_laser"]:
+	if facet == "" and hull_type_id == "":
+		if type_id in ["basic_cannon", "ciws", "pd_laser"]:
+			return PI # 360 degrees
+		elif type_id == "heavy_howitzer":
+			return PI / 3.0 # 60 degrees
+		elif type_id in ["mortar_array", "spigot_mortar"]:
+			return PI / 6.0 # 30 degrees
+		else:
+			return PI / 4.0 # 45 degrees
+	var style = get_mount_style(type_id, facet, hull_type_id)
+	if style in ["turret", "pintle_top", "pintle_bottom"]:
 		return PI # 360 degrees
+	# sponson: default 60-degree forward arc, with per-weapon narrow cap
+	# for indirect-fire weapons whose lobbed arc wants even less sweep.
+	if type_id in ["mortar_array", "spigot_mortar"]:
+		return PI / 6.0 # 30 degrees
 	elif type_id == "heavy_howitzer":
 		return PI / 3.0 # 60 degrees
-	elif type_id in ["mortar_array", "spigot_mortar"]:
-		return PI / 6.0 # 30 degrees
-	else:
-		return PI / 4.0 # 45 degrees
+	return PI / 3.0 # 60 degrees
 
 static func get_module_data(type_id: String) -> Dictionary:
 	var cat = get_catalog()
