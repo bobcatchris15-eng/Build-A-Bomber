@@ -133,6 +133,7 @@ func _init():
 	success = success and await test_enemy_intel_readout_respects_fog_of_war()
 	success = success and await test_base_power_is_separate_from_vehicle_energy_budget()
 	success = success and await test_every_weight_tweak_also_costs_real_resources()
+	success = success and await test_target_dummies_actually_take_damage_in_test_range()
 
 	print("\n==============================================")
 	if success:
@@ -7550,4 +7551,77 @@ func test_every_weight_tweak_also_costs_real_resources() -> bool:
 			return false
 
 	print("  [PASS] Every tweak that already costs real weight (and thus real traverse) now also costs real metal/crystal - the cost model no longer whitelists only 5 of ~22 such tweaks.")
+	return true
+
+func test_target_dummies_actually_take_damage_in_test_range() -> bool:
+	print("Running Test Suite: Test Range Target Dummies Actually Take Damage...")
+	# Regression test for a real bug: target_dummy.gd's take_damage() only
+	# accepted 2 args while auto_weapon.gd's _deal_weapon_damage() had moved
+	# on to calling it with a 3rd hit_origin arg (added for facet-gated
+	# subsystem stripping) - every hit threw a script error and silently did
+	# nothing. Once that was fixed, a second bug surfaced: target_dummy.gd
+	# had its own hand-rolled hard-negate-below-threshold armor check
+	# instead of DamageResolver's shared chip-through model, so rapid-fire
+	# weapons (whose per-shot amount is dps*fire_rate, often single digits)
+	# still dealt zero. And a third, more fundamental bug - _find_nearest_
+	# target() re-picked "nearest" from scratch every physics tick, so two
+	# patrolling dummies at near-equal distance flip-flopped the target
+	# every frame, yanking the turret's aim back and forth so it could
+	# never converge within the firing angle tolerance at all.
+	var battlefield_scene = preload("res://scenes/Battlefield.tscn").instantiate()
+	root.add_child(battlefield_scene)
+	current_scene = battlefield_scene
+	await process_frame
+
+	var hull = battlefield_scene.vehicle_hull
+	if not hull:
+		print("  [FAIL] No vehicle_hull on Battlefield scene.")
+		battlefield_scene.queue_free()
+		return false
+
+	var weapon = null
+	for child in hull.get_children():
+		if child.has_meta("module_data") and child.has_method("_find_nearest_target"):
+			weapon = child
+			break
+	if not weapon:
+		print("  [FAIL] No combat-scripted weapon module found on the player's hull.")
+		battlefield_scene.queue_free()
+		return false
+
+	var dummies = get_nodes_in_group("targets")
+	var initial_total_health = 0.0
+	for d in dummies:
+		initial_total_health += d.health
+
+	# Same target must stay locked across consecutive ticks (stickiness),
+	# and total dummy health must actually drop within a generous window.
+	var same_target_run = 0
+	var max_same_target_run = 0
+	var last_target = null
+	for i in range(400):
+		await process_frame
+		if weapon.target and weapon.target == last_target:
+			same_target_run += 1
+			max_same_target_run = max(max_same_target_run, same_target_run)
+		else:
+			same_target_run = 0
+		last_target = weapon.target
+
+	var end_total_health = 0.0
+	for d in dummies:
+		if is_instance_valid(d):
+			end_total_health += d.health
+
+	battlefield_scene.queue_free()
+
+	if max_same_target_run < 30:
+		print("  [FAIL] Weapon target never stayed locked for more than ", max_same_target_run, " consecutive physics ticks (expected sustained lock, not frame-by-frame flip-flopping).")
+		return false
+
+	if end_total_health >= initial_total_health:
+		print("  [FAIL] Target dummy total health did not decrease after 400 physics ticks of live weapon fire: ", initial_total_health, " -> ", end_total_health)
+		return false
+
+	print("  [PASS] Weapon target locks stably (", max_same_target_run, "+ consecutive ticks) and target dummy total health genuinely drops from live fire: ", initial_total_health, " -> ", end_total_health)
 	return true
