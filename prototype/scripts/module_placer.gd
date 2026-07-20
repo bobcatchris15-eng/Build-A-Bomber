@@ -447,6 +447,7 @@ func _place_hull_from_ui(type_id: String):
 	hull.add_child(col)
 	
 	add_child(hull)
+	update_hull_appearance()
 	_log("New hull spawned: " + type_id)
 	get_tree().call_group("stat_ui", "update_stats", hull)
 
@@ -1100,6 +1101,52 @@ func update_hull_appearance():
 			var col_box = BoxShape3D.new()
 			col_box.size = catalog_data.size * hull_scale * armor_bulk
 			col.shape = col_box
+			
+	# Manage Front Arrow Indicator (Green triangle pointing along -Z)
+	var arrow = hull.get_node_or_null("FrontArrow")
+	if not arrow:
+		arrow = Node3D.new()
+		arrow.name = "FrontArrow"
+		
+		# Tip: a cone pointing forward (-Z)
+		var tip = MeshInstance3D.new()
+		tip.name = "Tip"
+		var cone = CylinderMesh.new()
+		cone.top_radius = 0.0
+		cone.bottom_radius = 0.18
+		cone.height = 0.35
+		tip.mesh = cone
+		tip.rotation.x = -PI / 2.0
+		tip.position = Vector3(0, 0, -0.175)
+		arrow.add_child(tip)
+		
+		# Shaft: a cylinder behind the tip
+		var shaft = MeshInstance3D.new()
+		shaft.name = "Shaft"
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = 0.07
+		cyl.bottom_radius = 0.07
+		cyl.height = 0.35
+		shaft.mesh = cyl
+		shaft.rotation.x = -PI / 2.0
+		shaft.position = Vector3(0, 0, 0.175)
+		arrow.add_child(shaft)
+		
+		# Vibrant green material
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.1, 0.9, 0.1)
+		mat.emission_enabled = true
+		mat.emission = Color(0.1, 0.7, 0.1)
+		mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+		tip.material_override = mat
+		shaft.material_override = mat
+		
+		hull.add_child(arrow)
+		
+	var vis_size = catalog_data.size * hull_scale * armor_bulk
+	# Position at the front-center of the deck, slightly raised
+	arrow.position = Vector3(0, vis_size.y / 2.0 + 0.3, -vis_size.z / 2.0 - 0.5)
+	
 	# Recalculate stats
 	get_tree().call_group("stat_ui", "update_stats", hull)
 	check_all_clipping()
