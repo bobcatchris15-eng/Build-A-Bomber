@@ -422,28 +422,36 @@ func _place_hull_from_ui(type_id: String):
 	hull.set_meta("hull_scale", Vector3(1, 1, 1))
 	hull.set_meta("type_id", type_id)
 	
-	var mesh_inst = MeshInstance3D.new()
-	mesh_inst.name = "MeshInstance3D"
+	var phys_mesh = MeshInstance3D.new()
+	phys_mesh.name = "PhysicsMesh"
 	var authored_mesh = MeshAssetLoader.get_hull_mesh(type_id)
 	if authored_mesh:
-		mesh_inst.mesh = authored_mesh
-		mesh_inst.rotation.y = deg_to_rad(ModuleCatalog.get_hull_visual_yaw_offset_deg(type_id))
+		phys_mesh.mesh = authored_mesh
+		phys_mesh.rotation.y = deg_to_rad(ModuleCatalog.get_hull_visual_yaw_offset_deg(type_id))
 	else:
 		var box = BoxMesh.new()
 		box.size = catalog_data.size
-		mesh_inst.mesh = box
+		phys_mesh.mesh = box
+
+	phys_mesh.visible = true
+	hull.add_child(phys_mesh)
+
+	var mesh_inst = MeshInstance3D.new()
+	mesh_inst.name = "MeshInstance3D"
+	mesh_inst.mesh = phys_mesh.mesh
+	mesh_inst.rotation = phys_mesh.rotation
+	hull.add_child(mesh_inst)
 
 	var mat = StandardMaterial3D.new()
 	mat.albedo_color = catalog_data.color
 	mesh_inst.material_override = mat
-	
-	hull.add_child(mesh_inst)
 	
 	var col = CollisionShape3D.new()
 	col.name = "CollisionShape3D"
 	var col_box = BoxShape3D.new()
 	col_box.size = catalog_data.size
 	col.shape = col_box
+	col.rotation = phys_mesh.rotation
 	hull.add_child(col)
 	
 	add_child(hull)
@@ -1052,8 +1060,9 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 
 func update_hull_appearance():
 	if not hull: return
+	var phys_mesh = hull.get_node_or_null("PhysicsMesh") as MeshInstance3D
 	var mesh_inst = hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if not mesh_inst: return
+	if not phys_mesh or not mesh_inst: return
 	
 	var type_id = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
@@ -1076,14 +1085,18 @@ func update_hull_appearance():
 			var taper = hull.get_meta("nose_taper")
 			if abs(taper - 1.0) > 0.001:
 				authored_mesh = HullDeformScript.apply_nose_taper(authored_mesh, taper)
-		mesh_inst.mesh = authored_mesh
-		mesh_inst.scale = hull_scale * armor_bulk
-		mesh_inst.rotation.y = deg_to_rad(ModuleCatalog.get_hull_visual_yaw_offset_deg(type_id))
+		phys_mesh.mesh = authored_mesh
+		phys_mesh.scale = hull_scale * armor_bulk
+		phys_mesh.rotation.y = deg_to_rad(ModuleCatalog.get_hull_visual_yaw_offset_deg(type_id))
 	else:
 		var box = BoxMesh.new()
 		box.size = catalog_data.size * hull_scale * armor_bulk
-		mesh_inst.mesh = box
-		mesh_inst.scale = Vector3.ONE
+		phys_mesh.mesh = box
+		phys_mesh.scale = Vector3.ONE
+
+	mesh_inst.mesh = phys_mesh.mesh
+	mesh_inst.scale = phys_mesh.scale
+	mesh_inst.rotation = phys_mesh.rotation
 	
 	# Apply materials - shared faction+armor shader (see hull_material_builder.gd)
 	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
@@ -1096,11 +1109,13 @@ func update_hull_appearance():
 		if authored_mesh:
 			col.shape = authored_mesh.create_convex_shape()
 			col.scale = hull_scale * armor_bulk
+			col.rotation = phys_mesh.rotation
 		else:
 			col.scale = Vector3.ONE
 			var col_box = BoxShape3D.new()
 			col_box.size = catalog_data.size * hull_scale * armor_bulk
 			col.shape = col_box
+			col.rotation = phys_mesh.rotation
 			
 	# Manage Front Arrow Indicator (Green triangle pointing along -Z)
 	var arrow = hull.get_node_or_null("FrontArrow")

@@ -382,22 +382,34 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	# nose-taper hull deform (MOUNTING_AND_ARMOR_SPEC.md #4): without this
 	# fix, a tapered nose would only ever be visible in the Design Lab and
 	# silently vanish the moment the design was saved, loaded, or fielded.
-	var mesh_inst = MeshInstance3D.new()
-	mesh_inst.name = "MeshInstance3D"
+	# PhysicsMesh (re-use the physical mesh, as a renamed copy)
+	var phys_mesh = MeshInstance3D.new()
+	phys_mesh.name = "PhysicsMesh"
 	var authored_hull_mesh = MeshAssetLoader.get_hull_mesh(hull_type)
 	if authored_hull_mesh:
 		if hull_type == "interceptor_hull" and abs(nose_taper - 1.0) > 0.001:
 			authored_hull_mesh = HullDeformScript.apply_nose_taper(authored_hull_mesh, nose_taper)
-		mesh_inst.mesh = authored_hull_mesh
-		mesh_inst.scale = hull_scale * armor_bulk
-		mesh_inst.rotation.y = deg_to_rad(ModuleCatalogScript.get_hull_visual_yaw_offset_deg(hull_type))
+		phys_mesh.mesh = authored_hull_mesh
+		phys_mesh.scale = hull_scale * armor_bulk
+		phys_mesh.rotation.y = deg_to_rad(ModuleCatalogScript.get_hull_visual_yaw_offset_deg(hull_type))
 	else:
 		var box = BoxMesh.new()
 		box.size = catalog_data.size * hull_scale * armor_bulk
-		mesh_inst.mesh = box
+		phys_mesh.mesh = box
+
+	# PhysicsMesh is hidden in battle, only visible in designer
+	phys_mesh.visible = is_designer
+	hull.add_child(phys_mesh)
+
+	# MeshInstance3D (visual mesh, renamed/copied visual representation)
+	var mesh_inst = MeshInstance3D.new()
+	mesh_inst.name = "MeshInstance3D"
+	mesh_inst.mesh = phys_mesh.mesh
+	mesh_inst.scale = phys_mesh.scale
+	mesh_inst.rotation = phys_mesh.rotation
+	hull.add_child(mesh_inst)
 
 	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
-	hull.add_child(mesh_inst)
 	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
 	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
 	
@@ -408,11 +420,13 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		if authored_hull_mesh:
 			col.shape = authored_hull_mesh.create_convex_shape()
 			col.scale = hull_scale * armor_bulk
+			col.rotation = phys_mesh.rotation
 		else:
 			col.scale = Vector3.ONE
 			var col_box = BoxShape3D.new()
 			col_box.size = catalog_data.size * hull_scale * armor_bulk
 			col.shape = col_box
+			col.rotation = phys_mesh.rotation
 		hull.add_child(col)
 	
 	parent_node.add_child(hull)
