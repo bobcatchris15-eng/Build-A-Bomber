@@ -221,8 +221,16 @@ func _setup_navigation():
 		return
 	nav_agent = NavigationAgent3D.new()
 	add_child(nav_agent)
-	nav_agent.path_desired_distance = 1.5
-	nav_agent.target_desired_distance = 1.5
+	# path_desired_distance: how close the agent must get to each intermediate
+	# waypoint before advancing to the next one. 1.0 m gives tight path-following
+	# without snapping every frame.
+	# target_desired_distance: how close to the FINAL destination counts as
+	# "arrived." 2.0 m matches the MOVE arrive_dist in _steer_towards so both
+	# systems agree on when the trip is done - the old 1.5 m was smaller than
+	# the nav agent's own path quantization in some maps, causing an oscillation
+	# loop where nav said "done" but the steering code kept overriding it.
+	nav_agent.path_desired_distance = 1.0
+	nav_agent.target_desired_distance = 2.0
 	nav_agent.avoidance_enabled = false
 	if is_naval:
 		if hull_draught > ModuleCatalog.SHALLOW_WATER_DRAUGHT_THRESHOLD and controller.has_method("get_deep_water_nav_map"):
@@ -612,7 +620,16 @@ func _physics_process(delta):
 			# through to the old gravity-only behavior below, unchanged.
 			velocity.y = 0.0
 			var target_y = terrain_controller.terrain_height_at(global_position)
-			global_position.y = lerp(global_position.y, target_y, 8.0 * delta)
+			# Snap hard when significantly off the ground (spawn, teleport, or a
+			# large terrain step) so the vehicle never "slides on its belly" for
+			# half a second waiting for a slow lerp to converge. Use a fast lerp
+			# for small corrections (rolling over surface undulations) so the
+			# motion still looks smooth rather than jittery.
+			var y_error = target_y - global_position.y
+			if abs(y_error) > 0.5:
+				global_position.y = target_y
+			else:
+				global_position.y += y_error * min(12.0 * delta, 1.0)
 		elif not is_on_floor():
 			velocity.y -= 9.8 * delta
 		else:
@@ -624,7 +641,12 @@ func _physics_process(delta):
 				_steer_fixed_wing(move_target, delta)
 				if global_position.distance_to(move_target) < attack_range:
 					order = OrderType.IDLE
-			elif _steer_towards(move_target, delta, 0.6):
+			# arrive_dist = 2.0 m matches nav_agent.target_desired_distance so the
+			# two systems agree on "arrived" - the old 0.6 m was smaller than the
+			# nav agent's own finish threshold, causing a tight circle where
+			# nav_agent.is_navigation_finished() returned true but direct steering
+			# thought the unit was still 0.6-1.5 m away.
+			elif _steer_towards(move_target, delta, 2.0):
 				order = OrderType.IDLE
 		OrderType.ATTACK:
 			if not is_instance_valid(attack_target) or ("is_dead" in attack_target and attack_target.is_dead):
@@ -749,6 +771,16 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 			candidate.y = 0.0
 			if candidate.length() > 0.05:
 				steer_diff = candidate
+		else:
+			# Nav agent has declared the trip done. If we're also within the
+			# nav agent's own finish radius (regardless of the caller's
+			# arrive_dist), stop here. Without this guard the unit switches to
+			# raw direct steering toward a destination that is 0–2 m away,
+			# overshoots, and loops in a tight circle.
+			if pos_diff.length() < max(arrive_dist, nav_agent.target_desired_distance):
+				velocity.x = 0.0
+				velocity.z = 0.0
+				return true
 
 	if is_omni:
 		# The real mechanical difference (task 5): every other ground type

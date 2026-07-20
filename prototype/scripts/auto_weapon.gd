@@ -543,8 +543,13 @@ func _physics_process(delta):
 		var current_dir = -global_transform.basis.z.normalized()
 		var angle_to_target = current_dir.angle_to(dir_to_target)
 		
-		# Only fire if pointing within 10 degrees (0.17 rad) and not blocked
-		if angle_to_target < 0.17 and not _is_line_of_sight_blocked():
+		# Only fire if pointing within ~15 degrees (0.26 rad) and not blocked.
+		# Widened from 0.17 rad (10°): slow/heavy turrets that physically have
+		# 360° arc were tracking targets indefinitely without ever closing into
+		# the 10° cone tight enough to trigger a shot. 15° still requires the
+		# weapon to be meaningfully pointed at the target while giving the
+		# traverse mechanism realistic slack to complete its slew.
+		if angle_to_target < 0.26 and not _is_line_of_sight_blocked():
 			# Spin up check for Rotary Cannon
 			if type_id == "rotary_cannon":
 				var spin_needed = 0.8
