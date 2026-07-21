@@ -99,6 +99,7 @@ static func build_hull_material(armor_material: String, faction: String) -> Shad
 	var vis = FactionCatalogScript.get_visual(faction)
 	var mat = ShaderMaterial.new()
 	mat.shader = HULL_SHADER
+	# Disable backface culling to render chamfered edges correctly - moved to shader render_mode
 	# Lightened 2026-07-18 alongside metallic being brought down (see
 	# ARMOR_PBR's own comment) - guarantees a real, reliable brightness
 	# gap against build_structural_material()'s darkened(0.62) even with

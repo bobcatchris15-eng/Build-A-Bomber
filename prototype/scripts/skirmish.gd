@@ -181,7 +181,12 @@ func _ready():
 			economy[PLAYER_TEAM].crystal = match_config.starting_crystal
 			economy[ENEMY_TEAM].crystal = match_config.starting_crystal
 
+	if INFINITE_PLAYER_RESOURCES_FOR_TESTING:
+		economy[PLAYER_TEAM].metal = INFINITE_RESOURCE_FLOOR
+		economy[PLAYER_TEAM].crystal = INFINITE_RESOURCE_FLOOR
+
 	_setup_navigation()
+	_setup_fog_shroud()
 	_load_rosters()
 	_spawn_resource_nodes()
 	_spawn_bases()
@@ -320,6 +325,22 @@ func _get_construct_faction(c) -> String:
 		return c.hull_node.get_meta("faction")
 	return FactionCatalog.DEFAULT_FACTION
 
+# Reveal-vs-hide hysteresis (Skirmish refinement pass): a construct sitting
+# right at the vision-range boundary used to flicker in/out of fog every
+# 0.3s tick as tiny position deltas crossed a single threshold. Now reveal
+# still happens at the plain vision range, but a construct that's ALREADY
+# visible only drops back out past a wider hide threshold - the two-
+# threshold gap is the flicker's dead zone.
+const FOG_HIDE_RANGE_MULT: float = 1.15
+
+func _get_effective_vision(o) -> float:
+	var vision = o.vision_range if "vision_range" in o else 0.0
+	var o_flying = "is_flying" in o and o.is_flying
+	if not o_flying:
+		var elevation = terrain_height_at(o.global_position)
+		vision *= 1.0 + min(elevation, ELEVATION_VISION_CAP) * ELEVATION_VISION_BONUS_PER_UNIT
+	return vision
+
 func _recalc_fog_of_war():
 	if game_over: return
 	var player_constructs = get_team_units(PLAYER_TEAM) + get_team_buildings(PLAYER_TEAM)
@@ -328,18 +349,17 @@ func _recalc_fog_of_war():
 		if not is_instance_valid(c) or not c.has_method("set_fog_visible"): continue
 		var seen = false
 		var c_flying = "is_flying" in c and c.is_flying
+		var was_visible = not ("fog_hidden" in c and c.fog_hidden)
 		# Bayou Irregulars passive: shrinks the effective distance at which
 		# ANY observer can spot this specific construct - camouflage is a
 		# property of the thing being looked at, not the viewer.
 		var detection_mult = FactionCatalog.get_passive(_get_construct_faction(c), "detection_range_mult", 1.0)
 		for o in player_constructs:
 			if not is_instance_valid(o): continue
-			var vision = o.vision_range if "vision_range" in o else 0.0
+			var vision = _get_effective_vision(o) * detection_mult
+			var effective_range = vision * FOG_HIDE_RANGE_MULT if was_visible else vision
 			var o_flying = "is_flying" in o and o.is_flying
-			if not o_flying:
-				var elevation = terrain_height_at(o.global_position)
-				vision *= 1.0 + min(elevation, ELEVATION_VISION_CAP) * ELEVATION_VISION_BONUS_PER_UNIT
-			if c.global_position.distance_to(o.global_position) <= vision * detection_mult:
+			if c.global_position.distance_to(o.global_position) <= effective_range:
 				# Flying viewers/targets skip the terrain-obstacle raycast
 				# entirely - already airborne regardless of what's on the
 				# ground below, same reasoning the elevation bonus above
@@ -348,7 +368,108 @@ func _recalc_fog_of_war():
 					seen = true
 					break
 		c.set_fog_visible(seen)
+	_update_fog_shroud(player_constructs)
 	_update_enemy_intel()
+
+# --- Fog shroud (visual): a full-map alpha-mask overlay reusing the same
+# GRID_CELL resolution as TerrainBuilder's navmesh grid - unexplored terrain
+# reads black, explored-but-not-currently-visible reads dimmed, currently
+# visible is fully clear. Deliberately a plain radius reveal (no LOS
+# raycast) - unlike per-construct enemy visibility above, which needs real
+# LOS to avoid a wallhack-through-fog exploit, the shroud is purely cosmetic
+# ground dimming, and a raycast per grid cell per player construct would be
+# hundreds-to-thousands of extra ray casts every tick for no gameplay
+# payoff. Only cells that actually change state get touched (not a full
+# image rewrite every tick), so cost scales with vision area, not map size.
+const FOG_GRID_CELL: float = 4.0
+const FOG_EXPLORED_ALPHA: float = 0.55
+const FOG_UNEXPLORED_ALPHA: float = 1.0
+const FOG_SHROUD_HEIGHT: float = 0.4
+const FOG_SHROUD_SHADER_CODE := """
+shader_type spatial;
+render_mode unshaded, blend_mix, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
+
+varying vec3 world_pos;
+
+uniform sampler2D shroud_tex : hint_default_black, filter_linear;
+uniform float map_half = 80.0;
+
+void vertex() {
+	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+	vec2 uv = (world_pos.xz + vec2(map_half)) / (2.0 * map_half);
+	vec4 c = texture(shroud_tex, uv);
+	ALBEDO = vec3(0.015, 0.015, 0.02);
+	ALPHA = c.a;
+}
+"""
+
+var _fog_half: float = 0.0
+var _fog_dim: int = 0
+var _fog_shroud_image: Image
+var _fog_shroud_texture: ImageTexture
+var _fog_prev_visible_cells: Dictionary = {}
+
+func _setup_fog_shroud():
+	_fog_half = current_map.get("map_half_extents", 80.0)
+	_fog_dim = max(1, int(ceil((_fog_half * 2.0) / FOG_GRID_CELL)))
+	_fog_shroud_image = Image.create(_fog_dim, _fog_dim, false, Image.FORMAT_RGBA8)
+	_fog_shroud_image.fill(Color(0, 0, 0, FOG_UNEXPLORED_ALPHA))
+	_fog_shroud_texture = ImageTexture.create_from_image(_fog_shroud_image)
+
+	var mesh_inst = MeshInstance3D.new()
+	mesh_inst.name = "FogShroud"
+	var plane = PlaneMesh.new()
+	plane.size = Vector2(_fog_half * 2.0, _fog_half * 2.0)
+	mesh_inst.mesh = plane
+	var shader = Shader.new()
+	shader.code = FOG_SHROUD_SHADER_CODE
+	var shader_mat = ShaderMaterial.new()
+	shader_mat.shader = shader
+	shader_mat.set_shader_parameter("shroud_tex", _fog_shroud_texture)
+	shader_mat.set_shader_parameter("map_half", _fog_half)
+	mesh_inst.material_override = shader_mat
+	add_child(mesh_inst)
+	mesh_inst.global_position = Vector3(0, FOG_SHROUD_HEIGHT, 0)
+
+func _fog_world_to_cell(x: float, z: float) -> Vector2i:
+	return Vector2i(int(floor((x + _fog_half) / FOG_GRID_CELL)), int(floor((z + _fog_half) / FOG_GRID_CELL)))
+
+func _update_fog_shroud(player_constructs: Array):
+	if not is_instance_valid(_fog_shroud_texture): return
+	var new_visible: Dictionary = {}
+	for o in player_constructs:
+		if not is_instance_valid(o): continue
+		var vision = _get_effective_vision(o)
+		if vision <= 0.0: continue
+		var center = o.global_position
+		var cell_radius = int(ceil(vision / FOG_GRID_CELL)) + 1
+		var c0 = _fog_world_to_cell(center.x, center.z)
+		for dz in range(-cell_radius, cell_radius + 1):
+			var gz = c0.y + dz
+			if gz < 0 or gz >= _fog_dim: continue
+			for dx in range(-cell_radius, cell_radius + 1):
+				var gx = c0.x + dx
+				if gx < 0 or gx >= _fog_dim: continue
+				var world_x = -_fog_half + (gx + 0.5) * FOG_GRID_CELL
+				var world_z = -_fog_half + (gz + 0.5) * FOG_GRID_CELL
+				if Vector2(world_x - center.x, world_z - center.z).length() <= vision:
+					new_visible[Vector2i(gx, gz)] = true
+
+	var changed = false
+	for cell in new_visible.keys():
+		if not _fog_prev_visible_cells.has(cell):
+			_fog_shroud_image.set_pixel(cell.x, cell.y, Color(0, 0, 0, 0.0))
+			changed = true
+	for cell in _fog_prev_visible_cells.keys():
+		if not new_visible.has(cell):
+			_fog_shroud_image.set_pixel(cell.x, cell.y, Color(0, 0, 0, FOG_EXPLORED_ALPHA))
+			changed = true
+	_fog_prev_visible_cells = new_visible
+	if changed:
+		_fog_shroud_texture.update(_fog_shroud_image)
 
 # Composition readout for whatever enemy constructs are CURRENTLY visible
 # (never fog-hidden ones - same one-directional, no-persistent-memory fog
@@ -524,6 +645,15 @@ func build_time_for_cost(cost: Vector2i) -> float:
 
 # --- Economy ---
 
+# Testing cheat (Chris's explicit request): the player's economy never
+# actually runs out - every spend() immediately tops back up to a floor
+# comfortably above the most expensive roster entry, so build/production
+# testing isn't gated by grinding harvester income. Deliberately PLAYER_TEAM
+# only - the enemy AI's economy is untouched, so its own production timing
+# still behaves normally for balance/AI testing.
+const INFINITE_PLAYER_RESOURCES_FOR_TESTING: bool = true
+const INFINITE_RESOURCE_FLOOR: int = 999999
+
 func can_afford(team: int, metal: int, crystal: int) -> bool:
 	return economy[team].metal >= metal and economy[team].crystal >= crystal
 
@@ -532,6 +662,9 @@ func spend(team: int, metal: int, crystal: int) -> bool:
 		return false
 	economy[team].metal -= metal
 	economy[team].crystal -= crystal
+	if INFINITE_PLAYER_RESOURCES_FOR_TESTING and team == PLAYER_TEAM:
+		economy[team].metal = max(economy[team].metal, INFINITE_RESOURCE_FLOOR)
+		economy[team].crystal = max(economy[team].crystal, INFINITE_RESOURCE_FLOOR)
 	_update_resource_ui()
 	return true
 
@@ -562,28 +695,26 @@ func _setup_navigation():
 	_amphibious_nav_region = nav.amphibious_region
 	_deep_water_nav_region = nav.deep_water_region
 
-	var half: float = current_map.get("map_half_extents", 80.0)
 	var ground = get_node_or_null("Ground")
 	if ground:
-		var size = Vector3(half * 2.0, 1.0, half * 2.0)
-		# Duplicate before mutating - Ground's BoxMesh/BoxShape3D are scene
-		# sub-resources that could otherwise be shared across every
-		# Skirmish instance (same footgun as the hull nose-taper work,
-		# which duplicates its mesh for the same reason), which would leak
-		# one map's size/color into another's, particularly noticeable
-		# across the many Skirmish instantiate/free cycles in the test suite.
+		# Skirmish refinement pass: Ground used to be one flat BoxMesh/
+		# BoxShape3D slab (hence the scene's baked -0.5 Y offset, sizing its
+		# top surface to sit at y=0) - replaced with a real subdivided
+		# heightmap mesh/shape whose vertices already carry absolute
+		# height_at() world Y values (see build_ground_visual_mesh()), so
+		# the old slab offset has to go too or every terrain query would be
+		# off by half a unit from what units/buildings actually see.
+		ground.position = Vector3.ZERO
+		var generated = TerrainBuilder.build_ground_visual_mesh(current_map)
 		var mesh_inst: MeshInstance3D = ground.get_node_or_null("MeshInstance3D")
-		if mesh_inst and mesh_inst.mesh is BoxMesh:
-			var box: BoxMesh = mesh_inst.mesh.duplicate()
-			box.size = size
-			mesh_inst.mesh = box
+		if mesh_inst:
+			mesh_inst.mesh = generated.mesh
 			var ground_color = current_map.get("ground_color", Color(0.2, 0.26, 0.21))
-			mesh_inst.material_override = TerrainBuilder.build_ground_material(ground_color, Vector2(size.x, size.z))
+			mesh_inst.material_override = TerrainBuilder.build_ground_material_heightmap(ground_color)
 		var col_shape: CollisionShape3D = ground.get_node_or_null("CollisionShape3D")
-		if col_shape and col_shape.shape is BoxShape3D:
-			var box_shape: BoxShape3D = col_shape.shape.duplicate()
-			box_shape.size = size
-			col_shape.shape = box_shape
+		if col_shape:
+			col_shape.shape = generated.shape
+			col_shape.scale = generated.get("collision_scale", Vector3.ONE)
 
 	TerrainBuilder.spawn_visuals(current_map, self)
 

@@ -1,0 +1,27 @@
+{
+    "name": "The Rod",
+    "hp": 300.0,
+    "weight": 150.0,
+    "metal": 80,
+    "crystal": 0,
+    "size": [
+        1.0,
+        1.0,
+        8.0
+    ],
+    "color": [
+        0.5,
+        0.5,
+        0.5,
+        1.0
+    ],
+    "dps": 0.0,
+    "is_foundation": false,
+    "base_energy": 50.0,
+    "base_vision": 20.0,
+    "draught": 0.5,
+    "underside_y_bias": 0.0,
+    "turreted_capable": true,
+    "category": "hull",
+    "primitive_shape": "cylinder"
+}

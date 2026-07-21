@@ -82,10 +82,20 @@ static func _scan_directory(dir_path: String, is_mod: bool) -> void:
 	var dir = DirAccess.open(dir_path)
 	if not dir:
 		return # directory doesn't exist yet - not an error (mods dir starts empty)
+	# Scan .json sidecars, not .glb files.
+	#
+	# The scan used to be driven by the .glb, which made a mesh file mandatory
+	# for a hull to exist at all. That is wrong for a hull whose shape is a
+	# declared primitive ("primitive_shape" - the cube/orb/rod/slab): they
+	# have no mesh to ship, and deleting their placeholder .glb made all four
+	# vanish from the catalog entirely rather than fall back to a primitive.
+	# The sidecar is the actual hull definition, so it is what defines
+	# existence; _try_load_hull still warns about a sidecar that names neither
+	# a mesh nor a primitive.
 	dir.list_dir_begin()
 	var fname = dir.get_next()
 	while fname != "":
-		if not dir.current_is_dir() and fname.get_extension() == "glb":
+		if not dir.current_is_dir() and fname.get_extension() == "json":
 			_try_load_hull(dir_path, fname.get_basename(), is_mod)
 		fname = dir.get_next()
 	dir.list_dir_end()
@@ -94,12 +104,11 @@ static func _try_load_hull(dir_path: String, stem: String, is_mod: bool) -> void
 	var regex = RegEx.new()
 	regex.compile("^[a-z0-9_]+$")
 	if not regex.search(stem):
-		push_warning("HullLoader: skipping '%s.glb' in %s - type_id must be lowercase snake_case [a-z0-9_]+" % [stem, dir_path])
+		push_warning("HullLoader: skipping '%s.json' in %s - type_id must be lowercase snake_case [a-z0-9_]+" % [stem, dir_path])
 		return
 
 	var json_path = "%s/%s.json" % [dir_path, stem]
 	if not FileAccess.file_exists(json_path):
-		push_warning("HullLoader: skipping '%s.glb' in %s - no matching .json sidecar (a .glb with no sidecar is left for the procedural fallback, not treated as an error)" % [stem, dir_path])
 		return
 
 	var file = FileAccess.open(json_path, FileAccess.READ)
@@ -124,6 +133,12 @@ static func _try_load_hull(dir_path: String, stem: String, is_mod: bool) -> void
 		return # _validate_and_default already logged the specific reason
 
 	validated["category"] = "hull" # never trusted from the sidecar - see class header
+
+	# A hull needs SOME shape: either a mesh beside it or a declared primitive.
+	# Neither is not fatal (module_placer falls back to a plain box), but it is
+	# almost always a mistake worth surfacing.
+	if not validated.has("primitive_shape") and not FileAccess.file_exists("%s/%s.glb" % [dir_path, stem]):
+		push_warning("HullLoader: '%s' has neither a matching .glb nor a \"primitive_shape\" - it will render as a plain box" % json_path)
 
 	if _cache.has(stem):
 		if is_mod:
@@ -175,7 +190,7 @@ static func _validate_and_default(raw: Dictionary, source_path: String):
 	# for these optional fields (HULL_MODDING_PLAN.md §1/§3) - a sparse
 	# sidecar that only fills in the required fields behaves identically to
 	# today's code path for anything it omits.
-	return {
+	var out = {
 		"name": raw["name"],
 		"hp": float(raw["hp"]),
 		"weight": float(raw["weight"]),
@@ -191,6 +206,27 @@ static func _validate_and_default(raw: Dictionary, source_path: String):
 		"underside_y_bias": float(raw.get("underside_y_bias", 0.0)),
 		"turreted_capable": bool(raw.get("turreted_capable", true)),
 	}
+
+	# A hull whose shape IS a plain primitive declares it here instead of
+	# shipping a .glb (see MeshAssetLoader.get_hull_mesh). "box" | "sphere" |
+	# "cylinder", built at unit size and stretched to the hull's own `size` by
+	# ModuleCatalog.get_hull_mesh_fit() like any other mesh.
+	if raw.has("primitive_shape") and typeof(raw["primitive_shape"]) == TYPE_STRING:
+		out["primitive_shape"] = raw["primitive_shape"]
+
+	# Explicit mesh-orientation overrides. Copied through ONLY when actually
+	# present: ModuleCatalog.has_explicit_hull_orientation() keys off whether
+	# these exist at all, so defaulting them here would permanently disable
+	# the automatic orientation search for every JSON-defined hull. This
+	# dictionary is rebuilt field by field, so anything not named here is
+	# silently dropped - which is what used to happen to these three, making
+	# the documented escape hatch unreachable for exactly the hulls (authored
+	# .glb ones) that need it most.
+	for override_field in ["visual_yaw_offset_deg", "visual_pitch_offset_deg", "visual_roll_offset_deg"]:
+		if raw.has(override_field) and typeof(raw[override_field]) in NUMERIC_TYPES:
+			out[override_field] = float(raw[override_field])
+
+	return out
 
 static func _ensure_medium_hull_protected() -> void:
 	if _cache.has("medium_hull"):

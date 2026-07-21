@@ -1,21 +1,21 @@
 {
-	"base_energy": 55,
-	"base_vision": 24,
-	"color": [
-		0.720000028610229,
-		0.699999988079071,
-		0.600000023841858,
-		1
-	],
-	"crystal": 30,
-	"hp": 480,
-	"metal": 95,
-	"name": "Airship Hull",
-	"size": [
-		4,
-		3,
-		9.5
-	],
-	"underside_y_bias": 0.6,
-	"weight": 260
+    "base_energy": 55,
+    "base_vision": 24,
+    "color": [
+        0.720000028610229,
+        0.699999988079071,
+        0.600000023841858,
+        1
+    ],
+    "crystal": 30,
+    "hp": 480,
+    "metal": 95,
+    "name": "Airship Hull",
+    "size": [
+        6.0,
+        4.0,
+        16.0
+    ],
+    "underside_y_bias": 0.6,
+    "weight": 260
 }

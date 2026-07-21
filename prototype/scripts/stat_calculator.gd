@@ -1,6 +1,7 @@
 extends Control
+const ModuleDataResource = preload("res://scripts/module_data.gd")
 
-const ModuleData = preload("res://scripts/module_data.gd")
+
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
 
@@ -494,7 +495,7 @@ func update_stats(hull: Node3D):
 	if hull:
 		for child in hull.get_children():
 			if child.has_meta("module_data"):
-				var data = child.get_meta("module_data") as ModuleData
+				var data = child.get_meta("module_data") as ModuleDataResource
 				if data:
 					total_hp += data.get_hp()
 					total_weight += data.get_weight()
@@ -909,28 +910,28 @@ func _on_tweak_changed():
 		if placer:
 			placer.check_all_clipping()
 
-# mount_style (module_placer.gd/module_catalog.gd) drives real visible/
-# mechanical behavior (whether the weapon stays level, embeds into the
-# hull, or the whole vehicle aims instead) but was never named or
-# explained anywhere in the UI - a player just saw the result with no
-# indication these are 5 distinct categories with different rules.
-# Appended to the floating module popup (not the fixed sidebar, which has
-# zero layout slack left - see the manufactory-tier tooltip judgment call
-# above) since this only applies to weapons, not every module.
+# mount_style (module_placer.gd/module_catalog.gd) drives real combat
+# behavior (whether the weapon independently traverses or the whole
+# vehicle aims instead) but was never named or explained anywhere in the
+# UI - a player just saw the result with no indication these are distinct
+# categories with different rules. Appended to the floating module popup
+# (not the fixed sidebar, which has zero layout slack left - see the
+# manufactory-tier tooltip judgment call above) since this only applies to
+# weapons, not every module. Visual placement (flush-mounted to whatever
+# facet it's on) is the same for all three styles now - only traverse
+# differs, so the wording below describes traverse, not mount geometry.
 func _mount_style_line(style: String) -> String:
 	var desc = ""
 	match style:
 		"turret": desc = "Turret mount (full traverse)"
 		"frame_built": desc = "Frame-built (fixed - whole vehicle aims)"
-		"pintle_top": desc = "Pintle mount (sits on top)"
-		"pintle_bottom": desc = "Pintle mount (hangs below)"
-		"sponson": desc = "Sponson mount (embedded in hull)"
+		"pintle": desc = "Pintle mount (full traverse)"
 	return "\n%s" % desc if desc != "" else ""
 
 const ARMOR_MATERIALS = ["hardened_steel", "reactive_armor", "ablative_ceramic", "energy_shielding"]
 const ARMOR_MATERIAL_LABELS = ["Hardened Steel", "Reactive Armor", "Ablative Ceramic", "Energy Shielding"]
 
-func _generate_custom_tweaks(module: Node3D, data: ModuleData):
+func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 	if not popup_tweaks_container: return
 	var type_id = data.type_id
 

@@ -21,6 +21,11 @@ prototype/visual_regression/captures/
 # the real project. Persistent on purpose - see scratch/reimport_assets.sh.
 prototype/scratch/.reimport_root/
 
+# Local tool installations (Godot engine binary, future tool copies) -
+# not project source, just convenient to keep next to project.godot so
+# headless test runs don't have to re-find a Godot install elsewhere.
+prototype/.tools/
+
 # Local tool config (not project source)
 .antigravitycli/
 .claude/

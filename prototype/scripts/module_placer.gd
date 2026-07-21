@@ -1,6 +1,7 @@
 extends Node3D
+const ModuleDataResource = preload("res://scripts/module_data.gd")
 
-const ModuleData = preload("res://scripts/module_data.gd")
+
 const Gizmo3D = preload("res://scenes/Gizmo3D.tscn")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
@@ -14,6 +15,8 @@ var hull: Node3D
 
 var mirror_enabled: bool = true
 var selected_module: Node3D = null
+
+
 var clipping_detected: bool = false
 var log_mutex: Mutex = Mutex.new()
 
@@ -98,6 +101,17 @@ func _reconstruct_from_snapshot(snapshot: Dictionary):
 	check_all_clipping()
 
 func _ready():
+	# Spawn some scale reference boxes (1x1x1 meters)
+	for x in [-8, 8]:
+		var mesh_inst = MeshInstance3D.new()
+		var box = BoxMesh.new()
+		box.size = Vector3(1, 1, 1)
+		mesh_inst.mesh = box
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.8, 0.4, 0.2)
+		mesh_inst.material_override = mat
+		mesh_inst.position = Vector3(x, 0.5, -4)
+		add_child(mesh_inst)
 	if has_node("Hull"):
 		hull = get_node("Hull")
 		if hull:
@@ -234,9 +248,7 @@ func _unhandled_input(event):
 				push_undo_snapshot()
 				is_dragging_module = true
 				drag_pending = false
-				var old_gizmo = selected_module.get_node_or_null("Gizmo3D")
-				if old_gizmo:
-					old_gizmo.queue_free()
+				_free_gizmo(selected_module)
 				_log("Module dragging started.")
 				
 		if is_dragging_module and selected_module and is_instance_valid(selected_module):
@@ -254,11 +266,10 @@ func _unhandled_input(event):
 					if mirror and is_instance_valid(mirror):
 						_get_colliders_recursive(mirror, exclude_list)
 						
-				var query = PhysicsRayQueryParameters3D.create(ray_origin, ray_end)
-				query.collision_mask = 1 # Only hit the Hull
-				query.exclude = exclude_list
-				
-				var result = space_state.intersect_ray(query)
+				# Precise hull surface first, bounding box only as a fallback -
+				# same rule initial placement uses, so a dragged module tracks
+				# the visible hull instead of jumping onto its bounding shell.
+				var result = surface_raycast(ray_origin, camera.project_ray_normal(mouse_pos), 1000.0, exclude_list)
 				if result:
 					_update_module_placement(selected_module, result.position, result.normal)
 					check_all_clipping()
@@ -291,11 +302,8 @@ func rotate_selected_module():
 func _select_module(module: Node3D):
 	if selected_module:
 		_deselect_module()
-		# Deselect old
-		var old_gizmo = selected_module.get_node_or_null("Gizmo3D")
-		if old_gizmo:
-			old_gizmo.queue_free()
-		
+		_free_gizmo(selected_module)
+
 	selected_module = module
 	get_tree().call_group("stat_ui", "on_module_selected", selected_module)
 	
@@ -381,7 +389,7 @@ func delete_selected_module():
 				if hull.has_meta("hull_scale"):
 					hull_scale = hull.get_meta("hull_scale")
 				var hull_catalog_data = ModuleCatalog.get_module_data(hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull")
-				hull.position.y = (hull_catalog_data.size.y * hull_scale.y) / 2.0
+				hull.position.y = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0
 				hull.remove_meta("locomotion_type")
 				hull.remove_meta("locomotion_settings")
 		
@@ -416,9 +424,9 @@ func _place_hull_from_ui(type_id: String):
 	hull.name = "Hull"
 	hull.collision_layer = 1
 	hull.collision_mask = 0
-	hull.position = Vector3(0, catalog_data.size.y / 2.0, 0)
+	hull.position = Vector3(0, catalog_data.get("size", Vector3.ONE).y / 2.0, 0)
 	
-	hull.set_meta("base_hull_size", catalog_data.size)
+	hull.set_meta("base_hull_size", catalog_data.get("size", Vector3.ONE))
 	hull.set_meta("hull_scale", Vector3(1, 1, 1))
 	hull.set_meta("type_id", type_id)
 	
@@ -427,33 +435,53 @@ func _place_hull_from_ui(type_id: String):
 	var authored_mesh = MeshAssetLoader.get_hull_mesh(type_id)
 	if authored_mesh:
 		phys_mesh.mesh = authored_mesh
-		phys_mesh.rotation.y = deg_to_rad(ModuleCatalog.get_hull_visual_yaw_offset_deg(type_id))
+		var fit = ModuleCatalog.get_hull_mesh_fit(type_id, authored_mesh)
+		phys_mesh.rotation = fit["rotation"]
+		phys_mesh.scale = fit["scale"]
+		phys_mesh.position = fit["position"]
 	else:
 		var box = BoxMesh.new()
-		box.size = catalog_data.size
+		box.size = catalog_data.get("size", Vector3.ONE)
 		phys_mesh.mesh = box
 
-	phys_mesh.visible = true
+	# Never drawn: it carries the same mesh at the same transform as the
+	# visual MeshInstance3D below, so rendering both just z-fights (and this
+	# one has no material, so the fight is against untextured white). It
+	# exists as the hull's physical-shape reference for code that wants the
+	# mesh independent of whatever the visual copy is currently showing.
+	phys_mesh.visible = false
 	hull.add_child(phys_mesh)
 
 	var mesh_inst = MeshInstance3D.new()
 	mesh_inst.name = "MeshInstance3D"
 	mesh_inst.mesh = phys_mesh.mesh
 	mesh_inst.rotation = phys_mesh.rotation
+	mesh_inst.scale = phys_mesh.scale
+	mesh_inst.position = phys_mesh.position
 	hull.add_child(mesh_inst)
 
 	var mat = StandardMaterial3D.new()
 	mat.albedo_color = catalog_data.color
 	mesh_inst.material_override = mat
-	
+
+	_rebuild_surface_body(hull, phys_mesh)
+
+	# Axis-aligned in hull-local space, and NOT rotated to match the mesh:
+	# col_box.size is already expressed in the hull-local convention
+	# (x = width, z = length along the -Z front), and get_hull_mesh_fit() has
+	# just scaled the visual mesh to occupy exactly that box. Applying the
+	# mesh's orientation correction here as well used to rotate the collider
+	# 90 degrees away from the hull you can see - medium_hull rendered 3.0
+	# wide by 5.5 long while colliding as 5.5 wide by 3.0 long, which threw
+	# off click-to-select raycasts, locomotion mounting and armor auto-fit
+	# (all of which read this shape's size).
 	var col = CollisionShape3D.new()
 	col.name = "CollisionShape3D"
 	var col_box = BoxShape3D.new()
-	col_box.size = catalog_data.size
+	col_box.size = catalog_data.get("size", Vector3.ONE)
 	col.shape = col_box
-	col.rotation = phys_mesh.rotation
 	hull.add_child(col)
-	
+
 	add_child(hull)
 	update_hull_appearance()
 	_log("New hull spawned: " + type_id)
@@ -520,20 +548,29 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 
 func update_locomotion(type_id: String, settings: Dictionary):
 	if not hull: return
-	
+
 	# Save settings on hull metadata
 	hull.set_meta("locomotion_type", type_id)
 	hull.set_meta("locomotion_settings", settings)
-	
+
 	# Delete any existing locomotion parts first
 	for child in hull.get_children():
 		if child.has_meta("module_data"):
 			var m_data = child.get_meta("module_data")
 			if m_data and m_data.category == "locomotion":
 				child.queue_free()
-				
+
+	# Same class of cleanup for the running-gear chassis slab: if a previous
+	# locomotion type created one and the new type either doesn't want one
+	# (hover_engine/anti_grav) or wants it freshly sized (the new hull might
+	# be a different size), tear it down before deciding whether to rebuild.
+	# ModuleDataResource is already preloaded at the top of this file.
+	var existing_gear = hull.get_node_or_null("RunningGear")
+	if existing_gear:
+		existing_gear.queue_free()
+
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
-	
+
 	# Get actual hull size
 	var hull_size = Vector3(4.0, 1.0, 6.0)
 	var hull_scale = Vector3(1.0, 1.0, 1.0)
@@ -542,6 +579,32 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	var hull_shape = hull.get_node_or_null("CollisionShape3D")
 	if hull_shape and hull_shape.shape is BoxShape3D:
 		hull_size = hull_shape.shape.size
+
+	# Locomotion grounding fix (test arena "vehicle slides on its belly"):
+	# every ground-contact locomotion archetype now has a procedurally-
+	# generated chassis slab (the "running gear") that sits BELOW the hull's
+	# underside, with the wheels/treads/legs/screws mounting to its sides
+	# rather than to the bare hull skin. Two real effects:
+	#
+	# 1. The unit's CharacterBody3D collider (battle_unit.gd) extends down
+	#    to the chassis bottom, so the unit rests on the chassis (not the
+	#    hull's belly) - a real "vehicle on its running gear" pose.
+	# 2. Side-mount parts now have a real chassis surface to mount to, not
+	#    a hull-skin interface that left them floating below the authored
+	#    mesh on hulls whose underside sits above the catalog bottom
+	#    (per the underside_y_bias hack).
+	#
+	# Hover_engine / anti_grav / winged / naval / buoyant types don't get
+	# a chassis - they project from the underside / above / stern and a
+	# slab underneath them would be visual noise.
+	var running_gear_size := Vector3.ZERO
+	if ModuleCatalog.needs_running_gear(type_id):
+		running_gear_size = ModuleCatalog.get_running_gear_size(hull_size)
+		var VisualBuilder = load("res://scripts/visual_builder.gd")
+		var gear_body: StaticBody3D = VisualBuilder.build_running_gear(hull, running_gear_size, catalog_data.color)
+		# Flush the chassis's top against the hull's underside: hull's origin
+		# is at its center, so chassis center sits at -hull_size.y/2 - gear_y/2.
+		gear_body.position = Vector3(0, -hull_size.y / 2.0 - running_gear_size.y / 2.0, 0)
 
 	# Visual bug pass finding: several hulls' visual mesh doesn't fill its
 	# collision box symmetrically (ship hulls' tapered keel, airship_hull's
@@ -577,28 +640,43 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		if count < 2: count = 2
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
-		
-		# Tucked slightly underneath the hull side
-		var x_offset = hull_size.x / 2.0 - (0.4 * size)
+
+		# Wheel center now sits on the chassis's SIDE (not the hull's side
+		# with a fudge inset), and the wheel's vertical center aligns with
+		# the chassis's vertical center. Visual result: the wheel is half-
+		# embedded in the chassis (its lower half visibly hangs below the
+		# chassis's bottom edge), the unit's CharacterBody3D collider sits
+		# on the chassis bottom (not the hull belly - see battle_unit.gd's
+		# collider sizing in setup()).
+		var x_offset = running_gear_size.x / 2.0
 		var z_limit = hull_size.z * 0.35
-		
+		# Module-local Y of the wheel's BOTTOM (visual_builder.gd's
+		# _build_wheels places the cylinder so the module's local origin
+		# is at the visual's bottom). Centering the visual vertically on
+		# the chassis means placement Y = chassis_center - half_wheel_height.
+		var wheel_y = -hull_size.y / 2.0 - running_gear_size.y / 2.0 - (catalog_data.get("size", Vector3.ONE).y * size * hull_height_factor) / 2.0
+
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
 			for i in range(half_count):
 				var z_pos = 0.0
 				if half_count > 1:
 					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
-				
+
 				# Place using Vector3.DOWN normal, then override position and rotation to point forward
 				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias, z_pos)
 				var wheel = _place_weapon(type_id, pos, Vector3.DOWN)
 				if wheel:
 					wheel.scale = Vector3(size, size, size) * hull_height_factor
-					# Override position to be underneath (bottom Y) and rotation to be forward (0)
-					wheel.position = Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias - (0.8 * size * hull_height_factor), z_pos)
+					# Override position to be at the chassis-side mount point
+					# and rotation to point forward (0).
+					wheel.position = Vector3(x_offset * side, wheel_y, z_pos)
 					wheel.rotation = Vector3.ZERO
 					if wheel.has_meta("module_data"):
 						wheel.get_meta("module_data").scale_multiplier = wheel.scale
+					if side < 0:
+						wheel.set_meta("scale_flip_x", true)
+						_apply_mirror_flip(wheel)
 					spawned_wheels.append(wheel)
 
 	elif type_id == "omni_wheels":
@@ -612,8 +690,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
 
-		var x_offset = hull_size.x / 2.0 - (0.4 * size)
+		var x_offset = running_gear_size.x / 2.0
 		var z_limit = hull_size.z * 0.35
+		var wheel_y = -hull_size.y / 2.0 - running_gear_size.y / 2.0 - (catalog_data.get("size", Vector3.ONE).y * size * hull_height_factor) / 2.0
 
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
@@ -626,50 +705,68 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				var wheel = _place_weapon(type_id, pos, Vector3.DOWN)
 				if wheel:
 					wheel.scale = Vector3(size, size, size) * hull_height_factor
-					wheel.position = Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias - (0.8 * size * hull_height_factor), z_pos)
+					wheel.position = Vector3(x_offset * side, wheel_y, z_pos)
 					wheel.rotation = Vector3.ZERO
 					if wheel.has_meta("module_data"):
 						wheel.get_meta("module_data").scale_multiplier = wheel.scale
+					if side < 0:
+						wheel.set_meta("scale_flip_x", true)
+						_apply_mirror_flip(wheel)
 					spawned_wheels.append(wheel)
 
 	elif type_id == "tracked_treads":
 		var width = settings.get("width", 1.0)
-		
-		# Always 2 treads
-		var x_offset = hull_size.x / 2.0
-		var y_offset = -hull_size.y / 4.0
+
+		# Always 2 treads. Tread center now on the chassis's SIDE and at
+		# the chassis's vertical CENTER - the loop geometry is shorter
+		# than the chassis, so centering it vertically puts the upper
+		# half inside the chassis (hidden) and the lower half visibly
+		# hanging off the bottom edge. Same look-and-feel as the wheels
+		# above: side-mounted, half-tucked into the chassis.
+		var x_offset = running_gear_size.x / 2.0
+		var y_offset = -hull_size.y / 2.0 - running_gear_size.y / 2.0
 		var tread_length = hull_size.z
-		
+
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			var pos = hull.global_position + Vector3((x_offset + (catalog_data.size.x * width / 2.0) - 0.2) * side, y_offset, 0.0)
+			var pos = hull.global_position + Vector3(x_offset * side, y_offset, 0.0)
 			var tread = _place_weapon(type_id, pos, side_normal)
 			if tread:
-				tread.scale = Vector3(width, 1.0, tread_length / catalog_data.size.z)
+				tread.scale = Vector3(width, 1.0, tread_length / catalog_data.get("size", Vector3.ONE).z)
 				tread.rotation = Vector3.ZERO
 				if tread.has_meta("module_data"):
 					tread.get_meta("module_data").scale_multiplier = tread.scale
+				if side < 0:
+					tread.set_meta("scale_flip_x", true)
+					_apply_mirror_flip(tread)
 				spawned_wheels.append(tread)
-				
+
 	elif type_id == "rhomboid_treads":
 		# Batch E task 4: MkIV-style full-body loop. Unlike tracked_treads
 		# (which mounts low, hugging the underside), this mounts centered
 		# on the hull's vertical middle - the loop geometry itself (see
 		# _build_rhomboid_treads) already extends well above and below
 		# that center point, since it wraps the ENTIRE hull rather than
-		# just flanking the bottom.
+		# just flanking the bottom. With the running gear present, the
+		# loop's centerline is on the chassis's vertical center (not the
+		# hull's exact middle), so the chassis is properly enclosed
+		# inside the loop, not hanging off the side.
 		var width = settings.get("width", 1.0)
-		var x_offset = hull_size.x / 2.0
+		var x_offset = running_gear_size.x / 2.0
+		var y_offset = -hull_size.y / 2.0 - running_gear_size.y / 2.0
 		var tread_length = hull_size.z
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			var pos = hull.global_position + Vector3((x_offset + (catalog_data.size.x * width / 2.0) - 0.1) * side, 0.0, 0.0)
+			var pos = hull.global_position + Vector3(x_offset * side, y_offset, 0.0)
 			var loop = _place_weapon(type_id, pos, side_normal)
 			if loop:
-				loop.scale = Vector3(width, 1.0, tread_length / catalog_data.size.z)
+				loop.scale = Vector3(width, 1.0, tread_length / catalog_data.get("size", Vector3.ONE).z)
 				loop.rotation = Vector3.ZERO
 				if loop.has_meta("module_data"):
 					loop.get_meta("module_data").scale_multiplier = loop.scale
+				if side < 0:
+					loop.set_meta("scale_flip_x", true)
+					_apply_mirror_flip(loop)
 				spawned_wheels.append(loop)
 
 	elif type_id == "helicopter_rotors":
@@ -716,6 +813,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				hover.scale = Vector3(size * hull_footprint_factor, 1.0, size * hull_footprint_factor)
 				if hover.has_meta("module_data"):
 					hover.get_meta("module_data").scale_multiplier = hover.scale
+				if p.x < 0.0:
+					hover.set_meta("scale_flip_x", true)
+					_apply_mirror_flip(hover)
 				spawned_wheels.append(hover)
 
 	elif type_id == "legs":
@@ -725,8 +825,12 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
 
-		var x_offset = hull_size.x / 2.0
+		# Legs hang from the chassis sides, like wheels. Centered on the
+		# chassis's vertical axis so the leg's hip sits at the chassis's
+		# side and the foot hangs below the chassis bottom edge.
+		var x_offset = running_gear_size.x / 2.0
 		var z_limit = hull_size.z * 0.35
+		var leg_y = -hull_size.y / 2.0 - running_gear_size.y / 2.0 - (catalog_data.get("size", Vector3.ONE).y * size * hull_height_factor) / 2.0
 
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
@@ -740,8 +844,12 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				if leg:
 					leg.rotation = Vector3.ZERO
 					leg.scale = Vector3(1.0, size * hull_height_factor, 1.0)
+					leg.position = Vector3(x_offset * side, leg_y, z_pos)
 					if leg.has_meta("module_data"):
 						leg.get_meta("module_data").scale_multiplier = leg.scale
+					if side < 0:
+						leg.set_meta("scale_flip_x", true)
+						_apply_mirror_flip(leg)
 					spawned_wheels.append(leg)
 
 	elif type_id == "anti_grav":
@@ -761,6 +869,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				ag.scale = Vector3(size * hull_footprint_factor, 1.0, size * hull_footprint_factor)
 				if ag.has_meta("module_data"):
 					ag.get_meta("module_data").scale_multiplier = ag.scale
+				if p.x < 0.0:
+					ag.set_meta("scale_flip_x", true)
+					_apply_mirror_flip(ag)
 				spawned_wheels.append(ag)
 
 	elif type_id == "fixed_wing_engine":
@@ -779,6 +890,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				engine.rotation = Vector3.ZERO
 				if engine.has_meta("module_data"):
 					engine.get_meta("module_data").scale_multiplier = engine.scale
+				if side < 0:
+					engine.set_meta("scale_flip_x", true)
+					_apply_mirror_flip(engine)
 				spawned_wheels.append(engine)
 
 	elif type_id == "ornithopter_wing":
@@ -798,6 +912,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				wing.rotation = Vector3.ZERO
 				if wing.has_meta("module_data"):
 					wing.get_meta("module_data").scale_multiplier = wing.scale
+				if side < 0:
+					wing.set_meta("scale_flip_x", true)
+					_apply_mirror_flip(wing)
 				spawned_wheels.append(wing)
 
 	elif type_id == "naval_propeller":
@@ -828,6 +945,9 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				prop.scale = Vector3(size, size, size) * hull_footprint_factor
 				if prop.has_meta("module_data"):
 					prop.get_meta("module_data").scale_multiplier = prop.scale
+				if x_pos < -0.001:
+					prop.set_meta("scale_flip_x", true)
+					_apply_mirror_flip(prop)
 				spawned_wheels.append(prop)
 
 	elif type_id == "buoyant_envelope":
@@ -847,39 +967,57 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				envelope_motor.rotation = Vector3.ZERO
 				if envelope_motor.has_meta("module_data"):
 					envelope_motor.get_meta("module_data").scale_multiplier = envelope_motor.scale
+				if side < 0:
+					envelope_motor.set_meta("scale_flip_x", true)
+					_apply_mirror_flip(envelope_motor)
 				spawned_wheels.append(envelope_motor)
 
 	elif type_id == "screw_drive":
 		# Twin helical auger drums, one per side, mounted the same way
-		# tracked_treads is - replaces wheels/treads entirely.
+		# tracked_treads is - replaces wheels/treads entirely. Drums now
+		# centered on the chassis's vertical axis (the chassis's running-
+		# gear slab is what supports the unit; the drums are the visible
+		# propulsion).
 		var width = settings.get("width", 1.0)
-		var x_offset = hull_size.x / 2.0
-		var y_offset = -hull_size.y / 4.0
+		var x_offset = running_gear_size.x / 2.0
+		var y_offset = -hull_size.y / 2.0 - running_gear_size.y / 2.0
 		var drum_length = hull_size.z
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			var pos = hull.global_position + Vector3((x_offset + (catalog_data.size.x * width / 2.0) - 0.15) * side, y_offset, 0.0)
+			var pos = hull.global_position + Vector3(x_offset * side, y_offset, 0.0)
 			var drum = _place_weapon(type_id, pos, side_normal)
 			if drum:
-				drum.scale = Vector3(width, 1.0, drum_length / catalog_data.size.z)
+				drum.scale = Vector3(width, 1.0, drum_length / catalog_data.get("size", Vector3.ONE).z)
 				drum.rotation = Vector3.ZERO
 				if drum.has_meta("module_data"):
 					drum.get_meta("module_data").scale_multiplier = drum.scale
+				if side < 0:
+					drum.set_meta("scale_flip_x", true)
+					_apply_mirror_flip(drum)
 				spawned_wheels.append(drum)
 
-	# Adjust hull Y position in the editor to make wheels rest on floor
-	var wheels_offset = 0.0
-	if type_id == "wheels" or type_id == "omni_wheels":
-		var size = settings.get("size", 1.0)
-		wheels_offset = 0.8 * size * hull_height_factor
-	elif type_id == "legs":
-		wheels_offset = 1.6 * settings.get("size", 1.0) * hull_height_factor
-	elif type_id == "anti_grav":
-		wheels_offset = 0.4 * settings.get("size", 1.0)
-		
+	# Adjust hull Y position in the editor so the unit sits on its ground
+	# contact. For ground-contact locomotion with a running-gear chassis,
+	# the chassis's BOTTOM is the ground contact (not the wheel's bottom -
+	# the chassis is what the unit's CharacterBody3D collider rests on, per
+	# battle_unit.gd), so the hull lifts by the full chassis height.
+	# For hover / anti_grav / other underside-projecting types, the legacy
+	# wheels_offset formula (sized to lift the part's bottom to the floor)
+	# stays in effect.
 	var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
 	var hull_catalog_data = ModuleCatalog.get_module_data(hull_type)
-	hull.position.y = (hull_catalog_data.size.y * hull_scale.y) / 2.0 + wheels_offset
+	if running_gear_size.y > 0.0:
+		hull.position.y = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + running_gear_size.y
+	else:
+		var wheels_offset = 0.0
+		if type_id == "wheels" or type_id == "omni_wheels":
+			var size = settings.get("size", 1.0)
+			wheels_offset = 0.8 * size * hull_height_factor
+		elif type_id == "legs":
+			wheels_offset = 1.6 * settings.get("size", 1.0) * hull_height_factor
+		elif type_id == "anti_grav":
+			wheels_offset = 0.4 * settings.get("size", 1.0)
+		hull.position.y = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + wheels_offset
 				
 	# Link them in a group
 	for w in spawned_wheels:
@@ -902,27 +1040,27 @@ func update_locomotion(type_id: String, settings: Dictionary):
 
 	get_tree().call_group("stat_ui", "update_stats", hull)
 	
-func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
+func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bool = false) -> Node3D:
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var category = catalog_data.get("category", "module")
 	
 	var new_weapon = Node3D.new()
 	
 	var VisualBuilder = preload("res://scripts/visual_builder.gd")
-	VisualBuilder.build_visual(type_id, new_weapon, catalog_data.size, catalog_data.color)
+	VisualBuilder.build_visual(type_id, new_weapon, catalog_data.get("size", Vector3.ONE), catalog_data.color)
 	
 	var static_body = StaticBody3D.new()
 	static_body.collision_layer = 2 # Modules layer
 	static_body.collision_mask = 0
-	static_body.position = Vector3(0, catalog_data.size.y / 2.0, 0)
+	static_body.position = Vector3(0, catalog_data.get("size", Vector3.ONE).y / 2.0, 0)
 	var collision_shape = CollisionShape3D.new()
 	var col_box = BoxShape3D.new()
-	col_box.size = catalog_data.size
+	col_box.size = catalog_data.get("size", Vector3.ONE)
 	collision_shape.shape = col_box
 	static_body.add_child(collision_shape)
 	new_weapon.add_child(static_body)
 	
-	var data = ModuleData.new()
+	var data = ModuleDataResource.new()
 	data.type_id = type_id
 	data.module_name = catalog_data.name
 	data.category = category
@@ -938,12 +1076,11 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 	new_weapon.set_meta("module_data", data)
 	
 	hull.add_child(new_weapon)
-	
+
 	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
-	var pintle_style = ""
+	var mount_style = ""
 	if category == "weapon":
-		pintle_style = ModuleCatalog.get_mount_style(type_id, hull_type_for_mount)
-	var stays_level = pintle_style == "pintle"
+		mount_style = ModuleCatalog.get_mount_style(type_id, hull_type_for_mount)
 
 	# Snap to 0.25m grid relative to hull local space
 	var final_pos = pos
@@ -952,7 +1089,7 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 	if hull:
 		local_pos = hull.to_local(pos)
 		local_normal = hull.global_transform.basis.inverse() * normal
-		
+
 		var snap_interval = 0.25
 		if abs(local_normal.x) < 0.9:
 			local_pos.x = round(local_pos.x / snap_interval) * snap_interval
@@ -960,16 +1097,26 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 			local_pos.y = round(local_pos.y / snap_interval) * snap_interval
 		if abs(local_normal.z) < 0.9:
 			local_pos.z = round(local_pos.z / snap_interval) * snap_interval
-			
+
 		final_pos = hull.to_global(local_pos)
-		
+
 	new_weapon.global_position = final_pos
 
-	# Align to surface normal if not perfectly up/down (and not a
-	# pintle-style mount, which stays level by design - see above)
-	if not stays_level and abs(normal.dot(Vector3.UP)) < 0.999:
-		new_weapon.look_at(final_pos + normal, Vector3.UP)
-		new_weapon.rotate_object_local(Vector3.RIGHT, -PI/2)
+	# Weapon meshes are authored with their own mounting post/base baked in
+	# (bottom of the mesh sits at local Y=0 - see build_visual()'s
+	# monolithic-mesh placement above). Rotating local-up to the surface
+	# normal puts that baked-in post flush against whatever facet it landed
+	# on - flat deck, sloped glacis, or underside alike - replacing the old
+	# column-extrusion + procedurally-drawn hardware model (abandoned; see
+	# MOUNTING_AND_ARMOR_SPEC.md addendum, 2026-07-21). Applies uniformly
+	# across mount styles now - mount_style only still matters for combat
+	# traverse (get_traverse_limit_angle), not visual placement.
+	#
+	# Every category goes through _align_up_to() now, not just weapons: a
+	# radar mast, armor plate or fuel tank dropped on the underside has the
+	# same "base against the hull, body projecting outward" requirement a gun
+	# does. See _align_up_to() for the antiparallel bug this fixes.
+	new_weapon.transform.basis = _align_up_to(local_normal)
 
 	# Auto-scale armor to fit facet
 	if category == "armor":
@@ -994,9 +1141,9 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 			elif local_z.y > 0.5: target_z = hull_size.y
 			elif local_z.z > 0.5: target_z = hull_size.z
 			
-			# The module's base size is catalog_data.size, so we scale by ratio
-			new_weapon.scale.x = target_x / catalog_data.size.x
-			new_weapon.scale.z = target_z / catalog_data.size.z
+			# The module's base size is catalog_data.get("size", Vector3.ONE), so we scale by ratio
+			new_weapon.scale.x = target_x / catalog_data.get("size", Vector3.ONE).x
+			new_weapon.scale.z = target_z / catalog_data.get("size", Vector3.ONE).z
 
 			# Center on the facet rather than leaving it at the clicked
 			# point: a plate that auto-fits the WHOLE face but stays
@@ -1018,40 +1165,13 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 			# treating all placed armor as one undifferentiated pool.
 			new_weapon.set_meta("facet", armor_facet)
 
-	# Face-based weapon mounting (MOUNTING_AND_ARMOR_SPEC.md #3):
-	# turret and frame-built have no columns. pintle mount extends outward
-	# along the column direction by column_length.
+	# Face-based weapon mounting: mount_style still drives combat traverse
+	# (see get_traverse_limit_angle) but no longer changes how the weapon is
+	# placed - every style flush-mounts against the clicked facet now (see
+	# the rotation block above).
 	if category == "weapon":
-		var mount_style = pintle_style
 		new_weapon.set_meta("mount_style", mount_style)
 		new_weapon.set_meta("mount_normal", normal)
-
-		if mount_style == "pintle":
-			var column_dir = Vector3.UP
-			if abs(local_normal.z) > 0.5:
-				column_dir = local_normal
-			else:
-				column_dir = Vector3(local_pos.x, local_pos.y, 0.0)
-				if column_dir.length() < 0.001:
-					column_dir = local_normal
-				else:
-					column_dir = column_dir.normalized()
-			var column_length = max(catalog_data.size.y * 1.5, 0.6)
-			
-			new_weapon.set_meta("column_dir", column_dir)
-			new_weapon.set_meta("column_length", column_length)
-			
-			local_pos += column_dir * column_length
-			final_pos = hull.to_global(local_pos)
-			new_weapon.global_position = final_pos
-			
-			VisualBuilder.add_mount_hardware(new_weapon, mount_style, catalog_data.size, column_dir, column_length)
-		else:
-			new_weapon.set_meta("column_length", 0.0)
-			if mount_style == "frame_built":
-				var embed_depth = catalog_data.size.y * 0.75
-				new_weapon.global_position -= normal * embed_depth
-			VisualBuilder.add_mount_hardware(new_weapon, mount_style, catalog_data.size, normal, 0.0)
 
 	# Notify the UI that a module was added
 	get_tree().call_group("stat_ui", "update_stats", hull)
@@ -1060,10 +1180,22 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3) -> Node3D:
 
 func update_hull_appearance():
 	if not hull: return
-	var phys_mesh = hull.get_node_or_null("PhysicsMesh") as MeshInstance3D
 	var mesh_inst = hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if not phys_mesh or not mesh_inst: return
-	
+	if not mesh_inst: return
+	# MainLab.tscn's hand-authored startup Hull node predates the
+	# PhysicsMesh/MeshInstance3D split and only ships the visual one. Bailing
+	# out when PhysicsMesh was missing meant the hull the player actually
+	# opens the Design Lab looking at never got its authored mesh, faction
+	# material, greebles, decals, front arrow or correctly-sized collider -
+	# and every later call (armor thickness, faction, scale) silently no-oped
+	# for the same reason. Create the node instead of giving up.
+	var phys_mesh = hull.get_node_or_null("PhysicsMesh") as MeshInstance3D
+	if not phys_mesh:
+		phys_mesh = MeshInstance3D.new()
+		phys_mesh.name = "PhysicsMesh"
+		phys_mesh.visible = false
+		hull.add_child(phys_mesh)
+
 	var type_id = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	
@@ -1086,36 +1218,42 @@ func update_hull_appearance():
 			if abs(taper - 1.0) > 0.001:
 				authored_mesh = HullDeformScript.apply_nose_taper(authored_mesh, taper)
 		phys_mesh.mesh = authored_mesh
-		phys_mesh.scale = hull_scale * armor_bulk
-		phys_mesh.rotation.y = deg_to_rad(ModuleCatalog.get_hull_visual_yaw_offset_deg(type_id))
+		var fit = ModuleCatalog.get_hull_mesh_fit(type_id, authored_mesh, hull_scale * armor_bulk)
+		phys_mesh.rotation = fit["rotation"]
+		phys_mesh.scale = fit["scale"]
+		phys_mesh.position = fit["position"]
 	else:
 		var box = BoxMesh.new()
-		box.size = catalog_data.size * hull_scale * armor_bulk
+		box.size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
 		phys_mesh.mesh = box
 		phys_mesh.scale = Vector3.ONE
+		phys_mesh.position = Vector3.ZERO
 
 	mesh_inst.mesh = phys_mesh.mesh
 	mesh_inst.scale = phys_mesh.scale
 	mesh_inst.rotation = phys_mesh.rotation
-	
+	mesh_inst.position = phys_mesh.position
+
+	# Precise placement surface has to track every change to the visual mesh
+	# (hull swap, rescale, armor bulk, nose taper) or modules would snap to a
+	# stale silhouette.
+	_rebuild_surface_body(hull, mesh_inst)
+
 	# Apply materials - shared faction+armor shader (see hull_material_builder.gd)
 	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
-	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
-	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
+	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
+	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	
 	# Also update collision shape size in the designer
 	var col = hull.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if col:
-		if authored_mesh:
-			col.shape = authored_mesh.create_convex_shape()
-			col.scale = hull_scale * armor_bulk
-			col.rotation = phys_mesh.rotation
-		else:
-			col.scale = Vector3.ONE
-			var col_box = BoxShape3D.new()
-			col_box.size = catalog_data.size * hull_scale * armor_bulk
-			col.shape = col_box
-			col.rotation = phys_mesh.rotation
+		col.scale = Vector3.ONE
+		var col_box = BoxShape3D.new()
+		col_box.size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
+		col.shape = col_box
+		# Deliberately left unrotated - see _place_hull_from_ui() for why
+		# inheriting the mesh's orientation correction here is wrong.
+		col.rotation = Vector3.ZERO
 			
 	# Manage Front Arrow Indicator (Green triangle pointing along -Z)
 	var arrow = hull.get_node_or_null("FrontArrow")
@@ -1158,13 +1296,32 @@ func update_hull_appearance():
 		
 		hull.add_child(arrow)
 		
-	var vis_size = catalog_data.size * hull_scale * armor_bulk
+	var vis_size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
 	# Position at the front-center of the deck, slightly raised
 	arrow.position = Vector3(0, vis_size.y / 2.0 + 0.3, -vis_size.z / 2.0 - 0.5)
 	
 	# Recalculate stats
 	get_tree().call_group("stat_ui", "update_stats", hull)
 	check_all_clipping()
+
+# Immediate free (not queue_free) for exactly the same reason _deselect_module()
+# frees the "ArcCone" immediately: a gizmo is routinely torn down and rebuilt
+# within a SINGLE frame - _select_module(m) is called with m already selected
+# on every drag release, and the drag-start handler drops the gizmo just before
+# the drag begins. queue_free()'s deferred removal leaves the old node in the
+# tree long enough that Godot renames the incoming "Gizmo3D" to "Gizmo3D2" to
+# avoid the sibling name collision, after which this by-name lookup can never
+# find it again - so the gizmo is orphaned from cleanup and a fresh one stacks
+# on top of it on every subsequent drag.
+func _free_gizmo(module: Node3D):
+	if not module or not is_instance_valid(module):
+		return
+	# Loop rather than a single lookup so any gizmos already orphaned under a
+	# generated name by the old code get cleaned up too.
+	for child in module.get_children():
+		if child.name.begins_with("Gizmo3D"):
+			module.remove_child(child)
+			child.free()
 
 func _deselect_module():
 	if selected_module:
@@ -1183,116 +1340,134 @@ func _deselect_module():
 				selected_module.remove_child(child)
 				child.free()
 
+# Firing envelope preview.
+#
+# Rewritten 2026-07-21 (Chris: pintle mounts fire in a full sphere, and line
+# of sight against the hull/other modules is what limits them). This used to
+# draw a flat horizontal wedge at the weapon's own height, which said nothing
+# about elevation or depression and so could not express either half of that:
+# a pintle's envelope is a SPHERE, minus whatever its own vehicle occludes.
+#
+# Samples directions over a sphere and raycasts each one against the hull
+# (layer 1) and sibling modules (layer 2) - the same two layers auto_weapon.gd
+# checks before it fires - so a blocked patch here is a shot combat will
+# genuinely refuse to take. Clear directions read blue, occluded ones red.
+const ARC_AZIMUTH_SEGMENTS := 24
+const ARC_ELEVATION_SEGMENTS := 12
+const ARC_RADIUS := 3.0
+
 func _build_firing_arc(module: Node3D, data) -> Node3D:
 	var container = Node3D.new()
 	container.name = "ArcCone"
-	container.position = Vector3(0, 0.35, 0)
 
-	# module.get_meta("facet") is only ever set for ARMOR modules (see
-	# where it's assigned above, in the armor auto-fit block) - weapons
-	# never carry it. Reading it here for a weapon silently returned "",
-	# which fed get_mount_style() a zero-length normal and misclassified
-	# every pintle-mounted weapon as "sponson" (narrow arc instead of the
-	# full 360 a pintle actually gets). Weapons DO carry their real
-	# placement normal as "mount_normal" (set at placement time, kept live
-	# across rebuild_visual() calls) - derive the facet from that instead,
-	# the same way the armor auto-fit path derives armor_facet from its
-	# own placement normal.
 	var arc_facet = module.get_meta("facet", "")
 	if arc_facet == "" and module.has_meta("mount_normal") and hull:
 		var local_mount_normal = hull.global_transform.basis.inverse() * module.get_meta("mount_normal")
 		arc_facet = ModuleCatalog.classify_facet(local_mount_normal)
 	var arc_hull_type = hull.get_meta("type_id", "") if hull else ""
 	var limit = ModuleCatalog.get_traverse_limit_angle(data.type_id, arc_facet, arc_hull_type)
-	var full_circle = limit >= PI - 0.01
-	var angle_span = 2.0 * PI if full_circle else limit * 2.0
-	var segments = 32 if full_circle else max(6, int(32.0 * angle_span / (2.0 * PI)))
-	var angle_start = -angle_span / 2.0
-	var step = angle_span / segments
-	var radius = 3.0
 
 	var exclude_list = []
 	_get_colliders_recursive(module, exclude_list)
 	var space_state = get_world_3d().direct_space_state
-	var origin = module.global_position + Vector3(0, 0.35, 0)
+	# Trace from just off the weapon's own mounting face, along ITS up axis -
+	# world-up would start a side- or belly-mounted weapon's rays inside the
+	# hull it is bolted to and report everything as blocked.
+	var origin = module.global_position + module.global_transform.basis.y.normalized() * 0.35
 
-	var clear_mesh = ImmediateMesh.new()
-	var blocked_mesh = ImmediateMesh.new()
+	# frame_built: no independent traverse at all, the whole vehicle aims.
+	# A sphere would be a lie, so draw a single forward spike instead.
+	if limit <= 0.001:
+		container.add_child(_build_fixed_forward_indicator(module, origin, exclude_list, space_state))
+		return container
 
 	var clear_vertices = []
 	var blocked_vertices = []
 
-	for i in range(segments):
-		var a0 = angle_start + i * step
-		var a1 = a0 + step
-		var mid_angle = (a0 + a1) / 2.0
-		var local_dir = Vector3(sin(mid_angle), 0, -cos(mid_angle))
-		var world_dir = (module.global_transform.basis * local_dir).normalized()
+	for ei in range(ARC_ELEVATION_SEGMENTS):
+		# Polar angle from +Y (0 = straight up, PI = straight down), so the
+		# band genuinely covers full elevation AND full depression.
+		var t0 = float(ei) / ARC_ELEVATION_SEGMENTS
+		var t1 = float(ei + 1) / ARC_ELEVATION_SEGMENTS
+		var phi0 = t0 * PI
+		var phi1 = t1 * PI
+		for ai in range(ARC_AZIMUTH_SEGMENTS):
+			var u0 = float(ai) / ARC_AZIMUTH_SEGMENTS * TAU
+			var u1 = float(ai + 1) / ARC_AZIMUTH_SEGMENTS * TAU
+			var mid = _sphere_point((phi0 + phi1) * 0.5, (u0 + u1) * 0.5, 1.0)
+			var world_dir = (module.global_transform.basis * mid).normalized()
 
-		var query = PhysicsRayQueryParameters3D.create(origin, origin + world_dir * radius)
-		query.collision_mask = 3 # Layer 1 (Hull) + Layer 2 (Modules)
-		query.exclude = exclude_list
-		var result = space_state.intersect_ray(query)
-		var blocked = not result.is_empty()
+			var query = PhysicsRayQueryParameters3D.create(origin, origin + world_dir * ARC_RADIUS)
+			query.collision_mask = 3 # Layer 1 (Hull) + Layer 2 (Modules)
+			query.exclude = exclude_list
+			var blocked = not space_state.intersect_ray(query).is_empty()
 
-		var p0 = Vector3.ZERO
-		var p1 = Vector3(sin(a0) * radius, 0, -cos(a0) * radius)
-		var p2 = Vector3(sin(a1) * radius, 0, -cos(a1) * radius)
-
-		if blocked:
-			blocked_vertices.append(p0)
-			blocked_vertices.append(p1)
-			blocked_vertices.append(p2)
-		else:
-			clear_vertices.append(p0)
-			clear_vertices.append(p1)
-			clear_vertices.append(p2)
+			var a = _sphere_point(phi0, u0, ARC_RADIUS)
+			var b = _sphere_point(phi0, u1, ARC_RADIUS)
+			var c = _sphere_point(phi1, u1, ARC_RADIUS)
+			var d = _sphere_point(phi1, u0, ARC_RADIUS)
+			var bucket = blocked_vertices if blocked else clear_vertices
+			for v in [a, b, c, a, c, d]:
+				bucket.append(v)
 
 	if not clear_vertices.is_empty():
-		clear_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-		for v in clear_vertices:
-			clear_mesh.surface_add_vertex(v)
-		clear_mesh.surface_end()
-		
-		var clear_mi = MeshInstance3D.new()
-		clear_mi.name = "ClearArc"
-		clear_mi.mesh = clear_mesh
-		
-		var clear_mat = StandardMaterial3D.new()
-		clear_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		clear_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		clear_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		clear_mat.emission_enabled = true
-		clear_mat.albedo_color = Color(0.2, 0.6, 1.0, 0.25)
-		clear_mat.emission = Color(0.2, 0.6, 1.0)
-		clear_mat.emission_energy_multiplier = 0.5
-		clear_mi.material_override = clear_mat
-		
-		container.add_child(clear_mi)
-
+		container.add_child(_arc_surface("ClearArc", clear_vertices, Color(0.2, 0.6, 1.0, 0.12), Color(0.2, 0.6, 1.0)))
 	if not blocked_vertices.is_empty():
-		blocked_mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-		for v in blocked_vertices:
-			blocked_mesh.surface_add_vertex(v)
-		blocked_mesh.surface_end()
-		
-		var blocked_mi = MeshInstance3D.new()
-		blocked_mi.name = "BlockedArc"
-		blocked_mi.mesh = blocked_mesh
-		
-		var blocked_mat = StandardMaterial3D.new()
-		blocked_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		blocked_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		blocked_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		blocked_mat.emission_enabled = true
-		blocked_mat.albedo_color = Color(1.0, 0.15, 0.15, 0.4)
-		blocked_mat.emission = Color(1.0, 0.15, 0.15)
-		blocked_mat.emission_energy_multiplier = 0.5
-		blocked_mi.material_override = blocked_mat
-		
-		container.add_child(blocked_mi)
+		container.add_child(_arc_surface("BlockedArc", blocked_vertices, Color(1.0, 0.15, 0.15, 0.3), Color(1.0, 0.15, 0.15)))
 
 	return container
+
+# Point on a sphere in the module's local frame. phi is measured from +Y so
+# phi=0 is straight up and phi=PI straight down; azimuth 0 faces -Z, matching
+# the barrel-forward convention used everywhere else.
+static func _sphere_point(phi: float, azimuth: float, radius: float) -> Vector3:
+	var sin_phi = sin(phi)
+	return Vector3(sin_phi * sin(azimuth), cos(phi), -sin_phi * cos(azimuth)) * radius
+
+func _arc_surface(surface_name: String, vertices: Array, albedo: Color, emission: Color) -> MeshInstance3D:
+	var mesh = ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for v in vertices:
+		mesh.surface_add_vertex(v)
+	mesh.surface_end()
+
+	var mi = MeshInstance3D.new()
+	mi.name = surface_name
+	mi.mesh = mesh
+
+	var mat = StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.emission_enabled = true
+	mat.albedo_color = albedo
+	mat.emission = emission
+	mat.emission_energy_multiplier = 0.5
+	# The envelope wraps the weapon, so without this it z-fights its own far
+	# side and the module inside it.
+	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	mi.material_override = mat
+	return mi
+
+# A frame_built weapon aims by turning the whole vehicle, so its "arc" is one
+# fixed direction - drawn as a short spike, coloured by whether that single
+# line of fire is clear.
+func _build_fixed_forward_indicator(module: Node3D, origin: Vector3, exclude_list: Array, space_state) -> MeshInstance3D:
+	var world_dir = -module.global_transform.basis.z.normalized()
+	var query = PhysicsRayQueryParameters3D.create(origin, origin + world_dir * ARC_RADIUS)
+	query.collision_mask = 3
+	query.exclude = exclude_list
+	var blocked = not space_state.intersect_ray(query).is_empty()
+
+	var half = 0.08
+	var tip = Vector3(0, 0, -ARC_RADIUS)
+	var verts = [
+		Vector3(-half, 0, 0), Vector3(half, 0, 0), tip,
+		Vector3(0, -half, 0), Vector3(0, half, 0), tip,
+	]
+	if blocked:
+		return _arc_surface("BlockedArc", verts, Color(1.0, 0.15, 0.15, 0.5), Color(1.0, 0.15, 0.15))
+	return _arc_surface("ClearArc", verts, Color(0.2, 0.6, 1.0, 0.5), Color(0.2, 0.6, 1.0))
 
 func _refresh_firing_arc():
 	if not selected_module or not is_instance_valid(selected_module): return
@@ -1309,6 +1484,93 @@ func _refresh_firing_arc():
 		selected_module.remove_child(old)
 		old.free()
 	selected_module.add_child(_build_firing_arc(selected_module, data))
+
+# --- Precise placement surface ---------------------------------------------
+#
+# The hull's CollisionShape3D is an axis-aligned BOX of the catalog size,
+# because that is what every dimension-reading caller needs (locomotion
+# mounting, armor facet fitting, clipping). But a hull mesh only touches that
+# box where it is widest: everywhere it curves, tapers or slopes, the visible
+# surface sits well inside its own bounding box. Placement raycasts hit the
+# box, so modules landed on an invisible shell and floated off the hull -
+# worst on the tapered ship keels and the airship's curved envelope.
+#
+# HullSurface is a second StaticBody3D carrying a trimesh of the ACTUAL hull
+# mesh, on its own collision layer so placement can query it alone. Layer 5
+# (bit value 16) is unused by the hull(1)/modules(2)/gizmos(4)/buildings(8)
+# assignments already in play. Placement prefers a HullSurface hit and falls
+# back to the box when there is no authored mesh to trace against.
+const SURFACE_COLLISION_LAYER := 16
+
+func _rebuild_surface_body(target_hull: Node3D, source_mesh_inst: MeshInstance3D):
+	if not target_hull or not is_instance_valid(target_hull):
+		return
+	var existing = target_hull.get_node_or_null("HullSurface")
+	if existing:
+		target_hull.remove_child(existing)
+		existing.free()
+	if not source_mesh_inst or not source_mesh_inst.mesh:
+		return
+	var tri_shape = source_mesh_inst.mesh.create_trimesh_shape()
+	if not tri_shape:
+		return
+	var body = StaticBody3D.new()
+	body.name = "HullSurface"
+	body.collision_layer = SURFACE_COLLISION_LAYER
+	body.collision_mask = 0
+	var col = CollisionShape3D.new()
+	col.shape = tri_shape
+	# Match the visual mesh exactly - same orientation correction and same
+	# per-axis fit - so the surface we snap to IS the surface being drawn.
+	col.transform = source_mesh_inst.transform
+	body.add_child(col)
+	target_hull.add_child(body)
+
+# Raycast used by every placement path. Traces the precise hull surface first
+# and only falls back to the bounding box if that misses, so a dropped module
+# sits on the hull you can see rather than on its bounding shell.
+func surface_raycast(ray_origin: Vector3, ray_dir: Vector3, length: float = 1000.0, exclude: Array = []):
+	var space_state = get_world_3d().direct_space_state
+	var to = ray_origin + ray_dir * length
+	var precise = PhysicsRayQueryParameters3D.create(ray_origin, to)
+	precise.collision_mask = SURFACE_COLLISION_LAYER
+	precise.exclude = exclude
+	var hit = space_state.intersect_ray(precise)
+	if hit:
+		return hit
+	var fallback = PhysicsRayQueryParameters3D.create(ray_origin, to)
+	fallback.collision_mask = 1
+	fallback.exclude = exclude
+	return space_state.intersect_ray(fallback)
+
+# Basis that rotates the module's local +Y (its "up", i.e. the direction the
+# body projects away from its baked-in mounting base) onto `n`, the surface
+# normal of the facet it was dropped on. Every category uses this now, so a
+# module's base always sits flush against the hull and its body always
+# projects outward - including straight down off the underside.
+#
+# Two bugs this replaces:
+#
+# 1. Godot's Quaternion(from, to) constructor special-cases ANTIPARALLEL
+#    inputs to the quaternion (0,1,0,0) - a 180-degree spin about Y - which
+#    maps UP straight back to UP. So Basis(Quaternion(UP, DOWN)) is not a
+#    flip at all, and anything mounted on the hull's underside kept pointing
+#    UP, burying its body inside the hull instead of hanging below it.
+# 2. Non-weapon categories additionally guarded the whole rotation behind
+#    `abs(normal.dot(UP)) < 0.999`, which skips the top and bottom faces
+#    entirely - the two facets most likely to need it.
+static func _align_up_to(n: Vector3) -> Basis:
+	var target = n.normalized()
+	if target.length_squared() < 0.5:
+		return Basis.IDENTITY
+	var d = Vector3.UP.dot(target)
+	if d > 1.0 - 0.000001:
+		return Basis.IDENTITY
+	if d < -1.0 + 0.000001:
+		# Genuine flip: rotate a half turn about a HORIZONTAL axis, so +Y
+		# really does end up pointing at -Y.
+		return Basis(Vector3.RIGHT, PI)
+	return Basis(Quaternion(Vector3.UP, target))
 
 func _get_parent_space_aabb(module: Node3D, size: Vector3) -> AABB:
 	var extents = size / 2.0
@@ -1371,8 +1633,22 @@ func check_all_clipping():
 				continue
 			if my_module.has_meta("locomotion_group") and other_module in my_module.get_meta("locomotion_group"):
 				continue
-				
-			var other_data = other_module.get_meta("module_data")
+
+			var other_data_early = other_module.get_meta("module_data")
+			# Armor is a skin, not an obstruction. MOUNTING_AND_ARMOR_SPEC.md
+			# #2 has an armor plate "auto-scale to exactly fit the facet it's
+			# deployed on", and #3 has weapons/devices mounting onto those same
+			# facets - so armouring the deck and then mounting a deck gun is a
+			# completely ordinary design, yet every module on an armoured facet
+			# used to overlap the plate's AABB and flag the whole vehicle
+			# clipping-red. Exempt armor-vs-anything-else while still catching
+			# armor-vs-armor, which is a genuine conflict (two plates fighting
+			# over the same facet).
+			var one_is_armor = (my_data.category == "armor") != (other_data_early.category == "armor")
+			if one_is_armor:
+				continue
+
+			var other_data = other_data_early
 			var other_catalog = ModuleCatalog.get_module_data(other_data.type_id)
 			var other_size = other_catalog.size * other_module.scale
 			var aabb_b = _get_parent_space_aabb(other_module, other_size)
@@ -1391,13 +1667,8 @@ func check_all_clipping():
 		
 		var meshes = []
 		_find_meshes_recursive(m, meshes)
-		
+
 		for mesh in meshes:
-			if mesh.name == "ArcCone":
-				continue
-			var mesh_parent = mesh.get_parent()
-			if mesh_parent and mesh_parent.name == "ArcCone":
-				continue # per-segment wedge meshes nested under the ArcCone container
 			var mat = mesh.material_override as StandardMaterial3D
 			if not mat:
 				mat = StandardMaterial3D.new()
@@ -1422,7 +1693,17 @@ func check_all_clipping():
 	# site.
 	_refresh_firing_arc()
 
+# Collects the module's own body meshes for clipping recolouring. Skips the
+# editor-overlay subtrees entirely: "ArcCone" (firing-arc wedges, which carry
+# their own deliberate blue/red materials) and "Gizmo3D" (the manipulator
+# handles). The gizmo was previously walked into and had material_override
+# assigned on every clipping pass, so selecting a module repainted its own
+# transform handles in the module's catalog colour - and turned them solid red
+# whenever the module was clipping, which is precisely when you need to see
+# the handles to drag it back out.
 func _find_meshes_recursive(node: Node, result: Array):
+	if node.name == "ArcCone" or node.name.begins_with("Gizmo3D"):
+		return
 	if node is MeshInstance3D:
 		result.append(node)
 	for child in node.get_children():
@@ -1450,92 +1731,54 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 		local_pos.z = round(local_pos.z / snap_interval) * snap_interval
 
 	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
-	var pintle_style = ""
+	var mount_style = ""
 	if category == "weapon":
-		pintle_style = ModuleCatalog.get_mount_style(data.type_id, hull_type_for_mount)
-	var stays_level = pintle_style == "pintle"
-
-	if category == "weapon":
-		module.set_meta("mount_style", pintle_style)
+		mount_style = ModuleCatalog.get_mount_style(data.type_id, hull_type_for_mount)
+		module.set_meta("mount_style", mount_style)
 		module.set_meta("mount_normal", normal)
-		if pintle_style == "pintle":
-			var column_dir = Vector3.UP
-			if abs(local_normal.z) > 0.5:
-				column_dir = local_normal
-			else:
-				column_dir = Vector3(local_pos.x, local_pos.y, 0.0)
-				if column_dir.length() < 0.001:
-					column_dir = local_normal
-				else:
-					column_dir = column_dir.normalized()
-			var column_length = max(catalog_data.size.y * 1.5, 0.6)
-			
-			module.set_meta("column_dir", column_dir)
-			module.set_meta("column_length", column_length)
-			local_pos += column_dir * column_length
-		else:
-			module.set_meta("column_length", 0.0)
-			if pintle_style == "frame_built":
-				var embed_depth = catalog_data.size.y * 0.75
-				local_pos -= local_normal * embed_depth
-	else:
-		var offset = normal * (catalog_data.size.y / 2.0)
-		local_pos = hull.to_local(world_pos) + offset
-		if abs(local_normal.x) < 0.9:
-			local_pos.x = round(local_pos.x / snap_interval) * snap_interval
-		if abs(local_normal.y) < 0.9:
-			local_pos.y = round(local_pos.y / snap_interval) * snap_interval
-		if abs(local_normal.z) < 0.9:
-			local_pos.z = round(local_pos.z / snap_interval) * snap_interval
 
+	# Non-weapons used to get an extra `normal * size.y / 2` push-off here,
+	# which _place_weapon() never applies. Module meshes are built with their
+	# base at local Y=0 (build_visual() offsets the mesh up by half its height
+	# so the BOTTOM lands on the origin), so the origin belongs exactly on the
+	# surface - that extra half-height left every non-weapon module hovering
+	# off the hull the moment it was dragged, at a different height than where
+	# it was originally dropped.
 	module.position = local_pos
-	
-	module.rotation = Vector3.ZERO
-	if not stays_level and abs(normal.dot(Vector3.UP)) < 0.999:
-		module.look_at(module.global_position + normal, Vector3.UP)
-		module.rotate_object_local(Vector3.RIGHT, -PI/2.0)
-		
+
+	# Same alignment as initial placement, for every category - see
+	# _place_weapon() and _align_up_to().
+	module.transform.basis = _align_up_to(local_normal)
+
 	var yaw_offset = module.get_meta("yaw_offset", 0.0)
 	module.rotate_object_local(Vector3.UP, yaw_offset)
 	
 	if category == "weapon":
 		var VisualBuilder = preload("res://scripts/visual_builder.gd")
 		VisualBuilder.rebuild_visual(module)
+		if module.get_meta("is_mirror", false):
+			_apply_mirror_flip(module)
 		
 	if module.has_meta("mirrored_counterpart"):
 		var mirror = module.get_meta("mirrored_counterpart")
 		if mirror and is_instance_valid(mirror):
 			var mirrored_local_pos = Vector3(-local_pos.x, local_pos.y, local_pos.z)
 			mirror.position = mirrored_local_pos
-			
+
 			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
-			mirror.rotation = Vector3.ZERO
-			if not stays_level and abs(mirrored_normal.dot(Vector3.UP)) < 0.999:
-				mirror.look_at(mirror.global_position + mirrored_normal, Vector3.UP)
-				mirror.rotate_object_local(Vector3.RIGHT, -PI/2.0)
-			
+			var local_mirrored_normal = hull.global_transform.basis.inverse() * mirrored_normal
+			mirror.transform.basis = _align_up_to(local_mirrored_normal)
+
 			mirror.rotate_object_local(Vector3.UP, -yaw_offset)
 			if category == "weapon":
-				mirror.set_meta("mount_style", pintle_style)
+				mirror.set_meta("mount_style", mount_style)
 				mirror.set_meta("mount_normal", mirrored_normal)
-				if pintle_style == "pintle":
-					var m_column_dir = Vector3.UP
-					var local_mirrored_normal = hull.global_transform.basis.inverse() * mirrored_normal
-					if abs(local_mirrored_normal.z) > 0.5:
-						m_column_dir = local_mirrored_normal
-					else:
-						m_column_dir = Vector3(mirrored_local_pos.x, mirrored_local_pos.y, 0.0)
-						if m_column_dir.length() < 0.001:
-							m_column_dir = local_mirrored_normal
-						else:
-							m_column_dir = m_column_dir.normalized()
-					mirror.set_meta("column_dir", m_column_dir)
-					mirror.set_meta("column_length", module.get_meta("column_length", 0.0))
 				var VisualBuilder = preload("res://scripts/visual_builder.gd")
 				VisualBuilder.rebuild_visual(mirror)
+			_apply_mirror_flip(mirror)
 
 # Re-runs the same facet/mount classification _place_weapon() does at initial placement.
-func _reclassify_module_after_drag(module: Node3D, normal: Vector3, _is_mirror_call: bool = false):
+func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: bool = false):
 	if not module or not is_instance_valid(module) or not module.has_meta("module_data"):
 		return
 	var data = module.get_meta("module_data")
@@ -1563,8 +1806,8 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, _is_mirror_c
 		if local_z.x > 0.5: target_z = hull_size.x
 		elif local_z.y > 0.5: target_z = hull_size.y
 		elif local_z.z > 0.5: target_z = hull_size.z
-		module.scale.x = target_x / catalog_data.size.x
-		module.scale.z = target_z / catalog_data.size.z
+		module.scale.x = target_x / catalog_data.get("size", Vector3.ONE).x
+		module.scale.z = target_z / catalog_data.get("size", Vector3.ONE).z
 
 		var armor_facet = ModuleCatalog.classify_facet(local_normal)
 		var centered_local = Vector3.ZERO
@@ -1583,29 +1826,16 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, _is_mirror_c
 		var mount_style = ModuleCatalog.get_mount_style(data.type_id, hull_type_for_mount)
 		module.set_meta("mount_style", mount_style)
 		module.set_meta("mount_normal", normal)
-		if mount_style == "pintle":
-			var local_pos = hull.to_local(module.global_position)
-			var column_dir = Vector3.UP
-			if abs(local_normal.z) > 0.5:
-				column_dir = local_normal
-			else:
-				column_dir = Vector3(local_pos.x, local_pos.y, 0.0)
-				if column_dir.length() < 0.001:
-					column_dir = local_normal
-				else:
-					column_dir = column_dir.normalized()
-			var column_length = max(catalog_data.size.y * 1.5, 0.6)
-			module.set_meta("column_dir", column_dir)
-			module.set_meta("column_length", column_length)
-		else:
-			module.set_meta("column_length", 0.0)
-			if mount_style == "frame_built":
-				var embed_depth = catalog_data.size.y * 0.75
-				module.global_position -= normal * embed_depth
+		# Position/rotation are already flush-mounted to the new facet by
+		# the last _update_module_placement() call during the drag - this
+		# just finalizes the mount_style classification and rebuilds the
+		# visual for the new facet's mesh (e.g. tweak deformations).
 		var VisualBuilder = preload("res://scripts/visual_builder.gd")
 		VisualBuilder.rebuild_visual(module)
+		if module.get_meta("is_mirror", false):
+			_apply_mirror_flip(module)
 
-	if not _is_mirror_call and module.has_meta("mirrored_counterpart"):
+	if not is_mirror and module.has_meta("mirrored_counterpart"):
 		var mirror = module.get_meta("mirrored_counterpart")
 		if mirror and is_instance_valid(mirror):
 			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
@@ -1616,3 +1846,37 @@ func _get_colliders_recursive(node: Node, list: Array):
 		list.append(node.get_rid())
 	for child in node.get_children():
 		_get_colliders_recursive(child, list)
+
+# Mirrors a module's visuals across the module's own YZ plane, so a left-side
+# instance is the true reflection of the right-side one rather than a second
+# copy of it. Applied to the module's DIRECT visual children (nested geometry
+# inherits it) - never to the module node's own scale, which would put a
+# negative factor into collision shapes and into module_data.scale_multiplier,
+# where the stat maths reads it.
+#
+# Rewritten 2026-07-21. The old version walked the whole subtree flipping each
+# MeshInstance3D's LOCAL scale.z, which only mirrors across module-X for a
+# mesh that happens to carry the authored parts' 90-degree yaw offset - the
+# procedural-fallback meshes have no such offset, so it mirrored them along
+# the wrong axis. Reflecting the child's whole transform in module space is
+# correct whatever orientation the child is in.
+#
+# The "_mirrored" marker keeps this idempotent: a reflection is its own
+# inverse, so calling it twice on the same node would silently undo it, and
+# it IS called repeatedly - once per mouse-motion frame while dragging a
+# mirrored module. rebuild_visual() destroys and recreates these children, so
+# fresh geometry is correctly unmarked and gets mirrored again.
+const _MIRROR_X := Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1))
+
+func _apply_mirror_flip(module: Node3D):
+	if not module or not is_instance_valid(module): return
+	if not module.get_meta("scale_flip_x", false): return
+	for child in module.get_children():
+		if child is CollisionObject3D:
+			continue
+		if not (child is Node3D):
+			continue
+		if child.get_meta("_mirrored", false):
+			continue
+		child.transform = Transform3D(_MIRROR_X * child.transform.basis, _MIRROR_X * child.transform.origin)
+		child.set_meta("_mirrored", true)

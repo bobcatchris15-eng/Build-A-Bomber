@@ -31,6 +31,9 @@ window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
-[rendering]
+[filesystem]
 
-renderer/rendering_method="forward_plus"
+import/blender/enabled=false
+
+[debug]
+file_logging/enable_file_logging=true

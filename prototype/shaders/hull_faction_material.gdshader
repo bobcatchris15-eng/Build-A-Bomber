@@ -1,5 +1,5 @@
 shader_type spatial;
-render_mode blend_mix, depth_draw_always, cull_back, diffuse_burley, specular_schlick_ggx;
+render_mode blend_mix, depth_draw_always, cull_disabled, diffuse_burley, specular_schlick_ggx;
 // Faction visual identity system - v2, built against VISUAL_ART_DIRECTION.md's
 // parameter model (section 2). ONE shared hull material across every
 // faction and every armor material: same mesh geometry always, differentiation

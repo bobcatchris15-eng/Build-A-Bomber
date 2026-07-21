@@ -90,7 +90,7 @@ func _spawn_trail_puff():
 	smat.albedo_color = Color(0.6, 0.6, 0.6, 0.5)
 	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	smoke.material_override = smat
-	get_tree().current_scene.add_child(smoke)
+	(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(smoke)
 	smoke.global_position = global_position - global_transform.basis.z * 0.2
 	var st = create_tween()
 	st.tween_property(smoke, "scale", Vector3.ZERO, 0.25)
@@ -142,7 +142,7 @@ func _spawn_impact_visual():
 	mat.emission_enabled = true
 	mat.emission = Color.ORANGE
 	exp.material_override = mat
-	get_tree().current_scene.add_child(exp)
+	(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(exp)
 	exp.global_position = global_position
 	var tween = exp.create_tween()
 	tween.tween_property(exp, "scale", Vector3.ZERO, 0.15)
@@ -163,7 +163,7 @@ func destroy_missile(intercepted: bool):
 		mat.emission_enabled = true
 		mat.emission = mat.albedo_color
 		exp.material_override = mat
-		get_tree().current_scene.add_child(exp)
+		(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(exp)
 		exp.global_position = global_position
 		var tween = exp.create_tween()
 		tween.tween_property(exp, "scale", Vector3.ZERO, 0.15)

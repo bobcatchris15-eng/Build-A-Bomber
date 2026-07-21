@@ -26,10 +26,74 @@ static func get_part_mesh(part_name: String) -> Mesh:
 	return _load_and_cache("res://assets/models/parts/%s.glb" % part_name)
 
 static func get_hull_mesh(hull_type_id: String) -> Mesh:
+	# A hull whose shape is genuinely a plain primitive declares
+	# "primitive_shape" in its sidecar instead of shipping a .glb, and wins
+	# over any .glb that happens to sit next to it. the_cube/the_orb/the_rod/
+	# the_slab were supposed to be exactly that - simple geometric solids -
+	# but shipped as byte-identical COPIES of medium_hull.glb, so all four
+	# rendered as a medium hull stretched to their catalog dimensions.
+	var primitive = _primitive_shape_for(hull_type_id)
+	if primitive != "":
+		return _build_primitive(primitive)
 	var mod_path = "user://mods/hulls/%s.glb" % hull_type_id
 	if FileAccess.file_exists(mod_path):
 		return _load_and_cache_runtime_gltf(mod_path)
 	return _load_and_cache("res://assets/models/hulls/%s.glb" % hull_type_id)
+
+static func _primitive_shape_for(hull_type_id: String) -> String:
+	# Runtime load rather than preload: module_catalog.gd sits upstream of
+	# this file in the preload graph, so a preload here would close a cycle.
+	var ModuleCatalogScript = load("res://scripts/module_catalog.gd")
+	if ModuleCatalogScript == null:
+		return ""
+	return ModuleCatalogScript.get_module_data(hull_type_id).get("primitive_shape", "")
+
+# Primitives are built at UNIT size (a 1x1x1 bounding box) and left there.
+# ModuleCatalog.get_hull_mesh_fit() then stretches them per-axis onto the
+# hull's catalog size exactly as it does for an authored mesh, so a 1x1x8 rod
+# and a 3x3x3 cube both fall out of the same unit source with no special
+# casing - and the orientation search is a no-op on a cube-shaped AABB, so
+# they are never spuriously rotated.
+static func _build_primitive(shape: String) -> Mesh:
+	var cache_key = "primitive://%s" % shape
+	if _cache.has(cache_key):
+		return _cache[cache_key]
+
+	var source: Mesh = null
+	var bake := Transform3D.IDENTITY
+	match shape:
+		"sphere":
+			var sphere = SphereMesh.new()
+			sphere.radius = 0.5
+			sphere.height = 1.0
+			sphere.radial_segments = 32
+			sphere.rings = 16
+			source = sphere
+		"cylinder":
+			var cyl = CylinderMesh.new()
+			cyl.top_radius = 0.5
+			cyl.bottom_radius = 0.5
+			cyl.height = 1.0
+			cyl.radial_segments = 24
+			source = cyl
+			# CylinderMesh runs along Y. Bake a quarter turn about X so the
+			# long axis is Z, matching the -Z-forward convention every hull
+			# uses - otherwise a "rod" 8 units long in Z would come out as a
+			# 1-unit-tall disc stretched sideways.
+			bake = Transform3D(Basis(Vector3.RIGHT, PI / 2.0), Vector3.ZERO)
+		_:
+			var box = BoxMesh.new()
+			box.size = Vector3.ONE
+			source = box
+
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.append_from(source, 0, bake)
+	st.generate_normals()
+	st.generate_tangents()
+	var mesh = st.commit()
+	_cache[cache_key] = mesh
+	return mesh
 
 static func _load_and_cache(path: String) -> Mesh:
 	if _cache.has(path):

@@ -35,16 +35,32 @@ def process_model(input_path, output_path, base_name):
         
     obj = bpy.context.active_object
     
-    # Decimate (Simplify)
-    print("Decimating mesh...")
-    mod = obj.modifiers.new(name="Decimate", type='DECIMATE')
-    mod.ratio = 0.25 # Reduce to 25% of original faces
-    bpy.ops.object.modifier_apply(modifier="Decimate")
+    # Unparent keeping transform using direct data API to allow transform_apply to succeed
+    world_matrix = obj.matrix_world.copy()
+    obj.parent = None
+    obj.matrix_world = world_matrix
+    
+    # Remove any leftover Empty root objects to prevent hierarchy issues
+    for empty in [o for o in bpy.context.scene.objects if o.type == 'EMPTY' and o.name != "Camera_Target"]:
+        bpy.data.objects.remove(empty)
+        
+    bpy.context.view_layer.update()
+    
+    # Removed Decimate as it was destroying geometry
     
     # Center Origin
     print("Centering origin...")
     bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
     obj.location = (0, 0, 0)
+    
+    # Rotate hulls 90 degrees to align forward axis before scaling
+    is_hull = "hull" in base_name or "foundation" in base_name
+    if is_hull:
+        print("Rotating hull to align forward axis...")
+        import math
+        obj.rotation_euler.z += math.radians(0)
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
+        bpy.context.view_layer.update() # Force update to recalculate dimensions!
     
     # Find dimensions from sizes map
     # We try to match base_name in sizes keys
@@ -54,26 +70,31 @@ def process_model(input_path, output_path, base_name):
             dims_target = val
             break
             
-    # Scale to target size
+    # Scale to target size proportionally
     # target size is (width, height, length)
     # Blender axes: X=width, Y=length, Z=height
     target_x = dims_target[0] # width
     target_y = dims_target[2] # length
     target_z = dims_target[1] # height
     
-    print(f"Scaling to exact dimensions: Width={target_x}, Height={target_z}, Length={target_y}")
+    print(f"Target dimensions: Width={target_x}, Height={target_z}, Length={target_y}")
     
-    # Scale each axis independently to fit dimensions
     current_dims = obj.dimensions
     if current_dims.x > 0 and current_dims.y > 0 and current_dims.z > 0:
-        scale_x = target_x / current_dims.x
-        scale_y = target_y / current_dims.y
-        scale_z = target_z / current_dims.z
+        # Scale proportionally matching the largest dimension
+        targets = [target_x, target_y, target_z]
+        max_target = max(targets)
+        max_idx = targets.index(max_target)
         
-        # To avoid extreme stretching if the model shape is very different from target proportions,
-        # we can optionally scale uniformly based on the longest axis, or scale non-uniformly.
-        # The user requested specific footprints, so we scale non-uniformly.
-        obj.scale = (scale_x, scale_y, scale_z)
+        if max_idx == 0:   # Width (X)
+            scale_factor = target_x / current_dims.x
+        elif max_idx == 1: # Length (Y)
+            scale_factor = target_y / current_dims.y
+        else:              # Height (Z)
+            scale_factor = target_z / current_dims.z
+            
+        print(f"Scaling uniformly by factor {scale_factor} (matching largest target: {max_target})")
+        obj.scale = (scale_factor, scale_factor, scale_factor)
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     
     # Export GLB

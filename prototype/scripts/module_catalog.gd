@@ -142,7 +142,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Small, light gun on a light mount - swings fast, same real-world
 			# intuition as its pintle tolerance above.
 			"traverse_agility": 1.3,
-			"size": Vector3(0.4, 0.4, 1.2),
+			"size": Vector3(0.3, 0.3, 1.0),
 			"color": Color.SLATE_GRAY
 		},
 		"rotary_cannon": {
@@ -159,7 +159,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Motor-driven gatling on a powered gimbal - agile but not as
 			# featherweight-quick as the single-barrel MG.
 			"traverse_agility": 1.2,
-			"size": Vector3(0.7, 0.7, 1.8),
+			"size": Vector3(0.5, 0.5, 1.5),
 			"color": Color(0.2, 0.2, 0.2) # Charcoal
 		},
 		"gauss_railgun": {
@@ -175,7 +175,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# if that override is ever lifted, kept low for consistency with
 			# its long rigid accelerator rail.
 			"traverse_agility": 0.4,
-			"size": Vector3(0.4, 0.4, 3.0),
+			"size": Vector3(0.6, 0.6, 2.8),
 			"color": Color.BLUE_VIOLET
 		},
 
@@ -360,7 +360,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Tall, top-heavy precision emitter - deliberate, controlled
 			# traverse rather than a fast snap-track.
 			"traverse_agility": 0.8,
-			"size": Vector3(0.6, 1.6, 0.6),
+			"size": Vector3(0.5, 1.2, 0.5),
 			"color": Color.LIGHT_SKY_BLUE
 		},
 		"arc_projector": {
@@ -376,7 +376,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Compact, low-profile emitter, tolerant like the light autoguns -
 			# it needs to chase down a target to disable it, so agility matters.
 			"traverse_agility": 1.15,
-			"size": Vector3(0.5, 0.5, 1.2),
+			"size": Vector3(0.4, 0.4, 1.0),
 			"color": Color.CYAN
 		},
 		"ion_cannon": {
@@ -400,7 +400,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 70,
 			"crystal": 65,
 			"dps": 75.0,
-			"size": Vector3(0.7, 0.7, 2.6),
+			"size": Vector3(0.8, 0.8, 2.8),
 			"color": Color.SKY_BLUE
 		},
 		"heavy_laser": {
@@ -418,7 +418,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Continuous-beam precision weapon over a long housing - benefits
 			# from a stable, deliberate traverse for sustained aim.
 			"traverse_agility": 0.75,
-			"size": Vector3(0.6, 0.6, 2.5),
+			"size": Vector3(0.7, 0.7, 2.4),
 			"color": Color.DARK_RED
 		},
 		"plasma_lobber": {
@@ -435,7 +435,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Arcing lob weapon, same slow-deliberate character as the
 			# mortars/cluster_dispenser.
 			"traverse_agility": 0.55,
-			"size": Vector3(0.8, 0.8, 2.0),
+			"size": Vector3(0.6, 0.6, 1.6),
 			"color": Color.MEDIUM_SPRING_GREEN
 		},
 
@@ -454,7 +454,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Point defense lives and dies by how fast it can snap onto a
 			# small, fast-moving threat - the quickest traverse in the roster.
 			"traverse_agility": 1.8,
-			"size": Vector3(0.8, 1.0, 0.8),
+			"size": Vector3(0.6, 0.8, 0.6),
 			"color": Color.WHITE_SMOKE
 		},
 		"pd_laser": {
@@ -714,7 +714,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# overloaded - a real overloaded car sags and struggles - so this
 			# tolerates less excess weight than the heavier ground types.
 			"base_weight_capacity": 350.0,
-			"size": Vector3(0.8, 0.8, 0.8),
+			"size": Vector3(0.6, 0.6, 0.6),
 			"color": Color.BLACK,
 			"traits": ["ground_contact", "high_speed"]
 		},
@@ -737,7 +737,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			"base_weight_capacity": 300.0,
 			"thrust_coefficient": 130.0,
-			"size": Vector3(0.8, 0.8, 0.8),
+			"size": Vector3(0.6, 0.6, 0.6),
 			"color": Color(0.15, 0.15, 0.18),
 			"traits": ["ground_contact", "omni"]
 		},
@@ -752,7 +752,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Heaviest, toughest ground locomotor - literally what tanks use
 			# to carry heavy armor. Highest ground-type capacity.
 			"base_weight_capacity": 700.0,
-			"size": Vector3(1.0, 0.8, 3.0),
+			"size": Vector3(0.8, 0.6, 2.5),
 			"color": Color.DARK_OLIVE_GREEN,
 			"traits": ["ground_contact"]
 		},
@@ -776,7 +776,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			"base_weight_capacity": 900.0,
 			"thrust_coefficient": 95.0,
-			"size": Vector3(1.1, 2.6, 6.5),
+			"size": Vector3(1.0, 2.0, 5.0),
 			"color": Color(0.28, 0.26, 0.2),
 			"traits": ["ground_contact"]
 		},
@@ -807,7 +807,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Ground-effect lift is weight-sensitive like a real hovercraft,
 			# though less extreme than a helicopter's rotor lift.
 			"base_weight_capacity": 300.0,
-			"size": Vector3(1.5, 0.4, 1.5),
+			"size": Vector3(1.2, 0.3, 1.2),
 			"color": Color.CYAN,
 			"traits": ["hovering"]
 		},
@@ -822,7 +822,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# A mech walker's legs are built to bear real structural load,
 			# closer to tracked_treads than to a wheeled chassis.
 			"base_weight_capacity": 500.0,
-			"size": Vector3(0.6, 1.8, 0.6),
+			"size": Vector3(0.5, 1.5, 0.5),
 			"color": Color.DARK_RED,
 			"traits": ["ground_contact"]
 		},
@@ -838,7 +838,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# lift - more forgiving of extra weight than the other hovering/
 			# airborne types, though still not as tolerant as a grounded hull.
 			"base_weight_capacity": 450.0,
-			"size": Vector3(1.6, 0.3, 1.6),
+			"size": Vector3(1.2, 0.3, 1.2),
 			"color": Color.MEDIUM_BLUE,
 			"traits": ["hovering", "airborne"]
 		},
@@ -854,7 +854,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# more payload tolerance than rotary/hover lift, but it's still
 			# a real aircraft weight budget, not a grounded vehicle's.
 			"base_weight_capacity": 380.0,
-			"size": Vector3(1.2, 0.6, 2.0),
+			"size": Vector3(1.0, 0.5, 1.5),
 			"color": Color.SLATE_BLUE,
 			"traits": ["airborne", "fixed_wing", "high_speed"]
 		},
@@ -882,7 +882,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# as efficiently as one built for sustained forward flight.
 			"base_weight_capacity": 300.0,
 			"thrust_coefficient": 120.0,
-			"size": Vector3(1.6, 0.5, 2.2),
+			"size": Vector3(2.0, 0.2, 1.0),
 			"color": Color(0.42, 0.32, 0.22),
 			"traits": ["airborne", "flapping_wing"]
 		},
@@ -898,7 +898,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# routinely carry far more weight than any ground/air vehicle.
 			# Highest capacity in the roster.
 			"base_weight_capacity": 800.0,
-			"size": Vector3(0.6, 0.6, 1.0),
+			"size": Vector3(0.5, 0.5, 0.8),
 			"color": Color.TEAL,
 			"traits": ["buoyant", "naval"]
 		},
@@ -952,7 +952,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			"base_weight_capacity": 600.0,
 			"thrust_coefficient": 110.0,
-			"size": Vector3(1.1, 0.9, 3.4),
+			"size": Vector3(0.8, 0.8, 3.0),
 			"color": Color(0.32, 0.3, 0.24),
 			"traits": ["ground_contact", "amphibious"]
 		},
@@ -987,9 +987,176 @@ static func hull_exists(type_id: String) -> bool:
 # 180-degree flip every current hull needs; a future hull authored with its
 # nose already at -Z can opt out via its own "visual_yaw_offset_deg" catalog
 # field (or JSON sidecar field, for HullLoader-scanned mod hulls).
-const HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG: float = 180.0
+const HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG: float = 90.0
 static func get_hull_visual_yaw_offset_deg(hull_type_id: String) -> float:
 	return get_module_data(hull_type_id).get("visual_yaw_offset_deg", HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG)
+
+# --- Hull mesh orientation + fit (single source of truth) -------------------
+#
+# module_placer.gd (fresh hull placed in the Design Lab) and
+# blueprint_manager.gd (hull reconstructed from a saved blueprint, in the lab
+# or in battle) each used to compute this independently and DISAGREED, so the
+# same design looked and collided differently depending on how it got on
+# screen. Both call get_hull_mesh_fit() now.
+#
+# Two separate problems this solves, both found 2026-07-21:
+#
+# 1. ORIENTATION. The old code applied a blanket 90-degree yaw to every hull
+#    (HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG). That happens to be right for the
+#    ~13 authored meshes whose long axis is X, but it is wrong for the ones
+#    authored along Z (flying_wing_hull, pillbox_foundation), wrong for the
+#    mod hull authored correctly in the first place (prospectors_folly_hull),
+#    and useless for the ones standing on their tail with their long axis on
+#    Y (interceptor_hull, fuselage_hull) - a yaw can never lay those down.
+#    We now pick the axis-aligned orientation whose ASPECT RATIO best matches
+#    the catalog size, which reproduces the old 90-degree answer wherever the
+#    old answer was right and fixes it everywhere it wasn't.
+#
+# 2. FIT. The old code scaled uniformly so the mesh's LARGEST axis matched the
+#    catalog's LARGEST axis. For any mesh whose proportions differ from the
+#    catalog's that silently inflates the other two axes - interceptor_hull
+#    rendered 7 units TALL and under 1 wide, naval_hull as a 12 x 1.76 x 1.76
+#    pencil. Since the collision box, module placement, locomotion mounting,
+#    armor auto-fit, clipping and stats are ALL defined in catalog space, the
+#    visual has to occupy catalog space too or none of them line up. We fit
+#    per-axis so the mesh exactly fills its catalog box.
+#
+# A hull whose .glb is authored at its true catalog dimensions (which is the
+# convention - prospectors_folly_hull follows it) gets rotation 0 and scale 1
+# here and is passed through untouched. Anything else is being corrected for
+# a mis-authored source mesh; see get_hull_mesh_fit_warnings().
+#
+# An author can bypass the auto-detection entirely by setting any of
+# "visual_yaw_offset_deg" / "visual_pitch_offset_deg" / "visual_roll_offset_deg"
+# in the hull's catalog entry or .json sidecar - if any is present, those
+# angles are used verbatim and no orientation search runs. That is the escape
+# hatch for a mesh the AABB heuristic lands upside down (an axis-aligned
+# bounding box cannot tell "nose up" from "nose down").
+static func has_explicit_hull_orientation(hull_type_id: String) -> bool:
+	var d = get_module_data(hull_type_id)
+	return d.has("visual_yaw_offset_deg") or d.has("visual_pitch_offset_deg") or d.has("visual_roll_offset_deg")
+
+# The axis-aligned orientations we search. Restricted to the 6 that map the
+# mesh's three axes onto the hull's three axes without mirroring; the further
+# 180-degree spins produce identical extents, so they cannot be distinguished
+# by an AABB and are left to the explicit override above.
+const _HULL_ORIENTATION_CANDIDATES: Array = [
+	Vector3(0, 0, 0),
+	Vector3(0, PI / 2.0, 0),
+	Vector3(PI / 2.0, 0, 0),
+	Vector3(PI / 2.0, PI / 2.0, 0),
+	Vector3(0, 0, PI / 2.0),
+	Vector3(0, PI / 2.0, PI / 2.0),
+]
+
+# Extents of an AABB after being rotated by an axis-aligned euler.
+static func _oriented_extents(size: Vector3, euler: Vector3) -> Vector3:
+	var b = Basis.from_euler(euler)
+	var e = (b * Vector3(size.x, 0, 0)).abs() + (b * Vector3(0, size.y, 0)).abs() + (b * Vector3(0, 0, size.z)).abs()
+	# Kill float fuzz from the 90-degree rotations so scale comes out exact.
+	return Vector3(snappedf(e.x, 0.000001), snappedf(e.y, 0.000001), snappedf(e.z, 0.000001))
+
+# Scale-invariant distance between two boxes' proportions: how far the
+# per-axis scale factors are from being a single uniform scale. 0 means the
+# mesh already has exactly the catalog's proportions.
+static func _aspect_distance(extents: Vector3, target: Vector3) -> float:
+	var ln := []
+	for axis in ["x", "y", "z"]:
+		if extents[axis] <= 0.0001 or target[axis] <= 0.0001:
+			return INF
+		ln.append(log(target[axis] / extents[axis]))
+	var mean = (ln[0] + ln[1] + ln[2]) / 3.0
+	return abs(ln[0] - mean) + abs(ln[1] - mean) + abs(ln[2] - mean)
+
+# Returns {"rotation": Vector3 euler, "scale": Vector3, "position": Vector3}
+# to apply to a MeshInstance3D so the authored mesh fills exactly `cat_size`,
+# CENTERED on the hull's own origin. `extra_scale` (hull_scale * armor_bulk)
+# is folded in for callers.
+#
+# "position" exists because an authored .glb's geometry is not necessarily
+# centered on its own origin - medium_hull's sits about 0.32 units high after
+# fitting. Nothing re-centered it, so the visible hull floated off-centre
+# inside its own collision box, and every module placed against that box
+# landed at a different height than the hull skin it was supposed to touch.
+static func get_hull_mesh_fit(hull_type_id: String, mesh: Mesh, extra_scale: Vector3 = Vector3.ONE) -> Dictionary:
+	var cat_size: Vector3 = get_module_data(hull_type_id).get("size", Vector3.ONE)
+	if not mesh:
+		return {"rotation": Vector3.ZERO, "scale": extra_scale, "position": Vector3.ZERO}
+	var aabb = mesh.get_aabb()
+	var aabb_size = aabb.size
+	if aabb_size.x <= 0.0001 or aabb_size.y <= 0.0001 or aabb_size.z <= 0.0001:
+		return {"rotation": Vector3.ZERO, "scale": extra_scale, "position": Vector3.ZERO}
+
+	var euler: Vector3
+	if has_explicit_hull_orientation(hull_type_id):
+		var d = get_module_data(hull_type_id)
+		euler = Vector3(
+			deg_to_rad(d.get("visual_pitch_offset_deg", 0.0)),
+			deg_to_rad(d.get("visual_yaw_offset_deg", 0.0)),
+			deg_to_rad(d.get("visual_roll_offset_deg", 0.0)))
+	else:
+		var best = _HULL_ORIENTATION_CANDIDATES[0]
+		var best_score = INF
+		for candidate in _HULL_ORIENTATION_CANDIDATES:
+			var score = _aspect_distance(_oriented_extents(aabb_size, candidate), cat_size)
+			# Candidates run least-rotated first, and a challenger has to be
+			# meaningfully better (not merely luckier on float noise) to
+			# displace the incumbent. Without a real margin, a near-symmetric
+			# mesh like airship_hull's cigar envelope - whose two minor axes
+			# differ by under 10% - gets rolled onto its side for a scoring
+			# gain small enough to be indistinguishable from rounding.
+			if score < best_score - 0.05:
+				best_score = score
+				best = candidate
+		euler = best
+
+	# Godot composes a node's basis as rotation * scale, so `scale` is applied
+	# along MESH-local axes and only then rotated into hull space. The fit
+	# factors we just derived are per HULL axis, so they have to be permuted
+	# back through the rotation before being handed to the node - otherwise
+	# every hull needing a non-zero rotation gets its fit factors applied to
+	# the wrong axes (which is exactly what the resulting-extents check in
+	# run_tests.gd's hull suite now guards against).
+	var oriented = _oriented_extents(aabb_size, euler)
+	var hull_axis_fit = Vector3(cat_size.x / oriented.x, cat_size.y / oriented.y, cat_size.z / oriented.z)
+	var mesh_axis_fit = (Basis.from_euler(euler).transposed() * hull_axis_fit).abs()
+	var final_scale = mesh_axis_fit * extra_scale
+
+	# Recentre: a node's transform maps a mesh point p to
+	# position + R*S*p, so putting the geometry's own AABB centre on the hull
+	# origin means position = -R*S*centre.
+	var basis = Basis.from_euler(euler).scaled(final_scale)
+	var position = -(basis * aabb.get_center())
+
+	return {"rotation": euler, "scale": final_scale, "position": position}
+
+# Diagnostic: hulls whose authored mesh proportions are far enough from their
+# catalog size that get_hull_mesh_fit() has to stretch them noticeably. These
+# are data problems (the .glb should be re-exported at its catalog
+# dimensions), not code problems - surfaced so they stay visible instead of
+# being silently absorbed by the per-axis fit.
+static func get_hull_mesh_fit_warnings(tolerance: float = 1.5) -> Array:
+	var out := []
+	var MeshAssetLoaderScript = load("res://scripts/mesh_asset_loader.gd")
+	for hull_id in get_catalog().keys():
+		if get_catalog()[hull_id].get("category", "") != "hull":
+			continue
+		var mesh = MeshAssetLoaderScript.get_hull_mesh(hull_id)
+		if not mesh:
+			continue
+		var fit = get_hull_mesh_fit(hull_id, mesh)
+		var s: Vector3 = fit["scale"]
+		var lo = min(s.x, min(s.y, s.z))
+		var hi = max(s.x, max(s.y, s.z))
+		if lo > 0.0001 and hi / lo > tolerance:
+			out.append({
+				"hull": hull_id,
+				"stretch": hi / lo,
+				"scale": s,
+				"rotation_deg": fit["rotation"] * (180.0 / PI),
+			})
+	out.sort_custom(func(a, b): return a["stretch"] > b["stretch"])
+	return out
 
 # Energy resource (ENERGY_AND_BALANCE_SPEC.md #1): a hull's base_energy is
 # the starting point for max_energy before any generator modules are
@@ -1110,17 +1277,17 @@ static func is_turreted_capable(hull_type_id: String) -> bool:
 
 # Single source of truth for weapon mount style, shared between the runtime
 # combat AI (auto_weapon.gd), the Design Lab placement code (module_placer.gd),
-# and the mount-hardware mesh builder (visual_builder.gd) - they must never
-# drift apart, since the whole point is that they all agree on the same
-# classification. Collapsed from a 5-bucket system (turret / frame_built /
-# pintle_top / pintle_bottom / sponson) to 3 buckets. Sponson no longer
-# exists; a "pintle" is now the universal independent-traverse mount, drawn
-# as a chunky post running along whatever column axis the click put it on
-# (vertical post for a top click, horizontal arm for a side click, diagonal
-# post for a corner click) - see module_placer.gd's column-axis model.
-#   "turret"      - existing enclosed-turret visual, unchanged (basic_cannon only)
-#   "frame_built" - built into the vehicle frame; the whole vehicle aims, not the weapon
-#   "pintle"      - column-axis independent-traverse mount, 360 azimuth + 90 elevation
+# and the Design Lab firing-arc visualizer - they must never drift apart,
+# since the whole point is that they all agree on the same classification.
+# Collapsed from an original 5-bucket system (turret / frame_built /
+# pintle_top / pintle_bottom / sponson) to 3 buckets, then (2026-07-21) the
+# visual side was simplified further: mount_style no longer drives HOW a
+# weapon is placed (module_placer.gd flush-mounts every style the same way,
+# rotating the module's authored mesh - post and all - flat against
+# whichever facet it landed on) - it now only drives combat traverse.
+#   "turret"      - existing enclosed-turret visual, unchanged (basic_cannon only), full traverse
+#   "frame_built" - built into the vehicle frame; the whole vehicle aims, not the weapon, zero traverse
+#   "pintle"      - independent-traverse mount, 360 azimuth
 #
 # hull_type_id generalizes "frame_built" from weapon-type-gated to
 # turreted_capable-trait-gated (MOUNTING_AND_ARMOR_SPEC.md addendum): on a
@@ -1356,20 +1523,57 @@ static func get_hull_size_tier(hull_type_id: String) -> String:
 static func get_underside_y_bias(hull_type_id: String) -> float:
 	return get_module_data(hull_type_id).get("underside_y_bias", 0.0)
 
+# --- Running gear (locomotion chassis slab) --------------------------------
+# Locomotion archetypes whose visible mount point is the underside of the
+# hull, and which therefore benefit from a procedural running-gear slab to
+# sit between hull and locomotion parts (the test arena's "vehicle slides on
+# its belly" bug - the CharacterBody3D's collider was sized to the hull only,
+# so a wheeled unit sat on the hull's underside with wheels dangling below
+# the collider; a deterministic running-gear slab gives the unit a real flat
+# bottom at the right height AND gives the side-mount types a chassis to
+# visually attach to, not float against the hull skin).
+#
+# Excluded: helicopter_rotors, fixed_wing_engine, ornithopter_wing (all
+# mounted ABOVE the hull, not on the underside), naval_propeller (stern),
+# buoyant_envelope (under the envelope, not the hull). Foundation hulls
+# (pillbox_foundation, fortress_wall_foundation, tower_foundation) take no
+# locomotion at all, so they never need a running gear either.
+const LOCOMOTION_TYPES_USING_RUNNING_GEAR: Array = [
+	"wheels", "omni_wheels", "tracked_treads", "rhomboid_treads",
+	"legs", "screw_drive", "hover_engine", "anti_grav",
+]
+
+# Per-axis scale of the running-gear slab relative to the hull footprint.
+# 0.95 inset on XZ (so the chassis tucks inside the hull edge by 2.5% per
+# side, a sensible default for a chassis that's not wider than the vehicle
+# it supports) and a clamped fraction of hull height for Y (so tall hulls
+# get a more prominent chassis without becoming comical, short hulls still
+# get enough clearance for default-size wheels).
+const RUNNING_GEAR_XZ_INSET: float = 0.95
+const RUNNING_GEAR_HEIGHT_MIN: float = 0.2
+const RUNNING_GEAR_HEIGHT_MAX: float = 0.6
+const RUNNING_GEAR_HEIGHT_FRACTION: float = 0.4
+
+static func needs_running_gear(locomotion_type: String) -> bool:
+	return locomotion_type in LOCOMOTION_TYPES_USING_RUNNING_GEAR
+
+# Deterministic running-gear dimensions for a given (already-scaled) hull
+# size. Pure/static so battle_unit.gd can compute the chassis height for
+# the CharacterBody3D's collider without needing the chassis to actually
+# exist as a node yet - and so it stays in sync with whatever
+# module_placer.gd / blueprint_manager.gd build.
+static func get_running_gear_size(hull_size: Vector3) -> Vector3:
+	return Vector3(
+		hull_size.x * RUNNING_GEAR_XZ_INSET,
+		clamp(hull_size.y * RUNNING_GEAR_HEIGHT_FRACTION, RUNNING_GEAR_HEIGHT_MIN, RUNNING_GEAR_HEIGHT_MAX),
+		hull_size.z * RUNNING_GEAR_XZ_INSET
+	)
+
 # Continuous alternative to get_mount_style()'s discrete facet matching,
-# for real mount-hardware decisions (module_placer.gd's actual weapon
-# placement, which has the real continuous surface normal, not just a
-# coarse "top/bottom/front/back/left/right" bucket). A pintle-style mount
-# (angled base plate conforming to the true local surface, world-vertical
-# post, weapon level on top - see visual_builder.gd's add_mount_hardware())
-# is available anywhere the surface has a meaningful upward OR downward
-# component RELATIVE TO THIS SPECIFIC WEAPON'S OWN TOLERANCE - this is what
-# makes a sloped glacis plate (interceptor_hull's nose, e.g.) a legitimate
-# pintle mount for a compact machine gun instead of forcing it into an
-# embedded sponson, while the same slope might still sponson-mount a mortar.
-# (Unused now: see column-axis model in module_placer.gd - we don't use a
-# per-frame surface-normal test anymore. Kept as a stub for legacy blueprint
-# reloads; new code should not call this.)
+# from an early per-normal mount-hardware design that predates the current
+# flush-rotate-to-surface placement (see module_placer.gd's _place_weapon()).
+# (Unused now, kept as a stub for legacy blueprint reloads; new code should
+# not call this.)
 static func get_mount_style_for_normal(type_id: String, normal: Vector3, hull_type_id: String = "") -> String:
 	return get_mount_style(type_id, hull_type_id)
 

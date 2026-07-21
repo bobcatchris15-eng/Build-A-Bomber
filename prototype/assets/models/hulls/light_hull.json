@@ -1,20 +1,20 @@
 {
-	"base_energy": 40,
-	"base_vision": 22,
-	"color": [
-		0.82745099067688,
-		0.82745099067688,
-		0.82745099067688,
-		1
-	],
-	"crystal": 10,
-	"hp": 200,
-	"metal": 50,
-	"name": "Light Hull",
-	"size": [
-		3,
-		1,
-		4
-	],
-	"weight": 100
+    "base_energy": 40,
+    "base_vision": 22,
+    "color": [
+        0.82745099067688,
+        0.82745099067688,
+        0.82745099067688,
+        1
+    ],
+    "crystal": 10,
+    "hp": 200,
+    "metal": 50,
+    "name": "Light Hull",
+    "size": [
+        2.5,
+        1.5,
+        4.0
+    ],
+    "weight": 100
 }

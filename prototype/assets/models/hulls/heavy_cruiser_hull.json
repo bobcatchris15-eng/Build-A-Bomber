@@ -1,22 +1,22 @@
 {
-	"base_energy": 110,
-	"base_vision": 15,
-	"color": [
-		0.300000011920929,
-		0.319999992847443,
-		0.340000003576279,
-		1
-	],
-	"crystal": 50,
-	"draught": 1.8,
-	"hp": 900,
-	"metal": 255,
-	"name": "Heavy Cruiser Hull",
-	"size": [
-		4.40000009536743,
-		1.89999997615814,
-		10.5
-	],
-	"underside_y_bias": 0.38,
-	"weight": 680
+    "base_energy": 110,
+    "base_vision": 15,
+    "color": [
+        0.300000011920929,
+        0.319999992847443,
+        0.340000003576279,
+        1
+    ],
+    "crystal": 50,
+    "draught": 1.8,
+    "hp": 900,
+    "metal": 255,
+    "name": "Heavy Cruiser Hull",
+    "size": [
+        5.0,
+        3.0,
+        16.0
+    ],
+    "underside_y_bias": 0.38,
+    "weight": 680
 }

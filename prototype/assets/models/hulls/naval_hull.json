@@ -1,22 +1,22 @@
 {
-	"base_energy": 70,
-	"base_vision": 17,
-	"color": [
-		0.349999994039536,
-		0.379999995231628,
-		0.400000005960464,
-		1
-	],
-	"crystal": 25,
-	"draught": 0.9,
-	"hp": 550,
-	"metal": 145,
-	"name": "Naval Hull",
-	"size": [
-		3.5,
-		1.60000002384186,
-		9
-	],
-	"underside_y_bias": 0.32,
-	"weight": 380
+    "base_energy": 70,
+    "base_vision": 17,
+    "color": [
+        0.349999994039536,
+        0.379999995231628,
+        0.400000005960464,
+        1
+    ],
+    "crystal": 25,
+    "draught": 0.9,
+    "hp": 550,
+    "metal": 145,
+    "name": "Naval Hull",
+    "size": [
+        4.0,
+        2.5,
+        12.0
+    ],
+    "underside_y_bias": 0.32,
+    "weight": 380
 }
