@@ -118,17 +118,25 @@ const KITE_STANDOFF_FRACTION: float = 0.45
 var selection_ring: MeshInstance3D = null
 var attack_range: float = 12.0
 
-# Auto-engage: a unit sitting IDLE or marching toward a MOVE order previously
-# had no way to notice a hostile in sight at all - it would walk right past
-# an enemy, only getting whatever passive fire its own weapons' narrow
-# traverse arcs happened to land, never actually maneuvering to fight.
-# Throttled (not every physics tick) since it's an O(n) group scan per unit.
-# Deliberately does NOT touch units already under ATTACK order (leaves the
-# existing kiting/flanking/wave-target priority alone - retargeting an
-# already-engaged unit onto a closer distraction is a separate design
-# question) or HARVEST order (economy units keep working; don't turn every
-# harvester into an accidental skirmisher).
+# Auto-engage: a unit sitting IDLE (no order at all) had no way to notice a
+# hostile in sight - it would just sit there, only getting whatever passive
+# fire its own weapons' independent targeting happened to land. This USED to
+# also divert a unit off an active MOVE order the instant it spotted a
+# hostile, but Chris's spec is that a move order is inviolable - the unit
+# finishes moving where it was told to go, and only starts hunting on its
+# own once it's actually sitting idle (no order) for a couple of seconds
+# (_idle_duration/IDLE_BEFORE_AUTO_ENGAGE below). Weapons stay free to
+# fire at anything in range/arc/LOS the whole time regardless - auto_
+# weapon.gd's targeting has no dependency on this unit's order state at
+# all, so a moving unit still shoots at whatever it passes. Throttled (not
+# every physics tick) since it's an O(n) group scan per unit. Deliberately
+# does NOT touch units already under ATTACK order (leaves the existing
+# kiting/flanking/wave-target priority alone) or HARVEST order (economy
+# units keep working; don't turn every harvester into an accidental
+# skirmisher).
 var _auto_engage_scan_timer: float = 0.0
+var _idle_duration: float = 0.0
+const IDLE_BEFORE_AUTO_ENGAGE: float = 1.5
 const AUTO_ENGAGE_SCAN_INTERVAL: float = 0.5
 
 func _ready():
@@ -329,6 +337,7 @@ func _recalculate_energy(hull_type_for_energy: String = ""):
 		current_energy = clamp(current_energy, 0.0, max_energy)
 
 func _setup_weapons():
+	var min_weapon_range = INF
 	for child in hull_node.get_children():
 		if child.has_meta("module_data"):
 			var data = child.get_meta("module_data")
@@ -337,13 +346,54 @@ func _setup_weapons():
 				child.set_script(weapon_script)
 				child.set_physics_process(true)
 				child._ready()
-				# Track the longest-ranged weapon for attack-order standoff distance
-				if "fire_range" in child:
-					attack_range = max(attack_range, child.fire_range * 0.85)
+				# Standoff distance for the ATTACK order's approach-and-stop
+				# (see that branch below): the SHORTEST-ranged offensive
+				# weapon's range, not the longest. The old "track the
+				# longest" behavior parked a mixed loadout (e.g. a
+				# long-range cluster_dispenser alongside short-range
+				# machine guns/cannons) right at the edge of its single
+				# longest weapon's reach - every shorter-range weapon then
+				# sat permanently out of range, perpetually idle ("sits in
+				# view of a target, neither attacks nor maneuvers" - most of
+				# its own arsenal literally couldn't reach). The long-range
+				# weapon isn't shortchanged by closing in further - it's
+				# already firing independently throughout the approach
+				# regardless of the unit's own order state (auto_weapon.gd's
+				# targeting has no dependency on it), so stopping closer
+				# just means it started shooting even earlier. Only real
+				# offensive weapons count - repair_array/drone_carrier/etc
+				# ("module", not "weapon") have their own auto_weapon.gd-
+				# driven range for healing/support and shouldn't drag the
+				# whole unit's engagement distance down to theirs.
+				# The ATTACK order's approach/hold distance (attack_range,
+				# below) is measured from the HULL's center, but a weapon's
+				# own fire_range is measured from wherever it's actually
+				# mounted - which can be meters away from hull center on a
+				# large hull (e.g. a tail-mounted gun on a 16m airship).
+				# Subtracting the weapon's own local-position magnitude
+				# (its worst-case distance from hull center) before taking
+				# the range floor means the hull stops close enough that
+				# even an off-center weapon's REAL target distance still
+				# fits inside its fire_range, not just the hull-center
+				# distance - otherwise the unit could park at a range that
+				# looks fine from its own center while every off-center
+				# weapon is actually still a few meters short of reaching,
+				# and never gets any closer once it's decided it's "in
+				# range."
+				if data.category == "weapon" and "fire_range" in child:
+					var effective_range = child.fire_range - child.position.length()
+					min_weapon_range = min(min_weapon_range, effective_range)
 				# Reuse the traverse angle auto_weapon.gd just computed (single
 				# source of truth) rather than re-deriving mount_style here.
 				if "traverse_limit_angle" in child and child.traverse_limit_angle <= 0.001:
 					has_frame_built_weapon = true
+	if min_weapon_range < INF:
+		# Floored at 2.0: an extreme mount offset (fire_range barely bigger
+		# than the weapon's own distance from hull center, or smaller)
+		# could otherwise drive this to zero or negative, which would make
+		# the ATTACK order's "dist > attack_range" approach check always
+		# true and the unit would try to close to point-blank forever.
+		attack_range = max(min_weapon_range * 0.85, 2.0)
 
 func _detect_harvester():
 	for child in hull_node.get_children():
@@ -577,7 +627,19 @@ func order_harvest(node: Node3D):
 	harvest_timer = 0.0
 
 func _try_auto_engage(delta: float):
-	if is_harvester or order == OrderType.ATTACK or order == OrderType.HARVEST:
+	# Move orders are inviolable (see the field comment above) - only an
+	# idle unit (no order) is ever a candidate to start hunting on its own,
+	# and only after it's stayed idle for IDLE_BEFORE_AUTO_ENGAGE straight
+	# seconds. Any other order (MOVE, ATTACK, HARVEST) resets the idle
+	# clock and bails immediately.
+	if order == OrderType.IDLE:
+		_idle_duration += delta
+	else:
+		_idle_duration = 0.0
+		_auto_engage_scan_timer = 0.0 # re-scan right away next time it goes idle
+		return
+
+	if is_harvester or _idle_duration < IDLE_BEFORE_AUTO_ENGAGE:
 		return
 	_auto_engage_scan_timer -= delta
 	if _auto_engage_scan_timer > 0.0:

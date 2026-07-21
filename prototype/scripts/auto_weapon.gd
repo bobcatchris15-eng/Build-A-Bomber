@@ -610,7 +610,7 @@ func _physics_process(delta):
 	time_since_last_shot += delta
 	_recalculate_low_hp_dps_bonus()
 	_find_nearest_target()
-	
+
 	if target and is_instance_valid(target):
 		var target_pos = target.global_position
 		# Target center height
@@ -627,9 +627,21 @@ func _physics_process(delta):
 		# angle_to_target check just below naturally reflects that since
 		# global_transform now tracks the hull's own facing 1:1.
 		if traverse_limit_angle > 0.001:
-			# Target local direction relative to weapon parent (the Hull)
+			# Target local direction relative to THIS WEAPON's own mount
+			# point, not the hull's origin. Previously this normalized
+			# target_local_pos directly - the target's position relative
+			# to the hull's ORIGIN, not to the weapon's own (usually
+			# off-center) mount position - which is only the correct aim
+			# direction for a weapon sitting exactly at the hull's center.
+			# Every other weapon (nearly all of them) aimed with a
+			# permanent, never-converging angular error proportional to
+			# its offset from hull-center and inversely proportional to
+			# target distance (worse up close), so angle_to_target could
+			# sit well above the 0.26 rad firing gate forever - a fully
+			# independently-traversing pintle weapon that visibly slews
+			# toward a target and then simply never actually fires.
 			var target_local_pos = get_parent().to_local(target_pos)
-			var local_dir = target_local_pos.normalized()
+			var local_dir = (target_local_pos - position).normalized()
 			var target_local_basis = _looking_at_safe(local_dir)
 
 			# Gradually rotate local basis towards target using Quaternions

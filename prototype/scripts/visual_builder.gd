@@ -146,15 +146,33 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 	var monolithic_mesh = _part(type_id)
 	if monolithic_mesh:
 		var inst = _mesh_inst(monolithic_mesh, base_color)
-		inst.position = Vector3(0, base_size.y / 2.0, 0)
 		inst.rotation.y = deg_to_rad(90.0) # TripoSG native orientation offset
-		# We scale the mesh uniformly so its largest dimension matches the largest dimension 
+		# We scale the mesh uniformly so its largest dimension matches the largest dimension
 		# defined in base_size. This prevents squishing/stretching while ensuring it fits the scale curve.
-		var aabb = monolithic_mesh.get_aabb().size
+		var aabb = monolithic_mesh.get_aabb()
 		var max_target = max(base_size.x, max(base_size.y, base_size.z))
-		var max_authored = max(aabb.x, max(aabb.y, aabb.z))
+		var max_authored = max(aabb.size.x, max(aabb.size.y, aabb.size.z))
 		var fit_scale = max_target / max_authored if max_authored > 0.0 else 1.0
 		inst.scale = Vector3(fit_scale, fit_scale, fit_scale) * _monolithic_tweak_scale(type_id, tweaks, inst.rotation)
+
+		# Mounting-gap fix: the old `Vector3(0, base_size.y / 2.0, 0)` assumed
+		# every authored mesh was perfectly centered on its own origin AND
+		# that its natural (post-scale) height exactly matched the catalog's
+		# target height - true for almost none of them (checked via a
+		# headless AABB dump across several parts: most are already
+		# bottom-anchored near their own local origin already, e.g.
+		# sensor_suite's aabb.position.y is -0.025 against a 1.32-unit tall
+		# mesh, not -0.66; a few are height-centered but their largest
+		# dimension - the one fit_scale actually matches - is a different
+		# axis). That mismatch left the mesh's REAL bottom floating above
+		# the module's local origin (where _place_weapon() flush-mounts it
+		# against the hull surface) by anywhere from a few cm up to over a
+		# meter for sensor_suite's mast - "noticeable gaps beneath most
+		# modules." Using the mesh's own actual AABB minimum Y (scaled by
+		# the same fit_scale) instead puts its real bottom exactly on the
+		# module's origin regardless of how the source mesh happens to be
+		# centered.
+		inst.position = Vector3(0, -aabb.position.y * fit_scale, 0)
 
 		# Animation pivot. battle_unit.gd and auto_weapon.gd animate moving
 		# parts by looking up a child node BY NAME ("WingPivot", "RotorBlades",
