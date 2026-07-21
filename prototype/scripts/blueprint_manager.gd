@@ -1,4 +1,5 @@
 extends Node
+const ModuleDataResource = preload("res://scripts/module_data.gd")
 
 # Bumped only when the blueprint JSON schema changes in a way that could
 # silently mis-load older saves (not for every new field - new fields
@@ -71,6 +72,14 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 				"mount_style": child.get_meta("mount_style", ""),
 				"mount_normal": _vec3_to_dict(child.get_meta("mount_normal", Vector3.UP)),
 				"facet": child.get_meta("facet", ""),
+				# Chirality. A left-side leg/engine/wing is the REFLECTION of
+				# its right-side twin, not a second copy, and that reflection
+				# lives on the module's visual children (see
+				# module_placer.gd's _apply_mirror_flip). It was never
+				# serialized, so every mirrored part came back unmirrored the
+				# moment a design was saved and reloaded - or fielded in a
+				# match, which rebuilds from this same dictionary.
+				"scale_flip_x": bool(child.get_meta("scale_flip_x", false)),
 				"tweaks": data.tweaks if "tweaks" in data else {},
 				"stats": {
 					"hp": data.get_hp(),
@@ -342,7 +351,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	hull.name = "Hull"
 	
 	# Set metadata
-	hull.set_meta("base_hull_size", catalog_data.size)
+	hull.set_meta("base_hull_size", catalog_data.get("size", Vector3.ONE))
 	var hull_scale_dict = blueprint_data.get("hull_scale", {"x": 1.0, "y": 1.0, "z": 1.0})
 	var hull_scale = Vector3(hull_scale_dict.x, hull_scale_dict.y, hull_scale_dict.z)
 	hull.set_meta("hull_scale", hull_scale)
@@ -390,15 +399,24 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		if hull_type == "interceptor_hull" and abs(nose_taper - 1.0) > 0.001:
 			authored_hull_mesh = HullDeformScript.apply_nose_taper(authored_hull_mesh, nose_taper)
 		phys_mesh.mesh = authored_hull_mesh
-		phys_mesh.scale = hull_scale * armor_bulk
-		phys_mesh.rotation.y = deg_to_rad(ModuleCatalogScript.get_hull_visual_yaw_offset_deg(hull_type))
+
+		# Shared with module_placer.gd's update_hull_appearance() so a design
+		# looks and collides identically whether it was just built in the lab
+		# or reconstructed from a saved blueprint. These two used to compute
+		# the orientation and fit separately and disagree.
+		var fit = ModuleCatalogScript.get_hull_mesh_fit(hull_type, authored_hull_mesh, hull_scale * armor_bulk)
+		phys_mesh.rotation = fit["rotation"]
+		phys_mesh.scale = fit["scale"]
+		phys_mesh.position = fit["position"]
 	else:
 		var box = BoxMesh.new()
-		box.size = catalog_data.size * hull_scale * armor_bulk
+		box.size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
 		phys_mesh.mesh = box
 
-	# PhysicsMesh is hidden in battle, only visible in designer
-	phys_mesh.visible = is_designer
+	# Never drawn - it duplicates the visual MeshInstance3D exactly, so
+	# showing it (which the designer used to do) only produced z-fighting
+	# against an untextured copy of the same hull.
+	phys_mesh.visible = false
 	hull.add_child(phys_mesh)
 
 	# MeshInstance3D (visual mesh, renamed/copied visual representation)
@@ -407,44 +425,81 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	mesh_inst.mesh = phys_mesh.mesh
 	mesh_inst.scale = phys_mesh.scale
 	mesh_inst.rotation = phys_mesh.rotation
+	mesh_inst.position = phys_mesh.position
 	hull.add_child(mesh_inst)
 
 	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
-	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
-	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.size * hull_scale * armor_bulk)
+	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
+	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	
 	# Re-create Hull's CollisionShape3D (only in designer)
 	if is_designer:
+		# Same shape the Design Lab builds for a freshly placed hull (see
+		# module_placer.gd's _place_hull_from_ui): an axis-aligned box of the
+		# catalog size, NOT rotated to match the mesh's orientation
+		# correction. This used to be a convex hull of the authored mesh
+		# instead, which meant `shape is BoxShape3D` was false and every
+		# caller reading the hull's dimensions off this shape
+		# (update_locomotion, armor auto-fit, _reclassify_module_after_drag)
+		# silently fell back to a hardcoded 4 x 1 x 6 - so a loaded blueprint
+		# mounted its wheels and armor to different dimensions than the same
+		# design freshly built.
 		var col = CollisionShape3D.new()
 		col.name = "CollisionShape3D"
-		if authored_hull_mesh:
-			col.shape = authored_hull_mesh.create_convex_shape()
-			col.scale = hull_scale * armor_bulk
-			col.rotation = phys_mesh.rotation
-		else:
-			col.scale = Vector3.ONE
-			var col_box = BoxShape3D.new()
-			col_box.size = catalog_data.size * hull_scale * armor_bulk
-			col.shape = col_box
-			col.rotation = phys_mesh.rotation
+		col.scale = Vector3.ONE
+		col.rotation = Vector3.ZERO
+		var col_box = BoxShape3D.new()
+		col_box.size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
+		col.shape = col_box
 		hull.add_child(col)
 	
 	parent_node.add_child(hull)
-	
-	# Raise hull height if wheels are present so they touch the ground (Y=0)
-	var wheels_offset = 0.0
+
+	# Raise hull height if wheels are present so they touch the ground (Y=0).
+	#
+	# Locomotion grounding fix (test arena "vehicle slides on its belly"):
+	# this used to be a standalone formula that only special-cased
+	# wheels/legs/anti_grav and gave every other locomotion type (including
+	# tracked_treads, rhomboid_treads, screw_drive, hover_engine) ZERO lift -
+	# so a battle-spawned unit's hull (and everything mounted below it) sat
+	# right at ground level, and the running-gear chassis + wheels/treads
+	# module_placer.gd's update_locomotion() builds below the hull (per
+	# ModuleCatalog.get_running_gear_size()) clipped straight through the
+	# terrain. Now mirrors update_locomotion()'s own running-gear-aware
+	# math exactly, so a design sits identically whether it was just built
+	# in the Design Lab or reconstructed here for a battle spawn.
 	var locomotion = blueprint_data.get("locomotion", {})
 	var loc_type = locomotion.get("type_id", "")
 	var settings = locomotion.get("settings", {})
-	if loc_type == "wheels":
-		var wheel_size = settings.get("size", 1.0)
-		wheels_offset = 0.8 * wheel_size
-	elif loc_type == "legs":
-		wheels_offset = 1.6 * settings.get("size", 1.0)
-	elif loc_type == "anti_grav":
-		wheels_offset = 0.4 * settings.get("size", 1.0)
-		
-	hull.position = Vector3(0, (catalog_data.size.y * hull_scale.y) / 2.0 + wheels_offset, 0)
+	var hull_size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
+	var running_gear_size = Vector3.ZERO
+	if ModuleCatalog.needs_running_gear(loc_type):
+		running_gear_size = ModuleCatalog.get_running_gear_size(hull_size)
+		var RunningGearBuilder = load("res://scripts/visual_builder.gd")
+		# collision_layer 0 in battle mode (is_designer's hull is a real
+		# StaticBody3D on layer 1 for click-selection; a battle-spawned hull
+		# is a plain Node3D under a CharacterBody3D whose collision_mask is
+		# 1 "Ground only" - a layer-1 chassis right at its own unit's feet
+		# would read as terrain and the unit would perpetually push itself
+		# off its own running gear). battle_unit.gd's own CollisionShape3D
+		# is the real physics collider for this chassis in battle.
+		var gear_layer = 1 if is_designer else 0
+		var gear_body: StaticBody3D = RunningGearBuilder.build_running_gear(hull, running_gear_size, catalog_data.color, gear_layer)
+		# Flush the chassis's top against the hull's underside, same as
+		# update_locomotion()'s placement.
+		gear_body.position = Vector3(0, -hull_size.y / 2.0 - running_gear_size.y / 2.0, 0)
+
+	if running_gear_size.y > 0.0:
+		hull.position = Vector3(0, (catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + running_gear_size.y, 0)
+	else:
+		var wheels_offset = 0.0
+		if loc_type == "wheels" or loc_type == "omni_wheels":
+			wheels_offset = 0.8 * settings.get("size", 1.0)
+		elif loc_type == "legs":
+			wheels_offset = 1.6 * settings.get("size", 1.0)
+		elif loc_type == "anti_grav":
+			wheels_offset = 0.4 * settings.get("size", 1.0)
+		hull.position = Vector3(0, (catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + wheels_offset, 0)
 	
 	# Spawn modules
 	var modules = blueprint_data.get("modules", [])
@@ -471,21 +526,21 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		var new_module = Node3D.new()
 		
 		var VisualBuilder = preload("res://scripts/visual_builder.gd")
-		VisualBuilder.build_visual(type_id, new_module, mod_catalog_data.size, mod_catalog_data.color, mod.get("tweaks", {}))
+		VisualBuilder.build_visual(type_id, new_module, mod_catalog_data.get("size", Vector3.ONE), mod_catalog_data.color, mod.get("tweaks", {}))
 		
 		if is_designer:
 			var static_body = StaticBody3D.new()
 			static_body.collision_layer = 2 # Modules layer
 			static_body.collision_mask = 0
-			static_body.position = Vector3(0, mod_catalog_data.size.y / 2.0, 0)
+			static_body.position = Vector3(0, mod_catalog_data.get("size", Vector3.ONE).y / 2.0, 0)
 			var collision_shape = CollisionShape3D.new()
 			var col_box_mod = BoxShape3D.new()
-			col_box_mod.size = mod_catalog_data.size
+			col_box_mod.size = mod_catalog_data.get("size", Vector3.ONE)
 			collision_shape.shape = col_box_mod
 			static_body.add_child(collision_shape)
 			new_module.add_child(static_body)
 		
-		var m_data = ModuleData.new()
+		var m_data = ModuleDataResource.new()
 		m_data.type_id = type_id
 		m_data.module_name = mod_catalog_data.name
 		m_data.category = category
@@ -529,5 +584,26 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# Force mesh deformation rebuild (also re-applies mount hardware,
 		# see rebuild_visual()'s mount_style check)
 		VisualBuilder.rebuild_visual(new_module)
-		
+
+		# Re-apply chirality AFTER rebuild_visual, which recreates the very
+		# children the reflection is applied to. Kept in sync with
+		# module_placer.gd's _apply_mirror_flip() - same module-space X
+		# reflection, same "_mirrored" idempotency marker - so a design looks
+		# identical whether it was just built in the lab or reconstructed
+		# here for a save, a load, or a battle spawn.
+		if bool(mod.get("scale_flip_x", false)):
+			new_module.set_meta("scale_flip_x", true)
+			_apply_mirror_flip_to(new_module)
+
 	return hull
+
+const _MIRROR_X := Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1))
+
+func _apply_mirror_flip_to(module: Node3D):
+	for child in module.get_children():
+		if child is CollisionObject3D or not (child is Node3D):
+			continue
+		if child.get_meta("_mirrored", false):
+			continue
+		child.transform = Transform3D(_MIRROR_X * child.transform.basis, _MIRROR_X * child.transform.origin)
+		child.set_meta("_mirrored", true)

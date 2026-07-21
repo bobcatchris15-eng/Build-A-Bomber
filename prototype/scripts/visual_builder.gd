@@ -8,14 +8,88 @@ class_name VisualBuilder
 # both the authored and procedural mesh - only the `.mesh` source differs.
 
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
+const GlobalConfigScript = preload("res://scripts/global_config.gd")
 
 static func _part(part_name: String) -> Mesh:
 	return MeshAssetLoader.get_part_mesh(part_name)
+
+# Procedural running-gear slab (locomotion grounding fix). A flat dark-metal
+# chassis that sits under the hull, sized to the hull's XZ with a small
+# inset, with the wheels/treads/legs/screws/hover-pads mounting to its
+# sides instead of to the hull's bare underside. Two real jobs at once:
+#
+# 1. Visual chassis: previously, side-mount locomotion (wheels/treads/etc.)
+#    were placed straight against the hull skin, with the hull's authored
+#    mesh often leaving a visible gap between the part and the hull surface
+#    on hulls whose underside doesn't sit at the catalog bottom (per the
+#    underside_y_bias hack). A real chassis reads as a deliberate
+#    intermediary between hull and running gear.
+# 2. Physics grounding: the CharacterBody3D's collider in battle_unit.gd
+#    was sized to the hull only, so a wheeled unit sat on the hull's
+#    underside with wheels dangling in midair (test arena: "vehicle slides
+#    on its belly"). The unit's collider now extends to include the
+#    running-gear height (see battle_unit.gd), and the running gear's
+#    StaticBody3D carries the matching physics shape so designer-mode ray
+#    casts and click-to-select also see a flat bottom, not a hull-bottom.
+#
+# Returns the StaticBody3D so callers can re-position or query it.
+# The body is returned at the parent's local origin - callers are
+# responsible for translating it to the right hull-local Y (conventionally
+# -hull_size.y/2 - dimensions.y/2, so the chassis's TOP sits flush with
+# the hull's underside and the chassis hangs BELOW the hull).
+#
+# collision_layer defaults to 1 (matching the designer-mode hull's own
+# StaticBody3D layer, for click/raycast selection) but MUST be 0 when built
+# under a battle_unit.gd CharacterBody3D: that body's collision_mask is 1
+# ("Ground only"), so a layer-1 RunningGear sitting right at its own feet
+# reads as terrain and it perpetually pushes itself off its own chassis -
+# the battle-arena "constantly bouncing" bug. battle_unit.gd's own
+# CollisionShape3D already provides the real physics collider in that case;
+# this body's collider is purely for the designer-raycast/dimension-lookup
+# use, so it can safely be collision-free there.
+static func build_running_gear(parent_node: Node3D, dimensions: Vector3, base_color: Color, collision_layer: int = 1) -> StaticBody3D:
+	var body = StaticBody3D.new()
+	body.name = "RunningGear"
+	body.collision_layer = collision_layer
+	body.collision_mask = 0
+	# Hull-local: body returned at the parent's local origin; the caller
+	# translates it. Keeps the helper decoupled from any specific hull's
+	# dimensions (so the same call works in module_placer's designer-mode
+	# update_locomotion and in blueprint_manager's battle-mode
+	# reconstruct_vehicle, which both know their own hull size).
+
+	# Visual: dark brushed-metal chassis. Built locally rather than via
+	# _mesh_inst() because the chassis wants a real metallic material, not
+	# the flat-color one _mesh_inst() produces.
+	var box = BoxMesh.new()
+	box.size = dimensions
+	var mesh_inst = MeshInstance3D.new()
+	mesh_inst.mesh = box
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = base_color.darkened(0.35)
+	mat.metallic = 0.6
+	mat.roughness = 0.5
+	mesh_inst.material_override = mat
+	body.add_child(mesh_inst)
+
+	# Collider: matching box. Layer 1, mask 0 (same as hull - the unit's
+	# CharacterBody3D handles all terrain interaction; this is just
+	# designer-mode raycast + the static-body reference for any code that
+	# reads the chassis's own dimensions off its shape).
+	var col = CollisionShape3D.new()
+	var col_box = BoxShape3D.new()
+	col_box.size = dimensions
+	col.shape = col_box
+	body.add_child(col)
+
+	parent_node.add_child(body)
+	return body
 
 static func _mesh_inst(mesh: Mesh, color: Color, emission: Color = Color(0, 0, 0, 0), emission_energy: float = 0.0) -> MeshInstance3D:
 	var inst = MeshInstance3D.new()
 	inst.mesh = mesh
 	var mat = StandardMaterial3D.new()
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.albedo_color = color
 	if emission_energy > 0.0:
 		mat.emission_enabled = true
@@ -33,11 +107,88 @@ static func _fit_scale(target: Vector3, authored_base: Vector3) -> Vector3:
 		target.z / authored_base.z if authored_base.z > 0.0 else 1.0
 	)
 
+# Which monolithic authored parts get their mesh wrapped in a named animation
+# pivot, and under what name - see the pivot block in build_visual() below.
+#
+# Only types where rotating the WHOLE module is the correct motion are listed.
+# rotary_cannon is deliberately absent: its "BarrelCluster" pivot is meant to
+# spin the barrel ring while the mount stays put, and the authored mesh fuses
+# barrels and mount into one object - wrapping it would spin the entire gun on
+# its side, which is worse than leaving it static. That one needs the barrels
+# authored as a separate mesh before it can animate.
+const MONOLITHIC_ANIMATION_PIVOTS := {
+	"helicopter_rotors": "RotorBlades",
+	"ornithopter_wing": "WingPivot",
+	"naval_propeller": "PropBlades",
+	"ship_screw": "PropBlades",
+	"propeller_prop": "PropBlades",
+	"pusher_prop": "PropBlades",
+	"paddle_wheel": "PropBlades",
+}
+
 static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}):
-	# Clear any existing visual children
+	# Clear any existing visual children. Used to only free MeshInstance3D
+	# nodes, which silently leaked the Node3D animation pivots (WingPivot,
+	# and now BarrelCluster/RotorBlades/PropBlades) on every rebuild_visual()
+	# call (every Design Lab slider tweak) - each rebuild added a fresh pivot
+	# on top of the stale one instead of replacing it. Explicitly skips
+	# StaticBody3D: module_placer.gd's _place_weapon()/_place_locomotion()
+	# add the module's collision StaticBody3D as a sibling of whatever
+	# build_visual() built, ONCE, at placement time - rebuild_visual() never
+	# recreates it, so freeing it here would silently destroy the module's
+	# collision on the very next stat-tweak rebuild.
 	for child in parent_node.get_children():
-		if child is MeshInstance3D:
-			child.queue_free()
+		if child is StaticBody3D:
+			continue
+		child.queue_free()
+
+	# Try to load a monolithic authored mesh for this entire module first
+	var monolithic_mesh = _part(type_id)
+	if monolithic_mesh:
+		var inst = _mesh_inst(monolithic_mesh, base_color)
+		inst.position = Vector3(0, base_size.y / 2.0, 0)
+		inst.rotation.y = deg_to_rad(90.0) # TripoSG native orientation offset
+		# We scale the mesh uniformly so its largest dimension matches the largest dimension 
+		# defined in base_size. This prevents squishing/stretching while ensuring it fits the scale curve.
+		var aabb = monolithic_mesh.get_aabb().size
+		var max_target = max(base_size.x, max(base_size.y, base_size.z))
+		var max_authored = max(aabb.x, max(aabb.y, aabb.z))
+		var fit_scale = max_target / max_authored if max_authored > 0.0 else 1.0
+		inst.scale = Vector3(fit_scale, fit_scale, fit_scale) * _monolithic_tweak_scale(type_id, tweaks, inst.rotation)
+
+		# Animation pivot. battle_unit.gd and auto_weapon.gd animate moving
+		# parts by looking up a child node BY NAME ("WingPivot", "RotorBlades",
+		# "PropBlades") - names the procedural build creates. A monolithic
+		# authored mesh has no such child, so those lookups came back null and
+		# the motion silently stopped: ornithopter wings in particular never
+		# flapped at all, since that arm isn't behind the
+		# enable_animated_monolithic_parts flag the others sit behind.
+		#
+		# Wrap the mesh in a correctly-named pivot rather than bolting a second
+		# procedural copy of the blades on top (what the flag does) - the
+		# authored mesh already sculpts them, so a second copy would double the
+		# geometry, which is exactly the caveat _attach_moving_parts() warns
+		# about. A WRAPPER, not a rename: the animation writes whole rotations
+		# onto the pivot (pivot.rotation.x = ...), which would otherwise
+		# clobber the mesh's own orientation offset.
+		var pivot_name = MONOLITHIC_ANIMATION_PIVOTS.get(type_id, "")
+		if pivot_name != "":
+			var pivot = Node3D.new()
+			pivot.name = pivot_name
+			pivot.add_child(inst)
+			parent_node.add_child(pivot)
+		else:
+			parent_node.add_child(inst)
+		# Feature-flagged (GlobalConfig.enable_animated_monolithic_parts,
+		# default off): attach the same named moving-part pivots (barrels,
+		# rotors) the procedural fallback below builds, so a detailed
+		# monolithic body doesn't lose animation just because it replaced
+		# the procedural base mesh. Off by default so this can be A/B tested
+		# without changing today's shipped behavior.
+		if GlobalConfigScript.enable_animated_monolithic_parts:
+			_attach_moving_parts(type_id, parent_node, base_size, base_color, tweaks)
+		return
+
 
 	if type_id == "basic_cannon":
 		# Turret Base
@@ -159,30 +310,13 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			base.position = Vector3(0, base_cyl.height / 2.0, 0)
 		parent_node.add_child(base)
 
-		# barrel count cluster
-		var b_count = int(tweaks.get("barrel_count", 6.0))
-		var base_h = base_size.y * 0.3
-		for i in range(b_count):
-			var angle = i * (2.0 * PI / b_count)
-			var barrel_mesh = _part("barrel_thin")
-			var barrel: MeshInstance3D
-			if barrel_mesh:
-				barrel = _mesh_inst(barrel_mesh, Color.BLACK)
-				barrel.scale = Vector3(1.0, (base_size.z * 0.8) / 1.0, 1.0)
-			else:
-				barrel = MeshInstance3D.new()
-				var barrel_cyl = CylinderMesh.new()
-				barrel_cyl.top_radius = 0.03
-				barrel_cyl.bottom_radius = 0.03
-				barrel_cyl.height = base_size.z * 0.8
-				barrel.mesh = barrel_cyl
-				var barrel_mat = StandardMaterial3D.new()
-				barrel_mat.albedo_color = Color.BLACK
-				barrel.material_override = barrel_mat
-			var radius_offset = 0.06
-			barrel.position = Vector3(cos(angle) * radius_offset, base_h + 0.15 + sin(angle) * radius_offset, -base_size.z * 0.25)
-			barrel.rotation = Vector3(PI / 2, 0, 0)
-			parent_node.add_child(barrel)
+		# barrel count cluster - built under a named "BarrelCluster" pivot
+		# (not directly under parent_node) so it can spin independently of
+		# the static base/mount (see auto_weapon.gd's rotary_cannon spin-up,
+		# which used to rotate the whole weapon node for lack of an isolated
+		# target) and so the same pivot can be reattached under a monolithic
+		# authored body by _attach_moving_parts() below.
+		_attach_rotary_barrels(parent_node, base_size, tweaks)
 
 	elif type_id == "gauss_railgun":
 		var rail_mesh = _part("rail_array")
@@ -873,24 +1007,8 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			mast.position = Vector3(0, base_size.y / 2.0, 0)
 		parent_node.add_child(mast)
 
-		# Spinning radar grid dish (wide cylinder or curved plane)
-		var dish = MeshInstance3D.new()
-		dish.name = "RadarDish"
-		var dish_cyl = CylinderMesh.new()
-		# Proportional to the mast's own footprint, not a fixed absolute size -
-		# the old hardcoded 0.7 radius towered over the thin 0.5-wide mast base
-		# (nearly 3x its footprint), reading as a broken oversized disc rather
-		# than a dish.
-		dish_cyl.top_radius = base_size.x * 0.6
-		dish_cyl.bottom_radius = base_size.x * 0.6
-		dish_cyl.height = 0.06
-		dish.mesh = dish_cyl
-		var dish_mat = StandardMaterial3D.new()
-		dish_mat.albedo_color = base_color
-		dish.material_override = dish_mat
-		dish.position = Vector3(0, base_size.y, 0)
-		dish.rotation = Vector3(PI / 2 - 0.2, 0, 0)
-		parent_node.add_child(dish)
+		# Spinning radar grid dish
+		_attach_radar_dish(parent_node, base_size, base_color)
 
 	elif type_id == "logistics_tank":
 		# Horizontal cylindrical tank
@@ -1064,6 +1182,94 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 
 	# Apply deformations to the newly constructed meshes based on the tweaks
 	_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
+
+
+# Dispatcher for GlobalConfig.enable_animated_monolithic_parts: attaches the
+# same named moving-part pivots the procedural fallback builds, on top of a
+# monolithic authored body. No-op for any type_id without a moving-part
+# helper - a monolithic body renders exactly as it did before this feature
+# unless it's one of the types listed here.
+#
+# CAVEAT worth checking visually once this is toggled on: unlike a cannon
+# barrel (which pokes out beyond its housing either way), a TripoSG-authored
+# monolithic mesh for a rotor/propeller/dish/wing type may already sculpt
+# the blades/dish/membrane INTO the single mesh. If so, attaching a second
+# procedural copy on top will double the geometry rather than animate the
+# existing one - inspect each type after enabling the flag and drop its
+# _attach_moving_parts() case below if that's what's happening (the fix at
+# that point is authoring the monolithic mesh WITHOUT the moving piece, not
+# a code change here).
+static func _attach_moving_parts(type_id: String, parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary):
+	match type_id:
+		"rotary_cannon":
+			_attach_rotary_barrels(parent_node, base_size, tweaks)
+		"helicopter_rotors":
+			_attach_rotor_blades(parent_node, base_size)
+		"ornithopter_wing":
+			_attach_ornithopter_pivot(parent_node, base_size, base_color)
+		"sensor_suite":
+			_attach_radar_dish(parent_node, base_size, base_color)
+		"naval_propeller":
+			_attach_naval_propeller_blades(parent_node, base_size)
+		"ship_screw":
+			_attach_ship_screw_blades(parent_node, base_size)
+		"paddle_wheel":
+			_attach_paddle_wheel_blades(parent_node, base_size, base_color)
+		"propeller_prop":
+			_attach_propeller_blades(parent_node, base_size, base_color, false)
+		"pusher_prop":
+			_attach_propeller_blades(parent_node, base_size, base_color, true)
+
+
+# Barrel ring for rotary_cannon, wrapped under a "BarrelCluster" pivot so it
+# can spin independently of the (static) base/mount - see auto_weapon.gd.
+static func _attach_rotary_barrels(parent_node: Node3D, base_size: Vector3, tweaks: Dictionary):
+	var pivot = Node3D.new()
+	pivot.name = "BarrelCluster"
+	parent_node.add_child(pivot)
+
+	var b_count = int(tweaks.get("barrel_count", 6.0))
+	var base_h = base_size.y * 0.3
+	for i in range(b_count):
+		var angle = i * (2.0 * PI / b_count)
+		var barrel_mesh = _part("barrel_thin")
+		var barrel: MeshInstance3D
+		if barrel_mesh:
+			barrel = _mesh_inst(barrel_mesh, Color.BLACK)
+			barrel.scale = Vector3(1.0, (base_size.z * 0.8) / 1.0, 1.0)
+		else:
+			barrel = MeshInstance3D.new()
+			var barrel_cyl = CylinderMesh.new()
+			barrel_cyl.top_radius = 0.03
+			barrel_cyl.bottom_radius = 0.03
+			barrel_cyl.height = base_size.z * 0.8
+			barrel.mesh = barrel_cyl
+			var barrel_mat = StandardMaterial3D.new()
+			barrel_mat.albedo_color = Color.BLACK
+			barrel.material_override = barrel_mat
+		var radius_offset = 0.06
+		barrel.position = Vector3(cos(angle) * radius_offset, base_h + 0.15 + sin(angle) * radius_offset, -base_size.z * 0.25)
+		barrel.rotation = Vector3(PI / 2, 0, 0)
+		pivot.add_child(barrel)
+
+
+# Spinning radar grid dish for sensor_suite, named "RadarDish" (already spun
+# directly by auto_weapon.gd - see get_node_or_null("RadarDish") there, no
+# rename needed since it was never nested under another pivot).
+static func _attach_radar_dish(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	var dish = MeshInstance3D.new()
+	dish.name = "RadarDish"
+	var dish_cyl = CylinderMesh.new()
+	dish_cyl.top_radius = base_size.x * 0.6
+	dish_cyl.bottom_radius = base_size.x * 0.6
+	dish_cyl.height = 0.06
+	dish.mesh = dish_cyl
+	var dish_mat = StandardMaterial3D.new()
+	dish_mat.albedo_color = base_color
+	dish.material_override = dish_mat
+	dish.position = Vector3(0, base_size.y, 0)
+	dish.rotation = Vector3(PI / 2 - 0.2, 0, 0)
+	parent_node.add_child(dish)
 
 
 static func _build_wheels(parent_node: Node3D, base_size: Vector3):
@@ -1268,27 +1474,39 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3):
 	shaft.position = Vector3(0, shaft_cyl.height / 2.0, 0)
 	parent_node.add_child(shaft)
 
-	# Cross Blades
+	_attach_rotor_blades(parent_node, base_size)
+
+
+# Cross-blade rotor for helicopter_rotors, wrapped under a "RotorBlades"
+# pivot (previously two independently-named siblings, "BladeRotator"/
+# "BladeRotator2" - battle_unit.gd used to reach in via get_child(0), which
+# only worked because they happened to be the first children added; now a
+# single named pivot holds both, robust regardless of body/sibling order).
+static func _attach_rotor_blades(parent_node: Node3D, base_size: Vector3):
+	var pivot = Node3D.new()
+	pivot.name = "RotorBlades"
+	var shaft_h = base_size.y * 0.8
+	pivot.position = Vector3(0, shaft_h, 0)
+	parent_node.add_child(pivot)
+
+	var blade_mat = StandardMaterial3D.new()
+	blade_mat.albedo_color = Color(0.1, 0.1, 0.1)
+
 	var blades = MeshInstance3D.new()
-	blades.name = "BladeRotator"
 	var blade_mesh = BoxMesh.new()
 	blade_mesh.size = Vector3(base_size.x, 0.03, 0.2)
 	blades.mesh = blade_mesh
-	var blade_mat = StandardMaterial3D.new()
-	blade_mat.albedo_color = Color(0.1, 0.1, 0.1)
 	blades.material_override = blade_mat
-	blades.position = Vector3(0, shaft_cyl.height, 0)
-	parent_node.add_child(blades)
+	pivot.add_child(blades)
 
 	# Second perpendicular blade
 	var blade2 = MeshInstance3D.new()
-	blade2.name = "BladeRotator2"
 	var blade_mesh2 = BoxMesh.new()
 	blade_mesh2.size = Vector3(0.2, 0.03, base_size.x)
 	blade2.mesh = blade_mesh2
 	blade2.material_override = blade_mat
-	blade2.position = Vector3(0, shaft_cyl.height + 0.01, 0)
-	parent_node.add_child(blade2)
+	blade2.position = Vector3(0, 0.01, 0)
+	pivot.add_child(blade2)
 
 
 static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_color: Color):
@@ -1466,9 +1684,15 @@ static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, bas
 	shoulder.material_override = joint_mat
 	parent_node.add_child(shoulder)
 
-	# The membrane itself lives under a pivot node so battle_unit.gd's
-	# flap animation has a single, clean rotation target (same pattern as
-	# helicopter_rotors spinning its own first child).
+	_attach_ornithopter_pivot(parent_node, base_size, base_color)
+
+
+# The membrane/tip/ribs live under a "WingPivot" pivot node so battle_unit.gd's
+# flap animation has a single, clean rotation target (same pattern as
+# helicopter_rotors spinning its own RotorBlades pivot). Split out from
+# _build_ornithopter_wing (which additionally builds the static shoulder
+# joint) so it can also be attached on top of a monolithic authored body.
+static func _attach_ornithopter_pivot(parent_node: Node3D, base_size: Vector3, base_color: Color):
 	var pivot = Node3D.new()
 	pivot.name = "WingPivot"
 	pivot.position = Vector3(base_size.x * 0.2, base_size.y * 0.15, 0)
@@ -1529,6 +1753,16 @@ static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base
 	housing.rotation = Vector3(PI / 2.0, 0, 0)
 	parent_node.add_child(housing)
 
+	_attach_naval_propeller_blades(parent_node, base_size)
+
+
+# 3-blade stern fan, wrapped under a "PropBlades" pivot so it can spin
+# independently of the (static) housing.
+static func _attach_naval_propeller_blades(parent_node: Node3D, base_size: Vector3):
+	var pivot = Node3D.new()
+	pivot.name = "PropBlades"
+	parent_node.add_child(pivot)
+
 	for i in range(3):
 		var blade = MeshInstance3D.new()
 		var blade_box = BoxMesh.new()
@@ -1539,7 +1773,7 @@ static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base
 		blade.material_override = blade_mat
 		blade.position = Vector3(0, 0, base_size.z * 0.4)
 		blade.rotate_z(i * (TAU / 3.0))
-		parent_node.add_child(blade)
+		pivot.add_child(blade)
 
 
 static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, base_color: Color):
@@ -1731,6 +1965,19 @@ static func _build_propeller(parent_node: Node3D, base_size: Vector3, base_color
 	hub.position = Vector3(0, 0, facing * base_size.z * 0.3)
 	parent_node.add_child(hub)
 
+	_attach_propeller_blades(parent_node, base_size, base_color, pusher)
+
+
+# 3-blade tractor/pusher fan, wrapped under a "PropBlades" pivot so it can
+# spin (about local Z, matching the rotate_z fan arrangement below)
+# independently of the (static) hub.
+static func _attach_propeller_blades(parent_node: Node3D, base_size: Vector3, base_color: Color, pusher: bool):
+	var facing = 1.0 if pusher else -1.0
+	var pivot = Node3D.new()
+	pivot.name = "PropBlades"
+	pivot.position = Vector3(0, 0, facing * base_size.z * 0.55)
+	parent_node.add_child(pivot)
+
 	var blade_mat = StandardMaterial3D.new()
 	blade_mat.albedo_color = Color.SILVER
 	var blade_mesh = _build_tapered_blade_mesh(0.03, 0.14, 0.045, base_size.x * 0.9)
@@ -1738,9 +1985,8 @@ static func _build_propeller(parent_node: Node3D, base_size: Vector3, base_color
 		var blade = MeshInstance3D.new()
 		blade.mesh = blade_mesh
 		blade.material_override = blade_mat
-		blade.position = Vector3(0, 0, facing * base_size.z * 0.55)
 		blade.rotate_z(i * (TAU / 3.0))
-		parent_node.add_child(blade)
+		pivot.add_child(blade)
 
 
 static func _build_paddle_wheel(parent_node: Node3D, base_size: Vector3, base_color: Color):
@@ -1762,6 +2008,17 @@ static func _build_paddle_wheel(parent_node: Node3D, base_size: Vector3, base_co
 	disc.rotation = Vector3(0, 0, PI / 2.0)
 	parent_node.add_child(disc)
 
+	_attach_paddle_wheel_blades(parent_node, base_size, base_color)
+
+
+# 6 radial paddle blades, wrapped under a "PropBlades" pivot so they can spin
+# (about local X, matching the rotate_x fan arrangement below) independently
+# of the (static) disc.
+static func _attach_paddle_wheel_blades(parent_node: Node3D, base_size: Vector3, base_color: Color):
+	var pivot = Node3D.new()
+	pivot.name = "PropBlades"
+	parent_node.add_child(pivot)
+
 	var paddle_mat = StandardMaterial3D.new()
 	paddle_mat.albedo_color = base_color.darkened(0.35)
 	for i in range(6):
@@ -1772,7 +2029,7 @@ static func _build_paddle_wheel(parent_node: Node3D, base_size: Vector3, base_co
 		paddle.material_override = paddle_mat
 		paddle.rotation = Vector3(0, 0, PI / 2.0)
 		paddle.rotate_x(i * (TAU / 6.0))
-		parent_node.add_child(paddle)
+		pivot.add_child(paddle)
 
 
 static func _build_ship_screw(parent_node: Node3D, base_size: Vector3, base_color: Color):
@@ -1793,6 +2050,17 @@ static func _build_ship_screw(parent_node: Node3D, base_size: Vector3, base_colo
 	hub.rotation = Vector3(PI / 2.0, 0, 0)
 	parent_node.add_child(hub)
 
+	_attach_ship_screw_blades(parent_node, base_size)
+
+
+# 4 twisted (pitched) blades, wrapped under a "PropBlades" pivot so they can
+# spin (about local Z, matching the rotate_z fan arrangement below)
+# independently of the (static) hub.
+static func _attach_ship_screw_blades(parent_node: Node3D, base_size: Vector3):
+	var pivot = Node3D.new()
+	pivot.name = "PropBlades"
+	parent_node.add_child(pivot)
+
 	var blade_mat = StandardMaterial3D.new()
 	blade_mat.albedo_color = Color.SILVER
 	var blade_mesh = _build_tapered_blade_mesh(0.025, base_size.x * 0.38, base_size.x * 0.12, base_size.x * 0.55)
@@ -1802,218 +2070,94 @@ static func _build_ship_screw(parent_node: Node3D, base_size: Vector3, base_colo
 		blade.material_override = blade_mat
 		blade.rotation.x = 0.5
 		blade.rotate_z(i * (TAU / 4.0))
-		parent_node.add_child(blade)
+		pivot.add_child(blade)
 
 
-# MOUNTING_AND_ARMOR_SPEC.md #3: generic (not per-weapon-type-bespoke) mount
-# hardware, added on top of whatever build_visual() already constructed for
-# this type_id. Column-axis model (per Chris, 2026-07-19): the click point
-# defines a column axis pointing from the click toward the hull's
-# longitudinal centerline; the weapon sits at the OUTER end of that column.
-# "turret" and "frame_built" add nothing extra - the tank cannon's existing
-# enclosed-turret look is correct as-is, and a frame-built weapon's
-# differentiation comes entirely from being built into the hull (no
-# column, no extra geometry). For "pintle" (the new catch-all independent-
-# traverse mount), the visual is a chunky post running along the column
-# direction, with a base plate at the hull end and the weapon sitting at
-# the far end. A column axis is treated as "vertical" if its dot with
-# world-UP is larger than its dot with any horizontal axis - draws a
-# standing post; otherwise draws a horizontal arm (same shape, rotated to
-# match the column).
-#
-# column_dir (local to parent_node's space) is the column direction
-# POINTING FROM THE HULL TOWARD THE WEAPON (i.e. away from the hull's
-# centerline). column_dir is normalized; zero-length is treated as UP.
-# column_length is the distance from the hull surface to the weapon.
-static func add_mount_hardware(parent_node: Node3D, mount_style: String, base_size: Vector3, column_dir: Vector3 = Vector3.UP, column_length: float = 0.0):
-	var old = parent_node.get_node_or_null("MountHardware")
-	if old:
-		parent_node.remove_child(old)
-		old.free()
-
-	if mount_style == "turret" or mount_style == "frame_built":
-		return
-
-	var n = column_dir.normalized() if column_dir.length() > 0.001 else Vector3.UP
-	# A column axis counts as "vertical" when world-UP is the dominant
-	# component (absolute Y is largest). Otherwise the column is treated
-	# as horizontal/sideways, including the diagonal case (corner click)
-	# where the column points diagonally through the hull - the post just
-	# tilts to match.
-	var is_vertical = abs(n.y) >= abs(n.x) and abs(n.y) >= abs(n.z)
-
-	var hardware = Node3D.new()
-	hardware.name = "MountHardware"
-	parent_node.add_child(hardware)
-
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.12, 0.12, 0.12)
-
-	# Effective post length: whatever column_length was provided, or fall
-	# back to a sensible default based on the weapon's own size so a small
-	# weapon on a tall column still reads as "mounted" without floating.
-	var effective_length = column_length if column_length > 0.01 else max(base_size.y * 1.5, 0.6)
-
-	if is_vertical:
-		# Vertical post (top/bottom click): the chunky column lives at
-		# the hull surface, with a base plate flush against whatever
-		# local surface the click hit. The post extends upward (or
-		# downward if n.y < 0) by effective_length. The weapon's own
-		# origin is already at the far end of the column (set by
-		# module_placer.gd's column-axis model) - the post just visually
-		# spans the gap, not the weapon.
-		var cyl = CylinderMesh.new()
-		var radius = max(0.06, base_size.x * 0.22)
-		cyl.top_radius = radius
-		cyl.bottom_radius = radius * 1.15
-		cyl.height = max(0.1, effective_length)
-		var post = MeshInstance3D.new()
-		post.mesh = cyl
-		post.material_override = mat
-		# Post spans from the hull surface to the weapon end. The weapon
-		# itself sits at distance effective_length along n from the hull
-		# surface; the post needs to span the SAME distance, with its
-		# center at effective_length/2 along -n.
-		post.position = -n * (effective_length * 0.5)
-		# Quaternion(UP, n) rotates the post's default up-axis to n -
-		# identity for n=UP (the original top-click case), 180 for
-		# n=DOWN (inverted post for a bottom click), smoothly tilted
-		# for any other vertical-leaning direction.
-		post.transform.basis = Basis(Quaternion(Vector3.UP, n))
-		hardware.add_child(post)
-
-		# Base plate at the hull end (the END the weapon is NOT at).
-		# Placed at -n * effective_length relative to the weapon.
-		hardware.add_child(_build_pintle_base_plate(n, base_size, -n * effective_length))
-	else:
-		# Horizontal/diagonal arm (side or corner click): the column
-		# axis lies mostly in the horizontal plane, so a single post
-		# isn't visually right (it'd be lying flat against the hull).
-		# Use a short bracket stub at the hull end, then a horizontal
-		# beam reaching out along n to the weapon - same chunky
-		# material as the vertical post, just oriented to the column.
-		var cyl = CylinderMesh.new()
-		var radius = max(0.05, base_size.x * 0.16)
-		cyl.top_radius = radius
-		cyl.bottom_radius = radius
-		cyl.height = max(0.1, effective_length)
-		var arm = MeshInstance3D.new()
-		arm.mesh = cyl
-		arm.material_override = mat
-		# Same position+rotation logic as the vertical post, just
-		# driven by a horizontal n.
-		arm.position = -n * (effective_length * 0.5)
-		arm.transform.basis = Basis(Quaternion(Vector3.UP, n))
-		hardware.add_child(arm)
-
-		# Base plate at the hull end.
-		hardware.add_child(_build_pintle_base_plate(n, base_size, -n * effective_length))
-
-# A base plate that conforms to the actual local surface (flat for a
-# top/bottom deck, tilted for a sloped glacis or similar), with a ring of
-# bolt greebles and a raised center hub so it reads as a real mounting
-# bracket rather than a bare disc.
-#
-# Design refinement from Chris: rather than trying to fit the plate flush
-# against the local surface angle everywhere (a thin flush plate can show
-# a visible gap at the rim if the real surface deviates from the assumed
-# normal at all), the plate is a genuinely chunky disc/short-column whose
-# BULK extends deep into the hull - any angle mismatch gets absorbed
-# inside that intersection instead of showing as a gap, so the plate
-# doesn't need to be geometrically perfect against every surface angle.
-# The disc is built asymmetrically: its outer (visible) face stays right
-# at the nominal flush position exactly as before, but it extends much
-# further inward than its outer profile would suggest. The hub/bolt ring
-# stay anchored to that same nominal surface position, so they still read
-# as sitting on top of the mount, visible - only the disc's own body is
-# deliberately over-buried.
-static func _build_pintle_base_plate(local_normal: Vector3, base_size: Vector3, flush_position: Vector3) -> Node3D:
-	var n = local_normal.normalized() if local_normal.length() > 0.001 else Vector3.UP
-	# Small residual embed for the whole assembly - avoids a hairline
-	# z-fighting seam even in the perfectly-flat/no-mismatch case.
-	var embed_depth = max(0.02, base_size.y * 0.05)
-
-	var plate_root = Node3D.new()
-	plate_root.name = "BasePlate"
-	# Quaternion(UP, n) is the shortest-arc rotation taking the plate's
-	# default "face points up" orientation to point along the real
-	# surface normal - identity when n IS up (the original flat-deck
-	# case), smoothly tilted for anything angled. One formula covers both,
-	# no separate "is this exactly flat" branch needed.
-	plate_root.transform = Transform3D(Basis(Quaternion(Vector3.UP, n)), flush_position - n * embed_depth)
-
-	var plate_radius = max(0.12, base_size.x * 0.42)
-	var plate_thickness = max(0.08, base_size.y * 0.14)
-	var plate_mat = StandardMaterial3D.new()
-	plate_mat.albedo_color = Color(0.16, 0.16, 0.17)
-
-	# Buried depth scales off the plate's own RADIUS, not hull size - the
-	# radius is what actually determines how big a rim gap an angle
-	# mismatch would create, so a wider plate needs proportionally deeper
-	# burial to keep that gap hidden.
-	var embed_extra = plate_radius * 0.35
-	var disc = MeshInstance3D.new()
-	var disc_cyl = CylinderMesh.new()
-	disc_cyl.top_radius = plate_radius
-	disc_cyl.bottom_radius = plate_radius
-	disc_cyl.height = plate_thickness + embed_extra
-	disc.mesh = disc_cyl
-	disc.material_override = plate_mat
-	# Shifted down by half the extra burial so the OUTER face stays at
-	# the same y=+thickness/2 the hub/bolts already assume, while the
-	# inner face reaches embed_extra deeper than before.
-	disc.position = Vector3(0, -embed_extra * 0.5, 0)
-	plate_root.add_child(disc)
-
-	# Raised center hub - reads as the swivel bearing the post actually
-	# turns in, not just a flat washer.
-	var hub = MeshInstance3D.new()
-	var hub_cyl = CylinderMesh.new()
-	hub_cyl.top_radius = plate_radius * 0.38
-	hub_cyl.bottom_radius = plate_radius * 0.44
-	hub_cyl.height = plate_thickness * 1.6
-	hub.mesh = hub_cyl
-	hub.material_override = plate_mat
-	hub.position = Vector3(0, plate_thickness * 0.55, 0)
-	plate_root.add_child(hub)
-
-	# Bolt ring around the rim - the actual "this is bolted to the hull"
-	# greeble detail Chris asked for.
-	var bolt_mat = StandardMaterial3D.new()
-	bolt_mat.albedo_color = Color(0.24, 0.24, 0.26)
-	var bolt_count = 6
-	for i in range(bolt_count):
-		var angle = i * TAU / bolt_count
-		var bolt = MeshInstance3D.new()
-		var bolt_cyl = CylinderMesh.new()
-		bolt_cyl.top_radius = plate_radius * 0.09
-		bolt_cyl.bottom_radius = plate_radius * 0.09
-		bolt_cyl.height = plate_thickness * 1.8
-		bolt.mesh = bolt_cyl
-		bolt.material_override = bolt_mat
-		bolt.position = Vector3(cos(angle) * plate_radius * 0.78, plate_thickness * 0.2, sin(angle) * plate_radius * 0.78)
-		plate_root.add_child(bolt)
-
-	return plate_root
+# Procedural mount hardware (post + bolted base plate) was removed
+# 2026-07-21: authored module meshes now bring their own baked-in mounting
+# post/base (see build_visual()'s monolithic-mesh path), and
+# module_placer.gd flush-rotates the whole module to the surface normal
+# instead of extruding it outward along a separate column axis - see
+# MOUNTING_AND_ARMOR_SPEC.md addendum. A weapon type still on the
+# procedural-primitive fallback path (no authored .glb yet) simply has no
+# extra mount geometry drawn until it gets one.
 
 static func rebuild_visual(module: Node3D):
 	if not module or not module.has_meta("module_data"): return
 	var data = module.get_meta("module_data")
 	var catalog_data = preload("res://scripts/module_catalog.gd").get_module_data(data.type_id)
 	if catalog_data:
-		build_visual(data.type_id, module, catalog_data.size, catalog_data.color, data.tweaks)
-		if module.has_meta("mount_style"):
-			# column_dir is the new column-axis normal (points from the
-			# hull surface toward the weapon). Legacy blueprints saved
-			# under the old system may carry only "mount_normal" (the
-			# surface normal the click hit) - that's the same vector in
-			# the limit, and add_mount_hardware treats them identically
-			# for the common "clicked on a flat facet" case. column_length
-			# is the new field; legacy blueprints don't have it, the
-			# default falls back to a sensible weapon-relative size.
-			var col_dir = module.get_meta("column_dir", module.get_meta("mount_normal", Vector3.UP))
-			var col_length = module.get_meta("column_length", 0.0)
-			add_mount_hardware(module, module.get_meta("mount_style"), catalog_data.size, col_dir, col_length)
+		build_visual(data.type_id, module, catalog_data.get("size", Vector3.ONE), catalog_data.color, data.tweaks)
+
+# --- Tweak deformation for monolithic authored meshes ----------------------
+#
+# _apply_tweak_deformations() below reshapes a module by scaling individual
+# sub-meshes of the procedural build (children[1] is the barrel, children[2]
+# is the drum, and so on). A monolithic authored .glb has no sub-meshes - the
+# whole module is one MeshInstance3D - and build_visual()'s monolithic branch
+# returns before ever reaching that function. Since every module now ships an
+# authored .glb, that made EVERY tweak slider in the Design Lab, and the
+# gizmo's drag-to-tweak handles, visually inert: the stat readout moved (stats
+# come from stat_calculator.gd, which was never affected) while the model on
+# screen never changed.
+#
+# A single mesh can still express its tweaks by scaling along the axis the
+# tweak is about, which is what this table encodes: which of the module's own
+# axes each tweak stretches. Vector3 components are flags, not magnitudes -
+# (1,1,0) means "this tweak fattens the cross-section", (0,0,1) means "this
+# tweak extends it forward", (1,1,1) means "this tweak grows the whole part".
+# The axis each tweak maps to matches what the procedural path already did to
+# the corresponding sub-mesh, and what gizmo_3d.gd's get_tweak_for_axis()
+# binds to the X and Z drag handles.
+const MONOLITHIC_TWEAK_AXES := {
+	"basic_cannon": {"caliber": Vector3(1, 1, 0), "barrel_length": Vector3(0, 0, 1)},
+	"heavy_machine_gun": {"caliber": Vector3(1, 1, 0), "drum_size": Vector3(1, 1, 1)},
+	"rotary_cannon": {"caliber": Vector3(1, 1, 0), "motor_size": Vector3(1, 1, 1)},
+	"gauss_railgun": {"rail_length": Vector3(0, 0, 1)},
+	"heavy_howitzer": {"elevation": Vector3(1, 1, 1)},
+	"spigot_mortar": {"rod_thickness": Vector3(1, 1, 0)},
+	"guided_missile": {"seeker_size": Vector3(1, 1, 0), "engine_length": Vector3(0, 0, 1)},
+	"dual_stage_missile": {"payload_size": Vector3(1, 1, 1), "ascent_thruster": Vector3(0, 0, 1)},
+	"flamethrower": {"nozzle_width": Vector3(1, 1, 0), "pressure_valve": Vector3(1, 1, 1)},
+	"heavy_laser": {"lens_aperture": Vector3(1, 1, 0)},
+	"plasma_lobber": {"containment": Vector3(1, 1, 1)},
+	"ciws": {"radar_dish": Vector3(1, 1, 1)},
+	"pd_laser": {"cooling_jacket": Vector3(1, 1, 1)},
+	"flak_cannon": {"fuse_setting": Vector3(1, 1, 1)},
+	"resource_harvester": {"extractor_size": Vector3(1, 1, 1)},
+	"sensor_suite": {"mast_height": Vector3(0, 1, 0)},
+	"logistics_tank": {"tank_capacity": Vector3(1, 1, 1)},
+	"cluster_dispenser": {"dispersion": Vector3(1, 0, 1)},
+	"mortar_array": {"tube_count": Vector3(1, 0, 1)},
+	"missile_pod": {"grid_size": Vector3(1, 0, 1)},
+}
+
+# Per-axis multiplier for a monolithic mesh, expressed in MESH-local axes.
+#
+# The table above is written in the module's own frame (x = width,
+# y = height, z = forward), but the authored mesh is mounted with a yaw offset
+# to correct TripoSG's native orientation, and Godot composes a node's basis
+# as rotation * scale - so a scale assigned to the node is applied along mesh
+# axes and only then rotated. The multiplier therefore has to be permuted back
+# through that rotation, otherwise "lengthen the barrel" would fatten the gun
+# sideways instead.
+static func _monolithic_tweak_scale(type_id: String, tweaks: Dictionary, mesh_rotation: Vector3) -> Vector3:
+	if tweaks.is_empty() or not MONOLITHIC_TWEAK_AXES.has(type_id):
+		return Vector3.ONE
+	var module_space = Vector3.ONE
+	for tweak_name in MONOLITHIC_TWEAK_AXES[type_id]:
+		if not tweaks.has(tweak_name):
+			continue
+		var value = float(tweaks[tweak_name])
+		if value <= 0.0:
+			continue
+		var axes: Vector3 = MONOLITHIC_TWEAK_AXES[type_id][tweak_name]
+		# Flag set -> this tweak scales that axis; flag clear -> leave it be.
+		module_space *= Vector3(
+			value if axes.x > 0.5 else 1.0,
+			value if axes.y > 0.5 else 1.0,
+			value if axes.z > 0.5 else 1.0)
+	return (Basis.from_euler(mesh_rotation).transposed() * module_space).abs()
 
 static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: Dictionary, base_size: Vector3):
 	var children = parent.get_children().filter(func(c): return c is MeshInstance3D)
@@ -2031,10 +2175,19 @@ static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: D
 				children[2].scale = Vector3(drum, drum, drum)
 		"rotary_cannon":
 			var motor = tweaks.get("motor_size", 1.0)
-			children[0].scale = Vector3(motor, motor, motor)
+			if children.size() > 0:
+				children[0].scale = Vector3(motor, motor, motor)
+			# Barrels now live under the "BarrelCluster" pivot (see
+			# _attach_rotary_barrels) so they can spin independently of the
+			# base - no longer direct MeshInstance3D siblings of the base,
+			# so `children` (direct-MeshInstance3D-only, see filter above)
+			# can't reach them anymore.
 			var cal = tweaks.get("caliber", 1.0)
-			for i in range(1, children.size()):
-				children[i].scale = Vector3(cal, 1.0, cal)
+			var cluster = parent.get_node_or_null("BarrelCluster")
+			if cluster:
+				for barrel in cluster.get_children():
+					if barrel is MeshInstance3D:
+						barrel.scale = Vector3(cal, 1.0, cal)
 		"gauss_railgun":
 			# When the authored "rail_array" mesh is present (it is - it ships
 			# in assets/models/parts/), build_visual() adds exactly ONE child

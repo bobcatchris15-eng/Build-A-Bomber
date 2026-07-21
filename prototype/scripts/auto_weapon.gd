@@ -29,6 +29,23 @@ var traverse_speed: float = 4.0
 var resting_transform: Transform3D
 var spin_up_timer: float = 0.0
 
+# frame_built weapons (ModuleCatalog.get_traverse_limit_angle == 0.0 exactly -
+# the barrel is fixed to the hull, so the whole vehicle aims instead, see
+# battle_unit.gd's has_frame_built_weapon) still need a real, reachable
+# ACQUISITION tolerance. Every target-scan below used to gate on
+# `angle_to(dir) <= traverse_limit_angle` directly, which for a frame_built
+# weapon means literally 0.0 - bit-exact alignment with a continuous slerp
+# (battle_unit.gd's _turn_toward) essentially never produces that, so target
+# stayed permanently null and these weapons almost never fired regardless of
+# how well the hull was actually aimed (the "flaky firing" bug report).
+# Flooring the comparison at this tolerance (same 0.26 rad/~15 degrees the
+# firing gate below already uses) lets acquisition succeed once the hull's
+# real-time turn has it roughly on target, so the firing gate - which checks
+# the true CURRENT angle every frame, not this stale acquisition snapshot -
+# gets a real chance to close the rest of the way and fire. No effect on
+# turret/pintle (traverse_limit_angle == PI already exceeds this).
+const MIN_ACQUISITION_ARC: float = 0.26
+
 # repair_array's real fix (ENERGY_AND_BALANCE_SPEC.md #3): inverts
 # targeting to same-team/HP-deficit candidates instead of hostiles.
 var targets_allies: bool = false
@@ -92,6 +109,24 @@ func _roll_hit(t: Node3D) -> bool:
 	var miss_chance = clamp(target_speed * factor / size_factor, 0.0, MISS_CHANCE_CAP)
 	return randf() >= miss_chance
 
+# Parent node for spawned projectiles, tracers and impact VFX.
+#
+# Every _fire_*() below used to call _effects_parent().add_child()
+# directly. current_scene is null whenever no scene has been marked current -
+# briefly during a scene transition, and permanently in any harness that
+# instantiates a scene straight under the tree root (which is exactly how
+# run_tests.gd drives the Test Range). In that state the add_child() aborted
+# the shot with "Cannot call method 'add_child' on a null value" AFTER the
+# weapon had already reset its cooldown: the gun cycled, played its timing,
+# and fired blanks - target dummies sat at full health while every other
+# signal (target lock, line of sight, aim angle) looked perfectly healthy.
+# Falling back to the tree root keeps the projectile real in that case.
+func _effects_parent() -> Node:
+	var t = get_tree()
+	if t == null:
+		return null
+	return t.current_scene if t.current_scene != null else t.root
+
 # Small dirt-puff visual where a missed shot lands, so a miss reads as a
 # miss instead of silent nothing.
 func _spawn_miss_puff(t: Node3D):
@@ -106,7 +141,7 @@ func _spawn_miss_puff(t: Node3D):
 	mat.albedo_color = Color(0.5, 0.45, 0.35, 0.7)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	puff.material_override = mat
-	get_tree().current_scene.add_child(puff)
+	_effects_parent().add_child(puff)
 	var side = Vector3(randf_range(-1.0, 1.0), 0, randf_range(-1.0, 1.0)).normalized()
 	puff.global_position = t.global_position + side * randf_range(1.2, 2.2)
 	var tween = create_tween()
@@ -205,40 +240,105 @@ func get_team() -> int:
 # RTS behavior and blocking on it would deadlock any grouped formation.
 # The target's own colliders are excluded so the target can never "block"
 # the shot at itself. Own-hull blocking (the logged sponson-through-own-hull
-# question) is still structurally absent in Skirmish - battle-spawned hulls
-# carry no StaticBody at all (reconstruct_vehicle is_designer=false), so
-# there is nothing for the ray to hit; a real fix needs battle hull
-# colliders and is logged as deferred in DECISIONS_NEEDED.md.
+# question, DECISIONS_NEEDED.md 2026-07-17) is handled by a second, narrower
+# check inside _is_los_blocked_to() below - see its comment - since the
+# layer-4 omission above (needed to keep OTHER units from blocking) also
+# happened to exempt a weapon's own vehicle, which lives on that same layer.
 func _is_line_of_sight_blocked() -> bool:
-	if not target or not is_instance_valid(target): return true
+	return _is_los_blocked_to(target)
+
+# Line of sight from this weapon's muzzle to an arbitrary candidate.
+#
+# Pulled out of _is_line_of_sight_blocked() so target ACQUISITION can consult
+# it too, not just the firing gate. A pintle mount has no mechanical traverse
+# limit (see ModuleCatalog.get_traverse_limit_angle) - what actually decides
+# whether it can engage a given direction is whether the hull or a neighbouring
+# module is in the way. With acquisition blind to that, a weapon would lock
+# onto the nearest enemy, discover at the firing gate that its own hull was
+# between them, and then sit there aiming at it forever instead of picking a
+# target it could actually hit.
+func _is_los_blocked_to(candidate: Node3D) -> bool:
+	if not candidate or not is_instance_valid(candidate): return true
 
 	var space_state = get_world_3d().direct_space_state
 	# Weapons face forward along negative Z relative to their own local space
 	var muzzle_forward = -global_transform.basis.z.normalized()
 
-	var ray_start = global_position + Vector3(0, _los_height_offset, 0) + muzzle_forward * 0.8 # start in front of barrel
-	var ray_end = target.global_position + Vector3(0, 0.5, 0) # target center
+	# Offset along the weapon's OWN up axis, not world up. Since placement
+	# aligns local +Y with the surface normal it was mounted on, this always
+	# steps AWAY from the hull - whereas the old world-up offset pushed a
+	# side- or belly-mounted weapon's ray start straight into the hull it was
+	# bolted to.
+	var muzzle_up = global_transform.basis.y.normalized()
+	var ray_start = global_position + muzzle_up * _los_height_offset + muzzle_forward * 0.8
+	var ray_end = candidate.global_position + Vector3(0, 0.5, 0) # target center
 
 	var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
 	query.collision_mask = 1 + 2 + 8 # Ground/obstacles (1), Modules (2), Buildings (8) - not units (4)
 	query.collide_with_areas = true
 
-	# Exclude own weapon static body, main vehicle body, the Hull static body,
-	# and everything belonging to the target itself.
+	# Exclude this weapon's own colliders and everything belonging to the
+	# candidate (a target can never "block" the shot at itself). Units
+	# (layer 4) stay out of this query's mask - firing through/past other
+	# units is standard RTS behavior, blocking on it would deadlock any
+	# grouped formation.
 	var own_colliders = []
 	_get_colliders_recursive(self, own_colliders)
-	var vehicle = get_vehicle_root()
-	if vehicle:
-		if vehicle is CollisionObject3D:
-			own_colliders.append(vehicle.get_rid())
-		var hull = vehicle.get_node_or_null("Hull")
-		if hull and hull is CollisionObject3D:
-			own_colliders.append(hull.get_rid())
-	_get_colliders_recursive(target, own_colliders)
+	_get_colliders_recursive(candidate, own_colliders)
 	query.exclude = own_colliders
 
 	var result = space_state.intersect_ray(query)
-	return not result.is_empty()
+	if not result.is_empty():
+		return true
+
+	# Own-hull self-occlusion (DECISIONS_NEEDED.md 2026-07-17 "sponson
+	# weapons may be able to shoot through their own hull"): a battle-spawned
+	# hull's collider lives on battle_unit.gd's own CharacterBody3D (layer
+	# 4, "units" - see setup()'s CollisionShape3D and the running-gear
+	# collider), the very layer the query above deliberately omits so other
+	# units never block a shot. That omission meant a weapon's OWN hull
+	# could never block its own shot either - a sponson/pintle mounted on
+	# the near side could "see" and hit a target its own vehicle's mass was
+	# actually between it and. A second, narrower ray - units back in the
+	# mask, but only this weapon's own vehicle counts as a block - catches
+	# that case without reopening the ally-formation deadlock: if the first
+	# thing hit is some OTHER unit standing in the way, that's disregarded
+	# (same permissive behavior the first query already has for units);
+	# only a hit on this weapon's own vehicle body counts as blocked.
+	var vehicle = get_vehicle_root()
+	if vehicle:
+		var self_query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
+		self_query.collision_mask = 4 # Units
+		self_query.collide_with_areas = true
+		var candidate_colliders = []
+		_get_colliders_recursive(candidate, candidate_colliders)
+		self_query.exclude = candidate_colliders
+		var self_result = space_state.intersect_ray(self_query)
+		if not self_result.is_empty() and self_result.get("collider") == vehicle:
+			return true
+
+	return false
+
+# Basis pointing -Z along `dir`, safe for a target directly overhead or
+# directly underneath.
+#
+# Basis.looking_at(dir, Vector3.UP) is undefined when dir is parallel to the
+# up reference - it collapses to a singular matrix and Godot logs
+# 'Condition "det == 0" is true'. That is exactly the straight-up and
+# straight-down case, so a pintle weapon could traverse freely in azimuth but
+# went haywire the moment it tried to fully depress onto something beneath it
+# (or elevate onto something directly above). Swapping to a sideways
+# reference vector in that cone keeps the basis well-conditioned, which is
+# what lets a pintle actually cover the whole sphere rather than just a band
+# around the horizon.
+static func _looking_at_safe(dir: Vector3) -> Basis:
+	var d = dir.normalized()
+	if d.length_squared() < 0.5:
+		return Basis.IDENTITY
+	var up_ref = Vector3.UP
+	if abs(d.dot(Vector3.UP)) > 0.999:
+		up_ref = Vector3.BACK
+	return Basis.looking_at(d, up_ref)
 
 func _ready():
 	resting_transform = transform
@@ -530,7 +630,7 @@ func _physics_process(delta):
 			# Target local direction relative to weapon parent (the Hull)
 			var target_local_pos = get_parent().to_local(target_pos)
 			var local_dir = target_local_pos.normalized()
-			var target_local_basis = Basis.looking_at(local_dir, Vector3.UP)
+			var target_local_basis = _looking_at_safe(local_dir)
 
 			# Gradually rotate local basis towards target using Quaternions
 			var q_current = transform.basis.get_rotation_quaternion()
@@ -559,8 +659,23 @@ func _physics_process(delta):
 					if motor_size > 0.0:
 						spin_needed /= motor_size
 				
-				# Visually rotate barrels if spun up or spinning
-				rotate_object_local(Vector3.FORWARD, delta * (spin_up_timer / spin_needed) * 30.0)
+				# Visually rotate barrels if spun up or spinning. Flag-gated
+				# (GlobalConfig.enable_animated_monolithic_parts): the old
+				# behavior rotated the ENTIRE weapon node (base/mount and
+				# all), since there was no isolated barrel-only target -
+				# visual_builder.gd now wraps the barrels in a "BarrelCluster"
+				# pivot (see _attach_rotary_barrels), so spin that instead
+				# when the flag is on. Falls back to the historical
+				# whole-weapon spin when it's off, so this stays a pure
+				# opt-in visual change.
+				if GlobalConfig.enable_animated_monolithic_parts:
+					var barrel_cluster = get_node_or_null("BarrelCluster")
+					if barrel_cluster:
+						barrel_cluster.rotate_object_local(Vector3.FORWARD, delta * (spin_up_timer / spin_needed) * 30.0)
+					else:
+						rotate_object_local(Vector3.FORWARD, delta * (spin_up_timer / spin_needed) * 30.0)
+				else:
+					rotate_object_local(Vector3.FORWARD, delta * (spin_up_timer / spin_needed) * 30.0)
 				
 				if spin_up_timer < spin_needed:
 					spin_up_timer += delta
@@ -628,7 +743,12 @@ func _is_current_target_still_valid(resting_forward: Vector3) -> bool:
 	if global_position.distance_to(target.global_position) > fire_range:
 		return false
 	var dir = (target.global_position - global_position).normalized()
-	if resting_forward.angle_to(dir) > traverse_limit_angle:
+	if resting_forward.angle_to(dir) > max(traverse_limit_angle, MIN_ACQUISITION_ARC):
+		return false
+	# Stop clinging to something our own hull is standing in front of -
+	# otherwise the weapon tracks an unshootable target indefinitely instead
+	# of reacquiring one it can actually engage.
+	if _is_los_blocked_to(target):
 		return false
 	return true
 
@@ -656,7 +776,7 @@ func _find_nearest_target():
 				var dist = global_position.distance_to(c.global_position)
 				if dist < closest_ally_dist:
 					var dir = (c.global_position - global_position).normalized()
-					if resting_forward.angle_to(dir) <= traverse_limit_angle:
+					if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC):
 						closest_ally = c
 						closest_ally_dist = dist
 			target = closest_ally
@@ -673,7 +793,7 @@ func _find_nearest_target():
 				var dist_m = global_position.distance_to(m.global_position)
 				if dist_m < closest_m_dist:
 					var dir_m = (m.global_position - global_position).normalized()
-					if resting_forward.angle_to(dir_m) <= traverse_limit_angle:
+					if resting_forward.angle_to(dir_m) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC):
 						closest_m = m
 						closest_m_dist = dist_m
 			if closest_m:
@@ -697,7 +817,7 @@ func _find_nearest_target():
 			var dist = global_position.distance_to(c.global_position)
 			if dist < closest_c_dist:
 				var dir = (c.global_position - global_position).normalized()
-				if resting_forward.angle_to(dir) <= traverse_limit_angle:
+				if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC) and not _is_los_blocked_to(c):
 					closest_c = c
 					closest_c_dist = dist
 		target = closest_c
@@ -713,7 +833,7 @@ func _find_nearest_target():
 				var dist = global_position.distance_to(m.global_position)
 				if dist < closest_dist:
 					var dir = (m.global_position - global_position).normalized()
-					if resting_forward.angle_to(dir) <= traverse_limit_angle:
+					if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC):
 						closest = m
 						closest_dist = dist
 		target = closest
@@ -730,7 +850,7 @@ func _find_nearest_target():
 			var dist = global_position.distance_to(player.global_position)
 			if dist < fire_range:
 				var dir = (player.global_position - global_position).normalized()
-				if resting_forward.angle_to(dir) <= traverse_limit_angle:
+				if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC):
 					target = player
 					return
 		target = null
@@ -746,7 +866,7 @@ func _find_nearest_target():
 			var dist = global_position.distance_to(t.global_position)
 			if dist < closest_dist:
 				var dir = (t.global_position - global_position).normalized()
-				if resting_forward.angle_to(dir) <= traverse_limit_angle:
+				if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC) and not _is_los_blocked_to(t):
 					closest = t
 					closest_dist = dist
 	target = closest
@@ -841,7 +961,7 @@ func _fire_pd_at_missile():
 		mat.emission_enabled = true
 		mat.emission = Color.RED
 		beam.material_override = mat
-		get_tree().current_scene.add_child(beam)
+		_effects_parent().add_child(beam)
 		beam.global_position = global_position.lerp(target.global_position, 0.5)
 		beam.look_at(target.global_position, Vector3.UP)
 		beam.rotate_object_local(Vector3.RIGHT, PI/2)
@@ -864,7 +984,7 @@ func _fire_kinetic_projectile(radius: float, length: float, duration: float, col
 	mat.emission_enabled = true
 	mat.emission = color
 	tracer.material_override = mat
-	get_tree().current_scene.add_child(tracer)
+	_effects_parent().add_child(tracer)
 	
 	var start = global_position + Vector3(0, 0.4, 0)
 	tracer.global_position = start
@@ -896,7 +1016,7 @@ func _fire_railgun_beam():
 	mat.emission_enabled = true
 	mat.emission = Color.BLUE_VIOLET
 	beam.material_override = mat
-	get_tree().current_scene.add_child(beam)
+	_effects_parent().add_child(beam)
 	
 	beam.global_position = global_position.lerp(target.global_position, 0.5)
 	beam.look_at(target.global_position, Vector3.UP)
@@ -913,7 +1033,7 @@ func _fire_railgun_beam():
 		smat.emission_enabled = true
 		smat.emission = Color.CYAN
 		spark.material_override = smat
-		get_tree().current_scene.add_child(spark)
+		_effects_parent().add_child(spark)
 		
 		var pct = randf()
 		spark.global_position = global_position.lerp(target.global_position, pct) + Vector3(randf_range(-0.2, 0.2), randf_range(-0.2, 0.2), randf_range(-0.2, 0.2))
@@ -940,7 +1060,7 @@ func _fire_heavy_howitzer():
 	mat.emission_enabled = true
 	mat.emission = Color.ORANGE
 	shell.material_override = mat
-	get_tree().current_scene.add_child(shell)
+	_effects_parent().add_child(shell)
 	
 	var start = global_position
 	var end = target.global_position
@@ -979,7 +1099,7 @@ func _fire_mortar_salvo():
 			mat.emission_enabled = true
 			mat.emission = Color.YELLOW
 			shell.material_override = mat
-			get_tree().current_scene.add_child(shell)
+			_effects_parent().add_child(shell)
 			
 			var start = global_position
 			var end = target.global_position + Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5))
@@ -1012,7 +1132,7 @@ func _fire_spigot_mortar():
 	mat.emission_enabled = true
 	mat.emission = Color.CRIMSON
 	bomb.material_override = mat
-	get_tree().current_scene.add_child(bomb)
+	_effects_parent().add_child(bomb)
 	
 	var start = global_position
 	var end = target.global_position
@@ -1044,7 +1164,7 @@ func _fire_missile_projectile(is_top_attack: bool):
 	missile.position = global_position + Vector3(0, 0.5, 0)
 	missile.is_top_attack = is_top_attack
 	missile.setup(target, self, dps * fire_rate, damage_class, get_team())
-	get_tree().current_scene.add_child(missile)
+	_effects_parent().add_child(missile)
 
 func _fire_swarm_missiles():
 	var count = 4
@@ -1063,7 +1183,7 @@ func _fire_swarm_missiles():
 			missile.speed = 20.0
 			missile.salvo_jitter = 1.2
 			missile.setup(target, self, per_missile_damage, damage_class, get_team())
-			get_tree().current_scene.add_child(missile)
+			_effects_parent().add_child(missile)
 		)
 
 func _fire_drone_swarm():
@@ -1083,7 +1203,7 @@ func _fire_drone_swarm():
 	for i in range(count):
 		var drone = Node3D.new()
 		drone.set_script(load("res://scripts/drone_unit.gd"))
-		get_tree().current_scene.add_child(drone)
+		_effects_parent().add_child(drone)
 		drone.global_position = global_position + Vector3(randf_range(-0.5, 0.5), 1.0, randf_range(-0.5, 0.5))
 		drone.carrier = carrier
 		drone.target = target
@@ -1102,7 +1222,7 @@ func _fire_cluster_dispenser():
 	mat.emission_enabled = true
 	mat.emission = Color.ORANGE_RED
 	canister.material_override = mat
-	get_tree().current_scene.add_child(canister)
+	_effects_parent().add_child(canister)
 	
 	var start = global_position
 	var end = target.global_position
@@ -1126,7 +1246,7 @@ func _fire_cluster_dispenser():
 			smat.emission_enabled = true
 			smat.emission = Color.ORANGE
 			sub.material_override = smat
-			get_tree().current_scene.add_child(sub)
+			_effects_parent().add_child(sub)
 			sub.global_position = mid
 			
 			var scatter_dest = end + Vector3(randf_range(-2.0, 2.0), 0.0, randf_range(-2.0, 2.0))
@@ -1150,7 +1270,7 @@ func _fire_flame_spray():
 		mat.emission_enabled = true
 		mat.emission = mat.albedo_color
 		flame.material_override = mat
-		get_tree().current_scene.add_child(flame)
+		_effects_parent().add_child(flame)
 		
 		flame.global_position = global_position + Vector3(randf_range(-0.1, 0.1), 0.4, randf_range(-0.1, 0.1))
 		var spread = Vector3(randf_range(-1.2, 1.2), randf_range(-0.2, 0.5), randf_range(-1.2, 1.2))
@@ -1179,7 +1299,7 @@ func _fire_continuous_beam():
 	mat.emission_enabled = true
 	mat.emission = laser_color
 	beam.material_override = mat
-	get_tree().current_scene.add_child(beam)
+	_effects_parent().add_child(beam)
 	
 	beam.global_position = global_position.lerp(target.global_position, 0.5)
 	beam.look_at(target.global_position, Vector3.UP)
@@ -1201,7 +1321,7 @@ func _fire_plasma_lobber():
 	mat.emission_enabled = true
 	mat.emission = Color.MEDIUM_SPRING_GREEN
 	plasma.material_override = mat
-	get_tree().current_scene.add_child(plasma)
+	_effects_parent().add_child(plasma)
 	
 	var start = global_position
 	var end = target.global_position
@@ -1230,7 +1350,7 @@ func _fire_plasma_lobber():
 		pmat.emission_enabled = true
 		pmat.emission = Color.MEDIUM_SPRING_GREEN
 		puddle.material_override = pmat
-		get_tree().current_scene.add_child(puddle)
+		_effects_parent().add_child(puddle)
 		puddle.global_position = end
 
 		var pt = create_tween()
@@ -1248,7 +1368,7 @@ func _fire_flak_cannon():
 	mat.emission_enabled = true
 	mat.emission = Color.GOLD
 	shell.material_override = mat
-	get_tree().current_scene.add_child(shell)
+	_effects_parent().add_child(shell)
 	
 	var start = global_position
 	var end = target.global_position
@@ -1268,7 +1388,7 @@ func _fire_flak_cannon():
 		smat.albedo_color = Color(0.15, 0.15, 0.15, 0.7)
 		smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		smoke.material_override = smat
-		get_tree().current_scene.add_child(smoke)
+		_effects_parent().add_child(smoke)
 		smoke.global_position = detonate_pos
 		
 		var st = create_tween()
@@ -1291,7 +1411,7 @@ func _fire_resource_harvester_tether():
 	mat.emission_enabled = true
 	mat.emission = Color.GOLD
 	tether.material_override = mat
-	get_tree().current_scene.add_child(tether)
+	_effects_parent().add_child(tether)
 	
 	tether.global_position = global_position.lerp(target.global_position, 0.5)
 	tether.look_at(target.global_position, Vector3.UP)
@@ -1317,7 +1437,7 @@ func _fire_repair_array_beam():
 	mat.emission_enabled = true
 	mat.emission = Color.CYAN
 	beam.material_override = mat
-	get_tree().current_scene.add_child(beam)
+	_effects_parent().add_child(beam)
 	
 	beam.global_position = global_position.lerp(target.global_position, 0.5)
 	beam.look_at(target.global_position, Vector3.UP)
@@ -1333,7 +1453,7 @@ func _fire_repair_array_beam():
 	smat.emission_enabled = true
 	smat.emission = Color.CYAN
 	spark.material_override = smat
-	get_tree().current_scene.add_child(spark)
+	_effects_parent().add_child(spark)
 	spark.global_position = target.global_position + Vector3(randf_range(-0.3, 0.3), randf_range(0.2, 0.8), randf_range(-0.3, 0.3))
 	var st = create_tween()
 	st.tween_property(spark, "scale", Vector3.ZERO, 0.1)
@@ -1375,7 +1495,7 @@ func _fire_tesla_coil():
 		mat.emission = laser_color
 		mat.emission_energy_multiplier = 1.5
 		bolt.material_override = mat
-		get_tree().current_scene.add_child(bolt)
+		_effects_parent().add_child(bolt)
 		bolt.global_position = prev_pos.lerp(pos, 0.5)
 		bolt.look_at(pos, Vector3.UP)
 		bolt.rotate_object_local(Vector3.RIGHT, PI / 2)
@@ -1405,7 +1525,7 @@ func _fire_arc_projector():
 	mat.emission = laser_color
 	mat.emission_energy_multiplier = 2.0
 	beam.material_override = mat
-	get_tree().current_scene.add_child(beam)
+	_effects_parent().add_child(beam)
 	beam.global_position = global_position.lerp(target.global_position, 0.5)
 	beam.look_at(target.global_position, Vector3.UP)
 	beam.rotate_object_local(Vector3.RIGHT, PI / 2)
@@ -1434,7 +1554,7 @@ func _fire_ion_cannon():
 	mat.emission = laser_color
 	mat.emission_energy_multiplier = 1.2
 	beam.material_override = mat
-	get_tree().current_scene.add_child(beam)
+	_effects_parent().add_child(beam)
 	beam.global_position = global_position.lerp(target.global_position, 0.5)
 	beam.look_at(target.global_position, Vector3.UP)
 	beam.rotate_object_local(Vector3.RIGHT, PI / 2)
@@ -1460,7 +1580,7 @@ func _spawn_explosion_visual(pos: Vector3, custom_scale: float = 0.6, color: Col
 	mat.emission_enabled = true
 	mat.emission = color
 	exp.material_override = mat
-	get_tree().current_scene.add_child(exp)
+	_effects_parent().add_child(exp)
 	exp.global_position = pos
 	
 	var tween = create_tween()
@@ -1480,7 +1600,7 @@ func _fire_standard_laser():
 	mat.emission_enabled = true
 	mat.emission = laser_color
 	laser.material_override = mat
-	get_tree().current_scene.add_child(laser)
+	_effects_parent().add_child(laser)
 	
 	laser.global_position = global_position.lerp(target.global_position, 0.5)
 	laser.look_at(target.global_position, Vector3.UP)

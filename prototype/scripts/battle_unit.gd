@@ -13,6 +13,7 @@ const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
+const GlobalConfigScript = preload("res://scripts/global_config.gd")
 
 var team: int = 0
 var max_hp: float = 400.0
@@ -179,7 +180,7 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node, match_f
 	# Collision shape matching the hull
 	var col_shape = CollisionShape3D.new()
 	col_shape.name = "CollisionShape3D"
-	var base_size = catalog_data.size
+	var base_size = catalog_data.get("size", Vector3.ONE)
 	if hull_node.has_meta("base_hull_size") and hull_node.has_meta("hull_scale"):
 		base_size = hull_node.get_meta("base_hull_size") * hull_node.get_meta("hull_scale")
 	var bulk = Vector3(1.0 + (thick - 1.0) * 0.15, 1.0 + (thick - 1.0) * 0.15, 1.0)
@@ -196,6 +197,26 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node, match_f
 		col_shape.shape = box
 		col_shape.position = Vector3(0, box.size.y / 2.0, 0)
 	add_child(col_shape)
+
+	# Running-gear collider (test arena "vehicle slides on its belly" fix):
+	# the hull's own collider above only covers the hull mesh, so it never
+	# reached down to the wheels/treads/legs/screws bp_manager.reconstruct_
+	# vehicle() just lifted the hull to make room for. Without this, the
+	# CharacterBody3D's is_on_floor()/real-physics fallback (see the
+	# gravity branch below) had nothing to actually rest the unit on -
+	# it's a second box collider spanning the same running-gear chassis
+	# ModuleCatalog.get_running_gear_size() sizes for the visual chassis,
+	# so the collider's bottom now lines up with the ground contact the
+	# unit is snapped to, not the bare hull belly.
+	if ModuleCatalog.needs_running_gear(locomotion_type):
+		var running_gear_size = ModuleCatalog.get_running_gear_size(base_size * bulk)
+		var gear_shape = CollisionShape3D.new()
+		gear_shape.name = "RunningGearCollisionShape3D"
+		var gear_box = BoxShape3D.new()
+		gear_box.size = running_gear_size
+		gear_shape.shape = gear_box
+		gear_shape.position = Vector3(0, hull_node.position.y - (base_size.y * bulk.y) / 2.0 - running_gear_size.y / 2.0, 0)
+		add_child(gear_shape)
 
 	_setup_weapons()
 	_detect_harvester()
@@ -563,8 +584,21 @@ func _try_auto_engage(delta: float):
 		return
 	_auto_engage_scan_timer = AUTO_ENGAGE_SCAN_INTERVAL
 
+	# "Closest enemy IN SIGHT" (Chris's spec) - not just closest by raw
+	# distance. fog_hidden already filters to what the team has scouted, but
+	# a scouted-but-currently-behind-a-rock-or-building enemy still passed
+	# that filter, so the unit could commit to (and path/turn toward) a
+	# target it structurally can't see or engage yet while ignoring a
+	# farther one it could start closing on immediately. Tracks both the
+	# closest overall AND the closest with a real, unblocked sightline;
+	# prefers the latter, falling back to the former only when NOTHING
+	# in range currently has a clear line (so auto-engage still functions
+	# rather than going permanently idle the instant every scouted enemy
+	# happens to be terrain-occluded).
 	var closest: Node3D = null
 	var closest_dist: float = vision_range
+	var closest_visible: Node3D = null
+	var closest_visible_dist: float = vision_range
 	for c in get_tree().get_nodes_in_group("damageable"):
 		if not is_instance_valid(c) or c == self:
 			continue
@@ -579,9 +613,51 @@ func _try_auto_engage(delta: float):
 		if dist < closest_dist:
 			closest = c
 			closest_dist = dist
+		if dist < closest_visible_dist and _has_clear_sightline_to(c):
+			closest_visible = c
+			closest_visible_dist = dist
 
-	if closest:
-		order_attack(closest)
+	var engage_target = closest_visible if closest_visible else closest
+	if engage_target:
+		order_attack(engage_target)
+
+# Recursively collects CollisionObject3D RIDs under a node, for LOS raycast
+# exclude lists. Mirrors auto_weapon.gd's own _get_colliders_recursive (kept
+# as a separate small copy here rather than a shared module - it's a 6-line
+# utility, not worth factoring out for).
+func _get_colliders_recursive(node: Node, list: Array):
+	if node is CollisionObject3D:
+		list.append(node.get_rid())
+	for child in node.get_children():
+		_get_colliders_recursive(child, list)
+
+# Coarse "can this unit actually see that candidate" check for auto-engage
+# target SELECTION (deciding which enemy to drive toward) - distinct from
+# auto_weapon.gd's per-weapon muzzle-level LOS, which gates actual firing
+# once a unit is already engaged. Ray from roughly hull-center height to the
+# candidate's center; blocked by world geometry/obstacles (layer 1), modules
+# (layer 2), or buildings (layer 8) - same layer convention auto_weapon.gd's
+# LOS check uses. Units (layer 4) are deliberately excluded from the mask
+# for the same reason as there: some OTHER unit standing in the way doesn't
+# mean this candidate is unseeable, just that there's something closer.
+# Terrain elevation (hills/ramps) has no real collider at all (see
+# terrain_builder.gd's header) so it never factors in here either way -
+# this only ever catches actual obstacle props and buildings.
+func _has_clear_sightline_to(candidate: Node3D) -> bool:
+	if not is_instance_valid(candidate):
+		return false
+	var space_state = get_world_3d().direct_space_state
+	var ray_start = global_position + Vector3(0, 1.0, 0)
+	var ray_end = candidate.global_position + Vector3(0, 0.5, 0)
+	var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
+	query.collision_mask = 1 + 2 + 8 # Ground/obstacles, Modules, Buildings - not units
+	query.collide_with_areas = true
+	var excluded = []
+	_get_colliders_recursive(self, excluded)
+	_get_colliders_recursive(candidate, excluded)
+	query.exclude = excluded
+	var result = space_state.intersect_ray(query)
+	return result.is_empty()
 
 func _physics_process(delta):
 	if is_dead: return
@@ -728,13 +804,27 @@ func _physics_process(delta):
 
 	move_and_slide()
 
-	# Spin rotors
-	if is_flying and is_instance_valid(hull_node):
+	# Spin rotors. Loosened from "is_flying only" to any hull_node, since
+	# propellers/screws apply to naval and amphibious units too, not just
+	# airborne ones - each arm below decides for itself whether to spin.
+	if is_instance_valid(hull_node):
 		for child in hull_node.get_children():
 			if not child.has_meta("module_data"): continue
 			var child_type_id = child.get_meta("module_data").type_id
 			if child_type_id == "helicopter_rotors":
-				if child.get_child_count() > 0 and is_instance_valid(child.get_child(0)):
+				# Named "RotorBlades" pivot (visual_builder.gd's
+				# _attach_rotor_blades) - previously reached in via
+				# get_child(0), which actually grabbed the static shaft (the
+				# shaft is built before the blades), not the blades, so the
+				# rotor never visibly spun. Flag-gated (like auto_weapon.gd's
+				# BarrelCluster fix) to keep today's exact behavior, bug
+				# included, when the flag is off - this is purely an A/B
+				# visual toggle, not a silent behavior change.
+				if GlobalConfigScript.enable_animated_monolithic_parts:
+					var rotor = child.get_node_or_null("RotorBlades")
+					if rotor:
+						rotor.rotate_y(15.0 * delta)
+				elif child.get_child_count() > 0 and is_instance_valid(child.get_child(0)):
 					child.get_child(0).rotate_y(15.0 * delta)
 			elif child_type_id == "ornithopter_wing":
 				# Flapping motion: an oscillating (not continuous) rotation
@@ -745,6 +835,17 @@ func _physics_process(delta):
 				var pivot = child.get_node_or_null("WingPivot")
 				if pivot:
 					pivot.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 8.0) * 0.35
+			elif GlobalConfigScript.enable_animated_monolithic_parts and child_type_id in ["propeller_prop", "pusher_prop", "naval_propeller", "ship_screw", "paddle_wheel"]:
+				# New continuous idle spin for the prop-style locomotion
+				# add-ons (previously fully static in every path) - flag-
+				# gated since this is a genuinely new visual, not a bugfix
+				# to existing behavior like the two arms above.
+				var prop = child.get_node_or_null("PropBlades")
+				if prop:
+					if child_type_id == "paddle_wheel":
+						prop.rotate_x(10.0 * delta)
+					else:
+						prop.rotate_z(10.0 * delta)
 
 # Returns true when arrived. The "arrived" check always uses the real
 # final destination; the per-frame STEERING direction uses the navmesh's
