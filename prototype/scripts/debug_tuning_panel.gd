@@ -1,4 +1,5 @@
 extends Control
+const ModuleDataResource = preload("res://scripts/module_data.gd")
 # Live tuning overlay (Phase 2, Milestone B). Toggle with F1 in Battlefield.tscn.
 # Lets GlobalConfig's scale factors be adjusted while a fight plays out,
 # instead of hand-editing GlobalConfig.gd and relaunching the test range.

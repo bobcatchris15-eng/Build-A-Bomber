@@ -5,11 +5,9 @@ Write-Host "=== Syncing assets/ into isolated copy ==="
 # robocopy returns exit codes that aren't 0 even on success, so we ignore errors/exit codes
 robocopy "$REAL\assets" "$DST\assets" /E /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 
-# First run: copy the rest of the project if project.godot isn't present
-if (-not (Test-Path "$DST\project.godot")) {
-    Write-Host "=== First run: copying full project ==="
-    robocopy "$REAL" "$DST" /E /XD "$REAL\UPBGE-0.30-windows-x86_64" "$REAL\progress_captures" "$REAL\.godot" "$REAL\.git" "$REAL\scratch" /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
-}
+# Always copy full project (excluding large folders) before import
+Write-Host "=== Copying full project (excluding UPBGE/progress_captures/.godot) ==="
+robocopy "$REAL" "$DST" /E /XD "$REAL\UPBGE-0.30-windows-x86_64" "$REAL\progress_captures" "$REAL\.godot" "$REAL\.git" "$REAL\scratch" /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
 
 Write-Host "=== Running isolated reimport ==="
 # Run Godot headless editor to force import

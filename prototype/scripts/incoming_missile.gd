@@ -55,7 +55,7 @@ func destroy_missile(intercepted: bool):
 	mat.emission_enabled = true
 	mat.emission = mat.albedo_color
 	exp.material_override = mat
-	get_tree().current_scene.add_child(exp)
+	(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(exp)
 	exp.global_position = global_position
 	
 	var tween = create_tween()

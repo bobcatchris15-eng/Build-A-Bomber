@@ -1,10 +1,17 @@
 extends Camera3D
 # Classic RTS camera: WASD/arrow pan, mouse-wheel zoom, middle-mouse drag pan.
 
-@export var pan_speed: float = 22.0
-@export var zoom_speed: float = 2.5
+@export var pan_speed: float = 30.0
+@export var zoom_speed: float = 8.0
 @export var min_height: float = 10.0
-@export var max_height: float = 45.0
+# Skirmish refinement pass: maps grew to ~3x their original size (see
+# map_catalog.gd - two scale-up passes, 1.5x then another 2x after the
+# first still read as too small) and the old 45-unit cap meant you could
+# never zoom out far enough to see a meaningful fraction of even the
+# smallest map. Pan speed already scales with height (see _process()
+# below), so raising this doesn't make traversal at max zoom-out feel
+# sluggish.
+@export var max_height: float = 240.0
 
 var height: float = 26.0
 

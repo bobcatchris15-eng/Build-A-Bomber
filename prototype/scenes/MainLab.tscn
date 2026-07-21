@@ -25,6 +25,12 @@ size = Vector3(4, 1, 6)
 [sub_resource type="BoxShape3D" id="BoxShape3D_hull"]
 size = Vector3(4, 1, 6)
 
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_floor"]
+albedo_color = Color(0.2, 0.25, 0.3, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crate"]
+albedo_color = Color(0.6, 0.4, 0.2, 1)
+
 [node name="MainLab" type="Node3D"]
 script = ExtResource("1_placer")
 hull_path = NodePath("Hull")
@@ -39,6 +45,29 @@ shadow_enabled = true
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 5, 10)
 script = ExtResource("2_camera")
+
+
+
+
+[node name="Crate1" type="CSGBox3D" parent="."]
+transform = Transform3D(0.866, 0, 0.5, 0, 1, 0, -0.5, 0, 0.866, -10, -0.5, -5)
+size = Vector3(2, 2, 2)
+material = SubResource("StandardMaterial3D_crate")
+
+[node name="Crate2" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, -0.5, 8)
+size = Vector3(2, 2, 4)
+material = SubResource("StandardMaterial3D_crate")
+
+[node name="Crate3" type="CSGBox3D" parent="."]
+transform = Transform3D(0.707, 0, -0.707, 0, 1, 0, 0.707, 0, 0.707, -8, -0.75, 12)
+size = Vector3(1.5, 1.5, 1.5)
+material = SubResource("StandardMaterial3D_crate")
+
+[node name="Crate4" type="CSGBox3D" parent="."]
+transform = Transform3D(0.965, 0, 0.258, 0, 1, 0, -0.258, 0, 0.965, 15, 0, -10)
+size = Vector3(3, 3, 3)
+material = SubResource("StandardMaterial3D_crate")
 
 [node name="Hull" type="StaticBody3D" parent="."]
 

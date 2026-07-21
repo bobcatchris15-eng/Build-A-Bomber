@@ -22,8 +22,7 @@ func _init():
 	print("==============================================\n")
 	
 	var success = true
-	
-	# Run tests sequentially
+
 	success = success and await test_stats_calculations()
 	success = success and await test_clipping_detection()
 	success = success and await test_damage_mitigation()
@@ -366,13 +365,57 @@ func test_damage_mitigation() -> bool:
 
 func test_headless_combat_simulation() -> bool:
 	print("Running Test Suite 4: Headless Combat Simulation Tick Loop...")
-	
+
+	# Field a known, POINT-DEFENCE-FREE design instead of whatever happens to
+	# be sitting in user://blueprint.json.
+	#
+	# Battlefield._spawn_vehicle() loads the player's real last-active design,
+	# and this suite drops a missile directly overhead and asserts the player
+	# takes damage from it. That only held while weapons could not aim
+	# straight up: Basis.looking_at(dir, Vector3.UP) is singular for a target
+	# directly above, so a CIWS/pd_laser/flak_cannon simply failed to track
+	# anything overhead. auto_weapon.gd's _looking_at_safe() fixed that (part
+	# of giving pintle mounts a genuine full-sphere envelope), at which point
+	# the user's current PD-heavy design started shooting the missile down at
+	# tick 2 - a correct interception, reported as "failed to apply damage".
+	#
+	# Same machine-state fix the Test Range suite already uses: write a known
+	# fixture, restore whatever was there afterwards.
+	var bp_path = "user://blueprint.json"
+	var had_prior_bp = FileAccess.file_exists(bp_path)
+	var prior_bp_content = ""
+	if had_prior_bp:
+		var rf = FileAccess.open(bp_path, FileAccess.READ)
+		prior_bp_content = rf.get_as_text()
+		rf.close()
+	var fixture_bp = {
+		"version": 1.0,
+		"hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"faction": "industrialists",
+		"locomotion": {"type_id": "wheels", "settings": {"count": 4}},
+		"modules": [
+			{"type_id": "wheels", "position": {"x": 0, "y": 0, "z": 0}, "normal": {"x": 0, "y": 1, "z": 0}},
+			{"type_id": "basic_cannon", "position": {"x": 0, "y": 1.0, "z": -1.5}, "normal": {"x": 0, "y": 1, "z": 0}}
+		]
+	}
+	var wf = FileAccess.open(bp_path, FileAccess.WRITE)
+	wf.store_string(JSON.stringify(fixture_bp))
+	wf.close()
+
 	# We simulate a dynamic combat scenario headlessly
 	var battlefield_scene = preload("res://scenes/Battlefield.tscn").instantiate()
 	root.add_child(battlefield_scene)
 	current_scene = battlefield_scene
 	await process_frame
-	
+
+	if had_prior_bp:
+		var rwf = FileAccess.open(bp_path, FileAccess.WRITE)
+		rwf.store_string(prior_bp_content)
+		rwf.close()
+	else:
+		DirAccess.remove_absolute(bp_path)
+
 	var player = battlefield_scene.get_node_or_null("PlayerVehicle")
 	if not player:
 		print("  [FAIL] Player vehicle not spawned in Battlefield.")
@@ -611,29 +654,51 @@ func test_rotation_popup_and_deforms() -> bool:
 		hull.queue_free()
 		return false
 		
-	# Deformation
+	# Deformation.
+	#
+	# This used to assert that children[1] (the barrel sub-mesh of the
+	# PROCEDURAL cannon build) ended up scaled to exactly (caliber, length).
+	# Every module now ships an authored monolithic .glb, so build_visual()
+	# takes its single-mesh branch and there is no children[1] to inspect -
+	# the assertion was checking an implementation detail of a code path the
+	# game no longer runs, and it failed for that reason rather than because
+	# tweaking was broken. (It WAS broken too: the monolithic branch returned
+	# before applying tweaks at all. Fixed in visual_builder.gd.)
+	#
+	# Assert the behaviour players can actually observe instead, which holds
+	# for the authored and procedural builds alike: raising caliber makes the
+	# gun wider, and raising barrel_length makes it longer.
 	var data = mod.get_meta("module_data")
-	data.tweaks["caliber"] = 1.8
-	data.tweaks["barrel_length"] = 1.5
 	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+
+	data.tweaks["caliber"] = 1.0
+	data.tweaks["barrel_length"] = 1.0
 	VisualBuilder.rebuild_visual(mod)
-	
-	var children = mod.get_children().filter(func(c): return c is MeshInstance3D)
-	if children.size() <= 1:
-		print("  [FAIL] Cannon mesh children missing")
+	var base_extents = _module_visual_extents(mod)
+
+	data.tweaks["caliber"] = 1.8
+	VisualBuilder.rebuild_visual(mod)
+	var wide_extents = _module_visual_extents(mod)
+
+	data.tweaks["caliber"] = 1.0
+	data.tweaks["barrel_length"] = 1.5
+	VisualBuilder.rebuild_visual(mod)
+	var long_extents = _module_visual_extents(mod)
+
+	if wide_extents.x <= base_extents.x * 1.05:
+		print("  [FAIL] raising caliber did not widen the cannon: ", base_extents, " -> ", wide_extents)
 		stat_ui.queue_free()
 		placer.queue_free()
 		hull.queue_free()
 		return false
-		
-	var barrel = children[1]
-	if abs(barrel.scale.x - 1.8) > 0.01 or abs(barrel.scale.y - 1.5) > 0.01:
-		print("  [FAIL] barrel scaling deformation incorrect: ", barrel.scale)
+
+	if long_extents.z <= base_extents.z * 1.05:
+		print("  [FAIL] raising barrel_length did not lengthen the cannon: ", base_extents, " -> ", long_extents)
 		stat_ui.queue_free()
 		placer.queue_free()
 		hull.queue_free()
 		return false
-		
+
 	# Clean up
 	stat_ui.queue_free()
 	placer.queue_free()
@@ -643,6 +708,36 @@ func test_rotation_popup_and_deforms() -> bool:
 	print("  [PASS] Module rotation, hovering stats popup, and mesh deformations verified.")
 	return true
 
+# Combined extents of a module's rendered geometry, in the module's own local
+# space. Lets a test assert what a tweak does to the model without depending
+# on how the mesh tree happens to be structured (one authored mesh vs. a
+# procedural base + barrel + drum).
+func _module_visual_extents(module: Node3D) -> Vector3:
+	var min_p = Vector3.INF
+	var max_p = -Vector3.INF
+	var stack: Array = [module]
+	while not stack.is_empty():
+		var n = stack.pop_back()
+		# Skip the editor overlays wholesale. The firing arc in particular is a
+		# fixed 3-unit-radius fan whose ClearArc/BlockedArc child meshes are
+		# far larger than any weapon, so leaving it in pins the measured
+		# extents at 6 x 6 and hides whatever the tweak actually did.
+		if n.name.begins_with("ArcCone") or n.name.begins_with("Gizmo3D"):
+			continue
+		if n is MeshInstance3D and n.mesh:
+			var rel = module.global_transform.affine_inverse() * n.global_transform
+			var box = n.mesh.get_aabb()
+			for i in range(8):
+				var p = rel * box.get_endpoint(i)
+				min_p = min_p.min(p)
+				max_p = max_p.max(p)
+		for c in n.get_children():
+			if not (c is CollisionObject3D):
+				stack.append(c)
+	if min_p == Vector3.INF:
+		return Vector3.ZERO
+	return max_p - min_p
+
 func test_sensor_mast_tweak_and_proportions() -> bool:
 	print("Running Test Suite: Sensor Mast Dish Proportions + Tweak Target (visual QA fix)...")
 	# Regression test for two bugs found during the Tuesday visual QA pass:
@@ -650,6 +745,16 @@ func test_sensor_mast_tweak_and_proportions() -> bool:
 	#    towering over the sensor_suite's actual 0.5-wide footprint.
 	# 2) the "mast_height" tweak scaled the DISH's thickness (children[1]),
 	#    not the MAST's height (children[0]) - the slider's label was a lie.
+	# Rewritten 2026-07-21: this used to reach into the PROCEDURAL build's
+	# children[0] (mast) and children[1] (dish) by index. sensor_suite ships an
+	# authored monolithic .glb now, so build_visual() emits a single mesh and
+	# those indices no longer exist - the test failed on a structural
+	# assumption rather than on the behaviour it was written to protect.
+	# Both original regressions are still covered, just measured off the
+	# rendered result so the assertion holds for either build path:
+	#   1) the module must not tower absurdly over its own catalog footprint,
+	#   2) "mast_height" must make it TALLER (it used to fatten the dish
+	#      instead, so the slider's label was a lie).
 	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 	var catalog_data = ModuleCatalog.get_module_data("sensor_suite")
 
@@ -657,48 +762,41 @@ func test_sensor_mast_tweak_and_proportions() -> bool:
 	root.add_child(node_default)
 	VisualBuilderScript.build_visual("sensor_suite", node_default, catalog_data.size, catalog_data.color, {})
 	await process_frame
-
-	var default_children = node_default.get_children().filter(func(c): return c is MeshInstance3D)
-	if default_children.size() < 2:
-		print("  [FAIL] sensor_suite should build a mast + dish, got ", default_children.size(), " mesh children")
-		node_default.queue_free()
-		return false
-
-	var dish_default = default_children[1]
-	var dish_radius = (dish_default.mesh as CylinderMesh).top_radius if dish_default.mesh is CylinderMesh else -1.0
-	if dish_radius > catalog_data.size.x * 1.5:
-		print("  [FAIL] Dish radius (", dish_radius, ") is still disproportionate to module footprint (", catalog_data.size.x, ")")
-		node_default.queue_free()
-		return false
-	var default_mast_scale_y = default_children[0].scale.y
+	var default_extents = _module_visual_extents(node_default)
 	node_default.queue_free()
+
+	if default_extents == Vector3.ZERO:
+		print("  [FAIL] sensor_suite built no visible geometry at all")
+		return false
+
+	# Width, not height - a mast is legitimately tall, but it should not be
+	# several times wider than the footprint the catalog gives it.
+	if default_extents.x > catalog_data.size.x * 3.0:
+		print("  [FAIL] sensor_suite is disproportionately wide: ", default_extents.x,
+			" vs catalog footprint ", catalog_data.size.x)
+		return false
 
 	var node_tweaked = Node3D.new()
 	root.add_child(node_tweaked)
 	VisualBuilderScript.build_visual("sensor_suite", node_tweaked, catalog_data.size, catalog_data.color, {"mast_height": 2.0})
 	await process_frame
-
-	# Compare against the untweaked baseline rather than asserting an absolute
-	# value: the authored-mesh path's baseline scale.y already equals base_size.y
-	# (from _fit_scale), so mast_height=2.0 correctly produces scale.y=2x that
-	# baseline, not literally 2.0.
-	var tweaked_children = node_tweaked.get_children().filter(func(c): return c is MeshInstance3D)
-	var mast_scale_y = tweaked_children[0].scale.y
-	var ratio = mast_scale_y / default_mast_scale_y if default_mast_scale_y != 0.0 else 0.0
-	if abs(ratio - 2.0) > 0.05:
-		print("  [FAIL] mast_height=2.0 should scale the MAST (children[0]) to 2x its baseline, got ratio=", ratio, " (baseline=", default_mast_scale_y, ", tweaked=", mast_scale_y, ")")
-		node_tweaked.queue_free()
-		return false
-
-	var dish_y = tweaked_children[1].position.y
-	var expected_dish_y = catalog_data.size.y * 2.0
-	if abs(dish_y - expected_dish_y) > 0.05:
-		print("  [FAIL] Dish should ride the mast top at y=", expected_dish_y, ", got y=", dish_y)
-		node_tweaked.queue_free()
-		return false
-
+	var tweaked_extents = _module_visual_extents(node_tweaked)
 	node_tweaked.queue_free()
-	print("  [PASS] Sensor mast dish is proportionate and mast_height tweak now scales the mast, not the dish.")
+
+	var height_ratio = tweaked_extents.y / default_extents.y if default_extents.y > 0.0 else 0.0
+	if abs(height_ratio - 2.0) > 0.1:
+		print("  [FAIL] mast_height=2.0 should double the module's HEIGHT, got ratio=", height_ratio,
+			" (baseline y=", default_extents.y, ", tweaked y=", tweaked_extents.y, ")")
+		return false
+
+	# The point of the original bug: mast_height must not be secretly resizing
+	# the module's girth instead of its height.
+	if abs(tweaked_extents.x - default_extents.x) > 0.01:
+		print("  [FAIL] mast_height changed the module's WIDTH (", default_extents.x, " -> ",
+			tweaked_extents.x, ") - it should only affect height")
+		return false
+
+	print("  [PASS] Sensor mast is proportionate and mast_height tweak scales height, not girth.")
 	return true
 
 func test_no_dead_tweaks() -> bool:
@@ -1388,11 +1486,20 @@ func test_design_to_battle_integration() -> bool:
 		if data.type_id == "legs":
 			legs_found = true
 			# Batch E hull-relative scaling fix: leg length is the "size"
-			# tweak (1.7) times heavy_hull's own height factor relative to
-			# medium_hull (heavy_hull.size.y=1.5 / REFERENCE_HULL_SIZE.y=1.0
-			# = 1.5), not the raw tweak value alone - see module_placer.gd's
-			# update_locomotion().
-			var expected_leg_scale = 1.7 * 1.5
+			# tweak (1.7) times the hull's own height factor relative to the
+			# reference hull, not the raw tweak value alone - see
+			# module_placer.gd's update_locomotion().
+			#
+			# Derived from the catalog rather than hardcoded: this used to
+			# assert 1.7 * 1.5 against a comment claiming heavy_hull.size.y
+			# was 1.5. The hull data has since been re-authored (it is 2.5
+			# now), so the literal silently went stale and the suite could
+			# only have passed by accident. It was invisible because Suite 7
+			# failed first and the `and` chain short-circuited every suite
+			# after it.
+			var ref_y = ModuleCatalog.REFERENCE_HULL_SIZE.y
+			var heavy_y = ModuleCatalog.get_module_data("heavy_hull").get("size", Vector3.ONE).y
+			var expected_leg_scale = 1.7 * clamp(heavy_y / ref_y, 0.45, 2.25)
 			if abs(child.scale.y - expected_leg_scale) < 0.05:
 				legs_scale_ok = true
 		elif data.type_id == "gauss_railgun":
@@ -1545,8 +1652,14 @@ func test_armor_module_facet_fitting() -> bool:
 	root.add_child(placer)
 	await process_frame
 
-	placer._place_hull_from_ui("medium_hull") # size 4 x 1 x 6
+	placer._place_hull_from_ui("medium_hull")
 	await process_frame
+	# Read the hull's real dimensions rather than hardcoding them: this suite
+	# used to assert a literal 4.0 x 6.0 footprint from a stale "# size 4 x 1
+	# x 6" comment, and medium_hull has since been re-authored to 3 x 1.8 x
+	# 5.5. The assertion is about auto-fitting to WHATEVER facet it lands on,
+	# so deriving the expectation keeps it honest across data changes.
+	var hull_size: Vector3 = ModuleCatalog.get_module_data("medium_hull").get("size", Vector3.ONE)
 
 	# Top facet: should auto-fit to hull_size.x x hull_size.z, center on the
 	# facet (x=0, z=0), and NOT mirror (top is already on the symmetry plane).
@@ -1566,8 +1679,9 @@ func test_armor_module_facet_fitting() -> bool:
 	var catalog_data = ModuleCatalog.get_module_data("armor_plating")
 	var fitted_x = top_plate.scale.x * catalog_data.size.x
 	var fitted_z = top_plate.scale.z * catalog_data.size.z
-	if abs(fitted_x - 4.0) > 0.1 or abs(fitted_z - 6.0) > 0.1:
-		print("  [FAIL] Top plate should auto-fit to 4.0 x 6.0 (hull footprint), got ", fitted_x, " x ", fitted_z)
+	if abs(fitted_x - hull_size.x) > 0.1 or abs(fitted_z - hull_size.z) > 0.1:
+		print("  [FAIL] Top plate should auto-fit to ", hull_size.x, " x ", hull_size.z,
+			" (hull footprint), got ", fitted_x, " x ", fitted_z)
 		placer.queue_free()
 		return false
 	var local_pos = placer.hull.to_local(top_plate.global_position)
@@ -1683,7 +1797,7 @@ func test_armor_module_combat_bonus() -> bool:
 	return true
 
 func test_face_based_weapon_mounting() -> bool:
-	print("Running Test Suite: Face-Based Weapon Mounting (MOUNTING_AND_ARMOR_SPEC.md #3)...")
+	print("Running Test Suite: Face-Based Weapon Mounting (flush-mount to facet, MOUNTING_AND_ARMOR_SPEC.md addendum 2026-07-21)...")
 	var placer = Node3D.new()
 	placer.name = "MainLab"
 	placer.set_script(preload("res://scripts/module_placer.gd"))
@@ -1693,8 +1807,8 @@ func test_face_based_weapon_mounting() -> bool:
 	placer._place_hull_from_ui("heavy_hull")
 	await process_frame
 
-	# basic_cannon: "turret" mount style, no extra hardware, existing
-	# enclosed-turret visual explicitly left unchanged.
+	# basic_cannon: "turret" mount style - flush on the top facet; the
+	# surface normal IS up, so no tilt is needed either.
 	placer._place_weapon_from_ui("basic_cannon", Vector3(0, 0.75, -1.0), Vector3.UP)
 	await process_frame
 	var cannon = null
@@ -1702,13 +1816,15 @@ func test_face_based_weapon_mounting() -> bool:
 		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "basic_cannon":
 			cannon = c
 			break
-	if not cannon or cannon.get_meta("mount_style", "") != "turret" or cannon.get_node_or_null("MountHardware"):
-		print("  [FAIL] basic_cannon should be mount_style 'turret' with no MountHardware, got '", cannon.get_meta("mount_style", "") if cannon else "null", "'")
+	if not cannon or cannon.get_meta("mount_style", "") != "turret":
+		print("  [FAIL] basic_cannon should be mount_style 'turret', got '", cannon.get_meta("mount_style", "") if cannon else "null", "'")
 		placer.queue_free()
 		return false
 
-	# gauss_railgun: "frame_built", no hardware, but embedded deeper into
-	# the hull (whole vehicle aims, not the weapon).
+	# gauss_railgun: "frame_built" - now flush-mounted at the clicked point
+	# like everything else (no longer embedded backward into the hull;
+	# mount_style only affects combat traverse, not placement, since
+	# 2026-07-21).
 	placer._place_weapon_from_ui("gauss_railgun", Vector3(0, 0.75, 1.0), Vector3.UP)
 	await process_frame
 	var railgun = null
@@ -1716,12 +1832,17 @@ func test_face_based_weapon_mounting() -> bool:
 		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "gauss_railgun":
 			railgun = c
 			break
-	if not railgun or railgun.get_meta("mount_style", "") != "frame_built" or railgun.get_node_or_null("MountHardware"):
-		print("  [FAIL] gauss_railgun should be mount_style 'frame_built' with no MountHardware")
+	if not railgun or railgun.get_meta("mount_style", "") != "frame_built":
+		print("  [FAIL] gauss_railgun should be mount_style 'frame_built'")
+		placer.queue_free()
+		return false
+	if abs(railgun.global_position.y - 0.75) > 0.3:
+		print("  [FAIL] frame_built weapon should sit flush at the clicked point (no more embed-backward offset), y=", railgun.global_position.y, " (clicked at ~0.75)")
 		placer.queue_free()
 		return false
 
-	# heavy_machine_gun on the TOP facet: "pintle" with visible hardware.
+	# heavy_machine_gun on the TOP facet: "pintle" - flush at the clicked
+	# point, upright since the surface normal is UP.
 	placer._place_weapon_from_ui("heavy_machine_gun", Vector3(1.5, 0.75, -1.5), Vector3.UP)
 	await process_frame
 	var top_mg = null
@@ -1729,14 +1850,21 @@ func test_face_based_weapon_mounting() -> bool:
 		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun":
 			top_mg = c
 			break
-	if not top_mg or top_mg.get_meta("mount_style", "") != "pintle" or not top_mg.get_node_or_null("MountHardware"):
-		print("  [FAIL] Top-facet heavy_machine_gun should be 'pintle' with MountHardware present")
+	if not top_mg or top_mg.get_meta("mount_style", "") != "pintle":
+		print("  [FAIL] Top-facet heavy_machine_gun should be 'pintle'")
+		placer.queue_free()
+		return false
+	if top_mg.global_transform.basis.y.dot(Vector3.UP) < 0.999:
+		print("  [FAIL] Weapon placed on the top facet should sit upright (basis.y ~= UP), got ", top_mg.global_transform.basis.y)
 		placer.queue_free()
 		return false
 
-	# heavy_machine_gun on a SIDE facet: "pintle", offset outward.
-	var pre_embed_pos = placer.hull.global_position + Vector3(3.0, 0.5, 0.0)
-	placer._place_weapon_from_ui("heavy_machine_gun", pre_embed_pos, Vector3.RIGHT)
+	# heavy_machine_gun on a SIDE facet: still "pintle" (mount_style is
+	# facet-independent), flush against the side now (no outward column
+	# offset), rotated so its baked-in mount post sits flat against that
+	# facet - local-up rotated to match the RIGHT normal.
+	var side_click_pos = placer.hull.global_position + Vector3(3.0, 0.5, 0.0)
+	placer._place_weapon_from_ui("heavy_machine_gun", side_click_pos, Vector3.RIGHT)
 	await process_frame
 	var side_mg = null
 	for c in placer.hull.get_children():
@@ -1745,31 +1873,34 @@ func test_face_based_weapon_mounting() -> bool:
 			if lp.x > 0.1:
 				side_mg = c
 				break
-	if not side_mg or side_mg.get_meta("mount_style", "") != "pintle" or not side_mg.get_node_or_null("MountHardware"):
-		print("  [FAIL] Side-facet heavy_machine_gun should be 'pintle' with MountHardware present")
+	if not side_mg or side_mg.get_meta("mount_style", "") != "pintle":
+		print("  [FAIL] Side-facet heavy_machine_gun should be 'pintle'")
 		placer.queue_free()
 		return false
 	var side_local = placer.hull.to_local(side_mg.global_position)
-	if side_local.x <= 3.0:
-		print("  [FAIL] Pintle-mounted weapon on side should be offset outward from the clicked surface point, local x=", side_local.x, " (clicked at ~3.0)")
+	if abs(side_local.x - 3.0) > 0.3:
+		print("  [FAIL] Weapon should sit flush at the clicked surface point, not offset outward, local x=", side_local.x, " (clicked at ~3.0)")
+		placer.queue_free()
+		return false
+	if side_mg.global_transform.basis.y.dot(Vector3.RIGHT) < 0.999:
+		print("  [FAIL] Weapon placed on the right facet should have its local-up (baked-in mount post) rotated flush against that facet (basis.y ~= RIGHT), got ", side_mg.global_transform.basis.y)
 		placer.queue_free()
 		return false
 
-	# Mount hardware must survive a tweak-driven rebuild_visual() call, not
-	# just the initial placement (this was a real risk: build_visual() clears
-	# MeshInstance3D children on every rebuild).
+	# The flush-mount rotation must survive a tweak-driven rebuild_visual()
+	# call, not just the initial placement.
 	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 	var mg_data = top_mg.get_meta("module_data")
 	mg_data.tweaks["drum_size"] = 1.8
 	VisualBuilderScript.rebuild_visual(top_mg)
 	await process_frame
-	if not top_mg.get_node_or_null("MountHardware"):
-		print("  [FAIL] MountHardware should survive rebuild_visual() (tweak-drag), but was lost")
+	if top_mg.global_transform.basis.y.dot(Vector3.UP) < 0.999:
+		print("  [FAIL] Flush-mount rotation should survive rebuild_visual() (tweak-drag), but was lost")
 		placer.queue_free()
 		return false
 
 	placer.queue_free()
-	print("  [PASS] Face-based mounting: turret/frame_built exceptions correct, pintle_top/sponson hardware present, sponson embeds inward, hardware survives tweak rebuilds.")
+	print("  [PASS] Face-based mounting: every mount style flush-mounts at the clicked point, rotated to match the facet's surface normal; mount_style only affects combat traverse now.")
 	return true
 
 func test_module_drag_reclassifies_facet_and_mount() -> bool:
@@ -1820,8 +1951,9 @@ func test_module_drag_reclassifies_facet_and_mount() -> bool:
 		placer.queue_free()
 		return false
 
-	# Weapon placed on TOP (pintle), dragged to a SIDE face - should
-	# keep 'pintle' and update its column_dir and hardware.
+	# Weapon placed on TOP (pintle), dragged to a BACK-facing side face -
+	# should keep 'pintle' (mount_style is facet-independent) and rotate
+	# its baked-in mount post flush against the new facet.
 	placer._place_weapon_from_ui("heavy_machine_gun", Vector3(-1.5, 0.75, 1.5), Vector3.UP)
 	await process_frame
 	var mg = null
@@ -1837,37 +1969,39 @@ func test_module_drag_reclassifies_facet_and_mount() -> bool:
 	var side_world_pos = placer.hull.global_position + Vector3(0.0, 0.5, 3.0)
 	placer._update_module_placement(mg, side_world_pos, Vector3.BACK)
 	await process_frame
-	
+
 	placer._reclassify_module_after_drag(mg, Vector3.BACK)
 	await process_frame
 
-	if mg.get_meta("mount_style", "") != "pintle" or not mg.get_node_or_null("MountHardware"):
-		print("  [FAIL] Weapon dragged from top to a side face should be 'pintle' with hardware, got mount_style='", mg.get_meta("mount_style", ""), "'")
+	if mg.get_meta("mount_style", "") != "pintle":
+		print("  [FAIL] Weapon dragged from top to a back-facing face should stay 'pintle', got mount_style='", mg.get_meta("mount_style", ""), "'")
 		placer.queue_free()
 		return false
-	var col_dir = mg.get_meta("column_dir", Vector3.ZERO)
-	if col_dir.z <= 0.9:
-		print("  [FAIL] Dragged weapon should have column_dir pointing backward, got col_dir=", col_dir)
+	if mg.global_transform.basis.y.dot(Vector3.BACK) < 0.999:
+		print("  [FAIL] Dragged weapon should rotate its baked-in mount post flush against the new (BACK) facet, basis.y=", mg.global_transform.basis.y)
 		placer.queue_free()
 		return false
 
 	placer.queue_free()
-	print("  [PASS] Dragging a module to a new face re-runs facet/mount classification: armor refits+recenters, weapons get the right mount_style/hardware/embed.")
+	print("  [PASS] Dragging a module to a new face re-runs facet/mount classification: armor refits+recenters, weapons keep the right mount_style and re-flush-mount against the new facet.")
 	return true
 
 func test_angled_pintle_mount() -> bool:
-	print("Running Test Suite: Angled Pintle Mount (MOUNTING_AND_ARMOR_SPEC.md #3 correction - sloped surfaces like a glacis plate)...")
+	print("Running Test Suite: Weapon Placement On A Sloped Surface (glacis plate) Tilts To Match It (MOUNTING_AND_ARMOR_SPEC.md addendum, 2026-07-21)...")
 	var ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
-	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 
-	# Pure function checks first.
+	# Pure function check first.
 	if ModuleCatalogScript.get_mount_style("rotary_cannon", "interceptor_hull") != "pintle":
 		print("  [FAIL] rotary_cannon should resolve to pintle")
 		return false
 
 	# Real placement: a weapon on a sloped (not exactly flat) upward
-	# surface should get pintle, stay level itself, and its
-	# MountHardware should contain a BasePlate tilted to match the slope.
+	# surface should get pintle (traverse classification only - facet-
+	# independent), and its baked-in mount post should rotate flush
+	# against the real sloped surface. This reverses the older "stays
+	# level, tilt lives in a separately-drawn base plate" model - weapon
+	# meshes now carry their own mounting post/base, so the whole mesh
+	# tilts instead.
 	var placer = Node3D.new()
 	placer.name = "MainLab"
 	placer.set_script(preload("res://scripts/module_placer.gd"))
@@ -1895,47 +2029,24 @@ func test_angled_pintle_mount() -> bool:
 		placer.queue_free()
 		return false
 
-	# "Stays level" = the weapon's own basis.y is still world-up, not
-	# tilted to match the placement normal - that's the whole point of the
-	# correction (the TILT lives in the base plate, not the weapon).
-	if gun.global_transform.basis.y.dot(Vector3.UP) < 0.999:
-		print("  [FAIL] A pintle-mounted weapon on a sloped surface should stay level (basis.y ~= UP), got basis.y=", gun.global_transform.basis.y)
+	# The weapon's own basis.y should now match the placement normal - the
+	# baked-in mount post sits flush against the real sloped surface
+	# instead of the weapon artificially staying level.
+	if gun.global_transform.basis.y.dot(glacis_normal) < 0.999:
+		print("  [FAIL] A weapon placed on a sloped surface should rotate flush against it (basis.y ~= surface normal), got basis.y=", gun.global_transform.basis.y, " expected ~=", glacis_normal)
 		placer.queue_free()
 		return false
 
-	var hardware = gun.get_node_or_null("MountHardware")
-	var plate = hardware.get_node_or_null("BasePlate") if hardware else null
-	if not plate:
-		print("  [FAIL] pintle MountHardware should contain a BasePlate")
-		placer.queue_free()
-		return false
-	if plate.transform.basis.y.dot(Vector3.UP) > 0.99:
-		print("  [FAIL] BasePlate on a 45-degree sloped surface should be visibly tilted (not flat), basis.y=", plate.transform.basis.y)
-		placer.queue_free()
-		return false
-	# The plate should sit slightly INTO the hull (embedded backward along
-	# the surface normal), not flush/floating at exactly the origin.
-	if plate.position.dot(glacis_normal) >= 0.0:
-		print("  [FAIL] BasePlate should be embedded backward along the surface normal, not floating at/past the surface, position=", plate.position)
-		placer.queue_free()
-		return false
-
-	# Post itself must exist.
-	var post = hardware.get_node_or_null("MeshInstance3D") if hardware else null
-	if not post:
-		for child in hardware.get_children():
-			if child is MeshInstance3D:
-				post = child
-				break
-	if not post:
-		print("  [FAIL] pintle MountHardware should contain a post MeshInstance3D")
+	# No procedural mount hardware is drawn anymore - the authored mesh
+	# brings its own post.
+	if gun.get_node_or_null("MountHardware"):
+		print("  [FAIL] No procedural MountHardware should be created anymore")
 		placer.queue_free()
 		return false
 
 	# Save -> reconstruct round-trip: the tilt must survive a reload, not
-	# just the live in-session placement - mount_normal meta specifically
-	# exists for this; without it, reconstruct_vehicle() would fall back
-	# to the default (flat) normal and silently flatten the plate.
+	# just the live in-session placement. Position/rotation are serialized
+	# directly now (no mount-style-driven rebuild step re-derives them).
 	var blueprint = bm.serialize_hull(placer.hull)
 	var reconstructed_root = Node3D.new()
 	root.add_child(reconstructed_root)
@@ -1947,17 +2058,15 @@ func test_angled_pintle_mount() -> bool:
 		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "rotary_cannon":
 			reloaded_gun = c
 			break
-	var reloaded_hardware = reloaded_gun.get_node_or_null("MountHardware") if reloaded_gun else null
-	var reloaded_plate = reloaded_hardware.get_node_or_null("BasePlate") if reloaded_hardware else null
-	if not reloaded_plate or reloaded_plate.transform.basis.y.dot(Vector3.UP) > 0.99:
-		print("  [FAIL] BasePlate tilt should survive a save/reconstruct round-trip via mount_normal meta, got ", (reloaded_plate.transform.basis.y if reloaded_plate else "no plate"))
+	if not reloaded_gun or reloaded_gun.global_transform.basis.y.dot(glacis_normal) < 0.999:
+		print("  [FAIL] Sloped-surface tilt should survive a save/reconstruct round-trip, got ", (reloaded_gun.global_transform.basis.y if reloaded_gun else "no gun"))
 		placer.queue_free()
 		reconstructed_root.queue_free()
 		return false
 
 	placer.queue_free()
 	reconstructed_root.queue_free()
-	print("  [PASS] Angled pintle mount: sloped surfaces resolve to pintle_top (not sponson), the weapon stays level, the base plate tilts to match the real surface while embedding slightly into the hull, and the tilt survives a save/reload round-trip.")
+	print("  [PASS] Weapons placed on a sloped surface rotate flush against it (no more stays-level pintle / separately-drawn base plate), and the tilt survives a save/reload round-trip.")
 	return true
 
 func test_centerline_placement_does_not_self_mirror() -> bool:
@@ -2839,21 +2948,28 @@ func test_skirmish_economy_and_production() -> bool:
 	await process_frame
 	await process_frame
 
-	# Economy math
-	var start_metal = skirmish.economy[0].metal
-	if not skirmish.spend(0, 100, 0):
+	# Economy math - deliberately checked against ENEMY_TEAM (1), not
+	# PLAYER_TEAM (0): Chris's infinite-resources testing cheat
+	# (INFINITE_PLAYER_RESOURCES_FOR_TESTING in skirmish.gd) clamps team 0's
+	# economy back up to a floor after every spend, which is the whole
+	# point of the cheat but means team 0 can no longer exercise a real
+	# deduct-and-reject-overspend check. The underlying spend()/can_afford()
+	# logic is team-agnostic, so testing it via team 1 still covers the
+	# same code path without fighting the cheat.
+	var start_metal = skirmish.economy[1].metal
+	if not skirmish.spend(1, 100, 0):
 		print("  [FAIL] Could not spend affordable amount.")
 		skirmish.queue_free()
 		return false
-	if skirmish.economy[0].metal != start_metal - 100:
+	if skirmish.economy[1].metal != start_metal - 100:
 		print("  [FAIL] Spend did not deduct correctly.")
 		skirmish.queue_free()
 		return false
-	if skirmish.spend(0, 999999, 0):
+	if skirmish.spend(1, 999999, 0):
 		print("  [FAIL] Overspend was allowed.")
 		skirmish.queue_free()
 		return false
-	skirmish.add_resources(0, 100, 0)
+	skirmish.add_resources(1, 100, 0)
 
 	# Rosters loaded (bundled defaults guarantee at least 4 + 4)
 	if skirmish.roster.size() < 4 or skirmish.enemy_roster.size() < 4:
@@ -2959,11 +3075,21 @@ func test_match_config_overrides_apply_to_skirmish() -> bool:
 	if skirmish.enemy_faction != "expansionists":
 		print("  [FAIL] MatchConfig.enemy_faction should override the roster-derived default, got ", skirmish.enemy_faction)
 		ok = false
-	if skirmish.economy[skirmish.PLAYER_TEAM].metal != 900 or skirmish.economy[skirmish.ENEMY_TEAM].metal != 900:
-		print("  [FAIL] MatchConfig.starting_metal should set both teams' starting metal, got ", skirmish.economy)
+	# ENEMY_TEAM only - Chris's infinite-resources testing cheat
+	# (INFINITE_PLAYER_RESOURCES_FOR_TESTING in skirmish.gd) deliberately
+	# overrides PLAYER_TEAM's starting economy to a floor AFTER MatchConfig
+	# is applied, so the player's own starting_metal/crystal no longer
+	# reflects the override by design. The enemy's economy is untouched by
+	# the cheat, so it's still the right team to verify the override
+	# actually reaches Skirmish.
+	if skirmish.economy[skirmish.ENEMY_TEAM].metal != 900:
+		print("  [FAIL] MatchConfig.starting_metal should set the enemy's starting metal, got ", skirmish.economy)
 		ok = false
-	if skirmish.economy[skirmish.PLAYER_TEAM].crystal != 400 or skirmish.economy[skirmish.ENEMY_TEAM].crystal != 400:
-		print("  [FAIL] MatchConfig.starting_crystal should set both teams' starting crystal, got ", skirmish.economy)
+	if skirmish.economy[skirmish.ENEMY_TEAM].crystal != 400:
+		print("  [FAIL] MatchConfig.starting_crystal should set the enemy's starting crystal, got ", skirmish.economy)
+		ok = false
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal < skirmish.INFINITE_RESOURCE_FLOOR:
+		print("  [FAIL] PLAYER_TEAM should start at the infinite-resources testing floor regardless of MatchConfig, got ", skirmish.economy[skirmish.PLAYER_TEAM].metal)
 		ok = false
 	if skirmish.ai_difficulty != "hard":
 		print("  [FAIL] MatchConfig.ai_difficulty should flow into skirmish.ai_difficulty, got ", skirmish.ai_difficulty)
@@ -3308,10 +3434,20 @@ func test_new_faction_mechanical_bonuses() -> bool:
 	bayou_viewer.add_to_group("units")
 	bayou_viewer.add_to_group("damageable")
 	bayou_viewer.vision_range = 25.0
-	# Positioned so 25 * 0.7 (Bayou's detection_range_mult) = 17.5 < 20 <= 25 -
-	# a non-camouflaged unit at this exact distance WOULD be seen, proving
+	# Positioned at distance 22, which has to clear TWO thresholds at once:
+	#   - hidden as Bayou: 25 * 0.7 (detection_range_mult) * 1.15
+	#     (FOG_HIDE_RANGE_MULT) = 20.125 < 22
+	#   - visible as Industrialists: 22 <= 25
+	# so a non-camouflaged unit at this exact distance WOULD be seen, proving
 	# the multiplier is what hides a Bayou unit, not raw distance alone.
-	bayou_viewer.global_position = Vector3(380, 0, 0)
+	#
+	# This used to sit at distance 20, chosen against the plain 17.5 range
+	# before skirmish.gd grew the anti-flicker hysteresis band. 20 falls
+	# INSIDE that band (17.5 -> 20.125), so a unit that starts out visible
+	# never drops out and the sanity check failed - a stale test constant,
+	# not a fog bug. Suite 7 failing earlier in the `and` chain had been
+	# hiding this.
+	bayou_viewer.global_position = Vector3(378, 0, 0)
 	skirmish._recalc_fog_of_war()
 	if not bayou_enemy.fog_hidden:
 		print("  [FAIL] Sanity check failed: a Bayou Irregulars unit just outside its reduced detection range should still be fog_hidden")
@@ -4812,11 +4948,29 @@ func test_navmesh_routes_around_the_lake() -> bool:
 		skirmish.queue_free()
 		return false
 
-	# Query straight across the lake (LAKE_CENTER=(18,0,0), half-extents
-	# 7x7 -> bounds x:[11,25] z:[-7,7]) - a real ground path must detour
+	# Read the lake's real position/extent from the live map instead of a
+	# hardcoded literal (Skirmish refinement pass: lake_crossing's lake is
+	# now an organic water_blob, not a fixed rect, and map scale itself can
+	# change independently of this test) - is_position_blocked() is the
+	# actual ground-truth query every other system already trusts, so using
+	# it here instead of re-deriving bounds keeps this test honest no
+	# matter how the map's water is authored.
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	var lake_center: Vector3 = Vector3(27, 0, 0)
+	var lake_span: float = 15.0
+	if not skirmish.current_map.get("water_blobs", []).is_empty():
+		var blob = skirmish.current_map.water_blobs[0]
+		lake_center = blob.center
+		lake_span = blob.get("radius", 10.0)
+	elif not skirmish.current_map.get("water_areas", []).is_empty():
+		var w = skirmish.current_map.water_areas[0]
+		lake_center = w.center
+		lake_span = max(w.half_extents.x, w.half_extents.y)
+
+	# Query straight across the lake - a real ground path must detour
 	# around it, not cut straight through.
-	var start = Vector3(0, 0, 0)
-	var end = Vector3(35, 0, 0)
+	var start = Vector3(lake_center.x - lake_span * 2.5, 0, lake_center.z)
+	var end = Vector3(lake_center.x + lake_span * 2.5, 0, lake_center.z)
 	var path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, start, end, true)
 	if path.size() < 2:
 		print("  [FAIL] Expected a real multi-point path across the map, got ", path.size(), " points")
@@ -4824,7 +4978,7 @@ func test_navmesh_routes_around_the_lake() -> bool:
 		return false
 	var crosses_lake = false
 	for p in path:
-		if p.x > 11.0 and p.x < 25.0 and p.z > -7.0 and p.z < 7.0:
+		if TerrainBuilderScript.is_position_blocked(skirmish.current_map, p):
 			crosses_lake = true
 	if crosses_lake:
 		print("  [FAIL] Ground navmesh path should detour around the lake, not cross through its bounds")
@@ -4834,7 +4988,7 @@ func test_navmesh_routes_around_the_lake() -> bool:
 	# The water navmesh, conversely, should ONLY have geometry inside the
 	# lake bounds - a path query from land to land on the water map
 	# should be empty/degenerate (there's simply no connected water there).
-	var water_path = NavigationServer3D.map_get_path(skirmish.water_nav_map, Vector3(18, 0, 0), Vector3(18, 0, 3), true)
+	var water_path = NavigationServer3D.map_get_path(skirmish.water_nav_map, lake_center, lake_center + Vector3(0, 0, 3), true)
 	if water_path.size() < 2:
 		print("  [FAIL] A short path fully inside the lake should resolve on the water navmesh, got ", water_path.size(), " points")
 		skirmish.queue_free()
@@ -5007,14 +5161,29 @@ func test_unit_order_move_actually_navigates_around_the_lake() -> bool:
 		skirmish.queue_free()
 		return false
 
+	# Same live-map-derived lake bounds as test_navmesh_routes_around_the_lake()
+	# - see that test's comment for why a hardcoded literal doesn't hold up
+	# across map scale/shape changes.
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	var lake_center: Vector3 = Vector3(27, 0, 0)
+	var lake_span: float = 15.0
+	if not skirmish.current_map.get("water_blobs", []).is_empty():
+		var blob = skirmish.current_map.water_blobs[0]
+		lake_center = blob.center
+		lake_span = blob.get("radius", 10.0)
+	elif not skirmish.current_map.get("water_areas", []).is_empty():
+		var w = skirmish.current_map.water_areas[0]
+		lake_center = w.center
+		lake_span = max(w.half_extents.x, w.half_extents.y)
+
 	var start_pos = unit.global_position
-	unit.order_move(Vector3(35, 0.5, 0))
+	unit.order_move(Vector3(lake_center.x + lake_span * 2.5, 0.5, lake_center.z))
 
 	var crossed_lake = false
 	for i in range(140):
 		unit._physics_process(1.0 / 60.0)
 		unit.move_and_slide()
-		if unit.global_position.x > 11.0 and unit.global_position.x < 25.0 and unit.global_position.z > -7.0 and unit.global_position.z < 7.0:
+		if TerrainBuilderScript.is_position_blocked(skirmish.current_map, unit.global_position):
 			crossed_lake = true
 
 	var moved_dist = start_pos.distance_to(unit.global_position)
@@ -5047,8 +5216,13 @@ func test_terrain_builder_pure_functions() -> bool:
 	if TerrainBuilder.terrain_height_at(map_def, Vector3(0, 0, -20)) != 6.0:
 		print("  [FAIL] Plateau center should report height 6.0")
 		return false
-	if TerrainBuilder.terrain_height_at(map_def, Vector3(40, 0, 40)) != 0.0:
-		print("  [FAIL] Flat ground far from any zone should report height 0.0")
+	# Skirmish refinement pass: "flat" ground now carries real low-amplitude
+	# rolling noise (height_at()'s baseline contribution) instead of being
+	# hardcoded to exactly 0.0 - a small tolerance replaces the old exact
+	# equality check, still well clear of the elevation zone's real 6.0.
+	var flat_h = TerrainBuilder.terrain_height_at(map_def, Vector3(40, 0, 40))
+	if abs(flat_h) > 1.0:
+		print("  [FAIL] Flat ground far from any zone should report a height near 0.0 (noise only), got ", flat_h)
 		return false
 	var ramp_h = TerrainBuilder.terrain_height_at(map_def, Vector3(0, 0, -35))
 	if ramp_h <= 0.5 or ramp_h >= 5.5:
@@ -5424,9 +5598,11 @@ func test_build_placement_rejects_water_and_obstacles() -> bool:
 
 	skirmish.placing = {"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}
 	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
-	# lake_crossing's real lake is at (18,0,0) with half-extents (7,7) - well
-	# within the player's 28m build radius of their own base.
-	skirmish._try_place_building(Vector3(18, 0, 0))
+	# lake_crossing's real lake is at (27,0,0) with half-extents (10.5,10.5)
+	# (scaled 1.5x from the map's original size in the Skirmish refinement
+	# pass) - the placement should be rejected as water regardless of base
+	# proximity, which is all this test actually asserts.
+	skirmish._try_place_building(Vector3(27, 0, 0))
 	var buildings_after = skirmish.get_team_buildings(skirmish.PLAYER_TEAM).size()
 
 	if skirmish.economy[skirmish.PLAYER_TEAM].metal != metal_before:
@@ -6742,6 +6918,17 @@ func test_damage_model_rof_chip_strip_and_air_rules() -> bool:
 	var air_target = skirmish.spawn_unit(bp, 1, Vector3(30, 0, 0))
 	await process_frame
 	air_target.is_flying = true
+	# Give both targets far more HP than the test can chew through. Damage is
+	# floored at 0 hp, so if a target DIES mid-loop its recorded damage clamps
+	# to its starting HP - and with both targets clamping, the anti-air
+	# multiplier becomes invisible (both read exactly max_hp). That is what
+	# started happening once the hull catalog was re-authored to smaller
+	# sizes: compute_hull_max_hp() returned less, and 40 x 20 was suddenly
+	# enough to overkill both. Not a combat bug - a test that had been
+	# quietly relying on the targets outlasting the loop.
+	for t in [ground_target, air_target]:
+		t.max_hp = 1000000.0
+		t.hp = 1000000.0
 	var g0 = ground_target.hp
 	var a0 = air_target.hp
 	# Use a modest above-threshold amount; run several hits to average out
@@ -7519,6 +7706,29 @@ func test_every_weight_tweak_also_costs_real_resources() -> bool:
 
 func test_target_dummies_actually_take_damage_in_test_range() -> bool:
 	print("Running Test Suite: Test Range Target Dummies Actually Take Damage...")
+	# KNOWN FAILURE, 2026-07-21 - fails HERE but passes standalone.
+	#
+	# Diagnosis so far: run after the ~110 preceding suites, the Test Range
+	# vehicle sinks to y = -1.45 (well under the battlefield floor) instead of
+	# resting at ~0.94. From down there the turret can never slew inside the
+	# 15-degree firing cone, so it fires ZERO shots across all 400 ticks and
+	# the dummies read a flat 500 -> 500 - which looks exactly like "weapons
+	# are broken" even though target lock, line of sight and range are all
+	# healthy the whole time. Driving the identical fixture in a standalone
+	# script drops them 500 -> ~373 with 36 shots fired, so the weapons are
+	# fine and this is cross-suite interference.
+	#
+	# Ruled out: stale nodes in the "targets"/"damageable"/"units" groups (the
+	# lookup below is scoped to this scene, and the counts are clean anyway);
+	# leftover scenes' colliders in the shared World3D (force-freeing every
+	# root child first changes nothing); Engine.time_scale /
+	# physics_ticks_per_second / SceneTree.paused (nothing in this file
+	# touches them); GlobalConfig statics (likewise untouched).
+	#
+	# Still unexplained: what actually drags the vehicle's ground-snap down.
+	# Left failing rather than skipped or loosened - it is a real signal about
+	# suite isolation, and quietly neutering it would hide the Test Range's
+	# only end-to-end live-fire check.
 	# Regression test for a real bug: target_dummy.gd's take_damage() only
 	# accepted 2 args while auto_weapon.gd's _deal_weapon_damage() had moved
 	# on to calling it with a 3rd hit_origin arg (added for facet-gated
@@ -7592,7 +7802,21 @@ func test_target_dummies_actually_take_damage_in_test_range() -> bool:
 		battlefield_scene.queue_free()
 		return false
 
-	var dummies = get_nodes_in_group("targets")
+	# Scope to THIS battlefield's own dummies rather than the global "targets"
+	# group. Other suites spawn dummies/targets too, and a queue_free()d one
+	# stays in the group until the deferred free actually lands - so the
+	# global lookup could hand back a previous suite's five untouched dummies
+	# while this scene's five were the ones getting shot, reporting a flat
+	# 500 -> 500 no matter how well the guns worked. Run in isolation the same
+	# fixture drops 500 -> ~373.
+	var dummies = []
+	for d in get_nodes_in_group("targets"):
+		if is_instance_valid(d) and battlefield_scene.is_ancestor_of(d):
+			dummies.append(d)
+	if dummies.is_empty():
+		print("  [FAIL] Battlefield scene spawned no target dummies of its own.")
+		battlefield_scene.queue_free()
+		return false
 	var initial_total_health = 0.0
 	for d in dummies:
 		initial_total_health += d.health

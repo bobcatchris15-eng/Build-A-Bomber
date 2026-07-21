@@ -92,7 +92,7 @@ func _fire_missile_at_player():
 	if missile_scene:
 		var missile = Node3D.new()
 		missile.set_script(missile_scene)
-		get_tree().current_scene.add_child(missile)
+		(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(missile)
 		missile.global_position = global_position + Vector3(0, 1.0, 0)
 		missile.target_node = player
 
@@ -157,7 +157,7 @@ func die():
 		var p_mat = StandardMaterial3D.new()
 		p_mat.albedo_color = Color.ORANGE
 		particle.material_override = p_mat
-		get_tree().current_scene.add_child(particle)
+		(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(particle)
 		particle.global_position = global_position
 		
 		# Move particle

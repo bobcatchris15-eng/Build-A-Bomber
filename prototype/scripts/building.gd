@@ -69,6 +69,16 @@ var energy_capacity: float = 0.0
 # sensor_suite bonus), see setup_defense().
 var vision_range: float = 15.0
 var fog_hidden: bool = false
+# Three-state fog (Skirmish refinement pass): once a structure has been
+# scouted, it stays visible-but-dimmed at its last-known (== current, since
+# buildings don't move) position instead of vanishing the instant it leaves
+# current vision - RA2's convention for structures vs. units. fog_hidden
+# keeps meaning exactly what it always did ("not currently visible" - every
+# existing gate on it, e.g. skirmish.gd's right-click order check and
+# battle_unit.gd's auto-engage scan, is unaffected); fog_ever_seen is new
+# and purely drives the visual dim/hide choice below.
+var fog_ever_seen: bool = false
+const FOG_DIM_TRANSPARENCY: float = 0.55
 
 # Factory production queue: array of {blueprint: Dictionary, time_left: float, total_time: float}
 var production_queue: Array = []
@@ -178,11 +188,11 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 		var d_hull_scale = defense_hull.get_meta("hull_scale") if defense_hull.has_meta("hull_scale") else Vector3.ONE
 		max_hp = ModuleCatalog.compute_hull_max_hp(hull_type, armor_thickness, armor_material, d_hull_scale)
 		hp = max_hp
-		footprint = catalog_data.size
+		footprint = catalog_data.get("size", Vector3.ONE)
 
 		var col = CollisionShape3D.new()
 		var col_box = BoxShape3D.new()
-		var base_size = catalog_data.size
+		var base_size = catalog_data.get("size", Vector3.ONE)
 		if defense_hull.has_meta("base_hull_size") and defense_hull.has_meta("hull_scale"):
 			base_size = defense_hull.get_meta("base_hull_size") * defense_hull.get_meta("hull_scale")
 		col_box.size = base_size
@@ -258,13 +268,31 @@ func set_selected(selected: bool):
 	if is_instance_valid(selection_ring):
 		selection_ring.visible = selected
 
-# Fog-of-war: see battle_unit.gd's set_fog_visible() for the full
-# reasoning - same "currently visible only" model applies to buildings too
-# (not the fuller "revealed once explored, stays dimly visible after"
-# tier some RTS games have - a deliberate simplification for this pass).
+# Fog-of-war: see battle_unit.gd's set_fog_visible() for the "currently
+# visible only" model that still applies to mobile units. Buildings get the
+# fuller three-state treatment - once ever_seen, a structure stays visible
+# (dimmed) rather than snapping back to hidden, since a building's
+# last-known position IS its current position.
 func set_fog_visible(is_visible: bool):
 	fog_hidden = not is_visible
-	visible = is_visible
+	if is_visible:
+		fog_ever_seen = true
+		visible = true
+		_set_fog_dim(false)
+	elif fog_ever_seen:
+		visible = true
+		_set_fog_dim(true)
+	else:
+		visible = false
+
+func _set_fog_dim(dim: bool):
+	_set_fog_dim_recursive(self, dim)
+
+static func _set_fog_dim_recursive(node: Node, dim: bool):
+	for child in node.get_children():
+		if child is GeometryInstance3D:
+			child.transparency = FOG_DIM_TRANSPARENCY if dim else 0.0
+		_set_fog_dim_recursive(child, dim)
 
 func _update_hp_bar():
 	if not is_instance_valid(hp_bar): return

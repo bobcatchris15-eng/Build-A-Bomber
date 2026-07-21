@@ -9,8 +9,38 @@ var start_scale: Vector3
 var child_start_positions: Dictionary = {}
 var start_tweaks: Dictionary = {}
 
+const HANDLE_COLORS := {
+	"HandleX": Color(0.95, 0.26, 0.30),
+	"HandleY": Color(0.42, 0.85, 0.32),
+	"HandleZ": Color(0.30, 0.55, 0.95),
+	"HandleRotate": Color(0.95, 0.80, 0.25),
+}
+
+# The handle meshes ship with no material at all in Gizmo3D.tscn, so they used
+# to render flat white - and module_placer.gd's clipping pass then walked into
+# the gizmo and overwrote them with the module's own colour (or red). With that
+# pass no longer touching the gizmo, give the handles the conventional
+# red/green/blue per-axis colours so it reads as a manipulator rather than as
+# part of the model. Unshaded and drawn on top so it stays legible against a
+# dark hull or from inside a large module.
+func _paint_handles():
+	for handle_name in HANDLE_COLORS:
+		var handle = get_node_or_null(handle_name)
+		if not handle:
+			continue
+		var mesh_inst = handle.get_node_or_null("MeshInstance3D") as MeshInstance3D
+		if not mesh_inst:
+			continue
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = HANDLE_COLORS[handle_name]
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.no_depth_test = true
+		mat.render_priority = 1
+		mesh_inst.material_override = mat
+
 func _ready():
 	target_module = get_parent()
+	_paint_handles()
 
 	# Connect to the 3 linear handles (X/Y/Z scale/tweak drag)
 	for child in get_children():
@@ -131,6 +161,14 @@ func _on_dragged(offset_3d: Vector3, axis: Vector3):
 		var mirror = target_module.get_meta("mirrored_counterpart")
 		if is_instance_valid(mirror):
 			_apply_scale_to_node(mirror, new_scale)
+			# Chirality is no longer carried by a negative scale on the
+			# mirror's own node - module_placer.gd's _apply_mirror_flip()
+			# reflects the module's VISUAL CHILDREN in module space instead,
+			# which survives this scale write untouched and keeps the negative
+			# factor out of both the collision shape and
+			# module_data.scale_multiplier (which the stat maths reads).
+			# Re-asserting scale.x = -abs(scale.x) here would now double up
+			# with that child-level reflection and un-mirror the part.
 		
 	# Notify UI
 	get_tree().call_group("stat_ui", "update_stats", get_node("/root/MainLab/Hull"))
@@ -165,15 +203,36 @@ func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
 		# the visible mesh until some later full rebuild (FABLE_REVIEW.md 3.8).
 		var armor_thick = node.get_meta("armor_thickness") if node.has_meta("armor_thickness") else 1.0
 		var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
+		var hull_type = node.get_meta("type_id") if node.has_meta("type_id") else "medium_hull"
 		var mesh_inst = node.get_node_or_null("MeshInstance3D")
+		var phys_mesh = node.get_node_or_null("PhysicsMesh")
 		if mesh_inst and mesh_inst.mesh is BoxMesh:
 			if not mesh_inst.mesh.resource_local_to_scene:
 				mesh_inst.mesh = mesh_inst.mesh.duplicate()
 			mesh_inst.mesh.size = target_size
+			if phys_mesh:
+				phys_mesh.mesh = mesh_inst.mesh
 		elif mesh_inst:
-			mesh_inst.scale = new_scale * armor_bulk
-			
-		# Resize CollisionShape3D
+			# An authored .glb needs the orientation + per-axis fit that maps
+			# it onto its catalog box folded in, exactly as
+			# update_hull_appearance() does. Assigning the raw hull_scale here
+			# dropped that factor entirely, so the hull's visible size jumped
+			# the instant a scale handle was grabbed and then tracked a
+			# different curve than the collider for the rest of the drag.
+			var fit = ModuleCatalogScript.get_hull_mesh_fit(hull_type, mesh_inst.mesh, new_scale * armor_bulk)
+			mesh_inst.rotation = fit["rotation"]
+			mesh_inst.scale = fit["scale"]
+			mesh_inst.position = fit["position"]
+			# The physics copy is never drawn but other code reads its
+			# transform, so it must not drift away from the visual one.
+			if phys_mesh:
+				phys_mesh.rotation = fit["rotation"]
+				phys_mesh.scale = fit["scale"]
+				phys_mesh.position = fit["position"]
+
+		# Resize CollisionShape3D. Stays axis-aligned in hull-local space -
+		# see module_placer.gd's _place_hull_from_ui() for why it must not
+		# inherit the mesh's orientation correction.
 		var col_shape = node.get_node_or_null("CollisionShape3D")
 		if col_shape and col_shape.shape is BoxShape3D:
 			if not col_shape.shape.resource_local_to_scene:
