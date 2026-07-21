@@ -32,3 +32,7 @@ prototype/.tools/
 
 # Python bytecode from top-level blender_cleanup.py / run_tripo.py
 __pycache__/
+
+# Exported builds (regenerable via `godot --export-release`, not source) -
+# export_presets.cfg itself IS tracked, so any export stays reproducible.
+/builds/

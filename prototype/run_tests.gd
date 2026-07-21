@@ -8082,8 +8082,11 @@ func test_idle_units_auto_engage_sighted_enemies() -> bool:
 		idle_unit.queue_free(); moving_unit.queue_free(); enemy.queue_free(); bp_manager.queue_free()
 		return false
 
-	# Advance past the throttled scan interval (0.5s).
-	for i in range(40):
+	# Advance past both the idle-before-engaging grace period
+	# (IDLE_BEFORE_AUTO_ENGAGE, 1.5s - a move order is now inviolable, only
+	# an idle unit starts hunting on its own, and only after sitting idle
+	# that long) and the throttled scan interval on top of it (0.5s).
+	for i in range(200):
 		await process_frame
 
 	var idle_engaged = idle_unit.order == idle_unit.OrderType.ATTACK and idle_unit.attack_target == enemy
