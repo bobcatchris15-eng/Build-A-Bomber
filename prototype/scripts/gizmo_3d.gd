@@ -270,14 +270,12 @@ func get_tweak_for_axis(type_id: String, axis: Vector3) -> String:
 				return "caliber"
 			"gauss_railgun":
 				return "rail_length"
-			"heavy_howitzer":
-				return "elevation"
+			"artillery":
+				return "barrel_length"
 			"spigot_mortar":
 				return "rod_thickness"
 			"guided_missile":
 				return "seeker_size"
-			"dual_stage_missile":
-				return "payload_size"
 			"flamethrower":
 				return "nozzle_width"
 			"heavy_laser":
@@ -308,8 +306,6 @@ func get_tweak_for_axis(type_id: String, axis: Vector3) -> String:
 				return "barrel_length"
 			"guided_missile":
 				return "engine_length"
-			"dual_stage_missile":
-				return "ascent_thruster"
 			"flamethrower":
 				return "pressure_valve"
 			"resource_harvester":

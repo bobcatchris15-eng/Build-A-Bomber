@@ -56,32 +56,35 @@ const TWEAK_SPECS = {
 		{"name": "barrel_count", "label": "Barrel Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 1.0}
 	],
 	"heavy_machine_gun": [
+		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "multi_barrel", "label": "Multi-Barrel Mode", "type": "bool", "default": false},
 		{"name": "drum_size", "label": "Ammo Drum Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
 	"rotary_cannon": [
-		{"name": "barrel_count", "label": "Barrel Count", "min": 3.0, "max": 8.0, "step": 1.0, "default": 6.0},
+		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_count", "label": "Barrel Count", "min": 3.0, "max": 9.0, "step": 1.0, "default": 6.0},
 		{"name": "motor_size", "label": "Electric Motor Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
 	"gauss_railgun": [
+		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "rail_length", "label": "Electromagnetic Rail Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
-	"heavy_howitzer": [
-		{"name": "elevation", "label": "Howitzer Elevation Mount", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	"artillery": [
+		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_count", "label": "Barrel Count", "min": 1.0, "max": 2.0, "step": 1.0, "default": 1.0}
 	],
 	"mortar_array": [
+		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Mortar Tube Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "tube_count", "label": "Mortar Tube Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0}
 	],
-	"spigot_mortar": [
-		{"name": "rod_thickness", "label": "Spigot Rod Thickness", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
-	],
 	"guided_missile": [
-		{"name": "seeker_size", "label": "Seeker Head Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "engine_length", "label": "Missile Engine Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
-	],
-	"dual_stage_missile": [
-		{"name": "ascent_thruster", "label": "Top-Attack Ascent Thruster", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "payload_size", "label": "Warhead Payload Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+		{"name": "seeker_size", "label": "Missile Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "engine_length", "label": "Launch Tube Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_count", "label": "Launcher Tube Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 1.0}
 	],
 	"missile_pod": [
 		{"name": "grid_size", "label": "Swarm Pod Grid Size", "min": 2.0, "max": 6.0, "step": 1.0, "default": 4.0}

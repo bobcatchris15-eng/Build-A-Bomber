@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://j1qemrlgr1hp"
-path="res://.godot/imported/guided_missile.glb-fb339c22175cfa9b1537733c7a74ef2b.scn"
+uid="uid://bug1uwc1o0b5v"
+path="res://.godot/imported/railgun_capacitor_housing.glb-3492820fe2a8fa6a2d36c529e94b20c3.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/guided_missile.glb"
-dest_files=["res://.godot/imported/guided_missile.glb-fb339c22175cfa9b1537733c7a74ef2b.scn"]
+source_file="res://assets/models/parts/railgun_capacitor_housing.glb"
+dest_files=["res://.godot/imported/railgun_capacitor_housing.glb-3492820fe2a8fa6a2d36c529e94b20c3.scn"]
 
 [params]
 

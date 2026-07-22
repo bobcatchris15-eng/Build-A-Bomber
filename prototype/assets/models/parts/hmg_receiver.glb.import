@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://bd0b4pgt4yppy"
-path="res://.godot/imported/heavy_machine_gun.glb-2f78099ed3bd588b75bf6f361a840126.scn"
+uid="uid://ccibmqlb86q23"
+path="res://.godot/imported/hmg_receiver.glb-b1e0ffbd96c3d125cc2959ab45a44cc7.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/heavy_machine_gun.glb"
-dest_files=["res://.godot/imported/heavy_machine_gun.glb-2f78099ed3bd588b75bf6f361a840126.scn"]
+source_file="res://assets/models/parts/hmg_receiver.glb"
+dest_files=["res://.godot/imported/hmg_receiver.glb-b1e0ffbd96c3d125cc2959ab45a44cc7.scn"]
 
 [params]
 

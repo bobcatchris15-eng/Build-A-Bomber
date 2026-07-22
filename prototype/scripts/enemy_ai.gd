@@ -96,7 +96,7 @@ func _combat_roster() -> Array:
 # fall through unchanged to the existing round-robin cycle below - this is a
 # bias layered on the existing production loop, not a replacement for it.
 const ANTI_AIR_WEAPONS = ["ciws", "flak_cannon", "pd_laser"]
-const ANTI_ARMOR_WEAPONS = ["gauss_railgun", "heavy_howitzer", "ion_cannon", "tesla_coil"]
+const ANTI_ARMOR_WEAPONS = ["gauss_railgun", "artillery", "ion_cannon", "tesla_coil"]
 const COUNTER_SCOUT_MIN_UNITS = 2
 const COUNTER_SCOUT_MAJORITY = 0.4
 

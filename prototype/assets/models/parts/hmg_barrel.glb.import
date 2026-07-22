@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dd22r7l6612br"
-path="res://.godot/imported/gauss_railgun.glb-e3905e379d9f5c52677bae7a3f333bb4.scn"
+uid="uid://65aue38pisby"
+path="res://.godot/imported/hmg_barrel.glb-6a296129c3cc8c6e24363a5d3fe70f57.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/gauss_railgun.glb"
-dest_files=["res://.godot/imported/gauss_railgun.glb-e3905e379d9f5c52677bae7a3f333bb4.scn"]
+source_file="res://assets/models/parts/hmg_barrel.glb"
+dest_files=["res://.godot/imported/hmg_barrel.glb-6a296129c3cc8c6e24363a5d3fe70f57.scn"]
 
 [params]
 

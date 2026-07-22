@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://m8xgj0q6f3j2"
-path="res://.godot/imported/mortar_array.glb-b6134b0b49ae7625911906772164b1c9.scn"
+uid="uid://bcemsikcupjm1"
+path="res://.godot/imported/rotary_housing.glb-6f42df80779b9eb751da863c215d5610.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/mortar_array.glb"
-dest_files=["res://.godot/imported/mortar_array.glb-b6134b0b49ae7625911906772164b1c9.scn"]
+source_file="res://assets/models/parts/rotary_housing.glb"
+dest_files=["res://.godot/imported/rotary_housing.glb-6f42df80779b9eb751da863c215d5610.scn"]
 
 [params]
 
