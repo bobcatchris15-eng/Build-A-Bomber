@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://fojnk58blhbw"
-path="res://.godot/imported/rotary_cannon.glb-33ff9e271de8fe00407d5afa7dace7fc.scn"
+uid="uid://ch6bmkkl1ofxa"
+path="res://.godot/imported/tow_pintle_mount.glb-8e166c5e63197ad3785483e57490e9d2.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/rotary_cannon.glb"
-dest_files=["res://.godot/imported/rotary_cannon.glb-33ff9e271de8fe00407d5afa7dace7fc.scn"]
+source_file="res://assets/models/parts/tow_pintle_mount.glb"
+dest_files=["res://.godot/imported/tow_pintle_mount.glb-8e166c5e63197ad3785483e57490e9d2.scn"]
 
 [params]
 

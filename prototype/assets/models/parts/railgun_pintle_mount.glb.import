@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://d2ycyx2ct6c4a"
-path="res://.godot/imported/heavy_howitzer.glb-82908ac9373247896f1028d03db63e7f.scn"
+uid="uid://d3o5m7045q0wt"
+path="res://.godot/imported/railgun_pintle_mount.glb-0e5d502be919fa4d6ac645efaacbb9e0.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/heavy_howitzer.glb"
-dest_files=["res://.godot/imported/heavy_howitzer.glb-82908ac9373247896f1028d03db63e7f.scn"]
+source_file="res://assets/models/parts/railgun_pintle_mount.glb"
+dest_files=["res://.godot/imported/railgun_pintle_mount.glb-0e5d502be919fa4d6ac645efaacbb9e0.scn"]
 
 [params]
 

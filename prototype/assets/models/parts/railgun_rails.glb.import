@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cef6f21dv4x8d"
-path="res://.godot/imported/spigot_mortar.glb-9980eb41825a9aa90ac04f14d22b18e8.scn"
+uid="uid://ci2esrot8xlgn"
+path="res://.godot/imported/railgun_rails.glb-51948df1bbbd13b11af29415d71cfa6e.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/spigot_mortar.glb"
-dest_files=["res://.godot/imported/spigot_mortar.glb-9980eb41825a9aa90ac04f14d22b18e8.scn"]
+source_file="res://assets/models/parts/railgun_rails.glb"
+dest_files=["res://.godot/imported/railgun_rails.glb-51948df1bbbd13b11af29415d71cfa6e.scn"]
 
 [params]
 

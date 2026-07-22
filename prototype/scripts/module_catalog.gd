@@ -180,8 +180,8 @@ static func _build_catalog_literal() -> Dictionary:
 		},
 
 		# --- INDIRECT FIRE ---
-		"heavy_howitzer": {
-			"name": "Heavy Howitzer",
+		"artillery": {
+			"name": "Artillery",
 			"category": "weapon",
 			"hp": 150.0,
 			"weight": 250.0,
@@ -213,24 +213,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"size": Vector3(1.2, 0.6, 1.2),
 			"color": Color.OLIVE
 		},
-		"spigot_mortar": {
-			"name": "Petard Spigot Mortar",
-			"category": "weapon",
-			"hp": 110.0,
-			"weight": 140.0,
-			"pintle_min_up_alignment": 0.55, # same indirect-fire reasoning as mortar_array
-			"traverse_agility": 0.5, # same slow-deliberate reasoning as mortar_array
-			# Balance pass (tools/balance_report.gd, ENERGY_AND_BALANCE_SPEC.md
-			# #6): had the highest raw dps in the game at less than half the
-			# cost of comparable weapons (gauss_railgun/heavy_howitzer) -
-			# value/cost was 6.31 against a category average of 2.86, more
-			# than 2x an outlier. Cost raised, dps/hp untouched.
-			"metal": 65,
-			"crystal": 15,
-			"dps": 130.0,
-			"size": Vector3(1.0, 1.0, 1.0),
-			"color": Color.DARK_KHAKI
-		},
 
 		# --- MISSILES & DRONES ---
 		"guided_missile": {
@@ -250,19 +232,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"traverse_agility": 0.9,
 			"size": Vector3(0.6, 0.4, 1.6),
 			"color": Color.GOLD
-		},
-		"dual_stage_missile": {
-			"name": "Top-Attack Javelin",
-			"category": "weapon",
-			"hp": 75.0,
-			"weight": 70.0,
-			"metal": 35,
-			"crystal": 25,
-			"dps": 70.0,
-			"pintle_min_up_alignment": 0.25, # guided - same reasoning as guided_missile
-			"traverse_agility": 0.85, # guided - same reasoning as guided_missile, slightly heavier launcher
-			"size": Vector3(0.7, 0.5, 1.8),
-			"color": Color.YELLOW_GREEN
 		},
 		"missile_pod": {
 			"name": "Swarm Missile Pod",
@@ -1342,9 +1311,9 @@ const PROJECTILE_CLASS = {
 	"resource_harvester": "hitscan", "repair_array": "hitscan",
 	"basic_cannon": "ballistic", "heavy_machine_gun": "ballistic", "rotary_cannon": "ballistic",
 	"ciws": "ballistic", "flak_cannon": "ballistic", "flamethrower": "ballistic",
-	"heavy_howitzer": "arc", "mortar_array": "arc", "spigot_mortar": "arc",
+	"artillery": "arc", "mortar_array": "arc",
 	"cluster_dispenser": "arc", "plasma_lobber": "arc",
-	"guided_missile": "guided", "dual_stage_missile": "guided", "missile_pod": "guided",
+	"guided_missile": "guided", "missile_pod": "guided",
 	"drone_carrier": "guided",
 }
 

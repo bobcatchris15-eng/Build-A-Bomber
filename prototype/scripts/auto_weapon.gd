@@ -375,7 +375,7 @@ func _ready():
 			
 		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws"]:
 			damage_class = "kinetic"
-		elif type_id in ["heavy_howitzer", "mortar_array", "spigot_mortar", "guided_missile", "dual_stage_missile", "missile_pod", "cluster_dispenser", "flak_cannon"]:
+		elif type_id in ["artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flak_cannon"]:
 			damage_class = "explosive"
 		elif type_id in ENERGY_DAMAGE_CLASS_TYPES:
 			# See ENERGY_DAMAGE_CLASS_TYPES's own comment for the full
@@ -404,7 +404,7 @@ func _ready():
 			fire_range = 45.0
 			fire_rate = 3.5
 			laser_color = Color.BLUE_VIOLET
-		elif type_id == "heavy_howitzer":
+		elif type_id == "artillery":
 			fire_range = 50.0
 			fire_rate = 4.5
 			laser_color = Color.SADDLE_BROWN
@@ -412,18 +412,10 @@ func _ready():
 			fire_range = 28.0
 			fire_rate = 2.0
 			laser_color = Color.OLIVE
-		elif type_id == "spigot_mortar":
-			fire_range = 10.0
-			fire_rate = 4.0
-			laser_color = Color.CRIMSON
 		elif type_id == "guided_missile":
 			fire_range = 35.0
 			fire_rate = 3.0
 			laser_color = Color.YELLOW
-		elif type_id == "dual_stage_missile":
-			fire_range = 38.0
-			fire_rate = 4.0
-			laser_color = Color.YELLOW_GREEN
 		elif type_id == "missile_pod":
 			fire_range = 30.0
 			fire_rate = 2.8
@@ -671,23 +663,12 @@ func _physics_process(delta):
 					if motor_size > 0.0:
 						spin_needed /= motor_size
 				
-				# Visually rotate barrels if spun up or spinning. Flag-gated
-				# (GlobalConfig.enable_animated_monolithic_parts): the old
-				# behavior rotated the ENTIRE weapon node (base/mount and
-				# all), since there was no isolated barrel-only target -
-				# visual_builder.gd now wraps the barrels in a "BarrelCluster"
-				# pivot (see _attach_rotary_barrels), so spin that instead
-				# when the flag is on. Falls back to the historical
-				# whole-weapon spin when it's off, so this stays a pure
-				# opt-in visual change.
-				if GlobalConfig.enable_animated_monolithic_parts:
-					var barrel_cluster = get_node_or_null("BarrelCluster")
-					if barrel_cluster:
-						barrel_cluster.rotate_object_local(Vector3.FORWARD, delta * (spin_up_timer / spin_needed) * 30.0)
-					else:
-						rotate_object_local(Vector3.FORWARD, delta * (spin_up_timer / spin_needed) * 30.0)
-				else:
-					rotate_object_local(Vector3.FORWARD, delta * (spin_up_timer / spin_needed) * 30.0)
+				# Visually rotate barrels if spun up or spinning.
+				var barrel_cluster = get_node_or_null("BarrelCluster")
+				if not barrel_cluster:
+					barrel_cluster = find_child("BarrelCluster", true, false)
+				if barrel_cluster:
+					barrel_cluster.rotate_object_local(Vector3.FORWARD, delta * (spin_up_timer / spin_needed) * 30.0)
 				
 				if spin_up_timer < spin_needed:
 					spin_up_timer += delta
@@ -919,16 +900,12 @@ func _fire_at_target():
 			_fire_kinetic_projectile(0.012, 0.2, 0.06, laser_color, false)
 		"gauss_railgun":
 			_fire_railgun_beam()
-		"heavy_howitzer":
-			_fire_heavy_howitzer()
+		"artillery":
+			_fire_artillery()
 		"mortar_array":
 			_fire_mortar_salvo()
-		"spigot_mortar":
-			_fire_spigot_mortar()
 		"guided_missile":
 			_fire_missile_projectile(false)
-		"dual_stage_missile":
-			_fire_missile_projectile(true)
 		"missile_pod":
 			_fire_swarm_missiles()
 		"drone_carrier":
@@ -1062,7 +1039,7 @@ func _fire_railgun_beam():
 	tween.tween_property(beam, "scale", Vector3(0.0, 1.0, 0.0), 0.15)
 	tween.finished.connect(func(): beam.queue_free())
 
-func _fire_heavy_howitzer():
+func _fire_artillery():
 	var shell = MeshInstance3D.new()
 	var sphere = SphereMesh.new()
 	shell.mesh = sphere
@@ -1130,39 +1107,6 @@ func _fire_mortar_salvo():
 				_spawn_explosion_visual(end, 0.5, Color.YELLOW)
 			)
 		)
-
-func _fire_spigot_mortar():
-	var bomb = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = 0.25
-	cyl.bottom_radius = 0.25
-	cyl.height = 0.5
-	bomb.mesh = cyl
-	
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.DARK_KHAKI
-	mat.emission_enabled = true
-	mat.emission = Color.CRIMSON
-	bomb.material_override = mat
-	_effects_parent().add_child(bomb)
-	
-	var start = global_position
-	var end = target.global_position
-	var tween = create_tween()
-	var callable = func(val: float):
-		if not is_instance_valid(bomb): return
-		var pos = start.lerp(end, val)
-		pos.y += sin(val * PI) * 5.0
-		bomb.global_position = pos
-		bomb.rotate_x(0.1)
-		bomb.rotate_y(0.05)
-		
-	tween.tween_method(callable, 0.0, 1.0, 0.7)
-	tween.finished.connect(func():
-		if is_instance_valid(bomb): bomb.queue_free()
-		_deal_aoe_damage(end, 5.0, dps * fire_rate)
-		_spawn_explosion_visual(end, 1.8, Color.CRIMSON)
-	)
 
 const WeaponMissileScene = preload("res://scripts/weapon_missile.gd")
 

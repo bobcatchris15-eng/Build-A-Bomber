@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dhn38ce17slyf"
-path="res://.godot/imported/dual_stage_missile.glb-b78e9f96a1a0207659ebfa749f4c6d03.scn"
+uid="uid://bcewmgeysqkhe"
+path="res://.godot/imported/mortar_tube_single.glb-80ca75f2a5ac6dcf035f264cfb8b2a0a.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/dual_stage_missile.glb"
-dest_files=["res://.godot/imported/dual_stage_missile.glb-b78e9f96a1a0207659ebfa749f4c6d03.scn"]
+source_file="res://assets/models/parts/mortar_tube_single.glb"
+dest_files=["res://.godot/imported/mortar_tube_single.glb-80ca75f2a5ac6dcf035f264cfb8b2a0a.scn"]
 
 [params]
 

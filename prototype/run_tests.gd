@@ -5852,7 +5852,7 @@ func test_weight_vs_locomotion_capacity_penalty() -> bool:
 		if extra_module_weight > 0.0:
 			var extra_child = Node3D.new()
 			var extra_data = ModuleData.new()
-			extra_data.type_id = "heavy_howitzer"
+			extra_data.type_id = "artillery"
 			extra_data.category = "weapon"
 			extra_data.base_weight = extra_module_weight
 			extra_child.set_meta("module_data", extra_data)
@@ -7066,7 +7066,7 @@ func test_explosive_weapons_deal_real_aoe_damage() -> bool:
 	var weapon = Node3D.new()
 	weapon.set_script(load("res://scripts/auto_weapon.gd"))
 	shooter.add_child(weapon)
-	weapon.type_id = "heavy_howitzer"
+	weapon.type_id = "artillery"
 	weapon.damage_class = "explosive"
 
 	var impact = Vector3(20, 0, 0)
