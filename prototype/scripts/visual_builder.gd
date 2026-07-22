@@ -142,11 +142,14 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			continue
 		child.queue_free()
 
-	# Try to load a monolithic authored mesh for this entire module first
-	var monolithic_mesh = _part(type_id)
+	# Try to load a monolithic authored mesh for this entire module first (modular sub-part assemblies bypass this)
+	var monolithic_mesh = _part(type_id) if type_id != "basic_cannon" else null
 	if monolithic_mesh:
 		var inst = _mesh_inst(monolithic_mesh, base_color)
-		inst.rotation.y = deg_to_rad(90.0) # TripoSG native orientation offset
+		if type_id == "basic_cannon":
+			inst.rotation.y = 0.0
+		else:
+			inst.rotation.y = deg_to_rad(90.0) # TripoSG native orientation offset
 		# We scale the mesh uniformly so its largest dimension matches the largest dimension
 		# defined in base_size. This prevents squishing/stretching while ensuring it fits the scale curve.
 		var aabb = monolithic_mesh.get_aabb()
@@ -209,45 +212,84 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 
 
 	if type_id == "basic_cannon":
-		# Turret Base
-		var base_mesh = _part("turret_base_round")
-		var base: MeshInstance3D
-		if base_mesh:
-			base = _mesh_inst(base_mesh, base_color.darkened(0.2))
-			base.scale = _fit_scale(Vector3(base_size.x * 1.6, base_size.y * 0.4, base_size.x * 1.6), Vector3(1.0, 0.35, 1.0))
-			base.position = Vector3(0, 0, 0)
-		else:
-			base = MeshInstance3D.new()
-			var base_cyl = CylinderMesh.new()
-			base_cyl.top_radius = base_size.x * 0.8
-			base_cyl.bottom_radius = base_size.x * 1.0
-			base_cyl.height = base_size.y * 0.4
-			base.mesh = base_cyl
-			var base_mat = StandardMaterial3D.new()
-			base_mat.albedo_color = base_color.darkened(0.2)
-			base.material_override = base_mat
-			base.position = Vector3(0, base_cyl.height / 2.0, 0)
-		parent_node.add_child(base)
+		var b_count = int(tweaks.get("barrel_count", 1.0))
+		b_count = clamp(b_count, 1, 4)
+		var caliber = tweaks.get("caliber", 1.0)
+		var length = tweaks.get("barrel_length", 1.0)
 
-		# Barrel (extends along Z-axis at runtime via rotation)
-		var barrel_mesh = _part("barrel_standard")
-		var barrel: MeshInstance3D
-		if barrel_mesh:
-			barrel = _mesh_inst(barrel_mesh, Color.DIM_GRAY)
-			barrel.scale = Vector3(1.0, base_size.z / 1.0, 1.0)
+		# 1. MOUNT / PINTLE (m3_pintle_mount.glb)
+		var base_w_scale = (1.0 + (b_count - 1) * 0.35) * caliber
+		var pintle_mesh = _part("m3_pintle_mount")
+		if not pintle_mesh:
+			pintle_mesh = _part("pintle_mount")
+		var pintle: MeshInstance3D
+		var pintle_h = base_size.y * 0.45 * caliber
+		if pintle_mesh:
+			pintle = _mesh_inst(pintle_mesh, base_color.darkened(0.3))
+			pintle.scale = Vector3(base_w_scale, caliber, caliber)
+			pintle.position = Vector3(0, 0, 0)
 		else:
-			barrel = MeshInstance3D.new()
-			var barrel_cyl = CylinderMesh.new()
-			barrel_cyl.top_radius = 0.08
-			barrel_cyl.bottom_radius = 0.1
-			barrel_cyl.height = base_size.z
-			barrel.mesh = barrel_cyl
-			var barrel_mat = StandardMaterial3D.new()
-			barrel_mat.albedo_color = Color.DIM_GRAY
-			barrel.material_override = barrel_mat
-		barrel.position = Vector3(0, base_size.y * 0.4 + 0.1, -base_size.z / 4.0)
-		barrel.rotation = Vector3(PI / 2, 0, 0)
-		parent_node.add_child(barrel)
+			pintle = MeshInstance3D.new()
+			var p_box = BoxMesh.new()
+			p_box.size = Vector3(base_size.x * 1.2 * base_w_scale, pintle_h, base_size.x * 1.2 * caliber)
+			pintle.mesh = p_box
+			var p_mat = StandardMaterial3D.new()
+			p_mat.albedo_color = base_color.darkened(0.3)
+			pintle.material_override = p_mat
+			pintle.position = Vector3(0, p_box.size.y / 2.0, 0)
+		parent_node.add_child(pintle)
+
+		# 2. ACTION / BREECH & BARREL (Per barrel count 1 to 4)
+		var breech_mesh = _part("m3_action_breech")
+		if not breech_mesh:
+			breech_mesh = _part("howitzer_breech")
+		var barrel_mesh = _part("m3_barrel")
+		if not barrel_mesh:
+			barrel_mesh = _part("barrel_standard")
+
+		var x_spacing = 0.28 * caliber
+		var start_x = -((b_count - 1) * x_spacing) / 2.0
+		var trunnion_y = 0.26 * caliber
+
+		for i in range(b_count):
+			var cur_x = start_x + i * x_spacing
+
+			# 2A. ACTION / BREECH
+			var breech: MeshInstance3D
+			if breech_mesh:
+				breech = _mesh_inst(breech_mesh, Color(0.22, 0.24, 0.26))
+				breech.scale = Vector3(caliber, caliber, caliber)
+				breech.position = Vector3(cur_x, trunnion_y, 0.0)
+			else:
+				breech = MeshInstance3D.new()
+				var b_box = BoxMesh.new()
+				b_box.size = Vector3(0.22 * caliber, 0.26 * caliber, 0.38 * caliber)
+				breech.mesh = b_box
+				var b_mat = StandardMaterial3D.new()
+				b_mat.albedo_color = Color(0.22, 0.24, 0.26)
+				breech.material_override = b_mat
+				breech.position = Vector3(cur_x, trunnion_y, 0.0)
+			parent_node.add_child(breech)
+
+			# 2B. BARREL (Mounted at breech muzzle port, scaling with caliber and barrel_length)
+			var barrel: MeshInstance3D
+			if barrel_mesh:
+				barrel = _mesh_inst(barrel_mesh, Color(0.18, 0.19, 0.21))
+				barrel.scale = Vector3(caliber, caliber, length * caliber)
+				barrel.position = Vector3(cur_x, trunnion_y, -0.05 * caliber)
+			else:
+				barrel = MeshInstance3D.new()
+				var b_cyl = CylinderMesh.new()
+				b_cyl.top_radius = 0.045 * caliber
+				b_cyl.bottom_radius = 0.065 * caliber
+				b_cyl.height = 1.25 * length
+				barrel.mesh = b_cyl
+				var b_mat = StandardMaterial3D.new()
+				b_mat.albedo_color = Color(0.18, 0.19, 0.21)
+				barrel.material_override = b_mat
+				barrel.position = Vector3(cur_x, trunnion_y, -(1.25 * length / 2.0) - 0.05 * caliber)
+				barrel.rotation = Vector3(PI / 2, 0, 0)
+			parent_node.add_child(barrel)
 
 	elif type_id == "heavy_machine_gun":
 		var base_mesh = _part("pintle_mount")

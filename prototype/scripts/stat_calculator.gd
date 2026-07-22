@@ -52,7 +52,8 @@ var popup_rotate_btn: Button
 const TWEAK_SPECS = {
 	"basic_cannon": [
 		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_count", "label": "Barrel Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 1.0}
 	],
 	"heavy_machine_gun": [
 		{"name": "multi_barrel", "label": "Multi-Barrel Mode", "type": "bool", "default": false},

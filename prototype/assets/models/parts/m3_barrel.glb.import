@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://ce7rl3dasw1aj"
-path="res://.godot/imported/basic_cannon.glb-6708ab9db1962d0ebf2399b83fed732e.scn"
+uid="uid://cujst48pcsm54"
+path="res://.godot/imported/m3_barrel.glb-ddc154db7c1182ad5f29a04c3de8b034.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/basic_cannon.glb"
-dest_files=["res://.godot/imported/basic_cannon.glb-6708ab9db1962d0ebf2399b83fed732e.scn"]
+source_file="res://assets/models/parts/m3_barrel.glb"
+dest_files=["res://.godot/imported/m3_barrel.glb-ddc154db7c1182ad5f29a04c3de8b034.scn"]
 
 [params]
 
