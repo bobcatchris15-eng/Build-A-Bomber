@@ -38,7 +38,8 @@ import math
 import os
 import mathutils
 
-PROJECT_ROOT = r"E:\Build-A-Bomber\prototype"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 PARTS_DIR = os.path.join(PROJECT_ROOT, "assets", "models", "parts")
 HULLS_DIR = os.path.join(PROJECT_ROOT, "assets", "models", "hulls")
 
@@ -894,6 +895,38 @@ def build_howitzer_breech(name, width=0.9, height=0.5, depth=0.55, color=(0.28, 
 	greeble_bolt_ring(bm, (0, height * 0.95, depth * 0.3), width * 0.3, count=6, axis='y')
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.6, roughness=0.5)
+	return obj
+
+
+def build_basic_cannon_solid(name, color=(0.28, 0.28, 0.32)):
+	"""Simplified 37 mm Gun M3 on an open pintle mount (single solid mesh)."""
+	bm = bmesh.new()
+
+	# 1. Open Pintle Base Socket & Yoke Carriage
+	add_box(bm, (0, 0.04, 0), (0.36, 0.08, 0.32), bevel=0.015)
+	for side in (-1, 1):
+		add_box(bm, (side * 0.16, 0.2, 0), (0.05, 0.24, 0.22), bevel=0.015)
+	greeble_bolt_ring(bm, (0, 0.04, 0), 0.14, count=6, axis='y')
+
+	# 2. Side Elevation Handwheel (left yoke)
+	add_cyl_axis(bm, (-0.2, 0.22, 0), 0.07, 0.03, 'x', segments=12)
+
+	# 3. Vertical Sliding-Block Breech Housing (at trunnion height Y = 0.22)
+	trunnion_y = 0.22
+	add_box(bm, (0, trunnion_y, 0.05), (0.2, 0.22, 0.36), bevel=0.02)
+	greeble_bolt_ring(bm, (0, trunnion_y + 0.1, 0.1), 0.06, count=4, axis='y')
+
+	# 4. Parallel Under-Barrel Hydraulic Recoil Cylinder Buffer
+	recoil_len = 0.45
+	add_cyl_axis(bm, (0, trunnion_y - 0.07, -recoil_len / 2.0 + 0.05), 0.05, recoil_len, 'z', segments=16)
+
+	# 5. Slender 37mm L/56 Main Gun Barrel (Extending forward along -Z)
+	barrel_len = 1.25
+	add_cyl_axis(bm, (0, trunnion_y, -barrel_len / 2.0 - 0.05), 0.06, barrel_len, 'z', segments=20)
+	add_cyl_axis(bm, (0, trunnion_y, -barrel_len - 0.05), 0.07, 0.06, 'z', segments=20)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.65, roughness=0.4)
 	return obj
 
 
@@ -1906,6 +1939,7 @@ def generate_parts():
 	export_and_cleanup(build_cylinder_part("muzzle_brake", radius=0.5, height=0.5, segments=10, color=(0.15, 0.15, 0.16)), PARTS_DIR, "muzzle_brake")
 
 	export_and_cleanup(build_howitzer_breech("howitzer_breech", color=(0.28, 0.28, 0.3)), PARTS_DIR, "howitzer_breech")
+	export_and_cleanup(build_basic_cannon_solid("basic_cannon", color=(0.28, 0.28, 0.32)), PARTS_DIR, "basic_cannon")
 	export_and_cleanup(build_rotary_jacket("rotary_jacket", color=(0.2, 0.2, 0.21)), PARTS_DIR, "rotary_jacket")
 	export_and_cleanup(build_rail_array("rail_array", color=(0.15, 0.15, 0.15)), PARTS_DIR, "rail_array")
 	export_and_cleanup(build_flak_breech("flak_breech", color=(0.18, 0.18, 0.18)), PARTS_DIR, "flak_breech")
@@ -2204,5 +2238,5 @@ def generate_hulls():
 
 clear_scene()
 generate_parts()
-generate_hulls()
+# generate_hulls()  # Protected: hulls remain unmodified
 print("=== Mesh generation complete ===")
