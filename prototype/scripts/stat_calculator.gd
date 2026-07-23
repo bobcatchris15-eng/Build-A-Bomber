@@ -19,6 +19,7 @@ const UITheme = preload("res://scripts/ui_theme.gd")
 @onready var library_button = $ScrollContainer/VBoxContainer/LibraryButton
 
 @onready var locomotion_tweaks = $ScrollContainer/VBoxContainer/LocomotionTweaks
+@onready var size_container = $ScrollContainer/VBoxContainer/LocomotionTweaks/SizeContainer
 @onready var size_label = $ScrollContainer/VBoxContainer/LocomotionTweaks/SizeContainer/SizeLabel
 @onready var size_slider = $ScrollContainer/VBoxContainer/LocomotionTweaks/SizeContainer/SizeSlider
 @onready var count_container = $ScrollContainer/VBoxContainer/LocomotionTweaks/CountContainer
@@ -39,7 +40,20 @@ const VisualBuilder = preload("res://scripts/visual_builder.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 var current_selected_module: Node3D = null
 var is_updating_sliders: bool = false
+var _loco_slider_dragging: bool = false
 var module_tweaks_container: VBoxContainer
+
+# Which tweaks-dict key the shared "Size" slider writes, per locomotion
+# type_id - used to route size_slider changes through
+# update_locomotion_geometry_tweak() (no respawn) instead of the full
+# update_locomotion() respawn _apply_tweaks() uses for count changes.
+const LOCOMOTION_SIZE_KEY := {
+	"wheels": "wheel_size",
+	"tracked_treads": "tread_width",
+	"helicopter_rotors": "blade_length",
+	"legs": "leg_length",
+	"hover_engine": "pad_size",
+}
 
 # Floating Popup Window fields
 var popup_panel: PanelContainer
@@ -160,6 +174,26 @@ var energy_label: Label
 var nose_taper_label: Label
 var nose_taper_slider: HSlider
 
+# Wheels-only "dually" tweak (wheels_per_axle, 1-2): no scene node for this
+# exists in UI_StatBlock.tscn (only the generic Size/Count sliders shared by
+# every locomotion type), so it's built dynamically here, following the same
+# pattern nose_taper_slider already uses below - added as a sibling of
+# SizeContainer/CountContainer inside LocomotionTweaks so it reads as part of
+# the same panel instead of a separate floating control.
+var wheels_per_axle_container: HBoxContainer
+var wheels_per_axle_label: Label
+var wheels_per_axle_slider: HSlider
+
+# tracked_treads-only "Road Wheels" tweak (road_wheel_count, 3-8): same
+# dynamic-widget pattern as wheels_per_axle above - no scene node for it,
+# built once and reparented into popup_tweaks_container. tracked_treads is
+# fixed at 2 instances (no count-slider concept), so this is purely a
+# per-instance geometry tweak - always routed through
+# update_locomotion_geometry_tweak(), never a respawn.
+var road_wheel_count_container: HBoxContainer
+var road_wheel_count_label: Label
+var road_wheel_count_slider: HSlider
+
 func _ready():
 	add_to_group("stat_ui")
 	if sidebar_panel:
@@ -183,9 +217,75 @@ func _ready():
 	
 	size_slider.value_changed.connect(_on_size_value_changed)
 	count_slider.value_changed.connect(_on_count_value_changed)
+	# Size never changes how many module instances exist for ANY locomotion
+	# type (only Count does) - it's a purely cosmetic per-instance geometry
+	# tweak, so it's routed through update_locomotion_geometry_tweak() (an
+	# in-place mesh rebuild on every existing instance, same idea as a
+	# weapon's rebuild_visual - see that function in module_placer.gd) on
+	# EVERY value_changed tick, live and smooth, no debounce needed. Count IS
+	# structural (adds/removes instances), so it still goes through the full
+	# update_locomotion() respawn - but debounced to drag-END: applying that
+	# full respawn on every tick during a drag reselects an arbitrary
+	# instance each time, which relocates the floating popup (it tracks the
+	# selected module's 3D->2D screen position every frame) and made a real
+	# mouse drag land on the wrong final slider position relative to where
+	# the panel had jumped to mid-drag - confirmed via a real simulated-
+	# mouse-drag test, not just a direct function call.
 	size_slider.drag_started.connect(_push_undo)
-	count_slider.drag_started.connect(_push_undo)
-	
+	count_slider.drag_started.connect(_on_loco_drag_started)
+	count_slider.drag_ended.connect(_on_loco_drag_ended)
+
+	# Dynamically build the wheels-only "Wheels Per Axle" slider (dually
+	# tweak) and insert it right after CountContainer inside LocomotionTweaks.
+	wheels_per_axle_container = HBoxContainer.new()
+	wheels_per_axle_container.custom_minimum_size = Vector2(0, 24)
+	wheels_per_axle_container.add_theme_constant_override("separation", 4)
+	locomotion_tweaks.add_child(wheels_per_axle_container)
+	locomotion_tweaks.move_child(wheels_per_axle_container, count_container.get_index() + 1)
+
+	wheels_per_axle_label = Label.new()
+	wheels_per_axle_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wheels_per_axle_label.text = "Wheels Per Axle:"
+	wheels_per_axle_container.add_child(wheels_per_axle_label)
+
+	wheels_per_axle_slider = HSlider.new()
+	wheels_per_axle_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	wheels_per_axle_slider.size_flags_stretch_ratio = 2.0
+	wheels_per_axle_slider.min_value = 1.0
+	wheels_per_axle_slider.max_value = 2.0
+	wheels_per_axle_slider.step = 1.0
+	wheels_per_axle_slider.value = 1.0
+	wheels_per_axle_container.add_child(wheels_per_axle_slider)
+	UITheme.style_slider(wheels_per_axle_slider)
+	wheels_per_axle_slider.value_changed.connect(_on_wheels_per_axle_changed)
+	wheels_per_axle_slider.drag_started.connect(_push_undo)
+	wheels_per_axle_container.visible = false
+
+	# Dynamically build the tracked_treads-only "Road Wheels" slider.
+	road_wheel_count_container = HBoxContainer.new()
+	road_wheel_count_container.custom_minimum_size = Vector2(0, 24)
+	road_wheel_count_container.add_theme_constant_override("separation", 4)
+	locomotion_tweaks.add_child(road_wheel_count_container)
+	locomotion_tweaks.move_child(road_wheel_count_container, wheels_per_axle_container.get_index() + 1)
+
+	road_wheel_count_label = Label.new()
+	road_wheel_count_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	road_wheel_count_label.text = "Road Wheels:"
+	road_wheel_count_container.add_child(road_wheel_count_label)
+
+	road_wheel_count_slider = HSlider.new()
+	road_wheel_count_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	road_wheel_count_slider.size_flags_stretch_ratio = 2.0
+	road_wheel_count_slider.min_value = 3.0
+	road_wheel_count_slider.max_value = 8.0
+	road_wheel_count_slider.step = 1.0
+	road_wheel_count_slider.value = 5.0
+	road_wheel_count_container.add_child(road_wheel_count_slider)
+	UITheme.style_slider(road_wheel_count_slider)
+	road_wheel_count_slider.value_changed.connect(_on_road_wheel_count_changed)
+	road_wheel_count_slider.drag_started.connect(_push_undo)
+	road_wheel_count_container.visible = false
+
 	# Dynamically create Armor Material dropdown
 	armor_mat_label = Label.new()
 	armor_mat_label.text = "Armor Material"
@@ -342,6 +442,19 @@ func _ready():
 	menu_btn.text = "◀ Main Menu"
 	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 	$ScrollContainer/VBoxContainer.add_child(menu_btn)
+
+	# Locomotion tweaks (Size/Count/Wheels-Per-Axle) move into the same
+	# floating popup weapon/armor tweaks use, instead of living in the
+	# right-hand sidebar - Chris's ask, "mirroring the weapon module
+	# behavior" so every module type's tweaks appear in one consistent
+	# place near the selected module. These are reused/reparented (not
+	# rebuilt) each selection since on_module_selected()'s popup-clearing
+	# sweep below explicitly skips them - see that guard.
+	size_container.reparent(popup_tweaks_container)
+	count_container.reparent(popup_tweaks_container)
+	wheels_per_axle_container.reparent(popup_tweaks_container)
+	road_wheel_count_container.reparent(popup_tweaks_container)
+	locomotion_tweaks.visible = false
 
 	# Initial sync of armor UI
 	call_deferred("_initial_sync")
@@ -519,10 +632,17 @@ func update_stats(hull: Node3D):
 						total_energy_capacity += data.get_energy_capacity()
 					if data.category == "locomotion":
 						var capacity_contrib = 1.0
-						if locomotion_type in ["wheels", "omni_wheels", "helicopter_rotors", "legs"]:
+						if locomotion_type == "wheels":
+							# Total wheel count (axle positions x
+							# wheels-per-axle, dually) drives load-bearing
+							# capacity, not just axle count, per Chris's ask.
+							var axles = float(locomotion_settings.get("num_axles", locomotion_settings.get("count", 4)))
+							var w_per_axle = float(locomotion_settings.get("wheels_per_axle", 1.0))
+							capacity_contrib = (axles * w_per_axle) / 4.0
+						elif locomotion_type in ["helicopter_rotors", "legs"]:
 							capacity_contrib = float(locomotion_settings.get("count", 4)) / 4.0
-						elif locomotion_type in ["tracked_treads", "rhomboid_treads"]:
-							capacity_contrib = locomotion_settings.get("width", 1.0)
+						elif locomotion_type == "tracked_treads":
+							capacity_contrib = locomotion_settings.get("tread_width", locomotion_settings.get("width", 1.0))
 						total_weight_capacity += ModuleCatalog.get_base_weight_capacity(data.type_id) * child.scale.x * child.scale.z * capacity_contrib
 					var mod_catalog_data = ModuleCatalog.get_module_data(data.type_id)
 					var wc_bonus = mod_catalog_data.get("weight_capacity_bonus", 0.0)
@@ -634,34 +754,57 @@ func update_stats(hull: Node3D):
 	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
 
 func on_module_selected(module: Node3D):
+	# Defense in depth: treat a freed-but-non-null module reference the same
+	# as no selection, rather than crashing on the first .has_meta() call
+	# below (which previously left current_selected_module permanently
+	# corrupted - see the is_queued_for_deletion() guard in _apply_tweaks()
+	# for the actual bug that used to hand this function a freed instance).
+	if module and not is_instance_valid(module):
+		module = null
 	current_selected_module = module
-	
-	# Clear old tweaks in the popup tweaks container
+
+	# Clear old tweaks in the popup tweaks container. size_container/
+	# count_container/wheels_per_axle_container are PERSISTENT, reparented
+	# once into popup_tweaks_container at _ready() (not rebuilt per
+	# selection like the weapon/armor widgets below) - free()ing them here
+	# would destroy the Locomotion Tweaks sliders the first time any
+	# non-locomotion module got selected. Everything else in this container
+	# is disposable, generated fresh by _generate_custom_tweaks() each time.
 	if popup_tweaks_container:
 		for child in popup_tweaks_container.get_children():
+			if child == size_container or child == count_container or child == wheels_per_axle_container or child == road_wheel_count_container:
+				continue
 			child.queue_free()
-			
+
+	# Default every locomotion tweak widget to hidden; only the "locomotion"
+	# branch below re-enables the ones the selected type actually uses. This
+	# also covers the null-selection and non-locomotion-category early
+	# returns below without needing to repeat the hides in each of them.
+	size_container.visible = false
+	count_container.visible = false
+	wheels_per_axle_container.visible = false
+	road_wheel_count_container.visible = false
+
 	var root = get_node_or_null("/root/MainLab")
 	var hull = root.get_node_or_null("Hull") if root else null
-	
+
 	if hull and (module == null or module == hull or module.name == "Hull"):
 		sync_hull_ui(hull)
 		if popup_panel: popup_panel.visible = false
 
 	if not locomotion_tweaks: return
-	
+
 	if not module or not module.has_meta("module_data"):
-		locomotion_tweaks.visible = false
 		if popup_panel: popup_panel.visible = false
 		return
-		
+
 	var data = module.get_meta("module_data")
-	
+
 	# Populate Module stats & tweaks into the hovering popup!
 	if popup_panel:
 		popup_panel.visible = true
 		popup_name_label.text = "🛠️ " + data.module_name.to_upper()
-		
+
 		var hp = data.get_hp()
 		var wt = data.get_weight()
 		var cost = data.get_cost()
@@ -672,50 +815,41 @@ func on_module_selected(module: Node3D):
 		popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s%s" % [hp, wt, cost.x, cost.y, last_line, mount_line]
 
 	if data.category != "locomotion":
-		locomotion_tweaks.visible = false
 		_generate_custom_tweaks(module, data)
 		return
-		
+
 	root = get_node("/root/MainLab")
 	hull = root.get_node_or_null("Hull")
 	if not hull:
-		locomotion_tweaks.visible = false
 		return
-		
+
 	var type_id = data.type_id
 	var settings = {}
 	if hull.has_meta("locomotion_settings"):
 		settings = hull.get_meta("locomotion_settings")
-		
+
 	is_updating_sliders = true
-	locomotion_tweaks.visible = true
-	
+	size_container.visible = true
+	count_slider.min_value = 2.0
+
 	if type_id == "wheels":
 		size_label_base = "Wheel Size"
 		count_container.visible = true
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
-		size_slider.value = settings.get("size", 1.0)
-		count_slider.value = settings.get("count", 4)
-	elif type_id == "omni_wheels":
-		size_label_base = "Wheel Size"
-		count_container.visible = true
-		size_slider.min_value = 0.5
-		size_slider.max_value = 2.5
-		size_slider.value = settings.get("size", 1.0)
-		count_slider.value = settings.get("count", 4)
+		size_slider.value = settings.get("wheel_size", settings.get("size", 1.0))
+		count_slider.min_value = 4.0
+		count_slider.value = settings.get("num_axles", settings.get("count", 4))
+		wheels_per_axle_container.visible = true
+		wheels_per_axle_slider.value = settings.get("wheels_per_axle", 1.0)
 	elif type_id == "tracked_treads":
 		size_label_base = "Tread Width"
 		count_container.visible = false
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
-		size_slider.value = settings.get("width", 1.0)
-	elif type_id == "rhomboid_treads":
-		size_label_base = "Track Width"
-		count_container.visible = false
-		size_slider.min_value = 0.5
-		size_slider.max_value = 2.5
-		size_slider.value = settings.get("width", 1.0)
+		size_slider.value = settings.get("tread_width", settings.get("width", 1.0))
+		road_wheel_count_container.visible = true
+		road_wheel_count_slider.value = settings.get("road_wheel_count", 5.0)
 	elif type_id == "helicopter_rotors":
 		size_label_base = "Rotor Size"
 		count_container.visible = true
@@ -730,12 +864,6 @@ func on_module_selected(module: Node3D):
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 		count_slider.value = settings.get("count", 4)
-	elif type_id == "anti_grav":
-		size_label_base = "Ring Size"
-		count_container.visible = false
-		size_slider.min_value = 0.5
-		size_slider.max_value = 2.5
-		size_slider.value = settings.get("size", 1.0)
 	elif type_id == "hover_engine":
 		size_label_base = "Hover Pad Size"
 		count_container.visible = false
@@ -743,7 +871,7 @@ func on_module_selected(module: Node3D):
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 	else:
-		locomotion_tweaks.visible = false
+		size_container.visible = false
 
 	_refresh_locomotion_labels()
 	is_updating_sliders = false
@@ -752,16 +880,54 @@ func _refresh_locomotion_labels():
 	size_label.text = "%s: %.2fx" % [size_label_base, size_slider.value]
 	if count_container.visible:
 		count_label.text = "%s: %d" % [count_label_base, int(count_slider.value)]
+	if wheels_per_axle_container.visible:
+		var dually = int(wheels_per_axle_slider.value) >= 2
+		wheels_per_axle_label.text = "Wheels Per Axle: %d%s" % [int(wheels_per_axle_slider.value), " (dually)" if dually else ""]
+	if road_wheel_count_container.visible:
+		road_wheel_count_label.text = "Road Wheels: %d" % int(road_wheel_count_slider.value)
 
 func _on_size_value_changed(value: float):
 	_refresh_locomotion_labels()
-	if is_updating_sliders or not current_selected_module: return
-	_apply_tweaks()
+	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
+	var root = get_node_or_null("/root/MainLab")
+	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
+	var data = current_selected_module.get_meta("module_data")
+	var type_id = data.type_id
+	var key = LOCOMOTION_SIZE_KEY.get(type_id, "size")
+	root.update_locomotion_geometry_tweak(type_id, key, value)
 
 func _on_count_value_changed(value: float):
 	_refresh_locomotion_labels()
-	if is_updating_sliders or not current_selected_module: return
+	if is_updating_sliders or not current_selected_module or _loco_slider_dragging: return
 	_apply_tweaks()
+
+func _on_wheels_per_axle_changed(value: float):
+	_refresh_locomotion_labels()
+	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
+	var root = get_node_or_null("/root/MainLab")
+	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
+	root.update_locomotion_geometry_tweak("wheels", "wheels_per_axle", int(value))
+
+func _on_road_wheel_count_changed(value: float):
+	_refresh_locomotion_labels()
+	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
+	var root = get_node_or_null("/root/MainLab")
+	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
+	root.update_locomotion_geometry_tweak("tracked_treads", "road_wheel_count", int(value))
+
+func _on_loco_drag_started():
+	_loco_slider_dragging = true
+	_push_undo()
+
+# Fires once when the mouse releases the slider grabber - this is where the
+# actual (expensive, full-respawn) update_locomotion() call happens, not on
+# every intermediate value_changed tick during the drag. See the comment on
+# the drag_started/drag_ended connections in _ready() for why.
+func _on_loco_drag_ended(value_changed: bool):
+	_loco_slider_dragging = false
+	if is_updating_sliders or not current_selected_module: return
+	if value_changed:
+		_apply_tweaks()
 
 func _apply_tweaks():
 	var root = get_node("/root/MainLab")
@@ -774,21 +940,14 @@ func _apply_tweaks():
 	
 	if type_id == "wheels":
 		new_settings = {
-			"size": size_slider.value,
-			"count": int(count_slider.value)
-		}
-	elif type_id == "omni_wheels":
-		new_settings = {
-			"size": size_slider.value,
-			"count": int(count_slider.value)
+			"wheel_size": size_slider.value,
+			"num_axles": int(count_slider.value),
+			"wheels_per_axle": int(wheels_per_axle_slider.value)
 		}
 	elif type_id == "tracked_treads":
 		new_settings = {
-			"width": size_slider.value
-		}
-	elif type_id == "rhomboid_treads":
-		new_settings = {
-			"width": size_slider.value
+			"tread_width": size_slider.value,
+			"road_wheel_count": int(road_wheel_count_slider.value)
 		}
 	elif type_id == "helicopter_rotors":
 		new_settings = {
@@ -799,10 +958,6 @@ func _apply_tweaks():
 		new_settings = {
 			"size": size_slider.value,
 			"count": int(count_slider.value)
-		}
-	elif type_id == "anti_grav":
-		new_settings = {
-			"size": size_slider.value
 		}
 	elif type_id == "hover_engine":
 		new_settings = {
@@ -815,6 +970,22 @@ func _apply_tweaks():
 		# Reselect the new node counterpart to keep selection and UI visible
 		var new_selected = null
 		for child in hull.get_children():
+			# update_locomotion() just queue_free()'d every OLD instance of
+			# this type before spawning the new ones - queue_free() doesn't
+			# remove a node from its parent immediately, so the doomed old
+			# instances are still in get_children() (and, since they were
+			# added earlier, sorted BEFORE the fresh replacements) at this
+			# exact point. Without this check, "first match" reliably picked
+			# a soon-to-be-freed old instance instead of a live new one; by
+			# the time the deferred _select_module below actually ran, that
+			# instance had already been freed, and on_module_selected()
+			# calling .has_meta() on it threw - which left
+			# current_selected_module corrupted (pointing at a freed
+			# object) for every tweak afterward, until the player manually
+			# reselected. Confirmed via a real drag-up-then-drag-down test:
+			# the second (down) drag silently no-op'd because of exactly
+			# this.
+			if child.is_queued_for_deletion(): continue
 			if child.has_meta("module_data"):
 				var m_data = child.get_meta("module_data")
 				if m_data and m_data.type_id == type_id:

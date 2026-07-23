@@ -558,29 +558,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"color": Color.BLACK,
 			"traits": ["ground_contact", "high_speed"]
 		},
-		"omni_wheels": {
-			"name": "Omni Wheels",
-			"category": "locomotion",
-			# Batch E task 5: real mecanum/omni-wheel locomotion - the
-			# "omni" trait (battle_unit.gd's is_omni) is what actually
-			# unlocks genuine lateral/strafing movement (see
-			# _steer_towards()'s is_omni branch), not just a new mesh.
-			# Stat-wise: the extra rollers/mechanism that make the
-			# sideways translation possible cost some raw efficiency and
-			# ruggedness relative to plain wheels - slightly less thrust,
-			# slightly less weight capacity - the strafing capability
-			# itself is the actual upside, not a stat advantage.
-			"hp": 90.0,
-			"weight": 55.0,
-			"metal": 25,
-			"crystal": 10,
-			"dps": 0.0,
-			"base_weight_capacity": 300.0,
-			"thrust_coefficient": 130.0,
-			"size": Vector3(0.6, 0.6, 0.6),
-			"color": Color(0.15, 0.15, 0.18),
-			"traits": ["ground_contact", "omni"]
-		},
 		"tracked_treads": {
 			"name": "Tracked Treads",
 			"category": "locomotion",
@@ -594,30 +571,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"base_weight_capacity": 700.0,
 			"size": Vector3(0.8, 0.6, 2.5),
 			"color": Color.DARK_OLIVE_GREEN,
-			"traits": ["ground_contact"]
-		},
-		"rhomboid_treads": {
-			"name": "Rhomboid Tank Treads",
-			"category": "locomotion",
-			# Batch E task 4: WWI Mark IV-style track - the loop runs all
-			# the way around the entire hull (up and over the top, not just
-			# flanking the bottom sides like tracked_treads) - see
-			# _build_rhomboid_treads(). A genuinely different silhouette,
-			# and a genuinely different tradeoff: the full-body track loop
-			# is the toughest, highest-capacity ground locomotor in the
-			# roster (heavier than tracked_treads), at the cost of being
-			# the slowest (a real Mark IV topped out around 4mph) -
-			# reflected directly in a below-default thrust_coefficient
-			# rather than just a bigger/heavier part.
-			"hp": 260.0,
-			"weight": 160.0,
-			"metal": 55,
-			"crystal": 0,
-			"dps": 0.0,
-			"base_weight_capacity": 900.0,
-			"thrust_coefficient": 95.0,
-			"size": Vector3(1.0, 2.0, 5.0),
-			"color": Color(0.28, 0.26, 0.2),
 			"traits": ["ground_contact"]
 		},
 		"helicopter_rotors": {
@@ -665,22 +618,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"size": Vector3(0.5, 1.5, 0.5),
 			"color": Color.DARK_RED,
 			"traits": ["ground_contact"]
-		},
-		"anti_grav": {
-			"name": "Anti-Grav Rings",
-			"category": "locomotion",
-			"hp": 60.0,
-			"weight": 30.0,
-			"metal": 50,
-			"crystal": 80,
-			"dps": 0.0,
-			# Advanced repulsor tech rather than aerodynamic/ground-effect
-			# lift - more forgiving of extra weight than the other hovering/
-			# airborne types, though still not as tolerant as a grounded hull.
-			"base_weight_capacity": 450.0,
-			"size": Vector3(1.2, 0.3, 1.2),
-			"color": Color.MEDIUM_BLUE,
-			"traits": ["hovering", "airborne"]
 		},
 		"fixed_wing_engine": {
 			"name": "Fixed-Wing Engine",
@@ -1276,24 +1213,10 @@ static func get_thrust_coefficient(type_id: String) -> float:
 #                   drive moderate (augers work best with real grip/water,
 #                   dry sand offers less than mud does).
 const TERRAIN_SPEED_MULTIPLIERS = {
-	# rhomboid_treads: the real Mark IV's whole reason for existing was
-	# crossing WWI trenches/shell-cratered mud that stopped wheeled and
-	# even normal tracked vehicles - so it beats tracked_treads on
-	# marsh/snow_mud specifically, at the cost of being worse on rocky
-	# terrain (a long, heavy, low-ground-clearance full-body loop is
-	# less nimble scrambling over rock than tracked_treads' shorter,
-	# lower-profile track run). Its baseline slowness is already captured
-	# by its below-default thrust_coefficient, not by this table.
-	# omni_wheels: still fundamentally wheels (rolling contact, not
-	# tracks/legs), and the diagonal rollers that make strafing possible
-	# have an even smaller/harder contact patch than a plain tire - worse
-	# than wheels across the board, not just a sideways-move sidegrade.
-	# The strafing capability itself is the payoff, not off-road terrain
-	# performance.
-	"marsh": {"wheels": 0.25, "omni_wheels": 0.18, "tracked_treads": 0.45, "rhomboid_treads": 0.55, "legs": 0.6, "screw_drive": 1.1},
-	"rocky": {"wheels": 0.35, "omni_wheels": 0.28, "tracked_treads": 0.75, "rhomboid_treads": 0.65, "legs": 1.1, "screw_drive": 0.5},
-	"snow_mud": {"wheels": 0.2, "omni_wheels": 0.15, "tracked_treads": 0.8, "rhomboid_treads": 0.88, "legs": 0.75, "screw_drive": 0.7},
-	"sand": {"wheels": 0.3, "omni_wheels": 0.22, "tracked_treads": 0.85, "rhomboid_treads": 0.85, "legs": 0.8, "screw_drive": 0.6},
+	"marsh": {"wheels": 0.25, "tracked_treads": 0.45, "legs": 0.6, "screw_drive": 1.1},
+	"rocky": {"wheels": 0.35, "tracked_treads": 0.75, "legs": 1.1, "screw_drive": 0.5},
+	"snow_mud": {"wheels": 0.2, "tracked_treads": 0.8, "legs": 0.75, "screw_drive": 0.7},
+	"sand": {"wheels": 0.3, "tracked_treads": 0.85, "legs": 0.8, "screw_drive": 0.6},
 }
 
 static func get_terrain_speed_multiplier(locomotion_type_id: String, surface_type: String) -> float:
@@ -1354,7 +1277,7 @@ static func get_hull_size_tier(hull_type_id: String) -> String:
 		return "heavy"
 
 # Visual bug pass finding: module_placer.gd's underside-mount locomotion
-# placement (wheels/legs/hover_engine/anti_grav) assumes a hull's visual
+# placement (wheels/legs/hover_engine) assumes a hull's visual
 # bottom sits exactly at its collision box's -halfHeight - true for the
 # wedge/box-ish hulls (medium_hull, sponson_hull, etc.) but not for hulls
 # whose mesh doesn't fill its box symmetrically (ship hulls' tapered keel,
@@ -1379,9 +1302,116 @@ static func get_underside_y_bias(hull_type_id: String) -> float:
 # (pillbox_foundation, fortress_wall_foundation, tower_foundation) take no
 # locomotion at all, so they never need a running gear either.
 const LOCOMOTION_TYPES_USING_RUNNING_GEAR: Array = [
-	"wheels", "omni_wheels", "tracked_treads", "rhomboid_treads",
-	"legs", "screw_drive", "hover_engine", "anti_grav",
+	"wheels", "tracked_treads",
+	"legs", "screw_drive", "hover_engine",
 ]
+
+const LOCOMOTION_TWEAK_SPECS = {
+	"wheels": [
+		{"name": "wheel_size", "label": "Wheel Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "num_axles", "label": "Axle Count", "min": 2.0, "max": 8.0, "step": 2.0, "default": 4.0},
+		{"name": "wheels_per_axle", "label": "Wheels per Axle Side", "min": 1.0, "max": 3.0, "step": 1.0, "default": 1.0}
+	],
+	"helicopter_rotors": [
+		{"name": "rotor_units", "label": "Rotor Units", "min": 1.0, "max": 4.0, "step": 1.0, "default": 1.0},
+		{"name": "blade_count", "label": "Blades per Rotor", "min": 2.0, "max": 8.0, "step": 1.0, "default": 4.0},
+		{"name": "blade_length", "label": "Blade Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "duct", "label": "Ducted Shroud", "type": "bool", "default": false}
+	],
+	"tracked_treads": [
+		{"name": "tread_width", "label": "Tread Track Width", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "road_wheel_count", "label": "Road Wheels", "min": 3.0, "max": 8.0, "step": 1.0, "default": 5.0},
+		{"name": "drive_sprocket", "label": "Exposed Sprocket", "type": "bool", "default": true}
+	],
+	"legs": [
+		{"name": "leg_count", "label": "Leg Count", "min": 2.0, "max": 8.0, "step": 2.0, "default": 4.0},
+		{"name": "leg_length", "label": "Leg Length", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "foot_size", "label": "Foot Pad Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"hover_engine": [
+		{"name": "pad_count", "label": "Pad Count", "min": 2.0, "max": 4.0, "step": 2.0, "default": 2.0},
+		{"name": "pad_size", "label": "Hover Pad Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "skirt", "label": "Flexible Skirt", "type": "bool", "default": false}
+	],
+	"fixed_wing_engine": [
+		{"name": "nacelle_size", "label": "Engine Nacelle Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "fan_blades", "label": "Intake Fan Blades", "min": 4.0, "max": 10.0, "step": 1.0, "default": 6.0},
+		{"name": "afterburner", "label": "Afterburner Ring", "type": "bool", "default": false}
+	],
+	"ornithopter_wing": [
+		{"name": "wingspan", "label": "Wingspan", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "rib_count", "label": "Structural Ribs", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
+		{"name": "wing_sweep", "label": "Wing Sweep Angle", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0}
+	],
+	"naval_propeller": [
+		{"name": "prop_count", "label": "Propeller Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0},
+		{"name": "prop_size", "label": "Propeller Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "blade_count", "label": "Blades per Propeller", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
+		{"name": "kort_nozzle", "label": "Kort Nozzle Duct", "type": "bool", "default": false}
+	],
+	"buoyant_envelope": [
+		{"name": "motor_size", "label": "Gondola Motor Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "prop_blades", "label": "Motor Blades", "min": 2.0, "max": 4.0, "step": 1.0, "default": 2.0},
+		{"name": "tail_fins", "label": "Stabilizer Tail Fins", "type": "bool", "default": true}
+	],
+	"screw_drive": [
+		{"name": "drum_count", "label": "Screw Drum Pair Count", "min": 1.0, "max": 2.0, "step": 1.0, "default": 1.0},
+		{"name": "drum_width", "label": "Screw Drum Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0}
+	]
+}
+
+static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Dictionary:
+	var thrust = 1.0
+	var capacity = 0.0
+	match type_id:
+		"wheels":
+			var num_axles = settings.get("num_axles", settings.get("count", 4.0) / 2.0)
+			var w_per_axle = settings.get("wheels_per_axle", 1.0)
+			var size = settings.get("wheel_size", settings.get("size", 1.0))
+			thrust = (num_axles * w_per_axle * 2.0) / 4.0 * size
+			capacity = (num_axles * w_per_axle * 2.0) / 4.0 * size * 100.0
+		"tracked_treads":
+			var width = settings.get("tread_width", settings.get("width", 1.0))
+			thrust = width
+			capacity = width * 150.0
+		"legs":
+			var count = settings.get("leg_count", settings.get("count", 4.0))
+			var length = settings.get("leg_length", settings.get("size", 1.0))
+			var foot_size = settings.get("foot_size", 1.0)
+			thrust = (count / 4.0) * length
+			capacity = (count / 4.0) * foot_size * 120.0
+		"hover_engine":
+			var count = settings.get("pad_count", settings.get("count", 2.0))
+			var size = settings.get("pad_size", settings.get("size", 1.0))
+			thrust = (count / 2.0) * size
+			capacity = (count / 2.0) * size * 80.0
+		"helicopter_rotors":
+			var units = settings.get("rotor_units", settings.get("count", 1.0))
+			var blades = settings.get("blade_count", 4.0)
+			var length = settings.get("blade_length", settings.get("size", 1.0))
+			var duct = settings.get("duct", false)
+			thrust = units * (0.8 + 0.05 * blades) * length * (1.15 if duct else 1.0)
+		"fixed_wing_engine":
+			var size = settings.get("nacelle_size", settings.get("size", 1.0))
+			var afterburner = settings.get("afterburner", false)
+			thrust = size * (1.3 if afterburner else 1.0)
+		"ornithopter_wing":
+			var wingspan = settings.get("wingspan", settings.get("size", 1.0))
+			thrust = wingspan
+		"naval_propeller":
+			var count = settings.get("prop_count", settings.get("count", 2.0))
+			var size = settings.get("prop_size", settings.get("size", 1.0))
+			var kort = settings.get("kort_nozzle", false)
+			thrust = (count / 2.0) * size * (1.2 if kort else 1.0)
+		"buoyant_envelope":
+			var size = settings.get("motor_size", settings.get("size", 1.0))
+			thrust = size
+		"screw_drive":
+			var count = settings.get("drum_count", settings.get("count", 1.0))
+			var size = settings.get("drum_width", settings.get("size", 1.0))
+			thrust = count * size
+			capacity = count * size * 160.0
+	return {"thrust": thrust, "capacity": capacity}
 
 # Per-axis scale of the running-gear slab relative to the hull footprint.
 # 0.95 inset on XZ (so the chassis tucks inside the hull edge by 2.5% per

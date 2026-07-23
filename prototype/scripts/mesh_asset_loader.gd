@@ -98,19 +98,27 @@ static func _build_primitive(shape: String) -> Mesh:
 static func _load_and_cache(path: String) -> Mesh:
 	if _cache.has(path):
 		return _cache[path]
-	if not ResourceLoader.exists(path):
-		_cache[path] = null
-		return null
-	var packed_scene = load(path) as PackedScene
-	if not packed_scene:
-		_cache[path] = null
-		return null
-	var instance = packed_scene.instantiate()
-	var mesh_inst = _find_first_mesh_instance(instance)
-	var mesh: Mesh = mesh_inst.mesh if mesh_inst else null
-	instance.free()
-	_cache[path] = mesh
-	return mesh
+	if ResourceLoader.exists(path):
+		var packed_scene = load(path) as PackedScene
+		if packed_scene:
+			var instance = packed_scene.instantiate()
+			var mesh_inst = _find_first_mesh_instance(instance)
+			var mesh: Mesh = mesh_inst.mesh if mesh_inst else null
+			instance.free()
+			if mesh:
+				_cache[path] = mesh
+				return mesh
+
+	# Runtime fallback for newly exported GLBs directly from disk
+	var global_path = ProjectSettings.globalize_path(path)
+	if FileAccess.file_exists(global_path):
+		var runtime_mesh = _load_and_cache_runtime_gltf(global_path)
+		if runtime_mesh:
+			_cache[path] = runtime_mesh
+			return runtime_mesh
+
+	_cache[path] = null
+	return null
 
 # Runtime glTF import (no .import cache available for a user:// file, since
 # it was never part of the editor's asset pipeline) - GLTFDocument is

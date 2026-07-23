@@ -1,6 +1,6 @@
 extends Node3D
 # Windowed visual verification for the Sunday locomotion-tweak-parity fix:
-# legs/anti_grav/hover_engine now actually respond to their size slider.
+# legs/hover_engine now actually respond to their size slider.
 # Builds a medium_hull with each locomotion type at size=1.0, then size=2.0,
 # screenshotting both so the visual difference is checkable by eye.
 # Run with: ./Godot_v4.3-stable_win64_console.exe res://scratch/VerifyLocomotionTweaks.tscn
@@ -12,8 +12,6 @@ var shots_taken = 0
 var cases = [
 	["legs", {"size": 1.0, "count": 4}],
 	["legs", {"size": 2.0, "count": 4}],
-	["anti_grav", {"size": 1.0}],
-	["anti_grav", {"size": 2.0}],
 	["hover_engine", {"size": 1.0}],
 	["hover_engine", {"size": 2.0}],
 ]

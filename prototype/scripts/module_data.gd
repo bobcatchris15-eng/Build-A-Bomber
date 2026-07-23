@@ -36,28 +36,22 @@ func get_weight() -> float:
 	
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "wheel_size", "tread_width", "blade_length", "leg_length", "pad_size", "nacelle_size", "wingspan", "prop_size", "drum_width", "wheels_per_axle", "foot_size"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				weight *= val
 		elif tweak_name == "multi_barrel" and val == true:
 			weight *= 2.0
-		elif tweak_name == "barrel_count":
+		elif tweak_name in ["barrel_count", "road_wheel_count"]:
 			weight *= (val / 6.0)
-		elif tweak_name == "tube_count":
+		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "drum_count", "prop_blades"]:
 			weight *= (val / 2.0)
-		elif tweak_name == "grid_size":
+		elif tweak_name in ["grid_size", "num_axles", "blade_count", "rotor_units", "leg_count", "pad_count"]:
 			weight *= (val / 4.0)
-		elif tweak_name == "welder_count":
-			weight *= (val / 2.0)
-		elif tweak_name == "hangar_size":
-			# "Increases active drone count but takes up massive chassis
-			# real estate" (Arsenal_Weapons_List.md) - weight scales with
-			# drone count, same shape as barrel_count/tube_count above.
-			weight *= (val / 2.0)
+		elif tweak_name == "rib_count":
+			weight *= (val / 3.0)
+		elif tweak_name in ["afterburner", "duct", "skirt", "kort_nozzle", "tail_fins"] and val == true:
+			weight *= 1.25
 		elif tweak_name == "launch_catapult":
-			# Faster launches need heavier catapult machinery - also
-			# ensures this tweak actually changes a stat (test_no_dead_tweaks),
-			# not just fire_rate deep inside auto_weapon.gd.
 			weight *= val
 
 	return GlobalConfig.round_to_half(weight)
@@ -67,41 +61,30 @@ func get_cost() -> Vector2i:
 	var m = cost_metal + int(cost_metal * (vol - 1.0) * GlobalConfig.cost_scale_factor)
 	var c = cost_crystal + int(cost_crystal * (vol - 1.0) * GlobalConfig.cost_scale_factor)
 
-	# FABLE_REVIEW.md 1.5 (systemic tweak-cost audit): every "single part
-	# gets physically bigger" tweak already costs real weight (get_weight()
-	# below) - a bigger lens/rail/cooling jacket/warhead is a bigger, more
-	# expensive part, not just a heavier one. Same whitelist get_weight()
-	# uses, so a tweak's weight and cost consequences can never drift out
-	# of sync with each other. Previously only 5 of these ~22 tweaks had
-	# ANY cost consequence, so most of the roster's "max every slider"
-	# sliders were free power in resource terms even though they already
-	# cost real weight/traverse - the review's own "does this slider have
-	# a correct answer" complaint, still true for the resource axis even
-	# after an earlier pass fixed the weight/traverse side.
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "wheel_size", "tread_width", "blade_length", "leg_length", "pad_size", "nacelle_size", "wingspan", "prop_size", "drum_width", "wheels_per_axle", "foot_size"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				m = int(m * val)
 				c = int(c * val)
 		elif tweak_name == "multi_barrel" and val == true:
 			m *= 2
 			c *= 2
-		elif tweak_name == "barrel_count":
+		elif tweak_name in ["barrel_count", "road_wheel_count"]:
 			m = int(m * (val / 6.0))
 			c = int(c * (val / 6.0))
-		elif tweak_name == "tube_count":
+		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "drum_count", "prop_blades"]:
 			m = int(m * (val / 2.0))
 			c = int(c * (val / 2.0))
-		elif tweak_name == "grid_size":
+		elif tweak_name in ["grid_size", "num_axles", "blade_count", "rotor_units", "leg_count", "pad_count"]:
 			m = int(m * (val / 4.0))
 			c = int(c * (val / 4.0))
-		elif tweak_name == "welder_count":
-			m = int(m * (val / 2.0))
-			c = int(c * (val / 2.0))
-		elif tweak_name == "hangar_size":
-			m = int(m * (val / 2.0))
-			c = int(c * (val / 2.0))
+		elif tweak_name == "rib_count":
+			m = int(m * (val / 3.0))
+			c = int(c * (val / 3.0))
+		elif tweak_name in ["afterburner", "duct", "skirt", "kort_nozzle", "tail_fins"] and val == true:
+			m = int(m * 1.25)
+			c = int(c * 1.25)
 		elif tweak_name == "launch_catapult":
 			m = int(m * val)
 			c = int(c * val)

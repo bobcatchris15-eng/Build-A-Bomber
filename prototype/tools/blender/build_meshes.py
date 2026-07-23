@@ -963,34 +963,73 @@ def build_flak_breech(name, width=0.5, height=0.32, depth=0.4, color=(0.18, 0.18
 	return obj
 
 
-def build_wheel(name, radius=0.45, width=0.35, spokes=6, color=(0.08, 0.08, 0.08), groove_depth=0.07):
-	"""Wheel + hub, built Y-vertical (radius in X/Z, thickness along Y) -
-	matches the existing runtime convention where locomotion code applies
-	rotation.z = PI/2 at runtime to stand it up with the axle along X.
-
-	R (module's own reference dimension, per Section 3) is the tire
-	diameter - width is the axle axis, excluded the same way a barrel's
-	length is. The tire is now 3 stacked segments so a real inset groove
-	ring sits at the tire/rim boundary, and its outer edges get a
-	stronger tier-1 bevel; the hub gets a radial lug-nut bolt ring."""
+def build_wheel(name, radius=0.45, width=0.35, spokes=5, color=(0.1, 0.1, 0.12)):
+	"""High-detail military run-flat wheel with treaded rubber tire + recessed steel rim + 8 lug bolts."""
 	bm = bmesh.new()
-	R = radius * 2.0
-	seg_w = width / 3.0
-	tire_verts = []
-	tire_verts += add_cyl_y(bm, (0, seg_w * 0.5, 0), radius, seg_w, segments=22)
-	tire_verts += add_cyl_y(bm, (0, seg_w * 1.5, 0), radius * (1.0 - groove_depth), seg_w, segments=22)
-	tire_verts += add_cyl_y(bm, (0, seg_w * 2.5, 0), radius, seg_w, segments=22)
-	bmesh.ops.remove_doubles(bm, verts=tire_verts, dist=0.001)
-	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.05)
-
-	add_cyl_y(bm, (0, width * 0.53, 0), radius * 0.42, width * 1.06, segments=16)
-	greeble_bolt_ring(bm, (0, width * 1.0, 0), radius * 0.22, count=6, bolt_radius=radius * 0.035, axis='y')
+	# Outer rubber tire
+	add_cyl_y(bm, (0, width * 0.5, 0), radius, width, segments=28)
+	# Off-road tire tread lugs (16 diagonal tread bars around circumference)
+	for i in range(16):
+		angle = i * (2.0 * math.pi / 16)
+		pos = (math.cos(angle) * radius * 0.98, width * 0.5, math.sin(angle) * radius * 0.98)
+		add_box(bm, pos, (radius * 0.12, width * 0.85, 0.04), rot_axis='y', rot_angle=angle)
+	# Recessed steel wheel rim face (outer face near Y = width)
+	add_cyl_y(bm, (0, width * 0.7, 0), radius * 0.65, width * 0.65, segments=20)
+	# Center axle cap
+	add_cyl_y(bm, (0, width * 0.95, 0), radius * 0.22, width * 0.15, segments=16)
+	# 8 hex lug bolts around center cap
+	greeble_bolt_ring(bm, (0, width * 0.98, 0), radius * 0.38, count=8, bolt_radius=radius * 0.035, axis='y')
+	# 5 rim ventilation cutouts / spokes
 	for i in range(spokes):
 		angle = i * (2.0 * math.pi / spokes)
-		pos = (math.cos(angle) * radius * 0.55, width / 2.0, math.sin(angle) * radius * 0.55)
-		add_box(bm, pos, (radius * 0.5, width * 0.9, 0.05), rot_axis='y', rot_angle=angle)
+		pos = (math.cos(angle) * radius * 0.48, width * 0.8, math.sin(angle) * radius * 0.48)
+		add_box(bm, pos, (radius * 0.15, width * 0.4, radius * 0.15), rot_axis='y', rot_angle=angle)
+
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.2, roughness=0.7)
+	finalize(obj, name, color=color, metallic=0.4, roughness=0.5)
+	return obj
+
+
+def build_locomotion_mount_box(name, size_x=0.35, size_y=0.4, size_z=0.35, color=(0.28, 0.3, 0.32)):
+	"""Chamfered rectangular prism mount box for seamless locomotion-to-hull mounting."""
+	bm = bmesh.new()
+	add_box(bm, (0, size_y * 0.5, 0), (size_x, size_y, size_z), bevel=0.03)
+	greeble_bolt_ring(bm, (0, size_y * 0.85, 0), min(size_x, size_z) * 0.35, count=4, axis='y')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
+	return obj
+
+
+def build_wheel_driveshaft(name, color=(0.16, 0.16, 0.18)):
+	"""Simple chamfered rectangular housing standing in for an enclosed
+	half-axle/driveshaft, running from the hull mount point DOWN to the
+	wheel's gearbox. A single beveled unit box, deliberately plain (this
+	reads as an enclosed shaft housing rather than a decorated part,
+	matching the "just a chamfered box" request) - authored as a unit cube
+	spanning Y=0 (top, at the hull mount point) DOWN to Y=-1 (bottom, at
+	the gearbox/wheel end), so a small Z-rotation in visual_builder.gd
+	tilts it down-and-inboard instead of up-and-sideways. Scaled directly
+	to whatever final world-space box dimensions a given
+	wheel_size/wheels_per_axle needs, no authored-size ratio math
+	required."""
+	bm = bmesh.new()
+	add_box(bm, (0, -0.5, 0), (1.0, 1.0, 1.0), bevel=0.06)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.55, roughness=0.4)
+	return obj
+
+
+def build_wheel_gearbox(name, color=(0.14, 0.14, 0.16)):
+	"""Small chamfered gearbox/differential housing that sits directly
+	behind the wheel hub, fed by the driveshaft box - the "attaches to the
+	driveshaft" piece the running-gear redesign asked for. A beveled unit
+	cube (scaled directly by visual_builder.gd, same convention as
+	wheel_driveshaft) with one bolt ring on its top face."""
+	bm = bmesh.new()
+	add_box(bm, (0, 0, 0), (1.0, 0.8, 1.0), bevel=0.12)
+	greeble_bolt_ring(bm, (0, 0.42, 0), 0.28, count=4, bolt_radius=0.05, axis='y')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.35)
 	return obj
 
 
@@ -1039,6 +1078,93 @@ def build_tread_plate(name, width=1.0, length=1.0, links=6, color=(0.16, 0.16, 0
 	return obj
 
 
+def build_tread_belt_loop(name, half_span=1.0, radius=0.45, belt_width=0.3, belt_thickness=0.07,
+		drop=0.4, inset_frac=0.55, arc_segments=12, color=(0.14, 0.14, 0.15)):
+	"""Closed tread loop that wraps all the way around the road-wheel/
+	sprocket row, shaped as an "inverted trapezoid" like a real modern
+	track (Chris's ask) rather than a plain symmetric stadium/oval: the TOP
+	run is a simple straight line tangent to both sprockets (unchanged from
+	the stadium version), but the BOTTOM run dips DOWN by `drop` between two
+	diagonal transitions, so the road wheels ride notably lower than the
+	sprocket axle line - wide/low at the bottom, narrower/higher at the top.
+	`inset_frac` (0-1) controls how much of the half-span the flat lowered
+	middle run covers vs. the diagonal transitions on each side. Two
+	semicircular end-wraps of radius `radius` around the front/rear sprocket
+	centers (Godot Z = +-half_span), swept from a small rectangular cross-
+	section (belt_width x belt_thickness). The path is planar (Godot Y-Z /
+	Blender X-Z plane) so the cross-section only rotates within that plane
+	as it sweeps - its own width axis (Godot X / Blender X) never rotates,
+	which is what makes this tractable with bmesh.ops.spin + straight
+	extrude/translate instead of a full Frenet-frame sweep."""
+	bm = bmesh.new()
+	hw = belt_width / 2.0
+	# Profile: an OPEN rectangle (4 verts, 4 edges, no cap face - this needs
+	# to sweep into one continuous closed tube, not a pair of capped
+	# cylinders), positioned at the start point: directly above the rear
+	# sprocket center (Blender Y=-half_span, Blender Z=+radius, i.e. Godot
+	# Z=-half_span, Y=+radius).
+	pts = [
+		(-hw, -half_span, radius - belt_thickness), (hw, -half_span, radius - belt_thickness),
+		(hw, -half_span, radius), (-hw, -half_span, radius),
+	]
+	verts = [bm.verts.new(p) for p in pts]
+	edges = [bm.edges.new((verts[i], verts[(i + 1) % 4])) for i in range(4)]
+
+	# 1. Wrap around the REAR sprocket center: top -> back -> bottom.
+	# Positive angle here sweeps toward -Y first (outward/away from the
+	# loop's center for this end), not inward - see the derivation in the
+	# session notes; verified against the render, not just worked out on
+	# paper.
+	ret = bmesh.ops.spin(bm, geom=verts + edges, cent=(0, -half_span, 0), axis=(1, 0, 0),
+		angle=math.radians(180), steps=arc_segments, use_duplicate=False)
+	verts = [v for v in ret['geom_last'] if isinstance(v, bmesh.types.BMVert)]
+	edges = [e for e in ret['geom_last'] if isinstance(e, bmesh.types.BMEdge)]
+
+	# 2. Bottom run, now in 3 segments instead of 1 straight line: diagonal
+	# down to the lowered wheel-level run, flat across the middle, diagonal
+	# back up to the front sprocket's own bottom tangent - this is the
+	# actual trapezoid dip.
+	half_run = half_span * inset_frac
+	diag_reach = half_span - half_run  # horizontal distance each diagonal covers
+
+	ext_a = bmesh.ops.extrude_edge_only(bm, edges=edges)
+	verts = [v for v in ext_a['geom'] if isinstance(v, bmesh.types.BMVert)]
+	edges = [e for e in ext_a['geom'] if isinstance(e, bmesh.types.BMEdge)]
+	bmesh.ops.translate(bm, verts=verts, vec=(0, diag_reach, -drop))
+
+	ext_b = bmesh.ops.extrude_edge_only(bm, edges=edges)
+	verts = [v for v in ext_b['geom'] if isinstance(v, bmesh.types.BMVert)]
+	edges = [e for e in ext_b['geom'] if isinstance(e, bmesh.types.BMEdge)]
+	bmesh.ops.translate(bm, verts=verts, vec=(0, half_run * 2.0, 0))
+
+	ext_c = bmesh.ops.extrude_edge_only(bm, edges=edges)
+	verts = [v for v in ext_c['geom'] if isinstance(v, bmesh.types.BMVert)]
+	edges = [e for e in ext_c['geom'] if isinstance(e, bmesh.types.BMEdge)]
+	bmesh.ops.translate(bm, verts=verts, vec=(0, diag_reach, drop))
+
+	# 3. Wrap around the FRONT sprocket center: bottom -> front -> top.
+	ret2 = bmesh.ops.spin(bm, geom=verts + edges, cent=(0, half_span, 0), axis=(1, 0, 0),
+		angle=math.radians(180), steps=arc_segments, use_duplicate=False)
+	verts = [v for v in ret2['geom_last'] if isinstance(v, bmesh.types.BMVert)]
+	edges = [e for e in ret2['geom_last'] if isinstance(e, bmesh.types.BMEdge)]
+
+	# 4. Straight top run back to the start point, closing the loop -
+	# unchanged, the top stays a simple direct line (the "narrow/high" side
+	# of the trapezoid).
+	ext2 = bmesh.ops.extrude_edge_only(bm, edges=edges)
+	verts = [v for v in ext2['geom'] if isinstance(v, bmesh.types.BMVert)]
+	bmesh.ops.translate(bm, verts=verts, vec=(0, -half_span * 2.0, 0))
+
+	# The final ring's translated position should land exactly back on the
+	# original starting ring - weld the seam shut.
+	bmesh.ops.remove_doubles(bm, verts=list(bm.verts), dist=0.001)
+	bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.4, roughness=0.6)
+	return obj
+
+
 def build_screw_drum(name, length=1.6, shaft_radius=0.13, fin_reach=0.16, turns=3.0,
 		color=(0.35, 0.32, 0.28)):
 	"""Helical auger/screw drum for amphibious screw-drive locomotion (real
@@ -1063,6 +1189,267 @@ def build_screw_drum(name, length=1.6, shaft_radius=0.13, fin_reach=0.16, turns=
 		add_box(bm, pos, (fin_reach, 0.045, (length * 0.8 / segments) * 2.4), rot_axis='z', rot_angle=angle)
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.65, roughness=0.55)
+	return obj
+
+
+def build_wheel_axle_bar(name, length=0.8, radius=0.05, color=(0.2, 0.2, 0.22)):
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), radius, length, 'x', segments=12)
+	greeble_bolt_ring(bm, (-length * 0.45, 0, 0), radius * 1.4, count=4, axis='x')
+	greeble_bolt_ring(bm, (length * 0.45, 0, 0), radius * 1.4, count=4, axis='x')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
+	return obj
+
+
+def build_rotor_mast(name, height=0.6, radius_bottom=0.07, radius_top=0.05, color=(0.25, 0.25, 0.28)):
+	bm = bmesh.new()
+	add_cyl_y(bm, (0, height * 0.5, 0), radius_bottom, height, segments=14, radius2=radius_top)
+	greeble_bolt_ring(bm, (0, height * 0.1, 0), radius_bottom * 1.3, count=6, axis='y')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
+	return obj
+
+
+def build_rotor_hub(name, radius=0.22, height=0.15, color=(0.2, 0.2, 0.22)):
+	bm = bmesh.new()
+	add_cyl_y(bm, (0, height * 0.5, 0), radius, height, segments=16)
+	greeble_bolt_ring(bm, (0, height * 0.9, 0), radius * 0.75, count=6, axis='y')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.65, roughness=0.35)
+	return obj
+
+
+def build_rotor_blade(name, length=1.2, width_root=0.16, width_tip=0.08, thickness=0.02, color=(0.18, 0.18, 0.2)):
+	bm = bmesh.new()
+	pts = [
+		(-width_root * 0.5, 0, 0), (width_root * 0.5, 0, 0),
+		(-width_tip * 0.5, 0, length), (width_tip * 0.5, 0, length),
+		(-width_root * 0.5, thickness, 0), (width_root * 0.5, thickness, 0),
+		(-width_tip * 0.5, thickness, length), (width_tip * 0.5, thickness, length)
+	]
+	verts = [bm.verts.new(GV(*p)) for p in pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.4, roughness=0.5)
+	return obj
+
+
+def build_rotor_duct_ring(name, major_radius=1.2, minor_radius=0.06, height=0.25, color=(0.3, 0.3, 0.33)):
+	bm = bmesh.new()
+	add_ring(bm, (0, height * 0.5, 0), major_radius, minor_radius, major_segments=32, minor_segments=8)
+	add_cyl_y(bm, (0, height * 0.5, 0), major_radius + minor_radius, height, segments=32, radius2=major_radius + minor_radius)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.45, roughness=0.5)
+	return obj
+
+
+def build_drive_sprocket(name, radius=0.4, width=0.3, teeth=10, color=(0.18, 0.18, 0.2)):
+	bm = bmesh.new()
+	add_cyl_y(bm, (0, width * 0.5, 0), radius * 0.85, width, segments=20)
+	for i in range(teeth):
+		angle = i * (2.0 * math.pi / teeth)
+		pos = (math.cos(angle) * radius * 0.92, width * 0.5, math.sin(angle) * radius * 0.92)
+		add_box(bm, pos, (radius * 0.2, width * 0.95, radius * 0.12), rot_axis='y', rot_angle=angle)
+	greeble_bolt_ring(bm, (0, width, 0), radius * 0.5, count=6, axis='y')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.5, roughness=0.5)
+	return obj
+
+
+def build_leg_foot(name, size_x=0.4, size_y=0.12, size_z=0.5, color=(0.22, 0.22, 0.24)):
+	bm = bmesh.new()
+	add_box(bm, (0, size_y * 0.5, 0), (size_x, size_y, size_z), bevel=0.02)
+	add_box(bm, (0, size_y * 0.8, -size_z * 0.25), (size_x * 0.7, size_y * 0.6, size_z * 0.4), bevel=0.015)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.4, roughness=0.6)
+	return obj
+
+
+def build_hover_fan(name, radius=0.4, height=0.08, blades=8, color=(0.25, 0.25, 0.28)):
+	bm = bmesh.new()
+	add_cyl_y(bm, (0, height * 0.5, 0), radius * 0.3, height * 1.2, segments=14)
+	add_cyl_y(bm, (0, height * 0.5, 0), radius, height, segments=20)
+	for i in range(blades):
+		angle = i * (2.0 * math.pi / blades)
+		pos = (math.cos(angle) * radius * 0.6, height * 0.5, math.sin(angle) * radius * 0.6)
+		add_box(bm, pos, (radius * 0.75, height * 0.6, 0.03), rot_axis='y', rot_angle=angle)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.5, roughness=0.4)
+	return obj
+
+
+def build_hover_skirt(name, radius_top=0.5, radius_bottom=0.65, height=0.35, color=(0.12, 0.12, 0.14)):
+	bm = bmesh.new()
+	add_cyl_y(bm, (0, height * 0.5, 0), radius_top, height, segments=24, radius2=radius_bottom)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.1, roughness=0.85)
+	return obj
+
+
+def build_engine_nacelle(name, length=1.2, radius=0.3, color=(0.4, 0.42, 0.45)):
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), radius * 0.7, length, 'z', segments=20, radius2=radius)
+	add_cyl_axis(bm, (0, 0, -length * 0.5 - 0.05), radius * 0.7, 0.1, 'z', segments=20, radius2=radius * 0.5)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.35)
+	return obj
+
+
+def build_engine_fan(name, radius=0.28, height=0.06, blades=12, color=(0.2, 0.2, 0.22)):
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), radius * 0.25, height * 1.5, 'z', segments=14)
+	for i in range(blades):
+		angle = i * (2.0 * math.pi / blades)
+		pos = (math.cos(angle) * radius * 0.55, math.sin(angle) * radius * 0.55, 0)
+		add_box(bm, pos, (radius * 0.7, 0.02, height), rot_axis='z', rot_angle=angle)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.7, roughness=0.3)
+	return obj
+
+
+def build_exhaust_cone(name, radius=0.25, length=0.3, color=(0.15, 0.15, 0.16)):
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), radius, length, 'z', segments=16, radius2=radius * 0.6)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.75, roughness=0.3)
+	return obj
+
+
+def build_wing_shoulder(name, size=(0.3, 0.2, 0.25), color=(0.3, 0.3, 0.33)):
+	bm = bmesh.new()
+	add_box(bm, (0, size[1] * 0.5, 0), size, bevel=0.02)
+	greeble_bolt_ring(bm, (size[0] * 0.5, size[1] * 0.5, 0), min(size[1], size[2]) * 0.35, count=5, axis='x')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.55, roughness=0.45)
+	return obj
+
+
+def build_wing_membrane(name, length=1.2, width_root=0.4, width_tip=0.15, thickness=0.015, color=(0.25, 0.28, 0.3)):
+	bm = bmesh.new()
+	pts = [
+		(0, 0, -width_root * 0.5), (0, 0, width_root * 0.5),
+		(length, 0, -width_tip * 0.5), (length, 0, width_tip * 0.5),
+		(0, thickness, -width_root * 0.5), (0, thickness, width_root * 0.5),
+		(length, thickness, -width_tip * 0.5), (length, thickness, width_tip * 0.5)
+	]
+	verts = [bm.verts.new(GV(*p)) for p in pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.2, roughness=0.6)
+	return obj
+
+
+def build_wing_rib(name, length=1.1, thickness=0.03, height=0.04, color=(0.2, 0.2, 0.22)):
+	bm = bmesh.new()
+	add_box(bm, (length * 0.5, height * 0.5, 0), (length, height, thickness), bevel=0.008)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
+	return obj
+
+
+def build_prop_housing(name, length=0.4, radius_front=0.15, radius_back=0.08, color=(0.28, 0.3, 0.32)):
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), radius_front, length, 'z', segments=16, radius2=radius_back)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
+	return obj
+
+
+def build_kort_nozzle(name, major_radius=0.45, minor_radius=0.04, height=0.25, color=(0.25, 0.25, 0.28)):
+	bm = bmesh.new()
+	add_ring(bm, (0, 0, 0), major_radius, minor_radius, major_segments=24, minor_segments=8)
+	add_cyl_axis(bm, (0, 0, 0), major_radius + minor_radius, height, 'z', segments=24)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.5, roughness=0.45)
+	return obj
+
+
+def build_cruise_nacelle(name, length=0.6, radius=0.15, color=(0.35, 0.35, 0.38)):
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), radius, length, 'z', segments=14, radius2=radius * 0.6)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.55, roughness=0.4)
+	return obj
+
+
+def build_outrigger_strut(name, length=0.8, radius=0.03, color=(0.2, 0.2, 0.22)):
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), radius, length, 'x', segments=10)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.5, roughness=0.5)
+	return obj
+
+
+def build_tail_fin(name, height=0.5, width_bottom=0.3, width_top=0.12, thickness=0.02, color=(0.3, 0.3, 0.35)):
+	bm = bmesh.new()
+	pts = [
+		(0, 0, -width_bottom * 0.5), (0, 0, width_bottom * 0.5),
+		(0, height, -width_top * 0.5), (0, height, width_top * 0.5),
+		(thickness, 0, -width_bottom * 0.5), (thickness, 0, width_bottom * 0.5),
+		(thickness, height, -width_top * 0.5), (thickness, height, width_top * 0.5)
+	]
+	verts = [bm.verts.new(GV(*p)) for p in pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.3, roughness=0.6)
+	return obj
+
+
+def build_rg_susp_beam(name, length=1.0, width=0.12, height=0.12, color=(0.18, 0.18, 0.2)):
+	bm = bmesh.new()
+	add_box(bm, (0, height * 0.5, 0), (width, height, length), bevel=0.015)
+	greeble_bolt_ring(bm, (0, height * 0.5, -length * 0.4), width * 0.4, count=4, axis='z')
+	greeble_bolt_ring(bm, (0, height * 0.5, length * 0.4), width * 0.4, count=4, axis='z')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
+	return obj
+
+
+def build_rg_axle_stub(name, length=0.25, radius=0.04, color=(0.2, 0.2, 0.22)):
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), radius, length, 'x', segments=12)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
+	return obj
+
+
+def build_rg_track_frame(name, length=1.4, width=0.14, height=0.2, color=(0.16, 0.16, 0.18)):
+	bm = bmesh.new()
+	add_box(bm, (0, height * 0.5, 0), (width, height, length), bevel=0.02)
+	greeble_bolt_ring(bm, (0, height * 0.5, 0), width * 0.4, count=6, axis='x')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.55, roughness=0.45)
+	return obj
+
+
+def build_rg_road_bogie(name, width=0.18, height=0.15, depth=0.15, color=(0.2, 0.2, 0.22)):
+	bm = bmesh.new()
+	add_box(bm, (0, height * 0.5, 0), (width, height, depth), bevel=0.015)
+	add_cyl_axis(bm, (width * 0.5, height * 0.5, 0), 0.035, 0.1, 'x', segments=10)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.5, roughness=0.5)
+	return obj
+
+
+def build_rg_hip_socket(name, size=(0.25, 0.25, 0.25), color=(0.22, 0.22, 0.25)):
+	bm = bmesh.new()
+	add_box(bm, (0, size[1] * 0.5, 0), size, bevel=0.02)
+	greeble_bolt_ring(bm, (0, size[1] * 0.5, 0), min(size[0], size[2]) * 0.35, count=6, axis='y')
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
+	return obj
+
+
+def build_rg_screw_cradle(name, size=(0.3, 0.25, 0.35), color=(0.25, 0.22, 0.2)):
+	bm = bmesh.new()
+	add_box(bm, (0, size[1] * 0.5, 0), size, bevel=0.02)
+	add_cyl_axis(bm, (0, size[1] * 0.8, 0), size[0] * 0.35, size[2] * 0.9, 'z', segments=12)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.5, roughness=0.5)
 	return obj
 
 
@@ -1948,9 +2335,40 @@ def generate_parts():
 	export_and_cleanup(build_leg_segment("leg_thigh", length=0.55, radius_top=0.13, radius_bottom=0.09, color=(0.3, 0.3, 0.32)), PARTS_DIR, "leg_thigh")
 	export_and_cleanup(build_leg_segment("leg_shin", length=0.5, radius_top=0.09, radius_bottom=0.06, color=(0.16, 0.16, 0.17)), PARTS_DIR, "leg_shin")
 	export_and_cleanup(build_hover_ring("hover_ring", major_radius=0.5, minor_radius=0.1, color=(0.2, 0.6, 0.9)), PARTS_DIR, "hover_ring")
-	export_and_cleanup(build_hover_ring("antigrav_ring", major_radius=0.5, minor_radius=0.07, color=(0.3, 0.5, 1.0)), PARTS_DIR, "antigrav_ring")
 	export_and_cleanup(build_tread_plate("tread_plate", color=(0.16, 0.16, 0.17)), PARTS_DIR, "tread_plate")
+	export_and_cleanup(build_tread_belt_loop("tread_belt_loop", color=(0.14, 0.14, 0.15)), PARTS_DIR, "tread_belt_loop")
 	export_and_cleanup(build_screw_drum("screw_drum", color=(0.35, 0.32, 0.28)), PARTS_DIR, "screw_drum")
+
+	export_and_cleanup(build_wheel_axle_bar("wheel_axle_bar"), PARTS_DIR, "wheel_axle_bar")
+	export_and_cleanup(build_rotor_mast("rotor_mast"), PARTS_DIR, "rotor_mast")
+	export_and_cleanup(build_rotor_hub("rotor_hub"), PARTS_DIR, "rotor_hub")
+	export_and_cleanup(build_rotor_blade("rotor_blade"), PARTS_DIR, "rotor_blade")
+	export_and_cleanup(build_rotor_duct_ring("rotor_duct_ring"), PARTS_DIR, "rotor_duct_ring")
+	export_and_cleanup(build_drive_sprocket("drive_sprocket"), PARTS_DIR, "drive_sprocket")
+	export_and_cleanup(build_leg_foot("leg_foot"), PARTS_DIR, "leg_foot")
+	export_and_cleanup(build_hover_fan("hover_fan"), PARTS_DIR, "hover_fan")
+	export_and_cleanup(build_hover_skirt("hover_skirt"), PARTS_DIR, "hover_skirt")
+	export_and_cleanup(build_engine_nacelle("engine_nacelle"), PARTS_DIR, "engine_nacelle")
+	export_and_cleanup(build_engine_fan("engine_fan"), PARTS_DIR, "engine_fan")
+	export_and_cleanup(build_exhaust_cone("exhaust_cone"), PARTS_DIR, "exhaust_cone")
+	export_and_cleanup(build_wing_shoulder("wing_shoulder"), PARTS_DIR, "wing_shoulder")
+	export_and_cleanup(build_wing_membrane("wing_membrane"), PARTS_DIR, "wing_membrane")
+	export_and_cleanup(build_wing_rib("wing_rib"), PARTS_DIR, "wing_rib")
+	export_and_cleanup(build_prop_housing("prop_housing"), PARTS_DIR, "prop_housing")
+	export_and_cleanup(build_kort_nozzle("kort_nozzle"), PARTS_DIR, "kort_nozzle")
+	export_and_cleanup(build_cruise_nacelle("cruise_nacelle"), PARTS_DIR, "cruise_nacelle")
+	export_and_cleanup(build_outrigger_strut("outrigger_strut"), PARTS_DIR, "outrigger_strut")
+	export_and_cleanup(build_tail_fin("tail_fin"), PARTS_DIR, "tail_fin")
+
+	export_and_cleanup(build_rg_susp_beam("rg_susp_beam"), PARTS_DIR, "rg_susp_beam")
+	export_and_cleanup(build_rg_axle_stub("rg_axle_stub"), PARTS_DIR, "rg_axle_stub")
+	export_and_cleanup(build_rg_track_frame("rg_track_frame"), PARTS_DIR, "rg_track_frame")
+	export_and_cleanup(build_rg_road_bogie("rg_road_bogie"), PARTS_DIR, "rg_road_bogie")
+	export_and_cleanup(build_rg_hip_socket("rg_hip_socket"), PARTS_DIR, "rg_hip_socket")
+	export_and_cleanup(build_rg_screw_cradle("rg_screw_cradle"), PARTS_DIR, "rg_screw_cradle")
+	export_and_cleanup(build_locomotion_mount_box("rg_mount_box"), PARTS_DIR, "rg_mount_box")
+	export_and_cleanup(build_wheel_driveshaft("wheel_driveshaft"), PARTS_DIR, "wheel_driveshaft")
+	export_and_cleanup(build_wheel_gearbox("wheel_gearbox"), PARTS_DIR, "wheel_gearbox")
 
 	export_and_cleanup(build_accessory("headlight_cluster", "spotlight", (0.9, 0.9, 0.75), radius=0.07, metallic=0.3, roughness=0.2), PARTS_DIR, "headlight_cluster")
 	export_and_cleanup(build_accessory("exhaust_stack", "exhaust", (0.15, 0.15, 0.15), height=0.35, metallic=0.7, roughness=0.5), PARTS_DIR, "exhaust_stack")

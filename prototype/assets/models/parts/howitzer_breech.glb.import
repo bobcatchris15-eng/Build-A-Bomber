@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://d2y5vv6amfqx6"
-path="res://.godot/imported/anti_grav.glb-4180fe262fcbaa4e348ef61f1ae5a917.scn"
+uid="uid://blisslrd4w3f1"
+path="res://.godot/imported/howitzer_breech.glb-a57d9a80d0a55615d5bf1b47ec67486c.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/anti_grav.glb"
-dest_files=["res://.godot/imported/anti_grav.glb-4180fe262fcbaa4e348ef61f1ae5a917.scn"]
+source_file="res://assets/models/parts/howitzer_breech.glb"
+dest_files=["res://.godot/imported/howitzer_breech.glb-a57d9a80d0a55615d5bf1b47ec67486c.scn"]
 
 [params]
 

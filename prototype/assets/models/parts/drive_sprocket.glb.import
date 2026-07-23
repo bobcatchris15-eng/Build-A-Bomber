@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://bpfnv7jbg3rdp"
-path="res://.godot/imported/omni_wheels.glb-99d5731fad1d53f5d76b78b48d4bd8b5.scn"
+uid="uid://2yvu1iw6b2ip"
+path="res://.godot/imported/drive_sprocket.glb-8a365456bbd6df2f75d342919ead1324.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/omni_wheels.glb"
-dest_files=["res://.godot/imported/omni_wheels.glb-99d5731fad1d53f5d76b78b48d4bd8b5.scn"]
+source_file="res://assets/models/parts/drive_sprocket.glb"
+dest_files=["res://.godot/imported/drive_sprocket.glb-8a365456bbd6df2f75d342919ead1324.scn"]
 
 [params]
 
