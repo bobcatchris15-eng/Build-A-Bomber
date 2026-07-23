@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dpi6jqtisylpf"
-path="res://.godot/imported/rhomboid_treads.glb-771bf6facb5ce010d900ddbed28201c0.scn"
+uid="uid://kke1j58vlis7"
+path="res://.godot/imported/rg_susp_beam.glb-79c1ed0fb9fff8b8268aef4c2ac37281.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/rhomboid_treads.glb"
-dest_files=["res://.godot/imported/rhomboid_treads.glb-771bf6facb5ce010d900ddbed28201c0.scn"]
+source_file="res://assets/models/parts/rg_susp_beam.glb"
+dest_files=["res://.godot/imported/rg_susp_beam.glb-79c1ed0fb9fff8b8268aef4c2ac37281.scn"]
 
 [params]
 

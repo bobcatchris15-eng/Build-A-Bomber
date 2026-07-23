@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cdeud3mswrvc6"
-path="res://.godot/imported/antigrav_ring.glb-88622e71024d1a9879de91e3586171e8.scn"
+uid="uid://ciu47i62lorpx"
+path="res://.godot/imported/wing_rib.glb-b26501bd66e9b6cae3cc4d4c213e0aa2.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/antigrav_ring.glb"
-dest_files=["res://.godot/imported/antigrav_ring.glb-88622e71024d1a9879de91e3586171e8.scn"]
+source_file="res://assets/models/parts/wing_rib.glb"
+dest_files=["res://.godot/imported/wing_rib.glb-b26501bd66e9b6cae3cc4d4c213e0aa2.scn"]
 
 [params]
 

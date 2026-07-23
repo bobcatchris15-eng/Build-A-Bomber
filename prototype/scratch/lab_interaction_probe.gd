@@ -545,7 +545,7 @@ func _probe_primitive_hulls():
 
 func _probe_locomotion_mirroring():
 	print("\n--- Probe 9: chiral locomotion mirrors left/right ---")
-	for loco in ["legs", "hover_engine", "anti_grav", "fixed_wing_engine", "ornithopter_wing", "wheels"]:
+	for loco in ["legs", "hover_engine", "fixed_wing_engine", "ornithopter_wing", "wheels"]:
 		lab.clear_hull()
 		await _settle(2)
 		lab._place_hull_from_ui("medium_hull")

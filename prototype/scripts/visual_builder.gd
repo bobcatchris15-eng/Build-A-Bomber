@@ -11,7 +11,11 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const GlobalConfigScript = preload("res://scripts/global_config.gd")
 
 static func _part(part_name: String) -> Mesh:
-	return MeshAssetLoader.get_part_mesh(part_name)
+	var m = MeshAssetLoader.get_part_mesh(part_name)
+	if m == null:
+		push_error("VisualBuilder CRITICAL ERROR: Failed to load part mesh '%s' from library!" % part_name)
+		assert(m != null, "VisualBuilder CRITICAL ERROR: Failed to load part mesh '%s' from library!" % part_name)
+	return m
 
 # Procedural running-gear slab (locomotion grounding fix). A flat dark-metal
 # chassis that sits under the hull, sized to the hull's XZ with a small
@@ -47,35 +51,13 @@ static func _part(part_name: String) -> Mesh:
 # CollisionShape3D already provides the real physics collider in that case;
 # this body's collider is purely for the designer-raycast/dimension-lookup
 # use, so it can safely be collision-free there.
-static func build_running_gear(parent_node: Node3D, dimensions: Vector3, base_color: Color, collision_layer: int = 1) -> StaticBody3D:
+static func build_running_gear(parent_node: Node3D, dimensions: Vector3, base_color: Color, collision_layer: int = 1, type_id: String = "") -> StaticBody3D:
 	var body = StaticBody3D.new()
 	body.name = "RunningGear"
 	body.collision_layer = collision_layer
 	body.collision_mask = 0
-	# Hull-local: body returned at the parent's local origin; the caller
-	# translates it. Keeps the helper decoupled from any specific hull's
-	# dimensions (so the same call works in module_placer's designer-mode
-	# update_locomotion and in blueprint_manager's battle-mode
-	# reconstruct_vehicle, which both know their own hull size).
 
-	# Visual: dark brushed-metal chassis. Built locally rather than via
-	# _mesh_inst() because the chassis wants a real metallic material, not
-	# the flat-color one _mesh_inst() produces.
-	var box = BoxMesh.new()
-	box.size = dimensions
-	var mesh_inst = MeshInstance3D.new()
-	mesh_inst.mesh = box
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = base_color.darkened(0.35)
-	mat.metallic = 0.6
-	mat.roughness = 0.5
-	mesh_inst.material_override = mat
-	body.add_child(mesh_inst)
-
-	# Collider: matching box. Layer 1, mask 0 (same as hull - the unit's
-	# CharacterBody3D handles all terrain interaction; this is just
-	# designer-mode raycast + the static-body reference for any code that
-	# reads the chassis's own dimensions off its shape).
+	# Collider: matching box for grounding and raycast selection.
 	var col = CollisionShape3D.new()
 	var col_box = BoxShape3D.new()
 	col_box.size = dimensions
@@ -126,24 +108,43 @@ const MONOLITHIC_ANIMATION_PIVOTS := {
 	"paddle_wheel": "PropBlades",
 }
 
+const LOCOMOTION_MODULAR_TYPES := {
+	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
+	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
+	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true
+}
+
+const MODULAR_ASSEMBLY_TYPES := {
+	"basic_cannon": true, "heavy_machine_gun": true, "rotary_cannon": true, "gauss_railgun": true,
+	"artillery": true, "mortar_array": true, "guided_missile": true, "missile_pod": true,
+	"cluster_dispenser": true, "flamethrower": true, "tesla_coil": true, "ion_cannon": true,
+	"heavy_laser": true, "plasma_lobber": true, "ciws": true, "pd_laser": true, "flak_cannon": true,
+	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
+	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
+	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true
+}
+
+static func _repeat_along_axis(parent: Node3D, count: int, spacing: float, axis_vec: Vector3, builder_func: Callable):
+	var start_pos = -axis_vec * ((count - 1) * spacing / 2.0)
+	for i in range(count):
+		var pos = start_pos + axis_vec * (i * spacing)
+		builder_func.call(parent, pos, i)
+
+static func _ring_of(parent: Node3D, count: int, radius: float, builder_func: Callable):
+	for i in range(count):
+		var angle = i * (TAU / max(1, count))
+		var pos = Vector3(cos(angle) * radius, 0, sin(angle) * radius)
+		builder_func.call(parent, pos, angle, i)
+
 static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}):
-	# Clear any existing visual children. Used to only free MeshInstance3D
-	# nodes, which silently leaked the Node3D animation pivots (WingPivot,
-	# and now BarrelCluster/RotorBlades/PropBlades) on every rebuild_visual()
-	# call (every Design Lab slider tweak) - each rebuild added a fresh pivot
-	# on top of the stale one instead of replacing it. Explicitly skips
-	# StaticBody3D: module_placer.gd's _place_weapon()/_place_locomotion()
-	# add the module's collision StaticBody3D as a sibling of whatever
-	# build_visual() built, ONCE, at placement time - rebuild_visual() never
-	# recreates it, so freeing it here would silently destroy the module's
-	# collision on the very next stat-tweak rebuild.
+	# Clear any existing visual children.
 	for child in parent_node.get_children():
 		if child is StaticBody3D:
 			continue
 		child.queue_free()
 
 	# Try to load a monolithic authored mesh for this entire module first (modular sub-part assemblies bypass this)
-	var monolithic_mesh = _part(type_id) if (type_id != "basic_cannon" and type_id != "heavy_machine_gun" and type_id != "rotary_cannon" and type_id != "gauss_railgun" and type_id != "artillery" and type_id != "mortar_array" and type_id != "guided_missile" and type_id != "missile_pod" and type_id != "cluster_dispenser" and type_id != "flamethrower" and type_id != "tesla_coil" and type_id != "ion_cannon" and type_id != "heavy_laser" and type_id != "plasma_lobber" and type_id != "ciws" and type_id != "pd_laser" and type_id != "flak_cannon") else null
+	var monolithic_mesh = _part(type_id) if not MODULAR_ASSEMBLY_TYPES.has(type_id) else null
 	if monolithic_mesh:
 		var inst = _mesh_inst(monolithic_mesh, base_color)
 		if type_id == "basic_cannon":
@@ -208,6 +209,37 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		# without changing today's shipped behavior.
 		if GlobalConfigScript.enable_animated_monolithic_parts:
 			_attach_moving_parts(type_id, parent_node, base_size, base_color, tweaks)
+		return
+
+	# Locomotion dispatch: handled BEFORE the weapon if/elif/else chain below,
+	# not after it. Every locomotion type_id is in MODULAR_ASSEMBLY_TYPES (so
+	# it skips the monolithic-mesh branch above), but none of them ever
+	# matched any of the weapon-specific `if type_id == "..."` branches in
+	# that chain either - so every locomotion instance fell through to the
+	# chain's final `else: Fallback: Simple box mesh for armor and basic
+	# parts`, which unconditionally added a plain uncolored BoxMesh sized to
+	# the catalog's flat base_size (not scaled by any tweak) at the module's
+	# mount point, BEFORE _build_wheels()/etc. below ever ran - a second,
+	# unwanted, unchamfered box baked into every locomotion instance ("box
+	# outboard of them and above, no chamfered edges" - visually indistinguishable
+	# from a failed/fallback mount). The dispatch below also wasn't passing
+	# `tweaks` through to most _build_X() calls, so wheel_size/blade_length/
+	# etc. tweaks never reached the actual sub-part geometry at all. Returning
+	# here after the real per-type build fixes both: no more stray fallback
+	# box, and every per-instance tweak now actually reaches its _build_X().
+	if LOCOMOTION_MODULAR_TYPES.has(type_id):
+		match type_id:
+			"wheels": _build_wheels(parent_node, base_size, base_color, tweaks)
+			"tracked_treads": _build_tracked_treads(parent_node, base_size, base_color, tweaks)
+			"helicopter_rotors": _build_helicopter_rotors(parent_node, base_size, base_color, tweaks)
+			"hover_engine": _build_hover_engine(parent_node, base_size, base_color, tweaks)
+			"legs": _build_legs(parent_node, base_size, base_color, tweaks)
+			"fixed_wing_engine": _build_fixed_wing_engine(parent_node, base_size, base_color, tweaks)
+			"ornithopter_wing": _build_ornithopter_wing(parent_node, base_size, base_color, tweaks)
+			"naval_propeller": _build_naval_propeller(parent_node, base_size, base_color, tweaks)
+			"buoyant_envelope": _build_buoyant_envelope(parent_node, base_size, base_color, tweaks)
+			"screw_drive": _build_screw_drive(parent_node, base_size, base_color, tweaks)
+		_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
 		return
 
 
@@ -1690,34 +1722,6 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		mesh_inst.position = Vector3(0, base_size.y / 2.0, 0)
 		parent_node.add_child(mesh_inst)
 
-	# Locomotion & remaining categories, split out for readability
-	if type_id == "wheels":
-		_build_wheels(parent_node, base_size)
-	elif type_id == "omni_wheels":
-		_build_omni_wheels(parent_node, base_size)
-	elif type_id == "tracked_treads":
-		_build_tracked_treads(parent_node, base_size, base_color)
-	elif type_id == "rhomboid_treads":
-		_build_rhomboid_treads(parent_node, base_size, base_color)
-	elif type_id == "helicopter_rotors":
-		_build_helicopter_rotors(parent_node, base_size)
-	elif type_id == "hover_engine":
-		_build_hover_engine(parent_node, base_size, base_color)
-	elif type_id == "legs":
-		_build_legs(parent_node, base_size, base_color)
-	elif type_id == "anti_grav":
-		_build_anti_grav(parent_node, base_size, base_color)
-	elif type_id == "fixed_wing_engine":
-		_build_fixed_wing_engine(parent_node, base_size, base_color)
-	elif type_id == "ornithopter_wing":
-		_build_ornithopter_wing(parent_node, base_size, base_color)
-	elif type_id == "naval_propeller":
-		_build_naval_propeller(parent_node, base_size, base_color)
-	elif type_id == "buoyant_envelope":
-		_build_buoyant_envelope(parent_node, base_size, base_color)
-	elif type_id == "screw_drive":
-		_build_screw_drive(parent_node, base_size, base_color)
-
 	# Apply deformations to the newly constructed meshes based on the tweaks
 	_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
 
@@ -1829,227 +1833,14 @@ static func _attach_radar_dish(parent_node: Node3D, base_size: Vector3, base_col
 	dish.rotation = Vector3(PI / 2 - 0.2, 0, 0)
 	parent_node.add_child(dish)
 
-
-static func _build_wheels(parent_node: Node3D, base_size: Vector3):
-	var wheel_mesh = _part("wheel_hub")
-	var wheel: MeshInstance3D
-	if wheel_mesh:
-		wheel = _mesh_inst(wheel_mesh, Color.BLACK)
-		wheel.scale = _fit_scale(Vector3(base_size.y, base_size.x * 0.7, base_size.y), Vector3(0.9, 0.35, 0.9))
-	else:
-		wheel = MeshInstance3D.new()
-		var wheel_cyl = CylinderMesh.new()
-		wheel_cyl.top_radius = base_size.y / 2.0
-		wheel_cyl.bottom_radius = base_size.y / 2.0
-		wheel_cyl.height = base_size.x * 0.7
-		wheel.mesh = wheel_cyl
-		var wheel_mat = StandardMaterial3D.new()
-		wheel_mat.albedo_color = Color.BLACK
-		wheel.material_override = wheel_mat
-	wheel.position = Vector3(0, base_size.y / 2.0, 0)
-	wheel.rotation = Vector3(0, 0, PI / 2)
-	parent_node.add_child(wheel)
-
-	# Inner Hubcap
-	var hub = MeshInstance3D.new()
-	var hub_cyl = CylinderMesh.new()
-	hub_cyl.top_radius = (base_size.y / 2.0) * 0.5
-	hub_cyl.bottom_radius = (base_size.y / 2.0) * 0.5
-	hub_cyl.height = (base_size.x * 0.7) * 1.05
-	hub.mesh = hub_cyl
-	var hub_mat = StandardMaterial3D.new()
-	hub_mat.albedo_color = Color.SILVER
-	hub.material_override = hub_mat
-	hub.position = Vector3(0, base_size.y / 2.0, 0)
-	hub.rotation = Vector3(0, 0, PI / 2)
-	parent_node.add_child(hub)
-
-
-static func _build_omni_wheels(parent_node: Node3D, base_size: Vector3):
-	# Batch E task 5: mecanum-style wheel - a real mecanum wheel's tell is
-	# a ring of small diagonal rollers around its circumference (that's
-	# literally what lets it push sideways), so this is deliberately built
-	# to look different from a plain wheel_hub, not just a recolor.
-	var hub = MeshInstance3D.new()
-	var hub_cyl = CylinderMesh.new()
-	hub_cyl.top_radius = base_size.y * 0.42
-	hub_cyl.bottom_radius = base_size.y * 0.42
-	hub_cyl.height = base_size.x * 0.55
-	hub.mesh = hub_cyl
-	var hub_mat = StandardMaterial3D.new()
-	hub_mat.albedo_color = Color(0.15, 0.15, 0.18)
-	hub_mat.metallic = 0.6
-	hub_mat.roughness = 0.4
-	hub.material_override = hub_mat
-	hub.position = Vector3(0, base_size.y / 2.0, 0)
-	hub.rotation = Vector3(0, 0, PI / 2)
-	parent_node.add_child(hub)
-
-	# Ring of small diagonal rollers around the hub's circumference - each
-	# one angled ~45 degrees to its own tangent, the actual mecanum-wheel
-	# look.
-	var roller_count = 9
-	var roller_mat = StandardMaterial3D.new()
-	roller_mat.albedo_color = Color.SILVER
-	roller_mat.metallic = 0.7
-	roller_mat.roughness = 0.3
-	for i in range(roller_count):
-		var angle = TAU * float(i) / float(roller_count)
-		var y = sin(angle) * base_size.y * 0.4
-		var z = cos(angle) * base_size.y * 0.4
-		var roller = MeshInstance3D.new()
-		var roller_cyl = CylinderMesh.new()
-		roller_cyl.top_radius = base_size.y * 0.12
-		roller_cyl.bottom_radius = base_size.y * 0.12
-		roller_cyl.height = base_size.y * 0.28
-		roller.mesh = roller_cyl
-		roller.material_override = roller_mat
-		roller.position = Vector3(0, base_size.y / 2.0 + y, z)
-		# Tangent-ish orientation (angle offset by 45deg) plus the tilt
-		# that makes each roller's own axis diagonal to the wheel's
-		# rotation axis - the actual mechanical trick a real mecanum
-		# wheel uses, reproduced here as a static visual cue.
-		roller.rotation = Vector3(angle, 0, deg_to_rad(45.0))
-		parent_node.add_child(roller)
-
-
-static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	var belt_mesh = _part("tread_plate")
-	var belt: MeshInstance3D
-	if belt_mesh:
-		belt = _mesh_inst(belt_mesh, base_color)
-		belt.scale = _fit_scale(base_size, Vector3(1.0, 0.3, 1.0))
-	else:
-		belt = MeshInstance3D.new()
-		var belt_box = BoxMesh.new()
-		belt_box.size = base_size
-		belt.mesh = belt_box
-		var belt_mat = StandardMaterial3D.new()
-		belt_mat.albedo_color = base_color
-		belt.material_override = belt_mat
-	belt.position = Vector3(0, base_size.y / 2.0, 0)
-	parent_node.add_child(belt)
-
-	# Roller wheels along the bottom
-	var roller_mesh = _part("wheel_hub")
-	for i in range(4):
-		var roller: MeshInstance3D
-		if roller_mesh:
-			roller = _mesh_inst(roller_mesh, Color.DARK_SLATE_GRAY)
-			roller.scale = _fit_scale(Vector3(base_size.y * 0.5, base_size.x * 1.1, base_size.y * 0.5), Vector3(0.9, 0.35, 0.9))
-		else:
-			roller = MeshInstance3D.new()
-			var roller_cyl = CylinderMesh.new()
-			roller_cyl.top_radius = base_size.y * 0.25
-			roller_cyl.bottom_radius = base_size.y * 0.25
-			roller_cyl.height = base_size.x * 1.1
-			roller.mesh = roller_cyl
-			var roller_mat = StandardMaterial3D.new()
-			roller_mat.albedo_color = Color.DARK_SLATE_GRAY
-			roller.material_override = roller_mat
-		var z_pos = -base_size.z / 3.0 + (i * base_size.z / 4.5)
-		roller.position = Vector3(0, base_size.y * 0.1, z_pos)
-		roller.rotation = Vector3(0, 0, PI / 2)
-		parent_node.add_child(roller)
-
-
-static func _build_rhomboid_treads(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# Batch E task 4: WWI Mark IV silhouette - the track loop wraps all the
-	# way around the hull (up and over the top), not just the bottom sides
-	# like _build_tracked_treads' flat plate-plus-rollers. Built as a ring
-	# of link plates traced around an ellipse in the local Y-Z plane
-	# (base_size.y is deliberately much taller than a normal tread's, and
-	# base_size.z longer, so the loop genuinely extends above/below and
-	# fore/aft of the hull body it's mounted beside - see the catalog
-	# entry's size field).
-	var link_count = 22
-	var radius_y = base_size.y * 0.46
-	var radius_z = base_size.z * 0.46
-	var link_mesh = _part("tread_plate")
-	var mat: StandardMaterial3D
-	if not link_mesh:
-		mat = StandardMaterial3D.new()
-		mat.albedo_color = base_color
-
-	for i in range(link_count):
-		var angle = TAU * float(i) / float(link_count)
-		var y = sin(angle) * radius_y
-		var z = cos(angle) * radius_z
-		var link: MeshInstance3D
-		if link_mesh:
-			link = _mesh_inst(link_mesh, base_color)
-			link.scale = _fit_scale(Vector3(base_size.x * 0.85, base_size.y * 0.12, base_size.z * 0.16), Vector3(1.0, 0.3, 1.0))
-		else:
-			link = MeshInstance3D.new()
-			var box = BoxMesh.new()
-			box.size = Vector3(base_size.x * 0.85, base_size.y * 0.12, base_size.z * 0.16)
-			link.mesh = box
-			link.material_override = mat
-		link.position = Vector3(0, y, z)
-		# Tangent-to-the-loop orientation so each link plate faces along
-		# the belt's direction of travel rather than all facing the same
-		# way - an ellipse's exact tangent angle isn't simply angle+90deg
-		# once radius_y != radius_z, but it's a close enough approximation
-		# for a static, non-simulated part to read correctly.
-		link.rotation = Vector3(angle + PI / 2.0, 0, 0)
-		parent_node.add_child(link)
-
-	# Two idler drums at the fore/aft turning points (where the loop
-	# reverses direction) - breaks up the ring into a recognizable "track
-	# horn" shape at each end, echoing the real Mark IV's pointed track horns.
-	var drum_mesh = _part("wheel_hub")
-	for z_end in [radius_z, -radius_z]:
-		var drum: MeshInstance3D
-		if drum_mesh:
-			drum = _mesh_inst(drum_mesh, Color.DARK_SLATE_GRAY)
-			drum.scale = _fit_scale(Vector3(base_size.y * 0.55, base_size.x * 0.9, base_size.y * 0.55), Vector3(0.9, 0.35, 0.9))
-		else:
-			drum = MeshInstance3D.new()
-			var drum_cyl = CylinderMesh.new()
-			drum_cyl.top_radius = base_size.y * 0.28
-			drum_cyl.bottom_radius = base_size.y * 0.28
-			drum_cyl.height = base_size.x * 0.9
-			drum.mesh = drum_cyl
-			var drum_mat = StandardMaterial3D.new()
-			drum_mat.albedo_color = Color.DARK_SLATE_GRAY
-			drum.material_override = drum_mat
-		drum.position = Vector3(0, 0, z_end)
-		drum.rotation = Vector3(0, 0, PI / 2)
-		parent_node.add_child(drum)
-
-
-static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3):
-	# Spindle / Shaft
-	var shaft = MeshInstance3D.new()
-	var shaft_cyl = CylinderMesh.new()
-	shaft_cyl.top_radius = 0.05
-	shaft_cyl.bottom_radius = 0.05
-	shaft_cyl.height = base_size.y * 0.8
-	shaft.mesh = shaft_cyl
-	var shaft_mat = StandardMaterial3D.new()
-	shaft_mat.albedo_color = Color.DARK_GRAY
-	shaft.material_override = shaft_mat
-	shaft.position = Vector3(0, shaft_cyl.height / 2.0, 0)
-	parent_node.add_child(shaft)
-
-	_attach_rotor_blades(parent_node, base_size)
-
-
-# Cross-blade rotor for helicopter_rotors, wrapped under a "RotorBlades"
-# pivot (previously two independently-named siblings, "BladeRotator"/
-# "BladeRotator2" - battle_unit.gd used to reach in via get_child(0), which
-# only worked because they happened to be the first children added; now a
-# single named pivot holds both, robust regardless of body/sibling order).
 static func _attach_rotor_blades(parent_node: Node3D, base_size: Vector3):
 	var pivot = Node3D.new()
 	pivot.name = "RotorBlades"
 	var shaft_h = base_size.y * 0.8
 	pivot.position = Vector3(0, shaft_h, 0)
 	parent_node.add_child(pivot)
-
 	var blade_mat = StandardMaterial3D.new()
 	blade_mat.albedo_color = Color(0.1, 0.1, 0.1)
-
 	var blades = MeshInstance3D.new()
 	var blade_mesh = BoxMesh.new()
 	blade_mesh.size = Vector3(base_size.x, 0.03, 0.2)
@@ -2057,270 +1848,16 @@ static func _attach_rotor_blades(parent_node: Node3D, base_size: Vector3):
 	blades.material_override = blade_mat
 	pivot.add_child(blades)
 
-	# Second perpendicular blade
-	var blade2 = MeshInstance3D.new()
-	var blade_mesh2 = BoxMesh.new()
-	blade_mesh2.size = Vector3(0.2, 0.03, base_size.x)
-	blade2.mesh = blade_mesh2
-	blade2.material_override = blade_mat
-	blade2.position = Vector3(0, 0.01, 0)
-	pivot.add_child(blade2)
-
-
-static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	var pad_mesh = _part("hover_ring")
-	if pad_mesh:
-		var pad = _mesh_inst(pad_mesh, base_color, base_color, 1.0)
-		pad.scale = _fit_scale(Vector3(base_size.x, base_size.y * 1.4, base_size.x), Vector3(1.2, 0.2, 1.2))
-		pad.position = Vector3(0, base_size.y / 2.0, 0)
-		parent_node.add_child(pad)
-	else:
-		# Outer Ring / Disc
-		var pad = MeshInstance3D.new()
-		var pad_cyl = CylinderMesh.new()
-		pad_cyl.top_radius = base_size.x / 2.0
-		pad_cyl.bottom_radius = base_size.x / 2.0
-		pad_cyl.height = base_size.y
-		pad.mesh = pad_cyl
-		var pad_mat = StandardMaterial3D.new()
-		pad_mat.albedo_color = base_color.darkened(0.2)
-		pad.material_override = pad_mat
-		pad.position = Vector3(0, base_size.y / 2.0, 0)
-		parent_node.add_child(pad)
-
-		# Inner Glow
-		var glow = MeshInstance3D.new()
-		var glow_cyl = CylinderMesh.new()
-		glow_cyl.top_radius = pad_cyl.top_radius * 0.7
-		glow_cyl.bottom_radius = pad_cyl.bottom_radius * 0.7
-		glow_cyl.height = pad_cyl.height * 1.05
-		glow.mesh = glow_cyl
-		var glow_mat = StandardMaterial3D.new()
-		glow_mat.albedo_color = base_color
-		glow_mat.emission_enabled = true
-		glow_mat.emission = base_color
-		glow_mat.emission_energy_multiplier = 1.0
-		glow.material_override = glow_mat
-		glow.position = Vector3(0, base_size.y / 2.0, 0)
-		parent_node.add_child(glow)
-
-
-static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# Upper thigh segment (angled cylinder)
-	var thigh_mesh = _part("leg_thigh")
-	var thigh: MeshInstance3D
-	var thigh_len = base_size.y * 0.5
-	if thigh_mesh:
-		thigh = _mesh_inst(thigh_mesh, base_color)
-		thigh.scale = _fit_scale(Vector3(0.24, thigh_len, 0.24), Vector3(0.26, 0.55, 0.26))
-	else:
-		thigh = MeshInstance3D.new()
-		var thigh_cyl = CylinderMesh.new()
-		thigh_cyl.top_radius = 0.12
-		thigh_cyl.bottom_radius = 0.08
-		thigh_cyl.height = thigh_len
-		thigh.mesh = thigh_cyl
-		var leg_mat = StandardMaterial3D.new()
-		leg_mat.albedo_color = base_color
-		thigh.material_override = leg_mat
-	thigh.position = Vector3(0, base_size.y * 0.75, 0)
-	thigh.rotation = Vector3(0, 0, PI / 6)
-	parent_node.add_child(thigh)
-
-	# Lower shin segment (angled cylinder)
-	var shin_mesh = _part("leg_shin")
-	var shin: MeshInstance3D
-	var shin_len = base_size.y * 0.6
-	if shin_mesh:
-		shin = _mesh_inst(shin_mesh, Color(0.15, 0.15, 0.15))
-		shin.scale = _fit_scale(Vector3(0.18, shin_len, 0.18), Vector3(0.18, 0.5, 0.18))
-	else:
-		shin = MeshInstance3D.new()
-		var shin_cyl = CylinderMesh.new()
-		shin_cyl.top_radius = 0.08
-		shin_cyl.bottom_radius = 0.05
-		shin_cyl.height = shin_len
-		shin.mesh = shin_cyl
-		var shin_mat = StandardMaterial3D.new()
-		shin_mat.albedo_color = Color(0.15, 0.15, 0.15)
-		shin.material_override = shin_mat
-	shin.position = Vector3(base_size.y * 0.2, base_size.y * 0.3, 0)
-	shin.rotation = Vector3(0, 0, -PI / 8)
-	parent_node.add_child(shin)
-
-	# Flat foot pad
-	var foot = MeshInstance3D.new()
-	var foot_box = BoxMesh.new()
-	foot_box.size = Vector3(base_size.x * 0.7, 0.06, base_size.z * 0.7)
-	foot.mesh = foot_box
-	var foot_mat = StandardMaterial3D.new()
-	foot_mat.albedo_color = Color(0.15, 0.15, 0.15)
-	foot.material_override = foot_mat
-	foot.position = Vector3(base_size.y * 0.1, 0.03, 0)
-	parent_node.add_child(foot)
-
-
-static func _build_anti_grav(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	var ring_mesh = _part("antigrav_ring")
-	if ring_mesh:
-		for r in range(2):
-			var ring = _mesh_inst(ring_mesh, base_color, base_color, 0.8)
-			ring.scale = _fit_scale(Vector3(base_size.x * (0.8 + r * 0.4), base_size.y * 2.0, base_size.x * (0.8 + r * 0.4)), Vector3(1.0, 0.14, 1.0))
-			ring.position = Vector3(0, base_size.y / 2.0 + r * 0.05, 0)
-			parent_node.add_child(ring)
-	else:
-		# Concentric glowing rings
-		for r in range(2):
-			var ring = MeshInstance3D.new()
-			var ring_cyl = CylinderMesh.new()
-			ring_cyl.top_radius = base_size.x * (0.4 + r * 0.2)
-			ring_cyl.bottom_radius = ring_cyl.top_radius
-			ring_cyl.height = base_size.y
-			ring.mesh = ring_cyl
-			var ring_mat = StandardMaterial3D.new()
-			ring_mat.albedo_color = base_color
-			ring_mat.emission_enabled = true
-			ring_mat.emission = base_color
-			ring_mat.emission_energy_multiplier = 0.8
-			ring.material_override = ring_mat
-			ring.position = Vector3(0, base_size.y / 2.0 + r * 0.05, 0)
-			parent_node.add_child(ring)
-
-
-static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# Tapered nacelle pod, oriented along local Z (forward). No authored
-	# asset yet (Traits B3 proof-of-concept, procedural like several other
-	# fallback visuals) - see DECISIONS_NEEDED.md on why new Blender-
-	# authored geometry is deferred.
-	var nacelle = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = base_size.y * 0.55
-	cyl.bottom_radius = base_size.y * 0.4
-	cyl.height = base_size.z
-	nacelle.mesh = cyl
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = base_color
-	mat.metallic = 0.6
-	mat.roughness = 0.3
-	nacelle.material_override = mat
-	nacelle.rotation = Vector3(PI / 2.0, 0, 0)
-	parent_node.add_child(nacelle)
-
-	var intake = MeshInstance3D.new()
-	var intake_cyl = CylinderMesh.new()
-	intake_cyl.top_radius = base_size.y * 0.35
-	intake_cyl.bottom_radius = base_size.y * 0.35
-	intake_cyl.height = 0.08
-	intake.mesh = intake_cyl
-	var intake_mat = StandardMaterial3D.new()
-	intake_mat.albedo_color = Color(0.05, 0.05, 0.05)
-	intake.material_override = intake_mat
-	intake.rotation = Vector3(PI / 2.0, 0, 0)
-	intake.position = Vector3(0, 0, -base_size.z / 2.0 - 0.02)
-	parent_node.add_child(intake)
-
-
-static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# Batch E task 3: flapping-wing flight, deliberately a different
-	# silhouette from both fixed_wing_engine (a cylindrical nacelle - no
-	# wing surface at all, just an engine pod) and the flat glider "wing"
-	# add-on module (_build_wing, above - a plain rectangular panel).
-	# A bat/pterosaur-style angled membrane: a small shoulder joint block
-	# close to the hull, then a tapered, dihedral-angled (raised) membrane
-	# with visible rib struts, tapering to a swept tip - reads as an
-	# organic wing shape even static, since there's no real flap animation
-	# baked into the mesh itself (the actual flapping motion is a runtime
-	# rotation in battle_unit.gd, not a rigged/animated mesh).
-	var shoulder = MeshInstance3D.new()
-	var shoulder_box = BoxMesh.new()
-	shoulder_box.size = Vector3(base_size.x * 0.35, base_size.y * 0.7, base_size.z * 0.35)
-	shoulder.mesh = shoulder_box
-	var joint_mat = StandardMaterial3D.new()
-	joint_mat.albedo_color = Color(0.3, 0.28, 0.25)
-	joint_mat.metallic = 0.4
-	joint_mat.roughness = 0.5
-	shoulder.material_override = joint_mat
-	parent_node.add_child(shoulder)
-
-	_attach_ornithopter_pivot(parent_node, base_size, base_color)
-
-
-# The membrane/tip/ribs live under a "WingPivot" pivot node so battle_unit.gd's
-# flap animation has a single, clean rotation target (same pattern as
-# helicopter_rotors spinning its own RotorBlades pivot). Split out from
-# _build_ornithopter_wing (which additionally builds the static shoulder
-# joint) so it can also be attached on top of a monolithic authored body.
 static func _attach_ornithopter_pivot(parent_node: Node3D, base_size: Vector3, base_color: Color):
 	var pivot = Node3D.new()
 	pivot.name = "WingPivot"
 	pivot.position = Vector3(base_size.x * 0.2, base_size.y * 0.15, 0)
 	parent_node.add_child(pivot)
 
-	var membrane = MeshInstance3D.new()
-	var membrane_box = BoxMesh.new()
-	membrane_box.size = Vector3(base_size.x * 0.75, base_size.y * 0.15, base_size.z * 0.85)
-	membrane.mesh = membrane_box
-	var mem_mat = StandardMaterial3D.new()
-	mem_mat.albedo_color = base_color
-	mem_mat.metallic = 0.05
-	mem_mat.roughness = 0.85
-	membrane.material_override = mem_mat
-	membrane.position = Vector3(base_size.x * 0.42, 0, 0)
-	membrane.rotation = Vector3(0, 0, deg_to_rad(12.0))
-	pivot.add_child(membrane)
-
-	var tip = MeshInstance3D.new()
-	var tip_box = BoxMesh.new()
-	tip_box.size = Vector3(base_size.x * 0.35, base_size.y * 0.1, base_size.z * 0.45)
-	tip.mesh = tip_box
-	tip.material_override = mem_mat
-	tip.position = Vector3(base_size.x * 0.85, base_size.y * 0.12, -base_size.z * 0.1)
-	tip.rotation = Vector3(0, 0, deg_to_rad(20.0))
-	pivot.add_child(tip)
-
-	# Rib struts - thin diagonal bars across the membrane, the visual cue
-	# that reads as "wing bones under skin" rather than a solid panel.
-	for i in range(3):
-		var rib = MeshInstance3D.new()
-		var rib_box = BoxMesh.new()
-		rib_box.size = Vector3(base_size.x * 0.7, base_size.y * 0.04, base_size.z * 0.06)
-		rib.mesh = rib_box
-		var rib_mat = StandardMaterial3D.new()
-		rib_mat.albedo_color = Color(0.22, 0.17, 0.12)
-		rib.material_override = rib_mat
-		var z_pos = -base_size.z * 0.3 + i * base_size.z * 0.3
-		rib.position = Vector3(base_size.x * 0.42, base_size.y * 0.08, z_pos)
-		rib.rotation = Vector3(0, 0, deg_to_rad(12.0))
-		pivot.add_child(rib)
-
-
-static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# Stern housing + a small blade cluster - new movement paradigm
-	# proof-of-concept (Traits B3), procedural like the fixed-wing engine.
-	var housing = MeshInstance3D.new()
-	var housing_cyl = CylinderMesh.new()
-	housing_cyl.top_radius = base_size.x * 0.4
-	housing_cyl.bottom_radius = base_size.x * 0.5
-	housing_cyl.height = base_size.z * 0.7
-	housing.mesh = housing_cyl
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = base_color.darkened(0.2)
-	mat.metallic = 0.7
-	mat.roughness = 0.4
-	housing.material_override = mat
-	housing.rotation = Vector3(PI / 2.0, 0, 0)
-	parent_node.add_child(housing)
-
-	_attach_naval_propeller_blades(parent_node, base_size)
-
-
-# 3-blade stern fan, wrapped under a "PropBlades" pivot so it can spin
-# independently of the (static) housing.
 static func _attach_naval_propeller_blades(parent_node: Node3D, base_size: Vector3):
 	var pivot = Node3D.new()
 	pivot.name = "PropBlades"
 	parent_node.add_child(pivot)
-
 	for i in range(3):
 		var blade = MeshInstance3D.new()
 		var blade_box = BoxMesh.new()
@@ -2334,77 +1871,682 @@ static func _attach_naval_propeller_blades(parent_node: Node3D, base_size: Vecto
 		pivot.add_child(blade)
 
 
-static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# One small cruise-motor nacelle on an outrigger strut - deliberately
-	# modest (buoyancy does the actual lifting, this is just steering/
-	# cruise thrust), distinct from fixed_wing_engine's bigger nacelle. One
-	# instance per call, same convention as fixed_wing_engine/tracked_treads
-	# - update_locomotion() places a matched pair (left/right) so the
-	# vehicle's real weight/thrust contribution reflects two physical
-	# motors, not one asymmetric one.
-	var strut_mat = StandardMaterial3D.new()
-	strut_mat.albedo_color = base_color.darkened(0.3)
-	var nacelle_mat = StandardMaterial3D.new()
-	nacelle_mat.albedo_color = base_color.darkened(0.15)
-	nacelle_mat.metallic = 0.6
-	nacelle_mat.roughness = 0.35
-	var blade_mat = StandardMaterial3D.new()
-	blade_mat.albedo_color = Color.SILVER
+static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.BLACK, tweaks: Dictionary = {}):
+	var wheel_size = float(tweaks.get("wheel_size", tweaks.get("size", 1.0)))
+	var w_per_axle = int(tweaks.get("wheels_per_axle", 1.0))
 
-	var strut = MeshInstance3D.new()
-	var strut_box = BoxMesh.new()
-	strut_box.size = Vector3(base_size.x * 0.5, 0.04, 0.04)
-	strut.mesh = strut_box
-	strut.material_override = strut_mat
-	strut.position = Vector3(base_size.x * 0.25, 0, 0)
-	parent_node.add_child(strut)
+	# Strict GLB part mesh loading - fails with assertion if asset is missing
+	var wheel_mesh = _part("wheel_hub")
+	var driveshaft_mesh = _part("wheel_driveshaft")
+	var gearbox_mesh = _part("wheel_gearbox")
 
-	var nacelle = MeshInstance3D.new()
-	var nacelle_cyl = CylinderMesh.new()
-	nacelle_cyl.top_radius = base_size.y * 0.3
-	nacelle_cyl.bottom_radius = base_size.y * 0.25
-	nacelle_cyl.height = base_size.z * 0.6
-	nacelle.mesh = nacelle_cyl
-	nacelle.material_override = nacelle_mat
-	nacelle.rotation = Vector3(PI / 2.0, 0, 0)
-	nacelle.position = Vector3(base_size.x * 0.5, 0, 0)
-	parent_node.add_child(nacelle)
+	var wheel_y = -0.2 * wheel_size
+	var cluster_width = 0.3 * wheel_size * float(w_per_axle)
 
-	for i in range(2):
-		var blade = MeshInstance3D.new()
-		var blade_box = BoxMesh.new()
-		blade_box.size = Vector3(0.02, base_size.y * 0.55, 0.08)
-		blade.mesh = blade_box
-		blade.material_override = blade_mat
-		blade.position = Vector3(base_size.x * 0.5, 0, -base_size.z * 0.35)
-		blade.rotate_z(i * (TAU / 2.0))
-		parent_node.add_child(blade)
+	# Lateral layout along local X. X=0 is the module's own local origin,
+	# i.e. the hull mount point. Keep the WHOLE cluster close to that mount
+	# point instead of pushing it past the hull's silhouette: the gearbox
+	# sits INBOARD (negative X, tucked toward the hull), the wheel only a
+	# small step further OUTBOARD from the mount point than before, and the
+	# driveshaft spans the gap between them. This still keeps the wheel
+	# clear of the gearbox/driveshaft's own local-X slab (the wheel is an
+	# opaque disc of radius ~0.45*wheel_size lying in the local Y-Z plane -
+	# without SOME separation the gearbox/driveshaft render entirely inside
+	# it, invisible, confirmed via an isolated single-module capture) while
+	# no longer leaving the wheel floating outside the vehicle's footprint.
+	# hub_x_offset is negative (pulled inboard, toward the gearbox/mount
+	# column) rather than outboard - Chris's ask, twice now: the wheel and
+	# gearbox should visibly intersect/overlap, not just sit adjacent.
+	var hub_x_offset = -0.05 * wheel_size
+	var gearbox_x = -0.24 * wheel_size
+
+	# Enclosed driveshaft housing: anchored at its BOTTOM near the gearbox/
+	# wheel (a fixed connection point) with its TOP computed backward from
+	# length + angle, so a longer, shallower shaft naturally reaches further
+	# inboard toward the hull's longitudinal centerline before it pierces
+	# the hull mesh - a short, steep shaft barely inside the mount edge
+	# doesn't reliably intersect real hull geometry on hulls whose belly
+	# tapers/narrows away from the outer edge, which read as a floating,
+	# disconnected strut. wheel_driveshaft is authored spanning Y=0 (top/
+	# pivot) to Y=-1 (bottom) - see build_meshes.py - so its bottom end
+	# after scale+rotation is `position + Rz(angle)*(0,-shaft_len,0)`;
+	# solving that backward from the desired bottom point gives the pivot
+	# position placed here. Lightened relative to the near-black tire so it
+	# actually reads as a distinct part instead of blending into the tire/
+	# hull shadow.
+	if driveshaft_mesh:
+		var shaft = _mesh_inst(driveshaft_mesh, base_color.darkened(0.25).lightened(0.35))
+		var shaft_len = 1.0 * wheel_size
+		var shaft_angle = deg_to_rad(55.0)
+		var bottom_target = Vector3(gearbox_x + 0.05 * wheel_size, wheel_y, 0.0)
+		var drop = Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
+		shaft.scale = Vector3(0.32 * wheel_size, shaft_len, cluster_width)
+		shaft.position = bottom_target - drop
+		shaft.rotation = Vector3(0, 0, shaft_angle)
+		parent_node.add_child(shaft)
+
+	# Gearbox: large housing tucked inboard at the mount column, fed by the
+	# driveshaft above it and facing the wheel cluster - the "attaches to
+	# the driveshaft" piece.
+	if gearbox_mesh:
+		var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.1).lightened(0.3))
+		var gb_size = 0.46 * wheel_size
+		gearbox.scale = Vector3(gb_size, gb_size, cluster_width)
+		gearbox.position = Vector3(gearbox_x, wheel_y, 0.0)
+		parent_node.add_child(gearbox)
+
+	var spacing = 0.38 * wheel_size
+	_repeat_along_axis(parent_node, w_per_axle, spacing, Vector3.RIGHT, func(p, pos, _idx):
+		var wheel = _mesh_inst(wheel_mesh, Color(0.1, 0.1, 0.12))
+		wheel.scale = Vector3(wheel_size, wheel_size, wheel_size)
+		wheel.position = pos + Vector3(hub_x_offset, wheel_y, 0)
+		# wheel_hub.glb's hub-cap/lug-bolt detail is authored at its +Y end
+		# (the "outward-facing" side of the tire, per build_wheel() in
+		# build_meshes.py) - rotation.z = -PI/2 (not +PI/2) maps that +Y face
+		# to +X, i.e. outboard/away from the mount column above, so the
+		# visible hub face points away from the vehicle instead of backwards
+		# into the gearbox.
+		wheel.rotation = Vector3(0, 0, -PI / 2.0)
+		p.add_child(wheel)
+	)
 
 
-static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# One helical auger drum - the real distinguishing silhouette of an
-	# amphibious screw-propelled vehicle (see screw_drum's own comment in
-	# tools/blender/build_meshes.py for the historical reference). One
-	# instance per call, same convention as tracked_treads - update_
-	# locomotion() places a matched left/right pair.
+static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
+	var width = tweaks.get("tread_width", tweaks.get("width", tweaks.get("size", 1.0)))
+	var road_wheels = int(tweaks.get("road_wheel_count", 5.0))
+	var sprocket = tweaks.get("drive_sprocket", true)
+
+	var loop_mesh = _part("tread_belt_loop")
+	var sprocket_mesh = _part("drive_sprocket")
+	var wheel_mesh = _part("wheel_hub")
+	var gearbox_mesh = _part("wheel_gearbox")
+	var driveshaft_mesh = _part("wheel_driveshaft")
+
+	# Snap the tread's overall length to the actual hull it's mounted on
+	# (target_length, passed in from module_placer.gd's update_locomotion() -
+	# the tread's own catalog base_size.z is just a small placeholder with
+	# no relationship to any specific hull, which is why the loop rendered
+	# as a small oval regardless of hull size before this). Height and width
+	# scale up PROPORTIONATELY from that same length ratio so the tread
+	# keeps its authored shape instead of stretching into a thin snake on a
+	# long hull or a squat blob on a short one - tread_width is a separate,
+	# independent multiplier on top of that for user control. Sprockets end
+	# up centered at the hull's own front/rear ends this way (extending past
+	# the hull is fine, per Chris).
+	var target_length = tweaks.get("target_length", base_size.z)
+	var length_scale = target_length / base_size.z
+	var actual_size = Vector3(base_size.x * width * length_scale, base_size.y * length_scale, target_length)
+
+	# Real rework, not a layout tweak: the belt is now a genuine closed
+	# LOOP (tread_belt_loop, authored via bmesh.ops.spin in build_meshes.py)
+	# that wraps all the way around the road-wheel/sprocket row, shaped as
+	# an "inverted trapezoid" like a real modern track - Chris's ask - not a
+	# plain symmetric oval: the top run is a simple straight line tangent to
+	# both sprockets, but the bottom run dips DOWN by authored_drop between
+	# two diagonal transitions, so the road wheels ride notably lower than
+	# the sprocket axle line. Because the authored mesh is asymmetric
+	# (top = +radius, bottom = -(radius+drop)), the loop's local origin is
+	# NOT its vertical center - placement below has to account for that,
+	# unlike the old symmetric-stadium math.
+	var target_radius = actual_size.y * 0.42
+	var target_half_span = actual_size.z * 0.5 - target_radius
+	var authored_radius = 0.45
+	var authored_drop = 0.4
+	var authored_half_span = 1.0
+	var y_scale = target_radius / authored_radius
+	var target_drop = authored_drop * y_scale
+	# Vertical offset from the loop's own local origin down to its lowest
+	# point (the bottom of the trapezoid dip) - placing the loop/sprockets
+	# at this height puts that lowest point at world Y=0 (ground), matching
+	# where the road wheels also sit.
+	var ground_offset = target_radius + target_drop
+
+	# Drop the WHOLE assembly further down (Chris: "road wheels below the
+	# hull altogether" - they were still clipping into the hull's
+	# underside) - a uniform Y shift applied to every element below, purely
+	# visual (the actual ground-contact collider is the separate invisible
+	# running-gear StaticBody3D sized by ModuleCatalog.get_running_gear_size(),
+	# untouched by this).
+	var y_shift = -target_radius * 0.9
+
+	# Move the WHOLE assembly (loop, sprockets, wheels, gearbox/driveshaft)
+	# outboard along local X - originally 35% of the tread's own width, then
+	# pulled back inboard by half that (Chris: "so the sprockets and
+	# driveshafts intersect with the hull"), netting 17.5% outboard.
+	# "Extending past the hull is fine" applies to length (Z); this is the
+	# separate width (X) axis.
+	var outboard_x = actual_size.x * 0.175
+
+	var loop: MeshInstance3D
+	if loop_mesh:
+		loop = _mesh_inst(loop_mesh, base_color)
+		loop.scale = Vector3(width, y_scale, (target_half_span + target_radius) / (authored_half_span + authored_radius))
+	else:
+		loop = MeshInstance3D.new()
+		var loop_box = BoxMesh.new()
+		loop_box.size = actual_size
+		loop.mesh = loop_box
+		var loop_mat = StandardMaterial3D.new()
+		loop_mat.albedo_color = base_color
+		loop.material_override = loop_mat
+	loop.position = Vector3(outboard_x, ground_offset + y_shift, 0)
+	parent_node.add_child(loop)
+
+	# Sprockets at the true forward/rear corners, at the loop's own wrap-
+	# circle height (ground_offset, matching the loop's local Z=0 - NOT
+	# ground level itself, the sprocket axle sits above the road wheels),
+	# sized to the loop's own wrap radius (authored drive_sprocket radius =
+	# 0.4) so the belt visibly hugs them instead of floating around an
+	# unrelated-sized wheel.
+	if sprocket and sprocket_mesh:
+		var sprocket_scale = (target_radius / 0.4) * width
+		var sp_front = _mesh_inst(sprocket_mesh, Color(0.18, 0.18, 0.2))
+		sp_front.scale = Vector3(sprocket_scale, sprocket_scale, sprocket_scale)
+		sp_front.position = Vector3(outboard_x, ground_offset + y_shift, -target_half_span)
+		sp_front.rotation = Vector3(0, 0, PI / 2.0)
+		parent_node.add_child(sp_front)
+
+		var sp_rear = _mesh_inst(sprocket_mesh, Color(0.18, 0.18, 0.2))
+		sp_rear.scale = Vector3(sprocket_scale, sprocket_scale, sprocket_scale)
+		sp_rear.position = Vector3(outboard_x, ground_offset + y_shift, target_half_span)
+		sp_rear.rotation = Vector3(0, 0, PI / 2.0)
+		parent_node.add_child(sp_rear)
+
+	# Road wheels: smaller than the sprockets, riding low at true ground
+	# level (Y=0, same as the loop's own lowest point - see ground_offset
+	# above), evenly spaced strictly BETWEEN the two sprockets. Wheel radius
+	# is derived from the resulting spacing (not a fixed constant) so they
+	# never pile into an overlapping clump regardless of road_wheel_count
+	# (3-8).
+	var wheel_span = target_half_span * 1.55
+	var spacing = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
+	var wheel_radius_target = clamp(spacing * 0.42, target_radius * 0.25, target_radius * 0.65)
+	var wheel_scale = (wheel_radius_target / 0.45) * width
+
+	# Gearbox + driveshaft behind each road wheel, angled and sized to
+	# actually intersect the wheel - Chris's ask. The earlier attempt
+	# offset the gearbox by a fraction of the TREAD's overall width
+	# (actual_size.x, which after hull-length scaling could be a couple of
+	# units) instead of the wheel's own (much smaller) radius, so it
+	# rendered nowhere near the wheel; fixed by basing every offset here on
+	# wheel_radius_target instead. The driveshaft is anchored at its BOTTOM
+	# (a fixed point inside the wheel/gearbox, guaranteeing the overlap)
+	# with its TOP computed backward from length+angle, same trick used for
+	# the wheels locomotion type's own driveshaft.
+	var gb_x_offset = -wheel_radius_target * 0.85
+	var gb_size = wheel_radius_target * 1.2
+
+	_repeat_along_axis(parent_node, road_wheels, spacing, Vector3.FORWARD, func(p, pos, _idx):
+		var roller: MeshInstance3D
+		if wheel_mesh:
+			roller = _mesh_inst(wheel_mesh, Color.DARK_SLATE_GRAY)
+			roller.scale = Vector3(wheel_scale, wheel_scale, wheel_scale)
+		else:
+			roller = MeshInstance3D.new()
+			var cyl = CylinderMesh.new()
+			cyl.top_radius = wheel_radius_target
+			cyl.bottom_radius = wheel_radius_target
+			cyl.height = actual_size.x * 1.05
+			roller.mesh = cyl
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = Color.DARK_SLATE_GRAY
+			roller.material_override = mat
+		roller.position = Vector3(outboard_x, wheel_radius_target + y_shift, pos.z)
+		roller.rotation = Vector3(0, 0, PI / 2.0)
+		p.add_child(roller)
+
+		if gearbox_mesh:
+			var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.15).lightened(0.25))
+			gearbox.scale = Vector3(gb_size, gb_size, gb_size)
+			gearbox.position = Vector3(outboard_x + gb_x_offset, wheel_radius_target + y_shift, pos.z)
+			p.add_child(gearbox)
+
+		if driveshaft_mesh:
+			var shaft = _mesh_inst(driveshaft_mesh, base_color.darkened(0.3).lightened(0.3))
+			var shaft_len = wheel_radius_target * 2.4
+			var shaft_angle = deg_to_rad(25.0)
+			var bottom_target = Vector3(outboard_x + gb_x_offset * 0.4, wheel_radius_target * 0.9 + y_shift, pos.z)
+			var shaft_drop = Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
+			shaft.scale = Vector3(gb_size * 0.55, shaft_len, gb_size * 0.55)
+			shaft.position = bottom_target - shaft_drop
+			shaft.rotation = Vector3(0, 0, shaft_angle)
+			p.add_child(shaft)
+	)
+
+
+static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_GRAY, tweaks: Dictionary = {}):
+	var blade_count = int(tweaks.get("blade_count", 4.0))
+	var blade_length = tweaks.get("blade_length", tweaks.get("size", 1.0))
+	var duct = tweaks.get("duct", false)
+
+	var mast_mesh = _part("rotor_mast")
+	var hub_mesh = _part("rotor_hub")
+	var blade_mesh = _part("rotor_blade")
+	var duct_mesh = _part("rotor_duct_ring")
+	var mount_mesh = _part("rg_mount_box")
+
+	# Per-instance chamfered mount box angled sharply into hull top
+	if mount_mesh:
+		var mount = _mesh_inst(mount_mesh, base_color.darkened(0.3))
+		mount.scale = Vector3(0.5, 0.4, 0.5)
+		mount.position = Vector3(0, -0.15, 0)
+		mount.rotation = Vector3(deg_to_rad(15.0), 0, 0)
+		parent_node.add_child(mount)
+
+	var shaft_h = base_size.y * 0.8
+	if mast_mesh:
+		var mast = _mesh_inst(mast_mesh, Color.DARK_GRAY)
+		mast.scale = Vector3(1.0, shaft_h / 0.6, 1.0)
+		mast.position = Vector3(0, 0, 0)
+		parent_node.add_child(mast)
+	else:
+		var shaft = MeshInstance3D.new()
+		var shaft_cyl = CylinderMesh.new()
+		shaft_cyl.top_radius = 0.05
+		shaft_cyl.bottom_radius = 0.05
+		shaft_cyl.height = shaft_h
+		shaft.mesh = shaft_cyl
+		var shaft_mat = StandardMaterial3D.new()
+		shaft_mat.albedo_color = Color.DARK_GRAY
+		shaft.material_override = shaft_mat
+		shaft.position = Vector3(0, shaft_h / 2.0, 0)
+		parent_node.add_child(shaft)
+
+	if hub_mesh:
+		var hub = _mesh_inst(hub_mesh, Color(0.2, 0.2, 0.22))
+		hub.position = Vector3(0, shaft_h, 0)
+		parent_node.add_child(hub)
+
+	var pivot = Node3D.new()
+	pivot.name = "RotorBlades"
+	pivot.position = Vector3(0, shaft_h + 0.05, 0)
+	parent_node.add_child(pivot)
+
+	_ring_of(pivot, blade_count, 0.0, func(p, _pos, angle, _idx):
+		var blade: MeshInstance3D
+		if blade_mesh:
+			blade = _mesh_inst(blade_mesh, Color(0.1, 0.1, 0.1))
+			blade.scale = Vector3(1.0, 1.0, blade_length)
+			blade.rotation.y = angle
+		else:
+			blade = MeshInstance3D.new()
+			var b_box = BoxMesh.new()
+			b_box.size = Vector3(0.1, 0.03, base_size.x * blade_length)
+			blade.mesh = b_box
+			var b_mat = StandardMaterial3D.new()
+			b_mat.albedo_color = Color(0.1, 0.1, 0.1)
+			blade.material_override = b_mat
+			blade.position = Vector3(0, 0, base_size.x * blade_length * 0.5)
+			blade.rotation.y = angle
+		p.add_child(blade)
+	)
+
+	if duct and duct_mesh:
+		var shroud = _mesh_inst(duct_mesh, base_color.darkened(0.2))
+		shroud.scale = Vector3(blade_length, 1.0, blade_length)
+		shroud.position = Vector3(0, shaft_h, 0)
+		parent_node.add_child(shroud)
+
+
+static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DEEP_SKY_BLUE, tweaks: Dictionary = {}):
+	var pad_size = tweaks.get("pad_size", tweaks.get("size", 1.0))
+	var skirt = tweaks.get("skirt", false)
+
+	var ring_mesh = _part("hover_ring")
+	var fan_mesh = _part("hover_fan")
+	var skirt_mesh = _part("hover_skirt")
+	var mount_mesh = _part("rg_mount_box")
+
+	var actual_size = Vector3(base_size.x * pad_size, base_size.y, base_size.z * pad_size)
+	
+	if mount_mesh:
+		var mount = _mesh_inst(mount_mesh, base_color.darkened(0.3))
+		mount.scale = Vector3(pad_size * 0.8, 0.4, pad_size * 0.8)
+		mount.position = Vector3(0, actual_size.y * 0.3, 0)
+		mount.rotation = Vector3(deg_to_rad(-12.0), 0, 0)
+		parent_node.add_child(mount)
+
+	if ring_mesh:
+		var pad = _mesh_inst(ring_mesh, base_color, base_color, 1.0)
+		pad.scale = Vector3(pad_size, pad_size, pad_size)
+		pad.position = Vector3(0, actual_size.y / 2.0, 0)
+		parent_node.add_child(pad)
+	else:
+		var pad = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = actual_size.x / 2.0
+		cyl.bottom_radius = actual_size.x / 2.0
+		cyl.height = actual_size.y
+		pad.mesh = cyl
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = base_color.darkened(0.2)
+		pad.material_override = mat
+		pad.position = Vector3(0, actual_size.y / 2.0, 0)
+		parent_node.add_child(pad)
+
+	if fan_mesh:
+		var fan = _mesh_inst(fan_mesh, Color(0.25, 0.25, 0.28))
+		fan.scale = Vector3(pad_size, 1.0, pad_size)
+		fan.position = Vector3(0, actual_size.y * 0.4, 0)
+		parent_node.add_child(fan)
+
+	if skirt and skirt_mesh:
+		var s_inst = _mesh_inst(skirt_mesh, Color(0.12, 0.12, 0.14))
+		s_inst.scale = Vector3(pad_size, 1.0, pad_size)
+		s_inst.position = Vector3(0, 0, 0)
+		parent_node.add_child(s_inst)
+
+
+static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.GRAY, tweaks: Dictionary = {}):
+	var leg_length = tweaks.get("leg_length", tweaks.get("size", 1.0))
+	var foot_size = tweaks.get("foot_size", 1.0)
+
+	var thigh_mesh = _part("leg_thigh")
+	var shin_mesh = _part("leg_shin")
+	var foot_mesh = _part("leg_foot")
+	var mount_mesh = _part("rg_mount_box")
+
+	# Per-leg hip mount box angled sharply into hull belly
+	if mount_mesh:
+		var mount = _mesh_inst(mount_mesh, base_color.darkened(0.3))
+		mount.scale = Vector3(0.4 * leg_length, 0.4 * leg_length, 0.4 * leg_length)
+		mount.position = Vector3(0, base_size.y * 0.8 * leg_length, 0)
+		mount.rotation = Vector3(deg_to_rad(-15.0), 0, 0)
+		parent_node.add_child(mount)
+
+	var thigh_len = base_size.y * 0.5 * leg_length
+	var thigh: MeshInstance3D
+	if thigh_mesh:
+		thigh = _mesh_inst(thigh_mesh, base_color)
+		thigh.scale = Vector3(leg_length, thigh_len / 0.55, leg_length)
+	else:
+		thigh = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = 0.12 * leg_length
+		cyl.bottom_radius = 0.08 * leg_length
+		cyl.height = thigh_len
+		thigh.mesh = cyl
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = base_color
+		thigh.material_override = mat
+	thigh.position = Vector3(0, base_size.y * 0.75 * leg_length, 0)
+	thigh.rotation = Vector3(0, 0, PI / 6.0)
+	parent_node.add_child(thigh)
+
+	var shin_len = base_size.y * 0.6 * leg_length
+	var shin: MeshInstance3D
+	if shin_mesh:
+		shin = _mesh_inst(shin_mesh, Color(0.15, 0.15, 0.15))
+		shin.scale = Vector3(leg_length, shin_len / 0.5, leg_length)
+	else:
+		shin = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = 0.08 * leg_length
+		cyl.bottom_radius = 0.05 * leg_length
+		cyl.height = shin_len
+		shin.mesh = cyl
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.15, 0.15, 0.15)
+		shin.material_override = mat
+	shin.position = Vector3(base_size.y * 0.2 * leg_length, base_size.y * 0.3 * leg_length, 0)
+	shin.rotation = Vector3(0, 0, -PI / 8.0)
+	parent_node.add_child(shin)
+
+	var foot: MeshInstance3D
+	if foot_mesh:
+		foot = _mesh_inst(foot_mesh, Color(0.18, 0.18, 0.2))
+		foot.scale = Vector3(foot_size, foot_size, foot_size)
+	else:
+		foot = MeshInstance3D.new()
+		var box = BoxMesh.new()
+		box.size = Vector3(base_size.x * 0.7 * foot_size, 0.06 * foot_size, base_size.z * 0.7 * foot_size)
+		foot.mesh = box
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.15, 0.15, 0.15)
+		foot.material_override = mat
+	foot.position = Vector3(base_size.y * 0.1 * leg_length, 0.03, 0)
+	parent_node.add_child(foot)
+
+
+static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.SLATE_GRAY, tweaks: Dictionary = {}):
+	var nacelle_size = tweaks.get("nacelle_size", tweaks.get("size", 1.0))
+	var afterburner = tweaks.get("afterburner", false)
+
+	var nacelle_mesh = _part("engine_nacelle")
+	var fan_mesh = _part("engine_fan")
+	var exhaust_mesh = _part("exhaust_cone")
+
+	var actual_size = Vector3(base_size.x * nacelle_size, base_size.y * nacelle_size, base_size.z * nacelle_size)
+	if nacelle_mesh:
+		var nac = _mesh_inst(nacelle_mesh, base_color)
+		nac.scale = Vector3(nacelle_size, nacelle_size, nacelle_size)
+		nac.rotation = Vector3(0, deg_to_rad(90.0), 0)
+		nac.position = Vector3(0, 0, 0)
+		parent_node.add_child(nac)
+	else:
+		var nac = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = actual_size.y * 0.55
+		cyl.bottom_radius = actual_size.y * 0.4
+		cyl.height = actual_size.z
+		nac.mesh = cyl
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = base_color
+		mat.metallic = 0.6
+		mat.roughness = 0.3
+		nac.material_override = mat
+		nac.rotation = Vector3(PI / 2.0, 0, 0)
+		parent_node.add_child(nac)
+
+	if fan_mesh:
+		var fan = _mesh_inst(fan_mesh, Color(0.2, 0.2, 0.22))
+		fan.scale = Vector3(nacelle_size, nacelle_size, nacelle_size)
+		fan.position = Vector3(0, 0, -actual_size.z * 0.48)
+		parent_node.add_child(fan)
+
+	if afterburner:
+		if exhaust_mesh:
+			var ex = _mesh_inst(exhaust_mesh, Color(1.0, 0.4, 0.1), Color(1.0, 0.5, 0.1), 1.5)
+			ex.scale = Vector3(nacelle_size, nacelle_size, nacelle_size)
+			ex.position = Vector3(0, 0, actual_size.z * 0.48)
+			parent_node.add_child(ex)
+
+
+static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.BROWN, tweaks: Dictionary = {}):
+	var wingspan = tweaks.get("wingspan", tweaks.get("size", 1.0))
+	var rib_count = int(tweaks.get("rib_count", 3.0))
+
+	var shoulder_mesh = _part("wing_shoulder")
+	var mem_mesh = _part("wing_membrane")
+	var rib_mesh = _part("wing_rib")
+
+	if shoulder_mesh:
+		var sh = _mesh_inst(shoulder_mesh, Color(0.3, 0.28, 0.25))
+		sh.scale = Vector3(1.0, 1.0, 1.0)
+		parent_node.add_child(sh)
+	else:
+		var shoulder = MeshInstance3D.new()
+		var box = BoxMesh.new()
+		box.size = Vector3(base_size.x * 0.35, base_size.y * 0.7, base_size.z * 0.35)
+		shoulder.mesh = box
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.3, 0.28, 0.25)
+		shoulder.material_override = mat
+		parent_node.add_child(shoulder)
+
+	var pivot = Node3D.new()
+	pivot.name = "WingPivot"
+	pivot.position = Vector3(base_size.x * 0.2, base_size.y * 0.15, 0)
+	parent_node.add_child(pivot)
+
+	if mem_mesh:
+		var mem = _mesh_inst(mem_mesh, base_color)
+		mem.scale = Vector3(wingspan, 1.0, 1.0)
+		mem.position = Vector3(base_size.x * 0.2, 0, 0)
+		mem.rotation = Vector3(0, 0, deg_to_rad(12.0))
+		pivot.add_child(mem)
+	else:
+		var mem = MeshInstance3D.new()
+		var box = BoxMesh.new()
+		box.size = Vector3(base_size.x * 0.75 * wingspan, base_size.y * 0.15, base_size.z * 0.85)
+		mem.mesh = box
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = base_color
+		mem.material_override = mat
+		mem.position = Vector3(base_size.x * 0.42 * wingspan, 0, 0)
+		mem.rotation = Vector3(0, 0, deg_to_rad(12.0))
+		pivot.add_child(mem)
+
+	var spacing = base_size.z * 0.6 / float(max(1, rib_count - 1))
+	_repeat_along_axis(pivot, rib_count, spacing, Vector3.FORWARD, func(p, pos, _idx):
+		var rib: MeshInstance3D
+		if rib_mesh:
+			rib = _mesh_inst(rib_mesh, Color(0.22, 0.17, 0.12))
+			rib.scale = Vector3(wingspan, 1.0, 1.0)
+		else:
+			rib = MeshInstance3D.new()
+			var box = BoxMesh.new()
+			box.size = Vector3(base_size.x * 0.7 * wingspan, base_size.y * 0.04, base_size.z * 0.06)
+			rib.mesh = box
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = Color(0.22, 0.17, 0.12)
+			rib.material_override = mat
+		rib.position = Vector3(base_size.x * 0.42 * wingspan, base_size.y * 0.08, pos.z)
+		rib.rotation = Vector3(0, 0, deg_to_rad(12.0))
+		p.add_child(rib)
+	)
+
+
+static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
+	var prop_size = tweaks.get("prop_size", tweaks.get("size", 1.0))
+	var blade_count = int(tweaks.get("blade_count", 3.0))
+	var kort = tweaks.get("kort_nozzle", false)
+
+	var housing_mesh = _part("prop_housing")
+	var blade_mesh = _part("rotor_blade")
+	var kort_mesh = _part("kort_nozzle")
+
+	var actual_size = Vector3(base_size.x * prop_size, base_size.y * prop_size, base_size.z * prop_size)
+	if housing_mesh:
+		var house = _mesh_inst(housing_mesh, base_color.darkened(0.2))
+		house.scale = Vector3(prop_size, prop_size, prop_size)
+		house.position = Vector3(0, 0, 0)
+		parent_node.add_child(house)
+	else:
+		var house = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = actual_size.x * 0.4
+		cyl.bottom_radius = actual_size.x * 0.5
+		cyl.height = actual_size.z * 0.7
+		house.mesh = cyl
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = base_color.darkened(0.2)
+		house.material_override = mat
+		house.rotation = Vector3(PI / 2.0, 0, 0)
+		parent_node.add_child(house)
+
+	var pivot = Node3D.new()
+	pivot.name = "PropBlades"
+	pivot.position = Vector3(0, 0, actual_size.z * 0.35)
+	parent_node.add_child(pivot)
+
+	_ring_of(pivot, blade_count, 0.0, func(p, _pos, angle, _idx):
+		var blade: MeshInstance3D
+		if blade_mesh:
+			blade = _mesh_inst(blade_mesh, Color.SILVER)
+			blade.scale = Vector3(0.5, 1.0, actual_size.x * 0.4)
+			blade.rotation = Vector3(0.3, 0, angle)
+		else:
+			blade = MeshInstance3D.new()
+			var box = BoxMesh.new()
+			box.size = Vector3(0.04, actual_size.x * 0.7, 0.12)
+			blade.mesh = box
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = Color.SILVER
+			blade.material_override = mat
+			blade.rotate_z(angle)
+		p.add_child(blade)
+	)
+
+	if kort and kort_mesh:
+		var nozzle = _mesh_inst(kort_mesh, Color(0.25, 0.25, 0.28))
+		nozzle.scale = Vector3(prop_size, prop_size, prop_size)
+		nozzle.position = Vector3(0, 0, actual_size.z * 0.35)
+		parent_node.add_child(nozzle)
+
+
+static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.TAN, tweaks: Dictionary = {}):
+	var motor_size = tweaks.get("motor_size", tweaks.get("size", 1.0))
+	var blades = int(tweaks.get("prop_blades", 2.0))
+	var tail_fins = tweaks.get("tail_fins", true)
+
+	var strut_mesh = _part("outrigger_strut")
+	var nacelle_mesh = _part("cruise_nacelle")
+	var blade_mesh = _part("rotor_blade")
+	var fin_mesh = _part("tail_fin")
+
+	var actual_size = Vector3(base_size.x * motor_size, base_size.y * motor_size, base_size.z * motor_size)
+
+	if strut_mesh:
+		var strut = _mesh_inst(strut_mesh, base_color.darkened(0.3))
+		strut.scale = Vector3(motor_size, 1.0, 1.0)
+		strut.position = Vector3(actual_size.x * 0.25, 0, 0)
+		parent_node.add_child(strut)
+
+	if nacelle_mesh:
+		var nacelle = _mesh_inst(nacelle_mesh, base_color.darkened(0.15))
+		nacelle.scale = Vector3(motor_size, motor_size, motor_size)
+		nacelle.position = Vector3(actual_size.x * 0.5, 0, 0)
+		parent_node.add_child(nacelle)
+
+	var pivot = Node3D.new()
+	pivot.name = "PropBlades"
+	pivot.position = Vector3(actual_size.x * 0.5, 0, -actual_size.z * 0.35)
+	parent_node.add_child(pivot)
+
+	_ring_of(pivot, blades, 0.0, func(p, _pos, angle, _idx):
+		var blade: MeshInstance3D
+		if blade_mesh:
+			blade = _mesh_inst(blade_mesh, Color.SILVER)
+			blade.scale = Vector3(0.4, 1.0, actual_size.y * 0.4)
+			blade.rotation = Vector3(0.2, 0, angle)
+		else:
+			blade = MeshInstance3D.new()
+			var box = BoxMesh.new()
+			box.size = Vector3(0.02, actual_size.y * 0.55, 0.08)
+			blade.mesh = box
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = Color.SILVER
+			blade.material_override = mat
+			blade.rotate_z(angle)
+		p.add_child(blade)
+	)
+
+	if tail_fins and fin_mesh:
+		var fin = _mesh_inst(fin_mesh, Color(0.3, 0.3, 0.35))
+		fin.scale = Vector3(1.0, motor_size, motor_size)
+		fin.position = Vector3(actual_size.x * 0.5, actual_size.y * 0.3, actual_size.z * 0.3)
+		parent_node.add_child(fin)
+
+
+static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_GOLDENROD, tweaks: Dictionary = {}):
+	var drum_width = tweaks.get("drum_width", tweaks.get("size", 1.0))
 	var drum_mesh = _part("screw_drum")
 	var drum: MeshInstance3D
+	var actual_size = Vector3(base_size.x * drum_width, base_size.y * drum_width, base_size.z * drum_width)
 	if drum_mesh:
-		# Authored along local Z already (tools/blender/build_meshes.py's
-		# build_screw_drum) - no runtime rotation needed, unlike
-		# wheel_hub/hover_ring which are authored Y-vertical.
 		drum = _mesh_inst(drum_mesh, base_color)
-		drum.scale = _fit_scale(Vector3(base_size.y * 0.85, base_size.y * 0.85, base_size.z), Vector3(0.29, 0.29, 1.6))
+		drum.scale = _fit_scale(Vector3(actual_size.y * 0.85, actual_size.y * 0.85, actual_size.z), Vector3(0.29, 0.29, 1.6))
 	else:
 		drum = MeshInstance3D.new()
-		var drum_cyl = CylinderMesh.new()
-		drum_cyl.top_radius = base_size.y * 0.4
-		drum_cyl.bottom_radius = base_size.y * 0.4
-		drum_cyl.height = base_size.z
-		drum.mesh = drum_cyl
-		var drum_mat = StandardMaterial3D.new()
-		drum_mat.albedo_color = base_color
-		drum.material_override = drum_mat
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = actual_size.y * 0.4
+		cyl.bottom_radius = actual_size.y * 0.4
+		cyl.height = actual_size.z
+		drum.mesh = cyl
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = base_color
+		drum.material_override = mat
 		drum.rotation = Vector3(PI / 2.0, 0, 0)
 	parent_node.add_child(drum)
 

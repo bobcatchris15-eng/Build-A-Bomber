@@ -78,13 +78,6 @@ var is_naval: bool = false
 # folded into is_naval: it's not buoyant/surface-locked like a naval hull,
 # it drives normally on land and just isn't blocked by water.
 var is_amphibious: bool = false
-# Batch E task 5: real mecanum/omni-wheel locomotion - unlike every other
-# ground locomotion type, an omni unit can translate in ANY direction
-# without first rotating to face it (see _steer_towards()'s is_omni
-# branch, which decouples velocity direction from hull facing entirely -
-# every other ground type couples the two, always turning to face its
-# direction of travel).
-var is_omni: bool = false
 # Terrain variety task: hull-level draught (ModuleCatalog.get_hull_draught()),
 # only meaningful for is_naval units - see _setup_navigation() for where
 # this routes a deep-draught hull onto deep_water_map instead of
@@ -163,7 +156,6 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node, match_f
 	is_fixed_wing = "fixed_wing" in unit_traits
 	is_naval = "naval" in unit_traits
 	is_amphibious = "amphibious" in unit_traits
-	is_omni = "omni" in unit_traits
 	hull_draught = ModuleCatalog.get_hull_draught(hull_type_for_traits)
 	if is_flying:
 		target_altitude = 4.0
@@ -448,7 +440,16 @@ func _recalculate_move_speed():
 				# of boosting both together.
 				var thrust_contrib = 1.0
 				var capacity_contrib = 1.0
-				if locomotion_type == "wheels" or locomotion_type == "omni_wheels" or locomotion_type == "helicopter_rotors":
+				if locomotion_type == "wheels":
+					# Total wheel count (axle positions x wheels-per-axle,
+					# dually) drives both thrust and load-bearing capacity,
+					# not just axle count, per Chris's ask.
+					var axles = float(locomotion_settings.get("num_axles", locomotion_settings.get("count", 4)))
+					var w_per_axle = float(locomotion_settings.get("wheels_per_axle", 1.0))
+					var c = (axles * w_per_axle) / 4.0
+					thrust_contrib = c
+					capacity_contrib = c
+				elif locomotion_type == "helicopter_rotors":
 					var c = float(locomotion_settings.get("count", 4)) / 4.0
 					thrust_contrib = c
 					capacity_contrib = c
@@ -456,8 +457,8 @@ func _recalculate_move_speed():
 					var leg_count = float(locomotion_settings.get("count", 4))
 					capacity_contrib = leg_count / 4.0
 					thrust_contrib = 1.0 + (4.0 - leg_count) / 8.0
-				elif locomotion_type == "tracked_treads" or locomotion_type == "rhomboid_treads":
-					var width = locomotion_settings.get("width", 1.0)
+				elif locomotion_type == "tracked_treads":
+					var width = locomotion_settings.get("tread_width", locomotion_settings.get("width", 1.0))
 					capacity_contrib = width
 					thrust_contrib = 1.0 + (1.0 - width) * 0.5
 				motor_thrust += ModuleCatalog.get_thrust_coefficient(data.type_id) * child.scale.x * child.scale.z * thrust_contrib
@@ -543,8 +544,8 @@ func _recalculate_terrain_speed_multiplier():
 	# treads already has for this surface, doesn't grant terrain immunity
 	# (clamped at 1.2, so even a max-width tread stays "notably better",
 	# not "as good as being on pavement").
-	if locomotion_type == "tracked_treads" or locomotion_type == "rhomboid_treads":
-		var width = locomotion_settings.get("width", 1.0)
+	if locomotion_type == "tracked_treads":
+		var width = locomotion_settings.get("tread_width", locomotion_settings.get("width", 1.0))
 		var width_delta = (width - 1.0) * 0.25
 		terrain_speed_multiplier = clamp(terrain_speed_multiplier + width_delta, 0.15, 1.2)
 
@@ -874,34 +875,14 @@ func _physics_process(delta):
 			if not child.has_meta("module_data"): continue
 			var child_type_id = child.get_meta("module_data").type_id
 			if child_type_id == "helicopter_rotors":
-				# Named "RotorBlades" pivot (visual_builder.gd's
-				# _attach_rotor_blades) - previously reached in via
-				# get_child(0), which actually grabbed the static shaft (the
-				# shaft is built before the blades), not the blades, so the
-				# rotor never visibly spun. Flag-gated (like auto_weapon.gd's
-				# BarrelCluster fix) to keep today's exact behavior, bug
-				# included, when the flag is off - this is purely an A/B
-				# visual toggle, not a silent behavior change.
-				if GlobalConfigScript.enable_animated_monolithic_parts:
-					var rotor = child.get_node_or_null("RotorBlades")
-					if rotor:
-						rotor.rotate_y(15.0 * delta)
-				elif child.get_child_count() > 0 and is_instance_valid(child.get_child(0)):
-					child.get_child(0).rotate_y(15.0 * delta)
+				var rotor = child.get_node_or_null("RotorBlades")
+				if rotor:
+					rotor.rotate_y(15.0 * delta)
 			elif child_type_id == "ornithopter_wing":
-				# Flapping motion: an oscillating (not continuous) rotation
-				# on the WingPivot node visual_builder.gd built the membrane/
-				# tip/ribs under - a sine wave rather than rotate_y's steady
-				# spin, since a wing flaps back and forth, it doesn't rotate
-				# through a full circle like a rotor blade.
 				var pivot = child.get_node_or_null("WingPivot")
 				if pivot:
 					pivot.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 8.0) * 0.35
-			elif GlobalConfigScript.enable_animated_monolithic_parts and child_type_id in ["propeller_prop", "pusher_prop", "naval_propeller", "ship_screw", "paddle_wheel"]:
-				# New continuous idle spin for the prop-style locomotion
-				# add-ons (previously fully static in every path) - flag-
-				# gated since this is a genuinely new visual, not a bugfix
-				# to existing behavior like the two arms above.
+			elif child_type_id in ["propeller_prop", "pusher_prop", "naval_propeller", "ship_screw", "paddle_wheel", "buoyant_envelope"]:
 				var prop = child.get_node_or_null("PropBlades")
 				if prop:
 					if child_type_id == "paddle_wheel":
@@ -944,22 +925,6 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 				velocity.x = 0.0
 				velocity.z = 0.0
 				return true
-
-	if is_omni:
-		# The real mechanical difference (task 5): every other ground type
-		# rotates the hull to face its travel direction, then moves along
-		# its own local forward - facing and velocity direction are the
-		# same vector. An omni unit's rollers let it push in any direction
-		# regardless of which way the chassis is pointed, so velocity is
-		# set directly from the (nav-agent-adjusted) direction to the
-		# destination and the hull's rotation is left untouched entirely -
-		# it can drive straight sideways while still facing whatever way
-		# it already was, which a normal wheeled/tracked/legged unit
-		# structurally cannot do.
-		var omni_dir = steer_diff.normalized()
-		velocity.x = omni_dir.x * move_speed * terrain_speed_multiplier
-		velocity.z = omni_dir.z * move_speed * terrain_speed_multiplier
-		return false
 
 	var target_basis = Basis.looking_at(steer_diff, Vector3.UP)
 	global_transform.basis = global_transform.basis.slerp(target_basis, rotate_speed * delta).orthonormalized()

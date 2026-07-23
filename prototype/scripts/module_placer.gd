@@ -300,7 +300,7 @@ func rotate_selected_module():
 	get_tree().call_group("stat_ui", "update_stats", hull)
 
 func _select_module(module: Node3D):
-	if selected_module:
+	if selected_module and is_instance_valid(selected_module):
 		_deselect_module()
 		_free_gizmo(selected_module)
 
@@ -488,10 +488,8 @@ func _place_hull_from_ui(type_id: String):
 	get_tree().call_group("stat_ui", "update_stats", hull)
 
 var default_locomotion_settings = {
-	"wheels": {"size": 1.0, "count": 4},
-	"omni_wheels": {"size": 1.0, "count": 4},
-	"tracked_treads": {"width": 1.0},
-	"rhomboid_treads": {"width": 1.0},
+	"wheels": {"wheel_size": 1.0, "num_axles": 4, "wheels_per_axle": 1},
+	"tracked_treads": {"tread_width": 1.0, "road_wheel_count": 5},
 	"hover_engine": {},
 	"helicopter_rotors": {"size": 1.0, "count": 4},
 	"fixed_wing_engine": {"size": 1.0, "count": 2},
@@ -545,6 +543,81 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 			if primary and mirror:
 				primary.set_meta("mirrored_counterpart", mirror)
 				mirror.set_meta("mirrored_counterpart", primary)
+
+## Lightweight per-instance geometry update for locomotion tweaks that DON'T
+## change how many module instances exist (wheel_size, wheels_per_axle,
+## tread_width, blade_length, etc. - anything that isn't a "count" tweak).
+## Unlike update_locomotion(), this never destroys/recreates any node: it
+## just updates each existing instance's own data.tweaks and rebuilds its
+## mesh in place, exactly like a weapon's tweak slider does via
+## VisualBuilder.rebuild_visual(). That means it's cheap enough to call on
+## EVERY value_changed tick during a drag (no debounce needed) and never
+## disturbs the current selection or the floating tweak popup's position -
+## unlike a full update_locomotion() respawn, which reselects an arbitrary
+## instance and visibly jumps the popup around mid-drag (confirmed via a
+## real simulated-mouse-drag test - this was the actual cause of the wheels
+## size slider feeling "laggy"/unresponsive compared to weapon tweaks).
+func update_locomotion_geometry_tweak(type_id: String, tweak_key: String, value) -> void:
+	if not hull: return
+	var VisualBuilder = load("res://scripts/visual_builder.gd")
+	var settings: Dictionary = hull.get_meta("locomotion_settings", {}).duplicate() if hull.has_meta("locomotion_settings") else {}
+	settings[tweak_key] = value
+	hull.set_meta("locomotion_settings", settings)
+	for child in hull.get_children():
+		if child.has_meta("module_data"):
+			var m_data = child.get_meta("module_data")
+			if m_data and m_data.type_id == type_id:
+				m_data.tweaks[tweak_key] = value
+				VisualBuilder.rebuild_visual(child)
+				# _apply_mirror_flip() (called once at initial placement for
+				# the mirrored side) doesn't scale the module itself - it
+				# individually mirrors each of the module's CHILDREN's own
+				# transforms and marks them "_mirrored", one time. rebuild_
+				# visual() just destroyed those mirrored children and built
+				# fresh, un-mirrored ones, and nothing re-applied the mirror
+				# afterward - the mirrored-side wheel's driveshaft/gearbox
+				# would silently un-mirror (render on the wrong side) on the
+				# very first live wheel_size/wheels_per_axle drag. Redo it
+				# here since this is the only path that rebuilds children
+				# after initial placement.
+				if child.get_meta("scale_flip_x", false):
+					_apply_mirror_flip(child)
+				# rebuild_visual()/build_visual() deliberately skip
+				# StaticBody3D children when clearing/rebuilding a module's
+				# mesh (so the click-target collider survives visual
+				# rebuilds), which means it's never resized here on its own
+				# - for wheels specifically the click box is sized/
+				# positioned from wheel_size/wheels_per_axle (see
+				# _place_weapon()'s wheels override), so it has to be kept
+				# in sync by hand whenever those tweaks change live, or the
+				# collider goes stale again after the very first drag.
+				if type_id == "wheels":
+					var wsize = float(m_data.tweaks.get("wheel_size", 1.0))
+					var w_per_axle = int(m_data.tweaks.get("wheels_per_axle", 1.0))
+					var static_body = child.get_children().filter(func(c): return c is StaticBody3D)
+					if static_body.size() > 0:
+						var sb: StaticBody3D = static_body[0]
+						sb.position = Vector3(-0.05 * wsize, -0.35 * wsize, 0)
+						var shape_node = sb.get_children().filter(func(c): return c is CollisionShape3D)
+						if shape_node.size() > 0 and shape_node[0].shape is BoxShape3D:
+							shape_node[0].shape.size = Vector3(1.3 * wsize, 1.1 * wsize, (0.9 + 0.4 * float(w_per_axle - 1)) * wsize)
+				elif type_id == "tracked_treads":
+					# Same idea as wheels above, and same target_length/
+					# length_scale math as _build_tracked_treads() - see
+					# _place_weapon()'s tracked_treads collider override.
+					var twidth = float(m_data.tweaks.get("tread_width", 1.0))
+					var catalog_size: Vector3 = ModuleCatalog.get_module_data(type_id).get("size", Vector3.ONE)
+					var target_length = float(m_data.tweaks.get("target_length", catalog_size.z))
+					var length_scale = target_length / catalog_size.z
+					var static_body2 = child.get_children().filter(func(c): return c is StaticBody3D)
+					if static_body2.size() > 0:
+						var sb2: StaticBody3D = static_body2[0]
+						var new_col_size = Vector3(catalog_size.x * twidth * length_scale, catalog_size.y * length_scale, target_length)
+						sb2.position = Vector3(new_col_size.x * 0.175, sb2.position.y, 0)
+						var shape_node2 = sb2.get_children().filter(func(c): return c is CollisionShape3D)
+						if shape_node2.size() > 0 and shape_node2[0].shape is BoxShape3D:
+							shape_node2[0].shape.size = new_col_size
+	get_tree().call_group("stat_ui", "update_stats", hull)
 
 func update_locomotion(type_id: String, settings: Dictionary):
 	if not hull: return
@@ -601,7 +674,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	if ModuleCatalog.needs_running_gear(type_id):
 		running_gear_size = ModuleCatalog.get_running_gear_size(hull_size)
 		var VisualBuilder = load("res://scripts/visual_builder.gd")
-		var gear_body: StaticBody3D = VisualBuilder.build_running_gear(hull, running_gear_size, catalog_data.color)
+		var gear_body: StaticBody3D = VisualBuilder.build_running_gear(hull, running_gear_size, catalog_data.color, 1, type_id)
 		# Flush the chassis's top against the hull's underside: hull's origin
 		# is at its center, so chassis center sits at -hull_size.y/2 - gear_y/2.
 		gear_body.position = Vector3(0, -hull_size.y / 2.0 - running_gear_size.y / 2.0, 0)
@@ -635,26 +708,17 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	var spawned_wheels = []
 	
 	if type_id == "wheels":
-		var size = settings.get("size", 1.0)
-		var count = settings.get("count", 4)
+		var wheel_size = settings.get("wheel_size", settings.get("size", 1.0))
+		var w_per_axle = settings.get("wheels_per_axle", 1.0)
+		var count = settings.get("num_axles", settings.get("count", 4))
 		if count < 2: count = 2
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
+		var geo_tweaks = {"wheel_size": wheel_size, "wheels_per_axle": w_per_axle}
 
-		# Wheel center now sits on the chassis's SIDE (not the hull's side
-		# with a fudge inset), and the wheel's vertical center aligns with
-		# the chassis's vertical center. Visual result: the wheel is half-
-		# embedded in the chassis (its lower half visibly hangs below the
-		# chassis's bottom edge), the unit's CharacterBody3D collider sits
-		# on the chassis bottom (not the hull belly - see battle_unit.gd's
-		# collider sizing in setup()).
-		var x_offset = running_gear_size.x / 2.0
+		var x_offset = (hull_size.x / 2.0) + (0.15 * wheel_size)
 		var z_limit = hull_size.z * 0.35
-		# Module-local Y of the wheel's BOTTOM (visual_builder.gd's
-		# _build_wheels places the cylinder so the module's local origin
-		# is at the visual's bottom). Centering the visual vertically on
-		# the chassis means placement Y = chassis_center - half_wheel_height.
-		var wheel_y = -hull_size.y / 2.0 - running_gear_size.y / 2.0 - (catalog_data.get("size", Vector3.ONE).y * size * hull_height_factor) / 2.0
+		var wheel_y = -hull_size.y / 2.0 + underside_y_bias
 
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
@@ -663,118 +727,65 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				if half_count > 1:
 					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
 
-				# Place using Vector3.DOWN normal, then override position and rotation to point forward
-				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias, z_pos)
-				var wheel = _place_weapon(type_id, pos, Vector3.DOWN)
+				var pos = hull.global_position + Vector3(x_offset * side, wheel_y, z_pos)
+				var wheel = _place_weapon(type_id, pos, Vector3.UP, false, geo_tweaks)
 				if wheel:
-					wheel.scale = Vector3(size, size, size) * hull_height_factor
-					# Override position to be at the chassis-side mount point
-					# and rotation to point forward (0).
+					wheel.scale = Vector3.ONE
 					wheel.position = Vector3(x_offset * side, wheel_y, z_pos)
 					wheel.rotation = Vector3.ZERO
 					if wheel.has_meta("module_data"):
-						wheel.get_meta("module_data").scale_multiplier = wheel.scale
-					if side < 0:
-						wheel.set_meta("scale_flip_x", true)
-						_apply_mirror_flip(wheel)
-					spawned_wheels.append(wheel)
-
-	elif type_id == "omni_wheels":
-		# Batch E task 5: same axle-pair mounting pattern as wheels - the
-		# real mechanical difference (genuine strafing) lives entirely in
-		# battle_unit.gd's steering code via the "omni" trait, not in how
-		# these are placed.
-		var size = settings.get("size", 1.0)
-		var count = settings.get("count", 4)
-		if count < 2: count = 2
-		if count % 2 != 0: count += 1
-		var half_count = int(count / 2)
-
-		var x_offset = running_gear_size.x / 2.0
-		var z_limit = hull_size.z * 0.35
-		var wheel_y = -hull_size.y / 2.0 - running_gear_size.y / 2.0 - (catalog_data.get("size", Vector3.ONE).y * size * hull_height_factor) / 2.0
-
-		for side in [-1.0, 1.0]:
-			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			for i in range(half_count):
-				var z_pos = 0.0
-				if half_count > 1:
-					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
-
-				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias, z_pos)
-				var wheel = _place_weapon(type_id, pos, Vector3.DOWN)
-				if wheel:
-					wheel.scale = Vector3(size, size, size) * hull_height_factor
-					wheel.position = Vector3(x_offset * side, wheel_y, z_pos)
-					wheel.rotation = Vector3.ZERO
-					if wheel.has_meta("module_data"):
-						wheel.get_meta("module_data").scale_multiplier = wheel.scale
+						wheel.get_meta("module_data").scale_multiplier = Vector3.ONE
 					if side < 0:
 						wheel.set_meta("scale_flip_x", true)
 						_apply_mirror_flip(wheel)
 					spawned_wheels.append(wheel)
 
 	elif type_id == "tracked_treads":
-		var width = settings.get("width", 1.0)
+		var width = settings.get("tread_width", settings.get("width", settings.get("size", 1.0)))
+		var road_wheels = settings.get("road_wheel_count", 5.0)
+		var sprocket = settings.get("drive_sprocket", true)
+		# The tread's own catalog size.z (2.5, a small placeholder) has
+		# nothing to do with the actual hull it's mounted on - _build_
+		# tracked_treads() was sizing the whole loop off that fixed catalog
+		# value regardless of hull length, which is why it rendered as a
+		# small oval under hulls of any size. Pass the hull's own real
+		# length through instead: _build_tracked_treads() snaps the loop's
+		# total length to it (sprockets centered at the hull's own front/
+		# rear ends - extending past the hull is fine, per Chris) and scales
+		# height/width up proportionately from there.
+		var geo_tweaks = {"tread_width": width, "road_wheel_count": road_wheels, "drive_sprocket": sprocket, "target_length": hull_size.z}
 
-		# Always 2 treads. Tread center now on the chassis's SIDE and at
-		# the chassis's vertical CENTER - the loop geometry is shorter
-		# than the chassis, so centering it vertically puts the upper
-		# half inside the chassis (hidden) and the lower half visibly
-		# hanging off the bottom edge. Same look-and-feel as the wheels
-		# above: side-mounted, half-tucked into the chassis.
 		var x_offset = running_gear_size.x / 2.0
 		var y_offset = -hull_size.y / 2.0 - running_gear_size.y / 2.0
-		var tread_length = hull_size.z
 
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
 			var pos = hull.global_position + Vector3(x_offset * side, y_offset, 0.0)
-			var tread = _place_weapon(type_id, pos, side_normal)
+			var tread = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
 			if tread:
-				tread.scale = Vector3(width, 1.0, tread_length / catalog_data.get("size", Vector3.ONE).z)
+				# tread_width is already baked into each sub-part's own scale
+				# inside _build_tracked_treads() - scaling the outer module
+				# node too would double-apply it (geometry) and double-count
+				# it in module_data.get_weight()/get_cost(), which already
+				# read tread_width straight out of the tweaks dict.
+				tread.scale = Vector3.ONE
 				tread.rotation = Vector3.ZERO
 				if tread.has_meta("module_data"):
-					tread.get_meta("module_data").scale_multiplier = tread.scale
+					tread.get_meta("module_data").scale_multiplier = Vector3.ONE
 				if side < 0:
 					tread.set_meta("scale_flip_x", true)
 					_apply_mirror_flip(tread)
 				spawned_wheels.append(tread)
 
-	elif type_id == "rhomboid_treads":
-		# Batch E task 4: MkIV-style full-body loop. Unlike tracked_treads
-		# (which mounts low, hugging the underside), this mounts centered
-		# on the hull's vertical middle - the loop geometry itself (see
-		# _build_rhomboid_treads) already extends well above and below
-		# that center point, since it wraps the ENTIRE hull rather than
-		# just flanking the bottom. With the running gear present, the
-		# loop's centerline is on the chassis's vertical center (not the
-		# hull's exact middle), so the chassis is properly enclosed
-		# inside the loop, not hanging off the side.
-		var width = settings.get("width", 1.0)
-		var x_offset = running_gear_size.x / 2.0
-		var y_offset = -hull_size.y / 2.0 - running_gear_size.y / 2.0
-		var tread_length = hull_size.z
-		for side in [-1.0, 1.0]:
-			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			var pos = hull.global_position + Vector3(x_offset * side, y_offset, 0.0)
-			var loop = _place_weapon(type_id, pos, side_normal)
-			if loop:
-				loop.scale = Vector3(width, 1.0, tread_length / catalog_data.get("size", Vector3.ONE).z)
-				loop.rotation = Vector3.ZERO
-				if loop.has_meta("module_data"):
-					loop.get_meta("module_data").scale_multiplier = loop.scale
-				if side < 0:
-					loop.set_meta("scale_flip_x", true)
-					_apply_mirror_flip(loop)
-				spawned_wheels.append(loop)
-
 	elif type_id == "helicopter_rotors":
-		var size = settings.get("size", 1.0)
-		var count = settings.get("count", 4)
+		var blade_count = settings.get("blade_count", 4.0)
+		var blade_length = settings.get("blade_length", settings.get("size", 1.0))
+		var duct = settings.get("duct", false)
+		var count = settings.get("rotor_units", settings.get("count", 4))
 		if count < 2: count = 2
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
+		var geo_tweaks = {"blade_count": blade_count, "blade_length": blade_length, "duct": duct}
 
 		var x_offset = hull_size.x / 2.0 + 1.2
 		var y_offset = hull_size.y / 2.0 + 0.3
@@ -788,19 +799,26 @@ func update_locomotion(type_id: String, settings: Dictionary):
 					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
 					
 				var pos = hull.global_position + Vector3(x_offset * side, y_offset, z_pos)
-				var rotor = _place_weapon(type_id, pos, side_normal)
+				var rotor = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
 				if rotor:
-					rotor.scale = Vector3(size * hull_footprint_factor, 1.0, size * hull_footprint_factor)
+					# blade_length is already baked into the blade/duct sub-part
+					# scales inside _build_helicopter_rotors() - scaling the
+					# outer node too would also stretch the mast/hub/mount
+					# (which aren't supposed to track blade_length at all) and
+					# double-count blade_length in module_data's weight/cost.
+					rotor.scale = Vector3.ONE
 					rotor.rotation = Vector3.ZERO
 					if rotor.has_meta("module_data"):
-						rotor.get_meta("module_data").scale_multiplier = rotor.scale
+						rotor.get_meta("module_data").scale_multiplier = Vector3.ONE
 					spawned_wheels.append(rotor)
 					
 	elif type_id == "hover_engine":
-		var size = settings.get("size", 1.0)
-		var x_offset = (hull_size.x / 2.0) * size
+		var pad_size = settings.get("pad_size", settings.get("size", 1.0))
+		var skirt = settings.get("skirt", false)
+		var geo_tweaks = {"pad_size": pad_size, "skirt": skirt}
+		var x_offset = (hull_size.x / 2.0) * pad_size
 		var y_offset = -hull_size.y / 2.0 + underside_y_bias
-		var z_offset = (hull_size.z * 0.35) * size
+		var z_offset = (hull_size.z * 0.35) * pad_size
 		var points = [
 			Vector3(-x_offset, y_offset, z_offset),
 			Vector3(x_offset, y_offset, z_offset),
@@ -808,29 +826,32 @@ func update_locomotion(type_id: String, settings: Dictionary):
 			Vector3(x_offset, y_offset, -z_offset)
 		]
 		for p in points:
-			var hover = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN)
+			var hover = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN, false, geo_tweaks)
 			if hover:
-				hover.scale = Vector3(size * hull_footprint_factor, 1.0, size * hull_footprint_factor)
+				# pad_size is already baked into the pad/fan/skirt/mount
+				# sub-part scales inside _build_hover_engine() - see the
+				# tracked_treads comment above for why the outer node stays
+				# unscaled.
+				hover.scale = Vector3.ONE
 				if hover.has_meta("module_data"):
-					hover.get_meta("module_data").scale_multiplier = hover.scale
+					hover.get_meta("module_data").scale_multiplier = Vector3.ONE
 				if p.x < 0.0:
 					hover.set_meta("scale_flip_x", true)
 					_apply_mirror_flip(hover)
 				spawned_wheels.append(hover)
 
 	elif type_id == "legs":
-		var size = settings.get("size", 1.0)
-		var count = settings.get("count", 4)
+		var leg_length = settings.get("leg_length", settings.get("size", 1.0))
+		var foot_size = settings.get("foot_size", 1.0)
+		var count = settings.get("leg_count", settings.get("count", 4))
 		if count < 2: count = 2
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
+		var geo_tweaks = {"leg_length": leg_length, "foot_size": foot_size}
 
-		# Legs hang from the chassis sides, like wheels. Centered on the
-		# chassis's vertical axis so the leg's hip sits at the chassis's
-		# side and the foot hangs below the chassis bottom edge.
 		var x_offset = running_gear_size.x / 2.0
 		var z_limit = hull_size.z * 0.35
-		var leg_y = -hull_size.y / 2.0 - running_gear_size.y / 2.0 - (catalog_data.get("size", Vector3.ONE).y * size * hull_height_factor) / 2.0
+		var leg_y = -hull_size.y / 2.0 - running_gear_size.y / 2.0 - (catalog_data.get("size", Vector3.ONE).y * leg_length) / 2.0
 
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
@@ -840,157 +861,139 @@ func update_locomotion(type_id: String, settings: Dictionary):
 					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
 
 				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias, z_pos)
-				var leg = _place_weapon(type_id, pos, side_normal)
+				var leg = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
 				if leg:
 					leg.rotation = Vector3.ZERO
-					leg.scale = Vector3(1.0, size * hull_height_factor, 1.0)
+					# leg_length/foot_size are already baked into the
+					# thigh/shin/foot/mount sub-part scales inside
+					# _build_legs() - see the tracked_treads comment above.
+					# hull_height_factor still legitimately belongs on the
+					# outer node since _build_legs() has no notion of hull
+					# size, only leg_length.
+					leg.scale = Vector3(1.0, hull_height_factor, 1.0)
 					leg.position = Vector3(x_offset * side, leg_y, z_pos)
 					if leg.has_meta("module_data"):
-						leg.get_meta("module_data").scale_multiplier = leg.scale
+						leg.get_meta("module_data").scale_multiplier = Vector3.ONE
 					if side < 0:
 						leg.set_meta("scale_flip_x", true)
 						_apply_mirror_flip(leg)
 					spawned_wheels.append(leg)
 
-	elif type_id == "anti_grav":
-		var size = settings.get("size", 1.0)
-		var x_offset = (hull_size.x / 2.2) * size
-		var y_offset = -hull_size.y / 2.0 + underside_y_bias
-		var z_offset = (hull_size.z * 0.35) * size
-		var points = [
-			Vector3(-x_offset, y_offset, z_offset),
-			Vector3(x_offset, y_offset, z_offset),
-			Vector3(-x_offset, y_offset, -z_offset),
-			Vector3(x_offset, y_offset, -z_offset)
-		]
-		for p in points:
-			var ag = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN)
-			if ag:
-				ag.scale = Vector3(size * hull_footprint_factor, 1.0, size * hull_footprint_factor)
-				if ag.has_meta("module_data"):
-					ag.get_meta("module_data").scale_multiplier = ag.scale
-				if p.x < 0.0:
-					ag.set_meta("scale_flip_x", true)
-					_apply_mirror_flip(ag)
-				spawned_wheels.append(ag)
-
 	elif type_id == "fixed_wing_engine":
-		# Wing-mounted engine pods, left/right - new movement paradigm
-		# (Traits B3, MOUNTING_AND_ARMOR_SPEC.md addendum): banking,
-		# minimum airspeed, no-hover flight, handled in battle_unit.gd.
-		var size = settings.get("size", 1.0)
-		var x_offset = (hull_size.x / 2.0 + 0.4 * size)
+		var nacelle_size = settings.get("nacelle_size", settings.get("size", 1.0))
+		var afterburner = settings.get("afterburner", false)
+		var geo_tweaks = {"nacelle_size": nacelle_size, "afterburner": afterburner}
+		var x_offset = (hull_size.x / 2.0 + 0.4 * nacelle_size)
 		var y_offset = 0.0
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
 			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.1)
-			var engine = _place_weapon(type_id, pos, side_normal)
+			var engine = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
 			if engine:
-				engine.scale = Vector3(1.0, size * hull_footprint_factor, size * hull_footprint_factor)
+				# nacelle_size is already baked into the nacelle/fan/exhaust
+				# sub-part scales inside _build_fixed_wing_engine() - see the
+				# tracked_treads comment above.
+				engine.scale = Vector3.ONE
 				engine.rotation = Vector3.ZERO
 				if engine.has_meta("module_data"):
-					engine.get_meta("module_data").scale_multiplier = engine.scale
+					engine.get_meta("module_data").scale_multiplier = Vector3.ONE
 				if side < 0:
 					engine.set_meta("scale_flip_x", true)
 					_apply_mirror_flip(engine)
 				spawned_wheels.append(engine)
 
 	elif type_id == "ornithopter_wing":
-		# Batch E task 3: mirrors fixed_wing_engine's wing-mounted-pod
-		# placement pattern (left/right, forward-biased), since the two
-		# share a mount shape even though the flight paradigm underneath
-		# differs (no "fixed_wing" trait - see the catalog entry).
-		var size = settings.get("size", 1.0)
-		var x_offset = (hull_size.x / 2.0 + 0.3 * size)
+		var wingspan = settings.get("wingspan", settings.get("size", 1.0))
+		var rib_count = settings.get("rib_count", 3.0)
+		var geo_tweaks = {"wingspan": wingspan, "rib_count": rib_count}
+		var x_offset = (hull_size.x / 2.0 + 0.3 * wingspan)
 		var y_offset = hull_size.y * 0.1
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
 			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.05)
-			var wing = _place_weapon(type_id, pos, side_normal)
+			var wing = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
 			if wing:
-				wing.scale = Vector3(1.0, size * hull_footprint_factor, size * hull_footprint_factor)
+				# wingspan is already baked into the membrane/rib sub-part
+				# scales inside _build_ornithopter_wing() (the shoulder
+				# deliberately stays unscaled there) - scaling the outer node
+				# too would stretch the shoulder as well, which the builder
+				# explicitly avoids. See the tracked_treads comment above.
+				wing.scale = Vector3.ONE
 				wing.rotation = Vector3.ZERO
 				if wing.has_meta("module_data"):
-					wing.get_meta("module_data").scale_multiplier = wing.scale
+					wing.get_meta("module_data").scale_multiplier = Vector3.ONE
 				if side < 0:
 					wing.set_meta("scale_flip_x", true)
 					_apply_mirror_flip(wing)
 				spawned_wheels.append(wing)
 
 	elif type_id == "naval_propeller":
-		# Stern-mounted propeller(s) - new movement paradigm (Traits B3):
-		# surface-locked, no gravity/altitude falling, handled in
-		# battle_unit.gd via the "buoyant" trait.
-		var size = settings.get("size", 1.0)
-		var count = settings.get("count", 2)
+		var prop_size = settings.get("prop_size", settings.get("size", 1.0))
+		var blade_count = settings.get("blade_count", 3.0)
+		var kort = settings.get("kort_nozzle", false)
+		var count = settings.get("prop_count", settings.get("count", 2))
 		if count < 1: count = 1
-		var half_count = max(1, int(count / 2)) if count > 1 else 1
+		var geo_tweaks = {"prop_size": prop_size, "blade_count": blade_count, "kort_nozzle": kort}
 		var x_limit = hull_size.x * 0.3
 		for i in range(count):
 			var x_pos = 0.0
 			if count > 1:
 				x_pos = -x_limit + (2.0 * x_limit * i) / (count - 1)
-			# Visual bug pass finding: naval_hull's stern is a convex-hull
-			# taper (build_ship_hull's keel reaches only to z=hz*0.8 before
-			# fairing up to the deck-level transom at the true z=hz edge) -
-			# a propeller placed at the exact stern edge (z=hz) sat well
-			# outside the hull's real underwater volume, floating visibly
-			# behind/below it. z=hz*0.82 keeps it just inside the keel's
-			# full-depth region (still reads as stern-mounted); y=-0.28x
-			# full height stays just short of the keel's own -0.3x depth
-			# so it doesn't clip through on the shallower hulls either.
-			var pos = hull.global_position + Vector3(x_pos, -hull_size.y * 0.12, hull_size.z * 0.36)
-			var prop = _place_weapon(type_id, pos, Vector3.BACK)
+			var pos = hull.global_position + Vector3(x_pos, -hull_size.y * 0.20, hull_size.z * 0.42)
+			var prop = _place_weapon(type_id, pos, Vector3.BACK, false, geo_tweaks)
 			if prop:
-				prop.scale = Vector3(size, size, size) * hull_footprint_factor
+				# prop_size is already baked into the housing/blade/nozzle
+				# sub-part scales inside _build_naval_propeller() - see the
+				# tracked_treads comment above.
+				prop.scale = Vector3.ONE
 				if prop.has_meta("module_data"):
-					prop.get_meta("module_data").scale_multiplier = prop.scale
+					prop.get_meta("module_data").scale_multiplier = Vector3.ONE
 				if x_pos < -0.001:
 					prop.set_meta("scale_flip_x", true)
 					_apply_mirror_flip(prop)
 				spawned_wheels.append(prop)
 
 	elif type_id == "buoyant_envelope":
-		# Twin small cruise-motor nacelles slung under the envelope, left/
-		# right - same wing-mounted-pod shape as fixed_wing_engine, but
-		# smaller and centered lower since it's steering/cruise thrust for
-		# a buoyant hull, not the sole source of lift.
-		var size = settings.get("size", 1.0)
-		var x_offset = hull_size.x * 0.15
-		var y_offset = -hull_size.y * 0.4
+		var motor_size = settings.get("motor_size", settings.get("size", 1.0))
+		var prop_blades = settings.get("prop_blades", 2.0)
+		var tail_fins = settings.get("tail_fins", true)
+		var geo_tweaks = {"motor_size": motor_size, "prop_blades": prop_blades, "tail_fins": tail_fins}
+		var x_offset = hull_size.x * 0.48 + 0.3 * motor_size
+		var y_offset = -hull_size.y * 0.25
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
 			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.1)
-			var envelope_motor = _place_weapon(type_id, pos, side_normal)
+			var envelope_motor = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
 			if envelope_motor:
-				envelope_motor.scale = Vector3(1.0, size * hull_footprint_factor, size * hull_footprint_factor)
+				# motor_size is already baked into the strut/nacelle/blade/fin
+				# sub-part scales inside _build_buoyant_envelope() - see the
+				# tracked_treads comment above.
+				envelope_motor.scale = Vector3.ONE
 				envelope_motor.rotation = Vector3.ZERO
 				if envelope_motor.has_meta("module_data"):
-					envelope_motor.get_meta("module_data").scale_multiplier = envelope_motor.scale
+					envelope_motor.get_meta("module_data").scale_multiplier = Vector3.ONE
 				if side < 0:
 					envelope_motor.set_meta("scale_flip_x", true)
 					_apply_mirror_flip(envelope_motor)
 				spawned_wheels.append(envelope_motor)
 
 	elif type_id == "screw_drive":
-		# Twin helical auger drums, one per side, mounted the same way
-		# tracked_treads is - replaces wheels/treads entirely. Drums now
-		# centered on the chassis's vertical axis (the chassis's running-
-		# gear slab is what supports the unit; the drums are the visible
-		# propulsion).
-		var width = settings.get("width", 1.0)
+		var drum_width = settings.get("drum_width", settings.get("width", settings.get("size", 1.0)))
+		var geo_tweaks = {"drum_width": drum_width}
 		var x_offset = running_gear_size.x / 2.0
 		var y_offset = -hull_size.y / 2.0 - running_gear_size.y / 2.0
-		var drum_length = hull_size.z
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
 			var pos = hull.global_position + Vector3(x_offset * side, y_offset, 0.0)
-			var drum = _place_weapon(type_id, pos, side_normal)
+			var drum = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
 			if drum:
-				drum.scale = Vector3(width, 1.0, drum_length / catalog_data.get("size", Vector3.ONE).z)
+				# drum_width is already baked into the drum sub-part's own
+				# scale inside _build_screw_drive() - see the tracked_treads
+				# comment above.
+				drum.scale = Vector3.ONE
 				drum.rotation = Vector3.ZERO
 				if drum.has_meta("module_data"):
-					drum.get_meta("module_data").scale_multiplier = drum.scale
+					drum.get_meta("module_data").scale_multiplier = Vector3.ONE
 				if side < 0:
 					drum.set_meta("scale_flip_x", true)
 					_apply_mirror_flip(drum)
@@ -1010,13 +1013,11 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		hull.position.y = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + running_gear_size.y
 	else:
 		var wheels_offset = 0.0
-		if type_id == "wheels" or type_id == "omni_wheels":
-			var size = settings.get("size", 1.0)
+		if type_id == "wheels":
+			var size = settings.get("wheel_size", settings.get("size", 1.0))
 			wheels_offset = 0.8 * size * hull_height_factor
 		elif type_id == "legs":
-			wheels_offset = 1.6 * settings.get("size", 1.0) * hull_height_factor
-		elif type_id == "anti_grav":
-			wheels_offset = 0.4 * settings.get("size", 1.0)
+			wheels_offset = 1.6 * settings.get("leg_length", settings.get("size", 1.0)) * hull_height_factor
 		hull.position.y = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + wheels_offset
 				
 	# Link them in a group
@@ -1040,22 +1041,61 @@ func update_locomotion(type_id: String, settings: Dictionary):
 
 	get_tree().call_group("stat_ui", "update_stats", hull)
 	
-func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bool = false) -> Node3D:
+func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bool = false, tweaks: Dictionary = {}) -> Node3D:
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var category = catalog_data.get("category", "module")
 	
 	var new_weapon = Node3D.new()
 	
 	var VisualBuilder = preload("res://scripts/visual_builder.gd")
-	VisualBuilder.build_visual(type_id, new_weapon, catalog_data.get("size", Vector3.ONE), catalog_data.color)
+	VisualBuilder.build_visual(type_id, new_weapon, catalog_data.get("size", Vector3.ONE), catalog_data.color, tweaks)
 	
 	var static_body = StaticBody3D.new()
 	static_body.collision_layer = 2 # Modules layer
 	static_body.collision_mask = 0
-	static_body.position = Vector3(0, catalog_data.get("size", Vector3.ONE).y / 2.0, 0)
+	var col_size = catalog_data.get("size", Vector3.ONE)
+	var col_center = Vector3(0, col_size.y / 2.0, 0)
+	# Wheels-only click-target override: _build_wheels() (visual_builder.gd)
+	# renders the wheel offset from the module's own origin (hub_x_offset)
+	# and scaled by wheel_size (0.5-2.5x, well beyond the catalog's fixed
+	# base size), with the gearbox/driveshaft column sitting back near the
+	# origin - the generic fixed-at-catalog-size box below left the actual
+	# click target centered on empty space near the mount point instead of
+	# over the visible wheel, "needing to be clicked very close to dead
+	# center" once wheel_size moved the rendered wheel away from it. Sized
+	# generously (not pixel-exact) to comfortably cover both the gearbox
+	# column and the wheel cluster.
+	if type_id == "wheels":
+		var wsize = float(tweaks.get("wheel_size", tweaks.get("size", 1.0)))
+		var w_per_axle = int(tweaks.get("wheels_per_axle", 1.0))
+		col_size = Vector3(1.3 * wsize, 1.1 * wsize, (0.9 + 0.4 * float(w_per_axle - 1)) * wsize)
+		col_center = Vector3(-0.05 * wsize, -0.35 * wsize, 0)
+	elif type_id == "tracked_treads":
+		# tread_width can now be live-adjusted (no respawn, see
+		# update_locomotion_geometry_tweak()) same as wheels' wheel_size was -
+		# applying the same fix proactively here instead of waiting for it to
+		# get reported: _build_tracked_treads() scales the belt/sprockets by
+		# tread_width (0.5-2.5x) but its geometry stays centered on the
+		# module's own origin (no hub_x_offset-style asymmetry like wheels),
+		# so only the collider's size needs to track the tweaks, not its
+		# center. Also has to mirror _build_tracked_treads()'s target_length/
+		# length_scale math (the tread now snaps its whole length to the
+		# hull it's mounted on, not the catalog's small fixed size.z) - the
+		# collider would otherwise stay a tiny ~2.5-unit box while the actual
+		# rendered loop spans the full hull length, an even more extreme
+		# version of the same click-target mismatch wheels had.
+		var twidth = float(tweaks.get("tread_width", tweaks.get("width", 1.0)))
+		var target_length = float(tweaks.get("target_length", col_size.z))
+		var length_scale = target_length / col_size.z
+		col_size = Vector3(col_size.x * twidth * length_scale, col_size.y * length_scale, target_length)
+		# _build_tracked_treads() now shifts the whole visible assembly
+		# outboard by 17.5% of its own width - keep the click target
+		# centered on it instead of the module's bare origin.
+		col_center = Vector3(col_size.x * 0.175, col_center.y, 0)
+	static_body.position = col_center
 	var collision_shape = CollisionShape3D.new()
 	var col_box = BoxShape3D.new()
-	col_box.size = catalog_data.get("size", Vector3.ONE)
+	col_box.size = col_size
 	collision_shape.shape = col_box
 	static_body.add_child(collision_shape)
 	new_weapon.add_child(static_body)
@@ -1073,6 +1113,7 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	data.base_energy_capacity = catalog_data.get("energy_capacity", 0.0)
 	data.base_energy_regen = catalog_data.get("energy_regen", 0.0)
 	data.base_vision_bonus = catalog_data.get("vision_bonus", 0.0)
+	data.tweaks = tweaks.duplicate()
 	new_weapon.set_meta("module_data", data)
 	
 	hull.add_child(new_weapon)
@@ -1324,7 +1365,21 @@ func _free_gizmo(module: Node3D):
 			child.free()
 
 func _deselect_module():
-	if selected_module:
+	# is_instance_valid guard (2026-07-23 locomotion-tweak fix): a
+	# count-changing locomotion tweak (num_axles etc.) calls
+	# update_locomotion() synchronously, which queue_free()s every existing
+	# instance of that type INCLUDING the currently-selected one, then
+	# _apply_tweaks() call_deferred()s a reselect of one of the freshly
+	# respawned instances. By the time that deferred _select_module() runs
+	# (and reaches here via _deselect_module()), `selected_module` still
+	# points at the OLD, by-then-actually-freed instance - selected_module
+	# alone is a stale Object reference, not null, so the old `if
+	# selected_module:` check passed and get_children() below threw on a
+	# freed instance. With the debugger attached (the normal editor Play
+	# session) an uncaught script error like that pauses/freezes the running
+	# game - exactly the "game locks up" symptom reported when adjusting
+	# axle/wheel count.
+	if selected_module and is_instance_valid(selected_module):
 		# Immediate free (not queue_free) - same reasoning as
 		# _refresh_firing_arc()'s own old-arc cleanup: _select_module()
 		# calls this and then immediately adds a fresh "ArcCone" (e.g. the

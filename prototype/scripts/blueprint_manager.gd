@@ -471,6 +471,14 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	var locomotion = blueprint_data.get("locomotion", {})
 	var loc_type = locomotion.get("type_id", "")
 	var settings = locomotion.get("settings", {})
+	# battle_unit.gd's thrust/capacity-per-locomotion-setting math (count,
+	# width, wheels_per_axle etc.) reads these two metas off the hull - never
+	# set here before, so that math silently no-op'd (flat 1.0 contribution)
+	# for every battle-spawned unit regardless of its locomotion tweaks; it
+	# only ever worked in the Design Lab's live sidebar preview, which reads
+	# the same metas off the hull it's actively editing.
+	hull.set_meta("locomotion_type", loc_type)
+	hull.set_meta("locomotion_settings", settings)
 	var hull_size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
 	var running_gear_size = Vector3.ZERO
 	if ModuleCatalog.needs_running_gear(loc_type):
@@ -484,7 +492,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# off its own running gear). battle_unit.gd's own CollisionShape3D
 		# is the real physics collider for this chassis in battle.
 		var gear_layer = 1 if is_designer else 0
-		var gear_body: StaticBody3D = RunningGearBuilder.build_running_gear(hull, running_gear_size, catalog_data.color, gear_layer)
+		var gear_body: StaticBody3D = RunningGearBuilder.build_running_gear(hull, running_gear_size, catalog_data.color, gear_layer, loc_type)
 		# Flush the chassis's top against the hull's underside, same as
 		# update_locomotion()'s placement.
 		gear_body.position = Vector3(0, -hull_size.y / 2.0 - running_gear_size.y / 2.0, 0)
@@ -493,12 +501,10 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		hull.position = Vector3(0, (catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + running_gear_size.y, 0)
 	else:
 		var wheels_offset = 0.0
-		if loc_type == "wheels" or loc_type == "omni_wheels":
+		if loc_type == "wheels":
 			wheels_offset = 0.8 * settings.get("size", 1.0)
 		elif loc_type == "legs":
 			wheels_offset = 1.6 * settings.get("size", 1.0)
-		elif loc_type == "anti_grav":
-			wheels_offset = 0.4 * settings.get("size", 1.0)
 		hull.position = Vector3(0, (catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + wheels_offset, 0)
 	
 	# Spawn modules

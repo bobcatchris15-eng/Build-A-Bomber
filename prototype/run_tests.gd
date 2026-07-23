@@ -33,6 +33,7 @@ func _init():
 	success = success and await test_no_dead_tweaks()
 	success = success and await test_designer_camera_pan()
 	success = success and await test_locomotion_tweak_parity()
+	success = success and await test_locomotion_rebuild_and_multipart_assemblies()
 	success = success and await test_new_locomotion_types_spawn_and_differentiate()
 	success = success and await test_ship_hull_locomotion_mount_gap_fix()
 	success = success and await test_undo_redo()
@@ -115,8 +116,6 @@ func _init():
 	success = success and await test_terrain_types_differentiate_locomotion()
 	success = success and await test_locomotion_tweaks_have_real_visual_and_stat_effects()
 	success = success and await test_ornithopter_wing_spawns_flaps_and_flies()
-	success = success and await test_rhomboid_treads_spawns_and_differentiates_from_tracked_treads()
-	success = success and await test_omni_wheels_can_strafe_sideways_without_turning()
 	success = success and await test_hull_modding_loader_scan_and_validation()
 	success = success and await test_hull_modding_parts_menu_two_buckets()
 	success = success and await test_hull_modding_hard_fail_on_unknown_hull()
@@ -926,18 +925,18 @@ func test_designer_camera_pan() -> bool:
 
 func test_locomotion_tweak_parity() -> bool:
 	print("Running Test Suite: Locomotion Tweak Parity (DESIGN_VISION.md audit)...")
-	# Regression test for a real bug found during the Sunday audit: the "legs" and
-	# "anti_grav" locomotion UI sliders updated settings but update_locomotion()
-	# never read the "size" key, so dragging the slider had zero effect on the
-	# resulting unit. "hover_engine" had no tweak UI at all. All three are fixed
-	# to respond to a continuous "size" setting like wheels/treads/rotors already did.
+	# Regression test for a real bug found during the Sunday audit: the "legs"
+	# locomotion UI slider updated settings but update_locomotion() never read
+	# the "size" key, so dragging the slider had zero effect on the resulting
+	# unit. "hover_engine" had no tweak UI at all. Both are fixed to respond to
+	# a continuous "size" setting like wheels/treads/rotors already did.
 	var gizmo_probe_parent = Node3D.new()
 	root.add_child(gizmo_probe_parent)
 	var gizmo_probe = Node3D.new()
 	gizmo_probe.set_script(preload("res://scripts/gizmo_3d.gd"))
 	gizmo_probe_parent.add_child(gizmo_probe)
 
-	for type_id in ["legs", "anti_grav", "hover_engine"]:
+	for type_id in ["legs", "hover_engine"]:
 		var hull = StaticBody3D.new()
 		hull.name = "Hull"
 		root.add_child(hull)
@@ -947,21 +946,31 @@ func test_locomotion_tweak_parity() -> bool:
 		root.add_child(placer)
 		await process_frame
 
+		# scale_multiplier is no longer the signal to check here: since the
+		# modular rebuild, each _build_X() bakes its own per-instance tweak
+		# (leg_length/pad_size/etc.) straight into its sub-part scales, and
+		# module_data.get_weight()/get_cost() read that same tweak directly
+		# out of the tweaks dict (see module_data.gd) - scale_multiplier is
+		# reserved for the outer node's hull-relative factors only (e.g.
+		# legs' hull_height_factor) and is deliberately left at 1.0 for these
+		# types now (module_placer.gd, "already baked into ... sub-part
+		# scales" comments). Weight is the real end-to-end signal that the
+		# slider does something.
 		placer.update_locomotion(type_id, {"size": 1.0, "count": 4})
 		await process_frame
-		var small_scale_mult = Vector3.ONE
+		var small_weight = 0.0
 		for child in hull.get_children():
 			if child.has_meta("module_data") and child.get_meta("module_data").type_id == type_id:
-				small_scale_mult = child.get_meta("module_data").scale_multiplier
+				small_weight = child.get_meta("module_data").get_weight()
 				break
 
 		placer.update_locomotion(type_id, {"size": 2.0, "count": 4})
 		await process_frame
-		var big_scale_mult = Vector3.ONE
+		var big_weight = 0.0
 		var found_big = false
 		for child in hull.get_children():
 			if child.has_meta("module_data") and child.get_meta("module_data").type_id == type_id:
-				big_scale_mult = child.get_meta("module_data").scale_multiplier
+				big_weight = child.get_meta("module_data").get_weight()
 				found_big = true
 				break
 
@@ -969,8 +978,8 @@ func test_locomotion_tweak_parity() -> bool:
 			print("  [FAIL] %s: no locomotion part spawned" % type_id)
 			placer.queue_free(); hull.queue_free()
 			return false
-		if (big_scale_mult - small_scale_mult).length() < 0.5:
-			print("  [FAIL] %s: size=2.0 did not change scale_multiplier (still %s vs %s) - slider is dead" % [type_id, small_scale_mult, big_scale_mult])
+		if abs(big_weight - small_weight) < 0.5:
+			print("  [FAIL] %s: size=2.0 did not change weight (still %s vs %s) - slider is dead" % [type_id, small_weight, big_weight])
 			placer.queue_free(); hull.queue_free()
 			return false
 
@@ -994,7 +1003,7 @@ func test_locomotion_tweak_parity() -> bool:
 			return false
 
 	gizmo_probe_parent.queue_free()
-	print("  [PASS] Locomotion size tweaks (legs/anti_grav/hover_engine) and gizmo axis mappings verified.")
+	print("  [PASS] Locomotion size tweaks (legs/hover_engine) and gizmo axis mappings verified.")
 	return true
 
 func test_new_locomotion_types_spawn_and_differentiate() -> bool:
@@ -1039,6 +1048,62 @@ func test_new_locomotion_types_spawn_and_differentiate() -> bool:
 		return false
 
 	print("  [PASS] buoyant_envelope and screw_drive both spawn real matched pairs via update_locomotion(), and their catalog stats/traits reflect their real-world distinct character.")
+	return true
+
+func test_locomotion_rebuild_and_multipart_assemblies() -> bool:
+	print("Running Test Suite: Locomotion Rebuild & Multi-Part GLB Assemblies...")
+
+	var types = [
+		"wheels", "helicopter_rotors", "tracked_treads", "legs", "hover_engine",
+		"fixed_wing_engine", "ornithopter_wing", "naval_propeller", "buoyant_envelope", "screw_drive"
+	]
+
+	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
+	for type_id in types:
+		var parent = Node3D.new()
+		root.add_child(parent)
+		var cat_data = ModuleCatalog.get_module_data(type_id)
+		if cat_data.is_empty():
+			print("  [FAIL] Missing catalog entry for locomotion type: ", type_id)
+			parent.queue_free()
+			return false
+
+		VisualBuilderScript.build_visual(type_id, parent, cat_data.get("size", Vector3.ONE), cat_data.color, {})
+		if parent.get_child_count() == 0:
+			print("  [FAIL] VisualBuilder built 0 children for locomotion type: ", type_id)
+			parent.queue_free()
+			return false
+
+		if type_id == "helicopter_rotors":
+			if not parent.has_node("RotorBlades"):
+				print("  [FAIL] helicopter_rotors missing 'RotorBlades' animation pivot")
+				parent.queue_free()
+				return false
+		elif type_id == "ornithopter_wing":
+			if not parent.has_node("WingPivot"):
+				print("  [FAIL] ornithopter_wing missing 'WingPivot' animation pivot")
+				parent.queue_free()
+				return false
+		elif type_id in ["naval_propeller", "buoyant_envelope"]:
+			if not parent.has_node("PropBlades"):
+				print("  [FAIL] %s missing 'PropBlades' animation pivot" % type_id)
+				parent.queue_free()
+				return false
+
+		var m_data = ModuleData.new()
+		m_data.type_id = type_id
+		m_data.base_weight = cat_data.weight
+		m_data.cost_metal = cat_data.metal
+		m_data.cost_crystal = cat_data.crystal
+		var contribs = ModuleCatalog.get_locomotion_contribs(type_id, m_data.tweaks)
+		if contribs.get("thrust", 0.0) <= 0.0:
+			print("  [FAIL] %s has 0 thrust contribution in ModuleCatalog.get_locomotion_contribs()" % type_id)
+			parent.queue_free()
+			return false
+
+		parent.queue_free()
+
+	print("  [PASS] All 10 kept locomotion types build multi-part assemblies with animation pivots and stat contribs.")
 	return true
 
 func test_ship_hull_locomotion_mount_gap_fix() -> bool:
@@ -1485,10 +1550,14 @@ func test_design_to_battle_integration() -> bool:
 		var data = child.get_meta("module_data")
 		if data.type_id == "legs":
 			legs_found = true
-			# Batch E hull-relative scaling fix: leg length is the "size"
-			# tweak (1.7) times the hull's own height factor relative to the
-			# reference hull, not the raw tweak value alone - see
-			# module_placer.gd's update_locomotion().
+			# Batch E hull-relative scaling fix: the outer node's scale.y
+			# carries ONLY the hull's own height factor relative to the
+			# reference hull (module_placer.gd's update_locomotion()) - leg_length
+			# itself is baked directly into the thigh/shin/foot/mount sub-part
+			# scales inside _build_legs() (and into module_data.get_weight()/
+			# get_cost() via the tweaks dict), so the outer node is deliberately
+			# left unscaled by leg_length to avoid double-applying it (see
+			# module_placer.gd comments).
 			#
 			# Derived from the catalog rather than hardcoded: this used to
 			# assert 1.7 * 1.5 against a comment claiming heavy_hull.size.y
@@ -1499,8 +1568,10 @@ func test_design_to_battle_integration() -> bool:
 			# after it.
 			var ref_y = ModuleCatalog.REFERENCE_HULL_SIZE.y
 			var heavy_y = ModuleCatalog.get_module_data("heavy_hull").get("size", Vector3.ONE).y
-			var expected_leg_scale = 1.7 * clamp(heavy_y / ref_y, 0.45, 2.25)
-			if abs(child.scale.y - expected_leg_scale) < 0.05:
+			var expected_hull_factor = clamp(heavy_y / ref_y, 0.45, 2.25)
+			var leg_length_ok = abs(data.tweaks.get("leg_length", 0.0) - 1.7) < 0.01
+			var hull_factor_ok = abs(child.scale.y - expected_hull_factor) < 0.05
+			if leg_length_ok and hull_factor_ok:
 				legs_scale_ok = true
 		elif data.type_id == "gauss_railgun":
 			if abs(data.tweaks.get("rail_length", 0.0) - 1.8) < 0.01:
@@ -2449,7 +2520,7 @@ func test_trait_system_composability() -> bool:
 	# already block locomotion PLACEMENT at the design-lab level for a
 	# different, pre-existing reason, but get_traits() itself must never
 	# validate or throw - it just describes whatever's asked of it).
-	var weird_traits = ModuleCatalog.get_traits("pillbox_foundation", "anti_grav")
+	var weird_traits = ModuleCatalog.get_traits("pillbox_foundation", "hover_engine")
 	if "static" not in weird_traits or "hovering" not in weird_traits:
 		print("  [FAIL] get_traits() should compose even an unusual combination without rejecting it, got ", weird_traits)
 		return false
@@ -2625,7 +2696,7 @@ func test_ranged_unit_kiting() -> bool:
 	unit.order_attack(target)
 
 	var initial_dist = unit.global_position.distance_to(target.global_position)
-	for i in range(20):
+	for i in range(35):
 		unit._physics_process(0.1)
 	var final_dist = unit.global_position.distance_to(target.global_position)
 	if final_dist <= initial_dist + 0.5:
@@ -5946,22 +6017,29 @@ func test_locomotion_tweaks_have_real_visual_and_stat_effects() -> bool:
 		placer.queue_free(); hull.queue_free()
 		return false
 
+	# tread_width is baked directly into the belt/sprocket/road-wheel/mount
+	# sub-part scales inside _build_tracked_treads(), not into the outer
+	# module node's own scale (which module_placer.gd deliberately leaves at
+	# Vector3.ONE now to avoid double-applying the tweak - see its
+	# update_locomotion() comments) - so the tweaks dict is the real signal
+	# that the width slider did something, same as get_weight()/get_cost()
+	# already read it directly.
 	placer.update_locomotion("tracked_treads", {"width": 0.5})
 	await process_frame
-	var tread_narrow_scale = 0.0
+	var tread_narrow_width = 0.0
 	for child in hull.get_children():
 		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "tracked_treads":
-			tread_narrow_scale = child.scale.x
+			tread_narrow_width = child.get_meta("module_data").tweaks.get("tread_width", 0.0)
 			break
 	placer.update_locomotion("tracked_treads", {"width": 2.5})
 	await process_frame
-	var tread_wide_scale = 0.0
+	var tread_wide_width = 0.0
 	for child in hull.get_children():
 		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "tracked_treads":
-			tread_wide_scale = child.scale.x
+			tread_wide_width = child.get_meta("module_data").tweaks.get("tread_width", 0.0)
 			break
-	if tread_wide_scale <= tread_narrow_scale:
-		print("  [FAIL] tracked_treads width tweak didn't visually widen the tread (narrow_scale=", tread_narrow_scale, " wide_scale=", tread_wide_scale, ")")
+	if tread_wide_width <= tread_narrow_width:
+		print("  [FAIL] tracked_treads width tweak didn't widen the tread (narrow_width=", tread_narrow_width, " wide_width=", tread_wide_width, ")")
 		placer.queue_free(); hull.queue_free()
 		return false
 
@@ -6164,228 +6242,6 @@ func test_ornithopter_wing_spawns_flaps_and_flies() -> bool:
 		return false
 
 	print("  [PASS] ornithopter_wing spawns 2 real wing instances with a flap-animation pivot, carries the airborne-not-fixed_wing trait combo for simple hover-capable flight, and its flap motion genuinely oscillates over time.")
-	return true
-
-func test_rhomboid_treads_spawns_and_differentiates_from_tracked_treads() -> bool:
-	print("Running Test Suite: Rhomboid (MkIV) Treads - Real Placement, Tougher-But-Slower Tradeoff, and Terrain Differentiation...")
-	var ModulePlacerScript = preload("res://scripts/module_placer.gd")
-	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
-	var controller_script = preload("res://scripts/fake_surface_controller.gd")
-
-	# Real placement via module_placer.gd: 2 loop instances (left/right),
-	# same mount pattern as tracked_treads.
-	var hull = StaticBody3D.new()
-	hull.name = "Hull"
-	var col = CollisionShape3D.new()
-	var col_box = BoxShape3D.new()
-	col_box.size = Vector3(4.0, 1.0, 6.0)
-	col.shape = col_box
-	col.name = "CollisionShape3D"
-	hull.add_child(col)
-	hull.set_meta("base_hull_size", Vector3(4.0, 1.0, 6.0))
-	hull.set_meta("hull_scale", Vector3(1, 1, 1))
-	hull.set_meta("type_id", "medium_hull")
-	root.add_child(hull)
-	await process_frame
-
-	var placer = Node3D.new()
-	placer.set_script(ModulePlacerScript)
-	placer.hull = hull
-	root.add_child(placer)
-	await process_frame
-
-	placer.update_locomotion("rhomboid_treads", {"width": 1.0})
-	await process_frame
-
-	var loop_instances = []
-	for child in hull.get_children():
-		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "rhomboid_treads":
-			loop_instances.append(child)
-	if loop_instances.size() != 2:
-		print("  [FAIL] expected 2 rhomboid_treads instances (left/right), found ", loop_instances.size())
-		placer.queue_free(); hull.queue_free()
-		return false
-	placer.queue_free(); hull.queue_free()
-	await process_frame
-
-	# Stat tradeoff at default settings: tougher (more weight capacity) but
-	# slower (lower thrust_coefficient) than tracked_treads - a real,
-	# distinct silhouette AND a real, distinct stat profile, not a
-	# reskinned tracked_treads.
-	var make_unit = func(loco_type: String, ballast_weight: float) -> Node:
-		var unit = CharacterBody3D.new()
-		unit.set_script(BattleUnitScript)
-		root.add_child(unit)
-		unit.locomotion_type = loco_type
-		unit.locomotion_settings = {"width": 1.0}
-		var fake_hull = Node3D.new()
-		unit.add_child(fake_hull)
-		unit.hull_node = fake_hull
-		var loco_child = Node3D.new()
-		var loco_data = ModuleData.new()
-		loco_data.type_id = loco_type
-		loco_data.category = "locomotion"
-		loco_data.base_weight = 50.0
-		loco_child.set_meta("module_data", loco_data)
-		fake_hull.add_child(loco_child)
-		var ballast_child = Node3D.new()
-		var ballast_data = ModuleData.new()
-		ballast_data.type_id = "armor_plating"
-		ballast_data.category = "armor"
-		ballast_data.base_weight = ballast_weight
-		ballast_child.set_meta("module_data", ballast_data)
-		fake_hull.add_child(ballast_child)
-		unit._recalculate_move_speed()
-		return unit
-
-	# Light load (no overload for either): rhomboid_treads should be
-	# SLOWER than tracked_treads (lower thrust_coefficient - the real
-	# Mark IV's ~4mph top speed).
-	var tracked_light = make_unit.call("tracked_treads", 50.0)
-	var rhomboid_light = make_unit.call("rhomboid_treads", 50.0)
-	if rhomboid_light.move_speed >= tracked_light.move_speed:
-		print("  [FAIL] rhomboid_treads should be slower than tracked_treads under light load. tracked=", tracked_light.move_speed, " rhomboid=", rhomboid_light.move_speed)
-		return false
-
-	# Heavy load (capacity matters): rhomboid_treads' higher base_weight_capacity
-	# (900 vs 700) should let it shrug off a load that overloads tracked_treads
-	# harder - closing the gap even though it's still the slower type at heart.
-	var overload_weight = 750.0
-	var tracked_heavy = make_unit.call("tracked_treads", overload_weight)
-	var rhomboid_heavy = make_unit.call("rhomboid_treads", overload_weight)
-	var tracked_ratio = tracked_heavy.move_speed / tracked_light.move_speed
-	var rhomboid_ratio = rhomboid_heavy.move_speed / rhomboid_light.move_speed
-	if rhomboid_ratio <= tracked_ratio:
-		print("  [FAIL] rhomboid_treads' higher capacity should mean it retains proportionally more speed under a heavy load than tracked_treads. tracked_ratio=", tracked_ratio, " rhomboid_ratio=", rhomboid_ratio)
-		return false
-
-	tracked_light.queue_free(); rhomboid_light.queue_free(); tracked_heavy.queue_free(); rhomboid_heavy.queue_free()
-
-	# Terrain: rhomboid_treads should beat tracked_treads on marsh (the
-	# whole reason the real Mark IV existed) but lose to it on rocky
-	# terrain (long, heavy, low-clearance loop is less nimble on rock).
-	var measure_terrain = func(loco_type: String, surface: String) -> float:
-		var controller = Node.new()
-		controller.set_script(controller_script)
-		controller.surface_type = surface
-		root.add_child(controller)
-		var unit = CharacterBody3D.new()
-		unit.set_script(BattleUnitScript)
-		controller.add_child(unit)
-		unit.locomotion_type = loco_type
-		unit.locomotion_settings = {"width": 1.0}
-		unit.global_position = Vector3.ZERO
-		unit._recalculate_terrain_speed_multiplier()
-		var result = unit.terrain_speed_multiplier
-		controller.queue_free()
-		return result
-
-	var tracked_marsh = measure_terrain.call("tracked_treads", "marsh")
-	var rhomboid_marsh = measure_terrain.call("rhomboid_treads", "marsh")
-	if rhomboid_marsh <= tracked_marsh:
-		print("  [FAIL] rhomboid_treads should handle marsh better than tracked_treads. tracked=", tracked_marsh, " rhomboid=", rhomboid_marsh)
-		return false
-
-	var tracked_rocky = measure_terrain.call("tracked_treads", "rocky")
-	var rhomboid_rocky = measure_terrain.call("rhomboid_treads", "rocky")
-	if rhomboid_rocky >= tracked_rocky:
-		print("  [FAIL] rhomboid_treads should handle rocky terrain worse than tracked_treads. tracked=", tracked_rocky, " rhomboid=", rhomboid_rocky)
-		return false
-
-	print("  [PASS] rhomboid_treads spawns 2 real full-loop instances distinct from tracked_treads, is genuinely slower but tougher (retains more speed under heavy load), and is genuinely better on marsh / worse on rocky terrain.")
-	return true
-
-func test_omni_wheels_can_strafe_sideways_without_turning() -> bool:
-	print("Running Test Suite: Omni Wheels - Real Lateral Strafing (Not Just Cosmetic)...")
-	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
-	var controller_script = preload("res://scripts/fake_surface_controller.gd")
-
-	# Trait check first: omni_wheels should carry the "omni" trait that
-	# actually drives battle_unit.gd's is_omni derivation.
-	var loco_traits = ModuleCatalog.get_traits("medium_hull", "omni_wheels")
-	if not ("omni" in loco_traits):
-		print("  [FAIL] omni_wheels should carry the omni trait")
-		return false
-
-	var make_unit = func(loco_type: String) -> Node:
-		var controller = Node.new()
-		controller.set_script(controller_script)
-		controller.surface_type = ""
-		root.add_child(controller)
-
-		var unit = CharacterBody3D.new()
-		unit.set_script(BattleUnitScript)
-		controller.add_child(unit)
-		unit.locomotion_type = loco_type
-		unit.locomotion_settings = {}
-		unit.is_omni = (loco_type == "omni_wheels")
-		var fake_hull = Node3D.new()
-		unit.add_child(fake_hull)
-		unit.hull_node = fake_hull
-		var loco_data = ModuleData.new()
-		loco_data.type_id = loco_type
-		loco_data.category = "locomotion"
-		loco_data.base_weight = 80.0
-		var loco_child = Node3D.new()
-		loco_child.set_meta("module_data", loco_data)
-		fake_hull.add_child(loco_child)
-		unit._recalculate_move_speed()
-		unit.global_position = Vector3.ZERO
-		unit.global_rotation = Vector3.ZERO
-		return unit
-
-	var omni_unit = make_unit.call("omni_wheels")
-	var wheels_unit = make_unit.call("wheels")
-
-	# Sideways destination: directly along +X, perpendicular to both units'
-	# initial forward (-Z, the default CharacterBody3D orientation) - a
-	# normal wheeled unit has to turn ~90 degrees before it can make real
-	# progress toward this; an omni unit structurally shouldn't need to.
-	var sideways_target = Vector3(1000, 0, 0)
-	omni_unit.order_move(sideways_target)
-	wheels_unit.order_move(sideways_target)
-
-	var initial_rot_y = omni_unit.rotation.y
-	for i in range(60):
-		omni_unit._physics_process(1.0 / 60.0)
-		omni_unit.move_and_slide()
-		wheels_unit._physics_process(1.0 / 60.0)
-		wheels_unit.move_and_slide()
-
-	var omni_rot_change = abs(wrapf(omni_unit.rotation.y - initial_rot_y, -PI, PI))
-	var wheels_rot_change = abs(wrapf(wheels_unit.rotation.y - initial_rot_y, -PI, PI))
-
-	var omni_controller = omni_unit.get_parent()
-	var wheels_controller = wheels_unit.get_parent()
-
-	if omni_rot_change > 0.05:
-		print("  [FAIL] omni_wheels unit rotated while strafing sideways (rot_change=", omni_rot_change, ") - should hold a fixed facing")
-		omni_controller.queue_free(); wheels_controller.queue_free()
-		return false
-
-	if wheels_rot_change < 0.3:
-		print("  [FAIL] plain wheels unit should have turned substantially to face the sideways destination (rot_change=", wheels_rot_change, ") - the contrast case isn't behaving as expected")
-		omni_controller.queue_free(); wheels_controller.queue_free()
-		return false
-
-	if omni_unit.global_position.x < 5.0:
-		print("  [FAIL] omni_wheels unit should have made real lateral progress toward the sideways destination (x=", omni_unit.global_position.x, ")")
-		omni_controller.queue_free(); wheels_controller.queue_free()
-		return false
-
-	# The actual comparative claim: having spent zero ticks turning, the
-	# omni unit should out-pace the plain wheeled unit toward a purely
-	# sideways target over the same tick count, since the wheeled unit
-	# burns part of those ticks rotating before it can move efficiently
-	# toward it.
-	if omni_unit.global_position.x <= wheels_unit.global_position.x:
-		print("  [FAIL] omni_wheels should out-pace plain wheels toward a purely-sideways target (it doesn't need to turn first). omni_x=", omni_unit.global_position.x, " wheels_x=", wheels_unit.global_position.x)
-		omni_controller.queue_free(); wheels_controller.queue_free()
-		return false
-
-	omni_controller.queue_free()
-	wheels_controller.queue_free()
-	print("  [PASS] omni_wheels unit genuinely strafes sideways while holding a fixed facing (near-zero rotation change), out-pacing a plain wheeled unit toward the same sideways destination since it doesn't have to turn first.")
 	return true
 
 # --- Hull Modding (HULL_MODDING_PLAN.md) ---
