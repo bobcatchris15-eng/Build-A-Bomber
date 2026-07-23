@@ -191,7 +191,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Frame_built like gauss_railgun - traverse is moot in practice,
 			# a low number matches its bulky fixed-elevation mount either way.
 			"traverse_agility": 0.4,
-			"size": Vector3(0.9, 0.9, 3.2),
+			"size": Vector3(1.8, 1.8, 6.4),
 			"color": Color.SADDLE_BROWN
 		},
 		"mortar_array": {
@@ -311,8 +311,7 @@ static func _build_catalog_literal() -> Dictionary:
 		# "energy" damage_class weapons (ENERGY_AND_BALANCE_SPEC.md #4) - the
 		# only weapons that cost the firing unit's own current_energy per
 		# shot and, for tesla_coil/ion_cannon, also drain the TARGET's
-		# energy pool alongside HP damage. arc_projector is the dedicated
-		# pure-drain "disable" weapon (near-zero HP damage, big drain).
+		# energy pool alongside HP damage.
 		"tesla_coil": {
 			"name": "Tesla Coil",
 			"category": "weapon",
@@ -331,22 +330,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"traverse_agility": 0.8,
 			"size": Vector3(0.5, 1.2, 0.5),
 			"color": Color.LIGHT_SKY_BLUE
-		},
-		"arc_projector": {
-			"name": "Arc Projector",
-			"category": "weapon",
-			"hp": 55.0,
-			"weight": 45.0,
-			"metal": 25,
-			"crystal": 35,
-			"dps": 40.0,
-			# Compact, low-profile emitter - tolerant like the light autoguns.
-			"pintle_min_up_alignment": 0.2,
-			# Compact, low-profile emitter, tolerant like the light autoguns -
-			# it needs to chase down a target to disable it, so agility matters.
-			"traverse_agility": 1.15,
-			"size": Vector3(0.4, 0.4, 1.0),
-			"color": Color.CYAN
 		},
 		"ion_cannon": {
 			"name": "Ion Cannon",
@@ -459,7 +442,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Bulkier than the other PD weapons but still needs to swing to
 			# steep anti-air elevations routinely - fast, just not CIWS-fast.
 			"traverse_agility": 1.4,
-			"size": Vector3(0.7, 0.7, 1.8),
+			"size": Vector3(0.525, 0.525, 1.35),
 			"color": Color.DARK_GOLDENROD
 		},
 
@@ -1307,7 +1290,7 @@ static func get_traverse_agility(type_id: String) -> float:
 #                 point-defense interception (weapon_missile.gd), not dodging
 const PROJECTILE_CLASS = {
 	"gauss_railgun": "hitscan", "heavy_laser": "hitscan", "pd_laser": "hitscan",
-	"tesla_coil": "hitscan", "arc_projector": "hitscan", "ion_cannon": "hitscan",
+	"tesla_coil": "hitscan", "ion_cannon": "hitscan",
 	"resource_harvester": "hitscan", "repair_array": "hitscan",
 	"basic_cannon": "ballistic", "heavy_machine_gun": "ballistic", "rotary_cannon": "ballistic",
 	"ciws": "ballistic", "flak_cannon": "ballistic", "flamethrower": "ballistic",
@@ -1331,7 +1314,7 @@ static func get_projectile_class(type_id: String) -> String:
 # consistent per-tweak traverse_speed effect across every weapon type that
 # has ANY such tweak, instead of only the two tweak names (barrel_length,
 # elevation) that happened to be wired up before.
-const LINEAR_SCALE_WEAPON_TWEAKS = ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "dispersion", "elevation", "fuse_setting"]
+const LINEAR_SCALE_WEAPON_TWEAKS = ["caliber", "barrel_length", "barrel_count", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "dispersion", "elevation", "fuse_setting", "focal_length", "charge_rate", "burst_length", "burst_size", "arc_frequency", "surge_capacity", "tracking_speed"]
 
 # Weight capacity fallback for any locomotion type_id missing its own
 # "base_weight_capacity" entry - a reasonable middle ground between the

@@ -143,7 +143,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		child.queue_free()
 
 	# Try to load a monolithic authored mesh for this entire module first (modular sub-part assemblies bypass this)
-	var monolithic_mesh = _part(type_id) if (type_id != "basic_cannon" and type_id != "heavy_machine_gun" and type_id != "rotary_cannon" and type_id != "gauss_railgun" and type_id != "artillery" and type_id != "mortar_array" and type_id != "guided_missile") else null
+	var monolithic_mesh = _part(type_id) if (type_id != "basic_cannon" and type_id != "heavy_machine_gun" and type_id != "rotary_cannon" and type_id != "gauss_railgun" and type_id != "artillery" and type_id != "mortar_array" and type_id != "guided_missile" and type_id != "missile_pod" and type_id != "cluster_dispenser" and type_id != "flamethrower" and type_id != "tesla_coil" and type_id != "ion_cannon" and type_id != "heavy_laser" and type_id != "plasma_lobber" and type_id != "ciws" and type_id != "pd_laser" and type_id != "flak_cannon") else null
 	if monolithic_mesh:
 		var inst = _mesh_inst(monolithic_mesh, base_color)
 		if type_id == "basic_cannon":
@@ -753,126 +753,413 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		slot.position = Vector3(0, base_size.y * 0.4, -base_size.z / 2.0 - 0.01)
 		parent_node.add_child(slot)
 
-	elif type_id == "cluster_dispenser":
-		var disp = MeshInstance3D.new()
-		var disp_box = BoxMesh.new()
-		disp_box.size = base_size
-		disp.mesh = disp_box
-		var disp_mat = StandardMaterial3D.new()
-		disp_mat.albedo_color = base_color.darkened(0.2)
-		disp.material_override = disp_mat
-		disp.position = Vector3(0, base_size.y / 2.0, 0)
-		parent_node.add_child(disp)
+	elif type_id in ["cluster_dispenser", "cluster_launcher"]:
+		var dispersion = tweaks.get("dispersion", 1.0)
+		var payload_size = tweaks.get("payload_size", 1.0)
 
-		# Multiple dropper ports on bottom (Y=0.01)
-		for x in [-0.3, 0.3]:
-			for z in [-0.3, 0.3]:
-				var port = MeshInstance3D.new()
-				var port_cyl = CylinderMesh.new()
-				port_cyl.top_radius = 0.12
-				port_cyl.bottom_radius = 0.12
-				port_cyl.height = 0.04
-				port.mesh = port_cyl
-				var port_mat = StandardMaterial3D.new()
-				port_mat.albedo_color = Color.BLACK
-				port.material_override = port_mat
-				port.position = Vector3(x * base_size.x, 0.01, z * base_size.z)
-				parent_node.add_child(port)
+		# 1. MOUNT (cluster_dispenser_mount.glb)
+		var mount_mesh = _part("cluster_dispenser_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
+		var mount: MeshInstance3D
+		if mount_mesh:
+			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+			mount.scale = Vector3(dispersion, 1.0, dispersion)
+			mount.position = Vector3(0, 0, 0)
+		else:
+			mount = MeshInstance3D.new()
+			var m_box = BoxMesh.new()
+			m_box.size = Vector3(0.42 * dispersion, 0.16, 0.42 * dispersion)
+			mount.mesh = m_box
+			var m_mat = StandardMaterial3D.new()
+			m_mat.albedo_color = base_color.darkened(0.2)
+			mount.material_override = m_mat
+			mount.position = Vector3(0, 0.08, 0)
+		parent_node.add_child(mount)
+
+		# 2. CONTAINER HOUSING (cluster_dispenser_housing.glb)
+		var trunnion_y = 0.22
+		var housing_mesh = _part("cluster_dispenser_housing")
+		var housing: MeshInstance3D
+		if housing_mesh:
+			housing = _mesh_inst(housing_mesh, Color(0.28, 0.22, 0.18))
+			housing.scale = Vector3(dispersion, 1.0, dispersion)
+			housing.position = Vector3(0, trunnion_y, 0)
+		else:
+			housing = MeshInstance3D.new()
+			var h_box = BoxMesh.new()
+			h_box.size = Vector3(0.42 * dispersion, 0.32, 0.70 * dispersion)
+			housing.mesh = h_box
+			var h_mat = StandardMaterial3D.new()
+			h_mat.albedo_color = Color(0.28, 0.22, 0.18)
+			housing.material_override = h_mat
+			housing.position = Vector3(0, trunnion_y, 0)
+		parent_node.add_child(housing)
+
+		# 3. SUBMUNITION CANISTERS (cluster_dispenser_canister.glb)
+		var canister_mesh = _part("cluster_dispenser_canister")
+		var offsets = [Vector2(-0.12 * dispersion, -0.18 * dispersion), Vector2(0.12 * dispersion, -0.18 * dispersion), Vector2(-0.12 * dispersion, 0.18 * dispersion), Vector2(0.12 * dispersion, 0.18 * dispersion)]
+		for off in offsets:
+			var can: MeshInstance3D
+			var can_scale = dispersion * payload_size
+			if canister_mesh:
+				can = _mesh_inst(canister_mesh, Color(0.70, 0.40, 0.20))
+				can.scale = Vector3(can_scale, can_scale, can_scale)
+				can.position = Vector3(off.x, trunnion_y - 0.12 * payload_size, off.y)
+			else:
+				can = MeshInstance3D.new()
+				var c_cyl = CylinderMesh.new()
+				c_cyl.top_radius = 0.05 * can_scale
+				c_cyl.bottom_radius = 0.05 * can_scale
+				c_cyl.height = 0.18 * payload_size
+				can.mesh = c_cyl
+				var c_mat = StandardMaterial3D.new()
+				c_mat.albedo_color = Color(0.70, 0.40, 0.20)
+				can.material_override = c_mat
+				can.position = Vector3(off.x, trunnion_y - 0.12 * payload_size, off.y)
+				can.rotation = Vector3(PI / 2, 0, 0)
+			parent_node.add_child(can)
 
 	elif type_id == "flamethrower":
-		var base_mesh = _part("pintle_mount")
-		var base: MeshInstance3D
-		var base_h = base_size.y * 0.5
-		if base_mesh:
-			base = _mesh_inst(base_mesh, base_color.darkened(0.1))
-			base.scale = _fit_scale(Vector3(base_size.x * 0.8, base_h, base_size.z * 0.4), Vector3(0.34, 0.22, 0.22))
-			base.position = Vector3(0, 0, 0)
-		else:
-			base = MeshInstance3D.new()
-			var base_box = BoxMesh.new()
-			base_box.size = Vector3(base_size.x * 0.8, base_h, base_size.z * 0.4)
-			base.mesh = base_box
-			var base_mat = StandardMaterial3D.new()
-			base_mat.albedo_color = base_color.darkened(0.1)
-			base.material_override = base_mat
-			base.position = Vector3(0, base_h / 2.0, 0)
-		parent_node.add_child(base)
+		var nozzle_width = tweaks.get("nozzle_width", 1.0)
+		var pressure_valve = tweaks.get("pressure_valve", 1.0)
 
-		# Flame emitter nozzle cylinder
-		var nozzle_mesh = _part("barrel_thin")
+		# 1. MOUNT (flamethrower_mount.glb)
+		var mount_mesh = _part("flamethrower_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
+		var mount: MeshInstance3D
+		if mount_mesh:
+			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+			mount.scale = Vector3(nozzle_width, 1.0, pressure_valve)
+			mount.position = Vector3(0, 0, 0)
+		else:
+			mount = MeshInstance3D.new()
+			var m_box = BoxMesh.new()
+			m_box.size = Vector3(0.32 * nozzle_width, 0.16, 0.32 * pressure_valve)
+			mount.mesh = m_box
+			var m_mat = StandardMaterial3D.new()
+			m_mat.albedo_color = base_color.darkened(0.2)
+			mount.material_override = m_mat
+			mount.position = Vector3(0, 0.08, 0)
+		parent_node.add_child(mount)
+
+		# 2. BODY & DUAL FUEL TANKS (flamethrower_body.glb)
+		var trunnion_y = 0.20
+		var body_mesh = _part("flamethrower_body")
+		var body: MeshInstance3D
+		if body_mesh:
+			body = _mesh_inst(body_mesh, Color(0.35, 0.20, 0.12))
+			body.scale = Vector3(nozzle_width, 1.0, pressure_valve)
+			body.position = Vector3(0, trunnion_y, 0)
+		else:
+			body = MeshInstance3D.new()
+			var b_box = BoxMesh.new()
+			b_box.size = Vector3(0.22 * nozzle_width, 0.22, 0.45 * pressure_valve)
+			body.mesh = b_box
+			var b_mat = StandardMaterial3D.new()
+			b_mat.albedo_color = Color(0.35, 0.20, 0.12)
+			body.material_override = b_mat
+			body.position = Vector3(0, trunnion_y, 0)
+		parent_node.add_child(body)
+
+		# 3. NOZZLE & IGNITER TIP (flamethrower_nozzle.glb)
+		var nozzle_mesh = _part("flamethrower_nozzle")
 		var nozzle: MeshInstance3D
-		var nozzle_len = base_size.z * 0.8
+		var nozzle_z = -0.22 * pressure_valve
 		if nozzle_mesh:
 			nozzle = _mesh_inst(nozzle_mesh, Color(0.15, 0.15, 0.15))
-			nozzle.scale = Vector3(1.0, nozzle_len / 1.0, 1.0)
+			nozzle.scale = Vector3(nozzle_width, nozzle_width, pressure_valve)
+			nozzle.position = Vector3(0, trunnion_y, nozzle_z)
 		else:
 			nozzle = MeshInstance3D.new()
-			var nozzle_cyl = CylinderMesh.new()
-			nozzle_cyl.top_radius = 0.06
-			nozzle_cyl.bottom_radius = 0.04
-			nozzle_cyl.height = nozzle_len
-			nozzle.mesh = nozzle_cyl
-			var nozzle_mat = StandardMaterial3D.new()
-			nozzle_mat.albedo_color = Color(0.15, 0.15, 0.15)
-			nozzle.material_override = nozzle_mat
-		nozzle.position = Vector3(0, base_h + 0.1, -base_size.z * 0.35)
-		nozzle.rotation = Vector3(PI / 2, 0, 0)
+			var n_cyl = CylinderMesh.new()
+			n_cyl.top_radius = 0.08 * nozzle_width
+			n_cyl.bottom_radius = 0.05 * nozzle_width
+			n_cyl.height = 0.35 * pressure_valve
+			nozzle.mesh = n_cyl
+			var n_mat = StandardMaterial3D.new()
+			n_mat.albedo_color = Color(0.15, 0.15, 0.15)
+			nozzle.material_override = n_mat
+			nozzle.position = Vector3(0, trunnion_y, nozzle_z - 0.15 * pressure_valve)
+			nozzle.rotation = Vector3(PI / 2, 0, 0)
 		parent_node.add_child(nozzle)
 
-		# Rear pressure fuel tanks
-		var tank_mesh = _part("fuel_tank")
-		var tank: MeshInstance3D
-		if tank_mesh:
-			tank = _mesh_inst(tank_mesh, Color.DARK_RED)
-			tank.scale = _fit_scale(Vector3(0.24, base_size.y * 0.6, 0.24), Vector3(1.0, 1.0, 1.0))
-		else:
-			tank = MeshInstance3D.new()
-			var tank_cyl = CylinderMesh.new()
-			tank_cyl.top_radius = 0.12
-			tank_cyl.bottom_radius = 0.12
-			tank_cyl.height = base_size.y * 0.6
-			tank.mesh = tank_cyl
-			var tank_mat = StandardMaterial3D.new()
-			tank_mat.albedo_color = Color.DARK_RED
-			tank.material_override = tank_mat
-		tank.position = Vector3(0, base_h * 0.4, base_size.z * 0.2)
-		tank.rotation = Vector3(0, 0, PI / 2)
-		parent_node.add_child(tank)
+	elif type_id == "tesla_coil":
+		var caliber = tweaks.get("caliber", 1.0)
+		var arc_freq = tweaks.get("arc_frequency", 1.0)
+		var surge_cap = tweaks.get("surge_capacity", 1.0)
 
-	elif type_id == "plasma_lobber":
-		var base_mesh = _part("turret_base_round")
-		var base: MeshInstance3D
-		if base_mesh:
-			base = _mesh_inst(base_mesh, base_color.darkened(0.2))
-			base.scale = _fit_scale(Vector3(base_size.x * 1.6, base_size.y * 0.3, base_size.x * 1.6), Vector3(1.0, 0.35, 1.0))
-			base.position = Vector3(0, 0, 0)
+		# 1. MOUNT (tesla_coil_mount.glb)
+		var mount_mesh = _part("tesla_coil_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
+		var mount: MeshInstance3D
+		if mount_mesh:
+			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+			mount.scale = Vector3(caliber, 1.0, caliber)
+			mount.position = Vector3(0, 0, 0)
 		else:
-			base = MeshInstance3D.new()
-			var base_cyl = CylinderMesh.new()
-			base_cyl.top_radius = base_size.x * 0.8
-			base_cyl.bottom_radius = base_size.x * 0.8
-			base_cyl.height = base_size.y * 0.3
-			base.mesh = base_cyl
-			var base_mat = StandardMaterial3D.new()
-			base_mat.albedo_color = base_color.darkened(0.2)
-			base.material_override = base_mat
-			base.position = Vector3(0, base_cyl.height / 2.0, 0)
-		parent_node.add_child(base)
+			mount = MeshInstance3D.new()
+			var m_box = BoxMesh.new()
+			m_box.size = Vector3(0.48 * caliber, 0.16, 0.48 * caliber)
+			mount.mesh = m_box
+			var m_mat = StandardMaterial3D.new()
+			m_mat.albedo_color = base_color.darkened(0.2)
+			mount.material_override = m_mat
+			mount.position = Vector3(0, 0.08, 0)
+		parent_node.add_child(mount)
 
-		# Glowing green plasma generator orb
-		var orb = MeshInstance3D.new()
-		var orb_mesh = SphereMesh.new()
-		orb_mesh.radius = base_size.x * 0.45
-		orb_mesh.height = base_size.x * 0.9
-		orb.mesh = orb_mesh
-		var orb_mat = StandardMaterial3D.new()
-		orb_mat.albedo_color = Color.MEDIUM_SPRING_GREEN
-		orb_mat.emission_enabled = true
-		orb_mat.emission = Color.MEDIUM_SPRING_GREEN
-		orb_mat.emission_energy_multiplier = 0.8
-		orb.material_override = orb_mat
-		orb.position = Vector3(0, base_size.y * 0.3 + orb_mesh.radius * 0.8, 0)
-		parent_node.add_child(orb)
+		# 2. TRANSFORMER TOWER HOUSING (tesla_coil_housing.glb)
+		var trunnion_y = 0.16 * surge_cap
+		var housing_mesh = _part("tesla_coil_housing")
+		var housing: MeshInstance3D
+		if housing_mesh:
+			housing = _mesh_inst(housing_mesh, Color(0.20, 0.22, 0.28))
+			housing.scale = Vector3(caliber, caliber * surge_cap, caliber)
+			housing.position = Vector3(0, trunnion_y + 0.40 * caliber * surge_cap, 0)
+		else:
+			housing = MeshInstance3D.new()
+			var h_cyl = CylinderMesh.new()
+			h_cyl.top_radius = 0.16 * caliber
+			h_cyl.bottom_radius = 0.16 * caliber * surge_cap
+			h_cyl.height = 0.80 * caliber * surge_cap
+			housing.mesh = h_cyl
+			var h_mat = StandardMaterial3D.new()
+			h_mat.albedo_color = Color(0.20, 0.22, 0.28)
+			housing.material_override = h_mat
+			housing.position = Vector3(0, trunnion_y + 0.40 * caliber * surge_cap, 0)
+		parent_node.add_child(housing)
+
+		# 3. DISCHARGE TOROID DOME (tesla_coil_toroid.glb)
+		var toroid_mesh = _part("tesla_coil_toroid")
+		var toroid: MeshInstance3D
+		var toroid_y = trunnion_y + 0.80 * caliber * surge_cap
+		if toroid_mesh:
+			toroid = _mesh_inst(toroid_mesh, Color.LIGHT_SKY_BLUE)
+			toroid.scale = Vector3(caliber * arc_freq, caliber * arc_freq, caliber)
+			toroid.position = Vector3(0, toroid_y, 0)
+		else:
+			toroid = MeshInstance3D.new()
+			var t_sph = SphereMesh.new()
+			t_sph.radius = 0.24 * caliber * arc_freq
+			t_sph.height = 0.32 * caliber * arc_freq
+			toroid.mesh = t_sph
+			var t_mat = StandardMaterial3D.new()
+			t_mat.albedo_color = Color.LIGHT_SKY_BLUE
+			toroid.material_override = t_mat
+			toroid.position = Vector3(0, toroid_y, 0)
+		parent_node.add_child(toroid)
+
+	elif type_id == "ion_cannon":
+		var beam_width = tweaks.get("beam_width", 1.0)
+		var ion_density = tweaks.get("ion_density", 1.0)
+
+		# 1. MOUNT (ion_cannon_mount.glb)
+		var mount_mesh = _part("ion_cannon_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
+		var mount: MeshInstance3D
+		if mount_mesh:
+			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+			mount.scale = Vector3(beam_width, 1.0, beam_width)
+			mount.position = Vector3(0, 0, 0)
+		else:
+			mount = MeshInstance3D.new()
+			var m_box = BoxMesh.new()
+			m_box.size = Vector3(0.50 * beam_width, 0.16, 0.50 * beam_width)
+			mount.mesh = m_box
+			var m_mat = StandardMaterial3D.new()
+			m_mat.albedo_color = base_color.darkened(0.2)
+			mount.material_override = m_mat
+			mount.position = Vector3(0, 0.08, 0)
+		parent_node.add_child(mount)
+
+		# 2. ACCELERATOR HOUSING (ion_cannon_housing.glb)
+		var trunnion_y = 0.28
+		var housing_mesh = _part("ion_cannon_housing")
+		var housing: MeshInstance3D
+		if housing_mesh:
+			housing = _mesh_inst(housing_mesh, Color(0.18, 0.22, 0.28))
+			housing.scale = Vector3(beam_width, beam_width, ion_density)
+			housing.position = Vector3(0, trunnion_y, 0)
+		else:
+			housing = MeshInstance3D.new()
+			var h_cyl = CylinderMesh.new()
+			h_cyl.top_radius = 0.14 * beam_width
+			h_cyl.bottom_radius = 0.14 * beam_width
+			h_cyl.height = 1.20 * ion_density
+			housing.mesh = h_cyl
+			var h_mat = StandardMaterial3D.new()
+			h_mat.albedo_color = Color(0.18, 0.22, 0.28)
+			housing.material_override = h_mat
+			housing.position = Vector3(0, trunnion_y, -0.60 * ion_density)
+			housing.rotation = Vector3(PI / 2, 0, 0)
+		parent_node.add_child(housing)
+
+		# 3. FOCUSING LENS (ion_cannon_lens.glb)
+		var lens_mesh = _part("ion_cannon_lens")
+		var lens: MeshInstance3D
+		var lens_z = -0.80 * ion_density
+		if lens_mesh:
+			lens = _mesh_inst(lens_mesh, Color.CYAN)
+			lens.scale = Vector3(beam_width, beam_width, beam_width)
+			lens.position = Vector3(0, trunnion_y, lens_z)
+		else:
+			lens = MeshInstance3D.new()
+			var l_cyl = CylinderMesh.new()
+			l_cyl.top_radius = 0.08 * beam_width
+			l_cyl.bottom_radius = 0.14 * beam_width
+			l_cyl.height = 0.20
+			lens.mesh = l_cyl
+			var l_mat = StandardMaterial3D.new()
+			l_mat.albedo_color = Color.CYAN
+			lens.material_override = l_mat
+			lens.position = Vector3(0, trunnion_y, lens_z - 0.10)
+			lens.rotation = Vector3(PI / 2, 0, 0)
+		parent_node.add_child(lens)
+
+	elif type_id in ["heavy_laser", "laser_cannon"]:
+		var lens_aperture = tweaks.get("lens_aperture", 1.0)
+		var focal_length = tweaks.get("focal_length", 1.0)
+
+		# 1. MOUNT (heavy_laser_mount.glb)
+		var mount_mesh = _part("heavy_laser_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
+		var mount: MeshInstance3D
+		if mount_mesh:
+			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+			mount.scale = Vector3(lens_aperture, 1.0, lens_aperture)
+			mount.position = Vector3(0, 0, 0)
+		else:
+			mount = MeshInstance3D.new()
+			var m_box = BoxMesh.new()
+			m_box.size = Vector3(0.44 * lens_aperture, 0.16, 0.44 * lens_aperture)
+			mount.mesh = m_box
+			var m_mat = StandardMaterial3D.new()
+			m_mat.albedo_color = base_color.darkened(0.2)
+			mount.material_override = m_mat
+			mount.position = Vector3(0, 0.08, 0)
+		parent_node.add_child(mount)
+
+		# 2. OPTICAL CAVITY BARREL HOUSING (heavy_laser_housing.glb)
+		var trunnion_y = 0.25
+		var housing_mesh = _part("heavy_laser_housing")
+		var housing: MeshInstance3D
+		if housing_mesh:
+			housing = _mesh_inst(housing_mesh, Color(0.22, 0.24, 0.26))
+			housing.scale = Vector3(lens_aperture, lens_aperture, focal_length)
+			housing.position = Vector3(0, trunnion_y, 0)
+		else:
+			housing = MeshInstance3D.new()
+			var h_cyl = CylinderMesh.new()
+			h_cyl.top_radius = 0.12 * lens_aperture
+			h_cyl.bottom_radius = 0.12 * lens_aperture
+			h_cyl.height = 1.00 * focal_length
+			housing.mesh = h_cyl
+			var h_mat = StandardMaterial3D.new()
+			h_mat.albedo_color = Color(0.22, 0.24, 0.26)
+			housing.material_override = h_mat
+			housing.position = Vector3(0, trunnion_y, -0.50 * focal_length)
+			housing.rotation = Vector3(PI / 2, 0, 0)
+		parent_node.add_child(housing)
+
+		# 3. LENS EMITTER (heavy_laser_lens.glb)
+		var lens_mesh = _part("heavy_laser_lens")
+		var lens: MeshInstance3D
+		var lens_z = -0.70 * focal_length
+		if lens_mesh:
+			lens = _mesh_inst(lens_mesh, Color(1.0, 0.2, 0.2))
+			lens.scale = Vector3(lens_aperture, lens_aperture, lens_aperture)
+			lens.position = Vector3(0, trunnion_y, lens_z)
+		else:
+			lens = MeshInstance3D.new()
+			var l_cyl = CylinderMesh.new()
+			l_cyl.top_radius = 0.14 * lens_aperture
+			l_cyl.bottom_radius = 0.12 * lens_aperture
+			l_cyl.height = 0.16
+			lens.mesh = l_cyl
+			var l_mat = StandardMaterial3D.new()
+			l_mat.albedo_color = Color(1.0, 0.2, 0.2)
+			lens.material_override = l_mat
+			lens.position = Vector3(0, trunnion_y, lens_z - 0.08)
+			lens.rotation = Vector3(PI / 2, 0, 0)
+		parent_node.add_child(lens)
+
+	elif type_id in ["plasma_lobber", "plasma_launcher"]:
+		var containment = tweaks.get("containment", 1.0)
+		var charge_rate = tweaks.get("charge_rate", 1.0)
+
+		# 1. MOUNT (plasma_lobber_mount.glb)
+		var mount_mesh = _part("plasma_lobber_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
+		var mount: MeshInstance3D
+		if mount_mesh:
+			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+			mount.scale = Vector3(containment, 1.0, containment)
+			mount.position = Vector3(0, 0, 0)
+		else:
+			mount = MeshInstance3D.new()
+			var m_box = BoxMesh.new()
+			m_box.size = Vector3(0.56 * containment, 0.16, 0.56 * containment)
+			mount.mesh = m_box
+			var m_mat = StandardMaterial3D.new()
+			m_mat.albedo_color = base_color.darkened(0.2)
+			mount.material_override = m_mat
+			mount.position = Vector3(0, 0.08, 0)
+		parent_node.add_child(mount)
+
+		# Entire barrel group tilts upward, pivoting at the trunnion
+		# so the housing stays above the hull (Y=0.28 matches original).
+		var trunnion_y = 0.28
+		var barrel_group = Node3D.new()
+		barrel_group.position = Vector3(0, trunnion_y, 0)
+		barrel_group.rotation.x = deg_to_rad(35.0)
+		parent_node.add_child(barrel_group)
+
+		# 2. CONTAINMENT VESSEL HOUSING (plasma_lobber_housing.glb)
+		var housing_mesh = _part("plasma_lobber_housing")
+		var housing: MeshInstance3D
+		if housing_mesh:
+			housing = _mesh_inst(housing_mesh, Color(0.28, 0.20, 0.28))
+			housing.scale = Vector3(containment, containment, charge_rate)
+			housing.position = Vector3(0, 0.08 * containment, 0.16 * charge_rate)
+		else:
+			housing = MeshInstance3D.new()
+			var h_cyl = CylinderMesh.new()
+			h_cyl.top_radius = 0.24 * containment
+			h_cyl.bottom_radius = 0.24 * containment
+			h_cyl.height = 0.80 * charge_rate
+			housing.mesh = h_cyl
+			var h_mat = StandardMaterial3D.new()
+			h_mat.albedo_color = Color(0.28, 0.20, 0.28)
+			housing.material_override = h_mat
+			housing.position = Vector3(0, 0.28 * containment, -0.40 * charge_rate)
+			housing.rotation = Vector3(PI / 2, 0, 0)
+		barrel_group.add_child(housing)
+
+		# 3. BELL CONSTRICTION NOZZLE (plasma_lobber_muzzle.glb)
+		var muzzle_mesh = _part("plasma_lobber_muzzle")
+		var muzzle: MeshInstance3D
+		if muzzle_mesh:
+			muzzle = _mesh_inst(muzzle_mesh, Color.MEDIUM_SPRING_GREEN)
+			muzzle.scale = Vector3(1.0, 1.0, 1.0)
+			muzzle.position = Vector3(0, 0.282, -0.46)
+			housing.add_child(muzzle)
+		else:
+			muzzle = MeshInstance3D.new()
+			var n_cyl = CylinderMesh.new()
+			n_cyl.top_radius = 0.28 * containment
+			n_cyl.bottom_radius = 0.20 * containment
+			n_cyl.height = 0.25
+			muzzle.mesh = n_cyl
+			var n_mat = StandardMaterial3D.new()
+			n_mat.albedo_color = Color.MEDIUM_SPRING_GREEN
+			muzzle.material_override = n_mat
+			muzzle.rotation = Vector3(PI / 2, 0, 0)
+			barrel_group.add_child(muzzle)
 
 	elif type_id == "heavy_laser":
 		var base_mesh = _part("pintle_mount")
@@ -923,197 +1210,306 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			parent_node.add_child(barrel)
 
 	elif type_id == "missile_pod":
-		# Launcher body
-		var body = MeshInstance3D.new()
-		var body_box = BoxMesh.new()
-		body_box.size = base_size
-		body.mesh = body_box
-		var body_mat = StandardMaterial3D.new()
-		body_mat.albedo_color = base_color
-		body.material_override = body_mat
-		body.position = Vector3(0, base_size.y / 2.0, 0)
-		parent_node.add_child(body)
-
-		# Spawns rocket tube circles on the front face (Z-axis negative is forward)
+		var seeker_size = tweaks.get("seeker_size", 1.0)
+		var engine_len = tweaks.get("engine_length", 1.0)
 		var grid_size = int(tweaks.get("grid_size", 4.0))
+		grid_size = clamp(grid_size, 1, 6)
+
+		# 1. PINTLE MOUNT (missile_pod_pintle_mount.glb)
+		var pintle_mesh = _part("missile_pod_pintle_mount")
+		if not pintle_mesh:
+			pintle_mesh = _part("pintle_mount")
+		var pintle: MeshInstance3D
+		var base_w_scale = (0.8 + (grid_size - 1) * 0.15) * seeker_size
+		if pintle_mesh:
+			pintle = _mesh_inst(pintle_mesh, base_color.darkened(0.2))
+			pintle.scale = Vector3(base_w_scale, seeker_size, base_w_scale)
+			pintle.position = Vector3(0, 0, 0)
+		else:
+			pintle = MeshInstance3D.new()
+			var p_box = BoxMesh.new()
+			p_box.size = Vector3(0.48 * base_w_scale, 0.20 * seeker_size, 0.48 * base_w_scale)
+			pintle.mesh = p_box
+			var p_mat = StandardMaterial3D.new()
+			p_mat.albedo_color = base_color.darkened(0.2)
+			pintle.material_override = p_mat
+			pintle.position = Vector3(0, 0.10 * seeker_size, 0)
+		parent_node.add_child(pintle)
+
+		# 2. HOUSING BOX (missile_pod_housing.glb)
+		var trunnion_y = 0.24 * seeker_size
+		var housing_mesh = _part("missile_pod_housing")
+		var housing: MeshInstance3D
+		var pod_scale_x = (0.8 + (grid_size - 1) * 0.15) * seeker_size
+		var pod_scale_y = (0.8 + (grid_size - 1) * 0.15) * seeker_size
+		var pod_scale_z = engine_len * seeker_size
+		if housing_mesh:
+			housing = _mesh_inst(housing_mesh, Color(0.24, 0.26, 0.28))
+			housing.scale = Vector3(pod_scale_x, pod_scale_y, pod_scale_z)
+			housing.position = Vector3(0, trunnion_y, 0)
+		else:
+			housing = MeshInstance3D.new()
+			var h_box = BoxMesh.new()
+			h_box.size = Vector3(0.48 * pod_scale_x, 0.36 * pod_scale_y, 0.85 * pod_scale_z)
+			housing.mesh = h_box
+			var h_mat = StandardMaterial3D.new()
+			h_mat.albedo_color = Color(0.24, 0.26, 0.28)
+			housing.material_override = h_mat
+			housing.position = Vector3(0, trunnion_y, 0)
+		parent_node.add_child(housing)
+
+		# 3. INDIVIDUAL MISSILES (missile_pod_missile.glb) arranged in NxM grid on front cell face
+		var missile_mesh = _part("missile_pod_missile")
+		var cell_w = 0.36 * pod_scale_x
+		var cell_h = 0.26 * pod_scale_y
+		var front_z = -0.25 * pod_scale_z
 		for r in range(grid_size):
 			for c in range(grid_size):
-				var norm_r = (float(r) / (grid_size - 1) - 0.5) if grid_size > 1 else 0.0
-				var norm_c = (float(c) / (grid_size - 1) - 0.5) if grid_size > 1 else 0.0
-				var tube = MeshInstance3D.new()
-				var tube_cyl = CylinderMesh.new()
-				tube_cyl.top_radius = 0.08 * (4.0 / float(grid_size))
-				tube_cyl.bottom_radius = tube_cyl.top_radius
-				tube_cyl.height = 0.05
-				tube.mesh = tube_cyl
-				var tube_mat = StandardMaterial3D.new()
-				tube_mat.albedo_color = Color.BLACK
-				tube.material_override = tube_mat
-				tube.position = Vector3(norm_r * base_size.x * 0.7, base_size.y / 2.0 + norm_c * base_size.y * 0.7, -base_size.z / 2.0 - 0.01)
-				tube.rotation = Vector3(PI / 2, 0, 0)
-				parent_node.add_child(tube)
+				var norm_x = (float(c) / (grid_size - 1) - 0.5) if grid_size > 1 else 0.0
+				var norm_y = (float(r) / (grid_size - 1) - 0.5) if grid_size > 1 else 0.0
+				var cur_x = norm_x * cell_w
+				var cur_y = trunnion_y + norm_y * cell_h
+				var missile: MeshInstance3D
+				if missile_mesh:
+					missile = _mesh_inst(missile_mesh, Color(0.85, 0.85, 0.85))
+					missile.scale = Vector3(seeker_size * 0.7, seeker_size * 0.7, engine_len * seeker_size * 0.7)
+					missile.position = Vector3(cur_x, cur_y, front_z)
+				else:
+					missile = MeshInstance3D.new()
+					var m_cyl = CylinderMesh.new()
+					m_cyl.top_radius = 0.04 * seeker_size
+					m_cyl.bottom_radius = 0.04 * seeker_size
+					m_cyl.height = 0.50 * engine_len * seeker_size
+					missile.mesh = m_cyl
+					var m_mat = StandardMaterial3D.new()
+					m_mat.albedo_color = Color(0.85, 0.85, 0.85)
+					missile.material_override = m_mat
+					missile.position = Vector3(cur_x, cur_y, front_z)
+					missile.rotation = Vector3(PI / 2, 0, 0)
+				parent_node.add_child(missile)
 
 	elif type_id == "ciws":
-		# Round turret mount
-		var mount_mesh = _part("turret_base_round")
+		var radar_dish = tweaks.get("radar_dish", 1.0)
+		var burst_length = tweaks.get("burst_length", 1.0)
+
+		# 1. MOUNT (ciws_mount.glb)
+		var mount_mesh = _part("ciws_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
 		var mount: MeshInstance3D
 		if mount_mesh:
-			mount = _mesh_inst(mount_mesh, Color.WHITE_SMOKE)
-			mount.scale = _fit_scale(Vector3(base_size.x * 1.6, base_size.y * 0.3, base_size.x * 1.6), Vector3(1.0, 0.35, 1.0))
+			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+			mount.scale = Vector3(radar_dish, 1.0, radar_dish)
 			mount.position = Vector3(0, 0, 0)
 		else:
 			mount = MeshInstance3D.new()
-			var mount_cyl = CylinderMesh.new()
-			mount_cyl.top_radius = base_size.x * 0.8
-			mount_cyl.bottom_radius = base_size.x * 0.8
-			mount_cyl.height = base_size.y * 0.3
-			mount.mesh = mount_cyl
-			var mount_mat = StandardMaterial3D.new()
-			mount_mat.albedo_color = Color.WHITE_SMOKE
-			mount.material_override = mount_mat
-			mount.position = Vector3(0, mount_cyl.height / 2.0, 0)
+			var m_box = BoxMesh.new()
+			m_box.size = Vector3(0.58 * radar_dish, 0.16, 0.58 * radar_dish)
+			mount.mesh = m_box
+			var m_mat = StandardMaterial3D.new()
+			m_mat.albedo_color = base_color.darkened(0.2)
+			mount.material_override = m_mat
+			mount.position = Vector3(0, 0.08, 0)
 		parent_node.add_child(mount)
-		var mount_h = base_size.y * 0.3
 
-		# Radar Dome sphere
-		var dome_mesh = _part("sensor_dome")
-		var dome: MeshInstance3D
-		var dome_r = base_size.x * 0.5
-		if dome_mesh:
-			dome = _mesh_inst(dome_mesh, Color.WHITE)
-			dome.scale = _fit_scale(Vector3(dome_r * 2.0, dome_r * 2.0 * 0.9, dome_r * 2.0), Vector3(1.0, 0.65, 1.0))
+		# 2. RADOME & RECEIVER HOUSING (ciws_housing.glb)
+		var trunnion_y = 0.32
+		var housing_mesh = _part("ciws_housing")
+		var housing: MeshInstance3D
+		if housing_mesh:
+			housing = _mesh_inst(housing_mesh, Color.WHITE_SMOKE)
+			housing.scale = Vector3(radar_dish, radar_dish, radar_dish)
+			housing.rotation.y = PI  # Dish faces forward (-Z same as barrels)
+			housing.position = Vector3(0, trunnion_y, 0)
 		else:
-			dome = MeshInstance3D.new()
-			var dome_mesh2 = SphereMesh.new()
-			dome_mesh2.radius = dome_r
-			dome_mesh2.height = base_size.y * 0.9
-			dome.mesh = dome_mesh2
-			var dome_mat = StandardMaterial3D.new()
-			dome_mat.albedo_color = Color.WHITE
-			dome.material_override = dome_mat
-		dome.position = Vector3(0, mount_h + dome_r * 0.7, 0)
-		parent_node.add_child(dome)
+			housing = MeshInstance3D.new()
+			var h_cyl = CylinderMesh.new()
+			h_cyl.top_radius = 0.24 * radar_dish
+			h_cyl.bottom_radius = 0.24 * radar_dish
+			h_cyl.height = 0.50 * radar_dish
+			housing.mesh = h_cyl
+			var h_mat = StandardMaterial3D.new()
+			h_mat.albedo_color = Color.WHITE_SMOKE
+			housing.material_override = h_mat
+			housing.position = Vector3(0, trunnion_y + 0.25 * radar_dish, 0)
+		parent_node.add_child(housing)
 
-		# Small high-ROF gun barrel on side of dome
-		var gun_mesh = _part("barrel_thin")
-		var gun: MeshInstance3D
-		var gun_len = base_size.z * 0.8
-		if gun_mesh:
-			gun = _mesh_inst(gun_mesh, Color.DARK_GRAY)
-			gun.scale = Vector3(1.0, gun_len / 1.0, 1.0)
-		else:
-			gun = MeshInstance3D.new()
-			var gun_cyl = CylinderMesh.new()
-			gun_cyl.top_radius = 0.04
-			gun_cyl.bottom_radius = 0.04
-			gun_cyl.height = gun_len
-			gun.mesh = gun_cyl
-			var gun_mat = StandardMaterial3D.new()
-			gun_mat.albedo_color = Color.DARK_GRAY
-			gun.material_override = gun_mat
-		gun.position = Vector3(dome_r * 0.8, mount_h + 0.1, -base_size.z * 0.3)
-		gun.rotation = Vector3(PI / 2, 0, 0)
-		parent_node.add_child(gun)
-
-	elif type_id == "pd_laser":
-		var base_mesh = _part("turret_base_round")
-		var base: MeshInstance3D
-		if base_mesh:
-			base = _mesh_inst(base_mesh, base_color.darkened(0.2))
-			base.scale = _fit_scale(Vector3(base_size.x * 1.4, base_size.y * 0.4, base_size.x * 1.4), Vector3(1.0, 0.35, 1.0))
-			base.position = Vector3(0, 0, 0)
-		else:
-			base = MeshInstance3D.new()
-			var base_cyl = CylinderMesh.new()
-			base_cyl.top_radius = base_size.x * 0.7
-			base_cyl.bottom_radius = base_size.x * 0.8
-			base_cyl.height = base_size.y * 0.4
-			base.mesh = base_cyl
-			var base_mat = StandardMaterial3D.new()
-			base_mat.albedo_color = base_color.darkened(0.2)
-			base.material_override = base_mat
-			base.position = Vector3(0, base_cyl.height / 2.0, 0)
-		parent_node.add_child(base)
-		var base_h = base_size.y * 0.4
-
-		# Tiny focal crystal/housing
-		var focal_mesh = _part("focal_lens")
-		var focal: MeshInstance3D
-		if focal_mesh:
-			focal = _mesh_inst(focal_mesh, Color.LIGHT_CORAL, Color.RED, 1.0)
-			focal.scale = _fit_scale(Vector3(0.24, 0.24, 0.24), Vector3(1.0, 0.8, 1.0))
-		else:
-			focal = MeshInstance3D.new()
-			var focal_mesh2 = SphereMesh.new()
-			focal_mesh2.radius = 0.12
-			focal_mesh2.height = 0.24
-			focal.mesh = focal_mesh2
-			var focal_mat = StandardMaterial3D.new()
-			focal_mat.albedo_color = Color.LIGHT_CORAL
-			focal_mat.emission_enabled = true
-			focal_mat.emission = Color.RED
-			focal.material_override = focal_mat
-		focal.position = Vector3(0, base_h + 0.05, -0.05)
-		parent_node.add_child(focal)
-
-	elif type_id == "flak_cannon":
-		var base_mesh = _part("flak_breech")
-		var base: MeshInstance3D
-		if base_mesh:
-			base = _mesh_inst(base_mesh, base_color.darkened(0.3))
-			base.scale = _fit_scale(Vector3(base_size.x, base_size.y * 0.5, base_size.z * 0.6), Vector3(0.5, 0.32, 0.4))
-			base.position = Vector3(0, 0, 0)
-		else:
-			base = MeshInstance3D.new()
-			var base_box = BoxMesh.new()
-			base_box.size = Vector3(base_size.x, base_size.y * 0.5, base_size.z * 0.6)
-			base.mesh = base_box
-			var base_mat = StandardMaterial3D.new()
-			base_mat.albedo_color = base_color.darkened(0.3)
-			base.material_override = base_mat
-			base.position = Vector3(0, base_box.size.y / 2.0, 0)
-		parent_node.add_child(base)
-		var base_h = base_size.y * 0.5
-
-		# Heavy flak barrel with massive muzzle brake cylinder
-		var barrel_mesh = _part("barrel_standard")
+		# 3. 6-BARREL ROTARY GATLING CLUSTER (ciws_barrel.glb)
+		var barrel_mesh = _part("ciws_barrel")
 		var barrel: MeshInstance3D
-		var barrel_len = base_size.z * 0.7
+		var barrel_z = -0.25 * radar_dish
 		if barrel_mesh:
-			barrel = _mesh_inst(barrel_mesh, Color(0.15, 0.15, 0.15))
-			barrel.scale = Vector3(0.9, barrel_len / 1.0, 0.9)
+			barrel = _mesh_inst(barrel_mesh, Color(0.20, 0.22, 0.24))
+			barrel.scale = Vector3(radar_dish, radar_dish, burst_length)
+			barrel.position = Vector3(0, trunnion_y, barrel_z)
 		else:
 			barrel = MeshInstance3D.new()
-			var barrel_cyl = CylinderMesh.new()
-			barrel_cyl.top_radius = 0.09
-			barrel_cyl.bottom_radius = 0.09
-			barrel_cyl.height = barrel_len
-			barrel.mesh = barrel_cyl
-			var barrel_mat = StandardMaterial3D.new()
-			barrel_mat.albedo_color = Color(0.15, 0.15, 0.15)
-			barrel.material_override = barrel_mat
-		barrel.position = Vector3(0, base_h + 0.1, -base_size.z * 0.2)
-		barrel.rotation = Vector3(PI / 2, 0, 0)
+			var b_cyl = CylinderMesh.new()
+			b_cyl.top_radius = 0.08 * radar_dish
+			b_cyl.bottom_radius = 0.08 * radar_dish
+			b_cyl.height = 0.85 * burst_length
+			barrel.mesh = b_cyl
+			var b_mat = StandardMaterial3D.new()
+			b_mat.albedo_color = Color(0.20, 0.22, 0.24)
+			barrel.material_override = b_mat
+			barrel.position = Vector3(0, trunnion_y, barrel_z - 0.42 * burst_length)
+			barrel.rotation = Vector3(PI / 2, 0, 0)
 		parent_node.add_child(barrel)
 
-		var brake_mesh = _part("muzzle_brake")
-		var brake: MeshInstance3D
-		if brake_mesh:
-			brake = _mesh_inst(brake_mesh, Color.DARK_GRAY)
-			brake.scale = _fit_scale(Vector3(0.3, 0.15, 0.3), Vector3(1.0, 0.5, 1.0))
+	elif type_id in ["pd_laser", "point_defense_laser"]:
+		var cooling_jacket = tweaks.get("cooling_jacket", 1.0)
+		var tracking_speed = tweaks.get("tracking_speed", 1.0)
+
+		# 1. GIMBAL MOUNT (pd_laser_mount.glb)
+		var mount_mesh = _part("pd_laser_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
+		var mount: MeshInstance3D
+		if mount_mesh:
+			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+			mount.scale = Vector3(tracking_speed, 1.0, tracking_speed)
+			mount.position = Vector3(0, 0, 0)
 		else:
-			brake = MeshInstance3D.new()
-			var brake_cyl = CylinderMesh.new()
-			brake_cyl.top_radius = 0.15
-			brake_cyl.bottom_radius = 0.15
-			brake_cyl.height = 0.15
-			brake.mesh = brake_cyl
-			var brake_mat = StandardMaterial3D.new()
-			brake_mat.albedo_color = Color.DARK_GRAY
-			brake.material_override = brake_mat
-		brake.position = Vector3(0, base_h + 0.1, -base_size.z * 0.55)
-		brake.rotation = Vector3(PI / 2, 0, 0)
-		parent_node.add_child(brake)
+			mount = MeshInstance3D.new()
+			var m_box = BoxMesh.new()
+			m_box.size = Vector3(0.32 * tracking_speed, 0.14, 0.32 * tracking_speed)
+			mount.mesh = m_box
+			var m_mat = StandardMaterial3D.new()
+			m_mat.albedo_color = base_color.darkened(0.2)
+			mount.material_override = m_mat
+			mount.position = Vector3(0, 0.07, 0)
+		parent_node.add_child(mount)
+
+		# 2. DIODE RECEIVER HOUSING (pd_laser_housing.glb)
+		var trunnion_y = 0.20 * tracking_speed
+		var housing_mesh = _part("pd_laser_housing")
+		var housing: MeshInstance3D
+		if housing_mesh:
+			housing = _mesh_inst(housing_mesh, Color(0.24, 0.28, 0.30))
+			housing.scale = Vector3(cooling_jacket, cooling_jacket, cooling_jacket)
+			housing.position = Vector3(0, trunnion_y, 0)
+		else:
+			housing = MeshInstance3D.new()
+			var h_box = BoxMesh.new()
+			h_box.size = Vector3(0.18 * cooling_jacket, 0.18, 0.32 * cooling_jacket)
+			housing.mesh = h_box
+			var h_mat = StandardMaterial3D.new()
+			h_mat.albedo_color = Color(0.24, 0.28, 0.30)
+			housing.material_override = h_mat
+			housing.position = Vector3(0, trunnion_y, -0.16 * cooling_jacket)
+		parent_node.add_child(housing)
+
+		# 3. TWIN LENS EMITTERS (pd_laser_lens.glb)
+		var lens_mesh = _part("pd_laser_lens")
+		var lens: MeshInstance3D
+		var lens_z = -0.16 * cooling_jacket
+		if lens_mesh:
+			lens = _mesh_inst(lens_mesh, Color.CORAL)
+			lens.scale = Vector3(cooling_jacket, cooling_jacket, cooling_jacket)
+			lens.position = Vector3(0, trunnion_y, lens_z)
+		else:
+			lens = MeshInstance3D.new()
+			var l_cyl = CylinderMesh.new()
+			l_cyl.top_radius = 0.04 * cooling_jacket
+			l_cyl.bottom_radius = 0.04 * cooling_jacket
+			l_cyl.height = 0.28 * tracking_speed
+			lens.mesh = l_cyl
+			var l_mat = StandardMaterial3D.new()
+			l_mat.albedo_color = Color.CORAL
+			lens.material_override = l_mat
+			lens.position = Vector3(0, trunnion_y, lens_z - 0.14)
+			lens.rotation = Vector3(PI / 2, 0, 0)
+		parent_node.add_child(lens)
+
+	elif type_id in ["flak_cannon", "flak_battery"]:
+		var fuse_setting = tweaks.get("fuse_setting", 1.0)
+		var burst_size = tweaks.get("burst_size", 1.0)
+		var barrel_count = int(tweaks.get("barrel_count", 2.0))
+
+		# 1. MOUNT (flak_cannon_mount.glb)
+		var mount_mesh = _part("flak_cannon_mount")
+		if not mount_mesh:
+			mount_mesh = _part("pintle_mount")
+		var mount: MeshInstance3D
+		if mount_mesh:
+			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+			mount.scale = Vector3(fuse_setting, 1.0, fuse_setting)
+			mount.position = Vector3(0, 0, 0)
+		else:
+			mount = MeshInstance3D.new()
+			var m_box = BoxMesh.new()
+			m_box.size = Vector3(0.52 * fuse_setting, 0.16, 0.52 * fuse_setting)
+			mount.mesh = m_box
+			var m_mat = StandardMaterial3D.new()
+			m_mat.albedo_color = base_color.darkened(0.2)
+			mount.material_override = m_mat
+			mount.position = Vector3(0, 0.08, 0)
+		parent_node.add_child(mount)
+
+		# Entire barrel group tilts up ~45° for the anti-air role,
+		# pivoting at the trunnion so housing stays above the hull.
+		var trunnion_y = 0.28
+		var barrel_group = Node3D.new()
+		barrel_group.position = Vector3(0, trunnion_y, 0)
+		barrel_group.rotation.x = deg_to_rad(45.0)
+		parent_node.add_child(barrel_group)
+
+		# 2. BREECH BLOCK & RECUPERATOR (flak_cannon_housing.glb)
+		var housing_mesh = _part("flak_cannon_housing")
+		var housing: MeshInstance3D
+		if housing_mesh:
+			housing = _mesh_inst(housing_mesh, Color(0.24, 0.25, 0.22))
+			housing.scale = Vector3(fuse_setting, fuse_setting, burst_size)
+			housing.position = Vector3(0, 0.08 * fuse_setting, 0.10 * burst_size)
+		else:
+			housing = MeshInstance3D.new()
+			var h_box = BoxMesh.new()
+			h_box.size = Vector3(0.34 * fuse_setting, 0.32, 0.50 * burst_size)
+			housing.mesh = h_box
+			var h_mat = StandardMaterial3D.new()
+			h_mat.albedo_color = Color(0.24, 0.25, 0.22)
+			housing.material_override = h_mat
+			housing.position = Vector3(0, 0.05 * fuse_setting, -0.28 * burst_size)
+		barrel_group.add_child(housing)
+
+		# 3. CLUSTERED HEAVY BARRELS (flak_cannon_barrel.glb)
+		var barrel_glb_y = 0.043 * fuse_setting
+		var barrel_proc_y = 0.16 * fuse_setting
+		for i in range(barrel_count):
+			var barrel_mesh = _part("flak_cannon_barrel")
+			var barrel: MeshInstance3D
+			var bx = 0.0
+			var by = 0.0
+			match barrel_count:
+				2:
+					bx = (i - 0.5) * 0.20 * fuse_setting
+				3:
+					var angle = (float(i) / 3.0) * TAU - PI / 2.0
+					bx = cos(angle) * 0.14 * fuse_setting
+					by = sin(angle) * 0.14 * fuse_setting
+				4:
+					var col = i % 2
+					var row = floor(float(i) / 2.0)
+					bx = (col - 0.5) * 0.20 * fuse_setting
+					by = (row - 0.5) * 0.20 * fuse_setting
+			if barrel_mesh:
+				barrel = _mesh_inst(barrel_mesh, Color(0.18, 0.18, 0.18))
+				barrel.scale = Vector3(1.0, 1.0, 1.0)
+				barrel.position = Vector3(bx, by, 0.0)
+				housing.add_child(barrel)
+			else:
+				barrel = MeshInstance3D.new()
+				var b_cyl = CylinderMesh.new()
+				b_cyl.top_radius = 0.09 * fuse_setting
+				b_cyl.bottom_radius = 0.09 * fuse_setting
+				b_cyl.height = 1.10 * burst_size
+				barrel.mesh = b_cyl
+				var b_mat = StandardMaterial3D.new()
+				b_mat.albedo_color = Color(0.18, 0.18, 0.18)
+				barrel.material_override = b_mat
+				barrel.position = Vector3(bx, barrel_proc_y + by, -1.05 * burst_size)
+				barrel.rotation = Vector3(PI / 2, 0, 0)
+				barrel_group.add_child(barrel)
 
 	elif type_id == "repair_array":
 		# Base plate
@@ -2318,17 +2714,19 @@ const MONOLITHIC_TWEAK_AXES := {
 	"artillery": {"caliber": Vector3(1, 1, 0), "barrel_length": Vector3(0, 0, 1)},
 	"guided_missile": {"seeker_size": Vector3(1, 1, 0), "engine_length": Vector3(0, 0, 1)},
 	"flamethrower": {"nozzle_width": Vector3(1, 1, 0), "pressure_valve": Vector3(1, 1, 1)},
-	"heavy_laser": {"lens_aperture": Vector3(1, 1, 0)},
-	"plasma_lobber": {"containment": Vector3(1, 1, 1)},
-	"ciws": {"radar_dish": Vector3(1, 1, 1)},
-	"pd_laser": {"cooling_jacket": Vector3(1, 1, 1)},
-	"flak_cannon": {"fuse_setting": Vector3(1, 1, 1)},
+	"heavy_laser": {"lens_aperture": Vector3(1, 1, 0), "focal_length": Vector3(0, 0, 1)},
+	"plasma_lobber": {"containment": Vector3(1, 1, 1), "charge_rate": Vector3(0, 0, 1)},
+	"ciws": {"radar_dish": Vector3(1, 1, 1), "burst_length": Vector3(0, 0, 1)},
+	"pd_laser": {"cooling_jacket": Vector3(1, 1, 1), "tracking_speed": Vector3(1, 0, 0)},
+	"flak_cannon": {"barrel_count": Vector3(1, 0, 0), "fuse_setting": Vector3(1, 1, 1), "burst_size": Vector3(0, 0, 1)},
 	"resource_harvester": {"extractor_size": Vector3(1, 1, 1)},
 	"sensor_suite": {"mast_height": Vector3(0, 1, 0)},
 	"logistics_tank": {"tank_capacity": Vector3(1, 1, 1)},
-	"cluster_dispenser": {"dispersion": Vector3(1, 0, 1)},
+	"cluster_dispenser": {"dispersion": Vector3(1, 0, 1), "payload_size": Vector3(1, 1, 1)},
 	"mortar_array": {"tube_count": Vector3(1, 0, 1)},
-	"missile_pod": {"grid_size": Vector3(1, 0, 1)},
+	"missile_pod": {"grid_size": Vector3(1, 0, 1), "seeker_size": Vector3(1, 1, 0), "engine_length": Vector3(0, 0, 1)},
+	"tesla_coil": {"caliber": Vector3(1, 1, 1), "arc_frequency": Vector3(0, 0, 1), "surge_capacity": Vector3(0, 1, 1)},
+	"ion_cannon": {"beam_width": Vector3(1, 1, 0), "ion_density": Vector3(0, 0, 1)},
 }
 
 # Per-axis multiplier for a monolithic mesh, expressed in MESH-local axes.
@@ -2363,47 +2761,8 @@ static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: D
 	if children.is_empty(): return
 
 	match type_id:
-		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile":
+		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery":
 			return
-		"cluster_dispenser":
-			# Was entirely absent from this switch - the "Dispersion Matrix
-			# Size" slider changed the stored value but affected nothing:
-			# no visual, and (until module_data.gd's whitelist fix) no stat
-			# either. Scale the dispenser body's footprint to at least give
-			# it a visible, physically-sensible effect.
-			var dispersion = tweaks.get("dispersion", 1.0)
-			children[0].scale = Vector3(dispersion, 1.0, dispersion)
-		"dual_stage_missile":
-			if children.size() > 1:
-				var payload = tweaks.get("payload_size", 1.0)
-				children[1].scale = Vector3(payload, payload, payload)
-		"flamethrower":
-			var nozzle = tweaks.get("nozzle_width", 1.0)
-			var valve = tweaks.get("pressure_valve", 1.0)
-			if children.size() > 1:
-				children[1].scale = Vector3(nozzle, 1.0, nozzle)
-			if children.size() > 2:
-				children[2].scale = Vector3(valve, valve, valve)
-		"heavy_laser":
-			var lens = tweaks.get("lens_aperture", 1.0)
-			for i in range(1, children.size()):
-				children[i].scale = Vector3(lens, 1.0, lens)
-		"plasma_lobber":
-			if children.size() > 1:
-				var cont = tweaks.get("containment", 1.0)
-				children[1].scale = Vector3(cont, cont, cont)
-		"ciws":
-			if children.size() > 2:
-				var dish = tweaks.get("radar_dish", 1.0)
-				children[2].scale = Vector3(dish, dish, dish)
-		"pd_laser":
-			if children.size() > 1:
-				var cooling = tweaks.get("cooling_jacket", 1.0)
-				children[1].scale = Vector3(cooling, cooling, cooling)
-		"flak_cannon":
-			if children.size() > 2:
-				var fuse = tweaks.get("fuse_setting", 1.0)
-				children[2].scale = Vector3(fuse, fuse, fuse)
 		"resource_harvester":
 			if children.size() > 1:
 				var ext = tweaks.get("extractor_size", 1.0)
