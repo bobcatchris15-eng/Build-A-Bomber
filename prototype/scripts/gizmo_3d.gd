@@ -292,8 +292,6 @@ func get_tweak_for_axis(type_id: String, axis: Vector3) -> String:
 				return "extractor_size"
 			"sensor_suite":
 				return "mast_height"
-			"logistics_tank":
-				return "tank_capacity"
 			"mortar_array":
 				return "tube_count"
 			"cluster_dispenser":
@@ -306,6 +304,8 @@ func get_tweak_for_axis(type_id: String, axis: Vector3) -> String:
 				return "barrel_length"
 			"guided_missile":
 				return "engine_length"
+			"missile_pod":
+				return "motor_length"
 			"flamethrower":
 				return "pressure_valve"
 			"resource_harvester":

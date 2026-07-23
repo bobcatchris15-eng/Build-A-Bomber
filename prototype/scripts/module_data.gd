@@ -36,7 +36,7 @@ func get_weight() -> float:
 	
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "tank_capacity", "dispersion", "elevation", "fuse_setting"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				weight *= val
 		elif tweak_name == "multi_barrel" and val == true:
@@ -80,7 +80,7 @@ func get_cost() -> Vector2i:
 	# after an earlier pass fixed the weight/traverse side.
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "tank_capacity", "dispersion", "elevation", "fuse_setting"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				m = int(m * val)
 				c = int(c * val)
@@ -147,7 +147,7 @@ func get_dps() -> float:
 	
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "rail_length", "rod_thickness", "payload_size", "pressure_valve", "lens_aperture", "cooling_jacket", "extractor_size"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				dps *= val
 		elif tweak_name == "multi_barrel" and val == true:
