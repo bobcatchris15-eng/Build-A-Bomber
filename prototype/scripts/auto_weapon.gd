@@ -590,13 +590,11 @@ func _recalculate_low_hp_dps_bonus():
 func _physics_process(delta):
 	# Spin radar mast dish
 	if type_id == "sensor_suite":
-		var dish = get_node_or_null("RadarDish")
+		var dish = get_node_or_null("sensor_suite_dish")
+		if not dish:
+			dish = get_node_or_null("RadarDish")
 		if dish:
 			dish.rotate_y(delta * 2.5)
-		return
-		
-	# Ignore support modules in tracking (except harvester and repair welder)
-	if type_id in ["logistics_tank"]:
 		return
 
 	time_since_last_shot += delta
@@ -1169,75 +1167,130 @@ func _fire_drone_swarm():
 		drone.team = my_team
 
 func _fire_cluster_dispenser():
-	var canister = MeshInstance3D.new()
-	var box = BoxMesh.new()
-	box.size = Vector3(0.2, 0.2, 0.4)
-	canister.mesh = box
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.CHOCOLATE
-	mat.emission_enabled = true
-	mat.emission = Color.ORANGE_RED
-	canister.material_override = mat
-	_effects_parent().add_child(canister)
-	
-	var start = global_position
-	var end = target.global_position
-	canister.global_position = start
-	canister.look_at(end, Vector3.UP)
-	
-	var mid = start.lerp(end, 0.4)
-	var tween = create_tween()
-	tween.tween_property(canister, "global_position", mid, 0.25)
-	tween.finished.connect(func():
-		if is_instance_valid(canister): canister.queue_free()
-		
-		for i in range(5):
-			var sub = MeshInstance3D.new()
-			var sph = SphereMesh.new()
-			sph.radius = 0.08
-			sph.height = 0.16
-			sub.mesh = sph
-			var smat = StandardMaterial3D.new()
-			smat.albedo_color = Color.CHOCOLATE
-			smat.emission_enabled = true
-			smat.emission = Color.ORANGE
-			sub.material_override = smat
-			_effects_parent().add_child(sub)
-			sub.global_position = mid
-			
-			var scatter_dest = end + Vector3(randf_range(-2.0, 2.0), 0.0, randf_range(-2.0, 2.0))
-			var st = create_tween()
-			st.tween_property(sub, "global_position", scatter_dest, 0.2)
-			st.finished.connect(func():
-				if is_instance_valid(sub): sub.queue_free()
-				_deal_aoe_damage(scatter_dest, 3.0, (dps * fire_rate) / 5.0)
-				_spawn_explosion_visual(scatter_dest, 0.3, Color.CHOCOLATE)
+	# Housing recoil animation
+	for c in get_children():
+		if c is MeshInstance3D:
+			var orig_pos = c.position
+			var rec_tween = create_tween()
+			rec_tween.tween_property(c, "position", orig_pos + Vector3(0, 0, 0.08), 0.05)
+			rec_tween.tween_property(c, "position", orig_pos, 0.15)
+			break
+
+	var dispersion = 1.0
+	var payload_size = 1.0
+	var t_count = 2
+	if has_meta("module_data"):
+		var data = get_meta("module_data")
+		dispersion = data.tweaks.get("dispersion", 1.0)
+		payload_size = data.tweaks.get("payload_size", 1.0)
+		t_count = int(data.tweaks.get("tube_count", 2.0))
+
+	var submunitions_per_canister = 3
+	var total_bomblets = t_count * submunitions_per_canister
+	var per_bomblet_damage = (dps * fire_rate) / float(total_bomblets)
+	var scatter_radius = 3.0 * dispersion
+
+	for c_idx in range(t_count):
+		get_tree().create_timer(c_idx * 0.10).timeout.connect(func():
+			if not is_instance_valid(target): return
+			var canister = MeshInstance3D.new()
+			var can_scene = load("res://assets/models/parts/cluster_dispenser_canister.glb")
+			if can_scene:
+				var inst = can_scene.instantiate()
+				for child in inst.get_children():
+					if child is MeshInstance3D:
+						canister.mesh = child.mesh
+						break
+			else:
+				var box = BoxMesh.new()
+				box.size = Vector3(0.12 * payload_size, 0.12 * payload_size, 0.24 * payload_size)
+				canister.mesh = box
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = Color(0.70, 0.40, 0.20)
+			mat.emission_enabled = true
+			mat.emission = Color.ORANGE_RED
+			canister.material_override = mat
+			_effects_parent().add_child(canister)
+
+			var start = global_position + Vector3(randf_range(-0.1, 0.1), 0.3, randf_range(-0.1, 0.1))
+			var end = target.global_position
+			canister.global_position = start
+			canister.scale = Vector3(payload_size, payload_size, payload_size)
+			canister.look_at(end, Vector3.UP)
+
+			var mid = start.lerp(end, 0.4) + Vector3(0, 1.5, 0)
+			var tween = create_tween()
+			tween.tween_property(canister, "global_position", mid, 0.25)
+			tween.finished.connect(func():
+				if is_instance_valid(canister): canister.queue_free()
+
+				for i in range(submunitions_per_canister):
+					var sub = MeshInstance3D.new()
+					var sph = SphereMesh.new()
+					sph.radius = 0.06 * payload_size
+					sph.height = 0.12 * payload_size
+					sub.mesh = sph
+					var smat = StandardMaterial3D.new()
+					smat.albedo_color = Color.CHOCOLATE
+					smat.emission_enabled = true
+					smat.emission = Color.ORANGE
+					sub.material_override = smat
+					_effects_parent().add_child(sub)
+					sub.global_position = mid
+
+					var scatter_dest = end + Vector3(randf_range(-scatter_radius, scatter_radius), 0.0, randf_range(-scatter_radius, scatter_radius))
+					var st = create_tween()
+					st.tween_property(sub, "global_position", scatter_dest, 0.2)
+					st.finished.connect(func():
+						if is_instance_valid(sub): sub.queue_free()
+						_deal_aoe_damage(scatter_dest, 2.5 * payload_size, per_bomblet_damage)
+						_spawn_explosion_visual(scatter_dest, 0.3 * payload_size, Color.CHOCOLATE)
+					)
 			)
-	)
+		)
 
 func _fire_flame_spray():
+	var n_width = 1.0
+	var p_valve = 1.0
+	if has_meta("module_data"):
+		var data = get_meta("module_data")
+		n_width = data.tweaks.get("nozzle_width", 1.0)
+		p_valve = data.tweaks.get("pressure_valve", 1.0)
+
+	# Body/Nozzle recoil vibration
+	for c in get_children():
+		if c is MeshInstance3D:
+			var orig_pos = c.position
+			var rec_tween = create_tween()
+			rec_tween.tween_property(c, "position", orig_pos + Vector3(0, 0, 0.04 * p_valve), 0.04)
+			rec_tween.tween_property(c, "position", orig_pos, 0.12)
+			break
+
 	for i in range(6):
 		var flame = MeshInstance3D.new()
 		var sphere = SphereMesh.new()
 		flame.mesh = sphere
-		flame.scale = Vector3(0.15, 0.15, 0.15)
+		var init_scale = 0.15 * n_width
+		var peak_scale = 0.45 * n_width
+		flame.scale = Vector3(init_scale, init_scale, init_scale)
 		var mat = StandardMaterial3D.new()
-		mat.albedo_color = Color(randf_range(0.8, 1.0), randf_range(0.2, 0.5), 0.0)
+		mat.albedo_color = Color(randf_range(0.85, 1.0), randf_range(0.2, 0.5), 0.0)
 		mat.emission_enabled = true
 		mat.emission = mat.albedo_color
 		flame.material_override = mat
 		_effects_parent().add_child(flame)
-		
-		flame.global_position = global_position + Vector3(randf_range(-0.1, 0.1), 0.4, randf_range(-0.1, 0.1))
-		var spread = Vector3(randf_range(-1.2, 1.2), randf_range(-0.2, 0.5), randf_range(-1.2, 1.2))
+
+		flame.global_position = global_position + Vector3(randf_range(-0.1, 0.1), 0.35, randf_range(-0.1, 0.1))
+		var spread = Vector3(randf_range(-1.2, 1.2) * n_width, randf_range(-0.2, 0.5) * n_width, randf_range(-1.2, 1.2) * n_width)
 		var dest = target.global_position + spread
-		
+
+		var flight_dur = 0.35 * p_valve
 		var tween = create_tween()
-		tween.tween_property(flame, "global_position", dest, 0.35)
-		tween.parallel().tween_property(flame, "scale", Vector3(0.4, 0.4, 0.4), 0.15)
-		tween.chain().tween_property(flame, "scale", Vector3.ZERO, 0.2)
+		tween.tween_property(flame, "global_position", dest, flight_dur)
+		tween.parallel().tween_property(flame, "scale", Vector3(peak_scale, peak_scale, peak_scale), flight_dur * 0.4)
+		tween.chain().tween_property(flame, "scale", Vector3.ZERO, flight_dur * 0.6)
 		tween.finished.connect(func():
-			flame.queue_free()
+			if is_instance_valid(flame): flame.queue_free()
 			if is_instance_valid(target) and i == 0:
 				_deal_weapon_damage(target, dps * fire_rate)
 		)

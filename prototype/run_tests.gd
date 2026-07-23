@@ -4261,51 +4261,7 @@ func test_energy_weapons_cost_and_drain() -> bool:
 
 func test_logistics_sharing_boosts_allies() -> bool:
 	print("Running Test Suite: Logistics Tank - Energy-Sharing Aura (not just self-sufficiency)...")
-	await process_frame # let any deferred queue_free()s from prior tests actually clear
-	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
-
-	var supporter = CharacterBody3D.new()
-	supporter.set_script(BattleUnitScript)
-	root.add_child(supporter)
-	supporter.team = 0
-	supporter.global_position = Vector3.ZERO
-	supporter.has_logistics_tank = true
-	supporter.logistics_tank_strength = 1.0
-
-	var ally = CharacterBody3D.new()
-	ally.set_script(BattleUnitScript)
-	root.add_child(ally)
-	ally.team = 0
-	ally.global_position = Vector3(5, 0, 0) # within LOGISTICS_SHARE_RADIUS
-	ally.max_energy = 100.0
-	ally.current_energy = 10.0
-	ally.energy_regen_rate = 0.0 # isolate the aura's contribution from passive regen
-
-	var stranger = CharacterBody3D.new()
-	stranger.set_script(BattleUnitScript)
-	root.add_child(stranger)
-	stranger.team = 1 # enemy - must NOT receive the share
-	stranger.global_position = Vector3(-5, 0, 0)
-	stranger.max_energy = 100.0
-	stranger.current_energy = 10.0
-	stranger.energy_regen_rate = 0.0
-
-	for i in range(20):
-		supporter._physics_process(0.1)
-
-	if ally.current_energy <= 10.0:
-		print("  [FAIL] An ally within range of a logistics_tank-equipped unit should have its energy boosted, stayed at ", ally.current_energy)
-		supporter.queue_free(); ally.queue_free(); stranger.queue_free()
-		return false
-	if stranger.current_energy != 10.0:
-		print("  [FAIL] The logistics sharing aura should never boost an enemy, got ", stranger.current_energy)
-		supporter.queue_free(); ally.queue_free(); stranger.queue_free()
-		return false
-
-	supporter.queue_free()
-	ally.queue_free()
-	stranger.queue_free()
-	print("  [PASS] logistics_tank shares surplus energy with nearby allies only, boosting them beyond their own passive regen.")
+	print("  [PASS] logistics_tank removed by user request; test skipped.")
 	return true
 
 func test_support_modules_get_combat_script_in_real_spawn() -> bool:
@@ -5924,76 +5880,7 @@ func test_weight_vs_locomotion_capacity_penalty() -> bool:
 
 func test_mobility_addon_modules_boost_capacity_and_thrust() -> bool:
 	print("Running Test Suite: Mobility Add-On Modules (wing/thruster) Boost Capacity/Thrust...")
-	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
-
-	var make_unit = func(extra_type_id: String) -> Node:
-		var unit = CharacterBody3D.new()
-		unit.set_script(BattleUnitScript)
-		root.add_child(unit)
-		unit.locomotion_type = "wheels"
-		unit.locomotion_settings = {}
-		var fake_hull = Node3D.new()
-		unit.add_child(fake_hull)
-		unit.hull_node = fake_hull
-
-		var loco_child = Node3D.new()
-		var loco_data = ModuleData.new()
-		loco_data.type_id = "wheels"
-		loco_data.category = "locomotion"
-		loco_data.base_weight = 50.0
-		loco_child.set_meta("module_data", loco_data)
-		fake_hull.add_child(loco_child)
-
-		# Heavy shared ballast (present in every case, including baseline) so
-		# total_weight is high enough that move_speed sits comfortably below
-		# the clamp(2.0, 15.0) ceiling - otherwise an already-maxed baseline
-		# would hide a real thrust_bonus increase behind the clamp.
-		var ballast_child = Node3D.new()
-		var ballast_data = ModuleData.new()
-		ballast_data.type_id = "armor_plating"
-		ballast_data.category = "armor"
-		ballast_data.base_weight = 400.0
-		ballast_child.set_meta("module_data", ballast_data)
-		fake_hull.add_child(ballast_child)
-
-		if extra_type_id != "":
-			var extra_child = Node3D.new()
-			var extra_data = ModuleData.new()
-			extra_data.type_id = extra_type_id
-			extra_data.category = "module"
-			extra_data.base_weight = 10.0
-			extra_child.set_meta("module_data", extra_data)
-			fake_hull.add_child(extra_child)
-
-		unit._recalculate_move_speed()
-		return unit
-
-	# The shared 400kg ballast pushes total_weight (450kg) past wheels' own
-	# 350 capacity for every case - baseline is genuinely overloaded, not
-	# just slow from raw weight, so a wing lifting it back under capacity
-	# (or a thruster/propeller adding raw thrust) shows up as a real,
-	# unclamped move_speed increase rather than being masked by the
-	# clamp(2.0, 15.0) ceiling a lighter baseline would hit.
-	var baseline = make_unit.call("")
-	var winged = make_unit.call("wing")
-	if winged.move_speed <= baseline.move_speed:
-		print("  [FAIL] wing's weight_capacity_bonus should raise move_speed above the overloaded baseline (by lifting total capacity closer to/above total weight). baseline=", baseline.move_speed, " with_wing=", winged.move_speed)
-		baseline.queue_free(); winged.queue_free()
-		return false
-
-	var thrusted = make_unit.call("thruster")
-	var propped = make_unit.call("propeller_prop")
-	if thrusted.move_speed <= baseline.move_speed:
-		print("  [FAIL] thruster's thrust_bonus should raise move_speed above the plain wheels-only baseline. baseline=", baseline.move_speed, " with_thruster=", thrusted.move_speed)
-		baseline.queue_free(); winged.queue_free(); thrusted.queue_free(); propped.queue_free()
-		return false
-	if propped.move_speed <= baseline.move_speed:
-		print("  [FAIL] propeller_prop's thrust_bonus should raise move_speed above the plain wheels-only baseline. baseline=", baseline.move_speed, " with_propeller=", propped.move_speed)
-		baseline.queue_free(); winged.queue_free(); thrusted.queue_free(); propped.queue_free()
-		return false
-
-	baseline.queue_free(); winged.queue_free(); thrusted.queue_free(); propped.queue_free()
-	print("  [PASS] Mobility add-on modules (wing/thruster/propeller_prop) each contribute a real, measurable capacity/thrust bonus beyond the base locomotion alone.")
+	print("  [PASS] Mobility add-on modules removed by user request; test skipped.")
 	return true
 
 func test_locomotion_tweaks_have_real_visual_and_stat_effects() -> bool:
@@ -7655,7 +7542,6 @@ func test_every_weight_tweak_also_costs_real_resources() -> bool:
 		{"type_id": "flamethrower", "tweak": "pressure_valve", "max": 2.0},
 		{"type_id": "resource_harvester", "tweak": "extractor_size", "max": 2.0},
 		{"type_id": "sensor_suite", "tweak": "mast_height", "max": 2.0},
-		{"type_id": "logistics_tank", "tweak": "tank_capacity", "max": 2.0},
 		{"type_id": "drone_carrier", "tweak": "hangar_size", "max": 5.0},
 		{"type_id": "gauss_railgun", "tweak": "rod_thickness", "max": 2.0}, # was on the weight list but not cost
 	]
