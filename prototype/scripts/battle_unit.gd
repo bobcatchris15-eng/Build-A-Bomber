@@ -461,6 +461,28 @@ func _recalculate_move_speed():
 					var width = locomotion_settings.get("tread_width", locomotion_settings.get("width", 1.0))
 					capacity_contrib = width
 					thrust_contrib = 1.0 + (1.0 - width) * 0.5
+				elif locomotion_type == "hover_engine":
+					# Pad count drives both thrust and capacity like wheels/
+					# rotors; Electron Megavoltage (emv_level) ALSO boosts
+					# capacity on top of that - Chris's ask, "increases the
+					# weight capacity... while requiring more resources to
+					# build" (the cost/weight side is in module_data.gd).
+					var pad_count = float(locomotion_settings.get("pad_count", 4))
+					var emv = float(locomotion_settings.get("emv_level", 1.0))
+					var c = pad_count / 4.0
+					thrust_contrib = c
+					capacity_contrib = c * emv
+				elif locomotion_type == "fixed_wing_engine":
+					# Engine count and turbine compression both drive real
+					# thrust (a bigger/more-compressed turbine core pushes
+					# harder) - unlike hover's emv_level, compression isn't
+					# framed as purely cosmetic, so it earns a capacity bump
+					# too (a physically larger turbine core carries more).
+					var engine_count = float(locomotion_settings.get("engine_count", 2))
+					var compression = float(locomotion_settings.get("turbine_compression", 1.0))
+					var c2 = engine_count / 2.0
+					thrust_contrib = c2 * compression
+					capacity_contrib = c2 * compression
 				motor_thrust += ModuleCatalog.get_thrust_coefficient(data.type_id) * child.scale.x * child.scale.z * thrust_contrib
 				# Weight capacity scales with the size/count/width factor
 				# above (a bigger/wider tread, more legs, or a 6-wheel
@@ -882,6 +904,36 @@ func _physics_process(delta):
 				var pivot = child.get_node_or_null("WingPivot")
 				if pivot:
 					pivot.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 8.0) * 0.35
+			elif child_type_id == "hover_engine":
+				# Outer ring stays fixed/horizontal; the middle ring spins
+				# around X, the inner ring around Y (Chris's ask) - same
+				# by-name-pivot pattern as helicopter_rotors' "RotorBlades".
+				var mid_ring = child.get_node_or_null("HoverRingMid")
+				if mid_ring:
+					mid_ring.rotate_x(12.0 * delta)
+				var inner_ring = child.get_node_or_null("HoverRingInner")
+				if inner_ring:
+					inner_ring.rotate_y(18.0 * delta)
+			elif child_type_id == "legs":
+				# Simple sine-wave leg swing (Chris's ask: not a full IK
+				# walk cycle) on the "LegSwing" pivot _build_legs() wraps
+				# the thigh/shin/foot/ankle joint in - only while actually
+				# moving, snapping back to the static pose when stopped so
+				# a stationary walker doesn't look like it's jogging in
+				# place. leg_phase (module_placer.gd, alternating per leg
+				# in a checkerboard) staggers legs into a trot instead of
+				# every leg swinging in lockstep. Rotating on X (not Z) -
+				# X swings the leg fore-aft in the Y-Z plane, along the
+				# direction of travel, like an actual walking stride; Z
+				# swung it sideways in the X-Y plane instead, which read as
+				# flapping side-to-side like a bird wing.
+				var swing = child.get_node_or_null("LegRoot/LegSwing")
+				if swing:
+					if velocity.length() > 0.3:
+						var phase = child.get_meta("leg_phase", 0.0)
+						swing.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 6.0 + phase) * 0.5
+					else:
+						swing.rotation.x = 0.0
 			elif child_type_id in ["propeller_prop", "pusher_prop", "naval_propeller", "ship_screw", "paddle_wheel", "buoyant_envelope"]:
 				var prop = child.get_node_or_null("PropBlades")
 				if prop:

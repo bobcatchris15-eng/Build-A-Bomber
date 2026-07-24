@@ -36,20 +36,20 @@ func get_weight() -> float:
 	
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "wheel_size", "tread_width", "blade_length", "leg_length", "pad_size", "nacelle_size", "wingspan", "prop_size", "drum_width", "wheels_per_axle", "foot_size"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "wheel_size", "tread_width", "blade_length", "leg_length", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "prop_size", "drum_width", "wheels_per_axle", "foot_size"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				weight *= val
 		elif tweak_name == "multi_barrel" and val == true:
 			weight *= 2.0
-		elif tweak_name in ["barrel_count", "road_wheel_count"]:
+		elif tweak_name == "barrel_count":
 			weight *= (val / 6.0)
-		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "drum_count", "prop_blades"]:
+		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "drum_count", "prop_blades", "engine_count"]:
 			weight *= (val / 2.0)
 		elif tweak_name in ["grid_size", "num_axles", "blade_count", "rotor_units", "leg_count", "pad_count"]:
 			weight *= (val / 4.0)
 		elif tweak_name == "rib_count":
 			weight *= (val / 3.0)
-		elif tweak_name in ["afterburner", "duct", "skirt", "kort_nozzle", "tail_fins"] and val == true:
+		elif tweak_name in ["afterburner", "duct", "kort_nozzle", "tail_fins"] and val == true:
 			weight *= 1.25
 		elif tweak_name == "launch_catapult":
 			weight *= val
@@ -63,17 +63,17 @@ func get_cost() -> Vector2i:
 
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "wheel_size", "tread_width", "blade_length", "leg_length", "pad_size", "nacelle_size", "wingspan", "prop_size", "drum_width", "wheels_per_axle", "foot_size"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "wheel_size", "tread_width", "blade_length", "leg_length", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "prop_size", "drum_width", "wheels_per_axle", "foot_size"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				m = int(m * val)
 				c = int(c * val)
 		elif tweak_name == "multi_barrel" and val == true:
 			m *= 2
 			c *= 2
-		elif tweak_name in ["barrel_count", "road_wheel_count"]:
+		elif tweak_name == "barrel_count":
 			m = int(m * (val / 6.0))
 			c = int(c * (val / 6.0))
-		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "drum_count", "prop_blades"]:
+		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "drum_count", "prop_blades", "engine_count"]:
 			m = int(m * (val / 2.0))
 			c = int(c * (val / 2.0))
 		elif tweak_name in ["grid_size", "num_axles", "blade_count", "rotor_units", "leg_count", "pad_count"]:
@@ -82,7 +82,7 @@ func get_cost() -> Vector2i:
 		elif tweak_name == "rib_count":
 			m = int(m * (val / 3.0))
 			c = int(c * (val / 3.0))
-		elif tweak_name in ["afterburner", "duct", "skirt", "kort_nozzle", "tail_fins"] and val == true:
+		elif tweak_name in ["afterburner", "duct", "kort_nozzle", "tail_fins"] and val == true:
 			m = int(m * 1.25)
 			c = int(c * 1.25)
 		elif tweak_name == "launch_catapult":

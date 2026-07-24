@@ -51,8 +51,9 @@ const LOCOMOTION_SIZE_KEY := {
 	"wheels": "wheel_size",
 	"tracked_treads": "tread_width",
 	"helicopter_rotors": "blade_length",
-	"legs": "leg_length",
-	"hover_engine": "pad_size",
+	"legs": "knee_height",
+	"hover_engine": "emv_level",
+	"fixed_wing_engine": "turbine_compression",
 }
 
 # Floating Popup Window fields
@@ -184,15 +185,21 @@ var wheels_per_axle_container: HBoxContainer
 var wheels_per_axle_label: Label
 var wheels_per_axle_slider: HSlider
 
-# tracked_treads-only "Road Wheels" tweak (road_wheel_count, 3-8): same
-# dynamic-widget pattern as wheels_per_axle above - no scene node for it,
-# built once and reparented into popup_tweaks_container. tracked_treads is
-# fixed at 2 instances (no count-slider concept), so this is purely a
-# per-instance geometry tweak - always routed through
-# update_locomotion_geometry_tweak(), never a respawn.
-var road_wheel_count_container: HBoxContainer
-var road_wheel_count_label: Label
-var road_wheel_count_slider: HSlider
+# helicopter_rotors-only "Blade Count" tweak (blade_count, 2-8): same
+# dynamic-widget pattern as wheels_per_axle above. Pure per-instance
+# geometry (the ring in _build_helicopter_rotors()), no effect on collider
+# or instance count, so it's always routed through
+# update_locomotion_geometry_tweak(), never a respawn - same as tread_width.
+var blade_count_container: HBoxContainer
+var blade_count_label: Label
+var blade_count_slider: HSlider
+
+# helicopter_rotors-only "Ducted Shroud" tweak (duct, bool): same dynamic-
+# widget pattern as above. Pure geometry (spawns/removes the duct ring in
+# _build_helicopter_rotors()), routed through update_locomotion_geometry_
+# tweak() like blade_count, not a respawn.
+var duct_container: HBoxContainer
+var duct_checkbox: CheckButton
 
 func _ready():
 	add_to_group("stat_ui")
@@ -261,30 +268,44 @@ func _ready():
 	wheels_per_axle_slider.drag_started.connect(_push_undo)
 	wheels_per_axle_container.visible = false
 
-	# Dynamically build the tracked_treads-only "Road Wheels" slider.
-	road_wheel_count_container = HBoxContainer.new()
-	road_wheel_count_container.custom_minimum_size = Vector2(0, 24)
-	road_wheel_count_container.add_theme_constant_override("separation", 4)
-	locomotion_tweaks.add_child(road_wheel_count_container)
-	locomotion_tweaks.move_child(road_wheel_count_container, wheels_per_axle_container.get_index() + 1)
+	# Dynamically build the helicopter_rotors-only "Blade Count" slider.
+	blade_count_container = HBoxContainer.new()
+	blade_count_container.custom_minimum_size = Vector2(0, 24)
+	blade_count_container.add_theme_constant_override("separation", 4)
+	locomotion_tweaks.add_child(blade_count_container)
+	locomotion_tweaks.move_child(blade_count_container, wheels_per_axle_container.get_index() + 1)
 
-	road_wheel_count_label = Label.new()
-	road_wheel_count_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	road_wheel_count_label.text = "Road Wheels:"
-	road_wheel_count_container.add_child(road_wheel_count_label)
+	blade_count_label = Label.new()
+	blade_count_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	blade_count_label.text = "Blade Count:"
+	blade_count_container.add_child(blade_count_label)
 
-	road_wheel_count_slider = HSlider.new()
-	road_wheel_count_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	road_wheel_count_slider.size_flags_stretch_ratio = 2.0
-	road_wheel_count_slider.min_value = 3.0
-	road_wheel_count_slider.max_value = 8.0
-	road_wheel_count_slider.step = 1.0
-	road_wheel_count_slider.value = 5.0
-	road_wheel_count_container.add_child(road_wheel_count_slider)
-	UITheme.style_slider(road_wheel_count_slider)
-	road_wheel_count_slider.value_changed.connect(_on_road_wheel_count_changed)
-	road_wheel_count_slider.drag_started.connect(_push_undo)
-	road_wheel_count_container.visible = false
+	blade_count_slider = HSlider.new()
+	blade_count_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	blade_count_slider.size_flags_stretch_ratio = 2.0
+	blade_count_slider.min_value = 2.0
+	blade_count_slider.max_value = 8.0
+	blade_count_slider.step = 1.0
+	blade_count_slider.value = 4.0
+	blade_count_container.add_child(blade_count_slider)
+	UITheme.style_slider(blade_count_slider)
+	blade_count_slider.value_changed.connect(_on_blade_count_changed)
+	blade_count_slider.drag_started.connect(_push_undo)
+	blade_count_container.visible = false
+
+	# Dynamically build the helicopter_rotors-only "Ducted Shroud" checkbox.
+	duct_container = HBoxContainer.new()
+	duct_container.custom_minimum_size = Vector2(0, 24)
+	duct_container.add_theme_constant_override("separation", 4)
+	locomotion_tweaks.add_child(duct_container)
+	locomotion_tweaks.move_child(duct_container, blade_count_container.get_index() + 1)
+
+	duct_checkbox = CheckButton.new()
+	duct_checkbox.text = "Ducted Shroud"
+	duct_checkbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	duct_container.add_child(duct_checkbox)
+	duct_checkbox.toggled.connect(_on_duct_toggled)
+	duct_container.visible = false
 
 	# Dynamically create Armor Material dropdown
 	armor_mat_label = Label.new()
@@ -453,7 +474,8 @@ func _ready():
 	size_container.reparent(popup_tweaks_container)
 	count_container.reparent(popup_tweaks_container)
 	wheels_per_axle_container.reparent(popup_tweaks_container)
-	road_wheel_count_container.reparent(popup_tweaks_container)
+	blade_count_container.reparent(popup_tweaks_container)
+	duct_container.reparent(popup_tweaks_container)
 	locomotion_tweaks.visible = false
 
 	# Initial sync of armor UI
@@ -772,7 +794,7 @@ func on_module_selected(module: Node3D):
 	# is disposable, generated fresh by _generate_custom_tweaks() each time.
 	if popup_tweaks_container:
 		for child in popup_tweaks_container.get_children():
-			if child == size_container or child == count_container or child == wheels_per_axle_container or child == road_wheel_count_container:
+			if child == size_container or child == count_container or child == wheels_per_axle_container or child == blade_count_container or child == duct_container:
 				continue
 			child.queue_free()
 
@@ -783,7 +805,8 @@ func on_module_selected(module: Node3D):
 	size_container.visible = false
 	count_container.visible = false
 	wheels_per_axle_container.visible = false
-	road_wheel_count_container.visible = false
+	blade_count_container.visible = false
+	duct_container.visible = false
 
 	var root = get_node_or_null("/root/MainLab")
 	var hull = root.get_node_or_null("Hull") if root else null
@@ -831,6 +854,8 @@ func on_module_selected(module: Node3D):
 	is_updating_sliders = true
 	size_container.visible = true
 	count_slider.min_value = 2.0
+	count_slider.max_value = 8.0
+	count_slider.step = 2.0
 
 	if type_id == "wheels":
 		size_label_base = "Wheel Size"
@@ -848,8 +873,6 @@ func on_module_selected(module: Node3D):
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("tread_width", settings.get("width", 1.0))
-		road_wheel_count_container.visible = true
-		road_wheel_count_slider.value = settings.get("road_wheel_count", 5.0)
 	elif type_id == "helicopter_rotors":
 		size_label_base = "Rotor Size"
 		count_container.visible = true
@@ -857,19 +880,36 @@ func on_module_selected(module: Node3D):
 		size_slider.max_value = 2.5
 		size_slider.value = settings.get("size", 1.0)
 		count_slider.value = settings.get("count", 4)
+		blade_count_container.visible = true
+		blade_count_slider.value = settings.get("blade_count", 4.0)
+		duct_container.visible = true
+		duct_checkbox.button_pressed = settings.get("duct", false)
 	elif type_id == "legs":
-		size_label_base = "Leg Length"
+		size_label_base = "Knee Height"
+		count_container.visible = true
+		size_slider.min_value = -0.5
+		size_slider.max_value = 1.5
+		size_slider.value = settings.get("knee_height", 0.375)
+		count_slider.value = settings.get("count", 4)
+	elif type_id == "hover_engine":
+		size_label_base = "Electron Megavoltage"
 		count_container.visible = true
 		size_slider.min_value = 0.5
 		size_slider.max_value = 2.5
-		size_slider.value = settings.get("size", 1.0)
-		count_slider.value = settings.get("count", 4)
-	elif type_id == "hover_engine":
-		size_label_base = "Hover Pad Size"
-		count_container.visible = false
+		size_slider.value = settings.get("emv_level", 1.0)
+		count_slider.min_value = 4.0
+		count_slider.step = 1.0
+		count_slider.value = settings.get("pad_count", 4)
+	elif type_id == "fixed_wing_engine":
+		size_label_base = "Turbine Compression"
+		count_container.visible = true
 		size_slider.min_value = 0.5
-		size_slider.max_value = 2.5
-		size_slider.value = settings.get("size", 1.0)
+		size_slider.max_value = 2.0
+		size_slider.value = settings.get("turbine_compression", 1.0)
+		count_slider.min_value = 2.0
+		count_slider.max_value = 6.0
+		count_slider.step = 1.0
+		count_slider.value = settings.get("engine_count", 2)
 	else:
 		size_container.visible = false
 
@@ -877,14 +917,17 @@ func on_module_selected(module: Node3D):
 	is_updating_sliders = false
 
 func _refresh_locomotion_labels():
-	size_label.text = "%s: %.2fx" % [size_label_base, size_slider.value]
+	if size_label_base == "Knee Height":
+		size_label.text = "%s: %+.2fm" % [size_label_base, size_slider.value]
+	else:
+		size_label.text = "%s: %.2fx" % [size_label_base, size_slider.value]
 	if count_container.visible:
 		count_label.text = "%s: %d" % [count_label_base, int(count_slider.value)]
 	if wheels_per_axle_container.visible:
 		var dually = int(wheels_per_axle_slider.value) >= 2
 		wheels_per_axle_label.text = "Wheels Per Axle: %d%s" % [int(wheels_per_axle_slider.value), " (dually)" if dually else ""]
-	if road_wheel_count_container.visible:
-		road_wheel_count_label.text = "Road Wheels: %d" % int(road_wheel_count_slider.value)
+	if blade_count_container.visible:
+		blade_count_label.text = "Blade Count: %d" % int(blade_count_slider.value)
 
 func _on_size_value_changed(value: float):
 	_refresh_locomotion_labels()
@@ -908,12 +951,19 @@ func _on_wheels_per_axle_changed(value: float):
 	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
 	root.update_locomotion_geometry_tweak("wheels", "wheels_per_axle", int(value))
 
-func _on_road_wheel_count_changed(value: float):
+func _on_blade_count_changed(value: float):
 	_refresh_locomotion_labels()
 	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
 	var root = get_node_or_null("/root/MainLab")
 	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
-	root.update_locomotion_geometry_tweak("tracked_treads", "road_wheel_count", int(value))
+	root.update_locomotion_geometry_tweak("helicopter_rotors", "blade_count", int(value))
+
+func _on_duct_toggled(pressed: bool):
+	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
+	_push_undo()
+	var root = get_node_or_null("/root/MainLab")
+	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
+	root.update_locomotion_geometry_tweak("helicopter_rotors", "duct", pressed)
 
 func _on_loco_drag_started():
 	_loco_slider_dragging = true
@@ -946,22 +996,29 @@ func _apply_tweaks():
 		}
 	elif type_id == "tracked_treads":
 		new_settings = {
-			"tread_width": size_slider.value,
-			"road_wheel_count": int(road_wheel_count_slider.value)
+			"tread_width": size_slider.value
 		}
 	elif type_id == "helicopter_rotors":
 		new_settings = {
 			"size": size_slider.value,
-			"count": int(count_slider.value)
+			"count": int(count_slider.value),
+			"blade_count": int(blade_count_slider.value),
+			"duct": duct_checkbox.button_pressed
 		}
 	elif type_id == "legs":
 		new_settings = {
-			"size": size_slider.value,
+			"knee_height": size_slider.value,
 			"count": int(count_slider.value)
 		}
 	elif type_id == "hover_engine":
 		new_settings = {
-			"size": size_slider.value
+			"emv_level": size_slider.value,
+			"pad_count": int(count_slider.value)
+		}
+	elif type_id == "fixed_wing_engine":
+		new_settings = {
+			"turbine_compression": size_slider.value,
+			"engine_count": int(count_slider.value)
 		}
 
 	if root.has_method("update_locomotion"):

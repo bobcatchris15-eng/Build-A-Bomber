@@ -127,6 +127,32 @@ func _ready():
 				hull.set_meta("armor_thickness", 1.0)
 			update_hull_appearance()
 		
+func _process(delta: float):
+	# Live idle spin for helicopter_rotors blades while designing - the
+	# Design Lab canvas never had this at all (battle_unit.gd/battlefield.gd
+	# spin them in combat/Test Range, but nothing did it here), which read
+	# as "the animation is broken" when the actual issue was that it never
+	# existed on this screen. Same rotate_y(15/sec) on the "RotorBlades"
+	# pivot as the combat paths, so it looks consistent everywhere.
+	if not is_instance_valid(hull): return
+	for child in hull.get_children():
+		if not child.has_meta("module_data"): continue
+		var type_id = child.get_meta("module_data").type_id
+		if type_id == "helicopter_rotors":
+			var rotor = child.get_node_or_null("RotorBlades")
+			if rotor:
+				rotor.rotate_y(15.0 * delta)
+		elif type_id == "hover_engine":
+			# Same idle spin as helicopter_rotors' blades - outer ring stays
+			# fixed/horizontal, middle ring spins around X, inner ring
+			# around Y (Chris's ask).
+			var mid_ring = child.get_node_or_null("HoverRingMid")
+			if mid_ring:
+				mid_ring.rotate_x(12.0 * delta)
+			var inner_ring = child.get_node_or_null("HoverRingInner")
+			if inner_ring:
+				inner_ring.rotate_y(18.0 * delta)
+
 func set_mirror_enabled(enabled: bool):
 	mirror_enabled = enabled
 	_log("Mirror toggled via UI: " + str(mirror_enabled))
@@ -489,7 +515,7 @@ func _place_hull_from_ui(type_id: String):
 
 var default_locomotion_settings = {
 	"wheels": {"wheel_size": 1.0, "num_axles": 4, "wheels_per_axle": 1},
-	"tracked_treads": {"tread_width": 1.0, "road_wheel_count": 5},
+	"tracked_treads": {"tread_width": 1.0},
 	"hover_engine": {},
 	"helicopter_rotors": {"size": 1.0, "count": 4},
 	"fixed_wing_engine": {"size": 1.0, "count": 2},
@@ -742,7 +768,6 @@ func update_locomotion(type_id: String, settings: Dictionary):
 
 	elif type_id == "tracked_treads":
 		var width = settings.get("tread_width", settings.get("width", settings.get("size", 1.0)))
-		var road_wheels = settings.get("road_wheel_count", 5.0)
 		var sprocket = settings.get("drive_sprocket", true)
 		# The tread's own catalog size.z (2.5, a small placeholder) has
 		# nothing to do with the actual hull it's mounted on - _build_
@@ -753,7 +778,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		# total length to it (sprockets centered at the hull's own front/
 		# rear ends - extending past the hull is fine, per Chris) and scales
 		# height/width up proportionately from there.
-		var geo_tweaks = {"tread_width": width, "road_wheel_count": road_wheels, "drive_sprocket": sprocket, "target_length": hull_size.z}
+		var geo_tweaks = {"tread_width": width, "drive_sprocket": sprocket, "target_length": hull_size.z}
 
 		var x_offset = running_gear_size.x / 2.0
 		var y_offset = -hull_size.y / 2.0 - running_gear_size.y / 2.0
@@ -785,19 +810,31 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		if count < 2: count = 2
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
-		var geo_tweaks = {"blade_count": blade_count, "blade_length": blade_length, "duct": duct}
 
 		var x_offset = hull_size.x / 2.0 + 1.2
 		var y_offset = hull_size.y / 2.0 + 0.3
 		var z_limit = hull_size.z * 0.35
-		
+
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.UP
+			# mount_side/mount_reach_x/mount_reach_y tell _build_helicopter_
+			# rotors() where "the hull" actually is in its own local space -
+			# unlike wheels/tracked_treads, rotors were never mirror-flipped
+			# (the mast+blade ring is already rotationally symmetric), so this
+			# is the first rotor geometry that needs to know its own mount
+			# geometry. The mounting pylon needs the FULL x_offset/y_offset
+			# (the exact distance back to the hull's own center, i.e. its
+			# Z-axis centerline), not just the fixed 1.2/0.3 constants added
+			# on top of the hull's half-extents - a pylon that only reached
+			# back to the hull's near EDGE by that fixed amount visually
+			# stopped short of the hull for anything but the smallest hulls
+			# (Chris's ask: root it all the way to the physical center).
+			var geo_tweaks = {"blade_count": blade_count, "blade_length": blade_length, "duct": duct, "mount_side": side, "mount_reach_x": x_offset, "mount_reach_y": y_offset}
 			for i in range(half_count):
 				var z_pos = 0.0
 				if half_count > 1:
 					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
-					
+
 				var pos = hull.global_position + Vector3(x_offset * side, y_offset, z_pos)
 				var rotor = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
 				if rotor:
@@ -813,31 +850,49 @@ func update_locomotion(type_id: String, settings: Dictionary):
 					spawned_wheels.append(rotor)
 					
 	elif type_id == "hover_engine":
-		var pad_size = settings.get("pad_size", settings.get("size", 1.0))
-		var skirt = settings.get("skirt", false)
-		var geo_tweaks = {"pad_size": pad_size, "skirt": skirt}
-		var x_offset = (hull_size.x / 2.0) * pad_size
+		# Scifi concentric-ring redesign (Chris's ask): pad_count (4-8)
+		# replaces the old fixed-4-corners layout, distributed evenly
+		# around an ellipse - pushed OUTBOARD (hull half-extent + the pad's
+		# own footprint radius, same "half-extent + fixed clearance"
+		# convention helicopter_rotors' x_offset/y_offset already use) so
+		# the fore/aft and port/starboard pads clear the hull's visual mesh
+		# entirely instead of sitting enmeshed underneath it. Since every
+		# pad is now three rotationally-symmetric rings (no fan/skirt
+		# asymmetry left), there's nothing left to mirror-flip either.
+		var emv = settings.get("emv_level", settings.get("size", 1.0))
+		var count = int(settings.get("pad_count", 4))
+		count = clamp(count, 4, 8)
+		var pad_radius = catalog_data.get("size", Vector3.ONE).x * 0.5
+		var x_radius = hull_size.x / 2.0 + pad_radius
+		var z_radius = hull_size.z / 2.0 + pad_radius
 		var y_offset = -hull_size.y / 2.0 + underside_y_bias
-		var z_offset = (hull_size.z * 0.35) * pad_size
-		var points = [
-			Vector3(-x_offset, y_offset, z_offset),
-			Vector3(x_offset, y_offset, z_offset),
-			Vector3(-x_offset, y_offset, -z_offset),
-			Vector3(x_offset, y_offset, -z_offset)
-		]
-		for p in points:
+		for i in range(count):
+			var angle = i * TAU / float(count)
+			var p = Vector3(cos(angle) * x_radius, y_offset, sin(angle) * z_radius)
+			# Reach FROM the pad's own local origin BACK to the hull's
+			# physical center - passed through so _build_hover_engine() can
+			# root a flattened mounting pylon (mount_strut_flat, ~3x as wide
+			# as it is thick, per Chris's ask - a flattened version of
+			# helicopter_rotors' tapered strut) all the way back to the
+			# hull, same "extend to the center, not just the near edge"
+			# fix the rotor pylons already got.
+			var reach = -p
+			var geo_tweaks = {"emv_level": emv, "mount_reach_x": reach.x, "mount_reach_y": reach.y, "mount_reach_z": reach.z}
 			var hover = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN, false, geo_tweaks)
 			if hover:
-				# pad_size is already baked into the pad/fan/skirt/mount
-				# sub-part scales inside _build_hover_engine() - see the
-				# tracked_treads comment above for why the outer node stays
-				# unscaled.
+				# emv_level is already baked into the ring sub-part scales
+				# inside _build_hover_engine() - see the tracked_treads
+				# comment above for why the outer node stays unscaled.
 				hover.scale = Vector3.ONE
+				# The rings need to stay level with the ground (Chris: "the
+				# outer one staying horizontal") regardless of the DOWN
+				# mount normal _align_up_to() used above to place them
+				# against the hull's underside - unlike the old fan/skirt
+				# visual, which was deliberately oriented to face outward
+				# along that normal.
+				hover.rotation = Vector3.ZERO
 				if hover.has_meta("module_data"):
 					hover.get_meta("module_data").scale_multiplier = Vector3.ONE
-				if p.x < 0.0:
-					hover.set_meta("scale_flip_x", true)
-					_apply_mirror_flip(hover)
 				spawned_wheels.append(hover)
 
 	elif type_id == "legs":
@@ -847,11 +902,27 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		if count < 2: count = 2
 		if count % 2 != 0: count += 1
 		var half_count = int(count / 2)
-		var geo_tweaks = {"leg_length": leg_length, "foot_size": foot_size}
-
+		# Wider stance (Chris's ask): the foot should land 1.3x the hull's
+		# own width out from the centerline, i.e. 0.8x hull width FARTHER
+		# than the hip mount already sits (hip mount is ~0.5x hull width
+		# out - half the hull's width - so 0.5 + 0.8 = 1.3). The hip joint
+		# itself stays flush against the hull (x_offset, unchanged below) -
+		# only the thigh/shin/foot/ankle assembly splays outward from
+		# there, via leg_stance_reach in _build_legs(), for a real angled
+		# "wide stance" look instead of just moving the whole mount out
+		# (which would leave the hip floating off the hull, same problem
+		# the rotor/hover pylons had to fix).
 		var x_offset = running_gear_size.x / 2.0
 		var z_limit = hull_size.z * 0.35
 		var leg_y = -hull_size.y / 2.0 - running_gear_size.y / 2.0 - (catalog_data.get("size", Vector3.ONE).y * leg_length) / 2.0
+		# Distance from the leg module's OWN local origin (near the foot) up
+		# to the hull's own vertical centerline (its Z-axis running through
+		# the hull's true middle) - leg_y above is that same reach in the
+		# other direction (hull center down to the leg's origin), so this is
+		# just -leg_y. _build_legs() needs this to raise the knee joint
+		# above the hull's centerline (Chris's ask), since it only knows its
+		# own catalog size, not the hull's.
+		var geo_tweaks = {"leg_length": leg_length, "foot_size": foot_size, "leg_stance_reach": hull_size.x * 0.8, "leg_hull_centerline_y": -leg_y, "knee_height": settings.get("knee_height", 0.375)}
 
 		for side in [-1.0, 1.0]:
 			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
@@ -874,32 +945,52 @@ func update_locomotion(type_id: String, settings: Dictionary):
 					leg.position = Vector3(x_offset * side, leg_y, z_pos)
 					if leg.has_meta("module_data"):
 						leg.get_meta("module_data").scale_multiplier = Vector3.ONE
+					# Alternating walk-cycle phase (Chris's ask: simple
+					# oscillation, not full IK) - a checkerboard across the
+					# side/front-back grid, so adjacent legs (front-left vs
+					# front-right, front-left vs back-left) swing opposite
+					# ways like a real trot, read by battle_unit.gd/
+					# battlefield.gd's LegSwing animation.
+					var side_idx = 0 if side < 0.0 else 1
+					leg.set_meta("leg_phase", PI if (side_idx + i) % 2 == 1 else 0.0)
 					if side < 0:
 						leg.set_meta("scale_flip_x", true)
 						_apply_mirror_flip(leg)
 					spawned_wheels.append(leg)
 
 	elif type_id == "fixed_wing_engine":
-		var nacelle_size = settings.get("nacelle_size", settings.get("size", 1.0))
+		# Redesign (Chris's ask): engine_count (2-6) replaces the old fixed
+		# left/right pair, distributed radially/elliptically around the
+		# hull's Y axis instead - angle=0 lands the first engine at pure
+		# +X and angle=PI at pure -X, so engine_count=2 reproduces the old
+		# exact left/right layout with no special-casing needed. Every
+		# engine is now mounted on a pylon reaching back to the hull's own
+		# center (same "extend all the way to the center" fix the rotor/
+		# hover pylons already got), so there's nothing left to mirror-
+		# flip either - the nacelle/fan/core/exhaust stack is already
+		# rotationally symmetric, same as rotors/hover.
+		var turbine_compression = settings.get("turbine_compression", 1.0)
 		var afterburner = settings.get("afterburner", false)
-		var geo_tweaks = {"nacelle_size": nacelle_size, "afterburner": afterburner}
-		var x_offset = (hull_size.x / 2.0 + 0.4 * nacelle_size)
+		var count = int(settings.get("engine_count", settings.get("count", 2)))
+		count = clamp(count, 2, 6)
+		var x_radius = hull_size.x / 2.0 + 0.4
+		var z_radius = hull_size.z * 0.25
 		var y_offset = 0.0
-		for side in [-1.0, 1.0]:
-			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.1)
-			var engine = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
+		for i in range(count):
+			var angle = i * TAU / float(count)
+			var p = Vector3(cos(angle) * x_radius, y_offset, sin(angle) * z_radius)
+			var reach = -p
+			var geo_tweaks = {"turbine_compression": turbine_compression, "afterburner": afterburner, "mount_reach_x": reach.x, "mount_reach_y": reach.y, "mount_reach_z": reach.z}
+			var engine = _place_weapon(type_id, hull.global_position + p, Vector3.RIGHT, false, geo_tweaks)
 			if engine:
-				# nacelle_size is already baked into the nacelle/fan/exhaust
-				# sub-part scales inside _build_fixed_wing_engine() - see the
-				# tracked_treads comment above.
+				# turbine_compression is already baked into the core/
+				# nacelle/fan/exhaust sub-part scales inside
+				# _build_fixed_wing_engine() - see the tracked_treads
+				# comment above.
 				engine.scale = Vector3.ONE
 				engine.rotation = Vector3.ZERO
 				if engine.has_meta("module_data"):
 					engine.get_meta("module_data").scale_multiplier = Vector3.ONE
-				if side < 0:
-					engine.set_meta("scale_flip_x", true)
-					_apply_mirror_flip(engine)
 				spawned_wheels.append(engine)
 
 	elif type_id == "ornithopter_wing":
@@ -1092,6 +1183,22 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 		# outboard by 17.5% of its own width - keep the click target
 		# centered on it instead of the module's bare origin.
 		col_center = Vector3(col_size.x * 0.175, col_center.y, 0)
+	elif type_id == "legs":
+		# Same click-target mismatch class as wheels/tracked_treads above -
+		# _build_legs() splays the whole thigh/shin/foot/ankle/knee chain
+		# out from the module's own origin (near the foot) up to the hip
+		# and out to leg_stance_reach laterally (the wide-stance redesign),
+		# but the generic fixed-at-catalog-size box above stayed a small
+		# ~0.5x1.5x0.5 box right at the origin - nowhere near most of the
+		# now much larger, diagonal leg, making it very hard to click
+		# ("very difficult to select once placed," Chris's report). Mirrors
+		# _build_legs()' own hip_y formula so the collider's height tracks
+		# leg_length the same way the visual does.
+		var leg_len = float(tweaks.get("leg_length", 1.0))
+		var stance = float(tweaks.get("leg_stance_reach", 0.0))
+		var hip_y_est = col_size.y * 0.8 * leg_len
+		col_size = Vector3(stance + 0.6, hip_y_est + 0.6, 0.6)
+		col_center = Vector3(stance * 0.5, hip_y_est * 0.5, 0)
 	static_body.position = col_center
 	var collision_shape = CollisionShape3D.new()
 	var col_box = BoxShape3D.new()
