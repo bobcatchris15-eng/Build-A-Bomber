@@ -13,6 +13,16 @@ const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const EnemyAIScript = preload("res://scripts/enemy_ai.gd")
 const MapCatalog = preload("res://scripts/map_catalog.gd")
 const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
+const ProductionQueueScript = preload("res://scripts/production_queue.gd")
+
+# RTS_CORE_ROADMAP.md A1: the one production authority, shared by the
+# player's build bar and enemy_ai.gd - see production_queue.gd's own header
+# for the model (one queue per team+tier, not per building). Typed as
+# RefCounted (its actual base), not a class_name - matching this codebase's
+# existing convention (e.g. building.gd's `bp_manager: Node`) rather than
+# relying on the global class cache, which a bare `--script` headless run
+# doesn't reliably have populated.
+var production: RefCounted = null
 
 const PLAYER_TEAM = 0
 const ENEMY_TEAM = 1
@@ -185,6 +195,9 @@ func _ready():
 		economy[PLAYER_TEAM].metal = INFINITE_RESOURCE_FLOOR
 		economy[PLAYER_TEAM].crystal = INFINITE_RESOURCE_FLOOR
 
+	production = ProductionQueueScript.new()
+	production.setup(self)
+
 	_setup_navigation()
 	_setup_fog_shroud()
 	_load_rosters()
@@ -218,6 +231,13 @@ func _ready():
 	add_child(fog_timer)
 	fog_timer.timeout.connect(_recalc_fog_of_war)
 	_recalc_fog_of_war() # populate before the first tick so enemies aren't briefly visible at match start
+
+# Production used to tick inside every manufactory's own _physics_process()
+# (building.gd); centralized here now that one ProductionQueue owns every
+# team+tier queue (RTS_CORE_ROADMAP.md A1).
+func _physics_process(delta):
+	if production:
+		production.tick(delta)
 
 func _on_trickle():
 	if game_over: return
@@ -848,23 +868,22 @@ func spawn_defense(blueprint_data: Dictionary, team: int, pos: Vector3) -> Stati
 # "medium"/"heavy" returns only a manufactory of that exact tier, or null
 # if the team doesn't have one (e.g. it was destroyed mid-match).
 #
-# FABLE_REVIEW.md 2.4 fix: among matching manufactories, the LEAST-BUSY one
-# (shortest production queue) is returned rather than whichever happens to
-# come first in the scene tree - previously a second manufactory of the same
-# tier never received a single job, making the build bar's "parallel
-# production capacity" pitch false for both the player and the AI.
+# RTS_CORE_ROADMAP.md A1: no longer picks the LEAST-BUSY of several matching
+# manufactories (FABLE_REVIEW.md 2.4's fix) - that distinction stopped
+# existing the moment production moved to one shared queue per team+tier
+# (ProductionQueue/production_queue.gd). Every manufactory of a given tier is
+# now equivalent for queuing purposes; this just returns the first live
+# match, used as a spawn point / existence check.
 func get_team_factory(team: int, tier: String = "") -> Node:
-	var best: Node = null
-	var best_queue := 1 << 30
 	for b in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(b) or b.is_dead or b.team != team: continue
-		var matches = (tier == "" and b.kind in ["light_manufactory", "medium_manufactory", "heavy_manufactory"]) or b.kind == tier + "_manufactory"
-		if not matches: continue
-		var q = b.production_queue.size() if "production_queue" in b else 0
-		if q < best_queue:
-			best = b
-			best_queue = q
-	return best
+		var matches = (tier == "" and b.kind in BuildingScript.MANUFACTORY_KINDS) or b.kind == tier + "_manufactory"
+		if matches:
+			return b
+	return null
+
+func has_factory_of_tier(team: int, tier: String) -> bool:
+	return get_team_factory(team, tier) != null
 
 func get_team_units(team: int, combat_only: bool = false) -> Array:
 	var list = []
@@ -1076,25 +1095,19 @@ func _queue_player_unit(entry: Dictionary):
 	# Size-tiered manufactories: which building this design can be queued
 	# from depends on its own hull's weight tier, not domain - a design on
 	# heavy_cruiser_hull needs a Heavy Manufactory exactly like one on
-	# heavy_hull would.
-	var hull_type = entry.blueprint.get("hull_type", "medium_hull")
-	var tier = ModuleCatalog.get_hull_size_tier(hull_type)
-	var factory = get_team_factory(PLAYER_TEAM, tier)
-	if not factory:
-		_flash_status("Need a %s Manufactory to build %s!" % [tier.capitalize(), entry.name])
+	# heavy_hull would. Tier resolve, factory-exists/legality/afford checks,
+	# spend, and build-time all now live in production.enqueue() - the same
+	# path enemy_ai.gd's producer calls through (RTS_CORE_ROADMAP.md A1).
+	var result = production.enqueue(PLAYER_TEAM, entry.blueprint, player_faction, entry.cost_metal, entry.cost_crystal)
+	if not result.queued:
+		match result.error:
+			"no_factory":
+				_flash_status("Need a %s Manufactory to build %s!" % [result.tier.capitalize(), entry.name])
+			"cant_afford":
+				_flash_status("Not enough resources for %s!" % entry.name)
+			"illegal":
+				_flash_status("%s can't be built: %s" % [entry.name, result.reason])
 		return
-	var legality = ModuleCatalog.validate_build_legality(entry.blueprint)
-	if not legality.valid:
-		_flash_status("%s can't be built: %s" % [entry.name, legality.reason])
-		return
-	if not spend(PLAYER_TEAM, entry.cost_metal, entry.cost_crystal):
-		_flash_status("Not enough resources for %s!" % entry.name)
-		return
-	var build_time = build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal))
-	build_time *= FactionCatalog.get_passive(player_faction, "build_time_mult", 1.0)
-	if is_energy_deficit(PLAYER_TEAM):
-		build_time *= 1.5
-	factory.queue_unit(entry.blueprint, build_time)
 	_flash_status("Building %s... (low power, slower build)" % entry.name if is_energy_deficit(PLAYER_TEAM) else "Building %s..." % entry.name)
 
 # --- Building placement ---

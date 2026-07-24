@@ -136,6 +136,7 @@ func _init():
 	success = success and await test_design_lab_firing_arc_matches_real_pintle_traverse()
 	success = success and await test_firing_arc_disappears_after_dragging_the_weapon()
 	success = success and await test_idle_units_auto_engage_sighted_enemies()
+	success = success and await test_production_is_one_shared_authority_for_player_and_ai()
 
 	print("\n==============================================")
 	if success:
@@ -6548,8 +6549,11 @@ func test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes() -> bool:
 	await process_frame
 	await process_frame
 
-	# Factory load-balancing (FABLE_REVIEW.md 2.4): a busy manufactory must
-	# lose to an idle one of the same tier.
+	# Shared per-tier production queue (RTS_CORE_ROADMAP.md A1, replacing
+	# FABLE_REVIEW.md 2.4's old least-busy-factory routing): two manufactories
+	# of the SAME tier now alias the exact same queue Array (OpenRA's
+	# ClassicProductionQueue model - one line per team+tier, not per
+	# building), so queuing via one is immediately visible through the other.
 	var first_light = skirmish.get_team_factory(0, "light")
 	if not first_light:
 		print("  [FAIL] No starting light manufactory found.")
@@ -6558,9 +6562,8 @@ func test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes() -> bool:
 	var second_light = skirmish._spawn_prefab("light_manufactory", 0, first_light.global_position + Vector3(0, 0, 14), skirmish.player_faction)
 	await process_frame
 	first_light.queue_unit({}, 60.0)
-	var chosen = skirmish.get_team_factory(0, "light")
-	if chosen != second_light:
-		print("  [FAIL] get_team_factory() did not pick the idle manufactory over the busy one - extra factories are still decorative.")
+	if second_light.production_queue.size() != 1 or second_light.production_queue[0] != first_light.production_queue[0]:
+		print("  [FAIL] A second manufactory of the same tier should share the exact same production queue as the first, not an independent one.")
 		skirmish.queue_free()
 		return false
 	first_light.production_queue.clear()
@@ -6607,7 +6610,7 @@ func test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes() -> bool:
 
 	skirmish.queue_free()
 	await process_frame
-	print("  [PASS] Weapon fire is blocked by real cover, idle factories receive queue jobs, buildings can't stack, and defenses carry their faction.")
+	print("  [PASS] Weapon fire is blocked by real cover, same-tier factories share one production queue, buildings can't stack, and defenses carry their faction.")
 	return true
 
 func test_damage_model_rof_chip_strip_and_air_rules() -> bool:
@@ -7864,4 +7867,82 @@ func test_idle_units_auto_engage_sighted_enemies() -> bool:
 		return false
 
 	print("  [PASS] An idle unit with a hostile within vision_range automatically switches to attacking it, without disturbing a unit that has nothing nearby to engage.")
+	return true
+
+func test_production_is_one_shared_authority_for_player_and_ai() -> bool:
+	print("Running Test Suite: Production - One Shared Authority For Player And AI (RTS_CORE_ROADMAP.md A1)...")
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var ai = skirmish.get_node_or_null("EnemyAI")
+	if not ai:
+		print("  [FAIL] Skirmish should have an EnemyAI child node")
+		skirmish.queue_free()
+		return false
+
+	# A player-side entry that resolves to the "medium" tier, so we know
+	# exactly which shared queue to check.
+	var player_entry = null
+	for e in skirmish.roster:
+		if not e.is_defense and ModuleCatalog.get_hull_size_tier(e.blueprint.get("hull_type", "medium_hull")) == "medium":
+			player_entry = e
+			break
+	if not player_entry:
+		print("  [SKIP] No medium-tier entry in the bundled player roster to test against.")
+		skirmish.queue_free()
+		return true
+
+	skirmish.economy[skirmish.PLAYER_TEAM].metal = 100000
+	skirmish.economy[skirmish.PLAYER_TEAM].crystal = 100000
+	skirmish.economy[skirmish.ENEMY_TEAM].metal = 100000
+	skirmish.economy[skirmish.ENEMY_TEAM].crystal = 100000
+
+	var player_units_before = skirmish.get_team_units(skirmish.PLAYER_TEAM).size()
+	var enemy_units_before = skirmish.get_team_units(skirmish.ENEMY_TEAM).size()
+
+	# Player path: skirmish.gd's build-bar handler.
+	skirmish._queue_player_unit(player_entry)
+	if skirmish.production.queue_depth(skirmish.PLAYER_TEAM, "medium") != 1:
+		print("  [FAIL] _queue_player_unit() should append to skirmish.production's shared medium-tier queue.")
+		skirmish.queue_free()
+		return false
+
+	# AI path: enemy_ai.gd's own producer, going through the exact same
+	# ProductionQueue object - not a second, similar-looking implementation.
+	ai._try_produce()
+	var enemy_queued = skirmish.production.queue_depth(skirmish.ENEMY_TEAM, "light") > 0 \
+		or skirmish.production.queue_depth(skirmish.ENEMY_TEAM, "medium") > 0 \
+		or skirmish.production.queue_depth(skirmish.ENEMY_TEAM, "heavy") > 0
+	if not enemy_queued:
+		print("  [FAIL] enemy_ai.gd's _try_produce() did not queue anything through skirmish.production.")
+		skirmish.queue_free()
+		return false
+
+	# Both real units, produced through the one shared authority.
+	var ticks = 0
+	var player_produced = false
+	var enemy_produced = false
+	while ticks < 400 and not (player_produced and enemy_produced):
+		await process_frame
+		ticks += 1
+		if not player_produced and skirmish.get_team_units(skirmish.PLAYER_TEAM).size() > player_units_before:
+			player_produced = true
+		if not enemy_produced and skirmish.get_team_units(skirmish.ENEMY_TEAM).size() > enemy_units_before:
+			enemy_produced = true
+
+	skirmish.queue_free()
+	await process_frame
+
+	if not player_produced:
+		print("  [FAIL] Player-queued unit never spawned.")
+		return false
+	if not enemy_produced:
+		print("  [FAIL] AI-queued unit never spawned.")
+		return false
+
+	print("  [PASS] Player build bar and enemy AI both queue through the exact same ProductionQueue object, and both produce real units.")
 	return true

@@ -4,8 +4,6 @@ extends Node
 # - queues affordable units from its roster
 # - launches attack waves at the player HQ on a ramping timer
 
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
-
 var skirmish: Node3D = null
 var team: int = 1
 
@@ -128,22 +126,17 @@ func _entry_counters(entry, threat: String) -> bool:
 			return true
 	return false
 
-# Shared by both the counter-pick and round-robin paths: tier/factory/
-# affordability gate, then spend + queue. Returns whether it actually queued.
+# Shared by both the counter-pick and round-robin paths: an AI-only
+# self-throttle (never queue more than 2 deep per tier - keeps the AI from
+# dumping its whole bankroll into one tier's line the instant it can afford
+# to) in front of the real production path (RTS_CORE_ROADMAP.md A1's
+# production.enqueue(), the same one skirmish.gd's build bar calls). Returns
+# whether it actually queued.
 func _queue_entry(entry) -> bool:
 	var tier = ModuleCatalog.get_hull_size_tier(entry.blueprint.get("hull_type", "medium_hull"))
-	var factory = skirmish.get_team_factory(team, tier)
-	if not factory or factory.production_queue.size() >= 2:
+	if skirmish.production.queue_depth(team, tier) >= 2:
 		return false
-	if not skirmish.can_afford(team, entry.cost_metal, entry.cost_crystal):
-		return false
-	skirmish.spend(team, entry.cost_metal, entry.cost_crystal)
-	var build_time = skirmish.build_time_for_cost(Vector2i(entry.cost_metal, entry.cost_crystal))
-	build_time *= FactionCatalog.get_passive(skirmish.enemy_faction, "build_time_mult", 1.0)
-	if skirmish.is_energy_deficit(team):
-		build_time *= 1.5
-	factory.queue_unit(entry.blueprint, build_time)
-	return true
+	return skirmish.production.enqueue(team, entry.blueprint, skirmish.enemy_faction, entry.cost_metal, entry.cost_crystal).queued
 
 func _try_produce():
 	var combat = _combat_roster()
@@ -172,11 +165,7 @@ func _ensure_harvester():
 	var harv_bp = skirmish._find_harvester_blueprint(skirmish.enemy_roster)
 	if harv_bp.is_empty(): return
 	var cost = skirmish.blueprint_cost(harv_bp)
-	var tier = ModuleCatalog.get_hull_size_tier(harv_bp.get("hull_type", "medium_hull"))
-	var factory = skirmish.get_team_factory(team, tier)
-	if factory and skirmish.can_afford(team, cost.x, cost.y):
-		skirmish.spend(team, cost.x, cost.y)
-		factory.queue_unit(harv_bp, skirmish.build_time_for_cost(cost) * FactionCatalog.get_passive(skirmish.enemy_faction, "build_time_mult", 1.0))
+	skirmish.production.enqueue(team, harv_bp, skirmish.enemy_faction, cost.x, cost.y)
 
 func _launch_wave():
 	wave_number += 1

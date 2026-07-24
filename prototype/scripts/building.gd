@@ -107,6 +107,19 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 	footprint = stats.size
 	energy_capacity = stats.get("energy_capacity", 0.0)
 
+	# RTS_CORE_ROADMAP.md A1: production_queue becomes an ALIAS to the shared
+	# team+tier Array owned by Skirmish.production (Array assignment is
+	# by-reference in GDScript) - not this building's own independent queue.
+	# Every manufactory of the same tier ends up pointing at the exact same
+	# Array, which is the point (OpenRA's ClassicProductionQueue model: one
+	# shared line per tier, not one per building). Falls back to the plain
+	# local Array declared above for any building not parented under a real
+	# Skirmish (e.g. a standalone test construct) or non-manufactory kinds.
+	if kind in MANUFACTORY_KINDS:
+		var parent = get_parent()
+		if parent and "production" in parent and parent.production:
+			production_queue = parent.production.get_queue(team, kind.replace("_manufactory", ""))
+
 	var mesh_inst = MeshInstance3D.new()
 	mesh_inst.name = "MeshInstance3D"
 	var box = BoxMesh.new()
@@ -313,19 +326,30 @@ func _physics_process(delta):
 	if is_dead: return
 	if current_energy < max_energy:
 		current_energy = min(max_energy, current_energy + energy_regen_rate * delta)
+	# The actual tick (time_left countdown, pop-and-spawn) now lives in
+	# Skirmish.production.tick() (RTS_CORE_ROADMAP.md A1) - this just keeps
+	# the Label3D fresh every physics frame while a job is active, reading
+	# straight off the (possibly-aliased-shared) production_queue.
 	if kind in MANUFACTORY_KINDS and not production_queue.is_empty():
-		var job = production_queue[0]
-		job.time_left -= delta
 		_update_hp_bar()
-		if job.time_left <= 0.0:
-			production_queue.pop_front()
-			_spawn_unit(job.blueprint)
 
+# Back-compat direct-append: bypasses Skirmish.production.enqueue()'s cost/
+# legality gating entirely. Real production goes through that path now;
+# this stays because several tests use it to drive the tick mechanism in
+# isolation. For a manufactory, production_queue is an alias to the shared
+# team+tier Array (see setup_prefab()), so this is equivalent to appending
+# directly to that tier's queue.
 func queue_unit(blueprint_data: Dictionary, build_time: float):
 	production_queue.append({"blueprint": blueprint_data, "time_left": build_time, "total_time": build_time})
 	_update_hp_bar()
 
-func _spawn_unit(blueprint_data: Dictionary):
+# Called by ProductionQueue.tick() when a job for this building's team+tier
+# completes - not necessarily called on the SAME instance queue_unit()/
+# enqueue() was invoked through, since multiple manufactories of one tier
+# share a queue (ProductionQueue.tick() picks one live factory of the tier
+# to spawn from). Renamed from the old _spawn_unit() and made public since
+# it's now called from outside this script.
+func spawn_from_queue(blueprint_data: Dictionary):
 	if not bp_manager or not is_instance_valid(bp_manager): return
 	var unit = CharacterBody3D.new()
 	unit.set_script(load("res://scripts/battle_unit.gd"))
