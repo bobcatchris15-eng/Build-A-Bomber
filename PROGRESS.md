@@ -4,6 +4,36 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-24 — Repo audit + catch-up: 3 retroactive entries below, LOCOMOTION_REBUILD_PLAN.md status refreshed, root cruft removed
+
+A codebase gap-analysis found this log hadn't been updated since 2026-07-17, despite 9 real commits landing since then (weapon module GLB splits, the full locomotion rebuild, Linux/macOS export presets). The three entries directly below this one reconstruct that work from `git log`/commit messages, not from a live session — flagged as retroactive rather than silently backfilled. Also refreshed `LOCOMOTION_REBUILD_PLAN.md`'s status header (it still said "next up: tracked_treads" after all 10 types were actually finished) and removed ~33 tracked-but-obsolete root files: one-off `fix_*.py`/`apply_*.py` migration scripts (superseded once applied), ad hoc `test_*.gd` scripts predating `prototype/run_tests.gd`'s real suite, and empty debug-output files (`godot_out.txt`, `stdout.txt`, `stderr.txt`, `version.txt`).
+
+---
+
+## 2026-07-24 — Linux + macOS export presets added (retroactive entry)
+
+`prototype/export_presets.cfg` gained Linux (x86_64) and macOS (universal x86_64+arm64) presets alongside the existing Windows Desktop one. Required enabling `textures/vram_compression/import_etc2_astc` project-wide — Godot's macOS export needs it for the universal binary, and the bundled 4.3 export templates only ship the universal variant (no x86_64-only option to sidestep it). All three platforms now build; `builds/{windows,linux,macos}/` all have current output.
+
+---
+
+## 2026-07-23/24 — Locomotion rebuild complete: all 10 types now match the wheels reference implementation (retroactive entry)
+
+`LOCOMOTION_REBUILD_PLAN.md` had been left mid-flight with only `wheels` fully rebuilt (multi-part GLB assembly, per-type tweak UI, dedicated running gear) and its own status header pointing at `tracked_treads` as next up. Three commits since then finished the remaining 9 types:
+
+- **702e2dc** — `tracked_treads` got the wheels treatment: a real closed-loop swept tread belt (`build_tread_belt_loop`) replacing the old flat-plate-on-wheels look, `road_wheel_count`/`tread_width` tweaks, tread length now scales to the hull's actual Z size instead of a fixed catalog value, per-wheel gearbox/driveshaft. Root-cause fix alongside it: `build_visual()` was dropping every locomotion type into the weapon dispatch chain's fallback box and never threading tweaks through to the `_build_X()` functions at all — this bug affected every one of the 10 types, not just treads, so fixing it unblocked the rest of the pass.
+- **93a5839** — `helicopter_rotors` (pylon reaching true hull center, Blade Count + Ducted Shroud tweaks, duct ring now genuinely hollow), `hover_engine` (three concentric rings, pads pushed outboard on aerofoil pylons, Pad Count + Electron Megavoltage tweaks — a different tweak set than the plan doc's original "pad_size/pad_count/skirt" sketch), `legs` (wider stance, tweakable knee joint, walk-cycle swing animation with real per-leg phase), `fixed_wing_engine` (aerofoil-pylon-mounted, Engine Count + Turbine Compression tweaks — again a different final pair than the plan doc's "nacelle_size/fan_blades/afterburner" sketch). Root-cause fix: `VisualBuilder.build_visual()` now removes old children immediately instead of only `queue_free()`-ing them, fixing a name collision that silently broke every by-name animation lookup (`RotorBlades`/`HoverRing`/`LegSwing`) on any blueprint-reconstructed vehicle (Test Range, Skirmish, defense buildings) — this had been quietly breaking animation on every non-Design-Lab-live vehicle.
+- **eebf356** — `ornithopter_wing` rebuilt as a dragonfly-style fore/hind wing pair (was a single wing), each on its own opposed flap pivot, dropping the plan's originally-envisioned `rib_count` fan tweak entirely (it had never actually been wired to any UI control). `naval_propeller`/`buoyant_envelope` unified around a shared pylon-mounted design (both had been spawning inside the hull mesh) with `blade_count`/`blade_pitch`/`prop_count` tweaks — one shared tweak set rather than the plan's originally-separate per-type lists. `screw_drive` rebuilt as a single-GLB drum+helix with gearbox pylons aimed at the hull's true geometric center, final tweaks `drum_diameter`+`helix_depth` (the plan had sketched `drum_width`/`drum_count` instead — dropped in favor of 3 discrete authored flighting-depth variants, since a baked mesh can't be continuously re-deformed at runtime). Same commit fixed a recurring root cause across several of these: `add_cyl_axis`'s `'x'`/`'z'` godot_axis arguments were swapped from what they claimed, baking several parts spanwise instead of fore-aft.
+
+Spot-checked `battle_unit.gd`'s animation code during this catch-up pass to confirm Risk R1 from the plan doc (rotor/prop spin pivot lookup needing to be by-name, not `get_child(0)`) actually landed: every locomotion animation branch (`RotorBlades`, `WingPivotFore`/`WingPivotHind`, `LegRoot/LegSwing`, `PropBlades`) now uses `get_node_or_null()` by name — confirmed resolved, not just claimed.
+
+---
+
+## 2026-07-21/22/23 — Weapon modules split into GLB sub-parts (retroactive entry)
+
+Four commits reworked weapon module construction to match the same multi-part-GLB-with-tweaks pattern locomotion later followed: **492815d** split the 37mm M3 cannon into constituent sub-parts with tweak sliders reimplemented against them; **2b37232** generalized this to more weapon types (TOW/Mortar/Railgun/HMG/Rotary tweak updates) plus an Artillery rename; **15ac618** fixed assembly gaps in Flak Cannon/Plasma Lobber and rebalanced scale (Artillery doubled, Flak Cannon reduced 25%); **12a4d87** broke down the remaining weapon/utility modules into GLB sub-parts, removed the `logistics_tank` and mobility add-on modules, and rescaled artillery/flak again. `4c8de90` (2026-07-21) removed an unused `TRIPO_GEN_Meshes` directory from the project.
+
+---
+
 ## 2026-07-17 — Hull massing punch-list resumed: light_hull + heavy_hull finished (items 2-3), moving through the rest of the roster
 
 Picked up `HULL_MASSING_SPEC.md`'s prioritized punch-list where a prior session left off (medium_hull, item 1, was already committed). Items 2 and 3 (`heavy_hull`, `light_hull`) were already converted to `build_afv_hull()` in the working tree with rebuilt `.glb`s but uncommitted and under-verified - reviewed the parameter choices against the spec (all correct), re-verified with wider/side/extreme-stretch screenshots (`progress_captures/2026-07-13/afv_hulls/`), and committed both separately. light_hull now reads low/sleek/scout-car; heavy_hull reads tall/blunt/slab-sided with a real recessed engine-deck louver grate and turret ring. Headless tests green throughout. Full reasoning in `DECISIONS_NEEDED.md`.

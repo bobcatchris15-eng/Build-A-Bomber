@@ -1,25 +1,29 @@
 # Locomotion Modules — Modular Rebuild & Running-Gear Refinement
 
-Status snapshot (updated 2026-07-23): **Phase 1 (removal) is complete. Phase 2
-(Blender parts) is substantially complete — most locomotion sub-parts across all
-10 kept types are authored and in the parts library, plus the wheels-specific
-`wheel_driveshaft`/`wheel_gearbox` running-gear parts (see Phase 4). Phase 3
-(running gear) is done for wheels only, still generic/slab for the other 4
-running-gear types. Phase 4 (visual builders + tweak plumbing) is DONE and
-battle-tested for `wheels` — treat it as the reference implementation; the other
-9 types still run on their pre-rebuild procedural/monolithic paths and need the
-same treatment. Phase 5 (spec-driven UI) is DONE for `wheels` specifically (NOT
-via the generic spec-driven system originally envisioned — see Phase 5 notes,
-there's a real design fork here worth reading before continuing).** This file is
-the resumable spec for finishing the remaining 9 types — written so a fresh
-session can pick up without re-deriving the architecture or re-discovering the
-bugs already found and fixed once on wheels.
+Status snapshot (updated 2026-07-24): **Punch-list complete — all 10 kept types
+have now been through Phases 1-5.** `wheels` (documented in this file in full
+detail below) was the reference implementation; the remaining 9 were finished
+across 3 later commits not originally reflected in this doc's status header:
+`702e2dc` (`tracked_treads`, plus a `build_visual()` dispatch-chain bug that had
+been silently affecting every locomotion type), `93a5839` (`helicopter_rotors`,
+`hover_engine`, `legs`, `fixed_wing_engine`), and `eebf356` (`ornithopter_wing`,
+`naval_propeller`, `buoyant_envelope`, `screw_drive`, plus an `add_cyl_axis`
+axis-swap bug fix shared across several of them). Full detail on each in
+`PROGRESS.md`'s 2026-07-23/24 entry. Risk **R1** (rotor/prop spin pivot lookup
+needing to be by-name) is confirmed resolved — every animation branch in
+`battle_unit.gd` now uses `get_node_or_null()` by name.
 
-**Next up when resuming: `tracked_treads`**, using the wheels implementation as
-the template (see Phase 4 for the full list of non-obvious bugs that pattern
-already ran into once — expect several of them to recur for treads/legs/rotors/
-etc. since they share the same `update_locomotion()`/popup/mirroring
-infrastructure).
+**This file is being kept as historical reference**, not a live spec — the
+per-type tweak table below, the Phase write-ups, the bug list, and the R1-R9
+risk conventions all remain accurate/useful background for anyone touching this
+system again (adding an 11th locomotion type, revisiting a specific type's
+tweaks, etc.), but nothing in it currently describes pending work. Several
+types shipped a different final tweak set than this doc's original "target
+design" sketch — noted inline in the table below where known. The one
+follow-up this pass did NOT verify: whether every type's specific ranges/step
+values in the table match what actually landed in `module_catalog.gd` — treat
+the table as directionally right, not gospel, until someone diffs it against
+the real `LOCOMOTION_TWEAK_SPECS` entries.
 
 ## Context (why this change)
 
@@ -512,28 +516,28 @@ per-type wiring 9 more times):
   scene nodes from `UI_StatBlock.tscn` for real, and their dedicated handlers in
   `stat_calculator.gd`, if a fully generic system replaces them.
 
-### Per-type tweak specs (target design — implement in Phase 4/5)
+### Per-type tweak specs (target design vs. what actually shipped — see status snapshot at top)
 
-| type | tweaks (name: range) | placement count | notes |
+| type | original target design | actually shipped | notes |
 |---|---|---|---|
-| wheels | ✅ IMPLEMENTED — wheel_size 0.5–2.5, num_axles 4–8 (step 2), wheels_per_axle 1–2 | num_axles (total across both sides; see Phase 5) | ranges tightened from the original spec's 2–8/1–3 to match Chris's exact ask (4-8 total wheels, dually not triple) |
-| helicopter_rotors | blade_count 2–8, blade_length 0.5–2.0, duct bool, rotor_units 1–4 | rotor_units | user-specified; duct = `rotor_duct_ring` toggle |
-| tracked_treads | tread_width 0.5–2.5, road_wheel_count 3–8, drive_sprocket bool | 2 | width key→tread_width (keep back-compat fallback to old `width` key) |
-| legs | leg_length 0.5–2.5, leg_count 2–8, foot_size 0.5–2.0 | leg_count×… | leg_count keeps existing `count` semantics (rename key, same meaning) |
-| hover_engine | pad_size 0.5–2.5, pad_count 2–4, skirt bool | pad_count | collider-only running gear (Phase 3) |
-| fixed_wing_engine | nacelle_size 0.5–2.5, fan_blades 4–10, afterburner bool | 2 | afterburner = emissive exhaust |
-| ornithopter_wing | wingspan 0.5–2.5, rib_count 2–6, wing_sweep 0.5–1.5 | 2 | keep `WingPivot` name |
-| naval_propeller | prop_size 0.5–2.5, blade_count 2–6, prop_count 1–4, kort_nozzle bool | prop_count | keep `PropBlades` name |
-| buoyant_envelope | motor_size 0.5–2.5, prop_blades 2–4, tail_fins bool | 2 | |
-| screw_drive | drum_width 0.5–2.5, drum_count 1–2, (helix_turns 2–5 optional) | drum_count | helix_turns optional — only if authored variants (Phase 2) are built |
+| wheels | wheel_size, num_axles, wheels_per_axle | ✅ IMPLEMENTED as targeted | ranges tightened from spec's 2–8/1–3 to Chris's exact ask (4-8 total wheels, dually not triple) |
+| tracked_treads | tread_width, road_wheel_count, drive_sprocket bool | ✅ shipped in `702e2dc` — `tread_width`/`road_wheel_count` confirmed; `drive_sprocket` bool not confirmed wired, check before relying on it | width key→tread_width (back-compat fallback to old `width` key) |
+| helicopter_rotors | blade_count, blade_length, duct bool, rotor_units | ✅ shipped in `93a5839` — Blade Count + Ducted Shroud tweaks confirmed; `blade_length`/`rotor_units` not confirmed by name | duct = `rotor_duct_ring` toggle |
+| legs | leg_length, leg_count, foot_size | ✅ shipped in `93a5839` — tweakable knee joint + walk-cycle swing animation confirmed; exact final field names not verified against `module_catalog.gd` | |
+| hover_engine | pad_size, pad_count, skirt bool | ✅ shipped in `93a5839` — **deviated**: Pad Count + "Electron Megavoltage" tweaks, no `skirt` bool mentioned | three concentric rings, pads on aerofoil pylons |
+| fixed_wing_engine | nacelle_size, fan_blades, afterburner bool | ✅ shipped in `93a5839` — **deviated**: Engine Count + Turbine Compression, no `afterburner`/`fan_blades` mentioned | aerofoil-pylon-mounted |
+| ornithopter_wing | wingspan, rib_count, wing_sweep | ✅ shipped in `eebf356` — **deviated**: `rib_count` explicitly dropped (dead tweak, never wired to UI in the original); rebuilt as dragonfly fore/hind wing pair instead | keep `WingPivotFore`/`WingPivotHind` names (not the old single `WingPivot`) |
+| naval_propeller | prop_size, blade_count, prop_count, kort_nozzle bool | ✅ shipped in `eebf356` — **deviated**: unified with buoyant_envelope into one shared `blade_count`/`blade_pitch`/`prop_count` set | keep `PropBlades` name |
+| buoyant_envelope | motor_size, prop_blades, tail_fins bool | ✅ shipped in `eebf356` — **deviated**: same unified tweak set as naval_propeller above, no `tail_fins` bool mentioned | |
+| screw_drive | drum_width, drum_count, helix_turns optional | ✅ shipped in `eebf356` — **deviated**: `drum_diameter`+`helix_depth` (3 discrete authored flighting-depth variants) instead of `drum_width`/`drum_count`, since a baked mesh can't be continuously re-deformed at runtime | |
 
 ## Risks (carry forward into Phases 2-6)
 
 - **R1 Rotor/prop spin** — after rebuild the animated pivot is no longer reliably
   `get_child(0)`; switch `battle_unit.gd` spin-lookup code to by-name (`get_node_or_null`)
-  for every branch, not just the one that already does it. **Still open / not verified this
-  session** — the named pivots exist in the builders (see Phase 4) but nobody has confirmed
-  `battle_unit.gd`'s lookup side actually matches.
+  for every branch, not just the one that already does it. **RESOLVED (confirmed
+  2026-07-24)** — every branch (`RotorBlades`, `WingPivotFore`/`WingPivotHind`,
+  `LegRoot/LegSwing`, `PropBlades`) now uses `get_node_or_null()` by name.
 - **R2 Save/load key rename** — old blueprints store `size`/`count`; add back-compat fallback
   reads (and/or consider rebuilding locomotion via `update_locomotion` on blueprint load instead
   of trusting saved per-instance state, if desync issues surface). **Done for wheels** — every
@@ -619,7 +623,15 @@ per-type wiring 9 more times):
    distinct per-type mount (not the old slab). For wheels specifically this is now DONE and
    iterated to Chris's satisfaction; for the other 9 types this is still the actual bar to clear.
 
-## Next concrete step when resuming
+## Status: punch-list complete (2026-07-24)
+
+All 10 types have shipped (see the status snapshot at the top of this file and
+`PROGRESS.md`'s 2026-07-23/24 entry for the specific commits/details). This
+section is left in place, unedited below, as a worked example of how the
+"next concrete step" for a type was scoped and handed off — useful as a
+template if an 11th locomotion type is ever added, not as a live TODO.
+
+**Original next-step note (historical, tracked_treads was picked up and finished in `702e2dc`):**
 
 **Pick up `tracked_treads` next** (Chris's stated next target). Before writing any new geometry:
 
