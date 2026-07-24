@@ -138,6 +138,7 @@ func _init():
 	success = success and await test_idle_units_auto_engage_sighted_enemies()
 	success = success and await test_production_is_one_shared_authority_for_player_and_ai()
 	success = success and await test_debug_infinite_resources_is_a_real_runtime_toggle()
+	success = success and await test_map_schema_validator()
 	success = success and await test_2d_ui_chrome_overhaul()
 
 	print("\n==============================================")
@@ -8004,6 +8005,75 @@ func test_debug_infinite_resources_is_a_real_runtime_toggle() -> bool:
 	await process_frame
 
 	print("  [PASS] debug_infinite_resources is a genuine runtime toggle, not a compile-time const - off makes spend() a real economy check, on restores the sandbox top-up.")
+	return true
+
+func test_map_schema_validator() -> bool:
+	print("Running Test Suite: Map Schema Validator (RTS_CORE_ROADMAP.md B1)...")
+
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+
+	# All 8 bundled maps should validate clean - zero errors, no exceptions,
+	# same coverage a hand-written per-map assert would give but derived
+	# entirely from FIELD_SPEC.
+	var ids = MapCatalogScript.get_map_ids()
+	if ids.size() < 8:
+		print("  [FAIL] Expected at least 8 bundled maps, found ", ids.size())
+		return false
+	for id in ids:
+		var errors = MapCatalogScript.validate_map(id)
+		if not errors.is_empty():
+			print("  [FAIL] Map '%s' failed validation: %s" % [id, errors])
+			return false
+
+	# Unknown map id.
+	var unknown_errors = MapCatalogScript.validate_map("this_map_does_not_exist")
+	if unknown_errors.is_empty():
+		print("  [FAIL] validate_map() should report an error for an unknown map id.")
+		return false
+
+	# Three deliberately corrupted IN-MEMORY copies (validate_map_def()
+	# takes a raw Dictionary, so none of this touches the real MAPS const),
+	# kept as separate copies rather than stacked on one - a wrong-typed
+	# map_half_extents would otherwise also suppress the bounds check below
+	# (it needs a real number to compare against), which would silently
+	# hide a real defect class instead of proving it's caught.
+	var base_map = MapCatalogScript.get_map(MapCatalogScript.DEFAULT_MAP_ID)
+
+	var bad_type_map = base_map.duplicate(true)
+	bad_type_map["map_half_extents"] = "240" # was a number, now a String
+	var bad_type_errors: Array = MapCatalogScript.validate_map_def(bad_type_map)
+	var caught_bad_type = false
+	for e in bad_type_errors:
+		if "map_half_extents" in e and "number" in e:
+			caught_bad_type = true
+	if not caught_bad_type:
+		print("  [FAIL] A String map_half_extents should be caught as a type error. Got: ", bad_type_errors)
+		return false
+
+	var typo_map = base_map.duplicate(true)
+	typo_map["elevaton_zones"] = typo_map["elevation_zones"] # misspelled - "elevation_zones" itself stays present, so this is a genuine extra unknown key
+	var typo_errors: Array = MapCatalogScript.validate_map_def(typo_map)
+	var caught_unknown_key = false
+	for e in typo_errors:
+		if "elevaton_zones" in e:
+			caught_unknown_key = true
+	if not caught_unknown_key:
+		print("  [FAIL] A misspelled field name should be caught as an unknown-key error. Got: ", typo_errors)
+		return false
+
+	var oob_map = base_map.duplicate(true)
+	oob_map["resource_nodes"] = oob_map["resource_nodes"].duplicate(true)
+	oob_map["resource_nodes"].append({"position": Vector3(99999, 0, 0), "type": "metal", "amount": 500})
+	var oob_errors: Array = MapCatalogScript.validate_map_def(oob_map)
+	var caught_out_of_bounds = false
+	for e in oob_errors:
+		if "resource_nodes" in e and "outside map_half_extents" in e:
+			caught_out_of_bounds = true
+	if not caught_out_of_bounds:
+		print("  [FAIL] A resource node placed outside map_half_extents should be caught. Got: ", oob_errors)
+		return false
+
+	print("  [PASS] All 8 bundled maps validate clean via FIELD_SPEC; unknown map id, wrong-typed scalar, misspelled field, and out-of-bounds resource node are all caught.")
 	return true
 
 func test_2d_ui_chrome_overhaul() -> bool:

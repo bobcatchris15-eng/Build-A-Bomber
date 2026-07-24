@@ -4,6 +4,21 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-24 — RTS_CORE_ROADMAP.md B1: map schema validator
+
+Picked up the roadmap's terrain/maps track (prioritized after the mandatory A1/A2 production-authority work) with its first, no-format-change chunk: a real validator over the 8 bundled maps in `map_catalog.gd`.
+
+**Shipped:**
+- `MapCatalog.FIELD_SPEC`: a declarative field → type → required → range spec covering every field the header comment already documented (`name`, `description`, `map_half_extents`, `ground_color`, `water_blobs`, `water_areas`, `shallow_water_areas`, `obstacles`, `elevation_zones`, `surface_zones`, `bridges`, `resource_nodes`, `player_start`/`enemy_start`) - array/dictionary fields carry a nested `item` spec so per-subkey and unknown-key checking falls out of one recursive walk instead of a bespoke validator per field.
+- `MapCatalog.validate_map_def(map_def: Dictionary) -> Array` does the actual walk (reusable against any Dictionary, not just something already in `MAPS`); `validate_map(map_id: String)` is the thin by-id wrapper the rest of the codebase will call. Split this way specifically so tests can validate a deliberately corrupted copy without ever mutating the shared `MAPS` const.
+- One cross-field check the per-field spec can't express alone: every `resource_nodes` entry has to sit inside the map's own `map_half_extents` - nothing upstream enforced this before.
+
+**Verified:**
+- New test `test_map_schema_validator()`: all 8 bundled maps validate with zero errors; an unknown map id is reported; three separate corrupted in-memory copies (each isolated, not stacked - a wrong-typed `map_half_extents` would otherwise suppress the bounds check, which needs a real number to compare against) prove a bad-typed scalar, a misspelled field name (`elevaton_zones`), and an out-of-bounds resource node are each genuinely caught.
+- Full suite green twice in a row.
+
+---
+
 ## 2026-07-24 — RTS_CORE_ROADMAP.md A2: debug/options panel, infinite-resources toggle is now a real runtime var
 
 Picked up `RTS_CORE_ROADMAP.md` where A1 (one production authority, commit `9ff8604`) left off. A2's goal: `INFINITE_PLAYER_RESOURCES_FOR_TESTING` goes from a hardcoded const to a real runtime toggle, surfaced in an actual debug/options panel, default unchanged (still `true` — Chris is still developing against the sandbox economy).

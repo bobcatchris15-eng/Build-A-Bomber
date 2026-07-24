@@ -434,3 +434,165 @@ static func get_map(map_id: String) -> Dictionary:
 
 static func get_map_name(map_id: String) -> String:
 	return get_map(map_id).get("name", map_id)
+
+# RTS_CORE_ROADMAP.md B1: a declarative field -> type -> required -> range
+# spec, walked by one reflective validator (validate_map()) instead of
+# hand-written per-field asserts - the GDScript analogue of OpenRA's lint
+# passes (D1's decision). Ships BEFORE the B3 JSON-format swap so that
+# migration has a safety net to catch a transcription error against, per
+# this file's own MAPS const being the only source of truth today.
+#
+# Each leaf spec: {"type": <below>, "required": bool, "min": num (opt),
+# "enum": Array[String] (opt)}. Array/Dictionary specs additionally carry
+# "item": a nested field-spec Dictionary, applied to every array element
+# (Array) or directly (Dictionary) - same recursive shape used all the way
+# down, so obstacles/elevation_zones/etc. get free per-subkey + unknown-key
+# checking without a bespoke validator each.
+const FIELD_SPEC: Dictionary = {
+	"name": {"type": "string", "required": true},
+	"description": {"type": "string", "required": true},
+	"map_half_extents": {"type": "number", "required": true, "min": 1.0},
+	"ground_color": {"type": "color", "required": true},
+	"water_blobs": {"type": "array", "required": false, "item": {
+		"center": {"type": "vector3", "required": true},
+		"radius": {"type": "number", "required": true, "min": 0.01},
+		"irregularity": {"type": "number", "required": false},
+		"depth": {"type": "number", "required": false},
+		"shore_blend": {"type": "number", "required": false},
+	}},
+	"water_areas": {"type": "array", "required": false, "item": {
+		"center": {"type": "vector3", "required": true},
+		"half_extents": {"type": "vector2", "required": true},
+	}},
+	"shallow_water_areas": {"type": "array", "required": false, "item": {
+		"center": {"type": "vector3", "required": true},
+		"half_extents": {"type": "vector2", "required": true},
+	}},
+	"obstacles": {"type": "array", "required": false, "item": {
+		"center": {"type": "vector3", "required": true},
+		"half_extents": {"type": "vector2", "required": true},
+		"type": {"type": "string", "required": false, "enum": ["rock", "building"]},
+		"building_height": {"type": "number", "required": false, "min": 0.01},
+	}},
+	"elevation_zones": {"type": "array", "required": false, "item": {
+		"center": {"type": "vector3", "required": true},
+		"half_extents": {"type": "vector2", "required": true},
+		"height": {"type": "number", "required": true},
+		"ramp_side": {"type": "string", "required": true, "enum": ["north", "south", "east", "west"]},
+		"ramp_width": {"type": "number", "required": true, "min": 0.01},
+	}},
+	"surface_zones": {"type": "array", "required": false, "item": {
+		"center": {"type": "vector3", "required": true},
+		"half_extents": {"type": "vector2", "required": true},
+		"surface_type": {"type": "string", "required": true, "enum": ["marsh", "rocky", "snow_mud", "sand"]},
+	}},
+	"bridges": {"type": "array", "required": false, "item": {
+		"center": {"type": "vector3", "required": true},
+		"half_extents": {"type": "vector2", "required": true},
+		"deck_height": {"type": "number", "required": false},
+	}},
+	"resource_nodes": {"type": "array", "required": false, "item": {
+		"position": {"type": "vector3", "required": true},
+		"type": {"type": "string", "required": true, "enum": ["metal", "crystal"]},
+		"amount": {"type": "number", "required": true, "min": 1},
+	}},
+	"player_start": {"type": "dictionary", "required": true, "item": {
+		"hq": {"type": "vector3", "required": true},
+		"factory": {"type": "vector3", "required": true},
+		"refinery": {"type": "vector3", "required": true},
+		"harvester": {"type": "vector3", "required": true},
+	}},
+	"enemy_start": {"type": "dictionary", "required": true, "item": {
+		"hq": {"type": "vector3", "required": true},
+		"factory": {"type": "vector3", "required": true},
+		"refinery": {"type": "vector3", "required": true},
+		"harvester": {"type": "vector3", "required": true},
+	}},
+}
+
+# Returns an Array[String] of human-readable errors; empty = valid. Looks
+# the id up in MAPS and delegates to validate_map_def() - split out so
+# tests can validate a deliberately corrupted IN-MEMORY copy of a map
+# without mutating the shared MAPS const to do it.
+static func validate_map(map_id: String) -> Array:
+	if not MAPS.has(map_id):
+		return ["Unknown map id '%s'" % map_id]
+	return validate_map_def(MAPS[map_id])
+
+# Walks FIELD_SPEC against any map Dictionary - no per-map hand-written
+# asserts, so a 9th map (or a test's corrupted copy) gets the exact same
+# coverage the first 8 already do.
+static func validate_map_def(map_def: Dictionary) -> Array:
+	var errors: Array = []
+	_validate_dict(map_def, FIELD_SPEC, "", errors)
+
+	# Cross-field check (not expressible in the per-field spec alone):
+	# every resource node has to actually sit inside the map's own bounds -
+	# nothing upstream of this enforces that today.
+	var half_extents = map_def.get("map_half_extents", 0)
+	if typeof(half_extents) == TYPE_FLOAT or typeof(half_extents) == TYPE_INT:
+		var nodes = map_def.get("resource_nodes", [])
+		if typeof(nodes) == TYPE_ARRAY:
+			for i in range(nodes.size()):
+				var node = nodes[i]
+				if typeof(node) == TYPE_DICTIONARY and typeof(node.get("position")) == TYPE_VECTOR3:
+					var pos: Vector3 = node["position"]
+					if abs(pos.x) > half_extents or abs(pos.z) > half_extents:
+						errors.append("resource_nodes[%d].position %s is outside map_half_extents %s" % [i, pos, half_extents])
+	return errors
+
+static func _validate_dict(d: Dictionary, spec: Dictionary, prefix: String, errors: Array) -> void:
+	for key in spec.keys():
+		var full_key = prefix + key
+		if not d.has(key):
+			if spec[key].get("required", false):
+				errors.append("Missing required field '%s'" % full_key)
+			continue
+		_validate_value(d[key], spec[key], full_key, errors)
+	for key in d.keys():
+		if not spec.has(key):
+			errors.append("Unknown field '%s'" % (prefix + str(key)))
+
+static func _validate_value(value, field_spec: Dictionary, full_key: String, errors: Array) -> void:
+	var t: String = field_spec.get("type", "")
+	match t:
+		"string":
+			if typeof(value) != TYPE_STRING:
+				errors.append("'%s' should be a String, got type %d" % [full_key, typeof(value)])
+				return
+			if field_spec.has("enum") and not (value in field_spec["enum"]):
+				errors.append("'%s' value '%s' not in allowed set %s" % [full_key, value, field_spec["enum"]])
+		"number":
+			if typeof(value) != TYPE_INT and typeof(value) != TYPE_FLOAT:
+				errors.append("'%s' should be a number, got type %d" % [full_key, typeof(value)])
+				return
+			if field_spec.has("min") and value < field_spec["min"]:
+				errors.append("'%s' value %s is below minimum %s" % [full_key, value, field_spec["min"]])
+		"color":
+			if typeof(value) != TYPE_COLOR:
+				errors.append("'%s' should be a Color, got type %d" % [full_key, typeof(value)])
+		"vector3":
+			if typeof(value) != TYPE_VECTOR3:
+				errors.append("'%s' should be a Vector3, got type %d" % [full_key, typeof(value)])
+		"vector2":
+			if typeof(value) != TYPE_VECTOR2:
+				errors.append("'%s' should be a Vector2, got type %d" % [full_key, typeof(value)])
+		"array":
+			if typeof(value) != TYPE_ARRAY:
+				errors.append("'%s' should be an Array, got type %d" % [full_key, typeof(value)])
+				return
+			if field_spec.has("item"):
+				for i in range(value.size()):
+					var elem = value[i]
+					if typeof(elem) != TYPE_DICTIONARY:
+						errors.append("'%s[%d]' should be a Dictionary, got type %d" % [full_key, i, typeof(elem)])
+						continue
+					_validate_dict(elem, field_spec["item"], "%s[%d]." % [full_key, i], errors)
+		"dictionary":
+			if typeof(value) != TYPE_DICTIONARY:
+				errors.append("'%s' should be a Dictionary, got type %d" % [full_key, typeof(value)])
+				return
+			if field_spec.has("item"):
+				_validate_dict(value, field_spec["item"], full_key + ".", errors)
+		_:
+			errors.append("Internal: unknown field-spec type '%s' for '%s'" % [t, full_key])
