@@ -12,8 +12,7 @@ MODLY_DIR = Path(r"C:\Users\Chris\Documents\Modly")
 EXT_DIR = MODLY_DIR / "extensions" / "triposg"
 VENDOR_DIR = EXT_DIR / "vendor"
 MODEL_DIR = MODLY_DIR / "models" / "triposg" / "generate"
-OUTPUT_DIR = Path(r"E:\Build-A-Bomber\TRIPO_GEN_Meshes")
-
+OUTPUT_DIR = Path(r"e:\Build-A-Bomber-GitHub\prototype\assets\models\buildings")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Add to sys.path

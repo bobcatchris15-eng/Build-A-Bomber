@@ -120,54 +120,54 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 		if parent and "production" in parent and parent.production:
 			production_queue = parent.production.get_queue(team, kind.replace("_manufactory", ""))
 
-	var mesh_inst = MeshInstance3D.new()
-	mesh_inst.name = "MeshInstance3D"
-	var box = BoxMesh.new()
-	box.size = stats.size
-	mesh_inst.mesh = box
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = stats.color if team == 0 else stats.color.lerp(Color(0.7, 0.2, 0.2), 0.45)
-	mesh_inst.material_override = mat
-	mesh_inst.position = Vector3(0, stats.size.y / 2.0, 0)
-	add_child(mesh_inst)
+	var glb_loaded = _setup_building_glb_mesh(kind, stats)
+	if not glb_loaded:
+		var mesh_inst = MeshInstance3D.new()
+		mesh_inst.name = "MeshInstance3D"
+		var box = BoxMesh.new()
+		box.size = stats.size
+		mesh_inst.mesh = box
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = stats.color if team == 0 else stats.color.lerp(Color(0.7, 0.2, 0.2), 0.45)
+		mesh_inst.material_override = mat
+		mesh_inst.position = Vector3(0, stats.size.y / 2.0, 0)
+		add_child(mesh_inst)
 
-	# Simple identifying rooftop detail so prefabs read differently at a glance
-	var detail = MeshInstance3D.new()
-	var dmat = StandardMaterial3D.new()
-	dmat.albedo_color = Color(0.2, 0.9, 0.9) if team == 0 else Color(1.0, 0.35, 0.2)
-	dmat.emission_enabled = true
-	dmat.emission = dmat.albedo_color
-	detail.material_override = dmat
-	match kind:
-		"hq":
-			var antenna = CylinderMesh.new()
-			antenna.top_radius = 0.08
-			antenna.bottom_radius = 0.08
-			antenna.height = 3.0
-			detail.mesh = antenna
-			detail.position = Vector3(0, stats.size.y + 1.5, 0)
-		"refinery":
-			var silo = CylinderMesh.new()
-			silo.top_radius = 1.0
-			silo.bottom_radius = 1.0
-			silo.height = 1.5
-			detail.mesh = silo
-			detail.position = Vector3(1.2, stats.size.y + 0.75, 1.2)
-		"power_plant":
-			# Placeholder-simple by design (see PREFAB_STATS comment) - a
-			# glowing coil so it reads as "power" at a glance, nothing more.
-			var coil = CylinderMesh.new()
-			coil.top_radius = 0.6
-			coil.bottom_radius = 0.9
-			coil.height = 1.8
-			detail.mesh = coil
-			detail.position = Vector3(0, stats.size.y + 0.9, 0)
-		"light_manufactory", "medium_manufactory", "heavy_manufactory":
-			var vent = BoxMesh.new()
-			vent.size = Vector3(stats.size.x * 0.65, 0.6, 1.2)
-			detail.mesh = vent
-			detail.position = Vector3(0, stats.size.y + 0.3, 0)
-	add_child(detail)
+		# Simple identifying rooftop detail so prefabs read differently at a glance
+		var detail = MeshInstance3D.new()
+		var dmat = StandardMaterial3D.new()
+		dmat.albedo_color = Color(0.2, 0.9, 0.9) if team == 0 else Color(1.0, 0.35, 0.2)
+		dmat.emission_enabled = true
+		dmat.emission = dmat.albedo_color
+		detail.material_override = dmat
+		match kind:
+			"hq":
+				var antenna = CylinderMesh.new()
+				antenna.top_radius = 0.08
+				antenna.bottom_radius = 0.08
+				antenna.height = 3.0
+				detail.mesh = antenna
+				detail.position = Vector3(0, stats.size.y + 1.5, 0)
+			"refinery":
+				var silo = CylinderMesh.new()
+				silo.top_radius = 1.0
+				silo.bottom_radius = 1.0
+				silo.height = 1.5
+				detail.mesh = silo
+				detail.position = Vector3(1.2, stats.size.y + 0.75, 1.2)
+			"power_plant":
+				var coil = CylinderMesh.new()
+				coil.top_radius = 0.6
+				coil.bottom_radius = 0.9
+				coil.height = 1.8
+				detail.mesh = coil
+				detail.position = Vector3(0, stats.size.y + 0.9, 0)
+			"light_manufactory", "medium_manufactory", "heavy_manufactory":
+				var vent = BoxMesh.new()
+				vent.size = Vector3(stats.size.x * 0.65, 0.6, 1.2)
+				detail.mesh = vent
+				detail.position = Vector3(0, stats.size.y + 0.3, 0)
+		add_child(detail)
 
 	var col = CollisionShape3D.new()
 	var col_box = BoxShape3D.new()
@@ -438,3 +438,68 @@ func die():
 	var tween = create_tween()
 	tween.tween_property(self, "scale", Vector3(0.01, 0.01, 0.01), 0.5)
 	tween.finished.connect(func(): queue_free())
+
+func _setup_building_glb_mesh(kind_str: String, stats: Dictionary) -> bool:
+	var glb_path = "res://assets/models/buildings/%s.glb" % kind_str
+	if not ResourceLoader.exists(glb_path):
+		return false
+	var scene = load(glb_path) as PackedScene
+	if not scene:
+		return false
+	var glb_inst = scene.instantiate()
+	glb_inst.name = "BuildingGLBMesh"
+
+	var aabb = _compute_node_aabb(glb_inst)
+	if aabb.size.x < 0.01 or aabb.size.y < 0.01 or aabb.size.z < 0.01:
+		return false
+
+	var scale_vec = Vector3(
+		stats.size.x / aabb.size.x,
+		stats.size.y / aabb.size.y,
+		stats.size.z / aabb.size.z
+	)
+	glb_inst.scale = scale_vec
+	glb_inst.position = Vector3(0, stats.size.y / 2.0, 0) - (aabb.position + aabb.size / 2.0) * scale_vec
+
+	var faction_color = FactionCatalog.get_visual_color(faction)
+	if team != 0:
+		faction_color = faction_color.lerp(Color(0.8, 0.2, 0.2), 0.45)
+	_apply_material_to_building_mesh(glb_inst, faction_color)
+
+	add_child(glb_inst)
+	return true
+
+func _compute_node_aabb(node: Node3D) -> AABB:
+	var combined_aabb = AABB()
+	var first = true
+	var meshes = []
+	_find_mesh_instances(node, meshes)
+	for mi in meshes:
+		if mi.mesh:
+			var maabb = mi.mesh.get_aabb()
+			maabb.position = mi.transform * maabb.position
+			maabb.size = mi.transform.basis * maabb.size
+			if first:
+				combined_aabb = maabb
+				first = false
+			else:
+				combined_aabb = combined_aabb.merge(maabb)
+	if first:
+		combined_aabb = AABB(Vector3(-1, -1, -1), Vector3(2, 2, 2))
+	return combined_aabb
+
+func _find_mesh_instances(node: Node, results: Array) -> void:
+	if node is MeshInstance3D:
+		results.append(node)
+	for child in node.get_children():
+		_find_mesh_instances(child, results)
+
+func _apply_material_to_building_mesh(node: Node, col: Color) -> void:
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = col
+	mat.roughness = 0.4
+	mat.metallic = 0.3
+	if node is MeshInstance3D:
+		node.material_override = mat
+	for child in node.get_children():
+		_apply_material_to_building_mesh(child, col)
