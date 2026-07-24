@@ -1040,7 +1040,10 @@ def build_leg_segment(name, length=0.5, radius_top=0.12, radius_bottom=0.08, col
 	shin - narrows the whole leg toward the foot); this pass adds the
 	joint housing the doc asks for - a separate boolean-added collar at
 	the wide (hip) end, individually beveled, rather than a smooth taper
-	reading as one uninterrupted cone."""
+	reading as one uninterrupted cone. Longitudinal reinforcement ridges
+	(Chris's "cooler" ask) run most of the segment's length at the taper's
+	AVERAGE radius - a deliberate approximation (real cone-hugging ridges
+	would need a proper swept profile) that reads fine at this scale."""
 	bm = bmesh.new()
 	R = 2.0 * max(radius_top, radius_bottom)
 	seg_verts = add_cyl_y(bm, (0, length / 2.0, 0), radius_top, length, segments=12, radius2=radius_bottom)
@@ -1048,6 +1051,32 @@ def build_leg_segment(name, length=0.5, radius_top=0.12, radius_bottom=0.08, col
 	housing_h = length * 0.12
 	add_cyl_y(bm, (0, housing_h * 0.5, 0), radius_top * 1.18, housing_h, segments=12, radius2=radius_top * 1.1)
 	greeble_bolt_ring(bm, (0, length * 0.05, 0), radius_top * 0.85, count=6, axis='y')
+
+	ridge_count = 5
+	ridge_r = (radius_top + radius_bottom) * 0.5 * 0.95
+	ridge_len = length * 0.75
+	for i in range(ridge_count):
+		angle = i * (2.0 * math.pi / ridge_count)
+		pos = (math.cos(angle) * ridge_r, housing_h + ridge_len * 0.5, math.sin(angle) * ridge_r)
+		add_box(bm, pos, (radius_top * 0.16, ridge_len, radius_top * 0.14), rot_axis='y', rot_angle=angle)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.55, roughness=0.4)
+	return obj
+
+
+def build_leg_joint(name, radius=0.18, height=0.22, segments=8, color=(0.22, 0.22, 0.25)):
+	"""Bulky faceted joint housing (Chris's ask) - low segment count (8,
+	same technique build_airship_hull's envelope cross-section uses) keeps
+	the dihedral angle between adjacent side faces above finalize()'s
+	35-degree auto-smooth threshold, so it reads as flat riveted panels
+	instead of a smooth drum. Used for legs' hull-mount hip joint and its
+	ankle/toe joint - both previously bare, unarticulated junctions (the
+	hip only had a generic rg_mount_box, the ankle had nothing at all)."""
+	bm = bmesh.new()
+	add_cyl_y(bm, (0, height * 0.5, 0), radius, height, segments=segments)
+	greeble_bolt_ring(bm, (0, height * 0.85, 0), radius * 0.7, count=6, axis='y')
+	greeble_bolt_ring(bm, (0, height * 0.15, 0), radius * 0.7, count=6, axis='y')
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.55, roughness=0.4)
 	return obj
@@ -1236,10 +1265,104 @@ def build_rotor_blade(name, length=1.2, width_root=0.16, width_tip=0.08, thickne
 	return obj
 
 
-def build_rotor_duct_ring(name, major_radius=1.2, minor_radius=0.06, height=0.25, color=(0.3, 0.3, 0.33)):
+def build_tapered_strut(name, length=1.0, near_half=0.12, far_half=0.36, depth_scale=1.0, color=(0.25, 0.25, 0.28)):
+	"""Structural strut/pylon, thin at local Y=0 (near_half) and flaring out
+	to a much thicker cross-section at local Y=length (far_half) - same
+	taper technique build_rotor_blade already uses (two rectangular rings
+	of verts through convex_hull, safe here since both cross-sections are
+	convex rectangles and the whole shape stays convex end-to-end, no
+	re-entrant profile). Used for helicopter_rotors' hull-mounting pylon,
+	which needs to read as load-bearing - thick where it roots into the
+	hull, thin where it meets the rotor. depth_scale (default 1.0, square
+	cross-section) shrinks ONLY the local-Z half-width relative to local-X,
+	flattening the strut into a wide, thin blade instead of a square rod -
+	used for hover_engine's mounting pylon (Chris's ask: "about 3 times as
+	wide as they are thick", i.e. depth_scale=1/3)."""
 	bm = bmesh.new()
-	add_ring(bm, (0, height * 0.5, 0), major_radius, minor_radius, major_segments=32, minor_segments=8)
-	add_cyl_y(bm, (0, height * 0.5, 0), major_radius + minor_radius, height, segments=32, radius2=major_radius + minor_radius)
+	pts = [
+		(-near_half, 0, -near_half * depth_scale), (near_half, 0, -near_half * depth_scale),
+		(-near_half, 0, near_half * depth_scale), (near_half, 0, near_half * depth_scale),
+		(-far_half, length, -far_half * depth_scale), (far_half, length, -far_half * depth_scale),
+		(-far_half, length, far_half * depth_scale), (far_half, length, far_half * depth_scale),
+	]
+	verts = [bm.verts.new(GV(*p)) for p in pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.5, roughness=0.45)
+	return obj
+
+
+def build_aerofoil_strut(name, length=1.0, chord=0.5, thickness=0.16, taper=0.85, color=(0.3, 0.3, 0.33)):
+	"""Mounting pylon with a simplified symmetric aerofoil cross-section
+	(Chris's ask: "vaguely aerofoil shaped... pretend that gives enough
+	lift") - a 6-point convex hexagon standing in for a real aerofoil
+	profile (blunt-ish leading edge, max thickness biased toward the front
+	third, pointed trailing edge), swept along local Y the same two-ring
+	convex_hull taper technique build_tapered_strut uses. `taper` (0-1)
+	shrinks the far end only slightly relative to the near end - kept
+	close to 1.0 by default since fixed_wing_engine's pylon should read as
+	substantially thicker throughout ("significantly thicker than the
+	hover ones"), not whip-thin at either end like that strut."""
+	bm = bmesh.new()
+
+	def profile(y, chord_s, thick_s):
+		return [
+			(-0.5 * chord_s, y, 0.0),
+			(-0.2 * chord_s, y, 0.5 * thick_s),
+			(0.2 * chord_s, y, 0.5 * thick_s),
+			(0.5 * chord_s, y, 0.0),
+			(0.2 * chord_s, y, -0.5 * thick_s),
+			(-0.2 * chord_s, y, -0.5 * thick_s),
+		]
+
+	pts = profile(0.0, chord, thickness) + profile(length, chord * taper, thickness * taper)
+	verts = [bm.verts.new(GV(*p)) for p in pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.5, roughness=0.35)
+	return obj
+
+
+def build_engine_core(name, length=0.6, radius=0.32, color=(0.32, 0.32, 0.35)):
+	"""Turbine core segment, sits behind the main nacelle - its own length
+	is what fixed_wing_engine's turbine_compression tweak stretches/
+	compresses at runtime ("physically scale a central part of the engine
+	housing longer or shorter... out the back", Chris's ask). Authored
+	along local Z like build_engine_nacelle/build_engine_fan/
+	build_exhaust_cone (the rest of this engine's part family), not local
+	Y, so it shares their placement/rotation convention in
+	_build_fixed_wing_engine(). A few compressor-ring grooves via stacked
+	slightly-recessed rings read as turbine detail without needing a
+	boolean cut."""
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), radius, length, 'z', segments=18)
+	rings = 4
+	for i in range(1, rings):
+		z = -length * 0.5 + length * (i / float(rings))
+		add_cyl_axis(bm, (0, 0, z), radius * 1.03, length * 0.04, 'z', segments=18)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.7, roughness=0.3)
+	return obj
+
+
+def build_rotor_duct_ring(name, major_radius=1.2, minor_radius=0.06, height=0.25, color=(0.3, 0.3, 0.33)):
+	"""Ducted-fan shroud wall. Previously used add_cyl_y for the wall, which
+	always cap_ends=True (it has no hollow option) - at this radius/height
+	that rendered as a solid opaque drum completely covering the blades
+	instead of a ring they spin inside (caught via a debug capture, not
+	code review - a solid disc reads fine in a thumbnail-sized screenshot).
+	Built here directly with cap_ends=False for a genuine hollow tube, with
+	a thin torus rim (add_ring) top and bottom for a lipped-edge look."""
+	bm = bmesh.new()
+	wall_radius = major_radius + minor_radius
+	ret = bmesh.ops.create_cone(bm, cap_ends=False, cap_tris=False, segments=32,
+		radius1=wall_radius, radius2=wall_radius, depth=height)
+	bmesh.ops.translate(bm, verts=ret['verts'], vec=GV(0, height * 0.5, 0))
+	add_ring(bm, (0, 0, 0), wall_radius, minor_radius * 0.6, major_segments=32, minor_segments=8)
+	add_ring(bm, (0, height, 0), wall_radius, minor_radius * 0.6, major_segments=32, minor_segments=8)
+	bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.45, roughness=0.5)
 	return obj
@@ -2344,13 +2467,18 @@ def generate_parts():
 	export_and_cleanup(build_rotor_hub("rotor_hub"), PARTS_DIR, "rotor_hub")
 	export_and_cleanup(build_rotor_blade("rotor_blade"), PARTS_DIR, "rotor_blade")
 	export_and_cleanup(build_rotor_duct_ring("rotor_duct_ring"), PARTS_DIR, "rotor_duct_ring")
+	export_and_cleanup(build_tapered_strut("mount_strut_tapered"), PARTS_DIR, "mount_strut_tapered")
+	export_and_cleanup(build_tapered_strut("mount_strut_flat", depth_scale=1.0 / 3.0), PARTS_DIR, "mount_strut_flat")
 	export_and_cleanup(build_drive_sprocket("drive_sprocket"), PARTS_DIR, "drive_sprocket")
 	export_and_cleanup(build_leg_foot("leg_foot"), PARTS_DIR, "leg_foot")
+	export_and_cleanup(build_leg_joint("leg_joint"), PARTS_DIR, "leg_joint")
 	export_and_cleanup(build_hover_fan("hover_fan"), PARTS_DIR, "hover_fan")
 	export_and_cleanup(build_hover_skirt("hover_skirt"), PARTS_DIR, "hover_skirt")
 	export_and_cleanup(build_engine_nacelle("engine_nacelle"), PARTS_DIR, "engine_nacelle")
 	export_and_cleanup(build_engine_fan("engine_fan"), PARTS_DIR, "engine_fan")
 	export_and_cleanup(build_exhaust_cone("exhaust_cone"), PARTS_DIR, "exhaust_cone")
+	export_and_cleanup(build_engine_core("engine_core"), PARTS_DIR, "engine_core")
+	export_and_cleanup(build_aerofoil_strut("mount_strut_aerofoil"), PARTS_DIR, "mount_strut_aerofoil")
 	export_and_cleanup(build_wing_shoulder("wing_shoulder"), PARTS_DIR, "wing_shoulder")
 	export_and_cleanup(build_wing_membrane("wing_membrane"), PARTS_DIR, "wing_membrane")
 	export_and_cleanup(build_wing_rib("wing_rib"), PARTS_DIR, "wing_rib")

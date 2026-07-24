@@ -1320,22 +1320,20 @@ const LOCOMOTION_TWEAK_SPECS = {
 	],
 	"tracked_treads": [
 		{"name": "tread_width", "label": "Tread Track Width", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
-		{"name": "road_wheel_count", "label": "Road Wheels", "min": 3.0, "max": 8.0, "step": 1.0, "default": 5.0},
 		{"name": "drive_sprocket", "label": "Exposed Sprocket", "type": "bool", "default": true}
 	],
 	"legs": [
 		{"name": "leg_count", "label": "Leg Count", "min": 2.0, "max": 8.0, "step": 2.0, "default": 4.0},
-		{"name": "leg_length", "label": "Leg Length", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "knee_height", "label": "Knee Height", "min": -0.5, "max": 1.5, "step": 0.05, "default": 0.375},
 		{"name": "foot_size", "label": "Foot Pad Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
 	"hover_engine": [
-		{"name": "pad_count", "label": "Pad Count", "min": 2.0, "max": 4.0, "step": 2.0, "default": 2.0},
-		{"name": "pad_size", "label": "Hover Pad Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
-		{"name": "skirt", "label": "Flexible Skirt", "type": "bool", "default": false}
+		{"name": "pad_count", "label": "Pad Count", "min": 4.0, "max": 8.0, "step": 1.0, "default": 4.0},
+		{"name": "emv_level", "label": "Electron Megavoltage", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0}
 	],
 	"fixed_wing_engine": [
-		{"name": "nacelle_size", "label": "Engine Nacelle Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
-		{"name": "fan_blades", "label": "Intake Fan Blades", "min": 4.0, "max": 10.0, "step": 1.0, "default": 6.0},
+		{"name": "engine_count", "label": "Engine Count", "min": 2.0, "max": 6.0, "step": 1.0, "default": 2.0},
+		{"name": "turbine_compression", "label": "Turbine Compression", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "afterburner", "label": "Afterburner Ring", "type": "bool", "default": false}
 	],
 	"ornithopter_wing": [
@@ -1381,10 +1379,10 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 			thrust = (count / 4.0) * length
 			capacity = (count / 4.0) * foot_size * 120.0
 		"hover_engine":
-			var count = settings.get("pad_count", settings.get("count", 2.0))
-			var size = settings.get("pad_size", settings.get("size", 1.0))
-			thrust = (count / 2.0) * size
-			capacity = (count / 2.0) * size * 80.0
+			var count = settings.get("pad_count", 4.0)
+			var emv = settings.get("emv_level", 1.0)
+			thrust = count / 4.0
+			capacity = (count / 4.0) * emv * 160.0
 		"helicopter_rotors":
 			var units = settings.get("rotor_units", settings.get("count", 1.0))
 			var blades = settings.get("blade_count", 4.0)
@@ -1392,9 +1390,10 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 			var duct = settings.get("duct", false)
 			thrust = units * (0.8 + 0.05 * blades) * length * (1.15 if duct else 1.0)
 		"fixed_wing_engine":
-			var size = settings.get("nacelle_size", settings.get("size", 1.0))
+			var count = settings.get("engine_count", settings.get("count", 2.0))
+			var compression = settings.get("turbine_compression", 1.0)
 			var afterburner = settings.get("afterburner", false)
-			thrust = size * (1.3 if afterburner else 1.0)
+			thrust = (count / 2.0) * compression * (1.3 if afterburner else 1.0)
 		"ornithopter_wing":
 			var wingspan = settings.get("wingspan", settings.get("size", 1.0))
 			thrust = wingspan

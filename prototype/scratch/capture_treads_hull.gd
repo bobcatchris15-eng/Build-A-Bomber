@@ -20,7 +20,7 @@ func _init():
 	scene._place_hull_from_ui("medium_hull")
 	for i in range(6): await process_frame
 
-	scene.update_locomotion("tracked_treads", {"tread_width": 1.0, "road_wheel_count": 5, "drive_sprocket": true})
+	scene.update_locomotion("tracked_treads", {"tread_width": 1.0, "drive_sprocket": true})
 	for i in range(6): await process_frame
 
 	if cam and "_distance" in cam:

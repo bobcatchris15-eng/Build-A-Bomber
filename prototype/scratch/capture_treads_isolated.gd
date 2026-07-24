@@ -34,7 +34,7 @@ func _init():
 	var VisualBuilder = load("res://scripts/visual_builder.gd")
 	var module = Node3D.new()
 	world.add_child(module)
-	VisualBuilder.build_visual("tracked_treads", module, Vector3(0.8, 0.6, 2.5), Color.DARK_OLIVE_GREEN, {"tread_width": 1.0, "road_wheel_count": 5, "drive_sprocket": true, "target_length": 6.0})
+	VisualBuilder.build_visual("tracked_treads", module, Vector3(0.8, 0.6, 2.5), Color.DARK_OLIVE_GREEN, {"tread_width": 1.0, "drive_sprocket": true, "target_length": 6.0})
 	for i in range(4): await process_frame
 
 	var cam = Camera3D.new()
@@ -52,12 +52,13 @@ func _init():
 	root.get_texture().get_image().save_png("%s/treads_isolated_side.png" % out_dir)
 	print("[CAPTURE] treads isolated_side saved")
 
-	VisualBuilder.build_visual("tracked_treads", module, Vector3(0.8, 0.6, 2.5), Color.DARK_OLIVE_GREEN, {"tread_width": 1.0, "road_wheel_count": 8, "drive_sprocket": true, "target_length": 6.0})
+	# Close-up on one sprocket/loop junction - checks the loop now fully
+	# covers the sprocket's width (Chris's ask) instead of the sprocket
+	# poking out past a too-narrow belt.
+	cam.position = Vector3(0.9, 0.6, 2.9)
+	cam.look_at(Vector3(0.15, 0.3, 2.5), Vector3.UP)
 	for i in range(4): await process_frame
-	cam.position = Vector3(5.0, 2.4, 5.0)
-	cam.look_at(Vector3(0, 0.3, 0), Vector3.UP)
-	for i in range(4): await process_frame
-	root.get_texture().get_image().save_png("%s/treads_isolated_8wheels.png" % out_dir)
-	print("[CAPTURE] treads isolated_8wheels saved")
+	root.get_texture().get_image().save_png("%s/treads_isolated_sprocket_closeup.png" % out_dir)
+	print("[CAPTURE] treads isolated_sprocket_closeup saved")
 
 	quit(0)

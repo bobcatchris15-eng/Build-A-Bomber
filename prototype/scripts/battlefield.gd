@@ -177,17 +177,38 @@ func _physics_process(delta):
 
 	update_player_hp_ui()
 
-	# Spin helicopter rotors if present
+	# Spin helicopter rotors if present. Previously grabbed get_child(0),
+	# which is whichever mount/strut mesh happens to be built first (not the
+	# blades) - same stale-lookup bug battle_unit.gd had until 702e2dc fixed
+	# it there by name instead; this path never got that fix, so Test Range
+	# rotors silently spun the wrong (static-looking) piece instead of the
+	# actual blade ring.
 	if is_instance_valid(vehicle_hull):
 		for child in vehicle_hull.get_children():
 			if child.has_meta("module_data"):
 				var data = child.get_meta("module_data")
 				if data.type_id == "helicopter_rotors":
-					# Find the MeshInstance3D inside and spin it on Y
-					if child.get_child_count() > 0:
-						var mesh = child.get_child(0)
-						if is_instance_valid(mesh):
-							mesh.rotate_y(15.0 * delta)
+					var rotor = child.get_node_or_null("RotorBlades")
+					if rotor:
+						rotor.rotate_y(15.0 * delta)
+				elif data.type_id == "hover_engine":
+					var mid_ring = child.get_node_or_null("HoverRingMid")
+					if mid_ring:
+						mid_ring.rotate_x(12.0 * delta)
+					var inner_ring = child.get_node_or_null("HoverRingInner")
+					if inner_ring:
+						inner_ring.rotate_y(18.0 * delta)
+				elif data.type_id == "legs":
+					# Rotating on X, not Z - see battle_unit.gd's matching
+					# comment (Z swung sideways like a bird wing; X swings
+					# fore-aft along the direction of travel instead).
+					var swing = child.get_node_or_null("LegRoot/LegSwing")
+					if swing:
+						if vehicle.velocity.length() > 0.3:
+							var phase = child.get_meta("leg_phase", 0.0)
+							swing.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 6.0 + phase) * 0.5
+						else:
+							swing.rotation.x = 0.0
 
 	# Update Camera to follow vehicle
 	var target_cam_pos = vehicle.global_position + Vector3(0, 12, 12)

@@ -137,10 +137,21 @@ static func _ring_of(parent: Node3D, count: int, radius: float, builder_func: Ca
 		builder_func.call(parent, pos, angle, i)
 
 static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}):
-	# Clear any existing visual children.
+	# Clear any existing visual children. remove_child() BEFORE queue_free() -
+	# queue_free() alone doesn't actually detach the node until end-of-frame,
+	# so a caller that immediately calls build_visual() again on the same
+	# parent (blueprint_manager.gd's reconstruct_vehicle() does exactly this:
+	# build_visual() then rebuild_visual() back to back, same frame) would
+	# have its freshly-created "RotorBlades"/"HoverRingMid"/"LegSwing" pivot
+	# collide in name with the still-present old one and get silently
+	# auto-renamed by add_child() - breaking every by-name animation lookup
+	# for any vehicle reconstructed from a blueprint (Skirmish, Test Range,
+	# defense buildings). remove_child() first frees the name immediately;
+	# queue_free() still handles the actual node deletion safely.
 	for child in parent_node.get_children():
 		if child is StaticBody3D:
 			continue
+		parent_node.remove_child(child)
 		child.queue_free()
 
 	# Try to load a monolithic authored mesh for this entire module first (modular sub-part assemblies bypass this)
@@ -1953,7 +1964,10 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 
 static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
 	var width = tweaks.get("tread_width", tweaks.get("width", tweaks.get("size", 1.0)))
-	var road_wheels = int(tweaks.get("road_wheel_count", 5.0))
+	# Fixed at 3 - Chris's ask, no longer a user tweak (was road_wheel_count,
+	# 3-8 via a dedicated slider; removed along with the slider/catalog entry
+	# in stat_calculator.gd/module_catalog.gd/module_placer.gd/module_data.gd).
+	var road_wheels = 3
 	var sprocket = tweaks.get("drive_sprocket", true)
 
 	var loop_mesh = _part("tread_belt_loop")
@@ -1966,16 +1980,25 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# (target_length, passed in from module_placer.gd's update_locomotion() -
 	# the tread's own catalog base_size.z is just a small placeholder with
 	# no relationship to any specific hull, which is why the loop rendered
-	# as a small oval regardless of hull size before this). Height and width
-	# scale up PROPORTIONATELY from that same length ratio so the tread
-	# keeps its authored shape instead of stretching into a thin snake on a
-	# long hull or a squat blob on a short one - tread_width is a separate,
-	# independent multiplier on top of that for user control. Sprockets end
-	# up centered at the hull's own front/rear ends this way (extending past
-	# the hull is fine, per Chris).
+	# as a small oval regardless of hull size before this). Height scales up
+	# PROPORTIONATELY from that same length ratio so the tread keeps its
+	# authored shape instead of stretching into a thin snake on a long hull
+	# or a squat blob on a short one. Sprockets end up centered at the
+	# hull's own front/rear ends this way (extending past the hull is fine,
+	# per Chris).
+	#
+	# actual_size.x deliberately does NOT fold in the tread_width tweak
+	# (`width`) - it used to, which meant every X-axis size/position derived
+	# from it (outboard_x, and via that sprocket_scale/wheel_scale/
+	# belt_center_x) drifted with tread_width too, so dragging the Tread
+	# Track Width slider visibly resized and repositioned the sprockets and
+	# road wheels right along with the belt (Chris: only the belt loop
+	# itself should widen). `width` is applied ONLY to the loop's own
+	# lateral scale below now - everything else here is sized purely off
+	# the hull.
 	var target_length = tweaks.get("target_length", base_size.z)
 	var length_scale = target_length / base_size.z
-	var actual_size = Vector3(base_size.x * width * length_scale, base_size.y * length_scale, target_length)
+	var actual_size = Vector3(base_size.x * length_scale, base_size.y * length_scale, target_length)
 
 	# Real rework, not a layout tweak: the belt is now a genuine closed
 	# LOOP (tread_belt_loop, authored via bmesh.ops.spin in build_meshes.py)
@@ -2017,19 +2040,48 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# separate width (X) axis.
 	var outboard_x = actual_size.x * 0.175
 
+	# Both drive_sprocket and tread_belt_loop are authored with the same
+	# 0.3 width along their own local Y/X (build_drive_sprocket's `width` and
+	# build_tread_belt_loop's `belt_width` in build_meshes.py) - the sprocket
+	# is a cylinder spanning local Y=[0, 0.3] that gets rotated so that span
+	# maps to world X=[position.x - 0.3*sprocket_scale, position.x], i.e.
+	# entirely INBOARD of its own position (see the wheel/sprocket rotation
+	# comments below). The loop, unrotated, is symmetric about its own
+	# position.x instead - so scaling it by the same sprocket_scale factor
+	# alone still leaves half the loop hanging past the sprocket's outboard
+	# face and the other half short of its inboard face. Deliberately NOT
+	# multiplied by `width` (tread_width) - sprocket_scale also sizes the
+	# actual sprockets/feeds belt_center_x below, and Chris's ask is for
+	# tread_width to widen only the belt loop itself, not resize or reposition
+	# the sprockets/wheels. Computed here (before the loop is built) so both
+	# the loop and the sprockets below share one value.
+	var sprocket_scale = target_radius / 0.4
+	var sprocket_width_authored = 0.3
+	# Center of the sprocket's own footprint (which sits entirely inboard of
+	# outboard_x, its outer edge) - the loop anchors to THIS instead of
+	# outboard_x directly, so it's centered over the sprocket's actual
+	# footprint rather than straddling empty space past its outboard face.
+	var belt_center_x = outboard_x - sprocket_width_authored * 0.5 * sprocket_scale
+
 	var loop: MeshInstance3D
 	if loop_mesh:
 		loop = _mesh_inst(loop_mesh, base_color)
-		loop.scale = Vector3(width, y_scale, (target_half_span + target_radius) / (authored_half_span + authored_radius))
+		# `width` (tread_width tweak) applied ONLY here, on top of the
+		# sprocket-covering baseline above - this is the one place tread_width
+		# is allowed to affect the tracked_treads assembly (Chris: "just the
+		# tread loop should get wider, the sprockets and wheels should stay
+		# as is"). The loop grows/shrinks symmetrically around belt_center_x
+		# (fixed, width-independent) rather than shifting it.
+		loop.scale = Vector3(sprocket_scale * width, y_scale, (target_half_span + target_radius) / (authored_half_span + authored_radius))
 	else:
 		loop = MeshInstance3D.new()
 		var loop_box = BoxMesh.new()
-		loop_box.size = actual_size
+		loop_box.size = Vector3(actual_size.x * width, actual_size.y, actual_size.z)
 		loop.mesh = loop_box
 		var loop_mat = StandardMaterial3D.new()
 		loop_mat.albedo_color = base_color
 		loop.material_override = loop_mat
-	loop.position = Vector3(outboard_x, ground_offset + y_shift, 0)
+	loop.position = Vector3(belt_center_x, ground_offset + y_shift, 0)
 	parent_node.add_child(loop)
 
 	# Sprockets at the true forward/rear corners, at the loop's own wrap-
@@ -2039,7 +2091,6 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# 0.4) so the belt visibly hugs them instead of floating around an
 	# unrelated-sized wheel.
 	if sprocket and sprocket_mesh:
-		var sprocket_scale = (target_radius / 0.4) * width
 		var sp_front = _mesh_inst(sprocket_mesh, Color(0.18, 0.18, 0.2))
 		sp_front.scale = Vector3(sprocket_scale, sprocket_scale, sprocket_scale)
 		sp_front.position = Vector3(outboard_x, ground_offset + y_shift, -target_half_span)
@@ -2055,13 +2106,31 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# Road wheels: smaller than the sprockets, riding low at true ground
 	# level (Y=0, same as the loop's own lowest point - see ground_offset
 	# above), evenly spaced strictly BETWEEN the two sprockets. Wheel radius
-	# is derived from the resulting spacing (not a fixed constant) so they
-	# never pile into an overlapping clump regardless of road_wheel_count
-	# (3-8).
-	var wheel_span = target_half_span * 1.55
+	# is derived from the resulting spacing (not a fixed constant) rather
+	# than hardcoded, even though road_wheels is now fixed at 3, so it stays
+	# consistent with how every other size here scales off the hull.
+	# wheel_span keyed directly to the hull's own actual length (actual_size.z
+	# == target_length) rather than target_half_span/sprocket spacing - Chris
+	# wants all 3 road wheels clustered in the middle, spaced regularly
+	# across the center 50% of the hull's length, not spread out toward the
+	# sprockets. Outer wheels would land at +-wheel_span/2 (see
+	# _repeat_along_axis), so half of actual_size.z puts them at +-25% of
+	# hull length, i.e. the center 50% - sized off THIS span first so
+	# wheel_radius_target doesn't shrink from the inward pull below.
+	var wheel_span = actual_size.z * 0.5
 	var spacing = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
 	var wheel_radius_target = clamp(spacing * 0.42, target_radius * 0.25, target_radius * 0.65)
-	var wheel_scale = (wheel_radius_target / 0.45) * width
+	# Not multiplied by `width` (tread_width) - same reasoning as
+	# sprocket_scale above, road wheels stay fixed size when the belt widens.
+	var wheel_scale = wheel_radius_target / 0.45
+
+	# Pull the outer wheels further in by half their own diameter (Chris's
+	# ask, on top of the center-50%-of-hull-length span above) - shrinks the
+	# span used for POSITIONING only, not the span used to size the wheels
+	# above, so this doesn't shrink the wheels themselves, just tucks them in
+	# closer together.
+	wheel_span = max(0.0, wheel_span - wheel_radius_target * 2.0)
+	spacing = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
 
 	# Gearbox + driveshaft behind each road wheel, angled and sized to
 	# actually intersect the wheel - Chris's ask. The earlier attempt
@@ -2123,15 +2192,57 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 	var hub_mesh = _part("rotor_hub")
 	var blade_mesh = _part("rotor_blade")
 	var duct_mesh = _part("rotor_duct_ring")
+	var strut_mesh = _part("mount_strut_tapered")
 	var mount_mesh = _part("rg_mount_box")
 
-	# Per-instance chamfered mount box angled sharply into hull top
-	if mount_mesh:
-		var mount = _mesh_inst(mount_mesh, base_color.darkened(0.3))
-		mount.scale = Vector3(0.5, 0.4, 0.5)
-		mount.position = Vector3(0, -0.15, 0)
-		mount.rotation = Vector3(deg_to_rad(15.0), 0, 0)
-		parent_node.add_child(mount)
+	# Structural mounting pylon down to the hull's physical center - NOT just
+	# to its near edge. module_placer.gd places this whole module at
+	# hull_size/2 + a fixed clearance (1.2 outboard, 0.3 above the hull top)
+	# and passes the FULL resulting distances through as mount_reach_x/y
+	# (mirrored by mount_side for whichever side this instance is on -
+	# rotors are never mirror-flipped like wheels/tracked_treads are, since
+	# the mast+blade ring alone is rotationally symmetric, so this is the
+	# first rotor geometry that needs to know its own side). The strut
+	# travels the FULL mount_reach_x/y, guaranteeing it plunges into the
+	# hull body regardless of hull size or shape.
+	var mount_side = tweaks.get("mount_side", 1.0)
+	var mount_reach_x = tweaks.get("mount_reach_x", 1.2)
+	var mount_reach_y = tweaks.get("mount_reach_y", 0.3)
+	var hull_center = Vector3(-mount_reach_x * mount_side, -mount_reach_y, 0)
+	var strut_len = hull_center.length()
+	var strut_dir = hull_center / strut_len
+	# rg_mount_box/mount_strut_tapered are both authored spanning local
+	# Y=[0, authored_len] - rotating by strut_angle about Z maps that Y span
+	# to world direction (-sin(angle), cos(angle), 0), so solving
+	# strut_dir = that gives the angle needed to point the strut's long axis
+	# at the hull center.
+	var strut_angle = atan2(-strut_dir.x, strut_dir.y)
+	if strut_mesh:
+		# mount_strut_tapered (build_meshes.py) is authored as a genuine
+		# taper - thin (near_half=0.12) at local Y=0, 3x-per-edge thicker
+		# (far_half=0.36) at local Y=1.0 (Chris's ask: the pylon should read
+		# as load-bearing, thickening as it nears the hull, not a uniform
+		# rod) - one continuous mesh, no separate flared "anchor" block
+		# needed anymore.
+		var strut = _mesh_inst(strut_mesh, base_color.darkened(0.3))
+		strut.scale = Vector3(1.0, strut_len, 1.0)
+		strut.position = Vector3.ZERO
+		strut.rotation = Vector3(0, 0, strut_angle)
+		parent_node.add_child(strut)
+	elif mount_mesh:
+		# Fallback (mount_strut_tapered not yet reimported): the old
+		# two-piece uniform-strut + larger-block-at-the-end approximation.
+		var strut = _mesh_inst(mount_mesh, base_color.darkened(0.3))
+		strut.scale = Vector3(0.3, strut_len / 0.4, 0.3)
+		strut.position = Vector3.ZERO
+		strut.rotation = Vector3(0, 0, strut_angle)
+		parent_node.add_child(strut)
+
+		var anchor = _mesh_inst(mount_mesh, base_color.darkened(0.3))
+		anchor.scale = Vector3(0.85, 0.7, 0.85)
+		anchor.position = hull_center
+		anchor.rotation = Vector3(0, 0, strut_angle)
+		parent_node.add_child(anchor)
 
 	var shaft_h = base_size.y * 0.8
 	if mast_mesh:
@@ -2189,109 +2300,257 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 
 
 static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DEEP_SKY_BLUE, tweaks: Dictionary = {}):
-	var pad_size = tweaks.get("pad_size", tweaks.get("size", 1.0))
-	var skirt = tweaks.get("skirt", false)
-
+	# Scifi hover pad, per Chris's redesign: three concentric rings instead
+	# of the old fan+skirt+single-ring combo. The outer ring stays fixed/
+	# horizontal; the middle ring spins continuously around local X and the
+	# inner ring around local Y (battle_unit.gd/battlefield.gd/
+	# module_placer.gd all spin "HoverRingMid"/"HoverRingInner" by name,
+	# same by-name-pivot pattern as helicopter_rotors' "RotorBlades"). No
+	# pad_size/skirt tweaks anymore - footprint is fixed off the hull
+	# (module_placer.gd), and emv_level (Electron Megavoltage) instead
+	# fattens the rings' tube thickness without changing their diameter, so
+	# it reads as "denser hardware", not "bigger pad".
+	var emv = tweaks.get("emv_level", 1.0)
 	var ring_mesh = _part("hover_ring")
-	var fan_mesh = _part("hover_fan")
-	var skirt_mesh = _part("hover_skirt")
-	var mount_mesh = _part("rg_mount_box")
 
-	var actual_size = Vector3(base_size.x * pad_size, base_size.y, base_size.z * pad_size)
-	
-	if mount_mesh:
-		var mount = _mesh_inst(mount_mesh, base_color.darkened(0.3))
-		mount.scale = Vector3(pad_size * 0.8, 0.4, pad_size * 0.8)
-		mount.position = Vector3(0, actual_size.y * 0.3, 0)
-		mount.rotation = Vector3(deg_to_rad(-12.0), 0, 0)
-		parent_node.add_child(mount)
+	# hover_ring is authored with major_radius=0.5, i.e. diameter=1.0 (see
+	# build_hover_ring in build_meshes.py) - ring_scale converts that to the
+	# catalog's actual footprint (base_size.x), and ring_radii nests three
+	# rings inside it (outer/mid/inner) at decreasing diameter.
+	var authored_diameter = 1.0
+	var ring_scale = base_size.x / authored_diameter
+	var ring_radii = [1.0, 0.65, 0.35]
+	var ring_names = ["HoverRingOuter", "HoverRingMid", "HoverRingInner"]
+	var ring_y = base_size.y * 0.5
 
-	if ring_mesh:
-		var pad = _mesh_inst(ring_mesh, base_color, base_color, 1.0)
-		pad.scale = Vector3(pad_size, pad_size, pad_size)
-		pad.position = Vector3(0, actual_size.y / 2.0, 0)
-		parent_node.add_child(pad)
-	else:
-		var pad = MeshInstance3D.new()
-		var cyl = CylinderMesh.new()
-		cyl.top_radius = actual_size.x / 2.0
-		cyl.bottom_radius = actual_size.x / 2.0
-		cyl.height = actual_size.y
-		pad.mesh = cyl
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = base_color.darkened(0.2)
-		pad.material_override = mat
-		pad.position = Vector3(0, actual_size.y / 2.0, 0)
-		parent_node.add_child(pad)
+	for idx in range(3):
+		var ring: MeshInstance3D
+		if ring_mesh:
+			ring = _mesh_inst(ring_mesh, base_color, base_color, 1.0)
+			ring.scale = Vector3(ring_scale * ring_radii[idx], emv, ring_scale * ring_radii[idx])
+		else:
+			ring = MeshInstance3D.new()
+			var torus = TorusMesh.new()
+			torus.outer_radius = ring_scale * ring_radii[idx] * 0.5
+			torus.inner_radius = torus.outer_radius * 0.8
+			ring.mesh = torus
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = base_color
+			mat.emission_enabled = true
+			mat.emission = base_color
+			mat.emission_energy_multiplier = 1.0
+			ring.material_override = mat
+			ring.scale = Vector3(1.0, emv, 1.0)
+		ring.name = ring_names[idx]
+		ring.position = Vector3(0, ring_y, 0)
+		parent_node.add_child(ring)
 
-	if fan_mesh:
-		var fan = _mesh_inst(fan_mesh, Color(0.25, 0.25, 0.28))
-		fan.scale = Vector3(pad_size, 1.0, pad_size)
-		fan.position = Vector3(0, actual_size.y * 0.4, 0)
-		parent_node.add_child(fan)
-
-	if skirt and skirt_mesh:
-		var s_inst = _mesh_inst(skirt_mesh, Color(0.12, 0.12, 0.14))
-		s_inst.scale = Vector3(pad_size, 1.0, pad_size)
-		s_inst.position = Vector3(0, 0, 0)
-		parent_node.add_child(s_inst)
+	# Structural mounting pylon back to the hull's physical center - same
+	# "extend all the way to the center, not just the near edge" fix
+	# helicopter_rotors' pylon got, but flattened (mount_strut_flat, ~3x as
+	# wide as it is thick, per Chris's ask) rather than square, and general
+	# 3D (module_placer.gd distributes pads radially around the hull, so
+	# the reach direction has both an X and a Z component, unlike the
+	# rotor pylon which only ever needed to reach inboard along X).
+	var mount_reach = Vector3(tweaks.get("mount_reach_x", 0.6), tweaks.get("mount_reach_y", 0.15), tweaks.get("mount_reach_z", 0.0))
+	if mount_reach.length() > 0.001:
+		var strut_mesh = _part("mount_strut_flat")
+		var strut_len = mount_reach.length()
+		var dir = mount_reach / strut_len
+		# Gram-Schmidt: build an orthonormal basis with local Y along `dir`
+		# (the strut's authored long axis) - `reference` just needs to be
+		# any vector not parallel to dir, picked per-instance since dir
+		# varies with each pad's own angle around the hull.
+		var reference = Vector3(0, 0, 1)
+		if abs(dir.dot(reference)) > 0.95:
+			reference = Vector3(1, 0, 0)
+		var right = dir.cross(reference).normalized()
+		var forward = right.cross(dir).normalized()
+		if strut_mesh:
+			var strut = _mesh_inst(strut_mesh, base_color.darkened(0.3))
+			# Basis columns pre-scaled directly (right/forward stay unit-
+			# length - the flattened 3-to-1 cross-section is already baked
+			# into the authored mesh - dir scaled to strut_len) rather than
+			# setting .scale separately afterward, which risks desyncing
+			# from a directly-assigned .transform.basis.
+			strut.transform = Transform3D(Basis(right, dir * strut_len, forward), Vector3.ZERO)
+			parent_node.add_child(strut)
+		else:
+			# Fallback (mount_strut_flat not yet reimported): a plain
+			# flattened box, no taper.
+			var mount_mesh = _part("rg_mount_box")
+			if mount_mesh:
+				var strut = _mesh_inst(mount_mesh, base_color.darkened(0.3))
+				strut.transform = Transform3D(Basis(right * 0.6, dir * strut_len, forward * 0.2), Vector3.ZERO)
+				parent_node.add_child(strut)
 
 
 static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.GRAY, tweaks: Dictionary = {}):
 	var leg_length = tweaks.get("leg_length", tweaks.get("size", 1.0))
 	var foot_size = tweaks.get("foot_size", 1.0)
+	# Chris's ask: legs about 2x thicker all the way through (cross-section
+	# only - length/reach are untouched), except the knee joint block,
+	# which is 2.5x bigger all around instead.
+	var thickness_mult = 2.0
+	var knee_mult = 2.5
 
 	var thigh_mesh = _part("leg_thigh")
 	var shin_mesh = _part("leg_shin")
 	var foot_mesh = _part("leg_foot")
+	var joint_mesh = _part("leg_joint")
 	var mount_mesh = _part("rg_mount_box")
 
-	# Per-leg hip mount box angled sharply into hull belly
-	if mount_mesh:
+	# Bulkier faceted hip joint at the hull interface (Chris's ask) -
+	# leg_joint (build_meshes.py) replaces the old plain rg_mount_box here;
+	# low segment count keeps it reading as flat riveted panels rather than
+	# a smooth drum. Falls back to the old generic mount box if leg_joint
+	# hasn't been reimported yet. Stays a direct child of parent_node
+	# (fixed to the hull), NOT the swing pivot below - a real hip mount
+	# doesn't swing with the leg.
+	var hip_y = base_size.y * 0.8 * leg_length
+	if joint_mesh:
+		var hip = _mesh_inst(joint_mesh, base_color.darkened(0.2))
+		hip.scale = Vector3(1.0, 1.0, 1.0) * (0.7 * leg_length * thickness_mult)
+		hip.position = Vector3(0, hip_y, 0)
+		hip.rotation = Vector3(deg_to_rad(-15.0), 0, 0)
+		parent_node.add_child(hip)
+	elif mount_mesh:
 		var mount = _mesh_inst(mount_mesh, base_color.darkened(0.3))
-		mount.scale = Vector3(0.4 * leg_length, 0.4 * leg_length, 0.4 * leg_length)
-		mount.position = Vector3(0, base_size.y * 0.8 * leg_length, 0)
+		mount.scale = Vector3(0.4 * leg_length, 0.4 * leg_length, 0.4 * leg_length) * thickness_mult
+		mount.position = Vector3(0, hip_y, 0)
 		mount.rotation = Vector3(deg_to_rad(-15.0), 0, 0)
 		parent_node.add_child(mount)
 
-	var thigh_len = base_size.y * 0.5 * leg_length
+	# Everything below (thigh/shin/foot/ankle joint) hangs off a "LegSwing"
+	# pivot, itself nested inside a static "leg_root" anchor rooted at the
+	# hip - NOT a single pivot directly under parent_node. module_placer.gd's
+	# _apply_mirror_flip() reflects every DIRECT child of the leg module
+	# once at placement time by rewriting its whole Transform3D; Godot then
+	# decomposes that reflected Transform3D back into .rotation/.scale, and
+	# for a pure X-mirror it's free to pick EITHER (rotation=0, scale=
+	# (-1,1,1)) OR (rotation=(PI,0,0), scale=(-1,-1,-1)) - both represent
+	# the identical transform, but confirmed via a headless test
+	# (scratch/debug_leg_mirror_swing.gd) that Godot 4.3 actually picks the
+	# second one here. The walk animation used to write swing.rotation.x
+	# directly onto that SAME node - which, on the mirrored side, means
+	# overwriting the baked-in PI (the mirror's own encoding) with the
+	# swing angle instead of adding to it, destroying the mirror and
+	# rendering the leg inside-out ("upside down," Chris's report). leg_root
+	# now carries the mirror and is never touched again after placement;
+	# the animation instead rotates the NESTED "LegSwing" pivot, which is
+	# always freshly created at identity and never mirrored itself (mirror-
+	# flip only walks parent_node's DIRECT children) - it just inherits
+	# leg_root's already-correct mirrored frame normally, the same way any
+	# child node does.
+	#
+	# leg_stance_reach (Chris's ask, "wider stance") is carried by the
+	# thigh+shin themselves (40%/60% split), each reoriented to actually
+	# SPAN from its own start point out to where it needs to land - same
+	# "compute a direction and length, orient a stretchable mesh along it"
+	# technique the rotor/hover mounting pylons use - rather than just
+	# translating the whole assembly sideways, which left a gap between
+	# the fixed hip and a floating thigh instead of a real angled leg.
+	# leg_root itself stays at X=0 (still rooted at the hip, flush against
+	# the hull) - only the segments below splay outward from it. Authored
+	# assuming the canonical +X = outboard direction (unmirrored build);
+	# side<0 legs get this mirrored correctly for free via
+	# module_placer.gd's existing whole-subtree mirror-flip.
+	var stance_reach = tweaks.get("leg_stance_reach", 0.0)
+	var leg_root = Node3D.new()
+	# Named (not left auto-generated) so the animation code can reach the
+	# nested "LegSwing" pivot via the fixed path "LegRoot/LegSwing".
+	leg_root.name = "LegRoot"
+	leg_root.position = Vector3(0, hip_y, 0)
+	parent_node.add_child(leg_root)
+
+	var swing = Node3D.new()
+	swing.name = "LegSwing"
+	swing.position = Vector3.ZERO
+	leg_root.add_child(swing)
+
+	# Knee height is a pure cosmetic tweak now (Chris's ask - "doesn't
+	# really make a stat difference, just looking cool"), replacing the old
+	# fixed-margin-above-centerline formula: knee_height is the margin
+	# above the hull's own vertical centerline directly, slider-controlled
+	# in stat_calculator.gd (repurposing what used to be the Leg Length
+	# slider - leg_length itself is no longer user-tweakable, just a fixed
+	# 1.0 internally). leg_hull_centerline_y (module_placer.gd) is the
+	# reach from THIS module's own local origin up to the hull's
+	# centerline; both thigh and shin below are expressed relative to the
+	# swing pivot (which sits at world-ish Y=hip_y), so it needs the same
+	# -hip_y conversion foot/ankle already used. Default (0.375) matches
+	# the original fixed-margin look before this became tweakable.
+	var hull_centerline_y = tweaks.get("leg_hull_centerline_y", hip_y)
+	var knee_height = tweaks.get("knee_height", base_size.y * 0.25)
+	var knee_y = (hull_centerline_y + knee_height) - hip_y
+
+	var thigh_target = Vector3(stance_reach * 0.4, knee_y, 0)
+	var thigh_len = thigh_target.length()
+	var thigh_dir = thigh_target / thigh_len
+	var thigh_angle = atan2(-thigh_dir.x, thigh_dir.y)
 	var thigh: MeshInstance3D
 	if thigh_mesh:
 		thigh = _mesh_inst(thigh_mesh, base_color)
-		thigh.scale = Vector3(leg_length, thigh_len / 0.55, leg_length)
+		thigh.scale = Vector3(leg_length * thickness_mult, thigh_len / 0.55, leg_length * thickness_mult)
 	else:
 		thigh = MeshInstance3D.new()
 		var cyl = CylinderMesh.new()
-		cyl.top_radius = 0.12 * leg_length
-		cyl.bottom_radius = 0.08 * leg_length
+		cyl.top_radius = 0.12 * leg_length * thickness_mult
+		cyl.bottom_radius = 0.08 * leg_length * thickness_mult
 		cyl.height = thigh_len
 		thigh.mesh = cyl
 		var mat = StandardMaterial3D.new()
 		mat.albedo_color = base_color
 		thigh.material_override = mat
-	thigh.position = Vector3(0, base_size.y * 0.75 * leg_length, 0)
-	thigh.rotation = Vector3(0, 0, PI / 6.0)
-	parent_node.add_child(thigh)
+	thigh.position = Vector3.ZERO
+	thigh.rotation = Vector3(0, 0, thigh_angle)
+	swing.add_child(thigh)
 
-	var shin_len = base_size.y * 0.6 * leg_length
+	var knee_pos = thigh_target
+	var foot_y = 0.03 - hip_y
+	var shin_target = Vector3(stance_reach * 0.6, foot_y - knee_y, 0)
+	var shin_len = shin_target.length()
+	var shin_dir = shin_target / shin_len
+	var shin_angle = atan2(-shin_dir.x, shin_dir.y)
 	var shin: MeshInstance3D
 	if shin_mesh:
 		shin = _mesh_inst(shin_mesh, Color(0.15, 0.15, 0.15))
-		shin.scale = Vector3(leg_length, shin_len / 0.5, leg_length)
+		shin.scale = Vector3(leg_length * thickness_mult, shin_len / 0.5, leg_length * thickness_mult)
 	else:
 		shin = MeshInstance3D.new()
 		var cyl = CylinderMesh.new()
-		cyl.top_radius = 0.08 * leg_length
-		cyl.bottom_radius = 0.05 * leg_length
+		cyl.top_radius = 0.08 * leg_length * thickness_mult
+		cyl.bottom_radius = 0.05 * leg_length * thickness_mult
 		cyl.height = shin_len
 		shin.mesh = cyl
 		var mat = StandardMaterial3D.new()
 		mat.albedo_color = Color(0.15, 0.15, 0.15)
 		shin.material_override = mat
-	shin.position = Vector3(base_size.y * 0.2 * leg_length, base_size.y * 0.3 * leg_length, 0)
-	shin.rotation = Vector3(0, 0, -PI / 8.0)
-	parent_node.add_child(shin)
+	shin.position = knee_pos
+	shin.rotation = Vector3(0, 0, shin_angle)
+	swing.add_child(shin)
 
+	# Bulkier faceted knee joint (Chris's ask) - the raised knee bends the
+	# thigh and shin at a much sharper, more visible angle than the old
+	# straight-ish hang did, so unlike the hip/ankle joints this one is
+	# scaled generously specifically to bury that intersection rather than
+	# just decorate a joint that was already reading fine. Oriented halfway
+	# between the thigh's and shin's own angles so it doesn't visibly favor
+	# either segment's direction.
+	if joint_mesh:
+		var knee = _mesh_inst(joint_mesh, base_color.darkened(0.1))
+		# Non-uniform this time (Chris's ask) - scaled back on the mesh's
+		# own local Z (leg_joint is authored as a vertical drum, so local Z
+		# is its "depth"/thickness axis) and extended on local Y (its
+		# height axis) instead of the flat uniform 2.5x from before, so it
+		# reads as a taller, thinner joint rather than a chunky ball.
+		var knee_base = 0.75 * leg_length * knee_mult
+		knee.scale = Vector3(knee_base, knee_base * 1.4, knee_base * 0.55)
+		knee.position = knee_pos
+		knee.rotation = Vector3(0, 0, (thigh_angle + shin_angle) * 0.5)
+		swing.add_child(knee)
+
+	var ankle_pos = knee_pos + shin_target
 	var foot: MeshInstance3D
 	if foot_mesh:
 		foot = _mesh_inst(foot_mesh, Color(0.18, 0.18, 0.2))
@@ -2304,17 +2563,41 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 		var mat = StandardMaterial3D.new()
 		mat.albedo_color = Color(0.15, 0.15, 0.15)
 		foot.material_override = mat
-	foot.position = Vector3(base_size.y * 0.1 * leg_length, 0.03, 0)
-	parent_node.add_child(foot)
+	foot.position = ankle_pos
+	swing.add_child(foot)
+
+	# Bulkier faceted ankle joint where the shin meets the foot ("toe
+	# sections meet", Chris's ask) - previously a bare junction with
+	# nothing there at all. Piggybacks on foot.position (already tuned to
+	# sit at the shin/foot contact point) rather than re-deriving it from
+	# shin's own rotated end, offset up slightly so it reads as sitting
+	# above the foot pad, not buried inside it.
+	if joint_mesh:
+		var ankle = _mesh_inst(joint_mesh, Color(0.18, 0.18, 0.2))
+		ankle.scale = Vector3(1.0, 1.0, 1.0) * (0.5 * leg_length * foot_size * thickness_mult)
+		ankle.position = foot.position + Vector3(0, 0.09 * leg_length, 0)
+		ankle.rotation = Vector3(0, 0, shin_angle)
+		swing.add_child(ankle)
 
 
 static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.SLATE_GRAY, tweaks: Dictionary = {}):
-	var nacelle_size = tweaks.get("nacelle_size", tweaks.get("size", 1.0))
+	# Redesign (Chris's ask): mounted out from the hull on a pylon like the
+	# rotors/hover pads, radially/elliptically distributed around the Y
+	# axis (module_placer.gd, engine_count 2-6) instead of a fixed pair.
+	# nacelle_size is no longer user-tweakable - turbine_compression takes
+	# over that "Size" slider slot, and unlike hover's purely cosmetic
+	# knee_height, IS wired into weight/cost (module_data.gd) since a
+	# physically longer turbine core is a real size change, not just a
+	# look.
+	var nacelle_size = tweaks.get("nacelle_size", 1.0)
+	var turbine_compression = tweaks.get("turbine_compression", 1.0)
 	var afterburner = tweaks.get("afterburner", false)
 
 	var nacelle_mesh = _part("engine_nacelle")
 	var fan_mesh = _part("engine_fan")
 	var exhaust_mesh = _part("exhaust_cone")
+	var core_mesh = _part("engine_core")
+	var strut_mesh = _part("mount_strut_aerofoil")
 
 	var actual_size = Vector3(base_size.x * nacelle_size, base_size.y * nacelle_size, base_size.z * nacelle_size)
 	if nacelle_mesh:
@@ -2344,12 +2627,73 @@ static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, ba
 		fan.position = Vector3(0, 0, -actual_size.z * 0.48)
 		parent_node.add_child(fan)
 
+	# Turbine core: a distinct segment behind the main nacelle whose own
+	# length is what turbine_compression physically stretches/compresses
+	# ("a central part of the engine housing longer or shorter... out the
+	# back", Chris's ask) - engine_core is authored along local Z like the
+	# rest of this engine's part family (build_engine_nacelle/_fan/
+	# _exhaust_cone), same rotation convention as the nacelle above.
+	var core_len = actual_size.z * 0.7 * turbine_compression
+	var core_rear_z = actual_size.z * 0.48
+	if core_mesh:
+		var core = _mesh_inst(core_mesh, base_color.darkened(0.15))
+		core.scale = Vector3(nacelle_size, nacelle_size, core_len / 0.6)
+		core.rotation = Vector3(0, deg_to_rad(90.0), 0)
+		core.position = Vector3(0, 0, core_rear_z + core_len * 0.5)
+		parent_node.add_child(core)
+	else:
+		var core = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = actual_size.y * 0.42
+		cyl.bottom_radius = actual_size.y * 0.42
+		cyl.height = core_len
+		core.mesh = cyl
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = base_color.darkened(0.15)
+		mat.metallic = 0.7
+		mat.roughness = 0.3
+		core.material_override = mat
+		core.rotation = Vector3(PI / 2.0, 0, 0)
+		core.position = Vector3(0, 0, core_rear_z + core_len * 0.5)
+		parent_node.add_child(core)
+
 	if afterburner:
 		if exhaust_mesh:
 			var ex = _mesh_inst(exhaust_mesh, Color(1.0, 0.4, 0.1), Color(1.0, 0.5, 0.1), 1.5)
 			ex.scale = Vector3(nacelle_size, nacelle_size, nacelle_size)
-			ex.position = Vector3(0, 0, actual_size.z * 0.48)
+			# Pushed back past the turbine core (which the old fixed
+			# actual_size.z*0.48 position didn't account for) so the
+			# exhaust sits at the engine's TRUE rear now that the core can
+			# stretch it further back.
+			ex.position = Vector3(0, 0, core_rear_z + core_len)
 			parent_node.add_child(ex)
+
+	# Structural mounting pylon back to the hull's physical center - same
+	# reach-vector technique as helicopter_rotors'/hover_engine's pylons,
+	# generalized to full 3D (module_placer.gd distributes engines
+	# radially/elliptically, so the reach direction has both an X and a Z
+	# component, same as hover's). Aerofoil cross-section (mount_strut_
+	# aerofoil, "vaguely aerofoil shaped... pretend that gives enough
+	# lift", Chris's ask) and noticeably thicker than hover's flat pylon.
+	var mount_reach = Vector3(tweaks.get("mount_reach_x", 1.0), tweaks.get("mount_reach_y", 0.0), tweaks.get("mount_reach_z", 0.0))
+	if mount_reach.length() > 0.001:
+		var reach_len = mount_reach.length()
+		var dir = mount_reach / reach_len
+		var reference = Vector3(0, 1, 0)
+		if abs(dir.dot(reference)) > 0.95:
+			reference = Vector3(1, 0, 0)
+		var right = dir.cross(reference).normalized()
+		var forward = right.cross(dir).normalized()
+		if strut_mesh:
+			var strut = _mesh_inst(strut_mesh, base_color.darkened(0.2))
+			strut.transform = Transform3D(Basis(right * 1.8, dir * reach_len, forward * 1.8), Vector3.ZERO)
+			parent_node.add_child(strut)
+		else:
+			var mount_mesh = _part("rg_mount_box")
+			if mount_mesh:
+				var strut = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+				strut.transform = Transform3D(Basis(right * 1.4, dir * reach_len, forward * 0.7), Vector3.ZERO)
+				parent_node.add_child(strut)
 
 
 static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.BROWN, tweaks: Dictionary = {}):
