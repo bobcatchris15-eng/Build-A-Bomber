@@ -8,6 +8,7 @@ Design docs live at the repo root:
 - [Damage_And_Armor_Model.md](Damage_And_Armor_Model.md) — thresholds, damage classes, anti-heavy-meta counters
 - [Design_Lab_UI_UX.md](Design_Lab_UI_UX.md) — designer UX (grab handles, arcs, clipping)
 - [Factions_and_Buildings.md](Factions_and_Buildings.md) — factions, pre-fab base buildings, custom defenses
+- [RTS_CORE_ROADMAP.md](RTS_CORE_ROADMAP.md) — **planned** chunked roadmap for terrain/maps, base building, and production queues, benchmarked against OpenRA
 
 ## Running the prototype
 
