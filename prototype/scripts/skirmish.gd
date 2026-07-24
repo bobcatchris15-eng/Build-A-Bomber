@@ -191,7 +191,16 @@ func _ready():
 			economy[PLAYER_TEAM].crystal = match_config.starting_crystal
 			economy[ENEMY_TEAM].crystal = match_config.starting_crystal
 
-	if INFINITE_PLAYER_RESOURCES_FOR_TESTING:
+	var debug_settings = get_node_or_null("/root/DebugSettings")
+	if debug_settings:
+		if "infinite_player_resources" in debug_settings:
+			debug_infinite_resources = debug_settings.infinite_player_resources
+		if "reveal_all_fog" in debug_settings:
+			debug_reveal_all_fog = debug_settings.reveal_all_fog
+		if "instant_build" in debug_settings:
+			debug_instant_build = debug_settings.instant_build
+
+	if debug_infinite_resources:
 		economy[PLAYER_TEAM].metal = INFINITE_RESOURCE_FLOOR
 		economy[PLAYER_TEAM].crystal = INFINITE_RESOURCE_FLOOR
 
@@ -387,6 +396,8 @@ func _recalc_fog_of_war():
 				if o_flying or c_flying or _has_line_of_sight(o.global_position, c.global_position):
 					seen = true
 					break
+		if debug_reveal_all_fog:
+			seen = true
 		c.set_fog_visible(seen)
 	_update_fog_shroud(player_constructs)
 	_update_enemy_intel()
@@ -671,8 +682,23 @@ func build_time_for_cost(cost: Vector2i) -> float:
 # testing isn't gated by grinding harvester income. Deliberately PLAYER_TEAM
 # only - the enemy AI's economy is untouched, so its own production timing
 # still behaves normally for balance/AI testing.
-const INFINITE_PLAYER_RESOURCES_FOR_TESTING: bool = true
+#
+# RTS_CORE_ROADMAP.md A2: was a hardcoded const; now a runtime var so the
+# debug/options panel (_build_debug_panel()) and tests can flip it without a
+# source edit. Seeded from the DebugSettings autoload if present (so a
+# player's choice persists across a match restart), defaulting to the same
+# `true` the const used to hardcode when the autoload is absent (every
+# headless test that instantiates Skirmish.tscn directly).
+var debug_infinite_resources: bool = true
 const INFINITE_RESOURCE_FLOOR: int = 999999
+
+# Same runtime-toggle treatment as debug_infinite_resources above: seeded
+# from DebugSettings, flipped live from the debug panel. reveal_all_fog
+# short-circuits _recalc_fog_of_war()'s per-construct visibility check;
+# instant_build makes production_queue.gd's tick() finish the front job of
+# every queue on its next physics tick instead of counting down build_time.
+var debug_reveal_all_fog: bool = false
+var debug_instant_build: bool = false
 
 func can_afford(team: int, metal: int, crystal: int) -> bool:
 	return economy[team].metal >= metal and economy[team].crystal >= crystal
@@ -682,7 +708,7 @@ func spend(team: int, metal: int, crystal: int) -> bool:
 		return false
 	economy[team].metal -= metal
 	economy[team].crystal -= crystal
-	if INFINITE_PLAYER_RESOURCES_FOR_TESTING and team == PLAYER_TEAM:
+	if debug_infinite_resources and team == PLAYER_TEAM:
 		economy[team].metal = max(economy[team].metal, INFINITE_RESOURCE_FLOOR)
 		economy[team].crystal = max(economy[team].crystal, INFINITE_RESOURCE_FLOOR)
 	_update_resource_ui()
@@ -959,8 +985,12 @@ func _build_ui():
 	# the existing one-directional fog model's own scope, see
 	# _recalc_fog_of_war()'s comment), updated on the same tick as fog.
 	intel_label = Label.new()
-	intel_label.position = Vector2(700, 14)
-	intel_label.size = Vector2(460, 40)
+	intel_label.anchor_left = 1.0
+	intel_label.anchor_right = 1.0
+	intel_label.offset_left = -620
+	intel_label.offset_right = -200
+	intel_label.offset_top = 14
+	intel_label.offset_bottom = 54
 	intel_label.add_theme_font_size_override("font_size", 15)
 	intel_label.modulate = Color(0.85, 0.75, 0.6)
 	intel_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -968,24 +998,34 @@ func _build_ui():
 	_update_enemy_intel()
 
 	var menu_btn = Button.new()
-	menu_btn.text = "Menu"
-	menu_btn.position = Vector2(1180, 14)
-	menu_btn.custom_minimum_size = Vector2(80, 40)
-	# Was a bare default-gray button, the one unstyled control sitting right
-	# next to the newly-styled build bar - consistent rounded chrome so the
-	# whole HUD reads as one designed system, not "everything except this."
+	menu_btn.text = " Menu"
+	menu_btn.icon = UIIcons.get_icon("menu")
+	menu_btn.expand_icon = true
+	menu_btn.anchor_left = 1.0
+	menu_btn.anchor_right = 1.0
+	menu_btn.offset_left = -190
+	menu_btn.offset_right = -105
+	menu_btn.offset_top = 14
+	menu_btn.offset_bottom = 54
 	var menu_style = StyleBoxFlat.new()
-	menu_style.bg_color = Color(0.3, 0.32, 0.36)
-	menu_style.corner_radius_top_left = 5
-	menu_style.corner_radius_top_right = 5
-	menu_style.corner_radius_bottom_left = 5
-	menu_style.corner_radius_bottom_right = 5
+	menu_style.bg_color = Color(0.12, 0.14, 0.18, 0.90)
+	menu_style.border_color = Color(0.20, 0.60, 0.85, 0.90)
+	menu_style.border_width_left = 1
+	menu_style.border_width_right = 1
+	menu_style.border_width_top = 1
+	menu_style.border_width_bottom = 1
+	menu_style.corner_radius_top_left = 4
+	menu_style.corner_radius_top_right = 4
+	menu_style.corner_radius_bottom_left = 4
+	menu_style.corner_radius_bottom_right = 4
 	menu_btn.add_theme_stylebox_override("normal", menu_style)
-	var menu_hover = menu_style.duplicate()
-	menu_hover.bg_color = Color(0.3, 0.32, 0.36).lightened(0.2)
+	var menu_hover = menu_style.duplicate() as StyleBoxFlat
+	menu_hover.bg_color = Color(0.18, 0.22, 0.28, 0.95)
 	menu_btn.add_theme_stylebox_override("hover", menu_hover)
 	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 	ui.add_child(menu_btn)
+
+	_build_debug_panel(ui, menu_style, menu_hover)
 
 	# Bottom build bar
 	var bar_bg = PanelContainer.new()
@@ -1050,6 +1090,76 @@ func _build_ui():
 	ui.add_child(selection_rect)
 
 	_update_resource_ui()
+
+# RTS_CORE_ROADMAP.md A2: the debug/options panel. Reuses the Menu button's
+# own chrome (menu_style/menu_hover) so it doesn't read as a bolted-on debug
+# hack sitting next to a designed HUD. A CheckBox per toggle, each writing
+# straight to this skirmish instance's own debug_* var (so the effect is
+# immediate - no "apply" step) and, if the DebugSettings autoload is present,
+# also back to it so the choice survives a match restart.
+func _build_debug_panel(ui: CanvasLayer, menu_style: StyleBoxFlat, menu_hover: StyleBoxFlat):
+	var debug_btn = Button.new()
+	debug_btn.text = " Debug"
+	debug_btn.icon = UIIcons.get_icon("gear")
+	debug_btn.expand_icon = true
+	debug_btn.anchor_left = 1.0
+	debug_btn.anchor_right = 1.0
+	debug_btn.offset_left = -95
+	debug_btn.offset_right = -10
+	debug_btn.offset_top = 14
+	debug_btn.offset_bottom = 54
+	debug_btn.add_theme_stylebox_override("normal", menu_style)
+	debug_btn.add_theme_stylebox_override("hover", menu_hover)
+	ui.add_child(debug_btn)
+
+	var popup = PopupPanel.new()
+	popup.name = "DebugPanel"
+	ui.add_child(popup)
+
+	var box = VBoxContainer.new()
+	box.add_theme_constant_override("separation", 8)
+	popup.add_child(box)
+
+	var title = Label.new()
+	title.text = "Debug Toggles"
+	title.add_theme_font_size_override("font_size", 18)
+	box.add_child(title)
+
+	box.add_child(_make_debug_checkbox("Infinite resources (player)", debug_infinite_resources,
+		func(pressed: bool):
+			debug_infinite_resources = pressed
+			var ds = get_node_or_null("/root/DebugSettings")
+			if ds and "infinite_player_resources" in ds:
+				ds.infinite_player_resources = pressed
+			if pressed:
+				economy[PLAYER_TEAM].metal = INFINITE_RESOURCE_FLOOR
+				economy[PLAYER_TEAM].crystal = INFINITE_RESOURCE_FLOOR
+				_update_resource_ui()))
+
+	box.add_child(_make_debug_checkbox("Reveal all fog", debug_reveal_all_fog,
+		func(pressed: bool):
+			debug_reveal_all_fog = pressed
+			var ds = get_node_or_null("/root/DebugSettings")
+			if ds and "reveal_all_fog" in ds:
+				ds.reveal_all_fog = pressed))
+
+	box.add_child(_make_debug_checkbox("Instant build", debug_instant_build,
+		func(pressed: bool):
+			debug_instant_build = pressed
+			var ds = get_node_or_null("/root/DebugSettings")
+			if ds and "instant_build" in ds:
+				ds.instant_build = pressed))
+
+	debug_btn.pressed.connect(func():
+		popup.position = debug_btn.global_position + Vector2(0, 44)
+		popup.popup())
+
+func _make_debug_checkbox(label_text: String, initial: bool, on_toggled: Callable) -> CheckBox:
+	var cb = CheckBox.new()
+	cb.text = label_text
+	cb.button_pressed = initial
+	cb.toggled.connect(on_toggled)
+	return cb
 
 func _add_build_button(text: String, color: Color, callback: Callable):
 	var btn = Button.new()

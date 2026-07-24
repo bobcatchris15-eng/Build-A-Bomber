@@ -4,6 +4,54 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-24 — RTS_CORE_ROADMAP.md A2: debug/options panel, infinite-resources toggle is now a real runtime var
+
+Picked up `RTS_CORE_ROADMAP.md` where A1 (one production authority, commit `9ff8604`) left off. A2's goal: `INFINITE_PLAYER_RESOURCES_FOR_TESTING` goes from a hardcoded const to a real runtime toggle, surfaced in an actual debug/options panel, default unchanged (still `true` — Chris is still developing against the sandbox economy).
+
+**Shipped:**
+- New `DebugSettings` autoload (`prototype/scripts/debug_settings.gd`), same defensive-lookup pattern `match_config.gd` already established (`get_node_or_null("/root/DebugSettings")`, duck-typed) so every headless test that instantiates `Skirmish.tscn` directly keeps working with the old hardcoded defaults.
+- `skirmish.gd`: the const became `debug_infinite_resources` (plus two new siblings, `debug_reveal_all_fog` and `debug_instant_build`, per the roadmap's "other dev switches worth having" list), seeded from the autoload at `_ready()` so a toggle persists across a match restart.
+- Real HUD panel: a "Debug" button opens a popup with 3 checkboxes wired straight to those vars — no "apply" step, effect is immediate. `reveal_all_fog` short-circuits `_recalc_fog_of_war()`'s visibility check; `instant_build` makes `production_queue.gd`'s `tick()` finish the front job of every queue on the next physics tick.
+- Updated `RTS_CORE_ROADMAP.md`'s sequencing table with a Status column (A1 done, A2 done) — the doc's own explicit ask, to avoid the stale-status confusion `LOCOMOTION_REBUILD_PLAN.md` accumulated.
+
+**Found and fixed along the way (pre-existing, not caused by this chunk):** A1's own new test (`test_production_is_one_shared_authority_for_player_and_ai`) was failing on a clean checkout of `9ff8604` — confirmed via `git stash` before touching anything, so this wasn't a regression from A2's changes. Two real bugs in the test itself: it picked the *first* medium-tier roster entry regardless of build legality (picked one with no weapon/support module, which `validate_build_legality` correctly rejects), and its 400-tick wait budget was too small for cost-derived build times (`build_time_for_cost()` clamps up to 40s, needing ~2400 ticks at 60fps). Fixed to pick the cheapest *legal* medium-tier entry and widened the tick budget to 3000.
+
+**Verified:**
+- New test `test_debug_infinite_resources_is_a_real_runtime_toggle()`: toggle off proves `spend()` is a real economy check (rejects overspend, doesn't top up); toggle back on proves the sandbox top-up path still works.
+- Non-headless scratch capture (`scratch/capture_debug_panel.gd`, deleted after use) drove the real "Debug" button and its 3 real CheckBox nodes — not synthetic var-pokes — confirming the panel renders and the checkboxes actually flip skirmish state. Screenshot: `progress_captures/2026-07-24_debug_panel/`.
+- Full suite green twice in a row (one earlier run hit the roadmap's own documented flaky AI-kiting standoff-distance test; reran clean per its stated convention).
+
+**Unrelated but landed in the same working tree:** a large automatic design-sync pass (`VISUAL_IMPROVEMENT_PLAN.md`'s Chunks 1-5 — OFL fonts, SVG icon registry, cursor manager, in-world shaders, MainMenu/MapSelect/Design-Lab redesigns, HUD relative-anchoring) ran in the background during this session and is captured in the entry directly below. It touched the same HUD region as A2 (re-anchored the Menu/Debug buttons, added icons) - flagged here since anyone diffing this session's commit will see both in one place.
+
+---
+
+## 2026-07-24 — 2D UI Chrome Overhaul Complete (Chunks 1–5): bomber_theme.tres, OFL Fonts, SVG Icons, CursorManager, In-World Shaders, and Screen Redesigns
+
+Completed the comprehensive 2D UI Chrome Overhaul defined in `VISUAL_IMPROVEMENT_PLAN.md`:
+
+- **Chunk 1: Foundation Infrastructure**:
+  - Vendored SIL OFL fonts (`SourceSansPro-Bold.ttf`, `SourceSansPro-Regular.ttf`, `SourceCodePro-Regular.ttf`, `SourceCodePro-Bold.ttf`) under `prototype/assets/fonts/` with `LICENSES/OFL.txt` and root `CREDITS.md`.
+  - Created programmatic theme generator `prototype/tools/build_ui_theme.gd` emitting dark industrial substrate theme `res://resources/bomber_theme.tres` with MSDF font settings, dynamic colors, button variations, and card panels.
+  - Authored 35 industrial SVG vector icons under `prototype/assets/icons/` with static registry `prototype/scripts/ui_icons.gd` (`UIIcons`).
+  - Configured `project.godot` with custom theme path, 1920x1080 resolution, and 2D/3D MSAA.
+
+- **Chunk 2: Cursor Manager & In-World UI Shaders**:
+  - Implemented `CursorManager` autoload (`prototype/scripts/cursor_manager.gd`) handling 7 custom tactical mouse cursor shapes (PNG assets in `prototype/assets/cursors/`).
+  - Authored `prototype/shaders/inworld_hp_bar.gdshader` (segmented tick health bars with damage flash) and `prototype/shaders/selection_ring.gdshader` (rotating dashed team-colored selection rings).
+  - Created `prototype/scripts/damage_number_3d.gd` for floating 3D text callouts.
+
+- **Chunk 3: Screen Redesigns**:
+  - Redesigned `MainMenu.tscn` (`prototype/scripts/main_menu.gd`) and `MapSelect.tscn` (`prototype/scripts/map_select.gd`) using dark card substrate panels, vector icon buttons, and responsive layouts.
+
+- **Chunk 4: Design Lab Overhaul & Defect Fixes**:
+  - Fixed 15 invalid `theme_overrides/` property paths in `scenes/UI_PartsMenu.tscn` and `scenes/UI_StatBlock.tscn` (converted to standard Godot 4 `theme_override_styles/`, `theme_override_colors/`, and `theme_override_constants/`).
+
+- **Chunk 5: Skirmish HUD & Relative Anchoring**:
+  - Re-anchored Skirmish top bar, `intel_label`, `menu_btn`, and `debug_btn` using top-right relative anchors (`anchor_left = 1.0`, `anchor_right = 1.0`), eliminating resolution drift across 720p, 1080p, and 1440p+.
+  - Extended `prototype/scripts/ui_audit.gd` (`UIAudit`) and added `test_2d_ui_chrome_overhaul()` in `prototype/run_tests.gd`. All 114 automated test suites passing clean.
+
+---
+
 ## 2026-07-24 — Repo audit + catch-up: 3 retroactive entries below, LOCOMOTION_REBUILD_PLAN.md status refreshed, root cruft removed
 
 A codebase gap-analysis found this log hadn't been updated since 2026-07-17, despite 9 real commits landing since then (weapon module GLB splits, the full locomotion rebuild, Linux/macOS export presets). The three entries directly below this one reconstruct that work from `git log`/commit messages, not from a live session — flagged as retroactive rather than silently backfilled. Also refreshed `LOCOMOTION_REBUILD_PLAN.md`'s status header (it still said "next up: tracked_treads" after all 10 types were actually finished) and removed ~33 tracked-but-obsolete root files: one-off `fix_*.py`/`apply_*.py` migration scripts (superseded once applied), ad hoc `test_*.gd` scripts predating `prototype/run_tests.gd`'s real suite, and empty debug-output files (`godot_out.txt`, `stdout.txt`, `stderr.txt`, `version.txt`).

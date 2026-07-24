@@ -1,17 +1,14 @@
 extends Control
-# Title screen tying the game loop together:
-# Design Lab (build blueprints) -> Skirmish (fight with them) -> repeat.
 
 const UITheme = preload("res://scripts/ui_theme.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
-func _ready():
+func _ready() -> void:
+	# Root dark background + brushed aluminum panel shader
 	var bg = ColorRect.new()
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg)
-	# Brushed-aluminum chrome, tinted to whichever faction the player last
-	# configured a match with (MatchConfig persists across scene changes) -
-	# falls back to the default faction if no match has been set up yet.
+
 	var match_config = get_node_or_null("/root/MatchConfig")
 	var faction = FactionCatalog.DEFAULT_FACTION
 	if match_config and "player_faction" in match_config and match_config.player_faction != "":
@@ -22,49 +19,66 @@ func _ready():
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
 
+	# Main Card Panel
+	var card = PanelContainer.new()
+	card.theme_type_variation = "CardPanel"
+	card.custom_minimum_size = Vector2(480, 520)
+	center.add_child(card)
+
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 32)
+	margin.add_theme_constant_override("margin_right", 32)
+	margin.add_theme_constant_override("margin_top", 32)
+	margin.add_theme_constant_override("margin_bottom", 32)
+	card.add_child(margin)
+
 	var vbox = VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 14)
-	center.add_child(vbox)
+	vbox.add_theme_constant_override("separation", 16)
+	margin.add_child(vbox)
 
 	var title = Label.new()
 	title.text = "BUILD-A-BOMBER"
-	title.add_theme_font_size_override("font_size", 64)
-	title.modulate = Color(1.0, 0.75, 0.25)
+	title.theme_type_variation = "TitleLabel"
+	title.add_theme_font_size_override("font_size", 42)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 
 	var subtitle = Label.new()
-	subtitle.text = "Design ridiculous war machines. Send them to glorious, over-dramatized doom."
-	subtitle.add_theme_font_size_override("font_size", 16)
+	subtitle.text = "Design ridiculous war machines.\nSend them to glorious, over-dramatized doom."
+	subtitle.add_theme_font_size_override("font_size", 14)
 	subtitle.modulate = Color(0.7, 0.75, 0.8)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(subtitle)
 
 	vbox.add_child(HSeparator.new())
 
-	_add_button(vbox, "🔧  Design Lab", "Design and tweak unit & defense blueprints", func():
+	_add_menu_button(vbox, "wrench", "Design Lab", "Design and tweak unit & defense blueprints", func():
 		get_tree().change_scene_to_file("res://scenes/MainLab.tscn"))
-	_add_button(vbox, "⚔️  Skirmish", "C&C-style battle: build a base, produce your designs, destroy the enemy HQ", func():
+
+	_add_menu_button(vbox, "attack", "Skirmish", "C&C-style battle: build a base, produce designs, destroy HQ", func():
 		get_tree().change_scene_to_file("res://scenes/MapSelect.tscn"))
-	_add_button(vbox, "🎯  Test Range", "Drive your latest saved design against target dummies", func():
+
+	_add_menu_button(vbox, "target", "Test Range", "Drive your latest saved design against target dummies", func():
 		get_tree().change_scene_to_file("res://scenes/Battlefield.tscn"))
-	_add_button(vbox, "🚪  Quit", "", func():
+
+	_add_menu_button(vbox, "close", "Quit", "", func():
 		get_tree().quit())
 
-func _add_button(parent: Control, text: String, tooltip: String, callback: Callable):
+func _add_menu_button(parent: Control, icon_name: String, title_text: String, hint_text: String, callback: Callable) -> void:
 	var btn = Button.new()
-	btn.text = text
-	btn.tooltip_text = tooltip
-	btn.custom_minimum_size = Vector2(340, 54)
-	btn.add_theme_font_size_override("font_size", 22)
+	btn.custom_minimum_size = Vector2(360, 52)
+	btn.text = "  " + title_text
+	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	btn.add_theme_font_size_override("font_size", 18)
+
+	var icon_tex = UIIcons.get_icon(icon_name)
+	if icon_tex:
+		btn.icon = icon_tex
+		btn.expand_icon = true
+
 	btn.pressed.connect(callback)
 	parent.add_child(btn)
 
-	if tooltip != "":
-		var hint = Label.new()
-		hint.text = tooltip
-		hint.add_theme_font_size_override("font_size", 12)
-		hint.modulate = Color(0.55, 0.6, 0.65)
-		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		parent.add_child(hint)
+	if hint_text != "":
+		btn.tooltip_text = hint_text

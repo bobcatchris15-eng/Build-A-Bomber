@@ -82,12 +82,18 @@ func enqueue(team: int, blueprint: Dictionary, faction: String, cost_metal: int,
 # refund-on-tier-loss is E3's job (RTS_CORE_ROADMAP.md), not this pass's.
 func tick(delta: float):
 	if not skirmish or skirmish.game_over: return
+	# RTS_CORE_ROADMAP.md A2: debug_instant_build finishes the front job of
+	# every queue on the next tick rather than skipping the timer entirely,
+	# so spawn/legality/factory-death handling below all still run normally.
+	var effective_delta = delta
+	if "debug_instant_build" in skirmish and skirmish.debug_instant_build:
+		effective_delta = 999999.0
 	for team in queues.keys():
 		for tier in TIERS:
 			var q: Array = get_queue(team, tier)
 			if q.is_empty(): continue
 			var job = q[0]
-			job.time_left -= delta
+			job.time_left -= effective_delta
 			if job.time_left <= 0.0:
 				q.pop_front()
 				var factory = skirmish.get_team_factory(team, tier)

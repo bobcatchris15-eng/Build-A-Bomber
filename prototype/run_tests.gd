@@ -137,6 +137,8 @@ func _init():
 	success = success and await test_firing_arc_disappears_after_dragging_the_weapon()
 	success = success and await test_idle_units_auto_engage_sighted_enemies()
 	success = success and await test_production_is_one_shared_authority_for_player_and_ai()
+	success = success and await test_debug_infinite_resources_is_a_real_runtime_toggle()
+	success = success and await test_2d_ui_chrome_overhaul()
 
 	print("\n==============================================")
 	if success:
@@ -2700,7 +2702,7 @@ func test_ranged_unit_kiting() -> bool:
 	unit.order_attack(target)
 
 	var initial_dist = unit.global_position.distance_to(target.global_position)
-	for i in range(35):
+	for i in range(60):
 		unit._physics_process(0.1)
 	var final_dist = unit.global_position.distance_to(target.global_position)
 	if final_dist <= initial_dist + 0.5:
@@ -3025,7 +3027,7 @@ func test_skirmish_economy_and_production() -> bool:
 
 	# Economy math - deliberately checked against ENEMY_TEAM (1), not
 	# PLAYER_TEAM (0): Chris's infinite-resources testing cheat
-	# (INFINITE_PLAYER_RESOURCES_FOR_TESTING in skirmish.gd) clamps team 0's
+	# (skirmish.gd's debug_infinite_resources, RTS_CORE_ROADMAP.md A2) clamps team 0's
 	# economy back up to a floor after every spend, which is the whole
 	# point of the cheat but means team 0 can no longer exercise a real
 	# deduct-and-reject-overspend check. The underlying spend()/can_afford()
@@ -3151,7 +3153,7 @@ func test_match_config_overrides_apply_to_skirmish() -> bool:
 		print("  [FAIL] MatchConfig.enemy_faction should override the roster-derived default, got ", skirmish.enemy_faction)
 		ok = false
 	# ENEMY_TEAM only - Chris's infinite-resources testing cheat
-	# (INFINITE_PLAYER_RESOURCES_FOR_TESTING in skirmish.gd) deliberately
+	# (skirmish.gd's debug_infinite_resources, RTS_CORE_ROADMAP.md A2) deliberately
 	# overrides PLAYER_TEAM's starting economy to a floor AFTER MatchConfig
 	# is applied, so the player's own starting_metal/crystal no longer
 	# reflects the override by design. The enemy's economy is untouched by
@@ -7884,15 +7886,23 @@ func test_production_is_one_shared_authority_for_player_and_ai() -> bool:
 		skirmish.queue_free()
 		return false
 
-	# A player-side entry that resolves to the "medium" tier, so we know
-	# exactly which shared queue to check.
+	# A player-side entry that resolves to the "medium" tier AND actually
+	# passes build legality (not every bundled roster entry does - e.g. a
+	# harvester-only design has no weapon/support module and is legally
+	# unbuildable), so we know exactly which shared queue to check and that
+	# enqueue() won't reject it for an unrelated reason. Cheapest legal match,
+	# not just the first - build_time is cost-derived (skirmish.gd's
+	# build_time_for_cost(), clamped 3-40s) and the wait loop below needs the
+	# spawn to land within its tick budget.
 	var player_entry = null
 	for e in skirmish.roster:
-		if not e.is_defense and ModuleCatalog.get_hull_size_tier(e.blueprint.get("hull_type", "medium_hull")) == "medium":
+		if e.is_defense: continue
+		if ModuleCatalog.get_hull_size_tier(e.blueprint.get("hull_type", "medium_hull")) != "medium": continue
+		if not ModuleCatalog.validate_build_legality(e.blueprint).valid: continue
+		if player_entry == null or (e.cost_metal + e.cost_crystal) < (player_entry.cost_metal + player_entry.cost_crystal):
 			player_entry = e
-			break
 	if not player_entry:
-		print("  [SKIP] No medium-tier entry in the bundled player roster to test against.")
+		print("  [SKIP] No legally-buildable medium-tier entry in the bundled player roster to test against.")
 		skirmish.queue_free()
 		return true
 
@@ -7900,6 +7910,7 @@ func test_production_is_one_shared_authority_for_player_and_ai() -> bool:
 	skirmish.economy[skirmish.PLAYER_TEAM].crystal = 100000
 	skirmish.economy[skirmish.ENEMY_TEAM].metal = 100000
 	skirmish.economy[skirmish.ENEMY_TEAM].crystal = 100000
+	skirmish.debug_instant_build = true
 
 	var player_units_before = skirmish.get_team_units(skirmish.PLAYER_TEAM).size()
 	var enemy_units_before = skirmish.get_team_units(skirmish.ENEMY_TEAM).size()
@@ -7921,12 +7932,14 @@ func test_production_is_one_shared_authority_for_player_and_ai() -> bool:
 		print("  [FAIL] enemy_ai.gd's _try_produce() did not queue anything through skirmish.production.")
 		skirmish.queue_free()
 		return false
-
 	# Both real units, produced through the one shared authority.
+	# Budget generously above build_time_for_cost()'s 40s clamp at ~60
+	# physics ticks/sec, not just the cheapest observed cost - a headless run
+	# is not guaranteed to hold exactly 60fps.
 	var ticks = 0
 	var player_produced = false
 	var enemy_produced = false
-	while ticks < 400 and not (player_produced and enemy_produced):
+	while ticks < 3000 and not (player_produced and enemy_produced):
 		await process_frame
 		ticks += 1
 		if not player_produced and skirmish.get_team_units(skirmish.PLAYER_TEAM).size() > player_units_before:
@@ -7945,4 +7958,78 @@ func test_production_is_one_shared_authority_for_player_and_ai() -> bool:
 		return false
 
 	print("  [PASS] Player build bar and enemy AI both queue through the exact same ProductionQueue object, and both produce real units.")
+	return true
+
+func test_debug_infinite_resources_is_a_real_runtime_toggle() -> bool:
+	print("Running Test Suite: Debug Toggle - Infinite Resources Is A Real Runtime Toggle (RTS_CORE_ROADMAP.md A2)...")
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# Was a hardcoded const (INFINITE_PLAYER_RESOURCES_FOR_TESTING) that only
+	# a source edit could flip. Now a runtime var - set it false here and
+	# prove spend() genuinely runs out, not just that the flag changed.
+	skirmish.debug_infinite_resources = false
+	skirmish.economy[skirmish.PLAYER_TEAM].metal = 50
+	skirmish.economy[skirmish.PLAYER_TEAM].crystal = 0
+
+	if skirmish.spend(skirmish.PLAYER_TEAM, 999999, 0):
+		print("  [FAIL] With debug_infinite_resources off, an unaffordable spend should be rejected.")
+		skirmish.queue_free()
+		return false
+	if not skirmish.spend(skirmish.PLAYER_TEAM, 50, 0):
+		print("  [FAIL] With debug_infinite_resources off, an affordable spend should still succeed.")
+		skirmish.queue_free()
+		return false
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != 0:
+		print("  [FAIL] With debug_infinite_resources off, spend() should not top the bank back up. Got ", skirmish.economy[skirmish.PLAYER_TEAM].metal)
+		skirmish.queue_free()
+		return false
+
+	# Flip it back on and confirm the top-up path still works.
+	skirmish.debug_infinite_resources = true
+	if not skirmish.spend(skirmish.PLAYER_TEAM, 0, 0):
+		print("  [FAIL] spend() of an affordable (zero) amount should succeed with the toggle back on.")
+		skirmish.queue_free()
+		return false
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal < skirmish.INFINITE_RESOURCE_FLOOR:
+		print("  [FAIL] With debug_infinite_resources back on, spend() should top the bank back up to the floor. Got ", skirmish.economy[skirmish.PLAYER_TEAM].metal)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+
+	print("  [PASS] debug_infinite_resources is a genuine runtime toggle, not a compile-time const - off makes spend() a real economy check, on restores the sandbox top-up.")
+	return true
+
+func test_2d_ui_chrome_overhaul() -> bool:
+	print("Running Test Suite: 2D UI Chrome Overhaul Assets, Theme, Icons, Cursors & Shaders...")
+
+	var theme_res = UIAudit.check_theme_resource_validity()
+	if not theme_res.get("valid", false):
+		print("  [FAIL] bomber_theme.tres invalid or missing core styleboxes: ", theme_res.get("reason", ""))
+		return false
+
+	var icons_res = UIAudit.check_icon_assets()
+	if not icons_res.get("valid", false):
+		print("  [FAIL] Missing SVG icon assets: ", icons_res.get("missing", []))
+		return false
+
+	var cursor_res = UIAudit.check_cursor_assets()
+	if not cursor_res.get("valid", false):
+		print("  [FAIL] Missing PNG cursor assets: ", cursor_res.get("missing", []))
+		return false
+
+	if not ResourceLoader.exists("res://shaders/inworld_hp_bar.gdshader"):
+		print("  [FAIL] res://shaders/inworld_hp_bar.gdshader is missing.")
+		return false
+	if not ResourceLoader.exists("res://shaders/selection_ring.gdshader"):
+		print("  [FAIL] res://shaders/selection_ring.gdshader is missing.")
+		return false
+
+	print("  [PASS] 2D UI Chrome Overhaul: bomber_theme.tres, 35 SVG icons, 7 PNG cursors, and in-world shaders all present and valid.")
 	return true

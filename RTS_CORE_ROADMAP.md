@@ -1,12 +1,13 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-24): PLANNING ONLY — nothing here is implemented yet.** This is a
-resumable roadmap, written so a fresh session can pick up any single chunk without
-re-deriving the architecture. Chunks are ordered with explicit dependencies in the
-sequencing table at the end; each is sized to land as one commit with its own
-`PROGRESS.md` entry. **Update the sequencing table's status as chunks land** — a
-stale "next up" header in a plan doc is exactly the confusion that
-`LOCOMOTION_REBUILD_PLAN.md` accumulated before being corrected on 2026-07-24.
+**Status (2026-07-24): A1 landed (commit `9ff8604`); everything else is planning
+only.** This is a resumable roadmap, written so a fresh session can pick up any
+single chunk without re-deriving the architecture. Chunks are ordered with
+explicit dependencies in the sequencing table at the end; each is sized to land
+as one commit with its own `PROGRESS.md` entry. **Update the sequencing table's
+status as chunks land** — a stale "next up" header in a plan doc is exactly the
+confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before being corrected on
+2026-07-24. **Next up: A2** (debug/options menu).
 
 Reference implementation for all of this is OpenRA, cloned locally to
 `C:\Misc\openra` (not vendored into this repo). Specific `file:line` citations
@@ -561,31 +562,31 @@ readback) over catalog-number assertions.
 
 ## Sequencing summary
 
-| # | Chunk | Size | Depends on |
-|---|---|---|---|
-| 1 | A1 one production authority | afternoon | — |
-| 2 | A2 debug/options menu | small | A1 |
-| 3 | B1 map schema validator | afternoon | — |
-| 4 | B2 slots array (N-player) | one session | — |
-| 5 | B3 maps → JSON | one session | B1, B2 |
-| 6 | **B4 Python terrain generator + heightmap** | **multi** | B3 |
-| 7 | **B5 slope-aware navmesh + collision** | **multi** | B4 |
-| 8 | B6 retire elevation_zones, migrate, rect+bounds | one session | B5 |
-| 9 | B7 terrain type differentiation | one session | B4 |
-| 10 | B8 bigger/denser maps | multi (content) | B5–B7 |
-| 11 | B9 minimap | 1–1.5 sessions | B6 |
-| 12 | B10 spawn assignment + fairness lint | multi | B3, B8 |
-| 13 | C1 buildings block movement | multi | — |
-| 14 | C2 real placement legality | one session | B6 |
-| 15 | C3 buildable area / adjacency | afternoon | C2 |
-| 16 | C4 exits + rally points | one session | A1, C1 |
-| 17 | D1 drip-fed cost + refunds | one session | A1, A2 |
-| 18 | D2 queue HUD + tabs | one session | D1 |
-| 19 | D3 multi-factory speed | afternoon | A1 |
-| 20 | D4 building build time | multi | D1 |
-| 21 | E1 power states | one session | D1, D4 |
-| 22 | E2 sell + repair | afternoon | C2 |
-| 23 | E3 tech-tree greying | one session | D2 |
+| # | Chunk | Size | Depends on | Status |
+|---|---|---|---|---|
+| 1 | A1 one production authority | afternoon | — | **Done (`9ff8604`)** |
+| 2 | A2 debug/options menu | small | A1 | In progress |
+| 3 | B1 map schema validator | afternoon | — | — |
+| 4 | B2 slots array (N-player) | one session | — | — |
+| 5 | B3 maps → JSON | one session | B1, B2 | — |
+| 6 | **B4 Python terrain generator + heightmap** | **multi** | B3 | — |
+| 7 | **B5 slope-aware navmesh + collision** | **multi** | B4 | — |
+| 8 | B6 retire elevation_zones, migrate, rect+bounds | one session | B5 | — |
+| 9 | B7 terrain type differentiation | one session | B4 | — |
+| 10 | B8 bigger/denser maps | multi (content) | B5–B7 | — |
+| 11 | B9 minimap | 1–1.5 sessions | B6 | — |
+| 12 | B10 spawn assignment + fairness lint | multi | B3, B8 | — |
+| 13 | C1 buildings block movement | multi | — | — |
+| 14 | C2 real placement legality | one session | B6 | — |
+| 15 | C3 buildable area / adjacency | afternoon | C2 | — |
+| 16 | C4 exits + rally points | one session | A1, C1 | — |
+| 17 | D1 drip-fed cost + refunds | one session | A1, A2 | — |
+| 18 | D2 queue HUD + tabs | one session | D1 | — |
+| 19 | D3 multi-factory speed | afternoon | A1 | — |
+| 20 | D4 building build time | multi | D1 | — |
+| 21 | E1 power states | one session | D1, D4 | — |
+| 22 | E2 sell + repair | afternoon | C2 | — |
+| 23 | E3 tech-tree greying | one session | D2 | — |
 
 **A1 → A2 → B1 → B2 → B3 → B4 → B5** is the ordered spine; B4/B5 are the keystone
 and the largest single investment in the roadmap. C1 (buildings block movement) is

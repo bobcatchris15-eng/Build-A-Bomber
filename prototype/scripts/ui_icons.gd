@@ -1,0 +1,61 @@
+class_name UIIcons
+extends RefCounted
+
+## Central icon registry mapping logical icon names to loaded Texture2D resources.
+
+const ICON_PATHS: Dictionary = {
+	"metal": "res://assets/icons/icon_metal.svg",
+	"crystal": "res://assets/icons/icon_crystal.svg",
+	"power": "res://assets/icons/icon_power.svg",
+	"credits": "res://assets/icons/icon_credits.svg",
+	"attack": "res://assets/icons/icon_attack.svg",
+	"defense": "res://assets/icons/icon_defense.svg",
+	"repair": "res://assets/icons/icon_repair.svg",
+	"salvage": "res://assets/icons/icon_salvage.svg",
+	"target": "res://assets/icons/icon_target.svg",
+	"skull": "res://assets/icons/icon_skull.svg",
+	"trophy": "res://assets/icons/icon_trophy.svg",
+	"factory": "res://assets/icons/icon_factory.svg",
+	"powerplant": "res://assets/icons/icon_powerplant.svg",
+	"extractor": "res://assets/icons/icon_extractor.svg",
+	"hq": "res://assets/icons/icon_hq.svg",
+	"turret": "res://assets/icons/icon_turret.svg",
+	"gear": "res://assets/icons/icon_gear.svg",
+	"wrench": "res://assets/icons/icon_wrench.svg",
+	"menu": "res://assets/icons/icon_menu.svg",
+	"back": "res://assets/icons/icon_back.svg",
+	"close": "res://assets/icons/icon_close.svg",
+	"chevron_left": "res://assets/icons/icon_chevron_left.svg",
+	"chevron_right": "res://assets/icons/icon_chevron_right.svg",
+	"rotate_left": "res://assets/icons/icon_rotate_left.svg",
+	"rotate_right": "res://assets/icons/icon_rotate_right.svg",
+	"play": "res://assets/icons/icon_play.svg",
+	"pause": "res://assets/icons/icon_pause.svg",
+	"undo": "res://assets/icons/icon_undo.svg",
+	"redo": "res://assets/icons/icon_redo.svg",
+	"check": "res://assets/icons/icon_check.svg",
+	"hull": "res://assets/icons/icon_hull.svg",
+	"weapon": "res://assets/icons/icon_weapon.svg",
+	"engine": "res://assets/icons/icon_engine.svg",
+	"armor": "res://assets/icons/icon_armor.svg",
+	"info": "res://assets/icons/icon_info.svg"
+}
+
+static var _cache: Dictionary = {}
+
+static func get_icon(name: String) -> Texture2D:
+	if _cache.has(name):
+		return _cache[name]
+	if not ICON_PATHS.has(name):
+		push_warning("UIIcons: unknown icon name '%s'" % name)
+		return null
+	var path: String = ICON_PATHS[name]
+	if ResourceLoader.exists(path):
+		var tex: Texture2D = load(path) as Texture2D
+		_cache[name] = tex
+		return tex
+	push_warning("UIIcons: icon file missing at '%s'" % path)
+	return null
+
+static func has_icon(name: String) -> bool:
+	return ICON_PATHS.has(name)

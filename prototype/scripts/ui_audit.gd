@@ -1,27 +1,10 @@
 class_name UIAudit
-# Headless UI regression checks. Both techniques here were empirically
-# validated against the real UI_StatBlock.tscn/MainLab.tscn scenes before
-# being built in (see PROGRESS.md) - notably, the naive "compare a Label's
-# own .size to its own get_minimum_size()" approach does NOT work in this
-# codebase: the UI is built on auto-sizing VBoxContainers that grow to
-# exactly fit their children, so a control's size trivially always equals
-# its own minimum. The real signal is a genuinely fixed-size ancestor
-# panel (one whose size comes from screen anchors, not from expanding to
-# fit content) versus its content's natural combined minimum size.
+extends RefCounted
 
-# Scans for "fixed" Controls (size_flags without SIZE_EXPAND on that axis)
-# whose direct Control children need more space than the fixed size
-# provides. Returns an Array of Dictionaries:
-#   {path, fixed_size, content_min_size, overflow_x, overflow_y, culprit}
 static func find_overflowing_panels(node: Node, results: Array = []) -> Array:
 	if node is Control and node.is_visible_in_tree() and node.get_child_count() > 0:
 		var h_fixed = not (node.size_flags_horizontal & Control.SIZE_EXPAND)
 		var v_fixed = not (node.size_flags_vertical & Control.SIZE_EXPAND)
-		# A "fixed" panel with a near-zero actual size hasn't been through a
-		# real layout pass yet (or is a collapsed/not-yet-shown popup that
-		# is_visible_in_tree() didn't catch for some other reason) - not a
-		# genuine "too small for its content" case, skip it rather than
-		# flag a false positive.
 		if node.size.x < 4.0 and node.size.y < 4.0:
 			h_fixed = false
 			v_fixed = false
@@ -50,11 +33,6 @@ static func find_overflowing_panels(node: Node, results: Array = []) -> Array:
 		find_overflowing_panels(child, results)
 	return results
 
-# Scans for visible Controls whose global rect has zero overlap with the
-# viewport's visible rect - i.e. fully off-screen (a popup positioned
-# outside the window, a panel with a broken anchor calculation, etc).
-# Ignores zero-size controls (containers not yet laid out, or genuinely
-# empty spacers) since those aren't visually meaningful either way.
 static func find_offscreen_controls(node: Node, viewport_rect: Rect2, results: Array = []) -> Array:
 	if node is Control and node.is_visible_in_tree():
 		var rect = node.get_global_rect()
@@ -64,3 +42,31 @@ static func find_offscreen_controls(node: Node, viewport_rect: Rect2, results: A
 	for child in node.get_children():
 		find_offscreen_controls(child, viewport_rect, results)
 	return results
+
+static func check_theme_resource_validity() -> Dictionary:
+	var res_path = "res://resources/bomber_theme.tres"
+	var exists = ResourceLoader.exists(res_path)
+	if not exists:
+		return {"valid": false, "reason": "bomber_theme.tres does not exist"}
+	var theme = load(res_path) as Theme
+	if not theme:
+		return {"valid": false, "reason": "Failed to load bomber_theme.tres as Theme"}
+	var has_panel = theme.has_stylebox("panel", "Panel")
+	var has_button = theme.has_stylebox("normal", "Button")
+	return {"valid": has_panel and has_button, "reason": "Theme resource contains core styleboxes"}
+
+static func check_icon_assets() -> Dictionary:
+	var missing = []
+	for icon_name in UIIcons.ICON_PATHS:
+		var path = UIIcons.ICON_PATHS[icon_name]
+		if not FileAccess.file_exists(path):
+			missing.append(icon_name)
+	return {"valid": missing.is_empty(), "missing": missing}
+
+static func check_cursor_assets() -> Dictionary:
+	var missing = []
+	for type in CursorManager.CURSOR_CONFIGS:
+		var path = CursorManager.CURSOR_CONFIGS[type]["path"]
+		if not FileAccess.file_exists(path):
+			missing.append(path)
+	return {"valid": missing.is_empty(), "missing": missing}
