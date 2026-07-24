@@ -901,9 +901,38 @@ func _physics_process(delta):
 				if rotor:
 					rotor.rotate_y(15.0 * delta)
 			elif child_type_id == "ornithopter_wing":
-				var pivot = child.get_node_or_null("WingPivot")
-				if pivot:
-					pivot.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 8.0) * 0.35
+				# Dragonfly-style fore/hind wing pair (Chris's ask,
+				# 2026-07-24): flapped in opposition to each other (hind
+				# wing's phase negated) rather than the old single
+				# "WingPivot" all beating in unison - matches how real
+				# dragonflies beat their two wing pairs roughly 180deg
+				# out of phase. Sped up and widened (Chris's ask, same day
+				# follow-up: "faster" + "larger arc") - was frequency 8.0 /
+				# amplitude 0.35 rad; now 16.0 / 0.65 rad.
+				#
+				# rotation.x alone (the original motion) rotates around the
+				# wing's own SPANWISE axis (the membrane reaches out along
+				# local X) - since the wing's chord/width runs along local
+				# Z, that swings the leading/trailing edges between Z and Y
+				# but stays mostly Z-dominant at these angles (cos(37deg)
+				# ~=0.8 vs sin(37deg)~=0.6), reading as "mostly fore/aft"
+				# (Chris's observation) rather than a true up/down wing
+				# beat. rotation.z is the other half: it rotates the
+				# spanwise reach itself (which sits far out along X) up and
+				# down around Y, the actual flapping-wing motion. Added on
+				# top of (not instead of) the existing X twist, same
+				# frequency/phase and same fore/hind opposition, per
+				# Chris's "add more up/down as well" (keep the fore/aft feel,
+				# don't replace it).
+				var t = Time.get_ticks_msec() / 1000.0 * 16.0
+				var fore = child.get_node_or_null("WingPivotFore")
+				if fore:
+					fore.rotation.x = sin(t) * 0.65
+					fore.rotation.z = sin(t) * 0.7
+				var hind = child.get_node_or_null("WingPivotHind")
+				if hind:
+					hind.rotation.x = -sin(t) * 0.65
+					hind.rotation.z = -sin(t) * 0.7
 			elif child_type_id == "hover_engine":
 				# Outer ring stays fixed/horizontal; the middle ring spins
 				# around X, the inner ring around Y (Chris's ask) - same
@@ -939,8 +968,22 @@ func _physics_process(delta):
 				if prop:
 					if child_type_id == "paddle_wheel":
 						prop.rotate_x(10.0 * delta)
+					elif child_type_id == "buoyant_envelope":
+						# Zeppelin-style cruise prop (Chris's ask,
+						# 2026-07-24): large, slow-turning, unlike the
+						# fast small screw on a boat/aircraft - was the
+						# same 10.0 rad/s as every other prop type here.
+						prop.rotate_z(3.0 * delta)
 					else:
 						prop.rotate_z(10.0 * delta)
+			elif child_type_id == "screw_drive":
+				# Amphibious screw-drive auger (Chris's ask, 2026-07-24):
+				# the whole drum+helix turns as one rigid unit under the
+				# "ScrewSpin" pivot - there was no spin animation for this
+				# type at all before this rebuild.
+				var spin = child.get_node_or_null("ScrewSpin")
+				if spin:
+					spin.rotate_z(6.0 * delta)
 
 # Returns true when arrived. The "arrived" check always uses the real
 # final destination; the per-frame STEERING direction uses the navmesh's

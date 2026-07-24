@@ -1202,13 +1202,35 @@ def build_screw_drum(name, length=1.6, shaft_radius=0.13, fin_reach=0.16, turns=
 	helical fin approximated by many short radial blade segments advancing
 	in both angle and length together, along Godot +Z (matches the
 	runtime mounting convention: the drum's own length lies parallel to the
-	vehicle's travel direction, one drum per side)."""
-	bm = bmesh.new()
-	add_cyl_axis(bm, (0, 0, 0), shaft_radius, length, 'z', segments=14)
-	add_cyl_axis(bm, (0, 0, -length * 0.5 - length * 0.05), 0.02, length * 0.1, 'z', segments=14, radius2=shaft_radius)
-	add_cyl_axis(bm, (0, 0, length * 0.5 + length * 0.05), shaft_radius, length * 0.1, 'z', segments=14, radius2=0.02)
+	vehicle's travel direction, one drum per side).
 
-	segments = 40
+	NOTE: 'x' (not 'z') on the shaft's add_cyl_axis calls is intentional -
+	same add_cyl_axis 'x'/'z' swap already documented on build_engine_core -
+	'x' is what actually yields a Godot-Z-long (fore-aft) result. Without
+	this the shaft stuck out sideways through the (correctly Z-aligned,
+	since it's built from raw positions/rotations rather than add_cyl_axis)
+	helical fin ring - Chris's report, 2026-07-24."""
+	bm = bmesh.new()
+	add_cyl_axis(bm, (0, 0, 0), shaft_radius, length, 'x', segments=14)
+	# radius1/radius2 swapped from the first pass (Chris's report, 2026-07-24:
+	# "the cones on each end are backwards") - the tapered tip now comes to
+	# a POINT at the outer end and widens toward the shaft, like a real
+	# auger nose, instead of flaring open outward.
+	add_cyl_axis(bm, (0, 0, -length * 0.5 - length * 0.05), shaft_radius, length * 0.1, 'x', segments=14, radius2=0.02)
+	add_cyl_axis(bm, (0, 0, length * 0.5 + length * 0.05), 0.02, length * 0.1, 'x', segments=14, radius2=shaft_radius)
+
+	# Chris's ask, 2026-07-24 ("the blades part of the helix seem to be
+	# sitting wrong... build the drum and helix as a single unit"): this
+	# was already one bmesh/GLB (shaft + fin both go into the same `bm`
+	# below, exported as a single object) - the geometry itself checks out
+	# too (each segment's radial "reach" and its Z-progression overlap are
+	# both correctly aligned, verified by hand against the coordinate
+	# convention at the top of this file). The actual problem is more
+	# segments=40 read as a scattered pile of separate short paddles
+	# rather than one continuous auger flight - tripled to 120 (with a
+	# matched larger overlap factor below) for a visibly smoother, more
+	# continuous-looking single ribbon.
+	segments = 120
 	r_mid = shaft_radius + fin_reach / 2.0
 	for i in range(segments):
 		t = i / float(segments)
@@ -1335,13 +1357,22 @@ def build_engine_core(name, length=0.6, radius=0.32, color=(0.32, 0.32, 0.35)):
 	Y, so it shares their placement/rotation convention in
 	_build_fixed_wing_engine(). A few compressor-ring grooves via stacked
 	slightly-recessed rings read as turbine detail without needing a
-	boolean cut."""
+	boolean cut.
+
+	NOTE: add_cyl_axis's 'x'/'z' godot_axis arguments are swapped from what
+	their docstring promises (verified empirically - requesting 'z' actually
+	yields a Godot-X-long cylinder, and 'x' yields Godot-Z-long). Passing
+	'x' here is the correct call to get a Godot-Z-long (fore-aft) result;
+	it is NOT a typo. This is a local workaround for this part family only -
+	the shared bug in add_cyl_axis itself is intentionally left alone for
+	now (see fixed_wing_engine investigation, 2026-07-24) since other parts
+	built with add_cyl_axis may already depend on its current behavior."""
 	bm = bmesh.new()
-	add_cyl_axis(bm, (0, 0, 0), radius, length, 'z', segments=18)
+	add_cyl_axis(bm, (0, 0, 0), radius, length, 'x', segments=18)
 	rings = 4
 	for i in range(1, rings):
 		z = -length * 0.5 + length * (i / float(rings))
-		add_cyl_axis(bm, (0, 0, z), radius * 1.03, length * 0.04, 'z', segments=18)
+		add_cyl_axis(bm, (0, 0, z), radius * 1.03, length * 0.04, 'x', segments=18)
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.7, roughness=0.3)
 	return obj
@@ -1412,9 +1443,12 @@ def build_hover_skirt(name, radius_top=0.5, radius_bottom=0.65, height=0.35, col
 
 
 def build_engine_nacelle(name, length=1.2, radius=0.3, color=(0.4, 0.42, 0.45)):
+	# NOTE: 'x' here (not 'z') is intentional - add_cyl_axis's 'x'/'z' args
+	# are swapped from what they claim (see build_engine_core's comment);
+	# 'x' is what actually yields a Godot-Z-long (fore-aft) result.
 	bm = bmesh.new()
-	add_cyl_axis(bm, (0, 0, 0), radius * 0.7, length, 'z', segments=20, radius2=radius)
-	add_cyl_axis(bm, (0, 0, -length * 0.5 - 0.05), radius * 0.7, 0.1, 'z', segments=20, radius2=radius * 0.5)
+	add_cyl_axis(bm, (0, 0, 0), radius * 0.7, length, 'x', segments=20, radius2=radius)
+	add_cyl_axis(bm, (0, 0, -length * 0.5 - 0.05), radius * 0.7, 0.1, 'x', segments=20, radius2=radius * 0.5)
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.6, roughness=0.35)
 	return obj
@@ -1422,7 +1456,7 @@ def build_engine_nacelle(name, length=1.2, radius=0.3, color=(0.4, 0.42, 0.45)):
 
 def build_engine_fan(name, radius=0.28, height=0.06, blades=12, color=(0.2, 0.2, 0.22)):
 	bm = bmesh.new()
-	add_cyl_axis(bm, (0, 0, 0), radius * 0.25, height * 1.5, 'z', segments=14)
+	add_cyl_axis(bm, (0, 0, 0), radius * 0.25, height * 1.5, 'x', segments=14)
 	for i in range(blades):
 		angle = i * (2.0 * math.pi / blades)
 		pos = (math.cos(angle) * radius * 0.55, math.sin(angle) * radius * 0.55, 0)
@@ -1433,14 +1467,20 @@ def build_engine_fan(name, radius=0.28, height=0.06, blades=12, color=(0.2, 0.2,
 
 
 def build_exhaust_cone(name, radius=0.25, length=0.3, color=(0.15, 0.15, 0.16)):
+	# 'x' (not 'z') for the same add_cyl_axis-swap reason as engine_nacelle/
+	# engine_core above.
 	bm = bmesh.new()
-	add_cyl_axis(bm, (0, 0, 0), radius, length, 'z', segments=16, radius2=radius * 0.6)
+	add_cyl_axis(bm, (0, 0, 0), radius, length, 'x', segments=16, radius2=radius * 0.6)
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.75, roughness=0.3)
 	return obj
 
 
-def build_wing_shoulder(name, size=(0.3, 0.2, 0.25), color=(0.3, 0.3, 0.33)):
+def build_wing_shoulder(name, size=(0.3, 0.2, 0.7), color=(0.3, 0.3, 0.33)):
+	# Lengthened fore-aft (Z, was 0.25) so one gearbox block can plausibly
+	# span BOTH the fore and hind wing roots (offset +-0.22 on Z, see
+	# _build_ornithopter_wing's root_gap) - the old 0.25 didn't even reach
+	# either root's Z offset, let alone both.
 	bm = bmesh.new()
 	add_box(bm, (0, size[1] * 0.5, 0), size, bevel=0.02)
 	greeble_bolt_ring(bm, (size[0] * 0.5, size[1] * 0.5, 0), min(size[1], size[2]) * 0.35, count=5, axis='x')
@@ -1449,7 +1489,11 @@ def build_wing_shoulder(name, size=(0.3, 0.2, 0.25), color=(0.3, 0.3, 0.33)):
 	return obj
 
 
-def build_wing_membrane(name, length=1.2, width_root=0.4, width_tip=0.15, thickness=0.015, color=(0.25, 0.28, 0.3)):
+def build_wing_membrane(name, length=2.4, width_root=0.3, width_tip=0.05, thickness=0.015, color=(0.25, 0.28, 0.3)):
+	# Rebuilt much longer and narrower (Chris's ask, 2026-07-24) for a
+	# dragonfly-like silhouette - was length=1.2/width_root=0.4/width_tip=
+	# 0.15 (aspect ratio ~3); now ~8, tapering to a fine point at the tip
+	# instead of a stubby paddle shape.
 	bm = bmesh.new()
 	pts = [
 		(0, 0, -width_root * 0.5), (0, 0, width_root * 0.5),
@@ -1465,7 +1509,8 @@ def build_wing_membrane(name, length=1.2, width_root=0.4, width_tip=0.15, thickn
 	return obj
 
 
-def build_wing_rib(name, length=1.1, thickness=0.03, height=0.04, color=(0.2, 0.2, 0.22)):
+def build_wing_rib(name, length=2.3, thickness=0.03, height=0.04, color=(0.2, 0.2, 0.22)):
+	# Lengthened to match build_wing_membrane's new longer span (was 1.1).
 	bm = bmesh.new()
 	add_box(bm, (length * 0.5, height * 0.5, 0), (length, height, thickness), bevel=0.008)
 	obj = make_object_from_bmesh(bm, name)
@@ -1474,8 +1519,13 @@ def build_wing_rib(name, length=1.1, thickness=0.03, height=0.04, color=(0.2, 0.
 
 
 def build_prop_housing(name, length=0.4, radius_front=0.15, radius_back=0.08, color=(0.28, 0.3, 0.32)):
+	# 'x' (not 'z') for the same add_cyl_axis-swap reason as
+	# build_engine_nacelle/build_engine_core/build_exhaust_cone (see
+	# build_engine_core's comment) - 'x' is what actually yields a
+	# Godot-Z-long (fore-aft) result. Without this, the housing faced
+	# spanwise instead of backwards (Chris's report, 2026-07-24).
 	bm = bmesh.new()
-	add_cyl_axis(bm, (0, 0, 0), radius_front, length, 'z', segments=16, radius2=radius_back)
+	add_cyl_axis(bm, (0, 0, 0), radius_front, length, 'x', segments=16, radius2=radius_back)
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
 	return obj
@@ -1568,9 +1618,15 @@ def build_rg_hip_socket(name, size=(0.25, 0.25, 0.25), color=(0.22, 0.22, 0.25))
 
 
 def build_rg_screw_cradle(name, size=(0.3, 0.25, 0.35), color=(0.25, 0.22, 0.2)):
+	# Gearbox/bearing housing for amphibious screw-drive drums (Chris's
+	# ask, 2026-07-24: "a gearbox that projects out and down from the fore
+	# and aft corners of the hull"). 'x' (not 'z') on the bearing-bore
+	# cylinder is intentional - same add_cyl_axis swap as build_screw_drum
+	# above - 'x' yields the Godot-Z-long (fore-aft) bore the drum shaft
+	# actually passes through.
 	bm = bmesh.new()
 	add_box(bm, (0, size[1] * 0.5, 0), size, bevel=0.02)
-	add_cyl_axis(bm, (0, size[1] * 0.8, 0), size[0] * 0.35, size[2] * 0.9, 'z', segments=12)
+	add_cyl_axis(bm, (0, size[1] * 0.8, 0), size[0] * 0.35, size[2] * 0.9, 'x', segments=12)
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.5, roughness=0.5)
 	return obj

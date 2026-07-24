@@ -54,6 +54,7 @@ const LOCOMOTION_SIZE_KEY := {
 	"legs": "knee_height",
 	"hover_engine": "emv_level",
 	"fixed_wing_engine": "turbine_compression",
+	"screw_drive": "drum_diameter",
 }
 
 # Floating Popup Window fields
@@ -185,14 +186,33 @@ var wheels_per_axle_container: HBoxContainer
 var wheels_per_axle_label: Label
 var wheels_per_axle_slider: HSlider
 
-# helicopter_rotors-only "Blade Count" tweak (blade_count, 2-8): same
-# dynamic-widget pattern as wheels_per_axle above. Pure per-instance
-# geometry (the ring in _build_helicopter_rotors()), no effect on collider
-# or instance count, so it's always routed through
-# update_locomotion_geometry_tweak(), never a respawn - same as tread_width.
+# "Blade Count" tweak (blade_count, 2-8): same dynamic-widget pattern as
+# wheels_per_axle above. Pure per-instance geometry (the ring in
+# _build_helicopter_rotors()/_build_pylon_mounted_propeller()), no effect
+# on collider or instance count, so it's always routed through
+# update_locomotion_geometry_tweak(), never a respawn - same as
+# tread_width. Originally helicopter_rotors-only; shared with naval_
+# propeller/buoyant_envelope (Chris's ask, 2026-07-24) since all three now
+# build a ring of blades the same way.
 var blade_count_container: HBoxContainer
 var blade_count_label: Label
 var blade_count_slider: HSlider
+
+# "Blade Pitch" tweak (blade_pitch, 0.5-1.5): naval_propeller/
+# buoyant_envelope only (Chris's ask, 2026-07-24) - same dynamic-widget/
+# geometry-tweak pattern as blade_count above.
+var blade_pitch_container: HBoxContainer
+var blade_pitch_label: Label
+var blade_pitch_slider: HSlider
+
+# "Helix Depth" tweak (helix_depth, 0.5-1.5): screw_drive only (Chris's
+# ask, 2026-07-24) - same dynamic-widget pattern as blade_pitch above.
+# Picks among 3 discrete authored drum variants in _build_screw_drive()
+# rather than a continuous deformation, but the slider itself is a plain
+# continuous 0.5-1.5 control like any other.
+var helix_depth_container: HBoxContainer
+var helix_depth_label: Label
+var helix_depth_slider: HSlider
 
 # helicopter_rotors-only "Ducted Shroud" tweak (duct, bool): same dynamic-
 # widget pattern as above. Pure geometry (spawns/removes the duct ring in
@@ -293,12 +313,63 @@ func _ready():
 	blade_count_slider.drag_started.connect(_push_undo)
 	blade_count_container.visible = false
 
+	# Dynamically build the naval_propeller/buoyant_envelope-only "Blade
+	# Pitch" slider (Chris's ask, 2026-07-24).
+	blade_pitch_container = HBoxContainer.new()
+	blade_pitch_container.custom_minimum_size = Vector2(0, 24)
+	blade_pitch_container.add_theme_constant_override("separation", 4)
+	locomotion_tweaks.add_child(blade_pitch_container)
+	locomotion_tweaks.move_child(blade_pitch_container, blade_count_container.get_index() + 1)
+
+	blade_pitch_label = Label.new()
+	blade_pitch_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	blade_pitch_label.text = "Blade Pitch:"
+	blade_pitch_container.add_child(blade_pitch_label)
+
+	blade_pitch_slider = HSlider.new()
+	blade_pitch_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	blade_pitch_slider.size_flags_stretch_ratio = 2.0
+	blade_pitch_slider.min_value = 0.5
+	blade_pitch_slider.max_value = 1.5
+	blade_pitch_slider.step = 0.1
+	blade_pitch_slider.value = 1.0
+	blade_pitch_container.add_child(blade_pitch_slider)
+	UITheme.style_slider(blade_pitch_slider)
+	blade_pitch_slider.value_changed.connect(_on_blade_pitch_changed)
+	blade_pitch_slider.drag_started.connect(_push_undo)
+	blade_pitch_container.visible = false
+
+	# Dynamically build the screw_drive-only "Helix Depth" slider.
+	helix_depth_container = HBoxContainer.new()
+	helix_depth_container.custom_minimum_size = Vector2(0, 24)
+	helix_depth_container.add_theme_constant_override("separation", 4)
+	locomotion_tweaks.add_child(helix_depth_container)
+	locomotion_tweaks.move_child(helix_depth_container, blade_pitch_container.get_index() + 1)
+
+	helix_depth_label = Label.new()
+	helix_depth_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	helix_depth_label.text = "Helix Depth:"
+	helix_depth_container.add_child(helix_depth_label)
+
+	helix_depth_slider = HSlider.new()
+	helix_depth_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	helix_depth_slider.size_flags_stretch_ratio = 2.0
+	helix_depth_slider.min_value = 0.5
+	helix_depth_slider.max_value = 1.5
+	helix_depth_slider.step = 0.1
+	helix_depth_slider.value = 1.0
+	helix_depth_container.add_child(helix_depth_slider)
+	UITheme.style_slider(helix_depth_slider)
+	helix_depth_slider.value_changed.connect(_on_helix_depth_changed)
+	helix_depth_slider.drag_started.connect(_push_undo)
+	helix_depth_container.visible = false
+
 	# Dynamically build the helicopter_rotors-only "Ducted Shroud" checkbox.
 	duct_container = HBoxContainer.new()
 	duct_container.custom_minimum_size = Vector2(0, 24)
 	duct_container.add_theme_constant_override("separation", 4)
 	locomotion_tweaks.add_child(duct_container)
-	locomotion_tweaks.move_child(duct_container, blade_count_container.get_index() + 1)
+	locomotion_tweaks.move_child(duct_container, helix_depth_container.get_index() + 1)
 
 	duct_checkbox = CheckButton.new()
 	duct_checkbox.text = "Ducted Shroud"
@@ -794,7 +865,7 @@ func on_module_selected(module: Node3D):
 	# is disposable, generated fresh by _generate_custom_tweaks() each time.
 	if popup_tweaks_container:
 		for child in popup_tweaks_container.get_children():
-			if child == size_container or child == count_container or child == wheels_per_axle_container or child == blade_count_container or child == duct_container:
+			if child == size_container or child == count_container or child == wheels_per_axle_container or child == blade_count_container or child == blade_pitch_container or child == helix_depth_container or child == duct_container:
 				continue
 			child.queue_free()
 
@@ -806,6 +877,8 @@ func on_module_selected(module: Node3D):
 	count_container.visible = false
 	wheels_per_axle_container.visible = false
 	blade_count_container.visible = false
+	blade_pitch_container.visible = false
+	helix_depth_container.visible = false
 	duct_container.visible = false
 
 	var root = get_node_or_null("/root/MainLab")
@@ -856,6 +929,14 @@ func on_module_selected(module: Node3D):
 	count_slider.min_value = 2.0
 	count_slider.max_value = 8.0
 	count_slider.step = 2.0
+	# blade_count_container is now shared between helicopter_rotors and
+	# naval_propeller/buoyant_envelope (Chris's ask, 2026-07-24) - reset
+	# unconditionally so it doesn't stay visible after switching away from
+	# whichever of those types last showed it (only helicopter_rotors used
+	# it before, so this never came up).
+	blade_count_container.visible = false
+	blade_pitch_container.visible = false
+	count_label_base = "Count"
 
 	if type_id == "wheels":
 		size_label_base = "Wheel Size"
@@ -910,6 +991,33 @@ func on_module_selected(module: Node3D):
 		count_slider.max_value = 6.0
 		count_slider.step = 1.0
 		count_slider.value = settings.get("engine_count", 2)
+	elif type_id in ["naval_propeller", "buoyant_envelope"]:
+		# Pylon-mounted rebuild (Chris's ask, 2026-07-24): no Size tweak at
+		# all for either type - Count doubles as Propeller Count (1-5),
+		# plus the shared Blade Count slider (reused from helicopter_rotors
+		# above) and a new Blade Pitch slider.
+		size_container.visible = false
+		count_container.visible = true
+		count_slider.min_value = 1.0
+		count_slider.max_value = 5.0
+		count_slider.step = 1.0
+		count_slider.value = settings.get("prop_count", settings.get("count", 2))
+		count_label_base = "Propeller Count"
+		blade_count_container.visible = true
+		blade_count_slider.value = settings.get("blade_count", 3.0)
+		blade_pitch_container.visible = true
+		blade_pitch_slider.value = settings.get("blade_pitch", 1.0)
+	elif type_id == "screw_drive":
+		# Rebuilt (Chris's ask, 2026-07-24): no Count at all - always one
+		# drum per side, like tracked_treads. Size doubles as Drum Diameter
+		# (see LOCOMOTION_SIZE_KEY), plus a new Helix Depth slider.
+		size_label_base = "Drum Diameter"
+		count_container.visible = false
+		size_slider.min_value = 0.5
+		size_slider.max_value = 2.0
+		size_slider.value = settings.get("drum_diameter", settings.get("drum_width", 1.0))
+		helix_depth_container.visible = true
+		helix_depth_slider.value = settings.get("helix_depth", 1.0)
 	else:
 		size_container.visible = false
 
@@ -928,6 +1036,10 @@ func _refresh_locomotion_labels():
 		wheels_per_axle_label.text = "Wheels Per Axle: %d%s" % [int(wheels_per_axle_slider.value), " (dually)" if dually else ""]
 	if blade_count_container.visible:
 		blade_count_label.text = "Blade Count: %d" % int(blade_count_slider.value)
+	if blade_pitch_container.visible:
+		blade_pitch_label.text = "Blade Pitch: %.2fx" % blade_pitch_slider.value
+	if helix_depth_container.visible:
+		helix_depth_label.text = "Helix Depth: %.2fx" % helix_depth_slider.value
 
 func _on_size_value_changed(value: float):
 	_refresh_locomotion_labels()
@@ -956,7 +1068,29 @@ func _on_blade_count_changed(value: float):
 	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
 	var root = get_node_or_null("/root/MainLab")
 	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
-	root.update_locomotion_geometry_tweak("helicopter_rotors", "blade_count", int(value))
+	# Shared between helicopter_rotors and naval_propeller/buoyant_envelope
+	# (Chris's ask, 2026-07-24) - was hardcoded to "helicopter_rotors",
+	# which silently no-opped this slider for the other two types (their
+	# module_data.tweaks never actually get a "blade_count" key written,
+	# since update_locomotion_geometry_tweak() matches children by type_id).
+	var data = current_selected_module.get_meta("module_data")
+	root.update_locomotion_geometry_tweak(data.type_id, "blade_count", int(value))
+
+func _on_blade_pitch_changed(value: float):
+	_refresh_locomotion_labels()
+	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
+	var root = get_node_or_null("/root/MainLab")
+	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
+	var data = current_selected_module.get_meta("module_data")
+	root.update_locomotion_geometry_tweak(data.type_id, "blade_pitch", value)
+
+func _on_helix_depth_changed(value: float):
+	_refresh_locomotion_labels()
+	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
+	var root = get_node_or_null("/root/MainLab")
+	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
+	var data = current_selected_module.get_meta("module_data")
+	root.update_locomotion_geometry_tweak(data.type_id, "helix_depth", value)
 
 func _on_duct_toggled(pressed: bool):
 	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
@@ -1019,6 +1153,21 @@ func _apply_tweaks():
 		new_settings = {
 			"turbine_compression": size_slider.value,
 			"engine_count": int(count_slider.value)
+		}
+	elif type_id in ["naval_propeller", "buoyant_envelope"]:
+		# Count (Propeller Count) is structural here too - changing it
+		# respawns every prop instance, so blade_count/blade_pitch have to
+		# ride along in the same settings dict or they'd silently reset to
+		# their defaults on the very next Count drag.
+		new_settings = {
+			"prop_count": int(count_slider.value),
+			"blade_count": int(blade_count_slider.value),
+			"blade_pitch": blade_pitch_slider.value
+		}
+	elif type_id == "screw_drive":
+		new_settings = {
+			"drum_diameter": size_slider.value,
+			"helix_depth": helix_depth_slider.value
 		}
 
 	if root.has_method("update_locomotion"):

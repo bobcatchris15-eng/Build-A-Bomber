@@ -2603,7 +2603,14 @@ static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, ba
 	if nacelle_mesh:
 		var nac = _mesh_inst(nacelle_mesh, base_color)
 		nac.scale = Vector3(nacelle_size, nacelle_size, nacelle_size)
-		nac.rotation = Vector3(0, deg_to_rad(90.0), 0)
+		# engine_nacelle is authored along local Z (build_engine_nacelle,
+		# add_cyl_axis(..., 'z')) - matching this function's own placement
+		# convention (rotation=Vector3.ZERO at the module_placer call site) -
+		# so it needs NO runtime rotation. The stray 90deg-about-Y rotation
+		# this used to carry pointed the nacelle/core sideways along world X
+		# instead of forward along Z, which is why turbine_compression read
+		# as "wider" instead of "longer" and the core appeared to drift off
+		# to the side instead of extending straight out the back.
 		nac.position = Vector3(0, 0, 0)
 		parent_node.add_child(nac)
 	else:
@@ -2632,13 +2639,18 @@ static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, ba
 	# ("a central part of the engine housing longer or shorter... out the
 	# back", Chris's ask) - engine_core is authored along local Z like the
 	# rest of this engine's part family (build_engine_nacelle/_fan/
-	# _exhaust_cone), same rotation convention as the nacelle above.
+	# _exhaust_cone), matching this function's own no-rotation convention
+	# (see the nacelle comment above - no runtime rotation needed).
+	# core_rear_z is fixed (independent of core_len), and the node's
+	# position is core_rear_z + half its own scaled length, so the FRONT
+	# face (position.z - core_len/2 == core_rear_z) never moves as
+	# turbine_compression changes - only the rear face (core_rear_z +
+	# core_len) extends further out, anchoring growth at the nacelle joint.
 	var core_len = actual_size.z * 0.7 * turbine_compression
 	var core_rear_z = actual_size.z * 0.48
 	if core_mesh:
 		var core = _mesh_inst(core_mesh, base_color.darkened(0.15))
 		core.scale = Vector3(nacelle_size, nacelle_size, core_len / 0.6)
-		core.rotation = Vector3(0, deg_to_rad(90.0), 0)
 		core.position = Vector3(0, 0, core_rear_z + core_len * 0.5)
 		parent_node.add_child(core)
 	else:
@@ -2697,84 +2709,179 @@ static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, ba
 
 
 static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.BROWN, tweaks: Dictionary = {}):
+	# Dragonfly-style rebuild (Chris's ask, 2026-07-24): TWO independent
+	# wing pairs per mount node (fore + hind, like a dragonfly's wing
+	# root) instead of one wing on one pivot, each on its own named pivot
+	# ("WingPivotFore"/"WingPivotHind") so battle_unit.gd can flap them in
+	# opposition to each other - real dragonflies beat their fore and hind
+	# wing pairs roughly 180 degrees out of phase. The wings themselves are
+	# also now authored substantially longer and narrower (see
+	# build_wing_membrane's rebuilt defaults in build_meshes.py) - a real
+	# slender dragonfly silhouette, not the old short stubby panel.
+	#
+	# wing_sweep was declared in TWEAK_SPECS but never read anywhere -
+	# wired in here now (scales the same leading-edge sweep angle the old
+	# single wing used a fixed 12deg for).
 	var wingspan = tweaks.get("wingspan", tweaks.get("size", 1.0))
-	var rib_count = int(tweaks.get("rib_count", 3.0))
+	var sweep = tweaks.get("wing_sweep", 1.0)
 
 	var shoulder_mesh = _part("wing_shoulder")
-	var mem_mesh = _part("wing_membrane")
-	var rib_mesh = _part("wing_rib")
-
 	if shoulder_mesh:
 		var sh = _mesh_inst(shoulder_mesh, Color(0.3, 0.28, 0.25))
-		sh.scale = Vector3(1.0, 1.0, 1.0)
 		parent_node.add_child(sh)
 	else:
 		var shoulder = MeshInstance3D.new()
 		var box = BoxMesh.new()
-		box.size = Vector3(base_size.x * 0.35, base_size.y * 0.7, base_size.z * 0.35)
+		box.size = Vector3(base_size.x * 0.35, base_size.y * 0.7, base_size.z * 0.5)
 		shoulder.mesh = box
 		var mat = StandardMaterial3D.new()
 		mat.albedo_color = Color(0.3, 0.28, 0.25)
 		shoulder.material_override = mat
 		parent_node.add_child(shoulder)
 
+	# Fore/hind wing roots sit close together fore-and-aft on the thorax
+	# (a real dragonfly's two wing bases are close but distinct), not
+	# spread across the whole hull like the old single-wing rib fan was.
+	# Hind wing reads slightly broader than fore (size_mult 1.15), matching
+	# a real dragonfly's hindwing being the bigger of the pair.
+	var root_gap = base_size.z * 0.22
+	_build_ornithopter_wing_unit(parent_node, base_size, base_color, wingspan, sweep, "WingPivotFore", root_gap, 1.0)
+	_build_ornithopter_wing_unit(parent_node, base_size, base_color, wingspan, sweep, "WingPivotHind", -root_gap, 1.15)
+
+
+# One wing (membrane + a single main spar) of an ornithopter_wing's fore/
+# hind pair, on its own named flap pivot. size_mult lets the hind wing read
+# as the broader of the two. Split out of _build_ornithopter_wing() so the
+# fore and hind units share identical construction logic.
+#
+# Rebuilt (Chris's ask, 2026-07-24): "each wing should have a single
+# wing-rib that connects to the gearbox/mount, and extends about 2/3rds of
+# the total length of the wing membrane" - the old rib_count-driven fan of
+# 2-6 parallel ribs (rib_count was never actually wired to any UI control,
+# so it silently always defaulted to 3) read as a loose bundle of sticks
+# radiating from the mount rather than a single readable wing spar,
+# especially once the wing got much longer earlier in this rebuild. One
+# spar, root-anchored at the same point as the membrane, 2/3 of the
+# membrane's own rendered length, replaces it - rib_count is gone
+# entirely, not just defaulted differently (see the matching removals in
+# module_catalog.gd's LOCOMOTION_TWEAK_SPECS, module_placer.gd, and
+# module_data.gd's weight/cost tweak tables).
+static func _build_ornithopter_wing_unit(parent_node: Node3D, base_size: Vector3, base_color: Color, wingspan: float, sweep: float, pivot_name: String, z_offset: float, size_mult: float):
+	var mem_mesh = _part("wing_membrane")
+	var rib_mesh = _part("wing_rib")
+	var span = wingspan * size_mult
+	var sweep_angle = deg_to_rad(12.0) * sweep
+
 	var pivot = Node3D.new()
-	pivot.name = "WingPivot"
-	pivot.position = Vector3(base_size.x * 0.2, base_size.y * 0.15, 0)
+	pivot.name = pivot_name
+	pivot.position = Vector3(base_size.x * 0.2, base_size.y * 0.15, z_offset)
 	parent_node.add_child(pivot)
+
+	# root_x/mem_len track the membrane's actual root position and
+	# rendered length so the single spar below can be anchored and sized
+	# to match, whichever branch (authored vs procedural fallback) built it.
+	# root_x is 0 (not base_size.x*0.2 again) because the pivot ABOVE
+	# already carries that same offset out from the gearbox - doubling it
+	# here used to put the wing's actual root a further 0.2*base_size.x
+	# past the pivot, floating well clear of the gearbox mesh instead of
+	# meeting it (Chris's report, 2026-07-24).
+	var root_x = 0.0
+	var mem_len: float
 
 	if mem_mesh:
 		var mem = _mesh_inst(mem_mesh, base_color)
-		mem.scale = Vector3(wingspan, 1.0, 1.0)
-		mem.position = Vector3(base_size.x * 0.2, 0, 0)
-		mem.rotation = Vector3(0, 0, deg_to_rad(12.0))
+		mem.scale = Vector3(span, 1.0, 1.0)
+		mem.position = Vector3(root_x, 0, 0)
+		mem.rotation = Vector3(0, 0, sweep_angle)
 		pivot.add_child(mem)
+		mem_len = 2.4 * span # 2.4 = build_wing_membrane's authored "length" default
+
+		# Inner connector panel (Chris's ask, 2026-07-24): a mirrored
+		# duplicate of the very same tapered membrane mesh, rotated 180deg
+		# so its NARROW end now points inward and reaches back past the
+		# pivot to intersect the gearbox, while its WIDE end sits at
+		# exactly the same point as the outer panel's own wide root above
+		# (both positioned at pivot-local x=0) - so the two meet seamlessly
+		# at full root width, with no visible gap or step. This also gives
+		# the wing the fast inside taper Chris asked for: the widest point
+		# of the whole wing is now out at this root/hinge, not smeared
+		# uniformly from the gearbox itself, since the connector pinches
+		# back down to the membrane's narrow-tip width as it nears the hull.
+		# scale.x is deliberately NOT `span` - wingspan only stretches the
+		# OUTER panel's reach; the connector only needs to be exactly long
+		# enough to bridge the gearbox gap (pivot.position.x) plus a 40%
+		# overshoot so it visibly overlaps/intersects the gearbox mesh
+		# rather than just grazing its surface.
+		var connector_len = pivot.position.x * 1.4
+		var connector = _mesh_inst(mem_mesh, base_color)
+		connector.scale = Vector3(connector_len / 2.4, 1.0, 1.0)
+		connector.rotation = Vector3(0, PI, sweep_angle)
+		pivot.add_child(connector)
 	else:
 		var mem = MeshInstance3D.new()
 		var box = BoxMesh.new()
-		box.size = Vector3(base_size.x * 0.75 * wingspan, base_size.y * 0.15, base_size.z * 0.85)
+		box.size = Vector3(base_size.x * 0.75 * span, base_size.y * 0.15, base_size.z * 0.85)
 		mem.mesh = box
 		var mat = StandardMaterial3D.new()
 		mat.albedo_color = base_color
 		mem.material_override = mat
-		mem.position = Vector3(base_size.x * 0.42 * wingspan, 0, 0)
-		mem.rotation = Vector3(0, 0, deg_to_rad(12.0))
+		# BoxMesh is centered on its own origin (unlike the authored
+		# membrane's root-at-zero convex hull), so root_x here is HALF the
+		# box's own length - that puts its near edge (the root) at
+		# pivot-local x=0, matching the authored branch's convention above.
+		root_x = box.size.x * 0.5
+		mem.position = Vector3(root_x, 0, 0)
+		mem.rotation = Vector3(0, 0, sweep_angle)
 		pivot.add_child(mem)
+		mem_len = base_size.x * 0.75 * span
 
-	var spacing = base_size.z * 0.6 / float(max(1, rib_count - 1))
-	_repeat_along_axis(pivot, rib_count, spacing, Vector3.FORWARD, func(p, pos, _idx):
-		var rib: MeshInstance3D
-		if rib_mesh:
-			rib = _mesh_inst(rib_mesh, Color(0.22, 0.17, 0.12))
-			rib.scale = Vector3(wingspan, 1.0, 1.0)
-		else:
-			rib = MeshInstance3D.new()
-			var box = BoxMesh.new()
-			box.size = Vector3(base_size.x * 0.7 * wingspan, base_size.y * 0.04, base_size.z * 0.06)
-			rib.mesh = box
-			var mat = StandardMaterial3D.new()
-			mat.albedo_color = Color(0.22, 0.17, 0.12)
-			rib.material_override = mat
-		rib.position = Vector3(base_size.x * 0.42 * wingspan, base_size.y * 0.08, pos.z)
-		rib.rotation = Vector3(0, 0, deg_to_rad(12.0))
-		p.add_child(rib)
-	)
+	var rib_len = mem_len * (2.0 / 3.0)
+	var rib: MeshInstance3D
+	if rib_mesh:
+		rib = _mesh_inst(rib_mesh, Color(0.22, 0.17, 0.12))
+		rib.scale = Vector3(rib_len / 2.3, 1.0, 1.0) # 2.3 = build_wing_rib's authored "length" default
+	else:
+		rib = MeshInstance3D.new()
+		var box = BoxMesh.new()
+		box.size = Vector3(rib_len, base_size.y * 0.04, base_size.z * 0.06)
+		rib.mesh = box
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.22, 0.17, 0.12)
+		rib.material_override = mat
+	rib.position = Vector3(root_x, base_size.y * 0.08, 0)
+	rib.rotation = Vector3(0, 0, sweep_angle)
+	pivot.add_child(rib)
 
 
-static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
-	var prop_size = tweaks.get("prop_size", tweaks.get("size", 1.0))
+# Shared by naval_propeller and buoyant_envelope (Chris's ask, 2026-07-24):
+# both used to spawn entirely inside the hull mesh with no visible
+# structure reaching them clear of it - a fixed offset (hull_size.z*0.42
+# for naval, side-mounted for buoyant) that landed well within the hull's
+# own collision box on most hull shapes. Rebuilt to reuse the exact stern/
+# reach-vector pylon technique already established for helicopter_rotors/
+# hover_engine/fixed_wing_engine: module_placer.gd now places the propeller
+# itself well aft of the hull's own mesh and passes a mount_reach vector
+# pointing back to the hull's geometric center, and this function builds a
+# mount_strut_aerofoil pylon along that vector, with the propeller hub+
+# blades at the far (outboard) end. hub_scale differentiates the two
+# "deformed" reuses of the same prop_housing/rotor_blade GLBs (buoyant_
+# envelope's smaller cruise motor vs naval_propeller's full-size boat
+# screw) without needing separate authored assets. Both types now share
+# the exact same tweak set (blade_count, blade_pitch, prop_count) - the old
+# prop_size/kort_nozzle/motor_size/tail_fins tweaks are gone entirely, not
+# just defaulted differently.
+static func _build_pylon_mounted_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary, hub_scale: float, blade_scale: float = 1.0):
 	var blade_count = int(tweaks.get("blade_count", 3.0))
-	var kort = tweaks.get("kort_nozzle", false)
+	var blade_pitch = tweaks.get("blade_pitch", 1.0)
 
 	var housing_mesh = _part("prop_housing")
 	var blade_mesh = _part("rotor_blade")
-	var kort_mesh = _part("kort_nozzle")
+	var strut_mesh = _part("mount_strut_aerofoil")
 
-	var actual_size = Vector3(base_size.x * prop_size, base_size.y * prop_size, base_size.z * prop_size)
+	var actual_size = base_size * hub_scale
 	if housing_mesh:
 		var house = _mesh_inst(housing_mesh, base_color.darkened(0.2))
-		house.scale = Vector3(prop_size, prop_size, prop_size)
-		house.position = Vector3(0, 0, 0)
+		house.scale = Vector3(hub_scale, hub_scale, hub_scale)
 		parent_node.add_child(house)
 	else:
 		var house = MeshInstance3D.new()
@@ -2797,87 +2904,137 @@ static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base
 	_ring_of(pivot, blade_count, 0.0, func(p, _pos, angle, _idx):
 		var blade: MeshInstance3D
 		if blade_mesh:
+			# rotor_blade is authored with its span along LOCAL Z (root at
+			# z=0, tip at z=length - see build_rotor_blade) - correct as-is
+			# for helicopter_rotors, which spins its blades around Y (a
+			# Z-reaching blade sweeps properly through the horizontal
+			# plane there). This hub spins around Z instead (PropBlades
+			# rotates_z in battle_unit.gd, matching a boat/aircraft
+			# propeller shaft), and rotating a Z-REACHING blade around Z
+			# does nothing - Z-axis rotation leaves the Z component
+			# unchanged, which is exactly why every blade used to end up
+			# overlapping at the same spot regardless of `angle` (Chris's
+			# report, 2026-07-24). Fix: reorient the blade's span from Z
+			# onto X first (a fixed -90deg turn around Y), then pitch it
+			# around its own new (X) spanwise axis, THEN fan each blade out
+			# by its own angle around Z - now that the blade actually has
+			# an X/Y component, the Z fan-out rotation genuinely spreads
+			# them around the hub. Built as a pure-rotation quaternion
+			# (not Euler) so it composes correctly and doesn't disturb the
+			# scale set right after.
+			var reorient = Basis(Vector3(0, 1, 0), -PI / 2.0)
+			var pitch_rot = Basis(Vector3(1, 0, 0), 0.3 * blade_pitch)
+			var fan_rot = Basis(Vector3(0, 0, 1), angle)
 			blade = _mesh_inst(blade_mesh, Color.SILVER)
-			blade.scale = Vector3(0.5, 1.0, actual_size.x * 0.4)
-			blade.rotation = Vector3(0.3, 0, angle)
+			blade.quaternion = (fan_rot * pitch_rot * reorient).get_rotation_quaternion()
+			blade.scale = Vector3(0.5 * blade_scale, 1.0, actual_size.x * 0.4 * blade_scale)
 		else:
+			# The procedural fallback box is built fresh here with its long
+			# dimension already along Y (box.size.y), perpendicular to the
+			# Z fan-out axis - correctly spreads with a plain rotate_z(),
+			# no reorientation needed (unlike the authored branch above).
 			blade = MeshInstance3D.new()
 			var box = BoxMesh.new()
-			box.size = Vector3(0.04, actual_size.x * 0.7, 0.12)
+			box.size = Vector3(0.04 * blade_scale, actual_size.x * 0.7 * blade_scale, 0.12 * blade_scale)
 			blade.mesh = box
 			var mat = StandardMaterial3D.new()
 			mat.albedo_color = Color.SILVER
 			blade.material_override = mat
 			blade.rotate_z(angle)
+			blade.rotate_y(0.3 * blade_pitch)
 		p.add_child(blade)
 	)
 
-	if kort and kort_mesh:
-		var nozzle = _mesh_inst(kort_mesh, Color(0.25, 0.25, 0.28))
-		nozzle.scale = Vector3(prop_size, prop_size, prop_size)
-		nozzle.position = Vector3(0, 0, actual_size.z * 0.35)
-		parent_node.add_child(nozzle)
+	# Pylon reaching back to the hull's geometric center - same reach-
+	# vector technique as _build_fixed_wing_engine's pylon (see that
+	# function's comment for the full explanation). module_placer.gd
+	# computes mount_reach as the offset from THIS propeller's placed
+	# position back to the hull's own local origin (0,0,0), so the far end
+	# of this strut always lands exactly at the hull's geometric center
+	# regardless of where the propeller itself was placed.
+	var mount_reach = Vector3(tweaks.get("mount_reach_x", 0.0), tweaks.get("mount_reach_y", 0.0), tweaks.get("mount_reach_z", 1.0))
+	if mount_reach.length() > 0.001:
+		var reach_len = mount_reach.length()
+		var dir = mount_reach / reach_len
+		var reference = Vector3(0, 1, 0)
+		if abs(dir.dot(reference)) > 0.95:
+			reference = Vector3(1, 0, 0)
+		var right = dir.cross(reference).normalized()
+		var forward = right.cross(dir).normalized()
+		if strut_mesh:
+			var strut = _mesh_inst(strut_mesh, base_color.darkened(0.2))
+			strut.transform = Transform3D(Basis(right * 1.4, dir * reach_len, forward * 1.4), Vector3.ZERO)
+			parent_node.add_child(strut)
+		else:
+			var mount_mesh = _part("rg_mount_box")
+			if mount_mesh:
+				var strut = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+				strut.transform = Transform3D(Basis(right * 1.2, dir * reach_len, forward * 0.6), Vector3.ZERO)
+				parent_node.add_child(strut)
+
+
+static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
+	_build_pylon_mounted_propeller(parent_node, base_size, base_color, tweaks, 1.0)
 
 
 static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.TAN, tweaks: Dictionary = {}):
-	var motor_size = tweaks.get("motor_size", tweaks.get("size", 1.0))
-	var blades = int(tweaks.get("prop_blades", 2.0))
-	var tail_fins = tweaks.get("tail_fins", true)
-
-	var strut_mesh = _part("outrigger_strut")
-	var nacelle_mesh = _part("cruise_nacelle")
-	var blade_mesh = _part("rotor_blade")
-	var fin_mesh = _part("tail_fin")
-
-	var actual_size = Vector3(base_size.x * motor_size, base_size.y * motor_size, base_size.z * motor_size)
-
-	if strut_mesh:
-		var strut = _mesh_inst(strut_mesh, base_color.darkened(0.3))
-		strut.scale = Vector3(motor_size, 1.0, 1.0)
-		strut.position = Vector3(actual_size.x * 0.25, 0, 0)
-		parent_node.add_child(strut)
-
-	if nacelle_mesh:
-		var nacelle = _mesh_inst(nacelle_mesh, base_color.darkened(0.15))
-		nacelle.scale = Vector3(motor_size, motor_size, motor_size)
-		nacelle.position = Vector3(actual_size.x * 0.5, 0, 0)
-		parent_node.add_child(nacelle)
-
-	var pivot = Node3D.new()
-	pivot.name = "PropBlades"
-	pivot.position = Vector3(actual_size.x * 0.5, 0, -actual_size.z * 0.35)
-	parent_node.add_child(pivot)
-
-	_ring_of(pivot, blades, 0.0, func(p, _pos, angle, _idx):
-		var blade: MeshInstance3D
-		if blade_mesh:
-			blade = _mesh_inst(blade_mesh, Color.SILVER)
-			blade.scale = Vector3(0.4, 1.0, actual_size.y * 0.4)
-			blade.rotation = Vector3(0.2, 0, angle)
-		else:
-			blade = MeshInstance3D.new()
-			var box = BoxMesh.new()
-			box.size = Vector3(0.02, actual_size.y * 0.55, 0.08)
-			blade.mesh = box
-			var mat = StandardMaterial3D.new()
-			mat.albedo_color = Color.SILVER
-			blade.material_override = mat
-			blade.rotate_z(angle)
-		p.add_child(blade)
-	)
-
-	if tail_fins and fin_mesh:
-		var fin = _mesh_inst(fin_mesh, Color(0.3, 0.3, 0.35))
-		fin.scale = Vector3(1.0, motor_size, motor_size)
-		fin.position = Vector3(actual_size.x * 0.5, actual_size.y * 0.3, actual_size.z * 0.3)
-		parent_node.add_child(fin)
+	# Zeppelin-style cruise prop (Chris's ask, 2026-07-24): a small engine
+	# nacelle (hub_scale 0.75, unchanged) turning a disproportionately
+	# large, slow prop - real airships mount big low-RPM propellers since
+	# they're only providing gentle cruise/steering thrust, not fighting
+	# gravity like a plane's. blade_scale 1.8 makes the blades noticeably
+	# bigger than naval_propeller's own (which stays at the neutral 1.0);
+	# the slow turn rate itself lives in battle_unit.gd's PropBlades spin.
+	_build_pylon_mounted_propeller(parent_node, base_size, base_color, tweaks, 0.75, 1.8)
 
 
 static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_GOLDENROD, tweaks: Dictionary = {}):
-	var drum_width = tweaks.get("drum_width", tweaks.get("size", 1.0))
-	var drum_mesh = _part("screw_drum")
+	# Rebuilt (Chris's ask, 2026-07-24, two passes): drum_width/drum_count
+	# are gone - just two tweaks now (drum_diameter, helix_depth). Each end
+	# now terminates in an explicit gearbox housing, corner-mounted:
+	# module_placer.gd positions this whole module "down and out" from the
+	# hull's own corner (its vertical centerline) at ~45 degrees, and
+	# passes the reach back UP to that corner as mount_reach_x/y (an
+	# internal geometry channel, not a player-facing tweak - same idea as
+	# fixed_wing_engine's pylon). A diagonal brace is built here along that
+	# reach vector at EACH end, from a gearbox housing back to the corner.
+	# drum_length (also internal) is the corner-to-corner span - the
+	# gearboxes sit at exactly +-drum_length/2 (the corners' own Z), and
+	# the drum's authored tapered tip (which lands at 0.65x whatever length
+	# _fit_scale targets, not the full span - see fit_length below) is
+	# scaled to land at that exact same point, so the cone visually plugs
+	# straight into the gearbox face instead of floating short of or past
+	# it ("pin the ends of the cones to the gearbox faces... stretch the
+	# drum between the cones", Chris's ask).
+	#
+	# helix_depth can't continuously re-deform a single baked mesh at
+	# runtime, so it picks among 3 discrete authored variants (shallow/
+	# standard/deep flighting) rather than a smooth scale, the same way
+	# blade_count picks a literal blade count instead of stretching one
+	# blade.
+	var diameter = tweaks.get("drum_diameter", tweaks.get("drum_width", tweaks.get("size", 1.0)))
+	var depth = tweaks.get("helix_depth", 1.0)
+	var span = tweaks.get("drum_length", base_size.z) # corner-to-corner distance
+	var fit_length = span / 1.3 # 0.65 * 2 - see the tip-alignment comment above
+
+	var drum_variant = "screw_drum"
+	if depth < 0.85:
+		drum_variant = "screw_drum_shallow"
+	elif depth > 1.15:
+		drum_variant = "screw_drum_deep"
+	var drum_mesh = _part(drum_variant)
+	if not drum_mesh:
+		drum_mesh = _part("screw_drum")
+	var gearbox_mesh = _part("screw_gearbox")
+	var strut_mesh = _part("mount_strut_aerofoil")
+
+	var actual_size = Vector3(base_size.x * diameter, base_size.y * diameter, fit_length)
+
+	var spin = Node3D.new()
+	spin.name = "ScrewSpin"
+	parent_node.add_child(spin)
+
 	var drum: MeshInstance3D
-	var actual_size = Vector3(base_size.x * drum_width, base_size.y * drum_width, base_size.z * drum_width)
 	if drum_mesh:
 		drum = _mesh_inst(drum_mesh, base_color)
 		drum.scale = _fit_scale(Vector3(actual_size.y * 0.85, actual_size.y * 0.85, actual_size.z), Vector3(0.29, 0.29, 1.6))
@@ -2886,13 +3043,68 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 		var cyl = CylinderMesh.new()
 		cyl.top_radius = actual_size.y * 0.4
 		cyl.bottom_radius = actual_size.y * 0.4
-		cyl.height = actual_size.z
+		cyl.height = span
 		drum.mesh = cyl
 		var mat = StandardMaterial3D.new()
 		mat.albedo_color = base_color
 		drum.material_override = mat
 		drum.rotation = Vector3(PI / 2.0, 0, 0)
-	parent_node.add_child(drum)
+	spin.add_child(drum)
+
+	# Gearbox housings at each end - static (siblings of the spin pivot,
+	# NOT children of it - the housing doesn't turn with the shaft), built
+	# from rg_screw_cradle's bearing-block shape, scaled to the drum's own
+	# diameter and positioned so the bore (authored near the top of the
+	# box, see build_rg_screw_cradle) lines up with the shaft centerline.
+	# gear_scale is sized off the drum's own rendered radius
+	# (actual_size.y*0.85, the _fit_scale target above), not actual_size.y
+	# directly, so the housing reads as bigger than the shaft it holds.
+	#
+	# Each end gets its OWN reach vector (module_placer.gd's
+	# mount_reach_fore_*/mount_reach_aft_*), not one shared X/Y-only reach -
+	# a single shared reach undershot the hull's actual footprint on this
+	# hull size and missed it entirely (Chris's report, 2026-07-24), and
+	# had no fore-aft lean at all. Both ends now aim toward the hull's own
+	# geometric center in full 3D (module_placer.gd computes this as most
+	# of the way from each end to hull-local (0,0,0)), so the brace angles
+	# inward on X AND toward center on Z simultaneously and reliably drives
+	# into the hull's solid volume regardless of hull proportions.
+	var gear_scale = actual_size.y * 0.85 * 1.3
+	var end_reaches = [
+		[span * 0.5, Vector3(tweaks.get("mount_reach_fore_x", 0.0), tweaks.get("mount_reach_fore_y", 0.0), tweaks.get("mount_reach_fore_z", 0.0))],
+		[-span * 0.5, Vector3(tweaks.get("mount_reach_aft_x", 0.0), tweaks.get("mount_reach_aft_y", 0.0), tweaks.get("mount_reach_aft_z", 0.0))],
+	]
+	for entry in end_reaches:
+		var z_end = entry[0]
+		var mount_reach = entry[1]
+		if gearbox_mesh:
+			var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.25))
+			gearbox.scale = Vector3(gear_scale, gear_scale, gear_scale)
+			gearbox.position = Vector3(0, -0.2 * gear_scale, z_end)
+			parent_node.add_child(gearbox)
+
+		# Diagonal corner brace - same reach-vector technique as
+		# _build_fixed_wing_engine's pylon (see that function's comment),
+		# just anchored toward the hull's center instead of reaching FROM
+		# it, and built once per end with its own reach.
+		if mount_reach.length() > 0.001:
+			var reach_len = mount_reach.length()
+			var dir = mount_reach / reach_len
+			var reference = Vector3(0, 1, 0)
+			if abs(dir.dot(reference)) > 0.95:
+				reference = Vector3(1, 0, 0)
+			var right = dir.cross(reference).normalized()
+			var forward = right.cross(dir).normalized()
+			if strut_mesh:
+				var strut = _mesh_inst(strut_mesh, base_color.darkened(0.2))
+				strut.transform = Transform3D(Basis(right * 1.2, dir * reach_len, forward * 1.2), Vector3(0, 0, z_end))
+				parent_node.add_child(strut)
+			else:
+				var mount_mesh = _part("rg_mount_box")
+				if mount_mesh:
+					var strut = _mesh_inst(mount_mesh, base_color.darkened(0.2))
+					strut.transform = Transform3D(Basis(right * 1.0, dir * reach_len, forward * 0.5), Vector3(0, 0, z_end))
+					parent_node.add_child(strut)
 
 
 static func _build_wing(parent_node: Node3D, base_size: Vector3, base_color: Color):

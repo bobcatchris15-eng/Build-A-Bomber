@@ -1338,23 +1338,36 @@ const LOCOMOTION_TWEAK_SPECS = {
 	],
 	"ornithopter_wing": [
 		{"name": "wingspan", "label": "Wingspan", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
-		{"name": "rib_count", "label": "Structural Ribs", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
 		{"name": "wing_sweep", "label": "Wing Sweep Angle", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0}
 	],
+	# naval_propeller and buoyant_envelope share an identical tweak set
+	# (Chris's ask, 2026-07-24: pylon-mounted rebuild) - both now mount a
+	# stern pylon reaching back from the hull's own center to a propeller
+	# hub+blades assembly built from the same shared GLBs, "deformed"
+	# (scaled/tilted) per instance rather than needing distinct authored
+	# parts per type. prop_size/kort_nozzle/motor_size/tail_fins are gone,
+	# not just defaulted differently - see the matching removals in
+	# module_data.gd's weight/cost tweak tables and visual_builder.gd's
+	# shared _build_pylon_mounted_propeller().
 	"naval_propeller": [
-		{"name": "prop_count", "label": "Propeller Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0},
-		{"name": "prop_size", "label": "Propeller Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
+		{"name": "prop_count", "label": "Propeller Count", "min": 1.0, "max": 5.0, "step": 1.0, "default": 2.0},
 		{"name": "blade_count", "label": "Blades per Propeller", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
-		{"name": "kort_nozzle", "label": "Kort Nozzle Duct", "type": "bool", "default": false}
+		{"name": "blade_pitch", "label": "Blade Pitch", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0}
 	],
 	"buoyant_envelope": [
-		{"name": "motor_size", "label": "Gondola Motor Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
-		{"name": "prop_blades", "label": "Motor Blades", "min": 2.0, "max": 4.0, "step": 1.0, "default": 2.0},
-		{"name": "tail_fins", "label": "Stabilizer Tail Fins", "type": "bool", "default": true}
+		{"name": "prop_count", "label": "Propeller Count", "min": 1.0, "max": 5.0, "step": 1.0, "default": 2.0},
+		{"name": "blade_count", "label": "Blades per Propeller", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
+		{"name": "blade_pitch", "label": "Blade Pitch", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0}
 	],
+	# Rebuilt (Chris's ask, 2026-07-24): drum_count is gone - always one
+	# drum per side now (like tracked_treads), spanning the hull's real
+	# fore-aft length with a gearbox at each end instead of a fixed-length
+	# floating shaft. drum_width renamed to drum_diameter; helix_depth is
+	# new (picks among 3 discrete authored flighting-depth variants - see
+	# _build_screw_drive()).
 	"screw_drive": [
-		{"name": "drum_count", "label": "Screw Drum Pair Count", "min": 1.0, "max": 2.0, "step": 1.0, "default": 1.0},
-		{"name": "drum_width", "label": "Screw Drum Size", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0}
+		{"name": "drum_diameter", "label": "Drum Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "helix_depth", "label": "Helix Depth", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0}
 	]
 }
 
@@ -1399,17 +1412,23 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 			thrust = wingspan
 		"naval_propeller":
 			var count = settings.get("prop_count", settings.get("count", 2.0))
-			var size = settings.get("prop_size", settings.get("size", 1.0))
-			var kort = settings.get("kort_nozzle", false)
-			thrust = (count / 2.0) * size * (1.2 if kort else 1.0)
+			var pitch = settings.get("blade_pitch", 1.0)
+			thrust = (count / 2.0) * pitch
 		"buoyant_envelope":
-			var size = settings.get("motor_size", settings.get("size", 1.0))
-			thrust = size
+			# Same pylon-mounted prop formula as naval_propeller, but
+			# attenuated (0.6x) - buoyancy does the lifting here, not the
+			# motors (see the catalog entry's own comment), so a bigger
+			# prop cluster shouldn't scale thrust as hard as it does for a
+			# real thrust-driven boat screw.
+			var count = settings.get("prop_count", settings.get("count", 2.0))
+			var pitch = settings.get("blade_pitch", 1.0)
+			thrust = (count / 2.0) * pitch * 0.6
 		"screw_drive":
-			var count = settings.get("drum_count", settings.get("count", 1.0))
-			var size = settings.get("drum_width", settings.get("size", 1.0))
-			thrust = count * size
-			capacity = count * size * 160.0
+			# drum_count is gone (always a fixed pair now) - matches
+			# tracked_treads' pattern, no count factor.
+			var diameter = settings.get("drum_diameter", settings.get("drum_width", settings.get("size", 1.0)))
+			thrust = diameter
+			capacity = diameter * 160.0
 	return {"thrust": thrust, "capacity": capacity}
 
 # Per-axis scale of the running-gear slab relative to the hull footprint.

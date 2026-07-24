@@ -1080,8 +1080,11 @@ func test_locomotion_rebuild_and_multipart_assemblies() -> bool:
 				parent.queue_free()
 				return false
 		elif type_id == "ornithopter_wing":
-			if not parent.has_node("WingPivot"):
-				print("  [FAIL] ornithopter_wing missing 'WingPivot' animation pivot")
+			# Dragonfly-style fore/hind wing pair, each with its own
+			# flap-animation pivot (see visual_builder.gd's
+			# _build_ornithopter_wing rebuild, 2026-07-24).
+			if not parent.has_node("WingPivotFore") or not parent.has_node("WingPivotHind"):
+				print("  [FAIL] ornithopter_wing missing 'WingPivotFore'/'WingPivotHind' animation pivots")
 				parent.queue_free()
 				return false
 		elif type_id in ["naval_propeller", "buoyant_envelope"]:
@@ -6206,8 +6209,11 @@ func test_ornithopter_wing_spawns_flaps_and_flies() -> bool:
 		placer.queue_free(); hull.queue_free()
 		return false
 	for w in wing_instances:
-		if not w.has_node("WingPivot"):
-			print("  [FAIL] ornithopter_wing instance missing WingPivot (flap-animation target)")
+		# Dragonfly-style fore/hind wing pair, each with its own
+		# flap-animation pivot (see visual_builder.gd's
+		# _build_ornithopter_wing rebuild, 2026-07-24).
+		if not w.has_node("WingPivotFore") or not w.has_node("WingPivotHind"):
+			print("  [FAIL] ornithopter_wing instance missing WingPivotFore/WingPivotHind (flap-animation targets)")
 			placer.queue_free(); hull.queue_free()
 			return false
 
@@ -6215,7 +6221,11 @@ func test_ornithopter_wing_spawns_flaps_and_flies() -> bool:
 	await process_frame
 
 	# Flap animation: real oscillation over time, driven by battle_unit.gd's
-	# per-physics-tick update, not a static authored pose.
+	# per-physics-tick update, not a static authored pose - and the fore/
+	# hind pivots must beat in OPPOSITION to each other (Chris's ask: "flap
+	# rapidly in opposition to each other per node", like a real
+	# dragonfly's two wing pairs beating roughly 180deg out of phase), not
+	# in unison.
 	var unit = CharacterBody3D.new()
 	unit.set_script(BattleUnitScript)
 	root.add_child(unit)
@@ -6228,20 +6238,25 @@ func test_ornithopter_wing_spawns_flaps_and_flies() -> bool:
 	unit.global_position = Vector3.ZERO
 	await process_frame
 
-	var pivot = wing_instances[0].get_node("WingPivot")
+	var fore_pivot = wing_instances[0].get_node("WingPivotFore")
+	var hind_pivot = wing_instances[0].get_node("WingPivotHind")
 	unit._physics_process(1.0 / 60.0)
-	var rot_a = pivot.rotation.x
+	var fore_a = fore_pivot.rotation.x
+	var hind_a = hind_pivot.rotation.x
 	await process_frame
 	await process_frame
 	await process_frame
 	unit._physics_process(1.0 / 60.0)
-	var rot_b = pivot.rotation.x
+	var fore_b = fore_pivot.rotation.x
 	unit.queue_free()
-	if is_equal_approx(rot_a, rot_b):
-		print("  [FAIL] ornithopter wing flap animation isn't changing over time (rot_a=", rot_a, " rot_b=", rot_b, ")")
+	if is_equal_approx(fore_a, fore_b):
+		print("  [FAIL] ornithopter wing flap animation isn't changing over time (fore_a=", fore_a, " fore_b=", fore_b, ")")
+		return false
+	if not is_equal_approx(fore_a, -hind_a):
+		print("  [FAIL] ornithopter fore/hind wings should flap in opposition to each other (fore_a=", fore_a, " hind_a=", hind_a, ")")
 		return false
 
-	print("  [PASS] ornithopter_wing spawns 2 real wing instances with a flap-animation pivot, carries the airborne-not-fixed_wing trait combo for simple hover-capable flight, and its flap motion genuinely oscillates over time.")
+	print("  [PASS] ornithopter_wing spawns 2 real wing instances, each with a dragonfly-style fore/hind wing pair on its own flap-animation pivot beating in opposition, carries the airborne-not-fixed_wing trait combo for simple hover-capable flight, and its flap motion genuinely oscillates over time.")
 	return true
 
 # --- Hull Modding (HULL_MODDING_PLAN.md) ---
