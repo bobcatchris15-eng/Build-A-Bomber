@@ -34,3 +34,7 @@ window/stretch/aspect="expand"
 [filesystem]
 
 import/blender/enabled=false
+
+[rendering]
+
+textures/vram_compression/import_etc2_astc=true
