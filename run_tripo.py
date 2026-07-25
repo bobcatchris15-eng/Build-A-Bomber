@@ -70,9 +70,17 @@ def preprocess_image(image_path, fg_ratio=0.85):
 def generate_mesh(image_path, output_filename=None):
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    
+
     print(f"Loading TripoSG on {device}...")
-    pipe = TripoSGPipeline.from_pretrained(str(MODEL_DIR)).to(device, dtype)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    try:
+        pipe = TripoSGPipeline.from_pretrained(str(MODEL_DIR)).to(device, dtype)
+    except Exception as err:
+        print(f"CUDA loading failed ({err}), falling back to CPU...")
+        device = "cpu"
+        dtype = torch.float32
+        pipe = TripoSGPipeline.from_pretrained(str(MODEL_DIR)).to(device, dtype)
     
     print("Preprocessing image...")
     image = preprocess_image(image_path)

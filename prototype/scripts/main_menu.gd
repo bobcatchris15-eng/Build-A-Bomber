@@ -77,7 +77,14 @@ func _add_menu_button(parent: Control, icon_name: String, title_text: String, hi
 		btn.icon = icon_tex
 		btn.expand_icon = true
 
-	btn.pressed.connect(callback)
+	btn.pressed.connect(func():
+		if get_node_or_null("/root/AudioManager"):
+			get_node("/root/AudioManager").play_sfx("click")
+		callback.call())
+	btn.mouse_entered.connect(func():
+		if get_node_or_null("/root/AudioManager"):
+			get_node("/root/AudioManager").play_sfx("hover"))
+
 	parent.add_child(btn)
 
 	if hint_text != "":

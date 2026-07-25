@@ -495,10 +495,10 @@ func _find_mesh_instances(node: Node, results: Array) -> void:
 		_find_mesh_instances(child, results)
 
 func _apply_material_to_building_mesh(node: Node, col: Color) -> void:
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = col
-	mat.roughness = 0.4
-	mat.metallic = 0.3
+	var mat = HullMaterialBuilder.build_hull_material(faction, armor_material)
+	if team != 0 and mat is ShaderMaterial:
+		var team_col = FactionCatalog.get_visual_color(faction).lerp(Color(0.85, 0.2, 0.2), 0.45)
+		mat.set_shader_parameter("faction_base_color", team_col)
 	if node is MeshInstance3D:
 		node.material_override = mat
 	for child in node.get_children():
