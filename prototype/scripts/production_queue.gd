@@ -71,6 +71,8 @@ func enqueue(team: int, blueprint: Dictionary, faction: String, cost_metal: int,
 	if skirmish.is_energy_deficit(team):
 		build_time *= 1.5
 	get_queue(team, tier).append({"blueprint": blueprint, "time_left": build_time, "total_time": build_time})
+	if team == skirmish._local_team() and skirmish.get_node_or_null("/root/AudioManager"):
+		skirmish.get_node("/root/AudioManager").play_sfx("click")
 	return {"queued": true, "error": "", "reason": "", "tier": tier}
 
 # Called every physics frame from skirmish.gd's _physics_process(). Only the
@@ -99,3 +101,5 @@ func tick(delta: float):
 				var factory = skirmish.get_team_factory(team, tier)
 				if factory and is_instance_valid(factory):
 					factory.spawn_from_queue(job.blueprint)
+					if team == skirmish._local_team() and skirmish.get_node_or_null("/root/AudioManager"):
+						skirmish.get_node("/root/AudioManager").play_sfx("construct")

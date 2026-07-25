@@ -1,13 +1,14 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-24): A1, A2, B1, and B2 landed; everything else is planning
-only.** This is a resumable roadmap, written so a fresh session can pick up any
-single chunk without re-deriving the architecture. Chunks are ordered with
-explicit dependencies in the sequencing table at the end; each is sized to land
-as one commit with its own `PROGRESS.md` entry. **Update the sequencing table's
-status as chunks land** — a stale "next up" header in a plan doc is exactly the
-confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before being corrected on
-2026-07-24. **Next up: B3** (`const MAPS` → `res://data/maps/*.json`).
+**Status (2026-07-24): A1, A2, B1, B2, and B3 landed; everything else is
+planning only.** This is a resumable roadmap, written so a fresh session can
+pick up any single chunk without re-deriving the architecture. Chunks are
+ordered with explicit dependencies in the sequencing table at the end; each is
+sized to land as one commit with its own `PROGRESS.md` entry. **Update the
+sequencing table's status as chunks land** — a stale "next up" header in a plan
+doc is exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated
+before being corrected on 2026-07-24. **Next up: B4** (Python terrain generator
++ heightmap-backed elevation — the keystone chunk).
 
 Reference implementation for all of this is OpenRA, cloned locally to
 `C:\Misc\openra` (not vendored into this repo). Specific `file:line` citations
@@ -568,7 +569,7 @@ readback) over catalog-number assertions.
 | 2 | A2 debug/options menu | small | A1 | **Done (`c6f48a0`)** |
 | 3 | B1 map schema validator | afternoon | — | **Done** |
 | 4 | B2 slots array (N-player) | one session | — | **Done** |
-| 5 | B3 maps → JSON | one session | B1, B2 | — |
+| 5 | B3 maps → JSON | one session | B1, B2 | **Done** |
 | 6 | **B4 Python terrain generator + heightmap** | **multi** | B3 | — |
 | 7 | **B5 slope-aware navmesh + collision** | **multi** | B4 | — |
 | 8 | B6 retire elevation_zones, migrate, rect+bounds | one session | B5 | — |

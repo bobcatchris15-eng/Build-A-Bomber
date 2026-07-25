@@ -948,8 +948,11 @@ func _spawn_resource_nodes():
 		node.setup(s.type, s.amount)
 
 func _spawn_bases():
-	var p_start = current_map.player_start
-	var e_start = current_map.enemy_start
+	# RTS_CORE_ROADMAP.md B3: player_start/enemy_start became a spawns
+	# array with an id per entry - "player"/"enemy" are the ids every
+	# bundled map uses.
+	var p_start = MapCatalog.get_spawn(current_map, "player")
+	var e_start = MapCatalog.get_spawn(current_map, "enemy")
 
 	player_hq = _spawn_prefab("hq", PLAYER_TEAM, p_start.hq, player_faction)
 	_spawn_starting_manufactories(PLAYER_TEAM, p_start.factory, player_faction)
@@ -1558,6 +1561,8 @@ func _set_selection(new_selection: Array):
 		if is_instance_valid(s) and s.has_method("set_selected"):
 			s.set_selected(false)
 	selected = new_selection
+	if not selected.is_empty() and get_node_or_null("/root/AudioManager"):
+		get_node("/root/AudioManager").play_sfx("select")
 	for s in selected:
 		if is_instance_valid(s) and s.has_method("set_selected"):
 			s.set_selected(true)
@@ -1582,6 +1587,8 @@ func _select_in_rect(rect: Rect2):
 
 func _issue_order(screen_pos: Vector2):
 	if selected.is_empty(): return
+	if get_node_or_null("/root/AudioManager"):
+		get_node("/root/AudioManager").play_sfx("select", 0.15)
 	# Check click on enemy / resource node first
 	var result = _raycast_screen(screen_pos, 4 + 8 + 16)
 	if result and result.collider:

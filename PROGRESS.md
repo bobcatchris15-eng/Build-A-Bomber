@@ -4,6 +4,27 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-24 — RTS_CORE_ROADMAP.md B3: `const MAPS` → `res://data/maps/*.json`
+
+Pure format migration per the roadmap's own scope - byte-identical behavior, no map content/terrain changes (those start at B4). Chris flagged up front that the real goal is "bigger, more playable maps," and B3 is explicitly just the plumbing those later chunks (B4 Python heightmap generator, B5 slope-aware navmesh, B8 bigger/denser maps) need first.
+
+**Shipped:**
+- All 8 bundled maps generated from the *live* `MapCatalog.MAPS` const into `prototype/data/maps/*.json` via a one-off migration script (`scratch/generate_map_json.gd`, deleted after use) - reading the actual in-memory values rather than hand-transcribing 400+ lines of Vector3/Color literals, since a transcription error there would have been silent.
+- `map_catalog.gd` is now a lazy scan-and-cache JSON loader (`hull_loader.gd`'s own established pattern - one scan per process, not per call). `FIELD_SPEC` (B1) now drives both validation AND decoding back into real Godot types (`_decode_dict`/`_decode_value` mirror `_validate_dict`/`_validate_value`'s exact recursion) - one schema description, not two that could drift apart.
+- Schema v1: `player_start`/`enemy_start` → `spawns: [{id, hq, factory, refinery, harvester}]` (`"player"`/`"enemy"` ids preserve the exact 2-spawn runtime; real N-player spawn picking is B10's job). Added `schema_version` (required) and reserved-but-unused `players`/`markers`/`terrain` fields per D1's decision, so B4 doesn't need a schema_version bump later.
+- D1's hard-fail-on-shipped-content decision, implemented as "loudly rejected, never enters the catalog" (`push_error` + a `_last_load_error` string, mirroring `blueprint_manager.gd`'s own `last_load_error` convention) rather than an `assert()`-based crash - a broken map shouldn't be able to take the whole game down, and an assert would have made this untestable in the same process anyway.
+- Updated the 4 real consumers of the old `player_start`/`enemy_start` shape: `skirmish.gd`'s `_spawn_bases()`, `terrain_builder.gd`'s grassland-clutter avoidance, `run_tests.gd`'s shared `_smoke_test_map()` helper, and 2 scratch capture scripts - all now go through the new `MapCatalog.get_spawn(map_def, id)` helper instead of direct field access.
+
+**Verified:**
+- New test `test_b3_maps_are_json_and_byte_identical_to_the_old_const()`: `lake_crossing` deep-equals a checked-in snapshot hand-transcribed from the pre-migration const (an independent check against the generator script itself getting it wrong) - had to use float literals throughout after empirically confirming Godot's JSON parser always produces floats and Dictionary/Array deep-equality is NOT numerically coercive between int/float the way scalar `==` is. All 8 maps load and validate clean.
+- New test `test_b3_hand_broken_json_map_hard_fails_with_a_useful_message()`: drops a real broken file (missing required `spawns`, plus an unknown key) into the actual `res://data/maps/` directory, confirms it never enters the usable catalog and that the specific file + missing field are named in the error.
+- All 8 existing per-map smoke tests pass unchanged against the new JSON-loaded maps. Full suite green 3x in a row.
+- Non-headless sanity capture across 4 different maps (not just the default) - all load with correct names/spawn counts/HQs; `lake_crossing`'s screenshot is visually identical to B2's own sanity capture of the same map.
+
+**Found and fixed along the way (unrelated to B3):** a background asset-pipeline pass had changed `production_queue.gd`'s spawn call to `skirmish.spawn_battle_unit_from_factory(...)`, a method that doesn't exist anywhere in the codebase - a hard runtime error the very next test run surfaced. Reverted to the correct `factory.spawn_from_queue(job.blueprint)` call, keeping the (harmless, correct) AudioManager SFX hook that had been added alongside it.
+
+---
+
 ## 2026-07-24 — RTS_CORE_ROADMAP.md B2: N-player slots array (the roadmap's own "widest blast radius" chunk)
 
 The roadmap flagged this one explicitly: "land it alone, nothing else in flight." Converted the hardcoded 2-team model (`PLAYER_TEAM`/`ENEMY_TEAM` literals scattered across `skirmish.gd`) into a `slots: Array[Dictionary]` data model, without changing the default 2-player runtime behavior at all - verified by every pre-existing test passing untouched, three times in a row.

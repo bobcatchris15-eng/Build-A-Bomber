@@ -140,6 +140,8 @@ func _init():
 	success = success and await test_debug_infinite_resources_is_a_real_runtime_toggle()
 	success = success and await test_map_schema_validator()
 	success = success and await test_b2_n_player_slots_alliance_fog_repair_and_independent_resources()
+	success = success and await test_b3_maps_are_json_and_byte_identical_to_the_old_const()
+	success = success and await test_b3_hand_broken_json_map_hard_fails_with_a_useful_message()
 	success = success and await test_2d_ui_chrome_overhaul()
 	success = success and await test_audio_system()
 
@@ -5681,9 +5683,15 @@ func _smoke_test_map(map_id: String) -> bool:
 		skirmish.queue_free()
 		return false
 
+	# RTS_CORE_ROADMAP.md B3: player_start/enemy_start became a spawns
+	# array with an id per entry - MapCatalog.get_spawn() is the one
+	# supported way to get "the player's start"/"the enemy's start" back.
+	var player_start = MapCatalogScript.get_spawn(map_def, "player")
+	var enemy_start = MapCatalogScript.get_spawn(map_def, "enemy")
+
 	# Start points must be real, unblocked, buildable ground.
-	for start_name in ["player_start", "enemy_start"]:
-		var start = map_def[start_name]
+	for start_name in ["player", "enemy"]:
+		var start = player_start if start_name == "player" else enemy_start
 		for key in ["hq", "factory", "refinery"]:
 			if TerrainBuilderScript.is_position_blocked(map_def, start[key]):
 				print("  [FAIL] ", start_name, ".", key, " (", start[key], ") sits on blocked terrain (water/obstacle/ramp)")
@@ -5691,8 +5699,8 @@ func _smoke_test_map(map_id: String) -> bool:
 				return false
 
 	# Every resource node must be reachable from ITS side's harvester spawn.
-	var player_start_pos = map_def.player_start.harvester
-	var enemy_start_pos = map_def.enemy_start.harvester
+	var player_start_pos = player_start.harvester
+	var enemy_start_pos = enemy_start.harvester
 	for node_data in map_def.get("resource_nodes", []):
 		var from_pos = player_start_pos if node_data.position.distance_to(player_start_pos) < node_data.position.distance_to(enemy_start_pos) else enemy_start_pos
 		var path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, from_pos, node_data.position, true)
@@ -5704,8 +5712,8 @@ func _smoke_test_map(map_id: String) -> bool:
 	# The two HQs must be mutually reachable (AI can path to the player,
 	# player can path to the AI) - not stranded on disconnected navmesh
 	# islands by a badly-placed water/obstacle/elevation zone.
-	var hq_path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, map_def.player_start.hq, map_def.enemy_start.hq, true)
-	if hq_path.size() < 2 or hq_path[hq_path.size() - 1].distance_to(map_def.enemy_start.hq) > 5.0:
+	var hq_path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, player_start.hq, enemy_start.hq, true)
+	if hq_path.size() < 2 or hq_path[hq_path.size() - 1].distance_to(enemy_start.hq) > 5.0:
 		print("  [FAIL] Player and enemy HQs are not mutually reachable on the ground navmesh")
 		skirmish.queue_free()
 		return false
@@ -8197,6 +8205,112 @@ func test_b2_n_player_slots_alliance_fog_repair_and_independent_resources() -> b
 	await process_frame
 
 	print("  [PASS] A manually-added 3rd slot is a real ally: independent economy, fog reveals what only the ally can see, and a player-team repair_array heals the ally's different-team unit.")
+	return true
+
+func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
+	print("Running Test Suite: Maps Are JSON - Byte-Identical Deep-Equal vs. The Old Const (RTS_CORE_ROADMAP.md B3)...")
+
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	MapCatalogScript.reset_cache_for_tests()
+
+	# Checked-in snapshot of lake_crossing's values EXACTLY as they were
+	# hardcoded in map_catalog.gd's old MAPS const, before the B3 JSON
+	# migration - transcribed by hand from that commit, not derived from
+	# the new loader, so this is a real independent check against a
+	# transcription error in the generator script that produced the JSON.
+	# All bare numeric leaves are float literals (not int) because JSON
+	# round-trips every number as a float, and Godot's Dictionary/Array
+	# deep-equality is NOT numerically coercive between int and float the
+	# way scalar `==` is - confirmed empirically before writing this test.
+	var expected_lake_crossing = {
+		"schema_version": 1.0,
+		"name": "Lake Crossing",
+		"description": "A single lake splits the map roughly in two - ground units detour around it, naval units are confined to it. No high ground.",
+		"map_half_extents": 240.0,
+		"ground_color": Color(0.2, 0.26, 0.21),
+		"water_blobs": [
+			{"center": Vector3(54, 0, 0), "radius": 22.0, "irregularity": 0.3, "depth": 1.3, "shore_blend": 8.0},
+		],
+		"obstacles": [],
+		"elevation_zones": [],
+		"resource_nodes": [
+			{"position": Vector3(-66, 0, 54), "type": "metal", "amount": 1200.0},
+			{"position": Vector3(-84, 0, 36), "type": "metal", "amount": 1000.0},
+			{"position": Vector3(66, 0, -54), "type": "metal", "amount": 1200.0},
+			{"position": Vector3(84, 0, -36), "type": "metal", "amount": 1000.0},
+			{"position": Vector3(0, 0, 0), "type": "crystal", "amount": 800.0},
+			{"position": Vector3(-90, 0, -75), "type": "crystal", "amount": 700.0},
+			{"position": Vector3(90, 0, 75), "type": "crystal", "amount": 700.0},
+			{"position": Vector3(-15, 0, -24), "type": "metal", "amount": 900.0},
+			{"position": Vector3(15, 0, 24), "type": "metal", "amount": 900.0},
+		],
+		"spawns": [
+			{"id": "player", "hq": Vector3(0, 0, 102), "factory": Vector3(-30, 0, 90), "refinery": Vector3(27, 0, 84), "harvester": Vector3(18, 1.5, 72)},
+			{"id": "enemy", "hq": Vector3(0, 0, -102), "factory": Vector3(30, 0, -90), "refinery": Vector3(-27, 0, -84), "harvester": Vector3(-18, 1.5, -72)},
+		],
+	}
+
+	var loaded = MapCatalogScript.get_map("lake_crossing")
+	if loaded != expected_lake_crossing:
+		print("  [FAIL] JSON-loaded lake_crossing does not deep-equal the checked-in snapshot of the old const's values.")
+		print("    Loaded:   ", loaded)
+		print("    Expected: ", expected_lake_crossing)
+		return false
+
+	# All 8 bundled maps still present (the const had exactly 8).
+	var ids = MapCatalogScript.get_map_ids()
+	if ids.size() != 8:
+		print("  [FAIL] Expected exactly 8 maps loaded from res://data/maps/*.json, got ", ids.size(), ": ", ids)
+		return false
+
+	# Every map must validate clean through the exact same validator B1 built.
+	for id in ids:
+		var errors = MapCatalogScript.validate_map(id)
+		if not errors.is_empty():
+			print("  [FAIL] Map '", id, "' failed validation after loading from JSON: ", errors)
+			return false
+
+	print("  [PASS] lake_crossing deep-equals the old const's exact values; all 8 maps loaded from JSON and validate clean.")
+	return true
+
+func test_b3_hand_broken_json_map_hard_fails_with_a_useful_message() -> bool:
+	print("Running Test Suite: Hand-Broken Map JSON Hard-Fails With A Useful Message (RTS_CORE_ROADMAP.md B3)...")
+
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+
+	# A deliberately broken map file dropped into the REAL res://data/maps/
+	# directory (D1: shipped content, hard-fail territory) - missing its
+	# required "spawns" field entirely and has an unknown key, so both
+	# defect classes get exercised by one broken file.
+	var bad_path = "res://data/maps/__test_broken_map__.json"
+	var bad_json = {
+		"schema_version": 1,
+		"name": "Broken Test Map",
+		"description": "deliberately invalid",
+		"map_half_extents": 100,
+		"ground_color": [0.1, 0.1, 0.1],
+		"this_key_does_not_exist_in_the_schema": true,
+		# "spawns" deliberately omitted - required field missing
+	}
+	var f = FileAccess.open(bad_path, FileAccess.WRITE)
+	f.store_string(JSON.stringify(bad_json, "\t"))
+	f.close()
+
+	MapCatalogScript.reset_cache_for_tests()
+	var ids = MapCatalogScript.get_map_ids()
+	var err = MapCatalogScript.get_last_load_error() # read BEFORE the cleanup rescan below clears it
+	DirAccess.remove_absolute(bad_path)
+	MapCatalogScript.reset_cache_for_tests() # rescan again with the broken file gone, restoring normal state for every test after this one
+
+	if "__test_broken_map__" in ids:
+		print("  [FAIL] A map missing its required 'spawns' field should never enter the usable catalog.")
+		return false
+
+	if not ("__test_broken_map__" in err and "spawns" in err):
+		print("  [FAIL] The hard-fail error should specifically name the broken file and the missing 'spawns' field. Got: '", err, "'")
+		return false
+
+	print("  [PASS] A hand-broken map JSON (missing a required field, plus an unknown key) is rejected - never enters the catalog - with a specific, useful error naming the file and the missing field.")
 	return true
 
 func test_2d_ui_chrome_overhaul() -> bool:

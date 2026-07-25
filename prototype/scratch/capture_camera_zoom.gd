@@ -30,7 +30,8 @@ func _init():
 
 	cam.height = cam.max_height
 	cam._apply_pitch()
-	cam.global_position = Vector3(skirmish.current_map.player_start.hq.x, cam.height, skirmish.current_map.player_start.hq.z * 0.3)
+	var p_hq = preload("res://scripts/map_catalog.gd").get_spawn(skirmish.current_map, "player").hq
+	cam.global_position = Vector3(p_hq.x, cam.height, p_hq.z * 0.3)
 	for i in range(3):
 		await process_frame
 	root.get_texture().get_image().save_png(out_dir + "/" + map_id + "_max_zoom_out.png")

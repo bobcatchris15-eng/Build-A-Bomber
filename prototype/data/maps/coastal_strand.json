@@ -1,0 +1,195 @@
+{
+	"description": "Water runs the full eastern coastline instead of sitting in the middle - naval units get real open water to work with, though the shallow shelf right at the shore keeps deep-draught cruisers further out. Rocky outcrops inland, including one squarely between the two bases.",
+	"elevation_zones": [],
+	"ground_color": [
+		0.259999990463257,
+		0.280000001192093,
+		0.219999998807907
+	],
+	"map_half_extents": 240,
+	"name": "Coastal Strand",
+	"obstacles": [
+		{
+			"center": [
+				-54,
+				0,
+				90
+			],
+			"half_extents": [
+				18,
+				18
+			]
+		},
+		{
+			"center": [
+				-54,
+				0,
+				-90
+			],
+			"half_extents": [
+				18,
+				18
+			]
+		},
+		{
+			"center": [
+				0,
+				0,
+				15
+			],
+			"half_extents": [
+				21,
+				21
+			]
+		}
+	],
+	"resource_nodes": [
+		{
+			"amount": 1100,
+			"position": [
+				-90,
+				0,
+				72
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 1100,
+			"position": [
+				-90,
+				0,
+				-72
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				72,
+				0,
+				60
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				72,
+				0,
+				-60
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-45,
+				0,
+				135
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-45,
+				0,
+				-135
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 800,
+			"position": [
+				30,
+				0,
+				54
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 800,
+			"position": [
+				30,
+				0,
+				-54
+			],
+			"type": "metal"
+		}
+	],
+	"schema_version": 1,
+	"shallow_water_areas": [
+		{
+			"center": [
+				105,
+				0,
+				0
+			],
+			"half_extents": [
+				15,
+				234
+			]
+		}
+	],
+	"spawns": [
+		{
+			"factory": [
+				-27,
+				0,
+				84
+			],
+			"harvester": [
+				15,
+				1.5,
+				69
+			],
+			"hq": [
+				0,
+				0,
+				96
+			],
+			"id": "player",
+			"refinery": [
+				24,
+				0,
+				78
+			]
+		},
+		{
+			"factory": [
+				27,
+				0,
+				-84
+			],
+			"harvester": [
+				-15,
+				1.5,
+				-69
+			],
+			"hq": [
+				0,
+				0,
+				-96
+			],
+			"id": "enemy",
+			"refinery": [
+				-24,
+				0,
+				-78
+			]
+		}
+	],
+	"water_areas": [
+		{
+			"center": [
+				165,
+				0,
+				0
+			],
+			"half_extents": [
+				75,
+				240
+			]
+		}
+	]
+}

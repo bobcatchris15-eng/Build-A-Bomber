@@ -11,7 +11,7 @@ func _init():
 	var cam = skirmish.camera
 	cam.set_process(false)
 	# Player base is around z=+30ish on lake_crossing - frame the factory cluster.
-	var p_start = skirmish.current_map.player_start
+	var p_start = preload("res://scripts/map_catalog.gd").get_spawn(skirmish.current_map, "player")
 	cam.global_position = p_start.factory + Vector3(0, 22, 20)
 	cam.rotation_degrees = Vector3(-48, 0, 0)
 	for i in range(4): await process_frame

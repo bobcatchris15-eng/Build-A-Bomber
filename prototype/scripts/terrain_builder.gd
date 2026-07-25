@@ -1057,10 +1057,13 @@ static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D):
 	var count = clamp(int(area / 2000.0), 20, 50)
 
 	var avoid_points: Array = []
-	for group_key in ["player_start", "enemy_start"]:
-		var group: Dictionary = map_def.get(group_key, {})
-		for key in group.keys():
-			avoid_points.append(group[key])
+	# RTS_CORE_ROADMAP.md B3: player_start/enemy_start became a spawns
+	# array - same "every position field in each start group" collection,
+	# just skipping the new "id" string field.
+	for spawn in map_def.get("spawns", []):
+		for key in spawn.keys():
+			if key == "id": continue
+			avoid_points.append(spawn[key])
 	for r in map_def.get("resource_nodes", []):
 		avoid_points.append(r.position)
 

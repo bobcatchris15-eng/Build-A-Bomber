@@ -1,0 +1,150 @@
+{
+	"description": "A tight, small map - two rock walls split it into three lanes (west/center/east). No room for a long buildup; whoever controls the lanes controls the fight. A single contested resource sits exactly at the map's center.",
+	"elevation_zones": [],
+	"ground_color": [
+		0.239999994635582,
+		0.219999998807907,
+		0.200000002980232
+	],
+	"map_half_extents": 135,
+	"name": "Close Quarters",
+	"obstacles": [
+		{
+			"center": [
+				-36,
+				0,
+				0
+			],
+			"half_extents": [
+				12,
+				54
+			]
+		},
+		{
+			"center": [
+				36,
+				0,
+				0
+			],
+			"half_extents": [
+				12,
+				54
+			]
+		}
+	],
+	"resource_nodes": [
+		{
+			"amount": 1000,
+			"position": [
+				-75,
+				0,
+				66
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 1000,
+			"position": [
+				75,
+				0,
+				66
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				0,
+				0,
+				45
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 1000,
+			"position": [
+				75,
+				0,
+				-66
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 1000,
+			"position": [
+				-75,
+				0,
+				-66
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				0,
+				0,
+				-45
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				0,
+				0,
+				0
+			],
+			"type": "crystal"
+		}
+	],
+	"schema_version": 1,
+	"spawns": [
+		{
+			"factory": [
+				-24,
+				0,
+				84
+			],
+			"harvester": [
+				15,
+				1.5,
+				66
+			],
+			"hq": [
+				0,
+				0,
+				96
+			],
+			"id": "player",
+			"refinery": [
+				21,
+				0,
+				78
+			]
+		},
+		{
+			"factory": [
+				24,
+				0,
+				-84
+			],
+			"harvester": [
+				-15,
+				1.5,
+				-66
+			],
+			"hq": [
+				0,
+				0,
+				-96
+			],
+			"id": "enemy",
+			"refinery": [
+				-21,
+				0,
+				-78
+			]
+		}
+	],
+	"water_areas": []
+}

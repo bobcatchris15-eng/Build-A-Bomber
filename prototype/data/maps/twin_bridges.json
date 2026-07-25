@@ -1,0 +1,226 @@
+{
+	"bridges": [
+		{
+			"center": [
+				-120,
+				0,
+				0
+			],
+			"half_extents": [
+				21,
+				30
+			]
+		},
+		{
+			"center": [
+				120,
+				0,
+				0
+			],
+			"half_extents": [
+				21,
+				30
+			]
+		}
+	],
+	"description": "A river spans the entire map with exactly two bridges crossing it, well apart - fight for one crossing or split your force across both. The largest map in the roster; resources stay on your own bank, but taking a bridge means taking the fight to the enemy's.",
+	"elevation_zones": [],
+	"ground_color": [
+		0.219999998807907,
+		0.25,
+		0.200000002980232
+	],
+	"map_half_extents": 300,
+	"name": "Twin Bridges",
+	"obstacles": [],
+	"resource_nodes": [
+		{
+			"amount": 1200,
+			"position": [
+				-75,
+				0,
+				180
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 1200,
+			"position": [
+				75,
+				0,
+				180
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-135,
+				0,
+				120
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				135,
+				0,
+				120
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 800,
+			"position": [
+				0,
+				0,
+				90
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				-45,
+				0,
+				225
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				45,
+				0,
+				225
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 1200,
+			"position": [
+				75,
+				0,
+				-180
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 1200,
+			"position": [
+				-75,
+				0,
+				-180
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				135,
+				0,
+				-120
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-135,
+				0,
+				-120
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 800,
+			"position": [
+				0,
+				0,
+				-90
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				45,
+				0,
+				-225
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				-45,
+				0,
+				-225
+			],
+			"type": "crystal"
+		}
+	],
+	"schema_version": 1,
+	"spawns": [
+		{
+			"factory": [
+				-36,
+				0,
+				222
+			],
+			"harvester": [
+				18,
+				1.5,
+				198
+			],
+			"hq": [
+				0,
+				0,
+				240
+			],
+			"id": "player",
+			"refinery": [
+				30,
+				0,
+				216
+			]
+		},
+		{
+			"factory": [
+				36,
+				0,
+				-222
+			],
+			"harvester": [
+				-18,
+				1.5,
+				-198
+			],
+			"hq": [
+				0,
+				0,
+				-240
+			],
+			"id": "enemy",
+			"refinery": [
+				-30,
+				0,
+				-216
+			]
+		}
+	],
+	"water_areas": [
+		{
+			"center": [
+				0,
+				0,
+				0
+			],
+			"half_extents": [
+				300,
+				30
+			]
+		}
+	]
+}

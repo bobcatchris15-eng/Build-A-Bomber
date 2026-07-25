@@ -1,0 +1,188 @@
+{
+	"description": "A single dominant hill splits the map, flanked by rock walls that narrow the approach to two lanes. No water. Hold the hill for real vision and combat advantages, or fight through the flanks.",
+	"elevation_zones": [
+		{
+			"center": [
+				0,
+				0,
+				0
+			],
+			"half_extents": [
+				30,
+				30
+			],
+			"height": 24,
+			"ramp_side": "south",
+			"ramp_width": 24
+		},
+		{
+			"center": [
+				0,
+				0,
+				0
+			],
+			"half_extents": [
+				30,
+				30
+			],
+			"height": 24,
+			"ramp_side": "north",
+			"ramp_width": 24
+		}
+	],
+	"ground_color": [
+		0.239999994635582,
+		0.239999994635582,
+		0.200000002980232
+	],
+	"map_half_extents": 225,
+	"name": "Highland Chokepoint",
+	"obstacles": [
+		{
+			"center": [
+				-84,
+				0,
+				0
+			],
+			"half_extents": [
+				18,
+				66
+			]
+		},
+		{
+			"center": [
+				84,
+				0,
+				0
+			],
+			"half_extents": [
+				18,
+				66
+			]
+		}
+	],
+	"resource_nodes": [
+		{
+			"amount": 1100,
+			"position": [
+				-90,
+				0,
+				72
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 1100,
+			"position": [
+				90,
+				0,
+				-72
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-60,
+				0,
+				90
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				60,
+				0,
+				-90
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				-48,
+				0,
+				42
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				48,
+				0,
+				-42
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 800,
+			"position": [
+				48,
+				0,
+				42
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 800,
+			"position": [
+				-48,
+				0,
+				-42
+			],
+			"type": "metal"
+		}
+	],
+	"schema_version": 1,
+	"spawns": [
+		{
+			"factory": [
+				-30,
+				0,
+				108
+			],
+			"harvester": [
+				18,
+				1.5,
+				93
+			],
+			"hq": [
+				0,
+				0,
+				120
+			],
+			"id": "player",
+			"refinery": [
+				27,
+				0,
+				102
+			]
+		},
+		{
+			"factory": [
+				30,
+				0,
+				-108
+			],
+			"harvester": [
+				-18,
+				1.5,
+				-93
+			],
+			"hq": [
+				0,
+				0,
+				-120
+			],
+			"id": "enemy",
+			"refinery": [
+				-27,
+				0,
+				-102
+			]
+		}
+	],
+	"water_areas": []
+}

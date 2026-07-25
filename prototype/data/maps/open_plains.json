@@ -1,0 +1,195 @@
+{
+	"description": "Fully open, no water or high ground - a tighter map with contested resources near the center, plus marsh/rocky/snow-mud/sand patches further out that reward the right locomotion choice. Fast, aggressive, few chokepoints to hide behind.",
+	"elevation_zones": [],
+	"ground_color": [
+		0.280000001192093,
+		0.259999990463257,
+		0.159999996423721
+	],
+	"map_half_extents": 210,
+	"name": "Open Plains",
+	"obstacles": [],
+	"resource_nodes": [
+		{
+			"amount": 1100,
+			"position": [
+				-60,
+				0,
+				60
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 1100,
+			"position": [
+				60,
+				0,
+				-60
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-78,
+				0,
+				24
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				78,
+				0,
+				-24
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				-42,
+				0,
+				-18
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 700,
+			"position": [
+				42,
+				0,
+				18
+			],
+			"type": "crystal"
+		},
+		{
+			"amount": 800,
+			"position": [
+				-24,
+				0,
+				42
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 800,
+			"position": [
+				24,
+				0,
+				-42
+			],
+			"type": "metal"
+		},
+		{
+			"amount": 850,
+			"position": [
+				0,
+				0,
+				0
+			],
+			"type": "crystal"
+		}
+	],
+	"schema_version": 1,
+	"spawns": [
+		{
+			"factory": [
+				-27,
+				0,
+				66
+			],
+			"harvester": [
+				15,
+				1.5,
+				51
+			],
+			"hq": [
+				0,
+				0,
+				78
+			],
+			"id": "player",
+			"refinery": [
+				24,
+				0,
+				60
+			]
+		},
+		{
+			"factory": [
+				27,
+				0,
+				-66
+			],
+			"harvester": [
+				-15,
+				1.5,
+				-51
+			],
+			"hq": [
+				0,
+				0,
+				-78
+			],
+			"id": "enemy",
+			"refinery": [
+				-24,
+				0,
+				-60
+			]
+		}
+	],
+	"surface_zones": [
+		{
+			"center": [
+				144,
+				0,
+				90
+			],
+			"half_extents": [
+				27,
+				27
+			],
+			"surface_type": "marsh"
+		},
+		{
+			"center": [
+				-144,
+				0,
+				-90
+			],
+			"half_extents": [
+				27,
+				27
+			],
+			"surface_type": "sand"
+		},
+		{
+			"center": [
+				-144,
+				0,
+				90
+			],
+			"half_extents": [
+				27,
+				27
+			],
+			"surface_type": "rocky"
+		},
+		{
+			"center": [
+				144,
+				0,
+				-90
+			],
+			"half_extents": [
+				27,
+				27
+			],
+			"surface_type": "snow_mud"
+		}
+	],
+	"water_areas": []
+}
