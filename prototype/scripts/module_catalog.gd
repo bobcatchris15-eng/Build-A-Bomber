@@ -733,6 +733,64 @@ static func _build_catalog_literal() -> Dictionary:
 			"color": Color(0.32, 0.3, 0.24),
 			"traits": ["ground_contact", "amphibious"]
 		},
+
+		# --- STRUCTURAL PIECES (hull-space extenders) ---------------------------
+		# Modules that provide attachment surfaces for other modules. Placed on
+		# the hull (or on another structural piece), they carry their own
+		# collision body on layer 16 (SURFACE_COLLISION_LAYER) so the
+		# placement raycast can snap new modules onto them — effectively
+		# extending the mounting area outward from the hull. They contribute no
+		# special combat stats but do have weight and cost, so there's a
+		# meaningful tradeoff: heavier-than-air vehicles in particular lose
+		# payload capacity to structural over-extension.
+		"structural_block": {
+			"name": "Structure Block",
+			"category": "structural",
+			"hp": 200.0, "weight": 80.0,
+			"metal": 20, "crystal": 0, "dps": 0.0,
+			"size": Vector3(2.0, 2.0, 2.0),
+			"color": Color(0.35, 0.30, 0.25)
+		},
+		"structural_dome": {
+			"name": "Dome Turret Base",
+			"category": "structural",
+			"hp": 150.0, "weight": 60.0,
+			"metal": 15, "crystal": 5, "dps": 0.0,
+			"size": Vector3(2.5, 1.5, 2.5),
+			"color": Color(0.42, 0.36, 0.30)
+		},
+		"structural_slab": {
+			"name": "Armor Slab",
+			"category": "structural",
+			"hp": 300.0, "weight": 120.0,
+			"metal": 30, "crystal": 0, "dps": 0.0,
+			"size": Vector3(3.0, 0.5, 2.0),
+			"color": Color(0.32, 0.28, 0.25)
+		},
+		"structural_wedge": {
+			"name": "Wedge Breech",
+			"category": "structural",
+			"hp": 180.0, "weight": 70.0,
+			"metal": 25, "crystal": 0, "dps": 0.0,
+			"size": Vector3(2.0, 1.0, 3.0),
+			"color": Color(0.38, 0.32, 0.28)
+		},
+		"structural_girder": {
+			"name": "Support Girder",
+			"category": "structural",
+			"hp": 100.0, "weight": 40.0,
+			"metal": 10, "crystal": 0, "dps": 0.0,
+			"size": Vector3(0.4, 0.4, 4.0),
+			"color": Color(0.30, 0.28, 0.22)
+		},
+		"structural_i_beam": {
+			"name": "I-Beam Frame",
+			"category": "structural",
+			"hp": 120.0, "weight": 50.0,
+			"metal": 15, "crystal": 0, "dps": 0.0,
+			"size": Vector3(0.6, 0.6, 4.0),
+			"color": Color(0.33, 0.30, 0.25)
+		},
 	}
 
 	return catalog

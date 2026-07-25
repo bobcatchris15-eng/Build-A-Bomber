@@ -32,7 +32,7 @@ const DOMAIN_ORDER = ["Vehicle", "Static Building"]
 # ModuleCatalog's existing SUPPORT_TYPE_IDS list (already the source of
 # truth for "which modules count as support" elsewhere, e.g. energy/vision
 # bonus wiring) rather than inventing a second, potentially-drifting list.
-const MODULE_DOMAIN_ORDER = ["Weapons", "Armor", "Generators", "Utility", "Mobility"]
+const MODULE_DOMAIN_ORDER = ["Weapons", "Armor", "Generators", "Utility", "Mobility", "Structural"]
 
 func _ready():
 	if panel_container:
@@ -96,6 +96,8 @@ func _ready():
 				module_domain = "Armor"
 			elif category == "generator":
 				module_domain = "Generators"
+			elif category == "structural":
+				module_domain = "Structural"
 			elif category == "module":
 				module_domain = "Utility" if type_id in ModuleCatalog.SUPPORT_TYPE_IDS else "Mobility"
 			module_buttons_by_domain[module_domain].append(btn)

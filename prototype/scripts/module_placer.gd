@@ -368,6 +368,12 @@ func _select_module(module: Node3D):
 				# Free-form yaw rotation ring (MOUNTING_AND_ARMOR_SPEC.md #3)
 				# replaces the old fixed-90-degree-only rotation for these.
 				if hy: hy.queue_free()
+			elif cat == "structural":
+				# Structural pieces resize freely in all 3 axes (X/Y/Z) so
+				# the player can stretch a block, lengthen a girder, or
+				# flatten a slab. No rotation ring — they should stay flush
+				# against the surface normal they were mounted on.
+				if hrot: hrot.queue_free()
 			elif cat == "hull":
 				# Hull scales in all 3 directions; whole-vehicle orientation
 				# isn't a placement tweak, so no rotation ring.
@@ -1266,7 +1272,25 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	collision_shape.shape = col_box
 	static_body.add_child(collision_shape)
 	new_weapon.add_child(static_body)
-	
+
+	# Structural pieces get a surface collision body on layer 16
+	# (SURFACE_COLLISION_LAYER) so subsequent modules can be placed onto
+	# their surfaces via surface_raycast() — same mechanism the hull's
+	# own HullSurface body uses, but a simple box collider matching the
+	# module's own size rather than a trimesh of the visual geometry.
+	if category == "structural":
+		var surf_body = StaticBody3D.new()
+		surf_body.name = "StructuralSurface"
+		surf_body.collision_layer = SURFACE_COLLISION_LAYER
+		surf_body.collision_mask = 0
+		var surf_col = CollisionShape3D.new()
+		var surf_box = BoxShape3D.new()
+		surf_box.size = catalog_data.get("size", Vector3.ONE)
+		surf_col.shape = surf_box
+		surf_col.position = col_center
+		surf_body.add_child(surf_col)
+		new_weapon.add_child(surf_body)
+
 	var data = ModuleDataResource.new()
 	data.type_id = type_id
 	data.module_name = catalog_data.name

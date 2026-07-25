@@ -121,7 +121,9 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"heavy_laser": true, "plasma_lobber": true, "ciws": true, "pd_laser": true, "flak_cannon": true,
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
-	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true
+	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
+	"structural_block": true, "structural_dome": true, "structural_slab": true,
+	"structural_wedge": true, "structural_girder": true, "structural_i_beam": true,
 }
 
 static func _repeat_along_axis(parent: Node3D, count: int, spacing: float, axis_vec: Vector3, builder_func: Callable):
@@ -1720,6 +1722,185 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		orb.material_override = orb_mat
 		orb.position = Vector3(0, base_size.y * 0.2 + coil_height + sphere.radius * 0.6, 0)
 		parent_node.add_child(orb)
+
+	elif type_id.begins_with("structural_"):
+		# Structural pieces (block, dome, slab, wedge, girder, i_beam).
+		# Procedural primitives with StandardMaterial3D (bolt-on modules,
+		# not the hull shader), painted in base_color with darkened accent.
+
+		# --- BLOCK ---
+		if type_id == "structural_block":
+			var box_mi = MeshInstance3D.new()
+			var box_mesh = BoxMesh.new()
+			box_mesh.size = base_size
+			box_mi.mesh = box_mesh
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = base_color
+			mat.metallic = 0.4
+			mat.roughness = 0.6
+			box_mi.material_override = mat
+			box_mi.position = Vector3(0, base_size.y / 2.0, 0)
+			parent_node.add_child(box_mi)
+
+			var trim_mat = StandardMaterial3D.new()
+			trim_mat.albedo_color = base_color.lightened(0.15)
+			trim_mat.metallic = 0.5
+			trim_mat.roughness = 0.4
+			for z_dir in [-1, 1]:
+				var trim = MeshInstance3D.new()
+				var trim_box = BoxMesh.new()
+				trim_box.size = Vector3(base_size.x * 0.95, base_size.y * 0.95, 0.04)
+				trim.mesh = trim_box
+				trim.material_override = trim_mat
+				trim.position = Vector3(0, base_size.y / 2.0, z_dir * base_size.z / 2.0)
+				parent_node.add_child(trim)
+
+		# --- DOME ---
+		elif type_id == "structural_dome":
+			var dome = MeshInstance3D.new()
+			var sphere = SphereMesh.new()
+			sphere.radius = max(base_size.x, base_size.z) / 2.0
+			sphere.height = base_size.y
+			dome.mesh = sphere
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = base_color
+			mat.metallic = 0.35
+			mat.roughness = 0.55
+			dome.material_override = mat
+			dome.position = Vector3(0, base_size.y / 2.0, 0)
+			parent_node.add_child(dome)
+
+			var rim = MeshInstance3D.new()
+			var rim_cyl = CylinderMesh.new()
+			rim_cyl.top_radius = sphere.radius * 1.05
+			rim_cyl.bottom_radius = sphere.radius * 1.05
+			rim_cyl.height = 0.08
+			rim.mesh = rim_cyl
+			var rim_mat = StandardMaterial3D.new()
+			rim_mat.albedo_color = base_color.darkened(0.15)
+			rim_mat.metallic = 0.5
+			rim_mat.roughness = 0.4
+			rim.material_override = rim_mat
+			rim.position = Vector3(0, 0.04, 0)
+			parent_node.add_child(rim)
+
+		# --- SLAB ---
+		elif type_id == "structural_slab":
+			var slab = MeshInstance3D.new()
+			var slab_box = BoxMesh.new()
+			slab_box.size = base_size
+			slab.mesh = slab_box
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = base_color
+			mat.metallic = 0.3
+			mat.roughness = 0.7
+			slab.material_override = mat
+			slab.position = Vector3(0, base_size.y / 2.0, 0)
+			parent_node.add_child(slab)
+
+			var rib_mat = StandardMaterial3D.new()
+			rib_mat.albedo_color = base_color.darkened(0.2)
+			rib_mat.metallic = 0.35
+			var rib_count = max(2, int(base_size.x / 0.5))
+			var rib_spacing = base_size.x / (rib_count + 1)
+			for i in range(rib_count):
+				var rib = MeshInstance3D.new()
+				var rib_box = BoxMesh.new()
+				rib_box.size = Vector3(0.06, base_size.y * 0.3, base_size.z * 0.9)
+				rib.mesh = rib_box
+				rib.material_override = rib_mat
+				rib.position = Vector3(-base_size.x / 2.0 + (i + 1) * rib_spacing, base_size.y * 0.15, 0)
+				parent_node.add_child(rib)
+
+		# --- WEDGE ---
+		elif type_id == "structural_wedge":
+			var wedge = MeshInstance3D.new()
+			var wedge_mesh = _build_wedge_mesh(base_size)
+			wedge.mesh = wedge_mesh
+			var mat = StandardMaterial3D.new()
+			mat.albedo_color = base_color
+			mat.metallic = 0.35
+			mat.roughness = 0.6
+			wedge.material_override = mat
+			wedge.position = Vector3(0, base_size.y / 2.0, 0)
+			parent_node.add_child(wedge)
+
+		# --- GIRDER ---
+		elif type_id == "structural_girder":
+			var girder_mat = StandardMaterial3D.new()
+			girder_mat.albedo_color = base_color
+			girder_mat.metallic = 0.45
+			girder_mat.roughness = 0.5
+			var rail_mat = StandardMaterial3D.new()
+			rail_mat.albedo_color = base_color.lightened(0.08)
+			rail_mat.metallic = 0.5
+			rail_mat.roughness = 0.4
+
+			var rail_w = max(0.04, base_size.x * 0.15)
+			var rail_h = max(0.04, base_size.y * 0.15)
+			var half_gap = (base_size.x - rail_w) / 2.0
+			for side in [-1, 1]:
+				var rail = MeshInstance3D.new()
+				var rail_box = BoxMesh.new()
+				rail_box.size = Vector3(rail_w, rail_h, base_size.z)
+				rail.mesh = rail_box
+				rail.material_override = rail_mat
+				rail.position = Vector3(side * half_gap, base_size.y / 2.0, 0)
+				parent_node.add_child(rail)
+
+			var strut_mat = StandardMaterial3D.new()
+			strut_mat.albedo_color = base_color.darkened(0.15)
+			strut_mat.metallic = 0.4
+			var strut_count = max(3, int(base_size.z / 0.6))
+			var strut_spacing = base_size.z / (strut_count - 1)
+			for i in range(strut_count):
+				var z_pos = -base_size.z / 2.0 + i * strut_spacing
+				var diag = MeshInstance3D.new()
+				var diag_box = BoxMesh.new()
+				var diag_w = rail_h * 0.6
+				diag_box.size = Vector3(base_size.x * 0.6, diag_w, diag_w)
+				diag.mesh = diag_box
+				diag.material_override = strut_mat
+				diag.position = Vector3(0, base_size.y / 2.0, z_pos)
+				var tilt = -0.3 if i % 2 == 0 else 0.3
+				diag.rotation = Vector3(tilt * sign(base_size.z), 0, 0)
+				parent_node.add_child(diag)
+
+		# --- I-BEAM ---
+		elif type_id == "structural_i_beam":
+			var beam_mat = StandardMaterial3D.new()
+			beam_mat.albedo_color = base_color
+			beam_mat.metallic = 0.45
+			beam_mat.roughness = 0.5
+
+			var flange_thick = max(0.03, base_size.y * 0.15)
+			var flange_width = max(0.05, base_size.x * 0.6)
+			var web_thick = max(0.03, base_size.x * 0.12)
+			var web_height = base_size.y - 2.0 * flange_thick
+
+			var top = MeshInstance3D.new()
+			var top_box = BoxMesh.new()
+			top_box.size = Vector3(flange_width, flange_thick, base_size.z)
+			top.mesh = top_box
+			top.material_override = beam_mat
+			top.position = Vector3(0, base_size.y - flange_thick / 2.0, 0)
+			parent_node.add_child(top)
+
+			var web = MeshInstance3D.new()
+			var web_box = BoxMesh.new()
+			web_box.size = Vector3(web_thick, max(0.01, web_height), base_size.z)
+			web.mesh = web_box
+			web.material_override = beam_mat
+			web.position = Vector3(0, flange_thick + web_height / 2.0, 0)
+			parent_node.add_child(web)
+
+			var bottom = MeshInstance3D.new()
+			var bottom_box = BoxMesh.new()
+			bottom_box.size = Vector3(flange_width, flange_thick, base_size.z)
+			bottom.mesh = bottom_box
+			bottom.material_override = beam_mat
+			bottom.position = Vector3(0, flange_thick / 2.0, 0)
+			parent_node.add_child(bottom)
 
 	else:
 		# Fallback: Simple box mesh for armor and basic parts
@@ -3421,3 +3602,79 @@ static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: D
 	match type_id:
 		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite":
 			return
+
+# Builds a wedge (triangular prism) mesh from a base_size Vector3.
+# The wedge has a flat base (full width X and depth Z) that tapers to a
+# ridge along the top centerline (Y-direction apex). This is a simple
+# ArrayMesh with 5 faces: base, back, and two sloped sides, + 2 end caps.
+static func _build_wedge_mesh(size: Vector3) -> ArrayMesh:
+	var hw = size.x / 2.0
+	var hh = size.y
+	var hd = size.z / 2.0
+
+	# Vertices: 0=bottom-left-front, 1=bottom-right-front, 2=bottom-left-back,
+	# 3=bottom-right-back, 4=apex-left-front, 5=apex-right-front,
+	# 6=apex-left-back, 7=apex-right-back
+	# Since Size Y is upright, we treat apex as the top ridge along Z direction
+	var verts = PackedVector3Array()
+	verts.append(Vector3(-hw, 0, -hd))   # 0
+	verts.append(Vector3( hw, 0, -hd))   # 1
+	verts.append(Vector3(-hw, 0,  hd))   # 2
+	verts.append(Vector3( hw, 0,  hd))   # 3
+	verts.append(Vector3(-hw, hh, -hd))  # 4
+	verts.append(Vector3( hw, hh, -hd))  # 5
+	verts.append(Vector3(-hw, hh,  hd))  # 6
+	verts.append(Vector3( hw, hh,  hd))  # 7
+
+	var indices = PackedInt32Array()
+	# Bottom face (0-1-3-2)
+	indices.append_array([0, 1, 3, 0, 3, 2])
+	# Front face (0-4-5-1) - left sloped
+	indices.append_array([0, 4, 5, 0, 5, 1])
+	# Back face (2-3-7-6) - right sloped
+	indices.append_array([2, 3, 7, 2, 7, 6])
+	# Left end cap (0-2-6-4)
+	indices.append_array([0, 2, 6, 0, 6, 4])
+	# Right end cap (1-5-7-3)
+	indices.append_array([1, 5, 7, 1, 7, 3])
+	# Top ridge (4-5-7-6)
+	indices.append_array([4, 5, 7, 4, 7, 6])
+
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = verts
+	arrays[Mesh.ARRAY_INDEX] = indices
+
+	# Build smooth normals
+	var mesh = ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	mesh.surface_set_material(0, StandardMaterial3D.new())
+	var normal_arrays = mesh.surface_get_arrays(0)
+	var normals = _compute_smooth_normals(verts, indices)
+	normal_arrays[Mesh.ARRAY_NORMAL] = normals
+	mesh.clear_surfaces()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, normal_arrays)
+	return mesh
+
+# Compute smooth vertex normals for an indexed triangle mesh.
+static func _compute_smooth_normals(verts: PackedVector3Array, indices: PackedInt32Array) -> PackedVector3Array:
+	var normals = PackedVector3Array()
+	normals.resize(verts.size())
+	for i in verts.size():
+		normals[i] = Vector3.ZERO
+
+	for i in range(0, indices.size(), 3):
+		var i0 = indices[i]
+		var i1 = indices[i+1]
+		var i2 = indices[i+2]
+		var e1 = verts[i1] - verts[i0]
+		var e2 = verts[i2] - verts[i0]
+		var n = e1.cross(e2).normalized()
+		normals[i0] += n
+		normals[i1] += n
+		normals[i2] += n
+
+	for i in normals.size():
+		normals[i] = normals[i].normalized()
+
+	return normals
