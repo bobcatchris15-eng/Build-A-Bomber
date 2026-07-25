@@ -29,7 +29,7 @@ var _music_streams: Dictionary = {}
 var _music_player: AudioStreamPlayer = null
 var _sfx_players: Array = []
 var _sfx_index: int = 0
-const MAX_SFX_PLAYERS: int = 16
+const MAX_SFX_PLAYERS: int = 32
 
 func _ready() -> void:
 	if DisplayServer.get_name() == "headless":
@@ -45,7 +45,10 @@ func _load_audio_assets() -> void:
 	for name in MUSIC_PATHS:
 		var path: String = MUSIC_PATHS[name]
 		if ResourceLoader.exists(path):
-			_music_streams[name] = load(path)
+			var mstream = load(path)
+			if mstream is AudioStreamWAV:
+				mstream.loop_mode = AudioStreamWAV.LOOP_FORWARD
+			_music_streams[name] = mstream
 
 func _setup_players() -> void:
 	for i in range(MAX_SFX_PLAYERS):
@@ -58,7 +61,7 @@ func _setup_players() -> void:
 	_music_player.bus = &"Master"
 	add_child(_music_player)
 
-func play_sfx(name: String, pitch_variance: float = 0.0) -> void:
+func play_sfx(name: String, pitch_variance: float = 0.12) -> void:
 	if DisplayServer.get_name() == "headless" or not _streams.has(name):
 		return
 	var stream = _streams[name] as AudioStream
@@ -74,7 +77,7 @@ func play_sfx(name: String, pitch_variance: float = 0.0) -> void:
 		player.pitch_scale = 1.0
 	player.play()
 
-func play_sfx_3d(name: String, pos: Vector3, parent_node: Node = null, max_dist: float = 60.0) -> void:
+func play_sfx_3d(name: String, pos: Vector3, parent_node: Node = null, max_dist: float = 60.0, pitch_variance: float = 0.15) -> void:
 	if DisplayServer.get_name() == "headless" or not _streams.has(name):
 		return
 	var stream = _streams[name] as AudioStream
@@ -84,8 +87,10 @@ func play_sfx_3d(name: String, pos: Vector3, parent_node: Node = null, max_dist:
 	var player = AudioStreamPlayer3D.new()
 	player.stream = stream
 	player.max_distance = max_dist
-	player.unit_size = 10.0
+	player.unit_size = 12.0
 	player.global_position = pos
+	if pitch_variance > 0.0:
+		player.pitch_scale = randf_range(1.0 - pitch_variance, 1.0 + pitch_variance)
 	player.finished.connect(func(): player.queue_free())
 
 	var target = parent_node if parent_node else get_tree().current_scene

@@ -1,13 +1,15 @@
 import os
 import sys
 import time
-import uuid
 from pathlib import Path
-import io
-from PIL import Image
-import numpy as np
 
-# Set up paths
+# Import torch FIRST so Windows registers PyTorch DLL directories
+import torch
+if torch.cuda.is_available():
+    torch.backends.cuda.enable_flash_sdp(False)
+    torch.backends.cuda.enable_mem_efficient_sdp(True)
+    torch.backends.cuda.enable_math_sdp(True)
+
 MODLY_DIR = Path(r"C:\Users\Chris\Documents\Modly")
 EXT_DIR = MODLY_DIR / "extensions" / "triposg"
 VENDOR_DIR = EXT_DIR / "vendor"
@@ -15,29 +17,23 @@ MODEL_DIR = MODLY_DIR / "models" / "triposg" / "generate"
 OUTPUT_DIR = Path(r"e:\Build-A-Bomber-GitHub\prototype\assets\models\buildings")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Add to sys.path
-sys.path.insert(0, str(VENDOR_DIR))
+if EXT_DIR.exists() and str(EXT_DIR) not in sys.path:
+    sys.path.insert(0, str(EXT_DIR))
+if VENDOR_DIR.exists() and str(VENDOR_DIR) not in sys.path:
+    sys.path.insert(0, str(VENDOR_DIR))
 
-import torch
 import trimesh
 import rembg
-
-try:
-    from triposg.pipelines.pipeline_triposg import TripoSGPipeline
-except ImportError as e:
-    print(f"Failed to import TripoSGPipeline: {e}")
-    sys.exit(1)
+import numpy as np
+from PIL import Image
+from triposg.pipelines.pipeline_triposg import TripoSGPipeline
 
 def preprocess_image(image_path, fg_ratio=0.85):
     image = Image.open(image_path).convert("RGBA")
     
-    # Remove background
-    try:
-        session = rembg.new_session()
-        image = rembg.remove(image, session=session)
-    except Exception:
-        session = rembg.new_session(providers=["CPUExecutionProvider"])
-        image = rembg.remove(image, session=session)
+    # Remove background via CPU ONNX session
+    session = rembg.new_session(providers=["CPUExecutionProvider"])
+    image = rembg.remove(image, session=session)
 
     # Composite on white background
     bg = Image.new("RGBA", image.size, (255, 255, 255, 255))
@@ -67,31 +63,30 @@ def preprocess_image(image_path, fg_ratio=0.85):
     result.paste(fg, ((iw - nw) // 2, (ih - nh) // 2))
     return result
 
-def generate_mesh(image_path, output_filename=None):
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+def generate_mesh(image_path, output_filename=None, steps=35):
+    force_cpu = os.environ.get("FORCE_CPU", "0") == "1"
+    device = "cpu" if force_cpu or not torch.cuda.is_available() else "cuda:0"
+    dtype = torch.float32 if device == "cpu" else torch.float16
 
-    print(f"Loading TripoSG on {device}...")
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    try:
-        pipe = TripoSGPipeline.from_pretrained(str(MODEL_DIR)).to(device, dtype)
-    except Exception as err:
-        print(f"CUDA loading failed ({err}), falling back to CPU...")
-        device = "cpu"
-        dtype = torch.float32
-        pipe = TripoSGPipeline.from_pretrained(str(MODEL_DIR)).to(device, dtype)
+    print(f"Loading TripoSG model from {MODEL_DIR}...")
+    posix_model_dir = Path(MODEL_DIR).resolve().as_posix()
+    if torch.cuda.is_available() and not force_cpu:
+        print("Loading pipeline on CUDA (float16)...")
+        pipe = TripoSGPipeline.from_pretrained(posix_model_dir, torch_dtype=torch.float16, local_files_only=True).to("cuda")
+    else:
+        print("Loading pipeline on CPU (float32)...")
+        pipe = TripoSGPipeline.from_pretrained(posix_model_dir, torch_dtype=torch.float32, local_files_only=True)
     
     print("Preprocessing image...")
     image = preprocess_image(image_path)
     
-    print("Running TripoSG...")
+    print(f"Running TripoSG ({steps} steps)...")
     generator = torch.Generator(device=pipe.device).manual_seed(42)
     with torch.no_grad():
         outputs = pipe(
             image=image,
             generator=generator,
-            num_inference_steps=50,
+            num_inference_steps=steps,
             guidance_scale=7.0,
             use_flash_decoder=False, # Use Marching Cubes
         ).samples[0]
