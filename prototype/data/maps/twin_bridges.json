@@ -24,7 +24,6 @@
 		}
 	],
 	"description": "A river spans the entire map with exactly two bridges crossing it, well apart - fight for one crossing or split your force across both. The largest map in the roster; resources stay on your own bank, but taking a bridge means taking the fight to the enemy's.",
-	"elevation_zones": [],
 	"ground_color": [
 		0.219999998807907,
 		0.25,

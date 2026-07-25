@@ -1,6 +1,5 @@
 {
 	"description": "A city block grid fills the middle of the map - real buildings that block movement AND sightlines, not just decoration. Fight street to street; a contested resource sits in the central plaza, hidden from both bases until someone scouts it.",
-	"elevation_zones": [],
 	"ground_color": [
 		0.200000002980232,
 		0.200000002980232,

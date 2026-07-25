@@ -1,35 +1,5 @@
 {
 	"description": "Two hills, not one - each sits closer to one side's own territory. Grab yours quickly, then decide whether to contest the other deep in enemy ground. No water; open lanes connect everything.",
-	"elevation_zones": [
-		{
-			"center": [
-				-84,
-				0,
-				54
-			],
-			"half_extents": [
-				27,
-				27
-			],
-			"height": 21,
-			"ramp_side": "east",
-			"ramp_width": 24
-		},
-		{
-			"center": [
-				84,
-				0,
-				-54
-			],
-			"half_extents": [
-				27,
-				27
-			],
-			"height": 21,
-			"ramp_side": "west",
-			"ramp_width": 24
-		}
-	],
 	"ground_color": [
 		0.25,
 		0.239999994635582,
@@ -42,36 +12,36 @@
 		{
 			"amount": 900,
 			"position": [
-				-114,
+				-145,
 				0,
-				30
+				5
 			],
 			"type": "metal"
 		},
 		{
 			"amount": 700,
 			"position": [
-				-114,
+				-145,
 				0,
-				78
+				103
 			],
 			"type": "crystal"
 		},
 		{
 			"amount": 900,
 			"position": [
-				114,
+				145,
 				0,
-				-30
+				-5
 			],
 			"type": "metal"
 		},
 		{
 			"amount": 700,
 			"position": [
-				114,
+				145,
 				0,
-				-78
+				-103
 			],
 			"type": "crystal"
 		},
@@ -179,5 +149,38 @@
 			]
 		}
 	],
+	"terrain": {
+		"features": [
+			{
+				"center": [
+					-84,
+					54
+				],
+				"falloff": 24,
+				"half_extents": [
+					27,
+					27
+				],
+				"height": 10,
+				"type": "plateau"
+			},
+			{
+				"center": [
+					84,
+					-54
+				],
+				"falloff": 24,
+				"half_extents": [
+					27,
+					27
+				],
+				"height": 10,
+				"type": "plateau"
+			}
+		],
+		"height_scale": 10.0,
+		"heightmap": "res://data/maps/twin_summits_height.png",
+		"surfacemap": "res://data/maps/twin_summits_surface.png"
+	},
 	"water_areas": []
 }

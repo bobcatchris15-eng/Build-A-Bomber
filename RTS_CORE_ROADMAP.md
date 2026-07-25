@@ -1,14 +1,24 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-25): A1, A2, B1, B2, B3, B4, and B5 landed; everything else
-is planning only.** This is a resumable roadmap, written so a fresh session can
-pick up any single chunk without re-deriving the architecture. Chunks are
-ordered with explicit dependencies in the sequencing table at the end; each is
-sized to land as one commit with its own `PROGRESS.md` entry. **Update the
-sequencing table's status as chunks land** — a stale "next up" header in a plan
-doc is exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated
-before being corrected on 2026-07-24. **Next up: B6** (retire `elevation_zones`,
-migrate all 8 maps onto heightmaps, rect + bounds).
+**Status (2026-07-25): A1, A2, B1, B2, B3, B4, B5, and B6 landed; everything
+else is planning only.** This is a resumable roadmap, written so a fresh
+session can pick up any single chunk without re-deriving the architecture.
+Chunks are ordered with explicit dependencies in the sequencing table at the
+end; each is sized to land as one commit with its own `PROGRESS.md` entry.
+**Update the sequencing table's status as chunks land** — a stale "next up"
+header in a plan doc is exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md`
+accumulated before being corrected on 2026-07-24. **Next up: B7** (terrain type
+differentiation).
+
+**B6 scope note:** "convert each of the 8 maps' elevation_zones" meant
+converting elevation_zones wherever it actually appeared - only
+`highland_chokepoint` and `twin_summits` used it; the other 6 maps never had
+any and needed no terrain migration. The `map_half_extents: float -> Vector2`
+change listed in B6's original bullets was **deliberately deferred** - every
+one of the 8 bundled maps is square today, so a sweeping type change across
+~9 files for a dimension nothing currently uses would be premature
+generalization. Revisit when B8 (bigger/denser maps) actually wants a
+non-square map.
 
 **B5 deviation from this doc's literal text, logged here so it isn't mistaken
 for an oversight:** B5's bullets say to delete `_near_elevation_zone()` and
@@ -587,7 +597,7 @@ readback) over catalog-number assertions.
 | 5 | B3 maps → JSON | one session | B1, B2 | **Done** |
 | 6 | **B4 Python terrain generator + heightmap** | **multi** | B3 | **Done** |
 | 7 | **B5 slope-aware navmesh + collision** | **multi** | B4 | **Done (flag-gated, see note above)** |
-| 8 | B6 retire elevation_zones, migrate, rect+bounds | one session | B5 | — |
+| 8 | B6 retire elevation_zones, migrate, rect+bounds | one session | B5 | **Done (Vector2 half_extents deferred, see note above)** |
 | 9 | B7 terrain type differentiation | one session | B4 | — |
 | 10 | B8 bigger/denser maps | multi (content) | B5–B7 | — |
 | 11 | B9 minimap | 1–1.5 sessions | B6 | — |

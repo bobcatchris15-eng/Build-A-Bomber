@@ -1,6 +1,5 @@
 {
 	"description": "A tight, small map - two rock walls split it into three lanes (west/center/east). No room for a long buildup; whoever controls the lanes controls the fight. A single contested resource sits exactly at the map's center.",
-	"elevation_zones": [],
 	"ground_color": [
 		0.239999994635582,
 		0.219999998807907,

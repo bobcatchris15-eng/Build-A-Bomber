@@ -27,12 +27,6 @@ class_name MapCatalog
 #     layer 1), which is what makes them block weapon LOS (auto_weapon.gd)
 #     and vision LOS (TerrainBuilder/skirmish.gd's _has_line_of_sight())
 #     alike, not just movement.
-#   elevation_zones: [{center, half_extents, height, ramp_side, ramp_width}, ...]
-#     a raised rectangular plateau with ONE ramp on the given side
-#     ("north"/"south"/"east"/"west" = +Z/-Z/+X/-X ground-level approach).
-#     Ramp run length is derived (TerrainBuilder.RAMP_RUN_PER_HEIGHT), not
-#     authored per-zone, to keep map data terse and every ramp's slope angle
-#     consistently walkable.
 #   bridges: [{center, half_extents, deck_height (opt)}, ...]
 #     a rectangular strip carved through a water_areas hole, walkable for
 #     ground/legged locomotion ONLY (not naval/amphibious, which don't need
@@ -184,7 +178,7 @@ static func get_spawn(map_def: Dictionary, spawn_id: String) -> Dictionary:
 # "enum": Array[String] (opt)}. Array/Dictionary specs additionally carry
 # "item": a nested field-spec Dictionary, applied to every array element
 # (Array) or directly (Dictionary) - same recursive shape used all the way
-# down, so obstacles/elevation_zones/etc. get free per-subkey + unknown-key
+# down, so obstacles/surface_zones/etc. get free per-subkey + unknown-key
 # checking without a bespoke validator each.
 const FIELD_SPEC: Dictionary = {
 	"name": {"type": "string", "required": true},
@@ -211,13 +205,6 @@ const FIELD_SPEC: Dictionary = {
 		"half_extents": {"type": "vector2", "required": true},
 		"type": {"type": "string", "required": false, "enum": ["rock", "building"]},
 		"building_height": {"type": "number", "required": false, "min": 0.01},
-	}},
-	"elevation_zones": {"type": "array", "required": false, "item": {
-		"center": {"type": "vector3", "required": true},
-		"half_extents": {"type": "vector2", "required": true},
-		"height": {"type": "number", "required": true},
-		"ramp_side": {"type": "string", "required": true, "enum": ["north", "south", "east", "west"]},
-		"ramp_width": {"type": "number", "required": true, "min": 0.01},
 	}},
 	"surface_zones": {"type": "array", "required": false, "item": {
 		"center": {"type": "vector3", "required": true},

@@ -95,7 +95,7 @@ func _init():
 	success = success and await test_hull_draught_routes_to_correct_water_nav_map()
 	success = success and await test_unit_order_move_actually_navigates_around_the_lake()
 	success = success and await test_terrain_builder_pure_functions()
-	success = success and await test_terrain_builder_navmesh_ramp_connects()
+	success = success and await test_b6_heightmap_plateau_approachable_from_any_side()
 	success = success and await test_bridges_carve_a_real_ground_crossing_through_water()
 	success = success and await test_building_obstacle_spawns_taller_real_cover_than_rock_cluster()
 	success = success and await test_amphibious_navmesh_crosses_water()
@@ -5249,25 +5249,14 @@ func test_terrain_builder_pure_functions() -> bool:
 		"map_half_extents": 80.0,
 		"water_areas": [{"center": Vector3(18, 0, 0), "half_extents": Vector2(7, 7)}],
 		"obstacles": [{"center": Vector3(-20, 0, 20), "half_extents": Vector2(5, 5)}],
-		"elevation_zones": [
-			{"center": Vector3(0, 0, -20), "half_extents": Vector2(10, 10), "height": 6.0, "ramp_side": "south", "ramp_width": 6.0},
-		],
 	}
 
-	if TerrainBuilder.terrain_height_at(map_def, Vector3(0, 0, -20)) != 6.0:
-		print("  [FAIL] Plateau center should report height 6.0")
-		return false
-	# Skirmish refinement pass: "flat" ground now carries real low-amplitude
+	# Skirmish refinement pass: "flat" ground carries real low-amplitude
 	# rolling noise (height_at()'s baseline contribution) instead of being
-	# hardcoded to exactly 0.0 - a small tolerance replaces the old exact
-	# equality check, still well clear of the elevation zone's real 6.0.
+	# hardcoded to exactly 0.0 - a small tolerance replaces exact equality.
 	var flat_h = TerrainBuilder.terrain_height_at(map_def, Vector3(40, 0, 40))
 	if abs(flat_h) > 1.0:
-		print("  [FAIL] Flat ground far from any zone should report a height near 0.0 (noise only), got ", flat_h)
-		return false
-	var ramp_h = TerrainBuilder.terrain_height_at(map_def, Vector3(0, 0, -35))
-	if ramp_h <= 0.5 or ramp_h >= 5.5:
-		print("  [FAIL] Ramp midpoint should report an intermediate height between 0 and 6, got ", ramp_h)
+		print("  [FAIL] Flat ground should report a height near 0.0 (noise only), got ", flat_h)
 		return false
 	if not TerrainBuilder.is_position_blocked(map_def, Vector3(18, 0, 0)):
 		print("  [FAIL] A position inside a water_area should be blocked")
@@ -5275,59 +5264,58 @@ func test_terrain_builder_pure_functions() -> bool:
 	if not TerrainBuilder.is_position_blocked(map_def, Vector3(-20, 0, 20)):
 		print("  [FAIL] A position inside an obstacle should be blocked")
 		return false
-	if TerrainBuilder.is_position_blocked(map_def, Vector3(0, 0, -20)):
-		print("  [FAIL] A plateau's flat top should NOT be blocked - it's legitimate buildable high ground")
-		return false
 	if TerrainBuilder.is_position_blocked(map_def, Vector3(40, 0, 40)):
 		print("  [FAIL] Ordinary flat ground should not be blocked")
 		return false
 
-	print("  [PASS] terrain_height_at()/is_position_blocked() correctly classify water, obstacles, ramps, plateau tops, and flat ground.")
+	print("  [PASS] terrain_height_at()/is_position_blocked() correctly classify water, obstacles, and flat ground.")
 	return true
 
-func test_terrain_builder_navmesh_ramp_connects() -> bool:
-	print("Running Test Suite: Multi-Map Terrain - Navmesh Ramp Actually Bridges Ground To Plateau...")
-	# Regression test for a real bug: Recast silently drops a baked
-	# triangle whose winding doesn't match the rest of the terrain's
-	# convention (found via an isolated probe - not a slope/parameter
-	# issue, a plain winding mismatch specific to "south"/"west" ramps
-	# where the ramp's outer edge has a SMALLER coordinate than its inner
-	# edge). Exercises all 4 ramp directions so this can't silently regress
-	# for just one of them again.
-	var TerrainBuilder = preload("res://scripts/terrain_builder.gd")
-	var directions = [
-		{"side": "south", "center": Vector3(0, 0, -20), "start": Vector3(0, 0, -50), "end": Vector3(0, 6, -20)},
-		{"side": "north", "center": Vector3(0, 0, 20), "start": Vector3(0, 0, 50), "end": Vector3(0, 6, 20)},
-		{"side": "east", "center": Vector3(-20, 0, 0), "start": Vector3(10, 0, 0), "end": Vector3(-20, 6, 0)},
-		{"side": "west", "center": Vector3(20, 0, 0), "start": Vector3(-10, 0, 0), "end": Vector3(20, 6, 0)},
+func test_b6_heightmap_plateau_approachable_from_any_side() -> bool:
+	print("Running Test Suite: Heightmap Plateau - Approachable From Any Side, Not Just An Authored Ramp Direction (RTS_CORE_ROADMAP.md B6)...")
+	# RTS_CORE_ROADMAP.md B6 retired elevation_zones' "one ramp on ONE
+	# authored side" system - a heightmap plateau has a real continuous
+	# slope on every side (see build_terrain.py's _plateau()), so unlike
+	# the old test_terrain_builder_navmesh_ramp_connects() (which had to
+	# exercise all 4 ramp directions because only ONE was ever authored),
+	# this proves a SINGLE plateau feature is reachable from all 4
+	# cardinal directions with no per-side authoring at all.
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	TerrainBuilderScript.reset_heightmap_cache_for_tests()
+
+	var file = FileAccess.open("res://data/test_fixtures/terrain/test_terrain.json", FileAccess.READ)
+	var json = JSON.new()
+	json.parse(file.get_as_text())
+	file.close()
+	var map_def: Dictionary = json.get_data()
+
+	var nav = TerrainBuilderScript.build_navmeshes(map_def)
+	await process_frame
+	await process_frame
+
+	# The fixture's plateau: center [-40, 20], half_extents [6, 6], height
+	# 3, falloff 5 (walkable: slope 3/5=0.6 < MAX_WALKABLE_SLOPE 0.7) - so
+	# its slope zone extends roughly x=[-51,-29], z=[9,31]. Approach points
+	# chosen clear of the fixture's other features (hill/basin share the
+	# plateau's x=-40 column further south; ridge/ravine sit at x=-10/10)
+	# and inside the map's 60-unit half-extent.
+	var approaches = [
+		{"side": "north", "start": Vector3(-40, 0, 45)},
+		{"side": "south", "start": Vector3(-25, 0, 0)},
+		{"side": "east", "start": Vector3(-20, 0, 20)},
+		{"side": "west", "start": Vector3(-55, 0, 20)},
 	]
-	for d in directions:
-		var map_def = {
-			"map_half_extents": 80.0, "water_areas": [], "obstacles": [],
-			"elevation_zones": [{"center": d.center, "half_extents": Vector2(10, 10), "height": 6.0, "ramp_side": d.side, "ramp_width": 6.0}],
-		}
-		var nav = TerrainBuilder.build_navmeshes(map_def)
-		await process_frame
-		await process_frame
-		var path = NavigationServer3D.map_get_path(nav.ground_map, d.start, d.end, true)
+	var top = Vector3(-40, 3, 20)
+	for a in approaches:
+		var path = NavigationServer3D.map_get_path(nav.ground_map, a.start, top, true)
 		var max_y = 0.0
 		for p in path:
 			max_y = max(max_y, p.y)
-		NavigationServer3D.free_rid(nav.ground_region)
-		if nav.water_region.is_valid():
-			NavigationServer3D.free_rid(nav.water_region)
-		NavigationServer3D.free_rid(nav.amphibious_region)
-		if nav.deep_water_region.is_valid():
-			NavigationServer3D.free_rid(nav.deep_water_region)
-		NavigationServer3D.free_rid(nav.ground_map)
-		NavigationServer3D.free_rid(nav.water_map)
-		NavigationServer3D.free_rid(nav.amphibious_map)
-		NavigationServer3D.free_rid(nav.deep_water_map)
-		if path.size() < 2 or max_y < 5.0:
-			print("  [FAIL] ramp_side='", d.side, "' should produce a real path reaching the plateau (max Y >= 5.0), got ", path.size(), " points, max_y=", max_y)
+		if path.is_empty() or max_y < 2.5:
+			print("  [FAIL] Approaching the plateau from the ", a.side, " should reach its top (Y>=2.5), got ", path.size(), " points, max_y=", max_y)
 			return false
 
-	print("  [PASS] All 4 ramp directions (north/south/east/west) produce a real connected path from ground level up to the plateau.")
+	print("  [PASS] A single plateau feature (no per-side ramp authoring) is reachable from all 4 cardinal directions.")
 	return true
 
 func test_bridges_carve_a_real_ground_crossing_through_water() -> bool:
@@ -5338,9 +5326,9 @@ func test_bridges_carve_a_real_ground_crossing_through_water() -> bool:
 	# there is literally zero room to go around, so any successful crossing
 	# can only be explained by the bridge carve-out, not a lucky detour.
 	var water = [{"center": Vector3(0, 0, 0), "half_extents": Vector2(half, 6)}]
-	var map_no_bridge = {"map_half_extents": half, "water_areas": water, "obstacles": [], "elevation_zones": []}
+	var map_no_bridge = {"map_half_extents": half, "water_areas": water, "obstacles": []}
 	var map_with_bridge = {
-		"map_half_extents": half, "water_areas": water, "obstacles": [], "elevation_zones": [],
+		"map_half_extents": half, "water_areas": water, "obstacles": [],
 		"bridges": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(4, 6)}],
 	}
 	var start = Vector3(0, 0, -30)
@@ -5447,7 +5435,7 @@ func test_deep_water_navmesh_blocks_shallow_draught_hulls() -> bool:
 		"map_half_extents": 80.0,
 		"water_areas": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(15, 40)}],
 		"shallow_water_areas": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(15, 3)}],
-		"obstacles": [], "elevation_zones": [],
+		"obstacles": [],
 	}
 	var nav = TerrainBuilder.build_navmeshes(map_def)
 	await process_frame
@@ -5497,7 +5485,7 @@ func test_amphibious_navmesh_crosses_water() -> bool:
 	var map_def = {
 		"map_half_extents": 80.0,
 		"water_areas": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(15, 40)}],
-		"obstacles": [], "elevation_zones": [],
+		"obstacles": [],
 	}
 	var nav = TerrainBuilder.build_navmeshes(map_def)
 	await process_frame
@@ -5560,11 +5548,13 @@ func test_elevation_combat_and_vision_bonus() -> bool:
 		print("  [FAIL] A shot from meaningfully higher ground should lower the defender's threshold (easier to pierce), level=", level_shot.x, " elevated=", elevated_shot.x)
 		return false
 
-	# Vision: a real Skirmish match, one player unit standing on an
-	# elevation zone's plateau should see further than an identical unit
-	# on flat ground - verified by overriding current_map with a synthetic
-	# map that has one elevation zone, then comparing effective vision via
-	# _recalc_fog_of_war()'s own real reveal/hide behavior.
+	# Vision: a real Skirmish match, one player unit standing on a hill
+	# should see further than an identical unit on flat ground - verified
+	# by overriding current_map with a synthetic map that has one "hills"
+	# feature (RTS_CORE_ROADMAP.md B6 retired elevation_zones; "hills" is
+	# the still-supported analytic primitive terrain_height_at() reads via
+	# height_at() for a map with no heightmap), then comparing effective
+	# vision via _recalc_fog_of_war()'s own real reveal/hide behavior.
 	await process_frame
 	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
 	root.add_child(skirmish)
@@ -5573,7 +5563,7 @@ func test_elevation_combat_and_vision_bonus() -> bool:
 	await process_frame
 	skirmish.current_map = {
 		"map_half_extents": 80.0, "water_areas": [], "obstacles": [],
-		"elevation_zones": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(10, 10), "height": 10.0, "ramp_side": "south", "ramp_width": 6.0}],
+		"hills": [{"center": Vector3(0, 0, 0), "radius": 10.0, "height": 10.0, "falloff": 5.0}],
 	}
 
 	# Use battle_unit.gd instances (real vision_range + team + fog API) so
@@ -8064,11 +8054,11 @@ func test_map_schema_validator() -> bool:
 		return false
 
 	var typo_map = base_map.duplicate(true)
-	typo_map["elevaton_zones"] = typo_map["elevation_zones"] # misspelled - "elevation_zones" itself stays present, so this is a genuine extra unknown key
+	typo_map["watre_blobs"] = typo_map["water_blobs"] # misspelled - "water_blobs" itself stays present, so this is a genuine extra unknown key
 	var typo_errors: Array = MapCatalogScript.validate_map_def(typo_map)
 	var caught_unknown_key = false
 	for e in typo_errors:
-		if "elevaton_zones" in e:
+		if "watre_blobs" in e:
 			caught_unknown_key = true
 	if not caught_unknown_key:
 		print("  [FAIL] A misspelled field name should be caught as an unknown-key error. Got: ", typo_errors)
@@ -8235,7 +8225,6 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 			{"center": Vector3(54, 0, 0), "radius": 22.0, "irregularity": 0.3, "depth": 1.3, "shore_blend": 8.0},
 		],
 		"obstacles": [],
-		"elevation_zones": [],
 		"resource_nodes": [
 			{"position": Vector3(-66, 0, 54), "type": "metal", "amount": 1200.0},
 			{"position": Vector3(-84, 0, 36), "type": "metal", "amount": 1000.0},
@@ -8381,25 +8370,27 @@ func test_b4_heightmap_terrain_pure_functions() -> bool:
 	return true
 
 func test_b4_heightmap_leaves_unmigrated_maps_untouched() -> bool:
-	print("Running Test Suite: Heightmap-Backed Terrain - Flag-Gated, Unmigrated Maps Untouched (RTS_CORE_ROADMAP.md B4)...")
+	print("Running Test Suite: Heightmap-Backed Terrain - Flag-Gated Per-Map (RTS_CORE_ROADMAP.md B4/B6)...")
 
 	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
 	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
 	TerrainBuilderScript.reset_heightmap_cache_for_tests()
 
-	# None of the 8 bundled maps author terrain.heightmap yet (B6's job) -
-	# confirm the flag gate genuinely stays dormant for real map data,
-	# not just for the synthetic fixture that deliberately sets it.
+	# RTS_CORE_ROADMAP.md B6 migrated highland_chokepoint/twin_summits (the
+	# only 2 of the 8 bundled maps that used elevation_zones) onto real
+	# heightmaps; the other 6 still take the analytic noise+hills+
+	# water_blobs path. Confirm the flag gate reflects exactly that split,
+	# not "on for everything" or "on for nothing."
+	var migrated = ["highland_chokepoint", "twin_summits"]
 	for map_id in MapCatalogScript.get_map_ids():
 		var map_def = MapCatalogScript.get_map(map_id)
-		if TerrainBuilderScript._get_heightmap_image(map_def) != null:
-			print("  [FAIL] Map '", map_id, "' should have no heightmap image (none of the 8 bundled maps author terrain.heightmap), but one loaded.")
-			return false
-		if TerrainBuilderScript._get_surfacemap_image(map_def) != null:
-			print("  [FAIL] Map '", map_id, "' should have no surfacemap image, but one loaded.")
+		var has_heightmap = TerrainBuilderScript._get_heightmap_image(map_def) != null
+		var should_have = map_id in migrated
+		if has_heightmap != should_have:
+			print("  [FAIL] Map '", map_id, "' heightmap presence should be ", should_have, ", got ", has_heightmap)
 			return false
 
-	print("  [PASS] All 8 bundled maps correctly have no heightmap/surfacemap - the B4 flag gate stays dormant until B6 migrates real map data onto it.")
+	print("  [PASS] Exactly the 2 migrated maps (highland_chokepoint, twin_summits) have a real heightmap; the other 6 still take the analytic path.")
 	return true
 
 func test_b5_heightmap_navmesh_rejects_steep_slope() -> bool:

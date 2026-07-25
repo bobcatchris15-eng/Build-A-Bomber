@@ -1439,6 +1439,13 @@ func _cancel_placement():
 # affordability, which doesn't change as the mouse moves and is checked
 # separately at _begin_placement/_try_place_building time.
 func _placement_validity(pos: Vector3) -> Dictionary:
+	# RTS_CORE_ROADMAP.md B6: the missing map-bounds check - is_position_blocked()
+	# reads map_half_extents but only ever used it for ramp geometry, never
+	# an actual bounds test, so nothing stopped placing a building past the
+	# edge of the map.
+	var half: float = current_map.get("map_half_extents", 80.0)
+	if abs(pos.x) > half or abs(pos.z) > half:
+		return {"valid": false, "reason": "Outside the map boundary!"}
 	# Terrain check first (water/obstacles/ramp slopes are never buildable,
 	# regardless of proximity to a friendly building) - a real check added
 	# alongside multi-map terrain; previously nothing stopped a building

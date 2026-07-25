@@ -1,6 +1,5 @@
 {
 	"description": "A single lake splits the map roughly in two - ground units detour around it, naval units are confined to it. No high ground.",
-	"elevation_zones": [],
 	"ground_color": [
 		0.200000002980232,
 		0.259999990463257,

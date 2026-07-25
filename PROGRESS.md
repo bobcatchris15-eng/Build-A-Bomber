@@ -4,6 +4,29 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-25 — RTS_CORE_ROADMAP.md B6: retire `elevation_zones`, migrate `highland_chokepoint`/`twin_summits` onto heightmaps
+
+The chunk where the terrain-quality goal Chris actually asked for (bigger, more interesting, less sparse maps) starts showing up in real gameplay maps, not just a test fixture. Only 2 of the 8 bundled maps ever used `elevation_zones` (`highland_chokepoint`'s single dual-ramp hill, `twin_summits`'s two separate hills) - both now use real `terrain.features` plateaus instead.
+
+**Design change, not just a format swap:** the old system authored exactly ONE ramp direction per zone (`ramp_side: "north"`), so a hill was only climbable from one or two authored sides - everywhere else was a hard, unclimbable wall. A heightmap plateau has a real continuous slope on **every** side via `build_terrain.py`'s smoothstep falloff, so both hills are now approachable from any direction. Verified visually (screenshots show a real sloped hill, not a boxy plateau) and with a new test proving reachability from all 4 cardinal directions with zero per-side authoring.
+
+**Real bug found mid-migration:** a smoothstep falloff's peak derivative is 1.5x steeper than the naive `height/falloff` average (smoothstep's derivative peaks at its midpoint) - my first-pass falloff values left both hills' slopes exceeding `MAX_WALKABLE_SLOPE` despite looking fine by the linear estimate. Fixed by sizing falloff against the actual peak (`1.5 * height / MAX_WALKABLE_SLOPE`), then had to reposition 4 resource nodes on `twin_summits` that ended up sitting almost exactly on the new hill's slope (the old system's much smaller footprint had left them on flat ground) - moved outward past the falloff zone, onto genuinely flat ground, which is also just better resource-node placement regardless.
+
+**Shipped:**
+- `terrain_builder.gd`: deleted `_ramp_geometry()`, `_ramp_quads()`, `_snap_floor()`/`_snap_ceil()`, `_near_elevation_zone()`, `_spawn_elevation_zone()`, the dead-code `_collect_holes()`, and every `elevation_zones` branch in `terrain_height_at()`/`is_position_blocked()`/`_build_ground_faces()`/`_build_amphibious_faces()`/`spawn_visuals()`. `RAMP_RUN_PER_HEIGHT`/`RAMP_PAD` consts gone.
+- `map_catalog.gd`: `elevation_zones` removed from `FIELD_SPEC` entirely (not just the 2 migrated maps' JSON - all 8, since 6 had it as a harmless empty array that would otherwise start failing as an unknown field).
+- The missing map-bounds check flagged in the roadmap: `_placement_validity()` now rejects a building placed outside `map_half_extents` - previously `is_position_blocked()` read that field but only for the old ramp geometry, never an actual bounds test.
+- **Deliberately deferred** (logged in `RTS_CORE_ROADMAP.md` itself): the `map_half_extents: float -> Vector2` conversion B6's original bullets listed. Every one of the 8 bundled maps is square today; a sweeping type change across ~9 files for a dimension nothing currently uses would be premature generalization ahead of B8 (bigger/denser maps), the natural point a non-square map first gets authored.
+
+**Verified:**
+- Rewrote 2 tests that directly exercised the deleted ramp system: `test_terrain_builder_pure_functions()` (dropped its elevation_zones-specific assertions, kept water/obstacle coverage) and the former `test_terrain_builder_navmesh_ramp_connects()` → `test_b6_heightmap_plateau_approachable_from_any_side()` (one plateau feature, no per-side ramp authoring, reachable from all 4 cardinal directions - using the B4 fixture, whose own plateau height/falloff got tuned down to something genuinely walkable for this check).
+- Updated a vision-bonus test that used a synthetic `elevation_zones` map to use `hills` instead (the still-supported analytic primitive) - same real assertion, different authoring format.
+- Updated B4's "flag gate is dormant for every real map" test to assert the correct split now: dormant for 6, real for the 2 migrated maps.
+- All 8 per-map smoke tests (start points legal, resources reachable, HQs mutually connected) pass against the migrated maps. Full suite green 3x in a row.
+- Non-headless screenshots of both migrated maps in a real Skirmish match - real sloped hills with baked ground texture, not boxes.
+
+---
+
 ## 2026-07-25 — RTS_CORE_ROADMAP.md B5: slope-aware navmesh + terrain collision (flag-gated)
 
 Makes B4's heightmap data **effective**, not just decorative - a real navmesh hole where a heightmap-backed map's slope exceeds `MAX_WALKABLE_SLOPE`, finally giving that constant a job.

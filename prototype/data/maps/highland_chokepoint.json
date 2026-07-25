@@ -1,35 +1,5 @@
 {
 	"description": "A single dominant hill splits the map, flanked by rock walls that narrow the approach to two lanes. No water. Hold the hill for real vision and combat advantages, or fight through the flanks.",
-	"elevation_zones": [
-		{
-			"center": [
-				0,
-				0,
-				0
-			],
-			"half_extents": [
-				30,
-				30
-			],
-			"height": 24,
-			"ramp_side": "south",
-			"ramp_width": 24
-		},
-		{
-			"center": [
-				0,
-				0,
-				0
-			],
-			"half_extents": [
-				30,
-				30
-			],
-			"height": 24,
-			"ramp_side": "north",
-			"ramp_width": 24
-		}
-	],
 	"ground_color": [
 		0.239999994635582,
 		0.239999994635582,
@@ -184,5 +154,25 @@
 			]
 		}
 	],
+	"terrain": {
+		"features": [
+			{
+				"center": [
+					0,
+					0
+				],
+				"falloff": 24,
+				"half_extents": [
+					30,
+					30
+				],
+				"height": 10,
+				"type": "plateau"
+			}
+		],
+		"height_scale": 10.0,
+		"heightmap": "res://data/maps/highland_chokepoint_height.png",
+		"surfacemap": "res://data/maps/highland_chokepoint_surface.png"
+	},
 	"water_areas": []
 }

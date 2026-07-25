@@ -3,97 +3,52 @@ class_name TerrainBuilder
 const TerrainGreeblesScript = preload("res://scripts/terrain_greebles.gd")
 # Turns a MapCatalog map Dictionary into: baked NavigationServer3D ground/
 # water maps, decorative terrain meshes (water planes, rock-cluster
-# obstacles, elevation plateaus+ramps), and pure query functions
-# (terrain_height_at / is_position_blocked) that skirmish.gd and
-# battle_unit.gd consult for Y-positioning, buildability, and (indirectly,
-# via real Y coordinates) vision/combat elevation bonuses.
+# obstacles), and pure query functions (terrain_height_at / is_position_
+# blocked) that skirmish.gd and battle_unit.gd consult for Y-positioning,
+# buildability, and (indirectly, via real Y coordinates) vision/combat
+# elevation bonuses.
 #
-# Ground navmesh technique: generalizes the old single-lake "4 quad bands
-# around one rectangular hole" into an arbitrary-hole grid - the 160x160
-# (or whatever map_half_extents says) area is walked in GRID_CELL-sized
-# quads, and any cell overlapping a water/obstacle/elevation-zone/ramp
-# footprint is simply omitted. Elevation zones then add back a plateau-top
-# quad (at y=height) and one sloped ramp quad bridging ground level to the
-# plateau, all on the SAME ground_nav_map - NavigationServer3D happily
-# routes across a slope as long as it's under NavigationMesh's default
-# ~45-degree max-slope bake limit (RAMP_RUN_PER_HEIGHT is chosen to stay
-# well under that, see its own comment).
-#
-# Deliberately NOT physically-collidable ramps/plateaus (no rotated
-# CollisionShape3D, no CharacterBody3D stair-stepping risk) - elevation
-# Y-positioning is instead driven by terrain_height_at(), a pure analytic
-# function battle_unit.gd/skirmish.gd call every tick to snap a unit/
-# building's Y, decoupled entirely from physics. This was a deliberate
-# scope choice over real 3D collision - see DECISIONS_NEEDED.md.
+# Ground navmesh technique: the 160x160 (or whatever map_half_extents
+# says) area is walked in GRID_CELL-sized quads, and any cell overlapping
+# a water/obstacle footprint is simply omitted. RTS_CORE_ROADMAP.md B6
+# retired the old rect elevation_zones/ramp system entirely (real
+# elevation now comes from a heightmap - see height_at()'s own header
+# comment) - every map has real per-cell slope rejection instead of a
+# hand-authored single-direction ramp.
 
 const GRID_CELL: float = 4.0
-# Ramp run (horizontal distance) per unit of rise. 1.5 -> slope angle
-# atan(1/1.5) ~= 33.7 degrees, comfortably under both Godot's default
-# NavigationMesh max-slope bake limit (45 deg) and CharacterBody3D's
-# default floor_max_angle (45 deg) - not that either matters for the
-# analytic height-snap approach, but keeping the ramp geometrically
-# plausible as an actual walkable slope, not just a navmesh technicality.
-const RAMP_RUN_PER_HEIGHT: float = 1.5
-# The coarse flat-ground grid skips a whole GRID_CELL if it even partially
-# overlaps a hole (water/obstacle/ramp footprint) - correct for avoiding
-# false-walkable slivers, but it means a hole boundary that doesn't fall
-# exactly on a grid line gets rounded UP TO a full cell short of the flat
-# grid's actual walkable edge. A first fix (pad the ramp's ground-facing
-# sides by a flat RAMP_PAD offset) turned out to be insufficient: an
-# unaligned PADDED edge has exactly the same problem the unpadded edge
-# did, just shifted outward by one cell - confirmed by a probe script
-# still failing to route onto the plateau after adding the naive pad.
-# The real fix is to SNAP every ground-facing ramp boundary onto an actual
-# grid line (_snap_floor/_snap_ceil below) and use that identical snapped
-# value for both the navmesh hole AND the apron quad's edge - so the two
-# pieces of geometry share an exact coincident boundary no matter where
-# the ramp sits, the same way the original lake's hand-computed exact
-# bands always did.
-const RAMP_PAD: float = GRID_CELL
 
 # Bridge deck height above water/ground level - just enough to read as a
 # real raised structure (and to keep the deck mesh visibly above the water
-# plane's own y=0.05) without needing a approach ramp of its own; bridges sit
-# flush with the surrounding ground on both banks, unlike an elevation zone's
-# plateau, so no ramp geometry is needed for units to walk onto it.
+# plane's own y=0.05) without needing an approach ramp of its own; bridges
+# sit flush with the surrounding ground on both banks.
 const BRIDGE_DECK_HEIGHT: float = 0.6
 
-# --- Heightmap terrain (Skirmish refinement pass) ---
+# --- Heightmap terrain ---
 #
-# height_at(map_def, x, z) is the ONE new source of truth for continuous
-# ground elevation, layered on top of (not replacing) the existing rect-
-# based water_areas/obstacles/elevation_zones system every un-migrated map
-# still uses. It combines three things:
+# height_at(map_def, x, z) is the ONE source of truth for continuous
+# ground elevation. It combines three things:
 #   - low-amplitude deterministic noise everywhere (real, but subtle rolling
 #     ground rather than perfectly dead-flat terrain)
 #   - "hills": [{center, radius, height, falloff}] - a radially-symmetric
-#     smoothstep bump, replacing the old rectangle-plateau-plus-single-ramp
-#     authoring for any NEW map that opts in (no existing map uses this yet
-#     - see terrain_builder.gd's own PROGRESS notes for why elevation_zones
-#     stays the authoring format for now)
+#     smoothstep bump
 #   - "water_blobs": [{center, radius, irregularity, depth, shore_blend}] -
 #     an organic (non-rectangular) lake shape: a per-angle radius wobble
 #     defines the coastline, and the ground dips smoothly below sea level
 #     inside it, blending back to 0 over `shore_blend` units past the edge.
+# A map with terrain.heightmap set (RTS_CORE_ROADMAP.md B4) REPLACES all
+# three with a bilinear sample of the baked heightmap PNG instead - see
+# height_at()'s own header comment for the exact precedence.
 #
-# Every map (migrated or not) gets the noise pass "for free" now that the
-# ground is a real subdivided mesh instead of one flat box (see
-# build_ground_visual_mesh()) - a mismatch between a bumpy navmesh/height
-# query and a visually flat ground would look like units floating/sinking,
-# so the two MUST move together, which is exactly what this single
-# function-plus-mesh-generator pairing guarantees.
-# Found empirically: this noise creates a seam between ordinary flat-ground
-# quads and the perfectly smooth analytic elevation_zone/ramp geometry
-# right next to them (ramps/plateaus don't sample height_at() - they use
-# their own exact height/ramp-interpolation math) - broke
-# test_terrain_builder_navmesh_ramp_connects's south-side case once navmesh
-# cell_size was widened for large-map bake performance (see
-# NavigationMesh.new()). Fixed at the source via _near_elevation_zone() keeping
-# noise away from that boundary entirely, so amplitude itself is free to be
-# a real, visible rolling texture again.
+# Every map gets the noise pass "for free" now that the ground is a real
+# subdivided mesh instead of one flat box (see build_ground_visual_mesh())
+# - a mismatch between a bumpy navmesh/height query and a visually flat
+# ground would look like units floating/sinking, so the two MUST move
+# together, which is exactly what this single function-plus-mesh-generator
+# pairing guarantees.
 const GROUND_NOISE_AMPLITUDE: float = 0.4
 const GROUND_NOISE_FREQUENCY: float = 0.035
-const MAX_WALKABLE_SLOPE: float = 0.7 # ~35 degrees - matches the old ramp geometry's angle philosophy (see RAMP_RUN_PER_HEIGHT)
+const MAX_WALKABLE_SLOPE: float = 0.7 # ~35 degrees
 
 static var _noise_cache: Dictionary = {}
 
@@ -112,12 +67,10 @@ static func _get_noise(map_def: Dictionary) -> FastNoiseLite:
 #
 # tools/terrain/build_terrain.py's counterpart: bilinear-samples the
 # 16-bit heightmap PNG a map's "terrain" block points at, instead of the
-# noise+hills+water_blobs analytic path above. Deliberately FLAG-GATED
-# (only engages when map_def.terrain.heightmap is actually set) per the
-# roadmap's own risk note - no existing map authors terrain data yet
-# (same "no map uses this yet" situation hills/water_blobs were in before
-# this pass), so every one of the 8 bundled maps is byte-for-byte
-# unaffected until B6 migrates them off elevation_zones.
+# noise+hills+water_blobs analytic path above. Flag-gated on
+# map_def.terrain.heightmap actually being set - highland_chokepoint/
+# twin_summits do (B6, migrated off the old elevation_zones/ramp system);
+# the other 6 bundled maps don't, so they keep the analytic path.
 #
 # Encoding MUST exactly mirror build_terrain.py's encode_heightmap():
 # normalized = pixel / 32767.5 - 1.0 (range [-1, 1]), world height =
@@ -260,48 +213,25 @@ static func _water_blob_height_contribution(blob: Dictionary, x: float, z: float
 	var s = t * t * (3.0 - 2.0 * t) # smoothstep, 0 at edge -> 1 at edge+blend
 	return -depth * (1.0 - s)
 
-# Keeps flat-ground noise away from any elevation_zone's footprint/ramp -
-# those still use their own EXACT analytic height (see terrain_height_at()
-# and _build_ground_faces()'s separate hardcoded plateau/ramp quads, which
-# never sample height_at()), so noisy ground right up against that boundary
-# creates a real seam Recast can't always bridge cleanly. Only elevation_
-# zones need this - hills/water_blobs handle their own smooth blending into
-# the noise via their own falloff math, no exclusion needed.
-static func _near_elevation_zone(map_def: Dictionary, x: float, z: float, margin: float) -> bool:
-	var zones = map_def.get("elevation_zones", [])
-	if zones.is_empty(): return false
-	var half: float = map_def.get("map_half_extents", 80.0)
-	for e in zones:
-		var r = _rect_from(e.center, e.half_extents)
-		if x >= r.x0 - margin and x <= r.x1 + margin and z >= r.z0 - margin and z <= r.z1 + margin:
-			return true
-		var rg = _ramp_geometry(e, half)
-		if x >= rg.x0 - margin and x <= rg.x1 + margin and z >= rg.z0 - margin and z <= rg.z1 + margin:
-			return true
-	return false
-
-# The single continuous elevation query - noise everywhere (except right
-# against an elevation_zone, see _near_elevation_zone()), plus authored
-# hills/water_blobs layered on top. Deliberately does NOT know about the
-# old rect elevation_zones/water_areas/bridges system otherwise;
-# terrain_height_at() below still owns that logic entirely, falling back to
-# this function only where none of those apply.
+# The single continuous elevation query - noise everywhere, plus authored
+# hills/water_blobs layered on top (or a real heightmap replacing all
+# three - see below). Deliberately does NOT know about water_areas/
+# bridges; terrain_height_at() below still owns that logic entirely,
+# falling back to this function only where none of those apply.
 static func height_at(map_def: Dictionary, x: float, z: float) -> float:
-	# RTS_CORE_ROADMAP.md B4: a real heightmap FULLY REPLACES the analytic
-	# noise+hills+water_blobs path below (not layered on top of it - a map
-	# authoring real terrain.features doesn't also want procedural noise
-	# added in). Flag-gated on map_def.terrain.heightmap actually being set:
-	# none of the 8 bundled maps do yet (B6 migrates them), so this is dead
-	# code for every map that exists today.
+	# RTS_CORE_ROADMAP.md B4/B6: a real heightmap FULLY REPLACES the
+	# analytic noise+hills+water_blobs path below (not layered on top of
+	# it - a map authoring real terrain.features doesn't also want
+	# procedural noise added in). Flag-gated on map_def.terrain.heightmap
+	# actually being set - highland_chokepoint/twin_summits do (B6); the
+	# other 6 bundled maps don't, so they still take the analytic path.
 	var heightmap_img = _get_heightmap_image(map_def)
 	if heightmap_img:
 		var half: float = map_def.get("map_half_extents", 80.0)
 		var height_scale: float = map_def.get("terrain", {}).get("height_scale", 20.0)
 		return _sample_heightmap_bilinear(heightmap_img, half, x, z) * height_scale
 
-	var h = 0.0
-	if not _near_elevation_zone(map_def, x, z, GRID_CELL):
-		h = _get_noise(map_def).get_noise_2d(x, z) * GROUND_NOISE_AMPLITUDE
+	var h = _get_noise(map_def).get_noise_2d(x, z) * GROUND_NOISE_AMPLITUDE
 	for hill in map_def.get("hills", []):
 		h += _hill_contribution(hill, x, z)
 	for blob in map_def.get("water_blobs", []):
@@ -329,9 +259,9 @@ static func _water_blob_polygon(blob: Dictionary) -> PackedVector2Array:
 # a fixed Y - used both for the flat water navmesh faces and the visual
 # water mesh. Winding follows the same low-to-high-angle sweep already
 # proven to bake correctly for the rect water/ground quads elsewhere in
-# this file (see _ramp_quads()'s own winding comment for the empirical
-# backstory) - increasing theta is the same rotational sense as those
-# quads' x0->x1/z0->z1 sweep.
+# this file (Recast silently drops a triangle whose winding doesn't match
+# its walkable-surface convention) - increasing theta is the same
+# rotational sense as those quads' x0->x1/z0->z1 sweep.
 static func _water_blob_fan_verts(blob: Dictionary, y: float) -> PackedVector3Array:
 	var c: Vector3 = blob.center
 	var poly = _water_blob_polygon(blob)
@@ -343,12 +273,6 @@ static func _water_blob_fan_verts(blob: Dictionary, y: float) -> PackedVector3Ar
 		verts.append(Vector3(c.x + p0.x, y, c.z + p0.y))
 		verts.append(Vector3(c.x + p1.x, y, c.z + p1.y))
 	return verts
-
-static func _snap_floor(coord: float, half: float) -> float:
-	return -half + floor((coord - (-half)) / GRID_CELL) * GRID_CELL
-
-static func _snap_ceil(coord: float, half: float) -> float:
-	return -half + ceil((coord - (-half)) / GRID_CELL) * GRID_CELL
 
 # --- Geometry helpers ---
 
@@ -362,90 +286,9 @@ static func _rect_overlaps(cx0: float, cx1: float, cz0: float, cz1: float, rect:
 static func _point_in_rect(pos: Vector3, rect: Dictionary) -> bool:
 	return pos.x >= rect.x0 and pos.x <= rect.x1 and pos.z >= rect.z0 and pos.z <= rect.z1
 
-# One ramp per elevation zone, on the given side. Returns the axis it runs
-# along, its true (unpadded) inner (plateau-level, y=height) / outer
-# (ground-level, y=0) coordinate along that axis - used for the sloped
-# quad's shape and the height-interpolation formula - plus a grid-SNAPPED
-# x0/x1/z0/z1 rect (see RAMP_PAD/_snap_floor/_snap_ceil) used for the
-# navmesh hole, the visual mesh's width, and the height/buildability
-# containment queries. `half` is the map's map_half_extents - the grid's
-# origin, needed to snap onto the same lines _build_ground_faces() uses.
-static func _ramp_geometry(zone: Dictionary, half: float) -> Dictionary:
-	var c: Vector3 = zone.center
-	var he: Vector2 = zone.half_extents
-	var h: float = zone.height
-	var rw: float = zone.get("ramp_width", 6.0)
-	var depth: float = h * RAMP_RUN_PER_HEIGHT
-	var side: String = zone.get("ramp_side", "south")
-	match side:
-		"north":
-			var true_outer = c.z + he.y + depth
-			return {"axis": "z", "inner": c.z + he.y, "outer": true_outer,
-				"x0": _snap_floor(c.x - rw / 2.0 - RAMP_PAD, half), "x1": _snap_ceil(c.x + rw / 2.0 + RAMP_PAD, half),
-				"z0": c.z + he.y, "z1": _snap_ceil(true_outer + RAMP_PAD, half)}
-		"east":
-			var true_outer = c.x + he.x + depth
-			return {"axis": "x", "inner": c.x + he.x, "outer": true_outer,
-				"z0": _snap_floor(c.z - rw / 2.0 - RAMP_PAD, half), "z1": _snap_ceil(c.z + rw / 2.0 + RAMP_PAD, half),
-				"x0": c.x + he.x, "x1": _snap_ceil(true_outer + RAMP_PAD, half)}
-		"west":
-			var true_outer = c.x - he.x - depth
-			return {"axis": "x", "inner": c.x - he.x, "outer": true_outer,
-				"z0": _snap_floor(c.z - rw / 2.0 - RAMP_PAD, half), "z1": _snap_ceil(c.z + rw / 2.0 + RAMP_PAD, half),
-				"x0": _snap_floor(true_outer - RAMP_PAD, half), "x1": c.x - he.x}
-		_: # "south" (also the default for an unrecognized side)
-			var true_outer = c.z - he.y - depth
-			return {"axis": "z", "inner": c.z - he.y, "outer": true_outer,
-				"x0": _snap_floor(c.x - rw / 2.0 - RAMP_PAD, half), "x1": _snap_ceil(c.x + rw / 2.0 + RAMP_PAD, half),
-				"z0": _snap_floor(true_outer - RAMP_PAD, half), "z1": c.z - he.y}
-
-# The ramp's navmesh geometry as two quads: the true sloped section (inner
-# to outer, height h to 0) plus a flat "apron" from outer out to the
-# padded far boundary - see RAMP_PAD for why the apron exists.
-#
-# Winding matters here in a way it doesn't for the rest of this file: an
-# empirical probe found that Recast's baking silently drops a triangle
-# whose winding doesn't match its (undocumented, but consistently
-# reproduced) walkable-surface convention - not a slope/height/agent-
-# parameter issue, a plain backface-style rejection. The existing grid/
-# lake/plateau quads all sweep low-to-high along whichever axis varies
-# (x0->x1, z0->z1), which happens to already match that convention. A
-# "south" or "west" ramp's outer edge is at a SMALLER coordinate than its
-# inner edge, which reverses that sweep and silently baked to zero
-# polygons (confirmed with an isolated single-quad repro) until `flip`
-# swaps the two width corners back to the matching winding.
-static func _ramp_quads(rg: Dictionary, h: float) -> Array:
-	var quads = []
-	var flip = rg.outer < rg.inner
-	if rg.axis == "z":
-		var apron_far = rg.z1 if rg.outer > rg.inner else rg.z0
-		var xa = rg.x1 if flip else rg.x0
-		var xb = rg.x0 if flip else rg.x1
-		quads.append([Vector3(xa, h, rg.inner), Vector3(xb, h, rg.inner), Vector3(xb, 0, rg.outer), Vector3(xa, 0, rg.outer)])
-		quads.append([Vector3(xa, 0, rg.outer), Vector3(xb, 0, rg.outer), Vector3(xb, 0, apron_far), Vector3(xa, 0, apron_far)])
-	else:
-		var apron_far = rg.x1 if rg.outer > rg.inner else rg.x0
-		var za = rg.z0 if flip else rg.z1
-		var zb = rg.z1 if flip else rg.z0
-		quads.append([Vector3(rg.inner, h, za), Vector3(rg.inner, h, zb), Vector3(rg.outer, 0, zb), Vector3(rg.outer, 0, za)])
-		quads.append([Vector3(rg.outer, 0, za), Vector3(rg.outer, 0, zb), Vector3(apron_far, 0, zb), Vector3(apron_far, 0, za)])
-	return quads
-
 static func _add_nav_quad(verts: PackedVector3Array, a: Vector3, b: Vector3, c: Vector3, d: Vector3):
 	verts.append(a); verts.append(b); verts.append(c)
 	verts.append(a); verts.append(c); verts.append(d)
-
-static func _collect_holes(map_def: Dictionary, half: float) -> Array:
-	var holes = []
-	for w in map_def.get("water_areas", []):
-		holes.append(_rect_from(w.center, w.half_extents))
-	for o in map_def.get("obstacles", []):
-		holes.append(_rect_from(o.center, o.half_extents))
-	for e in map_def.get("elevation_zones", []):
-		holes.append(_rect_from(e.center, e.half_extents))
-		var rg = _ramp_geometry(e, half)
-		holes.append({"x0": rg.x0, "x1": rg.x1, "z0": rg.z0, "z1": rg.z1})
-	return holes
 
 # Organic water_blobs can't be tested with the same rect-overlap check the
 # rest of this file uses - a grid cell counts as "on" a blob if its CENTER
@@ -486,22 +329,18 @@ static func _cell_on_bridge(x0: float, x1: float, z0: float, z1: float, bridges:
 
 # --- Navmesh source geometry ---
 #
-# Deliberately flat (Y=0 baseline, real Y only for the explicit rect-based
-# elevation_zones/bridges), NOT height_at()-driven, even though the visual
-# ground mesh and every gameplay height query genuinely are (see
-# build_ground_visual_mesh()/terrain_height_at()). Two independent, real
-# problems showed up feeding height_at() noise into the navmesh SOURCE
-# geometry: (1) Recast's bake cost scales with (map_size/cell_size)^2, and
-# real per-vertex noise across a ~240-half-extent map pushed a single bake
-# from milliseconds to 10+ seconds - unacceptable at 4 navmeshes per match
-# start; widening cell_size to compensate (2) broke ramp-to-plateau
-# connectivity on every elevation_zone map, confirmed on lake_crossing's
-# synthetic ramp test AND highland_chokepoint's real (scaled) hill. Neither
-# navmesh Y precision nor Recast's own slope-walkability check are actually
-# consumed anywhere - every unit/building's real on-screen Y comes from a
-# fresh terrain_height_at() query every tick, never from a navmesh path
-# point's Y - so a flat navmesh loses nothing gameplay ever depended on
-# while staying exactly as fast/reliable as before this whole pass.
+# Flat (Y=0 baseline, real Y only for bridges) for a map with no
+# heightmap - real per-vertex noise across a ~240-half-extent map pushed a
+# single Recast bake from milliseconds to 10+ seconds (unacceptable at 4
+# navmeshes per match start), and neither navmesh Y precision nor Recast's
+# own slope-walkability check are actually consumed anywhere for that path
+# - every unit/building's real on-screen Y comes from a fresh
+# terrain_height_at() query every tick, never from a navmesh path point's
+# Y - so staying flat loses nothing gameplay depends on. A heightmap-
+# backed map (RTS_CORE_ROADMAP.md B4/B5) samples REAL corner heights
+# instead and REJECTS any cell whose slope exceeds MAX_WALKABLE_SLOPE - an
+# O(1) image lookup per corner, not the expensive noise+hill/blob loop
+# stack, so the same bake-time problem doesn't apply.
 static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 	var verts = PackedVector3Array()
 	var half: float = map_def.get("map_half_extents", 80.0)
@@ -511,27 +350,8 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 	var hard_holes = []
 	for o in map_def.get("obstacles", []):
 		hard_holes.append(_rect_from(o.center, o.half_extents))
-	for e in map_def.get("elevation_zones", []):
-		hard_holes.append(_rect_from(e.center, e.half_extents))
-		var rg = _ramp_geometry(e, half)
-		hard_holes.append({"x0": rg.x0, "x1": rg.x1, "z0": rg.z0, "z1": rg.z1})
 	var bridges = _collect_bridges(map_def)
 	var has_blobs = not map_def.get("water_blobs", []).is_empty()
-
-	# RTS_CORE_ROADMAP.md B5: a heightmap-backed map (see B4 - none of the 8
-	# bundled maps set terrain.heightmap yet, so this whole branch is dead
-	# code for every map that exists today) samples REAL corner heights and
-	# REJECTS any cell whose slope exceeds MAX_WALKABLE_SLOPE - a cliff or
-	# ravine wall becomes a genuine navmesh hole, not just a Y-snap visual.
-	# This is deliberately NOT extended to elevation_zones maps: this
-	# function's own header comment documents two real regressions from
-	# feeding continuous height into the navmesh SOURCE geometry (10+
-	# second Recast bakes, broken ramp-to-plateau connectivity) - both were
-	# about the expensive noise+hill/blob loop stack and the discrete ramp-
-	# geometry special case, neither of which applies to an O(1) heightmap
-	# image lookup with no separate ramp geometry at all. Once B6 migrates
-	# a real map onto a heightmap, this is the path it exercises; until
-	# then elevation_zones maps keep the exact flat-navmesh behavior below.
 	var heightmap_img = _get_heightmap_image(map_def)
 
 	var x = -half
@@ -573,37 +393,22 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
 			z = z1
 		x = x1
-
-	for e in map_def.get("elevation_zones", []):
-		var c: Vector3 = e.center
-		var he: Vector2 = e.half_extents
-		var h: float = e.height
-		_add_nav_quad(verts,
-			Vector3(c.x - he.x, h, c.z - he.y), Vector3(c.x + he.x, h, c.z - he.y),
-			Vector3(c.x + he.x, h, c.z + he.y), Vector3(c.x - he.x, h, c.z + he.y))
-		var rg = _ramp_geometry(e, half)
-		for q in _ramp_quads(rg, h):
-			_add_nav_quad(verts, q[0], q[1], q[2], q[3])
 	return verts
 
 # Same grid-quad sweep as _build_ground_faces(), but water is walkable
-# terrain here instead of a hole - only real obstacles and elevation-zone
-# footprints block it. This is what makes screw_drive locomotion (the
-# amphibious auger-drum type) genuinely different from a plain ground
-# unit: it can path straight across a lake in one continuous route instead
-# of being confined to ground_nav_map like every other ground/legged type.
-# water_blobs are deliberately NOT excluded here either, for the same
-# reason water_areas never was - amphibious units cross water freely.
+# terrain here instead of a hole - only real obstacles block it. This is
+# what makes screw_drive locomotion (the amphibious auger-drum type)
+# genuinely different from a plain ground unit: it can path straight
+# across a lake in one continuous route instead of being confined to
+# ground_nav_map like every other ground/legged type. water_blobs are
+# deliberately NOT excluded here either, for the same reason water_areas
+# never was - amphibious units cross water freely.
 static func _build_amphibious_faces(map_def: Dictionary) -> PackedVector3Array:
 	var verts = PackedVector3Array()
 	var half: float = map_def.get("map_half_extents", 80.0)
 	var holes = []
 	for o in map_def.get("obstacles", []):
 		holes.append(_rect_from(o.center, o.half_extents))
-	for e in map_def.get("elevation_zones", []):
-		holes.append(_rect_from(e.center, e.half_extents))
-		var rg = _ramp_geometry(e, half)
-		holes.append({"x0": rg.x0, "x1": rg.x1, "z0": rg.z0, "z1": rg.z1})
 
 	var x = -half
 	while x < half:
@@ -620,17 +425,6 @@ static func _build_amphibious_faces(map_def: Dictionary) -> PackedVector3Array:
 				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
 			z = z1
 		x = x1
-
-	for e in map_def.get("elevation_zones", []):
-		var c: Vector3 = e.center
-		var he: Vector2 = e.half_extents
-		var h: float = e.height
-		_add_nav_quad(verts,
-			Vector3(c.x - he.x, h, c.z - he.y), Vector3(c.x + he.x, h, c.z - he.y),
-			Vector3(c.x + he.x, h, c.z + he.y), Vector3(c.x - he.x, h, c.z + he.y))
-		var rg = _ramp_geometry(e, half)
-		for q in _ramp_quads(rg, h):
-			_add_nav_quad(verts, q[0], q[1], q[2], q[3])
 	return verts
 
 # Deep-draught-only water: the same water_areas footprint as water_map,
@@ -727,15 +521,12 @@ static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 # --- Visuals ---
 
 static func spawn_visuals(map_def: Dictionary, parent: Node3D):
-	var half: float = map_def.get("map_half_extents", 80.0)
 	for w in map_def.get("water_areas", []):
 		_spawn_water_plane(w, parent)
 	for blob in map_def.get("water_blobs", []):
 		_spawn_water_blob(blob, parent)
 	for o in map_def.get("obstacles", []):
 		_spawn_obstacle(o, parent)
-	for e in map_def.get("elevation_zones", []):
-		_spawn_elevation_zone(e, parent, half)
 	for s in map_def.get("surface_zones", []):
 		_spawn_surface_zone(s, parent)
 	for sw in map_def.get("shallow_water_areas", []):
@@ -1099,41 +890,6 @@ static func _spawn_building_obstacle(obstacle: Dictionary, parent: Node3D) -> fl
 			window.global_position = Vector3(wx, wy, obstacle.center.z + obstacle.half_extents.y + 0.03)
 	return height
 
-static func _spawn_elevation_zone(zone: Dictionary, parent: Node3D, half: float):
-	var c: Vector3 = zone.center
-	var he: Vector2 = zone.half_extents
-	var h: float = zone.height
-
-	var plateau = MeshInstance3D.new()
-	var box = BoxMesh.new()
-	box.size = Vector3(he.x * 2.0, h, he.y * 2.0)
-	plateau.mesh = box
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.42, 0.38, 0.3)
-	mat.roughness = 0.85
-	plateau.material_override = mat
-	parent.add_child(plateau)
-	plateau.global_position = Vector3(c.x, h / 2.0, c.z)
-
-	# Ramp visual: just the true sloped quad (not the flat navmesh-only
-	# apron beyond it, which is already flush with the surrounding ground
-	# and needs no distinct visual) - built from the same corners the
-	# navmesh uses, so what a player sees lines up with where units walk.
-	var rg = _ramp_geometry(zone, half)
-	var slope_quad = _ramp_quads(rg, h)[0]
-	var st = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	st.add_vertex(slope_quad[0]); st.add_vertex(slope_quad[1]); st.add_vertex(slope_quad[2])
-	st.add_vertex(slope_quad[0]); st.add_vertex(slope_quad[2]); st.add_vertex(slope_quad[3])
-	st.generate_normals()
-	var ramp_mesh_inst = MeshInstance3D.new()
-	ramp_mesh_inst.mesh = st.commit()
-	var ramp_mat = StandardMaterial3D.new()
-	ramp_mat.albedo_color = Color(0.38, 0.35, 0.28)
-	ramp_mat.roughness = 0.9
-	ramp_mesh_inst.material_override = ramp_mat
-	parent.add_child(ramp_mesh_inst)
-
 # A raised deck spanning the bridge's full footprint (real geometry, not
 # just a color patch - it's the visual proof the navmesh carve-out actually
 # corresponds to a walkable structure) plus two low guard-rail strips along
@@ -1257,32 +1013,18 @@ static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D):
 # to real elevation differences without needing their own map awareness -
 # they just compare whatever Y values units/buildings already carry.
 static func terrain_height_at(map_def: Dictionary, pos: Vector3) -> float:
-	var half: float = map_def.get("map_half_extents", 80.0)
-	for e in map_def.get("elevation_zones", []):
-		if _point_in_rect(pos, _rect_from(e.center, e.half_extents)):
-			return e.height
-		var rg = _ramp_geometry(e, half)
-		var ramp_rect = {"x0": rg.x0, "x1": rg.x1, "z0": rg.z0, "z1": rg.z1}
-		if _point_in_rect(pos, ramp_rect):
-			var coord = pos.z if rg.axis == "z" else pos.x
-			var span = rg.outer - rg.inner
-			var t = 1.0
-			if span != 0.0:
-				t = 1.0 - clamp((coord - rg.inner) / span, 0.0, 1.0)
-			return e.height * clamp(t, 0.0, 1.0)
 	for b in map_def.get("bridges", []):
 		if _point_in_rect(pos, _rect_from(b.center, b.half_extents)):
 			return b.get("deck_height", BRIDGE_DECK_HEIGHT)
-	# Real continuous terrain (noise + any authored hills/water_blobs) for
-	# everywhere the old rect-based special cases above don't apply - see
-	# height_at()'s own header comment. Falls back to a flat 0.0 baseline
-	# automatically wherever a map defines none of those (unmigrated maps
-	# get only the small noise ripple).
+	# Real continuous terrain (noise + any authored hills/water_blobs, or a
+	# real heightmap - see height_at()'s own header comment) for everywhere
+	# a bridge deck doesn't apply.
 	return height_at(map_def, pos.x, pos.z)
 
-# Water, obstacles, and ramp slopes are all "can't stand/build here" -
-# a plateau's flat TOP is deliberately excluded (legitimate, valuable
-# buildable high ground - the whole point of holding it).
+# Water, obstacles, and (on a heightmap-backed map) steep slopes are all
+# "can't stand/build here" - a plateau's flat TOP is deliberately walkable
+# (legitimate, valuable buildable high ground - the whole point of holding
+# it), only the slope leading up to it can exceed MAX_WALKABLE_SLOPE.
 # Surface terrain type at a point ("" if not inside any surface_zones entry -
 # plain ground). Purely a speed-multiplier lookup (see ModuleCatalog.
 # get_terrain_speed_multiplier()) consulted every physics tick by
@@ -1311,17 +1053,11 @@ static func get_surface_type_at(map_def: Dictionary, pos: Vector3) -> String:
 	return ""
 
 static func is_position_blocked(map_def: Dictionary, pos: Vector3) -> bool:
-	var half: float = map_def.get("map_half_extents", 80.0)
 	for w in map_def.get("water_areas", []):
 		if _point_in_rect(pos, _rect_from(w.center, w.half_extents)):
 			return true
 	for o in map_def.get("obstacles", []):
 		if _point_in_rect(pos, _rect_from(o.center, o.half_extents)):
-			return true
-	for e in map_def.get("elevation_zones", []):
-		var rg = _ramp_geometry(e, half)
-		var ramp_rect = {"x0": rg.x0, "x1": rg.x1, "z0": rg.z0, "z1": rg.z1}
-		if _point_in_rect(pos, ramp_rect):
 			return true
 	for blob in map_def.get("water_blobs", []):
 		if _point_in_water_blob(blob, pos.x, pos.z):
