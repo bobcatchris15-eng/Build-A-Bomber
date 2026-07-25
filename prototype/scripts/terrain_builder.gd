@@ -108,6 +108,109 @@ static func _get_noise(map_def: Dictionary) -> FastNoiseLite:
 	_noise_cache[key] = n
 	return n
 
+# --- Heightmap-backed elevation (RTS_CORE_ROADMAP.md B4) ---
+#
+# tools/terrain/build_terrain.py's counterpart: bilinear-samples the
+# 16-bit heightmap PNG a map's "terrain" block points at, instead of the
+# noise+hills+water_blobs analytic path above. Deliberately FLAG-GATED
+# (only engages when map_def.terrain.heightmap is actually set) per the
+# roadmap's own risk note - no existing map authors terrain data yet
+# (same "no map uses this yet" situation hills/water_blobs were in before
+# this pass), so every one of the 8 bundled maps is byte-for-byte
+# unaffected until B6 migrates them off elevation_zones.
+#
+# Encoding MUST exactly mirror build_terrain.py's encode_heightmap():
+# normalized = pixel / 32767.5 - 1.0 (range [-1, 1]), world height =
+# normalized * height_scale. Pixel (px, pz) <-> world (px - half, pz -
+# half) at 1 pixel/world-unit (PIXELS_PER_UNIT in the Python script).
+const HEIGHT_PIXEL_HALF_RANGE: float = 32767.5
+
+static var _heightmap_cache: Dictionary = {}
+static var _surfacemap_cache: Dictionary = {}
+
+# null (not false) signals "no heightmap for this map" vs. "load failed" -
+# both fall back to the old analytic path identically, but a null cache
+# entry lets a failed load be retried instead of permanently wedged.
+static func _get_heightmap_image(map_def: Dictionary) -> Image:
+	var terrain: Dictionary = map_def.get("terrain", {})
+	var path: String = terrain.get("heightmap", "")
+	if path == "":
+		return null
+	if _heightmap_cache.has(path):
+		return _heightmap_cache[path]
+	var img = Image.load_from_file(path)
+	_heightmap_cache[path] = img # caches the null on failure too - avoids re-attempting a broken path every single tick
+	return img
+
+static func _get_surfacemap_image(map_def: Dictionary) -> Image:
+	var terrain: Dictionary = map_def.get("terrain", {})
+	var path: String = terrain.get("surfacemap", "")
+	if path == "":
+		return null
+	if _surfacemap_cache.has(path):
+		return _surfacemap_cache[path]
+	var img = Image.load_from_file(path)
+	_surfacemap_cache[path] = img
+	return img
+
+# Test-only: forces the next _get_heightmap_image()/_get_surfacemap_image()
+# call to reload from disk instead of reusing a cached Image - production
+# never needs this (a map's heightmap is static for the process lifetime),
+# but the automated suite runs everything in one process.
+static func reset_heightmap_cache_for_tests() -> void:
+	_heightmap_cache = {}
+	_surfacemap_cache = {}
+
+# Clamped addressing at the edges (roadmap's own noted risk: without this,
+# a unit standing exactly on the map boundary would sample past the image
+# and jitter) - matches Image's own get_pixel() bounds, just done manually
+# since bilinear needs the 4 neighbor pixels, one of which can be
+# out-of-bounds by exactly 1 at the extreme edge.
+static func _sample_heightmap_bilinear(img: Image, half_extents: float, x: float, z: float) -> float:
+	var dim = img.get_width()
+	# World -> pixel space (float, sub-pixel precision for the bilinear lerp).
+	var fx = clamp(x + half_extents, 0.0, float(dim - 1))
+	var fz = clamp(z + half_extents, 0.0, float(dim - 1))
+	var x0 = int(floor(fx))
+	var z0 = int(floor(fz))
+	var x1 = min(x0 + 1, dim - 1)
+	var z1 = min(z0 + 1, dim - 1)
+	var tx = fx - x0
+	var tz = fz - z0
+
+	var h00 = _decode_heightmap_pixel(img.get_pixel(x0, z0))
+	var h10 = _decode_heightmap_pixel(img.get_pixel(x1, z0))
+	var h01 = _decode_heightmap_pixel(img.get_pixel(x0, z1))
+	var h11 = _decode_heightmap_pixel(img.get_pixel(x1, z1))
+	var h0 = lerp(h00, h10, tx)
+	var h1 = lerp(h01, h11, tx)
+	return lerp(h0, h1, tz)
+
+# build_terrain.py packs the 16-bit pixel value into R (high byte) + G (low
+# byte) of an ordinary RGBA8 PNG - Godot's Image.load_from_file() does NOT
+# reliably preserve a true 16-bit-grayscale PNG (verified empirically: it
+# silently collapsed to 8-bit with every pixel saturating to 1.0), so this
+# is the standard byte-split workaround, not the naive single-channel read.
+static func _decode_heightmap_pixel(color: Color) -> float:
+	var high_byte = round(color.r * 255.0)
+	var low_byte = round(color.g * 255.0)
+	var pixel16 = high_byte * 256.0 + low_byte
+	return pixel16 / HEIGHT_PIXEL_HALF_RANGE - 1.0
+
+# Nearest-sample (not bilinear - a surface TYPE can't be interpolated)
+# palette index -> name. Must match build_terrain.py's SURFACE_PALETTE
+# order exactly.
+const SURFACE_PALETTE: Array = ["", "marsh", "rocky", "snow_mud", "sand"]
+
+static func _sample_surfacemap(img: Image, half_extents: float, x: float, z: float) -> String:
+	var dim = img.get_width()
+	var px = int(round(clamp(x + half_extents, 0.0, float(dim - 1))))
+	var pz = int(round(clamp(z + half_extents, 0.0, float(dim - 1))))
+	var index = int(round(img.get_pixel(px, pz).r * 255.0))
+	if index < 0 or index >= SURFACE_PALETTE.size():
+		return ""
+	return SURFACE_PALETTE[index]
+
 static func _hill_contribution(hill: Dictionary, x: float, z: float) -> float:
 	var c: Vector3 = hill.center
 	var dist = Vector2(x - c.x, z - c.z).length()
@@ -184,6 +287,18 @@ static func _near_elevation_zone(map_def: Dictionary, x: float, z: float, margin
 # terrain_height_at() below still owns that logic entirely, falling back to
 # this function only where none of those apply.
 static func height_at(map_def: Dictionary, x: float, z: float) -> float:
+	# RTS_CORE_ROADMAP.md B4: a real heightmap FULLY REPLACES the analytic
+	# noise+hills+water_blobs path below (not layered on top of it - a map
+	# authoring real terrain.features doesn't also want procedural noise
+	# added in). Flag-gated on map_def.terrain.heightmap actually being set:
+	# none of the 8 bundled maps do yet (B6 migrates them), so this is dead
+	# code for every map that exists today.
+	var heightmap_img = _get_heightmap_image(map_def)
+	if heightmap_img:
+		var half: float = map_def.get("map_half_extents", 80.0)
+		var height_scale: float = map_def.get("terrain", {}).get("height_scale", 20.0)
+		return _sample_heightmap_bilinear(heightmap_img, half, x, z) * height_scale
+
 	var h = 0.0
 	if not _near_elevation_zone(map_def, x, z, GRID_CELL):
 		h = _get_noise(map_def).get_noise_2d(x, z) * GROUND_NOISE_AMPLITUDE
@@ -1150,6 +1265,17 @@ static func terrain_height_at(map_def: Dictionary, pos: Vector3) -> float:
 # overlapping in practice; not worth a more elaborate blend for a cosmetic-
 # adjacent terrain-flavor system).
 static func get_surface_type_at(map_def: Dictionary, pos: Vector3) -> String:
+	# RTS_CORE_ROADMAP.md B4: a surfacemap FULLY REPLACES the rect
+	# surface_zones lookup below (build_terrain.py bakes surface_zones
+	# INTO the surfacemap at generation time - see its build_surfacemap(),
+	# same first-listed-wins overlap rule - so this isn't a second,
+	# divergent source of truth once a map actually has one). Flag-gated:
+	# none of the 8 bundled maps set terrain.surfacemap yet.
+	var surfacemap_img = _get_surfacemap_image(map_def)
+	if surfacemap_img:
+		var half: float = map_def.get("map_half_extents", 80.0)
+		return _sample_surfacemap(surfacemap_img, half, pos.x, pos.z)
+
 	for z in map_def.get("surface_zones", []):
 		if _point_in_rect(pos, _rect_from(z.center, z.half_extents)):
 			return z.get("surface_type", "")
@@ -1171,6 +1297,10 @@ static func is_position_blocked(map_def: Dictionary, pos: Vector3) -> bool:
 	for blob in map_def.get("water_blobs", []):
 		if _point_in_water_blob(blob, pos.x, pos.z):
 			return true
-	if not map_def.get("hills", []).is_empty() and _slope_at(map_def, pos.x, pos.z) > MAX_WALKABLE_SLOPE:
+	# RTS_CORE_ROADMAP.md B4: a heightmap makes slope-blocking meaningful
+	# everywhere, not just near authored hills (_slope_at() calls
+	# height_at(), which already checks the heightmap first internally).
+	var has_heightmap = _get_heightmap_image(map_def) != null
+	if (has_heightmap or not map_def.get("hills", []).is_empty()) and _slope_at(map_def, pos.x, pos.z) > MAX_WALKABLE_SLOPE:
 		return true
 	return false

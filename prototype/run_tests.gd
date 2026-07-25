@@ -142,6 +142,8 @@ func _init():
 	success = success and await test_b2_n_player_slots_alliance_fog_repair_and_independent_resources()
 	success = success and await test_b3_maps_are_json_and_byte_identical_to_the_old_const()
 	success = success and await test_b3_hand_broken_json_map_hard_fails_with_a_useful_message()
+	success = success and await test_b4_heightmap_terrain_pure_functions()
+	success = success and await test_b4_heightmap_leaves_unmigrated_maps_untouched()
 	success = success and await test_2d_ui_chrome_overhaul()
 	success = success and await test_audio_system()
 
@@ -8311,6 +8313,92 @@ func test_b3_hand_broken_json_map_hard_fails_with_a_useful_message() -> bool:
 		return false
 
 	print("  [PASS] A hand-broken map JSON (missing a required field, plus an unknown key) is rejected - never enters the catalog - with a specific, useful error naming the file and the missing field.")
+	return true
+
+func test_b4_heightmap_terrain_pure_functions() -> bool:
+	print("Running Test Suite: Heightmap-Backed Terrain - Pure Functions (RTS_CORE_ROADMAP.md B4)...")
+
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	TerrainBuilderScript.reset_heightmap_cache_for_tests()
+
+	var file = FileAccess.open("res://data/test_fixtures/terrain/test_terrain.json", FileAccess.READ)
+	if not file:
+		print("  [FAIL] Could not open the B4 test fixture map.")
+		return false
+	var json = JSON.new()
+	if json.parse(file.get_as_text()) != OK:
+		print("  [FAIL] B4 test fixture map failed to parse as JSON.")
+		return false
+	file.close()
+	# The fixture's terrain.features (hill/basin/plateau/ridge/ravine/
+	# escarpment/cliff, laid out with clean spatial separation so no two
+	# features' falloff zones overlap and stack) was generated via:
+	#   python tools/terrain/build_terrain.py data/test_fixtures/terrain/test_terrain.json
+	var map_def: Dictionary = json.get_data()
+
+	# A known ravine (center [10,-35], width 4, depth 8) samples lower at
+	# its center than at its rim (just past the half-width, still inside
+	# the falloff transition) and near-flat well outside it.
+	var ravine_center = TerrainBuilderScript.height_at(map_def, 10.0, -35.0)
+	var ravine_rim = TerrainBuilderScript.height_at(map_def, 13.0, -35.0)
+	var ravine_far = TerrainBuilderScript.height_at(map_def, 30.0, -35.0)
+	if not (ravine_center < ravine_rim and ravine_rim < ravine_far + 0.5):
+		print("  [FAIL] Ravine should sample lowest at its center, less low at its rim, near-flat outside it. Got center=", ravine_center, " rim=", ravine_rim, " far=", ravine_far)
+		return false
+
+	# A known escarpment (line at x=40, height 18, falloff 4, high side
+	# x>40) has its steepest slope AT the transition (x=40) - should
+	# exceed MAX_WALKABLE_SLOPE and therefore be blocked.
+	if not TerrainBuilderScript.is_position_blocked(map_def, Vector3(40.0, 0.0, 0.0)):
+		print("  [FAIL] The escarpment's steep transition should exceed MAX_WALKABLE_SLOPE and be blocked.")
+		return false
+	# Well clear of any feature, flat ground should NOT be blocked by slope.
+	if TerrainBuilderScript.is_position_blocked(map_def, Vector3(-55.0, 0.0, 55.0)):
+		print("  [FAIL] Flat ground far from every feature should not be slope-blocked.")
+		return false
+
+	# Bilinear sampling AT a pixel center (an exact integer world
+	# coordinate, since the generator uses 1 pixel/world-unit) must match
+	# the source PNG's own stored value exactly - not just approximately,
+	# since tx=tz=0 there and the lerp is mathematically a no-op.
+	var height_img = Image.load_from_file("res://data/test_fixtures/terrain/test_terrain_height.png")
+	if not height_img:
+		print("  [FAIL] Could not load the B4 test fixture heightmap PNG directly.")
+		return false
+	var half = map_def.map_half_extents
+	var height_scale = map_def.terrain.height_scale
+	for test_point in [Vector2(-40, -40), Vector2(-10, -35), Vector2(40, 0), Vector2(0, 0)]:
+		var px = int(round(test_point.x + half))
+		var pz = int(round(test_point.y + half))
+		var direct_pixel_height = TerrainBuilderScript._decode_heightmap_pixel(height_img.get_pixel(px, pz)) * height_scale
+		var via_height_at = TerrainBuilderScript.height_at(map_def, test_point.x, test_point.y)
+		if abs(direct_pixel_height - via_height_at) > 0.0001:
+			print("  [FAIL] Bilinear sample at pixel-exact coordinate ", test_point, " should match the source PNG's own pixel exactly. Direct=", direct_pixel_height, " via height_at()=", via_height_at)
+			return false
+
+	print("  [PASS] Ravine samples lowest at center; escarpment transition is slope-blocked while flat ground isn't; bilinear sampling at pixel centers matches the source PNG exactly.")
+	return true
+
+func test_b4_heightmap_leaves_unmigrated_maps_untouched() -> bool:
+	print("Running Test Suite: Heightmap-Backed Terrain - Flag-Gated, Unmigrated Maps Untouched (RTS_CORE_ROADMAP.md B4)...")
+
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	TerrainBuilderScript.reset_heightmap_cache_for_tests()
+
+	# None of the 8 bundled maps author terrain.heightmap yet (B6's job) -
+	# confirm the flag gate genuinely stays dormant for real map data,
+	# not just for the synthetic fixture that deliberately sets it.
+	for map_id in MapCatalogScript.get_map_ids():
+		var map_def = MapCatalogScript.get_map(map_id)
+		if TerrainBuilderScript._get_heightmap_image(map_def) != null:
+			print("  [FAIL] Map '", map_id, "' should have no heightmap image (none of the 8 bundled maps author terrain.heightmap), but one loaded.")
+			return false
+		if TerrainBuilderScript._get_surfacemap_image(map_def) != null:
+			print("  [FAIL] Map '", map_id, "' should have no surfacemap image, but one loaded.")
+			return false
+
+	print("  [PASS] All 8 bundled maps correctly have no heightmap/surfacemap - the B4 flag gate stays dormant until B6 migrates real map data onto it.")
 	return true
 
 func test_2d_ui_chrome_overhaul() -> bool:

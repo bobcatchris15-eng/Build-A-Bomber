@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-25 — RTS_CORE_ROADMAP.md B4: Python terrain generator + heightmap-backed elevation (the keystone chunk)
+
+The roadmap's own largest single investment. New `tools/terrain/build_terrain.py` (plain Python + numpy + Pillow, no Blender/Godot dependency, mirroring `tools/blender/build_meshes.py`'s role) turns a map's `terrain.features` list - high-level, diffable, seeded primitives (`hill`, `basin`, `plateau`, `ridge`, `ravine`, `escarpment`, `cliff`) - into a heightmap + surfacemap PNG pair.
+
+**Shipped:**
+- 7 feature types, numpy-vectorized: `hill`/`basin` (radial smoothstep bump/dip, same math as the existing GDScript analytic `hills` primitive), `plateau` (rectangular flat-top with a rounded falloff ring), `ridge`/`ravine` (the same bump/dip swept along a line segment via point-to-segment distance), `escarpment` (a true two-sided step via signed distance to the infinite line - one side high, one low, blended over `falloff`), `cliff` (escarpment with a forced near-zero transition - the hard-wall version).
+- **Real encoding bug caught before it shipped**: originally planned a 16-bit grayscale PNG per the roadmap's own wording, but empirically verified Godot's `Image.load_from_file()` does NOT reliably preserve 16-bit-grayscale PNGs - it silently collapsed to 8-bit with every pixel saturating to 1.0. Switched to the standard workaround: the 16-bit value packed across the R (high byte) + G (low byte) channels of an ordinary RGBA8 PNG. Caught by testing the actual Godot-side load path before wiring any runtime code against it, not by trusting the spec's stated format.
+- Runtime (`terrain_builder.gd`): `height_at()`/`get_surface_type_at()`/`is_position_blocked()` each gained a bilinear-sample (nearest-sample for surface type) path against the cached heightmap/surfacemap `Image`, with clamped addressing at map edges. **Deliberately flag-gated** exactly as the roadmap's own risk note asks - engages only when a map's `terrain.heightmap`/`terrain.surfacemap` is actually set, which none of the 8 bundled maps do yet (B6 migrates real maps off `elevation_zones` later). The old noise+hills+water_blobs analytic path is completely untouched for every map that exists today.
+- `MapCatalog.FIELD_SPEC`'s `terrain` entry fleshed out (`heightmap`/`surfacemap`/`height_scale`/`features`) - `features` deliberately left shallow (no per-type validation) since it's a discriminated union B1's single-shape validator engine doesn't model; `build_terrain.py` itself raises a clear error on an unknown feature type or missing param.
+
+**Verified:**
+- Determinism: regenerated the test fixture's heightmap+surfacemap twice, byte-identical (`cmp`).
+- Analytic correctness checked directly in Python before ever touching GDScript: each feature type sampled at its own center/rim/far-away matches hand-computed expected values (ravine ~-8 at center vs. ~0 far away, escarpment step ~0 -> ~18, etc.) - caught and fixed a bad first test-fixture layout where the escarpment/cliff (which span the full Z range) blanketed the hill/basin/plateau region entirely, a fixture design bug, not a generator bug.
+- New tests `test_b4_heightmap_terrain_pure_functions()` (ravine lower at center than rim; escarpment transition point is genuinely slope-blocked via `is_position_blocked()`; bilinear sampling at an exact pixel-center world coordinate matches the source PNG's own stored value to within 1e-4) and `test_b4_heightmap_leaves_unmigrated_maps_untouched()` (all 8 bundled maps confirmed to have no heightmap/surfacemap loaded - the flag gate is genuinely dormant, not just assumed to be).
+- Non-headless screenshot of a real built terrain mesh (`build_ground_visual_mesh()`, unmodified - it already calls `height_at()` per vertex, so the heightmap path works transparently) showing all 7 feature types as distinct, correctly-shaped 3D geometry in one shot.
+
+**Also fixed along the way (unrelated to B4, user-reported):** the Godot editor was locking up importing a newly-generated building GLB. Diagnosis: all 5 building GLBs (hq/light/medium/heavy_manufactory, refinery) were raw, undecimated TripoSG marching-cubes output - 900K-2.5M vertices each (30-73MB) vs. 3-90KB for every other GLB in the project. Used the project's own bundled UPBGE/Blender install to decimate; `medium_manufactory`/`refinery` fixed cleanly (~6000 tris, ~465KB, visually verified). `hq`/`light`/`heavy_manufactory` decimated into noisy fragments instead (their raw geometry has more scattered disconnected noise than a straight decimate handles) and were left at original size for now - slower to import but visually correct, which resolved the reported freeze. See the dedicated commit for the "keep the largest connected mesh island first" follow-up attempt.
+
+---
+
 ## 2026-07-24 — RTS_CORE_ROADMAP.md B3: `const MAPS` → `res://data/maps/*.json`
 
 Pure format migration per the roadmap's own scope - byte-identical behavior, no map content/terrain changes (those start at B4). Chris flagged up front that the real goal is "bigger, more playable maps," and B3 is explicitly just the plumbing those later chunks (B4 Python heightmap generator, B5 slope-aware navmesh, B8 bigger/denser maps) need first.

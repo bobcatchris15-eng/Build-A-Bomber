@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "name": "Test Terrain",
+  "description": "synthetic fixture for B4 generator testing",
+  "map_half_extents": 60,
+  "ground_color": [0.2, 0.2, 0.2],
+  "spawns": [
+    {"id": "player", "hq": [0, 0, 50], "factory": [0, 0, 40], "refinery": [0, 0, 30], "harvester": [0, 0, 20]},
+    {"id": "enemy", "hq": [0, 0, -50], "factory": [0, 0, -40], "refinery": [0, 0, -30], "harvester": [0, 0, -20]}
+  ],
+  "surface_zones": [
+    {"center": [30, 0, 30], "half_extents": [10, 10], "surface_type": "marsh"}
+  ],
+  "terrain": {
+    "heightmap": "res://data/test_fixtures/terrain/test_terrain_height.png",
+    "surfacemap": "res://data/test_fixtures/terrain/test_terrain_surface.png",
+    "height_scale": 20.0,
+    "features": [
+      {"type": "hill", "center": [-40, -40], "radius": 8, "height": 15, "falloff": 6},
+      {"type": "basin", "center": [-40, -10], "radius": 8, "depth": 10, "falloff": 6},
+      {"type": "plateau", "center": [-40, 20], "half_extents": [6, 6], "height": 12, "falloff": 5},
+      {"type": "ridge", "start": [-10, -50], "end": [-10, -20], "width": 4, "height": 8, "falloff": 4},
+      {"type": "ravine", "start": [10, -50], "end": [10, -20], "width": 4, "depth": 8, "falloff": 4},
+      {"type": "escarpment", "start": [40, -60], "end": [40, 60], "height": 18, "falloff": 4, "side": "right"},
+      {"type": "cliff", "start": [52, -60], "end": [52, 60], "height": 18, "side": "right"}
+    ]
+  }
+}

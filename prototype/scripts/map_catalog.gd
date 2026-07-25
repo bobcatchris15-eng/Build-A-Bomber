@@ -250,7 +250,21 @@ const FIELD_SPEC: Dictionary = {
 	# deeply validated, until something actually populates them.
 	"players": {"type": "array", "required": false},
 	"markers": {"type": "dictionary", "required": false},
-	"terrain": {"type": "dictionary", "required": false},
+	# RTS_CORE_ROADMAP.md B4: heightmap/surfacemap point at the PNGs
+	# tools/terrain/build_terrain.py generates (paths, not filename
+	# convention - see terrain_builder.gd's _get_heightmap_image()).
+	# "features" is deliberately NOT deep-validated here - it's a
+	# discriminated union (hill/basin/plateau/ridge/ravine/escarpment/
+	# cliff each have different required params), which this validator's
+	# single-shape-per-field engine doesn't model; build_terrain.py itself
+	# raises a clear error on an unknown type or missing param. Worth
+	# revisiting if/when B6 migrates real maps onto this.
+	"terrain": {"type": "dictionary", "required": false, "item": {
+		"heightmap": {"type": "string", "required": false},
+		"surfacemap": {"type": "string", "required": false},
+		"height_scale": {"type": "number", "required": false, "min": 0.01},
+		"features": {"type": "array", "required": false},
+	}},
 }
 
 # Returns an Array[String] of human-readable errors; empty = valid.
