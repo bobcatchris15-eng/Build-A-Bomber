@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://3fcpk5cyfsqu"
-path="res://.godot/imported/heavy_manufactory.glb-f27b1dff5f48753a5a484885382adbd4.scn"
+uid="uid://bte2iqdp237bi"
+path="res://.godot/imported/medium_manufactory.glb-77693584ca54638b422bd670d8c22395.scn"
 
 [deps]
 
-source_file="res://assets/models/buildings/heavy_manufactory.glb"
-dest_files=["res://.godot/imported/heavy_manufactory.glb-f27b1dff5f48753a5a484885382adbd4.scn"]
+source_file="res://assets/models/buildings/medium_manufactory.glb"
+dest_files=["res://.godot/imported/medium_manufactory.glb-77693584ca54638b422bd670d8c22395.scn"]
 
 [params]
 
