@@ -21,7 +21,7 @@ class_name HullGreebles
 
 const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
 
-const CARD_TEXTURE_SIZE: int = 48
+const CARD_TEXTURE_SIZE: int = 256
 static var _texture_cache: Dictionary = {}
 
 static func _get_cutout_texture(shape: String) -> ImageTexture:

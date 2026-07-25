@@ -42,7 +42,7 @@ extends SceneTree
 #   ./Godot_v4.3-stable_win64_console.exe --headless --script tools/generate_faction_textures.gd
 
 const OUT_DIR = "res://assets/textures/factions"
-const TEX_SIZE = 512
+const TEX_SIZE = 1024
 
 # panel_size/rivet_spacing must evenly divide TEX_SIZE (512) so the grid
 # wraps cleanly at the texture edge - each is a period, not raw pixels.
@@ -66,62 +66,92 @@ const FACTION_TEX_PARAMS = {
 	"industrialists": {
 		"seed": 101, "panel_size": 64, "seam_width_frac": 0.16, "panel_variance": 0.06,
 		"rivet_spacing": 32, "rivet_radius_frac": 0.22,
-		"grain_strength": 0.10, "corrosion_amount": 0.35, "streak_amount": 0.08,
+		"sub_rivet_spacing": 16, "sub_rivet_radius_frac": 0.10,
+		"grain_strength": 0.10, "fine_grain_strength": 0.04,
+		"corrosion_amount": 0.35, "streak_amount": 0.08,
 		"overlay_style": "", "overlay_amount": 0.0, "base_gray": 0.5, "trim_band": [0.42, 0.58],
+		"tint_color": Color(1.0, 0.92, 0.82),
 	},
 	"technocrats": {
 		"seed": 202, "panel_size": 32, "seam_width_frac": 0.08, "panel_variance": 0.02,
 		"rivet_spacing": 0, "rivet_radius_frac": 0.0,
-		"grain_strength": 0.03, "corrosion_amount": 0.02, "streak_amount": 0.25,
+		"sub_rivet_spacing": 0, "sub_rivet_radius_frac": 0.0,
+		"grain_strength": 0.03, "fine_grain_strength": 0.01,
+		"corrosion_amount": 0.02, "streak_amount": 0.25,
 		"overlay_style": "", "overlay_amount": 0.0, "base_gray": 0.5, "trim_band": [0.46, 0.54],
+		"tint_color": Color(0.88, 0.90, 1.0),
 	},
 	"expansionists": {
 		"seed": 303, "panel_size": 32, "seam_width_frac": 0.2, "panel_variance": 0.08,
 		"rivet_spacing": 64, "rivet_radius_frac": 0.24,
-		"grain_strength": 0.18, "corrosion_amount": 0.55, "streak_amount": 0.05,
+		"sub_rivet_spacing": 16, "sub_rivet_radius_frac": 0.08,
+		"grain_strength": 0.18, "fine_grain_strength": 0.06,
+		"corrosion_amount": 0.55, "streak_amount": 0.05,
 		"overlay_style": "", "overlay_amount": 0.0, "base_gray": 0.5, "trim_band": [0.4, 0.6],
+		"tint_color": Color(0.95, 0.88, 0.75),
 	},
 	"salvage_union": {
 		"seed": 404, "panel_size": 32, "seam_width_frac": 0.18, "panel_variance": 0.07,
 		"rivet_spacing": 32, "rivet_radius_frac": 0.2,
-		"grain_strength": 0.15, "corrosion_amount": 0.45, "streak_amount": 0.05,
+		"sub_rivet_spacing": 8, "sub_rivet_radius_frac": 0.06,
+		"grain_strength": 0.15, "fine_grain_strength": 0.08,
+		"corrosion_amount": 0.45, "streak_amount": 0.05,
 		"overlay_style": "patch", "overlay_amount": 0.7, "base_gray": 0.5, "trim_band": [0.38, 0.5],
+		"tint_color": Color(0.95, 0.88, 0.78),
 	},
 	"crimson_concordat": {
 		"seed": 505, "panel_size": 32, "seam_width_frac": 0.14, "panel_variance": 0.05,
 		"rivet_spacing": 64, "rivet_radius_frac": 0.2,
-		"grain_strength": 0.1, "corrosion_amount": 0.2, "streak_amount": 0.3,
+		"sub_rivet_spacing": 8, "sub_rivet_radius_frac": 0.08,
+		"grain_strength": 0.1, "fine_grain_strength": 0.03,
+		"corrosion_amount": 0.2, "streak_amount": 0.3,
 		"overlay_style": "", "overlay_amount": 0.0, "base_gray": 0.5, "trim_band": [0.44, 0.56],
+		"tint_color": Color(1.0, 0.85, 0.80),
 	},
 	"glacier_syndicate": {
 		"seed": 606, "panel_size": 32, "seam_width_frac": 0.1, "panel_variance": 0.03,
 		"rivet_spacing": 0, "rivet_radius_frac": 0.0,
-		"grain_strength": 0.05, "corrosion_amount": 0.03, "streak_amount": 0.25,
+		"sub_rivet_spacing": 0, "sub_rivet_radius_frac": 0.0,
+		"grain_strength": 0.05, "fine_grain_strength": 0.02,
+		"corrosion_amount": 0.03, "streak_amount": 0.25,
 		"overlay_style": "frost", "overlay_amount": 0.5, "base_gray": 0.5, "trim_band": [0.45, 0.55],
+		"tint_color": Color(0.85, 0.88, 1.0),
 	},
 	"dune_runners": {
 		"seed": 707, "panel_size": 32, "seam_width_frac": 0.14, "panel_variance": 0.06,
 		"rivet_spacing": 64, "rivet_radius_frac": 0.2,
-		"grain_strength": 0.2, "corrosion_amount": 0.5, "streak_amount": 0.05,
+		"sub_rivet_spacing": 16, "sub_rivet_radius_frac": 0.10,
+		"grain_strength": 0.2, "fine_grain_strength": 0.07,
+		"corrosion_amount": 0.5, "streak_amount": 0.05,
 		"overlay_style": "", "overlay_amount": 0.0, "base_gray": 0.5, "trim_band": [0.4, 0.6],
+		"tint_color": Color(1.0, 0.90, 0.72),
 	},
 	"ledger_combine": {
 		"seed": 808, "panel_size": 16, "seam_width_frac": 0.09, "panel_variance": 0.02,
 		"rivet_spacing": 0, "rivet_radius_frac": 0.0,
-		"grain_strength": 0.02, "corrosion_amount": 0.0, "streak_amount": 0.2,
+		"sub_rivet_spacing": 0, "sub_rivet_radius_frac": 0.0,
+		"grain_strength": 0.02, "fine_grain_strength": 0.01,
+		"corrosion_amount": 0.0, "streak_amount": 0.2,
 		"overlay_style": "", "overlay_amount": 0.0, "base_gray": 0.5, "trim_band": [0.47, 0.53],
+		"tint_color": Color(0.72, 0.78, 0.95),
 	},
 	"bayou_irregulars": {
 		"seed": 909, "panel_size": 64, "seam_width_frac": 0.14, "panel_variance": 0.06,
 		"rivet_spacing": 32, "rivet_radius_frac": 0.2,
-		"grain_strength": 0.15, "corrosion_amount": 0.35, "streak_amount": 0.05,
+		"sub_rivet_spacing": 8, "sub_rivet_radius_frac": 0.06,
+		"grain_strength": 0.15, "fine_grain_strength": 0.07,
+		"corrosion_amount": 0.35, "streak_amount": 0.05,
 		"overlay_style": "blotch", "overlay_amount": 0.55, "base_gray": 0.5, "trim_band": [0.4, 0.55],
+		"tint_color": Color(0.88, 0.90, 0.78),
 	},
 	"aerodrome_cartel": {
 		"seed": 1010, "panel_size": 32, "seam_width_frac": 0.14, "panel_variance": 0.04,
 		"rivet_spacing": 16, "rivet_radius_frac": 0.22,
-		"grain_strength": 0.08, "corrosion_amount": 0.12, "streak_amount": 0.3,
+		"sub_rivet_spacing": 8, "sub_rivet_radius_frac": 0.08,
+		"grain_strength": 0.08, "fine_grain_strength": 0.03,
+		"corrosion_amount": 0.12, "streak_amount": 0.3,
 		"overlay_style": "", "overlay_amount": 0.0, "base_gray": 0.5, "trim_band": [0.43, 0.57],
+		"tint_color": Color(0.98, 0.92, 0.82),
 	},
 }
 
@@ -215,6 +245,31 @@ static func _eval_surface(x: int, y: int, p: Dictionary) -> Dictionary:
 		var shadow_dist = sqrt(shadow_dx * shadow_dx + shadow_dy * shadow_dy)
 		var shadow_mask = clamp(1.0 - shadow_dist / (rivet_radius * 0.85), 0.0, 1.0) * (1.0 - rivet_mask)
 		albedo -= shadow_mask * 0.35
+
+	# Sub-rivets: smaller secondary fasteners for richer detail at higher
+	# texture resolution (1024 vs the original 512). Spaced tighter and
+	# subtler than the primary rivets - reads as smaller bolt heads on
+	# panel edging or access-hatch fasteners rather than primary structure.
+	if p.sub_rivet_spacing > 0:
+		var sub_rivet_radius = p.sub_rivet_spacing * p.sub_rivet_radius_frac
+		var srx = x % p.sub_rivet_spacing
+		var sry = y % p.sub_rivet_spacing
+		var sdx = min(srx, p.sub_rivet_spacing - srx)
+		var sdy = min(sry, p.sub_rivet_spacing - sry)
+		var sub_dist = sqrt(float(sdx * sdx + sdy * sdy))
+		var sub_mask = clamp(1.0 - sub_dist / max(sub_rivet_radius, 0.1), 0.0, 1.0)
+		albedo += sub_mask * 0.18
+		height += sub_mask * 0.8
+		roughness -= sub_mask * 0.12
+
+	# Fine grain: high-frequency isotropic noise for micro-surface texture
+	# (sandblasted/etched finish) that only resolves at 1024. Adds subtle
+	# sparkle that breaks up flat panel interiors without competing with
+	# the primary grain or streak systems.
+	if p.fine_grain_strength > 0.0:
+		var fine_grain = _periodic_noise2d(float(x) / 3.0, float(y) / 3.0, TEX_SIZE / 3, p.seed + 10) - 0.5
+		albedo += fine_grain * p.fine_grain_strength
+		roughness += abs(fine_grain) * p.fine_grain_strength * 0.2
 
 	# Fine grain (isotropic noise) - breaks up flatness on every faction.
 	var grain = _periodic_noise2d(float(x) / 8.0, float(y) / 8.0, TEX_SIZE / 8, seed + 1) - 0.5
@@ -322,7 +377,22 @@ func _generate_faction_textures(faction_id: String, params: Dictionary):
 			var ndotl = n.dot(light_dir)
 			var shade = clamp(0.35 + (ndotl * 0.5 + 0.5) * 1.35, 0.3, 1.7)
 			var final_albedo = clamp(raw_albedo_field[y * TEX_SIZE + x] * shade, 0.0, 1.0)
-			albedo_img.set_pixel(x, y, Color(final_albedo, final_albedo, final_albedo))
+			# Per-faction texture tint: a subtle hue bias baked into the
+			# otherwise-grayscale texture so faction panel surfaces carry a
+			# faint secondary hue that the runtime shader's multiply
+			# modulation (`tex_albedo * 2.0`) layers on top of base_color/
+			# accent_color. 12% is deliberately subtle - strong enough to add
+			# visual richness, subtle enough that the faction's own
+			# base_color (which dominates the armor surfaces) is never
+			# fought by a competing hue baked into the texture. The tint is
+			# encoded as a multiplier (lerp toward tint_color from white),
+			# not an additive blend, so baked shading (light/dark contrast
+			# on panel edges and rivet shadows) stays fully intact.
+			var tint = params.get("tint_color", Color.WHITE)
+			var tint_strength = 0.12
+			var tint_mult = Color(1.0, 1.0, 1.0).lerp(tint, tint_strength)
+			var final_color = Color(final_albedo, final_albedo, final_albedo) * tint_mult
+			albedo_img.set_pixel(x, y, final_color)
 
 	albedo_img.save_png(OUT_DIR + "/" + faction_id + "_albedo.png")
 	normal_img.save_png(OUT_DIR + "/" + faction_id + "_normal.png")

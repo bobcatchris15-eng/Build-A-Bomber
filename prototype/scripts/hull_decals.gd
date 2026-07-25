@@ -23,7 +23,7 @@ class_name HullDecals
 
 const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
 
-const DECAL_TEXTURE_SIZE: int = 48
+const DECAL_TEXTURE_SIZE: int = 256
 static var _texture_cache: Dictionary = {}
 
 static func _get_texture(key: String, draw_fn: Callable) -> ImageTexture:
@@ -65,10 +65,10 @@ const DIGIT_FONT = {
 }
 
 static func _draw_serial(img: Image, serial: String):
-	var scale = 3
+	var scale = 16
 	var digit_w = 3 * scale
 	var digit_h = 5 * scale
-	var gap = 2
+	var gap = 8
 	var total_w = serial.length() * digit_w + (serial.length() - 1) * gap
 	var start_x = (img.get_width() - total_w) / 2
 	var start_y = (img.get_height() - digit_h) / 2

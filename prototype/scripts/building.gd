@@ -8,6 +8,7 @@ signal unit_produced(unit)
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 
 const PREFAB_STATS = {
 	"hq":       {"hp": 3000.0, "size": Vector3(7, 4, 7),  "color": Color(0.75, 0.72, 0.55), "cost_metal": 0,   "cost_crystal": 0},
@@ -127,11 +128,22 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 		var box = BoxMesh.new()
 		box.size = stats.size
 		mesh_inst.mesh = box
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = stats.color if team == 0 else stats.color.lerp(Color(0.7, 0.2, 0.2), 0.45)
-		mesh_inst.material_override = mat
+		# Use the full faction shader pipeline (wear, grime, ink border,
+		# panel lines) instead of a flat StandardMaterial3D - buildings
+		# should read as faction-owned from the first frame, same as hulls.
+		HullMaterialBuilder.apply_hull_materials(mesh_inst, "hardened_steel", faction)
+		if team != 0:
+			var team_col = FactionCatalog.get_visual_color(faction).lerp(Color(0.85, 0.2, 0.2), 0.45)
+			var armor_mat = mesh_inst.get_surface_override_material(0)
+			if armor_mat is ShaderMaterial:
+				armor_mat.set_shader_parameter("base_color", team_col)
+				armor_mat.set_shader_parameter("accent_color", team_col.lightened(0.2))
 		mesh_inst.position = Vector3(0, stats.size.y / 2.0, 0)
 		add_child(mesh_inst)
+
+		# Decals on the fallback box hull — same hazard stripes, serial,
+		# and mascot icon that vehicle hulls get.
+		HullDecalsScript.apply_decals(mesh_inst, faction, stats.size * 1.5)
 
 		# Simple identifying rooftop detail so prefabs read differently at a glance
 		var detail = MeshInstance3D.new()
@@ -461,10 +473,11 @@ func _setup_building_glb_mesh(kind_str: String, stats: Dictionary) -> bool:
 	glb_inst.scale = scale_vec
 	glb_inst.position = Vector3(0, stats.size.y / 2.0, 0) - (aabb.position + aabb.size / 2.0) * scale_vec
 
-	var faction_color = FactionCatalog.get_visual_color(faction)
-	if team != 0:
-		faction_color = faction_color.lerp(Color(0.8, 0.2, 0.2), 0.45)
-	_apply_material_to_building_mesh(glb_inst, faction_color)
+	_apply_material_to_building_mesh(glb_inst)
+
+	# Decals on the authored building mesh — hazard stripes, serial
+	# stencil, and faction mascot, sized to the building's footprint.
+	HullDecalsScript.apply_decals(glb_inst, faction, stats.size * 1.5)
 
 	add_child(glb_inst)
 	return true
@@ -494,12 +507,13 @@ func _find_mesh_instances(node: Node, results: Array) -> void:
 	for child in node.get_children():
 		_find_mesh_instances(child, results)
 
-func _apply_material_to_building_mesh(node: Node, col: Color) -> void:
+func _apply_material_to_building_mesh(node: Node) -> void:
 	var mat = HullMaterialBuilder.build_hull_material(faction, armor_material)
 	if team != 0 and mat is ShaderMaterial:
 		var team_col = FactionCatalog.get_visual_color(faction).lerp(Color(0.85, 0.2, 0.2), 0.45)
-		mat.set_shader_parameter("faction_base_color", team_col)
+		mat.set_shader_parameter("base_color", team_col)
+		mat.set_shader_parameter("accent_color", team_col.lightened(0.2))
 	if node is MeshInstance3D:
 		node.material_override = mat
 	for child in node.get_children():
-		_apply_material_to_building_mesh(child, col)
+		_apply_material_to_building_mesh(child)
