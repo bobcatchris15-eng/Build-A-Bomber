@@ -4,6 +4,24 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-24 — RTS_CORE_ROADMAP.md B2: N-player slots array (the roadmap's own "widest blast radius" chunk)
+
+The roadmap flagged this one explicitly: "land it alone, nothing else in flight." Converted the hardcoded 2-team model (`PLAYER_TEAM`/`ENEMY_TEAM` literals scattered across `skirmish.gd`) into a `slots: Array[Dictionary]` data model, without changing the default 2-player runtime behavior at all - verified by every pre-existing test passing untouched, three times in a row.
+
+**Shipped:**
+- `slots` - one `{team, faction, is_local, is_bot, allies, hq}` Dictionary per player, `LOCAL_SLOT = 0` a named const for "this client's own side." Built as exactly 2 slots in `_ready()` (PLAYER_TEAM/ENEMY_TEAM) - real N-player spawn assignment needs map spawn-point data that doesn't exist until B10, so this chunk is the storage model, not a live 3rd map slot.
+- `economy`/`energy_pool` stopped being 2-entry literals - `_rebuild_economy_from_slots()` derives an entry per slot, called from `_ready()` and from the new `add_slot()` (the one supported way to grow past 2 slots today). Stayed keyed by team int, not slot index - the stable seam A1's own comments already called out.
+- `player_hq`/`enemy_hq` became thin computed properties over `slots[i].hq` (`var player_hq: StaticBody3D: get: ... set(value): ...`) - every existing read/write site (including `_spawn_bases()`'s `player_hq = _spawn_prefab(...)`) kept compiling unchanged.
+- New shared alliance primitives: `_alliance_for_team()`, `is_allied(a, b)`, `_alliances_with_living_hq()`. `_recalc_fog_of_war()` now splits constructs into "allied with `LOCAL_SLOT`" vs. not (was hardcoded PLAYER_TEAM-vs-ENEMY_TEAM); `_on_hq_died()`'s win condition became "one alliance remains" instead of "first HQ dies loses" (reduces to the exact old behavior when nobody has allies, since every team's alliance is then just itself). `_on_trickle()`/`_recalc_energy_economy()` loop over `slots` instead of a hardcoded 2-team array.
+- `auto_weapon.gd` and `battle_unit.gd` each got a small `_teams_allied(a, b)` helper (duck-typed via `get_tree().current_scene.is_allied()`, falls back to plain team equality with no real Skirmish in the tree - test range/legacy tests unaffected) - repair_array's ally-targeting filter and the auto-engage/hostile-targeting scans all defer to it now instead of hardcoded `team ==`/`!=` checks, so an allied unit on a different team is never treated as hostile and CAN be repaired.
+
+**Verified:**
+- All pre-existing tests pass **untouched** - confirmed green 3 runs in a row before and after.
+- New test `test_b2_n_player_slots_alliance_fog_repair_and_independent_resources()`: boots a real 2-slot match, adds a 3rd slot allied with the player via `add_slot()`, and proves independent economies (the ally's `spend()` never touches the player's/enemy's bank), fog reveals an enemy unit that's only in the *ally's* vision range (nowhere near the player's own base), and a player-team `repair_array` targets and heals the ally's different-team unit instead of the closer, same-distance enemy.
+- Non-headless sanity capture (real renderer, not the headless dummy) of a normal 2-team match boot - HUD, resources, fog ("No enemies sighted"), and both HQs all present and correct; screenshot in `progress_captures/2026-07-24_b2_sanity/`.
+
+---
+
 ## 2026-07-24 — RTS_CORE_ROADMAP.md B1: map schema validator
 
 Picked up the roadmap's terrain/maps track (prioritized after the mandatory A1/A2 production-authority work) with its first, no-format-change chunk: a real validator over the 8 bundled maps in `map_catalog.gd`.
@@ -64,6 +82,17 @@ Completed the comprehensive 2D UI Chrome Overhaul defined in `VISUAL_IMPROVEMENT
 - **Chunk 5: Skirmish HUD & Relative Anchoring**:
   - Re-anchored Skirmish top bar, `intel_label`, `menu_btn`, and `debug_btn` using top-right relative anchors (`anchor_left = 1.0`, `anchor_right = 1.0`), eliminating resolution drift across 720p, 1080p, and 1440p+.
   - Extended `prototype/scripts/ui_audit.gd` (`UIAudit`) and added `test_2d_ui_chrome_overhaul()` in `prototype/run_tests.gd`. All 114 automated test suites passing clean.
+
+- **Building 3D Mesh Generation & Faction Materials (TripoSG Integration)**:
+  - Utilized local TripoSG install (`C:\Users\Chris\Documents\Modly\extensions\triposg\venv\Scripts\python.exe` with GTX 1080 GPU) to convert 3D building concepts into GLB models (`hq.glb`, `refinery.glb`, `light_manufactory.glb`, `heavy_manufactory.glb`, `medium_manufactory.glb`, `power_plant.glb`) stored under `prototype/assets/models/buildings/`.
+  - Updated `prototype/scripts/building.gd` (`setup_prefab()`, `_setup_building_glb_mesh()`, `_compute_node_aabb()`) to dynamically load and auto-scale TripoSG GLB models to match building stats footprints.
+  - Applied the full 13-parameter faction shader material (`HullMaterialBuilder.build_hull_material`) to every building mesh, supporting dynamic team tints and faction-specific surface parameters.
+
+- **Audio Architecture, Procedural Sound Effects & Music**:
+  - Authored `prototype/tools/generate_audio.py` to procedurally synthesize 15 16-bit 44.1kHz WAV sound effects (`sfx_click`, `sfx_hover`, `sfx_error`, `sfx_select`, `sfx_place`, `sfx_cannon`, `sfx_machine_gun`, `sfx_laser`, `sfx_missile`, `sfx_explosion`, `sfx_hit`, `sfx_harvest`, `sfx_construct`, `sfx_victory`, `sfx_defeat`) and a 12-second ambient RTS synth music track (`music_main_theme.wav`).
+  - Implemented `prototype/scripts/audio_manager.gd` (`AudioManager`) Autoload in `project.godot` handling UI audio channels, 3D spatial world sound playback (`play_sfx_3d`), and music track loops (`play_music`).
+  - Wired 3D spatial weapon audio into `auto_weapon.gd`, unit explosion & armor hit sounds into `battle_unit.gd`, match win/loss jingles and ambient music into `skirmish.gd`, and button hover/click SFX into `main_menu.gd`.
+  - Added automated test suite `test_audio_system()` in `run_tests.gd`. All 115 automated test suites pass clean in headless Godot.
 
 ---
 

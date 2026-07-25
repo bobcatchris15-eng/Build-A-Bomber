@@ -27,11 +27,25 @@ var production: RefCounted = null
 const PLAYER_TEAM = 0
 const ENEMY_TEAM = 1
 
+# RTS_CORE_ROADMAP.md B2: N-player slot metadata - {team, faction, is_local,
+# is_bot, allies: Array[int], hq}. Populated in _ready() (2 slots by
+# default, matching PLAYER_TEAM/ENEMY_TEAM exactly - runtime still only
+# ever SPAWNS 2 by default, since map data only authors 2 start points;
+# real N-player spawn assignment is B10's job). `hq` is the actual
+# source of truth behind the player_hq/enemy_hq thin properties below.
+# LOCAL_SLOT is a slot ARRAY INDEX (not a team id) - slots[LOCAL_SLOT] is
+# always "this client's own side," so HUD/debug toggles stay honest even
+# if a future session reorders slots.
+const LOCAL_SLOT: int = 0
+var slots: Array = []
+
 var bp_manager: Node
-var economy = {
-	PLAYER_TEAM: {"metal": 450, "crystal": 150},
-	ENEMY_TEAM: {"metal": 450, "crystal": 150},
-}
+# Kept keyed by TEAM (not slot index) - already the stable, team-
+# parameterized seam A1's own comment called out (can_afford/spend/
+# add_resources/is_energy_deficit). B2 just stops hardcoding it as a
+# 2-entry literal: _rebuild_economy_from_slots() derives an entry per
+# slot, so N slots means N independent economies for free.
+var economy: Dictionary = {}
 # Energy resource (ENERGY_AND_BALANCE_SPEC.md #1) - deliberately NOT a
 # spendable currency like metal/crystal (can_afford/spend/blueprint_cost
 # keep their existing 2-resource signatures, see the spec for why). Instead
@@ -50,10 +64,7 @@ var economy = {
 # _recalc_energy_economy() below) - it used to, which was exactly the
 # review's "put a fusion_generator on a tank so your factories build
 # faster; lose the tank, lose the base's power" complaint.
-var energy_pool = {
-	PLAYER_TEAM: {"energy": 0.0, "capacity": 0.0, "deficit": false},
-	ENEMY_TEAM: {"energy": 0.0, "capacity": 0.0, "deficit": false},
-}
+var energy_pool: Dictionary = {}
 const ENERGY_TICK_INTERVAL: float = 3.0
 const GHOST_COLOR_VALID: Color = Color(0.3, 1.0, 0.4, 0.4)
 const GHOST_COLOR_INVALID: Color = Color(1.0, 0.25, 0.2, 0.45)
@@ -139,8 +150,16 @@ var _mc_enemy_faction: String = ""
 var _mc_blueprint_paths: Array = []
 var ai_difficulty: String = "normal"
 
-var player_hq: StaticBody3D = null
-var enemy_hq: StaticBody3D = null
+# RTS_CORE_ROADMAP.md B2: thin properties over slots[i].hq, kept so every
+# existing `player_hq`/`enemy_hq` read/write site (including 113+
+# pre-existing tests) compiles and behaves identically - the actual
+# storage moved to the slots array.
+var player_hq: StaticBody3D:
+	get: return _get_slot(PLAYER_TEAM).get("hq")
+	set(value): _get_slot(PLAYER_TEAM)["hq"] = value
+var enemy_hq: StaticBody3D:
+	get: return _get_slot(ENEMY_TEAM).get("hq")
+	set(value): _get_slot(ENEMY_TEAM)["hq"] = value
 var game_over: bool = false
 
 # Roster: array of {blueprint: Dictionary, name, cost_metal, cost_crystal, is_defense}
@@ -165,10 +184,107 @@ var selection_rect: Panel
 
 @onready var camera: Camera3D = $Camera3D
 
+# --- N-player slots (RTS_CORE_ROADMAP.md B2) ---
+
+# Returns the slot Dictionary for a team (a real reference into `slots`,
+# not a copy - mutating the result, e.g. `_get_slot(t)["hq"] = x`, writes
+# straight through). Empty Dictionary if the team isn't slotted (shouldn't
+# happen once _ready() has run; defensive because player_hq/enemy_hq's
+# property getters call this before any slot is guaranteed to exist).
+func _get_slot(team: int) -> Dictionary:
+	for s in slots:
+		if s.get("team") == team:
+			return s
+	return {}
+
+# Appends a new slot and gives it an economy/energy_pool entry - the one
+# supported way to grow past the default 2 slots today (there's no map
+# data for a 3rd+ spawn point yet, so this is for tests / a future N-
+# player setup flow to call directly, not something _spawn_bases() does
+# on its own).
+func add_slot(slot: Dictionary) -> void:
+	slots.append(slot)
+	_rebuild_economy_from_slots()
+
+func _rebuild_economy_from_slots() -> void:
+	for s in slots:
+		if not economy.has(s.team):
+			economy[s.team] = {"metal": 450, "crystal": 150}
+		if not energy_pool.has(s.team):
+			energy_pool[s.team] = {"energy": 0.0, "capacity": 0.0, "deficit": false}
+
+func _local_team() -> int:
+	if slots.size() > LOCAL_SLOT:
+		return slots[LOCAL_SLOT].team
+	return PLAYER_TEAM
+
+func _all_teams() -> Array:
+	var result: Array = []
+	for s in slots:
+		result.append(s.team)
+	return result
+
+# A team's alliance = itself + its own `allies` list. Not a full
+# transitive closure (if A lists B and B lists C but A doesn't list C,
+# A/C aren't linked) - authored alliances are expected to be symmetric,
+# which is all B2's 2v1 scenario needs.
+func _alliance_for_team(team: int) -> Array:
+	var s = _get_slot(team)
+	var result: Array = [team]
+	for a in s.get("allies", []):
+		if not a in result:
+			result.append(a)
+	return result
+
+# True if team_b is in team_a's alliance (same team always counts). This
+# is the one shared answer fog-of-war, the win condition, and the repair/
+# auto-engage targeting fixes below all defer to - one source of truth for
+# "is this hostile," not four separately-hardcoded team-equality checks.
+func is_allied(team_a: int, team_b: int) -> bool:
+	if team_a == team_b:
+		return true
+	return team_b in _alliance_for_team(team_a)
+
+# One entry per still-alive alliance (an Array[int] of that alliance's
+# member teams), used by _on_hq_died() to decide whether the match is
+# actually over yet - "one alliance remains," not "first HQ dies loses."
+func _alliances_with_living_hq() -> Array:
+	var result: Array = []
+	var seen_teams: Array = []
+	for team in _all_teams():
+		if team in seen_teams:
+			continue
+		var alliance = _alliance_for_team(team)
+		for t in alliance:
+			if not t in seen_teams:
+				seen_teams.append(t)
+		var alive = false
+		for t in alliance:
+			var hq = _get_slot(t).get("hq")
+			if is_instance_valid(hq) and not hq.is_dead:
+				alive = true
+				break
+		if alive:
+			result.append(alliance)
+	return result
+
 func _ready():
+	if get_node_or_null("/root/AudioManager"):
+		get_node("/root/AudioManager").play_music("main_theme")
 	bp_manager = BlueprintManagerScript.new()
 	bp_manager.name = "BlueprintManager"
 	add_child(bp_manager)
+
+	# Default 2-slot config - PLAYER_TEAM/ENEMY_TEAM exactly, so every
+	# existing consumer of economy[PLAYER_TEAM] etc. below sees the same
+	# entries it always did. Faction gets re-synced onto the slots once
+	# _load_rosters() resolves the real (possibly MatchConfig-overridden)
+	# player_faction/enemy_faction further down.
+	slots = [
+		{"team": PLAYER_TEAM, "faction": player_faction, "is_local": true, "is_bot": false, "allies": [], "hq": null},
+		{"team": ENEMY_TEAM, "faction": enemy_faction, "is_local": false, "is_bot": true, "allies": [], "hq": null},
+	]
+	_rebuild_economy_from_slots()
 
 	var match_config = get_node_or_null("/root/MatchConfig")
 	if match_config and "selected_map_id" in match_config and match_config.selected_map_id != "":
@@ -250,10 +366,14 @@ func _physics_process(delta):
 
 func _on_trickle():
 	if game_over: return
-	if is_instance_valid(player_hq) and not player_hq.is_dead:
-		add_resources(PLAYER_TEAM, FactionCatalog.get_passive(player_faction, "hq_trickle_metal", 0), FactionCatalog.get_passive(player_faction, "hq_trickle_crystal", 0))
-	if is_instance_valid(enemy_hq) and not enemy_hq.is_dead:
-		add_resources(ENEMY_TEAM, FactionCatalog.get_passive(enemy_faction, "hq_trickle_metal", 0), FactionCatalog.get_passive(enemy_faction, "hq_trickle_crystal", 0))
+	# Loops over slots (RTS_CORE_ROADMAP.md B2) instead of hardcoding
+	# [PLAYER_TEAM, ENEMY_TEAM] - a slot manually added past the default 2
+	# (e.g. a test's ally) gets HQ trickle income for free.
+	for s in slots:
+		var hq = s.get("hq")
+		if is_instance_valid(hq) and not hq.is_dead:
+			var faction = s.get("faction", "industrialists")
+			add_resources(s.team, FactionCatalog.get_passive(faction, "hq_trickle_metal", 0), FactionCatalog.get_passive(faction, "hq_trickle_crystal", 0))
 
 # Energy resource team-level economy (ENERGY_AND_BALANCE_SPEC.md #1). A
 # static building is any prefab (hq/refinery/factory are always static) or
@@ -262,9 +382,10 @@ func _on_trickle():
 # static buildings are entirely self-powered, per Factions_and_Buildings.md).
 func _recalc_energy_economy():
 	if game_over: return
-	for team in [PLAYER_TEAM, ENEMY_TEAM]:
+	for s in slots:
+		var team = s.team
 		var capacity = 0.0
-		var hq = player_hq if team == PLAYER_TEAM else enemy_hq
+		var hq = s.get("hq")
 		if is_instance_valid(hq) and not hq.is_dead:
 			capacity += ENERGY_HQ_BASELINE_CAPACITY
 		# Deliberately NOT summing get_team_units(team)'s own generator
@@ -273,7 +394,7 @@ func _recalc_energy_economy():
 		# weapons (battle_unit.gd's max_energy), never the team's base pool.
 		# Only base/building power sources feed this loop: the HQ baseline
 		# above, and buildings' own generators/power_plant below.
-		var faction = player_faction if team == PLAYER_TEAM else enemy_faction
+		var faction = s.get("faction", "industrialists")
 		var upkeep = 0.0
 		for b in get_tree().get_nodes_in_group("buildings"):
 			if not is_instance_valid(b) or b.is_dead or b.team != team: continue
@@ -372,8 +493,20 @@ func _get_effective_vision(o) -> float:
 
 func _recalc_fog_of_war():
 	if game_over: return
-	var player_constructs = get_team_units(PLAYER_TEAM) + get_team_buildings(PLAYER_TEAM)
-	var enemy_constructs = get_team_units(ENEMY_TEAM) + get_team_buildings(ENEMY_TEAM)
+	# Alliance-aware (RTS_CORE_ROADMAP.md B2): "player_constructs" is
+	# everyone allied with LOCAL_SLOT's own team, not just literally
+	# PLAYER_TEAM - reduces to the exact old 2-team split when nobody has
+	# allies (is_allied(PLAYER_TEAM, ENEMY_TEAM) is false with an empty
+	# allies list, same as the old != check).
+	var local_team = _local_team()
+	var player_constructs: Array = []
+	var enemy_constructs: Array = []
+	for team in _all_teams():
+		var group = get_team_units(team) + get_team_buildings(team)
+		if is_allied(local_team, team):
+			player_constructs += group
+		else:
+			enemy_constructs += group
 	for c in enemy_constructs:
 		if not is_instance_valid(c) or not c.has_method("set_fog_visible"): continue
 		var seen = false
@@ -583,6 +716,11 @@ func _load_rosters():
 		enemy_faction = _mc_enemy_faction
 	elif not enemy_roster.is_empty():
 		enemy_faction = enemy_roster[0].blueprint.get("faction", "technocrats")
+
+	# Re-sync now that player_faction/enemy_faction have resolved past
+	# their _ready()-time defaults (MatchConfig override or roster[0]'s tag).
+	_get_slot(PLAYER_TEAM)["faction"] = player_faction
+	_get_slot(ENEMY_TEAM)["faction"] = enemy_faction
 
 	# Scavengers' "-10% metal cost on everything built" - a TEAM-level
 	# passive (the match's chosen faction, not each individual blueprint's
@@ -1512,8 +1650,20 @@ func _raycast_ground(screen_pos: Vector2):
 
 func _on_hq_died(building):
 	if game_over: return
+	# Alliance-aware win condition (RTS_CORE_ROADMAP.md B2): "one alliance
+	# remains," not "first HQ dies loses" - a dead HQ only actually ends
+	# the match once its whole alliance has zero living HQs left. With no
+	# allies configured (the default 2-team case), every team's alliance
+	# is just itself, so this reduces to the exact old 1-HQ-per-side
+	# behavior: the losing team's dead HQ immediately empties its own
+	# (singleton) alliance.
+	var alive_alliances = _alliances_with_living_hq()
+	if alive_alliances.size() > 1:
+		return
 	game_over = true
-	var victory = (building.team == ENEMY_TEAM)
+	var victory = not alive_alliances.is_empty() and _local_team() in alive_alliances[0]
+	if get_node_or_null("/root/AudioManager"):
+		get_node("/root/AudioManager").play_sfx("victory" if victory else "defeat")
 	var ui = get_node_or_null("UI")
 	if not ui: return
 

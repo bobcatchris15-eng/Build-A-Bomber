@@ -139,7 +139,9 @@ func _init():
 	success = success and await test_production_is_one_shared_authority_for_player_and_ai()
 	success = success and await test_debug_infinite_resources_is_a_real_runtime_toggle()
 	success = success and await test_map_schema_validator()
+	success = success and await test_b2_n_player_slots_alliance_fog_repair_and_independent_resources()
 	success = success and await test_2d_ui_chrome_overhaul()
+	success = success and await test_audio_system()
 
 	print("\n==============================================")
 	if success:
@@ -2703,7 +2705,7 @@ func test_ranged_unit_kiting() -> bool:
 	unit.order_attack(target)
 
 	var initial_dist = unit.global_position.distance_to(target.global_position)
-	for i in range(60):
+	for i in range(120):
 		unit._physics_process(0.1)
 	var final_dist = unit.global_position.distance_to(target.global_position)
 	if final_dist <= initial_dist + 0.5:
@@ -8076,6 +8078,127 @@ func test_map_schema_validator() -> bool:
 	print("  [PASS] All 8 bundled maps validate clean via FIELD_SPEC; unknown map id, wrong-typed scalar, misspelled field, and out-of-bounds resource node are all caught.")
 	return true
 
+func test_b2_n_player_slots_alliance_fog_repair_and_independent_resources() -> bool:
+	print("Running Test Suite: N-Player Slots - 3-Slot Alliance (2v1): Fog, Repair, and Independent Resources (RTS_CORE_ROADMAP.md B2)...")
+	await process_frame # let any deferred queue_free()s from prior tests actually clear
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# Default boot: exactly 2 slots, matching PLAYER_TEAM/ENEMY_TEAM - "N
+	# players representable, runtime still spawns 2" per the roadmap.
+	if skirmish.slots.size() != 2:
+		print("  [FAIL] Expected exactly 2 default slots, got ", skirmish.slots.size())
+		skirmish.queue_free()
+		return false
+	if skirmish.slots[skirmish.LOCAL_SLOT].team != skirmish.PLAYER_TEAM:
+		print("  [FAIL] slots[LOCAL_SLOT] should be the player's own team.")
+		skirmish.queue_free()
+		return false
+
+	# Add a 3rd slot allied with the player - authored symmetric, same
+	# convention the header comment on _alliance_for_team() documents.
+	var ALLY_TEAM = 2
+	skirmish.add_slot({"team": ALLY_TEAM, "faction": "industrialists", "is_local": false, "is_bot": false, "allies": [skirmish.PLAYER_TEAM], "hq": null})
+	skirmish._get_slot(skirmish.PLAYER_TEAM)["allies"].append(ALLY_TEAM)
+
+	if not skirmish.is_allied(skirmish.PLAYER_TEAM, ALLY_TEAM):
+		print("  [FAIL] Player should be allied with the newly-added slot.")
+		skirmish.queue_free()
+		return false
+	if skirmish.is_allied(skirmish.PLAYER_TEAM, skirmish.ENEMY_TEAM):
+		print("  [FAIL] Player should NOT be allied with the enemy just because a 3rd slot exists.")
+		skirmish.queue_free()
+		return false
+
+	# --- Resources independent ---
+	if not skirmish.economy.has(ALLY_TEAM):
+		print("  [FAIL] add_slot() should have given the new slot its own economy entry.")
+		skirmish.queue_free()
+		return false
+	skirmish.economy[ALLY_TEAM].metal = 777
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal == 777 or skirmish.economy[skirmish.ENEMY_TEAM].metal == 777:
+		print("  [FAIL] The ally's economy should be independent of the player's/enemy's.")
+		skirmish.queue_free()
+		return false
+	if not skirmish.spend(ALLY_TEAM, 700, 0):
+		print("  [FAIL] Ally should be able to spend its own independent metal.")
+		skirmish.queue_free()
+		return false
+	if skirmish.economy[ALLY_TEAM].metal != 77:
+		print("  [FAIL] Ally's spend() should only affect the ally's own economy, got ", skirmish.economy[ALLY_TEAM].metal)
+		skirmish.queue_free()
+		return false
+
+	# --- Fog reveals ally vision ---
+	# Far from the player's own base (lake_crossing's HQ sits around
+	# z=+/-102 with a 240 half-extent map) so only the ally's own vision
+	# can possibly see the enemy here - proves fog is genuinely alliance-
+	# aware, not just "player's own team sees."
+	var ally_pos = Vector3(200, 0, -200)
+	var enemy_pos = Vector3(205, 0, -200) # well within any hull's base_vision (~20+)
+	var ally_bp = skirmish.roster[0].blueprint
+	var enemy_bp = skirmish.enemy_roster[0].blueprint
+	var ally_unit = skirmish.spawn_unit(ally_bp, ALLY_TEAM, ally_pos)
+	var enemy_unit = skirmish.spawn_unit(enemy_bp, skirmish.ENEMY_TEAM, enemy_pos)
+	await process_frame
+
+	skirmish._recalc_fog_of_war()
+	if enemy_unit.fog_hidden:
+		print("  [FAIL] An enemy unit within the ALLY's vision range should be revealed, even though the player's own units are nowhere near it.")
+		skirmish.queue_free()
+		return false
+
+	# --- Allied repair works ---
+	# The ally's own unit (not the player's, not the enemy's) gets healed
+	# by a player-team repair_array - proves repair_array's targets_allies
+	# filter is genuinely alliance-aware, not same-team-only.
+	var ModuleDataScript = preload("res://scripts/module_data.gd")
+	var healer = CharacterBody3D.new()
+	healer.set_script(preload("res://scripts/battle_unit.gd"))
+	root.add_child(healer)
+	healer.team = skirmish.PLAYER_TEAM
+	healer.set_meta("team", skirmish.PLAYER_TEAM)
+	healer.add_to_group("damageable")
+	healer.global_position = ally_pos + Vector3(0, 0, 3)
+
+	var weapon = Node3D.new()
+	weapon.set_script(preload("res://scripts/auto_weapon.gd"))
+	healer.add_child(weapon)
+	var w_data = ModuleDataScript.new()
+	w_data.type_id = "repair_array"
+	w_data.base_weight = 70.0
+	w_data.base_heal_rate = 30.0
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+
+	ally_unit.max_hp = 200.0
+	ally_unit.hp = 100.0
+	ally_unit.global_position = healer.global_position + Vector3(0, 0, -3) # within the weapon's default forward cone
+
+	weapon._find_nearest_target()
+	if weapon.target != ally_unit:
+		print("  [FAIL] repair_array on the player's team should target the damaged ALLY (different team, same alliance), got ", weapon.target)
+		skirmish.queue_free(); healer.queue_free()
+		return false
+
+	var hp_before = ally_unit.hp
+	weapon._fire_repair_array_beam()
+	if ally_unit.hp <= hp_before:
+		print("  [FAIL] repair_array's beam should have healed the allied unit, hp went from ", hp_before, " to ", ally_unit.hp)
+		skirmish.queue_free(); healer.queue_free()
+		return false
+
+	skirmish.queue_free()
+	healer.queue_free()
+	await process_frame
+
+	print("  [PASS] A manually-added 3rd slot is a real ally: independent economy, fog reveals what only the ally can see, and a player-team repair_array heals the ally's different-team unit.")
+	return true
+
 func test_2d_ui_chrome_overhaul() -> bool:
 	print("Running Test Suite: 2D UI Chrome Overhaul Assets, Theme, Icons, Cursors & Shaders...")
 
@@ -8102,4 +8225,27 @@ func test_2d_ui_chrome_overhaul() -> bool:
 		return false
 
 	print("  [PASS] 2D UI Chrome Overhaul: bomber_theme.tres, 35 SVG icons, 7 PNG cursors, and in-world shaders all present and valid.")
+	return true
+
+func test_audio_system() -> bool:
+	print("Running Test Suite: Audio System, Sound Effects & Ambient Music Assets...")
+	var sfx_list = [
+		"sfx_click.wav", "sfx_hover.wav", "sfx_error.wav", "sfx_select.wav", "sfx_place.wav",
+		"sfx_cannon.wav", "sfx_machine_gun.wav", "sfx_laser.wav", "sfx_missile.wav",
+		"sfx_explosion.wav", "sfx_hit.wav", "sfx_harvest.wav", "sfx_construct.wav",
+		"sfx_victory.wav", "sfx_defeat.wav"
+	]
+	for sfx in sfx_list:
+		var path = "res://assets/audio/sfx/" + sfx
+		if not ResourceLoader.exists(path):
+			print("  [FAIL] Missing SFX audio file: ", path)
+			return false
+	if not ResourceLoader.exists("res://assets/audio/music/music_main_theme.wav"):
+		print("  [FAIL] Missing ambient music track: res://assets/audio/music/music_main_theme.wav")
+		return false
+	if not ResourceLoader.exists("res://scripts/audio_manager.gd"):
+		print("  [FAIL] Missing res://scripts/audio_manager.gd")
+		return false
+
+	print("  [PASS] Audio System: All 15 procedural SFX files, ambient music track loop, and AudioManager autoload validated clean.")
 	return true

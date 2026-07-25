@@ -649,6 +649,19 @@ func order_harvest(node: Node3D):
 	harvest_node = node
 	harvest_timer = 0.0
 
+# RTS_CORE_ROADMAP.md B2: defers to skirmish.gd's is_allied() (slots'
+# `allies` lists) instead of hardcoded team equality. Duck-typed via
+# current_scene, same as auto_weapon.gd's identical helper - falls back to
+# plain team equality with no real Skirmish in the tree (test range,
+# legacy tests), i.e. unchanged old behavior.
+func _teams_allied(a: int, b: int) -> bool:
+	if a == b:
+		return true
+	var scene = get_tree().current_scene
+	if scene and scene.has_method("is_allied"):
+		return scene.is_allied(a, b)
+	return false
+
 func _try_auto_engage(delta: float):
 	# Move orders are inviolable (see the field comment above) - only an
 	# idle unit (no order) is ever a candidate to start hunting on its own,
@@ -690,7 +703,7 @@ func _try_auto_engage(delta: float):
 		if "is_dead" in c and c.is_dead:
 			continue
 		var c_team = c.get_meta("team") if c.has_meta("team") else -1
-		if c_team == team:
+		if _teams_allied(c_team, team):
 			continue
 		if "fog_hidden" in c and c.fog_hidden:
 			continue
@@ -1348,6 +1361,8 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 		_flash_hull()
 	hp = max(0.0, hp - final_damage)
 	_update_hp_bar()
+	if get_node_or_null("/root/AudioManager"):
+		get_node("/root/AudioManager").play_sfx_3d("hit", global_position, null, 35.0)
 	if hp <= 0.0:
 		die()
 
@@ -1460,6 +1475,8 @@ func die():
 	remove_from_group("damageable")
 	collision_layer = 0
 	_spawn_explosion(global_position, 1.5)
+	if get_node_or_null("/root/AudioManager"):
+		get_node("/root/AudioManager").play_sfx_3d("explosion", global_position, null, 60.0)
 	emit_signal("died", self)
 	var tween = create_tween()
 	tween.tween_property(self, "scale", Vector3(0.01, 0.01, 0.01), 0.4)

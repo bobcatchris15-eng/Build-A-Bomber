@@ -225,6 +225,19 @@ func get_team() -> int:
 		return root_vehicle.get_meta("team")
 	return -1
 
+# RTS_CORE_ROADMAP.md B2: defers to skirmish.gd's is_allied() (slots'
+# `allies` lists) wherever this file used to hardcode "same team = not
+# hostile." Duck-typed via current_scene so this stays zero-dependency in
+# every context without a real Skirmish (test range, legacy tests) - falls
+# back to plain team equality there, i.e. unchanged old behavior.
+func _teams_allied(a: int, b: int) -> bool:
+	if a == b:
+		return true
+	var scene = get_tree().current_scene
+	if scene and scene.has_method("is_allied"):
+		return scene.is_allied(a, b)
+	return false
+
 # Line of sight raycast check.
 #
 # FABLE_REVIEW.md 3.1 fix: the old logic only reported "blocked" when the ray
@@ -727,7 +740,7 @@ func _is_current_target_still_valid(resting_forward: Vector3) -> bool:
 		var my_team = get_team()
 		if my_team >= 0:
 			var t_team = target.get_meta("team") if target.has_meta("team") else -1
-			if t_team == my_team:
+			if _teams_allied(t_team, my_team):
 				return false
 			if "fog_hidden" in target and target.fog_hidden:
 				return false
@@ -761,7 +774,7 @@ func _find_nearest_target():
 			for c in ally_candidates:
 				if not is_instance_valid(c) or not c.has_method("repair_hp"): continue
 				var c_team = c.get_meta("team") if c.has_meta("team") else -1
-				if c_team != my_team: continue
+				if not _teams_allied(c_team, my_team): continue
 				if "is_dead" in c and c.is_dead: continue
 				if not ("hp" in c and "max_hp" in c) or c.hp >= c.max_hp: continue
 				var dist = global_position.distance_to(c.global_position)
@@ -780,7 +793,7 @@ func _find_nearest_target():
 			for m in missiles:
 				if not is_instance_valid(m): continue
 				var m_team = m.get_meta("team") if m.has_meta("team") else -1
-				if m_team == my_team: continue
+				if _teams_allied(m_team, my_team): continue
 				var dist_m = global_position.distance_to(m.global_position)
 				if dist_m < closest_m_dist:
 					var dir_m = (m.global_position - global_position).normalized()
@@ -796,7 +809,7 @@ func _find_nearest_target():
 		for c in candidates:
 			if not is_instance_valid(c) or not c.has_method("take_damage"): continue
 			var c_team = c.get_meta("team") if c.has_meta("team") else -1
-			if c_team == my_team: continue
+			if _teams_allied(c_team, my_team): continue
 			if "is_dead" in c and c.is_dead: continue
 			# Fog-of-war: can't target what hasn't been scouted. Only ever
 			# true for enemy-team constructs (skirmish.gd's fog scan never
@@ -887,7 +900,17 @@ func _fire_at_target():
 		var flash_tween = create_tween()
 		flash_tween.tween_property(flash, "scale", Vector3.ZERO, 0.08)
 		flash_tween.finished.connect(func(): flash.queue_free())
-	
+
+	var sfx_name = "cannon"
+	match type_id:
+		"basic_cannon", "artillery", "flak_cannon", "plasma_lobber": sfx_name = "cannon"
+		"heavy_machine_gun", "rotary_cannon", "ciws": sfx_name = "machine_gun"
+		"gauss_railgun", "heavy_laser", "pd_laser", "tesla_coil", "arc_projector", "ion_cannon": sfx_name = "laser"
+		"guided_missile", "missile_pod", "cluster_dispenser": sfx_name = "missile"
+		"resource_harvester", "repair_array": sfx_name = "harvest"
+	if get_node_or_null("/root/AudioManager"):
+		get_node("/root/AudioManager").play_sfx_3d(sfx_name, global_position, null, 50.0)
+
 	# Call unique visual functions
 	match type_id:
 		"basic_cannon":
