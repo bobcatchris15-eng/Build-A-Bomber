@@ -518,6 +518,22 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 	var bridges = _collect_bridges(map_def)
 	var has_blobs = not map_def.get("water_blobs", []).is_empty()
 
+	# RTS_CORE_ROADMAP.md B5: a heightmap-backed map (see B4 - none of the 8
+	# bundled maps set terrain.heightmap yet, so this whole branch is dead
+	# code for every map that exists today) samples REAL corner heights and
+	# REJECTS any cell whose slope exceeds MAX_WALKABLE_SLOPE - a cliff or
+	# ravine wall becomes a genuine navmesh hole, not just a Y-snap visual.
+	# This is deliberately NOT extended to elevation_zones maps: this
+	# function's own header comment documents two real regressions from
+	# feeding continuous height into the navmesh SOURCE geometry (10+
+	# second Recast bakes, broken ramp-to-plateau connectivity) - both were
+	# about the expensive noise+hill/blob loop stack and the discrete ramp-
+	# geometry special case, neither of which applies to an O(1) heightmap
+	# image lookup with no separate ramp geometry at all. Once B6 migrates
+	# a real map onto a heightmap, this is the path it exercises; until
+	# then elevation_zones maps keep the exact flat-navmesh behavior below.
+	var heightmap_img = _get_heightmap_image(map_def)
+
 	var x = -half
 	while x < half:
 		var x1 = min(x + GRID_CELL, half)
@@ -536,7 +552,20 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 						break
 			if not blocked and has_blobs and _cell_on_water_blob(x, x1, z, z1, map_def):
 				blocked = true
-			if not blocked:
+			if not blocked and heightmap_img:
+				var h00 = height_at(map_def, x, z)
+				var h10 = height_at(map_def, x1, z)
+				var h01 = height_at(map_def, x, z1)
+				var h11 = height_at(map_def, x1, z1)
+				var max_slope = max(
+					max(abs(h10 - h00), abs(h01 - h00)),
+					max(abs(h11 - h10), abs(h11 - h01))
+				) / GRID_CELL
+				if max_slope > MAX_WALKABLE_SLOPE:
+					blocked = true
+				else:
+					_add_nav_quad(verts, Vector3(x, h00, z), Vector3(x1, h10, z), Vector3(x1, h11, z1), Vector3(x, h01, z1))
+			elif not blocked:
 				# Deliberately flat (not height_at()) - see this function's
 				# header comment for why the navmesh SOURCE geometry stays
 				# flat even though the visual mesh and every gameplay Y

@@ -4,6 +4,22 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-25 — RTS_CORE_ROADMAP.md B5: slope-aware navmesh + terrain collision (flag-gated)
+
+Makes B4's heightmap data **effective**, not just decorative - a real navmesh hole where a heightmap-backed map's slope exceeds `MAX_WALKABLE_SLOPE`, finally giving that constant a job.
+
+**Deliberate deviation from the roadmap's literal text (logged in `RTS_CORE_ROADMAP.md` itself too):** the doc's own B5 bullets say to delete `_near_elevation_zone()` and stop the navmesh source geometry from being flat, unconditionally. Doing that now, before B6 migrates any real map off `elevation_zones`, would break `highland_chokepoint`/`twin_summits` today - `_near_elevation_zone()` exists specifically to keep procedural noise from seaming against their ramps, and `_build_ground_faces()`'s own header comment documents *why* the navmesh source geometry stays flat for that system (a real 10+ second Recast bake regression, and broken ramp-to-plateau connectivity, both previously confirmed). Neither problem applies to an O(1) heightmap image lookup with no discrete ramp geometry, so this landed **flag-gated on `terrain.heightmap` being set** - same pattern B4 already established. Zero risk to the 8 existing maps; `_near_elevation_zone()` itself gets deleted for real once B6 actually migrates something off it.
+
+**Shipped:**
+- `_build_ground_faces()`: when a heightmap is present, each grid cell samples its 4 real corner heights and is REJECTED (never becomes navmesh geometry - a genuine hole) if the max corner-to-corner slope exceeds `MAX_WALKABLE_SLOPE`; surviving cells get their real sampled Y values instead of a flat 0. Unmigrated maps take the exact unchanged flat-navmesh path.
+- Physics collision needed **no new code at all** - `build_ground_visual_mesh()`'s `HeightMapShape3D` already samples `height_at()` per its own existing design, which B4 already made heightmap-aware. Verified directly (queried the collision heightmap at the test fixture's hill center, got ~15 - the hill's authored height) rather than assuming it "just worked."
+
+**Verified:**
+- New test `test_b5_heightmap_navmesh_rejects_steep_slope()`: bakes a real navmesh from the B4 test fixture, confirms a point past the fixture's cliff is genuinely unreachable from a point before it (not just visually different), while two points on flat ground elsewhere still path normally - slope-rejection didn't turn the whole map into holes.
+- Full suite green, unaffected (flag-gated, as intended).
+
+---
+
 ## 2026-07-25 — RTS_CORE_ROADMAP.md B4: Python terrain generator + heightmap-backed elevation (the keystone chunk)
 
 The roadmap's own largest single investment. New `tools/terrain/build_terrain.py` (plain Python + numpy + Pillow, no Blender/Godot dependency, mirroring `tools/blender/build_meshes.py`'s role) turns a map's `terrain.features` list - high-level, diffable, seeded primitives (`hill`, `basin`, `plateau`, `ridge`, `ravine`, `escarpment`, `cliff`) - into a heightmap + surfacemap PNG pair.

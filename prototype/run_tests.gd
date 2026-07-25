@@ -144,6 +144,7 @@ func _init():
 	success = success and await test_b3_hand_broken_json_map_hard_fails_with_a_useful_message()
 	success = success and await test_b4_heightmap_terrain_pure_functions()
 	success = success and await test_b4_heightmap_leaves_unmigrated_maps_untouched()
+	success = success and await test_b5_heightmap_navmesh_rejects_steep_slope()
 	success = success and await test_2d_ui_chrome_overhaul()
 	success = success and await test_audio_system()
 
@@ -8399,6 +8400,45 @@ func test_b4_heightmap_leaves_unmigrated_maps_untouched() -> bool:
 			return false
 
 	print("  [PASS] All 8 bundled maps correctly have no heightmap/surfacemap - the B4 flag gate stays dormant until B6 migrates real map data onto it.")
+	return true
+
+func test_b5_heightmap_navmesh_rejects_steep_slope() -> bool:
+	print("Running Test Suite: Heightmap-Backed Navmesh - Steep Slope Is A Real Hole (RTS_CORE_ROADMAP.md B5)...")
+
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	TerrainBuilderScript.reset_heightmap_cache_for_tests()
+
+	var file = FileAccess.open("res://data/test_fixtures/terrain/test_terrain.json", FileAccess.READ)
+	var json = JSON.new()
+	json.parse(file.get_as_text())
+	file.close()
+	var map_def: Dictionary = json.get_data()
+
+	var maps = TerrainBuilderScript.build_navmeshes(map_def)
+	await process_frame # let NavigationServer3D finish baking before querying
+
+	# The fixture's cliff (line at x=52, height 18, hard near-zero
+	# transition) makes a genuine navmesh hole - a point just before it and
+	# a point just after it must NOT be connected.
+	var before_cliff = Vector3(45, 0, 0)
+	var after_cliff = Vector3(58, 0, 0)
+	var path = NavigationServer3D.map_get_path(maps.ground_map, before_cliff, after_cliff, true)
+	var reached_other_side = not path.is_empty() and path[path.size() - 1].distance_to(after_cliff) < 3.0
+	if reached_other_side:
+		print("  [FAIL] A point past the cliff should NOT be reachable from a point before it - the cliff should be a real navmesh hole, not just a Y-snap visual. Path: ", path)
+		return false
+
+	# Meanwhile, two points on the SAME flat side (well clear of every
+	# feature's falloff) must still be normally connected - slope-rejection
+	# shouldn't have turned the whole map into holes.
+	var flat_a = Vector3(-55, 0, 55)
+	var flat_b = Vector3(-55, 0, -55)
+	var flat_path = NavigationServer3D.map_get_path(maps.ground_map, flat_a, flat_b, true)
+	if flat_path.is_empty() or flat_path[flat_path.size() - 1].distance_to(flat_b) > 3.0:
+		print("  [FAIL] Two points on flat ground, clear of every feature, should still be normally reachable. Path: ", flat_path)
+		return false
+
+	print("  [PASS] A heightmap-backed cliff is a genuine navmesh hole (unreachable across it), while flat ground elsewhere still paths normally.")
 	return true
 
 func test_2d_ui_chrome_overhaul() -> bool:

@@ -1,14 +1,29 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-25): A1, A2, B1, B2, B3, and B4 landed; everything else is
-planning only.** This is a resumable roadmap, written so a fresh session can
+**Status (2026-07-25): A1, A2, B1, B2, B3, B4, and B5 landed; everything else
+is planning only.** This is a resumable roadmap, written so a fresh session can
 pick up any single chunk without re-deriving the architecture. Chunks are
 ordered with explicit dependencies in the sequencing table at the end; each is
 sized to land as one commit with its own `PROGRESS.md` entry. **Update the
 sequencing table's status as chunks land** — a stale "next up" header in a plan
 doc is exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated
-before being corrected on 2026-07-24. **Next up: B5** (slope-aware navmesh +
-terrain collision — needs B4, done).
+before being corrected on 2026-07-24. **Next up: B6** (retire `elevation_zones`,
+migrate all 8 maps onto heightmaps, rect + bounds).
+
+**B5 deviation from this doc's literal text, logged here so it isn't mistaken
+for an oversight:** B5's bullets say to delete `_near_elevation_zone()` and
+stop the navmesh source geometry from being flat, unconditionally. Actually
+doing that before B6 migrates real maps off `elevation_zones` would break
+`highland_chokepoint`/`twin_summits` today - `_near_elevation_zone()` exists
+specifically to keep noise from creating a seam against their ramps, and
+`_build_ground_faces()`'s own header comment documents *why* the navmesh
+source stays flat for that system (10+ second Recast bakes, broken ramp
+connectivity). Neither regression applies to an O(1) heightmap image lookup
+with no discrete ramp geometry, so B5 landed the slope-rejecting real-height
+navmesh **flag-gated on `terrain.heightmap` being set** (same pattern as B4) -
+zero risk to the 8 existing maps, genuinely real for whichever map B6 migrates
+first. `_near_elevation_zone()` itself gets deleted for real in B6, once
+nothing depends on it anymore.
 
 Reference implementation for all of this is OpenRA, cloned locally to
 `C:\Misc\openra` (not vendored into this repo). Specific `file:line` citations
@@ -571,7 +586,7 @@ readback) over catalog-number assertions.
 | 4 | B2 slots array (N-player) | one session | — | **Done** |
 | 5 | B3 maps → JSON | one session | B1, B2 | **Done** |
 | 6 | **B4 Python terrain generator + heightmap** | **multi** | B3 | **Done** |
-| 7 | **B5 slope-aware navmesh + collision** | **multi** | B4 | — |
+| 7 | **B5 slope-aware navmesh + collision** | **multi** | B4 | **Done (flag-gated, see note above)** |
 | 8 | B6 retire elevation_zones, migrate, rect+bounds | one session | B5 | — |
 | 9 | B7 terrain type differentiation | one session | B4 | — |
 | 10 | B8 bigger/denser maps | multi (content) | B5–B7 | — |
