@@ -10,18 +10,35 @@ const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 
+# RTS_CORE_ROADMAP.md C3: gives_buildable_area (does an EXISTING building of
+# this kind count as an anchor other placements can measure against?) /
+# adjacent_m (how far THIS kind may itself be placed from the nearest
+# anchor when it's the one being placed - OpenRA's per-building-type
+# Adjacent) - OpenRA's IsCloseEnoughToBase, minus the tile grid: measured as
+# a real footprint-to-footprint gap in skirmish.gd's _placement_validity()/
+# _placing_adjacent_m(), not center-to-center. Every prefab building both
+# gives and requires buildable area at the same default 8.0m (~OpenRA's
+# Adjacent: 2) - "defense" kind buildings (foundation hulls, not in this
+# table - see _placing_footprint()) are handled separately in skirmish.gd:
+# they REQUIRE area like everything else but don't GIVE it (a ring of
+# turrets shouldn't let the base spiral outward), and get a much longer
+# 28.0m leash of their own (~OpenRA's long-range defense class) since
+# turrets are meant to ring a base's outside, not huddle next to the
+# factory.
+const DEFAULT_ADJACENT_M: float = 8.0
+const DEFENSE_ADJACENT_M: float = 28.0
 const PREFAB_STATS = {
-	"hq":       {"hp": 3000.0, "size": Vector3(7, 4, 7),  "color": Color(0.75, 0.72, 0.55), "cost_metal": 0,   "cost_crystal": 0},
-	"refinery": {"hp": 1200.0, "size": Vector3(5, 3, 5),  "color": Color(0.55, 0.62, 0.75), "cost_metal": 150, "cost_crystal": 0},
+	"hq":       {"hp": 3000.0, "size": Vector3(7, 4, 7),  "color": Color(0.75, 0.72, 0.55), "cost_metal": 0,   "cost_crystal": 0, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M},
+	"refinery": {"hp": 1200.0, "size": Vector3(5, 3, 5),  "color": Color(0.55, 0.62, 0.75), "cost_metal": 150, "cost_crystal": 0, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M},
 	# Size-tiered manufactories (base-building batch) replace the old single
 	# "factory" - which tier a design can be QUEUED from depends on its own
 	# hull's weight tier (ModuleCatalog.get_hull_size_tier()), not domain
 	# (a small boat and a light ground hull both need only the Light
 	# Manufactory). Escalating cost/HP/footprint per tier, same convention
 	# refinery/factory already used for "bigger building = pricier."
-	"light_manufactory":  {"hp": 1400.0, "size": Vector3(5, 2.4, 6),  "color": Color(0.68, 0.6, 0.42), "cost_metal": 150, "cost_crystal": 30},
-	"medium_manufactory": {"hp": 1800.0, "size": Vector3(6, 3, 8),    "color": Color(0.72, 0.55, 0.42), "cost_metal": 220, "cost_crystal": 55},
-	"heavy_manufactory":  {"hp": 2400.0, "size": Vector3(7.5, 3.8, 10), "color": Color(0.6, 0.42, 0.35), "cost_metal": 320, "cost_crystal": 85},
+	"light_manufactory":  {"hp": 1400.0, "size": Vector3(5, 2.4, 6),  "color": Color(0.68, 0.6, 0.42), "cost_metal": 150, "cost_crystal": 30, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M},
+	"medium_manufactory": {"hp": 1800.0, "size": Vector3(6, 3, 8),    "color": Color(0.72, 0.55, 0.42), "cost_metal": 220, "cost_crystal": 55, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M},
+	"heavy_manufactory":  {"hp": 2400.0, "size": Vector3(7.5, 3.8, 10), "color": Color(0.6, 0.42, 0.35), "cost_metal": 320, "cost_crystal": 85, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M},
 	# FABLE_REVIEW.md 2.7: a real supply-side building for team Energy -
 	# previously capacity only ever came from generator MODULES bolted onto
 	# units/defenses, so "put a fusion_generator on a tank so the base builds
@@ -32,7 +49,7 @@ const PREFAB_STATS = {
 	# hardcoding. Placeholder box geometry deliberately - Chris is replacing
 	# every building mesh with authored art later, so this pass is data/
 	# wiring only, not a Blender pass (see DECISIONS_NEEDED.md).
-	"power_plant": {"hp": 1000.0, "size": Vector3(4.5, 4.2, 4.5), "color": Color(0.85, 0.65, 0.2), "cost_metal": 180, "cost_crystal": 40, "energy_capacity": 20.0},
+	"power_plant": {"hp": 1000.0, "size": Vector3(4.5, 4.2, 4.5), "color": Color(0.85, 0.65, 0.2), "cost_metal": 180, "cost_crystal": 40, "energy_capacity": 20.0, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M},
 }
 
 const MANUFACTORY_KINDS = ["light_manufactory", "medium_manufactory", "heavy_manufactory"]
@@ -89,6 +106,15 @@ var bp_manager: Node = null
 var hp_bar: Label3D = null
 var selection_ring: MeshInstance3D = null
 var footprint: Vector3 = Vector3(5, 3, 5)
+# RTS_CORE_ROADMAP.md C3: does THIS existing building count as a
+# buildable-area anchor other placements can measure against (PREFAB_STATS'
+# gives_buildable_area, or the defense-specific override in setup_defense()
+# below - a ring of defenses shouldn't let the base spiral outward, so a
+# defense never anchors anything). How FAR a new placement may reach is a
+# property of whatever's being placed, not of this instance - see
+# skirmish.gd's _placing_adjacent_m().
+var gives_buildable_area: bool = true
+var requires_buildable_area: bool = true
 
 func _ready():
 	add_to_group("buildings")
@@ -107,6 +133,8 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 	hp = max_hp
 	footprint = stats.size
 	energy_capacity = stats.get("energy_capacity", 0.0)
+	gives_buildable_area = stats.get("gives_buildable_area", true)
+	requires_buildable_area = stats.get("requires_buildable_area", true)
 
 	# RTS_CORE_ROADMAP.md A1: production_queue becomes an ALIAS to the shared
 	# team+tier Array owned by Skirmish.production (Array assignment is
@@ -204,6 +232,13 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 	collision_layer = 8
 	collision_mask = 0
 	bp_manager = manager
+	# RTS_CORE_ROADMAP.md C3: a defense doesn't anchor further placements
+	# (see the gives_buildable_area field comment) - it still REQUIRES
+	# buildable area to be placed at all, just with a much longer leash
+	# (skirmish.gd's _placing_adjacent_m(), BuildingScript.DEFENSE_ADJACENT_M)
+	# since it's meant to ring a base's outside.
+	gives_buildable_area = false
+	requires_buildable_area = true
 
 	defense_hull = manager.reconstruct_vehicle(blueprint_data, self, false, match_faction)
 	if defense_hull:

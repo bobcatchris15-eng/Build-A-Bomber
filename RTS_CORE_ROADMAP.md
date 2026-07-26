@@ -1,13 +1,13 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1 landed; B8 in progress (1
-of N maps landed).** This is a resumable roadmap, written so a fresh session can pick up any
+**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3 landed; B8 in
+progress (1 of N maps landed).** This is a resumable roadmap, written so a fresh session can pick up any
 single chunk without re-deriving the architecture. Chunks are ordered with
 explicit dependencies in the sequencing table at the end; each is sized to land
 as one commit with its own `PROGRESS.md` entry. **Update the sequencing
 table's status as chunks land** — a stale "next up" header in a plan doc is
 exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before
-being corrected on 2026-07-24. **Next up: C2** (real placement legality).
+being corrected on 2026-07-24. **Next up: C4** (exits and rally points).
 
 **C1 landed both halves together** (physics backstop + dynamic navmesh), per
 this doc's own note that they had to ship together. Found and fixed a real
@@ -16,6 +16,13 @@ navmesh bake, not after) and two real map-authoring bugs (`twin_bridges`
 resource nodes sitting inside a starting manufactory's footprint - see
 `PROGRESS.md`'s C1 entry for the full story, worth reading before touching
 navmesh/building code again).
+
+**C3 caught a real design-direction bug before it shipped:** buildable-area
+reach is a property of the THING BEING PLACED (OpenRA's per-building-type
+`Adjacent`), not something existing buildings radiate outward - the first
+implementation pass had this backwards, which would have meant one lone
+defense on the map made everything else placeable 28m out instead of just
+the defense itself. See `PROGRESS.md`'s C3 entry for how it was caught.
 
 **B10 scope note:** landed the two genuinely reusable/testable pieces -
 `MapCatalog.assign_spawns()` (OpenRA's explicit-pick > maximize-squared-
@@ -638,8 +645,8 @@ readback) over catalog-number assertions.
 | 11 | B9 minimap | 1–1.5 sessions | B6 | **Done** |
 | 12 | B10 spawn assignment + fairness lint | multi | B3, B8 | **Done (slot-picker UI deferred, see note above)** |
 | 13 | C1 buildings block movement | multi | — | **Done** |
-| 14 | C2 real placement legality | one session | B6 | — |
-| 15 | C3 buildable area / adjacency | afternoon | C2 | — |
+| 14 | C2 real placement legality | one session | B6 | **Done** |
+| 15 | C3 buildable area / adjacency | afternoon | C2 | **Done** |
 | 16 | C4 exits + rally points | one session | A1, C1 | — |
 | 17 | D1 drip-fed cost + refunds | one session | A1, A2 | — |
 | 18 | D2 queue HUD + tabs | one session | D1 | — |

@@ -103,6 +103,10 @@ func _init():
 	success = success and await test_deep_water_navmesh_blocks_shallow_draught_hulls()
 	success = success and await test_elevation_combat_and_vision_bonus()
 	success = success and await test_build_placement_rejects_water_and_obstacles()
+	success = success and await test_c2_placement_rejects_a_footprint_corner_overhang()
+	success = success and await test_c2_placement_rejects_building_on_resource_node()
+	success = success and await test_c2_placement_shoves_own_units_clear_instead_of_failing()
+	success = success and await test_c3_buildable_area_reach_is_per_kind_not_flat_28m()
 	success = success and await test_map_open_plains_smoke()
 	success = success and await test_map_lake_crossing_smoke()
 	success = success and await test_map_highland_chokepoint_smoke()
@@ -5728,6 +5732,190 @@ func test_build_placement_rejects_water_and_obstacles() -> bool:
 	print("  [PASS] Attempting to place a building inside water is rejected without spending resources.")
 	return true
 
+func test_c2_placement_rejects_a_footprint_corner_overhang() -> bool:
+	print("Running Test Suite: C2 - Placement Rejects a Footprint CORNER Overhang, Not Just Center-Point (RTS_CORE_ROADMAP.md C2)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# heavy_manufactory footprint is (7.5, 3.8, 10), half-extents (3.75, 5).
+	# Center at (27, 95) is clear ground, well within the refinery's (27, 84)
+	# own buildable-area reach (RTS_CORE_ROADMAP.md C3: 8.0m footprint-to-
+	# footprint gap, not the old flat 28m-from-center rule) - a center-only
+	# terrain check passes this regardless. The synthetic obstacle below
+	# sits clear of the CENTER point but overlaps the footprint's own +x
+	# edge - exactly the case a lattice walk over the whole footprint
+	# catches and a single point-check can't.
+	#
+	# MapCatalog.get_map() hands back the SAME cached Dictionary to every
+	# Skirmish instance for a given map_id (no copy) - mutating
+	# current_map.obstacles here would otherwise permanently leak this
+	# synthetic obstacle into every later test that loads lake_crossing.
+	# Must pop it back off before returning, on every exit path.
+	skirmish.current_map.obstacles.append({"center": Vector3(31.75, 0, 95), "half_extents": Vector2(2, 2), "type": "rock"})
+
+	skirmish.placing = {"kind": "heavy_manufactory", "cost_metal": 320, "cost_crystal": 85}
+	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	var center_pos = Vector3(27, 0, 95)
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	if TerrainBuilderScript.is_position_blocked(skirmish.current_map, center_pos):
+		print("  [FAIL] Test setup bug: the building's own CENTER point should read as clear ground (only a corner should overlap the obstacle)")
+		skirmish.current_map.obstacles.pop_back()
+		skirmish.queue_free()
+		return false
+
+	skirmish._try_place_building(center_pos)
+	var placement_rejected = skirmish.economy[skirmish.PLAYER_TEAM].metal == metal_before
+	skirmish.current_map.obstacles.pop_back()
+	if not placement_rejected:
+		print("  [FAIL] A footprint corner overhanging an obstacle should reject placement before spending any resources (center point alone is clear, so a center-only check would have wrongly allowed this)")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Placement correctly rejects a footprint corner overhanging an obstacle, even though the footprint's own center point is clear.")
+	return true
+
+func test_c2_placement_rejects_building_on_resource_node() -> bool:
+	print("Running Test Suite: C2 - Placement Rejects Building On Top Of A Resource Node (RTS_CORE_ROADMAP.md C2)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var node_pos: Vector3 = skirmish.current_map.resource_nodes[0].position
+	skirmish.placing = {"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}
+	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	skirmish._try_place_building(node_pos)
+
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != metal_before:
+		print("  [FAIL] Placing a building directly on a resource node should be rejected before spending any resources")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Placement is rejected when it would sit directly on top of a resource node.")
+	return true
+
+func test_c2_placement_shoves_own_units_clear_instead_of_failing() -> bool:
+	print("Running Test Suite: C2 - Placement Shoves Own Units Clear Instead Of Failing (RTS_CORE_ROADMAP.md C2, OpenRA's ClearBlockersOrders)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# RTS_CORE_ROADMAP.md A2/D1: debug_infinite_resources defaults to true
+	# (DebugSettings' own deliberate default for active development) and
+	# re-floors metal back up to INFINITE_RESOURCE_FLOOR on every spend() -
+	# a before/after metal comparison would pass vacuously with it on, same
+	# reasoning D1's own section already calls out for its drip-feed tests.
+	skirmish.debug_infinite_resources = false
+
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	# Clear ground within the refinery's (27, 84) own 8.0m buildable-area
+	# reach (RTS_CORE_ROADMAP.md C3) - footprint-to-footprint, not center-
+	# to-center, so this has to sit close now, not just "within 28".
+	var build_pos = Vector3(27, 0, 93)
+	var blocker = CharacterBody3D.new()
+	blocker.set_script(BattleUnitScript)
+	skirmish.add_child(blocker)
+	blocker.team = skirmish.PLAYER_TEAM
+	blocker.set_meta("team", skirmish.PLAYER_TEAM)
+	blocker.add_to_group("units")
+	blocker.add_to_group("damageable")
+	blocker.global_position = build_pos # sitting exactly where the building is about to go
+
+	skirmish.placing = {"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}
+	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	skirmish._try_place_building(build_pos)
+
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal == metal_before:
+		print("  [FAIL] Placement should succeed (and spend resources) even with a friendly unit standing on the spot - it should get shoved clear, not block the placement")
+		skirmish.queue_free()
+		return false
+
+	var refinery = null
+	for b in skirmish.get_team_buildings(skirmish.PLAYER_TEAM):
+		if b.kind == "refinery" and b.global_position.distance_to(build_pos) < 1.0:
+			refinery = b
+			break
+	if not refinery:
+		print("  [FAIL] The refinery should have actually spawned at the placement position")
+		skirmish.queue_free()
+		return false
+
+	var half_x = refinery.footprint.x / 2.0
+	var half_z = refinery.footprint.z / 2.0
+	var dx = abs(blocker.global_position.x - refinery.global_position.x)
+	var dz = abs(blocker.global_position.z - refinery.global_position.z)
+	if dx < half_x and dz < half_z:
+		print("  [FAIL] The blocking unit should have been shoved clear of the new building's footprint, still at ", blocker.global_position, " vs building at ", refinery.global_position)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A friendly unit standing where a building is placed gets shoved clear instead of blocking the placement.")
+	return true
+
+func test_c3_buildable_area_reach_is_per_kind_not_flat_28m() -> bool:
+	print("Running Test Suite: C3 - Buildable-Area Reach Is Per-KIND (defense's 28m vs. a regular building's 8m default), Not a Flat 28m (RTS_CORE_ROADMAP.md C3)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var refinery = null
+	for b in skirmish.get_team_buildings(skirmish.PLAYER_TEAM):
+		if b.kind == "refinery":
+			refinery = b
+			break
+	if not refinery:
+		print("  [FAIL] No starting player refinery found.")
+		skirmish.queue_free()
+		return false
+
+	# A defense's own leash (BuildingScript.DEFENSE_ADJACENT_M, 28m) is what
+	# lets IT be placed far from the base - it's a property of the thing
+	# being placed, not a bigger zone radiated by existing buildings (a
+	# defense doesn't even give_buildable_area, so nothing anchors off IT).
+	skirmish.placing = {"kind": "defense", "blueprint": {"hull_type": "pillbox_foundation"}, "cost_metal": 0, "cost_crystal": 0}
+	var defense_fp = skirmish._placing_footprint()
+	var gap_20_z = refinery.global_position.z + 20.0 + refinery.footprint.z / 2.0 + defense_fp.z / 2.0
+	var test_pos = Vector3(refinery.global_position.x, 0, gap_20_z)
+
+	var defense_validity = skirmish._placement_validity(test_pos)
+	if not defense_validity.valid:
+		print("  [FAIL] A defense should be placeable ~20m (footprint gap) from the refinery - within its own 28m leash - got rejected: ", defense_validity.reason)
+		skirmish.queue_free()
+		return false
+
+	# The SAME position, but for a regular building (default 8.0m reach) -
+	# should now be rejected, proving the reach really is per-kind and not
+	# secretly still a flat 28m for everything.
+	skirmish.placing = {"kind": "power_plant", "cost_metal": 180, "cost_crystal": 40}
+	var plant_validity = skirmish._placement_validity(test_pos)
+	if plant_validity.valid:
+		print("  [FAIL] A power_plant (default 8.0m reach) at the same ~20m gap from the refinery should be rejected as too far from base, but was accepted")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A defense can be placed ~20m from the base (within its own 28m leash) while a regular building at the same distance (default 8.0m reach) is correctly rejected.")
+	return true
+
 # Reusable per-map smoke test (per Chris's one-at-a-time verification
 # instruction: each map gets a real scripted playthrough, not just eyeball
 # screenshots) - real Skirmish spawn on the given map_id, checks:
@@ -7129,7 +7317,12 @@ func test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes() -> bool:
 	skirmish.placing = {"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}
 	var stacked = skirmish._placement_validity(first_light.global_position)
 	var hq_pos = skirmish.player_hq.global_position
-	var clear_spot = hq_pos + Vector3(0, 0, -16)
+	# RTS_CORE_ROADMAP.md C3: buildable-area reach is a real per-building
+	# adjacent_m now (HQ's default 8.0m, footprint-to-footprint), not a flat
+	# 28m from any friendly building's center - -16 cleared the OLD rule
+	# comfortably but sits outside HQ's own zone under the new one. -9
+	# leaves only a ~3m gap past HQ's own footprint, safely inside 8.0m.
+	var clear_spot = hq_pos + Vector3(0, 0, -9)
 	var clear = skirmish._placement_validity(clear_spot)
 	skirmish.placing = {}
 	if stacked.valid:

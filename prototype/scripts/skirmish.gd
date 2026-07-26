@@ -1384,20 +1384,34 @@ func _build_ui():
 	# with one of each already built (_spawn_starting_manufactories()); these
 	# buttons let a player build MORE of a given tier for parallel production
 	# capacity, same as the old single "Factory" button already allowed.
-	_add_build_button("🏭 Light Manufactory\n150M 30C", Color(0.68, 0.6, 0.42), func():
-		_begin_placement({"kind": "light_manufactory", "cost_metal": 150, "cost_crystal": 30}))
-	_add_build_button("🏭 Medium Manufactory\n220M 55C", Color(0.72, 0.55, 0.42), func():
-		_begin_placement({"kind": "medium_manufactory", "cost_metal": 220, "cost_crystal": 55}))
-	_add_build_button("🏭 Heavy Manufactory\n320M 85C", Color(0.6, 0.42, 0.35), func():
-		_begin_placement({"kind": "heavy_manufactory", "cost_metal": 320, "cost_crystal": 85}))
-	_add_build_button("⛽ Refinery\n150M", Color(0.55, 0.62, 0.75), func():
-		_begin_placement({"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}))
-	# Real supply-side Energy building (FABLE_REVIEW.md 2.7) - previously
-	# capacity only ever came from generator modules bolted onto units/
-	# defenses, so losing the one tank carrying a fusion_generator meant
-	# losing the base's power. Cost/stats live in building.gd's PREFAB_STATS.
-	_add_build_button("⚡ Power Plant\n180M 40C", Color(0.85, 0.65, 0.2), func():
-		_begin_placement({"kind": "power_plant", "cost_metal": 180, "cost_crystal": 40}))
+	# RTS_CORE_ROADMAP.md C2: costs read straight from building.gd's
+	# PREFAB_STATS instead of being duplicated here as literals (the label
+	# strings/colors below are presentation-only, not a second source of
+	# cost truth - see this same building's define in PREFAB_STATS for the
+	# real numbers).
+	const PREFAB_BUTTON_LABELS := {
+		"light_manufactory": "🏭 Light Manufactory",
+		"medium_manufactory": "🏭 Medium Manufactory",
+		"heavy_manufactory": "🏭 Heavy Manufactory",
+		"refinery": "⛽ Refinery",
+		# Real supply-side Energy building (FABLE_REVIEW.md 2.7) - previously
+		# capacity only ever came from generator modules bolted onto units/
+		# defenses, so losing the one tank carrying a fusion_generator meant
+		# losing the base's power.
+		"power_plant": "⚡ Power Plant",
+	}
+	const PREFAB_BUTTON_COLORS := {
+		"light_manufactory": Color(0.68, 0.6, 0.42),
+		"medium_manufactory": Color(0.72, 0.55, 0.42),
+		"heavy_manufactory": Color(0.6, 0.42, 0.35),
+		"refinery": Color(0.55, 0.62, 0.75),
+		"power_plant": Color(0.85, 0.65, 0.2),
+	}
+	for kind in ["light_manufactory", "medium_manufactory", "heavy_manufactory", "refinery", "power_plant"]:
+		var stats = BuildingScript.PREFAB_STATS[kind]
+		var label_text = "%s\n%dM %dC" % [PREFAB_BUTTON_LABELS[kind], stats.cost_metal, stats.cost_crystal]
+		_add_build_button(label_text, PREFAB_BUTTON_COLORS[kind], func():
+			_begin_placement({"kind": kind, "cost_metal": stats.cost_metal, "cost_crystal": stats.cost_crystal}))
 
 	for entry in roster:
 		var e = entry
@@ -1658,40 +1672,126 @@ func _begin_placement(info: Dictionary):
 			ring.material_override = ring_mat
 			placement_ghost.add_child(ring)
 
+	_show_buildable_area_decals()
+
+# RTS_CORE_ROADMAP.md C3: "render the union as a translucent ground decal
+# so the rule is visible instead of guessed at." One flat disc per friendly
+# building that gives_buildable_area, radius'd out to that building's own
+# adjacent_m plus its footprint's own half-diagonal - a circle is a
+# deliberately conservative (slightly generous at the corners) stand-in for
+# the true rounded-rectangle zone _footprint_gap() actually checks, same
+# "continuous AABBs, not a precise per-tile grid" simplification this whole
+# chunk already leans on.
+var _buildable_area_decals: Array = []
+
+func _show_buildable_area_decals() -> void:
+	if not _placing_requires_buildable_area():
+		return
+	# The reach is a property of whatever's currently being PLACED (see
+	# _placing_adjacent_m()'s own comment) - one shared value for every
+	# anchor's decal this placement session, not a per-building radius.
+	var reach = _placing_adjacent_m()
+	for b in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(b) or b.is_dead or b.team != PLAYER_TEAM: continue
+		if not ("gives_buildable_area" in b and b.gives_buildable_area): continue
+		var b_fp: Vector3 = b.footprint if "footprint" in b else Vector3(5, 3, 5)
+		var radius = reach + Vector2(b_fp.x, b_fp.z).length() / 2.0
+		var decal = MeshInstance3D.new()
+		var disc = CylinderMesh.new()
+		disc.top_radius = radius
+		disc.bottom_radius = radius
+		disc.height = 0.05
+		decal.mesh = disc
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.3, 0.85, 1.0, 0.12)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		decal.material_override = mat
+		add_child(decal)
+		decal.global_position = Vector3(b.global_position.x, terrain_height_at(b.global_position) + 0.05, b.global_position.z)
+		_buildable_area_decals.append(decal)
+
+func _clear_buildable_area_decals() -> void:
+	for d in _buildable_area_decals:
+		if is_instance_valid(d):
+			d.queue_free()
+	_buildable_area_decals.clear()
+
 func _cancel_placement():
 	placing = {}
 	if is_instance_valid(placement_ghost):
 		placement_ghost.queue_free()
 	placement_ghost = null
+	_clear_buildable_area_decals()
 
 # Shared by both the live ghost-color check (every mouse-move while
 # placing) and the actual placement attempt, so the two can never
 # disagree - position-dependent rules only (terrain/base-proximity), not
 # affordability, which doesn't change as the mouse moves and is checked
 # separately at _begin_placement/_try_place_building time.
+# RTS_CORE_ROADMAP.md C2: 2m lattice over a footprint's XZ rect, edge-to-edge
+# inclusive (OpenRA's CanPlaceBuilding = Tiles.All(IsCellBuildable), the
+# continuous-3D equivalent of walking every tile a building would occupy).
+# center.y is carried through unchanged - only x/z vary, since every real
+# check this feeds (bounds/is_position_blocked/resource overlap) is an XZ
+# footprint test.
+const PLACEMENT_LATTICE: float = 2.0
+
+func _footprint_samples(center: Vector3, footprint: Vector3) -> Array:
+	var samples: Array = []
+	var half_x = footprint.x / 2.0
+	var half_z = footprint.z / 2.0
+	var steps_x = max(1, int(ceil((half_x * 2.0) / PLACEMENT_LATTICE)))
+	var steps_z = max(1, int(ceil((half_z * 2.0) / PLACEMENT_LATTICE)))
+	for iz in range(steps_z + 1):
+		var z = center.z - half_z + (half_z * 2.0) * iz / steps_z
+		for ix in range(steps_x + 1):
+			var x = center.x - half_x + (half_x * 2.0) * ix / steps_x
+			samples.append(Vector3(x, center.y, z))
+	return samples
+
 func _placement_validity(pos: Vector3) -> Dictionary:
-	# RTS_CORE_ROADMAP.md B6: the missing map-bounds check - is_position_blocked()
-	# reads map_half_extents but only ever used it for ramp geometry, never
-	# an actual bounds test, so nothing stopped placing a building past the
-	# edge of the map.
 	var half: float = current_map.get("map_half_extents", 80.0)
-	if abs(pos.x) > half or abs(pos.z) > half:
-		return {"valid": false, "reason": "Outside the map boundary!"}
-	# Terrain check first (water/obstacles/ramp slopes are never buildable,
-	# regardless of proximity to a friendly building) - a real check added
-	# alongside multi-map terrain; previously nothing stopped a building
-	# from being placed inside the lake since there was no terrain data to
-	# check against at all.
-	if TerrainBuilder.is_position_blocked(current_map, pos):
-		return {"valid": false, "reason": "Can't build on water or terrain obstacles!"}
 	# Footprint of what's being placed - buildings occupy real space now
 	# (FABLE_REVIEW.md 3.3: the placement ray only ever hit the ground layer,
 	# so nothing stopped stacking a new building inside an existing one).
 	var new_footprint = _placing_footprint()
-	# Must be near your base (within 28m of any friendly building) and
-	# clear of the enemy's (their base being reachable at all doesn't mean
-	# it's "yours" to build next to).
-	var near_base = false
+
+	# RTS_CORE_ROADMAP.md C2: sample the WHOLE footprint, not just the
+	# center point - previously a large building's center could sit on
+	# legal ground while a corner overhung water, a cliff-steep slope
+	# (meaningful post-B5's heightmaps), or even the map edge, entirely
+	# unchecked. Map-bounds and terrain-blocked (water/obstacles/over-slope,
+	# matching OpenRA's "buildings never on ramps" rule) both fold into
+	# this one lattice walk now instead of a single center-point check.
+	for sample in _footprint_samples(pos, new_footprint):
+		if abs(sample.x) > half or abs(sample.z) > half:
+			return {"valid": false, "reason": "Outside the map boundary!"}
+		if TerrainBuilder.is_position_blocked(current_map, sample):
+			return {"valid": false, "reason": "Can't build on water, terrain obstacles, or a steep slope!"}
+
+	# Resource-node exclusion - a harvestable node isn't buildable ground
+	# (OpenRA-style; nothing previously stopped a building from being
+	# dropped directly on top of one).
+	for r in current_map.get("resource_nodes", []):
+		if abs(r.position.x - pos.x) < new_footprint.x / 2.0 and abs(r.position.z - pos.z) < new_footprint.z / 2.0:
+			return {"valid": false, "reason": "Can't build on top of a resource node!"}
+
+	# RTS_CORE_ROADMAP.md C3: buildable-area adjacency - the substance of
+	# OpenRA's IsCloseEnoughToBase, measured footprint-to-footprint (the
+	# real gap between the two buildings' AABBs) instead of center-to-
+	# center. The reach is a property of WHATEVER'S BEING PLACED (OpenRA's
+	# per-building-type Adjacent rule) - a defense's own much longer leash
+	# (28m) is what lets it ring the outside of a base, not a bigger zone
+	# radiated by existing buildings. Only friendly buildings that GIVE
+	# buildable area count as anchors to measure against (a ring of
+	# defenses shouldn't let the base spiral outward indefinitely - a
+	# defense itself never anchors a further placement). Clear of the
+	# enemy's zone stays a plain center-to-center check - a denial radius,
+	# not a buildable-area rule.
+	var requires_area = _placing_requires_buildable_area()
+	var placing_reach = _placing_adjacent_m()
+	var near_base = not requires_area
 	for b in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(b) or b.is_dead: continue
 		# XZ footprint overlap against every existing building, either team -
@@ -1701,13 +1801,67 @@ func _placement_validity(pos: Vector3) -> Dictionary:
 		var dz = abs(b.global_position.z - pos.z)
 		if dx < (b_fp.x + new_footprint.x) / 2.0 + 0.5 and dz < (b_fp.z + new_footprint.z) / 2.0 + 0.5:
 			return {"valid": false, "reason": "Blocked by another building!"}
-		if b.team == PLAYER_TEAM and b.global_position.distance_to(pos) < 28.0:
-			near_base = true
-		elif b.team != PLAYER_TEAM and b.global_position.distance_to(pos) < 20.0:
+		if b.team == PLAYER_TEAM:
+			if not near_base and "gives_buildable_area" in b and b.gives_buildable_area:
+				if _footprint_gap(b.global_position, b_fp, pos, new_footprint) <= placing_reach:
+					near_base = true
+		elif b.global_position.distance_to(pos) < 20.0:
 			return {"valid": false, "reason": "Too close to enemy territory!"}
 	if not near_base:
 		return {"valid": false, "reason": "Too far from your base!"}
 	return {"valid": true, "reason": ""}
+
+# Real gap between two XZ footprint AABBs (0 if overlapping or touching),
+# not a center-to-center distance.
+func _footprint_gap(a_center: Vector3, a_footprint: Vector3, b_center: Vector3, b_footprint: Vector3) -> float:
+	var dx = max(0.0, abs(a_center.x - b_center.x) - (a_footprint.x + b_footprint.x) / 2.0)
+	var dz = max(0.0, abs(a_center.z - b_center.z) - (a_footprint.z + b_footprint.z) / 2.0)
+	return Vector2(dx, dz).length()
+
+# Whether whatever's currently `placing` needs to be within someone's
+# buildable-area zone at all (everything does today - see PREFAB_STATS/
+# setup_defense() - but this is a real field, not a hardcoded true, so a
+# future building type could opt out without new branching here).
+func _placing_requires_buildable_area() -> bool:
+	if placing.is_empty():
+		return true
+	if placing.kind == "defense":
+		return true
+	return BuildingScript.PREFAB_STATS[placing.kind].get("requires_buildable_area", true)
+
+# How far whatever's currently `placing` is allowed to be from the nearest
+# gives_buildable_area anchor - a property of the THING BEING PLACED
+# (OpenRA's per-building-type Adjacent), not of whatever it's being measured
+# against. Defenses get the long 28m leash; every prefab kind defaults to
+# 8.0 via PREFAB_STATS.
+func _placing_adjacent_m() -> float:
+	if placing.is_empty():
+		return BuildingScript.DEFAULT_ADJACENT_M
+	if placing.kind == "defense":
+		return BuildingScript.DEFENSE_ADJACENT_M
+	return BuildingScript.PREFAB_STATS[placing.kind].get("adjacent_m", BuildingScript.DEFAULT_ADJACENT_M)
+
+# RTS_CORE_ROADMAP.md C2: OpenRA's ClearBlockersOrders, continuous-3D style -
+# a unit standing where a building is about to spawn gets physically shoved
+# clear instead of the placement failing outright (matches this project's
+# own "simplify vs OpenRA" call for C2: no discrete tiles/BuildingInfluence
+# layer needed, just an AABB and a straight teleport). Only the PLAYER's own
+# units get shoved - this only ever runs from the player's own placement
+# flow, and an enemy unit standing on the spot is contested ground, not "in
+# the way."
+func _shove_blockers_clear(center: Vector3, footprint: Vector3) -> void:
+	var half_x = footprint.x / 2.0 + 1.0
+	var half_z = footprint.z / 2.0 + 1.0
+	for u in get_team_units(PLAYER_TEAM):
+		if not is_instance_valid(u): continue
+		var dx = u.global_position.x - center.x
+		var dz = u.global_position.z - center.z
+		if abs(dx) >= half_x or abs(dz) >= half_z: continue
+		# Push out along whichever axis needs the shorter nudge.
+		if half_x - abs(dx) < half_z - abs(dz):
+			u.global_position.x = center.x + half_x * (1.0 if dx >= 0.0 else -1.0)
+		else:
+			u.global_position.z = center.z + half_z * (1.0 if dz >= 0.0 else -1.0)
 
 # Footprint of the building currently being placed (ghost/click validity).
 func _placing_footprint() -> Vector3:
@@ -1728,6 +1882,7 @@ func _try_place_building(pos: Vector3):
 		_flash_status("Not enough resources!")
 		_cancel_placement()
 		return
+	_shove_blockers_clear(pos, _placing_footprint())
 	if placing.kind == "defense":
 		spawn_defense(placing.blueprint, PLAYER_TEAM, pos)
 	else:

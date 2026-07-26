@@ -4,6 +4,27 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-26 — RTS_CORE_ROADMAP.md C2: real placement legality + C3: buildable-area adjacency
+
+**C2** replaces `_placement_validity()`'s single center-point check with OpenRA's `CanPlaceBuilding = Tiles.All(IsCellBuildable)`, continuous-3D style:
+- `_footprint_samples()` walks a 2m lattice over the WHOLE footprint rect (edge-to-edge inclusive) - a large building's center could previously sit on legal ground while a corner overhung water, a steep slope (meaningful post-B5's heightmaps), or the map edge, entirely unchecked.
+- Resource-node exclusion - a harvestable node was never buildable ground anywhere else in this game; nothing stopped a building from being dropped directly on it until now.
+- Cost literals in the build-bar buttons (`skirmish.gd`, duplicating `building.gd`'s own `PREFAB_STATS`) are gone - the buttons now read `cost_metal`/`cost_crystal` straight off `PREFAB_STATS` by kind.
+- `_shove_blockers_clear()`: OpenRA's `ClearBlockersOrders`, continuous-3D style - a friendly unit standing where a building is about to go gets teleported clear instead of the placement failing. Only the player's own units get shoved; an enemy unit on the spot is contested ground, a different problem.
+
+**C3** replaces the flat "within 28m of any friendly building" rule with real per-kind buildable-area adjacency (OpenRA's `IsCloseEnoughToBase`):
+- `PREFAB_STATS` gains `gives_buildable_area` (does an EXISTING building of this kind anchor other placements?) and `adjacent_m` (how far THIS kind may itself be placed from the nearest anchor, when it's the one being placed) - every prefab building defaults to 8.0m (~OpenRA's `Adjacent: 2`); `defense`-kind buildings (handled separately, not in the table) get a much longer 28.0m leash (~OpenRA's long-range defense class) since turrets ring a base's outside, and don't themselves anchor further placements (a ring of turrets shouldn't let the base spiral outward).
+- **Real design correction caught mid-implementation**: the reach is a property of the THING BEING PLACED (OpenRA's per-building-type `Adjacent`), not something radiated outward by existing buildings - my first pass had this backwards (existing building's own `adjacent_m` gating the check), which would have meant a defense already on the map made EVERYTHING placeable 28m out, not just other defenses. Caught before committing by reasoning through what a lone defense with nothing else nearby should allow (nothing, since it doesn't give_buildable_area) versus what my first implementation actually did.
+- Adjacency now measured footprint-to-footprint (`_footprint_gap()`, real AABB-to-AABB gap) instead of center-to-center.
+- A translucent ground decal (one flat disc per friendly anchor building, radius'd to whatever's currently being placed) renders the buildable-area union live during placement - "so the rule is visible instead of guessed at."
+- Skipped OpenRA's radial `BaseProvider` actor mechanism entirely, per this chunk's own note - it exists for scripted missions, which this project has none of.
+
+**Test-hygiene bug caught while writing C2's own tests**: `MapCatalog.get_map()` hands back the SAME cached Dictionary to every Skirmish instance loading a given map_id (no copy, by design - it's a process-lifetime cache). A test that mutates `skirmish.current_map.obstacles` to set up a synthetic scenario was leaking that mutation into every later test loading the same map, until it started popping its own addition back off before returning on every exit path.
+
+**Verified:** a footprint corner overhanging a synthetic obstacle is rejected even though the footprint's own center point is clear; placement on a resource node is rejected; a friendly unit standing on the placement spot gets shoved clear and the building still spawns; a defense can be placed ~20m (footprint gap) from the base while a regular building at the identical distance is correctly rejected - proving the reach really is per-kind, not still secretly a flat distance. Full suite green except the same pre-existing, already-documented cross-suite-isolation flake noted in C1's entry.
+
+---
+
 ## 2026-07-26 — RTS_CORE_ROADMAP.md C1: buildings actually block movement
 
 The highest-value non-terrain defect on the roadmap: units have always been able to drive straight through buildings (both physically and on the navmesh). Landed as two halves that had to ship together, per the roadmap's own note - a physics backstop plus a real dynamic navmesh.
