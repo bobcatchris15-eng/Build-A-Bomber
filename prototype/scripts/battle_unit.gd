@@ -671,6 +671,22 @@ func order_harvest(node: Node3D):
 	harvest_node = node
 	harvest_timer = 0.0
 
+# RTS_CORE_ROADMAP.md C4: OpenRA's NotifyBlocker/INotifyBlockingMove, minus
+# the cell abstraction - a factory whose exit is blocked calls this on
+# whatever's sitting in the way. Only nudges a genuinely IDLE unit (one
+# already under an active order is doing something on purpose and shouldn't
+# get yanked off course); the nudge is a short move order straight away
+# from the exit point, just far enough to actually clear it.
+const BLOCKER_NUDGE_DISTANCE: float = 4.0
+
+func notify_blocker(exit_pos: Vector3) -> void:
+	if order != OrderType.IDLE: return
+	var away = global_position - exit_pos
+	away.y = 0.0
+	if away.length() < 0.01:
+		away = Vector3(1, 0, 0)
+	order_move(global_position + away.normalized() * BLOCKER_NUDGE_DISTANCE)
+
 # RTS_CORE_ROADMAP.md B2: defers to skirmish.gd's is_allied() (slots'
 # `allies` lists) instead of hardcoded team equality. Duck-typed via
 # current_scene, same as auto_weapon.gd's identical helper - falls back to

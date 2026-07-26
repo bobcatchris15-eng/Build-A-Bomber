@@ -36,9 +36,15 @@ const PREFAB_STATS = {
 	# (a small boat and a light ground hull both need only the Light
 	# Manufactory). Escalating cost/HP/footprint per tier, same convention
 	# refinery/factory already used for "bigger building = pricier."
-	"light_manufactory":  {"hp": 1400.0, "size": Vector3(5, 2.4, 6),  "color": Color(0.68, 0.6, 0.42), "cost_metal": 150, "cost_crystal": 30, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M},
-	"medium_manufactory": {"hp": 1800.0, "size": Vector3(6, 3, 8),    "color": Color(0.72, 0.55, 0.42), "cost_metal": 220, "cost_crystal": 55, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M},
-	"heavy_manufactory":  {"hp": 2400.0, "size": Vector3(7.5, 3.8, 10), "color": Color(0.6, 0.42, 0.35), "cost_metal": 320, "cost_crystal": 85, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M},
+	# RTS_CORE_ROADMAP.md C4: exit_offset/exit_facing per kind, replacing the
+	# old footprint.z/2.0 + 3.0 formula computed inline at spawn time (same
+	# effective distances, just authored data now) - team-mirrored (x -1 for
+	# team 1) and height-snapped against real terrain in
+	# get_exit_position(), unlike the old flat offset that never snapped at
+	# all. Only the 3 manufactory kinds ever actually call spawn_from_queue().
+	"light_manufactory":  {"hp": 1400.0, "size": Vector3(5, 2.4, 6),  "color": Color(0.68, 0.6, 0.42), "cost_metal": 150, "cost_crystal": 30, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M, "exit_offset": Vector3(0, 0.5, 6.0), "exit_facing": Vector3(0, 0, 1)},
+	"medium_manufactory": {"hp": 1800.0, "size": Vector3(6, 3, 8),    "color": Color(0.72, 0.55, 0.42), "cost_metal": 220, "cost_crystal": 55, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M, "exit_offset": Vector3(0, 0.5, 7.0), "exit_facing": Vector3(0, 0, 1)},
+	"heavy_manufactory":  {"hp": 2400.0, "size": Vector3(7.5, 3.8, 10), "color": Color(0.6, 0.42, 0.35), "cost_metal": 320, "cost_crystal": 85, "gives_buildable_area": true, "requires_buildable_area": true, "adjacent_m": DEFAULT_ADJACENT_M, "exit_offset": Vector3(0, 0.5, 8.0), "exit_facing": Vector3(0, 0, 1)},
 	# FABLE_REVIEW.md 2.7: a real supply-side building for team Energy -
 	# previously capacity only ever came from generator MODULES bolted onto
 	# units/defenses, so "put a fusion_generator on a tank so the base builds
@@ -393,6 +399,42 @@ func queue_unit(blueprint_data: Dictionary, build_time: float):
 	production_queue.append({"blueprint": blueprint_data, "time_left": build_time, "total_time": build_time})
 	_update_hp_bar()
 
+# RTS_CORE_ROADMAP.md C4: real exit point - PREFAB_STATS' per-kind
+# exit_offset (team-mirrored, x -1 for team 1, same as the old inline
+# formula) height-snapped against real terrain, unlike the old flat offset
+# (building.gd:333's Vector3(0, 0.5, footprint.z/2.0 + 3.0)) which never
+# snapped at all and got worse on genuinely hilly maps. Duck-typed
+# terrain_height_at() lookup, same pattern battle_unit.gd's own ground-snap
+# already uses - falls back to the unsnapped offset for any synthetic test
+# building with no real Skirmish parent.
+func get_exit_position() -> Vector3:
+	var stats = PREFAB_STATS.get(kind, {})
+	var offset: Vector3 = stats.get("exit_offset", Vector3(0, 0.5, footprint.z / 2.0 + 3.0))
+	offset.x *= (1 if team == 0 else -1)
+	offset.z *= (1 if team == 0 else -1)
+	var pos = global_position + offset
+	var terrain_controller = get_parent()
+	if terrain_controller and terrain_controller.has_method("terrain_height_at"):
+		pos.y = terrain_controller.terrain_height_at(pos) + 0.5
+	return pos
+
+# RTS_CORE_ROADMAP.md C4: OpenRA's blocked-exit detection, minus the cell
+# abstraction - any living unit sitting within a real-world radius of the
+# exit point counts as "in the way." Used by production_queue.gd's tick()
+# to hold a finished job at the front of the queue (already "done", just
+# waiting) instead of spawning a new unit on top of whatever's blocking.
+const EXIT_CLEARANCE_RADIUS: float = 2.5
+
+func get_exit_blockers() -> Array:
+	var blockers: Array = []
+	var tree = get_tree()
+	if not tree: return blockers
+	var exit_pos = get_exit_position()
+	for u in tree.get_nodes_in_group("units"):
+		if is_instance_valid(u) and not u.is_dead and u.global_position.distance_to(exit_pos) < EXIT_CLEARANCE_RADIUS:
+			blockers.append(u)
+	return blockers
+
 # Called by ProductionQueue.tick() when a job for this building's team+tier
 # completes - not necessarily called on the SAME instance queue_unit()/
 # enqueue() was invoked through, since multiple manufactories of one tier
@@ -404,9 +446,7 @@ func spawn_from_queue(blueprint_data: Dictionary):
 	var unit = CharacterBody3D.new()
 	unit.set_script(load("res://scripts/battle_unit.gd"))
 	get_parent().add_child(unit)
-	var exit_offset = Vector3(0, 0.5, footprint.z / 2.0 + 3.0) * (1 if team == 0 else -1)
-	exit_offset.y = 0.5
-	unit.global_position = global_position + exit_offset
+	unit.global_position = get_exit_position()
 	# The factory's own faction IS the match faction for this team (set at
 	# spawn from player_faction/enemy_faction - see skirmish.gd's
 	# _spawn_starting_manufactories()) - passing it through here is what

@@ -4,6 +4,22 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-26 — RTS_CORE_ROADMAP.md C4: exits and rally points
+
+Closes out Phase C. `building.gd:333`'s hardcoded exit offset (`Vector3(0, 0.5, footprint.z/2.0 + 3.0)`, no terrain height snap at all, unlike `skirmish.gd`'s own `terrain_height_at()` everywhere else) becomes real per-kind data, plus OpenRA's blocked-exit handling and a genuinely settable rally point.
+
+**Shipped:**
+- `PREFAB_STATS` gains `exit_offset`/`exit_facing` for the 3 manufactory kinds (the only ones that ever call `spawn_from_queue()`) - same effective distances as the old inline formula, now authored data. `building.gd`'s new `get_exit_position()` height-snaps the result via the same duck-typed `terrain_height_at()` lookup `battle_unit.gd`'s own ground-snap already uses (falls back to the unsnapped offset for a synthetic test building with no real Skirmish parent).
+- `get_exit_blockers()`: any living unit within a real-world radius of the exit counts as blocking it (OpenRA's blocked-exit check, minus the cell abstraction).
+- `production_queue.gd`'s `tick()`: a finished job whose factory's exit is blocked stays at the front of the queue with `time_left` clamped at 0 (already "done," just waiting) instead of popping and spawning on top of whatever's in the way - retried every subsequent tick until the exit clears. Blockers get a real nudge via `battle_unit.gd`'s new `notify_blocker()` (OpenRA's `NotifyBlocker`/`INotifyBlockingMove`) - a short move order straight away from the exit, but only for a genuinely IDLE unit; one already under an active order is doing something on purpose and doesn't get yanked off course.
+- Settable rally point: select a manufactory (or several) and right-click ground sets their `rally_point` for real (`skirmish.gd`'s `_selected_manufactories()` + a new branch in `_issue_order()`), replacing the old hardcoded `±10z` default that only applied at spawn time and could never be changed.
+
+**Real edge case found writing the blocked-exit test**: lake_crossing's 3 manufactories (light/medium/heavy) sit close together, offset only ±8 in X from one shared factory spawn point. `notify_blocker()`'s straight-line nudge (away from the exit point, a fixed distance) doesn't itself check whether that direction walks toward a NEIGHBORING building - one of 4 test blockers nudged in -X got stuck oscillating a few meters short of clearing, sitting almost exactly on the neighboring heavy manufactory's own footprint edge, needing a real navmesh detour it never quite completed in the test's tick budget. Not a bug in the mechanism itself (a real player's units are rarely parked in a tight X-aligned line next to 3 clustered manufactories) - fixed by spreading the test's blockers with a deliberate +Z bias (away from the whole cluster, into open ground) instead of ±X.
+
+**Verified:** exit position is snapped to real terrain height on a heightmap map (highland_chokepoint), not a flat offset. 4 real units parked on a factory's exit hold a finished job `done` (never popped) until nudged clear, each blocker's `order` genuinely becomes `MOVE`, and the job eventually spawns once the exit is actually free. A manufactory's `rally_point` is settable, and a freshly-produced unit's own move order genuinely targets the new point, not the old default. Full suite green except the same pre-existing, already-documented cross-suite-isolation flake noted in C1/C2/C3's entries.
+
+---
+
 ## 2026-07-26 — RTS_CORE_ROADMAP.md C2: real placement legality + C3: buildable-area adjacency
 
 **C2** replaces `_placement_validity()`'s single center-point check with OpenRA's `CanPlaceBuilding = Tiles.All(IsCellBuildable)`, continuous-3D style:

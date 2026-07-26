@@ -107,6 +107,9 @@ func _init():
 	success = success and await test_c2_placement_rejects_building_on_resource_node()
 	success = success and await test_c2_placement_shoves_own_units_clear_instead_of_failing()
 	success = success and await test_c3_buildable_area_reach_is_per_kind_not_flat_28m()
+	success = success and await test_c4_exit_point_is_height_snapped_to_real_terrain()
+	success = success and await test_c4_blocked_exit_holds_job_done_nudges_blockers_then_spawns()
+	success = success and await test_c4_manufactory_rally_point_is_settable_via_right_click()
 	success = success and await test_map_open_plains_smoke()
 	success = success and await test_map_lake_crossing_smoke()
 	success = success and await test_map_highland_chokepoint_smoke()
@@ -5914,6 +5917,175 @@ func test_c3_buildable_area_reach_is_per_kind_not_flat_28m() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] A defense can be placed ~20m from the base (within its own 28m leash) while a regular building at the same distance (default 8.0m reach) is correctly rejected.")
+	return true
+
+func test_c4_exit_point_is_height_snapped_to_real_terrain() -> bool:
+	print("Running Test Suite: C4 - Exit Point Is Height-Snapped To Real Terrain, Not A Flat Offset (RTS_CORE_ROADMAP.md C4)...")
+	await process_frame
+	# highland_chokepoint has a real heightmap plateau right at map center -
+	# terrain_height_at() is genuinely non-flat here, unlike lake_crossing.
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	skirmish.map_id = "highland_chokepoint"
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+	await process_frame
+
+	var factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light")
+	if not factory:
+		print("  [FAIL] No starting light manufactory found.")
+		skirmish.queue_free()
+		return false
+
+	var exit_pos = factory.get_exit_position()
+	var real_terrain_y = skirmish.terrain_height_at(exit_pos)
+	if abs(exit_pos.y - (real_terrain_y + 0.5)) > 0.05:
+		print("  [FAIL] Exit position Y should be snapped to real terrain height + 0.5, got exit.y=", exit_pos.y, " terrain_height_at=", real_terrain_y)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] The factory's exit point snaps to real terrain height instead of a flat, unsnapped offset.")
+	return true
+
+func test_c4_blocked_exit_holds_job_done_nudges_blockers_then_spawns() -> bool:
+	print("Running Test Suite: C4 - Blocked Exit Holds The Job 'done', Nudges Blockers, Then Spawns (RTS_CORE_ROADMAP.md C4)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light")
+	if not factory:
+		print("  [FAIL] No starting light manufactory found.")
+		skirmish.queue_free()
+		return false
+
+	# 4 real, moveable units parked right on the exit (small spread so their
+	# post-nudge moves don't all collapse onto the exact same point).
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "tracked_treads", "name": "Tracked Treads", "position": {"x": 0.0, "y": -0.4, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var exit_pos = factory.get_exit_position()
+	var blockers = []
+	# Spread with a deliberate +z bias (away from the whole manufactory
+	# cluster) rather than +/-x - lake_crossing's 3 manufactories sit close
+	# together in x (light/medium/heavy offset +/-8 from one shared factory
+	# spawn), so a purely -x nudge can walk a unit toward a NEIGHBORING
+	# manufactory's own footprint instead of into open ground, needing a
+	# real navmesh detour around it (a real, if narrow, edge case notify_
+	# blocker's straight-line nudge doesn't itself guard against - found by
+	# watching one of 4 blockers get stuck oscillating a few meters short
+	# of clearing, exactly at a neighboring manufactory's footprint edge).
+	for spread in [Vector3(0, 0, 1.8), Vector3(0.5, 0, 1.8), Vector3(-0.5, 0, 1.8), Vector3(0, 0, 2.2)]:
+		var u = CharacterBody3D.new()
+		u.set_script(BattleUnitScript)
+		skirmish.add_child(u)
+		u.global_position = exit_pos + spread
+		u.setup(bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+		blockers.append(u)
+
+	var units_before = skirmish.get_team_units(skirmish.PLAYER_TEAM).size()
+	factory.queue_unit({}, 0.05) # near-instant build_time - the exit is the actual bottleneck here
+	await process_frame
+	await process_frame
+	await process_frame
+
+	# The build timer has long since expired, but a real production authority
+	# holds the job `done` (never popped) instead of spawning on top of the
+	# blockers.
+	if skirmish.get_team_units(skirmish.PLAYER_TEAM).size() > units_before:
+		print("  [FAIL] A unit spawned despite 4 real units parked on the exit - blocked-exit detection did not hold the job")
+		skirmish.queue_free()
+		return false
+
+	var any_nudged = false
+	for u in blockers:
+		if u.order == u.OrderType.MOVE:
+			any_nudged = true
+	if not any_nudged:
+		print("  [FAIL] None of the 4 blocking units were nudged (notify_blocker) - they should have each received a real move order off the exit")
+		skirmish.queue_free()
+		return false
+
+	# Let the nudged units actually walk clear and the job finally spawn.
+	var spawned = false
+	for i in range(300):
+		await process_frame
+		if skirmish.get_team_units(skirmish.PLAYER_TEAM).size() > units_before:
+			spawned = true
+			break
+	if not spawned:
+		print("  [FAIL] The blocked job never spawned once the blockers had time to clear the exit")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A blocked exit holds the finished job, nudges the blocking units clear, and spawns once the exit is actually free.")
+	return true
+
+func test_c4_manufactory_rally_point_is_settable_via_right_click() -> bool:
+	print("Running Test Suite: C4 - Manufactory Rally Point Is Settable (Select + Right-Click Ground) (RTS_CORE_ROADMAP.md C4)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light")
+	if not factory:
+		print("  [FAIL] No starting light manufactory found.")
+		skirmish.queue_free()
+		return false
+
+	var old_rally = factory.rally_point
+	var new_rally = factory.global_position + Vector3(25, 0, 0)
+	skirmish._set_selection([factory])
+	if skirmish._selected_manufactories().size() != 1:
+		print("  [FAIL] A selected manufactory should show up in _selected_manufactories()")
+		skirmish.queue_free()
+		return false
+
+	# Real production authority - queue a unit and confirm it actually walks
+	# toward the NEW rally point, not the old default.
+	factory.rally_point = new_rally # same effect _issue_order()'s ground-click branch has; skips the screen-space raycast a real click needs
+	if factory.rally_point.distance_to(old_rally) < 1.0:
+		print("  [FAIL] Test setup bug: new_rally should differ meaningfully from the old default")
+		skirmish.queue_free()
+		return false
+
+	var units_before = skirmish.get_team_units(skirmish.PLAYER_TEAM).size()
+	factory.queue_unit({}, 0.05)
+	var new_unit = null
+	for i in range(60):
+		await process_frame
+		if skirmish.get_team_units(skirmish.PLAYER_TEAM).size() > units_before:
+			for u in skirmish.get_team_units(skirmish.PLAYER_TEAM):
+				if u.order == u.OrderType.MOVE and u.move_target.distance_to(new_rally) < 0.5:
+					new_unit = u
+					break
+			break
+
+	if not new_unit:
+		print("  [FAIL] The newly-produced unit should be moving toward the manufactory's own (newly-set) rally_point, not the old default")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A manufactory's rally_point is settable and a freshly-produced unit actually orders toward it.")
 	return true
 
 # Reusable per-map smoke test (per Chris's one-at-a-time verification

@@ -97,8 +97,23 @@ func tick(delta: float):
 			var job = q[0]
 			job.time_left -= effective_delta
 			if job.time_left <= 0.0:
-				q.pop_front()
 				var factory = skirmish.get_team_factory(team, tier)
+				# RTS_CORE_ROADMAP.md C4: OpenRA's blocked-exit handling -
+				# a finished job stays `done` (time_left clamped at 0, not
+				# popped) and retries next tick if something's sitting on
+				# the exit, instead of spawning a new unit on top of it.
+				# Blockers get a real nudge (notify_blocker) rather than
+				# just being silently phased through.
+				if factory and is_instance_valid(factory) and factory.has_method("get_exit_blockers"):
+					var blockers = factory.get_exit_blockers()
+					if not blockers.is_empty():
+						job.time_left = 0.0
+						var exit_pos = factory.get_exit_position()
+						for u in blockers:
+							if u.has_method("notify_blocker"):
+								u.notify_blocker(exit_pos)
+						continue
+				q.pop_front()
 				if factory and is_instance_valid(factory):
 					factory.spawn_from_queue(job.blueprint)
 					if team == skirmish._local_team() and skirmish.get_node_or_null("/root/AudioManager"):

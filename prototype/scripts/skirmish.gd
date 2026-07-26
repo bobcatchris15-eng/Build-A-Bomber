@@ -95,6 +95,50 @@ var energy_tick_timer: float = 0.0
 # and this scan is O(player constructs x enemy constructs) every tick.
 const FOG_TICK_INTERVAL: float = 0.3
 
+# PERFORMANCE_PLAN.md P1c: auto_weapon.gd's _find_nearest_target() used to
+# scan get_tree().get_nodes_in_group("damageable") - EVERY damageable
+# construct in the match - for EVERY weapon reacquiring a target, an O(N)
+# scan per weapon that becomes O(N^2) the moment many weapons lose their
+# targets in the same tick (an alpha strike, a cluster dying together -
+# exactly the "fine at 5-6 units, falls off a cliff past that" shape
+# reported). This grid buckets every damageable construct by position on
+# the same throttled cadence as fog, and get_nearby_damageable() below lets
+# a weapon only scan the handful of cells within its own fire_range instead
+# of the whole roster. Cell size is a rough middle ground across the actual
+# fire_range spread in auto_weapon.gd (9-50) - small enough that short-range
+# weapons don't over-scan, large enough that long-range weapons only touch
+# a handful of cells, not hundreds.
+const DAMAGEABLE_GRID_CELL_SIZE: float = 20.0
+var _damageable_grid: Dictionary = {}
+
+func _rebuild_damageable_grid():
+	_damageable_grid.clear()
+	for c in get_tree().get_nodes_in_group("damageable"):
+		if not is_instance_valid(c):
+			continue
+		var cell = Vector2i(floori(c.global_position.x / DAMAGEABLE_GRID_CELL_SIZE), floori(c.global_position.z / DAMAGEABLE_GRID_CELL_SIZE))
+		if not _damageable_grid.has(cell):
+			_damageable_grid[cell] = []
+		_damageable_grid[cell].append(c)
+
+# Returns every "damageable" construct within `radius` of `pos` (a superset -
+# callers still do their own precise distance check, same as they did
+# against the old whole-roster scan; this only narrows which candidates get
+# considered at all). Duck-typed entry point (auto_weapon.gd calls this via
+# `current_scene.get_nearby_damageable(...)` if the method exists, falling
+# back to the old full-roster scan otherwise) so test fixtures and the Test
+# Range - neither of which has a real Skirmish - keep working unchanged.
+func get_nearby_damageable(pos: Vector3, radius: float) -> Array:
+	var result = []
+	var min_cell = Vector2i(floori((pos.x - radius) / DAMAGEABLE_GRID_CELL_SIZE), floori((pos.z - radius) / DAMAGEABLE_GRID_CELL_SIZE))
+	var max_cell = Vector2i(floori((pos.x + radius) / DAMAGEABLE_GRID_CELL_SIZE), floori((pos.z + radius) / DAMAGEABLE_GRID_CELL_SIZE))
+	for cx in range(min_cell.x, max_cell.x + 1):
+		for cz in range(min_cell.y, max_cell.y + 1):
+			var cell = Vector2i(cx, cz)
+			if _damageable_grid.has(cell):
+				result.append_array(_damageable_grid[cell])
+	return result
+
 # Real pathfinding + naval terrain (built two passes ago - the map was
 # flat and open with nothing to route around, and naval units were purely
 # Y-locked to a fixed waterline with no actual water/land distinction
@@ -378,6 +422,14 @@ func _ready():
 	add_child(fog_timer)
 	fog_timer.timeout.connect(_recalc_fog_of_war)
 	_recalc_fog_of_war() # populate before the first tick so enemies aren't briefly visible at match start
+
+	# PERFORMANCE_PLAN.md P1c - same cadence/pattern as fog above.
+	var grid_timer = Timer.new()
+	grid_timer.wait_time = FOG_TICK_INTERVAL
+	grid_timer.autostart = true
+	add_child(grid_timer)
+	grid_timer.timeout.connect(_rebuild_damageable_grid)
+	_rebuild_damageable_grid() # populate before the first tick so early reacquisition isn't scanning an empty grid
 
 # Production used to tick inside every manufactory's own _physics_process()
 # (building.gd); centralized here now that one ProductionQueue owns every
@@ -2009,10 +2061,30 @@ func _update_hover_cursor(screen_pos: Vector2) -> void:
 	else:
 		cm.set_cursor(cm.CursorType.DEFAULT)
 
+# RTS_CORE_ROADMAP.md C4: manufactories a player has selected and
+# right-clicked ground for - replaces building.gd:168's old hardcoded ±10z
+# rally_point default with a real settable one.
+func _selected_manufactories() -> Array:
+	var result: Array = []
+	for s in selected:
+		if is_instance_valid(s) and "kind" in s and s.kind in BuildingScript.MANUFACTORY_KINDS:
+			result.append(s)
+	return result
+
 func _issue_order(screen_pos: Vector2):
 	if selected.is_empty(): return
 	if get_node_or_null("/root/AudioManager"):
 		get_node("/root/AudioManager").play_sfx("select", 0.15)
+
+	var manufactories = _selected_manufactories()
+	if not manufactories.is_empty():
+		var rally_ground = _raycast_ground(screen_pos)
+		if rally_ground != null:
+			for m in manufactories:
+				m.rally_point = rally_ground
+			_spawn_order_marker(rally_ground, Color.GOLD)
+		return
+
 	# Check click on enemy / resource node first
 	var result = _raycast_screen(screen_pos, 4 + 8 + 16)
 	if result and result.collider:

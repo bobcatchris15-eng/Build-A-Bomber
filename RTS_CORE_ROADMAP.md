@@ -1,13 +1,22 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3 landed; B8 in
-progress (1 of N maps landed).** This is a resumable roadmap, written so a fresh session can pick up any
+**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3, C4 landed (Phase C
+complete); B8 in progress (1 of N maps landed).** This is a resumable roadmap, written so a fresh session can pick up any
 single chunk without re-deriving the architecture. Chunks are ordered with
 explicit dependencies in the sequencing table at the end; each is sized to land
 as one commit with its own `PROGRESS.md` entry. **Update the sequencing
 table's status as chunks land** — a stale "next up" header in a plan doc is
 exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before
-being corrected on 2026-07-24. **Next up: C4** (exits and rally points).
+being corrected on 2026-07-24. **Next up: Phase D** (production depth,
+starting with D1's drip-fed cost/pause-on-broke/refunds), or continue B8 -
+confirm which.
+
+**C4 found a real, narrow edge case writing its own test:** `notify_blocker()`'s
+straight-line nudge doesn't check whether that direction walks toward a
+NEIGHBORING building - harmless for real play (units are rarely parked in a
+tight line next to 3 clustered manufactories) but worth knowing about if a
+future map ever puts manufactories close enough together for this to matter
+in practice. See `PROGRESS.md`'s C4 entry.
 
 **C1 landed both halves together** (physics backstop + dynamic navmesh), per
 this doc's own note that they had to ship together. Found and fixed a real
@@ -647,7 +656,7 @@ readback) over catalog-number assertions.
 | 13 | C1 buildings block movement | multi | — | **Done** |
 | 14 | C2 real placement legality | one session | B6 | **Done** |
 | 15 | C3 buildable area / adjacency | afternoon | C2 | **Done** |
-| 16 | C4 exits + rally points | one session | A1, C1 | — |
+| 16 | C4 exits + rally points | one session | A1, C1 | **Done** |
 | 17 | D1 drip-fed cost + refunds | one session | A1, A2 | — |
 | 18 | D2 queue HUD + tabs | one session | D1 | — |
 | 19 | D3 multi-factory speed | afternoon | A1 | — |
