@@ -115,6 +115,8 @@ func _init():
 	success = success and await test_d2_build_bar_tabs_switch_visibility_and_pressed_state()
 	success = success and await test_d2_unit_buttons_grey_out_without_a_live_manufactory_of_that_tier()
 	success = success and await test_d2_queue_strip_right_click_pauses_then_cancels()
+	success = success and await test_d3_second_manufactory_of_a_tier_gives_075x_build_time()
+	success = success and await test_d3_destroying_a_manufactory_mid_job_leaves_the_timer_alone()
 	success = success and await test_map_open_plains_smoke()
 	success = success and await test_map_lake_crossing_smoke()
 	success = success and await test_map_highland_chokepoint_smoke()
@@ -6377,6 +6379,102 @@ func test_d2_queue_strip_right_click_pauses_then_cancels() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Right-clicking a queue strip pauses the front job; a second right-click while paused cancels and refunds it.")
+	return true
+
+func test_d3_second_manufactory_of_a_tier_gives_075x_build_time() -> bool:
+	print("Running Test Suite: D3 - A Second Manufactory Of A Tier Gives 0.75x Build Time (RTS_CORE_ROADMAP.md D3)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var heavy_factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "heavy")
+	if not heavy_factory:
+		print("  [FAIL] No starting heavy manufactory found.")
+		skirmish.queue_free()
+		return false
+
+	var base_time = skirmish.build_time_for_cost(Vector2i(300, 0))
+	# _d1_test_blueprint() is medium-tier by default (medium_hull) - force
+	# heavy tier for this test.
+	var heavy_bp = _d1_test_blueprint()
+	heavy_bp.hull_type = "heavy_hull"
+	var result = skirmish.production.enqueue(skirmish.PLAYER_TEAM, heavy_bp, skirmish.player_faction, 300, 0)
+	if not result.queued or result.tier != "heavy":
+		print("  [FAIL] Test setup: expected a queued heavy-tier item, got ", result)
+		skirmish.queue_free()
+		return false
+	var job_1 = skirmish.production.get_queue(skirmish.PLAYER_TEAM, "heavy")[0]
+	if not is_equal_approx(job_1.total_time, base_time):
+		print("  [FAIL] With only 1 heavy manufactory, build time should be the plain base time (", base_time, "), got ", job_1.total_time)
+		skirmish.queue_free()
+		return false
+	skirmish.production.cancel(skirmish.PLAYER_TEAM, "heavy", 0)
+
+	# Build a second heavy manufactory - now the tier has 2 live factories.
+	var second_heavy = skirmish._spawn_prefab("heavy_manufactory", skirmish.PLAYER_TEAM, heavy_factory.global_position + Vector3(0, 0, 14), skirmish.player_faction)
+	if skirmish.count_factories_of_tier(skirmish.PLAYER_TEAM, "heavy") != 2:
+		print("  [FAIL] Test setup: expected exactly 2 live heavy manufactories, got ", skirmish.count_factories_of_tier(skirmish.PLAYER_TEAM, "heavy"))
+		skirmish.queue_free()
+		return false
+
+	var result_2 = skirmish.production.enqueue(skirmish.PLAYER_TEAM, heavy_bp, skirmish.player_faction, 300, 0)
+	if not result_2.queued:
+		print("  [FAIL] Test setup: second enqueue should have succeeded, got ", result_2)
+		skirmish.queue_free()
+		return false
+	var job_2 = skirmish.production.get_queue(skirmish.PLAYER_TEAM, "heavy")[0]
+	if not is_equal_approx(job_2.total_time, base_time * 0.75):
+		print("  [FAIL] With 2 live heavy manufactories, build time should be 0.75x the base (", base_time * 0.75, "), got ", job_2.total_time)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A second live manufactory of a tier gives new items on that tier a real 0.75x build time.")
+	return true
+
+func test_d3_destroying_a_manufactory_mid_job_leaves_the_timer_alone() -> bool:
+	print("Running Test Suite: D3 - Destroying A Manufactory Mid-Job Leaves The In-Progress Timer Alone (RTS_CORE_ROADMAP.md D3)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var heavy_factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "heavy")
+	var second_heavy = skirmish._spawn_prefab("heavy_manufactory", skirmish.PLAYER_TEAM, heavy_factory.global_position + Vector3(0, 0, 14), skirmish.player_faction)
+	if skirmish.count_factories_of_tier(skirmish.PLAYER_TEAM, "heavy") != 2:
+		print("  [FAIL] Test setup: expected exactly 2 live heavy manufactories, got ", skirmish.count_factories_of_tier(skirmish.PLAYER_TEAM, "heavy"))
+		skirmish.queue_free()
+		return false
+
+	var heavy_bp = _d1_test_blueprint()
+	heavy_bp.hull_type = "heavy_hull"
+	var result = skirmish.production.enqueue(skirmish.PLAYER_TEAM, heavy_bp, skirmish.player_faction, 300, 0)
+	if not result.queued:
+		print("  [FAIL] Test setup: enqueue should have succeeded, got ", result)
+		skirmish.queue_free()
+		return false
+	var job = skirmish.production.get_queue(skirmish.PLAYER_TEAM, "heavy")[0]
+	var latched_total_time = job.total_time
+
+	# Destroy the second manufactory mid-job - the ALREADY-QUEUED item's
+	# timer must NOT change retroactively (D1/D3's own "total_time stays
+	# latched" rule).
+	second_heavy.is_dead = true
+	skirmish.production.tick(1.0 / 60.0)
+	if not is_equal_approx(job.total_time, latched_total_time):
+		print("  [FAIL] Destroying a manufactory mid-job should NOT retroactively change an already-queued item's total_time - was ", latched_total_time, ", now ", job.total_time)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Destroying a manufactory mid-job leaves the already-queued item's build-time multiplier untouched.")
 	return true
 
 # Reusable per-map smoke test (per Chris's one-at-a-time verification

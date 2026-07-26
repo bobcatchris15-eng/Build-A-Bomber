@@ -26,6 +26,11 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 const TIERS: Array = ["light", "medium", "heavy"]
 
+# RTS_CORE_ROADMAP.md D3: RA's own vehicle build_time_speed_reduction table
+# (percent of normal build time), indexed by (live manufactories of that
+# tier - 1), clamped to the table's own last entry for 4+.
+const MULTI_FACTORY_SPEED_PCT: Array = [100, 75, 60, 50]
+
 var skirmish: Node3D = null
 
 # queues[team][tier] = Array of {blueprint, time_left, total_time,
@@ -81,6 +86,16 @@ func enqueue(team: int, blueprint: Dictionary, faction: String, cost_metal: int,
 	build_time *= FactionCatalog.get_passive(faction, "build_time_mult", 1.0)
 	if skirmish.is_energy_deficit(team):
 		build_time *= 1.5
+	# RTS_CORE_ROADMAP.md D3: RA's own *vehicle* build_time_speed_reduction
+	# table - every unit this game produces is a vehicle, so there's no
+	# other production category to distinguish. Indexed by how many LIVE
+	# manufactories of THIS tier the team has right now; latched into
+	# total_time same as every other build_time modifier here - building or
+	# losing a manufactory of this tier later never retroactively changes
+	# an already-queued item's timer.
+	var factory_count = skirmish.count_factories_of_tier(team, tier)
+	var speed_index = clampi(factory_count - 1, 0, MULTI_FACTORY_SPEED_PCT.size() - 1)
+	build_time *= MULTI_FACTORY_SPEED_PCT[speed_index] / 100.0
 	get_queue(team, tier).append({
 		"blueprint": blueprint,
 		"time_left": build_time,

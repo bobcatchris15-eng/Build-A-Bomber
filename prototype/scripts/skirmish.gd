@@ -1289,6 +1289,16 @@ func get_team_factory(team: int, tier: String = "") -> Node:
 func has_factory_of_tier(team: int, tier: String) -> bool:
 	return get_team_factory(team, tier) != null
 
+# RTS_CORE_ROADMAP.md D3: how many LIVE manufactories of this tier a team
+# has - production_queue.gd's enqueue() uses this to look up the multi-
+# factory build-time speed bonus.
+func count_factories_of_tier(team: int, tier: String) -> int:
+	var count := 0
+	for b in get_tree().get_nodes_in_group("buildings"):
+		if is_instance_valid(b) and not b.is_dead and b.team == team and b.kind == tier + "_manufactory":
+			count += 1
+	return count
+
 func get_team_units(team: int, combat_only: bool = false) -> Array:
 	var list = []
 	for u in get_tree().get_nodes_in_group("units"):

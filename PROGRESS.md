@@ -4,6 +4,19 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-26 — RTS_CORE_ROADMAP.md D3: multi-factory speed bonus
+
+RA's own vehicle `build_time_speed_reduction` table - every unit this game produces is a vehicle, so there's no other production category to distinguish from.
+
+**Shipped:**
+- `production_queue.gd`'s `enqueue()` now indexes `MULTI_FACTORY_SPEED_PCT = [100, 75, 60, 50]` by (live manufactories of that tier - 1), clamped to the table's last entry for 4+, and folds it into `build_time` alongside the existing faction/energy-deficit multipliers. Every match starts with exactly 1 manufactory per tier, so this is a zero-change default until a player actually builds a second one of the same tier.
+- `skirmish.gd` gains `count_factories_of_tier()` (the live-count query the multiplier needs) alongside the existing `has_factory_of_tier()`/`get_team_factory()`.
+- Latched at enqueue time, same as every other build_time modifier here - building or losing a manufactory of that tier later never retroactively changes an already-queued item's timer (the roadmap's own explicit requirement).
+
+**Verified:** a second live heavy manufactory gives a freshly-queued heavy-tier item a real 0.75x build time (compared directly against the 1-manufactory baseline, not a hardcoded expectation). Destroying that second manufactory mid-build leaves the already-queued item's `total_time` completely untouched. Full suite green except the same pre-existing, already-flagged navmesh-test flakiness noted in C1-D2's entries (a different test each run, never a D3 test).
+
+---
+
 ## 2026-07-26 — RTS_CORE_ROADMAP.md D2: queue HUD + categorised build bar
 
 Replaces the flat `ScrollContainer` that mixed 5 building buttons with up to 12 unit entries in one undifferentiated row, and adds real visibility into what each tier's production queue is actually doing.
