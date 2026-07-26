@@ -1291,6 +1291,15 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 		surf_body.add_child(surf_col)
 		new_weapon.add_child(surf_body)
 
+		# Override the StandardMaterial3D meshes created by VisualBuilder
+		# with the hull shader (faction textures, wear, grime, ink border)
+		# so structural pieces inherit the faction's visual identity —
+		# same as the main hull. This is applied after build_visual so the
+		# geometry is correct but the material is the faction shader.
+		var hull_mat = HullMaterialBuilderScript.build_hull_material(hull.get_meta("faction") if hull.has_meta("faction") else "industrialists", "hardened_steel")
+		for child in new_weapon.find_children("*", "MeshInstance3D", true, false):
+			child.material_override = hull_mat
+
 	var data = ModuleDataResource.new()
 	data.type_id = type_id
 	data.module_name = catalog_data.name

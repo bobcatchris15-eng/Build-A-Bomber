@@ -749,7 +749,8 @@ static func _build_catalog_literal() -> Dictionary:
 			"hp": 200.0, "weight": 80.0,
 			"metal": 20, "crystal": 0, "dps": 0.0,
 			"size": Vector3(2.0, 2.0, 2.0),
-			"color": Color(0.35, 0.30, 0.25)
+			"color": Color(0.35, 0.30, 0.25),
+			"hull": true
 		},
 		"structural_dome": {
 			"name": "Dome Turret Base",
@@ -757,7 +758,8 @@ static func _build_catalog_literal() -> Dictionary:
 			"hp": 150.0, "weight": 60.0,
 			"metal": 15, "crystal": 5, "dps": 0.0,
 			"size": Vector3(2.5, 1.5, 2.5),
-			"color": Color(0.42, 0.36, 0.30)
+			"color": Color(0.42, 0.36, 0.30),
+			"hull": true
 		},
 		"structural_slab": {
 			"name": "Armor Slab",
@@ -765,7 +767,8 @@ static func _build_catalog_literal() -> Dictionary:
 			"hp": 300.0, "weight": 120.0,
 			"metal": 30, "crystal": 0, "dps": 0.0,
 			"size": Vector3(3.0, 0.5, 2.0),
-			"color": Color(0.32, 0.28, 0.25)
+			"color": Color(0.32, 0.28, 0.25),
+			"hull": true
 		},
 		"structural_wedge": {
 			"name": "Wedge Breech",
@@ -773,7 +776,8 @@ static func _build_catalog_literal() -> Dictionary:
 			"hp": 180.0, "weight": 70.0,
 			"metal": 25, "crystal": 0, "dps": 0.0,
 			"size": Vector3(2.0, 1.0, 3.0),
-			"color": Color(0.38, 0.32, 0.28)
+			"color": Color(0.38, 0.32, 0.28),
+			"hull": true
 		},
 		"structural_girder": {
 			"name": "Support Girder",
@@ -781,7 +785,8 @@ static func _build_catalog_literal() -> Dictionary:
 			"hp": 100.0, "weight": 40.0,
 			"metal": 10, "crystal": 0, "dps": 0.0,
 			"size": Vector3(0.4, 0.4, 4.0),
-			"color": Color(0.30, 0.28, 0.22)
+			"color": Color(0.30, 0.28, 0.22),
+			"hull": true
 		},
 		"structural_i_beam": {
 			"name": "I-Beam Frame",
@@ -789,7 +794,8 @@ static func _build_catalog_literal() -> Dictionary:
 			"hp": 120.0, "weight": 50.0,
 			"metal": 15, "crystal": 0, "dps": 0.0,
 			"size": Vector3(0.6, 0.6, 4.0),
-			"color": Color(0.33, 0.30, 0.25)
+			"color": Color(0.33, 0.30, 0.25),
+			"hull": true
 		},
 	}
 

@@ -121,9 +121,7 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"heavy_laser": true, "plasma_lobber": true, "ciws": true, "pd_laser": true, "flak_cannon": true,
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
-	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
-	"structural_block": true, "structural_dome": true, "structural_slab": true,
-	"structural_wedge": true, "structural_girder": true, "structural_i_beam": true,
+	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true
 }
 
 static func _repeat_along_axis(parent: Node3D, count: int, spacing: float, axis_vec: Vector3, builder_func: Callable):
