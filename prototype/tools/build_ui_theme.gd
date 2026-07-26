@@ -24,8 +24,19 @@ func build_theme() -> void:
 	var ui_font_reg = _load_font("res://assets/fonts/UIFont-Regular.ttf")
 	var ui_font_bold = _load_font("res://assets/fonts/UIFont-Bold.ttf")
 	var mono_font_reg = _load_font("res://assets/fonts/MonoFont-Regular.ttf")
+	# Special Elite (CREDITS.md) - old-school model-instruction-booklet /
+	# stamped-materiel stencil look: monospace, slab serifs, worn/uneven
+	# ink baked directly into the glyph shapes. Used as the DEFAULT font
+	# (every Label/Button without a more specific theme type variation)
+	# and for TitleLabel - deliberately NOT for HUDValueLabel, which stays
+	# on MonoFont/Source Code Pro's real tabular figures so rapidly-
+	# updating resource counters don't jitter or lose legibility to the
+	# stencil font's intentionally worn/irregular letterforms.
+	var stencil_font_reg = _load_font("res://assets/fonts/StencilFont-Regular.ttf")
 
-	if ui_font_reg:
+	if stencil_font_reg:
+		theme.set_default_font(stencil_font_reg)
+	elif ui_font_reg:
 		ui_font_reg.multichannel_signed_distance_field = true
 		theme.set_default_font(ui_font_reg)
 	theme.set_default_font_size(14)
@@ -98,7 +109,9 @@ func build_theme() -> void:
 
 	# Labels & Title Variations
 	theme.set_color("font_color", "Label", text_main)
-	if ui_font_bold:
+	if stencil_font_reg:
+		theme.set_font("font", "TitleLabel", stencil_font_reg)
+	elif ui_font_bold:
 		theme.set_font("font", "TitleLabel", ui_font_bold)
 	theme.set_font_size("font_size", "TitleLabel", 24)
 	theme.set_color("font_color", "TitleLabel", border_gold)
