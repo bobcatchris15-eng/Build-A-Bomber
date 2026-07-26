@@ -3266,10 +3266,17 @@ func test_faction_catalog_and_hull_material() -> bool:
 	# color but share the identical metallic/roughness "what is this armor
 	# made of" character (faction=ownership/paint, armor_material=PBR
 	# substance, deliberately independent axes).
+	#
+	# Faction color/wear identity is baked into the per-faction texture now
+	# (tools/generate_faction_textures.gd, hull_faction_material.gdshader v3)
+	# - base_color/accent_color are neutral, faction-independent multiply
+	# tints (default white), kept live only for building.gd's team-color
+	# override and a future damage-status overlay, NOT faction paint. The
+	# real per-faction differentiator to check is albedo_tex.
 	var mat_a = HullMaterialBuilder.build_hull_material("hardened_steel", "industrialists")
 	var mat_b = HullMaterialBuilder.build_hull_material("hardened_steel", "technocrats")
-	if mat_a.get_shader_parameter("base_color") == mat_b.get_shader_parameter("base_color"):
-		print("  [FAIL] Two different factions with the same armor material should get different paint colors")
+	if mat_a.get_shader_parameter("albedo_tex") == mat_b.get_shader_parameter("albedo_tex"):
+		print("  [FAIL] Two different factions with the same armor material should get different baked paint textures")
 		return false
 	if mat_a.get_shader_parameter("metallic") != mat_b.get_shader_parameter("metallic") or mat_a.get_shader_parameter("roughness") != mat_b.get_shader_parameter("roughness"):
 		print("  [FAIL] Two different factions with the SAME armor material should share identical metallic/roughness (armor character is faction-independent)")
@@ -3278,11 +3285,12 @@ func test_faction_catalog_and_hull_material() -> bool:
 		print("  [FAIL] Every faction should share the exact same shader resource (same mesh models, texture-only differentiation - no per-faction shader variants)")
 		return false
 
-	# Same faction, two different armor materials - paint color should stay
-	# identical (ownership doesn't change), metallic/roughness should differ.
+	# Same faction, two different armor materials - paint texture should
+	# stay identical (ownership doesn't change), metallic/roughness should
+	# differ.
 	var mat_c = HullMaterialBuilder.build_hull_material("ablative_ceramic", "industrialists")
-	if mat_a.get_shader_parameter("base_color") != mat_c.get_shader_parameter("base_color"):
-		print("  [FAIL] The same faction with a different armor material should keep the same paint color")
+	if mat_a.get_shader_parameter("albedo_tex") != mat_c.get_shader_parameter("albedo_tex"):
+		print("  [FAIL] The same faction with a different armor material should keep the same paint texture")
 		return false
 	if mat_a.get_shader_parameter("roughness") == mat_c.get_shader_parameter("roughness"):
 		print("  [FAIL] hardened_steel vs. ablative_ceramic should have different roughness")
@@ -3324,17 +3332,10 @@ func test_faction_catalog_and_hull_material() -> bool:
 	# Hull materials are per-surface overrides now (HullMaterialBuilder.
 	# apply_hull_materials() - real material slots, not a single whole-mesh
 	# material_override, which is always null for a hull - see that
-	# function's own comment). Surface count depends on which surface
-	# index is checked here: surface 0 (structural) darkens base_color and
-	# the last surface (armor) LIGHTENS it (2026-07-18, widening the
-	# armor/structural value contrast) - neither carries the faction's raw,
-	# unmodified color anymore, so comparing against FactionCatalog.
-	# get_visual_color() directly (as this test originally did) breaks
-	# every time that tuning changes. Cross-check against build_hull_
-	# material()'s OWN output for the same inputs instead - proves the real
-	# spawn pipeline applies the same transform the builder function does,
-	# without hardcoding a lighten/darken amount that's expected to keep
-	# moving during tuning passes.
+	# function's own comment). Faction identity lives in albedo_tex now
+	# (see the mat_a/mat_b check above) - cross-check against build_hull_
+	# material()'s OWN output for the same inputs, proving the real spawn
+	# pipeline applies the same texture selection the builder function does.
 	var check_surf = mesh_inst.mesh.get_surface_count() - 1 if mesh_inst and mesh_inst.mesh else 0
 	var surface_mat = mesh_inst.get_surface_override_material(check_surf) if mesh_inst else null
 	if not mesh_inst or not (surface_mat is ShaderMaterial):
@@ -3343,8 +3344,8 @@ func test_faction_catalog_and_hull_material() -> bool:
 		bp_manager.queue_free()
 		return false
 	var expected_armor_mat = HullMaterialBuilder.build_hull_material("reactive_armor", "crimson_concordat")
-	if surface_mat.get_shader_parameter("base_color") != expected_armor_mat.get_shader_parameter("base_color"):
-		print("  [FAIL] The real spawned hull's material should carry the blueprint's own faction color (crimson_concordat)")
+	if surface_mat.get_shader_parameter("albedo_tex") != expected_armor_mat.get_shader_parameter("albedo_tex"):
+		print("  [FAIL] The real spawned hull's material should carry the blueprint's own faction texture (crimson_concordat)")
 		parent.queue_free()
 		bp_manager.queue_free()
 		return false
@@ -7249,23 +7250,29 @@ func test_match_faction_overrides_blueprint_faction_stats_and_looks() -> bool:
 		print("  [FAIL] Reconstructed hulls should have a MeshInstance3D child")
 		free_all.call()
 		return false
-	var player_base_color = player_mesh.get_surface_override_material(0).get_shader_parameter("base_color")
-	var enemy_base_color = enemy_mesh.get_surface_override_material(0).get_shader_parameter("base_color")
+	# Faction identity lives in albedo_tex now (hull_faction_material.gdshader
+	# v3, tools/generate_faction_textures.gd) - base_color is a neutral,
+	# faction-independent multiply tint (see hull_material_builder.gd), so
+	# comparing it here would trivially always match (every faction's
+	# base_color is the same white default). Compare the actual baked
+	# per-faction texture instead - the real thing that changes appearance.
+	var player_albedo = player_mesh.get_surface_override_material(0).get_shader_parameter("albedo_tex")
+	var enemy_albedo = enemy_mesh.get_surface_override_material(0).get_shader_parameter("albedo_tex")
 
-	var wrong_armor = HullMaterialBuilder.build_hull_material("hardened_steel", "technocrats").get_shader_parameter("base_color")
-	var wrong_structural = HullMaterialBuilder.build_structural_material("technocrats").get_shader_parameter("base_color")
-	if player_base_color == wrong_armor or player_base_color == wrong_structural:
+	var wrong_armor = HullMaterialBuilder.build_hull_material("hardened_steel", "technocrats").get_shader_parameter("albedo_tex")
+	var wrong_structural = HullMaterialBuilder.build_structural_material("technocrats").get_shader_parameter("albedo_tex")
+	if player_albedo == wrong_armor or player_albedo == wrong_structural:
 		print("  [FAIL] Player unit's hull material should NOT be painted in technocrats' colors (the blueprint's saved tag) - it should follow industrialists, the match faction")
 		free_all.call()
 		return false
-	if enemy_base_color == wrong_armor or enemy_base_color == wrong_structural:
+	if enemy_albedo == wrong_armor or enemy_albedo == wrong_structural:
 		print("  [FAIL] Enemy unit's hull material should NOT be painted in technocrats' colors (the blueprint's saved tag) - it should follow expansionists, the match faction")
 		free_all.call()
 		return false
 
-	var expected_player_armor = HullMaterialBuilder.build_hull_material("hardened_steel", "industrialists").get_shader_parameter("base_color")
-	var expected_player_structural = HullMaterialBuilder.build_structural_material("industrialists").get_shader_parameter("base_color")
-	if player_base_color != expected_player_armor and player_base_color != expected_player_structural:
+	var expected_player_armor = HullMaterialBuilder.build_hull_material("hardened_steel", "industrialists").get_shader_parameter("albedo_tex")
+	var expected_player_structural = HullMaterialBuilder.build_structural_material("industrialists").get_shader_parameter("albedo_tex")
+	if player_albedo != expected_player_armor and player_albedo != expected_player_structural:
 		print("  [FAIL] Player unit's hull material should match industrialists' actual paint colors")
 		free_all.call()
 		return false

@@ -136,8 +136,11 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 			var team_col = FactionCatalog.get_visual_color(faction).lerp(Color(0.85, 0.2, 0.2), 0.45)
 			var armor_mat = mesh_inst.get_surface_override_material(0)
 			if armor_mat is ShaderMaterial:
+				# base_color/accent_color both multiply the baked faction
+				# texture now (hull_faction_material.gdshader v3) - setting
+				# both to the same team tint would double-darken (multiply
+				# twice), so only base_color carries it.
 				armor_mat.set_shader_parameter("base_color", team_col)
-				armor_mat.set_shader_parameter("accent_color", team_col.lightened(0.2))
 		mesh_inst.position = Vector3(0, stats.size.y / 2.0, 0)
 		add_child(mesh_inst)
 
@@ -511,8 +514,9 @@ func _apply_material_to_building_mesh(node: Node) -> void:
 	var mat = HullMaterialBuilder.build_hull_material(faction, armor_material)
 	if team != 0 and mat is ShaderMaterial:
 		var team_col = FactionCatalog.get_visual_color(faction).lerp(Color(0.85, 0.2, 0.2), 0.45)
+		# base_color alone carries the full tint now - see the other
+		# call site's comment in this file.
 		mat.set_shader_parameter("base_color", team_col)
-		mat.set_shader_parameter("accent_color", team_col.lightened(0.2))
 	if node is MeshInstance3D:
 		node.material_override = mat
 	for child in node.get_children():

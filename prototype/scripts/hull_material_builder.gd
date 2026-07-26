@@ -94,34 +94,43 @@ static func _get_faction_textures(faction: String) -> Dictionary:
 	_texture_cache[faction] = textures
 	return textures
 
-static func build_hull_material(armor_material: String, faction: String) -> ShaderMaterial:
+# Converts a hull's real-world face size into a texture_scale that tiles
+# roughly once per face - these hull meshes aren't UV-unwrapped (the
+# triplanar approach exists specifically so the Design Lab's continuous
+# hull_scale stretch doesn't distort a UV-mapped texture, see the shader's
+# own header comment), so there's no real per-face UV space to map one
+# tile onto directly. This is the practical alternative: texture_scale is
+# the reciprocal of a representative face dimension, so a small hull's
+# small faces and a large hull's large faces both land close to one tile,
+# instead of one fixed density making small hulls over-tile and large
+# hulls under-tile (or vice versa).
+const _DEFAULT_TEXTURE_WORLD_SIZE = 3.0
+static func _texture_scale_for_size(world_size: float) -> float:
+	return clamp(1.0 / max(world_size, 0.1), 0.05, 1.0)
+
+static func build_hull_material(armor_material: String, faction: String, texture_world_size: float = _DEFAULT_TEXTURE_WORLD_SIZE) -> ShaderMaterial:
 	var armor = ARMOR_PBR.get(armor_material, ARMOR_PBR["hardened_steel"])
-	var vis = FactionCatalogScript.get_visual(faction)
 	var mat = ShaderMaterial.new()
 	mat.shader = HULL_SHADER
-	# Disable backface culling to render chamfered edges correctly - moved to shader render_mode
-	# Lightened 2026-07-18 alongside metallic being brought down (see
-	# ARMOR_PBR's own comment) - guarantees a real, reliable brightness
-	# gap against build_structural_material()'s darkened(0.62) even with
-	# metallic's diffuse-suppression working against it. Applies to every
-	# hull's armor material uniformly, including the un-migrated single-
-	# surface fallback (apply_hull_materials()) - a harmless, arguably
-	# fitting side effect there too (armor reading a bit brighter/more
-	# premium), and moot in practice since every hull in the current
-	# roster already has a real 2-surface split.
-	mat.set_shader_parameter("base_color", vis.base_color.lightened(0.42))
-	mat.set_shader_parameter("accent_color", vis.accent_color.lightened(0.42))
-	mat.set_shader_parameter("detail_color", vis.detail_color)
-	mat.set_shader_parameter("anisotropy", vis.anisotropy)
-	mat.set_shader_parameter("brush_scale", vis.get("brush_scale", 2.0))
-	mat.set_shader_parameter("wear_amount", vis.wear_amount)
-	mat.set_shader_parameter("wear_color", vis.wear_color)
-	mat.set_shader_parameter("grime_amount", vis.grime_amount)
-	mat.set_shader_parameter("edge_highlight_strength", vis.edge_highlight_strength)
-	mat.set_shader_parameter("emissive_color", vis.emissive_color)
-	mat.set_shader_parameter("emissive_strength", vis.emissive_strength)
-	mat.set_shader_parameter("mottle_amount", vis.get("mottle_amount", 0.0))
-	mat.set_shader_parameter("decal_tint", vis.get("detail_color", Color.WHITE))
+	# Faction identity is carried ENTIRELY by the baked texture now
+	# (tools/generate_faction_textures.gd or, for the 10 real factions,
+	# tools/process_flow_faction_textures.gd) - no live per-fragment
+	# computation reads FactionCatalog data at all here anymore. This was
+	# a deliberate walk-back from an earlier version of this v3 rewrite
+	# that kept anisotropy/roughness_bias/emissive live per-faction -
+	# found via a real bug: Ledger Combine's emissive_strength=0.4 with a
+	# saturated green emissive_color painted the ENTIRE hull surface in a
+	# flat green glow, drowning out its actual blue/white/green-stripe
+	# texture (Chris's live screenshot: "solid minecraft emerald... I
+	# don't see the swatch on the hull"). Emissive/anisotropy/roughness
+	# variation belongs in the texture bake (already possible - the
+	# generator bakes directional shading) or a future explicit VFX pass,
+	# not a blanket live uniform with no spatial mask.
+	mat.set_shader_parameter("anisotropy", 0.25)
+	# See _texture_scale_for_size()'s comment - sized per-hull now rather
+	# than a single fixed constant (which either over- or under-tiled
+	# depending on hull size; tuning story in git history).
+	mat.set_shader_parameter("texture_scale", _texture_scale_for_size(texture_world_size))
 	mat.set_shader_parameter("metallic", armor.metallic)
 	mat.set_shader_parameter("roughness", armor.roughness)
 	mat.set_shader_parameter("shield_mode", armor.shield_mode)
@@ -133,78 +142,38 @@ static func build_hull_material(armor_material: String, faction: String) -> Shad
 	mat.set_shader_parameter("roughness_tex", textures.roughness)
 	return mat
 
-# Structural/base-plating material (2026-07-17, Approach A multi-region
-# rollout - see DECISIONS_NEEDED.md) - the majority, non-armor surface of a
+# Structural/base-plating material - the majority, non-armor surface of a
 # hull: matte/satin, reads as workmanlike structural plate rather than
-# polished armor. Deliberately reuses the SAME shader and the SAME
-# per-faction color/wear/grime/texture data as build_hull_material() - no
-# new per-faction texture set, no new FactionCatalog fields, exactly
-# preserving the "one parametric shader x N factions, zero combinatorial
-# texture re-authoring" property this system has always had. Only the PBR
-# response differs: low metallic, high roughness, and anisotropy knocked
-# way down (the anodized-brushed-metal streak is specifically the HARD
-# ARMOR plate's signature look now, not a whole-hull default - see
-# hull_faction_material.gdshader's ANISOTROPY line). Deliberately ignores
-# armor_material/ARMOR_PBR entirely: structural plating doesn't change
-# composition based on which armor package is bolted on, same as a real
-# vehicle's hull monocoque staying the same steel regardless of add-on
-# armor kit.
+# polished armor. Reuses the SAME per-faction texture as build_hull_
+# material() (no new per-faction texture set) - only the PBR response
+# differs (low metallic, high roughness, anisotropy near zero - the
+# anodized-brushed-metal streak is specifically the HARD ARMOR plate's
+# signature look, not a whole-hull default) plus a flat darkening multiply
+# via base_color.
 #
-# 2026-07-17 cont'd: pushed further toward matte (metallic 0.15->0.04,
-# roughness 0.82->0.93, anisotropy multiplier 0.25->0.08) after Chris's
-# follow-up that the armor/structural split didn't read strongly enough in
-# the first-pass screenshots. Also darkens base_color/accent_color via
-# Color.darkened() - a straight RGB scalar multiply toward black, which
-# preserves HUE exactly and only reduces value, per Chris's explicit "value/
-# saturation separation, not hue" ask - so structural reads as a genuinely
-# duller/darker version of the SAME faction color family, not a different
-# faction's paint job. detail_color (small stencil/bolt accents) is left
-# untouched on purpose - those should stay legible regardless of which
-# region they land on.
-#
-# 2026-07-18: darken amount raised again, 0.16 -> 0.62, after a rigorous
-# pixel-level check (not a visual read) proved 0.16 was nowhere near
-# enough - two identical boxes, one per material, side by side under
-# identical lighting, sampled dead center of each flat face (deliberately
-# far from any specular highlight or edge) came back within ~0.007
-# average RGB of each other, indistinguishable to the eye. That check also
-# exposed WHY: metallic/roughness differences are fundamentally VIEW- and
-# LIGHT-ANGLE-DEPENDENT (a shinier material only looks brighter where a
-# highlight actually lands; everywhere else, a HIGH-metallic surface can
-# look darker than a low-metallic one, since metals have near-zero diffuse
-# reflectance) - so the metallic/roughness gap alone, however wide, cannot
-# be trusted to read consistently regardless of camera/light angle. Color
-# VALUE is the only lever that's angle-independent (a darker diffuse
-# albedo reads darker under any lighting), hence pushing it hard here
-# rather than trying to further chase the PBR angle-dependent route.
-#
-# 2026-07-18 cont'd: pushed again, 0.62 -> 0.8, plus metallic/roughness/
-# anisotropy all pushed further toward their floor/ceiling (0.04->0.015,
-# 0.93->0.97, the 0.08 anisotropy multiplier ->0.03) - per Chris's explicit
-# "don't be conservative, push until unmistakable" direction. 0.62 already
-# measured as correctly-directioned and clearly visible in a real render,
-# but "clearly visible" and "unmistakable" are different bars - this is
-# most of the way to as dark as this color family can go before it stops
-# reading as "the same paint, duller" and starts reading as "black,"
-# which would cross into looking like damage/soot rather than a deliberate
-# structural finish.
-static func build_structural_material(faction: String) -> ShaderMaterial:
-	var vis = FactionCatalogScript.get_visual(faction)
+# The pre-v3 shader darkened base_color/accent_color by 0.8 (see git history
+# for the tuning story - value/darkness was found to be the only angle-
+# independent way to make the armor/structural split read reliably) BEFORE
+# that color went through its own separate live per-fragment recomputation
+# (wear/grime/rivets/seams, ending in a `tex_albedo * 2.0` renormalization).
+# That 0.8 factor doesn't carry over 1:1 here: albedo_tex is now the FINAL,
+# already fully-shaded/baked color (rivet highlights, seam ink, directional
+# shading, all baked in) - multiplying that a second time by a 0.8-darkened
+# grey compounds into near-black rather than "a bit duller than armor" (a
+# real regression caught via the faction lineup capture - most hulls
+# rendered nearly black except a few small armor-plate surfaces). 0.3 is a
+# lighter starting point tuned against the NEW baked-texture pipeline;
+# still a plain grey multiply (preserves the texture's hue exactly, only
+# scales value), just proportioned for a texture that's already "finished"
+# rather than a raw color about to go through more shading.
+static func build_structural_material(faction: String, texture_world_size: float = _DEFAULT_TEXTURE_WORLD_SIZE) -> ShaderMaterial:
 	var mat = ShaderMaterial.new()
 	mat.shader = HULL_SHADER
-	mat.set_shader_parameter("base_color", vis.base_color.darkened(0.8))
-	mat.set_shader_parameter("accent_color", vis.accent_color.darkened(0.8))
-	mat.set_shader_parameter("detail_color", vis.detail_color)
-	mat.set_shader_parameter("anisotropy", vis.anisotropy * 0.03)
-	mat.set_shader_parameter("brush_scale", vis.get("brush_scale", 2.0))
-	mat.set_shader_parameter("wear_amount", vis.wear_amount)
-	mat.set_shader_parameter("wear_color", vis.wear_color)
-	mat.set_shader_parameter("grime_amount", vis.grime_amount)
-	mat.set_shader_parameter("edge_highlight_strength", vis.edge_highlight_strength)
-	mat.set_shader_parameter("emissive_color", vis.emissive_color)
-	mat.set_shader_parameter("emissive_strength", vis.emissive_strength)
-	mat.set_shader_parameter("mottle_amount", vis.get("mottle_amount", 0.0))
-	mat.set_shader_parameter("decal_tint", vis.get("detail_color", Color.WHITE))
+	mat.set_shader_parameter("base_color", Color(1.0, 1.0, 1.0, 1.0).darkened(0.3))
+	# Fixed, faction-independent - see build_hull_material()'s comment for
+	# why anisotropy/emissive are no longer faction-driven at all.
+	mat.set_shader_parameter("anisotropy", 0.01)
+	mat.set_shader_parameter("texture_scale", _texture_scale_for_size(texture_world_size))
 	mat.set_shader_parameter("metallic", 0.015)
 	mat.set_shader_parameter("roughness", 0.97)
 	mat.set_shader_parameter("shield_mode", 0.0)
@@ -240,12 +209,29 @@ static func build_structural_material(faction: String) -> ShaderMaterial:
 # keep masking the real per-surface materials.
 static func apply_hull_materials(mesh_inst: MeshInstance3D, armor_material: String, faction: String) -> void:
 	mesh_inst.material_override = null
-	var armor_mat = build_hull_material(armor_material, faction)
+	# Real world-space face size (mesh-local AABB extents x the node's own
+	# scale, since the Design Lab's hull_scale slider and armor_bulk both
+	# apply via MeshInstance3D.scale, not a mesh rebuild) - see
+	# _texture_scale_for_size()'s comment. Falls back to the fixed default
+	# if there's no mesh yet (shouldn't happen in practice, this function
+	# is always called with a real hull mesh already assigned).
+	var texture_world_size = _DEFAULT_TEXTURE_WORLD_SIZE
+	if mesh_inst.mesh:
+		var extents = mesh_inst.mesh.get_aabb().size * mesh_inst.scale
+		texture_world_size = (extents.x + extents.y + extents.z) / 3.0
+	var armor_mat = build_hull_material(armor_material, faction, texture_world_size)
+	# Corrects for non-uniform hull_scale/armor_bulk stretch - see the
+	# shader's mesh_scale uniform comment. texture_world_size above already
+	# folds mesh_inst.scale into the AVERAGE tiling density; this instead
+	# corrects the PER-AXIS distortion between faces dominated by different
+	# axes, which an average alone can't fix.
+	armor_mat.set_shader_parameter("mesh_scale", mesh_inst.scale)
 	var surface_count = mesh_inst.mesh.get_surface_count() if mesh_inst.mesh else 1
 	if surface_count <= 1:
 		mesh_inst.set_surface_override_material(0, armor_mat)
 		return
-	var structural_mat = build_structural_material(faction)
+	var structural_mat = build_structural_material(faction, texture_world_size)
+	structural_mat.set_shader_parameter("mesh_scale", mesh_inst.scale)
 	mesh_inst.set_surface_override_material(0, structural_mat)
 	for surf in range(1, surface_count):
 		mesh_inst.set_surface_override_material(surf, armor_mat)
