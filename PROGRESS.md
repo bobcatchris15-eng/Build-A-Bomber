@@ -4,6 +4,30 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-26 — RTS_CORE_ROADMAP.md B9: minimap
+
+A real `Image` bake, deliberately NOT render-to-texture - headless never rasterizes a Viewport, which would make this untestable (the roadmap's own note, taken literally). `_setup_minimap()` bakes static terrain colors once per match (water via the new `TerrainBuilder.is_water_at()`, surface types via the existing `get_surface_type_at()`, plain ground otherwise) into `_minimap_static_image`; every fog tick, `_update_minimap()` resets `_minimap_image` to a copy of that bake and blits live unit/building/resource blips on top, piggybacking on the existing `_recalc_fog_of_war()` timer rather than adding a second one.
+
+**Shipped:**
+- `terrain_builder.gd`: `is_water_at()` - water-only check (no obstacles/slope), split out of `is_position_blocked()` since the minimap wants "is this cell water" for its blue tint, not "is this cell unwalkable" (an obstacle should still show its normal ground color underneath, with a blip on top).
+- `skirmish.gd`: `_setup_minimap()`/`_update_minimap()`/`_blit_minimap_blip()`/`_minimap_world_to_cell()`/`_minimap_uv_to_world()`, a bottom-right `TextureRect` HUD widget, and click-to-recenter-camera (`_on_minimap_gui_input()`). Enemy blips respect the same fog-of-war visibility rule as everything else the player sees (`fog_hidden`, no persistent memory); resource nodes are always shown, matching how they're already treated everywhere else in this game (map knowledge, not scouting-gated). Right-click-to-order is left as future polish, per this roadmap chunk's own note.
+
+**Verified:** a headless test reads `_minimap_static_image`/`_minimap_image` pixels back directly - a known water region (lake_crossing's water_blob) samples as water and open ground doesn't; an enemy blip is absent while `fog_hidden` and appears in its faction's real visual color once a nearby player unit scouts it.
+
+---
+
+## 2026-07-26 — RTS_CORE_ROADMAP.md B10: spawn assignment + fairness lint
+
+Landed the two genuinely reusable, testable pieces and deliberately deferred the UI (logged in `RTS_CORE_ROADMAP.md` itself - every bundled map, including B8's `scattered_peaks`, still authors exactly 2 spawns, so there's no real data yet to exercise a 3+-player slot picker against; same premature-generalization call B6 already made for `Vector2 half_extents`).
+
+**Shipped (`map_catalog.gd`):**
+- `assign_spawns()`: OpenRA's spawn-assignment algorithm verbatim (genuinely their entire runtime fairness logic) - explicit pick > (when `team_separation` is on) whichever unclaimed spawn maximizes summed squared distance to spawns already claimed by an earlier slot > uniform random otherwise. A pure function over plain spawn dicts, no Skirmish/scene dependency.
+- `lint_spawn_fairness()`: exceeds OpenRA (which only lints spawn counts/duplicates) by using this project's real baked navmesh at map-load time - per spawn, HQ pad legal (not blocked terrain), mutually reachable from every other spawn on the ground navmesh, a minimum count of resource nodes within a map-scaled radius, and pairwise spawn-distance variance (coefficient of variation) under a threshold. Every check generalizes across however many spawns a map authors - wired into the existing `_smoke_test_map()` helper, so it now runs against all 9 bundled maps for free.
+
+**Verified:** `assign_spawns()` - explicit picks win even over the distance-maximizing choice; with `team_separation` on, a 3rd spawn correctly maximizes squared distance to what's already claimed; with it off, 30 seeded trials prove the pick is genuinely random rather than always the distance-maximizing one (would have failed if the flag were ignored). `lint_spawn_fairness()` - every bundled map clears cleanly; two synthetic bad maps (a spawn HQ sitting on water with zero nearby resources; 3 spawns with one pair 10 units apart and the others 500+) each get caught by the specific check they were built to trip.
+
+---
+
 ## 2026-07-25 — RTS_CORE_ROADMAP.md B8: first bigger map (Scattered Peaks) + a real Recast crash chased to its root cause
 
 B8 is the open-ended "bigger, denser maps" arc from the roadmap - budgeted as its own arc and landed one map at a time rather than batched. This entry covers the first map, `scattered_peaks` (550 half-extent, nearly double `twin_bridges`), chosen via a quiz with Chris: much-bigger scale, multiple distinct high-ground pockets rather than one dominant hill, land-only, long approach march between bases. Four heightmap plateaus sit off-center in a point-symmetric layout (2 big/tall at height 18, 2 smaller at height 12) so map control rewards spreading out rather than turtling on a single objective - the long open march itself is the chokepoint, not rock-cluster props.

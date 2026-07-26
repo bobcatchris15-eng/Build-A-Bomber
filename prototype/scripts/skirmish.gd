@@ -325,6 +325,7 @@ func _ready():
 
 	_setup_navigation()
 	_setup_fog_shroud()
+	_setup_minimap()
 	_load_rosters()
 	_spawn_resource_nodes()
 	_spawn_bases()
@@ -533,6 +534,7 @@ func _recalc_fog_of_war():
 			seen = true
 		c.set_fog_visible(seen)
 	_update_fog_shroud(player_constructs)
+	_update_minimap()
 	_update_enemy_intel()
 
 # --- Fog shroud (visual): a full-map alpha-mask overlay reusing the same
@@ -634,6 +636,117 @@ func _update_fog_shroud(player_constructs: Array):
 	_fog_prev_visible_cells = new_visible
 	if changed:
 		_fog_shroud_texture.update(_fog_shroud_image)
+
+# --- Minimap (RTS_CORE_ROADMAP.md B9) ---
+# Deliberately a real Image the tests can read pixels back from directly,
+# NOT render-to-texture - headless never rasterizes a Viewport, which would
+# make this untestable (this roadmap chunk's own note). Static terrain
+# colors bake ONCE into _minimap_static_image (a coarser grid than the fog
+# shroud's - a minimap doesn't need per-vision-tick precision, just a
+# recognizable silhouette); every tick, _minimap_image resets to a copy of
+# that static bake, then gets live unit/building/resource blips blitted on
+# top - cheap since the whole image is small.
+const MINIMAP_CELL: float = 8.0
+const MINIMAP_UI_SIZE: float = 180.0
+const MINIMAP_WATER_COLOR: Color = Color(0.15, 0.32, 0.55)
+# Palette echoes generate_terrain_textures.gd's per-surface tints, coarsened
+# to a single flat color per type (a minimap swatch, not a material).
+const MINIMAP_SURFACE_COLORS: Dictionary = {
+	"marsh": Color(0.30, 0.36, 0.24),
+	"rocky": Color(0.42, 0.40, 0.38),
+	"snow_mud": Color(0.55, 0.58, 0.60),
+	"sand": Color(0.62, 0.56, 0.38),
+	"gravel": Color(0.48, 0.46, 0.44),
+	"forest": Color(0.16, 0.28, 0.16),
+	"ice": Color(0.75, 0.85, 0.92),
+}
+const MINIMAP_METAL_COLOR: Color = Color(0.85, 0.75, 0.4)
+const MINIMAP_CRYSTAL_COLOR: Color = Color(0.55, 0.75, 0.95)
+const MINIMAP_BLIP_RADIUS: int = 1
+
+var _minimap_half: float = 0.0
+var _minimap_dim: int = 0
+var _minimap_static_image: Image
+var _minimap_image: Image
+var _minimap_texture: ImageTexture
+var minimap_rect: TextureRect
+
+func _setup_minimap():
+	_minimap_half = current_map.get("map_half_extents", 80.0)
+	_minimap_dim = max(1, int(ceil((_minimap_half * 2.0) / MINIMAP_CELL)))
+	var ground_color_arr = current_map.get("ground_color", [0.2, 0.25, 0.2])
+	var ground_color = Color(ground_color_arr[0], ground_color_arr[1], ground_color_arr[2])
+	_minimap_static_image = Image.create(_minimap_dim, _minimap_dim, false, Image.FORMAT_RGB8)
+	for gz in range(_minimap_dim):
+		var world_z = -_minimap_half + (gz + 0.5) * MINIMAP_CELL
+		for gx in range(_minimap_dim):
+			var world_x = -_minimap_half + (gx + 0.5) * MINIMAP_CELL
+			var color: Color
+			if TerrainBuilder.is_water_at(current_map, world_x, world_z):
+				color = MINIMAP_WATER_COLOR
+			else:
+				var surf = TerrainBuilder.get_surface_type_at(current_map, Vector3(world_x, 0, world_z))
+				color = MINIMAP_SURFACE_COLORS.get(surf, ground_color)
+			_minimap_static_image.set_pixel(gx, gz, color)
+	_minimap_image = _minimap_static_image.duplicate()
+	_minimap_texture = ImageTexture.create_from_image(_minimap_image)
+
+func _minimap_world_to_cell(x: float, z: float) -> Vector2i:
+	var gx = int(floor((x + _minimap_half) / MINIMAP_CELL))
+	var gz = int(floor((z + _minimap_half) / MINIMAP_CELL))
+	return Vector2i(clampi(gx, 0, _minimap_dim - 1), clampi(gz, 0, _minimap_dim - 1))
+
+# Minimap-local UV (0..1, 0..1) -> world (x, z). Used by the click-to-move-
+# camera handler below.
+func _minimap_uv_to_world(uv: Vector2) -> Vector2:
+	return Vector2(-_minimap_half + uv.x * _minimap_half * 2.0, -_minimap_half + uv.y * _minimap_half * 2.0)
+
+func _blit_minimap_blip(world_x: float, world_z: float, color: Color, radius: int = MINIMAP_BLIP_RADIUS):
+	var c = _minimap_world_to_cell(world_x, world_z)
+	for dz in range(-radius, radius + 1):
+		var gz = c.y + dz
+		if gz < 0 or gz >= _minimap_dim: continue
+		for dx in range(-radius, radius + 1):
+			var gx = c.x + dx
+			if gx < 0 or gx >= _minimap_dim: continue
+			_minimap_image.set_pixel(gx, gz, color)
+
+func _update_minimap():
+	if not is_instance_valid(_minimap_texture): return
+	_minimap_image.blit_rect(_minimap_static_image, Rect2i(Vector2i.ZERO, Vector2i(_minimap_dim, _minimap_dim)), Vector2i.ZERO)
+
+	# Resource nodes aren't fog-gated anywhere else in this game (map
+	# knowledge, not scouting-gated - see resource_node.gd), so they always
+	# show here too.
+	for r in get_tree().get_nodes_in_group("resource_nodes"):
+		if not is_instance_valid(r): continue
+		var rcolor = MINIMAP_CRYSTAL_COLOR if r.get("resource_type") == "crystal" else MINIMAP_METAL_COLOR
+		_blit_minimap_blip(r.global_position.x, r.global_position.z, rcolor)
+
+	var local_team = _local_team()
+	for team in _all_teams():
+		var is_own_side = is_allied(local_team, team)
+		for c in get_team_units(team) + get_team_buildings(team):
+			if not is_instance_valid(c): continue
+			# Same visibility rule as everything else the player sees
+			# (_recalc_fog_of_war()'s own comment): an enemy blip only
+			# shows while currently scouted, no persistent memory.
+			if not is_own_side and "fog_hidden" in c and c.fog_hidden: continue
+			var color = FactionCatalog.get_visual_color(_get_construct_faction(c))
+			_blit_minimap_blip(c.global_position.x, c.global_position.z, color)
+
+	_minimap_texture.update(_minimap_image)
+
+func _on_minimap_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var uv = event.position / MINIMAP_UI_SIZE
+		var world = _minimap_uv_to_world(uv)
+		# Keep the camera's existing height/angle - just recenter its X/Z
+		# over the clicked minimap location (the camera is a fixed overhead
+		# angle with no independent pan target today, so X/Z IS its ground
+		# focus point).
+		camera.global_position.x = world.x
+		camera.global_position.z = world.y
 
 # Composition readout for whatever enemy constructs are CURRENTLY visible
 # (never fog-hidden ones - same one-directional, no-persistent-memory fog
@@ -1230,6 +1343,44 @@ func _build_ui():
 	style.border_width_bottom = 2
 	selection_rect.add_theme_stylebox_override("panel", style)
 	ui.add_child(selection_rect)
+
+	# Minimap (RTS_CORE_ROADMAP.md B9): bottom-right corner, sitting just
+	# above the build bar. Click recenters the camera; right-click-to-order
+	# is left as future polish per this roadmap chunk's own note.
+	minimap_rect = TextureRect.new()
+	minimap_rect.anchor_left = 1.0
+	minimap_rect.anchor_right = 1.0
+	minimap_rect.anchor_top = 1.0
+	minimap_rect.anchor_bottom = 1.0
+	minimap_rect.offset_right = -10
+	minimap_rect.offset_left = -10 - MINIMAP_UI_SIZE
+	minimap_rect.offset_bottom = -106
+	minimap_rect.offset_top = -106 - MINIMAP_UI_SIZE
+	minimap_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	minimap_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	minimap_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+	minimap_rect.texture = _minimap_texture
+	minimap_rect.gui_input.connect(_on_minimap_gui_input)
+	var minimap_border = StyleBoxFlat.new()
+	minimap_border.bg_color = Color(0, 0, 0, 0)
+	minimap_border.border_color = Color(0.20, 0.60, 0.85, 0.90)
+	minimap_border.border_width_left = 2
+	minimap_border.border_width_right = 2
+	minimap_border.border_width_top = 2
+	minimap_border.border_width_bottom = 2
+	var minimap_frame = PanelContainer.new()
+	minimap_frame.anchor_left = minimap_rect.anchor_left
+	minimap_frame.anchor_right = minimap_rect.anchor_right
+	minimap_frame.anchor_top = minimap_rect.anchor_top
+	minimap_frame.anchor_bottom = minimap_rect.anchor_bottom
+	minimap_frame.offset_left = minimap_rect.offset_left - 2
+	minimap_frame.offset_right = minimap_rect.offset_right + 2
+	minimap_frame.offset_top = minimap_rect.offset_top - 2
+	minimap_frame.offset_bottom = minimap_rect.offset_bottom + 2
+	minimap_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	minimap_frame.add_theme_stylebox_override("panel", minimap_border)
+	ui.add_child(minimap_frame)
+	ui.add_child(minimap_rect)
 
 	_update_resource_ui()
 

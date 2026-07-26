@@ -167,6 +167,122 @@ static func get_spawn(map_def: Dictionary, spawn_id: String) -> Dictionary:
 			return s
 	return {}
 
+# RTS_CORE_ROADMAP.md B10: spawn ASSIGNMENT - which slot gets which of a
+# map's spawn points. Adopts OpenRA's algorithm verbatim (genuinely their
+# entire runtime fairness logic, ~15 lines): explicit pick (if the slot
+# asked for a specific spawn and it's still free) > when team_separation is
+# on, whichever unclaimed spawn maximizes the summed squared distance to
+# every spawn already claimed by an EARLIER entry in `order` (spreads
+# players out, most valuable for keeping opposing teams apart) > uniform
+# random among whatever's left otherwise (also the fallback for the very
+# first pick, when nothing's claimed yet to measure distance against).
+# Pure function over plain spawn dicts - no Skirmish/scene dependency, so
+# it's testable in isolation and reusable by a future N-player match-setup
+# slot picker without dragging in the whole match flow.
+static func assign_spawns(spawn_defs: Array, order: Array, explicit_picks: Dictionary = {}, team_separation: bool = true, rng: RandomNumberGenerator = null) -> Dictionary:
+	var claimed_ids: Array = []
+	var claimed_hqs: Array = []
+	var assignment: Dictionary = {}
+	for slot_key in order:
+		var candidates: Array = []
+		for s in spawn_defs:
+			if not claimed_ids.has(s.id):
+				candidates.append(s)
+		if candidates.is_empty():
+			continue
+
+		var picked: Dictionary = {}
+		if explicit_picks.has(slot_key):
+			for c in candidates:
+				if c.id == explicit_picks[slot_key]:
+					picked = c
+					break
+
+		if picked.is_empty() and team_separation and not claimed_hqs.is_empty():
+			var best_score: float = -1.0
+			for c in candidates:
+				var score: float = 0.0
+				for hq in claimed_hqs:
+					score += c.hq.distance_squared_to(hq)
+				if score > best_score:
+					best_score = score
+					picked = c
+
+		if picked.is_empty():
+			var r = rng if rng else RandomNumberGenerator.new()
+			picked = candidates[r.randi() % candidates.size()]
+
+		assignment[slot_key] = picked.id
+		claimed_ids.append(picked.id)
+		claimed_hqs.append(picked.hq)
+	return assignment
+
+# RTS_CORE_ROADMAP.md B10: this project has a REAL baked navmesh at
+# map-load time, unlike OpenRA (which only lints spawn counts/duplicates) -
+# so this goes further and lints actual per-spawn FAIRNESS: is the HQ pad
+# legal ground, is every spawn mutually reachable from every other spawn on
+# the same ground navmesh, does it have a reasonable economy nearby, and
+# are no two spawns wildly closer/farther apart than the rest (a lopsided
+# map favors whoever gets the "good" spawn regardless of skill). Every
+# check generalizes across however many spawns a map actually authors -
+# trivially satisfied by today's fixed 2-spawn maps (a single pairwise
+# distance has zero variance by definition), but the real target is
+# whatever a future B8 map authors with 3+. Needs a REAL baked ground
+# navmesh RID (TerrainBuilder.build_navmeshes()'s ground_map) - reachability
+# can't be answered any other way - so this isn't a pure function like
+# assign_spawns() above.
+const FAIRNESS_RESOURCE_RADIUS_FRACTION: float = 0.6
+const FAIRNESS_MIN_RESOURCES_PER_SPAWN: int = 2
+const FAIRNESS_MAX_DISTANCE_COEFFICIENT_OF_VARIATION: float = 0.35
+
+static func lint_spawn_fairness(map_def: Dictionary, ground_nav_map: RID) -> Array:
+	var errors: Array = []
+	var TerrainBuilderScript = load("res://scripts/terrain_builder.gd")
+	var spawns: Array = map_def.get("spawns", [])
+	if spawns.size() < 2:
+		errors.append("Map needs at least 2 spawns, found %d" % spawns.size())
+		return errors
+
+	var half: float = map_def.get("map_half_extents", 80.0)
+	var resource_radius: float = half * FAIRNESS_RESOURCE_RADIUS_FRACTION
+	var resources: Array = map_def.get("resource_nodes", [])
+
+	var distances: Array = []
+	for i in range(spawns.size()):
+		var a = spawns[i]
+		if TerrainBuilderScript.is_position_blocked(map_def, a.hq):
+			errors.append("Spawn '%s' HQ pad sits on blocked terrain" % a.id)
+
+		var nearby := 0
+		for r in resources:
+			if a.hq.distance_to(r.position) <= resource_radius:
+				nearby += 1
+		if nearby < FAIRNESS_MIN_RESOURCES_PER_SPAWN:
+			errors.append("Spawn '%s' has only %d resource node(s) within %.0f units (need >= %d)" % [a.id, nearby, resource_radius, FAIRNESS_MIN_RESOURCES_PER_SPAWN])
+
+		for j in range(i + 1, spawns.size()):
+			var b = spawns[j]
+			var path = NavigationServer3D.map_get_path(ground_nav_map, a.hq, b.hq, true)
+			if path.size() < 2 or path[path.size() - 1].distance_to(b.hq) > 5.0:
+				errors.append("Spawns '%s' and '%s' are not mutually reachable on the ground navmesh" % [a.id, b.id])
+			distances.append(a.hq.distance_to(b.hq))
+
+	if distances.size() > 1:
+		var mean: float = 0.0
+		for d in distances:
+			mean += d
+		mean /= distances.size()
+		var variance: float = 0.0
+		for d in distances:
+			variance += (d - mean) * (d - mean)
+		variance /= distances.size()
+		var stdev: float = sqrt(variance)
+		var coeff: float = stdev / mean if mean > 0.0 else 0.0
+		if coeff > FAIRNESS_MAX_DISTANCE_COEFFICIENT_OF_VARIATION:
+			errors.append("Pairwise spawn distances vary too much (coefficient of variation %.2f > %.2f) - some spawn pairs are much closer/farther apart than others" % [coeff, FAIRNESS_MAX_DISTANCE_COEFFICIENT_OF_VARIATION])
+
+	return errors
+
 # RTS_CORE_ROADMAP.md B1: a declarative field -> type -> required -> range
 # spec, walked by one reflective validator (validate_map()) instead of
 # hand-written per-field asserts - the GDScript analogue of OpenRA's lint

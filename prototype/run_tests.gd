@@ -113,6 +113,9 @@ func _init():
 	success = success and await test_map_urban_sprawl_smoke()
 	success = success and await test_map_scattered_peaks_smoke()
 	success = success and await test_b8_large_map_navmesh_bake_does_not_crash_recast()
+	success = success and await test_b9_minimap_samples_water_and_hides_reveals_enemy_blips()
+	success = success and await test_b10_spawn_assignment_picks_explicit_then_maximizes_separation()
+	success = success and await test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones()
 	success = success and await test_weapon_traverse_and_range_differentiation()
 	success = success and await test_weight_vs_locomotion_capacity_penalty()
 	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
@@ -5788,6 +5791,17 @@ func _smoke_test_map(map_id: String) -> bool:
 		skirmish.queue_free()
 		return false
 
+	# RTS_CORE_ROADMAP.md B10: the fairness lint every map has to clear -
+	# generalizes across however many spawns a map authors (today's maps
+	# all have exactly 2, so this mostly re-proves the checks above in a
+	# more general form, plus the two genuinely NEW ones: a minimum nearby
+	# economy per spawn, and pairwise spawn-distance variance).
+	var fairness_errors = MapCatalogScript.lint_spawn_fairness(map_def, skirmish.ground_nav_map)
+	if not fairness_errors.is_empty():
+		print("  [FAIL] Spawn fairness lint failed for map '", map_id, "': ", fairness_errors)
+		skirmish.queue_free()
+		return false
+
 	# Economy/build loop still works: queue a unit, tick past its build
 	# time, confirm the factory actually produced it.
 	var factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM)
@@ -5933,6 +5947,238 @@ func test_b8_large_map_navmesh_bake_does_not_crash_recast() -> bool:
 	NavigationServer3D.free_rid(nav.deep_water_map)
 
 	print("  [PASS] A 550-half-extent map's navmesh bakes successfully (this specific crash is what killed the whole test process before the fix) with widened cell_size, while smaller maps keep Godot's own default.")
+	return true
+
+# RTS_CORE_ROADMAP.md B9: an 8-bit-per-channel Image (FORMAT_RGB8, what
+# _minimap_static_image/_minimap_image both use) quantizes/rounds a float
+# Color on set_pixel - comparing a sampled pixel against a raw float Color
+# constant with `==` fails on harmless rounding, not a real bug. Tolerant
+# only across a single-pixel compare - not a substitute for the existing
+# whole-image screenshot_diff.gd tolerance, a different problem.
+func _color_close(a: Color, b: Color, eps: float = 0.02) -> bool:
+	return abs(a.r - b.r) <= eps and abs(a.g - b.g) <= eps and abs(a.b - b.b) <= eps
+
+func test_b9_minimap_samples_water_and_hides_reveals_enemy_blips() -> bool:
+	print("Running Test Suite: Minimap - Real Water Sample + Fog-Gated Enemy Blips (RTS_CORE_ROADMAP.md B9)...")
+	# Deliberately tests the real Image (skirmish._minimap_static_image /
+	# _minimap_image) directly, not a render-to-texture screenshot -
+	# headless never rasterizes a Viewport, which is exactly why B9 is
+	# specified as a real Image bake in the first place (see skirmish.gd's
+	# _setup_minimap() comment).
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# lake_crossing (the default map) has a real water_blob centered at
+	# (54, 0, 0), radius 22 - well inside it, away from any surface_zones.
+	# _minimap_static_image is FORMAT_RGB8, so an exact float compare
+	# against the raw MINIMAP_WATER_COLOR constant would fail on harmless
+	# 8-bit quantization rounding (confirmed empirically) - _color_close()
+	# tolerates that, same reasoning as this suite's screenshot-diff test.
+	var water_cell = skirmish._minimap_world_to_cell(54.0, 0.0)
+	var water_sample = skirmish._minimap_static_image.get_pixel(water_cell.x, water_cell.y)
+	if not _color_close(water_sample, skirmish.MINIMAP_WATER_COLOR):
+		print("  [FAIL] A known water region should bake to MINIMAP_WATER_COLOR on the static minimap, got ", water_sample)
+		skirmish.queue_free()
+		return false
+
+	# Ground far from the lake shouldn't get the water tint.
+	var land_cell = skirmish._minimap_world_to_cell(-200.0, -200.0)
+	var land_sample = skirmish._minimap_static_image.get_pixel(land_cell.x, land_cell.y)
+	if _color_close(land_sample, skirmish.MINIMAP_WATER_COLOR):
+		print("  [FAIL] Open ground far from the lake should NOT sample as water on the minimap")
+		skirmish.queue_free()
+		return false
+
+	var enemy = CharacterBody3D.new()
+	enemy.set_script(BattleUnitScript)
+	skirmish.add_child(enemy)
+	enemy.team = skirmish.ENEMY_TEAM
+	enemy.set_meta("team", skirmish.ENEMY_TEAM)
+	enemy.add_to_group("units")
+	enemy.add_to_group("damageable")
+	enemy.vision_range = 5.0
+	enemy.global_position = Vector3(200, 0, 200) # far from any existing base/unit, same spot the fog test uses
+
+	skirmish._recalc_fog_of_war() # also runs _update_minimap()
+	var enemy_cell = skirmish._minimap_world_to_cell(200.0, 200.0)
+	var hidden_sample = skirmish._minimap_image.get_pixel(enemy_cell.x, enemy_cell.y)
+	var background_sample = skirmish._minimap_static_image.get_pixel(enemy_cell.x, enemy_cell.y)
+	if hidden_sample != background_sample:
+		print("  [FAIL] A fog-hidden enemy should NOT get a minimap blip - expected the plain background color ", background_sample, ", got ", hidden_sample)
+		skirmish.queue_free()
+		return false
+
+	var near_player = CharacterBody3D.new()
+	near_player.set_script(BattleUnitScript)
+	skirmish.add_child(near_player)
+	near_player.team = skirmish.PLAYER_TEAM
+	near_player.set_meta("team", skirmish.PLAYER_TEAM)
+	near_player.add_to_group("units")
+	near_player.add_to_group("damageable")
+	near_player.vision_range = 20.0
+	near_player.global_position = Vector3(205, 0, 200) # within 20 units of the enemy
+
+	skirmish._recalc_fog_of_war()
+	var revealed_sample = skirmish._minimap_image.get_pixel(enemy_cell.x, enemy_cell.y)
+	var expected_color = FactionCatalogScript.get_visual_color(FactionCatalogScript.DEFAULT_FACTION)
+	if not _color_close(revealed_sample, expected_color):
+		print("  [FAIL] A scouted enemy should get a minimap blip in its faction's visual color, expected ", expected_color, " got ", revealed_sample)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Minimap correctly samples a known water region, and only shows an enemy blip once that enemy is actually scouted (not while fog_hidden).")
+	return true
+
+func test_b10_spawn_assignment_picks_explicit_then_maximizes_separation() -> bool:
+	print("Running Test Suite: B10 Spawn Assignment - Explicit Pick > Max Squared Distance > Random (RTS_CORE_ROADMAP.md B10)...")
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+
+	# Three spawns on a line: a=0, b=100, c=200. Slot 0 explicitly picks
+	# "a"; slot 1 has no explicit pick, so with team_separation on it should
+	# maximize squared distance to what's already claimed (a) - c (dist 200)
+	# beats b (dist 100), so it must pick "c", never b.
+	var spawns = [
+		{"id": "a", "hq": Vector3(0, 0, 0)},
+		{"id": "b", "hq": Vector3(100, 0, 0)},
+		{"id": "c", "hq": Vector3(200, 0, 0)},
+	]
+	var assignment = MapCatalogScript.assign_spawns(spawns, [0, 1], {0: "a"}, true)
+	if assignment.get(0) != "a":
+		print("  [FAIL] Slot 0's explicit pick 'a' should be honored, got ", assignment.get(0))
+		return false
+	if assignment.get(1) != "c":
+		print("  [FAIL] Slot 1 (team_separation on, 'a' already claimed) should maximize squared distance and pick 'c' (dist 200) over 'b' (dist 100), got ", assignment.get(1))
+		return false
+
+	# An explicit pick wins even when it's NOT the distance-maximizing choice.
+	var explicit_assignment = MapCatalogScript.assign_spawns(spawns, [0, 1], {0: "a", 1: "b"}, true)
+	if explicit_assignment.get(1) != "b":
+		print("  [FAIL] An explicit pick should win even over the distance-maximizing candidate, got ", explicit_assignment.get(1))
+		return false
+
+	# With team_separation OFF, slot 1's pick among the 2 remaining
+	# candidates ('b'/'c') should be genuinely random, not always the
+	# distance-maximizing 'c' - run enough seeded trials that landing on
+	# 'b' at least once is a near-certainty if (and only if) the flag is
+	# actually respected rather than ignored.
+	var saw_b = false
+	for seed_val in range(30):
+		var rng = RandomNumberGenerator.new()
+		rng.seed = seed_val
+		var no_sep_assignment = MapCatalogScript.assign_spawns(spawns, [0, 1], {0: "a"}, false, rng)
+		if no_sep_assignment.get(1) == "b":
+			saw_b = true
+			break
+	if not saw_b:
+		print("  [FAIL] With team_separation off, slot 1 should sometimes land on 'b' (genuine randomness), not always 'c' (distance-maximizing) - the flag may be ignored")
+		return false
+
+	print("  [PASS] Spawn assignment honors explicit picks first, maximizes squared distance to claimed spawns when team_separation is on, and falls back to real randomness when it's off.")
+	return true
+
+func test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones() -> bool:
+	print("Running Test Suite: B10 Spawn Fairness Lint - Clears Every Bundled Map, Catches Synthetic Bad Ones (RTS_CORE_ROADMAP.md B10)...")
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	MapCatalogScript.reset_cache_for_tests()
+	TerrainBuilderScript.reset_heightmap_cache_for_tests()
+
+	# Every bundled map should already clear the lint - it's meant to
+	# generalize the checks _smoke_test_map already proves per-map, not
+	# introduce a new bar the existing roster hasn't cleared.
+	for map_id in MapCatalogScript.get_map_ids():
+		var map_def = MapCatalogScript.get_map(map_id)
+		var nav = TerrainBuilderScript.build_navmeshes(map_def)
+		await process_frame
+		var errors = MapCatalogScript.lint_spawn_fairness(map_def, nav.ground_map)
+		NavigationServer3D.free_rid(nav.ground_region)
+		NavigationServer3D.free_rid(nav.amphibious_region)
+		NavigationServer3D.free_rid(nav.ground_map)
+		NavigationServer3D.free_rid(nav.water_map)
+		NavigationServer3D.free_rid(nav.amphibious_map)
+		NavigationServer3D.free_rid(nav.deep_water_map)
+		if not errors.is_empty():
+			print("  [FAIL] Bundled map '", map_id, "' should clear the fairness lint cleanly, got: ", errors)
+			return false
+
+	# Synthetic bad map #1: spawn 'a's HQ sits inside a water rect, and
+	# there are no resource nodes at all - should trip both the blocked-
+	# terrain check and the minimum-nearby-resources check.
+	var blocked_map_def = {
+		"map_half_extents": 100.0,
+		"water_areas": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(10, 10)}],
+		"obstacles": [],
+		"resource_nodes": [],
+		"spawns": [
+			{"id": "a", "hq": Vector3(0, 0, 0)},
+			{"id": "b", "hq": Vector3(90, 0, 90)},
+		],
+	}
+	var blocked_nav = TerrainBuilderScript.build_navmeshes(blocked_map_def)
+	await process_frame
+	var blocked_errors = MapCatalogScript.lint_spawn_fairness(blocked_map_def, blocked_nav.ground_map)
+	NavigationServer3D.free_rid(blocked_nav.ground_region)
+	NavigationServer3D.free_rid(blocked_nav.amphibious_region)
+	NavigationServer3D.free_rid(blocked_nav.ground_map)
+	NavigationServer3D.free_rid(blocked_nav.water_map)
+	NavigationServer3D.free_rid(blocked_nav.amphibious_map)
+	NavigationServer3D.free_rid(blocked_nav.deep_water_map)
+	var found_blocked = false
+	var found_resource = false
+	for e in blocked_errors:
+		if "blocked terrain" in e:
+			found_blocked = true
+		if "resource node" in e:
+			found_resource = true
+	if not found_blocked or not found_resource:
+		print("  [FAIL] A spawn HQ on water with zero resource nodes should trip both the blocked-terrain and minimum-resources checks, got: ", blocked_errors)
+		return false
+
+	# Synthetic bad map #2: 3 spawns where one pair sits much closer than
+	# the others (10 units vs. ~500-510) - should trip the pairwise
+	# distance-variance check. Plenty of resources near every spawn and no
+	# obstacles, so only the variance check is exercised.
+	var lopsided_resources = []
+	for hq_x in [0, 10, 510]:
+		lopsided_resources.append({"position": Vector3(hq_x - 20, 0, 0), "type": "metal", "amount": 500})
+		lopsided_resources.append({"position": Vector3(hq_x + 20, 0, 0), "type": "metal", "amount": 500})
+	var lopsided_map_def = {
+		"map_half_extents": 600.0,
+		"water_areas": [],
+		"obstacles": [],
+		"resource_nodes": lopsided_resources,
+		"spawns": [
+			{"id": "a", "hq": Vector3(0, 0, 0)},
+			{"id": "b", "hq": Vector3(10, 0, 0)},
+			{"id": "c", "hq": Vector3(510, 0, 0)},
+		],
+	}
+	var lopsided_nav = TerrainBuilderScript.build_navmeshes(lopsided_map_def)
+	await process_frame
+	var lopsided_errors = MapCatalogScript.lint_spawn_fairness(lopsided_map_def, lopsided_nav.ground_map)
+	NavigationServer3D.free_rid(lopsided_nav.ground_region)
+	NavigationServer3D.free_rid(lopsided_nav.amphibious_region)
+	NavigationServer3D.free_rid(lopsided_nav.ground_map)
+	NavigationServer3D.free_rid(lopsided_nav.water_map)
+	NavigationServer3D.free_rid(lopsided_nav.amphibious_map)
+	NavigationServer3D.free_rid(lopsided_nav.deep_water_map)
+	var found_variance = false
+	for e in lopsided_errors:
+		if "vary too much" in e:
+			found_variance = true
+	if not found_variance:
+		print("  [FAIL] 3 spawns with one pair 10 units apart and the others ~500+ apart should trip the distance-variance check, got: ", lopsided_errors)
+		return false
+
+	print("  [PASS] Every bundled map clears the fairness lint cleanly; a spawn on blocked terrain with no nearby resources, and a lopsided 3-spawn distance spread, both get caught.")
 	return true
 
 func test_weapon_traverse_and_range_differentiation() -> bool:

@@ -1110,6 +1110,20 @@ static func get_surface_type_at(map_def: Dictionary, pos: Vector3) -> String:
 			return z.get("surface_type", "")
 	return ""
 
+# Water only (no obstacles/slope) - RTS_CORE_ROADMAP.md B9's minimap bake
+# wants "is this cell water" for its blue tint, not "is this cell
+# unwalkable" (an obstacle or over-slope cell should still read as its
+# normal ground color on the minimap, just with a blip/prop on top of it).
+static func is_water_at(map_def: Dictionary, x: float, z: float) -> bool:
+	var pos = Vector3(x, 0, z)
+	for w in map_def.get("water_areas", []):
+		if _point_in_rect(pos, _rect_from(w.center, w.half_extents)):
+			return true
+	for blob in map_def.get("water_blobs", []):
+		if _point_in_water_blob(blob, x, z):
+			return true
+	return false
+
 static func is_position_blocked(map_def: Dictionary, pos: Vector3) -> bool:
 	for w in map_def.get("water_areas", []):
 		if _point_in_rect(pos, _rect_from(w.center, w.half_extents)):
