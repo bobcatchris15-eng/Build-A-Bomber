@@ -437,6 +437,13 @@ func _ready():
 func _physics_process(delta):
 	if production:
 		production.tick(delta)
+	# RTS_CORE_ROADMAP.md D1: flush at most once per physics frame, no
+	# matter how many spend()/add_resources() calls happened this tick
+	# (drip-fed cost across several team+tier queues, HQ trickle, etc.) -
+	# see spend()'s own comment for why this exists.
+	if _resource_ui_dirty:
+		_resource_ui_dirty = false
+		_update_resource_ui()
 	# RTS_CORE_ROADMAP.md C1: one-frame debounce - a building placed/
 	# destroyed this physics tick just sets the flag (possibly several
 	# times, e.g. AOE splash killing a cluster of buildings in one tick);
@@ -1035,6 +1042,15 @@ var debug_instant_build: bool = false
 func can_afford(team: int, metal: int, crystal: int) -> bool:
 	return economy[team].metal >= metal and economy[team].crystal >= crystal
 
+# RTS_CORE_ROADMAP.md D1's own gotcha: spend() now gets called once per
+# team+tier queue EVERY physics tick (drip-fed cost, production_queue.gd's
+# tick()), not just on a discrete player action - _update_resource_ui()
+# itself is cheap, but calling it up to several times a frame for a label
+# update that only needs to happen once is wasted work. Both spend() and
+# add_resources() just flag dirty now; skirmish.gd's own _physics_process()
+# flushes it at most once per frame, after production has ticked.
+var _resource_ui_dirty: bool = false
+
 func spend(team: int, metal: int, crystal: int) -> bool:
 	if not can_afford(team, metal, crystal):
 		return false
@@ -1043,13 +1059,13 @@ func spend(team: int, metal: int, crystal: int) -> bool:
 	if debug_infinite_resources and team == PLAYER_TEAM:
 		economy[team].metal = max(economy[team].metal, INFINITE_RESOURCE_FLOOR)
 		economy[team].crystal = max(economy[team].crystal, INFINITE_RESOURCE_FLOOR)
-	_update_resource_ui()
+	_resource_ui_dirty = true
 	return true
 
 func add_resources(team: int, metal: int, crystal: int):
 	economy[team].metal += metal
 	economy[team].crystal += crystal
-	_update_resource_ui()
+	_resource_ui_dirty = true
 
 func _on_resources_delivered(team: int, metal: int, crystal: int):
 	add_resources(team, metal, crystal)
@@ -1643,16 +1659,19 @@ func _queue_player_unit(entry: Dictionary):
 	# Size-tiered manufactories: which building this design can be queued
 	# from depends on its own hull's weight tier, not domain - a design on
 	# heavy_cruiser_hull needs a Heavy Manufactory exactly like one on
-	# heavy_hull would. Tier resolve, factory-exists/legality/afford checks,
-	# spend, and build-time all now live in production.enqueue() - the same
-	# path enemy_ai.gd's producer calls through (RTS_CORE_ROADMAP.md A1).
+	# heavy_hull would. Tier resolve, legality, drip-fed cost, and build-time
+	# all now live in production.enqueue() - the same path enemy_ai.gd's
+	# producer calls through (RTS_CORE_ROADMAP.md A1).
+	#
+	# RTS_CORE_ROADMAP.md D1: no "cant_afford" branch here anymore - queuing
+	# no longer requires the full cost banked up front (see enqueue()'s own
+	# comment); a build that can't afford its next tick's draw pauses
+	# in-place instead of being rejected at queue time.
 	var result = production.enqueue(PLAYER_TEAM, entry.blueprint, player_faction, entry.cost_metal, entry.cost_crystal)
 	if not result.queued:
 		match result.error:
 			"no_factory":
 				_flash_status("Need a %s Manufactory to build %s!" % [result.tier.capitalize(), entry.name])
-			"cant_afford":
-				_flash_status("Not enough resources for %s!" % entry.name)
 			"illegal":
 				_flash_status("%s can't be built: %s" % [entry.name, result.reason])
 		return

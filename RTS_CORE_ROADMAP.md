@@ -1,15 +1,21 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3, C4 landed (Phase C
-complete); B8 in progress (1 of N maps landed).** This is a resumable roadmap, written so a fresh session can pick up any
+**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3, C4, D1 landed
+(Phase C complete); B8 in progress (1 of N maps landed).** This is a resumable roadmap, written so a fresh session can pick up any
 single chunk without re-deriving the architecture. Chunks are ordered with
 explicit dependencies in the sequencing table at the end; each is sized to land
 as one commit with its own `PROGRESS.md` entry. **Update the sequencing
 table's status as chunks land** — a stale "next up" header in a plan doc is
 exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before
-being corrected on 2026-07-24. **Next up: Phase D** (production depth,
-starting with D1's drip-fed cost/pause-on-broke/refunds), or continue B8 -
-confirm which.
+being corrected on 2026-07-24. **Next up: D2** (queue HUD + categorised
+build bar), or continue B8 - confirm which.
+
+**A pre-existing, already-flaky test class got a background investigation
+task spun off rather than being chased further inline**: across repeated
+suite runs, a different navmesh/movement test fails each time (never the
+same one twice), consistent with Recast-bake nondeterminism first suspected
+during C1. Not a D1 regression - D1's own tests pass every run. See the
+spawned task / `PROGRESS.md`'s D1 entry.
 
 **C4 found a real, narrow edge case writing its own test:** `notify_blocker()`'s
 straight-line nudge doesn't check whether that direction walks toward a
@@ -657,7 +663,7 @@ readback) over catalog-number assertions.
 | 14 | C2 real placement legality | one session | B6 | **Done** |
 | 15 | C3 buildable area / adjacency | afternoon | C2 | **Done** |
 | 16 | C4 exits + rally points | one session | A1, C1 | **Done** |
-| 17 | D1 drip-fed cost + refunds | one session | A1, A2 | — |
+| 17 | D1 drip-fed cost + refunds | one session | A1, A2 | **Done** |
 | 18 | D2 queue HUD + tabs | one session | D1 | — |
 | 19 | D3 multi-factory speed | afternoon | A1 | — |
 | 20 | D4 building build time | multi | D1 | — |

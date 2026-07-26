@@ -110,6 +110,8 @@ func _init():
 	success = success and await test_c4_exit_point_is_height_snapped_to_real_terrain()
 	success = success and await test_c4_blocked_exit_holds_job_done_nudges_blockers_then_spawns()
 	success = success and await test_c4_manufactory_rally_point_is_settable_via_right_click()
+	success = success and await test_d1_drip_fed_cost_pauses_when_broke_and_resumes_on_income()
+	success = success and await test_d1_cancel_refunds_exact_progress_drawn()
 	success = success and await test_map_open_plains_smoke()
 	success = success and await test_map_lake_crossing_smoke()
 	success = success and await test_map_highland_chokepoint_smoke()
@@ -6086,6 +6088,146 @@ func test_c4_manufactory_rally_point_is_settable_via_right_click() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] A manufactory's rally_point is settable and a freshly-produced unit actually orders toward it.")
+	return true
+
+# A legal, cheap medium-tier fixture reused by both D1 tests below - real
+# hull + weapon module so ModuleCatalog.validate_build_legality() passes,
+# which production.enqueue() requires before a job ever reaches the queue.
+func _d1_test_blueprint() -> Dictionary:
+	return {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"armor_material": "hardened_steel", "armor_thickness": 1.0,
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "tracked_treads", "name": "Treads", "position": {"x": 0, "y": 0, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}},
+			{"type_id": "basic_cannon", "name": "Cannon", "position": {"x": 0, "y": 0.75, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}},
+		],
+	}
+
+func test_d1_drip_fed_cost_pauses_when_broke_and_resumes_on_income() -> bool:
+	print("Running Test Suite: D1 - Drip-Fed Cost Pauses On Broke, Resumes On Income, Completes (RTS_CORE_ROADMAP.md D1)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# RTS_CORE_ROADMAP.md D1's own note: must explicitly disable the A2
+	# infinite-resources toggle, or every assertion here passes vacuously.
+	skirmish.debug_infinite_resources = false
+	skirmish.economy[skirmish.PLAYER_TEAM].metal = 100
+	skirmish.economy[skirmish.PLAYER_TEAM].crystal = 1000 # not the bottleneck being tested
+
+	var result = skirmish.production.enqueue(skirmish.PLAYER_TEAM, _d1_test_blueprint(), skirmish.player_faction, 300, 0)
+	if not result.queued:
+		print("  [FAIL] Queuing a 300-cost item with only 100 metal banked should succeed (D1: no longer requires the full cost up front), got error: ", result.error, " ", result.reason)
+		skirmish.queue_free()
+		return false
+
+	var tier = result.tier
+	var q = skirmish.production.get_queue(skirmish.PLAYER_TEAM, tier)
+	if q.size() != 1:
+		print("  [FAIL] Expected exactly 1 queued item, got ", q.size())
+		skirmish.queue_free()
+		return false
+	var job = q[0]
+
+	# Drip-feed only 1/3 of the total_time worth of cost is affordable (100
+	# of 300 metal) - tick well past that point (10s at 60fps) and confirm
+	# it stalled rather than completing or overdrawing.
+	for i in range(600):
+		skirmish.production.tick(1.0 / 60.0)
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != 0:
+		print("  [FAIL] All 100 banked metal should have been drawn by now, got ", skirmish.economy[skirmish.PLAYER_TEAM].metal, " remaining")
+		skirmish.queue_free()
+		return false
+	if job.time_left <= 0.0:
+		print("  [FAIL] The build should still be incomplete (only 1/3 of its cost was ever affordable), but time_left=", job.time_left)
+		skirmish.queue_free()
+		return false
+	var stalled_time_left = job.time_left
+
+	# Broke and staying broke - ticking further should make ZERO progress,
+	# not just slow progress (this is a pause, not a slowdown).
+	for i in range(60):
+		skirmish.production.tick(1.0 / 60.0)
+	if job.time_left != stalled_time_left:
+		print("  [FAIL] With no income, the stalled build should make exactly zero further progress, but time_left changed from ", stalled_time_left, " to ", job.time_left)
+		skirmish.queue_free()
+		return false
+
+	# Income arrives - the build should resume and eventually complete (the
+	# job leaves the queue and a real unit spawns).
+	skirmish.add_resources(skirmish.PLAYER_TEAM, 300, 0)
+	var completed = false
+	for i in range(900):
+		skirmish.production.tick(1.0 / 60.0)
+		if skirmish.production.get_queue(skirmish.PLAYER_TEAM, tier).is_empty():
+			completed = true
+			break
+	if not completed:
+		print("  [FAIL] The build should have completed once income arrived, but the job is still in the queue after 15s of ticking")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A drip-fed build correctly stalls when broke (making zero further progress, not slowed progress), then resumes and completes once income arrives.")
+	return true
+
+func test_d1_cancel_refunds_exact_progress_drawn() -> bool:
+	print("Running Test Suite: D1 - Cancel Refunds Exactly What Was Drawn, Not The Full Cost (RTS_CORE_ROADMAP.md D1)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	skirmish.debug_infinite_resources = false
+	skirmish.economy[skirmish.PLAYER_TEAM].metal = 1000
+	skirmish.economy[skirmish.PLAYER_TEAM].crystal = 1000
+
+	var result = skirmish.production.enqueue(skirmish.PLAYER_TEAM, _d1_test_blueprint(), skirmish.player_faction, 300, 0)
+	if not result.queued:
+		print("  [FAIL] Test setup: queuing should have succeeded, got error: ", result.error)
+		skirmish.queue_free()
+		return false
+	var tier = result.tier
+	var bank_after_queue = skirmish.economy[skirmish.PLAYER_TEAM].metal
+
+	# Tick partway through the build (well short of completion) - some real
+	# cost has been drawn, but not all of it.
+	for i in range(150): # 2.5s of a build costing 15s total
+		skirmish.production.tick(1.0 / 60.0)
+	var bank_mid_build = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	var spent_so_far = bank_after_queue - bank_mid_build
+	if spent_so_far <= 0 or spent_so_far >= 300:
+		print("  [FAIL] Test setup: expected SOME but not ALL of the 300 cost drawn by now, got ", spent_so_far)
+		skirmish.queue_free()
+		return false
+
+	var refund = skirmish.production.cancel(skirmish.PLAYER_TEAM, tier, 0)
+	var bank_after_cancel = skirmish.economy[skirmish.PLAYER_TEAM].metal
+
+	if refund.metal != spent_so_far:
+		print("  [FAIL] cancel() should report refunding exactly what was drawn (", spent_so_far, "), got ", refund.metal)
+		skirmish.queue_free()
+		return false
+	if bank_after_cancel != bank_mid_build + spent_so_far:
+		print("  [FAIL] Bank should be credited exactly the refund amount - expected ", bank_mid_build + spent_so_far, ", got ", bank_after_cancel)
+		skirmish.queue_free()
+		return false
+	if not skirmish.production.get_queue(skirmish.PLAYER_TEAM, tier).is_empty():
+		print("  [FAIL] The cancelled item should be gone from the queue")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Cancelling a mid-build job refunds exactly the amount actually drawn so far (", spent_so_far, "), not the full cost, and removes it from the queue.")
 	return true
 
 # Reusable per-map smoke test (per Chris's one-at-a-time verification

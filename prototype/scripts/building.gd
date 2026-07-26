@@ -396,7 +396,18 @@ func _physics_process(delta):
 # team+tier Array (see setup_prefab()), so this is equivalent to appending
 # directly to that tier's queue.
 func queue_unit(blueprint_data: Dictionary, build_time: float):
-	production_queue.append({"blueprint": blueprint_data, "time_left": build_time, "total_time": build_time})
+	# RTS_CORE_ROADMAP.md D1: production_queue.gd's tick() now expects every
+	# job to carry cost-tracking fields (drip-fed cost) - zeroed here since
+	# this back-compat path never gated on affordability even before D1
+	# (only real production.enqueue() cost anything); zero cost just means
+	# every tick's draw is trivially free, so the timer-only behavior this
+	# was already used for is unchanged.
+	production_queue.append({
+		"blueprint": blueprint_data, "time_left": build_time, "total_time": build_time,
+		"total_cost_metal": 0, "total_cost_crystal": 0,
+		"remaining_cost_metal": 0.0, "remaining_cost_crystal": 0.0,
+		"paused": false,
+	})
 	_update_hp_bar()
 
 # RTS_CORE_ROADMAP.md C4: real exit point - PREFAB_STATS' per-kind

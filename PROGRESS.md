@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-26 — RTS_CORE_ROADMAP.md D1: drip-fed cost, pause-on-broke, refunds
+
+Opens Phase D. Adopts OpenRA's `ProductionItem.Tick` semantics directly (adapted from discrete ticks to this project's continuous delta-seconds): cost is drawn incrementally over a build's whole duration instead of spent in full the instant it's queued.
+
+**Shipped (`production_queue.gd`):**
+- `enqueue()` no longer requires the full cost banked up front - queuing something you can't yet fully afford now succeeds (matching this chunk's own verify example: queue a 300-cost unit with only 100 banked), removing the old `"cant_afford"` rejection entirely. `skirmish.gd`'s build-bar UI handler dropped the now-dead branch for it.
+- Each job carries `total_cost_metal`/`total_cost_crystal` (latched at queue time) and `remaining_cost_metal`/`remaining_cost_crystal` (floats, tracking what's ACTUALLY been drawn so far - not an idealized "should be by now" value, which is what lets per-tick integer rounding never lose or gain cost over a build's whole lifetime: a rounded-down tick's shortfall just shows up as a bigger draw the next tick).
+- `tick()`: each tick computes what fraction of the total cost SHOULD remain once this tick's time has passed, diffs that against what's actually still owed, and tries to draw the difference. If `spend()` fails, the job makes **zero** progress that tick (a pause, not a slowdown) - `time_left` and `remaining_cost` both stay exactly where they were, and it retries next tick.
+- New `cancel(team, tier, index)`: refunds exactly `total_cost - remaining_cost` (what's actually been drawn), not the full price - canceling something 90% paid-for only gives back that 90%.
+- New `set_paused(team, tier, paused)`: a manual pause (for D2's right-click) distinct from the automatic pause-on-broke tick() already does on its own.
+- `building.gd`'s back-compat `queue_unit()` (the direct-append path several tests use to drive the timer without going through real production) now seeds zero-cost tracking fields, so it keeps behaving exactly as before (a job with 0 total cost trivially never gates on affordability - the same as it never did pre-D1).
+
+**The roadmap's own flagged gotcha, handled**: `spend()` now runs once per team+tier queue every physics tick (not just on a discrete player action), so calling `_update_resource_ui()` directly from it would mean several label rebuilds a frame. Both `spend()`/`add_resources()` now just flag `_resource_ui_dirty`; `skirmish.gd`'s own `_physics_process()` flushes it at most once per frame, after production has ticked.
+
+**Verified**: with `debug_infinite_resources` explicitly off (per this chunk's own note - otherwise every assertion here passes vacuously) and 100 metal banked, queuing a 300-cost item succeeds; ticking exhausts exactly the 100 available and then makes **zero** further progress while broke (not a slowdown - genuinely stalled); adding income resumes it and it completes. Canceling a job partway through refunds exactly the amount drawn so far (asserted via real bank-delta math, not a formula), not the full cost, and removes it from the queue.
+
+Full suite green except pre-existing, already-documented flakiness unrelated to this chunk - across 3 repeated runs, a *different* navmesh/movement test failed each time (never the same one twice, never a D1 test), consistent with the Recast-bake nondeterminism already suspected during C1. Spun off as a background investigation task rather than chased further here, per Chris's standing "don't over-invest in repeated test reruns" guidance.
+
+---
+
 ## 2026-07-26 — RTS_CORE_ROADMAP.md C4: exits and rally points
 
 Closes out Phase C. `building.gd:333`'s hardcoded exit offset (`Vector3(0, 0.5, footprint.z/2.0 + 3.0)`, no terrain height snap at all, unlike `skirmish.gd`'s own `terrain_height_at()` everywhere else) becomes real per-kind data, plus OpenRA's blocked-exit handling and a genuinely settable rally point.

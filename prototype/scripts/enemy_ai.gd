@@ -148,10 +148,14 @@ func _try_produce():
 			if _entry_counters(entry, threat) and _queue_entry(entry):
 				return
 
-	# Cycle through the roster; skip what we can't afford OR don't have the
-	# right manufactory tier for yet (size-tiered manufactories - see
-	# ModuleCatalog.get_hull_size_tier()). Checked per-entry, not once
-	# upfront, since different roster entries can need different tiers.
+	# Cycle through the roster; skip what we don't have the right manufactory
+	# tier for yet (size-tiered manufactories - see ModuleCatalog.
+	# get_hull_size_tier()) or that tier's queue is already at its self-
+	# throttle depth. RTS_CORE_ROADMAP.md D1: no longer skips on
+	# affordability - queuing something the AI can't yet fully afford is
+	# fine now, it just drip-feeds/pauses like anything else once it's the
+	# front item. Checked per-entry, not once upfront, since different
+	# roster entries can need different tiers.
 	for i in range(combat.size()):
 		var entry = combat[(roster_index + i) % combat.size()]
 		if _queue_entry(entry):
