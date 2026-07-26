@@ -34,6 +34,14 @@ const DOMAIN_ORDER = ["Vehicle", "Static Building"]
 # bonus wiring) rather than inventing a second, potentially-drifting list.
 const MODULE_DOMAIN_ORDER = ["Weapons", "Armor", "Generators", "Utility", "Mobility", "Structural"]
 
+# Uniform part-button colors (see _ready()'s button-building loop) - one
+# dark background/text pair shared by every button regardless of module
+# type, with the module's own catalog color demoted to an accent stripe.
+const PART_BUTTON_BG = Color(0.14, 0.14, 0.17, 0.95)
+const PART_BUTTON_BG_HOVER = Color(0.20, 0.20, 0.24, 0.95)
+const PART_BUTTON_TEXT = Color(0.92, 0.93, 0.95, 1.0)
+const PART_BUTTON_TEXT_OUTLINE = Color(0.02, 0.02, 0.03, 1.0)
+
 func _ready():
 	if panel_container:
 		UITheme.apply_brushed_panel(panel_container, FactionCatalog.DEFAULT_FACTION, 0.35)
@@ -56,11 +64,19 @@ func _ready():
 		btn.text = data["name"]
 		btn.custom_minimum_size = Vector2(150, 30)
 
-		# Visually differentiate buttons
+		# Uniform dark background for every button regardless of module
+		# type (matches this project's locked-in "dark substrate + accent
+		# trim, never a color-fill" register - see VISUAL_IMPROVEMENT_
+		# PLAN.md's decision log) - the old per-module bg_color made some
+		# buttons' default theme text unreadable depending on how light or
+		# dark that module's catalog color happened to be. The module's
+		# own color is still shown, just demoted to an accent stripe (the
+		# bottom border) instead of the fill, and text gets an explicit
+		# light color + outline so it stays legible against every accent.
 		var style = StyleBoxFlat.new()
-		style.bg_color = data["color"]
+		style.bg_color = PART_BUTTON_BG
 		style.border_width_bottom = 4
-		style.border_color = data["color"].darkened(0.3)
+		style.border_color = data["color"]
 		style.corner_radius_top_left = 4
 		style.corner_radius_top_right = 4
 		style.corner_radius_bottom_left = 4
@@ -68,8 +84,15 @@ func _ready():
 		btn.add_theme_stylebox_override("normal", style)
 
 		var hover_style = style.duplicate()
-		hover_style.bg_color = data["color"].lightened(0.2)
+		hover_style.bg_color = PART_BUTTON_BG_HOVER
+		hover_style.border_color = data["color"].lightened(0.25)
 		btn.add_theme_stylebox_override("hover", hover_style)
+
+		btn.add_theme_color_override("font_color", PART_BUTTON_TEXT)
+		btn.add_theme_color_override("font_hover_color", PART_BUTTON_TEXT)
+		btn.add_theme_color_override("font_pressed_color", PART_BUTTON_TEXT)
+		btn.add_theme_color_override("font_outline_color", PART_BUTTON_TEXT_OUTLINE)
+		btn.add_theme_constant_override("outline_size", 3)
 
 		var category = data.get("category", "module")
 		if category == "hull":
@@ -137,10 +160,11 @@ func _make_collapsible_drawer(category: String, buttons: Array, tab_type: String
 	header_btn.add_theme_stylebox_override("hover", header_hover)
 	drawer.add_child(header_btn)
 
-	# Content container (VBoxContainer with the buttons, starts hidden)
+	# Content container (VBoxContainer with the buttons, starts collapsed via min height)
 	var content = VBoxContainer.new()
 	content.custom_minimum_size = Vector2(0, 0)
-	content.visible = false
+	content.clip_contents = true
+	content.visible = true
 	for btn in buttons:
 		content.add_child(btn)
 	drawer.add_child(content)
@@ -148,6 +172,7 @@ func _make_collapsible_drawer(category: String, buttons: Array, tab_type: String
 	# Store drawer metadata for toggle handler
 	drawer.set_meta("drawer_category", category)
 	drawer.set_meta("drawer_tab", tab_type)
+	drawer.set_meta("drawer_open", false)
 	drawer.set_meta("header_btn", header_btn)
 	drawer.set_meta("content_container", content)
 
@@ -159,8 +184,7 @@ func _make_collapsible_drawer(category: String, buttons: Array, tab_type: String
 func _toggle_drawer(drawer: Control) -> void:
 	var category = drawer.get_meta("drawer_category")
 	var tab_type = drawer.get_meta("drawer_tab")
-	var content = drawer.get_meta("content_container")
-	var should_open = not content.visible
+	var should_open = not drawer.get_meta("drawer_open")
 
 	# Close any currently open drawer in this tab
 	var open_var = "open_drawer_%s" % tab_type
@@ -169,13 +193,34 @@ func _toggle_drawer(drawer: Control) -> void:
 		var parent = drawer.get_parent()
 		for child in parent.get_children():
 			if child.has_meta("drawer_category") and child.get_meta("drawer_category") == currently_open:
-				var other_content = child.get_meta("content_container")
-				other_content.visible = false
+				_animate_drawer(child, false)
 				break
 
-	# Toggle this drawer
-	content.visible = should_open
+	# Animate this drawer
+	_animate_drawer(drawer, should_open)
 	set(open_var, category if should_open else "")
+
+func _animate_drawer(drawer: Control, open: bool) -> void:
+	var content = drawer.get_meta("content_container")
+
+	# Kill any active tween on this drawer
+	if drawer.has_meta("active_tween"):
+		var old = drawer.get_meta("active_tween")
+		if old and old.is_valid():
+			old.kill()
+
+	# Cache target height on first open so closing doesn't measure while collapsed
+	if open and not drawer.has_meta("content_target_height"):
+		drawer.set_meta("content_target_height", content.get_combined_minimum_size().y)
+
+	var target_height = drawer.get_meta("content_target_height") if open else 0.0
+
+	var tween = create_tween()
+	tween.set_trans(Tween.TRANS_CUBIC)
+	tween.set_ease(Tween.EASE_OUT)
+	tween.tween_property(content, "custom_minimum_size:y", target_height, 0.18)
+	drawer.set_meta("active_tween", tween)
+	drawer.set_meta("drawer_open", open)
 
 func _stat_tooltip(data: Dictionary) -> String:
 	var lines = ["HP: %.0f | Weight: %.0f" % [data.get("hp", 0.0), data.get("weight", 0.0)]]

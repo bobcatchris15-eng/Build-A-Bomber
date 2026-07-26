@@ -121,7 +121,9 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"heavy_laser": true, "plasma_lobber": true, "ciws": true, "pd_laser": true, "flak_cannon": true,
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
-	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true
+	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
+	"structural_block": true, "structural_dome": true, "structural_slab": true,
+	"structural_wedge": true, "structural_girder": true, "structural_i_beam": true
 }
 
 static func _repeat_along_axis(parent: Node3D, count: int, spacing: float, axis_vec: Vector3, builder_func: Callable):
@@ -3523,6 +3525,78 @@ static func rebuild_visual(module: Node3D):
 	var catalog_data = preload("res://scripts/module_catalog.gd").get_module_data(data.type_id)
 	if catalog_data:
 		build_visual(data.type_id, module, catalog_data.get("size", Vector3.ONE), catalog_data.color, data.tweaks)
+
+# PERFORMANCE_PLAN.md P4: MODULAR_ASSEMBLY_TYPES modules (every weapon,
+# every locomotion type, and the structural hull-extenders) build_visual()
+# as many individually-instanced MeshInstance3Ds - up to ~9 for a 4-barrel
+# cannon, more for multi-axle wheels - each with its own freshly-allocated
+# StandardMaterial3D, none of it batchable. That's real in a battle instance
+# (draw calls, per-node culling/AABB overhead) and pointless in the Design
+# Lab, where those same nodes ARE the editable representation (gizmo drag
+# handles, per-part tweak deformation all target them by name/index).
+#
+# Call this ONLY on a battle-spawned module (never a Design-Lab one - see
+# blueprint_manager.gd's reconstruct_vehicle(), which gates this on
+# `not is_designer`), after rebuild_visual() has built the module's real
+# geometry. Merges this module's direct-child MeshInstance3D siblings into
+# one baked MeshInstance3D per distinct material (SurfaceTool, grouped so a
+# module with e.g. a metal pintle + a darker barrel still ends up as 2 draw
+# calls, not 1 with the wrong color) - typically collapses 3-9 nodes down to
+# 1-3. Named animation pivots (MONOLITHIC_ANIMATION_PIVOTS' values, plus the
+# procedural equivalents the modular-assembly branches build under the same
+# names - BarrelCluster, RotorBlades, WingPivot, PropBlades) are left
+# untouched: those rotate independently every frame (auto_weapon.gd's
+# rotary-cannon spin-up, battle_unit.gd's rotor/prop animation) and merging
+# them into a static mesh would freeze that motion.
+const _ANIMATED_PART_NAMES := ["BarrelCluster", "RotorBlades", "WingPivot", "PropBlades"]
+
+static func bake_module_visual(module: Node3D) -> void:
+	if not module:
+		return
+	# material_override -> Array[MeshInstance3D] sharing that exact material
+	# resource. null is a valid dictionary key here (an unmaterialed part) and
+	# groups correctly with other unmaterialed parts.
+	var groups: Dictionary = {}
+	var to_remove: Array = []
+	for child in module.get_children():
+		if not (child is MeshInstance3D):
+			continue
+		if child.name in _ANIMATED_PART_NAMES:
+			continue
+		if child.mesh == null:
+			continue
+		var mat = child.material_override
+		if not groups.has(mat):
+			groups[mat] = []
+		groups[mat].append(child)
+		to_remove.append(child)
+
+	# Nothing to gain merging a single part (most monolithic-mesh modules hit
+	# this - they're already one node) or an empty module.
+	if to_remove.size() <= 1:
+		return
+
+	for mat in groups.keys():
+		var parts: Array = groups[mat]
+		var surface_tool = SurfaceTool.new()
+		surface_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for part in parts:
+			# Iterate every surface, not just 0 - _mesh_inst() overrides the
+			# WHOLE MeshInstance3D's material regardless of how many surfaces
+			# its source mesh has, so a multi-surface authored part would
+			# silently lose geometry merging only surface 0.
+			for s in range(part.mesh.get_surface_count()):
+				surface_tool.append_from(part.mesh, s, part.transform)
+		surface_tool.generate_normals()
+		var baked_inst = MeshInstance3D.new()
+		baked_inst.name = "BakedVisual"
+		baked_inst.mesh = surface_tool.commit()
+		baked_inst.material_override = mat
+		module.add_child(baked_inst)
+
+	for part in to_remove:
+		module.remove_child(part)
+		part.queue_free()
 
 # --- Tweak deformation for monolithic authored meshes ----------------------
 #

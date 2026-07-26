@@ -1166,7 +1166,8 @@ func _build_ui():
 	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 	ui.add_child(menu_btn)
 
-	_build_debug_panel(ui, menu_style, menu_hover)
+	if OS.is_debug_build():
+		_build_debug_panel(ui, menu_style, menu_hover)
 
 	# Bottom build bar
 	var bar_bg = PanelContainer.new()
@@ -1515,6 +1516,7 @@ func _unhandled_input(event):
 		return
 
 	if event is InputEventMouseMotion:
+		_update_hover_cursor(event.position)
 		if not placing.is_empty() and is_instance_valid(placement_ghost):
 			var hit = _raycast_ground(event.position)
 			if hit != null:
@@ -1591,6 +1593,36 @@ func _select_in_rect(rect: Rect2):
 		if rect.has_point(screen):
 			picked.append(u)
 	_set_selection(picked)
+
+func _update_hover_cursor(screen_pos: Vector2) -> void:
+	var cm = get_node_or_null("/root/CursorManager")
+	if not cm:
+		return
+	if not placing.is_empty():
+		cm.set_cursor(cm.CursorType.BUILD)
+		return
+	if selected.is_empty():
+		cm.set_cursor(cm.CursorType.DEFAULT)
+		return
+	var result = _raycast_screen(screen_pos, 4 + 8 + 16)
+	if result and result.collider:
+		var node = result.collider
+		if node.is_in_group("resource_nodes"):
+			var can_harvest = false
+			for s in selected:
+				if is_instance_valid(s) and "is_harvester" in s and s.is_harvester:
+					can_harvest = true
+					break
+			cm.set_cursor(cm.CursorType.HARVEST if can_harvest else cm.CursorType.INVALID)
+			return
+		var node_fog_hidden = "fog_hidden" in node and node.fog_hidden
+		if (node.is_in_group("units") or node.is_in_group("buildings")) and node.get("team") != PLAYER_TEAM and not node_fog_hidden:
+			cm.set_cursor(cm.CursorType.ATTACK)
+			return
+	if _raycast_ground(screen_pos) != null:
+		cm.set_cursor(cm.CursorType.MOVE)
+	else:
+		cm.set_cursor(cm.CursorType.DEFAULT)
 
 func _issue_order(screen_pos: Vector2):
 	if selected.is_empty(): return
