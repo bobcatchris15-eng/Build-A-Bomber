@@ -1,14 +1,30 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-25): A1, A2, B1–B7 landed; everything else is planning
-only.** This is a resumable roadmap, written so a fresh session can pick up any
+**Status (2026-07-25): A1, A2, B1–B7 landed; B8 in progress (1 of N maps
+landed).** This is a resumable roadmap, written so a fresh session can pick up any
 single chunk without re-deriving the architecture. Chunks are ordered with
 explicit dependencies in the sequencing table at the end; each is sized to land
 as one commit with its own `PROGRESS.md` entry. **Update the sequencing
 table's status as chunks land** — a stale "next up" header in a plan doc is
 exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before
-being corrected on 2026-07-24. **Next up: B8** (bigger, denser maps — the real
-content-authoring arc, budget it as its own effort).
+being corrected on 2026-07-24. **Next up: continue B8** (more bigger/denser
+maps, per Chris's call each time) **or B9/B10** — confirm which before
+proceeding, since B8 is explicitly budgeted as its own multi-map arc.
+
+**B8 first map landed (`scattered_peaks`, 550 half-extent):** exposed a
+genuine 3-stage Recast/NavigationServer3D bug at large map scale — Recast's
+internal voxel heightfield is sized from `NavigationMesh.cell_size`
+independent of triangle count (segfaults at the old fixed 0.25 default once a
+map gets this big), **and** `NavigationServer3D` maps carry their own
+independent `cell_size` separate from the mesh resource, so
+`region_set_navigation_mesh()` silently rejects a mismatched mesh even though
+the region-map association stays "valid." Fixed via `_nav_cell_size()`
+(terrain_builder.gd) scaling cell size only above 300 half-extent (zero
+change to any of the 9 original maps) plus matching
+`NavigationServer3D.map_set_cell_size()`/`map_set_cell_height()` calls on all
+4 navigation maps. Full story in `PROGRESS.md`'s B8 entry — worth reading
+before authoring the next big map, since the same crash class will recur at
+this scale.
 
 **B6 scope note:** "convert each of the 8 maps' elevation_zones" meant
 converting elevation_zones wherever it actually appeared - only
@@ -599,7 +615,7 @@ readback) over catalog-number assertions.
 | 7 | **B5 slope-aware navmesh + collision** | **multi** | B4 | **Done (flag-gated, see note above)** |
 | 8 | B6 retire elevation_zones, migrate, rect+bounds | one session | B5 | **Done (Vector2 half_extents deferred, see note above)** |
 | 9 | B7 terrain type differentiation | one session | B4 | **Done** |
-| 10 | B8 bigger/denser maps | multi (content) | B5–B7 | — |
+| 10 | B8 bigger/denser maps | multi (content) | B5–B7 | **In progress (1 map: `scattered_peaks`)** |
 | 11 | B9 minimap | 1–1.5 sessions | B6 | — |
 | 12 | B10 spawn assignment + fairness lint | multi | B3, B8 | — |
 | 13 | C1 buildings block movement | multi | — | — |

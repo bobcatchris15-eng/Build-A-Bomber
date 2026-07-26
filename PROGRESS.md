@@ -4,6 +4,27 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-25 — RTS_CORE_ROADMAP.md B8: first bigger map (Scattered Peaks) + a real Recast crash chased to its root cause
+
+B8 is the open-ended "bigger, denser maps" arc from the roadmap - budgeted as its own arc and landed one map at a time rather than batched. This entry covers the first map, `scattered_peaks` (550 half-extent, nearly double `twin_bridges`), chosen via a quiz with Chris: much-bigger scale, multiple distinct high-ground pockets rather than one dominant hill, land-only, long approach march between bases. Four heightmap plateaus sit off-center in a point-symmetric layout (2 big/tall at height 18, 2 smaller at height 12) so map control rewards spreading out rather than turtling on a single objective - the long open march itself is the chokepoint, not rock-cluster props.
+
+**Real bug found, two false starts before the actual root cause:** baking `scattered_peaks`' navmesh segfaulted the whole test process (signal 11).
+1. First hypothesis - triangle count too high (151,250 ground triangles at the fixed `GRID_CELL=4`). Added `_nav_grid_cell()` to widen the ground-face grid cell with map size. Triangle count dropped to 45,602 (matching `twin_bridges`' known-working scale) - **still crashed.**
+2. Real root cause - Recast's internal voxel heightfield is sized from `NavigationMesh.cell_size`/`cell_height` (default 0.25), independent of triangle count entirely; at 1100 world units across, a 0.25 cell size means a ~4400x4400 voxel grid, which is an outright crash, not just slow. Confirmed by hand in an isolated bake-only script (`cell_size=1.0` baked in 500ms). Fixed with `_nav_cell_size()`: Godot's own 0.25 default is kept for every map at or under 300 half-extent (zero behavior change for all 9 original maps), scaling linearly up toward 1.0 at 550.
+3. **A third, genuinely separate bug**, only visible once the fix was checked in the real `Skirmish.tscn` scene (not the isolated bake-only script): `NavigationServer3D.map_create()` maps carry their own independent `cell_size`/`cell_height`, separate from whatever's set on the `NavigationMesh` resource assigned to a region on that map. `region_set_navigation_mesh()` silently **rejects** a mismatched mesh and prints a console ERROR, while the region-to-map association itself stays "valid" - so the existing regression test (which only checked `region_get_map(...).is_valid()`) passed vacuously even while the real navmesh was being thrown away. Fixed by calling `NavigationServer3D.map_set_cell_size()`/`map_set_cell_height()` on all 4 navigation maps in `build_navmeshes()`, matching the same `cell_size` used for the mesh resources.
+
+**Shipped:**
+- `scattered_peaks.json` + generated heightmap/surfacemap PNGs, 13 resource nodes, no rock-cluster obstacles.
+- `terrain_builder.gd`: `_nav_grid_cell()`/`_nav_cell_size()`, used by `_build_ground_faces()`/`_build_amphibious_faces()`/`_build_deep_water_faces()` and `build_navmeshes()`.
+
+**Verified:**
+- `test_map_scattered_peaks_smoke()`: legal start points, all resources reachable, HQs mutually reachable, factory production works.
+- `test_b8_large_map_navmesh_bake_does_not_crash_recast()`: bakes without crashing, and (strengthened after the map/mesh cell_size bug above was found in the wild) proves the navmesh was genuinely accepted by querying a real HQ-to-HQ path via `NavigationServer3D.map_get_path()` rather than just checking region-map association.
+- Non-headless screenshot (`Skirmish.tscn`, real scene) confirmed both console ERRORs gone after the map-cell_size fix, and the 4 plateaus render correctly at scale.
+- Full suite green, no regressions.
+
+---
+
 ## 2026-07-25 — RTS_CORE_ROADMAP.md B7: terrain type differentiation (3 new surface types + real surfacemap raster)
 
 Expanded the surface-terrain roster from 4 types (marsh/rocky/snow_mud/sand, previously used by only one map) to 7, and migrated `open_plains` onto a real B4 surfacemap raster instead of live rect checks - "paint, not rects."

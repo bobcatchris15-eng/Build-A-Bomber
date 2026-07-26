@@ -18,6 +18,34 @@ const TerrainGreeblesScript = preload("res://scripts/terrain_greebles.gd")
 
 const GRID_CELL: float = 4.0
 
+# RTS_CORE_ROADMAP.md B8: NavigationServer3D's Recast baker doesn't just
+# get slow past a triangle-count threshold, it SEGFAULTS outright -
+# confirmed empirically at scattered_peaks' 550 half-extent with the flat
+# GRID_CELL=4.0 (151,250 ground triangles alone). Keeps the grid's total
+# triangle count roughly constant regardless of map size by widening the
+# cell for anything bigger than the ~300 half-extent every map up to
+# twin_bridges already used successfully - GRID_CELL itself is untouched
+# (and this returns exactly GRID_CELL) for every map at or under that
+# size, so this is zero-risk for the 9 maps that already worked.
+static func _nav_grid_cell(map_def: Dictionary) -> float:
+	var half: float = map_def.get("map_half_extents", 80.0)
+	return max(GRID_CELL, half / 75.0)
+
+# RTS_CORE_ROADMAP.md B8: even AFTER _nav_grid_cell() brought scattered_peaks'
+# source triangle count back down to twin_bridges' working scale, the bake
+# still segfaulted - the actual cause was Recast's internal voxel grid,
+# sized from NavigationMesh.cell_size (Godot's own default: 0.25), not from
+# triangle count at all. At 550 half-extent (1100 world units) that's a
+# ~4400x4400 voxel heightfield; confirmed empirically that cell_size=1.0
+# bakes successfully in ~500ms. Every map at or under 300 half-extent
+# (twin_bridges' size, the largest that already worked) keeps EXACTLY
+# Godot's own 0.25 default - zero behavior change for the 9 original maps.
+static func _nav_cell_size(map_def: Dictionary) -> float:
+	var half: float = map_def.get("map_half_extents", 80.0)
+	if half <= 300.0:
+		return 0.25
+	return 0.25 + (half - 300.0) * 0.003
+
 # Bridge deck height above water/ground level - just enough to read as a
 # real raised structure (and to keep the deck mesh visibly above the water
 # plane's own y=0.05) without needing an approach ramp of its own; bridges
@@ -353,13 +381,14 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 	var bridges = _collect_bridges(map_def)
 	var has_blobs = not map_def.get("water_blobs", []).is_empty()
 	var heightmap_img = _get_heightmap_image(map_def)
+	var cell = _nav_grid_cell(map_def)
 
 	var x = -half
 	while x < half:
-		var x1 = min(x + GRID_CELL, half)
+		var x1 = min(x + cell, half)
 		var z = -half
 		while z < half:
-			var z1 = min(z + GRID_CELL, half)
+			var z1 = min(z + cell, half)
 			var blocked = false
 			for h in hard_holes:
 				if _rect_overlaps(x, x1, z, z1, h):
@@ -380,7 +409,7 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 				var max_slope = max(
 					max(abs(h10 - h00), abs(h01 - h00)),
 					max(abs(h11 - h10), abs(h11 - h01))
-				) / GRID_CELL
+				) / cell
 				if max_slope > MAX_WALKABLE_SLOPE:
 					blocked = true
 				else:
@@ -409,13 +438,14 @@ static func _build_amphibious_faces(map_def: Dictionary) -> PackedVector3Array:
 	var holes = []
 	for o in map_def.get("obstacles", []):
 		holes.append(_rect_from(o.center, o.half_extents))
+	var cell = _nav_grid_cell(map_def)
 
 	var x = -half
 	while x < half:
-		var x1 = min(x + GRID_CELL, half)
+		var x1 = min(x + cell, half)
 		var z = -half
 		while z < half:
-			var z1 = min(z + GRID_CELL, half)
+			var z1 = min(z + cell, half)
 			var blocked = false
 			for h in holes:
 				if _rect_overlaps(x, x1, z, z1, h):
@@ -440,14 +470,15 @@ static func _build_deep_water_faces(map_def: Dictionary) -> PackedVector3Array:
 	var shallow_holes = []
 	for sw in map_def.get("shallow_water_areas", []):
 		shallow_holes.append(_rect_from(sw.center, sw.half_extents))
+	var cell = _nav_grid_cell(map_def)
 	for w in map_def.get("water_areas", []):
 		var rect = _rect_from(w.center, w.half_extents)
 		var x = rect.x0
 		while x < rect.x1:
-			var x1 = min(x + GRID_CELL, rect.x1)
+			var x1 = min(x + cell, rect.x1)
 			var z = rect.z0
 			while z < rect.z1:
-				var z1 = min(z + GRID_CELL, rect.z1)
+				var z1 = min(z + cell, rect.z1)
 				var blocked = false
 				for h in shallow_holes:
 					if _rect_overlaps(x, x1, z, z1, h):
@@ -460,17 +491,38 @@ static func _build_deep_water_faces(map_def: Dictionary) -> PackedVector3Array:
 	return verts
 
 static func build_navmeshes(map_def: Dictionary) -> Dictionary:
+	# RTS_CORE_ROADMAP.md B8: a NavigationServer3D MAP has its own
+	# cell_size/cell_height (default 0.25, independent of whatever a
+	# NavigationMesh RESOURCE assigned to one of its regions uses) -
+	# region_set_navigation_mesh() silently REJECTS the mesh (real error,
+	# not just a warning) if the two don't match, which a region-to-map
+	# association check alone doesn't reveal (that stays "valid" even when
+	# the mesh assignment itself was refused). Caught via the real Skirmish
+	# scene, not the isolated bake-only repro that first found the
+	# original segfault - that repro never created a map/region at all, so
+	# it couldn't have surfaced this.
+	var cell_size = _nav_cell_size(map_def)
 	var ground_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_cell_size(ground_map, cell_size)
+	NavigationServer3D.map_set_cell_height(ground_map, cell_size)
 	NavigationServer3D.map_set_active(ground_map, true)
 	var water_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_cell_size(water_map, cell_size)
+	NavigationServer3D.map_set_cell_height(water_map, cell_size)
 	NavigationServer3D.map_set_active(water_map, true)
 	var amphibious_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_cell_size(amphibious_map, cell_size)
+	NavigationServer3D.map_set_cell_height(amphibious_map, cell_size)
 	NavigationServer3D.map_set_active(amphibious_map, true)
 	var deep_water_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_cell_size(deep_water_map, cell_size)
+	NavigationServer3D.map_set_cell_height(deep_water_map, cell_size)
 	NavigationServer3D.map_set_active(deep_water_map, true)
 
 	var ground_verts = _build_ground_faces(map_def)
 	var ground_nav_mesh = NavigationMesh.new()
+	ground_nav_mesh.cell_size = cell_size
+	ground_nav_mesh.cell_height = cell_size
 	var ground_source = NavigationMeshSourceGeometryData3D.new()
 	ground_source.add_faces(ground_verts, Transform3D.IDENTITY)
 	NavigationServer3D.bake_from_source_geometry_data(ground_nav_mesh, ground_source)
@@ -488,6 +540,8 @@ static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 	var water_region: RID = RID()
 	if water_verts.size() > 0:
 		var water_nav_mesh = NavigationMesh.new()
+		water_nav_mesh.cell_size = cell_size
+		water_nav_mesh.cell_height = cell_size
 		var water_source = NavigationMeshSourceGeometryData3D.new()
 		water_source.add_faces(water_verts, Transform3D.IDENTITY)
 		NavigationServer3D.bake_from_source_geometry_data(water_nav_mesh, water_source)
@@ -497,6 +551,8 @@ static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 
 	var amphibious_verts = _build_amphibious_faces(map_def)
 	var amphibious_nav_mesh = NavigationMesh.new()
+	amphibious_nav_mesh.cell_size = cell_size
+	amphibious_nav_mesh.cell_height = cell_size
 	var amphibious_source = NavigationMeshSourceGeometryData3D.new()
 	amphibious_source.add_faces(amphibious_verts, Transform3D.IDENTITY)
 	NavigationServer3D.bake_from_source_geometry_data(amphibious_nav_mesh, amphibious_source)
@@ -508,6 +564,8 @@ static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 	var deep_water_region: RID = RID()
 	if deep_water_verts.size() > 0:
 		var deep_water_nav_mesh = NavigationMesh.new()
+		deep_water_nav_mesh.cell_size = cell_size
+		deep_water_nav_mesh.cell_height = cell_size
 		var deep_water_source = NavigationMeshSourceGeometryData3D.new()
 		deep_water_source.add_faces(deep_water_verts, Transform3D.IDENTITY)
 		NavigationServer3D.bake_from_source_geometry_data(deep_water_nav_mesh, deep_water_source)

@@ -111,6 +111,8 @@ func _init():
 	success = success and await test_map_twin_summits_smoke()
 	success = success and await test_map_close_quarters_smoke()
 	success = success and await test_map_urban_sprawl_smoke()
+	success = success and await test_map_scattered_peaks_smoke()
+	success = success and await test_b8_large_map_navmesh_bake_does_not_crash_recast()
 	success = success and await test_weapon_traverse_and_range_differentiation()
 	success = success and await test_weight_vs_locomotion_capacity_penalty()
 	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
@@ -5871,6 +5873,67 @@ func test_map_urban_sprawl_smoke() -> bool:
 		print("  [PASS] Urban Sprawl: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
 	return ok
 
+func test_map_scattered_peaks_smoke() -> bool:
+	print("Running Test Suite: Map Smoke Test - Scattered Peaks (RTS_CORE_ROADMAP.md B8, ~550 half-extent, 4 heightmap plateaus, start points legal, resources reachable, HQs mutually reachable, economy loop works)...")
+	var ok = await _smoke_test_map("scattered_peaks")
+	if ok:
+		print("  [PASS] Scattered Peaks: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
+	return ok
+
+func test_b8_large_map_navmesh_bake_does_not_crash_recast() -> bool:
+	print("Running Test Suite: Large Map (Scattered Peaks) Navmesh Bake Doesn't Crash Recast (RTS_CORE_ROADMAP.md B8)...")
+	# Real bug found authoring this map: at 550 half-extent, Godot's own
+	# NavigationMesh.cell_size DEFAULT (0.25) sizes Recast's internal voxel
+	# heightfield to ~4400x4400 - not just slow, an outright SEGFAULT
+	# (confirmed empirically, reproduced with a minimal isolated repro
+	# before this fix). _nav_cell_size() widens the cell for anything
+	# bigger than the ~300 half-extent every original map already used
+	# safely - this test is the standing regression guard for that crash
+	# class, not just a "does the map load" check.
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	MapCatalogScript.reset_cache_for_tests()
+	TerrainBuilderScript.reset_heightmap_cache_for_tests()
+
+	# Every original (<=300 half-extent) map keeps EXACTLY Godot's own
+	# default cell_size - zero behavior change for maps that already worked.
+	var small_map = {"map_half_extents": 300.0}
+	if TerrainBuilderScript._nav_cell_size(small_map) != 0.25:
+		print("  [FAIL] A map at or under 300 half-extent should keep Godot's own default cell_size (0.25), got ", TerrainBuilderScript._nav_cell_size(small_map))
+		return false
+
+	var map_def = MapCatalogScript.get_map("scattered_peaks")
+	if TerrainBuilderScript._nav_cell_size(map_def) <= 0.25:
+		print("  [FAIL] scattered_peaks (550 half-extent) should get a widened cell_size, got ", TerrainBuilderScript._nav_cell_size(map_def))
+		return false
+
+	# The actual bake - this is what used to segfault the whole process.
+	var nav = TerrainBuilderScript.build_navmeshes(map_def)
+	await process_frame
+
+	# A region-map association check alone isn't enough here - a second
+	# real bug found via the actual Skirmish scene (not this isolated
+	# test): NavigationServer3D MAPS have their OWN cell_size/cell_height,
+	# independent of the NavigationMesh resource assigned to one of their
+	# regions, and region_set_navigation_mesh() silently REJECTS a
+	# mismatched mesh while leaving the region-map association itself
+	# "valid" - a real path query is the only way to prove the mesh was
+	# genuinely accepted, not just that a region RID exists.
+	var path = NavigationServer3D.map_get_path(nav.ground_map, Vector3(0, 0, 480), Vector3(0, 0, -480), true)
+	if path.size() < 2:
+		print("  [FAIL] scattered_peaks' ground navmesh should support a real HQ-to-HQ path query, got ", path.size(), " points - the navmesh may have been silently rejected (mismatched map/mesh cell_size).")
+		return false
+
+	NavigationServer3D.free_rid(nav.ground_region)
+	NavigationServer3D.free_rid(nav.amphibious_region)
+	NavigationServer3D.free_rid(nav.ground_map)
+	NavigationServer3D.free_rid(nav.water_map)
+	NavigationServer3D.free_rid(nav.amphibious_map)
+	NavigationServer3D.free_rid(nav.deep_water_map)
+
+	print("  [PASS] A 550-half-extent map's navmesh bakes successfully (this specific crash is what killed the whole test process before the fix) with widened cell_size, while smaller maps keep Godot's own default.")
+	return true
+
 func test_weapon_traverse_and_range_differentiation() -> bool:
 	print("Running Test Suite: Per-Weapon-Type Traverse Rate & Range Tweak Differentiation...")
 
@@ -8323,10 +8386,12 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 		print("    Expected: ", expected_lake_crossing)
 		return false
 
-	# All 8 bundled maps still present (the const had exactly 8).
+	# All 8 original bundled maps still present (the const had exactly 8) -
+	# "at least 8" rather than "exactly 8" since B8 has since added more
+	# (scattered_peaks) on top of the original migrated set.
 	var ids = MapCatalogScript.get_map_ids()
-	if ids.size() != 8:
-		print("  [FAIL] Expected exactly 8 maps loaded from res://data/maps/*.json, got ", ids.size(), ": ", ids)
+	if ids.size() < 8:
+		print("  [FAIL] Expected at least the 8 original maps loaded from res://data/maps/*.json, got ", ids.size(), ": ", ids)
 		return false
 
 	# Every map must validate clean through the exact same validator B1 built.
@@ -8336,7 +8401,7 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 			print("  [FAIL] Map '", id, "' failed validation after loading from JSON: ", errors)
 			return false
 
-	print("  [PASS] lake_crossing deep-equals the old const's exact values; all 8 maps loaded from JSON and validate clean.")
+	print("  [PASS] lake_crossing deep-equals the old const's exact values; every bundled map loads from JSON and validates clean.")
 	return true
 
 func test_b3_hand_broken_json_map_hard_fails_with_a_useful_message() -> bool:
@@ -8451,20 +8516,21 @@ func test_b4_heightmap_leaves_unmigrated_maps_untouched() -> bool:
 	TerrainBuilderScript.reset_heightmap_cache_for_tests()
 
 	# RTS_CORE_ROADMAP.md B6 migrated highland_chokepoint/twin_summits (the
-	# only 2 of the 8 bundled maps that used elevation_zones) onto real
-	# heightmaps; the other 6 still take the analytic noise+hills+
-	# water_blobs path. Confirm the flag gate reflects exactly that split,
-	# not "on for everything" or "on for nothing."
-	var migrated = ["highland_chokepoint", "twin_summits"]
+	# only 2 of the original 8 bundled maps that used elevation_zones) onto
+	# real heightmaps; B8's scattered_peaks was authored with a heightmap
+	# from the start. Every other map still takes the analytic
+	# noise+hills+water_blobs path. Confirm the flag gate reflects exactly
+	# that split, not "on for everything" or "on for nothing."
+	var has_heightmap_maps = ["highland_chokepoint", "twin_summits", "scattered_peaks"]
 	for map_id in MapCatalogScript.get_map_ids():
 		var map_def = MapCatalogScript.get_map(map_id)
 		var has_heightmap = TerrainBuilderScript._get_heightmap_image(map_def) != null
-		var should_have = map_id in migrated
+		var should_have = map_id in has_heightmap_maps
 		if has_heightmap != should_have:
 			print("  [FAIL] Map '", map_id, "' heightmap presence should be ", should_have, ", got ", has_heightmap)
 			return false
 
-	print("  [PASS] Exactly the 2 migrated maps (highland_chokepoint, twin_summits) have a real heightmap; the other 6 still take the analytic path.")
+	print("  [PASS] Exactly the maps that author terrain.heightmap have a real heightmap loaded; every other map still takes the analytic path.")
 	return true
 
 func test_b5_heightmap_navmesh_rejects_steep_slope() -> bool:
