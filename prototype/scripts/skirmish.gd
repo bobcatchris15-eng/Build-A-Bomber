@@ -229,8 +229,15 @@ var placement_ghost: MeshInstance3D = null
 var resource_label: Label
 var status_label: Label
 var intel_label: Label
-var build_bar: HBoxContainer
 var selection_rect: Panel
+
+# RTS_CORE_ROADMAP.md D2: tabbed build bar (Structures/Defenses/Units) +
+# queue panel (3 tier strips: progress fill, READY/HOLD/timer text).
+var build_tab_containers: Dictionary = {} # "structures"/"defenses"/"units" -> HBoxContainer
+var build_tab_buttons: Dictionary = {}
+var active_build_tab: String = "units"
+var _tier_gated_buttons: Array = [] # [{button, tier}] - greyed out when that tier has no live manufactory
+var queue_strips: Dictionary = {} # tier -> {bar: ProgressBar, status_label: Label, panel: Control}
 
 @onready var camera: Camera3D = $Camera3D
 
@@ -444,6 +451,13 @@ func _physics_process(delta):
 	if _resource_ui_dirty:
 		_resource_ui_dirty = false
 		_update_resource_ui()
+	# RTS_CORE_ROADMAP.md D2: queue panel (progress fill + READY/HOLD/timer)
+	# and tier-gated button greying both need to track live production/
+	# factory state - cheap enough (3 tier strips, ~a dozen buttons) to just
+	# recompute every physics tick rather than add another timer.
+	if not queue_strips.is_empty():
+		_update_queue_panel()
+	_refresh_tier_gated_buttons()
 	# RTS_CORE_ROADMAP.md C1: one-frame debounce - a building placed/
 	# destroyed this physics tick just sets the flag (possibly several
 	# times, e.g. AOE splash killing a cluster of buildings in one tick);
@@ -1429,24 +1443,42 @@ func _build_ui():
 	if OS.is_debug_build():
 		_build_debug_panel(ui, menu_style, menu_hover)
 
-	# Bottom build bar
+	# Bottom build bar (RTS_CORE_ROADMAP.md D2: tabbed Structures/Defenses/
+	# Units, replacing the old flat ScrollContainer that mixed 5 building
+	# buttons with up to 12 unit entries in one undifferentiated row) + a
+	# queue panel (3 tier strips: progress fill, READY/HOLD/timer text).
 	var bar_bg = PanelContainer.new()
 	bar_bg.anchor_top = 1.0
 	bar_bg.anchor_bottom = 1.0
 	bar_bg.anchor_left = 0.0
 	bar_bg.anchor_right = 1.0
-	bar_bg.offset_top = -96
+	bar_bg.offset_top = -132
 	ui.add_child(bar_bg)
 	UITheme.apply_brushed_panel(bar_bg, player_faction, 0.4)
 
-	var scroll = ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.custom_minimum_size = Vector2(0, 92)
-	bar_bg.add_child(scroll)
-	build_bar = HBoxContainer.new()
-	build_bar.add_theme_constant_override("separation", 8)
-	scroll.add_child(build_bar)
+	var bar_vbox = VBoxContainer.new()
+	bar_vbox.add_theme_constant_override("separation", 2)
+	bar_bg.add_child(bar_vbox)
+
+	_build_queue_panel(bar_vbox)
+	_build_tab_bar(bar_vbox)
+
+	# Each tab gets its OWN ScrollContainer (only one visible at a time) -
+	# a single shared ScrollContainer with 3 stacked HBoxContainer children
+	# computes its scroll region from all of them combined, hidden or not,
+	# which fights the tab-switching this is meant to do.
+	for tab_name in ["structures", "defenses", "units"]:
+		var tab_scroll = ScrollContainer.new()
+		tab_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+		tab_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		tab_scroll.custom_minimum_size = Vector2(0, 92)
+		tab_scroll.visible = (tab_name == active_build_tab)
+		bar_vbox.add_child(tab_scroll)
+
+		var box = HBoxContainer.new()
+		box.add_theme_constant_override("separation", 8)
+		tab_scroll.add_child(box)
+		build_tab_containers[tab_name] = box
 
 	# Size-tiered manufactories (base-building batch) - every match starts
 	# with one of each already built (_spawn_starting_manufactories()); these
@@ -1478,18 +1510,26 @@ func _build_ui():
 	for kind in ["light_manufactory", "medium_manufactory", "heavy_manufactory", "refinery", "power_plant"]:
 		var stats = BuildingScript.PREFAB_STATS[kind]
 		var label_text = "%s\n%dM %dC" % [PREFAB_BUTTON_LABELS[kind], stats.cost_metal, stats.cost_crystal]
-		_add_build_button(label_text, PREFAB_BUTTON_COLORS[kind], func():
+		_add_build_button(build_tab_containers["structures"], label_text, PREFAB_BUTTON_COLORS[kind], func():
 			_begin_placement({"kind": kind, "cost_metal": stats.cost_metal, "cost_crystal": stats.cost_crystal}))
 
 	for entry in roster:
 		var e = entry
-		var label_text = "%s%s\n%dM %dC" % ["🛡 " if e.is_defense else "", e.name, e.cost_metal, e.cost_crystal]
-		var color = Color(0.4, 0.5, 0.4) if e.is_defense else Color(0.35, 0.42, 0.55)
-		_add_build_button(label_text, color, func():
-			if e.is_defense:
-				_begin_placement({"kind": "defense", "blueprint": e.blueprint, "cost_metal": e.cost_metal, "cost_crystal": e.cost_crystal})
-			else:
-				_queue_player_unit(e))
+		var label_text = "%s\n%dM %dC" % [e.name, e.cost_metal, e.cost_crystal]
+		if e.is_defense:
+			_add_build_button(build_tab_containers["defenses"], label_text, Color(0.4, 0.5, 0.4), func():
+				_begin_placement({"kind": "defense", "blueprint": e.blueprint, "cost_metal": e.cost_metal, "cost_crystal": e.cost_crystal}))
+		else:
+			# RTS_CORE_ROADMAP.md D2: shift-click queues 5. Greyed out (and
+			# not clickable) whenever this entry's tier has no live
+			# manufactory - was only a status flash after the fact before,
+			# see _refresh_tier_gated_buttons().
+			var tier = ModuleCatalog.get_hull_size_tier(e.blueprint.get("hull_type", "medium_hull"))
+			var btn = _add_build_button(build_tab_containers["units"], label_text, Color(0.35, 0.42, 0.55), func():
+				var copies = 5 if Input.is_key_pressed(KEY_SHIFT) else 1
+				for i in range(copies):
+					_queue_player_unit(e))
+			_tier_gated_buttons.append({"button": btn, "tier": tier})
 
 	# Drag-select rectangle overlay
 	selection_rect = Panel.new()
@@ -1608,6 +1648,122 @@ func _build_debug_panel(ui: CanvasLayer, menu_style: StyleBoxFlat, menu_hover: S
 		popup.position = debug_btn.global_position + Vector2(0, 44)
 		popup.popup())
 
+# RTS_CORE_ROADMAP.md D2: 3 hand-rolled tab buttons (matching this project's
+# existing collapsible-drawer style rather than Godot's built-in
+# TabContainer, which fights the brushed-panel chrome everything else here
+# uses) switching which of build_tab_containers is visible.
+func _build_tab_bar(parent: Container) -> void:
+	var tab_bar = HBoxContainer.new()
+	tab_bar.add_theme_constant_override("separation", 4)
+	parent.add_child(tab_bar)
+	for tab_name in ["structures", "defenses", "units"]:
+		var btn = Button.new()
+		btn.text = tab_name.capitalize()
+		btn.custom_minimum_size = Vector2(90, 26)
+		btn.toggle_mode = true
+		btn.button_pressed = (tab_name == active_build_tab)
+		btn.pressed.connect(func(): _set_active_build_tab(tab_name))
+		tab_bar.add_child(btn)
+		build_tab_buttons[tab_name] = btn
+
+func _set_active_build_tab(tab_name: String) -> void:
+	active_build_tab = tab_name
+	for name in build_tab_containers.keys():
+		# Toggle the PARENT ScrollContainer, not the HBoxContainer itself
+		# (build_tab_containers holds the inner box - see _build_ui()'s own
+		# comment on why each tab needs its own ScrollContainer).
+		build_tab_containers[name].get_parent().visible = (name == tab_name)
+	for name in build_tab_buttons.keys():
+		build_tab_buttons[name].button_pressed = (name == tab_name)
+
+# RTS_CORE_ROADMAP.md D2: 3 tier strips (light/medium/heavy), each a
+# progress fill + READY/HOLD/timer text over the FRONT item of that team+
+# tier queue (production_queue.gd only ever ticks the front item - matches
+# everywhere else in this game that already assumes FIFO-front-only).
+# Right-click pauses; a SECOND right-click (while already paused) cancels
+# and refunds. Kept simple: one shared strip per tier regardless of how
+# many manufactories of that tier are alive, since the queue itself is
+# already shared per team+tier (RTS_CORE_ROADMAP.md A1).
+func _build_queue_panel(parent: Container) -> void:
+	var row = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	parent.add_child(row)
+	for tier in ["light", "medium", "heavy"]:
+		var panel = PanelContainer.new()
+		panel.custom_minimum_size = Vector2(160, 30)
+		panel.mouse_filter = Control.MOUSE_FILTER_STOP
+		var style = StyleBoxFlat.new()
+		style.bg_color = Color(0.1, 0.11, 0.14, 0.85)
+		style.border_color = Color(0.3, 0.35, 0.4, 0.9)
+		style.border_width_left = 1
+		style.border_width_right = 1
+		style.border_width_top = 1
+		style.border_width_bottom = 1
+		panel.add_theme_stylebox_override("panel", style)
+		row.add_child(panel)
+
+		var bar = ProgressBar.new()
+		bar.min_value = 0.0
+		bar.max_value = 1.0
+		bar.value = 0.0
+		bar.show_percentage = false
+		panel.add_child(bar)
+
+		var label = Label.new()
+		label.text = "%s: —" % tier.capitalize()
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.set_anchors_preset(Control.PRESET_FULL_RECT)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		panel.add_child(label)
+
+		queue_strips[tier] = {"panel": panel, "bar": bar, "status_label": label}
+		panel.gui_input.connect(func(event): _on_queue_strip_input(tier, event))
+
+func _on_queue_strip_input(tier: String, event: InputEvent) -> void:
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT):
+		return
+	var q = production.get_queue(PLAYER_TEAM, tier)
+	if q.is_empty():
+		return
+	if q[0].get("paused", false):
+		# Second right-click while already paused: cancel and refund.
+		production.cancel(PLAYER_TEAM, tier, 0)
+	else:
+		production.set_paused(PLAYER_TEAM, tier, true)
+
+# RTS_CORE_ROADMAP.md D2: OpenRA-style state computed straight off the
+# front job - waiting = not producing and not done. "producing" needs the
+# job's own stalled flag (production_queue.gd's tick() sets it whenever a
+# tick made zero progress, whether from a manual pause or being broke -
+# READY/HOLD text can't tell those apart from time_left/total_time alone).
+func _update_queue_panel() -> void:
+	for tier in queue_strips.keys():
+		var strip = queue_strips[tier]
+		var q = production.get_queue(PLAYER_TEAM, tier)
+		if q.is_empty():
+			strip.bar.value = 0.0
+			strip.status_label.text = "%s: —" % tier.capitalize()
+			continue
+		var job = q[0]
+		var done = job.time_left <= 0.0
+		var stalled = job.get("stalled", false)
+		strip.bar.value = 1.0 if done else clampf(1.0 - (job.time_left / max(0.001, job.total_time)), 0.0, 1.0)
+		if done:
+			strip.status_label.text = "%s: READY" % tier.capitalize()
+		elif stalled:
+			strip.status_label.text = "%s: HOLD%s" % [tier.capitalize(), " (paused)" if job.get("paused", false) else ""]
+		else:
+			strip.status_label.text = "%s: %.1fs" % [tier.capitalize(), job.time_left]
+
+# RTS_CORE_ROADMAP.md D2: greys out (Button.disabled) every unit button
+# whose tier has no live manufactory - previously only a status flash AFTER
+# a doomed click, per this chunk's own note.
+func _refresh_tier_gated_buttons() -> void:
+	for entry in _tier_gated_buttons:
+		if is_instance_valid(entry.button):
+			entry.button.disabled = not has_factory_of_tier(PLAYER_TEAM, entry.tier)
+
 func _make_debug_checkbox(label_text: String, initial: bool, on_toggled: Callable) -> CheckBox:
 	var cb = CheckBox.new()
 	cb.text = label_text
@@ -1615,7 +1771,7 @@ func _make_debug_checkbox(label_text: String, initial: bool, on_toggled: Callabl
 	cb.toggled.connect(on_toggled)
 	return cb
 
-func _add_build_button(text: String, color: Color, callback: Callable):
+func _add_build_button(parent: Container, text: String, color: Color, callback: Callable) -> Button:
 	var btn = Button.new()
 	btn.text = text
 	btn.custom_minimum_size = Vector2(120, 80)
@@ -1629,8 +1785,16 @@ func _add_build_button(text: String, color: Color, callback: Callable):
 	var hover = style.duplicate()
 	hover.bg_color = color.lightened(0.2)
 	btn.add_theme_stylebox_override("hover", hover)
+	# RTS_CORE_ROADMAP.md D2: greyed-out look for _refresh_tier_gated_buttons()
+	# to switch to when this button's tier has no live manufactory - a real
+	# distinct look (disabled state + dimmed stylebox), not just the old
+	# after-the-fact status flash.
+	var disabled_style = style.duplicate()
+	disabled_style.bg_color = color.darkened(0.5)
+	btn.add_theme_stylebox_override("disabled", disabled_style)
 	btn.pressed.connect(callback)
-	build_bar.add_child(btn)
+	parent.add_child(btn)
+	return btn
 
 func _update_resource_ui():
 	if resource_label:

@@ -90,6 +90,7 @@ func enqueue(team: int, blueprint: Dictionary, faction: String, cost_metal: int,
 		"remaining_cost_metal": float(cost_metal),
 		"remaining_cost_crystal": float(cost_crystal),
 		"paused": false,
+		"stalled": false,
 	})
 	if team == skirmish._local_team() and skirmish.get_node_or_null("/root/AudioManager"):
 		skirmish.get_node("/root/AudioManager").play_sfx("click")
@@ -141,7 +142,13 @@ func tick(delta: float):
 			var q: Array = get_queue(team, tier)
 			if q.is_empty(): continue
 			var job = q[0]
-			if job.get("paused", false): continue
+			# RTS_CORE_ROADMAP.md D2: `stalled` is what the queue HUD's
+			# READY/HOLD text needs - "made zero progress THIS tick," true
+			# for either a manual pause or being broke, which time_left/
+			# total_time alone can't distinguish from genuine completion.
+			if job.get("paused", false):
+				job.stalled = true
+				continue
 
 			# RTS_CORE_ROADMAP.md D1: drip-fed cost, adapted from OpenRA's
 			# ProductionItem.Tick (discrete ticks) to this project's
@@ -156,7 +163,9 @@ func tick(delta: float):
 			var draw_metal = int(round(max(0.0, job.remaining_cost_metal - expected_remaining_metal)))
 			var draw_crystal = int(round(max(0.0, job.remaining_cost_crystal - expected_remaining_crystal)))
 			if not skirmish.spend(team, draw_metal, draw_crystal):
+				job.stalled = true
 				continue # NO progress this tick - pause, not a slowdown; time_left/remaining_cost both stay exactly where they were
+			job.stalled = false
 			job.remaining_cost_metal -= draw_metal
 			job.remaining_cost_crystal -= draw_crystal
 			job.time_left = new_time_left

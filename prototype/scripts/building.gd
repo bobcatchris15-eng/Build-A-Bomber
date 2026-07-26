@@ -406,7 +406,7 @@ func queue_unit(blueprint_data: Dictionary, build_time: float):
 		"blueprint": blueprint_data, "time_left": build_time, "total_time": build_time,
 		"total_cost_metal": 0, "total_cost_crystal": 0,
 		"remaining_cost_metal": 0.0, "remaining_cost_crystal": 0.0,
-		"paused": false,
+		"paused": false, "stalled": false,
 	})
 	_update_hp_bar()
 

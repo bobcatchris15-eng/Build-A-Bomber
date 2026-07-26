@@ -112,6 +112,9 @@ func _init():
 	success = success and await test_c4_manufactory_rally_point_is_settable_via_right_click()
 	success = success and await test_d1_drip_fed_cost_pauses_when_broke_and_resumes_on_income()
 	success = success and await test_d1_cancel_refunds_exact_progress_drawn()
+	success = success and await test_d2_build_bar_tabs_switch_visibility_and_pressed_state()
+	success = success and await test_d2_unit_buttons_grey_out_without_a_live_manufactory_of_that_tier()
+	success = success and await test_d2_queue_strip_right_click_pauses_then_cancels()
 	success = success and await test_map_open_plains_smoke()
 	success = success and await test_map_lake_crossing_smoke()
 	success = success and await test_map_highland_chokepoint_smoke()
@@ -6228,6 +6231,152 @@ func test_d1_cancel_refunds_exact_progress_drawn() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Cancelling a mid-build job refunds exactly the amount actually drawn so far (", spent_so_far, "), not the full cost, and removes it from the queue.")
+	return true
+
+func test_d2_build_bar_tabs_switch_visibility_and_pressed_state() -> bool:
+	print("Running Test Suite: D2 - Build Bar Tabs Switch Visibility And Pressed State (RTS_CORE_ROADMAP.md D2)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	if skirmish.active_build_tab != "units":
+		print("  [FAIL] Default active tab should be 'units', got ", skirmish.active_build_tab)
+		skirmish.queue_free()
+		return false
+	for tab_name in ["structures", "defenses", "units"]:
+		var scroll = skirmish.build_tab_containers[tab_name].get_parent()
+		if scroll.visible != (tab_name == "units"):
+			print("  [FAIL] Only the default 'units' tab's ScrollContainer should start visible, '", tab_name, "' visible=", scroll.visible)
+			skirmish.queue_free()
+			return false
+
+	skirmish._set_active_build_tab("structures")
+	if skirmish.active_build_tab != "structures":
+		print("  [FAIL] active_build_tab should update to 'structures'")
+		skirmish.queue_free()
+		return false
+	for tab_name in ["structures", "defenses", "units"]:
+		var scroll = skirmish.build_tab_containers[tab_name].get_parent()
+		if scroll.visible != (tab_name == "structures"):
+			print("  [FAIL] After switching to 'structures', only its ScrollContainer should be visible, '", tab_name, "' visible=", scroll.visible)
+			skirmish.queue_free()
+			return false
+		if skirmish.build_tab_buttons[tab_name].button_pressed != (tab_name == "structures"):
+			print("  [FAIL] Only the 'structures' tab button should read pressed after switching to it")
+			skirmish.queue_free()
+			return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Switching build-bar tabs shows exactly one tab's ScrollContainer and updates the tab buttons' pressed state to match.")
+	return true
+
+func test_d2_unit_buttons_grey_out_without_a_live_manufactory_of_that_tier() -> bool:
+	print("Running Test Suite: D2 - Unit Buttons Grey Out Without A Live Manufactory Of That Tier (RTS_CORE_ROADMAP.md D2)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+	await process_frame # let _physics_process()'s _refresh_tier_gated_buttons() run at least once
+
+	var light_entries = []
+	for entry in skirmish._tier_gated_buttons:
+		if entry.tier == "light":
+			light_entries.append(entry)
+	if light_entries.is_empty():
+		print("  [SKIP] No light-tier unit button in the bundled roster to test against.")
+		skirmish.queue_free()
+		return true
+	for entry in light_entries:
+		if entry.button.disabled:
+			print("  [FAIL] A light-tier unit button should NOT be disabled while a light manufactory is alive")
+			skirmish.queue_free()
+			return false
+
+	var light_manufactory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light")
+	light_manufactory.is_dead = true
+	await process_frame
+	await process_frame
+	await process_frame
+
+	for entry in light_entries:
+		if not entry.button.disabled:
+			print("  [FAIL] A light-tier unit button should be disabled once its manufactory dies")
+			skirmish.queue_free()
+			return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Unit buttons grey out the instant their tier's manufactory dies, not just after a doomed click.")
+	return true
+
+func test_d2_queue_strip_right_click_pauses_then_cancels() -> bool:
+	print("Running Test Suite: D2 - Queue Strip Right-Click Pauses, Second Right-Click Cancels (RTS_CORE_ROADMAP.md D2)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	skirmish.debug_infinite_resources = false
+	skirmish.economy[skirmish.PLAYER_TEAM].metal = 1000
+	skirmish.economy[skirmish.PLAYER_TEAM].crystal = 1000
+	var result = skirmish.production.enqueue(skirmish.PLAYER_TEAM, _d1_test_blueprint(), skirmish.player_faction, 300, 0)
+	if not result.queued:
+		print("  [FAIL] Test setup: queuing should have succeeded, got error: ", result.error)
+		skirmish.queue_free()
+		return false
+	var tier = result.tier
+	var q = skirmish.production.get_queue(skirmish.PLAYER_TEAM, tier)
+
+	# Tick partway through first, so pausing/cancelling has some real
+	# progress to interact with (drawn cost > 0) instead of the degenerate
+	# "cancelled before a single tick ran" case D1's own tests already cover.
+	for i in range(150):
+		skirmish.production.tick(1.0 / 60.0)
+	var bank_before_pause = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	if bank_before_pause >= 1000:
+		print("  [FAIL] Test setup: expected some cost drawn before the first right-click, bank is still ", bank_before_pause)
+		skirmish.queue_free()
+		return false
+
+	var right_click = InputEventMouseButton.new()
+	right_click.button_index = MOUSE_BUTTON_RIGHT
+	right_click.pressed = true
+
+	# First right-click: pauses (job stays in the queue).
+	skirmish._on_queue_strip_input(tier, right_click)
+	if not q[0].paused:
+		print("  [FAIL] The first right-click on a queue strip should pause the front job")
+		skirmish.queue_free()
+		return false
+	if q.size() != 1:
+		print("  [FAIL] Pausing should not remove the job from the queue")
+		skirmish.queue_free()
+		return false
+
+	var bank_before_cancel = skirmish.economy[skirmish.PLAYER_TEAM].metal
+
+	# Second right-click (already paused): cancels and refunds.
+	skirmish._on_queue_strip_input(tier, right_click)
+	if not q.is_empty():
+		print("  [FAIL] The second right-click on an already-paused queue strip should cancel the job")
+		skirmish.queue_free()
+		return false
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal <= bank_before_cancel:
+		print("  [FAIL] Cancelling should have refunded the cost drawn before the pause back to the bank")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Right-clicking a queue strip pauses the front job; a second right-click while paused cancels and refunds it.")
 	return true
 
 # Reusable per-map smoke test (per Chris's one-at-a-time verification

@@ -4,6 +4,22 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-26 — RTS_CORE_ROADMAP.md D2: queue HUD + categorised build bar
+
+Replaces the flat `ScrollContainer` that mixed 5 building buttons with up to 12 unit entries in one undifferentiated row, and adds real visibility into what each tier's production queue is actually doing.
+
+**Shipped (`skirmish.gd`):**
+- Tabbed build bar: Structures / Defenses / Units, each its own `ScrollContainer` (only one visible at a time - see the real bug below for why NOT a single shared one). Hand-rolled tab buttons matching this project's existing UI style rather than Godot's built-in `TabContainer`.
+- Queue panel: one strip per tier (light/medium/heavy) with a live progress fill and OpenRA-style status text - `READY` (done, possibly waiting on a blocked exit), `HOLD` (waiting - broke or manually paused), or a live countdown. `waiting = not producing and not done`, per the roadmap's own formula; `producing` needed a new `stalled` flag on each job (set by `production_queue.gd`'s `tick()` whenever a tick makes zero progress, whether from a manual pause or being broke) since `time_left`/`total_time` alone can't tell "actively building" apart from either stall case.
+- Left-click a unit button queues it; **shift-click queues 5**. Right-click a queue strip pauses the front job; a **second** right-click while already paused cancels it (refunding whatever's been drawn so far, via D1's `cancel()`).
+- Unit buttons grey out (real `Button.disabled`, not just a status flash after a doomed click) the instant their tier's manufactory dies, refreshed every physics tick alongside the queue panel.
+
+**A real bug caught by the roadmap's own verify instruction**: the roadmap explicitly calls for a *non-headless* script driving real `InputEventMouseButton` events through the tabs and queue-strip right-click, warning this class of bug is invisible to the headless suite. It found one - a first attempt nested all 3 tabs' content inside one shared `ScrollContainer` (toggling the inner `HBoxContainer`s' visibility), which computes its scroll region from all three combined regardless of which is hidden; fixed by giving each tab its own `ScrollContainer` instead, toggling that. It also surfaced a real quirk in the verification approach itself (not a production bug): `Control.global_position` is reported in this project's `canvas_items`-stretch logical space, but `Window.push_input()` needs raw window pixels, so bottom-anchored controls (this whole build bar) needed a canvas-transform correction the initial synthetic-click script didn't apply - a top-anchored button (the existing Debug button) worked immediately with the naive approach, which is what pointed at the anchor-position asymmetry rather than the click mechanism itself.
+
+**Verified:** headless tests cover tab switching (visibility + pressed state), unit buttons greying out live as their manufactory dies, and queue-strip right-click pause-then-cancel via direct function calls. A real non-headless script (deleted after confirming, per this project's scratch-script convention) drove actual mouse clicks through the Structures tab, a Structures-tab build button, and a queue strip's pause/cancel - once the canvas-transform quirk above was accounted for, every one of those real clicks produced the correct observable effect. Full suite green except the same pre-existing, already-flagged navmesh-test flakiness noted in C1-D1's entries (a different test each run, never a D2 test).
+
+---
+
 ## 2026-07-26 — RTS_CORE_ROADMAP.md D1: drip-fed cost, pause-on-broke, refunds
 
 Opens Phase D. Adopts OpenRA's `ProductionItem.Tick` semantics directly (adapted from discrete ticks to this project's continuous delta-seconds): cost is drawn incrementally over a build's whole duration instead of spent in full the instant it's queued.
