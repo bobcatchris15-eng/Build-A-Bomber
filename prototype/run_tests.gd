@@ -116,6 +116,8 @@ func _init():
 	success = success and await test_b9_minimap_samples_water_and_hides_reveals_enemy_blips()
 	success = success and await test_b10_spawn_assignment_picks_explicit_then_maximizes_separation()
 	success = success and await test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones()
+	success = success and await test_c1_buildings_block_movement_unit_detours_around_manufactory()
+	success = success and await test_c1_building_placed_after_unit_is_moving_forces_a_repath()
 	success = success and await test_weapon_traverse_and_range_differentiation()
 	success = success and await test_weight_vs_locomotion_capacity_penalty()
 	success = success and await test_mobility_addon_modules_boost_capacity_and_thrust()
@@ -5785,8 +5787,16 @@ func _smoke_test_map(map_id: String) -> bool:
 	# The two HQs must be mutually reachable (AI can path to the player,
 	# player can path to the AI) - not stranded on disconnected navmesh
 	# islands by a badly-placed water/obstacle/elevation zone.
+	# RTS_CORE_ROADMAP.md C1: a path can no longer reach the HQ's own exact
+	# center - the HQ IS a building now, so it carves its own navmesh hole
+	# same as any other. HQ_REACHABLE_MARGIN accounts for stopping at the
+	# hole's edge (largest static building's footprint diagonal, ~6.25 for
+	# heavy_manufactory, HQ itself is smaller) plus up to one GRID_CELL
+	# (4.0) of quantization slop - the old 5.0 was sized for a world with no
+	# building holes at all and started failing the instant C1 landed.
+	const HQ_REACHABLE_MARGIN := 12.0
 	var hq_path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, player_start.hq, enemy_start.hq, true)
-	if hq_path.size() < 2 or hq_path[hq_path.size() - 1].distance_to(enemy_start.hq) > 5.0:
+	if hq_path.size() < 2 or hq_path[hq_path.size() - 1].distance_to(enemy_start.hq) > HQ_REACHABLE_MARGIN:
 		print("  [FAIL] Player and enemy HQs are not mutually reachable on the ground navmesh")
 		skirmish.queue_free()
 		return false
@@ -6179,6 +6189,162 @@ func test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones() -> boo
 		return false
 
 	print("  [PASS] Every bundled map clears the fairness lint cleanly; a spawn on blocked terrain with no nearby resources, and a lopsided 3-spawn distance spread, both get caught.")
+	return true
+
+func test_c1_buildings_block_movement_unit_detours_around_manufactory() -> bool:
+	print("Running Test Suite: C1 - Buildings Block Movement, a Unit Detours Around a Real Manufactory (RTS_CORE_ROADMAP.md C1)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# Place a real heavy_manufactory dead center in what will be the
+	# unit's straight-line path - well clear of lake_crossing's lake/spawns/
+	# resources (all near z ~= 0/+-90/+-102), so nothing else can be
+	# blocking this route.
+	var block_pos = Vector3(0, 0, -180)
+	var building = skirmish._spawn_prefab("heavy_manufactory", skirmish.ENEMY_TEAM, block_pos, skirmish.enemy_faction)
+	var half_x = building.footprint.x / 2.0
+	var half_z = building.footprint.z / 2.0
+
+	# _spawn_prefab() only FLAGS the rebake (RTS_CORE_ROADMAP.md C1's
+	# one-frame debounce, see skirmish.gd's _physics_process) - awaiting a
+	# few real frames here lets that debounced rebake actually run before
+	# the unit's own nav_agent is set up, so it picks up the hole from the
+	# start rather than needing a mid-flight repath to notice it.
+	for i in range(5):
+		await process_frame
+	if skirmish._nav_rebake_pending:
+		print("  [FAIL] The navmesh rebake should have completed within a few frames of placing the building")
+		skirmish.queue_free()
+		return false
+
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "tracked_treads", "name": "Tracked Treads", "position": {"x": 0.0, "y": -0.4, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	skirmish.add_child(unit)
+	unit.global_position = Vector3(-40, 0.5, -180)
+	unit.setup(bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+	if unit.move_speed <= 0.0:
+		print("  [FAIL] Unit with a real locomotion module should have nonzero move_speed, got ", unit.move_speed)
+		skirmish.queue_free()
+		return false
+
+	var start_pos = unit.global_position
+	unit.order_move(Vector3(40, 0.5, -180))
+
+	# medium_hull/tracked_treads' real move_speed is only ~7.2 u/s - budget
+	# enough ticks for the full (slightly-detoured) 80-unit trip, not just
+	# "moved at all" (this test cares whether it actually gets PAST the
+	# building, not merely that it's not stuck against it). Generous
+	# headroom over the ~600-650 ticks a clean run actually takes -
+	# Recast's bake isn't perfectly deterministic tick-for-tick, and this
+	# is a real detour around a real physical collider, not just a navmesh
+	# path query, so some run-to-run variance in exact arrival time is
+	# expected, not a bug.
+	var entered_footprint = false
+	for i in range(1200):
+		unit._physics_process(1.0 / 60.0)
+		unit.move_and_slide()
+		if abs(unit.global_position.x - block_pos.x) < half_x and abs(unit.global_position.z - block_pos.z) < half_z:
+			entered_footprint = true
+
+	if entered_footprint:
+		print("  [FAIL] Unit's real movement path entered the manufactory's own footprint AABB instead of detouring around it")
+		skirmish.queue_free()
+		return false
+
+	var moved_dist = start_pos.distance_to(unit.global_position)
+	if moved_dist < 5.0:
+		print("  [FAIL] Unit given order_move() straight at a building barely moved (", moved_dist, " units) - it may be stuck against the building instead of detouring")
+		skirmish.queue_free()
+		return false
+	if unit.global_position.x < 15.0:
+		print("  [FAIL] Unit should have made it past the building to the far side (x >= 15) within 700 ticks, got x=", unit.global_position.x)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A unit ordered straight at a real building detours around its navmesh hole (never entering its footprint AABB) and reaches the far side.")
+	return true
+
+func test_c1_building_placed_after_unit_is_moving_forces_a_repath() -> bool:
+	print("Running Test Suite: C1 - A Building Placed Mid-Flight Forces a Live Repath (RTS_CORE_ROADMAP.md C1)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "tracked_treads", "name": "Tracked Treads", "position": {"x": 0.0, "y": -0.4, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	skirmish.add_child(unit)
+	unit.global_position = Vector3(-40, 0.5, 200)
+	unit.setup(bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+
+	var block_pos = Vector3(0, 0, 200)
+	unit.order_move(Vector3(40, 0.5, 200))
+	# A few ticks of real straight-line travel BEFORE the building exists -
+	# the whole point of this test is that the building lands in a path the
+	# unit already committed to, not one it planned around from the start.
+	for i in range(20):
+		unit._physics_process(1.0 / 60.0)
+		unit.move_and_slide()
+
+	var building = skirmish._spawn_prefab("heavy_manufactory", skirmish.ENEMY_TEAM, block_pos, skirmish.enemy_faction)
+	var half_x = building.footprint.x / 2.0
+	var half_z = building.footprint.z / 2.0
+	# Same debounce wait as the test above, but now with the unit already
+	# mid-flight - this is what actually exercises request_repath()/
+	# _repath_live_units(), not just a fresh nav_agent picking up the
+	# hole from a standing start.
+	for i in range(5):
+		await process_frame
+
+	# Same move_speed-budget reasoning as the test above (~7.2 u/s) - a bit
+	# more headroom here since a mid-flight repath costs some extra time
+	# re-planning around the new obstacle versus knowing about it from the
+	# start.
+	var entered_footprint = false
+	for i in range(900):
+		unit._physics_process(1.0 / 60.0)
+		unit.move_and_slide()
+		if abs(unit.global_position.x - block_pos.x) < half_x and abs(unit.global_position.z - block_pos.z) < half_z:
+			entered_footprint = true
+
+	if entered_footprint:
+		print("  [FAIL] A unit already mid-flight should repath around a building that appears in its way, not drive through its footprint AABB")
+		skirmish.queue_free()
+		return false
+	if unit.global_position.x < 10.0:
+		print("  [FAIL] Unit should have made it past the building to the far side (x >= 10) after the repath, got x=", unit.global_position.x)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A building placed directly in an already-moving unit's path triggers a real repath - it detours instead of driving through.")
 	return true
 
 func test_weapon_traverse_and_range_differentiation() -> bool:

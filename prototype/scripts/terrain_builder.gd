@@ -369,7 +369,7 @@ static func _cell_on_bridge(x0: float, x1: float, z0: float, z1: float, bridges:
 # instead and REJECTS any cell whose slope exceeds MAX_WALKABLE_SLOPE - an
 # O(1) image lookup per corner, not the expensive noise+hill/blob loop
 # stack, so the same bake-time problem doesn't apply.
-static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
+static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) -> PackedVector3Array:
 	var verts = PackedVector3Array()
 	var half: float = map_def.get("map_half_extents", 80.0)
 	var water_holes = []
@@ -378,6 +378,13 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 	var hard_holes = []
 	for o in map_def.get("obstacles", []):
 		hard_holes.append(_rect_from(o.center, o.half_extents))
+	# RTS_CORE_ROADMAP.md C1: extra_holes are building footprints ({center,
+	# half_extents}, same rect shape obstacles already use) - a live
+	# building blocks the ground navmesh exactly like a map-authored
+	# obstacle does. Empty for the initial map-load bake; populated by
+	# skirmish.gd's dynamic rebake on building placed/destroyed.
+	for eh in extra_holes:
+		hard_holes.append(_rect_from(eh.center, eh.half_extents))
 	var bridges = _collect_bridges(map_def)
 	var has_blobs = not map_def.get("water_blobs", []).is_empty()
 	var heightmap_img = _get_heightmap_image(map_def)
@@ -432,12 +439,17 @@ static func _build_ground_faces(map_def: Dictionary) -> PackedVector3Array:
 # ground_nav_map like every other ground/legged type. water_blobs are
 # deliberately NOT excluded here either, for the same reason water_areas
 # never was - amphibious units cross water freely.
-static func _build_amphibious_faces(map_def: Dictionary) -> PackedVector3Array:
+static func _build_amphibious_faces(map_def: Dictionary, extra_holes: Array = []) -> PackedVector3Array:
 	var verts = PackedVector3Array()
 	var half: float = map_def.get("map_half_extents", 80.0)
 	var holes = []
 	for o in map_def.get("obstacles", []):
 		holes.append(_rect_from(o.center, o.half_extents))
+	# RTS_CORE_ROADMAP.md C1: same building-footprint holes as
+	# _build_ground_faces() above - a screw_drive unit can cross open
+	# water, but not through a building sitting on land.
+	for eh in extra_holes:
+		holes.append(_rect_from(eh.center, eh.half_extents))
 	var cell = _nav_grid_cell(map_def)
 
 	var x = -half
@@ -490,7 +502,35 @@ static func _build_deep_water_faces(map_def: Dictionary) -> PackedVector3Array:
 			x = x1
 	return verts
 
-static func build_navmeshes(map_def: Dictionary) -> Dictionary:
+# Shared by build_navmeshes() below AND rebake_ground_and_amphibious() (C1's
+# dynamic rebake) - one place that knows how to turn source verts into a
+# baked NavigationMesh, so the two bakers can't silently drift apart on
+# cell_size/agent settings.
+static func _bake_nav_mesh(verts: PackedVector3Array, cell_size: float) -> NavigationMesh:
+	var nav_mesh = NavigationMesh.new()
+	nav_mesh.cell_size = cell_size
+	nav_mesh.cell_height = cell_size
+	var source = NavigationMeshSourceGeometryData3D.new()
+	source.add_faces(verts, Transform3D.IDENTITY)
+	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
+	return nav_mesh
+
+# RTS_CORE_ROADMAP.md C1: dynamic navmesh for buildings blocking movement.
+# Re-bakes ONLY ground+amphibious (the two surfaces a building actually
+# footprints on - water/deep_water are never affected by a building
+# placement) against the SAME region RIDs build_navmeshes() already
+# created, via region_set_navigation_mesh() rather than region_create() -
+# reuses the existing region/map RIDs instead of leaking new ones every
+# time a building goes up or down. extra_holes is the live building
+# footprint list (skirmish.gd's job to gather from the "buildings" group).
+static func rebake_ground_and_amphibious(map_def: Dictionary, extra_holes: Array, ground_region: RID, amphibious_region: RID) -> void:
+	var cell_size = _nav_cell_size(map_def)
+	var ground_verts = _build_ground_faces(map_def, extra_holes)
+	NavigationServer3D.region_set_navigation_mesh(ground_region, _bake_nav_mesh(ground_verts, cell_size))
+	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
+	NavigationServer3D.region_set_navigation_mesh(amphibious_region, _bake_nav_mesh(amphibious_verts, cell_size))
+
+static func build_navmeshes(map_def: Dictionary, extra_holes: Array = []) -> Dictionary:
 	# RTS_CORE_ROADMAP.md B8: a NavigationServer3D MAP has its own
 	# cell_size/cell_height (default 0.25, independent of whatever a
 	# NavigationMesh RESOURCE assigned to one of its regions uses) -
@@ -519,16 +559,10 @@ static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 	NavigationServer3D.map_set_cell_height(deep_water_map, cell_size)
 	NavigationServer3D.map_set_active(deep_water_map, true)
 
-	var ground_verts = _build_ground_faces(map_def)
-	var ground_nav_mesh = NavigationMesh.new()
-	ground_nav_mesh.cell_size = cell_size
-	ground_nav_mesh.cell_height = cell_size
-	var ground_source = NavigationMeshSourceGeometryData3D.new()
-	ground_source.add_faces(ground_verts, Transform3D.IDENTITY)
-	NavigationServer3D.bake_from_source_geometry_data(ground_nav_mesh, ground_source)
+	var ground_verts = _build_ground_faces(map_def, extra_holes)
 	var ground_region = NavigationServer3D.region_create()
 	NavigationServer3D.region_set_map(ground_region, ground_map)
-	NavigationServer3D.region_set_navigation_mesh(ground_region, ground_nav_mesh)
+	NavigationServer3D.region_set_navigation_mesh(ground_region, _bake_nav_mesh(ground_verts, cell_size))
 
 	var water_verts = PackedVector3Array()
 	for w in map_def.get("water_areas", []):
@@ -539,39 +573,21 @@ static func build_navmeshes(map_def: Dictionary) -> Dictionary:
 		water_verts.append_array(_water_blob_fan_verts(blob, 0.0))
 	var water_region: RID = RID()
 	if water_verts.size() > 0:
-		var water_nav_mesh = NavigationMesh.new()
-		water_nav_mesh.cell_size = cell_size
-		water_nav_mesh.cell_height = cell_size
-		var water_source = NavigationMeshSourceGeometryData3D.new()
-		water_source.add_faces(water_verts, Transform3D.IDENTITY)
-		NavigationServer3D.bake_from_source_geometry_data(water_nav_mesh, water_source)
 		water_region = NavigationServer3D.region_create()
 		NavigationServer3D.region_set_map(water_region, water_map)
-		NavigationServer3D.region_set_navigation_mesh(water_region, water_nav_mesh)
+		NavigationServer3D.region_set_navigation_mesh(water_region, _bake_nav_mesh(water_verts, cell_size))
 
-	var amphibious_verts = _build_amphibious_faces(map_def)
-	var amphibious_nav_mesh = NavigationMesh.new()
-	amphibious_nav_mesh.cell_size = cell_size
-	amphibious_nav_mesh.cell_height = cell_size
-	var amphibious_source = NavigationMeshSourceGeometryData3D.new()
-	amphibious_source.add_faces(amphibious_verts, Transform3D.IDENTITY)
-	NavigationServer3D.bake_from_source_geometry_data(amphibious_nav_mesh, amphibious_source)
+	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
 	var amphibious_region = NavigationServer3D.region_create()
 	NavigationServer3D.region_set_map(amphibious_region, amphibious_map)
-	NavigationServer3D.region_set_navigation_mesh(amphibious_region, amphibious_nav_mesh)
+	NavigationServer3D.region_set_navigation_mesh(amphibious_region, _bake_nav_mesh(amphibious_verts, cell_size))
 
 	var deep_water_verts = _build_deep_water_faces(map_def)
 	var deep_water_region: RID = RID()
 	if deep_water_verts.size() > 0:
-		var deep_water_nav_mesh = NavigationMesh.new()
-		deep_water_nav_mesh.cell_size = cell_size
-		deep_water_nav_mesh.cell_height = cell_size
-		var deep_water_source = NavigationMeshSourceGeometryData3D.new()
-		deep_water_source.add_faces(deep_water_verts, Transform3D.IDENTITY)
-		NavigationServer3D.bake_from_source_geometry_data(deep_water_nav_mesh, deep_water_source)
 		deep_water_region = NavigationServer3D.region_create()
 		NavigationServer3D.region_set_map(deep_water_region, deep_water_map)
-		NavigationServer3D.region_set_navigation_mesh(deep_water_region, deep_water_nav_mesh)
+		NavigationServer3D.region_set_navigation_mesh(deep_water_region, _bake_nav_mesh(deep_water_verts, cell_size))
 
 	return {"ground_map": ground_map, "water_map": water_map, "amphibious_map": amphibious_map, "deep_water_map": deep_water_map,
 		"ground_region": ground_region, "water_region": water_region, "amphibious_region": amphibious_region, "deep_water_region": deep_water_region}

@@ -234,6 +234,14 @@ static func assign_spawns(spawn_defs: Array, order: Array, explicit_picks: Dicti
 const FAIRNESS_RESOURCE_RADIUS_FRACTION: float = 0.6
 const FAIRNESS_MIN_RESOURCES_PER_SPAWN: int = 2
 const FAIRNESS_MAX_DISTANCE_COEFFICIENT_OF_VARIATION: float = 0.35
+# RTS_CORE_ROADMAP.md C1: a spawn's HQ is itself a real building once a
+# match is actually running, carving its own navmesh hole - a path can only
+# get to that hole's edge, not the exact center point this lint queries
+# against. Sized for the largest static building's footprint diagonal
+# (~6.25, heavy_manufactory) plus up to one GRID_CELL (4.0) of navmesh
+# quantization slop. Harmless before C1 too (no building yet = the real
+# distance is ~0 regardless of how generous this margin is).
+const FAIRNESS_HQ_REACHABLE_MARGIN: float = 12.0
 
 static func lint_spawn_fairness(map_def: Dictionary, ground_nav_map: RID) -> Array:
 	var errors: Array = []
@@ -263,7 +271,7 @@ static func lint_spawn_fairness(map_def: Dictionary, ground_nav_map: RID) -> Arr
 		for j in range(i + 1, spawns.size()):
 			var b = spawns[j]
 			var path = NavigationServer3D.map_get_path(ground_nav_map, a.hq, b.hq, true)
-			if path.size() < 2 or path[path.size() - 1].distance_to(b.hq) > 5.0:
+			if path.size() < 2 or path[path.size() - 1].distance_to(b.hq) > FAIRNESS_HQ_REACHABLE_MARGIN:
 				errors.append("Spawns '%s' and '%s' are not mutually reachable on the ground navmesh" % [a.id, b.id])
 			distances.append(a.hq.distance_to(b.hq))
 

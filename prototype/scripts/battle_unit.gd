@@ -142,7 +142,14 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node, match_f
 	team = unit_team
 	set_meta("team", team)
 	collision_layer = 4
-	collision_mask = 1 # Ground only; units pass through each other in the prototype
+	# RTS_CORE_ROADMAP.md C1: Ground (1) + Buildings (8) - units still pass
+	# through each other (no 4), but now physically collide with buildings
+	# too. This is a BACKSTOP, not the primary solution - the dynamic
+	# navmesh (skirmish.gd's building-placed/destroyed rebake) is what's
+	# supposed to route units around buildings in the first place; this
+	# just keeps a navmesh miss (e.g. a unit already mid-path when a
+	# building goes up) from silently becoming a drive-through.
+	collision_mask = 1 | 8
 
 	var locomotion = blueprint_data.get("locomotion", {})
 	locomotion_type = locomotion.get("type_id", "")
@@ -264,6 +271,19 @@ func _setup_navigation():
 		nav_agent.set_navigation_map(controller.get_amphibious_nav_map())
 	else:
 		nav_agent.set_navigation_map(controller.get_ground_nav_map())
+
+# RTS_CORE_ROADMAP.md C1: called by skirmish.gd right after a ground/
+# amphibious navmesh rebake (a building was just placed or destroyed) -
+# NavigationAgent3D doesn't know its cached path corridor might now cut
+# through a building that wasn't there a moment ago (or that a hole just
+# closed up), so force a fresh path query against the current move order.
+# Re-assigning target_position to its own current value still triggers a
+# real repath (the setter doesn't gate on the value being unchanged) - see
+# _steer_towards()'s own distance-gated re-set for the more common "did the
+# destination actually change" case, which this deliberately bypasses.
+func request_repath():
+	if is_instance_valid(nav_agent):
+		nav_agent.target_position = nav_agent.target_position
 
 # Fog-of-war (built this pass): base_vision from the hull + sum of mounted
 # sensor_suite modules' vision bonus, with the Technocrats faction passive

@@ -123,6 +123,12 @@ var _water_nav_region: RID
 var _amphibious_nav_region: RID
 var _deep_water_nav_region: RID
 
+# RTS_CORE_ROADMAP.md C1: set true by any building placement/death, cleared
+# and acted on once per physics tick in _physics_process() - see that
+# function's own comment for why this is a one-frame debounce, not an
+# immediate rebake.
+var _nav_rebake_pending: bool = false
+
 # Multi-map architecture (this pass): the map itself - terrain layout,
 # resources, start points - is now data (MapCatalog), not hardcoded here.
 # map_id defaults to the original lake map so every pre-existing test/
@@ -323,12 +329,27 @@ func _ready():
 	production = ProductionQueueScript.new()
 	production.setup(self)
 
-	_setup_navigation()
-	_setup_fog_shroud()
-	_setup_minimap()
+	# RTS_CORE_ROADMAP.md C1: buildings spawn BEFORE the navmesh bakes (not
+	# after, as this used to run) so the very first bake already carves
+	# holes for the starting HQ/refinery/manufactories - no separate
+	# same-frame rebake needed for them. That matters: a rebake mid-match
+	# (via _physics_process's debounce) is fine because real player orders
+	# always land several real engine frames later, giving NavigationServer3D
+	# time to internally sync the updated region - but a rebake happening
+	# via a SECOND bake within the same handful of startup frames (the old
+	# order: bake once with no holes, spawn buildings, debounced rebake
+	# fires next tick) left one narrow window where a unit's very first
+	# path query could run before that resync fully settled. Confirmed via
+	# a standalone repro script - a unit ordered across the map immediately
+	# after such a same-frame rebake could wander into the lake before the
+	# nav data had caught up. Baking once, correctly, from the start avoids
+	# the race entirely rather than papering over it with extra waits.
 	_load_rosters()
 	_spawn_resource_nodes()
 	_spawn_bases()
+	_setup_navigation()
+	_setup_fog_shroud()
+	_setup_minimap()
 	_build_ui()
 
 	var ai = Node.new()
@@ -364,6 +385,14 @@ func _ready():
 func _physics_process(delta):
 	if production:
 		production.tick(delta)
+	# RTS_CORE_ROADMAP.md C1: one-frame debounce - a building placed/
+	# destroyed this physics tick just sets the flag (possibly several
+	# times, e.g. AOE splash killing a cluster of buildings in one tick);
+	# whichever call flips it first, the actual rebake+repath only runs
+	# once, next tick, right here.
+	if _nav_rebake_pending:
+		_nav_rebake_pending = false
+		_rebuild_dynamic_navmesh_holes()
 
 func _on_trickle():
 	if game_over: return
@@ -982,7 +1011,12 @@ func _on_resources_delivered(team: int, metal: int, crystal: int):
 # the flat Ground node to match the map, and spawn the decorative terrain
 # (water/obstacles/elevation).
 func _setup_navigation():
-	var nav = TerrainBuilder.build_navmeshes(current_map)
+	# RTS_CORE_ROADMAP.md C1: the starting buildings (_spawn_bases(), which
+	# now runs before this) already exist, so their footprints go straight
+	# into the FIRST bake instead of needing an immediate follow-up rebake
+	# - see this function's caller for why that ordering matters.
+	var nav = TerrainBuilder.build_navmeshes(current_map, _gather_building_holes())
+	_nav_rebake_pending = false
 	ground_nav_map = nav.ground_map
 	water_nav_map = nav.water_map
 	amphibious_nav_map = nav.amphibious_map
@@ -1115,6 +1149,11 @@ func _spawn_prefab(kind: String, team: int, pos: Vector3, faction: String) -> St
 	b.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
 	b.setup_prefab(kind, team, faction)
 	b.bp_manager = bp_manager
+	# RTS_CORE_ROADMAP.md C1: a new building needs a navmesh hole carved
+	# for it, and its eventual death needs to un-carve that hole - both go
+	# through the same debounced rebake.
+	b.died.connect(func(_b): _mark_navmesh_dirty())
+	_mark_navmesh_dirty()
 	return b
 
 func spawn_unit(blueprint_data: Dictionary, team: int, pos: Vector3) -> Node:
@@ -1140,6 +1179,9 @@ func spawn_defense(blueprint_data: Dictionary, team: int, pos: Vector3) -> Stati
 	# player_faction, in case that changes.
 	var match_faction = player_faction if team == PLAYER_TEAM else enemy_faction
 	b.setup_defense(blueprint_data, team, bp_manager, match_faction)
+	# RTS_CORE_ROADMAP.md C1: same navmesh-hole bookkeeping as _spawn_prefab().
+	b.died.connect(func(_b): _mark_navmesh_dirty())
+	_mark_navmesh_dirty()
 	return b
 
 # tier: "" returns a manufactory of ANY tier (backward-compatible
@@ -1199,6 +1241,43 @@ func get_amphibious_nav_map() -> RID:
 # battle_unit.gd's hull_draught branch in _setup_navigation()).
 func get_deep_water_nav_map() -> RID:
 	return deep_water_nav_map
+
+# --- Dynamic navmesh for buildings (RTS_CORE_ROADMAP.md C1) ---
+
+func _mark_navmesh_dirty() -> void:
+	_nav_rebake_pending = true
+
+# Every LIVE building's footprint, gathered fresh each rebake (not cached -
+# a live match's building set only changes on placement/death, both of
+# which already call _mark_navmesh_dirty(), so this is never stale when it
+# actually runs).
+func _gather_building_holes() -> Array:
+	var holes: Array = []
+	for b in get_tree().get_nodes_in_group("buildings"):
+		# is_inside_tree() guards a real teardown-race: queue_free() defers
+		# actual removal to end-of-frame, so a building mid-teardown (e.g.
+		# during a test's skirmish.queue_free() cleanup) can stay
+		# is_instance_valid() a moment after leaving the tree - reading
+		# global_position on it throws (found via a real "!is_inside_tree()"
+		# engine error during the test suite once buildings started
+		# carving real holes).
+		if not is_instance_valid(b) or b.is_dead or not b.is_inside_tree(): continue
+		var fp: Vector3 = b.footprint if "footprint" in b else Vector3(5, 3, 5)
+		holes.append({"center": b.global_position, "half_extents": Vector2(fp.x / 2.0, fp.z / 2.0)})
+	return holes
+
+func _rebuild_dynamic_navmesh_holes() -> void:
+	TerrainBuilder.rebake_ground_and_amphibious(current_map, _gather_building_holes(), _ground_nav_region, _amphibious_nav_region)
+	_repath_live_units()
+
+# A rebaked navmesh doesn't retroactively invalidate a NavigationAgent3D's
+# already-cached path corridor - a unit mid-route when a building goes up
+# (or comes down) needs to be told to ask again, or it walks straight into
+# (or around, needlessly) geometry that just changed.
+func _repath_live_units() -> void:
+	for u in get_tree().get_nodes_in_group("units"):
+		if is_instance_valid(u) and not u.is_dead and u.is_inside_tree() and u.has_method("request_repath"):
+			u.request_repath()
 
 # --- UI ---
 

@@ -1,15 +1,21 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-26): A1, A2, B1–B7, B9, B10 landed; B8 in progress (1 of N
-maps landed).** This is a resumable roadmap, written so a fresh session can pick up any
+**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1 landed; B8 in progress (1
+of N maps landed).** This is a resumable roadmap, written so a fresh session can pick up any
 single chunk without re-deriving the architecture. Chunks are ordered with
 explicit dependencies in the sequencing table at the end; each is sized to land
 as one commit with its own `PROGRESS.md` entry. **Update the sequencing
 table's status as chunks land** — a stale "next up" header in a plan doc is
 exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before
-being corrected on 2026-07-24. **Next up: continue B8** (more bigger/denser
-maps, per Chris's call each time), or move on to Phase C — confirm which
-before proceeding, since B8 is explicitly budgeted as its own multi-map arc.
+being corrected on 2026-07-24. **Next up: C2** (real placement legality).
+
+**C1 landed both halves together** (physics backstop + dynamic navmesh), per
+this doc's own note that they had to ship together. Found and fixed a real
+navmesh-sync race in the process (buildings now spawn BEFORE the first
+navmesh bake, not after) and two real map-authoring bugs (`twin_bridges`
+resource nodes sitting inside a starting manufactory's footprint - see
+`PROGRESS.md`'s C1 entry for the full story, worth reading before touching
+navmesh/building code again).
 
 **B10 scope note:** landed the two genuinely reusable/testable pieces -
 `MapCatalog.assign_spawns()` (OpenRA's explicit-pick > maximize-squared-
@@ -631,7 +637,7 @@ readback) over catalog-number assertions.
 | 10 | B8 bigger/denser maps | multi (content) | B5–B7 | **In progress (1 map: `scattered_peaks`)** |
 | 11 | B9 minimap | 1–1.5 sessions | B6 | **Done** |
 | 12 | B10 spawn assignment + fairness lint | multi | B3, B8 | **Done (slot-picker UI deferred, see note above)** |
-| 13 | C1 buildings block movement | multi | — | — |
+| 13 | C1 buildings block movement | multi | — | **Done** |
 | 14 | C2 real placement legality | one session | B6 | — |
 | 15 | C3 buildable area / adjacency | afternoon | C2 | — |
 | 16 | C4 exits + rally points | one session | A1, C1 | — |

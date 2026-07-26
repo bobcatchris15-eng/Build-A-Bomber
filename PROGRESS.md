@@ -4,6 +4,28 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-26 — RTS_CORE_ROADMAP.md C1: buildings actually block movement
+
+The highest-value non-terrain defect on the roadmap: units have always been able to drive straight through buildings (both physically and on the navmesh). Landed as two halves that had to ship together, per the roadmap's own note - a physics backstop plus a real dynamic navmesh.
+
+**Shipped:**
+- `battle_unit.gd`: `collision_mask` gains layer 8 (Buildings) alongside Ground - a physics backstop only, not the primary fix (a nav miss no longer silently becomes a drive-through).
+- `terrain_builder.gd`: `_build_ground_faces()`/`_build_amphibious_faces()` accept an `extra_holes` param (same `{center, half_extents}` rect shape `obstacles` already use); `rebake_ground_and_amphibious()` re-bakes ground+amphibious in place against the SAME region RIDs (via `region_set_navigation_mesh()`, not new regions) - water/deep_water are untouched since no building ever affects them. `build_navmeshes()` itself also gained the same `extra_holes` param and was refactored around a shared `_bake_nav_mesh()` helper (dedupes 4x near-identical bake blocks into one).
+- `skirmish.gd`: every building placement/death (`_spawn_prefab()`/`spawn_defense()`, via the existing `died` signal) marks a dirty flag, debounced to a single rebake+repath per physics tick in `_physics_process()` (coalesces e.g. an AOE splash killing several buildings in one tick into one rebake, not N). `battle_unit.gd` gained `request_repath()`, called on every live unit after a rebake, since a `NavigationAgent3D`'s cached path corridor doesn't know a building just appeared/disappeared on its own.
+- **Ordering fix**: `_spawn_bases()` now runs BEFORE `_setup_navigation()` (previously after) - the starting HQ/refinery/manufactories' holes go straight into the very FIRST bake instead of needing an immediate same-frame follow-up rebake. Found via a real bug: a rebake that happens within the first few frames of match start left a narrow window where a unit's first-ever path query could run before NavigationServer3D's internal region-update sync had settled, producing a genuinely bad path (confirmed via a standalone repro - a unit ordered straight across the map wandered into the lake it should have avoided). Baking correctly once from the start avoids the race outright rather than papering over it with extra waits.
+
+**Real bugs found migrating to real building holes** (exactly the "generate real output and inspect it" pattern this project keeps running into):
+- `twin_bridges.json` had two crystal resource nodes each sitting almost exactly inside a starting manufactory's footprint (the manufactory-offset math isn't team-mirrored, so this hit one node near the player's base and the differently-offset mirror node near the enemy's) - both were always slightly wrong, just invisible until buildings became real navmesh obstacles. Repositioned both further from their base cluster.
+- Every map's HQ-mutual-reachability margin (`_smoke_test_map()`'s own check, and `MapCatalog.lint_spawn_fairness()`) was hardcoded at 5.0 units, sized for a world where a path could reach an HQ's exact center point. An HQ is a building now too, so it carves its own hole - a path can only reach the hole's edge. Bumped to a shared `HQ_REACHABLE_MARGIN`/`FAIRNESS_HQ_REACHABLE_MARGIN` (12.0, sized off the largest static building's footprint diagonal plus a grid-cell of quantization slop).
+- A real teardown race: `_gather_building_holes()`/`_repath_live_units()` iterating "buildings"/"units" group nodes mid-`queue_free()` could hit a node that's `is_instance_valid()` but no longer `is_inside_tree()` (deferred deletion), throwing a real engine error reading `global_position`. Both now guard with `is_inside_tree()`.
+
+**Verified:**
+- `test_c1_buildings_block_movement_unit_detours_around_manufactory()`: a unit ordered straight at a real heavy_manufactory never enters its footprint AABB and makes it to the far side - budgeted against the hull's real ~7.2 u/s move_speed, not a guessed tick count.
+- `test_c1_building_placed_after_unit_is_moving_forces_a_repath()`: a building placed directly in an already-in-flight unit's path forces a real repath (proving `request_repath()`/`_repath_live_units()`, not just a fresh `nav_agent` picking up the hole from a standing start).
+- Full suite green except one pre-existing, already-documented cross-suite-isolation flake (`test_target_dummies_actually_take_damage_in_test_range`, flagged in its own comment since 2026-07-21 as a known, deliberately-left-failing suite-order sensitivity, unrelated to terrain/navigation).
+
+---
+
 ## 2026-07-26 — RTS_CORE_ROADMAP.md B9: minimap
 
 A real `Image` bake, deliberately NOT render-to-texture - headless never rasterizes a Viewport, which would make this untestable (the roadmap's own note, taken literally). `_setup_minimap()` bakes static terrain colors once per match (water via the new `TerrainBuilder.is_water_at()`, surface types via the existing `get_surface_type_at()`, plain ground otherwise) into `_minimap_static_image`; every fog tick, `_update_minimap()` resets `_minimap_image` to a copy of that bake and blits live unit/building/resource blips on top, piggybacking on the existing `_recalc_fog_of_war()` timer rather than adding a second one.
