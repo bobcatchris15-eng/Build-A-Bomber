@@ -96,6 +96,7 @@ func _init():
 	success = success and await test_unit_order_move_actually_navigates_around_the_lake()
 	success = success and await test_terrain_builder_pure_functions()
 	success = success and await test_b6_heightmap_plateau_approachable_from_any_side()
+	success = success and await test_b7_open_plains_surfacemap_covers_all_7_surface_types()
 	success = success and await test_bridges_carve_a_real_ground_crossing_through_water()
 	success = success and await test_building_obstacle_spawns_taller_real_cover_than_rock_cluster()
 	success = success and await test_amphibious_navmesh_crosses_water()
@@ -1199,7 +1200,7 @@ func test_ship_hull_locomotion_mount_gap_fix() -> bool:
 	return true
 
 func test_terrain_types_differentiate_locomotion() -> bool:
-	print("Running Test Suite: Terrain Variety - marsh/rocky/snow_mud/sand Genuinely Differentiate Locomotor Types...")
+	print("Running Test Suite: Terrain Variety - All 7 Surface Types (marsh/rocky/snow_mud/sand/gravel/forest/ice) Genuinely Differentiate Locomotor Types...")
 	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
 
 	# Fake controller: only get_surface_type_at() exists (no get_ground_nav_map),
@@ -1279,15 +1280,45 @@ func test_terrain_types_differentiate_locomotion() -> bool:
 		print("  [FAIL] sand: tracked_treads should cross noticeably faster than wheels. wheels=", sand_wheels, " treads=", sand_treads)
 		return false
 
+	# RTS_CORE_ROADMAP.md B7: gravel is the one surface that's a genuine
+	# speed BONUS for every locomotor, not a penalty - wheels (its best
+	# case) should measurably outrun the same wheels on plain ground.
+	var plain_wheels_baseline = measure.call("wheels", "")
+	var gravel_wheels = measure.call("wheels", "gravel")
+	if gravel_wheels <= plain_wheels_baseline * 1.15:
+		print("  [FAIL] gravel: wheels should cross measurably faster than on plain ground (a real bonus, not just 'least penalized'). plain=", plain_wheels_baseline, " gravel=", gravel_wheels)
+		return false
+
+	# forest: legs should outpace wheels (dense vegetation blocks wheels
+	# hardest, legs weave through best).
+	var forest_wheels = measure.call("wheels", "forest")
+	var forest_legs = measure.call("legs", "forest")
+	if forest_legs <= forest_wheels * 1.5:
+		print("  [FAIL] forest: legs should cross noticeably faster than wheels. wheels=", forest_wheels, " legs=", forest_legs)
+		return false
+
+	# ice: unlike every other surface (which always has one clear
+	# "winner"), ice penalizes every locomotor - screw_drive suffers LEAST
+	# (its auger bites in rather than relying on friction).
+	var ice_wheels = measure.call("wheels", "ice")
+	var ice_legs = measure.call("legs", "ice")
+	var ice_treads = measure.call("tracked_treads", "ice")
+	var ice_screw = measure.call("screw_drive", "ice")
+	if not (ice_screw > ice_wheels and ice_screw > ice_legs and ice_screw > ice_treads):
+		print("  [FAIL] ice: screw_drive should outpace every other locomotor (suffers least from lost traction). wheels=", ice_wheels, " legs=", ice_legs, " treads=", ice_treads, " screw_drive=", ice_screw)
+		return false
+	if not (ice_wheels < plain_wheels_baseline and ice_legs < plain_wheels_baseline and ice_treads < plain_wheels_baseline):
+		print("  [FAIL] ice should penalize every locomotor vs. plain ground, not just some of them.")
+		return false
+
 	# Sanity: plain ground (no surface_type) should be unaffected by any of
 	# this - same locomotion type covers the same distance on "" as it does
 	# with a 1.0 multiplier explicitly, proving the default fallback works.
-	var plain_wheels = measure.call("wheels", "")
-	if abs(plain_wheels - marsh_wheels) < 0.01:
-		print("  [FAIL] plain ground and marsh gave wheels the identical distance (", plain_wheels, ") - the multiplier isn't actually being applied.")
+	if abs(plain_wheels_baseline - marsh_wheels) < 0.01:
+		print("  [FAIL] plain ground and marsh gave wheels the identical distance (", plain_wheels_baseline, ") - the multiplier isn't actually being applied.")
 		return false
 
-	print("  [PASS] marsh favors screw_drive over wheels, rocky favors legs over wheels, snow_mud and sand both favor tracked_treads over wheels - all measured via real physics-tick movement, not just catalog numbers.")
+	print("  [PASS] marsh favors screw_drive, rocky favors legs, snow_mud/sand/forest favor tracked_treads or legs over wheels, gravel is a genuine bonus, ice penalizes every locomotor (screw_drive least) - all measured via real physics-tick movement, not just catalog numbers.")
 	return true
 
 func test_undo_redo() -> bool:
@@ -5316,6 +5347,49 @@ func test_b6_heightmap_plateau_approachable_from_any_side() -> bool:
 			return false
 
 	print("  [PASS] A single plateau feature (no per-side ramp authoring) is reachable from all 4 cardinal directions.")
+	return true
+
+func test_b7_open_plains_surfacemap_covers_all_7_surface_types() -> bool:
+	print("Running Test Suite: Open Plains - Real Surfacemap Covers All 7 Surface Types (RTS_CORE_ROADMAP.md B7)...")
+	# RTS_CORE_ROADMAP.md B7: "with B4's surface map this becomes paint-not-
+	# rects" - open_plains now resolves get_surface_type_at() through a real
+	# baked surfacemap PNG (terrain.surfacemap) instead of a live rect-
+	# overlap test, proving the raster path works for an actual bundled map,
+	# not just the B4 test fixture.
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	MapCatalogScript.reset_cache_for_tests()
+	TerrainBuilderScript.reset_heightmap_cache_for_tests()
+
+	var map_def = MapCatalogScript.get_map("open_plains")
+	if TerrainBuilderScript._get_surfacemap_image(map_def) == null:
+		print("  [FAIL] open_plains should have a real surfacemap image loaded.")
+		return false
+
+	# Every authored surface_zones center should resolve to its own type
+	# via the raster - the exact center point of each zone.
+	for zone in map_def.get("surface_zones", []):
+		var pos = zone.center
+		var got = TerrainBuilderScript.get_surface_type_at(map_def, Vector3(pos.x, 0, pos.z))
+		if got != zone.surface_type:
+			print("  [FAIL] Zone center ", pos, " should resolve to '", zone.surface_type, "', got '", got, "'")
+			return false
+
+	# All 7 types are actually represented somewhere on this map.
+	var found_types: Dictionary = {}
+	for zone in map_def.get("surface_zones", []):
+		found_types[zone.surface_type] = true
+	for t in ["marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice"]:
+		if not found_types.has(t):
+			print("  [FAIL] open_plains should include a '", t, "' surface zone.")
+			return false
+
+	# Flat ground far from every zone still resolves to plain ("").
+	if TerrainBuilderScript.get_surface_type_at(map_def, Vector3(0, 0, 0)) != "":
+		print("  [FAIL] Open ground away from every zone should resolve to plain (\"\").")
+		return false
+
+	print("  [PASS] open_plains' surfacemap correctly resolves all 7 surface types at their authored centers, plus plain ground elsewhere - a real raster, not rects.")
 	return true
 
 func test_bridges_carve_a_real_ground_crossing_through_water() -> bool:

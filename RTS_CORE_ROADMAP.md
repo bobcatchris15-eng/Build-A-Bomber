@@ -1,14 +1,14 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-25): A1, A2, B1, B2, B3, B4, B5, and B6 landed; everything
-else is planning only.** This is a resumable roadmap, written so a fresh
-session can pick up any single chunk without re-deriving the architecture.
-Chunks are ordered with explicit dependencies in the sequencing table at the
-end; each is sized to land as one commit with its own `PROGRESS.md` entry.
-**Update the sequencing table's status as chunks land** — a stale "next up"
-header in a plan doc is exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md`
-accumulated before being corrected on 2026-07-24. **Next up: B7** (terrain type
-differentiation).
+**Status (2026-07-25): A1, A2, B1–B7 landed; everything else is planning
+only.** This is a resumable roadmap, written so a fresh session can pick up any
+single chunk without re-deriving the architecture. Chunks are ordered with
+explicit dependencies in the sequencing table at the end; each is sized to land
+as one commit with its own `PROGRESS.md` entry. **Update the sequencing
+table's status as chunks land** — a stale "next up" header in a plan doc is
+exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before
+being corrected on 2026-07-24. **Next up: B8** (bigger, denser maps — the real
+content-authoring arc, budget it as its own effort).
 
 **B6 scope note:** "convert each of the 8 maps' elevation_zones" meant
 converting elevation_zones wherever it actually appeared - only
@@ -598,7 +598,7 @@ readback) over catalog-number assertions.
 | 6 | **B4 Python terrain generator + heightmap** | **multi** | B3 | **Done** |
 | 7 | **B5 slope-aware navmesh + collision** | **multi** | B4 | **Done (flag-gated, see note above)** |
 | 8 | B6 retire elevation_zones, migrate, rect+bounds | one session | B5 | **Done (Vector2 half_extents deferred, see note above)** |
-| 9 | B7 terrain type differentiation | one session | B4 | — |
+| 9 | B7 terrain type differentiation | one session | B4 | **Done** |
 | 10 | B8 bigger/denser maps | multi (content) | B5–B7 | — |
 | 11 | B9 minimap | 1–1.5 sessions | B6 | — |
 | 12 | B10 spawn assignment + fairness lint | multi | B3, B8 | — |

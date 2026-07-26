@@ -1,5 +1,5 @@
 {
-	"description": "Fully open, no water or high ground - a tighter map with contested resources near the center, plus marsh/rocky/snow-mud/sand patches further out that reward the right locomotion choice. Fast, aggressive, few chokepoints to hide behind.",
+	"description": "Fully open, no water or high ground - a tighter map with contested resources near the center, plus 7 different surface-terrain patches further out (marsh/rocky/snow-mud/sand/gravel/forest/ice) that reward the right locomotion choice. Fast, aggressive, few chokepoints to hide behind.",
 	"ground_color": [
 		0.280000001192093,
 		0.259999990463257,
@@ -188,7 +188,82 @@
 				27
 			],
 			"surface_type": "snow_mud"
+		},
+		{
+			"center": [
+				114,
+				0,
+				150
+			],
+			"half_extents": [
+				27,
+				27
+			],
+			"surface_type": "gravel"
+		},
+		{
+			"center": [
+				-114,
+				0,
+				-150
+			],
+			"half_extents": [
+				27,
+				27
+			],
+			"surface_type": "gravel"
+		},
+		{
+			"center": [
+				-114,
+				0,
+				150
+			],
+			"half_extents": [
+				27,
+				27
+			],
+			"surface_type": "forest"
+		},
+		{
+			"center": [
+				114,
+				0,
+				-150
+			],
+			"half_extents": [
+				27,
+				27
+			],
+			"surface_type": "forest"
+		},
+		{
+			"center": [
+				0,
+				0,
+				174
+			],
+			"half_extents": [
+				18,
+				18
+			],
+			"surface_type": "ice"
+		},
+		{
+			"center": [
+				0,
+				0,
+				-174
+			],
+			"half_extents": [
+				18,
+				18
+			],
+			"surface_type": "ice"
 		}
 	],
+	"terrain": {
+		"surfacemap": "res://data/maps/open_plains_surface.png"
+	},
 	"water_areas": []
 }

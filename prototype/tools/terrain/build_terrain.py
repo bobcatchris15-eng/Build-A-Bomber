@@ -54,7 +54,7 @@ HEIGHT_PIXEL_MAX = 65535
 # side of this - B4 just needs the raster to exist). Index 0 is "no
 # surface_zone" (plain ground), matching get_surface_type_at()'s existing
 # "" empty-string default.
-SURFACE_PALETTE = ["", "marsh", "rocky", "snow_mud", "sand"]
+SURFACE_PALETTE = ["", "marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice"]
 
 
 def _smoothstep(t):
@@ -199,7 +199,14 @@ def build_surfacemap(half_extents, surface_zones, resolution):
     # existing "resolve to whichever is listed first" rule, so migrating a
     # map from rect surface_zones to this raster is behavior-preserving.
     for z in reversed(surface_zones):
-        cx, cz = z["center"][0], z["center"][1]
+        # center is a 3-element [x, y, z] world Vector3 (unlike a terrain
+        # feature's 2-element [x, z]) - index 2, not 1, for the Z
+        # component. A real bug caught here: index 1 is Y (always 0),
+        # which silently painted every zone's Z-band around z=0 instead
+        # of its real position - invisible on highland_chokepoint/
+        # twin_summits (both have empty surface_zones) but caught
+        # immediately once open_plains' real zones exercised it.
+        cx, cz = z["center"][0], z["center"][2]
         hx, hz = z["half_extents"][0], z["half_extents"][1]
         mask = (np.abs(px - cx) <= hx) & (np.abs(pz - cz) <= hz)
         try:
@@ -215,36 +222,41 @@ def generate(map_json_path, resolution=None):
         map_def = json.load(f)
 
     terrain = map_def.get("terrain")
-    if not terrain or not terrain.get("features"):
-        print(f"'{map_json_path}' has no terrain.features - nothing to generate.")
+    if not terrain:
+        print(f"'{map_json_path}' has no terrain block - nothing to generate.")
         return
 
     half_extents = float(map_def["map_half_extents"])
-    height_scale = float(terrain.get("height_scale", 20.0))
-    features = terrain["features"]
-
-    height, dim = build_heightfield(half_extents, features, resolution)
-    pixels = encode_heightmap(height, height_scale)
-
     map_id = os.path.splitext(os.path.basename(map_json_path))[0]
     out_dir = os.path.dirname(map_json_path)
-    height_path = os.path.join(out_dir, f"{map_id}_height.png")
-    surface_path = os.path.join(out_dir, f"{map_id}_surface.png")
+    # A map can want a heightmap, a surfacemap, or both independently
+    # (RTS_CORE_ROADMAP.md B7: open_plains wants ONLY a surfacemap - real
+    # elevation would contradict its own "no high ground" design) - each
+    # output is generated only if its map_def field is actually present,
+    # not gated on the other one existing.
+    dim = resolution or (int(round(half_extents * 2 * PIXELS_PER_UNIT)) + 1)
 
-    Image.fromarray(pixels, mode="RGBA").save(height_path)
-    print(f"Wrote {height_path} ({dim}x{dim})")
+    if terrain.get("features"):
+        height_scale = float(terrain.get("height_scale", 20.0))
+        height, dim = build_heightfield(half_extents, terrain["features"], resolution)
+        pixels = encode_heightmap(height, height_scale)
+        height_path = os.path.join(out_dir, f"{map_id}_height.png")
+        Image.fromarray(pixels, mode="RGBA").save(height_path)
+        print(f"Wrote {height_path} ({dim}x{dim})")
 
-    surface_zones = map_def.get("surface_zones", [])
-    indices = build_surfacemap(half_extents, surface_zones, dim)
-    # "P" mode with an explicit palette so the file is a real indexed PNG,
-    # not just a grayscale image that happens to hold small integers.
-    surf_img = Image.fromarray(indices, mode="P")
-    palette = []
-    for i in range(256):
-        palette.extend([i, i, i])  # runtime never reads pixel COLOR, only the index - grayscale ramp is just so it's inspectable in an image viewer
-    surf_img.putpalette(palette)
-    surf_img.save(surface_path)
-    print(f"Wrote {surface_path} ({dim}x{dim})")
+    if terrain.get("surfacemap"):
+        surface_zones = map_def.get("surface_zones", [])
+        indices = build_surfacemap(half_extents, surface_zones, dim)
+        # "P" mode with an explicit palette so the file is a real indexed
+        # PNG, not just a grayscale image that happens to hold small ints.
+        surf_img = Image.fromarray(indices, mode="P")
+        palette = []
+        for i in range(256):
+            palette.extend([i, i, i])  # runtime never reads pixel COLOR, only the index - grayscale ramp is just so it's inspectable in an image viewer
+        surf_img.putpalette(palette)
+        surface_path = os.path.join(out_dir, f"{map_id}_surface.png")
+        surf_img.save(surface_path)
+        print(f"Wrote {surface_path} ({dim}x{dim})")
 
 
 if __name__ == "__main__":

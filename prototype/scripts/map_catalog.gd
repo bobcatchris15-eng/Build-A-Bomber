@@ -209,7 +209,7 @@ const FIELD_SPEC: Dictionary = {
 	"surface_zones": {"type": "array", "required": false, "item": {
 		"center": {"type": "vector3", "required": true},
 		"half_extents": {"type": "vector2", "required": true},
-		"surface_type": {"type": "string", "required": true, "enum": ["marsh", "rocky", "snow_mud", "sand"]},
+		"surface_type": {"type": "string", "required": true, "enum": ["marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice"]},
 	}},
 	"bridges": {"type": "array", "required": false, "item": {
 		"center": {"type": "vector3", "required": true},

@@ -65,6 +65,11 @@ func _init():
 	_generate("shallow_water", _eval_shallow_water)
 	_generate("grassland", _eval_grassland)
 	_generate("blue_water", _eval_blue_water)
+	# RTS_CORE_ROADMAP.md B7: 3 new surface_zones types, matching
+	# module_catalog.gd's TERRAIN_SPEED_MULTIPLIERS additions.
+	_generate("gravel", _eval_gravel)
+	_generate("forest", _eval_forest)
+	_generate("ice", _eval_ice)
 	quit(0)
 
 # --- Periodic value noise (tiles seamlessly at `period` lattice cells) ---
@@ -205,6 +210,65 @@ static func _eval_sand(x: int, y: int) -> Dictionary:
 	color = color.lightened(grain * 0.04) if grain >= 0.0 else color.darkened(-grain * 0.04)
 	height += grain * 0.08
 	return {"color": color, "height": height, "roughness": 0.93} # raised from 0.88, see file header comment
+
+# RTS_CORE_ROADMAP.md B7: gravel - packed road-grade surface (the one
+# surface type that's a genuine speed BONUS, not a penalty - see
+# module_catalog.gd's TERRAIN_SPEED_MULTIPLIERS). Light warm grey, fine
+# grain plus sparse small darker pebbles - reads as "hard-packed and fast"
+# rather than the soft/organic look of sand or mud.
+static func _eval_gravel(x: int, y: int) -> Dictionary:
+	var seed = 9701
+	var base = Color(0.52, 0.5, 0.46)
+	var grain = _periodic_noise2d(float(x) / 5.0, float(y) / 5.0, TEX_SIZE / 5, seed) - 0.5
+	var color = base.lightened(grain * 0.12) if grain >= 0.0 else base.darkened(-grain * 0.12)
+	var height = grain * 0.3
+
+	var pebble_noise = _periodic_noise2d(float(x) / 9.0, float(y) / 9.0, TEX_SIZE / 9, seed + 1)
+	var pebble_mask = smoothstep(0.72, 0.86, pebble_noise)
+	if pebble_mask > 0.0:
+		color = color.darkened(pebble_mask * 0.35)
+		height -= pebble_mask * 0.5
+	return {"color": color, "height": height, "roughness": 0.8}
+
+# Forest floor: dark, dense, mottled green-brown - dappled canopy-shadow
+# blobs (soft, irregular, unlike rocky's hard-edged facets) standing in
+# for broken sunlight through tree cover, per this surface's "dense
+# vegetation" mechanical read (worst for wheels, best for legs).
+static func _eval_forest(x: int, y: int) -> Dictionary:
+	var seed = 9801
+	var base = Color(0.13, 0.17, 0.1)
+	var mottle = _periodic_noise2d(float(x) / 18.0, float(y) / 18.0, TEX_SIZE / 18, seed) - 0.5
+	var color = base.lightened(mottle * 0.2) if mottle >= 0.0 else base.darkened(-mottle * 0.2)
+	var height = mottle * 0.4
+
+	var canopy_noise = _periodic_noise2d(float(x) / 26.0, float(y) / 26.0, TEX_SIZE / 26, seed + 1)
+	var shadow_mask = smoothstep(0.45, 0.7, canopy_noise)
+	color = color.darkened(shadow_mask * 0.4)
+	height -= shadow_mask * 0.6
+
+	var grain = _periodic_noise2d(float(x) / 4.0, float(y) / 4.0, TEX_SIZE / 4, seed + 2) - 0.5
+	color = color.lightened(grain * 0.06) if grain >= 0.0 else color.darkened(-grain * 0.06)
+	return {"color": color, "height": height, "roughness": 0.92}
+
+# Ice: pale cool blue-white, low roughness (the one deliberately GLOSSY
+# ground-plane surface besides the wet-mud/puddle exceptions elsewhere in
+# this file - the sheen itself is what reads as "slippery, will cost you
+# traction"), with faint jagged crack lines instead of organic mottling.
+static func _eval_ice(x: int, y: int) -> Dictionary:
+	var seed = 9901
+	var base = Color(0.78, 0.86, 0.9)
+	var grain = _periodic_noise2d(float(x) / 30.0, float(y) / 30.0, TEX_SIZE / 30, seed) - 0.5
+	var color = base.lightened(grain * 0.06) if grain >= 0.0 else base.darkened(-grain * 0.06)
+	var height = grain * 0.3
+
+	# Sparse, thin crack lines: a domain-warped ridge (near-zero of a noise
+	# field), not a filled region like the other surfaces' masks.
+	var crack_noise = _periodic_noise2d(float(x) / 16.0, float(y) / 16.0, TEX_SIZE / 16, seed + 1)
+	var crack_mask = 1.0 - smoothstep(0.0, 0.04, abs(crack_noise - 0.5))
+	if crack_mask > 0.0:
+		color = color.darkened(crack_mask * 0.3)
+		height -= crack_mask * 0.4
+	return {"color": color, "height": height, "roughness": 0.15}
 
 # Shallow water: lighter, more saturated teal-blue than deep water, with
 # visible sandy-bed mottling baked directly into the albedo so the tile

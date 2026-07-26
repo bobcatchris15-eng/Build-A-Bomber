@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-25 — RTS_CORE_ROADMAP.md B7: terrain type differentiation (3 new surface types + real surfacemap raster)
+
+Expanded the surface-terrain roster from 4 types (marsh/rocky/snow_mud/sand, previously used by only one map) to 7, and migrated `open_plains` onto a real B4 surfacemap raster instead of live rect checks - "paint, not rects."
+
+**Shipped:**
+- 3 new surface types in `module_catalog.gd`'s `TERRAIN_SPEED_MULTIPLIERS`: `gravel` (the one surface that's a genuine speed BONUS across the board, matching OpenRA's Road-tile convention - not just "least penalized"), `forest` (worst for wheels, best for legs - dense vegetation), `ice` (uniquely penalizes every locomotor at least somewhat, since traction loss is a whole-vehicle problem; `screw_drive` suffers least since its auger doesn't rely on friction).
+- Matching procedural textures added to `tools/generate_terrain_textures.gd` (gravel: light packed-stone grain + pebble speckle; forest: dark mottled green with dappled canopy-shadow blobs; ice: pale glossy blue-white with thin crack lines - the one surface besides puddles/mud-ruts that's deliberately shiny, since the sheen itself reads as "slippery").
+- `open_plains.json` gained `terrain.surfacemap` and 6 new surface_zones (2 gravel, 2 forest, 2 ice, point-symmetric like the map's existing convention) - `get_surface_type_at()` now resolves through a real baked raster for this map instead of a live rect-overlap loop.
+- `build_terrain.py`'s `generate()` restructured so heightmap and surfacemap generation are independent (gated on `terrain.heightmap`/`terrain.surfacemap` each existing, not on `terrain.features`) - needed since `open_plains` wants only a surfacemap (real elevation would contradict its own "no high ground" design), unlike `highland_chokepoint`/`twin_summits` which want both.
+
+**Real bug caught mid-implementation:** `build_terrain.py`'s `build_surfacemap()` read a zone's `center[1]` (the Y component of a 3-element `[x,y,z]` world Vector3, always 0) instead of `center[2]` (Z) - silently painted every zone's Z-band around z=0 instead of its authored position. Invisible on `highland_chokepoint`/`twin_summits` (both have empty `surface_zones`), caught immediately once `open_plains`' real zones exercised the function for the first time - exactly why "generate real output and inspect it" beats trusting a function that happened to run without erroring.
+
+**Verified:**
+- Extended the existing terrain-multiplier test (`test_terrain_types_differentiate_locomotion`) with 3 new checks, all measured via real physics-tick movement: gravel gives wheels a measurable bonus over plain ground (not just "less of a penalty"), forest favors legs over wheels, ice penalizes every locomotor vs. plain ground with `screw_drive` measurably ahead of the other three.
+- New test `test_b7_open_plains_surfacemap_covers_all_7_surface_types()`: every authored zone center resolves to its own type through the real raster, all 7 types are represented, and open ground away from every zone still resolves to plain.
+- Full suite green.
+- Non-headless screenshot confirms the new zones render as distinct ground patches in a real match.
+
+---
+
 ## 2026-07-25 — RTS_CORE_ROADMAP.md B6: retire `elevation_zones`, migrate `highland_chokepoint`/`twin_summits` onto heightmaps
 
 The chunk where the terrain-quality goal Chris actually asked for (bigger, more interesting, less sparse maps) starts showing up in real gameplay maps, not just a test fixture. Only 2 of the 8 bundled maps ever used `elevation_zones` (`highland_chokepoint`'s single dual-ramp hill, `twin_summits`'s two separate hills) - both now use real `terrain.features` plateaus instead.

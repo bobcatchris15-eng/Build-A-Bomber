@@ -153,7 +153,7 @@ static func _decode_heightmap_pixel(color: Color) -> float:
 # Nearest-sample (not bilinear - a surface TYPE can't be interpolated)
 # palette index -> name. Must match build_terrain.py's SURFACE_PALETTE
 # order exactly.
-const SURFACE_PALETTE: Array = ["", "marsh", "rocky", "snow_mud", "sand"]
+const SURFACE_PALETTE: Array = ["", "marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice"]
 
 static func _sample_surfacemap(img: Image, half_extents: float, x: float, z: float) -> String:
 	var dim = img.get_width()
