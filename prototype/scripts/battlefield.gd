@@ -24,10 +24,10 @@ func _ready():
 	var reset_dummies_btn = get_node_or_null("UI/ResetDummiesButton")
 	if reset_dummies_btn:
 		reset_dummies_btn.pressed.connect(_on_reset_dummies_pressed)
-		
+
 	# Instantiate live tuning overlay
 	var tuning_panel_script = load("res://scripts/debug_tuning_panel.gd")
-	if tuning_panel_script:
+	if tuning_panel_script and OS.is_debug_build():
 		var tuning_panel = Control.new()
 		tuning_panel.set_script(tuning_panel_script)
 		tuning_panel.name = "DebugTuningPanel"

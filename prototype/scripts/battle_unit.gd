@@ -128,9 +128,11 @@ var attack_range: float = 12.0
 # units keep working; don't turn every harvester into an accidental
 # skirmisher).
 var _auto_engage_scan_timer: float = 0.0
+var _energy_share_scan_timer: float = 0.0
 var _idle_duration: float = 0.0
 const IDLE_BEFORE_AUTO_ENGAGE: float = 1.5
 const AUTO_ENGAGE_SCAN_INTERVAL: float = 0.5
+const ENERGY_SHARE_SCAN_INTERVAL: float = 0.5
 
 func _ready():
 	add_to_group("units")
@@ -1406,6 +1408,10 @@ func receive_energy_share(amount: float):
 # battles are modest-scale (tens of units), not thousands, so this is
 # cheap enough without needing a spatial partition.
 func _share_energy_with_allies(delta: float):
+	_energy_share_scan_timer -= delta
+	if _energy_share_scan_timer > 0.0:
+		return
+	_energy_share_scan_timer = ENERGY_SHARE_SCAN_INTERVAL
 	for u in get_tree().get_nodes_in_group("units"):
 		if u == self or not is_instance_valid(u): continue
 		if "is_dead" in u and u.is_dead: continue
@@ -1413,7 +1419,7 @@ func _share_energy_with_allies(delta: float):
 		if not (u.has_method("receive_energy_share") and "current_energy" in u and "max_energy" in u): continue
 		if u.current_energy >= u.max_energy: continue
 		if global_position.distance_to(u.global_position) <= LOGISTICS_SHARE_RADIUS:
-			u.receive_energy_share(LOGISTICS_SHARE_RATE * logistics_tank_strength * delta)
+			u.receive_energy_share(LOGISTICS_SHARE_RATE * logistics_tank_strength * ENERGY_SHARE_SCAN_INTERVAL)
 
 func _flash_shield():
 	var exp_mesh = MeshInstance3D.new()

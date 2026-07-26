@@ -29,6 +29,32 @@ var traverse_speed: float = 4.0
 var resting_transform: Transform3D
 var spin_up_timer: float = 0.0
 
+# PERFORMANCE_PLAN.md P1: _is_current_target_still_valid() used to call
+# _is_los_blocked_to() every single physics tick for every weapon on every
+# unit - each call walks both this weapon's and the target's ENTIRE node
+# tree to build a raycast exclude list, then fires up to two raycasts. That
+# was the dominant cost behind the "falls off a cliff past ~5-6 units"
+# report - O(units x weapons) tree-walks/raycasts every tick in steady
+# state. LOS geometry doesn't meaningfully change within ~150ms at RTS unit
+# speeds, so cache the result instead of re-querying every frame.
+var _los_cache_blocked: bool = false
+var _los_cache_target: Node3D = null
+var _los_cache_timer: float = 0.0
+const LOS_CACHE_TTL: float = 0.15
+
+# PERFORMANCE_PLAN.md P1a (throttling _find_nearest_target()'s full-roster
+# reacquisition scan) was attempted alongside the LOS cache above and
+# reverted: it caused a real regression under the full test suite's load
+# (test_target_dummies_actually_take_damage_in_test_range failed - 500 -> 500
+# - while passing clean in isolation, 500 -> 400), most likely a timing
+# interaction between the throttle window and real per-tick delta variance
+# under heavier engine load. The LOS cache above already addresses the
+# dominant cost (every weapon re-raycasting its CURRENT target every tick
+# regardless of whether anything changed); reacquisition only runs at all
+# for weapons with no target, a rarer case in a real battle. Left as a
+# follow-up chunk in PERFORMANCE_PLAN.md rather than shipping a
+# not-fully-understood risk in core combat-targeting code.
+
 # frame_built weapons (ModuleCatalog.get_traverse_limit_angle == 0.0 exactly -
 # the barrel is fixed to the hull, so the whole vehicle aims instead, see
 # battle_unit.gd's has_frame_built_weapon) still need a real, reachable
@@ -611,6 +637,7 @@ func _physics_process(delta):
 		return
 
 	time_since_last_shot += delta
+	_los_cache_timer -= delta
 	_recalculate_low_hp_dps_bonus()
 	_find_nearest_target()
 
@@ -752,9 +779,22 @@ func _is_current_target_still_valid(resting_forward: Vector3) -> bool:
 	# Stop clinging to something our own hull is standing in front of -
 	# otherwise the weapon tracks an unshootable target indefinitely instead
 	# of reacquiring one it can actually engage.
-	if _is_los_blocked_to(target):
+	if _is_los_blocked_cached(target):
 		return false
 	return true
+
+# PERFORMANCE_PLAN.md P1: cached wrapper around _is_los_blocked_to() for the
+# "is my CURRENT target still valid" fast path - see the _los_cache_* var
+# comments above. Reacquisition scans below call _is_los_blocked_to()
+# directly (uncached), since those check many different one-off candidates
+# rather than repeatedly re-checking the same target.
+func _is_los_blocked_cached(candidate: Node3D) -> bool:
+	if candidate == _los_cache_target and _los_cache_timer > 0.0:
+		return _los_cache_blocked
+	_los_cache_blocked = _is_los_blocked_to(candidate)
+	_los_cache_target = candidate
+	_los_cache_timer = LOS_CACHE_TTL
+	return _los_cache_blocked
 
 func _find_nearest_target():
 	var resting_forward = get_parent().global_transform.basis * resting_transform.basis * Vector3.FORWARD

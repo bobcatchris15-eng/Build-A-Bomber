@@ -601,6 +601,14 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			new_module.set_meta("scale_flip_x", true)
 			_apply_mirror_flip_to(new_module)
 
+		# PERFORMANCE_PLAN.md P4: only a battle instance's module needs this -
+		# the Design Lab keeps the per-part nodes as the live-editable
+		# representation (gizmo handles, tweak deformation target them
+		# directly). Must run AFTER rebuild_visual and the mirror-flip above,
+		# both of which need the real, un-merged sub-part nodes to work on.
+		if not is_designer:
+			VisualBuilder.bake_module_visual(new_module)
+
 	return hull
 
 const _MIRROR_X := Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1))
