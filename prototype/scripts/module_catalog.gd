@@ -1270,11 +1270,42 @@ static func get_thrust_coefficient(type_id: String) -> float:
 #                   still worst, treads/legs both handle it well, screw_
 #                   drive moderate (augers work best with real grip/water,
 #                   dry sand offers less than mud does).
+#
+# RTS_CORE_ROADMAP.md B7 additions - cross-checked against OpenRA's own
+# locomotor-speed convention as a balance reference (RA's Road tileset is
+# a genuine speed BONUS over Clear for every locomotor, not just "less of
+# a penalty"; Rough/dense terrain hits wheeled harder than tracked/legged):
+#   gravel        - the one surface that's a genuine BONUS across the
+#                   board (packed road-grade surface, matching RA's Road
+#                   tiles), not just "least-penalized" - gives every
+#                   surface_zones map a real reason to fight for specific
+#                   ground instead of only ever avoiding bad ground.
+#                   wheels benefit most (a wheel's ideal surface is
+#                   exactly this), legs least (already at their own
+#                   natural pace, gravel doesn't help bipedal footing
+#                   much).
+#   forest        - dense vegetation/undergrowth. Worst for wheels (can't
+#                   push through trunks/roots), treads do reasonably
+#                   (tracked vehicles historically log/clear terrain),
+#                   legs pick through best (weave around obstacles a
+#                   wheeled/tracked vehicle can't), screw_drive middling
+#                   (augers aren't built for this, but aren't blocked
+#                   either).
+#   ice           - uniformly slippery - the one surface type that
+#                   penalizes every locomotor at least somewhat (unlike
+#                   the others, which always have one clear "winner"),
+#                   since loss of traction is a whole-vehicle problem, not
+#                   a locomotor-specific one. screw_drive suffers least
+#                   (its auger bites into ice rather than relying on
+#                   friction the way wheels/treads/legs all do).
 const TERRAIN_SPEED_MULTIPLIERS = {
 	"marsh": {"wheels": 0.25, "tracked_treads": 0.45, "legs": 0.6, "screw_drive": 1.1},
 	"rocky": {"wheels": 0.35, "tracked_treads": 0.75, "legs": 1.1, "screw_drive": 0.5},
 	"snow_mud": {"wheels": 0.2, "tracked_treads": 0.8, "legs": 0.75, "screw_drive": 0.7},
 	"sand": {"wheels": 0.3, "tracked_treads": 0.85, "legs": 0.8, "screw_drive": 0.6},
+	"gravel": {"wheels": 1.25, "tracked_treads": 1.1, "legs": 1.02, "screw_drive": 1.0},
+	"forest": {"wheels": 0.3, "tracked_treads": 0.65, "legs": 0.95, "screw_drive": 0.55},
+	"ice": {"wheels": 0.45, "tracked_treads": 0.5, "legs": 0.4, "screw_drive": 0.75},
 }
 
 static func get_terrain_speed_multiplier(locomotion_type_id: String, surface_type: String) -> float:
