@@ -321,8 +321,20 @@ func _is_los_blocked_to(candidate: Node3D) -> bool:
 	# (layer 4) stay out of this query's mask - firing through/past other
 	# units is standard RTS behavior, blocking on it would deadlock any
 	# grouped formation.
+	#
+	# Excludes the whole VEHICLE ROOT's subtree, not just this weapon
+	# module's own - a mobile unit's own hull collider lives on layer 4
+	# (units), already outside this query's mask by construction, so using
+	# just `self` here never mattered for those. A defense building's own
+	# foundation collider (building.gd's CollisionShape3D) lives on layer 8
+	# ("Buildings"), which this query's mask DOES include - excluding only
+	# the weapon module's own (empty) subtree left every defense weapon's
+	# own foundation box eligible to block its own first raycast, so a
+	# defense's turret could permanently "see" its own base and treat every
+	# target as blocked. get_vehicle_root() covers both cases uniformly.
+	var vehicle_for_exclude = get_vehicle_root()
 	var own_colliders = []
-	_get_colliders_recursive(self, own_colliders)
+	_get_colliders_recursive(vehicle_for_exclude if vehicle_for_exclude else self, own_colliders)
 	_get_colliders_recursive(candidate, own_colliders)
 	query.exclude = own_colliders
 
