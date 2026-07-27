@@ -483,6 +483,16 @@ func _physics_process(delta):
 		var ready_info = production.pop_ready_structure(PLAYER_TEAM)
 		if not ready_info.is_empty():
 			_begin_placement(ready_info)
+	# RTS_CORE_ROADMAP.md 1.3: the AI's own structures queue (enemy_ai.gd's
+	# rebuild/power-plant logic) drip-feeds through the exact same
+	# production.enqueue_structure()/pop_ready_structure() pipeline as the
+	# player - but the AI has no ghost/UI to place through, so a ready job
+	# is placed immediately at a computed legal spot instead of waiting on
+	# _begin_placement()'s player-only flow.
+	if production:
+		var ai_ready = production.pop_ready_structure(ENEMY_TEAM)
+		if not ai_ready.is_empty():
+			_place_ai_structure(ENEMY_TEAM, ai_ready)
 	# RTS_CORE_ROADMAP.md C1: one-frame debounce - a building placed/
 	# destroyed this physics tick just sets the flag (possibly several
 	# times, e.g. AOE splash killing a cluster of buildings in one tick);
@@ -2136,11 +2146,15 @@ func _footprint_samples(center: Vector3, footprint: Vector3) -> Array:
 	return samples
 
 func _placement_validity(pos: Vector3) -> Dictionary:
+	return _placement_validity_for(PLAYER_TEAM, pos, _placing_footprint(), _placing_requires_buildable_area(), _placing_adjacent_m())
+
+# RTS_CORE_ROADMAP.md 1.3: the actual legality body, pulled out from behind
+# the player's `placing` ghost state so the enemy AI can ask the identical
+# question for its own team/kind (rebuilding a destroyed manufactory, siting
+# a power plant) without a ghost mesh or decals ever existing. `_placement_
+# validity()` above is now a thin PLAYER_TEAM-flavored wrapper over this.
+func _placement_validity_for(team: int, pos: Vector3, new_footprint: Vector3, requires_area: bool, placing_reach: float) -> Dictionary:
 	var half: float = current_map.get("map_half_extents", 80.0)
-	# Footprint of what's being placed - buildings occupy real space now
-	# (FABLE_REVIEW.md 3.3: the placement ray only ever hit the ground layer,
-	# so nothing stopped stacking a new building inside an existing one).
-	var new_footprint = _placing_footprint()
 
 	# RTS_CORE_ROADMAP.md C2: sample the WHOLE footprint, not just the
 	# center point - previously a large building's center could sit on
@@ -2168,25 +2182,23 @@ func _placement_validity(pos: Vector3) -> Dictionary:
 	# center. The reach is a property of WHATEVER'S BEING PLACED (OpenRA's
 	# per-building-type Adjacent rule) - a defense's own much longer leash
 	# (28m) is what lets it ring the outside of a base, not a bigger zone
-	# radiated by existing buildings. Only friendly buildings that GIVE
-	# buildable area count as anchors to measure against (a ring of
-	# defenses shouldn't let the base spiral outward indefinitely - a
-	# defense itself never anchors a further placement). Clear of the
-	# enemy's zone stays a plain center-to-center check - a denial radius,
+	# radiated by existing buildings. Only friendly (same-`team`) buildings
+	# that GIVE buildable area count as anchors to measure against (a ring
+	# of defenses shouldn't let the base spiral outward indefinitely - a
+	# defense itself never anchors a further placement). Clear of any OTHER
+	# team's zone stays a plain center-to-center check - a denial radius,
 	# not a buildable-area rule.
-	var requires_area = _placing_requires_buildable_area()
-	var placing_reach = _placing_adjacent_m()
 	var near_base = not requires_area
 	for b in get_tree().get_nodes_in_group("buildings"):
 		if not is_instance_valid(b) or b.is_dead: continue
-		# XZ footprint overlap against every existing building, either team -
+		# XZ footprint overlap against every existing building, any team -
 		# a small 0.5 clearance margin so buildings can't visually kiss.
 		var b_fp: Vector3 = b.footprint if "footprint" in b else Vector3(5, 3, 5)
 		var dx = abs(b.global_position.x - pos.x)
 		var dz = abs(b.global_position.z - pos.z)
 		if dx < (b_fp.x + new_footprint.x) / 2.0 + 0.5 and dz < (b_fp.z + new_footprint.z) / 2.0 + 0.5:
 			return {"valid": false, "reason": "Blocked by another building!"}
-		if b.team == PLAYER_TEAM:
+		if b.team == team:
 			if not near_base and "gives_buildable_area" in b and b.gives_buildable_area:
 				if _footprint_gap(b.global_position, b_fp, pos, new_footprint) <= placing_reach:
 					near_base = true
@@ -2256,6 +2268,74 @@ func _placing_footprint() -> Vector3:
 		var hull_data = ModuleCatalog.get_module_data(placing.blueprint.get("hull_type", "pillbox_foundation"))
 		return hull_data.size
 	return BuildingScript.PREFAB_STATS[placing.kind].size
+
+# RTS_CORE_ROADMAP.md 1.3: enemy_ai.gd never placed a building - the base
+# was pre-placed complete at match start and stayed that way, so a killed
+# manufactory was gone for the rest of the match and Phase C/D/E's placement
+# legality/adjacency/build-time work was entirely player-only. This finds a
+# legal spot for the AI's own structures queue to land on, searching an
+# expanding ring of candidate points around the team's HQ (or, failing that,
+# any live building of theirs) rather than anything scripted per-map - the
+# same _placement_validity_for() the player's own ghost placement uses, so
+# the AI is held to the identical rules (buildable-area adjacency, terrain,
+# resource-node exclusion) instead of a separate, looser one.
+const AI_BUILD_SEARCH_RADII: Array = [10.0, 16.0, 22.0, 30.0, 40.0, 55.0]
+const AI_BUILD_ANGLE_STEPS: int = 10
+
+func _find_ai_build_position(team: int, footprint: Vector3, requires_area: bool, adjacent_m: float) -> Vector3:
+	var anchor: Node = _get_slot(team).get("hq")
+	var anchor_pos: Vector3
+	if is_instance_valid(anchor):
+		anchor_pos = anchor.global_position
+	else:
+		var buildings = get_team_buildings(team)
+		if buildings.is_empty():
+			return Vector3.INF
+		anchor_pos = buildings[0].global_position
+	for radius in AI_BUILD_SEARCH_RADII:
+		for i in range(AI_BUILD_ANGLE_STEPS):
+			var angle = TAU * i / AI_BUILD_ANGLE_STEPS
+			var candidate = anchor_pos + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+			candidate.y = terrain_height_at(candidate)
+			if _placement_validity_for(team, candidate, footprint, requires_area, adjacent_m).valid:
+				return candidate
+	return Vector3.INF
+
+# Places a job popped off `team`'s own structures queue - the AI-side
+# analogue of _try_place_building(), minus the ghost/decal UI (nothing to
+# show, nobody watching) and _shove_blockers_clear() (that only ever shoves
+# the PLAYER's own units, by design - see its own comment; an AI structure
+# landing where an enemy unit stands would need a very different call, and
+# _find_ai_build_position()'s legality search already keeps it off any
+# building's footprint regardless).
+func _place_ai_structure(team: int, info: Dictionary) -> void:
+	var footprint: Vector3
+	var adjacent_m: float
+	var requires_area: bool
+	var faction: String = enemy_faction if team == ENEMY_TEAM else player_faction
+	if info.kind == "defense":
+		var hull_data = ModuleCatalog.get_module_data(info.blueprint.get("hull_type", "pillbox_foundation"))
+		footprint = hull_data.size
+		adjacent_m = BuildingScript.DEFENSE_ADJACENT_M
+		requires_area = true
+	else:
+		var stats = BuildingScript.PREFAB_STATS[info.kind]
+		footprint = stats.size
+		adjacent_m = stats.get("adjacent_m", BuildingScript.DEFAULT_ADJACENT_M)
+		requires_area = stats.get("requires_buildable_area", true)
+	var pos = _find_ai_build_position(team, footprint, requires_area, adjacent_m)
+	if pos == Vector3.INF:
+		# No legal spot found anywhere in the search ring - refund rather
+		# than silently eat the AI's own drip-fed cost for nothing.
+		add_resources(team, info.cost_metal, info.cost_crystal)
+		return
+	var b: StaticBody3D
+	if info.kind == "defense":
+		b = spawn_defense(info.blueprint, team, pos)
+	else:
+		b = _spawn_prefab(info.kind, team, pos, faction)
+		b.bp_manager = bp_manager
+	b.start_construction_animation()
 
 func _try_place_building(pos: Vector3):
 	if placing.is_empty(): return

@@ -393,31 +393,48 @@ overlay, a per-match summary of what was built and what killed what) and a
 tuning checklist keyed to the table above. What it cannot do is decide whether
 the game feels right. **Size:** a few evenings of play, then a tuning chunk.
 
-### 1.3 The enemy AI cannot use anything Phase C/D/E built
+### 1.3 The enemy AI cannot use anything Phase C/D/E built — items 1-2 ✅ DONE 2026-07-27
 
-[enemy_ai.gd](prototype/scripts/enemy_ai.gd) is **182 lines and places zero
-buildings.** Its whole loop is produce / ensure-harvester / launch-wave, plus a
-pity resource trickle. `enqueue_structure()` has exactly one caller in the
-codebase — [skirmish.gd:1966](prototype/scripts/skirmish.gd:1966), hardcoded to
-`PLAYER_TEAM`. The enemy base is pre-placed complete at match start and the AI
-never expands, never rebuilds a destroyed manufactory, and never places a defense.
+[enemy_ai.gd](prototype/scripts/enemy_ai.gd) was **182 lines and placed zero
+buildings.** Its whole loop was produce / ensure-harvester / launch-wave, plus a
+pity resource trickle. `enqueue_structure()` had exactly one caller in the
+codebase — `skirmish.gd`, hardcoded to `PLAYER_TEAM`. The enemy base was
+pre-placed complete at match start and the AI never expanded, never rebuilt a
+destroyed manufactory, and never placed a defense.
 
 So: placement legality (C2), buildable-area adjacency (C3), exits and rally
-points (C4), the structures production tier (D4), and low-power behavior (E1) are
-**all player-only**. Killing the enemy's heavy manufactory permanently removes
-heavy units from the match.
+points (C4), the structures production tier (D4), and low-power behavior (E1)
+were **all player-only**. Killing the enemy's heavy manufactory permanently
+removed heavy units from the match.
 
 **Recommendation, in increasing order of ambition:**
-1. Rebuild a destroyed manufactory (uses D4's structures queue + C2's legality).
-2. Place a `power_plant` when `is_low_power(team)` (uses E1).
+1. ✅ Rebuild a destroyed manufactory (uses D4's structures queue + C2's legality).
+2. ✅ Place a `power_plant` when `is_low_power(team)` (uses E1).
 3. Place defenses near the HQ under attack (uses C3's 28m defense adjacency).
 4. Expand toward an unclaimed resource cluster.
 
-Items 1–2 are the ones that make the base-building work mean something. This is
-also the natural home for `DECISIONS_NEEDED.md:89`'s standing note that the AI
-has never built a building, and `:940`'s consequence (all three manufactory tiers
-are pre-built because the AI couldn't be trusted to build them).
-**Size:** one session for 1–2, multi-session for 3–4.
+**Done (1-2).** `skirmish.gd`'s player-only `_placement_validity()` is now a
+thin `PLAYER_TEAM` wrapper over a team-generic `_placement_validity_for()` —
+the exact same footprint/terrain/adjacency rules, askable for any team. A new
+`_find_ai_build_position()` searches an expanding ring around a team's HQ for
+the first legal spot, and `_place_ai_structure()` places a job popped off that
+team's own structures queue (no ghost/UI, nothing to show). `enemy_ai.gd`
+gained an 8s-interval check: `_rebuild_lost_manufactories()` (any of
+light/medium/heavy missing and not already pending → queue a replacement) and
+`_build_power_plant_if_needed()` (`is_low_power(team)` and no power_plant
+pending → queue one) — both through the same `production.enqueue_structure()`
+the player's build bar already uses, no new production path. Killing the
+enemy's heavy manufactory now costs it heavy units only until the AI's own
+queue rebuilds one; a starved enemy base now answers its own brownout instead
+of just running its factories slower forever.
+
+Items 3-4 remain open — multi-session, and lower priority now that the AI
+actually maintains its own economy. This is also the natural home for
+`DECISIONS_NEEDED.md:89`'s standing note that the AI has never built a
+building, and `:940`'s consequence (all three manufactory tiers are pre-built
+because the AI couldn't be trusted to build them) — that note is now half-true:
+the AI can rebuild a lost tier, just doesn't grow beyond the starting three.
+**Size:** multi-session for 3–4.
 
 ### 1.4 Control groups and shift-select — *you cannot play an RTS without these* — ✅ DONE 2026-07-27
 
@@ -665,7 +682,7 @@ Suggest `docs/archive/` for Tier 4 and a one-line pointer from `README.md`.
 | **1.4** | Control groups + shift-select — ✅ DONE | 1 session | — | Playability blocker |
 | **1.5** | Gate debug HUD; wire `CursorManager` | small ×2 | — | Both nearly free |
 | **1.2** | Playtest + tune the 10 guessed number sets | evenings | 1.1, 1.4, 1.5 | **Chris only.** Nothing else is validated without it |
-| **1.3** | AI builds buildings | 1–multi | 1.1 | Makes all of Phase C/D/E two-sided |
+| **1.3** | AI builds buildings — items 1-2 ✅ done, 3-4 open | 1–multi | 1.1 | Makes all of Phase C/D/E two-sided |
 | **1.6** | E2 sell+repair, E3 tech greying (D4 ghost-cancel refund ✅ done) | 1 session | 1.3 | Closes `RTS_CORE_ROADMAP.md` |
 | **2.x** | A1 → A4 → B1 → C4 → A2 → B2 → G → A3 | varies | — | A1 alone changes how everything reads |
 | **3.3** | One perf measurement session, then P4d | 1 session | — | Plan says measure; measurement is stale |

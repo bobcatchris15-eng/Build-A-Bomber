@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-27 — UNIFIED_ROADMAP.md 1.3 (items 1-2): enemy AI places its first buildings
+
+The roadmap's own headline finding: `enemy_ai.gd` was 182 lines that never placed a building - the base was pre-placed complete at match start, so a killed manufactory was gone for the rest of the match and Phase C (placement legality/adjacency)/D (build-time)/E1 (power) were all player-only in practice. This lands the first two of the roadmap's four recommended AI-building items, in order: rebuild a destroyed manufactory, and place a `power_plant` when the team is low power.
+
+**Shipped:**
+- `skirmish.gd`'s `_placement_validity(pos)` (previously hardcoded to `PLAYER_TEAM` throughout - the near-base anchor check and the "too close to enemy territory" check) is now a thin wrapper over a new team-generic `_placement_validity_for(team, pos, footprint, requires_area, adjacent_m)`. Same rules (footprint lattice sampling, map bounds, terrain/slope, resource-node exclusion, footprint-to-footprint buildable-area adjacency), now askable for any team - the player's own ghost-placement flow is unchanged, just routed through the shared body instead of duplicating it.
+- New `_find_ai_build_position(team, footprint, requires_area, adjacent_m)`: searches an expanding ring (6 radii × 10 angles) around the team's HQ (or, failing that, any live building of theirs) and returns the first candidate that clears `_placement_validity_for()` - the AI is held to the exact same legality the player's ghost is, not a separate looser rule.
+- New `_place_ai_structure(team, info)`: the AI-side analogue of `_try_place_building()`, called from `_physics_process()` whenever `production.pop_ready_structure(ENEMY_TEAM)` reports a job done (mirroring the player's own poll, just without the ghost/decal UI - there's nothing to show and nobody watching). Refunds the cost if no legal spot is found anywhere in the search ring, rather than silently eating it.
+- `enemy_ai.gd` gains a `STRUCTURE_CHECK_INTERVAL` (8s) timer driving two new checks: `_rebuild_lost_manufactories()` (any of light/medium/heavy missing via `has_factory_of_tier()` and not already pending, queue a replacement) and `_build_power_plant_if_needed()` (`is_low_power(team)` and no power_plant already pending, queue one). Both go through the exact same `production.enqueue_structure()` the player's build bar and D4's drip-fed cost/pause-on-broke already use - no new production path. `_structure_pending(kind)` (checks both the live structures queue and any `build_incomplete` building of that kind already on the map) is what stops either check from re-queuing every 8 seconds while a rebuild is already in flight.
+
+**Real bug found writing the first test, not in the shipped code:** the initial rebuild test drove the AI/production/skirmish `_physics_process()` calls directly in a tight loop (matching this suite's own established pattern for timer-gated behavior) and then checked `has_factory_of_tier()` - which never returned true, even though the queue genuinely emptied (job completed and popped). Root cause: `start_construction_animation()`'s scale-up `Tween` only advances on real engine-processed frames (`Tween.finished`), which a manually-driven `_physics_process()` loop never produces - so `build_incomplete` never cleared, and `has_factory_of_tier()` correctly (by design, same gate D4 already relies on) excludes an incomplete building. Not a placement bug at all - fixed the test itself to check `get_team_buildings()` for a genuinely new `heavy_manufactory` instance directly (proving the AI placed a real replacement), rather than asserting on the cosmetic tween's completion.
+
+**New tests** (`run_tests.gd`): `test_1_3_ai_rebuilds_a_destroyed_manufactory` (destroys the enemy's live heavy manufactory, drives the AI/production loop, confirms a genuinely new instance gets placed - not the same building, not the player's); `test_1_3_ai_builds_a_power_plant_under_low_power` (tips the enemy team into Low/Critical the same way `test_e1_power_state_derives_normal_low_and_critical_thresholds` does - extra static buildings on that team only - then confirms a real power_plant count increase).
+
+**Not done this pass** (items 3-4 of the roadmap's own recommended order, both explicitly higher-ambition): placing defenses near an HQ under attack (needs C3's 28m defense adjacency, already generic-enough now to reuse), and expanding toward an unclaimed resource cluster.
+
+**Verified:** full suite 157/158 - the one failure is `test_target_dummies_actually_take_damage_in_test_range`, the pre-existing, deliberately-left-failing flake documented since 2026-07-21 and again in `UNIFIED_ROADMAP.md` 0.4 (unrelated to this change; both new tests pass in the same run and in isolated standalone reruns).
+
+---
+
 ## 2026-07-27 — UNIFIED_ROADMAP.md Phase 1: economy on, control groups + shift-select, D4 ghost-cancel refund
 
 Following the Phase 0 quality-gate work (`4cc6a22`), this session moves Phase 1 ("make it a game") forward on three fronts.

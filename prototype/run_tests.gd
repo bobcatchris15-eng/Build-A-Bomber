@@ -680,6 +680,14 @@ func _init():
 	if not await _run_suite(test_c1_shift_select_is_additive_instead_of_replacing, "test_c1_shift_select_is_additive_instead_of_replacing"):
 		success = false
 		_failed.append("test_c1_shift_select_is_additive_instead_of_replacing")
+	_total_suites += 1
+	if not await _run_suite(test_1_3_ai_rebuilds_a_destroyed_manufactory, "test_1_3_ai_rebuilds_a_destroyed_manufactory"):
+		success = false
+		_failed.append("test_1_3_ai_rebuilds_a_destroyed_manufactory")
+	_total_suites += 1
+	if not await _run_suite(test_1_3_ai_builds_a_power_plant_under_low_power, "test_1_3_ai_builds_a_power_plant_under_low_power"):
+		success = false
+		_failed.append("test_1_3_ai_builds_a_power_plant_under_low_power")
 
 	print("\n==============================================")
 	if success:
@@ -7509,6 +7517,144 @@ func test_e1_low_power_disables_defense_weapon_and_dims_its_mesh() -> bool:
 	free_all.call()
 	await process_frame
 	print("  [PASS] A defense's weapon is fully inert and its mesh visibly dims while its team is Low/Critical power, and both recover the instant power is restored - real per-tick gating, not just a flag.")
+	return true
+
+# RTS_CORE_ROADMAP.md 1.3, item 1: "the enemy AI has never placed a
+# building" - killing its heavy manufactory used to permanently remove heavy
+# units from the match, since enemy_ai.gd's whole loop was produce/ensure-
+# harvester/launch-wave and nothing ever rebuilt. Proves the real end-to-end
+# path: destroy it, let the AI's own structures queue (enemy_ai.gd's
+# _rebuild_lost_manufactories(), ticked every STRUCTURE_CHECK_INTERVAL) drip-
+# feed a real replacement through production.enqueue_structure(), then let
+# skirmish.gd's _place_ai_structure() site and spawn it for real - not a
+# mocked call, the actual production tick + placement-legality search.
+func test_1_3_ai_rebuilds_a_destroyed_manufactory() -> bool:
+	print("Running Test Suite: 1.3 - Enemy AI Rebuilds A Destroyed Manufactory (UNIFIED_ROADMAP.md 1.3)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var heavy = skirmish.get_team_factory(skirmish.ENEMY_TEAM, "heavy")
+	if not is_instance_valid(heavy):
+		print("  [FAIL] Test setup: enemy should start with a live heavy manufactory")
+		skirmish.queue_free()
+		return false
+	heavy.take_damage(999999.0, "explosive")
+	await process_frame
+	if skirmish.has_factory_of_tier(skirmish.ENEMY_TEAM, "heavy"):
+		print("  [FAIL] Test setup: destroying the heavy manufactory should leave the enemy without one")
+		skirmish.queue_free()
+		return false
+
+	# Give the AI resources to actually afford the rebuild (D1's drip-fed
+	# cost still needs something to draw from) and drive its own
+	# _physics_process() directly rather than waiting real wall-clock time -
+	# same pattern the rest of the suite uses for timer-gated AI behavior.
+	skirmish.add_resources(skirmish.ENEMY_TEAM, 5000, 5000)
+	var ai = skirmish.get_node("EnemyAI")
+	var new_heavy: Node = null
+	for i in range(3000):
+		ai._physics_process(1.0 / 60.0)
+		skirmish.production.tick(1.0 / 60.0)
+		skirmish._physics_process(1.0 / 60.0)
+		# Checked via get_team_buildings() directly, NOT has_factory_of_tier() -
+		# a freshly-placed building's start_construction_animation() tween
+		# only advances on real engine frames (Tween.finished), which manually
+		# driving _physics_process() in a tight loop never produces, so
+		# build_incomplete would never clear and has_factory_of_tier() (which
+		# correctly excludes incomplete buildings, same as D4's own gate)
+		# would never see it - the point here is proving the AI placed a real
+		# replacement at all, not proving the cosmetic tween finishes.
+		for b in skirmish.get_team_buildings(skirmish.ENEMY_TEAM):
+			if b.kind == "heavy_manufactory" and b != heavy:
+				new_heavy = b
+				break
+		if new_heavy:
+			break
+	if not new_heavy:
+		print("  [FAIL] The AI should have rebuilt its heavy manufactory within the simulated time budget")
+		skirmish.queue_free()
+		return false
+
+	if new_heavy == heavy:
+		print("  [FAIL] The rebuilt manufactory should be a genuinely NEW building, not the destroyed one")
+		skirmish.queue_free()
+		return false
+	if new_heavy.team != skirmish.ENEMY_TEAM:
+		print("  [FAIL] The rebuilt manufactory should belong to the ENEMY_TEAM")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] The AI's own structures queue rebuilds a destroyed manufactory through the real D4 production pipeline and a real legal placement.")
+	return true
+
+# RTS_CORE_ROADMAP.md 1.3, item 2: the AI never reacted to its own low-power
+# state (E1's power states/build-slowdown/defense-gating were all player-
+# only in practice, since nothing on the enemy side ever built a
+# power_plant). Forces Low power the same way test_e1_power_state_derives...
+# does (extra static buildings tip upkeep past capacity), then proves
+# enemy_ai.gd's _build_power_plant_if_needed() queues and places a real one.
+func test_1_3_ai_builds_a_power_plant_under_low_power() -> bool:
+	print("Running Test Suite: 1.3 - Enemy AI Builds A Power Plant When Its Own Team Is Low Power (UNIFIED_ROADMAP.md 1.3)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	skirmish._recalc_energy_economy()
+	if skirmish.is_low_power(skirmish.ENEMY_TEAM):
+		print("  [FAIL] Test setup: a fresh match's enemy team should start at Normal power")
+		skirmish.queue_free()
+		return false
+
+	# Same trick as E1's own threshold test - extra static buildings on the
+	# ENEMY team push its upkeep past capacity without touching the player.
+	var extras: Array = []
+	for i in range(6):
+		extras.append(skirmish._spawn_prefab("light_manufactory", skirmish.ENEMY_TEAM, skirmish.enemy_hq.global_position + Vector3(-30, 0, 6.0 * i), skirmish.enemy_faction))
+	await process_frame
+	skirmish._recalc_energy_economy()
+	if not skirmish.is_low_power(skirmish.ENEMY_TEAM):
+		print("  [FAIL] Test setup: 6 extra static buildings should have tipped the enemy team into Low/Critical power")
+		for b in extras: b.queue_free()
+		skirmish.queue_free()
+		return false
+
+	skirmish.add_resources(skirmish.ENEMY_TEAM, 5000, 5000)
+	var ai = skirmish.get_node("EnemyAI")
+	var built = false
+	var power_plant_count_before = 0
+	for b in skirmish.get_team_buildings(skirmish.ENEMY_TEAM):
+		if b.kind == "power_plant":
+			power_plant_count_before += 1
+	for i in range(3000):
+		ai._physics_process(1.0 / 60.0)
+		skirmish.production.tick(1.0 / 60.0)
+		skirmish._physics_process(1.0 / 60.0)
+		var count = 0
+		for b in skirmish.get_team_buildings(skirmish.ENEMY_TEAM):
+			if b.kind == "power_plant":
+				count += 1
+		if count > power_plant_count_before:
+			built = true
+			break
+	if not built:
+		print("  [FAIL] The AI should have built a power_plant to answer its own Low power state within the simulated time budget")
+		for b in extras: b.queue_free()
+		skirmish.queue_free()
+		return false
+
+	for b in extras: b.queue_free()
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] The AI queues and places a real power_plant through the same E1 power-state check the HUD itself uses, once its own team is Low/Critical.")
 	return true
 
 # Reusable per-map smoke test (per Chris's one-at-a-time verification

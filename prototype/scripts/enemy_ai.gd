@@ -10,6 +10,7 @@ var team: int = 1
 var produce_timer: float = 0.0
 var wave_timer: float = 0.0
 var harvester_check_timer: float = 0.0
+var structure_check_timer: float = 0.0
 var roster_index: int = 0
 var wave_number: int = 0
 
@@ -18,6 +19,8 @@ const FIRST_WAVE_DELAY: float = 60.0
 const WAVE_INTERVAL: float = 55.0
 const PITY_METAL: int = 10
 const PITY_CRYSTAL: int = 3
+const STRUCTURE_CHECK_INTERVAL: float = 8.0
+const MANUFACTORY_TIERS: Array = ["light", "medium", "heavy"]
 
 # Configurable enemy/team count (pre-match settings ask) was scoped down to
 # AI difficulty instead - see DECISIONS_NEEDED.md. Scales the same timers/
@@ -50,6 +53,7 @@ func _physics_process(delta):
 	produce_timer += delta
 	wave_timer += delta
 	harvester_check_timer += delta
+	structure_check_timer += delta
 
 	if produce_timer >= produce_interval:
 		produce_timer = 0.0
@@ -65,7 +69,13 @@ func _physics_process(delta):
 		# Small pity trickle so the AI never fully stalls
 		skirmish.add_resources(team, pity_metal, pity_crystal)
 
+	if structure_check_timer >= STRUCTURE_CHECK_INTERVAL:
+		structure_check_timer = 0.0
+		_rebuild_lost_manufactories()
+		_build_power_plant_if_needed()
+
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const BuildingScript = preload("res://scripts/building.gd")
 
 func _combat_roster() -> Array:
 	var list = []
@@ -170,6 +180,43 @@ func _ensure_harvester():
 	if harv_bp.is_empty(): return
 	var cost = skirmish.blueprint_cost(harv_bp)
 	skirmish.production.enqueue(team, harv_bp, skirmish.enemy_faction, cost.x, cost.y)
+
+# RTS_CORE_ROADMAP.md 1.3, items 1-2: "the enemy AI has never placed a
+# building" - the base was pre-placed complete at match start and the AI
+# never rebuilt a destroyed manufactory or reacted to its own low-power
+# state. Both queue through the exact same production.enqueue_structure()
+# the player's build bar calls (D4's drip-fed cost, C2's legality) - the
+# only AI-specific part is _skip-if-already-pending, since a rebuild takes
+# real build time and skirmish.gd's has_factory_of_tier()/get_team_factory()
+# both correctly exclude a still-under-construction (build_incomplete)
+# manufactory, which would otherwise look "missing" and re-queue every
+# check forever.
+func _structure_pending(kind: String) -> bool:
+	for job in skirmish.production.get_queue(team, "structures"):
+		if job.info.kind == kind:
+			return true
+	for b in skirmish.get_team_buildings(team):
+		if b.kind == kind and b.build_incomplete:
+			return true
+	return false
+
+func _rebuild_lost_manufactories() -> void:
+	for tier in MANUFACTORY_TIERS:
+		if skirmish.has_factory_of_tier(team, tier):
+			continue
+		var kind = tier + "_manufactory"
+		if _structure_pending(kind):
+			continue
+		var stats = BuildingScript.PREFAB_STATS[kind]
+		skirmish.production.enqueue_structure(team, {"kind": kind, "cost_metal": stats.cost_metal, "cost_crystal": stats.cost_crystal})
+
+func _build_power_plant_if_needed() -> void:
+	if not skirmish.is_low_power(team):
+		return
+	if _structure_pending("power_plant"):
+		return
+	var stats = BuildingScript.PREFAB_STATS["power_plant"]
+	skirmish.production.enqueue_structure(team, {"kind": "power_plant", "cost_metal": stats.cost_metal, "cost_crystal": stats.cost_crystal})
 
 func _launch_wave():
 	wave_number += 1
