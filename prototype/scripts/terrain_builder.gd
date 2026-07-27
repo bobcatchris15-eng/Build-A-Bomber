@@ -119,7 +119,13 @@ static func _get_heightmap_image(map_def: Dictionary) -> Image:
 		return null
 	if _heightmap_cache.has(path):
 		return _heightmap_cache[path]
-	var img = Image.load_from_file(path)
+	# load(), not Image.load_from_file() - the latter reads the raw PNG off
+	# disk directly, which only exists in a dev checkout. In an exported
+	# build only the imported resource ships in the .pck, so load_from_file()
+	# silently returns null there (every heightmap/surfacemap .import sidecar
+	# is importer="image"/type="Image" specifically so this load() resolves
+	# to a real Image in both dev and export, not a CompressedTexture2D).
+	var img = load(path) as Image
 	_heightmap_cache[path] = img # caches the null on failure too - avoids re-attempting a broken path every single tick
 	return img
 
@@ -130,7 +136,7 @@ static func _get_surfacemap_image(map_def: Dictionary) -> Image:
 		return null
 	if _surfacemap_cache.has(path):
 		return _surfacemap_cache[path]
-	var img = Image.load_from_file(path)
+	var img = load(path) as Image
 	_surfacemap_cache[path] = img
 	return img
 
