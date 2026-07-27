@@ -1,0 +1,6 @@
+# Godot regenerates .import sidecars with LF line endings every reimport
+# regardless of platform. Without this, core.autocrlf=true on Windows keeps
+# flipping them to CRLF on checkout, so every regenerated file shows as
+# modified with a 0-line diff (pure line-ending churn, no real change) -
+# see UNIFIED_ROADMAP.md 0.7/0.8.
+*.import text eol=lf
