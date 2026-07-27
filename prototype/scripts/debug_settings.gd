@@ -12,11 +12,14 @@ extends Node
 # since autoloads live under /root for the whole process lifetime, so a
 # toggle flipped mid-match survives a restart.
 
-# Chris is still actively developing against the always-solvent sandbox
-# economy - default stays TRUE per RTS_CORE_ROADMAP.md's explicit "do NOT
-# flip the default." Only becomes a real test of drip-feed/refund economy
-# (Phase D1) when a test deliberately sets this false for its own run.
-var infinite_player_resources: bool = true
+# Flipped to false (UNIFIED_ROADMAP.md Phase 1.1): with this on by default,
+# every piece of Phase D (drip-fed cost, pause-on-broke, exact-progress
+# refunds, multi-factory speed bonus, low-power build slowdown) was dormant
+# in normal play - the whole economy only ever ran under an explicit test
+# override. Still a real runtime toggle, still surfaced in the Debug HUD
+# panel (skirmish.gd's Debug button) so it can be flipped back on for
+# ad-hoc testing without a source edit.
+var infinite_player_resources: bool = false
 
 var reveal_all_fog: bool = false
 var instant_build: bool = false

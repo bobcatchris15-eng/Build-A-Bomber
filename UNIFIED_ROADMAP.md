@@ -345,23 +345,30 @@ output on a sampled pixel grid across all 9 files, for every file including the
 Phases C, D, and E of `RTS_CORE_ROADMAP.md` built base building, production
 depth, and power states — and almost none of it is reachable in normal play.*
 
-### 1.1 Turn the economy on — *one line, largest single gameplay change available*
+### 1.1 Turn the economy on — *one line, largest single gameplay change available* — ✅ DONE 2026-07-27
 
-[debug_settings.gd:19](prototype/scripts/debug_settings.gd:19) defaults
+[debug_settings.gd:19](prototype/scripts/debug_settings.gd:19) defaulted
 `infinite_player_resources = true`. Every piece of Phase D — drip-fed cost,
 pause-on-broke, exact-progress refunds, `stalled` job state, the multi-factory
-speed bonus, the low-power build slowdown — is only exercised when a test
-explicitly turns the flag off. **In normal play the entire economy is bypassed.**
+speed bonus, the low-power build slowdown — was only exercised when a test
+explicitly turned the flag off. **In normal play the entire economy was bypassed.**
 
 `RTS_CORE_ROADMAP.md:155` made this decision deliberately ("stays ON by default —
 the game is still heavily in development") and A2 correctly turned it into a
-runtime toggle. That was the right call *before* D1–D4 and E1 existed. It isn't
-anymore: the flag now hides a week of shipped work from the person who needs to
+runtime toggle. That was the right call *before* D1–D4 and E1 existed. It wasn't
+anymore: the flag was hiding a week of shipped work from the person who needs to
 feel it.
 
-**Recommendation:** flip the default to `false`, keep the toggle. Expect this to
-surface real balance problems — that is the point, and 1.2 is where they get
-fixed. **Size:** one line + a play session to see what breaks.
+**Done.** Default flipped to `false`; the runtime toggle (Debug HUD checkbox)
+is untouched, so infinite resources are still one click away for ad-hoc
+testing. **Surfaced a real regression as predicted:**
+`test_match_config_overrides_apply_to_skirmish` had been silently relying on
+the old ambient default for its PLAYER_TEAM assertion instead of setting the
+flag explicitly — fixed by having the test force the flag on for its own
+duration (save/restore), so it now proves the override logic itself rather
+than depending on whatever the flag defaults to. 1.2 (the actual playtest)
+is what surfaces the deeper balance problems this was hiding — not done this
+pass, per its own note below (Chris's job).
 
 ### 1.2 An actual playtest pass — *Chris's job, not an agent's*
 
@@ -412,26 +419,40 @@ has never built a building, and `:940`'s consequence (all three manufactory tier
 are pre-built because the AI couldn't be trusted to build them).
 **Size:** one session for 1–2, multi-session for 3–4.
 
-### 1.4 Control groups and shift-select — *you cannot play an RTS without these*
+### 1.4 Control groups and shift-select — *you cannot play an RTS without these* — ✅ DONE 2026-07-27
 
 `VISUAL_AND_UX_POLISH_PLAN.md` C1. `skirmish.gd`'s `_set_selection()` always
-replaces the selection wholesale; there is no shift/ctrl modifier handling
-anywhere in the file's input code. **Size:** one session. Promote this above the
-rest of that doc — it is a playability blocker, not polish.
+replaced the selection wholesale; there was no shift/ctrl modifier handling
+anywhere in the file's input code.
 
-### 1.5 Stop shipping the dev harness — *two small chunks, both about feeling finished*
+**Done.** `control_groups: Dictionary` keyed 1-9: Ctrl+1-9 assigns the current
+selection (overwrite, not additive); 1-9 recalls it, filtering dead/freed
+members from both the live selection and the stored group at read time;
+double-tapping the same digit within 400ms recentres the camera on the
+group's average position (OpenRA/RA2 convention).
+`_select_at_point()`/`_select_in_rect()` gained an `additive` bool wired to
+`event.shift_pressed`: shift-click adds a unit or toggles it off if already
+selected, shift-drag unions with the existing selection, and a shift-click
+that hits nothing leaves the selection alone. Three new tests in
+`run_tests.gd` cover both paths directly (no synthetic `InputEvent`
+injection). Full suite green, 156/156.
+
+### 1.5 Stop shipping the dev harness — *one small chunk; the other half was already done*
 
 - **C2:** `skirmish.gd:1235-1296` puts an ungated Debug button in the live HUD,
   next to Menu, with checkboxes for infinite resources / reveal fog / instant
   build. `battlefield.gd:28-34` does the same in the Test Range. Gate both behind
-  `OS.is_debug_build()`.
-- **C3:** `cursor_manager.gd` is a **fully built autoload with 7 real cursor
-  assets that is never called** from `skirmish.gd`, `battlefield.gd`, or
-  `battle_unit.gd`. The order-resolution logic that would drive it already exists
-  at `skirmish.gd:1595-1631`. This is "call an existing function from another
-  existing function."
+  `OS.is_debug_build()`. **Deliberately not done this pass** — Chris asked to
+  keep the debug menu available while Phase 1 lands, for testing spawning and
+  combat. Revisit once that testing is done.
+- **C3, ✅ already done — the original survey was wrong.** `cursor_manager.gd`
+  is fully wired: `skirmish.gd:2284` calls `_update_hover_cursor()` on every
+  `InputEventMouseMotion`, which itself (`skirmish.gd:2362-2390`) calls
+  `cm.set_cursor(...)` with real Build/Move/Attack/Harvest/Invalid/Default
+  logic driven by the same raycast the order-resolution code uses. Confirmed
+  by direct grep, not by trusting the earlier finding.
 
-**Size:** small + afternoon.
+**Size:** small (C2 only, deferred).
 
 ### 1.6 Close out `RTS_CORE_ROADMAP.md` Phase E
 
@@ -445,10 +466,15 @@ The roadmap's own "next up," and the only two chunks left in it:
   your queue" feel fair rather than silently broken — and it pairs directly with
   1.3, since an AI that rebuilds factories makes the greying meaningful.
 
-Also worth folding in here: the **D4 gap the roadmap flagged itself**
-(`RTS_CORE_ROADMAP.md:19`) — cancelling a queued building's ghost placement
-neither refunds it nor lets you re-trigger placement; the cost stays spent and the
-building is lost. Cheap to fix, actively annoying once 1.1 makes cost real.
+The **D4 gap the roadmap flagged itself** (`RTS_CORE_ROADMAP.md:19`) —
+cancelling a queued building's ghost placement neither refunded it nor let
+you re-trigger placement, so the cost stayed spent and the building was just
+lost — **✅ DONE 2026-07-27**: `_abandon_placement()` refunds the exact cost
+paid on both abandon paths (Escape, right-click-while-placing); a successful
+placement still doesn't refund (verified by a new test). Re-triggering
+placement without a full re-queue remains unbuilt — not in this gap's
+original scope, and lower priority now that abandoning at least isn't a pure
+loss.
 
 ---
 
@@ -635,12 +661,12 @@ Suggest `docs/archive/` for Tier 4 and a one-line pointer from `README.md`.
 | **0.6** | Delete 4 broken test files, add real ones | afternoon | 0.1 | They landed broken and stayed broken |
 | **0.7** | Heightmaps → `Image` import; verify by real export | afternoon | — | Game cannot currently ship with working terrain |
 | **0.8** | Repo hygiene (.import, root cruft, scratch) | afternoon | — | Cheap; 120 phantom-modified files hide real work |
-| **1.1** | Economy on by default | 1 line + play | 0.* | Unlocks a week of dormant Phase D work |
-| **1.4** | Control groups + shift-select | 1 session | — | Playability blocker |
+| **1.1** | Economy on by default — ✅ DONE | 1 line + play | 0.* | Unlocks a week of dormant Phase D work |
+| **1.4** | Control groups + shift-select — ✅ DONE | 1 session | — | Playability blocker |
 | **1.5** | Gate debug HUD; wire `CursorManager` | small ×2 | — | Both nearly free |
 | **1.2** | Playtest + tune the 10 guessed number sets | evenings | 1.1, 1.4, 1.5 | **Chris only.** Nothing else is validated without it |
 | **1.3** | AI builds buildings | 1–multi | 1.1 | Makes all of Phase C/D/E two-sided |
-| **1.6** | E2 sell+repair, E3 tech greying, D4 ghost-cancel refund | 1 session | 1.3 | Closes `RTS_CORE_ROADMAP.md` |
+| **1.6** | E2 sell+repair, E3 tech greying (D4 ghost-cancel refund ✅ done) | 1 session | 1.3 | Closes `RTS_CORE_ROADMAP.md` |
 | **2.x** | A1 → A4 → B1 → C4 → A2 → B2 → G → A3 | varies | — | A1 alone changes how everything reads |
 | **3.3** | One perf measurement session, then P4d | 1 session | — | Plan says measure; measurement is stale |
 | **3.1** | Re-audit + rewrite `HULL_BUILDER_PLAN.md`, then build | multi | 0.1 | Plan is unusable as written |

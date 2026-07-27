@@ -437,6 +437,10 @@ func _init():
 		success = false
 		_failed.append("test_d4_clicking_a_structure_queues_it_instead_of_placing_immediately")
 	_total_suites += 1
+	if not await _run_suite(test_d4_abandoning_ghost_placement_refunds_but_successful_placement_does_not, "test_d4_abandoning_ghost_placement_refunds_but_successful_placement_does_not"):
+		success = false
+		_failed.append("test_d4_abandoning_ghost_placement_refunds_but_successful_placement_does_not")
+	_total_suites += 1
 	if not await _run_suite(test_d4_freshly_placed_building_is_build_incomplete_until_its_grace_period_clears, "test_d4_freshly_placed_building_is_build_incomplete_until_its_grace_period_clears"):
 		success = false
 		_failed.append("test_d4_freshly_placed_building_is_build_incomplete_until_its_grace_period_clears")
@@ -668,6 +672,14 @@ func _init():
 	if not await _run_suite(test_every_scene_script_parses_cleanly, "test_every_scene_script_parses_cleanly"):
 		success = false
 		_failed.append("test_every_scene_script_parses_cleanly")
+	_total_suites += 1
+	if not await _run_suite(test_c1_control_groups_assign_recall_and_double_tap_recenters_camera, "test_c1_control_groups_assign_recall_and_double_tap_recenters_camera"):
+		success = false
+		_failed.append("test_c1_control_groups_assign_recall_and_double_tap_recenters_camera")
+	_total_suites += 1
+	if not await _run_suite(test_c1_shift_select_is_additive_instead_of_replacing, "test_c1_shift_select_is_additive_instead_of_replacing"):
+		success = false
+		_failed.append("test_c1_shift_select_is_additive_instead_of_replacing")
 
 	print("\n==============================================")
 	if success:
@@ -3683,6 +3695,17 @@ func test_match_config_overrides_apply_to_skirmish() -> bool:
 		"starting_crystal": match_config.starting_crystal,
 	}
 
+	# This test's PLAYER_TEAM assertion below specifically verifies the
+	# infinite-resources cheat's override behavior, which now defaults OFF
+	# (UNIFIED_ROADMAP.md Phase 1.1) - force it on for this test rather than
+	# depending on the ambient default, so the test proves the override logic
+	# itself instead of just whatever DebugSettings.infinite_player_resources
+	# happens to default to.
+	var debug_settings = root.get_node_or_null("DebugSettings")
+	var saved_infinite_resources = debug_settings.infinite_player_resources if debug_settings else null
+	if debug_settings:
+		debug_settings.infinite_player_resources = true
+
 	# A deterministic test blueprint (independent of whatever the real
 	# %APPDATA% user:// blueprint folder happens to contain) so the
 	# blueprint-import override can be proven regardless of environment.
@@ -3754,6 +3777,8 @@ func test_match_config_overrides_apply_to_skirmish() -> bool:
 	match_config.ai_difficulty = saved.ai_difficulty
 	match_config.starting_metal = saved.starting_metal
 	match_config.starting_crystal = saved.starting_crystal
+	if debug_settings:
+		debug_settings.infinite_player_resources = saved_infinite_resources
 
 	if ok:
 		print("  [PASS] Player/enemy faction, blueprint-library import, starting resources, and AI difficulty overrides from MatchConfig all flow into a real Skirmish instance.")
@@ -7014,6 +7039,77 @@ func test_d4_clicking_a_structure_queues_it_instead_of_placing_immediately() -> 
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Clicking a structure queues a real drip-fed build; ghost placement only begins once production.pop_ready_structure() confirms it's actually done.")
+	return true
+
+func test_d4_abandoning_ghost_placement_refunds_but_successful_placement_does_not() -> bool:
+	print("Running Test Suite: D4 - Abandoning A Structure's Ghost Placement Refunds The Fully-Paid Cost; A Successful Placement Does Not (RTS_CORE_ROADMAP.md D4 gap)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# --- Abandon path: Escape (or right-click) should refund the full cost ---
+	skirmish._queue_structure_build({"kind": "power_plant", "cost_metal": 180, "cost_crystal": 40})
+	var q = skirmish.production.get_queue(skirmish.PLAYER_TEAM, "structures")
+	for i in range(2000):
+		skirmish.production.tick(1.0 / 60.0)
+		if not q.is_empty() and q[0].time_left <= 0.0:
+			break
+	skirmish._physics_process(1.0 / 60.0) # pops the ready job, starts ghost placement
+	if skirmish.placing.get("kind", "") != "power_plant":
+		print("  [FAIL] Test setup: ghost placement should have started for the completed power_plant build, placing=", skirmish.placing)
+		skirmish.queue_free()
+		return false
+
+	var metal_before_abandon = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	var crystal_before_abandon = skirmish.economy[skirmish.PLAYER_TEAM].crystal
+	skirmish._abandon_placement()
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != metal_before_abandon + 180:
+		print("  [FAIL] Abandoning the ghost should refund the full 180 metal actually paid, got ", skirmish.economy[skirmish.PLAYER_TEAM].metal - metal_before_abandon)
+		skirmish.queue_free()
+		return false
+	if skirmish.economy[skirmish.PLAYER_TEAM].crystal != crystal_before_abandon + 40:
+		print("  [FAIL] Abandoning the ghost should refund the full 40 crystal actually paid, got ", skirmish.economy[skirmish.PLAYER_TEAM].crystal - crystal_before_abandon)
+		skirmish.queue_free()
+		return false
+	if not skirmish.placing.is_empty():
+		print("  [FAIL] placing should be cleared after abandoning.")
+		skirmish.queue_free()
+		return false
+
+	# --- Success path: an actual placement must NOT also refund ---
+	skirmish._queue_structure_build({"kind": "power_plant", "cost_metal": 180, "cost_crystal": 40})
+	q = skirmish.production.get_queue(skirmish.PLAYER_TEAM, "structures")
+	for i in range(2000):
+		skirmish.production.tick(1.0 / 60.0)
+		if not q.is_empty() and q[0].time_left <= 0.0:
+			break
+	skirmish._physics_process(1.0 / 60.0)
+	if skirmish.placing.get("kind", "") != "power_plant":
+		print("  [FAIL] Test setup: second ghost placement should have started, placing=", skirmish.placing)
+		skirmish.queue_free()
+		return false
+
+	var metal_before_place = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	var crystal_before_place = skirmish.economy[skirmish.PLAYER_TEAM].crystal
+	# Same offset the D4 build-incomplete test above already verified is a
+	# clear, in-adjacency-range spot next to the starting light_manufactory.
+	var place_pos = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light").global_position + Vector3(0, 0, 14)
+	skirmish._try_place_building(place_pos)
+	if not skirmish.placing.is_empty():
+		print("  [FAIL] Test setup: placement should have succeeded (placing should be cleared), placing=", skirmish.placing)
+		skirmish.queue_free()
+		return false
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != metal_before_place or skirmish.economy[skirmish.PLAYER_TEAM].crystal != crystal_before_place:
+		print("  [FAIL] A SUCCESSFUL placement must not also refund the cost - metal ", metal_before_place, " -> ", skirmish.economy[skirmish.PLAYER_TEAM].metal, ", crystal ", crystal_before_place, " -> ", skirmish.economy[skirmish.PLAYER_TEAM].crystal)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Abandoning a structure's ghost placement refunds the full amount already drawn; a successful placement leaves the spend alone.")
 	return true
 
 func test_d4_freshly_placed_building_is_build_incomplete_until_its_grace_period_clears() -> bool:
@@ -10798,3 +10894,139 @@ func test_every_scene_script_parses_cleanly() -> bool:
 	if all_ok:
 		print("  [PASS] All %d scene-attached scripts (across every .tscn under res://scenes) parse cleanly." % script_paths.size())
 	return all_ok
+
+func test_c1_control_groups_assign_recall_and_double_tap_recenters_camera() -> bool:
+	print("Running Test Suite: C1 - Ctrl+1-9 Assigns A Control Group, 1-9 Recalls It And Filters Dead Members, Double-Tap Recentres The Camera (VISUAL_AND_UX_POLISH_PLAN.md C1)...")
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull", "faction": "technocrats",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "wheels", "settings": {}},
+		"modules": [
+			{"type_id": "wheels", "name": "Wheels", "position": {"x": 0.0, "y": -1.0, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var unit_a = skirmish.spawn_unit(bp, skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(20, 0, 0))
+	var unit_b = skirmish.spawn_unit(bp, skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(30, 0, 0))
+	await process_frame
+
+	var free_all = func():
+		if is_instance_valid(unit_a): unit_a.queue_free()
+		if is_instance_valid(unit_b): unit_b.queue_free()
+		skirmish.queue_free()
+
+	# --- Assign: Ctrl+1 with both units selected should store both ---
+	skirmish._set_selection([unit_a, unit_b])
+	skirmish._assign_control_group(1)
+	if not skirmish.control_groups.has(1) or skirmish.control_groups[1].size() != 2:
+		print("  [FAIL] Assigning group 1 with 2 units selected should store both, got ", skirmish.control_groups.get(1))
+		free_all.call()
+		return false
+
+	# --- Recall: clear selection, then 1 should restore both stored units ---
+	skirmish._set_selection([])
+	skirmish._recall_control_group(1)
+	if skirmish.selected.size() != 2 or not skirmish.selected.has(unit_a) or not skirmish.selected.has(unit_b):
+		print("  [FAIL] Recalling group 1 should reselect both stored units, got ", skirmish.selected)
+		free_all.call()
+		return false
+
+	# --- Dead-member filtering: free one, recall should surface only the survivor and prune the group itself ---
+	unit_b.queue_free()
+	await process_frame
+	skirmish._set_selection([])
+	skirmish._recall_control_group(1)
+	if skirmish.selected.size() != 1 or not skirmish.selected.has(unit_a):
+		print("  [FAIL] Recalling a group with a freed member should filter it out and keep the survivor, got ", skirmish.selected)
+		free_all.call()
+		return false
+	if skirmish.control_groups[1].size() != 1:
+		print("  [FAIL] The freed member should also be pruned from control_groups[1] itself, not just the live selection, got ", skirmish.control_groups[1])
+		free_all.call()
+		return false
+
+	# --- Double-tap recentres the camera on the group's average position ---
+	skirmish.camera.global_position = Vector3(999.0, skirmish.camera.global_position.y, 999.0)
+	skirmish._last_group_recall_num = 1
+	skirmish._last_group_recall_time_ms = Time.get_ticks_msec()
+	skirmish._recall_control_group(1)
+	if abs(skirmish.camera.global_position.x - unit_a.global_position.x) > 0.01 or abs(skirmish.camera.global_position.z - unit_a.global_position.z) > 0.01:
+		print("  [FAIL] A double-tap recall (same group, within CONTROL_GROUP_DOUBLE_TAP_MS) should recentre the camera on the group, camera is at ", skirmish.camera.global_position, " expected near ", unit_a.global_position)
+		free_all.call()
+		return false
+
+	free_all.call()
+	await process_frame
+	print("  [PASS] Control groups assign, recall, filter dead members out of both the selection and the stored group, and double-tap recentres the camera.")
+	return true
+
+func test_c1_shift_select_is_additive_instead_of_replacing() -> bool:
+	print("Running Test Suite: C1 - Shift-Click/Shift-Drag Add To (Or Toggle Out Of) The Current Selection Instead Of Replacing It (VISUAL_AND_UX_POLISH_PLAN.md C1)...")
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull", "faction": "technocrats",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "wheels", "settings": {}},
+		"modules": [
+			{"type_id": "wheels", "name": "Wheels", "position": {"x": 0.0, "y": -1.0, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var unit_a = skirmish.spawn_unit(bp, skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(20, 0, 0))
+	var unit_b = skirmish.spawn_unit(bp, skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(30, 0, 0))
+	await process_frame
+
+	var free_all = func():
+		if is_instance_valid(unit_a): unit_a.queue_free()
+		if is_instance_valid(unit_b): unit_b.queue_free()
+		skirmish.queue_free()
+
+	# --- A shift-click on empty ground (raycast miss) with additive=true must
+	# preserve the existing selection - only a non-additive miss clears it. ---
+	skirmish._set_selection([unit_a])
+	skirmish._select_at_point(Vector2(-500, -500), true)
+	if skirmish.selected.size() != 1 or not skirmish.selected.has(unit_a):
+		print("  [FAIL] A shift-click that hits nothing should leave the existing selection untouched, got ", skirmish.selected)
+		free_all.call()
+		return false
+
+	# --- Non-additive rect selection replaces whatever was selected before ---
+	var screen_a = skirmish.camera.unproject_position(unit_a.global_position)
+	var screen_b = skirmish.camera.unproject_position(unit_b.global_position)
+	var both_rect = Rect2(screen_a, screen_b - screen_a).abs().grow(20)
+	skirmish._select_in_rect(both_rect, false)
+	if skirmish.selected.size() != 2 or not skirmish.selected.has(unit_a) or not skirmish.selected.has(unit_b):
+		print("  [FAIL] Test setup: a plain rect over both units should select both, got ", skirmish.selected)
+		free_all.call()
+		return false
+
+	# --- Shift-drag a rect over just unit_a, starting from a selection of
+	# just unit_b, should UNION rather than replace ---
+	skirmish._set_selection([unit_b])
+	var a_only_rect = Rect2(screen_a, Vector2.ZERO).grow(20)
+	skirmish._select_in_rect(a_only_rect, true)
+	if skirmish.selected.size() != 2 or not skirmish.selected.has(unit_a) or not skirmish.selected.has(unit_b):
+		print("  [FAIL] Shift-drag over unit_a should union with the pre-existing unit_b selection, got ", skirmish.selected)
+		free_all.call()
+		return false
+
+	# --- A plain (non-shift) rect selection replaces the union above ---
+	skirmish._select_in_rect(a_only_rect, false)
+	if skirmish.selected.size() != 1 or not skirmish.selected.has(unit_a):
+		print("  [FAIL] A plain drag-select should replace the prior selection, not add to it, got ", skirmish.selected)
+		free_all.call()
+		return false
+
+	free_all.call()
+	await process_frame
+	print("  [PASS] Shift-click and shift-drag add to (or preserve, on a miss) the current selection; plain click/drag still replaces it.")
+	return true

@@ -4,6 +4,25 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-27 — UNIFIED_ROADMAP.md Phase 1: economy on, control groups + shift-select, D4 ghost-cancel refund
+
+Following the Phase 0 quality-gate work (`4cc6a22`), this session moves Phase 1 ("make it a game") forward on three fronts.
+
+**Shipped:**
+- **1.1 — economy on by default.** `debug_settings.gd`'s `infinite_player_resources` flips from `true` to `false`. Every piece of Phase D (drip-fed cost, pause-on-broke, exact-progress refunds, `stalled` job state, multi-factory speed bonus, low-power build slowdown) now actually runs in normal play instead of only under an explicit test override. The runtime toggle (Debug HUD checkbox) is untouched, so it can still be flipped back on for ad-hoc testing.
+- **1.4 — control groups + shift-select** (`VISUAL_AND_UX_POLISH_PLAN.md` C1). `skirmish.gd` gains `control_groups: Dictionary` keyed 1-9: Ctrl+1-9 assigns the current selection to a slot (overwrite, not additive - standard RTS convention); 1-9 recalls it, filtering dead/freed members from both the live selection *and* the stored group at read time (nothing needs to react to a group shrinking until the player next presses that digit). Pressing the same digit twice within 400ms also recentres the camera on the group's average position, matching OpenRA/RA2. Separately, `_select_at_point()`/`_select_in_rect()` now take an `additive` bool wired to `event.shift_pressed`: shift-click adds a unit (or toggles it off if already selected), shift-drag unions a rect with the existing selection, and a shift-click that hits nothing leaves the selection untouched (only a *plain* miss-click clears it).
+- **1.6 (partial) — D4's flagged ghost-placement gap.** `RTS_CORE_ROADMAP.md:19` named this directly: cancelling a queued structure's ghost placement (Escape, or right-click while placing) neither refunded the cost nor returned it to a re-placeable state - the drip-fed cost stayed spent and the building was just lost. New `_abandon_placement()` wraps `_cancel_placement()` and refunds the exact `cost_metal`/`cost_crystal` actually drawn, called only from the two genuine abandon paths; the post-success cleanup in `_try_place_building()` still calls `_cancel_placement()` directly so a completed placement is never also refunded. This was cheap before 1.1 (refunding fake infinite resources didn't matter) and actively annoying after it, per the roadmap's own note.
+
+**A real regression, found and fixed by the test suite doing its job:** flipping 1.1's default broke `test_match_config_overrides_apply_to_skirmish`, whose PLAYER_TEAM assertion specifically exercises the infinite-resources cheat's override-after-MatchConfig behavior and had been silently relying on the old ambient default rather than setting it explicitly. Fixed by having the test force `DebugSettings.infinite_player_resources = true` for its own duration (save/restore, same pattern already used for the `MatchConfig` fields it touches) - the test now proves the override logic itself regardless of what the flag defaults to.
+
+**New tests** (`run_tests.gd`): `test_d4_abandoning_ghost_placement_refunds_but_successful_placement_does_not` (refund-on-abandon vs. no-refund-on-success, both paths); `test_c1_control_groups_assign_recall_and_double_tap_recenters_camera` (assign, recall, dead-member filtering out of both the selection and the stored group, double-tap recentre); `test_c1_shift_select_is_additive_instead_of_replacing` (shift-click add/toggle/preserve-on-miss, shift-drag union, plain click/drag still replaces). All exercise the real functions directly (no synthetic `InputEvent` injection) - consistent with how the rest of the suite tests input-adjacent logic headless.
+
+**Verified:** full suite green, 156/156 (up from 153 at the end of Phase 0) - `.\run_tests.ps1` end to end, including the known-flaky quarantined set from Phase 0.4 (`test_c4_blocked_exit...`, `test_c1_building_placed_after...`, `test_target_dummies_actually_take_damage...`) each recovering on their documented retry, not a new failure.
+
+**Not done this pass:** 1.2 (playtest - explicitly Chris's job), 1.3 (enemy AI still builds nothing), 1.5's C2 (debug HUD gating - deliberately deferred per the roadmap, Chris wants it available while 1.2's testing happens), 1.6's remaining E2 (sell+repair) and E3 (tech-tree greying + cancel-unbuildable refund).
+
+---
+
 ## 2026-07-26 — RTS_CORE_ROADMAP.md E1: real power states
 
 OpenRA's actual 3-state `PowerManager` (Normal/Low/Critical), replacing the old flat "deficit? build 1.5x slower" hack with a live per-tick slowdown and real defense-weapon gating.

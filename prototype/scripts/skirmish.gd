@@ -221,6 +221,17 @@ var selected: Array = []
 var drag_select_start: Vector2 = Vector2.ZERO
 var is_drag_selecting: bool = false
 
+# Control groups (VISUAL_AND_UX_POLISH_PLAN.md C1): Ctrl+1-9 assigns the
+# current selection to a slot, 1-9 recalls it, matching both OpenRA and RA2
+# convention. Keyed by the digit itself (1-9), never populated for 0.
+# Recall filters dead/freed members at read time rather than eagerly
+# pruning on death, since nothing needs to react to a group shrinking
+# until the player actually presses that digit again.
+var control_groups: Dictionary = {}
+const CONTROL_GROUP_DOUBLE_TAP_MS: int = 400
+var _last_group_recall_num: int = -1
+var _last_group_recall_time_ms: int = 0
+
 # Building placement state
 var placing: Dictionary = {} # {kind: "refinery"/"light_manufactory"/"medium_manufactory"/"heavy_manufactory"/"defense", blueprint (opt), cost_metal, cost_crystal}
 var placement_ghost: MeshInstance3D = null
@@ -2081,6 +2092,23 @@ func _cancel_placement():
 	placement_ghost = null
 	_clear_buildable_area_decals()
 
+# RTS_CORE_ROADMAP.md's own flagged gap, fixed: by the time a structure's
+# ghost is up, production.enqueue_structure()'s drip-fed cost is already
+# 100% drawn (that's what "ready to place" means - see pop_ready_structure()'s
+# comment). _cancel_placement() itself is shared with the post-success
+# cleanup path in _try_place_building() (placement went fine, cost should
+# stay spent) - so the refund lives in this separate wrapper, called only
+# from the two genuine abandon paths (Escape, right-click-while-placing).
+# Refunds the full amount actually paid (placing.cost_metal/cost_crystal,
+# the same fields enqueue_structure() charged from); defense ghosts carry
+# the same two fields (see _begin_placement's info dict shape), so this
+# covers both kinds uniformly.
+func _abandon_placement():
+	if not placing.is_empty() and placing.has("cost_metal"):
+		add_resources(PLAYER_TEAM, placing.cost_metal, placing.cost_crystal)
+		_flash_status("Placement cancelled - refunded %dM/%dC" % [placing.cost_metal, placing.cost_crystal])
+	_cancel_placement()
+
 # Shared by both the live ghost-color check (every mouse-move while
 # placing) and the actual placement attempt, so the two can never
 # disagree - position-dependent rules only (terrain/base-proximity), not
@@ -2259,8 +2287,16 @@ func _unhandled_input(event):
 	if game_over: return
 
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		_cancel_placement()
+		_abandon_placement()
 		_set_selection([])
+		return
+
+	if event is InputEventKey and event.pressed and event.keycode >= KEY_1 and event.keycode <= KEY_9:
+		var group_num = event.keycode - KEY_1 + 1
+		if event.ctrl_pressed:
+			_assign_control_group(group_num)
+		else:
+			_recall_control_group(group_num)
 		return
 
 	if event is InputEventMouseMotion:
@@ -2297,12 +2333,12 @@ func _unhandled_input(event):
 				selection_rect.visible = false
 				var drag_dist = event.position.distance_to(drag_select_start)
 				if drag_dist > 10:
-					_select_in_rect(Rect2(drag_select_start, event.position - drag_select_start).abs())
+					_select_in_rect(Rect2(drag_select_start, event.position - drag_select_start).abs(), event.shift_pressed)
 				else:
-					_select_at_point(event.position)
+					_select_at_point(event.position, event.shift_pressed)
 	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 		if not placing.is_empty():
-			_cancel_placement()
+			_abandon_placement()
 			return
 		_issue_order(event.position)
 
@@ -2324,21 +2360,68 @@ func _set_selection(new_selection: Array):
 		if is_instance_valid(s) and s.has_method("set_selected"):
 			s.set_selected(true)
 
-func _select_at_point(screen_pos: Vector2):
+# Ctrl+1-9 assigns the current selection to a slot, overwriting whatever was
+# there before (standard RTS convention - no additive group-assign).
+func _assign_control_group(num: int) -> void:
+	if selected.is_empty():
+		return
+	control_groups[num] = selected.duplicate()
+	_flash_status("Control group %d set (%d units)" % [num, selected.size()])
+
+# 1-9 recalls a slot, filtering dead/freed members at read time rather than
+# eagerly pruning on death (see control_groups' declaration comment).
+# Pressing the same digit twice within CONTROL_GROUP_DOUBLE_TAP_MS also
+# recenters the camera on the group, matching OpenRA/RA2 convention.
+func _recall_control_group(num: int) -> void:
+	if not control_groups.has(num):
+		return
+	var alive = []
+	for u in control_groups[num]:
+		if is_instance_valid(u):
+			alive.append(u)
+	control_groups[num] = alive
+	if alive.is_empty():
+		return
+	_set_selection(alive)
+
+	var now_ms = Time.get_ticks_msec()
+	var double_tap = num == _last_group_recall_num and (now_ms - _last_group_recall_time_ms) <= CONTROL_GROUP_DOUBLE_TAP_MS
+	_last_group_recall_num = num
+	_last_group_recall_time_ms = now_ms
+	if double_tap:
+		var center = Vector3.ZERO
+		for u in alive:
+			center += u.global_position
+		center /= alive.size()
+		camera.global_position.x = center.x
+		camera.global_position.z = center.z
+
+func _select_at_point(screen_pos: Vector2, additive: bool = false):
 	var result = _raycast_screen(screen_pos, 4 + 8)
 	if result and result.collider:
 		var node = result.collider
 		if node.is_in_group("units") or node.is_in_group("buildings"):
 			if node.get("team") == PLAYER_TEAM:
-				_set_selection([node])
+				if additive:
+					# Shift-clicking an already-selected unit deselects just
+					# that unit (standard RTS convention), otherwise adds it.
+					var merged = selected.duplicate()
+					if merged.has(node):
+						merged.erase(node)
+					else:
+						merged.append(node)
+					_set_selection(merged)
+				else:
+					_set_selection([node])
 				return
-	_set_selection([])
+	if not additive:
+		_set_selection([])
 
-func _select_in_rect(rect: Rect2):
-	var picked = []
+func _select_in_rect(rect: Rect2, additive: bool = false):
+	var picked = selected.duplicate() if additive else []
 	for u in get_team_units(PLAYER_TEAM):
 		var screen = camera.unproject_position(u.global_position)
-		if rect.has_point(screen):
+		if rect.has_point(screen) and not picked.has(u):
 			picked.append(u)
 	_set_selection(picked)
 
