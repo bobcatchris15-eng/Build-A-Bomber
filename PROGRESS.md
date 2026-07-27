@@ -4,6 +4,21 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-26 — RTS_CORE_ROADMAP.md E1: real power states
+
+OpenRA's actual 3-state `PowerManager` (Normal/Low/Critical), replacing the old flat "deficit? build 1.5x slower" hack with a live per-tick slowdown and real defense-weapon gating.
+
+**Shipped:**
+- `skirmish.gd`'s `_recalc_energy_economy()` now stores `energy_pool[team].upkeep` alongside `.capacity`, and derives `power_state` ("normal"/"low"/"critical") from the same OpenRA thresholds: `capacity >= upkeep` → Normal, `capacity > upkeep/2` → Low, else → Critical. New `is_low_power(team)` collapses Low+Critical into one boolean (OpenRA treats them identically for production and the defense gate - the distinction only matters for AI conditions this game doesn't have). `_update_defense_low_power_visuals(team)` fires only when the state actually *changes*, not every tick.
+- `production_queue.gd`: the old `if skirmish.is_energy_deficit(team): build_time *= 1.5` at `enqueue()` time is gone. Low power now slows an *in-progress* build live, every tick, inside `tick()` itself via a new `LOW_POWER_MODIFIER = 300.0` (RA's own value - 1/3 the normal progress rate), read per-team every tick from `skirmish.is_low_power(team)`. A build queued under Normal power that later loses power slows down mid-build; one that recovers power speeds back up immediately - neither is possible with a one-shot multiplier baked in at queue time, which is exactly why this chunk replaces it.
+- `building.gd`: fog-dimming and the new low-power dimming now share one `_refresh_dim_visual()` path (`low_power_dimmed || (fog_hidden && fog_ever_seen)`), so the two compose without one silently overwriting the other. New `set_low_power_dim(dim)` setter.
+- `auto_weapon.gd`: new `_owner_defense_low_power()` (mirrors `_owner_building_incomplete()`'s ancestor-walk) gates a defense's weapon fully inert while its team is Low/Critical - a mobile unit's own weapons are never touched by this (they run off the vehicle's own onboard capacitor, not team base power).
+- HUD: the old single "⚡ Base Power: X/Y (DEFICIT: builds slower!)" text string is gone, replaced by a real `ProgressBar` + status label (`power_bar`/`power_status_label`) that changes fill color per state (green/amber/red) and reads "⚡ Base Power: Normal/Low/Critical".
+
+**Verified:** a fresh match's starting buildings (HQ + 3 starting manufactories) breakeven at Normal; one extra static building tips Low, six more tips Critical - matching OpenRA's own thresholds exactly. The *same* in-progress queued job consumes `time_left` at the full rate under Normal, drops to a real 1/3 rate the instant the team is forced into Low power mid-build (not baked in at enqueue), and speeds back up to the full rate the instant power recovers. A real defense's weapon (spawned via `spawn_defense()`) can't acquire a target while its team is Low power and reacquires normally the instant power recovers; its mesh visibly dims (`transparency` > 0) while Low and un-dims on recovery. One test-only flake found and fixed along the way: `_find_nearest_target()` called via `_physics_process(delta)` for a single-tick assertion is itself flaky, since `_ready()` seeds the reacquire throttle with a random `[0, REACQUIRE_INTERVAL)` phase (an unrelated, already-uncommitted P1a performance change) - fixed by calling `_find_nearest_target()` directly (its `-1.0` sentinel bypasses the throttle) for "should succeed" assertions, keeping `_physics_process()` only for proving the low-power *gate* itself. Full suite green except one already-known-flaky, unrelated D2 test (`test_d2_unit_buttons_grey_out_without_a_live_manufactory_of_that_tier` - races `_physics_process()`'s tier-refresh against idle-frame `await`s, reproduces intermittently regardless of these changes) and the same pre-existing navmesh-test flakiness noted in every chunk since C1.
+
+---
+
 ## 2026-07-26 — RTS_CORE_ROADMAP.md D4: buildings get build time
 
 Closes out the multi-session chunk. Buildings now go through a real 4th "structures" production queue instead of spawning a ghost the instant you click - "buildings never auto-exit," matching OpenRA.

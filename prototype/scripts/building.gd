@@ -368,15 +368,28 @@ func set_fog_visible(is_visible: bool):
 	if is_visible:
 		fog_ever_seen = true
 		visible = true
-		_set_fog_dim(false)
 	elif fog_ever_seen:
 		visible = true
-		_set_fog_dim(true)
 	else:
 		visible = false
+	_refresh_dim_visual()
 
-func _set_fog_dim(dim: bool):
-	_set_fog_dim_recursive(self, dim)
+# RTS_CORE_ROADMAP.md E1: "disabling defence weapons and dimming their
+# mesh" - a second, independent reason a building can end up visually
+# dimmed, alongside fog. Both share the same transparency mechanism/
+# threshold; _refresh_dim_visual() is the one place that reconciles
+# whichever combination is currently true so they can't silently stomp on
+# each other (e.g. a scouted-but-not-currently-visible enemy defense that's
+# ALSO its owner's team being low on power).
+var low_power_dimmed: bool = false
+
+func set_low_power_dim(dim: bool) -> void:
+	if low_power_dimmed == dim: return
+	low_power_dimmed = dim
+	_refresh_dim_visual()
+
+func _refresh_dim_visual() -> void:
+	_set_fog_dim_recursive(self, low_power_dimmed or (fog_hidden and fog_ever_seen))
 
 static func _set_fog_dim_recursive(node: Node, dim: bool):
 	for child in node.get_children():

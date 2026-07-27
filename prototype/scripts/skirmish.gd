@@ -230,6 +230,10 @@ var resource_label: Label
 var status_label: Label
 var intel_label: Label
 var selection_rect: Panel
+# RTS_CORE_ROADMAP.md E1: a real power bar (see _build_ui()'s own comment).
+var power_bar_panel: PanelContainer
+var power_bar: ProgressBar
+var power_status_label: Label
 
 # RTS_CORE_ROADMAP.md D2: tabbed build bar (Structures/Defenses/Units) +
 # queue panel (3 tier strips: progress fill, READY/HOLD/timer text).
@@ -534,12 +538,46 @@ func _recalc_energy_economy():
 			upkeep += ENERGY_UPKEEP_PER_STATIC_BUILDING
 		capacity *= FactionCatalog.get_passive(faction, "energy_capacity_mult", 1.0)
 		energy_pool[team].capacity = capacity
+		energy_pool[team].upkeep = upkeep
 		energy_pool[team].energy = clamp(capacity - upkeep, 0.0, max(capacity, 1.0))
 		energy_pool[team].deficit = (capacity - upkeep) < 0.0
+		# RTS_CORE_ROADMAP.md E1: OpenRA's real 3-state PowerManager, not
+		# just a binary deficit flag. "drained" here is upkeep (the only
+		# thing actually consuming power in this game - see the loop above);
+		# Normal/Low/Critical purely reflect provided-vs-drained, same
+		# thresholds OpenRA itself uses.
+		var old_power_state = energy_pool[team].get("power_state", "normal")
+		var power_state = "normal"
+		if capacity < upkeep:
+			power_state = "low" if capacity > upkeep / 2.0 else "critical"
+		energy_pool[team].power_state = power_state
+		if power_state != old_power_state:
+			_update_defense_low_power_visuals(team)
 	_update_resource_ui()
 
 func is_energy_deficit(team: int) -> bool:
 	return energy_pool[team].deficit
+
+# RTS_CORE_ROADMAP.md E1: "OpenRA treats Low and Critical identically for
+# production - the distinction only drives conditions" (this one: defense
+# weapons disabled + dimmed). Both non-Normal states collapse to the same
+# single low_power boolean here.
+func is_low_power(team: int) -> bool:
+	return energy_pool[team].get("power_state", "normal") != "normal"
+
+# RTS_CORE_ROADMAP.md E1: "disabling defence weapons and dimming their
+# mesh" - only ever touches "defense"-kind buildings (a mobile unit's own
+# weapons are never gated by the TEAM's base power, same ENERGY_AND_
+# BALANCE_SPEC.md #1 boundary _recalc_energy_economy()'s own comment
+# already draws). Called only when a team's power_state actually changes,
+# not every tick - dimming is a discrete visual state, not something that
+# needs smooth per-frame interpolation.
+func _update_defense_low_power_visuals(team: int) -> void:
+	var low = is_low_power(team)
+	for b in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(b) or b.is_dead or b.team != team or b.kind != "defense": continue
+		if b.has_method("set_low_power_dim"):
+			b.set_low_power_dim(low)
 
 # Fog-of-war: deliberately ONE-DIRECTIONAL (only ever toggles ENEMY
 # constructs' visibility, never the player's own). This is a single shared
@@ -1411,6 +1449,38 @@ func _build_ui():
 	resource_label.add_theme_font_size_override("font_size", 22)
 	ui.add_child(resource_label)
 
+	# RTS_CORE_ROADMAP.md E1: a real power bar (progress fill + Normal/Low/
+	# Critical text) instead of the old single status-flash string baked
+	# into resource_label. Same panel-with-overlay-label structure as D2's
+	# queue strips, for visual consistency.
+	power_bar_panel = PanelContainer.new()
+	power_bar_panel.position = Vector2(340, 16)
+	power_bar_panel.size = Vector2(190, 26)
+	var power_bar_style = StyleBoxFlat.new()
+	power_bar_style.bg_color = Color(0.1, 0.11, 0.14, 0.85)
+	power_bar_style.border_color = Color(0.3, 0.35, 0.4, 0.9)
+	power_bar_style.border_width_left = 1
+	power_bar_style.border_width_right = 1
+	power_bar_style.border_width_top = 1
+	power_bar_style.border_width_bottom = 1
+	power_bar_panel.add_theme_stylebox_override("panel", power_bar_style)
+	ui.add_child(power_bar_panel)
+
+	power_bar = ProgressBar.new()
+	power_bar.min_value = 0.0
+	power_bar.max_value = 1.0
+	power_bar.value = 1.0
+	power_bar.show_percentage = false
+	power_bar_panel.add_child(power_bar)
+
+	power_status_label = Label.new()
+	power_status_label.text = "⚡ Normal"
+	power_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	power_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	power_status_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	power_status_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	power_bar_panel.add_child(power_status_label)
+
 	status_label = Label.new()
 	status_label.position = Vector2(20, 46)
 	status_label.add_theme_font_size_override("font_size", 15)
@@ -1829,16 +1899,27 @@ func _add_build_button(parent: Container, text: String, color: Color, callback: 
 
 func _update_resource_ui():
 	if resource_label:
+		resource_label.text = "💰 Metal: %d   💎 Crystal: %d" % [economy[PLAYER_TEAM].metal, economy[PLAYER_TEAM].crystal]
+	# RTS_CORE_ROADMAP.md E1: a real power bar, replacing the old single
+	# "(DEFICIT: builds slower!)" status string - "Base Power" wording kept
+	# (FABLE_REVIEW.md 3.9/1.6: this is the BASE's power only, never a
+	# vehicle's own onboard energy budget). Fill/color/text all reflect the
+	# real 3-state PowerManager (_recalc_energy_economy()), not just a
+	# binary deficit flag.
+	if power_bar and power_status_label:
 		var e = energy_pool[PLAYER_TEAM]
-		# "Base Power" (not bare "Energy") - FABLE_REVIEW.md 3.9 flagged the
-		# old label as readable like a stored quantity when it's actually a
-		# net-margin gauge (capacity minus upkeep); 1.6's later resolution
-		# adds a second reason: this number is the BASE's power only (HQ/
-		# power_plant/defense generators), never a vehicle's own energy
-		# budget, and the label needs to say so or players will read it as
-		# some universal resource that should affect individual units too.
-		var energy_str = "⚡ Base Power: %d/%d%s" % [int(e.energy), int(e.capacity), " (DEFICIT: builds slower!)" if e.deficit else ""]
-		resource_label.text = "💰 Metal: %d   💎 Crystal: %d   %s" % [economy[PLAYER_TEAM].metal, economy[PLAYER_TEAM].crystal, energy_str]
+		var state: String = e.get("power_state", "normal")
+		var upkeep: float = e.get("upkeep", 0.0)
+		# The bar shows drained-vs-provided (upkeep-vs-capacity) - what
+		# actually drives Normal/Low/Critical - not the floored "energy"
+		# margin, which can't go negative and would hide how deep a
+		# Critical deficit really is.
+		power_bar.value = clampf(1.0 - (upkeep / max(e.capacity, 1.0)), 0.0, 1.0) if e.capacity > 0.0 else 0.0
+		var state_color = Color(0.35, 0.85, 0.4) if state == "normal" else (Color(0.9, 0.75, 0.2) if state == "low" else Color(0.9, 0.3, 0.25))
+		var fill_style = StyleBoxFlat.new()
+		fill_style.bg_color = state_color
+		power_bar.add_theme_stylebox_override("fill", fill_style)
+		power_status_label.text = "⚡ Base Power: %s" % state.capitalize()
 
 func _flash_status(msg: String):
 	if status_label:

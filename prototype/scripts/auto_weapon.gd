@@ -639,8 +639,26 @@ func _owner_building_incomplete() -> bool:
 		node = node.get_parent()
 	return false
 
+# RTS_CORE_ROADMAP.md E1: "disabling defence weapons" while a team's power
+# is Low or Critical - only ever applies to a "defense"-kind building.gd
+# owner (a mobile unit's weapons run off its own onboard capacitor, never
+# the team's base power - see ENERGY_AND_BALANCE_SPEC.md #1, the same
+# boundary skirmish.gd's _recalc_energy_economy() already draws). Duck-
+# typed through current_scene same as _teams_allied() - a real Skirmish's
+# is_low_power(team), nothing in a synthetic test/test-range context.
+func _owner_defense_low_power() -> bool:
+	var node = get_parent()
+	while node:
+		if "kind" in node and node.kind == "defense":
+			var scene = get_tree().current_scene
+			if scene and scene.has_method("is_low_power"):
+				return scene.is_low_power(node.team)
+			return false
+		node = node.get_parent()
+	return false
+
 func _physics_process(delta):
-	if _owner_building_incomplete():
+	if _owner_building_incomplete() or _owner_defense_low_power():
 		return
 	# Spin radar mast dish
 	if type_id == "sensor_suite":

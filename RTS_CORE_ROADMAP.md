@@ -1,7 +1,7 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3, C4, D1, D2, D3, D4
-landed (Phase D complete); B8 parked as future work (1 map landed -
+**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3, C4, D1, D2, D3, D4,
+E1 landed; B8 parked as future work (1 map landed -
 `scattered_peaks` - more maps can be added anytime by resuming that arc, but
 it's not the active focus right now).** This is a resumable roadmap, written so a fresh session can pick up any
 single chunk without re-deriving the architecture. Chunks are ordered with
@@ -9,7 +9,8 @@ explicit dependencies in the sequencing table at the end; each is sized to land
 as one commit with its own `PROGRESS.md` entry. **Update the sequencing
 table's status as chunks land** — a stale "next up" header in a plan doc is
 exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before
-being corrected on 2026-07-24. **Next up: Phase E**, or resume B8.
+being corrected on 2026-07-24. **Next up: E2 (sell + repair), or E3 (tech-tree
+greying), or resume B8.**
 
 **D4 shipped with two real bugs Chris caught by just running the actual
 game** (`Object.get()` called with a Dictionary-style default arg on a real
@@ -684,7 +685,7 @@ readback) over catalog-number assertions.
 | 18 | D2 queue HUD + tabs | one session | D1 | **Done** |
 | 19 | D3 multi-factory speed | afternoon | A1 | **Done** |
 | 20 | D4 building build time | multi | D1 | **Done** |
-| 21 | E1 power states | one session | D1, D4 | — |
+| 21 | E1 power states | one session | D1, D4 | **Done** |
 | 22 | E2 sell + repair | afternoon | C2 | — |
 | 23 | E3 tech-tree greying | one session | D2 | — |
 

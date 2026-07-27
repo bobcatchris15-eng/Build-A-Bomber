@@ -36,6 +36,10 @@ const TIERS: Array = ["light", "medium", "heavy", "structures"]
 # tier - 1), clamped to the table's own last entry for 4+.
 const MULTI_FACTORY_SPEED_PCT: Array = [100, 75, 60, 50]
 
+# RTS_CORE_ROADMAP.md E1: RA's own low_power_modifier value - 300 means a
+# build takes 3x as long under low power (1/3 the normal progress rate).
+const LOW_POWER_MODIFIER: float = 300.0
+
 var skirmish: Node3D = null
 
 # queues[team][tier] = Array of {blueprint, time_left, total_time,
@@ -89,8 +93,12 @@ func enqueue(team: int, blueprint: Dictionary, faction: String, cost_metal: int,
 		return {"queued": false, "error": "illegal", "reason": legality.reason, "tier": tier}
 	var build_time = skirmish.build_time_for_cost(Vector2i(cost_metal, cost_crystal))
 	build_time *= FactionCatalog.get_passive(faction, "build_time_mult", 1.0)
-	if skirmish.is_energy_deficit(team):
-		build_time *= 1.5
+	# RTS_CORE_ROADMAP.md E1: the old flat build_time *= 1.5 (baked in once,
+	# at queue time) is gone - low power now slows a build LIVE, every tick,
+	# via tick()'s own low_power_modifier, so it responds to the team's
+	# power state actually changing mid-build (recovering power speeds an
+	# in-progress item back up; losing it slows one down), matching
+	# OpenRA's real tick-skip instead of a one-shot multiplier.
 	# RTS_CORE_ROADMAP.md D3: RA's own *vehicle* build_time_speed_reduction
 	# table - every unit this game produces is a vehicle, so there's no
 	# other production category to distinguish. Indexed by how many LIVE
@@ -194,10 +202,20 @@ func tick(delta: float):
 	# RTS_CORE_ROADMAP.md A2: debug_instant_build finishes the front job of
 	# every queue on the next tick rather than skipping the timer entirely,
 	# so spawn/legality/factory-death handling below all still run normally.
-	var effective_delta = delta
-	if "debug_instant_build" in skirmish and skirmish.debug_instant_build:
-		effective_delta = 999999.0
+	var debug_instant = "debug_instant_build" in skirmish and skirmish.debug_instant_build
 	for team in queues.keys():
+		# RTS_CORE_ROADMAP.md E1: RA's own low_power_modifier (300 = build
+		# takes 3x as long, i.e. 1/3 the normal progress rate) applied LIVE
+		# every tick per-team, not baked into total_time once at queue time -
+		# a team's power state recovering mid-build speeds it back up, same
+		# as OpenRA's real tick-skip. "Low and Critical are identical for
+		# production" (this roadmap chunk's own note) - is_low_power()
+		# already collapses both into one boolean.
+		var effective_delta = delta
+		if debug_instant:
+			effective_delta = 999999.0
+		elif skirmish.has_method("is_low_power") and skirmish.is_low_power(team):
+			effective_delta = delta * (100.0 / LOW_POWER_MODIFIER)
 		for tier in TIERS:
 			var q: Array = get_queue(team, tier)
 			if q.is_empty(): continue

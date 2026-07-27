@@ -120,6 +120,9 @@ func _init():
 	success = success and await test_d4_clicking_a_structure_queues_it_instead_of_placing_immediately()
 	success = success and await test_d4_freshly_placed_building_is_build_incomplete_until_its_grace_period_clears()
 	success = success and await test_d4_build_incomplete_weapon_does_not_fire()
+	success = success and await test_e1_power_state_derives_normal_low_and_critical_thresholds()
+	success = success and await test_e1_low_power_slows_production_live_per_tick_not_baked_in()
+	success = success and await test_e1_low_power_disables_defense_weapon_and_dims_its_mesh()
 	success = success and await test_map_open_plains_smoke()
 	success = success and await test_map_lake_crossing_smoke()
 	success = success and await test_map_highland_chokepoint_smoke()
@@ -6623,6 +6626,300 @@ func test_d4_build_incomplete_weapon_does_not_fire() -> bool:
 	print("  [PASS] A build_incomplete defense's weapon is fully inert (no targeting) and works normally again once the flag clears.")
 	return true
 
+# BFS helper (no self-referencing lambda needed) - finds the first real
+# renderable mesh under a node, used by the E1 low-power dimming test to
+# confirm a defense's actual mesh transparency changes, not just a flag.
+func _e1_find_first_geometry_instance(node: Node) -> GeometryInstance3D:
+	var stack: Array = [node]
+	while not stack.is_empty():
+		var n = stack.pop_back()
+		if n is GeometryInstance3D:
+			return n
+		for c in n.get_children():
+			stack.append(c)
+	return null
+
+func test_e1_power_state_derives_normal_low_and_critical_thresholds() -> bool:
+	print("Running Test Suite: E1 - Power State Derives Normal/Low/Critical From Real Capacity Vs Upkeep (RTS_CORE_ROADMAP.md E1)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	skirmish._recalc_energy_economy()
+	var pool = skirmish.energy_pool[skirmish.PLAYER_TEAM]
+	if pool.power_state != "normal" or skirmish.is_low_power(skirmish.PLAYER_TEAM):
+		print("  [FAIL] A fresh match's starting buildings (HQ + 3 starting manufactories) should breakeven at Normal power, got state '", pool.power_state, "' (capacity ", pool.capacity, " vs upkeep ", pool.upkeep, ")")
+		skirmish.queue_free()
+		return false
+
+	# One extra static building tips capacity(16) below upkeep(18) but still
+	# above upkeep/2(9) - OpenRA's Low band.
+	var extras: Array = []
+	extras.append(skirmish._spawn_prefab("light_manufactory", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(30, 0, 0), skirmish.player_faction))
+	await process_frame
+	skirmish._recalc_energy_economy()
+	pool = skirmish.energy_pool[skirmish.PLAYER_TEAM]
+	if pool.power_state != "low" or not skirmish.is_low_power(skirmish.PLAYER_TEAM):
+		print("  [FAIL] Capacity below upkeep but above upkeep/2 should be Low power, got state '", pool.power_state, "' (capacity ", pool.capacity, " vs upkeep ", pool.upkeep, ")")
+		for b in extras: b.queue_free()
+		skirmish.queue_free()
+		return false
+
+	# Five more (six extra total) push upkeep(33) to at or above capacity's
+	# double (16*2=32) - OpenRA's Critical band.
+	for i in range(5):
+		extras.append(skirmish._spawn_prefab("light_manufactory", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(30, 0, 6.0 * (i + 1)), skirmish.player_faction))
+	await process_frame
+	skirmish._recalc_energy_economy()
+	pool = skirmish.energy_pool[skirmish.PLAYER_TEAM]
+	if pool.power_state != "critical" or not skirmish.is_low_power(skirmish.PLAYER_TEAM):
+		print("  [FAIL] Capacity at or below upkeep/2 should be Critical power, got state '", pool.power_state, "' (capacity ", pool.capacity, " vs upkeep ", pool.upkeep, ")")
+		for b in extras: b.queue_free()
+		skirmish.queue_free()
+		return false
+
+	for b in extras: b.queue_free()
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Power state correctly derives Normal/Low/Critical from real capacity-vs-upkeep, matching OpenRA's own PowerManager thresholds.")
+	return true
+
+func test_e1_low_power_slows_production_live_per_tick_not_baked_in() -> bool:
+	print("Running Test Suite: E1 - Low Power Slows An IN-PROGRESS Build Live, Every Tick (Not A One-Shot Multiplier Baked In At Queue Time) (RTS_CORE_ROADMAP.md E1)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	skirmish.debug_infinite_resources = false
+	skirmish.economy[skirmish.PLAYER_TEAM].metal = 1000
+	skirmish.economy[skirmish.PLAYER_TEAM].crystal = 1000
+
+	skirmish._recalc_energy_economy()
+	if skirmish.is_low_power(skirmish.PLAYER_TEAM):
+		print("  [FAIL] Test setup: a fresh match should start at Normal power")
+		skirmish.queue_free()
+		return false
+
+	var result = skirmish.production.enqueue(skirmish.PLAYER_TEAM, _d1_test_blueprint(), skirmish.player_faction, 300, 0)
+	if not result.queued:
+		print("  [FAIL] Test setup: queuing should have succeeded, got error: ", result.error)
+		skirmish.queue_free()
+		return false
+	var tier = result.tier
+	var job = skirmish.production.get_queue(skirmish.PLAYER_TEAM, tier)[0]
+	var total_time = job.total_time
+
+	# Baseline: 1 second of ticking at Normal power.
+	for i in range(60):
+		skirmish.production.tick(1.0 / 60.0)
+	var normal_consumed = total_time - job.time_left
+	if normal_consumed < 0.9 or normal_consumed > 1.05:
+		print("  [FAIL] Test setup: 1 second of ticking at Normal power should consume ~1.0s of time_left, got ", normal_consumed)
+		skirmish.queue_free()
+		return false
+
+	# Force the SAME team into Low power mid-build, purely by adding a real
+	# extra static building - no test-only hook into production_queue.gd.
+	var extra = skirmish._spawn_prefab("light_manufactory", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(30, 0, 0), skirmish.player_faction)
+	await process_frame
+	skirmish._recalc_energy_economy()
+	if not skirmish.is_low_power(skirmish.PLAYER_TEAM):
+		print("  [FAIL] Test setup: the extra static building should have tipped the team into Low power")
+		extra.queue_free()
+		skirmish.queue_free()
+		return false
+
+	var time_left_before_low = job.time_left
+	for i in range(60):
+		skirmish.production.tick(1.0 / 60.0)
+	var low_consumed = time_left_before_low - job.time_left
+	# RTS_CORE_ROADMAP.md E1: low_power_modifier=300 means 1/3 the normal rate.
+	if abs(low_consumed - normal_consumed / 3.0) > 0.05:
+		print("  [FAIL] The SAME in-progress job should now consume time_left at 1/3 the Normal rate while Low power, expected ~", normal_consumed / 3.0, ", got ", low_consumed)
+		extra.queue_free()
+		skirmish.queue_free()
+		return false
+
+	# Recover power mid-build (remove the extra building) - the key proof
+	# this is a LIVE per-tick effect, not a total_time multiplier baked in
+	# once at enqueue() (the old build_time *= 1.5 hack this chunk replaced).
+	extra.queue_free()
+	await process_frame
+	skirmish._recalc_energy_economy()
+	if skirmish.is_low_power(skirmish.PLAYER_TEAM):
+		print("  [FAIL] Test setup: removing the extra building should have restored Normal power")
+		skirmish.queue_free()
+		return false
+
+	var time_left_before_recover = job.time_left
+	for i in range(60):
+		skirmish.production.tick(1.0 / 60.0)
+	var recovered_consumed = time_left_before_recover - job.time_left
+	if abs(recovered_consumed - normal_consumed) > 0.05:
+		print("  [FAIL] The SAME job should speed back up to the full Normal rate the instant power recovers, expected ~", normal_consumed, ", got ", recovered_consumed)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Production speed responds live to the team's power state changing mid-build (slows to 1/3 under Low power, speeds back up the instant power recovers) - not a one-shot multiplier baked in at queue time.")
+	return true
+
+func test_e1_low_power_disables_defense_weapon_and_dims_its_mesh() -> bool:
+	print("Running Test Suite: E1 - Low Power Disables A Defense's Weapon And Dims Its Mesh (RTS_CORE_ROADMAP.md E1)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# basic_cannon specifically (not heavy_machine_gun): its enclosed turret
+	# gets full 360-degree traverse regardless of mount facet
+	# (test_pintle_mounts_grant_full_traverse already proves this), so this
+	# test's target placement isn't at the mercy of an unrelated narrow-arc
+	# mount-style computation - the only thing under test here is the E1
+	# power gate, same weapon module _d1_test_blueprint() already uses.
+	var defense_bp = {
+		"hull_type": "pillbox_foundation",
+		"faction": "industrialists",
+		"armor_material": "hardened_steel",
+		"armor_thickness": 1.0,
+		"locomotion": {"type_id": "", "settings": {}},
+		"modules": [{"type_id": "basic_cannon", "position": {"x": 0, "y": 1.2, "z": 0}, "rotation": {"x": 0, "y": 0, "z": 0}, "scale": {"x": 1, "y": 1, "z": 1}, "tweaks": {}}]
+	}
+	var defense = skirmish.spawn_defense(defense_bp, skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(16, 0, 0))
+	await process_frame
+
+	# The defense itself is a static building and owes its own +3 upkeep
+	# (test_e1_power_state_derives... already proves that alone is enough to
+	# tip a fresh match into Low) - a power_plant's real +20 capacity
+	# compensates so this test can start from a genuine Normal baseline
+	# before deliberately forcing Low below.
+	var plant = skirmish._spawn_prefab("power_plant", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(-16, 0, 0), skirmish.player_faction)
+	await process_frame
+
+	var weapon = null
+	for child in defense.defense_hull.get_children():
+		if "target" in child:
+			weapon = child
+			break
+	if weapon == null:
+		print("  [FAIL] Test setup: the defense's heavy_machine_gun should have a real auto_weapon.gd child")
+		defense.queue_free()
+		skirmish.queue_free()
+		return false
+
+	var mesh = _e1_find_first_geometry_instance(defense)
+	if mesh == null:
+		print("  [FAIL] Test setup: the defense should have a real renderable mesh somewhere under it")
+		defense.queue_free()
+		skirmish.queue_free()
+		return false
+
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var target = CharacterBody3D.new()
+	target.set_script(BattleUnitScript)
+	root.add_child(target)
+	target.team = 1
+	target.set_meta("team", 1)
+	target.add_to_group("damageable")
+	target.global_position = defense.global_position + Vector3(5, 0, 0)
+	await process_frame
+	# A real Skirmish scans _damageable_candidates() via a periodic spatial
+	# grid (get_nearby_damageable()), not a live group scan - a manually
+	# constructed target needs a forced rebuild rather than waiting out the
+	# real grid_timer.
+	skirmish._rebuild_damageable_grid()
+
+	var free_all = func():
+		defense.queue_free()
+		target.queue_free()
+		skirmish.queue_free()
+
+	skirmish._recalc_energy_economy()
+	if skirmish.is_low_power(skirmish.PLAYER_TEAM):
+		print("  [FAIL] Test setup: the power_plant should have restored a genuine Normal baseline despite the defense's own upkeep")
+		plant.queue_free()
+		free_all.call()
+		return false
+
+	# _find_nearest_target() directly (delta=-1 sentinel) bypasses the
+	# PERFORMANCE_PLAN.md P1a reacquire throttle - _ready() seeds
+	# _reacquire_timer with a random [0, REACQUIRE_INTERVAL) value, so a
+	# single _physics_process(delta) call here would flakily skip scanning
+	# depending on that random seed (this isn't what's under test anyway;
+	# the low-power GATE check below deliberately keeps _physics_process
+	# since that's the real code path the gate itself lives in).
+	weapon._find_nearest_target()
+	if weapon.target == null:
+		print("  [FAIL] Test setup: the weapon should acquire the hostile target under Normal power")
+		plant.queue_free()
+		free_all.call()
+		return false
+	if mesh.transparency > 0.01:
+		print("  [FAIL] A defense's mesh should not be dimmed under Normal power, got transparency ", mesh.transparency)
+		plant.queue_free()
+		free_all.call()
+		return false
+
+	# Force Low power the same way test_e1_power_state_derives... proved a
+	# bare defense alone does it - remove the compensating power_plant so the
+	# defense's own upkeep is unmasked again.
+	plant.queue_free()
+	await process_frame
+	skirmish._recalc_energy_economy()
+	if not skirmish.is_low_power(skirmish.PLAYER_TEAM):
+		print("  [FAIL] Test setup: removing the power_plant should have tipped the team into Low power")
+		free_all.call()
+		return false
+
+	weapon.target = null
+	weapon._physics_process(1.0 / 60.0)
+	if weapon.target != null:
+		print("  [FAIL] A defense's weapon should be fully inert (no targeting) while its team is Low power")
+		free_all.call()
+		return false
+	if mesh.transparency < 0.01:
+		print("  [FAIL] A defense's mesh should visibly dim while its team is Low power, got transparency ", mesh.transparency)
+		free_all.call()
+		return false
+
+	# Recover power - the SAME defense should un-dim and its weapon should
+	# work again immediately.
+	var plant2 = skirmish._spawn_prefab("power_plant", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(-16, 0, 0), skirmish.player_faction)
+	await process_frame
+	skirmish._recalc_energy_economy()
+	if skirmish.is_low_power(skirmish.PLAYER_TEAM):
+		print("  [FAIL] Test setup: rebuilding the power_plant should have restored Normal power")
+		plant2.queue_free()
+		free_all.call()
+		return false
+
+	weapon._find_nearest_target()
+	if weapon.target == null:
+		print("  [FAIL] Once power recovers, the SAME weapon should be able to acquire a target normally again")
+		plant2.queue_free()
+		free_all.call()
+		return false
+	if mesh.transparency > 0.01:
+		print("  [FAIL] Once power recovers, the SAME defense's mesh should un-dim, got transparency ", mesh.transparency)
+		plant2.queue_free()
+		free_all.call()
+		return false
+
+	plant2.queue_free()
+	free_all.call()
+	await process_frame
+	print("  [PASS] A defense's weapon is fully inert and its mesh visibly dims while its team is Low/Critical power, and both recover the instant power is restored - real per-tick gating, not just a flag.")
+	return true
+
 # Reusable per-map smoke test (per Chris's one-at-a-time verification
 # instruction: each map gets a real scripted playthrough, not just eyeball
 # screenshots) - real Skirmish spawn on the given map_id, checks:
@@ -8849,9 +9146,11 @@ func test_base_power_is_separate_from_vehicle_energy_budget() -> bool:
 		return false
 
 	# HUD label should read as base power, not a bare/ambiguous "Energy".
+	# RTS_CORE_ROADMAP.md E1: moved from resource_label into its own real
+	# power bar's status label.
 	skirmish._update_resource_ui()
-	if not "Base Power" in skirmish.resource_label.text:
-		print("  [FAIL] The HUD readout should clearly label this as base/team power, got '", skirmish.resource_label.text, "'")
+	if not "Base Power" in skirmish.power_status_label.text:
+		print("  [FAIL] The HUD readout should clearly label this as base/team power, got '", skirmish.power_status_label.text, "'")
 		unit.queue_free()
 		plant.queue_free()
 		skirmish.queue_free()
