@@ -48,12 +48,23 @@ Bottom bar: buildings first (Factory, Refinery), then your unit blueprints (queu
 
 ## Tests
 
-Headless test suite (11 suites: stat math, clipping, damage model, firing arcs, stripping, team targeting, economy/production, win condition):
+Headless test suite (152 suites: stat math, clipping, damage model, firing arcs,
+stripping, team targeting, economy/production, terrain/navmesh, base building,
+faction/UI, win condition, and more). Run via the wrapper, not the raw Godot
+invocation — the `.godot` import cache is gitignored and goes stale whenever a
+new autoload or `class_name` script lands, which breaks a direct
+`--headless --script run_tests.gd` run with a misleading
+`Identifier "X" not declared` error before a single test executes:
 
 ```
 cd prototype
-./Godot_v4.3-stable_win64_console.exe --headless --script run_tests.gd
+./run_tests.ps1   # Windows (PowerShell)
+./run_tests.sh    # Linux/macOS/Git Bash
 ```
+
+The suite runs every registered test regardless of earlier failures and prints
+a full list of failing suite names at the end, rather than stopping at the
+first one.
 
 ## Art pipeline
 
