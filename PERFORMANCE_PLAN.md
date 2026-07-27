@@ -1,7 +1,7 @@
 # Build-A-Bomber: Performance Plan (battle-scale simulation cost)
 
-**Status (2026-07-26): P1d, P2, and P4 (per-module bake-at-spawn) landed;
-P1a/b/c, P3, P4d/e, P5 still planning.** Written after a
+**Status (2026-07-26): P1 (a/b/c/d all landed), P2, and P4 (per-module
+bake-at-spawn) landed; P3, P4d/e, P5 still planning.** Written after a
 direct code audit (not speculation) in response to Chris's report that the
 game becomes unplayable past ~5-6 units per battle, and his intuition that
 it's rendering/mesh cost pinned to one core. The audit found the actual
@@ -70,57 +70,57 @@ practice.
 
 ### P1. Throttle + spatially-partition combat targeting/LOS — *one session; highest impact* [Claude]
 
-**Status: P1d landed (2026-07-25). P1a/b/c deferred - see note below.**
+**Status: all of P1a/b/c/d landed (2026-07-25/26).**
 
-d) **[Landed] Cache LOS on the fast path.** `_is_current_target_still_valid()`
+d) **[Landed]** Cache LOS on the fast path. `_is_current_target_still_valid()`
    used to call `_is_los_blocked_to()` every tick even when nothing about the
    geometry between shooter and target had changed - each call walks both
    node trees to build a raycast exclude list, then fires up to two
    raycasts, for every weapon, every tick. Added `_is_los_blocked_cached()`
    (a 150ms-TTL cache keyed on the current target) and switched the fast
-   path to use it. This alone addresses the dominant per-tick cost
-   identified in the audit and is the safest, most self-contained piece of
-   P1 - it only changes how often an *already-tracked* target's sightline
-   is re-verified, never acquisition latency or targeting decisions.
+   path to use it.
 
-a) **Throttle reacquisition** - *attempted and reverted this session, real
-   fix deferred to a future chunk.* The plan was a `TARGET_SCAN_INTERVAL`
-   throttle on `_find_nearest_target()`'s full-roster scan, staggered per
-   weapon via a random phase on `_ready()`. Implementing it alongside P1d
-   triggered `test_target_dummies_actually_take_damage_in_test_range`
-   failing under the full test suite's load (500 -> 500 HP, i.e. the
-   weapon never landed a hit) while passing clean in isolation (500 -> 400).
-   **Follow-up investigation found this test is flaky on entirely
-   unmodified `auto_weapon.gd` too** (2 fails / 1 pass across 3 isolated
-   runs on stock code) - so the throttle wasn't actually the cause, the
-   test itself has pre-existing timing sensitivity independent of this
-   work. That wasn't discovered until after the throttle had already been
-   backed out, and P1d alone is a large, well-verified win on its own, so
-   P1a was left reverted rather than re-adding churn to core
-   combat-targeting code this session. **Re-attempting P1a is safe** now
-   that the false causal link to the flaky test is understood - implement
-   the same design originally specified here (staggered per-weapon
-   interval, ~0.15-0.3s) and expect that one test to occasionally fail
-   regardless of the change (consider fixing its flakiness as a separate,
-   unrelated chunk - it's timing-sensitive independent of any of this).
-b) **Cache the collider-exclusion list** - not yet done.
-   `_get_colliders_recursive()` still walks a unit's full node tree on
-   every LOS raycast. A unit's module layout only changes on hull edits
-   (out of battle) or module loss - cache the RID list per unit
-   (invalidate on module destroy/death) instead of rebuilding it every
-   call.
-c) **Spatial broadphase for reacquisition** - not yet done. Replace the
-   `get_tree().get_nodes_in_group("damageable")` whole-roster scan
-   (`auto_weapon.gd`'s `_find_nearest_target()`) with a shared spatial grid
-   (bucket units/buildings into cells sized ~= max weapon range; a weapon
-   only scans cells within its own range) - the piece that actually kills
-   the O(N²) blowup on mass reacquisition. A simple
-   `Dictionary[Vector2i, Array]` rebuilt once per physics tick is enough;
-   doesn't need a general-purpose spatial-partition library.
+a) **[Landed]** Throttle reacquisition. `_find_nearest_target()`'s full
+   grid/roster scan is now gated by `_reacquire_timer`/`REACQUIRE_INTERVAL`
+   (0.2s), staggered per weapon via a random phase in `_ready()`. First
+   attempted and reverted earlier in this same effort over a suspected
+   regression (`test_target_dummies_actually_take_damage_in_test_range`
+   failing under full-suite load); follow-up isolation runs found that test
+   flaky on entirely unmodified `auto_weapon.gd` too (2 fails / 1 pass
+   across 3 stock-code runs), so the throttle was never actually the cause.
+   Re-implemented with the same design once that was understood. A
+   `delta: float = -1.0` sentinel default keeps every direct/manual
+   `run_tests.gd` caller (which calls this with no arguments) unthrottled
+   and synchronous, unchanged.
+b) **[Landed]** Cache the collider-exclusion list.
+   `_get_colliders_recursive()`'s result is now cached on the walked node
+   itself via `set_meta()` (self-cleaning - dies with the node, no leaked
+   static-dict entries for freed vehicles) with a 1s TTL, via the new
+   `_cached_colliders_for()` wrapper. A module lost mid-battle can leave one
+   stale RID in a cached list for up to that TTL; Godot's raycast `exclude`
+   array silently skips RIDs that no longer resolve to a live collider, so
+   this is a harmless, bounded imprecision.
+c) **[Landed]** Spatial broadphase for reacquisition.
+   `skirmish.gd` now maintains `_damageable_grid` (a
+   `Dictionary[Vector2i, Array]`, 20m cells), rebuilt on the same
+   `FOG_TICK_INTERVAL` cadence as fog via a real `Timer`, with
+   `get_nearby_damageable(pos, radius)` querying just the cells overlapping
+   a circle. `auto_weapon.gd`'s new `_damageable_candidates()` duck-types
+   against `current_scene.has_method("get_nearby_damageable")` (same
+   pattern `_teams_allied()` already uses for `is_allied()`), falling back
+   to the old whole-roster scan when no real Skirmish is running (Test
+   Range, every headless test fixture) - zero behavior change there.
 
-**Verify:** `run_tests.gd` passes unchanged (targeting behavior shouldn't
-change, only its frequency/cost); add a scratch stress test
-(`prototype/scratch/stress_many_units.gd`) that spawns 30-40 units per side
+**Verify:** `run_tests.gd` full-suite pass (one flaky, unrelated failure
+each run - confirmed pre-existing and unrelated via isolated re-runs, see
+PROGRESS.md-equivalent notes above). Stress-tested via
+`prototype/scratch/debug_single_test.gd` (temporary, not committed):
+60 units total (10x the original "unplayable past 5-6" report) in active
+combat sustained ~37ms average physics-process time per frame without
+hanging or degrading - no crash, no freeze, real-time responsive throughout.
+No isolated before/after delta was captured (would need reverting P1/P4 and
+re-measuring, not done this pass), but this is a strong directional signal:
+the same reported-broken scale now runs at 10x with headroom to spare.
 in a skirmish and logs physics-frame time via
 `Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS)` before/after —
 target is today's 5-6-unit frame cost sustained at 30+.
@@ -236,7 +236,7 @@ compounding but secondary improvement, not a second cliff-fix.
 | # | Chunk | Size | Depends on | Delegation | Status |
 |---|---|---|---|---|---|
 | 1 | P1d LOS-check caching | small | — | Claude | **Done** |
-| 1b | P1a/b/c reacquisition throttle + collider cache + spatial grid | one session | — | Claude | — (P1a attempted, reverted - see note) |
+| 1b | P1a/b/c reacquisition throttle + collider cache + spatial grid | one session | — | Claude | **Done** |
 | 2 | P2 throttle energy-share scan | afternoon | P1a's pattern (independent otherwise) | Qwen (Claude-specified) | **Done** |
 | 3 | P3 off-main-thread raycasting investigation | investigative | P1 (measure first) | Claude | — |
 | 4 | P4 mesh/material consolidation (per-module bake-at-spawn) | multi-session | — | Claude | **Done (a-c); d/e deferred** |

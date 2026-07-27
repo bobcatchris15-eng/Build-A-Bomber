@@ -42,18 +42,14 @@ var _los_cache_target: Node3D = null
 var _los_cache_timer: float = 0.0
 const LOS_CACHE_TTL: float = 0.15
 
-# PERFORMANCE_PLAN.md P1a (throttling _find_nearest_target()'s full-roster
-# reacquisition scan) was attempted alongside the LOS cache above and
-# reverted: it caused a real regression under the full test suite's load
-# (test_target_dummies_actually_take_damage_in_test_range failed - 500 -> 500
-# - while passing clean in isolation, 500 -> 400), most likely a timing
-# interaction between the throttle window and real per-tick delta variance
-# under heavier engine load. The LOS cache above already addresses the
-# dominant cost (every weapon re-raycasting its CURRENT target every tick
-# regardless of whether anything changed); reacquisition only runs at all
-# for weapons with no target, a rarer case in a real battle. Left as a
-# follow-up chunk in PERFORMANCE_PLAN.md rather than shipping a
-# not-fully-understood risk in core combat-targeting code.
+# PERFORMANCE_PLAN.md P1a: reacquiring a target (_find_nearest_target()'s
+# full grid/roster scan) is the other expensive path, throttled the same
+# way _try_auto_engage() already throttles its own O(n) scan.
+# _ready() staggers each weapon's timer with a random phase so a mass
+# target-loss event (an alpha strike, a scouted group dying) doesn't turn
+# into every weapon re-scanning on the same physics frame.
+var _reacquire_timer: float = 0.0
+const REACQUIRE_INTERVAL: float = 0.2
 
 # frame_built weapons (ModuleCatalog.get_traverse_limit_angle == 0.0 exactly -
 # the barrel is fixed to the hull, so the whole vehicle aims instead, see
@@ -235,6 +231,29 @@ func _get_colliders_recursive(node: Node, list: Array):
 	for child in node.get_children():
 		_get_colliders_recursive(child, list)
 
+# PERFORMANCE_PLAN.md P1b: _get_colliders_recursive() walks a node's ENTIRE
+# subtree (for a full vehicle: the hull plus every mounted module) on every
+# single LOS raycast - this weapon's own tree, plus whichever candidate is
+# currently being checked, every tick a target is tracked and every
+# candidate considered during reacquisition. Cache the result on the node
+# itself via set_meta() (not a static Dictionary here - metadata dies with
+# the node, so a freed vehicle can't leak a cache entry forever) with a
+# short TTL. A module lost mid-battle (subsystem stripping) can leave one
+# stale, already-invalid RID in a cached list for up to the TTL - Godot's
+# exclude array silently skips RIDs that no longer resolve to a live
+# collider, so this is a harmless, bounded imprecision, not a correctness
+# bug.
+const COLLIDER_CACHE_TTL_MS: int = 1000
+func _cached_colliders_for(node: Node) -> Array:
+	var now = Time.get_ticks_msec()
+	if node.has_meta("_collider_cache_expires_at") and now < node.get_meta("_collider_cache_expires_at"):
+		return node.get_meta("_collider_cache_list")
+	var list = []
+	_get_colliders_recursive(node, list)
+	node.set_meta("_collider_cache_list", list)
+	node.set_meta("_collider_cache_expires_at", now + COLLIDER_CACHE_TTL_MS)
+	return list
+
 # Helper to find vehicle root
 func get_vehicle_root() -> Node3D:
 	var p = get_parent()
@@ -333,9 +352,7 @@ func _is_los_blocked_to(candidate: Node3D) -> bool:
 	# defense's turret could permanently "see" its own base and treat every
 	# target as blocked. get_vehicle_root() covers both cases uniformly.
 	var vehicle_for_exclude = get_vehicle_root()
-	var own_colliders = []
-	_get_colliders_recursive(vehicle_for_exclude if vehicle_for_exclude else self, own_colliders)
-	_get_colliders_recursive(candidate, own_colliders)
+	var own_colliders = _cached_colliders_for(vehicle_for_exclude if vehicle_for_exclude else self) + _cached_colliders_for(candidate)
 	query.exclude = own_colliders
 
 	var result = space_state.intersect_ray(query)
@@ -361,9 +378,7 @@ func _is_los_blocked_to(candidate: Node3D) -> bool:
 		var self_query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
 		self_query.collision_mask = 4 # Units
 		self_query.collide_with_areas = true
-		var candidate_colliders = []
-		_get_colliders_recursive(candidate, candidate_colliders)
-		self_query.exclude = candidate_colliders
+		self_query.exclude = _cached_colliders_for(candidate)
 		var self_result = space_state.intersect_ray(self_query)
 		if not self_result.is_empty() and self_result.get("collider") == vehicle:
 			return true
@@ -393,6 +408,9 @@ static func _looking_at_safe(dir: Vector3) -> Basis:
 
 func _ready():
 	resting_transform = transform
+	# PERFORMANCE_PLAN.md P1a: random phase so every weapon doesn't reacquire
+	# on the same physics frame as every other weapon.
+	_reacquire_timer = randf() * REACQUIRE_INTERVAL
 	if has_meta("module_data"):
 		var data = get_meta("module_data")
 		type_id = data.type_id
@@ -684,7 +702,7 @@ func _physics_process(delta):
 	time_since_last_shot += delta
 	_los_cache_timer -= delta
 	_recalculate_low_hp_dps_bonus()
-	_find_nearest_target()
+	_find_nearest_target(delta)
 
 	if target and is_instance_valid(target):
 		var target_pos = target.global_position
@@ -841,11 +859,40 @@ func _is_los_blocked_cached(candidate: Node3D) -> bool:
 	_los_cache_timer = LOS_CACHE_TTL
 	return _los_cache_blocked
 
-func _find_nearest_target():
+# PERFORMANCE_PLAN.md P1c: narrows the whole-roster "damageable" scan down
+# to just the cells within `radius` of `pos` when a real Skirmish (with the
+# spatial grid) is running the scene - duck-typed the same way
+# _teams_allied() defers to current_scene.is_allied(), so the Test Range and
+# every headless test fixture (neither has a real Skirmish) fall back to the
+# exact old full-roster scan unchanged.
+func _damageable_candidates(pos: Vector3, radius: float) -> Array:
+	var scene = get_tree().current_scene
+	if scene and scene.has_method("get_nearby_damageable"):
+		return scene.get_nearby_damageable(pos, radius)
+	return get_tree().get_nodes_in_group("damageable")
+
+# delta defaults to -1.0 (a "forced/manual scan" sentinel, distinct from any
+# real physics delta which is always >= 0.0) so every direct/manual caller in
+# run_tests.gd - which calls this with no arguments and expects a synchronous,
+# unthrottled scan - keeps working unchanged. Only real _physics_process(delta)
+# ticks (delta >= 0.0) are subject to the throttle below.
+func _find_nearest_target(delta: float = -1.0):
 	var resting_forward = get_parent().global_transform.basis * resting_transform.basis * Vector3.FORWARD
 
 	if _is_current_target_still_valid(resting_forward):
 		return
+
+	# PERFORMANCE_PLAN.md P1a: the full-roster/grid scans below are the
+	# expensive path - throttle them instead of running every tick while no
+	# valid target exists. target stays whatever it currently is (usually
+	# null) between scans. (Previously attempted and reverted this same
+	# session over a suspected regression that turned out to be an
+	# unrelated pre-existing flaky test - see git history / PROGRESS.md.)
+	if delta >= 0.0:
+		_reacquire_timer -= delta
+		if _reacquire_timer > 0.0:
+			return
+		_reacquire_timer = REACQUIRE_INTERVAL
 
 	# --- TEAM MODE (Skirmish): target any hostile "damageable" construct ---
 	var my_team = get_team()
@@ -853,7 +900,7 @@ func _find_nearest_target():
 		# repair_array's real fix: same-team, HP-deficit candidates instead
 		# of hostiles - the opposite filter from every other weapon below.
 		if targets_allies:
-			var ally_candidates = get_tree().get_nodes_in_group("damageable")
+			var ally_candidates = _damageable_candidates(global_position, fire_range)
 			var closest_ally: Node3D = null
 			var closest_ally_dist: float = fire_range
 			for c in ally_candidates:
@@ -888,7 +935,7 @@ func _find_nearest_target():
 			if closest_m:
 				target = closest_m
 				return
-		var candidates = get_tree().get_nodes_in_group("damageable")
+		var candidates = _damageable_candidates(global_position, fire_range)
 		var closest_c: Node3D = null
 		var closest_c_dist: float = fire_range
 		for c in candidates:
