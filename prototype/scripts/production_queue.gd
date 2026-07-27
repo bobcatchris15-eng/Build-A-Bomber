@@ -24,7 +24,12 @@ extends RefCounted
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
-const TIERS: Array = ["light", "medium", "heavy"]
+# RTS_CORE_ROADMAP.md D4: "structures" is a 4th tier in the SAME drip-fed
+# object as light/medium/heavy - it reuses tick()'s generic cost-drawing
+# loop below unchanged, but its OWN completion (see tick()'s own comment)
+# doesn't spawn a unit at a factory exit like the other 3 do; it hands off
+# to skirmish.gd's real ghost-placement flow instead.
+const TIERS: Array = ["light", "medium", "heavy", "structures"]
 
 # RTS_CORE_ROADMAP.md D3: RA's own vehicle build_time_speed_reduction table
 # (percent of normal build time), indexed by (live manufactories of that
@@ -111,6 +116,46 @@ func enqueue(team: int, blueprint: Dictionary, faction: String, cost_metal: int,
 		skirmish.get_node("/root/AudioManager").play_sfx("click")
 	return {"queued": true, "error": "", "reason": "", "tier": tier}
 
+# RTS_CORE_ROADMAP.md D4: the structures-tier analogue of enqueue() above -
+# no manufactory-of-a-tier gate (structures are what BUILD manufactories,
+# they can't require one) and no multi-factory speed bonus (that's a
+# vehicle-tier-only OpenRA table). `info` is skirmish.gd's own placement
+# dict ({kind, cost_metal, cost_crystal, blueprint (defense only)}) - stored
+# whole and handed back unchanged by pop_ready_structure() once the job is
+# done, since _begin_placement() already expects exactly this shape.
+func enqueue_structure(team: int, info: Dictionary) -> Dictionary:
+	if info.kind == "defense":
+		var legality = ModuleCatalog.validate_build_legality(info.blueprint)
+		if not legality.valid:
+			return {"queued": false, "error": "illegal", "reason": legality.reason, "tier": "structures"}
+	var build_time = skirmish.build_time_for_cost(Vector2i(info.cost_metal, info.cost_crystal))
+	get_queue(team, "structures").append({
+		"info": info,
+		"time_left": build_time,
+		"total_time": build_time,
+		"total_cost_metal": info.cost_metal,
+		"total_cost_crystal": info.cost_crystal,
+		"remaining_cost_metal": float(info.cost_metal),
+		"remaining_cost_crystal": float(info.cost_crystal),
+		"paused": false,
+		"stalled": false,
+	})
+	if team == skirmish._local_team() and skirmish.get_node_or_null("/root/AudioManager"):
+		skirmish.get_node("/root/AudioManager").play_sfx("click")
+	return {"queued": true, "error": "", "reason": "", "tier": "structures"}
+
+# RTS_CORE_ROADMAP.md D4: "buildings never auto-exit" - once the front
+# structures job is genuinely done, skirmish.gd polls this every physics
+# tick (only when nothing's currently being placed) to pop it and hand back
+# its placement info, at which point _begin_placement() takes over exactly
+# like a player had just clicked the build button, except the cost is
+# already fully paid. Empty Dictionary if there's nothing ready yet.
+func pop_ready_structure(team: int) -> Dictionary:
+	var q = get_queue(team, "structures")
+	if q.is_empty() or q[0].time_left > 0.0:
+		return {}
+	return q.pop_front().info
+
 # RTS_CORE_ROADMAP.md D1: cancels the item at `index` (0 = the front,
 # currently-ticking item), refunding exactly what's been drawn so far
 # (total_cost - remaining_cost) - not the full price, matching OpenRA. A
@@ -186,6 +231,14 @@ func tick(delta: float):
 			job.time_left = new_time_left
 
 			if job.time_left <= 0.0:
+				# RTS_CORE_ROADMAP.md D4: "buildings never auto-exit" - a
+				# structures job just stays here, genuinely done (time_left
+				# already clamped at 0 above), until skirmish.gd's
+				# pop_ready_structure() claims it and hands off to real
+				# ghost placement. No factory/exit/spawn logic applies to a
+				# building placement at all.
+				if tier == "structures":
+					continue
 				var factory = skirmish.get_team_factory(team, tier)
 				# RTS_CORE_ROADMAP.md C4: OpenRA's blocked-exit handling -
 				# a finished job stays `done` (time_left clamped at 0, not

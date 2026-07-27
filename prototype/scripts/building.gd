@@ -122,6 +122,27 @@ var footprint: Vector3 = Vector3(5, 3, 5)
 var gives_buildable_area: bool = true
 var requires_buildable_area: bool = true
 
+# RTS_CORE_ROADMAP.md D4: "buildings never auto-exit" - a building actually
+# placed live during a match (not one of the starting bases, which spawn
+# complete) is inert (no weapons/production/energy contribution - see
+# auto_weapon.gd's _owner_building_incomplete(), skirmish.gd's
+# get_team_factory()/_recalc_energy_economy()) for a real construction
+# grace period, with a scale-up tween as the visible tell. Only
+# start_construction_animation()'s callers (skirmish.gd's
+# _try_place_building()) ever set this true - the match-start spawn path
+# never does, so the initial base is immediately usable.
+const BUILD_INCOMPLETE_DURATION: float = 2.0
+var build_incomplete: bool = false
+
+func start_construction_animation() -> void:
+	build_incomplete = true
+	scale = Vector3(0.05, 0.05, 0.05)
+	var tween = create_tween()
+	tween.tween_property(self, "scale", Vector3.ONE, BUILD_INCOMPLETE_DURATION)
+	tween.finished.connect(func():
+		if is_instance_valid(self):
+			build_incomplete = false)
+
 func _ready():
 	add_to_group("buildings")
 	add_to_group("damageable")

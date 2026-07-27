@@ -1,20 +1,29 @@
 # Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
 
-**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3, C4, D1, D2, D3
-landed (Phase C complete); B8 in progress (1 of N maps landed).** This is a resumable roadmap, written so a fresh session can pick up any
+**Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3, C4, D1, D2, D3, D4
+landed (Phase D complete); B8 parked as future work (1 map landed -
+`scattered_peaks` - more maps can be added anytime by resuming that arc, but
+it's not the active focus right now).** This is a resumable roadmap, written so a fresh session can pick up any
 single chunk without re-deriving the architecture. Chunks are ordered with
 explicit dependencies in the sequencing table at the end; each is sized to land
 as one commit with its own `PROGRESS.md` entry. **Update the sequencing
 table's status as chunks land** — a stale "next up" header in a plan doc is
 exactly the confusion that `LOCOMOTION_REBUILD_PLAN.md` accumulated before
-being corrected on 2026-07-24. **Next up: D4** (buildings get build time),
-or continue B8 - confirm which.
+being corrected on 2026-07-24. **Next up: Phase E**, or resume B8.
+
+**D4 shipped with two real bugs Chris caught by just running the actual
+game** (`Object.get()` called with a Dictionary-style default arg on a real
+Node; an overly-narrow `var b: Node` type hint blocking a later property
+assignment) - both fixed, see `PROGRESS.md`'s D4 entry. Also logs one
+deliberate gap: cancelling a queued building's ghost placement doesn't
+refund it or let you re-trigger placement - not in this chunk's stated
+scope, flagged as a possible follow-up.
 
 **A pre-existing, already-flaky test class got a background investigation
 task spun off rather than being chased further inline**: across repeated
 suite runs, a different navmesh/movement test fails each time (never the
 same one twice), consistent with Recast-bake nondeterminism first suspected
-during C1. Not a regression from D1/D2/D3 - each chunk's own tests pass
+during C1. Not a regression from D1/D2/D3/D4 - each chunk's own tests pass
 every run. See the spawned task / `PROGRESS.md`'s D1 entry.
 
 **D2 validated its own "needs a non-headless click-driving script" verify
@@ -664,7 +673,7 @@ readback) over catalog-number assertions.
 | 7 | **B5 slope-aware navmesh + collision** | **multi** | B4 | **Done (flag-gated, see note above)** |
 | 8 | B6 retire elevation_zones, migrate, rect+bounds | one session | B5 | **Done (Vector2 half_extents deferred, see note above)** |
 | 9 | B7 terrain type differentiation | one session | B4 | **Done** |
-| 10 | B8 bigger/denser maps | multi (content) | B5–B7 | **In progress (1 map: `scattered_peaks`)** |
+| 10 | B8 bigger/denser maps | multi (content) | B5–B7 | **Parked (1 map: `scattered_peaks`) - future work, resume anytime** |
 | 11 | B9 minimap | 1–1.5 sessions | B6 | **Done** |
 | 12 | B10 spawn assignment + fairness lint | multi | B3, B8 | **Done (slot-picker UI deferred, see note above)** |
 | 13 | C1 buildings block movement | multi | — | **Done** |
@@ -674,7 +683,7 @@ readback) over catalog-number assertions.
 | 17 | D1 drip-fed cost + refunds | one session | A1, A2 | **Done** |
 | 18 | D2 queue HUD + tabs | one session | D1 | **Done** |
 | 19 | D3 multi-factory speed | afternoon | A1 | **Done** |
-| 20 | D4 building build time | multi | D1 | — |
+| 20 | D4 building build time | multi | D1 | **Done** |
 | 21 | E1 power states | one session | D1, D4 | — |
 | 22 | E2 sell + repair | afternoon | C2 | — |
 | 23 | E3 tech-tree greying | one session | D2 | — |

@@ -626,7 +626,22 @@ func _recalculate_low_hp_dps_bonus():
 	var hp_ratio = clamp(vehicle.hp / vehicle.max_hp, 0.0, 1.0)
 	dps = base_dps * (1.0 + bonus_max * (1.0 - hp_ratio))
 
+# RTS_CORE_ROADMAP.md D4: a defense building's weapons are inert for its
+# whole build_incomplete grace period (real construction time, not just a
+# cosmetic scale-up) - walks up to whichever ancestor actually carries the
+# flag (building.gd), since a weapon module sits several nodes below the
+# building itself in the reconstructed hull hierarchy.
+func _owner_building_incomplete() -> bool:
+	var node = get_parent()
+	while node:
+		if "build_incomplete" in node:
+			return node.build_incomplete
+		node = node.get_parent()
+	return false
+
 func _physics_process(delta):
+	if _owner_building_incomplete():
+		return
 	# Spin radar mast dish
 	if type_id == "sensor_suite":
 		var dish = get_node_or_null("sensor_suite_dish")

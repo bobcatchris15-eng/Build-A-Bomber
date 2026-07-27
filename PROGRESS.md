@@ -4,6 +4,26 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-26 — RTS_CORE_ROADMAP.md D4: buildings get build time
+
+Closes out the multi-session chunk. Buildings now go through a real 4th "structures" production queue instead of spawning a ghost the instant you click - "buildings never auto-exit," matching OpenRA.
+
+**Shipped:**
+- `production_queue.gd` gains a 4th tier, `"structures"`, sharing `tick()`'s generic drip-fed cost/pause-on-broke machinery with light/medium/heavy - but its completion branch is special-cased: a done structures job just sits there (no factory/exit/spawn logic applies to a building), waiting for `pop_ready_structure()` to claim it.
+- New `enqueue_structure()`/`pop_ready_structure()`: the structures-tier analogues of `enqueue()`/the unit-spawn path, minus the manufactory-of-a-tier gate (structures are what BUILD manufactories) and the multi-factory speed bonus (vehicle-only in OpenRA).
+- `skirmish.gd`: clicking a Structures/Defenses button now calls `_queue_structure_build()` (queues, doesn't place) instead of `_begin_placement()` directly. `_physics_process()` polls `pop_ready_structure()` every tick (only when nothing else is currently being placed) and auto-starts real ghost placement the instant a job is actually done - same UX as the old instant-click-to-place, just gated behind a real timer now. `_begin_placement()`/`_try_place_building()` lost their own afford/spend checks entirely, since cost is already fully paid by the time either ever runs.
+- `building.gd` gains `build_incomplete` + `start_construction_animation()` (a real 2s scale-up tween) - only ever set true by a LIVE player placement (`_try_place_building()`), never the match-start `_spawn_bases()` path, so the initial base stays instantly usable. While incomplete: `get_team_factory()`/`count_factories_of_tier()` skip it entirely (no production/multi-factory-bonus contribution), `_recalc_energy_economy()` skips its capacity *and* upkeep, and `auto_weapon.gd`'s new `_owner_building_incomplete()` (walks up to whichever ancestor carries the flag) makes its weapons fully inert.
+
+**Two real bugs caught by a very direct signal - Chris testing the actual running game and reporting "Skirmish is failing to load":**
+1. `b.get("build_incomplete", false)` on three call sites, where `b` is a real `Node`, not a `Dictionary` - `Object.get()` only takes one argument (no default), unlike `Dictionary.get()`. Fixed by reading `b.build_incomplete` directly, since the field is a real property on every building now, not something needing duck-typed fallback.
+2. `var b: Node` in `_try_place_building()` - too-narrow a static type hint blocked a later `b.bp_manager = ...` assignment (GDScript's static analysis didn't know a plain `Node` could have that property, even though the runtime value always does). Fixed by typing it `StaticBody3D`, matching what `spawn_defense()`/`_spawn_prefab()` actually return.
+
+**Deliberate simplification, not yet handled**: cancelling a structure's ghost placement (Escape) doesn't return it to a "ready to place again" state or refund it - the cost stays spent and the building is simply lost. OpenRA lets you re-trigger a ready building's placement from its sidebar icon; this project's simpler auto-trigger-on-done model doesn't have an equivalent "still ready, just not currently showing a ghost" state yet. Not exercised by the roadmap's own stated scope for this chunk - worth a follow-up if it turns out to matter in practice.
+
+**Verified:** clicking a structure queues a real drip-fed build and does NOT begin ghost placement immediately; ghost placement starts automatically once `pop_ready_structure()` confirms it's actually done. A freshly-placed building is `build_incomplete` (excluded from factory-tier counts) immediately after placement, and counts normally again once the flag clears. A `build_incomplete` defense's weapon can't acquire a target at all; the identical weapon works normally the instant the flag clears. Full suite green except the same pre-existing, already-flagged navmesh-test flakiness noted in C1-D3's entries.
+
+---
+
 ## 2026-07-26 — RTS_CORE_ROADMAP.md D3: multi-factory speed bonus
 
 RA's own vehicle `build_time_speed_reduction` table - every unit this game produces is a vehicle, so there's no other production category to distinguish from.

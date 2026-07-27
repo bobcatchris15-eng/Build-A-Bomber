@@ -117,6 +117,9 @@ func _init():
 	success = success and await test_d2_queue_strip_right_click_pauses_then_cancels()
 	success = success and await test_d3_second_manufactory_of_a_tier_gives_075x_build_time()
 	success = success and await test_d3_destroying_a_manufactory_mid_job_leaves_the_timer_alone()
+	success = success and await test_d4_clicking_a_structure_queues_it_instead_of_placing_immediately()
+	success = success and await test_d4_freshly_placed_building_is_build_incomplete_until_its_grace_period_clears()
+	success = success and await test_d4_build_incomplete_weapon_does_not_fire()
 	success = success and await test_map_open_plains_smoke()
 	success = success and await test_map_lake_crossing_smoke()
 	success = success and await test_map_highland_chokepoint_smoke()
@@ -5823,13 +5826,6 @@ func test_c2_placement_shoves_own_units_clear_instead_of_failing() -> bool:
 	await process_frame
 	await process_frame
 
-	# RTS_CORE_ROADMAP.md A2/D1: debug_infinite_resources defaults to true
-	# (DebugSettings' own deliberate default for active development) and
-	# re-floors metal back up to INFINITE_RESOURCE_FLOOR on every spend() -
-	# a before/after metal comparison would pass vacuously with it on, same
-	# reasoning D1's own section already calls out for its drip-feed tests.
-	skirmish.debug_infinite_resources = false
-
 	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
 	# Clear ground within the refinery's (27, 84) own 8.0m buildable-area
 	# reach (RTS_CORE_ROADMAP.md C3) - footprint-to-footprint, not center-
@@ -5844,14 +5840,14 @@ func test_c2_placement_shoves_own_units_clear_instead_of_failing() -> bool:
 	blocker.add_to_group("damageable")
 	blocker.global_position = build_pos # sitting exactly where the building is about to go
 
+	# RTS_CORE_ROADMAP.md D4: _try_place_building() no longer spends -
+	# cost is already fully paid by production.enqueue_structure()'s
+	# drip-feed by the time a placement actually runs. Directly driving
+	# _try_place_building() here (skipping the queue) is still the right
+	# way to test the SHOVE mechanic in isolation; whether placement
+	# succeeded is proven by the refinery actually existing below.
 	skirmish.placing = {"kind": "refinery", "cost_metal": 150, "cost_crystal": 0}
-	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
 	skirmish._try_place_building(build_pos)
-
-	if skirmish.economy[skirmish.PLAYER_TEAM].metal == metal_before:
-		print("  [FAIL] Placement should succeed (and spend resources) even with a friendly unit standing on the spot - it should get shoved clear, not block the placement")
-		skirmish.queue_free()
-		return false
 
 	var refinery = null
 	for b in skirmish.get_team_buildings(skirmish.PLAYER_TEAM):
@@ -6475,6 +6471,156 @@ func test_d3_destroying_a_manufactory_mid_job_leaves_the_timer_alone() -> bool:
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Destroying a manufactory mid-job leaves the already-queued item's build-time multiplier untouched.")
+	return true
+
+func test_d4_clicking_a_structure_queues_it_instead_of_placing_immediately() -> bool:
+	print("Running Test Suite: D4 - Clicking A Structure Queues It (Real Build Time), Ghost Placement Only Begins Once Done (RTS_CORE_ROADMAP.md D4)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	skirmish._queue_structure_build({"kind": "power_plant", "cost_metal": 180, "cost_crystal": 40})
+	var q = skirmish.production.get_queue(skirmish.PLAYER_TEAM, "structures")
+	if q.size() != 1:
+		print("  [FAIL] Clicking a Structures button should queue a real structures-tier job, got queue size ", q.size())
+		skirmish.queue_free()
+		return false
+	if not skirmish.placing.is_empty():
+		print("  [FAIL] Placement should NOT begin immediately on click - buildings never auto-exit, it has to actually finish building first")
+		skirmish.queue_free()
+		return false
+
+	# Tick the job all the way through - RTS_CORE_ROADMAP.md D4's own
+	# "buildings never auto-exit" means tick() deliberately does NOT pop a
+	# done structures job on its own (unlike unit tiers) - it just sits at
+	# time_left <= 0 until skirmish.gd's _physics_process() polls
+	# pop_ready_structure() and starts real ghost placement.
+	for i in range(2000):
+		skirmish.production.tick(1.0 / 60.0)
+		if not q.is_empty() and q[0].time_left <= 0.0:
+			break
+	if q.is_empty() or q[0].time_left > 0.0:
+		print("  [FAIL] The structures job should have finished ticking down by now, queue=", q)
+		skirmish.queue_free()
+		return false
+
+	skirmish._physics_process(1.0 / 60.0) # the same poll _physics_process() itself does every real tick
+	if skirmish.placing.get("kind", "") != "power_plant":
+		print("  [FAIL] Ghost placement should have started automatically for the completed power_plant build, placing=", skirmish.placing)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Clicking a structure queues a real drip-fed build; ghost placement only begins once production.pop_ready_structure() confirms it's actually done.")
+	return true
+
+func test_d4_freshly_placed_building_is_build_incomplete_until_its_grace_period_clears() -> bool:
+	print("Running Test Suite: D4 - A Freshly-Placed Building Is build_incomplete (No Weapons/Production/Energy) Until Its Grace Period Clears (RTS_CORE_ROADMAP.md D4)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# A second light_manufactory, placed the same way _try_place_building()
+	# places anything live (not via _spawn_bases(), which never sets
+	# build_incomplete - the starting base spawns complete).
+	var first_light = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light")
+	var second_light = skirmish._spawn_prefab("light_manufactory", skirmish.PLAYER_TEAM, first_light.global_position + Vector3(0, 0, 14), skirmish.player_faction)
+	second_light.start_construction_animation()
+
+	if not second_light.build_incomplete:
+		print("  [FAIL] A freshly-placed building should be build_incomplete immediately after start_construction_animation()")
+		skirmish.queue_free()
+		return false
+	# Energy: an incomplete building's own energy_capacity/generators must
+	# NOT count yet - light_manufactory carries no energy_capacity itself,
+	# so just prove the gate exists via count_factories_of_tier(), which
+	# every other tier-aware check (get_team_factory, D3's speed bonus)
+	# shares the same underlying build_incomplete filter with.
+	if skirmish.count_factories_of_tier(skirmish.PLAYER_TEAM, "light") != 1:
+		print("  [FAIL] An incomplete second light manufactory should NOT count toward count_factories_of_tier() yet, got ", skirmish.count_factories_of_tier(skirmish.PLAYER_TEAM, "light"))
+		skirmish.queue_free()
+		return false
+	if skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light") != first_light:
+		print("  [FAIL] get_team_factory() should still resolve to the ALREADY-complete first manufactory, not the incomplete second one")
+		skirmish.queue_free()
+		return false
+
+	# Clear the flag directly (bypassing the real 2s tween - this test is
+	# about the GATING logic, not the tween's own timing) and confirm it
+	# now counts.
+	second_light.build_incomplete = false
+	if skirmish.count_factories_of_tier(skirmish.PLAYER_TEAM, "light") != 2:
+		print("  [FAIL] Once build_incomplete clears, the second manufactory should count toward count_factories_of_tier(), got ", skirmish.count_factories_of_tier(skirmish.PLAYER_TEAM, "light"))
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] A freshly-placed building is build_incomplete (excluded from factory-tier counts) until its grace period clears, then counts normally.")
+	return true
+
+func test_d4_build_incomplete_weapon_does_not_fire() -> bool:
+	print("Running Test Suite: D4 - A build_incomplete Defense's Weapon Does Not Target Or Fire (RTS_CORE_ROADMAP.md D4)...")
+	await process_frame
+
+	var building = StaticBody3D.new()
+	building.set_script(preload("res://scripts/building.gd"))
+	root.add_child(building)
+	building.team = 0
+	building.set_meta("team", 0) # auto_weapon.gd's get_team() reads the META, not the property directly
+	building.build_incomplete = true
+
+	var weapon = Node3D.new()
+	weapon.set_script(preload("res://scripts/auto_weapon.gd"))
+	building.add_child(weapon)
+	var ModuleDataScript = preload("res://scripts/module_data.gd")
+	var w_data = ModuleDataScript.new()
+	w_data.type_id = "basic_cannon"
+	w_data.base_weight = 80.0
+	w_data.base_dps = 40.0
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+
+	# A plain hostile battle_unit (not target_dummy.gd, which expects a
+	# real $MeshInstance3D child from its own .tscn - not present when
+	# constructed bare like this) - same minimal-target pattern already
+	# used by this suite's other weapon-targeting tests.
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var target = CharacterBody3D.new()
+	target.set_script(BattleUnitScript)
+	root.add_child(target)
+	target.team = 1
+	target.set_meta("team", 1)
+	target.add_to_group("damageable")
+	target.global_position = weapon.global_position + Vector3(3, 0, 0)
+	await process_frame
+
+	weapon._physics_process(1.0 / 60.0) # exercises the real gate, which lives at the top of _physics_process()
+	if weapon.target != null:
+		print("  [FAIL] A build_incomplete defense's weapon should not acquire a target at all")
+		building.queue_free()
+		target.queue_free()
+		return false
+
+	building.build_incomplete = false
+	weapon._find_nearest_target()
+	if weapon.target == null:
+		print("  [FAIL] Once build_incomplete clears, the SAME weapon should be able to acquire a target normally")
+		building.queue_free()
+		target.queue_free()
+		return false
+
+	building.queue_free()
+	target.queue_free()
+	await process_frame
+	print("  [PASS] A build_incomplete defense's weapon is fully inert (no targeting) and works normally again once the flag clears.")
 	return true
 
 # Reusable per-map smoke test (per Chris's one-at-a-time verification

@@ -458,6 +458,16 @@ func _physics_process(delta):
 	if not queue_strips.is_empty():
 		_update_queue_panel()
 	_refresh_tier_gated_buttons()
+	# RTS_CORE_ROADMAP.md D4: "buildings never auto-exit" - once a
+	# structures job is genuinely done, real ghost placement begins
+	# automatically (matching the old instant-placement UX exactly, just
+	# gated behind a real build timer now). Only when nothing else is
+	# already being placed - a second queued structure waits its turn until
+	# the first is placed or cancelled.
+	if production and placing.is_empty():
+		var ready_info = production.pop_ready_structure(PLAYER_TEAM)
+		if not ready_info.is_empty():
+			_begin_placement(ready_info)
 	# RTS_CORE_ROADMAP.md C1: one-frame debounce - a building placed/
 	# destroyed this physics tick just sets the flag (possibly several
 	# times, e.g. AOE splash killing a cluster of buildings in one tick);
@@ -501,6 +511,10 @@ func _recalc_energy_economy():
 		var upkeep = 0.0
 		for b in get_tree().get_nodes_in_group("buildings"):
 			if not is_instance_valid(b) or b.is_dead or b.team != team: continue
+			# RTS_CORE_ROADMAP.md D4: a building mid-construction contributes
+			# nothing at all yet - not capacity, not upkeep - until its
+			# build_incomplete grace period clears.
+			if b.build_incomplete: continue
 			# A building's own generators always contribute to capacity,
 			# independent of whether it also owes upkeep - Expansionists'
 			# perk is "our static buildings don't drain," not "our
@@ -1280,7 +1294,10 @@ func spawn_defense(blueprint_data: Dictionary, team: int, pos: Vector3) -> Stati
 # match, used as a spawn point / existence check.
 func get_team_factory(team: int, tier: String = "") -> Node:
 	for b in get_tree().get_nodes_in_group("buildings"):
-		if not is_instance_valid(b) or b.is_dead or b.team != team: continue
+		# RTS_CORE_ROADMAP.md D4: a manufactory still under construction
+		# doesn't count as usable yet - production/queuing/multi-factory
+		# speed bonus all key off this same lookup.
+		if not is_instance_valid(b) or b.is_dead or b.team != team or b.build_incomplete: continue
 		var matches = (tier == "" and b.kind in BuildingScript.MANUFACTORY_KINDS) or b.kind == tier + "_manufactory"
 		if matches:
 			return b
@@ -1295,7 +1312,7 @@ func has_factory_of_tier(team: int, tier: String) -> bool:
 func count_factories_of_tier(team: int, tier: String) -> int:
 	var count := 0
 	for b in get_tree().get_nodes_in_group("buildings"):
-		if is_instance_valid(b) and not b.is_dead and b.team == team and b.kind == tier + "_manufactory":
+		if is_instance_valid(b) and not b.is_dead and b.team == team and b.kind == tier + "_manufactory" and not b.build_incomplete:
 			count += 1
 	return count
 
@@ -1520,15 +1537,19 @@ func _build_ui():
 	for kind in ["light_manufactory", "medium_manufactory", "heavy_manufactory", "refinery", "power_plant"]:
 		var stats = BuildingScript.PREFAB_STATS[kind]
 		var label_text = "%s\n%dM %dC" % [PREFAB_BUTTON_LABELS[kind], stats.cost_metal, stats.cost_crystal]
+		# RTS_CORE_ROADMAP.md D4: "buildings never auto-exit" - clicking
+		# QUEUES the structure (real drip-fed build time) instead of
+		# starting ghost placement immediately; _try_place_building() only
+		# runs once production.pop_ready_structure() says it's actually done.
 		_add_build_button(build_tab_containers["structures"], label_text, PREFAB_BUTTON_COLORS[kind], func():
-			_begin_placement({"kind": kind, "cost_metal": stats.cost_metal, "cost_crystal": stats.cost_crystal}))
+			_queue_structure_build({"kind": kind, "cost_metal": stats.cost_metal, "cost_crystal": stats.cost_crystal}))
 
 	for entry in roster:
 		var e = entry
 		var label_text = "%s\n%dM %dC" % [e.name, e.cost_metal, e.cost_crystal]
 		if e.is_defense:
 			_add_build_button(build_tab_containers["defenses"], label_text, Color(0.4, 0.5, 0.4), func():
-				_begin_placement({"kind": "defense", "blueprint": e.blueprint, "cost_metal": e.cost_metal, "cost_crystal": e.cost_crystal}))
+				_queue_structure_build({"kind": "defense", "blueprint": e.blueprint, "cost_metal": e.cost_metal, "cost_crystal": e.cost_crystal}))
 		else:
 			# RTS_CORE_ROADMAP.md D2: shift-click queues 5. Greyed out (and
 			# not clickable) whenever this entry's tier has no live
@@ -1686,19 +1707,19 @@ func _set_active_build_tab(tab_name: String) -> void:
 	for name in build_tab_buttons.keys():
 		build_tab_buttons[name].button_pressed = (name == tab_name)
 
-# RTS_CORE_ROADMAP.md D2: 3 tier strips (light/medium/heavy), each a
-# progress fill + READY/HOLD/timer text over the FRONT item of that team+
-# tier queue (production_queue.gd only ever ticks the front item - matches
-# everywhere else in this game that already assumes FIFO-front-only).
-# Right-click pauses; a SECOND right-click (while already paused) cancels
-# and refunds. Kept simple: one shared strip per tier regardless of how
-# many manufactories of that tier are alive, since the queue itself is
-# already shared per team+tier (RTS_CORE_ROADMAP.md A1).
+# RTS_CORE_ROADMAP.md D2: 4 tier strips (light/medium/heavy/structures - D4
+# adds the 4th), each a progress fill + READY/HOLD/timer text over the
+# FRONT item of that team+tier queue (production_queue.gd only ever ticks
+# the front item - matches everywhere else in this game that already
+# assumes FIFO-front-only). Right-click pauses; a SECOND right-click (while
+# already paused) cancels and refunds. Kept simple: one shared strip per
+# tier regardless of how many manufactories of that tier are alive, since
+# the queue itself is already shared per team+tier (RTS_CORE_ROADMAP.md A1).
 func _build_queue_panel(parent: Container) -> void:
 	var row = HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	parent.add_child(row)
-	for tier in ["light", "medium", "heavy"]:
+	for tier in ["light", "medium", "heavy", "structures"]:
 		var panel = PanelContainer.new()
 		panel.custom_minimum_size = Vector2(160, 30)
 		panel.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -1853,16 +1874,26 @@ func _queue_player_unit(entry: Dictionary):
 
 # --- Building placement ---
 
+# RTS_CORE_ROADMAP.md D4: the structures-tier analogue of _queue_player_unit()
+# above - clicking a Structures/Defenses button queues a real drip-fed build
+# instead of starting ghost placement immediately. Once production.
+# pop_ready_structure() reports it done (checked every physics tick, see
+# _physics_process()), _begin_placement() runs automatically - same
+# real-money-already-spent ghost the player used to get instantly.
+func _queue_structure_build(info: Dictionary) -> void:
+	if game_over: return
+	var result = production.enqueue_structure(PLAYER_TEAM, info)
+	if not result.queued:
+		_flash_status("Can't build this: %s" % result.reason)
+		return
+	_flash_status("Constructing...")
+
 func _begin_placement(info: Dictionary):
 	if game_over: return
-	if info.kind == "defense":
-		var legality = ModuleCatalog.validate_build_legality(info.blueprint)
-		if not legality.valid:
-			_flash_status("Can't build this: %s" % legality.reason)
-			return
-	if not can_afford(PLAYER_TEAM, info.cost_metal, info.cost_crystal):
-		_flash_status("Not enough resources!")
-		return
+	# RTS_CORE_ROADMAP.md D4: no legality/afford gate here anymore - both
+	# already happened at production.enqueue_structure() time, before the
+	# build even started drip-feeding cost. By the time this runs (auto-
+	# triggered once that job is done), it's already fully paid for.
 	_cancel_placement()
 	placing = info
 	placement_ghost = MeshInstance3D.new()
@@ -2123,16 +2154,22 @@ func _try_place_building(pos: Vector3):
 	if not validity.valid:
 		_flash_status(validity.reason)
 		return
-	if not spend(PLAYER_TEAM, placing.cost_metal, placing.cost_crystal):
-		_flash_status("Not enough resources!")
-		_cancel_placement()
-		return
+	# RTS_CORE_ROADMAP.md D4: cost is already fully paid by now - drip-fed
+	# over the real build time production.enqueue_structure() queued this
+	# under, not spent here. _try_place_building() only ever runs on
+	# something production.pop_ready_structure() already popped as done.
 	_shove_blockers_clear(pos, _placing_footprint())
+	var b: StaticBody3D
 	if placing.kind == "defense":
-		spawn_defense(placing.blueprint, PLAYER_TEAM, pos)
+		b = spawn_defense(placing.blueprint, PLAYER_TEAM, pos)
 	else:
-		var b = _spawn_prefab(placing.kind, PLAYER_TEAM, pos, player_faction)
+		b = _spawn_prefab(placing.kind, PLAYER_TEAM, pos, player_faction)
 		b.bp_manager = bp_manager
+	# RTS_CORE_ROADMAP.md D4: "buildings never auto-exit" - real
+	# construction time (scale-up tween + weapons/production/energy
+	# disabled) for anything the PLAYER places live, unlike the starting
+	# bases (_spawn_bases()), which spawn complete and skip this entirely.
+	b.start_construction_animation()
 	_cancel_placement()
 
 # --- Input: selection & orders ---
