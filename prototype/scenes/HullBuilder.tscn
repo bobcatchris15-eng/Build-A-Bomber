@@ -1,0 +1,155 @@
+[gd_scene load_steps=7 format=3 uid="uid://hullbuilder001"]
+
+[ext_resource type="Script" path="res://scripts/hull_builder.gd" id="1_hb"]
+[ext_resource type="Script" path="res://scripts/designer_camera.gd" id="2_cam"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_horizon_color = Color(0.55, 0.6, 0.65, 1)
+ground_horizon_color = Color(0.45, 0.5, 0.55, 1)
+
+[sub_resource type="Sky" id="Sky_sky"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_env"]
+background_mode = 2
+sky = SubResource("Sky_sky")
+tonemap_mode = 2
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_crate"]
+albedo_color = Color(0.6, 0.4, 0.2, 1)
+
+[node name="HullBuilder" type="Node3D"]
+script = ExtResource("1_hb")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_env")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 0, 0)
+shadow_enabled = true
+
+[node name="HullContainer" type="Node3D" parent="."]
+
+[node name="Crate1" type="CSGBox3D" parent="."]
+transform = Transform3D(0.866, 0, 0.5, 0, 1, 0, -0.5, 0, 0.866, -10, -0.5, -5)
+size = Vector3(2, 2, 2)
+material = SubResource("StandardMaterial3D_crate")
+
+[node name="Crate2" type="CSGBox3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, -0.5, 8)
+size = Vector3(2, 2, 4)
+material = SubResource("StandardMaterial3D_crate")
+
+[node name="Crate3" type="CSGBox3D" parent="."]
+transform = Transform3D(0.707, 0, -0.707, 0, 1, 0, 0.707, 0, 0.707, -8, -0.75, 12)
+size = Vector3(1.5, 1.5, 1.5)
+material = SubResource("StandardMaterial3D_crate")
+
+[node name="Crate4" type="CSGBox3D" parent="."]
+transform = Transform3D(0.965, 0, 0.258, 0, 1, 0, -0.258, 0, 0.965, 15, 0, -10)
+size = Vector3(3, 3, 3)
+material = SubResource("StandardMaterial3D_crate")
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.866025, 0.5, 0, -0.5, 0.866025, 0, 5, 10)
+current = true
+script = ExtResource("2_cam")
+orbit_speed = 0.008
+zoom_speed = 2.0
+min_zoom = 2.0
+max_zoom = 40.0
+pan_speed = 0.02
+
+[node name="CanvasLayer" type="CanvasLayer" parent="."]
+
+[node name="BackButton" type="Button" parent="CanvasLayer"]
+offset_left = 10
+offset_top = 10
+text = "< Back to Menu"
+
+[node name="LeftPanel" type="Panel" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_left = 0.0
+anchor_right = 0.2
+anchor_top = 0.0
+anchor_bottom = 1.0
+offset_top = 60
+offset_bottom = -40
+color = Color(0.08, 0.1, 0.12, 0.85)
+
+[node name="PrimitiveLabel" type="Label" parent="CanvasLayer"]
+offset_left = 10
+offset_top = 68
+text = "Primitives"
+horizontal_alignment = 1
+
+[node name="PrimitiveScroller" type="ScrollContainer" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_left = 0.0
+anchor_right = 0.2
+anchor_top = 0.1
+anchor_bottom = 0.9
+offset_bottom = -40
+
+[node name="primitive_palette" type="VBoxContainer" parent="CanvasLayer/PrimitiveScroller"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="RightPanel" type="Panel" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_left = 0.8
+anchor_right = 1.0
+anchor_top = 0.0
+anchor_bottom = 1.0
+offset_top = 60
+offset_bottom = -40
+color = Color(0.08, 0.1, 0.12, 0.85)
+
+[node name="PropertiesLabel" type="Label" parent="CanvasLayer"]
+offset_left = 810
+offset_top = 68
+text = "Properties"
+horizontal_alignment = 1
+
+[node name="PropertiesScroller" type="ScrollContainer" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_left = 0.8
+anchor_right = 1.0
+anchor_top = 0.1
+anchor_bottom = 0.9
+offset_bottom = -40
+
+[node name="properties_panel" type="VBoxContainer" parent="CanvasLayer/PropertiesScroller"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="BottomBar" type="Panel" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_left = 0.0
+anchor_right = 1.0
+anchor_top = 1.0
+anchor_bottom = 1.0
+offset_top = -40
+offset_bottom = 0
+color = Color(0.08, 0.1, 0.12, 0.9)
+
+[node name="StatusLabel" type="Label" parent="CanvasLayer/BottomBar"]
+offset_left = 100
+offset_top = 10
+text = "Ready"
+vertical_alignment = 1
+
+[node name="ClearButton" type="Button" parent="CanvasLayer/BottomBar"]
+offset_left = 700
+offset_top = 10
+text = "Clear"
+
+[node name="ExportButton" type="Button" parent="CanvasLayer/BottomBar"]
+offset_left = 870
+offset_top = 10
+text = "Export Hull"

@@ -45,7 +45,7 @@ func _ready() -> void:
 	vbox.add_child(title)
 
 	var subtitle = Label.new()
-	subtitle.text = "Design ridiculous war machines.\nSend them to glorious, over-dramatized doom."
+	subtitle.text = "Design ridiculous war machines.\nSend them to glorious, over-dramatized doom."   
 	subtitle.add_theme_font_size_override("font_size", 14)
 	subtitle.modulate = Color(0.7, 0.75, 0.8)
 	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -55,6 +55,9 @@ func _ready() -> void:
 
 	_add_menu_button(vbox, "wrench", "Design Lab", "Design and tweak unit & defense blueprints", func():
 		get_tree().change_scene_to_file("res://scenes/MainLab.tscn"))
+
+	_add_menu_button(vbox, "gear", "Hull Builder", "Construct custom hulls from primitive shapes", func():
+		get_tree().change_scene_to_file("res://scenes/HullBuilder.tscn"))
 
 	_add_menu_button(vbox, "attack", "Skirmish", "C&C-style battle: build a base, produce designs, destroy HQ", func():
 		get_tree().change_scene_to_file("res://scenes/MapSelect.tscn"))
