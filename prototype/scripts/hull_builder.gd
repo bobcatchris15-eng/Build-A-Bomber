@@ -62,6 +62,9 @@ var _gizmo_drag_start_rot: Vector3 = Vector3.ZERO
 # Reference angle for rotate-ring drag (atan2 in XZ plane)
 var _gizmo_drag_start_angle: float = 0.0
 
+# Undo stack (see _update_undo_stack/_perform_undo below)
+var _undo_stack: Array = []
+
 # Handle collision is on layer 4 (same as Design Lab gizmo)
 const GIZMO_LAYER := 4
 
@@ -1068,8 +1071,8 @@ func _show_hull_stats_dialog() -> void:
 	var volume = aabb.size.x * aabb.size.y * aabb.size.z
 
 	# Auto-calculated stats
-	var hp = round(100.0 + volume * 20.0, 1)
-	var weight = round(50.0 + volume * 15.0, 1)
+	var hp = snapped(100.0 + volume * 20.0, 0.1)
+	var weight = snapped(50.0 + volume * 15.0, 0.1)
 	var metal = int(20 + volume * 5.0)
 	var crystal = int(5 + volume * 1.0)
 
@@ -1197,7 +1200,7 @@ func _generate_color_for_primitive(type: PrimitiveType) -> Color:
 			return Color(0.8, 0.6, 0.4, 1.0)
 		PrimitiveType.CYLINDER:
 			return Color(0.6, 0.8, 0.7, 1.0)
-			PrimitiveType.WEDGE:
+		PrimitiveType.WEDGE:
 			return Color(0.9, 0.7, 0.5, 1.0)
 		PrimitiveType.CONE:
 			return Color(0.8, 0.5, 0.6, 1.0)
@@ -1219,6 +1222,23 @@ func _perform_undo() -> bool:
 	var action = _undo_stack.pop_at(_undo_stack.size() - 1)
 	_match_undo_action(action)
 	return true
+
+func _delete_primitive_at_position(index: int) -> void:
+	if index < 0 or index >= primitives.size():
+		return
+	var prim = primitives[index]
+	if selected_primitive == index:
+		_detach_gizmo()
+	if prim.node:
+		prim.node.queue_free()
+	primitives.remove_at(index)
+	if selected_primitive == index:
+		selected_primitive = -1
+	elif selected_primitive > index:
+		selected_primitive -= 1
+	if primitives.is_empty():
+		has_origin = false
+	_update_properties_panel()
 
 func _match_undo_action(action: Dictionary) -> void:
 	match action["type"]:
