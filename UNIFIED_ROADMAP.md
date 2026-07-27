@@ -393,7 +393,7 @@ overlay, a per-match summary of what was built and what killed what) and a
 tuning checklist keyed to the table above. What it cannot do is decide whether
 the game feels right. **Size:** a few evenings of play, then a tuning chunk.
 
-### 1.3 The enemy AI cannot use anything Phase C/D/E built — items 1-2 ✅ DONE 2026-07-27
+### 1.3 The enemy AI cannot use anything Phase C/D/E built — items 1-3 ✅ DONE 2026-07-27
 
 [enemy_ai.gd](prototype/scripts/enemy_ai.gd) was **182 lines and placed zero
 buildings.** Its whole loop was produce / ensure-harvester / launch-wave, plus a
@@ -410,31 +410,42 @@ removed heavy units from the match.
 **Recommendation, in increasing order of ambition:**
 1. ✅ Rebuild a destroyed manufactory (uses D4's structures queue + C2's legality).
 2. ✅ Place a `power_plant` when `is_low_power(team)` (uses E1).
-3. Place defenses near the HQ under attack (uses C3's 28m defense adjacency).
+3. ✅ Place defenses near the HQ under attack (uses C3's 28m defense adjacency).
 4. Expand toward an unclaimed resource cluster.
 
-**Done (1-2).** `skirmish.gd`'s player-only `_placement_validity()` is now a
+**Done (1-3).** `skirmish.gd`'s player-only `_placement_validity()` is now a
 thin `PLAYER_TEAM` wrapper over a team-generic `_placement_validity_for()` —
 the exact same footprint/terrain/adjacency rules, askable for any team. A new
 `_find_ai_build_position()` searches an expanding ring around a team's HQ for
 the first legal spot, and `_place_ai_structure()` places a job popped off that
 team's own structures queue (no ghost/UI, nothing to show). `enemy_ai.gd`
 gained an 8s-interval check: `_rebuild_lost_manufactories()` (any of
-light/medium/heavy missing and not already pending → queue a replacement) and
+light/medium/heavy missing and not already pending → queue a replacement),
 `_build_power_plant_if_needed()` (`is_low_power(team)` and no power_plant
-pending → queue one) — both through the same `production.enqueue_structure()`
-the player's build bar already uses, no new production path. Killing the
-enemy's heavy manufactory now costs it heavy units only until the AI's own
-queue rebuilds one; a starved enemy base now answers its own brownout instead
-of just running its factories slower forever.
+pending → queue one), and `_defend_hq_if_under_attack()` (HQ hp dropped since
+the last check → queue the cheapest legal defense entry, capped at 3 AI-placed
+defenses) — all three through the same `production.enqueue_structure()` the
+player's build bar already uses, no new production path. Item 3 also needed a
+real data fix: `res://data/enemy/` had **zero** defense (foundation-hull)
+blueprints at all — added `gatling_pillbox.json` (mirroring the player's own
+default loadout entry) so the AI actually has something legal to build.
+Killing the enemy's heavy manufactory now costs it heavy units only until the
+AI's own queue rebuilds one; a starved enemy base answers its own brownout
+instead of running its factories slower forever; and an HQ under sustained
+attack now gets ringed with real turrets instead of sitting undefended.
 
-Items 3-4 remain open — multi-session, and lower priority now that the AI
-actually maintains its own economy. This is also the natural home for
-`DECISIONS_NEEDED.md:89`'s standing note that the AI has never built a
-building, and `:940`'s consequence (all three manufactory tiers are pre-built
-because the AI couldn't be trusted to build them) — that note is now half-true:
-the AI can rebuild a lost tier, just doesn't grow beyond the starting three.
-**Size:** multi-session for 3–4.
+**Item 4 investigated, not built — a real design constraint, not a missing
+feature.** "Expand toward an unclaimed resource cluster" runs straight into
+C3's buildable-area rule: any new building must sit within `adjacent_m` of an
+*existing* friendly anchor building. There is no way to legally drop a
+refinery near a remote resource cluster without first having a forward
+outpost already there — the system has no "found a new base" primitive at
+all. Building one (a forward-MCV-style mechanic, or relaxing adjacency for a
+deliberately-flagged expansion) is genuine design work, not a quick add, so
+it's left open rather than faked as a "build another refinery near home"
+stand-in that wouldn't actually answer the roadmap's own wording.
+**Size:** multi-session for 4, and needs a design decision on the forward-base
+mechanic first.
 
 ### 1.4 Control groups and shift-select — *you cannot play an RTS without these* — ✅ DONE 2026-07-27
 
@@ -471,17 +482,43 @@ injection). Full suite green, 156/156.
 
 **Size:** small (C2 only, deferred).
 
-### 1.6 Close out `RTS_CORE_ROADMAP.md` Phase E
+### 1.6 Close out `RTS_CORE_ROADMAP.md` Phase E — ✅ DONE 2026-07-27
 
 The roadmap's own "next up," and the only two chunks left in it:
 
-- **E2 sell + repair** — *afternoon; needs C2 (done)*. `refund = sell_value × 50%
-  × hp/max_hp`; repair on a 24-tick interval, 7 HP/step.
-- **E3 tech-tree greying + cancel-unbuildable** — *one session; needs D2 (done)*.
-  Per-team owned-kind counts; `cancel_unbuildable_items()` refunds queued items
-  whose tier manufactory just died. This is what makes "lose your factory, lose
+- **E2 sell + repair** — ✅ done. `refund = sell_value × 50% × hp/max_hp`;
+  repair on a 24-tick interval, 7 HP/step.
+- **E3 tech-tree greying + cancel-unbuildable** — ✅ done. Per-team
+  owned-kind counts; `cancel_unbuildable_items()` refunds queued items whose
+  tier manufactory just died. This is what makes "lose your factory, lose
   your queue" feel fair rather than silently broken — and it pairs directly with
   1.3, since an AI that rebuilds factories makes the greying meaningful.
+
+**E2 done.** Two new toggle buttons on the build bar (🔧 Repair / 💰 Sell,
+mutually exclusive, OpenRA's "armed cursor mode" convention — the next
+left-click on a friendly building performs the action). `building.gd` gained
+`build_cost_metal`/`build_cost_crystal` (the real per-instance cost — a static
+`PREFAB_STATS` lookup for prefab kinds, `blueprint_cost()` for a `defense`,
+since those vary by design) so sell/repair share one formula across both
+building shapes instead of branching on kind. `sell_building()` refunds 50%
+of that cost scaled by current hp fraction and calls a new `die(spawn_debris
+= false)` — selling isn't dying in combat, so no debris particles, but the
+same `died` signal still fires (E3's cancel-on-death and the navmesh-hole
+rebake both key off it). `_process_repairs()` heals 7 HP per real 0.96s tick,
+drawing real metal/crystal per step (each resource repairs against its own
+share of the original build cost, floored at 1 if that resource was actually
+part of the cost), and auto-stops at full HP.
+
+**E3 done.** `_on_manufactory_died()` (wired into every manufactory's `died`
+signal in `_spawn_prefab()`) fires `production.cancel_unbuildable_items(team,
+tier)` the instant a tier's *last* live manufactory dies — refunding every
+queued item in that tier's line via the same partial-refund formula `cancel()`
+already uses per item, not the fake completion `tick()`'s own documented gap
+would otherwise silently drop on the floor. Losing one of *two* live
+manufactories of a tier correctly leaves the queue alone (still buildable from
+the survivor). D2's existing per-tick `has_factory_of_tier()` button-greying
+already covered the "tech-tree greying" half of this chunk's spec — no
+separate owned-kind-count cache was needed on top of it.
 
 The **D4 gap the roadmap flagged itself** (`RTS_CORE_ROADMAP.md:19`) —
 cancelling a queued building's ghost placement neither refunded it nor let
@@ -503,7 +540,7 @@ into Phase 1 above; what remains:
 
 | Chunk | Why it's worth it |
 |---|---|
-| **A1** environment/post-processing | *"the single highest visual-return-for-effort item"* — one `WorldEnvironment` node with tuned bloom/SSAO/ACES tonemap. No `WorldEnvironment` tuning exists anywhere in the project, and emissive data is already plumbed through the hull shader with nothing making it bloom. |
+| **A1** environment/post-processing — ✅ DONE 2026-07-27 | *"the single highest visual-return-for-effort item"* — one `WorldEnvironment` node with tuned bloom/SSAO/ACES tonemap. |
 | **A4** = `VISUAL_IMPROVEMENT_PLAN.md` chunk F | In-world health bars are still `Label3D` rendering an `■□` ASCII bar, in **three independently duplicated implementations** (`battle_unit.gd:601-621`, `building.gd:255-262`, `target_dummy.gd:44`). Selection rings are an unshaded flat `TorusMesh`. Chunk F already specs the replacement — pure execution, no new design. |
 | **A2** GPUParticles3D VFX | Muzzle flashes and hit effects currently allocate a fresh `MeshInstance3D` + `StandardMaterial3D` + `Tween` **per shot**. Replacing them is a genuine performance win as well as polish. |
 | **B1** RTS camera | No edge-scroll, no zoom-to-cursor. Both are core RTS camera expectations. |
@@ -514,6 +551,22 @@ into Phase 1 above; what remains:
 
 **Recommended order:** A1 → A4 → B1 → C4 → A2 → B2 → G → A3.
 A1 first because it changes how *everything* reads for an afternoon's work.
+
+**A1 done.** All 4 gameplay/editor scenes with their own `WorldEnvironment`
+(`Skirmish.tscn`, `Battlefield.tscn`, `MainLab.tscn`, `HullBuilder.tscn`)
+previously shared an identical bare-minimum `Environment` — sky background
+and `tonemap_mode = 2` (Filmic), nothing else. Each now also gets
+`tonemap_mode = 3` (ACES, matching the plan's explicit ask), `glow_enabled`
+with a modest bloom (`glow_intensity 0.9`, `glow_bloom 0.08`, screen blend,
+`glow_hdr_threshold 1.0` so only genuinely emissive material — energy
+shields, engine glow, muzzle flashes, already plumbed through
+`hull_faction_material.gdshader` — actually blooms, not general geometry),
+and SSAO (`ssao_radius 0.8`, `ssao_intensity 2.5`) for contact shadowing
+under flush-mounted parts. One shared set of tuned values across all 4
+scenes rather than per-scene tweaking, since they're all the same rendering
+pipeline. Tagged `[Qwen once Claude sets exact parameter values]` in the
+source plan; done directly this pass since it's a small, well-specified
+engine-config change, not a multi-file code change.
 
 ---
 
@@ -682,9 +735,9 @@ Suggest `docs/archive/` for Tier 4 and a one-line pointer from `README.md`.
 | **1.4** | Control groups + shift-select — ✅ DONE | 1 session | — | Playability blocker |
 | **1.5** | Gate debug HUD; wire `CursorManager` | small ×2 | — | Both nearly free |
 | **1.2** | Playtest + tune the 10 guessed number sets | evenings | 1.1, 1.4, 1.5 | **Chris only.** Nothing else is validated without it |
-| **1.3** | AI builds buildings — items 1-2 ✅ done, 3-4 open | 1–multi | 1.1 | Makes all of Phase C/D/E two-sided |
-| **1.6** | E2 sell+repair, E3 tech greying (D4 ghost-cancel refund ✅ done) | 1 session | 1.3 | Closes `RTS_CORE_ROADMAP.md` |
-| **2.x** | A1 → A4 → B1 → C4 → A2 → B2 → G → A3 | varies | — | A1 alone changes how everything reads |
+| **1.3** | AI builds buildings — items 1-3 ✅ done, 4 open (needs a forward-base design decision) | 1–multi | 1.1 | Makes all of Phase C/D/E two-sided |
+| **1.6** | E2 sell+repair, E3 tech greying — ✅ DONE | 1 session | 1.3 | Closes `RTS_CORE_ROADMAP.md` |
+| **2.x** | A1 ✅ done → A4 → B1 → C4 → A2 → B2 → G → A3 | varies | — | A1 alone changes how everything reads |
 | **3.3** | One perf measurement session, then P4d | 1 session | — | Plan says measure; measurement is stale |
 | **3.1** | Re-audit + rewrite `HULL_BUILDER_PLAN.md`, then build | multi | 0.1 | Plan is unusable as written |
 | **3.2** | B8 next map (unblocks B10 slot UI at 3 spawns) | multi | — | Authoring judgment, own arc |

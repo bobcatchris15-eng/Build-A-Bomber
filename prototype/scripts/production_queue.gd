@@ -181,6 +181,19 @@ func cancel(team: int, tier: String, index: int) -> Dictionary:
 		skirmish.add_resources(team, refund_metal, refund_crystal)
 	return {"metal": refund_metal, "crystal": refund_crystal}
 
+# RTS_CORE_ROADMAP.md E3: OpenRA's CancelUnbuildableItems - called once a
+# tier's last live manufactory dies (skirmish.gd's _on_manufactory_died()),
+# refunding every queued item in that team+tier's line via the same partial-
+# refund formula cancel() already uses per item (total_cost - remaining_cost,
+# not the full price). Without this, tick()'s own documented gap lets a job
+# already mid-build drip-feed cost toward a factory that will never exist to
+# spawn it from, then silently drop it on the floor once done - "lose your
+# factory, lose your queue" should refund what's left, not eat it.
+func cancel_unbuildable_items(team: int, tier: String) -> void:
+	var q = get_queue(team, tier)
+	while not q.is_empty():
+		cancel(team, tier, 0)
+
 # RTS_CORE_ROADMAP.md D1: a manual pause (D2's right-click), distinct from
 # the automatic pause-on-broke tick() already does on its own - only ever
 # applies to the front item, matching the FIFO-front-only-ticks model

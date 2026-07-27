@@ -134,6 +134,25 @@ var requires_buildable_area: bool = true
 const BUILD_INCOMPLETE_DURATION: float = 2.0
 var build_incomplete: bool = false
 
+# RTS_CORE_ROADMAP.md E2: what this SPECIFIC instance actually cost to build -
+# a static PREFAB_STATS lookup by kind for prefab buildings (setup_prefab()),
+# or the real per-blueprint cost for a "defense" (setup_defense(), which has
+# no PREFAB_STATS entry at all - cost varies by design). Sell/repair both key
+# off this rather than PREFAB_STATS directly, so the two kinds share one
+# formula in skirmish.gd instead of branching on kind there.
+var build_cost_metal: int = 0
+var build_cost_crystal: int = 0
+
+# RTS_CORE_ROADMAP.md E2: RA's own repair cadence (24 ticks at RA's 25fps tick
+# rate) and per-step HP, continuous-time-adapted like D1's drip-fed cost.
+# Toggled by skirmish.gd's repair-mode click; ticked from skirmish.gd's
+# _process_repairs() (needs skirmish.spend(), which building.gd has no
+# reference to call directly).
+const REPAIR_INTERVAL: float = 24.0 / 25.0
+const REPAIR_HP_PER_STEP: float = 7.0
+var is_repairing: bool = false
+var _repair_timer: float = 0.0
+
 func start_construction_animation() -> void:
 	build_incomplete = true
 	scale = Vector3(0.05, 0.05, 0.05)
@@ -159,6 +178,8 @@ func setup_prefab(building_kind: String, building_team: int, building_faction: S
 	max_hp = stats.hp
 	hp = max_hp
 	footprint = stats.size
+	build_cost_metal = stats.get("cost_metal", 0)
+	build_cost_crystal = stats.get("cost_crystal", 0)
 	energy_capacity = stats.get("energy_capacity", 0.0)
 	gives_buildable_area = stats.get("gives_buildable_area", true)
 	requires_buildable_area = stats.get("requires_buildable_area", true)
@@ -266,6 +287,17 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 	# since it's meant to ring a base's outside.
 	gives_buildable_area = false
 	requires_buildable_area = true
+
+	# RTS_CORE_ROADMAP.md E2: a defense has no PREFAB_STATS entry (cost is
+	# per-blueprint, not per-kind) - reuse the same blueprint_cost() the
+	# build bar/AI already price a defense with, via whichever parent this
+	# building is a direct child of (always the real Skirmish - see
+	# skirmish.gd's spawn_defense(), the only caller).
+	var parent = get_parent()
+	if parent and parent.has_method("blueprint_cost"):
+		var c = parent.blueprint_cost(blueprint_data)
+		build_cost_metal = c.x
+		build_cost_crystal = c.y
 
 	defense_hull = manager.reconstruct_vehicle(blueprint_data, self, false, match_faction)
 	if defense_hull:
@@ -545,13 +577,18 @@ func repair_hp(amount: float):
 	hp = min(max_hp, hp + amount)
 	_update_hp_bar()
 
-func die():
+# RTS_CORE_ROADMAP.md E2: `spawn_debris` is false only for a sold building
+# (skirmish.gd's sell_building()) - selling isn't dying in combat, so no
+# debris particles, but everything else (is_dead, the `died` signal - which
+# is what E3's cancel_unbuildable_items() and the navmesh-hole rebake both
+# key off - and the shrink-out tween) is identical to a real destruction.
+func die(spawn_debris: bool = true):
 	if is_dead: return
 	is_dead = true
 	remove_from_group("damageable")
 	collision_layer = 0
 	var scene = get_tree().current_scene
-	if scene:
+	if scene and spawn_debris:
 		for i in range(14):
 			var particle = MeshInstance3D.new()
 			var box = BoxMesh.new()

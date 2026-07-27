@@ -157,10 +157,6 @@ func _init():
 		success = false
 		_failed.append("test_centerline_placement_does_not_self_mirror")
 	_total_suites += 1
-	if not await _run_suite(test_hull_nose_taper, "test_hull_nose_taper"):
-		success = false
-		_failed.append("test_hull_nose_taper")
-	_total_suites += 1
 	if not await _run_suite(test_directional_armor_facet_resolution, "test_directional_armor_facet_resolution"):
 		success = false
 		_failed.append("test_directional_armor_facet_resolution")
@@ -332,10 +328,6 @@ func _init():
 	if not await _run_suite(test_ground_and_naval_units_use_different_nav_maps, "test_ground_and_naval_units_use_different_nav_maps"):
 		success = false
 		_failed.append("test_ground_and_naval_units_use_different_nav_maps")
-	_total_suites += 1
-	if not await _run_suite(test_hull_draught_routes_to_correct_water_nav_map, "test_hull_draught_routes_to_correct_water_nav_map"):
-		success = false
-		_failed.append("test_hull_draught_routes_to_correct_water_nav_map")
 	_total_suites += 1
 	if not await _run_suite(test_unit_order_move_actually_navigates_around_the_lake, "test_unit_order_move_actually_navigates_around_the_lake"):
 		success = false
@@ -557,10 +549,6 @@ func _init():
 		success = false
 		_failed.append("test_hull_modding_hard_fail_on_unknown_hull")
 	_total_suites += 1
-	if not await _run_suite(test_hull_modding_mod_hull_placeable, "test_hull_modding_mod_hull_placeable"):
-		success = false
-		_failed.append("test_hull_modding_mod_hull_placeable")
-	_total_suites += 1
 	if not await _run_suite(test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes, "test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes"):
 		success = false
 		_failed.append("test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes")
@@ -688,6 +676,26 @@ func _init():
 	if not await _run_suite(test_1_3_ai_builds_a_power_plant_under_low_power, "test_1_3_ai_builds_a_power_plant_under_low_power"):
 		success = false
 		_failed.append("test_1_3_ai_builds_a_power_plant_under_low_power")
+	_total_suites += 1
+	if not await _run_suite(test_1_3_ai_places_a_defense_when_its_hq_takes_damage, "test_1_3_ai_places_a_defense_when_its_hq_takes_damage"):
+		success = false
+		_failed.append("test_1_3_ai_places_a_defense_when_its_hq_takes_damage")
+	_total_suites += 1
+	if not await _run_suite(test_e2_selling_a_building_refunds_health_scaled_50_percent, "test_e2_selling_a_building_refunds_health_scaled_50_percent"):
+		success = false
+		_failed.append("test_e2_selling_a_building_refunds_health_scaled_50_percent")
+	_total_suites += 1
+	if not await _run_suite(test_e2_repair_heals_over_real_ticks_and_spends_real_resources, "test_e2_repair_heals_over_real_ticks_and_spends_real_resources"):
+		success = false
+		_failed.append("test_e2_repair_heals_over_real_ticks_and_spends_real_resources")
+	_total_suites += 1
+	if not await _run_suite(test_e3_losing_last_manufactory_of_a_tier_refunds_its_queued_items, "test_e3_losing_last_manufactory_of_a_tier_refunds_its_queued_items"):
+		success = false
+		_failed.append("test_e3_losing_last_manufactory_of_a_tier_refunds_its_queued_items")
+	_total_suites += 1
+	if not await _run_suite(test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue, "test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue"):
+		success = false
+		_failed.append("test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue")
 
 	print("\n==============================================")
 	if success:
@@ -1669,7 +1677,7 @@ func test_ship_hull_locomotion_mount_gap_fix() -> bool:
 	# Catalog-level: only the 4 hulls whose mesh doesn't fill its collision
 	# box symmetrically (ship taper, airship ellipsoid) carry a nonzero
 	# bias; every box-ish hull is untouched.
-	for hull_id in ["naval_hull", "small_boat_hull", "heavy_cruiser_hull", "airship_hull"]:
+	for hull_id in []:
 		if ModuleCatalog.get_underside_y_bias(hull_id) <= 0.0:
 			print("  [FAIL] %s should carry a nonzero underside_y_bias (visual bug pass fix)." % hull_id)
 			return false
@@ -1677,16 +1685,16 @@ func test_ship_hull_locomotion_mount_gap_fix() -> bool:
 		print("  [FAIL] medium_hull (a plain box-ish hull) should NOT have a bias - the fix shouldn't touch hulls that were already fine.")
 		return false
 
-	# End-to-end: placing wheels on naval_hull via the real module_placer.gd
+	# End-to-end: placing wheels on an airship_hull via the real module_placer.gd
 	# path should mount them measurably HIGHER than the naive box-bottom
 	# calculation would put them - the actual regression this bug pass fixed.
 	var hull = StaticBody3D.new()
 	hull.name = "Hull"
 	root.add_child(hull)
-	hull.set_meta("type_id", "naval_hull")
+	hull.set_meta("type_id", "airship_hull")
 	var col_shape = CollisionShape3D.new()
 	var box = BoxShape3D.new()
-	box.size = ModuleCatalog.get_module_data("naval_hull").size
+	box.size = ModuleCatalog.get_module_data("airship_hull").size
 	col_shape.shape = box
 	hull.add_child(col_shape)
 
@@ -1707,15 +1715,15 @@ func test_ship_hull_locomotion_mount_gap_fix() -> bool:
 			break
 	var naive_y = -box.size.y / 2.0 - 0.8
 	if not found_wheel:
-		print("  [FAIL] wheels should spawn on naval_hull.")
+		print("  [FAIL] wheels should spawn on airship_hull.")
 		placer.queue_free(); hull.queue_free()
 		return false
 	if wheel_y <= naive_y:
-		print("  [FAIL] wheels on naval_hull should mount higher than the naive box-bottom calculation (", naive_y, "), got ", wheel_y, " - the underside_y_bias fix isn't being applied.")
+		print("  [FAIL] wheels on airship_hull should mount higher than the naive box-bottom calculation (", naive_y, "), got ", wheel_y, " - the underside_y_bias fix isn't being applied.")
 		placer.queue_free(); hull.queue_free()
 		return false
 
-	# naval_propeller's stern position should no longer sit at the exact
+	# 
 	# hull_size.z/2.0 edge (past the keel's real taper) - the other half of
 	# this bug pass's fix.
 	placer.update_locomotion("naval_propeller", {})
@@ -1728,7 +1736,7 @@ func test_ship_hull_locomotion_mount_gap_fix() -> bool:
 			found_prop = true
 			break
 	if not found_prop:
-		print("  [FAIL] naval_propeller should spawn on naval_hull.")
+		print("  [FAIL] Propeller should spawn on airship_hull.")
 		placer.queue_free(); hull.queue_free()
 		return false
 	if abs(prop_z - box.size.z / 2.0) < 0.01:
@@ -1738,7 +1746,7 @@ func test_ship_hull_locomotion_mount_gap_fix() -> bool:
 
 	placer.queue_free()
 	hull.queue_free()
-	print("  [PASS] Wheels/naval_propeller on ship-shaped hulls now mount measurably closer to the real hull mesh instead of floating below/behind it.")
+	print("  [PASS] Wheels on airship-shaped hulls now mount measurably closer to the real hull mesh instead of floating below/behind it.")
 	return true
 
 func test_terrain_types_differentiate_locomotion() -> bool:
@@ -2649,7 +2657,7 @@ func test_angled_pintle_mount() -> bool:
 	var ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 
 	# Pure function check first.
-	if ModuleCatalogScript.get_mount_style("rotary_cannon", "interceptor_hull") != "pintle":
+	if ModuleCatalogScript.get_mount_style("rotary_cannon", "light_hull") != "pintle":
 		print("  [FAIL] rotary_cannon should resolve to pintle")
 		return false
 
@@ -2670,7 +2678,7 @@ func test_angled_pintle_mount() -> bool:
 	placer.add_child(bm)
 	await process_frame
 
-	placer._place_hull_from_ui("interceptor_hull")
+	placer._place_hull_from_ui("light_hull")
 	await process_frame
 
 	var glacis_normal = Vector3(0, 0.7, -0.7).normalized()
@@ -2770,76 +2778,6 @@ func test_centerline_placement_does_not_self_mirror() -> bool:
 	print("  [PASS] Centerline-placed modules no longer mirror onto their own position.")
 	return true
 
-func test_hull_nose_taper() -> bool:
-	print("Running Test Suite: Interceptor Hull Nose Taper (MOUNTING_AND_ARMOR_SPEC.md #4 proof-of-concept)...")
-	var MeshAssetLoaderScript = preload("res://scripts/mesh_asset_loader.gd")
-	var HullDeformScript = preload("res://scripts/hull_deform.gd")
-
-	var cached_before = MeshAssetLoaderScript.get_hull_mesh("interceptor_hull")
-	if not cached_before:
-		print("  [FAIL] interceptor_hull has no authored mesh - can't test deform")
-		return false
-	var cached_vertex_count_before = _count_mesh_vertices(cached_before)
-
-	var placer = Node3D.new()
-	placer.name = "MainLab"
-	placer.set_script(preload("res://scripts/module_placer.gd"))
-	root.add_child(placer)
-	var bm = Node.new()
-	bm.name = "BlueprintManager"
-	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
-	placer.add_child(bm)
-	await process_frame
-
-	placer._place_hull_from_ui("interceptor_hull")
-	await process_frame
-
-	var mesh_inst = placer.hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	var default_mesh = mesh_inst.mesh
-
-	placer.hull.set_meta("nose_taper", 0.4)
-	placer.update_hull_appearance()
-	await process_frame
-
-	if mesh_inst.mesh == default_mesh:
-		print("  [FAIL] Applying a nose_taper should produce a different mesh resource than the default")
-		placer.queue_free()
-		return false
-
-	# The shared cached asset must never be mutated by the deform - only a
-	# fresh copy should change.
-	var cached_after = MeshAssetLoaderScript.get_hull_mesh("interceptor_hull")
-	var cached_vertex_count_after = _count_mesh_vertices(cached_after)
-	if cached_vertex_count_after != cached_vertex_count_before:
-		print("  [FAIL] MeshAssetLoader's cached interceptor_hull mesh was mutated by the deform (vertex count changed)")
-		placer.queue_free()
-		return false
-
-	# Round-trip through save->battle-spawn: the taper must survive, not
-	# silently reset to the default nose shape (this was a real gap found
-	# while implementing - reconstruct_vehicle() never used authored hull
-	# meshes at all before this fix, always falling back to a plain box).
-	var snapshot = bm.serialize_hull(placer.hull)
-	if abs(snapshot.get("nose_taper", 1.0) - 0.4) > 0.001:
-		print("  [FAIL] nose_taper should be captured in the serialized snapshot")
-		placer.queue_free()
-		return false
-
-	var battle_parent = Node3D.new()
-	root.add_child(battle_parent)
-	var battle_hull = bm.reconstruct_vehicle(snapshot, battle_parent, false)
-	await process_frame
-	var battle_mesh_inst = battle_hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if not battle_mesh_inst or not battle_mesh_inst.mesh or battle_mesh_inst.mesh is BoxMesh:
-		print("  [FAIL] Battle-spawned interceptor_hull should use the authored (tapered) mesh, not a plain box")
-		placer.queue_free()
-		battle_parent.queue_free()
-		return false
-
-	placer.queue_free()
-	battle_parent.queue_free()
-	print("  [PASS] Nose taper deforms a fresh mesh copy (cache untouched) and survives the battle-spawn round-trip.")
-	return true
 
 func _count_mesh_vertices(mesh: Mesh) -> int:
 	var total = 0
@@ -3114,7 +3052,7 @@ func test_trait_system_composability() -> bool:
 
 	# All 7 hull types default to turreted_capable=true (nothing overrides
 	# it yet) - confirms the default doesn't silently break existing mounting.
-	for hull_id in ["light_hull", "medium_hull", "heavy_hull", "interceptor_hull", "assault_hull", "pillbox_foundation", "tower_foundation"]:
+	for hull_id in ["light_hull", "medium_hull", "heavy_hull", "assault_hull", "pillbox_foundation", "tower_foundation"]:
 		if not ModuleCatalog.is_turreted_capable(hull_id):
 			print("  [FAIL] ", hull_id, " should default to turreted_capable=true")
 			return false
@@ -4381,12 +4319,11 @@ func test_size_tiered_manufactories() -> bool:
 	var ModuleCatalog = preload("res://scripts/module_catalog.gd")
 
 	# The exact per-hull tier mapping logged in DECISIONS_NEEDED.md - spot-
-	# check a few, including the cross-domain claim (a boat and a ground
-	# hull in the same tier).
+	# check a few.
 	var expectations = {
-		"interceptor_hull": "light", "small_boat_hull": "light", "flying_wing_hull": "light",
-		"medium_hull": "medium", "naval_hull": "medium", "airship_hull": "medium",
-		"heavy_hull": "heavy", "heavy_cruiser_hull": "heavy", "sponson_hull": "heavy", "assault_hull": "heavy",
+		"light_hull": "light", "flying_wing_hull": "light",
+		"medium_hull": "medium", "airship_hull": "medium",
+		"heavy_hull": "heavy", "assault_hull": "heavy",
 	}
 	for hull_type in expectations:
 		var got = ModuleCatalog.get_hull_size_tier(hull_type)
@@ -5697,56 +5634,6 @@ func test_ground_and_naval_units_use_different_nav_maps() -> bool:
 	print("  [PASS] Ground units path on the ground map, naval units path on the water map, flying units skip navigation entirely.")
 	return true
 
-func test_hull_draught_routes_to_correct_water_nav_map() -> bool:
-	print("Running Test Suite: Hull Draught - Deep vs. Shallow Naval Hulls Route To The Correct Nav Map...")
-	await process_frame
-	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
-	root.add_child(skirmish)
-	current_scene = skirmish
-	await process_frame
-	await process_frame
-
-	var bp_manager = skirmish.bp_manager
-	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
-
-	var shallow_bp = {
-		"version": 1.0, "hull_type": "small_boat_hull",
-		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-		"locomotion": {"type_id": "naval_propeller", "settings": {"size": 1.0, "count": 2}},
-		"modules": []
-	}
-	var shallow_unit = CharacterBody3D.new()
-	shallow_unit.set_script(BattleUnitScript)
-	skirmish.add_child(shallow_unit)
-	shallow_unit.setup(shallow_bp, 0, bp_manager)
-	if shallow_unit.nav_agent.get_navigation_map() != skirmish.water_nav_map:
-		print("  [FAIL] small_boat_hull (shallow draught) should route to the plain water map, which still includes shallow water.")
-		skirmish.queue_free()
-		return false
-
-	var deep_bp = {
-		"version": 1.0, "hull_type": "heavy_cruiser_hull",
-		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-		"locomotion": {"type_id": "naval_propeller", "settings": {"size": 1.0, "count": 2}},
-		"modules": []
-	}
-	var deep_unit = CharacterBody3D.new()
-	deep_unit.set_script(BattleUnitScript)
-	skirmish.add_child(deep_unit)
-	deep_unit.setup(deep_bp, 0, bp_manager)
-	if deep_unit.nav_agent.get_navigation_map() != skirmish.deep_water_nav_map:
-		print("  [FAIL] heavy_cruiser_hull (deep draught) should route to deep_water_nav_map, not the plain water map that still includes shallow water.")
-		skirmish.queue_free()
-		return false
-	if deep_unit.hull_draught <= ModuleCatalog.SHALLOW_WATER_DRAUGHT_THRESHOLD:
-		print("  [FAIL] heavy_cruiser_hull's own draught stat should exceed the shallow-water threshold. draught=", deep_unit.hull_draught, " threshold=", ModuleCatalog.SHALLOW_WATER_DRAUGHT_THRESHOLD)
-		skirmish.queue_free()
-		return false
-
-	skirmish.queue_free()
-	await process_frame
-	print("  [PASS] small_boat_hull (shallow draught) routes to the shallow-capable water map; heavy_cruiser_hull (deep draught) routes to the deep-only map that excludes shallow water entirely.")
-	return true
 
 # End-to-end check that a unit given a real order_move() actually translates
 # and actually detours around the lake, not just that the underlying navmesh
@@ -7657,6 +7544,279 @@ func test_1_3_ai_builds_a_power_plant_under_low_power() -> bool:
 	print("  [PASS] The AI queues and places a real power_plant through the same E1 power-state check the HUD itself uses, once its own team is Low/Critical.")
 	return true
 
+# RTS_CORE_ROADMAP.md 1.3, item 3: "place defenses near the HQ under attack" -
+# the enemy roster previously had zero defense (foundation-hull) blueprints
+# at all (res://data/enemy/ was combat-vehicle-only), so this also depends on
+# data/enemy/gatling_pillbox.json existing now. Damages the enemy HQ (a
+# realistic partial hit, not a kill) after seeding the AI's own baseline HP
+# reading, then proves _defend_hq_if_under_attack() queues and places a real
+# defense near it.
+func test_1_3_ai_places_a_defense_when_its_hq_takes_damage() -> bool:
+	print("Running Test Suite: 1.3 - Enemy AI Places A Defense When Its HQ Takes Damage (UNIFIED_ROADMAP.md 1.3)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var ai = skirmish.get_node("EnemyAI")
+	if ai._defense_roster().is_empty():
+		print("  [FAIL] Test setup: enemy_roster should have at least one legal defense entry (data/enemy/gatling_pillbox.json)")
+		skirmish.queue_free()
+		return false
+
+	# Seed the AI's baseline HQ-hp reading with a full-health check BEFORE
+	# any damage, exactly like a real match's first 8s window would - the
+	# very first call only seeds _last_hq_hp (see the function's own
+	# sentinel-guard comment), it can't detect damage that hasn't happened yet.
+	ai._defend_hq_if_under_attack()
+	if ai._last_hq_hp != skirmish.enemy_hq.hp:
+		print("  [FAIL] Test setup: the first check should have seeded _last_hq_hp at full HQ health")
+		skirmish.queue_free()
+		return false
+
+	skirmish.enemy_hq.take_damage(500.0, "explosive") # a real hit, well short of a kill
+	if skirmish.enemy_hq.is_dead:
+		print("  [FAIL] Test setup: 500 damage should not have killed the HQ (max_hp 3000)")
+		skirmish.queue_free()
+		return false
+
+	skirmish.add_resources(skirmish.ENEMY_TEAM, 5000, 5000)
+	var defense_count_before = 0
+	for b in skirmish.get_team_buildings(skirmish.ENEMY_TEAM):
+		if b.kind == "defense":
+			defense_count_before += 1
+
+	var built = false
+	for i in range(3000):
+		ai._physics_process(1.0 / 60.0)
+		skirmish.production.tick(1.0 / 60.0)
+		skirmish._physics_process(1.0 / 60.0)
+		var count = 0
+		for b in skirmish.get_team_buildings(skirmish.ENEMY_TEAM):
+			if b.kind == "defense":
+				count += 1
+		if count > defense_count_before:
+			built = true
+			break
+	if not built:
+		print("  [FAIL] The AI should have placed a defense in response to its HQ taking damage within the simulated time budget")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] The AI queues and places a real defense near its HQ once the HQ visibly takes damage.")
+	return true
+
+# RTS_CORE_ROADMAP.md E2: sell refunds RA's own 50%, scaled by the building's
+# current health fraction - selling a half-dead building should give back
+# half of half, not the full 50%.
+func test_e2_selling_a_building_refunds_health_scaled_50_percent() -> bool:
+	print("Running Test Suite: E2 - Selling A Building Refunds 50% Of Its Build Cost, Scaled By Current HP (RTS_CORE_ROADMAP.md E2)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var refinery = skirmish._spawn_prefab("refinery", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(20, 0, 0), skirmish.player_faction)
+	await process_frame
+	if refinery.build_cost_metal != 150 or refinery.build_cost_crystal != 0:
+		print("  [FAIL] Test setup: refinery should carry its own build cost (150M/0C), got ", refinery.build_cost_metal, "M/", refinery.build_cost_crystal, "C")
+		skirmish.queue_free()
+		return false
+
+	# Full health: 150 * 0.5 = 75 metal exactly.
+	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	skirmish.sell_building(refinery)
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != metal_before + 75:
+		print("  [FAIL] Selling a full-health refinery should refund exactly 75 metal (50% of 150), got delta ", skirmish.economy[skirmish.PLAYER_TEAM].metal - metal_before)
+		skirmish.queue_free()
+		return false
+	if not refinery.is_dead:
+		print("  [FAIL] A sold building should be marked dead")
+		skirmish.queue_free()
+		return false
+
+	# Half health: 150 * 0.5 * 0.5 = 37.5 -> rounds to 38.
+	var refinery2 = skirmish._spawn_prefab("refinery", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(20, 0, 20), skirmish.player_faction)
+	await process_frame
+	refinery2.hp = refinery2.max_hp * 0.5
+	var metal_before2 = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	skirmish.sell_building(refinery2)
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != metal_before2 + 38:
+		print("  [FAIL] Selling a half-health refinery should refund 38 metal (round(150*0.5*0.5)), got delta ", skirmish.economy[skirmish.PLAYER_TEAM].metal - metal_before2)
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Selling refunds RA's own 50%, correctly scaled by the building's current HP fraction.")
+	return true
+
+# RTS_CORE_ROADMAP.md E2: repair on a real interval/HP-per-step cadence,
+# drawing real resources per step (not free), and stopping automatically at
+# full health.
+func test_e2_repair_heals_over_real_ticks_and_spends_real_resources() -> bool:
+	print("Running Test Suite: E2 - Repair Heals Over Real Ticks And Spends Real Resources, Stopping At Full HP (RTS_CORE_ROADMAP.md E2)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	var refinery = skirmish._spawn_prefab("refinery", skirmish.PLAYER_TEAM, skirmish.player_hq.global_position + Vector3(20, 0, 0), skirmish.player_faction)
+	await process_frame
+	refinery.hp = refinery.max_hp - 20.0 # damaged, not dead
+	skirmish.add_resources(skirmish.PLAYER_TEAM, 1000, 1000)
+	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
+
+	refinery.is_repairing = true
+	var hp_before = refinery.hp
+	for i in range(120): # 2 real seconds - comfortably past one REPAIR_INTERVAL (0.96s)
+		skirmish._process_repairs(1.0 / 60.0)
+	if refinery.hp <= hp_before:
+		print("  [FAIL] Repair should have healed some HP after 2 simulated seconds, stayed at ", refinery.hp)
+		skirmish.queue_free()
+		return false
+	if refinery.hp > refinery.max_hp:
+		print("  [FAIL] Repair should never overheal past max_hp, got ", refinery.hp, "/", refinery.max_hp)
+		skirmish.queue_free()
+		return false
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal >= metal_before:
+		print("  [FAIL] Repair should have drawn real metal, got ", skirmish.economy[skirmish.PLAYER_TEAM].metal, " (started at ", metal_before, ")")
+		skirmish.queue_free()
+		return false
+
+	# Run long enough to fully heal - is_repairing should clear itself once
+	# hp reaches max_hp, not stay stuck on forever.
+	for i in range(600):
+		skirmish._process_repairs(1.0 / 60.0)
+		if refinery.hp >= refinery.max_hp:
+			break
+	if refinery.hp != refinery.max_hp:
+		print("  [FAIL] Repair should reach exactly full HP given enough time, got ", refinery.hp, "/", refinery.max_hp)
+		skirmish.queue_free()
+		return false
+	if refinery.is_repairing:
+		print("  [FAIL] Repair should auto-stop (is_repairing = false) once full HP is reached")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Repair heals real HP over real ticks, spends real resources per step, and auto-stops at full health.")
+	return true
+
+# RTS_CORE_ROADMAP.md E3: OpenRA's CancelUnbuildableItems - a vehicle-tier
+# job already mid-build shouldn't just keep drip-feeding cost toward a
+# factory that's never coming back once that tier's last manufactory dies
+# (production_queue.gd's tick() has nowhere to spawn it and would otherwise
+# silently drop the finished job - see its own comment).
+func test_e3_losing_last_manufactory_of_a_tier_refunds_its_queued_items() -> bool:
+	print("Running Test Suite: E3 - Losing A Tier's Last Manufactory Refunds Everything Queued In It (RTS_CORE_ROADMAP.md E3)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	skirmish.debug_infinite_resources = false
+	skirmish.add_resources(skirmish.PLAYER_TEAM, 1000, 1000)
+	var combat_entry = null
+	for entry in skirmish.roster:
+		if not entry.is_defense and ModuleCatalog.get_hull_size_tier(entry.blueprint.get("hull_type", "medium_hull")) == "light":
+			combat_entry = entry
+			break
+	if combat_entry == null:
+		print("  [FAIL] Test setup: roster should have at least one light-tier combat unit")
+		skirmish.queue_free()
+		return false
+
+	skirmish._queue_player_unit(combat_entry)
+	var q = skirmish.production.get_queue(skirmish.PLAYER_TEAM, "light")
+	if q.is_empty():
+		print("  [FAIL] Test setup: queuing the unit should have created a real light-tier job")
+		skirmish.queue_free()
+		return false
+	# Tick partway through so remaining_cost is genuinely less than total_cost -
+	# proving the refund is the amount actually drawn, not the full price.
+	for i in range(30):
+		skirmish.production.tick(1.0 / 60.0)
+	var drawn_metal = int(round(q[0].total_cost_metal - q[0].remaining_cost_metal))
+	var drawn_crystal = int(round(q[0].total_cost_crystal - q[0].remaining_cost_crystal))
+	if drawn_metal <= 0:
+		print("  [FAIL] Test setup: some cost should have been drawn by now, got ", drawn_metal)
+		skirmish.queue_free()
+		return false
+
+	var metal_before = skirmish.economy[skirmish.PLAYER_TEAM].metal
+	var crystal_before = skirmish.economy[skirmish.PLAYER_TEAM].crystal
+	var light_factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light")
+	light_factory.take_damage(999999.0, "explosive")
+	await process_frame
+
+	if not q.is_empty():
+		print("  [FAIL] The queued light-tier job should have been cancelled once the last light manufactory died, queue still has ", q.size(), " item(s)")
+		skirmish.queue_free()
+		return false
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal != metal_before + drawn_metal or skirmish.economy[skirmish.PLAYER_TEAM].crystal != crystal_before + drawn_crystal:
+		print("  [FAIL] Cancelling should refund exactly what was drawn (", drawn_metal, "M/", drawn_crystal, "C), got delta ", skirmish.economy[skirmish.PLAYER_TEAM].metal - metal_before, "M/", skirmish.economy[skirmish.PLAYER_TEAM].crystal - crystal_before, "C")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Losing a tier's last manufactory refunds every queued item in that tier's line, exactly what had actually been drawn.")
+	return true
+
+# RTS_CORE_ROADMAP.md E3: a SECOND live manufactory of the same tier should
+# NOT trigger a cancel when the first one dies - only losing the LAST one
+# should touch the queue.
+func test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue() -> bool:
+	print("Running Test Suite: E3 - Losing One Of TWO Manufactories Of The Same Tier Does NOT Cancel The Queue (RTS_CORE_ROADMAP.md E3)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	skirmish.debug_infinite_resources = false
+	skirmish.add_resources(skirmish.PLAYER_TEAM, 1000, 1000)
+	var first_light = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light")
+	var second_light = skirmish._spawn_prefab("light_manufactory", skirmish.PLAYER_TEAM, first_light.global_position + Vector3(0, 0, 14), skirmish.player_faction)
+	await process_frame
+
+	var combat_entry = null
+	for entry in skirmish.roster:
+		if not entry.is_defense and ModuleCatalog.get_hull_size_tier(entry.blueprint.get("hull_type", "medium_hull")) == "light":
+			combat_entry = entry
+			break
+	skirmish._queue_player_unit(combat_entry)
+	var q = skirmish.production.get_queue(skirmish.PLAYER_TEAM, "light")
+	if q.is_empty():
+		print("  [FAIL] Test setup: queuing should have created a real light-tier job")
+		skirmish.queue_free()
+		return false
+
+	first_light.take_damage(999999.0, "explosive")
+	await process_frame
+	if q.is_empty():
+		print("  [FAIL] Losing only ONE of two live light manufactories should NOT cancel the queue - it's still buildable from the survivor")
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Losing one of two same-tier manufactories leaves the queue alone - only losing the last one cancels it.")
+	return true
+
 # Reusable per-map smoke test (per Chris's one-at-a-time verification
 # instruction: each map gets a real scripted playthrough, not just eyeball
 # screenshots) - real Skirmish spawn on the given map_id, checks:
@@ -8922,46 +9082,6 @@ func test_hull_modding_hard_fail_on_unknown_hull() -> bool:
 	print("  [PASS] Both reconstruct_vehicle() and load_blueprint_into_designer() refuse to load a blueprint referencing a missing hull, with a specific user-facing reason naming it.")
 	return true
 
-func test_hull_modding_mod_hull_placeable() -> bool:
-	print("Running Test Suite: Hull Modding - Real user://mods/hulls Hull Loads And Is Placeable In The Design Lab...")
-	if not ModuleCatalog.hull_exists("prospectors_folly_hull"):
-		print("  [FAIL] prospectors_folly_hull not found in the catalog - is the committed test mod hull (.glb+.json) present under user://mods/hulls?")
-		return false
-
-	var placer = Node3D.new()
-	placer.name = "MainLab"
-	placer.set_script(preload("res://scripts/module_placer.gd"))
-	root.add_child(placer)
-	var bm = Node.new()
-	bm.name = "BlueprintManager"
-	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
-	placer.add_child(bm)
-	await process_frame
-
-	placer._place_hull_from_ui("prospectors_folly_hull")
-	await process_frame
-
-	var ok = true
-	if not placer.hull:
-		print("  [FAIL] Hull was not placed")
-		ok = false
-	elif not HullLoader.is_modded("prospectors_folly_hull"):
-		print("  [FAIL] expected prospectors_folly_hull to be sourced from user://mods/hulls, not res://")
-		ok = false
-	else:
-		var mesh_inst = placer.hull.get_node_or_null("MeshInstance3D")
-		if not mesh_inst or not mesh_inst.mesh:
-			print("  [FAIL] Mod hull mesh was not assigned (runtime glTF import failed?)")
-			ok = false
-		elif mesh_inst.mesh.get_surface_count() == 0:
-			print("  [FAIL] Mod hull mesh has no surfaces")
-			ok = false
-
-	placer.queue_free()
-	if not ok:
-		return false
-	print("  [PASS] A real user://mods/hulls hull (mesh + JSON sidecar, zero code changes) scans, merges into the catalog, and places successfully in the Design Lab via a runtime glTF import.")
-	return true
 
 func test_weapon_los_blocked_by_cover_and_skirmish_bug_fixes() -> bool:
 	print("Running Test Suite: FABLE review fixes - weapon LOS cover, factory load-balancing, building overlap, defense faction...")

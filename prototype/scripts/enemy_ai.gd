@@ -13,6 +13,7 @@ var harvester_check_timer: float = 0.0
 var structure_check_timer: float = 0.0
 var roster_index: int = 0
 var wave_number: int = 0
+var _last_hq_hp: float = -1.0
 
 const PRODUCE_INTERVAL: float = 14.0
 const FIRST_WAVE_DELAY: float = 60.0
@@ -21,6 +22,7 @@ const PITY_METAL: int = 10
 const PITY_CRYSTAL: int = 3
 const STRUCTURE_CHECK_INTERVAL: float = 8.0
 const MANUFACTORY_TIERS: Array = ["light", "medium", "heavy"]
+const MAX_AI_DEFENSES: int = 3
 
 # Configurable enemy/team count (pre-match settings ask) was scoped down to
 # AI difficulty instead - see DECISIONS_NEEDED.md. Scales the same timers/
@@ -73,6 +75,7 @@ func _physics_process(delta):
 		structure_check_timer = 0.0
 		_rebuild_lost_manufactories()
 		_build_power_plant_if_needed()
+		_defend_hq_if_under_attack()
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const BuildingScript = preload("res://scripts/building.gd")
@@ -217,6 +220,52 @@ func _build_power_plant_if_needed() -> void:
 		return
 	var stats = BuildingScript.PREFAB_STATS["power_plant"]
 	skirmish.production.enqueue_structure(team, {"kind": "power_plant", "cost_metal": stats.cost_metal, "cost_crystal": stats.cost_crystal})
+
+# RTS_CORE_ROADMAP.md 1.3, item 3: "place defenses near the HQ under
+# attack" - checked once per STRUCTURE_CHECK_INTERVAL against the HQ's OWN hp
+# delta since the last check (no separate damage-event signal exists on
+# building.gd, and this is cheap and reliable enough at an 8s cadence: any
+# real attack drops HQ hp measurably within one window). Placement reuses
+# _find_ai_build_position()'s default anchor (the team's own HQ) with the
+# defense's real 28m leash, so "near the HQ" falls straight out of the
+# existing C3 adjacency rule with no special-casing.
+func _defense_roster() -> Array:
+	var list = []
+	for entry in skirmish.enemy_roster:
+		if not entry.is_defense: continue
+		if not ModuleCatalog.validate_build_legality(entry.blueprint).valid: continue
+		list.append(entry)
+	return list
+
+func _defend_hq_if_under_attack() -> void:
+	var hq = skirmish._get_slot(team).get("hq")
+	if not is_instance_valid(hq) or hq.is_dead:
+		return
+	if _last_hq_hp < 0.0:
+		_last_hq_hp = hq.hp
+		return
+	var took_damage = hq.hp < _last_hq_hp - 0.01
+	_last_hq_hp = hq.hp
+	if not took_damage:
+		return
+
+	var live_defenses = 0
+	for b in skirmish.get_team_buildings(team):
+		if b.kind == "defense":
+			live_defenses += 1
+	if live_defenses >= MAX_AI_DEFENSES:
+		return
+	if _structure_pending("defense"):
+		return
+
+	var defenses = _defense_roster()
+	if defenses.is_empty():
+		return
+	var cheapest = defenses[0]
+	for e in defenses:
+		if e.cost_metal + e.cost_crystal < cheapest.cost_metal + cheapest.cost_crystal:
+			cheapest = e
+	skirmish.production.enqueue_structure(team, {"kind": "defense", "blueprint": cheapest.blueprint, "cost_metal": cheapest.cost_metal, "cost_crystal": cheapest.cost_crystal})
 
 func _launch_wave():
 	wave_number += 1

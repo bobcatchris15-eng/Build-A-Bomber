@@ -254,6 +254,16 @@ var active_build_tab: String = "units"
 var _tier_gated_buttons: Array = [] # [{button, tier}] - greyed out when that tier has no live manufactory
 var queue_strips: Dictionary = {} # tier -> {bar: ProgressBar, status_label: Label, panel: Control}
 
+# RTS_CORE_ROADMAP.md E2: sell/repair are cursor MODES (OpenRA convention),
+# armed by a toggle button - the next left-click on a friendly building
+# performs the action instead of selecting/moving. Mutually exclusive with
+# each other; _repair_button/_sell_button let the click handler un-press
+# whichever toggle fired once its one click has been consumed.
+var repair_mode: bool = false
+var sell_mode: bool = false
+var _repair_button: Button = null
+var _sell_button: Button = null
+
 @onready var camera: Camera3D = $Camera3D
 
 # --- N-player slots (RTS_CORE_ROADMAP.md B2) ---
@@ -459,6 +469,7 @@ func _ready():
 func _physics_process(delta):
 	if production:
 		production.tick(delta)
+	_process_repairs(delta)
 	# RTS_CORE_ROADMAP.md D1: flush at most once per physics frame, no
 	# matter how many spend()/add_resources() calls happened this tick
 	# (drip-fed cost across several team+tier queues, HQ trickle, etc.) -
@@ -1308,8 +1319,26 @@ func _spawn_prefab(kind: String, team: int, pos: Vector3, faction: String) -> St
 	# for it, and its eventual death needs to un-carve that hole - both go
 	# through the same debounced rebake.
 	b.died.connect(func(_b): _mark_navmesh_dirty())
+	# RTS_CORE_ROADMAP.md E3: OpenRA's CancelUnbuildableItems - without this,
+	# a vehicle-tier job already mid-build when its tier's last manufactory
+	# dies just keeps drip-feeding cost toward a `spawn_from_queue()` that
+	# will never run (production_queue.gd's tick() has nowhere to spawn it
+	# and silently drops the job on the floor - see its own comment). Only
+	# wired for the 3 manufactory kinds; losing an hq/refinery/power_plant
+	# doesn't gate any production tier.
+	if kind in BuildingScript.MANUFACTORY_KINDS:
+		var tier = kind.trim_suffix("_manufactory")
+		b.died.connect(func(_b): _on_manufactory_died(team, tier))
 	_mark_navmesh_dirty()
 	return b
+
+# RTS_CORE_ROADMAP.md E3: fires on every manufactory death (any team); only
+# actually cancels anything if that tier now has ZERO live manufactories left
+# for that team - losing a second heavy manufactory while a first one still
+# stands shouldn't touch an in-flight heavy-tier job.
+func _on_manufactory_died(team: int, tier: String) -> void:
+	if not has_factory_of_tier(team, tier):
+		production.cancel_unbuildable_items(team, tier)
 
 func spawn_unit(blueprint_data: Dictionary, team: int, pos: Vector3) -> Node:
 	var unit = CharacterBody3D.new()
@@ -1787,6 +1816,33 @@ func _build_tab_bar(parent: Container) -> void:
 		btn.pressed.connect(func(): _set_active_build_tab(tab_name))
 		tab_bar.add_child(btn)
 		build_tab_buttons[tab_name] = btn
+
+	# RTS_CORE_ROADMAP.md E2: repair/sell toggles, same row as the build
+	# tabs (the bar the player's eyes are already on) but NOT one of
+	# build_tab_containers - these arm a click-mode instead of switching
+	# which unit/building buttons are visible.
+	var repair_btn = Button.new()
+	repair_btn.text = "🔧 Repair"
+	repair_btn.custom_minimum_size = Vector2(90, 26)
+	repair_btn.toggle_mode = true
+	tab_bar.add_child(repair_btn)
+	var sell_btn = Button.new()
+	sell_btn.text = "💰 Sell"
+	sell_btn.custom_minimum_size = Vector2(90, 26)
+	sell_btn.toggle_mode = true
+	tab_bar.add_child(sell_btn)
+	repair_btn.pressed.connect(func():
+		repair_mode = repair_btn.button_pressed
+		if repair_mode:
+			sell_mode = false
+			sell_btn.button_pressed = false)
+	sell_btn.pressed.connect(func():
+		sell_mode = sell_btn.button_pressed
+		if sell_mode:
+			repair_mode = false
+			repair_btn.button_pressed = false)
+	_repair_button = repair_btn
+	_sell_button = sell_btn
 
 func _set_active_build_tab(tab_name: String) -> void:
 	active_build_tab = tab_name
@@ -2337,6 +2393,52 @@ func _place_ai_structure(team: int, info: Dictionary) -> void:
 		b.bp_manager = bp_manager
 	b.start_construction_animation()
 
+# RTS_CORE_ROADMAP.md E2: RA's own sell formula - RefundPercent=50, scaled by
+# the building's current health fraction, so selling a half-dead building
+# gives back half of half, not the full 50%. Generalized across this game's
+# two resources (RA only has one currency): each refunds independently off
+# building.gd's own build_cost_metal/build_cost_crystal (set at construction
+# time for both prefab and defense kinds - see setup_prefab()/setup_defense()).
+const SELL_REFUND_PCT: float = 0.5
+
+func sell_building(b: StaticBody3D) -> void:
+	if not is_instance_valid(b) or b.is_dead: return
+	var hp_frac = b.hp / max(0.001, b.max_hp)
+	var refund_metal = int(round(b.build_cost_metal * SELL_REFUND_PCT * hp_frac))
+	var refund_crystal = int(round(b.build_cost_crystal * SELL_REFUND_PCT * hp_frac))
+	add_resources(b.team, refund_metal, refund_crystal)
+	_flash_status("Sold for %dM/%dC" % [refund_metal, refund_crystal])
+	b.die(false) # no debris - selling isn't dying in combat
+
+# RTS_CORE_ROADMAP.md E2: RA's own repair formula, adapted to this project's
+# two-resource economy - each of metal/crystal repairs independently against
+# that SAME resource's own share of the building's original build cost (a
+# building with 0 crystal cost, e.g. hq, repairs for 0 crystal - no separate
+# gate needed, the formula already zeroes out). "min 1" only applies to a
+# resource the building actually cost something in, matching RA's own
+# `max(1, ...)` floor (a building can't repair for literally 0 of an
+# ingredient it was actually built from).
+func _process_repairs(delta: float) -> void:
+	for b in get_tree().get_nodes_in_group("buildings"):
+		if not is_instance_valid(b) or b.is_dead or not b.is_repairing: continue
+		if b.hp >= b.max_hp:
+			b.is_repairing = false
+			continue
+		b._repair_timer += delta
+		while b.is_repairing and b.hp < b.max_hp and b._repair_timer >= BuildingScript.REPAIR_INTERVAL:
+			b._repair_timer -= BuildingScript.REPAIR_INTERVAL
+			var hp_to_repair = min(BuildingScript.REPAIR_HP_PER_STEP, b.max_hp - b.hp)
+			var frac = hp_to_repair * 0.2 / (b.max_hp * 100.0)
+			var cost_metal = int(ceil(frac * b.build_cost_metal)) if b.build_cost_metal > 0 else 0
+			var cost_crystal = int(ceil(frac * b.build_cost_crystal)) if b.build_cost_crystal > 0 else 0
+			if b.build_cost_metal > 0: cost_metal = max(1, cost_metal)
+			if b.build_cost_crystal > 0: cost_crystal = max(1, cost_crystal)
+			if not spend(b.team, cost_metal, cost_crystal):
+				break # stalled - retry next interval once affordable, same pause-not-slowdown convention as D1
+			b.repair_hp(hp_to_repair)
+			if b.hp >= b.max_hp:
+				b.is_repairing = false
+
 func _try_place_building(pos: Vector3):
 	if placing.is_empty(): return
 	var validity = _placement_validity(pos)
@@ -2399,6 +2501,23 @@ func _unhandled_input(event):
 
 	if event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
+			# RTS_CORE_ROADMAP.md E2: repair/sell modes consume the very next
+			# left-click, whatever it hits (a miss just cancels the mode -
+			# same "armed, one-shot" convention OpenRA's own sidebar icons
+			# use), before any of the normal placement/selection handling
+			# below runs.
+			if repair_mode or sell_mode:
+				var hit = _raycast_screen(event.position, 8) # layer 8 = buildings
+				if hit and hit.collider and hit.collider.is_in_group("buildings") and hit.collider.get("team") == PLAYER_TEAM:
+					if sell_mode:
+						sell_building(hit.collider)
+					else:
+						hit.collider.is_repairing = not hit.collider.is_repairing
+				repair_mode = false
+				sell_mode = false
+				if is_instance_valid(_repair_button): _repair_button.button_pressed = false
+				if is_instance_valid(_sell_button): _sell_button.button_pressed = false
+				return
 			if not placing.is_empty():
 				var hit = _raycast_ground(event.position)
 				if hit != null:

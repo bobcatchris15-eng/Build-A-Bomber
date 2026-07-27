@@ -12,7 +12,15 @@ sky_material = SubResource("ProceduralSkyMaterial_x3k")
 [sub_resource type="Environment" id="Environment_x3k"]
 background_mode = 2
 sky = SubResource("Sky_x3k")
-tonemap_mode = 2
+tonemap_mode = 3
+glow_enabled = true
+glow_intensity = 0.9
+glow_bloom = 0.08
+glow_blend_mode = 2
+glow_hdr_threshold = 1.0
+ssao_enabled = true
+ssao_radius = 0.8
+ssao_intensity = 2.5
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
 size = Vector3(100, 1, 100)
