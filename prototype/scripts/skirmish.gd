@@ -7,6 +7,7 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const ModuleDataScript = preload("res://scripts/module_data.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
+const UIAnimScript = preload("res://scripts/ui_anim.gd")
 const BattleUnitScript = preload("res://scripts/battle_unit.gd")
 const BuildingScript = preload("res://scripts/building.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
@@ -1970,13 +1971,44 @@ func _add_build_button(parent: Container, text: String, color: Color, callback: 
 	var disabled_style = style.duplicate()
 	disabled_style.bg_color = color.darkened(0.5)
 	btn.add_theme_stylebox_override("disabled", disabled_style)
+	# VISUAL_IMPROVEMENT_PLAN.md chunk G: real tactile press feedback (a
+	# quick squash-release) alongside whatever the button's own click does -
+	# purely cosmetic, so it's a second connection rather than something
+	# `callback` itself needs to know about.
+	btn.pressed.connect(func(): UIAnimScript.button_press_feedback(btn))
 	btn.pressed.connect(callback)
 	parent.add_child(btn)
 	return btn
 
+var _displayed_metal: int = -1
+var _displayed_crystal: int = -1
+var _resource_roll_tween: Tween = null
+
 func _update_resource_ui():
 	if resource_label:
-		resource_label.text = "💰 Metal: %d   💎 Crystal: %d" % [economy[PLAYER_TEAM].metal, economy[PLAYER_TEAM].crystal]
+		var target_metal: int = economy[PLAYER_TEAM].metal
+		var target_crystal: int = economy[PLAYER_TEAM].crystal
+		# VISUAL_IMPROVEMENT_PLAN.md chunk G: "resource counter roll-up" -
+		# but only for a genuinely big jump (a harvester delivering a full
+		# load, a sell refund) - D1's drip-fed production cost changes this
+		# by 1-2 units almost every physics tick, and re-triggering a Tween
+		# on every one of those would just look like noise, not a roll-up.
+		# Small changes snap instantly, exactly like before this chunk.
+		if _displayed_metal < 0 or abs(target_metal - _displayed_metal) + abs(target_crystal - _displayed_crystal) < 3:
+			_displayed_metal = target_metal
+			_displayed_crystal = target_crystal
+			resource_label.text = "💰 Metal: %d   💎 Crystal: %d" % [target_metal, target_crystal]
+		else:
+			if _resource_roll_tween and _resource_roll_tween.is_valid():
+				_resource_roll_tween.kill()
+			var start_metal = _displayed_metal
+			var start_crystal = _displayed_crystal
+			_resource_roll_tween = UIAnimScript.roll_up(resource_label, 0.0, 1.0, UIAnimScript.DURATION_NORMAL, func(t):
+				var m = int(round(lerp(float(start_metal), float(target_metal), t)))
+				var c = int(round(lerp(float(start_crystal), float(target_crystal), t)))
+				resource_label.text = "💰 Metal: %d   💎 Crystal: %d" % [m, c])
+			_displayed_metal = target_metal
+			_displayed_crystal = target_crystal
 	# RTS_CORE_ROADMAP.md E1: a real power bar, replacing the old single
 	# "(DEFICIT: builds slower!)" status string - "Base Power" wording kept
 	# (FABLE_REVIEW.md 3.9/1.6: this is the BASE's power only, never a
@@ -1998,10 +2030,25 @@ func _update_resource_ui():
 		power_bar.add_theme_stylebox_override("fill", fill_style)
 		power_status_label.text = "⚡ Base Power: %s" % state.capitalize()
 
+var _status_toast_home_pos: Vector2 = Vector2.INF
+var _status_toast_tween: Tween = null
+
 func _flash_status(msg: String):
 	if status_label:
 		status_label.text = msg
 		status_label.modulate = Color(1.0, 0.8, 0.3)
+		# VISUAL_IMPROVEMENT_PLAN.md chunk G: a real slide+fade entrance
+		# instead of the text just snapping in place. Cache the label's own
+		# resting position once and reset to it before each toast (rather
+		# than reading whatever position a still-in-flight previous tween
+		# left it at) so back-to-back status flashes can't drift the label
+		# away from its anchored spot.
+		if _status_toast_home_pos == Vector2.INF:
+			_status_toast_home_pos = status_label.position
+		if _status_toast_tween and _status_toast_tween.is_valid():
+			_status_toast_tween.kill()
+		status_label.position = _status_toast_home_pos
+		_status_toast_tween = UIAnimScript.toast_slide_fade(status_label)
 		get_tree().create_timer(2.5).timeout.connect(func():
 			if is_instance_valid(status_label):
 				status_label.modulate = Color(0.8, 0.85, 0.9)
@@ -2767,6 +2814,9 @@ func _on_hq_died(building):
 	overlay.color = Color(0, 0, 0, 0.6)
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	ui.add_child(overlay)
+	# VISUAL_IMPROVEMENT_PLAN.md chunk G: a real scene-transition fade
+	# instead of the dim + card just appearing instantly.
+	UIAnimScript.fade(overlay, 1.0)
 
 	# A framed card behind the text/button, not just text floating on the
 	# dimmed overlay - the same "real panel chrome, not bare Controls"
@@ -2790,6 +2840,14 @@ func _on_hq_died(building):
 	card_style.content_margin_bottom = 30
 	card.add_theme_stylebox_override("panel", card_style)
 	overlay.add_child(card)
+	# VISUAL_IMPROVEMENT_PLAN.md chunk G: slide the card in - deferred one
+	# frame (not called inline here) since PRESET_CENTER's actual pixel
+	# position only resolves once the card's children (added below) have
+	# gone through a real layout pass; reading card.position synchronously
+	# in the same frame it's created would capture a stale pre-layout value.
+	get_tree().process_frame.connect(func():
+		UIAnimScript.slide_in(card, Vector2(0, 40))
+	, CONNECT_ONE_SHOT)
 
 	var vbox = VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER

@@ -93,6 +93,18 @@ func _init():
 		success = false
 		_failed.append("test_designer_camera_pan")
 	_total_suites += 1
+	if not await _run_suite(test_designer_camera_zoom_smoothing, "test_designer_camera_zoom_smoothing"):
+		success = false
+		_failed.append("test_designer_camera_zoom_smoothing")
+	_total_suites += 1
+	if not await _run_suite(test_ui_anim_motion_library, "test_ui_anim_motion_library"):
+		success = false
+		_failed.append("test_ui_anim_motion_library")
+	_total_suites += 1
+	if not await _run_suite(test_part_button_custom_tooltip_card, "test_part_button_custom_tooltip_card"):
+		success = false
+		_failed.append("test_part_button_custom_tooltip_card")
+	_total_suites += 1
 	if not await _run_suite(test_rts_camera_edge_scroll_direction, "test_rts_camera_edge_scroll_direction"):
 		success = false
 		_failed.append("test_rts_camera_edge_scroll_direction")
@@ -1499,6 +1511,141 @@ func test_designer_camera_pan() -> bool:
 
 	parent.queue_free()
 	print("  [PASS] Designer camera pan math verified (middle-drag, distance-scaled).")
+	return true
+
+# VISUAL_AND_UX_POLISH_PLAN.md B2: designer_camera.gd's zoom used to snap
+# `position.z` straight to `_distance` the instant the wheel moved - the
+# only per-frame smoothing anywhere in either camera script was
+# rts_camera.gd's own height lerp. Proves the real behavior change: a big
+# jump in `_distance` should NOT be fully reflected in `position.z` after a
+# single small time step, but SHOULD converge there given enough steps.
+func test_designer_camera_zoom_smoothing() -> bool:
+	print("Running Test Suite: Designer Camera Zoom Smoothing (VISUAL_AND_UX_POLISH_PLAN.md B2)...")
+	var parent = Node3D.new()
+	root.add_child(parent)
+	var cam = Camera3D.new()
+	cam.set_script(preload("res://scripts/designer_camera.gd"))
+	parent.add_child(cam)
+	await process_frame
+	await process_frame
+
+	cam.position.z = 15.0
+	cam._distance = 30.0
+	cam._process(1.0 / 60.0)
+	if abs(cam.position.z - 30.0) < 0.01:
+		print("  [FAIL] A single small time step should not snap position.z straight to the new _distance, got ", cam.position.z)
+		parent.queue_free()
+		return false
+	if cam.position.z <= 15.0:
+		print("  [FAIL] position.z should have moved at least partway toward the new _distance, stayed at ", cam.position.z)
+		parent.queue_free()
+		return false
+
+	for i in range(180): # 3 real seconds - comfortably past the lerp's own convergence time
+		cam._process(1.0 / 60.0)
+	if abs(cam.position.z - 30.0) > 0.01:
+		print("  [FAIL] position.z should converge to _distance given enough time, got ", cam.position.z)
+		parent.queue_free()
+		return false
+
+	parent.queue_free()
+	print("  [PASS] Zoom smoothly lerps position.z toward _distance instead of snapping instantly.")
+	return true
+
+# VISUAL_IMPROVEMENT_PLAN.md chunk G: the shared ui_anim.gd motion library -
+# proves each function actually changes real node state over real time
+# (not an instant snap), and that roll_up()'s Callable-driven design lets a
+# caller interpolate more than one value from a single tween parameter
+# (skirmish.gd's resource_label needs metal AND crystal from one t).
+func test_ui_anim_motion_library() -> bool:
+	print("Running Test Suite: ui_anim.gd Motion Library (VISUAL_IMPROVEMENT_PLAN.md chunk G)...")
+	var UIAnimScript = preload("res://scripts/ui_anim.gd")
+	var host = Control.new()
+	root.add_child(host)
+	await process_frame
+
+	# --- slide_in(): starts offset + transparent, ends at original position + opaque ---
+	var panel = Control.new()
+	panel.position = Vector2(100, 100)
+	host.add_child(panel)
+	var target_pos = panel.position
+	UIAnimScript.slide_in(panel, Vector2(0, 40), 0.1)
+	if panel.position == target_pos or panel.modulate.a >= 0.99:
+		print("  [FAIL] slide_in() should start the node offset and transparent, got pos=", panel.position, " alpha=", panel.modulate.a)
+		host.queue_free()
+		return false
+	for i in range(30): await process_frame # 0.5s @ 60fps, past the 0.1s duration
+	if panel.position.distance_to(target_pos) > 0.5 or panel.modulate.a < 0.95:
+		print("  [FAIL] slide_in() should converge to its original position and full opacity, got pos=", panel.position, " alpha=", panel.modulate.a)
+		host.queue_free()
+		return false
+
+	# --- roll_up(): a Callable-driven tween_method reaches its end value ---
+	# `received` is a single-element Array, not a bare float - GDScript
+	# lambdas capture local primitives BY VALUE, so a lambda reassigning a
+	# captured float only mutates its own copy, never the outer variable
+	# (caught by this exact test failing "got -1" on the first attempt - a
+	# real GDScript pitfall, not a bug in roll_up() itself). An Array is a
+	# reference type, so mutating its contents from inside the lambda is
+	# visible here too.
+	var received = [-1.0]
+	UIAnimScript.roll_up(host, 0.0, 100.0, 0.1, func(v): received[0] = v)
+	for i in range(30): await process_frame
+	if abs(received[0] - 100.0) > 0.5:
+		print("  [FAIL] roll_up() should tween its Callable up to the end value, got ", received[0])
+		host.queue_free()
+		return false
+
+	# --- fade(): starts at from_alpha, converges to target_alpha ---
+	var fade_node = ColorRect.new()
+	fade_node.modulate.a = 1.0
+	host.add_child(fade_node)
+	UIAnimScript.fade(fade_node, 1.0, 0.1, 0.0)
+	if fade_node.modulate.a >= 0.99:
+		print("  [FAIL] fade() should reset modulate.a to from_alpha before tweening, got ", fade_node.modulate.a)
+		host.queue_free()
+		return false
+	for i in range(30): await process_frame
+	if fade_node.modulate.a < 0.95:
+		print("  [FAIL] fade() should converge to target_alpha, got ", fade_node.modulate.a)
+		host.queue_free()
+		return false
+
+	host.queue_free()
+	await process_frame
+	print("  [PASS] slide_in()/roll_up()/fade() all animate real node state over real time instead of snapping instantly.")
+	return true
+
+# VISUAL_IMPROVEMENT_PLAN.md chunk G: part_button.gd's custom tooltip card -
+# replaces Godot's default plain PopupPanel tooltip with a styled card (dark
+# panel, bordered title row, smaller stat rows below) built directly from
+# whatever the button's own tooltip_text currently is.
+func test_part_button_custom_tooltip_card() -> bool:
+	print("Running Test Suite: Custom Tooltip Card On Part Buttons (VISUAL_IMPROVEMENT_PLAN.md chunk G)...")
+	var btn = Button.new()
+	btn.set_script(preload("res://scripts/part_button.gd"))
+	root.add_child(btn)
+	await process_frame
+
+	var tooltip = btn._make_custom_tooltip("Rotary Gatling\nHP: 120 | Weight: 40\nCost: 200 Metal, 10 Crystal")
+	if not (tooltip is PanelContainer):
+		print("  [FAIL] _make_custom_tooltip() should return a real styled PanelContainer, not Godot's default")
+		btn.queue_free()
+		return false
+	var vbox = tooltip.get_child(0) if tooltip.get_child_count() > 0 else null
+	if not (vbox is VBoxContainer) or vbox.get_child_count() != 3:
+		print("  [FAIL] Expected a title row + 2 stat rows (3 total), got ", vbox.get_child_count() if vbox else "no vbox")
+		btn.queue_free()
+		return false
+	var title_label = vbox.get_child(0) as Label
+	if not title_label or title_label.text != "Rotary Gatling":
+		print("  [FAIL] The first row should be the part name as a title, got ", title_label.text if title_label else "null")
+		btn.queue_free()
+		return false
+
+	btn.queue_free()
+	await process_frame
+	print("  [PASS] Part buttons build a real styled tooltip card (title + stat rows) instead of Godot's default plain PopupPanel.")
 	return true
 
 # VISUAL_AND_UX_POLISH_PLAN.md B1: rts_camera.gd had neither edge-scroll nor

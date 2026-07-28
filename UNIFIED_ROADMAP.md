@@ -549,8 +549,8 @@ into Phase 1 above; what remains:
 | **B1** RTS camera — ✅ DONE 2026-07-27 | Edge-scroll and zoom-to-cursor, both core RTS camera expectations, were missing. |
 | **C4** drawer tween — ✅ already done, this roadmap's entry was stale | `parts_menu.gd`'s collapsible drawers already animate open/closed via a real `Tween` (landed in `6f8b17e`, before this roadmap's own baseline commit - the original survey missed it). |
 | **A2** GPUParticles3D VFX — ✅ DONE 2026-07-27 | Muzzle flashes and hit effects allocated a fresh `MeshInstance3D` + `StandardMaterial3D` + `Tween` **per shot**. |
-| **B2** Design Lab camera smoothing | `designer_camera.gd:40-46` snaps with no lerp. Small. |
-| **G** = `VISUAL_IMPROVEMENT_PLAN.md` chunk G | Custom tooltip cards + a `ui_anim.gd` motion library. The only remaining unbuilt chunk of the UI chrome plan besides F. |
+| **B2** Design Lab camera smoothing — ✅ DONE 2026-07-27 | `designer_camera.gd:40-46` snapped with no lerp. |
+| **G** = `VISUAL_IMPROVEMENT_PLAN.md` chunk G — ✅ DONE 2026-07-27 | Custom tooltip cards + a `ui_anim.gd` motion library. |
 | **A3** decal system | Real art production, not a code task. Budget as its own arc. Lowest priority here. |
 
 **Recommended order:** A1 → A4 → B1 → C4 → A2 → B2 → G → A3.
@@ -649,6 +649,48 @@ new design). New test
 real wiring (firing a weapon and killing a unit each spawn a genuine
 `GPUParticles3D`, not the old node types), plus a real non-headless capture
 (`prototype/scratch/capture_a2_vfx.gd`) confirming it actually renders.
+
+**B2 done.** `designer_camera.gd`'s zoom snapped `position.z` straight to
+`_distance` the instant the wheel moved - the only smoothing anywhere in
+either camera script was `rts_camera.gd`'s own height lerp. New `_process()`
+lerps `position.z` toward `_distance` (`lerp(position.z, _distance, 10.0 *
+delta)`), matching that same convention. New test
+`test_designer_camera_zoom_smoothing` proves a single small time step
+doesn't fully reflect a big `_distance` jump, but repeated steps converge
+to it.
+
+**G done.** New `res://scripts/ui_anim.gd` (`class_name UIAnim`) - a small
+shared motion library (`slide_in`, `button_press_feedback`, `roll_up`,
+`toast_slide_fade`, `fade`), all real, all wired into real call sites
+rather than left sitting unused: build-bar buttons get press feedback,
+`_flash_status()`'s toast now slides+fades in, the resource counter rolls
+up via `roll_up()`'s Callable-driven `tween_method` (but only for a
+genuinely big jump - a harvester delivery, a sell refund - small
+production-drip-feed changes still snap instantly, since re-triggering a
+Tween on a 1-2-unit change every physics tick would read as noise, not a
+roll-up), and the victory/defeat overlay's dim now fades in with its card
+sliding up. Also `part_button.gd` gained `_make_custom_tooltip()` -
+Godot's own virtual hook for replacing the default plain `PopupPanel`
+tooltip - returning a styled dark card (gold-bordered title row + smaller
+stat rows) built directly from the button's existing `tooltip_text`, no
+new icon-graphic system needed since every "icon" in this project is
+already emoji baked into that same text (per `VISUAL_IMPROVEMENT_PLAN.md`'s
+own inventory).
+
+**A real GDScript pitfall caught while writing `test_ui_anim_motion_library`,
+not a bug in `ui_anim.gd` itself:** a first attempt captured a local `float`
+in a lambda and reassigned it from inside the tween's callback to observe
+the result - GDScript closures capture local primitives **by value**, so
+the lambda was mutating its own private copy, and the outer test variable
+never changed (`roll_up() should tween... got -1` - the initial sentinel,
+forever). Fixed by capturing a single-element `Array` instead (a reference
+type, so mutations from inside the lambda are visible outside it) - the
+production code in `skirmish.gd`'s `_update_resource_ui()` was never at
+risk, since its own `roll_up()` callback only *reads* captured values, never
+reassigns one.
+
+Real screenshots (`prototype/scratch/capture_g_ui_anim.gd`) confirm the
+tooltip card and toast/counter both actually render.
 
 ---
 
@@ -819,7 +861,7 @@ Suggest `docs/archive/` for Tier 4 and a one-line pointer from `README.md`.
 | **1.2** | Playtest + tune the 10 guessed number sets | evenings | 1.1, 1.4, 1.5 | **Chris only.** Nothing else is validated without it |
 | **1.3** | AI builds buildings — items 1-3 ✅ done, 4 open (needs a forward-base design decision) | 1–multi | 1.1 | Makes all of Phase C/D/E two-sided |
 | **1.6** | E2 sell+repair, E3 tech greying — ✅ DONE | 1 session | 1.3 | Closes `RTS_CORE_ROADMAP.md` |
-| **2.x** | A1 ✅ done → A4 ✅ done → B1 ✅ done → C4 ✅ already done → A2 ✅ done → B2 → G → A3 | varies | — | A1 alone changes how everything reads |
+| **2.x** | A1 ✅ done → A4 ✅ done → B1 ✅ done → C4 ✅ already done → A2 ✅ done → B2 ✅ done → G ✅ done → A3 | varies | — | A1 alone changes how everything reads |
 | **3.3** | One perf measurement session, then P4d | 1 session | — | Plan says measure; measurement is stale |
 | **3.1** | Re-audit + rewrite `HULL_BUILDER_PLAN.md`, then build | multi | 0.1 | Plan is unusable as written |
 | **3.2** | B8 next map (unblocks B10 slot UI at 3 spawns) | multi | — | Authoring judgment, own arc |

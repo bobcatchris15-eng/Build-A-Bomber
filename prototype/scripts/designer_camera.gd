@@ -21,6 +21,14 @@ func _ready():
 	position = Vector3(0, 0, _distance)
 	look_at(_pivot.position)
 
+# VISUAL_AND_UX_POLISH_PLAN.md B2: zoom used to snap position.z straight to
+# _distance the instant the wheel moved - the only per-frame smoothing
+# anywhere in either camera script is rts_camera.gd's own height lerp
+# (`global_position.y = lerp(global_position.y, height, 10.0 * delta)`),
+# which this now matches for consistency between the two cameras.
+func _process(delta):
+	position.z = lerp(position.z, _distance, 10.0 * delta)
+
 func _input(event):
 	pass
 
@@ -43,7 +51,6 @@ func _unhandled_input(event):
 			_distance += zoom_speed
 			
 		_distance = clamp(_distance, min_zoom, max_zoom)
-		position.z = _distance
 
 func _compute_pan_delta(mouse_relative: Vector2) -> Vector3:
 	# Scale with distance so pan speed stays consistent whether zoomed in

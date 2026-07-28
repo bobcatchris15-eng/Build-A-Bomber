@@ -1,0 +1,68 @@
+extends RefCounted
+class_name UIAnim
+# VISUAL_IMPROVEMENT_PLAN.md chunk G: a small shared motion library so the
+# UI's handful of animated moments (panel slide-in, button press feedback,
+# resource counter roll-up, status toast slide+fade, scene-transition fade)
+# read as one consistent system - same standard durations/easings - instead
+# of each call site hand-rolling its own one-off Tween with its own timing.
+
+const DURATION_FAST: float = 0.12
+const DURATION_NORMAL: float = 0.22
+const DURATION_SLOW: float = 0.4
+const EASE_STANDARD := Tween.EASE_OUT
+const TRANS_STANDARD := Tween.TRANS_CUBIC
+
+# Slides a Control in from `from_offset` (relative to its own current/target
+# position) while fading it in - a panel/card's entrance.
+static func slide_in(node: Control, from_offset: Vector2, duration: float = DURATION_NORMAL) -> Tween:
+	var target_pos = node.position
+	node.position = target_pos + from_offset
+	node.modulate.a = 0.0
+	var tween = node.create_tween()
+	tween.set_trans(TRANS_STANDARD)
+	tween.set_ease(EASE_STANDARD)
+	tween.tween_property(node, "position", target_pos, duration)
+	tween.parallel().tween_property(node, "modulate:a", 1.0, duration)
+	return tween
+
+# A quick squash-then-release on press - real tactile feedback instead of
+# just the theme's built-in pressed StyleBox swap.
+static func button_press_feedback(button: Control) -> Tween:
+	var tween = button.create_tween()
+	tween.tween_property(button, "scale", Vector2(0.92, 0.92), DURATION_FAST * 0.4)
+	tween.tween_property(button, "scale", Vector2.ONE, DURATION_FAST * 0.6)
+	return tween
+
+# Generic tween_method driver for a numeric roll-up (resource counters,
+# score tallies, etc.) - deliberately takes a Callable rather than a fixed
+# label/format string, since callers often need to update more than one
+# value from a single interpolation parameter (e.g. metal AND crystal
+# sharing one label's text).
+static func roll_up(node: Object, from_value: float, to_value: float, duration: float, on_update: Callable) -> Tween:
+	var tween = node.create_tween()
+	tween.set_trans(TRANS_STANDARD)
+	tween.set_ease(Tween.EASE_OUT)
+	tween.tween_method(on_update, from_value, to_value, duration)
+	return tween
+
+# A status toast's entrance - slides up slightly while fading in.
+static func toast_slide_fade(node: Control, duration: float = DURATION_NORMAL) -> Tween:
+	var start_pos = node.position
+	node.position = start_pos + Vector2(0, 12)
+	node.modulate.a = 0.0
+	var tween = node.create_tween()
+	tween.set_trans(TRANS_STANDARD)
+	tween.set_ease(EASE_STANDARD)
+	tween.tween_property(node, "position", start_pos, duration)
+	tween.parallel().tween_property(node, "modulate:a", 1.0, duration)
+	return tween
+
+# Scene-transition fade (e.g. a victory/defeat dimming overlay) - sets the
+# starting alpha itself (like slide_in()/toast_slide_fade() set their own
+# starting position) so a caller doesn't have to remember to zero out
+# modulate.a first; pass `from_alpha` explicitly for a fade-OUT instead.
+static func fade(node: CanvasItem, target_alpha: float, duration: float = DURATION_SLOW, from_alpha: float = 0.0) -> Tween:
+	node.modulate.a = from_alpha
+	var tween = node.create_tween()
+	tween.tween_property(node, "modulate:a", target_alpha, duration)
+	return tween

@@ -4,6 +4,22 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-27 — VISUAL_AND_UX_POLISH_PLAN.md B2 (Design Lab camera) + VISUAL_IMPROVEMENT_PLAN.md chunk G (tooltips + motion library) — Phase 2 complete except A3
+
+Closes out Phase 2's remaining code chunks. Only A3 (decal system - real art production, its own arc) is left in the whole phase.
+
+**Shipped - B2:** `designer_camera.gd`'s zoom snapped `position.z` straight to `_distance` the instant the wheel moved - the only smoothing anywhere in either camera script was `rts_camera.gd`'s own height lerp. New `_process()` lerps `position.z` toward `_distance` (`lerp(position.z, _distance, 10.0 * delta)`), matching that convention. New test `test_designer_camera_zoom_smoothing` proves a single small time step doesn't fully reflect a big `_distance` jump but repeated steps converge to it.
+
+**Shipped - G:** New `res://scripts/ui_anim.gd` (`class_name UIAnim`) - `slide_in`, `button_press_feedback`, `roll_up`, `toast_slide_fade`, `fade` - all wired into real call sites, not left sitting unused: build-bar buttons get press feedback (`_add_build_button`), `_flash_status()`'s toast slides+fades in (with a cached home-position + tween-kill guard so back-to-back status flashes can't drift the label), the resource counter rolls up via `roll_up()`'s Callable-driven `tween_method` for a genuinely big jump (harvester delivery, sell refund - small per-tick production-drip changes still snap instantly, since animating every 1-2-unit tick would read as noise), and the victory/defeat overlay's dim fades in with its card sliding up (deferred one frame past creation, since `PRESET_CENTER`'s real pixel position only resolves after a layout pass). `part_button.gd` gained `_make_custom_tooltip()` - Godot's own virtual hook - returning a styled dark card (gold-bordered title + stat rows) parsed directly from the button's existing `tooltip_text`, no new icon-graphic system needed since every "icon" in this project is already emoji baked into that text.
+
+**A real GDScript pitfall caught while writing the ui_anim test, not a bug in ui_anim.gd itself:** a first attempt captured a local `float` in a lambda and reassigned it from inside the tween callback to observe the result - GDScript closures capture local primitives **by value**, so the lambda mutated its own private copy and the outer variable never changed (assertion kept reading the initial `-1` sentinel forever). Fixed by capturing a single-element `Array` instead (a reference type - mutations from inside the lambda are visible outside it). Confirmed the production code (`skirmish.gd`'s own `roll_up()` callback) was never at risk, since it only *reads* its captured values, never reassigns one.
+
+**New tests** (`run_tests.gd`): `test_designer_camera_zoom_smoothing`; `test_ui_anim_motion_library` (each of `slide_in`/`roll_up`/`fade` actually animates real node state over real time, not an instant snap); `test_part_button_custom_tooltip_card` (a real `PanelContainer` with a title row + stat rows, not Godot's default). Two real non-headless captures (`prototype/scratch/capture_g_ui_anim.gd`) confirm the tooltip card and toast/counter both actually render.
+
+**Verified:** full suite 166/167 via `run_tests.sh` end to end - the one failure is the same pre-existing, deliberately-left-failing `test_target_dummies_actually_take_damage_in_test_range` flake.
+
+---
+
 ## 2026-07-27 — VISUAL_AND_UX_POLISH_PLAN.md B1 (camera) + A2 (VFX), and two stale roadmap entries corrected
 
 Continues Phase 2. Also found, while starting C4, that two roadmap entries were already stale.
