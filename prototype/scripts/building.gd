@@ -9,6 +9,7 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
+const WorldHPBarScript = preload("res://scripts/world_hp_bar.gd")
 
 # RTS_CORE_ROADMAP.md C3: gives_buildable_area (does an EXISTING building of
 # this kind count as an anchor other placements can measure against?) /
@@ -109,7 +110,8 @@ var production_queue: Array = []
 var rally_point: Vector3 = Vector3.ZERO
 var bp_manager: Node = null
 
-var hp_bar: Label3D = null
+var hp_bar: MeshInstance3D = null
+var kind_label: Label3D = null
 var selection_ring: MeshInstance3D = null
 var footprint: Vector3 = Vector3(5, 3, 5)
 # RTS_CORE_ROADMAP.md C3: does THIS existing building count as a
@@ -361,30 +363,32 @@ func setup_defense(blueprint_data: Dictionary, building_team: int, manager: Node
 		_create_hp_bar(base_size.y + 2.0)
 		_create_selection_ring(max(base_size.x, base_size.z) * 0.72)
 
+var production_bar: MeshInstance3D = null
+var _last_hp_for_flash: float = -1.0
+
 func _create_hp_bar(height: float):
-	hp_bar = Label3D.new()
-	hp_bar.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	hp_bar.font_size = 24
-	hp_bar.outline_size = 5
-	hp_bar.position = Vector3(0, height, 0)
-	add_child(hp_bar)
+	hp_bar = WorldHPBarScript.create_bar(self, Vector3(0, height, 0), team, 1.8, 0.18)
+	# A second, thinner bar just below the hp bar - only ever shown while a
+	# job is actively progressing (see _update_hp_bar()) - replaces the old
+	# "⚙ NN%" text folded into the same Label3D the hp bar used. Reuses the
+	# same hp-bar shader/team-tint machinery; a production job isn't "hp,"
+	# but the segmented-fill-with-gradient look reads correctly for
+	# "progress toward done" too.
+	production_bar = WorldHPBarScript.create_bar(self, Vector3(0, height - 0.32, 0), team, 1.4, 0.12, 6.0)
+	WorldHPBarScript.set_bar_visible(production_bar, false)
+	# The kind name (HQ/REFINERY/...) is real information, not the ASCII bar
+	# being replaced - kept as a small label above the graphical bar.
+	kind_label = Label3D.new()
+	kind_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	kind_label.font_size = 20
+	kind_label.outline_size = 4
+	kind_label.position = Vector3(0, height + 0.3, 0)
+	kind_label.text = kind.to_upper()
+	add_child(kind_label)
 	_update_hp_bar()
 
 func _create_selection_ring(radius: float):
-	selection_ring = MeshInstance3D.new()
-	var torus = TorusMesh.new()
-	torus.inner_radius = radius - 0.14
-	torus.outer_radius = radius
-	selection_ring.mesh = torus
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.3, 1.0, 0.4)
-	mat.emission_enabled = true
-	mat.emission = Color(0.3, 1.0, 0.4)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	selection_ring.material_override = mat
-	selection_ring.position = Vector3(0, 0.08, 0)
-	selection_ring.visible = false
-	add_child(selection_ring)
+	selection_ring = WorldHPBarScript.create_selection_ring(self, radius)
 
 func set_selected(selected: bool):
 	if is_instance_valid(selection_ring):
@@ -432,17 +436,17 @@ static func _set_fog_dim_recursive(node: Node, dim: bool):
 func _update_hp_bar():
 	if not is_instance_valid(hp_bar): return
 	var pct = clamp(hp / max_hp, 0.0, 1.0)
-	var filled = int(pct * 10.0)
-	var bar = ""
-	for i in range(filled): bar += "■"
-	for i in range(10 - filled): bar += "□"
-	var label_name = kind.to_upper()
+	WorldHPBarScript.update_bar(hp_bar, pct)
+	if _last_hp_for_flash >= 0.0 and hp < _last_hp_for_flash:
+		WorldHPBarScript.flash_damage(hp_bar)
+	_last_hp_for_flash = hp
 	if kind in MANUFACTORY_KINDS and not production_queue.is_empty():
 		var job = production_queue[0]
 		var job_pct = 1.0 - (job.time_left / job.total_time)
-		label_name += " ⚙ %d%%" % int(job_pct * 100)
-	hp_bar.text = "%s\n%s" % [label_name, bar]
-	hp_bar.modulate = (Color.CYAN if team == 0 else Color.ORANGE_RED).lerp(Color.RED, 1.0 - pct)
+		WorldHPBarScript.set_bar_visible(production_bar, true)
+		WorldHPBarScript.update_bar(production_bar, job_pct)
+	else:
+		WorldHPBarScript.set_bar_visible(production_bar, false)
 
 func _physics_process(delta):
 	if is_dead: return

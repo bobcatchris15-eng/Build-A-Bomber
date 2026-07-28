@@ -541,7 +541,7 @@ into Phase 1 above; what remains:
 | Chunk | Why it's worth it |
 |---|---|
 | **A1** environment/post-processing — ✅ DONE 2026-07-27 | *"the single highest visual-return-for-effort item"* — one `WorldEnvironment` node with tuned bloom/SSAO/ACES tonemap. |
-| **A4** = `VISUAL_IMPROVEMENT_PLAN.md` chunk F | In-world health bars are still `Label3D` rendering an `■□` ASCII bar, in **three independently duplicated implementations** (`battle_unit.gd:601-621`, `building.gd:255-262`, `target_dummy.gd:44`). Selection rings are an unshaded flat `TorusMesh`. Chunk F already specs the replacement — pure execution, no new design. |
+| **A4** = `VISUAL_IMPROVEMENT_PLAN.md` chunk F — ✅ DONE 2026-07-27 | In-world health bars were `Label3D` rendering an `■□` ASCII bar, in **three independently duplicated implementations**. Selection rings were an unshaded flat `TorusMesh`. |
 | **A2** GPUParticles3D VFX | Muzzle flashes and hit effects currently allocate a fresh `MeshInstance3D` + `StandardMaterial3D` + `Tween` **per shot**. Replacing them is a genuine performance win as well as polish. |
 | **B1** RTS camera | No edge-scroll, no zoom-to-cursor. Both are core RTS camera expectations. |
 | **B2** Design Lab camera smoothing | `designer_camera.gd:40-46` snaps with no lerp. Small. |
@@ -567,6 +567,46 @@ scenes rather than per-scene tweaking, since they're all the same rendering
 pipeline. Tagged `[Qwen once Claude sets exact parameter values]` in the
 source plan; done directly this pass since it's a small, well-specified
 engine-config change, not a multi-file code change.
+
+**A4 done.** New `res://scripts/world_hp_bar.gd` (`class_name WorldHPBar`,
+`RefCounted`) is the one shared helper `battle_unit.gd`/`building.gd`/
+`target_dummy.gd` now all go through instead of each building its own
+Label3D. It doesn't invent new geometry/shaders — it discovered and wired up
+`res://shaders/inworld_hp_bar.gdshader` and `res://shaders/selection_ring.
+gdshader`, both already fully authored (a real segmented-bar gradient with
+a damage-flash uniform; a self-animating rotating-dash pulsing ring) but
+**never referenced by any script anywhere** — `test_2d_ui_chrome_overhaul`
+only checked the files exist on disk, which they did, unused, the whole
+time. `inworld_hp_bar.gdshader` shipped without `render_mode billboard` set
+(not actually a valid spatial render_mode token in Godot 4 — a custom
+shader has to face the camera via a manual `vertex()` rebuild of
+`MODELVIEW_MATRIX`, added here) and would not have faced the camera at all
+otherwise. `building.gd` gets a second, thinner bar (same shader/helper,
+different color/segment count) for production-job progress, replacing the
+old "⚙ NN%" text folded into the same Label3D; kind name (HQ/REFINERY/...)
+and a harvester's cargo glyph both stay as small compact Label3Ds — real
+information, not the ASCII bar being replaced.
+
+**Real bug caught by a screenshot, not headless tests**: the selection
+ring's world-space size formula was off by 2x (`radius * 2.0 / 0.42`
+instead of `radius / 0.42` — the shader's ring sits at UV-space distance
+0.42 from center, a *fraction* of the quad's own size, not world units).
+Headless tests can assert a `MeshInstance3D` exists and its shader param
+tracks hp correctly, but "is the ring the right size" is a real-render
+question — caught by a scratch capture script
+(`prototype/scratch/capture_a4_hp_bars.gd`) showing a selection ring
+roughly 2x the intended radius around the HQ, fixed, then reverified with
+a second capture. The new `test_a4_world_hp_bar_and_selection_ring_real_
+wiring` test asserts the exact expected quad size algebraically so a
+regression here fails headless too, not just visually.
+
+**Real, unrelated bug found in passing, not fixed this pass:** the same
+screenshot showed every building's faction "mascot" decal (`hull_decals.
+gd` — gear/hexagon/star/etc.) rendering as a giant disc covering most of
+the building, contradicting that file's own header comment ("sized to stay
+genuinely detail-scale, never competing with the silhouette"). Unrelated
+to A4's own scope (health bars/selection rings, not hull decals) — flagged
+as a follow-up task rather than fixed here.
 
 ---
 
@@ -737,7 +777,7 @@ Suggest `docs/archive/` for Tier 4 and a one-line pointer from `README.md`.
 | **1.2** | Playtest + tune the 10 guessed number sets | evenings | 1.1, 1.4, 1.5 | **Chris only.** Nothing else is validated without it |
 | **1.3** | AI builds buildings — items 1-3 ✅ done, 4 open (needs a forward-base design decision) | 1–multi | 1.1 | Makes all of Phase C/D/E two-sided |
 | **1.6** | E2 sell+repair, E3 tech greying — ✅ DONE | 1 session | 1.3 | Closes `RTS_CORE_ROADMAP.md` |
-| **2.x** | A1 ✅ done → A4 → B1 → C4 → A2 → B2 → G → A3 | varies | — | A1 alone changes how everything reads |
+| **2.x** | A1 ✅ done → A4 ✅ done → B1 → C4 → A2 → B2 → G → A3 | varies | — | A1 alone changes how everything reads |
 | **3.3** | One perf measurement session, then P4d | 1 session | — | Plan says measure; measurement is stale |
 | **3.1** | Re-audit + rewrite `HULL_BUILDER_PLAN.md`, then build | multi | 0.1 | Plan is unusable as written |
 | **3.2** | B8 next map (unblocks B10 slot UI at 3 spawns) | multi | — | Authoring judgment, own arc |

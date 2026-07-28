@@ -10,6 +10,17 @@ uniform vec4 color_bg : source_color = vec4(0.05, 0.07, 0.1, 0.85);
 uniform vec4 color_border : source_color = vec4(0.2, 0.25, 0.3, 0.9);
 uniform float damage_flash : hint_range(0.0, 1.0) = 0.0;
 
+// "billboard" isn't a valid spatial render_mode keyword in Godot 4 (unlike
+// StandardMaterial3D's own billboard_mode property) - a custom shader has
+// to face the camera manually. Standard Godot 4 recipe: rebuild
+// MODELVIEW_MATRIX from VIEW_MATRIX's rotation with the model's own
+// translation, discarding the model's rotation/scale from the basis
+// entirely - matches Label3D's BILLBOARD_ENABLED behavior, which is what
+// this bar replaces.
+void vertex() {
+	MODELVIEW_MATRIX = VIEW_MATRIX * mat4(INV_VIEW_MATRIX[0], INV_VIEW_MATRIX[1], INV_VIEW_MATRIX[2], MODEL_MATRIX[3]);
+}
+
 void fragment() {
 	vec2 uv = UV;
 

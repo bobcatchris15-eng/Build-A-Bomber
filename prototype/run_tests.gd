@@ -696,6 +696,10 @@ func _init():
 	if not await _run_suite(test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue, "test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue"):
 		success = false
 		_failed.append("test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue")
+	_total_suites += 1
+	if not await _run_suite(test_a4_world_hp_bar_and_selection_ring_real_wiring, "test_a4_world_hp_bar_and_selection_ring_real_wiring"):
+		success = false
+		_failed.append("test_a4_world_hp_bar_and_selection_ring_real_wiring")
 
 	print("\n==============================================")
 	if success:
@@ -7815,6 +7819,114 @@ func test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue
 	skirmish.queue_free()
 	await process_frame
 	print("  [PASS] Losing one of two same-tier manufactories leaves the queue alone - only losing the last one cancels it.")
+	return true
+
+# VISUAL_AND_UX_POLISH_PLAN.md A4 / VISUAL_IMPROVEMENT_PLAN.md chunk F:
+# replaces the Label3D + ASCII `■□` bar (duplicated 3 times: battle_unit.gd,
+# building.gd, target_dummy.gd) with a real shader-driven bar via the new
+# world_hp_bar.gd - proves the actual wiring (a real MeshInstance3D with the
+# real shader, hp_ratio tracking real hp, a properly-scaled selection ring),
+# not just that the shader files exist on disk (test_2d_ui_chrome_overhaul's
+# own check, which would have passed even while these shaders sat completely
+# unused - which is exactly the state this session found them in).
+func test_a4_world_hp_bar_and_selection_ring_real_wiring() -> bool:
+	print("Running Test Suite: A4 - Real Graphical HP Bars + Selection Rings (Not Just Shader Files Existing) (VISUAL_AND_UX_POLISH_PLAN.md A4)...")
+	await process_frame
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await process_frame
+	await process_frame
+
+	# --- building.gd: hp bar tracks real hp, production bar tracks a real job ---
+	var hq = skirmish.player_hq
+	if not (hq.hp_bar is MeshInstance3D) or not is_instance_valid(hq.hp_bar):
+		print("  [FAIL] building.gd's hp_bar should be a real MeshInstance3D")
+		skirmish.queue_free()
+		return false
+	var hq_mat = hq.hp_bar.material_override as ShaderMaterial
+	if not hq_mat or hq_mat.shader.resource_path != "res://shaders/inworld_hp_bar.gdshader":
+		print("  [FAIL] building.gd's hp_bar should use the real inworld_hp_bar shader")
+		skirmish.queue_free()
+		return false
+	hq.hp = hq.max_hp * 0.5
+	hq._update_hp_bar()
+	if abs(float(hq_mat.get_shader_parameter("hp_ratio")) - 0.5) > 0.01:
+		print("  [FAIL] hp_bar's hp_ratio shader param should track real hp/max_hp, got ", hq_mat.get_shader_parameter("hp_ratio"))
+		skirmish.queue_free()
+		return false
+
+	var light_factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM, "light")
+	light_factory.queue_unit({"hull_type": "light_hull", "modules": []}, 10.0)
+	light_factory._update_hp_bar()
+	if not is_instance_valid(light_factory.production_bar) or not light_factory.production_bar.visible:
+		print("  [FAIL] production_bar should be visible while a real job is active")
+		skirmish.queue_free()
+		return false
+	light_factory.production_queue.clear()
+	light_factory._update_hp_bar()
+	if light_factory.production_bar.visible:
+		print("  [FAIL] production_bar should hide once the queue is empty again")
+		skirmish.queue_free()
+		return false
+
+	# --- selection ring: real geometry, correctly scaled, toggles with set_selected() ---
+	if not (hq.selection_ring is MeshInstance3D):
+		print("  [FAIL] selection_ring should be a real MeshInstance3D")
+		skirmish.queue_free()
+		return false
+	var ring_mat = hq.selection_ring.material_override as ShaderMaterial
+	if not ring_mat or ring_mat.shader.resource_path != "res://shaders/selection_ring.gdshader":
+		print("  [FAIL] selection_ring should use the real selection_ring shader")
+		skirmish.queue_free()
+		return false
+	# hq footprint is (7,4,7) -> _create_selection_ring(max(7,7)*0.72=5.04) ->
+	# quad side = 5.04/0.42 = 12.0 exactly - catches the *2.0 sizing bug a
+	# real screenshot caught this session (headless alone would have missed
+	# a ring rendering 2x too big, since nothing here asserted world scale
+	# before).
+	var expected_side = (max(hq.footprint.x, hq.footprint.z) * 0.72) / 0.42
+	if abs(hq.selection_ring.mesh.size.x - expected_side) > 0.01:
+		print("  [FAIL] selection_ring quad should be sized so the shader's fixed 0.42 UV-radius matches the real footprint radius, expected side ", expected_side, " got ", hq.selection_ring.mesh.size.x)
+		skirmish.queue_free()
+		return false
+	if hq.selection_ring.visible:
+		print("  [FAIL] selection_ring should start hidden")
+		skirmish.queue_free()
+		return false
+	hq.set_selected(true)
+	if not hq.selection_ring.visible:
+		print("  [FAIL] set_selected(true) should show the ring")
+		skirmish.queue_free()
+		return false
+	hq.set_selected(false)
+	if hq.selection_ring.visible:
+		print("  [FAIL] set_selected(false) should hide the ring again")
+		skirmish.queue_free()
+		return false
+
+	# --- battle_unit.gd: same bar wiring on a live unit ---
+	var units = skirmish.get_team_units(skirmish.PLAYER_TEAM)
+	if units.is_empty():
+		print("  [FAIL] Test setup: expected at least one starting player unit")
+		skirmish.queue_free()
+		return false
+	var u = units[0]
+	if not is_instance_valid(u.hp_bar) or not (u.hp_bar.material_override as ShaderMaterial):
+		print("  [FAIL] battle_unit.gd's hp_bar should be a real shader-backed MeshInstance3D")
+		skirmish.queue_free()
+		return false
+	u.hp = u.max_hp * 0.25
+	u._update_hp_bar()
+	var u_mat = u.hp_bar.material_override as ShaderMaterial
+	if abs(float(u_mat.get_shader_parameter("hp_ratio")) - 0.25) > 0.01:
+		print("  [FAIL] battle_unit.gd's hp_bar hp_ratio should track real hp, got ", u_mat.get_shader_parameter("hp_ratio"))
+		skirmish.queue_free()
+		return false
+
+	skirmish.queue_free()
+	await process_frame
+	print("  [PASS] Real MeshInstance3D + ShaderMaterial hp bars and a correctly-scaled, toggleable selection ring - genuinely wired, not just present on disk.")
 	return true
 
 # Reusable per-map smoke test (per Chris's one-at-a-time verification

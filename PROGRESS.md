@@ -4,6 +4,28 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-27 — VISUAL_AND_UX_POLISH_PLAN.md A4: real in-world hp bars + selection rings
+
+Phase 2's second chunk. Replaces the `Label3D` + `■□` ASCII health bar pattern - three independently duplicated implementations (`battle_unit.gd`, `building.gd`, `target_dummy.gd`) - and the flat unshaded `TorusMesh` selection ring, with real geometry.
+
+**A genuinely lucky find, not something built from scratch:** `res://shaders/inworld_hp_bar.gdshader` and `res://shaders/selection_ring.gdshader` already existed, dated before this session, fully authored - a real segmented-bar shader with a green/amber/red HP gradient and a damage-flash uniform, and a self-animating rotating-dash pulsing ring shader. Neither was referenced by any script anywhere. `test_2d_ui_chrome_overhaul` (already in the suite) only checked they exist on disk, which they did, unused, the whole time - exactly the "designed but never wired up" pattern this project's docs have flagged before (A3's `decal_tint` uniform, similarly inert).
+
+**Shipped:**
+- New `res://scripts/world_hp_bar.gd` (`class_name WorldHPBar`) - the one shared helper all three callers now go through, so they can't drift out of sync with each other the way the three independent Label3D implementations already had (different font sizes, bar cell counts, color lerps).
+- `inworld_hp_bar.gdshader` shipped without `render_mode billboard` - not actually a valid spatial render_mode token in Godot 4 (confirmed by a real shader compile error; misremembered from elsewhere). Fixed with the standard Godot 4 manual-billboard recipe: a `vertex()` function rebuilding `MODELVIEW_MATRIX` from `VIEW_MATRIX`'s rotation + the model's own translation. Without this the bar would never have faced the camera at all.
+- `building.gd` gets a second, thinner bar (same shader/helper, amber-leaning via a lower segment count) for production-job progress - replaces the old "⚙ NN%" text folded into the same Label3D the hp bar used. Kind name (HQ/REFINERY/...) and a harvester's cargo glyph both stay as small compact Label3Ds - real information, not the ASCII bar being replaced.
+- Damage flash: `WorldHPBar.flash_damage()` kicks the shader's `damage_flash` uniform to 1.0 and tweens it back to 0 over 0.25s, fired only on an actual HP decrease (tracked via a `_last_hp_for_flash` field) - not on every `_update_hp_bar()` call, several of which aren't damage (e.g. cargo pickup).
+
+**Real bug caught by a screenshot, not headless tests:** the selection ring's world-space sizing formula was off by 2x (`radius * 2.0 / 0.42` instead of `radius / 0.42` - the shader's ring sits at UV-space distance 0.42 from center, a *fraction* of the quad's own size, not world units). A first capture (`prototype/scratch/capture_a4_hp_bars.gd`, non-headless, damages the HQ and a unit to ~40%/35% and selects both) showed a selection ring roughly 2x the intended radius. Fixed, then reverified with a second capture. This is exactly the class of bug this project's own verification conventions call out - "some verification must run non-headless" - a headless test asserting a `MeshInstance3D` exists and its `hp_ratio` shader param tracks real hp would never have caught a pure world-scale error.
+
+**Real, unrelated bug found in passing, not fixed this pass:** the same screenshot showed every building's faction "mascot" decal (`hull_decals.gd` - gear/hexagon/star/etc.) rendering as a giant disc covering most of the building, contradicting that file's own header comment ("sized to stay genuinely detail-scale, never competing with the silhouette"). Out of scope for A4 (health bars/selection rings, not hull decals) - flagged as a follow-up task.
+
+**New test** (`run_tests.gd`): `test_a4_world_hp_bar_and_selection_ring_real_wiring` - asserts a real `MeshInstance3D` + `ShaderMaterial` (not just a Dictionary or Label3D), the correct shader resource path, `hp_ratio` tracking real hp on both a building and a unit, the production bar's visibility toggling with a real job, and the selection ring's exact expected quad size algebraically (so the 2x sizing bug would fail headless too, not just visually) plus its show/hide toggle via `set_selected()`.
+
+**Verified:** full suite 160/161 (up from 159/160) via `.\run_tests.ps1`/`run_tests.sh` end to end - the one failure is the same pre-existing, deliberately-left-failing `test_target_dummies_actually_take_damage_in_test_range` flake. Two real non-headless screenshots (`prototype/progress_captures/2026-07-27_a4_hp_bars/`) confirm the bars/ring actually render correctly in a live Skirmish scene, not just pass headless assertions.
+
+---
+
 ## 2026-07-27 — Phase 1 close-out (1.3 item 3, E2, E3) + Phase 2 A1
 
 Finishes everything left in `UNIFIED_ROADMAP.md` Phase 1 that doesn't require Chris directly (1.2's playtest and 1.5's debug-HUD gating both remain deliberately his call), then opens Phase 2 with its recommended-first item.

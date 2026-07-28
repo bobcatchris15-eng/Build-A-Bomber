@@ -604,43 +604,44 @@ func _recalculate_terrain_speed_multiplier():
 			terrain_speed_multiplier = 1.0 - (1.0 - terrain_speed_multiplier) * (1.0 - reduction)
 
 func _create_selection_ring(base_size: Vector3):
-	selection_ring = MeshInstance3D.new()
-	var torus = TorusMesh.new()
 	var radius = max(base_size.x, base_size.z) * 0.65
-	torus.inner_radius = radius - 0.12
-	torus.outer_radius = radius
-	selection_ring.mesh = torus
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.3, 1.0, 0.4)
-	mat.emission_enabled = true
-	mat.emission = Color(0.3, 1.0, 0.4)
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	selection_ring.material_override = mat
-	selection_ring.position = Vector3(0, 0.08, 0)
-	selection_ring.visible = false
-	add_child(selection_ring)
+	selection_ring = WorldHPBarScript.create_selection_ring(self, radius)
 
-var hp_bar: Label3D = null
+const WorldHPBarScript = preload("res://scripts/world_hp_bar.gd")
+var hp_bar: MeshInstance3D = null
+var cargo_icon: Label3D = null
+var _last_hp_for_flash: float = -1.0
+
 func _create_hp_bar():
-	hp_bar = Label3D.new()
-	hp_bar.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	hp_bar.font_size = 22
-	hp_bar.outline_size = 5
-	hp_bar.position = Vector3(0, 2.6, 0)
-	add_child(hp_bar)
+	hp_bar = WorldHPBarScript.create_bar(self, Vector3(0, 2.6, 0), team, 1.4, 0.16)
+	# The cargo glyph is real information (a harvester is carrying a load),
+	# not part of the bar being replaced - kept as a tiny secondary label
+	# rather than folded into the graphical bar itself.
+	if is_harvester:
+		cargo_icon = Label3D.new()
+		cargo_icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		cargo_icon.font_size = 20
+		cargo_icon.outline_size = 4
+		cargo_icon.position = Vector3(0, 2.9, 0)
+		cargo_icon.visible = false
+		add_child(cargo_icon)
 	_update_hp_bar()
 
 func _update_hp_bar():
 	if not is_instance_valid(hp_bar): return
 	var pct = clamp(hp / max_hp, 0.0, 1.0)
-	var filled = int(pct * 8.0)
-	var bar = ""
-	for i in range(filled): bar += "■"
-	for i in range(8 - filled): bar += "□"
-	if is_harvester and (cargo_metal > 0 or cargo_crystal > 0):
-		bar += " ⛏"
-	hp_bar.text = bar
-	hp_bar.modulate = (Color.GREEN if team == 0 else Color.ORANGE_RED).lerp(Color.RED, 1.0 - pct)
+	WorldHPBarScript.update_bar(hp_bar, pct)
+	# The shader's own damage_flash uniform fires once per real HP drop -
+	# _update_hp_bar() also runs on things that aren't damage (e.g. cargo
+	# pickup), which shouldn't flash white.
+	if _last_hp_for_flash >= 0.0 and hp < _last_hp_for_flash:
+		WorldHPBarScript.flash_damage(hp_bar)
+	_last_hp_for_flash = hp
+	if is_instance_valid(cargo_icon):
+		var carrying = cargo_metal > 0 or cargo_crystal > 0
+		cargo_icon.visible = carrying
+		if carrying:
+			cargo_icon.text = "⛏"
 
 func set_selected(selected: bool):
 	if is_instance_valid(selection_ring):

@@ -1,6 +1,7 @@
 extends StaticBody3D
 
 const DamageResolver = preload("res://scripts/damage_resolver.gd")
+const WorldHPBarScript = preload("res://scripts/world_hp_bar.gd")
 
 @export var max_health: float = 100.0
 var health: float = 100.0
@@ -18,6 +19,8 @@ var is_combat_dummy: bool = false
 var time_since_last_missile: float = 0.0
 
 var label: Label3D
+var hp_bar: MeshInstance3D = null
+var _last_health_for_flash: float = -1.0
 
 @onready var mesh_inst = $MeshInstance3D
 
@@ -40,28 +43,27 @@ func _ready():
 		mat.albedo_color = Color.WHITE
 	mesh_inst.material_override = mat
 	
-	# Instantiate floating 3D health label
+	# Real graphical bar (VISUAL_AND_UX_POLISH_PLAN.md A4) + a compact text
+	# label for the numeric HP/type - the ASCII `■□` bar itself is what's
+	# being replaced, the actual numbers are still worth keeping legible.
+	hp_bar = WorldHPBarScript.create_bar(self, Vector3(0, 1.4, 0), get_meta("team", 1), 1.2, 0.16)
 	label = Label3D.new()
-	label.position = Vector3(0, 1.3, 0)
+	label.position = Vector3(0, 1.15, 0)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.font_size = 28
-	label.outline_size = 6
+	label.font_size = 20
+	label.outline_size = 4
 	add_child(label)
 	_update_health_label()
 
 func _update_health_label():
+	var hp_pct = clamp(health / max_health, 0.0, 1.0)
+	WorldHPBarScript.update_bar(hp_bar, hp_pct)
+	if _last_health_for_flash >= 0.0 and health < _last_health_for_flash:
+		WorldHPBarScript.flash_damage(hp_bar)
+	_last_health_for_flash = health
 	if is_instance_valid(label):
-		var hp_pct = clamp(health / max_health, 0.0, 1.0)
-		var bar_length = 8
-		var filled = int(hp_pct * bar_length)
-		var bar_str = ""
-		for i in range(filled):
-			bar_str += "■"
-		for i in range(bar_length - filled):
-			bar_str += "□"
-		
 		var type_str = "HOSTILE" if is_combat_dummy else "DUMMY"
-		label.text = "%s (%s)\n%d/%d HP" % [bar_str, type_str, int(health), int(max_health)]
+		label.text = "%s\n%d/%d HP" % [type_str, int(health), int(max_health)]
 		label.modulate = Color.GREEN.lerp(Color.RED, 1.0 - hp_pct)
 
 func _physics_process(delta):
@@ -138,6 +140,7 @@ func die():
 	if is_instance_valid(label):
 		label.visible = false
 		label.queue_free()
+	WorldHPBarScript.free_bar(hp_bar)
 	
 	# Disable collisions immediately
 	collision_layer = 0
