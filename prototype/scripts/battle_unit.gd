@@ -14,6 +14,7 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const GlobalConfigScript = preload("res://scripts/global_config.gd")
+const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 
 var team: int = 0
 var max_hp: float = 400.0
@@ -1459,22 +1460,7 @@ func _share_energy_with_allies(delta: float):
 			u.receive_energy_share(LOGISTICS_SHARE_RATE * logistics_tank_strength * ENERGY_SHARE_SCAN_INTERVAL)
 
 func _flash_shield():
-	var exp_mesh = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = 0.8
-	sphere.height = 1.6
-	exp_mesh.mesh = sphere
-	var flash_mat = StandardMaterial3D.new()
-	flash_mat.albedo_color = Color(0.2, 0.6, 1.0, 0.4)
-	flash_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	flash_mat.emission_enabled = true
-	flash_mat.emission = Color(0.2, 0.6, 1.0)
-	exp_mesh.material_override = flash_mat
-	add_child(exp_mesh)
-	exp_mesh.position = Vector3(0, 0.5, 0)
-	var tween = create_tween()
-	tween.tween_property(exp_mesh, "scale", Vector3.ZERO, 0.1)
-	tween.finished.connect(func(): exp_mesh.queue_free())
+	VFXBurstScript.spawn(self, Vector3(0, 0.5, 0), Color(0.2, 0.6, 1.0), 10, 0.12, 50.0, 1.5, 3.0, Vector3.ZERO, 0.6, 1.3)
 
 func _flash_hull():
 	if not is_instance_valid(hull_node): return
@@ -1494,23 +1480,15 @@ func _spawn_explosion(pos: Vector3, size: float):
 	var scene = get_tree().current_scene
 	if not scene: scene = get_parent()
 	if not scene: return
-	for i in range(6):
-		var particle = MeshInstance3D.new()
-		var box = BoxMesh.new()
-		box.size = Vector3(0.2, 0.2, 0.2) * size
-		particle.mesh = box
-		var p_mat = StandardMaterial3D.new()
-		p_mat.albedo_color = Color.RED.lerp(Color.YELLOW, randf())
-		p_mat.emission_enabled = true
-		p_mat.emission = p_mat.albedo_color
-		particle.material_override = p_mat
-		scene.add_child(particle)
-		particle.global_position = pos
-		var dir = Vector3(randf_range(-2, 2), randf_range(1, 4), randf_range(-2, 2)).normalized()
-		var tween_p = create_tween()
-		tween_p.tween_property(particle, "global_position", pos + dir * 4.0 * size, 0.6)
-		tween_p.parallel().tween_property(particle, "scale", Vector3.ZERO, 0.6)
-		tween_p.finished.connect(func(): particle.queue_free())
+	# Debris flies outward over ~0.6s the same distance the old per-particle
+	# Tween covered (4.0*size world units) - average initial velocity picked
+	# to match that same travel distance/duration, now GPU-simulated instead
+	# of 6 individually hand-tweened MeshInstance3D nodes. Per-particle
+	# RED->YELLOW color variety is simplified to one fixed orange (a
+	# color_ramp could restore true per-particle variation later if it turns
+	# out to matter - flagged, not chased, given this is a visual parity
+	# swap, not a new design).
+	VFXBurstScript.spawn(scene, pos, Color(1.0, 0.55, 0.15), 6, 0.6, 60.0, 5.0 * size, 8.0 * size, Vector3.ZERO, size, size * 1.6, VFXBurstScript.get_box_mesh())
 
 func die():
 	if is_dead: return

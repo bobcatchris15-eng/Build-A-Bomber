@@ -4,6 +4,25 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-27 — VISUAL_AND_UX_POLISH_PLAN.md B1 (camera) + A2 (VFX), and two stale roadmap entries corrected
+
+Continues Phase 2. Also found, while starting C4, that two roadmap entries were already stale.
+
+**Shipped - B1, RTS camera:**
+- `rts_camera.gd` gains `compute_edge_scroll_direction()` (a pure function - mouse position vs. viewport size and a margin, no `Input`/viewport reads inside it) so edge-scroll is directly testable without faking real OS mouse input. Wired into `_process()`, unioned with the existing WASD input before normalizing, gated on the window actually having focus (so a mouse merely near the edge of an unfocused window doesn't drag the camera).
+- Zoom (mouse wheel) now goes through `zoom_to_cursor()`: measure where the cursor ray hits a flat ground-plane approximation (new `ray_plane_hit()`) before changing height, change height (and the existing zoom-linked pitch), then nudge the camera's XZ so the same world point still sits under the cursor after - previously zooming always re-centered on the camera's own position regardless of where the mouse pointed, like every other RTS/map camera does.
+- New tests `test_rts_camera_edge_scroll_direction` and `test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse` - both real headless assertions (pure-function/deterministic-transform logic, not a real-render question), the latter proving the actual invariant (the same screen point hits the same world point before/after a zoom), not just that height changed.
+
+**Shipped - A2, GPUParticles3D VFX:** New `res://scripts/vfx_burst.gd` (`class_name VFXBurst`) replaces three near-duplicated per-shot `MeshInstance3D` + `StandardMaterial3D` + `Tween` allocations (`auto_weapon.gd`'s muzzle flash, `battle_unit.gd`'s `_flash_shield()`/`_spawn_explosion()`) with one shared `GPUParticles3D` burst helper. Real particle spread/falloff (GPU-simulated) instead of a single scaling mesh; the `ParticleProcessMaterial`/`StandardMaterial3D` pair is cached per (color, mesh) combination and reused across every future call with the same look - the common case, since most weapons fire the same color repeatedly - rather than allocated fresh per shot. Auto-cleanup is the real `finished` signal a `one_shot` `GPUParticles3D` fires once every particle has completed, not a guessed timer. `_spawn_explosion()`'s old per-particle random RED→YELLOW variety is simplified to one fixed orange (flagged as restorable via a `color_ramp` later, not chased this pass). New test `test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion` proves the real wiring (firing a weapon and killing a unit each spawn a genuine `GPUParticles3D`), plus a real non-headless capture (`prototype/scratch/capture_a2_vfx.gd`) confirming it actually renders without error.
+
+**Two stale roadmap entries corrected, found while starting C4:** `parts_menu.gd`'s collapsible drawers already animate open/closed via a real `Tween` (`_animate_drawer()`), and both `skirmish.gd`'s Debug panel and `battlefield.gd`'s `DebugTuningPanel` are already gated behind `OS.is_debug_build()`. Both landed in `6f8b17e` (2026-07-26) - *before* `UNIFIED_ROADMAP.md`'s own `b1c5309` baseline - so the original survey that produced the roadmap simply missed them. `UNIFIED_ROADMAP.md`'s C4 and 1.5/C2 entries corrected to reflect this (confirmed against current code, not just commit history, in case either had been reverted since - neither had).
+
+**A real bug in the zoom-to-cursor test itself, caught by re-running it, not just eyeballing a green result once:** the test set `cam.global_position` then immediately called `cam._apply_pitch()`, assuming `_ready()` (which derives `height` from `global_position.y` at the moment it fires) had already run by then. That ordering isn't guaranteed - it passed in isolation, then failed the exact same way the real implementation bug it exists to catch would fail (height silently clamped to `min_height` instead of the intended 26) inside a full-suite run, where node-entering-tree timing differs. Fixed by setting `cam.height` explicitly instead of relying on `_ready()`'s implicit derivation - confirmed stable across 5 repeated isolated runs before trusting it again.
+
+**Verified:** full suite 163/164 via `run_tests.sh` end to end (reimport + suite) - the one failure is the same pre-existing, deliberately-left-failing `test_target_dummies_actually_take_damage_in_test_range` flake, documented since 2026-07-21 and again in `UNIFIED_ROADMAP.md` 0.4.
+
+---
+
 ## 2026-07-27 — VISUAL_AND_UX_POLISH_PLAN.md A4: real in-world hp bars + selection rings
 
 Phase 2's second chunk. Replaces the `Label3D` + `■□` ASCII health bar pattern - three independently duplicated implementations (`battle_unit.gd`, `building.gd`, `target_dummy.gd`) - and the flat unshaded `TorusMesh` selection ring, with real geometry.

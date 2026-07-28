@@ -3,6 +3,7 @@ extends Node3D
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const GlobalConfig = preload("res://scripts/global_config.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 
 var target: Node3D = null
 var fire_range: float = 12.0
@@ -1017,21 +1018,7 @@ func _fire_at_target():
 		
 	# Spawn a nice muzzle flash (except for silent lasers/beams/harvester/welder)
 	if not type_id in ["heavy_laser", "pd_laser", "resource_harvester", "repair_array"]:
-		var flash = MeshInstance3D.new()
-		var sphere_mesh = SphereMesh.new()
-		sphere_mesh.radius = 0.2
-		sphere_mesh.height = 0.4
-		flash.mesh = sphere_mesh
-		var flash_mat = StandardMaterial3D.new()
-		flash_mat.albedo_color = laser_color
-		flash_mat.emission_enabled = true
-		flash_mat.emission = laser_color
-		flash.material_override = flash_mat
-		add_child(flash)
-		flash.position = Vector3(0, 0.4, -0.6)
-		var flash_tween = create_tween()
-		flash_tween.tween_property(flash, "scale", Vector3.ZERO, 0.08)
-		flash_tween.finished.connect(func(): flash.queue_free())
+		VFXBurstScript.spawn(self, Vector3(0, 0.4, -0.6), laser_color, 8, 0.1, 25.0, 3.0, 6.0, Vector3.ZERO, 0.4, 0.9)
 
 	var sfx_name = "cannon"
 	match type_id:

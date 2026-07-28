@@ -93,6 +93,18 @@ func _init():
 		success = false
 		_failed.append("test_designer_camera_pan")
 	_total_suites += 1
+	if not await _run_suite(test_rts_camera_edge_scroll_direction, "test_rts_camera_edge_scroll_direction"):
+		success = false
+		_failed.append("test_rts_camera_edge_scroll_direction")
+	_total_suites += 1
+	if not await _run_suite(test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse, "test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse"):
+		success = false
+		_failed.append("test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse")
+	_total_suites += 1
+	if not await _run_suite(test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion, "test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion"):
+		success = false
+		_failed.append("test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion")
+	_total_suites += 1
 	if not await _run_suite(test_locomotion_tweak_parity, "test_locomotion_tweak_parity"):
 		success = false
 		_failed.append("test_locomotion_tweak_parity")
@@ -1487,6 +1499,202 @@ func test_designer_camera_pan() -> bool:
 
 	parent.queue_free()
 	print("  [PASS] Designer camera pan math verified (middle-drag, distance-scaled).")
+	return true
+
+# VISUAL_AND_UX_POLISH_PLAN.md B1: rts_camera.gd had neither edge-scroll nor
+# zoom-to-cursor - both core RTS camera expectations. compute_edge_scroll_
+# direction() is a pure function (no Input/viewport reads) specifically so
+# this can assert it directly without faking real OS mouse position.
+func test_rts_camera_edge_scroll_direction() -> bool:
+	print("Running Test Suite: RTS Camera - Edge-Scroll Direction (VISUAL_AND_UX_POLISH_PLAN.md B1)...")
+	var RTSCam = preload("res://scripts/rts_camera.gd")
+	var vp_size = Vector2(1280, 800)
+	var margin = 18.0
+
+	if RTSCam.compute_edge_scroll_direction(Vector2(640, 400), vp_size, margin) != Vector2.ZERO:
+		print("  [FAIL] Mouse at screen center should produce zero edge-scroll")
+		return false
+	if RTSCam.compute_edge_scroll_direction(Vector2(5, 400), vp_size, margin).x >= 0.0:
+		print("  [FAIL] Mouse near the left edge should scroll left (negative x)")
+		return false
+	if RTSCam.compute_edge_scroll_direction(Vector2(1275, 400), vp_size, margin).x <= 0.0:
+		print("  [FAIL] Mouse near the right edge should scroll right (positive x)")
+		return false
+	if RTSCam.compute_edge_scroll_direction(Vector2(640, 5), vp_size, margin).y >= 0.0:
+		print("  [FAIL] Mouse near the top edge should scroll up (negative y)")
+		return false
+	if RTSCam.compute_edge_scroll_direction(Vector2(640, 795), vp_size, margin).y <= 0.0:
+		print("  [FAIL] Mouse near the bottom edge should scroll down (positive y)")
+		return false
+	# A corner should scroll diagonally (both axes set), not just one.
+	var corner = RTSCam.compute_edge_scroll_direction(Vector2(2, 2), vp_size, margin)
+	if corner.x >= 0.0 or corner.y >= 0.0:
+		print("  [FAIL] Top-left corner should scroll both up AND left, got ", corner)
+		return false
+
+	print("  [PASS] Edge-scroll direction correctly reads all 4 edges and diagonal corners, and is zero at screen center.")
+	return true
+
+# VISUAL_AND_UX_POLISH_PLAN.md B1: zoom-to-cursor - the previous behavior
+# changed height in place regardless of where the mouse pointed, unlike
+# every modern map/RTS camera. Proves the real invariant: the world point
+# under the cursor (on the flat-plane approximation ray_plane_hit() uses)
+# should be the SAME before and after a zoom, not just that height changed.
+func test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse() -> bool:
+	print("Running Test Suite: RTS Camera - Zoom-To-Cursor Keeps The Same World Point Under The Mouse (VISUAL_AND_UX_POLISH_PLAN.md B1)...")
+	root.size = Vector2i(1280, 800)
+	var parent = Node3D.new()
+	root.add_child(parent)
+	var cam = Camera3D.new()
+	cam.set_script(preload("res://scripts/rts_camera.gd"))
+	parent.add_child(cam)
+	cam.global_position = Vector3(20, 26, 40)
+	# Explicit, not relying on _ready()'s own height = clamp(global_position.y,
+	# ...) - whether _ready() reads global_position.y before or after the
+	# line above runs is a real ordering race (whether Godot flushes the
+	# queued NOTIFICATION_READY before or after this script's own synchronous
+	# execution finishes isn't guaranteed) that bit an earlier version of
+	# this test: it passed in isolation, then failed the exact same way the
+	# real bug it was written to catch failed, inside a full-suite run,
+	# because height silently ended up clamped to min_height (10) instead of
+	# the intended 26.
+	cam.height = 26.0
+	cam._apply_pitch()
+	await process_frame
+
+	# Off-center so a real XZ shift is actually required to compensate (the
+	# screen center ray from directly above barely moves when height alone
+	# changes, which would let a broken implementation pass by accident).
+	var screen_pos = Vector2(950, 550)
+	var before = cam.ray_plane_hit(screen_pos)
+	if before == null:
+		print("  [FAIL] Test setup: ray_plane_hit should hit the y=0 plane from this camera angle")
+		parent.queue_free()
+		return false
+
+	cam.zoom_to_cursor(cam.height - cam.zoom_speed, screen_pos)
+	if abs(cam.height - (26.0 - cam.zoom_speed)) > 0.01:
+		print("  [FAIL] zoom_to_cursor should still change height like the old behavior, got ", cam.height)
+		parent.queue_free()
+		return false
+
+	var after = cam.ray_plane_hit(screen_pos)
+	if after == null:
+		print("  [FAIL] ray_plane_hit should still hit the plane after zooming in")
+		parent.queue_free()
+		return false
+	if before.distance_to(after) > 0.05:
+		print("  [FAIL] The same screen point should hit the same world point before/after zoom-to-cursor, got before=", before, " after=", after, " (distance ", before.distance_to(after), ")")
+		parent.queue_free()
+		return false
+
+	parent.queue_free()
+	await process_frame
+	print("  [PASS] Zooming in/out keeps the world point under the cursor fixed, not just the camera's own XZ position.")
+	return true
+
+# VISUAL_AND_UX_POLISH_PLAN.md A2: replaces the per-shot MeshInstance3D +
+# StandardMaterial3D + Tween muzzle flash/hit/death effects (auto_weapon.gd,
+# battle_unit.gd) with a shared GPUParticles3D-driven vfx_burst.gd. Proves
+# the real wiring - firing a weapon and killing a unit each spawn a genuine
+# GPUParticles3D, not the old node types - not just that vfx_burst.gd's
+# spawn() function exists in isolation.
+func test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion() -> bool:
+	print("Running Test Suite: A2 - GPUParticles3D VFX Replaces Ad-Hoc Muzzle Flash/Explosion Nodes (VISUAL_AND_UX_POLISH_PLAN.md A2)...")
+	await process_frame
+	var VFXBurstScript = preload("res://scripts/vfx_burst.gd")
+
+	# --- spawn() itself: real GPUParticles3D, one-shot, self-cleaning ---
+	var host = Node3D.new()
+	root.add_child(host)
+	var particles = VFXBurstScript.spawn(host, Vector3.ZERO, Color.RED, 4, 0.05)
+	if not (particles is GPUParticles3D) or not is_instance_valid(particles):
+		print("  [FAIL] VFXBurst.spawn() should return a real GPUParticles3D")
+		host.queue_free()
+		return false
+	if not particles.one_shot or not particles.emitting:
+		print("  [FAIL] A freshly-spawned burst should be one_shot and actively emitting")
+		host.queue_free()
+		return false
+	for i in range(120): # 2 real seconds - comfortably past the 0.05s lifetime
+		await process_frame
+		if not is_instance_valid(particles):
+			break
+	if is_instance_valid(particles):
+		print("  [FAIL] A one-shot burst should free itself once finished, not linger forever")
+		host.queue_free()
+		return false
+
+	# --- auto_weapon.gd: firing a real (non-silent) weapon spawns a real burst ---
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var shooter = CharacterBody3D.new()
+	shooter.set_script(BattleUnitScript)
+	root.add_child(shooter)
+	shooter.team = 0
+	shooter.set_meta("team", 0)
+	shooter.add_to_group("damageable")
+
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	shooter.add_child(weapon)
+	var w_data = ModuleData.new()
+	w_data.type_id = "basic_cannon" # not in the silent-weapon exclusion list
+	w_data.base_weight = 20.0
+	w_data.base_dps = 30.0
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+
+	var target_unit = CharacterBody3D.new()
+	target_unit.set_script(BattleUnitScript)
+	root.add_child(target_unit)
+	target_unit.team = 1
+	target_unit.set_meta("team", 1)
+	target_unit.add_to_group("damageable")
+	target_unit.max_hp = 500.0
+	target_unit.hp = 500.0
+	target_unit.global_position = weapon.global_position + Vector3(0, 0, -5)
+	weapon.target = target_unit
+
+	var scene_stub = Node3D.new()
+	root.add_child(scene_stub)
+	current_scene = scene_stub
+	weapon.time_since_last_shot = weapon.fire_rate
+	var found_muzzle_burst = false
+	for i in range(30):
+		weapon._physics_process(0.1)
+		for child in weapon.get_children():
+			if child is GPUParticles3D:
+				found_muzzle_burst = true
+				break
+		if found_muzzle_burst: break
+	if not found_muzzle_burst:
+		print("  [FAIL] Firing basic_cannon should spawn a real GPUParticles3D muzzle flash on the weapon node")
+		shooter.queue_free(); target_unit.queue_free(); scene_stub.queue_free()
+		return false
+
+	# --- battle_unit.gd: a real death explosion spawns a real burst in the scene ---
+	var found_death_burst = false
+	for child in scene_stub.get_children():
+		if child is GPUParticles3D:
+			found_death_burst = true
+			break
+	if found_death_burst:
+		print("  [FAIL] Test setup: scene_stub shouldn't have a burst before die() runs yet")
+		shooter.queue_free(); target_unit.queue_free(); scene_stub.queue_free()
+		return false
+	target_unit._spawn_explosion(target_unit.global_position, 1.5)
+	for child in scene_stub.get_children():
+		if child is GPUParticles3D:
+			found_death_burst = true
+			break
+	if not found_death_burst:
+		print("  [FAIL] _spawn_explosion() should spawn a real GPUParticles3D in the scene, not the old per-particle MeshInstance3D loop")
+		shooter.queue_free(); target_unit.queue_free(); scene_stub.queue_free()
+		return false
+
+	shooter.queue_free(); target_unit.queue_free(); scene_stub.queue_free(); host.queue_free()
+	await process_frame
+	print("  [PASS] Muzzle flash and death explosion both go through the real shared GPUParticles3D burst helper, not the old per-shot Tween/MeshInstance3D pattern.")
 	return true
 
 func test_locomotion_tweak_parity() -> bool:

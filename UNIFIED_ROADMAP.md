@@ -465,14 +465,18 @@ that hits nothing leaves the selection alone. Three new tests in
 `run_tests.gd` cover both paths directly (no synthetic `InputEvent`
 injection). Full suite green, 156/156.
 
-### 1.5 Stop shipping the dev harness — *one small chunk; the other half was already done*
+### 1.5 Stop shipping the dev harness — ✅ DONE (this roadmap's own C2 entry was stale)
 
-- **C2:** `skirmish.gd:1235-1296` puts an ungated Debug button in the live HUD,
-  next to Menu, with checkboxes for infinite resources / reveal fog / instant
-  build. `battlefield.gd:28-34` does the same in the Test Range. Gate both behind
-  `OS.is_debug_build()`. **Deliberately not done this pass** — Chris asked to
-  keep the debug menu available while Phase 1 lands, for testing spawning and
-  combat. Revisit once that testing is done.
+- **C2, ✅ already done — this roadmap's own entry was wrong.** Both
+  `skirmish.gd`'s Debug button/panel and `battlefield.gd`'s
+  `DebugTuningPanel` are gated behind `if OS.is_debug_build():` (`skirmish.
+  gd:1590-1591`, `battlefield.gd:30`). This roadmap originally logged C2 as
+  "deliberately not done this pass," but `git log` shows the gating actually
+  landed in `6f8b17e` (2026-07-26, the same "uniform part-button theming"
+  commit that also did C4 below) - *before* this roadmap's own `b1c5309`
+  baseline, meaning the original survey simply missed it. Confirmed against
+  current code, not just commit history, in case it had been reverted since
+  - it hadn't.
 - **C3, ✅ already done — the original survey was wrong.** `cursor_manager.gd`
   is fully wired: `skirmish.gd:2284` calls `_update_hover_cursor()` on every
   `InputEventMouseMotion`, which itself (`skirmish.gd:2362-2390`) calls
@@ -542,15 +546,32 @@ into Phase 1 above; what remains:
 |---|---|
 | **A1** environment/post-processing — ✅ DONE 2026-07-27 | *"the single highest visual-return-for-effort item"* — one `WorldEnvironment` node with tuned bloom/SSAO/ACES tonemap. |
 | **A4** = `VISUAL_IMPROVEMENT_PLAN.md` chunk F — ✅ DONE 2026-07-27 | In-world health bars were `Label3D` rendering an `■□` ASCII bar, in **three independently duplicated implementations**. Selection rings were an unshaded flat `TorusMesh`. |
-| **A2** GPUParticles3D VFX | Muzzle flashes and hit effects currently allocate a fresh `MeshInstance3D` + `StandardMaterial3D` + `Tween` **per shot**. Replacing them is a genuine performance win as well as polish. |
-| **B1** RTS camera | No edge-scroll, no zoom-to-cursor. Both are core RTS camera expectations. |
+| **B1** RTS camera — ✅ DONE 2026-07-27 | Edge-scroll and zoom-to-cursor, both core RTS camera expectations, were missing. |
+| **C4** drawer tween — ✅ already done, this roadmap's entry was stale | `parts_menu.gd`'s collapsible drawers already animate open/closed via a real `Tween` (landed in `6f8b17e`, before this roadmap's own baseline commit - the original survey missed it). |
+| **A2** GPUParticles3D VFX — ✅ DONE 2026-07-27 | Muzzle flashes and hit effects allocated a fresh `MeshInstance3D` + `StandardMaterial3D` + `Tween` **per shot**. |
 | **B2** Design Lab camera smoothing | `designer_camera.gd:40-46` snaps with no lerp. Small. |
-| **C4** drawer tween | `parts_menu.gd:159-178` has a comment promising a smooth slide and a body that sets `visible = true/false`. Trivial — and it's the designated Qwen delegation trial. |
 | **G** = `VISUAL_IMPROVEMENT_PLAN.md` chunk G | Custom tooltip cards + a `ui_anim.gd` motion library. The only remaining unbuilt chunk of the UI chrome plan besides F. |
 | **A3** decal system | Real art production, not a code task. Budget as its own arc. Lowest priority here. |
 
 **Recommended order:** A1 → A4 → B1 → C4 → A2 → B2 → G → A3.
 A1 first because it changes how *everything* reads for an afternoon's work.
+(C4 turned out to already be done, discovered while starting it - see its
+own entry above.)
+
+**B1 done.** `rts_camera.gd` gains `compute_edge_scroll_direction()` (a pure
+function - mouse position vs. viewport size and a margin - so it's directly
+testable without faking real OS input) driving pan from all 4 screen edges
+whenever the window has focus, unioned with the existing WASD input before
+normalizing. Zoom (mouse wheel) now goes through `zoom_to_cursor()`: measure
+where the cursor ray hits a flat ground-plane approximation before changing
+height, change height (and the existing zoom-linked pitch), then nudge the
+camera's XZ so the same world point still sits under the cursor after -
+previously zooming always re-centered on the camera's own position
+regardless of where the mouse pointed. Both are exercised by real headless
+tests (`test_rts_camera_edge_scroll_direction`, `test_rts_camera_zoom_to_
+cursor_keeps_world_point_under_mouse`) rather than only being eyeballed,
+since both are pure-function/deterministic-transform logic, not real-render
+questions the way A4's ring-scale bug was.
 
 **A1 done.** All 4 gameplay/editor scenes with their own `WorldEnvironment`
 (`Skirmish.tscn`, `Battlefield.tscn`, `MainLab.tscn`, `HullBuilder.tscn`)
@@ -607,6 +628,27 @@ the building, contradicting that file's own header comment ("sized to stay
 genuinely detail-scale, never competing with the silhouette"). Unrelated
 to A4's own scope (health bars/selection rings, not hull decals) — flagged
 as a follow-up task rather than fixed here.
+
+**A2 done.** New `res://scripts/vfx_burst.gd` (`class_name VFXBurst`) is the
+one shared helper `auto_weapon.gd`'s muzzle flash and `battle_unit.gd`'s
+`_flash_shield()`/`_spawn_explosion()` now all go through, replacing three
+near-duplicated per-shot `MeshInstance3D` + `StandardMaterial3D` + `Tween`
+allocations with a `GPUParticles3D` burst. Real particle spread/falloff
+(GPU-simulated) instead of a single scaling mesh, and a genuine perf win:
+the `ParticleProcessMaterial`/`StandardMaterial3D` pair is cached per
+(color, mesh) combination and reused across every future call with the same
+look — the common case, since most weapons fire the same color repeatedly —
+rather than allocated fresh per shot the way the old code always did.
+Auto-cleanup is the real `finished` signal `GPUParticles3D` fires once a
+`one_shot` burst's particles have all completed, not a guessed timer.
+`_spawn_explosion()`'s old per-particle random RED→YELLOW color variety is
+simplified to one fixed orange (flagged in a comment as restorable via a
+`color_ramp` later if it turns out to matter — a visual-parity swap, not a
+new design). New test
+`test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion` proves the
+real wiring (firing a weapon and killing a unit each spawn a genuine
+`GPUParticles3D`, not the old node types), plus a real non-headless capture
+(`prototype/scratch/capture_a2_vfx.gd`) confirming it actually renders.
 
 ---
 
@@ -777,7 +819,7 @@ Suggest `docs/archive/` for Tier 4 and a one-line pointer from `README.md`.
 | **1.2** | Playtest + tune the 10 guessed number sets | evenings | 1.1, 1.4, 1.5 | **Chris only.** Nothing else is validated without it |
 | **1.3** | AI builds buildings — items 1-3 ✅ done, 4 open (needs a forward-base design decision) | 1–multi | 1.1 | Makes all of Phase C/D/E two-sided |
 | **1.6** | E2 sell+repair, E3 tech greying — ✅ DONE | 1 session | 1.3 | Closes `RTS_CORE_ROADMAP.md` |
-| **2.x** | A1 ✅ done → A4 ✅ done → B1 → C4 → A2 → B2 → G → A3 | varies | — | A1 alone changes how everything reads |
+| **2.x** | A1 ✅ done → A4 ✅ done → B1 ✅ done → C4 ✅ already done → A2 ✅ done → B2 → G → A3 | varies | — | A1 alone changes how everything reads |
 | **3.3** | One perf measurement session, then P4d | 1 session | — | Plan says measure; measurement is stale |
 | **3.1** | Re-audit + rewrite `HULL_BUILDER_PLAN.md`, then build | multi | 0.1 | Plan is unusable as written |
 | **3.2** | B8 next map (unblocks B10 slot UI at 3 spawns) | multi | — | Authoring judgment, own arc |
