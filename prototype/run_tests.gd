@@ -105,6 +105,10 @@ func _init():
 		success = false
 		_failed.append("test_part_button_custom_tooltip_card")
 	_total_suites += 1
+	if not await _run_suite(test_resource_node_regrows_gradually_after_being_mined, "test_resource_node_regrows_gradually_after_being_mined"):
+		success = false
+		_failed.append("test_resource_node_regrows_gradually_after_being_mined")
+	_total_suites += 1
 	if not await _run_suite(test_rts_camera_edge_scroll_direction, "test_rts_camera_edge_scroll_direction"):
 		success = false
 		_failed.append("test_rts_camera_edge_scroll_direction")
@@ -512,6 +516,10 @@ func _init():
 	if not await _run_suite(test_map_scattered_peaks_smoke, "test_map_scattered_peaks_smoke"):
 		success = false
 		_failed.append("test_map_scattered_peaks_smoke")
+	_total_suites += 1
+	if not await _run_suite(test_map_ore_basin_smoke, "test_map_ore_basin_smoke"):
+		success = false
+		_failed.append("test_map_ore_basin_smoke")
 	_total_suites += 1
 	if not await _run_suite(test_b8_large_map_navmesh_bake_does_not_crash_recast, "test_b8_large_map_navmesh_bake_does_not_crash_recast"):
 		success = false
@@ -1646,6 +1654,77 @@ func test_part_button_custom_tooltip_card() -> bool:
 	btn.queue_free()
 	await process_frame
 	print("  [PASS] Part buttons build a real styled tooltip card (title + stat rows) instead of Godot's default plain PopupPanel.")
+	return true
+
+# Resource field regrowth (Chris's own call, 2026-07-27, cribbed from
+# C&C/Tiberium fields): a node left alone regrows gradually, whether it was
+# merely picked at or fully depleted. Proves the real state machine: no
+# regrowth while recently harvested, real regrowth once REGROW_DELAY has
+# passed, capped at start_amount, and a fully-depleted node rejoins the
+# "resource_nodes" group (re-harvestable) once it regrows above zero.
+func test_resource_node_regrows_gradually_after_being_mined() -> bool:
+	print("Running Test Suite: Resource Node Regrowth After Mining (C&C-style field regrowth)...")
+	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
+	var node = StaticBody3D.new()
+	node.set_script(ResourceNodeScript)
+	root.add_child(node)
+	node.setup("metal", 1000)
+	await process_frame
+
+	node.harvest(600) # partial draw, 400 left
+	if node.amount != 400:
+		print("  [FAIL] Test setup: harvest(600) from 1000 should leave 400, got ", node.amount)
+		node.queue_free()
+		return false
+
+	# Immediately after harvesting, no regrowth yet - still within REGROW_DELAY.
+	for i in range(300): # 5 real seconds, well under the 15s delay
+		node._physics_process(1.0 / 60.0)
+	if node.amount != 400:
+		print("  [FAIL] A recently-harvested node should not regrow yet, got ", node.amount)
+		node.queue_free()
+		return false
+
+	# Push well past REGROW_DELAY - real regrowth should now accumulate.
+	# (REGROW_DELAY is only crossed partway through this loop, so there
+	# needs to be real time left AFTER crossing it for accumulation to
+	# produce a whole unit, not just "5s + exactly 15s total".)
+	for i in range(1200): # 20 more real seconds -> 25s total elapsed, 10s past the 15s delay
+		node._physics_process(1.0 / 60.0)
+	if node.amount <= 400:
+		print("  [FAIL] A node left alone past REGROW_DELAY should have regrown some amount, stayed at ", node.amount)
+		node.queue_free()
+		return false
+	if node.amount > node.start_amount:
+		print("  [FAIL] Regrowth should never exceed start_amount, got ", node.amount, "/", node.start_amount)
+		node.queue_free()
+		return false
+
+	# Fully deplete, confirm it leaves the harvestable group, then confirm
+	# it eventually regrows back into it.
+	node.harvest(node.amount)
+	if node.amount != 0 or node.is_in_group("resource_nodes"):
+		print("  [FAIL] A fully depleted node should read amount=0 and leave the resource_nodes group")
+		node.queue_free()
+		return false
+	var regrew = false
+	for i in range(6000): # 100 real seconds - comfortably enough at a 1%/s rate to regrow measurably
+		node._physics_process(1.0 / 60.0)
+		if node.amount > 0:
+			regrew = true
+			break
+	if not regrew:
+		print("  [FAIL] A fully-depleted node should eventually regrow given enough time")
+		node.queue_free()
+		return false
+	if not node.is_in_group("resource_nodes"):
+		print("  [FAIL] A regrown node should rejoin the resource_nodes group (re-harvestable again)")
+		node.queue_free()
+		return false
+
+	node.queue_free()
+	await process_frame
+	print("  [PASS] A resource node regrows gradually after a delay, whether merely picked at or fully depleted, and becomes re-harvestable again.")
 	return true
 
 # VISUAL_AND_UX_POLISH_PLAN.md B1: rts_camera.gd had neither edge-scroll nor
@@ -8459,6 +8538,13 @@ func test_map_scattered_peaks_smoke() -> bool:
 	var ok = await _smoke_test_map("scattered_peaks")
 	if ok:
 		print("  [PASS] Scattered Peaks: legal start points, all resources reachable, HQs mutually reachable, factory production works.")
+	return ok
+
+func test_map_ore_basin_smoke() -> bool:
+	print("Running Test Suite: Map Smoke Test - Ore Basin (Chris's own C&C-crib resource redesign: 3 clustered fields - player-side, enemy-side, contested center - instead of scattered singleton nodes; start points legal, resources reachable, HQs mutually reachable, economy loop works)...")
+	var ok = await _smoke_test_map("ore_basin")
+	if ok:
+		print("  [PASS] Ore Basin: legal start points, all 15 resource nodes (3 clustered fields) reachable, HQs mutually reachable, factory production works.")
 	return ok
 
 func test_b8_large_map_navmesh_bake_does_not_crash_recast() -> bool:

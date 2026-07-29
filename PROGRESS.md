@@ -4,6 +4,24 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-07-27 — Resource field regrowth (C&C crib) + new map: Ore Basin
+
+Direct request from Chris, outside the existing roadmap docs' own chunk lists: resources should read as clustered fields around a central point rather than a handful of scattered singleton nodes, and regrow gradually after being mined - "a much much more direct crib from C&C, but hey, Westwood knew what they were about back in the day." Also records a real design decision on `UNIFIED_ROADMAP.md` 1.3 item 4 (AI resource expansion, left open last session): a proper **construction module** that lets its carrying vehicle build anywhere, likely required for *every* building (not just remote expansion) for the gameplay tension it creates - deliberately shelved as its own future design pass, not folded into an AI-behavior chunk.
+
+**Shipped - regrowth (`resource_node.gd`):** a node left alone for `REGROW_DELAY` (15s) since its last successful harvest gradually regrows at `REGROW_RATE_FRACTION` (1%/s of its own `start_amount`), capped at `start_amount` - whether it was merely picked at or fully depleted. A fully-depleted node (already removed from the `resource_nodes` group so harvesters stop targeting it) rejoins that group once it regrows above zero, becoming re-harvestable again. Self-contained in the node's own `_physics_process()` - no new external timer for skirmish.gd to drive. Adapted from OpenRA's own `SeedsResource` to this game's discrete nodes rather than a cell/density grid - `RTS_CORE_ROADMAP.md` had already flagged this exact feature as "explicitly out of scope... but worth having eventually."
+
+**Shipped - Ore Basin (`data/maps/ore_basin.json`):** a new flat, symmetric, 210-half-extent map with three resource *fields* instead of scattered nodes - 5 clustered nodes near each base (the safe economy) plus a bigger, riskier 5-node field dead center (the map's actual objective), flanked by two rock clusters for cover during the fight over it. 15 nodes total, deliberately smaller-average-amount than this project's usual single big nodes (matching a real field's "many patches" read, not "one boulder"). Auto-discovered by `MapCatalog`'s existing directory scan - no manifest to update.
+
+**New tests** (`run_tests.gd`): `test_resource_node_regrows_gradually_after_being_mined` (no regrowth within the delay window, real regrowth past it, capped at `start_amount`, rejoins `resource_nodes` once regrown from fully depleted); `test_map_ore_basin_smoke` (the same generic per-map smoke test every bundled map gets - legal start points, all 15 nodes reachable, HQs mutually reachable, economy loop works).
+
+**A real test-timing bug caught on the first isolated run, not a bug in the regrowth logic itself:** the initial test advanced exactly to the `REGROW_DELAY` boundary (5s + 10s = 15.0s) before checking for regrowth, but the delay-crossing itself only happens on the LAST tick of that window, leaving no real time afterward for `_regrow_accum` to reach a whole unit - "stayed at 400" on the first run. Fixed by running well past the delay (25s total, 10s of real margin past the 15s threshold) before asserting.
+
+**Verified:** the new map's schema validates clean (`MapCatalog.validate_map_def()`), the smoke test passes (reachability, fairness, economy loop), and a real non-headless overhead screenshot (`prototype/scratch/capture_ore_basin.gd`, fog force-revealed via the debug toggle) confirms the three-field clustering is visually distinct from every other bundled map's scattered layout. Full suite 168/169 via `run_tests.sh` end to end - the one failure is the same pre-existing, deliberately-left-failing `test_c1_building_placed_after_unit_is_moving_forces_a_repath` flake (a different navmesh/movement test fails each run per this project's own long-standing note; never the same one twice, never a test from this session).
+
+**Not done this pass, per Chris's own note it may not be worth building right now:** only one new map. Chris asked for "some new maps" (plural) - matching this project's own established one-map-at-a-time cadence (see B8's entry), more can follow the same pattern on request rather than being batched into this session.
+
+---
+
 ## 2026-07-27 — VISUAL_AND_UX_POLISH_PLAN.md B2 (Design Lab camera) + VISUAL_IMPROVEMENT_PLAN.md chunk G (tooltips + motion library) — Phase 2 complete except A3
 
 Closes out Phase 2's remaining code chunks. Only A3 (decal system - real art production, its own arc) is left in the whole phase.

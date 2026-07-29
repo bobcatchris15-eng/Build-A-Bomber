@@ -440,12 +440,23 @@ C3's buildable-area rule: any new building must sit within `adjacent_m` of an
 *existing* friendly anchor building. There is no way to legally drop a
 refinery near a remote resource cluster without first having a forward
 outpost already there — the system has no "found a new base" primitive at
-all. Building one (a forward-MCV-style mechanic, or relaxing adjacency for a
-deliberately-flagged expansion) is genuine design work, not a quick add, so
-it's left open rather than faked as a "build another refinery near home"
-stand-in that wouldn't actually answer the roadmap's own wording.
-**Size:** multi-session for 4, and needs a design decision on the forward-base
-mechanic first.
+all.
+
+**Design decision made 2026-07-27, deliberately not built yet:** Chris's
+call is a real **construction module** — a module type that grants the
+ability to build wherever the carrying vehicle currently is, breaking the
+"must be near an existing anchor" rule entirely for that vehicle. Leaning
+toward *every* building requiring a live construction-module-equipped
+vehicle nearby to build at all (even the starting base) rather than a
+free-standing ability baked into the HQ — the stated reason is the
+gameplay tension it creates (protect your con vehicles or lose the ability
+to build, a real C&C-era MCV-style stake), with a combat-capable
+con-vehicle variant as a possible alternative to a pure-support one. This
+is genuine new gameplay, not a quick add — deliberately shelved while the
+game gets into better shape elsewhere; revisit as its own design pass, not
+folded into a future 1.3/AI-behavior chunk.
+**Size:** multi-session, and now has its design direction — no longer
+blocked on a decision, just on priority.
 
 ### 1.4 Control groups and shift-select — *you cannot play an RTS without these* — ✅ DONE 2026-07-27
 
