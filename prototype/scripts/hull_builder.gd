@@ -1409,14 +1409,20 @@ func _apply_stage_materials() -> void:
 					mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 				child.material_override = mat
 
-func _update_finishing_preview() -> void:
+func _queue_finishing_preview() -> void:
+	if not _preview_debounce_timer:
+		return
+	_preview_debounce_timer.start()
+	_update_status("Updating hull skin preview...")
+
+func _update_finishing_preview(force_high_res: bool = false) -> void:
 	if not _preview_mesh_instance:
 		return
 	if current_stage != AuthoringStage.STAGE_FINISHING or primitives.is_empty():
 		_preview_mesh_instance.visible = false
 		return
 
-	var res: int = bake_resolution
+	var res: int = bake_resolution if force_high_res else PREVIEW_BAKE_RESOLUTION
 	var mesh := SDFMeshBaker.bake(primitives, smoothness, res, bake_method, fit_percent, facet_angle, crystallinity)
 	if mesh != null:
 		_preview_mesh_instance.mesh = mesh
@@ -1539,7 +1545,7 @@ func _build_finishing_properties_panel() -> void:
 	algo_opt.selected = 0 if bake_method == "dc" else 1
 	algo_opt.item_selected.connect(func(idx: int):
 		bake_method = "dc" if idx == 0 else "mc"
-		_update_finishing_preview()
+		_queue_finishing_preview()
 	)
 	properties_panel.add_child(algo_opt)
 
@@ -1555,7 +1561,7 @@ func _build_finishing_properties_panel() -> void:
 	fit_slider.value_changed.connect(func(v: float):
 		fit_percent = v
 		fit_lbl.text = "Skin Fit (%): " + str(int(v)) + "%"
-		_update_finishing_preview()
+		_queue_finishing_preview()
 	)
 	properties_panel.add_child(fit_slider)
 
@@ -1572,7 +1578,7 @@ func _build_finishing_properties_panel() -> void:
 	sm_slider.value_changed.connect(func(v: float):
 		smoothness = v
 		sm_lbl.text = "Smoothness / Fillets: " + str(snapped(v, 0.01))
-		_update_finishing_preview()
+		_queue_finishing_preview()
 	)
 	properties_panel.add_child(sm_slider)
 
@@ -1596,20 +1602,20 @@ func _build_finishing_properties_panel() -> void:
 	cpb.custom_minimum_size = Vector2(0, 36)
 	cpb.color_changed.connect(func(c: Color):
 		skin_color = c
-		_update_finishing_preview()
+		_queue_finishing_preview()
 	)
 	properties_panel.add_child(cpb)
 
 	properties_panel.add_child(HSeparator.new())
 
 	var rebake_btn := Button.new()
-	rebake_btn.text = "🔄 Re-Bake Preview"
+	rebake_btn.text = "🔄 High-Res Preview"
 	rebake_btn.custom_minimum_size = Vector2(0, 44)
-	rebake_btn.pressed.connect(_update_finishing_preview)
+	rebake_btn.pressed.connect(func(): _update_finishing_preview(true))
 	properties_panel.add_child(rebake_btn)
 
 	var save_btn := Button.new()
-	save_btn.text = "💾 Finalize & Save Hull"
+	save_btn.text = "💾 Save & Finalize Hull"
 	save_btn.custom_minimum_size = Vector2(0, 44)
 	save_btn.pressed.connect(_on_export_clicked)
 	properties_panel.add_child(save_btn)
@@ -1749,12 +1755,9 @@ func _on_export_clicked() -> void:
 
 func _show_hull_stats_dialog() -> void:
 	var dialog = AcceptDialog.new()
-	dialog.title = "Export Hull"
-	# AcceptDialog extends Window in Godot 4, not Control - it has no
-	# custom_minimum_size (that assignment silently aborted this whole
-	# function before add_child(dialog)/popup_centered() ever ran, which is
-	# why Export did nothing). `size` is the Window-side equivalent.
-	dialog.size = Vector2i(400, 450)
+	dialog.title = "Save & Finalize Hull"
+	dialog.ok_button_text = "💾 Save & Finalize Hull"
+	dialog.size = Vector2i(480, 560)
 
 	var vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 12)
@@ -1768,6 +1771,9 @@ func _show_hull_stats_dialog() -> void:
 	var name_edit = LineEdit.new()
 	name_edit.placeholder_text = "My Custom Hull"
 	name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_edit.text_submitted.connect(func(_t: String):
+		dialog.emit_signal("confirmed")
+	)
 	vbox.add_child(name_edit)
 
 	vbox.add_child(HSeparator.new())
