@@ -389,9 +389,11 @@ static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, cryst
 static func scene_sdf(world_point: Vector3, primitives: Array, smoothness: float) -> float:
 	if primitives.is_empty():
 		return 1e9
-	var d: float = primitive_sdf(world_point, primitives[0])
+	# Bilateral X-Symmetry Enforcement: fold world_point into +X domain
+	var sym_point := Vector3(abs(world_point.x), world_point.y, world_point.z)
+	var d: float = primitive_sdf(sym_point, primitives[0])
 	for i in range(1, primitives.size()):
-		d = smin(d, primitive_sdf(world_point, primitives[i]), smoothness)
+		d = smin(d, primitive_sdf(sym_point, primitives[i]), smoothness)
 	return d
 
 # Polynomial smooth-min (Inigo Quilez). k <= 0 degenerates to a hard min, i.e.
@@ -403,68 +405,73 @@ static func smin(a: float, b: float, k: float) -> float:
 	var h: float = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
 	return lerp(b, a, h) - k * h * (1.0 - h)
 
-# Transforms world_point into the primitive's own unit local space (inverse
-# rotation/translation, then divide by scale) and evaluates the unit-size SDF
-# for its type. Non-uniform scale isn't handled exactly - the unit-space
-# distance is scaled back by the minimum axis factor, which is the standard
-# approximation for SDFs under non-uniform scale (exact for uniform scale,
-# a slight over/under-estimate otherwise, immaterial at voxel-grid
-# resolution).
+# Transforms world_point into the primitive's local space and evaluates
+# exact scaled distances for crisp non-blobby CSG geometry.
 static func primitive_sdf(world_point: Vector3, prim: Dictionary) -> float:
 	var basis := Basis.from_euler(prim.rotation)
 	var local: Vector3 = basis.inverse() * (world_point - prim.position)
-	var scale: Vector3 = prim.scale
-	var scale_safe := Vector3(
-		max(abs(scale.x), 0.0001),
-		max(abs(scale.y), 0.0001),
-		max(abs(scale.z), 0.0001))
-	var unit_point: Vector3 = local / scale_safe
-	var d: float = _unit_sdf(unit_point, prim.type)
-	var min_scale: float = min(scale_safe.x, min(scale_safe.y, scale_safe.z))
-	return d * min_scale
+	var scale: Vector3 = Vector3(
+		max(abs(prim.scale.x), 0.0001),
+		max(abs(prim.scale.y), 0.0001),
+		max(abs(prim.scale.z), 0.0001))
+	var half_extents: Vector3 = scale * 0.5
+	return _scaled_sdf(local, half_extents, prim.type)
 
-static func _unit_sdf(p: Vector3, type: int) -> float:
+static func _scaled_sdf(p: Vector3, h: Vector3, type: int) -> float:
 	match type:
 		TYPE_BOX:
-			return _sdf_box(p, Vector3(0.5, 0.5, 0.5))
+			return _sdf_box(p, h)
 		TYPE_SPHERE:
-			return p.length() - 0.5
+			var r: float = min(h.x, min(h.y, h.z))
+			return p.length() - r
 		TYPE_CYLINDER:
-			return _sdf_cylinder(p, 0.5, 0.5)
+			var r: float = min(h.x, h.z)
+			return _sdf_cylinder(p, r, h.y)
 		TYPE_WEDGE:
-			return _sdf_wedge(p, Vector3(0.5, 0.5, 0.5))
+			return _sdf_wedge(p, h)
 		TYPE_CONE:
-			return _sdf_cone(p, 0.5, 0.5)
+			var r: float = min(h.x, h.z)
+			return _sdf_cone(p, r, h.y)
 		TYPE_TORUS:
-			return _sdf_torus(p, 0.45, 0.15)
+			var r_major: float = min(h.x, h.z) * 0.8
+			var r_minor: float = min(h.x, min(h.y, h.z)) * 0.2
+			return _sdf_torus(p, r_major, r_minor)
 		TYPE_SLOPE:
-			return _sdf_slope(p, Vector3(0.5, 0.5, 0.5))
+			return _sdf_slope(p, h)
 		TYPE_FRUSTUM:
-			return _sdf_frustum(p, Vector3(0.5, 0.5, 0.5), 0.5)
+			return _sdf_frustum(p, h, 0.5)
 		TYPE_CHAMFER_BOX:
-			return _sdf_chamfer_box(p, Vector3(0.5, 0.5, 0.5), 0.12)
+			var chamfer_r: float = min(h.x, min(h.y, h.z)) * 0.15
+			return _sdf_chamfer_box(p, h, chamfer_r)
 		TYPE_HALF_CYLINDER:
-			return _sdf_half_cylinder(p, 0.5, 0.5)
+			var r: float = min(h.x, h.z)
+			return _sdf_half_cylinder(p, r, h.y)
 		TYPE_HEMISPHERE:
-			return _sdf_dome(p, 0.5, 1.0)
+			var r: float = min(h.x, min(h.y, h.z))
+			return _sdf_dome(p, r, h.y / r if r > 0.0001 else 1.0)
 		TYPE_CAPSULE:
-			return _sdf_capsule(p, 0.25, 0.25)
+			var r: float = min(h.x, h.z)
+			return _sdf_capsule(p, r, h.y - r)
 		TYPE_I_BEAM:
-			return _sdf_i_beam(p, Vector3(0.5, 0.5, 0.5), 0.15, 0.15)
+			return _sdf_i_beam(p, h, h.x * 0.3, h.y * 0.3)
 		TYPE_L_BEAM:
-			return _sdf_l_beam(p, Vector3(0.5, 0.5, 0.5), 0.18)
+			return _sdf_l_beam(p, h, min(h.x, h.y) * 0.35)
 		TYPE_HEX_PRISM:
-			return _sdf_hex_prism(p, 0.5, 0.5)
+			var r: float = min(h.x, h.z)
+			return _sdf_hex_prism(p, r, h.y)
 		TYPE_PYRAMID:
-			return _sdf_frustum(p, Vector3(0.5, 0.5, 0.5), 0.0)
+			return _sdf_frustum(p, h, 0.0)
 		TYPE_FENDER:
-			return _sdf_fender(p, 0.4, 0.12)
+			return _sdf_fender(p, min(h.x, h.z), min(h.y, h.z) * 0.3)
 		TYPE_CANOPY:
-			return _sdf_dome(p, 0.5, 1.35)  # z_stretch matches build_hull_primitives.py's canopy
+			var r: float = min(h.x, h.y)
+			return _sdf_dome(p, r, h.z / r if r > 0.0001 else 1.35)
 		TYPE_RING:
-			return _sdf_ring(p, 0.5, 0.3, 0.15)
+			var r_out: float = min(h.x, h.z)
+			var r_in: float = r_out * 0.6
+			return _sdf_ring(p, r_out, r_in, h.y)
 		_:
-			return _sdf_box(p, Vector3(0.5, 0.5, 0.5))
+			return _sdf_box(p, h)
 
 static func _sdf_box(p: Vector3, half_extents: Vector3) -> float:
 	var q: Vector3 = p.abs() - half_extents
