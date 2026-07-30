@@ -190,7 +190,7 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 						vert = vert.clamp(cell_min, cell_max)
 
 					# Constructed Orthogonal Alignment: for constructed hulls (crystallinity < 0.5),
-					# align vertices on near-cardinal surfaces to flatten decks and side walls.
+					# snap vertex coordinates to discrete sub-voxel grid steps along dominant plane axes.
 					if crystallinity < 0.5 and not normals.is_empty():
 						var avg_n := Vector3.ZERO
 						for n in normals:
@@ -198,12 +198,13 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 						avg_n = avg_n.normalized()
 						avg_n = _snap_constructed_normal(avg_n, crystallinity)
 
-						if abs(avg_n.x) > 0.85:
-							vert.x = mass_point.x
-						elif abs(avg_n.y) > 0.85:
-							vert.y = mass_point.y
-						elif abs(avg_n.z) > 0.85:
-							vert.z = mass_point.z
+						var snap_step := voxel_size * 0.25
+						if abs(avg_n.x) > 0.75:
+							vert.x = round(vert.x / snap_step) * snap_step
+						if abs(avg_n.y) > 0.75:
+							vert.y = round(vert.y / snap_step) * snap_step
+						if abs(avg_n.z) > 0.75:
+							vert.z = round(vert.z / snap_step) * snap_step
 
 					dual_vertices[cell_idx] = vert
 
@@ -316,8 +317,8 @@ static func _snap_constructed_normal(n: Vector3, crystallinity: float) -> Vector
 	if crystallinity >= 1.0 or n.length_squared() < 1e-6:
 		return n
 
-	# Wider angular coverage (35 degrees) for constructed hulls (crystallinity = 0.0)
-	var snap_threshold_deg: float = lerp(35.0, 0.0, clamp(crystallinity, 0.0, 1.0))
+	# Bold angular coverage (40 degrees) for constructed hulls (crystallinity = 0.0)
+	var snap_threshold_deg: float = lerp(40.0, 0.0, clamp(crystallinity, 0.0, 1.0))
 	if snap_threshold_deg <= 0.001:
 		return n
 
@@ -353,8 +354,7 @@ static func _snap_constructed_normal(n: Vector3, crystallinity: float) -> Vector
 			best_target = target
 
 	if best_dot >= cos_thresh:
-		var blend_weight := (1.0 - crystallinity)
-		return n.slerp(best_target, blend_weight).normalized()
+		return best_target
 
 	return n
 
@@ -372,23 +372,7 @@ static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, cryst
 		if n.length_squared() < 1e-10:
 			continue
 		n = n.normalized()
-
-		# Hard snapping for constructed hulls (crystallinity < 0.5)
-		if crystallinity < 0.5:
-			if abs(n.y) < 0.25:
-				n.y = 0.0
-				if abs(n.x) > abs(n.z):
-					n.x = sign(n.x)
-					n.z = 0.0
-				else:
-					n.z = sign(n.z)
-					n.x = 0.0
-			elif abs(n.y) > 0.85:
-				n = Vector3(0, sign(n.y), 0)
-			else:
-				n = _snap_constructed_normal(n, crystallinity)
-		else:
-			n = _snap_constructed_normal(n, crystallinity)
+		n = _snap_constructed_normal(n, crystallinity)
 
 		st.set_normal(n)
 		st.add_vertex(p0)
