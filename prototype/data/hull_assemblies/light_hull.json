@@ -3,11 +3,12 @@
 	"hull_name": "light_hull",
 	"_role": "Scout / light recon (Ferret, BRDM, Panhard register). Survivability by not being hit: low, slim, wedge-nosed, sloped all around, with the hull and superstructure nearly merging into one continuous slope. Per HULL_MASSING_SPEC.md it deliberately SKIPS the chunky sponson blisters the heavier hulls get - thin fender lips only - so it stays visually distinct from them.",
 	"bake": {
-		"smoothness": 0.14,
-		"resolution": 18,
+		"smoothness": 0.0,
+		"resolution": 22,
 		"method": "dc",
 		"fit_percent": 95,
-		"facet_angle": 15
+		"facet_angle": 15,
+		"crystallinity": 0.0
 	},
 	"sidecar": {
 		"name": "Light Hull",

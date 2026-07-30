@@ -3,8 +3,8 @@
 	"hull_name": "transport_hull",
 	"_role": "Heavy flatbed MRAP / transport chassis. Armored front cab with a long flatbed deck behind it for heavy cargo or module mounting.",
 	"bake": {
-		"smoothness": 0.08,
-		"resolution": 24,
+		"smoothness": 0.0,
+		"resolution": 26,
 		"method": "dc",
 		"fit_percent": 95,
 		"facet_angle": 15,

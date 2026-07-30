@@ -3,11 +3,12 @@
 	"hull_name": "heavy_hull",
 	"_role": "Heavy / breakthrough tank (Tiger, IS-3, Maus register). Where light reads as 'sloped to deflect', heavy reads as 'thick enough not to care': slab-sided and tall, high tub_frac (~0.6) with a near-full-width upper structure (upper_w ~0.9), a thick BLUNT steep glacis rather than a thin wedge, and deep boxy sponsons. Chunky edges throughout.",
 	"bake": {
-		"smoothness": 0.12,
-		"resolution": 22,
+		"smoothness": 0.0,
+		"resolution": 26,
 		"method": "dc",
 		"fit_percent": 95,
-		"facet_angle": 15
+		"facet_angle": 15,
+		"crystallinity": 0.0
 	},
 	"sidecar": {
 		"name": "Heavy Hull",
