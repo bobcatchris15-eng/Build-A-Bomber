@@ -199,18 +199,35 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 						avg_n = avg_n.normalized()
 						avg_n = _snap_constructed_normal(avg_n, crystallinity, vert, primitives, chamfer_edge_pct)
 
-						var snap_step := voxel_size * 0.25
+						# Coarse snap along dominant axis locks panels flat;
+						# fine snap on tangential axes keeps silhouette fidelity.
+						var coarse_snap := voxel_size * 0.5
+						var fine_snap   := voxel_size * 0.25
 						if abs(avg_n.x) > 0.75:
-							vert.x = round(vert.x / snap_step) * snap_step
-						if abs(avg_n.y) > 0.75:
-							vert.y = round(vert.y / snap_step) * snap_step
-						if abs(avg_n.z) > 0.75:
-							vert.z = round(vert.z / snap_step) * snap_step
+							vert.x = round(vert.x / coarse_snap) * coarse_snap
+							vert.y = round(vert.y / fine_snap)   * fine_snap
+							vert.z = round(vert.z / fine_snap)   * fine_snap
+						elif abs(avg_n.y) > 0.75:
+							vert.y = round(vert.y / coarse_snap) * coarse_snap
+							vert.x = round(vert.x / fine_snap)   * fine_snap
+							vert.z = round(vert.z / fine_snap)   * fine_snap
+						elif abs(avg_n.z) > 0.75:
+							vert.z = round(vert.z / coarse_snap) * coarse_snap
+							vert.x = round(vert.x / fine_snap)   * fine_snap
+							vert.y = round(vert.y / fine_snap)   * fine_snap
 
 					dual_vertices[cell_idx] = vert
 
 	if dual_vertices.is_empty():
 		return null
+
+	# ── Post-process: Flatten Cardinal Panels ────────────────────────────
+	# Vertices whose SDF normal points along a cardinal axis (+X, -X, +Y,
+	# -Y, +Z, -Z) should lie on identical planes. DC vertex jitter causes
+	# visible stepping; cluster-averaging the dominant-axis coordinate
+	# across nearby same-cardinal vertices eliminates it.
+	if crystallinity < 0.5:
+		_flatten_cardinal_panels(dual_vertices, primitives, smoothness, crystallinity, chamfer_edge_pct, voxel_size)
 
 	var triangles: Array = []
 
@@ -262,7 +279,7 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 	if triangles.is_empty():
 		return null
 
-	return _build_faceted_mesh(triangles, facet_angle_deg, crystallinity)
+	return _build_faceted_mesh(triangles, facet_angle_deg, crystallinity, primitives, chamfer_edge_pct)
 
 # QEF solver (3D Quadratic Error Function) using 3x3 matrix inverse.
 static func _solve_qef_3d(pts: Array, normals: Array, mass_point: Vector3, cell_min: Vector3, cell_max: Vector3) -> Vector3:
@@ -343,17 +360,48 @@ static func _snap_constructed_normal(n: Vector3, crystallinity: float, point: Ve
 		Vector3(0.866025, 0.5, 0), Vector3(-0.866025, 0.5, 0)
 	]
 
-	# Check if point is in main face body or near perimeter edge
+	# Check if point is in main face body or near perimeter edge.
+	# Only the NEAREST primitive matters - checking all primitives causes
+	# every surface vertex to be misclassified as edge-zone (since a surface
+	# point is trivially "outside the inner region" of distant primitives).
+	# Additionally, only tangential axes (perpendicular to the face normal)
+	# determine edge proximity - the face-normal axis is always at the
+	# boundary by definition.
 	var is_edge_zone := false
 	if not primitives.is_empty() and chamfer_edge_pct > 0.0:
+		# Find the nearest primitive by SDF distance
+		var min_abs_dist: float = INF
+		var nearest_prim: Dictionary = primitives[0]
 		for prim in primitives:
-			var basis := Basis.from_euler(prim.rotation)
-			var local: Vector3 = basis.inverse() * (point - prim.position)
-			var half_extents: Vector3 = prim.scale * 0.5
-			# Distance to outer face boundary normalized by size
-			var margin_frac: float = chamfer_edge_pct / 100.0
-			var q: Vector3 = local.abs() - half_extents * (1.0 - margin_frac)
-			if q.x > 0.0 or q.y > 0.0 or q.z > 0.0:
+			var d_abs: float = abs(primitive_sdf(point, prim))
+			if d_abs < min_abs_dist:
+				min_abs_dist = d_abs
+				nearest_prim = prim
+
+		var basis := Basis.from_euler(nearest_prim.rotation)
+		var local: Vector3 = basis.inverse() * (point - nearest_prim.position)
+		var half_extents: Vector3 = nearest_prim.scale * 0.5
+		var margin_frac: float = chamfer_edge_pct / 100.0
+
+		# Determine which face the point is on (closest face of this primitive)
+		var abs_local := local.abs()
+		var face_dists := [
+			abs(abs_local.x - half_extents.x),  # X face
+			abs(abs_local.y - half_extents.y),  # Y face
+			abs(abs_local.z - half_extents.z)   # Z face
+		]
+		var face_axis: int = 0
+		if face_dists[1] < face_dists[face_axis]: face_axis = 1
+		if face_dists[2] < face_dists[face_axis]: face_axis = 2
+
+		# Check tangential axes only (perpendicular to face normal)
+		for a in range(3):
+			if a == face_axis:
+				continue
+			var coord: float = abs_local[a]
+			var extent: float = half_extents[a]
+			var inner_extent: float = extent * (1.0 - margin_frac)
+			if coord > inner_extent:
 				is_edge_zone = true
 				break
 
@@ -366,7 +414,7 @@ static func _snap_constructed_normal(n: Vector3, crystallinity: float, point: Ve
 			if d > best_cardinal_dot:
 				best_cardinal_dot = d
 				best_cardinal = t
-		if best_cardinal_dot >= 0.707: # Within 45 degrees of cardinal
+		if best_cardinal_dot >= 0.5: # Within 60 degrees of cardinal (was 45)
 			return best_cardinal
 
 	# In edge chamfer zone: evaluate both cardinal and angled chamfers
@@ -415,6 +463,77 @@ static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, cryst
 		st.add_vertex(p2)
 
 	return st.commit()
+
+
+# ── Cardinal Panel Flattening ────────────────────────────────────────────
+
+# Post-process dual vertices: for each cardinal normal direction (+/-X, +/-Y, +/-Z),
+# cluster nearby vertices and project them onto a shared plane so that roofs, side
+# walls, and floor panels are perfectly flat instead of exhibiting per-cell jitter.
+static func _flatten_cardinal_panels(dual_vertices: Dictionary, primitives: Array, smoothness: float, crystallinity: float, chamfer_edge_pct: float, voxel_size: float) -> void:
+	if dual_vertices.is_empty():
+		return
+
+	# Classify every dual vertex by its dominant cardinal normal
+	# 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z
+	var cardinal_dirs := [
+		Vector3(1, 0, 0), Vector3(-1, 0, 0),
+		Vector3(0, 1, 0), Vector3(0, -1, 0),
+		Vector3(0, 0, 1), Vector3(0, 0, -1)
+	]
+	# axis_index per cardinal: 0,0,1,1,2,2
+	var cardinal_axis := [0, 0, 1, 1, 2, 2]
+
+	var groups: Array = [[], [], [], [], [], []]  # one array of cell_ids per cardinal
+
+	for cell_idx in dual_vertices:
+		var v: Vector3 = dual_vertices[cell_idx]
+		var n: Vector3 = _sdf_normal(v, primitives, smoothness)
+		n = _snap_constructed_normal(n, crystallinity, v, primitives, chamfer_edge_pct)
+
+		for ci in range(6):
+			if n.dot(cardinal_dirs[ci]) > 0.9:
+				groups[ci].append(cell_idx)
+				break
+
+	# For each cardinal group, cluster by position along the normal axis
+	# and flatten each cluster to its average coordinate.
+	for ci in range(6):
+		var ids: Array = groups[ci]
+		if ids.size() < 2:
+			continue
+
+		var ax: int = cardinal_axis[ci]
+
+		# Sort by coordinate along the cardinal axis
+		ids.sort_custom(func(a, b):
+			return dual_vertices[a][ax] < dual_vertices[b][ax]
+		)
+
+		# Cluster: group consecutive vertices within 1.5 voxels along the axis
+		var tolerance: float = voxel_size * 1.5
+		var clusters: Array = [[ids[0]]]
+		for i in range(1, ids.size()):
+			var prev_coord: float = dual_vertices[ids[i - 1]][ax]
+			var curr_coord: float = dual_vertices[ids[i]][ax]
+			if abs(curr_coord - prev_coord) < tolerance:
+				clusters[-1].append(ids[i])
+			else:
+				clusters.append([ids[i]])
+
+		# Flatten each cluster to the average coordinate along the axis
+		for cluster in clusters:
+			if cluster.size() < 2:
+				continue
+			var avg_coord: float = 0.0
+			for idx in cluster:
+				avg_coord += dual_vertices[idx][ax]
+			avg_coord /= float(cluster.size())
+
+			for idx in cluster:
+				var v: Vector3 = dual_vertices[idx]
+				v[ax] = avg_coord
+				dual_vertices[idx] = v
 
 
 # ── SDF evaluation ───────────────────────────────────────────────────────
