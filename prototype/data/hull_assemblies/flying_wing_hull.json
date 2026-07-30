@@ -1,0 +1,159 @@
+{
+	"schema_version": 1,
+	"hull_name": "flying_wing_hull",
+	"_role": "Blended wing body / lifting body (B-2, Horten register). One of the two hulls the SDF pipeline genuinely suits better than the old convex-hull approach: the whole point is a CONTINUOUS blend from centre body into wing with no hard join, which is exactly what smooth-min does for free. Wide span (10 x 1.5 x 6), thin section, faired canopy rather than a proud box.",
+	"bake": {
+		"smoothness": 0.18,
+		"resolution": 24,
+		"method": "dc",
+		"fit_percent": 95,
+		"facet_angle": 15
+	},
+	"sidecar": {
+		"name": "Flying Wing Hull",
+		"hp": 230,
+		"weight": 140,
+		"metal": 55,
+		"crystal": 15,
+		"base_energy": 30,
+		"base_vision": 24,
+		"size": [
+			10,
+			1.5,
+			6
+		],
+		"color": [
+			0.5,
+			0.519999980926514,
+			0.560000002384186,
+			1
+		]
+	},
+	"primitives": [
+		{
+			"_note": "Centre body - an ellipsoid rather than a box, so it blends into the wings instead of meeting them at an edge.",
+			"type": "SPHERE",
+			"position": [
+				0,
+				0,
+				0.2
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				3.4,
+				1.4,
+				5.6
+			],
+			"color": [
+				0.5,
+				0.52,
+				0.56,
+				1
+			]
+		},
+		{
+			"_note": "Left wing panel, swept back. Thickness (0.72) is deliberately well above one voxel at this resolution - at 0.50/res18 the wings vanished entirely and the hull baked 4.57 wide instead of 10.80. High smoothness fairs the root into the body.",
+			"type": "BOX",
+			"position": [
+				-3.1,
+				-0.05,
+				0.9
+			],
+			"rotation": [
+				0,
+				0.34,
+				0
+			],
+			"scale": [
+				4.6,
+				0.72,
+				2.4
+			],
+			"color": [
+				0.5,
+				0.52,
+				0.56,
+				1
+			]
+		},
+		{
+			"_note": "Right wing panel, mirrored sweep. Same minimum-thickness constraint as the left.",
+			"type": "BOX",
+			"position": [
+				3.1,
+				-0.05,
+				0.9
+			],
+			"rotation": [
+				0,
+				-0.34,
+				0
+			],
+			"scale": [
+				4.6,
+				0.72,
+				2.4
+			],
+			"color": [
+				0.5,
+				0.52,
+				0.56,
+				1
+			]
+		},
+		{
+			"_note": "Faired canopy blister on the dorsal ridge (CANOPY is the Z-elongated dome from the primitive kit) - the spec's 'real cockpit volume, not just a bump'.",
+			"type": "CANOPY",
+			"position": [
+				0,
+				0.42,
+				-1.1
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				1.5,
+				0.8,
+				2.2
+			],
+			"color": [
+				0.55,
+				0.7,
+				0.82,
+				1
+			]
+		},
+		{
+			"_note": "Nose fairing - keeps the leading edge from reading as a blunt ellipsoid cap.",
+			"type": "SPHERE",
+			"position": [
+				0,
+				-0.08,
+				-2.4
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				2.2,
+				0.9,
+				2.6
+			],
+			"color": [
+				0.5,
+				0.52,
+				0.56,
+				1
+			]
+		}
+	]
+}

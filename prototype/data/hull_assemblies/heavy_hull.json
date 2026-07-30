@@ -1,0 +1,209 @@
+{
+	"schema_version": 1,
+	"hull_name": "heavy_hull",
+	"_role": "Heavy / breakthrough tank (Tiger, IS-3, Maus register). Where light reads as 'sloped to deflect', heavy reads as 'thick enough not to care': slab-sided and tall, high tub_frac (~0.6) with a near-full-width upper structure (upper_w ~0.9), a thick BLUNT steep glacis rather than a thin wedge, and deep boxy sponsons. Chunky edges throughout.",
+	"bake": {
+		"smoothness": 0.12,
+		"resolution": 22,
+		"method": "dc",
+		"fit_percent": 95,
+		"facet_angle": 15
+	},
+	"sidecar": {
+		"name": "Heavy Hull",
+		"hp": 1000,
+		"weight": 800,
+		"metal": 250,
+		"crystal": 50,
+		"base_energy": 130,
+		"base_vision": 18,
+		"size": [
+			4,
+			2.5,
+			8
+		],
+		"color": [
+			0.662745118141174,
+			0.662745118141174,
+			0.662745118141174,
+			1
+		]
+	},
+	"primitives": [
+		{
+			"_note": "Lower tub - tall (tub_frac ~0.6), full width, near-vertical slab sides.",
+			"type": "BOX",
+			"position": [
+				0,
+				-0.5,
+				0
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				4,
+				1.5,
+				8
+			],
+			"color": [
+				0.64,
+				0.64,
+				0.66,
+				1
+			]
+		},
+		{
+			"_note": "Upper structure barely narrows (upper_w ~0.9) - this is what gives the slab-sided read instead of a tapered one.",
+			"type": "BOX",
+			"position": [
+				0,
+				0.75,
+				1.4
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				3.6,
+				1,
+				5.2
+			],
+			"color": [
+				0.64,
+				0.64,
+				0.66,
+				1
+			]
+		},
+		{
+			"_note": "Thick, steep, BLUNT frontal plate - the whole plate stays tall rather than tapering to a sharp wedge. Blunt also means a front sponson-embed muzzle exits cleanly (the least severe case of the shared front-glacis caveat).",
+			"type": "SLOPE",
+			"position": [
+				0,
+				0,
+				-2.7
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				3.7,
+				2.1,
+				2.6
+			],
+			"color": [
+				0.67,
+				0.67,
+				0.69,
+				1
+			]
+		},
+		{
+			"_note": "Deep boxy left sponson over the track run.",
+			"type": "BOX",
+			"position": [
+				-1.82,
+				0.25,
+				0.1
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				0.9,
+				0.5,
+				7.4
+			],
+			"color": [
+				0.6,
+				0.6,
+				0.63,
+				1
+			]
+		},
+		{
+			"_note": "Deep boxy right sponson.",
+			"type": "BOX",
+			"position": [
+				1.82,
+				0.25,
+				0.1
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				0.9,
+				0.5,
+				7.4
+			],
+			"color": [
+				0.6,
+				0.6,
+				0.63,
+				1
+			]
+		},
+		{
+			"_note": "Turret ring platform on the roof.",
+			"type": "RING",
+			"position": [
+				0,
+				1.2,
+				0.4
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				2.3,
+				0.5,
+				2.3
+			],
+			"color": [
+				0.56,
+				0.56,
+				0.6,
+				1
+			]
+		},
+		{
+			"_note": "Commander cupola - a heavy-tank signature, kept off-centre so it doesn't eat the pintle's spot.",
+			"type": "HEMISPHERE",
+			"position": [
+				-0.7,
+				1.28,
+				1.7
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				1,
+				0.6,
+				1
+			],
+			"color": [
+				0.6,
+				0.6,
+				0.63,
+				1
+			]
+		}
+	]
+}

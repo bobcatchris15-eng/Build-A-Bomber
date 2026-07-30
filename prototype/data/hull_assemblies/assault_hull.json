@@ -1,0 +1,209 @@
+{
+	"schema_version": 1,
+	"hull_name": "assault_hull",
+	"_role": "Breakthrough / assault gun (StuG casemate, AVRE, dozer-tank register). 'Kicks the door in': a heavy blunt front with a prominent dozer plate, appliqué armour, and a LOW CASEMATE built into the hull rather than a tall turret - that casemate (not a turret ring) is what distinguishes it from medium_hull.",
+	"bake": {
+		"smoothness": 0.14,
+		"resolution": 20,
+		"method": "dc",
+		"fit_percent": 95,
+		"facet_angle": 15
+	},
+	"sidecar": {
+		"name": "Assault Hull",
+		"hp": 650,
+		"weight": 500,
+		"metal": 170,
+		"crystal": 35,
+		"base_energy": 90,
+		"base_vision": 18,
+		"size": [
+			3,
+			2,
+			6
+		],
+		"color": [
+			0.400000005960464,
+			0.319999992847443,
+			0.280000001192093,
+			1
+		]
+	},
+	"primitives": [
+		{
+			"_note": "Lower tub (tub_frac ~0.55).",
+			"type": "BOX",
+			"position": [
+				0,
+				-0.45,
+				0
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				3,
+				1.1,
+				6
+			],
+			"color": [
+				0.42,
+				0.34,
+				0.3,
+				1
+			]
+		},
+		{
+			"_note": "Low CASEMATE superstructure - a boxy fighting compartment with the gun built in, sitting lower and further forward than medium_hull's turret deck.",
+			"type": "BOX",
+			"position": [
+				0,
+				0.5,
+				0.4
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				2.46,
+				0.9,
+				3.4
+			],
+			"color": [
+				0.42,
+				0.34,
+				0.3,
+				1
+			]
+		},
+		{
+			"_note": "Layered frontal assembly, part 1 - the glacis proper.",
+			"type": "SLOPE",
+			"position": [
+				0,
+				-0.05,
+				-2
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				2.8,
+				1.6,
+				2
+			],
+			"color": [
+				0.44,
+				0.36,
+				0.31,
+				1
+			]
+		},
+		{
+			"_note": "Layered frontal assembly, part 2 - dozer plate, promoted from a greeble into real massing and tied to the glacis so the nose reads as one thick layered assembly. Kept LOW so a front sponson-embed muzzle clears it (the specific mount-zone check this hull needs).",
+			"type": "BOX",
+			"position": [
+				0,
+				-0.62,
+				-2.92
+			],
+			"rotation": [
+				0.22,
+				0,
+				0
+			],
+			"scale": [
+				3.1,
+				0.66,
+				0.46
+			],
+			"color": [
+				0.36,
+				0.29,
+				0.25,
+				1
+			]
+		},
+		{
+			"_note": "Left fender / appliqué shelf.",
+			"type": "BOX",
+			"position": [
+				-1.34,
+				0.1,
+				0.15
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				0.66,
+				0.34,
+				5.5
+			],
+			"color": [
+				0.38,
+				0.31,
+				0.27,
+				1
+			]
+		},
+		{
+			"_note": "Right fender / appliqué shelf.",
+			"type": "BOX",
+			"position": [
+				1.34,
+				0.1,
+				0.15
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				0.66,
+				0.34,
+				5.5
+			],
+			"color": [
+				0.38,
+				0.31,
+				0.27,
+				1
+			]
+		},
+		{
+			"_note": "Appliqué armour slab bolted to the casemate face - the 'assembled, up-armoured' read.",
+			"type": "CHAMFER_BOX",
+			"position": [
+				0,
+				0.5,
+				-1.28
+			],
+			"rotation": [
+				0,
+				0,
+				0
+			],
+			"scale": [
+				2.1,
+				0.78,
+				0.46
+			],
+			"color": [
+				0.46,
+				0.37,
+				0.32,
+				1
+			]
+		}
+	]
+}
