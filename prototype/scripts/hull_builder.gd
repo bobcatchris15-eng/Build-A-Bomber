@@ -174,6 +174,7 @@ var bake_resolution: int = 32
 var bake_method: String = "dc"
 var fit_percent: float = 95.0
 var facet_angle: float = 15.0
+var crystallinity: float = 0.0
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -350,7 +351,7 @@ func _rebake_smoothness_preview() -> void:
 	if primitives.is_empty():
 		_preview_mesh_instance.visible = false
 		return
-	var mesh := SDFMeshBaker.bake(primitives, smoothness, PREVIEW_BAKE_RESOLUTION, bake_method, fit_percent, facet_angle)
+	var mesh := SDFMeshBaker.bake(primitives, smoothness, PREVIEW_BAKE_RESOLUTION, bake_method, fit_percent, facet_angle, crystallinity)
 	if mesh == null:
 		_preview_mesh_instance.visible = false
 		return
@@ -1633,7 +1634,7 @@ func _on_export_confirmed(dialog: AcceptDialog) -> void:
 	# Let the status label repaint before the (synchronous) bake blocks the thread.
 	await get_tree().process_frame
 
-	var mesh := SDFMeshBaker.bake(primitives, smoothness, bake_resolution, bake_method, fit_percent, facet_angle)
+	var mesh := SDFMeshBaker.bake(primitives, smoothness, bake_resolution, bake_method, fit_percent, facet_angle, crystallinity)
 	if mesh == null:
 		_show_error("Bake produced no geometry - try lowering Smoothness or adding more primitives")
 		return
@@ -1894,7 +1895,8 @@ func serialize_assembly(hull_name: String = "", sidecar: Dictionary = {}) -> Dic
 			"resolution": bake_resolution,
 			"method": bake_method,
 			"fit_percent": fit_percent,
-			"facet_angle": facet_angle
+			"facet_angle": facet_angle,
+			"crystallinity": crystallinity
 		},
 		# Verbatim gameplay stats. Deliberately NOT recomputed from volume on
 		# load/bake the way the interactive export dialog does it - the
@@ -1948,6 +1950,7 @@ func deserialize_assembly(data: Dictionary) -> bool:
 	bake_method = str(bake.get("method", bake_method))
 	fit_percent = float(bake.get("fit_percent", fit_percent))
 	facet_angle = float(bake.get("facet_angle", facet_angle))
+	crystallinity = float(bake.get("crystallinity", crystallinity))
 	if smoothness_slider:
 		smoothness_slider.value = smoothness
 	if bake_quality_option:

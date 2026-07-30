@@ -58,10 +58,11 @@ const _UNIT_BOUND := 0.6
 # method: "dc" (Dual Contouring - hard facets & sharp edges) or "mc" (Marching Cubes - smooth).
 # fit_percent: 0..100+ (for DC: controls how tightly vertices hug the SDF isosurface, default 95).
 # facet_angle_deg: angle threshold for coplanar face merging.
-static func bake(primitives: Array, smoothness: float, resolution: int, method: String = "dc", fit_percent: float = 95.0, facet_angle_deg: float = 15.0) -> ArrayMesh:
+# crystallinity: 0.0 (constructed/axis-aligned plates & standard slope angles) .. 1.0 (unconstrained/crystalline facets).
+static func bake(primitives: Array, smoothness: float, resolution: int, method: String = "dc", fit_percent: float = 95.0, facet_angle_deg: float = 15.0, crystallinity: float = 0.0) -> ArrayMesh:
 	if method.to_lower() == "mc":
 		return bake_mc(primitives, smoothness, resolution)
-	return bake_dc(primitives, smoothness, resolution, fit_percent, facet_angle_deg)
+	return bake_dc(primitives, smoothness, resolution, fit_percent, facet_angle_deg, crystallinity)
 
 # Legacy / Smooth Marching Cubes pipeline
 static func bake_mc(primitives: Array, smoothness: float, resolution: int) -> ArrayMesh:
@@ -110,7 +111,7 @@ static func bake_mc(primitives: Array, smoothness: float, resolution: int) -> Ar
 	return st.commit()
 
 # Dual Contouring (DC) bake pipeline — sharp edges, QEF solver, hard facets.
-static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_percent: float = 95.0, facet_angle_deg: float = 15.0) -> ArrayMesh:
+static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_percent: float = 95.0, facet_angle_deg: float = 15.0, crystallinity: float = 0.0) -> ArrayMesh:
 	if primitives.is_empty():
 		return null
 
@@ -170,6 +171,7 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 							t = clamp(v0 / (v0 - v1), 0.0, 1.0)
 						var p_edge := p0.lerp(p1, t)
 						var n_edge := _sdf_normal(p_edge, primitives, smoothness)
+						n_edge = _snap_constructed_normal(n_edge, crystallinity)
 
 						intersections.append(p_edge)
 						normals.append(n_edge)
@@ -182,6 +184,7 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 					if fit_percent != 100.0:
 						var sdf_val := scene_sdf(vert, primitives, smoothness)
 						var norm := _sdf_normal(vert, primitives, smoothness)
+						norm = _snap_constructed_normal(norm, crystallinity)
 						var desired_offset := (100.0 - fit_percent) / 100.0 * voxel_size * 0.5
 						vert = vert - norm * (sdf_val - desired_offset)
 						vert = vert.clamp(cell_min, cell_max)
@@ -241,7 +244,7 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 	if triangles.is_empty():
 		return null
 
-	return _build_faceted_mesh(triangles, facet_angle_deg)
+	return _build_faceted_mesh(triangles, facet_angle_deg, crystallinity)
 
 # QEF solver (3D Quadratic Error Function) using 3x3 matrix inverse.
 static func _solve_qef_3d(pts: Array, normals: Array, mass_point: Vector3, cell_min: Vector3, cell_max: Vector3) -> Vector3:
@@ -292,8 +295,54 @@ static func _solve_qef_3d(pts: Array, normals: Array, mass_point: Vector3, cell_
 	var solution := mass_point + Vector3(dx, dy, dz)
 	return solution.clamp(cell_min, cell_max)
 
+# Quantizes / snaps normals to cardinal & standard chamfer / slope angles for constructed hulls.
+static func _snap_constructed_normal(n: Vector3, crystallinity: float) -> Vector3:
+	if crystallinity >= 1.0 or n.length_squared() < 1e-6:
+		return n
+
+	var snap_threshold_deg: float = lerp(25.0, 0.0, clamp(crystallinity, 0.0, 1.0))
+	if snap_threshold_deg <= 0.001:
+		return n
+
+	var cos_thresh := cos(deg_to_rad(snap_threshold_deg))
+
+	var targets := [
+		Vector3(1, 0, 0), Vector3(-1, 0, 0),
+		Vector3(0, 1, 0), Vector3(0, -1, 0),
+		Vector3(0, 0, 1), Vector3(0, 0, -1),
+
+		Vector3(0.707107, 0.707107, 0), Vector3(-0.707107, 0.707107, 0),
+		Vector3(0.707107, -0.707107, 0), Vector3(-0.707107, -0.707107, 0),
+		Vector3(0.707107, 0, 0.707107), Vector3(-0.707107, 0, 0.707107),
+		Vector3(0.707107, 0, -0.707107), Vector3(-0.707107, 0, -0.707107),
+		Vector3(0, 0.707107, 0.707107), Vector3(0, -0.707107, 0.707107),
+		Vector3(0, 0.707107, -0.707107), Vector3(0, -0.707107, -0.707107),
+
+		Vector3(0, 0.5, 0.866025), Vector3(0, 0.5, -0.866025),
+		Vector3(0, 0.866025, 0.5), Vector3(0, 0.866025, -0.5),
+		Vector3(0, -0.5, 0.866025), Vector3(0, -0.5, -0.866025),
+		Vector3(0, -0.866025, 0.5), Vector3(0, -0.866025, -0.5),
+		Vector3(0.5, 0.866025, 0), Vector3(-0.5, 0.866025, 0),
+		Vector3(0.866025, 0.5, 0), Vector3(-0.866025, 0.5, 0)
+	]
+
+	var best_dot := -1.0
+	var best_target := n
+
+	for target in targets:
+		var d := n.dot(target)
+		if d > best_dot:
+			best_dot = d
+			best_target = target
+
+	if best_dot >= cos_thresh:
+		var blend_weight := (1.0 - crystallinity)
+		return n.slerp(best_target, blend_weight).normalized()
+
+	return n
+
 # Builds ArrayMesh from triangles with flat face normals for crisp faceting.
-static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float) -> ArrayMesh:
+static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, crystallinity: float = 0.0) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 
@@ -306,6 +355,7 @@ static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float) -> Ar
 		if n.length_squared() < 1e-10:
 			continue
 		n = n.normalized()
+		n = _snap_constructed_normal(n, crystallinity)
 
 		st.set_normal(n)
 		st.add_vertex(p0)

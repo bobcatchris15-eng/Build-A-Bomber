@@ -103,11 +103,12 @@ func _bake_one(path: String, stem: String) -> int:
 	var method := str(bake.get("method", "dc"))
 	var fit_percent := float(bake.get("fit_percent", 95.0))
 	var facet_angle := float(bake.get("facet_angle", 15.0))
+	var crystallinity := float(bake.get("crystallinity", 0.0))
 
 	_warn_on_subvoxel_features(primitives, resolution, stem)
 
 	var t0 := Time.get_ticks_msec()
-	var mesh: ArrayMesh = SDFMeshBaker.bake(primitives, smoothness, resolution, method, fit_percent, facet_angle)
+	var mesh: ArrayMesh = SDFMeshBaker.bake(primitives, smoothness, resolution, method, fit_percent, facet_angle, crystallinity)
 	var elapsed := Time.get_ticks_msec() - t0
 	if mesh == null:
 		printerr("  %s: bake produced no geometry" % stem)
