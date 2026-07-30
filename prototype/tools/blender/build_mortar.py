@@ -9,7 +9,22 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 PARTS_DIR = os.path.join(PROJECT_ROOT, "assets", "models", "parts")
 os.makedirs(PARTS_DIR, exist_ok=True)
 
-ELEV_60_DEG = math.radians(60.0)
+# Authoring axis rotation. Was +60 degrees, which baked the mortar's firing
+# elevation into mortar_tube_single.glb and left the tube running along a tilted
+# +Y/+Z diagonal. visual_builder.gd lengthens tubes by scaling Z, so the
+# barrel_length tweak stretched the tube sideways rather than extending it - the
+# same bug build_artillery.py had. Zero leaves the tube along add_cyl_y()'s
+# Blender +Y, which the glTF exporter emits as Godot -Z (the forward convention),
+# and the 60-degree firing elevation is applied by visual_builder.gd as a pivot
+# rotation instead.
+#
+# The name is kept because every call site references it; it is now an authoring
+# axis, not an elevation.
+ELEV_60_DEG = math.radians(0.0)
+
+# Firing elevation visual_builder.gd applies to the tube pivot, kept here so the
+# two files cannot drift apart.
+ASSEMBLY_ELEVATION_DEG = 60.0
 
 def clear_scene():
 	bpy.ops.object.select_all(action='SELECT')

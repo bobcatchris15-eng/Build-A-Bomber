@@ -9,7 +9,34 @@ PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 PARTS_DIR = os.path.join(PROJECT_ROOT, "assets", "models", "parts")
 os.makedirs(PARTS_DIR, exist_ok=True)
 
-ELEV_ANGLE = math.radians(35.0)
+# Rotation applied to every add_*_y() primitive when authoring, and the axis the
+# whole assembly is laid out along.
+#
+# This used to be +35 degrees, baking the gun's elevation straight into the mesh:
+# the barrel ran along +Y tilted back toward +Z, so artillery_barrel.glb came out
+# 0.20 x 1.28 x 1.73 - a tall plate rather than a tube down one axis. Two things
+# broke as a result:
+#
+#   * visual_builder.gd scales barrels with Vector3(caliber, caliber, length),
+#     i.e. it lengthens along Z. On a mesh whose long axis was neither Z nor even
+#     axis-aligned, the barrel_length tweak stretched the gun sideways instead of
+#     extending the tube - which is exactly how it rendered.
+#   * a barrel with a 1.28-tall bounding box reads as body rather than
+#     protrusion, so the up-armour code measuring the weapon's action volume
+#     included the whole elevating mass and grew the casemate to swallow it.
+#
+# Zero is correct, NOT -90: Blender is Z-up and the glTF exporter swaps axes, so
+# add_cyl_y()'s Blender +Y axis already exports as Godot -Z, the forward
+# convention every other weapon's barrel uses. The +35 tilt was the entire bug -
+# it rotated part of the tube into Blender's Z, which exports as Godot +Y and is
+# what gave the barrel its 1.28-tall bounding box. Elevation is now applied by visual_builder.gd as a node
+# rotation on a pivot, so it is a property of the mount rather than of the mesh -
+# which also means the gun can actually be aimed later.
+ELEV_ANGLE = math.radians(0.0)
+
+# The elevation visual_builder.gd should apply to the breech/barrel pivot to
+# restore the original look. Kept here so the two files cannot drift.
+ASSEMBLY_ELEVATION_DEG = 35.0
 
 def clear_scene():
 	bpy.ops.object.select_all(action='SELECT')

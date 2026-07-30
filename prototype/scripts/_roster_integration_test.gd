@@ -3,7 +3,12 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullLoader = preload("res://scripts/hull_loader.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 
-const CONVERTED = ["light_hull","medium_hull","heavy_hull","assault_hull","flying_wing_hull","airship_hull"]
+const CONVERTED = ["light_hull","medium_hull","heavy_hull","assault_hull","airship_hull",
+	"scout_hull","transport_hull",
+	# Kitbash roster (tools/gen_kitbash_hulls.py) - silhouettes borrowed from
+	# outside the "military vehicle" family the original roster all shared.
+	"dreadnought_wedge_hull","pressure_hull","roadster_hull","rotor_fuselage_hull",
+	"locomotive_hull","landing_craft_hull","water_tower_hull","cabover_truck_hull"]
 const UNCONVERTED = ["pillbox_foundation","tower_foundation","fortress_wall_foundation"]
 const PRIMITIVE_HULLS = ["the_cube","the_orb","the_rod","the_slab"]
 

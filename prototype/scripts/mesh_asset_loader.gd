@@ -22,11 +22,18 @@
 
 static var _cache: Dictionary = {}
 
+# Aliases exist for parts whose authored .glb is named differently from the id
+# the builders ask for. An alias SHADOWS a real asset, so it must be removed the
+# moment the properly-named file lands.
+#
+# tow_launch_tube and tow_pintle_mount used to be aliased to the swarm pod's
+# missile_pod_housing / missile_pod_pintle_mount as placeholders. Both TOW assets
+# now exist (assets/models/parts/tow_launch_tube.glb, tow_pintle_mount.glb) but
+# the aliases kept shadowing them, so the TOW launcher rendered with the swarm
+# pod's body carrying its own tow_missile_warhead - which is exactly what it
+# looked like. Removed; they resolve to their own files now.
 const PART_NAME_ALIASES := {
-	"missile_pod": "missile_pod_housing",
 	"guided_missile": "missile_body",
-	"tow_launch_tube": "missile_pod_housing",
-	"tow_pintle_mount": "missile_pod_pintle_mount",
 	"tow_missile_warhead": "tow_missile_warhead",
 }
 

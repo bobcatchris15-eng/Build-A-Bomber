@@ -924,8 +924,8 @@ static func get_hull_visual_yaw_offset_deg(hull_type_id: String) -> float:
 # 1. ORIENTATION. The old code applied a blanket 90-degree yaw to every hull
 #    (HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG). That happens to be right for the
 #    ~13 authored meshes whose long axis is X, but it is wrong for the ones
-#    authored along Z (flying_wing_hull, pillbox_foundation), wrong for the
-#    mod hull authored correctly in the first place (prospectors_folly_hull),
+#    authored along Z (pillbox_foundation and the since-retired flying wing),
+#    wrong for a mod hull authored correctly in the first place,
 #    and useless for the ones standing on their tail with their long axis on
 #    Y (interceptor_hull, fuselage_hull) - a yaw can never lay those down.
 #    We now pick the axis-aligned orientation whose ASPECT RATIO best matches
@@ -942,7 +942,7 @@ static func get_hull_visual_yaw_offset_deg(hull_type_id: String) -> float:
 #    per-axis so the mesh exactly fills its catalog box.
 #
 # A hull whose .glb is authored at its true catalog dimensions (which is the
-# convention - prospectors_folly_hull follows it) gets rotation 0 and scale 1
+# convention) gets rotation 0 and scale 1
 # here and is passed through untouched. Anything else is being corrected for
 # a mis-authored source mesh; see get_hull_mesh_fit_warnings().
 #

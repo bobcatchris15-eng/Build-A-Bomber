@@ -1,0 +1,21 @@
+{
+	"base_energy": 125,
+	"base_vision": 22,
+	"category": "hull",
+	"color": [
+		0.6,
+		0.62,
+		0.66,
+		1
+	],
+	"crystal": 55,
+	"hp": 900,
+	"metal": 230,
+	"name": "Dreadnought Wedge",
+	"size": [
+		5,
+		1.85,
+		9
+	],
+	"weight": 700
+}

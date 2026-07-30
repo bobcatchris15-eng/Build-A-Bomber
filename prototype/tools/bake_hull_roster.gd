@@ -272,7 +272,7 @@ func _check_size_drift(stem: String, aabb: AABB, sidecar: Dictionary) -> void:
 # Marching Cubes samples the SDF on a voxel grid, so it physically cannot
 # represent a feature thinner than ~1 voxel - such a primitive is silently
 # absorbed into its neighbours or vanishes outright, with NO error. This bit
-# real geometry during the roster conversion: flying_wing_hull's 0.50-thick
+# real geometry during the roster conversion: the flying wing hull's 0.50-thick
 # wings on a 10.8-unit span at resolution 18 (voxel 0.60) disappeared
 # completely, collapsing the baked hull from 10.80 wide to 4.57.
 #
@@ -291,7 +291,7 @@ func _warn_on_subvoxel_features(primitives: Array, resolution: int, smoothness: 
 	# rotation, and grows by the margin - so the figure printed here was ~25%
 	# smaller than the grid actually used (heavy_hull: 0.31 reported vs ~0.39
 	# real). Under-reporting the voxel means the "WILL BE LOST" branch below
-	# almost never fires, which is how flying_wing_hull's wings disappeared.
+	# almost never fires, which is how the flying wing hull's wings disappeared.
 	var voxel := SDFMeshBaker.compute_voxel_size(primitives, smoothness, resolution)
 	if voxel <= 0.0:
 		return

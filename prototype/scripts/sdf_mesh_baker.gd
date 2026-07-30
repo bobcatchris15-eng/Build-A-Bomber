@@ -94,7 +94,8 @@ static var snap_surface_eps_voxels := 0.2
 # margin. On heavy_hull that made the tool report voxel 0.31 where the baker
 # actually used ~0.39 - a 26% understatement, so the "WILL BE LOST" branch
 # effectively never fired and thin features vanished silently (exactly the
-# flying_wing_hull wing-loss failure the warning exists to prevent).
+# swept-wing hull's wing-loss failure the warning exists to prevent - that
+# hull has since been retired from the roster, but the failure mode has not).
 #
 # Both now call these two functions. Do not reintroduce a local copy.
 
@@ -1011,7 +1012,8 @@ static func scene_sdf(world_point: Vector3, primitives: Array, smoothness: float
 	# ascending blends the running minimum against ever more DISTANT values,
 	# where smin(a, b, k) with b >> a just returns a - so the compounding stops,
 	# the bridges vanish, and the hull falls apart into detached pieces (measured:
-	# airship 2 components, flying_wing 2 components + 24 boundary edges).
+	# airship 2 components, and the since-retired flying wing 2 components + 24
+	# boundary edges).
 	#
 	# A few percent of mirror asymmetry on one hull is a far better trade than an
 	# airship in bits. If exact symmetry for smooth hulls is wanted later, the fix
@@ -1113,8 +1115,8 @@ static func _scaled_sdf(p: Vector3, h: Vector3, type: int) -> float:
 #   airship_hull's envelope is a SPHERE scaled 5.8 x 3.6 x 12.6 - a 12.6-long
 #   gasbag. min() made it a ball of radius 1.8, so the envelope no longer
 #   reached the gondola, tail or nose, and the hull baked as a small ball with
-#   several boxes floating around it in mid-air. flying_wing_hull's 5.6-long
-#   body sphere became a 0.7-radius pebble the same way.
+#   several boxes floating around it in mid-air. The retired flying wing hull's
+#   5.6-long body sphere became a 0.7-radius pebble the same way.
 static func _sdf_ellipsoid(p: Vector3, r: Vector3) -> float:
 	var rr := Vector3(max(r.x, 0.0001), max(r.y, 0.0001), max(r.z, 0.0001))
 	var k0: float = Vector3(p.x / rr.x, p.y / rr.y, p.z / rr.z).length()

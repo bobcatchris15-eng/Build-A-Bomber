@@ -22,6 +22,7 @@ class_name HullDecals
 # Chris's own framing invited exactly this call. See DECISIONS_NEEDED.md.
 
 const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
+const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 
 const DECAL_TEXTURE_SIZE: int = 256
 static var _texture_cache: Dictionary = {}
@@ -252,15 +253,27 @@ static func _make_decal_material(texture: Texture2D, color: Color) -> StandardMa
 	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	return mat
 
-static func _add_decal(container: Node3D, texture: Texture2D, color: Color, size: Vector2, pos: Vector3, rot: Vector3):
+# Surface-projected placement (hull_projection.gd): the caller says roughly
+# where on the hull it wants the decal, in normalized AABB coordinates, plus
+# which face to approach from - and the decal lands on the hull's ACTUAL skin,
+# rotated to match that skin's normal. Replaces the previous hardcoded
+# "fraction of the declared catalog box" positions, which floated off every
+# hull that is not a literal box (and, because the roof sits at 0.5 * size.y
+# while the code used 0.62, off the boxes too).
+static func _project_decal(container: Node3D, surface: Dictionary, texture: Texture2D,
+		color: Color, size: Vector2, anchor: Vector3, axis: Vector3, lift: float = 0.0):
+	var hit = HullProjectionScript.project(surface, anchor, axis)
 	var card = MeshInstance3D.new()
 	var quad = QuadMesh.new()
 	quad.size = size
 	card.mesh = quad
 	card.material_override = _make_decal_material(texture, color)
 	container.add_child(card)
-	card.position = pos
-	card.rotation = rot
+	var normal: Vector3 = hit["normal"]
+	var pos: Vector3 = hit["position"] + normal * lift
+	card.position = pos * surface.get("position_scale", Vector3.ONE)
+	card.basis = hit["basis"]
+	return card
 
 # Removes any previously-attached decals (so faction changes in the Design
 # Lab don't accumulate duplicates) and rebuilds - every faction gets
@@ -275,28 +288,43 @@ static func apply_decals(hull: Node3D, faction: String, hull_size: Vector3):
 	container.name = "HullDecals"
 	hull.add_child(container)
 
+	# Real mesh extents, not the declared catalog box. Sizing off the actual
+	# skin matters as much as positioning does: a CSG-baked hull is often
+	# noticeably narrower than its catalog size, so a stripe sized to the box
+	# overhung the panel it was supposed to be stencilled on.
+	var surface = HullProjectionScript.build_surface(hull)
+	var comp = HullProjectionScript.attach_compensation(hull)
+	container.scale = comp["container_scale"]
+	surface["position_scale"] = comp["position_scale"]
+	var extents: Vector3 = hull_size
+	if surface["tris"].size() >= 3:
+		extents = (surface["aabb"] as AABB).size
+	else:
+		# No mesh to project onto (a bare host, or a hull built before its
+		# MeshInstance3D exists). Synthesise the box the old code assumed,
+		# centred on the origin the way ModuleCatalog.get_hull_mesh_fit()
+		# recentres real hull geometry, so the fallback is at least
+		# self-consistent instead of hovering above the roof.
+		surface["aabb"] = AABB(-hull_size * 0.5, hull_size)
+
 	var tint = FactionCatalogScript.get_visual_decal_tint(faction)
 	var hazard_tex = _get_texture("hazard", _draw_hazard)
 
-	# 2 hazard-stripe strips near the front-top panel edge (a real cut
-	# stencil's most common placement - a warning strip along an edge).
-	# Held clear of the hull's own top face by a real margin (not a razor-
-	# thin offset) - too close to the surface risked z-fighting/occlusion
-	# against the hull's own opaque material, the same lesson
-	# hull_greebles.gd's cards never had to learn since they sit well
-	# outside the hull entirely.
-	var stripe_size = Vector2(hull_size.x * 0.18, hull_size.y * 0.16)
+	# 2 hazard-stripe strips near the top edge of the tail panel (a real cut
+	# stencil's most common placement - a warning strip along an edge),
+	# projected onto whatever that panel actually is: a flat plate on a boxy
+	# hull, a sloped one on a wedge, a curved one on the airship.
+	var stripe_size = Vector2(extents.x * 0.18, extents.y * 0.16)
 	for side in [-1.0, 1.0]:
-		_add_decal(container, hazard_tex, tint, stripe_size,
-			Vector3(side * hull_size.x * 0.32, hull_size.y * 0.62, hull_size.z * 0.46),
-			Vector3(0, 0, 0))
+		_project_decal(container, surface, hazard_tex, tint, stripe_size,
+			Vector3(0.5 + side * 0.18, 0.78, 1.0), Vector3.BACK)
 
-	# 1 stencil serial number, small, on the side near the front.
+	# 1 stencil serial number, small, on the starboard flank near the front.
 	var serial = _get_faction_serial(faction)
 	var serial_tex = _get_texture("serial_%s" % serial, func(img): _draw_serial(img, serial))
-	_add_decal(container, serial_tex, tint, Vector2(hull_size.x * 0.32, hull_size.y * 0.14),
-		Vector3(hull_size.x * 0.56, hull_size.y * 0.3, hull_size.z * 0.2),
-		Vector3(0, PI / 2.0, 0))
+	_project_decal(container, surface, serial_tex, tint,
+		Vector2(extents.z * 0.32, extents.y * 0.14),
+		Vector3(1.0, 0.6, 0.6), Vector3.RIGHT)
 
 	# 1 mascot/insignia icon, small and fixed - never more than ~12% of the
 	# hull's own footprint width, well under the "silhouette-scale" line
@@ -308,13 +336,19 @@ static func apply_decals(hull: Node3D, faction: String, hull_size: Vector3):
 	# nothing behind it. The badge itself is a fixed dark neutral color,
 	# not faction-tinted - every reference badge is dark regardless of the
 	# unit's own paint scheme, same convention a real insignia patch uses.
+	# Badge and mascot are projected onto the roof as a pair from the SAME
+	# anchor, so they share one surface point and one normal and therefore stay
+	# concentric on a sloped or curved roof - the old pair used two hardcoded
+	# positions differing only in world Y, which slid apart the moment the roof
+	# was not horizontal. They are separated along the surface normal instead
+	# of along world Y, which is what "just behind it" actually means.
 	var mascot_tex = _get_mascot_texture(faction)
-	var mascot_size = Vector2(min(hull_size.x, hull_size.z) * 0.22, min(hull_size.x, hull_size.z) * 0.22)
+	var mascot_span: float = min(extents.x, extents.z) * 0.22
+	var mascot_size = Vector2(mascot_span, mascot_span)
 	var badge_tex = _get_texture("circle_badge", _draw_circle_badge)
 	var badge_size = mascot_size * 1.4
-	_add_decal(container, badge_tex, Color(0.07, 0.07, 0.08), badge_size,
-		Vector3(0, hull_size.y * 0.62 - 0.015, hull_size.z * 0.15),
-		Vector3(-PI / 2.0, 0, 0))
-	_add_decal(container, mascot_tex, tint, mascot_size,
-		Vector3(0, hull_size.y * 0.62, hull_size.z * 0.15),
-		Vector3(-PI / 2.0, 0, 0))
+	var mascot_anchor := Vector3(0.5, 1.0, 0.58)
+	_project_decal(container, surface, badge_tex, Color(0.07, 0.07, 0.08), badge_size,
+		mascot_anchor, Vector3.UP)
+	_project_decal(container, surface, mascot_tex, tint, mascot_size,
+		mascot_anchor, Vector3.UP, mascot_span * 0.02)

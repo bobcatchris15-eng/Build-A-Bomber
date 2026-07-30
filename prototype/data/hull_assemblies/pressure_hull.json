@@ -1,0 +1,187 @@
+{
+	"schema_version": 1,
+	"hull_name": "pressure_hull",
+	"_role": "Submarine pressure hull, run on land because nothing here is underwater. The dorsal casing is not decoration: a bare cylinder has almost no flat area for module mounts, and a real submarine's flat walking casing solves the realism and the mounting problem with the same part.",
+	"bake": {
+		"smoothness": 0.0,
+		"resolution": 60,
+		"method": "csg",
+		"fit_percent": 95,
+		"facet_angle": 15,
+		"crystallinity": 0.0,
+		"chamfer_edge_pct": 6.0,
+		"mirror_x": false
+	},
+	"sidecar": {
+		"name": "Pressure Hull",
+		"hp": 700,
+		"weight": 520,
+		"metal": 180,
+		"crystal": 40,
+		"base_energy": 110,
+		"base_vision": 20,
+		"size": [
+			2.8,
+			3.3,
+			11.55
+		],
+		"color": [
+			0.3,
+			0.33,
+			0.36,
+			1
+		]
+	},
+	"primitives": [
+		{
+			"_note": "Pressure hull proper - one long tapered cigar.",
+			"type": "CAPSULE",
+			"position": [
+				0,
+				-0.3,
+				0
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				2.6,
+				2.6,
+				11.0
+			],
+			"color": [
+				0.3,
+				0.33,
+				0.36,
+				1
+			]
+		},
+		{
+			"_note": "Flat dorsal casing / walking deck. The mounting surface.",
+			"type": "BOX",
+			"position": [
+				0,
+				0.9,
+				-0.5
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				1.5,
+				0.5,
+				8.4
+			],
+			"color": [
+				0.26,
+				0.28,
+				0.31,
+				1
+			]
+		},
+		{
+			"_note": "Conning tower / sail.",
+			"type": "CHAMFER_BOX",
+			"position": [
+				0,
+				1.3,
+				1.4
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				1.2,
+				0.7,
+				2.2
+			],
+			"color": [
+				0.22,
+				0.24,
+				0.27,
+				1
+			]
+		},
+		{
+			"_note": "Forward hull band.",
+			"type": "RING",
+			"position": [
+				0,
+				-0.3,
+				-2.2
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				2.8,
+				0.3,
+				2.8
+			],
+			"color": [
+				0.38,
+				0.4,
+				0.42,
+				1
+			]
+		},
+		{
+			"_note": "Aft hull band.",
+			"type": "RING",
+			"position": [
+				0,
+				-0.3,
+				2.6
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				2.8,
+				0.3,
+				2.8
+			],
+			"color": [
+				0.38,
+				0.4,
+				0.42,
+				1
+			]
+		},
+		{
+			"_note": "Propeller shaft fairing. Rotated pi/2 about X so CYLINDER's Y axis runs fore-aft along Z.",
+			"type": "CYLINDER",
+			"position": [
+				0,
+				-0.3,
+				5.2
+			],
+			"rotation": [
+				1.570796,
+				0,
+				0
+			],
+			"scale": [
+				0.5,
+				1.4,
+				0.5
+			],
+			"color": [
+				0.5,
+				0.44,
+				0.3,
+				1
+			]
+		}
+	]
+}

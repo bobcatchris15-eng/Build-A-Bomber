@@ -4508,7 +4508,7 @@ func test_new_faction_mechanical_bonuses() -> bool:
 
 	# Aerodrome Cartel: +15% move_speed, but ONLY for airborne units.
 	var cartel_air_bp = {
-		"version": 1.0, "hull_type": "flying_wing_hull",
+		"version": 1.0, "hull_type": "airship_hull",
 		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
 		"armor_material": "hardened_steel", "armor_thickness": 1.0, "faction": "aerodrome_cartel",
 		"locomotion": {"type_id": "fixed_wing_engine", "settings": {}},
@@ -4532,7 +4532,7 @@ func test_new_faction_mechanical_bonuses() -> bool:
 	skirmish.add_child(baseline_air_unit)
 	baseline_air_unit.setup(baseline_air_bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
 	if not cartel_air_unit.is_flying or not baseline_air_unit.is_flying:
-		print("  [FAIL] Both test units should be real airborne units (fixed_wing_engine on flying_wing_hull)")
+		print("  [FAIL] Both test units should be real airborne units (fixed_wing_engine on airship_hull)")
 		ok = false
 	elif not is_equal_approx(cartel_air_unit.move_speed, baseline_air_unit.move_speed * 1.15):
 		print("  [FAIL] Aerodrome Cartel airborne units should move exactly 15% faster than an identical neutral-faction airborne unit, got cartel=", cartel_air_unit.move_speed, " baseline=", baseline_air_unit.move_speed)
@@ -4759,9 +4759,10 @@ func test_size_tiered_manufactories() -> bool:
 	# The exact per-hull tier mapping logged in DECISIONS_NEEDED.md - spot-
 	# check a few.
 	var expectations = {
-		"light_hull": "light", "flying_wing_hull": "light",
+		"light_hull": "light", "roadster_hull": "light",
 		"medium_hull": "medium", "airship_hull": "medium",
 		"heavy_hull": "heavy", "assault_hull": "heavy",
+		"cabover_truck_hull": "medium", "locomotive_hull": "heavy",
 	}
 	for hull_type in expectations:
 		var got = ModuleCatalog.get_hull_size_tier(hull_type)

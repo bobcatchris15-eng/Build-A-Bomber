@@ -1,0 +1,187 @@
+{
+	"schema_version": 1,
+	"hull_name": "dreadnought_wedge_hull",
+	"_role": "Capital-ship wedge (Star Destroyer register). The single most useful hull shape in the roster mechanically, not just visually: a wedge is all flat dorsal deck, which is exactly what module mounting and decal projection both want. Bow tapers to a point, stern carries the full height and the superstructure.",
+	"bake": {
+		"smoothness": 0.0,
+		"resolution": 36,
+		"method": "csg",
+		"fit_percent": 95,
+		"facet_angle": 15,
+		"crystallinity": 0.0,
+		"chamfer_edge_pct": 2.0,
+		"mirror_x": false
+	},
+	"sidecar": {
+		"name": "Dreadnought Wedge",
+		"hp": 900,
+		"weight": 700,
+		"metal": 230,
+		"crystal": 55,
+		"base_energy": 125,
+		"base_vision": 22,
+		"size": [
+			5.0,
+			1.85,
+			9.0
+		],
+		"color": [
+			0.6,
+			0.62,
+			0.66,
+			1
+		]
+	},
+	"primitives": [
+		{
+			"_note": "Main hull. Rotated pi about Y so the full height sits at the STERN and the bow tapers to a point - an unrotated WEDGE is tall at -Z, i.e. backwards for a ship. Note the consequence: the top surface runs from y=+0.6 at the stern down to y=-0.9 at the bow, so anything mounted on the 'deck' at a constant height only touches the hull aft of where the slope reaches it. A flat plate at y=+0.35 floated free of the entire hull for exactly this reason.",
+			"type": "WEDGE",
+			"position": [
+				0,
+				-0.15,
+				0
+			],
+			"rotation": [
+				0,
+				3.141593,
+				0
+			],
+			"scale": [
+				5.0,
+				1.5,
+				9.0
+			],
+			"color": [
+				0.6,
+				0.62,
+				0.66,
+				1
+			]
+		},
+		{
+			"_note": "Midships hull block. Rides low enough to stay inside the wedge's sloping top over its whole length, which is what ties the superstructure to the hull instead of leaving it hovering.",
+			"type": "BOX",
+			"position": [
+				0,
+				-0.3,
+				0.5
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				4.2,
+				0.8,
+				6.0
+			],
+			"color": [
+				0.57,
+				0.59,
+				0.63,
+				1
+			]
+		},
+		{
+			"_note": "Aft superstructure. Its flat top is the module real estate - the wedge itself cannot provide one, since its deck is a slope.",
+			"type": "BOX",
+			"position": [
+				0,
+				0.1,
+				2.1
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				3.0,
+				0.6,
+				4.8
+			],
+			"color": [
+				0.52,
+				0.54,
+				0.59,
+				1
+			]
+		},
+		{
+			"_note": "Bridge tower, the silhouette's signature.",
+			"type": "CHAMFER_BOX",
+			"position": [
+				0,
+				0.6,
+				3.4
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				1.4,
+				0.6,
+				1.6
+			],
+			"color": [
+				0.46,
+				0.48,
+				0.54,
+				1
+			]
+		},
+		{
+			"_note": "Port ventral rail. Kept aft: the wedge collapses to a knife edge at y=-0.9 near the bow, so a rail carried forward would stick out below it.",
+			"type": "BOX",
+			"position": [
+				-1.4,
+				-0.78,
+				1.6
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				0.5,
+				0.3,
+				5.4
+			],
+			"color": [
+				0.44,
+				0.45,
+				0.5,
+				1
+			]
+		},
+		{
+			"_note": "Starboard ventral rail.",
+			"type": "BOX",
+			"position": [
+				1.4,
+				-0.78,
+				1.6
+			],
+			"rotation": [
+				0.0,
+				0.0,
+				0.0
+			],
+			"scale": [
+				0.5,
+				0.3,
+				5.4
+			],
+			"color": [
+				0.44,
+				0.45,
+				0.5,
+				1
+			]
+		}
+	]
+}

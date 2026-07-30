@@ -110,6 +110,14 @@ const LOCOMOTION_MODULAR_TYPES := {
 	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true
 }
 
+# Firing elevation applied as a PIVOT ROTATION for the two weapons whose barrels
+# used to have their elevation baked into the mesh. Must match
+# ASSEMBLY_ELEVATION_DEG in tools/blender/build_artillery.py / build_mortar.py -
+# those scripts author the tube along -Z at zero elevation and record here the
+# angle the mount is supposed to restore.
+const ARTILLERY_ELEVATION_DEG := 35.0
+const MORTAR_ELEVATION_DEG := 60.0
+
 const MODULAR_ASSEMBLY_TYPES := {
 	"basic_cannon": true, "heavy_machine_gun": true, "rotary_cannon": true, "gauss_railgun": true,
 	"artillery": true, "mortar_array": true, "guided_missile": true, "missile_pod": true,
@@ -588,12 +596,26 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		for i in range(b_count):
 			var cur_x = start_x + i * x_spacing
 
+			# ELEVATION PIVOT. artillery_barrel.glb / artillery_breech.glb are now
+			# authored along -Z at zero elevation (see build_artillery.py's
+			# ELEV_ANGLE); the gun's 35-degree elevation is applied here instead.
+			#
+			# This is what makes the barrel_length tweak work: the barrel's own
+			# local -Z is the tube axis, so scaling its Z lengthens the tube. When
+			# the elevation was baked into the mesh, the long axis was a tilted
+			# Y/Z diagonal and scaling Z sheared the gun sideways.
+			var elev_pivot = Node3D.new()
+			elev_pivot.name = "ElevationPivot" if i == 0 else "ElevationPivot%d" % i
+			elev_pivot.position = Vector3(cur_x, trunnion_y, 0.0)
+			elev_pivot.rotation = Vector3(deg_to_rad(ARTILLERY_ELEVATION_DEG), 0, 0)
+			parent_node.add_child(elev_pivot)
+
 			# 2A. BREECH BLOCK
 			var breech: MeshInstance3D
 			if breech_mesh:
 				breech = _mesh_inst(breech_mesh, Color(0.20, 0.22, 0.24))
 				breech.scale = Vector3(caliber, caliber, caliber)
-				breech.position = Vector3(cur_x, trunnion_y, 0.0)
+				elev_pivot.add_child(breech)
 			else:
 				breech = MeshInstance3D.new()
 				var b_box = BoxMesh.new()
@@ -602,15 +624,14 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				var b_mat = StandardMaterial3D.new()
 				b_mat.albedo_color = Color(0.20, 0.22, 0.24)
 				breech.material_override = b_mat
-				breech.position = Vector3(cur_x, trunnion_y, -0.12 * caliber)
-			parent_node.add_child(breech)
+				breech.position = Vector3(0, 0, -0.12 * caliber)
+				elev_pivot.add_child(breech)
 
-			# 2B. BARREL (Mounted at front of breech socket, scaling with caliber and barrel_length)
+			# 2B. BARREL. Authored along -Z, so scaling Z lengthens the tube.
 			var barrel: MeshInstance3D
 			if barrel_mesh:
 				barrel = _mesh_inst(barrel_mesh, Color(0.16, 0.17, 0.19))
 				barrel.scale = Vector3(caliber, caliber, length * caliber)
-				barrel.position = Vector3(cur_x, trunnion_y, 0.0)
 			else:
 				barrel = MeshInstance3D.new()
 				var b_cyl = CylinderMesh.new()
@@ -621,9 +642,9 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				var b_mat = StandardMaterial3D.new()
 				b_mat.albedo_color = Color(0.16, 0.17, 0.19)
 				barrel.material_override = b_mat
-				barrel.position = Vector3(cur_x, trunnion_y, -(1.35 * length / 2.0))
+				barrel.position = Vector3(0, 0, -(1.35 * length / 2.0))
 				barrel.rotation = Vector3(PI / 2, 0, 0)
-			parent_node.add_child(barrel)
+			elev_pivot.add_child(barrel)
 
 	elif type_id == "mortar_array":
 		var t_count = int(tweaks.get("tube_count", 2.0))
@@ -677,11 +698,21 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			]
 
 		for offset in tube_offsets:
+			# ELEVATION PIVOT, same reasoning as artillery: mortar_tube_single.glb
+			# is now authored along -Z at zero elevation (build_mortar.py's
+			# ELEV_60_DEG), and the 60-degree firing elevation is a pivot rotation.
+			# Scaling the tube's Z therefore lengthens the tube along its own axis
+			# instead of shearing it, which is what barrel_length needs.
+			var m_pivot = Node3D.new()
+			m_pivot.name = "TubePivot"
+			m_pivot.position = Vector3(offset.x, trunnion_y, offset.z)
+			m_pivot.rotation = Vector3(deg_to_rad(MORTAR_ELEVATION_DEG), 0, 0)
+			parent_node.add_child(m_pivot)
+
 			var tube: MeshInstance3D
 			if tube_mesh:
 				tube = _mesh_inst(tube_mesh, Color(0.22, 0.25, 0.20))
 				tube.scale = Vector3(caliber, caliber, length * caliber)
-				tube.position = Vector3(offset.x, trunnion_y, offset.z)
 			else:
 				tube = MeshInstance3D.new()
 				var t_cyl = CylinderMesh.new()
@@ -692,10 +723,90 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				var t_mat = StandardMaterial3D.new()
 				t_mat.albedo_color = Color(0.22, 0.25, 0.20)
 				tube.material_override = t_mat
-				tube.position = Vector3(offset.x, trunnion_y + (1.10 * length * 0.4), offset.z)
-				tube.rotation = Vector3(PI / 3, 0, 0)
-			parent_node.add_child(tube)
+				# Procedural fallback: CylinderMesh runs along Y, so a quarter turn
+				# puts it along the pivot's -Z like the authored tube.
+				tube.position = Vector3(0, 0, -(1.10 * length * 0.5))
+				tube.rotation = Vector3(PI / 2, 0, 0)
+			m_pivot.add_child(tube)
 
+
+	elif type_id == "missile_pod":
+		# missile_pod is in MODULAR_ASSEMBLY_TYPES, so build_visual() never tries
+		# the monolithic _part(type_id) path for it - it comes straight here. There
+		# was no branch, so it fell through to the generic box fallback at the end
+		# of this function and the swarm pod rendered as a plain orange box, while
+		# its three authored meshes (missile_pod_pintle_mount, missile_pod_housing,
+		# missile_pod_missile) sat unused in assets/models/parts.
+		var warhead = tweaks.get("warhead_size", 1.0)
+		var motor = tweaks.get("motor_length", 1.0)
+		var grid = int(clamp(tweaks.get("grid_size", 4.0), 2.0, 6.0))
+
+		# 1. PINTLE MOUNT
+		var pod_mount_mesh = _part("missile_pod_pintle_mount")
+		if not pod_mount_mesh:
+			pod_mount_mesh = _part("pintle_mount")
+		var pod_mount: MeshInstance3D
+		if pod_mount_mesh:
+			pod_mount = _mesh_inst(pod_mount_mesh, base_color.darkened(0.25))
+			pod_mount.scale = Vector3(warhead, warhead, warhead)
+		else:
+			pod_mount = MeshInstance3D.new()
+			var pm_box = BoxMesh.new()
+			pm_box.size = Vector3(base_size.x * 0.45, base_size.y * 0.25, base_size.z * 0.45)
+			pod_mount.mesh = pm_box
+			var pm_mat = StandardMaterial3D.new()
+			pm_mat.albedo_color = base_color.darkened(0.25)
+			pod_mount.material_override = pm_mat
+			pod_mount.position = Vector3(0, pm_box.size.y * 0.5, 0)
+		parent_node.add_child(pod_mount)
+
+		# 2. LAUNCHER HOUSING - the boxy multi-tube pod body
+		var pod_body_y: float = base_size.y * 0.55 * warhead
+		var housing_mesh = _part("missile_pod_housing")
+		var pod_housing: MeshInstance3D
+		if housing_mesh:
+			pod_housing = _mesh_inst(housing_mesh, base_color)
+			pod_housing.scale = Vector3(warhead, warhead, motor * warhead)
+			pod_housing.position = Vector3(0, pod_body_y, 0)
+		else:
+			pod_housing = MeshInstance3D.new()
+			var ph_box = BoxMesh.new()
+			ph_box.size = Vector3(base_size.x * 0.9 * warhead,
+				base_size.y * 0.6 * warhead, base_size.z * 0.8 * motor)
+			pod_housing.mesh = ph_box
+			var ph_mat = StandardMaterial3D.new()
+			ph_mat.albedo_color = base_color
+			pod_housing.material_override = ph_mat
+			pod_housing.position = Vector3(0, pod_body_y, 0)
+		parent_node.add_child(pod_housing)
+
+		# 3. ROCKET GRID - grid x rows of tube muzzles across the pod's front face
+		var rocket_mesh = _part("missile_pod_missile")
+		var rows: int = maxi(int(round(float(grid) * 0.66)), 2)
+		var cell_w: float = (base_size.x * 0.72 * warhead) / float(grid)
+		var cell_h: float = (base_size.y * 0.5 * warhead) / float(rows)
+		var grid_z: float = -base_size.z * 0.4 * motor
+		for gx in range(grid):
+			for gy in range(rows):
+				var rx: float = (float(gx) - float(grid - 1) * 0.5) * cell_w
+				var ry: float = pod_body_y + (float(gy) - float(rows - 1) * 0.5) * cell_h
+				var rocket: MeshInstance3D
+				if rocket_mesh:
+					rocket = _mesh_inst(rocket_mesh, Color(0.75, 0.72, 0.66))
+					rocket.scale = Vector3(warhead, warhead, motor * warhead)
+				else:
+					rocket = MeshInstance3D.new()
+					var r_cyl = CylinderMesh.new()
+					r_cyl.top_radius = cell_w * 0.3
+					r_cyl.bottom_radius = cell_w * 0.3
+					r_cyl.height = cell_w * 0.5
+					rocket.mesh = r_cyl
+					rocket.rotation = Vector3(PI / 2.0, 0, 0)
+					var r_mat = StandardMaterial3D.new()
+					r_mat.albedo_color = Color(0.75, 0.72, 0.66)
+					rocket.material_override = r_mat
+				rocket.position = Vector3(rx, ry, grid_z)
+				parent_node.add_child(rocket)
 
 	elif type_id == "guided_missile":
 		var b_count = int(tweaks.get("barrel_count", 1.0))
@@ -1916,7 +2027,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 
 	var protectedness = tweaks.get("protectedness", 0.0)
 	if protectedness > 0.0 and type_id not in LOCOMOTION_MODULAR_TYPES and type_id != "drone_carrier" and type_id != "resource_harvester" and type_id != "repair_array" and type_id != "sensor_suite" and not type_id.begins_with("structural_"):
-		_build_weapon_armor(parent_node, int(protectedness), base_size, base_color)
+		_build_weapon_armor(parent_node, int(protectedness), base_size, base_color, tweaks)
 
 
 
@@ -3756,189 +3867,432 @@ static func _compute_smooth_normals(verts: PackedVector3Array, indices: PackedIn
 
 
 
-static func _build_weapon_armor(parent_node: Node3D, stage: int, base_size: Vector3, base_color: Color):
+static func _build_weapon_armor(parent_node: Node3D, stage: int, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}):
 	if stage <= 0:
 		return
-		
-	var w = base_size.x
-	var h = base_size.y
-	var d = base_size.z
-	
+
+	# Armour tracks the weapon's own tweaks: a bigger calibre grows the whole
+	# casemate, and extra barrels/tubes widen it to cover them. Without this the
+	# enclosure stayed at the catalog size while the gun inside it grew, so the
+	# barrels pushed straight through the plates.
+	var girth: float = _weapon_armor_girth(tweaks)   # overall size multiplier
+	var spread: float = _weapon_armor_spread(tweaks) # extra WIDTH for more barrels
+
+	# ── Adaptive sizing ──────────────────────────────────────────────────
+	# The enclosure is fitted to the weapon's HOUSING, measured from the
+	# geometry that has already been built, not to the catalog's base_size.
+	#
+	# base_size is the module's overall footprint, and for a gun most of it is
+	# BARREL: basic_cannon is (0.6, 0.6, 2.0), where z = 2.0 is almost entirely
+	# barrel length. The old code took w_base = x * 1.3 and d_base = z * 0.6,
+	# i.e. 0.78 wide by 1.2 deep - a box sized off the barrel, which is why the
+	# armour only ever landed "roughly" on the gun instead of wrapping its
+	# breech and mount. Measuring the built housing makes the same code fit
+	# every weapon in the roster, whatever its proportions.
+	var housing := _weapon_housing_bounds(parent_node, base_size, girth, spread)
+
 	var a_mat = StandardMaterial3D.new()
 	a_mat.albedo_color = base_color.darkened(0.2)
 	a_mat.metallic = 0.5
 	a_mat.roughness = 0.5
+	# Armour plates render double-sided.
+	#
+	# The geometry below is a closed solid with verified-outward winding (every
+	# face is emitted through _add_tri, which derives winding from an explicit
+	# outward direction), and an isolated ray test finds zero camera-visible back
+	# faces. Yet the plates still read as hollow in the scene, which means
+	# something in the live transform chain is inverting them - a mirrored module
+	# contributes a determinant-(-1) basis, and turret_armor.gd overwrites the
+	# holder's basis every frame on top of whatever the parent chain carries.
+	# Rather than keep chasing which combination flips it, disable culling: for a
+	# thin plate the back face is a legitimate surface to see anyway (you can look
+	# into an open-topped turret), and it makes the plates impossible to lose to
+	# a winding or handedness bug from any source.
+	a_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 
-	var h_plate = h * 0.7 
-	var S = h_plate * 0.57735 
-	
-	var w_base = w * 1.3
-	var d_base = d * 0.6
-	var c_base = 0.0
+	var centre_x: float = housing.position.x + housing.size.x * 0.5
+	var centre_z: float = housing.position.z + housing.size.z * 0.5
+	# Never start below the module's mounting plane. Authored part meshes are not
+	# all modelled sitting on y=0 - heavy_machine_gun's pintle mesh straddles the
+	# origin - so an unclamped housing floor put the whole enclosure underneath
+	# the weapon, which is the "tiny capsule below the gun" symptom.
+	var floor_y: float = max(housing.position.y, 0.0)
+
+	# SIZE comes from the module's own cross-section; PLACEMENT comes from the
+	# measured housing above.
+	#
+	# Splitting it this way is deliberate. Deriving the size from measured
+	# geometry sounds better but cannot be made reliable, because a breech is
+	# long and thin in exactly the way a barrel is: on basic_cannon the breech
+	# (0.27 x 0.30 x 0.97) and the barrel (0.15 x 0.15 x 1.51) are the same shape
+	# to any aspect-ratio test, so excluding barrels also excluded the breech and
+	# the enclosure shrank to just the pintle; while on artillery the elevation
+	# assembly (0.39 x 2.56 x 3.46) is squat enough to pass as housing and gave a
+	# casemate 3.79 tall on a module only 1.8 high.
+	#
+	# base_size.x/y are the weapon's calibre-ish cross-section and scale sensibly
+	# across the whole roster; only base_size.z is barrel-dominated, so it is not
+	# used. The measured housing still decides WHERE the enclosure sits, which is
+	# the part that has to adapt per weapon and is robust to measure (a centre is
+	# far less sensitive to a stray mesh than an extent).
+	# All three dimensions come from the measured action volume, each clamped to a
+	# sane band around the module's declared size (scaled by the same tweak
+	# multipliers, so the bands move with the weapon).
+	#
+	# Measuring rather than using a flat ratio is what stops the casemate
+	# swallowing the muzzle on compact weapons: a flat depth of 1.7 x base_size.x
+	# put the armour's front face 0.52 beyond the end of mortar_array's tubes and
+	# 0.42 beyond missile_pod's rocket grid, so the very thing that should
+	# protrude was enclosed.
+	var w_base: float = clampf(housing.size.x * 1.45,
+		base_size.x * 1.15 * girth * spread, base_size.x * 2.0 * girth * spread)
+	var d_base: float = clampf(housing.size.z * 1.45,
+		base_size.x * 1.05 * girth, base_size.x * 1.9 * girth)
+
+	# The casemate never reaches past the weapon's own frontmost geometry. This is
+	# "let the barrel protrude" stated generally, and it is what keeps the armour
+	# off the business end of weapons whose body is short: mortar_array's tubes,
+	# rotary_cannon's barrel cluster and missile_pod's rocket grid all sat INSIDE
+	# the plates before this, because a depth derived from the body alone happened
+	# to exceed the distance to the muzzle. For a long gun the barrel tip is far
+	# forward and this never binds.
+	var front_z: float = _weapon_front_z(parent_node)
+	# 0.95 leaves a slight recess rather than landing exactly flush, so the plate
+	# and the muzzle face are never coplanar (which would z-fight).
+	var max_depth: float = 2.0 * max(centre_z - front_z, 0.0) * 0.95
+	if max_depth > 0.0:
+		d_base = min(d_base, max(max_depth, base_size.x * 0.6 * girth))
+
+	# heavy_machine_gun needs the measured height (base_size.y is 0.30, well under
+	# its built receiver, so a purely declared height gave a stubby box below the
+	# gun); artillery needs the clamp.
+	var measured_h: float = max(housing.position.y + housing.size.y - floor_y, 0.01)
+	var h_plate: float = clampf(measured_h * 1.05,
+		base_size.y * 0.8 * girth, base_size.y * 1.8 * girth)
+
+	# Corner cut, always non-zero at BOTH base and top so the silhouette is a
+	# true octagon all the way up.
+	#
+	# The old code left c_base = 0 below stage 4, which made vertex pairs
+	# 0/1, 2/3, 4/5 and 6/7 land on the same position. Coincident-but-distinct
+	# vertices got different averaged normals, so the inner surface was offset
+	# two different ways at every corner and the plates did not close up - the
+	# "plates don't meet reliably" symptom - and the corner faces degenerated to
+	# zero-width triangles.
+	var c_base: float = min(w_base, d_base) * 0.22
+	var thick: float = max(min(w_base, d_base) * 0.06, 0.02)
+
+	# Inward slope of the walls, in the classic faceted-turret style.
+	var inset: float = h_plate * 0.30
+	var w_top: float = max(w_base - 2.0 * inset, min(w_base, d_base) * 0.35)
+	var d_top: float = max(d_base - 2.0 * inset, min(w_base, d_base) * 0.35)
+	var c_top: float = min(c_base, min(w_top, d_top) * 0.4)
+
+	# Inner rings are the outer rings pulled in by the wall thickness. The
+	# chamfer is reduced by thick*(sqrt(2)-1) so the 45-degree corner plates end
+	# up the same thickness as the axis-aligned ones.
+	var c_shrink: float = thick * 0.41421356
+	var ib_c: float = max(c_base - c_shrink, 0.01)
+	var it_c: float = max(c_top - c_shrink, 0.01)
+
+	# Geometry is built around the LOCAL origin and the holder is positioned at
+	# the housing centre instead. turret_armor.gd/mantlet_armor.gd overwrite the
+	# holder's basis every frame to keep the enclosure level with the hull, and a
+	# basis rotates about the node's own origin - so if the geometry carried the
+	# centre offset internally, the enclosure would swing around the module's
+	# origin instead of spinning about its own axis.
+	var origin := Vector3.ZERO
+	var ring_ob := _octagon_ring(w_base, d_base, c_base, 0.0, origin)
+	var ring_ot := _octagon_ring(w_top, d_top, c_top, h_plate, origin)
+	var ring_ib := _octagon_ring(max(w_base - 2.0 * thick, 0.02),
+		max(d_base - 2.0 * thick, 0.02), ib_c, 0.0, origin)
+	var ring_it := _octagon_ring(max(w_top - 2.0 * thick, 0.02),
+		max(d_top - 2.0 * thick, 0.02), it_c, h_plate, origin)
+
+	# ── Which of the 8 segments exist at this stage ───────────────────────
+	# _octagon_ring's ordering puts segment i between ring[i] and ring[i+1]:
+	#   0 front-right corner   1 FRONT           2 front-left corner
+	#   3 LEFT                 4 back-left cnr   5 BACK
+	#   6 back-right corner    7 RIGHT
+	var segments: Array = []
+	match stage:
+		1:
+			segments = [1]                      # mantlet: front plate only
+		2:
+			segments = [0, 1, 2, 3, 7]          # front, its corners, both sides
+		_:
+			segments = [0, 1, 2, 3, 4, 5, 6, 7] # closed ring
+	var present := {}
+	for s in segments:
+		present[s] = true
+
+	var verts := PackedVector3Array()
+	var indices := PackedInt32Array()
+
+	for s in segments:
+		var i: int = s
+		var j: int = (s + 1) % 8
+		var ob: Vector3 = ring_ob[i]
+		var ob2: Vector3 = ring_ob[j]
+		var ot: Vector3 = ring_ot[i]
+		var ot2: Vector3 = ring_ot[j]
+		var ib: Vector3 = ring_ib[i]
+		var ib2: Vector3 = ring_ib[j]
+		var it: Vector3 = ring_it[i]
+		var it2: Vector3 = ring_it[j]
+
+		# Horizontal outward direction of this segment, used to orient faces.
+		var along: Vector3 = ob2 - ob
+		var outward := Vector3(along.z, 0.0, -along.x)
+		if outward.length_squared() < 1e-9:
+			outward = Vector3(0, 0, -1)
+		outward = outward.normalized()
+		if outward.dot((ob + ob2) * 0.5 - origin) < 0.0:
+			outward = -outward
+
+		_add_quad(verts, indices, ob, ob2, ot2, ot, outward)          # outer skin
+		_add_quad(verts, indices, ib, ib2, it2, it, -outward)         # inner skin
+		_add_quad(verts, indices, ob, ob2, ib2, ib, Vector3.DOWN)     # bottom rim
+		# The top rim is needed at EVERY stage, including with a roof. The roof
+		# slab only fills the INNER top octagon, so without this the annulus
+		# between the outer and inner top rings is an open slot right around the
+		# roof's edge - rays from above pass through it into the interior.
+		_add_quad(verts, indices, ot, ot2, it2, it, Vector3.UP)       # top rim
+
+		# Cap the open ends of a partial ring so it stays a closed solid.
+		var prev: int = (s + 7) % 8
+		if not present.has(prev):
+			_add_quad(verts, indices, ob, ot, it, ib, -along.normalized())
+		if not present.has(j):
+			_add_quad(verts, indices, ob2, ot2, it2, ib2, along.normalized())
+
+	# ── Roof ─────────────────────────────────────────────────────────────
+	# A slab filling the inner top octagon, so it never touches the OUTER ring
+	# and therefore cannot change the top-down silhouette. The old roof was a
+	# triangle fan wound the wrong way round (its normals pointed at -Y), so it
+	# was backface-culled - you saw straight into the turret - and because
+	# _solidify() averaged face normals per vertex, that inverted fan also
+	# dragged the top ring's inward offset off true, deforming the octagon at
+	# exactly the corners where the plates meet.
 	if stage >= 4:
-		c_base = w_base * 0.2
-		
-	var w_top = w_base - 2 * S
-	var d_top = d_base - 2 * S
-	
-	if w_top < 0.1: w_top = 0.1
-	if d_top < 0.1: d_top = 0.1
-	
-	var c_top = c_base + S * 0.41421356
-	
-	var max_c_base_w = w_base / 2.0 - 0.02
-	var max_c_base_d = d_base / 2.0 - 0.02
-	var max_c_base = min(max_c_base_w, max_c_base_d)
-	if max_c_base < 0.0: max_c_base = 0.0
-	if c_base > max_c_base: c_base = max_c_base
-	
-	var max_c_top_w = w_top / 2.0 - 0.02
-	var max_c_top_d = d_top / 2.0 - 0.02
-	var max_c_top = min(max_c_top_w, max_c_top_d)
-	if max_c_top < 0.0: max_c_top = 0.0
-	if c_top > max_c_top: c_top = max_c_top
-	
-	# Generate ALL vertices for the turret geometry
-	var t_verts = PackedVector3Array()
-	var hw_b = w_base / 2.0
-	var hd_b = d_base / 2.0
-	t_verts.append(Vector3( hw_b, 0, -hd_b + c_base )) # 0
-	t_verts.append(Vector3( hw_b - c_base, 0, -hd_b )) # 1
-	t_verts.append(Vector3(-hw_b + c_base, 0, -hd_b )) # 2
-	t_verts.append(Vector3(-hw_b, 0, -hd_b + c_base )) # 3
-	t_verts.append(Vector3(-hw_b, 0,  hd_b - c_base )) # 4
-	t_verts.append(Vector3(-hw_b + c_base, 0,  hd_b )) # 5
-	t_verts.append(Vector3( hw_b - c_base, 0,  hd_b )) # 6
-	t_verts.append(Vector3( hw_b, 0,  hd_b - c_base )) # 7
-	
-	var hw_t = w_top / 2.0
-	var hd_t = d_top / 2.0
-	t_verts.append(Vector3( hw_t, h_plate, -hd_t + c_top )) # 8
-	t_verts.append(Vector3( hw_t - c_top, h_plate, -hd_t )) # 9
-	t_verts.append(Vector3(-hw_t + c_top, h_plate, -hd_t )) # 10
-	t_verts.append(Vector3(-hw_t, h_plate, -hd_t + c_top )) # 11
-	t_verts.append(Vector3(-hw_t, h_plate,  hd_t - c_top )) # 12
-	t_verts.append(Vector3(-hw_t + c_top, h_plate,  hd_t )) # 13
-	t_verts.append(Vector3( hw_t - c_top, h_plate,  hd_t )) # 14
-	t_verts.append(Vector3( hw_t, h_plate,  hd_t - c_top )) # 15
+		var roof_t: float = thick
+		var under: Array = []
+		for k in range(8):
+			under.append(ring_it[k] - Vector3(0, roof_t, 0))
+		# Top surface and underside, as fans from vertex 0.
+		for k in range(1, 7):
+			_add_tri(verts, indices, ring_it[0], ring_it[k], ring_it[k + 1], Vector3.UP)
+			_add_tri(verts, indices, under[0], under[k], under[k + 1], Vector3.DOWN)
+		# Rim between them, so the slab is closed.
+		for k in range(8):
+			var k2: int = (k + 1) % 8
+			var a: Vector3 = ring_it[k]
+			var b: Vector3 = ring_it[k2]
+			var seg: Vector3 = b - a
+			var out_h := Vector3(seg.z, 0.0, -seg.x)
+			if out_h.length_squared() < 1e-9:
+				out_h = Vector3(0, 0, -1)
+			out_h = out_h.normalized()
+			if out_h.dot((a + b) * 0.5 - origin) < 0.0:
+				out_h = -out_h
+			_add_quad(verts, indices, a, b, under[k2], under[k], out_h)
 
-	var thick = 0.04 * d
+	if indices.is_empty():
+		return
 
-	# Stage 1: Just the Front Plate
+	var flat_mesh = _create_flat_shaded_mesh(verts, indices)
+
+	# Stage 1 tilts with the gun (mantlet_armor.gd); stages 2+ stay level with
+	# the hull and only yaw with the turret (turret_armor.gd).
+	var holder = Node3D.new()
 	if stage == 1:
-		var mantlet_pivot = Node3D.new()
-		mantlet_pivot.name = "MantletPivot"
-		mantlet_pivot.set_script(load("res://scripts/mantlet_armor.gd"))
-		mantlet_pivot.position = Vector3(0, h * 0.15, 0)
-		parent_node.add_child(mantlet_pivot)
-		
-		var m_indices = PackedInt32Array([2, 10, 9, 2, 9, 1])
-		
-		var solid = _solidify(t_verts, m_indices, thick)
-		var flat_mesh = _create_flat_shaded_mesh(solid.verts, solid.indices)
-		
-		var mantlet = MeshInstance3D.new()
-		mantlet.mesh = flat_mesh
-		mantlet.material_override = a_mat
-		mantlet_pivot.add_child(mantlet)
+		holder.name = "MantletPivot"
+		holder.set_script(load("res://scripts/mantlet_armor.gd"))
+	else:
+		holder.name = "ArmorEnclosure"
+		holder.set_script(load("res://scripts/turret_armor.gd"))
+	holder.position = Vector3(centre_x, floor_y, centre_z)
+	parent_node.add_child(holder)
 
-	# Stages 2-4: The Full Unified Turret Box
-	if stage >= 2:
-		var enclosure = Node3D.new()
-		enclosure.name = "ArmorEnclosure"
-		enclosure.set_script(load("res://scripts/turret_armor.gd"))
-		enclosure.position = Vector3(0, h * 0.15, 0)
-		parent_node.add_child(enclosure)
+	var shell = MeshInstance3D.new()
+	shell.name = "ArmorShell"
+	shell.mesh = flat_mesh
+	shell.material_override = a_mat
+	holder.add_child(shell)
 
-		var t_indices = PackedInt32Array()
-		
-		# Front plate is integrated into the turret
-		t_indices.append_array([2, 10, 9, 2, 9, 1])
-		# Left wall
-		t_indices.append_array([4, 12, 11, 4, 11, 3])
-		# Right wall
-		t_indices.append_array([0, 8, 15, 0, 15, 7])
-		# Front corners
-		t_indices.append_array([1, 9, 8, 1, 8, 0])
-		t_indices.append_array([3, 11, 10, 3, 10, 2])
-			
-		# Back wall and Back corners
-		if stage >= 3:
-			t_indices.append_array([6, 14, 13, 6, 13, 5])
-			t_indices.append_array([5, 13, 12, 5, 12, 4])
-			t_indices.append_array([7, 15, 14, 7, 14, 6])
-			
-		# Roof
-		if stage >= 4:
-			t_indices.append_array([8, 15, 14, 8, 14, 13, 8, 13, 12, 8, 12, 11, 8, 11, 10, 8, 10, 9])
-			
-		var solid = _solidify(t_verts, t_indices, thick)
-		var flat_mesh = _create_flat_shaded_mesh(solid.verts, solid.indices)
-		
-		var turret = MeshInstance3D.new()
-		turret.mesh = flat_mesh
-		turret.material_override = a_mat
-		enclosure.add_child(turret)
 
-static func _solidify(verts: PackedVector3Array, indices: PackedInt32Array, thickness: float) -> Dictionary:
-	var normals = PackedVector3Array()
-	normals.resize(verts.size())
-	for i in verts.size():
-		normals[i] = Vector3.ZERO
-		
-	for i in range(0, indices.size(), 3):
-		var i0 = indices[i]
-		var i1 = indices[i+1]
-		var i2 = indices[i+2]
-		var v0 = verts[i0]
-		var v1 = verts[i1]
-		var v2 = verts[i2]
-		var n = (v1 - v0).cross(v2 - v0).normalized()
-		normals[i0] += n
-		normals[i1] += n
-		normals[i2] += n
-		
-	for i in normals.size():
-		if normals[i].length_squared() > 0.001:
-			normals[i] = normals[i].normalized()
-		
-	var new_verts = verts.duplicate()
-	for i in verts.size():
-		new_verts.append(verts[i] - normals[i] * thickness)
-		
-	var new_indices = indices.duplicate()
-	var offset = verts.size()
-	for i in range(0, indices.size(), 3):
-		new_indices.append(indices[i+2] + offset)
-		new_indices.append(indices[i+1] + offset)
-		new_indices.append(indices[i] + offset)
-		
-	var edge_counts = {}
-	for i in range(0, indices.size(), 3):
-		for j in range(3):
-			var v_a = indices[i + j]
-			var v_b = indices[i + (j + 1) % 3]
-			var edge_key = str(v_a) + "_" + str(v_b)
-			edge_counts[edge_key] = true
+# Overall armour size multiplier from whichever "how big is this weapon" tweak
+# the module happens to expose. Different weapon families name it differently -
+# guns have calibre, guided missiles a seeker, rocket pods a warhead, cluster
+# weapons a payload - so take whichever is present rather than special-casing
+# type_id, which would silently miss any weapon added later.
+static func _weapon_armor_girth(tweaks: Dictionary) -> float:
+	for key in ["caliber", "seeker_size", "warhead_size", "payload_size", "drum_size"]:
+		if tweaks.has(key):
+			return clampf(float(tweaks[key]), 0.4, 3.0)
+	return 1.0
 
-	for i in range(0, indices.size(), 3):
-		for j in range(3):
-			var v_a = indices[i + j]
-			var v_b = indices[i + (j + 1) % 3]
-			var rev_key = str(v_b) + "_" + str(v_a)
-			if not edge_counts.has(rev_key):
-				var inner_a = v_a + offset
-				var inner_b = v_b + offset
-				
-				new_indices.append(v_a)
-				new_indices.append(inner_b)
-				new_indices.append(v_b)
-				
-				new_indices.append(v_a)
-				new_indices.append(inner_a)
-				new_indices.append(inner_b)
-				
-	return {"verts": new_verts, "indices": new_indices}
+
+# Extra WIDTH only, for weapons that mount several barrels/tubes side by side.
+# Mirrors the same (1 + (n-1)*0.35) spacing the weapon builders themselves use to
+# lay those barrels out, so the plates widen exactly as fast as the guns do.
+static func _weapon_armor_spread(tweaks: Dictionary) -> float:
+	if bool(tweaks.get("multi_barrel", false)):
+		return 1.4
+	for key in ["barrel_count", "tube_count", "grid_size"]:
+		if tweaks.has(key):
+			var n: float = clampf(float(tweaks[key]), 1.0, 8.0)
+			return 1.0 + (n - 1.0) * 0.35
+	return 1.0
+
+
+# One ring of the octagon, ordered so segment i spans ring[i] -> ring[i+1].
+# `c` is the corner cut; a positive c on every ring is what keeps the silhouette
+# a real octagon and stops corner vertices collapsing onto each other.
+static func _octagon_ring(width: float, depth: float, c: float, y: float, origin: Vector3) -> Array:
+	var hw: float = width * 0.5
+	var hd: float = depth * 0.5
+	var cc: float = clampf(c, 0.0, min(hw, hd) - 0.005)
+	if cc < 0.0:
+		cc = 0.0
+	var o := origin + Vector3(0, y, 0)
+	return [
+		o + Vector3( hw, 0, -hd + cc),
+		o + Vector3( hw - cc, 0, -hd),
+		o + Vector3(-hw + cc, 0, -hd),
+		o + Vector3(-hw, 0, -hd + cc),
+		o + Vector3(-hw, 0,  hd - cc),
+		o + Vector3(-hw + cc, 0,  hd),
+		o + Vector3( hw - cc, 0,  hd),
+		o + Vector3( hw, 0,  hd - cc),
+	]
+
+
+# Appends a triangle wound so its normal agrees with `outward`.
+#
+# Every face in the enclosure is emitted through this (or _add_quad), which is
+# why winding cannot go wrong here: the caller states the direction the face
+# should look, geometrically, and the winding is derived from that rather than
+# from hand-ordered index lists. The old builder hand-wrote index lists and got
+# the roof fan backwards.
+static func _add_tri(verts: PackedVector3Array, indices: PackedInt32Array,
+		a: Vector3, b: Vector3, c: Vector3, outward: Vector3) -> void:
+	var n: Vector3 = (b - a).cross(c - a)
+	if n.length_squared() < 1e-14:
+		return
+	var base: int = verts.size()
+	verts.append(a)
+	if n.dot(outward) < 0.0:
+		verts.append(c)
+		verts.append(b)
+	else:
+		verts.append(b)
+		verts.append(c)
+	indices.append(base)
+	indices.append(base + 1)
+	indices.append(base + 2)
+
+
+static func _add_quad(verts: PackedVector3Array, indices: PackedInt32Array,
+		a: Vector3, b: Vector3, c: Vector3, d: Vector3, outward: Vector3) -> void:
+	_add_tri(verts, indices, a, b, c, outward)
+	_add_tri(verts, indices, a, c, d, outward)
+
+
+# The weapon's ACTION volume: the mount and breech clustered around the pintle,
+# which is what a casemate armours. Barrels are meant to protrude through it.
+#
+# Measurement is CLIPPED to a box around the mount rather than trying to
+# classify whole meshes as barrel-or-not:
+#   * horizontally +/- base_size.x * 0.9 on BOTH axes - never base_size.z, which
+#     is barrel-dominated (basic_cannon's z is 2.0 against a 0.6 body),
+#   * vertically base_size.y * 1.15 up from the mounting plane.
+#
+# Clipping is what makes this robust where classification could not be. Every
+# per-mesh test failed on real data: basic_cannon's breech (0.27 x 0.30 x 0.97)
+# is the same shape as its barrel (0.15 x 0.15 x 1.51) to any aspect-ratio rule,
+# and artillery models its barrel TOGETHER with the elevation cradle as a single
+# 0.39 x 2.56 x 3.46 mesh, so there is no mesh to exclude at all - that one mesh
+# is both action and barrel. Clipping simply keeps whichever part of each mesh
+# lies inside the action volume, so the artillery casemate now wraps the breech
+# and carriage and lets the tube run out through it, instead of growing to 3.06
+# tall to swallow the whole elevating mass.
+# Frontmost point (most negative Z, the firing direction) of everything the
+# weapon has built so far. Unclipped, unlike _weapon_housing_bounds - the whole
+# point is to find the muzzle.
+static func _weapon_front_z(parent_node: Node3D) -> float:
+	var front: float = 0.0
+	var found := false
+	for child in parent_node.get_children():
+		if not (child is MeshInstance3D):
+			continue
+		var mi: MeshInstance3D = child
+		if mi.mesh == null:
+			continue
+		var local: AABB = mi.mesh.get_aabb()
+		for sx in [0.0, 1.0]:
+			for sy in [0.0, 1.0]:
+				for sz in [0.0, 1.0]:
+					var p: Vector3 = mi.transform * (local.position + Vector3(
+						local.size.x * sx, local.size.y * sy, local.size.z * sz))
+					if not found or p.z < front:
+						front = p.z
+						found = true
+	return front
+
+
+# girth/spread scale the clip box with the weapon's own tweaks, so a bigger
+# calibre or a wider multi-barrel cluster is still measured in full rather than
+# being cut off by a box sized for the default configuration.
+static func _weapon_housing_bounds(parent_node: Node3D, base_size: Vector3,
+		girth: float = 1.0, spread: float = 1.0) -> AABB:
+	var rx: float = max(base_size.x, 0.05) * 0.9 * girth * spread
+	var rz: float = max(base_size.x, 0.05) * 0.9 * girth
+	var lift: float = max(base_size.y, 0.05) * 1.15 * girth
+	var clip := AABB(Vector3(-rx, 0.0, -rz), Vector3(rx * 2.0, lift, rz * 2.0))
+
+	var found := false
+	var acc := AABB()
+	for child in parent_node.get_children():
+		if not (child is MeshInstance3D):
+			continue
+		var mi: MeshInstance3D = child
+		if mi.mesh == null:
+			continue
+		var local := mi.mesh.get_aabb()
+		var ext: Vector3 = local.size
+		# Enclosing box of the mesh in the module's own space.
+		var box := AABB()
+		var first := true
+		for sx in [0.0, 1.0]:
+			for sy in [0.0, 1.0]:
+				for sz in [0.0, 1.0]:
+					var corner: Vector3 = mi.transform * (local.position + Vector3(
+						ext.x * sx, ext.y * sy, ext.z * sz))
+					if first:
+						box = AABB(corner, Vector3.ZERO)
+						first = false
+					else:
+						box = box.expand(corner)
+		if not clip.intersects(box):
+			continue
+		var kept := clip.intersection(box)
+		if kept.size.x <= 0.0001 or kept.size.z <= 0.0001:
+			continue
+		if not found:
+			acc = kept
+			found = true
+		else:
+			acc = acc.merge(kept)
+
+	if not found:
+		return AABB(Vector3(-base_size.x * 0.5, 0.0, -base_size.x * 0.5),
+			Vector3(base_size.x, base_size.y, base_size.x))
+	# A housing with no measurable height would give a zero-height enclosure.
+	if acc.size.y < 0.01:
+		acc.size.y = max(base_size.y * 0.5, 0.05)
+	return acc
+
 
 static func _create_flat_shaded_mesh(verts: PackedVector3Array, indices: PackedInt32Array) -> ArrayMesh:
 	var flat_verts = PackedVector3Array()

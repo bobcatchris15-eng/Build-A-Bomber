@@ -2119,3 +2119,23 @@ func _apply_mirror_flip(module: Node3D):
 			continue
 		child.transform = Transform3D(_MIRROR_X * child.transform.basis, _MIRROR_X * child.transform.origin)
 		child.set_meta("_mirrored", true)
+		_compensate_mirrored_culling(child)
+
+# _MIRROR_X has determinant -1, so every mesh under a mirrored child is rendered
+# with its triangle winding effectively reversed - front faces become back faces
+# and get culled. The result is a module that looks hollow and inside-out: you
+# see through the near surface into the far one. Godot does not compensate for
+# this automatically, and it is most obvious on thin open shells like the turret
+# up-armour plates, where there is no second surface behind to hide it.
+#
+# Inverting cull_mode on the mirrored copies cancels the flip exactly. Each mesh
+# here carries its own material_override (visual_builder.gd builds a fresh
+# StandardMaterial3D per instance), so this cannot leak onto the unmirrored side.
+func _compensate_mirrored_culling(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node
+		var mat = mi.material_override
+		if mat is BaseMaterial3D:
+			mat.cull_mode = BaseMaterial3D.CULL_FRONT
+	for child in node.get_children():
+		_compensate_mirrored_culling(child)
