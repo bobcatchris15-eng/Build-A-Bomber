@@ -189,6 +189,22 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 						vert = vert - norm * (sdf_val - desired_offset)
 						vert = vert.clamp(cell_min, cell_max)
 
+					# Constructed Orthogonal Alignment: for constructed hulls (crystallinity < 0.5),
+					# align vertices on near-cardinal surfaces to flatten decks and side walls.
+					if crystallinity < 0.5 and not normals.is_empty():
+						var avg_n := Vector3.ZERO
+						for n in normals:
+							avg_n += n
+						avg_n = avg_n.normalized()
+						avg_n = _snap_constructed_normal(avg_n, crystallinity)
+
+						if abs(avg_n.x) > 0.85:
+							vert.x = mass_point.x
+						elif abs(avg_n.y) > 0.85:
+							vert.y = mass_point.y
+						elif abs(avg_n.z) > 0.85:
+							vert.z = mass_point.z
+
 					dual_vertices[cell_idx] = vert
 
 	if dual_vertices.is_empty():
@@ -300,7 +316,8 @@ static func _snap_constructed_normal(n: Vector3, crystallinity: float) -> Vector
 	if crystallinity >= 1.0 or n.length_squared() < 1e-6:
 		return n
 
-	var snap_threshold_deg: float = lerp(25.0, 0.0, clamp(crystallinity, 0.0, 1.0))
+	# Wider angular coverage (35 degrees) for constructed hulls (crystallinity = 0.0)
+	var snap_threshold_deg: float = lerp(35.0, 0.0, clamp(crystallinity, 0.0, 1.0))
 	if snap_threshold_deg <= 0.001:
 		return n
 
@@ -355,7 +372,23 @@ static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, cryst
 		if n.length_squared() < 1e-10:
 			continue
 		n = n.normalized()
-		n = _snap_constructed_normal(n, crystallinity)
+
+		# Hard snapping for constructed hulls (crystallinity < 0.5)
+		if crystallinity < 0.5:
+			if abs(n.y) < 0.25:
+				n.y = 0.0
+				if abs(n.x) > abs(n.z):
+					n.x = sign(n.x)
+					n.z = 0.0
+				else:
+					n.z = sign(n.z)
+					n.x = 0.0
+			elif abs(n.y) > 0.85:
+				n = Vector3(0, sign(n.y), 0)
+			else:
+				n = _snap_constructed_normal(n, crystallinity)
+		else:
+			n = _snap_constructed_normal(n, crystallinity)
 
 		st.set_normal(n)
 		st.add_vertex(p0)
