@@ -630,22 +630,76 @@ const TERRAIN_TEXTURE_DIR = "res://assets/textures/terrain/"
 const TERRAIN_TILE_WORLD_SIZE: float = 6.0
 
 static var _terrain_texture_cache: Dictionary = {}
+# surface_type -> Array of variant suffixes that actually exist on disk
+# (always includes "" for the procedural bake). Probed once per surface.
+static var _terrain_variant_cache: Dictionary = {}
 
-static func _get_terrain_textures(surface_type: String) -> Dictionary:
-	if _terrain_texture_cache.has(surface_type):
-		return _terrain_texture_cache[surface_type]
-	var base = TERRAIN_TEXTURE_DIR + surface_type
+# Every surface type has a base bake ({surface}_albedo.png) plus however many
+# photographic variants tools/process_flow_terrain_textures.gd has produced
+# ({surface}_v1_albedo.png and up). Zones pick between them so that a map
+# isn't one identical 6-unit tile stamped out end to end - at RTS zoom the
+# camera holds dozens of repeats at once, and the regularity of the grid is
+# far more obvious than any individual tile's quality.
+#
+# The list is DISCOVERED rather than declared, so dropping new variant PNGs in
+# (or deleting ones that don't work out) changes the amount of variety with no
+# code change here.
+#
+# Variant 0 (suffix "", the procedural bake from
+# tools/generate_terrain_textures.gd) is used ONLY when no photographic
+# variant exists. It is deliberately NOT mixed in alongside them: a side-by-
+# side grid capture of all four variants per surface made the quality gap
+# obvious - the procedural marsh reads as blue blobs on green and the
+# procedural snow_mud as pen scribbles, next to actual photographic ground.
+# Blending them together doesn't average to something in between, it just
+# drags a good surface back toward the clip-art one and reintroduces the
+# regular procedural pattern the blend exists to hide. So it stays as the
+# guaranteed-present fallback for surfaces no plate has been produced for
+# (blue_water, shallow_water, ice), and nothing more.
+const MAX_TERRAIN_VARIANTS = 8
+
+static func _get_terrain_variants(surface_type: String) -> Array:
+	if _terrain_variant_cache.has(surface_type):
+		return _terrain_variant_cache[surface_type]
+	var found: Array = []
+	for n in range(1, MAX_TERRAIN_VARIANTS + 1):
+		var suffix = "_v%d" % n
+		if ResourceLoader.exists(TERRAIN_TEXTURE_DIR + surface_type + suffix + "_albedo.png"):
+			found.append(suffix)
+	if found.is_empty():
+		found = [""]
+	_terrain_variant_cache[surface_type] = found
+	return found
+
+# Deterministic variant choice from a world position. Seeded from the zone's
+# own centre rather than a global RNG for the same reason the coastline wobble
+# above is: map geometry has to look identical every time a map loads, or a
+# saved game / rejoined match would repaint the ground. Quantised to whole
+# units first so floating-point noise in a zone centre can't flip the choice
+# between two runs.
+static func _variant_for_position(surface_type: String, x: float, z: float) -> String:
+	var variants = _get_terrain_variants(surface_type)
+	if variants.size() <= 1:
+		return ""
+	var seed_val = hash("%s:%d:%d" % [surface_type, int(round(x)), int(round(z))])
+	return variants[abs(seed_val) % variants.size()]
+
+static func _get_terrain_textures(surface_type: String, variant: String = "") -> Dictionary:
+	var key = surface_type + variant
+	if _terrain_texture_cache.has(key):
+		return _terrain_texture_cache[key]
+	var base = TERRAIN_TEXTURE_DIR + surface_type + variant
 	var textures = {
 		"albedo": load(base + "_albedo.png"),
 		"normal": load(base + "_normal.png"),
 		"roughness": load(base + "_roughness.png"),
 	}
-	_terrain_texture_cache[surface_type] = textures
+	_terrain_texture_cache[key] = textures
 	return textures
 
-static func _build_terrain_material(surface_type: String, footprint: Vector2, tint: Color = Color.WHITE) -> StandardMaterial3D:
+static func _build_terrain_material(surface_type: String, footprint: Vector2, tint: Color = Color.WHITE, variant: String = "") -> StandardMaterial3D:
 	var mat = StandardMaterial3D.new()
-	var tex = _get_terrain_textures(surface_type)
+	var tex = _get_terrain_textures(surface_type, variant)
 	mat.albedo_texture = tex.albedo
 	mat.albedo_color = tint
 	mat.roughness_texture = tex.roughness
@@ -672,15 +726,36 @@ static func build_ground_material(ground_color: Color, footprint: Vector2) -> St
 # build_ground_visual_mesh()'s dense heightmap mesh, which bakes its own
 # absolute-world-position UVs directly into the mesh (see that function) -
 # no footprint-relative uv1_scale needed on the material itself.
-static func build_ground_material_heightmap(ground_color: Color) -> StandardMaterial3D:
-	var mat = StandardMaterial3D.new()
-	var tex = _get_terrain_textures("grassland")
-	mat.albedo_texture = tex.albedo
-	mat.albedo_color = ground_color.lightened(0.55)
-	mat.roughness_texture = tex.roughness
-	mat.roughness = 1.0
-	mat.normal_enabled = true
-	mat.normal_texture = tex.normal
+#
+# This one uses the multi-variant blend shader rather than a plain
+# StandardMaterial3D, because it's the single worst repetition offender in the
+# game: one 6-unit tile stretched over the entire map. See
+# shaders/terrain_ground.gdshader for why the blend is a fade driven by
+# low-frequency noise rather than a hard per-patch choice.
+#
+# Returns Material, not StandardMaterial3D - callers assign it straight to
+# material_override, which is typed Material anyway.
+const GROUND_BLEND_SHADER = preload("res://shaders/terrain_ground.gdshader")
+
+static func build_ground_material_heightmap(ground_color: Color) -> Material:
+	return build_blended_surface_material("grassland", ground_color.lightened(0.55))
+
+# Builds a variant-blending material for any surface type. Falls back to
+# whatever variants actually exist - a surface with only its procedural bake
+# gets variant_count 1 and behaves exactly as before, so this is safe to point
+# at a surface no photographic plate has been produced for yet.
+static func build_blended_surface_material(surface_type: String, tint: Color = Color.WHITE) -> Material:
+	var variants = _get_terrain_variants(surface_type)
+	var mat = ShaderMaterial.new()
+	mat.shader = GROUND_BLEND_SHADER
+	var count = mini(variants.size(), 3)
+	mat.set_shader_parameter("variant_count", count)
+	for i in range(count):
+		var tex = _get_terrain_textures(surface_type, variants[i])
+		mat.set_shader_parameter("albedo_%d" % i, tex.albedo)
+		mat.set_shader_parameter("normal_%d" % i, tex.normal)
+		mat.set_shader_parameter("rough_%d" % i, tex.roughness)
+	mat.set_shader_parameter("ground_tint", tint)
 	return mat
 
 # Skirmish refinement pass: replaces the old flat single BoxMesh "Ground"
@@ -774,7 +849,10 @@ static func _spawn_surface_zone(zone: Dictionary, parent: Node3D):
 	var footprint = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
 	plane.size = footprint
 	mesh_inst.mesh = plane
-	mesh_inst.material_override = _build_terrain_material(zone.get("surface_type", ""), footprint)
+	var surface_type = zone.get("surface_type", "")
+	mesh_inst.material_override = _build_terrain_material(
+		surface_type, footprint, Color.WHITE,
+		_variant_for_position(surface_type, zone.center.x, zone.center.z))
 	parent.add_child(mesh_inst)
 	mesh_inst.global_position = Vector3(zone.center.x, 0.03, zone.center.z)
 

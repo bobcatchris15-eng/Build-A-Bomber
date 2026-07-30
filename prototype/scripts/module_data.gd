@@ -28,6 +28,10 @@ func get_hp() -> float:
 	var hp = base_hp + (base_hp * (vol - 1.0) * GlobalConfig.hp_scale_factor)
 	if tweaks.has("cooling_jacket"):
 		hp *= tweaks["cooling_jacket"]
+	if tweaks.has("protectedness"):
+		var p = tweaks["protectedness"]
+		if typeof(p) == TYPE_FLOAT or typeof(p) == TYPE_INT:
+			hp *= 1.0 + (p * 0.25)
 	return GlobalConfig.round_to_half(hp)
 
 func get_weight() -> float:
@@ -51,6 +55,9 @@ func get_weight() -> float:
 			weight *= 1.25
 		elif tweak_name == "launch_catapult":
 			weight *= val
+		elif tweak_name == "protectedness":
+			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
+				weight *= 1.0 + (val * 0.15)
 
 	return GlobalConfig.round_to_half(weight)
 	
@@ -83,6 +90,10 @@ func get_cost() -> Vector2i:
 		elif tweak_name == "launch_catapult":
 			m = int(m * val)
 			c = int(c * val)
+		elif tweak_name == "protectedness":
+			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
+				m = int(m * (1.0 + (val * 0.20)))
+				c = int(c * (1.0 + (val * 0.20)))
 
 	return Vector2i(m, c)
 

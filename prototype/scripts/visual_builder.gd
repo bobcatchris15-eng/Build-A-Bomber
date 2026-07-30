@@ -249,6 +249,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			"buoyant_envelope": _build_buoyant_envelope(parent_node, base_size, base_color, tweaks)
 			"screw_drive": _build_screw_drive(parent_node, base_size, base_color, tweaks)
 		_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
+
 		return
 
 
@@ -1912,6 +1913,11 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 
 	# Apply deformations to the newly constructed meshes based on the tweaks
 	_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
+
+	var protectedness = tweaks.get("protectedness", 0.0)
+	if protectedness > 0.0 and type_id not in LOCOMOTION_MODULAR_TYPES and type_id != "drone_carrier" and type_id != "resource_harvester" and type_id != "repair_array" and type_id != "sensor_suite" and not type_id.begins_with("structural_"):
+		_build_weapon_armor(parent_node, int(protectedness), base_size, base_color)
+
 
 
 # Dispatcher for GlobalConfig.enable_animated_monolithic_parts: attaches the
@@ -3746,3 +3752,223 @@ static func _compute_smooth_normals(verts: PackedVector3Array, indices: PackedIn
 		normals[i] = normals[i].normalized()
 
 	return normals
+
+
+
+
+static func _build_weapon_armor(parent_node: Node3D, stage: int, base_size: Vector3, base_color: Color):
+	if stage <= 0:
+		return
+		
+	var w = base_size.x
+	var h = base_size.y
+	var d = base_size.z
+	
+	var a_mat = StandardMaterial3D.new()
+	a_mat.albedo_color = base_color.darkened(0.2)
+	a_mat.metallic = 0.5
+	a_mat.roughness = 0.5
+
+	var h_plate = h * 0.7 
+	var S = h_plate * 0.57735 
+	
+	var w_base = w * 1.3
+	var d_base = d * 0.6
+	var c_base = 0.0
+	if stage >= 4:
+		c_base = w_base * 0.2
+		
+	var w_top = w_base - 2 * S
+	var d_top = d_base - 2 * S
+	
+	if w_top < 0.1: w_top = 0.1
+	if d_top < 0.1: d_top = 0.1
+	
+	var c_top = c_base + S * 0.41421356
+	
+	var max_c_base_w = w_base / 2.0 - 0.02
+	var max_c_base_d = d_base / 2.0 - 0.02
+	var max_c_base = min(max_c_base_w, max_c_base_d)
+	if max_c_base < 0.0: max_c_base = 0.0
+	if c_base > max_c_base: c_base = max_c_base
+	
+	var max_c_top_w = w_top / 2.0 - 0.02
+	var max_c_top_d = d_top / 2.0 - 0.02
+	var max_c_top = min(max_c_top_w, max_c_top_d)
+	if max_c_top < 0.0: max_c_top = 0.0
+	if c_top > max_c_top: c_top = max_c_top
+	
+	# Generate ALL vertices for the turret geometry
+	var t_verts = PackedVector3Array()
+	var hw_b = w_base / 2.0
+	var hd_b = d_base / 2.0
+	t_verts.append(Vector3( hw_b, 0, -hd_b + c_base )) # 0
+	t_verts.append(Vector3( hw_b - c_base, 0, -hd_b )) # 1
+	t_verts.append(Vector3(-hw_b + c_base, 0, -hd_b )) # 2
+	t_verts.append(Vector3(-hw_b, 0, -hd_b + c_base )) # 3
+	t_verts.append(Vector3(-hw_b, 0,  hd_b - c_base )) # 4
+	t_verts.append(Vector3(-hw_b + c_base, 0,  hd_b )) # 5
+	t_verts.append(Vector3( hw_b - c_base, 0,  hd_b )) # 6
+	t_verts.append(Vector3( hw_b, 0,  hd_b - c_base )) # 7
+	
+	var hw_t = w_top / 2.0
+	var hd_t = d_top / 2.0
+	t_verts.append(Vector3( hw_t, h_plate, -hd_t + c_top )) # 8
+	t_verts.append(Vector3( hw_t - c_top, h_plate, -hd_t )) # 9
+	t_verts.append(Vector3(-hw_t + c_top, h_plate, -hd_t )) # 10
+	t_verts.append(Vector3(-hw_t, h_plate, -hd_t + c_top )) # 11
+	t_verts.append(Vector3(-hw_t, h_plate,  hd_t - c_top )) # 12
+	t_verts.append(Vector3(-hw_t + c_top, h_plate,  hd_t )) # 13
+	t_verts.append(Vector3( hw_t - c_top, h_plate,  hd_t )) # 14
+	t_verts.append(Vector3( hw_t, h_plate,  hd_t - c_top )) # 15
+
+	var thick = 0.04 * d
+
+	# Stage 1: Just the Front Plate
+	if stage == 1:
+		var mantlet_pivot = Node3D.new()
+		mantlet_pivot.name = "MantletPivot"
+		mantlet_pivot.set_script(load("res://scripts/mantlet_armor.gd"))
+		mantlet_pivot.position = Vector3(0, h * 0.15, 0)
+		parent_node.add_child(mantlet_pivot)
+		
+		var m_indices = PackedInt32Array([2, 10, 9, 2, 9, 1])
+		
+		var solid = _solidify(t_verts, m_indices, thick)
+		var flat_mesh = _create_flat_shaded_mesh(solid.verts, solid.indices)
+		
+		var mantlet = MeshInstance3D.new()
+		mantlet.mesh = flat_mesh
+		mantlet.material_override = a_mat
+		mantlet_pivot.add_child(mantlet)
+
+	# Stages 2-4: The Full Unified Turret Box
+	if stage >= 2:
+		var enclosure = Node3D.new()
+		enclosure.name = "ArmorEnclosure"
+		enclosure.set_script(load("res://scripts/turret_armor.gd"))
+		enclosure.position = Vector3(0, h * 0.15, 0)
+		parent_node.add_child(enclosure)
+
+		var t_indices = PackedInt32Array()
+		
+		# Front plate is integrated into the turret
+		t_indices.append_array([2, 10, 9, 2, 9, 1])
+		# Left wall
+		t_indices.append_array([4, 12, 11, 4, 11, 3])
+		# Right wall
+		t_indices.append_array([0, 8, 15, 0, 15, 7])
+		# Front corners
+		t_indices.append_array([1, 9, 8, 1, 8, 0])
+		t_indices.append_array([3, 11, 10, 3, 10, 2])
+			
+		# Back wall and Back corners
+		if stage >= 3:
+			t_indices.append_array([6, 14, 13, 6, 13, 5])
+			t_indices.append_array([5, 13, 12, 5, 12, 4])
+			t_indices.append_array([7, 15, 14, 7, 14, 6])
+			
+		# Roof
+		if stage >= 4:
+			t_indices.append_array([8, 15, 14, 8, 14, 13, 8, 13, 12, 8, 12, 11, 8, 11, 10, 8, 10, 9])
+			
+		var solid = _solidify(t_verts, t_indices, thick)
+		var flat_mesh = _create_flat_shaded_mesh(solid.verts, solid.indices)
+		
+		var turret = MeshInstance3D.new()
+		turret.mesh = flat_mesh
+		turret.material_override = a_mat
+		enclosure.add_child(turret)
+
+static func _solidify(verts: PackedVector3Array, indices: PackedInt32Array, thickness: float) -> Dictionary:
+	var normals = PackedVector3Array()
+	normals.resize(verts.size())
+	for i in verts.size():
+		normals[i] = Vector3.ZERO
+		
+	for i in range(0, indices.size(), 3):
+		var i0 = indices[i]
+		var i1 = indices[i+1]
+		var i2 = indices[i+2]
+		var v0 = verts[i0]
+		var v1 = verts[i1]
+		var v2 = verts[i2]
+		var n = (v1 - v0).cross(v2 - v0).normalized()
+		normals[i0] += n
+		normals[i1] += n
+		normals[i2] += n
+		
+	for i in normals.size():
+		if normals[i].length_squared() > 0.001:
+			normals[i] = normals[i].normalized()
+		
+	var new_verts = verts.duplicate()
+	for i in verts.size():
+		new_verts.append(verts[i] - normals[i] * thickness)
+		
+	var new_indices = indices.duplicate()
+	var offset = verts.size()
+	for i in range(0, indices.size(), 3):
+		new_indices.append(indices[i+2] + offset)
+		new_indices.append(indices[i+1] + offset)
+		new_indices.append(indices[i] + offset)
+		
+	var edge_counts = {}
+	for i in range(0, indices.size(), 3):
+		for j in range(3):
+			var v_a = indices[i + j]
+			var v_b = indices[i + (j + 1) % 3]
+			var edge_key = str(v_a) + "_" + str(v_b)
+			edge_counts[edge_key] = true
+
+	for i in range(0, indices.size(), 3):
+		for j in range(3):
+			var v_a = indices[i + j]
+			var v_b = indices[i + (j + 1) % 3]
+			var rev_key = str(v_b) + "_" + str(v_a)
+			if not edge_counts.has(rev_key):
+				var inner_a = v_a + offset
+				var inner_b = v_b + offset
+				
+				new_indices.append(v_a)
+				new_indices.append(inner_b)
+				new_indices.append(v_b)
+				
+				new_indices.append(v_a)
+				new_indices.append(inner_a)
+				new_indices.append(inner_b)
+				
+	return {"verts": new_verts, "indices": new_indices}
+
+static func _create_flat_shaded_mesh(verts: PackedVector3Array, indices: PackedInt32Array) -> ArrayMesh:
+	var flat_verts = PackedVector3Array()
+	var flat_indices = PackedInt32Array()
+	var flat_normals = PackedVector3Array()
+	
+	for i in range(0, indices.size(), 3):
+		var v0 = verts[indices[i]]
+		var v1 = verts[indices[i+1]]
+		var v2 = verts[indices[i+2]]
+		var n = (v1 - v0).cross(v2 - v0).normalized()
+		
+		var start_idx = flat_verts.size()
+		flat_verts.append(v0)
+		flat_verts.append(v1)
+		flat_verts.append(v2)
+		flat_normals.append(n)
+		flat_normals.append(n)
+		flat_normals.append(n)
+		
+		flat_indices.append(start_idx)
+		flat_indices.append(start_idx + 1)
+		flat_indices.append(start_idx + 2)
+		
+	var arrays = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = flat_verts
+	arrays[Mesh.ARRAY_NORMAL] = flat_normals
+	arrays[Mesh.ARRAY_INDEX] = flat_indices
+	
+	var mesh = ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh

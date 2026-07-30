@@ -801,6 +801,85 @@ static func _build_catalog_literal() -> Dictionary:
 
 	return catalog
 
+# --- Flavor text (VISUAL_ART_DIRECTION.md 1.2) ---
+# The art doc restricts "where goofy lives" to DETAIL SCALE only, never
+# silhouette or color-blocking. Copy is the cheapest detail-scale channel in
+# the project - it costs no art production and no shader work - so the tone
+# target (straight-faced military-industrial surface, cartoon absurdity
+# underneath, per Chris's Starship Troopers / Tremors reference) lands here
+# first, ahead of the decal atlas that will eventually carry the same voice
+# visually.
+#
+# Voice rules, so this stays consistent as modules get added:
+#  - Written as procurement/field-manual copy by someone with no sense of
+#    humor about their job. The joke is never acknowledged by the writer.
+#  - The absurdity is a FACT stated flatly, not a punchline ("rated for
+#    continuous fire well past the point the crew compartment is habitable"),
+#    never a wink at the player.
+#  - Bureaucratic register: ratings, clearances, advisories, revisions,
+#    liability-shaped hedging. Passive voice is correct here.
+#  - One line, roughly <90 chars so the tooltip card doesn't reflow.
+#
+# Kept as a separate keyed block rather than a "flavor" key inside each of
+# the 40 catalog literals above: one contiguous, reviewable place to tune
+# voice, and it can't perturb the stat data the sim reads.
+const MODULE_FLAVOR = {
+	# Ballistic
+	"basic_cannon": "Standard issue. Accurate, dependable, and entirely unremarkable in every after-action report.",
+	"heavy_machine_gun": "Suppression rated. Barrel life is measured in engagements, not rounds. Spares are your problem.",
+	"rotary_cannon": "Sustained fire well past the point the crew compartment remains habitable.",
+	"gauss_railgun": "Capacitor discharge may interfere with nearby avionics, radios, and crew fillings.",
+	"artillery": "Indirect fire. Observer required. Do not attempt to observe from the impact area.",
+	"mortar_array": "Cheap, arcing, and imprecise. Effectiveness scales with quantity rather than skill.",
+	# Guided
+	"guided_missile": "Operator must maintain line of sight until impact. Operator discomfort is anticipated.",
+	"missile_pod": "Fires everything at once. There is no partial-salvo setting. This was a design decision.",
+	"drone_carrier": "Drones are considered expendable. Recovery is not a supported operation.",
+	"cluster_dispenser": "Wide dispersal pattern. Confirm no friendly units are downrange, or thereabouts.",
+	# Energy / exotic
+	"flamethrower": "Short range by design. Crews are advised to be certain about wind direction.",
+	"tesla_coil": "Arcs to the nearest conductive mass, which is not always the intended target.",
+	"ion_cannon": "Draws heavily from base power. Scheduling with the generator crew is recommended.",
+	"heavy_laser": "Continuous beam. Performance degrades in dust, smoke, rain, and general atmosphere.",
+	"plasma_lobber": "Containment is temporary by design. Everything downrange is briefly reclassified.",
+	# Point defense
+	"ciws": "Engages incoming ordnance automatically. Do not walk in front of it while powered.",
+	"pd_laser": "Silent, precise, and invisible. Confirming that it is working is an ongoing challenge.",
+	"flak_cannon": "Fills the sky with fragments. Aircraft are discouraged from entering that sky.",
+	# Support
+	"resource_harvester": "Extracts and hauls. Slow, unarmed, and statistically the first thing shot at.",
+	"repair_array": "Field repair. Restores structure. Does not restore crews, morale, or paperwork.",
+	"sensor_suite": "Extends detection range. Emits constantly, and is therefore also easily detected.",
+	"armor_plating": "Additional plate. Adds mass. Physics has been consulted and remains unsympathetic.",
+	# Power
+	"fusion_generator": "Supplies base power. Rated safe. Rating issued by the manufacturer.",
+	"capacitor_bank": "Stores surplus power for demand spikes. Discharges spectacularly when destroyed.",
+	# Locomotion
+	"wheels": "Fast on hard ground. Enthusiasm for soft ground is not shared by the wheels.",
+	"tracked_treads": "Slow, heavy, and indifferent to terrain. Throws a track at the worst opportunity.",
+	"helicopter_rotors": "Vertical lift. Loud enough to announce arrival well ahead of arrival.",
+	"hover_engine": "Ignores ground conditions entirely. Also ignores most attempts at braking.",
+	"legs": "Walks over what others drive around. Complexity per kilometre is considerable.",
+	"fixed_wing_engine": "Requires forward speed to stay airborne. Hovering is not among the options.",
+	"ornithopter_wing": "Flaps. Reviewed twice by engineering. Approved twice. Nobody is entirely sure why.",
+	"naval_propeller": "Water only. On land it is ballast with a maintenance schedule.",
+	"buoyant_envelope": "Lighter than air, slower than everything, and a generously sized target.",
+	"screw_drive": "Amphibious augers. Crosses land and water equally badly, which counts as versatility.",
+	# Structural
+	"structural_block": "Structural filler. Holds things apart at the distance you specified.",
+	"structural_dome": "Turret base. Rotates. That is the entire specification.",
+	"structural_slab": "Flat plate. Stops things. Stops fewer things after it has stopped some things.",
+	"structural_wedge": "Angled breech. Deflects hits that arrive at the angle you were hoping for.",
+	"structural_girder": "Load-bearing span. Rated for loads well beyond anything you should be mounting.",
+	"structural_i_beam": "Frame member. Unglamorous, load-bearing, and quietly holding your design together.",
+}
+
+# Empty string when a module has no authored line - callers append
+# conditionally, so a missing entry degrades to "no flavor row" rather than
+# a blank row or an error.
+static func get_module_flavor(type_id: String) -> String:
+	return MODULE_FLAVOR.get(type_id, "")
+
 static func is_foundation(type_id: String) -> bool:
 	var data = get_module_data(type_id)
 	return data.get("is_foundation", false)

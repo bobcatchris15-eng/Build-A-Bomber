@@ -73,6 +73,9 @@ pan_speed = 0.02
 [node name="BackButton" type="Button" parent="CanvasLayer"]
 offset_left = 10
 offset_top = 10
+offset_right = 190
+offset_bottom = 54
+theme_override_font_sizes/font_size = 16
 text = "< Back to Menu"
 
 [node name="LeftPanel" type="Panel" parent="CanvasLayer"]
@@ -87,8 +90,13 @@ offset_bottom = -40
 color = Color(0.08, 0.1, 0.12, 0.85)
 
 [node name="PrimitiveLabel" type="Label" parent="CanvasLayer"]
-offset_left = 10
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.0
+anchor_right = 0.2
 offset_top = 68
+offset_bottom = 92
+theme_override_font_sizes/font_size = 16
 text = "Primitives"
 horizontal_alignment = 1
 
@@ -104,6 +112,7 @@ offset_bottom = -40
 [node name="primitive_palette" type="VBoxContainer" parent="CanvasLayer/PrimitiveScroller"]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_override_constants/separation = 6
 
 [node name="RightPanel" type="Panel" parent="CanvasLayer"]
 layout_mode = 3
@@ -117,8 +126,13 @@ offset_bottom = -40
 color = Color(0.08, 0.1, 0.12, 0.85)
 
 [node name="PropertiesLabel" type="Label" parent="CanvasLayer"]
-offset_left = 810
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.8
+anchor_right = 1.0
 offset_top = 68
+offset_bottom = 92
+theme_override_font_sizes/font_size = 16
 text = "Properties"
 horizontal_alignment = 1
 
@@ -128,12 +142,97 @@ anchors_preset = 15
 anchor_left = 0.8
 anchor_right = 1.0
 anchor_top = 0.1
-anchor_bottom = 0.9
-offset_bottom = -40
+anchor_bottom = 0.58
+offset_bottom = -10
 
 [node name="properties_panel" type="VBoxContainer" parent="CanvasLayer/PropertiesScroller"]
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="HullActionsLabel" type="Label" parent="CanvasLayer"]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.8
+anchor_right = 1.0
+anchor_top = 0.58
+anchor_bottom = 0.58
+offset_top = 4
+offset_bottom = 28
+theme_override_font_sizes/font_size = 16
+text = "Hull Actions"
+horizontal_alignment = 1
+
+[node name="HullActionsScroller" type="ScrollContainer" parent="CanvasLayer"]
+layout_mode = 3
+anchors_preset = 15
+anchor_left = 0.8
+anchor_right = 1.0
+anchor_top = 0.6
+anchor_bottom = 1.0
+offset_left = 10
+offset_right = -10
+offset_bottom = -10
+
+[node name="HullActionsPanel" type="VBoxContainer" parent="CanvasLayer/HullActionsScroller"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="SmoothnessLabel" type="Label" parent="CanvasLayer/HullActionsScroller/HullActionsPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Smoothness"
+
+[node name="SmoothnessSlider" type="HSlider" parent="CanvasLayer/HullActionsScroller/HullActionsPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 32)
+min_value = 0.0
+max_value = 1.0
+step = 0.01
+value = 0.15
+
+[node name="BakeQualityLabel" type="Label" parent="CanvasLayer/HullActionsScroller/HullActionsPanel"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "Bake Quality"
+
+[node name="BakeQualityOption" type="OptionButton" parent="CanvasLayer/HullActionsScroller/HullActionsPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 44)
+theme_override_font_sizes/font_size = 16
+
+[node name="ActionsSeparator" type="HSeparator" parent="CanvasLayer/HullActionsScroller/HullActionsPanel"]
+layout_mode = 2
+
+[node name="SaveAssemblyButton" type="Button" parent="CanvasLayer/HullActionsScroller/HullActionsPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 44)
+theme_override_font_sizes/font_size = 15
+text = "Save Assembly"
+
+[node name="LoadAssemblyButton" type="Button" parent="CanvasLayer/HullActionsScroller/HullActionsPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 44)
+theme_override_font_sizes/font_size = 15
+text = "Load Assembly"
+
+[node name="ClearButton" type="Button" parent="CanvasLayer/HullActionsScroller/HullActionsPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 48)
+theme_override_font_sizes/font_size = 17
+text = "Clear"
+
+[node name="ExportButton" type="Button" parent="CanvasLayer/HullActionsScroller/HullActionsPanel"]
+layout_mode = 2
+size_flags_horizontal = 3
+custom_minimum_size = Vector2(0, 56)
+theme_override_font_sizes/font_size = 18
+text = "Export Hull"
 
 [node name="BottomBar" type="Panel" parent="CanvasLayer"]
 layout_mode = 3
@@ -147,17 +246,12 @@ offset_bottom = 0
 color = Color(0.08, 0.1, 0.12, 0.9)
 
 [node name="StatusLabel" type="Label" parent="CanvasLayer/BottomBar"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 offset_left = 100
-offset_top = 10
+offset_right = -20
+theme_override_font_sizes/font_size = 15
 text = "Ready"
 vertical_alignment = 1
-
-[node name="ClearButton" type="Button" parent="CanvasLayer/BottomBar"]
-offset_left = 700
-offset_top = 10
-text = "Clear"
-
-[node name="ExportButton" type="Button" parent="CanvasLayer/BottomBar"]
-offset_left = 870
-offset_top = 10
-text = "Export Hull"

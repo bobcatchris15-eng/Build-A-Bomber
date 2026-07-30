@@ -134,11 +134,14 @@ static func _try_load_hull(dir_path: String, stem: String, is_mod: bool) -> void
 
 	validated["category"] = "hull" # never trusted from the sidecar - see class header
 
-	# A hull needs SOME shape: either a mesh beside it or a declared primitive.
+	# A hull needs SOME shape: a mesh beside it (.glb, or a baked .res from
+	# sdf_mesh_baker.gd/hull_builder.gd's export) or a declared primitive.
 	# Neither is not fatal (module_placer falls back to a plain box), but it is
 	# almost always a mistake worth surfacing.
-	if not validated.has("primitive_shape") and not FileAccess.file_exists("%s/%s.glb" % [dir_path, stem]):
-		push_warning("HullLoader: '%s' has neither a matching .glb nor a \"primitive_shape\" - it will render as a plain box" % json_path)
+	if not validated.has("primitive_shape") \
+			and not FileAccess.file_exists("%s/%s.glb" % [dir_path, stem]) \
+			and not FileAccess.file_exists("%s/%s.res" % [dir_path, stem]):
+		push_warning("HullLoader: '%s' has neither a matching .glb/.res nor a \"primitive_shape\" - it will render as a plain box" % json_path)
 
 	if _cache.has(stem):
 		if is_mod:

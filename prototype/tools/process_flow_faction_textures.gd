@@ -51,6 +51,59 @@ func _box_blur(field: Array, size: int, radius: int) -> Array:
 			v_pass[y * size + x] = total / float(radius * 2 + 1)
 	return v_pass
 
+# Make an arbitrary image tile by mirror-blending its borders, in place.
+#
+# Why mirror-blend rather than the more commonly cited "offset by half and
+# heal the cross seam": offset-and-heal needs an inpainting step to hide the
+# seam it deliberately creates, and anything cheap enough to write here
+# (blur, clone) leaves a smudged band. Mirror-blending instead makes the two
+# opposite edges converge on the SAME value, so the match is exact by
+# construction rather than by repair.
+#
+# The construction: within a band of `band` pixels at each edge, blend each
+# pixel toward its mirror on the opposite edge, with the blend weight ramping
+# from 0.5 exactly at the edge down to 0.0 at the inner limit of the band.
+# At x=0 the result is 0.5*px(0) + 0.5*px(W-1); at x=W-1 it's
+# 0.5*px(W-1) + 0.5*px(0). Those are identical, so column 0 and column W-1
+# match exactly - which is precisely the definition of tiling in X. The ramp
+# means the correction fades out smoothly rather than ending in a hard line
+# of its own.
+#
+# Cost: the blend does soften detail within the band, so `band` is a
+# trade-off - too wide and the edges visibly lose contrast against the middle,
+# too narrow and the correction is abrupt. An eighth of the image is a
+# reasonable default for these swatches, whose detail is small-scale and
+# uniform enough to survive it.
+# Static so it can be called without instantiating this script - it extends
+# SceneTree (it's a --script entry point), and `.new()` on a SceneTree
+# subclass spawns a second tree and hangs. Learned the hard way.
+static func _make_seamless(img: Image, band: int) -> void:
+	var w := img.get_width()
+	var h := img.get_height()
+	band = clampi(band, 1, mini(w, h) / 2 - 1)
+
+	# --- Horizontal pass (fixes the left/right join) ---
+	# Read from a snapshot so mirror lookups always see ORIGINAL pixels; if we
+	# sampled the image being written, the second half of each row would blend
+	# against values already modified by the first half.
+	var src := img.duplicate() as Image
+	for y in range(h):
+		for i in range(band):
+			var t := 0.5 * (1.0 - float(i) / float(band))
+			# Left edge blends toward the right edge's mirror, and vice versa.
+			img.set_pixel(i, y, src.get_pixel(i, y).lerp(src.get_pixel(w - 1 - i, y), t))
+			img.set_pixel(w - 1 - i, y, src.get_pixel(w - 1 - i, y).lerp(src.get_pixel(i, y), t))
+
+	# --- Vertical pass (fixes the top/bottom join) ---
+	# Snapshot again, so this pass sees the horizontally-corrected image and
+	# the corner regions end up consistent with both passes.
+	src = img.duplicate() as Image
+	for x in range(w):
+		for i in range(band):
+			var t := 0.5 * (1.0 - float(i) / float(band))
+			img.set_pixel(x, i, src.get_pixel(x, i).lerp(src.get_pixel(x, h - 1 - i), t))
+			img.set_pixel(x, h - 1 - i, src.get_pixel(x, h - 1 - i).lerp(src.get_pixel(x, i), t))
+
 func _process_one(faction_id: String):
 	var src_path = SRC_DIR + faction_id + ".jpg"
 	var img = Image.load_from_file(ProjectSettings.globalize_path(src_path))
@@ -69,6 +122,15 @@ func _process_one(faction_id: String):
 	var region_img = Image.create(side, side, false, Image.FORMAT_RGB8)
 	region_img.blit_rect(img, Rect2i(crop_x, crop_y, side, side), Vector2i(0, 0))
 	region_img.resize(TEX_SIZE, TEX_SIZE, Image.INTERPOLATE_LANCZOS)
+
+	# Force the swatch to tile before anything downstream touches it.
+	# Flow (like any image generator) does not edge-match: measured with
+	# tools/check_texture_seam.gd, 6 of the 10 original swatches had clearly
+	# visible seams, the worst at 11x the image's own internal variation.
+	# Triplanar sampling tiles these textures across every hull face, so a
+	# seam isn't a subtle artifact - it's a hard line repeating down the side
+	# of every unit.
+	_make_seamless(region_img, TEX_SIZE / 8)
 
 	region_img.save_png(OUT_DIR + "/" + faction_id + "_albedo.png")
 

@@ -8,7 +8,13 @@ const ModuleDataResource = preload("res://scripts/module_data.gd")
 # ~29 saved designs today - it exists so a FUTURE schema change doesn't
 # silently load stale data with zero indication, which was the actual gap
 # (every save/load path already tolerates a missing "version" key fine).
-const CURRENT_BLUEPRINT_VERSION: float = 1.0
+# Bumped 1.0 -> 2.0 when the hull roster was rebuilt on the SDF/Marching-Cubes
+# pipeline (data/hull_assemblies/ + tools/bake_hull_roster.gd). Hull type_ids
+# and their load-bearing sidecar `size` were both preserved, so v1 designs
+# still LOAD - but their module positions were placed against the previous
+# hull surfaces, so mounts can sit slightly proud of or sunk into the new
+# ones. The version check below surfaces that instead of loading silently.
+const CURRENT_BLUEPRINT_VERSION: float = 2.0
 
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
@@ -286,6 +292,17 @@ func load_blueprint_into_designer(id: String) -> bool:
 	var save_version = data.get("version", CURRENT_BLUEPRINT_VERSION)
 	if save_version > CURRENT_BLUEPRINT_VERSION:
 		_show_toast("This design was saved by a newer version - some parts may not load correctly.", true)
+	elif save_version < CURRENT_BLUEPRINT_VERSION:
+		# The OLDER direction was previously unchecked entirely, so a stale
+		# design loaded silently with no indication anything was wrong. That
+		# matters now: v1 designs placed their modules against the previous
+		# generation of hull geometry, so on the rebuilt hulls (see
+		# data/hull_assemblies/ and tools/bake_hull_roster.gd) mounts can sit
+		# slightly off the surface. Deliberately a warning rather than a hard
+		# refusal, matching the existing best-effort philosophy above - the
+		# design is still mostly usable and hard-blocking would strand it with
+		# no recourse.
+		_show_toast("This design predates the hull rebuild - weapon mounts may need repositioning.", true)
 
 	if root.has_method("clear_hull"):
 		root.clear_hull()
@@ -396,8 +413,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	phys_mesh.name = "PhysicsMesh"
 	var authored_hull_mesh = MeshAssetLoader.get_hull_mesh(hull_type)
 	if authored_hull_mesh:
-		if hull_type == "interceptor_hull" and abs(nose_taper - 1.0) > 0.001:
-			authored_hull_mesh = HullDeformScript.apply_nose_taper(authored_hull_mesh, nose_taper)
+		# nose_taper removed with interceptor_hull - hook point for future per-hull mesh deform
 		phys_mesh.mesh = authored_hull_mesh
 
 		# Shared with module_placer.gd's update_hull_appearance() so a design

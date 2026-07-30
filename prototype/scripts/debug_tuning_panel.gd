@@ -21,6 +21,10 @@ var weight_label: Label
 var dps_label: Label
 var cost_label: Label
 
+# uniform name -> its readout Label, so _on_visual_changed can update the row
+# it belongs to without searching the tree.
+var _visual_labels: Dictionary = {}
+
 func _ready():
 	battlefield = get_parent()
 	visible = false
@@ -67,6 +71,43 @@ func _ready():
 	cost_slider = _make_slider(vbox, 0.0, 2.0, GlobalConfig.cost_scale_factor)
 	cost_slider.value_changed.connect(_on_cost_changed)
 
+	# --- Visual / toon-shading section ---
+	# Rows are generated from VisualTuning.PARAMS rather than hand-listed, so
+	# adding a uniform there makes a slider appear here with no edit to this
+	# file (and no chance of the two lists drifting out of sync).
+	vbox.add_child(HSeparator.new())
+	var vis_title = Label.new()
+	vis_title.text = "Unit Look (live)"
+	vis_title.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(vis_title)
+
+	for key in VisualTuning.PARAMS:
+		var spec = VisualTuning.PARAMS[key]
+		var row_label = Label.new()
+		row_label.text = "%s: %.3f" % [spec["label"], VisualTuning.get_value(key)]
+		vbox.add_child(row_label)
+		var slider = HSlider.new()
+		slider.min_value = spec["min"]
+		slider.max_value = spec["max"]
+		slider.step = spec["step"]
+		slider.value = VisualTuning.get_value(key)
+		vbox.add_child(slider)
+		_visual_labels[key] = row_label
+		# Bind the key and its label so one shared handler serves every row.
+		slider.value_changed.connect(_on_visual_changed.bind(key))
+
+	var copy_btn = Button.new()
+	copy_btn.text = "Copy values to clipboard"
+	# The whole point of tuning live is to end up with numbers worth keeping.
+	# Without this you'd have to squint at sliders and transcribe by hand.
+	copy_btn.pressed.connect(_on_copy_visual_pressed)
+	vbox.add_child(copy_btn)
+
+	var reset_btn = Button.new()
+	reset_btn.text = "Reset look to defaults"
+	reset_btn.pressed.connect(_on_reset_visual_pressed)
+	vbox.add_child(reset_btn)
+
 	vbox.add_child(HSeparator.new())
 	var respawn_btn = Button.new()
 	respawn_btn.text = "Respawn Player + Dummies"
@@ -106,6 +147,45 @@ func _on_dps_changed(value: float):
 func _on_cost_changed(value: float):
 	GlobalConfig.cost_scale_factor = value
 	_refresh_labels()
+
+# Note the argument order: Callable.bind() APPENDS bound args, and
+# value_changed emits the new value first, so the signature is (value, key)
+# rather than the (key, value) that reads more naturally.
+func _on_visual_changed(value: float, key: String):
+	VisualTuning.set_value(key, value)
+	if _visual_labels.has(key):
+		_visual_labels[key].text = "%s: %.3f" % [VisualTuning.PARAMS[key]["label"], value]
+	# Push to everything already on the field. Anything spawned from here on
+	# picks the value up via hull_material_builder instead.
+	VisualTuning.apply_to_tree(get_tree().root)
+
+func _on_reset_visual_pressed():
+	VisualTuning.reset()
+	VisualTuning.apply_to_tree(get_tree().root)
+	_rebuild_visual_rows()
+
+# Slider positions don't follow a reset on their own, so re-seed them from the
+# store. Cheap enough to just re-read every row rather than track dirty ones.
+func _rebuild_visual_rows():
+	for key in _visual_labels:
+		_visual_labels[key].text = "%s: %.3f" % [VisualTuning.PARAMS[key]["label"], VisualTuning.get_value(key)]
+		var slider = _visual_labels[key].get_parent().get_child(
+			_visual_labels[key].get_index() + 1)
+		if slider is HSlider:
+			slider.set_value_no_signal(VisualTuning.get_value(key))
+
+# Emits GDScript that can be pasted straight into visual_tuning.gd's PARAMS
+# defaults - the handoff from "dialled it in by eye" to "committed value".
+func _on_copy_visual_pressed():
+	var lines = []
+	for key in VisualTuning.PARAMS:
+		var spec = VisualTuning.PARAMS[key]
+		lines.append('\t"%s": {"label": "%s", "min": %s, "max": %s, "step": %s, "default": %s},' % [
+			key, spec["label"], spec["min"], spec["max"], spec["step"],
+			String.num(VisualTuning.get_value(key), 3)])
+	var text = "\n".join(lines)
+	DisplayServer.clipboard_set(text)
+	print("[VisualTuning] copied to clipboard:\n%s" % text)
 
 func _refresh_labels():
 	hp_label.text = "HP Scale: %.2f" % GlobalConfig.hp_scale_factor

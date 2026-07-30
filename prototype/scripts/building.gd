@@ -672,7 +672,13 @@ func _find_mesh_instances(node: Node, results: Array) -> void:
 		_find_mesh_instances(child, results)
 
 func _apply_material_to_building_mesh(node: Node) -> void:
-	var mat = HullMaterialBuilder.build_hull_material(faction, armor_material)
+	# Argument order is (armor_material, faction) - these were passed swapped
+	# until 2026-07-29. Both wrong values fell back SILENTLY rather than
+	# erroring (ARMOR_PBR.get() missed and returned hardened_steel; the
+	# faction lookup missed FACTIONS and returned DEFAULT_FACTION), so every
+	# building rendered with Industrialist textures regardless of its actual
+	# faction, and its armor_material had no visual effect at all.
+	var mat = HullMaterialBuilder.build_hull_material(armor_material, faction)
 	if team != 0 and mat is ShaderMaterial:
 		var team_col = FactionCatalog.get_visual_color(faction).lerp(Color(0.85, 0.2, 0.2), 0.45)
 		# base_color alone carries the full tint now - see the other

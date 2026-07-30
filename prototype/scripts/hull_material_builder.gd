@@ -10,6 +10,7 @@ class_name HullMaterialBuilder
 
 const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
 const HULL_SHADER = preload("res://shaders/hull_faction_material.gdshader")
+const VisualTuningScript = preload("res://scripts/visual_tuning.gd")
 
 # The 4 existing armor materials' PBR character, unchanged in substance from
 # the old hardcoded StandardMaterial3D blocks (hardened_steel's shiny-metal
@@ -126,7 +127,10 @@ static func build_hull_material(armor_material: String, faction: String, texture
 	# variation belongs in the texture bake (already possible - the
 	# generator bakes directional shading) or a future explicit VFX pass,
 	# not a blanket live uniform with no spatial mask.
-	mat.set_shader_parameter("anisotropy", 0.25)
+	# The `anisotropy` write that used to sit here is gone (2026-07-29): the
+	# shader no longer exposes it, since the toon light() pass replaced the
+	# brushed-aluminum PBR surface language wholesale. See the shader's own
+	# note where that uniform was removed.
 	# See _texture_scale_for_size()'s comment - sized per-hull now rather
 	# than a single fixed constant (which either over- or under-tiled
 	# depending on hull size; tuning story in git history).
@@ -140,7 +144,44 @@ static func build_hull_material(armor_material: String, faction: String, texture
 	mat.set_shader_parameter("albedo_tex", textures.albedo)
 	mat.set_shader_parameter("normal_tex", textures.normal)
 	mat.set_shader_parameter("roughness_tex", textures.roughness)
+	# Livery stripe - the faction's accent color, drawn procedurally by the
+	# shader instead of being baked into the albedo. See the shader's
+	# stripe_color block for why: a baked stripe is large-scale COMPOSITION,
+	# and composition can't survive triplanar projection (it was the cause of
+	# the "sides look stratified, top looks fine" bug). accent_color has sat
+	# unused in faction_catalog.gd since the v3 bake took over faction
+	# identity - this puts it back to work as the thing it's named for.
+	var visual = FactionCatalogScript.get_visual(faction_id)
+	mat.set_shader_parameter("stripe_color", visual.get("accent_color", Color(1.0, 0.75, 0.1)))
+	# Inherit whatever the live tuning sliders are currently set to. Without
+	# this, anything built AFTER a slider moved (production, respawns, every
+	# Design Lab rebuild) would silently revert to the shader defaults - see
+	# visual_tuning.gd's header for why the store exists at all.
+	VisualTuningScript.apply(mat)
 	return mat
+
+# The stripe is positioned against the hull's own local vertical extent, so
+# the material needs to know that extent. Kept as a separate call because the
+# AABB usually isn't known at build_hull_material() time - callers typically
+# build the material first and assign it to a MeshInstance3D after, at which
+# point mesh.get_aabb() is available. Anything that never calls this falls
+# back to the shader's unit-height default and still renders a sane stripe.
+static func apply_local_bounds(mat: ShaderMaterial, bounds_y: Vector2) -> void:
+	if mat == null:
+		return
+	# Guard a degenerate/zero-height AABB - flat plane meshes and some greeble
+	# parts hit this, and a zero span would divide-by-zero in the shader.
+	if absf(bounds_y.y - bounds_y.x) < 0.0001:
+		bounds_y = Vector2(-0.5, 0.5)
+	mat.set_shader_parameter("local_bounds_y", bounds_y)
+
+# Convenience for the common case: read the vertical bounds straight off a
+# mesh's AABB.
+static func apply_bounds_from_mesh(mat: ShaderMaterial, mesh: Mesh) -> void:
+	if mat == null or mesh == null:
+		return
+	var aabb: AABB = mesh.get_aabb()
+	apply_local_bounds(mat, Vector2(aabb.position.y, aabb.position.y + aabb.size.y))
 
 # Structural/base-plating material - the majority, non-armor surface of a
 # hull: matte/satin, reads as workmanlike structural plate rather than
@@ -171,11 +212,18 @@ static func build_structural_material(faction: String, texture_world_size: float
 	mat.shader = HULL_SHADER
 	mat.set_shader_parameter("base_color", Color(1.0, 1.0, 1.0, 1.0).darkened(0.3))
 	# Fixed, faction-independent - see build_hull_material()'s comment for
-	# why anisotropy/emissive are no longer faction-driven at all.
-	mat.set_shader_parameter("anisotropy", 0.01)
+	# why emissive is no longer faction-driven at all (the `anisotropy`
+	# write formerly here was dropped with the uniform itself).
 	mat.set_shader_parameter("texture_scale", _texture_scale_for_size(texture_world_size))
 	mat.set_shader_parameter("metallic", 0.015)
 	mat.set_shader_parameter("roughness", 0.97)
+	# No livery stripe on structural plating. The stripe is faction TRIM - it
+	# belongs on the hull's outer paneling, not on girders, frames and filler
+	# blocks. Leaving it on would also band every small structural part at its
+	# own local mid-height, producing a scatter of unrelated stripes across a
+	# design rather than one continuous line around the hull.
+	mat.set_shader_parameter("stripe_enabled", 0.0)
+	VisualTuningScript.apply(mat)
 	mat.set_shader_parameter("shield_mode", 0.0)
 	mat.set_shader_parameter("alpha_base", 1.0)
 	var faction_id = faction if FactionCatalogScript.FACTIONS.has(faction) else FactionCatalogScript.DEFAULT_FACTION

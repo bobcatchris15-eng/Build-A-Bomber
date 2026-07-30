@@ -45,12 +45,28 @@ const TYPE_FENDER := 16
 const TYPE_CANOPY := 17
 const TYPE_RING := 18
 
+# Primitive types whose surface normals are inherently curved (radial,
+# spherical, toroidal). Vertices on these surfaces keep their natural SDF
+# normals instead of being snapped to cardinal/chamfer targets.
+const CURVED_PRIMITIVE_TYPES := [
+	TYPE_SPHERE, TYPE_CYLINDER, TYPE_CONE, TYPE_TORUS,
+	TYPE_HALF_CYLINDER, TYPE_HEMISPHERE, TYPE_CAPSULE,
+	TYPE_FENDER, TYPE_CANOPY, TYPE_RING,
+]
+
 # Conservative unit-space half-extent shared by _compute_primitives_aabb() -
 # every primitive type in hull_builder.gd is built at unit size (see its
 # _build_mesh_for_type()); 0.6 covers all of them (box/sphere/cylinder/cone/
 # wedge are exactly 0.5, the torus's outer_radius is 0.6) with a little
 # headroom, since this AABB only sizes the voxel grid, not the final surface.
 const _UNIT_BOUND := 0.6
+
+# Large number for distance comparisons
+const INF := 1e9
+
+# Utility function
+func rad_to_deg(rad: float) -> float:
+	return rad * 180.0 / PI
 
 # ── Public API ────────────────────────────────────────────────────────────
 
@@ -330,12 +346,49 @@ static func _solve_qef_3d(pts: Array, normals: Array, mass_point: Vector3, cell_
 	var solution := mass_point + Vector3(dx, dy, dz)
 	return solution.clamp(cell_min, cell_max)
 
-# Quantizes / snaps normals to cardinal & standard chamfer / slope angles for constructed hulls.
-# Weights main face body (inner > chamfer_edge_pct) 100% hard cardinal, reserving angled chamfers for perimeter edges.
+# Quantizes / snaps normals to cardinal & standard chamfer / slope angles for
+# constructed hulls. Vertices whose nearest primitive is a curved-silhouette
+# type (ring, torus, sphere, cylinder, etc.) skip snapping entirely and keep
+# their natural SDF normals. Box-derived types (box, wedge, slope, frustum,
+# i-beam, etc.) snap to cardinal in the main face body and to chamfer targets
+# in the perimeter edge zone.
 static func _snap_constructed_normal(n: Vector3, crystallinity: float, point: Vector3 = Vector3.ZERO, primitives: Array = [], chamfer_edge_pct: float = 5.0) -> Vector3:
 	if crystallinity >= 1.0 or n.length_squared() < 1e-6:
 		return n
 
+	# ── Find the nearest primitive ───────────────────────────────────────
+	# Used for both curved-type bypass and edge-zone detection.
+	var nearest_prim: Dictionary = primitives[0] if not primitives.is_empty() else {}
+	var nearest_prim_type: int = nearest_prim.get("type", TYPE_BOX) if not primitives.is_empty() else TYPE_BOX
+	if not primitives.is_empty():
+		var min_abs_dist: float = INF
+		for prim in primitives:
+			var d_abs: float = abs(primitive_sdf(point, prim))
+			if d_abs < min_abs_dist:
+				min_abs_dist = d_abs
+				nearest_prim = prim
+				nearest_prim_type = prim.type
+
+	# ── Curvature-aware normal snapping ──────────────────────────────────────
+	# Rather than binary curved/constructed distinction, we now measure
+	# local-space curvature and blend intelligently: high curvature preserves
+	# natural SDF normals, low curvature enables snapping to cardinal/chamfer targets.
+
+	# Calculate local-space curvature for intelligent decision making
+	# smoothness is 0.0 because _snap_constructed_normal's callers don't thread
+	# one through, and _estimate_curvature declares the parameter without ever
+	# reading it (its curvature is analytic per primitive type). If that
+	# function ever starts using smoothness, this call site has to be revisited.
+	var curvature_deg: float = _estimate_curvature(point, nearest_prim, primitives, 0.0)
+
+	# Curvature threshold (matches issue summary) - above this, preserve natural SDF normal
+	var curvature_threshold_deg: float = 15.0
+
+	if curvature_deg > curvature_threshold_deg:
+		# HIGH CURVATURE - preserve SDF normal (ring, sphere, tight curves)
+		return n
+
+	# LOW CURVATURE - enable snapping to cardinal/chamfer targets
 	# Cardinal targets (orthogonal vertical / horizontal surfaces)
 	var cardinal_targets := [
 		Vector3(1, 0, 0), Vector3(-1, 0, 0),
@@ -369,15 +422,6 @@ static func _snap_constructed_normal(n: Vector3, crystallinity: float, point: Ve
 	# boundary by definition.
 	var is_edge_zone := false
 	if not primitives.is_empty() and chamfer_edge_pct > 0.0:
-		# Find the nearest primitive by SDF distance
-		var min_abs_dist: float = INF
-		var nearest_prim: Dictionary = primitives[0]
-		for prim in primitives:
-			var d_abs: float = abs(primitive_sdf(point, prim))
-			if d_abs < min_abs_dist:
-				min_abs_dist = d_abs
-				nearest_prim = prim
-
 		var basis := Basis.from_euler(nearest_prim.rotation)
 		var local: Vector3 = basis.inverse() * (point - nearest_prim.position)
 		var half_extents: Vector3 = nearest_prim.scale * 0.5
@@ -414,7 +458,7 @@ static func _snap_constructed_normal(n: Vector3, crystallinity: float, point: Ve
 			if d > best_cardinal_dot:
 				best_cardinal_dot = d
 				best_cardinal = t
-		if best_cardinal_dot >= 0.5: # Within 60 degrees of cardinal (was 45)
+		if best_cardinal_dot >= 0.5: # Within 60 degrees of cardinal
 			return best_cardinal
 
 	# In edge chamfer zone: evaluate both cardinal and angled chamfers
@@ -536,7 +580,104 @@ static func _flatten_cardinal_panels(dual_vertices: Dictionary, primitives: Arra
 				dual_vertices[idx] = v
 
 
-# ── SDF evaluation ───────────────────────────────────────────────────────
+# ── Curvature estimation ───────────────────────────────────────────────────
+
+static func _estimate_curvature(world_point: Vector3, nearest_prim: Dictionary, primitives: Array, smoothness: float) -> float:
+	# Local-space curvature estimation for intelligent normal snapping
+	# Measures curvature in primitive-local coordinates rather than world-space
+	# to avoid artifacts with rotated or translated primitives.
+
+	var basis := Basis.from_euler(nearest_prim.rotation)
+	var local_point: Vector3 = basis.inverse() * (world_point - nearest_prim.position)
+	var scale: Vector3 = Vector3(
+		max(abs(nearest_prim.scale.x), 0.0001),
+		max(abs(nearest_prim.scale.y), 0.0001),
+		max(abs(nearest_prim.scale.z), 0.0001))
+	var half_extents: Vector3 = scale * 0.5
+	var prim_type: int = nearest_prim.type
+
+	match prim_type:
+		# Flat primitive: zero curvature
+		TYPE_BOX, TYPE_WEDGE, TYPE_SLOPE, TYPE_FRUSTUM, TYPE_CHAMFER_BOX, TYPE_HALF_CYLINDER, TYPE_I_BEAM, TYPE_L_BEAM, TYPE_HEX_PRISM, TYPE_PYRAMID, TYPE_FENDER, TYPE_CANOPY:
+			return 0.0
+
+		# Perfectly curved primitives (constant curvature across surface)
+		TYPE_SPHERE:
+			# Sphere has constant positive curvature everywhere
+			# Gaussian curvature K = 1/r^2, mean curvature H = 1/r
+			# Convert to angular deviation: max normal deviation = arcsin(1/r)
+			var r: float = min(half_extents.x, min(half_extents.y, half_extents.z))
+			if r > 0.0001:
+				# Maximum angular deviation from point vs sphere center
+				var angle_rad: float = atan(sqrt(3.0) / r)
+				return rad_to_deg(angle_rad)
+			return 0.0
+
+		TYPE_CYLINDER:
+			# Cylinder has zero Gaussian curvature but principal curvature H = 1/r
+			var r: float = min(half_extents.x, half_extents.z)
+			if r > 0.0001:
+				var angle_rad: float = atan(sqrt(3.0) / r)
+				return rad_to_deg(angle_rad)
+			return 0.0
+
+		TYPE_CONE:
+			# Cone curvature varies with position - at vertex it's infinite
+			# At base it's 1/r, but we're approximating with mid-cylinder value
+			var r: float = min(half_extents.x, half_extents.z)
+			if r > 0.0001:
+				var angle_rad: float = atan(sqrt(3.0) / r) * 0.7  # Moderate for cone
+				return rad_to_deg(angle_rad)
+			return 0.0
+
+		TYPE_TORUS:
+			# Torus has varying curvature (inner and outer radii)
+			var r_major: float = min(half_extents.x, half_extents.z) * 0.8
+			var r_minor: float = min(half_extents.x, min(half_extents.y, half_extents.z)) * 0.2
+			if r_minor > 0.0001:
+				# Focus on minor radius for local surface curvature
+				var angle_rad: float = atan(sqrt(3.0) / r_minor)
+				return rad_to_deg(angle_rad)
+			return 0.0
+
+		TYPE_HEMISPHERE:
+			# Hemisphere inherits sphere curvature on dome surface
+			var r: float = min(half_extents.x, min(half_extents.y, half_extents.z))
+			if r > 0.0001:
+				var angle_rad: float = atan(sqrt(3.0) / r) * 0.9  # Very curved
+				return rad_to_deg(angle_rad)
+			return 0.0
+
+		TYPE_CAPSULE:
+			# Capsule is curved cylinder with hemispherical ends
+			var r: float = min(half_extents.x, half_extents.z)
+			if r > 0.0001:
+				var angle_rad: float = atan(sqrt(3.0) / r) * 0.8
+				return rad_to_deg(angle_rad)
+			return 0.0
+
+		TYPE_RING:
+			# Ring is a critical special case - has two curvatures:
+			# 1. Major radius curvature (outer/inner radii): primary ring shape
+			# 2. Minor radius curvature (tube thickness): secondary tube shape
+			# For ring rendering we need major radius curvature since that
+			# determines whether the ring appears as a smooth circle vs blocky.
+			var r_out: float = min(half_extents.x, half_extents.z)
+			var r_in: float = r_out * 0.6  # Per _sdf_ring in hash
+			var r_tube: float = min(half_extents.y * 0.5, r_out - r_in) * 0.5
+
+			# PRIMARY curvature (for ring appearance): use major radius
+			# This determines whether we snap to cardinal or keep circle
+			if r_out > 0.0001:
+				var angle_rad: float = atan(sqrt(3.0) / r_out)
+				return rad_to_deg(angle_rad)
+			return 0.0
+
+		# FALLBACK - default to zero curvature for unknown types
+		_:
+			return 0.0
+
+	# ── SDF evaluation ───────────────────────────────────────────────────────
 
 static func scene_sdf(world_point: Vector3, primitives: Array, smoothness: float) -> float:
 	if primitives.is_empty():

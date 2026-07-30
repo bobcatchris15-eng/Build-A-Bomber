@@ -1296,7 +1296,12 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 		# so structural pieces inherit the faction's visual identity —
 		# same as the main hull. This is applied after build_visual so the
 		# geometry is correct but the material is the faction shader.
-		var hull_mat = HullMaterialBuilderScript.build_hull_material(hull.get_meta("faction") if hull.has_meta("faction") else "industrialists", "hardened_steel")
+		# Argument order is (armor_material, faction) - these were passed
+		# swapped until 2026-07-29, which silently forced every weapon's
+		# structural pieces to DEFAULT_FACTION textures instead of the hull's
+		# own faction. See building.gd's copy of this note for the mechanism.
+		var hull_faction = hull.get_meta("faction") if hull.has_meta("faction") else "industrialists"
+		var hull_mat = HullMaterialBuilderScript.build_hull_material("hardened_steel", hull_faction)
 		for child in new_weapon.find_children("*", "MeshInstance3D", true, false):
 			child.material_override = hull_mat
 
@@ -1454,10 +1459,7 @@ func update_hull_appearance():
 		# reshaping of the actual authored mesh via MeshDataTool, not a mesh
 		# swap - apply_nose_taper() returns a fresh ArrayMesh each time, so
 		# this never mutates MeshAssetLoader's cached shared resource.
-		if type_id == "interceptor_hull" and hull.has_meta("nose_taper"):
-			var taper = hull.get_meta("nose_taper")
-			if abs(taper - 1.0) > 0.001:
-				authored_mesh = HullDeformScript.apply_nose_taper(authored_mesh, taper)
+			# nose_taper removed with interceptor_hull - hook point for future per-hull mesh deform
 		phys_mesh.mesh = authored_mesh
 		var fit = ModuleCatalog.get_hull_mesh_fit(type_id, authored_mesh, hull_scale * armor_bulk)
 		phys_mesh.rotation = fit["rotation"]

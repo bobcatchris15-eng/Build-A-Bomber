@@ -101,8 +101,12 @@ func _ready():
 			# call) so a player can compare hulls before dragging one in.
 			var size = data.get("size", Vector3.ZERO)
 			var domain = "Static Building" if data.get("is_foundation", false) else "Vehicle"
-			btn.tooltip_text = "%s hull\nHP: %.0f | Weight: %.0f\nCost: %d Metal, %d Crystal\nSize: %.1f x %.1f x %.1f" % [
-				domain, data.get("hp", 0.0), data.get("weight", 0.0),
+			# Name first - see _stat_tooltip()'s comment for why line 0 is
+			# load-bearing. The domain ("Vehicle" / "Static Building") moves
+			# down into a stat row, where it sits with the rest of the
+			# classification data instead of standing in for the name.
+			btn.tooltip_text = "%s\n%s hull\nHP: %.0f | Weight: %.0f\nCost: %d Metal, %d Crystal\nSize: %.1f x %.1f x %.1f" % [
+				data["name"], domain, data.get("hp", 0.0), data.get("weight", 0.0),
 				data.get("metal", 0), data.get("crystal", 0),
 				size.x, size.y, size.z]
 			hull_buttons_by_domain[domain].append(btn)
@@ -222,8 +226,16 @@ func _animate_drawer(drawer: Control, open: bool) -> void:
 	drawer.set_meta("active_tween", tween)
 	drawer.set_meta("drawer_open", open)
 
+# NOTE: line 0 is the part NAME, and that is load-bearing - part_button.gd's
+# _make_custom_tooltip() renders the first line as the card's bold gold title
+# row and every line after it as a smaller stat row. Before this, the name was
+# omitted entirely, so the title slot rendered "HP: 240 | Weight: 180" in
+# title styling and the part's actual name appeared nowhere on the card (the
+# hull branch in _ready() already prepended a line, which is why only module
+# and locomotion tooltips showed the bug).
 func _stat_tooltip(data: Dictionary) -> String:
-	var lines = ["HP: %.0f | Weight: %.0f" % [data.get("hp", 0.0), data.get("weight", 0.0)]]
+	var lines = [data.get("name", "Unknown Part")]
+	lines.append("HP: %.0f | Weight: %.0f" % [data.get("hp", 0.0), data.get("weight", 0.0)])
 	lines.append("Cost: %d Metal, %d Crystal" % [data.get("metal", 0), data.get("crystal", 0)])
 	var dps = data.get("dps", 0.0)
 	if dps > 0.0:

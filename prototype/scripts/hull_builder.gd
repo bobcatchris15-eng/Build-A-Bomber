@@ -1886,6 +1886,14 @@ func _on_export_confirmed(dialog: AcceptDialog) -> void:
 		_show_error("Failed to save baked mesh: error %d" % save_err)
 		return
 
+	# Use the baked mesh actual AABB for sidecar size, not primitive AABB.
+	# The bake margin (smoothness * 2.5 + 0.25) makes the mesh significantly
+	# larger than raw primitives. An undersized box means large hull areas
+	# wont register for module placement in the Design Lab.
+	var baked_aabb := mesh.get_aabb()
+	var baked_size := baked_aabb.size
+	if baked_size.length_squared() < 0.01:
+		baked_size = aabb.size
 	var hp = snapped(100.0 + volume * 20.0, 0.1)
 	var weight = snapped(50.0 + volume * 15.0, 0.1)
 	var metal = int(20 + volume * 5.0)
@@ -1896,7 +1904,7 @@ func _on_export_confirmed(dialog: AcceptDialog) -> void:
 		"weight": weight,
 		"metal": metal,
 		"crystal": crystal,
-		"size": [aabb.size.x, aabb.size.y, aabb.size.z],
+			"size": [baked_size.x, baked_size.y, baked_size.z],
 		"color": [0.7, 0.7, 0.8, 1.0],
 		"domain": domain,
 		"category": "hull",
