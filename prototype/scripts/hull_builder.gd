@@ -175,6 +175,7 @@ var bake_method: String = "dc"
 var fit_percent: float = 95.0
 var facet_angle: float = 15.0
 var crystallinity: float = 0.0
+var chamfer_edge_pct: float = 5.0
 
 enum AuthoringStage {
 	STAGE_FRAME,      # Stage 1: Frame Builder (Girders & Structural Skeleton)
@@ -1423,7 +1424,7 @@ func _update_finishing_preview(force_high_res: bool = false) -> void:
 		return
 
 	var res: int = bake_resolution if force_high_res else PREVIEW_BAKE_RESOLUTION
-	var mesh := SDFMeshBaker.bake(primitives, smoothness, res, bake_method, fit_percent, facet_angle, crystallinity)
+	var mesh := SDFMeshBaker.bake(primitives, smoothness, res, bake_method, fit_percent, facet_angle, crystallinity, chamfer_edge_pct)
 	if mesh != null:
 		_preview_mesh_instance.mesh = mesh
 		var mat := StandardMaterial3D.new()
@@ -1581,6 +1582,23 @@ func _build_finishing_properties_panel() -> void:
 		_queue_finishing_preview()
 	)
 	properties_panel.add_child(sm_slider)
+
+	# Chamfer Edge Width (%)
+	var ch_lbl := Label.new()
+	ch_lbl.text = "Chamfer Edge Width: " + str(snapped(chamfer_edge_pct, 0.5)) + "%"
+	properties_panel.add_child(ch_lbl)
+
+	var ch_slider := HSlider.new()
+	ch_slider.min_value = 0.0
+	ch_slider.max_value = 25.0
+	ch_slider.step = 0.5
+	ch_slider.value = chamfer_edge_pct
+	ch_slider.value_changed.connect(func(v: float):
+		chamfer_edge_pct = v
+		ch_lbl.text = "Chamfer Edge Width: " + str(snapped(v, 0.5)) + "%"
+		_queue_finishing_preview()
+	)
+	properties_panel.add_child(ch_slider)
 
 	# Frame Toggle
 	var frame_chk := CheckBox.new()
@@ -1854,7 +1872,7 @@ func _on_export_confirmed(dialog: AcceptDialog) -> void:
 	# Let the status label repaint before the (synchronous) bake blocks the thread.
 	await get_tree().process_frame
 
-	var mesh := SDFMeshBaker.bake(primitives, smoothness, bake_resolution, bake_method, fit_percent, facet_angle, crystallinity)
+	var mesh := SDFMeshBaker.bake(primitives, smoothness, bake_resolution, bake_method, fit_percent, facet_angle, crystallinity, chamfer_edge_pct)
 	if mesh == null:
 		_show_error("Bake produced no geometry - try lowering Smoothness or adding more primitives")
 		return
@@ -2116,7 +2134,8 @@ func serialize_assembly(hull_name: String = "", sidecar: Dictionary = {}) -> Dic
 			"method": bake_method,
 			"fit_percent": fit_percent,
 			"facet_angle": facet_angle,
-			"crystallinity": crystallinity
+			"crystallinity": crystallinity,
+			"chamfer_edge_pct": chamfer_edge_pct
 		},
 		# Verbatim gameplay stats. Deliberately NOT recomputed from volume on
 		# load/bake the way the interactive export dialog does it - the
@@ -2171,6 +2190,7 @@ func deserialize_assembly(data: Dictionary) -> bool:
 	fit_percent = float(bake.get("fit_percent", fit_percent))
 	facet_angle = float(bake.get("facet_angle", facet_angle))
 	crystallinity = float(bake.get("crystallinity", crystallinity))
+	chamfer_edge_pct = float(bake.get("chamfer_edge_pct", chamfer_edge_pct))
 	if smoothness_slider:
 		smoothness_slider.value = smoothness
 	if bake_quality_option:
