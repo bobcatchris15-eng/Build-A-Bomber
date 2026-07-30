@@ -1,0 +1,56 @@
+{
+	"schema_version": 1,
+	"hull_name": "scout_hull",
+	"_role": "Fast light scout chassis. Low, compact, wedge-nosed, optimized for high speed and mounting one small-to-medium weapon module.",
+	"bake": {
+		"smoothness": 0.08,
+		"resolution": 20,
+		"method": "dc",
+		"fit_percent": 95,
+		"facet_angle": 15,
+		"crystallinity": 0.0
+	},
+	"sidecar": {
+		"name": "Scout Hull",
+		"hp": 160,
+		"weight": 75,
+		"metal": 40,
+		"crystal": 10,
+		"base_energy": 35,
+		"base_vision": 26,
+		"size": [
+			2.0,
+			1.2,
+			3.6
+		],
+		"color": [
+			0.55,
+			0.58,
+			0.62,
+			1
+		]
+	},
+	"primitives": [
+		{
+			"type": "BOX",
+			"position": [0, 0, 0.2],
+			"rotation": [0, 0, 0],
+			"scale": [1.8, 0.8, 2.8],
+			"color": [0.55, 0.58, 0.62, 1]
+		},
+		{
+			"type": "SLOPE",
+			"position": [0, 0.05, -1.2],
+			"rotation": [0, 0, 0],
+			"scale": [1.7, 0.7, 1.2],
+			"color": [0.55, 0.58, 0.62, 1]
+		},
+		{
+			"type": "CHAMFER_BOX",
+			"position": [0, 0.45, 0.1],
+			"rotation": [0, 0, 0],
+			"scale": [1.2, 0.4, 1.6],
+			"color": [0.5, 0.53, 0.58, 1]
+		}
+	]
+}

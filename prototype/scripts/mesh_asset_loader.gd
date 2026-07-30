@@ -22,8 +22,24 @@
 
 static var _cache: Dictionary = {}
 
+const PART_NAME_ALIASES := {
+	"missile_pod": "missile_pod_housing",
+	"guided_missile": "missile_body",
+	"tow_launch_tube": "missile_pod_housing",
+	"tow_pintle_mount": "missile_pod_pintle_mount",
+	"tow_missile_warhead": "tow_missile_warhead",
+}
+
 static func get_part_mesh(part_name: String) -> Mesh:
-	return _load_and_cache("res://assets/models/parts/%s.glb" % part_name)
+	var resolved: String = PART_NAME_ALIASES.get(part_name, part_name)
+	return _load_and_cache("res://assets/models/parts/%s.glb" % resolved)
+
+# Hull Builder's expanded primitive kit (tools/blender/build_hull_primitives.py)
+# - unit-sized shapes Godot has no native Mesh for (slope, frustum, chamfer
+# box, half-cylinder, i/l-beam, fender, hemisphere, canopy, ring). Same
+# res://-import-cache-first, runtime-glTF-fallback loading as get_part_mesh().
+static func get_hull_primitive_mesh(shape_name: String) -> Mesh:
+	return _load_and_cache("res://assets/models/hull_primitives/%s.glb" % shape_name)
 
 static func get_hull_mesh(hull_type_id: String) -> Mesh:
 	# A hull whose shape is genuinely a plain primitive declares
@@ -35,9 +51,24 @@ static func get_hull_mesh(hull_type_id: String) -> Mesh:
 	var primitive = _primitive_shape_for(hull_type_id)
 	if primitive != "":
 		return _build_primitive(primitive)
+	# SDF/Marching-Cubes-baked hulls (sdf_mesh_baker.gd, exported from the
+	# Hull Builder) are saved as a plain ArrayMesh resource rather than a
+	# .glb - checked first since a baked hull has no .glb at all.
+	var res_path = "user://mods/hulls/%s.res" % hull_type_id
+	if ResourceLoader.exists(res_path):
+		return _load_and_cache_mesh_resource(res_path)
 	var mod_path = "user://mods/hulls/%s.glb" % hull_type_id
 	if FileAccess.file_exists(mod_path):
 		return _load_and_cache_runtime_gltf(mod_path)
+	# Built-in hulls rebuilt through the SDF pipeline ship a baked .res
+	# (tools/bake_hull_roster.gd) instead of a Blender-authored .glb. Checked
+	# BEFORE the .glb so a rebuilt hull wins over a stale leftover .glb of the
+	# same id, and falling through to .glb means converted and not-yet-
+	# converted hulls coexist - the roster can migrate one hull at a time
+	# rather than all at once.
+	var builtin_res = "res://assets/models/hulls/%s.res" % hull_type_id
+	if ResourceLoader.exists(builtin_res):
+		return _load_and_cache_mesh_resource(builtin_res)
 	return _load_and_cache("res://assets/models/hulls/%s.glb" % hull_type_id)
 
 static func _primitive_shape_for(hull_type_id: String) -> String:
@@ -93,6 +124,16 @@ static func _build_primitive(shape: String) -> Mesh:
 	st.generate_tangents()
 	var mesh = st.commit()
 	_cache[cache_key] = mesh
+	return mesh
+
+# SDF-baked hulls save a plain ArrayMesh Resource directly (ResourceSaver, no
+# scene/PackedScene wrapper), unlike _load_and_cache()'s .glb-oriented path -
+# a straight load() + type check is all that's needed here.
+static func _load_and_cache_mesh_resource(path: String) -> Mesh:
+	if _cache.has(path):
+		return _cache[path]
+	var mesh = load(path) as Mesh
+	_cache[path] = mesh
 	return mesh
 
 static func _load_and_cache(path: String) -> Mesh:

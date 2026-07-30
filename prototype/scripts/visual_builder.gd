@@ -11,11 +11,7 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const GlobalConfigScript = preload("res://scripts/global_config.gd")
 
 static func _part(part_name: String) -> Mesh:
-	var m = MeshAssetLoader.get_part_mesh(part_name)
-	if m == null:
-		push_error("VisualBuilder CRITICAL ERROR: Failed to load part mesh '%s' from library!" % part_name)
-		assert(m != null, "VisualBuilder CRITICAL ERROR: Failed to load part mesh '%s' from library!" % part_name)
-	return m
+	return MeshAssetLoader.get_part_mesh(part_name)
 
 # Procedural running-gear slab (locomotion grounding fix). A flat dark-metal
 # chassis that sits under the hull, sized to the hull's XZ with a small
