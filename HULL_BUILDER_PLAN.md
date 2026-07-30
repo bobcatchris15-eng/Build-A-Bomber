@@ -1,8 +1,8 @@
 # Hull Builder Plan
 
-**Status:** planning only — work through the chunks in order, each is self-contained and testable.
+**Status:** Chunk 5 (export/bake) implemented, as an in-engine SDF + Marching Cubes bake rather than the originally-planned Blender subprocess — see that chunk for what actually shipped. Chunks 1-4 and 6-8 remain planning-only; work through them in order, each is self-contained and testable.
 
-**Goal:** Let the player build a custom hull from primitive shapes (box, sphere, cylinder, wedge, cone, torus), export/bake the assembly into a single `.glb` mesh via the local Blender installation (`prototype\UPBGE-0.30-windows-x86_64\blender.exe`), and register that mesh + sidecar metadata in `res://assets/models/hulls/` so it appears in the Design Lab parts catalog as a selectable hull — exactly like the built-in procedural hulls, but player-authored.
+**Goal:** Let the player build a custom hull from primitive shapes (box, sphere, cylinder, wedge, cone, torus), bake the assembly into a single fused mesh, and register that mesh + sidecar metadata in `user://mods/hulls/` so it appears in the Design Lab parts catalog as a selectable hull — exactly like the built-in procedural hulls, but player-authored. Overlapping primitives blend smoothly (signed-distance-field smooth-min + Marching Cubes polygonization) rather than sitting as interpenetrating shells.
 
 ---
 
@@ -16,18 +16,19 @@
 | Surface-snapping (first prim on grid, subsequent on existing prim surfaces) | Keyboard mode switching (G/R/S) with mouse-delta drag — functional but no gizmo visual | Duplicate / delete individual primitives |
 | StaticBody3D + collision for raycasting | Preview ghost (transparent gold) | Mirror / symmetry mode |
 | Grid floor with collision | Status bar messages | Save / load hull assembly (JSON) |
-| Back to menu, Clear All | | Export to `.glb` via Blender |
-| | | `.json` sidecar generation |
-| | | Registration in Design Lab catalog |
+| Back to menu, Clear All | | |
+| Export via SDF + Marching Cubes bake (Chunk 5, done) | | |
+| `.json` sidecar generation (Chunk 5, done) | | |
+| Registration in Design Lab catalog (Chunk 5/7, `.res` path done — `parts_menu.gd` domain-sort in 7b still open) | | |
 
-The [HullBuilder.tscn](file:///E:/Build-A-Bomber-GitHub/prototype/scenes/HullBuilder.tscn) scene has the skeleton UI: left panel (primitives palette), right panel (properties), bottom bar (status + Clear + Export buttons), designer camera, grid floor, `HullContainer` node. The Export button shows `"Export: not yet implemented"`.
+The [HullBuilder.tscn](file:///E:/Build-A-Bomber-GitHub/prototype/scenes/HullBuilder.tscn) scene has the skeleton UI: left panel (primitives palette), right panel (properties), bottom bar (status + Clear + Export + Smoothness slider + Bake Quality dropdown), designer camera, grid floor, `HullContainer` node.
 
 ### Key integration points
 
-- **Mesh loading:** [mesh_asset_loader.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/mesh_asset_loader.gd) — loads `.glb` from `res://assets/models/hulls/` or `user://mods/hulls/`, caches, supports runtime glTF import
-- **Hull metadata:** `.json` sidecar files alongside `.glb` in `assets/models/hulls/` (e.g. [medium_hull.json](file:///E:/Build-A-Bomber-GitHub/prototype/assets/models/hulls/medium_hull.json)) — carries `name`, `hp`, `weight`, `metal`, `crystal`, `size`, `color`, etc.
+- **Mesh loading:** [mesh_asset_loader.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/mesh_asset_loader.gd) — loads a baked `.res` mesh or `.glb` from `res://assets/models/hulls/` or `user://mods/hulls/`, caches, supports runtime glTF import
+- **Hull metadata:** `.json` sidecar files alongside the mesh (e.g. [medium_hull.json](file:///E:/Build-A-Bomber-GitHub/prototype/assets/models/hulls/medium_hull.json)) — carries `name`, `hp`, `weight`, `metal`, `crystal`, `size`, `color`, etc.
 - **Design Lab registration:** [hull_loader.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/hull_loader.gd) discovers sidecars → [module_catalog.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/module_catalog.gd) exposes hull data → [parts_menu.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/parts_menu.gd) lists hulls in sidebar → [module_placer.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/module_placer.gd) loads hull into viewport
-- **Blender:** UPBGE 0.30 portable installation at `prototype\UPBGE-0.30-windows-x86_64\blender.exe`; existing hull build scripts at [prototype/tools/blender/build_meshes.py](file:///E:/Build-A-Bomber-GitHub/prototype/tools/blender/build_meshes.py)
+- **Bake pipeline:** [sdf_mesh_baker.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/sdf_mesh_baker.gd) + [mc_tables.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/mc_tables.gd) — in-engine, no external Blender dependency for player-authored hulls. The built-in hulls' own Blender pipeline ([prototype/tools/blender/build_meshes.py](file:///E:/Build-A-Bomber-GitHub/prototype/tools/blender/build_meshes.py)) is separate and untouched.
 - **Gizmo system:** [gizmo_3d.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/gizmo_3d.gd) + [gizmo_handle.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/gizmo_handle.gd) + [gizmo_rotate_ring.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/gizmo_rotate_ring.gd) — translate/rotate/scale handles used in Design Lab but **not yet in Hull Builder**
 
 ---
@@ -184,94 +185,38 @@ Define a `hull_assembly.json` schema (distinct from the hull *sidecar* `.json` �
 
 ---
 
-## Chunk 5 — Export Pipeline: Godot → Blender → `.glb`
+## Chunk 5 — Export Pipeline: SDF + Marching Cubes bake (superseded the Blender plan)
 
-> **Goal:** Bake the primitive assembly into a single unified `.glb` mesh using Blender headlessly.
+> **Status: implemented**, and implemented differently than originally planned below (kept for history). The Blender subprocess approach was replaced with an in-engine bake so custom hulls work with no external Blender dependency (needed for a shipped build) and so overlapping primitives genuinely fuse (smooth-min blend) instead of just sitting as interpenetrating shells.
 
-### 5a. Serialize primitives to an intermediate format
-
-When the user clicks **Export Hull**:
-
-1. Iterate `primitives[]` and write each shape's type, world transform, and scale to a temporary JSON file at a known path (e.g. `user://hull_assemblies/_export_temp.json`)
-2. This file is the bridge between Godot and Blender — Blender reads it, not Godot's scene format
-
-### 5b. Blender bake script: `tools/blender/bake_custom_hull.py`
-
-A new Python script for Blender (`prototype/tools/blender/bake_custom_hull.py`) that:
-
-1. Reads the intermediate JSON
-2. For each primitive entry, creates the corresponding Blender mesh object (`bpy.ops.mesh.primitive_cube_add()`, etc.) with the exact transform
-3. Joins all objects into one (`Ctrl+J` equivalent: `bpy.ops.object.join()`)
-4. Optionally runs a boolean union to merge intersecting geometry (configurable — some users may want interpenetrating volumes like the built-in hull construction, others may want a clean manifold)
-5. Runs a **limited dissolve** or **decimate** to clean up unnecessary geometry
-6. Recalculates normals (outward-facing)
-7. Exports the result as `.glb` to the target path
-
-```python
-# bake_custom_hull.py — run headlessly:
-# blender.exe --background --python bake_custom_hull.py -- input.json output.glb
-import bpy, bmesh, json, sys
-
-argv = sys.argv[sys.argv.index("--") + 1:]
-input_path, output_path = argv[0], argv[1]
-
-with open(input_path) as f:
-    assembly = json.load(f)
-
-# Clear scene
-bpy.ops.object.select_all(action='SELECT')
-bpy.ops.object.delete()
-
-for prim in assembly["primitives"]:
-    # Create primitive, set transform...
-    pass
-
-# Join all
-bpy.ops.object.select_all(action='SELECT')
-bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
-bpy.ops.object.join()
-
-# Export
-bpy.ops.export_scene.gltf(filepath=output_path, export_format='GLB')
-```
-
-### 5c. Invoke Blender from Godot
-
-In `hull_builder.gd`, replace the stub `_on_export_clicked()`:
-
-```gdscript
-func _on_export_clicked() -> void:
-    if primitives.is_empty():
-        _show_error("No primitives to export")
-        return
-
-    var hull_name = _get_hull_name()  # from the name LineEdit
-    var temp_json = _serialize_for_blender()
-    _write_temp_json(temp_json)
-
-    var blender_path = ProjectSettings.globalize_path(
-        "res://UPBGE-0.30-windows-x86_64/blender.exe")
-    var script_path = ProjectSettings.globalize_path(
-        "res://tools/blender/bake_custom_hull.py")
-    var output_glb = ProjectSettings.globalize_path(
-        "res://assets/models/hulls/%s.glb" % hull_name)
-
-    var args = ["--background", "--python", script_path,
-                "--", temp_json_path, output_glb]
-    var pid = OS.create_process(blender_path, args)
-    # ... poll or await completion, show progress
-```
-
-### 5d. Error handling
-
-- Show a progress/status message while Blender runs ("Baking hull mesh…")
-- If Blender fails (non-zero exit code), show the error and leave the assembly intact
-- If output `.glb` is generated, show success and the file path
+**What actually shipped:**
+- [sdf_mesh_baker.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/sdf_mesh_baker.gd) — treats each primitive as a signed distance field, combines them with a polynomial smooth-min (`Smoothness` slider, 0 = hard union), and polygonizes the result with Marching Cubes ([mc_tables.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/mc_tables.gd)'s standard 256-entry tables) on a voxel grid sized to the assembly's AABB (`Bake Quality` dropdown: Low/Medium/High → 24/32/48 voxels along the longest axis).
+- `hull_builder.gd`'s `_on_export_confirmed()` calls `SDFMeshBaker.bake()`, saves the resulting `ArrayMesh` directly via `ResourceSaver.save()` to `user://mods/hulls/<name>.res`, and writes the `.json` sidecar to the same directory — no Blender process, no `.glb`, no intermediate JSON handoff file.
+- No UVs/tangents are generated — the hull faction shader (`hull_faction_material.gdshader`) is fully world-space triplanar and reads no mesh UV/TANGENT data at all, so this isn't a gap, just unnecessary work skipped.
+- `mesh_asset_loader.gd`'s `get_hull_mesh()` and `hull_loader.gd`'s shape-sanity warning both learned to recognize a sibling `.res` alongside/instead of a `.glb`.
+- `tools/blender/bake_custom_hull.py` (the script sketched below) was removed — it's dead code now that the bake happens in-engine.
 
 ### Verification
-- Build a simple 3-box hull, click Export, see Blender run headlessly
-- Verify the output `.glb` exists and contains the fused mesh (open in Blender GUI to inspect)
-- The `.glb` loads correctly via `mesh_asset_loader.gd`'s runtime glTF path
+- Build a 3+ primitive hull with Smoothness > 0, click Export Hull, fill in the stats dialog — no `blender.exe` process is ever launched.
+- `user://mods/hulls/<name>.res` and `.json` exist immediately after export.
+- The hull appears in the Design Lab catalog and loads via `MeshAssetLoader.get_hull_mesh()`'s new `.res` branch, with fillets visible where primitives overlapped (compare against Smoothness = 0).
+
+<details>
+<summary>Original Blender-based plan (not implemented — kept for context)</summary>
+
+**Goal:** Bake the primitive assembly into a single unified `.glb` mesh using Blender headlessly.
+
+**5a.** Serialize primitives to an intermediate JSON, written to a temp path Blender would read.
+
+**5b.** A `tools/blender/bake_custom_hull.py` script would read that JSON, recreate each primitive in Blender, join them, optionally boolean-union, decimate, recalculate normals, and export `.glb`.
+
+**5c.** `hull_builder.gd` would shell out via `OS.create_process()` to the bundled `UPBGE-0.30-windows-x86_64/blender.exe`, passing the script and I/O paths as arguments.
+
+**5d.** Error handling around the subprocess (non-zero exit, missing output file).
+
+This depended on a bundled Blender install being present at runtime, which doesn't hold in a shipped build, and only ever joined primitives rather than blending them — see the SDF/Marching-Cubes replacement above.
+
+</details>
 
 ---
 
