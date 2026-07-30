@@ -22,6 +22,7 @@ const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.g
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
+const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 
 # Set by load_blueprint_into_designer() whenever it returns false, so
 # callers (blueprint_library_panel.gd) can show a specific reason instead of
@@ -468,6 +469,21 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		col_box.size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
 		col.shape = col_box
 		hull.add_child(col)
+
+		# The box above stays the hull's DIMENSION oracle (see the comment
+		# above - update_locomotion, armor auto-fit and
+		# _reclassify_module_after_drag all read their hull size off it, and
+		# gizmo_3d.gd resizes it on scale). It is not the surface modules
+		# should snap to: everywhere the hull curves, tapers or slopes, the
+		# visible skin sits well inside it.
+		#
+		# module_placer.gd builds a precise trimesh HullSurface for a freshly
+		# placed hull and on hull swap, but this designer reconstruction never
+		# did - so a LOADED blueprint had only the box, and every module
+		# dropped onto it snapped to the bounding shell instead of the hull you
+		# can see. Same mesh instance the visuals use, so the surface traced is
+		# the surface drawn.
+		HullSurfaceScript.rebuild(hull, mesh_inst)
 	
 	parent_node.add_child(hull)
 

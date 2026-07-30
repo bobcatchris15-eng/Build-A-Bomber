@@ -4,11 +4,13 @@
 	"_role": "Fast light scout chassis. Low, compact, wedge-nosed, optimized for high speed and mounting one small-to-medium weapon module.",
 	"bake": {
 		"smoothness": 0.0,
-		"resolution": 22,
-		"method": "dc",
+		"resolution": 36,
+		"method": "csg",
 		"fit_percent": 95,
 		"facet_angle": 15,
-		"crystallinity": 0.0
+		"crystallinity": 0.0,
+		"chamfer_edge_pct": 5.0,
+		"mirror_x": false
 	},
 	"sidecar": {
 		"name": "Scout Hull",

@@ -25,6 +25,17 @@ const SDFMeshBaker = preload("res://scripts/sdf_mesh_baker.gd")
 const ASSEMBLY_DIR := "res://data/hull_assemblies"
 const OUT_DIR := "res://assets/models/hulls"
 
+# Baked-AABB vs declared-`size` tolerance. Below SOFT it's noise from the
+# skin-fit inset; above HARD the collision box is visibly wrong.
+const SOFT_DRIFT := 0.05
+const HARD_DRIFT := 0.15
+
+# Hulls whose baked extents disagree with their declared size beyond HARD_DRIFT.
+# Reported always; fails the run only under --strict, so an existing red roster
+# doesn't block unrelated work.
+var drifted := 0
+var strict := false
+
 # Must stay in sync with hull_builder.gd's PrimitiveType enum. Duplicated
 # here rather than imported because hull_builder.gd is a Node3D bound to a
 # scene full of @onready UI references - instancing it headlessly just to read
@@ -61,13 +72,19 @@ func _init() -> void:
 			total_tris += result
 
 	print("")
-	print("Baked %d hull(s), %d failed. Total %d triangles." % [baked, failed, total_tris])
-	quit(1 if failed > 0 else 0)
+	print("Baked %d hull(s), %d failed, %d with size drift. Total %d triangles." % [
+		baked, failed, drifted, total_tris])
+	if drifted > 0 and not strict:
+		print("Re-run with `-- --strict` to make size drift fail the build.")
+	quit(1 if failed > 0 or (strict and drifted > 0) else 0)
 
 func _parse_id_filter() -> Dictionary:
 	var ids := {}
 	var args := OS.get_cmdline_user_args()
 	for a in args:
+		if a == "--strict":
+			strict = true
+			continue
 		ids[a] = true
 	return ids
 
@@ -104,11 +121,17 @@ func _bake_one(path: String, stem: String) -> int:
 	var fit_percent := float(bake.get("fit_percent", 95.0))
 	var facet_angle := float(bake.get("facet_angle", 15.0))
 	var crystallinity := float(bake.get("crystallinity", 0.0))
+	# Every knob SDFMeshBaker.bake() accepts must be read here and passed on.
+	# chamfer_edge_pct was missing, so the pipeline baked at the 5.0 default
+	# regardless of what was authored - the same hull came out of CI different
+	# from the way it came out of the in-game builder.
+	var chamfer_edge_pct := float(bake.get("chamfer_edge_pct", 5.0))
+	var mirror_x := bool(bake.get("mirror_x", false))
 
-	_warn_on_subvoxel_features(primitives, resolution, stem)
+	_warn_on_subvoxel_features(primitives, resolution, smoothness, stem)
 
 	var t0 := Time.get_ticks_msec()
-	var mesh: ArrayMesh = SDFMeshBaker.bake(primitives, smoothness, resolution, method, fit_percent, facet_angle, crystallinity)
+	var mesh: ArrayMesh = SDFMeshBaker.bake(primitives, smoothness, resolution, method, fit_percent, facet_angle, crystallinity, chamfer_edge_pct, mirror_x)
 	var elapsed := Time.get_ticks_msec() - t0
 	if mesh == null:
 		printerr("  %s: bake produced no geometry" % stem)
@@ -138,7 +161,113 @@ func _bake_one(path: String, stem: String) -> int:
 	print("  %-30s %5d tris  %4d ms  mesh aabb %s  size %s" % [
 		stem, tris, elapsed,
 		_fmt_v3(aabb.size), str(sidecar.get("size", "?"))])
+	_check_size_drift(stem, aabb, sidecar)
+	_check_topology(stem, mesh, method)
 	return tris
+
+# A hull must bake as ONE closed shell. Nothing checked this, and two hulls had
+# been shipping broken in a way no other check could see:
+#
+#   airship_hull baked as TWO disconnected components - a ball with the gondola,
+#   nose and tail boxes floating separately in mid-air - because the SPHERE SDF
+#   collapsed its 5.8 x 3.6 x 12.6 envelope to a ball of the smallest half-extent
+#   (fixed in sdf_mesh_baker.gd's _sdf_ellipsoid). The size-drift check could not
+#   catch it: the floating pieces kept the overall AABB roughly plausible.
+#
+# Components > 1 means detached geometry. Boundary edges (an edge used by exactly
+# one triangle) are the rim of a hole. Both are reported; neither fails the build
+# unless --strict, same as size drift.
+func _check_topology(stem: String, mesh: ArrayMesh, method: String) -> void:
+	var faces := mesh.get_faces()
+	if faces.is_empty():
+		return
+	var ids := {}
+	var parent: Array[int] = []
+	var edge_use := {}
+	for i in range(0, faces.size(), 3):
+		var tri: Array[int] = []
+		for k in range(3):
+			var key := "%.4f|%.4f|%.4f" % [faces[i + k].x, faces[i + k].y, faces[i + k].z]
+			if not ids.has(key):
+				ids[key] = parent.size()
+				parent.append(parent.size())
+			tri.append(ids[key])
+		for k in range(3):
+			var a: int = tri[k]
+			var b: int = tri[(k + 1) % 3]
+			var ek := "%d_%d" % [mini(a, b), maxi(a, b)]
+			edge_use[ek] = int(edge_use.get(ek, 0)) + 1
+			var ra := _uf_find(parent, a)
+			var rb := _uf_find(parent, b)
+			if ra != rb:
+				parent[rb] = ra
+
+	var boundary := 0
+	for ek in edge_use:
+		if int(edge_use[ek]) == 1:
+			boundary += 1
+	var roots := {}
+	for v in range(parent.size()):
+		roots[_uf_find(parent, v)] = true
+
+	if roots.size() > 1:
+		printerr("  %s: %d DISCONNECTED COMPONENTS - parts of this hull float free of the rest." % [
+			stem, roots.size()])
+		drifted += 1
+	if boundary > 0:
+		# Under CSG these are T-junctions, not holes, and they are expected: two
+		# primitives' faces meet exactly along a line, but one side carries an
+		# extra vertex from its own clipping, so the edges do not pair up
+		# combinatorially. The surfaces still coincide geometrically - verified by
+		# enclosed-volume comparison against an independent SDF lattice sample -
+		# so there is no gap to see. Reported at a lower volume for that method.
+		if method.to_lower() == "csg":
+			print("  %s: %d T-junction edge(s) (expected for CSG - surfaces meet, vertices don't)." % [
+				stem, boundary])
+		else:
+			print("  %s: NOTE %d boundary edge(s) - small holes in the shell." % [stem, boundary])
+
+func _uf_find(parent: Array[int], x: int) -> int:
+	var r: int = x
+	while parent[r] != r:
+		r = parent[r]
+	var c: int = x
+	while parent[c] != c:
+		var nxt: int = parent[c]
+		parent[c] = r
+		c = nxt
+	return r
+
+# The sidecar's `size` drives the collision box, the mount facets and
+# ModuleCatalog.get_hull_mesh_fit()'s size tier, while the baked AABB is what
+# the player actually sees. Nothing used to compare them, so a hull could bake
+# a fifth narrower than its declared size (airship_hull: 4.73 baked vs 6
+# declared) and the pipeline still reported success - visuals and hitbox
+# quietly disagreeing.
+func _check_size_drift(stem: String, aabb: AABB, sidecar: Dictionary) -> void:
+	var declared = sidecar.get("size", null)
+	if typeof(declared) != TYPE_ARRAY or (declared as Array).size() < 3:
+		printerr("  %s: sidecar has no usable `size` - cannot verify baked extents" % stem)
+		drifted += 1
+		return
+	var want := _to_vec3(declared)
+	var got := aabb.size
+	var axis_names := ["x", "y", "z"]
+	var worst := 0.0
+	var worst_msg := ""
+	for a in range(3):
+		if want[a] <= 0.0001:
+			continue
+		var dev: float = abs(got[a] - want[a]) / want[a]
+		if dev > worst:
+			worst = dev
+			worst_msg = "%s %.2f baked vs %.2f declared (%+.0f%%)" % [
+				axis_names[a], got[a], want[a], (got[a] / want[a] - 1.0) * 100.0]
+	if worst >= HARD_DRIFT:
+		printerr("  %s: SIZE DRIFT %s - collision box and visual mesh disagree." % [stem, worst_msg])
+		drifted += 1
+	elif worst >= SOFT_DRIFT:
+		print("  %s: NOTE size drift %s" % [stem, worst_msg])
 
 # Marching Cubes samples the SDF on a voxel grid, so it physically cannot
 # represent a feature thinner than ~1 voxel - such a primitive is silently
@@ -155,21 +284,19 @@ func _bake_one(path: String, stem: String) -> int:
 # Thin fins, battens and collars belong to the module/greeble layer, not the
 # baked base mesh. If a hull needs sub-voxel detail, the answer is usually to
 # remove it rather than to crank resolution (cost is ~quadratic in it).
-func _warn_on_subvoxel_features(primitives: Array, resolution: int, stem: String) -> void:
-	var bounds := AABB()
-	var first := true
-	for p in primitives:
-		var half: Vector3 = (p["scale"] as Vector3).abs() * 0.5
-		var a := AABB(p["position"] - half, half * 2.0)
-		if first:
-			bounds = a
-			first = false
-		else:
-			bounds = bounds.merge(a)
-	var longest: float = max(bounds.size.x, max(bounds.size.y, bounds.size.z))
-	if longest <= 0.0:
+func _warn_on_subvoxel_features(primitives: Array, resolution: int, smoothness: float, stem: String) -> void:
+	# Ask the baker for the voxel size rather than re-deriving it. This used to
+	# build its own AABB from scale*0.5 with no rotation and no smoothness
+	# margin, while the baker uses _UNIT_BOUND=0.6, applies each primitive's
+	# rotation, and grows by the margin - so the figure printed here was ~25%
+	# smaller than the grid actually used (heavy_hull: 0.31 reported vs ~0.39
+	# real). Under-reporting the voxel means the "WILL BE LOST" branch below
+	# almost never fires, which is how flying_wing_hull's wings disappeared.
+	var voxel := SDFMeshBaker.compute_voxel_size(primitives, smoothness, resolution)
+	if voxel <= 0.0:
 		return
-	var voxel := longest / float(max(resolution, 1))
+	var bake_size: Vector3 = SDFMeshBaker.compute_bake_bounds(primitives, smoothness).size
+	var longest: float = max(bake_size.x, max(bake_size.y, bake_size.z))
 
 	for i in range(primitives.size()):
 		var scl: Vector3 = primitives[i]["scale"]

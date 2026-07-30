@@ -197,6 +197,28 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node, match_f
 	
 	var authored_hull_mesh = MeshAssetLoader.get_hull_mesh(hull_type)
 	if authored_hull_mesh:
+		# Stays a single convex hull, deliberately. Two things rule out making
+		# the in-game collider the visible mesh the way the designer's
+		# HullSurface now does (see scripts/hull_surface.gd):
+		#
+		# 1. This is a CharacterBody3D. Godot only supports
+		#    ConcavePolygonShape3D on StaticBody3D, so a trimesh of the visible
+		#    mesh is not a legal shape here at all.
+		# 2. Convex decomposition (V-HACD, Mesh.convex_decompose()) is the usual
+		#    way to keep concavity on a moving body, and it HANGS on these baked
+		#    hulls - it never returned on the smallest hull in the roster
+		#    (scout_hull, 1184 tris) with max_convex_hulls as low as 4. Almost
+		#    certainly the unwelded triangle soup the SDF baker emits: it builds
+		#    faces through SurfaceTool with per-face normals and no index
+		#    welding, so every triangle carries its own vertices and the dual
+		#    contouring quads leave T-junctions. Welding/repairing the mesh in
+		#    the bake step is the prerequisite for revisiting this, and the
+		#    decomposition belongs offline in tools/bake_hull_roster.gd rather
+		#    than at spawn time regardless.
+		#
+		# The convex hull fills in concavities (deck wells, the gap under a
+		# tapered keel, the space between sponsons all collide as solid). That
+		# is a known inaccuracy, not an oversight.
 		col_shape.shape = authored_hull_mesh.create_convex_shape()
 		col_shape.scale = unit_hull_scale * bulk
 		col_shape.position = hull_node.position

@@ -4,11 +4,13 @@
 	"_role": "Breakthrough / assault gun (StuG casemate, AVRE, dozer-tank register). 'Kicks the door in': a heavy blunt front with a prominent dozer plate, appliqué armour, and a LOW CASEMATE built into the hull rather than a tall turret - that casemate (not a turret ring) is what distinguishes it from medium_hull.",
 	"bake": {
 		"smoothness": 0.0,
-		"resolution": 24,
-		"method": "dc",
+		"resolution": 36,
+		"method": "csg",
 		"fit_percent": 95,
 		"facet_angle": 15,
-		"crystallinity": 0.0
+		"crystallinity": 0.0,
+		"chamfer_edge_pct": 5.0,
+		"mirror_x": false
 	},
 	"sidecar": {
 		"name": "Assault Hull",

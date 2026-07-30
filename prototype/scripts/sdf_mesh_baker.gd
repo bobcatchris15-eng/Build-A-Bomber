@@ -61,12 +61,83 @@ const CURVED_PRIMITIVE_TYPES := [
 # headroom, since this AABB only sizes the voxel grid, not the final surface.
 const _UNIT_BOUND := 0.6
 
-# Large number for distance comparisons
-const INF := 1e9
+# Large number for distance comparisons. Deliberately NOT named INF - a class
+# const by that name shadows GDScript's global INF, and every `INF` in this
+# file then silently means 1e9 instead of true infinity.
+const _FAR_DIST := 1e9
 
-# Utility function
-func rad_to_deg(rad: float) -> float:
-	return rad * 180.0 / PI
+# ── Plane-snap tunables ──────────────────────────────────────────────────
+# Static so a probe script can sweep them; the defaults are the shipping values.
+#
+# snap_pad_voxels is the interesting one. Strict Dual Contouring keeps every
+# vertex inside its own cell, and the first version of the plane snap honoured
+# that. But it is over-cautious for THIS operation: snapping pulls many vertices
+# onto a SHARED plane, which cannot change the mesh's connectivity, so it cannot
+# open a hole - the quad-per-sign-change topology is decided before any snapping
+# happens. Allowing a vertex to sit somewhat outside its cell lets far more of
+# them reach their plane, which is what actually flattens the panels.
+static var snap_tol_voxels := 0.75
+static var snap_pad_voxels := 0.0
+static var snap_surface_eps_voxels := 0.2
+
+# (There used to be a non-static `rad_to_deg()` helper here shadowing the
+# GDScript global of the same name, called from static functions. Removed - the
+# built-in does the same thing and doesn't depend on an instance existing.)
+
+# ── Grid sizing (shared) ─────────────────────────────────────────────────
+#
+# bake_dc()/bake_mc() and tools/bake_hull_roster.gd's sub-voxel feature check
+# MUST agree on the voxel size, or the check lies. They used to compute it
+# independently: the tool used AABB(pos - scale*0.5, scale) with no rotation
+# and no margin, while the baker uses _UNIT_BOUND (0.6, not 0.5) per axis,
+# applies each primitive's rotation basis, and then grows by the smoothness
+# margin. On heavy_hull that made the tool report voxel 0.31 where the baker
+# actually used ~0.39 - a 26% understatement, so the "WILL BE LOST" branch
+# effectively never fired and thin features vanished silently (exactly the
+# flying_wing_hull wing-loss failure the warning exists to prevent).
+#
+# Both now call these two functions. Do not reintroduce a local copy.
+
+static func compute_bake_bounds(primitives: Array, smoothness: float) -> AABB:
+	var bounds := _compute_primitives_aabb(primitives)
+	var margin: float = max(smoothness * 2.5, 0.25)
+	return bounds.grow(margin)
+
+# Returns 0.0 if the assembly is degenerate (no extent to grid).
+static func compute_voxel_size(primitives: Array, smoothness: float, resolution: int) -> float:
+	if primitives.is_empty():
+		return 0.0
+	var size: Vector3 = compute_bake_bounds(primitives, smoothness).size
+	var longest: float = max(size.x, max(size.y, size.z))
+	if longest <= 0.001:
+		return 0.0
+	return longest / float(max(resolution, 4))
+
+# Re-lays the sample lattice so it is exactly mirror-symmetric about x=0, and
+# returns the corrected [origin_x, nx].
+#
+# This is the honest fix for the problem scene_sdf()'s abs(x) fold was hiding.
+# nx comes from ceil(size.x / voxel), so the grid overshoots the bounds - and
+# because the origin stays at bounds.position, the whole overshoot lands on the
+# +X side. The lattice is therefore NOT symmetric about x=0, so a hand-mirrored
+# pair of primitives gets sampled at different offsets on each side and Dual
+# Contouring places visibly different vertices. Folding the field forced
+# symmetry, but at the cost of duplicating one-sided features and opening seam
+# gaps. Centring the lattice instead gets exact symmetry for mirrored input
+# while leaving asymmetric input alone.
+#
+# Width is taken from whichever side reaches further from x=0, so a hull that
+# sits entirely off-centre is still fully covered (never cropped), and nx is
+# rounded up to even so a sample plane lands exactly on x=0.
+static func _center_grid_x(bounds: AABB, voxel_size: float, nx: int, max_cells: int) -> Array:
+	var reach: float = max(absf(bounds.position.x), absf(bounds.position.x + bounds.size.x))
+	var needed: int = int(ceil(2.0 * reach / voxel_size))
+	if needed % 2 == 1:
+		needed += 1
+	needed = clampi(max(needed, nx), 2, max_cells)
+	if needed % 2 == 1:
+		needed -= 1
+	return [-(float(needed) * voxel_size) * 0.5, needed]
 
 # ── Public API ────────────────────────────────────────────────────────────
 
@@ -76,19 +147,28 @@ func rad_to_deg(rad: float) -> float:
 # facet_angle_deg: angle threshold for coplanar face merging.
 # crystallinity: 0.0 (constructed/axis-aligned plates & standard slope angles) .. 1.0 (unconstrained/crystalline facets).
 # chamfer_edge_pct: 0.0% .. 25.0% (default 5.0% - weights edge zone for angled chamfers while locking main face bodies 100% cardinal).
-static func bake(primitives: Array, smoothness: float, resolution: int, method: String = "dc", fit_percent: float = 95.0, facet_angle_deg: float = 15.0, crystallinity: float = 0.0, chamfer_edge_pct: float = 5.0) -> ArrayMesh:
-	if method.to_lower() == "mc":
-		return bake_mc(primitives, smoothness, resolution)
-	return bake_dc(primitives, smoothness, resolution, fit_percent, facet_angle_deg, crystallinity, chamfer_edge_pct)
+# mirror_x: fold the field into the +X half. Off by default and rarely what you
+#   want - it DELETES any primitive centred at negative X. See scene_sdf().
+static func bake(primitives: Array, smoothness: float, resolution: int, method: String = "dc", fit_percent: float = 95.0, facet_angle_deg: float = 15.0, crystallinity: float = 0.0, chamfer_edge_pct: float = 5.0, mirror_x: bool = false) -> ArrayMesh:
+	var m := method.to_lower()
+	# "csg" bypasses the voxel grid entirely - see scripts/csg_mesh_baker.gd. It
+	# is the method for manufactured hulls: exactly planar panels and hard edges,
+	# no resolution/fit/crystallinity knobs because there is no sampling error to
+	# tune. `resolution` is reused as the curved-primitive facet count so the
+	# existing quality control still means something on this path.
+	if m == "csg":
+		var CSG = load("res://scripts/csg_mesh_baker.gd")
+		return CSG.bake(primitives, maxi(int(round(float(resolution) / 3.0)), 6))
+	if m == "mc":
+		return bake_mc(primitives, smoothness, resolution, mirror_x)
+	return bake_dc(primitives, smoothness, resolution, fit_percent, facet_angle_deg, crystallinity, chamfer_edge_pct, mirror_x)
 
 # Legacy / Smooth Marching Cubes pipeline
-static func bake_mc(primitives: Array, smoothness: float, resolution: int) -> ArrayMesh:
+static func bake_mc(primitives: Array, smoothness: float, resolution: int, mirror_x: bool = false) -> ArrayMesh:
 	if primitives.is_empty():
 		return null
 
-	var bounds := _compute_primitives_aabb(primitives)
-	var margin: float = max(smoothness * 2.5, 0.25)
-	bounds = bounds.grow(margin)
+	var bounds := compute_bake_bounds(primitives, smoothness)
 
 	var size: Vector3 = bounds.size
 	var longest: float = max(size.x, max(size.y, size.z))
@@ -101,6 +181,10 @@ static func bake_mc(primitives: Array, smoothness: float, resolution: int) -> Ar
 	var ny: int = clampi(int(ceil(size.y / voxel_size)), 2, res * 2)
 	var nz: int = clampi(int(ceil(size.z / voxel_size)), 2, res * 2)
 
+	var centered := _center_grid_x(bounds, voxel_size, nx, res * 2)
+	bounds.position.x = centered[0]
+	nx = centered[1]
+
 	var dim_x := nx + 1
 	var dim_y := ny + 1
 	var dim_z := nz + 1
@@ -111,7 +195,7 @@ static func bake_mc(primitives: Array, smoothness: float, resolution: int) -> Ar
 		for iy in range(dim_y):
 			for ix in range(dim_x):
 				var wp: Vector3 = bounds.position + Vector3(ix, iy, iz) * voxel_size
-				field[_grid_index(ix, iy, iz, dim_x, dim_y)] = scene_sdf(wp, primitives, smoothness)
+				field[_grid_index(ix, iy, iz, dim_x, dim_y)] = scene_sdf(wp, primitives, smoothness, mirror_x)
 
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
@@ -120,7 +204,7 @@ static func bake_mc(primitives: Array, smoothness: float, resolution: int) -> Ar
 		for iy in range(ny):
 			for ix in range(nx):
 				tri_count += _march_cell(st, ix, iy, iz, dim_x, dim_y, field,
-					bounds.position, voxel_size, primitives, smoothness)
+					bounds.position, voxel_size, primitives, smoothness, mirror_x)
 
 	if tri_count == 0:
 		return null
@@ -128,13 +212,11 @@ static func bake_mc(primitives: Array, smoothness: float, resolution: int) -> Ar
 	return st.commit()
 
 # Dual Contouring (DC) bake pipeline — sharp edges, QEF solver, hard facets.
-static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_percent: float = 95.0, facet_angle_deg: float = 15.0, crystallinity: float = 0.0, chamfer_edge_pct: float = 5.0) -> ArrayMesh:
+static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_percent: float = 95.0, facet_angle_deg: float = 15.0, crystallinity: float = 0.0, chamfer_edge_pct: float = 5.0, mirror_x: bool = false) -> ArrayMesh:
 	if primitives.is_empty():
 		return null
 
-	var bounds := _compute_primitives_aabb(primitives)
-	var margin: float = max(smoothness * 2.5, 0.25)
-	bounds = bounds.grow(margin)
+	var bounds := compute_bake_bounds(primitives, smoothness)
 
 	var size: Vector3 = bounds.size
 	var longest: float = max(size.x, max(size.y, size.z))
@@ -147,6 +229,10 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 	var ny: int = clampi(int(ceil(size.y / voxel_size)), 2, res * 2)
 	var nz: int = clampi(int(ceil(size.z / voxel_size)), 2, res * 2)
 
+	var centered := _center_grid_x(bounds, voxel_size, nx, res * 2)
+	bounds.position.x = centered[0]
+	nx = centered[1]
+
 	var dim_x := nx + 1
 	var dim_y := ny + 1
 	var dim_z := nz + 1
@@ -157,7 +243,7 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 		for iy in range(dim_y):
 			for ix in range(dim_x):
 				var wp: Vector3 = bounds.position + Vector3(ix, iy, iz) * voxel_size
-				field[_grid_index(ix, iy, iz, dim_x, dim_y)] = scene_sdf(wp, primitives, smoothness)
+				field[_grid_index(ix, iy, iz, dim_x, dim_y)] = scene_sdf(wp, primitives, smoothness, mirror_x)
 
 	var dual_vertices := {}
 
@@ -187,8 +273,8 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 						if abs(v1 - v0) > 0.00001:
 							t = clamp(v0 / (v0 - v1), 0.0, 1.0)
 						var p_edge := p0.lerp(p1, t)
-						var n_edge := _sdf_normal(p_edge, primitives, smoothness)
-						n_edge = _snap_constructed_normal(n_edge, crystallinity, p_edge, primitives, chamfer_edge_pct)
+						var n_edge := _sdf_normal(p_edge, primitives, smoothness, mirror_x)
+						n_edge = _snap_constructed_normal(n_edge, crystallinity, p_edge, primitives, chamfer_edge_pct, mirror_x)
 
 						intersections.append(p_edge)
 						normals.append(n_edge)
@@ -199,39 +285,28 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 					var vert := _solve_qef_3d(intersections, normals, mass_point, cell_min, cell_max)
 
 					if fit_percent != 100.0:
-						var sdf_val := scene_sdf(vert, primitives, smoothness)
-						var norm := _sdf_normal(vert, primitives, smoothness)
-						norm = _snap_constructed_normal(norm, crystallinity, vert, primitives, chamfer_edge_pct)
+						var sdf_val := scene_sdf(vert, primitives, smoothness, mirror_x)
+						var norm := _sdf_normal(vert, primitives, smoothness, mirror_x)
+						norm = _snap_constructed_normal(norm, crystallinity, vert, primitives, chamfer_edge_pct, mirror_x)
 						var desired_offset := (100.0 - fit_percent) / 100.0 * voxel_size * 0.5
 						vert = vert - norm * (sdf_val - desired_offset)
 						vert = vert.clamp(cell_min, cell_max)
 
-					# Constructed Orthogonal Alignment: for constructed hulls (crystallinity < 0.5),
-					# snap vertex coordinates to discrete sub-voxel grid steps along dominant plane axes.
-					if crystallinity < 0.5 and not normals.is_empty():
-						var avg_n := Vector3.ZERO
-						for n in normals:
-							avg_n += n
-						avg_n = avg_n.normalized()
-						avg_n = _snap_constructed_normal(avg_n, crystallinity, vert, primitives, chamfer_edge_pct)
-
-						# Coarse snap along dominant axis locks panels flat;
-						# fine snap on tangential axes keeps silhouette fidelity.
-						var coarse_snap := voxel_size * 0.5
-						var fine_snap   := voxel_size * 0.25
-						if abs(avg_n.x) > 0.75:
-							vert.x = round(vert.x / coarse_snap) * coarse_snap
-							vert.y = round(vert.y / fine_snap)   * fine_snap
-							vert.z = round(vert.z / fine_snap)   * fine_snap
-						elif abs(avg_n.y) > 0.75:
-							vert.y = round(vert.y / coarse_snap) * coarse_snap
-							vert.x = round(vert.x / fine_snap)   * fine_snap
-							vert.z = round(vert.z / fine_snap)   * fine_snap
-						elif abs(avg_n.z) > 0.75:
-							vert.z = round(vert.z / coarse_snap) * coarse_snap
-							vert.x = round(vert.x / fine_snap)   * fine_snap
-							vert.y = round(vert.y / fine_snap)   * fine_snap
-
+					# NOTE: vertices are aligned to the primitives' real face
+					# planes in a final pass (_snap_to_primitive_planes) once
+					# every cell has a vertex, not here.
+					#
+					# What used to be here was a "Constructed Orthogonal
+					# Alignment" that rounded each coordinate onto an arbitrary
+					# sub-voxel lattice - voxel*0.5 along the dominant axis,
+					# voxel*0.25 tangentially. That lattice has no relationship
+					# to where the box faces actually are, so neighbouring cells
+					# rounded to DIFFERENT lattice steps and the shared edge
+					# between them became a zigzag. It is the direct cause of the
+					# sawtooth ribbons along the deck edges, and it injected up
+					# to a quarter-voxel of jitter into lines that should be
+					# dead straight. Snapping to the actual planes gets the hard
+					# edges this was reaching for, without inventing a grid.
 					dual_vertices[cell_idx] = vert
 
 	if dual_vertices.is_empty():
@@ -243,7 +318,10 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 	# visible stepping; cluster-averaging the dominant-axis coordinate
 	# across nearby same-cardinal vertices eliminates it.
 	if crystallinity < 0.5:
-		_flatten_cardinal_panels(dual_vertices, primitives, smoothness, crystallinity, chamfer_edge_pct, voxel_size)
+		_flatten_cardinal_panels(dual_vertices, primitives, smoothness, crystallinity, chamfer_edge_pct, voxel_size, mirror_x)
+		# Runs AFTER flattening so exact planes win over averaged ones.
+		_snap_to_primitive_planes(dual_vertices, primitives, smoothness, bounds,
+			voxel_size, dim_x, dim_y, mirror_x)
 
 	var triangles: Array = []
 
@@ -295,7 +373,7 @@ static func bake_dc(primitives: Array, smoothness: float, resolution: int, fit_p
 	if triangles.is_empty():
 		return null
 
-	return _build_faceted_mesh(triangles, facet_angle_deg, crystallinity, primitives, chamfer_edge_pct)
+	return _build_faceted_mesh(triangles, facet_angle_deg, crystallinity, primitives, chamfer_edge_pct, mirror_x, smoothness, voxel_size)
 
 # QEF solver (3D Quadratic Error Function) using 3x3 matrix inverse.
 static func _solve_qef_3d(pts: Array, normals: Array, mass_point: Vector3, cell_min: Vector3, cell_max: Vector3) -> Vector3:
@@ -352,16 +430,59 @@ static func _solve_qef_3d(pts: Array, normals: Array, mass_point: Vector3, cell_
 # their natural SDF normals. Box-derived types (box, wedge, slope, frustum,
 # i-beam, etc.) snap to cardinal in the main face body and to chamfer targets
 # in the perimeter edge zone.
-static func _snap_constructed_normal(n: Vector3, crystallinity: float, point: Vector3 = Vector3.ZERO, primitives: Array = [], chamfer_edge_pct: float = 5.0) -> Vector3:
+static func _snap_constructed_normal(n: Vector3, crystallinity: float, point: Vector3 = Vector3.ZERO, primitives: Array = [], chamfer_edge_pct: float = 5.0, mirror_x: bool = false) -> Vector3:
 	if crystallinity >= 1.0 or n.length_squared() < 1e-6:
 		return n
 
+	# ── Mirror-space agreement ───────────────────────────────────────────
+	# When mirror_x is on, scene_sdf() evaluates the field at |x|, so the
+	# surface in the -X half belongs to a primitive sitting in the +X half.
+	# This function used to classify against the RAW point, so on the -X side
+	# it found the wrong nearest primitive and ran edge-zone detection against
+	# the wrong half-extents - producing faceting that was asymmetric on a mesh
+	# the field guarantees is symmetric. Fold the point (and the normal's x,
+	# which flips with it), snap in +X space, then unfold the result.
+	var flipped := mirror_x and point.x < 0.0
+	if flipped:
+		point = Vector3(-point.x, point.y, point.z)
+		n = Vector3(-n.x, n.y, n.z)
+	var result := _snap_constructed_normal_folded(n, crystallinity, point, primitives, chamfer_edge_pct)
+	if flipped:
+		result = Vector3(-result.x, result.y, result.z)
+	return result
+
+# True when the point sits on a primitive whose surface is genuinely curved
+# (ring, sphere, cylinder, dome, torus...), using the same nearest-primitive
+# search and curvature threshold the normal snap uses.
+#
+# The normal snap already bypasses curved surfaces, but two OTHER passes were
+# quantising them regardless: the sub-voxel coordinate snap and the cardinal
+# panel flattener. Both key off "is this normal within 0.75 of an axis", which
+# is true for big stretches of any curved surface - so the top and outer wall of
+# heavy_hull's turret RING had its coordinates rounded onto a voxel*0.25 lattice
+# and its panels averaged flat. A circle quantised onto a coarse lattice is
+# exactly the "series of crystalline bumps" instead of a ring.
+static func _is_on_curved_surface(point: Vector3, primitives: Array, mirror_x: bool = false) -> bool:
+	if primitives.is_empty():
+		return false
+	var p := Vector3(absf(point.x), point.y, point.z) if mirror_x else point
+	var nearest: Dictionary = primitives[0]
+	var min_abs_dist: float = _FAR_DIST
+	for prim in primitives:
+		var d_abs: float = absf(primitive_sdf(p, prim))
+		if d_abs < min_abs_dist:
+			min_abs_dist = d_abs
+			nearest = prim
+	return _estimate_curvature(p, nearest, primitives, 0.0) > 15.0
+
+# The body of the snap, evaluated strictly in +X space when mirror_x is on.
+static func _snap_constructed_normal_folded(n: Vector3, crystallinity: float, point: Vector3, primitives: Array, chamfer_edge_pct: float) -> Vector3:
 	# ── Find the nearest primitive ───────────────────────────────────────
 	# Used for both curved-type bypass and edge-zone detection.
 	var nearest_prim: Dictionary = primitives[0] if not primitives.is_empty() else {}
 	var nearest_prim_type: int = nearest_prim.get("type", TYPE_BOX) if not primitives.is_empty() else TYPE_BOX
 	if not primitives.is_empty():
-		var min_abs_dist: float = INF
+		var min_abs_dist: float = _FAR_DIST
 		for prim in primitives:
 			var d_abs: float = abs(primitive_sdf(point, prim))
 			if d_abs < min_abs_dist:
@@ -483,7 +604,7 @@ static func _snap_constructed_normal(n: Vector3, crystallinity: float, point: Ve
 	return n
 
 # Builds ArrayMesh from triangles with flat face normals for crisp faceting.
-static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, crystallinity: float = 0.0, primitives: Array = [], chamfer_edge_pct: float = 5.0) -> ArrayMesh:
+static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, crystallinity: float = 0.0, primitives: Array = [], chamfer_edge_pct: float = 5.0, mirror_x: bool = false, smoothness: float = 0.0, voxel_size: float = 0.1) -> ArrayMesh:
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 
@@ -497,7 +618,50 @@ static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, cryst
 			continue
 		n = n.normalized()
 		var center := (p0 + p1 + p2) / 3.0
-		n = _snap_constructed_normal(n, crystallinity, center, primitives, chamfer_edge_pct)
+
+		# Defensive winding fix, matching the one _march_cell() has always had
+		# on the Marching Cubes path. Dual Contouring emits each quad's winding
+		# from the sign of the field at the edge's origin corner, which does NOT
+		# reliably produce outward-facing triangles: ~30% of every baked hull
+		# came out wound inward (heavy_hull: 481 of 1632). Inward faces are
+		# backface-culled, so they read as holes and dark patches, AND they are
+		# invisible to placement raycasts, because create_trimesh_shape()'s
+		# ConcavePolygonShape3D defaults to backface_collision = false. That is
+		# the "large portions of the hull won't accept a module" symptom.
+		#
+		# Must happen BEFORE the normal snap: snapping an inward normal picks
+		# the wrong cardinal target, so the lighting normal was wrong too.
+		#
+		# Decided against the SDF gradient, which is the same quantity the mesh's
+		# shading normals are derived from - so "outward" here means the same
+		# thing it means everywhere else in this file.
+		#
+		# The gradient is a central difference, and it vanishes in a couple of
+		# places (inside a sub-voxel-thin feature, exactly on a union seam) where
+		# _sdf_normal() would hand back its hard-coded Vector3.UP fallback and
+		# make the test a coin flip. Only in that degenerate case, fall back to
+		# sampling the field either side of the face: outside the solid the field
+		# reads higher, so the higher side is the outside.
+		#
+		# Field-sampling was tried as the PRIMARY test and was clearly worse -
+		# it disagreed with the gradient on up to 20 faces per hull, because at a
+		# concave seam both probe points can sit inside solid material. Gradient
+		# first, sampling only to break ties.
+		var grad_raw := _sdf_gradient(center, primitives, smoothness, mirror_x)
+		var flip := false
+		if grad_raw.length_squared() > 1e-12:
+			flip = n.dot(grad_raw) < 0.0
+		else:
+			var probe: float = max(voxel_size * 0.25, 0.001)
+			flip = scene_sdf(center + n * probe, primitives, smoothness, mirror_x) \
+				 < scene_sdf(center - n * probe, primitives, smoothness, mirror_x)
+		if flip:
+			var swap := p1
+			p1 = p2
+			p2 = swap
+			n = -n
+
+		n = _snap_constructed_normal(n, crystallinity, center, primitives, chamfer_edge_pct, mirror_x)
 
 		st.set_normal(n)
 		st.add_vertex(p0)
@@ -509,12 +673,114 @@ static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, cryst
 	return st.commit()
 
 
+# ── Primitive Plane Snapping ─────────────────────────────────────────────
+
+# Pulls each dual vertex onto the REAL face planes of the primitive it sits on,
+# so a hull assembled from boxes and slopes reads as a constructed object:
+# panels dead flat, edges dead straight, corners meeting exactly.
+#
+# Dual Contouring puts a vertex wherever the QEF fit lands inside each cell,
+# which is near the surface but never exactly on it. Sub-voxel error that varies
+# cell to cell is what makes a flat armour plate look faintly quilted and a
+# straight edge look like a saw. The previous approach rounded coordinates onto
+# an invented sub-voxel lattice, which traded that for a coarser, more regular
+# sawtooth. A box's faces are at exactly +/-half_extent in its own local space,
+# so there is no need to guess a grid: snap to the plane itself.
+#
+# Two guards keep this from tearing the mesh, both essential:
+#
+#  1. IN-CELL ONLY. A vertex is only moved to a plane that passes through its
+#     own cell. Dual Contouring's manifold guarantee depends on each cell's
+#     vertex staying inside that cell - push one out and the quads around it
+#     fold over each other. Because a cell straddling a face plane is exactly
+#     the cell that contains it, the right cells snap and no others.
+#
+#  2. STILL-ON-SURFACE. The candidate position is rejected unless it is still on
+#     the union's isosurface. The nearest primitive's face plane is often BURIED
+#     inside a neighbouring primitive (that's what a union does), and snapping to
+#     a buried plane would drag the skin inward through solid material.
+static func _snap_to_primitive_planes(dual_vertices: Dictionary, primitives: Array,
+		smoothness: float, bounds: AABB, voxel_size: float,
+		dim_x: int, dim_y: int, mirror_x: bool) -> void:
+	if primitives.is_empty():
+		return
+	# How far a vertex will reach to find a plane.
+	var tol: float = voxel_size * snap_tol_voxels
+	# A candidate is "still on the surface" within this much of the isosurface.
+	var surface_eps: float = voxel_size * snap_surface_eps_voxels
+	# How far outside its own cell a vertex may be placed. Strict DC keeps every
+	# vertex inside its cell; see snap_pad_voxels for why that is relaxed.
+	var cell_pad: float = voxel_size * snap_pad_voxels + voxel_size * 0.001
+
+	for cell_idx in dual_vertices:
+		var vert: Vector3 = dual_vertices[cell_idx]
+		if _is_on_curved_surface(vert, primitives, mirror_x):
+			continue
+
+		var ix: int = cell_idx % dim_x
+		var iy: int = int(cell_idx / dim_x) % dim_y
+		var iz: int = int(cell_idx / (dim_x * dim_y))
+		var cell_min: Vector3 = bounds.position + Vector3(ix, iy, iz) * voxel_size
+		var cell_max: Vector3 = cell_min + Vector3(voxel_size, voxel_size, voxel_size)
+
+		# Fold for the nearest-primitive search when the field is folded, so the
+		# -X half is matched against the primitive that actually shapes it.
+		var probe := Vector3(absf(vert.x), vert.y, vert.z) if mirror_x else vert
+		var nearest: Dictionary = primitives[0]
+		var min_abs_dist: float = _FAR_DIST
+		for prim in primitives:
+			var d_abs: float = absf(primitive_sdf(probe, prim))
+			if d_abs < min_abs_dist:
+				min_abs_dist = d_abs
+				nearest = prim
+		# Only box-like primitives have flat faces to snap to.
+		if nearest.type in CURVED_PRIMITIVE_TYPES:
+			continue
+
+		var basis := Basis.from_euler(nearest.rotation)
+		var inv := basis.inverse()
+		var half: Vector3 = nearest.scale.abs() * 0.5
+		var local: Vector3 = inv * (probe - nearest.position)
+
+		# Accept axes independently, then apply together - that is what makes an
+		# edge (two planes) and a corner (three) land exactly, instead of only
+		# ever resolving one face at a time.
+		var snapped_local := local
+		var changed := false
+		for a in range(3):
+			if half[a] <= 0.0001:
+				continue
+			var target: float = half[a] if local[a] >= 0.0 else -half[a]
+			if absf(local[a] - target) > tol:
+				continue
+			var cand_local := snapped_local
+			cand_local[a] = target
+			var cand: Vector3 = nearest.position + basis * cand_local
+			# Undo the fold to test against this vertex's own cell.
+			if mirror_x and vert.x < 0.0:
+				cand.x = -cand.x
+			if cand[a] < cell_min[a] - cell_pad or cand[a] > cell_max[a] + cell_pad:
+				continue
+			if absf(scene_sdf(cand, primitives, smoothness, mirror_x)) > surface_eps:
+				continue
+			snapped_local = cand_local
+			changed = true
+
+		if not changed:
+			continue
+		var out: Vector3 = nearest.position + basis * snapped_local
+		if mirror_x and vert.x < 0.0:
+			out.x = -out.x
+		dual_vertices[cell_idx] = out.clamp(
+			cell_min - Vector3(cell_pad, cell_pad, cell_pad),
+			cell_max + Vector3(cell_pad, cell_pad, cell_pad))
+
 # ── Cardinal Panel Flattening ────────────────────────────────────────────
 
 # Post-process dual vertices: for each cardinal normal direction (+/-X, +/-Y, +/-Z),
 # cluster nearby vertices and project them onto a shared plane so that roofs, side
 # walls, and floor panels are perfectly flat instead of exhibiting per-cell jitter.
-static func _flatten_cardinal_panels(dual_vertices: Dictionary, primitives: Array, smoothness: float, crystallinity: float, chamfer_edge_pct: float, voxel_size: float) -> void:
+static func _flatten_cardinal_panels(dual_vertices: Dictionary, primitives: Array, smoothness: float, crystallinity: float, chamfer_edge_pct: float, voxel_size: float, mirror_x: bool = false) -> void:
 	if dual_vertices.is_empty():
 		return
 
@@ -532,8 +798,11 @@ static func _flatten_cardinal_panels(dual_vertices: Dictionary, primitives: Arra
 
 	for cell_idx in dual_vertices:
 		var v: Vector3 = dual_vertices[cell_idx]
-		var n: Vector3 = _sdf_normal(v, primitives, smoothness)
-		n = _snap_constructed_normal(n, crystallinity, v, primitives, chamfer_edge_pct)
+		# Never flatten a curved surface into a plane - see _is_on_curved_surface.
+		if _is_on_curved_surface(v, primitives, mirror_x):
+			continue
+		var n: Vector3 = _sdf_normal(v, primitives, smoothness, mirror_x)
+		n = _snap_constructed_normal(n, crystallinity, v, primitives, chamfer_edge_pct, mirror_x)
 
 		for ci in range(6):
 			if n.dot(cardinal_dirs[ci]) > 0.9:
@@ -548,22 +817,40 @@ static func _flatten_cardinal_panels(dual_vertices: Dictionary, primitives: Arra
 			continue
 
 		var ax: int = cardinal_axis[ci]
+		# +1 for the outward-positive cardinal of this axis, -1 for its twin.
+		var dir: float = cardinal_dirs[ci][ax]
 
-		# Sort by coordinate along the cardinal axis
+		# Sort by coordinate * dir, i.e. inward-to-outward, NOT by raw ascending
+		# coordinate. Mirroring maps the +X group onto the -X group with every
+		# coordinate negated, so raw ascending order traverses the two groups in
+		# opposite directions: they anchor their clusters at opposite ends and
+		# split at non-mirrored boundaries, which made a perfectly symmetric
+		# assembly (e.g. medium_hull, whose only off-centre primitives are an
+		# exact +/-1.32 pair) bake asymmetrically. coord*dir is invariant under
+		# the mirror, so both sides cluster identically.
 		ids.sort_custom(func(a, b):
-			return dual_vertices[a][ax] < dual_vertices[b][ax]
+			return dual_vertices[a][ax] * dir < dual_vertices[b][ax] * dir
 		)
 
-		# Cluster: group consecutive vertices within 1.5 voxels along the axis
+		# Cluster: group vertices lying within 1.5 voxels along the axis.
+		#
+		# The gap test is against the cluster's ANCHOR (its first coordinate),
+		# not against the immediately preceding vertex. Comparing to the
+		# predecessor makes clustering transitive: a run of vertices each
+		# within tolerance of the last chains into one cluster of unbounded
+		# extent, which then gets flattened to a single averaged plane. That
+		# silently ate genuine steps and ledges whenever the stair risers
+		# happened to be spaced under 1.5 voxels apart.
 		var tolerance: float = voxel_size * 1.5
 		var clusters: Array = [[ids[0]]]
+		var anchor_coord: float = dual_vertices[ids[0]][ax] * dir
 		for i in range(1, ids.size()):
-			var prev_coord: float = dual_vertices[ids[i - 1]][ax]
-			var curr_coord: float = dual_vertices[ids[i]][ax]
-			if abs(curr_coord - prev_coord) < tolerance:
+			var curr_coord: float = dual_vertices[ids[i]][ax] * dir
+			if abs(curr_coord - anchor_coord) < tolerance:
 				clusters[-1].append(ids[i])
 			else:
 				clusters.append([ids[i]])
+				anchor_coord = curr_coord
 
 		# Flatten each cluster to the average coordinate along the axis
 		for cluster in clusters:
@@ -679,11 +966,57 @@ static func _estimate_curvature(world_point: Vector3, nearest_prim: Dictionary, 
 
 	# ── SDF evaluation ───────────────────────────────────────────────────────
 
-static func scene_sdf(world_point: Vector3, primitives: Array, smoothness: float) -> float:
+static func scene_sdf(world_point: Vector3, primitives: Array, smoothness: float, mirror_x: bool = false) -> float:
 	if primitives.is_empty():
 		return 1e9
-	# Bilateral X-Symmetry Enforcement: fold world_point into +X domain
-	var sym_point := Vector3(abs(world_point.x), world_point.y, world_point.z)
+	# Bilateral X-Symmetry Enforcement: fold world_point into the +X domain.
+	#
+	# This is now OPT-IN (mirror_x), defaulting OFF, because folding does not
+	# merely tidy up symmetry - it SILENTLY DELETES GEOMETRY. The fold can only
+	# ever produce sample points with x >= 0, so a primitive whose CENTRE sits
+	# at negative x is never reached at all: its local coordinate would need a
+	# negative sample x to evaluate inside. It does not get mirrored to the
+	# other side, it vanishes.
+	#
+	# heavy_hull was losing two primitives to this: the port side-rail at
+	# x=-1.82 (masked, because its starboard twin at +1.82 was mirrored back
+	# over the port side and looked correct) and the unpaired HEMISPHERE cupola
+	# at x=-0.7, which simply never appeared in any baked hull.
+	#
+	# Exact symmetry for hand-mirrored pairs now comes from _center_grid_x()
+	# instead, which makes the sample lattice itself mirror-symmetric. That
+	# achieves what the fold was reaching for without destroying anything.
+	var sym_point := Vector3(abs(world_point.x), world_point.y, world_point.z) if mirror_x else world_point
+
+	# Hard union: min() is associative, so array order cannot matter.
+	if smoothness <= 0.0001:
+		var d_hard: float = primitive_sdf(sym_point, primitives[0])
+		for i in range(1, primitives.size()):
+			d_hard = min(d_hard, primitive_sdf(sym_point, primitives[i]))
+		return d_hard
+
+	# Smooth union: fold in ARRAY ORDER. Do not "improve" this by sorting.
+	#
+	# smin() is not associative, so array order does affect the result, and that
+	# does cost a little bilateral symmetry (airship_hull, the only hull with a
+	# large smoothness, ends up with ~3% of its vertices lacking an exact mirror
+	# partner). Sorting the distances first makes the fold order a function of
+	# geometry alone and fixes that - and it also DESTROYS both smooth hulls.
+	#
+	# The reason is that a smooth union is load-bearing structure here, not a
+	# finishing touch. airship_hull's primitives do not overlap: the envelope is
+	# a chain of separate volumes that only becomes one connected surface because
+	# each iterated smin() inflates the running result toward the next primitive,
+	# compounding across the fold and bridging the gaps between them. Sorting
+	# ascending blends the running minimum against ever more DISTANT values,
+	# where smin(a, b, k) with b >> a just returns a - so the compounding stops,
+	# the bridges vanish, and the hull falls apart into detached pieces (measured:
+	# airship 2 components, flying_wing 2 components + 24 boundary edges).
+	#
+	# A few percent of mirror asymmetry on one hull is a far better trade than an
+	# airship in bits. If exact symmetry for smooth hulls is wanted later, the fix
+	# is an order-independent blend that still compounds - exponential smooth-min,
+	# -log(sum(exp(-k*d_i)))/k - not sorting this one.
 	var d: float = primitive_sdf(sym_point, primitives[0])
 	for i in range(1, primitives.size()):
 		d = smin(d, primitive_sdf(sym_point, primitives[i]), smoothness)
@@ -715,11 +1048,13 @@ static func _scaled_sdf(p: Vector3, h: Vector3, type: int) -> float:
 		TYPE_BOX:
 			return _sdf_box(p, h)
 		TYPE_SPHERE:
-			var r: float = min(h.x, min(h.y, h.z))
-			return p.length() - r
+			# Fills the primitive's box as an ellipsoid rather than collapsing to
+			# a ball of the smallest half-extent - see _sdf_ellipsoid.
+			return _sdf_ellipsoid(p, h)
 		TYPE_CYLINDER:
-			var r: float = min(h.x, h.z)
-			return _sdf_cylinder(p, r, h.y)
+			# Elliptical cross-section, so a cylinder stretched in one horizontal
+			# axis stays stretched instead of shrinking to the narrower one.
+			return _sdf_elliptic_cylinder(p, h.x, h.z, h.y)
 		TYPE_WEDGE:
 			return _sdf_wedge(p, h)
 		TYPE_CONE:
@@ -740,8 +1075,7 @@ static func _scaled_sdf(p: Vector3, h: Vector3, type: int) -> float:
 			var r: float = min(h.x, h.z)
 			return _sdf_half_cylinder(p, r, h.y)
 		TYPE_HEMISPHERE:
-			var r: float = min(h.x, min(h.y, h.z))
-			return _sdf_dome(p, r, h.y / r if r > 0.0001 else 1.0)
+			return _sdf_dome(p, h)
 		TYPE_CAPSULE:
 			var r: float = min(h.x, h.z)
 			return _sdf_capsule(p, r, h.y - r)
@@ -757,14 +1091,39 @@ static func _scaled_sdf(p: Vector3, h: Vector3, type: int) -> float:
 		TYPE_FENDER:
 			return _sdf_fender(p, min(h.x, h.z), min(h.y, h.z) * 0.3)
 		TYPE_CANOPY:
-			var r: float = min(h.x, h.y)
-			return _sdf_dome(p, r, h.z / r if r > 0.0001 else 1.35)
+			# A canopy is just a dome elongated along Z, which the ellipsoidal
+			# dome expresses directly through its per-axis radii.
+			return _sdf_dome(p, h)
 		TYPE_RING:
 			var r_out: float = min(h.x, h.z)
 			var r_in: float = r_out * 0.6
 			return _sdf_ring(p, r_out, r_in, h.y)
 		_:
 			return _sdf_box(p, h)
+
+# Ellipsoid with independent per-axis radii (Inigo Quilez's standard bounded
+# approximation - not an exact distance field, but accurate near the surface,
+# which is all polygonisation needs).
+#
+# This exists because the sphere family used to collapse non-uniform scale to
+# min(h.x, h.y, h.z) and return a PERFECT BALL of that radius. That is not an
+# approximation of an ellipsoid, it is a different and far smaller shape, and it
+# destroyed every hull built on a stretched sphere:
+#
+#   airship_hull's envelope is a SPHERE scaled 5.8 x 3.6 x 12.6 - a 12.6-long
+#   gasbag. min() made it a ball of radius 1.8, so the envelope no longer
+#   reached the gondola, tail or nose, and the hull baked as a small ball with
+#   several boxes floating around it in mid-air. flying_wing_hull's 5.6-long
+#   body sphere became a 0.7-radius pebble the same way.
+static func _sdf_ellipsoid(p: Vector3, r: Vector3) -> float:
+	var rr := Vector3(max(r.x, 0.0001), max(r.y, 0.0001), max(r.z, 0.0001))
+	var k0: float = Vector3(p.x / rr.x, p.y / rr.y, p.z / rr.z).length()
+	if k0 < 0.00001:
+		return -min(rr.x, min(rr.y, rr.z))
+	var k1: float = Vector3(p.x / (rr.x * rr.x), p.y / (rr.y * rr.y), p.z / (rr.z * rr.z)).length()
+	if k1 < 0.000001:
+		return k0 - 1.0
+	return k0 * (k0 - 1.0) / k1
 
 static func _sdf_box(p: Vector3, half_extents: Vector3) -> float:
 	var q: Vector3 = p.abs() - half_extents
@@ -820,8 +1179,24 @@ static func _sdf_wedge(p: Vector3, he: Vector3) -> float:
 # _sdf_wedge, just one extra shallow cut instead of a full-height ramp.
 static func _sdf_slope(p: Vector3, he: Vector3) -> float:
 	var d_box: float = _sdf_box(p, he)
-	var d_cut: float = (p.y - p.z - 0.65) / sqrt(2.0)
-	return max(d_box, d_cut)
+	# The cut plane has to be expressed RELATIVE to the primitive's half-extents.
+	#
+	# It used to be the absolute plane (p.y - p.z - 0.65), which is correct only
+	# at he = (0.5, 0.5, 0.5) - the unit cube the 0.35 bevel offset was measured
+	# on. primitive_sdf() passes local coordinates at full world scale, so on any
+	# other size the cut landed in the wrong place and the bevel came out at an
+	# arbitrary angle: assault_hull scales its SLOPE to 2.8 x 1.6 x 2 and
+	# light_hull to 2.3 x 1.05 x 1.45, so neither matched its own authored
+	# preview mesh, and the glacis angle was whatever the scale happened to make
+	# it. Normalising by he.y/he.z reproduces build_slope()'s proportions at
+	# every size: the plane passes through (y, z) = (he.y, -0.3*he.z) and
+	# (0.3*he.y, -he.z), which is 2y - 2z = 1.3 on the unit cube, i.e. exactly
+	# the old constant.
+	if he.y <= 0.0001 or he.z <= 0.0001:
+		return d_box
+	var f: float = p.y / he.y - p.z / he.z - 1.3
+	var grad: float = sqrt(1.0 / (he.y * he.y) + 1.0 / (he.z * he.z))
+	return max(d_box, f / grad)
 
 # Box tapered from full half-extents at -Y to half-extents*top_scale at +Y -
 # matches build_hull_primitives.py's build_frustum() (top_scale=0.5) and, at
@@ -837,12 +1212,29 @@ static func _sdf_frustum(p: Vector3, he: Vector3, top_scale: float) -> float:
 	var outside := Vector3(max(qx, 0.0), max(qy, 0.0), max(qz, 0.0))
 	return outside.length() + min(max(qx, max(qy, qz)), 0.0)
 
-# Rounded box (exact SDF, Quilez's standard "box minus radius, then grow
-# back out by radius" construction) - matches build_hull_primitives.py's
-# build_chamfer_box() bevel offset=0.12.
-static func _sdf_chamfer_box(p: Vector3, he: Vector3, radius: float) -> float:
-	var inner_he: Vector3 = he - Vector3(radius, radius, radius)
-	return _sdf_box(p, inner_he) - radius
+# TRUE chamfered box: the box intersected with 45-degree planes across each of
+# its 12 edges, giving flat bevel facets and hard edges either side of them.
+#
+# This used to be a ROUNDED box - _sdf_box(p, he - r) - r, Quilez's round-over
+# construction. That is a fillet, not a chamfer: it replaces every edge with a
+# smoothly curved quarter-round, which by definition has no hard edge anywhere on
+# it. On assault_hull it was the single largest source of non-cardinal surface
+# area, and it is exactly the "smooshed instead of constructed" look - the shape
+# named CHAMFER_BOX was the one shape in the kit guaranteed to never produce a
+# crisp edge. build_hull_primitives.py's build_chamfer_box() authors a real
+# flat-bevel chamfer, so the SDF now matches the mesh the editor previews.
+#
+# Each cut is a half-space on the sum of two |coords| - the standard convex
+# half-space-intersection technique already used by _sdf_wedge and _sdf_ring.
+# The 8 corner facets fall out of the three edge cuts meeting, no extra term.
+static func _sdf_chamfer_box(p: Vector3, he: Vector3, chamfer: float) -> float:
+	var d: float = _sdf_box(p, he)
+	var q: Vector3 = p.abs()
+	var inv_sqrt2: float = 0.70710678
+	d = max(d, (q.x + q.y - (he.x + he.y - chamfer)) * inv_sqrt2)
+	d = max(d, (q.y + q.z - (he.y + he.z - chamfer)) * inv_sqrt2)
+	d = max(d, (q.x + q.z - (he.x + he.z - chamfer)) * inv_sqrt2)
+	return d
 
 # Flat-bottomed half-round trough, extruded along Z - matches
 # build_hull_primitives.py's build_half_cylinder(): a disc of the given
@@ -865,11 +1257,32 @@ static func _sdf_half_cylinder(p: Vector3, radius: float, half_len: float) -> fl
 # script's build_canopy() does, via a non-uniform-scale approximation
 # (same acceptable-approximation tradeoff primitive_sdf() already documents
 # for non-uniform scale in general).
-static func _sdf_dome(p: Vector3, radius: float, z_stretch: float) -> float:
-	var q := Vector3(p.x, p.y + radius, p.z / z_stretch)
-	var d_sphere: float = (q.length() - radius) * min(1.0, z_stretch)
-	var d_flat: float = -p.y - radius
-	return max(d_sphere, d_flat)
+# Rewritten to take the half-extents directly. The old signature took a single
+# radius plus a z_stretch factor, and every caller passed min(h...) for the
+# radius - so a dome or canopy stretched in x or z shrank to its narrowest axis
+# instead of filling its box (see _sdf_ellipsoid for the same bug on SPHERE).
+#
+# Base sits on the primitive's floor (y = -he.y) and the apex reaches its ceiling
+# (y = +he.y), so the vertical radius is the full 2*he.y about a centre at the
+# floor - matching build_hull_primitives.py's build_hemisphere()/build_canopy(),
+# which both fill the unit cell.
+static func _sdf_dome(p: Vector3, he: Vector3) -> float:
+	var radii := Vector3(he.x, he.y * 2.0, he.z)
+	var d_ellip: float = _sdf_ellipsoid(Vector3(p.x, p.y + he.y, p.z), radii)
+	var d_flat: float = -p.y - he.y
+	return max(d_ellip, d_flat)
+
+# Cylinder with an elliptical cross-section, extruded along Y.
+static func _sdf_elliptic_cylinder(p: Vector3, rx: float, rz: float, half_height: float) -> float:
+	var ex: float = max(rx, 0.0001)
+	var ez: float = max(rz, 0.0001)
+	# Radial term scaled back into world units so it stays comparable with the
+	# Y term (a raw normalised value would not be a distance).
+	var k: float = Vector2(p.x / ex, p.z / ez).length()
+	var d_radial: float = (k - 1.0) * min(ex, ez)
+	var d_y: float = abs(p.y) - half_height
+	var outside := Vector2(max(d_radial, 0.0), max(d_y, 0.0))
+	return outside.length() + min(max(d_radial, d_y), 0.0)
 
 # Capsule (cylinder + hemispherical caps) along Y - exact SDF, matches
 # Godot's native CapsuleMesh built directly for this type in hull_builder.gd
@@ -933,14 +1346,27 @@ static func _sdf_ring(p: Vector3, outer_radius: float, inner_radius: float, half
 	var outside := Vector2(max(d2, 0.0), max(dy, 0.0))
 	return outside.length() + min(max(d2, dy), 0.0)
 
-static func _sdf_normal(p: Vector3, primitives: Array, smoothness: float) -> Vector3:
+# Raw (un-normalised) central-difference gradient. Callers that need to know
+# whether the gradient actually exists use this instead of _sdf_normal(), which
+# hides a vanishing gradient behind a Vector3.UP fallback.
+static func _sdf_gradient(p: Vector3, primitives: Array, smoothness: float, mirror_x: bool = false) -> Vector3:
 	var eps := 0.01
-	var dx: float = scene_sdf(p + Vector3(eps, 0, 0), primitives, smoothness) \
-		- scene_sdf(p - Vector3(eps, 0, 0), primitives, smoothness)
-	var dy: float = scene_sdf(p + Vector3(0, eps, 0), primitives, smoothness) \
-		- scene_sdf(p - Vector3(0, eps, 0), primitives, smoothness)
-	var dz: float = scene_sdf(p + Vector3(0, 0, eps), primitives, smoothness) \
-		- scene_sdf(p - Vector3(0, 0, eps), primitives, smoothness)
+	return Vector3(
+		scene_sdf(p + Vector3(eps, 0, 0), primitives, smoothness, mirror_x) \
+			- scene_sdf(p - Vector3(eps, 0, 0), primitives, smoothness, mirror_x),
+		scene_sdf(p + Vector3(0, eps, 0), primitives, smoothness, mirror_x) \
+			- scene_sdf(p - Vector3(0, eps, 0), primitives, smoothness, mirror_x),
+		scene_sdf(p + Vector3(0, 0, eps), primitives, smoothness, mirror_x) \
+			- scene_sdf(p - Vector3(0, 0, eps), primitives, smoothness, mirror_x))
+
+static func _sdf_normal(p: Vector3, primitives: Array, smoothness: float, mirror_x: bool = false) -> Vector3:
+	var eps := 0.01
+	var dx: float = scene_sdf(p + Vector3(eps, 0, 0), primitives, smoothness, mirror_x) \
+		- scene_sdf(p - Vector3(eps, 0, 0), primitives, smoothness, mirror_x)
+	var dy: float = scene_sdf(p + Vector3(0, eps, 0), primitives, smoothness, mirror_x) \
+		- scene_sdf(p - Vector3(0, eps, 0), primitives, smoothness, mirror_x)
+	var dz: float = scene_sdf(p + Vector3(0, 0, eps), primitives, smoothness, mirror_x) \
+		- scene_sdf(p - Vector3(0, 0, eps), primitives, smoothness, mirror_x)
 	var n := Vector3(dx, dy, dz)
 	if n.length_squared() < 0.0000001:
 		return Vector3.UP
@@ -973,7 +1399,7 @@ static func _grid_index(ix: int, iy: int, iz: int, dim_x: int, dim_y: int) -> in
 
 static func _march_cell(st: SurfaceTool, ix: int, iy: int, iz: int, dim_x: int, dim_y: int,
 		field: PackedFloat32Array, origin: Vector3, voxel_size: float,
-		primitives: Array, smoothness: float) -> int:
+		primitives: Array, smoothness: float, mirror_x: bool = false) -> int:
 	var corner_val := PackedFloat32Array()
 	corner_val.resize(8)
 	for c in range(8):
@@ -1015,9 +1441,9 @@ static func _march_cell(st: SurfaceTool, ix: int, iy: int, iz: int, dim_x: int, 
 		var pa: Vector3 = edge_pos[tris[i]]
 		var pb: Vector3 = edge_pos[tris[i + 1]]
 		var pc: Vector3 = edge_pos[tris[i + 2]]
-		var na := _sdf_normal(pa, primitives, smoothness)
-		var nb := _sdf_normal(pb, primitives, smoothness)
-		var nc := _sdf_normal(pc, primitives, smoothness)
+		var na := _sdf_normal(pa, primitives, smoothness, mirror_x)
+		var nb := _sdf_normal(pb, primitives, smoothness, mirror_x)
+		var nc := _sdf_normal(pc, primitives, smoothness, mirror_x)
 
 		# Defensive winding fix: force triangle winding to agree with the
 		# outward SDF gradient regardless of the source table's assumed

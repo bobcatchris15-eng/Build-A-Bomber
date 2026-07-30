@@ -4,11 +4,13 @@
 	"_role": "Main-battle workhorse chassis (T-34/Sherman/Leopard register). HULL_MASSING_SPEC.md's flagship: distinct boxy lower tub, a genuinely separate sloped glacis plate, flat sponson/fender shelves over the track run, a rear engine deck, and a flat turret-ring platform on top. Authored at roughly the sidecar size (3.0 x 1.8 x 5.5, nose at -Z) so ModuleCatalog.get_hull_mesh_fit()'s orientation search resolves to identity and its per-axis fit stays near 1:1.",
 	"bake": {
 		"smoothness": 0.0,
-		"resolution": 24,
-		"method": "dc",
+		"resolution": 72,
+		"method": "csg",
 		"fit_percent": 95,
 		"facet_angle": 15,
-		"crystallinity": 0.0
+		"crystallinity": 0.0,
+		"chamfer_edge_pct": 5.0,
+		"mirror_x": false
 	},
 	"sidecar": {
 		"name": "Medium Hull",

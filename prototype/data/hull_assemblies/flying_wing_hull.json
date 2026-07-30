@@ -4,10 +4,13 @@
 	"_role": "Blended wing body / lifting body (B-2, Horten register). One of the two hulls the SDF pipeline genuinely suits better than the old convex-hull approach: the whole point is a CONTINUOUS blend from centre body into wing with no hard join, which is exactly what smooth-min does for free. Wide span (10 x 1.5 x 6), thin section, faired canopy rather than a proud box.",
 	"bake": {
 		"smoothness": 0.18,
-		"resolution": 24,
+		"resolution": 32,
 		"method": "dc",
 		"fit_percent": 95,
-		"facet_angle": 15
+		"facet_angle": 15,
+		"crystallinity": 0.0,
+		"chamfer_edge_pct": 5.0,
+		"mirror_x": false
 	},
 	"sidecar": {
 		"name": "Flying Wing Hull",

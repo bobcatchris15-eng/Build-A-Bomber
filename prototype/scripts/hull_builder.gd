@@ -171,11 +171,40 @@ var primitive_defs: Array = [
 # Bake parameters, read from the bottom-bar controls at export time.
 var smoothness: float = 0.0
 var bake_resolution: int = 32
-var bake_method: String = "dc"
+# Exact polygonal CSG by default - flat panels, hard edges, no voxel grid. The
+# "dc"/"mc" SDF methods remain available for deliberately soft shapes.
+var bake_method: String = "csg"
 var fit_percent: float = 95.0
 var facet_angle: float = 15.0
 var crystallinity: float = 0.0
 var chamfer_edge_pct: float = 5.0
+# Fold the SDF into the +X half. Off by default: the fold DELETES any primitive
+# centred at negative X (it can never be sampled), so symmetry comes from
+# explicit mirrored pairs (the Mirror X action) plus the mirror-symmetric sample
+# lattice instead. See SDFMeshBaker.scene_sdf().
+var mirror_x: bool = false
+
+# Frame Builder symmetry constraint (Stage 1).
+#
+# With this on, placing a girder off the centreline immediately creates its
+# mirror on the other side, and the pair stays welded together: move, scale,
+# rotate or delete one and the other follows. A hull is bilaterally symmetric
+# in practice, so authoring both halves by hand is duplicated effort and the
+# usual source of a frame that is subtly lopsided.
+#
+# Overlap between a block and its mirror is harmless and deliberately not
+# guarded against - the skin/plating bake unions everything into one surface, so
+# intersecting girders simply merge.
+#
+# This is the authoring-time constraint. It is NOT SDFMeshBaker's mirror_x
+# (above): that folds the FIELD at bake time and deletes anything centred at
+# negative X. This creates real, editable primitives on both sides, which is
+# what the baker's centred sample lattice is built to keep exactly symmetric.
+var frame_symmetry: bool = true
+
+# Anything closer than this to the centreline counts as ON it, and so gets no
+# partner - it is already symmetric about X.
+const SYMMETRY_CENTRE_EPS := 0.01
 
 enum AuthoringStage {
 	STAGE_FRAME,      # Stage 1: Frame Builder (Girders & Structural Skeleton)
@@ -369,7 +398,11 @@ func _rebake_smoothness_preview() -> void:
 	if primitives.is_empty():
 		_preview_mesh_instance.visible = false
 		return
-	var mesh := SDFMeshBaker.bake(primitives, smoothness, PREVIEW_BAKE_RESOLUTION, bake_method, fit_percent, facet_angle, crystallinity)
+	# Every argument the final bake passes has to be passed here too, or the
+	# preview is a picture of a mesh you will never get. chamfer_edge_pct used
+	# to be omitted, so the preview silently baked at the 5.0 default while the
+	# export used the slider value.
+	var mesh := SDFMeshBaker.bake(primitives, smoothness, PREVIEW_BAKE_RESOLUTION, bake_method, fit_percent, facet_angle, crystallinity, chamfer_edge_pct, mirror_x)
 	if mesh == null:
 		_preview_mesh_instance.visible = false
 		return
@@ -918,6 +951,7 @@ func _on_gizmo_drag_motion(event: InputEventMouseMotion) -> void:
 		prim.position = _gizmo_drag_start_pos + delta
 		if prim.node:
 			prim.node.position = prim.position
+		_sync_mirror_partner(prim)
 		_update_properties_panel()
 
 	elif _gizmo_drag_mode == "scale":
@@ -940,6 +974,7 @@ func _on_gizmo_drag_motion(event: InputEventMouseMotion) -> void:
 		prim.scale = new_scale
 		if prim.node:
 			prim.node.scale = new_scale
+		_sync_mirror_partner(prim)
 		_update_properties_panel()
 
 	elif _gizmo_drag_mode == "rotate":
@@ -968,6 +1003,7 @@ func _on_gizmo_drag_motion(event: InputEventMouseMotion) -> void:
 		prim.rotation = new_basis.get_euler()
 		if prim.node:
 			prim.node.rotation = prim.rotation
+		_sync_mirror_partner(prim)
 		_update_properties_panel()
 
 func _on_gizmo_drag_end() -> void:
@@ -1036,8 +1072,21 @@ func _add_primitive_at_position(type: PrimitiveType, position: Vector3) -> void:
 
 	hull_container.add_child(mi)
 	primitives.append(prim)
-	_select_primitive(primitives.size() - 1)
-	_update_status("Added " + _def_name(type))
+	var added_index := primitives.size() - 1
+
+	# Symmetry constraint: a girder placed off the centreline gets its twin
+	# immediately, so the frame can't be built lopsided. The partner is appended
+	# after, so re-select the primitive the user actually placed.
+	var paired := false
+	if frame_symmetry and current_stage == AuthoringStage.STAGE_FRAME:
+		_create_mirror_partner(prim)
+		paired = _has_partner(prim)
+
+	_select_primitive(added_index)
+	if paired:
+		_update_status("Added " + _def_name(type) + " (+ mirrored twin)")
+	else:
+		_update_status("Added " + _def_name(type))
 
 # ── Delete ────────────────────────────────────────────────────────────────────
 
@@ -1050,6 +1099,24 @@ func _delete_selected() -> void:
 	var name := _def_name(prim.type)
 
 	_detach_gizmo()
+
+	# Symmetry constraint: a pair is deleted as a unit. Leaving the twin behind
+	# would silently break the symmetry the constraint just enforced, and the
+	# orphan is the hard kind of mistake to spot - it looks intentional.
+	var partner_deleted := false
+	if _has_partner(prim):
+		var partner = prim["mirror_partner"]
+		_unlink_mirror_partner(prim)
+		var pidx: int = primitives.find(partner)
+		if pidx >= 0:
+			if partner.node:
+				partner.node.queue_free()
+			primitives.remove_at(pidx)
+			partner_deleted = true
+			# Removing the partner may have shifted the selection index.
+			if pidx < selected_primitive:
+				selected_primitive -= 1
+
 	if prim.node:
 		prim.node.queue_free()
 	primitives.remove_at(selected_primitive)
@@ -1068,6 +1135,8 @@ func _delete_selected() -> void:
 		_select_primitive(next)
 
 	var confirm = "Deleted " + _def_name(prim.type)
+	if partner_deleted:
+		confirm += " (+ mirrored twin)"
 	_update_status(confirm)
 
 # ── Duplicate ─────────────────────────────────────────────────────────────────
@@ -1108,8 +1177,21 @@ func _duplicate_selected() -> void:
 
 	hull_container.add_child(mi)
 	primitives.append(prim)
-	_select_primitive(primitives.size() - 1)
-	_update_status("Duplicated " + _def_name(src.type))
+	var dup_index := primitives.size() - 1
+
+	# A duplicate is a newly placed girder like any other, so it gets its own
+	# twin. It deliberately does NOT inherit src's pairing - the new dict has no
+	# mirror_partner key, so it starts unlinked and gets a fresh partner here.
+	var paired := false
+	if frame_symmetry and current_stage == AuthoringStage.STAGE_FRAME:
+		_create_mirror_partner(prim)
+		paired = _has_partner(prim)
+
+	_select_primitive(dup_index)
+	if paired:
+		_update_status("Duplicated " + _def_name(src.type) + " (+ mirrored twin)")
+	else:
+		_update_status("Duplicated " + _def_name(src.type))
 
 # ── Primitive node builders ───────────────────────────────────────────────────
 
@@ -1424,7 +1506,7 @@ func _update_finishing_preview(force_high_res: bool = false) -> void:
 		return
 
 	var res: int = bake_resolution if force_high_res else PREVIEW_BAKE_RESOLUTION
-	var mesh := SDFMeshBaker.bake(primitives, smoothness, res, bake_method, fit_percent, facet_angle, crystallinity, chamfer_edge_pct)
+	var mesh := SDFMeshBaker.bake(primitives, smoothness, res, bake_method, fit_percent, facet_angle, crystallinity, chamfer_edge_pct, mirror_x)
 	if mesh != null:
 		_preview_mesh_instance.mesh = mesh
 		var mat := StandardMaterial3D.new()
@@ -1525,6 +1607,30 @@ func _update_properties_panel() -> void:
 	del_btn.pressed.connect(_delete_selected)
 	properties_panel.add_child(del_btn)
 
+	properties_panel.add_child(HSeparator.new())
+
+	var sym_chk := CheckBox.new()
+	sym_chk.text = "Enforce Left/Right Symmetry"
+	sym_chk.tooltip_text = "Placing a girder off the centreline also places its " \
+		+ "mirror on the other side, and the\npair stays welded: move, scale, " \
+		+ "rotate or delete one and the other follows.\nOverlap between the two " \
+		+ "is fine - the plating bake unions everything into one skin."
+	sym_chk.button_pressed = frame_symmetry
+	sym_chk.toggled.connect(func(t: bool):
+		frame_symmetry = t
+		# Turning it ON adopts the existing frame: pair up anything that already
+		# has an exact opposite, so previously hand-built halves start moving
+		# together instead of only newly-placed girders benefiting.
+		if t:
+			_relink_mirror_pairs()
+			_update_status("Symmetry on - existing mirrored girders linked")
+		else:
+			for p in primitives:
+				p["mirror_partner"] = null
+			_update_status("Symmetry off - girders edit independently")
+	)
+	properties_panel.add_child(sym_chk)
+
 func _build_finishing_properties_panel() -> void:
 	_add_section_header("🎨 Hull Finishing & Plating")
 
@@ -1540,12 +1646,17 @@ func _build_finishing_properties_panel() -> void:
 	algo_lbl.text = "Plating Algorithm:"
 	properties_panel.add_child(algo_lbl)
 
+	# CSG first and default: it is the only method that produces exactly planar
+	# panels and genuinely hard edges, because it never samples a voxel grid.
+	# The two SDF methods stay for deliberately soft/organic shapes, where the
+	# smooth-union blending between primitives is the point.
 	var algo_opt := OptionButton.new()
-	algo_opt.add_item("Dual Contouring (Constructed / Faceted)", 0)
-	algo_opt.add_item("Marching Cubes (Smooth / Aerodynamic)", 1)
-	algo_opt.selected = 0 if bake_method == "dc" else 1
+	algo_opt.add_item("Exact CSG (Manufactured / Hard Edges)", 0)
+	algo_opt.add_item("Dual Contouring (Faceted / Blended)", 1)
+	algo_opt.add_item("Marching Cubes (Smooth / Aerodynamic)", 2)
+	algo_opt.selected = 0 if bake_method == "csg" else (1 if bake_method == "dc" else 2)
 	algo_opt.item_selected.connect(func(idx: int):
-		bake_method = "dc" if idx == 0 else "mc"
+		bake_method = "csg" if idx == 0 else ("dc" if idx == 1 else "mc")
 		_queue_finishing_preview()
 	)
 	properties_panel.add_child(algo_opt)
@@ -1599,6 +1710,20 @@ func _build_finishing_properties_panel() -> void:
 		_queue_finishing_preview()
 	)
 	properties_panel.add_child(ch_slider)
+
+	# Bilateral X-Symmetry
+	var sym_chk := CheckBox.new()
+	sym_chk.text = "Force Bilateral X-Symmetry"
+	sym_chk.tooltip_text = "Folds the hull onto its centreline.\nWARNING: any " \
+		+ "primitive whose CENTRE sits at negative X is DELETED by the fold - " \
+		+ "it\ncannot be sampled at all. Use the Mirror X action to build " \
+		+ "symmetric pairs instead."
+	sym_chk.button_pressed = mirror_x
+	sym_chk.toggled.connect(func(t: bool):
+		mirror_x = t
+		_queue_finishing_preview()
+	)
+	properties_panel.add_child(sym_chk)
 
 	# Frame Toggle
 	var frame_chk := CheckBox.new()
@@ -1675,6 +1800,119 @@ func _mirror_selected_x() -> void:
 	_select_primitive(primitives.size() - 1)
 	_update_status("Mirrored " + _def_name(src.type) + " across X axis")
 
+# ── Frame symmetry constraint ─────────────────────────────────────────────
+#
+# Pairs are linked by storing each other's dictionary under "mirror_partner".
+# GDScript dictionaries are reference types, so both halves point at the same
+# objects the `primitives` array holds - no index bookkeeping to invalidate when
+# something is removed from the middle of the array.
+
+static func _mirror_position(p: Vector3) -> Vector3:
+	return Vector3(-p.x, p.y, p.z)
+
+# Negating yaw and roll (but not pitch) is what makes the mirrored copy a true
+# reflection rather than a rotated one - same convention _mirror_selected_x uses.
+static func _mirror_rotation(r: Vector3) -> Vector3:
+	return Vector3(r.x, -r.y, -r.z)
+
+func _has_partner(prim) -> bool:
+	return prim.has("mirror_partner") and prim["mirror_partner"] != null
+
+# Creates the opposite-side twin of `prim` and welds the two together. No-op for
+# a primitive already on the centreline, already paired, or when there is no room.
+func _create_mirror_partner(prim) -> void:
+	if _has_partner(prim):
+		return
+	if absf(prim.position.x) <= SYMMETRY_CENTRE_EPS:
+		return
+	if primitives.size() >= max_primitives:
+		_show_warning("Maximum primitives reached (" + str(max_primitives) + ") - symmetry partner not created")
+		return
+
+	var new_pos := _mirror_position(prim.position)
+	var new_rot := _mirror_rotation(prim.rotation)
+
+	var mi := _make_primitive_node(prim.type)
+	mi.position = new_pos
+	mi.rotation = new_rot
+	mi.scale = prim.scale
+	for child in mi.get_children():
+		if child is MeshInstance3D:
+			var mat = child.material_override as StandardMaterial3D
+			if mat:
+				mat.albedo_color = prim.color
+
+	var partner := {
+		type     = prim.type,
+		position = new_pos,
+		rotation = new_rot,
+		scale    = prim.scale,
+		color    = prim.color,
+		node     = mi,
+	}
+	partner["mirror_partner"] = prim
+	prim["mirror_partner"] = partner
+
+	hull_container.add_child(mi)
+	primitives.append(partner)
+
+# Pushes `prim`'s transform onto its twin. Called after every edit that can move,
+# resize or reorient a primitive, so a pair can never drift apart.
+func _sync_mirror_partner(prim) -> void:
+	if not _has_partner(prim):
+		return
+	var partner = prim["mirror_partner"]
+	# If the source has been dragged onto the centreline the pair is redundant,
+	# but silently deleting the twin mid-drag would be surprising - leave both in
+	# place and keep them synced.
+	partner.position = _mirror_position(prim.position)
+	partner.rotation = _mirror_rotation(prim.rotation)
+	partner.scale = prim.scale
+	partner.color = prim.color
+	if partner.node:
+		partner.node.position = partner.position
+		partner.node.rotation = partner.rotation
+		partner.node.scale = partner.scale
+		for child in partner.node.get_children():
+			if child is MeshInstance3D:
+				var mat = child.material_override as StandardMaterial3D
+				if mat:
+					mat.albedo_color = partner.color
+
+# Breaks the link both ways - used when one half is deleted on its own.
+func _unlink_mirror_partner(prim) -> void:
+	if not _has_partner(prim):
+		return
+	var partner = prim["mirror_partner"]
+	if partner is Dictionary:
+		partner["mirror_partner"] = null
+	prim["mirror_partner"] = null
+
+# Re-establishes pairs after loading an assembly, which stores both halves as
+# plain primitives with no link between them. Without this, editing a loaded
+# design would move one side only - exactly the lopsided-frame problem the
+# constraint exists to prevent.
+func _relink_mirror_pairs() -> void:
+	for p in primitives:
+		p["mirror_partner"] = null
+	for i in range(primitives.size()):
+		var a = primitives[i]
+		if _has_partner(a) or absf(a.position.x) <= SYMMETRY_CENTRE_EPS:
+			continue
+		for j in range(i + 1, primitives.size()):
+			var b = primitives[j]
+			if _has_partner(b) or b.type != a.type:
+				continue
+			if b.position.distance_to(_mirror_position(a.position)) > 0.001:
+				continue
+			if b.scale.distance_to(a.scale) > 0.001:
+				continue
+			if b.rotation.distance_to(_mirror_rotation(a.rotation)) > 0.001:
+				continue
+			a["mirror_partner"] = b
+			b["mirror_partner"] = a
+			break
+
 func _add_section_header(text: String) -> void:
 	var lbl := Label.new()
 	lbl.text = text
@@ -1731,6 +1969,7 @@ func _set_position(idx: int, value: Vector3) -> void:
 	primitives[idx].position = value
 	if primitives[idx].node:
 		primitives[idx].node.position = value
+	_sync_mirror_partner(primitives[idx])
 	_update_status("Position updated")
 
 func _set_rotation(idx: int, value: Vector3) -> void:
@@ -1739,6 +1978,7 @@ func _set_rotation(idx: int, value: Vector3) -> void:
 	primitives[idx].rotation = value
 	if primitives[idx].node:
 		primitives[idx].node.rotation = value
+	_sync_mirror_partner(primitives[idx])
 	_update_status("Rotation updated")
 
 func _set_scale(idx: int, value: Vector3) -> void:
@@ -1747,6 +1987,7 @@ func _set_scale(idx: int, value: Vector3) -> void:
 	primitives[idx].scale = value
 	if primitives[idx].node:
 		primitives[idx].node.scale = value
+	_sync_mirror_partner(primitives[idx])
 	_update_status("Scale updated")
 
 func _on_color_changed(idx: int, color: Color) -> void:
@@ -1759,6 +2000,7 @@ func _on_color_changed(idx: int, color: Color) -> void:
 				var mat = child.material_override as StandardMaterial3D
 				if mat:
 					mat.albedo_color = color
+	_sync_mirror_partner(primitives[idx])
 	_update_status("Color updated")
 
 # ── Bottom bar callbacks ──────────────────────────────────────────────────────
@@ -1872,7 +2114,7 @@ func _on_export_confirmed(dialog: AcceptDialog) -> void:
 	# Let the status label repaint before the (synchronous) bake blocks the thread.
 	await get_tree().process_frame
 
-	var mesh := SDFMeshBaker.bake(primitives, smoothness, bake_resolution, bake_method, fit_percent, facet_angle, crystallinity, chamfer_edge_pct)
+	var mesh := SDFMeshBaker.bake(primitives, smoothness, bake_resolution, bake_method, fit_percent, facet_angle, crystallinity, chamfer_edge_pct, mirror_x)
 	if mesh == null:
 		_show_error("Bake produced no geometry - try lowering Smoothness or adding more primitives")
 		return
@@ -2143,7 +2385,8 @@ func serialize_assembly(hull_name: String = "", sidecar: Dictionary = {}) -> Dic
 			"fit_percent": fit_percent,
 			"facet_angle": facet_angle,
 			"crystallinity": crystallinity,
-			"chamfer_edge_pct": chamfer_edge_pct
+			"chamfer_edge_pct": chamfer_edge_pct,
+			"mirror_x": mirror_x
 		},
 		# Verbatim gameplay stats. Deliberately NOT recomputed from volume on
 		# load/bake the way the interactive export dialog does it - the
@@ -2191,6 +2434,12 @@ func deserialize_assembly(data: Dictionary) -> bool:
 					if mat:
 						mat.albedo_color = prim.color
 
+	# An assembly stores both halves of every mirrored pair as plain primitives
+	# with nothing linking them, so re-derive the pairing before the user can
+	# edit anything - otherwise dragging one side of a loaded design would move
+	# that side only, which is the lopsided frame the constraint exists to stop.
+	_relink_mirror_pairs()
+
 	var bake: Dictionary = data.get("bake", {})
 	smoothness = float(bake.get("smoothness", smoothness))
 	bake_resolution = int(bake.get("resolution", bake_resolution))
@@ -2199,6 +2448,7 @@ func deserialize_assembly(data: Dictionary) -> bool:
 	facet_angle = float(bake.get("facet_angle", facet_angle))
 	crystallinity = float(bake.get("crystallinity", crystallinity))
 	chamfer_edge_pct = float(bake.get("chamfer_edge_pct", chamfer_edge_pct))
+	mirror_x = bool(bake.get("mirror_x", mirror_x))
 	if smoothness_slider:
 		smoothness_slider.value = smoothness
 	if bake_quality_option:

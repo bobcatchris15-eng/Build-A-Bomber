@@ -9,6 +9,7 @@ const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
+const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -1757,31 +1758,12 @@ func _refresh_firing_arc():
 # (bit value 16) is unused by the hull(1)/modules(2)/gizmos(4)/buildings(8)
 # assignments already in play. Placement prefers a HullSurface hit and falls
 # back to the box when there is no authored mesh to trace against.
-const SURFACE_COLLISION_LAYER := 16
+const SURFACE_COLLISION_LAYER := HullSurfaceScript.SURFACE_COLLISION_LAYER
 
+# Delegates to scripts/hull_surface.gd so blueprint_manager.gd's designer
+# reconstruction can build an identical surface body for a loaded blueprint.
 func _rebuild_surface_body(target_hull: Node3D, source_mesh_inst: MeshInstance3D):
-	if not target_hull or not is_instance_valid(target_hull):
-		return
-	var existing = target_hull.get_node_or_null("HullSurface")
-	if existing:
-		target_hull.remove_child(existing)
-		existing.free()
-	if not source_mesh_inst or not source_mesh_inst.mesh:
-		return
-	var tri_shape = source_mesh_inst.mesh.create_trimesh_shape()
-	if not tri_shape:
-		return
-	var body = StaticBody3D.new()
-	body.name = "HullSurface"
-	body.collision_layer = SURFACE_COLLISION_LAYER
-	body.collision_mask = 0
-	var col = CollisionShape3D.new()
-	col.shape = tri_shape
-	# Match the visual mesh exactly - same orientation correction and same
-	# per-axis fit - so the surface we snap to IS the surface being drawn.
-	col.transform = source_mesh_inst.transform
-	body.add_child(col)
-	target_hull.add_child(body)
+	HullSurfaceScript.rebuild(target_hull, source_mesh_inst)
 
 # Raycast used by every placement path. Traces the precise hull surface first
 # and only falls back to the bounding box if that misses, so a dropped module

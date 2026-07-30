@@ -4,10 +4,13 @@
 	"_role": "Rigid dirigible (Zeppelin register - RIGID, not blimp: HULL_MASSING_SPEC.md settled that, and the doped-fabric-over-frame read matches VISUAL_ART_DIRECTION's flat/low-metallic finish). Long tapered envelope, gondola slung BELOW on the centreline (the sidecar's underside_y_bias 0.6 is what hangs locomotion off it), longitudinal keel battens, and a tail-fin cross. The other hull the SDF pipeline genuinely suits - it is mostly one big smooth swept volume. NOTE: the longitudinal keel battens from the original spec were dropped - at 0.30 thick on a 15.5-long hull they are greeble-scale, not massing, and cannot survive Marching Cubes at any sane resolution. They belong in the greeble/module layer.",
 	"bake": {
 		"smoothness": 0.35,
-		"resolution": 24,
+		"resolution": 32,
 		"method": "dc",
 		"fit_percent": 95,
-		"facet_angle": 15
+		"facet_angle": 15,
+		"crystallinity": 0.0,
+		"chamfer_edge_pct": 5.0,
+		"mirror_x": false
 	},
 	"sidecar": {
 		"name": "Airship Hull",
