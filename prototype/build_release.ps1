@@ -85,15 +85,33 @@ foreach ($t in $targets) {
     }
 
     if (Test-Path $outFile) {
-        $sizeMb = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
-        Write-Output "    OK  $sizeMb MB"
-        $results += [pscustomobject]@{ Platform = $t.Preset; File = $outFile; SizeMB = $sizeMb }
+        # Windows and Linux presets do NOT embed the pack, so the export writes
+        # a sibling .pck that is most of the build and MUST ship alongside the
+        # executable. Reporting only the executable made a 112 MB reduction in
+        # pack size look like no change at all, since the executable is just the
+        # export template and never varies.
+        $exeMb = [math]::Round((Get-Item $outFile).Length / 1MB, 1)
+        $pck = [IO.Path]::ChangeExtension($outFile, ".pck")
+        $pckMb = 0
+        if (Test-Path $pck) { $pckMb = [math]::Round((Get-Item $pck).Length / 1MB, 1) }
+        $totalMb = [math]::Round($exeMb + $pckMb, 1)
+        if ($pckMb -gt 0) {
+            Write-Output "    OK  $exeMb MB exe + $pckMb MB pck = $totalMb MB (ship BOTH files)"
+        } else {
+            Write-Output "    OK  $totalMb MB (pack embedded)"
+        }
+        $results += [pscustomobject]@{
+            Platform = $t.Preset; Name = [IO.Path]::GetFileName($outFile)
+            ExeMB = $exeMb; PckMB = $pckMb; TotalMB = $totalMb
+        }
     } else {
         Write-Output "    FAILED - no output produced"
-        $results += [pscustomobject]@{ Platform = $t.Preset; File = "(none)"; SizeMB = 0 }
+        $results += [pscustomobject]@{
+            Platform = $t.Preset; Name = "(none)"; ExeMB = 0; PckMB = 0; TotalMB = 0
+        }
     }
 }
 
 Write-Output ""
 Write-Output "=== build summary ==="
-$results | Format-Table -AutoSize
+$results | Format-Table -AutoSize | Out-String -Width 200 | Write-Output
