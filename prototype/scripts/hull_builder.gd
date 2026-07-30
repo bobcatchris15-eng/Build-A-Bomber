@@ -169,12 +169,26 @@ var primitive_defs: Array = [
 @onready var load_assembly_button: Button      = $CanvasLayer/HullActionsScroller/HullActionsPanel/LoadAssemblyButton
 
 # Bake parameters, read from the bottom-bar controls at export time.
-var smoothness: float = 0.15
+var smoothness: float = 0.0
 var bake_resolution: int = 32
 var bake_method: String = "dc"
 var fit_percent: float = 95.0
 var facet_angle: float = 15.0
 var crystallinity: float = 0.0
+
+enum AuthoringStage {
+	STAGE_FRAME,      # Stage 1: Frame Builder (Girders & Structural Skeleton)
+	STAGE_FINISHING,  # Stage 2: Hull Finishing & Plating (Outer Armor Skin & Live Preview)
+}
+
+var current_stage: AuthoringStage = AuthoringStage.STAGE_FRAME
+var show_internal_frame: bool = true
+var skin_color: Color = Color(0.45, 0.48, 0.52, 1.0)
+
+var _stage_bar: HBoxContainer = null
+var _stage_frame_btn: Button = null
+var _stage_finishing_btn: Button = null
+var _stage_banner: Label = null
 
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
@@ -186,6 +200,8 @@ func _populate_palette() -> void:
 	if not primitive_palette or not properties_panel or not status_label:
 		push_error("UI nodes not ready in _populate_palette")
 		return
+
+	_setup_stage_navigation_bar()
 
 	var first := true
 	for d in primitive_defs:
@@ -238,8 +254,9 @@ func _populate_palette() -> void:
 	_setup_smoothness_preview()
 	_setup_forward_arrow()
 
+	_set_authoring_stage(AuthoringStage.STAGE_FRAME)
 	_update_properties_panel()
-	_update_status("Drag primitives from palette, or click to place!")
+	_update_status("FRAME BUILDER — Place & manipulate structural girders!")
 
 func _process(_delta: float) -> void:
 	_update_forward_arrow()
@@ -1318,15 +1335,116 @@ func _def_name(type: int) -> String:
 			return str(d.name)
 	return "Unknown"
 
+# ── Stage Navigation & Viewport Preview ──────────────────────────────────────
+
+func _setup_stage_navigation_bar() -> void:
+	var canvas := $CanvasLayer
+	if not canvas:
+		return
+
+	_stage_bar = HBoxContainer.new()
+	_stage_bar.name = "StageNavigationBar"
+	_stage_bar.anchor_left = 0.20
+	_stage_bar.anchor_top = 0.015
+	_stage_bar.anchor_right = 0.80
+	_stage_bar.anchor_bottom = 0.075
+	_stage_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+
+	_stage_frame_btn = Button.new()
+	_stage_frame_btn.text = " 🛠️ 1. FRAME BUILDER "
+	_stage_frame_btn.toggle_mode = true
+	_stage_frame_btn.button_pressed = true
+	_stage_frame_btn.custom_minimum_size = Vector2(220, 44)
+	_stage_frame_btn.add_theme_font_size_override("font_size", 15)
+	_stage_frame_btn.pressed.connect(func(): _set_authoring_stage(AuthoringStage.STAGE_FRAME))
+
+	_stage_finishing_btn = Button.new()
+	_stage_finishing_btn.text = " 🎨 2. HULL FINISHING & PLATING "
+	_stage_finishing_btn.toggle_mode = true
+	_stage_finishing_btn.custom_minimum_size = Vector2(260, 44)
+	_stage_finishing_btn.add_theme_font_size_override("font_size", 15)
+	_stage_finishing_btn.pressed.connect(func(): _set_authoring_stage(AuthoringStage.STAGE_FINISHING))
+
+	_stage_bar.add_child(_stage_frame_btn)
+	_stage_bar.add_child(VSeparator.new())
+	_stage_bar.add_child(_stage_finishing_btn)
+
+	canvas.add_child(_stage_bar)
+
+func _set_authoring_stage(stage: AuthoringStage) -> void:
+	current_stage = stage
+	if _stage_frame_btn:
+		_stage_frame_btn.button_pressed = (stage == AuthoringStage.STAGE_FRAME)
+	if _stage_finishing_btn:
+		_stage_finishing_btn.button_pressed = (stage == AuthoringStage.STAGE_FINISHING)
+
+	if primitive_palette:
+		primitive_palette.get_parent().visible = (stage == AuthoringStage.STAGE_FRAME)
+
+	_apply_stage_materials()
+	_update_properties_panel()
+
+	if stage == AuthoringStage.STAGE_FRAME:
+		_hide_smoothness_preview()
+		_update_status("FRAME BUILDER — Assemble & adjust structural frame girders.")
+	else:
+		_deselect()
+		_update_finishing_preview()
+		_update_status("HULL FINISHING — Configure outer skin wrapping & live viewport preview.")
+
+func _apply_stage_materials() -> void:
+	for p in primitives:
+		if not p.node:
+			continue
+		p.node.visible = (current_stage == AuthoringStage.STAGE_FRAME or show_internal_frame)
+		for child in p.node.get_children():
+			if child is MeshInstance3D:
+				var mat := StandardMaterial3D.new()
+				if current_stage == AuthoringStage.STAGE_FRAME:
+					mat.albedo_color = Color(p.color.r * 0.35 + 0.15, p.color.g * 0.35 + 0.2, p.color.b * 0.35 + 0.3, 0.85)
+					mat.metallic = 0.8
+					mat.roughness = 0.25
+				else:
+					mat.albedo_color = Color(0.2, 0.25, 0.3, 0.45)
+					mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				child.material_override = mat
+
+func _update_finishing_preview() -> void:
+	if not _preview_mesh_instance:
+		return
+	if current_stage != AuthoringStage.STAGE_FINISHING or primitives.is_empty():
+		_preview_mesh_instance.visible = false
+		return
+
+	var res: int = bake_resolution
+	var mesh := SDFMeshBaker.bake(primitives, smoothness, res, bake_method, fit_percent, facet_angle, crystallinity)
+	if mesh != null:
+		_preview_mesh_instance.mesh = mesh
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = skin_color
+		mat.metallic = 0.4
+		mat.roughness = 0.5
+		_preview_mesh_instance.material_override = mat
+		_preview_mesh_instance.visible = true
+	else:
+		_preview_mesh_instance.visible = false
+
 # ── Properties panel ──────────────────────────────────────────────────────────
 
 func _update_properties_panel() -> void:
+	if not properties_panel:
+		return
+
 	for child in properties_panel.get_children():
 		child.queue_free()
 
+	if current_stage == AuthoringStage.STAGE_FINISHING:
+		_build_finishing_properties_panel()
+		return
+
 	if selected_primitive < 0 or selected_primitive >= primitives.size():
 		var lbl := Label.new()
-		lbl.text = "Select a primitive to edit\n\nDEL — delete\nCtrl+D — duplicate\nG/R/S — transform mode"
+		lbl.text = "Select a frame girder to edit\n\nDEL — delete\nCtrl+D — duplicate\nG/R/S — transform mode"
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		properties_panel.add_child(lbl)
@@ -1399,6 +1517,102 @@ func _update_properties_panel() -> void:
 	del_btn.add_theme_font_size_override("font_size", 15)
 	del_btn.pressed.connect(_delete_selected)
 	properties_panel.add_child(del_btn)
+
+func _build_finishing_properties_panel() -> void:
+	_add_section_header("🎨 Hull Finishing & Plating")
+
+	var desc := Label.new()
+	desc.text = "Configure outer armor skin wrapping over the structural frame girders."
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	properties_panel.add_child(desc)
+
+	properties_panel.add_child(HSeparator.new())
+
+	# Bake Algorithm
+	var algo_lbl := Label.new()
+	algo_lbl.text = "Plating Algorithm:"
+	properties_panel.add_child(algo_lbl)
+
+	var algo_opt := OptionButton.new()
+	algo_opt.add_item("Dual Contouring (Constructed / Faceted)", 0)
+	algo_opt.add_item("Marching Cubes (Smooth / Aerodynamic)", 1)
+	algo_opt.selected = 0 if bake_method == "dc" else 1
+	algo_opt.item_selected.connect(func(idx: int):
+		bake_method = "dc" if idx == 0 else "mc"
+		_update_finishing_preview()
+	)
+	properties_panel.add_child(algo_opt)
+
+	# Fit Percent
+	var fit_lbl := Label.new()
+	fit_lbl.text = "Skin Fit (%): " + str(int(fit_percent)) + "%"
+	properties_panel.add_child(fit_lbl)
+
+	var fit_slider := HSlider.new()
+	fit_slider.min_value = 85.0
+	fit_slider.max_value = 115.0
+	fit_slider.value = fit_percent
+	fit_slider.value_changed.connect(func(v: float):
+		fit_percent = v
+		fit_lbl.text = "Skin Fit (%): " + str(int(v)) + "%"
+		_update_finishing_preview()
+	)
+	properties_panel.add_child(fit_slider)
+
+	# Smoothness
+	var sm_lbl := Label.new()
+	sm_lbl.text = "Smoothness / Fillets: " + str(snapped(smoothness, 0.01))
+	properties_panel.add_child(sm_lbl)
+
+	var sm_slider := HSlider.new()
+	sm_slider.min_value = 0.0
+	sm_slider.max_value = 0.40
+	sm_slider.step = 0.01
+	sm_slider.value = smoothness
+	sm_slider.value_changed.connect(func(v: float):
+		smoothness = v
+		sm_lbl.text = "Smoothness / Fillets: " + str(snapped(v, 0.01))
+		_update_finishing_preview()
+	)
+	properties_panel.add_child(sm_slider)
+
+	# Frame Toggle
+	var frame_chk := CheckBox.new()
+	frame_chk.text = "Show Structural Frame Girders"
+	frame_chk.button_pressed = show_internal_frame
+	frame_chk.toggled.connect(func(t: bool):
+		show_internal_frame = t
+		_apply_stage_materials()
+	)
+	properties_panel.add_child(frame_chk)
+
+	# Skin Tint
+	var color_lbl := Label.new()
+	color_lbl.text = "Armor Plating Tint:"
+	properties_panel.add_child(color_lbl)
+
+	var cpb := ColorPickerButton.new()
+	cpb.color = skin_color
+	cpb.custom_minimum_size = Vector2(0, 36)
+	cpb.color_changed.connect(func(c: Color):
+		skin_color = c
+		_update_finishing_preview()
+	)
+	properties_panel.add_child(cpb)
+
+	properties_panel.add_child(HSeparator.new())
+
+	var rebake_btn := Button.new()
+	rebake_btn.text = "🔄 Re-Bake Preview"
+	rebake_btn.custom_minimum_size = Vector2(0, 44)
+	rebake_btn.pressed.connect(_update_finishing_preview)
+	properties_panel.add_child(rebake_btn)
+
+	var save_btn := Button.new()
+	save_btn.text = "💾 Finalize & Save Hull"
+	save_btn.custom_minimum_size = Vector2(0, 44)
+	save_btn.pressed.connect(_on_export_clicked)
+	properties_panel.add_child(save_btn)
 
 func _mirror_selected_x() -> void:
 	if selected_primitive < 0 or selected_primitive >= primitives.size():
