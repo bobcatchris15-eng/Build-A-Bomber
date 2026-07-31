@@ -1,4 +1,5 @@
 extends Node3D
+const MunitionPool = preload("res://scripts/munition_pool.gd")
 # Real, interceptable weapon missile (FABLE_REVIEW.md 2.2). Fired by
 # guided_missile / dual_stage_missile / missile_pod instead of the old
 # cosmetic tweened meshes - those never registered in the "missiles" group,
@@ -46,28 +47,17 @@ func _ready():
 	# Visual: slim body + glowing nose cone (same read as the old cosmetic
 	# missile, now attached to a real entity)
 	var body = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = 0.06
-	cyl.bottom_radius = 0.06
-	cyl.height = 0.35
-	body.mesh = cyl
-	var bmat = StandardMaterial3D.new()
-	bmat.albedo_color = Color.DARK_SLATE_GRAY
-	body.material_override = bmat
+	body.mesh = MunitionPool.unit_cylinder()
+	body.scale = Vector3(0.12, 0.35, 0.12)
+	body.material_override = MunitionPool.albedo(Color.DARK_SLATE_GRAY)
 	add_child(body)
 	body.rotate_x(PI / 2)
 
 	var nose = MeshInstance3D.new()
-	var cone = CylinderMesh.new()
-	cone.top_radius = 0.0
-	cone.bottom_radius = 0.06
-	cone.height = 0.12
-	nose.mesh = cone
-	var nmat = StandardMaterial3D.new()
-	nmat.albedo_color = Color.RED
-	nmat.emission_enabled = true
-	nmat.emission = Color.RED
-	nose.material_override = nmat
+	# top_radius 0.0 over bottom 0.06 - a true cone, so taper ratio 0.
+	nose.mesh = MunitionPool.unit_taper(0.0)
+	nose.scale = Vector3(0.12, 0.12, 0.12)
+	nose.material_override = MunitionPool.emissive(Color.RED, Color.RED)
 	add_child(nose)
 	nose.position = Vector3(0, 0, -0.23)
 	nose.rotate_x(-PI / 2)
@@ -82,14 +72,9 @@ func _ready():
 func _spawn_trail_puff():
 	if is_destroyed or not is_inside_tree(): return
 	var smoke = MeshInstance3D.new()
-	var sph = SphereMesh.new()
-	sph.radius = 0.08
-	sph.height = 0.16
-	smoke.mesh = sph
-	var smat = StandardMaterial3D.new()
-	smat.albedo_color = Color(0.6, 0.6, 0.6, 0.5)
-	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	smoke.material_override = smat
+	smoke.mesh = MunitionPool.unit_sphere()
+	smoke.scale = Vector3(0.16, 0.16, 0.16)
+	smoke.material_override = MunitionPool.alpha(Color(0.6, 0.6, 0.6, 0.5))
 	(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(smoke)
 	smoke.global_position = global_position - global_transform.basis.z * 0.2
 	var st = create_tween()
@@ -133,15 +118,9 @@ func _physics_process(delta):
 func _spawn_impact_visual():
 	if not is_inside_tree(): return
 	var exp = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = 0.7
-	sphere.height = 1.4
-	exp.mesh = sphere
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.ORANGE
-	mat.emission_enabled = true
-	mat.emission = Color.ORANGE
-	exp.material_override = mat
+	exp.mesh = MunitionPool.unit_sphere()
+	exp.scale = Vector3(1.4, 1.4, 1.4)
+	exp.material_override = MunitionPool.emissive(Color.ORANGE, Color.ORANGE)
 	(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(exp)
 	exp.global_position = global_position
 	var tween = exp.create_tween()
@@ -154,15 +133,9 @@ func destroy_missile(intercepted: bool):
 	is_destroyed = true
 	if is_inside_tree():
 		var exp = MeshInstance3D.new()
-		var sphere = SphereMesh.new()
-		sphere.radius = 0.5
-		sphere.height = 1.0
-		exp.mesh = sphere
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = Color.CYAN if intercepted else Color.ORANGE
-		mat.emission_enabled = true
-		mat.emission = mat.albedo_color
-		exp.material_override = mat
+		exp.mesh = MunitionPool.unit_sphere()
+		var exp_color = Color.CYAN if intercepted else Color.ORANGE
+		exp.material_override = MunitionPool.emissive(exp_color, exp_color)
 		(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(exp)
 		exp.global_position = global_position
 		var tween = exp.create_tween()

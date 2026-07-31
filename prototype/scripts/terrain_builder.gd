@@ -1075,6 +1075,19 @@ static func _spawn_bridge(bridge: Dictionary, parent: Node3D):
 	var rail_thickness = 0.3
 	for side in [-1.0, 1.0]:
 		var rail = MeshInstance3D.new()
+		# add_child BEFORE assigning global_position, matching the deck above.
+		# The rails used to be added at the end of this loop body, after their
+		# global_position was set - and a Node3D outside the tree has no global
+		# transform, so each assignment logged "Condition !is_inside_tree() is
+		# true" and was applied to the LOCAL position instead. That happened to
+		# land the rails correctly anyway, purely because `parent` here is the
+		# Skirmish scene root (terrain_builder.spawn_visuals(current_map, self)),
+		# which sits at the origin with an identity transform - so local and
+		# global coincided. Reordering is therefore visually identical today;
+		# it removes two spurious errors per bridge at map load and the latent
+		# trap that the moment terrain is ever parented under an offset node,
+		# the rails would silently jump while the deck stayed put.
+		parent.add_child(rail)
 		var rail_box = BoxMesh.new()
 		if long_axis_x:
 			rail_box.size = Vector3(he.x * 2.0, rail_h, rail_thickness)
@@ -1088,7 +1101,6 @@ static func _spawn_bridge(bridge: Dictionary, parent: Node3D):
 		rail_mat.albedo_color = Color(0.35, 0.32, 0.28)
 		rail_mat.roughness = 0.7
 		rail.material_override = rail_mat
-		parent.add_child(rail)
 
 # Sparse grassland ground clutter (grass tufts/rocks/brush) scattered
 # across the WHOLE map's baseline ground - deliberately not per-area-dense

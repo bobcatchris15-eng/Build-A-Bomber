@@ -37,7 +37,43 @@ const SMALL_SCREEN_THRESHOLD := Vector2i(1600, 900)
 # second-guess it.
 
 
+# Vsync is asserted HERE, in code, rather than in project.godot.
+#
+# It was first set there as `window/vsync/vsync_mode=1` - and Godot silently
+# deleted the line, comments and all, the next time it loaded the project.
+# Godot only persists project settings whose value DIFFERS from the built-in
+# default, and Enabled (1) IS the default, so an explicit statement of the
+# current behaviour is literally unpersistable in that file. (This also makes
+# ProjectSettings.get_setting() useless for verifying it: the getter returns 1
+# whether the key was set deliberately or is simply absent.)
+#
+# Why state it at all, when it changes nothing today: during the performance
+# investigation the implicit default pinned every measurement to the 16.7ms
+# vblank on a 60Hz display, which made an empty map and a full battle measure
+# identically and manufactured a frame-time "floor" that did not exist. It
+# also means any regression stays invisible until it exceeds 16.7ms. Having it
+# written down as a decision, in a place that survives, is the point.
+#
+# Modes: 0 Disabled, 1 Enabled, 2 Adaptive, 3 Mailbox.
+#
+# Deliberately NOT Adaptive (Vulkan FIFO_RELAXED), though it would remove the
+# judder cliff this scene currently falls off: with Enabled, a frame that
+# misses the deadline waits a whole extra vblank, so ~17ms of work costs
+# 33.3ms and jitter pushes some frames to 50ms. Adaptive presents late instead
+# of waiting, but tears whenever a frame is late - and this scene measured
+# 22-45fps at 1080p on an integrated GPU, i.e. MOST frames are late, so it
+# would trade consistent pacing for near-constant tearing. The real fix is a
+# cheaper frame (the ground shader and 4x MSAA dominate it), not a different
+# way of presenting a slow one. Revisit once the frame fits in 16.7ms.
+#
+# The measurement harnesses (scratch/perf_matrix.gd, scratch/probe_world_cost.gd)
+# override this at runtime, because there is no measurement resolution below
+# the refresh period while it is on.
+const VSYNC_MODE := DisplayServer.VSYNC_ENABLED
+
+
 func _ready() -> void:
+	DisplayServer.window_set_vsync_mode(VSYNC_MODE)
 	# Deferred: on some platforms the window is still being created during
 	# autoload _ready(), and querying/setting geometry that early is either
 	# ignored or reports the pre-creation values.

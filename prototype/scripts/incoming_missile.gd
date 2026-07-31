@@ -1,4 +1,5 @@
 extends Node3D
+const MunitionPool = preload("res://scripts/munition_pool.gd")
 
 var target_node: Node3D = null
 var speed: float = 9.0
@@ -10,14 +11,9 @@ func _ready():
 	
 	# Visual rocket body
 	var mesh_inst = MeshInstance3D.new()
-	var box = BoxMesh.new()
-	box.size = Vector3(0.15, 0.15, 0.5)
-	mesh_inst.mesh = box
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.RED
-	mat.emission_enabled = true
-	mat.emission = Color.ORANGE
-	mesh_inst.material_override = mat
+	mesh_inst.mesh = MunitionPool.unit_box()
+	mesh_inst.scale = Vector3(0.15, 0.15, 0.5)
+	mesh_inst.material_override = MunitionPool.emissive(Color.RED, Color.ORANGE)
 	add_child(mesh_inst)
 
 func _physics_process(delta):
@@ -46,15 +42,9 @@ func destroy_missile(intercepted: bool):
 	
 	# Spawn explosion sphere
 	var exp = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = 0.5
-	sphere.height = 1.0
-	exp.mesh = sphere
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.ORANGE if not intercepted else Color.CYAN
-	mat.emission_enabled = true
-	mat.emission = mat.albedo_color
-	exp.material_override = mat
+	exp.mesh = MunitionPool.unit_sphere()
+	var exp_color = Color.ORANGE if not intercepted else Color.CYAN
+	exp.material_override = MunitionPool.emissive(exp_color, exp_color)
 	(get_tree().current_scene if get_tree().current_scene != null else get_tree().root).add_child(exp)
 	exp.global_position = global_position
 	

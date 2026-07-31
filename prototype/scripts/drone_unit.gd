@@ -1,4 +1,5 @@
 extends Node3D
+const MunitionPool = preload("res://scripts/munition_pool.gd")
 # A real autonomous drone launched by a drone_carrier weapon - independent
 # physics-driven flight and its own launch/attack/return state machine.
 # Previously drone_carrier's "_fire_drone_swarm()" just tweened two
@@ -28,14 +29,9 @@ func _ready():
 	set_meta("team", team)
 
 	var mesh_inst = MeshInstance3D.new()
-	var prism = PrismMesh.new()
-	prism.size = Vector3(0.22, 0.1, 0.22)
-	mesh_inst.mesh = prism
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.NAVY_BLUE
-	mat.emission_enabled = true
-	mat.emission = Color.CYAN
-	mesh_inst.material_override = mat
+	mesh_inst.mesh = MunitionPool.unit_prism()
+	mesh_inst.scale = Vector3(0.22, 0.1, 0.22)
+	mesh_inst.material_override = MunitionPool.emissive(Color.NAVY_BLUE, Color.CYAN)
 	add_child(mesh_inst)
 
 func _physics_process(delta):
@@ -81,15 +77,10 @@ func destroy_missile(intercepted: bool):
 	if is_destroyed: return
 	is_destroyed = true
 	var exp = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = 0.3
-	sphere.height = 0.6
-	exp.mesh = sphere
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.ORANGE if not intercepted else Color.CYAN
-	mat.emission_enabled = true
-	mat.emission = mat.albedo_color
-	exp.material_override = mat
+	exp.mesh = MunitionPool.unit_sphere()
+	exp.scale = Vector3(0.6, 0.6, 0.6)
+	var exp_color = Color.ORANGE if not intercepted else Color.CYAN
+	exp.material_override = MunitionPool.emissive(exp_color, exp_color)
 	var scene = get_tree().current_scene
 	if not scene: scene = get_parent()
 	if scene: scene.add_child(exp)

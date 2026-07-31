@@ -4,6 +4,12 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const GlobalConfig = preload("res://scripts/global_config.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
+# Shared unit meshes + cached materials for every munition visual below. See
+# munition_pool.gd's header for the measurements that motivated it; the short
+# version is that a fresh primitive Mesh per projectile was costing more frame
+# time at 8 units than the units themselves. Everything it returns is shared
+# and must not be mutated - size munitions via the node's scale.
+const MunitionPool = preload("res://scripts/munition_pool.gd")
 
 var target: Node3D = null
 var fire_range: float = 12.0
@@ -156,14 +162,9 @@ func _spawn_miss_puff(t: Node3D):
 	if not is_instance_valid(t) or not is_inside_tree():
 		return
 	var puff = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = 0.3
-	sphere.height = 0.6
-	puff.mesh = sphere
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color(0.5, 0.45, 0.35, 0.7)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	puff.material_override = mat
+	puff.mesh = MunitionPool.unit_sphere()
+	puff.scale = Vector3(0.6, 0.6, 0.6)
+	puff.material_override = MunitionPool.alpha(Color(0.5, 0.45, 0.35, 0.7))
 	_effects_parent().add_child(puff)
 	var side = Vector3(randf_range(-1.0, 1.0), 0, randf_range(-1.0, 1.0)).normalized()
 	puff.global_position = t.global_position + side * randf_range(1.2, 2.2)
@@ -1001,20 +1002,10 @@ func _fire_at_target():
 func _fire_pd_at_missile():
 	if type_id == "pd_laser":
 		var beam = MeshInstance3D.new()
-		var cyl = CylinderMesh.new()
-		cyl.top_radius = 0.02
-		cyl.bottom_radius = 0.02
-		cyl.height = global_position.distance_to(target.global_position)
-		beam.mesh = cyl
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = Color.LIGHT_CORAL
-		mat.emission_enabled = true
-		mat.emission = Color.RED
-		beam.material_override = mat
+		beam.mesh = MunitionPool.unit_cylinder()
+		beam.material_override = MunitionPool.emissive(Color.LIGHT_CORAL, Color.RED)
 		_effects_parent().add_child(beam)
-		beam.global_position = global_position.lerp(target.global_position, 0.5)
-		beam.look_at(target.global_position, Vector3.UP)
-		beam.rotate_object_local(Vector3.RIGHT, PI/2)
+		MunitionPool.aim_beam(beam, global_position, target.global_position, 0.04)
 		var timer = get_tree().create_timer(0.08)
 		timer.timeout.connect(func(): if is_instance_valid(beam): beam.queue_free())
 		
@@ -1023,19 +1014,11 @@ func _fire_pd_at_missile():
 
 func _fire_kinetic_projectile(radius: float, length: float, duration: float, color: Color, explode_on_hit: bool):
 	var tracer = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = radius
-	cyl.bottom_radius = radius
-	cyl.height = length
-	tracer.mesh = cyl
-	
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.emission_enabled = true
-	mat.emission = color
-	tracer.material_override = mat
+	tracer.mesh = MunitionPool.unit_cylinder()
+	tracer.scale = Vector3(radius * 2.0, length, radius * 2.0)
+	tracer.material_override = MunitionPool.emissive(color, color)
 	_effects_parent().add_child(tracer)
-	
+
 	var start = global_position + Vector3(0, 0.4, 0)
 	tracer.global_position = start
 	tracer.look_at(target.global_position, Vector3.UP)
@@ -1054,37 +1037,19 @@ func _fire_kinetic_projectile(radius: float, length: float, duration: float, col
 
 func _fire_railgun_beam():
 	var beam = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = 0.03
-	cyl.bottom_radius = 0.03
-	var dist = global_position.distance_to(target.global_position)
-	cyl.height = dist
-	beam.mesh = cyl
-	
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.BLUE_VIOLET
-	mat.emission_enabled = true
-	mat.emission = Color.BLUE_VIOLET
-	beam.material_override = mat
+	beam.mesh = MunitionPool.unit_cylinder()
+	beam.material_override = MunitionPool.emissive(Color.BLUE_VIOLET, Color.BLUE_VIOLET)
 	_effects_parent().add_child(beam)
-	
-	beam.global_position = global_position.lerp(target.global_position, 0.5)
-	beam.look_at(target.global_position, Vector3.UP)
-	beam.rotate_object_local(Vector3.RIGHT, PI/2)
-	
+
+	var beam_len = MunitionPool.aim_beam(beam, global_position, target.global_position, 0.06)
+
 	for i in range(4):
 		var spark = MeshInstance3D.new()
-		var sphere = SphereMesh.new()
-		sphere.radius = 0.15
-		sphere.height = 0.3
-		spark.mesh = sphere
-		var smat = StandardMaterial3D.new()
-		smat.albedo_color = Color.CYAN
-		smat.emission_enabled = true
-		smat.emission = Color.CYAN
-		spark.material_override = smat
+		spark.mesh = MunitionPool.unit_sphere()
+		spark.scale = Vector3(0.3, 0.3, 0.3)
+		spark.material_override = MunitionPool.emissive(Color.CYAN, Color.CYAN)
 		_effects_parent().add_child(spark)
-		
+
 		var pct = randf()
 		spark.global_position = global_position.lerp(target.global_position, pct) + Vector3(randf_range(-0.2, 0.2), randf_range(-0.2, 0.2), randf_range(-0.2, 0.2))
 		
@@ -1095,21 +1060,19 @@ func _fire_railgun_beam():
 	if is_instance_valid(target):
 		_deal_weapon_damage(target, dps * fire_rate)
 		_spawn_explosion_visual(target.global_position, 0.6, Color.BLUE_VIOLET)
-		
+
+	# Collapses the beam's radius while holding its length - the y component
+	# used to be a literal 1.0 because length lived in the mesh; it now lives
+	# in scale.y, so it has to be preserved explicitly here.
 	var tween = create_tween()
-	tween.tween_property(beam, "scale", Vector3(0.0, 1.0, 0.0), 0.15)
+	tween.tween_property(beam, "scale", Vector3(0.0, beam_len, 0.0), 0.15)
 	tween.finished.connect(func(): beam.queue_free())
 
 func _fire_artillery():
 	var shell = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	shell.mesh = sphere
+	shell.mesh = MunitionPool.unit_sphere()
 	shell.scale = Vector3(0.4, 0.4, 0.4)
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.SADDLE_BROWN
-	mat.emission_enabled = true
-	mat.emission = Color.ORANGE
-	shell.material_override = mat
+	shell.material_override = MunitionPool.emissive(Color.SADDLE_BROWN, Color.ORANGE)
 	_effects_parent().add_child(shell)
 	
 	var start = global_position
@@ -1141,14 +1104,9 @@ func _fire_mortar_salvo():
 		get_tree().create_timer(i * 0.18).timeout.connect(func():
 			if not is_instance_valid(target): return
 			var shell = MeshInstance3D.new()
-			var sphere = SphereMesh.new()
-			shell.mesh = sphere
+			shell.mesh = MunitionPool.unit_sphere()
 			shell.scale = Vector3(0.2, 0.2, 0.2)
-			var mat = StandardMaterial3D.new()
-			mat.albedo_color = Color.OLIVE
-			mat.emission_enabled = true
-			mat.emission = Color.YELLOW
-			shell.material_override = mat
+			shell.material_override = MunitionPool.emissive(Color.OLIVE, Color.YELLOW)
 			_effects_parent().add_child(shell)
 			
 			var start = global_position
@@ -1265,14 +1223,13 @@ func _fire_cluster_dispenser():
 						canister.mesh = child.mesh
 						break
 			else:
+				# Left un-pooled deliberately: this is the
+				# authored-mesh-missing fallback, so it fires at most once per
+				# canister on a broken install, not on the hot path.
 				var box = BoxMesh.new()
 				box.size = Vector3(0.12 * payload_size, 0.12 * payload_size, 0.24 * payload_size)
 				canister.mesh = box
-			var mat = StandardMaterial3D.new()
-			mat.albedo_color = Color(0.70, 0.40, 0.20)
-			mat.emission_enabled = true
-			mat.emission = Color.ORANGE_RED
-			canister.material_override = mat
+			canister.material_override = MunitionPool.emissive(Color(0.70, 0.40, 0.20), Color.ORANGE_RED)
 			_effects_parent().add_child(canister)
 
 			var start = global_position + Vector3(randf_range(-0.1, 0.1), 0.3, randf_range(-0.1, 0.1))
@@ -1289,15 +1246,9 @@ func _fire_cluster_dispenser():
 
 				for i in range(submunitions_per_canister):
 					var sub = MeshInstance3D.new()
-					var sph = SphereMesh.new()
-					sph.radius = 0.06 * payload_size
-					sph.height = 0.12 * payload_size
-					sub.mesh = sph
-					var smat = StandardMaterial3D.new()
-					smat.albedo_color = Color.CHOCOLATE
-					smat.emission_enabled = true
-					smat.emission = Color.ORANGE
-					sub.material_override = smat
+					sub.mesh = MunitionPool.unit_sphere()
+					sub.scale = Vector3.ONE * (0.12 * payload_size)
+					sub.material_override = MunitionPool.emissive(Color.CHOCOLATE, Color.ORANGE)
 					_effects_parent().add_child(sub)
 					sub.global_position = mid
 
@@ -1331,16 +1282,21 @@ func _fire_flame_spray():
 
 	for i in range(6):
 		var flame = MeshInstance3D.new()
-		var sphere = SphereMesh.new()
-		flame.mesh = sphere
+		flame.mesh = MunitionPool.unit_sphere()
 		var init_scale = 0.15 * n_width
 		var peak_scale = 0.45 * n_width
 		flame.scale = Vector3(init_scale, init_scale, init_scale)
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = Color(randf_range(0.85, 1.0), randf_range(0.2, 0.5), 0.0)
-		mat.emission_enabled = true
-		mat.emission = mat.albedo_color
-		flame.material_override = mat
+		# Per-flame colour jitter is what makes the spray read as fire rather
+		# than as six identical balls, so it stays - but quantised to 0.05 so
+		# the pool converges on a small fixed set of flame materials instead
+		# of minting a new one for every continuously-random colour. At
+		# fire_rate 0.06 x6 flames that is the difference between a bounded
+		# cache and an unbounded leak over a long match.
+		var flame_color = Color(
+			snappedf(randf_range(0.85, 1.0), 0.05),
+			snappedf(randf_range(0.2, 0.5), 0.05),
+			0.0)
+		flame.material_override = MunitionPool.emissive(flame_color, flame_color)
 		_effects_parent().add_child(flame)
 
 		flame.global_position = global_position + Vector3(randf_range(-0.1, 0.1), 0.35, randf_range(-0.1, 0.1))
@@ -1360,39 +1316,23 @@ func _fire_flame_spray():
 
 func _fire_continuous_beam():
 	var beam = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = 0.04
-	cyl.bottom_radius = 0.04
-	cyl.height = global_position.distance_to(target.global_position)
-	beam.mesh = cyl
-	
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = laser_color
-	mat.emission_enabled = true
-	mat.emission = laser_color
-	beam.material_override = mat
+	beam.mesh = MunitionPool.unit_cylinder()
+	beam.material_override = MunitionPool.emissive(laser_color, laser_color)
 	_effects_parent().add_child(beam)
-	
-	beam.global_position = global_position.lerp(target.global_position, 0.5)
-	beam.look_at(target.global_position, Vector3.UP)
-	beam.rotate_object_local(Vector3.RIGHT, PI/2)
-	
+
+	MunitionPool.aim_beam(beam, global_position, target.global_position, 0.08)
+
 	if is_instance_valid(target):
 		_deal_weapon_damage(target, dps * fire_rate)
-		
+
 	var timer = get_tree().create_timer(0.06)
 	timer.timeout.connect(func(): if is_instance_valid(beam): beam.queue_free())
 
 func _fire_plasma_lobber():
 	var plasma = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	plasma.mesh = sphere
+	plasma.mesh = MunitionPool.unit_sphere()
 	plasma.scale = Vector3(0.35, 0.35, 0.35)
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.MEDIUM_SPRING_GREEN
-	mat.emission_enabled = true
-	mat.emission = Color.MEDIUM_SPRING_GREEN
-	plasma.material_override = mat
+	plasma.material_override = MunitionPool.emissive(Color.MEDIUM_SPRING_GREEN, Color.MEDIUM_SPRING_GREEN)
 	_effects_parent().add_child(plasma)
 	
 	var start = global_position
@@ -1411,17 +1351,10 @@ func _fire_plasma_lobber():
 		_spawn_explosion_visual(end, 0.8, Color.MEDIUM_SPRING_GREEN)
 
 		var puddle = MeshInstance3D.new()
-		var cyl = CylinderMesh.new()
-		cyl.top_radius = 1.0
-		cyl.bottom_radius = 1.0
-		cyl.height = 0.05
-		puddle.mesh = cyl
-		var pmat = StandardMaterial3D.new()
-		pmat.albedo_color = Color(0.1, 0.8, 0.2, 0.4)
-		pmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		pmat.emission_enabled = true
-		pmat.emission = Color.MEDIUM_SPRING_GREEN
-		puddle.material_override = pmat
+		puddle.mesh = MunitionPool.unit_cylinder()
+		puddle.scale = Vector3(2.0, 0.05, 2.0)
+		puddle.material_override = MunitionPool.alpha_emissive(
+			Color(0.1, 0.8, 0.2, 0.4), Color.MEDIUM_SPRING_GREEN)
 		_effects_parent().add_child(puddle)
 		puddle.global_position = end
 
@@ -1432,14 +1365,9 @@ func _fire_plasma_lobber():
 
 func _fire_flak_cannon():
 	var shell = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	shell.mesh = sphere
+	shell.mesh = MunitionPool.unit_sphere()
 	shell.scale = Vector3(0.18, 0.18, 0.18)
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.DARK_GOLDENROD
-	mat.emission_enabled = true
-	mat.emission = Color.GOLD
-	shell.material_override = mat
+	shell.material_override = MunitionPool.emissive(Color.DARK_GOLDENROD, Color.GOLD)
 	_effects_parent().add_child(shell)
 	
 	var start = global_position
@@ -1452,14 +1380,9 @@ func _fire_flak_cannon():
 		if is_instance_valid(shell): shell.queue_free()
 		
 		var smoke = MeshInstance3D.new()
-		var sph = SphereMesh.new()
-		sph.radius = 0.8
-		sph.height = 1.6
-		smoke.mesh = sph
-		var smat = StandardMaterial3D.new()
-		smat.albedo_color = Color(0.15, 0.15, 0.15, 0.7)
-		smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		smoke.material_override = smat
+		smoke.mesh = MunitionPool.unit_sphere()
+		smoke.scale = Vector3(1.6, 1.6, 1.6)
+		smoke.material_override = MunitionPool.alpha(Color(0.15, 0.15, 0.15, 0.7))
 		_effects_parent().add_child(smoke)
 		smoke.global_position = detonate_pos
 		
@@ -1472,59 +1395,33 @@ func _fire_flak_cannon():
 
 func _fire_resource_harvester_tether():
 	var tether = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = 0.08
-	cyl.bottom_radius = 0.08
-	cyl.height = global_position.distance_to(target.global_position)
-	tether.mesh = cyl
-	
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.GOLD
-	mat.emission_enabled = true
-	mat.emission = Color.GOLD
-	tether.material_override = mat
+	tether.mesh = MunitionPool.unit_cylinder()
+	tether.material_override = MunitionPool.emissive(Color.GOLD, Color.GOLD)
 	_effects_parent().add_child(tether)
-	
-	tether.global_position = global_position.lerp(target.global_position, 0.5)
-	tether.look_at(target.global_position, Vector3.UP)
-	tether.rotate_object_local(Vector3.RIGHT, PI/2)
-	
+
+	var tether_len = MunitionPool.aim_beam(tether, global_position, target.global_position, 0.16)
+
 	if is_instance_valid(target):
 		_deal_weapon_damage(target, dps * fire_rate)
-		
+
+	# y holds the tether's length now that it is no longer baked into the mesh
+	# (was a literal 1); only the radius collapses.
 	var tween = create_tween()
-	tween.tween_property(tether, "scale", Vector3(0, 1, 0), 0.08)
+	tween.tween_property(tether, "scale", Vector3(0, tether_len, 0), 0.08)
 	tween.finished.connect(func(): tether.queue_free())
 
 func _fire_repair_array_beam():
 	var beam = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = 0.03
-	cyl.bottom_radius = 0.03
-	cyl.height = global_position.distance_to(target.global_position)
-	beam.mesh = cyl
-	
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.CYAN
-	mat.emission_enabled = true
-	mat.emission = Color.CYAN
-	beam.material_override = mat
+	beam.mesh = MunitionPool.unit_cylinder()
+	beam.material_override = MunitionPool.emissive(Color.CYAN, Color.CYAN)
 	_effects_parent().add_child(beam)
-	
-	beam.global_position = global_position.lerp(target.global_position, 0.5)
-	beam.look_at(target.global_position, Vector3.UP)
-	beam.rotate_object_local(Vector3.RIGHT, PI/2)
-	
+
+	MunitionPool.aim_beam(beam, global_position, target.global_position, 0.06)
+
 	var spark = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = 0.15
-	sphere.height = 0.3
-	spark.mesh = sphere
-	var smat = StandardMaterial3D.new()
-	smat.albedo_color = Color.WHITE
-	smat.emission_enabled = true
-	smat.emission = Color.CYAN
-	spark.material_override = smat
+	spark.mesh = MunitionPool.unit_sphere()
+	spark.scale = Vector3(0.3, 0.3, 0.3)
+	spark.material_override = MunitionPool.emissive(Color.WHITE, Color.CYAN)
 	_effects_parent().add_child(spark)
 	spark.global_position = target.global_position + Vector3(randf_range(-0.3, 0.3), randf_range(0.2, 0.8), randf_range(-0.3, 0.3))
 	var st = create_tween()
@@ -1556,21 +1453,10 @@ func _fire_tesla_coil():
 		if i < segments:
 			pos += Vector3(randf_range(-0.4, 0.4), randf_range(-0.3, 0.3), randf_range(-0.4, 0.4))
 		var bolt = MeshInstance3D.new()
-		var cyl = CylinderMesh.new()
-		cyl.top_radius = 0.025
-		cyl.bottom_radius = 0.025
-		cyl.height = prev_pos.distance_to(pos)
-		bolt.mesh = cyl
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = laser_color
-		mat.emission_enabled = true
-		mat.emission = laser_color
-		mat.emission_energy_multiplier = 1.5
-		bolt.material_override = mat
+		bolt.mesh = MunitionPool.unit_cylinder()
+		bolt.material_override = MunitionPool.emissive(laser_color, laser_color, 1.5)
 		_effects_parent().add_child(bolt)
-		bolt.global_position = prev_pos.lerp(pos, 0.5)
-		bolt.look_at(pos, Vector3.UP)
-		bolt.rotate_object_local(Vector3.RIGHT, PI / 2)
+		MunitionPool.aim_beam(bolt, prev_pos, pos, 0.05)
 		var bt = create_tween()
 		bt.tween_interval(0.1)
 		bt.finished.connect(func(): if is_instance_valid(bolt): bolt.queue_free())
@@ -1586,21 +1472,14 @@ func _fire_arc_projector():
 	# The dedicated pure-drain "disable" weapon - minor HP damage, big
 	# energy drain (see _ready()'s energy_drain_per_shot formula).
 	var beam = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = 0.02
-	cyl.bottom_radius = 0.05
-	cyl.height = global_position.distance_to(target.global_position)
-	beam.mesh = cyl
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = laser_color
-	mat.emission_enabled = true
-	mat.emission = laser_color
-	mat.emission_energy_multiplier = 2.0
-	beam.material_override = mat
+	# The only beam in the arsenal that widens along its length (0.02 -> 0.05),
+	# so it takes the taper variant rather than the plain unit cylinder; the
+	# 0.4 ratio is that same 0.02/0.05, with the 0.05 bottom carried by the
+	# 0.10 diameter passed to aim_beam.
+	beam.mesh = MunitionPool.unit_taper(0.4)
+	beam.material_override = MunitionPool.emissive(laser_color, laser_color, 2.0)
 	_effects_parent().add_child(beam)
-	beam.global_position = global_position.lerp(target.global_position, 0.5)
-	beam.look_at(target.global_position, Vector3.UP)
-	beam.rotate_object_local(Vector3.RIGHT, PI / 2)
+	MunitionPool.aim_beam(beam, global_position, target.global_position, 0.10)
 
 	if is_instance_valid(target):
 		_deal_weapon_damage(target, (dps * fire_rate) * 0.2)
@@ -1614,22 +1493,10 @@ func _fire_ion_cannon():
 	# The "grounded" energy heavy-hitter - single strong beam, full HP
 	# damage plus a real energy drain alongside it.
 	var beam = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = 0.06
-	cyl.bottom_radius = 0.06
-	var dist = global_position.distance_to(target.global_position)
-	cyl.height = dist
-	beam.mesh = cyl
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = laser_color
-	mat.emission_enabled = true
-	mat.emission = laser_color
-	mat.emission_energy_multiplier = 1.2
-	beam.material_override = mat
+	beam.mesh = MunitionPool.unit_cylinder()
+	beam.material_override = MunitionPool.emissive(laser_color, laser_color, 1.2)
 	_effects_parent().add_child(beam)
-	beam.global_position = global_position.lerp(target.global_position, 0.5)
-	beam.look_at(target.global_position, Vector3.UP)
-	beam.rotate_object_local(Vector3.RIGHT, PI / 2)
+	var beam_len = MunitionPool.aim_beam(beam, global_position, target.global_position, 0.12)
 
 	if is_instance_valid(target):
 		_deal_weapon_damage(target, dps * fire_rate)
@@ -1637,21 +1504,19 @@ func _fire_ion_cannon():
 			target.drain_energy(energy_drain_per_shot)
 		_spawn_explosion_visual(target.global_position, 0.7, laser_color)
 
+	# Radius-only collapse; y preserves the length that now lives in scale.
 	var tween = create_tween()
-	tween.tween_property(beam, "scale", Vector3(0.0, 1.0, 0.0), 0.15)
+	tween.tween_property(beam, "scale", Vector3(0.0, beam_len, 0.0), 0.15)
 	tween.finished.connect(func(): if is_instance_valid(beam): beam.queue_free())
 
 func _spawn_explosion_visual(pos: Vector3, custom_scale: float = 0.6, color: Color = Color.ORANGE):
 	var exp = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = custom_scale
-	sphere.height = custom_scale * 2.0
-	exp.mesh = sphere
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = color
-	mat.emission_enabled = true
-	mat.emission = color
-	exp.material_override = mat
+	exp.mesh = MunitionPool.unit_sphere()
+	# custom_scale was the sphere's RADIUS (with height 2x it, i.e. a true
+	# sphere), so the equivalent uniform scale on a unit-diameter sphere is
+	# twice it.
+	exp.scale = Vector3.ONE * (custom_scale * 2.0)
+	exp.material_override = MunitionPool.emissive(color, color)
 	_effects_parent().add_child(exp)
 	exp.global_position = pos
 	
@@ -1661,23 +1526,13 @@ func _spawn_explosion_visual(pos: Vector3, custom_scale: float = 0.6, color: Col
 
 func _fire_standard_laser():
 	var laser = MeshInstance3D.new()
-	var cylinder = CylinderMesh.new()
-	cylinder.top_radius = 0.05
-	cylinder.bottom_radius = 0.05
-	cylinder.height = global_position.distance_to(target.global_position)
-	laser.mesh = cylinder
-	
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = laser_color
-	mat.emission_enabled = true
-	mat.emission = laser_color
-	laser.material_override = mat
+	laser.mesh = MunitionPool.unit_cylinder()
+	laser.material_override = MunitionPool.emissive(laser_color, laser_color)
 	_effects_parent().add_child(laser)
-	
-	laser.global_position = global_position.lerp(target.global_position, 0.5)
-	laser.look_at(target.global_position, Vector3.UP)
-	laser.rotate_object_local(Vector3.RIGHT, PI/2)
-	
+
+	MunitionPool.aim_beam(laser, global_position, target.global_position, 0.10)
+
+
 	if is_instance_valid(target):
 		_deal_weapon_damage(target, dps * fire_rate)
 	

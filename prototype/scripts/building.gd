@@ -6,6 +6,7 @@ signal died(building)
 signal unit_produced(unit)
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const MunitionPool = preload("res://scripts/munition_pool.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
@@ -595,14 +596,13 @@ func die(spawn_debris: bool = true):
 	if scene and spawn_debris:
 		for i in range(14):
 			var particle = MeshInstance3D.new()
-			var box = BoxMesh.new()
-			box.size = Vector3(0.4, 0.4, 0.4)
-			particle.mesh = box
-			var p_mat = StandardMaterial3D.new()
-			p_mat.albedo_color = Color.RED.lerp(Color.YELLOW, randf())
-			p_mat.emission_enabled = true
-			p_mat.emission = p_mat.albedo_color
-			particle.material_override = p_mat
+			particle.mesh = MunitionPool.unit_box()
+			particle.scale = Vector3(0.4, 0.4, 0.4)
+			# Quantised to 0.1 along the red->yellow ramp so 14 debris chunks
+			# per death draw from a fixed handful of pooled materials instead
+			# of minting one per chunk from a continuous randf().
+			var p_color = Color.RED.lerp(Color.YELLOW, snappedf(randf(), 0.1))
+			particle.material_override = MunitionPool.emissive(p_color, p_color)
 			scene.add_child(particle)
 			particle.global_position = global_position + Vector3(0, 1, 0)
 			var dir = Vector3(randf_range(-2, 2), randf_range(1, 4), randf_range(-2, 2)).normalized()

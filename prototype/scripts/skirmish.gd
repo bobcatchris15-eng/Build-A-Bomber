@@ -2517,12 +2517,32 @@ func _try_place_building(pos: Vector3):
 
 # --- Input: selection & orders ---
 
+const PerfHUDScript = preload("res://scripts/perf_hud.gd")
+var _perf_hud: CanvasLayer = null
+
+func _toggle_perf_hud() -> void:
+	if is_instance_valid(_perf_hud):
+		_perf_hud.queue_free()
+		_perf_hud = null
+		return
+	_perf_hud = PerfHUDScript.new()
+	_perf_hud.name = "PerfHUD"
+	add_child(_perf_hud)
+
 func _unhandled_input(event):
 	if game_over: return
 
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
 		_abandon_placement()
 		_set_selection([])
+		return
+
+	# F3 toggles the performance overlay (scripts/perf_hud.gd). Deliberately
+	# created on demand rather than always-on: the offline harnesses can't
+	# reproduce the in-match slowdown at 6-8 engaged units, so the numbers
+	# have to be readable during a real match. See perf_hud.gd's header.
+	if event is InputEventKey and event.pressed and event.keycode == KEY_F3:
+		_toggle_perf_hud()
 		return
 
 	if event is InputEventKey and event.pressed and event.keycode >= KEY_1 and event.keycode <= KEY_9:
