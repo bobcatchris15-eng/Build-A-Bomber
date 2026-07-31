@@ -23,6 +23,7 @@ const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
+const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
 
 # Set by load_blueprint_into_designer() whenever it returns false, so
 # callers (blueprint_library_panel.gd) can show a specific reason instead of
@@ -31,6 +32,44 @@ const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 # save), which is a real and correct file, just referencing a hull that
 # genuinely doesn't exist. Cleared at the start of every load attempt.
 var last_load_error: String = ""
+
+# --- Scratch design vs. saved design -----------------------------------
+#
+# "Test in Arena" used to call save_blueprint(), which wrote a permanent
+# file into user://blueprints/ under the fallback name "Untitled Design".
+# Every trip to the test range therefore minted a new roster entry, which is
+# why the match-setup import list is full of near-identical "Untitled Design
+# (Medium Hull | Industrialists)" rows.
+#
+# The split now:
+#   SCRATCH  - the design currently being worked on. Written on every trip
+#              to the arena so the arena has something to load and the Lab
+#              can restore it on the way back. Never appears in the roster.
+#   SAVED    - user://blueprints/<id>.json, created only by an explicit
+#              Save with a real name. This is what the roster reads.
+const SCRATCH_PATH = "user://lab_scratch.json"
+# Legacy single-slot pointer that Battlefield.tscn (the Test Range) reads.
+const LEGACY_SLOT_PATH = "user://blueprint.json"
+
+# The name a design has when the player hasn't given it one. A design still
+# carrying this is by definition not something they chose to keep.
+const PLACEHOLDER_NAME = "Untitled Design"
+
+
+# A design earns a roster slot by having a real, player-chosen name.
+#
+# Deliberately also treats the placeholder as unnamed, not just the empty
+# string: the old save path silently substituted "Untitled Design" for a
+# blank field, so "has a name" and "has a non-empty name" are not the same
+# question against existing files on disk.
+#
+# Matched case-INSENSITIVELY. "untitled design" typed by hand is the same
+# non-decision as the one the old code auto-filled, and letting it through
+# on a capitalisation technicality would put it straight back in the roster
+# - which is the entire thing this gate exists to prevent.
+static func is_named(bp_name: String) -> bool:
+	var trimmed := bp_name.strip_edges()
+	return trimmed != "" and trimmed.to_lower() != PLACEHOLDER_NAME.to_lower()
 
 func _vec3_to_dict(v: Vector3) -> Dictionary:
 	return {"x": v.x, "y": v.y, "z": v.z}
@@ -164,9 +203,17 @@ func save_blueprint() -> bool:
 		bp_id = hull.get_meta("blueprint_id")
 	if bp_id == "":
 		bp_id = _generate_blueprint_id()
-	var bp_name = "Untitled Design"
-	if hull.has_meta("blueprint_name") and hull.get_meta("blueprint_name") != "":
-		bp_name = hull.get_meta("blueprint_name")
+	var bp_name = ""
+	if hull.has_meta("blueprint_name"):
+		bp_name = str(hull.get_meta("blueprint_name")).strip_edges()
+
+	# Refuse rather than substituting a placeholder. Saving is what puts a
+	# design in front of the player in a match, so it needs a deliberate
+	# name; quietly inventing one is how the roster filled up with
+	# indistinguishable entries in the first place.
+	if not is_named(bp_name):
+		_show_toast("Name this design before saving.", true)
+		return false
 
 	blueprint["id"] = bp_id
 	blueprint["name"] = bp_name
@@ -192,12 +239,132 @@ func save_blueprint() -> bool:
 		legacy_file.close()
 
 	_show_toast("Saved '%s'!" % bp_name)
+	# An explicit save supersedes whatever was in the scratch slot - the
+	# design is now a real, named file, so there is no unsaved work left for
+	# the Lab to restore.
+	clear_scratch()
 	return true
+
+
+# Writes the in-progress design to the scratch slot WITHOUT creating a
+# roster entry. Used by "Test in Arena".
+#
+# Returns false for the same reason save_blueprint() does - clipping - so
+# the caller can block the scene transition. It deliberately does NOT
+# require a name: testing an unnamed design is the whole point.
+func save_scratch(mark_for_lab_restore: bool = true) -> bool:
+	var root = get_node_or_null("/root/MainLab")
+	if root and root.get("clipping_detected") == true:
+		_show_toast("TEST BLOCKED: Clipping!", true)
+		return false
+
+	var hull = root.get_node_or_null("Hull") if root else null
+	if not hull:
+		print("No hull found to stage for testing.")
+		return false
+
+	var blueprint = serialize_hull(hull)
+	# Carry the id/name through even when unnamed, so that testing, coming
+	# back, and THEN saving updates the same design rather than forking a
+	# second copy of it.
+	blueprint["id"] = hull.get_meta("blueprint_id", "")
+	blueprint["name"] = str(hull.get_meta("blueprint_name", "")).strip_edges()
+	blueprint["modified_unix"] = Time.get_unix_time_from_system()
+	# Consumed once by the Lab on next load. Stored in the file rather than
+	# in a static var so it survives the player closing the game while in
+	# the arena - they still get their design back.
+	blueprint["pending_lab_restore"] = mark_for_lab_restore
+
+	var json_string = JSON.stringify(blueprint, "\t")
+	for path in [SCRATCH_PATH, LEGACY_SLOT_PATH]:
+		var f = FileAccess.open(path, FileAccess.WRITE)
+		if f:
+			f.store_string(json_string)
+			f.close()
+	return true
+
+
+# True when the Lab should restore a design on load - i.e. the player left
+# for the arena and is now coming back.
+func has_pending_lab_restore() -> bool:
+	if not FileAccess.file_exists(SCRATCH_PATH):
+		return false
+	return load_blueprint(SCRATCH_PATH).get("pending_lab_restore", false)
+
+
+# Rebuilds the scratch design in the Lab and clears the restore flag, so a
+# later fresh visit to the Lab starts clean instead of resurrecting an old
+# session. Mirrors load_blueprint_into_designer(), minus the roster lookup.
+func restore_scratch_into_designer() -> bool:
+	last_load_error = ""
+	var data = load_blueprint(SCRATCH_PATH)
+	if data.is_empty():
+		return false
+
+	var hull_type = data.get("hull_type", "medium_hull")
+	if not ModuleCatalogScript.hull_exists(hull_type):
+		last_load_error = "Couldn't restore your design: hull '%s' is not installed." % hull_type
+		_show_toast(last_load_error, true)
+		_set_scratch_restore_flag(false)
+		return false
+
+	var root = get_node_or_null("/root/MainLab")
+	if not root:
+		return false
+
+	if root.has_method("clear_hull"):
+		root.clear_hull()
+
+	var new_hull = reconstruct_vehicle(data, root, true)
+	if not new_hull:
+		_set_scratch_restore_flag(false)
+		return false
+	root.hull = new_hull
+
+	# reconstruct_vehicle() rebuilds geometry, not identity - without this
+	# the restored design forgets which saved blueprint it came from and a
+	# subsequent Save would fork a duplicate.
+	if data.get("id", "") != "":
+		new_hull.set_meta("blueprint_id", data["id"])
+	if data.get("name", "") != "":
+		new_hull.set_meta("blueprint_name", data["name"])
+
+	get_tree().call_group("stat_ui", "update_stats", new_hull)
+	get_tree().call_group("stat_ui", "sync_hull_ui", new_hull)
+	_set_scratch_restore_flag(false)
+	return true
+
+
+func _set_scratch_restore_flag(value: bool) -> void:
+	var data = load_blueprint(SCRATCH_PATH)
+	if data.is_empty():
+		return
+	data["pending_lab_restore"] = value
+	var f = FileAccess.open(SCRATCH_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(data, "\t"))
+		f.close()
+
+
+func clear_scratch() -> void:
+	if FileAccess.file_exists(SCRATCH_PATH):
+		DirAccess.remove_absolute(SCRATCH_PATH)
+
 
 func _generate_blueprint_id() -> String:
 	return "bp_%d_%d" % [Time.get_unix_time_from_system(), randi() % 100000]
 
-func list_blueprints() -> Array:
+# named_only: restrict the result to designs the player deliberately named.
+#
+# Match setup and the in-match production roster pass true, because those are
+# "which of my designs go into battle" lists and an unnamed design isn't a
+# choice the player made. The Blueprint Library panel passes false, because
+# it is the file manager - it has to show unnamed leftovers so they can be
+# renamed (which promotes them) or deleted.
+#
+# Nothing is hidden permanently and nothing is deleted: pre-existing
+# "Untitled Design" files stay on disk and stay visible in the Library.
+func list_blueprints(named_only: bool = false) -> Array:
 	var results = []
 	DirAccess.make_dir_recursive_absolute("user://blueprints")
 	var dir = DirAccess.open("user://blueprints")
@@ -208,7 +375,7 @@ func list_blueprints() -> Array:
 	while file_name != "":
 		if not dir.current_is_dir() and file_name.ends_with(".json"):
 			var data = load_blueprint("user://blueprints/" + file_name)
-			if not data.is_empty():
+			if not data.is_empty() and (not named_only or is_named(data.get("name", ""))):
 				results.append({
 					"id": data.get("id", file_name.get_basename()),
 					"name": data.get("name", "Untitled Design"),
@@ -233,7 +400,17 @@ func rename_blueprint(id: String, new_name: String) -> bool:
 	var data = load_blueprint(path)
 	if data.is_empty():
 		return false
-	data["name"] = new_name if new_name.strip_edges() != "" else "Untitled Design"
+
+	# Refuse the placeholder here too, and stop ASSIGNING it on a blank
+	# name. Rename is the promotion path for an existing unnamed design -
+	# renaming one back to "Untitled Design" (or clearing the field, which
+	# used to silently write the placeholder) would demote it out of the
+	# roster with no indication that anything had happened.
+	if not is_named(new_name):
+		_show_toast("Pick a real name - '%s' isn't one." % PLACEHOLDER_NAME, true)
+		return false
+
+	data["name"] = new_name.strip_edges()
 	data["modified_unix"] = Time.get_unix_time_from_system()
 	var file = FileAccess.open(path, FileAccess.WRITE)
 	if not file:
@@ -643,13 +820,9 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 
 	return hull
 
-const _MIRROR_X := Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1))
-
+# Delegates to ModuleMirror so the reconstruct path and the live-placement
+# path cannot drift apart again. This copy previously omitted the cull-mode
+# compensation, so every mirrored module rendered inside-out once it was
+# loaded, tested, or spawned into a match.
 func _apply_mirror_flip_to(module: Node3D):
-	for child in module.get_children():
-		if child is CollisionObject3D or not (child is Node3D):
-			continue
-		if child.get_meta("_mirrored", false):
-			continue
-		child.transform = Transform3D(_MIRROR_X * child.transform.basis, _MIRROR_X * child.transform.origin)
-		child.set_meta("_mirrored", true)
+	ModuleMirrorScript.apply(module)

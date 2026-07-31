@@ -59,6 +59,17 @@ var move_speed: float = 5.0
 # purely a per-tick multiplier applied where velocity is actually set.
 var terrain_speed_multiplier: float = 1.0
 var rotate_speed: float = 4.0
+
+# Steering throttle constants - see _steer_towards() for the derivation.
+# Heading alignment (forward · desired) at or below which the unit is
+# considered to be pointed the wrong way and should pivot rather than drive.
+# 0.0 = perpendicular; anything worse than perpendicular takes it backwards.
+const ALIGN_FLOOR: float = 0.0
+# Never fully stall while turning - a unit at zero throttle wedged against
+# terrain can never free itself.
+const MIN_THROTTLE: float = 0.15
+# Floor for the final-approach slowdown, so the last metre isn't a crawl.
+const APPROACH_THROTTLE_MIN: float = 0.35
 var target_altitude: float = 0.0
 # Real pathfinding (built this pass) - null unless a real Skirmish match
 # controller was found at setup() (see _setup_navigation()), so every
@@ -282,8 +293,20 @@ func _setup_navigation():
 	# systems agree on when the trip is done - the old 1.5 m was smaller than
 	# the nav agent's own path quantization in some maps, causing an oscillation
 	# loop where nav said "done" but the steering code kept overriding it.
-	nav_agent.path_desired_distance = 1.0
-	nav_agent.target_desired_distance = 2.0
+	# Both radii scale with how fast this unit actually is.
+	#
+	# Fixed radii were the other half of the circling bug. A waypoint is
+	# "reached" only once the unit is within path_desired_distance of it, but
+	# a unit moving at 18 m/s covers 0.3 m per 60 Hz tick and turns along an
+	# arc several metres wide - so it can sweep past a 1.0 m capture circle
+	# without ever entering it, never advance to the next waypoint, and loop
+	# back to try the same one again. The faster the unit, the more certain
+	# the miss, which is why it looked worse on light fast designs.
+	#
+	# Scaling by move_speed keeps the capture circle proportional to how far
+	# the unit travels between decisions. The floors preserve the previous
+	# behaviour for slow units, so this only loosens where it needs to.
+	_sync_nav_agent_radii()
 	nav_agent.avoidance_enabled = false
 	if is_naval:
 		if hull_draught > ModuleCatalog.SHALLOW_WATER_DRAUGHT_THRESHOLD and controller.has_method("get_deep_water_nav_map"):
@@ -579,6 +602,28 @@ func _recalculate_move_speed():
 	# a ground vehicle designed under this faction gets no speed change.
 	if is_flying:
 		move_speed *= FactionCatalog.get_passive(faction, "air_speed_mult", 1.0)
+
+	# The nav agent's capture radii are derived from move_speed, and this
+	# function runs again whenever damage strips a subsystem. Without this
+	# the radii keep the values they were given at spawn, so a unit that has
+	# been slowed keeps oversized capture circles (stopping short) and one
+	# that somehow speeds up keeps undersized ones (back to circling).
+	_sync_nav_agent_radii()
+
+# Keeps the nav agent's capture radii proportional to the unit's current
+# speed. See _setup_navigation() for why they can't be constants.
+func _arrive_distance() -> float:
+	# Mirrors _sync_nav_agent_radii()'s target radius, including for units
+	# with no nav agent at all (flying, or any synthetic test context).
+	if is_instance_valid(nav_agent):
+		return nav_agent.target_desired_distance
+	return maxf(2.0, move_speed * 0.22)
+
+func _sync_nav_agent_radii() -> void:
+	if not is_instance_valid(nav_agent):
+		return
+	nav_agent.path_desired_distance = maxf(1.0, move_speed * 0.30)
+	nav_agent.target_desired_distance = maxf(2.0, move_speed * 0.22)
 
 # Terrain variety task: surface terrain (marsh/rocky/snow_mud/sand) slows or
 # favors specific locomotion types - this looks up the CURRENT tile every
@@ -877,12 +922,14 @@ func _physics_process(delta):
 				_steer_fixed_wing(move_target, delta)
 				if global_position.distance_to(move_target) < attack_range:
 					order = OrderType.IDLE
-			# arrive_dist = 2.0 m matches nav_agent.target_desired_distance so the
-			# two systems agree on "arrived" - the old 0.6 m was smaller than the
-			# nav agent's own finish threshold, causing a tight circle where
-			# nav_agent.is_navigation_finished() returned true but direct steering
-			# thought the unit was still 0.6-1.5 m away.
-			elif _steer_towards(move_target, delta, 2.0):
+			# arrive_dist tracks nav_agent.target_desired_distance so the two
+			# systems agree on "arrived". They must not drift: when the direct
+			# steering threshold is SMALLER than the nav agent's finish radius,
+			# nav declares the trip done while steering still thinks it has a
+			# metre to cover, and the unit grinds in a tight circle at the
+			# destination. That radius is now speed-scaled, so reading it here
+			# is the only way to stay in sync.
+			elif _steer_towards(move_target, delta, _arrive_distance()):
 				order = OrderType.IDLE
 		OrderType.ATTACK:
 			if not is_instance_valid(attack_target) or ("is_dead" in attack_target and attack_target.is_dead):
@@ -1099,8 +1146,47 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 	var target_basis = Basis.looking_at(steer_diff, Vector3.UP)
 	global_transform.basis = global_transform.basis.slerp(target_basis, rotate_speed * delta).orthonormalized()
 	var forward_dir = -global_transform.basis.z.normalized()
-	velocity.x = forward_dir.x * move_speed * terrain_speed_multiplier
-	velocity.z = forward_dir.z * move_speed * terrain_speed_multiplier
+
+	# THROTTLE, gated on how well the unit is actually pointed at where it
+	# wants to go. This is the fix for "units drive in circles instead of
+	# reaching the ordered point."
+	#
+	# The old code drove at full move_speed along forward_dir unconditionally
+	# while yaw caught up separately, which is a vehicle with a fixed turning
+	# radius and no throttle. Turning radius r = v / w, and here w is roughly
+	# rotate_speed * heading_error, so a fast unit (move_speed clamps up to
+	# 18.0) at a 45 degree error needs r = 18 / (4.0 * 0.785) = 5.7 m of room
+	# to come around. Both capture radii are far smaller than that -
+	# target_desired_distance is 2.0 m and path_desired_distance 1.0 m - so
+	# the unit sweeps past the point it is aiming for, re-aims, and sweeps
+	# past again. It orbits forever, and no amount of repathing helps because
+	# the geometry, not the path, is what is wrong.
+	#
+	# Backing off the throttle while badly aimed shrinks the turning radius
+	# (less v for the same w) until it fits inside the capture radius, so the
+	# unit converges instead of circling. A vehicle that slows to turn and
+	# accelerates out of it is also just how vehicles behave.
+	var desired_dir = steer_diff.normalized()
+	var alignment := forward_dir.dot(desired_dir)  # 1 = dead on, -1 = backwards
+
+	# Below ALIGN_FLOOR the unit is pointed so wrong that driving forward
+	# actively takes it away from the target - it should pivot near-in-place.
+	# A small floor rather than zero so it never fully stalls, which would
+	# deadlock a unit wedged against geometry.
+	var throttle := clampf(
+		(alignment - ALIGN_FLOOR) / (1.0 - ALIGN_FLOOR), MIN_THROTTLE, 1.0)
+
+	# Ease off on the final approach as well, so the unit settles into the
+	# arrival radius instead of arriving at full speed and overshooting it -
+	# an overshoot re-enters the same orbit from the other side.
+	var dist := pos_diff.length()
+	var slow_radius := maxf(arrive_dist * 2.0, move_speed * 0.45)
+	if dist < slow_radius and slow_radius > 0.01:
+		throttle *= clampf(dist / slow_radius, APPROACH_THROTTLE_MIN, 1.0)
+
+	var speed := move_speed * terrain_speed_multiplier * throttle
+	velocity.x = forward_dir.x * speed
+	velocity.z = forward_dir.z * speed
 	return false
 
 # AI phase 1: rotates the whole hull to face a point without moving toward

@@ -4,6 +4,8 @@ const ModuleDataResource = preload("res://scripts/module_data.gd")
 
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
+const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
+const BlueprintNamerScript = preload("res://scripts/blueprint_namer.gd")
 
 @onready var sidebar_panel: Panel = $Panel
 
@@ -17,6 +19,7 @@ const UITheme = preload("res://scripts/ui_theme.gd")
 @onready var test_button = $ScrollContainer/VBoxContainer/TestButton
 @onready var blueprint_name_edit = $ScrollContainer/VBoxContainer/BlueprintNameEdit
 @onready var library_button = $ScrollContainer/VBoxContainer/LibraryButton
+var _name_roll_button: Button = null
 
 @onready var locomotion_tweaks = $ScrollContainer/VBoxContainer/LocomotionTweaks
 @onready var size_container = $ScrollContainer/VBoxContainer/LocomotionTweaks/SizeContainer
@@ -241,22 +244,29 @@ func _ready():
 	add_to_group("stat_ui")
 	if sidebar_panel:
 		UITheme.apply_brushed_panel(sidebar_panel, FactionCatalog.DEFAULT_FACTION)
-	# Real StyleBoxFlat button chrome instead of a plain default button with
-	# a raw `modulate` tint (which just washes the whole default gray button
-	# including its border/background in one flat color) - matches the
-	# rounded, bordered button look the Parts Catalog buttons already use,
-	# so the two sidebars read as one consistent UI instead of two
-	# differently-styled ones sitting side by side.
-	_style_action_button(delete_button, Color(0.75, 0.22, 0.2))
-	_style_action_button(save_button, Color(0.2, 0.6, 0.28))
-	_style_action_button(test_button, Color(0.2, 0.45, 0.75))
-	_style_action_button(library_button, Color(0.4, 0.38, 0.62))
+	# Theme variations rather than four hand-picked fill colors.
+	#
+	# These used to be a saturated red, green, blue and purple slab stacked
+	# in a column, which spent the loudest colors on screen on four buttons
+	# that are not urgent, and left nothing to escalate to when something
+	# actually goes wrong. It also meant the Design Lab's palette existed
+	# nowhere else in the game.
+	#
+	# Now: Delete is the only destructive action here, so it is the only one
+	# carrying alert red. Save is the commit action, so it takes the single
+	# go-green. Test and Library are ordinary navigation and stay neutral -
+	# they are reachable, not important.
+	delete_button.theme_type_variation = "DangerButton"
+	save_button.theme_type_variation = "PrimaryButton"
+	test_button.theme_type_variation = "Button"
+	library_button.theme_type_variation = "Button"
 	mirror_checkbox.toggled.connect(_on_mirror_toggled)
 	delete_button.pressed.connect(_on_delete_pressed)
 	save_button.pressed.connect(_on_save_pressed)
 	test_button.pressed.connect(_on_test_pressed)
 	library_button.pressed.connect(_on_library_pressed)
 	blueprint_name_edit.text_changed.connect(_on_blueprint_name_changed)
+	_setup_name_roller()
 	
 	size_slider.value_changed.connect(_on_size_value_changed)
 	count_slider.value_changed.connect(_on_count_value_changed)
@@ -568,28 +578,6 @@ func _ready():
 	# Initial sync of armor UI
 	call_deferred("_initial_sync")
 
-func _style_action_button(btn: Button, color: Color):
-	btn.modulate = Color.WHITE
-	var style = StyleBoxFlat.new()
-	style.bg_color = color
-	style.border_width_bottom = 3
-	style.border_color = color.darkened(0.35)
-	style.corner_radius_top_left = 5
-	style.corner_radius_top_right = 5
-	style.corner_radius_bottom_left = 5
-	style.corner_radius_bottom_right = 5
-	style.content_margin_top = 4
-	style.content_margin_bottom = 4
-	btn.add_theme_stylebox_override("normal", style)
-	var hover_style = style.duplicate()
-	hover_style.bg_color = color.lightened(0.15)
-	btn.add_theme_stylebox_override("hover", hover_style)
-	var pressed_style = style.duplicate()
-	pressed_style.bg_color = color.darkened(0.15)
-	btn.add_theme_stylebox_override("pressed", pressed_style)
-	btn.add_theme_color_override("font_color", Color.WHITE)
-	btn.add_theme_color_override("font_hover_color", Color.WHITE)
-
 func _push_undo():
 	var root = get_node_or_null("/root/MainLab")
 	if root and root.has_method("push_undo_snapshot"):
@@ -604,14 +592,64 @@ func _on_save_pressed():
 	var root = get_node("/root/MainLab")
 	var hull = root.get_node_or_null("Hull") if root else null
 	if hull:
+		# No placeholder substitution. A blank field used to become
+		# "Untitled Design" and save anyway, which is how designs reached the
+		# match roster without the player ever naming them. Now an unnamed
+		# save is refused and the field is focused so the fix is obvious.
 		var name_text = blueprint_name_edit.text.strip_edges()
-		if name_text == "":
-			name_text = "Untitled Design"
-			blueprint_name_edit.text = name_text
 		hull.set_meta("blueprint_name", name_text)
 	var blueprint_manager = root.get_node_or_null("BlueprintManager")
 	if blueprint_manager:
-		blueprint_manager.save_blueprint()
+		if not blueprint_manager.save_blueprint():
+			blueprint_name_edit.grab_focus()
+
+# Adds a "Roll" button beside the name field that fills in a generated
+# designation ("GoatHauler Mk VI", "Type 17 IronDung").
+#
+# Built in code rather than added to UI_StatBlock.tscn so the LineEdit keeps
+# its existing path - stat_calculator.gd reaches it via an @onready node
+# path, and reparenting it into a new HBox in the scene would break that
+# reference (and every other script that walks the same path).
+func _setup_name_roller() -> void:
+	if not blueprint_name_edit:
+		return
+	var parent := blueprint_name_edit.get_parent()
+	var idx := blueprint_name_edit.get_index()
+
+	var row := HBoxContainer.new()
+	row.name = "BlueprintNameRow"
+	row.add_theme_constant_override("separation", 4)
+	parent.add_child(row)
+	parent.move_child(row, idx)
+
+	# reparent() preserves the node itself, so $ScrollContainer/VBoxContainer/
+	# BlueprintNameEdit becomes .../BlueprintNameRow/BlueprintNameEdit. The
+	# @onready var already resolved at _ready(), so the reference stays valid.
+	blueprint_name_edit.reparent(row)
+	blueprint_name_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	_name_roll_button = Button.new()
+	_name_roll_button.text = "Roll"
+	_name_roll_button.tooltip_text = "Suggest a designation"
+	_name_roll_button.pressed.connect(_on_roll_name_pressed)
+	row.add_child(_name_roll_button)
+
+	_reroll_name_suggestion()
+
+func _reroll_name_suggestion() -> void:
+	# Shown as placeholder text only. A suggestion the player never looked at
+	# is not a name they chose, so it must not count as one - it stays out of
+	# the field (and therefore out of the save) until Roll is pressed.
+	if blueprint_name_edit:
+		blueprint_name_edit.placeholder_text = BlueprintNamerScript.generate()
+
+func _on_roll_name_pressed() -> void:
+	if not blueprint_name_edit:
+		return
+	var rolled: String = BlueprintNamerScript.generate()
+	blueprint_name_edit.text = rolled
+	_on_blueprint_name_changed(rolled)
+	_reroll_name_suggestion()
 
 func _on_blueprint_name_changed(new_text: String):
 	var root = get_node_or_null("/root/MainLab")
@@ -631,14 +669,22 @@ func _on_library_pressed():
 	root.add_child(panel)
 
 func sync_hull_ui(hull: Node3D):
+	# An unnamed design now shows an EMPTY field with a suggestion behind it,
+	# not the literal string "Untitled Design". Writing the placeholder into
+	# the field is what made it look like a name the player had already
+	# supplied - they'd hit Save and get refused by something the UI had
+	# filled in for them.
 	if not hull:
 		if blueprint_name_edit:
-			blueprint_name_edit.text = "Untitled Design"
+			blueprint_name_edit.text = ""
+			_reroll_name_suggestion()
 		return
 	is_updating_sliders = true
 	if blueprint_name_edit:
-		var bp_name = hull.get_meta("blueprint_name") if hull.has_meta("blueprint_name") else "Untitled Design"
-		blueprint_name_edit.text = bp_name
+		var bp_name = str(hull.get_meta("blueprint_name", "")).strip_edges()
+		blueprint_name_edit.text = bp_name if BlueprintManagerScript.is_named(bp_name) else ""
+		if blueprint_name_edit.text == "":
+			_reroll_name_suggestion()
 	if armor_mat_btn:
 		var mat = hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel"
 		match mat:
@@ -673,8 +719,16 @@ func _on_test_pressed():
 	var root = get_node("/root/MainLab")
 	var blueprint_manager = root.get_node_or_null("BlueprintManager")
 	if blueprint_manager:
-		# Auto-save before testing. If save fails (e.g. clipping), block transition!
-		var success = blueprint_manager.save_blueprint()
+		# Stage to the SCRATCH slot, not the roster.
+		#
+		# This used to call save_blueprint(), so every trip to the test range
+		# minted a permanent "Untitled Design" entry that then showed up in
+		# match setup. Testing is not keeping. save_scratch() also flags the
+		# design for restore, so coming back from the arena returns the
+		# player to what they were working on rather than a blank hull.
+		#
+		# Still returns false on clipping, so the transition stays blocked.
+		var success = blueprint_manager.save_scratch()
 		if not success:
 			var ui = get_tree().get_first_node_in_group("stat_ui")
 			if ui and ui.has_node("ScrollContainer/VBoxContainer/Title"):

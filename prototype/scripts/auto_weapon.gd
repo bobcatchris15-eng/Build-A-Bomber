@@ -457,95 +457,16 @@ func _ready():
 
 		targets_allies = ModuleCatalog.targets_allies(type_id)
 			
-		# Configure stats and colors by type_id
-		if type_id == "basic_cannon":
-			fire_range = 25.0
-			fire_rate = 1.8
-			laser_color = Color.ORANGE
-		elif type_id == "heavy_machine_gun":
-			fire_range = 15.0
-			fire_rate = 0.22
-			laser_color = Color.GOLD
-		elif type_id == "rotary_cannon":
-			fire_range = 20.0
-			fire_rate = 0.05
-			laser_color = Color.GOLD
-		elif type_id == "gauss_railgun":
-			fire_range = 45.0
-			fire_rate = 3.5
-			laser_color = Color.BLUE_VIOLET
-		elif type_id == "artillery":
-			fire_range = 50.0
-			fire_rate = 4.5
-			laser_color = Color.SADDLE_BROWN
-		elif type_id == "mortar_array":
-			fire_range = 28.0
-			fire_rate = 2.0
-			laser_color = Color.OLIVE
-		elif type_id == "guided_missile":
-			fire_range = 35.0
-			fire_rate = 3.0
-			laser_color = Color.YELLOW
-		elif type_id == "missile_pod":
-			fire_range = 30.0
-			fire_rate = 2.8
-			laser_color = Color.DARK_ORANGE
-		elif type_id == "drone_carrier":
-			fire_range = 30.0
-			fire_rate = 5.0
-			laser_color = Color.NAVY_BLUE
-		elif type_id == "cluster_dispenser":
-			fire_range = 24.0
-			fire_rate = 3.0
-			laser_color = Color.CHOCOLATE
-		elif type_id == "flamethrower":
-			fire_range = 9.0
-			fire_rate = 0.05
-			laser_color = Color.CRIMSON
-		elif type_id == "heavy_laser":
-			fire_range = 22.0
-			fire_rate = 0.05
-			laser_color = Color.DARK_RED
-		elif type_id == "plasma_lobber":
-			fire_range = 24.0
-			fire_rate = 2.2
-			laser_color = Color.MEDIUM_SPRING_GREEN
-		elif type_id == "tesla_coil":
-			fire_range = 14.0
-			fire_rate = 1.4
-			laser_color = Color.LIGHT_SKY_BLUE
-		elif type_id == "arc_projector":
-			fire_range = 10.0
-			fire_rate = 0.9
-			laser_color = Color.CYAN
-		elif type_id == "ion_cannon":
-			fire_range = 32.0
-			fire_rate = 3.2
-			laser_color = Color.SKY_BLUE
-		elif type_id == "ciws":
-			fire_range = 14.0
-			fire_rate = 0.06
-			laser_color = Color.WHITE_SMOKE
-		elif type_id == "pd_laser":
-			fire_range = 16.0
-			fire_rate = 0.1
-			laser_color = Color.LIGHT_CORAL
-		elif type_id == "flak_cannon":
-			fire_range = 22.0
-			fire_rate = 1.2
-			laser_color = Color.DARK_GOLDENROD
-		elif type_id == "resource_harvester":
-			fire_range = 15.0
-			fire_rate = 0.1
-			laser_color = Color.GOLD
-		elif type_id == "repair_array":
-			fire_range = 12.0
-			fire_rate = 0.15
-			laser_color = Color.CYAN
-		else:
-			fire_range = 15.0
-			fire_rate = 1.0
-			laser_color = Color.WHITE
+		# Base fire profile. These used to be a ~120-line if/elif chain right
+		# here; they now live in ModuleCatalog.WEAPON_FIRE_PROFILES so balance
+		# tooling can actually see and sweep them (fire_rate is the shot
+		# interval, and per-shot damage `dps * fire_rate` is what the armor
+		# thresholds gate on - so it's the strongest balance lever there is).
+		# The tweak modifiers below still apply on top, unchanged.
+		var fire_profile = ModuleCatalog.get_fire_profile(type_id)
+		fire_range = fire_profile.fire_range
+		fire_rate = fire_profile.fire_rate
+		laser_color = fire_profile.laser_color
 			
 		# Apply Range & Traverse Speed Tweak Modifiers
 		if data.tweaks.has("barrel_length"):

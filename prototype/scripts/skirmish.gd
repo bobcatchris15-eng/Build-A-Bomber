@@ -371,7 +371,8 @@ func _ready():
 
 	var match_config = get_node_or_null("/root/MatchConfig")
 	if match_config and "selected_map_id" in match_config and match_config.selected_map_id != "":
-		map_id = match_config.selected_map_id
+		if map_id == "" or map_id == MapCatalog.DEFAULT_MAP_ID:
+			map_id = match_config.selected_map_id
 	current_map = MapCatalog.get_map(map_id)
 
 	if match_config:
@@ -978,7 +979,11 @@ func _load_rosters():
 				if not entry.is_empty():
 					roster.append(entry)
 	else:
-		var entries = bp_manager.list_blueprints()
+		# named_only - the auto-include path picks the player's newest designs
+		# to field when they didn't hand-pick any in match setup. An unnamed
+		# design left over from a test-range trip was never a choice to
+		# field, so it shouldn't be auto-drafted into a match either.
+		var entries = bp_manager.list_blueprints(true)
 		for e in entries.slice(0, 8): # newest saved designs first, leave room for defaults
 			var data = bp_manager.load_blueprint(e.path)
 			if not data.is_empty():

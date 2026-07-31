@@ -158,7 +158,12 @@ func _on_rename_pressed(id: String, current_name: String):
 	dialog.dialog_text = "New name:"
 	add_child(dialog)
 	var line_edit = LineEdit.new()
-	line_edit.text = current_name
+	# Start blank rather than pre-filling the placeholder. Rename now refuses
+	# "Untitled Design", so seeding the field with it would hand the player a
+	# value they have to clear before the dialog will accept anything.
+	var BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
+	line_edit.text = current_name if BlueprintManagerScript.is_named(current_name) else ""
+	line_edit.placeholder_text = "Name this design"
 	line_edit.custom_minimum_size = Vector2(300, 0)
 	dialog.add_child(line_edit)
 	dialog.confirmed.connect(func():

@@ -18,6 +18,8 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+WindowFit="*res://scripts/window_fit.gd"
+SceneRouter="*res://scripts/scene_router.gd"
 MatchConfig="*res://scripts/match_config.gd"
 DebugSettings="*res://scripts/debug_settings.gd"
 CursorManager="*res://scripts/cursor_manager.gd"

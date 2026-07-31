@@ -1,50 +1,91 @@
 extends RefCounted
 class_name UITheme
-# Brushed-aluminum UI chrome, shared across every screen (Design Lab
-# sidebar, Skirmish HUD, MainMenu/MapSelect/MatchSetup) - Chris's direct
-# art brief: "bright and faintly goofy underneath a serious overtone,
-# brushed anodized aluminum... color and wear switches based on faction."
-# One shader (brushed_aluminum_panel.gdshader), one helper to stamp it onto
-# any CanvasItem background - no per-screen bespoke styling code, matching
-# how hull_material_builder.gd is the single hull-material entry point.
+# Helpers for the parts of the interface a Theme resource can't express -
+# the shader-backed backdrop, and a few "style this node like X" shortcuts
+# for controls built in code.
+#
+# Everything with a StyleBox belongs in tools/build_ui_theme.gd instead.
+# This file is for what has to happen at runtime.
 
 const PANEL_SHADER = preload("res://shaders/brushed_aluminum_panel.gdshader")
+const Tokens = preload("res://scripts/ui_tokens.gd")
 const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
 
-# Applies (or refreshes) the brushed-aluminum look on any CanvasItem that
-# has a `.material` property (Panel, PanelContainer, ColorRect, ...).
-# Reuses the existing ShaderMaterial instance on repeated calls (e.g. when
-# the player changes their faction selection live) instead of allocating a
-# new one every time.
-static func apply_brushed_panel(node: CanvasItem, faction: String, tint_strength: float = 0.55):
+
+# Paints the sheet-metal backdrop onto a full-screen (or panel-sized) node.
+#
+# The shader needs to know the node's pixel size to keep its grain a fixed
+# physical size, and a Control's size isn't final until layout has run - so
+# this both pushes the current size and keeps it current via `resized`.
+# Without that, the backdrop is correct at the design resolution and wrong
+# at every other window size, which is the kind of bug that only shows up on
+# someone else's monitor.
+static func apply_backdrop(node: CanvasItem, accent: Color = Color.WHITE, accent_strength: float = 0.0) -> void:
 	var mat := node.material as ShaderMaterial
 	if not mat or mat.shader != PANEL_SHADER:
 		mat = ShaderMaterial.new()
 		mat.shader = PANEL_SHADER
 		node.material = mat
-	mat.set_shader_parameter("faction_tint", FactionCatalogScript.get_visual_color(faction))
-	mat.set_shader_parameter("wear_amount", FactionCatalogScript.get_visual_wear_amount(faction))
-	mat.set_shader_parameter("tint_strength", tint_strength)
+	mat.set_shader_parameter("accent_tint", accent)
+	mat.set_shader_parameter("tint_strength", accent_strength)
+	mat.set_shader_parameter("wear_amount", 0.3)
+
+	if node is Control:
+		var ctrl := node as Control
+		var push := func() -> void:
+			var s := ctrl.size
+			if s.x > 1.0 and s.y > 1.0:
+				mat.set_shader_parameter("panel_size", s)
+		push.call()
+		if not ctrl.resized.is_connected(push):
+			ctrl.resized.connect(push)
+
+
+# Backwards-compatible entry point for the existing call sites (main_menu,
+# map_select, match_setup, parts_menu, skirmish, stat_calculator).
+#
+# The faction argument is now deliberately IGNORED for tinting. It used to
+# repaint all UI chrome in the player's faction color, which collided with
+# faction color's real job on the battlefield - telling the player who owns
+# a unit. The parameter is kept so the call sites don't all have to change
+# in the same commit as the visual work, and so the intent of "this panel
+# belongs to the player" stays recorded at each site.
+static func apply_brushed_panel(node: CanvasItem, _faction: String, _tint_strength: float = 0.55) -> void:
+	apply_backdrop(node)
+
+
+# For a genuine faction-identity surface - the faction picker's preview
+# swatch, and nothing else. Kept separate so it can't be reached by accident.
+static func apply_faction_preview(node: CanvasItem, faction: String) -> void:
+	apply_backdrop(node, FactionCatalogScript.get_visual_color(faction), 0.45)
+
 
 static func style_option_button(btn: OptionButton) -> void:
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.2, 0.2, 0.2, 0.8)
-	# set_border_enabled_all() is a Godot 3 API that doesn't exist on 4.3's
-	# StyleBoxFlat - the invalid call errored out of this whole function at
-	# runtime, so the border/corner styling below silently never applied
-	# (found via test-run error spam). Border width > 0 is what enables
-	# borders in Godot 4; no separate "enabled" call exists.
-	style.set_border_width_all(1)
-	style.border_color = Color(0.4, 0.4, 0.4, 1.0)
-	style.set_corner_radius_all(3)
-	btn.add_theme_stylebox_override("focus", style)
-	btn.add_theme_stylebox_override("normal", style)
-	btn.add_theme_color_override("font_color", Color(0.85, 0.85, 0.85, 1.0))
+	# The theme covers OptionButton now; this remains only so existing
+	# callers keep working. Deliberately a no-op rather than a second,
+	# competing set of overrides - local overrides beat the theme, so the
+	# old version of this function was actively preventing the design system
+	# from reaching any dropdown in the game.
+	pass
 
-static func style_slider(slider: HSlider) -> void:
-	var grabber = StyleBoxFlat.new()
-	grabber.bg_color = Color(0.5, 0.5, 0.5, 1.0)
-	# Same Godot 3 API removal as style_option_button() above.
-	grabber.set_border_width_all(1)
-	grabber.border_color = Color(0.3, 0.3, 0.3, 1.0)
-	slider.add_theme_stylebox_override("grabber_area", grabber)
+
+static func style_slider(_slider: HSlider) -> void:
+	# Same reasoning as style_option_button(): HSlider is themed centrally.
+	pass
+
+
+# Applies a theme type variation, with a clear failure mode. Typo'd
+# variation names fail silently in Godot (the control just renders with the
+# base type's style), which is hard to spot in a screenshot.
+const KNOWN_VARIATIONS = [
+	"CardPanel", "HeaderPanel", "HUDPanel", "InsetPanel",
+	"PrimaryButton", "DangerButton", "TabButton", "ListButton",
+	"DisplayLabel", "TitleLabel", "HeadingLabel", "HintLabel",
+	"HUDValueLabel", "StatLabel",
+]
+
+static func variation(ctrl: Control, name: String) -> Control:
+	if name not in KNOWN_VARIATIONS:
+		push_warning("UITheme: unknown theme variation '%s'" % name)
+	ctrl.theme_type_variation = name
+	return ctrl

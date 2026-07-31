@@ -6,6 +6,7 @@ const Gizmo3D = preload("res://scenes/Gizmo3D.tscn")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
+const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
@@ -127,6 +128,20 @@ func _ready():
 			if not hull.has_meta("armor_thickness"):
 				hull.set_meta("armor_thickness", 1.0)
 			update_hull_appearance()
+
+	# Coming back from the Test Range: rebuild whatever the player was
+	# working on instead of dropping them onto the default bare hull.
+	#
+	# Deferred because the restore runs reconstruct_vehicle() against this
+	# node and calls into the stat sidebar via the "stat_ui" group - during
+	# _ready() the sidebar's own _ready() may not have run yet, so its
+	# @onready references would still be null.
+	call_deferred("_restore_test_session")
+
+func _restore_test_session() -> void:
+	var bp_manager = get_node_or_null("BlueprintManager")
+	if bp_manager and bp_manager.has_pending_lab_restore():
+		bp_manager.restore_scratch_into_designer()
 		
 func _process(delta: float):
 	# Live idle spin for helicopter_rotors blades while designing - the
@@ -2105,37 +2120,11 @@ func _get_colliders_recursive(node: Node, list: Array):
 # it IS called repeatedly - once per mouse-motion frame while dragging a
 # mirrored module. rebuild_visual() destroys and recreates these children, so
 # fresh geometry is correctly unmarked and gets mirrored again.
-const _MIRROR_X := Basis(Vector3(-1, 0, 0), Vector3(0, 1, 0), Vector3(0, 0, 1))
-
+# The reflection itself, and the cull-mode compensation it requires, now live
+# in ModuleMirror - blueprint_manager.gd's reconstruct path needs the exact
+# same behaviour, and when these were two separate copies that copy silently
+# lost the compensation.
 func _apply_mirror_flip(module: Node3D):
 	if not module or not is_instance_valid(module): return
 	if not module.get_meta("scale_flip_x", false): return
-	for child in module.get_children():
-		if child is CollisionObject3D:
-			continue
-		if not (child is Node3D):
-			continue
-		if child.get_meta("_mirrored", false):
-			continue
-		child.transform = Transform3D(_MIRROR_X * child.transform.basis, _MIRROR_X * child.transform.origin)
-		child.set_meta("_mirrored", true)
-		_compensate_mirrored_culling(child)
-
-# _MIRROR_X has determinant -1, so every mesh under a mirrored child is rendered
-# with its triangle winding effectively reversed - front faces become back faces
-# and get culled. The result is a module that looks hollow and inside-out: you
-# see through the near surface into the far one. Godot does not compensate for
-# this automatically, and it is most obvious on thin open shells like the turret
-# up-armour plates, where there is no second surface behind to hide it.
-#
-# Inverting cull_mode on the mirrored copies cancels the flip exactly. Each mesh
-# here carries its own material_override (visual_builder.gd builds a fresh
-# StandardMaterial3D per instance), so this cannot leak onto the unmirrored side.
-func _compensate_mirrored_culling(node: Node) -> void:
-	if node is MeshInstance3D:
-		var mi: MeshInstance3D = node
-		var mat = mi.material_override
-		if mat is BaseMaterial3D:
-			mat.cull_mode = BaseMaterial3D.CULL_FRONT
-	for child in node.get_children():
-		_compensate_mirrored_culling(child)
+	ModuleMirrorScript.apply(module)

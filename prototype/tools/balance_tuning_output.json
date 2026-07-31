@@ -1,0 +1,58 @@
+{
+	"artillery": {
+		"dps": 90,
+		"fire_rate": 4.5
+	},
+	"basic_cannon": {
+		"dps": 40,
+		"fire_rate": 1.8
+	},
+	"cluster_dispenser": {
+		"dps": 65,
+		"fire_rate": 3
+	},
+	"flamethrower": {
+		"dps": 157,
+		"fire_rate": 0.06
+	},
+	"gauss_railgun": {
+		"dps": 99,
+		"fire_rate": 3.5
+	},
+	"guided_missile": {
+		"dps": 55,
+		"fire_rate": 3
+	},
+	"heavy_laser": {
+		"dps": 134.5,
+		"fire_rate": 0.05
+	},
+	"heavy_machine_gun": {
+		"dps": 32.5,
+		"fire_rate": 0.66
+	},
+	"ion_cannon": {
+		"dps": 97.5,
+		"fire_rate": 3.2
+	},
+	"missile_pod": {
+		"dps": 72,
+		"fire_rate": 2.8
+	},
+	"mortar_array": {
+		"dps": 50,
+		"fire_rate": 2
+	},
+	"plasma_lobber": {
+		"dps": 95,
+		"fire_rate": 2.2
+	},
+	"rotary_cannon": {
+		"dps": 147,
+		"fire_rate": 0.05
+	},
+	"tesla_coil": {
+		"dps": 72,
+		"fire_rate": 1.4
+	}
+}

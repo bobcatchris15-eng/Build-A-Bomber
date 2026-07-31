@@ -36,6 +36,9 @@ const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const _SUITE_RETRY_ATTEMPTS: int = 2
 
 func _run_suite(cb: Callable, name: String) -> bool:
+	var match_config = root.get_node_or_null("MatchConfig")
+	if match_config:
+		match_config.selected_map_id = ""
 	for attempt in range(1, _SUITE_RETRY_ATTEMPTS + 1):
 		var ok = await cb.call()
 		if ok:
@@ -256,6 +259,14 @@ func _init():
 	if not await _run_suite(test_brushed_aluminum_ui_theme, "test_brushed_aluminum_ui_theme"):
 		success = false
 		_failed.append("test_brushed_aluminum_ui_theme")
+	_total_suites += 1
+	if not await _run_suite(test_blueprint_roster_gating, "test_blueprint_roster_gating"):
+		success = false
+		_failed.append("test_blueprint_roster_gating")
+	_total_suites += 1
+	if not await _run_suite(test_module_mirror_chirality, "test_module_mirror_chirality"):
+		success = false
+		_failed.append("test_module_mirror_chirality")
 	_total_suites += 1
 	if not await _run_suite(test_new_faction_mechanical_bonuses, "test_new_faction_mechanical_bonuses"):
 		success = false
@@ -4071,6 +4082,7 @@ func test_match_config_overrides_apply_to_skirmish() -> bool:
 	# MatchConfig's defaults) is affected by a leftover override - restored
 	# unconditionally at the end, on both the pass and fail paths.
 	var saved = {
+		"selected_map_id": match_config.selected_map_id if "selected_map_id" in match_config else "",
 		"player_faction": match_config.player_faction,
 		"enemy_faction": match_config.enemy_faction,
 		"selected_blueprint_paths": match_config.selected_blueprint_paths.duplicate(),
@@ -4155,6 +4167,7 @@ func test_match_config_overrides_apply_to_skirmish() -> bool:
 	await process_frame
 	DirAccess.remove_absolute(test_bp_path)
 
+	match_config.selected_map_id = saved.selected_map_id
 	match_config.player_faction = saved.player_faction
 	match_config.enemy_faction = saved.enemy_faction
 	match_config.selected_blueprint_paths = saved.selected_blueprint_paths
@@ -4285,11 +4298,22 @@ func test_faction_catalog_and_hull_material() -> bool:
 	return true
 
 func test_brushed_aluminum_ui_theme() -> bool:
-	print("Running Test Suite: Faction Visual Identity - Brushed-Aluminum UI Theme...")
+	print("Running Test Suite: UI Chrome - Backdrop Shader & Faction/Chrome Separation...")
 	var UITheme = preload("res://scripts/ui_theme.gd")
 	var FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
+	# This suite used to assert the OPPOSITE of what it asserts now: that UI
+	# chrome is repainted in the player's faction color. That behaviour was
+	# removed deliberately, not accidentally. Faction color's job on screen
+	# is to tell the player who owns a unit; if it is also the wallpaper it
+	# stops being a reliable ownership signal, and the interface's own
+	# contrast ratios end up depending on which faction was picked
+	# (Technocrat white chrome and Bayou swamp-green chrome are not the same
+	# UI). The assertions below are inverted on purpose, so the old
+	# behaviour can't quietly come back.
+
 	var panel = Panel.new()
+	panel.size = Vector2(400, 300)
 	root.add_child(panel)
 	UITheme.apply_brushed_panel(panel, "industrialists")
 	var mat_a = panel.material as ShaderMaterial
@@ -4297,55 +4321,348 @@ func test_brushed_aluminum_ui_theme() -> bool:
 		print("  [FAIL] apply_brushed_panel should assign a ShaderMaterial to the node's .material")
 		panel.queue_free()
 		return false
-	if mat_a.get_shader_parameter("faction_tint") != FactionCatalog.get_visual_color("industrialists"):
-		print("  [FAIL] Panel's faction_tint should match industrialists' catalog color")
+	if mat_a.get_shader_parameter("tint_strength") != 0.0:
+		print("  [FAIL] UI chrome must NOT be faction-tinted - tint_strength should be 0.0, got ", mat_a.get_shader_parameter("tint_strength"))
 		panel.queue_free()
 		return false
 
-	# Re-theming the SAME panel to a different faction should reuse the
-	# existing ShaderMaterial (not allocate a new one each call) and update
-	# its tint - this is what match_setup.gd's live dropdown re-theme relies on.
+	# The shader's noise frequencies are in pixels, so it needs the node's
+	# real size or its grain scales with the panel - the bug that produced
+	# the giant smeared blobs behind every menu in the 2026-07-30 baseline.
+	var pushed = mat_a.get_shader_parameter("panel_size")
+	if pushed == null or pushed.x < 1.0 or pushed.y < 1.0:
+		print("  [FAIL] apply_backdrop should push the node's pixel size into panel_size, got ", pushed)
+		panel.queue_free()
+		return false
+
+	# Re-theming the SAME panel must reuse its ShaderMaterial rather than
+	# allocating a new one on every call.
 	UITheme.apply_brushed_panel(panel, "cybernetics")
 	var mat_b = panel.material as ShaderMaterial
 	if mat_b != mat_a:
 		print("  [FAIL] Re-theming the same panel should reuse its existing ShaderMaterial instance, not replace it")
 		panel.queue_free()
 		return false
-	if mat_b.get_shader_parameter("faction_tint") != FactionCatalog.get_visual_color("cybernetics"):
-		print("  [FAIL] After re-theming, faction_tint should now match cybernetics' catalog color, got ", mat_b.get_shader_parameter("faction_tint"))
+
+	# The one surface where faction color IS the point: an explicit preview
+	# swatch. Kept as its own entry point so ordinary chrome styling can't
+	# reach it by accident.
+	var swatch = Panel.new()
+	swatch.size = Vector2(120, 80)
+	root.add_child(swatch)
+	UITheme.apply_faction_preview(swatch, "crimson_concordat")
+	var swatch_mat = swatch.material as ShaderMaterial
+	if not swatch_mat or swatch_mat.get_shader_parameter("tint_strength") <= 0.0:
+		print("  [FAIL] apply_faction_preview should apply a non-zero faction tint")
 		panel.queue_free()
+		swatch.queue_free()
+		return false
+	if swatch_mat.get_shader_parameter("accent_tint") != FactionCatalog.get_visual_color("crimson_concordat"):
+		print("  [FAIL] Faction preview swatch should carry the Crimson Concordat catalog color")
+		panel.queue_free()
+		swatch.queue_free()
 		return false
 
-	# Real screen check: MatchSetup.tscn's background should carry the
-	# brushed shader from the moment it loads (not just when a helper is
-	# called in isolation).
+	# Real screen check: MatchSetup still gets a backdrop on load...
 	var setup_scene = preload("res://scenes/MatchSetup.tscn").instantiate()
 	root.add_child(setup_scene)
 	current_scene = setup_scene
 	await process_frame
 	await process_frame
 	if not (setup_scene.bg_rect.material is ShaderMaterial):
-		print("  [FAIL] MatchSetup.tscn's background should have the brushed-aluminum ShaderMaterial applied on load")
+		print("  [FAIL] MatchSetup.tscn's background should have the backdrop ShaderMaterial applied on load")
 		panel.queue_free()
+		swatch.queue_free()
 		setup_scene.queue_free()
 		return false
-	# Switching the faction dropdown should re-theme the background live.
-	var before_tint = setup_scene.bg_rect.material.get_shader_parameter("faction_tint")
+	# ...and changing faction must NOT repaint it.
+	var before_tint = setup_scene.bg_rect.material.get_shader_parameter("tint_strength")
 	var concordat_idx = setup_scene.FACTIONS.find("crimson_concordat")
 	setup_scene.player_faction_btn.selected = concordat_idx
 	setup_scene.player_faction_btn.item_selected.emit(concordat_idx)
 	await process_frame
-	var after_tint = setup_scene.bg_rect.material.get_shader_parameter("faction_tint")
-	if before_tint == after_tint or after_tint != FactionCatalog.get_visual_color("crimson_concordat"):
-		print("  [FAIL] Picking 'Crimson Concordat' in the faction dropdown should live-retint MatchSetup's background to its color, got before=", before_tint, " after=", after_tint)
+	var after_tint = setup_scene.bg_rect.material.get_shader_parameter("tint_strength")
+	if before_tint != 0.0 or after_tint != 0.0:
+		print("  [FAIL] Changing the faction dropdown must leave the backdrop neutral, got before=", before_tint, " after=", after_tint)
 		panel.queue_free()
+		swatch.queue_free()
 		setup_scene.queue_free()
 		return false
 
 	panel.queue_free()
+	swatch.queue_free()
 	setup_scene.queue_free()
 	await process_frame
-	print("  [PASS] Brushed-aluminum panels apply faction-correct shader params, reuse their ShaderMaterial on re-theme, and MatchSetup's background live-retints when the faction dropdown changes.")
+	print("  [PASS] Backdrop applies a size-aware ShaderMaterial, reuses it on re-theme, stays neutral across faction changes, and tints only on an explicit faction-preview swatch.")
+	return true
+
+func test_blueprint_roster_gating() -> bool:
+	print("Running Test Suite: Blueprints - Roster Gating, Scratch Slot & Lab Restore...")
+	var BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
+
+	# --- is_named(): the gate everything else keys off -------------------
+	# The placeholder counts as UNNAMED even though it is a non-empty
+	# string, because the old save path substituted it for a blank field.
+	# "has a name" and "has a non-empty name" are different questions
+	# against files already on disk.
+	var named_cases = {
+		"": false,
+		"   ": false,
+		"Untitled Design": false,
+		"  Untitled Design  ": false,
+		# Case-insensitive: typing it by hand in a different case is the same
+		# non-decision, and must not slip through on a capitalisation
+		# technicality.
+		"untitled design": false,
+		"UNTITLED DESIGN": false,
+		"UnTiTlEd DeSiGn": false,
+		# ...but only the exact placeholder is reserved. A design the player
+		# genuinely chose to call something starting with "Untitled" is still
+		# a choice, and stays allowed.
+		"Untitled Design 2": true,
+		"Untitled Doom Machine": true,
+		"FlakTrak": true,
+		"  FlakTrak  ": true,
+	}
+	for candidate in named_cases:
+		if BlueprintManagerScript.is_named(candidate) != named_cases[candidate]:
+			print("  [FAIL] is_named('%s') should be %s" % [candidate, named_cases[candidate]])
+			return false
+
+	# --- list_blueprints(named_only) filters, but never deletes ----------
+	# Write one named and one unnamed design straight to disk, then check
+	# each caller sees the right subset. Real files, not a stubbed list -
+	# the filtering happens during the directory walk.
+	DirAccess.make_dir_recursive_absolute("user://blueprints")
+	var named_id = "test_named_%d" % (randi() % 1000000)
+	var unnamed_id = "test_unnamed_%d" % (randi() % 1000000)
+	var base_bp = {
+		"version": 2.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"armor_material": "hardened_steel", "armor_thickness": 1.0,
+		"faction": "industrialists",
+		"locomotion": {"type_id": "", "settings": {}}, "modules": [],
+	}
+	for pair in [[named_id, "Roster Gating Probe"], [unnamed_id, "Untitled Design"]]:
+		var bp = base_bp.duplicate(true)
+		bp["id"] = pair[0]
+		bp["name"] = pair[1]
+		bp["modified_unix"] = Time.get_unix_time_from_system()
+		var f = FileAccess.open("user://blueprints/%s.json" % pair[0], FileAccess.WRITE)
+		f.store_string(JSON.stringify(bp, "\t"))
+		f.close()
+
+	var mgr = Node.new()
+	mgr.set_script(BlueprintManagerScript)
+	root.add_child(mgr)
+
+	var all_ids = []
+	for e in mgr.list_blueprints(false):
+		all_ids.append(e["id"])
+	var roster_ids = []
+	for e in mgr.list_blueprints(true):
+		roster_ids.append(e["id"])
+
+	var cleanup = func():
+		DirAccess.remove_absolute("user://blueprints/%s.json" % named_id)
+		DirAccess.remove_absolute("user://blueprints/%s.json" % unnamed_id)
+		mgr.queue_free()
+
+	if not (named_id in all_ids and unnamed_id in all_ids):
+		print("  [FAIL] list_blueprints(false) is the Library view and must show BOTH designs, got ", all_ids)
+		cleanup.call()
+		return false
+	if not (named_id in roster_ids):
+		print("  [FAIL] list_blueprints(true) should include the named design")
+		cleanup.call()
+		return false
+	if unnamed_id in roster_ids:
+		print("  [FAIL] list_blueprints(true) must exclude the unnamed design - this is the whole point of the gate")
+		cleanup.call()
+		return false
+
+	# The unnamed file must still be ON DISK. Filtering it out of the roster
+	# is a display decision; silently deleting the player's files is not.
+	if not FileAccess.file_exists("user://blueprints/%s.json" % unnamed_id):
+		print("  [FAIL] Filtering must not delete the unnamed blueprint from disk")
+		cleanup.call()
+		return false
+
+	# --- rename can promote, but never demote back to the placeholder ----
+	# Rename is the only route an already-saved unnamed design has into the
+	# roster, so it has to accept a real name...
+	if not mgr.rename_blueprint(unnamed_id, "Promoted By Rename"):
+		print("  [FAIL] rename_blueprint should accept a real name")
+		cleanup.call()
+		return false
+	var promoted = []
+	for e in mgr.list_blueprints(true):
+		promoted.append(e["id"])
+	if not (unnamed_id in promoted):
+		print("  [FAIL] A renamed design should now appear in the roster")
+		cleanup.call()
+		return false
+
+	# ...and refuse anything that would put it back out of the roster
+	# silently. The old version ASSIGNED the placeholder on a blank name.
+	for bad_name in ["", "   ", "Untitled Design", "untitled design"]:
+		if mgr.rename_blueprint(unnamed_id, bad_name):
+			print("  [FAIL] rename_blueprint should refuse '%s'" % bad_name)
+			cleanup.call()
+			return false
+	var still_named = []
+	for e in mgr.list_blueprints(true):
+		still_named.append(e["id"])
+	if not (unnamed_id in still_named):
+		print("  [FAIL] A refused rename must leave the existing name intact, not blank it")
+		cleanup.call()
+		return false
+
+	# --- scratch slot is not a roster entry ------------------------------
+	var scratch_before = mgr.list_blueprints(false).size()
+	var scratch_bp = base_bp.duplicate(true)
+	scratch_bp["id"] = ""
+	scratch_bp["name"] = ""
+	scratch_bp["pending_lab_restore"] = true
+	var sf = FileAccess.open(BlueprintManagerScript.SCRATCH_PATH, FileAccess.WRITE)
+	sf.store_string(JSON.stringify(scratch_bp, "\t"))
+	sf.close()
+
+	if mgr.list_blueprints(false).size() != scratch_before:
+		print("  [FAIL] The scratch slot must live outside user://blueprints and never appear in any listing")
+		cleanup.call()
+		mgr.clear_scratch()
+		return false
+	if not mgr.has_pending_lab_restore():
+		print("  [FAIL] A scratch file flagged pending_lab_restore should report true")
+		cleanup.call()
+		mgr.clear_scratch()
+		return false
+
+	# Clearing the flag is what stops a later, unrelated visit to the Lab
+	# from resurrecting an old session.
+	mgr._set_scratch_restore_flag(false)
+	if mgr.has_pending_lab_restore():
+		print("  [FAIL] Clearing the restore flag should make has_pending_lab_restore() false")
+		cleanup.call()
+		mgr.clear_scratch()
+		return false
+
+	mgr.clear_scratch()
+	if mgr.has_pending_lab_restore():
+		print("  [FAIL] A cleared scratch slot should not report a pending restore")
+		cleanup.call()
+		return false
+
+	cleanup.call()
+	await process_frame
+	print("  [PASS] Unnamed designs are kept out of the match roster but retained on disk for the Library, and the scratch slot stages test designs without creating roster entries.")
+	return true
+
+func test_module_mirror_chirality() -> bool:
+	print("Running Test Suite: Modules - Mirror Chirality & Winding Compensation...")
+	var ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
+
+	# The bug this guards: mirroring reflects across X (determinant -1), which
+	# reverses triangle winding, so front faces get culled and the module
+	# renders hollow/inside-out. The fix is inverting cull_mode. There used to
+	# be two copies of the mirror code and only ONE of them did that, so
+	# mirrored modules looked right while being placed in the Lab and wrong
+	# the instant they were loaded, tested, or spawned into a match.
+	#
+	# Asserting the transform alone would NOT have caught it - the broken copy
+	# got the transform right. The cull_mode assertion is the load-bearing one.
+	var module = Node3D.new()
+	module.set_meta("scale_flip_x", true)
+	root.add_child(module)
+
+	var child = MeshInstance3D.new()
+	child.mesh = BoxMesh.new()
+	var mat = StandardMaterial3D.new()
+	mat.cull_mode = BaseMaterial3D.CULL_BACK
+	child.material_override = mat
+	child.position = Vector3(1.5, 0.0, 0.0)
+	module.add_child(child)
+
+	# A nested mesh, to prove the compensation recurses rather than only
+	# touching direct children.
+	var nested = MeshInstance3D.new()
+	nested.mesh = BoxMesh.new()
+	var nested_mat = StandardMaterial3D.new()
+	nested_mat.cull_mode = BaseMaterial3D.CULL_BACK
+	nested.material_override = nested_mat
+	child.add_child(nested)
+
+	# A DOUBLE-SIDED mesh. This is the case the first version of this suite
+	# missed: it only tested CULL_BACK, so it passed while the shipped code
+	# forced CULL_FRONT onto everything. visual_builder._mesh_inst() sets
+	# CULL_DISABLED on essentially every procedural part (locomotion
+	# included), and forcing culling on a double-sided mesh makes its near
+	# face vanish - which IS the "renders inverted" report. A mesh drawn from
+	# both sides has no winding problem, so it must be left alone.
+	var double_sided = MeshInstance3D.new()
+	double_sided.mesh = BoxMesh.new()
+	var ds_mat = StandardMaterial3D.new()
+	ds_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	double_sided.material_override = ds_mat
+	module.add_child(double_sided)
+
+	# A mesh already flipped to CULL_FRONT, to prove the compensation is a
+	# swap and not a one-way assignment.
+	var already_front = MeshInstance3D.new()
+	already_front.mesh = BoxMesh.new()
+	var af_mat = StandardMaterial3D.new()
+	af_mat.cull_mode = BaseMaterial3D.CULL_FRONT
+	already_front.material_override = af_mat
+	module.add_child(already_front)
+
+	# A collider, which must be left alone - a negatively-scaled collision
+	# shape is undefined behaviour in Godot Physics.
+	var body = StaticBody3D.new()
+	body.position = Vector3(2.0, 0.0, 0.0)
+	module.add_child(body)
+
+	ModuleMirrorScript.apply(module)
+
+	var cleanup = func(): module.queue_free()
+
+	if not is_equal_approx(child.position.x, -1.5):
+		print("  [FAIL] Mirrored child should be reflected across X to -1.5, got ", child.position.x)
+		cleanup.call()
+		return false
+	if mat.cull_mode != BaseMaterial3D.CULL_FRONT:
+		print("  [FAIL] Mirrored mesh must flip cull_mode to CULL_FRONT or it renders inside-out")
+		cleanup.call()
+		return false
+	if nested_mat.cull_mode != BaseMaterial3D.CULL_FRONT:
+		print("  [FAIL] Cull compensation must recurse into nested meshes")
+		cleanup.call()
+		return false
+	if ds_mat.cull_mode != BaseMaterial3D.CULL_DISABLED:
+		print("  [FAIL] A double-sided mesh must stay double-sided - forcing a cull mode on it is what made mirrored locomotion look inverted")
+		cleanup.call()
+		return false
+	if af_mat.cull_mode != BaseMaterial3D.CULL_BACK:
+		print("  [FAIL] Compensation must SWAP cull mode, so an already-CULL_FRONT mesh becomes CULL_BACK")
+		cleanup.call()
+		return false
+	if not is_equal_approx(body.position.x, 2.0):
+		print("  [FAIL] Colliders must not be mirrored, got x=", body.position.x)
+		cleanup.call()
+		return false
+
+	# Idempotency: the reflection is its own inverse and module_placer calls
+	# this once per mouse-motion frame while dragging. A second call must be
+	# a no-op, not an un-mirror.
+	ModuleMirrorScript.apply(module)
+	if not is_equal_approx(child.position.x, -1.5):
+		print("  [FAIL] apply() must be idempotent - a second call un-mirrored the child to ", child.position.x)
+		cleanup.call()
+		return false
+
+	cleanup.call()
+	await process_frame
+	print("  [PASS] Mirroring reflects visuals across X, flips cull_mode recursively so mirrored modules don't render inside-out, skips colliders, and is idempotent.")
 	return true
 
 func test_new_faction_mechanical_bonuses() -> bool:

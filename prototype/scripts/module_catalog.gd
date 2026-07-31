@@ -109,6 +109,60 @@ static func get_catalog() -> Dictionary:
 static func module_exists(type_id: String) -> bool:
 	return get_catalog().has(type_id)
 
+# --- Weapon fire profiles (balance harness migration) ---
+# fire_rate/fire_range/laser_color used to live in a ~120-line if/elif chain
+# in auto_weapon.gd's _ready(), which made them invisible to every balance
+# tool: balance_report.gd scored weapons on `dps` alone, and `dps` is the
+# LEAST interesting of the three, because the armor system gates on PER-SHOT
+# damage and per-shot damage is `dps * fire_rate` (see auto_weapon.gd's
+# _deal_weapon_damage callers). A weapon's threshold behaviour is therefore
+# driven mostly by fire_rate, which nothing could see or tune.
+#
+# Kept as ONE contiguous table rather than folded into each catalog entry
+# specifically so tools/run_simulations.gd can rewrite it mechanically after
+# a sweep - a 21-entry block is patchable, 21 edits scattered through a
+# 1700-line dict literal are not.
+#
+# fire_rate is a shot INTERVAL in seconds (lower = faster), not shots/sec.
+# Merged into the catalog entries by _build_catalog_literal() below, so
+# `get_module_data(id).fire_rate` is the single source of truth.
+const WEAPON_FIRE_PROFILES = {
+	"basic_cannon":       {"fire_rate": 1.8,  "fire_range": 25.0, "laser_color": Color.ORANGE},
+	# 0.22 -> 0.66 is the largest single change the balance sweep asked for,
+	# and the one most likely to need a feel check: at 0.22s the HMG's
+	# per-shot damage (dps * fire_rate) was ~5.5, permanently under every
+	# real armor threshold, so it spent the whole game in CHIP_THROUGH_FACTOR
+	# territory dealing 15% damage to anything armored. At 0.66s it clears
+	# the lighter thresholds and becomes a real gun - but it also fires 3x
+	# slower, which reads more like a light autocannon than a machine gun.
+	"heavy_machine_gun":  {"fire_rate": 0.66, "fire_range": 15.0, "laser_color": Color.GOLD},
+	"rotary_cannon":      {"fire_rate": 0.05, "fire_range": 20.0, "laser_color": Color.GOLD},
+	"gauss_railgun":      {"fire_rate": 3.5,  "fire_range": 45.0, "laser_color": Color.BLUE_VIOLET},
+	"artillery":          {"fire_rate": 4.5,  "fire_range": 50.0, "laser_color": Color.SADDLE_BROWN},
+	"mortar_array":       {"fire_rate": 2.0,  "fire_range": 28.0, "laser_color": Color.OLIVE},
+	"guided_missile":     {"fire_rate": 3.0,  "fire_range": 35.0, "laser_color": Color.YELLOW},
+	"missile_pod":        {"fire_rate": 2.8,  "fire_range": 30.0, "laser_color": Color.DARK_ORANGE},
+	"drone_carrier":      {"fire_rate": 5.0,  "fire_range": 30.0, "laser_color": Color.NAVY_BLUE},
+	"cluster_dispenser":  {"fire_rate": 3.0,  "fire_range": 24.0, "laser_color": Color.CHOCOLATE},
+	"flamethrower":       {"fire_rate": 0.06, "fire_range": 9.0,  "laser_color": Color.CRIMSON},
+	"heavy_laser":        {"fire_rate": 0.05, "fire_range": 22.0, "laser_color": Color.DARK_RED},
+	"plasma_lobber":      {"fire_rate": 2.2,  "fire_range": 24.0, "laser_color": Color.MEDIUM_SPRING_GREEN},
+	"tesla_coil":         {"fire_rate": 1.4,  "fire_range": 14.0, "laser_color": Color.LIGHT_SKY_BLUE},
+	"arc_projector":      {"fire_rate": 0.9,  "fire_range": 10.0, "laser_color": Color.CYAN},
+	"ion_cannon":         {"fire_rate": 3.2,  "fire_range": 32.0, "laser_color": Color.SKY_BLUE},
+	"ciws":               {"fire_rate": 0.06, "fire_range": 14.0, "laser_color": Color.WHITE_SMOKE},
+	"pd_laser":           {"fire_rate": 0.1,  "fire_range": 16.0, "laser_color": Color.LIGHT_CORAL},
+	"flak_cannon":        {"fire_rate": 1.2,  "fire_range": 22.0, "laser_color": Color.DARK_GOLDENROD},
+	"resource_harvester": {"fire_rate": 0.1,  "fire_range": 15.0, "laser_color": Color.GOLD},
+	"repair_array":       {"fire_rate": 0.15, "fire_range": 12.0, "laser_color": Color.CYAN},
+}
+# Matches the old chain's trailing `else:` branch - any weapon-ish entry with
+# no profile row (including modded/hull-loaded ones) still gets sane values.
+const DEFAULT_FIRE_PROFILE = {"fire_rate": 1.0, "fire_range": 15.0, "laser_color": Color.WHITE}
+
+static func get_fire_profile(type_id: String) -> Dictionary:
+	return WEAPON_FIRE_PROFILES.get(type_id, DEFAULT_FIRE_PROFILE)
+
 static func _build_catalog_literal() -> Dictionary:
 	var catalog = {
 		# --- BALLISTIC & KINETIC ---
@@ -133,7 +187,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"weight": 40.0,
 			"metal": 15,
 			"crystal": 0,
-			"dps": 25.0,
+			"dps": 32.5,
 			# Pintle-mount eligibility (MOUNTING_AND_ARMOR_SPEC.md #3 second
 			# correction - see PINTLE_MIN_UP_ALIGNMENT_DEFAULT's comment): a
 			# small, light, classic pintle weapon in real life - bolts onto
@@ -152,7 +206,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"weight": 110.0,
 			"metal": 45,
 			"crystal": 5,
-			"dps": 75.0,
+			"dps": 105.0,
 			# Compact gatling housing, same "bolts on anywhere" logic as
 			# heavy_machine_gun.
 			"pintle_min_up_alignment": 0.15,
@@ -169,7 +223,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"weight": 180.0,
 			"metal": 80,
 			"crystal": 40,
-			"dps": 110.0,
+			"dps": 99.0,
 			# Frame_built (see get_mount_style_for_normal below), so it never
 			# independently traverses in practice - this number only matters
 			# if that override is ever lifted, kept low for consistency with
@@ -240,7 +294,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"weight": 150.0,
 			"metal": 50,
 			"crystal": 10,
-			"dps": 60.0,
+			"dps": 72.0,
 			# A boxy multi-tube launcher, unguided at launch (swarm-fire, not
 			# precision-guided per shot) - wants a more level base than a
 			# single guided missile does, but nowhere near as strict as a
@@ -302,7 +356,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# cheap starter weapon and left alone).
 			"metal": 35,
 			"crystal": 15,
-			"dps": 80.0,
+			"dps": 112.0,
 			"size": Vector3(0.5, 0.5, 1.6),
 			"color": Color.CRIMSON
 		},
@@ -319,7 +373,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"weight": 70.0,
 			"metal": 40,
 			"crystal": 45,
-			"dps": 60.0,
+			"dps": 72.0,
 			# Tall and top-heavy (size.y=1.6 vs a 0.6x0.6 footprint) - a real
 			# structure this slender wants a level base to not look/feel like
 			# it's about to topple, so it's less tolerant of a steep slope
@@ -351,7 +405,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# alternative to gauss_railgun/plasma_lobber, not strictly worse.
 			"metal": 70,
 			"crystal": 65,
-			"dps": 75.0,
+			"dps": 97.5,
 			"size": Vector3(0.8, 0.8, 2.8),
 			"color": Color.SKY_BLUE
 		},
@@ -362,7 +416,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"weight": 60.0,
 			"metal": 30,
 			"crystal": 20,
-			"dps": 80.0,
+			"dps": 112.0,
 			# A precision continuous beam over a long (2.5) housing benefits
 			# from a stable base for sustained aim - same logic as heavy_laser's
 			# kinetic-precision cousins.
@@ -798,6 +852,14 @@ static func _build_catalog_literal() -> Dictionary:
 			"hull": true
 		},
 	}
+
+	# Fold the fire profiles in so `get_module_data(id).fire_rate` works
+	# everywhere - see WEAPON_FIRE_PROFILES for why they're authored as a
+	# separate table instead of inline in each entry above.
+	for profile_id in WEAPON_FIRE_PROFILES:
+		if catalog.has(profile_id):
+			for k in WEAPON_FIRE_PROFILES[profile_id]:
+				catalog[profile_id][k] = WEAPON_FIRE_PROFILES[profile_id][k]
 
 	return catalog
 
