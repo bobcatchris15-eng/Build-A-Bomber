@@ -734,6 +734,66 @@ func order_attack(node: Node3D):
 	order = OrderType.ATTACK
 	attack_target = node
 
+# Attack-ground: fire on a POSITION (skirmish.gd's ctrl+right-click).
+#
+# Spawns one invisible marker at the aim point and hands it to every weapon
+# as a forced target (see auto_weapon.gd's set_forced_target for why a marker
+# node rather than a Vector3 - it makes all 20-odd firing routines work
+# unchanged). The unit also takes it as its own attack_target, so the normal
+# ATTACK steering applies and a short-ranged loadout will actually close to
+# within reach of the spot instead of firing hopelessly from wherever it
+# was standing.
+#
+# The marker parents to the scene root, not to this unit: it is a place in
+# the world, and it must not move when the shooter does.
+func order_attack_ground(pos: Vector3):
+	var host = get_parent()
+	if host == null:
+		return
+	var marker = Node3D.new()
+	marker.name = "GroundAimPoint"
+	host.add_child(marker)
+	marker.global_position = pos
+
+	order = OrderType.ATTACK
+	attack_target = marker
+
+	for w in _offensive_weapons():
+		w.set_forced_target(marker)
+
+	# The marker outlives the order slightly, then cleans itself up. Weapons
+	# revert to auto-acquisition on their own timeout (auto_weapon.gd's
+	# FORCED_TARGET_DURATION_MS); this just stops the node leaking.
+	var life = get_tree().create_timer(10.0)
+	life.timeout.connect(func():
+		if is_instance_valid(marker):
+			marker.queue_free())
+
+# Cooldown so a unit under sustained fire screens once and then fights,
+# rather than emptying every tube in the first second of contact.
+const SMOKE_SCREEN_COOLDOWN_MS: int = 12000
+var _last_screen_ms: int = 0
+
+func _request_smoke_screen(threat_pos: Vector3) -> void:
+	if Time.get_ticks_msec() - _last_screen_ms < SMOKE_SCREEN_COOLDOWN_MS:
+		return
+	var asked := false
+	for w in _offensive_weapons():
+		if w.has_method("request_screen"):
+			w.request_screen(threat_pos)
+			asked = true
+	if asked:
+		_last_screen_ms = Time.get_ticks_msec()
+
+func _offensive_weapons() -> Array:
+	var out: Array = []
+	if not is_instance_valid(hull_node):
+		return out
+	for child in hull_node.get_children():
+		if child.has_method("set_forced_target"):
+			out.append(child)
+	return out
+
 func order_harvest(node: Node3D):
 	if not is_harvester: return
 	order = OrderType.HARVEST
@@ -1455,6 +1515,17 @@ func _compute_flank_point(target: Node3D) -> Vector3:
 
 func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = null):
 	if is_dead: return
+
+	# Smoke is a REFLEX, not an engagement.
+	#
+	# A smoke discharger no longer fires just because an enemy wandered into
+	# range (see auto_weapon.gd's OBSCURANT_TYPES). Taking fire is the moment
+	# a screen is actually worth spending, and hit_origin tells us the
+	# bearing it needs to block - which the old auto-targeting never knew,
+	# since it aimed at whatever unit it had acquired rather than at whatever
+	# was actually shooting.
+	if hit_origin != null:
+		_request_smoke_screen(hit_origin if hit_origin is Vector3 else hit_origin.global_position)
 
 	var active_modules = get_active_modules()
 	var resolved = DamageResolverScript.resolve(hull_node, active_modules, damage_type, self, hit_origin)

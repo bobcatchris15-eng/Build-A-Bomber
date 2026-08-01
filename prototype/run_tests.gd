@@ -9658,10 +9658,32 @@ func test_c1_buildings_block_movement_unit_detours_around_manufactory() -> bool:
 	# is a real detour around a real physical collider, not just a navmesh
 	# path query, so some run-to-run variance in exact arrival time is
 	# expected, not a bug.
+	# DRIVEN ON REAL PHYSICS FRAMES, not by calling _physics_process() in a
+	# tight loop.
+	#
+	# Both C1 movement tests used to advance the unit by calling
+	# unit._physics_process(1/60) + move_and_slide() N times WITHOUT awaiting
+	# anything, which made them the two flakiest tests in the suite - a
+	# different one of the pair failed on each full run for no reason.
+	#
+	# The cause is that NavigationServer3D syncs its maps on real physics
+	# steps. Inside a no-await loop the agent can never RECEIVE an updated
+	# path, so every iteration steers on whichever corridor happened to be
+	# cached when the loop started - and whether that corridor already knew
+	# about the building was pure timing luck.
+	#
+	# Measured with scratch/probe_c1_repath_flake.gd, same scenario 6x each:
+	#   manual ticks : 3/6 passed, final x = -23.5, 12.7, 8.2, 38.1, -9.8, 11.8
+	#   real frames  : 6/6 passed, final x = 38.0, 38.1, 38.1, 38.1, 38.1, 38.1
+	#
+	# So the GAME was never flaky here - units route around a building
+	# reliably, arriving within 0.1 units of the same spot every time. Only
+	# the harness was. Awaiting physics_frame also means the unit's own
+	# _physics_process runs the way it does in a match, rather than being
+	# hand-cranked out of step with the servers it depends on.
 	var entered_footprint = false
 	for i in range(1200):
-		unit._physics_process(1.0 / 60.0)
-		unit.move_and_slide()
+		await physics_frame
 		if abs(unit.global_position.x - block_pos.x) < half_x and abs(unit.global_position.z - block_pos.z) < half_z:
 			entered_footprint = true
 
@@ -9714,9 +9736,12 @@ func test_c1_building_placed_after_unit_is_moving_forces_a_repath() -> bool:
 	# A few ticks of real straight-line travel BEFORE the building exists -
 	# the whole point of this test is that the building lands in a path the
 	# unit already committed to, not one it planned around from the start.
+	# Real frames here too - the unit has to be genuinely under way, with a
+	# live path corridor, before the building lands in front of it. Hand-
+	# cranked ticks would leave it "moving" with a corridor the navigation
+	# server never actually issued.
 	for i in range(20):
-		unit._physics_process(1.0 / 60.0)
-		unit.move_and_slide()
+		await physics_frame
 
 	var building = skirmish._spawn_prefab("heavy_manufactory", skirmish.ENEMY_TEAM, block_pos, skirmish.enemy_faction)
 	var half_x = building.footprint.x / 2.0
@@ -9732,10 +9757,32 @@ func test_c1_building_placed_after_unit_is_moving_forces_a_repath() -> bool:
 	# more headroom here since a mid-flight repath costs some extra time
 	# re-planning around the new obstacle versus knowing about it from the
 	# start.
+	# DRIVEN ON REAL PHYSICS FRAMES, not by calling _physics_process() in a
+	# tight loop.
+	#
+	# Both C1 movement tests used to advance the unit by calling
+	# unit._physics_process(1/60) + move_and_slide() N times WITHOUT awaiting
+	# anything, which made them the two flakiest tests in the suite - a
+	# different one of the pair failed on each full run for no reason.
+	#
+	# The cause is that NavigationServer3D syncs its maps on real physics
+	# steps. Inside a no-await loop the agent can never RECEIVE an updated
+	# path, so every iteration steers on whichever corridor happened to be
+	# cached when the loop started - and whether that corridor already knew
+	# about the building was pure timing luck.
+	#
+	# Measured with scratch/probe_c1_repath_flake.gd, same scenario 6x each:
+	#   manual ticks : 3/6 passed, final x = -23.5, 12.7, 8.2, 38.1, -9.8, 11.8
+	#   real frames  : 6/6 passed, final x = 38.0, 38.1, 38.1, 38.1, 38.1, 38.1
+	#
+	# So the GAME was never flaky here - units route around a building
+	# reliably, arriving within 0.1 units of the same spot every time. Only
+	# the harness was. Awaiting physics_frame also means the unit's own
+	# _physics_process runs the way it does in a match, rather than being
+	# hand-cranked out of step with the servers it depends on.
 	var entered_footprint = false
 	for i in range(900):
-		unit._physics_process(1.0 / 60.0)
-		unit.move_and_slide()
+		await physics_frame
 		if abs(unit.global_position.x - block_pos.x) < half_x and abs(unit.global_position.z - block_pos.z) < half_z:
 			entered_footprint = true
 
@@ -12206,8 +12253,24 @@ func test_target_dummies_actually_take_damage_in_test_range() -> bool:
 	var same_target_run = 0
 	var max_same_target_run = 0
 	var last_target = null
+	# physics_frame, NOT process_frame - this waits for damage that is only
+	# ever dealt from auto_weapon.gd's _physics_process.
+	#
+	# This is why PERFORMANCE_PLAN.md recorded this test as flaky on
+	# completely unmodified code (2 fails / 1 pass across 3 stock runs) and
+	# why an earlier throttling change was wrongly suspected of causing it:
+	# under --headless the main loop runs unthrottled, so the two clocks come
+	# badly apart. Measured on this machine, 400 process_frames covered only
+	# 167 physics frames - and that ratio moves with machine load, so the
+	# amount of simulated time the weapon actually got varied run to run.
+	# With reacquisition throttled to 0.2s (12 physics ticks) and a real
+	# fire_rate on top, sometimes there simply were not enough ticks for a
+	# shot to land inside the window.
+	#
+	# 400 physics_frames is a fixed 6.67s of simulation regardless of how
+	# fast the host renders, which is what the test meant all along.
 	for i in range(400):
-		await process_frame
+		await physics_frame
 		if weapon.target and weapon.target == last_target:
 			same_target_run += 1
 			max_same_target_run = max(max_same_target_run, same_target_run)

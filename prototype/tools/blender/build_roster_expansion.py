@@ -87,6 +87,70 @@ def bolt_ring(bm, y, radius, count=8, bolt_r=0.008, bolt_len=0.014):
 		add_cyl_y(bm, (math.cos(a) * radius, y, math.sin(a) * radius), bolt_r, bolt_len, segments=6)
 
 
+
+def add_helix(bm, pos, coil_r, length, turns, wire_r, segs_per_turn=12, minor_seg=6, axis='Z'):
+	"""A swept helical coil spring. Built as a real swept tube rather than a
+	stack of separate rings: at these sizes a ring stack reads as a threaded
+	collar, and the whole point of putting a spring on the model is that a
+	spring is instantly legible as 'this absorbs recoil'."""
+	total = int(turns * segs_per_turn)
+	rings = []
+	for i in range(total + 1):
+		t = i / segs_per_turn
+		a = t * math.tau
+		h = (i / max(1, total)) * length - length / 2.0
+		# Centre of the wire cross-section at this station, and the tangent.
+		cx, cy = math.cos(a) * coil_r, math.sin(a) * coil_r
+		tangent = mathutils.Vector((-math.sin(a) * coil_r * math.tau / segs_per_turn,
+									 math.cos(a) * coil_r * math.tau / segs_per_turn,
+									 length / max(1, total))).normalized()
+		# Any two vectors perpendicular to the tangent give the cross-section.
+		up = mathutils.Vector((0, 0, 1))
+		if abs(tangent.dot(up)) > 0.95:
+			up = mathutils.Vector((1, 0, 0))
+		n1 = tangent.cross(up).normalized()
+		n2 = tangent.cross(n1).normalized()
+		ring = []
+		for j in range(minor_seg):
+			b = (j / minor_seg) * math.tau
+			off = n1 * (math.cos(b) * wire_r) + n2 * (math.sin(b) * wire_r)
+			co = mathutils.Vector((cx, cy, h)) + off
+			if axis == 'Y':
+				co = mathutils.Vector((co.x, co.z, co.y))
+			elif axis == 'X':
+				co = mathutils.Vector((co.z, co.y, co.x))
+			ring.append(bm.verts.new(co + mathutils.Vector(pos)))
+		rings.append(ring)
+	for i in range(total):
+		for j in range(minor_seg):
+			a0 = rings[i][j]
+			a1 = rings[i][(j + 1) % minor_seg]
+			b0 = rings[i + 1][j]
+			b1 = rings[i + 1][(j + 1) % minor_seg]
+			try:
+				bm.faces.new((a0, a1, b1, b0))
+			except ValueError:
+				pass
+
+
+def add_tube_between(bm, p0, p1, radius, segments=8):
+	"""A round tube spanning two points - for welded tubular framing, which
+	is what makes a mount read as fabricated structure instead of as a solid
+	milled block."""
+	a = mathutils.Vector(p0)
+	b = mathutils.Vector(p1)
+	d = b - a
+	length = d.length
+	if length < 1e-5:
+		return
+	res = bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False, segments=segments,
+								radius1=radius, radius2=radius, depth=length)
+	rot = mathutils.Vector((0, 0, 1)).rotation_difference(d.normalized()).to_matrix().to_4x4()
+	mid = (a + b) / 2.0
+	for v in res['verts']:
+		v.co = (rot @ v.co) + mid
+
+
 def export_bmesh(bm, object_name, filename, color=(0.20, 0.22, 0.24, 1.0),
 				 metallic=0.75, roughness=0.30):
 	me = bpy.data.meshes.new(object_name + "_mesh")
@@ -152,15 +216,19 @@ def build_mk19():
 	for side in (-1, 1):
 		add_box(bm, (side * (rw * 0.5 + 0.012), -0.02, 0.03), (0.02, rd * 0.7, 0.03), bevel=0.004)
 		add_cyl_x(bm, (side * (rw * 0.5 + 0.04), 0.06, 0.03), 0.018, 0.05, segments=10)
-	# Rear spade grips + butterfly trigger
-	add_box(bm, (0, -0.245, 0.02), (rw * 0.8, 0.04, rh * 0.7), bevel=0.006)
-	for d in (-1, 1):
-		add_cyl_y(bm, (d * 0.085, -0.285, 0.03), 0.016, 0.07, segments=8)
-		add_cyl_z(bm, (d * 0.085, -0.315, 0.005), 0.019, 0.11, segments=10)
-	add_cyl_x(bm, (0, -0.30, -0.01), 0.012, 0.10, segments=8)
-	# Top optic rail + blade sight
-	add_box(bm, (0, 0.08, 0.14), (0.035, 0.14, 0.016), bevel=0.003)
-	add_box(bm, (0, 0.14, 0.165), (0.03, 0.012, 0.04), bevel=0.003)
+	# Rear servo drive + firing solenoid, replacing spade grips and a
+	# butterfly trigger. Both of those only make sense with a gunner standing
+	# behind the weapon; this is an exterior module on a vehicle.
+	add_box(bm, (0, -0.245, 0.02), (rw * 0.8, 0.045, rh * 0.7), bevel=0.006)
+	add_cyl_y(bm, (0, -0.305, 0.02), 0.050, 0.075, segments=16)          # servo can
+	add_cyl_y(bm, (0, -0.352, 0.02), 0.034, 0.025, segments=14)          # end bell
+	add_box(bm, (0, -0.300, -0.045), (0.07, 0.06, 0.045), bevel=0.005)   # solenoid block
+	for d in (-1, 1):                                                     # cable glands
+		add_cyl_y(bm, (d * 0.050, -0.352, -0.015), 0.011, 0.035, segments=6)
+	# Top sensor rail with a compact sight head instead of an iron blade sight
+	add_box(bm, (0, 0.06, 0.14), (0.035, 0.16, 0.016), bevel=0.003)
+	add_box(bm, (0, 0.125, 0.170), (0.052, 0.060, 0.044), bevel=0.006)
+	add_cyl_y(bm, (0, 0.160, 0.170), 0.017, 0.020, segments=12)
 	export_bmesh(bm, "mk19_receiver", "mk19_receiver.glb", color=(0.17, 0.19, 0.16, 1.0))
 
 	# 3. BARREL - origin at receiver front face, extends +Y
@@ -177,7 +245,9 @@ def build_mk19():
 	bm = bmesh.new()
 	add_box(bm, (-0.15, 0.0, 0.0), (0.19, 0.24, 0.20), bevel=0.012)   # can body
 	add_box(bm, (-0.15, 0.0, 0.105), (0.17, 0.22, 0.02), bevel=0.005)  # lid
-	add_cyl_x(bm, (-0.15, 0.0, 0.125), 0.018, 0.10, segments=10)       # carry handle
+	for lug_s in (-1, 1):                                              # bolted hoist lugs
+		add_box(bm, (-0.15, lug_s * 0.07, 0.122), (0.030, 0.022, 0.030), bevel=0.004)
+		add_cyl_x(bm, (-0.15, lug_s * 0.07, 0.130), 0.011, 0.034, segments=8)
 	for i in range(3):                                                  # rib stiffeners
 		add_box(bm, (-0.15, -0.08 + i * 0.08, -0.02), (0.20, 0.014, 0.13), bevel=0.003)
 	# Belt of linked rounds curving up into the receiver
@@ -216,13 +286,18 @@ def build_recoilless():
 	add_cyl_y(bm, (0, -0.04, 0), 0.082, 0.12, segments=20)    # breech ring
 	bolt_ring(bm, -0.04, 0.070, count=10)
 	add_cyl_y(bm, (0, 0.03, 0), 0.070, 0.03, segments=20)     # tube collar
-	# Optical sight on a riser, offset left as on the real weapon
-	add_box(bm, (-0.075, 0.04, 0.075), (0.03, 0.05, 0.07), bevel=0.005)
-	add_cyl_y(bm, (-0.075, 0.08, 0.115), 0.026, 0.16, segments=14)
-	add_cyl_y(bm, (-0.075, 0.165, 0.115), 0.032, 0.03, segments=14)
-	# Trigger grip below the breech
-	add_box(bm, (0, 0.0, -0.085), (0.035, 0.07, 0.09), bevel=0.006)
-	add_cyl_x(bm, (0, -0.015, -0.055), 0.010, 0.035, segments=8)
+	# Sensor head on a riser, offset left. A long eyepieced telescope on a
+	# riser reads as something a gunner puts their face to; a short boxed
+	# camera with the lens on the front does not.
+	add_box(bm, (-0.075, 0.045, 0.078), (0.052, 0.075, 0.060), bevel=0.006)
+	add_cyl_y(bm, (-0.075, 0.092, 0.078), 0.024, 0.030, segments=14)
+	add_cyl_y(bm, (-0.075, 0.112, 0.078), 0.019, 0.014, segments=14)
+	add_box(bm, (-0.075, 0.100, 0.104), (0.058, 0.048, 0.012), bevel=0.003)  # sunshade
+	# Firing solenoid and conduit under the breech, not a trigger grip
+	add_cyl_z(bm, (0, 0.005, -0.075), 0.030, 0.070, segments=14)
+	add_box(bm, (0, 0.005, -0.115), (0.052, 0.048, 0.026), bevel=0.005)
+	for i in range(3):
+		add_cyl_y(bm, (0.018, -0.030 - i * 0.006, -0.098 + i * 0.012), 0.008, 0.070, segments=6)
 	export_bmesh(bm, "recoilless_breech", "recoilless_breech.glb", color=(0.24, 0.23, 0.20, 1.0))
 
 	# 3. TUBE - origin at the breech's front face, extends +Y so a
@@ -232,10 +307,11 @@ def build_recoilless():
 	add_cyl_y(bm, (0, 0.70, 0), 0.070, 0.05, segments=20)     # muzzle collar
 	for i in range(3):                                        # reinforcing bands
 		add_cyl_y(bm, (0, 0.14 + i * 0.20, 0), 0.070, 0.022, segments=20)
-	# Carry handle over the balance point
-	add_box(bm, (0, 0.30, 0.085), (0.022, 0.16, 0.018), bevel=0.004)
-	for hy in (0.23, 0.37):
-		add_box(bm, (0, hy, 0.072), (0.022, 0.02, 0.03), bevel=0.003)
+	# Cable conduit clipped along the top, replacing a carry handle - nobody
+	# shoulder-carries a module bolted to a vehicle.
+	add_cyl_y(bm, (0, 0.30, 0.080), 0.011, 0.34, segments=8)
+	for hy in (0.19, 0.30, 0.41):
+		add_box(bm, (0, hy, 0.074), (0.024, 0.020, 0.022), bevel=0.003)
 	export_bmesh(bm, "recoilless_tube", "recoilless_tube.glb", color=(0.26, 0.25, 0.21, 1.0))
 
 	# 4. VENTURI / BLAST NOZZLE - origin at tube rear, flares toward -Y
@@ -315,120 +391,178 @@ def build_coilgun():
 
 
 # ---------------------------------------------------------------------------
-# AUTOCANNON - M230 chain gun (AH-64 Apache chin turret)
+# AUTOCANNON - M230 chain gun, second pass
 #
-# Remodelled from a generic "long thin barrel with a pepper-pot brake"
-# autocannon. The M230's read is specific and nothing like that:
-#   - a SHORT, boxy, almost square receiver, not a long rifle action
-#   - the chain drive housing bulging off the LEFT flank as a flat oval cover
-#     with the sprocket boss standing proud of it - this is THE signature
-#     feature and the reason it's called a chain gun
-#   - a plain unbraked muzzle (a chin gun firing forward over open ground has
-#     nothing to protect, and a brake would blast the airframe)
-#   - a slim barrel of genuinely large diameter relative to the receiver
-#   - the whole thing hung in a U-shaped chin YOKE with visible elevation
-#     actuators, rather than sat on a pintle
-#   - a linkless feed chute curving up into the receiver's underside
+# The first remodel was still reading as "bigger machine gun": a boxy receiver
+# with a stubby barrel on a pintle, which is the same silhouette as the HMG at
+# 120% scale. Rebuilt against Chris's reference photo of an airframe-mounted
+# installation, which is a completely different object, and the differences
+# are all structural rather than decorative:
+#
+#   1. THE BARREL IS THE SILHOUETTE. Very long, very slim, and projecting a
+#      long way clear of everything else - so the gun reads as "reach" rather
+#      than "volume of fire". The old one was barely longer than its receiver.
+#   2. A DISTINCTIVE MUZZLE: a ribbed/fluted sleeve near the tip and then a
+#      flared bell, unmistakable at a distance and nothing like the plain
+#      crowned pipe an HMG carries.
+#   3. EXPOSED HELICAL RECOIL SPRINGS. The single most legible cue in the
+#      reference - big open coil springs you can see daylight through. No
+#      machine gun has these on the outside.
+#   4. TUBULAR WELDED FRAMING, not milled blocks. Round tube stock triangulated
+#      into an A-frame, so the mount reads as fabricated aircraft structure.
+#   5. HYDRAULIC HOSES AND CABLE RUNS everywhere, with connector blocks and
+#      P-clips, draped rather than routed in straight lines.
+#
+# The chain drive housing stays - it is what makes it an M230 rather than a
+# generic cannon - but it no longer dominates, because in the reference the
+# structure and the barrel do.
 # ---------------------------------------------------------------------------
 def build_autocannon():
-	# 1. CHIN YOKE MOUNT - origin at deck
+	# 1. TUBULAR CHIN MOUNT - origin at deck. Welded tube A-frame with the
+	#    recoil springs standing in it, not a solid pintle.
 	bm = bmesh.new()
-	add_cyl_z(bm, (0, 0, 0.020), 0.165, 0.040, segments=22)        # azimuth ring
-	for i in range(12):                                            # ring bolts
+	add_cyl_z(bm, (0, 0, 0.018), 0.170, 0.036, segments=22)          # deck ring
+	for i in range(12):
 		a = (i / 12) * math.tau
-		add_cyl_z(bm, (math.cos(a) * 0.145, math.sin(a) * 0.145, 0.042), 0.010, 0.016, segments=6)
-	add_cyl_z(bm, (0, 0, 0.070), 0.115, 0.062, segments=20)        # turret drum
-	add_box(bm, (0, 0.075, 0.075), (0.13, 0.055, 0.070), bevel=0.008)   # drive gearbox
-	add_cyl_y(bm, (0, 0.112, 0.075), 0.030, 0.030, segments=12)
+		add_cyl_z(bm, (math.cos(a) * 0.150, math.sin(a) * 0.150, 0.040), 0.010, 0.016, segments=6)
+	add_cyl_z(bm, (0, 0, 0.062), 0.108, 0.052, segments=20)          # azimuth drum
+	add_box(bm, (0, 0.080, 0.062), (0.115, 0.050, 0.060), bevel=0.007)   # drive gearbox
+	add_cyl_y(bm, (0, 0.112, 0.062), 0.026, 0.026, segments=12)
 
-	# U-shaped yoke arms carrying the trunnions. Swept forward and taller
-	# than a pintle's fork - the gun hangs INSIDE the yoke.
+	# Welded tube A-frame: two forward legs up to the trunnions, two rear
+	# legs, cross-braced. This is the shape doing most of the work.
 	for side in (-1, 1):
-		add_box(bm, (side * 0.135, 0.010, 0.175), (0.042, 0.115, 0.180), bevel=0.009)
-		add_box(bm, (side * 0.135, -0.045, 0.105), (0.038, 0.075, 0.055), bevel=0.006)
-		add_cyl_x(bm, (side * 0.158, 0.010, 0.250), 0.040, 0.034, segments=14)   # trunnion boss
-		for i in range(6):                                                       # trunnion bolts
+		add_tube_between(bm, (side * 0.055, 0.030, 0.090), (side * 0.145, 0.050, 0.265), 0.020)
+		add_tube_between(bm, (side * 0.055, -0.045, 0.090), (side * 0.145, 0.010, 0.265), 0.020)
+		add_tube_between(bm, (side * 0.145, 0.050, 0.265), (side * 0.145, 0.010, 0.265), 0.018)
+		# Cross-brace back down to the drum
+		add_tube_between(bm, (side * 0.145, 0.010, 0.265), (0, -0.060, 0.100), 0.014)
+		# Trunnion bearing at the apex
+		add_cyl_x(bm, (side * 0.150, 0.030, 0.268), 0.040, 0.036, segments=16)
+		add_cyl_x(bm, (side * 0.172, 0.030, 0.268), 0.020, 0.014, segments=10)
+		for i in range(6):
 			a = (i / 6) * math.tau
-			add_cyl_x(bm, (side * 0.176, 0.010 + math.cos(a) * 0.028, 0.250 + math.sin(a) * 0.028),
-					  0.007, 0.012, segments=6)
-		# Elevation actuator: cylinder + exposed ram running up to the cradle
-		add_cyl_z(bm, (side * 0.112, -0.085, 0.130), 0.026, 0.115, segments=12)
-		add_cyl_z(bm, (side * 0.112, -0.085, 0.205), 0.013, 0.070, segments=10)
-		add_box(bm, (side * 0.112, -0.085, 0.245), (0.036, 0.030, 0.022), bevel=0.004)
-	# Hydraulic lines looping between the actuators
-	for i in range(4):
-		add_cyl_x(bm, (0, -0.085, 0.085 + i * 0.012), 0.008, 0.20, segments=6)
+			add_cyl_x(bm, (side * 0.170, 0.030 + math.cos(a) * 0.028, 0.268 + math.sin(a) * 0.028),
+					  0.006, 0.010, segments=6)
+
+	# EXPOSED RECOIL SPRINGS - the reference's loudest cue. Big open coils
+	# standing between the deck and the cradle, one each side.
+	for side in (-1, 1):
+		add_cyl_z(bm, (side * 0.098, -0.075, 0.058), 0.038, 0.028, segments=14)   # lower seat
+		add_helix(bm, (side * 0.098, -0.075, 0.150), 0.033, 0.170, 6.0, 0.0085)
+		add_cyl_z(bm, (side * 0.098, -0.075, 0.242), 0.038, 0.026, segments=14)   # upper seat
+		add_cyl_z(bm, (side * 0.098, -0.075, 0.150), 0.013, 0.190, segments=10)   # guide rod
+		add_box(bm, (side * 0.098, -0.075, 0.264), (0.048, 0.036, 0.024), bevel=0.004)
+
+	# Hydraulic actuator on the centreline behind the springs
+	add_cyl_z(bm, (0, -0.115, 0.115), 0.030, 0.130, segments=14)
+	add_cyl_z(bm, (0, -0.115, 0.200), 0.014, 0.070, segments=10)
+	add_box(bm, (0, -0.115, 0.240), (0.040, 0.032, 0.022), bevel=0.004)
+
+	# HOSES AND CABLE RUNS - draped, with P-clips and a connector block.
+	for i in range(3):
+		add_tube_between(bm, (-0.100, -0.100 + i * 0.014, 0.100 + i * 0.010),
+						 (0.100, -0.100 + i * 0.014, 0.100 + i * 0.010), 0.008, segments=6)
+	for side in (-1, 1):
+		add_tube_between(bm, (side * 0.100, -0.096, 0.106), (side * 0.140, -0.030, 0.230), 0.009, segments=6)
+		add_tube_between(bm, (side * 0.140, -0.030, 0.230), (side * 0.120, 0.060, 0.262), 0.009, segments=6)
+	add_box(bm, (0, -0.140, 0.072), (0.072, 0.040, 0.036), bevel=0.005)      # connector block
+	for i in range(3):
+		add_cyl_y(bm, (-0.022 + i * 0.022, -0.166, 0.072), 0.008, 0.020, segments=6)
 	export_bmesh(bm, "autocannon_mount", "autocannon_mount.glb", color=(0.19, 0.20, 0.22, 1.0))
 
-	# 2. RECEIVER - origin at trunnion. Squat and square, with the chain
-	#    drive housing on the left flank.
+	# 2. RECEIVER - origin at trunnion. Slimmer and lower than the last pass:
+	#    in the reference the receiver is a modest part of the object, and it
+	#    was the chunky receiver that made this read as a machine gun.
 	bm = bmesh.new()
-	rw, rd, rh = 0.155, 0.30, 0.175
-	add_box(bm, (0, -0.045, 0.0), (rw, rd, rh), bevel=0.012)          # main body
-	add_box(bm, (0, -0.035, 0.098), (rw * 0.80, rd * 0.80, 0.026), bevel=0.006)   # top cover
-	for i in range(3):                                                # cover latches
-		add_box(bm, (0, -0.13 + i * 0.085, 0.115), (rw * 0.55, 0.018, 0.012), bevel=0.003)
+	rw, rd, rh = 0.135, 0.285, 0.140
+	add_box(bm, (0, -0.040, 0.0), (rw, rd, rh), bevel=0.011)
+	add_box(bm, (0, -0.030, 0.080), (rw * 0.78, rd * 0.75, 0.022), bevel=0.005)  # top cover
+	for i in range(3):
+		add_box(bm, (0, -0.120 + i * 0.080, 0.094), (rw * 0.52, 0.016, 0.010), bevel=0.002)
 
-	# THE CHAIN HOUSING - flat oval cover on the left flank, sprocket boss
-	# standing proud of it. This is the part that makes it read as an M230.
-	add_box(bm, (-0.098, -0.045, 0.010), (0.048, 0.245, 0.135), bevel=0.020)
-	add_cyl_x(bm, (-0.128, 0.040, 0.010), 0.052, 0.026, segments=18)   # front sprocket boss
-	add_cyl_x(bm, (-0.128, -0.130, 0.010), 0.044, 0.026, segments=16)  # rear sprocket boss
-	add_cyl_x(bm, (-0.142, 0.040, 0.010), 0.020, 0.020, segments=10)   # sprocket hub cap
-	for i in range(6):                                                 # housing screws
+	# Chain drive housing on the left flank - present and readable, but no
+	# longer the widest thing on the gun.
+	add_box(bm, (-0.086, -0.040, 0.006), (0.040, 0.225, 0.108), bevel=0.017)
+	add_cyl_x(bm, (-0.110, 0.038, 0.006), 0.044, 0.022, segments=18)
+	add_cyl_x(bm, (-0.110, -0.116, 0.006), 0.038, 0.022, segments=16)
+	add_cyl_x(bm, (-0.124, 0.038, 0.006), 0.017, 0.018, segments=10)
+	for i in range(6):
 		a = (i / 6) * math.tau
-		add_cyl_x(bm, (-0.124, 0.040 + math.cos(a) * 0.062, 0.010 + math.sin(a) * 0.062),
-				  0.007, 0.014, segments=6)
-	# Drive motor stub off the back of the chain housing
-	add_cyl_y(bm, (-0.098, -0.215, 0.010), 0.042, 0.075, segments=14)
-	add_cyl_y(bm, (-0.098, -0.258, 0.010), 0.030, 0.020, segments=12)
+		add_cyl_x(bm, (-0.106, 0.038 + math.cos(a) * 0.053, 0.006 + math.sin(a) * 0.053),
+				  0.006, 0.012, segments=6)
+	add_cyl_y(bm, (-0.086, -0.196, 0.006), 0.036, 0.068, segments=14)       # drive motor
+	add_cyl_y(bm, (-0.086, -0.234, 0.006), 0.026, 0.018, segments=12)
 
-	# Right flank: ejection port and a flat inspection plate (deliberately
-	# plainer than the left - the asymmetry IS the silhouette)
-	add_box(bm, (rw * 0.5 + 0.008, -0.075, -0.020), (0.014, 0.105, 0.058), bevel=0.004)
-	add_box(bm, (rw * 0.5 + 0.006, 0.035, 0.020), (0.010, 0.085, 0.075), bevel=0.004)
+	# Right flank: ejection chute and inspection plate
+	add_box(bm, (rw * 0.5 + 0.008, -0.066, -0.018), (0.013, 0.095, 0.050), bevel=0.004)
+	add_box(bm, (rw * 0.5 + 0.005, 0.030, 0.016), (0.009, 0.075, 0.062), bevel=0.004)
 
-	# Recoil buffer through the back face, and the mounting lugs
-	add_cyl_y(bm, (0, -0.205, 0.020), 0.040, 0.070, segments=14)
-	add_cyl_y(bm, (0, -0.245, 0.020), 0.048, 0.022, segments=14)
+	# Recoil rails running back either side, with their own small springs -
+	# echoes the mount's springs and ties the two together.
 	for side in (-1, 1):
-		add_box(bm, (side * (rw * 0.5 + 0.012), 0.010, 0.0), (0.028, 0.070, 0.075), bevel=0.006)
-		add_cyl_x(bm, (side * (rw * 0.5 + 0.030), 0.010, 0.0), 0.030, 0.020, segments=14)
+		add_cyl_y(bm, (side * 0.082, -0.075, 0.048), 0.020, 0.230, segments=12)
+		add_helix(bm, (side * 0.082, -0.075, 0.048), 0.026, 0.140, 5.0, 0.0060, axis='Y')
+		add_cyl_y(bm, (side * 0.082, 0.048, 0.048), 0.028, 0.024, segments=12)
+		add_cyl_y(bm, (side * 0.082, -0.198, 0.048), 0.030, 0.028, segments=12)
 
-	# Feed throat on the underside (linkless feed comes up from below on a
-	# chin gun, not in from the side)
-	add_box(bm, (0, -0.020, -0.105), (0.105, 0.115, 0.045), bevel=0.008)
+	# Trunnion lugs
+	for side in (-1, 1):
+		add_box(bm, (side * (rw * 0.5 + 0.010), 0.015, 0.0), (0.024, 0.062, 0.066), bevel=0.005)
+		add_cyl_x(bm, (side * (rw * 0.5 + 0.026), 0.015, 0.0), 0.028, 0.018, segments=14)
+
+	# Feed throat underneath
+	add_box(bm, (0, -0.015, -0.088), (0.092, 0.100, 0.040), bevel=0.007)
+	# Hose stubs off the back plate
+	add_box(bm, (0, -0.190, 0.010), (0.120, 0.024, 0.120), bevel=0.006)
+	for side in (-1, 1):
+		add_cyl_y(bm, (side * 0.040, -0.212, 0.030), 0.010, 0.026, segments=6)
 	export_bmesh(bm, "autocannon_receiver", "autocannon_receiver.glb", color=(0.20, 0.21, 0.23, 1.0))
 
-	# 3. BARREL - origin at receiver face, extends +Y. Plain muzzle: no brake.
+	# 3. BARREL - origin at receiver face, extends +Y. LONG and SLIM, with the
+	#    reference's ribbed sleeve and flared bell at the muzzle. This part is
+	#    doing most of the work of not looking like a machine gun.
 	bm = bmesh.new()
-	add_cyl_y(bm, (0, 0.045, 0), 0.058, 0.090, segments=18)      # barrel nut / breech collar
-	bolt_ring(bm, 0.045, 0.048, count=8)
-	add_cyl_y(bm, (0, 0.115, 0), 0.046, 0.060, segments=16)      # chamber shoulder
-	add_taper_y(bm, (0, 0.175, 0), 0.046, 0.036, 0.060, segments=16)
-	add_cyl_y(bm, (0, 0.480, 0), 0.034, 0.560, segments=16)      # the tube
-	for i in range(2):                                           # barrel clamps
-		add_cyl_y(bm, (0, 0.290 + i * 0.230, 0), 0.042, 0.026, segments=16)
-		add_box(bm, (0, 0.290 + i * 0.230, 0.048), (0.030, 0.022, 0.030), bevel=0.004)
-	add_cyl_y(bm, (0, 0.768, 0), 0.038, 0.026, segments=16)      # muzzle band
-	add_cyl_y(bm, (0, 0.790, 0), 0.033, 0.022, segments=16)      # crown
+	add_cyl_y(bm, (0, 0.040, 0), 0.050, 0.080, segments=18)       # barrel nut
+	bolt_ring(bm, 0.040, 0.042, count=8)
+	add_taper_y(bm, (0, 0.110, 0), 0.044, 0.030, 0.060, segments=16)
+	add_cyl_y(bm, (0, 0.700, 0), 0.026, 1.120, segments=16)       # the long thin tube
+	# Barrel clamps at intervals, with hose clips hanging off them
+	for i in range(3):
+		band_y = 0.300 + i * 0.290
+		add_cyl_y(bm, (0, band_y, 0), 0.034, 0.020, segments=16)
+		add_box(bm, (0, band_y, 0.038), (0.024, 0.016, 0.024), bevel=0.003)
+	# RIBBED MUZZLE SLEEVE - a stack of raised bands, the reference's tell
+	for i in range(7):
+		add_cyl_y(bm, (0, 1.190 + i * 0.026, 0), 0.040, 0.017, segments=18)
+	add_cyl_y(bm, (0, 1.280, 0), 0.031, 0.070, segments=18)       # gap before the bell
+	# FLARED BELL at the tip
+	add_taper_y(bm, (0, 1.340, 0), 0.034, 0.052, 0.055, segments=20)
+	add_cyl_y(bm, (0, 1.376, 0), 0.052, 0.022, segments=20)
+	add_cyl_y(bm, (0, 1.392, 0), 0.044, 0.014, segments=20)
 	export_bmesh(bm, "autocannon_barrel", "autocannon_barrel.glb", color=(0.13, 0.14, 0.15, 1.0))
 
 	# 4. LINKLESS AMMO MAGAZINE - its own part so the drum_size tweak scales
 	#    ONLY the magazine. Origin at the receiver's underside feed throat.
 	bm = bmesh.new()
-	add_cyl_z(bm, (0, -0.055, -0.185), 0.140, 0.150, segments=20)      # drum body
-	add_cyl_z(bm, (0, -0.055, -0.108), 0.115, 0.020, segments=20)      # drum lid
-	add_cyl_z(bm, (0, -0.055, -0.265), 0.120, 0.018, segments=20)      # drum floor
-	for i in range(8):                                                  # drum ribs
+	# Deliberately modest. At its first size this drum was physically wider
+	# than the receiver and stood taller than the trunnion, so it read as the
+	# main body of the weapon with a gun bolted to it - the drum, not the
+	# barrel, became the silhouette. An ammunition store should be legible
+	# and subordinate.
+	add_cyl_z(bm, (0, -0.040, -0.128), 0.092, 0.110, segments=20)      # drum body
+	add_cyl_z(bm, (0, -0.040, -0.070), 0.074, 0.016, segments=20)      # lid
+	add_cyl_z(bm, (0, -0.040, -0.186), 0.080, 0.014, segments=20)      # floor
+	for i in range(8):
 		a = (i / 8) * math.tau
-		add_box(bm, (math.cos(a) * 0.132, -0.055 + math.sin(a) * 0.132, -0.185),
-				(0.022, 0.022, 0.140), bevel=0.004)
-	add_cyl_z(bm, (0, -0.055, -0.185), 0.038, 0.170, segments=12)      # centre auger
-	# Linkless feed chute curving up into the receiver's underside throat
+		add_box(bm, (math.cos(a) * 0.086, -0.040 + math.sin(a) * 0.086, -0.128),
+				(0.016, 0.016, 0.100), bevel=0.003)
+	add_cyl_z(bm, (0, -0.040, -0.128), 0.026, 0.124, segments=12)      # centre auger
+	# Linkless chute curving up into the throat, with a hose clipped alongside
 	for i in range(5):
-		add_box(bm, (0, -0.048 + i * 0.011, -0.115 + i * 0.026), (0.075, 0.040, 0.034), bevel=0.006)
-	add_box(bm, (0, 0.005, 0.010), (0.085, 0.055, 0.040), bevel=0.006)  # throat collar
+		add_box(bm, (0, -0.036 + i * 0.009, -0.070 + i * 0.019), (0.054, 0.030, 0.026), bevel=0.004)
+	add_tube_between(bm, (0.040, -0.040, -0.090), (0.040, 0.000, 0.010), 0.007, segments=6)
+	add_box(bm, (0, 0.004, 0.010), (0.062, 0.042, 0.030), bevel=0.005)
 	export_bmesh(bm, "autocannon_ammo_box", "autocannon_ammo_box.glb", color=(0.21, 0.24, 0.20, 1.0),
 				 metallic=0.4, roughness=0.6)
 
@@ -548,31 +682,102 @@ def build_anti_materiel_rifle():
 	export_bmesh(bm, "amr_muzzle_brake", "amr_muzzle_brake.glb", color=(0.115, 0.10, 0.095, 1.0),
 				 metallic=0.62, roughness=0.72)
 
-	# 5. SENSOR POD - the "expanded sensors". Day sight, thermal aperture,
-	#    laser rangefinder and a met probe, on a shock-mounted raft. Origin at
-	#    its mounting face on the breech's left flank; apertures face +Y.
+	# 5. SENSOR HEAD - the "expanded sensors", and deliberately NOT a scope.
+	#    An optic sitting on a rifle reads as a telescope by default, which is
+	#    the wrong story: this is an unmanned electro-optical head, so every
+	#    cue has to say camera and LIDAR rather than eyepiece.
+	#      - a rotating LIDAR drum standing proud on top, with a dark glass
+	#        band around it and a cap - the single most legible "this is a
+	#        sensor" silhouette there is
+	#      - a camera in a rectangular housing with a stepped lens barrel
+	#        PROTRUDING forward under a sunshade, so the glass is on the
+	#        outside where a lens is, not recessed where an eyepiece would be
+	#      - heat-sink fins and a data conduit, because this is electronics
+	#      - explicitly no eyepiece, no tube running back along the breech
+	#    Origin at its mounting face on the breech; apertures face +Y.
 	bm = bmesh.new()
-	add_box(bm, (0, -0.010, 0.0), (0.135, 0.230, 0.115), bevel=0.010)   # pod body
-	add_box(bm, (0, -0.010, 0.070), (0.115, 0.200, 0.030), bevel=0.006) # sunshade roof
-	# Day sight: big square window with a hood
-	add_box(bm, (-0.028, 0.108, 0.018), (0.062, 0.024, 0.062), bevel=0.005)
-	add_box(bm, (-0.028, 0.126, 0.040), (0.070, 0.030, 0.020), bevel=0.004)
-	# Thermal aperture: round, recessed
-	add_cyl_y(bm, (0.048, 0.108, 0.010), 0.032, 0.028, segments=16)
-	add_cyl_y(bm, (0.048, 0.124, 0.010), 0.026, 0.014, segments=16)
-	# Laser rangefinder tube slung underneath
-	add_cyl_y(bm, (0.020, 0.060, -0.070), 0.024, 0.180, segments=14)
-	add_cyl_y(bm, (0.020, 0.152, -0.070), 0.030, 0.020, segments=14)
-	# Meteorological probe on a whip off the back corner
-	add_cyl_z(bm, (-0.050, -0.110, 0.095), 0.008, 0.120, segments=8)
-	add_cyl_z(bm, (-0.050, -0.110, 0.165), 0.020, 0.028, segments=12)
-	# Shock mounts and a cable loom back toward the breech
+	add_box(bm, (0, -0.010, 0.010), (0.140, 0.235, 0.130), bevel=0.010)    # avionics box
+	add_box(bm, (0, -0.115, 0.010), (0.120, 0.030, 0.110), bevel=0.006)    # rear bulkhead
+
+	# Heat-sink fins down the flanks - electronics, not glass.
 	for side in (-1, 1):
-		add_cyl_x(bm, (side * 0.070, -0.090, -0.050), 0.018, 0.030, segments=10)
-	for i in range(4):
-		add_cyl_y(bm, (-0.085, -0.140 - i * 0.006, -0.030 + i * 0.012), 0.007, 0.060, segments=6)
+		for i in range(6):
+			add_box(bm, (side * 0.074, -0.075 + i * 0.032, 0.010), (0.012, 0.016, 0.100), bevel=0.002)
+
+	# CAMERA: rectangular housing, stepped lens barrel standing proud of it.
+	add_box(bm, (-0.030, 0.075, -0.012), (0.078, 0.070, 0.078), bevel=0.007)
+	add_cyl_y(bm, (-0.030, 0.122, -0.012), 0.032, 0.036, segments=18)      # lens mount
+	add_cyl_y(bm, (-0.030, 0.146, -0.012), 0.028, 0.020, segments=18)      # lens step
+	add_cyl_y(bm, (-0.030, 0.160, -0.012), 0.024, 0.014, segments=18)      # front element
+	add_box(bm, (-0.030, 0.140, 0.030), (0.086, 0.060, 0.014), bevel=0.004)  # sunshade hood
+	for side in (-1, 1):                                                    # hood cheeks
+		add_box(bm, (-0.030 + side * 0.040, 0.140, 0.008), (0.010, 0.060, 0.036), bevel=0.003)
+
+	# LIDAR: a drum standing on top, glass band around its middle, capped.
+	add_cyl_z(bm, (0.028, 0.010, 0.078), 0.044, 0.026, segments=20)        # base collar
+	add_cyl_z(bm, (0.028, 0.010, 0.118), 0.038, 0.056, segments=20)        # drum body
+	add_cyl_z(bm, (0.028, 0.010, 0.118), 0.042, 0.030, segments=20)        # glass band
+	add_cyl_z(bm, (0.028, 0.010, 0.152), 0.040, 0.014, segments=20)        # cap
+	add_cyl_z(bm, (0.028, 0.010, 0.162), 0.014, 0.010, segments=10)        # spindle boss
+	for i in range(4):                                                      # cap screws
+		a = (i / 4) * math.tau
+		add_cyl_z(bm, (0.028 + math.cos(a) * 0.030, 0.010 + math.sin(a) * 0.030, 0.158),
+				  0.006, 0.010, segments=6)
+
+	# Small ranging/illuminator aperture beside the camera.
+	add_cyl_y(bm, (0.052, 0.090, -0.026), 0.020, 0.060, segments=14)
+	add_cyl_y(bm, (0.052, 0.122, -0.026), 0.024, 0.012, segments=14)
+
+	# Data conduit and shock mounts back toward the breech.
+	for side in (-1, 1):
+		add_cyl_x(bm, (side * 0.072, -0.090, -0.052), 0.016, 0.030, segments=10)
+	for i in range(5):
+		add_cyl_y(bm, (-0.086, -0.132 - i * 0.005, -0.034 + i * 0.011), 0.008, 0.070, segments=6)
+	add_box(bm, (-0.086, -0.128, -0.062), (0.030, 0.040, 0.030), bevel=0.004)  # connector block
 	export_bmesh(bm, "amr_sensor_pod", "amr_sensor_pod.glb", color=(0.17, 0.19, 0.18, 1.0),
 				 metallic=0.45, roughness=0.55)
+
+	# 5b. RECOIL BUFFER + HYDRAULICS - deliberately OVERSIZED, hanging off the
+	#     back of the breech. This is the honest read for a weapon whose whole
+	#     premise is one enormous per-shot number: something has to absorb it,
+	#     and it should look like it barely can. Its own part rather than baked
+	#     into the breech so it can sit past the breech's rear face without
+	#     enlarging the part barrel_length scaling has to stay clear of.
+	#     Origin at the breech rear face; the assembly runs back along -Y.
+	bm = bmesh.new()
+	# The big central buffer tube, fat and long
+	add_cyl_y(bm, (0, -0.150, 0.010), 0.090, 0.300, segments=22)
+	add_cyl_y(bm, (0, 0.005, 0.010), 0.104, 0.030, segments=22)            # front gland
+	bolt_ring(bm, 0.005, 0.092, count=10, bolt_r=0.010, bolt_len=0.020)
+	for i in range(4):                                                      # cooling ribs
+		add_cyl_y(bm, (0, -0.070 - i * 0.062, 0.010), 0.100, 0.022, segments=22)
+	add_cyl_y(bm, (0, -0.312, 0.010), 0.100, 0.036, segments=22)           # rear cap
+	add_cyl_y(bm, (0, -0.340, 0.010), 0.052, 0.028, segments=16)           # charging boss
+	add_cyl_y(bm, (0, -0.360, 0.010), 0.020, 0.020, segments=10)
+
+	# Twin hydraulic rams flanking it, with exposed chromed rods
+	for side in (-1, 1):
+		add_cyl_y(bm, (side * 0.115, -0.130, -0.030), 0.046, 0.230, segments=16)
+		add_cyl_y(bm, (side * 0.115, -0.005, -0.030), 0.052, 0.026, segments=16)
+		add_cyl_y(bm, (side * 0.115, 0.055, -0.030), 0.022, 0.100, segments=12)   # ram rod
+		add_box(bm, (side * 0.115, 0.108, -0.030), (0.052, 0.030, 0.038), bevel=0.005)
+		add_cyl_y(bm, (side * 0.115, -0.256, -0.030), 0.052, 0.030, segments=16)  # rear cap
+		# Accumulator sphere on each ram
+		add_cyl_z(bm, (side * 0.115, -0.190, 0.048), 0.036, 0.070, segments=14)
+		add_cyl_z(bm, (side * 0.115, -0.190, 0.090), 0.026, 0.020, segments=12)
+
+	# Hydraulic plumbing looping between the rams and across the buffer
+	for i in range(3):
+		add_cyl_x(bm, (0, -0.060 - i * 0.070, -0.062), 0.011, 0.240, segments=8)
+	for side in (-1, 1):
+		for i in range(3):
+			add_cyl_y(bm, (side * 0.150, -0.100 - i * 0.020, -0.045 + i * 0.010), 0.009, 0.170, segments=6)
+	# Manifold block underslung between the rams
+	add_box(bm, (0, -0.230, -0.070), (0.150, 0.075, 0.048), bevel=0.007)
+	for i in range(4):
+		add_cyl_z(bm, (-0.048 + i * 0.032, -0.230, -0.100), 0.011, 0.028, segments=8)
+	export_bmesh(bm, "amr_buffer", "amr_buffer.glb", color=(0.19, 0.20, 0.21, 1.0),
+				 metallic=0.62, roughness=0.42)
 
 	# 6. BIPOD - shown only when the bipod_deploy tweak is on. Origin at the
 	#    deck under the barrel; legs splay out and forward.
@@ -724,7 +929,12 @@ def build_ballista():
 			a = (i / 8) * math.tau
 			add_box(bm, (side * 0.125, -0.34 + math.cos(a) * 0.062, 0.06 + math.sin(a) * 0.062),
 					(0.014, 0.018, 0.018), bevel=0.002)
-		add_cyl_z(bm, (side * 0.145, -0.34, 0.12), 0.012, 0.10, segments=8)    # crank handles
+		# Geared motor drive on the windlass instead of a hand crank - the
+		# ballista is deliberately archaic, but it is still a module a
+		# vehicle carries, not something a crew winds by hand.
+		add_cyl_x(bm, (side * 0.155, -0.34, 0.09), 0.032, 0.055, segments=14)
+		add_cyl_x(bm, (side * 0.190, -0.34, 0.09), 0.020, 0.020, segments=10)
+		add_box(bm, (side * 0.150, -0.34, 0.14), (0.045, 0.050, 0.040), bevel=0.005)
 	add_box(bm, (0, -0.20, 0.09), (0.03, 0.10, 0.03), bevel=0.004)             # trigger claw
 	export_bmesh(bm, "ballista_stock", "ballista_stock.glb", color=(0.44, 0.32, 0.19, 1.0),
 				 metallic=0.15, roughness=0.75)

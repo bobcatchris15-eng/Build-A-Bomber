@@ -36,3 +36,9 @@ __pycache__/
 # Exported builds (regenerable via `godot --export-release`, not source) -
 # export_presets.cfg itself IS tracked, so any export stays reproducible.
 /builds/
+
+# Pre-rebuild copies of the bloated Tripo building GLBs (134MB of dead
+# marching-cubes output, replaced by tools/blender/build_buildings.py).
+# Kept on disk as a safety net because the originals were never tracked,
+# but never committed - they would bloat history permanently.
+_mesh_backups/

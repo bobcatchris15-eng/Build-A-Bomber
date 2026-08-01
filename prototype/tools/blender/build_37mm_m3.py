@@ -127,6 +127,22 @@ def build_37mm_m3_parts():
 	export_bmesh(bm1, "m3_pintle_mount", "m3_pintle_mount.glb")
 
 	# 2. ACTION / BREECH (m3_action_breech.glb)
+	#
+	# Two things this part has to do that it previously did not:
+	#
+	# 1. PROJECT BEHIND THE TRUNNIONS. The origin IS the trunnion line, and
+	#    everything used to sit in front of it or level with it, so the gun
+	#    read as a barrel stuck on a post with nothing balancing it. A real
+	#    gun of this calibre carries most of its mass behind the trunnion -
+	#    recuperator cylinders, the breech ring, the case deflector, the
+	#    loader. Blender -Y is behind (Godot +Z), so that is where the blocky
+	#    mass goes now.
+	#
+	# 2. READ AS A REMOTE WEAPON STATION. The old hand operating lever said
+	#    "a crew stands here and works this", which is wrong for a module
+	#    bolted to the outside of a vehicle. Replaced with an electric breech
+	#    actuator - motor, gearbox, linkage arm - which does the same job with
+	#    nobody behind it.
 	bm2 = bmesh.new()
 	breech_w = 0.22
 	breech_h = 0.26
@@ -136,11 +152,48 @@ def build_37mm_m3_parts():
 	add_box(bm2, (0, breech_y_center, 0 + breech_h * 0.45), (breech_w * 0.7, breech_l * 0.6, 0.04), bevel=0.005)
 	add_cyl_y(bm2, (0, breech_y_center - breech_l * 0.5, 0), 0.06, 0.04, segments=12)
 
-	# Breech Operating Lever
-	add_cyl_x(bm2, (breech_w * 0.5 + 0.02, breech_y_center + 0.05, 0), 0.02, 0.04, segments=8)
-	add_box(bm2, (breech_w * 0.5 + 0.04, breech_y_center + 0.05, -0.06), (0.02, 0.03, 0.14), bevel=0.005)
+	# --- Blocky mass projecting BEHIND the trunnion line --------------------
+	# Breech ring: a heavy rectangular block immediately aft, wider than the
+	# body, which is the anchor for everything else back here.
+	add_box(bm2, (0, -0.28, -0.01), (0.27, 0.16, 0.28), bevel=0.016)
+	add_bolt_ring(bm2, (0, -0.36, -0.01), 0.10, count=8, axis='y')
 
-	# Hydro-Spring Recoil Cylinder & Collar
+	# Twin recuperator cylinders running back either side of it
+	for side in (-1, 1):
+		add_cyl_y(bm2, (side * 0.155, -0.36, 0.055), 0.048, 0.34, segments=14)
+		add_cyl_y(bm2, (side * 0.155, -0.19, 0.055), 0.056, 0.035, segments=14)
+		add_cyl_y(bm2, (side * 0.155, -0.53, 0.055), 0.056, 0.035, segments=14)
+		# Cooling ribs down each cylinder
+		for i in range(4):
+			add_cyl_y(bm2, (side * 0.155, -0.26 - i * 0.070, 0.055), 0.054, 0.016, segments=14)
+
+	# Case deflector / recoil guard: a big flat blocky shroud across the back
+	add_box(bm2, (0, -0.47, -0.06), (0.30, 0.09, 0.24), bevel=0.012)
+	add_box(bm2, (0, -0.53, -0.15), (0.26, 0.11, 0.09), bevel=0.010)   # ejection chute
+	# Spent-case bin slung under the chute
+	add_box(bm2, (0, -0.50, -0.24), (0.20, 0.20, 0.10), bevel=0.010)
+
+	# Autoloader magazine block, offset to one side and unmistakably square
+	add_box(bm2, (0.20, -0.34, 0.13), (0.15, 0.30, 0.20), bevel=0.012)
+	for i in range(4):
+		add_box(bm2, (0.20, -0.44 + i * 0.068, 0.235), (0.13, 0.030, 0.020), bevel=0.004)
+	add_box(bm2, (0.115, -0.24, 0.10), (0.07, 0.11, 0.09), bevel=0.008)   # transfer chute
+
+	# Junction box and conduit runs on the other side - the electrical half
+	# of "this thing is operated from somewhere else".
+	add_box(bm2, (-0.19, -0.32, 0.10), (0.10, 0.20, 0.14), bevel=0.010)
+	for i in range(3):
+		add_cyl_y(bm2, (-0.19, -0.44 - i * 0.008, 0.055 + i * 0.030), 0.012, 0.18, segments=8)
+	add_cyl_z(bm2, (-0.19, -0.22, 0.15), 0.014, 0.12, segments=8)
+
+	# --- Electric breech actuator, replacing the hand operating lever -------
+	add_box(bm2, (breech_w * 0.5 + 0.05, breech_y_center + 0.02, 0.02), (0.09, 0.12, 0.10), bevel=0.008)
+	add_cyl_x(bm2, (breech_w * 0.5 + 0.11, breech_y_center + 0.02, 0.02), 0.036, 0.07, segments=14)
+	add_cyl_x(bm2, (breech_w * 0.5 + 0.155, breech_y_center + 0.02, 0.02), 0.020, 0.03, segments=10)
+	# Linkage arm from the actuator down into the breech block
+	add_box(bm2, (breech_w * 0.5 + 0.05, breech_y_center + 0.02, -0.06), (0.022, 0.028, 0.10), bevel=0.004)
+
+	# Hydro-Spring Recoil Cylinder & Collar (forward, unchanged in intent)
 	recoil_r = 0.055
 	recoil_len = 0.65
 	recoil_z = -0.10

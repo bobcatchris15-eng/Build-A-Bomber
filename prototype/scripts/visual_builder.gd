@@ -270,6 +270,24 @@ const ARTILLERY_ELEVATION_DEG := 35.0
 const MORTAR_ELEVATION_DEG := 60.0
 const NAPALM_ELEVATION_DEG := 55.0
 
+# Anti-materiel rifle assembly stations, MEASURED from the authored .glb
+# AABBs rather than estimated. amr_breech's front face sits at z = -0.168 and
+# amr_barrel spans z = -1.040 .. 0.0 with its origin on its own rear face, so
+# the barrel mounts exactly at the breech's face and the muzzle brake belongs
+# one authored barrel-length beyond it. These were estimated at first and the
+# barrel hung 0.11 units clear of the breech in mid-air; re-measure if the
+# meshes change.
+const AMR_BREECH_FRONT_Z := -0.168
+const AMR_BARREL_LEN := 1.040
+const AMR_BUFFER_Z := 0.42
+
+# Same story for the two receivers that share the mk19/autocannon assembly
+# branch - measured off their own meshes, not shared between them.
+const MK19_RECEIVER_FRONT_Z := -0.16
+const AUTOCANNON_RECEIVER_FRONT_Z := -0.102
+const AUTOCANNON_DRUM_FLOOR := 0.262
+const AUTOCANNON_DRUM_Z := 0.11
+
 const MODULAR_ASSEMBLY_TYPES := {
 	"basic_cannon": true, "heavy_machine_gun": true, "rotary_cannon": true, "gauss_railgun": true,
 	"artillery": true, "mortar_array": true, "guided_missile": true, "missile_pod": true,
@@ -2382,7 +2400,13 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				var rec_mesh = _part(prefix + "_receiver")
 				if not rec_mesh:
 					rec_mesh = _part("hmg_receiver")
-				var rec_front_z = -0.16 * caliber
+				# MEASURED from each receiver's own .glb AABB, not shared and
+				# not estimated: the MK19's front face sits at z = -0.16, the
+				# remodelled M230's at -0.102. They used one shared -0.16,
+				# which left the autocannon's barrel floating 0.058 clear of
+				# its receiver - the same defect the anti-materiel rifle had.
+				# Re-measure if either mesh changes.
+				var rec_front_z = (MK19_RECEIVER_FRONT_Z if is_mk19 else AUTOCANNON_RECEIVER_FRONT_Z) * caliber
 				if rec_mesh:
 					var receiver = _mesh_inst(rec_mesh, Color(0.20, 0.22, 0.23))
 					receiver.scale = Vector3(caliber, caliber, caliber)
@@ -2425,7 +2449,19 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				if can_mesh:
 					var can = _mesh_inst(can_mesh, Color(0.22, 0.26, 0.18))
 					can.scale = Vector3.ONE * drum_scale * caliber
-					can.position = Vector3(0, trunnion_y * 0.85, 0)
+					# The M230's magazine is a linkless drum 0.28 units deep,
+					# which simply does not fit under a receiver whose
+					# trunnion sits 0.24 above the deck - so it mounts BEHIND
+					# the gun and stands on the deck instead, which is also
+					# where an ammunition drum that size would really go.
+					# Its floor tracks drum_size so a big drum grows upward
+					# rather than sinking through the deck.
+					var can_y = trunnion_y * 0.85
+					var can_z = 0.0
+					if not is_mk19:
+						can_y = AUTOCANNON_DRUM_FLOOR * drum_scale * caliber
+						can_z = AUTOCANNON_DRUM_Z * caliber
+					can.position = Vector3(0, can_y, can_z)
 					parent_node.add_child(can)
 				else:
 					var can = MeshInstance3D.new()
@@ -2442,6 +2478,13 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				# off them, so the gun reads as balanced about its middle,
 				# and the tube is long enough that the muzzle brake has to be
 				# its own part or barrel_length would stretch the baffles.
+				#
+				# The Z constants below are MEASURED off the authored meshes'
+				# own AABBs, not estimated. They were estimated originally,
+				# and the barrel ended up mounted 0.11 units in front of the
+				# breech's actual face - visibly floating in mid-air. Any
+				# change to the .glb geometry has to re-measure them; a probe
+				# that prints Mesh.get_aabb() for each part is the check.
 				var amr_trunnion_y = 0.28
 				var optic = tweaks.get("optic_power", 1.0)
 				var bipod_down = tweaks.get("bipod_deploy", 0.0) >= 0.5
@@ -2467,10 +2510,10 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 
 				# 2. BREECH - scaled by caliber only. barrel_length must never
 				#    touch it, or the sight rail and feed chutes stretch too.
-				var amr_breech_front_z = -0.28 * caliber
-				var amr_breech_mesh = _part("amr_breech")
-				if amr_breech_mesh:
-					var amr_breech = _mesh_inst(amr_breech_mesh, Color(0.20, 0.22, 0.21))
+				var amr_has_breech = _part("amr_breech") != null
+				var amr_breech_front_z = (AMR_BREECH_FRONT_Z if amr_has_breech else -0.52) * caliber
+				if amr_has_breech:
+					var amr_breech = _mesh_inst(_part("amr_breech"), Color(0.20, 0.22, 0.21))
 					amr_breech.scale = Vector3.ONE * caliber
 					amr_breech.position = Vector3(0, amr_trunnion_y, 0)
 					parent_node.add_child(amr_breech)
@@ -2487,13 +2530,15 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				var amr_bar_mesh = _part("amr_barrel")
 				if not amr_bar_mesh:
 					amr_bar_mesh = _part("barrel_thin")
-				var amr_barrel_len = 0.95 * length * caliber
+				var amr_barrel_len: float
 				if amr_bar_mesh:
+					amr_barrel_len = AMR_BARREL_LEN * length * caliber
 					var amr_barrel = _mesh_inst(amr_bar_mesh, Color(0.13, 0.14, 0.15))
 					amr_barrel.scale = Vector3(caliber, caliber, length * caliber)
 					amr_barrel.position = Vector3(0, amr_trunnion_y, amr_breech_front_z)
 					parent_node.add_child(amr_barrel)
 				else:
+					amr_barrel_len = 0.95 * length * caliber
 					var amr_barrel = MeshInstance3D.new()
 					var abr_cyl = CylinderMesh.new()
 					abr_cyl.top_radius = 0.035 * caliber
@@ -2516,9 +2561,9 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 					amr_brake.position = Vector3(0, amr_trunnion_y, amr_breech_front_z - amr_barrel_len)
 					parent_node.add_child(amr_brake)
 
-				# 5. SENSOR POD - the "expanded sensors". optic_power is the
-				#    only thing that scales it, and it scales UNIFORMLY: a
-				#    bigger sight is a bigger sight, not a stretched one.
+				# 5. SENSOR HEAD - camera + LIDAR, not a scope. optic_power is
+				#    the only thing that scales it, and it scales UNIFORMLY: a
+				#    better sensor head is a bigger one, not a stretched one.
 				var amr_pod_mesh = _part("amr_sensor_pod")
 				if not amr_pod_mesh:
 					amr_pod_mesh = _part("sensor_dome")
@@ -2528,7 +2573,17 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 					amr_pod.position = Vector3(-0.20 * caliber, amr_trunnion_y + 0.12 * caliber, 0.02 * caliber)
 					parent_node.add_child(amr_pod)
 
-				# 6. BIPOD - present ONLY when deployed. The tweak has a real
+				# 6. RECOIL BUFFER + HYDRAULICS - deliberately oversized, out
+				#    the back past the breech's rear face. Caliber only: this
+				#    absorbs the shot, it has nothing to do with barrel length.
+				var amr_buf_mesh = _part("amr_buffer")
+				if amr_buf_mesh:
+					var amr_buf = _mesh_inst(amr_buf_mesh, Color(0.19, 0.20, 0.21))
+					amr_buf.scale = Vector3.ONE * caliber
+					amr_buf.position = Vector3(0, amr_trunnion_y, AMR_BUFFER_Z * caliber)
+					parent_node.add_child(amr_buf)
+
+				# 7. BIPOD - present ONLY when deployed. The tweak has a real
 				#    combat effect (auto_weapon._bipod_blocks_firing), so it
 				#    has to be visible on the model or the player has no way
 				#    to tell a deployed rifle from a stowed one at a glance.
@@ -2537,7 +2592,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 					if amr_bipod_mesh:
 						var amr_bipod = _mesh_inst(amr_bipod_mesh, Color(0.18, 0.19, 0.20))
 						amr_bipod.scale = Vector3.ONE * caliber
-						amr_bipod.position = Vector3(0, 0.0, amr_breech_front_z * 0.6)
+						amr_bipod.position = Vector3(0, 0.0, amr_breech_front_z * 1.4)
 						parent_node.add_child(amr_bipod)
 
 			"recoilless_rifle":

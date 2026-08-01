@@ -13,11 +13,12 @@ var shots_taken = 0
 # Each entry: [type_id, tweaks]. A couple are captured twice at different
 # tweak settings so the per-part scaling is visible in the images too.
 var subjects = [
+	["basic_cannon", {}],
+	["heavy_machine_gun", {}],
+	["mk19_grenade_launcher", {}],
+	["recoilless_rifle", {}],
 	["autocannon", {}],
-	["autocannon", {"barrel_length": 1.6, "drum_size": 1.5}],
-	["anti_materiel_rifle", {}],
-	["anti_materiel_rifle", {"bipod_deploy": 1.0, "optic_power": 1.8}],
-	["anti_materiel_rifle", {"barrel_length": 2.2}],
+	["ballista", {}],
 ]
 
 func _ready():

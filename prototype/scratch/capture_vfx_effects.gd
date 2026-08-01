@@ -59,6 +59,11 @@ func _init():
 	# be over before the screenshot; fire it and wait a beat.
 	VFXEffects.smoke_puff(world, Vector3(4, 0.5, 6), 1.8, 14)
 
+	# Craters: one on the flat, one on the ramp, to show the normal map
+	# catching the light and the projection following the slope.
+	VFXEffects.crater(world, Vector3(-6, 0.3, -4), 2.4, 600.0)
+	VFXEffects.crater(world, Vector3(9, 2.2, 2), 2.0, 600.0)
+
 	# Let particles fill in and the flipbook reach a representative frame.
 	for i in range(70):
 		await process_frame

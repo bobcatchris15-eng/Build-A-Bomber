@@ -84,3 +84,26 @@ Governing rule: terrain saturation/brightness sits below unit paint; instant tac
 2. Author the 3 existing factions as data rows against that shader to prove the parameter set covers the intended range.
 3. Add remaining 7 factions purely as data once the shader is proven — should require zero new shader logic.
 4. Terrain shader work can proceed in parallel, reconnecting only at the urban/bridges brushed-metal touchpoint.
+
+---
+
+## Weapons Are Exterior Modules, Not Crew-Served Guns
+
+Every weapon in this game is a module bolted to the **outside** of a vehicle and aimed from somewhere else. Nothing has a person standing behind it. That has a hard consequence for what may appear on a model, and the roster originally violated it almost everywhere because the reference photographs are all of crew-served weapons.
+
+**Never model:** spade grips, D-handles, butterfly triggers, trigger grips, shoulder stocks, hand charging handles, carry handles, hand cranks, eyepieced telescopic sights, foot pedals, or seats. Each of these is a direct statement that a human's hands or face go there.
+
+**Model instead**, doing the same mechanical job:
+| Instead of | Use |
+| --- | --- |
+| Spade grips / handwheels | Servo can + gearbox + cable gland |
+| Butterfly trigger / trigger grip | Firing solenoid and conduit |
+| Hand charging handle | Pneumatic cocking cylinder |
+| Breech operating lever | Electric breech actuator with a linkage arm |
+| Carry handle | Bolted hoist lugs, or a clipped cable conduit |
+| Hand crank / windlass handle | Geared motor drive on the same shaft |
+| Eyepieced scope on a riser | Boxed camera with the lens on the FRONT, or a LIDAR drum |
+
+The optics rule is worth stating separately, because it is the easiest one to get wrong: a long tube on a riser reads as a telescope no matter what you call it. An unmanned sensor head needs its glass on the **outside**, where a lens is, rather than recessed where an eyepiece would be — plus at least one cue no telescope has, such as a rotating LIDAR drum, heat-sink fins, or a data conduit.
+
+**Mass belongs behind the trunnions.** A gun with everything in front of its trunnion line reads as a barrel stuck on a post. Real guns of any calibre carry recuperator cylinders, a breech ring, a case deflector and a loader aft of the pivot, and that blocky counterweight mass is a large part of what makes a weapon look like it can absorb its own recoil.

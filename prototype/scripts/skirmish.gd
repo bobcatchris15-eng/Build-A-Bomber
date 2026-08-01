@@ -429,24 +429,16 @@ func _ready():
 	# Freed at the end of _ready().
 	_show_load_cover()
 
-	var __t = Time.get_ticks_msec()
 	_load_rosters()
-	print("[LOADPHASE] _load_rosters         %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_spawn_resource_nodes()
-	print("[LOADPHASE] _spawn_resource_nodes %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_spawn_bases()
-	print("[LOADPHASE] _spawn_bases          %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	# await, because _setup_navigation() suspends between surface bakes in
 	# the real game. In headless it never awaits, so this resumes
 	# immediately and _ready() stays synchronous for every test.
 	await _setup_navigation()
-	print("[LOADPHASE] _setup_navigation     %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_setup_fog_shroud()
-	print("[LOADPHASE] _setup_fog_shroud     %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_setup_minimap()
-	print("[LOADPHASE] _setup_minimap        %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_build_ui()
-	print("[LOADPHASE] _build_ui             %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 
 	var ai = Node.new()
 	ai.set_script(EnemyAIScript)
@@ -2781,7 +2773,13 @@ func _unhandled_input(event):
 		if not placing.is_empty():
 			_abandon_placement()
 			return
-		_issue_order(event.position)
+		# Ctrl+right-click is ATTACK GROUND: fire on a point rather than a
+		# unit. The standard RTS binding, and the only way to express several
+		# things this game already models but had no way to order - suppress
+		# a position, shell a chokepoint you cannot currently see into, or
+		# (the case that motivated it) put a smoke screen somewhere specific
+		# instead of wherever the auto-targeter happened to aim.
+		_issue_order(event.position, event.ctrl_pressed)
 
 func _update_selection_rect(mouse_pos: Vector2):
 	var rect = Rect2(drag_select_start, mouse_pos - drag_select_start).abs()
@@ -2996,10 +2994,29 @@ func _selected_manufactories() -> Array:
 			result.append(s)
 	return result
 
-func _issue_order(screen_pos: Vector2):
+func _issue_order(screen_pos: Vector2, attack_ground: bool = false):
 	if selected.is_empty(): return
 	if get_node_or_null("/root/AudioManager"):
 		get_node("/root/AudioManager").play_sfx("select", 0.15)
+
+	# Attack-ground short-circuits everything below: the whole point is to
+	# target a POSITION, so it deliberately ignores whatever unit or resource
+	# node happens to be under the cursor, and is not fog-gated the way
+	# clicking an enemy is (you are firing blind at a map location, which is
+	# exactly the legitimate use - no information is revealed by asking for
+	# it).
+	if attack_ground:
+		var aim = _raycast_ground(screen_pos)
+		if aim == null:
+			return
+		var ordered := false
+		for s in selected:
+			if is_instance_valid(s) and s.get("team") == PLAYER_TEAM and s.has_method("order_attack_ground"):
+				s.order_attack_ground(aim)
+				ordered = true
+		if ordered:
+			_spawn_order_marker(aim, Color(1.0, 0.55, 0.1))
+		return
 
 	var manufactories = _selected_manufactories()
 	if not manufactories.is_empty():

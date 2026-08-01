@@ -116,15 +116,26 @@ def build_hmg_parts():
 	add_box(bm2, (0, rec_y_center + 0.02, 0.11), (rec_w * 0.9, rec_d * 0.6, 0.03), bevel=0.005)
 	add_box(bm2, (0, rec_y_center - rec_d * 0.3, 0.11), (rec_w * 0.5, 0.04, 0.04), bevel=0.005)
 
-	# Right-side Charging Handle
-	add_cyl_x(bm2, (rec_w * 0.5 + 0.02, rec_y_center, 0.02), 0.015, 0.04, segments=8)
-	add_cyl_y(bm2, (rec_w * 0.5 + 0.04, rec_y_center, 0.02), 0.02, 0.06, segments=10)
+	# Right-side pneumatic cocking cylinder, NOT a hand charging handle. Same
+	# job, no hand on it: this is a module bolted to the outside of a vehicle.
+	add_box(bm2, (rec_w * 0.5 + 0.035, rec_y_center + 0.01, 0.02), (0.05, 0.09, 0.06), bevel=0.006)
+	add_cyl_y(bm2, (rec_w * 0.5 + 0.035, rec_y_center + 0.09, 0.02), 0.020, 0.09, segments=12)
+	add_cyl_y(bm2, (rec_w * 0.5 + 0.035, rec_y_center + 0.14, 0.02), 0.026, 0.02, segments=12)
+	add_cyl_z(bm2, (rec_w * 0.5 + 0.035, rec_y_center - 0.04, 0.05), 0.008, 0.05, segments=6)
 
-	# Rear Spade Grips (Twin D-handles for operator traverse/elevation)
-	add_cyl_z(bm2, (0, rec_y_center - rec_d * 0.5 - 0.04, 0.02), 0.02, 0.10, segments=10)
-	for d_side in (-1, 1):
-		add_cyl_y(bm2, (d_side * 0.08, rec_y_center - rec_d * 0.5 - 0.04, 0.02), 0.015, 0.06, segments=8)
-		add_cyl_z(bm2, (d_side * 0.08, rec_y_center - rec_d * 0.5 - 0.07, 0.02), 0.018, 0.12, segments=10)
+	# REMOTE ELEVATION/TRAVERSE DRIVE, replacing the twin spade grips that
+	# used to hang off the back. Spade grips are the single clearest "a person
+	# stands behind this and holds it" cue there is, and every weapon in this
+	# roster is a remotely-operated module bolted to a vehicle's exterior.
+	# A servo can with a gearbox and a cable gland says the same thing about
+	# how the gun is aimed, without implying a gunner.
+	rear_y = rec_y_center - rec_d * 0.5 - 0.05
+	add_box(bm2, (0, rear_y, 0.02), (rec_w * 0.85, 0.07, rec_h * 0.75), bevel=0.008)
+	add_cyl_y(bm2, (0, rear_y - 0.06, 0.02), 0.055, 0.09, segments=16)          # servo can
+	add_cyl_y(bm2, (0, rear_y - 0.115, 0.02), 0.038, 0.03, segments=14)         # end bell
+	for d_side in (-1, 1):                                                       # cable glands
+		add_cyl_y(bm2, (d_side * 0.055, rear_y - 0.115, -0.02), 0.012, 0.04, segments=6)
+	add_box(bm2, (0, rear_y - 0.05, -0.055), (0.09, 0.06, 0.05), bevel=0.005)   # junction box
 
 	export_bmesh(bm2, "hmg_receiver", "hmg_receiver.glb")
 

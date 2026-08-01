@@ -36,8 +36,41 @@ class_name VFXEffects
 
 const FLAME_TEX = preload("res://assets/textures/effects/flame_flipbook.png")
 const SMOKE_TEX = preload("res://assets/textures/effects/smoke_flipbook.png")
-const SCORCH_TEX = preload("res://assets/textures/effects/scorch_decal.png")
 const SCORCH_EMISSION_TEX = preload("res://assets/textures/effects/scorch_emission.png")
+
+# Ground-damage decal sets, each {albedo, normal, orm}.
+#
+# THREE channels, not just albedo. An albedo-only decal is a flat sticker: it
+# never reacts to the scene light, so it reads as a texture painted on the
+# floor no matter how well drawn. The normal map is what makes a crater rim
+# catch the sun and a burn look like sunken, crusted ground, and it is by
+# some margin the biggest quality win available here. The ORM map carries
+# roughness, which is how a FRESH burn reads wet and glossy while old ash
+# reads bone dry - the same silhouette telling you how recent the damage is.
+#
+# Several variants per kind because the RTS camera holds a dozen marks at
+# once and one repeated silhouette is instantly legible as a repeat - the
+# same reasoning terrain_builder.gd applies to its ground tiles.
+const SCORCH_SETS := [
+	{"albedo": preload("res://assets/textures/effects/scorch_0_albedo.png"),
+	 "normal": preload("res://assets/textures/effects/scorch_0_normal.png"),
+	 "orm": preload("res://assets/textures/effects/scorch_0_orm.png")},
+	{"albedo": preload("res://assets/textures/effects/scorch_1_albedo.png"),
+	 "normal": preload("res://assets/textures/effects/scorch_1_normal.png"),
+	 "orm": preload("res://assets/textures/effects/scorch_1_orm.png")},
+	{"albedo": preload("res://assets/textures/effects/scorch_2_albedo.png"),
+	 "normal": preload("res://assets/textures/effects/scorch_2_normal.png"),
+	 "orm": preload("res://assets/textures/effects/scorch_2_orm.png")},
+]
+
+const CRATER_SETS := [
+	{"albedo": preload("res://assets/textures/effects/crater_0_albedo.png"),
+	 "normal": preload("res://assets/textures/effects/crater_0_normal.png"),
+	 "orm": preload("res://assets/textures/effects/crater_0_orm.png")},
+	{"albedo": preload("res://assets/textures/effects/crater_1_albedo.png"),
+	 "normal": preload("res://assets/textures/effects/crater_1_normal.png"),
+	 "orm": preload("res://assets/textures/effects/crater_1_orm.png")},
+]
 
 # Both flipbooks are 4x4. Kept as constants rather than read off the image so
 # a regenerated sheet with a different layout fails loudly here instead of
@@ -91,7 +124,8 @@ static func _billboard_material(tex: Texture2D, additive: bool, tint: Color) -> 
 
 static func _process_material(key: String, direction: Vector3, spread: float,
 		speed_min: float, speed_max: float, gravity: Vector3,
-		scale_min: float, scale_max: float, damping: float = 0.0) -> ParticleProcessMaterial:
+		scale_min: float, scale_max: float, damping: float = 0.0,
+		turbulence: float = 0.0, turbulence_scale: float = 1.0) -> ParticleProcessMaterial:
 	if _process_cache.has(key):
 		return _process_cache[key]
 	var mat = ParticleProcessMaterial.new()
@@ -114,6 +148,26 @@ static func _process_material(key: String, direction: Vector3, spread: float,
 	c.add_point(Vector2(1.0, 0.15))
 	curve.curve = c
 	mat.scale_curve = curve
+
+	# Godot 4.3's built-in turbulence: a noise field that pushes particles
+	# around as they travel, evaluated on the GPU with the rest of the
+	# simulation, so it costs nothing on the main thread.
+	#
+	# This is what stops a jet or a plume looking like particles on rails.
+	# Spread alone fans them out in straight lines from the emitter; real fire
+	# and smoke curl and tumble, and no amount of per-particle randomisation
+	# at BIRTH reproduces that, because the motion has to keep changing over
+	# the particle's life.
+	if turbulence > 0.0:
+		mat.turbulence_enabled = true
+		mat.turbulence_noise_strength = turbulence
+		mat.turbulence_noise_scale = turbulence_scale
+		# A slow drift keeps two particles born in the same spot from
+		# following identical paths.
+		mat.turbulence_noise_speed = Vector3(0.4, 0.2, 0.4)
+		mat.turbulence_influence_min = 0.4
+		mat.turbulence_influence_max = 1.0
+
 	_process_cache[key] = mat
 	return mat
 
@@ -147,7 +201,7 @@ static func make_flame_emitter(parent: Node3D, length: float = 8.0, width: float
 	p.process_material = _process_material(
 		"flame|%.1f|%.1f" % [length, width],
 		Vector3(0, 0, -1), 9.0 * width, speed * 0.72, speed,
-		Vector3(0, 1.0, 0), 3.0 * width, 4.4 * width, 1.2)
+		Vector3(0, 1.0, 0), 3.0 * width, 4.4 * width, 1.2, 1.6, 1.4)
 	parent.add_child(p)
 	return p
 
@@ -166,7 +220,7 @@ static func make_flame_smoke_emitter(parent: Node3D, length: float = 8.0) -> GPU
 	p.process_material = _process_material(
 		"flamesmoke|%.1f" % length,
 		Vector3(0, 0, -1), 22.0, length * 0.35, length * 0.55,
-		Vector3(0, 2.2, 0), 1.4, 2.6, 2.0)
+		Vector3(0, 2.2, 0), 1.4, 2.6, 2.0, 2.4, 0.9)
 	parent.add_child(p)
 	return p
 
@@ -190,7 +244,7 @@ static func smoke_puff(parent: Node3D, world_pos: Vector3, radius: float = 1.5,
 	p.process_material = _process_material(
 		"puff|%.1f" % radius,
 		Vector3(0, 1, 0), 75.0, radius * 0.8, radius * 1.6,
-		Vector3(0, 0.8, 0), radius * 0.9, radius * 1.7, 1.6)
+		Vector3(0, 0.8, 0), radius * 0.9, radius * 1.7, 1.6, 2.2, 0.8)
 	parent.add_child(p)
 	p.global_position = world_pos
 	p.emitting = true
@@ -215,7 +269,7 @@ static func fire_pool(parent: Node3D, world_pos: Vector3, radius: float, duratio
 	var mat = _process_material(
 		"firepool|%.1f" % radius,
 		Vector3(0, 1, 0), 18.0, 1.2, 2.6,
-		Vector3(0, 1.6, 0), radius * 0.9, radius * 1.5, 0.8)
+		Vector3(0, 1.6, 0), radius * 0.9, radius * 1.5, 0.8, 1.9, 1.2)
 	# Emit across the whole pool footprint rather than from a point, so a wide
 	# pool burns across its area instead of as one central bonfire. Assigning
 	# unconditionally is safe despite the never-mutate-a-cached-material rule
@@ -262,19 +316,8 @@ static func _stop_and_free_after(p: GPUParticles3D, duration: float) -> void:
 # scorch texture.
 static func scorch(parent: Node3D, world_pos: Vector3, radius: float = 3.0,
 		burn_seconds: float = 0.0, fade_seconds: float = 14.0) -> Decal:
-	var d = Decal.new()
+	var d = _ground_decal(parent, world_pos, radius, SCORCH_SETS[randi() % SCORCH_SETS.size()])
 	d.name = "Scorch"
-	# size.y is the PROJECTION DEPTH (how far down the decal reaches), not a
-	# visual height - it has to comfortably exceed local terrain relief or
-	# the mark clips off the side of a slope.
-	d.size = Vector3(radius * 2.0, max(4.0, radius), radius * 2.0)
-	d.texture_albedo = SCORCH_TEX
-	d.albedo_mix = 1.0
-	# Random yaw so repeated hits in one area don't stamp an obvious
-	# repeating silhouette.
-	d.rotation.y = randf() * TAU
-	parent.add_child(d)
-	d.global_position = world_pos
 
 	if burn_seconds > 0.0:
 		d.texture_emission = SCORCH_EMISSION_TEX
@@ -290,4 +333,56 @@ static func scorch(parent: Node3D, world_pos: Vector3, radius: float = 3.0,
 	fade.finished.connect(func():
 		if is_instance_valid(d):
 			d.queue_free())
+	return d
+
+
+# An impact crater: displaced earth, not a surface stain.
+#
+# Kept separate from scorch() rather than being a recoloured variant of it,
+# because the difference between the two lives almost entirely in the normal
+# map - a burn is flat ground that changed colour, a crater is a bowl with a
+# raised rim. That distinction only became expressible once decals carried a
+# normal map at all.
+#
+# Craters persist much longer than burns by default: a shell hole is terrain
+# damage, and a battlefield that remembers where it was shelled is most of
+# the reason to have ground decals.
+static func crater(parent: Node3D, world_pos: Vector3, radius: float = 2.0,
+		fade_seconds: float = 45.0) -> Decal:
+	var d = _ground_decal(parent, world_pos, radius, CRATER_SETS[randi() % CRATER_SETS.size()])
+	d.name = "Crater"
+	var fade = d.create_tween()
+	fade.tween_interval(fade_seconds * 0.7)
+	fade.tween_property(d, "modulate:a", 0.0, fade_seconds * 0.3)
+	fade.finished.connect(func():
+		if is_instance_valid(d):
+			d.queue_free())
+	return d
+
+
+# Shared Decal setup for anything stamped on the ground.
+static func _ground_decal(parent: Node3D, world_pos: Vector3, radius: float, set: Dictionary) -> Decal:
+	var d = Decal.new()
+	# size.y is the PROJECTION DEPTH (how far down the decal reaches), not a
+	# visual height - it has to comfortably exceed local terrain relief or
+	# the mark clips off the side of a slope.
+	d.size = Vector3(radius * 2.0, max(4.0, radius), radius * 2.0)
+	d.texture_albedo = set["albedo"]
+	d.texture_normal = set["normal"]
+	d.texture_orm = set["orm"]
+	d.albedo_mix = 1.0
+	# Stop the decal smearing down cliff faces: past ~60 degrees from the
+	# projection axis a downward-projected mark is being stretched across a
+	# near-vertical surface, which looks like a paint drip rather than damage.
+	d.normal_fade = 0.55
+	# Distant marks fade out - both a clutter control at RTS zoom and a real
+	# saving, since every decal in view is extra shading work.
+	d.distance_fade_enabled = true
+	d.distance_fade_begin = 90.0
+	d.distance_fade_length = 30.0
+	# Random yaw so repeated hits in one area don't stamp an obvious
+	# repeating silhouette.
+	d.rotation.y = randf() * TAU
+	parent.add_child(d)
+	d.global_position = world_pos
 	return d

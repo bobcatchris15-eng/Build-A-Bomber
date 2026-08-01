@@ -144,6 +144,12 @@ const ROLE_HINTS := [
 	["rail", "gunmetal"],
 	["tube", "gunmetal"],
 	["bore", "gunmetal"],
+	# More specific than the generic "ammo" -> brass below, and checked
+	# first. A belt-fed can with exposed links reads as brass; a sealed
+	# linkless drum magazine is a painted steel housing, and rendering it in
+	# bright brass made it the brightest object on the weapon.
+	["autocannon_ammo", "painted"],
+	["linkless", "painted"],
 	["ammo", "brass"],
 	["drum", "brass"],
 	["belt", "brass"],

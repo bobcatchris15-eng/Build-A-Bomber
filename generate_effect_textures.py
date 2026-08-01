@@ -216,6 +216,118 @@ def build_scorch(size=512):
     print(f"  scorch_emission.png  {size}x{size}")
 
 
+def normal_from_height(height, strength=2.5):
+    """
+    Sobel-style normal map from a height field.
+
+    Decals take a texture_normal, and it is the single biggest quality jump
+    available to them: with only an albedo a scorch is a flat sticker, and no
+    amount of better painting fixes that because it never reacts to the
+    scene's light. With a normal, a crater rim catches the sun and the mark
+    reads as displaced ground.
+    """
+    gy, gx = np.gradient(height.astype(np.float64))
+    nx = -gx * strength
+    ny = -gy * strength
+    nz = np.ones_like(height)
+    ln = np.sqrt(nx ** 2 + ny ** 2 + nz ** 2)
+    # Godot expects tangent-space normals in the usual 0.5-centred encoding.
+    return np.dstack([(nx / ln) * 0.5 + 0.5, (ny / ln) * 0.5 + 0.5, (nz / ln) * 0.5 + 0.5])
+
+
+def build_orm(occlusion, roughness, metallic=None):
+    """
+    ORM packing Godot's texture_orm expects: R=occlusion, G=roughness,
+    B=metallic. Lets a fresh burn read WET (low roughness, so it catches a
+    specular highlight) while old ash is bone dry - the same shape telling
+    you how recent the damage is, without a second albedo.
+    """
+    if metallic is None:
+        metallic = np.zeros_like(occlusion)
+    return np.dstack([occlusion, roughness, metallic])
+
+
+def _save_rgb(arr, name):
+    Image.fromarray((np.clip(arr, 0, 1) * 255).astype(np.uint8), "RGB").save(OUT / name)
+    print(f"  {name}  {arr.shape[1]}x{arr.shape[0]}")
+
+
+def _save_rgba(rgb, alpha, name):
+    Image.fromarray((np.clip(np.dstack([rgb, alpha]), 0, 1) * 255).astype(np.uint8), "RGBA").save(OUT / name)
+    print(f"  {name}  {rgb.shape[1]}x{rgb.shape[0]}")
+
+
+def build_scorch_variants(size=512, count=3):
+    """
+    Several scorch marks rather than one.
+
+    A single silhouette stamped repeatedly is instantly readable as a repeat
+    at RTS zoom, where the camera holds a dozen burn marks at once - the same
+    reasoning terrain_builder.gd already applies to its ground tiles.
+    """
+    for v in range(count):
+        rng = np.random.default_rng(400 + v)
+        warp = fbm(size, size, octaves=5, base=3, rng=rng)
+        d = radial(size, size, rx=0.44 + 0.03 * v, ry=0.46 - 0.02 * v)
+        d = d + (warp - 0.5) * (0.38 + 0.08 * v)
+        mask = 1.0 - smoothstep(0.55, 1.0, d)
+
+        grit = fbm(size, size, octaves=6, base=6, rng=np.random.default_rng(500 + v))
+        char = 0.04 + 0.10 * grit
+        rgb = np.dstack([char * 1.25, char * 1.05, char * 0.9])
+        alpha = np.clip(mask * (0.55 + 0.55 * grit), 0, 1)
+        _save_rgba(rgb, alpha, f"scorch_{v}_albedo.png")
+
+        # Burnt ground is slightly sunken and crusty, not flat.
+        height = -0.25 * mask + 0.14 * grit * mask
+        _save_rgb(normal_from_height(height, strength=3.0), f"scorch_{v}_normal.png")
+        # Char is matte and dark-occluded; the crusty grit is a touch glossier.
+        occl = 1.0 - 0.45 * mask
+        rough = np.clip(0.95 - 0.25 * grit * mask, 0, 1)
+        _save_rgb(build_orm(occl, rough), f"scorch_{v}_orm.png")
+
+
+def build_craters(size=512, count=2):
+    """
+    Impact craters: a real bowl with a raised, ejecta-streaked rim.
+
+    Distinct from a scorch, and worth its own texture rather than a recoloured
+    one: a burn is a surface stain with no relief, a crater is displaced
+    earth. The difference lives almost entirely in the normal map, which is
+    why this only became worth authoring once decals carried one.
+    """
+    for v in range(count):
+        rng = np.random.default_rng(700 + v)
+        warp = fbm(size, size, octaves=5, base=4, rng=rng)
+        d = radial(size, size, rx=0.40, ry=0.40)
+        d = d + (warp - 0.5) * 0.22          # irregular, not a perfect circle
+
+        bowl = 1.0 - smoothstep(0.0, 1.0, d)  # 1 at centre
+        rim = np.exp(-((d - 0.78) ** 2) / 0.012)   # ring of piled-up spoil
+        mask = 1.0 - smoothstep(0.85, 1.30, d)
+
+        # Ejecta rays streaking outward past the rim.
+        ang = np.arctan2(*np.mgrid[0:size, 0:size][::-1] - size / 2.0)
+        rays = (0.5 + 0.5 * np.sin(ang * (7 + 3 * v))) * smoothstep(0.7, 1.25, d) * (1.0 - smoothstep(1.0, 1.5, d))
+        grit = fbm(size, size, octaves=6, base=7, rng=np.random.default_rng(800 + v))
+
+        height = -0.85 * bowl + 0.45 * rim + 0.10 * grit * mask + 0.12 * rays
+        _save_rgb(normal_from_height(height, strength=4.5), f"crater_{v}_normal.png")
+
+        # Dark shadowed pit, dusty pale rim and rays.
+        dark = 0.05 + 0.09 * grit
+        pale = 0.34 + 0.20 * grit
+        blend = np.clip(rim * 1.4 + rays * 0.9, 0, 1)
+        base = dark * (1 - blend) + pale * blend
+        rgb = np.dstack([base * 1.12, base * 1.02, base * 0.92])
+        alpha = np.clip(mask * (0.75 + 0.35 * grit), 0, 1)
+        _save_rgba(rgb, alpha, f"crater_{v}_albedo.png")
+
+        occl = np.clip(1.0 - 0.75 * bowl, 0, 1)   # the pit self-shadows
+        rough = np.clip(0.92 - 0.15 * blend, 0, 1)
+        _save_rgb(build_orm(occl, rough), f"crater_{v}_orm.png")
+
+
 def build_spark(size=64):
     d = radial(size, size, rx=0.5, ry=0.5)
     core = 1.0 - smoothstep(0.0, 1.0, d)
@@ -231,5 +343,7 @@ if __name__ == "__main__":
     build_flipbook("flame_flipbook.png", flame_frame)
     build_flipbook("smoke_flipbook.png", smoke_frame)
     build_scorch()
+    build_scorch_variants()
+    build_craters()
     build_spark()
     print("Done.")

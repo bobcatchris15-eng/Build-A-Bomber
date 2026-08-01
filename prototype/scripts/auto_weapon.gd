@@ -281,6 +281,7 @@ func _deal_aoe_damage(center: Vector3, radius: float, amount: float):
 	# AMMO_NO_SPLASH_RADIUS). Every explosive weapon routes through here, so
 	# no individual _fire_*() had to learn about ammo.
 	radius = max(radius * ammo_aoe_mult, AMMO_NO_SPLASH_RADIUS)
+	_maybe_crater(center, radius)
 	# On-impact payload effects (clouds, burn pools, flares) fire once per
 	# detonation - here, not in _deal_weapon_damage(), which runs once per
 	# target caught in the blast.
@@ -951,6 +952,34 @@ func _damageable_candidates(pos: Vector3, radius: float) -> Array:
 # unthrottled scan - keeps working unchanged. Only real _physics_process(delta)
 # ticks (delta >= 0.0) are subject to the throttle below.
 func _find_nearest_target(delta: float = -1.0):
+	# A player-issued ground order outranks auto-acquisition for its whole
+	# duration - the point of attack-ground is to shoot where you were TOLD
+	# to, so a passing enemy must not silently steal the aim point.
+	if _has_forced_target():
+		target = _forced_target
+		return
+
+	# Obscurants do NOT auto-acquire.
+	#
+	# A smoke discharger used to ride this same targeting loop as every gun,
+	# which meant it fired whenever any enemy came into range, at a point 70%
+	# of the way toward them. That is the wrong trigger and the wrong aim
+	# point for what smoke is: a screen exists to break line of sight for a
+	# specific reason at a specific moment, and firing it off the instant
+	# contact happens spends it before there is anything to hide.
+	#
+	# It now only fires when actually asked to, by one of two paths:
+	#   - request_screen(), the automatic self-screen a unit triggers when it
+	#     starts taking fire (battle_unit.gd's take_damage) - aimed along the
+	#     bearing the fire came FROM, which is the direction that needs
+	#     blocking;
+	#   - a player ctrl+right-click attack-ground order, handled by the
+	#     forced-target branch above, which puts the cloud exactly where the
+	#     player pointed.
+	if type_id in OBSCURANT_TYPES:
+		target = null
+		return
+
 	var resting_forward = get_parent().global_transform.basis * resting_transform.basis * Vector3.FORWARD
 
 	if _is_current_target_still_valid(resting_forward):
@@ -1456,6 +1485,87 @@ var _flame_last_fired_at: int = 0
 # promptly when the target does.
 const FLAME_JET_CUTOFF_MS: int = 220
 
+# --- Attack-ground (fire on a position, not a unit) ----------------------
+#
+# Implemented as a FORCED TARGET pointing at an invisible marker node, rather
+# than as a parallel "aim at a Vector3" path through every _fire_* function.
+# There are 20-odd firing routines in this file and they all reach for
+# `target.global_position`; giving them a real Node3D to aim at means every
+# weapon type supports attack-ground for free, including the lobbed and
+# guided ones, with no per-weapon work.
+#
+# The marker deliberately has no take_damage() and is in no group, so
+# _deal_weapon_damage() no-ops against it (see its guard) while
+# _deal_aoe_damage()/_apply_ammo_impact(), which work off a POSITION, still
+# land normally. That is exactly the semantics attack-ground should have:
+# shells burst where you aimed and hurt whatever is actually there, and
+# nothing takes a direct hit just for being the thing you pointed at.
+var _forced_target: Node3D = null
+var _forced_target_until: int = 0
+
+# Weapons that lay an obscurant rather than trying to hurt anything, and so
+# are excluded from auto-acquisition entirely (see _find_nearest_target).
+# A gun loaded with smoke AMMO is not in here - that is a normal weapon
+# making a normal engagement decision that happens to deliver smoke; this is
+# about the dedicated launcher whose only job is screening.
+const OBSCURANT_TYPES := ["smoke_discharger"]
+
+# Automatic self-screen: put a cloud between me and whatever is shooting.
+#
+# `threat_pos` is where the fire came from (battle_unit.gd passes
+# take_damage's hit_origin). The screen goes on the line toward it rather
+# than on top of it - a screen you hide behind has to be between you and the
+# observer, and smoke blocks line of sight BOTH ways (it is checked by
+# _is_los_blocked_to, skirmish's fog, and missile guidance alike), so
+# dropping it directly on the enemy would blind you as much as them.
+func request_screen(threat_pos: Vector3) -> void:
+	if not (type_id in OBSCURANT_TYPES):
+		return
+	if _has_forced_target():
+		return # already screening; don't stack requests
+	var host = _effects_parent()
+	if host == null:
+		return
+	var here = global_position
+	var toward = threat_pos - here
+	toward.y = 0.0
+	if toward.length() < 0.5:
+		return
+	var screen_pos = here + toward.normalized() * (toward.length() * SMOKE_SCREEN_STANDOFF)
+	screen_pos.y = threat_pos.y
+	var marker = Node3D.new()
+	marker.name = "SmokeScreenPoint"
+	host.add_child(marker)
+	marker.global_position = screen_pos
+	set_forced_target(marker)
+	get_tree().create_timer(10.0).timeout.connect(func():
+		if is_instance_valid(marker):
+			marker.queue_free())
+
+# How long a ground order holds before the weapon reverts to auto-acquisition.
+# Long enough to be a real order rather than one shot, short enough that a
+# unit doesn't keep shelling an empty field forever after the fight moves on.
+const FORCED_TARGET_DURATION_MS: int = 8000
+
+func set_forced_target(marker: Node3D) -> void:
+	_forced_target = marker
+	_forced_target_until = Time.get_ticks_msec() + FORCED_TARGET_DURATION_MS
+	target = marker
+
+func clear_forced_target() -> void:
+	_forced_target = null
+	_forced_target_until = 0
+	if target != null and not is_instance_valid(target):
+		target = null
+
+func _has_forced_target() -> bool:
+	if _forced_target == null:
+		return false
+	if not is_instance_valid(_forced_target) or Time.get_ticks_msec() > _forced_target_until:
+		clear_forced_target()
+		return false
+	return true
+
 func _update_flame_jet() -> void:
 	if not is_instance_valid(_flame_jet):
 		return
@@ -1882,7 +1992,14 @@ func _fire_smoke_discharger():
 
 	var start = global_position + Vector3(0, 0.4, 0)
 	var aim = target.global_position if is_instance_valid(target) else (start - global_transform.basis.z * fire_range)
-	var end = start.lerp(aim, SMOKE_SCREEN_STANDOFF)
+	# The 70% standoff exists to convert "an enemy is over there" into "put
+	# the screen between us". When the aim point is already a deliberate
+	# ground target - a player's ctrl+right-click, or request_screen()'s
+	# pre-computed screen position - it has ALREADY been chosen as where the
+	# cloud should sit, and lerping toward it again would land the screen
+	# short of the spot that was picked.
+	var standoff := 1.0 if _has_forced_target() else SMOKE_SCREEN_STANDOFF
+	var end = start.lerp(aim, standoff)
 	end.y = aim.y
 
 	var canister = MeshInstance3D.new()
@@ -2067,6 +2184,34 @@ const BURN_POOL_TICK: float = 0.5
 # a battlefield that remembers where it burned is most of the value of having
 # ground decals at all.
 const BURN_POOL_SCORCH_FADE: float = 20.0
+
+# Craters from explosive hits that actually land on the ground.
+#
+# Rate-limited rather than one-per-shell on purpose: a rotary autocannon
+# firing HE would otherwise carpet the map in decals within seconds, and
+# every live decal is real shading cost. A minimum blast radius filters out
+# the small-arms end of the roster, so a crater means something hit hard.
+const CRATER_MIN_RADIUS: float = 2.0
+const CRATER_MIN_INTERVAL_MS: int = 900
+const CRATER_GROUND_MAX_Y: float = 1.2
+var _last_crater_ms: int = 0
+
+func _maybe_crater(center: Vector3, radius: float) -> void:
+	if radius < CRATER_MIN_RADIUS:
+		return
+	if Time.get_ticks_msec() - _last_crater_ms < CRATER_MIN_INTERVAL_MS:
+		return
+	# Only ground bursts leave a mark - an airburst against a flyer, or a hit
+	# high on a building, has no ground to dig into.
+	var scene = get_tree().current_scene
+	if scene and scene.has_method("terrain_height_at"):
+		if absf(center.y - scene.terrain_height_at(center)) > CRATER_GROUND_MAX_Y:
+			return
+	var parent = _effects_parent()
+	if parent == null:
+		return
+	_last_crater_ms = Time.get_ticks_msec()
+	VFXEffects.crater(parent, center, radius * 0.75)
 
 func _spawn_burn_pool(pos: Vector3, radius_mult: float = 1.0, duration_mult: float = 1.0):
 	var parent = _effects_parent()
