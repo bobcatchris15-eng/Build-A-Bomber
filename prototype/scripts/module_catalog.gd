@@ -163,6 +163,14 @@ const WEAPON_FIRE_PROFILES = {
 	# turreted, affordable hitscan option.
 	"coil_gun":           {"fire_rate": 1.6,  "fire_range": 34.0, "laser_color": Color(0.55, 0.85, 1.0)},
 	"autocannon":         {"fire_rate": 0.28, "fire_range": 18.0, "laser_color": Color.GOLDENROD},
+	# The roster's only PRECISION weapon. Everything else is DPS or splash;
+	# this one is a single very large per-shot number, which is the most
+	# interesting place on the damage curve because per-shot damage
+	# (dps * fire_rate) is exactly what the armor thresholds gate on. At a
+	# 4.5s interval its 78 dps becomes 351 per shot - straight through every
+	# armor threshold in the table, and utterly wasted on a scout it can only
+	# hit once every four and a half seconds.
+	"anti_materiel_rifle": {"fire_rate": 4.5, "fire_range": 36.0, "laser_color": Color(0.95, 0.92, 0.80)},
 	"napalm_mortar":      {"fire_rate": 2.6,  "fire_range": 26.0, "laser_color": Color(1.0, 0.45, 0.1)},
 	# Short "range" because it is not really shooting - it lobs a mine a
 	# short way ahead and leaves it there.
@@ -600,6 +608,24 @@ static func _build_catalog_literal() -> Dictionary:
 			"traverse_agility": 1.25,
 			"size": Vector3(0.35, 0.35, 1.4),
 			"color": Color(0.28, 0.30, 0.32)
+		},
+
+		# The roster had no precision weapon at all. Deliberately expensive
+		# in crystal (that is the sensor package, not the gun) and slow to
+		# traverse - it is an ambush/overwatch piece, not something you
+		# swing onto a target that is already close.
+		"anti_materiel_rifle": {
+			"name": "Anti-Materiel Rifle",
+			"category": "weapon",
+			"hp": 60.0,
+			"weight": 95.0,
+			"metal": 34,
+			"crystal": 18,
+			"dps": 78.0,
+			"pintle_min_up_alignment": 0.20,
+			"traverse_agility": 0.55,
+			"size": Vector3(0.4, 0.4, 2.2),
+			"color": Color(0.24, 0.28, 0.26)
 		},
 
 		# Area denial by fire rather than by fragments: modest impact
@@ -1098,6 +1124,7 @@ const MODULE_FLAVOR = {
 	"recoilless_rifle": "Recoilless by design. The recoil is instead emitted rearward. Stand elsewhere.",
 	"coil_gun": "Staged magnetic acceleration. Quieter than the rail. Everything else is unchanged.",
 	"autocannon": "Intermediate calibre. Chosen because neither adjacent option was satisfactory either.",
+	"anti_materiel_rifle": "One round, correctly placed, at considerable expense. The sight costs more than the gun.",
 	"napalm_mortar": "Deploys thickened fuel. The affected area remains affected for some time.",
 	"mine_layer": "Emplaces area denial. Minefield records are maintained to the extent practicable.",
 	"ballista": "Torsion-spring bolt thrower. Procurement has twice declined to explain this line item.",
@@ -1380,6 +1407,103 @@ static func needs_combat_script(type_id: String) -> bool:
 const SUPPORT_CATEGORIES = ["generator"]
 const SUPPORT_TYPE_IDS = ["repair_array", "drone_carrier", "resource_harvester", "sensor_suite"]
 
+# --- Roles (parts-menu grouping) -------------------------------------------
+# `category` is a mechanical classification - it tells the placer which gizmo
+# handles to show and the stat calculator how to score the part. It is far too
+# coarse to browse by: 25 of the catalog's entries are category "weapon", which
+# is one undifferentiated wall of buttons in the Design Lab sidebar.
+#
+# `role` is the BROWSING classification, and it lives here rather than in
+# parts_menu.gd on purpose. A grouping table sitting in the UI layer is the
+# exact failure HULL_MODDING_PLAN.md 4c calls out for hulls: a modded part
+# would need a code change in a UI script to appear anywhere sensible. Kept
+# next to the catalog, a mod that adds a part just declares its role like it
+# already declares its category, and get_module_role()'s category fallback
+# means one that declares nothing still lands somewhere reasonable instead of
+# vanishing.
+const MODULE_ROLES = {
+	# Flat-trajectory barrels you point at what you want to hit.
+	"heavy_machine_gun": "Direct-Fire Guns",
+	"flamethrower": "Direct-Fire Guns",
+	"autocannon": "Direct-Fire Guns",
+	"anti_materiel_rifle": "Direct-Fire Guns",
+	"recoilless_rifle": "Direct-Fire Guns",
+	"basic_cannon": "Direct-Fire Guns",
+	"rotary_cannon": "Direct-Fire Guns",
+	"ballista": "Direct-Fire Guns",
+
+	# Anything whose damage arrives as charge rather than mass - includes the
+	# electromagnetic launchers, which fire a slug but are built, costed and
+	# powered like energy weapons (crystal + capacitors, not a powder charge).
+	"heavy_laser": "Energy & Electromagnetic",
+	"tesla_coil": "Energy & Electromagnetic",
+	"coil_gun": "Energy & Electromagnetic",
+	"ion_cannon": "Energy & Electromagnetic",
+	"gauss_railgun": "Energy & Electromagnetic",
+
+	# Lobbed, arcing, or otherwise fired at something you cannot see.
+	"mk19_grenade_launcher": "Indirect Fire",
+	"mortar_array": "Indirect Fire",
+	"napalm_mortar": "Indirect Fire",
+	"cluster_dispenser": "Indirect Fire",
+	"plasma_lobber": "Indirect Fire",
+	"artillery": "Indirect Fire",
+
+	"guided_missile": "Missiles",
+	"missile_pod": "Missiles",
+
+	"pd_laser": "Point Defense",
+	"ciws": "Point Defense",
+	"flak_cannon": "Point Defense",
+
+	# Weapons that leave something behind on the field instead of resolving
+	# damage at a target - the reason smoke_discharger (0 dps) and mine_layer
+	# read as odd ducks in a flat weapon list.
+	"smoke_discharger": "Deployables",
+	"mine_layer": "Deployables",
+	"drone_carrier": "Deployables",
+
+	"armor_plating": "Armor",
+	"capacitor_bank": "Power",
+	"fusion_generator": "Power",
+	"repair_array": "Support",
+	"resource_harvester": "Support",
+	"sensor_suite": "Support",
+
+	"structural_girder": "Structural",
+	"structural_i_beam": "Structural",
+	"structural_dome": "Structural",
+	"structural_wedge": "Structural",
+	"structural_block": "Structural",
+	"structural_slab": "Structural",
+}
+
+# Display order for the module tab's drawers. Roughly "things that shoot" ->
+# "things that survive" -> "things that hold other things up", which is the
+# order a build actually gets assembled in.
+const MODULE_ROLE_ORDER = [
+	"Direct-Fire Guns", "Energy & Electromagnetic", "Indirect Fire", "Missiles",
+	"Point Defense", "Deployables", "Armor", "Power", "Support", "Structural",
+]
+
+# Fallback for anything MODULE_ROLES doesn't name (a mod, or a part added here
+# and not yet given a role). Deliberately never returns "" - an unroled part
+# must still land in a visible drawer, not silently disappear from the menu.
+const ROLE_BY_CATEGORY = {
+	"weapon": "Direct-Fire Guns",
+	"armor": "Armor",
+	"generator": "Power",
+	"structural": "Structural",
+	"module": "Support",
+}
+
+static func get_module_role(type_id: String, category: String = "") -> String:
+	if MODULE_ROLES.has(type_id):
+		return MODULE_ROLES[type_id]
+	if category != "" and ROLE_BY_CATEGORY.has(category):
+		return ROLE_BY_CATEGORY[category]
+	return "Support"
+
 # Build-legality gate (ENERGY_AND_BALANCE_SPEC.md #3/DECISIONS_NEEDED.md):
 # a design must have a hull, must have a weapon or a legitimate support/
 # utility purpose, and must have locomotion or be intentionally static
@@ -1524,6 +1648,7 @@ const PROJECTILE_CLASS = {
 	# mine layer all lob.
 	"coil_gun": "hitscan",
 	"recoilless_rifle": "ballistic", "autocannon": "ballistic", "ballista": "ballistic",
+	"anti_materiel_rifle": "ballistic",
 	"mk19_grenade_launcher": "arc", "napalm_mortar": "arc", "mine_layer": "arc",
 	"cluster_dispenser": "arc", "plasma_lobber": "arc",
 	"guided_missile": "guided", "missile_pod": "guided",
@@ -1689,6 +1814,10 @@ const WEAPON_AMMO_OPTIONS = {
 	"recoilless_rifle":  ["standard", "ap", "he", "incendiary", "smoke"],
 	"coil_gun":          ["standard", "ap", "emp"],
 	"autocannon":        ["standard", "ap", "incendiary", "flechette"],
+	# No flechette and no smoke: a precision rifle firing a cloud of darts or
+	# a screening round is fighting its own premise. AP listed first is
+	# deliberate - it is the round this weapon is FOR.
+	"anti_materiel_rifle": ["ap", "standard", "he", "incendiary", "emp"],
 	# A dedicated fire weapon - incendiary is its DEFAULT, not an option,
 	# hence it heading the list (get_ammo() falls back to options[0]).
 	"napalm_mortar":     ["incendiary", "standard", "smoke"],
@@ -1737,7 +1866,7 @@ static func get_ammo_profile(ammo_id: String) -> Dictionary:
 # consistent per-tweak traverse_speed effect across every weapon type that
 # has ANY such tweak, instead of only the two tweak names (barrel_length,
 # elevation) that happened to be wired up before.
-const LINEAR_SCALE_WEAPON_TWEAKS = ["caliber", "barrel_length", "barrel_count", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "dispersion", "elevation", "fuse_setting", "focal_length", "charge_rate", "burst_length", "burst_size", "arc_frequency", "surge_capacity", "tracking_speed"]
+const LINEAR_SCALE_WEAPON_TWEAKS = ["caliber", "barrel_length", "barrel_count", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "dispersion", "elevation", "fuse_setting", "optic_power", "focal_length", "charge_rate", "burst_length", "burst_size", "arc_frequency", "surge_capacity", "tracking_speed"]
 
 # Weight capacity fallback for any locomotion type_id missing its own
 # "base_weight_capacity" entry - a reasonable middle ground between the

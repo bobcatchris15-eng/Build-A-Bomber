@@ -878,7 +878,29 @@ func _physics_process(delta):
 	# Altitude / gravity / surface-lock
 	if is_flying:
 		velocity.y = 0.0
-		global_position.y = lerp(global_position.y, target_altitude, 3.0 * delta)
+		# target_altitude is height ABOVE THE GROUND, not an absolute world Y.
+		#
+		# It used to be absolute, which meant a flyer holding y=4.0 flew
+		# straight INTO any terrain taller than that instead of over it -
+		# twin_summits peaks at y=10. Once inside the hill it collides with
+		# every obstacle body sitting on that ground (a flyer's
+		# collision_mask is 1|8, which includes ground/obstacles) and
+		# move_and_slide() spends the rest of the match depenetrating it.
+		#
+		# Measured on twin_summits with scratch/probe_flyer_plateau.gd: one
+		# flyer flown into a summit took physics from 2.38ms to 15.57ms
+		# (6.5x) and left the unit stuck at y=6.86 - shoved ABOVE its own
+		# target altitude by the collision it should never have had. Chris
+		# hit the same thing in a real match and the frame rate collapsed.
+		#
+		# Duck-typed on terrain_height_at() exactly like the ground branch
+		# below, so a synthetic test with no real match controller keeps the
+		# old absolute-altitude behaviour and needs no change.
+		var ground_y := 0.0
+		var alt_controller = get_parent()
+		if alt_controller and alt_controller.has_method("terrain_height_at"):
+			ground_y = alt_controller.terrain_height_at(global_position)
+		global_position.y = lerp(global_position.y, ground_y + target_altitude, 3.0 * delta)
 	elif is_naval:
 		# Traits B3: surface-locked like flying units, not affected by
 		# gravity/floor detection the way ground locomotion is - there's no

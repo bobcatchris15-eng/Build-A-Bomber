@@ -115,6 +115,12 @@ func _add_row(entry: Dictionary):
 	load_btn.pressed.connect(_on_load_pressed.bind(entry.get("id", "")))
 	hbox.add_child(load_btn)
 
+	var comp_btn = Button.new()
+	comp_btn.text = "Compare"
+	comp_btn.modulate = Color(0.2, 0.9, 1.0, 1)
+	comp_btn.pressed.connect(_on_compare_pressed.bind(entry.get("id", ""), entry))
+	hbox.add_child(comp_btn)
+
 	var rename_btn = Button.new()
 	rename_btn.text = "Rename"
 	rename_btn.pressed.connect(_on_rename_pressed.bind(entry.get("id", ""), entry.get("name", "Untitled Design")))
@@ -132,6 +138,12 @@ func _add_row(entry: Dictionary):
 	hbox.add_child(del_btn)
 
 	list_vbox.add_child(HSeparator.new())
+
+func _on_compare_pressed(id: String, entry: Dictionary):
+	var ComparisonPanel = load("res://scripts/fleet_comparison_panel.gd")
+	var panel = ComparisonPanel.new(id, entry)
+	get_parent().add_child(panel)
+	queue_free()
 
 func _on_load_pressed(id: String):
 	# load_blueprint_into_designer's bool return was previously ignored

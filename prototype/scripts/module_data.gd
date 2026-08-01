@@ -70,6 +70,20 @@ func get_weight() -> float:
 			weight *= 1.25
 		elif tweak_name == "launch_catapult":
 			weight *= val
+		elif tweak_name == "optic_power":
+			# Deliberately NOT in the blanket linear list above. A 2x sight
+			# doubling the entire weapon's mass is nonsense - the optic is a
+			# fraction of the gun, so it scales a fraction of the weight.
+			# Its real price is crystal, in get_cost() below.
+			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
+				weight *= 1.0 + (float(val) - 1.0) * 0.35
+		elif tweak_name == "bipod_deploy":
+			# ADDITIVE, and deliberately not in any of the multiplier lists
+			# above: this tweak ranges 0..1, so multiplying by it would make
+			# an undeployed bipod zero out the module's entire weight. A
+			# fitted bipod is real mass whether or not it's down.
+			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
+				weight += base_weight * 0.06 * float(val)
 		elif tweak_name == "protectedness":
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				weight *= 1.0 + (val * 0.15)
@@ -91,6 +105,14 @@ func get_cost() -> Vector2i:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				m = int(m * val)
 				c = int(c * val)
+		elif tweak_name == "optic_power":
+			# Where an optic actually costs you: crystal, hard. Metal barely
+			# moves - a better sight is not more steel. This is the intended
+			# shape of the trade, and the reason the rifle is the roster's
+			# most crystal-hungry non-energy weapon.
+			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
+				m = int(m * (1.0 + (float(val) - 1.0) * 0.20))
+				c = int(c * (1.0 + (float(val) - 1.0) * 1.60))
 		elif tweak_name == "multi_barrel" and val == true:
 			m *= 2
 			c *= 2

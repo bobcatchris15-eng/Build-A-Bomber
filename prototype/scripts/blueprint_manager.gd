@@ -108,12 +108,20 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 		# Assume this is a module Node3D
 		if child.has_meta("module_data"):
 			var data = child.get_meta("module_data")
+			# Structural pieces carry their resize as a "struct_scale" meta
+			# and keep node.scale at ONE (scale isolation - see gizmo_3d.gd's
+			# _apply_scale_to_node and visual_builder's structural branch).
+			# Reading child.scale for those would save (1,1,1) every time and
+			# silently throw away every structural resize in the design on
+			# the next save. Same on-disk field either way, so old blueprints
+			# still load unchanged.
+			var saved_scale: Vector3 = child.get_meta("struct_scale", child.scale)
 			var mod_dict = {
 				"type_id": data.type_id if "type_id" in data else "",
 				"name": data.module_name,
 				"position": {"x": child.position.x, "y": child.position.y, "z": child.position.z},
 				"rotation": {"x": child.rotation.x, "y": child.rotation.y, "z": child.rotation.z},
-				"scale": {"x": child.scale.x, "y": child.scale.y, "z": child.scale.z},
+				"scale": {"x": saved_scale.x, "y": saved_scale.y, "z": saved_scale.z},
 				"yaw_offset": child.get_meta("yaw_offset", 0.0),
 				"mount_style": child.get_meta("mount_style", ""),
 				"mount_normal": _vec3_to_dict(child.get_meta("mount_normal", Vector3.UP)),
@@ -774,7 +782,16 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# Set scale
 		var sc_dict = mod.get("scale", {"x": 1.0, "y": 1.0, "z": 1.0})
 		var mod_scale = Vector3(sc_dict.x, sc_dict.y, sc_dict.z)
-		new_module.scale = mod_scale
+		if category == "structural":
+			# Scale isolation on the way back in, mirroring the save side and
+			# gizmo_3d.gd. Assigning node.scale here would stretch the
+			# fixed-size authored hardware, so a design that looked right in
+			# the Lab would come back from disk with smeared bolt heads and
+			# brackets - the resize has to go through the rebuild instead.
+			new_module.scale = Vector3.ONE
+			new_module.set_meta("struct_scale", mod_scale)
+		else:
+			new_module.scale = mod_scale
 		m_data.scale_multiplier = mod_scale
 		new_module.set_meta("module_data", m_data)
 		
@@ -797,8 +814,27 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		if mod.get("facet", "") != "":
 			new_module.set_meta("facet", mod["facet"])
 		# Force mesh deformation rebuild (also re-applies mount hardware,
-		# see rebuild_visual()'s mount_style check)
+		# see rebuild_visual()'s mount_style check). For a structural piece
+		# this is also what applies the struct_scale set above.
 		VisualBuilder.rebuild_visual(new_module)
+
+		if category == "structural" and is_designer:
+			# The collider built above was sized from the raw catalog size,
+			# which is only right for an unresized piece - it has to track
+			# struct_scale the same way gizmo_3d.gd keeps it in sync during a
+			# live drag, or a stretched piece loads back with a click target
+			# the size it used to be.
+			var struct_target = mod_catalog_data.get("size", Vector3.ONE) * mod_scale
+			for sb in new_module.get_children():
+				if not (sb is StaticBody3D):
+					continue
+				sb.position = Vector3(0, struct_target.y / 2.0, 0)
+				for shp in sb.get_children():
+					if shp is CollisionShape3D and shp.shape is BoxShape3D:
+						if not shp.shape.resource_local_to_scene:
+							shp.shape = shp.shape.duplicate()
+						shp.shape.size = struct_target
+						shp.position = Vector3.ZERO
 
 		# Re-apply chirality AFTER rebuild_visual, which recreates the very
 		# children the reflection is applied to. Kept in sync with

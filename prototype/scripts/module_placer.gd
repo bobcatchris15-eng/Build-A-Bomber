@@ -8,6 +8,7 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
+const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
@@ -1317,8 +1318,18 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 		# structural pieces to DEFAULT_FACTION textures instead of the hull's
 		# own faction. See building.gd's copy of this note for the mechanism.
 		var hull_faction = hull.get_meta("faction") if hull.has_meta("faction") else "industrialists"
+		#
+		# The authored hardware (bolt pads, brackets, splice collars, hatches
+		# - anything named with VisualBuilder.HARDWARE_PREFIX) is deliberately
+		# EXEMPT. Painting a bolt head in the same faction livery as the plate
+		# it's driven into flattens the piece back into one undifferentiated
+		# shader and throws away the detail the authored meshes exist to
+		# provide; leaving the hardware as bare dark steel is what makes the
+		# faction-painted structure read as painted structure.
 		var hull_mat = HullMaterialBuilderScript.build_hull_material("hardened_steel", hull_faction)
 		for child in new_weapon.find_children("*", "MeshInstance3D", true, false):
+			if child.name.begins_with(VisualBuilderScript.HARDWARE_PREFIX):
+				continue
 			child.material_override = hull_mat
 
 	var data = ModuleDataResource.new()
@@ -1873,7 +1884,11 @@ func check_all_clipping():
 		var my_module = modules[i]
 		var my_data = my_module.get_meta("module_data")
 		var my_catalog = ModuleCatalog.get_module_data(my_data.type_id)
-		var my_size = my_catalog.size * my_module.scale
+		# Structural pieces keep node.scale at ONE and carry their resize in
+		# the struct_scale meta instead (scale isolation - see gizmo_3d.gd), so
+		# reading .scale alone would AABB every stretched structural piece at
+		# its original catalog size and miss real overlaps.
+		var my_size = my_catalog.size * my_module.get_meta("struct_scale", my_module.scale)
 		var aabb_a = _get_parent_space_aabb(my_module, my_size)
 		
 		for j in range(i + 1, modules.size()):
@@ -1904,7 +1919,7 @@ func check_all_clipping():
 
 			var other_data = other_data_early
 			var other_catalog = ModuleCatalog.get_module_data(other_data.type_id)
-			var other_size = other_catalog.size * other_module.scale
+			var other_size = other_catalog.size * other_module.get_meta("struct_scale", other_module.scale)
 			var aabb_b = _get_parent_space_aabb(other_module, other_size)
 			
 			# Shrink AABB slightly to allow touching/adjacent modules
@@ -1922,30 +1937,94 @@ func check_all_clipping():
 		var meshes = []
 		_find_meshes_recursive(m, meshes)
 
+		# SWAP the override, never MUTATE it. Two separate reasons, both real:
+		#
+		# 1. Materials are now shared per role+tint (part_materials.gd), for
+		#    the sake of bake_module_visual()'s identity-keyed merge. Writing
+		#    albedo_color on one part's material here would repaint every
+		#    other part in the scene that happens to share that role - one
+		#    clipping module would turn the entire vehicle red.
+		#
+		# 2. Even before sharing, the "not clipping" branch flattened EVERY
+		#    mesh in the module to the catalog colour on every single pass -
+		#    and this runs on every placement, drag, rotation and tweak. So
+		#    the per-part colours the builders carefully assign (dark barrel,
+		#    pale lens, warm brass) survived only until the first clipping
+		#    check, which is to say never. Remembering the original override
+		#    and restoring THAT is what lets per-part material roles actually
+		#    reach the screen in the Design Lab.
 		for mesh in meshes:
-			var mat = mesh.material_override as StandardMaterial3D
-			if not mat:
-				mat = StandardMaterial3D.new()
-				mesh.material_override = mat
+			if not mesh.has_meta("base_material"):
+				mesh.set_meta("base_material", mesh.material_override)
 			if is_clipping:
-				mat.albedo_color = Color(1.0, 0.0, 0.0) # bright RED
-				mat.emission_enabled = true
-				mat.emission = Color(1.0, 0.0, 0.0)
-				mat.emission_energy_multiplier = 1.0
+				mesh.material_override = _clipping_material()
 			else:
-				mat.albedo_color = my_catalog.color
-				if my_data.type_id == "hover_engine":
-					mat.emission_enabled = true
-					mat.emission = my_catalog.color
-					mat.emission_energy_multiplier = 1.0
-				else:
-					mat.emission_enabled = false
+				mesh.material_override = mesh.get_meta("base_material")
 
-	# Keep the firing-arc visualization live: placement/rotation/drag/tweak
-	# changes all route through check_all_clipping(), so refreshing here
-	# covers all of them without needing a call at every individual mutation
-	# site.
 	_refresh_firing_arc()
+	_update_cog_crosshair()
+
+var _cog_node: Node3D = null
+
+func _update_cog_crosshair():
+	if not hull:
+		if _cog_node: _cog_node.visible = false
+		return
+
+	var total_mass: float = 250.0 # base hull mass
+	if hull.has_meta("weight"):
+		total_mass = float(hull.get_meta("weight"))
+
+	var weighted_pos = hull.global_position * total_mass
+
+	for child in hull.get_children():
+		if child.has_meta("module_data") and not child.is_queued_for_deletion():
+			var mdata = child.get_meta("module_data")
+			var m_weight = 20.0
+			if "weight" in mdata:
+				m_weight = float(mdata.weight)
+			total_mass += m_weight
+			weighted_pos += child.global_position * m_weight
+
+	var cog_pos = weighted_pos / max(1.0, total_mass)
+
+	if not _cog_node:
+		_cog_node = Node3D.new()
+		add_child(_cog_node)
+
+		# Build 3D crosshair lines
+		for axis in [Vector3.RIGHT, Vector3.UP, Vector3.BACK]:
+			var line_inst = MeshInstance3D.new()
+			var cylinder = CylinderMesh.new()
+			cylinder.top_radius = 0.02
+			cylinder.bottom_radius = 0.02
+			cylinder.height = 1.6
+			line_inst.mesh = cylinder
+			if axis == Vector3.RIGHT:
+				line_inst.rotation.z = PI / 2.0
+			elif axis == Vector3.BACK:
+				line_inst.rotation.x = PI / 2.0
+
+			var mat = StandardMaterial3D.new()
+			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			mat.albedo_color = Color(0.0, 0.95, 1.0, 0.9) # Bright CAD cyan
+			mat.no_depth_test = true
+			mat.render_priority = 8
+			line_inst.material_override = mat
+			_cog_node.add_child(line_inst)
+
+		var lbl = Label3D.new()
+		lbl.text = "⊕ COG TELEMETRY"
+		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lbl.no_depth_test = true
+		lbl.render_priority = 9
+		lbl.font_size = 15
+		lbl.modulate = Color(0.0, 0.95, 1.0)
+		lbl.position = Vector3(0, 0.9, 0)
+		_cog_node.add_child(lbl)
+
+	_cog_node.visible = true
+	_cog_node.global_position = cog_pos
 
 # Collects the module's own body meshes for clipping recolouring. Skips the
 # editor-overlay subtrees entirely: "ArcCone" (firing-arc wedges, which carry
@@ -1955,6 +2034,21 @@ func check_all_clipping():
 # transform handles in the module's catalog colour - and turned them solid red
 # whenever the module was clipping, which is precisely when you need to see
 # the handles to drag it back out.
+# One shared "this part is clipping" material for the whole scene. Built once
+# rather than per mesh so swapping it in is free, and so it can never be
+# confused with a part's own material by the base_material bookkeeping above.
+static var _clipping_mat: StandardMaterial3D = null
+
+static func _clipping_material() -> StandardMaterial3D:
+	if _clipping_mat == null:
+		_clipping_mat = StandardMaterial3D.new()
+		_clipping_mat.albedo_color = Color(1.0, 0.0, 0.0)
+		_clipping_mat.emission_enabled = true
+		_clipping_mat.emission = Color(1.0, 0.0, 0.0)
+		_clipping_mat.emission_energy_multiplier = 1.0
+		_clipping_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return _clipping_mat
+
 func _find_meshes_recursive(node: Node, result: Array):
 	if node.name == "ArcCone" or node.name.begins_with("Gizmo3D"):
 		return

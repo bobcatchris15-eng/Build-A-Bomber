@@ -8,6 +8,7 @@ extends Camera3D
 
 var _pivot: Node3D
 var _distance: float = 15.0
+var _cam_attributes: CameraAttributesPractical = null
 
 func _ready():
 	_pivot = Node3D.new()
@@ -20,14 +21,24 @@ func _ready():
 	
 	position = Vector3(0, 0, _distance)
 	look_at(_pivot.position)
+	_setup_tilt_shift_dof()
 
-# VISUAL_AND_UX_POLISH_PLAN.md B2: zoom used to snap position.z straight to
-# _distance the instant the wheel moved - the only per-frame smoothing
-# anywhere in either camera script is rts_camera.gd's own height lerp
-# (`global_position.y = lerp(global_position.y, height, 10.0 * delta)`),
-# which this now matches for consistency between the two cameras.
+func _setup_tilt_shift_dof():
+	_cam_attributes = CameraAttributesPractical.new()
+	_cam_attributes.dof_blur_far_enabled = true
+	_cam_attributes.dof_blur_far_distance = _distance + 4.0
+	_cam_attributes.dof_blur_far_transition = 6.0
+	_cam_attributes.dof_blur_near_enabled = true
+	_cam_attributes.dof_blur_near_distance = max(1.0, _distance - 4.0)
+	_cam_attributes.dof_blur_near_transition = 4.0
+	_cam_attributes.dof_blur_amount = 0.08 # Miniature scale tilt-shift lens blur
+	attributes = _cam_attributes
+
 func _process(delta):
 	position.z = lerp(position.z, _distance, 10.0 * delta)
+	if _cam_attributes:
+		_cam_attributes.dof_blur_far_distance = position.z + 4.0
+		_cam_attributes.dof_blur_near_distance = max(1.0, position.z - 4.0)
 
 func _input(event):
 	pass

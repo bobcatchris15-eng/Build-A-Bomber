@@ -9,9 +9,32 @@ class_name VisualBuilder
 
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const GlobalConfigScript = preload("res://scripts/global_config.gd")
+const PartMaterialsScript = preload("res://scripts/part_materials.gd")
+
+# mesh instance-id -> PartMaterials role, populated by _part() as assets load.
+#
+# This exists so material ROLES can be applied to all ~190 authored parts
+# without touching the several hundred `_mesh_inst(_part("x"), colour)` call
+# sites in this file. _part() is the single chokepoint every authored asset
+# passes through and it is the only place that still knows the part's NAME -
+# by the time _mesh_inst() sees it, it's an anonymous Mesh. So the name's
+# classification is recorded here on the way past, keyed by the mesh resource
+# MeshAssetLoader already caches (identity is stable for the process, so one
+# entry per part, not one per instance).
+#
+# A mesh that isn't in here - every procedural BoxMesh/CylinderMesh fallback
+# in this file - resolves to PartMaterials.DEFAULT_ROLE, which is still a
+# properly finished metal rather than the flat matte plastic everything used
+# to get. Nothing degrades; unclassified things just stay generic.
+static var _part_roles: Dictionary = {}
 
 static func _part(part_name: String) -> Mesh:
-	return MeshAssetLoader.get_part_mesh(part_name)
+	var mesh: Mesh = MeshAssetLoader.get_part_mesh(part_name)
+	if mesh != null:
+		var id := mesh.get_instance_id()
+		if not _part_roles.has(id):
+			_part_roles[id] = PartMaterialsScript.role_for_part(part_name)
+	return mesh
 
 # Procedural running-gear slab (locomotion grounding fix). A flat dark-metal
 # chassis that sits under the hull, sized to the hull's XZ with a small
@@ -63,17 +86,20 @@ static func build_running_gear(parent_node: Node3D, dimensions: Vector3, base_co
 	parent_node.add_child(body)
 	return body
 
-static func _mesh_inst(mesh: Mesh, color: Color, emission: Color = Color(0, 0, 0, 0), emission_energy: float = 0.0) -> MeshInstance3D:
+static func _mesh_inst(mesh: Mesh, color: Color, emission: Color = Color(0, 0, 0, 0), emission_energy: float = 0.0, role_override: String = "") -> MeshInstance3D:
 	var inst = MeshInstance3D.new()
 	inst.mesh = mesh
-	var mat = StandardMaterial3D.new()
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.albedo_color = color
-	if emission_energy > 0.0:
-		mat.emission_enabled = true
-		mat.emission = emission
-		mat.emission_energy_multiplier = emission_energy
-	inst.material_override = mat
+	# This used to build a bare StandardMaterial3D with nothing set but
+	# albedo_color, which is Godot's default metallic 0.0 / roughness 1.0 -
+	# i.e. matte plastic - for every barrel, lens, tyre and brass fitting
+	# alike. See part_materials.gd for the full reasoning; the short version
+	# is that the parts were differentiated by geometry and by paint colour
+	# but not by SUBSTANCE, and materials are shared per role+tint so the
+	# battle-side mesh merge still collapses them.
+	var role := role_override
+	if role == "" and mesh != null:
+		role = _part_roles.get(mesh.get_instance_id(), PartMaterialsScript.DEFAULT_ROLE)
+	inst.material_override = PartMaterialsScript.get_material(role, color, emission, emission_energy)
 	return inst
 
 # Plain albedo material for a procedurally-built primitive. The roster
@@ -84,6 +110,122 @@ static func _flat_mat(color: Color) -> StandardMaterial3D:
 	var mat = StandardMaterial3D.new()
 	mat.albedo_color = color
 	return mat
+
+# --- Structural piece helpers ----------------------------------------------
+# See the `structural_` branch of build_visual() for the design: parametric
+# body, fixed-size authored hardware bolted onto it.
+
+# Every authored hardware instance is named with this prefix. module_placer.gd
+# repaints a structural piece's meshes with the faction hull shader so the
+# piece matches the vehicle it's bolted to; that pass skips anything named
+# with this prefix, which is what keeps the fasteners reading as bare steel
+# against faction-liveried plate instead of the whole thing turning into one
+# flat shader.
+const HARDWARE_PREFIX := "Hardware_"
+const HARDWARE_COLOR := Color(0.27, 0.27, 0.30)
+
+static var _hardware_mat_cache: StandardMaterial3D = null
+
+static func _hardware_mat() -> StandardMaterial3D:
+	if _hardware_mat_cache == null:
+		_hardware_mat_cache = StandardMaterial3D.new()
+		_hardware_mat_cache.albedo_color = HARDWARE_COLOR
+		# Harder and shinier than the painted plate it sits on - the contrast
+		# between bare fastener and liveried structure is the whole reason the
+		# faction repaint skips these.
+		_hardware_mat_cache.metallic = 0.85
+		_hardware_mat_cache.roughness = 0.35
+	return _hardware_mat_cache
+
+static func _structural_body_mat(color: Color) -> StandardMaterial3D:
+	# Routed through the shared role palette rather than a hand-rolled
+	# StandardMaterial3D so structural plate gets the same triplanar wear
+	# texture everything else now has. It matters most in BATTLE: the Design
+	# Lab repaints these with the faction hull shader (module_placer), but
+	# blueprint_manager's battle reconstruction doesn't, so on the field this
+	# is the material a structural piece actually wears - and unpainted it
+	# was a flat matte slab next to hulls carrying a full wear/grime shader.
+	return PartMaterialsScript.get_material("painted", color)
+
+# Instances one authored hardware part at its TRUE authored size. There is
+# deliberately no scale argument: the whole point of the split is that this
+# geometry never stretches with the body. Silently no-ops if the .glb is
+# missing so a fresh checkout that hasn't run the Blender build yet still
+# renders the bodies rather than erroring out mid-build.
+#
+# `uniform_scale` is the ONE scaling allowance, and it is uniform on purpose:
+# stretching authored hardware anisotropically is the smearing this whole
+# design exists to prevent, but scaling it evenly just makes a bigger version
+# of the same object with every proportion intact. Used for the handful of
+# details that are crew-scale references rather than fasteners - a dome hatch
+# authored at fastener size reads as a coin on a 2.5-unit cupola.
+static func _hardware(parent_node: Node3D, part_name: String, pos: Vector3, rot: Vector3, uniform_scale: float = 1.0) -> MeshInstance3D:
+	var mesh = _part(part_name)
+	if mesh == null:
+		return null
+	var inst = MeshInstance3D.new()
+	inst.mesh = mesh
+	# ONE shared material across every hardware instance, not one per instance
+	# like _mesh_inst() would make. A stretched block can carry 60 of these,
+	# and bake_module_visual() groups its merge by material IDENTITY - 60
+	# separate-but-identical StandardMaterial3Ds would defeat the merge
+	# entirely and ship 60 draw calls per structural piece into a battle.
+	inst.material_override = _hardware_mat()
+	inst.position = pos
+	inst.rotation = rot
+	if not is_equal_approx(uniform_scale, 1.0):
+		inst.scale = Vector3.ONE * uniform_scale
+	parent_node.add_child(inst)
+	# Named AFTER add_child, and with an explicit unique suffix. Setting a
+	# colliding name on a not-yet-parented node makes Godot 4 throw the name
+	# away entirely and fall back to a generated "@MeshInstance3D@7" - so with
+	# the obvious ordering, only the FIRST of each hardware kind kept its name
+	# and every other one silently lost the HARDWARE_PREFIX that the faction-
+	# repaint exemption in module_placer keys off.
+	inst.name = "%s%s_%d" % [HARDWARE_PREFIX, part_name, parent_node.get_child_count()]
+	return inst
+
+# How many fixed-size details fit along `span` at roughly `spacing` apart.
+# This is the function that makes stretching work: it is the COUNT that grows
+# with the body, never the size of the individual detail.
+static func _hardware_count(span: float, spacing: float, lo: int = 1, hi: int = 20) -> int:
+	return clampi(int(round(abs(span) / max(0.01, spacing))), lo, hi)
+
+# Yaw that points a corner bracket's two arms inward along the faces meeting
+# at corner (sx, sz). The bracket is authored with arms along +X and -Z.
+static func _corner_yaw(sx: float, sz: float) -> float:
+	if sx > 0.0 and sz > 0.0: return PI / 2.0
+	if sx < 0.0 and sz > 0.0: return PI
+	if sx < 0.0 and sz < 0.0: return -PI / 2.0
+	return 0.0
+
+# Tie-down grid across a deck surface at height `y`. Spacing is fixed, so a
+# bigger deck gets more tie-downs rather than bigger ones.
+static func _deck_tie_downs(parent_node: Node3D, base_size: Vector3, y: float, spacing: float = 0.95) -> void:
+	var nx = _hardware_count(base_size.x, spacing, 1, 8)
+	var nz = _hardware_count(base_size.z, spacing, 1, 8)
+	for i in range(nx):
+		for j in range(nz):
+			var tx = (float(i) + 0.5) / float(nx) - 0.5
+			var tz = (float(j) + 0.5) / float(nz) - 0.5
+			_hardware(parent_node, "struct_tie_down",
+				Vector3(tx * base_size.x * 0.82, y, tz * base_size.z * 0.82), Vector3.ZERO)
+
+# Shared beam dressing for the girder and the I-beam: splice collars at fixed
+# stations along the run, and a bolted end cap on each end. The collar's ring
+# axis is authored along -Z (Blender +Y), which is already the beam's run, so
+# no rotation is needed on those.
+static func _beam_hardware(parent_node: Node3D, base_size: Vector3) -> void:
+	var collars = _hardware_count(base_size.z, 1.05, 1, 8)
+	for i in range(collars):
+		var t = (float(i) + 0.5) / float(collars) - 0.5
+		_hardware(parent_node, "struct_splice_collar",
+			Vector3(0, base_size.y / 2.0, t * base_size.z * 0.86), Vector3.ZERO)
+	for sz in [-1.0, 1.0]:
+		# The cap is authored facing -Z; the +Z end needs a half turn.
+		_hardware(parent_node, "struct_beam_end_cap",
+			Vector3(0, base_size.y / 2.0, sz * base_size.z * 0.5),
+			Vector3(0, 0.0 if sz < 0.0 else PI, 0))
 
 # Scales a fixed-dimension authored part's Node3D to hit a target Godot-space
 # (width, height, depth) size, given the part's own authored base dimensions.
@@ -126,6 +268,7 @@ const LOCOMOTION_MODULAR_TYPES := {
 # angle the mount is supposed to restore.
 const ARTILLERY_ELEVATION_DEG := 35.0
 const MORTAR_ELEVATION_DEG := 60.0
+const NAPALM_ELEVATION_DEG := 55.0
 
 const MODULAR_ASSEMBLY_TYPES := {
 	"basic_cannon": true, "heavy_machine_gun": true, "rotary_cannon": true, "gauss_railgun": true,
@@ -135,6 +278,7 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"smoke_discharger": true,
 	"mk19_grenade_launcher": true, "recoilless_rifle": true, "coil_gun": true,
 	"autocannon": true, "napalm_mortar": true, "mine_layer": true, "ballista": true,
+	"anti_materiel_rifle": true,
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
 	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
@@ -1844,186 +1988,357 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 		parent_node.add_child(orb)
 
 	elif type_id.begins_with("structural_"):
-		# Structural pieces (block, dome, slab, wedge, girder, i_beam).
-		# Procedural primitives with StandardMaterial3D (bolt-on modules,
-		# not the hull shader), painted in base_color with darkened accent.
+		# --- Structural pieces (block, dome, slab, wedge, girder, i_beam) ----
+		#
+		# PARAMETRIC BODY + FIXED-SIZE AUTHORED HARDWARE.
+		#
+		# These six are the only modules the player can scale freely on all
+		# three axes at once (module_placer.gd's gizmo-category switch gives
+		# them X, Y and Z handles), and they are MEANT to be stretched hard -
+		# a girder pulled to four times its length, a slab squashed into a
+		# deck. That rules out the approach every other part family here uses,
+		# where the whole part is one authored .glb that gets scaled: a bolt
+		# head scaled 4x along Z is a smear, and the whole reason these read
+		# as below the standard of the rest of the roster is that at anything
+		# other than default size they were a stretched box with stretched
+		# trim on it.
+		#
+		# So the body stays procedural (it is a box/wedge/hemisphere - trivial
+		# geometry that WANTS to be parametric and to re-tessellate when
+		# stretched), and all of the detail is authored hardware from
+		# build_structural.py, instanced at its true authored size with NO
+		# scaling applied. Stretch a girder and you get MORE splice collars,
+		# not longer ones. Stretch a block and you get more tie-downs on the
+		# deck, not bigger ones. That is how the real object would be built,
+		# which is why it holds up at any size.
+		#
+		# Hardware instances are named with the HARDWARE_PREFIX. module_placer
+		# repaints structural pieces with the faction hull shader so they
+		# match the vehicle they're bolted to; that pass skips these, so the
+		# painted plate reads as faction-liveried structure and the fasteners
+		# read as bare steel hardware, instead of everything being one
+		# undifferentiated shader.
+		var s_body := _structural_body_mat(base_color)
+		var s_trim := _structural_body_mat(base_color.lightened(0.12))
+		var s_dark := _structural_body_mat(base_color.darkened(0.25))
 
-		# --- BLOCK ---
+		# --- BLOCK: a bolted armoured crate ---------------------------------
 		if type_id == "structural_block":
-			var box_mi = MeshInstance3D.new()
+			var core = MeshInstance3D.new()
 			var box_mesh = BoxMesh.new()
-			box_mesh.size = base_size
-			box_mi.mesh = box_mesh
-			var mat = StandardMaterial3D.new()
-			mat.albedo_color = base_color
-			mat.metallic = 0.4
-			mat.roughness = 0.6
-			box_mi.material_override = mat
-			box_mi.position = Vector3(0, base_size.y / 2.0, 0)
-			parent_node.add_child(box_mi)
+			# The core sits slightly inside the nominal envelope so the corner
+			# brackets and edge beads below can occupy the outermost skin
+			# without poking past the collision box the placer snaps to.
+			box_mesh.size = base_size * 0.96
+			core.mesh = box_mesh
+			core.material_override = s_body
+			core.position = Vector3(0, base_size.y / 2.0, 0)
+			parent_node.add_child(core)
 
-			var trim_mat = StandardMaterial3D.new()
-			trim_mat.albedo_color = base_color.lightened(0.15)
-			trim_mat.metallic = 0.5
-			trim_mat.roughness = 0.4
-			for z_dir in [-1, 1]:
-				var trim = MeshInstance3D.new()
-				var trim_box = BoxMesh.new()
-				trim_box.size = Vector3(base_size.x * 0.95, base_size.y * 0.95, 0.04)
-				trim.mesh = trim_box
-				trim.material_override = trim_mat
-				trim.position = Vector3(0, base_size.y / 2.0, z_dir * base_size.z / 2.0)
-				parent_node.add_child(trim)
+			# Rolled edge beads down the four vertical corners - reads as a
+			# welded box section rather than a cut cube.
+			for sx in [-1.0, 1.0]:
+				for sz in [-1.0, 1.0]:
+					var bead = MeshInstance3D.new()
+					var bead_cyl = CylinderMesh.new()
+					bead_cyl.top_radius = 0.035
+					bead_cyl.bottom_radius = 0.035
+					bead_cyl.height = base_size.y
+					bead.mesh = bead_cyl
+					bead.material_override = s_trim
+					bead.position = Vector3(sx * base_size.x * 0.48, base_size.y / 2.0, sz * base_size.z * 0.48)
+					parent_node.add_child(bead)
 
-		# --- DOME ---
+			# Corner brackets wrapping each vertical edge, top and bottom.
+			# The bracket is authored with its arms along +X and +Y (Godot
+			# +X / -Z) and its plate rising in +Y, so each corner needs the
+			# yaw that points both arms inward along the block's faces.
+			for i in range(4):
+				var sx = -1.0 if i in [0, 3] else 1.0
+				var sz = -1.0 if i in [0, 1] else 1.0
+				var yaw = _corner_yaw(sx, sz)
+				for y in [0.02, max(0.02, base_size.y - 0.17)]:
+					_hardware(parent_node, "struct_corner_bracket",
+						Vector3(sx * base_size.x * 0.48, y, sz * base_size.z * 0.48),
+						Vector3(0, yaw, 0))
+
+			# Stiffener ribs standing off the two long faces. Count scales
+			# with the face, spacing does not.
+			var rib_rows = _hardware_count(base_size.z, 0.75)
+			for sx in [-1.0, 1.0]:
+				for i in range(rib_rows):
+					var t = (float(i) + 0.5) / float(rib_rows) - 0.5
+					# Sat flush at 0.48 originally, which buried all but a
+					# sliver of the rib inside the core box - they read as
+					# scratches rather than as structure. Stood proud of the
+					# face instead, which is where a welded-on stiffener
+					# actually sits.
+					_hardware(parent_node, "struct_stiffener_rib",
+						Vector3(sx * base_size.x * 0.50, base_size.y * 0.18, t * base_size.z * 0.86),
+						Vector3(0, 0, sx * PI / 2.0))
+
+			# Deck tie-downs on top, on a real grid.
+			_deck_tie_downs(parent_node, base_size, base_size.y)
+
+		# --- DOME: an armoured turret base ----------------------------------
 		elif type_id == "structural_dome":
+			var drum_h = base_size.y * 0.30
+			var rx = base_size.x / 2.0
+			var rz = base_size.z / 2.0
+
+			# Base drum. Elliptical footprint via node scale on a unit
+			# cylinder, so a stretched dome stays a stretched dome rather
+			# than snapping to a circle.
+			var drum = MeshInstance3D.new()
+			var drum_cyl = CylinderMesh.new()
+			drum_cyl.top_radius = 1.0
+			drum_cyl.bottom_radius = 1.02
+			drum_cyl.height = 1.0
+			drum.mesh = drum_cyl
+			drum.material_override = s_dark
+			drum.scale = Vector3(rx, drum_h, rz)
+			drum.position = Vector3(0, drum_h / 2.0, 0)
+			parent_node.add_child(drum)
+
+			# The cupola itself. SphereMesh with is_hemisphere so the flat cut
+			# lands on the drum instead of half the sphere hiding inside it.
+			# NOTE `height` is the hemisphere's FULL height above its base, not
+			# the diameter of the sphere it was cut from (verified against
+			# SphereMesh.get_aabb, which reports height 1.0 for radius 1.0) -
+			# passing 2.0 here built a dome twice as tall as its own module,
+			# a smooth egg that swallowed the hatch and every vision block
+			# whole.
+			var dome_h = max(0.05, base_size.y - drum_h)
 			var dome = MeshInstance3D.new()
 			var sphere = SphereMesh.new()
-			sphere.radius = max(base_size.x, base_size.z) / 2.0
-			sphere.height = base_size.y
+			sphere.radius = 1.0
+			sphere.height = 1.0
+			sphere.is_hemisphere = true
 			dome.mesh = sphere
-			var mat = StandardMaterial3D.new()
-			mat.albedo_color = base_color
-			mat.metallic = 0.35
-			mat.roughness = 0.55
-			dome.material_override = mat
-			dome.position = Vector3(0, base_size.y / 2.0, 0)
+			dome.material_override = s_body
+			# Slightly narrower than the drum, so the drum's rim reads as a
+			# real ledge for the bolt pads to sit on rather than the two
+			# surfaces meeting flush and hiding the fasteners inside.
+			dome.scale = Vector3(rx * 0.92, dome_h, rz * 0.92)
+			dome.position = Vector3(0, drum_h, 0)
 			parent_node.add_child(dome)
 
-			var rim = MeshInstance3D.new()
-			var rim_cyl = CylinderMesh.new()
-			rim_cyl.top_radius = sphere.radius * 1.05
-			rim_cyl.bottom_radius = sphere.radius * 1.05
-			rim_cyl.height = 0.08
-			rim.mesh = rim_cyl
-			var rim_mat = StandardMaterial3D.new()
-			rim_mat.albedo_color = base_color.darkened(0.15)
-			rim_mat.metallic = 0.5
-			rim_mat.roughness = 0.4
-			rim.material_override = rim_mat
-			rim.position = Vector3(0, 0.04, 0)
-			parent_node.add_child(rim)
+			# Bolt pads around the drum's top rim, on the ellipse - outboard of
+			# the cupola so they stand on the ledge instead of inside it.
+			var pad_count = _hardware_count(PI * (rx + rz), 0.62, 6, 24)
+			for i in range(pad_count):
+				var a = (float(i) / float(pad_count)) * TAU
+				_hardware(parent_node, "struct_bolt_pad",
+					Vector3(cos(a) * rx * 0.96, drum_h, sin(a) * rz * 0.96),
+					Vector3.ZERO)
 
-		# --- SLAB ---
+			# Vision blocks set into the dome's shoulder, facing outward.
+			# Deliberately not a full ring - four is enough to give the dome a
+			# front, and a full ring reads as decoration.
+			# Radius follows the ellipse at that height (r * sqrt(1 - t^2)),
+			# plus a little proud of it. Sitting at a flat fraction of rx put
+			# them inside the dome's own skin at anything but the base.
+			var shoulder_t = 0.42
+			var shoulder_y = drum_h + dome_h * shoulder_t
+			var shoulder_r = sqrt(max(0.0, 1.0 - shoulder_t * shoulder_t)) * 0.92
+			for i in range(4):
+				var a = (float(i) / 4.0) * TAU + PI / 4.0
+				_hardware(parent_node, "struct_vision_block",
+					Vector3(cos(a) * rx * shoulder_r, shoulder_y, sin(a) * rz * shoulder_r),
+					Vector3(0, -a + PI / 2.0, 0), 2.0)
+
+			# Crown hatch. This is the single detail that gives the dome a
+			# human scale reference - without it a stretched hemisphere has
+			# nothing in it to read size against.
+			# Uniformly upscaled - see _hardware()'s uniform_scale note. At
+			# authored fastener size the hatch read as a coin on the crown
+			# instead of as the crew-scale reference that gives the dome its
+			# sense of size.
+			_hardware(parent_node, "struct_dome_hatch",
+				Vector3(0, base_size.y * 0.97, 0), Vector3.ZERO, 2.6)
+
+		# --- SLAB: a ribbed armour deck plate -------------------------------
 		elif type_id == "structural_slab":
-			var slab = MeshInstance3D.new()
+			var plate = MeshInstance3D.new()
 			var slab_box = BoxMesh.new()
-			slab_box.size = base_size
-			slab.mesh = slab_box
-			var mat = StandardMaterial3D.new()
-			mat.albedo_color = base_color
-			mat.metallic = 0.3
-			mat.roughness = 0.7
-			slab.material_override = mat
-			slab.position = Vector3(0, base_size.y / 2.0, 0)
-			parent_node.add_child(slab)
+			slab_box.size = Vector3(base_size.x * 0.97, base_size.y, base_size.z * 0.97)
+			plate.mesh = slab_box
+			plate.material_override = s_body
+			plate.position = Vector3(0, base_size.y / 2.0, 0)
+			parent_node.add_child(plate)
 
-			var rib_mat = StandardMaterial3D.new()
-			rib_mat.albedo_color = base_color.darkened(0.2)
-			rib_mat.metallic = 0.35
-			var rib_count = max(2, int(base_size.x / 0.5))
-			var rib_spacing = base_size.x / (rib_count + 1)
-			for i in range(rib_count):
-				var rib = MeshInstance3D.new()
-				var rib_box = BoxMesh.new()
-				rib_box.size = Vector3(0.06, base_size.y * 0.3, base_size.z * 0.9)
-				rib.mesh = rib_box
-				rib.material_override = rib_mat
-				rib.position = Vector3(-base_size.x / 2.0 + (i + 1) * rib_spacing, base_size.y * 0.15, 0)
-				parent_node.add_child(rib)
+			# Rolled beads down all four edges - the slab's whole silhouette
+			# is its edge, so this is where the read is won or lost.
+			for sx in [-1.0, 1.0]:
+				var bx = MeshInstance3D.new()
+				var bx_cyl = CylinderMesh.new()
+				# Slimmer than the plate is thick, and tucked inboard. At 0.30
+				# these read as two enormous rolled logs bolted to a thin
+				# plate rather than as the plate's own rolled edge.
+				bx_cyl.top_radius = base_size.y * 0.20
+				bx_cyl.bottom_radius = base_size.y * 0.20
+				bx_cyl.height = base_size.z
+				bx.mesh = bx_cyl
+				bx.material_override = s_trim
+				bx.position = Vector3(sx * base_size.x * 0.470, base_size.y * 0.5, 0)
+				bx.rotation = Vector3(PI / 2.0, 0, 0)
+				parent_node.add_child(bx)
+			for sz in [-1.0, 1.0]:
+				var bz = MeshInstance3D.new()
+				var bz_cyl = CylinderMesh.new()
+				bz_cyl.top_radius = base_size.y * 0.20
+				bz_cyl.bottom_radius = base_size.y * 0.20
+				bz_cyl.height = base_size.x
+				bz.mesh = bz_cyl
+				bz.material_override = s_trim
+				bz.position = Vector3(0, base_size.y * 0.5, sz * base_size.z * 0.470)
+				bz.rotation = Vector3(0, 0, PI / 2.0)
+				parent_node.add_child(bz)
 
-		# --- WEDGE ---
+			# Stiffener ribs on the UNDERSIDE, running across the short axis -
+			# where they'd actually be on a real deck plate, and where they
+			# don't fight the walkable top surface.
+			var s_ribs = _hardware_count(base_size.x, 0.70)
+			for i in range(s_ribs):
+				var t = (float(i) + 0.5) / float(s_ribs) - 0.5
+				_hardware(parent_node, "struct_stiffener_rib",
+					Vector3(t * base_size.x * 0.88, 0.0, 0.0),
+					Vector3(PI, 0, 0))
+
+			# Non-slip step cleats along the top, plus corner brackets laid
+			# flat at each corner.
+			var cleats = _hardware_count(base_size.x, 0.85, 2, 10)
+			for i in range(cleats):
+				var t = (float(i) + 0.5) / float(cleats) - 0.5
+				_hardware(parent_node, "struct_step_cleat",
+					Vector3(t * base_size.x * 0.80, base_size.y, 0.0), Vector3.ZERO)
+			_deck_tie_downs(parent_node, base_size, base_size.y, 1.15)
+
+		# --- WEDGE: a sloped glacis breech ----------------------------------
 		elif type_id == "structural_wedge":
+			# The mesh already spans y 0..size.y from its own origin, so it
+			# sits flush on the mount at position ZERO. The old +y/2 offset
+			# floated the whole piece half its own height off the surface it
+			# was bolted to.
 			var wedge = MeshInstance3D.new()
-			var wedge_mesh = _build_wedge_mesh(base_size)
-			wedge.mesh = wedge_mesh
-			var mat = StandardMaterial3D.new()
-			mat.albedo_color = base_color
-			mat.metallic = 0.35
-			mat.roughness = 0.6
-			wedge.material_override = mat
-			wedge.position = Vector3(0, base_size.y / 2.0, 0)
+			wedge.mesh = _build_wedge_mesh(base_size)
+			wedge.material_override = s_body
 			parent_node.add_child(wedge)
 
-		# --- GIRDER ---
+			# Gussets braced against both flanks at the base of the slope.
+			var g_count = _hardware_count(base_size.z, 0.85, 2, 8)
+			for sx in [-1.0, 1.0]:
+				for i in range(g_count):
+					var t = (float(i) + 0.5) / float(g_count) - 0.5
+					_hardware(parent_node, "struct_gusset",
+						Vector3(sx * base_size.x * 0.49, 0.0, t * base_size.z * 0.80),
+						Vector3(0, 0.0 if sx > 0.0 else PI, 0))
+
+			# Step cleats climbing the sloped face, so the slope reads as
+			# something a crew would walk up rather than a bare ramp. Placed
+			# ON the glacis via _wedge_slope_point() and pitched to lie flat
+			# against it, rather than guessed at along a straight diagonal -
+			# with a real wedge under them now, a guess visibly floats.
+			var pitch = _wedge_slope_pitch(base_size)
+			var steps = _hardware_count(base_size.z, 0.62, 2, 9)
+			for i in range(steps):
+				var t = (float(i) + 0.5) / float(steps)
+				_hardware(parent_node, "struct_step_cleat",
+					_wedge_slope_point(base_size, t), Vector3(pitch, PI / 2.0, 0))
+
+			# Bolt pads along the base skirt.
+			var pads = _hardware_count(base_size.z, 0.80, 2, 8)
+			for sx in [-1.0, 1.0]:
+				for i in range(pads):
+					var t = (float(i) + 0.5) / float(pads) - 0.5
+					_hardware(parent_node, "struct_bolt_pad",
+						Vector3(sx * base_size.x * 0.44, 0.01, t * base_size.z * 0.82),
+						Vector3.ZERO)
+
+		# --- GIRDER: an open lattice truss ----------------------------------
 		elif type_id == "structural_girder":
-			var girder_mat = StandardMaterial3D.new()
-			girder_mat.albedo_color = base_color
-			girder_mat.metallic = 0.45
-			girder_mat.roughness = 0.5
-			var rail_mat = StandardMaterial3D.new()
-			rail_mat.albedo_color = base_color.lightened(0.08)
-			rail_mat.metallic = 0.5
-			rail_mat.roughness = 0.4
+			var rail_w = max(0.05, base_size.x * 0.30)
+			var rail_h = max(0.05, base_size.y * 0.30)
+			var half_gap_x = (base_size.x - rail_w) / 2.0
+			var half_gap_y = (base_size.y - rail_h) / 2.0
 
-			var rail_w = max(0.04, base_size.x * 0.15)
-			var rail_h = max(0.04, base_size.y * 0.15)
-			var half_gap = (base_size.x - rail_w) / 2.0
-			for side in [-1, 1]:
-				var rail = MeshInstance3D.new()
-				var rail_box = BoxMesh.new()
-				rail_box.size = Vector3(rail_w, rail_h, base_size.z)
-				rail.mesh = rail_box
-				rail.material_override = rail_mat
-				rail.position = Vector3(side * half_gap, base_size.y / 2.0, 0)
-				parent_node.add_child(rail)
+			# Four chords, one at each corner of the section - a real truss,
+			# not the two-rail ladder this used to be.
+			for sx in [-1.0, 1.0]:
+				for sy in [0.0, 1.0]:
+					var rail = MeshInstance3D.new()
+					var rail_box = BoxMesh.new()
+					rail_box.size = Vector3(rail_w, rail_h, base_size.z)
+					rail.mesh = rail_box
+					rail.material_override = s_trim
+					rail.position = Vector3(sx * half_gap_x, rail_h / 2.0 + sy * half_gap_y * 2.0, 0)
+					parent_node.add_child(rail)
 
-			var strut_mat = StandardMaterial3D.new()
-			strut_mat.albedo_color = base_color.darkened(0.15)
-			strut_mat.metallic = 0.4
-			var strut_count = max(3, int(base_size.z / 0.6))
-			var strut_spacing = base_size.z / (strut_count - 1)
-			for i in range(strut_count):
-				var z_pos = -base_size.z / 2.0 + i * strut_spacing
-				var diag = MeshInstance3D.new()
-				var diag_box = BoxMesh.new()
-				var diag_w = rail_h * 0.6
-				diag_box.size = Vector3(base_size.x * 0.6, diag_w, diag_w)
-				diag.mesh = diag_box
-				diag.material_override = strut_mat
-				diag.position = Vector3(0, base_size.y / 2.0, z_pos)
-				var tilt = -0.3 if i % 2 == 0 else 0.3
-				diag.rotation = Vector3(tilt * sign(base_size.z), 0, 0)
-				parent_node.add_child(diag)
+			# Zigzag lattice web between the chords. Bay COUNT scales with
+			# length, bay SIZE does not, so a long girder reads as a long
+			# truss instead of a stretched one.
+			var bays = _hardware_count(base_size.z, 0.55, 2, 32)
+			var bay_len = base_size.z / float(bays)
+			var diag_len = sqrt(bay_len * bay_len + base_size.y * base_size.y)
+			var diag_thick = rail_h * 0.55
+			for sx in [-1.0, 1.0]:
+				for i in range(bays):
+					var z0 = -base_size.z / 2.0 + (float(i) + 0.5) * bay_len
+					var diag = MeshInstance3D.new()
+					var diag_box = BoxMesh.new()
+					diag_box.size = Vector3(diag_thick, diag_thick, diag_len)
+					diag.mesh = diag_box
+					diag.material_override = s_dark
+					diag.position = Vector3(sx * half_gap_x, base_size.y / 2.0, z0)
+					# Alternating tilt gives the classic W-truss web.
+					var tilt = atan2(base_size.y, bay_len)
+					diag.rotation = Vector3(tilt if i % 2 == 0 else -tilt, 0, 0)
+					parent_node.add_child(diag)
 
-		# --- I-BEAM ---
+			_beam_hardware(parent_node, base_size)
+
+		# --- I-BEAM: a rolled section frame ---------------------------------
 		elif type_id == "structural_i_beam":
-			var beam_mat = StandardMaterial3D.new()
-			beam_mat.albedo_color = base_color
-			beam_mat.metallic = 0.45
-			beam_mat.roughness = 0.5
-
 			var flange_thick = max(0.03, base_size.y * 0.15)
-			var flange_width = max(0.05, base_size.x * 0.6)
-			var web_thick = max(0.03, base_size.x * 0.12)
-			var web_height = base_size.y - 2.0 * flange_thick
+			var flange_width = max(0.05, base_size.x * 0.85)
+			var web_thick = max(0.03, base_size.x * 0.16)
+			var web_height = max(0.01, base_size.y - 2.0 * flange_thick)
 
-			var top = MeshInstance3D.new()
-			var top_box = BoxMesh.new()
-			top_box.size = Vector3(flange_width, flange_thick, base_size.z)
-			top.mesh = top_box
-			top.material_override = beam_mat
-			top.position = Vector3(0, base_size.y - flange_thick / 2.0, 0)
-			parent_node.add_child(top)
+			for y in [flange_thick / 2.0, base_size.y - flange_thick / 2.0]:
+				var fl = MeshInstance3D.new()
+				var fl_box = BoxMesh.new()
+				fl_box.size = Vector3(flange_width, flange_thick, base_size.z)
+				fl.mesh = fl_box
+				fl.material_override = s_trim
+				fl.position = Vector3(0, y, 0)
+				parent_node.add_child(fl)
 
 			var web = MeshInstance3D.new()
 			var web_box = BoxMesh.new()
-			web_box.size = Vector3(web_thick, max(0.01, web_height), base_size.z)
+			web_box.size = Vector3(web_thick, web_height, base_size.z)
 			web.mesh = web_box
-			web.material_override = beam_mat
+			web.material_override = s_body
 			web.position = Vector3(0, flange_thick + web_height / 2.0, 0)
 			parent_node.add_child(web)
 
-			var bottom = MeshInstance3D.new()
-			var bottom_box = BoxMesh.new()
-			bottom_box.size = Vector3(flange_width, flange_thick, base_size.z)
-			bottom.mesh = bottom_box
-			bottom.material_override = beam_mat
-			bottom.position = Vector3(0, flange_thick / 2.0, 0)
-			parent_node.add_child(bottom)
+			# Web gussets at fixed stations, braced into both flanges - the
+			# detail that turns a plain extruded I into a fabricated beam.
+			var stations = _hardware_count(base_size.z, 0.80, 2, 16)
+			for i in range(stations):
+				var t = (float(i) + 0.5) / float(stations) - 0.5
+				for sx in [-1.0, 1.0]:
+					_hardware(parent_node, "struct_gusset",
+						Vector3(sx * web_thick * 0.6, flange_thick, t * base_size.z * 0.88),
+						Vector3(0, 0.0 if sx > 0.0 else PI, 0))
+				# Bolt pad on the top flange at the same station.
+				_hardware(parent_node, "struct_bolt_pad",
+					Vector3(0, base_size.y, t * base_size.z * 0.88), Vector3.ZERO)
+
+			_beam_hardware(parent_node, base_size)
 
 	elif type_id in ["mk19_grenade_launcher", "autocannon", "recoilless_rifle", "coil_gun",
-					 "ballista", "napalm_mortar", "mine_layer", "smoke_discharger"]:
+					 "ballista", "napalm_mortar", "mine_layer", "smoke_discharger",
+					 "anti_materiel_rifle"]:
 		# --- Roster expansion ------------------------------------------------
 		# Assembled from authored .glb sub-parts (tools/blender/
 		# build_roster_expansion.py) exactly like basic_cannon and the HMG
@@ -2120,6 +2435,110 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 					can.material_override = _flat_mat(Color(0.22, 0.26, 0.18))
 					can.position = Vector3(-0.16 * drum_scale * caliber, trunnion_y * 0.85, 0)
 					parent_node.add_child(can)
+
+			"anti_materiel_rifle":
+				# Long, thin, deliberate. The proportions are the point: the
+				# breech runs back THROUGH the trunnions rather than hanging
+				# off them, so the gun reads as balanced about its middle,
+				# and the tube is long enough that the muzzle brake has to be
+				# its own part or barrel_length would stretch the baffles.
+				var amr_trunnion_y = 0.28
+				var optic = tweaks.get("optic_power", 1.0)
+				var bipod_down = tweaks.get("bipod_deploy", 0.0) >= 0.5
+
+				# 1. TRUNNION CRADLE
+				var amr_mount_mesh = _part("amr_mount")
+				if not amr_mount_mesh:
+					amr_mount_mesh = _part("pintle_mount")
+				if amr_mount_mesh:
+					var amr_mount = _mesh_inst(amr_mount_mesh, base_color.darkened(0.25))
+					amr_mount.scale = Vector3(caliber, 1.0, caliber)
+					parent_node.add_child(amr_mount)
+				else:
+					var amr_mount = MeshInstance3D.new()
+					var am_cyl = CylinderMesh.new()
+					am_cyl.top_radius = 0.13 * caliber
+					am_cyl.bottom_radius = 0.20 * caliber
+					am_cyl.height = amr_trunnion_y
+					amr_mount.mesh = am_cyl
+					amr_mount.material_override = _flat_mat(base_color.darkened(0.25))
+					amr_mount.position = Vector3(0, amr_trunnion_y / 2.0, 0)
+					parent_node.add_child(amr_mount)
+
+				# 2. BREECH - scaled by caliber only. barrel_length must never
+				#    touch it, or the sight rail and feed chutes stretch too.
+				var amr_breech_front_z = -0.28 * caliber
+				var amr_breech_mesh = _part("amr_breech")
+				if amr_breech_mesh:
+					var amr_breech = _mesh_inst(amr_breech_mesh, Color(0.20, 0.22, 0.21))
+					amr_breech.scale = Vector3.ONE * caliber
+					amr_breech.position = Vector3(0, amr_trunnion_y, 0)
+					parent_node.add_child(amr_breech)
+				else:
+					var amr_breech = MeshInstance3D.new()
+					var ab_box = BoxMesh.new()
+					ab_box.size = Vector3(0.30, 0.33, 1.04) * caliber
+					amr_breech.mesh = ab_box
+					amr_breech.material_override = _flat_mat(Color(0.20, 0.22, 0.21))
+					amr_breech.position = Vector3(0, amr_trunnion_y, 0.15 * caliber)
+					parent_node.add_child(amr_breech)
+
+				# 3. BARREL - the only part barrel_length touches.
+				var amr_bar_mesh = _part("amr_barrel")
+				if not amr_bar_mesh:
+					amr_bar_mesh = _part("barrel_thin")
+				var amr_barrel_len = 0.95 * length * caliber
+				if amr_bar_mesh:
+					var amr_barrel = _mesh_inst(amr_bar_mesh, Color(0.13, 0.14, 0.15))
+					amr_barrel.scale = Vector3(caliber, caliber, length * caliber)
+					amr_barrel.position = Vector3(0, amr_trunnion_y, amr_breech_front_z)
+					parent_node.add_child(amr_barrel)
+				else:
+					var amr_barrel = MeshInstance3D.new()
+					var abr_cyl = CylinderMesh.new()
+					abr_cyl.top_radius = 0.035 * caliber
+					abr_cyl.bottom_radius = 0.048 * caliber
+					abr_cyl.height = amr_barrel_len
+					amr_barrel.mesh = abr_cyl
+					amr_barrel.material_override = _flat_mat(Color(0.13, 0.14, 0.15))
+					amr_barrel.position = Vector3(0, amr_trunnion_y, amr_breech_front_z - amr_barrel_len / 2.0)
+					amr_barrel.rotation = Vector3(PI / 2, 0, 0)
+					parent_node.add_child(amr_barrel)
+
+				# 4. MUZZLE BRAKE - own part, positioned at the barrel's ACTUAL
+				#    tip so a longer barrel moves it rather than stretching it.
+				var amr_brake_mesh = _part("amr_muzzle_brake")
+				if not amr_brake_mesh:
+					amr_brake_mesh = _part("muzzle_brake")
+				if amr_brake_mesh:
+					var amr_brake = _mesh_inst(amr_brake_mesh, Color(0.115, 0.10, 0.095))
+					amr_brake.scale = Vector3.ONE * caliber
+					amr_brake.position = Vector3(0, amr_trunnion_y, amr_breech_front_z - amr_barrel_len)
+					parent_node.add_child(amr_brake)
+
+				# 5. SENSOR POD - the "expanded sensors". optic_power is the
+				#    only thing that scales it, and it scales UNIFORMLY: a
+				#    bigger sight is a bigger sight, not a stretched one.
+				var amr_pod_mesh = _part("amr_sensor_pod")
+				if not amr_pod_mesh:
+					amr_pod_mesh = _part("sensor_dome")
+				if amr_pod_mesh:
+					var amr_pod = _mesh_inst(amr_pod_mesh, Color(0.17, 0.19, 0.18))
+					amr_pod.scale = Vector3.ONE * caliber * optic
+					amr_pod.position = Vector3(-0.20 * caliber, amr_trunnion_y + 0.12 * caliber, 0.02 * caliber)
+					parent_node.add_child(amr_pod)
+
+				# 6. BIPOD - present ONLY when deployed. The tweak has a real
+				#    combat effect (auto_weapon._bipod_blocks_firing), so it
+				#    has to be visible on the model or the player has no way
+				#    to tell a deployed rifle from a stowed one at a glance.
+				if bipod_down:
+					var amr_bipod_mesh = _part("amr_bipod")
+					if amr_bipod_mesh:
+						var amr_bipod = _mesh_inst(amr_bipod_mesh, Color(0.18, 0.19, 0.20))
+						amr_bipod.scale = Vector3.ONE * caliber
+						amr_bipod.position = Vector3(0, 0.0, amr_breech_front_z * 0.6)
+						parent_node.add_child(amr_bipod)
 
 			"recoilless_rifle":
 				var trunnion_y = 0.27
@@ -2276,7 +2695,13 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 				# Steep fixed elevation, applied as a pivot rotation on the
 				# tube group rather than baked into the mesh - the same
 				# approach ARTILLERY_ELEVATION_DEG/MORTAR_ELEVATION_DEG use.
-				var elev = deg_to_rad(-55.0)
+				# SIGN: positive, same as ARTILLERY_/MORTAR_ELEVATION_DEG. The
+				# parts are authored with the bore along -Z, and a POSITIVE X
+				# rotation pitches -Z upward. This read -55.0, which pitched
+				# the assembly nose-down through the deck - the flared muzzle
+				# ended up below the breech, which is what made the barrel
+				# look like it had been fitted upside down.
+				var elev = deg_to_rad(NAPALM_ELEVATION_DEG)
 
 				# 1. BASEPLATE
 				var np_mount_mesh = _part("napalm_mount")
@@ -4128,7 +4553,19 @@ static func rebuild_visual(module: Node3D):
 	var data = module.get_meta("module_data")
 	var catalog_data = preload("res://scripts/module_catalog.gd").get_module_data(data.type_id)
 	if catalog_data:
-		build_visual(data.type_id, module, catalog_data.get("size", Vector3.ONE), catalog_data.color, data.tweaks)
+		var size: Vector3 = catalog_data.get("size", Vector3.ONE)
+		# Structural pieces use SCALE ISOLATION, the same trick the hull uses
+		# (gizmo_3d.gd's _apply_scale_to_node): their resize is carried as a
+		# meta multiplier on the BASE SIZE and rebuilt here, rather than
+		# written to the node's own `scale`. Scaling the node would drag the
+		# fixed-size authored hardware along with it and smear every bolt
+		# head, which is exactly what the parametric-body split exists to
+		# avoid - the body has to be rebuilt at the new size so the detail
+		# count can change instead.
+		if module.has_meta("struct_scale"):
+			var ss: Vector3 = module.get_meta("struct_scale")
+			size = Vector3(size.x * ss.x, size.y * ss.y, size.z * ss.z)
+		build_visual(data.type_id, module, size, catalog_data.color, data.tweaks)
 
 # PERFORMANCE_PLAN.md P4: MODULAR_ASSEMBLY_TYPES modules (every weapon,
 # every locomotion type, and the structural hull-extenders) build_visual()
@@ -4276,61 +4713,85 @@ static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: D
 	if children.is_empty(): return
 
 	match type_id:
-		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista":
+		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle":
 			return
 
 # Builds a wedge (triangular prism) mesh from a base_size Vector3.
 # The wedge has a flat base (full width X and depth Z) that tapers to a
 # ridge along the top centerline (Y-direction apex). This is a simple
 # ArrayMesh with 5 faces: base, back, and two sloped sides, + 2 end caps.
+# Fraction of the piece's depth taken up by the flat top deck at the back.
+# The rest is the sloped glacis. Zero here would give a knife edge, which is
+# not a thing anyone fabricates out of armour plate.
+const WEDGE_DECK_FRACTION := 0.30
+
 static func _build_wedge_mesh(size: Vector3) -> ArrayMesh:
+	# A REAL wedge. What was here before declared eight vertices and then put
+	# the top four at the full size on all axes - i.e. it built a plain box,
+	# with comments describing an "apex" and a "top ridge" that the geometry
+	# never had. "Wedge Breech" has therefore always rendered as a rectangular
+	# block indistinguishable from Structure Block.
+	#
+	# Shape: bottom rectangle, a glacis rising from the FRONT edge (-Z, which
+	# is forward everywhere in this codebase) to a knuckle, then a flat deck
+	# running back from the knuckle to the rear face.
+	#
+	# Flat-shaded, not smooth-normal averaged: this is folded plate, and
+	# averaging normals across the knuckle rounded the fold into a soft blob
+	# and darkened the deck (which is what made the old box look hollow).
 	var hw = size.x / 2.0
-	var hh = size.y
+	var h = size.y
 	var hd = size.z / 2.0
+	var zk = -hd + size.z * (1.0 - WEDGE_DECK_FRACTION)
 
-	# Vertices: 0=bottom-left-front, 1=bottom-right-front, 2=bottom-left-back,
-	# 3=bottom-right-back, 4=apex-left-front, 5=apex-right-front,
-	# 6=apex-left-back, 7=apex-right-back
-	# Since Size Y is upright, we treat apex as the top ridge along Z direction
+	var p_bfl = Vector3(-hw, 0, -hd)  # bottom front left
+	var p_bfr = Vector3( hw, 0, -hd)
+	var p_brl = Vector3(-hw, 0,  hd)  # bottom rear left
+	var p_brr = Vector3( hw, 0,  hd)
+	var p_kl  = Vector3(-hw, h, zk)   # knuckle (top of the glacis)
+	var p_kr  = Vector3( hw, h, zk)
+	var p_trl = Vector3(-hw, h,  hd)  # top rear
+	var p_trr = Vector3( hw, h,  hd)
+
 	var verts = PackedVector3Array()
-	verts.append(Vector3(-hw, 0, -hd))   # 0
-	verts.append(Vector3( hw, 0, -hd))   # 1
-	verts.append(Vector3(-hw, 0,  hd))   # 2
-	verts.append(Vector3( hw, 0,  hd))   # 3
-	verts.append(Vector3(-hw, hh, -hd))  # 4
-	verts.append(Vector3( hw, hh, -hd))  # 5
-	verts.append(Vector3(-hw, hh,  hd))  # 6
-	verts.append(Vector3( hw, hh,  hd))  # 7
+	var normals = PackedVector3Array()
 
-	var indices = PackedInt32Array()
-	# Bottom face (0-1-3-2)
-	indices.append_array([0, 1, 3, 0, 3, 2])
-	# Front face (0-4-5-1) - left sloped
-	indices.append_array([0, 4, 5, 0, 5, 1])
-	# Back face (2-3-7-6) - right sloped
-	indices.append_array([2, 3, 7, 2, 7, 6])
-	# Left end cap (0-2-6-4)
-	indices.append_array([0, 2, 6, 0, 6, 4])
-	# Right end cap (1-5-7-3)
-	indices.append_array([1, 5, 7, 1, 7, 3])
-	# Top ridge (4-5-7-6)
-	indices.append_array([4, 5, 7, 4, 7, 6])
+	# Each quad emitted as two triangles with one shared face normal.
+	var quads = [
+		[p_bfl, p_brl, p_brr, p_bfr],  # bottom
+		[p_bfl, p_bfr, p_kr,  p_kl],   # glacis
+		[p_kl,  p_kr,  p_trr, p_trl],  # top deck
+		[p_brl, p_trl, p_trr, p_brr],  # rear face
+		[p_bfl, p_kl,  p_trl, p_brl],  # left flank
+		[p_bfr, p_brr, p_trr, p_kr],   # right flank
+	]
+	for q in quads:
+		var n = (q[1] - q[0]).cross(q[2] - q[0]).normalized()
+		for tri in [[0, 1, 2], [0, 2, 3]]:
+			for idx in tri:
+				verts.append(q[idx])
+				normals.append(n)
 
 	var arrays = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = verts
-	arrays[Mesh.ARRAY_INDEX] = indices
+	arrays[Mesh.ARRAY_NORMAL] = normals
 
-	# Build smooth normals
 	var mesh = ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	mesh.surface_set_material(0, StandardMaterial3D.new())
-	var normal_arrays = mesh.surface_get_arrays(0)
-	var normals = _compute_smooth_normals(verts, indices)
-	normal_arrays[Mesh.ARRAY_NORMAL] = normals
-	mesh.clear_surfaces()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, normal_arrays)
 	return mesh
+
+# Where the glacis surface sits at depth fraction `t` (0 = front edge, 1 =
+# knuckle). Used to lay step cleats onto the actual slope instead of guessing
+# at a diagonal, and to pitch them to match it.
+static func _wedge_slope_point(size: Vector3, t: float) -> Vector3:
+	var hd = size.z / 2.0
+	var zk = -hd + size.z * (1.0 - WEDGE_DECK_FRACTION)
+	return Vector3(0, size.y * t, lerp(-hd, zk, t))
+
+static func _wedge_slope_pitch(size: Vector3) -> float:
+	var run = size.z * (1.0 - WEDGE_DECK_FRACTION)
+	return atan2(size.y, max(0.001, run))
 
 # Compute smooth vertex normals for an indexed triangle mesh.
 static func _compute_smooth_normals(verts: PackedVector3Array, indices: PackedInt32Array) -> PackedVector3Array:

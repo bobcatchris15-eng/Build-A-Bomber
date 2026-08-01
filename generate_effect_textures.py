@@ -1,0 +1,235 @@
+"""
+Procedural texture generator for combat VFX (flames, smoke, scorch decals).
+
+Companion to generate_terrain_textures.py, but deliberately NOT using an
+image-generation API the way that one does: these are small, high-contrast,
+alpha-keyed sprites where exact control over the alpha falloff matters far
+more than photographic detail. A generated "photo of fire" comes back with
+baked-in black background and soft JPEG edges, which is exactly wrong for an
+additive billboard. Procedural fbm gives a clean premultiplied-safe alpha and
+costs nothing to re-tune.
+
+Outputs (prototype/assets/textures/effects/):
+  flame_flipbook.png   4x4 sheet, 512px  - additive fire, plays once per particle
+  smoke_flipbook.png   4x4 sheet, 512px  - white/alpha smoke, tinted in-material
+  scorch_decal.png     512px             - burn mark albedo for Decal nodes
+  scorch_emission.png  512px             - ember hotspots, emission channel
+  spark.png            64px              - single additive spark point
+
+Run: python generate_effect_textures.py
+"""
+
+import numpy as np
+from PIL import Image
+from pathlib import Path
+
+OUT = Path(__file__).parent / "prototype" / "assets" / "textures" / "effects"
+OUT.mkdir(parents=True, exist_ok=True)
+
+RNG = np.random.default_rng(20260731)
+
+
+def _value_noise(h, w, res, rng):
+    """One octave of smoothly-interpolated value noise at `res` control points."""
+    gy, gx = res
+    grid = rng.random((gy + 1, gx + 1))
+    # Bilinear upsample with a smoothstep easing so octaves stack without
+    # visible grid creases.
+    ys = np.linspace(0, gy, h, endpoint=False)
+    xs = np.linspace(0, gx, w, endpoint=False)
+    y0, x0 = np.floor(ys).astype(int), np.floor(xs).astype(int)
+    fy, fx = ys - y0, xs - x0
+    fy = (fy * fy * (3 - 2 * fy))[:, None]
+    fx = (fx * fx * (3 - 2 * fx))[None, :]
+    v00 = grid[np.ix_(y0, x0)]
+    v01 = grid[np.ix_(y0, x0 + 1)]
+    v10 = grid[np.ix_(y0 + 1, x0)]
+    v11 = grid[np.ix_(y0 + 1, x0 + 1)]
+    top = v00 * (1 - fx) + v01 * fx
+    bot = v10 * (1 - fx) + v11 * fx
+    return top * (1 - fy) + bot * fy
+
+
+def fbm(h, w, octaves=5, base=3, rng=None, stretch_y=1.0):
+    """
+    Fractal sum of value noise, normalised to 0..1.
+
+    stretch_y > 1 uses proportionally FEWER control points vertically, which
+    elongates features into vertical streaks. That is what makes fire read as
+    licking tongues instead of round blobs - isotropic noise on a flame sprite
+    always looks like clouds.
+    """
+    rng = rng or RNG
+    total = np.zeros((h, w))
+    amp, norm = 1.0, 0.0
+    for o in range(octaves):
+        f = base * 2 ** o
+        res = (max(1, int(f / stretch_y)), f)
+        total += amp * _value_noise(h, w, res, rng)
+        norm += amp
+        amp *= 0.5
+    out = total / norm
+    # np.ptp(arr), not arr.ptp() - the method was removed in NumPy 2.
+    return (out - out.min()) / (np.ptp(out) + 1e-9)
+
+
+def radial(h, w, cx=0.5, cy=0.5, rx=0.5, ry=0.5):
+    """Normalised elliptical distance field, 0 at centre and 1 at the edge."""
+    yy, xx = np.mgrid[0:h, 0:w]
+    nx = (xx / w - cx) / rx
+    ny = (yy / h - cy) / ry
+    return np.sqrt(nx ** 2 + ny ** 2)
+
+
+def smoothstep(e0, e1, x):
+    t = np.clip((x - e0) / (e1 - e0 + 1e-9), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def flame_frame(size, t, rng):
+    """
+    One flipbook cell of fire at normalised life t (0=ignition, 1=burnt out).
+
+    The plume narrows and rises as it ages while the turbulence scrolls
+    upward, so a particle playing the sheet over its lifetime reads as one
+    continuous flame rather than 16 unrelated puffs.
+    """
+    # A soft turbulent PUFF, deliberately not a flame silhouette.
+    #
+    # An earlier version drew a proper teardrop flame with ragged tongues. It
+    # looked correct in isolation and was wrong in use: a particle system
+    # emits dozens of these at once, so a strongly flame-shaped sprite reads
+    # as a crowd of little candles instead of one jet. In a particle system
+    # the AGGREGATE makes the shape, and the individual sprite has to be
+    # nondescript enough to blend with its neighbours. Hence: round-ish, soft
+    # edged, hot in the middle, with enough turbulence to break up the
+    # overlap so the jet doesn't look like a tube of airbrush.
+    grow = 0.30 + 0.13 * t
+    d = radial(size, size, cx=0.5, cy=0.52 - 0.06 * t, rx=grow, ry=grow * 1.12)
+    body = 1.0 - smoothstep(0.15, 1.0, d)
+
+    turb = fbm(size, size, octaves=5, base=4, rng=rng, stretch_y=2.0)
+    turb = np.roll(turb, -int(t * size * 0.35), axis=0)
+
+    # Mild erosion only - a WIDE smoothstep keeps the edges feathered so
+    # overlapping particles merge instead of showing their outlines.
+    field = body * (0.62 + 0.70 * turb)
+    thr = 0.16 + 0.34 * t
+
+    # Low peak alpha ON PURPOSE. These draw with additive blending, where
+    # brightness accumulates wherever particles overlap - so each sprite has
+    # to be dim enough that a stack of them reaches white, rather than each
+    # one already being white on its own. At full alpha the jet rendered as a
+    # crowd of blown-out white discs with no colour left in it.
+    #
+    # A GAMMA FALLOFF, not a smoothstep band. Any threshold - however wide -
+    # ends the sprite at a definite radius, and because the coolest (reddest)
+    # colour sits at exactly that radius, every particle drew a visible red
+    # RIM and the jet read as a pile of discs. Raising a linear ramp to a
+    # power instead gives a long asymptotic tail that reaches zero softly, so
+    # neighbouring particles dissolve into each other.
+    alpha = np.clip((field - thr) / (1.0 - thr + 1e-6), 0, 1) ** 2.1
+    alpha *= (1.0 - smoothstep(0.72, 1.0, t)) * 0.55
+
+    # Heat: mostly orange, with yellow only near the middle and white
+    # essentially never - additive overlap supplies the white core for free.
+    heat = np.clip((field - thr) / 0.48, 0, 1) * (1.0 - 0.50 * t)
+    rgb = np.zeros((size, size, 3))
+    rgb[..., 0] = np.clip(0.75 + heat * 1.2, 0, 1)     # always red-hot at minimum
+    rgb[..., 1] = np.clip((heat - 0.30) * 1.15, 0, 1)  # -> orange -> yellow
+    rgb[..., 2] = np.clip((heat - 0.88) * 1.6, 0, 1)   # a hint of white, no more
+    return rgb, np.clip(alpha, 0, 1)
+
+
+def smoke_frame(size, t, rng):
+    """One flipbook cell of smoke: expands, drifts up, thins out."""
+    rise = 0.20 * t
+    grow = 0.26 + 0.20 * t
+    d = radial(size, size, cx=0.5, cy=0.55 - rise, rx=grow, ry=grow)
+    body = 1.0 - smoothstep(0.30, 1.0, d)
+
+    turb = fbm(size, size, octaves=6, base=3, rng=rng, stretch_y=1.4)
+    turb = np.roll(turb, -int(t * size * 0.25), axis=0)
+    # Same erosion approach as the flame, but with a softer threshold ramp -
+    # smoke should stay billowy where fire is ragged.
+    # Wide threshold ramp, same reason as the flame: these overlap heavily in
+    # a puff and hard edges would show every individual billboard as a
+    # distinct grey ball (which is exactly what the first in-engine capture
+    # showed).
+    field = body * (0.40 + 1.05 * turb)
+    thr = 0.24 + 0.40 * t
+    dens = smoothstep(thr, thr + 0.52, field) * 0.85
+
+    # White; the material tints it (grey exhaust vs. black oil smoke) so one
+    # sheet serves every smoke colour in the game.
+    value = 0.72 + 0.28 * turb
+    rgb = np.dstack([value, value, value])
+    return rgb, np.clip(dens, 0, 1)
+
+
+def build_flipbook(name, frame_fn, cells=4, cell_px=128):
+    size = cells * cell_px
+    sheet = np.zeros((size, size, 4))
+    rng = np.random.default_rng(7)
+    n = cells * cells
+    for i in range(n):
+        t = i / (n - 1)
+        rgb, a = frame_fn(cell_px, t, rng)
+        r, c = divmod(i, cells)
+        sheet[r * cell_px:(r + 1) * cell_px, c * cell_px:(c + 1) * cell_px, :3] = rgb
+        sheet[r * cell_px:(r + 1) * cell_px, c * cell_px:(c + 1) * cell_px, 3] = a
+    img = Image.fromarray((np.clip(sheet, 0, 1) * 255).astype(np.uint8), "RGBA")
+    img.save(OUT / name)
+    print(f"  {name}  {size}x{size}  ({cells}x{cells} frames)")
+
+
+def build_scorch(size=512):
+    """
+    Burn mark for a Decal node: irregular charred blotch, soft edge.
+
+    Albedo is near-black with brown grit; a matching emission map puts a few
+    dying embers inside the same silhouette so a fresh napalm pool can glow
+    and then be faded to a cold scorch by animating emission_energy alone -
+    one decal, two lifetimes, no second texture swap.
+    """
+    rng = np.random.default_rng(11)
+    warp = fbm(size, size, octaves=5, base=3, rng=rng)
+    d = radial(size, size, rx=0.46, ry=0.46)
+    # Perturb the distance field so the edge is ragged, not a circle.
+    d = d + (warp - 0.5) * 0.42
+    mask = 1.0 - smoothstep(0.55, 1.0, d)
+
+    grit = fbm(size, size, octaves=6, base=6, rng=np.random.default_rng(12))
+    char = 0.045 + 0.11 * grit          # near-black with soot variation
+    rgb = np.dstack([char * 1.25, char * 1.05, char * 0.9])  # faintly warm
+    alpha = np.clip(mask * (0.55 + 0.55 * grit), 0, 1)
+    Image.fromarray((np.clip(np.dstack([rgb, alpha]), 0, 1) * 255).astype(np.uint8), "RGBA") \
+        .save(OUT / "scorch_decal.png")
+    print(f"  scorch_decal.png  {size}x{size}")
+
+    # Embers: sparse hot cells inside the burn, gated by the same mask.
+    ember = fbm(size, size, octaves=4, base=10, rng=np.random.default_rng(13))
+    hot = smoothstep(0.62, 0.92, ember) * mask
+    em = np.dstack([hot, hot * 0.42, hot * 0.06, np.clip(hot * 1.4, 0, 1)])
+    Image.fromarray((np.clip(em, 0, 1) * 255).astype(np.uint8), "RGBA") \
+        .save(OUT / "scorch_emission.png")
+    print(f"  scorch_emission.png  {size}x{size}")
+
+
+def build_spark(size=64):
+    d = radial(size, size, rx=0.5, ry=0.5)
+    core = 1.0 - smoothstep(0.0, 1.0, d)
+    a = np.clip(core ** 2.2 * 1.6, 0, 1)
+    rgb = np.dstack([np.ones_like(a), 0.72 + 0.28 * core, 0.35 * core])
+    Image.fromarray((np.clip(np.dstack([rgb, a]), 0, 1) * 255).astype(np.uint8), "RGBA") \
+        .save(OUT / "spark.png")
+    print(f"  spark.png  {size}x{size}")
+
+
+if __name__ == "__main__":
+    print(f"Writing effect textures to {OUT}")
+    build_flipbook("flame_flipbook.png", flame_frame)
+    build_flipbook("smoke_flipbook.png", smoke_frame)
+    build_scorch()
+    build_spark()
+    print("Done.")

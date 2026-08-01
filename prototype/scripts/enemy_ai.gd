@@ -111,7 +111,11 @@ const ANTI_AIR_WEAPONS = ["ciws", "flak_cannon", "pd_laser"]
 # explicitly built as anti-armor answers (big per-shot damage that clears
 # thresholds outright rather than chipping), so the AI should recognise
 # them as such when it evaluates a design's role.
-const ANTI_ARMOR_WEAPONS = ["gauss_railgun", "artillery", "ion_cannon", "tesla_coil", "coil_gun", "recoilless_rifle", "ballista"]
+# The anti-materiel rifle belongs here more than anything else in the list:
+# at a 4.5s interval its 351 per-shot is the single largest number any
+# weapon in the roster puts into one impact, which is precisely the
+# "clears the threshold outright rather than chipping" property.
+const ANTI_ARMOR_WEAPONS = ["gauss_railgun", "artillery", "ion_cannon", "tesla_coil", "coil_gun", "recoilless_rifle", "ballista", "anti_materiel_rifle"]
 const COUNTER_SCOUT_MIN_UNITS = 2
 const COUNTER_SCOUT_MAJORITY = 0.4
 

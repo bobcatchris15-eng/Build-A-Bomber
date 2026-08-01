@@ -40,6 +40,44 @@ static func _nav_grid_cell(map_def: Dictionary) -> float:
 # bakes successfully in ~500ms. Every map at or under 300 half-extent
 # (twin_bridges' size, the largest that already worked) keeps EXACTLY
 # Godot's own 0.25 default - zero behavior change for the 9 original maps.
+#
+# 2026-07-31 (performance): the "zero behavior change for the 9 original
+# maps" conservatism above was costing more than it was protecting. Recast's
+# cost is O(voxels), i.e. quadratic in 1/cell_size, and at 0.25 a 480-unit
+# map (lake_crossing) bakes a 1920x1920 heightfield. Measured on that map
+# with scratch/probe_nav_cell_size.gd:
+#
+#   cell_size   grid        bake      nav polys (lake / highland)
+#   0.25        1920x1920   1585 ms   62 / 544
+#   0.50         960x960     346 ms   56 / 144
+#   1.00         480x480     106 ms   48 /  80
+#
+# That 1.5s is paid TWICE per rebake (ground + amphibious), and
+# skirmish.gd rebakes on every building placement and every building death -
+# a measured 3.2s main-thread freeze per placement, which is the "placing a
+# building freezes the game" report. It is also ~3.5s of the ~6.4s cold
+# match load that makes Windows mark the process Not Responding.
+#
+#
+# 2026-07-31 (performance): DELIBERATELY LEFT AT 0.25 after trying to widen
+# it, because widening buys speed by spending pathing correctness, and there
+# turned out to be a way to get the speed without paying that. Recorded here
+# so the next person doesn't re-run the same experiment:
+#
+#   flat 1.0          4 tests fail - plateau ramp unreachable, a resource
+#                     node unreachable, repath-around-building broken
+#   flat 0.5          plateau ramp still unreachable (max_y 1.0 vs 2.5)
+#   scaled by size    plateau fixed, but a unit's path then cut straight
+#                     THROUGH lake_crossing's lake instead of detouring
+#
+# Measured per-surface bake cost, for reference (probe_nav_cell_size.gd):
+# 0.25 -> 1585ms, 0.5 -> 346ms, 1.0 -> 106ms. Tempting, and wrong: the
+# navmesh is what stops units driving into lakes and off plateaus.
+#
+# The freeze it was meant to fix is solved instead by
+# rebake_ground_and_amphibious_async() below, which moves Recast off the
+# main thread entirely - full resolution, no stall. Cost stays high, but
+# it is no longer paid where the player can feel it.
 static func _nav_cell_size(map_def: Dictionary) -> float:
 	var half: float = map_def.get("map_half_extents", 80.0)
 	if half <= 300.0:
@@ -147,6 +185,12 @@ static func _get_surfacemap_image(map_def: Dictionary) -> Image:
 static func reset_heightmap_cache_for_tests() -> void:
 	_heightmap_cache = {}
 	_surfacemap_cache = {}
+	# _corner_height_cache is derived from height_at(), which reads
+	# _heightmap_cache - so it is exactly as stale as the caches above and
+	# has to be dropped with them. A test that regenerates a fixture's
+	# heightmap PNG and rebakes would otherwise keep baking the OLD
+	# elevation, silently, with no error to show for it.
+	_corner_height_cache = {}
 
 # Clamped addressing at the edges (roadmap's own noted risk: without this,
 # a unit standing exactly on the map boundary would sample past the image
@@ -375,6 +419,54 @@ static func _cell_on_bridge(x0: float, x1: float, z0: float, z1: float, bridges:
 # instead and REJECTS any cell whose slope exceeds MAX_WALKABLE_SLOPE - an
 # O(1) image lookup per corner, not the expensive noise+hill/blob loop
 # stack, so the same bake-time problem doesn't apply.
+# Corner-height grid, computed once per (map, grid) and reused.
+#
+# _build_ground_faces() samples height_at() at all four corners of every grid
+# cell. Adjacent cells share corners, so every interior corner was being
+# resampled four times: on highland_chokepoint (a 150x150 grid) that is
+# ~90,000 bilinear heightmap samples, measured at 469ms of a 676ms rebake
+# once _nav_cell_size() had brought the Recast bake itself down to ~90ms.
+#
+# Caching across calls (not just within one) is what makes the mid-match
+# rebake cheap, and it is safe because terrain height is immutable for the
+# life of a match - height_at() reads the map's heightmap/hills/noise, none
+# of which change. Only the building holes change between rebakes, and those
+# are applied separately below as rect tests, never through this grid.
+#
+# Float64 (not 32) deliberately: these values feed the max_slope >
+# MAX_WALKABLE_SLOPE comparison, and a cell sitting exactly on that
+# threshold should not flip walkability because the cache rounded it.
+static var _corner_height_cache: Dictionary = {}
+
+static func _corner_heights(map_def: Dictionary, half: float, cell: float) -> Dictionary:
+	# Keyed on the heightmap PATH as well as the name: two map dicts can
+	# share a name (or have none at all - test fixtures and inline dicts
+	# like {"map_half_extents": 300.0} are common in run_tests.gd) while
+	# describing completely different elevation, and silently serving one
+	# map's heights for another would be near-impossible to diagnose from
+	# the symptom (a subtly wrong navmesh).
+	var terrain: Dictionary = map_def.get("terrain", {})
+	var key = "%s:%s:%s:%s" % [map_def.get("name", ""), terrain.get("heightmap", ""), half, cell]
+	if _corner_height_cache.has(key):
+		return _corner_height_cache[key]
+	# Exactly the boundary sequence the while-loops below walk (v = min(v +
+	# cell, half), terminating at half), so corner i is always grid line i.
+	var coords := PackedFloat64Array()
+	var v := -half
+	coords.append(v)
+	while v < half:
+		v = min(v + cell, half)
+		coords.append(v)
+	var n := coords.size()
+	var heights := PackedFloat64Array()
+	heights.resize(n * n)
+	for i in range(n):
+		for j in range(n):
+			heights[i * n + j] = height_at(map_def, coords[i], coords[j])
+	var out := {"heights": heights, "n": n}
+	_corner_height_cache[key] = out
+	return out
+
 static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) -> PackedVector3Array:
 	var verts = PackedVector3Array()
 	var half: float = map_def.get("map_half_extents", 80.0)
@@ -395,10 +487,20 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) ->
 	var has_blobs = not map_def.get("water_blobs", []).is_empty()
 	var heightmap_img = _get_heightmap_image(map_def)
 	var cell = _nav_grid_cell(map_def)
+	# Only the heightmap branch below reads corner heights, so only build
+	# (or fetch) the shared grid when there is a heightmap to sample.
+	var corner_heights := PackedFloat64Array()
+	var corner_n := 0
+	if heightmap_img:
+		var grid = _corner_heights(map_def, half, cell)
+		corner_heights = grid["heights"]
+		corner_n = grid["n"]
 
+	var xi = 0
 	var x = -half
 	while x < half:
 		var x1 = min(x + cell, half)
+		var zi = 0
 		var z = -half
 		while z < half:
 			var z1 = min(z + cell, half)
@@ -415,10 +517,12 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) ->
 			if not blocked and has_blobs and _cell_on_water_blob(x, x1, z, z1, map_def):
 				blocked = true
 			if not blocked and heightmap_img:
-				var h00 = height_at(map_def, x, z)
-				var h10 = height_at(map_def, x1, z)
-				var h01 = height_at(map_def, x, z1)
-				var h11 = height_at(map_def, x1, z1)
+				# Grid line xi is world x, xi+1 is world x1 (see
+				# _corner_heights() - it walks the same sequence).
+				var h00 = corner_heights[xi * corner_n + zi]
+				var h10 = corner_heights[(xi + 1) * corner_n + zi]
+				var h01 = corner_heights[xi * corner_n + zi + 1]
+				var h11 = corner_heights[(xi + 1) * corner_n + zi + 1]
 				var max_slope = max(
 					max(abs(h10 - h00), abs(h01 - h00)),
 					max(abs(h11 - h10), abs(h11 - h01))
@@ -434,7 +538,9 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) ->
 				# query (terrain_height_at()) are real heightmap-driven.
 				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
 			z = z1
+			zi += 1
 		x = x1
+		xi += 1
 	return verts
 
 # Same grid-quad sweep as _build_ground_faces(), but water is walkable
@@ -536,6 +642,51 @@ static func rebake_ground_and_amphibious(map_def: Dictionary, extra_holes: Array
 	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
 	NavigationServer3D.region_set_navigation_mesh(amphibious_region, _bake_nav_mesh(amphibious_verts, cell_size))
 
+# Async twin of rebake_ground_and_amphibious(), for the MID-MATCH rebake.
+#
+# Even after _nav_cell_size() dropped the per-surface Recast bake from
+# ~1585ms to ~327ms, a placement still stalled the main thread for ~766ms
+# (two surfaces plus face generation) - short of a freeze, but well past a
+# dropped frame, and paid on every building placed or destroyed.
+#
+# Recast itself is the bulk of that and does not need to run on the main
+# thread: NavigationServer3D.bake_from_source_geometry_data_async() hands it
+# to a worker and invokes the callback when the mesh is ready. What stays
+# synchronous here is only the GDScript face generation (~70-100ms with the
+# corner-height cache), because it walks map_def and has to see a consistent
+# snapshot of the building holes.
+#
+# The INITIAL map-load bake deliberately keeps using the synchronous version
+# above: units spawn and take their first orders within a frame or two of
+# _ready(), so a navmesh that arrives "soon" instead of "now" would let the
+# very first path query run against an empty region. Load already blocks;
+# the mid-match rebake is the one that must not.
+#
+# on_ready is invoked once BOTH surfaces have finished baking, so callers
+# can repath units against a fully-updated navmesh rather than a half-
+# updated one.
+static func rebake_ground_and_amphibious_async(map_def: Dictionary, extra_holes: Array, ground_region: RID, amphibious_region: RID, on_ready: Callable = Callable()) -> void:
+	var cell_size = _nav_cell_size(map_def)
+	var ground_verts = _build_ground_faces(map_def, extra_holes)
+	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
+	# Shared countdown so on_ready fires exactly once, after the second of
+	# the two bakes lands (order between them is not guaranteed).
+	var remaining = {"n": 2}
+	_bake_region_async(ground_region, ground_verts, cell_size, remaining, on_ready)
+	_bake_region_async(amphibious_region, amphibious_verts, cell_size, remaining, on_ready)
+
+static func _bake_region_async(region: RID, verts: PackedVector3Array, cell_size: float, remaining: Dictionary, on_ready: Callable) -> void:
+	var nav_mesh = NavigationMesh.new()
+	nav_mesh.cell_size = cell_size
+	nav_mesh.cell_height = cell_size
+	var source = NavigationMeshSourceGeometryData3D.new()
+	source.add_faces(verts, Transform3D.IDENTITY)
+	NavigationServer3D.bake_from_source_geometry_data_async(nav_mesh, source, func():
+		NavigationServer3D.region_set_navigation_mesh(region, nav_mesh)
+		remaining["n"] -= 1
+		if remaining["n"] <= 0 and on_ready.is_valid():
+			on_ready.call())
+
 static func build_navmeshes(map_def: Dictionary, extra_holes: Array = []) -> Dictionary:
 	# RTS_CORE_ROADMAP.md B8: a NavigationServer3D MAP has its own
 	# cell_size/cell_height (default 0.25, independent of whatever a
@@ -597,6 +748,83 @@ static func build_navmeshes(map_def: Dictionary, extra_holes: Array = []) -> Dic
 
 	return {"ground_map": ground_map, "water_map": water_map, "amphibious_map": amphibious_map, "deep_water_map": deep_water_map,
 		"ground_region": ground_region, "water_region": water_region, "amphibious_region": amphibious_region, "deep_water_region": deep_water_region}
+
+
+# Same as build_navmeshes(), but WITHOUT baking: every map and region RID is
+# created and wired up, and the source geometry for each surface is returned
+# unbaked in "pending" so the caller can bake them one at a time with a frame
+# yielded in between.
+#
+# WHY, given rebake_ground_and_amphibious_async() already exists. The async
+# API is the right tool mid-match, where the old navmesh stays usable until
+# the new one lands. It is the wrong tool at match load, because there IS no
+# previous navmesh - units spawn and take their first orders within a frame
+# or two of _ready(), and a path query against a region with no mesh yet
+# silently fails. So the load path still bakes to completion before the match
+# starts; it just stops doing all four surfaces inside a single frame.
+#
+# The cost is unchanged (~4s on lake_crossing, four surfaces at ~1s each).
+# What changes is that the main thread ticks between them, so the window
+# keeps pumping messages instead of going four seconds without one - which is
+# what made Windows grey the title bar and report Not Responding.
+#
+# Each pending entry is {"region": RID, "verts": PackedVector3Array, "label":
+# String}; feed them to bake_pending_entry() in order.
+static func build_navmeshes_deferred(map_def: Dictionary, extra_holes: Array = []) -> Dictionary:
+	var cell_size = _nav_cell_size(map_def)
+	var ground_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_cell_size(ground_map, cell_size)
+	NavigationServer3D.map_set_cell_height(ground_map, cell_size)
+	NavigationServer3D.map_set_active(ground_map, true)
+	var water_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_cell_size(water_map, cell_size)
+	NavigationServer3D.map_set_cell_height(water_map, cell_size)
+	NavigationServer3D.map_set_active(water_map, true)
+	var amphibious_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_cell_size(amphibious_map, cell_size)
+	NavigationServer3D.map_set_cell_height(amphibious_map, cell_size)
+	NavigationServer3D.map_set_active(amphibious_map, true)
+	var deep_water_map = NavigationServer3D.map_create()
+	NavigationServer3D.map_set_cell_size(deep_water_map, cell_size)
+	NavigationServer3D.map_set_cell_height(deep_water_map, cell_size)
+	NavigationServer3D.map_set_active(deep_water_map, true)
+
+	var pending: Array = []
+
+	var ground_region = NavigationServer3D.region_create()
+	NavigationServer3D.region_set_map(ground_region, ground_map)
+	pending.append({"region": ground_region, "verts": _build_ground_faces(map_def, extra_holes), "label": "Surveying ground"})
+
+	var water_verts = PackedVector3Array()
+	for w in map_def.get("water_areas", []):
+		var rect = _rect_from(w.center, w.half_extents)
+		_add_nav_quad(water_verts, Vector3(rect.x0, 0, rect.z0), Vector3(rect.x1, 0, rect.z0),
+			Vector3(rect.x1, 0, rect.z1), Vector3(rect.x0, 0, rect.z1))
+	for blob in map_def.get("water_blobs", []):
+		water_verts.append_array(_water_blob_fan_verts(blob, 0.0))
+	var water_region: RID = RID()
+	if water_verts.size() > 0:
+		water_region = NavigationServer3D.region_create()
+		NavigationServer3D.region_set_map(water_region, water_map)
+		pending.append({"region": water_region, "verts": water_verts, "label": "Charting waterways"})
+
+	var amphibious_region = NavigationServer3D.region_create()
+	NavigationServer3D.region_set_map(amphibious_region, amphibious_map)
+	pending.append({"region": amphibious_region, "verts": _build_amphibious_faces(map_def, extra_holes), "label": "Marking fording points"})
+
+	var deep_water_verts = _build_deep_water_faces(map_def)
+	var deep_water_region: RID = RID()
+	if deep_water_verts.size() > 0:
+		deep_water_region = NavigationServer3D.region_create()
+		NavigationServer3D.region_set_map(deep_water_region, deep_water_map)
+		pending.append({"region": deep_water_region, "verts": deep_water_verts, "label": "Sounding deep water"})
+
+	return {"ground_map": ground_map, "water_map": water_map, "amphibious_map": amphibious_map, "deep_water_map": deep_water_map,
+		"ground_region": ground_region, "water_region": water_region, "amphibious_region": amphibious_region, "deep_water_region": deep_water_region,
+		"pending": pending, "cell_size": cell_size}
+
+static func bake_pending_entry(entry: Dictionary, cell_size: float) -> void:
+	NavigationServer3D.region_set_navigation_mesh(entry["region"], _bake_nav_mesh(entry["verts"], cell_size))
 
 # --- Visuals ---
 

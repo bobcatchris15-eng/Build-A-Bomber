@@ -51,12 +51,38 @@ func _ready():
 			child.dragged.connect(_on_dragged.bind(child.axis))
 			child.drag_ended.connect(_on_drag_ended)
 
-	# Free-form rotation ring (Spore/KSP style, MOUNTING_AND_ARMOR_SPEC.md #3)
 	var ring = get_node_or_null("HandleRotate")
 	if ring:
 		ring.drag_started.connect(_on_drag_started)
 		ring.rotated.connect(_on_rotated)
 		ring.drag_ended.connect(_on_drag_ended)
+
+var _telemetry_label: Label3D = null
+
+func _get_telemetry_label() -> Label3D:
+	if _telemetry_label != null:
+		return _telemetry_label
+	_telemetry_label = Label3D.new()
+	_telemetry_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_telemetry_label.double_sided = false
+	_telemetry_label.no_depth_test = true
+	_telemetry_label.render_priority = 10
+	_telemetry_label.font_size = 18
+	_telemetry_label.outline_size = 4
+	_telemetry_label.outline_color = Color(0, 0, 0, 0.9)
+	_telemetry_label.modulate = Color(0.0, 0.95, 1.0, 1.0) # Glowing CAD cyan
+	add_child(_telemetry_label)
+	return _telemetry_label
+
+func _show_telemetry_callout(text: String, pos_offset: Vector3):
+	var lbl = _get_telemetry_label()
+	lbl.text = text
+	lbl.position = pos_offset
+	lbl.visible = true
+
+func _hide_telemetry_callout():
+	if _telemetry_label:
+		_telemetry_label.visible = false
 
 func _on_rotated(delta_angle: float):
 	# Free-form yaw rotation from the ring handle - continuous, not snapped
@@ -67,6 +93,8 @@ func _on_rotated(delta_angle: float):
 	target_module.rotate_object_local(Vector3.UP, delta_angle)
 	var yaw = wrapf(target_module.get_meta("yaw_offset", 0.0) + delta_angle, 0.0, 2.0 * PI)
 	target_module.set_meta("yaw_offset", yaw)
+	var yaw_deg = rad_to_deg(yaw)
+	_show_telemetry_callout("∠ YAW: %.1f°" % yaw_deg, Vector3(0, 1.5, 0))
 
 	if target_module.has_meta("mirrored_counterpart"):
 		var mirror = target_module.get_meta("mirrored_counterpart")
@@ -137,6 +165,7 @@ func _on_dragged(offset_3d: Vector3, axis: Vector3):
 						VisualBuilder.rebuild_visual(mirror)
 						
 				# Update the UI
+				_show_telemetry_callout("⚡ %s: %.2f" % [spec.label if spec else tweak_name, new_val], Vector3(0, 1.5, 0))
 				get_tree().call_group("stat_ui", "on_module_selected", target_module)
 				var root = get_node_or_null("/root/MainLab")
 				var hull = root.get_node_or_null("Hull") if root else null
@@ -155,6 +184,7 @@ func _on_dragged(offset_3d: Vector3, axis: Vector3):
 	elif axis.z != 0: new_scale.z = max(0.1, start_scale.z + scale_change)
 	
 	_apply_scale_to_node(target_module, new_scale)
+	_show_telemetry_callout("⚡ SCALE: (%.1f, %.1f, %.1f)" % [new_scale.x, new_scale.y, new_scale.z], Vector3(0, 1.5, 0))
 	
 	# Mirror scaling propagation
 	if target_module.has_meta("mirrored_counterpart"):
@@ -250,6 +280,40 @@ func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
 			if is_instance_valid(child):
 				var start_pos = child_start_positions[child]
 				child.position = start_pos * scale_factor
+	elif node.has_meta("module_data") and node.get_meta("module_data").category == "structural":
+		# Structural pieces get SCALE ISOLATION, same as the Hull above and
+		# for the same reason. Writing node.scale here stretched the module's
+		# whole subtree, which since the structural rebuild means stretching
+		# the fixed-size authored hardware (bolt heads, brackets, splice
+		# collars) that exists specifically so it WON'T stretch - a girder
+		# pulled to 4x length came out with 4x-long bolts. Instead the resize
+		# is stored as a multiplier and the body is rebuilt at the new size,
+		# so the detail re-instances at its authored size and the COUNT grows.
+		# This is what makes these behave like hull-builder primitives.
+		var data = node.get_meta("module_data")
+		node.scale = Vector3.ONE
+		node.set_meta("struct_scale", new_scale)
+		data.scale_multiplier = new_scale
+		VisualBuilder.rebuild_visual(node)
+
+		# The colliders are children, so they used to be resized for free by
+		# the node scale that no longer happens. Both have to be driven by
+		# hand now: the layer-2 body is the click target, and the layer-16
+		# StructuralSurface is the mounting area other modules snap onto -
+		# a stale one there means new modules snap to where the piece used
+		# to end.
+		var catalog_size: Vector3 = ModuleCatalogScript.get_module_data(data.type_id).get("size", Vector3.ONE)
+		var target = Vector3(catalog_size.x * new_scale.x, catalog_size.y * new_scale.y, catalog_size.z * new_scale.z)
+		for child in node.get_children():
+			if not (child is StaticBody3D):
+				continue
+			child.position = Vector3(0, target.y / 2.0, 0)
+			for shape_node in child.get_children():
+				if shape_node is CollisionShape3D and shape_node.shape is BoxShape3D:
+					if not shape_node.shape.resource_local_to_scene:
+						shape_node.shape = shape_node.shape.duplicate()
+					shape_node.shape.size = target
+					shape_node.position = Vector3.ZERO
 	else:
 		# Standard module scaling
 		node.scale = new_scale

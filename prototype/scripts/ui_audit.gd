@@ -8,6 +8,21 @@ static func find_overflowing_panels(node: Node, results: Array = []) -> Array:
 		if node.size.x < 4.0 and node.size.y < 4.0:
 			h_fixed = false
 			v_fixed = false
+		# Explicit opt-out for containers whose whole job is to clip. A
+		# collapsed drawer (parts_menu.gd) is a zero-height clip window around
+		# a full-height button list: correct behaviour that looks exactly like
+		# the bug this audit hunts for.
+		#
+		# Deliberately a meta flag and NOT a `clip_contents` check, which was
+		# the obvious version and is wrong: ScrollContainer sets clip_contents
+		# internally, so keying off it would have silently exempted every
+		# ScrollContainer in the project - the exact node type the real
+		# overflow bug this tool was written for lived in. Caught by
+		# test_ui_audit_has_real_teeth, which is what that suite is for.
+		# An opt-out has to be something a caller states on purpose.
+		if node.get_meta("ui_audit_clip_ok", false):
+			h_fixed = false
+			v_fixed = false
 		if h_fixed or v_fixed:
 			var content_min = Vector2.ZERO
 			var culprit_path = ""

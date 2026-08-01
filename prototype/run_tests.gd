@@ -600,6 +600,34 @@ func _init():
 		success = false
 		_failed.append("test_hull_modding_parts_menu_two_buckets")
 	_total_suites += 1
+	if not await _run_suite(test_module_roles_group_and_sort_the_parts_menu, "test_module_roles_group_and_sort_the_parts_menu"):
+		success = false
+		_failed.append("test_module_roles_group_and_sort_the_parts_menu")
+	_total_suites += 1
+	if not await _run_suite(test_structural_pieces_resize_without_smearing_detail, "test_structural_pieces_resize_without_smearing_detail"):
+		success = false
+		_failed.append("test_structural_pieces_resize_without_smearing_detail")
+	_total_suites += 1
+	if not await _run_suite(test_structural_resize_survives_a_blueprint_round_trip, "test_structural_resize_survives_a_blueprint_round_trip"):
+		success = false
+		_failed.append("test_structural_resize_survives_a_blueprint_round_trip")
+	_total_suites += 1
+	if not await _run_suite(test_part_material_roles_differentiate_surfaces, "test_part_material_roles_differentiate_surfaces"):
+		success = false
+		_failed.append("test_part_material_roles_differentiate_surfaces")
+	_total_suites += 1
+	if not await _run_suite(test_clipping_highlight_does_not_corrupt_shared_materials, "test_clipping_highlight_does_not_corrupt_shared_materials"):
+		success = false
+		_failed.append("test_clipping_highlight_does_not_corrupt_shared_materials")
+	_total_suites += 1
+	if not await _run_suite(test_napalm_mortar_tube_points_upward, "test_napalm_mortar_tube_points_upward"):
+		success = false
+		_failed.append("test_napalm_mortar_tube_points_upward")
+	_total_suites += 1
+	if not await _run_suite(test_anti_materiel_rifle_is_wired_and_trades_real_capability, "test_anti_materiel_rifle_is_wired_and_trades_real_capability"):
+		success = false
+		_failed.append("test_anti_materiel_rifle_is_wired_and_trades_real_capability")
+	_total_suites += 1
 	if not await _run_suite(test_hull_modding_hard_fail_on_unknown_hull, "test_hull_modding_hard_fail_on_unknown_hull"):
 		success = false
 		_failed.append("test_hull_modding_hard_fail_on_unknown_hull")
@@ -10279,8 +10307,652 @@ func test_hull_modding_loader_scan_and_validation() -> bool:
 	print("  [PASS] HullLoader scans both directories, skips malformed sidecars without failing the whole scan, and a mod hull correctly overrides a built-in of the same id (logged as a warning).")
 	return true
 
+func test_module_roles_group_and_sort_the_parts_menu() -> bool:
+	print("Running Test Suite: Parts Menu - Modules Group By Catalog Role, Sorted Light To Heavy...")
+	var menu = preload("res://scenes/UI_PartsMenu.tscn").instantiate()
+	root.add_child(menu)
+	await process_frame
+
+	var ok = true
+	var catalog = ModuleCatalog.get_catalog()
+
+	# Every non-hull, non-locomotion part must land in the drawer its OWN
+	# catalog role names, and nothing may go missing. The role table lives in
+	# module_catalog.gd rather than in the UI script precisely so a modded
+	# part can declare one; this asserts the menu genuinely reads it instead
+	# of carrying a second, drifting copy.
+	var tab_modules = menu.get_node("PanelContainer/VBoxContainer/TabContainer/Modules/VBoxContainer")
+	var placed := {}
+	for drawer in tab_modules.get_children():
+		if not drawer.has_meta("drawer_category"):
+			continue
+		var group = drawer.get_meta("drawer_category")
+		var last_weight := -1.0
+		for btn in drawer.get_meta("content_container").get_children():
+			var type_id = btn.module_type_id
+			var data = catalog[type_id]
+			placed[type_id] = true
+
+			var expect = ModuleCatalog.get_module_role(type_id, data.get("category", ""))
+			if group != expect:
+				print("  [FAIL] %s has role '%s' but landed in drawer '%s'" % [type_id, expect, group])
+				ok = false
+
+			var w = float(data.get("weight", 0.0))
+			if w < last_weight:
+				print("  [FAIL] Drawer '%s' not sorted light-to-heavy (%s at %.0f follows %.0f)" % [
+					group, type_id, w, last_weight])
+				ok = false
+			last_weight = w
+
+	for type_id in catalog.keys():
+		var cat = catalog[type_id].get("category", "module")
+		if cat == "hull" or cat == "locomotion":
+			continue
+		if not placed.has(type_id):
+			print("  [FAIL] Module '%s' (category %s) appears in no drawer at all" % [type_id, cat])
+			ok = false
+
+	# Locomotion groups come off each drive's own `traits` array, not a
+	# type_id table - same modding argument.
+	var tab_loco = menu.get_node("PanelContainer/VBoxContainer/TabContainer/Locomotion/VBoxContainer")
+	var loco_seen := 0
+	for drawer in tab_loco.get_children():
+		if not drawer.has_meta("drawer_category"):
+			continue
+		var group = drawer.get_meta("drawer_category")
+		for btn in drawer.get_meta("content_container").get_children():
+			loco_seen += 1
+			var traits: Array = catalog[btn.module_type_id].get("traits", [])
+			var expect_air = "airborne" in traits
+			if expect_air != (group == "Air"):
+				print("  [FAIL] %s (traits %s) landed in locomotion drawer '%s'" % [
+					btn.module_type_id, str(traits), group])
+				ok = false
+	if loco_seen == 0:
+		print("  [FAIL] Locomotion tab is empty")
+		ok = false
+
+	# Search is the retrieval half of the menu - grouping only helps browsing.
+	# Typing must filter across every tab at once, open the surviving drawers
+	# (otherwise you'd have to click to see what you just searched for), and
+	# fully restore on clear.
+	menu._on_search_changed("laser")
+	await process_frame
+	var hits := []
+	for drawer in menu._all_drawers:
+		if not drawer.visible:
+			continue
+		for btn in drawer.get_meta("content_container").get_children():
+			if btn.visible:
+				hits.append(btn.module_type_id)
+	hits.sort()
+	if hits != ["heavy_laser", "pd_laser"]:
+		print("  [FAIL] Search 'laser' returned ", hits, " expected [heavy_laser, pd_laser]")
+		ok = false
+	for drawer in menu._all_drawers:
+		if drawer.visible and not drawer.get_meta("drawer_open"):
+			print("  [FAIL] Drawer '%s' survived the filter but stayed shut" % drawer.get_meta("drawer_category"))
+			ok = false
+			break
+
+	menu._on_search_changed("")
+	await process_frame
+	var restored := 0
+	for drawer in menu._all_drawers:
+		if not drawer.visible:
+			print("  [FAIL] Drawer '%s' still hidden after clearing the search" % drawer.get_meta("drawer_category"))
+			ok = false
+			break
+		for btn in drawer.get_meta("content_container").get_children():
+			if btn.visible:
+				restored += 1
+	if restored < catalog.size():
+		print("  [FAIL] Only %d of %d parts came back after clearing the search" % [restored, catalog.size()])
+		ok = false
+
+	menu.queue_free()
+	if not ok:
+		return false
+	print("  [PASS] Modules/locomotion group off their own catalog fields, sort light-to-heavy, and search filters + restores across all tabs.")
+	return true
+
+func test_structural_pieces_resize_without_smearing_detail() -> bool:
+	print("Running Test Suite: Structural Pieces - Scale Isolation Keeps Authored Hardware Unstretched...")
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	var Gizmo = preload("res://scripts/gizmo_3d.gd")
+	var ModuleDataRes = preload("res://scripts/module_data.gd")
+	var ok = true
+
+	for type_id in ["structural_block", "structural_dome", "structural_slab",
+					"structural_wedge", "structural_girder", "structural_i_beam"]:
+		var cd = ModuleCatalog.get_module_data(type_id)
+		var module = Node3D.new()
+		root.add_child(module)
+		VisualBuilder.build_visual(type_id, module, cd.size, cd.color, {})
+
+		# Stand in for what module_placer builds: the layer-2 click target and
+		# the layer-16 mounting surface.
+		for layer in [2, 16]:
+			var sb = StaticBody3D.new()
+			sb.collision_layer = layer
+			var cs = CollisionShape3D.new()
+			var bx = BoxShape3D.new()
+			bx.size = cd.size
+			cs.shape = bx
+			sb.add_child(cs)
+			module.add_child(sb)
+
+		var data = ModuleDataRes.new()
+		data.type_id = type_id
+		data.category = "structural"
+		module.set_meta("module_data", data)
+
+		var base_hardware := 0
+		for m in module.find_children("*", "MeshInstance3D", true, false):
+			if m.name.begins_with(VisualBuilder.HARDWARE_PREFIX):
+				base_hardware += 1
+		if base_hardware < 4:
+			print("  [FAIL] %s built only %d authored hardware pieces - it's still a bare primitive" % [type_id, base_hardware])
+			ok = false
+
+		var gizmo = Node3D.new()
+		gizmo.set_script(Gizmo)
+		module.add_child(gizmo)
+		await process_frame
+
+		var new_scale = Vector3(1.0, 1.0, 3.0)
+		gizmo._apply_scale_to_node(module, new_scale)
+
+		# THE point of the whole exercise. Writing node.scale is what used to
+		# happen and is what smeared every bolt head 3x along Z; the resize
+		# has to travel as a meta multiplier and come back as a rebuild.
+		if not module.scale.is_equal_approx(Vector3.ONE):
+			print("  [FAIL] %s wrote node.scale (%s) instead of isolating the resize" % [type_id, str(module.scale)])
+			ok = false
+		if not Vector3(module.get_meta("struct_scale", Vector3.ZERO)).is_equal_approx(new_scale):
+			print("  [FAIL] %s did not record struct_scale" % type_id)
+			ok = false
+
+		var grown_hardware := 0
+		for m in module.find_children("*", "MeshInstance3D", true, false):
+			if not m.name.begins_with(VisualBuilder.HARDWARE_PREFIX):
+				continue
+			grown_hardware += 1
+			# UNIFORM scale is allowed (see _hardware()'s uniform_scale note -
+			# an evenly bigger copy keeps every proportion). Anisotropic scale
+			# is the actual defect: that's what smears a bolt head into a
+			# capsule when the body is stretched.
+			if not (is_equal_approx(m.scale.x, m.scale.y) and is_equal_approx(m.scale.y, m.scale.z)):
+				print("  [FAIL] %s: hardware '%s' came out non-uniformly scaled %s - authored detail must never stretch" % [
+					type_id, m.name, str(m.scale)])
+				ok = false
+		# Stretching the body 3x has to buy MORE detail, not bigger detail.
+		if grown_hardware <= base_hardware:
+			print("  [FAIL] %s: hardware count %d -> %d after a 3x stretch; detail density should rise with size" % [
+				type_id, base_hardware, grown_hardware])
+			ok = false
+
+		# Both colliders have to follow, or the click target and the mounting
+		# surface stay the size the piece used to be.
+		var expect_size = cd.size * new_scale
+		for child in module.get_children():
+			if not (child is StaticBody3D):
+				continue
+			var shape = child.get_child(0)
+			if not shape.shape.size.is_equal_approx(expect_size):
+				print("  [FAIL] %s: collider on layer %d is %s, expected %s" % [
+					type_id, child.collision_layer, str(shape.shape.size), str(expect_size)])
+				ok = false
+
+		module.free()
+
+	if not ok:
+		return false
+	print("  [PASS] All six structural pieces isolate their resize, keep authored hardware at authored size, gain detail density with size, and keep both colliders in sync.")
+	return true
+
+func test_structural_resize_survives_a_blueprint_round_trip() -> bool:
+	print("Running Test Suite: Structural Pieces - A Resize Survives Save/Load...")
+	var ok = true
+
+	# The save path reads child.scale for normal modules. Structural pieces
+	# now hold node.scale at ONE, so reading it there would have written
+	# (1,1,1) and silently discarded every structural resize in the design on
+	# the very next save. Assert the meta is what actually gets persisted.
+	var module = Node3D.new()
+	module.scale = Vector3.ONE
+	module.set_meta("struct_scale", Vector3(2.0, 1.0, 0.5))
+	var saved: Vector3 = module.get_meta("struct_scale", module.scale)
+	if not saved.is_equal_approx(Vector3(2.0, 1.0, 0.5)):
+		print("  [FAIL] struct_scale is not what a save would read: ", saved)
+		ok = false
+
+	# A module with no struct_scale (i.e. everything that isn't structural)
+	# must still fall through to node.scale untouched - this is the backward
+	# compatibility guard for every existing blueprint on disk.
+	var plain = Node3D.new()
+	plain.scale = Vector3(1.5, 1.5, 1.5)
+	var plain_saved: Vector3 = plain.get_meta("struct_scale", plain.scale)
+	if not plain_saved.is_equal_approx(Vector3(1.5, 1.5, 1.5)):
+		print("  [FAIL] Non-structural module scale no longer round-trips: ", plain_saved)
+		ok = false
+
+	module.free()
+	plain.free()
+	if not ok:
+		return false
+	print("  [PASS] Structural resizes persist via struct_scale, and non-structural modules still persist via node.scale.")
+	return true
+
+func test_part_material_roles_differentiate_surfaces() -> bool:
+	print("Running Test Suite: Part Materials - Roles Give Parts Different Substances, Not Just Different Paint...")
+	var PartMaterials = preload("res://scripts/part_materials.gd")
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	var ok = true
+
+	# Roles are resolved from the authored filename, which is what lets ~190
+	# existing parts pick one up without editing their call sites.
+	var expectations = {
+		"hmg_barrel": "gunmetal",
+		"basic_cannon": "steel",
+		"heavy_laser_lens": "optics",
+		"tread_belt_loop": "rubber",
+		"hmg_ammo_drum": "brass",
+		"muzzle_brake": "scorched",
+		"coilgun_coil": "energized",
+		"missile_pod_housing": "painted",
+	}
+	for part_name in expectations:
+		var got = PartMaterials.role_for_part(part_name)
+		if got != expectations[part_name]:
+			print("  [FAIL] role_for_part('%s') = '%s', expected '%s'" % [part_name, got, expectations[part_name]])
+			ok = false
+	# Anything unrecognised must degrade to the default role, never to "".
+	if PartMaterials.role_for_part("totally_unknown_modded_thing") != PartMaterials.DEFAULT_ROLE:
+		print("  [FAIL] An unrecognised part name must fall back to DEFAULT_ROLE")
+		ok = false
+
+	# The actual defect being fixed: every part used to get a bare
+	# StandardMaterial3D with only albedo_color set, i.e. Godot's default
+	# metallic 0.0 / roughness 1.0 - matte plastic for a barrel, a lens and a
+	# tyre alike. Assert they now differ in SURFACE, not just in colour.
+	var tint = Color(0.4, 0.4, 0.4)
+	var barrel = PartMaterials.get_material("gunmetal", tint)
+	var lens = PartMaterials.get_material("optics", tint)
+	var tyre = PartMaterials.get_material("rubber", tint)
+	if is_equal_approx(barrel.metallic, tyre.metallic) or is_equal_approx(barrel.roughness, lens.roughness):
+		print("  [FAIL] Roles are not actually differentiated (barrel/tyre metallic, barrel/lens roughness)")
+		ok = false
+	if barrel.metallic <= 0.0 or barrel.roughness >= 1.0:
+		print("  [FAIL] gunmetal is still at Godot's matte-plastic defaults: metallic=%.2f roughness=%.2f" % [
+			barrel.metallic, barrel.roughness])
+		ok = false
+	if tyre.metallic != 0.0:
+		print("  [FAIL] rubber must not be metallic, got %.2f" % tyre.metallic)
+		ok = false
+
+	# Triplanar procedural texture, so the authored meshes need no UVs.
+	if not barrel.uv1_triplanar or barrel.roughness_texture == null:
+		print("  [FAIL] No triplanar roughness texture on a worn role")
+		ok = false
+
+	# Identity sharing is load-bearing: bake_module_visual() merges a battle
+	# module's meshes grouped by material identity, so two parts of the same
+	# role+tint must hand back the SAME resource, not equal copies.
+	if PartMaterials.get_material("gunmetal", tint) != barrel:
+		print("  [FAIL] Materials are not shared - the battle-side mesh merge would be defeated")
+		ok = false
+
+	# A high-tint role takes the caller's colour; a low-tint one stays its own
+	# substance. This is what stops a barrel turning bright red just because
+	# the weapon's catalog colour is.
+	var red = Color(1.0, 0.0, 0.0)
+	var painted_red = PartMaterials.get_material("painted", red)
+	var barrel_red = PartMaterials.get_material("gunmetal", red)
+	if painted_red.albedo_color.r < 0.8:
+		print("  [FAIL] A painted part should take the requested colour, got ", painted_red.albedo_color)
+		ok = false
+	if barrel_red.albedo_color.r > 0.35:
+		print("  [FAIL] A gunmetal barrel should stay gunmetal on a red weapon, got ", barrel_red.albedo_color)
+		ok = false
+
+	# And it has to actually reach a built weapon, not just the palette.
+	var holder = Node3D.new()
+	root.add_child(holder)
+	var cd = ModuleCatalog.get_module_data("heavy_machine_gun")
+	VisualBuilder.build_visual("heavy_machine_gun", holder, cd.size, cd.color, {})
+	var distinct := {}
+	for m in holder.find_children("*", "MeshInstance3D", true, false):
+		if m.material_override != null:
+			distinct[m.material_override.get_instance_id()] = true
+	if distinct.size() < 2:
+		print("  [FAIL] A built HMG uses only %d distinct material(s) - parts are not differentiated" % distinct.size())
+		ok = false
+	holder.free()
+
+	if not ok:
+		return false
+	print("  [PASS] Parts resolve real material roles from their names, roles differ in surface response, materials are shared for the batch merge, and a built weapon carries several.")
+	return true
+
+func test_clipping_highlight_does_not_corrupt_shared_materials() -> bool:
+	print("Running Test Suite: Design Lab - Clipping Highlight Swaps Materials Instead Of Mutating Them...")
+	var PartMaterials = preload("res://scripts/part_materials.gd")
+	var ModulePlacer = preload("res://scripts/module_placer.gd")
+	var ok = true
+
+	# The clipping pass used to write albedo_color/emission straight onto each
+	# mesh's material_override. With materials now SHARED per role+tint, that
+	# would have repainted every other part in the scene using that role - one
+	# clipping module turning the whole vehicle red. It also meant the "not
+	# clipping" branch flattened every mesh to the catalog colour on every
+	# pass, which ran on every drag and tweak, so per-part colours never
+	# survived to be seen at all.
+	var tint = Color(0.4, 0.4, 0.4)
+	var shared = PartMaterials.get_material("gunmetal", tint)
+	var before = shared.albedo_color
+
+	var clip_mat = ModulePlacer._clipping_material()
+	if clip_mat == null or clip_mat.albedo_color != Color(1.0, 0.0, 0.0):
+		print("  [FAIL] No dedicated red clipping material")
+		ok = false
+	if clip_mat == shared:
+		print("  [FAIL] The clipping material must not BE a part material")
+		ok = false
+	if ModulePlacer._clipping_material() != clip_mat:
+		print("  [FAIL] The clipping material must be shared, not rebuilt per mesh")
+		ok = false
+
+	# Simulate the swap-and-restore the pass now performs.
+	var mesh = MeshInstance3D.new()
+	mesh.material_override = shared
+	mesh.set_meta("base_material", mesh.material_override)
+	mesh.material_override = ModulePlacer._clipping_material()
+	mesh.material_override = mesh.get_meta("base_material")
+
+	if mesh.material_override != shared:
+		print("  [FAIL] Restoring did not put the part's own material back")
+		ok = false
+	if shared.albedo_color != before:
+		print("  [FAIL] The shared material was mutated by the highlight cycle: %s -> %s" % [
+			str(before), str(shared.albedo_color)])
+		ok = false
+
+	mesh.free()
+	if not ok:
+		return false
+	print("  [PASS] The clipping highlight swaps to a shared red material and restores the part's own, never mutating a shared resource.")
+	return true
+
+func test_anti_materiel_rifle_is_wired_and_trades_real_capability() -> bool:
+	print("Running Test Suite: Anti-Materiel Rifle - Full Wiring, Precision Damage Profile, And A Bipod That Costs Something...")
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	var StatCalc = preload("res://scripts/stat_calculator.gd")
+	var EnemyAI = preload("res://scripts/enemy_ai.gd")
+	var ok = true
+	var tid = "anti_materiel_rifle"
+
+	# --- Registration: every point a weapon has to appear at ---------------
+	var cd = ModuleCatalog.get_module_data(tid)
+	if cd.get("category", "") != "weapon":
+		print("  [FAIL] No catalog entry")
+		ok = false
+	if not ModuleCatalog.WEAPON_FIRE_PROFILES.has(tid):
+		print("  [FAIL] No fire profile")
+		ok = false
+	if ModuleCatalog.get_module_flavor(tid) == "":
+		print("  [FAIL] No flavor line")
+		ok = false
+	if ModuleCatalog.get_module_role(tid, "weapon") != "Direct-Fire Guns":
+		print("  [FAIL] Not sorted into a parts-menu role drawer")
+		ok = false
+	if not StatCalc.TWEAK_SPECS.has(tid):
+		print("  [FAIL] No tweak specs - the module would be unmodifiable in the Lab")
+		ok = false
+	if tid not in EnemyAI.ANTI_ARMOR_WEAPONS:
+		print("  [FAIL] The AI does not recognise it as an anti-armor answer")
+		ok = false
+
+	# --- The whole design premise: one enormous per-shot number ------------
+	# Per-shot damage is dps * fire_rate (fire_rate is an INTERVAL), and
+	# per-shot is what damage_resolver's armor thresholds gate on. This
+	# weapon only justifies its cost if that number is the biggest among
+	# weapons you can actually POINT at a target - otherwise it is simply a
+	# worse cannon.
+	#
+	# Arc weapons are excluded from the comparison deliberately, not to make
+	# the assertion pass: artillery lands a larger 405 per shot, but it buys
+	# that with indirect fire it cannot aim at something in front of it, and
+	# with splash instead of precision. Comparing a rifle against it would
+	# be comparing two different jobs. Every DIRECT-fire weapon is fair game.
+	var profile = ModuleCatalog.get_fire_profile(tid)
+	var per_shot = cd.dps * profile.fire_rate
+	var best_other := 0.0
+	var best_name := ""
+	for other_id in ModuleCatalog.get_catalog().keys():
+		if other_id == tid:
+			continue
+		var od = ModuleCatalog.get_module_data(other_id)
+		if od.get("category", "") != "weapon" or od.get("dps", 0.0) <= 0.0:
+			continue
+		if ModuleCatalog.PROJECTILE_CLASS.get(other_id, "hitscan") == "arc":
+			continue
+		var op = ModuleCatalog.get_fire_profile(other_id)
+		var ops = od.dps * op.get("fire_rate", 1.0)
+		if ops > best_other:
+			best_other = ops
+			best_name = other_id
+	if per_shot <= best_other:
+		print("  [FAIL] Per-shot %.0f is not the largest direct-fire number in the roster (%s has %.0f) - it has no reason to exist" % [
+			per_shot, best_name, best_other])
+		ok = false
+
+	# --- Tweak plumbing traps ---------------------------------------------
+	# bipod_deploy ranges 0..1. If it ever gets added to one of module_data's
+	# blanket linear multiplier lists, an UNdeployed bipod multiplies the
+	# module weight by zero and the design mass silently vanishes.
+	var md = ModuleData.new()
+	md.type_id = tid
+	md.base_weight = cd.weight
+	md.cost_metal = cd.metal
+	md.cost_crystal = cd.crystal
+	md.base_dps = cd.dps
+	var base_weight = md.get_weight()
+	md.tweaks = {"bipod_deploy": 0.0}
+	var stowed_weight = md.get_weight()
+	md.tweaks = {"bipod_deploy": 1.0}
+	var deployed_weight = md.get_weight()
+	if stowed_weight <= 0.0 or not is_equal_approx(stowed_weight, base_weight):
+		print("  [FAIL] bipod_deploy=0 changed the weight to %.1f (base %.1f) - it is in a multiplier list" % [
+			stowed_weight, base_weight])
+		ok = false
+	if deployed_weight <= stowed_weight:
+		print("  [FAIL] Fitting a bipod is free (%.1f -> %.1f)" % [stowed_weight, deployed_weight])
+		ok = false
+
+	# optic_power buys REACH, and is paid for in crystal - it must not buy
+	# damage, or it stops being a trade and becomes a strictly-better slider.
+	md.tweaks = {}
+	var base_cost = md.get_cost()
+	var base_dps = md.get_dps()
+	md.tweaks = {"optic_power": 2.0}
+	var optic_cost = md.get_cost()
+	if not is_equal_approx(md.get_dps(), base_dps):
+		print("  [FAIL] optic_power changed dps %.1f -> %.1f; a sight must not make a round hit harder" % [
+			base_dps, md.get_dps()])
+		ok = false
+	if optic_cost.y <= base_cost.y:
+		print("  [FAIL] optic_power costs no extra crystal (%d -> %d)" % [base_cost.y, optic_cost.y])
+		ok = false
+	if md.get_weight() >= base_weight * 2.0:
+		print("  [FAIL] A 2x optic more than doubled the whole weapon mass (%.1f -> %.1f)" % [
+			base_weight, md.get_weight()])
+		ok = false
+
+	# --- Visual assembly ---------------------------------------------------
+	var holder = Node3D.new()
+	root.add_child(holder)
+	VisualBuilder.build_visual(tid, holder, cd.size, cd.color, {})
+	var stowed_parts = holder.find_children("*", "MeshInstance3D", true, false).size()
+	if stowed_parts < 4:
+		print("  [FAIL] Built from only %d meshes - it fell back to a primitive" % stowed_parts)
+		ok = false
+	holder.free()
+
+	# Deploying the bipod must be VISIBLE, or the player cannot tell a
+	# deployed rifle from a stowed one despite the real combat difference.
+	var holder2 = Node3D.new()
+	root.add_child(holder2)
+	VisualBuilder.build_visual(tid, holder2, cd.size, cd.color, {"bipod_deploy": 1.0})
+	var deployed_parts = holder2.find_children("*", "MeshInstance3D", true, false).size()
+	if deployed_parts <= stowed_parts:
+		print("  [FAIL] Deploying the bipod adds no visible geometry (%d -> %d)" % [stowed_parts, deployed_parts])
+		ok = false
+	holder2.free()
+
+	# A longer barrel must MOVE the muzzle brake, not stretch it - the same
+	# part-separation rule the rest of the roster follows.
+	var holder3 = Node3D.new()
+	root.add_child(holder3)
+	VisualBuilder.build_visual(tid, holder3, cd.size, cd.color, {"barrel_length": 2.2})
+	var stretched := 0
+	var unstretched := 0
+	for m in holder3.find_children("*", "MeshInstance3D", true, false):
+		if m.scale.z > 1.5:
+			stretched += 1
+		else:
+			unstretched += 1
+	if stretched != 1:
+		print("  [FAIL] barrel_length stretched %d parts; exactly the barrel should move" % stretched)
+		ok = false
+	if unstretched < 3:
+		print("  [FAIL] Only %d parts stayed at authored proportions under barrel_length" % unstretched)
+		ok = false
+	holder3.free()
+
+	# --- Firing, and the bipod actual cost ---------------------------------
+	var weapon = Node3D.new()
+	weapon.set_script(preload("res://scripts/auto_weapon.gd"))
+	var wdata = ModuleData.new()
+	wdata.type_id = tid
+	wdata.category = "weapon"
+	wdata.base_dps = cd.dps
+	wdata.tweaks = {"bipod_deploy": 1.0}
+	weapon.set_meta("module_data", wdata)
+	root.add_child(weapon)
+	await process_frame
+
+	if not weapon.bipod_deployed:
+		print("  [FAIL] bipod_deploy=1 did not set bipod_deployed")
+		ok = false
+	if weapon.fire_range <= ModuleCatalog.get_fire_profile(tid).fire_range:
+		print("  [FAIL] A deployed bipod bought no extra range (%.1f)" % weapon.fire_range)
+		ok = false
+
+	# The other half of the trade. With no vehicle to read a velocity off it
+	# must fail OPEN - a Test Range dummy or a building-mounted rifle has no
+	# locomotion, and silently never firing there would be far worse than the
+	# mechanic is worth.
+	if weapon._bipod_blocks_firing():
+		print("  [FAIL] A deployed bipod with no owning vehicle blocked firing - it must fail open")
+		ok = false
+
+	var fake_vehicle = CharacterBody3D.new()
+	fake_vehicle.add_to_group("damageable")
+	root.add_child(fake_vehicle)
+	var mounted = Node3D.new()
+	mounted.set_script(preload("res://scripts/auto_weapon.gd"))
+	var mdata = ModuleData.new()
+	mdata.type_id = tid
+	mdata.category = "weapon"
+	mdata.base_dps = cd.dps
+	mdata.tweaks = {"bipod_deploy": 1.0}
+	mounted.set_meta("module_data", mdata)
+	fake_vehicle.add_child(mounted)
+	await process_frame
+
+	fake_vehicle.velocity = Vector3.ZERO
+	if mounted._bipod_blocks_firing():
+		print("  [FAIL] A stationary vehicle blocked a deployed bipod from firing")
+		ok = false
+	fake_vehicle.velocity = Vector3(4.0, 0.0, 0.0)
+	if not mounted._bipod_blocks_firing():
+		print("  [FAIL] A moving vehicle did NOT block a deployed bipod - the tweak costs nothing")
+		ok = false
+	# Vertical motion alone is terrain, not travel.
+	fake_vehicle.velocity = Vector3(0.0, 5.0, 0.0)
+	if mounted._bipod_blocks_firing():
+		print("  [FAIL] Riding terrain undulations counted as moving")
+		ok = false
+
+	# A STOWED bipod must never gate firing, whatever the vehicle is doing.
+	var stowed_weapon = Node3D.new()
+	stowed_weapon.set_script(preload("res://scripts/auto_weapon.gd"))
+	var sdata = ModuleData.new()
+	sdata.type_id = tid
+	sdata.category = "weapon"
+	sdata.base_dps = cd.dps
+	sdata.tweaks = {"bipod_deploy": 0.0}
+	stowed_weapon.set_meta("module_data", sdata)
+	fake_vehicle.add_child(stowed_weapon)
+	await process_frame
+	if stowed_weapon.bipod_deployed:
+		print("  [FAIL] bipod_deploy=0 still reported as deployed")
+		ok = false
+	fake_vehicle.velocity = Vector3(9.0, 0.0, 0.0)
+	if stowed_weapon._bipod_blocks_firing():
+		print("  [FAIL] A stowed bipod gated firing on a moving vehicle")
+		ok = false
+
+	weapon.free()
+	fake_vehicle.free()
+	if not ok:
+		return false
+	print("  [PASS] Fully wired, largest per-shot in the roster, optic buys reach not damage, and the bipod buys range at the real cost of firing on the move.")
+	return true
+
+func test_napalm_mortar_tube_points_upward() -> bool:
+	print("Running Test Suite: Napalm Mortar - Tube Elevates Instead Of Firing Into The Deck...")
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	var ok = true
+
+	var holder = Node3D.new()
+	root.add_child(holder)
+	var cd = ModuleCatalog.get_module_data("napalm_mortar")
+	VisualBuilder.build_visual("napalm_mortar", holder, cd.size, cd.color, {})
+
+	var pivot = holder.get_node_or_null("ElevationPivot")
+	if pivot == null:
+		print("  [FAIL] No ElevationPivot on the napalm mortar")
+		ok = false
+	else:
+		# The elevation was authored as deg_to_rad(-55.0) while artillery and
+		# the mortar array both use a POSITIVE angle. Parts are built with the
+		# bore along -Z and a positive X rotation pitches -Z up, so the
+		# negative sign pitched the whole assembly nose-down through the deck
+		# and put the flared muzzle underneath the breech - which is what read
+		# as the barrel being fitted upside down.
+		if pivot.rotation.x <= 0.0:
+			print("  [FAIL] ElevationPivot pitches DOWN (%.1f deg) - the tube fires into the deck" % rad_to_deg(pivot.rotation.x))
+			ok = false
+
+		# Assert the actual geometry, not just the sign: the muzzle end of the
+		# tube has to end up above the trunnion it swings on.
+		var muzzle_world = pivot.to_global(Vector3(0, 0, -0.55))
+		var breech_world = pivot.to_global(Vector3(0, 0, 0.05))
+		if muzzle_world.y <= breech_world.y:
+			print("  [FAIL] Muzzle (y=%.2f) sits at or below the breech (y=%.2f)" % [muzzle_world.y, breech_world.y])
+			ok = false
+
+	holder.free()
+	if not ok:
+		return false
+	print("  [PASS] The napalm mortar's tube elevates, with the muzzle above the breech.")
+	return true
+
 func test_hull_modding_parts_menu_two_buckets() -> bool:
-	print("Running Test Suite: Hull Modding - Parts Catalog Collapses To 2 Buckets (Vehicle / Static Building)...")
+	print("Running Test Suite: Hull Modding - Parts Catalog Groups Hulls From Their Own Fields...")
 	var menu = preload("res://scenes/UI_PartsMenu.tscn").instantiate()
 	root.add_child(menu)
 	await process_frame
@@ -10293,30 +10965,71 @@ func test_hull_modding_parts_menu_two_buckets() -> bool:
 	drawer_categories.sort()
 
 	var ok = true
-	if drawer_categories != ["Static Building", "Vehicle"]:
-		print("  [FAIL] Expected exactly the drawers [Static Building, Vehicle], got ", drawer_categories)
-		ok = false
+	# The hull tab used to be a 2-way Vehicle / Static Building split, which
+	# meant one 22-entry "Vehicle" drawer. It is now is_foundation FIRST and
+	# then weight class - but the property under test is unchanged and is the
+	# only one that matters: every assignment is computed from the hull's own
+	# catalog fields, so a modded hull sorts correctly with zero code changes.
+	# There is still no per-type_id table anywhere in the UI layer.
+	for drawer_cat in drawer_categories:
+		if drawer_cat not in menu.HULL_GROUP_ORDER:
+			print("  [FAIL] Unexpected hull drawer '%s' (not in HULL_GROUP_ORDER)" % drawer_cat)
+			ok = false
 
-	# Every hull button must land in the bucket matching its OWN
-	# is_foundation flag, not a hardcoded per-type_id table - this is what
-	# lets a modded hull sort correctly with zero code changes.
+	var seen_hulls := {}
 	for child in tab_hulls.get_children():
 		if not child.has_meta("drawer_category"):
 			continue
 		var category = child.get_meta("drawer_category")
 		var content = child.get_meta("content_container")
+
+		# Light-to-heavy inside every drawer.
+		var last_weight := -1.0
 		for btn in content.get_children():
 			var data = ModuleCatalog.get_module_data(btn.module_type_id)
+			seen_hulls[btn.module_type_id] = true
+			var w = float(data.get("weight", 0.0))
+			if w < last_weight:
+				print("  [FAIL] Drawer '%s' is not sorted light-to-heavy (%s at %.0f follows %.0f)" % [
+					category, btn.module_type_id, w, last_weight])
+				ok = false
+			last_weight = w
+
+			# Foundations and only foundations go in the static drawer.
 			var expect_static = data.get("is_foundation", false)
-			var actual_static = category == "Static Building"
+			var actual_static = category == "Static Foundations"
 			if expect_static != actual_static:
 				print("  [FAIL] %s (is_foundation=%s) landed in drawer '%s'" % [btn.module_type_id, expect_static, category])
 				ok = false
+				continue
+			if expect_static:
+				continue
+
+			# Non-foundations land in the weight class their OWN weight puts
+			# them in - recomputed here from the catalog rather than trusting
+			# the menu's own bucketing.
+			var expect_group := "Heavy Chassis"
+			if w < menu.HULL_LIGHT_MAX:
+				expect_group = "Light Chassis"
+			elif w < menu.HULL_MEDIUM_MAX:
+				expect_group = "Medium Chassis"
+			if category != expect_group:
+				print("  [FAIL] %s (weight %.0f) landed in '%s', expected '%s'" % [
+					btn.module_type_id, w, category, expect_group])
+				ok = false
+
+	# Nothing may be dropped on the floor by the regrouping.
+	for type_id in ModuleCatalog.get_catalog().keys():
+		if ModuleCatalog.get_catalog()[type_id].get("category", "") != "hull":
+			continue
+		if not seen_hulls.has(type_id):
+			print("  [FAIL] Hull '%s' appears in no drawer at all" % type_id)
+			ok = false
 
 	menu.queue_free()
 	if not ok:
 		return false
-	print("  [PASS] Every hull sorts into Vehicle/Static Building purely off its own is_foundation flag - no hardcoded per-type_id domain table.")
+	print("  [PASS] Every hull sorts into a foundation/weight-class drawer purely off its own catalog fields, light-to-heavy, with none dropped - no hardcoded per-type_id domain table.")
 	return true
 
 func test_hull_modding_hard_fail_on_unknown_hull() -> bool:

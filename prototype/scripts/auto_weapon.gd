@@ -28,6 +28,7 @@ var laser_color: Color = Color.RED
 var type_id: String = ""
 
 var damage_class: String = "kinetic"
+var bipod_deployed: bool = false
 # Ray-start height for the LOS check - computed once from the catalog size in
 # _ready() instead of re-fetching catalog data every physics tick.
 var _los_height_offset: float = 0.5
@@ -113,6 +114,7 @@ const ENERGY_DAMAGE_CLASS_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", 
 # Plus the on-impact effects (smoke clouds, burn pools, flares) which hang
 # off _apply_ammo_impact().
 const SmokeVolume = preload("res://scripts/smoke_volume.gd")
+const VFXEffects = preload("res://scripts/vfx_effects.gd")
 
 var ammo_type: String = ModuleCatalog.AMMO_DEFAULT
 var ammo_damage_mult: float = 1.0
@@ -345,6 +347,30 @@ func _cached_colliders_for(node: Node) -> Array:
 	return list
 
 # Helper to find vehicle root
+# True when a deployed bipod should be holding fire. A bipod is planted on
+# the ground; a vehicle that is driving is not a firing platform. Reads the
+# owning vehicle's own horizontal velocity, ignoring Y so a unit riding
+# terrain undulations doesn't count as "moving" - the same reason
+# _find_nearest_target's evasion maths flattens target velocity.
+#
+# Fails OPEN (returns false) when there is no vehicle or no velocity to
+# read: a Test Range dummy or a building-mounted rifle has no locomotion to
+# begin with, and silently refusing to ever fire in those contexts would be
+# a far worse bug than the mechanic is worth.
+func _bipod_blocks_firing() -> bool:
+	# Self-guarding on bipod_deployed, not just relying on the caller to
+	# check first. The name is a claim about this weapon, and a weapon with
+	# no bipod down is never blocked by one - a bare velocity check here
+	# would answer "yes" for every stowed rifle and every other weapon in
+	# the roster that ever called it.
+	if not bipod_deployed:
+		return false
+	var root_vehicle = get_vehicle_root()
+	if root_vehicle == null or not ("velocity" in root_vehicle):
+		return false
+	var v: Vector3 = root_vehicle.velocity
+	return Vector3(v.x, 0.0, v.z).length() > BIPOD_MOVING_SPEED
+
 func get_vehicle_root() -> Node3D:
 	var p = get_parent()
 	while p:
@@ -536,7 +562,7 @@ func _ready():
 			mount_hull_type = mount_parent.get_meta("type_id")
 		traverse_limit_angle = ModuleCatalog.get_traverse_limit_angle(type_id, mount_facet, mount_hull_type)
 			
-		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws", "coil_gun", "autocannon", "ballista"]:
+		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws", "coil_gun", "autocannon", "ballista", "anti_materiel_rifle"]:
 			damage_class = "kinetic"
 		elif type_id in ["artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flak_cannon", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "mine_layer"]:
 			damage_class = "explosive"
@@ -620,6 +646,22 @@ func _ready():
 			fire_range *= data.tweaks["pressure_valve"]
 		if data.tweaks.has("fuse_setting"):
 			fire_range *= data.tweaks["fuse_setting"]
+		# A better sight is the whole reason a precision weapon reaches
+		# further than its barrel alone would justify.
+		if data.tweaks.has("optic_power"):
+			fire_range *= data.tweaks["optic_power"]
+		# Deployed bipod. Not a linear-scale tweak like the rest of these -
+		# it's a discrete either/or, and it's the only tweak in the roster
+		# that buys a stat with a CAPABILITY rather than with weight or
+		# cost. Deployed, the rifle reaches much further and hits harder at
+		# that reach; deployed, it also cannot fire while its vehicle is
+		# moving (_bipod_blocks_firing). That makes the choice a real
+		# question about how you intend to use the vehicle, which is what
+		# DESIGN_VISION.md wants out of a tweak, instead of a slider where
+		# more is simply better.
+		bipod_deployed = data.tweaks.get("bipod_deploy", 0.0) >= 0.5
+		if bipod_deployed:
+			fire_range *= BIPOD_RANGE_BONUS
 
 		# Audit (task 47/48): previously only barrel_length/elevation nudged
 		# traverse_speed, leaving most weapon types' actual tweaks
@@ -732,6 +774,7 @@ func _physics_process(delta):
 	_los_cache_timer -= delta
 	_recalculate_low_hp_dps_bonus()
 	_find_nearest_target(delta)
+	_update_flame_jet()
 
 	if target and is_instance_valid(target):
 		var target_pos = target.global_position
@@ -811,6 +854,8 @@ func _physics_process(delta):
 				# test-harness node), fire freely rather than hard-blocking
 				# on a duck-typed method that doesn't exist.
 				var can_fire = true
+				if _bipod_blocks_firing():
+					can_fire = false
 				if type_id in ENERGY_WEAPON_TYPES:
 					var root_vehicle = get_vehicle_root()
 					if root_vehicle and root_vehicle.has_method("spend_energy"):
@@ -1050,7 +1095,7 @@ func _fire_at_target():
 
 	var sfx_name = "cannon"
 	match type_id:
-		"basic_cannon", "artillery", "flak_cannon", "plasma_lobber", "recoilless_rifle", "ballista", "napalm_mortar": sfx_name = "cannon"
+		"basic_cannon", "artillery", "flak_cannon", "plasma_lobber", "recoilless_rifle", "ballista", "napalm_mortar", "anti_materiel_rifle": sfx_name = "cannon"
 		"heavy_machine_gun", "rotary_cannon", "ciws", "autocannon", "mk19_grenade_launcher": sfx_name = "machine_gun"
 		"gauss_railgun", "heavy_laser", "pd_laser", "tesla_coil", "arc_projector", "ion_cannon", "coil_gun": sfx_name = "laser"
 		"guided_missile", "missile_pod", "cluster_dispenser", "smoke_discharger", "mine_layer": sfx_name = "missile"
@@ -1102,6 +1147,8 @@ func _fire_at_target():
 			_fire_coil_gun()
 		"autocannon":
 			_fire_kinetic_projectile(0.03, 0.35, 0.12, laser_color, true)
+		"anti_materiel_rifle":
+			_fire_anti_materiel_rifle()
 		"napalm_mortar":
 			_fire_napalm_mortar()
 		"mine_layer":
@@ -1396,6 +1443,27 @@ func _fire_cluster_dispenser():
 			)
 		)
 
+# Persistent flamethrower jet + its smoke, created lazily on the first shot
+# and reused for the life of the weapon (see _fire_flame_spray).
+var _flame_jet: GPUParticles3D = null
+var _flame_smoke: GPUParticles3D = null
+var _flame_last_fired_at: int = 0
+
+# A continuous emitter has to be told when to stop. The weapon fires in
+# discrete shots, so "still firing" is defined as "fired recently" - the
+# cutoff is generously longer than one shot interval so a jet doesn't
+# stutter between shots at any fire_rate, but short enough that it dies
+# promptly when the target does.
+const FLAME_JET_CUTOFF_MS: int = 220
+
+func _update_flame_jet() -> void:
+	if not is_instance_valid(_flame_jet):
+		return
+	if _flame_jet.emitting and Time.get_ticks_msec() - _flame_last_fired_at > FLAME_JET_CUTOFF_MS:
+		_flame_jet.emitting = false
+		if is_instance_valid(_flame_smoke):
+			_flame_smoke.emitting = false
+
 func _fire_flame_spray():
 	var n_width = 1.0
 	var p_valve = 1.0
@@ -1413,39 +1481,39 @@ func _fire_flame_spray():
 			rec_tween.tween_property(c, "position", orig_pos, 0.12)
 			break
 
-	for i in range(6):
-		var flame = MeshInstance3D.new()
-		flame.mesh = MunitionPool.unit_sphere()
-		var init_scale = 0.15 * n_width
-		var peak_scale = 0.45 * n_width
-		flame.scale = Vector3(init_scale, init_scale, init_scale)
-		# Per-flame colour jitter is what makes the spray read as fire rather
-		# than as six identical balls, so it stays - but quantised to 0.05 so
-		# the pool converges on a small fixed set of flame materials instead
-		# of minting a new one for every continuously-random colour. At
-		# fire_rate 0.06 x6 flames that is the difference between a bounded
-		# cache and an unbounded leak over a long match.
-		var flame_color = Color(
-			snappedf(randf_range(0.85, 1.0), 0.05),
-			snappedf(randf_range(0.2, 0.5), 0.05),
-			0.0)
-		flame.material_override = MunitionPool.emissive(flame_color, flame_color)
-		_effects_parent().add_child(flame)
+	# ONE persistent GPU-particle jet, created on the first shot and only
+	# switched on thereafter (see scripts/vfx_effects.gd).
+	#
+	# This used to allocate SIX MeshInstance3D spheres and SIX Tweens per
+	# shot. At the flamethrower's fire_rate that is roughly 100 nodes and 100
+	# tweens created and destroyed every second, per weapon, all on the main
+	# thread - and six shaded spheres flying in formation never read as fire
+	# anyway, because fire has no surface. The jet now costs one draw call
+	# and allocates nothing per shot.
+	#
+	# The jet is aimed by the weapon's own transform (it emits along local
+	# -Z, the same axis the barrel points), so it tracks turret traverse for
+	# free instead of being re-aimed at target.global_position per shot.
+	if not is_instance_valid(_flame_jet):
+		var reach = fire_range if fire_range > 0.0 else 8.0
+		_flame_jet = VFXEffects.make_flame_emitter(self, reach, n_width)
+		_flame_smoke = VFXEffects.make_flame_smoke_emitter(self, reach)
+	_flame_jet.emitting = true
+	if is_instance_valid(_flame_smoke):
+		_flame_smoke.emitting = true
+	# _physics_process shuts the jet off once firing stops; a continuous
+	# emitter has no natural end the way a per-shot tween did.
+	_flame_last_fired_at = Time.get_ticks_msec()
 
-		flame.global_position = global_position + Vector3(randf_range(-0.1, 0.1), 0.35, randf_range(-0.1, 0.1))
-		var spread = Vector3(randf_range(-1.2, 1.2) * n_width, randf_range(-0.2, 0.5) * n_width, randf_range(-1.2, 1.2) * n_width)
-		var dest = target.global_position + spread
-
-		var flight_dur = 0.35 * p_valve
-		var tween = create_tween()
-		tween.tween_property(flame, "global_position", dest, flight_dur)
-		tween.parallel().tween_property(flame, "scale", Vector3(peak_scale, peak_scale, peak_scale), flight_dur * 0.4)
-		tween.chain().tween_property(flame, "scale", Vector3.ZERO, flight_dur * 0.6)
-		tween.finished.connect(func():
-			if is_instance_valid(flame): flame.queue_free()
-			if is_instance_valid(target) and i == 0:
-				_deal_weapon_damage(target, dps * fire_rate)
-		)
+	# Damage timing is preserved EXACTLY as it was: one application per shot,
+	# delayed by the same flight duration the old tween used, guarded by the
+	# same is_instance_valid(target) check. Only the visual changed here, so
+	# flamethrower DPS and its feel in combat are untouched.
+	var flight_dur = 0.35 * p_valve
+	var victim = target
+	get_tree().create_timer(flight_dur).timeout.connect(func():
+		if is_instance_valid(self) and is_instance_valid(victim):
+			_deal_weapon_damage(victim, dps * fire_rate))
 
 func _fire_continuous_beam():
 	var beam = MeshInstance3D.new()
@@ -1560,6 +1628,12 @@ func _fire_grenade_launcher():
 # tube, and this is the first weapon in the roster where WHERE it's mounted
 # has a mechanical consequence rather than just an arc one. Mount one
 # facing into your own hull and the danger zone lands on your own machine.
+const MUZZLE_STANDOFF: float = 1.1
+# Deployed bipod: a big reach bonus that costs the ability to shoot on the
+# move. See _bipod_blocks_firing() for the other half of the trade.
+const BIPOD_RANGE_BONUS: float = 1.45
+const BIPOD_MOVING_SPEED: float = 0.35
+
 const BACKBLAST_RANGE: float = 4.5
 const BACKBLAST_DAMAGE_FRACTION: float = 0.45
 
@@ -1606,6 +1680,50 @@ func _fire_recoilless_rifle():
 		var pt = create_tween()
 		pt.tween_property(puff, "scale", Vector3.ZERO, 0.3 + t * 0.2)
 		pt.finished.connect(func(): if is_instance_valid(puff): puff.queue_free())
+
+# Anti-materiel rifle: one very large, very fast round, and a lot of noise
+# about it. The visual has to sell "precision, expensive, slow to repeat" -
+# a tight bright tracer, a sharp muzzle flash with a real brake blast
+# signature to either side, and a dust ring kicked up under the muzzle. No
+# splash: this weapon's whole proposition is that it puts everything into
+# one impact point.
+func _fire_anti_materiel_rifle():
+	var parent = _effects_parent()
+	if parent == null: return
+
+	_fire_kinetic_projectile(0.045, 0.85, 0.10, laser_color, false)
+
+	var muzzle_forward = -global_transform.basis.z.normalized()
+	var muzzle_right = global_transform.basis.x.normalized()
+	var muzzle_pos = global_position + muzzle_forward * MUZZLE_STANDOFF
+
+	# Brake blast: two flat side jets, which is exactly what a big muzzle
+	# brake does and what makes it read as one at a glance.
+	for side in [-1.0, 1.0]:
+		var jet = MeshInstance3D.new()
+		jet.mesh = MunitionPool.unit_sphere()
+		jet.material_override = MunitionPool.emissive(Color(1.0, 0.86, 0.55), Color(1.0, 0.72, 0.35))
+		parent.add_child(jet)
+		jet.global_position = muzzle_pos + muzzle_right * side * 0.22
+		jet.scale = Vector3(0.42, 0.14, 0.20)
+		var jt = create_tween()
+		jt.tween_property(jet, "scale", Vector3.ZERO, 0.12)
+		jt.finished.connect(func(): if is_instance_valid(jet): jet.queue_free())
+
+	# Dust ring under the muzzle - the tell that something very large just
+	# went off close to the ground.
+	for i in range(6):
+		var dust = MeshInstance3D.new()
+		dust.mesh = MunitionPool.unit_sphere()
+		dust.material_override = MunitionPool.alpha(Color(0.62, 0.58, 0.50, 0.42))
+		parent.add_child(dust)
+		var a = (float(i) / 6.0) * TAU
+		dust.global_position = muzzle_pos + Vector3(cos(a) * 0.45, -0.35, sin(a) * 0.45)
+		dust.scale = Vector3.ONE * 0.22
+		var dt = create_tween()
+		dt.tween_property(dust, "scale", Vector3.ONE * 0.55, 0.35)
+		dt.parallel().tween_property(dust, "position", dust.position + Vector3(cos(a) * 0.5, 0.1, sin(a) * 0.5), 0.35)
+		dt.finished.connect(func(): if is_instance_valid(dust): dust.queue_free())
 
 # Coil gun: a hitscan slug, visually staged - a chain of accelerator
 # flashes runs up the barrel before the slug leaves, so it reads as
@@ -1945,6 +2063,10 @@ func _spawn_smoke_cloud(pos: Vector3):
 const BURN_POOL_RADIUS: float = 3.5
 const BURN_POOL_DURATION: float = 5.0
 const BURN_POOL_TICK: float = 0.5
+# How long the scorch mark lingers AFTER the fire is out. Long, deliberately -
+# a battlefield that remembers where it burned is most of the value of having
+# ground decals at all.
+const BURN_POOL_SCORCH_FADE: float = 20.0
 
 func _spawn_burn_pool(pos: Vector3, radius_mult: float = 1.0, duration_mult: float = 1.0):
 	var parent = _effects_parent()
@@ -1952,17 +2074,22 @@ func _spawn_burn_pool(pos: Vector3, radius_mult: float = 1.0, duration_mult: flo
 		return
 	var pool_radius = BURN_POOL_RADIUS * radius_mult
 	var pool_duration = BURN_POOL_DURATION * duration_mult
-	var puddle = MeshInstance3D.new()
-	puddle.mesh = MunitionPool.unit_cylinder()
-	puddle.scale = Vector3(pool_radius * 2.0, 0.05, pool_radius * 2.0)
-	puddle.material_override = MunitionPool.alpha_emissive(
-		Color(0.95, 0.35, 0.05, 0.45), Color(1.0, 0.45, 0.1))
-	parent.add_child(puddle)
-	puddle.global_position = pos
 
-	var pt = create_tween()
-	pt.tween_property(puddle, "scale", Vector3.ZERO, pool_duration)
-	pt.finished.connect(func(): if is_instance_valid(puddle): puddle.queue_free())
+	# A projected Decal plus real fire particles, replacing what used to be a
+	# flat emissive CYLINDER laid on the ground and shrunk by a tween.
+	#
+	# The cylinder had two problems. Visually it was a disc of orange plastic
+	# with a hard rim, at a single Y - so on any of the heightmap maps
+	# (highland_chokepoint, twin_summits, scattered_peaks) it either floated
+	# above a slope or sank into it, since every map in this game has real
+	# elevation. A Decal projects down onto whatever is actually there and
+	# wraps the contour for free. And "burning ground" reads as fire because
+	# of flames, not because the ground is tinted orange.
+	#
+	# Purely a visual swap: pool damage is driven by the scene timers below,
+	# which never referenced the puddle node at all.
+	VFXEffects.scorch(parent, pos, pool_radius, pool_duration, BURN_POOL_SCORCH_FADE)
+	VFXEffects.fire_pool(parent, pos, pool_radius, pool_duration)
 
 	# Damage ticks are driven off scene timers rather than the puddle's own
 	# _process so the pool keeps burning even if the firing weapon (and its

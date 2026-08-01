@@ -423,13 +423,30 @@ func _ready():
 	# after such a same-frame rebake could wander into the lake before the
 	# nav data had caught up. Baking once, correctly, from the start avoids
 	# the race entirely rather than papering over it with extra waits.
+	# Covers the frames _setup_navigation() now yields on (see there). Without
+	# it the player watches a half-assembled battlefield - terrain and bases
+	# placed, no fog, no minimap, no UI - for the duration of the bake.
+	# Freed at the end of _ready().
+	_show_load_cover()
+
+	var __t = Time.get_ticks_msec()
 	_load_rosters()
+	print("[LOADPHASE] _load_rosters         %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_spawn_resource_nodes()
+	print("[LOADPHASE] _spawn_resource_nodes %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_spawn_bases()
-	_setup_navigation()
+	print("[LOADPHASE] _spawn_bases          %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
+	# await, because _setup_navigation() suspends between surface bakes in
+	# the real game. In headless it never awaits, so this resumes
+	# immediately and _ready() stays synchronous for every test.
+	await _setup_navigation()
+	print("[LOADPHASE] _setup_navigation     %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_setup_fog_shroud()
+	print("[LOADPHASE] _setup_fog_shroud     %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_setup_minimap()
+	print("[LOADPHASE] _setup_minimap        %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 	_build_ui()
+	print("[LOADPHASE] _build_ui             %6d ms" % (Time.get_ticks_msec() - __t)); __t = Time.get_ticks_msec()
 
 	var ai = Node.new()
 	ai.set_script(EnemyAIScript)
@@ -465,6 +482,45 @@ func _ready():
 	add_child(grid_timer)
 	grid_timer.timeout.connect(_rebuild_damageable_grid)
 	_rebuild_damageable_grid() # populate before the first tick so early reacquisition isn't scanning an empty grid
+
+	_hide_load_cover()
+
+# --- Match-load cover -----------------------------------------------------
+#
+# A plain full-screen panel with a status line, shown for the span of
+# _ready(). Deliberately NOT the Loading.tscn scene: by the time this scene
+# exists, SceneRouter has already swapped away from the loading screen (it
+# hands off at change_scene_to_packed), so the remaining in-_ready work has
+# to cover itself.
+var _load_cover: CanvasLayer = null
+var _load_cover_label: Label = null
+
+func _show_load_cover() -> void:
+	if DisplayServer.get_name() == "headless" or is_instance_valid(_load_cover):
+		return
+	_load_cover = CanvasLayer.new()
+	_load_cover.layer = 128 # above the match UI, which builds underneath it
+	var bg = ColorRect.new()
+	bg.color = Color(0.05, 0.055, 0.07)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_load_cover.add_child(bg)
+	_load_cover_label = Label.new()
+	_load_cover_label.text = "Assembling battlefield"
+	_load_cover_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_load_cover_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_load_cover_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_load_cover.add_child(_load_cover_label)
+	add_child(_load_cover)
+
+func _set_load_note(text: String) -> void:
+	if is_instance_valid(_load_cover_label):
+		_load_cover_label.text = text
+
+func _hide_load_cover() -> void:
+	if is_instance_valid(_load_cover):
+		_load_cover.queue_free()
+	_load_cover = null
+	_load_cover_label = null
 
 # Production used to tick inside every manufactory's own _physics_process()
 # (building.gd); centralized here now that one ProductionQueue owns every
@@ -1247,7 +1303,28 @@ func _setup_navigation():
 	# now runs before this) already exist, so their footprints go straight
 	# into the FIRST bake instead of needing an immediate follow-up rebake
 	# - see this function's caller for why that ordering matters.
-	var nav = TerrainBuilder.build_navmeshes(current_map, _gather_building_holes())
+	#
+	# The four surfaces bake one per frame in the real game (headless keeps
+	# the single blocking call so every test stays synchronous - a test that
+	# add_child()s this scene and immediately reads state must not have
+	# _ready() suspend mid-way).
+	#
+	# The bake is ~4s on lake_crossing and unchanged in total cost; what
+	# matters is that it no longer happens inside ONE frame. Four seconds
+	# without pumping the message loop is what made Windows grey the title
+	# bar and report the app as Not Responding during match load.
+	var nav: Dictionary
+	if DisplayServer.get_name() == "headless":
+		nav = TerrainBuilder.build_navmeshes(current_map, _gather_building_holes())
+	else:
+		nav = TerrainBuilder.build_navmeshes_deferred(current_map, _gather_building_holes())
+		for entry in nav["pending"]:
+			# Yield BEFORE the expensive call, same ordering rationale as
+			# scene_router.gd's run_load(): the frame showing this step's
+			# label is the one it runs on.
+			_set_load_note(entry["label"])
+			await get_tree().process_frame
+			TerrainBuilder.bake_pending_entry(entry, nav["cell_size"])
 	_nav_rebake_pending = false
 	ground_nav_map = nav.ground_map
 	water_nav_map = nav.water_map
@@ -1530,8 +1607,39 @@ func _gather_building_holes() -> Array:
 	return holes
 
 func _rebuild_dynamic_navmesh_holes() -> void:
-	TerrainBuilder.rebake_ground_and_amphibious(current_map, _gather_building_holes(), _ground_nav_region, _amphibious_nav_region)
-	_repath_live_units()
+	# Headless stays SYNCHRONOUS, same DisplayServer.get_name() convention
+	# audio_manager.gd/cursor_manager.gd already use.
+	#
+	# Not a performance judgement - a correctness one. The C1 tests
+	# (test_c1_buildings_block_movement_unit_detours_around_manufactory,
+	# test_c1_building_placed_after_unit_is_moving_forces_a_repath) place a
+	# building and then advance a FIXED number of physics ticks before
+	# asserting the unit detoured. An off-thread bake finishes whenever the
+	# worker finishes, which is not a fixed number of ticks, so those tests
+	# started failing the moment this went async - the navmesh genuinely had
+	# not landed yet. Making the test path synchronous keeps them
+	# deterministic and still exercises the identical face-generation and
+	# bake code, just inline.
+	if DisplayServer.get_name() == "headless":
+		TerrainBuilder.rebake_ground_and_amphibious(
+			current_map, _gather_building_holes(), _ground_nav_region, _amphibious_nav_region)
+		_repath_live_units()
+		return
+
+	# Async (see rebake_ground_and_amphibious_async()): the Recast bake is
+	# the expensive half and runs on a worker, so placing a building no
+	# longer stalls the main thread for ~3 seconds. _repath_live_units()
+	# moves into the completion callback rather than running right here -
+	# repathing against the OLD navmesh would just hand every unit the same
+	# route it already had, and the whole point of the repath is to react to
+	# the hole that was just carved.
+	TerrainBuilder.rebake_ground_and_amphibious_async(
+		current_map, _gather_building_holes(), _ground_nav_region, _amphibious_nav_region,
+		func():
+			# The match can end (or the scene be torn down) between kicking
+			# off the bake and it completing.
+			if is_instance_valid(self) and is_inside_tree():
+				_repath_live_units())
 
 # A rebaked navmesh doesn't retroactively invalidate a NavigationAgent3D's
 # already-cached path corridor - a unit mid-route when a building goes up
@@ -1761,6 +1869,8 @@ func _build_ui():
 	style.border_width_bottom = 2
 	selection_rect.add_theme_stylebox_override("panel", style)
 	ui.add_child(selection_rect)
+
+	_build_subsystem_schematic_hud(ui)
 
 	# Minimap (RTS_CORE_ROADMAP.md B9): bottom-right corner, sitting just
 	# above the build bar. Click recenters the camera; right-click-to-order
@@ -2680,6 +2790,95 @@ func _update_selection_rect(mouse_pos: Vector2):
 		selection_rect.position = rect.position
 		selection_rect.size = rect.size
 
+	_update_subsystem_schematic_hud()
+
+var subsystem_schematic_hud: PanelContainer = null
+var subsystem_title_lbl: Label = null
+var subsystem_details_lbl: Label = null
+
+func _build_subsystem_schematic_hud(ui: CanvasLayer):
+	subsystem_schematic_hud = PanelContainer.new()
+	subsystem_schematic_hud.name = "SubsystemSchematicHUD"
+	subsystem_schematic_hud.custom_minimum_size = Vector2(260, 140)
+	subsystem_schematic_hud.anchor_right = 1.0
+	subsystem_schematic_hud.anchor_top = 0.0
+	subsystem_schematic_hud.offset_right = -20
+	subsystem_schematic_hud.offset_top = 80
+	subsystem_schematic_hud.offset_left = -280
+	subsystem_schematic_hud.visible = false
+	ui.add_child(subsystem_schematic_hud)
+
+	var sb = StyleBoxFlat.new()
+	sb.bg_color = Color(0.06, 0.08, 0.11, 0.9)
+	sb.border_color = Color(0.0, 0.95, 1.0, 0.8) # CAD vector cyan
+	sb.border_width_left = 2
+	sb.border_width_right = 2
+	sb.border_width_top = 2
+	sb.border_width_bottom = 2
+	subsystem_schematic_hud.add_theme_stylebox_override("panel", sb)
+
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	subsystem_schematic_hud.add_child(margin)
+
+	var vbox = VBoxContainer.new()
+	margin.add_child(vbox)
+
+	subsystem_title_lbl = Label.new()
+	subsystem_title_lbl.text = "⚡ SUBSYSTEM TELEMETRY"
+	subsystem_title_lbl.add_theme_font_size_override("font_size", 14)
+	subsystem_title_lbl.add_theme_color_override("font_color", Color(0.0, 0.95, 1.0))
+	vbox.add_child(subsystem_title_lbl)
+	vbox.add_child(HSeparator.new())
+
+	subsystem_details_lbl = Label.new()
+	subsystem_details_lbl.add_theme_font_size_override("font_size", 12)
+	subsystem_details_lbl.modulate = Color(0.9, 0.95, 1.0)
+	subsystem_details_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+	vbox.add_child(subsystem_details_lbl)
+
+func _update_subsystem_schematic_hud():
+	if subsystem_schematic_hud == null:
+		return
+	if selected.size() != 1 or not is_instance_valid(selected[0]):
+		subsystem_schematic_hud.visible = false
+		return
+
+	var u = selected[0]
+	subsystem_schematic_hud.visible = true
+
+	var unit_name = "UNIT"
+	if u.has_meta("blueprint_name"):
+		unit_name = u.get_meta("blueprint_name")
+	elif u.name != "":
+		unit_name = u.name
+
+	subsystem_title_lbl.text = "⚡ DIAGNOSTICS: %s" % unit_name.to_upper()
+
+	var hp_ratio = 1.0
+	var current_hp = 100.0
+	var max_hp = 100.0
+	if "current_hp" in u and "max_hp" in u:
+		current_hp = u.current_hp
+		max_hp = u.max_hp
+		hp_ratio = current_hp / max(1.0, max_hp)
+
+	var hp_status = "[NOMINAL]" if hp_ratio > 0.6 else ("[DAMAGED]" if hp_ratio > 0.3 else "[CRITICAL]")
+	
+	var is_immobilized = false
+	if "is_immobilized" in u:
+		is_immobilized = u.is_immobilized
+
+	var text = "• HULL INTEGRITY: %d/%d HP %s\n" % [int(current_hp), int(max_hp), hp_status]
+	text += "• LOCOMOTION: %s\n" % ("⚠ STRIPPED/DISABLED" if is_immobilized else "ONLINE [100%]")
+	text += "• PRIMARY TURRETS: %s\n" % ("ONLINE [READY]" if hp_ratio > 0.25 else "⚠ SEVERE DAMAGE")
+	text += "• FACET ARMOR: ACTIVE"
+
+	subsystem_details_lbl.text = text
+
 func _set_selection(new_selection: Array):
 	for s in selected:
 		if is_instance_valid(s) and s.has_method("set_selected"):
@@ -2690,6 +2889,7 @@ func _set_selection(new_selection: Array):
 	for s in selected:
 		if is_instance_valid(s) and s.has_method("set_selected"):
 			s.set_selected(true)
+	_update_subsystem_schematic_hud()
 
 # Ctrl+1-9 assigns the current selection to a slot, overwriting whatever was
 # there before (standard RTS convention - no additive group-assign).

@@ -21,11 +21,21 @@ Physical projectiles relying on velocity and mass. Excellent against raw armor.
   - **Multi-Barrel (Action Addition):** Adding a second barrel doubles ROF and damage, but doubles weight and ammo footprint.
   - **Ammo Drum Size:** Increases sustained burst duration before reloading.
 
-### 2b. Autocannon
+### 2b. Autocannon (modelled on the M230 chain gun, AH-64 chin turret)
 - **Role:** The mid-tier between the machine gun and the main cannon. Rapid enough to matter against light armor, with real per-shot weight behind it.
+- **Silhouette:** Squat square receiver with the **chain drive housing bulging off the left flank** (flat oval cover, sprocket bosses standing proud of it) — the asymmetry *is* the silhouette. Plain unbraked muzzle, slim barrel, and the whole gun hung inside a U-shaped chin **yoke** with visible elevation actuators rather than sat on a pintle. Linkless drum magazine feeds up into the receiver from underneath.
 - **Tweakable Features:**
   - **Caliber / Barrel Length:** The usual damage-vs-handling trade.
-  - **Ammo Drum Size:** Sustained burst duration.
+  - **Ammo Drum Size:** Sustained burst duration. Scales the magazine only — never the receiver it feeds.
+
+### 2ba. Anti-Materiel Rifle (Bushmaster III derived)
+- **Role:** The roster's only **precision** weapon — everything else is DPS or splash. One very large round every 4.5 seconds: **351 per shot, the largest direct-fire number in the game**, which matters because per-shot damage (`dps × fire_rate`) is exactly what `damage_resolver`'s armor thresholds gate on. It punches straight through every armor threshold in the table, and is comprehensively wasted on a scout it can only hit once every four and a half seconds. An ambush and overwatch piece: slow-traversing, expensive in crystal, and defenceless once something closes.
+- **Silhouette:** A long greebled breech running back **through** the trunnions rather than hanging off them, so the gun reads as balanced about its middle. Very long slim tube with a multi-baffle muzzle brake, and an oversized sensor pod (day sight, thermal aperture, laser rangefinder, met probe) where another weapon would carry ammunition.
+- **Ammunition:** `AP` first and by default — this is the round the weapon is *for*. No flechette and no smoke: a precision rifle firing a cloud of darts or a screening round is fighting its own premise.
+- **Tweakable Features:**
+  - **Calibre / Barrel Length:** Damage and reach, at the usual handling cost. Barrel Length moves the muzzle brake rather than stretching it.
+  - **Optic Power:** Buys **reach and nothing else** — explicitly *not* damage, or it would stop being a trade and become a strictly-better slider. Paid for in crystal (×1.6 per point) rather than in metal or mass: a better sight is not more steel. This makes the rifle the most crystal-hungry non-energy weapon in the roster.
+  - **Deploy Bipod:** The roster's only tweak that buys a stat with a **capability** instead of with weight or cost. Deployed, the rifle reaches 45% further; deployed, it **cannot fire while its vehicle is moving**. That turns the slider into a real question about how you intend to use the vehicle — a dug-in overwatch platform, or something that shoots on the advance — rather than a number you drag to the right. The bipod is visible on the model when down, so a deployed rifle is readable at a glance.
 
 ### 2c. Recoilless Rifle
 - **Role:** Enormous per-shot HEAT damage from a light, cheap mount, paid for with a brutal reload — and a **backblast danger zone behind the weapon** that damages *anything* in it, friend, foe, or the firing vehicle itself. The first weapon where *where you mount it* has a mechanical consequence, not just an arc consequence.

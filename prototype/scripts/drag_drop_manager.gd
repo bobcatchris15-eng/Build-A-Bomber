@@ -1,12 +1,101 @@
 extends Control
 
-var ghost_mesh: MeshInstance3D = null
-var ghost_mesh_mirror: MeshInstance3D = null
+const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const VisualBuilder = preload("res://scripts/visual_builder.gd")
+const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
+
+var ghost_mesh: Node3D = null
+var ghost_mesh_mirror: Node3D = null
+var current_ghost_type: String = ""
+var _cached_ghost_material: Material = null
+var _ghost_shader: Shader = null
+
+func _get_ghost_shader() -> Shader:
+	if _ghost_shader != null:
+		return _ghost_shader
+		
+	var shader = Shader.new()
+	shader.code = """
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_always, cull_back;
+
+uniform vec4 line_color : source_color = vec4(0.2, 1.0, 0.4, 0.9);
+
+void fragment() {
+	float NdotV = abs(dot(NORMAL, VIEW));
+	float fresnel = pow(1.0 - clamp(NdotV, 0.0, 1.0), 2.0);
+	float line_alpha = smoothstep(0.15, 0.65, fresnel);
+	
+	ALBEDO = line_color.rgb;
+	ALPHA = line_color.a * line_alpha;
+}
+"""
+	_ghost_shader = shader
+	return _ghost_shader
+
+func _get_foggy_part_material() -> Material:
+	if _cached_ghost_material != null:
+		return _cached_ghost_material
+		
+	var foggy_mat = StandardMaterial3D.new()
+	foggy_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	foggy_mat.albedo_color = Color(0.10, 0.26, 0.20, 0.42) # Foggy translucent teal-grey
+	foggy_mat.roughness = 0.2
+	foggy_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
+
+	# Feature Edge Contour Pass (renders clean vector lines around part contours, avoiding micro-triangle shell clutter)
+	var edge_mat = ShaderMaterial.new()
+	edge_mat.shader = _get_ghost_shader()
+
+	foggy_mat.next_pass = edge_mat
+	_cached_ghost_material = foggy_mat
+	return _cached_ghost_material
+
+func _apply_ghost_materials_recursive(node: Node, mat: Material):
+	if node is MeshInstance3D:
+		(node as MeshInstance3D).material_override = mat
+	for child in node.get_children():
+		_apply_ghost_materials_recursive(child, mat)
+
+func _build_module_ghost_node(type_id: String) -> Node3D:
+	var container = Node3D.new()
+	var catalog_data = ModuleCatalog.get_module_data(type_id)
+	var cat_size = catalog_data.get("size", Vector3.ONE)
+	
+	VisualBuilder.build_visual(type_id, container, cat_size, Color.WHITE, {})
+	
+	# Fallback box mesh if no visual children were spawned
+	if container.get_child_count() == 0:
+		var mi = MeshInstance3D.new()
+		var box = BoxMesh.new()
+		box.size = cat_size
+		mi.mesh = box
+		container.add_child(mi)
+		
+	_apply_ghost_materials_recursive(container, _get_foggy_part_material())
+	return container
+
+func _build_hull_ghost_node(type_id: String) -> Node3D:
+	var container = Node3D.new()
+	var catalog_data = ModuleCatalog.get_module_data(type_id)
+	var cat_size = catalog_data.get("size", Vector3.ONE)
+	
+	var hull_mesh = MeshAssetLoader.get_hull_mesh(type_id)
+	var mi = MeshInstance3D.new()
+	if hull_mesh != null:
+		mi.mesh = hull_mesh
+	else:
+		var box = BoxMesh.new()
+		box.size = cat_size
+		mi.mesh = box
+	container.add_child(mi)
+	
+	_apply_ghost_materials_recursive(container, _get_foggy_part_material())
+	return container
 
 func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 	if typeof(data) == TYPE_DICTIONARY and data.has("type") and data["type"] == "module_part":
 		var type_id = data["id"]
-		var ModuleCatalog = preload("res://scripts/module_catalog.gd")
 		var catalog_data = ModuleCatalog.get_module_data(type_id)
 		var category = catalog_data.get("category", "module")
 		
@@ -32,7 +121,6 @@ func _drop_data(at_position: Vector2, data: Variant):
 	
 	if typeof(data) == TYPE_DICTIONARY and data.has("type") and data["type"] == "module_part":
 		var type_id = data["id"]
-		var ModuleCatalog = preload("res://scripts/module_catalog.gd")
 		var catalog_data = ModuleCatalog.get_module_data(type_id)
 		var category = catalog_data.get("category", "module")
 		
@@ -40,14 +128,6 @@ func _drop_data(at_position: Vector2, data: Variant):
 		if category == "hull":
 			if root:
 				# clear_hull() detaches and frees the old hull IMMEDIATELY.
-				# queue_free() only marks it, so it was still sitting in the
-				# tree under the name "Hull" when _place_hull_from_ui() added
-				# the replacement - Godot then auto-renamed the new node
-				# (to "@StaticBody3D@200"), after which get_node("Hull")
-				# returned null forever: _can_drop_data() refused every
-				# subsequent module drop, and gizmo_3d.gd's
-				# "/root/MainLab/Hull" lookups broke. It also clears the
-				# selection and clipping state that pointed at the old hull.
 				if root.has_method("clear_hull"):
 					root.clear_hull()
 				if root.has_method("_place_hull_from_ui"):
@@ -59,27 +139,19 @@ func _drop_data(at_position: Vector2, data: Variant):
 					root._place_weapon_from_ui(type_id, result.position, result.normal)
 
 func _update_ghost_mesh_hull(type_id: String):
-	if not ghost_mesh:
-		ghost_mesh = MeshInstance3D.new()
-		get_node("/root/MainLab").add_child(ghost_mesh)
-		
-		# Setup ghost material
-		var mat = StandardMaterial3D.new()
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.albedo_color = Color(1, 1, 1, 0.4)
-		ghost_mesh.material_override = mat
-		
-	ghost_mesh.visible = true
-	var ModuleCatalog = preload("res://scripts/module_catalog.gd")
-	var catalog_data = ModuleCatalog.get_module_data(type_id)
+	var root = get_node_or_null("/root/MainLab")
+	if not root: return
 	
+	if current_ghost_type != type_id or ghost_mesh == null:
+		_destroy_ghost_mesh()
+		ghost_mesh = _build_hull_ghost_node(type_id)
+		root.add_child(ghost_mesh)
+		current_ghost_type = type_id
+
+	ghost_mesh.visible = true
+	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var cat_size = catalog_data.get("size", Vector3.ONE)
-	if not ghost_mesh.mesh or (ghost_mesh.mesh is BoxMesh and ghost_mesh.mesh.size != cat_size):
-		var box = BoxMesh.new()
-		box.size = cat_size
-		ghost_mesh.mesh = box
-		
-	ghost_mesh.position = Vector3(0, catalog_data.get("size", Vector3.ONE).y / 2.0, 0)
+	ghost_mesh.position = Vector3(0, cat_size.y / 2.0, 0)
 
 # Helper to create/update the ghost mesh preview
 func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
@@ -88,52 +160,34 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 		if ghost_mesh: ghost_mesh.visible = false
 		if ghost_mesh_mirror: ghost_mesh_mirror.visible = false
 		return
+
+	var root = get_node_or_null("/root/MainLab")
+	if not root: return
 		
-	if not ghost_mesh:
-		ghost_mesh = MeshInstance3D.new()
-		get_node("/root/MainLab").add_child(ghost_mesh)
-		
-		# Setup ghost material
-		var mat = StandardMaterial3D.new()
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.albedo_color = Color(1, 1, 1, 0.4)
-		ghost_mesh.material_override = mat
-		
-	ghost_mesh.visible = true
-	
-	# Update shape from catalog
-	var ModuleCatalog = preload("res://scripts/module_catalog.gd")
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
-	
 	var cat_size = catalog_data.get("size", Vector3.ONE)
-	if not ghost_mesh.mesh or (ghost_mesh.mesh is BoxMesh and ghost_mesh.mesh.size != cat_size):
-		var box = BoxMesh.new()
-		box.size = cat_size
-		ghost_mesh.mesh = box
-		
-	# Offset height properly
+	
+	if current_ghost_type != type_id or ghost_mesh == null:
+		_destroy_ghost_mesh()
+		ghost_mesh = _build_module_ghost_node(type_id)
+		root.add_child(ghost_mesh)
+		current_ghost_type = type_id
+
+	ghost_mesh.visible = true
 	ghost_mesh.position = result.position + Vector3(0, cat_size.y / 2.0, 0)
-	if not ghost_mesh_mirror:
-		ghost_mesh_mirror = MeshInstance3D.new()
-		get_node("/root/MainLab").add_child(ghost_mesh_mirror)
-		ghost_mesh_mirror.material_override = ghost_mesh.material_override
 
 	var is_symmetric = catalog_data.get("is_symmetric", true)
 	if not is_symmetric and abs(result.position.x) > 0.1:
+		if ghost_mesh_mirror == null:
+			ghost_mesh_mirror = _build_module_ghost_node(type_id)
+			root.add_child(ghost_mesh_mirror)
 		ghost_mesh_mirror.visible = true
-		if not ghost_mesh_mirror.mesh or (ghost_mesh_mirror.mesh is BoxMesh and ghost_mesh_mirror.mesh.size != cat_size):
-			var box2 = BoxMesh.new()
-			box2.size = cat_size
-			ghost_mesh_mirror.mesh = box2
 		ghost_mesh_mirror.position = Vector3(-result.position.x, ghost_mesh.position.y, result.position.z)
 	else:
-		ghost_mesh_mirror.visible = false
-	
+		if ghost_mesh_mirror:
+			ghost_mesh_mirror.visible = false
+
 func _notification(what: int):
-	# A drag that ends anywhere other than a successful drop on this overlay
-	# (released over the parts list, over empty UI, or cancelled with Escape)
-	# never calls _drop_data(), so the translucent preview box used to be left
-	# parented to MainLab forever - one stale ghost per abandoned drag.
 	if what == NOTIFICATION_DRAG_END:
 		_destroy_ghost_mesh()
 
@@ -144,6 +198,7 @@ func _destroy_ghost_mesh():
 	if ghost_mesh_mirror:
 		ghost_mesh_mirror.queue_free()
 		ghost_mesh_mirror = null
+	current_ghost_type = ""
 
 func _raycast_from_screen(screen_pos: Vector2):
 	var camera = get_viewport().get_camera_3d()
