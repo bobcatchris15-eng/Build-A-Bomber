@@ -294,6 +294,31 @@ const MICROWAVE_BODY_FRONT_Z := -0.080
 const LANCE_BREECH_FRONT_Z := -0.130
 const LANCE_BREECH_REAR_Z := 0.160
 
+# Indirect-fire and missile stations, measured from the exported AABBs.
+const SPIGOT_BREECH_FRONT_Z := -0.060
+const ROCKET_CRADLE_FRONT_Z := -0.070
+
+# The six guided launchers share a pedestal and an assembly path. Each entry
+# names the body that gives the launcher its identity, the round it carries,
+# how many it carries by default (1 = a single centreline round), the tweak
+# that scales that round, the measured front face of its body, and how far
+# the whole assembly is canted up. Kept as data rather than as six
+# near-identical match arms.
+const MISSILE_LAUNCHER_PARTS := {
+	"hypervelocity_missile": {"body": "hvm_body", "round": "hvm_canister", "default_count": 2,
+		"scale_tweak": "seeker_size", "front_z": -0.064, "cant_deg": 6.0, "tint": Color(0.24, 0.25, 0.22)},
+	"sam_launcher": {"body": "sam_body", "round": "sam_missile", "default_count": 2,
+		"scale_tweak": "radar_dish", "front_z": -0.035, "cant_deg": 34.0, "tint": Color(0.72, 0.72, 0.70)},
+	"loitering_munition": {"body": "loiter_body", "round": "loiter_tube", "default_count": 2,
+		"scale_tweak": "seeker_size", "front_z": -0.098, "cant_deg": 62.0, "tint": Color(0.25, 0.27, 0.23)},
+	"anti_radiation_missile": {"body": "arm_body", "round": "arm_missile", "default_count": 2,
+		"scale_tweak": "seeker_size", "front_z": -0.106, "cant_deg": 14.0, "tint": Color(0.34, 0.36, 0.33)},
+	"bunker_buster": {"body": "bb_body", "round": "bb_penetrator", "default_count": 1,
+		"scale_tweak": "warhead_size", "front_z": -0.080, "cant_deg": 46.0, "tint": Color(0.19, 0.20, 0.21)},
+	"cruise_missile": {"body": "cruise_body", "round": "cruise_container", "default_count": 1,
+		"scale_tweak": "warhead_size", "front_z": -0.035, "cant_deg": 26.0, "tint": Color(0.29, 0.31, 0.27)},
+}
+
 const MODULAR_ASSEMBLY_TYPES := {
 	"basic_cannon": true, "heavy_machine_gun": true, "rotary_cannon": true, "gauss_railgun": true,
 	"artillery": true, "mortar_array": true, "guided_missile": true, "missile_pod": true,
@@ -304,6 +329,9 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"autocannon": true, "napalm_mortar": true, "mine_layer": true, "ballista": true,
 	"anti_materiel_rifle": true,
 	"arc_projector": true, "microwave_emitter": true, "particle_lance": true,
+	"spigot_mortar": true, "rocket_artillery": true,
+	"hypervelocity_missile": true, "sam_launcher": true, "loitering_munition": true,
+	"anti_radiation_missile": true, "bunker_buster": true, "cruise_missile": true,
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
 	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
@@ -2364,7 +2392,9 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 	elif type_id in ["mk19_grenade_launcher", "autocannon", "recoilless_rifle", "coil_gun",
 					 "ballista", "napalm_mortar", "mine_layer", "smoke_discharger",
 					 "anti_materiel_rifle", "arc_projector", "microwave_emitter",
-					 "particle_lance"]:
+					 "particle_lance", "spigot_mortar", "rocket_artillery",
+					 "hypervelocity_missile", "sam_launcher", "loitering_munition",
+					 "anti_radiation_missile", "bunker_buster", "cruise_missile"]:
 		# --- Roster expansion ------------------------------------------------
 		# Assembled from authored .glb sub-parts (tools/blender/
 		# build_roster_expansion.py) exactly like basic_cannon and the HMG
@@ -2706,6 +2736,141 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 					pa.scale = Vector3(caliber, caliber, focal * caliber)
 					pa.position = Vector3(0, pl_trunnion_y, LANCE_BREECH_FRONT_Z * caliber)
 					parent_node.add_child(pa)
+
+			"spigot_mortar":
+				# The bomb is bigger than the weapon. A spigot has no barrel:
+				# the round slides OVER a rod, so rod_thickness and
+				# payload_size scale two genuinely separate parts and the
+				# silhouette changes shape rather than just size.
+				var sp_trunnion_y = 0.250
+				var sp_rod = tweaks.get("rod_thickness", 1.0)
+				var sp_pay = tweaks.get("payload_size", 1.0)
+				var sp_elev = deg_to_rad(50.0)
+
+				var sp_mount_mesh = _part("spigot_mount")
+				if sp_mount_mesh:
+					var spm = _mesh_inst(sp_mount_mesh, base_color.darkened(0.25))
+					spm.scale = Vector3(caliber, 1.0, caliber)
+					parent_node.add_child(spm)
+
+				var sp_pivot = Node3D.new()
+				sp_pivot.name = "ElevationPivot"
+				sp_pivot.position = Vector3(0, sp_trunnion_y, 0)
+				sp_pivot.rotation = Vector3(sp_elev, 0, 0)
+				parent_node.add_child(sp_pivot)
+
+				var sp_breech_mesh = _part("spigot_breech")
+				if sp_breech_mesh:
+					var spb = _mesh_inst(sp_breech_mesh, Color(0.21, 0.22, 0.20))
+					spb.scale = Vector3.ONE * caliber
+					sp_pivot.add_child(spb)
+
+				var sp_rod_mesh = _part("spigot_rod")
+				if sp_rod_mesh:
+					var spr = _mesh_inst(sp_rod_mesh, Color(0.14, 0.15, 0.16))
+					spr.scale = Vector3(sp_rod * caliber, sp_rod * caliber, caliber)
+					spr.position = Vector3(0, 0, SPIGOT_BREECH_FRONT_Z * caliber)
+					sp_pivot.add_child(spr)
+
+				var sp_bomb_mesh = _part("spigot_bomb")
+				if sp_bomb_mesh:
+					var spbomb = _mesh_inst(sp_bomb_mesh, Color(0.30, 0.32, 0.26))
+					spbomb.scale = Vector3.ONE * sp_pay * caliber
+					# Sits ON the rod, not at its tip - the rod runs up inside
+					# the bomb, which is what a spigot mortar actually does.
+					spbomb.position = Vector3(0, 0, (SPIGOT_BREECH_FRONT_Z - 0.20) * caliber)
+					sp_pivot.add_child(spbomb)
+
+			"rocket_artillery":
+				# tube_count spawns more RAILS rather than scaling one, so the
+				# rack visibly grows. Damage is split across the salvo (see
+				# _fire_rocket_artillery), so this is a spread slider and not
+				# a free upgrade.
+				var ra_trunnion_y = 0.272
+				var ra_rails = clampi(int(tweaks.get("tube_count", 4.0)), 2, 8)
+				var ra_elev = deg_to_rad(32.0)
+
+				var ra_mount_mesh = _part("rocket_arty_mount")
+				if ra_mount_mesh:
+					var ram = _mesh_inst(ra_mount_mesh, base_color.darkened(0.25))
+					ram.scale = Vector3(caliber, 1.0, caliber)
+					parent_node.add_child(ram)
+
+				var ra_pivot = Node3D.new()
+				ra_pivot.name = "ElevationPivot"
+				ra_pivot.position = Vector3(0, ra_trunnion_y, 0)
+				ra_pivot.rotation = Vector3(ra_elev, 0, 0)
+				parent_node.add_child(ra_pivot)
+
+				var ra_cradle_mesh = _part("rocket_arty_cradle")
+				if ra_cradle_mesh:
+					var rac = _mesh_inst(ra_cradle_mesh, Color(0.22, 0.24, 0.21))
+					rac.scale = Vector3.ONE * caliber
+					ra_pivot.add_child(rac)
+
+				var ra_rail_mesh = _part("rocket_arty_rail")
+				if ra_rail_mesh:
+					# Two rows when there are more than four, so a big rack
+					# reads as a rack rather than as a very wide comb.
+					var rows = 2 if ra_rails > 4 else 1
+					var per_row = int(ceil(float(ra_rails) / float(rows)))
+					var placed = 0
+					for row in range(rows):
+						for i in range(per_row):
+							if placed >= ra_rails:
+								break
+							placed += 1
+							var t = 0.0 if per_row == 1 else (float(i) / float(per_row - 1) - 0.5)
+							var rail = _mesh_inst(ra_rail_mesh, Color(0.26, 0.27, 0.24))
+							rail.scale = Vector3.ONE * caliber
+							rail.position = Vector3(t * 0.26 * caliber,
+								row * 0.13 * caliber,
+								ROCKET_CRADLE_FRONT_Z * caliber)
+							ra_pivot.add_child(rail)
+
+			"hypervelocity_missile", "sam_launcher", "loitering_munition", \
+			"anti_radiation_missile", "bunker_buster", "cruise_missile":
+				# The six guided launchers share one authored pedestal and one
+				# assembly path, differing in the body that gives each its
+				# identity and in what it carries. That is honest reuse - they
+				# genuinely are the same class of bolt-on launcher - and it
+				# keeps six near-identical pedestal .glbs out of the repo.
+				var ml_trunnion_y = 0.242
+				var ml_spec = MISSILE_LAUNCHER_PARTS[type_id]
+				var ml_count = clampi(int(tweaks.get("tube_count", ml_spec["default_count"])), 1, 4)
+				var ml_cant = deg_to_rad(ml_spec["cant_deg"])
+
+				var ml_ped_mesh = _part("missile_pedestal")
+				if ml_ped_mesh:
+					var mlp = _mesh_inst(ml_ped_mesh, base_color.darkened(0.25))
+					mlp.scale = Vector3(caliber, 1.0, caliber)
+					parent_node.add_child(mlp)
+
+				var ml_pivot = Node3D.new()
+				ml_pivot.name = "ElevationPivot"
+				ml_pivot.position = Vector3(0, ml_trunnion_y, 0)
+				ml_pivot.rotation = Vector3(ml_cant, 0, 0)
+				parent_node.add_child(ml_pivot)
+
+				var ml_body_mesh = _part(ml_spec["body"])
+				if ml_body_mesh:
+					var mlb = _mesh_inst(ml_body_mesh, Color(0.21, 0.23, 0.25))
+					mlb.scale = Vector3.ONE * caliber
+					ml_pivot.add_child(mlb)
+
+				var ml_round_mesh = _part(ml_spec["round"])
+				if ml_round_mesh:
+					# Single-round launchers (bunker buster, cruise) mount on
+					# the centreline; multi-round ones spread across the body.
+					var singles = ml_spec["default_count"] == 1
+					var n = 1 if singles else ml_count
+					for i in range(n):
+						var t = 0.0 if n == 1 else (float(i) / float(n - 1) - 0.5)
+						var rnd = _mesh_inst(ml_round_mesh, Color(ml_spec["tint"]))
+						rnd.scale = Vector3.ONE * caliber * float(tweaks.get(ml_spec["scale_tweak"], 1.0))
+						rnd.position = Vector3(t * 0.20 * caliber, 0.0,
+							float(ml_spec["front_z"]) * caliber)
+						ml_pivot.add_child(rnd)
 
 			"recoilless_rifle":
 				var trunnion_y = 0.27
@@ -4880,7 +5045,7 @@ static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: D
 	if children.is_empty(): return
 
 	match type_id:
-		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle", "arc_projector", "microwave_emitter", "particle_lance":
+		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle", "arc_projector", "microwave_emitter", "particle_lance", "spigot_mortar", "rocket_artillery", "hypervelocity_missile", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile":
 			return
 
 # Builds a wedge (triangular prism) mesh from a base_size Vector3.

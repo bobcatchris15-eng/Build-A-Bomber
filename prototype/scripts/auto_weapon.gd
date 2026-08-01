@@ -563,9 +563,9 @@ func _ready():
 			mount_hull_type = mount_parent.get_meta("type_id")
 		traverse_limit_angle = ModuleCatalog.get_traverse_limit_angle(type_id, mount_facet, mount_hull_type)
 			
-		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws", "coil_gun", "autocannon", "ballista", "anti_materiel_rifle"]:
+		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws", "coil_gun", "autocannon", "ballista", "anti_materiel_rifle", "hypervelocity_missile"]:
 			damage_class = "kinetic"
-		elif type_id in ["artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flak_cannon", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "mine_layer"]:
+		elif type_id in ["artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flak_cannon", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "mine_layer", "spigot_mortar", "rocket_artillery", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile"]:
 			damage_class = "explosive"
 		elif type_id in ENERGY_DAMAGE_CLASS_TYPES:
 			# See ENERGY_DAMAGE_CLASS_TYPES's own comment for the full
@@ -1133,10 +1133,10 @@ func _fire_at_target():
 
 	var sfx_name = "cannon"
 	match type_id:
-		"basic_cannon", "artillery", "flak_cannon", "plasma_lobber", "recoilless_rifle", "ballista", "napalm_mortar", "anti_materiel_rifle": sfx_name = "cannon"
+		"basic_cannon", "artillery", "flak_cannon", "plasma_lobber", "recoilless_rifle", "ballista", "napalm_mortar", "anti_materiel_rifle", "spigot_mortar": sfx_name = "cannon"
 		"heavy_machine_gun", "rotary_cannon", "ciws", "autocannon", "mk19_grenade_launcher": sfx_name = "machine_gun"
 		"gauss_railgun", "heavy_laser", "pd_laser", "tesla_coil", "arc_projector", "ion_cannon", "coil_gun", "microwave_emitter", "particle_lance": sfx_name = "laser"
-		"guided_missile", "missile_pod", "cluster_dispenser", "smoke_discharger", "mine_layer": sfx_name = "missile"
+		"guided_missile", "missile_pod", "cluster_dispenser", "smoke_discharger", "mine_layer", "hypervelocity_missile", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile", "rocket_artillery": sfx_name = "missile"
 		"resource_harvester", "repair_array": sfx_name = "harvest"
 	if get_node_or_null("/root/AudioManager"):
 		get_node("/root/AudioManager").play_sfx_3d(sfx_name, global_position, null, 50.0)
@@ -1157,6 +1157,22 @@ func _fire_at_target():
 			_fire_mortar_salvo()
 		"guided_missile":
 			_fire_missile_projectile(false)
+		"spigot_mortar":
+			_fire_spigot_mortar()
+		"rocket_artillery":
+			_fire_rocket_artillery()
+		"hypervelocity_missile":
+			_fire_hypervelocity_missile()
+		"sam_launcher":
+			_fire_sam_launcher()
+		"loitering_munition":
+			_fire_loitering_munition()
+		"anti_radiation_missile":
+			_fire_anti_radiation_missile()
+		"bunker_buster":
+			_fire_bunker_buster()
+		"cruise_missile":
+			_fire_cruise_missile()
 		"missile_pod":
 			_fire_swarm_missiles()
 		"drone_carrier":
@@ -1382,6 +1398,219 @@ func _fire_swarm_missiles():
 			missile.setup(target, self, per_missile_damage, damage_class, get_team())
 			_effects_parent().add_child(missile)
 		)
+
+
+# --- Roster expansion: indirect fire + missiles -----------------------------
+
+# A lobbed shell that arcs to a point and detonates. Extracted because the
+# tween/AoE pattern was already inlined three times (artillery, mortar salvo,
+# grenade launcher) and the spigot mortar plus rocket artillery would have
+# made five. Takes the aim offset so a salvo can scatter.
+func _fire_arcing_shell_at(shell_radius: float, arc_height: float, colour: Color,
+						   blast_radius: float, damage: float, aim_offset: Vector3 = Vector3.ZERO,
+						   flight_time: float = 0.8) -> void:
+	if not is_instance_valid(target):
+		return
+	var parent = _effects_parent()
+	if parent == null:
+		return
+	var shell = MeshInstance3D.new()
+	shell.mesh = MunitionPool.unit_sphere()
+	shell.scale = Vector3.ONE * shell_radius
+	shell.material_override = MunitionPool.emissive(colour, colour)
+	parent.add_child(shell)
+
+	var start = global_position
+	var end = target.global_position + aim_offset
+	var tween = create_tween()
+	tween.tween_method(func(val: float):
+		if not is_instance_valid(shell):
+			return
+		var pos = start.lerp(end, val)
+		pos.y += sin(val * PI) * arc_height * 12.0
+		shell.global_position = pos
+	, 0.0, 1.0, flight_time)
+	tween.finished.connect(func():
+		if is_instance_valid(shell):
+			shell.queue_free()
+		_deal_aoe_damage(end, blast_radius, damage)
+	)
+
+# Spigot mortar: one very large low-velocity bomb, enormous splash, derisory
+# range. payload_size scales both the bomb and the crater it leaves.
+const SPIGOT_BLAST_RADIUS: float = 5.5
+
+func _fire_spigot_mortar():
+	var pay = 1.0
+	if has_meta("module_data"):
+		pay = float(get_meta("module_data").tweaks.get("payload_size", 1.0))
+	_fire_arcing_shell_at(0.5 * pay, 0.55, laser_color, SPIGOT_BLAST_RADIUS * pay,
+						  dps * fire_rate, Vector3.ZERO, 1.1)
+
+# Rocket artillery: the whole rack empties in a couple of seconds, then the
+# long fire_rate interval is the reload. Damage is split across the salvo, so
+# more rails is NOT more damage - it is the same damage spread wider, which
+# is what `dispersion` then controls. Without that split, rail_count would be
+# a pure upgrade slider and the spread tweak would be a downside with no
+# matching upside.
+func _fire_rocket_artillery():
+	var rails = 4
+	var spread = 1.0
+	if has_meta("module_data"):
+		var d = get_meta("module_data")
+		rails = int(d.tweaks.get("tube_count", 4.0))
+		spread = float(d.tweaks.get("dispersion", 1.0))
+	rails = maxi(1, rails)
+	var per_rocket = (dps * fire_rate) / float(rails)
+
+	for i in range(rails):
+		get_tree().create_timer(i * 0.14).timeout.connect(func():
+			if not is_instance_valid(self):
+				return
+			var scatter = Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0)) * spread * 1.6
+			_fire_arcing_shell_at(0.25, 0.45, laser_color, 2.4 * spread, per_rocket, scatter, 0.7)
+		)
+
+# The six guided launchers all resolve through weapon_missile.gd, so they are
+# all interceptable by point defence - that is the property that makes a
+# missile a different proposition from a gun of the same per-shot number, and
+# it is why they are excluded from the anti-materiel rifle's "biggest hit"
+# claim rather than competing with it.
+
+# Hypervelocity: beam-riding kinetic darts. Very fast, no warhead, fired as a
+# short ripple from however many canisters are fitted.
+func _fire_hypervelocity_missile():
+	var tubes = 2
+	if has_meta("module_data"):
+		tubes = int(get_meta("module_data").tweaks.get("tube_count", 2.0))
+	tubes = maxi(1, tubes)
+	var per_dart = (dps * fire_rate) / float(tubes)
+	for i in range(tubes):
+		get_tree().create_timer(i * 0.06).timeout.connect(func():
+			if not is_instance_valid(self) or not is_instance_valid(target):
+				return
+			var m = Node3D.new()
+			m.set_script(WeaponMissileScene)
+			m.position = global_position + Vector3(randf_range(-0.15, 0.15), 0.35, 0.0)
+			# Roughly three times a normal missile. The whole proposition is
+			# that point defence has very little time to engage it.
+			m.speed = 48.0
+			m.setup(target, self, per_dart, damage_class, get_team())
+			_effects_parent().add_child(m)
+		)
+
+# SAM: air only. Refuses to engage anything that is not flying, which is
+# checked here as well as in target selection so it can never be tricked into
+# spending a round on a ground target by an unusual acquisition path.
+func _fire_sam_launcher():
+	if not is_instance_valid(target):
+		return
+	if not _target_is_airborne(target):
+		return
+	var m = Node3D.new()
+	m.set_script(WeaponMissileScene)
+	m.position = global_position + Vector3(0, 0.5, 0)
+	m.speed = 26.0
+	m.setup(target, self, dps * fire_rate, damage_class, get_team())
+	_effects_parent().add_child(m)
+
+# Loitering munition: climbs, holds, then dives. Modelled as a top-attack
+# missile with a deliberate delay before it starts tracking - the loiter is
+# the weapon's cost, paid in time before anything happens.
+func _fire_loitering_munition():
+	var endurance = 1.0
+	if has_meta("module_data"):
+		endurance = float(get_meta("module_data").tweaks.get("seeker_size", 1.0))
+	var loiter_delay = clampf(0.9 * endurance, 0.3, 2.5)
+	var locked = target
+	get_tree().create_timer(loiter_delay).timeout.connect(func():
+		if not is_instance_valid(self) or not is_instance_valid(locked):
+			return
+		var m = Node3D.new()
+		m.set_script(WeaponMissileScene)
+		m.position = global_position + Vector3(0, 0.6, 0)
+		m.is_top_attack = true
+		m.speed = 14.0
+		m.setup(locked, self, dps * fire_rate, damage_class, get_team())
+		_effects_parent().add_child(m)
+	)
+
+# Anti-radiation: only engages units that actually carry a sensor module.
+# That makes an enemy's radar into a liability, and makes this the one weapon
+# whose usefulness is decided by what the OPPONENT chose to build - a
+# genuinely different axis from everything else in the roster.
+func _fire_anti_radiation_missile():
+	if not is_instance_valid(target) or not _target_carries_sensors(target):
+		return
+	var m = Node3D.new()
+	m.set_script(WeaponMissileScene)
+	m.position = global_position + Vector3(0, 0.5, 0)
+	m.speed = 22.0
+	m.setup(target, self, dps * fire_rate, damage_class, get_team())
+	_effects_parent().add_child(m)
+
+# Bunker buster: top-attack, and heavily biased toward structures. Against
+# anything that moves it is clumsy and slow; against a building it is the
+# best per-shot in the roster.
+const BUNKER_BUSTER_STRUCTURE_BONUS: float = 2.1
+
+func _fire_bunker_buster():
+	if not is_instance_valid(target):
+		return
+	var dmg = dps * fire_rate
+	if target.is_in_group("buildings"):
+		dmg *= BUNKER_BUSTER_STRUCTURE_BONUS
+	var m = Node3D.new()
+	m.set_script(WeaponMissileScene)
+	m.position = global_position + Vector3(0, 0.5, 0)
+	m.is_top_attack = true
+	m.speed = 15.0
+	m.setup(target, self, dmg, damage_class, get_team())
+	_effects_parent().add_child(m)
+
+# Cruise missile: the one point defence exists to eat. Big, slow, and it
+# announces itself the whole way in.
+func _fire_cruise_missile():
+	if not is_instance_valid(target):
+		return
+	var m = Node3D.new()
+	m.set_script(WeaponMissileScene)
+	m.position = global_position + Vector3(0, 0.6, 0)
+	m.speed = 9.0
+	m.setup(target, self, dps * fire_rate, damage_class, get_team())
+	_effects_parent().add_child(m)
+
+# --- Shared predicates ------------------------------------------------------
+
+# "Airborne" for the SAM's purposes. Reads the same flying flags battle_unit
+# already maintains rather than inventing a parallel notion of flight.
+func _target_is_airborne(t: Node) -> bool:
+	if t == null or not is_instance_valid(t):
+		return false
+	if "is_flying" in t and t.is_flying:
+		return true
+	if t.is_in_group("air_units"):
+		return true
+	# Fallback for test harnesses and anything without the flag: treat a
+	# target sitting well clear of the ground as airborne.
+	if t is Node3D:
+		return (t as Node3D).global_position.y > 3.0
+	return false
+
+# Does this target carry anything that emits? Walks its module children for a
+# sensor/radar module, which is exactly the thing the missile homes on.
+const SENSOR_MODULE_IDS := ["sensor_suite", "ciws", "sam_launcher", "microwave_emitter"]
+
+func _target_carries_sensors(t: Node) -> bool:
+	if t == null or not is_instance_valid(t):
+		return false
+	for child in t.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		var d = child.get_meta("module_data")
+		if d and ("type_id" in d) and d.type_id in SENSOR_MODULE_IDS:
+			return true
+	return false
 
 func _fire_drone_swarm():
 	# Real autonomous drones (drone_unit.gd), not tweened throwaway meshes -

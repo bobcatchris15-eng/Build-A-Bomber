@@ -10772,22 +10772,26 @@ func test_anti_materiel_rifle_is_wired_and_trades_real_capability() -> bool:
 	# weapons you can actually POINT at a target - otherwise it is simply a
 	# worse cannon.
 	#
-	# Two exclusions, both stated up front so this cannot quietly become
-	# "narrow the claim until it passes":
+	# Stated as a POSITIVE selection rather than as a growing list of
+	# exclusions, because this assertion has now been narrowed twice under
+	# pressure from new weapons and that is exactly how a test quietly stops
+	# meaning anything.
 	#
-	#   ARC weapons. Artillery lands a larger 405 per shot, but buys it with
-	#   indirect fire it cannot aim at what is in front of it, and with splash
-	#   instead of precision. Different job.
+	# The comparison set is: projectile class "hitscan" or "ballistic" (i.e.
+	# it goes where you point it and CANNOT be shot down), and not an energy
+	# weapon (i.e. it does not need a charged capacitor to fire at all).
 	#
-	#   ENERGY weapons. The particle lance lands 660, but it costs 220 weight,
-	#   55 crystal, AND a charged capacitor - it cannot fire at all on a design
-	#   with no power plant. The rifle's actual claim, and the reason it earns
-	#   its place, is that it is the biggest single hit available WITHOUT
-	#   committing to a generator. That is the property worth protecting, and
-	#   it is a stronger statement than the one it replaces, not a weaker one.
+	# That set is the rifle's actual competition, and the exclusions are real
+	# mechanical differences rather than convenient ones:
+	#   - "arc" weapons cannot be aimed at what is in front of them.
+	#   - "guided" weapons register in the "missiles" group and are
+	#     interceptable by point defence - the cruise missile lands 440 and
+	#     the bunker buster 399, but either can be shot out of the air.
+	#   - energy weapons cannot fire at all on a design with no generator.
 	#
-	# Everything else - every conventional direct-fire weapon in the game - is
-	# fair game, and the margin is genuinely thin (gauss_railgun is at 347).
+	# So the claim is: the biggest hit you can get from something that always
+	# arrives and needs no power plant. Margin is thin - gauss_railgun is at
+	# 347 against the rifle's 351.
 	var profile = ModuleCatalog.get_fire_profile(tid)
 	var per_shot = cd.dps * profile.fire_rate
 	var best_other := 0.0
@@ -10798,7 +10802,7 @@ func test_anti_materiel_rifle_is_wired_and_trades_real_capability() -> bool:
 		var od = ModuleCatalog.get_module_data(other_id)
 		if od.get("category", "") != "weapon" or od.get("dps", 0.0) <= 0.0:
 			continue
-		if ModuleCatalog.PROJECTILE_CLASS.get(other_id, "hitscan") == "arc":
+		if ModuleCatalog.PROJECTILE_CLASS.get(other_id, "hitscan") not in ["hitscan", "ballistic"]:
 			continue
 		if other_id in preload("res://scripts/auto_weapon.gd").ENERGY_WEAPON_TYPES:
 			continue
@@ -10808,7 +10812,7 @@ func test_anti_materiel_rifle_is_wired_and_trades_real_capability() -> bool:
 			best_other = ops
 			best_name = other_id
 	if per_shot <= best_other:
-		print("  [FAIL] Per-shot %.0f is not the largest unpowered direct-fire number in the roster (%s has %.0f) - it has no reason to exist" % [
+		print("  [FAIL] Per-shot %.0f is not the largest uninterceptable unpowered number in the roster (%s has %.0f) - it has no reason to exist" % [
 			per_shot, best_name, best_other])
 		ok = false
 
@@ -10973,7 +10977,7 @@ func test_anti_materiel_rifle_is_wired_and_trades_real_capability() -> bool:
 	fake_vehicle.free()
 	if not ok:
 		return false
-	print("  [PASS] Fully wired, largest per-shot of any unpowered direct-fire weapon, optic buys reach not damage, and the bipod buys range at the real cost of firing on the move.")
+	print("  [PASS] Fully wired, largest per-shot of anything that always arrives and needs no generator, optic buys reach not damage, and the bipod buys range at the real cost of firing on the move.")
 	return true
 
 func test_weapon_modules_balance_about_their_mount() -> bool:

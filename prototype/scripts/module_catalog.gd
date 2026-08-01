@@ -159,6 +159,14 @@ const WEAPON_FIRE_PROFILES = {
 	# anti-materiel rifle - but you only get it every five and a half seconds
 	# and only if the capacitor is charged.
 	"particle_lance":     {"fire_rate": 5.5,  "fire_range": 34.0, "laser_color": Color(0.70, 0.90, 1.0)},
+	"spigot_mortar":      {"fire_rate": 5.0,  "fire_range": 14.0, "laser_color": Color(0.85, 0.70, 0.40)},
+	"rocket_artillery":   {"fire_rate": 3.0,  "fire_range": 30.0, "laser_color": Color(0.95, 0.60, 0.25)},
+	"hypervelocity_missile": {"fire_rate": 2.2, "fire_range": 26.0, "laser_color": Color(0.85, 0.92, 1.0)},
+	"sam_launcher":       {"fire_rate": 2.6,  "fire_range": 30.0, "laser_color": Color(0.80, 0.85, 0.90)},
+	"loitering_munition": {"fire_rate": 4.0,  "fire_range": 38.0, "laser_color": Color(0.70, 0.78, 0.66)},
+	"anti_radiation_missile": {"fire_rate": 3.4, "fire_range": 34.0, "laser_color": Color(0.75, 0.80, 0.78)},
+	"bunker_buster":      {"fire_rate": 4.2,  "fire_range": 24.0, "laser_color": Color(0.70, 0.72, 0.75)},
+	"cruise_missile":     {"fire_rate": 5.0,  "fire_range": 42.0, "laser_color": Color(0.78, 0.80, 0.72)},
 	"ciws":               {"fire_rate": 0.06, "fire_range": 14.0, "laser_color": Color.WHITE_SMOKE},
 	"pd_laser":           {"fire_rate": 0.1,  "fire_range": 16.0, "laser_color": Color.LIGHT_CORAL},
 	"flak_cannon":        {"fire_rate": 1.2,  "fire_range": 22.0, "laser_color": Color.DARK_GOLDENROD},
@@ -452,6 +460,131 @@ static func _build_catalog_literal() -> Dictionary:
 		# function, energy-drain maths, tweak specs and an authored mesh all
 		# existed, but with no catalog entry it could never be placed. The
 		# dedicated disabler - trivial HP damage, enormous energy drain.
+		# --- INDIRECT FIRE EXPANSION ---------------------------------------
+		# The bomb is bigger than the weapon. A spigot mortar has no barrel:
+		# the projectile slides over a rod. Enormous splash, derisory range -
+		# a demolition tool that has to be driven up to what it demolishes.
+		"spigot_mortar": {
+			"name": "Spigot Mortar",
+			"category": "weapon",
+			"hp": 80.0,
+			"weight": 130.0,
+			"metal": 38,
+			"crystal": 0,
+			"dps": 55.0,
+			"traverse_agility": 0.55,
+			"size": Vector3(0.6, 0.6, 1.2),
+			"color": Color(0.32, 0.34, 0.28)
+		},
+
+		# Saturation rather than precision: a rack of rails that empties fast
+		# and then spends a long time reloading, which is the whole trade.
+		"rocket_artillery": {
+			"name": "Rocket Artillery",
+			"category": "weapon",
+			"hp": 95.0,
+			"weight": 190.0,
+			"metal": 52,
+			"crystal": 8,
+			"dps": 85.0,
+			"traverse_agility": 0.6,
+			"size": Vector3(0.9, 0.7, 1.8),
+			"color": Color(0.30, 0.33, 0.28)
+		},
+
+		# --- MISSILE EXPANSION ---------------------------------------------
+		# Beam-riding kinetic darts. No warhead - the round IS the damage -
+		# and fast enough that point defence struggles, which is what it buys
+		# with its short reach and its need to hold a designator on target.
+		"hypervelocity_missile": {
+			"name": "Hypervelocity Missile",
+			"category": "weapon",
+			"hp": 70.0,
+			"weight": 110.0,
+			"metal": 34,
+			"crystal": 18,
+			"dps": 92.0,
+			"traverse_agility": 1.0,
+			"size": Vector3(0.6, 0.5, 1.3),
+			"color": Color(0.30, 0.32, 0.34)
+		},
+
+		# Air only. Useless against anything on the ground, and the longest
+		# reach against anything that isn't.
+		"sam_launcher": {
+			"name": "SAM Launcher",
+			"category": "weapon",
+			"hp": 75.0,
+			"weight": 130.0,
+			"metal": 40,
+			"crystal": 20,
+			"dps": 70.0,
+			"traverse_agility": 1.1,
+			"size": Vector3(0.7, 0.6, 1.4),
+			"color": Color(0.33, 0.35, 0.33)
+		},
+
+		# Launches, circles, then dives. The longest reach in the roster,
+		# bought with a long flight time before anything happens at all.
+		"loitering_munition": {
+			"name": "Loitering Munition",
+			"category": "weapon",
+			"hp": 65.0,
+			"weight": 120.0,
+			"metal": 36,
+			"crystal": 22,
+			"dps": 65.0,
+			"traverse_agility": 0.9,
+			"size": Vector3(0.7, 0.6, 1.2),
+			"color": Color(0.28, 0.31, 0.27)
+		},
+
+		# Only locks units carrying sensors, which turns radar into a
+		# liability and makes it the one weapon whose usefulness depends
+		# entirely on what the enemy chose to build.
+		"anti_radiation_missile": {
+			"name": "Anti-Radiation Missile",
+			"category": "weapon",
+			"hp": 70.0,
+			"weight": 115.0,
+			"metal": 33,
+			"crystal": 26,
+			"dps": 75.0,
+			"traverse_agility": 0.95,
+			"size": Vector3(0.6, 0.6, 1.4),
+			"color": Color(0.29, 0.31, 0.30)
+		},
+
+		# Top-attack anti-structure. Heavily biased toward buildings, and
+		# clumsy against anything that moves.
+		"bunker_buster": {
+			"name": "Bunker Buster",
+			"category": "weapon",
+			"hp": 85.0,
+			"weight": 175.0,
+			"metal": 48,
+			"crystal": 16,
+			"dps": 95.0,
+			"traverse_agility": 0.5,
+			"size": Vector3(0.7, 0.7, 1.5),
+			"color": Color(0.27, 0.28, 0.30)
+		},
+
+		# Long range, slow, big warhead, and very interceptable - the missile
+		# point defence exists to eat. Ships in a sealed container.
+		"cruise_missile": {
+			"name": "Cruise Missile",
+			"category": "weapon",
+			"hp": 80.0,
+			"weight": 200.0,
+			"metal": 55,
+			"crystal": 24,
+			"dps": 88.0,
+			"traverse_agility": 0.4,
+			"size": Vector3(0.8, 0.7, 2.0),
+			"color": Color(0.31, 0.33, 0.29)
+		},
+
 		"arc_projector": {
 			"name": "Arc Projector",
 			"category": "weapon",
@@ -1173,6 +1306,14 @@ const MODULE_FLAVOR = {
 	"arc_projector": "Empties capacitors at range. Does almost no damage and is almost never forgiven.",
 	"microwave_emitter": "Cooks electronics through armour. Crews report the taste of metal beforehand.",
 	"particle_lance": "Five seconds of charging for one second of consequence. Do not be interrupted.",
+	"spigot_mortar": "The bomb is larger than the launcher. Range is measured generously and still disappoints.",
+	"rocket_artillery": "Empties in seconds. Reloads in considerably more than seconds.",
+	"hypervelocity_missile": "No warhead. At this speed a warhead would be an affectation.",
+	"sam_launcher": "Excellent against aircraft. Perfectly useless against everything else, including infantry standing still.",
+	"loitering_munition": "Launches, circles, considers its options, then commits. Patience is a munition now.",
+	"anti_radiation_missile": "Homes on anyone using a radar. Encourages the enemy to switch theirs off, which is also a win.",
+	"bunker_buster": "Arrives from directly above. Structures were not consulted about this.",
+	"cruise_missile": "Long ranged, generously proportioned, and entirely visible on approach.",
 	"plasma_lobber": "Containment is temporary by design. Everything downrange is briefly reclassified.",
 	# Point defense
 	"ciws": "Engages incoming ordnance automatically. Do not walk in front of it while powered.",
@@ -1499,6 +1640,14 @@ const MODULE_ROLES = {
 	"arc_projector": "Energy & Electromagnetic",
 	"microwave_emitter": "Energy & Electromagnetic",
 	"particle_lance": "Energy & Electromagnetic",
+	"spigot_mortar": "Indirect Fire",
+	"rocket_artillery": "Indirect Fire",
+	"hypervelocity_missile": "Missiles",
+	"sam_launcher": "Missiles",
+	"loitering_munition": "Missiles",
+	"anti_radiation_missile": "Missiles",
+	"bunker_buster": "Missiles",
+	"cruise_missile": "Missiles",
 	"tesla_coil": "Energy & Electromagnetic",
 	"coil_gun": "Energy & Electromagnetic",
 	"ion_cannon": "Energy & Electromagnetic",
@@ -1706,6 +1855,13 @@ const PROJECTILE_CLASS = {
 	"basic_cannon": "ballistic", "heavy_machine_gun": "ballistic", "rotary_cannon": "ballistic",
 	"ciws": "ballistic", "flak_cannon": "ballistic", "flamethrower": "ballistic",
 	"artillery": "arc", "mortar_array": "arc", "smoke_discharger": "arc",
+	"spigot_mortar": "arc", "rocket_artillery": "arc",
+	# Every one of these is interceptable by point defence (they register in
+	# the "missiles" group via weapon_missile.gd), which is the property that
+	# makes them a different proposition from a gun of the same per-shot number.
+	"hypervelocity_missile": "guided", "sam_launcher": "guided",
+	"loitering_munition": "guided", "anti_radiation_missile": "guided",
+	"bunker_buster": "guided", "cruise_missile": "guided",
 	# Roster expansion: a coil gun accelerates a slug the same way a rail
 	# does (hitscan); the recoilless/autocannon/ballista all throw a real
 	# projectile fast and flat; the grenade launcher, napalm mortar and
@@ -1861,6 +2017,15 @@ const WEAPON_AMMO_OPTIONS = {
 	"basic_cannon":      ["standard", "ap", "he", "incendiary", "flechette", "emp", "smoke", "illumination"],
 	"artillery":         ["standard", "he", "incendiary", "emp", "smoke", "illumination"],
 	"mortar_array":      ["standard", "he", "incendiary", "smoke", "illumination"],
+	# HE first and by default: this thing exists to demolish, and a plain
+	# service round in a demolition bomb is a wasted trip.
+	"spigot_mortar":     ["he", "standard", "incendiary", "smoke"],
+	"rocket_artillery":  ["standard", "he", "incendiary", "flechette", "smoke", "illumination"],
+	# Deliberately absent: every guided launcher except the bunker buster.
+	# A seeker missile carries the warhead it was built with - offering a
+	# smoke or flechette option on a SAM would be an ammo dropdown that
+	# exists only because the dropdown exists.
+	"bunker_buster":     ["standard", "he"],
 	"cluster_dispenser": ["standard", "he", "incendiary", "flechette", "smoke"],
 	# Automatic weapons - small rounds, so no illumination/blast-filler
 	"heavy_machine_gun": ["standard", "ap", "incendiary", "flechette"],
