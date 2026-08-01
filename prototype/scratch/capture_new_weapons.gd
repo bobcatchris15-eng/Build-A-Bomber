@@ -13,12 +13,11 @@ var shots_taken = 0
 # Each entry: [type_id, tweaks]. A couple are captured twice at different
 # tweak settings so the per-part scaling is visible in the images too.
 var subjects = [
-	["basic_cannon", {}],
-	["heavy_machine_gun", {}],
-	["mk19_grenade_launcher", {}],
-	["recoilless_rifle", {}],
-	["autocannon", {}],
-	["ballista", {}],
+	["arc_projector", {}],
+	["microwave_emitter", {}],
+	["microwave_emitter", {"dish_aperture": 2.0}],
+	["particle_lance", {}],
+	["particle_lance", {"charge_time": 2.0, "focal_length": 1.8}],
 ]
 
 func _ready():

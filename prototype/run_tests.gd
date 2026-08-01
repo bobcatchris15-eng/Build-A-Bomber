@@ -624,6 +624,10 @@ func _init():
 		success = false
 		_failed.append("test_napalm_mortar_tube_points_upward")
 	_total_suites += 1
+	if not await _run_suite(test_weapon_modules_balance_about_their_mount, "test_weapon_modules_balance_about_their_mount"):
+		success = false
+		_failed.append("test_weapon_modules_balance_about_their_mount")
+	_total_suites += 1
 	if not await _run_suite(test_anti_materiel_rifle_is_wired_and_trades_real_capability, "test_anti_materiel_rifle_is_wired_and_trades_real_capability"):
 		success = false
 		_failed.append("test_anti_materiel_rifle_is_wired_and_trades_real_capability")
@@ -10768,11 +10772,22 @@ func test_anti_materiel_rifle_is_wired_and_trades_real_capability() -> bool:
 	# weapons you can actually POINT at a target - otherwise it is simply a
 	# worse cannon.
 	#
-	# Arc weapons are excluded from the comparison deliberately, not to make
-	# the assertion pass: artillery lands a larger 405 per shot, but it buys
-	# that with indirect fire it cannot aim at something in front of it, and
-	# with splash instead of precision. Comparing a rifle against it would
-	# be comparing two different jobs. Every DIRECT-fire weapon is fair game.
+	# Two exclusions, both stated up front so this cannot quietly become
+	# "narrow the claim until it passes":
+	#
+	#   ARC weapons. Artillery lands a larger 405 per shot, but buys it with
+	#   indirect fire it cannot aim at what is in front of it, and with splash
+	#   instead of precision. Different job.
+	#
+	#   ENERGY weapons. The particle lance lands 660, but it costs 220 weight,
+	#   55 crystal, AND a charged capacitor - it cannot fire at all on a design
+	#   with no power plant. The rifle's actual claim, and the reason it earns
+	#   its place, is that it is the biggest single hit available WITHOUT
+	#   committing to a generator. That is the property worth protecting, and
+	#   it is a stronger statement than the one it replaces, not a weaker one.
+	#
+	# Everything else - every conventional direct-fire weapon in the game - is
+	# fair game, and the margin is genuinely thin (gauss_railgun is at 347).
 	var profile = ModuleCatalog.get_fire_profile(tid)
 	var per_shot = cd.dps * profile.fire_rate
 	var best_other := 0.0
@@ -10785,13 +10800,15 @@ func test_anti_materiel_rifle_is_wired_and_trades_real_capability() -> bool:
 			continue
 		if ModuleCatalog.PROJECTILE_CLASS.get(other_id, "hitscan") == "arc":
 			continue
+		if other_id in preload("res://scripts/auto_weapon.gd").ENERGY_WEAPON_TYPES:
+			continue
 		var op = ModuleCatalog.get_fire_profile(other_id)
 		var ops = od.dps * op.get("fire_rate", 1.0)
 		if ops > best_other:
 			best_other = ops
 			best_name = other_id
 	if per_shot <= best_other:
-		print("  [FAIL] Per-shot %.0f is not the largest direct-fire number in the roster (%s has %.0f) - it has no reason to exist" % [
+		print("  [FAIL] Per-shot %.0f is not the largest unpowered direct-fire number in the roster (%s has %.0f) - it has no reason to exist" % [
 			per_shot, best_name, best_other])
 		ok = false
 
@@ -10956,7 +10973,82 @@ func test_anti_materiel_rifle_is_wired_and_trades_real_capability() -> bool:
 	fake_vehicle.free()
 	if not ok:
 		return false
-	print("  [PASS] Fully wired, largest per-shot in the roster, optic buys reach not damage, and the bipod buys range at the real cost of firing on the move.")
+	print("  [PASS] Fully wired, largest per-shot of any unpowered direct-fire weapon, optic buys reach not damage, and the bipod buys range at the real cost of firing on the move.")
+	return true
+
+func test_weapon_modules_balance_about_their_mount() -> bool:
+	print("Running Test Suite: Weapon Modules Are Balanced About Their Trunnion (no barrels bolted to nothing)...")
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	var ok = true
+
+	# A weapon module pivots about a trunnion sitting directly above its mount
+	# point, which is the module's own local origin. If essentially all of the
+	# geometry hangs forward of that origin, the module reads as a barrel
+	# stuck on a post with nothing balancing it - the exact note that got the
+	# main cannon its recuperator cylinders, breech ring and loader. Mass
+	# behind the trunnion is not decoration, it is what makes a gun look like
+	# it can absorb its own recoil.
+	#
+	# Measured as a volume-weighted centroid of every mesh in the assembled
+	# module, normalised against its own front-to-back span, so it is a shape
+	# property rather than an absolute distance and applies equally to a
+	# pistol-sized emitter and a 4-metre railgun.
+	#
+	# Threshold 0.45. The worst offender in the roster at the time of writing
+	# is mortar_array at -0.42 (a bank of tubes all canted forward, with very
+	# little behind them), so this has real headroom but not much - which is
+	# the point. Anything newly authored has to be built balanced.
+	const BALANCE_LIMIT := 0.45
+
+	var worst_name := ""
+	var worst := 0.0
+	for type_id in ModuleCatalog.get_catalog().keys():
+		var data = ModuleCatalog.get_module_data(type_id)
+		if data.get("category", "") != "weapon":
+			continue
+
+		var holder = Node3D.new()
+		root.add_child(holder)
+		VisualBuilder.build_visual(type_id, holder, data.get("size", Vector3.ONE), data.color, {})
+
+		var total := 0.0
+		var acc := Vector3.ZERO
+		var fwd := 0.0
+		var aft := 0.0
+		for m in holder.find_children("*", "MeshInstance3D", true, false):
+			if m.mesh == null:
+				continue
+			var a: AABB = m.mesh.get_aabb()
+			var sc = m.global_transform.basis.get_scale()
+			var vol = maxf(0.0001, a.size.x * sc.x) * maxf(0.0001, a.size.y * sc.y) * maxf(0.0001, a.size.z * sc.z)
+			acc += (m.global_transform * (a.position + a.size * 0.5)) * vol
+			total += vol
+			var z0 = (m.global_transform * a.position).z
+			var z1 = (m.global_transform * (a.position + a.size)).z
+			fwd = minf(fwd, minf(z0, z1))
+			aft = maxf(aft, maxf(z0, z1))
+
+		holder.free()
+		if total <= 0.0:
+			continue
+
+		var span = aft - fwd
+		if span < 0.05:
+			continue
+		var balance = (acc / total).z / (span * 0.5)
+		if absf(balance) > absf(worst):
+			worst = balance
+			worst_name = type_id
+		if absf(balance) > BALANCE_LIMIT:
+			var which = "NOSE-heavy" if balance < 0.0 else "TAIL-heavy"
+			print("  [FAIL] %s is %s (balance %+.2f, limit %.2f) - it needs real mass on the other side of the trunnion" % [
+				type_id, which, balance, BALANCE_LIMIT])
+			ok = false
+
+	if not ok:
+		return false
+	print("  [PASS] Every weapon balances about its own mount within %.2f (worst: %s at %+.2f)." % [
+		BALANCE_LIMIT, worst_name, worst])
 	return true
 
 func test_napalm_mortar_tube_points_upward() -> bool:

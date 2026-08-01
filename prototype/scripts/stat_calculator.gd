@@ -239,6 +239,21 @@ const TWEAK_SPECS = {
 		{"name": "containment", "label": "Arc Containment Field", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 4.0, "step": 1.0, "default": 0.0}
 	],
+	# dish_aperture is the classic width-vs-reach trade made physical: a
+	# bigger dish spreads the cone wider and shortens it, which the player can
+	# predict from the model before touching the slider.
+	"microwave_emitter": [
+		{"name": "dish_aperture", "label": "Dish Aperture", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 3.0, "step": 1.0, "default": 0.0}
+	],
+	# charge_time buys per-shot damage with exposure: a longer wind-up is more
+	# time an alert enemy has to kill you before the shot lands. focal_length
+	# scales the accelerator spine alone.
+	"particle_lance": [
+		{"name": "charge_time", "label": "Capacitor Charge", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "focal_length", "label": "Accelerator Length", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 3.0, "step": 1.0, "default": 0.0}
+	],
 	"ion_cannon": [
 		{"name": "lens_aperture", "label": "Ion Focusing Lens", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 4.0, "step": 1.0, "default": 0.0}

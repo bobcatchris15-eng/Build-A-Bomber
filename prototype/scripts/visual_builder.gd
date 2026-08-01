@@ -288,6 +288,12 @@ const AUTOCANNON_RECEIVER_FRONT_Z := -0.102
 const AUTOCANNON_DRUM_FLOOR := 0.262
 const AUTOCANNON_DRUM_Z := 0.11
 
+# Energy-bracket stations, measured from the exported AABBs.
+const ARC_BODY_FRONT_Z := -0.040
+const MICROWAVE_BODY_FRONT_Z := -0.080
+const LANCE_BREECH_FRONT_Z := -0.130
+const LANCE_BREECH_REAR_Z := 0.160
+
 const MODULAR_ASSEMBLY_TYPES := {
 	"basic_cannon": true, "heavy_machine_gun": true, "rotary_cannon": true, "gauss_railgun": true,
 	"artillery": true, "mortar_array": true, "guided_missile": true, "missile_pod": true,
@@ -297,6 +303,7 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"mk19_grenade_launcher": true, "recoilless_rifle": true, "coil_gun": true,
 	"autocannon": true, "napalm_mortar": true, "mine_layer": true, "ballista": true,
 	"anti_materiel_rifle": true,
+	"arc_projector": true, "microwave_emitter": true, "particle_lance": true,
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
 	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
@@ -2356,7 +2363,8 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 
 	elif type_id in ["mk19_grenade_launcher", "autocannon", "recoilless_rifle", "coil_gun",
 					 "ballista", "napalm_mortar", "mine_layer", "smoke_discharger",
-					 "anti_materiel_rifle"]:
+					 "anti_materiel_rifle", "arc_projector", "microwave_emitter",
+					 "particle_lance"]:
 		# --- Roster expansion ------------------------------------------------
 		# Assembled from authored .glb sub-parts (tools/blender/
 		# build_roster_expansion.py) exactly like basic_cannon and the HMG
@@ -2594,6 +2602,110 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 						amr_bipod.scale = Vector3.ONE * caliber
 						amr_bipod.position = Vector3(0, 0.0, amr_breech_front_z * 1.4)
 						parent_node.add_child(amr_bipod)
+
+			"arc_projector":
+				# Jacob's-ladder apparatus, not a gun. The transformer body
+				# sits BEHIND the trunnion and is most of the module's mass -
+				# it is both the counterweight the balance test wants and the
+				# visible answer to "where does the charge come from".
+				var arc_trunnion_y = 0.352
+				var contain = tweaks.get("containment", 1.0)
+
+				var arc_mount_mesh = _part("arc_projector_mount")
+				if arc_mount_mesh:
+					var am = _mesh_inst(arc_mount_mesh, base_color.darkened(0.25))
+					am.scale = Vector3(caliber, 1.0, caliber)
+					parent_node.add_child(am)
+
+				var arc_body_mesh = _part("arc_projector_body")
+				if arc_body_mesh:
+					var ab = _mesh_inst(arc_body_mesh, Color(0.22, 0.24, 0.26))
+					ab.scale = Vector3.ONE * caliber
+					ab.position = Vector3(0, arc_trunnion_y, 0)
+					parent_node.add_child(ab)
+
+				# The ONLY part containment scales - the field emitter and its
+				# electrodes. Measured: the body's front face is at z=-0.040.
+				var arc_em_mesh = _part("arc_projector_emitter")
+				if arc_em_mesh:
+					var ae = _mesh_inst(arc_em_mesh, Color(0.30, 0.33, 0.36),
+						Color(0.35, 0.85, 1.0), 0.7)
+					ae.scale = Vector3.ONE * caliber * contain
+					ae.position = Vector3(0, arc_trunnion_y, ARC_BODY_FRONT_Z * caliber)
+					parent_node.add_child(ae)
+
+			"microwave_emitter":
+				# The dish IS the silhouette; nothing else in the roster has
+				# one. The magnetron can behind the trunnion is the ballast
+				# that stops a 2.0-aperture dish tipping the module forward.
+				var mw_trunnion_y = 0.262
+				var dish = tweaks.get("dish_aperture", 1.0)
+
+				var mw_mount_mesh = _part("microwave_mount")
+				if mw_mount_mesh:
+					var mm = _mesh_inst(mw_mount_mesh, base_color.darkened(0.25))
+					mm.scale = Vector3(caliber, 1.0, caliber)
+					parent_node.add_child(mm)
+
+				var mw_body_mesh = _part("microwave_body")
+				if mw_body_mesh:
+					var mb = _mesh_inst(mw_body_mesh, Color(0.24, 0.25, 0.27))
+					mb.scale = Vector3.ONE * caliber
+					mb.position = Vector3(0, mw_trunnion_y, 0)
+					parent_node.add_child(mb)
+
+				# The ONLY part dish_aperture scales, and uniformly - a bigger
+				# dish is a bigger dish, not a stretched one.
+				var mw_dish_mesh = _part("microwave_dish")
+				if mw_dish_mesh:
+					var md = _mesh_inst(mw_dish_mesh, Color(0.62, 0.62, 0.60))
+					md.scale = Vector3.ONE * caliber * dish
+					md.position = Vector3(0, mw_trunnion_y, MICROWAVE_BODY_FRONT_Z * caliber)
+					parent_node.add_child(md)
+
+			"particle_lance":
+				# Charge-up heavy. The capacitor stack out the back is both
+				# the counterweight and the thing charge_time scales, which is
+				# the read the tweak needs: a longer wind-up is visibly more
+				# stored charge bolted to the back of the gun.
+				var pl_trunnion_y = 0.318
+				var charge = tweaks.get("charge_time", 1.0)
+				var focal = tweaks.get("focal_length", 1.0)
+
+				var pl_mount_mesh = _part("lance_mount")
+				if pl_mount_mesh:
+					var pm = _mesh_inst(pl_mount_mesh, base_color.darkened(0.25))
+					pm.scale = Vector3(caliber, 1.0, caliber)
+					parent_node.add_child(pm)
+
+				var pl_breech_mesh = _part("lance_breech")
+				if pl_breech_mesh:
+					var pb = _mesh_inst(pl_breech_mesh, Color(0.21, 0.23, 0.25))
+					pb.scale = Vector3.ONE * caliber
+					pb.position = Vector3(0, pl_trunnion_y, 0)
+					parent_node.add_child(pb)
+
+				# UNIFORM scale, and no emission. Scaling only Z stretched the
+				# individual capacitor cans into long tubes - the exact
+				# smearing the part-separation rule exists to prevent - and a
+				# 0.35 emission on the whole part turned the stack into one
+				# solid glowing slab that read as a lightsaber rather than as
+				# stored charge. Uniform keeps every can's proportions, and
+				# the glow belongs on the accelerator when it fires, not baked
+				# into the battery.
+				var pl_cap_mesh = _part("lance_capacitors")
+				if pl_cap_mesh:
+					var pc = _mesh_inst(pl_cap_mesh, Color(0.28, 0.30, 0.34))
+					pc.scale = Vector3.ONE * caliber * charge
+					pc.position = Vector3(0, pl_trunnion_y, LANCE_BREECH_REAR_Z * caliber)
+					parent_node.add_child(pc)
+
+				var pl_acc_mesh = _part("lance_accelerator")
+				if pl_acc_mesh:
+					var pa = _mesh_inst(pl_acc_mesh, Color(0.16, 0.18, 0.21))
+					pa.scale = Vector3(caliber, caliber, focal * caliber)
+					pa.position = Vector3(0, pl_trunnion_y, LANCE_BREECH_FRONT_Z * caliber)
+					parent_node.add_child(pa)
 
 			"recoilless_rifle":
 				var trunnion_y = 0.27
@@ -4768,7 +4880,7 @@ static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: D
 	if children.is_empty(): return
 
 	match type_id:
-		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle":
+		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle", "arc_projector", "microwave_emitter", "particle_lance":
 			return
 
 # Builds a wedge (triangular prism) mesh from a base_size Vector3.

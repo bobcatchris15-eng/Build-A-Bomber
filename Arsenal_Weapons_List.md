@@ -29,7 +29,7 @@ Physical projectiles relying on velocity and mass. Excellent against raw armor.
   - **Ammo Drum Size:** Sustained burst duration. Scales the magazine only — never the receiver it feeds.
 
 ### 2ba. Anti-Materiel Rifle (Bushmaster III derived)
-- **Role:** The roster's only **precision** weapon — everything else is DPS or splash. One very large round every 4.5 seconds: **351 per shot, the largest direct-fire number in the game**, which matters because per-shot damage (`dps × fire_rate`) is exactly what `damage_resolver`'s armor thresholds gate on. It punches straight through every armor threshold in the table, and is comprehensively wasted on a scout it can only hit once every four and a half seconds. An ambush and overwatch piece: slow-traversing, expensive in crystal, and defenceless once something closes.
+- **Role:** The roster's only **precision** weapon — everything else is DPS or splash. One very large round every 4.5 seconds: **351 per shot, the largest number any *unpowered* direct-fire weapon puts into one hit** (the particle lance hits harder, but only on a design that has committed to a generator), which matters because per-shot damage (`dps × fire_rate`) is exactly what `damage_resolver`'s armor thresholds gate on. It punches straight through every armor threshold in the table, and is comprehensively wasted on a scout it can only hit once every four and a half seconds. An ambush and overwatch piece: slow-traversing, expensive in crystal, and defenceless once something closes.
 - **Silhouette:** A long greebled breech running back **through** the trunnions rather than hanging off them, so the gun reads as balanced about its middle, with an oversized recoil buffer tube and twin hydraulic rams projecting well past the rear — something has to absorb a shot this size, and it should look like it barely can. Very long slim tube with a multi-baffle muzzle brake. Where another weapon would carry ammunition it carries an unmanned sensor head: a rotating **LIDAR drum**, a **camera** with its lens standing proud under a sunshade, and heat-sink fins. Deliberately not a scope — see VISUAL_ART_DIRECTION.md on why optics are the easiest place to accidentally imply a gunner.
 - **Ammunition:** `AP` first and by default — this is the round the weapon is *for*. No flechette and no smoke: a precision rifle firing a cloud of darts or a screening round is fighting its own premise.
 - **Tweakable Features:**
@@ -54,6 +54,25 @@ Physical projectiles relying on velocity and mass. Excellent against raw armor.
 - **Tweakable Features:**
   - **Barrel Count:** Adding more barrels increases maximum ROF and cooling, but increases the spin-up time before firing starts.
   - **Motor Size:** A larger electric motor decreases spin-up time, but draws significantly more power from the chassis.
+
+### 3c. Arc Projector
+- **Role:** The dedicated **disabler**. Trivial HP damage, enormous energy drain — the only weapon whose job is to stop an expensive design from being able to *use* what it paid for. Was fully implemented but had no catalog entry for several sessions, so it could never be placed.
+- **Silhouette:** A Jacob's-ladder apparatus, not a gun: two divergent electrodes with nothing between them but air, standing on a ceramic insulator stack, fed by an oil-filled HT transformer with cooling fins and porcelain bushings. The transformer sits *behind* the trunnion and is most of the module's mass — it is simultaneously the counterweight and the visible answer to "where does the charge come from".
+- **Tweakable Features:**
+  - **Arc Containment Field:** Scales the field emitter and electrodes alone.
+
+### 3d. Microwave Emitter
+- **Role:** Area denial by cooking electronics. Fires a **cone**, not a beam — everything else in the energy bracket resolves on one target. Very little damage; its output is energy drain across everything in the aperture. The roster's only dedicated answer to energy-hungry designs.
+- **Silhouette:** A parabolic dish, which nothing else in the roster has, with a feed horn on a tripod out front and a finned magnetron can behind the trunnion.
+- **Tweakable Features:**
+  - **Dish Aperture:** Widens the cone and **shortens the range** — the same slider that makes it hit more things makes it reach less far. Predictable from the model before you drag it.
+
+### 3e. Particle Lance
+- **Role:** Charge, then one devastating beam. **660 per shot**, the biggest single hit in the game, on the slowest cycle in the game (5.5s) and the largest energy bill. Deliberately telegraphed: a charge glow builds before the shot, so an alert opponent gets a warning and a chance to kill it mid-wind-up. That warning is the balance.
+- **Silhouette:** A long accelerator spine with visible stage rings and quadrupole vanes, a cryo reservoir slung under the breech, and a capacitor stack out the back that is plainly most of the module's mass.
+- **Tweakable Features:**
+  - **Capacitor Charge:** Buys per-shot damage with **exposure** — a longer wind-up is more time to be killed before the shot lands. Scales the capacitor stack uniformly, so more charge is visibly more battery.
+  - **Accelerator Length:** Reach. Scales the spine alone; the stage rings keep their spacing.
 
 ### 3b. Coil Gun
 - **Role:** The sane sibling to the railgun — genuinely turreted rather than frame-built, less per-shot punch, roughly twice the cycle rate, far cheaper on crystal. Lets a mid-tier design reach hitscan kinetic without committing a whole hull to a fixed rail.

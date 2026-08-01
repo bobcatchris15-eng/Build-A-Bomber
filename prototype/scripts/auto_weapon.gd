@@ -85,7 +85,7 @@ var targets_allies: bool = false
 # vehicle root, duck-typed) and, for tesla_coil/ion_cannon, drain the
 # TARGET's energy pool alongside HP damage. arc_projector is the dedicated
 # pure-drain weapon.
-const ENERGY_WEAPON_TYPES = ["tesla_coil", "arc_projector", "ion_cannon"]
+const ENERGY_WEAPON_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "microwave_emitter", "particle_lance"]
 var energy_cost_per_shot: float = 0.0
 var energy_drain_per_shot: float = 0.0
 
@@ -100,7 +100,7 @@ var energy_drain_per_shot: float = 0.0
 # lists would have silently turned three week-old weapons into
 # capacitor-limited ones, which is a much bigger change than "which armor
 # threshold they resolve against."
-const ENERGY_DAMAGE_CLASS_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "heavy_laser", "plasma_lobber", "pd_laser"]
+const ENERGY_DAMAGE_CLASS_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "heavy_laser", "plasma_lobber", "pd_laser", "microwave_emitter", "particle_lance"]
 
 # --- Ammunition (ModuleCatalog.AMMO_TYPES) ---
 # A design-time payload choice stored in the module's own tweaks dict,
@@ -651,6 +651,15 @@ func _ready():
 		# further than its barrel alone would justify.
 		if data.tweaks.has("optic_power"):
 			fire_range *= data.tweaks["optic_power"]
+		# A longer accelerator spine means a faster particle and more reach.
+		if data.tweaks.has("focal_length"):
+			fire_range *= data.tweaks["focal_length"]
+		# INVERSE, like lens_aperture and containment above: a wider dish
+		# spreads the same power over a broader cone, so it covers more and
+		# reaches less. That trade is the whole point of the slider, and it
+		# only exists if range actually falls as the dish grows.
+		if data.tweaks.has("dish_aperture") and data.tweaks["dish_aperture"] > 0.0:
+			fire_range /= data.tweaks["dish_aperture"]
 		# Deployed bipod. Not a linear-scale tweak like the rest of these -
 		# it's a discrete either/or, and it's the only tweak in the roster
 		# that buys a stat with a CAPABILITY rather than with weight or
@@ -1126,7 +1135,7 @@ func _fire_at_target():
 	match type_id:
 		"basic_cannon", "artillery", "flak_cannon", "plasma_lobber", "recoilless_rifle", "ballista", "napalm_mortar", "anti_materiel_rifle": sfx_name = "cannon"
 		"heavy_machine_gun", "rotary_cannon", "ciws", "autocannon", "mk19_grenade_launcher": sfx_name = "machine_gun"
-		"gauss_railgun", "heavy_laser", "pd_laser", "tesla_coil", "arc_projector", "ion_cannon", "coil_gun": sfx_name = "laser"
+		"gauss_railgun", "heavy_laser", "pd_laser", "tesla_coil", "arc_projector", "ion_cannon", "coil_gun", "microwave_emitter", "particle_lance": sfx_name = "laser"
 		"guided_missile", "missile_pod", "cluster_dispenser", "smoke_discharger", "mine_layer": sfx_name = "missile"
 		"resource_harvester", "repair_array": sfx_name = "harvest"
 	if get_node_or_null("/root/AudioManager"):
@@ -1192,6 +1201,10 @@ func _fire_at_target():
 			_fire_tesla_coil()
 		"arc_projector":
 			_fire_arc_projector()
+		"microwave_emitter":
+			_fire_microwave_emitter()
+		"particle_lance":
+			_fire_particle_lance()
 		"ion_cannon":
 			_fire_ion_cannon()
 		_:
@@ -2125,6 +2138,104 @@ func _fire_arc_projector():
 
 	var timer = get_tree().create_timer(0.1)
 	timer.timeout.connect(func(): if is_instance_valid(beam): beam.queue_free())
+
+
+# Microwave emitter: a CONE, not a beam. Everything else in the energy
+# bracket resolves on one target; this one sweeps everything inside its
+# aperture, does very little HP damage, and empties their capacitors. It is
+# the roster's only dedicated answer to an energy-hungry design.
+#
+# dish_aperture widens the cone and shortens the range (see _ready()), so
+# the same tweak that makes it hit more things makes it reach less far.
+const MICROWAVE_BASE_HALF_ANGLE: float = 0.26 # radians at aperture 1.0
+
+func _fire_microwave_emitter():
+	var parent = _effects_parent()
+	if parent == null: return
+
+	var aperture = 1.0
+	if has_meta("module_data"):
+		aperture = float(get_meta("module_data").tweaks.get("dish_aperture", 1.0))
+	var half_angle = clampf(MICROWAVE_BASE_HALF_ANGLE * aperture, 0.08, 1.1)
+	var forward = -global_transform.basis.z.normalized()
+	var per_shot = dps * fire_rate
+
+	# Everything hostile inside the cone takes the hit, so a tight dish
+	# concentrates on one target and a wide one blankets a formation.
+	var my_team = get_team()
+	for c in get_tree().get_nodes_in_group("damageable"):
+		if not is_instance_valid(c) or not c.has_method("take_damage"):
+			continue
+		if "is_dead" in c and c.is_dead:
+			continue
+		if c == get_vehicle_root():
+			continue
+		if c.has_meta("team") and my_team != -1 and c.get_meta("team") == my_team:
+			continue
+		var to_c = c.global_position - global_position
+		var dist = to_c.length()
+		if dist > fire_range or dist < 0.01:
+			continue
+		if forward.angle_to(to_c.normalized()) > half_angle:
+			continue
+		_deal_weapon_damage(c, per_shot)
+		if c.has_method("drain_energy"):
+			c.drain_energy(energy_drain_per_shot)
+
+	# Visual: nested shells stepping out along the cone, so the aperture is
+	# legible in the effect and not only in the model.
+	var steps := 4
+	for i in range(steps):
+		var t = (float(i) + 1.0) / float(steps)
+		var shell = MeshInstance3D.new()
+		shell.mesh = MunitionPool.unit_sphere()
+		shell.material_override = MunitionPool.alpha(Color(0.95, 0.85, 0.45, 0.20))
+		parent.add_child(shell)
+		shell.global_position = global_position + forward * (fire_range * t * 0.55)
+		var spread = fire_range * t * 0.55 * tan(half_angle)
+		shell.scale = Vector3(spread, spread, spread * 0.35)
+		var st = create_tween()
+		st.tween_property(shell, "scale", Vector3.ZERO, 0.16 + t * 0.10)
+		st.finished.connect(func(): if is_instance_valid(shell): shell.queue_free())
+
+# Particle lance: the roster's biggest single hit, at the roster's slowest
+# cycle. Deliberately telegraphed - a charge glow builds on the accelerator
+# before the shot, so an alert opponent gets a warning and a chance to kill
+# it mid-wind-up. That warning is the balance for 660 damage in one hit.
+func _fire_particle_lance():
+	var parent = _effects_parent()
+	if parent == null: return
+
+	var forward = -global_transform.basis.z.normalized()
+
+	# The beam itself: a thin, very bright core with a wider halo.
+	for pass_i in range(2):
+		var beam = MeshInstance3D.new()
+		beam.mesh = MunitionPool.unit_cylinder()
+		var col = laser_color if pass_i == 0 else Color(1.0, 1.0, 1.0)
+		beam.material_override = MunitionPool.emissive(col, col, 3.0 if pass_i == 1 else 1.6)
+		parent.add_child(beam)
+		var aim = target.global_position if is_instance_valid(target) else global_position + forward * fire_range
+		MunitionPool.aim_beam(beam, global_position, aim, 0.16 if pass_i == 0 else 0.05)
+		var bt = create_tween()
+		bt.tween_property(beam, "scale", Vector3(0.02, beam.scale.y, 0.02), 0.22)
+		bt.finished.connect(func(): if is_instance_valid(beam): beam.queue_free())
+
+	if is_instance_valid(target):
+		_deal_weapon_damage(target, dps * fire_rate)
+		if target.has_method("drain_energy"):
+			target.drain_energy(energy_drain_per_shot)
+
+	# Muzzle bloom and a hard recoil flare back down the spine.
+	var bloom = MeshInstance3D.new()
+	bloom.mesh = MunitionPool.unit_sphere()
+	bloom.material_override = MunitionPool.emissive(laser_color, Color(0.8, 0.95, 1.0), 2.5)
+	parent.add_child(bloom)
+	bloom.global_position = global_position + forward * 1.2
+	bloom.scale = Vector3.ONE * 0.55
+	var blt = create_tween()
+	blt.tween_property(bloom, "scale", Vector3.ZERO, 0.20)
+	blt.finished.connect(func(): if is_instance_valid(bloom): bloom.queue_free())
 
 func _fire_ion_cannon():
 	# The "grounded" energy heavy-hitter - single strong beam, full HP

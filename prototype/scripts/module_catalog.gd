@@ -150,6 +150,15 @@ const WEAPON_FIRE_PROFILES = {
 	"tesla_coil":         {"fire_rate": 1.4,  "fire_range": 14.0, "laser_color": Color.LIGHT_SKY_BLUE},
 	"arc_projector":      {"fire_rate": 0.9,  "fire_range": 10.0, "laser_color": Color.CYAN},
 	"ion_cannon":         {"fire_rate": 3.2,  "fire_range": 32.0, "laser_color": Color.SKY_BLUE},
+	# Cone denial. Short interval and low per-shot on purpose: it is not
+	# supposed to kill things, it is supposed to make their electronics stop
+	# working, which it does through the energy drain rather than the damage.
+	"microwave_emitter":  {"fire_rate": 0.35, "fire_range": 13.0, "laser_color": Color(0.95, 0.85, 0.45)},
+	# The slowest cycle in the roster by a wide margin, and the biggest energy
+	# bill. 120 dps at a 5.5s interval is 660 per shot - well past even the
+	# anti-materiel rifle - but you only get it every five and a half seconds
+	# and only if the capacitor is charged.
+	"particle_lance":     {"fire_rate": 5.5,  "fire_range": 34.0, "laser_color": Color(0.70, 0.90, 1.0)},
 	"ciws":               {"fire_rate": 0.06, "fire_range": 14.0, "laser_color": Color.WHITE_SMOKE},
 	"pd_laser":           {"fire_rate": 0.1,  "fire_range": 16.0, "laser_color": Color.LIGHT_CORAL},
 	"flak_cannon":        {"fire_rate": 1.2,  "fire_range": 22.0, "laser_color": Color.DARK_GOLDENROD},
@@ -439,6 +448,54 @@ static func _build_catalog_literal() -> Dictionary:
 			"size": Vector3(0.8, 0.8, 2.8),
 			"color": Color.SKY_BLUE
 		},
+		# Activating a module that was already 80% built: fire profile, fire
+		# function, energy-drain maths, tweak specs and an authored mesh all
+		# existed, but with no catalog entry it could never be placed. The
+		# dedicated disabler - trivial HP damage, enormous energy drain.
+		"arc_projector": {
+			"name": "Arc Projector",
+			"category": "weapon",
+			"hp": 70.0,
+			"weight": 85.0,
+			"metal": 24,
+			"crystal": 26,
+			"dps": 22.0,
+			"energy_capacity": 0.0,
+			"traverse_agility": 0.9,
+			"size": Vector3(0.5, 0.5, 1.0),
+			"color": Color(0.30, 0.40, 0.48)
+		},
+
+		# Area denial by cooking electronics. The counter to energy-hungry
+		# designs specifically, which nothing else in the roster targets.
+		"microwave_emitter": {
+			"name": "Microwave Emitter",
+			"category": "weapon",
+			"hp": 65.0,
+			"weight": 105.0,
+			"metal": 30,
+			"crystal": 32,
+			"dps": 30.0,
+			"traverse_agility": 0.75,
+			"size": Vector3(0.7, 0.6, 0.9),
+			"color": Color(0.52, 0.50, 0.42)
+		},
+
+		# Charge, then one devastating beam. The heaviest and most expensive
+		# weapon in the roster, and the only one that can be caught mid-charge.
+		"particle_lance": {
+			"name": "Particle Lance",
+			"category": "weapon",
+			"hp": 90.0,
+			"weight": 220.0,
+			"metal": 60,
+			"crystal": 55,
+			"dps": 120.0,
+			"traverse_agility": 0.45,
+			"size": Vector3(0.6, 0.6, 2.4),
+			"color": Color(0.34, 0.44, 0.52)
+		},
+
 		"heavy_laser": {
 			"name": "Continuous Laser",
 			"category": "weapon",
@@ -1113,6 +1170,9 @@ const MODULE_FLAVOR = {
 	"tesla_coil": "Arcs to the nearest conductive mass, which is not always the intended target.",
 	"ion_cannon": "Draws heavily from base power. Scheduling with the generator crew is recommended.",
 	"heavy_laser": "Continuous beam. Performance degrades in dust, smoke, rain, and general atmosphere.",
+	"arc_projector": "Empties capacitors at range. Does almost no damage and is almost never forgiven.",
+	"microwave_emitter": "Cooks electronics through armour. Crews report the taste of metal beforehand.",
+	"particle_lance": "Five seconds of charging for one second of consequence. Do not be interrupted.",
 	"plasma_lobber": "Containment is temporary by design. Everything downrange is briefly reclassified.",
 	# Point defense
 	"ciws": "Engages incoming ordnance automatically. Do not walk in front of it while powered.",
@@ -1436,6 +1496,9 @@ const MODULE_ROLES = {
 	# electromagnetic launchers, which fire a slug but are built, costed and
 	# powered like energy weapons (crystal + capacitors, not a powder charge).
 	"heavy_laser": "Energy & Electromagnetic",
+	"arc_projector": "Energy & Electromagnetic",
+	"microwave_emitter": "Energy & Electromagnetic",
+	"particle_lance": "Energy & Electromagnetic",
 	"tesla_coil": "Energy & Electromagnetic",
 	"coil_gun": "Energy & Electromagnetic",
 	"ion_cannon": "Energy & Electromagnetic",
@@ -1638,6 +1701,7 @@ static func get_traverse_agility(type_id: String) -> float:
 const PROJECTILE_CLASS = {
 	"gauss_railgun": "hitscan", "heavy_laser": "hitscan", "pd_laser": "hitscan",
 	"tesla_coil": "hitscan", "ion_cannon": "hitscan",
+	"arc_projector": "hitscan", "microwave_emitter": "hitscan", "particle_lance": "hitscan",
 	"resource_harvester": "hitscan", "repair_array": "hitscan",
 	"basic_cannon": "ballistic", "heavy_machine_gun": "ballistic", "rotary_cannon": "ballistic",
 	"ciws": "ballistic", "flak_cannon": "ballistic", "flamethrower": "ballistic",
