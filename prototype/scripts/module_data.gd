@@ -2,6 +2,21 @@ class_name ModuleData
 extends Resource
 
 const GlobalConfig = preload("res://scripts/global_config.gd")
+# Ammo selection (ModuleCatalog.AMMO_TYPES) carries real stowage weight and
+# per-round cost. Safe to preload: module_catalog.gd does not preload this
+# file, so there's no cycle.
+const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
+
+# Ammo's weight/cost multipliers. Kept as one helper rather than inlined
+# into get_weight()/get_cost() twice so the two can never disagree about
+# which round is loaded. Returns the neutral "standard" profile for any
+# module with no ammo selection at all, which is every weapon absent from
+# WEAPON_AMMO_OPTIONS plus every non-weapon module - so this is a strict
+# no-op for them.
+func _get_ammo_profile() -> Dictionary:
+	if not ModuleCatalogScript.is_ammo_capable(type_id):
+		return ModuleCatalogScript.AMMO_TYPES[ModuleCatalogScript.AMMO_DEFAULT]
+	return ModuleCatalogScript.get_ammo_profile(ModuleCatalogScript.get_ammo(type_id, tweaks))
 
 @export var type_id: String = ""
 @export var module_name: String = "Unknown Module"
@@ -59,6 +74,10 @@ func get_weight() -> float:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				weight *= 1.0 + (val * 0.15)
 
+	# Ammo stowage mass - AP penetrators and HE filler weigh more than a
+	# plain service round, obscurant canisters slightly less.
+	weight *= _get_ammo_profile().get("weight_mult", 1.0)
+
 	return GlobalConfig.round_to_half(weight)
 	
 func get_cost() -> Vector2i:
@@ -94,6 +113,13 @@ func get_cost() -> Vector2i:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				m = int(m * (1.0 + (val * 0.20)))
 				c = int(c * (1.0 + (val * 0.20)))
+
+	# Per-round payload cost. EMP shells are the crystal sink of the set
+	# (1.7x), obscurants the cheapest - deliberately so that loading smoke
+	# is an easy call and loading EMP is a real economic commitment.
+	var ammo = _get_ammo_profile()
+	m = int(m * ammo.get("metal_mult", 1.0))
+	c = int(c * ammo.get("crystal_mult", 1.0))
 
 	return Vector2i(m, c)
 

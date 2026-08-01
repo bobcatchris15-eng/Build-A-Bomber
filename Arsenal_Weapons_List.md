@@ -21,11 +21,35 @@ Physical projectiles relying on velocity and mass. Excellent against raw armor.
   - **Multi-Barrel (Action Addition):** Adding a second barrel doubles ROF and damage, but doubles weight and ammo footprint.
   - **Ammo Drum Size:** Increases sustained burst duration before reloading.
 
+### 2b. Autocannon
+- **Role:** The mid-tier between the machine gun and the main cannon. Rapid enough to matter against light armor, with real per-shot weight behind it.
+- **Tweakable Features:**
+  - **Caliber / Barrel Length:** The usual damage-vs-handling trade.
+  - **Ammo Drum Size:** Sustained burst duration.
+
+### 2c. Recoilless Rifle
+- **Role:** Enormous per-shot HEAT damage from a light, cheap mount, paid for with a brutal reload — and a **backblast danger zone behind the weapon** that damages *anything* in it, friend, foe, or the firing vehicle itself. The first weapon where *where you mount it* has a mechanical consequence, not just an arc consequence.
+- **Tweakable Features:**
+  - **Bore Caliber:** Warhead size.
+  - **Tube Length:** Range and accuracy. (Does not move the venturi — the backblast always vents from the breech.)
+
+### 2d. Ballista
+- **Role:** A torsion-spring bolt thrower, bolted to a machine that also mounts railguns. Enormous per-shot kinetic damage — enough to clear armor thresholds outright rather than chip at them — at almost no crystal cost, paid for with the slowest cycle in the roster. The cheap answer to heavy armor for a design that can't afford a railgun.
+- **Tweakable Features:**
+  - **Bolt Thickness:** Per-shot damage.
+  - **Draw Length:** Range, at the cost of an even slower cycle.
+
 ### 3. Rotary Cannon (Gatling Gun)
 - **Role:** Extreme ROF. Covers everything from tri-barreled .50 cals up to massive 30mm GAU-8 Avengers.
 - **Tweakable Features:**
   - **Barrel Count:** Adding more barrels increases maximum ROF and cooling, but increases the spin-up time before firing starts.
   - **Motor Size:** A larger electric motor decreases spin-up time, but draws significantly more power from the chassis.
+
+### 3b. Coil Gun
+- **Role:** The sane sibling to the railgun — genuinely turreted rather than frame-built, less per-shot punch, roughly twice the cycle rate, far cheaper on crystal. Lets a mid-tier design reach hitscan kinetic without committing a whole hull to a fixed rail.
+- **Tweakable Features:**
+  - **Accelerator Stage Count:** More coils means more muzzle velocity and range — and visibly more coils on a longer rail.
+  - **Slug Caliber:** Per-shot damage.
 
 ### 4. Gauss / Railgun
 - **Role:** Extreme velocity, line-piercing, anti-heavy armor.
@@ -46,6 +70,18 @@ Arcing fire used to bombard static positions or hit units behind cover.
 - **Role:** Medium-range, high-arcing, rapid-burst indirect fire.
 - **Tweakable Features:**
   - **Tube Array Size:** Adding more tubes allows for a massive "alpha strike," but drastically increases reload time.
+
+### 6b. MK19 Grenade Launcher
+- **Role:** Belt-fed rapid-fire grenades. Fills the gap between the mortar (slow, heavy, high arc) and the machine gun (fast, flat, no splash) — a small blast per round, but a great many rounds, on a low direct-lay arc.
+- **Tweakable Features:**
+  - **Grenade Caliber / Barrel Length:** Blast size and reach.
+  - **Belt Box Size:** Sustained fire before reloading.
+
+### 6c. Napalm Mortar
+- **Role:** Area denial by fire rather than fragments. Modest impact damage, but leaves a large, long-lived burning pool that makes ground genuinely expensive to stand on.
+- **Tweakable Features:**
+  - **Canister Caliber:** Pool size and burn damage.
+  - **Mortar Tube Length:** Range.
 
 ### 7. Spigot Mortar
 - **Role:** Fires an oversized, disproportionately massive explosive from a very small launcher (e.g., Petard mortar). Very short range, devastating anti-structure damage.
@@ -110,6 +146,52 @@ Bypasses physical armor, but highly susceptible to energy shielding.
 - **Role:** Slow projectiles dealing massive localized damage and lingering burn.
 - **Tweakable Features:**
   - **Containment Chamber:** Increases splash radius, but lowers projectile speed.
+
+---
+
+### 13a. Mine Layer
+- **Role:** The only weapon in the arsenal that **holds ground**. Everything else must keep firing to keep denying space; mines persist without the layer, survive its destruction, and punish a chokepoint indefinitely. They arm shortly after landing, blink visibly once armed (spotting and avoiding them is the counterplay), and ignore aircraft entirely — giving air a real reason to exist against a mined approach.
+- **Tweakable Features:**
+  - **Mines Per Volley:** More mines laid per cycle, visibly loaded on the rack.
+  - **Mine Charge Size:** Blast damage per mine.
+
+### 13b. Smoke Discharger
+- **Role:** Dedicated obscurant launcher. Deals no damage whatsoever — it lays a persistent cloud that blocks weapon line-of-sight, blocks fog-of-war scouting, and breaks guided-missile lock. The complement to smoke *ammunition* (below): a gun loaded with smoke gives up its turn to shoot, while a discharger frees your real weapons to keep firing.
+- **Tweakable Features:**
+  - **Discharger Tube Count:** More tubes lay a wider screen per volley, at the cost of a longer reload.
+
+---
+
+## 🎯 Ammunition Types (Cross-Cutting)
+Any weapon that fires a discrete **shell or payload** can be loaded with a specialist round, chosen per-module in the Design Lab and locked in for the match. Continuous-fire weapons (beams, flamethrowers, tesla/arc/ion discharges, plasma bolts) have nothing to swap and get no selection.
+
+This is the arsenal's main **counter-pick** layer. Each round resolves against a different row of the armor threshold table, so the same cannon answers different enemies depending on what it's fed.
+
+| Round | Damage Class | Profile | Beats | Loses To |
+|---|---|---|---|---|
+| **Standard** | *native* | Balanced, no specialisation | — | — |
+| **Armor-Piercing** | Kinetic | +25% damage, **no splash**, ×0.4 vs light | All armor, esp. Ablative | Drones, aircraft, swarms |
+| **High-Explosive** | Explosive | −15% damage, +60% blast | Hardened Steel, light targets | Reactive Armor |
+| **Incendiary** | Thermal | −30% damage, leaves a burning pool | Hardened Steel | Ablative Ceramic |
+| **Flechette Canister** | Kinetic | −45% damage, wide spread, ×3.5 vs light | Drones, swarms, aircraft | Anything armored |
+| **EMP Shell** | Energy | −50% damage, drains target capacitor | Steel, Reactive | Energy Shielding |
+| **Smoke** | — | **No damage.** Blocks sightlines and missile lock | Positioning | Anything, offensively |
+| **Illumination** | — | **No damage.** Burns off fog of war where it lands | Scouting | Anything, offensively |
+
+Resolved per-shot damage from a standard Main Cannon (72 base), against each armor material and against a light target:
+
+| | Steel | Reactive | Ablative | Shielding | **Light** |
+|---|---|---|---|---|---|
+| Standard | 53.6 | 66.2 | 70.2 | 64.8 | 72.0 |
+| **AP** | **73.1** | **85.5** | **87.8** | **84.4** | 36.0 |
+| **HE** | 53.8 | *24.5* | 50.1 | 30.6 | 79.6 |
+| **Incendiary** | 49.1 | 42.3 | *15.1* | 25.2 | 60.5 |
+| **EMP** | 31.1 | 31.1 | 21.6 | *10.8* | 36.0 |
+| **Flechette** | *27.7* | 31.7 | 36.3 | 29.7 | **138.6** |
+
+Every round has both a clear best target and a clear worst — Standard is the only one that is never either, which is what makes it the honest default rather than a wasted slot. AP is deliberately the anti-armor answer, but pays for it by over-penetrating thin-skinned targets, making it the exact mirror of Flechette.
+
+Ammunition carries real stowage **weight** and per-round **cost** — EMP shells are the crystal sink of the set, obscurants the cheapest. Loading a specialist round is a genuine commitment, not a free re-tune.
 
 ---
 

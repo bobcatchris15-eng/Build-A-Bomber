@@ -15,6 +15,7 @@ const EnemyAIScript = preload("res://scripts/enemy_ai.gd")
 const MapCatalog = preload("res://scripts/map_catalog.gd")
 const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
 const ProductionQueueScript = preload("res://scripts/production_queue.gd")
+const SmokeVolumeScript = preload("res://scripts/smoke_volume.gd")
 
 # RTS_CORE_ROADMAP.md A1: the one production authority, shared by the
 # player's build bar and enemy_ai.gd - see production_queue.gd's own header
@@ -649,7 +650,15 @@ func _has_line_of_sight(from_pos: Vector3, to_pos: Vector3) -> bool:
 	var ray_start = from_pos + Vector3(0, VISION_EYE_HEIGHT, 0)
 	var ray_end = to_pos + Vector3(0, VISION_EYE_HEIGHT, 0)
 	var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
-	query.collision_mask = 1 # Ground/obstacle layer only - never blocked by other units (layer 4)
+	# Ground/obstacle layer (1) - never blocked by other units (layer 4) -
+	# plus smoke (32). Smoke ammo and the smoke_discharger deny SCOUTING as
+	# well as weapon fire: a screen that hid you from being shot at but not
+	# from being seen would be a strange half-measure, and the fog system is
+	# the half players actually feel. Areas are off by default in a ray
+	# query, so collide_with_areas has to be opted into explicitly here -
+	# smoke is an Area3D (see smoke_volume.gd).
+	query.collision_mask = 1 + SmokeVolumeScript.SMOKE_COLLISION_LAYER
+	query.collide_with_areas = true
 	var result = space_state.intersect_ray(query)
 	return result.is_empty()
 
@@ -680,6 +689,38 @@ func _get_effective_vision(o) -> float:
 		vision *= 1.0 + min(elevation, ELEVATION_VISION_CAP) * ELEVATION_VISION_BONUS_PER_UNIT
 	return vision
 
+# --- Illumination reveal beacons -------------------------------------------
+# Illumination ammo (ModuleCatalog.AMMO_TYPES) burns off fog where it lands.
+# A flare is a temporary, STATIONARY observer that belongs to the team that
+# fired it, so rather than inventing a parallel visibility path it's folded
+# into the existing per-tick fog scan as an extra "viewer" alongside that
+# team's real constructs. Deliberately no line-of-sight requirement: a flare
+# lights an area from above, which is the entire point of firing one over a
+# ridge you can't see behind.
+var _reveal_beacons: Array = []
+
+# Called by auto_weapon.gd's _spawn_illumination_flare() (duck-typed through
+# current_scene, so contexts with no fog at all simply never call it).
+func reveal_area(team: int, pos: Vector3, radius: float, duration: float):
+	_reveal_beacons.append({
+		"pos": pos, "radius": radius, "team": team,
+		"expires_at": Time.get_ticks_msec() + int(duration * 1000.0),
+	})
+
+# Live beacons visible to `viewing_team`, dropping expired ones as it goes.
+func _active_reveal_beacons(viewing_team: int) -> Array:
+	var now = Time.get_ticks_msec()
+	var live: Array = []
+	var kept: Array = []
+	for b in _reveal_beacons:
+		if b.expires_at <= now:
+			continue
+		kept.append(b)
+		if is_allied(viewing_team, b.team):
+			live.append(b)
+	_reveal_beacons = kept
+	return live
+
 func _recalc_fog_of_war():
 	if game_over: return
 	# Alliance-aware (RTS_CORE_ROADMAP.md B2): "player_constructs" is
@@ -696,6 +737,7 @@ func _recalc_fog_of_war():
 			player_constructs += group
 		else:
 			enemy_constructs += group
+	var beacons = _active_reveal_beacons(local_team)
 	for c in enemy_constructs:
 		if not is_instance_valid(c) or not c.has_method("set_fog_visible"): continue
 		var seen = false
@@ -718,10 +760,17 @@ func _recalc_fog_of_war():
 				if o_flying or c_flying or _has_line_of_sight(o.global_position, c.global_position):
 					seen = true
 					break
+		# Illumination flares: a lit area is simply seen, no LOS check (see
+		# _reveal_beacons above).
+		if not seen:
+			for b in beacons:
+				if c.global_position.distance_to(b.pos) <= b.radius:
+					seen = true
+					break
 		if debug_reveal_all_fog:
 			seen = true
 		c.set_fog_visible(seen)
-	_update_fog_shroud(player_constructs)
+	_update_fog_shroud(player_constructs, beacons)
 	_update_minimap()
 	_update_enemy_intel()
 
@@ -791,14 +840,25 @@ func _setup_fog_shroud():
 func _fog_world_to_cell(x: float, z: float) -> Vector2i:
 	return Vector2i(int(floor((x + _fog_half) / FOG_GRID_CELL)), int(floor((z + _fog_half) / FOG_GRID_CELL)))
 
-func _update_fog_shroud(player_constructs: Array):
+func _update_fog_shroud(player_constructs: Array, beacons: Array = []):
 	if not is_instance_valid(_fog_shroud_texture): return
 	var new_visible: Dictionary = {}
+	# Constructs and illumination flares clear the shroud identically - a
+	# flare is just a stationary viewer with a fixed radius, so it's folded
+	# into the same loop as (position, vision) pairs rather than duplicating
+	# the cell-stamping below.
+	var viewers: Array = []
 	for o in player_constructs:
 		if not is_instance_valid(o): continue
-		var vision = _get_effective_vision(o)
-		if vision <= 0.0: continue
-		var center = o.global_position
+		var v = _get_effective_vision(o)
+		if v > 0.0:
+			viewers.append({"pos": o.global_position, "vision": v})
+	for b in beacons:
+		viewers.append({"pos": b.pos, "vision": b.radius})
+
+	for o in viewers:
+		var vision = o.vision
+		var center = o.pos
 		var cell_radius = int(ceil(vision / FOG_GRID_CELL)) + 1
 		var c0 = _fog_world_to_cell(center.x, center.z)
 		for dz in range(-cell_radius, cell_radius + 1):

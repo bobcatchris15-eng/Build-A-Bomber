@@ -155,6 +155,54 @@ const TWEAK_SPECS = {
 		{"name": "fuse_setting", "label": "Proximity Fuse Setter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 4.0, "step": 1.0, "default": 0.0}
 	],
+	# --- Roster expansion ---
+	# Every tweak name below is reused from the existing vocabulary
+	# (ModuleCatalog.LINEAR_SCALE_WEAPON_TWEAKS / module_data.gd's scaling
+	# lists) rather than invented, so weight/cost/dps/range/traverse
+	# scaling all work for these weapons with no new plumbing.
+	"mk19_grenade_launcher": [
+		{"name": "caliber", "label": "Grenade Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "drum_size", "label": "Belt Box Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 3.0, "step": 1.0, "default": 0.0}
+	],
+	"recoilless_rifle": [
+		{"name": "caliber", "label": "Bore Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Tube Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
+	],
+	"coil_gun": [
+		{"name": "caliber", "label": "Slug Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "rail_length", "label": "Accelerator Stage Count", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 4.0, "step": 1.0, "default": 0.0}
+	],
+	"autocannon": [
+		{"name": "caliber", "label": "Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "drum_size", "label": "Ammo Drum Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 3.0, "step": 1.0, "default": 0.0}
+	],
+	"napalm_mortar": [
+		{"name": "caliber", "label": "Canister Caliber", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Mortar Tube Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
+	],
+	"mine_layer": [
+		{"name": "tube_count", "label": "Mines Per Volley", "min": 1.0, "max": 4.0, "step": 1.0, "default": 1.0},
+		{"name": "payload_size", "label": "Mine Charge Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
+	],
+	"ballista": [
+		{"name": "caliber", "label": "Bolt Thickness", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Draw Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 3.0, "step": 1.0, "default": 0.0}
+	],
+	# Tube count is the discharger's one real handle: more tubes means more
+	# canisters per volley and so a wider screen, at the usual weight/cost.
+	"smoke_discharger": [
+		{"name": "tube_count", "label": "Discharger Tube Count", "min": 2.0, "max": 6.0, "step": 1.0, "default": 4.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
+	],
 	"resource_harvester": [
 		{"name": "extractor_size", "label": "Extractor Arm Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
@@ -1422,6 +1470,51 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 			_push_undo()
 			data.tweaks["material"] = ARMOR_MATERIALS[index]
 			mat_label.text = "Plate Material: %s" % ARMOR_MATERIAL_LABELS[index]
+			_on_tweak_changed()
+		)
+
+	# Ammunition selector. Same shape as the armor-material dropdown above
+	# and for the same reason: it's a discrete choice, not a numeric slider,
+	# and storing it in the module's own tweaks dict means it rides the
+	# existing save/load path for free. Only weapons with a real payload to
+	# swap get one (ModuleCatalog.WEAPON_AMMO_OPTIONS) - a continuous beam
+	# or a flamethrower has nothing to load.
+	if ModuleCatalog.is_ammo_capable(type_id):
+		var ammo_options = ModuleCatalog.get_ammo_options(type_id)
+		var current_ammo = ModuleCatalog.get_ammo(type_id, data.tweaks)
+		var ammo_idx = max(ammo_options.find(current_ammo), 0)
+
+		var ammo_container = VBoxContainer.new()
+		ammo_container.add_theme_constant_override("separation", 2)
+		popup_tweaks_container.add_child(ammo_container)
+
+		var ammo_label = Label.new()
+		ammo_label.text = "Loaded Ammo: %s" % ModuleCatalog.get_ammo_profile(ammo_options[ammo_idx]).label
+		ammo_container.add_child(ammo_label)
+
+		var ammo_btn = OptionButton.new()
+		for a in ammo_options:
+			ammo_btn.add_item(ModuleCatalog.get_ammo_profile(a).label)
+		ammo_btn.selected = ammo_idx
+		ammo_container.add_child(ammo_btn)
+
+		# The round's own one-line description, so the player can see what
+		# a choice actually does without leaving the popup.
+		var ammo_desc = Label.new()
+		ammo_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		ammo_desc.custom_minimum_size.x = 220
+		ammo_desc.add_theme_font_size_override("font_size", 11)
+		ammo_desc.modulate = Color(1, 1, 1, 0.65)
+		ammo_desc.text = ModuleCatalog.get_ammo_profile(ammo_options[ammo_idx]).desc
+		ammo_container.add_child(ammo_desc)
+
+		ammo_btn.item_selected.connect(func(index: int):
+			_push_undo()
+			var picked = ammo_options[index]
+			data.tweaks[ModuleCatalog.AMMO_TWEAK_KEY] = picked
+			var profile = ModuleCatalog.get_ammo_profile(picked)
+			ammo_label.text = "Loaded Ammo: %s" % profile.label
+			ammo_desc.text = profile.desc
 			_on_tweak_changed()
 		)
 

@@ -312,6 +312,18 @@ func _init():
 		success = false
 		_failed.append("test_energy_weapons_cost_and_drain")
 	_total_suites += 1
+	if not await _run_suite(test_ammo_types_change_damage_class_and_scaling, "test_ammo_types_change_damage_class_and_scaling"):
+		success = false
+		_failed.append("test_ammo_types_change_damage_class_and_scaling")
+	_total_suites += 1
+	if not await _run_suite(test_new_weapon_archetypes_are_fully_wired, "test_new_weapon_archetypes_are_fully_wired"):
+		success = false
+		_failed.append("test_new_weapon_archetypes_are_fully_wired")
+	_total_suites += 1
+	if not await _run_suite(test_smoke_ammo_blocks_line_of_sight, "test_smoke_ammo_blocks_line_of_sight"):
+		success = false
+		_failed.append("test_smoke_ammo_blocks_line_of_sight")
+	_total_suites += 1
 	if not await _run_suite(test_logistics_sharing_boosts_allies, "test_logistics_sharing_boosts_allies"):
 		success = false
 		_failed.append("test_logistics_sharing_boosts_allies")
@@ -5622,6 +5634,412 @@ func test_energy_weapons_cost_and_drain() -> bool:
 	shooter.queue_free()
 	target_unit.queue_free()
 	print("  [PASS] Energy weapons spend the shooter's own capacitor per shot, drain the target's energy pool, and can't fire with an empty capacitor.")
+	return true
+
+func test_ammo_types_change_damage_class_and_scaling() -> bool:
+	print("Running Test Suite: Ammunition - Damage Class Swap, Per-Shot Scaling, Weight/Cost, Backward Compatibility...")
+	await process_frame
+
+	# 1. The whole point of the system: ammo overrides the weapon's native
+	# damage_class, which is what routes it to a different armor threshold
+	# row in damage_resolver.gd.
+	var cases = [
+		{"ammo": "ap", "expect_class": "kinetic"},
+		{"ammo": "he", "expect_class": "explosive"},
+		{"ammo": "incendiary", "expect_class": "thermal"},
+		{"ammo": "emp", "expect_class": "energy"},
+	]
+	for case in cases:
+		var w = Node3D.new()
+		w.set_script(load("res://scripts/auto_weapon.gd"))
+		root.add_child(w)
+		var d = ModuleData.new()
+		d.type_id = "basic_cannon"
+		d.base_weight = 80.0
+		d.base_dps = 40.0
+		d.tweaks = {"ammo": case.ammo}
+		w.set_meta("module_data", d)
+		w._ready()
+		if w.damage_class != case.expect_class:
+			print("  [FAIL] ammo '%s' should set damage_class '%s', got '%s'" % [case.ammo, case.expect_class, w.damage_class])
+			w.queue_free()
+			return false
+		if w.ammo_type != case.ammo:
+			print("  [FAIL] ammo '%s' did not resolve, got '%s'" % [case.ammo, w.ammo_type])
+			w.queue_free()
+			return false
+		w.queue_free()
+
+	# 2. Backward compatibility - this is the one that matters most. A
+	# blueprint saved before ammo existed has no "ammo" key at all, and must
+	# behave EXACTLY as it did: native damage class, all multipliers 1.0.
+	var legacy = Node3D.new()
+	legacy.set_script(load("res://scripts/auto_weapon.gd"))
+	root.add_child(legacy)
+	var ld = ModuleData.new()
+	ld.type_id = "basic_cannon"
+	ld.base_weight = 80.0
+	ld.base_dps = 40.0
+	ld.tweaks = {"caliber": 1.0} # a pre-ammo tweaks dict
+	legacy.set_meta("module_data", ld)
+	legacy._ready()
+	if legacy.damage_class != "kinetic" or legacy.ammo_damage_mult != 1.0 or legacy.ammo_aoe_mult != 1.0:
+		print("  [FAIL] A pre-ammo blueprint must be unchanged: got class '%s', dmg x%s, aoe x%s" % [legacy.damage_class, legacy.ammo_damage_mult, legacy.ammo_aoe_mult])
+		legacy.queue_free()
+		return false
+	legacy.queue_free()
+
+	# 3. An illegal ammo id (hand-edited save, removed mod) must degrade to a
+	# legal option rather than erroring or silently applying garbage.
+	var bogus = Node3D.new()
+	bogus.set_script(load("res://scripts/auto_weapon.gd"))
+	root.add_child(bogus)
+	var bd = ModuleData.new()
+	bd.type_id = "gauss_railgun"
+	bd.base_weight = 180.0
+	bd.base_dps = 99.0
+	bd.tweaks = {"ammo": "smoke"} # not in gauss_railgun's allowed list
+	bogus.set_meta("module_data", bd)
+	bogus._ready()
+	if bogus.ammo_type not in ModuleCatalog.get_ammo_options("gauss_railgun"):
+		print("  [FAIL] An illegal ammo id should fall back to a legal option, got '%s'" % bogus.ammo_type)
+		bogus.queue_free()
+		return false
+	bogus.queue_free()
+
+	# 4. Weapons with no discrete payload get no ammo selection at all.
+	for beam_type in ["heavy_laser", "flamethrower", "tesla_coil", "repair_array"]:
+		if ModuleCatalog.is_ammo_capable(beam_type):
+			print("  [FAIL] %s has no shell to swap and should not be ammo-capable" % beam_type)
+			return false
+
+	# 5. Ammo carries real weight and cost through ModuleData, so loading a
+	# specialist round is an actual commitment.
+	var plain = ModuleData.new()
+	plain.type_id = "basic_cannon"
+	plain.base_weight = 80.0
+	plain.cost_metal = 30
+	plain.cost_crystal = 10
+	plain.tweaks = {"ammo": "standard"}
+
+	var emp = ModuleData.new()
+	emp.type_id = "basic_cannon"
+	emp.base_weight = 80.0
+	emp.cost_metal = 30
+	emp.cost_crystal = 10
+	emp.tweaks = {"ammo": "emp"}
+
+	if emp.get_cost().y <= plain.get_cost().y:
+		print("  [FAIL] EMP shells should cost more crystal than standard, got %d vs %d" % [emp.get_cost().y, plain.get_cost().y])
+		return false
+
+	var ap = ModuleData.new()
+	ap.type_id = "basic_cannon"
+	ap.base_weight = 80.0
+	ap.tweaks = {"ammo": "ap"}
+	if ap.get_weight() <= plain.get_weight():
+		print("  [FAIL] AP stowage should weigh more than standard, got %s vs %s" % [ap.get_weight(), plain.get_weight()])
+		return false
+
+	# 6. Utility rounds deal literally no HP damage - that IS their cost.
+	var smoke_w = Node3D.new()
+	smoke_w.set_script(load("res://scripts/auto_weapon.gd"))
+	root.add_child(smoke_w)
+	var sd = ModuleData.new()
+	sd.type_id = "basic_cannon"
+	sd.base_weight = 80.0
+	sd.base_dps = 40.0
+	sd.tweaks = {"ammo": "smoke"}
+	smoke_w.set_meta("module_data", sd)
+	smoke_w._ready()
+
+	var dummy = CharacterBody3D.new()
+	dummy.set_script(preload("res://scripts/battle_unit.gd"))
+	root.add_child(dummy)
+	dummy.team = 1
+	dummy.set_meta("team", 1)
+	dummy.max_hp = 500.0
+	dummy.hp = 500.0
+	smoke_w._deal_weapon_damage(dummy, 100.0)
+	if dummy.hp != 500.0:
+		print("  [FAIL] Smoke ammo must deal zero HP damage, target went to ", dummy.hp)
+		smoke_w.queue_free(); dummy.queue_free()
+		return false
+	smoke_w.queue_free()
+	dummy.queue_free()
+
+	# 7. No dominant choice. Every damage-dealing round must have at least
+	# one target class it is genuinely WORSE than standard against,
+	# otherwise it's a strict upgrade and the choice is solved - the exact
+	# Forged-Battalion failure DESIGN_VISION.md warns about. This caught a
+	# real one: AP originally beat standard against all four armor
+	# materials with no meaningful downside, which is why it now
+	# over-penetrates light targets.
+	var DamageResolver = preload("res://scripts/damage_resolver.gd")
+	var materials = ["hardened_steel", "reactive_armor", "ablative_ceramic", "energy_shielding"]
+	var std_profile = ModuleCatalog.get_ammo_profile("standard")
+	for ammo_id in ModuleCatalog.AMMO_TYPES:
+		if ammo_id == "standard":
+			continue
+		var prof = ModuleCatalog.get_ammo_profile(ammo_id)
+		if prof.damage_mult <= 0.0:
+			continue # utility rounds deal no damage at all - already a hard cost
+		var has_a_weakness = false
+		# Light targets count as a target class in their own right.
+		if prof.get("light_mult", 1.0) < std_profile.get("light_mult", 1.0):
+			has_a_weakness = true
+		for mat in materials:
+			var std_pair = DamageResolver.get_material_threshold(mat, "kinetic", 1.0)
+			var ammo_class = prof.damage_class if prof.damage_class != "" else "kinetic"
+			var ammo_pair = DamageResolver.get_material_threshold(mat, ammo_class, 1.0)
+			var std_dmg = DamageResolver.compute_hull_damage(72.0 * std_profile.damage_mult, std_pair.x, std_pair.y)
+			var ammo_dmg = DamageResolver.compute_hull_damage(72.0 * prof.damage_mult, ammo_pair.x, ammo_pair.y)
+			if ammo_dmg < std_dmg:
+				has_a_weakness = true
+				break
+		if not has_a_weakness:
+			print("  [FAIL] Ammo '%s' beats standard against every target class - that's a solved, dominant choice" % ammo_id)
+			return false
+
+	print("  [PASS] Ammo swaps damage class, scales weight/cost, degrades safely on bad input, leaves pre-ammo blueprints untouched, and no round is a strict upgrade.")
+	return true
+
+func test_new_weapon_archetypes_are_fully_wired() -> bool:
+	print("Running Test Suite: Roster Expansion - 8 New Archetypes Are Fully Wired End To End...")
+	await process_frame
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	var StatCalculatorScript = preload("res://scripts/stat_calculator.gd")
+
+	# Adding a weapon means touching ~8 separate registration points, and a
+	# weapon missing any ONE of them fails silently and differently (no
+	# tooltip, a fallback box mesh, a default 1.0s fire rate, an unarmed
+	# module). Rather than trust that, check every point for every new type.
+	var new_types = [
+		"mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon",
+		"napalm_mortar", "mine_layer", "ballista", "smoke_discharger",
+	]
+
+	var scene_stub = Node3D.new()
+	root.add_child(scene_stub)
+	current_scene = scene_stub
+
+	for type_id in new_types:
+		# 1. Catalog entry
+		if not ModuleCatalog.module_exists(type_id):
+			print("  [FAIL] %s has no catalog entry - it can never appear in the parts menu" % type_id)
+			return false
+		var data = ModuleCatalog.get_module_data(type_id)
+		if data.get("category", "") != "weapon":
+			print("  [FAIL] %s is not categorised as a weapon" % type_id)
+			return false
+
+		# 2. A real fire profile, not the silent 1.0/15.0 default fallback
+		if not ModuleCatalog.WEAPON_FIRE_PROFILES.has(type_id):
+			print("  [FAIL] %s has no WEAPON_FIRE_PROFILES row - it would silently use default timings" % type_id)
+			return false
+
+		# 3. Projectile class (drives the evasion model)
+		if not ModuleCatalog.PROJECTILE_CLASS.has(type_id):
+			print("  [FAIL] %s has no PROJECTILE_CLASS row" % type_id)
+			return false
+
+		# 4. Flavor text
+		if ModuleCatalog.get_module_flavor(type_id) == "":
+			print("  [FAIL] %s has no flavor line" % type_id)
+			return false
+
+		# 5. Design Lab tweak sliders
+		if not StatCalculatorScript.TWEAK_SPECS.has(type_id):
+			print("  [FAIL] %s has no TWEAK_SPECS - it would render zero sliders" % type_id)
+			return false
+
+		# 6. A real procedural visual, not the generic fallback box
+		var vis_parent = Node3D.new()
+		scene_stub.add_child(vis_parent)
+		VisualBuilder.build_visual(type_id, vis_parent, data.size, data.color, {})
+		var mesh_children = vis_parent.get_children().filter(func(c): return c is MeshInstance3D)
+		if mesh_children.size() < 2:
+			print("  [FAIL] %s built %d mesh parts - that's the generic fallback box, not a real silhouette" % [type_id, mesh_children.size()])
+			return false
+		vis_parent.queue_free()
+
+		# 7. It actually fires and does something. Every one of these has a
+		# distinct _fire_*() and several spawn persistent world entities, so
+		# a crash in any of them is a crash in real gameplay.
+		var shooter = CharacterBody3D.new()
+		shooter.set_script(preload("res://scripts/battle_unit.gd"))
+		scene_stub.add_child(shooter)
+		shooter.team = 0
+		shooter.set_meta("team", 0)
+		shooter.global_position = Vector3(0, 0, 0)
+
+		var weapon = Node3D.new()
+		weapon.set_script(load("res://scripts/auto_weapon.gd"))
+		shooter.add_child(weapon)
+		var w_data = ModuleData.new()
+		w_data.type_id = type_id
+		w_data.base_weight = data.weight
+		w_data.base_dps = data.dps
+		weapon.set_meta("module_data", w_data)
+		weapon._ready()
+
+		if weapon.fire_rate != ModuleCatalog.WEAPON_FIRE_PROFILES[type_id].fire_rate:
+			print("  [FAIL] %s did not pick up its own fire_rate" % type_id)
+			return false
+
+		var victim = CharacterBody3D.new()
+		victim.set_script(preload("res://scripts/battle_unit.gd"))
+		scene_stub.add_child(victim)
+		victim.team = 1
+		victim.set_meta("team", 1)
+		victim.add_to_group("damageable")
+		victim.max_hp = 5000.0
+		victim.hp = 5000.0
+		victim.global_position = Vector3(0, 0, -6)
+
+		weapon.target = victim
+		weapon._fire_at_target() # must not crash
+		await process_frame
+
+		shooter.queue_free()
+		victim.queue_free()
+		await process_frame
+
+	# The mine layer's mines and the smoke discharger's clouds are
+	# persistent entities that outlive their launcher - make sure the
+	# mine one really is reachable and self-arming rather than inert.
+	var ProximityMine = preload("res://scripts/proximity_mine.gd")
+	var mine = ProximityMine.spawn(scene_stub, Vector3(500, 0, 500), 0, 50.0, "explosive")
+	await process_frame
+	if mine.collision_layer != ProximityMine.MINE_COLLISION_LAYER:
+		print("  [FAIL] A mine must sit on its own layer so it never blocks movement")
+		return false
+	mine._process(ProximityMine.ARM_TIME + 0.1)
+	if not mine._armed:
+		print("  [FAIL] A mine should arm itself after ARM_TIME")
+		return false
+	mine.free()
+
+	scene_stub.free()
+	current_scene = null
+	await process_frame
+	print("  [PASS] All 8 new archetypes have catalog/fire-profile/projectile-class/flavor/tweak/visual wiring and fire without crashing.")
+	return true
+
+func test_smoke_ammo_blocks_line_of_sight() -> bool:
+	print("Running Test Suite: Smoke - Blocks Weapon LOS, Blocks Vision LOS, Breaks Missile Lock...")
+	await process_frame
+	var SmokeVolume = preload("res://scripts/smoke_volume.gd")
+
+	var scene_stub = Node3D.new()
+	root.add_child(scene_stub)
+	current_scene = scene_stub
+
+	# A cloud is an Area3D on its OWN layer, deliberately not layer 1 - a
+	# StaticBody3D there would have become a wall units bounce off. Guard
+	# that decision so it can't silently regress.
+	var cloud = SmokeVolume.spawn(scene_stub, Vector3(300, 1, -306), 5.0, 30.0)
+	await process_frame
+	if not (cloud is Area3D):
+		print("  [FAIL] Smoke must be an Area3D so it never blocks unit movement")
+		return false
+	if cloud.collision_layer != SmokeVolume.SMOKE_COLLISION_LAYER:
+		print("  [FAIL] Smoke should sit on its own dedicated layer, got ", cloud.collision_layer)
+		return false
+	if cloud.collision_mask != 0:
+		print("  [FAIL] Smoke should detect nothing itself, mask was ", cloud.collision_mask)
+		return false
+
+	# Both LOS systems must actually have opted into that layer - the whole
+	# mechanic is inert if either forgot, and neither failure is visible
+	# without checking the masks directly.
+	var weapon_src = FileAccess.get_file_as_string("res://scripts/auto_weapon.gd")
+	if not weapon_src.contains("SMOKE_COLLISION_LAYER"):
+		print("  [FAIL] auto_weapon.gd's LOS query never opted into the smoke layer")
+		return false
+	var skirmish_src = FileAccess.get_file_as_string("res://scripts/skirmish.gd")
+	if not skirmish_src.contains("SMOKE_COLLISION_LAYER"):
+		print("  [FAIL] skirmish.gd's vision LOS never opted into the smoke layer")
+		return false
+	if not skirmish_src.contains("query.collide_with_areas = true"):
+		print("  [FAIL] skirmish.gd's vision ray must enable collide_with_areas or it can never see an Area3D")
+		return false
+
+	# A cloud blooms in over BLOOM_TIME rather than blocking instantly (a
+	# screen you could duck behind on the same frame the round lands would
+	# be a panic button, not a plan), so it genuinely blocks NOTHING when
+	# freshly spawned - assert that, then advance it to full bloom.
+	if SmokeVolume.is_point_obscured(self, Vector3(300, 1, -306)):
+		print("  [FAIL] A cloud should not block anything before it has bloomed")
+		return false
+	cloud._process(SmokeVolume.BLOOM_TIME)
+	cloud._process(0.05)
+
+	# The point test missiles use for lock-breaking.
+	if not SmokeVolume.is_point_obscured(self, Vector3(300, 1, -306)):
+		print("  [FAIL] A point at the cloud's own centre should read as obscured")
+		return false
+	if SmokeVolume.is_point_obscured(self, Vector3(300, 1, 40)):
+		print("  [FAIL] A point far outside every cloud should not read as obscured")
+		return false
+
+	# A missile whose target is sitting in smoke must lose its lock rather
+	# than tracking through it - guided rounds previously had no counter at
+	# all except point defence.
+	var missile = Node3D.new()
+	missile.set_script(preload("res://scripts/weapon_missile.gd"))
+	var mtarget = CharacterBody3D.new()
+	mtarget.set_script(preload("res://scripts/battle_unit.gd"))
+	root.add_child(mtarget)
+	mtarget.team = 1
+	mtarget.set_meta("team", 1)
+	mtarget.max_hp = 300.0
+	mtarget.hp = 300.0
+	mtarget.global_position = Vector3(300, 1, -306) # inside the cloud
+	missile.setup(mtarget, null, 25.0, "explosive", 0)
+	scene_stub.add_child(missile)
+	missile.global_position = Vector3(300, 1, -296)
+	await process_frame
+
+	for i in range(20):
+		if missile._lock_broken:
+			break
+		# Keep the cloud at full bloom across the flight - its own _process
+		# only ticks on real engine frames, which this hand-driven loop
+		# doesn't generate.
+		cloud._process(0.0)
+		missile._physics_process(0.1)
+	if not missile._lock_broken:
+		print("  [FAIL] A missile should lose lock on a target concealed by smoke")
+		mtarget.queue_free()
+		return false
+
+	# Clouds are self-expiring - they must not accumulate forever.
+	var short_cloud = SmokeVolume.spawn(scene_stub, Vector3(320, 1, 320), 3.0, 0.05)
+	await process_frame
+	short_cloud._process(0.2)
+	await process_frame
+	if is_instance_valid(short_cloud) and not short_cloud.is_queued_for_deletion():
+		print("  [FAIL] An expired smoke cloud should free itself")
+		return false
+
+	# Tear the clouds down explicitly. A smoke volume is a real, persistent
+	# world object with its own multi-second lifetime, so leaving one behind
+	# genuinely blocks line of sight for whatever test runs next - which is
+	# exactly what happened the first time this suite was written (the later
+	# weapon-LOS cover test fires along z from the origin, straight through
+	# the cloud position used above, and started reporting "blocked" on a
+	# supposedly clear line).
+	if is_instance_valid(cloud):
+		cloud.free()
+	if is_instance_valid(short_cloud):
+		short_cloud.free()
+	mtarget.queue_free()
+	missile.free()
+	scene_stub.free()
+	current_scene = null
+	await process_frame
+	print("  [PASS] Smoke is a non-blocking Area3D on its own layer, both LOS systems honour it, it breaks missile lock, and it expires.")
 	return true
 
 func test_logistics_sharing_boosts_allies() -> bool:

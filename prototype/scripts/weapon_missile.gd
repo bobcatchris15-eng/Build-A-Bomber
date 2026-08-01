@@ -29,6 +29,24 @@ var _climb_target_y: float = 0.0
 var _phase: int = 0 # 0 = climb (top-attack only), 1 = terminal
 var _weave_seed: float = 0.0
 
+# Smoke lock-break (ammo pass). A guided round's counter used to be point
+# defense and nothing else - it could not miss from target speed by design
+# (ModuleCatalog.MISS_SPEED_FACTOR gives "guided" a factor of 0.0), so
+# there was no counter available to a player without PD mounted. Obscurant
+# ammo now provides one: a seeker that loses sight of its target keeps
+# flying on its last known heading and goes dumb, rather than tracking
+# through the cloud. Deliberately a POINT test on the target rather than a
+# raycast along the flight path - a seeker cares whether it can still see
+# what it locked onto, not whether some unrelated cloud sits off to one side.
+const SmokeVolume = preload("res://scripts/smoke_volume.gd")
+const LOCK_BREAK_GRACE: float = 0.35 # brief blindness is survivable; a real screen isn't
+const DUMB_FLIGHT_TIME: float = 1.6
+
+var _obscured_for: float = 0.0
+var _lock_broken: bool = false
+var _dumb_time: float = 0.0
+var _dumb_heading: Vector3 = Vector3.ZERO
+
 func setup(missile_target: Node3D, weapon: Node3D, dmg: float, dclass: String, missile_team: int):
 	target = missile_target
 	owner_weapon = weapon
@@ -83,9 +101,33 @@ func _spawn_trail_puff():
 
 func _physics_process(delta):
 	if is_destroyed: return
+
+	# Gone dumb (lock broken by smoke): coast on the last heading, then
+	# self-destruct. It can still be shot down by PD during this, and it
+	# still explodes - it just isn't aimed at anything any more.
+	if _lock_broken:
+		_dumb_time += delta
+		global_position += _dumb_heading * speed * delta
+		if _dumb_time >= DUMB_FLIGHT_TIME:
+			_spawn_impact_visual()
+			destroy_missile(false)
+		return
+
 	if not is_instance_valid(target) or ("is_dead" in target and target.is_dead):
 		destroy_missile(false)
 		return
+
+	# Seeker check: sustained obscurement of the target breaks the lock.
+	if SmokeVolume.is_point_obscured(get_tree(), target.global_position):
+		_obscured_for += delta
+		if _obscured_for >= LOCK_BREAK_GRACE:
+			_lock_broken = true
+			_dumb_heading = -global_transform.basis.z.normalized()
+			if _dumb_heading.length_squared() < 0.5:
+				_dumb_heading = Vector3.FORWARD
+			return
+	else:
+		_obscured_for = 0.0
 
 	var dest: Vector3
 	if _phase == 0:
@@ -108,6 +150,13 @@ func _physics_process(delta):
 	global_position += dir * speed * delta
 
 	if _phase == 1 and global_position.distance_to(target.global_position + Vector3(0, 0.5, 0)) < 1.1:
+		# Warhead payload effects (smoke/incendiary/illumination ammo) land
+		# at the impact point, same as a shell's would - the launcher owns
+		# the ammo profile, so this defers to it. Guarded on the launcher
+		# still existing; if it died mid-flight the warhead just does its
+		# damage, which is the same fallback the damage path below uses.
+		if is_instance_valid(owner_weapon) and owner_weapon.has_method("_apply_ammo_impact"):
+			owner_weapon._apply_ammo_impact(global_position)
 		if is_instance_valid(owner_weapon) and owner_weapon.has_method("_deal_weapon_damage"):
 			owner_weapon._deal_weapon_damage(target, damage_amount)
 		elif target.has_method("take_damage"):

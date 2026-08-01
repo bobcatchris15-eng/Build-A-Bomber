@@ -101,6 +101,51 @@ var energy_drain_per_shot: float = 0.0
 # threshold they resolve against."
 const ENERGY_DAMAGE_CLASS_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "heavy_laser", "plasma_lobber", "pd_laser"]
 
+# --- Ammunition (ModuleCatalog.AMMO_TYPES) ---
+# A design-time payload choice stored in the module's own tweaks dict,
+# resolved once in _ready(). Its whole job is to reach two places:
+#   1. damage_class - which armor threshold row damage_resolver.gd resolves
+#      against. This is the big one: it turns the existing armor matrix from
+#      a static property of which gun you mounted into a live counter-pick.
+#   2. the per-shot damage and blast-radius multipliers applied in this
+#      file's two damage funnels (_deal_weapon_damage/_deal_aoe_damage), so
+#      no individual _fire_*() function had to learn about ammo at all.
+# Plus the on-impact effects (smoke clouds, burn pools, flares) which hang
+# off _apply_ammo_impact().
+const SmokeVolume = preload("res://scripts/smoke_volume.gd")
+
+var ammo_type: String = ModuleCatalog.AMMO_DEFAULT
+var ammo_damage_mult: float = 1.0
+var ammo_light_mult: float = 1.0
+var ammo_aoe_mult: float = 1.0
+# Transient per-shot size multiplier for the payload effect, set around an
+# _apply_ammo_impact() call by any weapon whose own tweaks should change
+# how big the resulting cloud/pool/flare is (smoke_discharger's tube count).
+# A plain field rather than an argument so the three shared call sites
+# (_deal_aoe_damage, _fire_kinetic_projectile, weapon_missile) don't all
+# need to grow a parameter they'd always pass 1.0 for.
+var _ammo_impact_scale: float = 1.0
+
+# Blast radius floor for no-splash ammo (AP). _deal_aoe_damage() is shared
+# by every explosive weapon, so rather than teach each of them to branch,
+# an aoe_mult of 0.0 collapses the radius to this - small enough that only
+# what was directly hit is caught, which is exactly "no splash".
+const AMMO_NO_SPLASH_RADIUS: float = 0.6
+
+# Obscurant cloud geometry. A shell-delivered smoke round makes a modest
+# screen; the dedicated smoke_discharger makes a much bigger, longer-lived
+# one - that's the whole reason to spend a mount on the specialist rather
+# than just loading smoke in a gun you already have.
+const SMOKE_SHELL_RADIUS: float = 4.5
+const SMOKE_SHELL_LIFETIME: float = 10.0
+const SMOKE_DISCHARGER_RADIUS: float = 7.5
+const SMOKE_DISCHARGER_LIFETIME: float = 16.0
+
+# Illumination: burns off fog of war in a radius where it lands, by feeding
+# the same reveal path skirmish.gd's vision system already uses.
+const ILLUM_RADIUS: float = 16.0
+const ILLUM_LIFETIME: float = 12.0
+
 const PD_WEAPON_TYPES = ["ciws", "pd_laser", "flak_cannon"]
 # FABLE_REVIEW.md 1.8: the point-defense family finally gets a real anti-AIR
 # identity (previously "flak = AA" was pure flavor - nothing anywhere
@@ -183,7 +228,40 @@ func _deal_weapon_damage(t: Node3D, amount: float):
 		return
 	if type_id in PD_WEAPON_TYPES and "is_flying" in t and t.is_flying:
 		amount *= PD_ANTI_AIR_DAMAGE_MULT
+
+	# Ammo per-shot multiplier. A utility round (smoke/illumination) has a
+	# damage_mult of 0.0 and deals literally nothing - the round still
+	# flies and still lands its effect via _apply_ammo_impact(), it just
+	# doesn't hurt anyone. That IS the tradeoff for loading it.
+	amount *= ammo_damage_mult
+	# Light-target modifier - the field that keeps the ammo roster from
+	# collapsing into one right answer. Flechette multiplies here (3.5x),
+	# AP divides (0.4x, over-penetration), so the two are genuine mirrors
+	# rather than one being a free upgrade over the other. See
+	# ModuleCatalog.AMMO_TYPES' light_mult comment for the worked numbers.
+	if ammo_light_mult != 1.0 and _is_light_target(t):
+		amount *= ammo_light_mult
+	if amount <= 0.0:
+		return
+
 	t.take_damage(amount, damage_class, _hit_origin(t))
+
+	# EMP shells drain the target's capacitor alongside their (deliberately
+	# feeble) structural damage, reusing the exact drain_energy() contract
+	# tesla_coil/arc_projector already established.
+	if ammo_type == "emp" and t.has_method("drain_energy"):
+		t.drain_energy(amount * 1.5)
+
+# Light/unarmoured target test, driving each round's light_mult. The
+# "missiles" group is both real missiles and drone_carrier's drones (see
+# drone_unit.gd, which deliberately joins that group to reuse PD
+# interception), so it's the right handle for "small, fast, thin-skinned".
+func _is_light_target(t: Node3D) -> bool:
+	if t.is_in_group("missiles"):
+		return true
+	if "is_flying" in t and t.is_flying:
+		return true
+	return false
 
 # Real AoE (FABLE_REVIEW.md 2.3) - the other missing leg of the counter-
 # triangle ("AoE beats swarm"). A shared radius query around an impact
@@ -196,6 +274,16 @@ func _deal_weapon_damage(t: Node3D, amount: float):
 # design question (own units clustering would suddenly matter) deliberately
 # not bundled into this pass; see DECISIONS_NEEDED.md.
 func _deal_aoe_damage(center: Vector3, radius: float, amount: float):
+	# Ammo reshapes the blast before anything else: HE and flechette widen
+	# it, AP collapses it to effectively nothing (see
+	# AMMO_NO_SPLASH_RADIUS). Every explosive weapon routes through here, so
+	# no individual _fire_*() had to learn about ammo.
+	radius = max(radius * ammo_aoe_mult, AMMO_NO_SPLASH_RADIUS)
+	# On-impact payload effects (clouds, burn pools, flares) fire once per
+	# detonation - here, not in _deal_weapon_damage(), which runs once per
+	# target caught in the blast.
+	_apply_ammo_impact(center)
+
 	var my_team = get_team()
 	for c in get_tree().get_nodes_in_group("damageable"):
 		if not is_instance_valid(c) or not c.has_method("take_damage"):
@@ -334,7 +422,11 @@ func _is_los_blocked_to(candidate: Node3D) -> bool:
 	var ray_end = candidate.global_position + Vector3(0, 0.5, 0) # target center
 
 	var query = PhysicsRayQueryParameters3D.create(ray_start, ray_end)
-	query.collision_mask = 1 + 2 + 8 # Ground/obstacles (1), Modules (2), Buildings (8) - not units (4)
+	# Ground/obstacles (1), Modules (2), Buildings (8), Smoke (32) - not
+	# units (4). Smoke is an Area3D on its own layer (see smoke_volume.gd
+	# for why it isn't just put on layer 1), which this query already picks
+	# up because collide_with_areas is on below.
+	query.collision_mask = 1 + 2 + 8 + SmokeVolume.SMOKE_COLLISION_LAYER
 	query.collide_with_areas = true
 
 	# Exclude this weapon's own colliders and everything belonging to the
@@ -444,9 +536,9 @@ func _ready():
 			mount_hull_type = mount_parent.get_meta("type_id")
 		traverse_limit_angle = ModuleCatalog.get_traverse_limit_angle(type_id, mount_facet, mount_hull_type)
 			
-		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws"]:
+		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws", "coil_gun", "autocannon", "ballista"]:
 			damage_class = "kinetic"
-		elif type_id in ["artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flak_cannon"]:
+		elif type_id in ["artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flak_cannon", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "mine_layer"]:
 			damage_class = "explosive"
 		elif type_id in ENERGY_DAMAGE_CLASS_TYPES:
 			# See ENERGY_DAMAGE_CLASS_TYPES's own comment for the full
@@ -455,6 +547,20 @@ func _ready():
 			damage_class = "energy"
 		else:
 			damage_class = "thermal"
+
+		# Ammo resolution, applied AFTER the native damage_class chain above
+		# so a loaded round overrides the weapon's own class rather than the
+		# other way round. "standard" (and every weapon with no ammo
+		# selection at all) leaves all three values exactly at their
+		# pre-ammo defaults, so an old blueprint behaves identically.
+		ammo_type = ModuleCatalog.get_ammo(type_id, data.tweaks)
+		var ammo_profile = ModuleCatalog.get_ammo_profile(ammo_type)
+		var ammo_class = ammo_profile.get("damage_class", "")
+		if ammo_class != "":
+			damage_class = ammo_class
+		ammo_damage_mult = ammo_profile.get("damage_mult", 1.0)
+		ammo_light_mult = ammo_profile.get("light_mult", 1.0)
+		ammo_aoe_mult = ammo_profile.get("aoe_mult", 1.0)
 
 		targets_allies = ModuleCatalog.targets_allies(type_id)
 			
@@ -944,10 +1050,10 @@ func _fire_at_target():
 
 	var sfx_name = "cannon"
 	match type_id:
-		"basic_cannon", "artillery", "flak_cannon", "plasma_lobber": sfx_name = "cannon"
-		"heavy_machine_gun", "rotary_cannon", "ciws": sfx_name = "machine_gun"
-		"gauss_railgun", "heavy_laser", "pd_laser", "tesla_coil", "arc_projector", "ion_cannon": sfx_name = "laser"
-		"guided_missile", "missile_pod", "cluster_dispenser": sfx_name = "missile"
+		"basic_cannon", "artillery", "flak_cannon", "plasma_lobber", "recoilless_rifle", "ballista", "napalm_mortar": sfx_name = "cannon"
+		"heavy_machine_gun", "rotary_cannon", "ciws", "autocannon", "mk19_grenade_launcher": sfx_name = "machine_gun"
+		"gauss_railgun", "heavy_laser", "pd_laser", "tesla_coil", "arc_projector", "ion_cannon", "coil_gun": sfx_name = "laser"
+		"guided_missile", "missile_pod", "cluster_dispenser", "smoke_discharger", "mine_layer": sfx_name = "missile"
 		"resource_harvester", "repair_array": sfx_name = "harvest"
 	if get_node_or_null("/root/AudioManager"):
 		get_node("/root/AudioManager").play_sfx_3d(sfx_name, global_position, null, 50.0)
@@ -986,6 +1092,22 @@ func _fire_at_target():
 			_fire_continuous_beam()
 		"flak_cannon":
 			_fire_flak_cannon()
+		"smoke_discharger":
+			_fire_smoke_discharger()
+		"mk19_grenade_launcher":
+			_fire_grenade_launcher()
+		"recoilless_rifle":
+			_fire_recoilless_rifle()
+		"coil_gun":
+			_fire_coil_gun()
+		"autocannon":
+			_fire_kinetic_projectile(0.03, 0.35, 0.12, laser_color, true)
+		"napalm_mortar":
+			_fire_napalm_mortar()
+		"mine_layer":
+			_fire_mine_layer()
+		"ballista":
+			_fire_ballista()
 		"resource_harvester":
 			_fire_resource_harvester_tether()
 		"repair_array":
@@ -1029,10 +1151,21 @@ func _fire_kinetic_projectile(radius: float, length: float, duration: float, col
 	tween.tween_property(tracer, "global_position", end, duration)
 	tween.finished.connect(func():
 		if is_instance_valid(tracer): tracer.queue_free()
-		if is_instance_valid(target):
-			_deal_weapon_damage(target, dps * fire_rate)
-			if explode_on_hit:
-				_spawn_explosion_visual(end, 0.4, color)
+		# Flechette/HE/incendiary turn a direct-fire round into a spraying
+		# one; standard and AP keep this single-target exactly as it always
+		# was. _deal_aoe_damage() applies the payload impact itself, so the
+		# two branches must not both do it.
+		if ammo_aoe_mult > 1.0:
+			_deal_aoe_damage(end, 1.0, dps * fire_rate)
+		else:
+			# Payload effects land wherever the round lands, target still
+			# alive or not - a smoke round that arrives after its aim point
+			# died still makes a cloud.
+			_apply_ammo_impact(end)
+			if is_instance_valid(target):
+				_deal_weapon_damage(target, dps * fire_rate)
+		if is_instance_valid(target) and explode_on_hit:
+			_spawn_explosion_visual(end, 0.4, color)
 	)
 
 func _fire_railgun_beam():
@@ -1393,6 +1526,275 @@ func _fire_flak_cannon():
 		_deal_aoe_damage(detonate_pos, 5.0, dps * fire_rate)
 	)
 
+# --- Roster expansion fire functions ---------------------------------------
+
+# MK19: a low, fast arc with a small blast on arrival. Deliberately a
+# shallower lob and a much tighter blast than mortar_array - it's a
+# direct-lay weapon that happens to arc, not indirect fire.
+func _fire_grenade_launcher():
+	var grenade = MeshInstance3D.new()
+	grenade.mesh = MunitionPool.unit_sphere()
+	grenade.scale = Vector3(0.16, 0.16, 0.16)
+	grenade.material_override = MunitionPool.emissive(Color(0.35, 0.38, 0.22), Color(0.7, 0.65, 0.2))
+	var parent = _effects_parent()
+	if parent == null: return
+	parent.add_child(grenade)
+
+	var start = global_position + Vector3(0, 0.35, 0)
+	var end = target.global_position
+	var tween = create_tween()
+	var callable = func(val: float):
+		if not is_instance_valid(grenade): return
+		var pos = start.lerp(end, val)
+		pos.y += sin(val * PI) * 1.8 # shallow arc
+		grenade.global_position = pos
+	tween.tween_method(callable, 0.0, 1.0, 0.35)
+	tween.finished.connect(func():
+		if is_instance_valid(grenade): grenade.queue_free()
+		_deal_aoe_damage(end, 2.2, dps * fire_rate)
+		_spawn_explosion_visual(end, 0.35, Color(0.9, 0.7, 0.2))
+	)
+
+# Recoilless rifle. The backblast is the point: a real recoilless weapon
+# vents its propellant gases rearward hard enough to be lethal behind the
+# tube, and this is the first weapon in the roster where WHERE it's mounted
+# has a mechanical consequence rather than just an arc one. Mount one
+# facing into your own hull and the danger zone lands on your own machine.
+const BACKBLAST_RANGE: float = 4.5
+const BACKBLAST_DAMAGE_FRACTION: float = 0.45
+
+func _fire_recoilless_rifle():
+	var parent = _effects_parent()
+	if parent == null: return
+
+	# Forward: a single heavy HEAT round.
+	_fire_kinetic_projectile(0.06, 0.55, 0.16, laser_color, true)
+
+	# Rearward: the backblast cone. Damages ANYTHING in it, friend or foe -
+	# the one deliberate exception to the hostiles-only rule every other
+	# weapon in this file follows, because a backblast that politely spared
+	# your own units would defeat the entire reason the weapon is
+	# interesting. Own vehicle included.
+	var back_dir = global_transform.basis.z.normalized() # +Z is behind a -Z-facing weapon
+	var blast_origin = global_position + back_dir * 0.5
+	var blast_damage = dps * fire_rate * BACKBLAST_DAMAGE_FRACTION
+
+	for c in get_tree().get_nodes_in_group("damageable"):
+		if not is_instance_valid(c) or not c.has_method("take_damage"):
+			continue
+		if "is_dead" in c and c.is_dead:
+			continue
+		var to_c = c.global_position - blast_origin
+		var dist = to_c.length()
+		if dist > BACKBLAST_RANGE or dist < 0.01:
+			continue
+		# Roughly a 60-degree cone directly behind the tube.
+		if back_dir.dot(to_c.normalized()) < 0.5:
+			continue
+		c.take_damage(blast_damage * (1.0 - dist / BACKBLAST_RANGE), "thermal", blast_origin)
+
+	# Visual: a short cone of exhaust out the back.
+	for i in range(5):
+		var puff = MeshInstance3D.new()
+		puff.mesh = MunitionPool.unit_sphere()
+		puff.material_override = MunitionPool.alpha(Color(0.75, 0.72, 0.66, 0.55))
+		parent.add_child(puff)
+		var t = float(i) / 4.0
+		puff.global_position = blast_origin + back_dir * (t * BACKBLAST_RANGE * 0.7) \
+			+ Vector3(randf_range(-0.3, 0.3), randf_range(-0.2, 0.3), randf_range(-0.3, 0.3))
+		puff.scale = Vector3.ONE * (0.3 + t * 0.9)
+		var pt = create_tween()
+		pt.tween_property(puff, "scale", Vector3.ZERO, 0.3 + t * 0.2)
+		pt.finished.connect(func(): if is_instance_valid(puff): puff.queue_free())
+
+# Coil gun: a hitscan slug, visually staged - a chain of accelerator
+# flashes runs up the barrel before the slug leaves, so it reads as
+# "magnetically staged" rather than as a laser.
+func _fire_coil_gun():
+	var parent = _effects_parent()
+	if parent == null: return
+
+	var muzzle_forward = -global_transform.basis.z.normalized()
+	for i in range(4):
+		var ring = MeshInstance3D.new()
+		ring.mesh = MunitionPool.unit_sphere()
+		ring.scale = Vector3(0.18, 0.18, 0.18)
+		ring.material_override = MunitionPool.emissive(laser_color, laser_color, 1.6)
+		parent.add_child(ring)
+		ring.global_position = global_position + muzzle_forward * (0.3 + i * 0.45)
+		var rt = create_tween()
+		rt.tween_interval(i * 0.015)
+		rt.tween_property(ring, "scale", Vector3.ZERO, 0.09)
+		rt.finished.connect(func(): if is_instance_valid(ring): ring.queue_free())
+
+	var beam = MeshInstance3D.new()
+	beam.mesh = MunitionPool.unit_cylinder()
+	beam.material_override = MunitionPool.emissive(laser_color, Color.WHITE, 1.4)
+	parent.add_child(beam)
+	var beam_len = MunitionPool.aim_beam(beam, global_position, target.global_position, 0.05)
+
+	if is_instance_valid(target):
+		_apply_ammo_impact(target.global_position)
+		_deal_weapon_damage(target, dps * fire_rate)
+		_spawn_explosion_visual(target.global_position, 0.4, laser_color)
+
+	var tween = create_tween()
+	tween.tween_property(beam, "scale", Vector3(0.0, beam_len, 0.0), 0.12)
+	tween.finished.connect(func(): if is_instance_valid(beam): beam.queue_free())
+
+# Napalm mortar: a high lob that leaves a large, long-lived burn pool.
+# Reuses the incendiary-ammo pool wholesale rather than growing a parallel
+# fire system - this weapon simply always does what incendiary ammo does,
+# and does it bigger.
+func _fire_napalm_mortar():
+	var parent = _effects_parent()
+	if parent == null: return
+	var canister = MeshInstance3D.new()
+	canister.mesh = MunitionPool.unit_sphere()
+	canister.scale = Vector3(0.3, 0.3, 0.3)
+	canister.material_override = MunitionPool.emissive(Color(0.85, 0.4, 0.1), Color(1.0, 0.55, 0.1))
+	parent.add_child(canister)
+
+	var start = global_position
+	var end = target.global_position
+	var tween = create_tween()
+	var callable = func(val: float):
+		if not is_instance_valid(canister): return
+		var pos = start.lerp(end, val)
+		pos.y += sin(val * PI) * 7.0
+		canister.global_position = pos
+	tween.tween_method(callable, 0.0, 1.0, 0.7)
+	tween.finished.connect(func():
+		if is_instance_valid(canister): canister.queue_free()
+		_deal_aoe_damage(end, 4.0, dps * fire_rate)
+		_spawn_explosion_visual(end, 0.9, Color(1.0, 0.5, 0.1))
+		# Bigger and longer than an incendiary shell's pool - this is the
+		# weapon's entire identity, not a side effect.
+		_spawn_burn_pool(end, 1.7, 2.2)
+	)
+
+# Mine layer: lobs a proximity mine a short way out and leaves it. The mine
+# is a real, persistent world entity that outlives its layer - see
+# proximity_mine.gd.
+const ProximityMine = preload("res://scripts/proximity_mine.gd")
+
+func _fire_mine_layer():
+	var parent = _effects_parent()
+	if parent == null: return
+	var count = 1
+	if has_meta("module_data"):
+		count = int(get_meta("module_data").tweaks.get("tube_count", 1.0))
+	count = clamp(count, 1, 4)
+	var per_mine_damage = (dps * fire_rate) * 1.6 / float(count)
+
+	# Mines are laid toward the threat but well short of it - this is
+	# area denial in front of your own position, not a thrown bomb.
+	var aim = target.global_position if is_instance_valid(target) else (global_position - global_transform.basis.z * fire_range)
+	var drop = global_position.lerp(aim, 0.45)
+
+	for i in range(count):
+		var scatter = Vector3(randf_range(-1.6, 1.6), 0.0, randf_range(-1.6, 1.6))
+		var dest = drop + scatter
+		dest.y = drop.y
+
+		var casing = MeshInstance3D.new()
+		casing.mesh = MunitionPool.unit_cylinder()
+		casing.scale = Vector3(0.3, 0.1, 0.3)
+		casing.material_override = MunitionPool.albedo(Color(0.35, 0.33, 0.22))
+		parent.add_child(casing)
+		casing.global_position = global_position + Vector3(0, 0.3, 0)
+
+		var start = casing.global_position
+		var tween = create_tween()
+		var callable = func(val: float):
+			if not is_instance_valid(casing): return
+			var pos = start.lerp(dest, val)
+			pos.y += sin(val * PI) * 1.5
+			casing.global_position = pos
+		tween.tween_method(callable, 0.0, 1.0, 0.4)
+		tween.finished.connect(func():
+			if is_instance_valid(casing): casing.queue_free()
+			ProximityMine.spawn(parent, dest, get_team(), per_mine_damage, damage_class)
+		)
+
+# Ballista: one enormous bolt, slowly. Visually a real flying bolt rather
+# than a tracer streak, because at this cycle rate the player will watch
+# every single shot travel.
+func _fire_ballista():
+	var parent = _effects_parent()
+	if parent == null: return
+	var bolt = MeshInstance3D.new()
+	bolt.mesh = MunitionPool.unit_cylinder()
+	bolt.scale = Vector3(0.09, 1.1, 0.09)
+	bolt.material_override = MunitionPool.albedo(Color(0.35, 0.26, 0.16))
+	parent.add_child(bolt)
+
+	var start = global_position + Vector3(0, 0.5, 0)
+	var end = target.global_position
+	bolt.global_position = start
+	bolt.look_at(end, Vector3.UP)
+	bolt.rotate_object_local(Vector3.RIGHT, PI / 2)
+
+	var tween = create_tween()
+	tween.tween_property(bolt, "global_position", end, 0.3)
+	tween.finished.connect(func():
+		if is_instance_valid(bolt): bolt.queue_free()
+		_apply_ammo_impact(end)
+		if is_instance_valid(target):
+			_deal_weapon_damage(target, dps * fire_rate)
+		_spawn_explosion_visual(end, 0.35, Color(0.6, 0.45, 0.25))
+	)
+
+# The dedicated obscurant launcher. Lobs a canister short of the target
+# rather than at it: a screen is only useful BETWEEN you and them, so
+# putting the cloud on top of the enemy would defeat the entire purpose.
+# Deliberately screens at 70% of the way out, which for a unit backing off
+# under fire puts the smoke between the shooter and the threat.
+const SMOKE_SCREEN_STANDOFF: float = 0.7
+
+func _fire_smoke_discharger():
+	# More tubes lay a wider screen. This is also why tube_count lengthens
+	# the reload (auto_weapon's existing tube_count fire_rate modifier) -
+	# a bigger screen takes longer to reload for, same tradeoff the mortar
+	# array already makes.
+	var tube_count = 4.0
+	if has_meta("module_data"):
+		tube_count = get_meta("module_data").tweaks.get("tube_count", 4.0)
+	var spread_mult = sqrt(max(tube_count, 1.0) / 4.0)
+
+	var start = global_position + Vector3(0, 0.4, 0)
+	var aim = target.global_position if is_instance_valid(target) else (start - global_transform.basis.z * fire_range)
+	var end = start.lerp(aim, SMOKE_SCREEN_STANDOFF)
+	end.y = aim.y
+
+	var canister = MeshInstance3D.new()
+	canister.mesh = MunitionPool.unit_cylinder()
+	canister.scale = Vector3(0.12, 0.28, 0.12)
+	canister.material_override = MunitionPool.albedo(Color(0.35, 0.36, 0.32))
+	var parent = _effects_parent()
+	if parent == null:
+		return
+	parent.add_child(canister)
+	canister.global_position = start
+
+	# Short, high lob - it's a mortar-ish tube, not a gun.
+	var tween = create_tween()
+	var callable = func(val: float):
+		if not is_instance_valid(canister): return
+		var pos = start.lerp(end, val)
+		pos.y += sin(val * PI) * 3.0
+		canister.global_position = pos
+	tween.tween_method(callable, 0.0, 1.0, 0.45)
+	tween.finished.connect(func():
+		if is_instance_valid(canister): canister.queue_free()
+		# Routes through the shared ammo impact path, so a discharger loaded
+		# with illumination fires a flare instead - the one other thing it
+		# is allowed to do (see WEAPON_AMMO_OPTIONS).
+		_ammo_impact_scale = spread_mult
+		_apply_ammo_impact(end)
+		_ammo_impact_scale = 1.0
+	)
+
 func _fire_resource_harvester_tether():
 	var tether = MeshInstance3D.new()
 	tether.mesh = MunitionPool.unit_cylinder()
@@ -1508,6 +1910,121 @@ func _fire_ion_cannon():
 	var tween = create_tween()
 	tween.tween_property(beam, "scale", Vector3(0.0, beam_len, 0.0), 0.15)
 	tween.finished.connect(func(): if is_instance_valid(beam): beam.queue_free())
+
+# --- Ammo on-impact payload effects ---------------------------------------
+#
+# Called once per round that LANDS (not once per target damaged). Three call
+# sites cover every ammo-capable weapon in the roster:
+#   - _deal_aoe_damage()        - artillery, mortar, flak, cluster, HE/etc.
+#   - _fire_kinetic_projectile() - the direct-fire guns and autocannons
+#   - weapon_missile.gd's impact - guided_missile / missile_pod warheads
+# Everything else in WEAPON_AMMO_OPTIONS routes through one of those three.
+func _apply_ammo_impact(pos: Vector3):
+	match ammo_type:
+		"smoke":
+			_spawn_smoke_cloud(pos)
+		"incendiary":
+			_spawn_burn_pool(pos)
+		"illumination":
+			_spawn_illumination_flare(pos)
+
+func _spawn_smoke_cloud(pos: Vector3):
+	var parent = _effects_parent()
+	if parent == null:
+		return
+	var is_dedicated = type_id == "smoke_discharger"
+	var r = SMOKE_DISCHARGER_RADIUS if is_dedicated else SMOKE_SHELL_RADIUS
+	var life = SMOKE_DISCHARGER_LIFETIME if is_dedicated else SMOKE_SHELL_LIFETIME
+	SmokeVolume.spawn(parent, pos, r * _ammo_impact_scale, life)
+
+# Incendiary's lingering ground hazard. Deliberately built on the same
+# shape as plasma_lobber's existing puddle (a flat translucent disc that
+# shrinks away), but unlike that purely cosmetic one this actually ticks
+# damage - it's the reason to load incendiary over plain HE against a
+# position you expect the enemy to keep standing on.
+const BURN_POOL_RADIUS: float = 3.5
+const BURN_POOL_DURATION: float = 5.0
+const BURN_POOL_TICK: float = 0.5
+
+func _spawn_burn_pool(pos: Vector3, radius_mult: float = 1.0, duration_mult: float = 1.0):
+	var parent = _effects_parent()
+	if parent == null:
+		return
+	var pool_radius = BURN_POOL_RADIUS * radius_mult
+	var pool_duration = BURN_POOL_DURATION * duration_mult
+	var puddle = MeshInstance3D.new()
+	puddle.mesh = MunitionPool.unit_cylinder()
+	puddle.scale = Vector3(pool_radius * 2.0, 0.05, pool_radius * 2.0)
+	puddle.material_override = MunitionPool.alpha_emissive(
+		Color(0.95, 0.35, 0.05, 0.45), Color(1.0, 0.45, 0.1))
+	parent.add_child(puddle)
+	puddle.global_position = pos
+
+	var pt = create_tween()
+	pt.tween_property(puddle, "scale", Vector3.ZERO, pool_duration)
+	pt.finished.connect(func(): if is_instance_valid(puddle): puddle.queue_free())
+
+	# Damage ticks are driven off scene timers rather than the puddle's own
+	# _process so the pool keeps burning even if the firing weapon (and its
+	# whole vehicle) is destroyed mid-burn.
+	var ticks = int(pool_duration / BURN_POOL_TICK)
+	var per_tick = dps * fire_rate * 0.12
+	for i in range(ticks):
+		get_tree().create_timer(i * BURN_POOL_TICK).timeout.connect(func():
+			if not is_inside_tree():
+				return
+			_deal_burn_tick(pos, per_tick, pool_radius)
+		)
+
+# A burn tick bypasses the ammo multipliers in _deal_weapon_damage() - the
+# pool's damage is already derived from them once, at spawn time, and it is
+# always thermal regardless of anything else.
+func _deal_burn_tick(center: Vector3, amount: float, pool_radius: float = BURN_POOL_RADIUS):
+	var my_team = get_team()
+	for c in get_tree().get_nodes_in_group("damageable"):
+		if not is_instance_valid(c) or not c.has_method("take_damage"):
+			continue
+		if "is_dead" in c and c.is_dead:
+			continue
+		var c_team = c.get_meta("team") if c.has_meta("team") else -1
+		if my_team >= 0 and c_team == my_team:
+			continue
+		if center.distance_to(c.global_position) > pool_radius:
+			continue
+		c.take_damage(amount, "thermal", center)
+
+# Illumination flare: reveals fog of war where it lands. Duck-typed through
+# current_scene exactly like _teams_allied()/_owner_defense_low_power() do,
+# so a Test Range or headless fixture (neither of which has a real Skirmish
+# or any fog at all) simply gets the visual and no reveal, rather than
+# erroring on a method that isn't there.
+func _spawn_illumination_flare(pos: Vector3):
+	var parent = _effects_parent()
+	if parent == null:
+		return
+
+	var scene = get_tree().current_scene
+	if scene and scene.has_method("reveal_area"):
+		scene.reveal_area(get_team(), pos, ILLUM_RADIUS, ILLUM_LIFETIME)
+
+	var flare = MeshInstance3D.new()
+	flare.mesh = MunitionPool.unit_sphere()
+	flare.scale = Vector3.ONE * 0.8
+	flare.material_override = MunitionPool.emissive(Color(1.0, 0.97, 0.8), Color(1.0, 0.95, 0.7), 2.0)
+	parent.add_child(flare)
+	flare.global_position = pos + Vector3(0, 1.0, 0)
+
+	var light = OmniLight3D.new()
+	light.light_color = Color(1.0, 0.96, 0.8)
+	light.light_energy = 4.0
+	light.omni_range = ILLUM_RADIUS
+	flare.add_child(light)
+
+	# Drifts down under its parachute, then burns out.
+	var ft = create_tween()
+	ft.tween_property(flare, "global_position", pos + Vector3(0, 0.2, 0), ILLUM_LIFETIME)
+	ft.parallel().tween_property(light, "light_energy", 0.0, ILLUM_LIFETIME)
+	ft.finished.connect(func(): if is_instance_valid(flare): flare.queue_free())
 
 func _spawn_explosion_visual(pos: Vector3, custom_scale: float = 0.6, color: Color = Color.ORANGE):
 	var exp = MeshInstance3D.new()

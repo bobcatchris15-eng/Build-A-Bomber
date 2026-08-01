@@ -153,6 +153,28 @@ const WEAPON_FIRE_PROFILES = {
 	"ciws":               {"fire_rate": 0.06, "fire_range": 14.0, "laser_color": Color.WHITE_SMOKE},
 	"pd_laser":           {"fire_rate": 0.1,  "fire_range": 16.0, "laser_color": Color.LIGHT_CORAL},
 	"flak_cannon":        {"fire_rate": 1.2,  "fire_range": 22.0, "laser_color": Color.DARK_GOLDENROD},
+	# --- Roster expansion ---
+	# Belt-fed: fast for a grenade weapon, slow for an autogun.
+	"mk19_grenade_launcher": {"fire_rate": 0.5, "fire_range": 22.0, "laser_color": Color(0.55, 0.62, 0.30)},
+	# The slowest direct-fire cycle in the roster bar the ballista - one
+	# enormous HEAT round, then a long, exposed reload.
+	"recoilless_rifle":   {"fire_rate": 3.2,  "fire_range": 28.0, "laser_color": Color(1.0, 0.72, 0.35)},
+	# Roughly half gauss_railgun's 3.5s cycle at a shorter reach - the
+	# turreted, affordable hitscan option.
+	"coil_gun":           {"fire_rate": 1.6,  "fire_range": 34.0, "laser_color": Color(0.55, 0.85, 1.0)},
+	"autocannon":         {"fire_rate": 0.28, "fire_range": 18.0, "laser_color": Color.GOLDENROD},
+	"napalm_mortar":      {"fire_rate": 2.6,  "fire_range": 26.0, "laser_color": Color(1.0, 0.45, 0.1)},
+	# Short "range" because it is not really shooting - it lobs a mine a
+	# short way ahead and leaves it there.
+	"mine_layer":         {"fire_rate": 3.5,  "fire_range": 12.0, "laser_color": Color(0.62, 0.56, 0.30)},
+	# The slowest weapon in the game, by a distance. A torsion frame does
+	# not cycle quickly.
+	"ballista":           {"fire_rate": 4.0,  "fire_range": 26.0, "laser_color": Color(0.60, 0.46, 0.30)},
+	# Short-ranged and quick-cycling: a discharger lays a screen right in
+	# front of its own vehicle, it doesn't shell a distant position. dps is
+	# 0.0 in the catalog and every round it fires is a zero-damage
+	# obscurant, so fire_rate here is purely "how fast can it re-screen".
+	"smoke_discharger":   {"fire_rate": 2.5,  "fire_range": 18.0, "laser_color": Color(0.72, 0.72, 0.74)},
 	"resource_harvester": {"fire_rate": 0.1,  "fire_range": 15.0, "laser_color": Color.GOLD},
 	"repair_array":       {"fire_rate": 0.15, "fire_range": 12.0, "laser_color": Color.CYAN},
 }
@@ -498,6 +520,168 @@ static func _build_catalog_literal() -> Dictionary:
 			"traverse_agility": 1.4,
 			"size": Vector3(0.525, 0.525, 1.35),
 			"color": Color.DARK_GOLDENROD
+		},
+
+		# --- ROSTER EXPANSION: new base archetypes ---------------------------
+		# Each of these fills a gap the existing roster genuinely had rather
+		# than being a stat-shifted copy of something already present - the
+		# "arsenal pool is incredibly WIDE" principle in
+		# Arsenal_Weapons_List.md's own preamble.
+
+		# The hole between mortar_array (slow, heavy, high arc) and
+		# heavy_machine_gun (fast, flat, no splash): belt-fed rapid-fire
+		# grenades. Small blast per round, but a lot of rounds.
+		"mk19_grenade_launcher": {
+			"name": "MK19 Grenade Launcher",
+			"category": "weapon",
+			"hp": 70.0,
+			"weight": 55.0,
+			"metal": 28,
+			"crystal": 0,
+			"dps": 58.0,
+			# Belt-fed and shoulder-height in real life - a classic pintle
+			# weapon, though its low arc wants a slightly better stance than
+			# a pure flat-shooting autogun.
+			"pintle_min_up_alignment": 0.3,
+			"traverse_agility": 1.1,
+			"size": Vector3(0.4, 0.4, 1.1),
+			"color": Color(0.32, 0.36, 0.22)
+		},
+
+		# Huge per-shot HEAT damage on a light, cheap mount, paid for with a
+		# brutal reload AND a genuine backblast danger zone behind the
+		# weapon (see auto_weapon.gd's _fire_recoilless_rifle) - the first
+		# weapon in the roster where WHERE you mount it has a real
+		# mechanical consequence, not just an arc consequence.
+		"recoilless_rifle": {
+			"name": "Recoilless Rifle",
+			"category": "weapon",
+			"hp": 80.0,
+			"weight": 70.0,
+			"metal": 40,
+			"crystal": 5,
+			"dps": 85.0,
+			"pintle_min_up_alignment": 0.25,
+			"traverse_agility": 0.9,
+			"size": Vector3(0.35, 0.35, 2.0),
+			"color": Color(0.42, 0.40, 0.34)
+		},
+
+		# The sane sibling to gauss_railgun: genuinely turreted (pintle, not
+		# frame_built), less per-shot punch, roughly twice the cycle rate,
+		# and far cheaper on crystal. Gives a mid-tier design a way into
+		# hitscan kinetic without committing a whole hull to a fixed rail.
+		"coil_gun": {
+			"name": "Coil Gun",
+			"category": "weapon",
+			"hp": 90.0,
+			"weight": 120.0,
+			"metal": 55,
+			"crystal": 30,
+			"dps": 88.0,
+			"pintle_min_up_alignment": 0.3,
+			"traverse_agility": 0.7,
+			"size": Vector3(0.5, 0.5, 2.2),
+			"color": Color(0.45, 0.62, 0.78)
+		},
+
+		# The missing rung between heavy_machine_gun and basic_cannon -
+		# rapid enough to matter against light armor, with real per-shot
+		# weight behind it.
+		"autocannon": {
+			"name": "Autocannon",
+			"category": "weapon",
+			"hp": 75.0,
+			"weight": 65.0,
+			"metal": 26,
+			"crystal": 0,
+			"dps": 62.0,
+			"pintle_min_up_alignment": 0.15,
+			"traverse_agility": 1.25,
+			"size": Vector3(0.35, 0.35, 1.4),
+			"color": Color(0.28, 0.30, 0.32)
+		},
+
+		# Area denial by fire rather than by fragments: modest impact
+		# damage, but it leaves a large, long-lived burning pool that
+		# makes ground genuinely expensive to stand on.
+		"napalm_mortar": {
+			"name": "Napalm Mortar",
+			"category": "weapon",
+			"hp": 85.0,
+			"weight": 95.0,
+			"metal": 42,
+			"crystal": 12,
+			"dps": 45.0,
+			# Arcing tube, same ballistic-baseline reasoning as mortar_array.
+			"pintle_min_up_alignment": 0.55,
+			"traverse_agility": 0.5,
+			"size": Vector3(0.7, 0.6, 0.7),
+			"color": Color(0.78, 0.35, 0.12)
+		},
+
+		# Nothing in the roster could HOLD ground - every weapon had to keep
+		# shooting to keep denying space. Mines persist without the layer,
+		# survive its death, and punish a chokepoint indefinitely.
+		"mine_layer": {
+			"name": "Mine Layer",
+			"category": "weapon",
+			"hp": 90.0,
+			"weight": 85.0,
+			"metal": 45,
+			"crystal": 5,
+			"dps": 40.0,
+			"pintle_min_up_alignment": 0.4,
+			"traverse_agility": 0.8,
+			"size": Vector3(0.9, 0.5, 0.9),
+			"color": Color(0.48, 0.44, 0.26)
+		},
+
+		# Straight-faced absurdity, exactly where VISUAL_ART_DIRECTION.md
+		# says it belongs: a torsion-spring bolt thrower, bolted to a
+		# machine that also mounts railguns. Mechanically it earns its
+		# place - enormous per-shot kinetic damage (so it clears armor
+		# thresholds outright rather than chipping) at almost no crystal
+		# cost, paid for with the slowest cycle in the roster. The cheap
+		# answer to heavy armor for a design that can't afford a railgun.
+		"ballista": {
+			"name": "Ballista",
+			"category": "weapon",
+			"hp": 110.0,
+			"weight": 140.0,
+			"metal": 35,
+			"crystal": 0,
+			"dps": 70.0,
+			# A big timber-and-torsion frame - it needs a level, solid base
+			# the way a mortar does, for much the same reason.
+			"pintle_min_up_alignment": 0.5,
+			"traverse_agility": 0.45,
+			"size": Vector3(1.2, 0.9, 2.4),
+			"color": Color(0.44, 0.33, 0.20)
+		},
+
+		# The dedicated obscurant launcher (complement to shell-based smoke -
+		# see WEAPON_AMMO_OPTIONS). Categorised "weapon" so it gets
+		# auto_weapon.gd's targeting/firing logic like every other launcher,
+		# but its dps is a real 0.0: it cannot hurt anything, ever. Its whole
+		# value is denying sightlines, which the LOS systems now honour.
+		# Cheap, light and small enough to bolt onto a corner of anything.
+		"smoke_discharger": {
+			"name": "Smoke Discharger",
+			"category": "weapon",
+			"hp": 40.0,
+			"weight": 30.0,
+			"metal": 18,
+			"crystal": 0,
+			"dps": 0.0,
+			# A cluster of stubby mortar tubes on a light bracket - the
+			# classic hull-corner discharger, bolts onto almost anything.
+			"pintle_min_up_alignment": 0.15,
+			# Light, small, and aiming a cloud rather than a point target -
+			# it only needs to be pointed roughly the right way.
+			"traverse_agility": 1.35,
+			"size": Vector3(0.5, 0.4, 0.5),
+			"color": Color(0.55, 0.56, 0.58)
 		},
 
 		# --- UTILITY & SUPPORT ---
@@ -908,6 +1092,15 @@ const MODULE_FLAVOR = {
 	"ciws": "Engages incoming ordnance automatically. Do not walk in front of it while powered.",
 	"pd_laser": "Silent, precise, and invisible. Confirming that it is working is an ongoing challenge.",
 	"flak_cannon": "Fills the sky with fragments. Aircraft are discouraged from entering that sky.",
+	"smoke_discharger": "Produces concealment. Conceals friendly and hostile forces with equal diligence.",
+	# Roster expansion
+	"mk19_grenade_launcher": "Belt-fed grenades. Sustained fire is possible. Sustained resupply is not.",
+	"recoilless_rifle": "Recoilless by design. The recoil is instead emitted rearward. Stand elsewhere.",
+	"coil_gun": "Staged magnetic acceleration. Quieter than the rail. Everything else is unchanged.",
+	"autocannon": "Intermediate calibre. Chosen because neither adjacent option was satisfactory either.",
+	"napalm_mortar": "Deploys thickened fuel. The affected area remains affected for some time.",
+	"mine_layer": "Emplaces area denial. Minefield records are maintained to the extent practicable.",
+	"ballista": "Torsion-spring bolt thrower. Procurement has twice declined to explain this line item.",
 	# Support
 	"resource_harvester": "Extracts and hauls. Slow, unarmed, and statistically the first thing shot at.",
 	"repair_array": "Field repair. Restores structure. Does not restore crews, morale, or paperwork.",
@@ -1324,7 +1517,14 @@ const PROJECTILE_CLASS = {
 	"resource_harvester": "hitscan", "repair_array": "hitscan",
 	"basic_cannon": "ballistic", "heavy_machine_gun": "ballistic", "rotary_cannon": "ballistic",
 	"ciws": "ballistic", "flak_cannon": "ballistic", "flamethrower": "ballistic",
-	"artillery": "arc", "mortar_array": "arc",
+	"artillery": "arc", "mortar_array": "arc", "smoke_discharger": "arc",
+	# Roster expansion: a coil gun accelerates a slug the same way a rail
+	# does (hitscan); the recoilless/autocannon/ballista all throw a real
+	# projectile fast and flat; the grenade launcher, napalm mortar and
+	# mine layer all lob.
+	"coil_gun": "hitscan",
+	"recoilless_rifle": "ballistic", "autocannon": "ballistic", "ballista": "ballistic",
+	"mk19_grenade_launcher": "arc", "napalm_mortar": "arc", "mine_layer": "arc",
 	"cluster_dispenser": "arc", "plasma_lobber": "arc",
 	"guided_missile": "guided", "missile_pod": "guided",
 	"drone_carrier": "guided",
@@ -1332,6 +1532,199 @@ const PROJECTILE_CLASS = {
 
 static func get_projectile_class(type_id: String) -> String:
 	return PROJECTILE_CLASS.get(type_id, "ballistic")
+
+# --- Ammunition types (cross-cutting payload selection) --------------------
+#
+# Chris's framing: "something firing a shell or payload can also do smoke or
+# incendiary or HE". Ammo is a DESIGN-TIME choice per weapon module, stored
+# as a plain string in the module's own `tweaks` dict - exactly the pattern
+# armor_plating's "material" already uses (see stat_calculator.gd's
+# ARMOR_MATERIALS block: "stored in the same tweaks dict so it rides the
+# existing save/load path for free"). That choice is load-bearing:
+#   - module_data.gd's get_weight()/get_cost()/get_dps() loops all gate on
+#     `tweak_name in [...numeric names...]`, so a string under a NEW key
+#     falls straight through untouched - no accidental stat corruption.
+#   - blueprint_manager.gd copies the whole tweaks dict verbatim on save and
+#     load, so persistence needs no new code at all.
+#
+# The real payoff is `damage_class`. damage_resolver.gd already carries a
+# full armor-material x damage-class threshold table, but until now a
+# weapon's class was hardcoded once in auto_weapon.gd's _ready() and never
+# changed - so that whole matrix was a static property of WHICH GUN you
+# bolted on. Ammo makes it a live counter-pick: the same cannon fires AP
+# (kinetic - tears ablative_ceramic, bounces off hardened_steel) or HE
+# (explosive - good against steel, eaten alive by reactive_armor) or
+# incendiary (thermal - melts steel, useless against ablative). None of that
+# resolution math is new; it was built and sitting idle.
+#
+# "standard" is deliberately the default and a genuine no-op (native damage
+# class, all multipliers 1.0), so every blueprint saved before this system
+# existed behaves EXACTLY as it did before - loading an old design must not
+# silently re-tune its guns.
+#
+# Fields:
+#   damage_class  - "" keeps the weapon's own native class, else overrides it
+#   damage_mult   - per-shot damage multiplier (0.0 = deals no HP damage)
+#   light_mult    - EXTRA multiplier against light/unarmoured targets only
+#                   (drones, missiles, aircraft - see auto_weapon.gd's
+#                   _is_light_target). This field is what stops the roster
+#                   collapsing into one right answer, so it is not optional
+#                   flavour: worked through against the real armor tables,
+#                   AP came out a STRICT upgrade over standard on every
+#                   armor material (81.6 vs 53.6 damage on hardened steel,
+#                   94.8 vs 70.2 on ablative), with its only stated cost -
+#                   no splash - being nearly free on a single-target gun.
+#                   That is precisely the solved-dominant-choice failure
+#                   DESIGN_VISION.md warns about. A solid penetrator
+#                   over-penetrating a thin-skinned drone (0.4x) gives it a
+#                   real class of target it is genuinely bad against, and
+#                   makes it the exact mirror of flechette (3.5x) rather
+#                   than a free damage upgrade.
+#   aoe_mult      - blast radius multiplier (0.0 = no splash, single target)
+#   weight_mult   - ammo stowage mass, applied to the module's weight
+#   metal_mult /
+#   crystal_mult  - per-round cost of the payload
+const AMMO_TYPES = {
+	"standard": {
+		"label": "Standard",
+		"damage_class": "", "damage_mult": 1.0, "light_mult": 1.0, "aoe_mult": 1.0,
+		"weight_mult": 1.0, "metal_mult": 1.0, "crystal_mult": 1.0,
+		"desc": "Balanced service round. No specialisation, no surprises.",
+	},
+	# Kinetic penetrator: all the energy in one spot, nothing left over for
+	# splash. Best against ablative_ceramic (kinetic threshold 8, the lowest
+	# in the table); worst against hardened_steel (15, the highest).
+	"ap": {
+		"label": "Armor-Piercing",
+		"damage_class": "kinetic", "damage_mult": 1.25, "light_mult": 0.4, "aoe_mult": 0.0,
+		"weight_mult": 1.15, "metal_mult": 1.25, "crystal_mult": 1.0,
+		"desc": "Solid penetrator. Concentrates everything on one point and splashes nothing.",
+	},
+	# Blast round: trades per-shot punch for a much wider blast. Reactive
+	# armor's explosive threshold is 30 - by far the hardest wall in the
+	# table - so this is the round that gets genuinely countered.
+	"he": {
+		"label": "High-Explosive",
+		"damage_class": "explosive", "damage_mult": 0.85, "light_mult": 1.3, "aoe_mult": 1.6,
+		"weight_mult": 1.1, "metal_mult": 1.15, "crystal_mult": 1.0,
+		"desc": "Blast-fragmentation filler. Wide effect, poor penetration against sloped plate.",
+	},
+	# Thermal: hardened_steel's thermal threshold is 5 (its softest row),
+	# ablative_ceramic's is 25 (the hardest) - a clean inversion of AP.
+	# Also leaves a lingering burn pool at the impact point.
+	"incendiary": {
+		"label": "Incendiary",
+		"damage_class": "thermal", "damage_mult": 0.7, "light_mult": 1.2, "aoe_mult": 1.2,
+		"weight_mult": 1.1, "metal_mult": 1.1, "crystal_mult": 1.3,
+		"desc": "Thickened fuel filler. Burns on after impact. Ineffective against ablative plate.",
+	},
+	# Anti-swarm: a wide cone of sub-projectiles. Weak per fragment, but
+	# carries a large bonus against unarmoured light targets (drones,
+	# missiles, anything in the "missiles" group) - see auto_weapon.gd's
+	# AMMO_LIGHT_TARGET_MULT.
+	"flechette": {
+		"label": "Flechette Canister",
+		"damage_class": "kinetic", "damage_mult": 0.55, "light_mult": 3.5, "aoe_mult": 2.2,
+		"weight_mult": 1.0, "metal_mult": 1.1, "crystal_mult": 1.0,
+		"desc": "Sub-calibre dart canister. Devastating to light frames, irrelevant to armour.",
+	},
+	# Energy shell: drains the target's capacitor alongside light HP damage,
+	# reusing the same drain_energy() contract tesla_coil/arc_projector use.
+	# Gives ballistic weapons a door into the energy tier.
+	"emp": {
+		"label": "EMP Shell",
+		"damage_class": "energy", "damage_mult": 0.5, "light_mult": 1.0, "aoe_mult": 1.0,
+		"weight_mult": 1.05, "metal_mult": 1.0, "crystal_mult": 1.7,
+		"desc": "Capacitor-discharge warhead. Strips power reserves. Barely scratches structure.",
+	},
+	# Utility rounds: no HP damage at all. That IS the tradeoff - a gun
+	# loaded with smoke is not shooting anyone this reload.
+	"smoke": {
+		"label": "Smoke",
+		"damage_class": "", "damage_mult": 0.0, "light_mult": 1.0, "aoe_mult": 1.0,
+		"weight_mult": 0.95, "metal_mult": 0.8, "crystal_mult": 1.0,
+		"desc": "Obscurant round. Deals no damage. Blocks sightlines and breaks missile lock.",
+	},
+	"illumination": {
+		"label": "Illumination",
+		"damage_class": "", "damage_mult": 0.0, "light_mult": 1.0, "aoe_mult": 1.0,
+		"weight_mult": 0.95, "metal_mult": 0.8, "crystal_mult": 1.1,
+		"desc": "Parachute flare. Deals no damage. Burns off fog of war where it lands.",
+	},
+}
+
+const AMMO_DEFAULT: String = "standard"
+# The tweaks-dict key ammo is stored under. Deliberately NOT any name in
+# module_data.gd's numeric-tweak lists or LINEAR_SCALE_WEAPON_TWEAKS, so the
+# string value can never be fed into a multiplication.
+const AMMO_TWEAK_KEY: String = "ammo"
+
+# Which weapons can load which rounds. A weapon absent from this table has
+# no ammo selection at all - that's the correct answer for anything without
+# a discrete shell or payload to swap (continuous beams, the flamethrower's
+# fuel stream, tesla/arc/ion discharges, plasma's self-contained bolt) and
+# for the support modules. Per-weapon lists rather than one global list
+# because plenty of combinations are nonsense: a CIWS gatling has no
+# business firing an illumination flare, and a railgun slug cannot be
+# "high-explosive" in any meaningful sense.
+const WEAPON_AMMO_OPTIONS = {
+	# Full-service artillery pieces and general-purpose guns
+	"basic_cannon":      ["standard", "ap", "he", "incendiary", "flechette", "emp", "smoke", "illumination"],
+	"artillery":         ["standard", "he", "incendiary", "emp", "smoke", "illumination"],
+	"mortar_array":      ["standard", "he", "incendiary", "smoke", "illumination"],
+	"cluster_dispenser": ["standard", "he", "incendiary", "flechette", "smoke"],
+	# Automatic weapons - small rounds, so no illumination/blast-filler
+	"heavy_machine_gun": ["standard", "ap", "incendiary", "flechette"],
+	"rotary_cannon":     ["standard", "ap", "incendiary", "flechette"],
+	"ciws":              ["standard", "ap", "flechette"],
+	"flak_cannon":       ["standard", "he", "flechette", "emp"],
+	# A rail slug is a kinetic mass by definition - only variants that stay
+	# kinetic-ish make sense.
+	"gauss_railgun":     ["standard", "ap", "emp"],
+	# Missiles swap warheads rather than shells, same idea mechanically
+	"guided_missile":    ["standard", "he", "incendiary", "emp", "smoke"],
+	"missile_pod":       ["standard", "he", "incendiary", "emp"],
+	# Roster expansion
+	"mk19_grenade_launcher": ["standard", "he", "incendiary", "flechette", "smoke"],
+	"recoilless_rifle":  ["standard", "ap", "he", "incendiary", "smoke"],
+	"coil_gun":          ["standard", "ap", "emp"],
+	"autocannon":        ["standard", "ap", "incendiary", "flechette"],
+	# A dedicated fire weapon - incendiary is its DEFAULT, not an option,
+	# hence it heading the list (get_ammo() falls back to options[0]).
+	"napalm_mortar":     ["incendiary", "standard", "smoke"],
+	"mine_layer":        ["standard", "he", "incendiary"],
+	# Flaming ballista bolts are both period-appropriate and, per the
+	# straight-faced tone rule, never acknowledged as funny by anyone.
+	"ballista":          ["standard", "ap", "incendiary", "smoke"],
+	# The dedicated obscurant launcher - the complement to the shell-based
+	# smoke above, not a duplicate of it: far larger, faster-blooming clouds,
+	# but it can do nothing else whatsoever.
+	"smoke_discharger":  ["smoke", "illumination"],
+}
+
+static func get_ammo_options(type_id: String) -> Array:
+	return WEAPON_AMMO_OPTIONS.get(type_id, [])
+
+static func is_ammo_capable(type_id: String) -> bool:
+	return WEAPON_AMMO_OPTIONS.has(type_id)
+
+# Resolves the ammo a module is actually loaded with, validating it against
+# that weapon's own allowed list. An unknown or illegal ammo id (a
+# hand-edited blueprint, a save from a build where that weapon allowed a
+# round it no longer does, a mod) degrades to the weapon's first legal
+# option rather than erroring - same forgiving contract get_module_data()
+# has for unknown type_ids.
+static func get_ammo(type_id: String, tweaks: Dictionary) -> String:
+	var options = get_ammo_options(type_id)
+	if options.is_empty():
+		return AMMO_DEFAULT
+	var chosen = tweaks.get(AMMO_TWEAK_KEY, "")
+	if typeof(chosen) == TYPE_STRING and chosen in options:
+		return chosen
+	return options[0]
+
+static func get_ammo_profile(ammo_id: String) -> Dictionary:
+	return AMMO_TYPES.get(ammo_id, AMMO_TYPES[AMMO_DEFAULT])
 
 # Tweak names that scale a single part's physical size/mass (shared meaning
 # with module_data.gd's get_weight() tweak list, weapon-relevant subset only

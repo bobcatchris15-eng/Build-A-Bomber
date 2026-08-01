@@ -107,7 +107,11 @@ func _combat_roster() -> Array:
 # fall through unchanged to the existing round-robin cycle below - this is a
 # bias layered on the existing production loop, not a replacement for it.
 const ANTI_AIR_WEAPONS = ["ciws", "flak_cannon", "pd_laser"]
-const ANTI_ARMOR_WEAPONS = ["gauss_railgun", "artillery", "ion_cannon", "tesla_coil"]
+# Roster expansion: the coil gun, recoilless rifle and ballista are all
+# explicitly built as anti-armor answers (big per-shot damage that clears
+# thresholds outright rather than chipping), so the AI should recognise
+# them as such when it evaluates a design's role.
+const ANTI_ARMOR_WEAPONS = ["gauss_railgun", "artillery", "ion_cannon", "tesla_coil", "coil_gun", "recoilless_rifle", "ballista"]
 const COUNTER_SCOUT_MIN_UNITS = 2
 const COUNTER_SCOUT_MAJORITY = 0.4
 
