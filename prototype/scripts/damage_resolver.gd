@@ -129,6 +129,13 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 				threshold += m_data.get_hp() * 0.1
 				if plate_material == "":
 					reduction = clamp(reduction * 0.9, 0.2, 1.0)
+				# Bolt-on plate bias. Applied AFTER the material/hp
+				# contribution and as a multiplier on threshold only, so a
+				# plate shifts what the vehicle is good against without
+				# replacing the hull material's own answer. Plain
+				# armor_plating has no row and multiplies by 1.0.
+				threshold *= ModuleCatalogScript.get_armor_module_bias(
+					m_data.type_id if "type_id" in m_data else "", damage_type)
 				break # a facet only ever has one plate (see mirror-centering skip logic)
 
 		# Phase 4: true angle-of-incidence sloped armor. A shot that grazes
@@ -140,13 +147,23 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 		threshold *= compute_slope_multiplier(defender, hit_origin as Vector3)
 	else:
 		var armor_module_hp = 0.0
+		var bias_sum = 0.0
+		var bias_count = 0
 		for m in active_modules:
 			var m_data = m.get_meta("module_data")
 			if m_data and m_data.category == "armor":
 				armor_module_hp += m_data.get_hp()
+				# Same bias, averaged in when the hit has no facet to key on
+				# (a fallback path, so it uses the mean rather than letting
+				# whichever plate happens to be last in the list decide).
+				bias_sum += ModuleCatalogScript.get_armor_module_bias(
+					m_data.type_id if "type_id" in m_data else "", damage_type)
+				bias_count += 1
 		if armor_module_hp > 0.0:
 			threshold += armor_module_hp * 0.1
 			reduction = clamp(reduction * 0.9, 0.2, 1.0)
+			if bias_count > 0:
+				threshold *= bias_sum / float(bias_count)
 
 	if defender != null and hit_origin != null:
 		var height_advantage = (hit_origin as Vector3).y - defender.global_position.y

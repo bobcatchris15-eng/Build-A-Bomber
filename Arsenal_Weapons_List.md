@@ -266,3 +266,50 @@ Essential systems for economy, logistics, and intelligence.
 - **Role:** Resupplies energy or fuel to frontline units.
 - **Tweakable Features:**
   - **Tank Capacity:** Holds more reserves, but creates a massive explosive hazard if destroyed.
+
+---
+
+## Roster Expansion — Categories Levelled to 8
+
+Every combat category now carries 7–9 archetypes rather than 2–6. Full list with the tweak that distinguishes each:
+
+### Indirect Fire (6 → 8)
+| Module | Distinguishing tweak |
+| --- | --- |
+| **Spigot Mortar** | The bomb is bigger than the weapon — no barrel at all, the round slides over a rod. `rod_thickness` and `payload_size` scale two separate parts, so the silhouette changes shape rather than size. Enormous splash, derisory range. |
+| **Rocket Artillery** | `rail_count` splits the same damage across more rockets, so it is a **spread** slider, not a free upgrade — otherwise more rails would be strictly better and `dispersion` would be a downside with no matching upside. |
+
+### Missiles (2 → 8) — all interceptable by point defence
+| Module | Distinguishing tweak |
+| --- | --- |
+| **Hypervelocity Missile** | Beam-riding kinetic darts at ~3× normal missile speed. No warhead; the dart is the damage. Kinetic class. |
+| **SAM Launcher** | Air only, checked at the firing gate as well as in target selection. |
+| **Loitering Munition** | `loiter_endurance` is a real delay *before* it starts tracking. The loiter is the cost, paid in time before anything happens. |
+| **Anti-Radiation Missile** | Only locks units that actually carry a sensor module — the one weapon whose usefulness is decided by what the **opponent** built. |
+| **Bunker Buster** | Top-attack, ×2.1 against structures, clumsy against anything that moves. |
+| **Cruise Missile** | Big, slow, long-ranged and very interceptable — the missile point defence exists to eat. |
+
+### Point Defense (3 → 8)
+| Module | Distinguishing tweak |
+| --- | --- |
+| **Chaff Dispenser** | Consumable lock-break. Does **not** obscure vision — it breaks seeker locks directly and is gone in seconds. |
+| **Laser Dazzler** | Directional. Blinds seekers in a narrow cone, so it competes for arc with a real weapon. |
+| **APS Interceptor** | Hard kill. Covers the whole arc at once instead of traversing, so it pays in range rather than coverage. |
+| **AA Autocannon** | Engages **aircraft**, not just incoming munitions — deliberately *not* in `PD_WEAPON_TYPES`, or it would ignore the thing it exists to shoot. |
+| **Jammer Mast** | Passive aura. Degrades guided weapons in radius by existing, and advertises your position while doing it. |
+
+### Deployables (3 → 6)
+| Module | Distinguishing tweak |
+| --- | --- |
+| **Sentry Deployer** | Drops an autonomous turret that keeps fighting after the carrier leaves. Uses the same authored mesh loaded in the rack, so what you see loaded is what you get. |
+| **Sensor Beacon Launcher** | Lobs a beacon that reveals fog — reuses the `reveal_area()` beacons built for illumination ammo. Vision as a weapon. |
+| **Decoy Projector** | Deploys a false contact that draws fire. Zero damage; its entire output is other people's wasted shots. |
+
+### Bolt-on Armor (1 → 4)
+Three plates that each bias one damage class, forming a rock-paper-scissors **among themselves**. Applied as a threshold multiplier on top of the hull's armor material rather than replacing it — the four materials are an already-balanced 4-vs-4 (`FABLE_REVIEW.md` 1.2) and a fifth row would break a system that took real work to get right. A plate biases; it does not redefine.
+
+| Plate | Good against | Bad against |
+| --- | --- | --- |
+| **Slat Armor** | Explosive ×1.95 (pre-detonates shaped charges) | Kinetic ×0.55 — you can see straight through it |
+| **Spaced Composite** | Kinetic ×1.85 | Energy ×0.70, and heavy enough to be a real payload decision |
+| **Ablative Foam** | Thermal ×2.10 | Kinetic ×0.60 |

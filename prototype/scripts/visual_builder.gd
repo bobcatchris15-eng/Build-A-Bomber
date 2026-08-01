@@ -297,6 +297,7 @@ const LANCE_BREECH_REAR_Z := 0.160
 # Indirect-fire and missile stations, measured from the exported AABBs.
 const SPIGOT_BREECH_FRONT_Z := -0.060
 const ROCKET_CRADLE_FRONT_Z := -0.070
+const AA_RECEIVER_FRONT_Z := -0.082
 
 # The six guided launchers share a pedestal and an assembly path. Each entry
 # names the body that gives the launcher its identity, the round it carries,
@@ -332,6 +333,9 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"spigot_mortar": true, "rocket_artillery": true,
 	"hypervelocity_missile": true, "sam_launcher": true, "loitering_munition": true,
 	"anti_radiation_missile": true, "bunker_buster": true, "cruise_missile": true,
+	"chaff_dispenser": true, "laser_dazzler": true, "aps_interceptor": true,
+	"aa_autocannon": true, "jammer_mast": true, "sentry_deployer": true,
+	"sensor_beacon_launcher": true, "decoy_projector": true,
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
 	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
@@ -2394,7 +2398,10 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 					 "anti_materiel_rifle", "arc_projector", "microwave_emitter",
 					 "particle_lance", "spigot_mortar", "rocket_artillery",
 					 "hypervelocity_missile", "sam_launcher", "loitering_munition",
-					 "anti_radiation_missile", "bunker_buster", "cruise_missile"]:
+					 "anti_radiation_missile", "bunker_buster", "cruise_missile",
+					 "chaff_dispenser", "laser_dazzler", "aps_interceptor",
+					 "aa_autocannon", "jammer_mast", "sentry_deployer",
+					 "sensor_beacon_launcher", "decoy_projector"]:
 		# --- Roster expansion ------------------------------------------------
 		# Assembled from authored .glb sub-parts (tools/blender/
 		# build_roster_expansion.py) exactly like basic_cannon and the HMG
@@ -2871,6 +2878,128 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 						rnd.position = Vector3(t * 0.20 * caliber, 0.0,
 							float(ml_spec["front_z"]) * caliber)
 						ml_pivot.add_child(rnd)
+
+			"chaff_dispenser":
+				# Never points at anything, so no trunnion and no elevation
+				# pivot - the tubes are fixed and splayed. Same family as the
+				# smoke discharger, deliberately.
+				var cd_tubes = clampi(int(tweaks.get("tube_count", 4.0)), 2, 8)
+				var cd_body_mesh = _part("chaff_body")
+				if cd_body_mesh:
+					var cdb = _mesh_inst(cd_body_mesh, base_color.darkened(0.1))
+					cdb.scale = Vector3.ONE * caliber
+					parent_node.add_child(cdb)
+				var cd_tube_mesh = _part("chaff_tube")
+				if cd_tube_mesh:
+					for i in range(cd_tubes):
+						var t = 0.0 if cd_tubes == 1 else (float(i) / float(cd_tubes - 1) - 0.5)
+						var tube = _mesh_inst(cd_tube_mesh, Color(0.30, 0.31, 0.27))
+						tube.scale = Vector3.ONE * caliber
+						tube.position = Vector3(t * 0.30 * caliber, 0.24 * caliber, -0.05 * caliber)
+						# Splayed OUTWARD and canted up. Sign checked against
+						# the smoke discharger's own splay bug: the leftmost
+						# tube must yaw left, not inward.
+						tube.rotation = Vector3(deg_to_rad(-55.0), lerp(0.30, -0.30, float(i) / maxf(1.0, float(cd_tubes - 1))), 0)
+						parent_node.add_child(tube)
+
+			"laser_dazzler":
+				var dz_trunnion_y = 0.196
+				var dz_mount_mesh = _part("dazzler_mount")
+				if dz_mount_mesh:
+					var dzm = _mesh_inst(dz_mount_mesh, base_color.darkened(0.25))
+					dzm.scale = Vector3(caliber, 1.0, caliber)
+					parent_node.add_child(dzm)
+				var dz_head_mesh = _part("dazzler_head")
+				if dz_head_mesh:
+					var dzh = _mesh_inst(dz_head_mesh, Color(0.22, 0.24, 0.26),
+						Color(0.35, 0.95, 0.5), 0.5)
+					dzh.scale = Vector3.ONE * caliber * float(tweaks.get("lens_aperture", 1.0))
+					dzh.position = Vector3(0, dz_trunnion_y, 0)
+					parent_node.add_child(dzh)
+
+			"aps_interceptor":
+				# Covers the whole arc at once, so it does not traverse and
+				# has no trunnion - the launcher ring IS the weapon.
+				var aps_mesh = _part("aps_body")
+				if aps_mesh:
+					var apsb = _mesh_inst(aps_mesh, base_color.darkened(0.1),
+						Color(1.0, 0.6, 0.25), 0.25)
+					apsb.scale = Vector3.ONE * caliber
+					parent_node.add_child(apsb)
+
+			"aa_autocannon":
+				var aa_trunnion_y = 0.268
+				var aa_len = tweaks.get("barrel_length", 1.0)
+				var aa_mount_mesh = _part("aa_mount")
+				if aa_mount_mesh:
+					var aam = _mesh_inst(aa_mount_mesh, base_color.darkened(0.25))
+					aam.scale = Vector3(caliber, 1.0, caliber)
+					parent_node.add_child(aam)
+				# High fixed elevation - it is looking up, which is the point.
+				var aa_pivot = Node3D.new()
+				aa_pivot.name = "ElevationPivot"
+				aa_pivot.position = Vector3(0, aa_trunnion_y, 0)
+				aa_pivot.rotation = Vector3(deg_to_rad(38.0), 0, 0)
+				parent_node.add_child(aa_pivot)
+				var aa_rec_mesh = _part("aa_receiver")
+				if aa_rec_mesh:
+					var aar = _mesh_inst(aa_rec_mesh, Color(0.22, 0.24, 0.22))
+					aar.scale = Vector3.ONE * caliber
+					aa_pivot.add_child(aar)
+				var aa_bar_mesh = _part("aa_barrel")
+				if aa_bar_mesh:
+					for side in [-1.0, 1.0]:
+						var bar = _mesh_inst(aa_bar_mesh, Color(0.13, 0.14, 0.15))
+						bar.scale = Vector3(caliber, caliber, aa_len * caliber)
+						bar.position = Vector3(side * 0.055 * caliber, 0, AA_RECEIVER_FRONT_Z * caliber)
+						aa_pivot.add_child(bar)
+
+			"jammer_mast":
+				# No barrel, no traverse, no shot. Reads as equipment.
+				var jm_mesh = _part("jammer_body")
+				if jm_mesh:
+					var jmb = _mesh_inst(jm_mesh, base_color.darkened(0.1),
+						Color(0.4, 0.8, 0.95), 0.30)
+					jmb.scale = Vector3(caliber, float(tweaks.get("mast_height", 1.0)), caliber)
+					parent_node.add_child(jmb)
+
+			"sentry_deployer":
+				var sd_rack_mesh = _part("sentry_rack")
+				if sd_rack_mesh:
+					var sdr = _mesh_inst(sd_rack_mesh, base_color.darkened(0.1))
+					sdr.scale = Vector3.ONE * caliber
+					parent_node.add_child(sdr)
+				# Loaded sentries visible in the rack, using the SAME mesh the
+				# deployed turret uses - what you see loaded is what you get.
+				var sd_turret_mesh = _part("sentry_turret")
+				if sd_turret_mesh:
+					var loaded = clampi(int(tweaks.get("hangar_size", 2.0)), 1, 3)
+					for i in range(loaded):
+						var st = _mesh_inst(sd_turret_mesh, Color(0.27, 0.29, 0.24))
+						st.scale = Vector3.ONE * caliber * 0.72
+						st.position = Vector3(0, (0.10 + i * 0.115) * caliber, 0.02 * caliber)
+						parent_node.add_child(st)
+
+			"sensor_beacon_launcher":
+				var sb_body_mesh = _part("beacon_body")
+				if sb_body_mesh:
+					var sbb = _mesh_inst(sb_body_mesh, base_color.darkened(0.1))
+					sbb.scale = Vector3.ONE * caliber
+					parent_node.add_child(sbb)
+				var sb_tube_mesh = _part("beacon_tube")
+				if sb_tube_mesh:
+					var sbt = _mesh_inst(sb_tube_mesh, Color(0.26, 0.29, 0.25))
+					sbt.scale = Vector3.ONE * caliber
+					sbt.position = Vector3(0, 0.196 * caliber, -0.02 * caliber)
+					sbt.rotation = Vector3(deg_to_rad(58.0), 0, 0)
+					parent_node.add_child(sbt)
+
+			"decoy_projector":
+				var dp_mesh = _part("decoy_body")
+				if dp_mesh:
+					var dpb = _mesh_inst(dp_mesh, base_color.darkened(0.05))
+					dpb.scale = Vector3.ONE * caliber
+					parent_node.add_child(dpb)
 
 			"recoilless_rifle":
 				var trunnion_y = 0.27
@@ -5045,7 +5174,7 @@ static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: D
 	if children.is_empty(): return
 
 	match type_id:
-		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle", "arc_projector", "microwave_emitter", "particle_lance", "spigot_mortar", "rocket_artillery", "hypervelocity_missile", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile":
+		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle", "arc_projector", "microwave_emitter", "particle_lance", "spigot_mortar", "rocket_artillery", "hypervelocity_missile", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile", "chaff_dispenser", "laser_dazzler", "aps_interceptor", "aa_autocannon", "jammer_mast", "sentry_deployer", "sensor_beacon_launcher", "decoy_projector":
 			return
 
 # Builds a wedge (triangular prism) mesh from a base_size Vector3.

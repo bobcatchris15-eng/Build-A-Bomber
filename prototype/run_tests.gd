@@ -10428,6 +10428,10 @@ func test_module_roles_group_and_sort_the_parts_menu() -> bool:
 	# Typing must filter across every tab at once, open the surviving drawers
 	# (otherwise you'd have to click to see what you just searched for), and
 	# fully restore on clear.
+	# Expectation COMPUTED from the catalog, not hardcoded. The hardcoded
+	# version asserted exactly [heavy_laser, pd_laser] and broke the moment
+	# laser_dazzler was added - a test that has to be edited every time
+	# content is added is testing the content, not the search.
 	menu._on_search_changed("laser")
 	await process_frame
 	var hits := []
@@ -10438,8 +10442,17 @@ func test_module_roles_group_and_sort_the_parts_menu() -> bool:
 			if btn.visible:
 				hits.append(btn.module_type_id)
 	hits.sort()
-	if hits != ["heavy_laser", "pd_laser"]:
-		print("  [FAIL] Search 'laser' returned ", hits, " expected [heavy_laser, pd_laser]")
+	var expect_hits := []
+	for type_id in catalog.keys():
+		var hay = ("%s %s" % [catalog[type_id].get("name", ""), type_id]).to_lower()
+		if hay.contains("laser"):
+			expect_hits.append(type_id)
+	expect_hits.sort()
+	if hits != expect_hits:
+		print("  [FAIL] Search 'laser' returned ", hits, " expected ", expect_hits)
+		ok = false
+	if expect_hits.size() < 2:
+		print("  [FAIL] Search test is vacuous - fewer than 2 parts match 'laser'")
 		ok = false
 	for drawer in menu._all_drawers:
 		if drawer.visible and not drawer.get_meta("drawer_open"):

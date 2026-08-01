@@ -193,6 +193,39 @@ const TWEAK_SPECS = {
 		{"name": "bipod_deploy", "label": "Deploy Bipod", "min": 0.0, "max": 1.0, "step": 1.0, "default": 0.0},
 		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
 	],
+	"chaff_dispenser": [
+		{"name": "tube_count", "label": "Cartridge Tubes", "min": 2.0, "max": 8.0, "step": 1.0, "default": 4.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
+	],
+	"laser_dazzler": [
+		{"name": "lens_aperture", "label": "Emitter Aperture", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 3.0, "step": 1.0, "default": 0.0}
+	],
+	"aps_interceptor": [
+		{"name": "fuse_setting", "label": "Intercept Fuse", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 3.0, "step": 1.0, "default": 0.0}
+	],
+	"aa_autocannon": [
+		{"name": "caliber", "label": "Calibre", "min": 0.6, "max": 1.6, "step": 0.1, "default": 1.0},
+		{"name": "barrel_length", "label": "Barrel Length", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 3.0, "step": 1.0, "default": 0.0}
+	],
+	"jammer_mast": [
+		{"name": "mast_height", "label": "Mast Height", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
+	],
+	"sentry_deployer": [
+		{"name": "hangar_size", "label": "Sentries Carried", "min": 1.0, "max": 3.0, "step": 1.0, "default": 2.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
+	],
+	"sensor_beacon_launcher": [
+		{"name": "payload_size", "label": "Beacon Size", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
+	],
+	"decoy_projector": [
+		{"name": "payload_size", "label": "Decoy Size", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
+	],
 	"spigot_mortar": [
 		{"name": "rod_thickness", "label": "Spigot Rod", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
 		{"name": "payload_size", "label": "Bomb Size", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},

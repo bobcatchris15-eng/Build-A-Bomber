@@ -167,6 +167,14 @@ const WEAPON_FIRE_PROFILES = {
 	"anti_radiation_missile": {"fire_rate": 3.4, "fire_range": 34.0, "laser_color": Color(0.75, 0.80, 0.78)},
 	"bunker_buster":      {"fire_rate": 4.2,  "fire_range": 24.0, "laser_color": Color(0.70, 0.72, 0.75)},
 	"cruise_missile":     {"fire_rate": 5.0,  "fire_range": 42.0, "laser_color": Color(0.78, 0.80, 0.72)},
+	"chaff_dispenser":    {"fire_rate": 3.5,  "fire_range": 9.0,  "laser_color": Color(0.85, 0.86, 0.80)},
+	"laser_dazzler":      {"fire_rate": 0.7,  "fire_range": 16.0, "laser_color": Color(0.40, 0.95, 0.55)},
+	"aps_interceptor":    {"fire_rate": 0.9,  "fire_range": 7.0,  "laser_color": Color(1.0, 0.75, 0.35)},
+	"aa_autocannon":      {"fire_rate": 0.20, "fire_range": 20.0, "laser_color": Color(1.0, 0.85, 0.45)},
+	"jammer_mast":        {"fire_rate": 2.0,  "fire_range": 15.0, "laser_color": Color(0.55, 0.85, 0.90)},
+	"sentry_deployer":    {"fire_rate": 8.0,  "fire_range": 12.0, "laser_color": Color(0.70, 0.75, 0.60)},
+	"sensor_beacon_launcher": {"fire_rate": 6.0, "fire_range": 22.0, "laser_color": Color(0.65, 0.90, 0.75)},
+	"decoy_projector":    {"fire_rate": 10.0, "fire_range": 10.0, "laser_color": Color(0.80, 0.80, 0.65)},
 	"ciws":               {"fire_rate": 0.06, "fire_range": 14.0, "laser_color": Color.WHITE_SMOKE},
 	"pd_laser":           {"fire_rate": 0.1,  "fire_range": 16.0, "laser_color": Color.LIGHT_CORAL},
 	"flak_cannon":        {"fire_rate": 1.2,  "fire_range": 22.0, "laser_color": Color.DARK_GOLDENROD},
@@ -583,6 +591,170 @@ static func _build_catalog_literal() -> Dictionary:
 			"traverse_agility": 0.4,
 			"size": Vector3(0.8, 0.7, 2.0),
 			"color": Color(0.31, 0.33, 0.29)
+		},
+
+		# --- POINT DEFENSE EXPANSION ---------------------------------------
+		# Consumable lock-break. Unlike smoke it does not obscure vision - it
+		# breaks a seeker's lock directly and then it is gone.
+		"chaff_dispenser": {
+			"name": "Chaff Dispenser",
+			"category": "weapon",
+			"hp": 45.0,
+			"weight": 35.0,
+			"metal": 16,
+			"crystal": 4,
+			"dps": 0.0,
+			"traverse_agility": 1.0,
+			"size": Vector3(0.5, 0.4, 0.5),
+			"color": Color(0.42, 0.44, 0.38)
+		},
+
+		# Directional seeker blinding. Has to be pointed, so it competes for
+		# arc with a real weapon - which is its cost.
+		"laser_dazzler": {
+			"name": "Laser Dazzler",
+			"category": "weapon",
+			"hp": 50.0,
+			"weight": 55.0,
+			"metal": 18,
+			"crystal": 22,
+			"dps": 4.0,
+			"traverse_agility": 1.6,
+			"size": Vector3(0.5, 0.5, 0.7),
+			"color": Color(0.36, 0.42, 0.46)
+		},
+
+		# Hard kill. Covers the whole arc at once rather than traversing,
+		# which is what an active protection system does - and why it has
+		# almost no range.
+		"aps_interceptor": {
+			"name": "APS Interceptor",
+			"category": "weapon",
+			"hp": 60.0,
+			"weight": 75.0,
+			"metal": 28,
+			"crystal": 14,
+			"dps": 26.0,
+			"traverse_agility": 2.0,
+			"size": Vector3(0.6, 0.5, 0.6),
+			"color": Color(0.34, 0.36, 0.38)
+		},
+
+		# Dedicated flak. Engages AIRCRAFT, not just incoming munitions,
+		# which is the gap between the CIWS and having no answer to air.
+		"aa_autocannon": {
+			"name": "AA Autocannon",
+			"category": "weapon",
+			"hp": 80.0,
+			"weight": 125.0,
+			"metal": 42,
+			"crystal": 6,
+			"dps": 68.0,
+			"traverse_agility": 1.5,
+			"size": Vector3(0.7, 0.6, 1.5),
+			"color": Color(0.28, 0.31, 0.27)
+		},
+
+		# Passive aura. No barrel, no traverse, no shot - it degrades guided
+		# weapons within its radius simply by existing, and advertises the
+		# vehicle's position while doing it.
+		"jammer_mast": {
+			"name": "Jammer Mast",
+			"category": "weapon",
+			"hp": 55.0,
+			"weight": 70.0,
+			"metal": 22,
+			"crystal": 30,
+			"dps": 0.0,
+			"traverse_agility": 0.8,
+			"size": Vector3(0.6, 1.0, 0.6),
+			"color": Color(0.33, 0.37, 0.35)
+		},
+
+		# --- DEPLOYABLE EXPANSION ------------------------------------------
+		# Drops an autonomous turret that fights on after the carrier leaves.
+		"sentry_deployer": {
+			"name": "Sentry Deployer",
+			"category": "weapon",
+			"hp": 75.0,
+			"weight": 140.0,
+			"metal": 46,
+			"crystal": 12,
+			"dps": 45.0,
+			"traverse_agility": 0.7,
+			"size": Vector3(0.7, 0.6, 0.9),
+			"color": Color(0.31, 0.34, 0.27)
+		},
+
+		# Lobs a beacon that reveals fog where it lands. Reuses the reveal
+		# beacons built for illumination ammo - vision as a weapon.
+		"sensor_beacon_launcher": {
+			"name": "Sensor Beacon Launcher",
+			"category": "weapon",
+			"hp": 55.0,
+			"weight": 60.0,
+			"metal": 22,
+			"crystal": 18,
+			"dps": 0.0,
+			"vision_bonus": 3.0,
+			"traverse_agility": 1.1,
+			"size": Vector3(0.6, 0.5, 0.8),
+			"color": Color(0.34, 0.40, 0.36)
+		},
+
+		# Deploys a false contact that draws fire. Zero damage; its entire
+		# output is other people's wasted shots.
+		"decoy_projector": {
+			"name": "Decoy Projector",
+			"category": "weapon",
+			"hp": 50.0,
+			"weight": 50.0,
+			"metal": 20,
+			"crystal": 10,
+			"dps": 0.0,
+			"traverse_agility": 1.0,
+			"size": Vector3(0.6, 0.5, 0.6),
+			"color": Color(0.38, 0.39, 0.32)
+		},
+
+		# --- BOLT-ON ARMOR EXPANSION ---------------------------------------
+		# Three plates that bias toward a damage class each, mirroring the
+		# hull material rock-paper-scissors WITHOUT touching ARMOR_TABLE -
+		# FABLE_REVIEW.md 1.2 deliberately balanced those four materials
+		# against the four damage classes and a fifth row would muddy it.
+		# See ModuleCatalog.ARMOR_MODULE_BIAS for the actual numbers.
+		"slat_armor": {
+			"name": "Slat Armor",
+			"category": "armor",
+			"hp": 260.0,
+			"weight": 45.0,
+			"metal": 22,
+			"crystal": 0,
+			"dps": 0.0,
+			"size": Vector3(2.0, 0.25, 2.0),
+			"color": Color(0.40, 0.42, 0.36)
+		},
+		"spaced_composite": {
+			"name": "Spaced Composite",
+			"category": "armor",
+			"hp": 620.0,
+			"weight": 155.0,
+			"metal": 68,
+			"crystal": 10,
+			"dps": 0.0,
+			"size": Vector3(2.0, 0.3, 2.0),
+			"color": Color(0.44, 0.45, 0.46)
+		},
+		"ablative_foam": {
+			"name": "Ablative Foam",
+			"category": "armor",
+			"hp": 340.0,
+			"weight": 70.0,
+			"metal": 26,
+			"crystal": 14,
+			"dps": 0.0,
+			"size": Vector3(2.0, 0.28, 2.0),
+			"color": Color(0.60, 0.58, 0.50)
 		},
 
 		"arc_projector": {
@@ -1314,6 +1486,17 @@ const MODULE_FLAVOR = {
 	"anti_radiation_missile": "Homes on anyone using a radar. Encourages the enemy to switch theirs off, which is also a win.",
 	"bunker_buster": "Arrives from directly above. Structures were not consulted about this.",
 	"cruise_missile": "Long ranged, generously proportioned, and entirely visible on approach.",
+	"chaff_dispenser": "Fills the air with tinsel. Seekers find this more persuasive than seems reasonable.",
+	"laser_dazzler": "Blinds seekers and optics. Harmless to anything that navigates by hope.",
+	"aps_interceptor": "Shoots down what was shot at you. Bystanders are advised to stand considerably by.",
+	"aa_autocannon": "For aircraft. Will engage ground targets only under protest and with poor grace.",
+	"jammer_mast": "Degrades guided weapons nearby. Also announces exactly where you are.",
+	"sentry_deployer": "Leaves a turret behind. The turret does not ask when you are coming back.",
+	"sensor_beacon_launcher": "Throws an eye over the hill. Retrieval was not part of the design brief.",
+	"decoy_projector": "Inflates something vaguely vehicle-shaped. Works far more often than anyone admits.",
+	"slat_armor": "A cage held off the hull. Defeats shaped charges and almost nothing else.",
+	"spaced_composite": "Two plates and an argument between them. Heavy in every sense.",
+	"ablative_foam": "Sacrificial quilting. Burns away instead of you, once.",
 	"plasma_lobber": "Containment is temporary by design. Everything downrange is briefly reclassified.",
 	# Point defense
 	"ciws": "Engages incoming ordnance automatically. Do not walk in front of it while powered.",
@@ -1605,6 +1788,33 @@ static func needs_combat_script(type_id: String) -> bool:
 # accident. Anything else with zero weapons and none of these categories
 # is a motionless, harmless brick the player almost certainly forgot to
 # finish, not a deliberate build.
+# --- Bolt-on armor bias -----------------------------------------------------
+# Each plate multiplies the armor THRESHOLD against one damage class and is
+# punished against another, so the three of them form a rock-paper-scissors
+# among themselves. Deliberately applied on top of the hull's own armor
+# MATERIAL rather than replacing it: the material dropdown is a separate,
+# already-balanced 4-vs-4 (FABLE_REVIEW.md 1.2), and adding a fifth row there
+# would break a system that took real work to get right. A plate biases; it
+# does not redefine.
+#
+# Anything absent from a plate's row is 1.0 - unaffected.
+const ARMOR_MODULE_BIAS = {
+	# A cage held off the hull. Pre-detonates shaped charges beautifully and
+	# does essentially nothing against solid shot, which is honest: you can
+	# see straight through it.
+	"slat_armor": {"explosive": 1.95, "kinetic": 0.55, "thermal": 0.85},
+	# Two plates and an air gap. The kinetic answer, and heavy enough that
+	# committing to it is a real payload decision.
+	"spaced_composite": {"kinetic": 1.85, "explosive": 1.15, "energy": 0.70},
+	# Sacrificial quilting. Burns away instead of the hull, once.
+	"ablative_foam": {"thermal": 2.10, "energy": 1.25, "kinetic": 0.60},
+}
+
+static func get_armor_module_bias(type_id: String, damage_type: String) -> float:
+	if not ARMOR_MODULE_BIAS.has(type_id):
+		return 1.0
+	return float(ARMOR_MODULE_BIAS[type_id].get(damage_type, 1.0))
+
 const SUPPORT_CATEGORIES = ["generator"]
 const SUPPORT_TYPE_IDS = ["repair_array", "drone_carrier", "resource_harvester", "sensor_suite"]
 
@@ -1648,6 +1858,17 @@ const MODULE_ROLES = {
 	"anti_radiation_missile": "Missiles",
 	"bunker_buster": "Missiles",
 	"cruise_missile": "Missiles",
+	"chaff_dispenser": "Point Defense",
+	"laser_dazzler": "Point Defense",
+	"aps_interceptor": "Point Defense",
+	"aa_autocannon": "Point Defense",
+	"jammer_mast": "Point Defense",
+	"sentry_deployer": "Deployables",
+	"sensor_beacon_launcher": "Deployables",
+	"decoy_projector": "Deployables",
+	"slat_armor": "Armor",
+	"spaced_composite": "Armor",
+	"ablative_foam": "Armor",
 	"tesla_coil": "Energy & Electromagnetic",
 	"coil_gun": "Energy & Electromagnetic",
 	"ion_cannon": "Energy & Electromagnetic",
@@ -1856,6 +2077,10 @@ const PROJECTILE_CLASS = {
 	"ciws": "ballistic", "flak_cannon": "ballistic", "flamethrower": "ballistic",
 	"artillery": "arc", "mortar_array": "arc", "smoke_discharger": "arc",
 	"spigot_mortar": "arc", "rocket_artillery": "arc",
+	"chaff_dispenser": "arc", "sensor_beacon_launcher": "arc", "sentry_deployer": "arc",
+	"decoy_projector": "arc",
+	"laser_dazzler": "hitscan", "jammer_mast": "hitscan",
+	"aps_interceptor": "ballistic", "aa_autocannon": "ballistic",
 	# Every one of these is interceptable by point defence (they register in
 	# the "missiles" group via weapon_missile.gd), which is the property that
 	# makes them a different proposition from a gun of the same per-shot number.
