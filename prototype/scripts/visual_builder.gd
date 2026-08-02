@@ -121,6 +121,7 @@ static func _flat_mat(color: Color) -> StandardMaterial3D:
 # with this prefix, which is what keeps the fasteners reading as bare steel
 # against faction-liveried plate instead of the whole thing turning into one
 # flat shader.
+const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 const HARDWARE_PREFIX := "Hardware_"
 
 # Names of the pivot nodes battle_unit.gd spins. Locomotion animation has always
@@ -3620,7 +3621,13 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 	# position placed here. Lightened relative to the near-black tire so it
 	# actually reads as a distinct part instead of blending into the tire/
 	# hull shadow.
-	if driveshaft_mesh:
+	# The suspension kit replaces the improvised driveshaft/gearbox column this
+	# used to grow for itself - see build_mount_kit(). Every wheeled type now
+	# hangs off the same authored arm, coil-over and hub carrier, which is what
+	# makes them read as one vehicle family instead of four unrelated ideas.
+	build_mount_kit(parent_node, "wheels", base_color, 1.0, wheel_size)
+
+	if false and driveshaft_mesh:
 		var shaft = _mesh_inst(driveshaft_mesh, base_color.darkened(0.25).lightened(0.35))
 		var shaft_len = 1.0 * wheel_size
 		var shaft_angle = deg_to_rad(55.0)
@@ -3634,7 +3641,7 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 	# Gearbox: large housing tucked inboard at the mount column, fed by the
 	# driveshaft above it and facing the wheel cluster - the "attaches to
 	# the driveshaft" piece.
-	if gearbox_mesh:
+	if false and gearbox_mesh:
 		var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.1).lightened(0.3))
 		var gb_size = 0.46 * wheel_size
 		gearbox.scale = Vector3(gb_size, gb_size, cluster_width)
@@ -3667,6 +3674,7 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 
 
 static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "tracked_treads", base_color, 1.0, float(tweaks.get("tread_width", tweaks.get("width", 1.0))))
 	var width = tweaks.get("tread_width", tweaks.get("width", tweaks.get("size", 1.0)))
 	# Fixed at 3 - Chris's ask, no longer a user tweak (was road_wheel_count,
 	# 3-8 via a dedicated slider; removed along with the slider/catalog entry
@@ -5843,6 +5851,7 @@ static func _create_flat_shaded_mesh(verts: PackedVector3Array, indices: PackedI
 ## independently - the whole pitch of the type is that its two halves are
 ## different machines bolted to one frame.
 static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_OLIVE_GREEN, tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "half_track", base_color, 1.0, float(tweaks.get("tread_width", 1.0)))
 	var bogies := int(tweaks.get("bogie_count", 3.0))
 	var front_size := float(tweaks.get("front_axle_size", 1.0))
 	var width := float(tweaks.get("tread_width", 1.0))
@@ -5887,6 +5896,7 @@ static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_colo
 ## rocker, secondary bogie, wheels at the knuckles - because the articulation
 ## IS the silhouette, and a rigid axle would read as a normal wheeled chassis.
 static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.42, 0.38, 0.30), tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "rocker_bogie", base_color, 1.0, float(tweaks.get("wheel_size", 1.0)))
 	var pairs := int(tweaks.get("bogie_pairs", 3.0))
 	var arm_len := float(tweaks.get("arm_length", 1.0))
 	var wheel_size := float(tweaks.get("wheel_size", 1.0))
@@ -6046,6 +6056,7 @@ static func _build_water_jet(parent_node: Node3D, base_size: Vector3, base_color
 ## Pontoon wheels: sealed buoyant drums that are simultaneously the wheel and
 ## the float. One part doing both jobs is the point of the type.
 static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.36, 0.34, 0.30), tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "pontoon_wheels", base_color, 1.0, float(tweaks.get("pontoon_size", 1.0)))
 	var psize := float(tweaks.get("pontoon_size", 1.0))
 	var vanes: bool = bool(tweaks.get("paddle_vanes", true))
 
@@ -6060,3 +6071,132 @@ static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_
 		# paddle, which is what the thrust penalty is describing.
 		drum.scale = Vector3(psize * (1.0 if vanes else 0.82), psize, psize)
 		axle.add_child(drum)
+
+
+# ===========================================================================
+# MOUNT KIT ASSEMBLY
+#
+# One function, five archetypes, every locomotion type. See
+# locomotion_layout.gd's Kit enum for why this exists rather than a generic
+# chassis: locomotion had no mounting CONVENTION, so each type improvised one,
+# and anything generic added underneath fought them.
+#
+# Kit parts are authored with their ORIGIN AT THE ATTACHMENT POINT, -Z toward
+# the running gear and +X outboard (tools/blender/build_mount_kits.py), so a kit
+# is positioned by putting its origin on the mount station and nothing else.
+# Everything below is placed in the MODULE's local space, which is exactly that
+# station - so the kit needs no per-type fudge factors, which is the whole point.
+# ===========================================================================
+
+## Builds the structural mount for one locomotion instance, under a child node
+## named "MountKit" so it can be found, hidden or restyled as a unit.
+##
+## `outboard` is +1 for the starboard side and -1 for port; the kit is authored
+## once and mirrored here rather than authored twice.
+static func build_mount_kit(parent_node: Node3D, type_id: String,
+		base_color: Color, outboard: float = 1.0, scale_hint: float = 1.0) -> Node3D:
+	var spec: Dictionary = LocomotionLayoutScript.mount_kit(type_id)
+	var kit: int = int(spec.get("kit", 0))
+	if kit == LocomotionLayoutScript.Kit.NONE:
+		return null
+
+	var root := Node3D.new()
+	root.name = "MountKit"
+	parent_node.add_child(root)
+	var drop: float = float(spec.get("drop", 0.0)) * scale_hint
+	var stations: int = int(spec.get("stations", 1))
+	var frame_col := base_color.darkened(0.30)
+	var hw_col := base_color.darkened(0.10)
+	var side: float = signf(outboard) if not is_zero_approx(outboard) else 1.0
+
+	match kit:
+		LocomotionLayoutScript.Kit.SUSPENSION_ARM:
+			_kit_part(root, "mk_susp_anchor", frame_col, Vector3.ZERO, Vector3.ONE * scale_hint, side)
+			_kit_part(root, "mk_susp_arm", hw_col, Vector3(0, -drop * 0.35, 0),
+				Vector3.ONE * scale_hint, side)
+			_kit_part(root, "mk_susp_spring", base_color.lightened(0.05),
+				Vector3(side * 0.20 * scale_hint, -drop * 0.30, 0), Vector3.ONE * scale_hint, side)
+			# One hub per station, spread fore/aft - a rocker-bogie carries two
+			# on the same arm, a road wheel one.
+			for i in range(maxi(1, stations)):
+				var t: float = 0.0 if stations <= 1 else (float(i) / float(stations - 1)) - 0.5
+				_kit_part(root, "mk_susp_hub", hw_col,
+					Vector3(side * 0.34 * scale_hint, -drop, t * 0.55 * scale_hint),
+					Vector3.ONE * scale_hint, side)
+
+		LocomotionLayoutScript.Kit.TRACK_FRAME:
+			# The frame is authored one unit long on its own fore/aft axis so
+			# the runtime stretches only it, never the bearings bolted to it.
+			var frame := _kit_part(root, "mk_track_frame", frame_col,
+				Vector3(0, -drop * 0.5, 0), Vector3(scale_hint, scale_hint, 1.0), side)
+			if frame:
+				frame.scale = Vector3(scale_hint, scale_hint, maxf(0.2, scale_hint))
+			for i in range(maxi(1, stations)):
+				var t2: float = 0.0 if stations <= 1 else (float(i) / float(stations - 1)) - 0.5
+				_kit_part(root, "mk_track_bearing", hw_col,
+					Vector3(0, -drop * 0.5, t2 * 0.86 * scale_hint),
+					Vector3.ONE * scale_hint, side)
+			for zz in [-1.0, 1.0]:
+				_kit_part(root, "mk_track_finaldrive", hw_col.lightened(0.06),
+					Vector3(0, -drop * 0.4, zz * 0.46 * scale_hint),
+					Vector3.ONE * scale_hint, side)
+
+		LocomotionLayoutScript.Kit.STRUT_LEG:
+			_kit_part(root, "mk_strut_flange", frame_col, Vector3.ZERO,
+				Vector3.ONE * scale_hint, side)
+			var blade := _kit_part(root, "mk_strut_blade", hw_col,
+				Vector3(0, -drop * 0.5, 0), Vector3.ONE * scale_hint, side)
+			if blade:
+				# Authored one unit tall, so the drop stretches the blade alone.
+				blade.scale = Vector3(scale_hint, maxf(0.2, drop), scale_hint)
+			_kit_part(root, "mk_strut_actuator", base_color.lightened(0.04),
+				Vector3(side * 0.16 * scale_hint, -drop * 0.25, -0.12 * scale_hint),
+				Vector3.ONE * scale_hint, side)
+
+		LocomotionLayoutScript.Kit.PYLON:
+			_kit_part(root, "mk_pylon_root", frame_col, Vector3.ZERO,
+				Vector3.ONE * scale_hint, side)
+			var strut := _kit_part(root, "mk_pylon_strut", hw_col, Vector3.ZERO,
+				Vector3.ONE * scale_hint, side)
+			if strut:
+				strut.scale = Vector3(scale_hint, maxf(0.2, scale_hint), scale_hint)
+			_kit_part(root, "mk_pylon_collar", hw_col.lightened(0.05),
+				Vector3(0, -0.92 * scale_hint, 0), Vector3.ONE * scale_hint, side)
+
+		LocomotionLayoutScript.Kit.HARDPOINT_PAD:
+			_kit_part(root, "mk_pad_plate", frame_col, Vector3.ZERO,
+				Vector3.ONE * scale_hint, side)
+			for i in range(maxi(1, stations)):
+				var a: float = float(i) / float(maxi(1, stations)) * TAU
+				_kit_part(root, "mk_pad_standoff", hw_col,
+					Vector3(cos(a) * 0.24 * scale_hint, -drop * 0.5, sin(a) * 0.24 * scale_hint),
+					Vector3.ONE * scale_hint, side)
+			_kit_part(root, "mk_pad_conduit", base_color.lightened(0.03),
+				Vector3(side * 0.20 * scale_hint, -drop * 0.2, 0.16 * scale_hint),
+				Vector3.ONE * scale_hint, side)
+
+	return root
+
+
+## One kit part. Returns null (quietly) when the asset is missing, so a kit is
+## degraded rather than fatal if a part fails to import.
+static func _kit_part(root: Node3D, part_name: String, colour: Color,
+		pos: Vector3, part_scale: Vector3, side: float) -> MeshInstance3D:
+	var mesh := _part(part_name)
+	if mesh == null:
+		return null
+	var inst := _mesh_inst(mesh, colour, Color(0, 0, 0, 0), 0.0, "steel")
+	inst.name = part_name
+	# Mirroring on X rather than authoring a port-side variant. Negative scale
+	# flips winding, so cull mode is switched to match - the same compensation
+	# module_mirror.gd applies to mirrored weapon modules.
+	inst.scale = Vector3(part_scale.x * side, part_scale.y, part_scale.z)
+	inst.position = pos
+	if side < 0.0:
+		var mat := inst.material_override
+		if mat is BaseMaterial3D:
+			var flipped: BaseMaterial3D = mat.duplicate()
+			flipped.cull_mode = BaseMaterial3D.CULL_FRONT
+			inst.material_override = flipped
+	root.add_child(inst)
+	return inst

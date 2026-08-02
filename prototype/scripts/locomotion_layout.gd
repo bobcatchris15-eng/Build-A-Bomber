@@ -249,6 +249,60 @@ const GEOMETRY := {
 	"water_jet":         {"x_frac": 0.26, "z_clearance": 0.35, "y_frac": -0.12},
 }
 
+## MOUNT KITS - the structural interface between a hull and its running gear.
+##
+## Locomotion had no mounting CONVENTION: every type improvised its own way of
+## attaching (rotors grew a pylon, screws a cradle, legs a hip, wheels a gearbox
+## column), so there was nothing for a new type to be consistent with and nothing
+## shared to improve. A generic chassis frame tried underneath all of it just
+## fought the improvised mounts, because two answers to the same question were
+## being drawn at once.
+##
+## The weapons roster solved this with a convention rather than a part. This is
+## the locomotion equivalent: five structural archetypes, authored once in
+## tools/blender/build_mount_kits.py, that every type draws from. Five and not
+## one because a hover pad and a road wheel genuinely need different structure -
+## but each answer is now the same everywhere it is used.
+enum Kit {
+	NONE,            ## Type supplies its own structure (airborne, mostly).
+	SUSPENSION_ARM,  ## Swing arm + coil-over + hub carrier.
+	TRACK_FRAME,     ## Rigid side frame, bearing stations, final drive.
+	STRUT_LEG,       ## Vertical blade, hull flange, actuator.
+	PYLON,           ## Tapered strut to a nacelle collar.
+	HARDPOINT_PAD,   ## Flush pad, standoffs, power conduit.
+}
+
+## Per-type kit choice and its parameters. `drop` is how far below the mount
+## station the running gear hangs, in the module's own local units; `stations`
+## is how many repeats of the kit's repeating element (bearing blocks, standoffs)
+## to lay along it.
+const MOUNT_KITS := {
+	"wheels":            {"kit": Kit.SUSPENSION_ARM, "drop": 0.30, "stations": 1},
+	"half_track":        {"kit": Kit.TRACK_FRAME, "drop": 0.26, "stations": 4},
+	"rocker_bogie":      {"kit": Kit.SUSPENSION_ARM, "drop": 0.34, "stations": 2},
+	"pontoon_wheels":    {"kit": Kit.SUSPENSION_ARM, "drop": 0.32, "stations": 1},
+	"tracked_treads":    {"kit": Kit.TRACK_FRAME, "drop": 0.24, "stations": 5},
+	"screw_drive":       {"kit": Kit.TRACK_FRAME, "drop": 0.30, "stations": 3},
+	"legs":              {"kit": Kit.STRUT_LEG, "drop": 0.20, "stations": 1},
+	"hydrofoil":         {"kit": Kit.STRUT_LEG, "drop": 0.18, "stations": 1},
+	"helicopter_rotors": {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
+	"fixed_wing_engine": {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
+	"naval_propeller":   {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
+	"buoyant_envelope":  {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
+	"water_jet":         {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
+	"hover_engine":      {"kit": Kit.HARDPOINT_PAD, "drop": 0.16, "stations": 4},
+	"air_cushion_skirt": {"kit": Kit.HARDPOINT_PAD, "drop": 0.14, "stations": 4},
+	"anti_grav_plate":   {"kit": Kit.HARDPOINT_PAD, "drop": 0.12, "stations": 3},
+	# An ornithopter's wing root IS its structure - a shoulder joint, not a
+	# bolted-on mount. Declared NONE rather than left out, so the absence is a
+	# decision and not an omission.
+	"ornithopter_wing":  {"kit": Kit.NONE, "drop": 0.0, "stations": 0},
+}
+
+static func mount_kit(type_id: String) -> Dictionary:
+	return MOUNT_KITS.get(type_id, {"kit": Kit.NONE, "drop": 0.0, "stations": 0})
+
+
 ## How far outboard a type may reach, as a multiple of the hull's own half-width.
 ##
 ## Not one number for everything: a rotor disc is SUPPOSED to overhang the
