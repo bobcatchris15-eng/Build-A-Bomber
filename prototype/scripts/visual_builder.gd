@@ -4860,7 +4860,12 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	# thin rod under anything bigger than a scout ("the screw is too small",
 	# Chris). drum_bore is the hull's own height, from locomotion_layout.gd.
 	var bore: float = float(tweaks.get("drum_bore", base_size.y))
-	var drum_d: float = bore * 0.46 * float(diameter)
+	# GIRTH is the drum's own business. mount_ref, NOT drum_d, sizes the
+	# gearboxes and sets how deep the hub hangs - fattening the auger 3x
+	# (Chris) should not also triple the housings and shove the hull into the
+	# sky. The drum thickens about a centreline that stays put.
+	var mount_ref: float = bore * 0.46 * float(diameter)
+	var drum_d: float = mount_ref * 3.0
 	var actual_size = Vector3(drum_d, drum_d, fit_length)
 
 	var spin = Node3D.new()
@@ -4905,14 +4910,20 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	# 1.5, not 2.2: at 2.2 the housing came out as wide as the drum itself and
 	# the strut as thick as a leg, so the mounting read as the main object and
 	# the auger as an accessory hung off it.
-	var mount_s: float = actual_size.y * 1.5
+	var mount_s: float = mount_ref * 1.5
 	# Hung a full drum-diameter below the hull rather than at the mount's own
 	# default depth: Chris wants the drums "spread out and low to hold the hull
 	# up above terrain", which is a longer strut, not a bigger gearbox.
+	# STRUT_INSET pulls the mounts in from the hull's very ends (Chris) - a
+	# bearing hung off the extreme corner reads as an afterthought bolted on,
+	# and the drum's tapered nose wants to overhang it anyway. The drum still
+	# spans the full length, so the ends now cantilever past the bearings the
+	# way a real auger does.
+	const STRUT_INSET := 0.86
 	var hub_y := 0.0
-	for z_end in [span * 0.5, -span * 0.5]:
+	for z_end in [span * 0.5 * STRUT_INSET, -span * 0.5 * STRUT_INSET]:
 		var hub := build_wheel_mount(parent_node, base_color, mount_s, z_end,
-			actual_size.y * 0.7, actual_size.y * 1.0)
+			mount_ref * 0.7, mount_ref * 1.0)
 		hub_y = hub.y
 
 	# The drum hangs at the mounts' own hub line, not at the module origin,
