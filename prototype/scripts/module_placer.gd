@@ -612,6 +612,26 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 ## instance and visibly jumps the popup around mid-drag (confirmed via a
 ## real simulated-mouse-drag test - this was the actual cause of the wheels
 ## size slider feeling "laggy"/unresponsive compared to weapon tweaks).
+## Re-fits a placed module's click target to whatever it currently renders.
+## Shared by initial placement and by live tweak drags so the two cannot drift.
+static func _resize_collider_to_visual(module: Node3D) -> void:
+	var bounds := _visual_bounds(module)
+	if bounds.size.length_squared() <= 0.0:
+		return
+	for child in module.get_children():
+		if not (child is StaticBody3D):
+			continue
+		child.position = bounds.get_center()
+		for shape_node in child.get_children():
+			if shape_node is CollisionShape3D and shape_node.shape is BoxShape3D:
+				# Shapes are shared resources by default; resizing one in place
+				# would silently resize every other module using the same box.
+				if not shape_node.shape.resource_local_to_scene:
+					shape_node.shape = shape_node.shape.duplicate()
+				shape_node.shape.size = bounds.size
+				shape_node.position = Vector3.ZERO
+		return
+
 func update_locomotion_geometry_tweak(type_id: String, tweak_key: String, value) -> void:
 	if not hull: return
 	var VisualBuilder = load("res://scripts/visual_builder.gd")
@@ -637,42 +657,36 @@ func update_locomotion_geometry_tweak(type_id: String, tweak_key: String, value)
 				# after initial placement.
 				if child.get_meta("scale_flip_x", false):
 					_apply_mirror_flip(child)
-				# rebuild_visual()/build_visual() deliberately skip
-				# StaticBody3D children when clearing/rebuilding a module's
-				# mesh (so the click-target collider survives visual
-				# rebuilds), which means it's never resized here on its own
-				# - for wheels specifically the click box is sized/
-				# positioned from wheel_size/wheels_per_axle (see
-				# _place_weapon()'s wheels override), so it has to be kept
-				# in sync by hand whenever those tweaks change live, or the
-				# collider goes stale again after the very first drag.
-				if type_id == "wheels":
-					var wsize = float(m_data.tweaks.get("wheel_size", 1.0))
-					var w_per_axle = int(m_data.tweaks.get("wheels_per_axle", 1.0))
-					var static_body = child.get_children().filter(func(c): return c is StaticBody3D)
-					if static_body.size() > 0:
-						var sb: StaticBody3D = static_body[0]
-						sb.position = Vector3(-0.05 * wsize, -0.35 * wsize, 0)
-						var shape_node = sb.get_children().filter(func(c): return c is CollisionShape3D)
-						if shape_node.size() > 0 and shape_node[0].shape is BoxShape3D:
-							shape_node[0].shape.size = Vector3(1.3 * wsize, 1.1 * wsize, (0.9 + 0.4 * float(w_per_axle - 1)) * wsize)
-				elif type_id == "tracked_treads":
-					# Same idea as wheels above, and same target_length/
-					# length_scale math as _build_tracked_treads() - see
-					# _place_weapon()'s tracked_treads collider override.
-					var twidth = float(m_data.tweaks.get("tread_width", 1.0))
-					var catalog_size: Vector3 = ModuleCatalog.get_module_data(type_id).get("size", Vector3.ONE)
-					var target_length = float(m_data.tweaks.get("target_length", catalog_size.z))
-					var length_scale = target_length / catalog_size.z
-					var static_body2 = child.get_children().filter(func(c): return c is StaticBody3D)
-					if static_body2.size() > 0:
-						var sb2: StaticBody3D = static_body2[0]
-						var new_col_size = Vector3(catalog_size.x * twidth * length_scale, catalog_size.y * length_scale, target_length)
-						sb2.position = Vector3(new_col_size.x * 0.175, sb2.position.y, 0)
-						var shape_node2 = sb2.get_children().filter(func(c): return c is CollisionShape3D)
-						if shape_node2.size() > 0 and shape_node2[0].shape is BoxShape3D:
-							shape_node2[0].shape.size = new_col_size
+					# rebuild_visual()/build_visual() deliberately skip
+					# StaticBody3D children when clearing/rebuilding a module's
+					# mesh (so the click-target collider survives visual
+					# rebuilds), which means it is never resized on its own -
+					# and a tweak that just reshaped the mesh has, by
+					# definition, moved the thing the player is trying to click.
+					# Re-measured from the geometry that was just rebuilt, the
+					# same way _place_weapon() sizes it initially, so the two
+					# paths cannot disagree.
+					_resize_collider_to_visual(child)
 	get_tree().call_group("stat_ui", "update_stats", hull)
+
+## Re-runs the current locomotion layout against the hull as it is NOW.
+##
+## Every station position is derived from hull_size (x_offset, z_limit, the
+## ellipse radii, the drum span), but update_locomotion() only ever ran at
+## initial placement and on a count tweak - nothing re-ran it when the hull
+## itself changed. Dragging a hull scale handle after choosing locomotion left
+## the wheels spaced for the hull you used to have, getting worse the further
+## you dragged. gizmo_3d.gd's rescale handler calls this now.
+##
+## No-ops when the hull has no locomotion, so it is safe to call unconditionally.
+func refresh_locomotion() -> void:
+	if not hull or not hull.has_meta("locomotion_type"):
+		return
+	var type_id: String = str(hull.get_meta("locomotion_type"))
+	if type_id == "":
+		return
+	var settings: Dictionary = hull.get_meta("locomotion_settings", {})
+	update_locomotion(type_id, settings.duplicate())
 
 func update_locomotion(type_id: String, settings: Dictionary):
 	if not hull: return
@@ -796,6 +810,14 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		if station["mirror"]:
 			part.set_meta("scale_flip_x", true)
 			_apply_mirror_flip(part)
+			# The mirror reflects each child's own transform in module space, so
+			# geometry that sat off-centre (a wheel's hub offset, a leg's splayed
+			# stance, a wing's shoulder) lands somewhere new. The collider was
+			# measured before that happened, so the port-side instance of every
+			# asymmetric type had a click target sitting where the starboard one's
+			# geometry would have been - mirrored parts were the hardest of all to
+			# click, on top of the per-type drift this pass already removed.
+			_resize_collider_to_visual(part)
 		spawned_wheels.append(part)
 
 
@@ -841,6 +863,33 @@ func update_locomotion(type_id: String, settings: Dictionary):
 
 	get_tree().call_group("stat_ui", "update_stats", hull)
 	
+## The bounds of everything a module actually renders, in the module's own
+## local space. Empty AABB if it has no meshes yet.
+##
+## Deliberately walks MeshInstance3D children rather than trusting the catalog
+## size: a locomotion assembly's parts are positioned and scaled by its builder
+## from tweaks the catalog knows nothing about, so the catalog box and the thing
+## on screen routinely disagree by a factor of several.
+static func _visual_bounds(module: Node3D) -> AABB:
+	var bounds := AABB()
+	var seen := false
+	for mesh_inst in module.find_children("*", "MeshInstance3D", true, false):
+		if mesh_inst.mesh == null:
+			continue
+		# Each mesh's own AABB, carried up through every intermediate pivot's
+		# transform into the module's space. Locomotion builders nest parts
+		# under named pivots (rotor hubs, leg knees) that carry real offsets.
+		var xf := Transform3D.IDENTITY
+		var walker: Node = mesh_inst
+		while walker != null and walker != module:
+			if walker is Node3D:
+				xf = walker.transform * xf
+			walker = walker.get_parent()
+		var part = xf * mesh_inst.mesh.get_aabb()
+		bounds = part if not seen else bounds.merge(part)
+		seen = true
+	return bounds if seen else AABB()
+
 func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bool = false, tweaks: Dictionary = {}) -> Node3D:
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var category = catalog_data.get("category", "module")
@@ -855,59 +904,28 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	static_body.collision_mask = 0
 	var col_size = catalog_data.get("size", Vector3.ONE)
 	var col_center = Vector3(0, col_size.y / 2.0, 0)
-	# Wheels-only click-target override: _build_wheels() (visual_builder.gd)
-	# renders the wheel offset from the module's own origin (hub_x_offset)
-	# and scaled by wheel_size (0.5-2.5x, well beyond the catalog's fixed
-	# base size), with the gearbox/driveshaft column sitting back near the
-	# origin - the generic fixed-at-catalog-size box below left the actual
-	# click target centered on empty space near the mount point instead of
-	# over the visible wheel, "needing to be clicked very close to dead
-	# center" once wheel_size moved the rendered wheel away from it. Sized
-	# generously (not pixel-exact) to comfortably cover both the gearbox
-	# column and the wheel cluster.
-	if type_id == "wheels":
-		var wsize = float(tweaks.get("wheel_size", tweaks.get("size", 1.0)))
-		var w_per_axle = int(tweaks.get("wheels_per_axle", 1.0))
-		col_size = Vector3(1.3 * wsize, 1.1 * wsize, (0.9 + 0.4 * float(w_per_axle - 1)) * wsize)
-		col_center = Vector3(-0.05 * wsize, -0.35 * wsize, 0)
-	elif type_id == "tracked_treads":
-		# tread_width can now be live-adjusted (no respawn, see
-		# update_locomotion_geometry_tweak()) same as wheels' wheel_size was -
-		# applying the same fix proactively here instead of waiting for it to
-		# get reported: _build_tracked_treads() scales the belt/sprockets by
-		# tread_width (0.5-2.5x) but its geometry stays centered on the
-		# module's own origin (no hub_x_offset-style asymmetry like wheels),
-		# so only the collider's size needs to track the tweaks, not its
-		# center. Also has to mirror _build_tracked_treads()'s target_length/
-		# length_scale math (the tread now snaps its whole length to the
-		# hull it's mounted on, not the catalog's small fixed size.z) - the
-		# collider would otherwise stay a tiny ~2.5-unit box while the actual
-		# rendered loop spans the full hull length, an even more extreme
-		# version of the same click-target mismatch wheels had.
-		var twidth = float(tweaks.get("tread_width", tweaks.get("width", 1.0)))
-		var target_length = float(tweaks.get("target_length", col_size.z))
-		var length_scale = target_length / col_size.z
-		col_size = Vector3(col_size.x * twidth * length_scale, col_size.y * length_scale, target_length)
-		# _build_tracked_treads() now shifts the whole visible assembly
-		# outboard by 17.5% of its own width - keep the click target
-		# centered on it instead of the module's bare origin.
-		col_center = Vector3(col_size.x * 0.175, col_center.y, 0)
-	elif type_id == "legs":
-		# Same click-target mismatch class as wheels/tracked_treads above -
-		# _build_legs() splays the whole thigh/shin/foot/ankle/knee chain
-		# out from the module's own origin (near the foot) up to the hip
-		# and out to leg_stance_reach laterally (the wide-stance redesign),
-		# but the generic fixed-at-catalog-size box above stayed a small
-		# ~0.5x1.5x0.5 box right at the origin - nowhere near most of the
-		# now much larger, diagonal leg, making it very hard to click
-		# ("very difficult to select once placed," Chris's report). Mirrors
-		# _build_legs()' own hip_y formula so the collider's height tracks
-		# leg_length the same way the visual does.
-		var leg_len = float(tweaks.get("leg_length", 1.0))
-		var stance = float(tweaks.get("leg_stance_reach", 0.0))
-		var hip_y_est = col_size.y * 0.8 * leg_len
-		col_size = Vector3(stance + 0.6, hip_y_est + 0.6, 0.6)
-		col_center = Vector3(stance * 0.5, hip_y_est * 0.5, 0)
+	# Locomotion click targets are measured from the geometry that was just
+	# built, not re-derived from the tweaks.
+	#
+	# This used to be a per-type override block: wheels, tracked_treads and legs
+	# each had a hand-written box here that restated, in the placer, whatever
+	# _build_wheels()/_build_tracked_treads()/_build_legs() had done to the
+	# mesh. The same formulas also existed a THIRD time in
+	# update_locomotion_geometry_tweak(), to keep the collider in sync during a
+	# live slider drag. Three copies of one formula, synchronised by hand, drifted
+	# exactly as often as you would expect - "needing to be clicked very close to
+	# dead center" once wheel_size moved the wheel away from the box, and a tread
+	# collider that stayed a ~2.5-unit stub while the rendered loop spanned the
+	# whole hull. Both were fixed by copying the builder's math across again.
+	#
+	# The builder already knows where it put things, so ask it. The other seven
+	# locomotion types never got an override at all and had been silently wrong
+	# in the same way; they are fixed by the same change.
+	if category == "locomotion":
+		var visual_aabb := _visual_bounds(new_weapon)
+		if visual_aabb.size.length_squared() > 0.0:
+			col_size = visual_aabb.size
+			col_center = visual_aabb.get_center()
 	static_body.position = col_center
 	var collision_shape = CollisionShape3D.new()
 	var col_box = BoxShape3D.new()

@@ -122,6 +122,19 @@ static func _flat_mat(color: Color) -> StandardMaterial3D:
 # against faction-liveried plate instead of the whole thing turning into one
 # flat shader.
 const HARDWARE_PREFIX := "Hardware_"
+
+# Names of the pivot nodes battle_unit.gd spins. Locomotion animation has always
+# worked by looking a pivot up BY NAME, but the names were string literals
+# duplicated across the builder and the animator, and three types
+# (wheels, tracked_treads, fixed_wing_engine) simply never got a pivot - so a
+# rolling tank's treads and road wheels sat frozen while the helicopter parked
+# next to it span its rotor forever. Declared here so the two files agree.
+#
+# Godot uniquifies duplicate sibling names ("WheelSpin", "WheelSpin2", ...),
+# which is why the animator matches these as a PREFIX rather than exactly.
+const SPIN_PIVOT_WHEEL := "WheelSpin"
+const SPIN_PIVOT_TREAD := "TreadSpin"
+const SPIN_PIVOT_TURBINE := "TurbineFan"
 const HARDWARE_COLOR := Color(0.27, 0.27, 0.30)
 
 static var _hardware_mat_cache: StandardMaterial3D = null
@@ -3619,9 +3632,18 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 
 	var spacing = 0.38 * wheel_size
 	_repeat_along_axis(parent_node, w_per_axle, spacing, Vector3.RIGHT, func(p, pos, _idx):
+		# Each wheel hangs under its own spin pivot rather than being parented
+		# straight to the module. A wheel has to rotate about its OWN axle, and
+		# the axle is offset from the module origin - spinning the module node
+		# would swing the whole cluster around the mount point instead. Named
+		# so battle_unit.gd can find it: same by-name pivot convention as
+		# "RotorBlades", "PropBlades", "LegSwing" and "ScrewSpin".
+		var axle = Node3D.new()
+		axle.name = SPIN_PIVOT_WHEEL
+		axle.position = pos + Vector3(hub_x_offset, wheel_y, 0)
+		p.add_child(axle)
 		var wheel = _mesh_inst(wheel_mesh, Color(0.1, 0.1, 0.12))
 		wheel.scale = Vector3(wheel_size, wheel_size, wheel_size)
-		wheel.position = pos + Vector3(hub_x_offset, wheel_y, 0)
 		# wheel_hub.glb's hub-cap/lug-bolt detail is authored at its +Y end
 		# (the "outward-facing" side of the tire, per build_wheel() in
 		# build_meshes.py) - rotation.z = -PI/2 (not +PI/2) maps that +Y face
@@ -3629,7 +3651,7 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 		# visible hub face points away from the vehicle instead of backwards
 		# into the gearbox.
 		wheel.rotation = Vector3(0, 0, -PI / 2.0)
-		p.add_child(wheel)
+		axle.add_child(wheel)
 	)
 
 
@@ -3762,17 +3784,26 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# 0.4) so the belt visibly hugs them instead of floating around an
 	# unrelated-sized wheel.
 	if sprocket and sprocket_mesh:
+		# Drive sprockets turn on their own axles, so each gets a named spin
+		# pivot at its own station - rotating the module node would swing the
+		# whole track assembly about the mount point instead.
+		var sp_front_axle = Node3D.new()
+		sp_front_axle.name = SPIN_PIVOT_TREAD
+		sp_front_axle.position = Vector3(outboard_x, ground_offset + y_shift, -target_half_span)
+		parent_node.add_child(sp_front_axle)
 		var sp_front = _mesh_inst(sprocket_mesh, Color(0.18, 0.18, 0.2))
 		sp_front.scale = Vector3(sprocket_scale, sprocket_scale, sprocket_scale)
-		sp_front.position = Vector3(outboard_x, ground_offset + y_shift, -target_half_span)
 		sp_front.rotation = Vector3(0, 0, PI / 2.0)
-		parent_node.add_child(sp_front)
+		sp_front_axle.add_child(sp_front)
 
+		var sp_rear_axle = Node3D.new()
+		sp_rear_axle.name = SPIN_PIVOT_TREAD
+		sp_rear_axle.position = Vector3(outboard_x, ground_offset + y_shift, target_half_span)
+		parent_node.add_child(sp_rear_axle)
 		var sp_rear = _mesh_inst(sprocket_mesh, Color(0.18, 0.18, 0.2))
 		sp_rear.scale = Vector3(sprocket_scale, sprocket_scale, sprocket_scale)
-		sp_rear.position = Vector3(outboard_x, ground_offset + y_shift, target_half_span)
 		sp_rear.rotation = Vector3(0, 0, PI / 2.0)
-		parent_node.add_child(sp_rear)
+		sp_rear_axle.add_child(sp_rear)
 
 	# Road wheels: smaller than the sprockets, riding low at true ground
 	# level (Y=0, same as the loop's own lowest point - see ground_offset
@@ -3831,9 +3862,13 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 			var mat = StandardMaterial3D.new()
 			mat.albedo_color = Color.DARK_SLATE_GRAY
 			roller.material_override = mat
-		roller.position = Vector3(outboard_x, wheel_radius_target + y_shift, pos.z)
+		# Road wheels spin with the belt, same as the sprockets.
+		var roller_axle = Node3D.new()
+		roller_axle.name = SPIN_PIVOT_TREAD
+		roller_axle.position = Vector3(outboard_x, wheel_radius_target + y_shift, pos.z)
+		p.add_child(roller_axle)
 		roller.rotation = Vector3(0, 0, PI / 2.0)
-		p.add_child(roller)
+		roller_axle.add_child(roller)
 
 		if gearbox_mesh:
 			var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.15).lightened(0.25))
@@ -4300,10 +4335,19 @@ static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, ba
 		parent_node.add_child(nac)
 
 	if fan_mesh:
+		# The intake fan is the one moving part of a jet the eye can actually
+		# read, and it was static - a fixed-wing unit in flight had nothing at
+		# all in motion, unlike every other airborne type. Spun about local Z
+		# (the engine's own thrust axis, which is what this whole part family
+		# is authored along) via a named pivot, so the nacelle around it stays
+		# put.
+		var fan_pivot = Node3D.new()
+		fan_pivot.name = SPIN_PIVOT_TURBINE
+		fan_pivot.position = Vector3(0, 0, -actual_size.z * 0.48)
+		parent_node.add_child(fan_pivot)
 		var fan = _mesh_inst(fan_mesh, Color(0.2, 0.2, 0.22))
 		fan.scale = Vector3(nacelle_size, nacelle_size, nacelle_size)
-		fan.position = Vector3(0, 0, -actual_size.z * 0.48)
-		parent_node.add_child(fan)
+		fan_pivot.add_child(fan)
 
 	# Turbine core: a distinct segment behind the main nacelle whose own
 	# length is what turbine_compression physically stretches/compresses

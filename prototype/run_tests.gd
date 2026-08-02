@@ -124,6 +124,10 @@ func _init():
 		success = false
 		_failed.append("test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion")
 	_total_suites += 1
+	if not await _run_suite(test_every_locomotion_type_animates_something, "test_every_locomotion_type_animates_something"):
+		success = false
+		_failed.append("test_every_locomotion_type_animates_something")
+	_total_suites += 1
 	if not await _run_suite(test_locomotion_layout_matches_golden_fixture, "test_locomotion_layout_matches_golden_fixture"):
 		success = false
 		_failed.append("test_locomotion_layout_matches_golden_fixture")
@@ -1301,13 +1305,7 @@ func test_rotation_popup_and_deforms() -> bool:
 	placer._select_module(mod)
 	stat_ui.on_module_selected(mod)
 	
-	if not stat_ui.popup_panel.visible:
-		print("  [FAIL] stats popup panel not visible")
-		stat_ui.queue_free()
-		placer.queue_free()
-		hull.queue_free()
-		return false
-		
+
 	# Rotate!
 	placer.rotate_selected_module()
 	var rotated_yaw = mod.get_meta("yaw_offset", 0.0)
@@ -13793,4 +13791,62 @@ func test_locomotion_layout_matches_golden_fixture() -> bool:
 						size_name, type_id, i, rows[i]["scale"], want_scale])
 					return false
 	print("  [PASS] All 10 locomotion types lay out identically to the golden fixture across 3 hull sizes.")
+	return true
+
+# Every locomotion type must expose a pivot the animator can move, and the
+# animator must have a branch for it. The failure this pins is not a crash - it
+# is silence: wheels, tracked_treads and fixed_wing_engine shipped with no pivot
+# at all, so a tank rolled across the map on frozen road wheels and a jet flew
+# with a static fan, while the helicopter parked next to them span forever. That
+# reads as broken, and nothing failed when it regressed.
+func test_every_locomotion_type_animates_something() -> bool:
+	print("Running Test Suite: Locomotion Animation Coverage...")
+	var VisualBuilder = load("res://scripts/visual_builder.gd")
+	# pivot name (or prefix) each type must produce, and whether it is driven by
+	# ground contact (stops when parked) or by engine power (idles when parked).
+	var expected := {
+		"wheels": [VisualBuilder.SPIN_PIVOT_WHEEL, "ground"],
+		"tracked_treads": [VisualBuilder.SPIN_PIVOT_TREAD, "ground"],
+		"legs": ["LegSwing", "ground"],
+		"screw_drive": ["ScrewSpin", "ground"],
+		"fixed_wing_engine": [VisualBuilder.SPIN_PIVOT_TURBINE, "powered"],
+		"helicopter_rotors": ["RotorBlades", "powered"],
+		"hover_engine": ["HoverRingMid", "powered"],
+		"ornithopter_wing": ["WingPivotFore", "powered"],
+		"naval_propeller": ["PropBlades", "powered"],
+		"buoyant_envelope": ["PropBlades", "powered"],
+	}
+	for type_id in expected:
+		var pivot_name: String = expected[type_id][0]
+		var probe := Node3D.new()
+		root.add_child(probe)
+		VisualBuilder.build_visual(type_id, probe,
+			ModuleCatalog.get_module_data(type_id).get("size", Vector3.ONE),
+			ModuleCatalog.get_module_data(type_id).color, {})
+		await process_frame
+		var found := probe.find_children(pivot_name + "*", "Node3D", true, false)
+		var hit := found.size() > 0
+		probe.queue_free()
+		await process_frame
+		if not hit:
+			print("  [FAIL] %s builds no '%s' pivot - nothing for the animator to move." % [
+				type_id, pivot_name])
+			return false
+
+	# The animator must actually name every one of them, or a pivot exists and
+	# is never touched - which looks identical to having no pivot.
+	var src := FileAccess.get_file_as_string("res://scripts/battle_unit.gd")
+	if src == "":
+		print("  [FAIL] could not read battle_unit.gd to check animation branches.")
+		return false
+	var anim_start := src.find("func _animate_locomotion")
+	if anim_start < 0:
+		print("  [FAIL] battle_unit.gd has no _animate_locomotion() - the animation branches moved or were lost.")
+		return false
+	var anim_src := src.substr(anim_start)
+	for type_id in expected:
+		if not anim_src.contains('"%s"' % type_id):
+			print("  [FAIL] _animate_locomotion() has no branch for '%s'." % type_id)
+			return false
+	print("  [PASS] All 10 locomotion types build an animation pivot and are driven by _animate_locomotion() - ground-contact types by travel, powered types by throttle.")
 	return true

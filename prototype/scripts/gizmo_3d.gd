@@ -69,7 +69,7 @@ func _get_telemetry_label() -> Label3D:
 	_telemetry_label.render_priority = 10
 	_telemetry_label.font_size = 18
 	_telemetry_label.outline_size = 4
-	_telemetry_label.outline_color = Color(0, 0, 0, 0.9)
+	_telemetry_label.outline_modulate = Color(0, 0, 0, 0.9)
 	_telemetry_label.modulate = Color(0.0, 0.95, 1.0, 1.0) # Glowing CAD cyan
 	add_child(_telemetry_label)
 	return _telemetry_label
@@ -323,6 +323,17 @@ func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
 
 func _on_drag_ended():
 	var main_lab = get_node_or_null("/root/MainLab")
+	# Locomotion is laid out FROM the hull's dimensions - wheel spacing, tread
+	# span, hover-ring radii and the screw drums' corner offsets all derive from
+	# hull_size. Nothing re-ran that layout when the hull itself was resized, so
+	# dragging a scale handle after choosing locomotion left the running gear
+	# spaced for the hull's previous size, drifting further the more you dragged.
+	#
+	# Done on drag END rather than per-frame: re-laying out is a full respawn of
+	# every locomotion instance, which is far too heavy to run on every mouse
+	# move. It no-ops on a hull with no locomotion chosen.
+	if main_lab and main_lab.has_method("refresh_locomotion"):
+		main_lab.refresh_locomotion()
 	if main_lab and main_lab.has_method("check_all_clipping"):
 		main_lab.check_all_clipping()
 

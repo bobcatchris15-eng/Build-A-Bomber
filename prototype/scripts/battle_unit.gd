@@ -14,6 +14,7 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const GlobalConfigScript = preload("res://scripts/global_config.gd")
+const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 
 var team: int = 0
@@ -1093,42 +1094,77 @@ func _physics_process(delta):
 
 	move_and_slide()
 
-	# Spin rotors. Loosened from "is_flying only" to any hull_node, since
-	# propellers/screws apply to naval and amphibious units too, not just
-	# airborne ones - each arm below decides for itself whether to spin.
-	if is_instance_valid(hull_node):
-		for child in hull_node.get_children():
-			if not child.has_meta("module_data"): continue
-			var child_type_id = child.get_meta("module_data").type_id
-			if child_type_id == "helicopter_rotors":
+	_animate_locomotion(delta)
+
+func _animate_locomotion(delta: float) -> void:
+	# Every locomotion type moves something. That was NOT true before: rotors,
+	# props, hover rings, screws and ornithopter wings were animated, but
+	# wheels, tracked treads and turbine fans had no pivot to animate at all -
+	# so a tank drove across the map on frozen road wheels while the helicopter
+	# parked beside it span its rotor forever. Two inconsistencies, and this
+	# fixes both.
+	#
+	# The rule, applied uniformly:
+	#
+	#   GROUND CONTACT (wheels, treads, legs, screws) is DRIVEN BY THE GROUND.
+	#   These turn at a rate proportional to how fast the unit is actually
+	#   travelling, and stop dead when it stops. A parked tank with spinning
+	#   road wheels reads as a bug, and a walker jogging in place already did.
+	#
+	#   POWERED LIFT/THRUST (rotors, turbines, props, hover rings, wings) is
+	#   DRIVEN BY THE ENGINE. These idle at a low rate when stationary - the
+	#   engine is still running, that is what holds a helicopter up - and spool
+	#   toward full rate as the unit moves.
+	#
+	# Rates are per-type and unchanged from the values that were hand-tuned for
+	# the types that already had them; what is new is that they are now all
+	# scaled by the same two factors instead of each branch deciding for itself.
+	if not is_instance_valid(hull_node):
+		return
+
+	var speed := Vector2(velocity.x, velocity.z).length()
+	# Normalised against the unit's own move_speed, so a slow hauler's wheels do
+	# not spin like a scout's. Floored at 1.0 rather than dividing by zero.
+	var speed_ref: float = maxf(move_speed, 1.0)
+	var throttle: float = clampf(speed / speed_ref, 0.0, 1.5)
+	# Ground drive: pure function of travel, zero when parked.
+	var ground_rate: float = throttle
+	# Powered drive: idles, then spools up. Never zero while the unit exists.
+	var powered_rate: float = 0.35 + 0.65 * throttle
+
+	for child in hull_node.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		var child_type_id = child.get_meta("module_data").type_id
+		match child_type_id:
+			"wheels":
+				# Rolling direction follows travel direction, so reversing
+				# visibly reverses the wheels rather than just slowing them.
+				var dir := signf(velocity.dot(-global_transform.basis.z))
+				if is_zero_approx(dir):
+					dir = 1.0
+				for axle in child.find_children(VisualBuilderScript.SPIN_PIVOT_WHEEL + "*", "Node3D", true, false):
+					axle.rotate_x(9.0 * ground_rate * dir * delta)
+			"tracked_treads":
+				var dir := signf(velocity.dot(-global_transform.basis.z))
+				if is_zero_approx(dir):
+					dir = 1.0
+				for axle in child.find_children(VisualBuilderScript.SPIN_PIVOT_TREAD + "*", "Node3D", true, false):
+					axle.rotate_x(7.0 * ground_rate * dir * delta)
+			"fixed_wing_engine":
+				for fan in child.find_children(VisualBuilderScript.SPIN_PIVOT_TURBINE + "*", "Node3D", true, false):
+					fan.rotate_z(24.0 * powered_rate * delta)
+			"helicopter_rotors":
 				var rotor = child.get_node_or_null("RotorBlades")
 				if rotor:
-					rotor.rotate_y(15.0 * delta)
-			elif child_type_id == "ornithopter_wing":
-				# Dragonfly-style fore/hind wing pair (Chris's ask,
-				# 2026-07-24): flapped in opposition to each other (hind
-				# wing's phase negated) rather than the old single
-				# "WingPivot" all beating in unison - matches how real
-				# dragonflies beat their two wing pairs roughly 180deg
-				# out of phase. Sped up and widened (Chris's ask, same day
-				# follow-up: "faster" + "larger arc") - was frequency 8.0 /
-				# amplitude 0.35 rad; now 16.0 / 0.65 rad.
-				#
-				# rotation.x alone (the original motion) rotates around the
-				# wing's own SPANWISE axis (the membrane reaches out along
-				# local X) - since the wing's chord/width runs along local
-				# Z, that swings the leading/trailing edges between Z and Y
-				# but stays mostly Z-dominant at these angles (cos(37deg)
-				# ~=0.8 vs sin(37deg)~=0.6), reading as "mostly fore/aft"
-				# (Chris's observation) rather than a true up/down wing
-				# beat. rotation.z is the other half: it rotates the
-				# spanwise reach itself (which sits far out along X) up and
-				# down around Y, the actual flapping-wing motion. Added on
-				# top of (not instead of) the existing X twist, same
-				# frequency/phase and same fore/hind opposition, per
-				# Chris's "add more up/down as well" (keep the fore/aft feel,
-				# don't replace it).
-				var t = Time.get_ticks_msec() / 1000.0 * 16.0
+					rotor.rotate_y(15.0 * powered_rate * delta)
+			"ornithopter_wing":
+				# Dragonfly-style fore/hind wing pair: flapped in opposition to
+				# each other, as real dragonflies beat their two wing pairs
+				# roughly 180deg out of phase. rotation.x twists about the
+				# spanwise axis (the fore/aft feel); rotation.z is the actual
+				# up/down beat. Both, not either.
+				var t = Time.get_ticks_msec() / 1000.0 * 16.0 * powered_rate
 				var fore = child.get_node_or_null("WingPivotFore")
 				if fore:
 					fore.rotation.x = sin(t) * 0.65
@@ -1137,57 +1173,43 @@ func _physics_process(delta):
 				if hind:
 					hind.rotation.x = -sin(t) * 0.65
 					hind.rotation.z = -sin(t) * 0.7
-			elif child_type_id == "hover_engine":
-				# Outer ring stays fixed/horizontal; the middle ring spins
-				# around X, the inner ring around Y (Chris's ask) - same
-				# by-name-pivot pattern as helicopter_rotors' "RotorBlades".
+			"hover_engine":
+				# Outer ring stays fixed and horizontal; the middle ring spins
+				# around X, the inner ring around Y.
 				var mid_ring = child.get_node_or_null("HoverRingMid")
 				if mid_ring:
-					mid_ring.rotate_x(12.0 * delta)
+					mid_ring.rotate_x(12.0 * powered_rate * delta)
 				var inner_ring = child.get_node_or_null("HoverRingInner")
 				if inner_ring:
-					inner_ring.rotate_y(18.0 * delta)
-			elif child_type_id == "legs":
-				# Simple sine-wave leg swing (Chris's ask: not a full IK
-				# walk cycle) on the "LegSwing" pivot _build_legs() wraps
-				# the thigh/shin/foot/ankle joint in - only while actually
-				# moving, snapping back to the static pose when stopped so
-				# a stationary walker doesn't look like it's jogging in
-				# place. leg_phase (module_placer.gd, alternating per leg
-				# in a checkerboard) staggers legs into a trot instead of
-				# every leg swinging in lockstep. Rotating on X (not Z) -
-				# X swings the leg fore-aft in the Y-Z plane, along the
-				# direction of travel, like an actual walking stride; Z
-				# swung it sideways in the X-Y plane instead, which read as
-				# flapping side-to-side like a bird wing.
+					inner_ring.rotate_y(18.0 * powered_rate * delta)
+			"legs":
+				# Simple sine-wave swing on the "LegSwing" pivot, not a full IK
+				# walk cycle. leg_phase staggers legs into a trot instead of
+				# every leg swinging in lockstep. Rotating on X swings the leg
+				# fore-aft along the direction of travel, like a real stride.
 				var swing = child.get_node_or_null("LegRoot/LegSwing")
 				if swing:
-					if velocity.length() > 0.3:
+					if ground_rate > 0.04:
 						var phase = child.get_meta("leg_phase", 0.0)
-						swing.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 6.0 + phase) * 0.5
+						swing.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 6.0 * max(ground_rate, 0.35) + phase) * 0.5
 					else:
-						swing.rotation.x = 0.0
-			elif child_type_id in ["propeller_prop", "pusher_prop", "naval_propeller", "ship_screw", "paddle_wheel", "buoyant_envelope"]:
+						swing.rotation.x = lerp(swing.rotation.x, 0.0, 8.0 * delta)
+			"screw_drive":
+				# The whole drum+helix turns as one rigid unit under "ScrewSpin".
+				var spin = child.get_node_or_null("ScrewSpin")
+				if spin:
+					spin.rotate_z(6.0 * ground_rate * delta)
+			"propeller_prop", "pusher_prop", "naval_propeller", "ship_screw", "paddle_wheel", "buoyant_envelope":
 				var prop = child.get_node_or_null("PropBlades")
 				if prop:
 					if child_type_id == "paddle_wheel":
-						prop.rotate_x(10.0 * delta)
+						prop.rotate_x(10.0 * powered_rate * delta)
 					elif child_type_id == "buoyant_envelope":
-						# Zeppelin-style cruise prop (Chris's ask,
-						# 2026-07-24): large, slow-turning, unlike the
-						# fast small screw on a boat/aircraft - was the
-						# same 10.0 rad/s as every other prop type here.
-						prop.rotate_z(3.0 * delta)
+						# Zeppelin cruise prop: large and slow-turning, unlike
+						# the fast small screw on a boat or aircraft.
+						prop.rotate_z(3.0 * powered_rate * delta)
 					else:
-						prop.rotate_z(10.0 * delta)
-			elif child_type_id == "screw_drive":
-				# Amphibious screw-drive auger (Chris's ask, 2026-07-24):
-				# the whole drum+helix turns as one rigid unit under the
-				# "ScrewSpin" pivot - there was no spin animation for this
-				# type at all before this rebuild.
-				var spin = child.get_node_or_null("ScrewSpin")
-				if spin:
-					spin.rotate_z(6.0 * delta)
+						prop.rotate_z(10.0 * powered_rate * delta)
 
 # Returns true when arrived. The "arrived" check always uses the real
 # final destination; the per-frame STEERING direction uses the navmesh's
