@@ -1332,6 +1332,148 @@ static func _build_catalog_literal() -> Dictionary:
 			"color": Color(0.75, 0.72, 0.6),
 			"traits": ["airborne", "buoyant"]
 		},
+		# --- LOCOMOTION EXPANSION (LOCOMOTION_EXPANSION_PLAN.md 4) ---
+		# The roster was 3 ground / 1 hover / 4 air / 1 naval / 1 amphibious -
+		# air was the DEEPEST group in a game whose primary theatre is ground.
+		# These seven bring ground to 5, hover to 3, naval to 3 and amphibious
+		# to 2, and air stays at 4. Every one exists to offer a decision the
+		# roster could not previously express; none is a stat reshuffle.
+		"half_track": {
+			"name": "Half-Track",
+			"category": "locomotion",
+			# The explicit compromise slot, and the one the roster most
+			# obviously lacked: wheels and treads were a binary with nothing
+			# between them. Historically the obvious answer (Sd.Kfz. 251, M3) -
+			# steered wheels forward for road speed, a short track bogie aft for
+			# the soft ground that stops a wheeled vehicle dead.
+			"hp": 150.0,
+			"weight": 85.0,
+			"metal": 30,
+			"crystal": 0,
+			"dps": 0.0,
+			# Between wheels (350) and tracked_treads (700), nearer the middle
+			# than either - that IS the pitch.
+			"base_weight_capacity": 500.0,
+			"size": Vector3(0.7, 0.6, 2.2),
+			"color": Color(0.30, 0.31, 0.26),
+			"traits": ["ground_contact"]
+		},
+		"rocker_bogie": {
+			"name": "Rocker-Bogie Suspension",
+			"category": "locomotion",
+			# The terrain specialist: slow everywhere, but the only ground
+			# locomotor that is FASTER on rock than on gravel. A rocker-bogie
+			# keeps every wheel loaded over broken ground by letting the arms
+			# pivot freely, which is why it is what actually gets driven on
+			# Mars. The answer to a map whose best ground is bad ground.
+			"hp": 170.0,
+			"weight": 110.0,
+			"metal": 45,
+			"crystal": 5,
+			"dps": 0.0,
+			"base_weight_capacity": 620.0,
+			"thrust_coefficient": 105.0,
+			"size": Vector3(0.65, 0.9, 2.6),
+			"color": Color(0.42, 0.38, 0.30),
+			"traits": ["ground_contact"]
+		},
+		"air_cushion_skirt": {
+			"name": "Air-Cushion Skirt",
+			"category": "locomotion",
+			# A real hovercraft rather than a sci-fi pad: a big flexible skirt
+			# and lift fans. Crosses water AND marsh at full speed - it carries
+			# "amphibious" so it routes onto the combined navmesh - and is
+			# punished hard by anything it can catch on. Deliberately the
+			# widest footprint in the roster, which is a real cost in a game
+			# where modules clip.
+			"hp": 90.0,
+			"weight": 65.0,
+			"metal": 35,
+			"crystal": 20,
+			"dps": 0.0,
+			"base_weight_capacity": 560.0,
+			"thrust_coefficient": 135.0,
+			"size": Vector3(1.6, 0.45, 1.6),
+			"color": Color(0.55, 0.52, 0.42),
+			"traits": ["hovering", "amphibious"]
+		},
+		"anti_grav_plate": {
+			"name": "Anti-Grav Plate",
+			"category": "locomotion",
+			# The crystal sink. Flat 1.0 on every surface is the entire product
+			# - it is the only locomotor that does not care what it is over -
+			# and it pays for that with the roster's worst capacity-per-cost and
+			# a crystal bill nothing else approaches. Reintroduces the anti-grav
+			# ring the rebuild removed, but as a real trade rather than a free
+			# upgrade.
+			"hp": 60.0,
+			"weight": 30.0,
+			"metal": 20,
+			"crystal": 75,
+			"dps": 0.0,
+			"base_weight_capacity": 280.0,
+			"thrust_coefficient": 125.0,
+			"size": Vector3(0.9, 0.25, 0.9),
+			"color": Color(0.35, 0.65, 0.85),
+			"traits": ["hovering"]
+		},
+		"hydrofoil": {
+			"name": "Hydrofoil",
+			"category": "locomotion",
+			# Gives the naval group the speed/fragility axis it entirely
+			# lacked - naval_propeller was the only option and it was the
+			# highest-capacity locomotor in the game. A hydrofoil lifts the
+			# hull clear of the water at speed, which is fast and efficient and
+			# very bad at carrying things. Low HP: the struts are the whole
+			# vulnerability.
+			"hp": 70.0,
+			"weight": 60.0,
+			"metal": 45,
+			"crystal": 10,
+			"dps": 0.0,
+			"base_weight_capacity": 420.0,
+			"thrust_coefficient": 185.0,
+			"size": Vector3(0.6, 1.0, 2.4),
+			"color": Color(0.28, 0.40, 0.45),
+			"traits": ["buoyant", "naval"]
+		},
+		"water_jet": {
+			"name": "Water Jet",
+			"category": "locomotion",
+			# The hydrofoil's opposite number: an impeller in a duct instead of
+			# an exposed screw, so it works in shallow water and near debris
+			# where a propeller would be destroyed. High thrust, and it loses
+			# efficiency as it loads up - the pump does not care how heavy you
+			# are until suddenly it does.
+			"hp": 110.0,
+			"weight": 80.0,
+			"metal": 40,
+			"crystal": 10,
+			"dps": 0.0,
+			"base_weight_capacity": 640.0,
+			"thrust_coefficient": 160.0,
+			"size": Vector3(0.7, 0.7, 1.1),
+			"color": Color(0.30, 0.45, 0.48),
+			"traits": ["buoyant", "naval"]
+		},
+		"pontoon_wheels": {
+			"name": "Pontoon Wheels",
+			"category": "locomotion",
+			# The light amphibious option, against screw_drive's heavy one.
+			# Sealed buoyant drums with paddle vanes: mediocre on land, mediocre
+			# on water, blocked by neither, and cheap. The scout-tier answer to
+			# a map cut up by rivers.
+			"hp": 95.0,
+			"weight": 60.0,
+			"metal": 25,
+			"crystal": 0,
+			"dps": 0.0,
+			"base_weight_capacity": 330.0,
+			"thrust_coefficient": 120.0,
+			"size": Vector3(0.75, 0.7, 0.75),
+			"color": Color(0.36, 0.34, 0.30),
+			"traits": ["ground_contact", "amphibious"]
+		},
 		"screw_drive": {
 			"name": "Amphibious Screw Drive",
 			"category": "locomotion",
@@ -2421,15 +2563,39 @@ static func get_thrust_coefficient(type_id: String) -> float:
 #                   a locomotor-specific one. screw_drive suffers least
 #                   (its auger bites into ice rather than relying on
 #                   friction the way wheels/treads/legs all do).
+# Every GROUND-NAVIGATING locomotion type must appear in every row. Airborne
+# types (the "airborne" trait sets battle_unit.gd's is_flying) and naval ones
+# skip ground navigation entirely and never consult this table, so they are
+# deliberately absent rather than missing - see TERRAIN_EXEMPT_TRAITS below,
+# which is what test_every_ground_locomotion_type_has_terrain_character()
+# checks against so the distinction cannot rot into an accidental omission.
+#
+# hover_engine WAS an accidental omission: it carries "hovering", not
+# "airborne", so it ground-navigates like a wheeled vehicle and was silently
+# returning 1.0 on every surface - the one locomotor in the roster with no
+# terrain character at all. Ground effect is the whole point of the thing, so
+# it now ignores what a wheel sinks into (marsh, snow, sand) and hates what a
+# skirt catches on (rocky, forest).
 const TERRAIN_SPEED_MULTIPLIERS = {
-	"marsh": {"wheels": 0.25, "tracked_treads": 0.45, "legs": 0.6, "screw_drive": 1.1},
-	"rocky": {"wheels": 0.35, "tracked_treads": 0.75, "legs": 1.1, "screw_drive": 0.5},
-	"snow_mud": {"wheels": 0.2, "tracked_treads": 0.8, "legs": 0.75, "screw_drive": 0.7},
-	"sand": {"wheels": 0.3, "tracked_treads": 0.85, "legs": 0.8, "screw_drive": 0.6},
-	"gravel": {"wheels": 1.25, "tracked_treads": 1.1, "legs": 1.02, "screw_drive": 1.0},
-	"forest": {"wheels": 0.3, "tracked_treads": 0.65, "legs": 0.95, "screw_drive": 0.55},
-	"ice": {"wheels": 0.45, "tracked_treads": 0.5, "legs": 0.4, "screw_drive": 0.75},
+	"marsh":    {"wheels": 0.25, "tracked_treads": 0.45, "legs": 0.6,  "screw_drive": 1.1, "hover_engine": 1.15, "half_track": 0.4,  "rocker_bogie": 0.5,  "air_cushion_skirt": 1.2,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.9},
+	"rocky":    {"wheels": 0.35, "tracked_treads": 0.75, "legs": 1.1,  "screw_drive": 0.5, "hover_engine": 0.55, "half_track": 0.5,  "rocker_bogie": 1.15, "air_cushion_skirt": 0.4,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.35},
+	"snow_mud": {"wheels": 0.2,  "tracked_treads": 0.8,  "legs": 0.75, "screw_drive": 0.7, "hover_engine": 1.1,  "half_track": 0.6,  "rocker_bogie": 0.6,  "air_cushion_skirt": 1.15, "anti_grav_plate": 1.0, "pontoon_wheels": 0.5},
+	"sand":     {"wheels": 0.3,  "tracked_treads": 0.85, "legs": 0.8,  "screw_drive": 0.6, "hover_engine": 1.15, "half_track": 0.55, "rocker_bogie": 0.7,  "air_cushion_skirt": 1.1,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.45},
+	"gravel":   {"wheels": 1.25, "tracked_treads": 1.1,  "legs": 1.02, "screw_drive": 1.0, "hover_engine": 0.95, "half_track": 1.1,  "rocker_bogie": 0.8,  "air_cushion_skirt": 0.85, "anti_grav_plate": 1.0, "pontoon_wheels": 1.05},
+	"forest":   {"wheels": 0.3,  "tracked_treads": 0.65, "legs": 0.95, "screw_drive": 0.55, "hover_engine": 0.45, "half_track": 0.5,  "rocker_bogie": 1.0,  "air_cushion_skirt": 0.35, "anti_grav_plate": 1.0, "pontoon_wheels": 0.4},
+	"ice":      {"wheels": 0.45, "tracked_treads": 0.5,  "legs": 0.4,  "screw_drive": 0.75, "hover_engine": 1.2,  "half_track": 0.5,  "rocker_bogie": 0.55, "air_cushion_skirt": 1.25, "anti_grav_plate": 1.0, "pontoon_wheels": 0.5},
 }
+
+# A locomotion type carrying any of these never touches a ground surface, so it
+# is exempt from the terrain table by design rather than by oversight.
+const TERRAIN_EXEMPT_TRAITS := ["airborne", "naval"]
+
+# anti_grav_plate is the deliberate exception: flat 1.0 on every surface is not
+# a missing row, it is the entire product. It is listed explicitly, at cost,
+# rather than being allowed to fall through to the default - the whole reason
+# hover_engine went unnoticed for so long is that a missing row and an
+# intentionally flat one looked identical.
+const TERRAIN_INTENTIONALLY_FLAT := ["anti_grav_plate"]
 
 static func get_terrain_speed_multiplier(locomotion_type_id: String, surface_type: String) -> float:
 	return TERRAIN_SPEED_MULTIPLIERS.get(surface_type, {}).get(locomotion_type_id, 1.0)
@@ -2516,6 +2682,12 @@ static func get_underside_y_bias(hull_type_id: String) -> float:
 const LOCOMOTION_TYPES_USING_RUNNING_GEAR: Array = [
 	"wheels", "tracked_treads",
 	"legs", "screw_drive", "hover_engine",
+	# The new ground/amphibious types mount to the chassis for the same reason
+	# the originals do: they need a real surface to bolt to, and the unit's
+	# collider rests on the chassis bottom. anti_grav_plate and the two naval
+	# types are deliberately absent - they project from the underside or the
+	# stern, and a slab under them would be visual noise.
+	"half_track", "rocker_bogie", "pontoon_wheels", "air_cushion_skirt",
 ]
 
 const LOCOMOTION_TWEAK_SPECS = {
@@ -2561,15 +2733,62 @@ const LOCOMOTION_TWEAK_SPECS = {
 	# not just defaulted differently - see the matching removals in
 	# module_data.gd's weight/cost tweak tables and visual_builder.gd's
 	# shared _build_pylon_mounted_propeller().
+	# naval_propeller and buoyant_envelope share the pylon-mounted propeller
+	# geometry (a 2026-07-24 rebuild, and still the right call - one prop
+	# assembly deformed per type beats two near-identical authored sets). What
+	# they did NOT deserve was a byte-identical tweak spec: picking between them
+	# was a stats choice with no design choice attached. One unique slider each
+	# is enough to make them distinct decisions.
 	"naval_propeller": [
 		{"name": "prop_count", "label": "Propeller Count", "min": 1.0, "max": 5.0, "step": 1.0, "default": 2.0},
 		{"name": "blade_count", "label": "Blades per Propeller", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
-		{"name": "blade_pitch", "label": "Blade Pitch", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0}
+		{"name": "blade_pitch", "label": "Blade Pitch", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0},
+		# A Kort nozzle is a shroud around the screw: much more thrust at low
+		# speed, a lower top end. The classic tug-vs-runabout trade.
+		{"name": "kort_nozzle", "label": "Kort Nozzle", "type": "bool", "default": false}
 	],
 	"buoyant_envelope": [
 		{"name": "prop_count", "label": "Propeller Count", "min": 1.0, "max": 5.0, "step": 1.0, "default": 2.0},
 		{"name": "blade_count", "label": "Blades per Propeller", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
-		{"name": "blade_pitch", "label": "Blade Pitch", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0}
+		{"name": "blade_pitch", "label": "Blade Pitch", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0},
+		# Lift is free and scales with displaced volume, so a bigger envelope
+		# carries far more - and pushes far more air out of the way doing it.
+		{"name": "envelope_volume", "label": "Envelope Volume", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"half_track": [
+		{"name": "bogie_count", "label": "Track Bogie Count", "min": 2.0, "max": 5.0, "step": 1.0, "default": 3.0},
+		{"name": "front_axle_size", "label": "Front Axle Size", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "tread_width", "label": "Track Width", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"rocker_bogie": [
+		{"name": "bogie_pairs", "label": "Bogie Pairs", "min": 2.0, "max": 4.0, "step": 1.0, "default": 3.0},
+		{"name": "arm_length", "label": "Rocker Arm Length", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "wheel_size", "label": "Wheel Size", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"air_cushion_skirt": [
+		{"name": "skirt_diameter", "label": "Skirt Diameter", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "lift_fan_count", "label": "Lift Fan Count", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
+		{"name": "plenum_pressure", "label": "Plenum Pressure", "min": 0.5, "max": 1.8, "step": 0.1, "default": 1.0}
+	],
+	"anti_grav_plate": [
+		{"name": "plate_count", "label": "Plate Count", "min": 3.0, "max": 8.0, "step": 1.0, "default": 4.0},
+		{"name": "field_strength", "label": "Field Strength", "min": 0.5, "max": 2.2, "step": 0.1, "default": 1.0},
+		{"name": "stabilizer_ring", "label": "Stabiliser Ring", "type": "bool", "default": true}
+	],
+	"hydrofoil": [
+		{"name": "foil_span", "label": "Foil Span", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "strut_height", "label": "Strut Height", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "foil_count", "label": "Foil Count", "min": 2.0, "max": 4.0, "step": 1.0, "default": 2.0}
+	],
+	"water_jet": [
+		{"name": "intake_size", "label": "Intake Size", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "nozzle_count", "label": "Nozzle Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0},
+		{"name": "reverser", "label": "Reverser Bucket", "type": "bool", "default": false}
+	],
+	"pontoon_wheels": [
+		{"name": "pontoon_size", "label": "Pontoon Size", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
+		{"name": "axle_count", "label": "Axle Count", "min": 2.0, "max": 6.0, "step": 2.0, "default": 4.0},
+		{"name": "paddle_vanes", "label": "Paddle Vanes", "type": "bool", "default": true}
 	],
 	# Rebuilt (Chris's ask, 2026-07-24): drum_count is gone - always one
 	# drum per side now (like tracked_treads), spanning the hull's real
@@ -2595,14 +2814,25 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 			capacity = (num_axles * w_per_axle * 2.0) / 4.0 * size * 100.0
 		"tracked_treads":
 			var width = settings.get("tread_width", settings.get("width", 1.0))
-			thrust = width
+			var sprocket = settings.get("drive_sprocket", true)
+			# An exposed drive sprocket meshes directly with the track and puts
+			# power down harder; tucking it inside the hull line protects it but
+			# costs some of that drive. This toggle was purely cosmetic until
+			# test_every_locomotion_type_is_fully_declared caught it - the only
+			# tweak in the roster that changed the model and nothing else.
+			thrust = width * (1.0 if sprocket else 0.88)
 			capacity = width * 150.0
 		"legs":
 			var count = settings.get("leg_count", settings.get("count", 4.0))
 			var length = settings.get("leg_length", settings.get("size", 1.0))
 			var foot_size = settings.get("foot_size", 1.0)
-			thrust = (count / 4.0) * length
-			capacity = (count / 4.0) * foot_size * 120.0
+			var knee = settings.get("knee_height", 0.375)
+			# A high knee gives a long stride and real ground clearance; a low
+			# one is a crouched, stable stance that bears more load. Cosmetic
+			# until test_every_locomotion_type_is_fully_declared caught it -
+			# the slider reshaped the leg and changed nothing about the unit.
+			thrust = (count / 4.0) * length * (0.88 + 0.24 * clampf(knee, -0.5, 1.5))
+			capacity = (count / 4.0) * foot_size * 120.0 * (1.12 - 0.16 * clampf(knee, -0.5, 1.5))
 		"hover_engine":
 			var count = settings.get("pad_count", 4.0)
 			var emv = settings.get("emv_level", 1.0)
@@ -2614,18 +2844,42 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 			var length = settings.get("blade_length", settings.get("size", 1.0))
 			var duct = settings.get("duct", false)
 			thrust = units * (0.8 + 0.05 * blades) * length * (1.15 if duct else 1.0)
+			# Rotary lift carries payload as well as speed - a bigger rotor
+			# raises max-takeoff-weight, it does not just go faster. Five types
+			# (this, fixed_wing, ornithopter, naval, envelope) returned capacity
+			# 0.0, so every tweak on half the roster moved speed and nothing
+			# else, while every ground type's tweaks moved both. Coefficients
+			# are set so a default build lands near its base_weight_capacity
+			# and the extremes stay inside the band the ground types occupy.
+			capacity = units * (blades / 4.0) * length * 60.0
 		"fixed_wing_engine":
 			var count = settings.get("engine_count", settings.get("count", 2.0))
 			var compression = settings.get("turbine_compression", 1.0)
 			var afterburner = settings.get("afterburner", false)
 			thrust = (count / 2.0) * compression * (1.3 if afterburner else 1.0)
+			# Airspeed-assisted lift: more engine means more payload, but an
+			# afterburner is thrust only - it buys nothing you can carry.
+			capacity = (count / 2.0) * compression * 80.0
 		"ornithopter_wing":
 			var wingspan = settings.get("wingspan", settings.get("size", 1.0))
-			thrust = wingspan
+			var sweep = settings.get("wing_sweep", 1.0)
+			# Sweeping the wings back trades lift for speed, as it does on
+			# anything that flies. Cosmetic until now - it reshaped the membrane
+			# and changed nothing the player was choosing between.
+			thrust = wingspan * (0.85 + 0.30 * sweep)
+			capacity = wingspan * 70.0 * (1.15 - 0.25 * sweep)
 		"naval_propeller":
 			var count = settings.get("prop_count", settings.get("count", 2.0))
 			var pitch = settings.get("blade_pitch", 1.0)
-			thrust = (count / 2.0) * pitch
+			var blades = settings.get("blade_count", 3.0)
+			var kort = settings.get("kort_nozzle", false)
+			# A Kort nozzle is a shroud around the screw: markedly more thrust
+			# at working speed, a lower top end. Modelled as thrust up, and the
+			# top-end loss shows up as the reason not to fit one to a runabout.
+			# More blades bite more water per revolution - more thrust, slightly
+			# less efficient. blade_count was cosmetic on both prop types.
+			thrust = (count / 2.0) * pitch * (0.85 + 0.05 * blades) * (1.25 if kort else 1.0)
+			capacity = (count / 2.0) * pitch * 120.0
 		"buoyant_envelope":
 			# Same pylon-mounted prop formula as naval_propeller, but
 			# attenuated (0.6x) - buoyancy does the lifting here, not the
@@ -2634,13 +2888,82 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 			# real thrust-driven boat screw.
 			var count = settings.get("prop_count", settings.get("count", 2.0))
 			var pitch = settings.get("blade_pitch", 1.0)
-			thrust = (count / 2.0) * pitch * 0.6
+			var blades = settings.get("blade_count", 3.0)
+			var volume = settings.get("envelope_volume", 1.0)
+			# Lift is free and scales with displaced volume, so envelope_volume
+			# is almost pure capacity - and costs thrust, because a bigger gasbag
+			# is a bigger thing to push through the air.
+			thrust = (count / 2.0) * pitch * (0.85 + 0.05 * blades) * 0.6 / max(0.6, volume * 0.85 + 0.15)
+			capacity = (count / 2.0) * pitch * volume * 90.0
+		"half_track":
+			# Reads as the compromise it is: the tracked bogies carry the load,
+			# the front axle contributes speed rather than payload.
+			var bogies = settings.get("bogie_count", 3.0)
+			var front = settings.get("front_axle_size", 1.0)
+			var tw = settings.get("tread_width", 1.0)
+			thrust = (bogies / 3.0) * 0.7 + front * 0.45
+			capacity = (bogies / 3.0) * tw * 190.0
+		"rocker_bogie":
+			# Every wheel stays loaded over broken ground, so capacity scales
+			# with wheel count directly; long arms buy articulation, not speed.
+			var pairs = settings.get("bogie_pairs", 3.0)
+			var arm = settings.get("arm_length", 1.0)
+			var wsize = settings.get("wheel_size", 1.0)
+			# Long arms articulate further over obstacles but put the wheels on
+			# more leverage, which costs drive - the type's own slow/sure pitch
+			# expressed as a slider.
+			thrust = (pairs / 3.0) * wsize * 0.85 * (1.15 - 0.20 * arm)
+			capacity = (pairs / 3.0) * wsize * 210.0 * (0.90 + 0.14 * arm)
+		"air_cushion_skirt":
+			var diameter = settings.get("skirt_diameter", 1.0)
+			var fans = settings.get("lift_fan_count", 3.0)
+			var plenum = settings.get("plenum_pressure", 1.0)
+			# Cushion area carries the weight; fans and pressure move it.
+			thrust = (fans / 3.0) * plenum
+			capacity = diameter * diameter * plenum * 210.0
+		"anti_grav_plate":
+			var plates = settings.get("plate_count", 4.0)
+			var field = settings.get("field_strength", 1.0)
+			var ring = settings.get("stabilizer_ring", true)
+			thrust = (plates / 4.0) * field * (1.0 if ring else 1.15)
+			# The stabiliser ring is the trade: steadier and stronger lift, or
+			# drop it for raw speed and carry less.
+			capacity = (plates / 4.0) * field * (110.0 if ring else 70.0)
+		"hydrofoil":
+			var span = settings.get("foil_span", 1.0)
+			var strut = settings.get("strut_height", 1.0)
+			var foils = settings.get("foil_count", 2.0)
+			# Foil area lifts the hull clear, which is where the speed comes
+			# from - but a foil that has to carry more sits deeper and stops
+			# foiling, so capacity scales far more weakly than thrust.
+			thrust = span * (foils / 2.0) * (1.0 + 0.15 * strut)
+			capacity = span * (foils / 2.0) * 95.0
+		"water_jet":
+			var intake = settings.get("intake_size", 1.0)
+			var nozzles = settings.get("nozzle_count", 2.0)
+			var reverser = settings.get("reverser", false)
+			# A ducted impeller makes real thrust, and a reverser bucket buys
+			# manoeuvring at the cost of some of it.
+			thrust = intake * (nozzles / 2.0) * (0.92 if reverser else 1.0)
+			capacity = intake * 150.0
+		"pontoon_wheels":
+			var psize = settings.get("pontoon_size", 1.0)
+			var axles = settings.get("axle_count", 4.0)
+			var vanes = settings.get("paddle_vanes", true)
+			# Buoyancy is volume, so capacity goes with pontoon size cubed-ish;
+			# vanes are what actually drive it in the water.
+			thrust = (axles / 4.0) * (1.15 if vanes else 0.85)
+			capacity = psize * psize * (axles / 4.0) * 130.0
 		"screw_drive":
 			# drum_count is gone (always a fixed pair now) - matches
 			# tracked_treads' pattern, no count factor.
 			var diameter = settings.get("drum_diameter", settings.get("drum_width", settings.get("size", 1.0)))
-			thrust = diameter
-			capacity = diameter * 160.0
+			var depth = settings.get("helix_depth", 1.0)
+			# Deeper flighting bites harder into mud, snow and water - which is
+			# the entire reason a screw drive exists - at the cost of dragging
+			# more of it along. Cosmetic until now.
+			thrust = diameter * (0.80 + 0.24 * depth)
+			capacity = diameter * 160.0 * (1.08 - 0.10 * depth)
 	return {"thrust": thrust, "capacity": capacity}
 
 # Per-axis scale of the running-gear slab relative to the hull footprint.

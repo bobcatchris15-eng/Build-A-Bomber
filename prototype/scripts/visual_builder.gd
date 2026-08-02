@@ -271,7 +271,9 @@ const MONOLITHIC_ANIMATION_PIVOTS := {
 const LOCOMOTION_MODULAR_TYPES := {
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
-	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true
+	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
+	"half_track": true, "rocker_bogie": true, "air_cushion_skirt": true,
+	"anti_grav_plate": true, "hydrofoil": true, "water_jet": true, "pontoon_wheels": true,
 }
 
 # Firing elevation applied as a PIVOT ROTATION for the two weapons whose barrels
@@ -352,6 +354,8 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
 	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
+	"half_track": true, "rocker_bogie": true, "air_cushion_skirt": true,
+	"anti_grav_plate": true, "hydrofoil": true, "water_jet": true, "pontoon_wheels": true,
 	"structural_block": true, "structural_dome": true, "structural_slab": true,
 	"structural_wedge": true, "structural_girder": true, "structural_i_beam": true
 }
@@ -482,6 +486,13 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 			"naval_propeller": _build_naval_propeller(parent_node, base_size, base_color, tweaks)
 			"buoyant_envelope": _build_buoyant_envelope(parent_node, base_size, base_color, tweaks)
 			"screw_drive": _build_screw_drive(parent_node, base_size, base_color, tweaks)
+			"half_track": _build_half_track(parent_node, base_size, base_color, tweaks)
+			"rocker_bogie": _build_rocker_bogie(parent_node, base_size, base_color, tweaks)
+			"air_cushion_skirt": _build_air_cushion_skirt(parent_node, base_size, base_color, tweaks)
+			"anti_grav_plate": _build_anti_grav_plate(parent_node, base_size, base_color, tweaks)
+			"hydrofoil": _build_hydrofoil(parent_node, base_size, base_color, tweaks)
+			"water_jet": _build_water_jet(parent_node, base_size, base_color, tweaks)
+			"pontoon_wheels": _build_pontoon_wheels(parent_node, base_size, base_color, tweaks)
 		_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
 
 		return
@@ -5814,3 +5825,238 @@ static func _create_flat_shaded_mesh(verts: PackedVector3Array, indices: PackedI
 	var mesh = ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	return mesh
+
+
+# ===========================================================================
+# LOCOMOTION EXPANSION BUILDERS (LOCOMOTION_EXPANSION_PLAN.md 4)
+#
+# Each is a straight assembly of authored parts. Placement of the module as a
+# whole is locomotion_layout.gd's job - these only decide where a type's own
+# sub-parts sit relative to its mount point, and which of them a tweak scales.
+#
+# The rule the rest of the roster follows and these keep: a tweak scales the
+# PART it is about and nothing else, so a slider can never smear a bolt head.
+# ===========================================================================
+
+## Half-track: steered wheels forward, a short track bogie aft. The two ends
+## are separate parts because bogie_count and front_axle_size move
+## independently - the whole pitch of the type is that its two halves are
+## different machines bolted to one frame.
+static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_OLIVE_GREEN, tweaks: Dictionary = {}):
+	var bogies := int(tweaks.get("bogie_count", 3.0))
+	var front_size := float(tweaks.get("front_axle_size", 1.0))
+	var width := float(tweaks.get("tread_width", 1.0))
+	# The assembly spans the hull it is mounted on, like tracked_treads.
+	var target_length := float(tweaks.get("target_length", base_size.z))
+	var half := target_length * 0.5
+
+	var axle_mesh := _part("ht_front_axle")
+	if axle_mesh:
+		# The steered wheel is a wheel, so it rolls - under its own named pivot
+		# like every other ground-contact drive element in the roster.
+		var axle_pivot := Node3D.new()
+		axle_pivot.name = SPIN_PIVOT_WHEEL
+		axle_pivot.position = Vector3(0, 0, -half + 0.30 * front_size)
+		parent_node.add_child(axle_pivot)
+		var axle := _mesh_inst(axle_mesh, base_color.lightened(0.05))
+		axle.scale = Vector3(width, front_size, front_size)
+		axle_pivot.add_child(axle)
+
+	var bogie_mesh := _part("ht_track_bogie")
+	if bogie_mesh:
+		# One authored bogie, repeated aft. More bogies means a longer track
+		# run, which is what carries the extra payload.
+		var run := target_length * 0.55
+		var step: float = run / float(max(1, bogies))
+		for i in range(bogies):
+			var bogie_pivot := Node3D.new()
+			bogie_pivot.name = SPIN_PIVOT_TREAD
+			bogie_pivot.position = Vector3(0, 0, half - step * (float(i) + 0.5))
+			parent_node.add_child(bogie_pivot)
+			var bogie := _mesh_inst(bogie_mesh, base_color)
+			# Z is the fore/aft axis here, not Y: the parts are authored with
+			# Blender +Y forward, which imports as Godot -Z. Scaling Y instead
+			# squashed each bogie flat and left the track a paper ribbon.
+			# 0.9 is the authored frame length, so this fits each bogie to the
+			# slot the run divides into.
+			bogie.scale = Vector3(width, 1.0, step / 0.9)
+			bogie_pivot.add_child(bogie)
+
+
+## Rocker-bogie: a free-pivoting arm chain. Built as a real linkage - primary
+## rocker, secondary bogie, wheels at the knuckles - because the articulation
+## IS the silhouette, and a rigid axle would read as a normal wheeled chassis.
+static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.42, 0.38, 0.30), tweaks: Dictionary = {}):
+	var pairs := int(tweaks.get("bogie_pairs", 3.0))
+	var arm_len := float(tweaks.get("arm_length", 1.0))
+	var wheel_size := float(tweaks.get("wheel_size", 1.0))
+	var target_length := float(tweaks.get("target_length", base_size.z))
+	var span := target_length * 0.42
+
+	var rocker_mesh := _part("rb_rocker_arm")
+	var bogie_mesh := _part("rb_bogie_arm")
+	var wheel_mesh := _part("rb_wheel")
+
+	if rocker_mesh:
+		var rocker := _mesh_inst(rocker_mesh, base_color)
+		rocker.scale = Vector3(1.0, arm_len, arm_len)
+		parent_node.add_child(rocker)
+
+	for i in range(pairs):
+		var t: float = 0.5 if pairs <= 1 else float(i) / float(pairs - 1)
+		var z: float = -span + 2.0 * span * t
+		if bogie_mesh and i > 0:
+			var bogie := _mesh_inst(bogie_mesh, base_color.darkened(0.08))
+			bogie.scale = Vector3(1.0, arm_len, arm_len)
+			bogie.position = Vector3(0, -0.10 * arm_len, z)
+			parent_node.add_child(bogie)
+		if wheel_mesh:
+			var wheel_pivot := Node3D.new()
+			wheel_pivot.name = SPIN_PIVOT_WHEEL
+			wheel_pivot.position = Vector3(0.14 * wheel_size, -0.30 * arm_len, z)
+			parent_node.add_child(wheel_pivot)
+			var wheel := _mesh_inst(wheel_mesh, Color(0.20, 0.20, 0.22))
+			wheel.scale = Vector3.ONE * wheel_size
+			wheel_pivot.add_child(wheel)
+
+
+## Air-cushion skirt: one continuous bag around the module's footprint, with
+## the lift fans set into the plenum deck above it.
+static func _build_air_cushion_skirt(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.55, 0.52, 0.42), tweaks: Dictionary = {}):
+	var diameter := float(tweaks.get("skirt_diameter", 1.0))
+	var fans := int(tweaks.get("lift_fan_count", 3.0))
+	var plenum := float(tweaks.get("plenum_pressure", 1.0))
+
+	var skirt_mesh := _part("acs_skirt")
+	if skirt_mesh:
+		var skirt := _mesh_inst(skirt_mesh, base_color)
+		# Plenum pressure inflates the bag rather than widening it - a
+		# separate axis from skirt_diameter, so both sliders read distinctly.
+		skirt.scale = Vector3(diameter, 0.85 + 0.30 * plenum, diameter)
+		parent_node.add_child(skirt)
+
+	var fan_mesh := _part("acs_lift_fan")
+	if fan_mesh:
+		for i in range(fans):
+			var fan_pivot := Node3D.new()
+			# Named so _animate_locomotion() spins it: a hovercraft with still
+			# fans is the same "is this broken?" read the frozen road wheels had.
+			fan_pivot.name = SPIN_PIVOT_TURBINE
+			var a: float = float(i) / float(maxi(1, fans)) * TAU
+			var r: float = 0.30 * diameter if fans > 1 else 0.0
+			fan_pivot.position = Vector3(cos(a) * r, 0.16, sin(a) * r)
+			fan_pivot.rotation = Vector3(PI / 2.0, 0, 0)
+			parent_node.add_child(fan_pivot)
+			var fan := _mesh_inst(fan_mesh, Color(0.30, 0.32, 0.34))
+			fan.scale = Vector3.ONE * (0.75 + 0.25 * diameter)
+			fan_pivot.add_child(fan)
+
+
+## Anti-grav plate: emitter plates in a cluster under an optional stabiliser
+## toroid. The only locomotor with no moving contact surface at all, so its
+## motion cue is the ring - which is exactly why dropping the ring for speed
+## is a visible trade and not just a number.
+static func _build_anti_grav_plate(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.35, 0.65, 0.85), tweaks: Dictionary = {}):
+	var plates := int(tweaks.get("plate_count", 4.0))
+	var field := float(tweaks.get("field_strength", 1.0))
+	var has_ring: bool = bool(tweaks.get("stabilizer_ring", true))
+
+	var plate_mesh := _part("agp_plate")
+	if plate_mesh:
+		for i in range(plates):
+			var a: float = float(i) / float(maxi(1, plates)) * TAU
+			var r: float = 0.0 if plates <= 1 else 0.22
+			var plate := _mesh_inst(plate_mesh, base_color.darkened(0.35),
+				Color(0.30, 0.65, 0.95), 0.6 * field)
+			plate.scale = Vector3(0.8 + 0.3 * field, 1.0, 0.8 + 0.3 * field)
+			plate.position = Vector3(cos(a) * r, 0.0, sin(a) * r)
+			parent_node.add_child(plate)
+
+	if has_ring:
+		var ring_mesh := _part("agp_ring")
+		if ring_mesh:
+			var ring_pivot := Node3D.new()
+			ring_pivot.name = SPIN_PIVOT_TURBINE
+			ring_pivot.position = Vector3(0, -0.10, 0)
+			ring_pivot.rotation = Vector3(PI / 2.0, 0, 0)
+			parent_node.add_child(ring_pivot)
+			var ring := _mesh_inst(ring_mesh, base_color,
+				Color(0.35, 0.75, 1.0), 1.1 * field)
+			ring.scale = Vector3.ONE * (0.9 + 0.25 * field)
+			ring_pivot.add_child(ring)
+
+
+## Hydrofoil: struts down from the hull corners carrying lifting foils. The
+## strut is what makes it fragile and the foil is what makes it fast, so they
+## are separate parts scaled by separate tweaks.
+static func _build_hydrofoil(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.28, 0.40, 0.45), tweaks: Dictionary = {}):
+	var span := float(tweaks.get("foil_span", 1.0))
+	var strut_h := float(tweaks.get("strut_height", 1.0))
+	var foils := int(tweaks.get("foil_count", 2.0))
+	var length := float(tweaks.get("drum_length", base_size.z))
+	var half := length * 0.5
+
+	var strut_mesh := _part("hf_strut")
+	var foil_mesh := _part("hf_foil")
+	for i in range(foils):
+		var t: float = 0.5 if foils <= 1 else float(i) / float(foils - 1)
+		var z: float = -half * 0.8 + 1.6 * half * 0.8 * t
+		if strut_mesh:
+			var strut := _mesh_inst(strut_mesh, base_color)
+			strut.scale = Vector3(1.0, strut_h, 1.0)
+			strut.position = Vector3(0, 0, z)
+			parent_node.add_child(strut)
+		if foil_mesh:
+			var foil := _mesh_inst(foil_mesh, base_color.darkened(0.12))
+			foil.scale = Vector3(span, 1.0, 1.0)
+			# Seated at the bottom of the strut, which is where strut_height
+			# put it - the foil must not float when the strut lengthens.
+			foil.position = Vector3(0, -0.86 * strut_h, z)
+			parent_node.add_child(foil)
+
+
+## Water jet: a through-hull pump feeding a steerable nozzle. The reverser
+## bucket is part of the nozzle, so it appears and disappears with the toggle
+## rather than being a permanently visible lump.
+static func _build_water_jet(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.30, 0.45, 0.48), tweaks: Dictionary = {}):
+	var intake := float(tweaks.get("intake_size", 1.0))
+	var has_reverser: bool = bool(tweaks.get("reverser", false))
+
+	var pump_mesh := _part("wj_pump")
+	if pump_mesh:
+		# The impeller is inside the duct, so the pump body itself is the only
+		# thing that can carry the motion cue. Turning it slowly reads as a
+		# running pump rather than a dead casting - and keeps water_jet from
+		# being the one naval type with nothing moving.
+		var impeller := Node3D.new()
+		impeller.name = SPIN_PIVOT_TURBINE
+		parent_node.add_child(impeller)
+		var pump := _mesh_inst(pump_mesh, base_color)
+		pump.scale = Vector3.ONE * intake
+		impeller.add_child(pump)
+
+	var nozzle_mesh := _part("wj_nozzle")
+	if nozzle_mesh:
+		var nozzle := _mesh_inst(nozzle_mesh, base_color.lightened(0.10))
+		nozzle.scale = Vector3(intake, intake, 1.0 if has_reverser else 0.72)
+		nozzle.position = Vector3(0, 0, 0.24 * intake)
+		parent_node.add_child(nozzle)
+
+
+## Pontoon wheels: sealed buoyant drums that are simultaneously the wheel and
+## the float. One part doing both jobs is the point of the type.
+static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.36, 0.34, 0.30), tweaks: Dictionary = {}):
+	var psize := float(tweaks.get("pontoon_size", 1.0))
+	var vanes: bool = bool(tweaks.get("paddle_vanes", true))
+
+	var pontoon_mesh := _part("pw_pontoon")
+	if pontoon_mesh:
+		var axle := Node3D.new()
+		axle.name = SPIN_PIVOT_WHEEL
+		axle.position = Vector3(0.05 * psize, -0.22 * psize, 0)
+		parent_node.add_child(axle)
+		var drum := _mesh_inst(pontoon_mesh, base_color)
+		# Dropping the vanes narrows the drum: a plain float rather than a
+		# paddle, which is what the thrust penalty is describing.
+		drum.scale = Vector3(psize * (1.0 if vanes else 0.82), psize, psize)
+		axle.add_child(drum)

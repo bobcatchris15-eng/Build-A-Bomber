@@ -160,6 +160,56 @@ const LAYOUTS := {
 		"geo_keys": {"blade_count": 3.0, "blade_pitch": 1.0},
 		"normal": Vector3.BACK, "reach_keys": ReachKeys.XYZ,
 	},
+	# --- Expansion types (LOCOMOTION_EXPANSION_PLAN.md 4) ---
+	# Every one of these is a data declaration and nothing else - no new branch
+	# in module_placer.gd, which is the whole point of the factoring. Where a
+	# type needed a pattern that did not exist yet, the pattern was added to
+	# stations() once and is now available to everything.
+	"half_track": {
+		"pattern": Pattern.SIDE_PAIRS, "per_side": 1,
+		"geo_keys": {"bogie_count": 3.0, "front_axle_size": 1.0, "tread_width": 1.0},
+		"hull_length_geo_key": "target_length",
+		"normal_is_side": true,
+		"mirror": true,
+	},
+	"rocker_bogie": {
+		"pattern": Pattern.SIDE_PAIRS, "per_side": 1,
+		"geo_keys": {"bogie_pairs": 3.0, "arm_length": 1.0, "wheel_size": 1.0},
+		"hull_length_geo_key": "target_length",
+		"normal_is_side": true,
+		"mirror": true,
+	},
+	"pontoon_wheels": {
+		"pattern": Pattern.SIDE_PAIRS,
+		"count_key": "axle_count", "count_fallback": "count", "count_default": 4,
+		"count_min": 2, "count_even": true,
+		"geo_keys": {"pontoon_size": 1.0, "paddle_vanes": true},
+		"normal": Vector3.UP,
+		"mirror": true, "override_pos": true,
+	},
+	"air_cushion_skirt": {
+		"pattern": Pattern.RING_XZ,
+		"count_key": "lift_fan_count", "count_default": 3, "count_min": 2, "count_max": 6,
+		"geo_keys": {"skirt_diameter": 1.0, "plenum_pressure": 1.0},
+		"normal": Vector3.DOWN, "reach_keys": ReachKeys.XYZ,
+	},
+	"anti_grav_plate": {
+		"pattern": Pattern.RING_XZ,
+		"count_key": "plate_count", "count_default": 4, "count_min": 3, "count_max": 8,
+		"geo_keys": {"field_strength": 1.0, "stabilizer_ring": true},
+		"normal": Vector3.DOWN, "reach_keys": ReachKeys.XYZ,
+	},
+	"hydrofoil": {
+		"pattern": Pattern.CORNER_SPAN,
+		"geo_keys": {"foil_span": 1.0, "strut_height": 1.0, "foil_count": 2.0},
+		"normal_is_side": true, "reach_keys": ReachKeys.FORE_AFT,
+	},
+	"water_jet": {
+		"pattern": Pattern.STERN_ROW,
+		"count_key": "nozzle_count", "count_default": 2, "count_min": 1, "count_max": 4,
+		"geo_keys": {"intake_size": 1.0, "reverser": false},
+		"normal": Vector3.BACK, "reach_keys": ReachKeys.XYZ,
+	},
 	"screw_drive": {
 		"pattern": Pattern.CORNER_SPAN,
 		"geo_keys": {"drum_diameter": 1.0, "helix_depth": 1.0},
@@ -187,6 +237,16 @@ const GEOMETRY := {
 	# CORNER_SPAN: the drum's down-and-out offset, and how far each end brace
 	# reaches toward the hull's own centre.
 	"screw_drive":       {"drum_offset_frac": 0.6, "reach_fraction": 0.8},
+	# --- Expansion types ---
+	"half_track":        {"x_from": "running_gear", "y": "below_gear", "z_span": 0.0},
+	"rocker_bogie":      {"x_from": "running_gear", "y": "below_gear", "z_span": 0.0},
+	"pontoon_wheels":    {"x_pad": 0.22, "x_pad_scales_with": "pontoon_size", "y": "underside", "z_span": 0.32},
+	# A hovercraft's skirt is a single big cushion, so its fans sit INSIDE the
+	# hull footprint rather than outboard of it like hover_engine's pads.
+	"air_cushion_skirt": {"pad_from_catalog": false, "y": "underside"},
+	"anti_grav_plate":   {"pad_from_catalog": true, "y": "underside"},
+	"hydrofoil":         {"drum_offset_frac": 0.9, "reach_fraction": 0.7},
+	"water_jet":         {"x_frac": 0.26, "z_clearance": 0.35, "y_frac": -0.12},
 }
 
 static func has_layout(type_id: String) -> bool:

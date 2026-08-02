@@ -124,6 +124,14 @@ func _init():
 		success = false
 		_failed.append("test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion")
 	_total_suites += 1
+	if not await _run_suite(test_every_locomotion_type_is_fully_declared, "test_every_locomotion_type_is_fully_declared"):
+		success = false
+		_failed.append("test_every_locomotion_type_is_fully_declared")
+	_total_suites += 1
+	if not await _run_suite(test_expansion_locomotion_types_build_and_place, "test_expansion_locomotion_types_build_and_place"):
+		success = false
+		_failed.append("test_expansion_locomotion_types_build_and_place")
+	_total_suites += 1
 	if not await _run_suite(test_every_locomotion_type_animates_something, "test_every_locomotion_type_animates_something"):
 		success = false
 		_failed.append("test_every_locomotion_type_animates_something")
@@ -13815,6 +13823,15 @@ func test_every_locomotion_type_animates_something() -> bool:
 		"ornithopter_wing": ["WingPivotFore", "powered"],
 		"naval_propeller": ["PropBlades", "powered"],
 		"buoyant_envelope": ["PropBlades", "powered"],
+		"half_track": [VisualBuilder.SPIN_PIVOT_TREAD, "ground"],
+		"rocker_bogie": [VisualBuilder.SPIN_PIVOT_WHEEL, "ground"],
+		"pontoon_wheels": [VisualBuilder.SPIN_PIVOT_WHEEL, "ground"],
+		"air_cushion_skirt": [VisualBuilder.SPIN_PIVOT_TURBINE, "powered"],
+		"anti_grav_plate": [VisualBuilder.SPIN_PIVOT_TURBINE, "powered"],
+		"water_jet": [VisualBuilder.SPIN_PIVOT_TURBINE, "powered"],
+		# hydrofoil is deliberately absent: a lifting foil on a strut has no
+		# moving part. It is the one locomotor where stillness is correct, and
+		# saying so here is what stops it looking like another oversight.
 	}
 	for type_id in expected:
 		var pivot_name: String = expected[type_id][0]
@@ -13848,5 +13865,139 @@ func test_every_locomotion_type_animates_something() -> bool:
 		if not anim_src.contains('"%s"' % type_id):
 			print("  [FAIL] _animate_locomotion() has no branch for '%s'." % type_id)
 			return false
-	print("  [PASS] All 10 locomotion types build an animation pivot and are driven by _animate_locomotion() - ground-contact types by travel, powered types by throttle.")
+	print("  [PASS] All 16 moving locomotion types build an animation pivot and are driven by _animate_locomotion() - ground-contact types by travel, powered types by throttle.")
+	return true
+
+
+# Every locomotion type in the catalog must resolve to a LocomotionLayout, get a
+# real mount pattern, and be told apart from its neighbours by terrain. These
+# three are what make "add a locomotion type" a data declaration rather than a
+# code change - without them a new type can be half-added (catalog entry, no
+# layout; layout, no terrain row) and simply behave as a duller copy of
+# something else, which is exactly how hover_engine ended up with no terrain
+# character at all for months.
+func test_every_locomotion_type_is_fully_declared() -> bool:
+	print("Running Test Suite: Locomotion Declaration Completeness...")
+	var Layout = load("res://scripts/locomotion_layout.gd")
+	var loco_ids: Array = []
+	var catalog: Dictionary = ModuleCatalog.get_catalog()
+	for type_id in catalog:
+		if catalog[type_id].get("category", "") == "locomotion":
+			loco_ids.append(type_id)
+	if loco_ids.size() < 17:
+		print("  [FAIL] expected at least 17 locomotion types after the expansion, found %d." % loco_ids.size())
+		return false
+
+	for type_id in loco_ids:
+		# 1. A layout, or module_placer has nothing to place.
+		if not Layout.has_layout(type_id):
+			print("  [FAIL] '%s' has a catalog entry but no LocomotionLayout - it would place nothing." % type_id)
+			return false
+		# 2. Tweaks that all reach a stat. A cosmetic slider is a lie about
+		#    what the player is choosing.
+		var specs: Array = ModuleCatalog.LOCOMOTION_TWEAK_SPECS.get(type_id, [])
+		if specs.size() < 2:
+			print("  [FAIL] '%s' has %d tweaks - every type carries at least 2." % [type_id, specs.size()])
+			return false
+		var base = ModuleCatalog.get_locomotion_contribs(type_id, {})
+		for spec in specs:
+			var probe := {}
+			if spec.get("type", "") == "bool":
+				probe[spec["name"]] = not bool(spec.get("default", false))
+			else:
+				probe[spec["name"]] = float(spec.get("max", 2.0))
+			var moved = ModuleCatalog.get_locomotion_contribs(type_id, probe)
+			var thrust_moved: bool = abs(moved["thrust"] - base["thrust"]) > 0.0001
+			var cap_moved: bool = abs(moved["capacity"] - base["capacity"]) > 0.0001
+			if not (thrust_moved or cap_moved):
+				print("  [FAIL] '%s' tweak '%s' moves neither thrust nor capacity - it is cosmetic." % [
+					type_id, spec["name"]])
+				return false
+		# 3. Every tweak must move CAPACITY somewhere in the type, not just
+		#    speed - five types used to return capacity 0.0 flat.
+		if base["capacity"] <= 0.0:
+			print("  [FAIL] '%s' contributes no weight capacity at all - its tweaks move speed only." % type_id)
+			return false
+
+	# 4. Terrain character, for the types that actually touch the ground.
+	for type_id in loco_ids:
+		var traits: Array = catalog[type_id].get("traits", [])
+		var exempt := false
+		for t in traits:
+			if t in ModuleCatalog.TERRAIN_EXEMPT_TRAITS:
+				exempt = true
+		if exempt:
+			continue
+		var values := []
+		for surface in ModuleCatalog.TERRAIN_SPEED_MULTIPLIERS:
+			if not ModuleCatalog.TERRAIN_SPEED_MULTIPLIERS[surface].has(type_id):
+				print("  [FAIL] ground type '%s' has no '%s' entry - it silently returns 1.0 there." % [
+					type_id, surface])
+				return false
+			values.append(float(ModuleCatalog.TERRAIN_SPEED_MULTIPLIERS[surface][type_id]))
+		if type_id in ModuleCatalog.TERRAIN_INTENTIONALLY_FLAT:
+			continue
+		var flat := true
+		for v in values:
+			if abs(v - 1.0) > 0.01:
+				flat = false
+		if flat:
+			print("  [FAIL] ground type '%s' is 1.0 on every surface - no terrain character." % type_id)
+			return false
+
+	print("  [PASS] All %d locomotion types have a layout, consequential tweaks, real weight capacity, and terrain character (or a declared exemption)." % loco_ids.size())
+	return true
+
+
+# The seven expansion types must actually build geometry and lay out somewhere
+# sane. Cheap smoke coverage, but it is what catches a type wired into the
+# catalog and the layout table whose _build_X() was never written - which would
+# otherwise show up as an invisible locomotor in the Lab.
+func test_expansion_locomotion_types_build_and_place() -> bool:
+	print("Running Test Suite: Locomotion Expansion Types Build And Place...")
+	var VisualBuilder = load("res://scripts/visual_builder.gd")
+	var new_types := ["half_track", "rocker_bogie", "air_cushion_skirt",
+		"anti_grav_plate", "hydrofoil", "water_jet", "pontoon_wheels"]
+	for type_id in new_types:
+		var data = ModuleCatalog.get_module_data(type_id)
+		var probe := Node3D.new()
+		root.add_child(probe)
+		VisualBuilder.build_visual(type_id, probe, data.get("size", Vector3.ONE), data.color, {})
+		await process_frame
+		var meshes := probe.find_children("*", "MeshInstance3D", true, false)
+		var mesh_count := meshes.size()
+		probe.queue_free()
+		await process_frame
+		if mesh_count < 1:
+			print("  [FAIL] '%s' built no geometry - it would be invisible in the Lab." % type_id)
+			return false
+
+		# And it must place at least one instance on a real hull.
+		var hull := StaticBody3D.new()
+		hull.name = "Hull"
+		var shape := CollisionShape3D.new()
+		shape.name = "CollisionShape3D"
+		var box := BoxShape3D.new()
+		box.size = Vector3(4.0, 1.0, 6.0)
+		shape.shape = box
+		hull.add_child(shape)
+		root.add_child(hull)
+		var placer := Node3D.new()
+		placer.set_script(load("res://scripts/module_placer.gd"))
+		placer.hull = hull
+		root.add_child(placer)
+		await process_frame
+		placer.update_locomotion(type_id, {})
+		await process_frame
+		var placed := 0
+		for child in hull.get_children():
+			if child.has_meta("module_data") and child.get_meta("module_data").category == "locomotion":
+				placed += 1
+		placer.free()
+		hull.free()
+		await process_frame
+		if placed < 1:
+			print("  [FAIL] '%s' placed no instances on a reference hull." % type_id)
+			return false
+	print("  [PASS] All 7 expansion locomotion types build real geometry and place instances on a hull.")
 	return true

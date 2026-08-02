@@ -1145,12 +1145,27 @@ func _animate_locomotion(delta: float) -> void:
 					dir = 1.0
 				for axle in child.find_children(VisualBuilderScript.SPIN_PIVOT_WHEEL + "*", "Node3D", true, false):
 					axle.rotate_x(9.0 * ground_rate * dir * delta)
-			"tracked_treads":
+			"tracked_treads", "half_track":
+				# half_track drives both: a tread belt aft and a steered wheel
+				# forward, so it picks up the wheel branch below as well.
 				var dir := signf(velocity.dot(-global_transform.basis.z))
 				if is_zero_approx(dir):
 					dir = 1.0
 				for axle in child.find_children(VisualBuilderScript.SPIN_PIVOT_TREAD + "*", "Node3D", true, false):
 					axle.rotate_x(7.0 * ground_rate * dir * delta)
+				for wheel_axle in child.find_children(VisualBuilderScript.SPIN_PIVOT_WHEEL + "*", "Node3D", true, false):
+					wheel_axle.rotate_x(9.0 * ground_rate * dir * delta)
+			"rocker_bogie", "pontoon_wheels":
+				var dir := signf(velocity.dot(-global_transform.basis.z))
+				if is_zero_approx(dir):
+					dir = 1.0
+				for axle in child.find_children(VisualBuilderScript.SPIN_PIVOT_WHEEL + "*", "Node3D", true, false):
+					axle.rotate_x(8.0 * ground_rate * dir * delta)
+			"air_cushion_skirt", "anti_grav_plate", "water_jet":
+				# Powered lift/thrust: lift fans, a stabiliser toroid and a jet
+				# impeller all idle with the engine and spool up under way.
+				for spin in child.find_children(VisualBuilderScript.SPIN_PIVOT_TURBINE + "*", "Node3D", true, false):
+					spin.rotate_z(14.0 * powered_rate * delta)
 			"fixed_wing_engine":
 				for fan in child.find_children(VisualBuilderScript.SPIN_PIVOT_TURBINE + "*", "Node3D", true, false):
 					fan.rotate_z(24.0 * powered_rate * delta)
