@@ -13,6 +13,7 @@ const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
+const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -761,420 +762,42 @@ func update_locomotion(type_id: String, settings: Dictionary):
 
 	var spawned_wheels = []
 	
-	if type_id == "wheels":
-		var wheel_size = settings.get("wheel_size", settings.get("size", 1.0))
-		var w_per_axle = settings.get("wheels_per_axle", 1.0)
-		var count = settings.get("num_axles", settings.get("count", 4))
-		if count < 2: count = 2
-		if count % 2 != 0: count += 1
-		var half_count = int(count / 2)
-		var geo_tweaks = {"wheel_size": wheel_size, "wheels_per_axle": w_per_axle}
+	# One generic placement loop, replacing the ten hand-written branches this
+	# used to be. Every branch did the same six things - resolve tweaks, compute
+	# a mount pattern, build a geo_tweaks dict, place, reset the transform,
+	# mirror - and only the pattern was ever per-type. The patterns now live in
+	# locomotion_layout.gd as data, so adding a locomotion type is a table entry
+	# rather than another elif and another copy of the other five steps.
+	var layout_ctx := {
+		"hull_size": hull_size,
+		"running_gear_size": running_gear_size,
+		"underside_y_bias": underside_y_bias,
+		"catalog_size": catalog_data.get("size", Vector3.ONE),
+	}
+	var node_scale := LocomotionLayoutScript.node_scale_for(type_id, hull_height_factor)
+	var scale_mult := LocomotionLayoutScript.scale_multiplier_for(type_id)
+	for station in LocomotionLayoutScript.stations(type_id, settings, layout_ctx):
+		var station_pos: Vector3 = station["position"]
+		var part := _place_weapon(type_id, hull.global_position + station_pos,
+			station["normal"], false, station["geo"])
+		if part == null:
+			continue
+		# _place_weapon() aligns the node to the mount normal and snaps it to a
+		# 0.25m grid; locomotion wants neither - it is laid out analytically and
+		# its meshes are authored already-oriented.
+		part.scale = node_scale
+		part.rotation = Vector3.ZERO
+		if station["has_final_position"]:
+			part.position = station["final_position"]
+		if part.has_meta("module_data"):
+			part.get_meta("module_data").scale_multiplier = scale_mult
+		for meta_key in station["meta"]:
+			part.set_meta(meta_key, station["meta"][meta_key])
+		if station["mirror"]:
+			part.set_meta("scale_flip_x", true)
+			_apply_mirror_flip(part)
+		spawned_wheels.append(part)
 
-		var x_offset = (hull_size.x / 2.0) + (0.15 * wheel_size)
-		var z_limit = hull_size.z * 0.35
-		var wheel_y = -hull_size.y / 2.0 + underside_y_bias
-
-		for side in [-1.0, 1.0]:
-			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			for i in range(half_count):
-				var z_pos = 0.0
-				if half_count > 1:
-					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
-
-				var pos = hull.global_position + Vector3(x_offset * side, wheel_y, z_pos)
-				var wheel = _place_weapon(type_id, pos, Vector3.UP, false, geo_tweaks)
-				if wheel:
-					wheel.scale = Vector3.ONE
-					wheel.position = Vector3(x_offset * side, wheel_y, z_pos)
-					wheel.rotation = Vector3.ZERO
-					if wheel.has_meta("module_data"):
-						wheel.get_meta("module_data").scale_multiplier = Vector3.ONE
-					if side < 0:
-						wheel.set_meta("scale_flip_x", true)
-						_apply_mirror_flip(wheel)
-					spawned_wheels.append(wheel)
-
-	elif type_id == "tracked_treads":
-		var width = settings.get("tread_width", settings.get("width", settings.get("size", 1.0)))
-		var sprocket = settings.get("drive_sprocket", true)
-		# The tread's own catalog size.z (2.5, a small placeholder) has
-		# nothing to do with the actual hull it's mounted on - _build_
-		# tracked_treads() was sizing the whole loop off that fixed catalog
-		# value regardless of hull length, which is why it rendered as a
-		# small oval under hulls of any size. Pass the hull's own real
-		# length through instead: _build_tracked_treads() snaps the loop's
-		# total length to it (sprockets centered at the hull's own front/
-		# rear ends - extending past the hull is fine, per Chris) and scales
-		# height/width up proportionately from there.
-		var geo_tweaks = {"tread_width": width, "drive_sprocket": sprocket, "target_length": hull_size.z}
-
-		var x_offset = running_gear_size.x / 2.0
-		var y_offset = -hull_size.y / 2.0 - running_gear_size.y / 2.0
-
-		for side in [-1.0, 1.0]:
-			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			var pos = hull.global_position + Vector3(x_offset * side, y_offset, 0.0)
-			var tread = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
-			if tread:
-				# tread_width is already baked into each sub-part's own scale
-				# inside _build_tracked_treads() - scaling the outer module
-				# node too would double-apply it (geometry) and double-count
-				# it in module_data.get_weight()/get_cost(), which already
-				# read tread_width straight out of the tweaks dict.
-				tread.scale = Vector3.ONE
-				tread.rotation = Vector3.ZERO
-				if tread.has_meta("module_data"):
-					tread.get_meta("module_data").scale_multiplier = Vector3.ONE
-				if side < 0:
-					tread.set_meta("scale_flip_x", true)
-					_apply_mirror_flip(tread)
-				spawned_wheels.append(tread)
-
-	elif type_id == "helicopter_rotors":
-		var blade_count = settings.get("blade_count", 4.0)
-		var blade_length = settings.get("blade_length", settings.get("size", 1.0))
-		var duct = settings.get("duct", false)
-		var count = settings.get("rotor_units", settings.get("count", 4))
-		if count < 2: count = 2
-		if count % 2 != 0: count += 1
-		var half_count = int(count / 2)
-
-		var x_offset = hull_size.x / 2.0 + 1.2
-		var y_offset = hull_size.y / 2.0 + 0.3
-		var z_limit = hull_size.z * 0.35
-
-		for side in [-1.0, 1.0]:
-			var side_normal = Vector3.UP
-			# mount_side/mount_reach_x/mount_reach_y tell _build_helicopter_
-			# rotors() where "the hull" actually is in its own local space -
-			# unlike wheels/tracked_treads, rotors were never mirror-flipped
-			# (the mast+blade ring is already rotationally symmetric), so this
-			# is the first rotor geometry that needs to know its own mount
-			# geometry. The mounting pylon needs the FULL x_offset/y_offset
-			# (the exact distance back to the hull's own center, i.e. its
-			# Z-axis centerline), not just the fixed 1.2/0.3 constants added
-			# on top of the hull's half-extents - a pylon that only reached
-			# back to the hull's near EDGE by that fixed amount visually
-			# stopped short of the hull for anything but the smallest hulls
-			# (Chris's ask: root it all the way to the physical center).
-			var geo_tweaks = {"blade_count": blade_count, "blade_length": blade_length, "duct": duct, "mount_side": side, "mount_reach_x": x_offset, "mount_reach_y": y_offset}
-			for i in range(half_count):
-				var z_pos = 0.0
-				if half_count > 1:
-					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
-
-				var pos = hull.global_position + Vector3(x_offset * side, y_offset, z_pos)
-				var rotor = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
-				if rotor:
-					# blade_length is already baked into the blade/duct sub-part
-					# scales inside _build_helicopter_rotors() - scaling the
-					# outer node too would also stretch the mast/hub/mount
-					# (which aren't supposed to track blade_length at all) and
-					# double-count blade_length in module_data's weight/cost.
-					rotor.scale = Vector3.ONE
-					rotor.rotation = Vector3.ZERO
-					if rotor.has_meta("module_data"):
-						rotor.get_meta("module_data").scale_multiplier = Vector3.ONE
-					spawned_wheels.append(rotor)
-					
-	elif type_id == "hover_engine":
-		# Scifi concentric-ring redesign (Chris's ask): pad_count (4-8)
-		# replaces the old fixed-4-corners layout, distributed evenly
-		# around an ellipse - pushed OUTBOARD (hull half-extent + the pad's
-		# own footprint radius, same "half-extent + fixed clearance"
-		# convention helicopter_rotors' x_offset/y_offset already use) so
-		# the fore/aft and port/starboard pads clear the hull's visual mesh
-		# entirely instead of sitting enmeshed underneath it. Since every
-		# pad is now three rotationally-symmetric rings (no fan/skirt
-		# asymmetry left), there's nothing left to mirror-flip either.
-		var emv = settings.get("emv_level", settings.get("size", 1.0))
-		var count = int(settings.get("pad_count", 4))
-		count = clamp(count, 4, 8)
-		var pad_radius = catalog_data.get("size", Vector3.ONE).x * 0.5
-		var x_radius = hull_size.x / 2.0 + pad_radius
-		var z_radius = hull_size.z / 2.0 + pad_radius
-		var y_offset = -hull_size.y / 2.0 + underside_y_bias
-		for i in range(count):
-			var angle = i * TAU / float(count)
-			var p = Vector3(cos(angle) * x_radius, y_offset, sin(angle) * z_radius)
-			# Reach FROM the pad's own local origin BACK to the hull's
-			# physical center - passed through so _build_hover_engine() can
-			# root a flattened mounting pylon (mount_strut_flat, ~3x as wide
-			# as it is thick, per Chris's ask - a flattened version of
-			# helicopter_rotors' tapered strut) all the way back to the
-			# hull, same "extend to the center, not just the near edge"
-			# fix the rotor pylons already got.
-			var reach = -p
-			var geo_tweaks = {"emv_level": emv, "mount_reach_x": reach.x, "mount_reach_y": reach.y, "mount_reach_z": reach.z}
-			var hover = _place_weapon(type_id, hull.global_position + p, Vector3.DOWN, false, geo_tweaks)
-			if hover:
-				# emv_level is already baked into the ring sub-part scales
-				# inside _build_hover_engine() - see the tracked_treads
-				# comment above for why the outer node stays unscaled.
-				hover.scale = Vector3.ONE
-				# The rings need to stay level with the ground (Chris: "the
-				# outer one staying horizontal") regardless of the DOWN
-				# mount normal _align_up_to() used above to place them
-				# against the hull's underside - unlike the old fan/skirt
-				# visual, which was deliberately oriented to face outward
-				# along that normal.
-				hover.rotation = Vector3.ZERO
-				if hover.has_meta("module_data"):
-					hover.get_meta("module_data").scale_multiplier = Vector3.ONE
-				spawned_wheels.append(hover)
-
-	elif type_id == "legs":
-		var leg_length = settings.get("leg_length", settings.get("size", 1.0))
-		var foot_size = settings.get("foot_size", 1.0)
-		var count = settings.get("leg_count", settings.get("count", 4))
-		if count < 2: count = 2
-		if count % 2 != 0: count += 1
-		var half_count = int(count / 2)
-		# Wider stance (Chris's ask): the foot should land 1.3x the hull's
-		# own width out from the centerline, i.e. 0.8x hull width FARTHER
-		# than the hip mount already sits (hip mount is ~0.5x hull width
-		# out - half the hull's width - so 0.5 + 0.8 = 1.3). The hip joint
-		# itself stays flush against the hull (x_offset, unchanged below) -
-		# only the thigh/shin/foot/ankle assembly splays outward from
-		# there, via leg_stance_reach in _build_legs(), for a real angled
-		# "wide stance" look instead of just moving the whole mount out
-		# (which would leave the hip floating off the hull, same problem
-		# the rotor/hover pylons had to fix).
-		var x_offset = running_gear_size.x / 2.0
-		var z_limit = hull_size.z * 0.35
-		var leg_y = -hull_size.y / 2.0 - running_gear_size.y / 2.0 - (catalog_data.get("size", Vector3.ONE).y * leg_length) / 2.0
-		# Distance from the leg module's OWN local origin (near the foot) up
-		# to the hull's own vertical centerline (its Z-axis running through
-		# the hull's true middle) - leg_y above is that same reach in the
-		# other direction (hull center down to the leg's origin), so this is
-		# just -leg_y. _build_legs() needs this to raise the knee joint
-		# above the hull's centerline (Chris's ask), since it only knows its
-		# own catalog size, not the hull's.
-		var geo_tweaks = {"leg_length": leg_length, "foot_size": foot_size, "leg_stance_reach": hull_size.x * 0.8, "leg_hull_centerline_y": -leg_y, "knee_height": settings.get("knee_height", 0.375)}
-
-		for side in [-1.0, 1.0]:
-			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			for i in range(half_count):
-				var z_pos = 0.0
-				if half_count > 1:
-					z_pos = -z_limit + (2.0 * z_limit * i) / (half_count - 1)
-
-				var pos = hull.global_position + Vector3(x_offset * side, -hull_size.y / 2.0 + underside_y_bias, z_pos)
-				var leg = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
-				if leg:
-					leg.rotation = Vector3.ZERO
-					# leg_length/foot_size are already baked into the
-					# thigh/shin/foot/mount sub-part scales inside
-					# _build_legs() - see the tracked_treads comment above.
-					# hull_height_factor still legitimately belongs on the
-					# outer node since _build_legs() has no notion of hull
-					# size, only leg_length.
-					leg.scale = Vector3(1.0, hull_height_factor, 1.0)
-					leg.position = Vector3(x_offset * side, leg_y, z_pos)
-					if leg.has_meta("module_data"):
-						leg.get_meta("module_data").scale_multiplier = Vector3.ONE
-					# Alternating walk-cycle phase (Chris's ask: simple
-					# oscillation, not full IK) - a checkerboard across the
-					# side/front-back grid, so adjacent legs (front-left vs
-					# front-right, front-left vs back-left) swing opposite
-					# ways like a real trot, read by battle_unit.gd/
-					# battlefield.gd's LegSwing animation.
-					var side_idx = 0 if side < 0.0 else 1
-					leg.set_meta("leg_phase", PI if (side_idx + i) % 2 == 1 else 0.0)
-					if side < 0:
-						leg.set_meta("scale_flip_x", true)
-						_apply_mirror_flip(leg)
-					spawned_wheels.append(leg)
-
-	elif type_id == "fixed_wing_engine":
-		# Redesign (Chris's ask): engine_count (2-6) replaces the old fixed
-		# left/right pair, distributed radially/elliptically around the
-		# hull's Z axis (fore-aft) instead of the Y axis (up-down) - the
-		# ring now lies in the hull's X/Y (width/height) cross-section, all
-		# engines sitting at the same fore-aft station and facing forward
-		# together, like a radial engine cluster viewed nose-on, rather
-		# than spread out fore/aft at a single height. angle=0 lands the
-		# first engine at pure +X and angle=PI at pure -X, so engine_count=2
-		# still reproduces the old exact left/right layout with no special-
-		# casing needed. Every engine is mounted on a pylon reaching back to
-		# the hull's own center (same "extend all the way to the center"
-		# fix the rotor/hover pylons already got - now with a Y component
-		# too, since the ring can place engines above/below hull center),
-		# so there's nothing left to mirror-flip either - the nacelle/fan/
-		# core/exhaust stack is already rotationally symmetric, same as
-		# rotors/hover.
-		var turbine_compression = settings.get("turbine_compression", 1.0)
-		var afterburner = settings.get("afterburner", false)
-		var count = int(settings.get("engine_count", settings.get("count", 2)))
-		count = clamp(count, 2, 6)
-		var x_radius = hull_size.x / 2.0 + 0.4
-		var y_radius = hull_size.y / 2.0 + 0.4
-		var z_offset = hull_size.z * 0.15
-		for i in range(count):
-			var angle = i * TAU / float(count)
-			var p = Vector3(cos(angle) * x_radius, sin(angle) * y_radius, z_offset)
-			var reach = -p
-			var geo_tweaks = {"turbine_compression": turbine_compression, "afterburner": afterburner, "mount_reach_x": reach.x, "mount_reach_y": reach.y, "mount_reach_z": reach.z}
-			var engine = _place_weapon(type_id, hull.global_position + p, Vector3.RIGHT, false, geo_tweaks)
-			if engine:
-				# turbine_compression is already baked into the core/
-				# nacelle/fan/exhaust sub-part scales inside
-				# _build_fixed_wing_engine() - see the tracked_treads
-				# comment above.
-				engine.scale = Vector3.ONE
-				engine.rotation = Vector3.ZERO
-				if engine.has_meta("module_data"):
-					engine.get_meta("module_data").scale_multiplier = Vector3.ONE
-				spawned_wheels.append(engine)
-
-	elif type_id == "ornithopter_wing":
-		var wingspan = settings.get("wingspan", settings.get("size", 1.0))
-		var geo_tweaks = {"wingspan": wingspan}
-		var x_offset = (hull_size.x / 2.0 + 0.3 * wingspan)
-		var y_offset = hull_size.y * 0.1
-		for side in [-1.0, 1.0]:
-			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			var pos = hull.global_position + Vector3(x_offset * side, y_offset, hull_size.z * 0.05)
-			var wing = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
-			if wing:
-				# Whole-assembly 2x scale-up (Chris's ask, 2026-07-24),
-				# fore-aft/left-right (X/Z) only - Y left at 1.0 so the
-				# gearbox/wings don't also get twice as thick. This DOES
-				# scale the gearbox along with the wings (unlike wingspan,
-				# which only stretches the membrane/rib sub-parts inside
-				# _build_ornithopter_wing() and deliberately leaves the
-				# shoulder alone) - that's the point here, a uniform
-				# enlargement of the whole node, not a per-tweak reshape.
-				wing.scale = Vector3(2.0, 1.0, 2.0)
-				wing.rotation = Vector3.ZERO
-				if wing.has_meta("module_data"):
-					wing.get_meta("module_data").scale_multiplier = wing.scale
-				if side < 0:
-					wing.set_meta("scale_flip_x", true)
-					_apply_mirror_flip(wing)
-				spawned_wheels.append(wing)
-
-	elif type_id == "naval_propeller":
-		# Pylon-mounted stern rebuild (Chris's ask, 2026-07-24): the
-		# propeller used to spawn at hull_size.z*0.42, comfortably INSIDE
-		# the hull's own collision box on most hull shapes - completely
-		# invisible, buried in the hull mesh. Now placed well AFT of the
-		# hull's own boundary (hull_size.z*0.5 + a flat clearance), reached
-		# by a pylon whose wide end anchors back at the hull's own
-		# geometric center (mount_reach, same reach-vector technique
-		# fixed_wing_engine/hover_engine/helicopter_rotors already use) -
-		# see _build_pylon_mounted_propeller() in visual_builder.gd.
-		var blade_count = settings.get("blade_count", 3.0)
-		var blade_pitch = settings.get("blade_pitch", 1.0)
-		var count = int(settings.get("prop_count", settings.get("count", 2)))
-		count = clamp(count, 1, 5)
-		var x_limit = hull_size.x * 0.3
-		var z_end = hull_size.z * 0.5 + 0.6
-		var y_offset = -hull_size.y * 0.15
-		for i in range(count):
-			var x_pos = 0.0
-			if count > 1:
-				x_pos = -x_limit + (2.0 * x_limit * i) / (count - 1)
-			var p = Vector3(x_pos, y_offset, z_end)
-			var reach = -p
-			var geo_tweaks = {"blade_count": blade_count, "blade_pitch": blade_pitch, "mount_reach_x": reach.x, "mount_reach_y": reach.y, "mount_reach_z": reach.z}
-			var prop = _place_weapon(type_id, hull.global_position + p, Vector3.BACK, false, geo_tweaks)
-			if prop:
-				# The hub/blades/pylon are built from the reach vector and
-				# are already rotationally symmetric about their own axis
-				# (same as fixed_wing_engine/hover_engine) - nothing left
-				# to mirror-flip, unlike the old fixed side-mount design.
-				prop.scale = Vector3.ONE
-				prop.rotation = Vector3.ZERO
-				if prop.has_meta("module_data"):
-					prop.get_meta("module_data").scale_multiplier = Vector3.ONE
-				spawned_wheels.append(prop)
-
-	elif type_id == "buoyant_envelope":
-		# Same pylon-mounted stern rebuild as naval_propeller above (Chris's
-		# ask, 2026-07-24) - the old side-mounted pair floated inside the
-		# airship envelope's own silhouette. Now a stern-mounted cruise-
-		# prop cluster, same reach-vector pylon technique, sitting near the
-		# hull's vertical center (a gondola-height cruise motor, not
-		# underwater like naval_propeller).
-		var blade_count = settings.get("blade_count", 3.0)
-		var blade_pitch = settings.get("blade_pitch", 1.0)
-		var count = int(settings.get("prop_count", settings.get("count", 2)))
-		count = clamp(count, 1, 5)
-		var x_limit = hull_size.x * 0.3
-		var z_end = hull_size.z * 0.5 + 0.6
-		var y_offset = -hull_size.y * 0.05
-		for i in range(count):
-			var x_pos = 0.0
-			if count > 1:
-				x_pos = -x_limit + (2.0 * x_limit * i) / (count - 1)
-			var p = Vector3(x_pos, y_offset, z_end)
-			var reach = -p
-			var geo_tweaks = {"blade_count": blade_count, "blade_pitch": blade_pitch, "mount_reach_x": reach.x, "mount_reach_y": reach.y, "mount_reach_z": reach.z}
-			var envelope_motor = _place_weapon(type_id, hull.global_position + p, Vector3.BACK, false, geo_tweaks)
-			if envelope_motor:
-				envelope_motor.scale = Vector3.ONE
-				envelope_motor.rotation = Vector3.ZERO
-				if envelope_motor.has_meta("module_data"):
-					envelope_motor.get_meta("module_data").scale_multiplier = Vector3.ONE
-				spawned_wheels.append(envelope_motor)
-
-	elif type_id == "screw_drive":
-		# Corner-mounted rebuild (Chris's ask, 2026-07-24, four passes):
-		# drum_count is gone (always one drum per side, like
-		# tracked_treads) - just drum_diameter and helix_depth now. The
-		# drum itself sits down-and-out from the hull's side (drum_offset,
-		# unchanged since pass 2 - that placement already read fine).
-		#
-		# The two pylons (fore/aft) each aim toward the hull's own
-		# geometric center in full 3D now, rather than a single shared,
-		# hand-picked X/Y-only angle - a fixed 20deg-from-vertical lean
-		# undershot this hull's actual footprint and missed it entirely
-		# (Chris's report, 2026-07-24), and had no fore-aft component at
-		# all despite the ask for one. Aiming at hull-local (0,0,0) from
-		# each end and reaching most of the way there (0.8x) instead
-		# reliably drives the brace into the hull's solid volume ("angle
-		# toward the center of the hull in the fore/aft axis... so they
-		# intersect cleanly") regardless of hull proportions, no per-hull
-		# hand-tuning needed. drum_length is the corner-to-corner distance
-		# (unaffected by the reach, which only moves toward hull center)
-		# - the old design scaled off a fixed catalog reference length
-		# that never reached anywhere near the hull's actual ends.
-		#
-		# No mirror-flip: like every other reach-vector-mounted type here,
-		# each side computes its own correctly-signed position and reach
-		# directly, so there's nothing left to mirror.
-		var diameter = settings.get("drum_diameter", settings.get("drum_width", settings.get("size", 1.0)))
-		var depth = settings.get("helix_depth", 1.0)
-		var drum_length = hull_size.z
-		var drum_offset = (hull_size.y * 0.6) / sqrt(2.0) # down-and-out placement for the drum itself, unchanged
-		var half_span = drum_length * 0.5
-		var reach_fraction = 0.8 # how far toward hull-local (0,0,0) each pylon reaches
-		var corner_x = hull_size.x / 2.0
-		for side in [-1.0, 1.0]:
-			var side_normal = Vector3.LEFT if side < 0 else Vector3.RIGHT
-			var drum_x = (corner_x + drum_offset) * side
-			var drum_y = -drum_offset
-			var pos = hull.global_position + Vector3(drum_x, drum_y, 0.0)
-			var fore_end = Vector3(drum_x, drum_y, half_span)
-			var aft_end = Vector3(drum_x, drum_y, -half_span)
-			var fore_reach = -fore_end * reach_fraction
-			var aft_reach = -aft_end * reach_fraction
-			var geo_tweaks = {
-				"drum_diameter": diameter, "helix_depth": depth, "drum_length": drum_length,
-				"mount_reach_fore_x": fore_reach.x, "mount_reach_fore_y": fore_reach.y, "mount_reach_fore_z": fore_reach.z,
-				"mount_reach_aft_x": aft_reach.x, "mount_reach_aft_y": aft_reach.y, "mount_reach_aft_z": aft_reach.z
-			}
-			var drum = _place_weapon(type_id, pos, side_normal, false, geo_tweaks)
-			if drum:
-				# diameter/depth/length are already baked into the drum
-				# sub-part's own scale/variant-choice inside
-				# _build_screw_drive() - see the tracked_treads comment above.
-				drum.scale = Vector3.ONE
-				drum.rotation = Vector3.ZERO
-				if drum.has_meta("module_data"):
-					drum.get_meta("module_data").scale_multiplier = Vector3.ONE
-				spawned_wheels.append(drum)
 
 	# Adjust hull Y position in the editor so the unit sits on its ground
 	# contact. For ground-contact locomotion with a running-gear chassis,

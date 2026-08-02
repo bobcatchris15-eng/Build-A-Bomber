@@ -1,0 +1,436 @@
+extends RefCounted
+class_name LocomotionLayout
+# Where each locomotion type's instances go on a hull, expressed as data.
+#
+# This replaces the ~540-line `if type_id == "wheels": ... elif ...` chain that
+# used to live inside module_placer.gd's update_locomotion(). Every branch of
+# that chain did the same six things - read tweaks, compute a mount pattern,
+# build a geo_tweaks dict, place, reset the node's transform, mirror - and only
+# the second of those was ever genuinely per-type. The other five were
+# copy-pasted ten times, so a fix to one (or a new type that forgot one) drifted
+# silently.
+#
+# Here, a locomotion type is a LAYOUTS entry: which of six mount PATTERNS it
+# uses, the offsets that pattern needs, and which tweak keys it forwards to its
+# mesh builder. Adding a locomotion type is a data declaration; module_placer.gd
+# is not touched. The six patterns cover all ten shipped types and all seven
+# planned in LOCOMOTION_EXPANSION_PLAN.md 4.
+#
+# stations() returns Array[Dictionary], each a MOUNT STATION:
+#   position   - hull-LOCAL offset, before _place_weapon()'s 0.25m grid snap
+#   normal     - surface normal handed to _place_weapon() (also decides which
+#                axes that snap applies to, so it is layout-significant, not
+#                cosmetic)
+#   geo        - the tweaks dict for this instance's mesh builder
+#   side       - -1.0 / +1.0 for paired patterns, 0.0 for radial ones
+#   mirror     - whether this instance gets _apply_mirror_flip()
+#   final_position / has_final_position - see OVERRIDE below
+#   meta       - extra per-instance metadata (legs' walk-cycle phase)
+#
+# OVERRIDE: wheels and legs assign node.position directly after placement,
+# which deliberately bypasses the grid snap _place_weapon() would otherwise
+# apply. That is load-bearing (a snapped wheel row visibly steps in and out),
+# so it is preserved as an explicit per-type flag rather than quietly
+# normalised away.
+
+const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+
+enum Pattern {
+	SIDE_PAIRS,   ## N stations per side, spread along Z. Wheels, legs, treads, rotors, wings.
+	RING_XZ,      ## N stations round a plan-view ellipse. Hover pads, skirts, grav plates.
+	RING_XY,      ## N stations round a nose-on ellipse. Engine clusters.
+	STERN_ROW,    ## N stations in a row aft of the hull. Props, water jets.
+	CORNER_SPAN,  ## One span per side, anchored fore and aft. Screw drums, hydrofoils.
+	ROOF_PAIRS,   ## N stations per side, above the hull. Reserved; rotors use SIDE_PAIRS
+	              ## with a positive Y offset, which is the same thing.
+}
+
+## How a placed instance's node.scale is decided.
+enum ScaleMode {
+	FIXED,        ## Use the layout's `node_scale` verbatim.
+	HULL_HEIGHT,  ## Vector3(1, hull_height_factor, 1) - the part tracks ground clearance.
+}
+
+## Which spelling of the reach vector this type's mesh builder expects. The
+## concept is one thing - "from my own origin back to the hull's centre" - but
+## it shipped in four spellings across six types; they are enumerated here
+## rather than unified, because unifying them means editing visual_builder.gd's
+## builders, which this pass deliberately does not touch.
+enum ReachKeys {
+	NONE,
+	XYZ,        ## mount_reach_x / _y / _z
+	SIDE_XY,    ## mount_side + mount_reach_x / _y (helicopter_rotors)
+	FORE_AFT,   ## mount_reach_fore_* and mount_reach_aft_* (screw_drive)
+}
+
+# --- The table ---------------------------------------------------------
+#
+# Keys, all optional unless noted:
+#   pattern         (required) Pattern enum
+#   count_key       tweak that sets instance count; absent = fixed count
+#   count_fallback  legacy settings key checked before the default
+#   count_default   default when neither key is present
+#   count_min/max   clamp applied to the count
+#   count_even      round odd counts up (paired patterns need an even total)
+#   per_side        stations per side for SIDE_PAIRS when count_key is absent
+#   normal          surface normal, or LEFT/RIGHT per side when `normal_is_side`
+#   geo_keys        tweak names forwarded to the mesh builder, with defaults
+#   reach_keys      ReachKeys enum, default NONE
+#   node_scale      Vector3 assigned to the placed node, default ONE
+#   scale_mode      ScaleMode enum, default FIXED
+#   mirror          mirror-flip instances on the -X side, default false
+#   override_pos    assign node.position directly, bypassing the grid snap
+const LAYOUTS := {
+	"wheels": {
+		"pattern": Pattern.SIDE_PAIRS,
+		"count_key": "num_axles", "count_fallback": "count", "count_default": 4,
+		"count_min": 2, "count_even": true,
+		"geo_keys": {"wheel_size": 1.0, "wheels_per_axle": 1.0},
+		"geo_aliases": {"wheel_size": ["size"]},
+		"normal": Vector3.UP,
+		"mirror": true, "override_pos": true,
+	},
+	"tracked_treads": {
+		"pattern": Pattern.SIDE_PAIRS, "per_side": 1,
+		"geo_keys": {"tread_width": 1.0, "drive_sprocket": true},
+		"geo_aliases": {"tread_width": ["width", "size"]},
+		# The belt snaps its whole loop to the hull's real length rather than
+		# its own (small, placeholder) catalog size.z.
+		"hull_length_geo_key": "target_length",
+		"normal_is_side": true,
+		"mirror": true,
+	},
+	"legs": {
+		"pattern": Pattern.SIDE_PAIRS,
+		"count_key": "leg_count", "count_fallback": "count", "count_default": 4,
+		"count_min": 2, "count_even": true,
+		"geo_keys": {"leg_length": 1.0, "foot_size": 1.0, "knee_height": 0.375},
+		"geo_aliases": {"leg_length": ["size"]},
+		# The hip stays flush against the chassis; only the thigh/shin/foot
+		# chain splays outward, for a wide stance without a floating hip.
+		"stance_geo_key": "leg_stance_reach", "stance_frac": 0.8,
+		# The builder only knows its own catalog size, so it is told how far
+		# up the hull's centreline sits in order to raise the knee above it.
+		"centerline_geo_key": "leg_hull_centerline_y",
+		"drop_by_part_length": "leg_length",
+		"normal_is_side": true,
+		"mirror": true, "override_pos": true,
+		"scale_mode": ScaleMode.HULL_HEIGHT,
+	},
+	"helicopter_rotors": {
+		"pattern": Pattern.SIDE_PAIRS,
+		"count_key": "rotor_units", "count_fallback": "count", "count_default": 4,
+		"count_min": 2, "count_even": true,
+		"geo_keys": {"blade_count": 4.0, "blade_length": 1.0, "duct": false},
+		"geo_aliases": {"blade_length": ["size"]},
+		"normal": Vector3.UP, "reach_keys": ReachKeys.SIDE_XY,
+	},
+	"ornithopter_wing": {
+		"pattern": Pattern.SIDE_PAIRS, "per_side": 1,
+		"geo_keys": {"wingspan": 1.0},
+		"geo_aliases": {"wingspan": ["size"]},
+		"normal_is_side": true,
+		"mirror": true, "node_scale": Vector3(2.0, 1.0, 2.0),
+	},
+	"hover_engine": {
+		"pattern": Pattern.RING_XZ,
+		"count_key": "pad_count", "count_default": 4, "count_min": 4, "count_max": 8,
+		"geo_keys": {"emv_level": 1.0},
+		"geo_aliases": {"emv_level": ["size"]},
+		"normal": Vector3.DOWN, "reach_keys": ReachKeys.XYZ,
+	},
+	"fixed_wing_engine": {
+		"pattern": Pattern.RING_XY,
+		"count_key": "engine_count", "count_fallback": "count", "count_default": 2,
+		"count_min": 2, "count_max": 6,
+		"geo_keys": {"turbine_compression": 1.0, "afterburner": false},
+		"normal": Vector3.RIGHT, "reach_keys": ReachKeys.XYZ,
+	},
+	"naval_propeller": {
+		"pattern": Pattern.STERN_ROW,
+		"count_key": "prop_count", "count_fallback": "count", "count_default": 2,
+		"count_min": 1, "count_max": 5,
+		"geo_keys": {"blade_count": 3.0, "blade_pitch": 1.0},
+		"normal": Vector3.BACK, "reach_keys": ReachKeys.XYZ,
+	},
+	"buoyant_envelope": {
+		"pattern": Pattern.STERN_ROW,
+		"count_key": "prop_count", "count_fallback": "count", "count_default": 2,
+		"count_min": 1, "count_max": 5,
+		"geo_keys": {"blade_count": 3.0, "blade_pitch": 1.0},
+		"normal": Vector3.BACK, "reach_keys": ReachKeys.XYZ,
+	},
+	"screw_drive": {
+		"pattern": Pattern.CORNER_SPAN,
+		"geo_keys": {"drum_diameter": 1.0, "helix_depth": 1.0},
+		"geo_aliases": {"drum_diameter": ["drum_width", "size"]},
+		"normal_is_side": true, "reach_keys": ReachKeys.FORE_AFT,
+	},
+}
+
+## Per-pattern geometry. Kept out of LAYOUTS because these are the numbers a
+## designer tunes when a part reads wrong against a hull, and they want to be
+## findable as a block rather than scattered through the table.
+const GEOMETRY := {
+	# SIDE_PAIRS: how far outboard, how high, how far fore/aft the row spreads.
+	"wheels":            {"x_pad": 0.15, "x_pad_scales_with": "wheel_size", "y": "underside", "z_span": 0.35},
+	"tracked_treads":    {"x_from": "running_gear", "y": "below_gear", "z_span": 0.0},
+	"legs":              {"x_from": "running_gear", "y": "underside", "z_span": 0.35},
+	"helicopter_rotors": {"x_pad": 1.2, "y_pad": 0.3, "y": "topside", "z_span": 0.35},
+	"ornithopter_wing":  {"x_pad": 0.3, "x_pad_scales_with": "wingspan", "y_frac": 0.1, "z_frac": 0.05},
+	# RING_*: ellipse radii and the fixed offset on the third axis.
+	"hover_engine":      {"pad_from_catalog": true, "y": "underside"},
+	"fixed_wing_engine": {"x_pad": 0.4, "y_pad": 0.4, "z_frac": 0.15},
+	# STERN_ROW: how wide the row spreads, how far aft, how high.
+	"naval_propeller":   {"x_frac": 0.3, "z_clearance": 0.6, "y_frac": -0.15},
+	"buoyant_envelope":  {"x_frac": 0.3, "z_clearance": 0.6, "y_frac": -0.05},
+	# CORNER_SPAN: the drum's down-and-out offset, and how far each end brace
+	# reaches toward the hull's own centre.
+	"screw_drive":       {"drum_offset_frac": 0.6, "reach_fraction": 0.8},
+}
+
+static func has_layout(type_id: String) -> bool:
+	return LAYOUTS.has(type_id)
+
+static func get_layout(type_id: String) -> Dictionary:
+	return LAYOUTS.get(type_id, {})
+
+static func node_scale_for(type_id: String, hull_height_factor: float) -> Vector3:
+	var spec: Dictionary = LAYOUTS.get(type_id, {})
+	if int(spec.get("scale_mode", ScaleMode.FIXED)) == ScaleMode.HULL_HEIGHT:
+		return Vector3(1.0, hull_height_factor, 1.0)
+	return spec.get("node_scale", Vector3.ONE)
+
+## scale_multiplier exists so module_data's weight/cost read the same factor the
+## geometry got. A hull-relative factor is NOT a design choice the player made,
+## so it stays out; a deliberate whole-assembly enlargement (ornithopter_wing's
+## 2x) is one, so it goes in. That split used to be a per-branch judgement call.
+static func scale_multiplier_for(type_id: String) -> Vector3:
+	var spec: Dictionary = LAYOUTS.get(type_id, {})
+	if int(spec.get("scale_mode", ScaleMode.FIXED)) == ScaleMode.HULL_HEIGHT:
+		return Vector3.ONE
+	return spec.get("node_scale", Vector3.ONE)
+
+static func _resolve_count(spec: Dictionary, settings: Dictionary) -> int:
+	if not spec.has("count_key"):
+		return int(spec.get("per_side", 1))
+	var raw = settings.get(spec["count_key"], null)
+	if raw == null and spec.has("count_fallback"):
+		raw = settings.get(spec["count_fallback"], null)
+	if raw == null:
+		raw = spec.get("count_default", 1)
+	var n := int(raw)
+	if spec.has("count_min"):
+		n = max(n, int(spec["count_min"]))
+	if spec.has("count_max"):
+		n = min(n, int(spec["count_max"]))
+	if bool(spec.get("count_even", false)) and n % 2 != 0:
+		n += 1
+	return n
+
+## Resolves the tweaks a type's mesh builder reads.
+##
+## `geo_aliases` matters more than it looks: before the modular rebuild every
+## locomotion type had one universal "size" tweak, and a few types still accept
+## that spelling (and, for treads and screws, an intermediate one) so old
+## blueprints keep loading. Those aliases are per-KEY, not per-type - "size"
+## means wheel radius on wheels and blade length on rotors, but it has never
+## meant blade COUNT or the afterburner toggle. Applying it to every key would
+## quietly let a legacy `{"size": 2.0}` set `blade_count` to 2.
+static func _resolve_geo(spec: Dictionary, settings: Dictionary) -> Dictionary:
+	var geo := {}
+	var aliases: Dictionary = spec.get("geo_aliases", {})
+	for key in spec.get("geo_keys", {}):
+		var value = settings.get(key, null)
+		if value == null:
+			for alias in aliases.get(key, []):
+				value = settings.get(alias, null)
+				if value != null:
+					break
+		if value == null:
+			value = spec["geo_keys"][key]
+		geo[key] = value
+	return geo
+
+static func _apply_reach(geo: Dictionary, spec: Dictionary, reach: Vector3,
+		side: float, fore: Vector3 = Vector3.ZERO, aft: Vector3 = Vector3.ZERO) -> void:
+	match int(spec.get("reach_keys", ReachKeys.NONE)):
+		ReachKeys.XYZ:
+			geo["mount_reach_x"] = reach.x
+			geo["mount_reach_y"] = reach.y
+			geo["mount_reach_z"] = reach.z
+		ReachKeys.SIDE_XY:
+			geo["mount_side"] = side
+			geo["mount_reach_x"] = reach.x
+			geo["mount_reach_y"] = reach.y
+		ReachKeys.FORE_AFT:
+			geo["mount_reach_fore_x"] = fore.x
+			geo["mount_reach_fore_y"] = fore.y
+			geo["mount_reach_fore_z"] = fore.z
+			geo["mount_reach_aft_x"] = aft.x
+			geo["mount_reach_aft_y"] = aft.y
+			geo["mount_reach_aft_z"] = aft.z
+		_:
+			pass
+
+static func _station(pos: Vector3, normal: Vector3, geo: Dictionary, side: float,
+		mirror: bool) -> Dictionary:
+	return {
+		"position": pos, "normal": normal, "geo": geo, "side": side,
+		"mirror": mirror, "has_final_position": false,
+		"final_position": Vector3.ZERO, "meta": {},
+	}
+
+## The whole layout, for one type on one hull.
+##
+## `ctx` carries what only the placer knows: hull_size, running_gear_size,
+## underside_y_bias, and the locomotion type's own catalog size.
+static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> Array:
+	var spec: Dictionary = LAYOUTS.get(type_id, {})
+	if spec.is_empty():
+		return []
+	var geom: Dictionary = GEOMETRY.get(type_id, {})
+	var hull_size: Vector3 = ctx.get("hull_size", ModuleCatalog.REFERENCE_HULL_SIZE)
+	var gear: Vector3 = ctx.get("running_gear_size", Vector3.ZERO)
+	var bias: float = ctx.get("underside_y_bias", 0.0)
+	var cat_size: Vector3 = ctx.get("catalog_size", Vector3.ONE)
+	var geo_base := _resolve_geo(spec, settings)
+	var out: Array = []
+
+	match int(spec["pattern"]):
+		Pattern.SIDE_PAIRS, Pattern.ROOF_PAIRS:
+			var per_side := int(spec.get("per_side", 0))
+			if per_side == 0:
+				per_side = int(_resolve_count(spec, settings) / 2)
+			var x_offset := 0.0
+			if geom.get("x_from", "") == "running_gear":
+				x_offset = gear.x / 2.0
+			else:
+				var pad := float(geom.get("x_pad", 0.0))
+				if geom.has("x_pad_scales_with"):
+					pad *= float(geo_base.get(geom["x_pad_scales_with"], 1.0))
+				x_offset = hull_size.x / 2.0 + pad
+			var y := 0.0
+			match geom.get("y", ""):
+				"underside": y = -hull_size.y / 2.0 + bias
+				"below_gear": y = -hull_size.y / 2.0 - gear.y / 2.0
+				"topside": y = hull_size.y / 2.0 + float(geom.get("y_pad", 0.0))
+				_: y = hull_size.y * float(geom.get("y_frac", 0.0))
+			var z_base := hull_size.z * float(geom.get("z_frac", 0.0))
+			var z_limit := hull_size.z * float(geom.get("z_span", 0.0))
+
+			# Types whose part spans or hangs off the hull need to be told the
+			# hull's own dimensions - their builders see only their catalog size.
+			if spec.has("hull_length_geo_key"):
+				geo_base[spec["hull_length_geo_key"]] = hull_size.z
+			if spec.has("stance_geo_key"):
+				geo_base[spec["stance_geo_key"]] = hull_size.x * float(spec.get("stance_frac", 0.0))
+			# A part that hangs BELOW the chassis (a leg) sits at its own
+			# half-length under it, rather than at the hull's underside.
+			var final_y := y
+			var has_final := bool(spec.get("override_pos", false))
+			if spec.has("drop_by_part_length"):
+				var part_len := float(geo_base.get(spec["drop_by_part_length"], 1.0))
+				final_y = -hull_size.y / 2.0 - gear.y / 2.0 - (cat_size.y * part_len) / 2.0
+			if spec.has("centerline_geo_key"):
+				geo_base[spec["centerline_geo_key"]] = -final_y
+
+			for side in [-1.0, 1.0]:
+				var normal: Vector3 = spec.get("normal", Vector3.UP)
+				if bool(spec.get("normal_is_side", false)):
+					normal = Vector3.LEFT if side < 0.0 else Vector3.RIGHT
+				for i in range(per_side):
+					var z_pos := z_base
+					if per_side > 1:
+						z_pos = -z_limit + (2.0 * z_limit * i) / (per_side - 1)
+					var pos := Vector3(x_offset * side, y, z_pos)
+					var geo := geo_base.duplicate()
+					# helicopter_rotors' pylon reach is the UNSIGNED distance
+					# back to the hull's centreline on each axis - the builder
+					# applies mount_side itself.
+					_apply_reach(geo, spec, Vector3(x_offset, y, 0.0), side)
+					var st := _station(pos, normal, geo, side,
+						bool(spec.get("mirror", false)) and side < 0.0)
+					st["index"] = i
+					if has_final:
+						st["has_final_position"] = true
+						st["final_position"] = Vector3(pos.x, final_y, pos.z)
+					# Alternating walk-cycle phase: a checkerboard across the
+					# side/fore-aft grid, so adjacent legs swing opposite ways
+					# like a real trot. Read by battle_unit.gd's LegSwing.
+					if spec.has("drop_by_part_length"):
+						var side_idx := 0 if side < 0.0 else 1
+						st["meta"]["leg_phase"] = PI if (side_idx + i) % 2 == 1 else 0.0
+					out.append(st)
+
+		Pattern.RING_XZ:
+			var n := _resolve_count(spec, settings)
+			var pad_radius := 0.0
+			if bool(geom.get("pad_from_catalog", false)):
+				pad_radius = cat_size.x * 0.5
+			var x_radius := hull_size.x / 2.0 + pad_radius
+			var z_radius := hull_size.z / 2.0 + pad_radius
+			var y := -hull_size.y / 2.0 + bias
+			for i in range(n):
+				var angle := i * TAU / float(n)
+				var p := Vector3(cos(angle) * x_radius, y, sin(angle) * z_radius)
+				var geo := geo_base.duplicate()
+				_apply_reach(geo, spec, -p, 0.0)
+				var st := _station(p, spec.get("normal", Vector3.DOWN), geo, 0.0, false)
+				st["index"] = i
+				out.append(st)
+
+		Pattern.RING_XY:
+			var n := _resolve_count(spec, settings)
+			var x_radius := hull_size.x / 2.0 + float(geom.get("x_pad", 0.0))
+			var y_radius := hull_size.y / 2.0 + float(geom.get("y_pad", 0.0))
+			var z_offset := hull_size.z * float(geom.get("z_frac", 0.0))
+			for i in range(n):
+				var angle := i * TAU / float(n)
+				var p := Vector3(cos(angle) * x_radius, sin(angle) * y_radius, z_offset)
+				var geo := geo_base.duplicate()
+				_apply_reach(geo, spec, -p, 0.0)
+				var st := _station(p, spec.get("normal", Vector3.RIGHT), geo, 0.0, false)
+				st["index"] = i
+				out.append(st)
+
+		Pattern.STERN_ROW:
+			var n := _resolve_count(spec, settings)
+			var x_limit := hull_size.x * float(geom.get("x_frac", 0.3))
+			var z_end := hull_size.z * 0.5 + float(geom.get("z_clearance", 0.0))
+			var y := hull_size.y * float(geom.get("y_frac", 0.0))
+			for i in range(n):
+				var x_pos := 0.0
+				if n > 1:
+					x_pos = -x_limit + (2.0 * x_limit * i) / (n - 1)
+				var p := Vector3(x_pos, y, z_end)
+				var geo := geo_base.duplicate()
+				_apply_reach(geo, spec, -p, 0.0)
+				var st := _station(p, spec.get("normal", Vector3.BACK), geo, 0.0, false)
+				st["index"] = i
+				out.append(st)
+
+		Pattern.CORNER_SPAN:
+			var span_length := hull_size.z
+			var drum_offset := (hull_size.y * float(geom.get("drum_offset_frac", 0.6))) / sqrt(2.0)
+			var half_span := span_length * 0.5
+			var reach_fraction := float(geom.get("reach_fraction", 0.8))
+			var corner_x := hull_size.x / 2.0
+			for side in [-1.0, 1.0]:
+				var normal: Vector3 = Vector3.LEFT if side < 0.0 else Vector3.RIGHT
+				if not bool(spec.get("normal_is_side", false)):
+					normal = spec.get("normal", Vector3.UP)
+				var drum_x: float = (corner_x + drum_offset) * side
+				var drum_y := -drum_offset
+				var fore_end := Vector3(drum_x, drum_y, half_span)
+				var aft_end := Vector3(drum_x, drum_y, -half_span)
+				var geo := geo_base.duplicate()
+				geo["drum_length"] = span_length
+				_apply_reach(geo, spec, Vector3.ZERO, side,
+					-fore_end * reach_fraction, -aft_end * reach_fraction)
+				var st := _station(Vector3(drum_x, drum_y, 0.0), normal, geo, side,
+					bool(spec.get("mirror", false)) and side < 0.0)
+				st["index"] = 0
+				out.append(st)
+
+	return out

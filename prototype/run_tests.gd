@@ -124,6 +124,10 @@ func _init():
 		success = false
 		_failed.append("test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion")
 	_total_suites += 1
+	if not await _run_suite(test_locomotion_layout_matches_golden_fixture, "test_locomotion_layout_matches_golden_fixture"):
+		success = false
+		_failed.append("test_locomotion_layout_matches_golden_fixture")
+	_total_suites += 1
 	if not await _run_suite(test_locomotion_tweak_parity, "test_locomotion_tweak_parity"):
 		success = false
 		_failed.append("test_locomotion_tweak_parity")
@@ -13655,4 +13659,138 @@ func test_baked_module_visuals_carry_lods() -> bool:
 		return false
 	await process_frame
 	print("  [PASS] A %d-triangle merged module keeps full detail at LOD 0 and sheds to %d triangles across %d levels." % [full, coarsest, levels])
+	return true
+
+# --- Golden locomotion layout fixture -----------------------------------
+# Frozen output of module_placer.gd's update_locomotion() as it stood at
+# ff757ef, captured by scratch/probe_locomotion_layout.gd across three hull
+# sizes for all ten types.
+#
+# The point is not that these numbers are right - several are the residue of
+# a long tail of hand-tuned visual fixes (the comments inside
+# update_locomotion() read as a changelog of them). The point is that they
+# are what the game currently looks like, and the placement factoring
+# (LOCOMOTION_EXPANSION_PLAN.md 2.3) has to reproduce them EXACTLY, so that
+# a 540-line elif chain can be replaced without silently undoing one of
+# those fixes. Any intentional change to placement updates this fixture in
+# its own commit, with the delta explained - never as a side effect of a
+# refactor.
+const GOLDEN_LOCOMOTION_LAYOUT := {
+	"small": {
+		"wheels": {"hull_y": 1.1400, "stations": [[Vector3(-1.1500, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-1.1500, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.1500, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.1500, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"tracked_treads": {"hull_y": 1.1400, "stations": [[Vector3(-0.9500, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.9500, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"legs": {"hull_y": 1.1400, "stations": [[Vector3(-0.9500, -1.1700, -1.0500), Vector3(1.0000, 0.6000, 1.0000)], [Vector3(-0.9500, -1.1700, 1.0500), Vector3(1.0000, 0.6000, 1.0000)], [Vector3(0.9500, -1.1700, -1.0500), Vector3(1.0000, 0.6000, 1.0000)], [Vector3(0.9500, -1.1700, 1.0500), Vector3(1.0000, 0.6000, 1.0000)]]},
+		"hover_engine": {"hull_y": 1.1400, "stations": [[Vector3(-1.5000, -0.3000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.3000, -2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.3000, 2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.5000, -0.3000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-2.2500, 0.6000, -1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-2.2500, 0.6000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.2500, 0.6000, -1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.2500, 0.6000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-1.4000, 0.0000, 0.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.4000, 0.0000, 0.5000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(-1.3000, 0.0000, 0.2500), Vector3(2.0000, 1.0000, 2.0000)], [Vector3(1.3000, 0.0000, 0.2500), Vector3(2.0000, 1.0000, 2.0000)]]},
+		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-0.5000, 0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.5000, 0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-0.5000, 0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.5000, 0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"screw_drive": {"hull_y": 1.1400, "stations": [[Vector3(-1.2546, -0.2500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.2546, -0.2500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+	},
+	"reference": {
+		"wheels": {"hull_y": 1.3000, "stations": [[Vector3(-2.1500, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-2.1500, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.1500, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.1500, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"tracked_treads": {"hull_y": 1.3000, "stations": [[Vector3(-1.9000, -0.7500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.9000, -0.7500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"legs": {"hull_y": 1.3000, "stations": [[Vector3(-1.9000, -1.4500, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-1.9000, -1.4500, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.9000, -1.4500, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.9000, -1.4500, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"hover_engine": {"hull_y": 1.3000, "stations": [[Vector3(-2.5000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.5000, -3.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.5000, 3.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.5000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-3.2500, 0.8000, -2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-3.2500, 0.8000, 2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.2500, 0.8000, -2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.2500, 0.8000, 2.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-2.4000, 0.0000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.4000, 0.0000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(-2.3000, 0.0000, 0.2500), Vector3(2.0000, 1.0000, 2.0000)], [Vector3(2.3000, 0.0000, 0.2500), Vector3(2.0000, 1.0000, 2.0000)]]},
+		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-1.2500, -0.2500, 3.6000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.2500, -0.2500, 3.6000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-1.2500, 0.0000, 3.6000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.2500, 0.0000, 3.6000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"screw_drive": {"hull_y": 1.3000, "stations": [[Vector3(-2.4243, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.4243, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+	},
+	"large": {
+		"wheels": {"hull_y": 1.5000, "stations": [[Vector3(-3.6500, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-3.6500, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.6500, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.6500, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"tracked_treads": {"hull_y": 1.5000, "stations": [[Vector3(-3.3250, -1.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.3250, -1.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"legs": {"hull_y": 1.5000, "stations": [[Vector3(-3.3250, -2.1500, -3.8500), Vector3(1.0000, 2.2000, 1.0000)], [Vector3(-3.3250, -2.1500, 3.8500), Vector3(1.0000, 2.2000, 1.0000)], [Vector3(3.3250, -2.1500, -3.8500), Vector3(1.0000, 2.2000, 1.0000)], [Vector3(3.3250, -2.1500, 3.8500), Vector3(1.0000, 2.2000, 1.0000)]]},
+		"hover_engine": {"hull_y": 1.5000, "stations": [[Vector3(-4.0000, -1.1000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -1.1000, -6.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -1.1000, 6.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.0000, -1.1000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-4.7500, 1.4000, -3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-4.7500, 1.4000, 3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.7500, 1.4000, -3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.7500, 1.4000, 3.7500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-3.9000, 0.0000, 1.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.9000, 0.0000, 1.7500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(-3.8000, 0.2500, 0.5000), Vector3(2.0000, 1.0000, 2.0000)], [Vector3(3.8000, 0.2500, 0.5000), Vector3(2.0000, 1.0000, 2.0000)]]},
+		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-2.0000, -0.2500, 6.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.2500, 6.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-2.0000, 0.0000, 6.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, 0.0000, 6.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"screw_drive": {"hull_y": 1.5000, "stations": [[Vector3(-4.4334, -1.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.4334, -1.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+	},
+}
+
+const GOLDEN_HULL_SIZES := {
+	"small": Vector3(2.0, 0.6, 3.0),
+	"reference": Vector3(4.0, 1.0, 6.0),
+	"large": Vector3(7.0, 2.2, 11.0),
+}
+
+# Lays out every locomotion type against three hull sizes and requires the
+# result to match GOLDEN_LOCOMOTION_LAYOUT to 1e-3. This is the safety net for
+# the placement rearchitecture: it is deliberately a whole-output snapshot
+# rather than a set of hand-picked assertions, because the property being
+# protected is "nothing moved", and the failures it exists to catch are the
+# ones nobody thought to assert on.
+func test_locomotion_layout_matches_golden_fixture() -> bool:
+	print("Running Test Suite: Locomotion Golden Layout...")
+	var tol := 0.001
+	for size_name in GOLDEN_HULL_SIZES:
+		var hull_size: Vector3 = GOLDEN_HULL_SIZES[size_name]
+		var expected_for_size: Dictionary = GOLDEN_LOCOMOTION_LAYOUT[size_name]
+		for type_id in expected_for_size:
+			var hull := StaticBody3D.new()
+			hull.name = "Hull"
+			var shape := CollisionShape3D.new()
+			shape.name = "CollisionShape3D"
+			var box := BoxShape3D.new()
+			box.size = hull_size
+			shape.shape = box
+			hull.add_child(shape)
+			root.add_child(hull)
+			var placer := Node3D.new()
+			placer.set_script(load("res://scripts/module_placer.gd"))
+			placer.hull = hull
+			root.add_child(placer)
+			await process_frame
+
+			placer.update_locomotion(type_id, {})
+			await process_frame
+
+			var rows := []
+			for child in hull.get_children():
+				if not child.has_meta("module_data"):
+					continue
+				var m = child.get_meta("module_data")
+				if m == null or m.category != "locomotion":
+					continue
+				rows.append({"pos": child.position, "scale": child.scale})
+			rows.sort_custom(func(a, b):
+				if not is_equal_approx(a["pos"].x, b["pos"].x):
+					return a["pos"].x < b["pos"].x
+				if not is_equal_approx(a["pos"].y, b["pos"].y):
+					return a["pos"].y < b["pos"].y
+				return a["pos"].z < b["pos"].z)
+
+			var expected: Dictionary = expected_for_size[type_id]
+			var want_stations: Array = expected["stations"]
+			var hull_y := hull.position.y
+			placer.free()
+			hull.free()
+			await process_frame
+
+			if rows.size() != want_stations.size():
+				print("  [FAIL] %s/%s: %d instances placed, golden fixture has %d." % [
+					size_name, type_id, rows.size(), want_stations.size()])
+				return false
+			if abs(hull_y - float(expected["hull_y"])) > tol:
+				print("  [FAIL] %s/%s: hull sits at y=%.4f, golden fixture says %.4f." % [
+					size_name, type_id, hull_y, expected["hull_y"]])
+				return false
+			for i in range(rows.size()):
+				var want_pos: Vector3 = want_stations[i][0]
+				var want_scale: Vector3 = want_stations[i][1]
+				if rows[i]["pos"].distance_to(want_pos) > tol:
+					print("  [FAIL] %s/%s station %d moved: %s, golden fixture says %s." % [
+						size_name, type_id, i, rows[i]["pos"], want_pos])
+					return false
+				if rows[i]["scale"].distance_to(want_scale) > tol:
+					print("  [FAIL] %s/%s station %d rescaled: %s, golden fixture says %s." % [
+						size_name, type_id, i, rows[i]["scale"], want_scale])
+					return false
+	print("  [PASS] All 10 locomotion types lay out identically to the golden fixture across 3 hull sizes.")
 	return true
