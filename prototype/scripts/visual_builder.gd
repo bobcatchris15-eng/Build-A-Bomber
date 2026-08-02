@@ -3878,8 +3878,9 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# (a fixed point inside the wheel/gearbox, guaranteeing the overlap)
 	# with its TOP computed backward from length+angle, same trick used for
 	# the wheels locomotion type's own driveshaft.
-	var gb_x_offset = -wheel_radius_target * 0.85
-	var gb_size = wheel_radius_target * 1.2
+	# Where the hull's underside sits in this module's own local space, so the
+	# suspension arms below can be solved to reach it rather than guessed.
+	var hull_line_y: float = float(tweaks.get("kit_reach", 0.0))
 
 	_repeat_along_axis(parent_node, road_wheels, spacing, Vector3.FORWARD, func(p, pos, _idx):
 		var roller: MeshInstance3D
@@ -3908,22 +3909,52 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		roller.rotation = Vector3(0, 0, PI / 2.0)
 		roller_axle.add_child(roller)
 
-		if gearbox_mesh:
-			var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.15).lightened(0.25))
-			gearbox.scale = Vector3(gb_size, gb_size, gb_size)
-			gearbox.position = Vector3(outboard_x + gb_x_offset, wheel_radius_target + y_shift, pos.z)
-			p.add_child(gearbox)
-
-		if driveshaft_mesh:
-			var shaft = _mesh_inst(driveshaft_mesh, base_color.darkened(0.3).lightened(0.3))
-			var shaft_len = wheel_radius_target * 2.4
-			var shaft_angle = deg_to_rad(25.0)
-			var bottom_target = Vector3(outboard_x + gb_x_offset * 0.4, wheel_radius_target * 0.9 + y_shift, pos.z)
-			var shaft_drop = Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
-			shaft.scale = Vector3(gb_size * 0.55, shaft_len, gb_size * 0.55)
-			shaft.position = bottom_target - shaft_drop
-			shaft.rotation = Vector3(0, 0, shaft_angle)
-			p.add_child(shaft)
+		# SUSPENSION ARM from this road wheel up into the hull.
+		#
+		# Two of Chris's reports met here. The gearbox and driveshaft were still
+		# positioned at wheel_radius_target - the road wheel's OLD height, before
+		# it was reseated onto the belt's road-wheel line - so they had been left
+		# behind sitting on the bottom run of the track, which is nonsense. And
+		# with them stranded there, nothing connected the road wheels to the hull
+		# at all.
+		#
+		# Replaced with what a tracked vehicle actually has: a swing arm per road
+		# wheel, running from the wheel's own axle inboard and up to the hull,
+		# with a torsion housing where it enters. Solved to the real gap the same
+		# way the mount arm is, so it stays correct on any hull.
+		var arm_root := Vector3(outboard_x, roller_axle.position.y, pos.z)
+		var arm_top := Vector3(outboard_x * 0.42, hull_line_y, pos.z)
+		var arm_vec := arm_top - arm_root
+		if arm_vec.length() > 0.05:
+			var arm_pivot := Node3D.new()
+			arm_pivot.position = arm_root
+			p.add_child(arm_pivot)
+			arm_pivot.look_at_from_position(arm_root, arm_top, Vector3.UP)
+			arm_pivot.position = arm_root
+			var arm_len := arm_vec.length()
+			var arm_box := BoxMesh.new()
+			arm_box.size = Vector3(wheel_radius_target * 0.55, wheel_radius_target * 0.85, 1.0)
+			var arm_inst := _mesh_inst(arm_box, base_color.darkened(0.28), Color(0, 0, 0, 0), 0.0, "steel")
+			arm_inst.position = Vector3(0, 0, -arm_len * 0.5)
+			arm_inst.scale = Vector3(1, 1, arm_len)
+			arm_pivot.add_child(arm_inst)
+			# Torsion-bar housing where the arm enters the hull side.
+			var housing := CylinderMesh.new()
+			housing.top_radius = wheel_radius_target * 0.62
+			housing.bottom_radius = wheel_radius_target * 0.62
+			housing.height = wheel_radius_target * 1.5
+			var housing_inst := _mesh_inst(housing, base_color.darkened(0.12).lightened(0.18),
+				Color(0, 0, 0, 0), 0.0, "steel")
+			housing_inst.rotation = Vector3(0, 0, PI / 2.0)
+			housing_inst.position = arm_top
+			p.add_child(housing_inst)
+			# Bump stop above the arm, so the travel reads as sprung.
+			var stop := BoxMesh.new()
+			stop.size = Vector3(wheel_radius_target * 0.7, wheel_radius_target * 0.4,
+				wheel_radius_target * 0.7)
+			var stop_inst := _mesh_inst(stop, base_color.darkened(0.34), Color(0, 0, 0, 0), 0.0, "steel")
+			stop_inst.position = arm_root.lerp(arm_top, 0.55) + Vector3(0, wheel_radius_target * 0.7, 0)
+			p.add_child(stop_inst)
 	)
 
 

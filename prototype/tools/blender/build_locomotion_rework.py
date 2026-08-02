@@ -495,31 +495,56 @@ def build_tread_belt_loop():
 
 
 def build_drive_sprocket():
+	"""Drive sprocket. AXLE ALONG BLENDER Z.
+
+	The axis matters and I got it wrong: the runtime applies rotation.z = PI/2 to
+	each sprocket, which maps the part's local Y onto X (across the vehicle). The
+	original was authored with its axle on Blender Z (importing as Godot Y), so
+	that rotation stood it up correctly. Rebuilding it on Blender Y put the axle
+	on Godot Z, and the rotation then left it there - the sprockets rendered
+	SIDEWAYS, facing along the vehicle instead of across it (Chris's report).
+
+	The teeth are also no longer free-floating blocks. Each starts INSIDE the rim
+	and extends outward through it, so it reads as an extension of the hub rather
+	than a separate object parked next to one.
+	"""
 	radius = 0.40
 	width = 0.30
 	teeth = 11
 	bm = bmesh.new()
-	add_cyl_y(bm, (0, 0, 0), radius * 0.62, width, segments=22)             # web
-	add_cyl_y(bm, (0, 0, 0), radius * 0.30, width * 1.20, segments=18)      # hub
-	for sy in (-1, 1):                                                       # tooth rings
-		add_cyl_y(bm, (0, sy * width * 0.36, 0), radius * 0.88, width * 0.14, segments=22)
+	# Hub, web and rim - one stack on the same axis, overlapping so they fuse.
+	add_cyl_z(bm, (0, 0, 0), radius * 0.30, width * 1.25, segments=18)      # hub
+	add_cyl_z(bm, (0, 0, 0), radius * 0.66, width * 0.70, segments=24)      # web
+	add_cyl_z(bm, (0, 0, 0), radius * 0.86, width, segments=26)             # rim
+	for sz in (-1, 1):                                                       # rim flanges
+		add_cyl_z(bm, (0, 0, sz * width * 0.44), radius * 0.92, width * 0.12, segments=26)
+
 	for i in range(teeth):
 		a = (i / teeth) * math.tau
-		cx, cz = math.cos(a) * radius * 0.94, math.sin(a) * radius * 0.94
-		for sy in (-1, 1):
-			add_box(bm, (cx, sy * width * 0.36, cz),
-					(0.055, width * 0.16, 0.115), bevel=0.010)
-			# Tapered tip so the tooth engages rather than butting.
-			add_box(bm, (math.cos(a) * radius * 1.03, sy * width * 0.36, math.sin(a) * radius * 1.03),
-					(0.036, width * 0.14, 0.075), bevel=0.008)
+		ca, sa = math.cos(a), math.sin(a)
+		# Root starts at 0.78r - well inside the 0.86r rim - and reaches to
+		# 1.06r, so the tooth is continuous with the rim it grows out of.
+		root_r, tip_r = radius * 0.78, radius * 1.06
+		mid_r = (root_r + tip_r) * 0.5
+		res = bmesh.ops.create_cube(bm, size=1.0)
+		rot = mathutils.Matrix.Rotation(a, 4, 'Z')
+		for v in res['verts']:
+			v.co = mathutils.Vector((ca * mid_r, sa * mid_r, 0)) + rot @ mathutils.Vector(
+				(v.co.x * (tip_r - root_r), v.co.y * 0.085, v.co.z * width * 0.86))
+		# Chamfered tip, so the tooth engages a link rather than butting it.
+		res2 = bmesh.ops.create_cube(bm, size=1.0)
+		for v in res2['verts']:
+			v.co = mathutils.Vector((ca * tip_r, sa * tip_r, 0)) + rot @ mathutils.Vector(
+				(v.co.x * 0.055, v.co.y * 0.055, v.co.z * width * 0.62))
+
 	for i in range(6):                                                       # lightening holes
 		a = (i / 6) * math.tau
-		add_cyl_y(bm, (math.cos(a) * radius * 0.46, 0, math.sin(a) * radius * 0.46),
-				  0.052, width * 1.10, segments=10)
+		add_cyl_z(bm, (math.cos(a) * radius * 0.47, math.sin(a) * radius * 0.47, 0),
+				  0.050, width * 1.10, segments=10)
 	for i in range(8):                                                       # hub bolts
 		a = (i / 8) * math.tau
-		add_cyl_y(bm, (math.cos(a) * radius * 0.20, width * 0.56, math.sin(a) * radius * 0.20),
-				  0.016, 0.030, segments=6)
+		add_cyl_z(bm, (math.cos(a) * radius * 0.20, math.sin(a) * radius * 0.20,
+					   width * 0.60), 0.016, 0.030, segments=6)
 	export_bmesh(bm, "drive_sprocket", "drive_sprocket.glb",
 				 color=(0.19, 0.19, 0.21, 1.0), metallic=0.78, roughness=0.40)
 

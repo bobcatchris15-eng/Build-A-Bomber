@@ -62,7 +62,7 @@ func _init() -> void:
 			ids.append(t)
 	ids.sort()
 
-	print("type                 attach_gap  split_gap   bulk   slender   verdict")
+	print("type                 attach_gap  islands   bulk   slender   verdict")
 	for type_id in ids:
 		var hull := StaticBody3D.new()
 		hull.name = "Hull"
@@ -84,6 +84,7 @@ func _init() -> void:
 		var worst_split := 0.0
 		var total_vol := 0.0
 		var thinnest := 999.0
+		var islands := 0
 		var counted := 0
 
 		for child in hull.get_children():
@@ -122,22 +123,55 @@ func _init() -> void:
 					worst_split = sp[0] - reach
 				reach = maxf(reach, sp[1])
 
+			# ISLANDS - sub-parts that touch nothing else in the assembly.
+			# The general form of the bugs Chris found by eye on the treads: a
+			# gearbox stranded at a height its wheel no longer sat at, teeth
+			# floating beside a hub, road wheels with nothing joining them to the
+			# vehicle. Union-find over the sub-part boxes, each grown slightly so
+			# parts that merely abut still count as joined. One island is a solid
+			# assembly; more than one means loose pieces.
+			var n := boxes.size()
+			var parent_of: Array = []
+			for pi in range(n):
+				parent_of.append(pi)
+			for i in range(n):
+				var bi: AABB = (boxes[i] as AABB).grow(0.035)
+				for j in range(i + 1, n):
+					if not bi.intersects((boxes[j] as AABB).grow(0.035)):
+						continue
+					var ra := i
+					while parent_of[ra] != ra:
+						ra = parent_of[ra]
+					var rb := j
+					while parent_of[rb] != rb:
+						rb = parent_of[rb]
+					if ra != rb:
+						parent_of[rb] = ra
+			var roots := {}
+			for i in range(n):
+				var r := i
+				while parent_of[r] != r:
+					r = parent_of[r]
+				roots[r] = true
+			islands = maxi(islands, roots.size())
+
+
 		var bulk: float = total_vol / maxf(hull_vol, 0.0001)
 		if thinnest > 998.0:
 			thinnest = 0.0
 		var flags: Array = []
 		if worst_attach > ATTACH_GAP_LIMIT:
 			flags.append("FLOATING")
-		if worst_split > SPLIT_GAP_LIMIT:
-			flags.append("DISCONNECTED")
+		if worst_split > SPLIT_GAP_LIMIT or islands > 1:
+			flags.append("LOOSE(%d)" % islands)
 		if bulk > BULK_LIMIT:
 			flags.append("BULKY")
 		elif bulk < BULK_FLOOR:
 			flags.append("UNDERSIZED")
 		if thinnest > 0.0 and thinnest < SLENDER_MIN:
 			flags.append("FRAGILE")
-		print("%-20s %8.3f   %8.3f  %6.3f  %7.3f   %s" % [
-			type_id, worst_attach, worst_split, bulk, thinnest,
+		print("%-20s %8.3f   %6d  %6.3f  %7.3f   %s" % [
+			type_id, worst_attach, islands, bulk, thinnest,
 			"ok" if flags.is_empty() else ", ".join(flags)])
 
 		pl.free()
