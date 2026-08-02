@@ -4167,8 +4167,11 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	# Chris's ask: legs about 2x thicker all the way through (cross-section
 	# only - length/reach are untouched), except the knee joint block,
 	# which is 2.5x bigger all around instead.
-	var thickness_mult = 2.0
-	var knee_mult = 2.5
+	# Slimmer than the old mammalian build: an insect leg is a thin spar under
+	# tension, and at 2.0 the segments read as stocky pistons (Chris) once the
+	# leg stopped being hull-length.
+	var thickness_mult = 1.15
+	var knee_mult = 2.0
 
 	var thigh_mesh = _part("leg_thigh")
 	var shin_mesh = _part("leg_shin")
@@ -4212,19 +4215,22 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	# leg_root's already-correct mirrored frame normally, the same way any
 	# child node does.
 	#
-	# leg_stance_reach (Chris's ask, "wider stance") is carried by the
-	# thigh+shin themselves (40%/60% split), each reoriented to actually
-	# SPAN from its own start point out to where it needs to land - same
-	# "compute a direction and length, orient a stretchable mesh along it"
-	# technique the rotor/hover mounting pylons use - rather than just
-	# translating the whole assembly sideways, which left a gap between
-	# the fixed hip and a floating thigh instead of a real angled leg.
-	# leg_root itself stays at X=0 (still rooted at the hip, flush against
-	# the hull) - only the segments below splay outward from it. Authored
-	# assuming the canonical +X = outboard direction (unmirrored build);
-	# side<0 legs get this mirrored correctly for free via
-	# module_placer.gd's existing whole-subtree mirror-flip.
-	var stance_reach = tweaks.get("leg_stance_reach", 0.0)
+	# The femur and tibia each SPAN from their own start point out to where
+	# they need to land - the same "compute a direction and length, orient a
+	# stretchable mesh along it" technique the rotor/hover pylons use - rather
+	# than translating a fixed assembly sideways, which left a gap between the
+	# fixed hip and a floating thigh instead of a real angled leg. leg_root
+	# itself stays at the hip, flush against the mount; only the segments below
+	# splay out from it. Authored assuming the canonical +X = outboard
+	# direction (unmirrored build); side<0 legs get mirrored for free via
+	# module_placer.gd's whole-subtree mirror-flip.
+	#
+	# leg_stance_reach is no longer read here. It arrives as a fraction of the
+	# HULL'S WIDTH (~2.5 on a medium hull), and anything keyed to a hull
+	# dimension sets the leg's scale rather than influencing its pose - the
+	# repeated cause of both the giant-spider and the splayed-flat legs. The
+	# stance now comes out of knee_out/foot_out below, which are fractions of
+	# the leg's own drop.
 	var leg_root = Node3D.new()
 	# Named (not left auto-generated) so the animation code can reach the
 	# nested "LegSwing" pivot via the fixed path "LegRoot/LegSwing".
@@ -4237,44 +4243,37 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	swing.position = Vector3.ZERO
 	leg_root.add_child(swing)
 
-	# LEG PROPORTIONS ARE KEYED TO THE MOUNT, NOT TO THE HULL.
+	# INSECTILE STANCE. Chris: the legs "should resemble the insectile legs,
+	# carrying the body low between them."
 	#
-	# This used to put the knee at leg_hull_centerline_y - the hull's own
-	# mid-height - and the foot on the ground plane, so the leg's length was
-	# whatever the hull's height happened to be. On anything bigger than a
-	# scout that produced enormous spider legs holding the hull far up in the
-	# air (Chris: "the leg ones way too far down"). A vehicle's ride height is
-	# a property of its running gear, not of how tall its body is.
+	# That is a specific arrangement, not just a longer leg: the FEMUR RISES
+	# from the hip out to a knee ABOVE the hull line, and the tibia drops from
+	# that knee back down and inward to the foot. The body then hangs low
+	# BETWEEN the knees rather than being propped up on top of the legs. A
+	# mammalian leg - knee below the hip, which is what the previous pass
+	# built - cannot do that at any length; it just gets stockier.
 	#
-	# DROP is the ride height, measured from the module origin (the hull's
-	# underside) down to the sole. It is set to match what a pontoon of the
-	# same scale gives - hub at -0.2*s, drum radius on top of that - so a
-	# walker sits at the same height as the wheeled and pontooned versions of
-	# the same chassis, which is the "same positioning" Chris asked for.
-	var drop: float = 0.95 * float(leg_length)
-	# The foot tucks back INBOARD of the knee, so the leg reads as a bent limb
-	# taking the load down a line rather than a straight strut splayed out.
-	#
-	# leg_stance_reach arrives as a fraction of the HULL'S WIDTH, which on a
-	# medium hull is ~2.5 - against a 0.95 drop that put the legs out almost
-	# horizontal. Clamped against the drop instead: a leg can splay, but a leg
-	# that reaches further sideways than it does downward is not carrying
-	# anything. Same lesson as DROP above - hull dimensions may INFLUENCE the
-	# running gear's pose, but they must not SET its scale.
-	var stance: float = clampf(
-		(0.55 + 0.15 * float(stance_reach)) * float(leg_length),
-		0.30 * drop, 0.70 * drop)
+	# Proportions are still keyed to the mount rather than to the hull (that
+	# was what produced the enormous spider legs two passes ago, when the knee
+	# tracked the hull's centreline and the stance tracked its width). DROP is
+	# the ride height from the module origin down to the sole.
+	var drop: float = 1.35 * float(leg_length)
+	# The knee is the outermost AND highest point of the limb; the foot tucks
+	# back inboard under the load. Both are fractions of the drop, so the leg
+	# keeps its shape at any scale.
+	var knee_out: float = 0.80 * drop
+	var foot_out: float = 0.60 * drop
 
 	# knee_height keeps its cosmetic job (Chris: "doesn't really make a stat
-	# difference, just looking cool") but now slides the knee along the
-	# hip-to-foot span instead of parking it at an absolute hull height, so
-	# the slider can no longer stretch the leg - only re-pose it.
+	# difference, just looking cool") - it now sets how far the knee rises
+	# above the hip, which is the single most visible thing about an insect
+	# leg, instead of parking the knee at an absolute hull height.
 	var knee_height = tweaks.get("knee_height", 0.375)
-	var knee_frac: float = clampf(0.35 + 0.35 * float(knee_height), 0.15, 0.85)
-	var knee_y: float = (-drop + (hip_y + drop) * knee_frac) - hip_y
+	var knee_rise: float = drop * clampf(0.30 + 0.30 * float(knee_height), 0.10, 0.90)
+	var knee_y: float = knee_rise - hip_y
 	var foot_y: float = -drop - hip_y
 
-	var thigh_target = Vector3(stance, knee_y, 0)
+	var thigh_target = Vector3(knee_out, knee_y, 0)
 	var thigh_len = thigh_target.length()
 	var thigh_dir = thigh_target / thigh_len
 	var thigh_angle = atan2(-thigh_dir.x, thigh_dir.y)
@@ -4297,9 +4296,9 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	swing.add_child(thigh)
 
 	var knee_pos = thigh_target
-	# Negative X: the shin comes back INBOARD from the knee to the sole, which
-	# is what makes the knee the outermost point of the leg.
-	var shin_target = Vector3(-stance * 0.35, foot_y - knee_y, 0)
+	# Negative X: the tibia comes back INBOARD from the knee down to the sole,
+	# which is what makes the knee the outermost point of the leg.
+	var shin_target = Vector3(foot_out - knee_out, foot_y - knee_y, 0)
 	var shin_len = shin_target.length()
 	var shin_dir = shin_target / shin_len
 	var shin_angle = atan2(-shin_dir.x, shin_dir.y)
