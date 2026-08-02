@@ -519,6 +519,7 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				# which is where Chris asked for them: "these ones I think can
 				# go directly under the hull edges."
 				x_offset = hull_size.x / 2.0
+			else:
 				var pad := float(geom.get("x_pad", 0.0))
 				if geom.has("x_pad_scales_with"):
 					pad *= float(geo_base.get(geom["x_pad_scales_with"], 1.0))
@@ -526,9 +527,15 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 			var y := 0.0
 			match geom.get("y", ""):
 				"underside": y = -hull_size.y / 2.0 + bias
-				# Same: with no slab beneath it, "below the gear" is the hull's
-				# own underside.
-				"below_gear": y = -hull_size.y / 2.0 + bias
+				# "below_gear" used to mean the hull's underside minus half the
+				# running-gear slab. With the slab gone the naive reading is
+				# just the underside - which moved every belted type UP by that
+				# half-slab and left the sprockets overlapping the hull's sides
+				# (Chris: "the tracked treads are too high up now somehow").
+				# The drop it was really providing is kept explicitly, as a
+				# fraction of the hull's own height, so the belt still hangs
+				# below the body rather than beside it.
+				"below_gear": y = -hull_size.y / 2.0 + bias - hull_size.y * 0.20
 				"topside": y = hull_size.y / 2.0 + float(geom.get("y_pad", 0.0))
 				_: y = hull_size.y * float(geom.get("y_frac", 0.0))
 			var z_base := hull_size.z * float(geom.get("z_frac", 0.0))

@@ -3651,6 +3651,12 @@ static func build_wheel_mount(parent_node: Node3D, base_color: Color,
 	# Pulled slightly INBOARD of the module origin, not outboard: the hub and
 	# the gearbox should visibly overlap rather than sit adjacent (Chris's ask,
 	# twice, on the original wheels).
+	#
+	# Chris reported the wheels "angling inward rather than outward from the
+	# hull" and this offset was the obvious suspect, but it was not the cause -
+	# the stations themselves had collapsed onto the centreline (see the
+	# missing `else` in locomotion_layout.gd's x_offset block). This value is
+	# left where it was rather than "fixed" alongside the real bug.
 	return Vector3(-0.05 * s, hub_y, z)
 
 
@@ -6049,30 +6055,69 @@ static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_co
 	var target_length := float(tweaks.get("target_length", base_size.z))
 	var span := target_length * 0.42
 
+	# SIZE. Every part here was used at its authored scale, which has no
+	# relationship to any hull - against a real one the whole linkage came out
+	# as a handful of pebbles under the belly, which is what made it read as
+	# both floating and flimsy (Chris). Scale is now derived from the span the
+	# assembly actually has to cover, the same way half_track and
+	# tracked_treads derive theirs, so it stays in proportion on any hull.
+	# AUTHORED_SPAN is rb_rocker_arm's MEASURED fore/aft extent (0.83 along Z),
+	# not a guessed round number - the first pass assumed 1.30 and the arms
+	# came out well short of the wheels they were meant to reach. Same mistake
+	# as the screw drum's stale _fit_scale divisors, so it is measured here
+	# too: `span` is a half-extent, hence the doubling.
+	const AUTHORED_ARM_Z := 0.83
+	# Two factors, not one. z_s stretches the linkage fore/aft to cover the
+	# span; p_s sizes the parts themselves - cross-sections, the drop to the
+	# axle line, and the wheels. Driving all of it off z_s made the wheels grow
+	# with the hull's LENGTH and lifted the body to 3.5 units on a medium hull.
+	# How long a suspension is and how big its wheels are are separate
+	# questions, and conflating them is the same error as scaling the legs by
+	# the hull's height.
+	var z_s: float = maxf(0.4, (span * 2.0) / AUTHORED_ARM_Z)
+	var p_s: float = clampf(z_s * 0.42, 0.85, 1.7)
+	var v_scale: float = p_s
+
 	var rocker_mesh := _part("rb_rocker_arm")
 	var bogie_mesh := _part("rb_bogie_arm")
 	var wheel_mesh := _part("rb_wheel")
 
+	# THE ATTACHMENT. A rocker-bogie hangs the whole linkage off ONE pivot per
+	# side - that differential pivot is the only thing joining it to the body,
+	# and it had nothing at all here ("the lack of running gear of any kind
+	# attaching it to the hull"). build_wheel_mount() is that pivot: the
+	# gearbox reads as the bearing housing and the driveshaft as the trunnion
+	# arm running up into the hull. Same mount as the wheels and pontoons, for
+	# the same reason it works there - the module origin is already at the
+	# hull's underside.
+	var pivot_s: float = 0.55 * v_scale
+	var hub := build_wheel_mount(parent_node, base_color, pivot_s, 0.0, 0.45 * pivot_s)
+
+	var chain := Node3D.new()
+	chain.position = hub
+	parent_node.add_child(chain)
+
 	if rocker_mesh:
 		var rocker := _mesh_inst(rocker_mesh, base_color)
-		rocker.scale = Vector3(1.0, arm_len, arm_len)
-		parent_node.add_child(rocker)
+		rocker.scale = Vector3(p_s * 0.9, arm_len * p_s, z_s)
+		chain.add_child(rocker)
 
 	for i in range(pairs):
 		var t: float = 0.5 if pairs <= 1 else float(i) / float(pairs - 1)
-		var z: float = -span + 2.0 * span * t
+		var z: float = (-span + 2.0 * span * t)
 		if bogie_mesh and i > 0:
 			var bogie := _mesh_inst(bogie_mesh, base_color.darkened(0.08))
-			bogie.scale = Vector3(1.0, arm_len, arm_len)
-			bogie.position = Vector3(0, -0.10 * arm_len, z)
-			parent_node.add_child(bogie)
+			bogie.scale = Vector3(p_s * 0.9, arm_len * p_s, z_s * 0.42)
+			bogie.position = Vector3(0, -0.10 * arm_len * v_scale, z)
+			chain.add_child(bogie)
 		if wheel_mesh:
 			var wheel_pivot := Node3D.new()
 			wheel_pivot.name = SPIN_PIVOT_WHEEL
-			wheel_pivot.position = Vector3(0.14 * wheel_size, -0.30 * arm_len, z)
-			parent_node.add_child(wheel_pivot)
+			wheel_pivot.position = Vector3(0.14 * wheel_size * v_scale,
+				-0.30 * arm_len * v_scale, z)
+			chain.add_child(wheel_pivot)
 			var wheel := _mesh_inst(wheel_mesh, Color(0.20, 0.20, 0.22))
-			wheel.scale = Vector3.ONE * wheel_size
+			wheel.scale = Vector3.ONE * wheel_size * v_scale
 			wheel_pivot.add_child(wheel)
 
 
