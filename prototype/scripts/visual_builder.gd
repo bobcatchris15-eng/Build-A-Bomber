@@ -3584,74 +3584,72 @@ static func _attach_naval_propeller_blades(parent_node: Node3D, base_size: Vecto
 		pivot.add_child(blade)
 
 
+## The wheel mount: an angled driveshaft housing running up and inboard into a
+## gearbox, with the hub hanging off the outboard end of it.
+##
+## Authored once, here, because Chris called the pontoon version "excellent" and
+## asked for the same assembly on the screw drive and the legs. It works for the
+## same reason the original wheel mounting did: the locomotion module's origin
+## ALREADY SITS AT THE HULL'S UNDERSIDE (module_placer.gd puts it there), so a
+## shaft angling up and inboard from a point just below that origin arrives
+## inside the hull's solid volume by construction - no hull measurement, no
+## reach solving, no subframe to bridge a gap that was never open. That
+## invariant is the whole trick, and it is why four types can share one mount.
+##
+## `s` scales the whole assembly, `z` slides it fore/aft, `span` is its
+## thickness along Z (a dually cluster or a wide drum wants a fatter housing).
+## Returns the outboard hub position in the parent's local space so the caller
+## can hang a wheel, a drum end or a leg on it without redoing the arithmetic.
+static func build_wheel_mount(parent_node: Node3D, base_color: Color,
+		s: float = 1.0, z: float = 0.0, span: float = 0.3) -> Vector3:
+	var hub_y := -0.2 * s
+	var gearbox_x := -0.24 * s
+	var ds_mesh := _part("wheel_driveshaft")
+	var gb_mesh := _part("wheel_gearbox")
+	if ds_mesh:
+		# wheel_driveshaft is authored spanning Y=0 (top/pivot) to Y=-1
+		# (bottom), so its bottom end after scale+rotation is
+		# `position + Rz(angle)*(0,-len,0)`. Anchor the BOTTOM at the gearbox
+		# and solve the pivot backward from it: the fixed end is the one that
+		# has to meet the hub, and the free end is the one that should be
+		# allowed to run as deep into the hull as the angle takes it.
+		var shaft := _mesh_inst(ds_mesh, base_color.darkened(0.25).lightened(0.35))
+		var shaft_len := 1.0 * s
+		var shaft_angle := deg_to_rad(55.0)
+		var bottom_target := Vector3(gearbox_x + 0.05 * s, hub_y, z)
+		var drop := Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
+		shaft.scale = Vector3(0.32 * s, shaft_len, span)
+		shaft.position = bottom_target - drop
+		shaft.rotation = Vector3(0, 0, shaft_angle)
+		parent_node.add_child(shaft)
+	if gb_mesh:
+		var gearbox := _mesh_inst(gb_mesh, base_color.darkened(0.1).lightened(0.3))
+		var gb := 0.46 * s
+		gearbox.scale = Vector3(gb, gb, span)
+		gearbox.position = Vector3(gearbox_x, hub_y, z)
+		parent_node.add_child(gearbox)
+	# Pulled slightly INBOARD of the module origin, not outboard: the hub and
+	# the gearbox should visibly overlap rather than sit adjacent (Chris's ask,
+	# twice, on the original wheels).
+	return Vector3(-0.05 * s, hub_y, z)
+
+
 static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.BLACK, tweaks: Dictionary = {}):
 	var wheel_size = float(tweaks.get("wheel_size", tweaks.get("size", 1.0)))
 	var w_per_axle = int(tweaks.get("wheels_per_axle", 1.0))
 
 	# Strict GLB part mesh loading - fails with assertion if asset is missing
 	var wheel_mesh = _part("wheel_hub")
-	var driveshaft_mesh = _part("wheel_driveshaft")
-	var gearbox_mesh = _part("wheel_gearbox")
 
-	var wheel_y = -0.2 * wheel_size
 	var cluster_width = 0.3 * wheel_size * float(w_per_axle)
 
-	# Lateral layout along local X. X=0 is the module's own local origin,
-	# i.e. the hull mount point. Keep the WHOLE cluster close to that mount
-	# point instead of pushing it past the hull's silhouette: the gearbox
-	# sits INBOARD (negative X, tucked toward the hull), the wheel only a
-	# small step further OUTBOARD from the mount point than before, and the
-	# driveshaft spans the gap between them. This still keeps the wheel
-	# clear of the gearbox/driveshaft's own local-X slab (the wheel is an
-	# opaque disc of radius ~0.45*wheel_size lying in the local Y-Z plane -
-	# without SOME separation the gearbox/driveshaft render entirely inside
-	# it, invisible, confirmed via an isolated single-module capture) while
-	# no longer leaving the wheel floating outside the vehicle's footprint.
-	# hub_x_offset is negative (pulled inboard, toward the gearbox/mount
-	# column) rather than outboard - Chris's ask, twice now: the wheel and
-	# gearbox should visibly intersect/overlap, not just sit adjacent.
-	var hub_x_offset = -0.05 * wheel_size
-	var gearbox_x = -0.24 * wheel_size
-
-	# Enclosed driveshaft housing: anchored at its BOTTOM near the gearbox/
-	# wheel (a fixed connection point) with its TOP computed backward from
-	# length + angle, so a longer, shallower shaft naturally reaches further
-	# inboard toward the hull's longitudinal centerline before it pierces
-	# the hull mesh - a short, steep shaft barely inside the mount edge
-	# doesn't reliably intersect real hull geometry on hulls whose belly
-	# tapers/narrows away from the outer edge, which read as a floating,
-	# disconnected strut. wheel_driveshaft is authored spanning Y=0 (top/
-	# pivot) to Y=-1 (bottom) - see build_meshes.py - so its bottom end
-	# after scale+rotation is `position + Rz(angle)*(0,-shaft_len,0)`;
-	# solving that backward from the desired bottom point gives the pivot
-	# position placed here. Lightened relative to the near-black tire so it
-	# actually reads as a distinct part instead of blending into the tire/
-	# hull shadow.
-	# The suspension kit replaces the improvised driveshaft/gearbox column this
-	# used to grow for itself - see build_mount_kit(). Every wheeled type now
-	# hangs off the same authored arm, coil-over and hub carrier, which is what
-	# makes them read as one vehicle family instead of four unrelated ideas.
-
-	if false and driveshaft_mesh:
-		var shaft = _mesh_inst(driveshaft_mesh, base_color.darkened(0.25).lightened(0.35))
-		var shaft_len = 1.0 * wheel_size
-		var shaft_angle = deg_to_rad(55.0)
-		var bottom_target = Vector3(gearbox_x + 0.05 * wheel_size, wheel_y, 0.0)
-		var drop = Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
-		shaft.scale = Vector3(0.32 * wheel_size, shaft_len, cluster_width)
-		shaft.position = bottom_target - drop
-		shaft.rotation = Vector3(0, 0, shaft_angle)
-		parent_node.add_child(shaft)
-
-	# Gearbox: large housing tucked inboard at the mount column, fed by the
-	# driveshaft above it and facing the wheel cluster - the "attaches to
-	# the driveshaft" piece.
-	if gearbox_mesh:
-		var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.1).lightened(0.3))
-		var gb_size = 0.46 * wheel_size
-		gearbox.scale = Vector3(gb_size, gb_size, cluster_width)
-		gearbox.position = Vector3(gearbox_x, wheel_y, 0.0)
-		parent_node.add_child(gearbox)
+	# Lateral layout along local X. X=0 is the module's own local origin, i.e.
+	# the hull mount point. build_wheel_mount() puts the gearbox inboard of it
+	# and returns the hub point just outboard, keeping the whole cluster inside
+	# the vehicle's footprint instead of hanging past its silhouette.
+	var hub := build_wheel_mount(parent_node, base_color, wheel_size, 0.0, cluster_width)
+	var hub_x_offset := hub.x
+	var wheel_y := hub.y
 
 	var spacing = 0.38 * wheel_size
 	_repeat_along_axis(parent_node, w_per_axle, spacing, Vector3.RIGHT, func(p, pos, _idx):
@@ -4164,7 +4162,6 @@ static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_co
 
 
 static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.GRAY, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "legs", base_color, 1.0, float(tweaks.get("leg_length", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	var leg_length = tweaks.get("leg_length", tweaks.get("size", 1.0))
 	var foot_size = tweaks.get("foot_size", 1.0)
 	# Chris's ask: legs about 2x thicker all the way through (cross-section
@@ -4177,28 +4174,21 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	var shin_mesh = _part("leg_shin")
 	var foot_mesh = _part("leg_foot")
 	var joint_mesh = _part("leg_joint")
-	var mount_mesh = _part("rg_mount_box")
 
-	# Bulkier faceted hip joint at the hull interface (Chris's ask) -
-	# leg_joint (build_meshes.py) replaces the old plain rg_mount_box here;
-	# low segment count keeps it reading as flat riveted panels rather than
-	# a smooth drum. Falls back to the old generic mount box if leg_joint
-	# hasn't been reimported yet. Stays a direct child of parent_node
-	# (fixed to the hull), NOT the swing pivot below - a real hip mount
-	# doesn't swing with the leg.
-	var hip_y = base_size.y * 0.8 * leg_length
-	if joint_mesh:
-		var hip = _mesh_inst(joint_mesh, base_color.darkened(0.2))
-		hip.scale = Vector3(1.0, 1.0, 1.0) * (0.7 * leg_length * thickness_mult)
-		hip.position = Vector3(0, hip_y, 0)
-		hip.rotation = Vector3(deg_to_rad(-15.0), 0, 0)
-		parent_node.add_child(hip)
-	elif mount_mesh:
-		var mount = _mesh_inst(mount_mesh, base_color.darkened(0.3))
-		mount.scale = Vector3(0.4 * leg_length, 0.4 * leg_length, 0.4 * leg_length) * thickness_mult
-		mount.position = Vector3(0, hip_y, 0)
-		mount.rotation = Vector3(deg_to_rad(-15.0), 0, 0)
-		parent_node.add_child(mount)
+	# The hip is build_wheel_mount() - the same angled driveshaft and inboard
+	# gearbox the wheels and pontoons hang from, with a leg tacked on the
+	# outboard end instead of a wheel (Chris's ask: "just take those gearbox and
+	# strut assemblies, they are already positioned perfectly on the pontoon
+	# wheels"). A walking machine's hip actuator is a gearbox on the end of a
+	# drive housing, so the part reads correctly here without being restyled.
+	#
+	# hip_y comes back from the mount rather than being computed against
+	# base_size, and everything below is already expressed RELATIVE to hip_y
+	# (knee_y and foot_y both subtract it), so the foot still lands on the
+	# ground plane at y=0.03 no matter where the mount puts the hip.
+	var mount_s: float = float(leg_length) * 1.4
+	var hip := build_wheel_mount(parent_node, base_color, mount_s, 0.0, 0.42 * mount_s)
+	var hip_y: float = hip.y
 
 	# Everything below (thigh/shin/foot/ankle joint) hangs off a "LegSwing"
 	# pivot, itself nested inside a static "leg_root" anchor rooted at the
@@ -4239,7 +4229,7 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	# Named (not left auto-generated) so the animation code can reach the
 	# nested "LegSwing" pivot via the fixed path "LegRoot/LegSwing".
 	leg_root.name = "LegRoot"
-	leg_root.position = Vector3(0, hip_y, 0)
+	leg_root.position = Vector3(hip.x, hip_y, 0)
 	parent_node.add_child(leg_root)
 
 	var swing = Node3D.new()
@@ -4247,23 +4237,44 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	swing.position = Vector3.ZERO
 	leg_root.add_child(swing)
 
-	# Knee height is a pure cosmetic tweak now (Chris's ask - "doesn't
-	# really make a stat difference, just looking cool"), replacing the old
-	# fixed-margin-above-centerline formula: knee_height is the margin
-	# above the hull's own vertical centerline directly, slider-controlled
-	# in stat_calculator.gd (repurposing what used to be the Leg Length
-	# slider - leg_length itself is no longer user-tweakable, just a fixed
-	# 1.0 internally). leg_hull_centerline_y (module_placer.gd) is the
-	# reach from THIS module's own local origin up to the hull's
-	# centerline; both thigh and shin below are expressed relative to the
-	# swing pivot (which sits at world-ish Y=hip_y), so it needs the same
-	# -hip_y conversion foot/ankle already used. Default (0.375) matches
-	# the original fixed-margin look before this became tweakable.
-	var hull_centerline_y = tweaks.get("leg_hull_centerline_y", hip_y)
-	var knee_height = tweaks.get("knee_height", base_size.y * 0.25)
-	var knee_y = (hull_centerline_y + knee_height) - hip_y
+	# LEG PROPORTIONS ARE KEYED TO THE MOUNT, NOT TO THE HULL.
+	#
+	# This used to put the knee at leg_hull_centerline_y - the hull's own
+	# mid-height - and the foot on the ground plane, so the leg's length was
+	# whatever the hull's height happened to be. On anything bigger than a
+	# scout that produced enormous spider legs holding the hull far up in the
+	# air (Chris: "the leg ones way too far down"). A vehicle's ride height is
+	# a property of its running gear, not of how tall its body is.
+	#
+	# DROP is the ride height, measured from the module origin (the hull's
+	# underside) down to the sole. It is set to match what a pontoon of the
+	# same scale gives - hub at -0.2*s, drum radius on top of that - so a
+	# walker sits at the same height as the wheeled and pontooned versions of
+	# the same chassis, which is the "same positioning" Chris asked for.
+	var drop: float = 0.95 * float(leg_length)
+	# The foot tucks back INBOARD of the knee, so the leg reads as a bent limb
+	# taking the load down a line rather than a straight strut splayed out.
+	#
+	# leg_stance_reach arrives as a fraction of the HULL'S WIDTH, which on a
+	# medium hull is ~2.5 - against a 0.95 drop that put the legs out almost
+	# horizontal. Clamped against the drop instead: a leg can splay, but a leg
+	# that reaches further sideways than it does downward is not carrying
+	# anything. Same lesson as DROP above - hull dimensions may INFLUENCE the
+	# running gear's pose, but they must not SET its scale.
+	var stance: float = clampf(
+		(0.55 + 0.15 * float(stance_reach)) * float(leg_length),
+		0.30 * drop, 0.70 * drop)
 
-	var thigh_target = Vector3(stance_reach * 0.4, knee_y, 0)
+	# knee_height keeps its cosmetic job (Chris: "doesn't really make a stat
+	# difference, just looking cool") but now slides the knee along the
+	# hip-to-foot span instead of parking it at an absolute hull height, so
+	# the slider can no longer stretch the leg - only re-pose it.
+	var knee_height = tweaks.get("knee_height", 0.375)
+	var knee_frac: float = clampf(0.35 + 0.35 * float(knee_height), 0.15, 0.85)
+	var knee_y: float = (-drop + (hip_y + drop) * knee_frac) - hip_y
+	var foot_y: float = -drop - hip_y
+
+	var thigh_target = Vector3(stance, knee_y, 0)
 	var thigh_len = thigh_target.length()
 	var thigh_dir = thigh_target / thigh_len
 	var thigh_angle = atan2(-thigh_dir.x, thigh_dir.y)
@@ -4286,8 +4297,9 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	swing.add_child(thigh)
 
 	var knee_pos = thigh_target
-	var foot_y = 0.03 - hip_y
-	var shin_target = Vector3(stance_reach * 0.6, foot_y - knee_y, 0)
+	# Negative X: the shin comes back INBOARD from the knee to the sole, which
+	# is what makes the knee the outermost point of the leg.
+	var shin_target = Vector3(-stance * 0.35, foot_y - knee_y, 0)
 	var shin_len = shin_target.length()
 	var shin_dir = shin_target / shin_len
 	var shin_angle = atan2(-shin_dir.x, shin_dir.y)
@@ -4323,7 +4335,10 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 		# is its "depth"/thickness axis) and extended on local Y (its
 		# height axis) instead of the flat uniform 2.5x from before, so it
 		# reads as a taller, thinner joint rather than a chunky ball.
-		var knee_base = 0.75 * leg_length * knee_mult
+		# Re-scaled against the leg's own thickness, not its old hull-driven
+		# length: at 0.75 the joint drum was wider than the 0.95 ride height
+		# once the leg shrank, and read as a boulder with limbs attached.
+		var knee_base = 0.26 * leg_length * knee_mult
 		knee.scale = Vector3(knee_base, knee_base * 1.4, knee_base * 0.55)
 		knee.position = knee_pos
 		knee.rotation = Vector3(0, 0, (thigh_angle + shin_angle) * 0.5)
@@ -4353,7 +4368,7 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	# above the foot pad, not buried inside it.
 	if joint_mesh:
 		var ankle = _mesh_inst(joint_mesh, Color(0.18, 0.18, 0.2))
-		ankle.scale = Vector3(1.0, 1.0, 1.0) * (0.5 * leg_length * foot_size * thickness_mult)
+		ankle.scale = Vector3(1.0, 1.0, 1.0) * (0.20 * leg_length * foot_size * thickness_mult)
 		ankle.position = foot.position + Vector3(0, 0.09 * leg_length, 0)
 		ankle.rotation = Vector3(0, 0, shin_angle)
 		swing.add_child(ankle)
@@ -4780,17 +4795,19 @@ static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, bas
 
 
 static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_GOLDENROD, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "screw_drive", base_color, 1.0, float(tweaks.get("drum_diameter", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	# Rebuilt (Chris's ask, 2026-07-24, two passes): drum_width/drum_count
 	# are gone - just two tweaks now (drum_diameter, helix_depth). Each end
 	# now terminates in an explicit gearbox housing, corner-mounted:
-	# module_placer.gd positions this whole module "down and out" from the
-	# hull's own corner (its vertical centerline) at ~45 degrees, and
-	# passes the reach back UP to that corner as mount_reach_x/y (an
-	# internal geometry channel, not a player-facing tweak - same idea as
-	# fixed_wing_engine's pylon). A diagonal brace is built here along that
-	# reach vector at EACH end, from a gearbox housing back to the corner.
-	# drum_length (also internal) is the corner-to-corner span - the
+	# The reach-solved diagonal braces are gone. Each end now carries the
+	# SAME assembly the wheels and pontoons use - build_wheel_mount()'s
+	# angled driveshaft into an inboard gearbox - pinned at the hull corner
+	# and descending from there, with the drum slung between the two
+	# gearboxes (Chris's ask: "give the amphibious screw drive those same
+	# gearboxes and struts... then the drum and helix between the
+	# gearboxes"). That mount needs no mount_reach_* channel at all, because
+	# it reaches into the hull by construction rather than by measurement -
+	# see build_wheel_mount()'s own comment.
+	# drum_length (internal) is the corner-to-corner span - the
 	# gearboxes sit at exactly +-drum_length/2 (the corners' own Z), and
 	# the drum's authored tapered tip (which lands at 0.65x whatever length
 	# _fit_scale targets, not the full span - see fit_length below) is
@@ -4807,7 +4824,12 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	var diameter = tweaks.get("drum_diameter", tweaks.get("drum_width", tweaks.get("size", 1.0)))
 	var depth = tweaks.get("helix_depth", 1.0)
 	var span = tweaks.get("drum_length", base_size.z) # corner-to-corner distance
-	var fit_length = span / 1.3 # 0.65 * 2 - see the tip-alignment comment above
+	# span / 1.3 puts the drum's authored tapered tip (at 0.65x the fitted
+	# length) exactly on +-span/2, i.e. exactly on each gearbox's centre. The
+	# extra 6% drives the tip THROUGH the housing face instead of kissing it -
+	# a tangent contact left the drum reading as a separate object from the
+	# bearings holding it (3 islands in probe_loco_structure.gd).
+	var fit_length = (span / 1.3) * 1.06
 
 	var drum_variant = "screw_drum"
 	if depth < 0.85:
@@ -4817,10 +4839,15 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	var drum_mesh = _part(drum_variant)
 	if not drum_mesh:
 		drum_mesh = _part("screw_drum")
-	var gearbox_mesh = _part("screw_gearbox")
-	var strut_mesh = _part("mount_strut_aerofoil")
 
-	var actual_size = Vector3(base_size.x * diameter, base_size.y * diameter, fit_length)
+	# Diameter comes off the HULL, not the catalog base_size. A screw drive is
+	# the thing the vehicle rides on, so its drum has to be sized against the
+	# vehicle - the catalog number is a fixed placeholder that came out as a
+	# thin rod under anything bigger than a scout ("the screw is too small",
+	# Chris). drum_bore is the hull's own height, from locomotion_layout.gd.
+	var bore: float = float(tweaks.get("drum_bore", base_size.y))
+	var drum_d: float = bore * 0.46 * float(diameter)
+	var actual_size = Vector3(drum_d, drum_d, fit_length)
 
 	var spin = Node3D.new()
 	spin.name = "ScrewSpin"
@@ -4843,60 +4870,20 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 		drum.rotation = Vector3(PI / 2.0, 0, 0)
 	spin.add_child(drum)
 
-	# Gearbox housings at each end - static (siblings of the spin pivot,
-	# NOT children of it - the housing doesn't turn with the shaft), built
-	# from rg_screw_cradle's bearing-block shape, scaled to the drum's own
-	# diameter and positioned so the bore (authored near the top of the
-	# box, see build_rg_screw_cradle) lines up with the shaft centerline.
-	# gear_scale is sized off the drum's own rendered radius
-	# (actual_size.y*0.85, the _fit_scale target above), not actual_size.y
-	# directly, so the housing reads as bigger than the shaft it holds.
-	#
-	# Each end gets its OWN reach vector (module_placer.gd's
-	# mount_reach_fore_*/mount_reach_aft_*), not one shared X/Y-only reach -
-	# a single shared reach undershot the hull's actual footprint on this
-	# hull size and missed it entirely (Chris's report, 2026-07-24), and
-	# had no fore-aft lean at all. Both ends now aim toward the hull's own
-	# geometric center in full 3D (module_placer.gd computes this as most
-	# of the way from each end to hull-local (0,0,0)), so the brace angles
-	# inward on X AND toward center on Z simultaneously and reliably drives
-	# into the hull's solid volume regardless of hull proportions.
-	var gear_scale = actual_size.y * 0.85 * 1.3
-	var end_reaches = [
-		[span * 0.5, Vector3(tweaks.get("mount_reach_fore_x", 0.0), tweaks.get("mount_reach_fore_y", 0.0), tweaks.get("mount_reach_fore_z", 0.0))],
-		[-span * 0.5, Vector3(tweaks.get("mount_reach_aft_x", 0.0), tweaks.get("mount_reach_aft_y", 0.0), tweaks.get("mount_reach_aft_z", 0.0))],
-	]
-	for entry in end_reaches:
-		var z_end = entry[0]
-		var mount_reach = entry[1]
-		if gearbox_mesh:
-			var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.25))
-			gearbox.scale = Vector3(gear_scale, gear_scale, gear_scale)
-			gearbox.position = Vector3(0, -0.2 * gear_scale, z_end)
-			parent_node.add_child(gearbox)
+	# One shared mount per end. `mount_s` sizes it so the gearbox housing
+	# (0.46 * mount_s across) comes out visibly LARGER than the drum it
+	# carries (0.85 * actual_size.y across) - a bearing block smaller than
+	# its own shaft reads as a part that could not possibly hold it.
+	var mount_s: float = actual_size.y * 2.2
+	var hub_y := 0.0
+	for z_end in [span * 0.5, -span * 0.5]:
+		var hub := build_wheel_mount(parent_node, base_color, mount_s, z_end, actual_size.y * 0.7)
+		hub_y = hub.y
 
-		# Diagonal corner brace - same reach-vector technique as
-		# _build_fixed_wing_engine's pylon (see that function's comment),
-		# just anchored toward the hull's center instead of reaching FROM
-		# it, and built once per end with its own reach.
-		if mount_reach.length() > 0.001:
-			var reach_len = mount_reach.length()
-			var dir = mount_reach / reach_len
-			var reference = Vector3(0, 1, 0)
-			if abs(dir.dot(reference)) > 0.95:
-				reference = Vector3(1, 0, 0)
-			var right = dir.cross(reference).normalized()
-			var forward = right.cross(dir).normalized()
-			if strut_mesh:
-				var strut = _mesh_inst(strut_mesh, base_color.darkened(0.2))
-				strut.transform = Transform3D(Basis(right * 1.2, dir * reach_len, forward * 1.2), Vector3(0, 0, z_end))
-				parent_node.add_child(strut)
-			else:
-				var mount_mesh = _part("rg_mount_box")
-				if mount_mesh:
-					var strut = _mesh_inst(mount_mesh, base_color.darkened(0.2))
-					strut.transform = Transform3D(Basis(right * 1.0, dir * reach_len, forward * 0.5), Vector3(0, 0, z_end))
-					parent_node.add_child(strut)
+	# The drum hangs at the mounts' own hub line, not at the module origin,
+	# so its axis passes through both bearing bores instead of floating
+	# above them.
+	spin.position = Vector3(0, hub_y, 0)
 
 
 static func _build_wing(parent_node: Node3D, base_size: Vector3, base_color: Color):
@@ -6125,37 +6112,25 @@ static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_
 	# same angled driveshaft and inboard gearbox, sized off pontoon_size the way
 	# wheels size off wheel_size. A pontoon drum is a wheel that floats, so it
 	# should hang off the hull the same way one does.
-	var ds_mesh := _part("wheel_driveshaft")
-	var gb_mesh := _part("wheel_gearbox")
-	var drum_y := -0.2 * psize
-	var gearbox_x := -0.24 * psize
-	if ds_mesh:
-		var shaft := _mesh_inst(ds_mesh, base_color.darkened(0.25).lightened(0.35))
-		var shaft_len := 1.0 * psize
-		var shaft_angle := deg_to_rad(55.0)
-		var bottom_target := Vector3(gearbox_x + 0.05 * psize, drum_y, 0.0)
-		var drop := Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
-		shaft.scale = Vector3(0.32 * psize, shaft_len, 0.3 * psize)
-		shaft.position = bottom_target - drop
-		shaft.rotation = Vector3(0, 0, shaft_angle)
-		parent_node.add_child(shaft)
-	if gb_mesh:
-		var gearbox := _mesh_inst(gb_mesh, base_color.darkened(0.1).lightened(0.3))
-		var gb := 0.46 * psize
-		gearbox.scale = Vector3(gb, gb, 0.3 * psize)
-		gearbox.position = Vector3(gearbox_x, drum_y, 0.0)
-		parent_node.add_child(gearbox)
+	#
+	# DRUM_SCALE oversizes the drum against the mount that carries it (Chris:
+	# the mounting is right, "the wheels themselves are too small"). It applies
+	# to the drum only - scaling `psize` instead would grow the gearbox and
+	# driveshaft in lockstep and leave the proportions exactly where they were.
+	const DRUM_SCALE := 1.5
+	var hub := build_wheel_mount(parent_node, base_color, psize, 0.0, 0.3 * psize)
 
 	var pontoon_mesh := _part("pw_pontoon")
 	if pontoon_mesh:
 		var axle := Node3D.new()
 		axle.name = SPIN_PIVOT_WHEEL
-		axle.position = Vector3(0.05 * psize, -0.22 * psize, 0)
+		axle.position = hub
 		parent_node.add_child(axle)
 		var drum := _mesh_inst(pontoon_mesh, base_color)
 		# Dropping the vanes narrows the drum: a plain float rather than a
 		# paddle, which is what the thrust penalty is describing.
-		drum.scale = Vector3(psize * (1.0 if vanes else 0.82), psize, psize)
+		var d := psize * DRUM_SCALE
+		drum.scale = Vector3(d * (1.0 if vanes else 0.82), d, d)
 		axle.add_child(drum)
 
 

@@ -47,6 +47,9 @@ func _ready() -> void:
 		if ModuleCatalog.get_catalog()[type_id].get("category", "") == "locomotion":
 			subjects.append(type_id)
 	subjects.sort()
+	var only := OS.get_environment("LOCO_ONLY")
+	if only != "":
+		subjects = subjects.filter(func(t): return t in only.split(","))
 	print("[CAPTURE] %d locomotion types" % subjects.size())
 	_build(0)
 

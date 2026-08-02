@@ -311,6 +311,92 @@ def build_leg_foot():
 
 
 # ---------------------------------------------------------------------------
+# LEG THIGH / LEG SHIN - were tapered cylinders with ridges glued on.
+#
+# Chris: "please try and author better legs here too." The old segments read as
+# pipes because that is what they were - a cone plus five longitudinal ribs.
+# A walking machine's limb reads as a limb because you can see WHAT MOVES IT:
+# a hydraulic ram running alongside the bone, anchored at one joint and pushing
+# on the next. Both segments below are built as a structural casting plus a
+# visible actuator, which is the whole difference.
+#
+# AXIS: authored along Blender +Z, base (the upper joint) at the ORIGIN,
+# extending to +Z. Blender +Z maps to Godot +Y, and visual_builder.gd scales
+# these on local Y by (segment length / authored length) with the top at the
+# node origin - so the authored length below and the divisor there are the same
+# number and must change together.
+# ---------------------------------------------------------------------------
+def _leg_segment(name, length, r_top, r_bot, ram_side, color):
+	bm = bmesh.new()
+
+	# Structural casting: a faceted spar rather than a smooth cone, with the
+	# section stepping down in three stages toward the lower joint.
+	stages = 3
+	for i in range(stages):
+		t0 = i / float(stages)
+		t1 = (i + 1) / float(stages)
+		r0 = r_top + (r_bot - r_top) * t0
+		r1 = r_top + (r_bot - r_top) * t1
+		add_taper_z(bm, (0, 0, length * (t0 + t1) * 0.5),
+					r0, r1, length * (t1 - t0) * 1.02, segments=10)
+		# Collar at each step - the joint between two cast sections.
+		add_cyl_z(bm, (0, 0, length * t1), r1 * 1.22, length * 0.035, segments=10)
+
+	# Upper joint yoke: two cheeks and a pivot pin, so the segment visibly
+	# HANGS on something instead of ending in a flat disc.
+	for sy in (-1, 1):
+		add_box(bm, (0, sy * r_top * 0.86, length * 0.045),
+				(r_top * 1.5, r_top * 0.34, length * 0.13), bevel=r_top * 0.09)
+	add_cyl_y(bm, (0, 0, length * 0.045), r_top * 0.30, r_top * 2.3, segments=10)
+
+	# Hydraulic ram alongside the spar: barrel anchored near the top, polished
+	# rod emerging from it, clevis at the far end. ram_side puts it on the
+	# front or back face so the thigh's and shin's rams do not overlap.
+	rx = r_top * 1.05 * ram_side
+	barrel_len = length * 0.44
+	add_cyl_z(bm, (rx, 0, length * 0.30), r_top * 0.40, barrel_len, segments=12)
+	add_cyl_z(bm, (rx, 0, length * 0.30 - barrel_len * 0.5), r_top * 0.47,
+			  length * 0.05, segments=12)                                  # gland
+	add_cyl_z(bm, (rx, 0, length * 0.66), r_top * 0.20, length * 0.30, segments=10)  # rod
+	add_box(bm, (rx, 0, length * 0.83), (r_top * 0.62, r_top * 0.34, length * 0.075),
+			bevel=r_top * 0.06)                                            # clevis
+	add_tube_between(bm, (rx, 0, length * 0.12), (0, 0, length * 0.06),
+					 r_top * 0.16, segments=8)                             # ram mount
+	# Feed lines from the ram back up to the joint.
+	for hy in (-1, 1):
+		add_tube_between(bm, (rx * 0.7, hy * r_top * 0.42, length * 0.11),
+						 (rx * 0.5, hy * r_top * 0.30, length * 0.52),
+						 r_top * 0.055, segments=6)
+
+	# Armour shroud over the outboard face of the spar - a plate, not a rib,
+	# so the silhouette has a flat side and reads as built rather than grown.
+	add_box(bm, (-r_top * 0.92 * ram_side, 0, length * 0.48),
+			(r_top * 0.30, r_top * 1.35, length * 0.62), bevel=r_top * 0.10)
+	for i in range(3):
+		add_box(bm, (-r_top * 1.02 * ram_side, 0, length * (0.26 + 0.22 * i)),
+				(r_top * 0.16, r_top * 1.5, length * 0.045), bevel=r_top * 0.04)
+
+	# Lower joint: a boss with a through-pin, matching the yoke at the top so
+	# two segments visibly pin together at the knee.
+	add_cyl_z(bm, (0, 0, length * 0.965), r_bot * 1.30, length * 0.07, segments=12)
+	add_cyl_y(bm, (0, 0, length * 0.985), r_bot * 0.34, r_bot * 2.6, segments=10)
+
+	export_bmesh(bm, name, name + ".glb", color=color, metallic=0.62, roughness=0.40)
+
+
+def build_leg_thigh():
+	# 0.55 - matches the `thigh_len / 0.55` divisor in _build_legs().
+	_leg_segment("leg_thigh", 0.55, 0.13, 0.095, ram_side=1.0,
+				 color=(0.31, 0.31, 0.34, 1.0))
+
+
+def build_leg_shin():
+	# 0.50 - matches the `shin_len / 0.5` divisor in _build_legs().
+	_leg_segment("leg_shin", 0.50, 0.095, 0.062, ram_side=-1.0,
+				 color=(0.17, 0.17, 0.19, 1.0))
+
+
+# ---------------------------------------------------------------------------
 # HOVER SKIRT - was 92 triangles: a plain ring.
 # Authored around the origin, Z up, per _build_hover_engine().
 # ---------------------------------------------------------------------------
@@ -575,6 +661,8 @@ if __name__ == "__main__":
 					 color=(0.37, 0.33, 0.28, 1.0))
 	build_rotor_blade()
 	build_leg_foot()
+	build_leg_thigh()
+	build_leg_shin()
 	build_hover_skirt()
 	build_naval_propeller()
 	build_tread_belt_loop()

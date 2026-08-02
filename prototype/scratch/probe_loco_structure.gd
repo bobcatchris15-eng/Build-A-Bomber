@@ -103,7 +103,14 @@ func _init() -> void:
 				var bb: AABB = b
 				top = maxf(top, child.position.y + (bb.position.y + bb.size.y) * child.scale.y)
 			if child.position.y < hull_bottom:
-				worst_attach = maxf(worst_attach, absf(hull_bottom - top))
+				# maxf(0, ...), NOT absf(). A module whose topmost geometry
+				# sits ABOVE hull_bottom has driven UP INTO the hull, which is
+				# attachment working - absf() reported that penetration depth
+				# as if it were a gap, so the better a mount bit into the hull
+				# the worse it scored. That is where tracked_treads' phantom
+				# 0.957 came from while every capture showed it solidly
+				# attached, and why this number was never worth tuning against.
+				worst_attach = maxf(worst_attach, maxf(0.0, hull_bottom - top))
 			# SPLIT GAP - sort the sub-parts by vertical extent and look for a
 			# span with nothing in it.
 			var spans: Array = []

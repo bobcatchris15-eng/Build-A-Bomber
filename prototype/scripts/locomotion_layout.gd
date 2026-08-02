@@ -109,13 +109,18 @@ const LAYOUTS := {
 		# The hip stays flush against the chassis; only the thigh/shin/foot
 		# chain splays outward, for a wide stance without a floating hip.
 		"stance_geo_key": "leg_stance_reach", "stance_frac": 0.8,
-		# The builder only knows its own catalog size, so it is told how far
-		# up the hull's centreline sits in order to raise the knee above it.
-		"centerline_geo_key": "leg_hull_centerline_y",
-		"drop_by_part_length": "leg_length",
+		# No drop_by_part_length either: the hip is build_wheel_mount(), and
+		# that mount only works because the module origin sits AT the hull's
+		# underside. Pushing the origin down by the leg's length left the
+		# driveshaft reaching up into empty air.
 		"normal_is_side": true,
 		"mirror": true, "override_pos": true,
-		"scale_mode": ScaleMode.HULL_HEIGHT,
+		# FIXED, not HULL_HEIGHT. Scaling the whole leg by the hull's height
+		# was the other half of the giant-spider-legs problem (Chris,
+		# 2026-08-02): a taller body got taller legs, which raised the body
+		# further. Ride height belongs to the running gear - see the DROP
+		# comment in visual_builder.gd's _build_legs().
+		"scale_mode": ScaleMode.FIXED,
 	},
 	"helicopter_rotors": {
 		"pattern": Pattern.SIDE_PAIRS,
@@ -214,7 +219,7 @@ const LAYOUTS := {
 		"pattern": Pattern.CORNER_SPAN,
 		"geo_keys": {"drum_diameter": 1.0, "helix_depth": 1.0},
 		"geo_aliases": {"drum_diameter": ["drum_width", "size"]},
-		"normal_is_side": true, "reach_keys": ReachKeys.FORE_AFT,
+		"normal_is_side": true,
 	},
 }
 
@@ -280,15 +285,12 @@ const MOUNT_KITS := {
 	"wheels":            {"kit": Kit.SUSPENSION_ARM, "drop": 0.30, "stations": 1},
 	"half_track":        {"kit": Kit.TRACK_FRAME, "drop": 0.26, "stations": 4},
 	"rocker_bogie":      {"kit": Kit.SUSPENSION_ARM, "drop": 0.34, "stations": 2},
-	"pontoon_wheels":    {"kit": Kit.SUSPENSION_ARM, "drop": 0.32, "stations": 1},
 	# NONE, deliberately. _build_tracked_treads() now builds its own structure -
 	# a swing arm per road wheel up to the sub-frame line, plus the sprocket
 	# carriers - so the generic TRACK_FRAME kit was a SECOND set of frame rails
 	# and bearing blocks hanging below the belt, which is the object Chris kept
 	# seeing under the bottom run. One structure per assembly, not two.
 	"tracked_treads":    {"kit": Kit.NONE, "drop": 0.0, "stations": 0},
-	"screw_drive":       {"kit": Kit.TRACK_FRAME, "drop": 0.30, "stations": 3},
-	"legs":              {"kit": Kit.STRUT_LEG, "drop": 0.20, "stations": 1},
 	"hydrofoil":         {"kit": Kit.STRUT_LEG, "drop": 0.18, "stations": 1},
 	"helicopter_rotors": {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
 	"fixed_wing_engine": {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
@@ -318,7 +320,12 @@ const SUBFRAME_TYPES := [
 	# this. Putting them on the subframe as well gave them two structures, which
 	# is what the earlier generic chassis did wrong. pontoon_wheels copies the
 	# wheel mounting wholesale, so it belongs with them.
-	"legs", "half_track", "rocker_bogie", "screw_drive",
+	# legs and screw_drive left too: they now carry build_wheel_mount(), the
+	# same gearbox-and-driveshaft assembly the wheels and pontoons use
+	# (Chris's ask, 2026-08-02). Giving them the subframe AS WELL would stack
+	# two structures under one module, which is the mistake the first generic
+	# chassis made.
+	"half_track", "rocker_bogie",
 	"hover_engine", "air_cushion_skirt", "anti_grav_plate",
 ]
 
@@ -626,30 +633,43 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				out.append(st)
 
 		Pattern.CORNER_SPAN:
+			# Chris, twice: "pin the gearboxes to the corners of the hull, have
+			# them descend from there (with the struts intersecting into the
+			# hull to read as attached) and then stretch the drum between
+			# them."
+			#
+			# So the station IS the hull's bottom side edge - corner_x by
+			# -hull_size.y/2 - and nothing else. The drum used to be pushed
+			# outboard and UP by drum_offset (a 45-degree offset off the
+			# corner), which is what left it floating beside the hull at
+			# mid-height instead of hanging under the corner. Sitting the
+			# origin exactly on the underside is also what build_wheel_mount()
+			# requires to reach into the hull without measuring it, which is
+			# how the struts come to intersect the hull rather than aim at it.
 			var span_length := hull_size.z
-			var drum_offset := (hull_size.y * float(geom.get("drum_offset_frac", 0.6))) / sqrt(2.0)
 			var half_span := span_length * 0.5
-			var reach_fraction := float(geom.get("reach_fraction", 0.8))
 			var corner_x := hull_size.x / 2.0
 			for side in [-1.0, 1.0]:
 				var normal: Vector3 = Vector3.LEFT if side < 0.0 else Vector3.RIGHT
 				if not bool(spec.get("normal_is_side", false)):
 					normal = spec.get("normal", Vector3.UP)
-				var drum_x: float = (corner_x + drum_offset) * side
-				var drum_y := -drum_offset
-				var fore_end := Vector3(drum_x, drum_y, half_span)
-				var aft_end := Vector3(drum_x, drum_y, -half_span)
 				var geo := geo_base.duplicate()
-				geo["kit_reach"] = maxf(0.0, (-hull_size.y * 0.5) - drum_y)
-				geo["kit_anchor_x"] = (side * hull_size.x * 0.30) - drum_x
-				geo["kit_anchor_y"] = anchor_y - drum_y
-				geo["kit_anchor_z"] = 0.0
 				geo["drum_length"] = span_length
+				# Internal geometry channel, not a player tweak: the builder
+				# knows its own catalog size but not the hull's, and a drum
+				# sized off the catalog came out far too thin against a real
+				# hull ("the screw is too small").
+				geo["drum_bore"] = hull_size.y
+				# hydrofoil shares this pattern and still solves its struts
+				# from a reach vector. screw_drive no longer declares
+				# reach_keys, so this is a no-op for it.
+				var pos := Vector3(corner_x * side, -hull_size.y / 2.0, 0.0)
 				_apply_reach(geo, spec, Vector3.ZERO, side,
-					-fore_end * reach_fraction, -aft_end * reach_fraction)
-				var st := _station(Vector3(drum_x, drum_y, 0.0), normal, geo, side,
+					-(pos + Vector3(0, 0, half_span)) * 0.8,
+					-(pos + Vector3(0, 0, -half_span)) * 0.8)
+				var st := _station(pos,
+					normal, geo, side,
 					bool(spec.get("mirror", false)) and side < 0.0)
 				st["index"] = 0
 				out.append(st)
-
 	return out

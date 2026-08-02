@@ -58,10 +58,11 @@ const LOCOMOTION_SIZE_KEY := {
 	"hover_engine": "emv_level",
 	"fixed_wing_engine": "turbine_compression",
 	"screw_drive": "drum_diameter",
+	"pontoon_wheels": "pontoon_size",
 }
 
 # Floating Popup Window fields
-var popup_panel: PanelContainer
+var tweak_canvas: Control
 var popup_vbox: VBoxContainer
 var popup_name_label: Label
 var popup_stats_label: Label
@@ -385,7 +386,14 @@ var helix_depth_slider: HSlider
 # _build_helicopter_rotors()), routed through update_locomotion_geometry_
 # tweak() like blade_count, not a respawn.
 var duct_container: HBoxContainer
-var duct_checkbox: CheckButton
+var duct_checkbox: CheckBox
+# The checkbox is shared between helicopter_rotors' "Ducted Shroud" and
+# pontoon_wheels' "Paddle Vanes" - which tweak key it writes and what its
+# callout is titled are set per type in show_module_stats(), the same way the
+# Blade Count slider is shared. Hardcoding the key is what silently no-opped
+# that slider for two types before.
+var bool_tweak_key := "duct"
+var bool_tweak_title := "Ducted"
 
 func _ready():
 	add_to_group("stat_ui")
@@ -403,10 +411,99 @@ func _ready():
 	# carrying alert red. Save is the commit action, so it takes the single
 	# go-green. Test and Library are ordinary navigation and stay neutral -
 	# they are reachable, not important.
-	delete_button.theme_type_variation = "DangerButton"
-	save_button.theme_type_variation = "PrimaryButton"
-	test_button.theme_type_variation = "Button"
-	library_button.theme_type_variation = "Button"
+	# Plastic Model Kit Action Button Styling
+	save_button.text = "★ SAVE BLUEPRINT"
+	var s_style = StyleBoxFlat.new()
+	s_style.bg_color = Color(0.10, 0.22, 0.15, 0.95)
+	s_style.border_width_left = 6
+	s_style.border_color = Color(0.2, 0.9, 0.45) # Go-green plastic sprue gate
+	s_style.border_width_top = 1
+	s_style.border_width_right = 1
+	s_style.border_width_bottom = 3
+	s_style.corner_radius_top_left = 4
+	s_style.corner_radius_top_right = 4
+	s_style.corner_radius_bottom_left = 4
+	s_style.corner_radius_bottom_right = 4
+	s_style.content_margin_left = 12
+	s_style.content_margin_right = 12
+	s_style.content_margin_top = 8
+	s_style.content_margin_bottom = 8
+	save_button.add_theme_stylebox_override("normal", s_style)
+	var s_hover = s_style.duplicate()
+	s_hover.bg_color = Color(0.16, 0.30, 0.22, 0.98)
+	s_hover.border_color = Color(0.4, 1.0, 0.6)
+	save_button.add_theme_stylebox_override("hover", s_hover)
+	save_button.add_theme_color_override("font_color", Color(0.3, 1.0, 0.6))
+
+	test_button.text = "⚡ TEST IN ARENA"
+	var t_style = StyleBoxFlat.new()
+	t_style.bg_color = Color(0.24, 0.16, 0.08, 0.95)
+	t_style.border_width_left = 6
+	t_style.border_color = Color(1.0, 0.7, 0.2) # Caution amber sprue gate
+	t_style.border_width_top = 1
+	t_style.border_width_right = 1
+	t_style.border_width_bottom = 3
+	t_style.corner_radius_top_left = 4
+	t_style.corner_radius_top_right = 4
+	t_style.corner_radius_bottom_left = 4
+	t_style.corner_radius_bottom_right = 4
+	t_style.content_margin_left = 12
+	t_style.content_margin_right = 12
+	t_style.content_margin_top = 8
+	t_style.content_margin_bottom = 8
+	test_button.add_theme_stylebox_override("normal", t_style)
+	var t_hover = t_style.duplicate()
+	t_hover.bg_color = Color(0.32, 0.22, 0.10, 0.98)
+	t_hover.border_color = Color(1.0, 0.85, 0.3)
+	test_button.add_theme_stylebox_override("hover", t_hover)
+	test_button.add_theme_color_override("font_color", Color(1.0, 0.8, 0.3))
+
+	library_button.text = "📁 FLEET LIBRARY"
+	var l_style = StyleBoxFlat.new()
+	l_style.bg_color = Color(0.08, 0.18, 0.22, 0.95)
+	l_style.border_width_left = 6
+	l_style.border_color = Color(0.0, 0.85, 0.95) # Vector cyan sprue gate
+	l_style.border_width_top = 1
+	l_style.border_width_right = 1
+	l_style.border_width_bottom = 3
+	l_style.corner_radius_top_left = 4
+	l_style.corner_radius_top_right = 4
+	l_style.corner_radius_bottom_left = 4
+	l_style.corner_radius_bottom_right = 4
+	l_style.content_margin_left = 12
+	l_style.content_margin_right = 12
+	l_style.content_margin_top = 8
+	l_style.content_margin_bottom = 8
+	library_button.add_theme_stylebox_override("normal", l_style)
+	var l_hover = l_style.duplicate()
+	l_hover.bg_color = Color(0.12, 0.26, 0.32, 0.98)
+	l_hover.border_color = Color(0.3, 1.0, 1.0)
+	library_button.add_theme_stylebox_override("hover", l_hover)
+	library_button.add_theme_color_override("font_color", Color(0.3, 1.0, 1.0))
+
+	delete_button.text = "✂ DISCARD PART"
+	var d_style = StyleBoxFlat.new()
+	d_style.bg_color = Color(0.24, 0.08, 0.08, 0.95)
+	d_style.border_width_left = 6
+	d_style.border_color = Color(0.95, 0.3, 0.3) # Enamel red sprue gate
+	d_style.border_width_top = 1
+	d_style.border_width_right = 1
+	d_style.border_width_bottom = 3
+	d_style.corner_radius_top_left = 4
+	d_style.corner_radius_top_right = 4
+	d_style.corner_radius_bottom_left = 4
+	d_style.corner_radius_bottom_right = 4
+	d_style.content_margin_left = 12
+	d_style.content_margin_right = 12
+	d_style.content_margin_top = 8
+	d_style.content_margin_bottom = 8
+	delete_button.add_theme_stylebox_override("normal", d_style)
+	var d_hover = d_style.duplicate()
+	d_hover.bg_color = Color(0.34, 0.12, 0.12, 0.98)
+	d_hover.border_color = Color(1.0, 0.5, 0.5)
+	delete_button.add_theme_stylebox_override("hover", d_hover)
+	delete_button.add_theme_color_override("font_color", Color(1.0, 0.5, 0.5))
+
 	mirror_checkbox.toggled.connect(_on_mirror_toggled)
 	delete_button.pressed.connect(_on_delete_pressed)
 	save_button.pressed.connect(_on_save_pressed)
@@ -416,7 +513,9 @@ func _ready():
 	_setup_name_roller()
 	
 	size_slider.value_changed.connect(_on_size_value_changed)
+	size_slider.custom_minimum_size = Vector2(180, 0)
 	count_slider.value_changed.connect(_on_count_value_changed)
+	count_slider.custom_minimum_size = Vector2(180, 0)
 	# Size never changes how many module instances exist for ANY locomotion
 	# type (only Count does) - it's a purely cosmetic per-instance geometry
 	# tweak, so it's routed through update_locomotion_geometry_tweak() (an
@@ -455,6 +554,7 @@ func _ready():
 	wheels_per_axle_slider.max_value = 2.0
 	wheels_per_axle_slider.step = 1.0
 	wheels_per_axle_slider.value = 1.0
+	wheels_per_axle_slider.custom_minimum_size = Vector2(180, 0)
 	wheels_per_axle_container.add_child(wheels_per_axle_slider)
 	UITheme.style_slider(wheels_per_axle_slider)
 	wheels_per_axle_slider.value_changed.connect(_on_wheels_per_axle_changed)
@@ -480,6 +580,7 @@ func _ready():
 	blade_count_slider.max_value = 8.0
 	blade_count_slider.step = 1.0
 	blade_count_slider.value = 4.0
+	blade_count_slider.custom_minimum_size = Vector2(180, 0)
 	blade_count_container.add_child(blade_count_slider)
 	UITheme.style_slider(blade_count_slider)
 	blade_count_slider.value_changed.connect(_on_blade_count_changed)
@@ -506,6 +607,7 @@ func _ready():
 	blade_pitch_slider.max_value = 1.5
 	blade_pitch_slider.step = 0.1
 	blade_pitch_slider.value = 1.0
+	blade_pitch_slider.custom_minimum_size = Vector2(180, 0)
 	blade_pitch_container.add_child(blade_pitch_slider)
 	UITheme.style_slider(blade_pitch_slider)
 	blade_pitch_slider.value_changed.connect(_on_blade_pitch_changed)
@@ -531,6 +633,7 @@ func _ready():
 	helix_depth_slider.max_value = 1.5
 	helix_depth_slider.step = 0.1
 	helix_depth_slider.value = 1.0
+	helix_depth_slider.custom_minimum_size = Vector2(180, 0)
 	helix_depth_container.add_child(helix_depth_slider)
 	UITheme.style_slider(helix_depth_slider)
 	helix_depth_slider.value_changed.connect(_on_helix_depth_changed)
@@ -544,8 +647,7 @@ func _ready():
 	locomotion_tweaks.add_child(duct_container)
 	locomotion_tweaks.move_child(duct_container, helix_depth_container.get_index() + 1)
 
-	duct_checkbox = CheckButton.new()
-	duct_checkbox.text = "Ducted Shroud"
+	duct_checkbox = CheckBox.new()
 	duct_checkbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	duct_container.add_child(duct_checkbox)
 	duct_checkbox.toggled.connect(_on_duct_toggled)
@@ -626,43 +728,28 @@ func _ready():
 	module_tweaks_container.add_theme_constant_override("separation", 8)
 	$ScrollContainer/VBoxContainer.add_child(module_tweaks_container)
 	
-	# Dynamic Floating Customization Popup setup
-	popup_panel = PanelContainer.new()
-	popup_panel.name = "ModulePopup"
-	popup_panel.visible = false
-	popup_panel.custom_minimum_size = Vector2(280, 0)
+	# Remove popup_panel and use tweak_canvas instead for infographic UI
+	tweak_canvas = Control.new()
+	tweak_canvas.name = "TweakCanvas"
+	tweak_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(tweak_canvas)
 	
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.1, 0.1, 0.12, 0.9)
-	style.border_width_left = 2
-	style.border_width_top = 2
-	style.border_width_right = 2
-	style.border_width_bottom = 2
-	style.border_color = Color(0.4, 0.7, 1.0, 0.7) # Glowing cyan border
-	style.corner_radius_top_left = 8
-	style.corner_radius_top_right = 8
-	style.corner_radius_bottom_left = 8
-	style.corner_radius_bottom_right = 8
-	style.shadow_color = Color(0, 0, 0, 0.5)
-	style.shadow_size = 12
-	popup_panel.add_theme_stylebox_override("panel", style)
-	
-	add_child(popup_panel)
-	
-	popup_vbox = VBoxContainer.new()
-	popup_vbox.add_theme_constant_override("separation", 6)
-	popup_panel.add_child(popup_vbox)
+	# We still need popup_tweaks_container as a stash for persistent locomotion containers
+	# when they aren't assigned to a TweakCallout.
+	popup_tweaks_container = VBoxContainer.new()
+	popup_tweaks_container.visible = false
+	add_child(popup_tweaks_container)
 	
 	popup_name_label = Label.new()
 	popup_name_label.text = "Module Customization"
 	popup_name_label.add_theme_font_size_override("font_size", 16)
 	popup_name_label.add_theme_color_override("font_color", Color.GOLD)
-	popup_vbox.add_child(popup_name_label)
+	popup_tweaks_container.add_child(popup_name_label)
 	
 	popup_stats_label = Label.new()
 	popup_stats_label.text = ""
 	popup_stats_label.add_theme_font_size_override("font_size", 12)
-	popup_vbox.add_child(popup_stats_label)
+	popup_tweaks_container.add_child(popup_stats_label)
 	
 	popup_rotate_btn = Button.new()
 	popup_rotate_btn.text = "🔄 Rotate 90° [R]"
@@ -673,11 +760,7 @@ func _ready():
 		if placer and placer.has_method("rotate_selected_module"):
 			placer.rotate_selected_module()
 	)
-	popup_vbox.add_child(popup_rotate_btn)
-	
-	popup_tweaks_container = VBoxContainer.new()
-	popup_tweaks_container.add_theme_constant_override("separation", 6)
-	popup_vbox.add_child(popup_tweaks_container)
+	popup_tweaks_container.add_child(popup_rotate_btn)
 	
 	# Undo/Redo (Design_Lab_UI_UX.md top-bar spec: also bound to Ctrl+Z / Ctrl+Y)
 	var undo_redo_row = HBoxContainer.new()
@@ -730,24 +813,25 @@ func _push_undo():
 	if root and root.has_method("push_undo_snapshot"):
 		root.push_undo_snapshot()
 
+const UIStampScript = preload("res://scripts/ui_stamp.gd")
+
 func _on_delete_pressed():
-	var root = get_node("/root/MainLab")
+	var root = get_node_or_null("/root/MainLab")
 	if root and root.has_method("delete_selected_module"):
+		UIStampScript.spawn_stamp(get_tree().root, "DECOMMISSIONED / DISCARDED", Color(1.0, 0.35, 0.35))
 		root.delete_selected_module()
 		
 func _on_save_pressed():
 	var root = get_node("/root/MainLab")
 	var hull = root.get_node_or_null("Hull") if root else null
 	if hull:
-		# No placeholder substitution. A blank field used to become
-		# "Untitled Design" and save anyway, which is how designs reached the
-		# match roster without the player ever naming them. Now an unnamed
-		# save is refused and the field is focused so the fix is obvious.
 		var name_text = blueprint_name_edit.text.strip_edges()
 		hull.set_meta("blueprint_name", name_text)
 	var blueprint_manager = root.get_node_or_null("BlueprintManager")
 	if blueprint_manager:
-		if not blueprint_manager.save_blueprint():
+		if blueprint_manager.save_blueprint():
+			UIStampScript.spawn_stamp(get_tree().root, "APPROVED FOR FIELD TEST", Color(0.2, 0.95, 0.4))
+		else:
 			blueprint_name_edit.grab_focus()
 
 # Adds a "Roll" button beside the name field that fills in a generated
@@ -866,17 +950,13 @@ func _on_test_pressed():
 	var root = get_node("/root/MainLab")
 	var blueprint_manager = root.get_node_or_null("BlueprintManager")
 	if blueprint_manager:
-		# Stage to the SCRATCH slot, not the roster.
-		#
-		# This used to call save_blueprint(), so every trip to the test range
-		# minted a permanent "Untitled Design" entry that then showed up in
-		# match setup. Testing is not keeping. save_scratch() also flags the
-		# design for restore, so coming back from the arena returns the
-		# player to what they were working on rather than a blank hull.
-		#
-		# Still returns false on clipping, so the transition stays blocked.
 		var success = blueprint_manager.save_scratch()
-		if not success:
+		if success:
+			UIStampScript.spawn_stamp(get_tree().root, "DESTRUCTIVE TEST PERMIT", Color(1.0, 0.7, 0.2))
+			get_tree().create_timer(0.35).timeout.connect(func():
+				get_tree().change_scene_to_file("res://scenes/Battlefield.tscn")
+			)
+		else:
 			var ui = get_tree().get_first_node_in_group("stat_ui")
 			if ui and ui.has_node("ScrollContainer/VBoxContainer/Title"):
 				ui.get_node("ScrollContainer/VBoxContainer/Title").text = "TEST BLOCKED: Resolve Clipping!"
@@ -884,10 +964,8 @@ func _on_test_pressed():
 					if is_instance_valid(ui) and ui.has_node("ScrollContainer/VBoxContainer/Title"):
 						ui.get_node("ScrollContainer/VBoxContainer/Title").text = "Blueprint Stats"
 				)
-			return
-	
-	# Transition to battlefield
-	get_tree().change_scene_to_file("res://scenes/Battlefield.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/Battlefield.tscn")
 
 func _on_mirror_toggled(button_pressed: bool):
 	var root = get_node("/root/MainLab")
@@ -1063,33 +1141,48 @@ func update_stats(hull: Node3D):
 		$ScrollContainer/VBoxContainer.add_child(armor_threshold_label)
 	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
 
+# Radial positions for infographic lines (prioritize a ring around the module)
+var _callout_dirs = [
+	Vector2(0.8, -1.2), Vector2(-0.8, -1.2), # Top corners
+	Vector2(1.2, -0.2), Vector2(-1.2, -0.2), # High sides
+	Vector2(1.2, 0.6), Vector2(-1.2, 0.6),   # Low sides
+	Vector2(0.8, 1.2), Vector2(-0.8, 1.2)    # Bottom corners
+]
+var _current_callout_idx = 0
+
+func _add_callout(module: Node3D, title: String, control: Control):
+	if control.get_parent():
+		control.reparent(tweak_canvas) # Temporarily avoid issues if it's already in the tree somewhere
+	var dir = _callout_dirs[_current_callout_idx % _callout_dirs.size()]
+	var dist = 100.0 + (_current_callout_idx / _callout_dirs.size()) * 70.0
+	var callout = load("res://scripts/tweak_callout.gd").new(title, control, dir, dist)
+	callout.target_node = module
+	tweak_canvas.add_child(callout)
+	_current_callout_idx += 1
+
+func _clear_callouts():
+	if not tweak_canvas: return
+	# Rescue persistent containers back to stash
+	var persistent_items = [size_container, count_container, wheels_per_axle_container, blade_count_container, blade_pitch_container, helix_depth_container, duct_container, popup_name_label, popup_stats_label, popup_rotate_btn]
+	for c in persistent_items:
+		if is_instance_valid(c) and c.get_parent() != popup_tweaks_container:
+			if c.get_parent() != null:
+				c.reparent(popup_tweaks_container)
+			else:
+				popup_tweaks_container.add_child(c)
+	
+	for child in tweak_canvas.get_children():
+		child.queue_free()
+	_current_callout_idx = 0
+
 func on_module_selected(module: Node3D):
-	# Defense in depth: treat a freed-but-non-null module reference the same
-	# as no selection, rather than crashing on the first .has_meta() call
-	# below (which previously left current_selected_module permanently
-	# corrupted - see the is_queued_for_deletion() guard in _apply_tweaks()
-	# for the actual bug that used to hand this function a freed instance).
 	if module and not is_instance_valid(module):
 		module = null
 	current_selected_module = module
 
-	# Clear old tweaks in the popup tweaks container. size_container/
-	# count_container/wheels_per_axle_container are PERSISTENT, reparented
-	# once into popup_tweaks_container at _ready() (not rebuilt per
-	# selection like the weapon/armor widgets below) - free()ing them here
-	# would destroy the Locomotion Tweaks sliders the first time any
-	# non-locomotion module got selected. Everything else in this container
-	# is disposable, generated fresh by _generate_custom_tweaks() each time.
-	if popup_tweaks_container:
-		for child in popup_tweaks_container.get_children():
-			if child == size_container or child == count_container or child == wheels_per_axle_container or child == blade_count_container or child == blade_pitch_container or child == helix_depth_container or child == duct_container:
-				continue
-			child.queue_free()
+	_clear_callouts()
 
-	# Default every locomotion tweak widget to hidden; only the "locomotion"
-	# branch below re-enables the ones the selected type actually uses. This
-	# also covers the null-selection and non-locomotion-category early
-	# returns below without needing to repeat the hides in each of them.
+	# Default every locomotion tweak widget to hidden
 	size_container.visible = false
 	count_container.visible = false
 	wheels_per_axle_container.visible = false
@@ -1103,29 +1196,40 @@ func on_module_selected(module: Node3D):
 
 	if hull and (module == null or module == hull or module.name == "Hull"):
 		sync_hull_ui(hull)
-		if popup_panel: popup_panel.visible = false
 
 	if not locomotion_tweaks: return
 
 	if not module or not module.has_meta("module_data"):
-		if popup_panel: popup_panel.visible = false
 		return
 
 	var data = module.get_meta("module_data")
 
-	# Populate Module stats & tweaks into the hovering popup!
-	if popup_panel:
-		popup_panel.visible = true
-		popup_name_label.text = "🛠️ " + data.module_name.to_upper()
+	# We no longer use a single popup_panel. Instead we will create a callout for the stats
+	# We can just use the popup_name_label and popup_stats_label but add them to a callout.
+	
+	# Actually, to avoid breaking, let's keep the name and stat label but put them in a dedicated callout
+	var stats_container = VBoxContainer.new()
+	if popup_name_label.get_parent(): popup_name_label.reparent(stats_container)
+	else: stats_container.add_child(popup_name_label)
+	
+	if popup_stats_label.get_parent(): popup_stats_label.reparent(stats_container)
+	else: stats_container.add_child(popup_stats_label)
+		
+	if popup_rotate_btn.get_parent(): popup_rotate_btn.reparent(stats_container)
+	else: stats_container.add_child(popup_rotate_btn)
+		
+	popup_name_label.text = "🛠️ " + data.module_name.to_upper()
 
-		var hp = data.get_hp()
-		var wt = data.get_weight()
-		var cost = data.get_cost()
-		var dps = data.get_dps()
-		var heal = data.get_heal_rate()
-		var last_line = "Heal Rate: %.1f/s" % heal if heal > 0.0 else "DPS: %.1f" % dps
-		var mount_line = _mount_style_line(module.get_meta("mount_style", ""))
-		popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s%s" % [hp, wt, cost.x, cost.y, last_line, mount_line]
+	var hp = data.get_hp()
+	var wt = data.get_weight()
+	var cost = data.get_cost()
+	var dps = data.get_dps()
+	var heal = data.get_heal_rate()
+	var last_line = "Heal Rate: %.1f/s" % heal if heal > 0.0 else "DPS: %.1f" % dps
+	var mount_line = _mount_style_line(module.get_meta("mount_style", ""))
+	popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s%s" % [hp, wt, cost.x, cost.y, last_line, mount_line]
+	
+	_add_callout(module, "Module Stats", stats_container)
 
 	if data.category != "locomotion":
 		_generate_custom_tweaks(module, data)
@@ -1154,6 +1258,8 @@ func on_module_selected(module: Node3D):
 	blade_count_container.visible = false
 	blade_pitch_container.visible = false
 	count_label_base = "Count"
+	bool_tweak_key = "duct"
+	bool_tweak_title = "Ducted"
 
 	if type_id == "wheels":
 		size_label_base = "Wheel Size"
@@ -1181,6 +1287,7 @@ func on_module_selected(module: Node3D):
 		blade_count_container.visible = true
 		blade_count_slider.value = settings.get("blade_count", 4.0)
 		duct_container.visible = true
+		duct_checkbox.tooltip_text = "Ducted Shroud"
 		duct_checkbox.button_pressed = settings.get("duct", false)
 	elif type_id == "legs":
 		size_label_base = "Knee Height"
@@ -1235,10 +1342,39 @@ func on_module_selected(module: Node3D):
 		size_slider.value = settings.get("drum_diameter", settings.get("drum_width", 1.0))
 		helix_depth_container.visible = true
 		helix_depth_slider.value = settings.get("helix_depth", 1.0)
+	elif type_id == "pontoon_wheels":
+		# module_catalog.gd has declared these three since the type was added,
+		# but no UI branch ever read them, so the type came up with no
+		# tweakables at all (Chris's report, 2026-08-02) - it fell through to
+		# the else below and hid the Size slider.
+		size_label_base = "Pontoon Size"
+		size_slider.min_value = 0.6
+		size_slider.max_value = 1.8
+		size_slider.value = settings.get("pontoon_size", 1.0)
+		count_container.visible = true
+		count_slider.min_value = 2.0
+		count_slider.max_value = 6.0
+		count_slider.step = 2.0
+		count_slider.value = settings.get("axle_count", 4)
+		count_label_base = "Axle Count"
+		bool_tweak_key = "paddle_vanes"
+		bool_tweak_title = "Paddle Vanes"
+		duct_container.visible = true
+		duct_checkbox.tooltip_text = "Paddle Vanes"
+		duct_checkbox.button_pressed = settings.get("paddle_vanes", true)
 	else:
 		size_container.visible = false
 
 	_refresh_locomotion_labels()
+	
+	if size_container.visible: _add_callout(module, "Size", size_container)
+	if count_container.visible: _add_callout(module, "Count", count_container)
+	if wheels_per_axle_container.visible: _add_callout(module, "Wheels Per Axle", wheels_per_axle_container)
+	if blade_count_container.visible: _add_callout(module, "Blade Count", blade_count_container)
+	if blade_pitch_container.visible: _add_callout(module, "Blade Pitch", blade_pitch_container)
+	if helix_depth_container.visible: _add_callout(module, "Helix Depth", helix_depth_container)
+	if duct_container.visible: _add_callout(module, bool_tweak_title, duct_container)
+	
 	is_updating_sliders = false
 
 func _refresh_locomotion_labels():
@@ -1314,7 +1450,8 @@ func _on_duct_toggled(pressed: bool):
 	_push_undo()
 	var root = get_node_or_null("/root/MainLab")
 	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
-	root.update_locomotion_geometry_tweak("helicopter_rotors", "duct", pressed)
+	var data = current_selected_module.get_meta("module_data")
+	root.update_locomotion_geometry_tweak(data.type_id, bool_tweak_key, pressed)
 
 func _on_loco_drag_started():
 	_loco_slider_dragging = true
@@ -1360,6 +1497,15 @@ func _apply_tweaks():
 		new_settings = {
 			"knee_height": size_slider.value,
 			"count": int(count_slider.value)
+		}
+	elif type_id == "pontoon_wheels":
+		# paddle_vanes rides along for the same reason blade_count does below:
+		# an Axle Count change respawns every instance, so a tweak left out of
+		# this dict silently resets to its default on the next Count drag.
+		new_settings = {
+			"pontoon_size": size_slider.value,
+			"axle_count": int(count_slider.value),
+			"paddle_vanes": duct_checkbox.button_pressed
 		}
 	elif type_id == "hover_engine":
 		new_settings = {
@@ -1491,10 +1637,15 @@ func _initial_sync():
 
 func _on_tweak_changed():
 	if current_selected_module and is_instance_valid(current_selected_module):
+		var primary_data = current_selected_module.get_meta("module_data") if current_selected_module.has_meta("module_data") else null
 		VisualBuilder.rebuild_visual(current_selected_module)
 		if current_selected_module.has_meta("mirrored_counterpart"):
 			var mirror = current_selected_module.get_meta("mirrored_counterpart")
 			if mirror and is_instance_valid(mirror):
+				# Sync tweaks directly to the mirror so symmetric edits work correctly
+				var mirror_data = mirror.get_meta("module_data") if mirror.has_meta("module_data") else null
+				if primary_data and mirror_data:
+					mirror_data.tweaks = primary_data.tweaks.duplicate()
 				VisualBuilder.rebuild_visual(mirror)
 				
 	var root = get_node_or_null("/root/MainLab")
@@ -1539,26 +1690,15 @@ const ARMOR_MATERIALS = ["hardened_steel", "reactive_armor", "ablative_ceramic",
 const ARMOR_MATERIAL_LABELS = ["Hardened Steel", "Reactive Armor", "Ablative Ceramic", "Energy Shielding"]
 
 func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
-	if not popup_tweaks_container: return
 	var type_id = data.type_id
 
-	# Per-module armor material (Armor phase 3, MOUNTING_AND_ARMOR_SPEC.md
-	# addendum): each placed armor plate can pick its own material - a
-	# front plate can be reactive while the sides are ablative, instead of
-	# one material for the whole hull. Not TWEAK_SPECS-driven since it's a
-	# material choice, not a numeric slider; stored in the same tweaks dict
-	# so it rides the existing save/load path for free.
 	if data.category == "armor":
 		var mat_container = VBoxContainer.new()
 		mat_container.add_theme_constant_override("separation", 2)
-		popup_tweaks_container.add_child(mat_container)
 
-		var mat_label = Label.new()
 		var current_mat = data.tweaks.get("material", "hardened_steel")
 		var current_idx = ARMOR_MATERIALS.find(current_mat)
 		if current_idx < 0: current_idx = 0
-		mat_label.text = "Plate Material: %s" % ARMOR_MATERIAL_LABELS[current_idx]
-		mat_container.add_child(mat_label)
 
 		var mat_btn = OptionButton.new()
 		for lbl in ARMOR_MATERIAL_LABELS:
@@ -1568,16 +1708,10 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 		mat_btn.item_selected.connect(func(index: int):
 			_push_undo()
 			data.tweaks["material"] = ARMOR_MATERIALS[index]
-			mat_label.text = "Plate Material: %s" % ARMOR_MATERIAL_LABELS[index]
 			_on_tweak_changed()
 		)
+		_add_callout(module, "Plate Material", mat_container)
 
-	# Ammunition selector. Same shape as the armor-material dropdown above
-	# and for the same reason: it's a discrete choice, not a numeric slider,
-	# and storing it in the module's own tweaks dict means it rides the
-	# existing save/load path for free. Only weapons with a real payload to
-	# swap get one (ModuleCatalog.WEAPON_AMMO_OPTIONS) - a continuous beam
-	# or a flamethrower has nothing to load.
 	if ModuleCatalog.is_ammo_capable(type_id):
 		var ammo_options = ModuleCatalog.get_ammo_options(type_id)
 		var current_ammo = ModuleCatalog.get_ammo(type_id, data.tweaks)
@@ -1585,11 +1719,6 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 
 		var ammo_container = VBoxContainer.new()
 		ammo_container.add_theme_constant_override("separation", 2)
-		popup_tweaks_container.add_child(ammo_container)
-
-		var ammo_label = Label.new()
-		ammo_label.text = "Loaded Ammo: %s" % ModuleCatalog.get_ammo_profile(ammo_options[ammo_idx]).label
-		ammo_container.add_child(ammo_label)
 
 		var ammo_btn = OptionButton.new()
 		for a in ammo_options:
@@ -1597,8 +1726,6 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 		ammo_btn.selected = ammo_idx
 		ammo_container.add_child(ammo_btn)
 
-		# The round's own one-line description, so the player can see what
-		# a choice actually does without leaving the popup.
 		var ammo_desc = Label.new()
 		ammo_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		ammo_desc.custom_minimum_size.x = 220
@@ -1612,65 +1739,57 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 			var picked = ammo_options[index]
 			data.tweaks[ModuleCatalog.AMMO_TWEAK_KEY] = picked
 			var profile = ModuleCatalog.get_ammo_profile(picked)
-			ammo_label.text = "Loaded Ammo: %s" % profile.label
 			ammo_desc.text = profile.desc
 			_on_tweak_changed()
 		)
+		_add_callout(module, "Loaded Ammo", ammo_container)
 
 	if not TWEAK_SPECS.has(type_id): return
 
 	var specs = TWEAK_SPECS[type_id]
 	for spec in specs:
-		var container = VBoxContainer.new()
-		container.add_theme_constant_override("separation", 2)
-		popup_tweaks_container.add_child(container)
-		
-		var label = Label.new()
-		container.add_child(label)
-		
 		if spec.get("type", "") == "bool":
-			var check = CheckButton.new()
-			check.text = spec.label
+			var check = CheckBox.new()
 			check.button_pressed = data.tweaks.get(spec.name, spec.default)
-			container.add_child(check)
-			
-			label.text = "%s: %s" % [spec.label, "ENABLED" if check.button_pressed else "DISABLED"]
+			check.tooltip_text = spec.label
 			
 			check.toggled.connect(func(pressed):
 				_push_undo()
 				data.tweaks[spec.name] = pressed
-				label.text = "%s: %s" % [spec.label, "ENABLED" if pressed else "DISABLED"]
 				_on_tweak_changed()
 			)
+			_add_callout(module, spec.label, check)
 		else:
+			var container = VBoxContainer.new()
+			container.add_theme_constant_override("separation", 0)
+			
+			var label = Label.new()
+			container.add_child(label)
+
 			var slider = HSlider.new()
 			slider.min_value = spec.min
 			slider.max_value = spec.max
 			slider.step = spec.step
 			slider.value = data.tweaks.get(spec.name, spec.default)
+			slider.custom_minimum_size = Vector2(180, 0)
 			container.add_child(slider)
 			UITheme.style_slider(slider)
 
 			if spec.step == 1.0:
-				label.text = "%s: %d" % [spec.label, int(slider.value)]
+				label.text = "%d" % int(slider.value)
 			else:
-				label.text = "%s: %.2fx" % [spec.label, slider.value]
+				label.text = "%.2fx" % slider.value
 
 			slider.drag_started.connect(_push_undo)
 			slider.value_changed.connect(func(val):
 				data.tweaks[spec.name] = val
 				if spec.step == 1.0:
-					label.text = "%s: %d" % [spec.label, int(val)]
+					label.text = "%d" % int(val)
 				else:
-					label.text = "%s: %.2fx" % [spec.label, val]
+					label.text = "%.2fx" % val
 				_on_tweak_changed()
 			)
+			_add_callout(module, spec.label, container)
 
 func _process(delta):
-	if popup_panel and popup_panel.visible and is_instance_valid(current_selected_module) and current_selected_module != null and current_selected_module.name != "Hull":
-		var camera = get_viewport().get_camera_3d()
-		if camera:
-			var pos_3d = current_selected_module.global_position
-			var offset_pos_3d = pos_3d + Vector3(0, 0.85, 0)
-			var pos_2d = camera.unproject_position(offset_pos_3d)
-			popup_panel.global_position = pos_2d - Vector2(popup_panel.size.x / 2.0, popup_panel.size.y)
+	pass
