@@ -455,7 +455,14 @@ def _resample_closed(points, spacing):
 
 
 def build_tread_belt_loop():
-	half_span = 1.0
+	# ASPECT. Authored 2.6 half-span against a 0.46 sprocket - about 6:1 overall,
+	# which is roughly a real hull's proportions. It used to be 1.0 half-span,
+	# i.e. 2.75:1, and once the track group was scaled UNIFORMLY (so the belt
+	# would actually wrap the sprockets rather than cut through them) that short
+	# aspect meant scaling to a 6:1 hull's length blew the sprockets up to nearly
+	# hull height. A track is long and low; authoring it that way is what lets one
+	# uniform scale serve both the wrap and the proportions.
+	half_span = 2.6
 	# Chris: the trapezoid should be MORE pronounced. The drop from the sprocket
 	# centreline down to the road-wheel line is what makes the shape read, so it
 	# goes 0.20 -> 0.38 while the road wheels shrink slightly - a bigger
@@ -466,7 +473,7 @@ def build_tread_belt_loop():
 	road_drop = 0.38
 	width = 0.30
 	bm = bmesh.new()
-	path = _resample_closed(_track_path(half_span, r_drive, road_drop, r_road), 0.115)
+	path = _resample_closed(_track_path(half_span, r_drive, road_drop, r_road), 0.125)
 	for (y, z, ang, step) in path:
 		rot = mathutils.Matrix.Rotation(ang, 4, 'X')
 		centre = mathutils.Vector((0, y, z))

@@ -3673,13 +3673,23 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 	)
 
 
+# The numbers tread_belt_loop.glb was authored with (see _track_path in
+# tools/blender/build_locomotion_rework.py). EVERY placement below derives from
+# these, so the mesh and the runtime cannot disagree about where the sprocket
+# centreline, the road-wheel line or the belt path are. When the mesh changes,
+# these change in the same commit.
+const BELT_HALF_SPAN := 2.6     # sprocket centre to idler centre, halved
+const BELT_DRIVE_RADIUS := 0.46 # sprocket / idler radius
+const BELT_ROAD_DROP := 0.38    # road-wheel centre below the sprocket centreline
+const BELT_ROAD_RADIUS := 0.22  # road-wheel radius
+
 static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
 	build_mount_kit(parent_node, "tracked_treads", base_color, 1.0, float(tweaks.get("tread_width", tweaks.get("width", 1.0))), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	var width = tweaks.get("tread_width", tweaks.get("width", tweaks.get("size", 1.0)))
 	# Fixed at 3 - Chris's ask, no longer a user tweak (was road_wheel_count,
 	# 3-8 via a dedicated slider; removed along with the slider/catalog entry
 	# in stat_calculator.gd/module_catalog.gd/module_placer.gd/module_data.gd).
-	var road_wheels = 3
+	var road_wheels = 5
 	var sprocket = tweaks.get("drive_sprocket", true)
 
 	var loop_mesh = _part("tread_belt_loop")
@@ -3771,7 +3781,20 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# tread_width to widen only the belt loop itself, not resize or reposition
 	# the sprockets/wheels. Computed here (before the loop is built) so both
 	# the loop and the sprockets below share one value.
-	var sprocket_scale = target_radius / 0.4
+	# ONE SCALE FOR THE WHOLE TRACK GROUP.
+	#
+	# The belt was scaled non-uniformly - y_scale on height, a separate
+	# (half_span + radius) ratio on length - while the sprockets were scaled
+	# uniformly by target_radius/0.4. Two different mappings cannot line up, so
+	# the belt's end arcs were never the sprocket's radius and the track cut
+	# THROUGH the sprockets instead of wrapping them (Chris's report). The belt
+	# mesh is authored with the sprockets, road wheels and belt path all
+	# coincident; scaling that one assembly uniformly keeps them coincident, and
+	# is the only way they stay aligned at every hull size.
+	#
+	# tread_width still widens the belt alone, on top of this.
+	var belt_scale: float = target_length / (BELT_HALF_SPAN * 2.0 + BELT_DRIVE_RADIUS * 2.0)
+	var sprocket_scale = (BELT_DRIVE_RADIUS * belt_scale) / 0.4
 	var sprocket_width_authored = 0.3
 	# Center of the sprocket's own footprint (which sits entirely inboard of
 	# outboard_x, its outer edge) - the loop anchors to THIS instead of
@@ -3788,7 +3811,8 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		# tread loop should get wider, the sprockets and wheels should stay
 		# as is"). The loop grows/shrinks symmetrically around belt_center_x
 		# (fixed, width-independent) rather than shifting it.
-		loop.scale = Vector3(sprocket_scale * width, y_scale, (target_half_span + target_radius) / (authored_half_span + authored_radius))
+		# Uniform on height and length; width is the one axis tread_width owns.
+		loop.scale = Vector3(sprocket_scale * width, belt_scale, belt_scale)
 	else:
 		loop = MeshInstance3D.new()
 		var loop_box = BoxMesh.new()
@@ -3812,7 +3836,7 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		# whole track assembly about the mount point instead.
 		var sp_front_axle = Node3D.new()
 		sp_front_axle.name = SPIN_PIVOT_TREAD
-		sp_front_axle.position = Vector3(outboard_x, ground_offset + y_shift, -target_half_span)
+		sp_front_axle.position = Vector3(outboard_x, ground_offset + y_shift, -BELT_HALF_SPAN * belt_scale)
 		parent_node.add_child(sp_front_axle)
 		var sp_front = _mesh_inst(sprocket_mesh, Color(0.18, 0.18, 0.2))
 		sp_front.scale = Vector3(sprocket_scale, sprocket_scale, sprocket_scale)
@@ -3821,7 +3845,7 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 
 		var sp_rear_axle = Node3D.new()
 		sp_rear_axle.name = SPIN_PIVOT_TREAD
-		sp_rear_axle.position = Vector3(outboard_x, ground_offset + y_shift, target_half_span)
+		sp_rear_axle.position = Vector3(outboard_x, ground_offset + y_shift, BELT_HALF_SPAN * belt_scale)
 		parent_node.add_child(sp_rear_axle)
 		var sp_rear = _mesh_inst(sprocket_mesh, Color(0.18, 0.18, 0.2))
 		sp_rear.scale = Vector3(sprocket_scale, sprocket_scale, sprocket_scale)
@@ -3842,7 +3866,7 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# _repeat_along_axis), so half of actual_size.z puts them at +-25% of
 	# hull length, i.e. the center 50% - sized off THIS span first so
 	# wheel_radius_target doesn't shrink from the inward pull below.
-	var wheel_span = actual_size.z * 0.5
+	var wheel_span = BELT_HALF_SPAN * 2.0 * belt_scale * 0.62
 	var spacing = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
 	# Sized and seated from the AUTHORED belt profile, not independently.
 	# tread_belt_loop is now a real track trapezoid (see _track_path in
@@ -3852,10 +3876,8 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# hanging BELOW the belt instead of riding inside it - Chris's report - so
 	# both radius and seat now come from the same constants the mesh was built
 	# with, and the two cannot disagree.
-	const BELT_ROAD_DROP := 0.38   # authored: road-wheel centre below sprocket centre
-	const BELT_ROAD_RADIUS := 0.22 # authored: road-wheel radius
-	const BELT_DRIVE_RADIUS := 0.46
-	var wheel_radius_target = target_radius * (BELT_ROAD_RADIUS / BELT_DRIVE_RADIUS)
+
+	var wheel_radius_target = BELT_ROAD_RADIUS * belt_scale
 	# Not multiplied by `width` (tread_width) - same reasoning as
 	# sprocket_scale above, road wheels stay fixed size when the belt widens.
 	var wheel_scale = wheel_radius_target / 0.45
@@ -3903,8 +3925,7 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		# Seated on the belt's own road-wheel line rather than on its own radius,
 		# so the wheel sits INSIDE the loop with the bottom run passing under it.
 		roller_axle.position = Vector3(outboard_x,
-			ground_offset + y_shift - BELT_ROAD_DROP * (target_radius / BELT_DRIVE_RADIUS),
-			pos.z)
+			ground_offset + y_shift - BELT_ROAD_DROP * belt_scale, pos.z)
 		p.add_child(roller_axle)
 		roller.rotation = Vector3(0, 0, PI / 2.0)
 		roller_axle.add_child(roller)
@@ -3922,8 +3943,18 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		# wheel, running from the wheel's own axle inboard and up to the hull,
 		# with a torsion housing where it enters. Solved to the real gap the same
 		# way the mount arm is, so it stays correct on any hull.
+		# The arm terminates on the SUB-FRAME rail, not out at the hull's skin.
+		# Chris: "the gearboxes are barely on the hull" - they were, because
+		# arm_top was placed at 0.42 of the way inboard at the hull's underside,
+		# which on a hull whose sides taper is out in space. A real chassis has a
+		# sub-frame under the hull that the running gear bolts to, and the drive
+		# type changes while the sub-frame does not. So the arm ends INSIDE the
+		# hull's own footprint, a little below its belly, where a sub-frame rail
+		# would actually be - and the torsion housing sits on that rail.
+		var frame_x: float = outboard_x * 0.30
+		var frame_y: float = hull_line_y - wheel_radius_target * 0.55
 		var arm_root := Vector3(outboard_x, roller_axle.position.y, pos.z)
-		var arm_top := Vector3(outboard_x * 0.42, hull_line_y, pos.z)
+		var arm_top := Vector3(frame_x, frame_y, pos.z)
 		var arm_vec := arm_top - arm_root
 		if arm_vec.length() > 0.05:
 			var arm_pivot := Node3D.new()
@@ -3948,13 +3979,6 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 			housing_inst.rotation = Vector3(0, 0, PI / 2.0)
 			housing_inst.position = arm_top
 			p.add_child(housing_inst)
-			# Bump stop above the arm, so the travel reads as sprung.
-			var stop := BoxMesh.new()
-			stop.size = Vector3(wheel_radius_target * 0.7, wheel_radius_target * 0.4,
-				wheel_radius_target * 0.7)
-			var stop_inst := _mesh_inst(stop, base_color.darkened(0.34), Color(0, 0, 0, 0), 0.0, "steel")
-			stop_inst.position = arm_root.lerp(arm_top, 0.55) + Vector3(0, wheel_radius_target * 0.7, 0)
-			p.add_child(stop_inst)
 	)
 
 
