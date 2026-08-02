@@ -5978,23 +5978,25 @@ static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_colo
 
 	var bogie_mesh := _part("ht_track_bogie")
 	if bogie_mesh:
-		# One authored bogie, repeated aft. More bogies means a longer track
-		# run, which is what carries the extra payload.
-		var run := target_length * 0.55
-		var step: float = run / float(max(1, bogies))
-		for i in range(bogies):
-			var bogie_pivot := Node3D.new()
-			bogie_pivot.name = SPIN_PIVOT_TREAD
-			bogie_pivot.position = Vector3(0, 0, half - step * (float(i) + 0.5))
-			parent_node.add_child(bogie_pivot)
-			var bogie := _mesh_inst(bogie_mesh, base_color)
-			# Z is the fore/aft axis here, not Y: the parts are authored with
-			# Blender +Y forward, which imports as Godot -Z. Scaling Y instead
-			# squashed each bogie flat and left the track a paper ribbon.
-			# 0.9 is the authored frame length, so this fits each bogie to the
-			# slot the run divides into.
-			bogie.scale = Vector3(width * v_scale * 0.55, v_scale, step / 0.9)
-			bogie_pivot.add_child(bogie)
+		# ONE track, not one per bogie. This used to instance the authored
+		# bogie `bogies` times down the run, so what read as "the track" was
+		# actually three short closed loops parked nose to tail - every join
+		# between them showed two belt ends meeting, which is what made the
+		# front and back of the track portion look wrong (Chris). A half-track
+		# has a single belt; bogie_count now sets how LONG that belt is, which
+		# is the stat it was always standing in for.
+		var run: float = target_length * 0.42 * (1.0 + 0.16 * float(bogies - 3))
+		var bogie_pivot := Node3D.new()
+		bogie_pivot.name = SPIN_PIVOT_TREAD
+		bogie_pivot.position = Vector3(0, 0, half - run * 0.5)
+		parent_node.add_child(bogie_pivot)
+		var bogie := _mesh_inst(bogie_mesh, base_color)
+		# Z is the fore/aft axis here, not Y: the parts are authored with
+		# Blender +Y forward, which imports as Godot -Z. Scaling Y instead
+		# squashed the assembly flat and left the track a paper ribbon.
+		# 0.9 is the authored frame length end to end.
+		bogie.scale = Vector3(width * v_scale * 0.55, v_scale, run / 0.9)
+		bogie_pivot.add_child(bogie)
 
 
 ## Rocker-bogie: a free-pivoting arm chain. Built as a real linkage - primary

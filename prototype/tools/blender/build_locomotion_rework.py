@@ -400,6 +400,80 @@ def build_leg_shin():
 
 
 # ---------------------------------------------------------------------------
+# HALF-TRACK BOGIE - moved here from build_locomotion_expansion.py.
+#
+# Chris: "fix the front and back of the track portion to actually look like a
+# track. Look over the dedicated treaded track again, those look okay."
+#
+# It was authored with two straight runs plus a hand-rolled end loop, and that
+# loop was broken on its face - it multiplied its own cosine term by 0.0, so
+# every "arc" link landed on the same fore/aft coordinate and the ends read as
+# a squared-off stub rather than wrapping anything. tread_belt_loop already
+# solves this properly with _track_path(): real arcs sampled around the
+# sprocket and idler centres, so the belt wraps them by construction at any
+# scale. Using the same two helpers here means the two tracked types cannot
+# drift apart again, which is why this function moved files rather than
+# growing its own copy of the maths.
+#
+# AXIS: fore/aft on Blender Y, up on Blender Z, width across X - the plane
+# _track_path returns, and what _build_half_track() expects.
+# ---------------------------------------------------------------------------
+def build_ht_track_bogie():
+	half_span = 0.42
+	r_drive = 0.150     # rear sprocket
+	r_road = 0.085
+	road_drop = 0.130   # sprocket centreline down to the road-wheel line
+	width = 0.180
+	x = 0.10
+	bot = -(road_drop + r_road)
+	bm = bmesh.new()
+
+	# Frame and top rail, spanning between the two end wheels.
+	add_box(bm, (x, 0, -0.030), (0.090, half_span * 1.9, 0.115), bevel=0.010)
+	add_box(bm, (x, 0, 0.085), (0.075, half_span * 1.85, 0.030), bevel=0.005)
+
+	# Drive sprocket aft, idler forward - both on the RAISED axle line, which
+	# is what gives the track its trapezoid against the low road wheels.
+	add_cyl_x(bm, (x, half_span, 0), r_drive, width * 0.86, segments=18)
+	for i in range(10):
+		a = (i / 10) * math.tau
+		add_box(bm, (x, half_span + math.cos(a) * (r_drive * 0.94),
+					 math.sin(a) * (r_drive * 0.94)),
+				(width * 0.88, 0.038, 0.038), bevel=0.004)
+	add_cyl_x(bm, (x, -half_span, 0), r_drive * 0.86, width * 0.80, segments=16)
+
+	# Road wheels along the bottom line, riding the belt's lower run.
+	for i in range(4):
+		y = -half_span * 0.62 + i * (half_span * 1.24 / 3.0)
+		add_cyl_x(bm, (x, y, -road_drop), r_road, width * 0.84, segments=14)
+		add_cyl_x(bm, (x + 0.075, y, -road_drop), 0.040, 0.020, segments=10)
+	# Return rollers up top, carrying the slack run.
+	for i in range(2):
+		add_cyl_x(bm, (x, -0.15 + i * 0.30, r_drive * 0.72), 0.048, width * 0.61, segments=12)
+
+	# THE BELT: one closed path, resampled into links that meet.
+	path = _resample_closed(_track_path(half_span, r_drive, road_drop, r_road), 0.052)
+	for (y, z, ang, step) in path:
+		rot = mathutils.Matrix.Rotation(ang, 4, 'X')
+		centre = mathutils.Vector((x, y, z))
+		res = bmesh.ops.create_cube(bm, size=1.0)
+		for v in res['verts']:
+			v.co = centre + rot @ mathutils.Vector(
+				(v.co.x * width, v.co.y * step * 1.04, v.co.z * 0.024))
+		outward = mathutils.Vector((0, y, z))
+		outward = outward.normalized() if outward.length > 1e-5 else mathutils.Vector((0, 0, -1))
+		res2 = bmesh.ops.create_cube(bm, size=1.0)
+		for v in res2['verts']:
+			v.co = (centre + outward * 0.022) + rot @ mathutils.Vector(
+				(v.co.x * width * 0.84, v.co.y * step * 0.46, v.co.z * 0.022))
+
+	# Mounting spine - the face that meets the hull.
+	add_box(bm, (0.010, 0, 0.010), (0.070, half_span * 1.42, 0.150), bevel=0.010)
+	export_bmesh(bm, "ht_track_bogie", "ht_track_bogie.glb",
+				 color=(0.22, 0.23, 0.21, 1.0), metallic=0.74, roughness=0.40)
+
+
+# ---------------------------------------------------------------------------
 # HOVER SKIRT - was 92 triangles: a plain ring.
 # Authored around the origin, Z up, per _build_hover_engine().
 # ---------------------------------------------------------------------------
@@ -666,6 +740,7 @@ if __name__ == "__main__":
 	build_leg_foot()
 	build_leg_thigh()
 	build_leg_shin()
+	build_ht_track_bogie()
 	build_hover_skirt()
 	build_naval_propeller()
 	build_tread_belt_loop()

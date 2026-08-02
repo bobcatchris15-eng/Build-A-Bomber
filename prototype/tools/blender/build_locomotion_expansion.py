@@ -182,38 +182,10 @@ def build_half_track():
 	export_bmesh(bm, "ht_front_axle", "ht_front_axle.glb",
 				 color=(0.24, 0.25, 0.22, 1.0), metallic=0.70, roughness=0.42)
 
-	# Track bogie unit: drive sprocket, idler, return rollers, belt, frame.
-	bm = bmesh.new()
-	frame_half = 0.42
-	add_box(bm, (0.10, 0, 0.02), (0.090, 0.90, 0.115), bevel=0.010)     # bogie frame
-	add_box(bm, (0.10, 0, 0.135), (0.075, 0.86, 0.030), bevel=0.005)    # top rail
-	add_cyl_x(bm, (0.10, frame_half, 0.010), 0.150, 0.150, segments=18)  # drive sprocket
-	for i in range(10):
-		a = (i / 10) * math.tau
-		add_box(bm, (0.10, frame_half + math.cos(a) * 0.152, 0.010 + math.sin(a) * 0.152),
-				(0.155, 0.038, 0.038), bevel=0.004)
-	add_cyl_x(bm, (0.10, -frame_half, 0.010), 0.125, 0.140, segments=16)  # idler
-	for i in range(4):                                                    # road wheels
-		y = -0.27 + i * 0.18
-		add_cyl_x(bm, (0.10, y, -0.075), 0.085, 0.150, segments=14)
-		add_cyl_x(bm, (0.175, y, -0.075), 0.040, 0.020, segments=10)
-	for i in range(2):                                                    # return rollers
-		add_cyl_x(bm, (0.10, -0.15 + i * 0.30, 0.150), 0.048, 0.110, segments=12)
-	# Belt: two straight runs plus two end arcs, built from real links.
-	for i in range(11):
-		y = -frame_half + (i / 10.0) * (frame_half * 2.0)
-		add_box(bm, (0.10, y, -0.172), (0.180, 0.070, 0.028), bevel=0.004)   # bottom run
-		add_box(bm, (0.10, y, 0.205), (0.180, 0.070, 0.026), bevel=0.004)    # top run
-	for end, r in ((frame_half, 0.150), (-frame_half, 0.125)):
-		for i in range(7):
-			a = -math.pi / 2.0 + (i / 6.0) * math.pi
-			sgn = 1.0 if end > 0 else -1.0
-			y = end + math.cos(a) * r * sgn * 0.0 + math.sin(a) * 0.0
-			add_box(bm, (0.10, end + sgn * math.cos(a) * r * 0.55, 0.015 + math.sin(a) * (r + 0.030)),
-					(0.180, 0.068, 0.026), bevel=0.004)
-	add_box(bm, (0.010, 0, 0.060), (0.070, 0.60, 0.150), bevel=0.010)   # mounting spine
-	export_bmesh(bm, "ht_track_bogie", "ht_track_bogie.glb",
-				 color=(0.22, 0.23, 0.21, 1.0), metallic=0.74, roughness=0.40)
+	# The track bogie moved to build_locomotion_rework.py, where _track_path()
+	# and _resample_closed() live - its belt ends never wrapped the sprockets,
+	# and duplicating that maths here is how the two tracked types drifted
+	# apart in the first place. This function now authors the front axle only.
 
 
 # ---------------------------------------------------------------------------
