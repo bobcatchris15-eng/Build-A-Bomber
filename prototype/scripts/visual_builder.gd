@@ -5998,6 +5998,46 @@ static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_colo
 		bogie.scale = Vector3(width * v_scale * 0.55, v_scale, run / 0.9)
 		bogie_pivot.add_child(bogie)
 
+		# SUSPENSION STRUTS. Chris: "add a series of the struts on the inside
+		# attaching to the underside of the hull." The bogie carries its own
+		# mounting spine, but nothing visibly tied that spine to the vehicle -
+		# the track just floated alongside the hull edge.
+		#
+		# The module origin sits AT the hull's underside (that invariant again -
+		# see build_wheel_mount), so a strut running up and INBOARD from the
+		# track's top rail arrives inside the hull by construction; no reach
+		# solving, no hull measurement. mount_strut_tapered is authored along
+		# local +Y spanning 0..1, thin at the root and flaring at the far end,
+		# so it is oriented here by building a basis around the span vector -
+		# the same technique the rotor and hover pylons use.
+		var strut_mesh := _part("mount_strut_tapered")
+		if strut_mesh:
+			# One per bogie: the count that used to spawn a whole extra track
+			# now spawns the suspension station it always meant.
+			var n: int = maxi(2, bogies)
+			# Start at the top of the track's own frame and run a SHORT way up
+			# and inboard. First pass used a span of (-0.42, 0.30) * v_scale
+			# with a 0.14 * v_scale cross-section, which on a real hull came
+			# out as two great blades reaching most of the way to the
+			# centreline. A suspension strut is a short thick link between two
+			# things that are already almost touching.
+			var rail_y: float = 0.02 * v_scale
+			var strut_w: float = 0.10
+			for i in range(n):
+				var t: float = (float(i) + 0.5) / float(n)
+				var z: float = half - run * t
+				# Up and inboard, from the top of the track into the hull.
+				var span := Vector3(-0.16 * v_scale, 0.26 * v_scale, 0.0)
+				var len_s: float = span.length()
+				var dir: Vector3 = span / len_s
+				var right: Vector3 = dir.cross(Vector3.FORWARD).normalized()
+				var fwd: Vector3 = right.cross(dir).normalized()
+				var strut := _mesh_inst(strut_mesh, base_color.darkened(0.2))
+				strut.transform = Transform3D(
+					Basis(right * strut_w, dir * len_s, fwd * strut_w),
+					Vector3(0.0, rail_y, z))
+				parent_node.add_child(strut)
+
 
 ## Rocker-bogie: a free-pivoting arm chain. Built as a real linkage - primary
 ## rocker, secondary bogie, wheels at the knuckles - because the articulation
