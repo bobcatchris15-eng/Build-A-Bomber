@@ -49,7 +49,15 @@ def clear_scene():
 	bpy.ops.object.delete(use_global=False)
 
 
-def add_box(bm, pos, size, bevel=0.0):
+def add_box(bm, pos, size, bevel=0.0, bevel_segments=2):
+	"""A box, optionally with rounded edges.
+
+	`bevel_segments` is the knob that matters for anything INSTANCED MANY
+	TIMES. A 2-segment bevel on all 12 edges of a cube costs upward of a
+	hundred triangles - fine on a one-off breech, ruinous on a rivet plate
+	repeated 150 times across a hull. Pass 1 for a flat chamfer: it still
+	catches a highlight along the edge, at roughly a third of the cost.
+	"""
 	loc = mathutils.Vector(pos)
 	res = bmesh.ops.create_cube(bm, size=1.0)
 	for v in res['verts']:
@@ -57,7 +65,8 @@ def add_box(bm, pos, size, bevel=0.0):
 	if bevel > 0.001:
 		edges = [e for e in bm.edges if any(v in res['verts'] for v in e.verts)]
 		try:
-			bmesh.ops.bevel(bm, geom=edges, offset=bevel, segments=2, affect='EDGES')
+			bmesh.ops.bevel(bm, geom=edges, offset=bevel,
+							segments=max(1, int(bevel_segments)), affect='EDGES')
 		except Exception:
 			pass
 

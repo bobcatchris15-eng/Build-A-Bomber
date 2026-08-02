@@ -329,7 +329,17 @@ void fragment() {
 
 	ALPHA = alpha_base;
 	if (shield_mode > 0.5) {
-		EMISSION = base_color.rgb * 0.6;
+		// Was base_color.rgb * 0.6, which combined with the 0.7 alpha in
+		// ARMOR_PBR to render an energy-shielded hull as a blown-out white
+		// ghost - you could not see the vehicle you had built at all.
+		//
+		// That hack existed because the shield had no physical presence: the
+		// hull ITSELF had to carry the whole "this is shielded" read. It now
+		// projects a real crackling ellipsoid (armor_greebles.gd +
+		// energy_shield.gdshader) with four emitters at its upper corners, so
+		// the hull underneath only needs to look faintly energised - the
+		// field is the bubble, not the paint.
+		EMISSION = base_color.rgb * 0.12;
 	} else if (emissive_strength > 0.0) {
 		EMISSION = emissive_color.rgb * emissive_strength;
 	}

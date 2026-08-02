@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://d2w8b2rhac0bv"
-path="res://.godot/imported/armor_ablative.glb-d4188190240ec5b36477bbbdd3cd1228.scn"
+uid="uid://143dprbp63cs"
+path="res://.godot/imported/slat_armor.glb-a258ac0e6bc4539624db7a1a18e4f5ba.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/armor_ablative.glb"
-dest_files=["res://.godot/imported/armor_ablative.glb-d4188190240ec5b36477bbbdd3cd1228.scn"]
+source_file="res://assets/models/parts/slat_armor.glb"
+dest_files=["res://.godot/imported/slat_armor.glb-a258ac0e6bc4539624db7a1a18e4f5ba.scn"]
 
 [params]
 

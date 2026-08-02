@@ -10,6 +10,7 @@ const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
+const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 
@@ -247,12 +248,14 @@ func _unhandled_input(event):
 				if result.collider.has_method("start_drag"):
 					# We clicked a Gizmo Handle!
 					result.collider.start_drag(event, result.position)
-				elif result.collider.collision_layer & 1:
-					# Hit the Hull
-					_select_module(result.collider)
+				elif result.collider == hull or (result.collider.get_parent() == hull and not result.collider.has_meta("module_data") and not (result.collider.get_parent() and result.collider.get_parent().has_meta("module_data"))):
+					# Hit the Hull itself
+					_select_module(hull)
 				else:
 					# We clicked a Module!
-					var module = result.collider.get_parent()
+					var module = result.collider
+					if not module.has_meta("module_data") and module.get_parent() != null and module.get_parent().has_meta("module_data"):
+						module = module.get_parent()
 					_select_module(module)
 					
 					# Initialize drag movement if not locomotion
@@ -1512,6 +1515,11 @@ func update_hull_appearance():
 	# Apply materials - shared faction+armor shader (see hull_material_builder.gd)
 	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
 	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
+	# Armour-MATERIAL greebles, alongside the faction ones. Same call site and
+	# same size argument, because both want the hull's real post-scale extent;
+	# they land in separate containers ("HullGreebles" / "ArmorGreebles") so
+	# neither can clobber the other's rebuild.
+	ArmorGreeblesScript.apply(hull, armor_mat_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	
 	# Also update collision shape size in the designer

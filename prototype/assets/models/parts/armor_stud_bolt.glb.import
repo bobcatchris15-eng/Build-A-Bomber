@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://bxracppkl77s5"
-path="res://.godot/imported/armor_spaced.glb-7312786bb09ac32ac9dfb509a3d650af.scn"
+uid="uid://dk0aay1bbc4m0"
+path="res://.godot/imported/armor_stud_bolt.glb-f6e6d17fe939e4f0039312491c57b620.scn"
 
 [deps]
 
-source_file="res://assets/models/parts/armor_spaced.glb"
-dest_files=["res://.godot/imported/armor_spaced.glb-7312786bb09ac32ac9dfb509a3d650af.scn"]
+source_file="res://assets/models/parts/armor_stud_bolt.glb"
+dest_files=["res://.godot/imported/armor_stud_bolt.glb-f6e6d17fe939e4f0039312491c57b620.scn"]
 
 [params]
 

@@ -20,6 +20,7 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
+const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
@@ -632,6 +633,11 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 
 	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
 	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
+	# Armour-MATERIAL greebles, alongside the faction ones. Same call site and
+	# same size argument, because both want the hull's real post-scale extent;
+	# they land in separate containers ("HullGreebles" / "ArmorGreebles") so
+	# neither can clobber the other's rebuild.
+	ArmorGreeblesScript.apply(hull, armor_mat_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	
 	# Re-create Hull's CollisionShape3D (only in designer)

@@ -28,6 +28,17 @@ from _greeble import *  # noqa: F401,F403
 # no trunnion, no mount and no elevation. Those three are authored as flat
 # panels whose origin is the mounting face, and visual_builder scales them to
 # the facet rather than by a tweak.
+#
+# THEIR FILENAMES MUST EQUAL THEIR type_id. Unlike every other part in this
+# file, armor plates are MONOLITHIC: visual_builder loads them via
+# `_part(type_id)` for anything not in MODULAR_ASSEMBLY_TYPES, so the lookup
+# key IS the catalog id. These were first exported as armor_slat/armor_spaced/
+# armor_ablative against type_ids of slat_armor/spaced_composite/
+# ablative_foam, so nothing ever loaded them and all three silently rendered
+# as 12-triangle boxes while the authored .glbs sat unused in the repo.
+# Aliasing them in mesh_asset_loader would have worked but is explicitly the
+# wrong fix - see PART_NAME_ALIASES' own note that an alias shadows a real
+# asset and must go the moment a correctly-named file exists.
 
 
 # ===========================================================================
@@ -372,7 +383,7 @@ def build_slat_armor():
 		for sy in (-1, 1):
 			add_box(bm, (sx * 0.42, sy * 0.42, 0.008), (0.070, 0.070, 0.020), bevel=0.004)
 			add_tube_between(bm, (sx * 0.42, sy * 0.42, 0.010), (sx * 0.46, sy * 0.46, 0.052), 0.014)
-	export_bmesh(bm, "armor_slat", "armor_slat.glb", color=(0.30, 0.31, 0.28, 1.0),
+	export_bmesh(bm, "slat_armor", "slat_armor.glb", color=(0.30, 0.31, 0.28, 1.0),
 				 metallic=0.55, roughness=0.55)
 
 
@@ -399,7 +410,7 @@ def build_spaced_composite():
 	for sx in (-1, 1):
 		for sy in (-1, 1):
 			add_box(bm, (sx * 0.455, sy * 0.455, 0.070), (0.110, 0.110, 0.030), bevel=0.010)
-	export_bmesh(bm, "armor_spaced", "armor_spaced.glb", color=(0.34, 0.35, 0.36, 1.0),
+	export_bmesh(bm, "spaced_composite", "spaced_composite.glb", color=(0.34, 0.35, 0.36, 1.0),
 				 metallic=0.62, roughness=0.46)
 
 
@@ -424,7 +435,7 @@ def build_ablative_foam():
 		add_box(bm, (sx * 0.478, 0, 0.034), (0.040, 0.990, 0.052), bevel=0.006)
 	for sy in (-1, 1):
 		add_box(bm, (0, sy * 0.478, 0.034), (0.990, 0.040, 0.052), bevel=0.006)
-	export_bmesh(bm, "armor_ablative", "armor_ablative.glb", color=(0.52, 0.50, 0.44, 1.0),
+	export_bmesh(bm, "ablative_foam", "ablative_foam.glb", color=(0.52, 0.50, 0.44, 1.0),
 				 metallic=0.05, roughness=0.88)
 
 

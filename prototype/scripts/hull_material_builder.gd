@@ -73,7 +73,13 @@ const ARMOR_PBR = {
 	"hardened_steel": {"metallic": 0.65, "roughness": 0.42, "shield_mode": 0.0, "alpha": 1.0},
 	"reactive_armor": {"metallic": 0.1, "roughness": 0.7, "shield_mode": 0.0, "alpha": 1.0},
 	"ablative_ceramic": {"metallic": 0.0, "roughness": 0.5, "shield_mode": 0.0, "alpha": 1.0},
-	"energy_shielding": {"metallic": 0.1, "roughness": 0.1, "shield_mode": 1.0, "alpha": 0.7},
+	# alpha 0.7 -> 0.94. At 0.7 a shielded hull was see-through, and combined
+	# with the old shield_mode emission it rendered as a white blob with a
+	# vehicle vaguely inside it. The translucency was standing in for a shield
+	# that did not exist yet; it does now (armor_greebles.gd's ellipsoid), so
+	# the hull can go back to being a hull. Not fully opaque - a slight
+	# translucency still reads as "this plating is partly field, not metal".
+	"energy_shielding": {"metallic": 0.1, "roughness": 0.1, "shield_mode": 1.0, "alpha": 0.94},
 }
 
 const TEXTURE_DIR = "res://assets/textures/factions/"

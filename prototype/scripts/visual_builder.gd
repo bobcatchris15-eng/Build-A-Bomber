@@ -5092,13 +5092,44 @@ static func bake_module_visual(module: Node3D) -> void:
 		surface_tool.generate_normals()
 		var baked_inst = MeshInstance3D.new()
 		baked_inst.name = "BakedVisual"
-		baked_inst.mesh = surface_tool.commit()
+		baked_inst.mesh = _with_lods(surface_tool.commit())
 		baked_inst.material_override = mat
 		module.add_child(baked_inst)
 
 	for part in to_remove:
 		module.remove_child(part)
 		part.queue_free()
+
+
+# Regenerates level-of-detail data on a runtime-merged mesh.
+#
+# Every authored .glb imports with meshes/generate_lods=true, so a part drawn
+# straight from the asset already sheds triangles at distance. SurfaceTool
+# merging throws that away: commit() returns a plain ArrayMesh with a single
+# LOD level, so a BAKED module - which is most of them, since a weapon is an
+# assembly of six to ten parts - rendered its full density at every zoom. An
+# autocannon is ~9k triangles across its parts, and an RTS draws a dozen
+# vehicles carrying several modules each.
+#
+# ImporterMesh is the same simplifier the import pipeline uses, exposed at
+# runtime. It is wrapped defensively because it is editor-adjacent API: if it
+# is unavailable or throws, the un-LODded mesh is still perfectly correct,
+# just as expensive as it was before.
+static func _with_lods(mesh: ArrayMesh) -> ArrayMesh:
+	if mesh == null or mesh.get_surface_count() == 0:
+		return mesh
+	var im := ImporterMesh.new()
+	for s in range(mesh.get_surface_count()):
+		im.add_surface(mesh.surface_get_primitive_type(s), mesh.surface_get_arrays(s),
+			[], {}, mesh.surface_get_material(s), "", mesh.surface_get_format(s))
+	# 25 deg merge / 60 deg split are the import defaults - the angles below
+	# which the simplifier may weld normals, and above which it must keep a
+	# hard edge. These meshes are hard-surface greebles, so preserving the
+	# hard edges is what keeps a decimated breech from turning to mush.
+	im.generate_lods(25.0, 60.0, [])
+	var out := im.get_mesh()
+	return out if out != null else mesh
+
 
 # --- Tweak deformation for monolithic authored meshes ----------------------
 #

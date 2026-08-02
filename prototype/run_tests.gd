@@ -628,6 +628,14 @@ func _init():
 		success = false
 		_failed.append("test_weapon_modules_balance_about_their_mount")
 	_total_suites += 1
+	if not await _run_suite(test_armor_greebles_sit_on_the_hull_and_ignore_modules, "test_armor_greebles_sit_on_the_hull_and_ignore_modules"):
+		success = false
+		_failed.append("test_armor_greebles_sit_on_the_hull_and_ignore_modules")
+	_total_suites += 1
+	if not await _run_suite(test_baked_module_visuals_carry_lods, "test_baked_module_visuals_carry_lods"):
+		success = false
+		_failed.append("test_baked_module_visuals_carry_lods")
+	_total_suites += 1
 	if not await _run_suite(test_anti_materiel_rifle_is_wired_and_trades_real_capability, "test_anti_materiel_rifle_is_wired_and_trades_real_capability"):
 		success = false
 		_failed.append("test_anti_materiel_rifle_is_wired_and_trades_real_capability")
@@ -13469,4 +13477,182 @@ func test_c1_shift_select_is_additive_instead_of_replacing() -> bool:
 	free_all.call()
 	await process_frame
 	print("  [PASS] Shift-click and shift-drag add to (or preserve, on a miss) the current selection; plain click/drag still replaces it.")
+	return true
+
+func test_armor_greebles_sit_on_the_hull_and_ignore_modules() -> bool:
+	print("Running Test Suite: Armor Greebles Seat On The Hull And Never On A Placed Module...")
+	# Three separate bugs this pins down, all of which shipped once:
+	#
+	#   PERPENDICULAR - greeble_field used basis_for_normal (the CARD
+	#   convention, +Z to the surface) on meshes authored rising along +Y, so
+	#   every rivet lay on its side.
+	#
+	#   FLOATING - the lattice was laid out around the ORIGIN rather than the
+	#   hull's real AABB, and a ray that missed fell back to an origin-relative
+	#   guess instead of skipping the cell.
+	#
+	#   MODULES TREATED AS HULL - a placed module is a CHILD of the hull, so
+	#   HullProjection.build_surface() counted a turret's barrel as hull skin
+	#   and both decals and greebles landed on it.
+	var AG = preload("res://scripts/armor_greebles.gd")
+	var HP = preload("res://scripts/hull_projection.gd")
+
+	var hull = Node3D.new()
+	root.add_child(hull)
+	var size = Vector3(4.0, 1.4, 6.0)
+	var mi = MeshInstance3D.new()
+	var bm = BoxMesh.new(); bm.size = size
+	mi.mesh = bm
+	hull.add_child(mi)
+
+	# A stand-in module: the meta is what marks it, exactly as module_placer.gd
+	# and blueprint_manager.gd set it before parenting.
+	var turret = MeshInstance3D.new()
+	var tb = BoxMesh.new(); tb.size = Vector3(1.2, 0.9, 1.6)
+	turret.mesh = tb
+	turret.position = Vector3(0, size.y * 0.5 + 0.45, -0.6)
+	turret.set_meta("module_data", {})
+	hull.add_child(turret)
+
+	var cleanup = func():
+		hull.queue_free()
+
+	# --- The module contributes no triangles to the hull surface ---
+	var surface = HP.build_surface(hull)
+	var box: AABB = surface["aabb"]
+	var top = box.position.y + box.size.y
+	if top > size.y * 0.5 + 0.05:
+		print("  [FAIL] The hull surface extends to y=%.3f, above the hull roof at %.3f - a placed module is being counted as hull skin." % [top, size.y * 0.5])
+		cleanup.call()
+		return false
+
+	AG.apply(hull, "hardened_steel", size)
+	var container = hull.get_node_or_null("ArmorGreebles")
+	if container == null:
+		print("  [FAIL] hardened_steel produced no ArmorGreebles container.")
+		cleanup.call()
+		return false
+
+	var fields: Array = []
+	for c in container.get_children():
+		if c is MultiMeshInstance3D and c.multimesh != null:
+			fields.append(c)
+	if fields.is_empty():
+		print("  [FAIL] No MultiMeshInstance3D field was produced - scatter() should batch instances, not emit one node each.")
+		cleanup.call()
+		return false
+
+	var total := 0
+	var half: Vector3 = size * 0.5
+	for f in fields:
+		# Read the transforms from the node's meta, not from the MultiMesh:
+		# headless discards the RenderingServer-side buffer. See greeble_field.
+		var xf: Array = f.get_meta("greeble_transforms", [])
+		if xf.size() != (f.multimesh as MultiMesh).instance_count:
+			print("  [FAIL] Field %s recorded %d transforms for %d instances." % [f.name, xf.size(), (f.multimesh as MultiMesh).instance_count])
+			cleanup.call()
+			return false
+		total += xf.size()
+		for i in range(xf.size()):
+			var x: Transform3D = xf[i]
+			var p: Vector3 = x.origin
+
+			# SEATED: on a box hull every greeble must sit on a face, i.e. at
+			# least one coordinate is at the box's half-extent. Allow a couple
+			# of centimetres for the deliberate anti-z-fight nudge.
+			var gap := minf(minf(absf(absf(p.x) - half.x), absf(absf(p.y) - half.y)), absf(absf(p.z) - half.z))
+			if gap > 0.05:
+				print("  [FAIL] Greeble %d at %s floats %.3f from the nearest hull face." % [i, str(p), gap])
+				cleanup.call()
+				return false
+
+			# NOT ON THE MODULE: nothing may land inside the turret's footprint
+			# above the roof line.
+			if p.y > half.y + 0.06:
+				print("  [FAIL] Greeble %d at %s sits above the hull roof - it was scattered onto the placed module." % [i, str(p)])
+				cleanup.call()
+				return false
+
+			# UPRIGHT: local +Y (the axis these are authored along) must point
+			# away from the hull, i.e. agree with the face it sits on.
+			var up: Vector3 = x.basis.y.normalized()
+			var face_n := Vector3.ZERO
+			if absf(absf(p.x) - half.x) <= gap + 0.001: face_n = Vector3(signf(p.x), 0, 0)
+			elif absf(absf(p.y) - half.y) <= gap + 0.001: face_n = Vector3(0, signf(p.y), 0)
+			else: face_n = Vector3(0, 0, signf(p.z))
+			if up.dot(face_n) < 0.85:
+				print("  [FAIL] Greeble %d at %s stands along %s but its face normal is %s - it is lying on its side." % [i, str(p), str(up), str(face_n)])
+				cleanup.call()
+				return false
+
+	# --- The shield material gets emitters and a bubble, not a rivet field ---
+	AG.apply(hull, "energy_shielding", size)
+	container = hull.get_node_or_null("ArmorGreebles")
+	var bubble = container.get_node_or_null(AG.SHIELD_NAME) if container else null
+	if bubble == null:
+		print("  [FAIL] energy_shielding produced no visible shield bubble.")
+		cleanup.call()
+		return false
+	# It has to CONTAIN the hull, corners included - see SHIELD_MARGIN.
+	var bs: Vector3 = (bubble as MeshInstance3D).scale
+	if bs.x < half.x * 1.7 or bs.z < half.z * 1.7:
+		print("  [FAIL] Shield bubble %s is too small to enclose a hull of half-extent %s - its corners will poke through." % [str(bs), str(half)])
+		cleanup.call()
+		return false
+
+	cleanup.call()
+	await process_frame
+	print("  [PASS] %d greebles all seat flat on a real hull face, none land on the placed module, the module contributes no hull surface, and energy_shielding gets a containing bubble instead of cladding." % total)
+	return true
+
+
+func test_baked_module_visuals_carry_lods() -> bool:
+	print("Running Test Suite: Baked Module Visuals Keep Their Level-Of-Detail Data...")
+	# Every authored .glb imports with generate_lods=true, but SurfaceTool
+	# merging throws that away - commit() returns a single-LOD ArrayMesh. Since
+	# most modules are baked assemblies of six to ten parts, that silently made
+	# the whole module roster full-density at every zoom level.
+	var VB = preload("res://scripts/visual_builder.gd")
+	var MAL = preload("res://scripts/mesh_asset_loader.gd")
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var sourced := 0
+	for id in ["autocannon_mount", "autocannon_receiver", "autocannon_barrel", "autocannon_ammo_box"]:
+		var m: Mesh = MAL.get_part_mesh(id)
+		if m == null:
+			continue
+		sourced += 1
+		for s in range(m.get_surface_count()):
+			st.append_from(m, s, Transform3D.IDENTITY)
+	if sourced < 2:
+		print("  [FAIL] Could not load enough authored autocannon parts to exercise the bake (%d)." % sourced)
+		return false
+	st.generate_normals()
+	var plain: ArrayMesh = st.commit()
+	var lodded: ArrayMesh = VB._with_lods(plain)
+	if lodded == null or lodded.get_surface_count() == 0:
+		print("  [FAIL] _with_lods() returned nothing usable.")
+		return false
+	var full := plain.get_faces().size() / 3
+	if lodded.get_faces().size() / 3 != full:
+		print("  [FAIL] LOD 0 must be the untouched mesh - close up a module may not lose a single triangle. %d -> %d" % [full, lodded.get_faces().size() / 3])
+		return false
+
+	# ArrayMesh does not expose its LOD table, so re-run the same simplifier to
+	# assert it actually produces levels rather than silently no-opping.
+	var im = ImporterMesh.new()
+	for s in range(plain.get_surface_count()):
+		im.add_surface(plain.surface_get_primitive_type(s), plain.surface_get_arrays(s),
+			[], {}, plain.surface_get_material(s), "", plain.surface_get_format(s))
+	im.generate_lods(25.0, 60.0, [])
+	var levels = im.get_surface_lod_count(0)
+	if levels < 2:
+		print("  [FAIL] Only %d LOD levels generated for a %d-triangle merged module." % [levels, full])
+		return false
+	var coarsest = im.get_surface_lod_indices(0, levels - 1).size() / 3
+	if coarsest > full / 4:
+		print("  [FAIL] Coarsest LOD is %d tris against %d full - barely a saving." % [coarsest, full])
+		return false
+	await process_frame
+	print("  [PASS] A %d-triangle merged module keeps full detail at LOD 0 and sheds to %d triangles across %d levels." % [full, coarsest, levels])
 	return true

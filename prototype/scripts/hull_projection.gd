@@ -45,7 +45,23 @@ const OFFSET_MIN: float = 0.002
 # Containers whose own geometry must never be treated as hull surface -
 # otherwise a rebuild would project the new decals onto the previous pass's
 # decal quads.
-const EXCLUDED_NODES := ["HullDecals", "HullGreebles"]
+# "ArmorGreebles" added when armor_greebles.gd landed: it runs BEFORE
+# hull_decals in both call sites, so without the exclusion every decal
+# projected onto the energy shield's ellipsoid (a big mesh enclosing the whole
+# hull) and onto the rivet field, instead of onto the hull skin.
+const EXCLUDED_NODES := ["HullDecals", "HullGreebles", "ArmorGreebles"]
+
+# The meta every PLACED MODULE carries (set by module_placer.gd and
+# blueprint_manager.gd before they parent it to the hull). Modules are children
+# of the hull node, so without this check a hull that already has a turret on it
+# reports the turret's barrel as hull surface: decals project onto gun mantlets
+# and rivets grow out of missile pods. A module is a thing bolted TO the skin,
+# never part of it.
+#
+# Keyed on the meta rather than on node names because module nodes are named
+# per-instance, and rather than on a group because these run during
+# construction, before the node is necessarily in the tree.
+const MODULE_META := "module_data"
 
 const RAY_EPS: float = 0.000001
 
@@ -72,6 +88,8 @@ static func build_surface(host: Node3D) -> Dictionary:
 static func _gather(node: Node, host: Node3D, xform: Transform3D, tris: PackedVector3Array) -> void:
 	if node != host:
 		if node.name in EXCLUDED_NODES:
+			return
+		if node.has_meta(MODULE_META):
 			return
 		if node is Node3D:
 			var n3d := node as Node3D
