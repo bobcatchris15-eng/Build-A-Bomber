@@ -446,6 +446,15 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 	# regardless of hull size or which station the type uses.
 	geo_base["kit_reach"] = 0.0
 	var out: Array = []
+	# Where on the hull a mount kit anchors. This is the generalisation of what
+	# made the OLD wheels and treads work: their driveshaft was not a fixed lump
+	# dropped at the station, it was solved to span the actual gap from the part
+	# back into the hull, angling inboard and up. Every type gets that now - the
+	# layout hands each station a full reach VECTOR to its anchor, and the kit
+	# draws a strut of exactly that length and orientation. A fixed-size kit plus
+	# a vertical riser could never close these gaps, because the gap is different
+	# for every type, every hull and every station.
+	var anchor_y: float = -hull_size.y * 0.5 + hull_size.y * 0.08
 
 	match int(spec["pattern"]):
 		Pattern.SIDE_PAIRS, Pattern.ROOF_PAIRS:
@@ -495,7 +504,13 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 						z_pos = -z_limit + (2.0 * z_limit * i) / (per_side - 1)
 					var pos := Vector3(x_offset * side, y, z_pos)
 					var geo := geo_base.duplicate()
-					geo["kit_reach"] = maxf(0.0, (-hull_size.y * 0.5) - (final_y if has_final else y))
+					var st_y: float = final_y if has_final else y
+					geo["kit_reach"] = maxf(0.0, (-hull_size.y * 0.5) - st_y)
+					# Inboard and up, exactly like the old wheel driveshaft.
+					var anchor := Vector3(side * hull_size.x * 0.30, anchor_y, z_pos)
+					geo["kit_anchor_x"] = anchor.x - pos.x
+					geo["kit_anchor_y"] = anchor.y - st_y
+					geo["kit_anchor_z"] = anchor.z - pos.z
 					# helicopter_rotors' pylon reach is the UNSIGNED distance
 					# back to the hull's centreline on each axis - the builder
 					# applies mount_side itself.
@@ -527,6 +542,9 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				var p := Vector3(cos(angle) * x_radius, y, sin(angle) * z_radius)
 				var geo := geo_base.duplicate()
 				geo["kit_reach"] = maxf(0.0, (-hull_size.y * 0.5) - p.y)
+				geo["kit_anchor_x"] = p.x * -0.55
+				geo["kit_anchor_y"] = anchor_y - p.y
+				geo["kit_anchor_z"] = p.z * -0.55
 				_apply_reach(geo, spec, -p, 0.0)
 				var st := _station(p, spec.get("normal", Vector3.DOWN), geo, 0.0, false)
 				st["index"] = i
@@ -578,6 +596,9 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				var aft_end := Vector3(drum_x, drum_y, -half_span)
 				var geo := geo_base.duplicate()
 				geo["kit_reach"] = maxf(0.0, (-hull_size.y * 0.5) - drum_y)
+				geo["kit_anchor_x"] = (side * hull_size.x * 0.30) - drum_x
+				geo["kit_anchor_y"] = anchor_y - drum_y
+				geo["kit_anchor_z"] = 0.0
 				geo["drum_length"] = span_length
 				_apply_reach(geo, spec, Vector3.ZERO, side,
 					-fore_end * reach_fraction, -aft_end * reach_fraction)

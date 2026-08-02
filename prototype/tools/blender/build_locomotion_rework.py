@@ -456,9 +456,14 @@ def _resample_closed(points, spacing):
 
 def build_tread_belt_loop():
 	half_span = 1.0
-	r_drive = 0.45
-	r_road = 0.26
-	road_drop = 0.20
+	# Chris: the trapezoid should be MORE pronounced. The drop from the sprocket
+	# centreline down to the road-wheel line is what makes the shape read, so it
+	# goes 0.20 -> 0.38 while the road wheels shrink slightly - a bigger
+	# difference between the raised drive wheels and the low road wheels, which
+	# is the whole silhouette.
+	r_drive = 0.46
+	r_road = 0.22
+	road_drop = 0.38
 	width = 0.30
 	bm = bmesh.new()
 	path = _resample_closed(_track_path(half_span, r_drive, road_drop, r_road), 0.115)
