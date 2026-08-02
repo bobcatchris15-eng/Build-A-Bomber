@@ -3625,7 +3625,7 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 	# used to grow for itself - see build_mount_kit(). Every wheeled type now
 	# hangs off the same authored arm, coil-over and hub carrier, which is what
 	# makes them read as one vehicle family instead of four unrelated ideas.
-	build_mount_kit(parent_node, "wheels", base_color, 1.0, wheel_size)
+	build_mount_kit(parent_node, "wheels", base_color, 1.0, wheel_size, float(tweaks.get("kit_reach", 0.0)))
 
 	if false and driveshaft_mesh:
 		var shaft = _mesh_inst(driveshaft_mesh, base_color.darkened(0.25).lightened(0.35))
@@ -3674,7 +3674,7 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 
 
 static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "tracked_treads", base_color, 1.0, float(tweaks.get("tread_width", tweaks.get("width", 1.0))))
+	build_mount_kit(parent_node, "tracked_treads", base_color, 1.0, float(tweaks.get("tread_width", tweaks.get("width", 1.0))), float(tweaks.get("kit_reach", 0.0)))
 	var width = tweaks.get("tread_width", tweaks.get("width", tweaks.get("size", 1.0)))
 	# Fixed at 3 - Chris's ask, no longer a user tweak (was road_wheel_count,
 	# 3-8 via a dedicated slider; removed along with the slider/catalog entry
@@ -3909,6 +3909,7 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 
 
 static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_GRAY, tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "helicopter_rotors", base_color, 1.0, float(tweaks.get("blade_length", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	var blade_count = int(tweaks.get("blade_count", 4.0))
 	var blade_length = tweaks.get("blade_length", tweaks.get("size", 1.0))
 	var duct = tweaks.get("duct", false)
@@ -4025,6 +4026,7 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 
 
 static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DEEP_SKY_BLUE, tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "hover_engine", base_color, 1.0, float(tweaks.get("emv_level", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	# Scifi hover pad, per Chris's redesign: three concentric rings instead
 	# of the old fan+skirt+single-ring combo. The outer ring stays fixed/
 	# horizontal; the middle ring spins continuously around local X and the
@@ -4111,6 +4113,7 @@ static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_co
 
 
 static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.GRAY, tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "legs", base_color, 1.0, float(tweaks.get("leg_length", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	var leg_length = tweaks.get("leg_length", tweaks.get("size", 1.0))
 	var foot_size = tweaks.get("foot_size", 1.0)
 	# Chris's ask: legs about 2x thicker all the way through (cross-section
@@ -4306,6 +4309,7 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 
 
 static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.SLATE_GRAY, tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "fixed_wing_engine", base_color, 1.0, float(tweaks.get("turbine_compression", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	# Redesign (Chris's ask): mounted out from the hull on a pylon like the
 	# rotors/hover pads, radially/elliptically distributed around the Y
 	# axis (module_placer.gd, engine_count 2-6) instead of a fixed pair.
@@ -4708,10 +4712,12 @@ static func _build_pylon_mounted_propeller(parent_node: Node3D, base_size: Vecto
 
 
 static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "naval_propeller", base_color, 1.0, float(tweaks.get("blade_pitch", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	_build_pylon_mounted_propeller(parent_node, base_size, base_color, tweaks, 1.0)
 
 
 static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.TAN, tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "buoyant_envelope", base_color, 1.0, float(tweaks.get("blade_pitch", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	# Zeppelin-style cruise prop (Chris's ask, 2026-07-24): a small engine
 	# nacelle (hub_scale 0.75, unchanged) turning a disproportionately
 	# large, slow prop - real airships mount big low-RPM propellers since
@@ -4723,6 +4729,7 @@ static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, bas
 
 
 static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_GOLDENROD, tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "screw_drive", base_color, 1.0, float(tweaks.get("drum_diameter", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	# Rebuilt (Chris's ask, 2026-07-24, two passes): drum_width/drum_count
 	# are gone - just two tweaks now (drum_diameter, helix_depth). Each end
 	# now terminates in an explicit gearbox housing, corner-mounted:
@@ -5851,7 +5858,7 @@ static func _create_flat_shaded_mesh(verts: PackedVector3Array, indices: PackedI
 ## independently - the whole pitch of the type is that its two halves are
 ## different machines bolted to one frame.
 static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_OLIVE_GREEN, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "half_track", base_color, 1.0, float(tweaks.get("tread_width", 1.0)))
+	build_mount_kit(parent_node, "half_track", base_color, 1.0, float(tweaks.get("tread_width", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	var bogies := int(tweaks.get("bogie_count", 3.0))
 	var front_size := float(tweaks.get("front_axle_size", 1.0))
 	var width := float(tweaks.get("tread_width", 1.0))
@@ -5896,7 +5903,7 @@ static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_colo
 ## rocker, secondary bogie, wheels at the knuckles - because the articulation
 ## IS the silhouette, and a rigid axle would read as a normal wheeled chassis.
 static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.42, 0.38, 0.30), tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "rocker_bogie", base_color, 1.0, float(tweaks.get("wheel_size", 1.0)))
+	build_mount_kit(parent_node, "rocker_bogie", base_color, 1.0, float(tweaks.get("wheel_size", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	var pairs := int(tweaks.get("bogie_pairs", 3.0))
 	var arm_len := float(tweaks.get("arm_length", 1.0))
 	var wheel_size := float(tweaks.get("wheel_size", 1.0))
@@ -5933,6 +5940,7 @@ static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_co
 ## Air-cushion skirt: one continuous bag around the module's footprint, with
 ## the lift fans set into the plenum deck above it.
 static func _build_air_cushion_skirt(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.55, 0.52, 0.42), tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "air_cushion_skirt", base_color, 1.0, float(tweaks.get("skirt_diameter", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	var diameter := float(tweaks.get("skirt_diameter", 1.0))
 	var fans := int(tweaks.get("lift_fan_count", 3.0))
 	var plenum := float(tweaks.get("plenum_pressure", 1.0))
@@ -5967,6 +5975,7 @@ static func _build_air_cushion_skirt(parent_node: Node3D, base_size: Vector3, ba
 ## motion cue is the ring - which is exactly why dropping the ring for speed
 ## is a visible trade and not just a number.
 static func _build_anti_grav_plate(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.35, 0.65, 0.85), tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "anti_grav_plate", base_color, 1.0, float(tweaks.get("field_strength", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	var plates := int(tweaks.get("plate_count", 4.0))
 	var field := float(tweaks.get("field_strength", 1.0))
 	var has_ring: bool = bool(tweaks.get("stabilizer_ring", true))
@@ -6000,6 +6009,7 @@ static func _build_anti_grav_plate(parent_node: Node3D, base_size: Vector3, base
 ## strut is what makes it fragile and the foil is what makes it fast, so they
 ## are separate parts scaled by separate tweaks.
 static func _build_hydrofoil(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.28, 0.40, 0.45), tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "hydrofoil", base_color, 1.0, float(tweaks.get("strut_height", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	var span := float(tweaks.get("foil_span", 1.0))
 	var strut_h := float(tweaks.get("strut_height", 1.0))
 	var foils := int(tweaks.get("foil_count", 2.0))
@@ -6029,6 +6039,7 @@ static func _build_hydrofoil(parent_node: Node3D, base_size: Vector3, base_color
 ## bucket is part of the nozzle, so it appears and disappears with the toggle
 ## rather than being a permanently visible lump.
 static func _build_water_jet(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.30, 0.45, 0.48), tweaks: Dictionary = {}):
+	build_mount_kit(parent_node, "water_jet", base_color, 1.0, float(tweaks.get("intake_size", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	var intake := float(tweaks.get("intake_size", 1.0))
 	var has_reverser: bool = bool(tweaks.get("reverser", false))
 
@@ -6056,7 +6067,7 @@ static func _build_water_jet(parent_node: Node3D, base_size: Vector3, base_color
 ## Pontoon wheels: sealed buoyant drums that are simultaneously the wheel and
 ## the float. One part doing both jobs is the point of the type.
 static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.36, 0.34, 0.30), tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "pontoon_wheels", base_color, 1.0, float(tweaks.get("pontoon_size", 1.0)))
+	build_mount_kit(parent_node, "pontoon_wheels", base_color, 1.0, float(tweaks.get("pontoon_size", 1.0)), float(tweaks.get("kit_reach", 0.0)))
 	var psize := float(tweaks.get("pontoon_size", 1.0))
 	var vanes: bool = bool(tweaks.get("paddle_vanes", true))
 
@@ -6094,7 +6105,8 @@ static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_
 ## `outboard` is +1 for the starboard side and -1 for port; the kit is authored
 ## once and mirrored here rather than authored twice.
 static func build_mount_kit(parent_node: Node3D, type_id: String,
-		base_color: Color, outboard: float = 1.0, scale_hint: float = 1.0) -> Node3D:
+		base_color: Color, outboard: float = 1.0, scale_hint: float = 1.0,
+		kit_reach: float = 0.0) -> Node3D:
 	var spec: Dictionary = LocomotionLayoutScript.mount_kit(type_id)
 	var kit: int = int(spec.get("kit", 0))
 	if kit == LocomotionLayoutScript.Kit.NONE:
@@ -6108,6 +6120,28 @@ static func build_mount_kit(parent_node: Node3D, type_id: String,
 	var frame_col := base_color.darkened(0.30)
 	var hw_col := base_color.darkened(0.10)
 	var side: float = signf(outboard) if not is_zero_approx(outboard) else 1.0
+
+	# RISER. Several types mount well below the hull's underside, so a kit drawn
+	# only downward from the station leaves the running gear hanging with
+	# nothing joining it to the vehicle. The riser is that join: a box-section
+	# leg from the station up to the skin, capped with the same anchor plate the
+	# suspension kit uses so it reads as bolted rather than grown. Drawn first so
+	# the kit's own hardware sits in front of it.
+	if kit_reach > 0.02:
+		var riser := BoxMesh.new()
+		var thickness: float = clampf(0.16 * scale_hint, 0.08, 0.30)
+		riser.size = Vector3(thickness, kit_reach, thickness * 1.45)
+		var riser_inst := _mesh_inst(riser, frame_col, Color(0, 0, 0, 0), 0.0, "steel")
+		riser_inst.name = "MountRiser"
+		riser_inst.position = Vector3(0, kit_reach * 0.5, 0)
+		root.add_child(riser_inst)
+		# Gusset where the riser meets the hull, so the joint is not a butt.
+		var gusset := BoxMesh.new()
+		gusset.size = Vector3(thickness * 2.1, thickness * 0.55, thickness * 2.4)
+		var gusset_inst := _mesh_inst(gusset, hw_col, Color(0, 0, 0, 0), 0.0, "steel")
+		gusset_inst.name = "MountGusset"
+		gusset_inst.position = Vector3(0, kit_reach - thickness * 0.2, 0)
+		root.add_child(gusset_inst)
 
 	match kit:
 		LocomotionLayoutScript.Kit.SUSPENSION_ARM:

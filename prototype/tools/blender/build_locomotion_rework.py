@@ -369,6 +369,110 @@ def build_naval_propeller():
 				 color=(0.55, 0.42, 0.22, 1.0), metallic=0.85, roughness=0.30)
 
 
+# ---------------------------------------------------------------------------
+# TRACK BELT + DRIVE SPROCKET
+#
+# tread_belt_loop was 224 triangles for a 2.9-unit belt: a smooth, featureless
+# ring. A track's entire visual identity is its LINKS - the repeating plates,
+# the grousers biting the ground, the guide horns running between the road
+# wheels - and none of it was there. drive_sprocket had no teeth to speak of, so
+# nothing explained how the belt was driven.
+#
+# The authored axes are load-bearing and preserved exactly:
+#   tread_belt_loop  Godot X=width, Y=height, Z=length  (0.300 x 1.300 x 2.900)
+#   drive_sprocket   Godot X/Z=disc, Y=width
+# Blender +Y imports as Godot -Z, so the belt is built as a stadium in Blender's
+# YZ plane and extruded across X.
+# ---------------------------------------------------------------------------
+def _stadium_path(half_span, radius, steps_arc=10):
+	"""Points around a stadium (two straight runs joined by two half-circles),
+	returned as (y, z, tangent_angle) in Blender space."""
+	pts = []
+	# Top run, front to back.
+	straight = 6
+	for i in range(straight):
+		t = i / float(straight - 1)
+		pts.append((half_span - 2.0 * half_span * t, radius, 0.0))
+	# Rear arc.
+	for i in range(1, steps_arc):
+		a = math.pi * 0.5 + (i / float(steps_arc)) * math.pi
+		pts.append((-half_span + math.cos(a) * radius, math.sin(a) * radius, a))
+	# Bottom run, back to front.
+	for i in range(straight):
+		t = i / float(straight - 1)
+		pts.append((-half_span + 2.0 * half_span * t, -radius, math.pi))
+	# Front arc.
+	for i in range(1, steps_arc):
+		a = -math.pi * 0.5 + (i / float(steps_arc)) * math.pi
+		pts.append((half_span + math.cos(a) * radius, math.sin(a) * radius, a))
+	return pts
+
+
+def build_tread_belt_loop():
+	half_span = 1.0
+	radius = 0.45
+	width = 0.30
+	bm = bmesh.new()
+	path = _stadium_path(half_span, radius, steps_arc=11)
+	n = len(path)
+	for i, (y, z, _a) in enumerate(path):
+		nxt = path[(i + 1) % n]
+		ang = math.atan2(nxt[1] - z, nxt[0] - y)
+		rot = mathutils.Matrix.Rotation(ang, 4, 'X')
+		# Link plate: the flat pad that touches the ground.
+		res = bmesh.ops.create_cube(bm, size=1.0)
+		for v in res['verts']:
+			v.co = mathutils.Vector((0, y, z)) + rot @ mathutils.Vector(
+				(v.co.x * width, v.co.y * (2.0 * math.pi * radius / n) * 1.25, v.co.z * 0.055))
+		# Grouser: the raised bar that bites.
+		outward = mathutils.Vector((0, y, z)).normalized() if (y or z) else mathutils.Vector((0, 0, 1))
+		res2 = bmesh.ops.create_cube(bm, size=1.0)
+		for v in res2['verts']:
+			v.co = (mathutils.Vector((0, y, z)) + outward * 0.045) + rot @ mathutils.Vector(
+				(v.co.x * width * 0.82, v.co.y * (2.0 * math.pi * radius / n) * 0.42, v.co.z * 0.050))
+		# Guide horn, inboard, every other link - what keeps the track on.
+		if i % 2 == 0:
+			res3 = bmesh.ops.create_cube(bm, size=1.0)
+			for v in res3['verts']:
+				v.co = (mathutils.Vector((0, y, z)) - outward * 0.052) + rot @ mathutils.Vector(
+					(v.co.x * 0.055, v.co.y * (2.0 * math.pi * radius / n) * 0.36, v.co.z * 0.075))
+		# Pin bosses at the link edges.
+		for sx in (-1, 1):
+			add_cyl_x(bm, (sx * width * 0.42, y, z), 0.022, 0.030, segments=6)
+	export_bmesh(bm, "tread_belt_loop", "tread_belt_loop.glb",
+				 color=(0.16, 0.16, 0.17, 1.0), metallic=0.55, roughness=0.62)
+
+
+def build_drive_sprocket():
+	radius = 0.40
+	width = 0.30
+	teeth = 11
+	bm = bmesh.new()
+	add_cyl_y(bm, (0, 0, 0), radius * 0.62, width, segments=22)             # web
+	add_cyl_y(bm, (0, 0, 0), radius * 0.30, width * 1.20, segments=18)      # hub
+	for sy in (-1, 1):                                                       # tooth rings
+		add_cyl_y(bm, (0, sy * width * 0.36, 0), radius * 0.88, width * 0.14, segments=22)
+	for i in range(teeth):
+		a = (i / teeth) * math.tau
+		cx, cz = math.cos(a) * radius * 0.94, math.sin(a) * radius * 0.94
+		for sy in (-1, 1):
+			add_box(bm, (cx, sy * width * 0.36, cz),
+					(0.055, width * 0.16, 0.115), bevel=0.010)
+			# Tapered tip so the tooth engages rather than butting.
+			add_box(bm, (math.cos(a) * radius * 1.03, sy * width * 0.36, math.sin(a) * radius * 1.03),
+					(0.036, width * 0.14, 0.075), bevel=0.008)
+	for i in range(6):                                                       # lightening holes
+		a = (i / 6) * math.tau
+		add_cyl_y(bm, (math.cos(a) * radius * 0.46, 0, math.sin(a) * radius * 0.46),
+				  0.052, width * 1.10, segments=10)
+	for i in range(8):                                                       # hub bolts
+		a = (i / 8) * math.tau
+		add_cyl_y(bm, (math.cos(a) * radius * 0.20, width * 0.56, math.sin(a) * radius * 0.20),
+				  0.016, 0.030, segments=6)
+	export_bmesh(bm, "drive_sprocket", "drive_sprocket.glb",
+				 color=(0.19, 0.19, 0.21, 1.0), metallic=0.78, roughness=0.40)
+
+
 if __name__ == "__main__":
 	clear_scene()
 	build_screw_drum("screw_drum", fin_reach=0.185, turns=3.2)
@@ -380,4 +484,6 @@ if __name__ == "__main__":
 	build_leg_foot()
 	build_hover_skirt()
 	build_naval_propeller()
+	build_tread_belt_loop()
+	build_drive_sprocket()
 	print("LOCOMOTION_REWORK_PARTS_DONE")

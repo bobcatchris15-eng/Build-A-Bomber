@@ -437,6 +437,14 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 	var bias: float = ctx.get("underside_y_bias", 0.0)
 	var cat_size: Vector3 = ctx.get("catalog_size", Vector3.ONE)
 	var geo_base := _resolve_geo(spec, settings)
+	# How far the mount kit must reach UP from this station to meet the hull's
+	# underside. Several types sit well below it (a leg's origin is near its
+	# foot, a hydrofoil's near its flange) so a kit drawn only downward from the
+	# station leaves running gear hanging in space with nothing joining it to
+	# the vehicle - measured at 1.04 for tracked_treads, 0.23 for legs. The kit
+	# stretches its connecting element by this, so the bridge is always closed
+	# regardless of hull size or which station the type uses.
+	geo_base["kit_reach"] = 0.0
 	var out: Array = []
 
 	match int(spec["pattern"]):
@@ -487,6 +495,7 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 						z_pos = -z_limit + (2.0 * z_limit * i) / (per_side - 1)
 					var pos := Vector3(x_offset * side, y, z_pos)
 					var geo := geo_base.duplicate()
+					geo["kit_reach"] = maxf(0.0, (-hull_size.y * 0.5) - (final_y if has_final else y))
 					# helicopter_rotors' pylon reach is the UNSIGNED distance
 					# back to the hull's centreline on each axis - the builder
 					# applies mount_side itself.
@@ -517,6 +526,7 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				var angle := i * TAU / float(n)
 				var p := Vector3(cos(angle) * x_radius, y, sin(angle) * z_radius)
 				var geo := geo_base.duplicate()
+				geo["kit_reach"] = maxf(0.0, (-hull_size.y * 0.5) - p.y)
 				_apply_reach(geo, spec, -p, 0.0)
 				var st := _station(p, spec.get("normal", Vector3.DOWN), geo, 0.0, false)
 				st["index"] = i
@@ -567,6 +577,7 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				var fore_end := Vector3(drum_x, drum_y, half_span)
 				var aft_end := Vector3(drum_x, drum_y, -half_span)
 				var geo := geo_base.duplicate()
+				geo["kit_reach"] = maxf(0.0, (-hull_size.y * 0.5) - drum_y)
 				geo["drum_length"] = span_length
 				_apply_reach(geo, spec, Vector3.ZERO, side,
 					-fore_end * reach_fraction, -aft_end * reach_fraction)

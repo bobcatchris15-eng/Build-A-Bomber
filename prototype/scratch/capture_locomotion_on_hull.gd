@@ -13,6 +13,7 @@ extends Node3D
 #   Godot_v4.3-stable_win64.exe res://scratch/CaptureLocoOnHull.tscn
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 
 var frame_count := 0
 var shot := 0
@@ -21,10 +22,20 @@ var shot := 0
 var subjects: Array = []
 # side / front / top-three-quarter. Named so the filenames sort into a
 # comparable contact sheet per type.
+# Chris's ask: directly behind, directly below, and a dead side profile. All
+# three are ORTHOGONAL rather than three-quarter, because the questions being
+# asked are alignment questions - is the gear square to the hull, does it sit at
+# the right height, is it the right length - and a three-quarter view hides
+# exactly those. The from-below view is the one that catches running gear
+# floating off its mount, which no other angle shows.
+# Third element is the camera UP vector. The from-below shot needs its own:
+# look_at() degenerates when the view direction is parallel to the up vector, so
+# a straight-down-the-Y-axis camera with Vector3.UP produced a tilted near-side
+# view instead of a plan view of the underside.
 const VIEWS := [
-	["side", Vector3(1.0, 0.18, 0.0)],
-	["front", Vector3(0.0, 0.18, 1.0)],
-	["threequarter", Vector3(0.85, 0.55, 0.85)],
+	["rear", Vector3(0.0, 0.0, 1.0), Vector3.UP],
+	["below", Vector3(0.0, -1.0, 0.0), Vector3.FORWARD],
+	["side", Vector3(1.0, 0.0, 0.0), Vector3.UP],
 ]
 
 var placer: Node3D
@@ -47,15 +58,27 @@ func _build(index: int) -> void:
 		hull.queue_free()
 	await get_tree().process_frame
 
-	# A blank hull: the reference box, no modules, no armour, no faction dressing
-	# - so the only thing in shot besides the hull is the running gear.
+	# The REAL medium_hull mesh, not a stand-in box (Chris's ask). A box flatters
+	# the running gear: its sides are vertical and its belly is flat, so
+	# anything mounted to it lines up by accident. The authored hull has a
+	# tapered nose and a belly that is not where the collision box says it is,
+	# which is precisely where mounting goes wrong.
 	hull = StaticBody3D.new()
 	hull.name = "Hull"
+	hull.set_meta("type_id", "medium_hull")
 	var mesh_inst := MeshInstance3D.new()
 	mesh_inst.name = "MeshInstance3D"
-	var box := BoxMesh.new()
-	box.size = ModuleCatalog.REFERENCE_HULL_SIZE
-	mesh_inst.mesh = box
+	var authored: Mesh = MeshAssetLoader.get_hull_mesh("medium_hull")
+	if authored != null:
+		mesh_inst.mesh = authored
+		var fit: Dictionary = ModuleCatalog.get_hull_mesh_fit("medium_hull", authored, Vector3.ONE)
+		mesh_inst.rotation = fit["rotation"]
+		mesh_inst.scale = fit["scale"]
+		mesh_inst.position = fit["position"]
+	else:
+		var box := BoxMesh.new()
+		box.size = ModuleCatalog.REFERENCE_HULL_SIZE
+		mesh_inst.mesh = box
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.42, 0.44, 0.46)
 	mat.roughness = 0.75
@@ -111,12 +134,12 @@ func _process(_delta: float) -> void:
 	# every type is judged at a comparable apparent scale.
 	var b := _vehicle_bounds()
 	var centre := b.position + b.size * 0.5
-	var reach: float = maxf(b.size.x, maxf(b.size.y, b.size.z)) * 1.25 + 1.0
+	var reach: float = maxf(b.size.x, maxf(b.size.y, b.size.z)) * 1.15 + 1.2
 	var cam := get_node_or_null("Camera3D") as Camera3D
 	if cam:
 		var dir: Vector3 = (VIEWS[view_index][1] as Vector3).normalized()
 		cam.global_position = centre + dir * reach
-		cam.look_at(centre, Vector3.UP)
+		cam.look_at(centre, VIEWS[view_index][2] as Vector3)
 
 	var img := get_viewport().get_texture().get_image()
 	img.save_png("res://scratch/hull_%s_%s.png" % [
