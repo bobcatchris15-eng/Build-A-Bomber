@@ -3631,7 +3631,6 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 	# used to grow for itself - see build_mount_kit(). Every wheeled type now
 	# hangs off the same authored arm, coil-over and hub carrier, which is what
 	# makes them read as one vehicle family instead of four unrelated ideas.
-	build_mount_kit(parent_node, "wheels", base_color, 1.0, wheel_size, float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 
 	if false and driveshaft_mesh:
 		var shaft = _mesh_inst(driveshaft_mesh, base_color.darkened(0.25).lightened(0.35))
@@ -3647,7 +3646,7 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 	# Gearbox: large housing tucked inboard at the mount column, fed by the
 	# driveshaft above it and facing the wheel cluster - the "attaches to
 	# the driveshaft" piece.
-	if false and gearbox_mesh:
+	if gearbox_mesh:
 		var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.1).lightened(0.3))
 		var gb_size = 0.46 * wheel_size
 		gearbox.scale = Vector3(gb_size, gb_size, cluster_width)
@@ -3690,7 +3689,6 @@ const BELT_ROAD_DROP := 0.38    # road-wheel centre below the sprocket centrelin
 const BELT_ROAD_RADIUS := 0.22  # road-wheel radius
 
 static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "tracked_treads", base_color, 1.0, float(tweaks.get("tread_width", tweaks.get("width", 1.0))), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	var width = tweaks.get("tread_width", tweaks.get("width", tweaks.get("size", 1.0)))
 	# Fixed at 3 - Chris's ask, no longer a user tweak (was road_wheel_count,
 	# 3-8 via a dedicated slider; removed along with the slider/catalog entry
@@ -3936,55 +3934,28 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		roller.rotation = Vector3(0, 0, PI / 2.0)
 		roller_axle.add_child(roller)
 
-		# SUSPENSION ARM from this road wheel up into the hull.
-		#
-		# Two of Chris's reports met here. The gearbox and driveshaft were still
-		# positioned at wheel_radius_target - the road wheel's OLD height, before
-		# it was reseated onto the belt's road-wheel line - so they had been left
-		# behind sitting on the bottom run of the track, which is nonsense. And
-		# with them stranded there, nothing connected the road wheels to the hull
-		# at all.
-		#
-		# Replaced with what a tracked vehicle actually has: a swing arm per road
-		# wheel, running from the wheel's own axle inboard and up to the hull,
-		# with a torsion housing where it enters. Solved to the real gap the same
-		# way the mount arm is, so it stays correct on any hull.
-		# The arm terminates on the SUB-FRAME rail, not out at the hull's skin.
-		# Chris: "the gearboxes are barely on the hull" - they were, because
-		# arm_top was placed at 0.42 of the way inboard at the hull's underside,
-		# which on a hull whose sides taper is out in space. A real chassis has a
-		# sub-frame under the hull that the running gear bolts to, and the drive
-		# type changes while the sub-frame does not. So the arm ends INSIDE the
-		# hull's own footprint, a little below its belly, where a sub-frame rail
-		# would actually be - and the torsion housing sits on that rail.
-		var frame_x: float = outboard_x * 0.30
-		var frame_y: float = hull_line_y - wheel_radius_target * 0.55
-		var arm_root := Vector3(outboard_x, roller_axle.position.y, pos.z)
-		var arm_top := Vector3(frame_x, frame_y, pos.z)
-		var arm_vec := arm_top - arm_root
-		if arm_vec.length() > 0.05:
-			var arm_pivot := Node3D.new()
-			arm_pivot.position = arm_root
-			p.add_child(arm_pivot)
-			arm_pivot.look_at_from_position(arm_root, arm_top, Vector3.UP)
-			arm_pivot.position = arm_root
-			var arm_len := arm_vec.length()
-			var arm_box := BoxMesh.new()
-			arm_box.size = Vector3(wheel_radius_target * 0.55, wheel_radius_target * 0.85, 1.0)
-			var arm_inst := _mesh_inst(arm_box, base_color.darkened(0.28), Color(0, 0, 0, 0), 0.0, "steel")
-			arm_inst.position = Vector3(0, 0, -arm_len * 0.5)
-			arm_inst.scale = Vector3(1, 1, arm_len)
-			arm_pivot.add_child(arm_inst)
-			# Torsion-bar housing where the arm enters the hull side.
-			var housing := CylinderMesh.new()
-			housing.top_radius = wheel_radius_target * 0.62
-			housing.bottom_radius = wheel_radius_target * 0.62
-			housing.height = wheel_radius_target * 1.5
-			var housing_inst := _mesh_inst(housing, base_color.darkened(0.12).lightened(0.18),
-				Color(0, 0, 0, 0), 0.0, "steel")
-			housing_inst.rotation = Vector3(0, 0, PI / 2.0)
-			housing_inst.position = arm_top
-			p.add_child(housing_inst)
+		# Gearbox and driveshaft behind each road wheel - the original, restored.
+		# It is anchored to the ROLLER's own axle rather than to a separately
+		# computed height, which is what stranded it on the bottom run before.
+		if gearbox_mesh:
+			var gearbox = _mesh_inst(gearbox_mesh, base_color.darkened(0.15).lightened(0.25))
+			var gb_size: float = wheel_radius_target * 1.2
+			gearbox.scale = Vector3(gb_size, gb_size, gb_size)
+			gearbox.position = Vector3(outboard_x - wheel_radius_target * 0.85,
+				roller_axle.position.y, pos.z)
+			p.add_child(gearbox)
+		if driveshaft_mesh:
+			var shaft = _mesh_inst(driveshaft_mesh, base_color.darkened(0.3).lightened(0.3))
+			var gb_size2: float = wheel_radius_target * 1.2
+			var shaft_len: float = wheel_radius_target * 2.4
+			var shaft_angle := deg_to_rad(25.0)
+			var bottom_target: Vector3 = Vector3(outboard_x - wheel_radius_target * 0.34,
+				roller_axle.position.y + wheel_radius_target * 0.35, pos.z)
+			var shaft_drop := Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
+			shaft.scale = Vector3(gb_size2 * 0.55, shaft_len, gb_size2 * 0.55)
+			shaft.position = bottom_target - shaft_drop
+			shaft.rotation = Vector3(0, 0, shaft_angle)
+			p.add_child(shaft)
 	)
 
 
@@ -6147,9 +6118,33 @@ static func _build_water_jet(parent_node: Node3D, base_size: Vector3, base_color
 ## Pontoon wheels: sealed buoyant drums that are simultaneously the wheel and
 ## the float. One part doing both jobs is the point of the type.
 static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.36, 0.34, 0.30), tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "pontoon_wheels", base_color, 1.0, float(tweaks.get("pontoon_size", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	var psize := float(tweaks.get("pontoon_size", 1.0))
 	var vanes: bool = bool(tweaks.get("paddle_vanes", true))
+
+	# Mounting copied wholesale from _build_wheels (Chris's instruction): the
+	# same angled driveshaft and inboard gearbox, sized off pontoon_size the way
+	# wheels size off wheel_size. A pontoon drum is a wheel that floats, so it
+	# should hang off the hull the same way one does.
+	var ds_mesh := _part("wheel_driveshaft")
+	var gb_mesh := _part("wheel_gearbox")
+	var drum_y := -0.2 * psize
+	var gearbox_x := -0.24 * psize
+	if ds_mesh:
+		var shaft := _mesh_inst(ds_mesh, base_color.darkened(0.25).lightened(0.35))
+		var shaft_len := 1.0 * psize
+		var shaft_angle := deg_to_rad(55.0)
+		var bottom_target := Vector3(gearbox_x + 0.05 * psize, drum_y, 0.0)
+		var drop := Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
+		shaft.scale = Vector3(0.32 * psize, shaft_len, 0.3 * psize)
+		shaft.position = bottom_target - drop
+		shaft.rotation = Vector3(0, 0, shaft_angle)
+		parent_node.add_child(shaft)
+	if gb_mesh:
+		var gearbox := _mesh_inst(gb_mesh, base_color.darkened(0.1).lightened(0.3))
+		var gb := 0.46 * psize
+		gearbox.scale = Vector3(gb, gb, 0.3 * psize)
+		gearbox.position = Vector3(gearbox_x, drum_y, 0.0)
+		parent_node.add_child(gearbox)
 
 	var pontoon_mesh := _part("pw_pontoon")
 	if pontoon_mesh:

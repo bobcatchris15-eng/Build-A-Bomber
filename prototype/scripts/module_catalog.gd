@@ -2972,7 +2972,11 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 # it supports) and a clamped fraction of hull height for Y (so tall hulls
 # get a more prominent chassis without becoming comical, short hulls still
 # get enough clearance for default-size wheels).
-const RUNNING_GEAR_XZ_INSET: float = 0.95
+# 0.90: the subframe sits 5% in from each edge of the hull (Chris's ask). At
+# 0.95 it tracked the hull's silhouette so closely that it read as part of the
+# hull rather than as a chassis slung under it, and on hulls whose sides taper
+# it poked out past the skin.
+const RUNNING_GEAR_XZ_INSET: float = 0.90
 const RUNNING_GEAR_HEIGHT_MIN: float = 0.2
 const RUNNING_GEAR_HEIGHT_MAX: float = 0.6
 const RUNNING_GEAR_HEIGHT_FRACTION: float = 0.4

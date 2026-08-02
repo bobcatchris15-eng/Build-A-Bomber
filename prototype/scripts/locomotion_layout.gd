@@ -312,8 +312,13 @@ const MOUNT_KITS := {
 ## what made the first generic frame collide with everything it was added to.
 ## They keep their own structure until they get a system of their own.
 const SUBFRAME_TYPES := [
-	"wheels", "tracked_treads", "legs", "half_track", "rocker_bogie",
-	"pontoon_wheels", "screw_drive",
+	# wheels, tracked_treads and pontoon_wheels are DELIBERATELY ABSENT. They
+	# carry their own mounting - an inboard gearbox and an angled driveshaft,
+	# sized off the part itself - and that pattern already worked before any of
+	# this. Putting them on the subframe as well gave them two structures, which
+	# is what the earlier generic chassis did wrong. pontoon_wheels copies the
+	# wheel mounting wholesale, so it belongs with them.
+	"legs", "half_track", "rocker_bogie", "screw_drive",
 	"hover_engine", "air_cushion_skirt", "anti_grav_plate",
 ]
 
