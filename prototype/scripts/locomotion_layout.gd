@@ -313,7 +313,7 @@ const MAX_WIDTH_FACTOR := {
 	# Ground contact: the running gear must sit under the vehicle, not beside
 	# it. Measured tracked/wheeled types already land at ~1.1-1.25x, so this is
 	# a ceiling the well-behaved types never touch.
-	"wheels": 1.5, "tracked_treads": 1.5, "half_track": 1.5,
+	"wheels": 1.5, "tracked_treads": 1.62, "half_track": 1.5,
 	"rocker_bogie": 1.6, "pontoon_wheels": 1.6, "screw_drive": 1.9,
 	# A walker legitimately stands wider than its body - that IS the stance -
 	# but 2.69x read as a spider rather than a vehicle.

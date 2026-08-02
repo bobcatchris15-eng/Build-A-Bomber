@@ -26,7 +26,14 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 
 const ATTACH_GAP_LIMIT := 0.05
 const SPLIT_GAP_LIMIT := 0.18
-const BULK_LIMIT := 0.28
+# RE-BASELINED against tracked_treads, which Chris confirmed is the type that
+# reads at close to the right size. The first pass guessed 0.28 and duly flagged
+# treads at 0.614 as BULKY - i.e. it was calling the reference wrong. A full
+# track assembly legitimately IS a large fraction of the vehicle; the useful
+# question is which types are far off that benchmark in either direction, so
+# both a ceiling and a floor are reported now.
+const BULK_LIMIT := 0.95
+const BULK_FLOOR := 0.015
 const SLENDER_MIN := 0.045
 
 
@@ -125,6 +132,8 @@ func _init() -> void:
 			flags.append("DISCONNECTED")
 		if bulk > BULK_LIMIT:
 			flags.append("BULKY")
+		elif bulk < BULK_FLOOR:
+			flags.append("UNDERSIZED")
 		if thinnest > 0.0 and thinnest < SLENDER_MIN:
 			flags.append("FRAGILE")
 		print("%-20s %8.3f   %8.3f  %6.3f  %7.3f   %s" % [

@@ -3723,7 +3723,11 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# (top = +radius, bottom = -(radius+drop)), the loop's local origin is
 	# NOT its vertical center - placement below has to account for that,
 	# unlike the old symmetric-stadium math.
-	var target_radius = actual_size.y * 0.42
+	# 0.48, up from 0.42. Chris, calibrating the roster against this type: the
+	# treads are the one that is close to the right size, "if a bit too small
+	# still". Since tracked_treads is now the sizing REFERENCE every other
+	# ground type is judged against, it wants to be right first.
+	var target_radius = actual_size.y * 0.48
 	var target_half_span = actual_size.z * 0.5 - target_radius
 	var authored_radius = 0.45
 	var authored_drop = 0.4
@@ -3840,7 +3844,18 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# wheel_radius_target doesn't shrink from the inward pull below.
 	var wheel_span = actual_size.z * 0.5
 	var spacing = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
-	var wheel_radius_target = clamp(spacing * 0.42, target_radius * 0.25, target_radius * 0.65)
+	# Sized and seated from the AUTHORED belt profile, not independently.
+	# tread_belt_loop is now a real track trapezoid (see _track_path in
+	# tools/blender/build_locomotion_rework.py): sprockets on the centreline,
+	# road wheels a fixed drop below it, belt bottom another road-radius below
+	# that. Choosing the road wheel radius by its own rule left the wheels
+	# hanging BELOW the belt instead of riding inside it - Chris's report - so
+	# both radius and seat now come from the same constants the mesh was built
+	# with, and the two cannot disagree.
+	const BELT_ROAD_DROP := 0.20   # authored: road-wheel centre below sprocket centre
+	const BELT_ROAD_RADIUS := 0.26 # authored: road-wheel radius
+	const BELT_DRIVE_RADIUS := 0.45
+	var wheel_radius_target = target_radius * (BELT_ROAD_RADIUS / BELT_DRIVE_RADIUS)
 	# Not multiplied by `width` (tread_width) - same reasoning as
 	# sprocket_scale above, road wheels stay fixed size when the belt widens.
 	var wheel_scale = wheel_radius_target / 0.45
@@ -3884,7 +3899,11 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 		# Road wheels spin with the belt, same as the sprockets.
 		var roller_axle = Node3D.new()
 		roller_axle.name = SPIN_PIVOT_TREAD
-		roller_axle.position = Vector3(outboard_x, wheel_radius_target + y_shift, pos.z)
+		# Seated on the belt's own road-wheel line rather than on its own radius,
+		# so the wheel sits INSIDE the loop with the bottom run passing under it.
+		roller_axle.position = Vector3(outboard_x,
+			ground_offset + y_shift - BELT_ROAD_DROP * (target_radius / BELT_DRIVE_RADIUS),
+			pos.z)
 		p.add_child(roller_axle)
 		roller.rotation = Vector3(0, 0, PI / 2.0)
 		roller_axle.add_child(roller)

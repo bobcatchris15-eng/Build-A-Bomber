@@ -384,61 +384,107 @@ def build_naval_propeller():
 # Blender +Y imports as Godot -Z, so the belt is built as a stadium in Blender's
 # YZ plane and extruded across X.
 # ---------------------------------------------------------------------------
-def _stadium_path(half_span, radius, steps_arc=10):
-	"""Points around a stadium (two straight runs joined by two half-circles),
-	returned as (y, z, tangent_angle) in Blender space."""
-	pts = []
-	# Top run, front to back.
-	straight = 6
-	for i in range(straight):
-		t = i / float(straight - 1)
-		pts.append((half_span - 2.0 * half_span * t, radius, 0.0))
-	# Rear arc.
-	for i in range(1, steps_arc):
-		a = math.pi * 0.5 + (i / float(steps_arc)) * math.pi
-		pts.append((-half_span + math.cos(a) * radius, math.sin(a) * radius, a))
-	# Bottom run, back to front.
-	for i in range(straight):
-		t = i / float(straight - 1)
-		pts.append((-half_span + 2.0 * half_span * t, -radius, math.pi))
-	# Front arc.
-	for i in range(1, steps_arc):
-		a = -math.pi * 0.5 + (i / float(steps_arc)) * math.pi
-		pts.append((half_span + math.cos(a) * radius, math.sin(a) * radius, a))
-	return pts
+def _track_path(half_span, r_drive, road_drop, r_road):
+	"""The belt centreline as a real TRACK profile, not a stadium.
+
+	Chris: the treads want "that overall trapezoidal shape of the road wheels
+	being lower than the drive wheels". A constant-radius stadium - which is what
+	the first pass built - gives an oval, and an oval is what a conveyor looks
+	like, not a tracked vehicle. On a real track the sprocket and idler are
+	raised and the road wheels ride lower between them, so the silhouette is a
+	trapezoid: a high flat top run, a low flat bottom run, and angled runs at
+	each end.
+
+	Returned as a closed polyline of (y, z) waypoints in Blender's fore/aft-up
+	plane. Corner rounding and uniform spacing are applied by _resample_closed().
+	"""
+	top = r_drive
+	bot = -(road_drop + r_road)
+	nose = half_span + r_drive * 0.45
+	return [
+		(half_span * 0.94, top),                 # top run, rear end
+		(-half_span * 0.94, top),                # top run, front end
+		(-nose, top * 0.30),                     # over the idler
+		(-nose * 0.94, bot * 0.72),              # down the front face
+		(-half_span * 0.80, bot),                # onto the road-wheel line
+		(half_span * 0.80, bot),                 # bottom run
+		(nose * 0.94, bot * 0.72),               # up the rear face
+		(nose, top * 0.30),                      # over the sprocket
+	]
+
+
+def _resample_closed(points, spacing):
+	"""Walk a closed polyline at a CONSTANT arc-length step.
+
+	This is the other half of Chris's report - "most of the tread links aren't
+	actually touching or connected". The first pass emitted one link per waypoint
+	and sized them from an average circumference, so on the straight runs the
+	waypoints were far apart and the links floated with gaps between them, while
+	round the ends they overlapped. Stepping by arc length instead means every
+	link is the same distance from its neighbour, so sizing each to exactly that
+	step makes the belt continuous by construction.
+
+	Yields (y, z, tangent_angle, step) tuples.
+	"""
+	n = len(points)
+	segs = []
+	total = 0.0
+	for i in range(n):
+		a = mathutils.Vector(points[i])
+		b = mathutils.Vector(points[(i + 1) % n])
+		d = (b - a).length
+		if d > 1e-6:
+			segs.append((a, b, d))
+			total += d
+	count = max(8, int(round(total / spacing)))
+	step = total / count
+	out = []
+	seg_i = 0
+	seg_pos = 0.0
+	for _k in range(count):
+		while seg_pos > segs[seg_i][2]:
+			seg_pos -= segs[seg_i][2]
+			seg_i = (seg_i + 1) % len(segs)
+		a, b, d = segs[seg_i]
+		t = seg_pos / d
+		p = a.lerp(b, t)
+		ang = math.atan2(b.y - a.y, b.x - a.x)
+		out.append((p.x, p.y, ang, step))
+		seg_pos += step
+	return out
 
 
 def build_tread_belt_loop():
 	half_span = 1.0
-	radius = 0.45
+	r_drive = 0.45
+	r_road = 0.26
+	road_drop = 0.20
 	width = 0.30
 	bm = bmesh.new()
-	path = _stadium_path(half_span, radius, steps_arc=11)
-	n = len(path)
-	for i, (y, z, _a) in enumerate(path):
-		nxt = path[(i + 1) % n]
-		ang = math.atan2(nxt[1] - z, nxt[0] - y)
+	path = _resample_closed(_track_path(half_span, r_drive, road_drop, r_road), 0.115)
+	for (y, z, ang, step) in path:
 		rot = mathutils.Matrix.Rotation(ang, 4, 'X')
-		# Link plate: the flat pad that touches the ground.
+		centre = mathutils.Vector((0, y, z))
+		# Link plate sized to EXACTLY the sampling step (plus a hair of overlap)
+		# so consecutive links meet rather than leaving a gap.
 		res = bmesh.ops.create_cube(bm, size=1.0)
 		for v in res['verts']:
-			v.co = mathutils.Vector((0, y, z)) + rot @ mathutils.Vector(
-				(v.co.x * width, v.co.y * (2.0 * math.pi * radius / n) * 1.25, v.co.z * 0.055))
-		# Grouser: the raised bar that bites.
-		outward = mathutils.Vector((0, y, z)).normalized() if (y or z) else mathutils.Vector((0, 0, 1))
+			v.co = centre + rot @ mathutils.Vector(
+				(v.co.x * width, v.co.y * step * 1.04, v.co.z * 0.055))
+		# Grouser on the outer face, and a guide horn on the inner one.
+		outward = mathutils.Vector((0, y, z))
+		outward = outward.normalized() if outward.length > 1e-5 else mathutils.Vector((0, 0, -1))
 		res2 = bmesh.ops.create_cube(bm, size=1.0)
 		for v in res2['verts']:
-			v.co = (mathutils.Vector((0, y, z)) + outward * 0.045) + rot @ mathutils.Vector(
-				(v.co.x * width * 0.82, v.co.y * (2.0 * math.pi * radius / n) * 0.42, v.co.z * 0.050))
-		# Guide horn, inboard, every other link - what keeps the track on.
-		if i % 2 == 0:
-			res3 = bmesh.ops.create_cube(bm, size=1.0)
-			for v in res3['verts']:
-				v.co = (mathutils.Vector((0, y, z)) - outward * 0.052) + rot @ mathutils.Vector(
-					(v.co.x * 0.055, v.co.y * (2.0 * math.pi * radius / n) * 0.36, v.co.z * 0.075))
-		# Pin bosses at the link edges.
+			v.co = (centre + outward * 0.048) + rot @ mathutils.Vector(
+				(v.co.x * width * 0.84, v.co.y * step * 0.46, v.co.z * 0.052))
+		res3 = bmesh.ops.create_cube(bm, size=1.0)
+		for v in res3['verts']:
+			v.co = (centre - outward * 0.050) + rot @ mathutils.Vector(
+				(v.co.x * 0.055, v.co.y * step * 0.40, v.co.z * 0.070))
+		# Pin bosses at the link edges - what the links actually hinge on.
 		for sx in (-1, 1):
-			add_cyl_x(bm, (sx * width * 0.42, y, z), 0.022, 0.030, segments=6)
+			add_cyl_x(bm, (sx * width * 0.42, y, z), 0.020, 0.028, segments=6)
 	export_bmesh(bm, "tread_belt_loop", "tread_belt_loop.glb",
 				 color=(0.16, 0.16, 0.17, 1.0), metallic=0.55, roughness=0.62)
 
