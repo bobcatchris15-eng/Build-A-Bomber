@@ -281,7 +281,12 @@ const MOUNT_KITS := {
 	"half_track":        {"kit": Kit.TRACK_FRAME, "drop": 0.26, "stations": 4},
 	"rocker_bogie":      {"kit": Kit.SUSPENSION_ARM, "drop": 0.34, "stations": 2},
 	"pontoon_wheels":    {"kit": Kit.SUSPENSION_ARM, "drop": 0.32, "stations": 1},
-	"tracked_treads":    {"kit": Kit.TRACK_FRAME, "drop": 0.24, "stations": 5},
+	# NONE, deliberately. _build_tracked_treads() now builds its own structure -
+	# a swing arm per road wheel up to the sub-frame line, plus the sprocket
+	# carriers - so the generic TRACK_FRAME kit was a SECOND set of frame rails
+	# and bearing blocks hanging below the belt, which is the object Chris kept
+	# seeing under the bottom run. One structure per assembly, not two.
+	"tracked_treads":    {"kit": Kit.NONE, "drop": 0.0, "stations": 0},
 	"screw_drive":       {"kit": Kit.TRACK_FRAME, "drop": 0.30, "stations": 3},
 	"legs":              {"kit": Kit.STRUT_LEG, "drop": 0.20, "stations": 1},
 	"hydrofoil":         {"kit": Kit.STRUT_LEG, "drop": 0.18, "stations": 1},

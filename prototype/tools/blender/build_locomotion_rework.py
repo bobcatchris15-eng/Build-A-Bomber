@@ -384,33 +384,43 @@ def build_naval_propeller():
 # Blender +Y imports as Godot -Z, so the belt is built as a stadium in Blender's
 # YZ plane and extruded across X.
 # ---------------------------------------------------------------------------
-def _track_path(half_span, r_drive, road_drop, r_road):
-	"""The belt centreline as a real TRACK profile, not a stadium.
+def _track_path(half_span, r_drive, road_drop, r_road, arc_steps=14):
+	"""The belt centreline, with ends that ACTUALLY WRAP THE SPROCKETS.
 
-	Chris: the treads want "that overall trapezoidal shape of the road wheels
-	being lower than the drive wheels". A constant-radius stadium - which is what
-	the first pass built - gives an oval, and an oval is what a conveyor looks
-	like, not a tracked vehicle. On a real track the sprocket and idler are
-	raised and the road wheels ride lower between them, so the silhouette is a
-	trapezoid: a high flat top run, a low flat bottom run, and angled runs at
-	each end.
+	The previous version listed hand-picked waypoints including a "nose" at
+	half_span + r_drive * 0.45. That is not a point on a circle of radius r_drive
+	around the sprocket centre - it traced a shallow polygonal end roughly 0.21
+	from the axle while the sprocket itself was 0.46, so the sprocket punched
+	straight through the belt. Measured, not guessed: sprocket half-size 0.505
+	against a belt end reach of 0.28.
 
-	Returned as a closed polyline of (y, z) waypoints in Blender's fore/aft-up
-	plane. Corner rounding and uniform spacing are applied by _resample_closed().
+	The ends are now real arcs sampled around the sprocket and idler centres, so
+	the belt wraps them by construction at any scale. The trapezoid comes from
+	the bottom run sitting on the road-wheel line, well below the axle line, with
+	tangential runs down to it at each end.
+
+	Returned as a closed polyline of (y, z) in Blender's fore/aft-up plane.
 	"""
-	top = r_drive
 	bot = -(road_drop + r_road)
-	nose = half_span + r_drive * 0.45
-	return [
-		(half_span * 0.94, top),                 # top run, rear end
-		(-half_span * 0.94, top),                # top run, front end
-		(-nose, top * 0.30),                     # over the idler
-		(-nose * 0.94, bot * 0.72),              # down the front face
-		(-half_span * 0.80, bot),                # onto the road-wheel line
-		(half_span * 0.80, bot),                 # bottom run
-		(nose * 0.94, bot * 0.72),               # up the rear face
-		(nose, top * 0.30),                      # over the sprocket
-	]
+	# Where the belt leaves each end arc to run down to the road-wheel line.
+	leave = math.radians(212.0)
+	pts = []
+	# Top run, rear to front, along the top of both wheels.
+	pts.append((half_span, r_drive))
+	pts.append((-half_span, r_drive))
+	# Front (idler) arc: over the top, round the nose, down to the leave angle.
+	for i in range(1, arc_steps + 1):
+		a = math.radians(90.0) + (leave - math.radians(90.0)) * (i / float(arc_steps))
+		pts.append((-half_span + math.cos(a) * r_drive, math.sin(a) * r_drive))
+	# Down onto the road-wheel line, then the bottom run.
+	pts.append((-half_span * 0.78, bot))
+	pts.append((half_span * 0.78, bot))
+	# Rear (sprocket) arc: up from the road line, round the tail, back to the top.
+	enter = math.radians(-32.0)
+	for i in range(arc_steps + 1):
+		a = enter + (math.radians(90.0) - enter) * (i / float(arc_steps))
+		pts.append((half_span + math.cos(a) * r_drive, math.sin(a) * r_drive))
+	return pts
 
 
 def _resample_closed(points, spacing):
