@@ -2977,6 +2977,17 @@ const RUNNING_GEAR_HEIGHT_MIN: float = 0.2
 const RUNNING_GEAR_HEIGHT_MAX: float = 0.6
 const RUNNING_GEAR_HEIGHT_FRACTION: float = 0.4
 
+## Whether a locomotion type rests on the ground, and so whether the hull should
+## be lifted until its lowest geometry touches. Airborne, naval and buoyant types
+## hold themselves up and must NOT be pushed down onto the terrain.
+static func locomotion_touches_ground(locomotion_type: String) -> bool:
+	var traits: Array = get_module_data(locomotion_type).get("traits", [])
+	for t in ["airborne", "naval", "buoyant"]:
+		if t in traits:
+			return false
+	return "ground_contact" in traits or "hovering" in traits
+
+
 static func needs_running_gear(locomotion_type: String) -> bool:
 	return locomotion_type in LOCOMOTION_TYPES_USING_RUNNING_GEAR
 

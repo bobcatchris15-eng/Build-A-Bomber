@@ -249,6 +249,34 @@ const GEOMETRY := {
 	"water_jet":         {"x_frac": 0.26, "z_clearance": 0.35, "y_frac": -0.12},
 }
 
+## How far outboard a type may reach, as a multiple of the hull's own half-width.
+##
+## Not one number for everything: a rotor disc is SUPPOSED to overhang the
+## fuselage and a road wheel is not, so a single limit would either crop the
+## helicopter or leave the walker at 2.7x. 0.0 disables the clamp entirely for
+## types whose whole identity is span.
+const MAX_WIDTH_FACTOR := {
+	# Ground contact: the running gear must sit under the vehicle, not beside
+	# it. Measured tracked/wheeled types already land at ~1.1-1.25x, so this is
+	# a ceiling the well-behaved types never touch.
+	"wheels": 1.5, "tracked_treads": 1.5, "half_track": 1.5,
+	"rocker_bogie": 1.6, "pontoon_wheels": 1.6, "screw_drive": 1.9,
+	# A walker legitimately stands wider than its body - that IS the stance -
+	# but 2.69x read as a spider rather than a vehicle.
+	"legs": 1.9,
+	# Hover skirts and grav plates spread to carry the footprint.
+	"hover_engine": 1.7, "air_cushion_skirt": 1.6, "anti_grav_plate": 1.6,
+	# Naval gear is submerged and narrow.
+	"hydrofoil": 1.7, "water_jet": 1.4, "naval_propeller": 1.4,
+	# Air: span is the point. Rotors and engine clusters overhang by design;
+	# the ornithopter was still absurd at 4.25x.
+	"helicopter_rotors": 2.4, "fixed_wing_engine": 1.8,
+	"ornithopter_wing": 2.6, "buoyant_envelope": 1.4,
+}
+
+static func max_width_factor(type_id: String) -> float:
+	return float(MAX_WIDTH_FACTOR.get(type_id, 1.8))
+
 static func has_layout(type_id: String) -> bool:
 	return LAYOUTS.has(type_id)
 

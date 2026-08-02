@@ -49,7 +49,11 @@ const OFFSET_MIN: float = 0.002
 # hull_decals in both call sites, so without the exclusion every decal
 # projected onto the energy shield's ellipsoid (a big mesh enclosing the whole
 # hull) and onto the rivet field, instead of onto the hull skin.
-const EXCLUDED_NODES := ["HullDecals", "HullGreebles", "ArmorGreebles"]
+# "RunningGear" joins the list now that the chassis actually has geometry: it is
+# a structural frame bolted UNDER the hull, not hull skin, so rivets should not
+# grow out of its cross-members and unit markings should not project onto its
+# belly plate - the same reasoning that excludes placed modules.
+const EXCLUDED_NODES := ["HullDecals", "HullGreebles", "ArmorGreebles", "RunningGear"]
 
 # The meta every PLACED MODULE carries (set by module_placer.gd and
 # blueprint_manager.gd before they parent it to the hull). Modules are children

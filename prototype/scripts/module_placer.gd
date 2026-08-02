@@ -821,26 +821,71 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		spawned_wheels.append(part)
 
 
-	# Adjust hull Y position in the editor so the unit sits on its ground
-	# contact. For ground-contact locomotion with a running-gear chassis,
-	# the chassis's BOTTOM is the ground contact (not the wheel's bottom -
-	# the chassis is what the unit's CharacterBody3D collider rests on, per
-	# battle_unit.gd), so the hull lifts by the full chassis height.
-	# For hover / anti_grav / other underside-projecting types, the legacy
-	# wheels_offset formula (sized to lift the part's bottom to the floor)
-	# stays in effect.
+	# WIDTH CLAMP. Locomotion is laid out from hull dimensions, but each type's
+	# own parts are authored at a fixed size, so on a small hull an assembly can
+	# end up wider than the vehicle it is carrying. Measured against the
+	# reference hull: ornithopter_wing came out 4.25x the hull's width and legs
+	# 2.69x, against ~1.1-1.2x for the tracked and wheeled types. That is not a
+	# style difference, it is the same part failing to scale with its hull.
+	#
+	# Clamped by scaling the instances rather than moving them: scale shrinks
+	# each assembly about its own station, so the mount stays exactly where the
+	# layout put it and only the outboard reach comes in. Limits are per type
+	# because a rotor disc SHOULD overhang and a road wheel should not.
+	var width_limit := LocomotionLayoutScript.max_width_factor(type_id)
+	if width_limit > 0.0 and not spawned_wheels.is_empty():
+		# Solve for the scale directly rather than applying a ratio. An
+		# instance's outboard reach is |station.x| + scale.x * local_extent, and
+		# only the second term shrinks - the station is where the layout put the
+		# mount and must not move. Scaling by allowed/reach ignores that and
+		# under-corrects badly on exactly the types that need it most: the first
+		# attempt took ornithopter_wing from 4.25x to 4.14x. It also has to read
+		# the CURRENT scale, since ornithopter_wing already carries a deliberate
+		# 2x and legs a hull-height factor.
+		var mount_reach := 0.0
+		var local_extent := 0.0
+		for w in spawned_wheels:
+			var wb := _visual_bounds(w)
+			if wb.size.length_squared() <= 0.0:
+				continue
+			mount_reach = maxf(mount_reach, absf(w.position.x))
+			local_extent = maxf(local_extent, absf(wb.position.x) * w.scale.x)
+			local_extent = maxf(local_extent, absf(wb.position.x + wb.size.x) * w.scale.x)
+		var allowed: float = hull_size.x * 0.5 * width_limit
+		if mount_reach + local_extent > allowed and local_extent > 0.001:
+			# Never invert or vanish the part, even if the mount alone already
+			# exceeds the budget - a sliver reads worse than a slight overhang.
+			var shrink: float = clampf((allowed - mount_reach) / local_extent, 0.35, 1.0)
+			for w in spawned_wheels:
+				w.scale *= shrink
+				if w.has_meta("module_data"):
+					w.get_meta("module_data").scale_multiplier *= shrink
+				_resize_collider_to_visual(w)
+
+	# GROUND CONTACT. The hull lift used to be computed from the chassis height
+	# (or, before that, a per-type hand-tuned constant), which is only right if
+	# every part happens to end exactly at the chassis bottom - and none of them
+	# did. Measured against the reference hull, wheels floated 0.13 above the
+	# ground, half_track 0.30, pontoon_wheels 0.28, while legs sank 0.31 through
+	# it. Measuring where the geometry ACTUALLY ends and lifting the hull by that
+	# is both simpler and correct for every type, including the seven new ones
+	# that never had a constant of their own.
 	var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
 	var hull_catalog_data = ModuleCatalog.get_module_data(hull_type)
-	if running_gear_size.y > 0.0:
-		hull.position.y = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + running_gear_size.y
-	else:
-		var wheels_offset = 0.0
-		if type_id == "wheels":
-			var size = settings.get("wheel_size", settings.get("size", 1.0))
-			wheels_offset = 0.8 * size * hull_height_factor
-		elif type_id == "legs":
-			wheels_offset = 1.6 * settings.get("leg_length", settings.get("size", 1.0)) * hull_height_factor
-		hull.position.y = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + wheels_offset
+	var default_lift: float = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + running_gear_size.y
+	hull.position.y = default_lift
+	if ModuleCatalog.locomotion_touches_ground(type_id):
+		var lowest := INF
+		for w in spawned_wheels:
+			var wb := _visual_bounds(w)
+			if wb.size.length_squared() <= 0.0:
+				continue
+			lowest = minf(lowest, w.position.y + wb.position.y * w.scale.y)
+		# The chassis slab is ground contact too when nothing hangs below it.
+		if running_gear_size.y > 0.0:
+			lowest = minf(lowest, -hull_size.y / 2.0 - running_gear_size.y)
+		if lowest < INF:
+			hull.position.y = -lowest
 				
 	# Link them in a group
 	for w in spawned_wheels:
