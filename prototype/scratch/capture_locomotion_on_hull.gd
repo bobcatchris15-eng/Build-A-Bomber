@@ -54,6 +54,9 @@ func _ready() -> void:
 	_build(0)
 
 
+var HULL_ID := OS.get_environment("LOCO_HULL") if OS.get_environment("LOCO_HULL") != "" else "medium_hull"
+
+
 func _build(index: int) -> void:
 	if placer and is_instance_valid(placer):
 		placer.queue_free()
@@ -68,13 +71,13 @@ func _build(index: int) -> void:
 	# which is precisely where mounting goes wrong.
 	hull = StaticBody3D.new()
 	hull.name = "Hull"
-	hull.set_meta("type_id", "medium_hull")
+	hull.set_meta("type_id", HULL_ID)
 	var mesh_inst := MeshInstance3D.new()
 	mesh_inst.name = "MeshInstance3D"
-	var authored: Mesh = MeshAssetLoader.get_hull_mesh("medium_hull")
+	var authored: Mesh = MeshAssetLoader.get_hull_mesh(HULL_ID)
 	if authored != null:
 		mesh_inst.mesh = authored
-		var fit: Dictionary = ModuleCatalog.get_hull_mesh_fit("medium_hull", authored, Vector3.ONE)
+		var fit: Dictionary = ModuleCatalog.get_hull_mesh_fit(HULL_ID, authored, Vector3.ONE)
 		mesh_inst.rotation = fit["rotation"]
 		mesh_inst.scale = fit["scale"]
 		mesh_inst.position = fit["position"]
@@ -90,7 +93,11 @@ func _build(index: int) -> void:
 	var shape := CollisionShape3D.new()
 	shape.name = "CollisionShape3D"
 	var col := BoxShape3D.new()
-	col.size = ModuleCatalog.REFERENCE_HULL_SIZE
+	# The hull's OWN catalog size, not the reference box - hardcoding the
+	# reference meant LOCO_HULL changed the mesh but not the size every
+	# locomotion station is derived from, so every hull captured identically.
+	var cat: Dictionary = ModuleCatalog.get_catalog().get(HULL_ID, {})
+	col.size = cat.get("size", ModuleCatalog.REFERENCE_HULL_SIZE)
 	shape.shape = col
 	hull.add_child(shape)
 	add_child(hull)

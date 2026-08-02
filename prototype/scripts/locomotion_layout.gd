@@ -220,6 +220,12 @@ const LAYOUTS := {
 		"geo_keys": {"drum_diameter": 1.0, "helix_depth": 1.0},
 		"geo_aliases": {"drum_diameter": ["drum_width", "size"]},
 		"normal_is_side": true,
+		# mirror was missing. build_wheel_mount() authors the gearbox and
+		# driveshaft at NEGATIVE local X (inboard), which is only inboard on
+		# the starboard side - without the flip the port assembly reached out
+		# away from the hull instead of into it (Chris). Every other type that
+		# uses that mount already sets this.
+		"mirror": true,
 	},
 }
 

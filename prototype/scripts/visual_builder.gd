@@ -3600,9 +3600,15 @@ static func _attach_naval_propeller_blades(parent_node: Node3D, base_size: Vecto
 ## thickness along Z (a dually cluster or a wide drum wants a fatter housing).
 ## Returns the outboard hub position in the parent's local space so the caller
 ## can hang a wheel, a drum end or a leg on it without redoing the arithmetic.
+## `hub_drop` overrides how far the hub hangs below the origin. A wheel wants
+## the default (the mount is as deep as the wheel is big); a screw drum wants to
+## hang well clear so the hull rides high over terrain, WITHOUT inflating the
+## gearbox to get there. The driveshaft lengthens to match, so it still arrives
+## inside the hull however deep the hub goes.
 static func build_wheel_mount(parent_node: Node3D, base_color: Color,
-		s: float = 1.0, z: float = 0.0, span: float = 0.3) -> Vector3:
-	var hub_y := -0.2 * s
+		s: float = 1.0, z: float = 0.0, span: float = 0.3,
+		hub_drop: float = -1.0) -> Vector3:
+	var hub_y: float = -0.2 * s if hub_drop < 0.0 else -hub_drop
 	var gearbox_x := -0.24 * s
 	var ds_mesh := _part("wheel_driveshaft")
 	var gb_mesh := _part("wheel_gearbox")
@@ -3614,8 +3620,22 @@ static func build_wheel_mount(parent_node: Node3D, base_color: Color,
 		# has to meet the hub, and the free end is the one that should be
 		# allowed to run as deep into the hull as the angle takes it.
 		var shaft := _mesh_inst(ds_mesh, base_color.darkened(0.25).lightened(0.35))
-		var shaft_len := 1.0 * s
+		# Default depth keeps the original 55 degrees and length verbatim - the
+		# wheels' look is settled and must not drift.
+		#
+		# A DEEP hub is a different structural problem: holding 55 degrees just
+		# makes the strut longer, and at a full drum-diameter drop the two
+		# struts ran so far inboard they crossed past each other under the hull
+		# centreline. A deep leg should get STEEPER, not longer. So the angle is
+		# solved from the drop instead: rise is whatever it takes to clear the
+		# hull's underside, run is a bounded step inboard.
 		var shaft_angle := deg_to_rad(55.0)
+		var shaft_len: float = 1.0 * s
+		if hub_drop >= 0.0:
+			var rise: float = absf(hub_y) + 0.25 * s
+			var run: float = 0.55 * s
+			shaft_angle = atan2(run, rise)
+			shaft_len = sqrt(run * run + rise * rise)
 		var bottom_target := Vector3(gearbox_x + 0.05 * s, hub_y, z)
 		var drop := Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
 		shaft.scale = Vector3(0.32 * s, shaft_len, span)
@@ -4823,12 +4843,7 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	var diameter = tweaks.get("drum_diameter", tweaks.get("drum_width", tweaks.get("size", 1.0)))
 	var depth = tweaks.get("helix_depth", 1.0)
 	var span = tweaks.get("drum_length", base_size.z) # corner-to-corner distance
-	# span / 1.3 puts the drum's authored tapered tip (at 0.65x the fitted
-	# length) exactly on +-span/2, i.e. exactly on each gearbox's centre. The
-	# extra 6% drives the tip THROUGH the housing face instead of kissing it -
-	# a tangent contact left the drum reading as a separate object from the
-	# bearings holding it (3 islands in probe_loco_structure.gd).
-	var fit_length = (span / 1.3) * 1.06
+	var fit_length = span
 
 	var drum_variant = "screw_drum"
 	if depth < 0.85:
@@ -4855,7 +4870,21 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	var drum: MeshInstance3D
 	if drum_mesh:
 		drum = _mesh_inst(drum_mesh, base_color)
-		drum.scale = _fit_scale(Vector3(actual_size.y * 0.85, actual_size.y * 0.85, actual_size.z), Vector3(0.29, 0.29, 1.6))
+		# Scale solved against the mesh's OWN measured AABB, not against
+		# hardcoded authored constants. Those constants said 0.29 across by
+		# 1.6 long; the re-authored drum is 0.66 by 1.895, and the three
+		# helix-depth variants differ in diameter from each other. So the
+		# drum came out ~2x too fat and ~10% short of the gearboxes, and no
+		# amount of adjusting the length target fixed it because the divisor
+		# was wrong. A measured fit cannot go stale the next time the mesh is
+		# re-authored, which is the actual lesson.
+		var da: AABB = drum_mesh.get_aabb()
+		drum.scale = Vector3(
+			actual_size.y / maxf(da.size.x, 0.001),
+			actual_size.y / maxf(da.size.y, 0.001),
+			# 1.04: the drum runs THROUGH each bearing housing rather than
+			# stopping on its centre, so the two read as assembled.
+			(span * 1.04) / maxf(da.size.z, 0.001))
 	else:
 		drum = MeshInstance3D.new()
 		var cyl = CylinderMesh.new()
@@ -4873,10 +4902,17 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	# (0.46 * mount_s across) comes out visibly LARGER than the drum it
 	# carries (0.85 * actual_size.y across) - a bearing block smaller than
 	# its own shaft reads as a part that could not possibly hold it.
-	var mount_s: float = actual_size.y * 2.2
+	# 1.5, not 2.2: at 2.2 the housing came out as wide as the drum itself and
+	# the strut as thick as a leg, so the mounting read as the main object and
+	# the auger as an accessory hung off it.
+	var mount_s: float = actual_size.y * 1.5
+	# Hung a full drum-diameter below the hull rather than at the mount's own
+	# default depth: Chris wants the drums "spread out and low to hold the hull
+	# up above terrain", which is a longer strut, not a bigger gearbox.
 	var hub_y := 0.0
 	for z_end in [span * 0.5, -span * 0.5]:
-		var hub := build_wheel_mount(parent_node, base_color, mount_s, z_end, actual_size.y * 0.7)
+		var hub := build_wheel_mount(parent_node, base_color, mount_s, z_end,
+			actual_size.y * 0.7, actual_size.y * 1.0)
 		hub_y = hub.y
 
 	# The drum hangs at the mounts' own hub line, not at the module origin,

@@ -854,15 +854,28 @@ func update_locomotion(type_id: String, settings: Dictionary):
 		# attempt took ornithopter_wing from 4.25x to 4.14x. It also has to read
 		# the CURRENT scale, since ornithopter_wing already carries a deliberate
 		# 2x and legs a hull-height factor.
+		# OUTBOARD extent, not |x|. absf() counted a part reaching INBOARD -
+		# toward the vehicle's centreline - as if it stuck out sideways, and
+		# build_wheel_mount()'s whole job is to reach inboard into the hull. On
+		# screw_drive that inboard driveshaft measured further from the module
+		# origin than the drum did, so the clamp fired on it and shrank the
+		# entire assembly UNIFORMLY - which is why the drum kept coming out
+		# short of the hull's ends and tucked up high (Chris, three times)
+		# despite the layout handing the builder the hull's full length. The
+		# side sign comes from which side of the hull the station sits on.
 		var mount_reach := 0.0
 		var local_extent := 0.0
 		for w in spawned_wheels:
 			var wb := _visual_bounds(w)
 			if wb.size.length_squared() <= 0.0:
 				continue
+			var out_sign: float = signf(w.position.x)
+			if out_sign == 0.0:
+				out_sign = 1.0
 			mount_reach = maxf(mount_reach, absf(w.position.x))
-			local_extent = maxf(local_extent, absf(wb.position.x) * w.scale.x)
-			local_extent = maxf(local_extent, absf(wb.position.x + wb.size.x) * w.scale.x)
+			local_extent = maxf(local_extent, out_sign * wb.position.x * w.scale.x)
+			local_extent = maxf(local_extent, out_sign * (wb.position.x + wb.size.x) * w.scale.x)
+		local_extent = maxf(local_extent, 0.0)
 		var allowed: float = hull_size.x * 0.5 * width_limit
 		if mount_reach + local_extent > allowed and local_extent > 0.001:
 			# Never invert or vanish the part, even if the mount alone already
