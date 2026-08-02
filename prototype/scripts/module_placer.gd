@@ -743,7 +743,19 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	if ModuleCatalog.needs_running_gear(type_id):
 		running_gear_size = ModuleCatalog.get_running_gear_size(hull_size)
 		var VisualBuilder = load("res://scripts/visual_builder.gd")
-		var gear_body: StaticBody3D = VisualBuilder.build_running_gear(hull, running_gear_size, catalog_data.color, 1, type_id)
+		# The frame is generated around the hardpoints this fitment actually
+		# needs, so a four-wheeled chassis gets four bays and a five-road-wheel
+		# track gets five. The layout has to be asked BEFORE the instances are
+		# placed, which is why the context is assembled here rather than reusing
+		# layout_ctx below.
+		var gear_ctx := {
+			"hull_size": hull_size,
+			"running_gear_size": running_gear_size,
+			"catalog_size": catalog_data.get("size", Vector3.ONE),
+		}
+		var hardpoints: Array = LocomotionLayoutScript.subframe_hardpoints(
+			type_id, settings, gear_ctx, running_gear_size)
+		var gear_body: StaticBody3D = VisualBuilder.build_running_gear(hull, running_gear_size, catalog_data.color, 1, type_id, hardpoints)
 		# Flush the chassis's top against the hull's underside: hull's origin
 		# is at its center, so chassis center sits at -hull_size.y/2 - gear_y/2.
 		gear_body.position = Vector3(0, -hull_size.y / 2.0 - running_gear_size.y / 2.0, 0)

@@ -70,7 +70,7 @@ static func _part(part_name: String) -> Mesh:
 # CollisionShape3D already provides the real physics collider in that case;
 # this body's collider is purely for the designer-raycast/dimension-lookup
 # use, so it can safely be collision-free there.
-static func build_running_gear(parent_node: Node3D, dimensions: Vector3, base_color: Color, collision_layer: int = 1, type_id: String = "") -> StaticBody3D:
+static func build_running_gear(parent_node: Node3D, dimensions: Vector3, base_color: Color, collision_layer: int = 1, type_id: String = "", hardpoints: Array = []) -> StaticBody3D:
 	var body = StaticBody3D.new()
 	body.name = "RunningGear"
 	body.collision_layer = collision_layer
@@ -84,6 +84,12 @@ static func build_running_gear(parent_node: Node3D, dimensions: Vector3, base_co
 	body.add_child(col)
 
 	parent_node.add_child(body)
+	# Ground and hover types ride a real subframe; naval and airborne ones do
+	# not (see build_subframe). An empty hardpoint list still yields a frame -
+	# just a plain two-bay one - so a type that has not published its stations
+	# yet degrades to something sensible rather than to nothing.
+	if LocomotionLayoutScript.uses_subframe(type_id):
+		build_subframe(body, dimensions, base_color, hardpoints)
 	return body
 
 static func _mesh_inst(mesh: Mesh, color: Color, emission: Color = Color(0, 0, 0, 0), emission_energy: float = 0.0, role_override: String = "") -> MeshInstance3D:
@@ -6346,3 +6352,139 @@ static func _kit_part(root: Node3D, part_name: String, colour: Color,
 			inst.material_override = flipped
 	root.add_child(inst)
 	return inst
+
+
+# ===========================================================================
+# SUBFRAME - the chassis every ground and hover locomotor bolts to.
+#
+# Chris's design, and the answer the per-type improvising kept failing to be:
+# a space-frame of tubes and beams that DYNAMICALLY grows attachment points
+# wherever the fitted locomotor needs them, with the locomotors lining up on
+# those points, and the whole thing slung under the hull as the running gear.
+#
+# This is how a real modular chassis works, and it is why it fixes the class of
+# bug rather than an instance of it. Previously each type invented its own way
+# of reaching the hull, so a hardpoint was wherever that type's author put it,
+# and nothing could line up with anything. Now the frame publishes the
+# hardpoints and the locomotor consumes them - one contract, ten types.
+#
+# Naval and airborne types deliberately do NOT use this: a propeller on a stern
+# pylon and a rotor on a mast are not carried by a chassis under the hull, and
+# forcing them onto one is what made the first generic frame collide with
+# everything. They keep their own structure until they get a system of their own.
+# ===========================================================================
+
+## Builds the subframe into `body`, with a mounting pad at each hardpoint.
+##
+## `hardpoints` are in the running gear's own local space (X outboard, Y up,
+## Z fore/aft). The frame is generated around them, so a four-wheeled chassis
+## gets four bays and a five-road-wheel track gets five - the geometry follows
+## the fitment rather than being a fixed prop the parts sit near.
+static func build_subframe(body: StaticBody3D, dimensions: Vector3,
+		base_color: Color, hardpoints: Array) -> void:
+	var half := dimensions * 0.5
+	var beam_col := base_color.darkened(0.34)
+	var tube_col := base_color.darkened(0.20)
+	var pad_col := base_color.darkened(0.06)
+	# Section scales with the chassis so a big hull gets a frame that looks like
+	# it could hold one, without a per-hull constant.
+	var tube_r: float = clampf(dimensions.y * 0.16, 0.035, 0.085)
+	var rail_x: float = half.x - tube_r * 1.6
+
+	var tube := func(a: Vector3, b: Vector3, r: float, colour: Color, nm: String) -> void:
+		var d := b - a
+		if d.length() < 0.02:
+			return
+		var mesh := CylinderMesh.new()
+		mesh.top_radius = r
+		mesh.bottom_radius = r
+		mesh.height = d.length()
+		mesh.radial_segments = 10
+		var inst := _mesh_inst(mesh, colour, Color(0, 0, 0, 0), 0.0, "steel")
+		inst.name = nm
+		inst.position = (a + b) * 0.5
+		# CylinderMesh runs along local Y; aim that at the span.
+		var up := Vector3.UP
+		if absf(d.normalized().dot(up)) > 0.99:
+			up = Vector3.FORWARD
+		inst.basis = Basis.looking_at(d.normalized(), up) * Basis(Vector3.RIGHT, PI / 2.0)
+		body.add_child(inst)
+
+	var beam := func(centre: Vector3, size: Vector3, colour: Color, nm: String) -> void:
+		var mesh := BoxMesh.new()
+		mesh.size = size
+		var inst := _mesh_inst(mesh, colour, Color(0, 0, 0, 0), 0.0, "steel")
+		inst.name = nm
+		inst.position = centre
+		body.add_child(inst)
+
+	# Longitudinal main rails - the frame's backbone, one per side.
+	for side in [-1.0, 1.0]:
+		beam.call(Vector3(side * rail_x, 0.0, 0.0),
+			Vector3(tube_r * 2.2, dimensions.y * 0.62, dimensions.z * 0.98),
+			beam_col, "SubframeRail")
+		# Top and bottom chords, so the rail reads as fabricated section.
+		for sy in [-1.0, 1.0]:
+			beam.call(Vector3(side * rail_x, sy * dimensions.y * 0.30, 0.0),
+				Vector3(tube_r * 3.0, dimensions.y * 0.13, dimensions.z * 0.98),
+				tube_col, "SubframeChord")
+
+	# Sort the hardpoints fore-to-aft so cross members and bracing run between
+	# NEIGHBOURS rather than criss-crossing the frame.
+	var stations: Array = []
+	for hp in hardpoints:
+		var v: Vector3 = hp
+		if not stations.has(v.z):
+			stations.append(v.z)
+	stations.sort()
+	if stations.is_empty():
+		stations = [-half.z * 0.5, half.z * 0.5]
+
+	var y_top: float = dimensions.y * 0.26
+	var y_bot: float = -dimensions.y * 0.26
+
+	for i in range(stations.size()):
+		var z: float = stations[i]
+		# Cross member at every station - this is what makes it a frame.
+		tube.call(Vector3(-rail_x, y_bot, z), Vector3(rail_x, y_bot, z),
+			tube_r, tube_col, "SubframeCross")
+		tube.call(Vector3(-rail_x * 0.72, y_top, z), Vector3(rail_x * 0.72, y_top, z),
+			tube_r * 0.82, tube_col, "SubframeCrossUpper")
+		# Vertical posts tying the two chords together at the rail.
+		for side in [-1.0, 1.0]:
+			tube.call(Vector3(side * rail_x, y_bot, z), Vector3(side * rail_x, y_top, z),
+				tube_r * 0.8, tube_col, "SubframePost")
+		# Diagonal bracing into the next bay - a ladder without diagonals is a
+		# ladder, not a frame, and reads as flimsy from every angle.
+		if i + 1 < stations.size():
+			var z2: float = stations[i + 1]
+			for side in [-1.0, 1.0]:
+				tube.call(Vector3(side * rail_x, y_bot, z), Vector3(side * rail_x * 0.55, y_top, z2),
+					tube_r * 0.62, tube_col, "SubframeBrace")
+
+	# Belly skids rather than one full tray. A solid plate closed the frame off
+	# completely and hid the tubes and bracing behind it, which defeats the point
+	# of building a space-frame - two narrow skid rails give it a floor to read
+	# against while leaving the structure visible from below.
+	for side in [-0.55, 0.55]:
+		beam.call(Vector3(rail_x * side, -dimensions.y * 0.40, 0.0),
+			Vector3(tube_r * 3.2, dimensions.y * 0.12, dimensions.z * 0.86),
+			beam_col, "SubframeSkid")
+
+	# HARDPOINTS. A machined pad and a boss at every attachment the fitted
+	# locomotor asked for - this is the contract the locomotors line up on.
+	for hp in hardpoints:
+		var p: Vector3 = hp
+		var pad_x: float = signf(p.x) * rail_x if not is_zero_approx(p.x) else 0.0
+		beam.call(Vector3(pad_x, p.y, p.z),
+			Vector3(tube_r * 3.4, tube_r * 2.6, tube_r * 4.2), pad_col, "SubframeHardpoint")
+		var boss := CylinderMesh.new()
+		boss.top_radius = tube_r * 1.15
+		boss.bottom_radius = tube_r * 1.15
+		boss.height = tube_r * 3.2
+		boss.radial_segments = 10
+		var boss_inst := _mesh_inst(boss, pad_col, Color(0, 0, 0, 0), 0.0, "steel")
+		boss_inst.name = "SubframeBoss"
+		boss_inst.rotation = Vector3(0, 0, PI / 2.0)
+		boss_inst.position = Vector3(pad_x + signf(pad_x) * tube_r * 1.4, p.y, p.z)
+		body.add_child(boss_inst)

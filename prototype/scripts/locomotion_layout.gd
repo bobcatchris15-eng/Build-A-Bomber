@@ -304,6 +304,41 @@ const MOUNT_KITS := {
 	"ornithopter_wing":  {"kit": Kit.NONE, "drop": 0.0, "stations": 0},
 }
 
+## Which types ride the subframe under the hull.
+##
+## Ground contact and hover, because both are carried by a chassis. Naval and
+## airborne are deliberately excluded: a stern propeller on a pylon and a rotor
+## on a mast are not carried by a chassis, and forcing them onto one is exactly
+## what made the first generic frame collide with everything it was added to.
+## They keep their own structure until they get a system of their own.
+const SUBFRAME_TYPES := [
+	"wheels", "tracked_treads", "legs", "half_track", "rocker_bogie",
+	"pontoon_wheels", "screw_drive",
+	"hover_engine", "air_cushion_skirt", "anti_grav_plate",
+]
+
+static func uses_subframe(type_id: String) -> bool:
+	return type_id in SUBFRAME_TYPES
+
+
+## Where the fitted locomotor wants to attach, in the running gear's own local
+## space. Derived from the type's OWN stations, so the frame grows a bay per
+## wheel, per bogie, per pad - the geometry follows the fitment instead of being
+## a fixed prop the parts happen to sit near.
+static func subframe_hardpoints(type_id: String, settings: Dictionary,
+		ctx: Dictionary, gear_size: Vector3) -> Array:
+	if not uses_subframe(type_id):
+		return []
+	var out: Array = []
+	for st in stations(type_id, settings, ctx):
+		var p: Vector3 = st["position"]
+		# Pulled onto the frame's own rail line and mid-height: the hardpoint is
+		# where the FRAME offers a mount, not where the part's mesh happens to
+		# sit, which is the whole point of publishing it.
+		out.append(Vector3(signf(p.x) * gear_size.x * 0.5, 0.0, p.z))
+	return out
+
+
 static func mount_kit(type_id: String) -> Dictionary:
 	return MOUNT_KITS.get(type_id, {"kit": Kit.NONE, "drop": 0.0, "stations": 0})
 
