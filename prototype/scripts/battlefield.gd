@@ -16,13 +16,57 @@ func _ready():
 	_spawn_vehicle()
 	_spawn_target_dummies()
 	
-	# Connect UI buttons
-	var return_btn = get_node_or_null("UI/ReturnButton")
+	# Connect & Style UI buttons
+	var return_btn = get_node_or_null("UI/ReturnButton") as Button
 	if return_btn:
+		return_btn.text = "❮ RETURN TO KITBASH LAB"
+		var r_style = StyleBoxFlat.new()
+		r_style.bg_color = Color(0.12, 0.16, 0.22, 0.95)
+		r_style.border_width_left = 6
+		r_style.border_color = Color(0.0, 0.85, 0.45) # Plastic green sprue gate
+		r_style.border_width_top = 1
+		r_style.border_width_right = 1
+		r_style.border_width_bottom = 3
+		r_style.corner_radius_top_left = 4
+		r_style.corner_radius_top_right = 4
+		r_style.corner_radius_bottom_left = 4
+		r_style.corner_radius_bottom_right = 4
+		r_style.content_margin_left = 12
+		r_style.content_margin_right = 12
+		r_style.content_margin_top = 8
+		r_style.content_margin_bottom = 8
+		return_btn.add_theme_stylebox_override("normal", r_style)
+		var r_hover = r_style.duplicate()
+		r_hover.bg_color = Color(0.18, 0.24, 0.32, 0.98)
+		r_hover.border_color = Color(0.3, 1.0, 0.6)
+		return_btn.add_theme_stylebox_override("hover", r_hover)
+		return_btn.add_theme_color_override("font_color", Color(0.2, 1.0, 0.5))
 		return_btn.pressed.connect(_on_return_pressed)
 		
-	var reset_dummies_btn = get_node_or_null("UI/ResetDummiesButton")
+	var reset_dummies_btn = get_node_or_null("UI/ResetDummiesButton") as Button
 	if reset_dummies_btn:
+		reset_dummies_btn.text = "🔄 RESET TARGET DUMMIES"
+		var d_style = StyleBoxFlat.new()
+		d_style.bg_color = Color(0.22, 0.15, 0.08, 0.95)
+		d_style.border_width_left = 6
+		d_style.border_color = Color(1.0, 0.65, 0.15) # Caution amber sprue gate
+		d_style.border_width_top = 1
+		d_style.border_width_right = 1
+		d_style.border_width_bottom = 3
+		d_style.corner_radius_top_left = 4
+		d_style.corner_radius_top_right = 4
+		d_style.corner_radius_bottom_left = 4
+		d_style.corner_radius_bottom_right = 4
+		d_style.content_margin_left = 12
+		d_style.content_margin_right = 12
+		d_style.content_margin_top = 8
+		d_style.content_margin_bottom = 8
+		reset_dummies_btn.add_theme_stylebox_override("normal", d_style)
+		var d_hover = d_style.duplicate()
+		d_hover.bg_color = Color(0.30, 0.20, 0.10, 0.98)
+		d_hover.border_color = Color(1.0, 0.8, 0.3)
+		reset_dummies_btn.add_theme_stylebox_override("hover", d_hover)
+		reset_dummies_btn.add_theme_color_override("font_color", Color(1.0, 0.75, 0.3))
 		reset_dummies_btn.pressed.connect(_on_reset_dummies_pressed)
 
 	# Instantiate live tuning overlay

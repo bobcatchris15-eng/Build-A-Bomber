@@ -319,21 +319,13 @@ const MOUNT_KITS := {
 ## on a mast are not carried by a chassis, and forcing them onto one is exactly
 ## what made the first generic frame collide with everything it was added to.
 ## They keep their own structure until they get a system of their own.
-const SUBFRAME_TYPES := [
-	# wheels, tracked_treads and pontoon_wheels are DELIBERATELY ABSENT. They
-	# carry their own mounting - an inboard gearbox and an angled driveshaft,
-	# sized off the part itself - and that pattern already worked before any of
-	# this. Putting them on the subframe as well gave them two structures, which
-	# is what the earlier generic chassis did wrong. pontoon_wheels copies the
-	# wheel mounting wholesale, so it belongs with them.
-	# legs and screw_drive left too: they now carry build_wheel_mount(), the
-	# same gearbox-and-driveshaft assembly the wheels and pontoons use
-	# (Chris's ask, 2026-08-02). Giving them the subframe AS WELL would stack
-	# two structures under one module, which is the mistake the first generic
-	# chassis made.
-	"half_track", "rocker_bogie",
-	"hover_engine", "air_cushion_skirt", "anti_grav_plate",
-]
+# Empty: Chris asked for the subframe dropped from everything (2026-08-02),
+# along with the running-gear slab in module_placer.gd. Both were extra
+# structure bolted under the hull to give locomotion something to mount to,
+# and both fought the per-type mounting instead of supporting it. Every type
+# now hangs off the hull directly - build_wheel_mount() for the ground types,
+# a pylon for the ones that project away from it.
+const SUBFRAME_TYPES := []
 
 static func uses_subframe(type_id: String) -> bool:
 	return type_id in SUBFRAME_TYPES
@@ -521,8 +513,12 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				per_side = int(_resolve_count(spec, settings) / 2)
 			var x_offset := 0.0
 			if geom.get("x_from", "") == "running_gear":
-				x_offset = gear.x / 2.0
-			else:
+				# The running-gear slab is gone (Chris, 2026-08-02), so `gear`
+				# is a zero vector and this used to collapse the whole row onto
+				# the centreline. These types now mount at the HULL'S OWN EDGE,
+				# which is where Chris asked for them: "these ones I think can
+				# go directly under the hull edges."
+				x_offset = hull_size.x / 2.0
 				var pad := float(geom.get("x_pad", 0.0))
 				if geom.has("x_pad_scales_with"):
 					pad *= float(geo_base.get(geom["x_pad_scales_with"], 1.0))
@@ -530,7 +526,9 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 			var y := 0.0
 			match geom.get("y", ""):
 				"underside": y = -hull_size.y / 2.0 + bias
-				"below_gear": y = -hull_size.y / 2.0 - gear.y / 2.0
+				# Same: with no slab beneath it, "below the gear" is the hull's
+				# own underside.
+				"below_gear": y = -hull_size.y / 2.0 + bias
 				"topside": y = hull_size.y / 2.0 + float(geom.get("y_pad", 0.0))
 				_: y = hull_size.y * float(geom.get("y_frac", 0.0))
 			var z_base := hull_size.z * float(geom.get("z_frac", 0.0))

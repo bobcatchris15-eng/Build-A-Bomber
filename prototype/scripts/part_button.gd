@@ -15,20 +15,20 @@ var module_type_id: String = ""
 func _make_custom_tooltip(for_text: String) -> Control:
 	var panel = PanelContainer.new()
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.08, 0.09, 0.11, 0.95)
-	style.border_color = Color(0.85, 0.75, 0.4, 1.0)
-	style.border_width_top = 3
-	style.border_width_left = 1
-	style.border_width_right = 1
-	style.border_width_bottom = 1
+	style.bg_color = Color(0.08, 0.11, 0.15, 0.96)
+	style.border_color = Color(1.0, 0.78, 0.25, 1.0) # Yellow Model Kit Instruction Decal Border
+	style.border_width_top = 5
+	style.border_width_left = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 2
 	style.corner_radius_top_left = 4
 	style.corner_radius_top_right = 4
 	style.corner_radius_bottom_left = 4
 	style.corner_radius_bottom_right = 4
-	style.content_margin_left = 10
-	style.content_margin_right = 10
-	style.content_margin_top = 8
-	style.content_margin_bottom = 8
+	style.content_margin_left = 12
+	style.content_margin_right = 12
+	style.content_margin_top = 10
+	style.content_margin_bottom = 10
 	panel.add_theme_stylebox_override("panel", style)
 
 	var vbox = VBoxContainer.new()
@@ -41,13 +41,13 @@ func _make_custom_tooltip(for_text: String) -> Control:
 	var title = Label.new()
 	title.text = lines[0]
 	title.add_theme_font_size_override("font_size", 16)
-	title.add_theme_color_override("font_color", Color(0.9, 0.85, 0.6, 1.0))
+	title.add_theme_color_override("font_color", Color(1.0, 0.92, 0.6))
 	vbox.add_child(title)
 	for i in range(1, lines.size()):
 		var row = Label.new()
 		row.text = lines[i]
-		row.add_theme_font_size_override("font_size", 13)
-		row.add_theme_color_override("font_color", Color(0.8, 0.82, 0.85, 1.0))
+		row.add_theme_font_size_override("font_size", 12)
+		row.add_theme_color_override("font_color", Color(0.8, 0.88, 0.85))
 		vbox.add_child(row)
 
 	# Flavor row (VISUAL_ART_DIRECTION.md 1.2 - the tone target's cheapest

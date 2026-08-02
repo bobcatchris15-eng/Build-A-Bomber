@@ -138,12 +138,20 @@ func _drop_data(at_position: Vector2, data: Variant):
 				if result:
 					root._place_weapon_from_ui(type_id, result.position, result.normal)
 
+func _collapse_parts_menu():
+	var root = get_node_or_null("/root/MainLab")
+	if root:
+		var parts_menu = root.get_node_or_null("UI_PartsMenu")
+		if parts_menu and parts_menu.has_method("collapse_all_drawers"):
+			parts_menu.collapse_all_drawers()
+
 func _update_ghost_mesh_hull(type_id: String):
 	var root = get_node_or_null("/root/MainLab")
 	if not root: return
 	
 	if current_ghost_type != type_id or ghost_mesh == null:
 		_destroy_ghost_mesh()
+		_collapse_parts_menu()
 		ghost_mesh = _build_hull_ghost_node(type_id)
 		root.add_child(ghost_mesh)
 		current_ghost_type = type_id
@@ -169,6 +177,7 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 	
 	if current_ghost_type != type_id or ghost_mesh == null:
 		_destroy_ghost_mesh()
+		_collapse_parts_menu()
 		ghost_mesh = _build_module_ghost_node(type_id)
 		root.add_child(ghost_mesh)
 		current_ghost_type = type_id

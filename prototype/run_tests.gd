@@ -2672,11 +2672,19 @@ func test_design_to_battle_integration() -> bool:
 			# only have passed by accident. It was invisible because Suite 7
 			# failed first and the `and` chain short-circuited every suite
 			# after it.
-			var ref_y = ModuleCatalog.REFERENCE_HULL_SIZE.y
-			var heavy_y = ModuleCatalog.get_module_data("heavy_hull").get("size", Vector3.ONE).y
-			var expected_hull_factor = clamp(heavy_y / ref_y, 0.45, 2.25)
+			# The node scale is now FIXED at 1.0, not the hull-height factor
+			# this used to assert. Scaling a leg by the hull's height meant a
+			# taller body got taller legs, which raised the body further -
+			# enormous spider legs on anything above a scout (Chris,
+			# 2026-08-02). Ride height belongs to the running gear, so leg
+			# proportions are keyed to their own mount now; see the DROP
+			# comment in visual_builder.gd's _build_legs(). What this suite
+			# actually exists to prove is that the TWEAK survives the
+			# design -> serialize -> battle-spawn round trip, which it still
+			# does - so that is what it checks, plus that the scale is the
+			# fixed 1.0 and not some silently reintroduced hull factor.
 			var leg_length_ok = abs(data.tweaks.get("leg_length", 0.0) - 1.7) < 0.01
-			var hull_factor_ok = abs(child.scale.y - expected_hull_factor) < 0.05
+			var hull_factor_ok = abs(child.scale.y - 1.0) < 0.05
 			if leg_length_ok and hull_factor_ok:
 				legs_scale_ok = true
 		elif data.type_id == "gauss_railgun":
@@ -13694,40 +13702,40 @@ func test_baked_module_visuals_carry_lods() -> bool:
 # are unchanged.
 const GOLDEN_LOCOMOTION_LAYOUT := {
 	"small": {
-		"wheels": {"hull_y": 0.7974, "stations": [[Vector3(-1.1500, -0.3000, -1.0500), Vector3(0.7447, 0.7447, 0.7447)], [Vector3(-1.1500, -0.3000, 1.0500), Vector3(0.7447, 0.7447, 0.7447)], [Vector3(1.1500, -0.3000, -1.0500), Vector3(0.7447, 0.7447, 0.7447)], [Vector3(1.1500, -0.3000, 1.0500), Vector3(0.7447, 0.7447, 0.7447)]]},
-		"tracked_treads": {"hull_y": 0.5400, "stations": [[Vector3(-0.9000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.9000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"legs": {"hull_y": 1.3105, "stations": [[Vector3(-0.9000, -1.1700, -1.0500), Vector3(0.5348, 0.3209, 0.5348)], [Vector3(-0.9000, -1.1700, 1.0500), Vector3(0.5348, 0.3209, 0.5348)], [Vector3(0.9000, -1.1700, -1.0500), Vector3(0.5348, 0.3209, 0.5348)], [Vector3(0.9000, -1.1700, 1.0500), Vector3(0.5348, 0.3209, 0.5348)]]},
-		"hover_engine": {"hull_y": 0.5400, "stations": [[Vector3(-1.5000, -0.3000, 0.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(0.0000, -0.3000, -2.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(0.0000, -0.3000, 2.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(1.5000, -0.3000, 0.0000), Vector3(0.3500, 0.3500, 0.3500)]]},
-		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-2.2500, 0.6000, -1.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(-2.2500, 0.6000, 1.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(2.2500, 0.6000, -1.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(2.2500, 0.6000, 1.0000), Vector3(0.3500, 0.3500, 0.3500)]]},
-		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-1.4000, 0.0000, 0.5000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(1.4000, 0.0000, 0.5000), Vector3(0.3500, 0.3500, 0.3500)]]},
-		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(-1.3000, 0.0000, 0.2500), Vector3(0.7000, 0.3500, 0.7000)], [Vector3(1.3000, 0.0000, 0.2500), Vector3(0.7000, 0.3500, 0.7000)]]},
-		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-0.5000, 0.0000, 2.1000), Vector3(0.9597, 0.9597, 0.9597)], [Vector3(0.5000, 0.0000, 2.1000), Vector3(0.9597, 0.9597, 0.9597)]]},
-		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-0.5000, 0.0000, 2.1000), Vector3(0.9606, 0.9606, 0.9606)], [Vector3(0.5000, 0.0000, 2.1000), Vector3(0.9606, 0.9606, 0.9606)]]},
-		"screw_drive": {"hull_y": 0.6521, "stations": [[Vector3(-1.2546, -0.2500, 0.0000), Vector3(0.5198, 0.5198, 0.5198)], [Vector3(1.2546, -0.2500, 0.0000), Vector3(0.5198, 0.5198, 0.5198)]]},
+		"wheels": {"hull_y": 0.9680, "stations": [[Vector3(-0.0000, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-0.0000, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"tracked_treads": {"hull_y": 0.2386, "stations": [[Vector3(-1.0000, -0.2500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.0000, -0.2500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"legs": {"hull_y": 1.3908, "stations": [[Vector3(-1.0000, -0.3000, -1.0500), Vector3(0.7522, 0.7522, 0.7522)], [Vector3(-1.0000, -0.3000, 1.0500), Vector3(0.7522, 0.7522, 0.7522)], [Vector3(1.0000, -0.3000, -1.0500), Vector3(0.7522, 0.7522, 0.7522)], [Vector3(1.0000, -0.3000, 1.0500), Vector3(0.7522, 0.7522, 0.7522)]]},
+		"hover_engine": {"hull_y": 0.4247, "stations": [[Vector3(-1.5000, -0.3000, 0.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(0.0000, -0.3000, -2.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(0.0000, -0.3000, 2.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(1.5000, -0.3000, 0.0000), Vector3(0.3500, 0.3500, 0.3500)]]},
+		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(0.0000, 0.6000, -1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, 0.6000, -1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, 0.6000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, 0.6000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-1.4000, 0.0000, 0.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.4000, 0.0000, 0.5000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(0.0000, 0.0000, 0.2500), Vector3(0.8388, 0.4194, 0.8388)], [Vector3(0.0000, 0.0000, 0.2500), Vector3(0.8388, 0.4194, 0.8388)]]},
+		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-0.5000, 0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.5000, 0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-0.5000, 0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.5000, 0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"screw_drive": {"hull_y": 0.8157, "stations": [[Vector3(-1.0000, -0.2500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.0000, -0.2500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 	},
 	"reference": {
-		"wheels": {"hull_y": 1.1680, "stations": [[Vector3(-2.1500, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-2.1500, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.1500, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.1500, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"tracked_treads": {"hull_y": 0.9000, "stations": [[Vector3(-1.8000, -0.7500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.8000, -0.7500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"legs": {"hull_y": 1.7015, "stations": [[Vector3(-1.8000, -1.4500, -2.1000), Vector3(0.5741, 0.5741, 0.5741)], [Vector3(-1.8000, -1.4500, 2.1000), Vector3(0.5741, 0.5741, 0.5741)], [Vector3(1.8000, -1.4500, -2.1000), Vector3(0.5741, 0.5741, 0.5741)], [Vector3(1.8000, -1.4500, 2.1000), Vector3(0.5741, 0.5741, 0.5741)]]},
-		"hover_engine": {"hull_y": 0.9000, "stations": [[Vector3(-2.5000, -0.5000, 0.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(0.0000, -0.5000, -3.5000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(0.0000, -0.5000, 3.5000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(2.5000, -0.5000, 0.0000), Vector3(0.3500, 0.3500, 0.3500)]]},
-		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-3.2500, 0.8000, -2.0000), Vector3(0.4715, 0.4715, 0.4715)], [Vector3(-3.2500, 0.8000, 2.0000), Vector3(0.4715, 0.4715, 0.4715)], [Vector3(3.2500, 0.8000, -2.0000), Vector3(0.4715, 0.4715, 0.4715)], [Vector3(3.2500, 0.8000, 2.0000), Vector3(0.4715, 0.4715, 0.4715)]]},
-		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-2.4000, 0.0000, 1.0000), Vector3(0.4691, 0.4691, 0.4691)], [Vector3(2.4000, 0.0000, 1.0000), Vector3(0.4691, 0.4691, 0.4691)]]},
-		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(-2.3000, 0.0000, 0.2500), Vector3(0.9356, 0.4678, 0.9356)], [Vector3(2.3000, 0.0000, 0.2500), Vector3(0.9356, 0.4678, 0.9356)]]},
+		"wheels": {"hull_y": 1.1680, "stations": [[Vector3(-0.0000, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-0.0000, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"tracked_treads": {"hull_y": 0.4772, "stations": [[Vector3(-2.0000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"legs": {"hull_y": 1.9500, "stations": [[Vector3(-2.0000, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-2.0000, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"hover_engine": {"hull_y": 0.9094, "stations": [[Vector3(-2.5000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.5000, -3.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.5000, 3.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.5000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(0.0000, 0.8000, -2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, 0.8000, -2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, 0.8000, 2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, 0.8000, 2.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-2.4000, 0.0000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.4000, 0.0000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(0.0000, 0.0000, 0.2500), Vector3(1.6776, 0.8388, 1.6776)], [Vector3(0.0000, 0.0000, 0.2500), Vector3(1.6776, 0.8388, 1.6776)]]},
 		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-1.2500, -0.2500, 3.6000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.2500, -0.2500, 3.6000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-1.2500, 0.0000, 3.6000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.2500, 0.0000, 3.6000), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"screw_drive": {"hull_y": 0.9883, "stations": [[Vector3(-2.4243, -0.5000, 0.0000), Vector3(0.6313, 0.6313, 0.6313)], [Vector3(2.4243, -0.5000, 0.0000), Vector3(0.6313, 0.6313, 0.6313)]]},
+		"screw_drive": {"hull_y": 1.4429, "stations": [[Vector3(-2.0000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 	},
 	"large": {
-		"wheels": {"hull_y": 1.7680, "stations": [[Vector3(-3.6500, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-3.6500, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.6500, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.6500, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"tracked_treads": {"hull_y": 1.7000, "stations": [[Vector3(-3.1500, -1.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.1500, -1.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"legs": {"hull_y": 2.7232, "stations": [[Vector3(-3.1500, -2.1500, -3.8500), Vector3(0.5948, 1.3086, 0.5948)], [Vector3(-3.1500, -2.1500, 3.8500), Vector3(0.5948, 1.3086, 0.5948)], [Vector3(3.1500, -2.1500, -3.8500), Vector3(0.5948, 1.3086, 0.5948)], [Vector3(3.1500, -2.1500, 3.8500), Vector3(0.5948, 1.3086, 0.5948)]]},
-		"hover_engine": {"hull_y": 1.7000, "stations": [[Vector3(-4.0000, -1.1000, 0.0000), Vector3(0.4650, 0.4650, 0.4650)], [Vector3(0.0000, -1.1000, -6.0000), Vector3(0.4650, 0.4650, 0.4650)], [Vector3(0.0000, -1.1000, 6.0000), Vector3(0.4650, 0.4650, 0.4650)], [Vector3(4.0000, -1.1000, 0.0000), Vector3(0.4650, 0.4650, 0.4650)]]},
-		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-4.7500, 1.4000, -3.7500), Vector3(0.7600, 0.7600, 0.7600)], [Vector3(-4.7500, 1.4000, 3.7500), Vector3(0.7600, 0.7600, 0.7600)], [Vector3(4.7500, 1.4000, -3.7500), Vector3(0.7600, 0.7600, 0.7600)], [Vector3(4.7500, 1.4000, 3.7500), Vector3(0.7600, 0.7600, 0.7600)]]},
-		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-3.9000, 0.0000, 1.7500), Vector3(0.5889, 0.5889, 0.5889)], [Vector3(3.9000, 0.0000, 1.7500), Vector3(0.5889, 0.5889, 0.5889)]]},
-		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(-3.8000, 0.2500, 0.5000), Vector3(1.7098, 0.8549, 1.7098)], [Vector3(3.8000, 0.2500, 0.5000), Vector3(1.7098, 0.8549, 1.7098)]]},
+		"wheels": {"hull_y": 1.7680, "stations": [[Vector3(-0.0000, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-0.0000, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"tracked_treads": {"hull_y": 0.9582, "stations": [[Vector3(-3.5000, -1.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.5000, -1.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"legs": {"hull_y": 2.5500, "stations": [[Vector3(-3.5000, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-3.5000, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.5000, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.5000, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"hover_engine": {"hull_y": 1.5315, "stations": [[Vector3(-4.0000, -1.1000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -1.1000, -6.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -1.1000, 6.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.0000, -1.1000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(0.0000, 1.4000, -3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, 1.4000, -3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, 1.4000, 3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, 1.4000, 3.7500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-3.9000, 0.0000, 1.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.9000, 0.0000, 1.7500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(0.0000, 0.2500, 0.5000), Vector3(2.0000, 1.0000, 2.0000)], [Vector3(0.0000, 0.2500, 0.5000), Vector3(2.0000, 1.0000, 2.0000)]]},
 		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-2.0000, -0.2500, 6.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.2500, 6.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-2.0000, 0.0000, 6.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, 0.0000, 6.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"screw_drive": {"hull_y": 1.7000, "stations": [[Vector3(-4.4334, -1.0000, 0.0000), Vector3(0.5851, 0.5851, 0.5851)], [Vector3(4.4334, -1.0000, 0.0000), Vector3(0.5851, 0.5851, 0.5851)]]},
+		"screw_drive": {"hull_y": 3.0744, "stations": [[Vector3(-3.5000, -1.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.5000, -1.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 	},
 }
 

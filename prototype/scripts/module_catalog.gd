@@ -2992,8 +2992,20 @@ static func locomotion_touches_ground(locomotion_type: String) -> bool:
 	return "ground_contact" in traits or "hovering" in traits
 
 
-static func needs_running_gear(locomotion_type: String) -> bool:
-	return locomotion_type in LOCOMOTION_TYPES_USING_RUNNING_GEAR
+## Always false now. Chris asked for the running-gear slab dropped from
+## everything (2026-08-02), along with the subframe. Both existed to give
+## locomotion a structure to mount to under the hull; both ended up as a second
+## body under every vehicle that the per-type mounting had to fight. Ground
+## contact is measured from where the locomotion geometry actually ends
+## (module_placer.gd's lift block), which is what the slab was really for.
+##
+## Kept as a function rather than deleted so the three call sites - the
+## designer placer, the battle spawner and battle_unit's collider - stay
+## visibly wired to one decision instead of each growing its own copy of it.
+## LOCOMOTION_TYPES_USING_RUNNING_GEAR is left in place for the same reason:
+## it records which types ever wanted one.
+static func needs_running_gear(_locomotion_type: String) -> bool:
+	return false
 
 # Deterministic running-gear dimensions for a given (already-scaled) hull
 # size. Pure/static so battle_unit.gd can compute the chassis height for

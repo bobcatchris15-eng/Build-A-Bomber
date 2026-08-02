@@ -214,10 +214,13 @@ def build_screw_drum(name, fin_reach, turns, color=(0.35, 0.32, 0.28, 1.0)):
 	for i in range(5):
 		y = -length * 0.36 + i * (length * 0.18)
 		add_cyl_y(bm, (0, y, 0), shaft_r * 1.06, 0.030, segments=24)
-	# Conical noses: pointed at the outer ends like a real auger, widening back
-	# into the drum.
-	add_taper_y(bm, (0, -length * 0.50, 0), shaft_r, 0.028, length * 0.14, segments=24)
-	add_taper_y(bm, (0, length * 0.50, 0), 0.028, shaft_r, length * 0.14, segments=24)
+	# Conical noses. Both radii swapped from the first authoring (Chris: "flip
+	# the cones on each end of the drum around") - add_taper_y's r_back lands
+	# at +Y and r_front at -Y after its internal X-rotation, which is the
+	# opposite of what the original call assumed, so the noses flared outward
+	# into funnels instead of tapering to a point like a real auger.
+	add_taper_y(bm, (0, -length * 0.50, 0), 0.028, shaft_r, length * 0.14, segments=24)
+	add_taper_y(bm, (0, length * 0.50, 0), shaft_r, 0.028, length * 0.14, segments=24)
 	add_cyl_y(bm, (0, -length * 0.575, 0), 0.038, 0.055, segments=12)
 	add_cyl_y(bm, (0, length * 0.575, 0), 0.038, 0.055, segments=12)
 

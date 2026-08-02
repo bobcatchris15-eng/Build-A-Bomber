@@ -4865,7 +4865,9 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	# (Chris) should not also triple the housings and shove the hull into the
 	# sky. The drum thickens about a centreline that stays put.
 	var mount_ref: float = bore * 0.46 * float(diameter)
-	var drum_d: float = mount_ref * 3.0
+	# 2.1, down 30% from 3.0 (Chris) - at 3x the drums read as the vehicle and
+	# the hull as cargo.
+	var drum_d: float = mount_ref * 2.1
 	var actual_size = Vector3(drum_d, drum_d, fit_length)
 
 	var spin = Node3D.new()
@@ -5942,7 +5944,6 @@ static func _create_flat_shaded_mesh(verts: PackedVector3Array, indices: PackedI
 ## independently - the whole pitch of the type is that its two halves are
 ## different machines bolted to one frame.
 static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_OLIVE_GREEN, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "half_track", base_color, 1.0, float(tweaks.get("tread_width", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	var bogies := int(tweaks.get("bogie_count", 3.0))
 	var front_size := float(tweaks.get("front_axle_size", 1.0))
 	var width := float(tweaks.get("tread_width", 1.0))
@@ -5950,16 +5951,29 @@ static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_colo
 	var target_length := float(tweaks.get("target_length", base_size.z))
 	var half := target_length * 0.5
 
+	# VERTICAL SIZE. Both parts are authored at a fixed depth (the belt loop
+	# spans ~0.43 in Blender Z, the tyre is 0.245 in radius), which against a
+	# real hull read as a paper ribbon with bicycle wheels (Chris: "the track
+	# and the wheel are too small vertically"). Depth is now a fraction of the
+	# assembly's own length, the same way tracked_treads derives everything
+	# from its belt span, so it stays in proportion on any hull.
+	const AUTHORED_LOOP_DEPTH := 0.43
+	var depth: float = target_length * 0.22
+	var v_scale: float = depth / AUTHORED_LOOP_DEPTH
+
 	var axle_mesh := _part("ht_front_axle")
 	if axle_mesh:
 		# The steered wheel is a wheel, so it rolls - under its own named pivot
 		# like every other ground-contact drive element in the roster.
 		var axle_pivot := Node3D.new()
 		axle_pivot.name = SPIN_PIVOT_WHEEL
-		axle_pivot.position = Vector3(0, 0, -half + 0.30 * front_size)
+		axle_pivot.position = Vector3(0, 0, -half + 0.30 * front_size * v_scale)
 		parent_node.add_child(axle_pivot)
 		var axle := _mesh_inst(axle_mesh, base_color.lightened(0.05))
-		axle.scale = Vector3(width, front_size, front_size)
+		# The steered wheel grows with the track it shares an axle line with -
+		# a half-track whose front wheel is half the height of its bogie looks
+		# like two vehicles spliced together.
+		axle.scale = Vector3(width * v_scale * 0.55, front_size * v_scale, front_size * v_scale)
 		axle_pivot.add_child(axle)
 
 	var bogie_mesh := _part("ht_track_bogie")
@@ -5979,7 +5993,7 @@ static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_colo
 			# squashed each bogie flat and left the track a paper ribbon.
 			# 0.9 is the authored frame length, so this fits each bogie to the
 			# slot the run divides into.
-			bogie.scale = Vector3(width, 1.0, step / 0.9)
+			bogie.scale = Vector3(width * v_scale * 0.55, v_scale, step / 0.9)
 			bogie_pivot.add_child(bogie)
 
 
@@ -5987,7 +6001,6 @@ static func _build_half_track(parent_node: Node3D, base_size: Vector3, base_colo
 ## rocker, secondary bogie, wheels at the knuckles - because the articulation
 ## IS the silhouette, and a rigid axle would read as a normal wheeled chassis.
 static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.42, 0.38, 0.30), tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "rocker_bogie", base_color, 1.0, float(tweaks.get("wheel_size", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	var pairs := int(tweaks.get("bogie_pairs", 3.0))
 	var arm_len := float(tweaks.get("arm_length", 1.0))
 	var wheel_size := float(tweaks.get("wheel_size", 1.0))

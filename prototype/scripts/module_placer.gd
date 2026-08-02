@@ -722,43 +722,21 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	if hull_shape and hull_shape.shape is BoxShape3D:
 		hull_size = hull_shape.shape.size
 
-	# Locomotion grounding fix (test arena "vehicle slides on its belly"):
-	# every ground-contact locomotion archetype now has a procedurally-
-	# generated chassis slab (the "running gear") that sits BELOW the hull's
-	# underside, with the wheels/treads/legs/screws mounting to its sides
-	# rather than to the bare hull skin. Two real effects:
+	# NO RUNNING-GEAR SLAB, AND NO SUBFRAME. Chris, 2026-08-02: "Drop the
+	# running gear / subframe (from everything actually)."
 	#
-	# 1. The unit's CharacterBody3D collider (battle_unit.gd) extends down
-	#    to the chassis bottom, so the unit rests on the chassis (not the
-	#    hull's belly) - a real "vehicle on its running gear" pose.
-	# 2. Side-mount parts now have a real chassis surface to mount to, not
-	#    a hull-skin interface that left them floating below the authored
-	#    mesh on hulls whose underside sits above the catalog bottom
-	#    (per the underside_y_bias hack).
+	# It was introduced to solve "the vehicle slides on its belly" by putting a
+	# procedural chassis under the hull for the gear to sit on. Ground contact
+	# is now MEASURED from where the locomotion geometry actually ends (see the
+	# lift block further down), which solves that properly and for every type,
+	# so the slab was doing nothing but adding a second structure under every
+	# vehicle - the same two-structures mistake the subframe made, and the
+	# reason parts kept reading as mounted to a box rather than to the hull.
 	#
-	# Hover_engine / anti_grav / winged / naval / buoyant types don't get
-	# a chassis - they project from the underside / above / stern and a
-	# slab underneath them would be visual noise.
+	# running_gear_size stays as a zero Vector3 rather than being deleted: it is
+	# still read as a layout input by several patterns, and zeroing it is what
+	# tells them there is nothing under the hull.
 	var running_gear_size := Vector3.ZERO
-	if ModuleCatalog.needs_running_gear(type_id):
-		running_gear_size = ModuleCatalog.get_running_gear_size(hull_size)
-		var VisualBuilder = load("res://scripts/visual_builder.gd")
-		# The frame is generated around the hardpoints this fitment actually
-		# needs, so a four-wheeled chassis gets four bays and a five-road-wheel
-		# track gets five. The layout has to be asked BEFORE the instances are
-		# placed, which is why the context is assembled here rather than reusing
-		# layout_ctx below.
-		var gear_ctx := {
-			"hull_size": hull_size,
-			"running_gear_size": running_gear_size,
-			"catalog_size": catalog_data.get("size", Vector3.ONE),
-		}
-		var hardpoints: Array = LocomotionLayoutScript.subframe_hardpoints(
-			type_id, settings, gear_ctx, running_gear_size)
-		var gear_body: StaticBody3D = VisualBuilder.build_running_gear(hull, running_gear_size, catalog_data.color, 1, type_id, hardpoints)
-		# Flush the chassis's top against the hull's underside: hull's origin
-		# is at its center, so chassis center sits at -hull_size.y/2 - gear_y/2.
-		gear_body.position = Vector3(0, -hull_size.y / 2.0 - running_gear_size.y / 2.0, 0)
 
 	# Visual bug pass finding: several hulls' visual mesh doesn't fill its
 	# collision box symmetrically (ship hulls' tapered keel, airship_hull's
@@ -906,9 +884,6 @@ func update_locomotion(type_id: String, settings: Dictionary):
 			if wb.size.length_squared() <= 0.0:
 				continue
 			lowest = minf(lowest, w.position.y + wb.position.y * w.scale.y)
-		# The chassis slab is ground contact too when nothing hangs below it.
-		if running_gear_size.y > 0.0:
-			lowest = minf(lowest, -hull_size.y / 2.0 - running_gear_size.y)
 		if lowest < INF:
 			hull.position.y = -lowest
 				

@@ -157,62 +157,67 @@ func _populate_tab(host: Node, groups: Dictionary, order: Array, tab_type: Strin
 		host.add_child(drawer)
 		_all_drawers.append(drawer)
 
+var _sprue_counter: int = 0
+
 func _build_part_button(type_id: String, data: Dictionary) -> Button:
+	_sprue_counter += 1
 	var btn = Button.new()
 	btn.set_script(preload("res://scripts/part_button.gd"))
 	btn.module_type_id = type_id
 	btn.text = data["name"]
 	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	btn.clip_text = true
-	btn.custom_minimum_size = Vector2(150, 30)
+	btn.custom_minimum_size = Vector2(160, 32)
 
-	# Uniform dark background for every button regardless of module type
-	# (matches this project's locked-in "dark substrate + accent trim, never a
-	# color-fill" register - see VISUAL_IMPROVEMENT_PLAN.md's decision log).
-	# The module's own color is shown as the bottom accent stripe.
+	# Heavy Bakelite Toggle Switch styling:
+	# - Thick bottom border to simulate physical height
+	# - Dark, heavy plastic body
 	var style = StyleBoxFlat.new()
-	style.bg_color = PART_BUTTON_BG
-	style.border_width_bottom = 4
-	style.border_color = data["color"]
-	style.corner_radius_top_left = 4
-	style.corner_radius_top_right = 4
-	style.corner_radius_bottom_left = 4
-	style.corner_radius_bottom_right = 4
-	style.content_margin_left = 8
+	style.bg_color = Color(0.15, 0.16, 0.17, 1.0)
+	style.border_width_left = 2
+	style.border_width_top = 2
+	style.border_width_right = 2
+	style.border_width_bottom = 6
+	style.border_color = Color(0.05, 0.05, 0.06, 1.0)
+	style.corner_radius_top_left = 2
+	style.corner_radius_top_right = 2
+	style.corner_radius_bottom_left = 2
+	style.corner_radius_bottom_right = 2
+	style.content_margin_left = 12
 	style.content_margin_right = 8
+	
+	# Accent color indicator on the left edge (like a painted stripe on the switch)
+	style.border_width_left = 6
+	style.border_color = data["color"]
 	btn.add_theme_stylebox_override("normal", style)
 
 	var hover_style = style.duplicate()
-	hover_style.bg_color = PART_BUTTON_BG_HOVER
-	hover_style.border_color = data["color"].lightened(0.25)
+	hover_style.bg_color = Color(0.2, 0.22, 0.24, 1.0)
+	hover_style.border_color = data["color"].lightened(0.2)
 	btn.add_theme_stylebox_override("hover", hover_style)
 
-	btn.add_theme_color_override("font_color", PART_BUTTON_TEXT)
-	btn.add_theme_color_override("font_hover_color", PART_BUTTON_TEXT)
-	btn.add_theme_color_override("font_pressed_color", PART_BUTTON_TEXT)
-	btn.add_theme_color_override("font_outline_color", PART_BUTTON_TEXT_OUTLINE)
-	btn.add_theme_constant_override("outline_size", 3)
+	var pressed_style = style.duplicate()
+	pressed_style.bg_color = Color(0.1, 0.11, 0.12, 1.0)
+	pressed_style.border_width_bottom = 2
+	pressed_style.border_width_top = 6
+	btn.add_theme_stylebox_override("pressed", pressed_style)
 
-	# Inline weight readout, right-aligned inside the button. The tooltip card
-	# already carries the full stat block, but a tooltip only answers a
-	# question you already thought to ask - the whole point of sorting the
-	# list by weight is defeated if the weight itself is invisible until you
-	# hover each entry one at a time. Kept to the one sort-key stat so the row
-	# stays a row and doesn't turn into a second stat panel.
+	btn.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9, 1.0))
+	btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
+	btn.add_theme_color_override("font_pressed_color", Color(0.7, 0.7, 0.75, 1.0))
+	btn.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
+	btn.add_theme_constant_override("outline_size", 4)
+
+	# Inline weight readout, right-aligned inside the button.
 	var weight_label = Label.new()
-	weight_label.text = "%.0f" % float(data.get("weight", 0.0))
+	weight_label.text = "%.0f kg" % float(data.get("weight", 0.0))
 	weight_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	weight_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	weight_label.add_theme_font_size_override("font_size", 11)
-	weight_label.add_theme_color_override("font_color", PART_BUTTON_STAT_TEXT)
+	weight_label.add_theme_font_size_override("font_size", 10)
+	weight_label.add_theme_color_override("font_color", Color(0.65, 0.8, 0.75))
 	weight_label.set_anchors_preset(Control.PRESET_FULL_RECT)
-	weight_label.offset_right = -10
-	# The button carries a 4px accent stripe along its bottom border, which
-	# PRESET_FULL_RECT includes - without pulling the label up off it, the
-	# number sits visibly low against the stripe instead of centred on the row.
-	weight_label.offset_bottom = -4
-	# Must not eat the click, and must not eat the drag either - part_button's
-	# _get_drag_data() is what makes these draggable onto the hull.
+	weight_label.offset_right = -8
+	weight_label.offset_bottom = -2
 	weight_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(weight_label)
 
@@ -466,6 +471,14 @@ func _animate_drawer(drawer: Control, open: bool) -> void:
 	tween.tween_property(clip, "custom_minimum_size:y", target_height, 0.18)
 	drawer.set_meta("active_tween", tween)
 	drawer.set_meta("drawer_open", open)
+
+func collapse_all_drawers() -> void:
+	for drawer in _all_drawers:
+		if is_instance_valid(drawer) and drawer.has_meta("drawer_open") and drawer.get_meta("drawer_open"):
+			_animate_drawer(drawer, false)
+	open_drawer_hulls = ""
+	open_drawer_modules = ""
+	open_drawer_locomotion = ""
 
 # NOTE: line 0 is the part NAME, and that is load-bearing - part_button.gd's
 # _make_custom_tooltip() renders the first line as the card's bold gold title
