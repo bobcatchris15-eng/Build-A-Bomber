@@ -250,7 +250,12 @@ const GEOMETRY := {
 	"screw_drive":       {"drum_offset_frac": 0.6, "reach_fraction": 0.8},
 	# --- Expansion types ---
 	"half_track":        {"x_from": "running_gear", "y": "below_gear", "z_span": 0.0},
-	"rocker_bogie":      {"x_from": "running_gear", "y": "below_gear", "z_span": 0.0},
+	# "underside", not "below_gear": the extra 0.30 * hull height that the
+	# belted types want (so their belts hang clear of the body) left the
+	# rocker-bogie's pivot mount reaching up at empty air, its struts stopping
+	# short of the hull (Chris). This linkage hangs from a pivot ON the hull,
+	# not from a beam slung under it.
+	"rocker_bogie":      {"x_from": "running_gear", "y": "underside", "z_span": 0.0},
 	"pontoon_wheels":    {"x_pad": 0.22, "x_pad_scales_with": "pontoon_size", "y": "underside", "z_span": 0.32},
 	# A hovercraft's skirt is a single big cushion, so its fans sit INSIDE the
 	# hull footprint rather than outboard of it like hover_engine's pads.

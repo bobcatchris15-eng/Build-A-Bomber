@@ -6100,6 +6100,7 @@ static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_co
 	# arm running up into the hull. Same mount as the wheels and pontoons, for
 	# the same reason it works there - the module origin is already at the
 	# hull's underside.
+	const WHEEL_GROWTH := 2.2
 	var pivot_s: float = 0.55 * v_scale
 	var hub := build_wheel_mount(parent_node, base_color, pivot_s, 0.0, 0.45 * pivot_s)
 
@@ -6131,13 +6132,36 @@ static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_co
 			# halved and the wheels are scaled up to close the rest of the gap
 			# themselves - rb_wheel's authored radius is 0.211, so WHEEL_GROWTH
 			# takes it to roughly twice what it was.
-			wheel_pivot.position = Vector3(0.14 * wheel_size * p_s,
+			# Outboard by half a wheel width (Chris) - rb_wheel is authored
+			# 0.20 across, so half of that times the rendered scale. Keeps the
+			# tyre clear of the arm it hangs on instead of straddling it.
+			var wheel_scale: float = wheel_size * p_s * WHEEL_GROWTH
+			wheel_pivot.position = Vector3(
+				0.14 * wheel_size * p_s + 0.10 * wheel_scale,
 				-0.12 * arm_len * p_s, z)
 			chain.add_child(wheel_pivot)
 			var wheel := _mesh_inst(wheel_mesh, Color(0.20, 0.20, 0.22))
-			const WHEEL_GROWTH := 2.2
-			wheel.scale = Vector3.ONE * wheel_size * p_s * WHEEL_GROWTH
+			wheel.scale = Vector3.ONE * wheel_scale
 			wheel_pivot.add_child(wheel)
+			# HUB CARRIER. Stepping the wheel outboard by half its width opens
+			# a gap between the arm's outer face and the tyre's inner one -
+			# measured as 4 islands where there had been 1. A real suspension
+			# has a carrier spanning exactly that gap, so this is the part the
+			# geometry was asking for rather than a fudge to close a number.
+			# Static (a sibling of the spin pivot, not a child) - the carrier
+			# does not turn with the wheel.
+			var carrier_mesh := _part("wheel_gearbox")
+			if carrier_mesh:
+				var carrier := _mesh_inst(carrier_mesh, base_color.lightened(0.2))
+				# Sized to SPAN the gap, not to fill the space: a 0.34 cube
+				# closed the islands but took the module to 0.996 bulk, i.e.
+				# the suspension weighed as much as the vehicle. Long on X
+				# (the axis the gap is on), slim on the other two.
+				carrier.scale = Vector3(0.26, 0.15, 0.15) * wheel_scale
+				carrier.position = Vector3(
+					0.16 * wheel_size * p_s,
+					-0.12 * arm_len * p_s, z)
+				chain.add_child(carrier)
 
 
 ## Air-cushion skirt: one continuous bag around the module's footprint, with
