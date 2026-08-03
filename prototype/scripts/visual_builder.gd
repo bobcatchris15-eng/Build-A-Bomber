@@ -3994,7 +3994,14 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 
 
 static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_GRAY, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "helicopter_rotors", base_color, 1.0, float(tweaks.get("blade_length", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
+	# NO MOUNT KIT. Chris: "what are those things dangling beneath each
+	# nacelle?" - that was the kit's mk_pylon_collar, sitting at a FIXED
+	# -0.92 below the module. That offset is the far end of the kit's own
+	# stub pylon, which assumes the module is bolted straight onto the hull.
+	# A rotor is not: module_placer.gd hangs it 1.2 outboard and 0.3 above the
+	# hull top, and this function then solves a real strut down to the hull's
+	# centre. So the kit was a second, shorter, unsolved pylon ending in a
+	# collar clamped around nothing. The solved strut below is the mounting.
 	var blade_count = int(tweaks.get("blade_count", 4.0))
 	var blade_length = tweaks.get("blade_length", tweaks.get("size", 1.0))
 	var duct = tweaks.get("duct", false)
@@ -4035,8 +4042,13 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 		# as load-bearing, thickening as it nears the hull, not a uniform
 		# rod) - one continuous mesh, no separate flared "anchor" block
 		# needed anymore.
+		# THIN. Chris: the struts should read "lightweight and strong for
+		# aircraft". At a 1.0 cross-section against a strut_len of ~1.5 this
+		# was a slab, not a spar - aircraft structure is deep in the plane it
+		# is loaded in and narrow across it, so the taper keeps its full depth
+		# along the load path and comes right in on the other axis.
 		var strut = _mesh_inst(strut_mesh, base_color.darkened(0.3))
-		strut.scale = Vector3(1.0, strut_len, 1.0)
+		strut.scale = Vector3(0.42, strut_len, 0.30)
 		strut.position = Vector3.ZERO
 		strut.rotation = Vector3(0, 0, strut_angle)
 		parent_node.add_child(strut)
