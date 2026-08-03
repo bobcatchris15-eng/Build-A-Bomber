@@ -8,6 +8,8 @@ const ModuleDataScript = preload("res://scripts/module_data.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
+const UIIconsScript = preload("res://scripts/ui_icons.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
 const BattleUnitScript = preload("res://scripts/battle_unit.gd")
 const BuildingScript = preload("res://scripts/building.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
@@ -250,6 +252,13 @@ var power_status_label: Label
 
 # RTS_CORE_ROADMAP.md D2: tabbed build bar (Structures/Defenses/Units) +
 # queue panel (3 tier strips: progress fill, READY/HOLD/timer text).
+# The bottom production bar's dock (VISUAL/UI plan item 8). Holds the queue
+# strips and the tabbed build buttons.
+var build_bar_dock: Control = null
+# The minimap's collapse frame. Not a UIDock - see _build_minimap_collapse() for
+# why an edge-dock primitive is the wrong shape for a square map in a corner.
+var minimap_group: Control = null
+var minimap_toggle_btn: Button = null
 var build_tab_containers: Dictionary = {} # "structures"/"defenses"/"units" -> HBoxContainer
 var build_tab_buttons: Dictionary = {}
 var active_build_tab: String = "units"
@@ -1662,7 +1671,7 @@ func _build_ui():
 
 	resource_label = Label.new()
 	resource_label.position = Vector2(20, 14)
-	resource_label.add_theme_font_size_override("font_size", 22)
+	resource_label.theme_type_variation = "HUDValueLabel"
 	ui.add_child(resource_label)
 
 	# RTS_CORE_ROADMAP.md E1: a real power bar (progress fill + Normal/Low/
@@ -1672,14 +1681,12 @@ func _build_ui():
 	power_bar_panel = PanelContainer.new()
 	power_bar_panel.position = Vector2(340, 16)
 	power_bar_panel.size = Vector2(190, 26)
-	var power_bar_style = StyleBoxFlat.new()
-	power_bar_style.bg_color = Color(0.1, 0.11, 0.14, 0.85)
-	power_bar_style.border_color = Color(0.3, 0.35, 0.4, 0.9)
-	power_bar_style.border_width_left = 1
-	power_bar_style.border_width_right = 1
-	power_bar_style.border_width_top = 1
-	power_bar_style.border_width_bottom = 1
-	power_bar_panel.add_theme_stylebox_override("panel", power_bar_style)
+	# HUDPanel: the recessed powdercoat plate every piece of in-match chrome
+	# shares (VISUAL/UI plan item 8). Was a hardcoded blue-black fill with a
+	# grey-blue hairline - the exact drifted pair ui_tokens.gd's header calls out,
+	# where the theme's accent and the inline panels had diverged into two
+	# different palettes.
+	power_bar_panel.theme_type_variation = "HUDPanel"
 	ui.add_child(power_bar_panel)
 
 	power_bar = ProgressBar.new()
@@ -1699,7 +1706,6 @@ func _build_ui():
 
 	status_label = Label.new()
 	status_label.position = Vector2(20, 46)
-	status_label.add_theme_font_size_override("font_size", 15)
 	status_label.modulate = Color(0.8, 0.85, 0.9)
 	status_label.text = "Left-click/drag: select | Right-click: move / attack / harvest | Destroy the enemy HQ!"
 	ui.add_child(status_label)
@@ -1719,7 +1725,6 @@ func _build_ui():
 	intel_label.offset_right = -200
 	intel_label.offset_top = 14
 	intel_label.offset_bottom = 54
-	intel_label.add_theme_font_size_override("font_size", 15)
 	intel_label.modulate = Color(0.85, 0.75, 0.6)
 	intel_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ui.add_child(intel_label)
@@ -1735,43 +1740,66 @@ func _build_ui():
 	menu_btn.offset_right = -105
 	menu_btn.offset_top = 14
 	menu_btn.offset_bottom = 54
-	var menu_style = StyleBoxFlat.new()
-	menu_style.bg_color = Color(0.12, 0.14, 0.18, 0.90)
-	menu_style.border_color = Color(0.20, 0.60, 0.85, 0.90)
-	menu_style.border_width_left = 1
-	menu_style.border_width_right = 1
-	menu_style.border_width_top = 1
-	menu_style.border_width_bottom = 1
-	menu_style.corner_radius_top_left = 4
-	menu_style.corner_radius_top_right = 4
-	menu_style.corner_radius_bottom_left = 4
-	menu_style.corner_radius_bottom_right = 4
-	menu_btn.add_theme_stylebox_override("normal", menu_style)
-	var menu_hover = menu_style.duplicate() as StyleBoxFlat
-	menu_hover.bg_color = Color(0.18, 0.22, 0.28, 0.95)
-	menu_btn.add_theme_stylebox_override("hover", menu_hover)
+	# No stylebox at all: the theme's BAKELITE Button is what this should have
+	# looked like all along. The old inline pair used a (0.20, 0.60, 0.85) cyan-blue
+	# border - the drifted accent ui_tokens.gd's header names explicitly - plus 4px
+	# corners the tokens' near-square geometry rejects.
 	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 	ui.add_child(menu_btn)
 
 	if OS.is_debug_build():
-		_build_debug_panel(ui, menu_style, menu_hover)
+		_build_debug_panel(ui)
 
 	# Bottom build bar (RTS_CORE_ROADMAP.md D2: tabbed Structures/Defenses/
 	# Units, replacing the old flat ScrollContainer that mixed 5 building
 	# buttons with up to 12 unit entries in one undifferentiated row) + a
 	# queue panel (3 tier strips: progress fill, READY/HOLD/timer text).
-	var bar_bg = PanelContainer.new()
-	bar_bg.anchor_top = 1.0
-	bar_bg.anchor_bottom = 1.0
-	bar_bg.anchor_left = 0.0
-	bar_bg.anchor_right = 1.0
-	bar_bg.offset_top = -132
-	ui.add_child(bar_bg)
-	UITheme.apply_brushed_panel(bar_bg, player_faction, 0.4)
+	# A UIDock rather than a bare anchored PanelContainer (VISUAL/UI plan item 8).
+	# The queue panel rides inside it: the two were always one bottom bar sharing
+	# one VBoxContainer, and splitting them into separate docks would put a seam
+	# through the middle of a deliberately unified strip.
+	#
+	# COLLAPSIBLE, NEVER AUTO-HIDING. `auto_reveal` stays false and HIDDEN is not
+	# in the chevron's cycle (see ui_dock.gd's toggle()), so the build bar cannot
+	# vanish on its own. The plan is explicit that real-time play is the one place
+	# where chrome disappearing by itself is a defect rather than a feature, and
+	# losing the build bar mid-engagement costs the player the engagement.
+	var UIDockScript = load("res://scripts/ui_dock.gd")
+	build_bar_dock = UIDockScript.new()
+	build_bar_dock.name = "BuildBarDock"
+	build_bar_dock.dock_title = "PRODUCTION"
+	build_bar_dock.dock_icon = "factory"
+	build_bar_dock.side = UIDockScript.Side.BOTTOM
+	# Summed from what the bar actually contains rather than inherited from the old
+	# bare panel's 132. A UIDock adds a collapse header and panel padding that an
+	# anchored PanelContainer did not, and 132 clipped the build buttons' cost
+	# lines off the bottom of the screen - the class of bug the plan warns the
+	# headless suite cannot see, found by looking at the capture twice.
+	#   28  collapse header
+	#   30  queue strips
+	#   30  tab bar
+	#   92  tab ScrollContainer (its own custom_minimum_size)
+	#    6  three 2px VBox separations
+	#   16  DockPanel padding, 8 a side
+	build_bar_dock.expanded_size = 28.0 + 30.0 + 30.0 + 92.0 + 6.0 + 16.0
+	build_bar_dock.auto_reveal = false
+	build_bar_dock.persist_key = "skirmish_build_bar"
+	# Anchors only. The dock pins its own offset on the docked axis - see
+	# ui_dock.gd's _apply_edge_offsets() for why that is the dock's job and not the
+	# caller's (the first version of this bar rendered entirely below the bottom
+	# edge of the screen).
+	build_bar_dock.anchor_left = 0.0
+	build_bar_dock.anchor_right = 1.0
+	build_bar_dock.anchor_top = 1.0
+	build_bar_dock.anchor_bottom = 1.0
+	ui.add_child(build_bar_dock)
+	# Height follows the dock's own target extent as it collapses.
+	build_bar_dock.state_changed.connect(func(_s): _reposition_build_bar())
+	_reposition_build_bar()
 
 	var bar_vbox = VBoxContainer.new()
 	bar_vbox.add_theme_constant_override("separation", 2)
-	bar_bg.add_child(bar_vbox)
+	build_bar_dock.body().add_child(bar_vbox)
 
 	_build_queue_panel(bar_vbox)
 	_build_tab_bar(bar_vbox)
@@ -1803,22 +1831,26 @@ func _build_ui():
 	# cost truth - see this same building's define in PREFAB_STATS for the
 	# real numbers).
 	const PREFAB_BUTTON_LABELS := {
-		"light_manufactory": "🏭 Light Manufactory",
-		"medium_manufactory": "🏭 Medium Manufactory",
-		"heavy_manufactory": "🏭 Heavy Manufactory",
-		"refinery": "⛽ Refinery",
+		"light_manufactory": "Light Manufactory",
+		"medium_manufactory": "Medium Manufactory",
+		"heavy_manufactory": "Heavy Manufactory",
+		"refinery": "Refinery",
 		# Real supply-side Energy building (FABLE_REVIEW.md 2.7) - previously
 		# capacity only ever came from generator modules bolted onto units/
 		# defenses, so losing the one tank carrying a fusion_generator meant
 		# losing the base's power.
-		"power_plant": "⚡ Power Plant",
+		"power_plant": "Power Plant",
 	}
-	const PREFAB_BUTTON_COLORS := {
-		"light_manufactory": Color(0.68, 0.6, 0.42),
-		"medium_manufactory": Color(0.72, 0.55, 0.42),
-		"heavy_manufactory": Color(0.6, 0.42, 0.35),
-		"refinery": Color(0.55, 0.62, 0.75),
-		"power_plant": Color(0.85, 0.65, 0.2),
+	# VISUAL/UI plan item 0: these labels carried 🏭/⛽/⚡. The registry in
+	# scripts/ui_icons.gd already had a drawn icon for each of the three concepts
+	# and was going unused at exactly this site, which is what item 0 says to
+	# reach for instead of an emoji.
+	const PREFAB_BUTTON_ICONS := {
+		"light_manufactory": "factory",
+		"medium_manufactory": "factory",
+		"heavy_manufactory": "factory",
+		"refinery": "extractor",
+		"power_plant": "powerplant",
 	}
 	for kind in ["light_manufactory", "medium_manufactory", "heavy_manufactory", "refinery", "power_plant"]:
 		var stats = BuildingScript.PREFAB_STATS[kind]
@@ -1827,14 +1859,14 @@ func _build_ui():
 		# QUEUES the structure (real drip-fed build time) instead of
 		# starting ghost placement immediately; _try_place_building() only
 		# runs once production.pop_ready_structure() says it's actually done.
-		_add_build_button(build_tab_containers["structures"], label_text, PREFAB_BUTTON_COLORS[kind], func():
+		_add_build_button(build_tab_containers["structures"], label_text, PREFAB_BUTTON_ICONS[kind], func():
 			_queue_structure_build({"kind": kind, "cost_metal": stats.cost_metal, "cost_crystal": stats.cost_crystal}))
 
 	for entry in roster:
 		var e = entry
 		var label_text = "%s\n%dM %dC" % [e.name, e.cost_metal, e.cost_crystal]
 		if e.is_defense:
-			_add_build_button(build_tab_containers["defenses"], label_text, Color(0.4, 0.5, 0.4), func():
+			_add_build_button(build_tab_containers["defenses"], label_text, "defense", func():
 				_queue_structure_build({"kind": "defense", "blueprint": e.blueprint, "cost_metal": e.cost_metal, "cost_crystal": e.cost_crystal}))
 		else:
 			# RTS_CORE_ROADMAP.md D2: shift-click queues 5. Greyed out (and
@@ -1842,7 +1874,7 @@ func _build_ui():
 			# manufactory - was only a status flash after the fact before,
 			# see _refresh_tier_gated_buttons().
 			var tier = ModuleCatalog.get_hull_size_tier(e.blueprint.get("hull_type", "medium_hull"))
-			var btn = _add_build_button(build_tab_containers["units"], label_text, Color(0.35, 0.42, 0.55), func():
+			var btn = _add_build_button(build_tab_containers["units"], label_text, "hull", func():
 				var copies = 5 if Input.is_key_pressed(KEY_SHIFT) else 1
 				for i in range(copies):
 					_queue_player_unit(e))
@@ -1852,13 +1884,19 @@ func _build_ui():
 	selection_rect = Panel.new()
 	selection_rect.visible = false
 	selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Stays a StyleBoxFlat, on purpose. A drag marquee is a transient RULE drawn
+	# over the world, not a piece of chrome with a surface - the same reason
+	# build_ui_theme.gd keeps HeaderPanel's underline flat. What changes is where
+	# the colour comes from: SIGNAL_HAZARD is ui_tokens.gd's designated selection
+	# colour, so the marquee now agrees with the in-world selection rings and the
+	# build bar's selected tab instead of being its own saturated web-green.
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.3, 0.8, 0.4, 0.15)
-	style.border_color = Color(0.3, 1.0, 0.4, 0.8)
-	style.border_width_left = 2
-	style.border_width_right = 2
-	style.border_width_top = 2
-	style.border_width_bottom = 2
+	style.bg_color = Color(Tokens.SIGNAL_HAZARD, 0.15)
+	style.border_color = Color(Tokens.SIGNAL_HAZARD, 0.8)
+	style.border_width_left = Tokens.BORDER_EMPHASIS
+	style.border_width_right = Tokens.BORDER_EMPHASIS
+	style.border_width_top = Tokens.BORDER_EMPHASIS
+	style.border_width_bottom = Tokens.BORDER_EMPHASIS
 	selection_rect.add_theme_stylebox_override("panel", style)
 	ui.add_child(selection_rect)
 
@@ -1881,13 +1919,6 @@ func _build_ui():
 	minimap_rect.mouse_filter = Control.MOUSE_FILTER_STOP
 	minimap_rect.texture = _minimap_texture
 	minimap_rect.gui_input.connect(_on_minimap_gui_input)
-	var minimap_border = StyleBoxFlat.new()
-	minimap_border.bg_color = Color(0, 0, 0, 0)
-	minimap_border.border_color = Color(0.20, 0.60, 0.85, 0.90)
-	minimap_border.border_width_left = 2
-	minimap_border.border_width_right = 2
-	minimap_border.border_width_top = 2
-	minimap_border.border_width_bottom = 2
 	var minimap_frame = PanelContainer.new()
 	minimap_frame.anchor_left = minimap_rect.anchor_left
 	minimap_frame.anchor_right = minimap_rect.anchor_right
@@ -1898,11 +1929,98 @@ func _build_ui():
 	minimap_frame.offset_top = minimap_rect.offset_top - 2
 	minimap_frame.offset_bottom = minimap_rect.offset_bottom + 2
 	minimap_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	minimap_frame.add_theme_stylebox_override("panel", minimap_border)
+	# A STEEL bezel around the map rather than a 2px cyan-blue rule. The minimap is
+	# an instrument face set into the console, which is exactly what the dock rail's
+	# material already says.
+	minimap_frame.theme_type_variation = "DockRail"
 	ui.add_child(minimap_frame)
 	ui.add_child(minimap_rect)
+	_build_minimap_collapse(ui, minimap_frame)
 
 	_update_resource_ui()
+
+
+# Makes the minimap collapsible, and keeps it sitting on top of the production
+# dock as that dock changes height.
+#
+# WHY THIS IS NOT A UIDock, unlike the production bar. VISUAL/UI plan item 8 asks
+# for the minimap to become a dock too, and it should be collapsible - but UIDock
+# is an EDGE-ANCHORED STRIP: LEFT and RIGHT span the full window height, BOTTOM
+# spans the full width. There is no bottom-right corner mode, so the only way to
+# express a 180px square map as a dock is to give it a full-height right rail,
+# which moves it out of the corner every RTS convention puts it in and steals a
+# column from the viewport the whole plan is trying to give back.
+#
+# So this delivers the item's INTENT - collapsible chrome, never auto-hiding, the
+# viewport gets the screen - with a toggle over the map's own bezel instead of by
+# forcing a square into a strip. Flagged rather than done quietly: if a corner
+# mode is ever added to UIDock, this should become a real dock.
+func _build_minimap_collapse(ui: CanvasLayer, frame: Control) -> void:
+	minimap_group = frame
+
+	minimap_toggle_btn = Button.new()
+	minimap_toggle_btn.name = "MinimapToggle"
+	minimap_toggle_btn.text = "MAP"
+	minimap_toggle_btn.toggle_mode = true
+	minimap_toggle_btn.button_pressed = true
+	minimap_toggle_btn.anchor_left = 1.0
+	minimap_toggle_btn.anchor_right = 1.0
+	minimap_toggle_btn.anchor_top = 1.0
+	minimap_toggle_btn.anchor_bottom = 1.0
+	minimap_toggle_btn.custom_minimum_size = Vector2(0, Tokens.HIT_TARGET_MIN)
+	ui.add_child(minimap_toggle_btn)
+	minimap_toggle_btn.toggled.connect(func(on: bool):
+		minimap_rect.visible = on
+		if minimap_group:
+			minimap_group.visible = on
+	)
+
+	# The minimap's offsets were hardcoded to -106, i.e. "just above a 132px build
+	# bar". That was already a hidden coupling to a magic number; now that the bar
+	# collapses it would leave the map floating over open ground, so it follows the
+	# dock's real height instead.
+	# The dock's state_changed is already wired to _reposition_build_bar(), which
+	# calls _reposition_minimap() after moving the bar - so the map is repositioned
+	# against the bar's NEW height rather than racing it.
+	_reposition_minimap()
+
+
+func _reposition_build_bar() -> void:
+	# The dock pins its own top offset now (ui_dock.gd's _apply_edge_offsets), so
+	# there is nothing to place here - only the minimap, which sits on top of the
+	# bar and has to follow its height.
+	_reposition_minimap()
+
+
+func _reposition_minimap() -> void:
+	if not is_instance_valid(minimap_rect):
+		return
+	# outer_extent() is the dock's TARGET height, which is the one that matters:
+	# state_changed fires when the collapse starts, so `size` is still mid-tween
+	# and would park the map at an interpolated position it then never leaves.
+	var bar_h := 0.0
+	if is_instance_valid(build_bar_dock):
+		bar_h = build_bar_dock.outer_extent()
+	var gap := Tokens.SPACE_SM
+	var bottom := -(bar_h + gap)
+
+	minimap_rect.offset_bottom = bottom
+	minimap_rect.offset_top = bottom - MINIMAP_UI_SIZE
+	minimap_rect.offset_right = -Tokens.SPACE_SM
+	minimap_rect.offset_left = -Tokens.SPACE_SM - MINIMAP_UI_SIZE
+
+	if is_instance_valid(minimap_group):
+		minimap_group.offset_bottom = minimap_rect.offset_bottom + 2
+		minimap_group.offset_top = minimap_rect.offset_top - 2
+		minimap_group.offset_right = minimap_rect.offset_right + 2
+		minimap_group.offset_left = minimap_rect.offset_left - 2
+
+	if is_instance_valid(minimap_toggle_btn):
+		# Sits directly above the bezel, right-aligned with it.
+		minimap_toggle_btn.offset_bottom = minimap_rect.offset_top - 4
+		minimap_toggle_btn.offset_top = minimap_toggle_btn.offset_bottom - Tokens.HIT_TARGET_MIN
+		minimap_toggle_btn.offset_right = -Tokens.SPACE_SM
+		minimap_toggle_btn.offset_left = -Tokens.SPACE_SM - 64.0
 
 # RTS_CORE_ROADMAP.md A2: the debug/options panel. Reuses the Menu button's
 # own chrome (menu_style/menu_hover) so it doesn't read as a bolted-on debug
@@ -1910,7 +2028,10 @@ func _build_ui():
 # straight to this skirmish instance's own debug_* var (so the effect is
 # immediate - no "apply" step) and, if the DebugSettings autoload is present,
 # also back to it so the choice survives a match restart.
-func _build_debug_panel(ui: CanvasLayer, menu_style: StyleBoxFlat, menu_hover: StyleBoxFlat):
+# No longer takes the menu button's styleboxes to copy - both buttons take the
+# theme's BAKELITE Button now, which is also why they finally match each other
+# without one being told to imitate the other.
+func _build_debug_panel(ui: CanvasLayer):
 	var debug_btn = Button.new()
 	debug_btn.text = " Debug"
 	debug_btn.icon = UIIcons.get_icon("gear")
@@ -1921,8 +2042,6 @@ func _build_debug_panel(ui: CanvasLayer, menu_style: StyleBoxFlat, menu_hover: S
 	debug_btn.offset_right = -10
 	debug_btn.offset_top = 14
 	debug_btn.offset_bottom = 54
-	debug_btn.add_theme_stylebox_override("normal", menu_style)
-	debug_btn.add_theme_stylebox_override("hover", menu_hover)
 	ui.add_child(debug_btn)
 
 	var popup = PopupPanel.new()
@@ -1935,7 +2054,7 @@ func _build_debug_panel(ui: CanvasLayer, menu_style: StyleBoxFlat, menu_hover: S
 
 	var title = Label.new()
 	title.text = "Debug Toggles"
-	title.add_theme_font_size_override("font_size", 18)
+	title.theme_type_variation = "HeadingLabel"
 	box.add_child(title)
 
 	box.add_child(_make_debug_checkbox("Infinite resources (player)", debug_infinite_resources,
@@ -2038,14 +2157,11 @@ func _build_queue_panel(parent: Container) -> void:
 		var panel = PanelContainer.new()
 		panel.custom_minimum_size = Vector2(160, 30)
 		panel.mouse_filter = Control.MOUSE_FILTER_STOP
-		var style = StyleBoxFlat.new()
-		style.bg_color = Color(0.1, 0.11, 0.14, 0.85)
-		style.border_color = Color(0.3, 0.35, 0.4, 0.9)
-		style.border_width_left = 1
-		style.border_width_right = 1
-		style.border_width_top = 1
-		style.border_width_bottom = 1
-		panel.add_theme_stylebox_override("panel", style)
+		# Same HUDPanel plate as the power bar, which is what the comment on that
+		# one already claimed ("same panel-with-overlay-label structure ... for
+		# visual consistency") - the two had identical hardcoded values pasted in
+		# two places, so they were consistent only until one of them was edited.
+		panel.theme_type_variation = "HUDPanel"
 		row.add_child(panel)
 
 		var bar = ProgressBar.new()
@@ -2117,27 +2233,36 @@ func _make_debug_checkbox(label_text: String, initial: bool, on_toggled: Callabl
 	cb.toggled.connect(on_toggled)
 	return cb
 
-func _add_build_button(parent: Container, text: String, color: Color, callback: Callable) -> Button:
+# A build-bar button. `icon_name` is a key into scripts/ui_icons.gd, or "" for
+# none.
+#
+# VISUAL/UI plan items 0 + 8. This used to take a `color` and hand-roll four
+# StyleBoxFlats from it - a saturated per-kind fill, a lightened hover, a
+# darkened disabled, and 6px consumer-software corners. Three problems, and the
+# theme now answers all of them:
+#   * Local overrides beat the theme, so the bakelite plate could never reach the
+#     single densest cluster of buttons in the game.
+#   * The fills spent saturation on category decoration. ui_tokens.gd's rule is
+#     that signal colour means STATE, not "this is a structure" - and the
+#     category is already carried by the tab the button sits in, so the colour
+#     was redundant as well as loud.
+#   * The disabled look was `color.darkened(0.5)`, i.e. derived from whatever the
+#     category colour happened to be, so "unavailable" read differently in every
+#     tab. It is one state and should look like one thing.
+func _add_build_button(parent: Container, text: String, icon_name: String, callback: Callable) -> Button:
 	var btn = Button.new()
 	btn.text = text
 	btn.custom_minimum_size = Vector2(120, 80)
-	var style = StyleBoxFlat.new()
-	style.bg_color = color
-	style.corner_radius_top_left = 6
-	style.corner_radius_top_right = 6
-	style.corner_radius_bottom_left = 6
-	style.corner_radius_bottom_right = 6
-	btn.add_theme_stylebox_override("normal", style)
-	var hover = style.duplicate()
-	hover.bg_color = color.lightened(0.2)
-	btn.add_theme_stylebox_override("hover", hover)
-	# RTS_CORE_ROADMAP.md D2: greyed-out look for _refresh_tier_gated_buttons()
-	# to switch to when this button's tier has no live manufactory - a real
-	# distinct look (disabled state + dimmed stylebox), not just the old
-	# after-the-fact status flash.
-	var disabled_style = style.duplicate()
-	disabled_style.bg_color = color.darkened(0.5)
-	btn.add_theme_stylebox_override("disabled", disabled_style)
+	# RTS_CORE_ROADMAP.md D2's greyed-out state for _refresh_tier_gated_buttons()
+	# is now the theme's own `disabled` bakelite plate - still a real distinct
+	# look, just no longer a per-button derivation.
+	if icon_name != "" and UIIconsScript.has_icon(icon_name):
+		btn.icon = UIIconsScript.get_icon(icon_name)
+		btn.expand_icon = false
+		# Icon above the label: these buttons are 120x80 with a two-line label, so
+		# a left-aligned icon would push the text into a wrap.
+		btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
+		btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	# VISUAL_IMPROVEMENT_PLAN.md chunk G: real tactile press feedback (a
 	# quick squash-release) alongside whatever the button's own click does -
 	# purely cosmetic, so it's a second connection rather than something
@@ -2191,11 +2316,31 @@ func _update_resource_ui():
 		# margin, which can't go negative and would hide how deep a
 		# Critical deficit really is.
 		power_bar.value = clampf(1.0 - (upkeep / max(e.capacity, 1.0)), 0.0, 1.0) if e.capacity > 0.0 else 0.0
-		var state_color = Color(0.35, 0.85, 0.4) if state == "normal" else (Color(0.9, 0.75, 0.2) if state == "low" else Color(0.9, 0.3, 0.25))
-		var fill_style = StyleBoxFlat.new()
-		fill_style.bg_color = state_color
-		power_bar.add_theme_stylebox_override("fill", fill_style)
+		# A genuine state fill, so this one KEEPS a stylebox - ui_tokens.gd's rule is
+		# that signal colour is for state, and base power being in deficit is the
+		# textbook case. What changes: the three colours are the tokens' GO/HAZARD/
+		# ALERT rather than three hand-mixed approximations of them, so the bar
+		# agrees with every other warning surface in the game.
+		#
+		# Also cached. This ran on every power update and built a fresh
+		# StyleBoxFlat each time, which is a resource allocation per tick for three
+		# values that never change.
+		power_bar.add_theme_stylebox_override("fill", _power_fill_style(state))
 		power_status_label.text = "Base Power: %s" % state.capitalize()
+
+# One stylebox per power state, built on first use and reused thereafter.
+var _power_fill_styles: Dictionary = {}
+
+func _power_fill_style(state: String) -> StyleBoxFlat:
+	if not _power_fill_styles.has(state):
+		var sb = StyleBoxFlat.new()
+		match state:
+			"normal": sb.bg_color = Tokens.SIGNAL_GO
+			"low": sb.bg_color = Tokens.SIGNAL_HAZARD
+			_: sb.bg_color = Tokens.SIGNAL_ALERT
+		_power_fill_styles[state] = sb
+	return _power_fill_styles[state]
+
 
 var _status_toast_home_pos: Vector2 = Vector2.INF
 var _status_toast_tween: Tween = null
@@ -2806,20 +2951,17 @@ func _build_subsystem_schematic_hud(ui: CanvasLayer):
 	subsystem_schematic_hud.visible = false
 	ui.add_child(subsystem_schematic_hud)
 
-	var sb = StyleBoxFlat.new()
-	sb.bg_color = Color(0.06, 0.08, 0.11, 0.9)
-	sb.border_color = Color(0.0, 0.95, 1.0, 0.8) # CAD vector cyan
-	sb.border_width_left = 2
-	sb.border_width_right = 2
-	sb.border_width_top = 2
-	sb.border_width_bottom = 2
-	subsystem_schematic_hud.add_theme_stylebox_override("panel", sb)
+	# HUDPanel, and the "CAD vector cyan" border is gone. That cyan was the single
+	# most off-palette colour left in the HUD - it appears nowhere in ui_tokens.gd,
+	# and a glowing cyan outline is precisely the sci-fi default the tokens' header
+	# argues against at length.
+	subsystem_schematic_hud.theme_type_variation = "HUDPanel"
 
 	var margin = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_bottom", 8)
+	margin.add_theme_constant_override("margin_left", Tokens.SPACE_MD)
+	margin.add_theme_constant_override("margin_right", Tokens.SPACE_MD)
+	margin.add_theme_constant_override("margin_top", Tokens.SPACE_SM)
+	margin.add_theme_constant_override("margin_bottom", Tokens.SPACE_SM)
 	subsystem_schematic_hud.add_child(margin)
 
 	var vbox = VBoxContainer.new()
@@ -2827,14 +2969,15 @@ func _build_subsystem_schematic_hud(ui: CanvasLayer):
 
 	subsystem_title_lbl = Label.new()
 	subsystem_title_lbl.text = "SUBSYSTEM STATUS"
-	subsystem_title_lbl.add_theme_font_size_override("font_size", 14)
-	subsystem_title_lbl.add_theme_color_override("font_color", Color(0.0, 0.95, 1.0))
+	subsystem_title_lbl.theme_type_variation = "HeadingLabel"
 	vbox.add_child(subsystem_title_lbl)
 	vbox.add_child(HSeparator.new())
 
 	subsystem_details_lbl = Label.new()
-	subsystem_details_lbl.add_theme_font_size_override("font_size", 12)
-	subsystem_details_lbl.modulate = Color(0.9, 0.95, 1.0)
+	# StatLabel: the mono face, which is what a column of "• HULL INTEGRITY:
+	# 240/400 HP [NOMINAL]" lines wanted all along. The cool-white modulate went
+	# with the cyan border above.
+	subsystem_details_lbl.theme_type_variation = "StatLabel"
 	subsystem_details_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
 	vbox.add_child(subsystem_details_lbl)
 
@@ -2871,8 +3014,12 @@ func _update_subsystem_schematic_hud():
 		is_immobilized = u.is_immobilized
 
 	var text = "• HULL INTEGRITY: %d/%d HP %s\n" % [int(current_hp), int(max_hp), hp_status]
-	text += "• LOCOMOTION: %s\n" % ("⚠ STRIPPED/DISABLED" if is_immobilized else "ONLINE [100%]")
-	text += "• PRIMARY TURRETS: %s\n" % ("ONLINE [READY]" if hp_ratio > 0.25 else "⚠ SEVERE DAMAGE")
+	# Bracketed status codes, not ⚠ (VISUAL/UI plan item 0). Every other line in
+	# this readout already reports state as [NOMINAL]/[DAMAGED]/[CRITICAL], so the
+	# warning glyph was both the one decorative character in a deadpan equipment
+	# report and inconsistent with the register the rest of the panel uses.
+	text += "• LOCOMOTION: %s\n" % ("STRIPPED [DISABLED]" if is_immobilized else "ONLINE [100%]")
+	text += "• PRIMARY TURRETS: %s\n" % ("ONLINE [READY]" if hp_ratio > 0.25 else "IMPAIRED [SEVERE DAMAGE]")
 	text += "• FACET ARMOR: ACTIVE"
 
 	subsystem_details_lbl.text = text
@@ -3125,22 +3272,12 @@ func _on_hq_died(building):
 	# upgrade the rest of the UI polish pass applied elsewhere.
 	var card = PanelContainer.new()
 	card.set_anchors_preset(Control.PRESET_CENTER)
-	var card_style = StyleBoxFlat.new()
-	card_style.bg_color = Color(0.12, 0.12, 0.14, 0.92)
-	card_style.border_color = Color.GOLD if victory else Color(0.7, 0.2, 0.2)
-	card_style.border_width_left = 3
-	card_style.border_width_top = 3
-	card_style.border_width_right = 3
-	card_style.border_width_bottom = 3
-	card_style.corner_radius_top_left = 10
-	card_style.corner_radius_top_right = 10
-	card_style.corner_radius_bottom_left = 10
-	card_style.corner_radius_bottom_right = 10
-	card_style.content_margin_left = 40
-	card_style.content_margin_right = 40
-	card_style.content_margin_top = 30
-	card_style.content_margin_bottom = 30
-	card.add_theme_stylebox_override("panel", card_style)
+	# CardPanel - the roomy POWDERCOAT plate the shell screens already use for
+	# free-floating cards, which is exactly what this is. The old inline version
+	# had 10px corners (the tokens commit to near-square) and a Color.GOLD /
+	# web-red border, neither of which is in the palette. Win/loss is carried by
+	# the title's signal colour below instead of by repainting the whole frame.
+	card.theme_type_variation = "CardPanel"
 	overlay.add_child(card)
 	# VISUAL_IMPROVEMENT_PLAN.md chunk G: slide the card in - deferred one
 	# frame (not called inline here) since PRESET_CENTER's actual pixel
@@ -3158,29 +3295,22 @@ func _on_hq_died(building):
 
 	var title = Label.new()
 	title.text = "VICTORY" if victory else "DEFEAT"
-	title.add_theme_font_size_override("font_size", 64)
-	title.modulate = Color.GOLD if victory else Color.RED
+	# DisplayLabel is the stencil face at the scale's top step. 64px was off the
+	# type scale entirely, and Color.GOLD/Color.RED are raw engine constants -
+	# GO for the win, ALERT for the loss, which is what those tokens are for.
+	title.theme_type_variation = "DisplayLabel"
+	title.add_theme_color_override("font_color", Tokens.SIGNAL_GO if victory else Tokens.SIGNAL_ALERT)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(title)
 
 	var sub = Label.new()
 	sub.text = "The enemy HQ has been destroyed." if victory else "Your HQ has been destroyed."
-	sub.add_theme_font_size_override("font_size", 20)
+	sub.theme_type_variation = "TitleLabel"
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(sub)
 
 	var btn = Button.new()
 	btn.text = "Return to Menu"
 	btn.custom_minimum_size = Vector2(220, 50)
-	var btn_style = StyleBoxFlat.new()
-	btn_style.bg_color = Color(0.3, 0.32, 0.36)
-	btn_style.corner_radius_top_left = 6
-	btn_style.corner_radius_top_right = 6
-	btn_style.corner_radius_bottom_left = 6
-	btn_style.corner_radius_bottom_right = 6
-	btn.add_theme_stylebox_override("normal", btn_style)
-	var btn_hover = btn_style.duplicate()
-	btn_hover.bg_color = Color(0.3, 0.32, 0.36).lightened(0.2)
-	btn.add_theme_stylebox_override("hover", btn_hover)
 	btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 	vbox.add_child(btn)

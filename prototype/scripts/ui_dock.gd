@@ -65,6 +65,10 @@ const REVEAL_MARGIN := 12.0
 @export var side: int = Side.LEFT
 @export var expanded_size: float = 320.0
 @export var auto_reveal: bool = false
+# State a dock opens in the FIRST time, before it has a persisted preference.
+# VISUAL/UI plan item 7 wants the Design Lab's two docks railed by default, so the
+# 3D model - the actual subject - gets the screen instead of the leftover middle.
+@export var default_state: int = State.EXPANDED
 # Where this dock's state is remembered. Empty disables persistence, which is
 # what the tests want - otherwise a test run rewrites the player's layout.
 @export var persist_key: String = ""
@@ -87,6 +91,10 @@ func _init() -> void:
 
 func _ready() -> void:
 	_build()
+	# The default goes in BEFORE _load_state(), which uses `_state` as its own
+	# fallback. Setting it afterwards would silently overrule whatever the player
+	# last left the dock as, which is the opposite of what persistence is for.
+	_state = default_state
 	_load_state()
 	_apply_state(false)
 	set_process_input(auto_reveal)
@@ -122,15 +130,34 @@ func _build() -> void:
 	_body_host = VBoxContainer.new()
 	_body_host.name = "DockBody"
 	_body_host.add_theme_constant_override("separation", Tokens.SPACE_SM)
-	if side == Side.BOTTOM:
-		_body_host.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	else:
-		_body_host.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	# FULL_RECT: the body always matches the clip in BOTH axes.
+	#
+	# It used to be LEFT_WIDE (or TOP_WIDE for a bottom dock), which leaves one
+	# axis unanchored and therefore sized by the content's own minimum. That works
+	# only as long as the content HAS a minimum on that axis, and it silently fails
+	# for the one container that deliberately does not: a ScrollContainer reports a
+	# zero minimum, because being smaller than its content is the entire point of
+	# it. The Design Lab's telemetry rail is a ScrollContainer, so the body came out
+	# 0px wide and the whole expanded panel rendered empty - header visible, nothing
+	# under it. The clip is what bounds the content here; the body should just fill
+	# it and let overflow scroll or clip.
+	_body_host.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_clip.add_child(_body_host)
 
 	# --- Rail -------------------------------------------------------------
-	# Shown only in RAILED/HIDDEN. Carries the title so a collapsed dock still
-	# says what it is - an unlabelled strip of icons is a memory test.
+	# Shown only in RAILED/HIDDEN.
+	#
+	# This used to carry `dock_title.substr(0, 3)` on the grounds that "an
+	# unlabelled strip of icons is a memory test". The intent was right and the
+	# execution did not survive contact with the width: a 40px rail is ~24px inside
+	# the panel's padding, so three stencil capitals either forced the rail wider
+	# than 40px (which they did - see _rail_btn.clip_text below) or clipped to
+	# nothing legible. A rotated vertical label is what an IDE does here and what
+	# Godot's Button cannot do.
+	#
+	# So the rail identifies itself by ICON plus tooltip instead. Every dock in the
+	# project sets dock_icon for exactly this reason; a dock without one gets a bare
+	# strip, which is the case worth avoiding.
 	_rail_btn = Button.new()
 	_rail_btn.theme_type_variation = "TabButton"
 	_rail_btn.focus_mode = Control.FOCUS_NONE
@@ -139,6 +166,16 @@ func _build() -> void:
 	if dock_icon != "" and UIIcons.has_icon(dock_icon):
 		_rail_btn.icon = UIIcons.get_icon(dock_icon)
 	_rail_btn.tooltip_text = dock_title
+	# clip_text, and this is load-bearing rather than cosmetic. A Button's minimum
+	# size includes its full text width, and this button is the only VISIBLE child
+	# while the dock is railed - so its minimum became the dock's minimum. A
+	# 3-letter title measured ~51px against a 40px rail, which meant a "collapsed"
+	# dock silently demanded 64px including the panel's padding: the exact
+	# Container-propagation trap the plan flags in item 4, arriving through the
+	# rail button instead of through the clip. Caught by
+	# test_ui_dock_state_cycle, not by looking at it - a 24px overrun looks fine.
+	_rail_btn.clip_text = true
+	_rail_btn.custom_minimum_size = Vector2.ZERO
 	column.add_child(_rail_btn)
 
 
@@ -147,6 +184,18 @@ func _build() -> void:
 # would not collapse.
 func body() -> VBoxContainer:
 	return _body_host
+
+
+# The dock's OUTER extent for whatever state it is in or heading to - width for a
+# LEFT/RIGHT dock, height for a BOTTOM one.
+#
+# Public because neighbours have to lay themselves out against it: skirmish.gd's
+# minimap sits directly on top of the production bar and has to know how tall
+# that bar will BE, not how tall it currently is. Reading `size` mid-collapse
+# gives an interpolated value, and reading custom_minimum_size gives the inner
+# extent (padding-discounted, see _clip_extent), so neither answers the question.
+func outer_extent() -> float:
+	return _target_extent()
 
 
 func get_dock_state() -> int:
@@ -192,7 +241,41 @@ func _apply_state(animate: bool) -> void:
 	var expanded := _state == State.EXPANDED
 	_header_btn.visible = expanded
 	_rail_btn.visible = not expanded
-	_rail_btn.text = "" if _state == State.HIDDEN else dock_title.substr(0, 3)
+	# The clip is HIDDEN when collapsed, not merely narrowed.
+	#
+	# Driving _clip.custom_minimum_size to zero is not enough: the clip lives in a
+	# VBoxContainer, which hands every visible child the full available width, and
+	# custom_minimum_size is a floor rather than a ceiling. So a railed dock still
+	# handed the clip its inner width (~24px) and cropped the catalogue to a 24px
+	# vertical sliver - a column of "Li / Ro / Th / Ca" letter-fragments down the
+	# rail instead of the rail button. Visibly wrong in the first capture of the
+	# railed Lab, and invisible to the width assertions, which were all correct.
+	_clip.visible = expanded
+	# Never text - see the rail's construction comment in _build() for why three
+	# capitals cannot fit a 40px rail. Identity is the icon plus the tooltip.
+	_rail_btn.text = ""
+	# In HIDDEN the rail button IS the grab tab, and it has to be able to shrink to
+	# TAB_SIZE. The TabButton plate's content margins are 12px a side, so even an
+	# empty clipped button held the dock at 24px + the panel's 16px = 40px - the
+	# same width as RAILED, which made HIDDEN indistinguishable from it and so
+	# pointless. A grab tab is a sliver of bare metal rather than a control with a
+	# face, so it gets a zero-margin fill; the moment the dock is railed or
+	# expanded, the plate comes back.
+	if _state == State.HIDDEN:
+		_rail_btn.add_theme_stylebox_override("normal", _tab_style(Tokens.BASE_600))
+		_rail_btn.add_theme_stylebox_override("hover", _tab_style(Tokens.BASE_500))
+		_rail_btn.add_theme_stylebox_override("pressed", _tab_style(Tokens.BASE_500))
+		# The dock's OWN plate goes too. DockPanel carries SPACE_SM of padding on
+		# each side, which is a 16px floor on the dock's minimum width - wider than
+		# TAB_SIZE, so the tab could never actually reach its intended 10px. A
+		# hidden dock is off-edge and has no visible body to put a surface on, so
+		# there is nothing to lose by dropping the plate until it comes back.
+		add_theme_stylebox_override("panel", _tab_style(Color(0, 0, 0, 0)))
+	else:
+		_rail_btn.remove_theme_stylebox_override("normal")
+		_rail_btn.remove_theme_stylebox_override("hover")
+		_rail_btn.remove_theme_stylebox_override("pressed")
+		remove_theme_stylebox_override("panel")
 
 	var extent := _target_extent()
 
@@ -201,14 +284,20 @@ func _apply_state(animate: bool) -> void:
 
 	# The CLIP drives collapse, not the dock's own size - see the layout trap
 	# in the header comment.
+	# Discounted by the panel's own padding so the dock's OUTER extent is `extent`
+	# rather than `extent` + padding - see _panel_padding() for the test failure
+	# that came from getting this wrong.
+	var inner := _clip_extent(extent)
 	var clip_target := Vector2.ZERO
 	if _is_horizontal():
-		clip_target = Vector2(extent if expanded else 0.0, 0)
+		clip_target = Vector2(inner if expanded else 0.0, 0)
 	else:
-		clip_target = Vector2(0, extent if expanded else 0.0)
+		clip_target = Vector2(0, inner if expanded else 0.0)
+
+	_apply_edge_offsets(extent)
 
 	if not animate:
-		custom_minimum_size = _extent_vector(extent)
+		custom_minimum_size = _extent_vector(_clip_extent(extent))
 		_clip.custom_minimum_size = clip_target
 		return
 
@@ -219,7 +308,7 @@ func _apply_state(animate: bool) -> void:
 	_tween.set_ease(UIAnim.EASE_STANDARD)
 	_tween.set_parallel(true)
 	var prop := "custom_minimum_size:x" if _is_horizontal() else "custom_minimum_size:y"
-	_tween.tween_property(self, prop, extent, UIAnim.DURATION_NORMAL)
+	_tween.tween_property(self, prop, _clip_extent(extent), UIAnim.DURATION_NORMAL)
 	_tween.tween_property(_clip, prop,
 		clip_target.x if _is_horizontal() else clip_target.y,
 		UIAnim.DURATION_NORMAL)
@@ -227,6 +316,86 @@ func _apply_state(animate: bool) -> void:
 
 func _extent_vector(extent: float) -> Vector2:
 	return Vector2(extent, 0) if _is_horizontal() else Vector2(0, extent)
+
+
+# Pins the dock INSIDE its edge rather than just outside it.
+#
+# THE TRAP THIS CLOSES, which cost two separate bugs before it was centralised.
+# Callers anchor a dock with the matching preset - PRESET_LEFT_WIDE,
+# PRESET_RIGHT_WIDE, PRESET_BOTTOM_WIDE - and those presets set BOTH anchors on
+# the docked axis to the same edge with zero offsets. A LEFT dock happens to work,
+# because its anchors are at 0.0 and custom_minimum_size grows it rightward into
+# the screen. RIGHT and BOTTOM anchor at 1.0, so the same growth goes OUTWARD:
+#   * the Design Lab's stat dock rendered at x=1920 in a 1920-wide viewport,
+#     entirely off the right edge (caught by test_ui_no_overflow_or_offscreen);
+#   * the Skirmish production bar rendered below the bottom edge and was simply
+#     absent from the HUD (caught by looking at a capture).
+#
+# Both are the same mistake, so the dock now takes responsibility for the offset
+# on its own docked axis. Callers still own the ANCHORS; this only ever writes
+# offsets, and only on the axis the dock occupies.
+func _apply_edge_offsets(extent: float) -> void:
+	match side:
+		Side.LEFT:
+			offset_left = 0.0
+			offset_right = extent
+		Side.RIGHT:
+			offset_left = -extent
+			offset_right = 0.0
+		_:
+			offset_top = -extent
+			offset_bottom = 0.0
+
+
+# The hidden dock's grab tab: a flat sliver with NO content margins, so it can
+# actually reach TAB_SIZE. Cached per colour to keep _apply_state() allocation-free.
+var _tab_styles: Dictionary = {}
+
+func _tab_style(c: Color) -> StyleBoxFlat:
+	if not _tab_styles.has(c):
+		var sb = StyleBoxFlat.new()
+		sb.bg_color = c
+		sb.content_margin_left = 0
+		sb.content_margin_right = 0
+		sb.content_margin_top = 0
+		sb.content_margin_bottom = 0
+		_tab_styles[c] = sb
+	return _tab_styles[c]
+
+
+# The dock's own panel padding, in pixels.
+#
+# WHY THIS EXISTS. `expanded_size` has to mean the dock's OUTER width, because
+# that is what every caller assumes: parts_menu.gd anchors a 336px host Control
+# and sets expanded_size = 336 expecting the two to match. But this node is a
+# PanelContainer, and a PanelContainer's minimum size is its child's minimum PLUS
+# its stylebox's content margins - and Godot takes the MAX of that and any
+# custom_minimum_size, so the padding could not be absorbed by simply asking for
+# less.
+#
+# The symptom was a real test failure, not a theory: test_ui_no_overflow_or_
+# offscreen reported UI_PartsMenu at fixed_size=(336,1080) against
+# content_min=(352,51). 352 = the clip's 336 + DockPanel's SPACE_SM on each side.
+# So the dock demanded 16px more than the column it was placed in, every frame,
+# in both of the Design Lab's docks.
+#
+# Read from the live stylebox rather than hardcoded from Tokens.SPACE_SM, because
+# build_ui_theme.gd owns that padding and is free to change it.
+func _panel_padding() -> Vector2:
+	var sb := get_theme_stylebox("panel")
+	if sb == null:
+		return Vector2.ZERO
+	return Vector2(
+		sb.content_margin_left + sb.content_margin_right,
+		sb.content_margin_top + sb.content_margin_bottom)
+
+
+# The extent the CLIP should ask for, so that the dock's outer size lands on
+# `extent`. Never negative: a padding wider than the rail would otherwise flip
+# the rail inside out.
+func _clip_extent(extent: float) -> float:
+	var pad := _panel_padding()
+	return maxf(0.0, extent - (pad.x if _is_horizontal() else pad.y))
 
 
 # --- Splitter -------------------------------------------------------------

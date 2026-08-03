@@ -14,22 +14,15 @@ var module_type_id: String = ""
 # button text, which the title row already carries through unchanged).
 func _make_custom_tooltip(for_text: String) -> Control:
 	var panel = PanelContainer.new()
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.08, 0.11, 0.15, 0.96)
-	style.border_color = Color(1.0, 0.78, 0.25, 1.0) # Yellow Model Kit Instruction Decal Border
-	style.border_width_top = 5
-	style.border_width_left = 2
-	style.border_width_right = 2
-	style.border_width_bottom = 2
-	style.corner_radius_top_left = 4
-	style.corner_radius_top_right = 4
-	style.corner_radius_bottom_left = 4
-	style.corner_radius_bottom_right = 4
-	style.content_margin_left = 12
-	style.content_margin_right = 12
-	style.content_margin_top = 10
-	style.content_margin_bottom = 10
-	panel.add_theme_stylebox_override("panel", style)
+	# CANVAS from the theme, the same soft backing the flyouts and callouts use -
+	# a tooltip is exactly that category of object, laid over the interface rather
+	# than built into it.
+	#
+	# The inline stylebox this replaces was a blue-black fill with a 5px "Yellow
+	# Model Kit Instruction Decal Border" and 4px corners: three separate values
+	# that appear nowhere in ui_tokens.gd, on the one card a player reads dozens of
+	# times per session while comparing parts.
+	panel.theme_type_variation = "FlyoutPanel"
 
 	var vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 3)
@@ -40,14 +33,14 @@ func _make_custom_tooltip(for_text: String) -> Control:
 		return panel
 	var title = Label.new()
 	title.text = lines[0]
-	title.add_theme_font_size_override("font_size", 16)
-	title.add_theme_color_override("font_color", Color(1.0, 0.92, 0.6))
+	title.theme_type_variation = "HeadingLabel"
 	vbox.add_child(title)
 	for i in range(1, lines.size()):
 		var row = Label.new()
 		row.text = lines[i]
-		row.add_theme_font_size_override("font_size", 12)
-		row.add_theme_color_override("font_color", Color(0.8, 0.88, 0.85))
+		# StatLabel: these rows ARE stats ("HP: 75 | Weight: 65 kg"), and the mono
+		# face is what makes a column of them comparable between two tooltips.
+		row.theme_type_variation = "StatLabel"
 		vbox.add_child(row)
 
 	# Flavor row (VISUAL_ART_DIRECTION.md 1.2 - the tone target's cheapest
@@ -68,10 +61,11 @@ func _make_custom_tooltip(for_text: String) -> Control:
 
 		var flavor_label = Label.new()
 		flavor_label.text = flavor
-		flavor_label.add_theme_font_size_override("font_size", 12)
-		# Dimmer and cooler than the stat rows - present but subordinate, so
-		# it never competes with the numbers a player is actually comparing.
-		flavor_label.add_theme_color_override("font_color", Color(0.62, 0.60, 0.55, 1.0))
+		# HintLabel is the secondary-text role: present but subordinate, so the
+		# voice line never competes with the numbers a player is comparing. That is
+		# what the old hand-mixed (0.62, 0.60, 0.55) was approximating - it is
+		# within a hair of Tokens.TEXT_SECONDARY, which HintLabel already carries.
+		flavor_label.theme_type_variation = "HintLabel"
 		# These lines run to ~90 chars; without an explicit wrap the tooltip
 		# card would stretch into a single very wide strip.
 		flavor_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

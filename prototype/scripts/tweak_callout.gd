@@ -64,6 +64,8 @@ var ring_dist: float = 120.0
 var _resolved_pos: Vector2 = Vector2.ZERO
 var _has_resolved: bool = false
 
+# Width of the hub/satellite signal strip down the panel's left edge.
+const EDGE_WIDTH := 3.0
 # Pixels of clearance required between two satellite panels.
 const OVERLAP_PAD := 8.0
 # How far a satellite may be pushed out along its ray before giving up.
@@ -78,35 +80,56 @@ func _init(tweak_title: String, ctrl: Control, dir: Vector2, dist: float):
 	clip_contents = false
 
 	panel = PanelContainer.new()
-	# CANVAS backing from the theme, with a signal edge for the hub/satellite
-	# distinction. Was an inline StyleBoxFlat with hardcoded gold and cyan -
-	# a local override, which beats the theme and so kept the design system out
-	# of the one part of the Design Lab the player looks at most.
-	panel.theme_type_variation = "FlyoutPanel"
-	var edge = StyleBoxFlat.new()
-	edge.bg_color = Color(Tokens.BASE_900, 0.86)
-	edge.border_width_left = 3
-	edge.border_color = Tokens.SIGNAL_INFO if is_hub else Tokens.SIGNAL_HAZARD
-	edge.corner_radius_top_left = Tokens.RADIUS_CONTROL
-	edge.corner_radius_bottom_right = Tokens.RADIUS_CONTROL
-	edge.content_margin_left = Tokens.SPACE_SM
-	edge.content_margin_right = Tokens.SPACE_SM
-	edge.content_margin_top = 2
-	edge.content_margin_bottom = 2
-	panel.add_theme_stylebox_override("panel", edge)
+	# CANVAS duck from the theme, via the CalloutPanel variation.
+	#
+	# The previous version set a theme variation here and then immediately
+	# overrode "panel" with an inline StyleBoxFlat carrying a hardcoded BASE_900
+	# fill - so the plate never rendered at all, and the callouts stayed the one
+	# part of the Lab the material pass could not reach. A local override beats
+	# the theme, which is precisely the failure mode ui_tokens.gd exists to end,
+	# recurring in the file whose comment claimed to have fixed it.
+	panel.theme_type_variation = "CalloutPanel"
 	add_child(panel)
-	
+
+	# The hub/satellite signal edge, as a strip rather than a stylebox border.
+	# It cannot be a theme entry for two independent reasons: StyleBoxTexture has
+	# no border properties (see build_ui_theme.gd's HeaderPanel note for the same
+	# constraint), and the colour differs per callout, which a single shared
+	# stylebox cannot express.
+	var row = HBoxContainer.new()
+	row.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	panel.add_child(row)
+
+	var edge = ColorRect.new()
+	edge.color = Tokens.SIGNAL_INFO if is_hub else Tokens.SIGNAL_HAZARD
+	edge.custom_minimum_size = Vector2(EDGE_WIDTH, 0)
+	edge.size_flags_vertical = Control.SIZE_FILL
+	# The strip is decoration sitting next to live sliders; letting it take a
+	# click would eat a drag that started a pixel off the control.
+	edge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(edge)
+
 	vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", 0)
-	panel.add_child(vbox)
-	
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(vbox)
+
 	if tweak_title != "":
 		title_label = Label.new()
 		title_label.text = tweak_title
-		title_label.add_theme_font_size_override("font_size", 10)
-		title_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.7) if not is_hub else Color(0.6, 0.9, 1.0))
+		# Was a hardcoded font_size 10 - off the type scale entirely. HintLabel
+		# carries the secondary-label role, then FONT_MICRO takes it down to the
+		# scale's smallest step: MICRO is the token for dense annotation, and
+		# HintLabel's FONT_SMALL would grow every one of up to eight simultaneous
+		# callouts. Still a token, not a magic number.
+		title_label.theme_type_variation = "HintLabel"
+		title_label.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
+		# Title matches its own edge colour, so the hub/satellite distinction
+		# survives several callouts overlapping at the edge of the ring.
+		title_label.add_theme_color_override("font_color",
+			Tokens.SIGNAL_INFO if is_hub else Tokens.SIGNAL_HAZARD)
 		vbox.add_child(title_label)
-	
+
 	control_node = ctrl
 	if control_node.get_parent():
 		control_node.reparent(vbox)

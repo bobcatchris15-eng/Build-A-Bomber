@@ -2,6 +2,7 @@ extends Node3D
 
 const BlueprintManager = preload("res://scripts/blueprint_manager.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
 
 @onready var vehicle_spawn_point = $VehicleSpawnPoint
 @onready var camera = $Camera3D
@@ -20,53 +21,17 @@ func _ready():
 	var return_btn = get_node_or_null("UI/ReturnButton") as Button
 	if return_btn:
 		return_btn.text = "RETURN TO DESIGN LAB"
-		var r_style = StyleBoxFlat.new()
-		r_style.bg_color = Color(0.12, 0.16, 0.22, 0.95)
-		r_style.border_width_left = 6
-		r_style.border_color = Color(0.0, 0.85, 0.45) # Plastic green sprue gate
-		r_style.border_width_top = 1
-		r_style.border_width_right = 1
-		r_style.border_width_bottom = 3
-		r_style.corner_radius_top_left = 4
-		r_style.corner_radius_top_right = 4
-		r_style.corner_radius_bottom_left = 4
-		r_style.corner_radius_bottom_right = 4
-		r_style.content_margin_left = 12
-		r_style.content_margin_right = 12
-		r_style.content_margin_top = 8
-		r_style.content_margin_bottom = 8
-		return_btn.add_theme_stylebox_override("normal", r_style)
-		var r_hover = r_style.duplicate()
-		r_hover.bg_color = Color(0.18, 0.24, 0.32, 0.98)
-		r_hover.border_color = Color(0.3, 1.0, 0.6)
-		return_btn.add_theme_stylebox_override("hover", r_hover)
-		return_btn.add_theme_color_override("font_color", Color(0.2, 1.0, 0.5))
+		# Theme BAKELITE, no override. This was the same "plastic sprue gate"
+		# treatment stat_calculator.gd carried - a hand-built fill with a saturated
+		# 6px left border and a matching font colour - and the Test Range had its own
+		# green/amber pair of it, drifted from the Design Lab's green/amber pair for
+		# the same kinds of action. Neither of these two is destructive or primary:
+		# going back to the Lab and resetting the dummies are both plain navigation.
 		return_btn.pressed.connect(_on_return_pressed)
 		
 	var reset_dummies_btn = get_node_or_null("UI/ResetDummiesButton") as Button
 	if reset_dummies_btn:
 		reset_dummies_btn.text = "RESET TARGET DUMMIES"
-		var d_style = StyleBoxFlat.new()
-		d_style.bg_color = Color(0.22, 0.15, 0.08, 0.95)
-		d_style.border_width_left = 6
-		d_style.border_color = Color(1.0, 0.65, 0.15) # Caution amber sprue gate
-		d_style.border_width_top = 1
-		d_style.border_width_right = 1
-		d_style.border_width_bottom = 3
-		d_style.corner_radius_top_left = 4
-		d_style.corner_radius_top_right = 4
-		d_style.corner_radius_bottom_left = 4
-		d_style.corner_radius_bottom_right = 4
-		d_style.content_margin_left = 12
-		d_style.content_margin_right = 12
-		d_style.content_margin_top = 8
-		d_style.content_margin_bottom = 8
-		reset_dummies_btn.add_theme_stylebox_override("normal", d_style)
-		var d_hover = d_style.duplicate()
-		d_hover.bg_color = Color(0.30, 0.20, 0.10, 0.98)
-		d_hover.border_color = Color(1.0, 0.8, 0.3)
-		reset_dummies_btn.add_theme_stylebox_override("hover", d_hover)
-		reset_dummies_btn.add_theme_color_override("font_color", Color(1.0, 0.75, 0.3))
 		reset_dummies_btn.pressed.connect(_on_reset_dummies_pressed)
 
 	# Instantiate live tuning overlay
@@ -135,7 +100,7 @@ func _spawn_vehicle():
 		var hp_label = Label.new()
 		hp_label.name = "PlayerHPLabel"
 		hp_label.position = Vector2(20, 20)
-		hp_label.add_theme_font_size_override("font_size", 24)
+		hp_label.theme_type_variation = "HUDValueLabel"
 		ui_node.add_child(hp_label)
 		update_player_hp_ui()
 
@@ -285,4 +250,10 @@ func update_player_hp_ui():
 			faction_str = FactionCatalog.get_faction_name(vehicle_hull.get_meta("faction"))
 			
 		hp_label.text = "Player HP: %d/%d [%s] (%s)" % [int(vehicle.hp), int(vehicle.max_hp), bar_str, faction_str]
-		hp_label.modulate = Color.GREEN.lerp(Color.RED, 1.0 - hp_pct)
+		# GO -> ALERT across the health range, rather than Color.GREEN -> Color.RED.
+		# The raw engine constants are fully-saturated primaries that appear nowhere
+		# in ui_tokens.gd; the signal pair means the same thing here as it does on
+		# the power bar and the game-over card. Set as a font colour, not modulate,
+		# which tints children too.
+		hp_label.add_theme_color_override("font_color",
+			Tokens.SIGNAL_GO.lerp(Tokens.SIGNAL_ALERT, 1.0 - hp_pct))

@@ -180,7 +180,7 @@ static func style_slider(_slider: HSlider) -> void:
 # base type's style), which is hard to spot in a screenshot.
 const KNOWN_VARIATIONS = [
 	"CardPanel", "HeaderPanel", "HUDPanel", "InsetPanel",
-	"DockPanel", "DockRail", "FlyoutPanel",
+	"DockPanel", "DockRail", "FlyoutPanel", "CalloutPanel",
 	"PrimaryButton", "DangerButton", "TabButton", "ListButton",
 	"DisplayLabel", "TitleLabel", "HeadingLabel", "HintLabel",
 	"HUDValueLabel", "StatLabel",

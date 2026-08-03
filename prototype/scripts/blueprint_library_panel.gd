@@ -45,7 +45,7 @@ func _ready():
 
 	var title = Label.new()
 	title.text = "Blueprint Library"
-	title.add_theme_font_size_override("font_size", 22)
+	title.theme_type_variation = "TitleLabel"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 
@@ -101,7 +101,7 @@ func _add_row(entry: Dictionary):
 
 	var name_label = Label.new()
 	name_label.text = entry.get("name", "Untitled Design")
-	name_label.add_theme_font_size_override("font_size", 16)
+	name_label.theme_type_variation = "HeadingLabel"
 	info.add_child(name_label)
 
 	var sub_label = Label.new()

@@ -38,7 +38,32 @@ const ICON_PATHS: Dictionary = {
 	"weapon": "res://assets/icons/icon_weapon.svg",
 	"engine": "res://assets/icons/icon_engine.svg",
 	"armor": "res://assets/icons/icon_armor.svg",
-	"info": "res://assets/icons/icon_info.svg"
+	"info": "res://assets/icons/icon_info.svg",
+
+	# Hull Builder primitives (VISUAL/UI plan item 0). One entry per member of
+	# hull_builder.gd's PRIMITIVES table, replacing the Unicode geometry glyphs
+	# that table used to carry as its button faces. Authored by
+	# tools/generate_icons.py - see its PRIMITIVE_ICONS block for the visual
+	# language these share.
+	"prim_box": "res://assets/icons/icon_prim_box.svg",
+	"prim_sphere": "res://assets/icons/icon_prim_sphere.svg",
+	"prim_cylinder": "res://assets/icons/icon_prim_cylinder.svg",
+	"prim_wedge": "res://assets/icons/icon_prim_wedge.svg",
+	"prim_cone": "res://assets/icons/icon_prim_cone.svg",
+	"prim_torus": "res://assets/icons/icon_prim_torus.svg",
+	"prim_slope": "res://assets/icons/icon_prim_slope.svg",
+	"prim_frustum": "res://assets/icons/icon_prim_frustum.svg",
+	"prim_chamfer_box": "res://assets/icons/icon_prim_chamfer_box.svg",
+	"prim_half_cylinder": "res://assets/icons/icon_prim_half_cylinder.svg",
+	"prim_hemisphere": "res://assets/icons/icon_prim_hemisphere.svg",
+	"prim_capsule": "res://assets/icons/icon_prim_capsule.svg",
+	"prim_i_beam": "res://assets/icons/icon_prim_i_beam.svg",
+	"prim_l_beam": "res://assets/icons/icon_prim_l_beam.svg",
+	"prim_hex_prism": "res://assets/icons/icon_prim_hex_prism.svg",
+	"prim_pyramid": "res://assets/icons/icon_prim_pyramid.svg",
+	"prim_fender": "res://assets/icons/icon_prim_fender.svg",
+	"prim_canopy": "res://assets/icons/icon_prim_canopy.svg",
+	"prim_ring": "res://assets/icons/icon_prim_ring.svg",
 }
 
 static var _cache: Dictionary = {}

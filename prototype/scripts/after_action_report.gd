@@ -51,8 +51,11 @@ func _build_ui() -> void:
 	var header_hbox = HBoxContainer.new()
 	var banner = Label.new()
 	banner.text = "VICTORY" if is_victory else "DEFEAT"
-	banner.add_theme_font_size_override("font_size", 32)
-	banner.add_theme_color_override("font_color", Color.GOLD if is_victory else Color(0.9, 0.3, 0.3))
+	banner.theme_type_variation = "TitleLabel"
+	# GO / ALERT rather than Color.GOLD and a hand-mixed red. Same pair skirmish.gd's
+	# game-over card uses, so a match now ends the same colour in both places -
+	# they were two different reds and two different golds for the same two events.
+	banner.add_theme_color_override("font_color", Tokens.SIGNAL_GO if is_victory else Tokens.SIGNAL_ALERT)
 	header_hbox.add_child(banner)
 
 	var sub_header = Label.new()
@@ -100,7 +103,6 @@ func _build_ui() -> void:
 	for h in headers:
 		var lbl = Label.new()
 		lbl.text = h
-		lbl.add_theme_font_size_override("font_size", 14)
 		lbl.theme_type_variation = "HeadingLabel"
 		grid.add_child(lbl)
 
@@ -153,12 +155,13 @@ func _build_ui() -> void:
 	var mvp_lbl = Label.new()
 	mvp_lbl.text = "BEST PERFORMING DESIGN"
 	mvp_lbl.theme_type_variation = "HeadingLabel"
-	mvp_lbl.add_theme_color_override("font_color", Color.GOLD)
+	# HAZARD is the tokens' attention colour; Color.GOLD is a raw engine constant.
+	mvp_lbl.add_theme_color_override("font_color", Tokens.SIGNAL_HAZARD)
 	mvp_vbox.add_child(mvp_lbl)
 
 	var mvp_name_lbl = Label.new()
 	mvp_name_lbl.text = mvp_name if mvp_name != "" else "N/A"
-	mvp_name_lbl.add_theme_font_size_override("font_size", 20)
+	mvp_name_lbl.theme_type_variation = "HeadingLabel"
 	mvp_vbox.add_child(mvp_name_lbl)
 	mvp_panel.add_child(mvp_vbox)
 	right_vbox.add_child(mvp_panel)
@@ -242,6 +245,5 @@ func _build_ui() -> void:
 func _add_table_cell(parent: Control, text: String) -> void:
 	var lbl = Label.new()
 	lbl.text = text
-	lbl.add_theme_font_size_override("font_size", 14)
 	lbl.theme_type_variation = "StatLabel"
 	parent.add_child(lbl)

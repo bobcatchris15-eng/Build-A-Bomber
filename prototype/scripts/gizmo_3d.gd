@@ -205,7 +205,9 @@ func _on_dragged(offset_3d: Vector3, axis: Vector3):
 						VisualBuilder.rebuild_visual(mirror)
 						
 				# Update the UI
-				_show_telemetry_callout("⚡ %s: %.2f" % [spec.label if spec else tweak_name, new_val], Vector3(0, 1.5, 0))
+				# No glyph (VISUAL/UI plan item 0). A live readout of a value being
+				# dragged is the plainest thing in the interface; it needs a number.
+				_show_telemetry_callout("%s: %.2f" % [spec.label if spec else tweak_name, new_val], Vector3(0, 1.5, 0))
 				get_tree().call_group("stat_ui", "on_module_selected", target_module)
 				var root = get_node_or_null("/root/MainLab")
 				var hull = root.get_node_or_null("Hull") if root else null
@@ -224,7 +226,7 @@ func _on_dragged(offset_3d: Vector3, axis: Vector3):
 	elif axis.z != 0: new_scale.z = max(0.1, start_scale.z + scale_change)
 	
 	_apply_scale_to_node(target_module, new_scale)
-	_show_telemetry_callout("⚡ SCALE: (%.1f, %.1f, %.1f)" % [new_scale.x, new_scale.y, new_scale.z], Vector3(0, 1.5, 0))
+	_show_telemetry_callout("SCALE: (%.1f, %.1f, %.1f)" % [new_scale.x, new_scale.y, new_scale.z], Vector3(0, 1.5, 0))
 	
 	# Mirror scaling propagation
 	if target_module.has_meta("mirrored_counterpart"):

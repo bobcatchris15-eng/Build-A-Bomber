@@ -132,10 +132,18 @@ func _build_shell() -> void:
 
 	_dock = UIDockScript.new()
 	_dock.dock_title = "HARDWARE CATALOG"
+	# Identifies the rail when the dock is collapsed to 40px, where the title
+	# cannot fit - see ui_dock.gd's rail construction comment.
+	_dock.dock_icon = "wrench"
 	_dock.side = UIDockScript.Side.LEFT
 	_dock.expanded_size = 336.0
 	_dock.persist_key = "parts_catalog"
+	_dock.auto_reveal = false
+	_dock.default_state = UIDockScript.State.RAILED
 	_dock.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	# Below the Design Lab's top toolbar, which spans the full width. Without this
+	# the catalogue was drawn OVER the toolbar and clipped the mirror toggle.
+	_dock.offset_top = Tokens.TOOLBAR_HEIGHT
 	add_child(_dock)
 
 	var host := _dock.body()

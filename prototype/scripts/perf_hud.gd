@@ -53,18 +53,17 @@ func _ready() -> void:
 	panel.offset_top = 74 # clear of skirmish.gd's 68px top info strip
 	panel.offset_right = -8
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color(0, 0, 0, 0.62)
-	style.content_margin_left = 8
-	style.content_margin_right = 8
-	style.content_margin_top = 6
-	style.content_margin_bottom = 6
-	panel.add_theme_stylebox_override("panel", style)
+	# HUDPanel, the recessed plate the rest of the in-match chrome uses. The old
+	# inline box was a 62%-opacity pure black with hand-picked margins, which is the
+	# generic "debug overlay" look rather than part of this interface.
+	panel.theme_type_variation = "HUDPanel"
 	add_child(panel)
 
 	_label = Label.new()
-	_label.add_theme_font_size_override("font_size", 12)
-	_label.add_theme_color_override("font_color", Color(0.75, 1.0, 0.75))
+	# StatLabel puts the numbers on the mono face, which is what a per-frame
+	# readout wants - proportional digits make a changing FPS counter jitter
+	# sideways. Replaces a pale-green tint that appears nowhere in ui_tokens.gd.
+	_label.theme_type_variation = "StatLabel"
 	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_child(_label)
 

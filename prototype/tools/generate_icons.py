@@ -1,6 +1,37 @@
 import os
+import re
 
-ICON_DIR = r"e:\Build-A-Bomber-GitHub\prototype\assets\icons"
+# ---------------------------------------------------------------------------
+# ONE STROKE COLOUR FOR EVERY ICON
+# ---------------------------------------------------------------------------
+# = ui_tokens.gd TEXT_SECONDARY (0.678, 0.663, 0.627).
+#
+# THE RULE: icons are monochrome chrome. Colour is carried by the CONTROL's
+# state, not by the glyph - a Button's icon dims with its disabled plate, a
+# DangerButton's icon reads as alert because the button does. This is the same
+# rule ui_tokens.gd states for fills ("signal colour is for STATE, not for
+# decorating actions"), applied to the icon set.
+#
+# WHAT IT REPLACES. The 35 icons authored before ui_tokens.gd existed carried
+# SEVENTEEN different stroke colours between them - #38BDF8, #4ADE80, #EF4444,
+# #A855F7, #F43F5E, #94A3B8 and a dozen more. Every one was a cool-toned web
+# palette value that appears nowhere in the token set, and they were the reason
+# the build bar rendered its factory and hull icons in sky blue against warm
+# powdercoat. Seventeen accent colours is not a design system with an icon set;
+# it is a design system with a sticker collection.
+#
+# Enforced by rewrite rather than by editing 35 literals, so a hand-added icon
+# that arrives with its own colour is normalised instead of quietly drifting.
+# test_ui_icons_share_one_stroke_colour guards it from the other end.
+ICON_STROKE = "#ADA9A0"
+
+# Derived from this file's own location, not hardcoded. The previous value was
+# an absolute path into a checkout that no longer exists
+# (e:\Build-A-Bomber-GitHub), so running this script silently wrote 35 icons to a
+# directory nobody reads and reported success.
+ICON_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "icons")
+)
 os.makedirs(ICON_DIR, exist_ok=True)
 
 icons = {
@@ -196,9 +227,152 @@ icons = {
 </svg>'''
 }
 
+# ---------------------------------------------------------------------------
+# HULL BUILDER PRIMITIVE ICONS
+# ---------------------------------------------------------------------------
+# VISUAL/UI plan item 0. The Hull Builder's primitive picker (hull_builder.gd's
+# PRIMITIVES table) used 19 Unicode geometry glyphs as its button faces - ⬢ for
+# Box, ⏢ for Frustum, ⬡ for Hex Prism and so on. They were the most defensible
+# glyphs in the codebase, because each one genuinely depicted its primitive
+# rather than decorating it, but they still had two real problems: the available
+# Unicode shapes only approximate the primitives (there is no "chamfer box" or
+# "fender" character, so those were approximated by whatever was closest), and
+# they rendered in the UI font, so their weight and size drifted from every other
+# icon in the interface.
+#
+# ONE VISUAL LANGUAGE, so the picker reads as a set rather than 19 unrelated
+# marks:
+#   * Warm neutral stroke (#ADA9A0 = ui_tokens.gd TEXT_SECONDARY) rather than the
+#     per-icon saturated colours the older icons above use. These sit on bakelite
+#     buttons in a dense grid; 19 saturated marks would be noise.
+#   * Solids that need a 3D read get a light isometric treatment with the top
+#     face drawn. Sections and profiles (I-Beam, L-Beam, Slope, Frustum) are
+#     drawn flat, because the profile IS the information.
+#   * 2px stroke, 24x24 box, ~4px margin, matching the icons above.
+def _prim(body):
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" '
+        'height="24" fill="none" stroke="%s" stroke-width="2" '
+        'stroke-linecap="round" stroke-linejoin="round">\n%s\n</svg>'
+        % (ICON_STROKE, body)
+    )
+
+
+primitives = {
+    # Isometric cube: front face, side face, top face.
+    "icon_prim_box.svg": _prim(
+        '  <path d="M4 8l8-4 8 4v8l-8 4-8-4V8z"/>\n'
+        '  <path d="M4 8l8 4 8-4M12 12v8"/>'
+    ),
+    # A globe: outline, equator, and one meridian. The meridian is what stops it
+    # reading as a lens - an outline plus a single flat ellipse is exactly the
+    # shape of an eye, which is how the first version came out.
+    "icon_prim_sphere.svg": _prim(
+        '  <circle cx="12" cy="12" r="8"/>\n'
+        '  <ellipse cx="12" cy="12" rx="8" ry="3.2"/>\n'
+        '  <ellipse cx="12" cy="12" rx="3.2" ry="8"/>'
+    ),
+    # Tube: elliptical top, straight walls, curved bottom.
+    "icon_prim_cylinder.svg": _prim(
+        '  <ellipse cx="12" cy="6" rx="7" ry="2.5"/>\n'
+        '  <path d="M5 6v12M19 6v12"/>\n'
+        '  <path d="M5 18a7 2.5 0 0 0 14 0"/>'
+    ),
+    # Triangular prism, seen at an angle: the sloped face plus depth.
+    "icon_prim_wedge.svg": _prim(
+        '  <path d="M4 19V9l8-4v10z"/>\n'
+        '  <path d="M4 19l8-4 6 3-6 3z"/>\n'
+        '  <path d="M12 5l6 3v10l-6-3"/>'
+    ),
+    "icon_prim_cone.svg": _prim(
+        '  <path d="M12 4l7 13"/>\n'
+        '  <path d="M12 4L5 17"/>\n'
+        '  <ellipse cx="12" cy="17" rx="7" ry="2.5"/>'
+    ),
+    # A doughnut in perspective. The outer ellipse is drawn as two arcs with a
+    # visible tube thickness at the sides, because two concentric ellipses alone
+    # read as an EYE at 24px - which is how the first version came out, and it sat
+    # three rows from a sphere that had the same problem.
+    "icon_prim_torus.svg": _prim(
+        '  <ellipse cx="12" cy="12" rx="9.5" ry="5.5"/>\n'
+        '  <ellipse cx="12" cy="12" rx="4.5" ry="1.6"/>\n'
+        '  <path d="M2.5 12a9.5 5.5 0 0 0 19 0"/>'
+    ),
+    # Side profile: box with the top-front edge cut away. The Lego-slope read.
+    "icon_prim_slope.svg": _prim('  <path d="M4 19V11l14-6v14z"/>\n  <path d="M4 11h14"/>'),
+    # Flat trapezoid - a box tapered to a smaller top footprint.
+    "icon_prim_frustum.svg": _prim('  <path d="M3 19L7 5h10l4 14z"/>\n  <path d="M7 5h10"/>'),
+    # Box with every edge bevelled: an octagon, with the four corner cuts drawn as
+    # short chords so the bevel reads as a CUT rather than a rounded corner. The
+    # first version added interior iso edges on top of the octagon, which at 24px
+    # just filled the shape with lines.
+    "icon_prim_chamfer_box.svg": _prim(
+        '  <path d="M8.5 4h7l4.5 4.5v7L15.5 20h-7L4 15.5v-7z"/>\n'
+        '  <path d="M8.5 4l1.5 1.5M15.5 4l-1.5 1.5M20 8.5l-1.5 1.5M20 15.5l-1.5-1.5"/>'
+    ),
+    # Flat-bottomed half-round trough seen end-on.
+    "icon_prim_half_cylinder.svg": _prim(
+        '  <path d="M4 16a8 8 0 0 1 16 0"/>\n'
+        '  <path d="M4 16h16"/>\n'
+        '  <path d="M4 16v2h16v-2"/>'
+    ),
+    # Dome on a flat base.
+    "icon_prim_hemisphere.svg": _prim(
+        '  <path d="M4 15a8 8 0 0 1 16 0"/>\n'
+        '  <ellipse cx="12" cy="15" rx="8" ry="2.5"/>'
+    ),
+    # Stadium shape: rounded-end cylinder, drawn lying down like a fuselage pod.
+    "icon_prim_capsule.svg": _prim('  <rect x="3" y="8" width="18" height="8" rx="4"/>'),
+    "icon_prim_i_beam.svg": _prim(
+        '  <path d="M5 4h14M5 20h14"/>\n  <path d="M12 4v16"/>\n'
+        '  <path d="M9 4v2h6V4M9 20v-2h6v2"/>'
+    ),
+    "icon_prim_l_beam.svg": _prim('  <path d="M6 4v16h14"/>\n  <path d="M6 4h4v12h10v4"/>'),
+    "icon_prim_hex_prism.svg": _prim(
+        '  <path d="M8 4h8l4 8-4 8H8l-4-8z"/>\n  <path d="M8 4l4 8 4-8M12 12v8"/>'
+    ),
+    "icon_prim_pyramid.svg": _prim(
+        '  <path d="M12 4L4 18h16z"/>\n  <path d="M12 4v14"/>\n  <path d="M4 18l8-3 8 3"/>'
+    ),
+    # Open arch - a half-torus, i.e. two concentric arcs with open ends.
+    "icon_prim_fender.svg": _prim(
+        '  <path d="M3 18a9 9 0 0 1 18 0"/>\n'
+        '  <path d="M7 18a5 5 0 0 1 10 0"/>\n'
+        '  <path d="M3 18h4M17 18h4"/>'
+    ),
+    # A dome stretched along one axis: wide and low, the cockpit-bubble read.
+    "icon_prim_canopy.svg": _prim(
+        '  <path d="M2 16c0-6 4.5-9 10-9s10 3 10 9"/>\n'
+        '  <path d="M2 16h20"/>'
+    ),
+    # Flat annulus, seen face-on: concentric circles, no perspective, which is
+    # what separates it from Torus above.
+    "icon_prim_ring.svg": _prim(
+        '  <circle cx="12" cy="12" r="9"/>\n  <circle cx="12" cy="12" r="5"/>'
+    ),
+}
+
+icons.update(primitives)
+
+# Normalise every stroke to ICON_STROKE. The primitives above are already
+# authored that way; this is what brings the 35 older icons onto the same
+# palette without rewriting each of their literals. `fill` is left alone - the
+# icons are stroke-only, and any fill they carry is "none".
+_STROKE_RE = re.compile(r'stroke="#[0-9A-Fa-f]{3,8}"')
+recoloured = 0
+for name, svg in list(icons.items()):
+    fixed, n = _STROKE_RE.subn('stroke="%s"' % ICON_STROKE, svg)
+    if n and fixed != svg:
+        recoloured += 1
+    icons[name] = fixed
+
 for filename, content in icons.items():
     filepath = os.path.join(ICON_DIR, filename)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
 
-print(f"Successfully generated {len(icons)} SVG icons in {ICON_DIR}")
+print(
+    "Successfully generated %d SVG icons (%d Hull Builder primitives, "
+    "%d recoloured to %s) in %s"
+    % (len(icons), len(primitives), recoloured, ICON_STROKE, ICON_DIR)
+)

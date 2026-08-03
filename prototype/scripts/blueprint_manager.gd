@@ -1,5 +1,6 @@
 extends Node
 const ModuleDataResource = preload("res://scripts/module_data.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
 
 # Bumped only when the blueprint JSON schema changes in a way that could
 # silently mis-load older saves (not for every new field - new fields
@@ -162,16 +163,26 @@ func _show_toast(msg: String, is_error: bool = false):
 	if not root:
 		return
 	var toast = PanelContainer.new()
+	# Keeps a stylebox, because the fill IS the message: succeeded or failed. That
+	# is state, which is what ui_tokens.gd reserves signal colour for.
+	#
+	# What changed is which colours. The DIM variants exist precisely for "fills
+	# that sit UNDER text" - the old hand-mixed (0.55, 0.15, 0.15) and (0.15, 0.45,
+	# 0.2) were saturated enough to fight the white label on top of them, and
+	# neither is in the palette. 8px corners went too; the tokens commit to
+	# near-square.
 	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.55, 0.15, 0.15, 0.92) if is_error else Color(0.15, 0.45, 0.2, 0.92)
-	style.corner_radius_top_left = 8
-	style.corner_radius_top_right = 8
-	style.corner_radius_bottom_left = 8
-	style.corner_radius_bottom_right = 8
-	style.content_margin_left = 20
-	style.content_margin_right = 20
-	style.content_margin_top = 10
-	style.content_margin_bottom = 10
+	style.bg_color = Tokens.SIGNAL_ALERT_DIM if is_error else Tokens.SIGNAL_GO_DIM
+	style.border_color = Tokens.SIGNAL_ALERT if is_error else Tokens.SIGNAL_GO
+	style.border_width_left = Tokens.BORDER_EMPHASIS
+	style.corner_radius_top_left = Tokens.RADIUS_CONTROL
+	style.corner_radius_top_right = Tokens.RADIUS_CONTROL
+	style.corner_radius_bottom_left = Tokens.RADIUS_CONTROL
+	style.corner_radius_bottom_right = Tokens.RADIUS_CONTROL
+	style.content_margin_left = Tokens.SPACE_LG
+	style.content_margin_right = Tokens.SPACE_LG
+	style.content_margin_top = Tokens.SPACE_SM
+	style.content_margin_bottom = Tokens.SPACE_SM
 	toast.add_theme_stylebox_override("panel", style)
 	toast.anchor_left = 0.5
 	toast.anchor_right = 0.5
@@ -185,8 +196,10 @@ func _show_toast(msg: String, is_error: bool = false):
 	var label = Label.new()
 	label.text = msg
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 18)
-	label.add_theme_color_override("font_color", Color.WHITE)
+	label.theme_type_variation = "HeadingLabel"
+	# TEXT_PRIMARY, the warm off-white. Pure white on a warm dark fill reads as a
+	# blown-out highlight - ui_tokens.gd's palette section says so explicitly.
+	label.add_theme_color_override("font_color", Tokens.TEXT_PRIMARY)
 	toast.add_child(label)
 
 	get_tree().create_timer(2.6).timeout.connect(func():

@@ -134,26 +134,34 @@ const COL_Z := Color(0.30, 0.55, 0.95)
 # Selection highlight colour layered on top of the primitive's own colour
 const HIGHLIGHT_EMISSION := Color(0.15, 0.40, 0.80)
 
+# `icon` is a key into scripts/ui_icons.gd, not a character.
+#
+# VISUAL/UI plan item 0: these were Unicode geometry glyphs (⬢ ○ ◯ ⋔ △ ⊗ …)
+# concatenated into the button's own text. Two of them were also doing double
+# duty - ○ for Sphere against ◯ for Cylinder, and ⊗ for Torus against ◎ for Ring
+# - which is a pair of near-identical circles standing for four different solids.
+# The drawn set distinguishes them properly: a sphere carries an equator, a
+# cylinder has walls, a torus is in perspective, a ring is flat-on.
 var primitive_defs: Array = [
-	{name="Box",          type=PrimitiveType.BOX,           icon="⬢", tooltip="Box/Cube primitive"},
-	{name="Sphere",       type=PrimitiveType.SPHERE,        icon="○", tooltip="Sphere primitive"},
-	{name="Cylinder",     type=PrimitiveType.CYLINDER,      icon="◯", tooltip="Cylinder primitive"},
-	{name="Wedge",        type=PrimitiveType.WEDGE,         icon="⋔", tooltip="Wedge/Prism primitive"},
-	{name="Cone",         type=PrimitiveType.CONE,          icon="△", tooltip="Cone primitive"},
-	{name="Torus",        type=PrimitiveType.TORUS,         icon="⊗", tooltip="Torus (ring) primitive"},
-	{name="Slope",        type=PrimitiveType.SLOPE,         icon="◺", tooltip="Box with one bevelled top-front edge - Lego-slope read"},
-	{name="Frustum",      type=PrimitiveType.FRUSTUM,       icon="⏢", tooltip="Box tapered to a smaller top footprint"},
-	{name="Chamfer Box",  type=PrimitiveType.CHAMFER_BOX,   icon="▢", tooltip="Box with all edges bevelled - cast-armor-block read"},
-	{name="Half-Cylinder",type=PrimitiveType.HALF_CYLINDER, icon="◗", tooltip="Flat-bottomed half-round trough/canopy shell"},
-	{name="Hemisphere",   type=PrimitiveType.HEMISPHERE,    icon="◔", tooltip="Flat-bottomed dome - turret hatch/sensor blister"},
-	{name="Capsule",      type=PrimitiveType.CAPSULE,       icon="⬭", tooltip="Rounded-end cylinder - pod/fuselage section"},
-	{name="I-Beam",       type=PrimitiveType.I_BEAM,        icon="ǁ", tooltip="I-beam structural section"},
-	{name="L-Beam",       type=PrimitiveType.L_BEAM,        icon="⌐", tooltip="L-angle bracket structural section"},
-	{name="Hex Prism",    type=PrimitiveType.HEX_PRISM,     icon="⬡", tooltip="Hexagonal prism - turret/nut/bolt read"},
-	{name="Pyramid",      type=PrimitiveType.PYRAMID,       icon="▲", tooltip="4-sided pyramid/spike"},
-	{name="Fender",       type=PrimitiveType.FENDER,        icon="◠", tooltip="Open half-torus arch - wheel-arch/mudguard read"},
-	{name="Canopy",       type=PrimitiveType.CANOPY,        icon="◓", tooltip="Dome elongated along Z - cockpit/turret bubble read"},
-	{name="Ring",         type=PrimitiveType.RING,          icon="◎", tooltip="Flat annulus/washer - turret ring collar"},
+	{name="Box",          type=PrimitiveType.BOX,           icon="prim_box",           tooltip="Box/Cube primitive"},
+	{name="Sphere",       type=PrimitiveType.SPHERE,        icon="prim_sphere",        tooltip="Sphere primitive"},
+	{name="Cylinder",     type=PrimitiveType.CYLINDER,      icon="prim_cylinder",      tooltip="Cylinder primitive"},
+	{name="Wedge",        type=PrimitiveType.WEDGE,         icon="prim_wedge",         tooltip="Wedge/Prism primitive"},
+	{name="Cone",         type=PrimitiveType.CONE,          icon="prim_cone",          tooltip="Cone primitive"},
+	{name="Torus",        type=PrimitiveType.TORUS,         icon="prim_torus",         tooltip="Torus (ring) primitive"},
+	{name="Slope",        type=PrimitiveType.SLOPE,         icon="prim_slope",         tooltip="Box with one bevelled top-front edge - Lego-slope read"},
+	{name="Frustum",      type=PrimitiveType.FRUSTUM,       icon="prim_frustum",       tooltip="Box tapered to a smaller top footprint"},
+	{name="Chamfer Box",  type=PrimitiveType.CHAMFER_BOX,   icon="prim_chamfer_box",   tooltip="Box with all edges bevelled - cast-armor-block read"},
+	{name="Half-Cylinder",type=PrimitiveType.HALF_CYLINDER, icon="prim_half_cylinder", tooltip="Flat-bottomed half-round trough/canopy shell"},
+	{name="Hemisphere",   type=PrimitiveType.HEMISPHERE,    icon="prim_hemisphere",    tooltip="Flat-bottomed dome - turret hatch/sensor blister"},
+	{name="Capsule",      type=PrimitiveType.CAPSULE,       icon="prim_capsule",       tooltip="Rounded-end cylinder - pod/fuselage section"},
+	{name="I-Beam",       type=PrimitiveType.I_BEAM,        icon="prim_i_beam",        tooltip="I-beam structural section"},
+	{name="L-Beam",       type=PrimitiveType.L_BEAM,        icon="prim_l_beam",        tooltip="L-angle bracket structural section"},
+	{name="Hex Prism",    type=PrimitiveType.HEX_PRISM,     icon="prim_hex_prism",     tooltip="Hexagonal prism - turret/nut/bolt read"},
+	{name="Pyramid",      type=PrimitiveType.PYRAMID,       icon="prim_pyramid",       tooltip="4-sided pyramid/spike"},
+	{name="Fender",       type=PrimitiveType.FENDER,        icon="prim_fender",        tooltip="Open half-torus arch - wheel-arch/mudguard read"},
+	{name="Canopy",       type=PrimitiveType.CANOPY,        icon="prim_canopy",        tooltip="Dome elongated along Z - cockpit/turret bubble read"},
+	{name="Ring",         type=PrimitiveType.RING,          icon="prim_ring",          tooltip="Flat annulus/washer - turret ring collar"},
 ]
 
 @onready var hull_container:    Node3D         = $HullContainer
@@ -236,12 +244,17 @@ func _populate_palette() -> void:
 	var first := true
 	for d in primitive_defs:
 		var btn := Button.new()
-		btn.text = str(d.icon) + "  " + str(d.name)
+		# A real icon rather than a glyph prefixed onto the label. Button draws the
+		# icon at its natural size ahead of the text, which also fixes the old
+		# version's alignment: two spaces after a variable-width glyph meant the
+		# 19 labels did not start on a common left edge.
+		btn.text = str(d.name)
+		btn.icon = UIIcons.get_icon(str(d.icon))
+		btn.expand_icon = false
 		btn.tooltip_text = str(d.tooltip)
 		btn.toggle_mode = true
 		btn.custom_minimum_size = Vector2(0, 48)
 		btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		btn.add_theme_font_size_override("font_size", 16)
 		if first:
 			btn.button_pressed = true
 			first = false
@@ -1632,7 +1645,7 @@ func _update_properties_panel() -> void:
 	properties_panel.add_child(sym_chk)
 
 func _build_finishing_properties_panel() -> void:
-	_add_section_header("🎨 Hull Finishing & Plating")
+	_add_section_header("Hull Finishing & Plating")
 
 	var desc := Label.new()
 	desc.text = "Configure outer armor skin wrapping over the structural frame girders."

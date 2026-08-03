@@ -52,6 +52,7 @@ const UIShell = preload("res://scripts/ui_shell.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 
 # Working title. Deliberately one constant rather than a literal scattered
 # across screens, because this is expected to change and a rename shouldn't
@@ -322,6 +323,7 @@ func _build_status_column(parent: Control) -> void:
 
 	UIShell.stat_row(body, "Hull class", _prettify(str(latest.get("hull_type", ""))))
 	UIShell.stat_row(body, "Affiliation", _prettify(str(latest.get("faction", ""))))
+	_add_spec_placard(body, mgr, latest)
 
 	if roster.size() <= 1:
 		return
@@ -337,6 +339,55 @@ func _build_status_column(parent: Control) -> void:
 		UIShell.stat_row(body,
 			str(entry.get("name", "")).to_upper(),
 			_prettify(str(entry.get("hull_type", ""))))
+
+
+# Mass, armour spec and the threshold table for the most recent design.
+#
+# VISUAL/UI plan item 9: "Presenting a 'GoatHauler Mk VI' on a spec placard with
+# total deadpan is the thesis of the whole interface in one panel." The status
+# column already carried the designation, hull class and affiliation; what was
+# missing was the part that makes it read as a certification rather than a save
+# slot - a mass figure and the armour thresholds the thing will actually be shot
+# at with.
+#
+# list_blueprints() returns a SUMMARY (id/name/hull_type/faction/path), so the
+# armour fields need the full record. That is one extra file read for one entry,
+# not for the whole library - the roster loop below deliberately stays on the
+# summary.
+func _add_spec_placard(body: VBoxContainer, mgr: Node, latest: Dictionary) -> void:
+	var path := str(latest.get("path", ""))
+	if path == "":
+		return
+	var full: Dictionary = mgr.load_blueprint(path)
+	if full.is_empty():
+		return
+
+	# Hull volume x thickness is not the real mass model - stat_calculator.gd owns
+	# that, and it needs a reconstructed hull to compute it. Reporting the
+	# authored hull envelope instead is honest about what a title screen can know
+	# without rebuilding the vehicle: it is a DIMENSION line on a spec sheet, and
+	# it is labelled as one rather than as a mass the game would disagree with.
+	var hs: Dictionary = full.get("hull_size", {})
+	if hs.has("x"):
+		UIShell.stat_row(body, "Envelope", "%.1f x %.1f x %.1f m" % [
+			float(hs.get("x", 0.0)), float(hs.get("y", 0.0)), float(hs.get("z", 0.0))])
+
+	var module_count: int = (full.get("modules", []) as Array).size()
+	UIShell.stat_row(body, "Fitted modules", str(module_count))
+
+	var material := str(full.get("armor_material", "hardened_steel"))
+	var thickness := float(full.get("armor_thickness", 1.0))
+	UIShell.stat_row(body, "Armour", "%s, %.1fx" % [_prettify(material), thickness])
+
+	# The threshold table, read from the same DamageResolver the combat model uses
+	# - not a second copy of those numbers living on the title screen.
+	var k: Vector2 = DamageResolverScript.get_material_threshold(material, "kinetic", thickness)
+	var t: Vector2 = DamageResolverScript.get_material_threshold(material, "thermal", thickness)
+	var e: Vector2 = DamageResolverScript.get_material_threshold(material, "explosive", thickness)
+	var table = Label.new()
+	table.text = "THRESHOLD  K %.1f / T %.1f / E %.1f" % [k.x, t.x, e.x]
+	table.theme_type_variation = "StatLabel"
+	body.add_child(table)
 
 
 func _prettify(id: String) -> String:

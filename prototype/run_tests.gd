@@ -248,6 +248,30 @@ func _init():
 		success = false
 		_failed.append("test_ui_audit_has_real_teeth")
 	_total_suites += 1
+	if not await _run_suite(test_ui_flyout_placement, "test_ui_flyout_placement"):
+		success = false
+		_failed.append("test_ui_flyout_placement")
+	_total_suites += 1
+	if not await _run_suite(test_hull_spec_flyout_round_trip, "test_hull_spec_flyout_round_trip"):
+		success = false
+		_failed.append("test_hull_spec_flyout_round_trip")
+	_total_suites += 1
+	if not await _run_suite(test_tweak_callout_uses_theme_not_local_stylebox, "test_tweak_callout_uses_theme_not_local_stylebox"):
+		success = false
+		_failed.append("test_tweak_callout_uses_theme_not_local_stylebox")
+	_total_suites += 1
+	if not await _run_suite(test_ui_dock_state_cycle, "test_ui_dock_state_cycle"):
+		success = false
+		_failed.append("test_ui_dock_state_cycle")
+	_total_suites += 1
+	if not await _run_suite(test_ui_tone_no_decorative_glyphs, "test_ui_tone_no_decorative_glyphs"):
+		success = false
+		_failed.append("test_ui_tone_no_decorative_glyphs")
+	_total_suites += 1
+	if not await _run_suite(test_ui_icons_share_one_stroke_colour, "test_ui_icons_share_one_stroke_colour"):
+		success = false
+		_failed.append("test_ui_icons_share_one_stroke_colour")
+	_total_suites += 1
 	if not await _run_suite(test_headless_combat_simulation, "test_headless_combat_simulation"):
 		success = false
 		_failed.append("test_headless_combat_simulation")
@@ -3884,6 +3908,488 @@ func test_ui_no_overflow_or_offscreen() -> bool:
 	scene.queue_free()
 	print("  [PASS] No UI panels have content wider/taller than their fixed size, and nothing is positioned off-screen (MainLab.tscn).")
 	return true
+
+func test_ui_flyout_placement() -> bool:
+	print("Running Test Suite: UIFlyout edge flipping + viewport clamping...")
+	# The flyout primitive's whole job is landing somewhere sensible relative to
+	# the control that opened it. Placement is also the part most likely to
+	# silently regress, because a mispositioned flyout still renders - it is just
+	# in the wrong place, or half off the screen, which no smoke test notices.
+	#
+	# screen_bounds_override exists precisely so this can be asserted: headless
+	# Godot's viewport is whatever project settings imply, not what a test set up,
+	# so without an injectable rect every assertion here would measure the wrong
+	# rectangle. See the property's comment in ui_flyout.gd.
+	var UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
+	var BOUNDS := Rect2(Vector2.ZERO, Vector2(1280, 720))
+
+	var host = Control.new()
+	host.size = BOUNDS.size
+	root.add_child(host)
+
+	# A source button hard against the BOTTOM edge. Asking for BELOW there must
+	# flip ABOVE rather than hang off the screen.
+	var low_btn = Button.new()
+	low_btn.text = "SPEC"
+	low_btn.position = Vector2(80, 700)
+	low_btn.size = Vector2(120, 20)
+	host.add_child(low_btn)
+
+	var f = UIFlyoutScript.create(host, "Hull Specification")
+	f.screen_bounds_override = BOUNDS
+	for i in range(6):
+		var pad = Label.new()
+		pad.text = "ARMOR MATERIAL ROW %d" % i
+		f.body().add_child(pad)
+	f.open_from(low_btn, UIFlyoutScript.Align.BELOW)
+	# open_from defers placement by two frames on purpose (a container has no real
+	# size until it has computed its minimum), so this must wait longer than that.
+	for i in range(6):
+		await process_frame
+
+	var r: Rect2 = f.get_rect()
+	if r.size.y < 4.0:
+		print("  [FAIL] Flyout never laid out (size=", r.size, ") - placement assertions would be meaningless.")
+		host.queue_free()
+		return false
+	if not BOUNDS.encloses(r):
+		print("  [FAIL] Flyout near the bottom edge left the viewport: rect=", r, " bounds=", BOUNDS)
+		host.queue_free()
+		return false
+	# Flipped ABOVE means it must not cover the button that opened it.
+	if r.intersects(low_btn.get_global_rect()):
+		print("  [FAIL] Flyout overlaps its own trigger: flyout=", r, " trigger=", low_btn.get_global_rect())
+		host.queue_free()
+		return false
+
+	# A source hard against the RIGHT edge, asked to open RIGHT_OF: same contract
+	# on the other axis, which is a genuinely separate branch in _rect_for_source.
+	var right_btn = Button.new()
+	right_btn.text = "SPEC"
+	right_btn.position = Vector2(1200, 300)
+	right_btn.size = Vector2(70, 20)
+	host.add_child(right_btn)
+
+	var f2 = UIFlyoutScript.create(host, "Faction")
+	f2.screen_bounds_override = BOUNDS
+	for i in range(4):
+		var pad2 = Label.new()
+		pad2.text = "THE AERODROME CARTEL"
+		f2.body().add_child(pad2)
+	f2.open_from(right_btn, UIFlyoutScript.Align.RIGHT_OF)
+	for i in range(6):
+		await process_frame
+
+	var r2: Rect2 = f2.get_rect()
+	if not BOUNDS.encloses(r2):
+		print("  [FAIL] Flyout near the right edge left the viewport: rect=", r2, " bounds=", BOUNDS)
+		host.queue_free()
+		return false
+
+	host.queue_free()
+	await process_frame
+	print("  [PASS] Flyouts flip off both the bottom and right edges, stay inside the viewport, and never cover their own trigger.")
+	return true
+
+func test_hull_spec_flyout_round_trip() -> bool:
+	print("Running Test Suite: hull-spec controls survive a flyout open/close cycle...")
+	# The hull-spec flyout REPARENTS six long-lived controls into a panel that
+	# frees itself on close. If the reclaim on `closed` ever stops firing, those
+	# controls get freed with the flyout and the armour/faction UI goes dead -
+	# and it goes dead silently, because every caller guards with `if
+	# armor_mat_btn:` and simply skips. That is the failure this test exists for.
+	root.size = Vector2i(1280, 720)
+	var scene = load("res://scenes/MainLab.tscn").instantiate()
+	root.add_child(scene)
+	await process_frame
+	root.size = Vector2i(1280, 720)
+	await process_frame
+
+	var stats = scene.get_node_or_null("UI_StatBlock")
+	if stats == null:
+		print("  [FAIL] No UI_StatBlock in MainLab.tscn.")
+		scene.queue_free()
+		return false
+	if stats.hull_spec_btn == null or stats.hull_spec_stash == null:
+		print("  [FAIL] Hull-spec trigger/stash were never built.")
+		scene.queue_free()
+		return false
+
+	var widgets: Array = stats._hull_spec_widgets()
+	if widgets.size() != 6:
+		print("  [FAIL] Expected 6 hull-spec widgets, got ", widgets.size())
+		scene.queue_free()
+		return false
+	for w in widgets:
+		if w == null or not is_instance_valid(w):
+			print("  [FAIL] A hull-spec widget was never created.")
+			scene.queue_free()
+			return false
+		if w.get_parent() != stats.hull_spec_stash:
+			print("  [FAIL] Widget ", w.name, " does not start in the stash (parent=", w.get_parent(), ")")
+			scene.queue_free()
+			return false
+
+	# --- Open: every widget must move into the flyout ---
+	stats._on_hull_spec_pressed()
+	await process_frame
+	var flyout = stats._hull_spec_flyout
+	if flyout == null or not is_instance_valid(flyout):
+		print("  [FAIL] Pressing the trigger created no flyout.")
+		scene.queue_free()
+		return false
+	for w in widgets:
+		if not stats.hull_spec_stash.is_ancestor_of(w) and not flyout.is_ancestor_of(w):
+			print("  [FAIL] Widget ", w.name, " went nowhere on open.")
+			scene.queue_free()
+			return false
+	if not flyout.is_ancestor_of(stats.armor_mat_btn):
+		print("  [FAIL] Armor material dropdown did not move into the flyout.")
+		scene.queue_free()
+		return false
+
+	# --- Close: every widget must come back, still alive ---
+	flyout.close()
+	await process_frame
+	await process_frame
+	for w in widgets:
+		if not is_instance_valid(w):
+			print("  [FAIL] A hull-spec widget was FREED with the flyout - the reclaim on `closed` did not run.")
+			scene.queue_free()
+			return false
+		if w.get_parent() != stats.hull_spec_stash:
+			print("  [FAIL] Widget ", w.name, " did not return to the stash (parent=", w.get_parent(), ")")
+			scene.queue_free()
+			return false
+
+	# Faction sync must still work after the round trip. This is the regression
+	# the old `get_node_or_null("FactionDropdown")` path lookup would have caused:
+	# null lookup, silent skip, wrong faction shown on a loaded blueprint.
+	if stats.faction_btn == null or not is_instance_valid(stats.faction_btn):
+		print("  [FAIL] faction_btn member lost after the round trip.")
+		scene.queue_free()
+		return false
+
+	# Reopening must toggle, not stack a second panel on top of the first.
+	stats._on_hull_spec_pressed()
+	await process_frame
+	if stats._hull_spec_flyout == null:
+		print("  [FAIL] Second open produced no flyout.")
+		scene.queue_free()
+		return false
+	stats._on_hull_spec_pressed()
+	await process_frame
+	await process_frame
+	if stats._hull_spec_flyout != null:
+		print("  [FAIL] Trigger did not toggle - a flyout is still open after a second press.")
+		scene.queue_free()
+		return false
+	for w in widgets:
+		if not is_instance_valid(w) or w.get_parent() != stats.hull_spec_stash:
+			print("  [FAIL] Widget ", w, " not reclaimed after the toggle cycle.")
+			scene.queue_free()
+			return false
+
+	scene.queue_free()
+	await process_frame
+	print("  [PASS] Hull-spec controls move into the flyout, return to the stash alive, and the trigger toggles.")
+	return true
+
+func test_tweak_callout_uses_theme_not_local_stylebox() -> bool:
+	print("Running Test Suite: TweakCallout takes its surface from the theme...")
+	# VISUAL/UI plan item 6b. The callout panel previously set a theme variation
+	# AND then overrode "panel" with an inline StyleBoxFlat, so the CANVAS plate
+	# never rendered - a local override beats the theme, which is the exact
+	# failure ui_tokens.gd was written to end. This asserts the override is gone
+	# and the variation the theme actually defines is in use, because the visual
+	# symptom (a slightly flatter panel) is invisible to every other test.
+	var TweakCalloutScript = preload("res://scripts/tweak_callout.gd")
+	var Tokens = preload("res://scripts/ui_tokens.gd")
+	var theme: Theme = load("res://resources/bomber_theme.tres")
+	if theme == null:
+		print("  [FAIL] bomber_theme.tres did not load.")
+		return false
+	if not theme.has_stylebox("panel", "CalloutPanel"):
+		print("  [FAIL] Theme has no CalloutPanel/panel stylebox - build_ui_theme.gd was not re-run.")
+		return false
+	var sb = theme.get_stylebox("panel", "CalloutPanel")
+	if not (sb is StyleBoxTexture):
+		print("  [FAIL] CalloutPanel is a ", sb.get_class(), ", not a StyleBoxTexture - it is not on a material plate.")
+		return false
+
+	# Deliberately NOT added to the scene tree. TweakCallout._process frees itself
+	# as soon as it has no valid target_node, and its _draw unprojects through the
+	# active Camera3D - neither of which exists in a bare harness, so a tree-
+	# parented callout is gone before the first assertion runs (which is exactly
+	# how the first version of this test failed). Everything asserted below is
+	# built in _init(), so construction alone is enough.
+	var slider = HSlider.new()
+	var callout = TweakCalloutScript.new("Barrel Length", slider, Vector2.RIGHT, 120.0)
+
+	if callout.panel == null:
+		print("  [FAIL] Callout built no panel.")
+		callout.free()
+		return false
+	if callout.panel.theme_type_variation != "CalloutPanel":
+		print("  [FAIL] Panel variation is '", callout.panel.theme_type_variation, "', expected 'CalloutPanel'.")
+		callout.free()
+		return false
+	if callout.panel.has_theme_stylebox_override("panel"):
+		print("  [FAIL] Panel still carries a LOCAL stylebox override, which beats the theme and hides the material plate.")
+		callout.free()
+		return false
+
+	# The hub/satellite signal edge must survive as a real strip, since it moved
+	# out of the stylebox border it used to live in.
+	var found_edge := false
+	for n in _all_descendants(callout):
+		if n is ColorRect and n.color.is_equal_approx(Tokens.SIGNAL_HAZARD):
+			found_edge = true
+			break
+	if not found_edge:
+		print("  [FAIL] Satellite callout has no SIGNAL_HAZARD edge strip.")
+		callout.free()
+		return false
+
+	# The hub takes the other signal colour, so the two are still distinguishable
+	# now that the distinction is a strip rather than a stylebox border.
+	var hub_slider = HSlider.new()
+	var hub = TweakCalloutScript.new("Module Stats", hub_slider, Vector2.RIGHT, 120.0)
+	var found_hub_edge := false
+	for n in _all_descendants(hub):
+		if n is ColorRect and n.color.is_equal_approx(Tokens.SIGNAL_INFO):
+			found_hub_edge = true
+			break
+	if not found_hub_edge:
+		print("  [FAIL] Hub callout has no SIGNAL_INFO edge strip - hub and satellite are indistinguishable.")
+		callout.free()
+		hub.free()
+		return false
+
+	callout.free()
+	hub.free()
+	print("  [PASS] Callout panel uses the theme's CalloutPanel plate with no local override, and hub/satellite keep distinct signal edges.")
+	return true
+
+func test_ui_dock_state_cycle() -> bool:
+	print("Running Test Suite: UIDock expanded/railed/hidden widths...")
+	# VISUAL/UI plan item 4's verification, plus the Container-propagation trap the
+	# plan flags in that item: "a railed dock reports its rail width as minimum
+	# size, not its expanded width". That one is invisible by inspection - a
+	# collapsed dock LOOKS collapsed while still demanding its full expanded width
+	# from the parent, which just squeezes whatever shares the row.
+	var UIDockScript = preload("res://scripts/ui_dock.gd")
+
+	var host = Control.new()
+	host.size = Vector2(1280, 720)
+	root.add_child(host)
+
+	var dock = UIDockScript.new()
+	dock.dock_title = "CATALOG"
+	dock.side = UIDockScript.Side.LEFT
+	dock.expanded_size = 320.0
+	dock.auto_reveal = false
+	# No persist_key: a test must not read or write user://ui_layout.cfg, or it
+	# picks up whatever width the developer last dragged and stops being a test.
+	dock.persist_key = ""
+	host.add_child(dock)
+
+	var wide = Label.new()
+	wide.text = "A PART NAME LONG ENOUGH TO NEED ROOM"
+	dock.body().add_child(wide)
+	await process_frame
+	await process_frame
+
+	dock.set_dock_state(UIDockScript.State.EXPANDED, false)
+	await process_frame
+	var expanded_min := dock.get_combined_minimum_size().x
+	if absf(expanded_min - 320.0) > 1.0:
+		print("  [FAIL] Expanded dock outer minimum is ", expanded_min, ", expected 320 (expanded_size must mean OUTER width).")
+		host.queue_free()
+		return false
+	if absf(dock.outer_extent() - 320.0) > 0.01:
+		print("  [FAIL] outer_extent() reported ", dock.outer_extent(), " when expanded.")
+		host.queue_free()
+		return false
+
+	dock.set_dock_state(UIDockScript.State.RAILED, false)
+	await process_frame
+	var railed_min := dock.get_combined_minimum_size().x
+	if railed_min > UIDockScript.RAIL_SIZE + 1.0:
+		print("  [FAIL] Railed dock still demands ", railed_min, "px (rail is ", UIDockScript.RAIL_SIZE,
+			"). The clip is propagating its children's minimum through the Container - see item 4's trap.")
+		host.queue_free()
+		return false
+	if absf(dock.outer_extent() - UIDockScript.RAIL_SIZE) > 0.01:
+		print("  [FAIL] outer_extent() reported ", dock.outer_extent(), " when railed.")
+		host.queue_free()
+		return false
+
+	dock.set_dock_state(UIDockScript.State.HIDDEN, false)
+	await process_frame
+	var hidden_min := dock.get_combined_minimum_size().x
+	if hidden_min > UIDockScript.TAB_SIZE + 1.0:
+		print("  [FAIL] Hidden dock still demands ", hidden_min, "px (tab is ", UIDockScript.TAB_SIZE, ").")
+		host.queue_free()
+		return false
+
+	# Back to expanded, because a one-way collapse would still pass everything above.
+	dock.set_dock_state(UIDockScript.State.EXPANDED, false)
+	await process_frame
+	if absf(dock.get_combined_minimum_size().x - 320.0) > 1.0:
+		print("  [FAIL] Dock did not return to its expanded width; got ", dock.get_combined_minimum_size().x)
+		host.queue_free()
+		return false
+
+	# toggle() must never reach HIDDEN - losing a panel off the screen edge is not
+	# something a double-click on a header should be able to do.
+	dock.set_dock_state(UIDockScript.State.EXPANDED, false)
+	dock.toggle()
+	await process_frame
+	var after_one := dock.get_dock_state()
+	dock.toggle()
+	await process_frame
+	var after_two := dock.get_dock_state()
+	if after_one == UIDockScript.State.HIDDEN or after_two == UIDockScript.State.HIDDEN:
+		print("  [FAIL] toggle() reached HIDDEN (", after_one, " -> ", after_two, ").")
+		host.queue_free()
+		return false
+	if after_two != UIDockScript.State.EXPANDED:
+		print("  [FAIL] Two toggles did not return to EXPANDED; got ", after_two)
+		host.queue_free()
+		return false
+
+	host.queue_free()
+	await process_frame
+	print("  [PASS] Dock cycles expanded/railed/hidden with correct OUTER minimum widths, and toggle() never hides.")
+	return true
+
+func test_ui_tone_no_decorative_glyphs() -> bool:
+	print("Running Test Suite: UI tone guard (no emoji/dingbats in shipped strings)...")
+	# VISUAL/UI plan item 0's standing guard. The plan predicted exactly why this
+	# is needed - "it stops item 0 from silently regressing the way main_menu.gd
+	# already did once" - and it was right twice over: with no guard in place,
+	# 🎨 survived in hull_builder.gd and 🏭/⛽/⚡ in skirmish.gd's build bar
+	# through the whole material pass.
+	#
+	# Walks the real Control trees rather than grepping source, so it also catches
+	# a glyph that arrives via a data table or a format string.
+	var screens := [
+		"res://scenes/MainMenu.tscn",
+		"res://scenes/MainLab.tscn",
+		"res://scenes/OperationsSetup.tscn",
+		"res://scenes/HullBuilder.tscn",
+	]
+	var offenders := []
+	for path in screens:
+		if not ResourceLoader.exists(path):
+			continue
+		root.size = Vector2i(1280, 720)
+		var scene = load(path).instantiate()
+		root.add_child(scene)
+		for i in range(6):
+			await process_frame
+		_collect_glyph_offenders(scene, path, offenders)
+		scene.queue_free()
+		await process_frame
+
+	if not offenders.is_empty():
+		for o in offenders:
+			print("  [FAIL] Decorative glyph %s in %s -> %s : \"%s\"" % [o.glyph, o.screen, o.path, o.text])
+		return false
+
+	print("  [PASS] No emoji or dingbat characters in any shipped label/button text across %d screens." % screens.size())
+	return true
+
+# Ranges deliberately EXCLUDE the Geometric Shapes block (0x25xx) and Latin/
+# punctuation. Box-drawing and geometric characters are legitimate technical
+# notation in this project - battle_unit.gd's health bars are built from them -
+# whereas emoji and dingbats are the decoration item 0 bans.
+const _GLYPH_RANGES := [
+	[0x2190, 0x21FF],   # arrows
+	[0x2600, 0x27BF],   # misc symbols + dingbats (stars, ✓, ⚙, ⚡)
+	[0x2B00, 0x2BFF],   # misc symbols and arrows
+	[0x1F000, 0x1FAFF], # emoji planes
+]
+
+func _is_decorative_glyph(c: int) -> bool:
+	for r in _GLYPH_RANGES:
+		if c >= r[0] and c <= r[1]:
+			return true
+	return false
+
+func _collect_glyph_offenders(node: Node, screen: String, out: Array) -> void:
+	var text := ""
+	if node is Label:
+		text = (node as Label).text
+	elif node is Button:
+		text = (node as Button).text
+	elif node is CheckBox:
+		text = (node as CheckBox).text
+	if text != "":
+		for i in range(text.length()):
+			if _is_decorative_glyph(text.unicode_at(i)):
+				out.append({
+					"glyph": text[i], "screen": screen.get_file(),
+					"path": String(node.get_path()).right(60), "text": text,
+				})
+				break
+	for c in node.get_children():
+		_collect_glyph_offenders(c, screen, out)
+
+func test_ui_icons_share_one_stroke_colour() -> bool:
+	print("Running Test Suite: every UI icon is authored in one neutral stroke...")
+	# The icon set is monochrome on purpose: colour belongs to the control's state,
+	# not to the glyph (see tools/generate_icons.py's ICON_STROKE comment). Before
+	# that rule, 35 icons carried 17 different cool-toned web colours between them,
+	# which is how the build bar ended up rendering sky-blue factory glyphs on warm
+	# powdercoat.
+	#
+	# Reads the .svg sources rather than the imported textures, because the source
+	# is what a future hand-added icon would arrive as, and the failure mode is a
+	# colour that looks fine in isolation and wrong in the interface.
+	var expect := "#ADA9A0"  # = Tokens.TEXT_SECONDARY
+	var dir := DirAccess.open("res://assets/icons")
+	if dir == null:
+		print("  [FAIL] Cannot open res://assets/icons")
+		return false
+
+	var re := RegEx.new()
+	re.compile('stroke="(#[0-9A-Fa-f]{3,8})"')
+
+	var checked := 0
+	var offenders := []
+	dir.list_dir_begin()
+	var f := dir.get_next()
+	while f != "":
+		if not dir.current_is_dir() and f.ends_with(".svg"):
+			var src := FileAccess.get_file_as_string("res://assets/icons/" + f)
+			var found := {}
+			for m in re.search_all(src):
+				found[m.get_string(1).to_upper()] = true
+			checked += 1
+			for c in found.keys():
+				if c != expect:
+					offenders.append({"file": f, "colour": c})
+		f = dir.get_next()
+	dir.list_dir_end()
+
+	if checked == 0:
+		print("  [FAIL] Found no .svg icons to check - the directory or the naming changed.")
+		return false
+	if not offenders.is_empty():
+		for o in offenders:
+			print("  [FAIL] %s strokes %s, expected %s. Re-run tools/generate_icons.py." % [o.file, o.colour, expect])
+		return false
+
+	print("  [PASS] All %d icons stroke %s; icon colour is left to the control's state." % [checked, expect])
+	return true
+
+func _all_descendants(node: Node, out: Array = []) -> Array:
+	for c in node.get_children():
+		out.append(c)
+		_all_descendants(c, out)
+	return out
 
 func test_ui_audit_has_real_teeth() -> bool:
 	print("Running Test Suite: UI Audit Tool Sanity Check (does it actually catch bugs?)...")

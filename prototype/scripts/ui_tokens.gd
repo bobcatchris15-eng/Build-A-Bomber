@@ -76,6 +76,13 @@ const FONT_MICRO = 11    # dense tabular readouts, footnotes
 # ---------------------------------------------------------------------------
 # SPACING - a 4px base grid. Every margin and gap should be one of these.
 # ---------------------------------------------------------------------------
+# The Design Lab's top toolbar height (VISUAL/UI plan item 7). Lives here rather
+# than in stat_calculator.gd because the docks have to start BELOW it: the toolbar
+# spans the full width, and the first version had the parts catalogue drawn over
+# the top of it, clipping the mirror toggle to "ment [M]". Two scenes need the
+# same number, so the number belongs to the token set.
+const TOOLBAR_HEIGHT = 44
+
 const SPACE_XS = 4
 const SPACE_SM = 8
 const SPACE_MD = 12

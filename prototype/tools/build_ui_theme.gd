@@ -201,6 +201,7 @@ const VARIATION_BASES = {
 	"DockPanel": "PanelContainer",
 	"DockRail": "PanelContainer",
 	"FlyoutPanel": "PanelContainer",
+	"CalloutPanel": "PanelContainer",
 	"PrimaryButton": "Button",
 	"DangerButton": "Button",
 	"TabButton": "Button",
@@ -277,6 +278,25 @@ func _build_panels(theme: Theme) -> void:
 	theme.set_stylebox("panel", "FlyoutPanel",
 		_plate("canvas", "normal", Tokens.SPACE_MD, Tokens.SPACE_MD))
 
+	# CalloutPanel - the annotation panels hanging off a selected module
+	# (scripts/tweak_callout.gd). Same CANVAS duck as a flyout, because it is the
+	# same kind of object: a soft thing laid over the model rather than chrome
+	# welded to the frame.
+	#
+	# Tighter margins than FlyoutPanel, and that is the whole reason this is a
+	# separate variation rather than a reuse. A callout is a label-sized panel
+	# sitting a few dozen pixels from the geometry it points at, and there are up
+	# to eight of them on screen at once; FlyoutPanel's SPACE_MD ring made them
+	# large enough to collide with each other before tweak_callout.gd's overlap
+	# resolution had any room to work.
+	#
+	# The hub/satellite signal edge is NOT here. It is a rule, not a material -
+	# same reasoning as HeaderPanel above - and it also has to change colour per
+	# callout, which a shared theme entry cannot do. tweak_callout.gd draws it as
+	# a strip inside this plate.
+	theme.set_stylebox("panel", "CalloutPanel",
+		_plate("canvas", "normal", Tokens.SPACE_XS, 2))
+
 
 func _build_buttons(theme: Theme) -> void:
 	# BAKELITE. Heavy moulded phenolic switches.
@@ -314,6 +334,20 @@ func _build_buttons(theme: Theme) -> void:
 		theme.set_color("font_outline_color", type, Color.BLACK)
 		theme.set_constant("outline_size", type, 3)
 		theme.set_constant("h_separation", type, Tokens.SPACE_SM)
+		# ICON STATE. tools/generate_icons.py authors every icon in one neutral
+		# stroke (TEXT_SECONDARY) on the rule that colour belongs to the control's
+		# state rather than to the glyph - so the control has to actually supply it.
+		# These are MODULATES over the authored colour, hence WHITE for "as
+		# authored" rather than a colour of their own; anything else would tint a
+		# grey icon.
+		theme.set_color("icon_normal_color", type, Color.WHITE)
+		theme.set_color("icon_hover_color", type, Color.WHITE)
+		theme.set_color("icon_pressed_color", type, Color.WHITE)
+		# The one that earns its keep: a disabled button's icon dims WITH the
+		# button. Previously the icons carried their own saturated colours, so a
+		# greyed-out build button kept a bright sky-blue glyph on a darkened plate
+		# and read as still-clickable.
+		theme.set_color("icon_disabled_color", type, Color(0.45, 0.45, 0.45, 0.7))
 
 	# PrimaryButton - CARBON, cast toward go-green. Carbon is deliberately
 	# rationed across the whole interface (see UITheme.MATERIALS); spending it

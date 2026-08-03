@@ -3,6 +3,7 @@ extends Control
 # Compares the active WIP Design Lab construct against a target Fleet Roster blueprint side-by-side.
 
 const UITheme = preload("res://scripts/ui_theme.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const StatCalculatorScript = preload("res://scripts/stat_calculator.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
@@ -19,11 +20,13 @@ func _ready():
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var backdrop = ColorRect.new()
-	backdrop.color = Color(0.04, 0.06, 0.08, 0.85)
+	# Modal scrim: BASE_900 is the token designated for it.
+	backdrop.color = Color(Tokens.BASE_900, 0.85)
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(backdrop)
 
 	var panel = PanelContainer.new()
+	panel.theme_type_variation = "CardPanel"
 	panel.anchor_left = 0.5
 	panel.anchor_top = 0.5
 	panel.anchor_right = 0.5
@@ -50,8 +53,9 @@ func _ready():
 
 	var title = Label.new()
 	title.text = "BLUEPRINT COMPARISON"
-	title.add_theme_font_size_override("font_size", 20)
-	title.add_theme_color_override("font_color", Color(0.2, 0.9, 1.0))
+	# TitleLabel takes the stencil face and the scale's title step. The old cyan
+	# (0.2, 0.9, 1.0) was the last of the sci-fi accent left anywhere in the UI.
+	title.theme_type_variation = "TitleLabel"
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 
@@ -73,7 +77,7 @@ func _ready():
 	main_vbox.add_child(split_hbox)
 
 	# Left Column: Active WIP Design
-	var wip_panel = _build_unit_column("ACTIVE WORKBENCH DESIGN", wip_stats, Color(0.3, 0.8, 1.0))
+	var wip_panel = _build_unit_column("ACTIVE WORKBENCH DESIGN", wip_stats, Tokens.SIGNAL_INFO)
 	wip_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	split_hbox.add_child(wip_panel)
 
@@ -84,7 +88,7 @@ func _ready():
 
 	# Right Column: Target Fleet Roster Blueprint
 	var target_name = target_blueprint.get("name", "Saved Blueprint")
-	var target_col = _build_unit_column(target_name.to_upper(), target_stats, Color(1.0, 0.75, 0.2))
+	var target_col = _build_unit_column(target_name.to_upper(), target_stats, Tokens.SIGNAL_HAZARD)
 	target_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	split_hbox.add_child(target_col)
 
@@ -97,7 +101,9 @@ func _ready():
 
 	var load_target_btn = Button.new()
 	load_target_btn.text = "Load Comparison Unit into Workbench"
-	load_target_btn.modulate = Color(0.4, 0.9, 0.5)
+	# The one primary action on this panel, so it takes the CARBON plate rather
+	# than a green tint - PrimaryButton exists for exactly this.
+	load_target_btn.theme_type_variation = "PrimaryButton"
 	load_target_btn.pressed.connect(func():
 		var root = get_node_or_null("/root/MainLab")
 		if root:
@@ -115,7 +121,13 @@ func _get_wip_stats() -> Dictionary:
 	if not stat_calc: return {}
 	
 	return {
-		"name": stat_calc.get_node_or_null("ScrollContainer/VBoxContainer/BlueprintNameEdit").text if stat_calc.has_node("ScrollContainer/VBoxContainer/BlueprintNameEdit") else "WIP Unit",
+		# Read through stat_calculator's own member, not by node path. The path
+		# "ScrollContainer/VBoxContainer/BlueprintNameEdit" stopped resolving the
+		# moment VISUAL/UI plan item 7 moved that ScrollContainer inside a UIDock -
+		# and it would have failed SILENTLY, because has_node() returning false just
+		# selects the "WIP Unit" fallback and the comparison panel would have
+		# quietly compared against a design with the wrong name forever.
+		"name": stat_calc.blueprint_name_edit.text if ("blueprint_name_edit" in stat_calc and is_instance_valid(stat_calc.blueprint_name_edit)) else "WIP Unit",
 		"hp": stat_calc.total_hp if "total_hp" in stat_calc else 0.0,
 		"weight": stat_calc.total_weight if "total_weight" in stat_calc else 0.0,
 		"dps": stat_calc.total_dps if "total_dps" in stat_calc else 0.0,
@@ -154,7 +166,10 @@ func _build_unit_column(title_text: String, s: Dictionary, title_color: Color) -
 
 	var h = Label.new()
 	h.text = title_text
-	h.add_theme_font_size_override("font_size", 14)
+	h.theme_type_variation = "HeadingLabel"
+	# `title_color` is now one of the signal tokens rather than a per-call literal -
+	# see the two call sites. It still distinguishes the two columns, which is the
+	# one thing this colour is actually for.
 	h.add_theme_color_override("font_color", title_color)
 	vbox.add_child(h)
 	vbox.add_child(HSeparator.new())
@@ -173,12 +188,12 @@ func _make_stat_row(label: String, val: String) -> HBoxContainer:
 	var l1 = Label.new()
 	l1.text = label
 	l1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	l1.modulate = Color(0.7, 0.75, 0.8)
+	l1.theme_type_variation = "HintLabel"
 	hb.add_child(l1)
 
 	var l2 = Label.new()
 	l2.text = val
-	l2.add_theme_font_size_override("font_size", 14)
+	l2.theme_type_variation = "StatLabel"
 	hb.add_child(l2)
 	return hb
 
@@ -190,8 +205,8 @@ func _build_delta_column(wip: Dictionary, target: Dictionary) -> PanelContainer:
 
 	var h = Label.new()
 	h.text = "TELEMETRY DELTA"
-	h.add_theme_font_size_override("font_size", 14)
-	h.add_theme_color_override("font_color", Color(0.2, 1.0, 0.4))
+	h.theme_type_variation = "HeadingLabel"
+	h.add_theme_color_override("font_color", Tokens.SIGNAL_GO)
 	h.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(h)
 	vbox.add_child(HSeparator.new())
@@ -223,13 +238,17 @@ func _make_delta_badge(label: String, val: float, unit: String, higher_is_better
 	var sign_str = "+" if val > 0 else ""
 	delta_lbl.text = "%s%.1f %s" % [sign_str, val, unit]
 	
+	# A better/worse/equal readout is state, which is what the signal tokens are
+	# for. `modulate` also tints a node's children, so these are set as a font
+	# colour instead - harmless on a bare Label, but the wrong tool.
+	delta_lbl.theme_type_variation = "StatLabel"
 	if abs(val) < 0.01:
 		delta_lbl.text = "MATCH"
-		delta_lbl.modulate = Color(0.7, 0.7, 0.7)
+		delta_lbl.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
 	elif (val > 0 and higher_is_better) or (val < 0 and not higher_is_better):
-		delta_lbl.modulate = Color(0.2, 1.0, 0.4) # Green improvement
+		delta_lbl.add_theme_color_override("font_color", Tokens.SIGNAL_GO)
 	else:
-		delta_lbl.modulate = Color(1.0, 0.35, 0.35) # Red penalty
+		delta_lbl.add_theme_color_override("font_color", Tokens.SIGNAL_ALERT)
 
 	hb.add_child(delta_lbl)
 	return pc

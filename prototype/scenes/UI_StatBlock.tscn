@@ -1,19 +1,6 @@
-[gd_scene load_steps=3 format=3 uid="uid://cxabstat123"]
+[gd_scene load_steps=2 format=3 uid="uid://cxabstat123"]
 
 [ext_resource type="Script" path="res://scripts/stat_calculator.gd" id="1_stats"]
-
-[sub_resource type="StyleBoxFlat" id="PanelStyle_Stats"]
-bg_color = Color(0.12, 0.14, 0.15, 0.95)
-border_width_left = 6
-border_width_top = 3
-border_width_right = 3
-border_width_bottom = 6
-border_color = Color(0.06, 0.08, 0.09, 1)
-corner_radius_top_left = 4
-corner_radius_bottom_left = 4
-shadow_color = Color(0, 0, 0, 0.8)
-shadow_size = 8
-shadow_offset = Vector2(-4, 4)
 
 [node name="UI_StatBlock" type="Control"]
 layout_mode = 3
@@ -24,18 +11,6 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("1_stats")
-
-[node name="Panel" type="Panel" parent="."]
-mouse_filter = 2
-layout_mode = 1
-anchors_preset = 11
-anchor_left = 1.0
-anchor_right = 1.0
-anchor_bottom = 1.0
-offset_left = -320.0
-grow_horizontal = 0
-grow_vertical = 2
-theme_override_styles/panel = SubResource("PanelStyle_Stats")
 
 [node name="ScrollContainer" type="ScrollContainer" parent="."]
 layout_mode = 1
@@ -57,8 +32,7 @@ theme_override_constants/separation = 6
 
 [node name="Title" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 18
-theme_override_colors/font_color = Color(0.8, 0.85, 0.9, 1)
+theme_type_variation = &"HeadingLabel"
 text = "HARDWARE TELEMETRY"
 custom_minimum_size = Vector2(0, 32)
 
@@ -85,27 +59,27 @@ custom_minimum_size = Vector2(0, 8)
 
 [node name="HPLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
+theme_type_variation = &"StatLabel"
 text = "Total HP: 0.0"
 custom_minimum_size = Vector2(0, 20)
-theme_override_colors/font_color = Color(0.75, 0.85, 0.75, 1)
 
 [node name="WeightLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
+theme_type_variation = &"StatLabel"
 text = "Total Weight: 0.0"
 custom_minimum_size = Vector2(0, 20)
-theme_override_colors/font_color = Color(0.8, 0.75, 0.7, 1)
 
 [node name="CostLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
+theme_type_variation = &"StatLabel"
 text = "Cost (Metal): 0"
 custom_minimum_size = Vector2(0, 20)
-theme_override_colors/font_color = Color(0.75, 0.75, 0.85, 1)
 
 [node name="DPSLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
+theme_type_variation = &"StatLabel"
 text = "Total DPS: 0.0"
 custom_minimum_size = Vector2(0, 20)
-theme_override_colors/font_color = Color(0.85, 0.65, 0.65, 1)
 
 [node name="HSeparator2" type="HSeparator" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
@@ -118,7 +92,7 @@ theme_override_constants/separation = 2
 
 [node name="TweaksTitle" type="Label" parent="ScrollContainer/VBoxContainer/LocomotionTweaks"]
 layout_mode = 2
-theme_override_font_sizes/font_size = 16
+theme_type_variation = &"HeadingLabel"
 text = "Locomotion Tweaks"
 custom_minimum_size = Vector2(0, 24)
 
@@ -178,6 +152,5 @@ custom_minimum_size = Vector2(0, 32)
 
 [node name="TestButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
-theme_type_variation = &"DangerButton"
 text = "Test in Arena"
 custom_minimum_size = Vector2(0, 32)

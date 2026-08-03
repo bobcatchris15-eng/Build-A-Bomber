@@ -48,7 +48,7 @@ func _ready():
 
 	var title = Label.new()
 	title.text = "Tuning Overlay [F1]"
-	title.add_theme_font_size_override("font_size", 18)
+	title.theme_type_variation = "HeadingLabel"
 	vbox.add_child(title)
 	vbox.add_child(HSeparator.new())
 	hp_label = Label.new()
@@ -78,7 +78,7 @@ func _ready():
 	vbox.add_child(HSeparator.new())
 	var vis_title = Label.new()
 	vis_title.text = "Unit Look (live)"
-	vis_title.add_theme_font_size_override("font_size", 16)
+	vis_title.theme_type_variation = "HeadingLabel"
 	vbox.add_child(vis_title)
 
 	for key in VisualTuning.PARAMS:

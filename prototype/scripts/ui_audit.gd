@@ -52,11 +52,36 @@ static func find_offscreen_controls(node: Node, viewport_rect: Rect2, results: A
 	if node is Control and node.is_visible_in_tree():
 		var rect = node.get_global_rect()
 		if rect.size.x > 1.0 and rect.size.y > 1.0:
-			if not viewport_rect.intersects(rect):
+			if not viewport_rect.intersects(rect) and not _is_inside_scroll(node):
 				results.append({"path": str(node.get_path()), "rect": rect})
 	for child in node.get_children():
 		find_offscreen_controls(child, viewport_rect, results)
 	return results
+
+
+# True if any ancestor is a ScrollContainer.
+#
+# WHY THIS EXEMPTION EXISTS. This check answers "can the player never reach this
+# control?", and content below a scroll container's fold is reachable by
+# definition - scrolling to it is the entire point. Without the exemption the
+# Design Lab's parts catalogue reported ~40 off-screen controls, because a
+# hardware list longer than the window is a correctly-working list.
+#
+# This was masked until the dock width fix landed: find_offscreen_controls() is
+# only reached after the overflow pass returns clean, and UI_PartsMenu was
+# failing the overflow pass first, so the whole off-screen half of
+# test_ui_no_overflow_or_offscreen had never actually run against MainLab.
+#
+# Deliberately NOT weakened past that: a control genuinely stranded outside the
+# viewport with no scrolling ancestor is still reported, which is what
+# test_ui_audit_has_real_teeth asserts with its bare (5000, 5000) rect.
+static func _is_inside_scroll(node: Node) -> bool:
+	var p := node.get_parent()
+	while p != null:
+		if p is ScrollContainer:
+			return true
+		p = p.get_parent()
+	return false
 
 static func check_theme_resource_validity() -> Dictionary:
 	var res_path = "res://resources/bomber_theme.tres"

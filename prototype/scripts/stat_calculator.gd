@@ -6,8 +6,26 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const BlueprintNamerScript = preload("res://scripts/blueprint_namer.gd")
+const UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
+const UIIconsScript = preload("res://scripts/ui_icons.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
 
-@onready var sidebar_panel: Panel = $Panel
+# --- Rail structure (VISUAL/UI plan item 7) ---------------------------------
+# The rail used to be a bare anchored `Panel` in UI_StatBlock.tscn carrying an
+# embedded StyleBoxFlat sub-resource (PanelStyle_Stats). Both are gone: the
+# surface is a UIDock built in _ready(), which brings the STEEL frame, the
+# POWDERCOAT body, the three collapse states and width persistence with it.
+#
+# EVERY @onready BELOW STAYS VALID ACROSS THAT MOVE. `$Path` resolves once, at
+# _ready(), and stores an object reference - reparenting the subtree afterwards
+# does not invalidate a reference, only a re-resolved path. The nine places that
+# re-resolved `$ScrollContainer/VBoxContainer` on every call are the ones that
+# had to change; they use `_rail_vbox` now, captured before the move.
+var stats_dock: Control = null
+var toolbar: Control = null
+var _rail_vbox: VBoxContainer = null
+var _undo_btn: Button = null
+var _redo_btn: Button = null
 
 @onready var hp_label = $ScrollContainer/VBoxContainer/HPLabel
 @onready var weight_label = $ScrollContainer/VBoxContainer/WeightLabel
@@ -339,6 +357,25 @@ var armor_mat_btn: OptionButton
 var armor_thick_label: Label
 var armor_thick_slider: HSlider
 var armor_threshold_label: Label
+
+# --- Hull spec flyout (VISUAL/UI plan item 7) -------------------------------
+# Armour material, faction and armour thickness used to be six controls parked
+# permanently in the right rail, visible whether or not they applied to
+# anything. They are hull-level settings a player touches a few times per
+# design, so they now live behind one toolbar-style trigger.
+#
+# The controls themselves are created once and REUSED, never rebuilt per open,
+# because every one of them is wired to an undo push and a stat recompute and
+# rebuilding them would mean reconnecting all of that on each open. When the
+# flyout closes they are reparented back into `hull_spec_stash` - the same
+# stash-and-reparent idiom _add_callout() already uses for tweak widgets, for
+# the same reason: a transient panel frees its children, and these must outlive
+# it.
+var faction_label: Label
+var faction_btn: OptionButton
+var hull_spec_btn: Button
+var hull_spec_stash: VBoxContainer
+var _hull_spec_flyout: Node = null
 var energy_label: Label
 var nose_taper_label: Label
 var nose_taper_slider: HSlider
@@ -397,8 +434,12 @@ var bool_tweak_title := "Ducted"
 
 func _ready():
 	add_to_group("stat_ui")
-	if sidebar_panel:
-		UITheme.apply_brushed_panel(sidebar_panel, FactionCatalog.DEFAULT_FACTION)
+	# Captured BEFORE _build_rail_dock() moves the subtree, because this one is
+	# used as a parent for dynamically-added rows throughout the file.
+	# Resolved here because the rest of _ready() adds rows to it. The dock itself
+	# is built at the END of _ready() - see the call there for why the order
+	# matters.
+	_rail_vbox = $ScrollContainer/VBoxContainer
 	# Theme variations rather than four hand-picked fill colors.
 	#
 	# These used to be a saturated red, green, blue and purple slab stacked
@@ -411,98 +452,28 @@ func _ready():
 	# carrying alert red. Save is the commit action, so it takes the single
 	# go-green. Test and Library are ordinary navigation and stay neutral -
 	# they are reachable, not important.
-	# Plastic Model Kit Action Button Styling
+	# The four blocks that used to sit here built a "plastic model kit sprue gate"
+	# StyleBoxFlat per button - a green Save, an amber Test, a CYAN Library and a
+	# red Delete, each with its own hover variant and font colour. They are gone,
+	# and the paragraph above is now true instead of aspirational: the comment
+	# already described theme variations as the intent while the code below it did
+	# the exact opposite, so the design system could not reach the four loudest
+	# controls in the Design Lab.
+	#
+	# Where the four states live now:
+	#   Delete  -> DangerButton  (FIBERGLASS hazard placard) - set in the .tscn
+	#   Save    -> PrimaryButton (CARBON, cast toward go-green) - set in the .tscn
+	#   Test    -> plain Button  (BAKELITE). Reclassified: it was marked
+	#              DangerButton in UI_StatBlock.tscn, but running a test is not
+	#              destructive, and spending alert red on it left nothing to
+	#              escalate to. It is navigation.
+	#   Library -> plain Button  (BAKELITE). Its cyan appears nowhere in
+	#              ui_tokens.gd; it was the last survivor of the old sci-fi accent.
 	save_button.text = "SAVE BLUEPRINT"
-	var s_style = StyleBoxFlat.new()
-	s_style.bg_color = Color(0.10, 0.22, 0.15, 0.95)
-	s_style.border_width_left = 6
-	s_style.border_color = Color(0.2, 0.9, 0.45) # Go-green plastic sprue gate
-	s_style.border_width_top = 1
-	s_style.border_width_right = 1
-	s_style.border_width_bottom = 3
-	s_style.corner_radius_top_left = 4
-	s_style.corner_radius_top_right = 4
-	s_style.corner_radius_bottom_left = 4
-	s_style.corner_radius_bottom_right = 4
-	s_style.content_margin_left = 12
-	s_style.content_margin_right = 12
-	s_style.content_margin_top = 8
-	s_style.content_margin_bottom = 8
-	save_button.add_theme_stylebox_override("normal", s_style)
-	var s_hover = s_style.duplicate()
-	s_hover.bg_color = Color(0.16, 0.30, 0.22, 0.98)
-	s_hover.border_color = Color(0.4, 1.0, 0.6)
-	save_button.add_theme_stylebox_override("hover", s_hover)
-	save_button.add_theme_color_override("font_color", Color(0.3, 1.0, 0.6))
-
 	test_button.text = "TEST IN ARENA"
-	var t_style = StyleBoxFlat.new()
-	t_style.bg_color = Color(0.24, 0.16, 0.08, 0.95)
-	t_style.border_width_left = 6
-	t_style.border_color = Color(1.0, 0.7, 0.2) # Caution amber sprue gate
-	t_style.border_width_top = 1
-	t_style.border_width_right = 1
-	t_style.border_width_bottom = 3
-	t_style.corner_radius_top_left = 4
-	t_style.corner_radius_top_right = 4
-	t_style.corner_radius_bottom_left = 4
-	t_style.corner_radius_bottom_right = 4
-	t_style.content_margin_left = 12
-	t_style.content_margin_right = 12
-	t_style.content_margin_top = 8
-	t_style.content_margin_bottom = 8
-	test_button.add_theme_stylebox_override("normal", t_style)
-	var t_hover = t_style.duplicate()
-	t_hover.bg_color = Color(0.32, 0.22, 0.10, 0.98)
-	t_hover.border_color = Color(1.0, 0.85, 0.3)
-	test_button.add_theme_stylebox_override("hover", t_hover)
-	test_button.add_theme_color_override("font_color", Color(1.0, 0.8, 0.3))
-
+	test_button.theme_type_variation = ""
 	library_button.text = "BLUEPRINT LIBRARY"
-	var l_style = StyleBoxFlat.new()
-	l_style.bg_color = Color(0.08, 0.18, 0.22, 0.95)
-	l_style.border_width_left = 6
-	l_style.border_color = Color(0.0, 0.85, 0.95) # Vector cyan sprue gate
-	l_style.border_width_top = 1
-	l_style.border_width_right = 1
-	l_style.border_width_bottom = 3
-	l_style.corner_radius_top_left = 4
-	l_style.corner_radius_top_right = 4
-	l_style.corner_radius_bottom_left = 4
-	l_style.corner_radius_bottom_right = 4
-	l_style.content_margin_left = 12
-	l_style.content_margin_right = 12
-	l_style.content_margin_top = 8
-	l_style.content_margin_bottom = 8
-	library_button.add_theme_stylebox_override("normal", l_style)
-	var l_hover = l_style.duplicate()
-	l_hover.bg_color = Color(0.12, 0.26, 0.32, 0.98)
-	l_hover.border_color = Color(0.3, 1.0, 1.0)
-	library_button.add_theme_stylebox_override("hover", l_hover)
-	library_button.add_theme_color_override("font_color", Color(0.3, 1.0, 1.0))
-
 	delete_button.text = "DISCARD PART"
-	var d_style = StyleBoxFlat.new()
-	d_style.bg_color = Color(0.24, 0.08, 0.08, 0.95)
-	d_style.border_width_left = 6
-	d_style.border_color = Color(0.95, 0.3, 0.3) # Enamel red sprue gate
-	d_style.border_width_top = 1
-	d_style.border_width_right = 1
-	d_style.border_width_bottom = 3
-	d_style.corner_radius_top_left = 4
-	d_style.corner_radius_top_right = 4
-	d_style.corner_radius_bottom_left = 4
-	d_style.corner_radius_bottom_right = 4
-	d_style.content_margin_left = 12
-	d_style.content_margin_right = 12
-	d_style.content_margin_top = 8
-	d_style.content_margin_bottom = 8
-	delete_button.add_theme_stylebox_override("normal", d_style)
-	var d_hover = d_style.duplicate()
-	d_hover.bg_color = Color(0.34, 0.12, 0.12, 0.98)
-	d_hover.border_color = Color(1.0, 0.5, 0.5)
-	delete_button.add_theme_stylebox_override("hover", d_hover)
-	delete_button.add_theme_color_override("font_color", Color(1.0, 0.5, 0.5))
 
 	mirror_checkbox.toggled.connect(_on_mirror_toggled)
 	delete_button.pressed.connect(_on_delete_pressed)
@@ -653,53 +624,69 @@ func _ready():
 	duct_checkbox.toggled.connect(_on_duct_toggled)
 	duct_container.visible = false
 
-	# Dynamically create Armor Material dropdown
+	# The hull-spec controls. Built here, parked in an invisible stash, and
+	# shown in a flyout off the trigger button below - see hull_spec_stash's
+	# declaration for why they are reused rather than rebuilt per open.
+	hull_spec_stash = VBoxContainer.new()
+	hull_spec_stash.visible = false
+	add_child(hull_spec_stash)
+
 	armor_mat_label = Label.new()
 	armor_mat_label.text = "Armor Material"
-	$ScrollContainer/VBoxContainer.add_child(armor_mat_label)
+	hull_spec_stash.add_child(armor_mat_label)
 
 	armor_mat_btn = OptionButton.new()
 	armor_mat_btn.add_item("Hardened Steel")
 	armor_mat_btn.add_item("Reactive Armor")
 	armor_mat_btn.add_item("Ablative Ceramic")
 	armor_mat_btn.add_item("Energy Shielding")
-	$ScrollContainer/VBoxContainer.add_child(armor_mat_btn)
+	hull_spec_stash.add_child(armor_mat_btn)
 	UITheme.style_option_button(armor_mat_btn)
 	armor_mat_btn.item_selected.connect(_on_armor_material_selected)
-	
-	# Dynamically create Faction dropdown
-	var faction_label = Label.new()
-	faction_label.text = "Faction Selection"
-	$ScrollContainer/VBoxContainer.add_child(faction_label)
 
-	var faction_btn = OptionButton.new()
+	faction_label = Label.new()
+	faction_label.text = "Faction Selection"
+	hull_spec_stash.add_child(faction_label)
+
+	faction_btn = OptionButton.new()
 	# clip_text - the roster grew from 3 factions to 10, some with longer
 	# names ("The Aerodrome Cartel") than any of the old 3 - without this,
 	# OptionButton auto-sizes to fit its longest item and was just barely
 	# pushing the whole sidebar past its fixed width (caught by the UI
-	# overflow audit test, not just eyeballing it).
+	# overflow audit test, not just eyeballing it). Still true inside a flyout,
+	# which sizes to its contents just as readily.
 	faction_btn.clip_text = true
 	for fac_id in FactionCatalog.get_ids():
 		faction_btn.add_item(FactionCatalog.get_faction_name(fac_id))
 	faction_btn.name = "FactionDropdown"
-	$ScrollContainer/VBoxContainer.add_child(faction_btn)
+	hull_spec_stash.add_child(faction_btn)
 	UITheme.style_option_button(faction_btn)
 	faction_btn.item_selected.connect(_on_faction_selected)
 
-	# Dynamically create Armor Thickness slider
 	armor_thick_label = Label.new()
 	armor_thick_label.text = "Armor Thickness"
-	$ScrollContainer/VBoxContainer.add_child(armor_thick_label)
+	hull_spec_stash.add_child(armor_thick_label)
 
 	armor_thick_slider = HSlider.new()
 	armor_thick_slider.min_value = 0.5
 	armor_thick_slider.max_value = 3.0
 	armor_thick_slider.step = 0.1
 	armor_thick_slider.value = 1.0
-	$ScrollContainer/VBoxContainer.add_child(armor_thick_slider)
+	hull_spec_stash.add_child(armor_thick_slider)
 	UITheme.style_slider(armor_thick_slider)
 	armor_thick_slider.value_changed.connect(_on_armor_thickness_changed)
 	armor_thick_slider.drag_started.connect(_push_undo)
+
+	# The trigger. Sits in the rail for now; item 7's top toolbar is where it
+	# belongs, and moving it there is a reparent of this one node.
+	#
+	# Deadpan procurement register per the plan's item 0 - this opens a hull's
+	# specification, so it says so, and it carries no glyph.
+	hull_spec_btn = Button.new()
+	hull_spec_btn.text = "HULL SPECIFICATION"
+	hull_spec_btn.tooltip_text = "Armor material, thickness and faction marking"
+	_rail_vbox.add_child(hull_spec_btn)
+	hull_spec_btn.pressed.connect(_on_hull_spec_pressed)
 
 	# Per-hull-type custom deform proof-of-concept (MOUNTING_AND_ARMOR_SPEC.md
 	# #4) - only shown for interceptor_hull, see DECISIONS_NEEDED.md for why
@@ -708,14 +695,14 @@ func _ready():
 	# from the uniform hull-scale handles which stretch the whole hull evenly.
 	nose_taper_label = Label.new()
 	nose_taper_label.text = "Nose Taper"
-	$ScrollContainer/VBoxContainer.add_child(nose_taper_label)
+	_rail_vbox.add_child(nose_taper_label)
 
 	nose_taper_slider = HSlider.new()
 	nose_taper_slider.min_value = 0.3
 	nose_taper_slider.max_value = 1.5
 	nose_taper_slider.step = 0.05
 	nose_taper_slider.value = 1.0
-	$ScrollContainer/VBoxContainer.add_child(nose_taper_slider)
+	_rail_vbox.add_child(nose_taper_slider)
 	UITheme.style_slider(nose_taper_slider)
 	nose_taper_slider.value_changed.connect(_on_nose_taper_changed)
 	nose_taper_slider.drag_started.connect(_push_undo)
@@ -726,7 +713,7 @@ func _ready():
 	module_tweaks_container = VBoxContainer.new()
 	module_tweaks_container.name = "ModuleTweaksContainer"
 	module_tweaks_container.add_theme_constant_override("separation", 8)
-	$ScrollContainer/VBoxContainer.add_child(module_tweaks_container)
+	_rail_vbox.add_child(module_tweaks_container)
 	
 	# Remove popup_panel and use tweak_canvas instead for infographic UI
 	tweak_canvas = Control.new()
@@ -767,34 +754,17 @@ func _ready():
 	)
 	popup_tweaks_container.add_child(popup_rotate_btn)
 	
-	# Undo/Redo (Design_Lab_UI_UX.md top-bar spec: also bound to Ctrl+Z / Ctrl+Y)
-	var undo_redo_row = HBoxContainer.new()
-	undo_redo_row.add_theme_constant_override("separation", 6)
-	$ScrollContainer/VBoxContainer.add_child(undo_redo_row)
-
-	var undo_btn = Button.new()
-	undo_btn.text = "Undo"
-	undo_btn.pressed.connect(func():
-		var root = get_node_or_null("/root/MainLab")
-		if root and root.has_method("undo"):
-			root.undo()
-	)
-	undo_redo_row.add_child(undo_btn)
-
-	var redo_btn = Button.new()
-	redo_btn.text = "Redo"
-	redo_btn.pressed.connect(func():
-		var root = get_node_or_null("/root/MainLab")
-		if root and root.has_method("redo"):
-			root.redo()
-	)
-	undo_redo_row.add_child(redo_btn)
+	# Undo/Redo used to be a two-button row stacked in this rail. Design_Lab_UI_UX
+	# .md always specified them as a TOP-BAR pair, and VISUAL/UI plan item 7 says
+	# the same thing ("Undo/redo belong on a toolbar, not stacked in a stat
+	# column"), so they are built in _build_toolbar() now. Their behaviour is
+	# unchanged and still mirrors the Ctrl+Z / Ctrl+Y bindings in module_placer.gd.
 
 	# Navigation back to the main menu
 	var menu_btn = Button.new()
 	menu_btn.text = "Main Menu"
 	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
-	$ScrollContainer/VBoxContainer.add_child(menu_btn)
+	_rail_vbox.add_child(menu_btn)
 
 	# Locomotion tweaks (Size/Count/Wheels-Per-Axle) move into the same
 	# floating popup weapon/armor tweaks use, instead of living in the
@@ -809,6 +779,12 @@ func _ready():
 	blade_count_container.reparent(popup_tweaks_container)
 	duct_container.reparent(popup_tweaks_container)
 	locomotion_tweaks.visible = false
+
+	# LAST, deliberately. _build_toolbar() reparents controls into the bar, and
+	# hull_spec_btn is created partway through this function rather than being an
+	# @onready node - building the dock any earlier caught it as null and silently
+	# left the flyout trigger stranded in the rail with no error.
+	_build_rail_dock()
 
 	# Initial sync of armor UI
 	call_deferred("_initial_sync")
@@ -942,7 +918,13 @@ func sync_hull_ui(hull: Node3D):
 			var taper = hull.get_meta("nose_taper") if hull.has_meta("nose_taper") else 1.0
 			nose_taper_slider.value = taper
 			nose_taper_label.text = "Nose Taper: %.2fx" % taper
-	var faction_btn = $ScrollContainer/VBoxContainer.get_node_or_null("FactionDropdown") as OptionButton
+	# Held as a member rather than looked up by node path. The old
+	# `$ScrollContainer/VBoxContainer.get_node_or_null("FactionDropdown")` broke
+	# the moment this control moved into the hull-spec flyout, and broke
+	# SILENTLY - get_node_or_null returns null, the `if` skips, and a loaded
+	# blueprint just quietly shows the wrong faction in the dropdown with no
+	# error anywhere. The dropdown now moves between stash and flyout on every
+	# open, so a path-based lookup could never be right again.
 	if faction_btn:
 		var fac = hull.get_meta("faction") if hull.has_meta("faction") else "industrialists"
 		var idx = FactionCatalog.get_ids().find(fac)
@@ -983,14 +965,14 @@ func set_mirror_toggle(enabled: bool):
 		mirror_checkbox.set_pressed_no_signal(enabled)
 
 func update_stats(hull: Node3D):
-	# Brushed-aluminum sidebar chrome, re-tinted to whatever faction the
-	# hull currently carries - refreshed here (not just once in _ready())
-	# since update_stats() is exactly the function _on_faction_selected()
-	# already calls after every faction change.
-	var faction_for_theme = hull.get_meta("faction", FactionCatalog.DEFAULT_FACTION) if hull else FactionCatalog.DEFAULT_FACTION
-	if sidebar_panel:
-		UITheme.apply_brushed_panel(sidebar_panel, faction_for_theme)
-
+	# The faction re-tint that used to happen here is gone with the `Panel` node
+	# it painted (VISUAL/UI plan items 2 and 7). ui_material.gdshader's contract is
+	# explicit that chrome stays neutral and the faction accent is "a low-strength
+	# identity wash for the faction preview swatch only, never general chrome" -
+	# and repainting the whole 320px rail in the faction's colour on every stat
+	# recompute is about as far from that as the codebase got. The rail is
+	# POWDERCOAT from the dock now, the same in every faction; faction identity is
+	# carried by the units on the stage, which is where the player is looking.
 	var total_hp = 0.0
 	var total_weight = 0.0
 	var total_cost_metal = 0
@@ -1128,7 +1110,7 @@ func update_stats(hull: Node3D):
 
 	if not energy_label:
 		energy_label = Label.new()
-		$ScrollContainer/VBoxContainer.add_child(energy_label)
+		_rail_vbox.add_child(energy_label)
 	energy_label.text = "Energy Capacity: +%.1f" % total_energy_capacity
 	energy_label.visible = total_energy_capacity > 0.0
 
@@ -1143,7 +1125,7 @@ func update_stats(hull: Node3D):
 		# instead of a hardcoded width, since threshold values can grow to
 		# more digits than today's baseline numbers.
 		armor_threshold_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		$ScrollContainer/VBoxContainer.add_child(armor_threshold_label)
+		_rail_vbox.add_child(armor_threshold_label)
 	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
 
 # Radial positions for infographic lines (prioritize a ring around the module).
@@ -1720,6 +1702,194 @@ func _apply_tweaks():
 					break
 		if new_selected:
 			root.call_deferred("_select_module", new_selected)
+
+# --- Rail dock + top toolbar (VISUAL/UI plan item 7) ------------------------
+
+# Wraps the telemetry rail in a UIDock and lifts its action controls into a thin
+# STEEL toolbar across the top of the Lab.
+#
+# WHY THE TOOLBAR EXISTS. Undo, Redo, Mirror, Save, Test, Library and the
+# hull-spec trigger were seven rows stacked in a 320px column, present whether or
+# not they applied to anything - and Undo/Redo in particular are document-level
+# actions that belong on a toolbar, not buried under a stat readout. Lifting them
+# out is also what lets the dock rail away to 40px and still be useful: what is
+# left in the rail is genuinely just the blueprint's identity and its headline
+# numbers, which is the only part worth reading continuously.
+#
+# DEFAULT STATE IS RAILED. The plan's whole complaint about the Design Lab is
+# that the 3D model - the actual subject - got the leftover middle. Both docks
+# start collapsed so the viewport has the screen until the player asks for a
+# panel. `auto_reveal` stays OFF: a dock that vanishes on mouse-out is a nuisance
+# in an editor and a defect in combat, and this primitive is shared with the HUD.
+func _build_rail_dock() -> void:
+	var scroll: Node = get_node_or_null("ScrollContainer")
+	if scroll == null:
+		push_error("stat_calculator: no ScrollContainer to dock")
+		return
+
+	var UIDockScript = load("res://scripts/ui_dock.gd")
+	stats_dock = UIDockScript.new()
+	stats_dock.name = "StatsDock"
+	stats_dock.dock_title = "TELEMETRY"
+	stats_dock.dock_icon = "info"
+	stats_dock.side = UIDockScript.Side.RIGHT
+	stats_dock.expanded_size = 320.0
+	stats_dock.auto_reveal = false
+	stats_dock.default_state = UIDockScript.State.RAILED
+	# Persisted separately from the parts catalogue so the two remember their own
+	# widths - they are different panels holding different things.
+	stats_dock.persist_key = "design_lab_stats"
+	stats_dock.set_anchors_preset(Control.PRESET_RIGHT_WIDE)
+	# Starts below the toolbar, which spans the full width above both docks.
+	stats_dock.offset_top = Tokens.TOOLBAR_HEIGHT
+	add_child(stats_dock)
+
+	# The dock is added first and the scroll moved into it second, so the scroll
+	# never spends a frame parentless (which would drop its scroll offset).
+	scroll.reparent(stats_dock.body())
+	# The rail's own anchoring came from the deleted Panel's layout; inside a dock
+	# body the container drives width, so the offsets have to go or the scroll
+	# keeps trying to sit 300px off the right edge of its new parent.
+	if scroll is Control:
+		var sc := scroll as Control
+		sc.set_anchors_preset(Control.PRESET_FULL_RECT)
+		sc.offset_left = 0.0
+		sc.offset_top = 0.0
+		sc.offset_right = 0.0
+		sc.offset_bottom = 0.0
+		sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+	_build_toolbar()
+
+
+# The thin top toolbar. STEEL band via HeaderPanel, which already carries the
+# hazard underline that separates chrome from viewport.
+func _build_toolbar() -> void:
+	var bar = PanelContainer.new()
+	bar.name = "Toolbar"
+	bar.theme_type_variation = "HeaderPanel"
+	bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	bar.offset_left = 0.0
+	bar.offset_right = 0.0
+	bar.offset_top = 0.0
+	# Tall enough to clear Tokens.HIT_TARGET_MIN with the band's own padding. Both
+	# docks inset their top by this same token so nothing is drawn over the bar.
+	bar.offset_bottom = Tokens.TOOLBAR_HEIGHT
+	add_child(bar)
+	toolbar = bar
+
+	var row = HBoxContainer.new()
+	row.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	bar.add_child(row)
+
+	# Undo/Redo first: they act on the document, and reading order should match
+	# the fact that they are the two most-used controls in the Lab.
+	_undo_btn = _toolbar_button(row, "UNDO", "undo", func(): _toolbar_undo())
+	_redo_btn = _toolbar_button(row, "REDO", "redo", func(): _toolbar_redo())
+
+	row.add_child(VSeparator.new())
+
+	# Mirror is a mode, so it stays a checkbox rather than becoming a button -
+	# a latched state needs to look latched.
+	if mirror_checkbox:
+		mirror_checkbox.reparent(row)
+
+	row.add_child(VSeparator.new())
+
+	# The flyout trigger, and then the document actions. Save last-but-one and
+	# Test last, so the two that leave or commit the screen sit furthest from
+	# Undo/Redo and cannot be hit by accident on the way to them.
+	if hull_spec_btn:
+		hull_spec_btn.reparent(row)
+	if library_button:
+		library_button.reparent(row)
+
+	var spacer = Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(spacer)
+
+	if save_button:
+		save_button.reparent(row)
+	if test_button:
+		test_button.reparent(row)
+
+
+func _toolbar_undo() -> void:
+	var root = get_node_or_null("/root/MainLab")
+	if root and root.has_method("undo"):
+		root.undo()
+
+
+func _toolbar_redo() -> void:
+	var root = get_node_or_null("/root/MainLab")
+	if root and root.has_method("redo"):
+		root.redo()
+
+
+func _toolbar_button(parent: Container, label: String, icon_name: String, cb: Callable) -> Button:
+	var b = Button.new()
+	b.text = label
+	if UIIconsScript.has_icon(icon_name):
+		b.icon = UIIconsScript.get_icon(icon_name)
+	b.custom_minimum_size = Vector2(0, Tokens.HIT_TARGET_MIN)
+	b.pressed.connect(cb)
+	parent.add_child(b)
+	return b
+
+
+# --- Hull spec flyout -------------------------------------------------------
+
+# Opens the hull-spec flyout, or closes it if it is already up so the trigger
+# toggles rather than stacking a second copy on every press.
+func _on_hull_spec_pressed() -> void:
+	if is_instance_valid(_hull_spec_flyout):
+		_hull_spec_flyout.close()
+		return
+
+	# Hosted on tweak_canvas, the same floating layer the callouts use.
+	#
+	# NOT the button's own ancestor: that is the rail's ScrollContainer, which
+	# would clip a flyout wider than the rail - and wider than the rail is the
+	# normal case, so clipping it there defeats the point of moving these
+	# controls out of the rail at all.
+	#
+	# NOT get_tree().root either, which was the first version. A flyout parented
+	# to the viewport outlives the Design Lab scene, so leaving the Lab with one
+	# open leaked the panel AND the six reparented controls inside it - they are
+	# no longer children of the scene by then, so freeing the scene does not take
+	# them with it. tweak_canvas dies with the Lab and takes the flyout along.
+	var flyout = UIFlyoutScript.create(tweak_canvas, "Hull Specification")
+	_hull_spec_flyout = flyout
+
+	for ctrl in _hull_spec_widgets():
+		if is_instance_valid(ctrl):
+			ctrl.reparent(flyout.body())
+
+	# Reclaim the controls BEFORE the flyout frees itself. `closed` is emitted at
+	# the top of close(), ahead of the queue_free, which is the only point where
+	# reparenting is still safe.
+	flyout.closed.connect(_on_hull_spec_closed)
+	flyout.open_from(hull_spec_btn, UIFlyoutScript.Align.LEFT_OF)
+
+
+func _on_hull_spec_closed() -> void:
+	for ctrl in _hull_spec_widgets():
+		if is_instance_valid(ctrl) and ctrl.get_parent() != hull_spec_stash:
+			ctrl.reparent(hull_spec_stash)
+	_hull_spec_flyout = null
+
+
+# Declared in display order once, so open and close cannot disagree about which
+# controls belong to the flyout - a mismatch would strand a widget in a freed
+# panel and take the control with it.
+func _hull_spec_widgets() -> Array:
+	return [
+		armor_mat_label, armor_mat_btn,
+		faction_label, faction_btn,
+		armor_thick_label, armor_thick_slider,
+	]
+
 
 func _on_armor_material_selected(index: int):
 	if is_updating_sliders: return
