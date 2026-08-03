@@ -1323,7 +1323,10 @@ func on_module_selected(module: Node3D):
 		size_container.visible = false
 		count_container.visible = true
 		count_slider.min_value = 1.0
-		count_slider.max_value = 5.0
+		# 6, not 5: buoyant_envelope's pod progression runs to three per side
+		# (Chris). naval_propeller shares this branch and is unaffected - its
+		# own layout still clamps at 5.
+		count_slider.max_value = 6.0
 		count_slider.step = 1.0
 		count_slider.value = settings.get("prop_count", settings.get("count", 2))
 		count_label_base = "Propeller Count"

@@ -43,6 +43,10 @@ enum Pattern {
 	CORNER_SPAN,  ## One span per side, anchored fore and aft. Screw drums, hydrofoils.
 	ROOF_PAIRS,   ## N stations per side, above the hull. Reserved; rotors use SIDE_PAIRS
 	              ## with a positive Y offset, which is the same thing.
+	SIDE_PODS,    ## Pods per side along Z, with an odd one under the belly.
+	              ## The count progression Chris specified for the envelope
+	              ## drive: 1-2 one per side, 3 adds a belly pod, 4 is two per
+	              ## side, and so on to 6.
 	FOOTPRINT,    ## ONE station under the hull's centre, handed the hull's plan
 	              ## dimensions. For gear that is a single continuous thing
 	              ## wrapping the whole vehicle rather than a row of units.
@@ -162,11 +166,14 @@ const LAYOUTS := {
 		"normal": Vector3.BACK, "reach_keys": ReachKeys.XYZ,
 	},
 	"buoyant_envelope": {
-		"pattern": Pattern.STERN_ROW,
+		# SIDE_PODS, not STERN_ROW. An airship's cruise engines hang off
+		# outriggers along the flanks, not in a row across the stern, and Chris
+		# specified the count progression explicitly - see the pattern.
+		"pattern": Pattern.SIDE_PODS,
 		"count_key": "prop_count", "count_fallback": "count", "count_default": 2,
-		"count_min": 1, "count_max": 5,
+		"count_min": 1, "count_max": 6,
 		"geo_keys": {"blade_count": 3.0, "blade_pitch": 1.0},
-		"normal": Vector3.BACK, "reach_keys": ReachKeys.XYZ,
+		"normal_is_side": true, "mirror": true,
 	},
 	# --- Expansion types (LOCOMOTION_EXPANSION_PLAN.md 4) ---
 	# Every one of these is a data declaration and nothing else - no new branch
@@ -252,7 +259,9 @@ const GEOMETRY := {
 	"fixed_wing_engine": {"x_pad": 0.4, "y_pad": 0.4, "z_frac": 0.15},
 	# STERN_ROW: how wide the row spreads, how far aft, how high.
 	"naval_propeller":   {"x_frac": 0.3, "z_clearance": 0.6, "y_frac": -0.15},
-	"buoyant_envelope":  {"x_frac": 0.3, "z_clearance": 0.6, "y_frac": -0.05},
+	# SIDE_PODS: how far outboard the pylon reaches, how far the row spreads
+	# fore/aft, and how far below the hull the belly pod hangs.
+	"buoyant_envelope":  {"x_pad": 0.55, "z_span": 0.30, "belly_drop": 0.55},
 	# CORNER_SPAN: the drum's down-and-out offset, and how far each end brace
 	# reaches toward the hull's own centre.
 	"screw_drive":       {"drum_offset_frac": 0.6, "reach_fraction": 0.8},
@@ -393,7 +402,11 @@ const MAX_WIDTH_FACTOR := {
 	# Air: span is the point. Rotors and engine clusters overhang by design;
 	# the ornithopter was still absurd at 4.25x.
 	"helicopter_rotors": 2.4, "fixed_wing_engine": 1.8,
-	"ornithopter_wing": 2.6, "buoyant_envelope": 1.4,
+	# An airship's cruise engines hang off outriggers well clear of the
+	# envelope, so this one legitimately stands wide. At 1.4 the clamp was
+	# shrinking the whole pod to the 0.35 floor - which is what made the
+	# re-authored engine render as a speck.
+	"ornithopter_wing": 2.6, "buoyant_envelope": 2.6,
 }
 
 static func max_width_factor(type_id: String) -> float:
@@ -670,6 +683,41 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				var st := _station(p, spec.get("normal", Vector3.BACK), geo, 0.0, false)
 				st["index"] = i
 				out.append(st)
+
+		Pattern.SIDE_PODS:
+			# Chris's progression: pods go on in SIDE PAIRS, and an odd count
+			# puts the extra one under the belly rather than leaving the
+			# vehicle lopsided. 1 -> one pod (belly), 2 -> one per side,
+			# 3 -> one per side plus belly, 4 -> two per side, 5 -> two per
+			# side plus belly, 6 -> three per side.
+			var total := _resolve_count(spec, settings)
+			var per_flank := int(total / 2)
+			var has_belly: bool = (total % 2) == 1
+			var out_x := hull_size.x * 0.5 + float(geom.get("x_pad", 0.5))
+			var z_reach := hull_size.z * float(geom.get("z_span", 0.3))
+			for side in [-1.0, 1.0]:
+				for i in range(per_flank):
+					var zf: float = 0.0 if per_flank <= 1 						else -1.0 + 2.0 * (float(i) / float(per_flank - 1))
+					var geo := geo_base.duplicate()
+					# Internal geometry channel: the builder knows its catalog
+					# size (1.0) but not the hull's, and an engine pod sized off
+					# the catalog came out as a speck against a real airship.
+					geo["pod_scale"] = hull_size.y
+					var st := _station(Vector3(out_x * side, 0.0, zf * z_reach),
+						Vector3.LEFT if side < 0.0 else Vector3.RIGHT, geo, side,
+						bool(spec.get("mirror", false)) and side < 0.0)
+					st["index"] = i
+					out.append(st)
+			if has_belly:
+				var bgeo := geo_base.duplicate()
+				# The belly pod hangs DOWN rather than out, so it is told to
+				# point its pylon at the hull's underside instead of its side.
+				bgeo["pod_belly"] = true
+				bgeo["pod_scale"] = hull_size.y
+				var by := -hull_size.y * 0.5 - float(geom.get("belly_drop", 0.5))
+				var bst := _station(Vector3(0.0, by, 0.0), Vector3.UP, bgeo, 0.0, false)
+				bst["index"] = 0
+				out.append(bst)
 
 		Pattern.FOOTPRINT:
 			var geo := geo_base.duplicate()

@@ -577,6 +577,77 @@ def build_acs_skirt():
 
 
 # ---------------------------------------------------------------------------
+# BUOYANT-ENVELOPE DRIVE - was a generic prop housing on a strut.
+#
+# Chris: "it should be a mechanical boxy engine out to either side on a pylon.
+# the pylon connecting to a nose cone, then a boxy-enginey-mechanical lookin
+# bit, then a wide slow turning prop."
+#
+# So it is three parts in a row along the shaft, not one nacelle: a faired nose
+# the pylon lands on, a boxy engine you can read the machinery of, and the hub
+# the prop turns on. An airship's cruise engine is a slow, exposed, serviceable
+# thing bolted to an outrigger - closer to a traction engine than to a jet -
+# which is why this is boxes and stacks rather than a smooth pod.
+#
+# AXIS: shaft along Blender Y, nose at -Y, prop end at +Y. Blender +Y maps to
+# Godot -Z, so the nose points forward and the prop faces aft, which is what
+# _build_buoyant_envelope() expects.
+# ---------------------------------------------------------------------------
+def build_be_nose_cone():
+	bm = bmesh.new()
+	add_taper_y(bm, (0, -0.30, 0), 0.021, 0.150, 0.290, segments=20)     # spinner/fairing
+	add_cyl_y(bm, (0, -0.150, 0), 0.158, 0.048, segments=20)             # collar
+
+	for i in range(10):                                                   # collar bolts
+		a = (i / 10) * math.tau
+		add_cyl_y(bm, (math.cos(a) * 0.128, -0.150, math.sin(a) * 0.128),
+				  0.012, 0.056, segments=6)
+	add_cyl_y(bm, (0, -0.075, 0), 0.150, 0.110, segments=20)             # bearing barrel
+	# Cooling intake scoop on top, and a drain on the bottom - the two things
+	# that tell you which way up an engine is.
+	add_box(bm, (0, -0.140, 0.135), (0.110, 0.190, 0.070), bevel=0.012)
+	add_cyl_y(bm, (0, -0.055, -0.140), 0.030, 0.090, segments=10)
+	export_bmesh(bm, "be_nose_cone", "be_nose_cone.glb",
+				 color=(0.30, 0.31, 0.33, 1.0), metallic=0.68, roughness=0.42)
+
+
+def build_be_engine_block():
+	bm = bmesh.new()
+	# Crankcase: a real box, chamfered, with a ribbed sump under it.
+	add_box(bm, (0, 0.150, 0), (0.290, 0.360, 0.250), bevel=0.020)
+	add_box(bm, (0, 0.150, -0.145), (0.250, 0.320, 0.070), bevel=0.012)
+	for i in range(5):                                                    # sump fins
+		add_box(bm, (0, 0.020 + i * 0.065, -0.190), (0.270, 0.030, 0.040), bevel=0.006)
+	# Cylinder bank down each side, heads outward - the single most legible
+	# "this is an engine" cue there is.
+	for sx in (-1, 1):
+		for i in range(3):
+			y = 0.045 + i * 0.100
+			add_cyl_x(bm, (sx * 0.170, y, 0.030), 0.058, 0.110, segments=12)
+			add_cyl_x(bm, (sx * 0.235, y, 0.030), 0.070, 0.045, segments=12)   # head
+			for f in range(3):                                                # fins
+				add_cyl_x(bm, (sx * (0.205 + f * 0.022), y, 0.030), 0.076, 0.010, segments=12)
+			# Exhaust stub turning up and aft into a collector.
+			add_tube_between(bm, (sx * 0.215, y, 0.075), (sx * 0.150, y + 0.030, 0.185),
+							 0.024, segments=8)
+		add_tube_between(bm, (sx * 0.150, 0.030, 0.195), (sx * 0.150, 0.300, 0.195),
+						 0.034, segments=10)                              # collector
+		add_cyl_y(bm, (sx * 0.150, 0.330, 0.195), 0.042, 0.070, segments=10)  # stack
+	# Accessory gear aft: magneto cans, a pump, and the reduction housing the
+	# prop actually hangs off.
+	add_box(bm, (0, 0.345, 0.040), (0.230, 0.090, 0.200), bevel=0.010)
+	for sx in (-1, 1):
+		add_cyl_y(bm, (sx * 0.080, 0.410, 0.040), 0.045, 0.075, segments=12)
+	add_cyl_y(bm, (0, 0.430, -0.060), 0.055, 0.100, segments=12)
+	add_taper_y(bm, (0, 0.435, 0), 0.185, 0.130, 0.090, segments=18)      # reduction case
+	add_cyl_y(bm, (0, 0.500, 0), 0.105, 0.060, segments=18)               # output bearing
+	# Mounting saddle on top, where the pylon lands.
+	add_box(bm, (0, 0.190, 0.170), (0.150, 0.240, 0.060), bevel=0.010)
+	export_bmesh(bm, "be_engine_block", "be_engine_block.glb",
+				 color=(0.26, 0.27, 0.29, 1.0), metallic=0.72, roughness=0.44)
+
+
+# ---------------------------------------------------------------------------
 # HOVER SKIRT - was 92 triangles: a plain ring.
 # Authored around the origin, Z up, per _build_hover_engine().
 # ---------------------------------------------------------------------------
@@ -845,6 +916,8 @@ if __name__ == "__main__":
 	build_leg_shin()
 	build_ht_track_bogie()
 	build_acs_skirt()
+	build_be_nose_cone()
+	build_be_engine_block()
 	build_hover_skirt()
 	build_naval_propeller()
 	build_tread_belt_loop()

@@ -4876,15 +4876,104 @@ static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base
 
 
 static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.TAN, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "buoyant_envelope", base_color, 1.0, float(tweaks.get("blade_pitch", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
-	# Zeppelin-style cruise prop (Chris's ask, 2026-07-24): a small engine
-	# nacelle (hub_scale 0.75, unchanged) turning a disproportionately
-	# large, slow prop - real airships mount big low-RPM propellers since
-	# they're only providing gentle cruise/steering thrust, not fighting
-	# gravity like a plane's. blade_scale 1.8 makes the blades noticeably
-	# bigger than naval_propeller's own (which stays at the neutral 1.0);
-	# the slow turn rate itself lives in battle_unit.gd's PropBlades spin.
-	_build_pylon_mounted_propeller(parent_node, base_size, base_color, tweaks, 0.75, 1.8)
+	# AIRSHIP CRUISE ENGINE. Chris: "a mechanical boxy engine out to either
+	# side on a pylon. the pylon connecting to a nose cone, then a
+	# boxy-enginey-mechanical lookin bit, then a wide slow turning prop."
+	#
+	# Three parts in a row along the shaft rather than one smooth nacelle. An
+	# airship engine is slow, exposed and serviceable - bolted to an outrigger,
+	# closer to a traction engine than to a jet - so you should be able to read
+	# the machinery of it. No mount kit: this builds its own pylon, and the
+	# kit's fixed-length stub pylon was the same redundant second mounting that
+	# left a collar dangling under the rotors.
+	var blade_count := int(tweaks.get("blade_count", 3.0))
+	var blade_pitch := float(tweaks.get("blade_pitch", 1.0))
+	var is_belly: bool = bool(tweaks.get("pod_belly", false))
+
+	var nose_mesh := _part("be_nose_cone")
+	var block_mesh := _part("be_engine_block")
+	var blade_mesh := _part("rotor_blade")
+	var strut_mesh := _part("mount_strut_aerofoil")
+
+	# Sized off the HULL, not the catalog. buoyant_envelope's catalog size is a
+	# 1.0 placeholder, so a pod built from it came out as a speck bolted to the
+	# side of a real airship. pod_scale is the hull's own height, from
+	# locomotion_layout.gd's SIDE_PODS pattern.
+	var s: float = maxf(float(tweaks.get("pod_scale", base_size.x)), 0.5) * 1.15
+	const POD_Z := -0.20
+	var struct_color := base_color.darkened(0.25)
+
+	# PYLON, from the hull to the top of the engine. A flank pod reaches
+	# inboard along X; the belly pod reaches straight up instead, which is the
+	# only thing that differs between them.
+	if strut_mesh:
+		var span := Vector3(0, 0.95 * s, 0) if is_belly else Vector3(-1.05 * s, 0.15 * s, 0)
+		var span_len := span.length()
+		var dir := span / span_len
+		var ref := Vector3.FORWARD if absf(dir.dot(Vector3.UP)) > 0.95 else Vector3.UP
+		var right := dir.cross(ref).normalized()
+		var fwd := right.cross(dir).normalized()
+		var pylon := _mesh_inst(strut_mesh, struct_color)
+		pylon.transform = Transform3D(
+			Basis(right * 0.30 * s, dir * span_len, fwd * 0.16 * s),
+			# Rooted on the block's own mounting saddle, not floating above it.
+			# At 0.42 * s the pylon started clear of the engine's top face and
+			# the pod measured as 2 islands - a strut reaching down at an
+			# engine it never touched.
+			Vector3(0, 0.16 * s, POD_Z * s))
+		parent_node.add_child(pylon)
+
+	# BLENDER +Y IS GODOT -Z, so the parts import with their prop end facing
+	# FORWARD and the nose cone facing aft - backwards. Both get a half turn
+	# about Y, which maps authored +Y onto Godot +Z: nose forward, output
+	# bearing aft, where the prop hub is. Getting this the wrong way round is
+	# what put the props out in front of their own nose cones on the first
+	# render, and it is the same +Y/-Z trap the screw drums and the sprocket
+	# axis both fell into.
+	if nose_mesh:
+		var nose := _mesh_inst(nose_mesh, struct_color.lightened(0.06))
+		nose.scale = Vector3.ONE * s
+		nose.rotation = Vector3(0, PI, 0)
+		nose.position = Vector3(0, 0, POD_Z * s)
+		parent_node.add_child(nose)
+
+	if block_mesh:
+		var block := _mesh_inst(block_mesh, struct_color)
+		block.scale = Vector3.ONE * s
+		block.rotation = Vector3(0, PI, 0)
+		block.position = Vector3(0, 0, POD_Z * s)
+		parent_node.add_child(block)
+
+	# THE PROP: wide and slow. battle_unit.gd spins "PropBlades" about Z at the
+	# airship's own reduced rate.
+	var pivot := Node3D.new()
+	pivot.name = "PropBlades"
+	# On the block's own output bearing (authored at Blender +0.50, so Godot
+	# +0.50 after the half turn, plus the pod offset).
+	pivot.position = Vector3(0, 0, (POD_Z + 0.52) * s)
+	parent_node.add_child(pivot)
+
+	# WIDE. An airship's cruise prop is disproportionately large and low-RPM,
+	# because it is providing gentle thrust rather than fighting gravity.
+	# A TARGET LENGTH, divided by the mesh's own measured span - not a raw
+	# multiplier. rotor_blade is 1.16 long on X, so treating 1.55 as a scale
+	# factor asked for a 3.7-unit blade.
+	const AUTHORED_BLADE_X := 1.16
+	var blade_span: float = (1.05 * s) / AUTHORED_BLADE_X
+	_ring_of(pivot, blade_count, 0.0, func(p, _pos, angle, _idx):
+		if blade_mesh == null:
+			return
+		# rotor_blade spans LOCAL X (measured 1.16 along X against 0.159 along
+		# Z). This hub turns about Z, and an X-spanning blade sweeps correctly
+		# under a Z rotation, so there is no reorientation to do - pitch it
+		# about its own spanwise axis, then fan it round the hub.
+		var pitch_rot := Basis(Vector3(1, 0, 0), 0.30 * blade_pitch)
+		var fan_rot := Basis(Vector3(0, 0, 1), angle)
+		var blade := _mesh_inst(blade_mesh, Color(0.22, 0.22, 0.24))
+		blade.quaternion = (fan_rot * pitch_rot).get_rotation_quaternion()
+		blade.scale = Vector3(blade_span, 0.9 * s, 0.9 * s)
+		p.add_child(blade)
+	)
 
 
 static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_GOLDENROD, tweaks: Dictionary = {}):
