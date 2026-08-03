@@ -3828,7 +3828,17 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# outboard_x, its outer edge) - the loop anchors to THIS instead of
 	# outboard_x directly, so it's centered over the sprocket's actual
 	# footprint rather than straddling empty space past its outboard face.
-	var belt_center_x = outboard_x - sprocket_width_authored * 0.5 * sprocket_scale
+	# BELT_OUTBOARD_NUDGE. The station moved INBOARD (locomotion_layout.gd's
+	# x_inset_frac) so the mount struts bite into the hull; without this the
+	# belt would have gone in with it and buried itself in the hull's side.
+	# Chris asked for both at once: "they need to move in further, so their
+	# struts actually intersect the hull, BUT the tread itself needs to move
+	# outboard some, so that it sits on the sprockets and wheels, not embedded
+	# in the hull." So the belt is pushed back out by the same amount the
+	# station came in, and now rides just PROUD of the sprocket's outer face
+	# rather than centred half a sprocket-width inboard of it.
+	const BELT_OUTBOARD_NUDGE := 0.16
+	var belt_center_x = outboard_x - sprocket_width_authored * 0.5 * sprocket_scale 		+ actual_size.x * BELT_OUTBOARD_NUDGE
 
 	var loop: MeshInstance3D
 	if loop_mesh:

@@ -235,7 +235,7 @@ const LAYOUTS := {
 const GEOMETRY := {
 	# SIDE_PAIRS: how far outboard, how high, how far fore/aft the row spreads.
 	"wheels":            {"x_pad": 0.15, "x_pad_scales_with": "wheel_size", "y": "underside", "z_span": 0.35},
-	"tracked_treads":    {"x_from": "running_gear", "y": "below_gear", "z_span": 0.0},
+	"tracked_treads":    {"x_from": "running_gear", "x_inset_frac": 0.12, "y": "below_gear", "z_span": 0.0},
 	"legs":              {"x_from": "running_gear", "y": "underside", "z_span": 0.35},
 	"helicopter_rotors": {"x_pad": 1.2, "y_pad": 0.3, "y": "topside", "z_span": 0.35},
 	"ornithopter_wing":  {"x_pad": 0.3, "x_pad_scales_with": "wingspan", "y_frac": 0.1, "z_frac": 0.05},
@@ -518,7 +518,14 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				# the centreline. These types now mount at the HULL'S OWN EDGE,
 				# which is where Chris asked for them: "these ones I think can
 				# go directly under the hull edges."
-				x_offset = hull_size.x / 2.0
+				# x_inset_frac pulls the station in from the hull's edge so the
+				# mount's own struts land INSIDE the hull's volume rather than
+				# grazing its skin (Chris: "they need to move in further, so
+				# their struts actually intersect the hull"). The running gear
+				# itself is pushed back out in the builder, which is the other
+				# half of that same ask - see BELT_OUTBOARD_NUDGE in
+				# visual_builder.gd.
+				x_offset = (hull_size.x / 2.0) * (1.0 - float(geom.get("x_inset_frac", 0.0)))
 			else:
 				var pad := float(geom.get("x_pad", 0.0))
 				if geom.has("x_pad_scales_with"):
@@ -535,7 +542,10 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				# The drop it was really providing is kept explicitly, as a
 				# fraction of the hull's own height, so the belt still hangs
 				# below the body rather than beside it.
-				"below_gear": y = -hull_size.y / 2.0 + bias - hull_size.y * 0.20
+				# 0.30, was 0.20: Chris asked for the treads "down a smidge
+				# further, say half the remaining distance to the bottom of the
+				# visible hull mesh."
+				"below_gear": y = -hull_size.y / 2.0 + bias - hull_size.y * 0.30
 				"topside": y = hull_size.y / 2.0 + float(geom.get("y_pad", 0.0))
 				_: y = hull_size.y * float(geom.get("y_frac", 0.0))
 			var z_base := hull_size.z * float(geom.get("z_frac", 0.0))
