@@ -6123,11 +6123,20 @@ static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_co
 		if wheel_mesh:
 			var wheel_pivot := Node3D.new()
 			wheel_pivot.name = SPIN_PIVOT_WHEEL
-			wheel_pivot.position = Vector3(0.14 * wheel_size * v_scale,
-				-0.30 * arm_len * v_scale, z)
+			# COLLAPSED UP. The linkage was spread over a drop of 0.30 * arm
+			# length with wheels sized at p_s, which left daylight between
+			# every pair of parts and read as a set of loose components rather
+			# than one suspension (Chris: "it mostly just all needs to collapse
+			# upwards, so the pieces actually connect"). The drop is more than
+			# halved and the wheels are scaled up to close the rest of the gap
+			# themselves - rb_wheel's authored radius is 0.211, so WHEEL_GROWTH
+			# takes it to roughly twice what it was.
+			wheel_pivot.position = Vector3(0.14 * wheel_size * p_s,
+				-0.12 * arm_len * p_s, z)
 			chain.add_child(wheel_pivot)
 			var wheel := _mesh_inst(wheel_mesh, Color(0.20, 0.20, 0.22))
-			wheel.scale = Vector3.ONE * wheel_size * v_scale
+			const WHEEL_GROWTH := 2.2
+			wheel.scale = Vector3.ONE * wheel_size * p_s * WHEEL_GROWTH
 			wheel_pivot.add_child(wheel)
 
 
