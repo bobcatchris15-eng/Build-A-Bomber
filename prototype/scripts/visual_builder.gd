@@ -4052,6 +4052,23 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 		strut.position = Vector3.ZERO
 		strut.rotation = Vector3(0, 0, strut_angle)
 		parent_node.add_child(strut)
+
+		# SECOND MEMBER, to a point lower down the hull, so the two struts and
+		# the hull's own side close a triangle in profile (Chris). Removing the
+		# kit's redundant pylon last pass took this bracing with it and left a
+		# single cantilever - which is exactly the thing a real outrigger does
+		# not do, because one strut can carry the load but cannot resist the
+		# rotor's torque about it. Thinner again than the main member: it is a
+		# brace, and a brace that matches the spar it braces reads as two spars.
+		var lower_target := Vector3(-mount_reach_x * mount_side * 0.62,
+			-mount_reach_y - base_size.y * 1.35, 0.0)
+		var lower_len := lower_target.length()
+		var lower_dir := lower_target / lower_len
+		var brace = _mesh_inst(strut_mesh, base_color.darkened(0.3))
+		brace.scale = Vector3(0.30, lower_len, 0.22)
+		brace.position = Vector3.ZERO
+		brace.rotation = Vector3(0, 0, atan2(-lower_dir.x, lower_dir.y))
+		parent_node.add_child(brace)
 	elif mount_mesh:
 		# Fallback (mount_strut_tapered not yet reimported): the old
 		# two-piece uniform-strut + larger-block-at-the-end approximation.
@@ -4100,7 +4117,14 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 		var blade: MeshInstance3D
 		if blade_mesh:
 			blade = _mesh_inst(blade_mesh, Color(0.1, 0.1, 0.1))
-			blade.scale = Vector3(1.0, 1.0, blade_length)
+			# SPANWISE IS X. Chris: "the rotor size tweak doesn't change the
+			# blades lengths." It was scaling Z, which the re-authored
+			# rotor_blade uses for CHORD - measured, the mesh is 1.16 along X
+			# and 0.159 along Z, so the slider was fattening the blade by a
+			# hair instead of lengthening it. The old flat-plank blade this
+			# replaced was authored along Z; the axis moved in the rework and
+			# this call site did not follow it.
+			blade.scale = Vector3(blade_length, 1.0, 1.0)
 			blade.rotation.y = angle
 		else:
 			blade = MeshInstance3D.new()
