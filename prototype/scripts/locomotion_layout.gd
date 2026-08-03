@@ -261,7 +261,11 @@ const GEOMETRY := {
 	"naval_propeller":   {"x_frac": 0.3, "z_clearance": 0.6, "y_frac": -0.15},
 	# SIDE_PODS: how far outboard the pylon reaches, how far the row spreads
 	# fore/aft, and how far below the hull the belly pod hangs.
-	"buoyant_envelope":  {"x_pad": 0.55, "z_span": 0.30, "belly_drop": 0.55},
+	# Standoff doubled (Chris): 0.55 -> 1.10 outboard, and the belly pod drops
+	# the same amount further. An airship's engines hang well clear of the
+	# envelope - close in they read as blisters on the hull rather than
+	# outriggers.
+	"buoyant_envelope":  {"x_pad": 1.10, "z_span": 0.30, "belly_drop": 1.10},
 	# CORNER_SPAN: the drum's down-and-out offset, and how far each end brace
 	# reaches toward the hull's own centre.
 	"screw_drive":       {"drum_offset_frac": 0.6, "reach_fraction": 0.8},
@@ -703,6 +707,11 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 					# size (1.0) but not the hull's, and an engine pod sized off
 					# the catalog came out as a speck against a real airship.
 					geo["pod_scale"] = hull_size.y
+					# How far the pylon has to span to reach the hull's skin.
+					# The pod used to carry a fixed-length pylon in its own
+					# units, which stopped reaching the moment the standoff
+					# changed.
+					geo["pod_reach"] = float(geom.get("x_pad", 0.5))
 					var st := _station(Vector3(out_x * side, 0.0, zf * z_reach),
 						Vector3.LEFT if side < 0.0 else Vector3.RIGHT, geo, side,
 						bool(spec.get("mirror", false)) and side < 0.0)
@@ -714,6 +723,7 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				# point its pylon at the hull's underside instead of its side.
 				bgeo["pod_belly"] = true
 				bgeo["pod_scale"] = hull_size.y
+				bgeo["pod_reach"] = float(geom.get("belly_drop", 0.5))
 				var by := -hull_size.y * 0.5 - float(geom.get("belly_drop", 0.5))
 				var bst := _station(Vector3(0.0, by, 0.0), Vector3.UP, bgeo, 0.0, false)
 				bst["index"] = 0

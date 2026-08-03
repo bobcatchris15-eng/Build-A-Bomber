@@ -4899,37 +4899,43 @@ static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, bas
 	# 1.0 placeholder, so a pod built from it came out as a speck bolted to the
 	# side of a real airship. pod_scale is the hull's own height, from
 	# locomotion_layout.gd's SIDE_PODS pattern.
-	var s: float = maxf(float(tweaks.get("pod_scale", base_size.x)), 0.5) * 1.15
+	# 0.92, was 1.15 - Chris asked for 20% off once the pod was legible.
+	var s: float = maxf(float(tweaks.get("pod_scale", base_size.x)), 0.5) * 0.92
 	const POD_Z := -0.20
 	var struct_color := base_color.darkened(0.25)
 
-	# PYLON, from the hull to the top of the engine. A flank pod reaches
-	# inboard along X; the belly pod reaches straight up instead, which is the
-	# only thing that differs between them.
+	# PYLON, from the engine's mounting saddle back into the hull. TWO members,
+	# so they and the hull's own side close a triangle in profile - the same
+	# arrangement the rotor outriggers use, and for the same reason: one strut
+	# carries the load but cannot resist the engine's torque about it.
+	#
+	# The span is SOLVED from pod_reach (locomotion_layout.gd's standoff)
+	# rather than being a fixed length in pod units. The old fixed span stopped
+	# reaching the hull the moment the standoff doubled, which is exactly the
+	# failure the rotor kit's stub pylon had.
+	var reach := float(tweaks.get("pod_reach", 0.6))
+	var root := Vector3(0, 0.16 * s, POD_Z * s)
 	if strut_mesh:
-		var span := Vector3(0, 0.95 * s, 0) if is_belly else Vector3(-1.05 * s, 0.15 * s, 0)
-		var span_len := span.length()
-		var dir := span / span_len
-		var ref := Vector3.FORWARD if absf(dir.dot(Vector3.UP)) > 0.95 else Vector3.UP
-		var right := dir.cross(ref).normalized()
-		var fwd := right.cross(dir).normalized()
-		var pylon := _mesh_inst(strut_mesh, struct_color)
-		pylon.transform = Transform3D(
-			Basis(right * 0.30 * s, dir * span_len, fwd * 0.16 * s),
-			# Rooted on the block's own mounting saddle, not floating above it.
-			# At 0.42 * s the pylon started clear of the engine's top face and
-			# the pod measured as 2 islands - a strut reaching down at an
-			# engine it never touched.
-			Vector3(0, 0.16 * s, POD_Z * s))
-		parent_node.add_child(pylon)
+		# +0.35 overruns the hull's skin so the strut ends inside its volume
+		# rather than against it. A flank pod reaches inboard along X; the
+		# belly pod reaches straight up instead, which is all that differs.
+		var main_span := Vector3(0, reach + 0.35 * s, 0) if is_belly 			else Vector3(-(reach + 0.35 * s), 0.15 * s, 0)
+		# The brace lands further AFT on the hull, which is what opens the
+		# triangle out in profile.
+		var brace_span := main_span + (Vector3(0, 0, 0.85 * s) if is_belly 			else Vector3(0, -0.25 * s, 0.85 * s))
+		for entry in [[main_span, 0.30, 0.16], [brace_span, 0.20, 0.11]]:
+			var span: Vector3 = entry[0]
+			var span_len: float = span.length()
+			var dir: Vector3 = span / span_len
+			var ref := Vector3.FORWARD if absf(dir.dot(Vector3.UP)) > 0.95 else Vector3.UP
+			var right: Vector3 = dir.cross(ref).normalized()
+			var fwd: Vector3 = right.cross(dir).normalized()
+			var member := _mesh_inst(strut_mesh, struct_color)
+			member.transform = Transform3D(
+				Basis(right * float(entry[1]) * s, dir * span_len, fwd * float(entry[2]) * s),
+				root)
+			parent_node.add_child(member)
 
-	# BLENDER +Y IS GODOT -Z, so the parts import with their prop end facing
-	# FORWARD and the nose cone facing aft - backwards. Both get a half turn
-	# about Y, which maps authored +Y onto Godot +Z: nose forward, output
-	# bearing aft, where the prop hub is. Getting this the wrong way round is
-	# what put the props out in front of their own nose cones on the first
-	# render, and it is the same +Y/-Z trap the screw drums and the sprocket
-	# axis both fell into.
 	if nose_mesh:
 		var nose := _mesh_inst(nose_mesh, struct_color.lightened(0.06))
 		nose.scale = Vector3.ONE * s
