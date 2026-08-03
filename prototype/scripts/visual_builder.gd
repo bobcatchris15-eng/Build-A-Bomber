@@ -4149,11 +4149,18 @@ static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_co
 	for idx in range(3):
 		var ring: MeshInstance3D
 		if ring_mesh:
-			# Dark polished alloy with a FAINT field glow, not a neon hoop.
-			# At emission energy 1.0 in the module's own bright team colour
-			# the rings came out as flat cyan with no substance at all.
-			ring = _mesh_inst(ring_mesh, base_color.darkened(0.55),
-				Color(0.35, 0.72, 1.0), 0.28)
+			# Only the INNERMOST ring glows - the other two are dark polished
+			# alloy, same as the anti-grav pad body. Chris: "the hover pad
+			# looks similar, still all sky blue." Emission is applied over any
+			# material, so glowing all three was what kept the whole assembly
+			# blue however exotic the substrate was. One lit hoop inside two
+			# dark ones reads as a machine with something running in it;
+			# three lit hoops read as a plastic toy.
+			if idx == 2:
+				ring = _mesh_inst(ring_mesh, Color(0.26, 0.30, 0.34),
+					Color(0.35, 0.72, 1.0), 0.55)
+			else:
+				ring = _mesh_inst(ring_mesh, Color(0.30, 0.32, 0.35))
 			ring.scale = Vector3(ring_scale * ring_radii[idx], emv, ring_scale * ring_radii[idx])
 		else:
 			ring = MeshInstance3D.new()
@@ -6265,8 +6272,14 @@ static func _build_anti_grav_plate(parent_node: Node3D, base_size: Vector3, base
 		for i in range(plates):
 			var a: float = float(i) / float(maxi(1, plates)) * TAU
 			var r: float = 0.0 if plates <= 1 else 0.22 * HEAD_SCALE
-			var plate := _mesh_inst(plate_mesh, base_color.darkened(0.55),
-				Color(0.30, 0.65, 0.95), 0.30 * field)
+			# NO EMISSION on the pad body. Chris: "that hoop in the middle
+			# can stay, the rest of the pad part should be the dark metal."
+			# The exotic role was already doing its job - emission is applied
+			# on top of ANY material, so a blue glow across the whole plate
+			# was what kept it reading as sky-blue plastic no matter what the
+			# substrate said. The tint is neutral too, so the team colour
+			# cannot leak back in through the role's own tint weight.
+			var plate := _mesh_inst(plate_mesh, Color(0.30, 0.32, 0.35))
 			plate.scale = Vector3(0.8 + 0.3 * field, 1.0, 0.8 + 0.3 * field) * HEAD_SCALE
 			plate.position = Vector3(cos(a) * r, 0.0, sin(a) * r)
 			parent_node.add_child(plate)
