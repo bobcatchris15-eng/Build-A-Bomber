@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Federal Bomber Command - Main Menu</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+</head>
+<body class="menu-body">
+    <div class="bg-layer" style="background-image: url('bg.jpg');"></div>
+    
+    <!-- Cartoonish Unit sitting in realistic hangar -->
+    <div class="unit-layer">
+        <img src="unit_hover.jpg" alt="Hovercraft SPG" class="unit-sprite">
+    </div>
+
+    <!-- UI Overlay -->
+    <div class="menu-wrapper">
+        <div class="menu-island">
+            <header class="menu-header">
+                <h1 class="main-title">STRATEGIC COMMAND</h1>
+                <h2 class="sub-title">1:35 SCALE ARMOR DIVISION // AUTHORIZED PERSONNEL ONLY</h2>
+            </header>
+
+            <nav class="main-nav">
+                <a href="assembly.html" class="nav-item">
+                    <span class="nav-text">INITIATE ASSEMBLY</span>
+                    <span class="nav-arrow">→</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-text">REVIEW DOCTRINE</span>
+                    <span class="nav-arrow">→</span>
+                </a>
+                <a href="#" class="nav-item">
+                    <span class="nav-text">CALIBRATE LETHALITY</span>
+                    <span class="nav-arrow">→</span>
+                </a>
+                <a href="#" class="nav-item disabled">
+                    <span class="nav-text">COWARD'S EXIT</span>
+                    <span class="nav-arrow"></span>
+                </a>
+            </nav>
+
+            <footer class="menu-footer">
+                <p><span class="status-dot"></span> SYSTEM NOMINAL</p>
+            </footer>
+        </div>
+    </div>
+</body>
+</html>

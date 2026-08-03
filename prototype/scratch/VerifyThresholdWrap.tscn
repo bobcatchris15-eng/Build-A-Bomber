@@ -1,6 +1,6 @@
-[gd_scene load_steps=3 format=3 uid="uid://cxthresholdwrapverify1"]
+[gd_scene load_steps=3 format=3 uid="uid://bqmohda7f0g67"]
 
-[ext_resource type="PackedScene" path="res://scenes/MainLab.tscn" id="1_lab"]
+[ext_resource type="PackedScene" uid="uid://cxabmain1234" path="res://scenes/MainLab.tscn" id="1_lab"]
 [ext_resource type="Script" path="res://scratch/verify_threshold_wrap.gd" id="2_verify"]
 
 [node name="MainLab" instance=ExtResource("1_lab")]

@@ -12,12 +12,29 @@ signal drag_ended
 var is_dragging: bool = false
 var last_angle: float = 0.0
 
+const Tokens = preload("res://scripts/ui_tokens.gd")
+
 func _ready():
+	# Matched to the 2D radial menu it is summoned from: a dark machined band
+	# with a hazard glow, not a bright gold hoop.
+	#
+	# Color.GOLD unshaded at 0.6 emission was the single most saturated object
+	# on the Design Lab screen - brighter than any hull, any terrain and any
+	# piece of chrome - which made a manipulator the loudest thing in a scene
+	# whose whole design premise is that the UNITS are the loud thing (see
+	# ui_tokens.gd). Hazard amber says "being adjusted" everywhere else in the
+	# interface; it says it here too, at a sane intensity.
 	var mat = StandardMaterial3D.new()
-	mat.albedo_color = Color.GOLD
+	mat.albedo_color = Tokens.BASE_700
+	mat.metallic = 0.7
+	mat.roughness = 0.35
 	mat.emission_enabled = true
-	mat.emission = Color.GOLD
-	mat.emission_energy_multiplier = 0.6
+	mat.emission = Tokens.SIGNAL_HAZARD
+	mat.emission_energy_multiplier = 0.35
+	# Drawn over the model, like the stretch handles - a rotation ring that
+	# disappears inside a large hull cannot be grabbed.
+	mat.no_depth_test = true
+	mat.render_priority = 1
 	if has_node("MeshInstance3D"):
 		get_node("MeshInstance3D").material_override = mat
 

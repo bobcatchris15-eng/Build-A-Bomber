@@ -142,6 +142,10 @@ const LAYOUTS := {
 		"geo_keys": {"wingspan": 1.0},
 		"geo_aliases": {"wingspan": ["size"]},
 		"normal_is_side": true,
+		# The shoulder rig is a roof-spanning frame, so the builder has to know
+		# how much roof there is to span and how far inboard the far rail sits.
+		"hull_length_geo_key": "target_length",
+		"stance_geo_key": "roof_reach", "stance_frac": 0.5,
 		"mirror": true, "node_scale": Vector3(2.0, 1.0, 2.0),
 	},
 	"hover_engine": {
@@ -253,7 +257,14 @@ const GEOMETRY := {
 	"tracked_treads":    {"x_from": "running_gear", "x_inset_frac": 0.12, "y": "below_gear", "z_span": 0.0},
 	"legs":              {"x_from": "running_gear", "y": "underside", "z_span": 0.35},
 	"helicopter_rotors": {"x_pad": 1.2, "y_pad": 0.3, "y": "topside", "z_span": 0.35},
-	"ornithopter_wing":  {"x_pad": 0.3, "x_pad_scales_with": "wingspan", "y_frac": 0.1, "z_frac": 0.05},
+	# On the ROOF EDGE, not floating beside the hull at mid-height. The old
+	# entry pushed the station further outboard as wingspan grew
+	# (x_pad_scales_with), so the longer Chris made the wings the further the
+	# whole assembly walked away from the vehicle - which is why they read as
+	# unattached. The station now sits exactly on the top corner rail and the
+	# builder reaches inboard across the roof for its frame, the same invariant
+	# build_wheel_mount() uses under the hull.
+	"ornithopter_wing":  {"x_pad": 0.0, "y": "topside", "y_pad": 0.0, "z_frac": 0.0},
 	# RING_*: ellipse radii and the fixed offset on the third axis.
 	"hover_engine":      {"pad_from_catalog": true, "y": "underside"},
 	"fixed_wing_engine": {"x_pad": 0.4, "y_pad": 0.4, "z_frac": 0.15},
@@ -410,7 +421,12 @@ const MAX_WIDTH_FACTOR := {
 	# envelope, so this one legitimately stands wide. At 1.4 the clamp was
 	# shrinking the whole pod to the 0.35 floor - which is what made the
 	# re-authored engine render as a speck.
-	"ornithopter_wing": 2.6, "buoyant_envelope": 2.6,
+	# The ornithopter is SUPPOSED to be absurd (Chris: "they're kind of an
+	# absurd choice and they need to feel like it. Impractically long"). This
+	# is the one type where a span several times the vehicle's width is the
+	# design, so the clamp is set to stop authoring accidents rather than to
+	# enforce proportion.
+	"ornithopter_wing": 5.5, "buoyant_envelope": 2.6,
 }
 
 static func max_width_factor(type_id: String) -> float:

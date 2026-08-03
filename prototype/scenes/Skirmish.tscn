@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3 uid="uid://cxabskirmish123"]
+[gd_scene load_steps=9 format=3 uid="uid://cdgclmayypuuc"]
 
 [ext_resource type="Script" path="res://scripts/skirmish.gd" id="1_skirmish"]
 [ext_resource type="Script" path="res://scripts/rts_camera.gd" id="2_rtscam"]
@@ -14,23 +14,21 @@ sky_material = SubResource("ProceduralSkyMaterial_sk")
 background_mode = 2
 sky = SubResource("Sky_sk")
 tonemap_mode = 3
-glow_enabled = true
-glow_intensity = 0.9
-glow_bloom = 0.08
-glow_blend_mode = 2
-glow_hdr_threshold = 1.0
 ssao_enabled = true
 ssao_radius = 0.8
 ssao_intensity = 2.5
+glow_enabled = true
+glow_intensity = 0.9
+glow_bloom = 0.08
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
 size = Vector3(160, 1, 160)
 
-[sub_resource type="BoxMesh" id="BoxMesh_ground"]
-size = Vector3(160, 1, 160)
-
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
 albedo_color = Color(0.2, 0.26, 0.21, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground"]
+size = Vector3(160, 1, 160)
 
 [node name="Skirmish" type="Node3D"]
 script = ExtResource("1_skirmish")

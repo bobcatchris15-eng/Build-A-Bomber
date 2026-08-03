@@ -1434,7 +1434,7 @@ func _setup_stage_navigation_bar() -> void:
 	_stage_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 
 	_stage_frame_btn = Button.new()
-	_stage_frame_btn.text = " 🛠️ 1. FRAME BUILDER "
+	_stage_frame_btn.text = "1. FRAME"
 	_stage_frame_btn.toggle_mode = true
 	_stage_frame_btn.button_pressed = true
 	_stage_frame_btn.custom_minimum_size = Vector2(220, 44)
@@ -1442,7 +1442,7 @@ func _setup_stage_navigation_bar() -> void:
 	_stage_frame_btn.pressed.connect(func(): _set_authoring_stage(AuthoringStage.STAGE_FRAME))
 
 	_stage_finishing_btn = Button.new()
-	_stage_finishing_btn.text = " 🎨 2. HULL FINISHING & PLATING "
+	_stage_finishing_btn.text = "2. FINISHING & PLATING"
 	_stage_finishing_btn.toggle_mode = true
 	_stage_finishing_btn.custom_minimum_size = Vector2(260, 44)
 	_stage_finishing_btn.add_theme_font_size_override("font_size", 15)
@@ -1590,7 +1590,7 @@ func _update_properties_panel() -> void:
 	properties_panel.add_child(dup_btn)
 
 	var mirror_btn := Button.new()
-	mirror_btn.text = "[↔] Mirror Across X"
+	mirror_btn.text = "Mirror Across X"
 	mirror_btn.tooltip_text = "Create a mirrored copy on the opposite side of X axis"
 	mirror_btn.custom_minimum_size = Vector2(0, 44)
 	mirror_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1752,13 +1752,13 @@ func _build_finishing_properties_panel() -> void:
 	properties_panel.add_child(HSeparator.new())
 
 	var rebake_btn := Button.new()
-	rebake_btn.text = "🔄 High-Res Preview"
+	rebake_btn.text = "High-Res Preview"
 	rebake_btn.custom_minimum_size = Vector2(0, 44)
 	rebake_btn.pressed.connect(func(): _update_finishing_preview(true))
 	properties_panel.add_child(rebake_btn)
 
 	var save_btn := Button.new()
-	save_btn.text = "💾 Save & Finalize Hull"
+	save_btn.text = "Save & Finalize Hull"
 	save_btn.custom_minimum_size = Vector2(0, 44)
 	save_btn.pressed.connect(_on_export_clicked)
 	properties_panel.add_child(save_btn)
@@ -2016,7 +2016,7 @@ func _on_export_clicked() -> void:
 func _show_hull_stats_dialog() -> void:
 	var dialog = AcceptDialog.new()
 	dialog.title = "Save & Finalize Hull"
-	dialog.ok_button_text = "💾 Save & Finalize Hull"
+	dialog.ok_button_text = "Save & Finalize Hull"
 	dialog.size = Vector2i(480, 560)
 
 	var vbox = VBoxContainer.new()

@@ -151,7 +151,7 @@ func _build_ui() -> void:
 	mvp_panel.theme_type_variation = "InsetPanel"
 	var mvp_vbox = VBoxContainer.new()
 	var mvp_lbl = Label.new()
-	mvp_lbl.text = "⭐ MVP DESIGN"
+	mvp_lbl.text = "BEST PERFORMING DESIGN"
 	mvp_lbl.theme_type_variation = "HeadingLabel"
 	mvp_lbl.add_theme_color_override("font_color", Color.GOLD)
 	mvp_vbox.add_child(mvp_lbl)
@@ -168,7 +168,7 @@ func _build_ui() -> void:
 	advice_panel.theme_type_variation = "InsetPanel"
 	var advice_vbox = VBoxContainer.new()
 	var adv_title = Label.new()
-	adv_title.text = "💡 TACTICAL ANALYSIS & ADVICE"
+	adv_title.text = "ASSESSMENT"
 	adv_title.theme_type_variation = "HeadingLabel"
 	advice_vbox.add_child(adv_title)
 
@@ -211,7 +211,7 @@ func _build_ui() -> void:
 	bottom_hbox.add_child(bp_select)
 
 	var iterate_btn = Button.new()
-	iterate_btn.text = "🔧 Iterate in Design Lab"
+	iterate_btn.text = "Iterate in Design Lab"
 	iterate_btn.theme_type_variation = "PrimaryButton"
 	iterate_btn.custom_minimum_size = Vector2(200, 44)
 	iterate_btn.pressed.connect(func():
@@ -228,13 +228,13 @@ func _build_ui() -> void:
 
 	if is_operation:
 		var next_btn = Button.new()
-		next_btn.text = "⚔️ Next Operation Stage >"
+		next_btn.text = "Next Operation Stage"
 		next_btn.custom_minimum_size = Vector2(200, 44)
 		next_btn.pressed.connect(func(): next_stage_requested.emit())
 		bottom_hbox.add_child(next_btn)
 
 	var menu_btn = Button.new()
-	menu_btn.text = "🏠 Main Menu"
+	menu_btn.text = "Main Menu"
 	menu_btn.custom_minimum_size = Vector2(140, 44)
 	menu_btn.pressed.connect(func(): main_menu_requested.emit())
 	bottom_hbox.add_child(menu_btn)

@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://cxabmapselect123"]
+[gd_scene load_steps=2 format=3 uid="uid://boo401i1e02oc"]
 
 [ext_resource type="Script" path="res://scripts/map_select.gd" id="1_mapselect"]
 

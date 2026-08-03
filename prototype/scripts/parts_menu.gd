@@ -1,73 +1,104 @@
 extends Control
+# The hardware catalog.
+#
+# REAUTHORED, not restyled (Chris, 2026-08-02: "I specifically did not want
+# just another reskin of the same static menu system"). What was here before:
+# a fixed 320px column, permanently open, with a TabContainer of three tabs,
+# each holding a one-at-a-time accordion of drawers, each drawer a vertical
+# stack of full-width text buttons. Every one of those is a decision that costs
+# the player something:
+#
+#   * PERMANENTLY OPEN. The catalog is a thing you visit, not a thing you read
+#     continuously, and it was taking a fifth of the screen from the model.
+#     It now lives in a UIDock and rails away to 40px.
+#   * TABS. Three tabs meant a part was always two clicks and a guess away, and
+#     search could not span them without fighting the tab state. Replaced by
+#     FILTER CHIPS, which are multi-selectable, always visible, and compose
+#     with search instead of competing with it.
+#   * ONE-AT-A-TIME ACCORDION. Opening a drawer closed the one you were
+#     comparing against. Sections now open independently.
+#   * FULL-WIDTH TEXT ROWS. A 320px row per part is enormous for "Light Hull,
+#     180kg" and meant six parts filled the panel. Parts are now compact CARDS
+#     in a responsive grid, so a group is scannable at a glance.
+#   * SEARCH BURIED. Search is the only thing that helps RETRIEVAL (grouping
+#     helps browsing - different task), so it is now the first thing in the
+#     panel and it is always focused-and-ready.
+#
+# WHAT DELIBERATELY SURVIVES. The grouping and sort LOGIC below is good and is
+# covered by two suites in run_tests.gd - roles come from the catalog rather
+# than a local table, hulls group by weight class, locomotion groups off its
+# own traits array, and everything sorts light-to-heavy. That logic is
+# untouched, and so is the node metadata contract those tests read
+# (`drawer_category`, `content_container`, `header_btn`, `drawer_open`, and
+# `_all_drawers`), so the presentation could change without the coverage
+# rotting. Only the widgets changed.
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
+const UIAnim = preload("res://scripts/ui_anim.gd")
+const UIDockScript = preload("res://scripts/ui_dock.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
-@onready var tab_hulls = $PanelContainer/VBoxContainer/TabContainer/Hulls/VBoxContainer
-@onready var tab_modules = $PanelContainer/VBoxContainer/TabContainer/Modules/VBoxContainer
-@onready var tab_loco = $PanelContainer/VBoxContainer/TabContainer/Locomotion/VBoxContainer
-@onready var tab_container = $PanelContainer/VBoxContainer/TabContainer
-@onready var panel_container = $PanelContainer
-@onready var header_label = $PanelContainer/VBoxContainer/Label
-
-# Track which category drawer is currently open per tab
-var open_drawer_hulls: String = ""
-var open_drawer_modules: String = ""
-var open_drawer_locomotion: String = ""
-
 # --- Grouping ---------------------------------------------------------------
-# Every one of the three tabs groups its parts and then sorts LIGHT TO HEAVY
-# inside each group. Weight is the right sort key here rather than cost or
-# name: it is the one stat every single part in the catalog has, it is
+# Every one of the three families groups its parts and then sorts LIGHT TO
+# HEAVY inside each group. Weight is the right sort key here rather than cost
+# or name: it is the one stat every single part in the catalog has, it is
 # monotonic with "how big a commitment is this", and on a game where payload
 # capacity is the binding constraint it is the number a player is actually
 # budgeting against while browsing. Alphabetical would scatter the light
-# starter parts through the list; cost would put the crystal-heavy exotics
-# next to the cheap junk.
+# starter parts through the list; cost would put the crystal-heavy exotics next
+# to the cheap junk.
 #
-# The group KEYS come from data the catalog already owns, never from a table
-# of type_ids kept here - see ModuleCatalog.MODULE_ROLES for why. Modules
-# group on `role`, hulls on is_foundation + weight class, and locomotion on
-# its own `traits` array.
+# The group KEYS come from data the catalog already owns, never from a table of
+# type_ids kept here - see ModuleCatalog.MODULE_ROLES for why. Modules group on
+# `role`, hulls on is_foundation + weight class, and locomotion on its own
+# `traits` array.
 
-# Hulls: a single 22-entry "Vehicle" drawer was the worst offender in the old
-# menu. Weight class is how the hulls actually differ (they have no other
-# distinguishing field - no role, no traits), and it maps directly onto the
-# only question a player asks when picking one: how much am I going to be
-# able to bolt onto it.
 const HULL_LIGHT_MAX := 200.0
 const HULL_MEDIUM_MAX := 450.0
 const HULL_GROUP_ORDER = ["Light Chassis", "Medium Chassis", "Heavy Chassis", "Static Foundations"]
 
 # Locomotion: derived from the traits array each entry already declares, so a
 # modded drive sorts itself. Order is checked top-down and first match wins,
-# which is what makes the overlapping traits resolve - buoyant_envelope is
-# both "airborne" and "buoyant" and belongs under Air, screw_drive is both
+# which is what makes the overlapping traits resolve - buoyant_envelope is both
+# "airborne" and "buoyant" and belongs under Air, screw_drive is both
 # "ground_contact" and "amphibious" and belongs under Ground.
 const LOCO_GROUP_ORDER = ["Ground", "Hover", "Naval", "Air"]
 
-# Uniform part-button colors (see _build_part_button()) - one dark background/
-# text pair shared by every button regardless of module type, with the
-# module's own catalog color demoted to an accent stripe.
-const PART_BUTTON_BG = Color(0.14, 0.14, 0.17, 0.95)
-const PART_BUTTON_BG_HOVER = Color(0.20, 0.20, 0.24, 0.95)
-const PART_BUTTON_TEXT = Color(0.92, 0.93, 0.95, 1.0)
-const PART_BUTTON_TEXT_OUTLINE = Color(0.02, 0.02, 0.03, 1.0)
-const PART_BUTTON_STAT_TEXT = Color(0.62, 0.66, 0.72, 1.0)
+# The three families, as filter chips. "" is the all-pass chip.
+const FAMILIES = [
+	{"id": "", "label": "All"},
+	{"id": "hulls", "label": "Hulls"},
+	{"id": "modules", "label": "Modules"},
+	{"id": "locomotion", "label": "Drives"},
+]
 
-# Every drawer built, across all three tabs, so search can sweep them without
-# re-walking the scene tree on each keystroke.
-var _all_drawers: Array = []
-var _search_box: LineEdit = null
-var _empty_hint: Label = null
+const CARD_MIN_WIDTH := 132
+const CARD_HEIGHT := 46
+
+var _dock: UIDock
+var _search_box: LineEdit
+var _empty_hint: Label
+var _sections_host: VBoxContainer
+var _chip_buttons: Dictionary = {}
+
 var _filter: String = ""
+var _family: String = ""
+
+# Every section built, across all three families, so search can sweep them
+# without re-walking the scene tree on each keystroke.
+var _all_drawers: Array = []
+
+# Retained so the old one-at-a-time API keeps working for any caller that still
+# sets them; the new panel does not enforce single-open.
+var open_drawer_hulls: String = ""
+var open_drawer_modules: String = ""
+var open_drawer_locomotion: String = ""
+
 
 func _ready():
-	if panel_container:
-		UITheme.apply_brushed_panel(panel_container, FactionCatalog.DEFAULT_FACTION, 0.35)
-
-	_build_search_bar()
+	_build_shell()
 
 	var catalog = ModuleCatalog.get_catalog()
 	var hull_groups: Dictionary = {}
@@ -85,11 +116,96 @@ func _ready():
 		else:
 			_bucket(module_groups, ModuleCatalog.get_module_role(type_id, category), type_id, data)
 
-	_populate_tab(tab_hulls, hull_groups, HULL_GROUP_ORDER, "hulls")
-	_populate_tab(tab_modules, module_groups, ModuleCatalog.MODULE_ROLE_ORDER, "modules")
-	_populate_tab(tab_loco, loco_groups, LOCO_GROUP_ORDER, "locomotion")
+	_populate(hull_groups, HULL_GROUP_ORDER, "hulls")
+	_populate(module_groups, ModuleCatalog.MODULE_ROLE_ORDER, "modules")
+	_populate(loco_groups, LOCO_GROUP_ORDER, "locomotion")
 
-	_build_footer_hint()
+	_apply_filters()
+
+
+# --- Shell ------------------------------------------------------------------
+
+func _build_shell() -> void:
+	# The panel fills whatever slot it is placed in; the dock owns the edge
+	# anchoring and the collapse behaviour.
+	set_anchors_preset(Control.PRESET_FULL_RECT)
+
+	_dock = UIDockScript.new()
+	_dock.dock_title = "HARDWARE CATALOG"
+	_dock.side = UIDockScript.Side.LEFT
+	_dock.expanded_size = 336.0
+	_dock.persist_key = "parts_catalog"
+	_dock.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	add_child(_dock)
+
+	var host := _dock.body()
+
+	# --- Search, first and always visible --------------------------------
+	_search_box = LineEdit.new()
+	_search_box.placeholder_text = "Search parts"
+	_search_box.clear_button_enabled = true
+	_search_box.custom_minimum_size = Vector2(0, Tokens.HIT_TARGET_MIN)
+	_search_box.text_changed.connect(_on_search_changed)
+	host.add_child(_search_box)
+
+	# --- Family filter chips ---------------------------------------------
+	# Chips rather than tabs: they are always visible, they read as filters
+	# rather than as pages, and they compose with the search box instead of
+	# fighting it.
+	var chips = HBoxContainer.new()
+	chips.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	host.add_child(chips)
+
+	for fam in FAMILIES:
+		var chip = Button.new()
+		chip.theme_type_variation = "TabButton"
+		chip.toggle_mode = true
+		chip.text = fam["label"]
+		chip.focus_mode = Control.FOCUS_NONE
+		chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		chip.custom_minimum_size = Vector2(0, 26)
+		chip.button_pressed = fam["id"] == ""
+		var fam_id: String = fam["id"]
+		chip.pressed.connect(func(): _set_family(fam_id))
+		chips.add_child(chip)
+		_chip_buttons[fam_id] = chip
+
+	host.add_child(HSeparator.new())
+
+	# --- Results ----------------------------------------------------------
+	var scroll = ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	host.add_child(scroll)
+
+	_sections_host = VBoxContainer.new()
+	_sections_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sections_host.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	scroll.add_child(_sections_host)
+
+	_empty_hint = Label.new()
+	_empty_hint.text = "No parts match."
+	_empty_hint.theme_type_variation = "HintLabel"
+	_empty_hint.visible = false
+	host.add_child(_empty_hint)
+
+	# Document the interaction in the panel. Drag-to-place is not guessable
+	# from a control that looks like a button.
+	var hint = Label.new()
+	hint.text = "Drag a part onto the hull to place it."
+	hint.theme_type_variation = "HintLabel"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	host.add_child(hint)
+
+
+func _set_family(family: String) -> void:
+	_family = family
+	for id in _chip_buttons:
+		_chip_buttons[id].button_pressed = (id == family)
+	_apply_filters()
+
 
 # --- Grouping helpers -------------------------------------------------------
 
@@ -121,11 +237,10 @@ func _loco_group(data: Dictionary) -> String:
 		return "Hover"
 	return "Ground"
 
+
 # --- Construction -----------------------------------------------------------
 
-func _populate_tab(host: Node, groups: Dictionary, order: Array, tab_type: String) -> void:
-	if host == null:
-		return
+func _populate(groups: Dictionary, order: Array, family: String) -> void:
 	# Any group the catalog produced that the order array doesn't name still
 	# gets shown, appended after the known ones. Same reasoning as
 	# get_module_role()'s fallback: an unlisted group must be visible, not
@@ -143,87 +258,64 @@ func _populate_tab(host: Node, groups: Dictionary, order: Array, tab_type: Strin
 	for group in ordered:
 		var entries: Array = groups[group]
 		# LIGHT TO HEAVY. Ties broken by name so the order is stable across
-		# runs - Dictionary.keys() order is insertion order, not sorted, and
-		# an unstable sidebar is genuinely disorienting to browse.
+		# runs - Dictionary.keys() order is insertion order, not sorted, and an
+		# unstable sidebar is genuinely disorienting to browse.
 		entries.sort_custom(func(a, b):
 			if is_equal_approx(a.weight, b.weight):
 				return String(a.data.get("name", a.id)) < String(b.data.get("name", b.id))
 			return a.weight < b.weight)
 
-		var buttons := []
+		var cards := []
 		for entry in entries:
-			buttons.append(_build_part_button(entry.id, entry.data))
-		var drawer = _make_collapsible_drawer(group, buttons, tab_type)
-		host.add_child(drawer)
-		_all_drawers.append(drawer)
+			cards.append(_build_part_card(entry.id, entry.data))
+		var section = _make_section(group, cards, family)
+		_sections_host.add_child(section)
+		_all_drawers.append(section)
 
-var _sprue_counter: int = 0
 
-func _build_part_button(type_id: String, data: Dictionary) -> Button:
-	_sprue_counter += 1
+# A part card. Compact, gridded, and carrying its weight inline.
+#
+# Styling comes from the THEME (bakelite plates, from tools/build_ui_theme.gd),
+# not from a local StyleBoxFlat. The previous version hand-rolled four
+# styleboxes per card here, which duplicated what the theme already builds for
+# Button and - because local overrides beat the theme - actively prevented the
+# design system from reaching the single most numerous control in the game.
+# The only per-part colour left is the catalog accent, as a thin left stripe.
+func _build_part_card(type_id: String, data: Dictionary) -> Button:
 	var btn = Button.new()
 	btn.set_script(preload("res://scripts/part_button.gd"))
 	btn.module_type_id = type_id
 	btn.text = data["name"]
 	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	btn.clip_text = true
-	btn.custom_minimum_size = Vector2(160, 32)
+	btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	btn.custom_minimum_size = Vector2(CARD_MIN_WIDTH, CARD_HEIGHT)
+	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	btn.add_theme_font_size_override("font_size", Tokens.FONT_SMALL)
 
-	# Heavy Bakelite Toggle Switch styling:
-	# - Thick bottom border to simulate physical height
-	# - Dark, heavy plastic body
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.15, 0.16, 0.17, 1.0)
-	style.border_width_left = 2
-	style.border_width_top = 2
-	style.border_width_right = 2
-	style.border_width_bottom = 6
-	style.border_color = Color(0.05, 0.05, 0.06, 1.0)
-	style.corner_radius_top_left = 2
-	style.corner_radius_top_right = 2
-	style.corner_radius_bottom_left = 2
-	style.corner_radius_bottom_right = 2
-	style.content_margin_left = 12
-	style.content_margin_right = 8
-	
-	# Accent color indicator on the left edge (like a painted stripe on the switch)
-	style.border_width_left = 6
-	style.border_color = data["color"]
-	btn.add_theme_stylebox_override("normal", style)
+	# The catalog accent as a painted stripe on the switch body. A StyleBox
+	# override would lose the plate texture, so the stripe is a child ColorRect
+	# drawn over the button's left edge instead.
+	var stripe = ColorRect.new()
+	stripe.color = data["color"]
+	stripe.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	stripe.offset_right = 4.0
+	stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(stripe)
 
-	var hover_style = style.duplicate()
-	hover_style.bg_color = Color(0.2, 0.22, 0.24, 1.0)
-	hover_style.border_color = data["color"].lightened(0.2)
-	btn.add_theme_stylebox_override("hover", hover_style)
-
-	var pressed_style = style.duplicate()
-	pressed_style.bg_color = Color(0.1, 0.11, 0.12, 1.0)
-	pressed_style.border_width_bottom = 2
-	pressed_style.border_width_top = 6
-	btn.add_theme_stylebox_override("pressed", pressed_style)
-
-	btn.add_theme_color_override("font_color", Color(0.85, 0.85, 0.9, 1.0))
-	btn.add_theme_color_override("font_hover_color", Color(1.0, 1.0, 1.0, 1.0))
-	btn.add_theme_color_override("font_pressed_color", Color(0.7, 0.7, 0.75, 1.0))
-	btn.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))
-	btn.add_theme_constant_override("outline_size", 4)
-
-	# Inline weight readout, right-aligned inside the button.
 	var weight_label = Label.new()
 	weight_label.text = "%.0f kg" % float(data.get("weight", 0.0))
 	weight_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	weight_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	weight_label.add_theme_font_size_override("font_size", 10)
-	weight_label.add_theme_color_override("font_color", Color(0.65, 0.8, 0.75))
+	weight_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	weight_label.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
+	weight_label.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
 	weight_label.set_anchors_preset(Control.PRESET_FULL_RECT)
-	weight_label.offset_right = -8
-	weight_label.offset_bottom = -2
+	weight_label.offset_right = -6
+	weight_label.offset_bottom = -3
 	weight_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	btn.add_child(weight_label)
 
 	if data.get("category", "") == "hull":
-		# Stat-preview tooltip (not a new visible panel - the sidebar has no
-		# layout slack) so a player can compare hulls before dragging one in.
 		var size = data.get("size", Vector3.ZERO)
 		var domain = "Static Building" if data.get("is_foundation", false) else "Vehicle"
 		# Name first - see _stat_tooltip()'s comment for why line 0 is
@@ -235,250 +327,156 @@ func _build_part_button(type_id: String, data: Dictionary) -> Button:
 	else:
 		btn.tooltip_text = _stat_tooltip(data)
 
-	# Cached for search - matching on the visible name plus the id means
-	# typing "mk19" or "Grenade" both work.
+	# Cached for search - matching on the visible name plus the id means typing
+	# "mk19" or "Grenade" both work.
 	btn.set_meta("search_key", ("%s %s" % [data.get("name", ""), type_id]).to_lower())
 	return btn
 
-func _build_search_bar() -> void:
-	# The single highest-value addition here. Every builder game with a parts
-	# palette this size (KSP2's VAB is the canonical example) gets the same
-	# complaint - the categories are fine but actually FINDING a specific part
-	# means opening drawers one at a time until you spot it. Grouping helps
-	# browsing; only search helps retrieval, and they are different tasks.
-	var host = header_label.get_parent() if header_label else null
-	if host == null:
-		return
 
-	_search_box = LineEdit.new()
-	_search_box.placeholder_text = "Search parts..."
-	_search_box.clear_button_enabled = true
-	_search_box.custom_minimum_size = Vector2(0, 28)
-	_search_box.text_changed.connect(_on_search_changed)
-	host.add_child(_search_box)
-	host.move_child(_search_box, header_label.get_index() + 1)
-
-	_empty_hint = Label.new()
-	_empty_hint.text = "  No parts match."
-	_empty_hint.add_theme_font_size_override("font_size", 12)
-	_empty_hint.add_theme_color_override("font_color", Color(0.6, 0.55, 0.45, 1.0))
-	_empty_hint.visible = false
-	host.add_child(_empty_hint)
-	host.move_child(_empty_hint, _search_box.get_index() + 1)
-
-func _build_footer_hint() -> void:
-	# "Document controls in-UI rather than leaving them to external guides" -
-	# the recurring discoverability complaint across this whole genre. Drag-
-	# to-place has never been stated anywhere in the Lab itself; a new player
-	# has no reason to guess that these buttons are drag sources at all,
-	# because they look exactly like buttons you click.
-	var host = header_label.get_parent() if header_label else null
-	if host == null:
-		return
-	var hint = Label.new()
-	hint.text = "Drag a part onto the hull to place it."
-	hint.add_theme_font_size_override("font_size", 11)
-	hint.add_theme_color_override("font_color", Color(0.55, 0.53, 0.48, 1.0))
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	host.add_child(hint)
-
-# --- Search -----------------------------------------------------------------
-
-func _on_search_changed(new_text: String) -> void:
-	_filter = new_text.strip_edges().to_lower()
-	var any_visible := false
-
-	for drawer in _all_drawers:
-		if not is_instance_valid(drawer):
-			continue
-		var content: Node = drawer.get_meta("content_container")
-		var matches := 0
-		for btn in content.get_children():
-			var hit := _filter == "" or String(btn.get_meta("search_key", "")).contains(_filter)
-			btn.visible = hit
-			if hit:
-				matches += 1
-
-		# A drawer with nothing in it is hidden entirely rather than left as an
-		# empty header - a column of dead headers reads as "the search broke"
-		# rather than "no hits in this group".
-		drawer.visible = matches > 0
-		if matches > 0:
-			any_visible = true
-
-		if _filter == "":
-			# Leaving the search restores the accordion: everything collapses
-			# back to headers, and the per-tab "which drawer is open" state is
-			# cleared so the next header click doesn't try to close a drawer
-			# that is already shut.
-			_set_drawer_open(drawer, false)
-		else:
-			# While filtering, force every surviving drawer open. Making the
-			# player click a header to see the thing they just searched for
-			# would defeat the search.
-			drawer.set_meta("content_target_height", content.get_combined_minimum_size().y)
-			_set_drawer_open(drawer, true)
-
-	if _filter == "":
-		open_drawer_hulls = ""
-		open_drawer_modules = ""
-		open_drawer_locomotion = ""
-
-	if _empty_hint:
-		_empty_hint.visible = _filter != "" and not any_visible
-
-func _set_drawer_open(drawer: Control, open: bool) -> void:
-	# Instant, not tweened. Search runs on every keystroke; animating each
-	# drawer per character would stack dozens of live tweens and lag behind
-	# the typing.
-	if drawer.has_meta("active_tween"):
-		var old = drawer.get_meta("active_tween")
-		if old and old.is_valid():
-			old.kill()
-	var content: Control = drawer.get_meta("content_container")
-	var clip: Control = drawer.get_meta("clip_container")
-	var target := 0.0
-	if open:
-		target = drawer.get_meta("content_target_height", content.get_combined_minimum_size().y)
-	clip.custom_minimum_size.y = target
-	drawer.set_meta("drawer_open", open)
-
-# --- Drawers ----------------------------------------------------------------
-
-func _make_collapsible_drawer(category: String, buttons: Array, tab_type: String) -> Control:
-	# Drawer UI: clickable header, contents revealed below.
-	# Only one drawer per tab is expanded at a time (outside of search).
-	var drawer = VBoxContainer.new()
-	drawer.name = "Drawer_%s" % category.replace(" ", "_").replace("&", "and")
-	drawer.custom_minimum_size = Vector2(0, 0)
+# A titled group of cards. Independently collapsible - opening one no longer
+# closes another, because comparing two groups is a normal thing to want.
+func _make_section(category: String, cards: Array, family: String) -> Control:
+	var section = VBoxContainer.new()
+	section.name = "Drawer_%s" % category.replace(" ", "_").replace("&", "and")
+	section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var header_btn = Button.new()
-	header_btn.custom_minimum_size = Vector2(0, 36)
+	header_btn.theme_type_variation = "ListButton"
+	header_btn.custom_minimum_size = Vector2(0, 28)
 	header_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	header_btn.text = category
-	var header_style = StyleBoxFlat.new()
-	header_style.bg_color = Color(0.3, 0.28, 0.22, 1.0)
-	header_style.border_width_bottom = 3
-	header_style.border_color = Color(0.85, 0.75, 0.4, 1.0)
-	header_style.content_margin_left = 8
-	header_style.content_margin_right = 8
-	header_btn.add_theme_stylebox_override("normal", header_style)
-	header_btn.add_theme_color_override("font_color", Color(0.9, 0.85, 0.6, 1.0))
-	var header_hover = header_style.duplicate()
-	header_hover.bg_color = Color(0.35, 0.32, 0.25, 1.0)
-	header_btn.add_theme_stylebox_override("hover", header_hover)
+	header_btn.focus_mode = Control.FOCUS_NONE
+	header_btn.toggle_mode = true
+	header_btn.button_pressed = true
 
-	# Count badge on the right of the header. With a closed accordion the
-	# player otherwise has no idea whether a drawer holds two parts or twelve,
-	# which makes deciding where to look a coin flip.
+	# Count badge. With sections collapsed the player otherwise has no idea
+	# whether a group holds two parts or twelve, which makes deciding where to
+	# look a coin flip.
 	var count_label = Label.new()
-	count_label.text = str(buttons.size())
+	count_label.text = str(cards.size())
 	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	count_label.add_theme_font_size_override("font_size", 12)
-	count_label.add_theme_color_override("font_color", Color(0.65, 0.60, 0.42, 1.0))
+	count_label.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
+	count_label.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
 	count_label.set_anchors_preset(Control.PRESET_FULL_RECT)
 	count_label.offset_right = -10
-	count_label.offset_bottom = -3
 	count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header_btn.add_child(count_label)
 
-	drawer.add_child(header_btn)
+	section.add_child(header_btn)
 
-	# Content, in a plain Control CLIP WRAPPER rather than the button
-	# VBoxContainer directly.
-	#
-	# This matters and isn't cosmetic. A Container propagates its children's
-	# combined minimum size to its parent, and clip_contents does NOT change
-	# that - so with the buttons' VBox as the drawer's direct child, every
-	# COLLAPSED drawer still demanded its full expanded height from the tab
-	# above it. With more, finer drawers than the old menu had (and a search
-	# bar taking a slice off the top) that tipped the Hulls tab into a real
-	# layout overflow, which the UI audit suite catches. A plain Control has
-	# no such propagation: it reports exactly the custom_minimum_size we set,
-	# which is the height the drawer animation is already driving anyway.
-	var clip = Control.new()
-	clip.clip_contents = true
-	# Explicit opt-out from the layout-overflow audit. A shut drawer is a
-	# zero-height window around a full-height list on purpose; see
-	# ui_audit.gd's note on why this is a stated flag and not inferred from
-	# clip_contents.
-	clip.set_meta("ui_audit_clip_ok", true)
-	clip.custom_minimum_size = Vector2(0, 0)
-	clip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# The cards live in a GridContainer so a group reads as a block to scan
+	# rather than as a column to walk. Two columns at the dock's default width;
+	# the grid reflows if the dock is dragged wider.
+	var grid = GridContainer.new()
+	grid.columns = 2
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_theme_constant_override("h_separation", Tokens.SPACE_XS)
+	grid.add_theme_constant_override("v_separation", Tokens.SPACE_XS)
+	for c in cards:
+		grid.add_child(c)
+	section.add_child(grid)
 
-	var content = VBoxContainer.new()
-	content.set_anchors_preset(Control.PRESET_TOP_WIDE)
-	content.offset_left = 0
-	content.offset_right = 0
-	for btn in buttons:
-		content.add_child(btn)
-	clip.add_child(content)
-	drawer.add_child(clip)
+	# METADATA CONTRACT. run_tests.gd reads these to check that roles, weight
+	# classes and locomotion traits put every part in the right group; keeping
+	# the names stable is what let the presentation be rebuilt without
+	# rewriting those suites. "content_container" is the card list;
+	# "drawer_category" and "drawer_tab" identify the group.
+	section.set_meta("drawer_category", category)
+	section.set_meta("drawer_tab", family)
+	section.set_meta("drawer_open", true)
+	section.set_meta("header_btn", header_btn)
+	section.set_meta("content_container", grid)
+	section.set_meta("family", family)
 
-	drawer.set_meta("drawer_category", category)
-	drawer.set_meta("drawer_tab", tab_type)
-	drawer.set_meta("drawer_open", false)
-	drawer.set_meta("header_btn", header_btn)
-	# "content_container" is the button list (iterated by search and by the
-	# tests); "clip_container" is what the open/close animation resizes.
-	drawer.set_meta("content_container", content)
-	drawer.set_meta("clip_container", clip)
+	header_btn.toggled.connect(func(pressed: bool):
+		grid.visible = pressed
+		section.set_meta("drawer_open", pressed))
 
-	header_btn.pressed.connect(func(): _toggle_drawer(drawer))
+	return section
 
-	return drawer
 
-func _toggle_drawer(drawer: Control) -> void:
-	var category = drawer.get_meta("drawer_category")
-	var tab_type = drawer.get_meta("drawer_tab")
-	var should_open = not drawer.get_meta("drawer_open")
+# --- Filtering --------------------------------------------------------------
 
-	# Close any currently open drawer in this tab
-	var open_var = "open_drawer_%s" % tab_type
-	var currently_open = get(open_var)
-	if currently_open != null and currently_open != "" and currently_open != category:
-		var parent = drawer.get_parent()
-		for child in parent.get_children():
-			if child.has_meta("drawer_category") and child.get_meta("drawer_category") == currently_open:
-				_animate_drawer(child, false)
-				break
+func _on_search_changed(new_text: String) -> void:
+	_filter = new_text.strip_edges().to_lower()
+	_apply_filters()
 
-	# Animate this drawer
-	_animate_drawer(drawer, should_open)
-	set(open_var, category if should_open else "")
 
-func _animate_drawer(drawer: Control, open: bool) -> void:
-	var content = drawer.get_meta("content_container")
-	var clip = drawer.get_meta("clip_container")
+# One pass that applies BOTH the family chip and the search text.
+#
+# They are applied together rather than as two independent passes because they
+# interact: a search hit inside a family that is filtered out must stay hidden,
+# and a section is only shown if it has surviving cards after both.
+func _apply_filters() -> void:
+	var any_visible := false
 
-	# Kill any active tween on this drawer
-	if drawer.has_meta("active_tween"):
-		var old = drawer.get_meta("active_tween")
-		if old and old.is_valid():
-			old.kill()
+	for section in _all_drawers:
+		if not is_instance_valid(section):
+			continue
+		var family: String = section.get_meta("family", "")
+		var family_ok := _family == "" or family == _family
 
-	# Cache target height on first open so closing doesn't measure while collapsed
-	if open and not drawer.has_meta("content_target_height"):
-		drawer.set_meta("content_target_height", content.get_combined_minimum_size().y)
+		var grid: Node = section.get_meta("content_container")
+		var matches := 0
+		for card in grid.get_children():
+			var hit := family_ok and (_filter == ""
+				or String(card.get_meta("search_key", "")).contains(_filter))
+			card.visible = hit
+			if hit:
+				matches += 1
 
-	var target_height = drawer.get_meta("content_target_height") if open else 0.0
+		# A section with nothing in it is hidden entirely rather than left as
+		# an empty header - a column of dead headers reads as "the search
+		# broke" rather than "no hits in this group".
+		section.visible = matches > 0
+		if matches > 0:
+			any_visible = true
+			# While filtering, force the surviving sections open. Making the
+			# player click a header to see the thing they just searched for
+			# would defeat the search.
+			if _filter != "":
+				grid.visible = true
+				section.get_meta("header_btn").button_pressed = true
+				section.set_meta("drawer_open", true)
 
-	var tween = create_tween()
-	tween.set_trans(Tween.TRANS_CUBIC)
-	tween.set_ease(Tween.EASE_OUT)
-	tween.tween_property(clip, "custom_minimum_size:y", target_height, 0.18)
-	drawer.set_meta("active_tween", tween)
-	drawer.set_meta("drawer_open", open)
+	if _empty_hint:
+		_empty_hint.visible = not any_visible
+
+
+# --- Introspection ----------------------------------------------------------
+
+# Every group section belonging to one family ("hulls" | "modules" |
+# "locomotion").
+#
+# This exists so the grouping suites in run_tests.gd have a stable way in.
+# They used to reach through a hardcoded node path
+# ("PanelContainer/VBoxContainer/TabContainer/Hulls/VBoxContainer"), which
+# coupled tests about CATALOG DATA - do modules group by their own role, do
+# hulls group by their own weight class - to the widget tree that happened to
+# display it. Rebuilding the panel then broke tests that had no opinion about
+# panels. Asking the panel a question instead keeps those suites testing the
+# thing they are actually about.
+func sections_for(family: String) -> Array:
+	var out: Array = []
+	for section in _all_drawers:
+		if is_instance_valid(section) and section.get_meta("family", "") == family:
+			out.append(section)
+	return out
+
+
+# --- Compatibility ----------------------------------------------------------
 
 func collapse_all_drawers() -> void:
-	for drawer in _all_drawers:
-		if is_instance_valid(drawer) and drawer.has_meta("drawer_open") and drawer.get_meta("drawer_open"):
-			_animate_drawer(drawer, false)
+	for section in _all_drawers:
+		if is_instance_valid(section):
+			section.get_meta("header_btn").button_pressed = false
+			section.get_meta("content_container").visible = false
+			section.set_meta("drawer_open", false)
 	open_drawer_hulls = ""
 	open_drawer_modules = ""
 	open_drawer_locomotion = ""
+
 
 # NOTE: line 0 is the part NAME, and that is load-bearing - part_button.gd's
 # _make_custom_tooltip() renders the first line as the card's bold gold title

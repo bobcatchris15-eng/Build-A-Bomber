@@ -1,0 +1,323 @@
+class_name UIDock
+extends PanelContainer
+# An edge-anchored dock that collapses to a rail and can auto-hide - the
+# old-IDE panel, in Godot.
+#
+# THE PROBLEM IT SOLVES. The Design Lab's two sidebars are permanently open and
+# permanently full: a 320px parts column of two dozen identical rows on the
+# left, a stat column on the right carrying armour material, faction, thickness,
+# undo/redo and three action buttons - all of it visible whether or not it
+# applies to anything selected. The model being edited, which is the entire
+# point of the screen, gets whatever is left in the middle. Chrome should be
+# reachable, not resident.
+#
+# THREE STATES, cycled by the header chevron or set directly:
+#   EXPANDED  full body visible, resizable by dragging the splitter edge.
+#   RAILED    collapsed to a ~40px strip showing the title and an icon. Click
+#             the rail to expand. This is the IDE behaviour and the default for
+#             the Design Lab's two docks.
+#   HIDDEN    fully off-edge, leaving a narrow grab tab. If `auto_reveal` is on,
+#             hovering the screen edge slides it back in and it re-hides on
+#             mouse-out.
+#
+# AUTO-HIDE IS OPT-IN AND OFF BY DEFAULT, and Skirmish must leave it off. A dock
+# that vanishes on its own mid-fight costs the player the fight; "gets out of
+# the way" is a virtue in an editor and a defect in a real-time match.
+#
+# THE LAYOUT TRAP, learned in parts_menu.gd:389-408 and worth restating because
+# it is invisible until it bites: a collapsed panel CANNOT be a Container with
+# clip_contents. A Container propagates its children's combined minimum size to
+# its parent regardless of clipping, so a "collapsed" dock would still demand
+# its full expanded width from the layout and collapse nothing at all. The body
+# therefore lives inside a plain Control clip wrapper whose custom_minimum_size
+# this script drives directly. That wrapper carries the `ui_audit_clip_ok` meta
+# so the layout-overflow audit knows the zero-size window around a full-size
+# child is deliberate (see ui_audit.gd:11-25 for why that opt-out has to be
+# stated rather than inferred from clip_contents).
+
+const Tokens = preload("res://scripts/ui_tokens.gd")
+const UIAnim = preload("res://scripts/ui_anim.gd")
+const UIIcons = preload("res://scripts/ui_icons.gd")
+
+signal state_changed(new_state: int)
+
+enum State { EXPANDED, RAILED, HIDDEN }
+enum Side { LEFT, RIGHT, BOTTOM }
+
+const RAIL_SIZE := 40.0
+const TAB_SIZE := 10.0
+const MIN_EXPANDED := 180.0
+const MAX_EXPANDED := 640.0
+const SPLITTER_GRAB := 6.0
+# How close to the screen edge the pointer must come to wake a hidden dock.
+const REVEAL_MARGIN := 12.0
+
+@export var dock_title: String = "PANEL"
+@export var dock_icon: String = ""
+# Typed `int`, not `Side`, and assigned from the enum.
+#
+# Godot 4.3 will not accept a script-local enum as an @export type on a script
+# that also declares class_name - it reports "Cannot assign a value of type
+# UIDock.Side as Side", because the exported property resolves the type through
+# the global class registration and ends up comparing the enum to itself under
+# two different names. Typing the storage as int and keeping the enum for
+# readability sidesteps it without giving up the named constants.
+@export var side: int = Side.LEFT
+@export var expanded_size: float = 320.0
+@export var auto_reveal: bool = false
+# Where this dock's state is remembered. Empty disables persistence, which is
+# what the tests want - otherwise a test run rewrites the player's layout.
+@export var persist_key: String = ""
+
+const LAYOUT_PATH := "user://ui_layout.cfg"
+
+var _state: int = State.EXPANDED
+var _body_host: VBoxContainer
+var _clip: Control
+var _header_btn: Button
+var _rail_btn: Button
+var _tween: Tween
+var _dragging_splitter := false
+
+
+func _init() -> void:
+	theme_type_variation = "DockPanel"
+	clip_contents = false
+
+
+func _ready() -> void:
+	_build()
+	_load_state()
+	_apply_state(false)
+	set_process_input(auto_reveal)
+
+
+func _build() -> void:
+	var column = VBoxContainer.new()
+	column.add_theme_constant_override("separation", 0)
+	add_child(column)
+
+	# --- Header ----------------------------------------------------------
+	# The whole header is the collapse control. A dedicated 16px chevron is a
+	# worse target than a 320x28 bar, and there is nothing else the header
+	# does.
+	_header_btn = Button.new()
+	_header_btn.theme_type_variation = "TabButton"
+	_header_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_header_btn.custom_minimum_size = Vector2(0, 28)
+	_header_btn.text = dock_title
+	_header_btn.focus_mode = Control.FOCUS_NONE
+	_header_btn.pressed.connect(_on_header_pressed)
+	column.add_child(_header_btn)
+
+	# --- Body, inside the clip wrapper ------------------------------------
+	_clip = Control.new()
+	_clip.name = "DockClip"
+	_clip.clip_contents = true
+	_clip.set_meta("ui_audit_clip_ok", true)
+	_clip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_clip.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(_clip)
+
+	_body_host = VBoxContainer.new()
+	_body_host.name = "DockBody"
+	_body_host.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	if side == Side.BOTTOM:
+		_body_host.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	else:
+		_body_host.set_anchors_preset(Control.PRESET_LEFT_WIDE)
+	_clip.add_child(_body_host)
+
+	# --- Rail -------------------------------------------------------------
+	# Shown only in RAILED/HIDDEN. Carries the title so a collapsed dock still
+	# says what it is - an unlabelled strip of icons is a memory test.
+	_rail_btn = Button.new()
+	_rail_btn.theme_type_variation = "TabButton"
+	_rail_btn.focus_mode = Control.FOCUS_NONE
+	_rail_btn.visible = false
+	_rail_btn.pressed.connect(func(): set_dock_state(State.EXPANDED))
+	if dock_icon != "" and UIIcons.has_icon(dock_icon):
+		_rail_btn.icon = UIIcons.get_icon(dock_icon)
+	_rail_btn.tooltip_text = dock_title
+	column.add_child(_rail_btn)
+
+
+# Where callers put their content. Never add children to the dock directly -
+# they would land beside the header rather than inside the clip window, and
+# would not collapse.
+func body() -> VBoxContainer:
+	return _body_host
+
+
+func get_dock_state() -> int:
+	return _state
+
+
+func set_dock_state(new_state: int, animate: bool = true) -> void:
+	if new_state == _state:
+		return
+	_state = new_state
+	_apply_state(animate)
+	_save_state()
+	state_changed.emit(_state)
+
+
+func toggle() -> void:
+	# EXPANDED -> RAILED -> EXPANDED. HIDDEN is deliberately NOT in the cycle:
+	# a player who clicks a header twice should get back where they started,
+	# not lose the panel off the edge of the screen. Hiding is an explicit act.
+	set_dock_state(State.RAILED if _state == State.EXPANDED else State.EXPANDED)
+
+
+func _on_header_pressed() -> void:
+	toggle()
+
+
+# The dock's extent along its own axis, for the current state.
+func _target_extent() -> float:
+	match _state:
+		State.EXPANDED:
+			return expanded_size
+		State.RAILED:
+			return RAIL_SIZE
+		_:
+			return TAB_SIZE
+
+
+func _is_horizontal() -> bool:
+	return side != Side.BOTTOM
+
+
+func _apply_state(animate: bool) -> void:
+	var expanded := _state == State.EXPANDED
+	_header_btn.visible = expanded
+	_rail_btn.visible = not expanded
+	_rail_btn.text = "" if _state == State.HIDDEN else dock_title.substr(0, 3)
+
+	var extent := _target_extent()
+
+	if _tween and _tween.is_valid():
+		_tween.kill()
+
+	# The CLIP drives collapse, not the dock's own size - see the layout trap
+	# in the header comment.
+	var clip_target := Vector2.ZERO
+	if _is_horizontal():
+		clip_target = Vector2(extent if expanded else 0.0, 0)
+	else:
+		clip_target = Vector2(0, extent if expanded else 0.0)
+
+	if not animate:
+		custom_minimum_size = _extent_vector(extent)
+		_clip.custom_minimum_size = clip_target
+		return
+
+	# One clock for the whole interface - UIAnim's constants, not a local
+	# guess, so docks move at the same speed as everything else.
+	_tween = create_tween()
+	_tween.set_trans(UIAnim.TRANS_STANDARD)
+	_tween.set_ease(UIAnim.EASE_STANDARD)
+	_tween.set_parallel(true)
+	var prop := "custom_minimum_size:x" if _is_horizontal() else "custom_minimum_size:y"
+	_tween.tween_property(self, prop, extent, UIAnim.DURATION_NORMAL)
+	_tween.tween_property(_clip, prop,
+		clip_target.x if _is_horizontal() else clip_target.y,
+		UIAnim.DURATION_NORMAL)
+
+
+func _extent_vector(extent: float) -> Vector2:
+	return Vector2(extent, 0) if _is_horizontal() else Vector2(0, extent)
+
+
+# --- Splitter -------------------------------------------------------------
+# Dragging the dock's inner edge resizes it. Only meaningful when expanded.
+
+func _gui_input(event: InputEvent) -> void:
+	if _state != State.EXPANDED:
+		return
+
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed and _over_splitter(event.position):
+			_dragging_splitter = true
+			accept_event()
+		elif not event.pressed:
+			if _dragging_splitter:
+				_save_state()
+			_dragging_splitter = false
+
+	elif event is InputEventMouseMotion:
+		if _dragging_splitter:
+			# Explicitly typed: GDScript cannot infer through a ternary whose
+			# branches it has not resolved yet.
+			var delta: float = event.relative.x if _is_horizontal() else event.relative.y
+			# A dock on the RIGHT grows when dragged left, so the sign flips.
+			if side == Side.RIGHT:
+				delta = -delta
+			if side == Side.BOTTOM:
+				delta = -delta
+			expanded_size = clampf(expanded_size + delta, MIN_EXPANDED, MAX_EXPANDED)
+			custom_minimum_size = _extent_vector(expanded_size)
+			_clip.custom_minimum_size = _extent_vector(expanded_size)
+			accept_event()
+		elif _over_splitter(event.position):
+			mouse_default_cursor_shape = (Control.CURSOR_HSIZE
+				if _is_horizontal() else Control.CURSOR_VSIZE)
+		else:
+			mouse_default_cursor_shape = Control.CURSOR_ARROW
+
+
+func _over_splitter(pos: Vector2) -> bool:
+	match side:
+		Side.LEFT:
+			return pos.x >= size.x - SPLITTER_GRAB
+		Side.RIGHT:
+			return pos.x <= SPLITTER_GRAB
+		_:
+			return pos.y <= SPLITTER_GRAB
+
+
+# --- Auto-reveal ----------------------------------------------------------
+
+func _input(event: InputEvent) -> void:
+	if not auto_reveal or _state != State.HIDDEN:
+		return
+	if not (event is InputEventMouseMotion):
+		return
+	var vp := get_viewport_rect()
+	var p: Vector2 = (event as InputEventMouseMotion).position
+	var at_edge := false
+	match side:
+		Side.LEFT:
+			at_edge = p.x <= REVEAL_MARGIN
+		Side.RIGHT:
+			at_edge = p.x >= vp.size.x - REVEAL_MARGIN
+		_:
+			at_edge = p.y >= vp.size.y - REVEAL_MARGIN
+	if at_edge:
+		set_dock_state(State.RAILED)
+
+
+# --- Persistence ----------------------------------------------------------
+
+func _save_state() -> void:
+	if persist_key == "":
+		return
+	var cfg := ConfigFile.new()
+	cfg.load(LAYOUT_PATH)  # missing file is fine; we are about to write one
+	cfg.set_value(persist_key, "state", _state)
+	cfg.set_value(persist_key, "size", expanded_size)
+	cfg.save(LAYOUT_PATH)
+
+
+func _load_state() -> void:
+	if persist_key == "":
+		return
+	var cfg := ConfigFile.new()
+	if cfg.load(LAYOUT_PATH) != OK:
+		return
+	_state = int(cfg.get_value(persist_key, "state", _state))
+	expanded_size = float(cfg.get_value(persist_key, "size", expanded_size))
+	# A dock restored as HIDDEN with auto_reveal off would be unreachable -
+	# there is no visible affordance to bring it back. Clamp to RAILED.
+	if _state == State.HIDDEN and not auto_reveal:
+		_state = State.RAILED

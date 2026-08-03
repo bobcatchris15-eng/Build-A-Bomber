@@ -4619,31 +4619,162 @@ static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, bas
 	# wing_sweep was declared in TWEAK_SPECS but never read anywhere -
 	# wired in here now (scales the same leading-edge sweep angle the old
 	# single wing used a fixed 12deg for).
+	# ABSURD BY DESIGN (Chris, 2026-08-02): "they're kind of an absurd choice
+	# and they need to feel like it. Impractically long, a bulky attachment
+	# that takes up most of the hull's roofspace with gearboxes and struts."
+	# So the span grows and, more importantly, the machinery that drives it
+	# stops being a single palm-sized shoulder block and becomes a flapping
+	# rig bolted across the whole roof - which is also what fixes the "not
+	# attached" half of the report, since there is now real structure between
+	# the wing root and the vehicle.
 	var wingspan = tweaks.get("wingspan", tweaks.get("size", 1.0))
 	var sweep = tweaks.get("wing_sweep", 1.0)
 
-	var shoulder_mesh = _part("wing_shoulder")
-	if shoulder_mesh:
-		var sh = _mesh_inst(shoulder_mesh, Color(0.3, 0.28, 0.25))
-		parent_node.add_child(sh)
-	else:
-		var shoulder = MeshInstance3D.new()
-		var box = BoxMesh.new()
-		box.size = Vector3(base_size.x * 0.35, base_size.y * 0.7, base_size.z * 0.5)
-		shoulder.mesh = box
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = Color(0.3, 0.28, 0.25)
-		shoulder.material_override = mat
-		parent_node.add_child(shoulder)
+	# node_scale for this type is (2, 1, 2), so hull measurements handed over
+	# in world units are HALF that many units in the module's own local space.
+	# Getting this wrong builds a frame twice the length of the roof it is
+	# supposed to sit on.
+	const NODE_S := 2.0
+	var roof_len: float = float(tweaks.get("target_length", base_size.z * 4.0)) / NODE_S
+	var roof_reach: float = float(tweaks.get("roof_reach", base_size.x * 2.0)) / NODE_S
+
+	var wing_root: Vector3 = _build_ornithopter_rig(parent_node, base_size, base_color, roof_len, roof_reach)
 
 	# Fore/hind wing roots sit close together fore-and-aft on the thorax
 	# (a real dragonfly's two wing bases are close but distinct), not
 	# spread across the whole hull like the old single-wing rib fan was.
 	# Hind wing reads slightly broader than fore (size_mult 1.15), matching
 	# a real dragonfly's hindwing being the bigger of the pair.
-	var root_gap = base_size.z * 0.22
-	_build_ornithopter_wing_unit(parent_node, base_size, base_color, wingspan, sweep, "WingPivotFore", root_gap, 1.0)
-	_build_ornithopter_wing_unit(parent_node, base_size, base_color, wingspan, sweep, "WingPivotHind", -root_gap, 1.15)
+	# Keyed to the rig's own rail length now, not base_size, so the two roots
+	# sit at the gearboxes the rig actually placed.
+	var root_gap = roof_len * 0.30
+	_build_ornithopter_wing_unit(parent_node, base_size, base_color, wingspan, sweep, "WingPivotFore", root_gap, wing_root, 1.0)
+	_build_ornithopter_wing_unit(parent_node, base_size, base_color, wingspan, sweep, "WingPivotHind", -root_gap, wing_root, 1.15)
+
+
+## The flapping rig: a two-rail frame lying fore-and-aft along the hull roof,
+## cross-braced, carrying a gearbox at each wing root and strutted down into
+## the roof itself. Returns the Y the wing pivots should hang off.
+##
+## Same invariant that makes build_wheel_mount() work, reflected: the module's
+## origin sits ON THE HULL'S TOP EDGE (locomotion_layout puts it there), so a
+## rail raised slightly above the origin and a strut running down and INBOARD
+## from it arrives inside the hull's solid volume by construction. No hull
+## measurement past the two spans the layout already publishes, no reach solve.
+##
+## `roof_len`/`roof_reach` are the hull's length and half-width, in the
+## module's LOCAL units. Inboard is -X on both sides (the layout mirrors the
+## port instance), so the frame is built on -X and the wings on +X.
+static func _build_ornithopter_rig(parent_node: Node3D, base_size: Vector3, base_color: Color, roof_len: float, roof_reach: float) -> Vector3:
+	var rail_z: float = roof_len * 0.42        # 84% of the roof, fore to aft
+	var inboard_x: float = -roof_reach * 0.85  # stops just short of the centreline
+	# Sized off the ROOF, not off base_size. The catalog size for this type is
+	# (2.0, 0.2, 1.0) - a wing panel's own proportions - so keying the frame's
+	# girth to base_size.y built 0.03-thick rails across a 2.5-long roof:
+	# threadlike, and loose enough that the assembly measured as six separate
+	# islands. The frame's job is to look like it could throw those wings, and
+	# the only thing it should be proportional to is the vehicle carrying it.
+	var rail_y: float = roof_reach * 0.20      # clear of the roof, so struts have a run
+	var beam := roof_reach * 0.13
+
+	var box_mesh := _part("rg_mount_box")
+	var gb_mesh := _part("wheel_gearbox")
+	var strut_mesh := _part("mount_strut_tapered")
+	var metal := base_color.darkened(0.25).lightened(0.2)
+
+	# rg_mount_box runs along its own local +Y, so a rail or a cross-beam is
+	# that same box turned onto the axis it should run along - built by basis
+	# rather than by rotation so the two cases read alike.
+	#
+	# MEASURED, not assumed. The box is not a unit cube: it is 0.4 long and
+	# 0.35 across. Treating the scale factor as a length in world units built
+	# rails 40% of the span they were asked for - the inboard rail stopped
+	# short of the aft cross-beam entirely and the frame measured as two
+	# separate islands - and cross-sections a third of the intended girth, so
+	# the whole frame read as wire. Same lesson as the screw drum and the
+	# rotor blade: fit to the AABB you can measure.
+	var box_len := 1.0
+	var box_wide := 1.0
+	if box_mesh:
+		var ba := box_mesh.get_aabb()
+		box_len = maxf(ba.size.y, 0.001)
+		box_wide = maxf(maxf(ba.size.x, ba.size.z), 0.001)
+	var _beamed := func(span: Vector3, at: Vector3, w: float) -> void:
+		if box_mesh == null:
+			return
+		var l: float = span.length()
+		if l <= 0.0001:
+			return
+		var dir: Vector3 = span / l
+		var right: Vector3 = dir.cross(Vector3.FORWARD)
+		if right.length_squared() < 0.001:
+			right = dir.cross(Vector3.RIGHT)
+		right = right.normalized()
+		var fwd: Vector3 = right.cross(dir).normalized()
+		var b := _mesh_inst(box_mesh, metal)
+		b.transform = Transform3D(
+			Basis(right * (w / box_wide), dir * (l / box_len), fwd * (w / box_wide)), at)
+		parent_node.add_child(b)
+
+	# Two longitudinal rails, outboard and inboard, plus three cross-beams.
+	for x in [0.0, inboard_x]:
+		_beamed.call(Vector3(0, 0, rail_z * 2.0), Vector3(x, rail_y, -rail_z), beam)
+	for z in [-rail_z, 0.0, rail_z]:
+		_beamed.call(Vector3(inboard_x, 0, 0), Vector3(0, rail_y, z), beam * 0.8)
+
+	# Gearboxes at the wing roots - the bulk Chris asked for. Sized off the
+	# hull's own height rather than the part's authored unit, because at the
+	# authored size these are pea-sized against a roof-spanning frame.
+	if gb_mesh:
+		var gb: float = roof_reach * 0.62
+		for z in [roof_len * 0.30, -roof_len * 0.30]:
+			var gearbox := _mesh_inst(gb_mesh, base_color.darkened(0.1).lightened(0.3))
+			gearbox.scale = Vector3(gb, gb, gb * 1.15)
+			gearbox.position = Vector3(-gb * 0.25, rail_y, z)
+			parent_node.add_child(gearbox)
+		# A drive housing amidships between them, so the two roots read as
+		# driven by one mechanism rather than as two unrelated boxes. It has to
+		# SPAN the gap (roof_len * 0.60 = the full root-to-root distance), not
+		# merely sit in the middle of it, or the gearboxes measure as islands.
+		var drive := _mesh_inst(gb_mesh, base_color.darkened(0.2))
+		drive.scale = Vector3(gb * 0.62, gb * 0.7, roof_len * 0.60)
+		drive.position = Vector3(-gb * 0.25, rail_y, 0.0)
+		parent_node.add_child(drive)
+
+	# Struts down and inboard into the roof. mount_strut_tapered is authored
+	# along local +Y spanning 0..1, thin at the root and flaring at the far
+	# end, so it is placed here by building a basis around the span vector -
+	# the technique the rotor, hover and track mounts all share.
+	if strut_mesh:
+		# DEEP. Chris: "extend the struts further down so they actually
+		# intersect hull." At 0.35 the struts stopped short of the hull's
+		# visible mesh, which is inset from the collision box the station is
+		# derived from - so they cleared the box and still read as resting on
+		# nothing. Taken past the halfway point of the hull's own height, so
+		# the frame is visibly bolted THROUGH the roof rather than onto it.
+		var down: float = rail_y + roof_reach * 0.85
+		for i in range(4):
+			var t: float = (float(i) + 0.5) / 4.0
+			var z: float = -rail_z + rail_z * 2.0 * t
+			for x in [0.0, inboard_x]:
+				# Splayed: the outboard rail's struts lean in, the inboard
+				# rail's lean out, so the pair reads as a braced trestle
+				# rather than as two parallel posts.
+				var lean: float = (roof_reach * 0.18) * (-1.0 if x == 0.0 else 1.0)
+				var span := Vector3(lean, -down, 0.0)
+				var l: float = span.length()
+				var dir: Vector3 = span / l
+				var right: Vector3 = dir.cross(Vector3.FORWARD).normalized()
+				var fwd: Vector3 = right.cross(dir).normalized()
+				var strut := _mesh_inst(strut_mesh, base_color.darkened(0.3))
+				strut.transform = Transform3D(
+					Basis(right * beam * 0.85, dir * l, fwd * beam * 0.85),
+					Vector3(x, rail_y, z))
+				parent_node.add_child(strut)
+
+	# Inside the gearbox, not adjacent to it: the wing root should visibly
+	# emerge from the housing that drives it.
+	return Vector3(roof_reach * 0.12, rail_y, 0.0)
 
 
 # One wing (membrane + a single main spar) of an ornithopter_wing's fore/
@@ -4663,15 +4794,23 @@ static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, bas
 # entirely, not just defaulted differently (see the matching removals in
 # module_catalog.gd's LOCOMOTION_TWEAK_SPECS, module_placer.gd, and
 # module_data.gd's weight/cost tweak tables).
-static func _build_ornithopter_wing_unit(parent_node: Node3D, base_size: Vector3, base_color: Color, wingspan: float, sweep: float, pivot_name: String, z_offset: float, size_mult: float):
+static func _build_ornithopter_wing_unit(parent_node: Node3D, base_size: Vector3, base_color: Color, wingspan: float, sweep: float, pivot_name: String, z_offset: float, wing_root: Vector3, size_mult: float):
 	var mem_mesh = _part("wing_membrane")
 	var rib_mesh = _part("wing_rib")
-	var span = wingspan * size_mult
+	# IMPRACTICALLY LONG (Chris, 2026-08-02). Sized to land just inside
+	# locomotion_layout's 5.5x width clamp at the default wingspan of 1.0:
+	# any further and the clamp fires and shrinks the roof rig along with the
+	# wing, which is not a trade worth making - the rig is the half of this
+	# module that has to stay legible.
+	const SPAN_MULT := 1.5
+	var span = wingspan * size_mult * SPAN_MULT
 	var sweep_angle = deg_to_rad(12.0) * sweep
 
 	var pivot = Node3D.new()
 	pivot.name = pivot_name
-	pivot.position = Vector3(base_size.x * 0.2, base_size.y * 0.15, z_offset)
+	# Hung off the rig's rail height, at the gearbox, rather than at a fixed
+	# fraction of the part's own size out in space.
+	pivot.position = Vector3(wing_root.x, wing_root.y, z_offset)
 	parent_node.add_child(pivot)
 
 	# root_x/mem_len track the membrane's actual root position and
@@ -4687,7 +4826,13 @@ static func _build_ornithopter_wing_unit(parent_node: Node3D, base_size: Vector3
 
 	if mem_mesh:
 		var mem = _mesh_inst(mem_mesh, base_color)
-		mem.scale = Vector3(span, 1.0, 1.0)
+		# CHORD. The membrane is authored 0.3 wide against a 2.4 length; at the
+		# new span that ratio put a 0.3-wide panel on an 8-unit wing, which
+		# rendered as a black sliver you could miss entirely from three
+		# quarters. Widened so the wing still reads AS a wing at a span this
+		# silly - the absurdity should be legible, not invisible.
+		const CHORD := 3.2
+		mem.scale = Vector3(span, 1.0, CHORD)
 		mem.position = Vector3(root_x, 0, 0)
 		mem.rotation = Vector3(0, 0, sweep_angle)
 		pivot.add_child(mem)
@@ -4711,7 +4856,7 @@ static func _build_ornithopter_wing_unit(parent_node: Node3D, base_size: Vector3
 		# rather than just grazing its surface.
 		var connector_len = pivot.position.x * 1.4
 		var connector = _mesh_inst(mem_mesh, base_color)
-		connector.scale = Vector3(connector_len / 2.4, 1.0, 1.0)
+		connector.scale = Vector3(connector_len / 2.4, 1.0, CHORD)
 		connector.rotation = Vector3(0, PI, sweep_angle)
 		pivot.add_child(connector)
 	else:

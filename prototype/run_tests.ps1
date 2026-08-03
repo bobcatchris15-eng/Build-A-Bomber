@@ -7,11 +7,12 @@
 #
 # Usage: cd prototype; ./run_tests.ps1
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $godot = Join-Path $PSScriptRoot "Godot_v4.3-stable_win64_console.exe"
 
 Write-Host "Reimporting assets (regenerating .godot import cache)..."
 & $godot --headless --editor --import --quit --path $PSScriptRoot 2>&1 | Out-Null
+$ErrorActionPreference = "Stop"
 
 Write-Host "Running headless test suite..."
 & $godot --headless --script run_tests.gd --path $PSScriptRoot

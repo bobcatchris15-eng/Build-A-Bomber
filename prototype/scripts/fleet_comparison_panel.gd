@@ -49,14 +49,14 @@ func _ready():
 	main_vbox.add_child(header)
 
 	var title = Label.new()
-	title.text = "⚡ FLEET BLUEPRINT TELEMETRY COMPARISON"
+	title.text = "BLUEPRINT COMPARISON"
 	title.add_theme_font_size_override("font_size", 20)
 	title.add_theme_color_override("font_color", Color(0.2, 0.9, 1.0))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(title)
 
 	var close_btn = Button.new()
-	close_btn.text = "✖ Close"
+	close_btn.text = "Close"
 	close_btn.pressed.connect(func(): queue_free())
 	header.add_child(close_btn)
 

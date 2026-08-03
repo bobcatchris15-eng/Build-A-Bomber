@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=2 format=3 uid="uid://cnt8qm1prli4f"]
 
 [ext_resource type="Script" path="res://scripts/operations_setup.gd" id="1_opsetup"]
 

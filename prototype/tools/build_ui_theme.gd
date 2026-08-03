@@ -48,11 +48,84 @@ func _flat(bg: Color, border: Color, border_width: int, radius: int) -> StyleBox
 	sb.corner_radius_bottom_right = radius
 	return sb
 
-func _pad(sb: StyleBoxFlat, h: int, v: int) -> StyleBoxFlat:
+func _pad(sb: StyleBox, h: int, v: int) -> StyleBox:
 	sb.content_margin_left = h
 	sb.content_margin_right = h
 	sb.content_margin_top = v
 	sb.content_margin_bottom = v
+	return sb
+
+
+# ---------------------------------------------------------------------------
+# MATERIAL PLATES
+# ---------------------------------------------------------------------------
+# The theme is now built from StyleBoxTexture over the plates baked by
+# tools/generate_ui_plates.py, not from flat fills.
+#
+# WHY THIS IS THE HIGHEST-LEVERAGE PIECE OF THE WHOLE MATERIAL PASS: a Theme
+# resource can carry a StyleBoxTexture. So assigning a bakelite plate to
+# "Button" here repaints every Button in the game - in the Design Lab, in the
+# Skirmish HUD, in every dialog - with no call-site edits at all. Colour alone
+# could never have got the interface to read as physical; this is what does.
+#
+# THE 9-SLICE CONTRACT, which generate_ui_plates.py holds up the other end of:
+# Godot stretches the CENTRE region of a StyleBoxTexture to fill the control
+# and leaves the margin ring unstretched. So the plates carry all of their
+# bevel and outline inside a 12px margin and keep the centre flat and
+# tileable. texture_margin_* below must match PLATE_MARGIN there or the bevel
+# either gets stretched into a smear or gets sliced through the middle.
+const PLATE_DIR = "res://assets/textures/ui/"
+const PLATE_MARGIN = 12
+
+func _plate_texture(material: String, state: String) -> Texture2D:
+	var path = PLATE_DIR + "plate_%s_%s.png" % [material, state]
+	if not ResourceLoader.exists(path):
+		# Loud, because the silent version of this failure is a theme that
+		# builds "successfully" and renders every control as a blank box.
+		push_error("build_ui_theme: missing plate %s" % path)
+		return null
+	return load(path) as Texture2D
+
+# One styleboxed plate. `h`/`v` are content margins - the padding INSIDE the
+# control, unrelated to the 9-slice texture margin.
+func _plate(material: String, state: String, h: int, v: int) -> StyleBox:
+	var tex = _plate_texture(material, state)
+	if tex == null:
+		# Degrade to a flat box rather than returning null, which Godot would
+		# render as "no style at all" and make the failure look cosmetic.
+		return _pad(_flat(Tokens.BASE_700, Tokens.BASE_500,
+			Tokens.BORDER_HAIRLINE, Tokens.RADIUS_CONTROL), h, v)
+	var sb = StyleBoxTexture.new()
+	sb.texture = tex
+	sb.texture_margin_left = PLATE_MARGIN
+	sb.texture_margin_right = PLATE_MARGIN
+	sb.texture_margin_top = PLATE_MARGIN
+	sb.texture_margin_bottom = PLATE_MARGIN
+	return _pad(sb, h, v)
+
+
+# A plate finished in a signal colour.
+#
+# StyleBoxTexture has NO border properties - that is a real constraint, not an
+# oversight, and it is the one thing lost in moving off StyleBoxFlat. So a
+# signal role cannot be "grey material plus a coloured hairline" any more.
+#
+# Rather than fake a border by stacking boxes (Godot draws one stylebox per
+# control state, so there is nowhere to stack them), the signal becomes a
+# property OF THE MATERIAL: the plate is modulated toward the role colour, so
+# a danger control is a placard actually finished in hazard amber-red and a
+# primary control is carbon with a green cast. This is arguably the more
+# honest reading anyway - real equipment signals with the colour of the part,
+# not with a stroke around it.
+#
+# Modulation is kept well below 1.0 saturation. Multiplying a plate by a fully
+# saturated signal colour crushes the material texture out of it entirely and
+# leaves a flat coloured rectangle, which loses the whole point of the plate.
+func _plate_tinted(material: String, state: String, role: Color,
+		h: int, v: int, strength: float = 0.55) -> StyleBox:
+	var sb = _plate(material, state, h, v)
+	if sb is StyleBoxTexture:
+		(sb as StyleBoxTexture).modulate_color = Color.WHITE.lerp(role * 1.6, strength)
 	return sb
 
 func build_theme() -> void:
@@ -125,6 +198,9 @@ const VARIATION_BASES = {
 	"HeaderPanel": "PanelContainer",
 	"HUDPanel": "PanelContainer",
 	"InsetPanel": "PanelContainer",
+	"DockPanel": "PanelContainer",
+	"DockRail": "PanelContainer",
+	"FlyoutPanel": "PanelContainer",
 	"PrimaryButton": "Button",
 	"DangerButton": "Button",
 	"TabButton": "Button",
@@ -154,64 +230,74 @@ func _build_panels(theme: Theme) -> void:
 	# landing directly on the 3D viewport (see the MainLab baseline capture -
 	# the entire right-hand stat column is unreadable against the sky).
 	# Chrome that a player reads mid-fight is not a place for transparency.
-	var panel = _pad(_flat(Tokens.BASE_800, Tokens.BASE_500,
-		Tokens.BORDER_HAIRLINE, Tokens.RADIUS_PANEL), Tokens.SPACE_MD, Tokens.SPACE_MD)
+	# POWDERCOAT.
+	var panel = _plate("powdercoat", "normal", Tokens.SPACE_MD, Tokens.SPACE_MD)
 	theme.set_stylebox("panel", "Panel", panel)
 	theme.set_stylebox("panel", "PanelContainer", panel)
 
-	# CardPanel - a free-floating card on a backdrop (menus, dialogs).
-	var card = _pad(_flat(Tokens.BASE_800, Tokens.BASE_400,
-		Tokens.BORDER_EMPHASIS, Tokens.RADIUS_PANEL), Tokens.SPACE_XL, Tokens.SPACE_LG)
-	theme.set_stylebox("panel", "CardPanel", card)
+	# CardPanel - a free-floating card on a backdrop (menus, dialogs). Same
+	# material as the base panel but roomier. A card earns its separation from
+	# the backdrop by the BACKDROP being held darker (UITheme.apply_backdrop
+	# runs it at 0.42 brightness), not by being a different colour itself.
+	theme.set_stylebox("panel", "CardPanel",
+		_plate("powdercoat", "normal", Tokens.SPACE_XL, Tokens.SPACE_LG))
 
 	# HeaderPanel - a titled band. Its identity is the hazard underline, not
 	# a fill, so it can sit on top of any panel without introducing a
 	# third background value.
+	#
+	# Kept as a StyleBoxFlat deliberately - the one survivor in this function.
+	# An underline is a RULE, not a material, and StyleBoxTexture has no border
+	# properties, so expressing it as a plate would mean tinting the whole band
+	# amber to get an amber edge.
 	var header = _flat(Tokens.BASE_700, Tokens.SIGNAL_HAZARD, 0, 0)
 	header.border_width_bottom = Tokens.BORDER_EMPHASIS
 	_pad(header, Tokens.SPACE_MD, Tokens.SPACE_SM)
 	theme.set_stylebox("panel", "HeaderPanel", header)
 
-	# HUDPanel - in-match chrome. Slightly darker and fully opaque so unit
-	# colors never bleed through and confuse ownership reads.
-	var hud = _pad(_flat(Tokens.BASE_900, Tokens.BASE_500,
-		Tokens.BORDER_HAIRLINE, 0), Tokens.SPACE_SM, Tokens.SPACE_XS)
-	theme.set_stylebox("panel", "HUDPanel", hud)
+	# HUDPanel - in-match chrome. The "pressed" plate, which is the same
+	# powdercoat held darker with its bevel inverted - it reads as recessed into
+	# the frame, and it keeps unit colours from bleeding through and confusing
+	# ownership reads.
+	theme.set_stylebox("panel", "HUDPanel",
+		_plate("powdercoat", "pressed", Tokens.SPACE_SM, Tokens.SPACE_XS))
 
 	# InsetPanel - a recessed well (list backgrounds, viewport surrounds).
-	var inset = _pad(_flat(Tokens.BASE_900, Tokens.BASE_700,
-		Tokens.BORDER_HAIRLINE, Tokens.RADIUS_PANEL), Tokens.SPACE_SM, Tokens.SPACE_SM)
-	theme.set_stylebox("panel", "InsetPanel", inset)
+	# CANVAS: a drawer lined with duck cloth. This is the one material with a
+	# genuinely different tactile read from the metal around it, which is what
+	# makes a recess look recessed rather than merely darker.
+	theme.set_stylebox("panel", "InsetPanel",
+		_plate("canvas", "pressed", Tokens.SPACE_SM, Tokens.SPACE_SM))
+
+	# The dock and flyout primitives (scripts/ui_dock.gd, ui_flyout.gd).
+	theme.set_stylebox("panel", "DockPanel",
+		_plate("powdercoat", "normal", Tokens.SPACE_SM, Tokens.SPACE_SM))
+	theme.set_stylebox("panel", "DockRail",
+		_plate("steel", "normal", Tokens.SPACE_XS, Tokens.SPACE_SM))
+	theme.set_stylebox("panel", "FlyoutPanel",
+		_plate("canvas", "normal", Tokens.SPACE_MD, Tokens.SPACE_MD))
 
 
 func _build_buttons(theme: Theme) -> void:
-	# Every state is defined, including disabled. The old theme left
-	# "disabled" unset, so a greyed-out build button (there is real logic
-	# gating these on having a manufactory of the right tier) looked
-	# identical to an available one.
-	var normal = _pad(_flat(Tokens.BASE_700, Tokens.BASE_500,
-		Tokens.BORDER_HAIRLINE, Tokens.RADIUS_CONTROL), Tokens.SPACE_MD, Tokens.SPACE_SM)
+	# BAKELITE. Heavy moulded phenolic switches.
+	#
+	# The physical press language survives the move off StyleBoxFlat, because
+	# it worked - it is just carried by the plate now instead of by border
+	# widths. At rest the plate's bevel lights the TOP edge; the pressed plate
+	# inverts that and lights the BOTTOM (see STATES in
+	# tools/generate_ui_plates.py). A control that changes WHICH WAY it catches
+	# light reads as physically moving; one that merely darkens reads as
+	# changing colour.
+	var normal = _plate("bakelite", "normal", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var hover = _plate("bakelite", "hover", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var pressed = _plate("bakelite", "pressed", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var disabled = _plate("bakelite", "disabled", Tokens.SPACE_MD, Tokens.SPACE_SM)
 
-	var hover = normal.duplicate() as StyleBoxFlat
-	hover.bg_color = Tokens.BASE_600
-	hover.border_color = Tokens.BASE_400
-
-	# Pressed reads as physically depressed: darker than its own rest state,
-	# with the top border brightened to imply a lip catching the light.
-	var pressed = normal.duplicate() as StyleBoxFlat
-	pressed.bg_color = Tokens.BASE_900
-	pressed.border_color = Tokens.SIGNAL_HAZARD
-	pressed.content_margin_top = Tokens.SPACE_SM + 1
-	pressed.content_margin_bottom = Tokens.SPACE_SM - 1
-
-	var disabled = normal.duplicate() as StyleBoxFlat
-	disabled.bg_color = Tokens.BASE_800
-	disabled.border_color = Tokens.BASE_700
-
-	# Focus is a hazard hairline, never a fill - a fill would collide with
-	# the pressed/selected reads during keyboard navigation.
+	# Focus stays a hazard hairline. Focus is a state of the INTERFACE - where
+	# keyboard attention is - not a property of the object, so it should not
+	# look like the control changed material.
 	var focus = _flat(Color(0, 0, 0, 0), Tokens.SIGNAL_HAZARD,
-		Tokens.BORDER_HAIRLINE, Tokens.RADIUS_CONTROL)
+		2, Tokens.RADIUS_CONTROL)
 
 	for type in ["Button", "MenuButton", "OptionButton"]:
 		theme.set_stylebox("normal", type, normal)
@@ -220,52 +306,71 @@ func _build_buttons(theme: Theme) -> void:
 		theme.set_stylebox("disabled", type, disabled)
 		theme.set_stylebox("focus", type, focus)
 		theme.set_color("font_color", type, Tokens.TEXT_PRIMARY)
-		theme.set_color("font_hover_color", type, Tokens.TEXT_PRIMARY)
-		theme.set_color("font_pressed_color", type, Tokens.SIGNAL_HAZARD)
+		theme.set_color("font_hover_color", type, Color(1, 1, 1))
+		theme.set_color("font_pressed_color", type, Tokens.TEXT_SECONDARY)
 		theme.set_color("font_disabled_color", type, Tokens.TEXT_DISABLED)
+		# The plates are dark and TEXTURED - a weave or a grain running under
+		# small text makes it vibrate, so every label gets a little separation.
+		theme.set_color("font_outline_color", type, Color.BLACK)
+		theme.set_constant("outline_size", type, 3)
 		theme.set_constant("h_separation", type, Tokens.SPACE_SM)
 
-	# PrimaryButton - the single "commit" action on a screen. Neutral body
-	# with a go-green edge and green text, rather than a saturated green
-	# slab. It still wins the screen because it is the only green thing on
-	# it, and it does not shout at the player during a match.
-	var prim = normal.duplicate() as StyleBoxFlat
-	prim.bg_color = Tokens.SIGNAL_GO_DIM
-	prim.border_color = Tokens.SIGNAL_GO
-	prim.border_width_bottom = Tokens.BORDER_EMPHASIS
-	var prim_hover = prim.duplicate() as StyleBoxFlat
-	prim_hover.bg_color = Tokens.SIGNAL_GO_DIM.lightened(0.10)
-	theme.set_stylebox("normal", "PrimaryButton", prim)
-	theme.set_stylebox("hover", "PrimaryButton", prim_hover)
-	theme.set_stylebox("pressed", "PrimaryButton", pressed)
+	# PrimaryButton - CARBON, cast toward go-green. Carbon is deliberately
+	# rationed across the whole interface (see UITheme.MATERIALS); spending it
+	# on the single primary action per screen is what keeps it meaning
+	# "this is the one".
+	theme.set_stylebox("normal", "PrimaryButton",
+		_plate_tinted("carbon", "normal", Tokens.SIGNAL_GO,
+			Tokens.SPACE_MD, Tokens.SPACE_SM, 0.45))
+	theme.set_stylebox("hover", "PrimaryButton",
+		_plate_tinted("carbon", "hover", Tokens.SIGNAL_GO,
+			Tokens.SPACE_MD, Tokens.SPACE_SM, 0.60))
+	theme.set_stylebox("pressed", "PrimaryButton",
+		_plate_tinted("carbon", "pressed", Tokens.SIGNAL_GO,
+			Tokens.SPACE_MD, Tokens.SPACE_SM, 0.45))
 	theme.set_stylebox("disabled", "PrimaryButton", disabled)
-	theme.set_color("font_color", "PrimaryButton", Tokens.TEXT_PRIMARY)
+	theme.set_stylebox("focus", "PrimaryButton", focus)
+	theme.set_color("font_color", "PrimaryButton", Color(0.88, 1.0, 0.88))
+	theme.set_color("font_outline_color", "PrimaryButton", Color.BLACK)
+	theme.set_constant("outline_size", "PrimaryButton", 3)
 	theme.set_color("font_disabled_color", "PrimaryButton", Tokens.TEXT_DISABLED)
 
-	# DangerButton - irreversible only (delete, sell, quit to desktop).
-	var danger = normal.duplicate() as StyleBoxFlat
-	danger.bg_color = Tokens.SIGNAL_ALERT_DIM
-	danger.border_color = Tokens.SIGNAL_ALERT
-	var danger_hover = danger.duplicate() as StyleBoxFlat
-	danger_hover.bg_color = Tokens.SIGNAL_ALERT_DIM.lightened(0.10)
-	theme.set_stylebox("normal", "DangerButton", danger)
-	theme.set_stylebox("hover", "DangerButton", danger_hover)
-	theme.set_stylebox("pressed", "DangerButton", pressed)
+	# DangerButton - Machined BIG RED BUTTON
+	# DangerButton - a FIBERGLASS hazard placard, not a big red fill.
+	#
+	# The old version was a saturated red slab that sat in a row beside a
+	# saturated green Save and a blue Test, spending the player's entire
+	# attention budget on three controls none of which are emergencies. A
+	# placard says "read me before you press this" without shouting.
+	theme.set_stylebox("normal", "DangerButton",
+		_plate_tinted("fiberglass", "normal", Tokens.SIGNAL_ALERT,
+			Tokens.SPACE_MD, Tokens.SPACE_SM, 0.50))
+	theme.set_stylebox("hover", "DangerButton",
+		_plate_tinted("fiberglass", "hover", Tokens.SIGNAL_ALERT,
+			Tokens.SPACE_MD, Tokens.SPACE_SM, 0.68))
+	theme.set_stylebox("pressed", "DangerButton",
+		_plate_tinted("fiberglass", "pressed", Tokens.SIGNAL_ALERT,
+			Tokens.SPACE_MD, Tokens.SPACE_SM, 0.50))
 	theme.set_stylebox("disabled", "DangerButton", disabled)
-	theme.set_color("font_color", "DangerButton", Tokens.TEXT_PRIMARY)
+	theme.set_stylebox("focus", "DangerButton", focus)
+	theme.set_color("font_color", "DangerButton", Color(1.0, 0.90, 0.88))
+	theme.set_color("font_outline_color", "DangerButton", Color.BLACK)
+	theme.set_constant("outline_size", "DangerButton", 3)
 
 	# TabButton - a latched selector. Selected state is carried by a hazard
 	# bar along the bottom edge plus a lifted fill, so it reads as a
 	# mechanically held-down control rather than just a recolor. This is the
 	# pattern the build tabs and the parts-catalog categories both use.
-	var tab = _pad(_flat(Tokens.BASE_800, Tokens.BASE_500,
-		Tokens.BORDER_HAIRLINE, 0), Tokens.SPACE_MD, Tokens.SPACE_SM)
-	var tab_hover = tab.duplicate() as StyleBoxFlat
-	tab_hover.bg_color = Tokens.BASE_700
-	var tab_on = tab.duplicate() as StyleBoxFlat
-	tab_on.bg_color = Tokens.BASE_600
-	tab_on.border_color = Tokens.SIGNAL_HAZARD
+	#
+	# Unselected tabs use the PRESSED bakelite plate and the selected one a
+	# flat lifted fill - i.e. the inactive tabs are the ones sunk into the
+	# frame. That inversion is what makes a tab strip read as one control with
+	# a chosen position rather than as a row of independent buttons.
+	var tab = _plate("bakelite", "pressed", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var tab_hover = _plate("bakelite", "normal", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var tab_on = _flat(Tokens.BASE_600, Tokens.SIGNAL_HAZARD, 0, 0)
 	tab_on.border_width_bottom = 3
+	_pad(tab_on, Tokens.SPACE_MD, Tokens.SPACE_SM)
 	theme.set_stylebox("normal", "TabButton", tab)
 	theme.set_stylebox("hover", "TabButton", tab_hover)
 	theme.set_stylebox("pressed", "TabButton", tab_on)
@@ -327,10 +432,14 @@ func _build_labels(theme: Theme, stencil: FontFile, ui_bold: FontFile, mono: Fon
 
 
 func _build_inputs(theme: Theme, mono: FontFile) -> void:
-	var field = _pad(_flat(Tokens.BASE_900, Tokens.BASE_500,
-		Tokens.BORDER_HAIRLINE, Tokens.RADIUS_CONTROL), Tokens.SPACE_SM, Tokens.SPACE_SM)
-	var field_focus = field.duplicate() as StyleBoxFlat
-	field_focus.border_color = Tokens.SIGNAL_HAZARD
+	# A text field is a recess milled into the panel, so it gets the PRESSED
+	# steel plate - inverted bevel, sunk into the frame. Focus keeps the flat
+	# hazard hairline for the same reason buttons do: focus is interface state,
+	# not a change of material.
+	var field = _plate("steel", "pressed", Tokens.SPACE_SM, Tokens.SPACE_SM)
+	var field_focus = _flat(Color(0, 0, 0, 0), Tokens.SIGNAL_HAZARD,
+		Tokens.BORDER_EMPHASIS, Tokens.RADIUS_CONTROL)
+	_pad(field_focus, Tokens.SPACE_SM, Tokens.SPACE_SM)
 	theme.set_stylebox("normal", "LineEdit", field)
 	theme.set_stylebox("focus", "LineEdit", field_focus)
 	theme.set_color("font_color", "LineEdit", Tokens.TEXT_PRIMARY)

@@ -10398,9 +10398,9 @@ func test_module_roles_group_and_sort_the_parts_menu() -> bool:
 	# module_catalog.gd rather than in the UI script precisely so a modded
 	# part can declare one; this asserts the menu genuinely reads it instead
 	# of carrying a second, drifting copy.
-	var tab_modules = menu.get_node("PanelContainer/VBoxContainer/TabContainer/Modules/VBoxContainer")
+	var module_sections = menu.sections_for("modules")
 	var placed := {}
-	for drawer in tab_modules.get_children():
+	for drawer in module_sections:
 		if not drawer.has_meta("drawer_category"):
 			continue
 		var group = drawer.get_meta("drawer_category")
@@ -10432,9 +10432,8 @@ func test_module_roles_group_and_sort_the_parts_menu() -> bool:
 
 	# Locomotion groups come off each drive's own `traits` array, not a
 	# type_id table - same modding argument.
-	var tab_loco = menu.get_node("PanelContainer/VBoxContainer/TabContainer/Locomotion/VBoxContainer")
 	var loco_seen := 0
-	for drawer in tab_loco.get_children():
+	for drawer in menu.sections_for("locomotion"):
 		if not drawer.has_meta("drawer_category"):
 			continue
 		var group = drawer.get_meta("drawer_category")
@@ -11139,9 +11138,10 @@ func test_hull_modding_parts_menu_two_buckets() -> bool:
 	root.add_child(menu)
 	await process_frame
 
-	var tab_hulls = menu.get_node("PanelContainer/VBoxContainer/TabContainer/Hulls/VBoxContainer")
+	# sections_for() rather than a hardcoded widget path - see its comment in
+	# parts_menu.gd for why this suite should not know the panel's node tree.
 	var drawer_categories = []
-	for child in tab_hulls.get_children():
+	for child in menu.sections_for("hulls"):
 		if child.has_meta("drawer_category"):
 			drawer_categories.append(child.get_meta("drawer_category"))
 	drawer_categories.sort()
@@ -11159,7 +11159,7 @@ func test_hull_modding_parts_menu_two_buckets() -> bool:
 			ok = false
 
 	var seen_hulls := {}
-	for child in tab_hulls.get_children():
+	for child in menu.sections_for("hulls"):
 		if not child.has_meta("drawer_category"):
 			continue
 		var category = child.get_meta("drawer_category")

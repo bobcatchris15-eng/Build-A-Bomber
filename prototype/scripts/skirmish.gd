@@ -1057,7 +1057,7 @@ func _update_enemy_intel():
 		if is_instance_valid(c) and not ("fog_hidden" in c and c.fog_hidden):
 			visible_enemies.append(c)
 	if visible_enemies.is_empty():
-		intel_label.text = "👁 No enemies sighted"
+		intel_label.text = "No enemies sighted"
 		return
 	var flying = 0
 	var armored = 0
@@ -1070,7 +1070,7 @@ func _update_enemy_intel():
 	if flying > 0: detail.append("%d air" % flying)
 	if armored > 0: detail.append("%d armored" % armored)
 	var detail_str = " (%s)" % ", ".join(detail) if not detail.is_empty() else ""
-	intel_label.text = "👁 Enemy sighted: %d%s" % [visible_enemies.size(), detail_str]
+	intel_label.text = "Enemy sighted: %d%s" % [visible_enemies.size(), detail_str]
 
 # --- Rosters ---
 
@@ -1690,7 +1690,7 @@ func _build_ui():
 	power_bar_panel.add_child(power_bar)
 
 	power_status_label = Label.new()
-	power_status_label.text = "⚡ Normal"
+	power_status_label.text = "Normal"
 	power_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	power_status_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	power_status_label.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -1990,12 +1990,12 @@ func _build_tab_bar(parent: Container) -> void:
 	# build_tab_containers - these arm a click-mode instead of switching
 	# which unit/building buttons are visible.
 	var repair_btn = Button.new()
-	repair_btn.text = "🔧 Repair"
+	repair_btn.text = "Repair"
 	repair_btn.custom_minimum_size = Vector2(90, 26)
 	repair_btn.toggle_mode = true
 	tab_bar.add_child(repair_btn)
 	var sell_btn = Button.new()
-	sell_btn.text = "💰 Sell"
+	sell_btn.text = "Sell"
 	sell_btn.custom_minimum_size = Vector2(90, 26)
 	sell_btn.toggle_mode = true
 	tab_bar.add_child(sell_btn)
@@ -2164,7 +2164,7 @@ func _update_resource_ui():
 		if _displayed_metal < 0 or abs(target_metal - _displayed_metal) + abs(target_crystal - _displayed_crystal) < 3:
 			_displayed_metal = target_metal
 			_displayed_crystal = target_crystal
-			resource_label.text = "💰 Metal: %d   💎 Crystal: %d" % [target_metal, target_crystal]
+			resource_label.text = "Metal: %d    Crystal: %d" % [target_metal, target_crystal]
 		else:
 			if _resource_roll_tween and _resource_roll_tween.is_valid():
 				_resource_roll_tween.kill()
@@ -2173,7 +2173,7 @@ func _update_resource_ui():
 			_resource_roll_tween = UIAnimScript.roll_up(resource_label, 0.0, 1.0, UIAnimScript.DURATION_NORMAL, func(t):
 				var m = int(round(lerp(float(start_metal), float(target_metal), t)))
 				var c = int(round(lerp(float(start_crystal), float(target_crystal), t)))
-				resource_label.text = "💰 Metal: %d   💎 Crystal: %d" % [m, c])
+				resource_label.text = "Metal: %d    Crystal: %d" % [m, c])
 			_displayed_metal = target_metal
 			_displayed_crystal = target_crystal
 	# RTS_CORE_ROADMAP.md E1: a real power bar, replacing the old single
@@ -2195,7 +2195,7 @@ func _update_resource_ui():
 		var fill_style = StyleBoxFlat.new()
 		fill_style.bg_color = state_color
 		power_bar.add_theme_stylebox_override("fill", fill_style)
-		power_status_label.text = "⚡ Base Power: %s" % state.capitalize()
+		power_status_label.text = "Base Power: %s" % state.capitalize()
 
 var _status_toast_home_pos: Vector2 = Vector2.INF
 var _status_toast_tween: Tween = null
@@ -2826,7 +2826,7 @@ func _build_subsystem_schematic_hud(ui: CanvasLayer):
 	margin.add_child(vbox)
 
 	subsystem_title_lbl = Label.new()
-	subsystem_title_lbl.text = "⚡ SUBSYSTEM TELEMETRY"
+	subsystem_title_lbl.text = "SUBSYSTEM STATUS"
 	subsystem_title_lbl.add_theme_font_size_override("font_size", 14)
 	subsystem_title_lbl.add_theme_color_override("font_color", Color(0.0, 0.95, 1.0))
 	vbox.add_child(subsystem_title_lbl)
@@ -2854,7 +2854,7 @@ func _update_subsystem_schematic_hud():
 	elif u.name != "":
 		unit_name = u.name
 
-	subsystem_title_lbl.text = "⚡ DIAGNOSTICS: %s" % unit_name.to_upper()
+	subsystem_title_lbl.text = "SUBSYSTEM STATUS: %s" % unit_name.to_upper()
 
 	var hp_ratio = 1.0
 	var current_hp = 100.0
@@ -3157,7 +3157,7 @@ func _on_hq_died(building):
 	card.add_child(vbox)
 
 	var title = Label.new()
-	title.text = "🏆 VICTORY!" if victory else "💀 DEFEAT"
+	title.text = "VICTORY" if victory else "DEFEAT"
 	title.add_theme_font_size_override("font_size", 64)
 	title.modulate = Color.GOLD if victory else Color.RED
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

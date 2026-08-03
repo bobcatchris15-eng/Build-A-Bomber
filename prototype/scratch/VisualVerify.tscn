@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=3 uid="uid://cxabvisualverify1"]
+[gd_scene load_steps=5 format=3 uid="uid://dtivnqnw1ormc"]
 
 [ext_resource type="Script" path="res://scratch/visual_verify.gd" id="1_verify"]
 

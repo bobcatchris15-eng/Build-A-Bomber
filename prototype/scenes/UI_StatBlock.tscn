@@ -1,18 +1,19 @@
-[gd_scene load_steps=2 format=3 uid="uid://cxabstat123"]
+[gd_scene load_steps=3 format=3 uid="uid://cxabstat123"]
 
 [ext_resource type="Script" path="res://scripts/stat_calculator.gd" id="1_stats"]
 
 [sub_resource type="StyleBoxFlat" id="PanelStyle_Stats"]
-bg_color = Color(0.12, 0.12, 0.14, 0.95)
-border_width_left = 2
-border_width_top = 2
-border_width_right = 2
-border_width_bottom = 2
-border_color = Color(0.35, 0.35, 0.38, 1.0)
-expand_margin_left = 1.0
-expand_margin_top = 1.0
-expand_margin_right = 1.0
-expand_margin_bottom = 1.0
+bg_color = Color(0.12, 0.14, 0.15, 0.95)
+border_width_left = 6
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 6
+border_color = Color(0.06, 0.08, 0.09, 1)
+corner_radius_top_left = 4
+corner_radius_bottom_left = 4
+shadow_color = Color(0, 0, 0, 0.8)
+shadow_size = 8
+shadow_offset = Vector2(-4, 4)
 
 [node name="UI_StatBlock" type="Control"]
 layout_mode = 3
@@ -31,7 +32,7 @@ anchors_preset = 11
 anchor_left = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -300.0
+offset_left = -320.0
 grow_horizontal = 0
 grow_vertical = 2
 theme_override_styles/panel = SubResource("PanelStyle_Stats")
@@ -42,23 +43,23 @@ anchors_preset = 11
 anchor_left = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -280.0
-offset_top = 12.0
-offset_right = -12.0
-offset_bottom = -12.0
+offset_left = -300.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = -16.0
 grow_horizontal = 0
 grow_vertical = 2
 
 [node name="VBoxContainer" type="VBoxContainer" parent="ScrollContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 3
+theme_override_constants/separation = 6
 
 [node name="Title" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 18
-theme_override_colors/font_color = Color(0.95, 0.95, 1.0, 1.0)
-text = "BLUEPRINT STATS"
+theme_override_colors/font_color = Color(0.8, 0.85, 0.9, 1)
+text = "HARDWARE TELEMETRY"
 custom_minimum_size = Vector2(0, 32)
 
 [node name="BlueprintNameEdit" type="LineEdit" parent="ScrollContainer/VBoxContainer"]
@@ -86,25 +87,25 @@ custom_minimum_size = Vector2(0, 8)
 layout_mode = 2
 text = "Total HP: 0.0"
 custom_minimum_size = Vector2(0, 20)
-theme_override_colors/font_color = Color(0.75, 0.85, 0.75, 1.0)
+theme_override_colors/font_color = Color(0.75, 0.85, 0.75, 1)
 
 [node name="WeightLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Total Weight: 0.0"
 custom_minimum_size = Vector2(0, 20)
-theme_override_colors/font_color = Color(0.8, 0.75, 0.7, 1.0)
+theme_override_colors/font_color = Color(0.8, 0.75, 0.7, 1)
 
 [node name="CostLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Cost (Metal): 0"
 custom_minimum_size = Vector2(0, 20)
-theme_override_colors/font_color = Color(0.75, 0.75, 0.85, 1.0)
+theme_override_colors/font_color = Color(0.75, 0.75, 0.85, 1)
 
 [node name="DPSLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 text = "Total DPS: 0.0"
 custom_minimum_size = Vector2(0, 20)
-theme_override_colors/font_color = Color(0.85, 0.65, 0.65, 1.0)
+theme_override_colors/font_color = Color(0.85, 0.65, 0.65, 1)
 
 [node name="HSeparator2" type="HSeparator" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
@@ -165,16 +166,18 @@ custom_minimum_size = Vector2(0, 6)
 
 [node name="DeleteButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
+theme_type_variation = &"DangerButton"
 text = "Delete Selected Part"
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 32)
 
 [node name="SaveButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
+theme_type_variation = &"PrimaryButton"
 text = "Save Blueprint"
-custom_minimum_size = Vector2(0, 28)
+custom_minimum_size = Vector2(0, 32)
 
 [node name="TestButton" type="Button" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
+theme_type_variation = &"DangerButton"
 text = "Test in Arena"
-custom_minimum_size = Vector2(0, 28)
-
+custom_minimum_size = Vector2(0, 32)

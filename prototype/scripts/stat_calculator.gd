@@ -412,7 +412,7 @@ func _ready():
 	# go-green. Test and Library are ordinary navigation and stay neutral -
 	# they are reachable, not important.
 	# Plastic Model Kit Action Button Styling
-	save_button.text = "★ SAVE BLUEPRINT"
+	save_button.text = "SAVE BLUEPRINT"
 	var s_style = StyleBoxFlat.new()
 	s_style.bg_color = Color(0.10, 0.22, 0.15, 0.95)
 	s_style.border_width_left = 6
@@ -435,7 +435,7 @@ func _ready():
 	save_button.add_theme_stylebox_override("hover", s_hover)
 	save_button.add_theme_color_override("font_color", Color(0.3, 1.0, 0.6))
 
-	test_button.text = "⚡ TEST IN ARENA"
+	test_button.text = "TEST IN ARENA"
 	var t_style = StyleBoxFlat.new()
 	t_style.bg_color = Color(0.24, 0.16, 0.08, 0.95)
 	t_style.border_width_left = 6
@@ -458,7 +458,7 @@ func _ready():
 	test_button.add_theme_stylebox_override("hover", t_hover)
 	test_button.add_theme_color_override("font_color", Color(1.0, 0.8, 0.3))
 
-	library_button.text = "📁 FLEET LIBRARY"
+	library_button.text = "BLUEPRINT LIBRARY"
 	var l_style = StyleBoxFlat.new()
 	l_style.bg_color = Color(0.08, 0.18, 0.22, 0.95)
 	l_style.border_width_left = 6
@@ -481,7 +481,7 @@ func _ready():
 	library_button.add_theme_stylebox_override("hover", l_hover)
 	library_button.add_theme_color_override("font_color", Color(0.3, 1.0, 1.0))
 
-	delete_button.text = "✂ DISCARD PART"
+	delete_button.text = "DISCARD PART"
 	var d_style = StyleBoxFlat.new()
 	d_style.bg_color = Color(0.24, 0.08, 0.08, 0.95)
 	d_style.border_width_left = 6
@@ -752,13 +752,18 @@ func _ready():
 	popup_tweaks_container.add_child(popup_stats_label)
 	
 	popup_rotate_btn = Button.new()
-	popup_rotate_btn.text = "🔄 Rotate 90° [R]"
+	popup_rotate_btn.text = "Rotate 90° [R]"
 	popup_rotate_btn.add_theme_font_size_override("font_size", 12)
 	popup_rotate_btn.pressed.connect(func():
 		var root = get_node_or_null("/root/MainLab")
-		var placer = root.get_node_or_null("ModulePlacer") if root else null
-		if placer and placer.has_method("rotate_selected_module"):
-			placer.rotate_selected_module()
+		# NOTE: module_placer.gd is the script on the MainLab ROOT node, not a
+		# child called "ModulePlacer" - check scenes/MainLab.tscn, where it is
+		# ext_resource "1_placer" on the root. Three call sites here looked up a
+		# child by that name, got null, and silently did nothing; the Rotate
+		# button in the Design Lab has never worked. _on_delete_pressed() had it
+		# right all along, calling root.delete_selected_module() directly.
+		if root and root.has_method("rotate_selected_module"):
+			root.rotate_selected_module()
 	)
 	popup_tweaks_container.add_child(popup_rotate_btn)
 	
@@ -768,7 +773,7 @@ func _ready():
 	$ScrollContainer/VBoxContainer.add_child(undo_redo_row)
 
 	var undo_btn = Button.new()
-	undo_btn.text = "↶ Undo"
+	undo_btn.text = "Undo"
 	undo_btn.pressed.connect(func():
 		var root = get_node_or_null("/root/MainLab")
 		if root and root.has_method("undo"):
@@ -777,7 +782,7 @@ func _ready():
 	undo_redo_row.add_child(undo_btn)
 
 	var redo_btn = Button.new()
-	redo_btn.text = "↷ Redo"
+	redo_btn.text = "Redo"
 	redo_btn.pressed.connect(func():
 		var root = get_node_or_null("/root/MainLab")
 		if root and root.has_method("redo"):
@@ -787,7 +792,7 @@ func _ready():
 
 	# Navigation back to the main menu
 	var menu_btn = Button.new()
-	menu_btn.text = "◀ Main Menu"
+	menu_btn.text = "Main Menu"
 	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 	$ScrollContainer/VBoxContainer.add_child(menu_btn)
 
@@ -818,7 +823,7 @@ const UIStampScript = preload("res://scripts/ui_stamp.gd")
 func _on_delete_pressed():
 	var root = get_node_or_null("/root/MainLab")
 	if root and root.has_method("delete_selected_module"):
-		UIStampScript.spawn_stamp(get_tree().root, "DECOMMISSIONED / DISCARDED", Color(1.0, 0.35, 0.35))
+		UIStampScript.spawn_stamp(get_tree().root, "DECOMMISSIONED / DISCARDED", "alert")
 		root.delete_selected_module()
 		
 func _on_save_pressed():
@@ -830,7 +835,7 @@ func _on_save_pressed():
 	var blueprint_manager = root.get_node_or_null("BlueprintManager")
 	if blueprint_manager:
 		if blueprint_manager.save_blueprint():
-			UIStampScript.spawn_stamp(get_tree().root, "APPROVED FOR FIELD TEST", Color(0.2, 0.95, 0.4))
+			UIStampScript.spawn_stamp(get_tree().root, "APPROVED FOR FIELD TEST", "go")
 		else:
 			blueprint_name_edit.grab_focus()
 
@@ -952,7 +957,7 @@ func _on_test_pressed():
 	if blueprint_manager:
 		var success = blueprint_manager.save_scratch()
 		if success:
-			UIStampScript.spawn_stamp(get_tree().root, "DESTRUCTIVE TEST PERMIT", Color(1.0, 0.7, 0.2))
+			UIStampScript.spawn_stamp(get_tree().root, "DESTRUCTIVE TEST PERMIT", "hazard")
 			get_tree().create_timer(0.35).timeout.connect(func():
 				get_tree().change_scene_to_file("res://scenes/Battlefield.tscn")
 			)
@@ -1141,7 +1146,16 @@ func update_stats(hull: Node3D):
 		$ScrollContainer/VBoxContainer.add_child(armor_threshold_label)
 	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
 
-# Radial positions for infographic lines (prioritize a ring around the module)
+# Radial positions for infographic lines (prioritize a ring around the module).
+#
+# These are ORDERED BY PREFERENCE, not by angle: top corners first, then high
+# sides, then low sides, then bottom corners. A module usually has fewer tweaks
+# than there are slots, so the early entries are the ones that get used, and
+# they are the positions that read best - above and outboard of the part, where
+# a leader line has clear air and nothing is hidden behind the callout.
+# tweak_callout.gd may flip a direction horizontally to keep its line on the
+# same side as the geometry it points at; the vertical spread here is what stops
+# same-side callouts from piling up.
 var _callout_dirs = [
 	Vector2(0.8, -1.2), Vector2(-0.8, -1.2), # Top corners
 	Vector2(1.2, -0.2), Vector2(-1.2, -0.2), # High sides
@@ -1150,6 +1164,103 @@ var _callout_dirs = [
 ]
 var _current_callout_idx = 0
 
+# The radial action ring (scripts/ui_radial_menu.gd). One at a time; opening a
+# new one on a fresh selection closes the old.
+var _action_ring: UIRadialMenu = null
+
+
+# Opens the action ring on `module`.
+#
+# The ring carries the DISCRETE, mutually-exclusive verbs - rotate, mirror,
+# discard - while the callouts carry the CONTINUOUS tweaks. That split is the
+# whole reason there are two mechanisms rather than one: a pie slice cannot
+# hold a slider, and a sidebar row is a bad place for a verb that applies to a
+# thing you are looking at somewhere else.
+func _open_action_ring(module: Node3D, designation: String) -> void:
+	_close_action_ring()
+	if tweak_canvas == null or module == null:
+		return
+
+	var ring = UIRadialMenu.new()
+	ring.target_node = module
+	ring.subject_label = designation
+	# TEXT LEGENDS, NOT ICONS, deliberately.
+	#
+	# The icons in scripts/ui_icons.gd carry their stroke colour baked into the
+	# SVG - rotate_right is cyan, close is red, and so on. draw_texture_rect's
+	# modulate MULTIPLIES, so there is no way to force a coloured icon to the
+	# ring's own tint; the first version put saturated cyan and red clip-art on
+	# a warm neutral dial and it fought the palette badly. Stencilled words are
+	# also simply more correct for this object: real equipment legends are
+	# words. A monochrome icon set would let icons back in here later.
+	ring.add_action("rotate", "Rotate", "", _module_can_rotate(module))
+	ring.add_action("mirror", "Mirror")
+	ring.add_action("arc", "Arc")
+	ring.add_action("discard", "Discard")
+	ring.action_invoked.connect(_on_ring_action)
+	tweak_canvas.add_child(ring)
+
+	var camera = get_viewport().get_camera_3d()
+	var at = Vector2.ZERO
+	if camera and not camera.is_position_behind(module.global_position):
+		at = camera.unproject_position(module.global_position)
+	ring.open_at(at)
+	_action_ring = ring
+
+
+# The Gizmo3D instance parented to the currently selected module, if any.
+# module_placer.gd names it "Gizmo3D" when it attaches it.
+func _selected_gizmo() -> Node:
+	if not is_instance_valid(current_selected_module):
+		return null
+	return current_selected_module.get_node_or_null("Gizmo3D")
+
+
+# Whether the rotation ring exists for this part. module_placer.gd frees
+# HandleRotate outright for locomotion, armor and structural categories (armor
+# is facet-fitted, structural stays flush - see MOUNTING_AND_ARMOR_SPEC.md), so
+# offering Rotate on those would be a button that does nothing.
+func _module_can_rotate(module: Node3D) -> bool:
+	if module == null or not module.has_meta("module_data"):
+		return false
+	var data = module.get_meta("module_data")
+	var cat = data.get("category") if "category" in data else "module"
+	return cat == "weapon" or cat == "module"
+
+
+func _close_action_ring() -> void:
+	if is_instance_valid(_action_ring):
+		_action_ring.close()
+	_action_ring = null
+
+
+func _on_ring_action(action_id: String) -> void:
+	match action_id:
+		"rotate":
+			# Summons the rotation RING rather than stepping 90 degrees.
+			#
+			# Chris's note: the fixed-step button sitting next to a permanently
+			# visible grab-handle ring was clunky - two ways to rotate, both on
+			# screen at once, neither obviously the main one. Now Rotate is the
+			# way IN to free rotation: the gizmo swaps its stretch handles for
+			# the ring (gizmo_3d.set_rotate_mode), and the ring is restyled to
+			# match this menu so the two read as one mechanism.
+			var giz = _selected_gizmo()
+			if giz and giz.has_method("set_rotate_mode"):
+				giz.set_rotate_mode(true)
+		"mirror":
+			# Reuses the existing global mirror toggle rather than introducing a
+			# second, per-module notion of mirroring that would then have to be
+			# kept in sync with the checkbox.
+			if mirror_checkbox:
+				mirror_checkbox.button_pressed = not mirror_checkbox.button_pressed
+		"arc":
+			var root = get_node_or_null("/root/MainLab")
+			if root and root.has_method("toggle_firing_arc"):
+				root.toggle_firing_arc()
+		"discard":
+			_on_delete_pressed()
+
 func _add_callout(module: Node3D, title: String, control: Control):
 	if control.get_parent():
 		control.reparent(tweak_canvas) # Temporarily avoid issues if it's already in the tree somewhere
@@ -1157,20 +1268,61 @@ func _add_callout(module: Node3D, title: String, control: Control):
 	var dist = 100.0 + (_current_callout_idx / _callout_dirs.size()) * 70.0
 	var callout = load("res://scripts/tweak_callout.gd").new(title, control, dir, dist)
 	callout.target_node = module
+	callout.stash = popup_tweaks_container
 	tweak_canvas.add_child(callout)
 	_current_callout_idx += 1
 
+# The persistent locomotion widgets. These are REUSED across selections rather
+# than rebuilt, so they must be rescued out of a dying callout instead of freed
+# with it. Everything else a callout holds is built fresh per selection and
+# should go when the callout goes.
+func _persistent_tweak_widgets() -> Array:
+	return [size_container, count_container, wheels_per_axle_container,
+		blade_count_container, blade_pitch_container, helix_depth_container,
+		duct_container, popup_name_label, popup_stats_label, popup_rotate_btn]
+
 func _clear_callouts():
 	if not tweak_canvas: return
-	# Rescue persistent containers back to stash
-	var persistent_items = [size_container, count_container, wheels_per_axle_container, blade_count_container, blade_pitch_container, helix_depth_container, duct_container, popup_name_label, popup_stats_label, popup_rotate_btn]
+
+	# STEP 1: reclaim every callout's control into the invisible stash BEFORE
+	# anything is freed.
+	#
+	# Doing this here, rather than leaving it to each callout's own _process,
+	# is what actually fixes the orphaned widgets: a callout only ran its
+	# hand-back path when its TARGET went invalid, so a plain deselect (target
+	# still alive, callout freed by the sweep below) never handed anything back
+	# at all. Reparenting into popup_tweaks_container is safe for both kinds of
+	# control because that container is invisible; step 3 then throws away the
+	# ones that were single-use.
+	for child in tweak_canvas.get_children():
+		if child is TweakCallout:
+			var ctrl = (child as TweakCallout).control_node
+			if is_instance_valid(ctrl) and ctrl.get_parent() != popup_tweaks_container:
+				ctrl.reparent(popup_tweaks_container)
+
+	# STEP 2: make sure the persistent widgets are in the stash and parented.
+	var persistent_items = _persistent_tweak_widgets()
 	for c in persistent_items:
 		if is_instance_valid(c) and c.get_parent() != popup_tweaks_container:
 			if c.get_parent() != null:
 				c.reparent(popup_tweaks_container)
 			else:
 				popup_tweaks_container.add_child(c)
-	
+
+	# STEP 3: purge the single-use controls that step 1 just swept in.
+	# Without this the stash grows by a few nodes on every selection for the
+	# whole session - invisible, so it would never be noticed, but it is still
+	# an unbounded leak.
+	for child in popup_tweaks_container.get_children():
+		if child not in persistent_items:
+			child.queue_free()
+
+
+	# The ring is a child of tweak_canvas too, so the sweep below would free it
+	# out from under _action_ring and leave a dangling reference. Drop it
+	# explicitly first.
+	_close_action_ring()
+
 	for child in tweak_canvas.get_children():
 		child.queue_free()
 	_current_callout_idx = 0
@@ -1218,7 +1370,10 @@ func on_module_selected(module: Node3D):
 	if popup_rotate_btn.get_parent(): popup_rotate_btn.reparent(stats_container)
 	else: stats_container.add_child(popup_rotate_btn)
 		
-	popup_name_label.text = "🛠️ " + data.module_name.to_upper()
+	popup_name_label.text = data.module_name.to_upper()
+
+	# The action ring opens with the callouts, on the part itself.
+	_open_action_ring(module, data.module_name.to_upper())
 
 	var hp = data.get_hp()
 	var wt = data.get_weight()
@@ -1667,9 +1822,9 @@ func _on_tweak_changed():
 				var last_line = "Heal Rate: %.1f/s" % heal if heal > 0.0 else "DPS: %.1f" % dps
 				var mount_line = _mount_style_line(current_selected_module.get_meta("mount_style", ""))
 				popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s%s" % [hp, wt, cost.x, cost.y, last_line, mount_line]
-		var placer = root.get_node_or_null("ModulePlacer") if root else null
-		if placer:
-			placer.check_all_clipping()
+		# Same root-not-child correction as the rotate sites above.
+		if root and root.has_method("check_all_clipping"):
+			root.check_all_clipping()
 
 # mount_style (module_placer.gd/module_catalog.gd) drives real combat
 # behavior (whether the weapon independently traverses or the whole

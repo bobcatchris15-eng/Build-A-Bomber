@@ -33,6 +33,29 @@ static func button_press_feedback(button: Control) -> Tween:
 	tween.tween_property(button, "scale", Vector2.ONE, DURATION_FAST * 0.6)
 	return tween
 
+# A radial menu's entrance: scales up from small while fading in, with a
+# slight overshoot.
+#
+# Deliberately NOT slide_in(). A ring opens AT a fixed point - the part it acts
+# on - so it has nowhere to slide from; translating it would break the one
+# thing the ring depends on, which is that its centre is exactly where the
+# cursor already is. TRANS_BACK gives the overshoot that reads as a mechanism
+# springing open, and EASE_OUT lands it without oscillation.
+#
+# The node must already be positioned before this is called - it animates
+# `scale` about `pivot_offset` and never touches `position`.
+static func ring_pop(node: Control, duration: float = DURATION_FAST) -> Tween:
+	node.pivot_offset = node.size * 0.5
+	node.scale = Vector2(0.72, 0.72)
+	node.modulate.a = 0.0
+	var tween = node.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(node, "scale", Vector2.ONE, duration) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_property(node, "modulate:a", 1.0, duration * 0.7)
+	return tween
+
+
 # Generic tween_method driver for a numeric roll-up (resource counters,
 # score tallies, etc.) - deliberately takes a Callable rather than a fixed
 # label/format string, since callers often need to update more than one

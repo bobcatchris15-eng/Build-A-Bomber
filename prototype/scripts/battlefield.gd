@@ -19,7 +19,7 @@ func _ready():
 	# Connect & Style UI buttons
 	var return_btn = get_node_or_null("UI/ReturnButton") as Button
 	if return_btn:
-		return_btn.text = "❮ RETURN TO KITBASH LAB"
+		return_btn.text = "RETURN TO DESIGN LAB"
 		var r_style = StyleBoxFlat.new()
 		r_style.bg_color = Color(0.12, 0.16, 0.22, 0.95)
 		r_style.border_width_left = 6
@@ -45,7 +45,7 @@ func _ready():
 		
 	var reset_dummies_btn = get_node_or_null("UI/ResetDummiesButton") as Button
 	if reset_dummies_btn:
-		reset_dummies_btn.text = "🔄 RESET TARGET DUMMIES"
+		reset_dummies_btn.text = "RESET TARGET DUMMIES"
 		var d_style = StyleBoxFlat.new()
 		d_style.bg_color = Color(0.22, 0.15, 0.08, 0.95)
 		d_style.border_width_left = 6

@@ -1,4 +1,4 @@
-[gd_scene load_steps=2 format=3 uid="uid://cxvisualregression1"]
+[gd_scene load_steps=2 format=3 uid="uid://crmjhfec1d3u3"]
 
 [ext_resource type="Script" path="res://visual_regression/run_visual_regression.gd" id="1_runner"]
 

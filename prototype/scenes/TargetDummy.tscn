@@ -1,14 +1,11 @@
-[gd_scene load_steps=4 format=3 uid="uid://cxabtargetdummy123"]
+[gd_scene load_steps=4 format=3 uid="uid://cxy7hja4l311o"]
 
 [ext_resource type="Script" path="res://scripts/target_dummy.gd" id="1_dummy"]
 
 [sub_resource type="CylinderShape3D" id="CylinderShape3D_dummy"]
 height = 1.8
-radius = 0.5
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_dummy"]
-top_radius = 0.5
-bottom_radius = 0.5
 height = 1.8
 
 [node name="TargetDummy" type="StaticBody3D"]

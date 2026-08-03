@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Federal Bomber Design Lab</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Share+Tech+Mono&family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- TOP BAR: Admin Tools -->
+        <header class="top-bar">
+            <div class="logo-section">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/US_Department_of_Defense_seal.svg/1024px-US_Department_of_Defense_seal.svg.png" alt="Federal Seal" class="seal">
+                <div class="title-group">
+                    <h1>DEPARTMENT OF LETHALITY</h1>
+                    <h2>AUTHORIZED DESIGN LAB</h2>
+                </div>
+            </div>
+            
+            <div class="controls-section">
+                <div class="input-group">
+                    <label for="blueprint-name">DESIGNATION:</label>
+                    <input type="text" id="blueprint-name" value="DEMOCRACY_BRINGER_MkIV" class="military-input">
+                </div>
+                
+                <div class="button-group">
+                    <button class="btn btn-warning" title="Undo Cowardice">UNDO ↩</button>
+                    <button class="btn btn-warning" title="Redo Courage">REDO ↪</button>
+                    <div class="divider"></div>
+                    <button class="btn btn-primary" id="sym-toggle" onclick="toggleSymmetry()">SYMMETRY: [ON]</button>
+                    <button class="btn btn-action">LOAD BLUEPRINT</button>
+                    <button class="btn btn-submit">COMMIT TO MOTHERLAND (SAVE)</button>
+                </div>
+            </div>
+        </header>
+
+        <main class="main-workspace">
+            <!-- LEFT PANEL: The Parts Bin -->
+            <aside class="panel left-panel parts-bin">
+                <div class="panel-header">
+                    <h3>THE ARMORY</h3>
+                    <span class="subtitle">Service Guarantees Parts!</span>
+                </div>
+                
+                <div class="search-container">
+                    <input type="text" placeholder="SEARCH CATALOG..." class="search-bar">
+                </div>
+                
+                <div class="accordion">
+                    <!-- Category 1 -->
+                    <div class="category">
+                        <button class="category-btn active">
+                            <span>DIRECT-FIRE WEAPONS</span>
+                            <span class="badge">4</span>
+                        </button>
+                        <div class="category-content expanded">
+                            <div class="part-item">
+                                <div class="part-info">
+                                    <span class="part-name">"Peacemaker" Auto-Cannon</span>
+                                    <span class="part-desc">Light ballistic suppression.</span>
+                                </div>
+                                <span class="part-weight">120 kg</span>
+                            </div>
+                            <div class="part-item">
+                                <div class="part-info">
+                                    <span class="part-name">Liberty Gatling</span>
+                                    <span class="part-desc">Brrrrrrrrrrt.</span>
+                                </div>
+                                <span class="part-weight">250 kg</span>
+                            </div>
+                            <div class="part-item">
+                                <div class="part-info">
+                                    <span class="part-name">Patriot Flak Cannon</span>
+                                    <span class="part-desc">Keeps the skies pure.</span>
+                                </div>
+                                <span class="part-weight">400 kg</span>
+                            </div>
+                            <div class="part-item heavy">
+                                <div class="part-info">
+                                    <span class="part-name">"Negotiator" Artillery</span>
+                                    <span class="part-desc">Diplomacy at 120mm.</span>
+                                </div>
+                                <span class="part-weight">1200 kg</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Category 2 -->
+                    <div class="category">
+                        <button class="category-btn">
+                            <span>ENERGY & ELECTROMAGNETIC</span>
+                            <span class="badge">3</span>
+                        </button>
+                        <div class="category-content">
+                            <!-- Content generated by JS -->
+                        </div>
+                    </div>
+                    
+                    <!-- Category 3 -->
+                    <div class="category">
+                        <button class="category-btn">
+                            <span>MISSILES & PAYLOADS</span>
+                            <span class="badge">2</span>
+                        </button>
+                        <div class="category-content">
+                            <!-- Content generated by JS -->
+                        </div>
+                    </div>
+                    
+                    <!-- Category 4 -->
+                    <div class="category">
+                        <button class="category-btn">
+                            <span>STRUCTURAL HULLS</span>
+                            <span class="badge">5</span>
+                        </button>
+                        <div class="category-content">
+                            <!-- Content generated by JS -->
+                        </div>
+                    </div>
+                </div>
+                <div class="drag-instruction">
+                    <p>DRAG MODULE TO DEPLOY ON HULL!</p>
+                </div>
+            </aside>
+
+            <!-- CENTER STAGE: 3D Viewport Placeholder -->
+            <section class="center-stage">
+                <div class="viewport-overlay">
+                    <div class="crosshair"></div>
+                    <div class="hud-text top-left">SYS: NOMINAL</div>
+                    <div class="hud-text bottom-right">LOCKED ON TGT</div>
+                    <div class="approval-stamp">APPROVED FOR SLAUGHTER</div>
+                </div>
+            </section>
+
+            <!-- RIGHT PANEL: Stat Block -->
+            <aside class="panel right-panel stat-block">
+                <div class="panel-header alert-header">
+                    <h3>LETHALITY METRICS</h3>
+                    <span class="subtitle">Is it deadly enough?</span>
+                </div>
+                
+                <div class="stats-container">
+                    <div class="stat-row">
+                        <span class="stat-label">TOTAL HP</span>
+                        <div class="stat-bar-container">
+                            <div class="stat-bar hp-bar" style="width: 85%"></div>
+                        </div>
+                        <span class="stat-value text-green">14,250</span>
+                    </div>
+                    
+                    <div class="stat-row">
+                        <span class="stat-label">OVERALL DPS</span>
+                        <div class="stat-bar-container">
+                            <div class="stat-bar dps-bar" style="width: 95%"></div>
+                        </div>
+                        <span class="stat-value text-red">8,400</span>
+                    </div>
+                    
+                    <div class="stat-row">
+                        <span class="stat-label">TOP SPEED</span>
+                        <div class="stat-bar-container">
+                            <div class="stat-bar speed-bar" style="width: 40%"></div>
+                        </div>
+                        <span class="stat-value text-yellow">45 KM/H</span>
+                    </div>
+
+                    <div class="stat-row">
+                        <span class="stat-label">TOTAL MASS</span>
+                        <div class="stat-bar-container">
+                            <div class="stat-bar weight-bar" style="width: 88%"></div>
+                        </div>
+                        <span class="stat-value text-warning">42 TONS</span>
+                    </div>
+                    
+                    <div class="stat-divider"></div>
+                    
+                    <h4 class="sub-heading">DAMAGE THRESHOLDS</h4>
+                    <div class="thresholds">
+                        <div class="threshold-item">
+                            <span class="t-icon">🎯</span>
+                            <span class="t-label">KINETIC</span>
+                            <span class="t-val">HEAVY (85%)</span>
+                        </div>
+                        <div class="threshold-item">
+                            <span class="t-icon">🔥</span>
+                            <span class="t-label">THERMAL</span>
+                            <span class="t-val">MEDIUM (40%)</span>
+                        </div>
+                        <div class="threshold-item">
+                            <span class="t-icon">⚡</span>
+                            <span class="t-label">ENERGY</span>
+                            <span class="t-val">WEAK (15%)</span>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-divider"></div>
+                    
+                    <div class="resource-cost">
+                        <h4>REQUISITION COST</h4>
+                        <div class="cost-value">
+                            <span class="currency-icon">₡</span> 24,500
+                        </div>
+                        <div class="tax-note">Includes 20% Freedom Tax</div>
+                    </div>
+                </div>
+                
+                <div class="propaganda-box">
+                    <p>"A GOOD BUG IS A DEAD BUG."</p>
+                    <p>- Fleet Admiral</p>
+                </div>
+            </aside>
+        </main>
+    </div>
+    
+    <!-- Grab Handles / Spec Popup Mockup (Hidden by default, shown on click in center) -->
+    <div class="spec-popup" id="spec-popup">
+        <div class="spec-header">
+            <h4>Liberty Gatling</h4>
+            <button class="close-btn" onclick="document.getElementById('spec-popup').style.display='none'">X</button>
+        </div>
+        <div class="spec-body">
+            <p><strong>DPS:</strong> 450</p>
+            <p><strong>Turn Rate:</strong> Fast (60°/s)</p>
+            <p><strong>Current Arc:</strong> <span class="text-warning">BLOCKED BY HULL (20°)</span></p>
+            <div class="arc-warning">REPOSITION TO CLEAR LINE OF SIGHT</div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

@@ -9,12 +9,28 @@ var start_scale: Vector3
 var child_start_positions: Dictionary = {}
 var start_tweaks: Dictionary = {}
 
+const Tokens = preload("res://scripts/ui_tokens.gd")
+
 const HANDLE_COLORS := {
 	"HandleX": Color(0.95, 0.26, 0.30),
 	"HandleY": Color(0.42, 0.85, 0.32),
 	"HandleZ": Color(0.30, 0.55, 0.95),
-	"HandleRotate": Color(0.95, 0.80, 0.25),
+	# The rotate ring is not an axis, so it does not take an axis colour. It
+	# takes the interface's hazard signal, which is what every other
+	# "you are adjusting this right now" cue in the game uses.
+	"HandleRotate": Tokens.SIGNAL_HAZARD,
 }
+
+# The rotate ring is HIDDEN BY DEFAULT and summoned from the radial menu.
+#
+# Showing the stretch handles and a 1.1-unit rotation torus at the same time -
+# and then opening a radial action menu on top of both - put three overlapping
+# manipulators around one small part. They compete for the same clicks and the
+# ring in particular swallows drags meant for the model behind it. So the two
+# modes are now exclusive: stretch handles are the resting state, and Rotate on
+# the radial menu swaps to the ring. Clicking away, or finishing a rotation,
+# returns to the resting state.
+var _rotate_mode := false
 
 # The handle meshes ship with no material at all in Gizmo3D.tscn, so they used
 # to render flat white - and module_placer.gd's clipping pass then walked into
@@ -56,6 +72,30 @@ func _ready():
 		ring.drag_started.connect(_on_drag_started)
 		ring.rotated.connect(_on_rotated)
 		ring.drag_ended.connect(_on_drag_ended)
+
+	set_rotate_mode(false)
+
+
+# Swaps between the stretch handles and the rotation ring. See _rotate_mode.
+func set_rotate_mode(enabled: bool) -> void:
+	_rotate_mode = enabled
+	for axis_name in ["HandleX", "HandleY", "HandleZ"]:
+		var h = get_node_or_null(axis_name)
+		if h:
+			h.visible = not enabled
+			# Visibility alone does not stop an Area3D from being picked, and a
+			# hidden-but-clickable handle is the worst of both.
+			h.set_deferred("monitorable", not enabled)
+			h.input_ray_pickable = not enabled
+	var ring = get_node_or_null("HandleRotate")
+	if ring:
+		ring.visible = enabled
+		ring.set_deferred("monitorable", enabled)
+		ring.input_ray_pickable = enabled
+
+
+func is_rotate_mode() -> bool:
+	return _rotate_mode
 
 var _telemetry_label: Label3D = null
 

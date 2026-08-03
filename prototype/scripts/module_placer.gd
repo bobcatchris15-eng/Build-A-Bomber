@@ -10,6 +10,7 @@ const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
+const UITokens = preload("res://scripts/ui_tokens.gd")
 const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
@@ -409,10 +410,10 @@ func _select_module(module: Node3D):
 		# horizontal wedge spanning the weapon's actual traverse_limit_angle
 		# (shared with combat via ModuleCatalog.get_traverse_limit_angle),
 		# raycast per-segment against the hull/other modules so blocked
-		# angles read red and clear angles read blue - not a fixed decorative
-		# cone. Kept live via _refresh_firing_arc(), called from
-		# check_all_clipping() so it updates after drags/tweaks/rotation.
-		if selected_module.has_meta("module_data"):
+		# angles read alert-red and clear angles read hazard-orange - not a
+		# fixed decorative cone. Kept live via _refresh_firing_arc(), called
+		# from check_all_clipping() so it updates after drags/tweaks/rotation.
+		if show_firing_arc and selected_module.has_meta("module_data"):
 			var m_data = selected_module.get_meta("module_data")
 			if m_data and m_data.category == "weapon":
 				selected_module.add_child(_build_firing_arc(selected_module, m_data))
@@ -1337,7 +1338,35 @@ func _deselect_module():
 # genuinely refuse to take. Clear directions read blue, occluded ones red.
 const ARC_AZIMUTH_SEGMENTS := 24
 const ARC_ELEVATION_SEGMENTS := 12
+# Fallback only. The envelope is normally sized from the hull - see
+# _arc_radius_for(): a fixed 3.0 sat inside a heavy hull and read as a bubble
+# stuck to the turret rather than as a field of fire around the vehicle.
 const ARC_RADIUS := 3.0
+# How far outside the hull's own bounding radius the envelope is drawn.
+const ARC_HULL_CLEARANCE := 3.2
+const ARC_RADIUS_MIN := 6.0
+
+# --- TRAVERSE ENVELOPE MODEL ------------------------------------------------
+#
+# Deliberately isolated in one place, because Chris intends to make traverse
+# genuinely meaningful later - traverse SPEED as a real cost, and hard vertical
+# limits on most weapons. Everything the visualiser knows about "can this
+# weapon point here, and how far out of its way is it" goes through
+# _traverse_intensity(); adding per-weapon yaw/pitch caps or a speed-weighted
+# falloff means editing that one function and the constants below, not the mesh
+# builder.
+#
+# Elevation limits, as a half-angle from the weapon's own horizon. Generous for
+# now because no catalog entry declares them yet; a gun that cannot shoot
+# straight up is the common case and this is where that will be expressed.
+const ARC_PITCH_UP_LIMIT := deg_to_rad(88.0)
+const ARC_PITCH_DOWN_LIMIT := deg_to_rad(88.0)
+
+# How dim the envelope gets at the far edge of the weapon's traverse. The point
+# is to make "this is where the gun already points" instantly separable from
+# "this is reachable, but the turret has to swing all the way round for it" -
+# which becomes a real cost once traverse speed matters.
+const ARC_FALLOFF_MIN := 0.14
 
 func _build_firing_arc(module: Node3D, data) -> Node3D:
 	var container = Node3D.new()
@@ -1364,8 +1393,23 @@ func _build_firing_arc(module: Node3D, data) -> Node3D:
 		container.add_child(_build_fixed_forward_indicator(module, origin, exclude_list, space_state))
 		return container
 
-	var clear_vertices = []
-	var blocked_vertices = []
+	# Two representations per state, and both matter:
+	#   *_fill  translucent triangles, so the covered VOLUME reads at a glance
+	#   *_grid  line segments along every cell boundary, so the player can
+	#           actually judge WHERE the boundary falls
+	#
+	# The fill alone (which is all this used to draw) is a soft translucent blob
+	# whose edge is impossible to locate - fine for "roughly forward", useless
+	# for "can this actually cover the left flank". The grid is what makes it a
+	# readable instrument, and it is why the mesh is built as a projected
+	# lat/long lattice rather than a smooth shell.
+	var radius = _arc_radius_for(module)
+	# Per-vertex colour carries the traverse falloff, so one draw call covers
+	# the whole gradient. Requires vertex_color_use_as_albedo on the material.
+	var fill_v = []
+	var fill_c = []
+	var grid_v = []
+	var grid_c = []
 
 	for ei in range(ARC_ELEVATION_SEGMENTS):
 		# Polar angle from +Y (0 = straight up, PI = straight down), so the
@@ -1377,28 +1421,110 @@ func _build_firing_arc(module: Node3D, data) -> Node3D:
 		for ai in range(ARC_AZIMUTH_SEGMENTS):
 			var u0 = float(ai) / ARC_AZIMUTH_SEGMENTS * TAU
 			var u1 = float(ai + 1) / ARC_AZIMUTH_SEGMENTS * TAU
-			var mid = _sphere_point((phi0 + phi1) * 0.5, (u0 + u1) * 0.5, 1.0)
+			var u_mid = (u0 + u1) * 0.5
+			var phi_mid = (phi0 + phi1) * 0.5
+
+			# ONLY DRAW WHERE THE WEAPON CAN ACTUALLY TARGET (Chris, 2026-08-02).
+			#
+			# Two separate reasons a direction can be unavailable, and both now
+			# result in nothing being drawn rather than in a red cell:
+			#   * MECHANICAL - outside the mount's traverse envelope.
+			#   * OBSTRUCTED - the vehicle's own hull or another module is in
+			#     the way.
+			# Drawing obstructed cells in red made the envelope a full sphere
+			# with a red patch, which reads as "the gun covers everything" at a
+			# glance - the opposite of the truth. An envelope that simply is not
+			# there where the gun cannot shoot needs no reading at all.
+			var intensity = _traverse_intensity(u_mid, phi_mid, limit)
+			if intensity <= 0.0:
+				continue
+
+			var mid = _sphere_point(phi_mid, u_mid, 1.0)
 			var world_dir = (module.global_transform.basis * mid).normalized()
 
-			var query = PhysicsRayQueryParameters3D.create(origin, origin + world_dir * ARC_RADIUS)
+			var query = PhysicsRayQueryParameters3D.create(origin, origin + world_dir * radius)
 			query.collision_mask = 3 # Layer 1 (Hull) + Layer 2 (Modules)
 			query.exclude = exclude_list
-			var blocked = not space_state.intersect_ray(query).is_empty()
+			if not space_state.intersect_ray(query).is_empty():
+				continue
 
-			var a = _sphere_point(phi0, u0, ARC_RADIUS)
-			var b = _sphere_point(phi0, u1, ARC_RADIUS)
-			var c = _sphere_point(phi1, u1, ARC_RADIUS)
-			var d = _sphere_point(phi1, u0, ARC_RADIUS)
-			var bucket = blocked_vertices if blocked else clear_vertices
+			var a = _sphere_point(phi0, u0, radius)
+			var b = _sphere_point(phi0, u1, radius)
+			var c = _sphere_point(phi1, u1, radius)
+			var d = _sphere_point(phi1, u0, radius)
+
+			# Low, because the material is CULL_DISABLED: every fragment is
+			# painted twice, once by the near face and once by the far one, so
+			# the on-screen alpha is roughly double this. At 0.10 the envelope
+			# went milky and swallowed the model inside it.
+			var fill_col = Color(UITokens.SIGNAL_HAZARD, 0.045 * intensity)
 			for v in [a, b, c, a, c, d]:
-				bucket.append(v)
+				fill_v.append(v)
+				fill_c.append(fill_col)
 
-	if not clear_vertices.is_empty():
-		container.add_child(_arc_surface("ClearArc", clear_vertices, Color(0.2, 0.6, 1.0, 0.12), Color(0.2, 0.6, 1.0)))
-	if not blocked_vertices.is_empty():
-		container.add_child(_arc_surface("BlockedArc", blocked_vertices, Color(1.0, 0.15, 0.15, 0.3), Color(1.0, 0.15, 0.15)))
+			# All four edges per cell. Shared edges get drawn twice, which is
+			# cheaper than de-duplicating them and visually identical.
+			var grid_col = Color(UITokens.SIGNAL_HAZARD, 0.90 * intensity)
+			for pair in [[a, b], [b, c], [c, d], [d, a]]:
+				grid_v.append(pair[0])
+				grid_c.append(grid_col)
+				grid_v.append(pair[1])
+				grid_c.append(grid_col)
+
+	if not fill_v.is_empty():
+		container.add_child(_arc_surface("ArcFill", fill_v,
+			UITokens.SIGNAL_HAZARD * 0.5, fill_c))
+	if not grid_v.is_empty():
+		container.add_child(_arc_surface("ArcGrid", grid_v,
+			UITokens.SIGNAL_HAZARD, grid_c, Mesh.PRIMITIVE_LINES))
 
 	return container
+
+
+# Envelope radius for a module: outside the hull by a clear margin, so the grid
+# reads as a field of fire AROUND the vehicle rather than as a bubble stuck to
+# the turret. Sized from the hull rather than fixed, so it stays correct across
+# a 70kg roadster and an 800kg heavy.
+func _arc_radius_for(_module: Node3D) -> float:
+	var hull_radius := 0.0
+	if hull and hull.has_meta("type_id"):
+		var hsize: Vector3 = ModuleCatalog.get_module_data(
+			hull.get_meta("type_id")).get("size", Vector3.ONE)
+		hull_radius = hsize.length() * 0.5
+	return maxf(ARC_RADIUS_MIN, hull_radius + ARC_HULL_CLEARANCE)
+
+
+# How strongly the envelope draws in a given direction, in the module's own
+# frame. Returns 0 for "cannot point here at all", otherwise 0..1 where 1 is
+# the weapon's default heading.
+#
+# THIS IS THE EXTENSION POINT for the traverse work Chris has planned. Today it
+# models a yaw limit, fixed pitch stops, and a falloff with angular distance
+# from the default heading. When traverse becomes a real per-weapon stat, this
+# is where per-weapon yaw/pitch caps and a speed-weighted cost go; nothing in
+# the mesh builder needs to change, because it already just asks for a number.
+#
+# `azimuth` is measured the same way _sphere_point() measures it (0 = the
+# barrel's forward, -Z). `phi` is polar from +Y.
+func _traverse_intensity(azimuth: float, phi: float, yaw_limit: float) -> float:
+	# Yaw: how far the turret must swing from its default heading.
+	var yaw = absf(wrapf(azimuth, -PI, PI))
+	if yaw > yaw_limit + 0.001:
+		return 0.0
+
+	# Pitch: elevation above / depression below the weapon's own horizon.
+	var pitch = PI * 0.5 - phi
+	if pitch > ARC_PITCH_UP_LIMIT or -pitch > ARC_PITCH_DOWN_LIMIT:
+		return 0.0
+
+	# Falloff with total angular distance off the default heading. Normalised
+	# against the actual yaw limit so a 60-degree mount fades across its own
+	# 60 degrees rather than across a notional 180.
+	var span = maxf(yaw_limit, 0.001)
+	var t = clampf(yaw / span, 0.0, 1.0)
+	# Squared, so the bright region genuinely reads as "where it already
+	# points" instead of as a slow linear wash across the whole envelope.
+	return lerpf(1.0, ARC_FALLOFF_MIN, t * t)
 
 # Point on a sphere in the module's local frame. phi is measured from +Y so
 # phi=0 is straight up and phi=PI straight down; azimuth 0 faces -Z, matching
@@ -1407,11 +1533,18 @@ static func _sphere_point(phi: float, azimuth: float, radius: float) -> Vector3:
 	var sin_phi = sin(phi)
 	return Vector3(sin_phi * sin(azimuth), cos(phi), -sin_phi * cos(azimuth)) * radius
 
-func _arc_surface(surface_name: String, vertices: Array, albedo: Color, emission: Color) -> MeshInstance3D:
+# `colors` is a per-vertex array parallel to `vertices`, carrying the traverse
+# falloff. Passing it per-vertex rather than baking several meshes at different
+# alphas keeps the whole gradient in one draw call and lets the falloff be
+# continuous instead of banded.
+func _arc_surface(surface_name: String, vertices: Array, emission: Color,
+		colors: Array = [], primitive: int = Mesh.PRIMITIVE_TRIANGLES) -> MeshInstance3D:
 	var mesh = ImmediateMesh.new()
-	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
-	for v in vertices:
-		mesh.surface_add_vertex(v)
+	mesh.surface_begin(primitive)
+	for i in vertices.size():
+		if i < colors.size():
+			mesh.surface_set_color(colors[i])
+		mesh.surface_add_vertex(vertices[i])
 	mesh.surface_end()
 
 	var mi = MeshInstance3D.new()
@@ -1423,7 +1556,10 @@ func _arc_surface(surface_name: String, vertices: Array, albedo: Color, emission
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mat.emission_enabled = true
-	mat.albedo_color = albedo
+	# White albedo so the per-vertex colours come through unmultiplied - the
+	# falloff lives entirely in vertex alpha.
+	mat.albedo_color = Color.WHITE
+	mat.vertex_color_use_as_albedo = true
 	mat.emission = emission
 	mat.emission_energy_multiplier = 0.5
 	# The envelope wraps the weapon, so without this it z-fights its own far
@@ -1436,23 +1572,53 @@ func _arc_surface(surface_name: String, vertices: Array, albedo: Color, emission
 # fixed direction - drawn as a short spike, coloured by whether that single
 # line of fire is clear.
 func _build_fixed_forward_indicator(module: Node3D, origin: Vector3, exclude_list: Array, space_state) -> MeshInstance3D:
+	var reach = _arc_radius_for(module)
 	var world_dir = -module.global_transform.basis.z.normalized()
-	var query = PhysicsRayQueryParameters3D.create(origin, origin + world_dir * ARC_RADIUS)
+	var query = PhysicsRayQueryParameters3D.create(origin, origin + world_dir * reach)
 	query.collision_mask = 3
 	query.exclude = exclude_list
 	var blocked = not space_state.intersect_ray(query).is_empty()
 
+	# Two crossed triangles, so the spike reads from any camera angle. Stays
+	# PRIMITIVE_TRIANGLES - it is a solid marker, not a lattice like the
+	# envelope, and drawing these six verts as lines would give three
+	# disconnected segments.
 	var half = 0.08
-	var tip = Vector3(0, 0, -ARC_RADIUS)
+	var tip = Vector3(0, 0, -reach)
 	var verts = [
 		Vector3(-half, 0, 0), Vector3(half, 0, 0), tip,
 		Vector3(0, -half, 0), Vector3(0, half, 0), tip,
 	]
-	if blocked:
-		return _arc_surface("BlockedArc", verts, Color(1.0, 0.15, 0.15, 0.5), Color(1.0, 0.15, 0.15))
-	return _arc_surface("ClearArc", verts, Color(0.2, 0.6, 1.0, 0.5), Color(0.2, 0.6, 1.0))
+	# A frame-built gun with its ONE line of fire obstructed is worth saying
+	# out loud, so this is the only place alert-red survives in the arc
+	# visualiser - there is no envelope here to simply omit.
+	var col = UITokens.SIGNAL_ALERT if blocked else UITokens.SIGNAL_HAZARD
+	var cols = []
+	for i in verts.size():
+		cols.append(Color(col, 0.85))
+	return _arc_surface("BlockedArc" if blocked else "ClearArc", verts, col, cols)
+
+# Whether the firing envelope is drawn. Toggled from the radial menu's Arc
+# wedge. Persisted across selections because it is a VIEW preference - a player
+# comparing coverage across several turrets should not have to re-enable it on
+# every part they click.
+var show_firing_arc: bool = true
+
+
+func toggle_firing_arc() -> void:
+	show_firing_arc = not show_firing_arc
+	if not show_firing_arc:
+		if is_instance_valid(selected_module):
+			var existing = selected_module.get_node_or_null("ArcCone")
+			if existing:
+				selected_module.remove_child(existing)
+				existing.free()
+	else:
+		_refresh_firing_arc()
+
 
 func _refresh_firing_arc():
+	if not show_firing_arc: return
 	if not selected_module or not is_instance_valid(selected_module): return
 	if not selected_module.has_meta("module_data"): return
 	var data = selected_module.get_meta("module_data")
@@ -1713,7 +1879,7 @@ func _update_cog_crosshair():
 			_cog_node.add_child(line_inst)
 
 		var lbl = Label3D.new()
-		lbl.text = "⊕ COG TELEMETRY"
+		lbl.text = "CENTRE OF GRAVITY"
 		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		lbl.no_depth_test = true
 		lbl.render_priority = 9

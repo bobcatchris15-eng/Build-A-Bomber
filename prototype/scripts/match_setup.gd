@@ -175,7 +175,7 @@ func _ready():
 	root_vbox.add_child(button_row)
 
 	var back_btn = Button.new()
-	back_btn.text = "◀ Back"
+	back_btn.text = "Back"
 	back_btn.custom_minimum_size = Vector2(200, 48)
 	# Back now returns to the main menu, not to MapSelect - map choice is a
 	# column on this screen, so there is no intermediate screen to go back to.
@@ -183,7 +183,7 @@ func _ready():
 	button_row.add_child(back_btn)
 
 	var start_btn = Button.new()
-	start_btn.text = "Start Match ▶"
+	start_btn.text = "Start Match"
 	start_btn.custom_minimum_size = Vector2(240, 48)
 	start_btn.add_theme_font_size_override("font_size", 20)
 	start_btn.modulate = Color(0.5, 1.0, 0.5)

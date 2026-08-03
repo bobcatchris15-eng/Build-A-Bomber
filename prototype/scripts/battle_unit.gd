@@ -710,7 +710,7 @@ func _update_hp_bar():
 		var carrying = cargo_metal > 0 or cargo_crystal > 0
 		cargo_icon.visible = carrying
 		if carrying:
-			cargo_icon.text = "⛏"
+			cargo_icon.text = "CARGO"
 
 func set_selected(selected: bool):
 	if is_instance_valid(selection_ring):

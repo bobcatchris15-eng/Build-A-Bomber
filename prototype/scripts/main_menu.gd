@@ -1,7 +1,7 @@
 extends Control
 # Title screen.
 #
-# REBUILT, not restyled. The previous version was a 480x520 PanelContainer
+# REBUILT, not restyled. The original version was a 480x520 PanelContainer
 # centred in a 1600x900 frame holding five identical stacked buttons - the
 # stock main-menu shape, and the thing that made the whole interface read as
 # dated no matter what colours went on it. Restyling it could not fix it,
@@ -19,6 +19,31 @@ extends Control
 #     line of plain text, so the menu is self-explaining rather than relying
 #     on a tooltip the player has to hover to discover.
 #
+# COLOUR AND TYPE COME FROM THE THEME, NOT FROM HERE. An earlier pass repainted
+# this screen as a green-phosphor CRT terminal - a Color(0.2, 1.0, 0.5) title,
+# a green ticker, and a hand-rolled StyleBoxFlat on every single control in the
+# file. Two problems with that, and the second is the one that mattered:
+#
+#   1. That palette appears nowhere in ui_tokens.gd, whose header argues at
+#      length for a WARM neutral base precisely because the cool sci-fi default
+#      fights the warm aluminium/olive the units and terrain commit to. Green
+#      terminal is also the single most over-used "military interface"
+#      shorthand there is; the tokens' powdercoat is both more specific and
+#      more period-correct.
+#   2. Local overrides beat the theme. Every inline stylebox here was actively
+#      preventing the design system from reaching this screen - the exact
+#      failure mode ui_tokens.gd was created to end, recurring.
+#
+# So: no add_theme_color_override for anything the theme already answers, and
+# no StyleBoxFlat in this file at all. Signal colours are read from Tokens.
+#
+# TONE. The interface plays it completely straight - see blueprint_namer.gd for
+# the rule stated in full. The joke is structural: a procurement console
+# reporting on whatever ludicrous contraption the player welded together, with
+# total bureaucratic indifference. Nothing here winks. That means no emoji, no
+# stars, no decorative glyphs, and copy in the register of equipment
+# documentation rather than of a game menu.
+#
 # The wordmark is read from a single constant because the title is a working
 # one and expected to change - see TITLE below.
 
@@ -34,86 +59,125 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const TITLE := "BUILD-A-BOMBER"
 const TAGLINE := "Design bureau and proving ground"
 
+# The roster cap the status column reports against. Pulled out because it
+# appears in a player-facing "n / N" readout and a silent drift between this
+# and the real cap would read as a bug.
+const ROSTER_CAP := 15
+
+# Destinations, in the order a player meets them. Description lines state what
+# the screen DOES in plain equipment language - no feature-marketing ("live
+# vector telemetry"), which is both a lie about the tone and a lie about the
+# build.
+const DESTINATIONS := [
+	{
+		"title": "DESIGN LAB",
+		"desc": "Assemble blueprints from hulls, modules and drives.",
+		"scene": "res://scenes/MainLab.tscn",
+	},
+	{
+		"title": "HULL AUTHORING",
+		"desc": "Shape new hull forms from primitives.",
+		"scene": "res://scenes/HullBuilder.tscn",
+	},
+	{
+		"title": "OPERATIONS",
+		"desc": "Multi-stage campaign with after-action reports.",
+		"scene": "res://scenes/OperationsSetup.tscn",
+	},
+	{
+		"title": "SKIRMISH",
+		"desc": "Select a map and a roster, then engage enemy forces.",
+		"scene": "res://scenes/MatchSetup.tscn",
+	},
+	{
+		"title": "PROVING GROUND",
+		"desc": "Field the current design against target dummies.",
+		"scene": "res://scenes/Battlefield.tscn",
+	},
+]
+
+
 func _ready() -> void:
-	# Deep obsidian backdrop
+	# The sheet-metal plate, not a flat fill. apply_backdrop() also keeps the
+	# shader's panel_size uniform in sync with the node through `resized`,
+	# which is what keeps the grain a fixed physical size at every window
+	# size - see its comment for why that is not optional.
 	var backdrop = ColorRect.new()
 	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	backdrop.color = Color(0.03, 0.07, 0.05) # Emerald-black CRT substrate
 	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(backdrop)
+	UITheme.apply_backdrop(backdrop)
 
 	var frame = MarginContainer.new()
 	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
-	frame.add_theme_constant_override("margin_left", 48)
-	frame.add_theme_constant_override("margin_right", 48)
-	frame.add_theme_constant_override("margin_top", 32)
-	frame.add_theme_constant_override("margin_bottom", 32)
+	frame.add_theme_constant_override("margin_left", Tokens.SPACE_XL + Tokens.SPACE_LG)
+	frame.add_theme_constant_override("margin_right", Tokens.SPACE_XL + Tokens.SPACE_LG)
+	frame.add_theme_constant_override("margin_top", Tokens.SPACE_XL)
+	frame.add_theme_constant_override("margin_bottom", Tokens.SPACE_LG)
 	add_child(frame)
 
 	var root_vbox = VBoxContainer.new()
-	root_vbox.add_theme_constant_override("separation", 16)
+	root_vbox.add_theme_constant_override("separation", Tokens.SPACE_LG)
 	frame.add_child(root_vbox)
 
-	_build_top_intelligence_bar(root_vbox)
+	_build_console_bar(root_vbox)
 
 	var columns = HBoxContainer.new()
 	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	columns.add_theme_constant_override("separation", 32)
+	columns.add_theme_constant_override("separation", Tokens.SPACE_XL)
 	root_vbox.add_child(columns)
 
 	_build_left_column(columns)
 	_build_status_column(columns)
 
-func _build_top_intelligence_bar(parent: Control) -> void:
-	var bar_panel = PanelContainer.new()
-	var style = StyleBoxFlat.new()
-	style.bg_color = Color(0.02, 0.12, 0.06, 0.9)
-	style.border_width_bottom = 2
-	style.border_width_top = 2
-	style.border_color = Color(0.0, 0.9, 0.4, 0.8)
-	style.content_margin_left = 16
-	style.content_margin_right = 16
-	style.content_margin_top = 6
-	style.content_margin_bottom = 6
-	bar_panel.add_theme_stylebox_override("panel", style)
-	parent.add_child(bar_panel)
+
+# A thin identification band across the top. This is the screen's one piece of
+# pure flavour, and it earns its place by being utterly mundane - a console
+# number and a shift, the sort of thing stencilled on a real panel. The
+# previous "CLASSIFIED WAR ROOM TERMINAL // FREQ 142.9 MHz" was straining; a
+# console that announces its own drama is the interface winking.
+func _build_console_bar(parent: Control) -> void:
+	var bar = PanelContainer.new()
+	bar.theme_type_variation = "HeaderPanel"
+	parent.add_child(bar)
 
 	var hbox = HBoxContainer.new()
-	hbox.add_theme_constant_override("separation", 12)
-	bar_panel.add_child(hbox)
+	hbox.add_theme_constant_override("separation", Tokens.SPACE_MD)
+	bar.add_child(hbox)
 
-	var sec_tag = Label.new()
-	sec_tag.text = "● CLASSIFIED WAR ROOM TERMINAL // FREQ 142.9 MHz"
-	sec_tag.add_theme_font_size_override("font_size", 13)
-	sec_tag.add_theme_color_override("font_color", Color(0.2, 1.0, 0.5))
-	hbox.add_child(sec_tag)
+	var ident = Label.new()
+	ident.text = "DESIGN BUREAU / CONSOLE 4"
+	ident.theme_type_variation = "HintLabel"
+	hbox.add_child(ident)
 
-	var ticker = Label.new()
-	ticker.text = " | INTEL: TECHNOCRATS FIELDING HEAVY GAUSS VEHICLES -- ALL SECTORS ON HIGH ALERT"
-	ticker.add_theme_font_size_override("font_size", 12)
-	ticker.add_theme_color_override("font_color", Color(0.0, 0.75, 0.35, 0.85))
-	ticker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	hbox.add_child(ticker)
+	var spacer = Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hbox.add_child(spacer)
+
+	var notice = Label.new()
+	notice.text = "ALL DESIGNS SUBJECT TO FIELD TEST PRIOR TO ISSUE"
+	notice.theme_type_variation = "HintLabel"
+	hbox.add_child(notice)
+
 
 func _build_left_column(parent: Control) -> void:
 	var col = VBoxContainer.new()
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.size_flags_stretch_ratio = 0.9
-	col.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	col.add_theme_constant_override("separation", Tokens.SPACE_XS)
 	parent.add_child(col)
 
+	# DisplayLabel is the stencil face at FONT_DISPLAY. That is the one place
+	# the stencil earns its keep - large, short, carrying the tone alone. See
+	# build_ui_theme.gd's note on why it is emphatically not the body font.
 	var title = Label.new()
-	title.text = "★ " + TITLE + " ★"
-	title.add_theme_font_size_override("font_size", 32)
-	title.add_theme_color_override("font_color", Color(0.2, 1.0, 0.5))
-	title.add_theme_color_override("font_outline_color", Color(0.0, 0.3, 0.1))
-	title.add_theme_constant_override("outline_size", 4)
+	title.text = TITLE
+	title.theme_type_variation = "DisplayLabel"
 	col.add_child(title)
 
 	var tagline = Label.new()
-	tagline.text = "DEFENSE BUREAU & PROVING GROUND CONSOLE"
-	tagline.add_theme_font_size_override("font_size", 13)
-	tagline.add_theme_color_override("font_color", Color(0.0, 0.7, 0.35))
+	tagline.text = TAGLINE
+	tagline.theme_type_variation = "HintLabel"
 	col.add_child(tagline)
 
 	var gap_top = Control.new()
@@ -121,89 +185,62 @@ func _build_left_column(parent: Control) -> void:
 	col.add_child(gap_top)
 
 	var nav = VBoxContainer.new()
-	nav.add_theme_constant_override("separation", 10)
+	nav.add_theme_constant_override("separation", Tokens.SPACE_XS)
 	col.add_child(nav)
+
+	for dest in DESTINATIONS:
+		_add_destination(nav, dest["title"], dest["desc"], dest["scene"])
 
 	var gap_bottom = Control.new()
 	gap_bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	gap_bottom.size_flags_stretch_ratio = 1.2
 	col.add_child(gap_bottom)
 
-	_add_destination(nav, "⚔️ SKIRMISH DEPLOYMENT", "Pick a map, select custom rosters, and engage enemy AI.", "res://scenes/MatchSetup.tscn")
-	_add_destination(nav, "🔧 DESIGN LAB WORKBENCH", "Build and tweak custom vehicles with real 3D mesh ghosts & live vector telemetry.", "res://scenes/MainLab.tscn")
-	_add_destination(nav, "🗺️ OPERATION THEATER", "Multi-stage campaign with after-action debriefing reports.", "res://scenes/OperationsSetup.tscn")
-	_add_destination(nav, "🎯 WEAPONS PROVING GROUND", "Test current design in arena against target dummies.", "res://scenes/Battlefield.tscn")
-	_add_destination(nav, "🛠️ HULL AUTHORING STUDIO", "Shape custom hull primitives for your fleet.", "res://scenes/HullBuilder.tscn")
-
+	# Plain, small, and last. Quit is not a hazard and does not need a red
+	# machined bezel - reserving SIGNAL_ALERT for things that are actually
+	# destructive is the whole point of having a signal palette.
 	var quit_btn = Button.new()
-	quit_btn.text = "PWR OFF / QUIT"
-	var q_style = StyleBoxFlat.new()
-	q_style.bg_color = Color(0.2, 0.05, 0.05, 0.9)
-	q_style.border_width_left = 3
-	q_style.border_width_right = 3
-	q_style.border_width_top = 3
-	q_style.border_width_bottom = 3
-	q_style.border_color = Color(0.9, 0.2, 0.2)
-	q_style.corner_radius_top_left = 4
-	q_style.corner_radius_top_right = 4
-	q_style.corner_radius_bottom_left = 4
-	q_style.corner_radius_bottom_right = 4
-	q_style.content_margin_left = 16
-	q_style.content_margin_right = 16
-	q_style.content_margin_top = 8
-	q_style.content_margin_bottom = 8
-	quit_btn.add_theme_stylebox_override("normal", q_style)
-	quit_btn.add_theme_color_override("font_color", Color(1.0, 0.4, 0.4))
-	quit_btn.custom_minimum_size = Vector2(140, 36)
+	quit_btn.text = "QUIT"
+	quit_btn.custom_minimum_size = Vector2(140, Tokens.HIT_TARGET_MIN)
 	quit_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	quit_btn.pressed.connect(func(): get_tree().quit())
 	col.add_child(quit_btn)
 
-# Chunky Bakelite & Brass Button for destinations
+
+# A destination row: title over description, inside one large hit target.
+#
+# ListButton rather than Button - flat and borderless at rest so five of these
+# read as a list of places to go rather than as five stacked slabs, gaining a
+# hazard left edge on hover/selection. The description sits inside the button
+# so the whole row is clickable, with mouse_filter IGNORE on the labels so
+# they don't eat the button's own hover.
 func _add_destination(parent: Control, title_text: String, description: String, scene_path: String) -> void:
 	var btn = Button.new()
-	btn.custom_minimum_size = Vector2(0, 58)
+	btn.theme_type_variation = "ListButton"
+	btn.custom_minimum_size = Vector2(0, 52)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	var normal_style = StyleBoxFlat.new()
-	normal_style.bg_color = Color(0.06, 0.16, 0.09, 0.95)
-	normal_style.border_width_left = 4
-	normal_style.border_color = Color(0.0, 0.85, 0.4)
-	normal_style.corner_radius_top_left = 4
-	normal_style.corner_radius_top_right = 4
-	normal_style.corner_radius_bottom_left = 4
-	normal_style.corner_radius_bottom_right = 4
-	normal_style.content_margin_left = 14
-	normal_style.content_margin_right = 14
-	normal_style.content_margin_top = 6
-	normal_style.content_margin_bottom = 6
-	btn.add_theme_stylebox_override("normal", normal_style)
-
-	var hover_style = normal_style.duplicate()
-	hover_style.bg_color = Color(0.08, 0.24, 0.12, 0.98)
-	hover_style.border_color = Color(0.3, 1.0, 0.5)
-	btn.add_theme_stylebox_override("hover", hover_style)
-
 	parent.add_child(btn)
 
 	var stack = VBoxContainer.new()
 	stack.set_anchors_preset(Control.PRESET_FULL_RECT)
 	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.alignment = BoxContainer.ALIGNMENT_CENTER
-	stack.add_theme_constant_override("separation", 2)
+	stack.add_theme_constant_override("separation", 0)
+	# The button's own content margin is horizontal padding for its (empty)
+	# text; the anchored stack ignores it, so it gets its own.
+	stack.offset_left = Tokens.SPACE_MD
+	stack.offset_right = -Tokens.SPACE_MD
 	btn.add_child(stack)
 
 	var name_label = Label.new()
 	name_label.text = title_text
-	name_label.add_theme_font_size_override("font_size", 16)
-	name_label.add_theme_color_override("font_color", Color(0.2, 1.0, 0.5))
+	name_label.theme_type_variation = "HeadingLabel"
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(name_label)
 
 	var desc_label = Label.new()
 	desc_label.text = description
-	desc_label.add_theme_font_size_override("font_size", 11)
-	desc_label.add_theme_color_override("font_color", Color(0.0, 0.7, 0.35))
+	desc_label.theme_type_variation = "HintLabel"
 	desc_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stack.add_child(desc_label)
 
@@ -217,6 +254,12 @@ func _add_destination(parent: Control, title_text: String, description: String, 
 		if audio:
 			audio.play_sfx("hover"))
 
+
+# The right column is a SPECIFICATION PLACARD for the player's most recent
+# design, not a menu. This is the screen's thesis in one panel: whatever
+# ridiculous thing the player built last is presented here as certified
+# hardware - stencilled designation, hull class, affiliation, mass - with the
+# format taking it completely seriously. The comedy is entirely structural.
 func _build_status_column(parent: Control) -> void:
 	var col = VBoxContainer.new()
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -225,28 +268,12 @@ func _build_status_column(parent: Control) -> void:
 	parent.add_child(col)
 
 	var heading = Label.new()
-	heading.text = "FLEET ROSTER & INTEL DOSSIER"
-	heading.add_theme_font_size_override("font_size", 16)
-	heading.add_theme_color_override("font_color", Color(0.2, 1.0, 0.5))
+	heading.text = "CURRENT STATUS"
+	heading.theme_type_variation = "HeadingLabel"
 	col.add_child(heading)
 
 	var panel = PanelContainer.new()
-	var panel_style = StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.04, 0.12, 0.07, 0.95)
-	panel_style.border_width_left = 2
-	panel_style.border_width_right = 2
-	panel_style.border_width_top = 2
-	panel_style.border_width_bottom = 2
-	panel_style.border_color = Color(0.0, 0.7, 0.35)
-	panel_style.corner_radius_top_left = 6
-	panel_style.corner_radius_top_right = 6
-	panel_style.corner_radius_bottom_left = 6
-	panel_style.corner_radius_bottom_right = 6
-	panel_style.content_margin_left = 16
-	panel_style.content_margin_right = 16
-	panel_style.content_margin_top = 16
-	panel_style.content_margin_bottom = 16
-	panel.add_theme_stylebox_override("panel", panel_style)
+	panel.theme_type_variation = "CardPanel"
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(panel)
 
@@ -261,66 +288,56 @@ func _build_status_column(parent: Control) -> void:
 	var roster: Array = mgr.list_blueprints(true)
 	var all: Array = mgr.list_blueprints(false)
 
-	_vector_stat_row(body, "Combat Blueprints Ready", str(roster.size()) + " / 15")
-	_vector_stat_row(body, "Total Archive Designs", str(all.size()))
+	# UIShell.stat_row() puts the value on the monospace face, which is what
+	# makes a column of these line up. Hand-rolling label pairs here was how
+	# the previous version ended up with six different font sizes.
+	UIShell.stat_row(body, "Designs ready to field", "%d / %d" % [roster.size(), ROSTER_CAP])
+	UIShell.stat_row(body, "Designs in library", str(all.size()))
 
 	body.add_child(HSeparator.new())
 
 	if roster.is_empty():
 		var empty = Label.new()
-		empty.text = "NO COMBAT BLUEPRINTS REGISTERED.\n\nEnter the Design Lab Workbench to author your first unit."
-		empty.add_theme_font_size_override("font_size", 12)
-		empty.add_theme_color_override("font_color", Color(0.0, 0.65, 0.35))
-		empty.autowrap_mode = TextServer.AUTOWRAP_WORD
+		empty.text = "No designs registered. Open the Design Lab to author one."
+		empty.theme_type_variation = "HintLabel"
+		empty.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		body.add_child(empty)
-	else:
-		var latest_label = Label.new()
-		latest_label.text = "★ FLAGSHIP UNIT DOSSIER"
-		latest_label.add_theme_font_size_override("font_size", 13)
-		latest_label.add_theme_color_override("font_color", Color(0.2, 1.0, 0.5))
-		body.add_child(latest_label)
+		return
 
-		var latest: Dictionary = roster[0]
-		var name_label = Label.new()
-		name_label.text = str(latest.get("name", "")).to_upper()
-		name_label.add_theme_font_size_override("font_size", 22)
-		name_label.add_theme_color_override("font_color", Color(0.4, 1.0, 0.6))
-		name_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-		body.add_child(name_label)
+	var most_recent = Label.new()
+	most_recent.text = "MOST RECENT"
+	most_recent.theme_type_variation = "HintLabel"
+	body.add_child(most_recent)
 
-		_vector_stat_row(body, "Hull Class", _prettify(str(latest.get("hull_type", ""))))
-		_vector_stat_row(body, "Affiliation", _prettify(str(latest.get("faction", ""))))
+	var latest: Dictionary = roster[0]
 
-		if roster.size() > 1:
-			body.add_child(HSeparator.new())
-			var also = Label.new()
-			also.text = "REGISTERED FLEET BLUEPRINTS"
-			also.add_theme_font_size_override("font_size", 12)
-			also.add_theme_color_override("font_color", Color(0.0, 0.75, 0.35))
-			body.add_child(also)
-			for entry in roster.slice(1, mini(5, roster.size())):
-				var row = Label.new()
-				row.text = "• %s  [%s]" % [str(entry.get("name", "")).to_upper(), _prettify(str(entry.get("hull_type", "")))]
-				row.add_theme_font_size_override("font_size", 12)
-				row.add_theme_color_override("font_color", Color(0.2, 0.9, 0.5))
-				row.autowrap_mode = TextServer.AUTOWRAP_WORD
-				body.add_child(row)
+	# The designation gets the stencil face at title size. A "GoatHauler Mk VI"
+	# rendered as though it came off a procurement form is the joke, and it
+	# only works if the rendering is entirely sincere.
+	var name_label = Label.new()
+	name_label.text = str(latest.get("name", "")).to_upper()
+	name_label.theme_type_variation = "TitleLabel"
+	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(name_label)
 
-func _vector_stat_row(parent: Control, key: String, val: String) -> void:
-	var row = HBoxContainer.new()
-	var l_key = Label.new()
-	l_key.text = key
-	l_key.add_theme_font_size_override("font_size", 12)
-	l_key.add_theme_color_override("font_color", Color(0.0, 0.7, 0.35))
-	l_key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(l_key)
+	UIShell.stat_row(body, "Hull class", _prettify(str(latest.get("hull_type", ""))))
+	UIShell.stat_row(body, "Affiliation", _prettify(str(latest.get("faction", ""))))
 
-	var l_val = Label.new()
-	l_val.text = val
-	l_val.add_theme_font_size_override("font_size", 12)
-	l_val.add_theme_color_override("font_color", Color(0.3, 1.0, 0.6))
-	row.add_child(l_val)
-	parent.add_child(row)
+	if roster.size() <= 1:
+		return
+
+	body.add_child(HSeparator.new())
+
+	var also = Label.new()
+	also.text = "ALSO READY"
+	also.theme_type_variation = "HintLabel"
+	body.add_child(also)
+
+	for entry in roster.slice(1, mini(5, roster.size())):
+		UIShell.stat_row(body,
+			str(entry.get("name", "")).to_upper(),
+			_prettify(str(entry.get("hull_type", ""))))
+
 
 func _prettify(id: String) -> String:
 	if id == "":
