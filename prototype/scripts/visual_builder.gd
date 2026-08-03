@@ -6185,23 +6185,30 @@ static func _build_air_cushion_skirt(parent_node: Node3D, base_size: Vector3, ba
 	var skirt_mesh := _part("acs_skirt")
 	if skirt_mesh:
 		var skirt := _mesh_inst(skirt_mesh, base_color.darkened(0.35))
-		# Fit against the mesh's MEASURED plan extent, not its nominal unit
-		# footprint. The path is authored at half-extent 0.5, but the wedge
-		# bulges 0.16 outboard of it, so the mesh is really 1.32 across - scale
-		# by the hull's size directly and the bag overhangs by that bulge on
-		# every edge (measured 7.26 against a 5.50 hull). Same measure-the-mesh
-		# rule the screw drum and the rocker arm both had to learn.
-		var sa: AABB = skirt_mesh.get_aabb()
+		# SKIRT_INNER_UNIT is the authored half-extent of the bag's INNER
+		# wall - the face that laps the hull's sides - and build_acs_skirt()
+		# in tools/blender/build_locomotion_rework.py authors it at exactly
+		# this value. The two must change together. Scaling by the hull's own
+		# width and length therefore lands that wall flush on the hull's sides,
+		# with the outer bulge extending past it, which is correct: the bag is
+		# wider than the vehicle.
+		#
+		# Deliberately NOT fitted to the mesh's AABB, unlike the screw drum and
+		# the rocker arm. The AABB is the OUTER extent, and fitting that to the
+		# hull would tuck the bag under the floor - the exact "bottom-to-top"
+		# arrangement Chris asked to get away from.
+		const SKIRT_INNER_UNIT := 0.5
+		const AUTHORED_SECTION_HEIGHT := 0.52
 		var proud: float = 1.0 + 0.10 * (diameter - 1.0)
 		# Plenum pressure inflates the bag vertically rather than widening it -
 		# a separate axis from skirt_diameter, so both sliders read distinctly.
 		# Depth is its own number: tying it to the footprint made the bag
 		# deeper on longer hulls, which is not what a skirt does.
-		var depth: float = 0.55 * (0.85 + 0.30 * plenum)
+		var depth: float = 0.86 * (0.85 + 0.30 * plenum)
 		skirt.scale = Vector3(
-			(fx * proud) / maxf(sa.size.x, 0.001),
-			depth / maxf(sa.size.y, 0.001),
-			(fz * proud) / maxf(sa.size.z, 0.001))
+			(fx * proud) / (SKIRT_INNER_UNIT * 2.0),
+			depth / AUTHORED_SECTION_HEIGHT,
+			(fz * proud) / (SKIRT_INNER_UNIT * 2.0))
 		parent_node.add_child(skirt)
 
 	var fan_mesh := _part("acs_lift_fan")

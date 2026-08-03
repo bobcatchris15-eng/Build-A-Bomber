@@ -536,27 +536,41 @@ def _sweep_closed(bm, path, section):
 
 
 def build_acs_skirt():
-	# The wedge, as (outward, up), closed. Broad where it bolts to the hull,
-	# bulging out and down, narrowing to the contact edge that rides the
-	# ground cushion. Rounded by sampling the bulge as an arc rather than
-	# chamfering a box - this is a fabric bag, not a machined part.
-	section = [(-0.055, 0.010), (0.075, 0.010)]
-	for i in range(7):                        # outer bulge, top to bottom
-		a = math.radians(72.0) - math.radians(150.0) * (i / 6.0)
-		section.append((0.075 + math.cos(a) * 0.085, -0.075 + math.sin(a) * 0.085))
-	section += [(0.020, -0.205), (-0.020, -0.205)]
-	for i in range(4):                        # inner face, bottom back up
-		t = i / 3.0
-		section.append((-0.020 - 0.035 * t, -0.205 + 0.215 * t))
+	# THE INNER FACE IS THE MOUNTING FACE. Chris: "attach the INNER side of the
+	# ring to the bottom edge of the sides of the hull, instead of
+	# bottom-to-top." So the bag laps UP the hull's side walls and is held
+	# there, rather than sitting under its floor like a gasket - which is how a
+	# real hovercraft skirt is hung, and it stops the hull looking like it is
+	# balanced on top of a doughnut.
+	#
+	# The inner wall is therefore authored at exactly +-0.5 (SKIRT_INNER_UNIT
+	# in visual_builder.gd - the two must change together), so scaling X and Z
+	# by the hull's own width and length lands that wall flush on the hull's
+	# sides. The outer bulge extends past it, which is correct: the bag is
+	# wider than the vehicle.
+	inner_u = -0.5
+	section = []
+	# Inner wall, top (lapped up the hull's side) down to the contact edge.
+	section.append((inner_u, 0.235))
+	section.append((inner_u, -0.240))
+	# Contact edge that rides the ground cushion.
+	section.append((inner_u + 0.075, -0.285))
+	# Outer face: a full rounded bulge from the bottom back up to the top.
+	for i in range(9):
+		a = math.radians(-78.0) + math.radians(156.0) * (i / 8.0)
+		section.append((inner_u + 0.105 + math.cos(a) * 0.175,
+						-0.030 + math.sin(a) * 0.215))
+	# Top face, running back inboard to the wall.
+	section.append((inner_u + 0.060, 0.235))
 
 	bm = bmesh.new()
-	path = _rounded_rect(0.5, 0.5, 0.22, per_corner=7)
-	_sweep_closed(bm, path, section)
-	# Attachment flange along the top edge, so it reads as bolted on rather
-	# than resting against the hull.
-	inner = _rounded_rect(0.5 - 0.035, 0.5 - 0.035, 0.20, per_corner=7)
-	_sweep_closed(bm, inner, [(-0.010, 0.010), (0.030, 0.010),
-							  (0.030, 0.055), (-0.010, 0.055)])
+	# The PATH is the inner wall's line, so the sweep's u=inner_u lands on it.
+	path = _rounded_rect(0.5 - inner_u * 0.0, 0.5, 0.22, per_corner=7)
+	_sweep_closed(bm, path, [(u - inner_u, v) for (u, v) in section])
+	# Attachment flange up the inner wall - bolts into the hull's side skin.
+	flange = _rounded_rect(0.5, 0.5, 0.22, per_corner=7)
+	_sweep_closed(bm, flange, [(-0.030, 0.120), (0.014, 0.120),
+							   (0.014, 0.215), (-0.030, 0.215)])
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
 	export_bmesh(bm, "acs_skirt", "acs_skirt.glb",
 				 color=(0.24, 0.23, 0.21, 1.0), metallic=0.10, roughness=0.88)
