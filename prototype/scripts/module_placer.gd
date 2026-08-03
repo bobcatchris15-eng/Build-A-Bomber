@@ -9,6 +9,9 @@ const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
+# Only for the shared elevation/depression tolerances the firing-arc envelope
+# has to match - see _build_firing_arc().
+const AutoWeaponScript = preload("res://scripts/auto_weapon.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const UITokens = preload("res://scripts/ui_tokens.gd")
 const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
@@ -891,7 +894,21 @@ func update_locomotion(type_id: String, settings: Dictionary):
 				continue
 			lowest = minf(lowest, w.position.y + wb.position.y * w.scale.y)
 		if lowest < INF:
-			hull.position.y = -lowest
+			# Floored at the hull's own half-height for the reason spelled out
+			# in blueprint_manager.gd's matching block: locomotion that does not
+			# reach past the hull's underside would otherwise sink the hull
+			# itself through the ground plane. Kept identical to that copy so a
+			# design sits at the same height in the lab and in a match.
+			#
+			# Measured from hull_size - the hull's OWN collision box, the same
+			# source every station position above is derived from - and NOT from
+			# default_lift. default_lift comes off the CATALOG entry for
+			# hull.get_meta("type_id"), which falls back to medium_hull when
+			# there is no such meta: that made the floor 0.9 for a hull actually
+			# 0.6 tall, and moved the layout golden fixture's small/tracked_
+			# treads row from 0.4886 to 0.9 - a hull hoisted a third of a metre
+			# into the air on a floor that had no business binding at all.
+			hull.position.y = maxf(-lowest, hull_size.y / 2.0)
 				
 	# Link them in a group
 	for w in spawned_wheels:
@@ -921,25 +938,11 @@ func update_locomotion(type_id: String, settings: Dictionary):
 ## size: a locomotion assembly's parts are positioned and scaled by its builder
 ## from tweaks the catalog knows nothing about, so the catalog box and the thing
 ## on screen routinely disagree by a factor of several.
+# Moved to visual_builder.gd's measure_visual_bounds() so the battle spawner can
+# measure ride height with the identical code - see that function's header. Kept
+# as a thin alias because this file calls it from four places.
 static func _visual_bounds(module: Node3D) -> AABB:
-	var bounds := AABB()
-	var seen := false
-	for mesh_inst in module.find_children("*", "MeshInstance3D", true, false):
-		if mesh_inst.mesh == null:
-			continue
-		# Each mesh's own AABB, carried up through every intermediate pivot's
-		# transform into the module's space. Locomotion builders nest parts
-		# under named pivots (rotor hubs, leg knees) that carry real offsets.
-		var xf := Transform3D.IDENTITY
-		var walker: Node = mesh_inst
-		while walker != null and walker != module:
-			if walker is Node3D:
-				xf = walker.transform * xf
-			walker = walker.get_parent()
-		var part = xf * mesh_inst.mesh.get_aabb()
-		bounds = part if not seen else bounds.merge(part)
-		seen = true
-	return bounds if seen else AABB()
+	return VisualBuilderScript.measure_visual_bounds(module)
 
 func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bool = false, tweaks: Dictionary = {}) -> Node3D:
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
@@ -1356,11 +1359,17 @@ const ARC_RADIUS_MIN := 6.0
 # falloff means editing that one function and the constants below, not the mesh
 # builder.
 #
-# Elevation limits, as a half-angle from the weapon's own horizon. Generous for
-# now because no catalog entry declares them yet; a gun that cannot shoot
-# straight up is the common case and this is where that will be expressed.
-const ARC_PITCH_UP_LIMIT := deg_to_rad(88.0)
-const ARC_PITCH_DOWN_LIMIT := deg_to_rad(88.0)
+# Elevation limits are now per-weapon and live in
+# ModuleCatalog.ELEVATION_LIMITS, read through get_elevation_up/down() - the
+# same accessors auto_weapon.gd gates real acquisition on, so the envelope drawn
+# here and the set of targets the weapon will actually accept cannot drift
+# apart.
+#
+# This replaces a single hardcoded pair (88 degrees up AND down, for every
+# weapon in the roster) that was left here as an explicit placeholder for
+# exactly this work - "a gun that cannot shoot straight up is the common case
+# and this is where that will be expressed". Chris, 2026-08-03: "we need to
+# differentiate the elevation available to each different weapon."
 
 # How dim the envelope gets at the far edge of the weapon's traverse. The point
 # is to make "this is where the gun already points" instantly separable from
@@ -1378,6 +1387,19 @@ func _build_firing_arc(module: Node3D, data) -> Node3D:
 		arc_facet = ModuleCatalog.classify_facet(local_mount_normal)
 	var arc_hull_type = hull.get_meta("type_id", "") if hull else ""
 	var limit = ModuleCatalog.get_traverse_limit_angle(data.type_id, arc_facet, arc_hull_type)
+	# Read from the instance's own tweaks, not the bare type - the `elevation`
+	# tweak raises the ceiling, and the envelope has to show the weapon the
+	# player actually built rather than the catalog default.
+	var arc_tweaks: Dictionary = data.tweaks if "tweaks" in data else {}
+	var pitch_up: float = ModuleCatalog.get_elevation_up(data.type_id, arc_tweaks)
+	# Same permissive depression floor combat applies - see
+	# auto_weapon.gd's MIN_DEPRESSION_TOLERANCE for why depression is not
+	# enforced strictly. Drawing the strict authored value here while combat
+	# honours the floor would show the player an envelope narrower than the
+	# weapon they actually have.
+	var pitch_down: float = maxf(
+		ModuleCatalog.get_elevation_down(data.type_id, arc_tweaks),
+		AutoWeaponScript.MIN_DEPRESSION_TOLERANCE)
 
 	var exclude_list = []
 	_get_colliders_recursive(module, exclude_list)
@@ -1435,7 +1457,7 @@ func _build_firing_arc(module: Node3D, data) -> Node3D:
 			# with a red patch, which reads as "the gun covers everything" at a
 			# glance - the opposite of the truth. An envelope that simply is not
 			# there where the gun cannot shoot needs no reading at all.
-			var intensity = _traverse_intensity(u_mid, phi_mid, limit)
+			var intensity = _traverse_intensity(u_mid, phi_mid, limit, pitch_up, pitch_down)
 			if intensity <= 0.0:
 				continue
 
@@ -1506,15 +1528,19 @@ func _arc_radius_for(_module: Node3D) -> float:
 #
 # `azimuth` is measured the same way _sphere_point() measures it (0 = the
 # barrel's forward, -Z). `phi` is polar from +Y.
-func _traverse_intensity(azimuth: float, phi: float, yaw_limit: float) -> float:
+func _traverse_intensity(azimuth: float, phi: float, yaw_limit: float,
+						 pitch_up: float = PI * 0.5, pitch_down: float = PI * 0.5) -> float:
 	# Yaw: how far the turret must swing from its default heading.
 	var yaw = absf(wrapf(azimuth, -PI, PI))
 	if yaw > yaw_limit + 0.001:
 		return 0.0
 
 	# Pitch: elevation above / depression below the weapon's own horizon.
+	# Per-weapon now (see the ARC_PITCH comment block above). The defaults are
+	# a full hemisphere so any caller that does not pass limits gets the old
+	# unrestricted behaviour rather than a silently clipped envelope.
 	var pitch = PI * 0.5 - phi
-	if pitch > ARC_PITCH_UP_LIMIT or -pitch > ARC_PITCH_DOWN_LIMIT:
+	if pitch > pitch_up + 0.001 or -pitch > pitch_down + 0.001:
 		return 0.0
 
 	# Falloff with total angular distance off the default heading. Normalised

@@ -70,6 +70,38 @@ static func _part(part_name: String) -> Mesh:
 # CollisionShape3D already provides the real physics collider in that case;
 # this body's collider is purely for the designer-raycast/dimension-lookup
 # use, so it can safely be collision-free there.
+## The tight bounds of everything a module actually DRAWS, in that module's own
+## local space. Used to find where running gear really ends so the hull can be
+## lifted until it touches the ground.
+##
+## Lives here, rather than in whichever file needed it first, because both the
+## Design Lab (module_placer.gd's GROUND CONTACT block) and the battle spawner
+## (blueprint_manager.gd's reconstruct_vehicle) have to measure ride height
+## identically or a design sits at a different height in a match than it did in
+## the lab. That is exactly the drift that made the second caller necessary -
+## the battle path had its own hand-tuned constants, which only covered wheels
+## and legs and read a tweak key that does not exist.
+##
+## Walks up through intermediate pivots deliberately: locomotion builders nest
+## parts under named pivots (rotor hubs, leg knees) that carry real offsets, so
+## a mesh's own AABB means nothing without them.
+static func measure_visual_bounds(module: Node3D) -> AABB:
+	var bounds := AABB()
+	var seen := false
+	for mesh_inst in module.find_children("*", "MeshInstance3D", true, false):
+		if mesh_inst.mesh == null:
+			continue
+		var xf := Transform3D.IDENTITY
+		var walker: Node = mesh_inst
+		while walker != null and walker != module:
+			if walker is Node3D:
+				xf = walker.transform * xf
+			walker = walker.get_parent()
+		var part = xf * mesh_inst.mesh.get_aabb()
+		bounds = part if not seen else bounds.merge(part)
+		seen = true
+	return bounds if seen else AABB()
+
 static func build_running_gear(parent_node: Node3D, dimensions: Vector3, base_color: Color, collision_layer: int = 1, type_id: String = "", hardpoints: Array = []) -> StaticBody3D:
 	var body = StaticBody3D.new()
 	body.name = "RunningGear"

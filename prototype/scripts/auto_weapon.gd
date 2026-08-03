@@ -3,6 +3,7 @@ extends Node3D
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const GlobalConfig = preload("res://scripts/global_config.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const WeaponRange = preload("res://scripts/weapon_range.gd")
 const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 # Shared unit meshes + cached materials for every munition visual below. See
 # munition_pool.gd's header for the measurements that motivated it; the short
@@ -34,6 +35,30 @@ var bipod_deployed: bool = false
 var _los_height_offset: float = 0.5
 var traverse_limit_angle: float = PI / 4.0
 var traverse_speed: float = 4.0
+
+# --- Traverse model (see the block in _ready that uses these) --------------
+# How hard a heavier module is charged. 1.0 would be "moment of inertia is
+# linear in mass", which it is - but mass and length are charged separately
+# here and a slider usually moves both, so each is softened a little to keep a
+# maxed-out gun slow rather than immobile.
+const TRAVERSE_WEIGHT_EXPONENT: float = 0.80
+# Length is charged on top of the mass it adds, because inertia goes with the
+# SQUARE of the radius. A true 2.0 here made a max-length barrel unusable once
+# combined with the weight term, so this is deliberately well under it.
+const TRAVERSE_LENGTH_EXPONENT: float = 0.90
+# Only the tweaks that ARE the long projecting tube the shot travels down.
+# Everything else that makes a part bigger is already paid for through weight;
+# listing it here too is the double-charge this model was built to remove.
+const TRAVERSE_LENGTH_TWEAKS := ["barrel_length", "rail_length", "focal_length"]
+# Floor and ceiling. The floor exists so an extreme build (a max-length barrel
+# on the heaviest gun in the roster) is punishing rather than literally stuck -
+# 0.08 rad/s is still 78 seconds for a full circle.
+const TRAVERSE_SPEED_MIN: float = 0.08
+const TRAVERSE_SPEED_MAX: float = 3.0
+# Ceiling on how much FASTER tweaks can make a weapon than its published base.
+# Not symmetrical with the penalty side on purpose - see the comment where it is
+# applied.
+const TRAVERSE_TWEAK_GAIN_MAX: float = 1.5
 var resting_transform: Transform3D
 var spin_up_timer: float = 0.0
 
@@ -75,6 +100,58 @@ const REACQUIRE_INTERVAL: float = 0.2
 # gets a real chance to close the rest of the way and fire. No effect on
 # turret/pintle (traverse_limit_angle == PI already exceeds this).
 const MIN_ACQUISITION_ARC: float = 0.26
+
+# --- Elevation stops ------------------------------------------------------
+# Set from ModuleCatalog.get_elevation_up/down() in _ready(). Radians above and
+# below THIS WEAPON's own horizon, where "up" is the weapon's local +Y (the
+# surface normal it was mounted on), so a belly mount's stops correctly point
+# at the ground.
+#
+# Before these existed, acquisition gated on a single symmetric yaw cone with
+# no vertical term whatsoever - so a howitzer could track an aircraft directly
+# overhead just as well as a CIWS could, and the Design Lab drew every weapon
+# with the same placeholder 88-degree stops. See ModuleCatalog.ELEVATION_LIMITS
+# for the per-weapon values and for why an artillery piece's ENGAGEMENT
+# elevation is low despite its barrel sitting steep.
+var elevation_up_limit: float = deg_to_rad(55.0)
+var elevation_down_limit: float = deg_to_rad(12.0)
+
+# The elevation half of acquisition needs a floor for the same reason
+# MIN_ACQUISITION_ARC exists on the yaw half: a target is a point, a unit has
+# height, and a weapon sitting on top of a tall hull looks slightly DOWN at
+# something standing right next to it. Without a tolerance, a mortar with 3
+# degrees of depression would refuse point-blank ground targets that it is
+# obviously able to hit, which reads as the weapon being broken rather than as
+# a depression limit.
+const MIN_ELEVATION_TOLERANCE: float = 0.26
+
+# DEPRESSION IS DELIBERATELY PERMISSIVE, and much more so than elevation.
+#
+# At this game's scale, how far a weapon must look DOWN to hit something is
+# dominated by where its muzzle sits, not by the gun's design: a basic_cannon
+# mounted 1.2 units up on a defense foundation needs roughly 27 degrees of
+# depression to engage a target 5 units away on flat ground. Enforcing a
+# realistic 10-degree depression stop against that geometry made every
+# elevated mount - every defense tower, every weapon on a tall hull - refuse
+# adjacent ground targets, which is a bug and not a feature. It was caught by
+# test_e1_low_power_disables_defense_weapon_and_dims_its_mesh, whose defense
+# gun simply stopped acquiring anything.
+#
+# So the per-weapon "down" values in ModuleCatalog.ELEVATION_LIMITS exist to
+# stop the genuinely absurd case - the old placeholder let every weapon in the
+# roster shoot almost straight down - and to differentiate later if depression
+# ever becomes a real lever. They are not a simulation of turret geometry, and
+# this floor is what keeps them from breaking ordinary shots. Elevation, the
+# axis Chris actually asked about, is enforced strictly and is unaffected.
+const MIN_DEPRESSION_TOLERANCE: float = 0.785 # 45 degrees
+
+# Makes the RATED angle inclusive. Without it, whether a weapon can engage at
+# exactly its own published limit came down to which way asin() happened to
+# round: basic_cannon (rated 45) refused a target at 45.0 degrees while
+# heavy_laser (rated 60) accepted one at 60.0. A catalog number that is
+# sometimes achievable and sometimes not is worse than either answer, and the
+# player-facing figure should mean "this angle works".
+const ELEVATION_EPSILON: float = 0.0087 # ~0.5 degrees
 
 # repair_array's real fix (ENERGY_AND_BALANCE_SPEC.md #3): inverts
 # targeting to same-team/HP-deficit candidates instead of hostiles.
@@ -440,6 +517,17 @@ func _is_line_of_sight_blocked() -> bool:
 func _is_los_blocked_to(candidate: Node3D) -> bool:
 	if not candidate or not is_instance_valid(candidate): return true
 
+	# Indirect fire arcs OVER whatever is in between, so a straight raycast to
+	# the target is the wrong question to ask of it. Requiring an unbroken
+	# sightline was survivable while a mortar reached 28 units; with artillery
+	# at 140 (ModuleCatalog.RANGE_TIERS) there is essentially always a rock,
+	# a building or a ridge somewhere in the intervening distance on a real
+	# map, so the LOS check alone would have made the entire Operational tier
+	# unable to fire. The set is exactly the weapons whose delivery IS a
+	# ballistic arc - a 72-unit gauss railgun still has to see what it shoots.
+	if ModuleCatalog.is_indirect_fire(type_id):
+		return false
+
 	var space_state = get_world_3d().direct_space_state
 	# Weapons face forward along negative Z relative to their own local space
 	var muzzle_forward = -global_transform.basis.z.normalized()
@@ -545,17 +633,56 @@ func _ready():
 		dps = base_dps
 		heal_rate = data.get_heal_rate()
 		
-		# Calculate traverse speed based on weight, then apply this weapon
-		# type's own agility character (ModuleCatalog.get_traverse_agility()
-		# - see its comment for the full per-type reasoning). Two weapons of
-		# similar weight but very different archetypes (a CIWS vs. a
-		# mortar_array, both ~90kg) previously got identical traverse speed
-		# since weight was the ONLY input. Base clamp widened from the old
-		# (0.6, 6.0) to (0.4, 8.0) so the per-type multiplier has real
-		# headroom to differentiate rather than being squashed back into a
-		# narrow shared band.
-		var weight = data.get_weight()
-		traverse_speed = clamp(200.0 / weight, 0.4, 8.0) * ModuleCatalog.get_traverse_agility(type_id)
+		# TRAVERSE SPEED. Starts from this weapon's own base
+		# (ModuleCatalog.get_base_traverse - see its comment for the band and
+		# how the values were derived) and is then moved by what has actually
+		# been done to THIS module.
+		#
+		# The base used to be derived from the instance's weight instead, which
+		# meant a weapon had no rate of its own to be modified away from: a
+		# heavy archetype and a heavily-tweaked light one were indistinguishable
+		# inputs to the same 200/weight expression.
+		#
+		# Weight now enters as a RATIO against the module's own untweaked mass,
+		# so an untweaked weapon sits exactly on its published base and every
+		# tweak that adds mass costs traverse in proportion. base_weight is the
+		# catalog figure the ModuleData was constructed with; get_weight() is
+		# that after tweaks, node scale and ammo stowage - so scaling a module
+		# up or loading heavier rounds slows it too, which is correct.
+		var base_traverse: float = ModuleCatalog.get_base_traverse(type_id)
+		var live_weight: float = data.get_weight()
+		var ref_weight: float = data.base_weight if data.base_weight > 0.0 else live_weight
+		var weight_factor := 1.0
+		if live_weight > 0.001 and ref_weight > 0.001:
+			weight_factor = pow(ref_weight / live_weight, TRAVERSE_WEIGHT_EXPONENT)
+
+		# Length is charged SEPARATELY from the mass it adds, because moment of
+		# inertia goes with mass times the square of the radius - a longer
+		# barrel is worse for traverse than the same extra mass bolted close in
+		# (Chris: "the same with barrel length: longer makes it slower, shorter
+		# makes it faster (angular momentum)").
+		#
+		# Only the tweaks that are literally the long tube the shot travels
+		# down. Every other "bigger part" tweak still costs traverse, but
+		# through the weight ratio above rather than twice.
+		var length_factor := 1.0
+		for tweak_name in TRAVERSE_LENGTH_TWEAKS:
+			var v = data.tweaks.get(tweak_name, 1.0)
+			if (typeof(v) == TYPE_FLOAT or typeof(v) == TYPE_INT) and float(v) > 0.001:
+				length_factor *= pow(1.0 / float(v), TRAVERSE_LENGTH_EXPONENT)
+
+		# The two factors compound, and going lighter AND shorter pushes them
+		# both the same way: a 0.6x barrel on a light gun came out 2.4x its base
+		# and hit the ceiling, where a cannon shaved to 0.5x hit the SAME
+		# ceiling - two different weapons converging on one number, which is the
+		# flattening this whole rework exists to remove. Penalties may run all
+		# the way down to the floor; the bonus is capped, on the reading that a
+		# mount's drive is rated for its weapon class and cannot be exploited
+		# indefinitely by shaving the gun. Keeping the top tied to
+		# base_traverse rather than to a shared clamp is what preserves
+		# per-weapon differentiation among light, stripped-down builds.
+		var tweak_factor: float = minf(weight_factor * length_factor, TRAVERSE_TWEAK_GAIN_MAX)
+		traverse_speed = base_traverse * tweak_factor
 		_los_height_offset = ModuleCatalog.get_module_data(type_id).size.y * 0.7
 		
 		# Traverse limit angle: shared with the Design Lab's firing-arc
@@ -567,7 +694,13 @@ func _ready():
 		if mount_parent and mount_parent.has_meta("type_id"):
 			mount_hull_type = mount_parent.get_meta("type_id")
 		traverse_limit_angle = ModuleCatalog.get_traverse_limit_angle(type_id, mount_facet, mount_hull_type)
-			
+		# Elevation stops, same shared-with-the-visualiser arrangement as the
+		# yaw limit above. Read once here rather than per-candidate, since
+		# acquisition asks about them for every hostile in reach every scan.
+		elevation_up_limit = ModuleCatalog.get_elevation_up(type_id, data.tweaks)
+		elevation_down_limit = ModuleCatalog.get_elevation_down(type_id, data.tweaks)
+
+
 		if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws", "coil_gun", "autocannon", "ballista", "anti_materiel_rifle", "hypervelocity_missile", "aa_autocannon", "aps_interceptor"]:
 			damage_class = "kinetic"
 		elif type_id in ["artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flak_cannon", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "mine_layer", "spigot_mortar", "rocket_artillery", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile"]:
@@ -603,97 +736,45 @@ func _ready():
 		# thresholds gate on - so it's the strongest balance lever there is).
 		# The tweak modifiers below still apply on top, unchanged.
 		var fire_profile = ModuleCatalog.get_fire_profile(type_id)
-		fire_range = fire_profile.fire_range
 		fire_rate = fire_profile.fire_rate
 		laser_color = fire_profile.laser_color
-			
-		# Apply Range & Traverse Speed Tweak Modifiers
-		if data.tweaks.has("barrel_length"):
-			fire_range *= data.tweaks["barrel_length"]
-		if data.tweaks.has("elevation"):
-			fire_range *= data.tweaks["elevation"]
-		if data.tweaks.has("rod_thickness") and data.tweaks["rod_thickness"] > 0.0:
-			fire_range /= data.tweaks["rod_thickness"]
-		if data.tweaks.has("engine_length"):
-			fire_range *= data.tweaks["engine_length"]
-		if data.tweaks.has("payload_size") and data.tweaks["payload_size"] > 0.0:
-			fire_range /= data.tweaks["payload_size"]
-		if data.tweaks.has("nozzle_width") and data.tweaks["nozzle_width"] > 0.0:
-			fire_range /= data.tweaks["nozzle_width"]
-		if data.tweaks.has("lens_aperture") and data.tweaks["lens_aperture"] > 0.0:
-			fire_range /= data.tweaks["lens_aperture"]
-		if data.tweaks.has("containment") and data.tweaks["containment"] > 0.0:
-			fire_range /= data.tweaks["containment"]
-		if data.tweaks.has("radar_dish"):
-			fire_range *= data.tweaks["radar_dish"]
-		# Audit (task 47/49): several weapons' only tweaks previously had
-		# zero effect on fire_range at all - a bigger caliber round flies
-		# further, a longer railgun accelerator rail means more muzzle
-		# velocity (gauss_railgun's rail_length tweak did NOTHING to its own
-		# range before this), a bigger missile seeker locks on further out,
-		# a bigger ascent thruster gives a top-attack missile more reach,
-		# more fuel pressure pushes a flamethrower's stream further, and a
-		# flak shell's proximity fuse setting IS its effective engagement
-		# range. Left out deliberately: count-type tweaks (multi_barrel/
-		# barrel_count/tube_count/grid_size - "more copies," not "reaches
-		# further") and tweaks with no real range link (drum_size/motor_size
-		# are ammo capacity and spin torque, not reach; dispersion is spread
-		# pattern, not distance; cooling_jacket is sustained-fire capacity,
-		# not reach).
-		if data.tweaks.has("caliber"):
-			fire_range *= data.tweaks["caliber"]
-		if data.tweaks.has("rail_length"):
-			fire_range *= data.tweaks["rail_length"]
-		if data.tweaks.has("seeker_size"):
-			fire_range *= data.tweaks["seeker_size"]
-		if data.tweaks.has("ascent_thruster"):
-			fire_range *= data.tweaks["ascent_thruster"]
-		if data.tweaks.has("pressure_valve"):
-			fire_range *= data.tweaks["pressure_valve"]
-		if data.tweaks.has("fuse_setting"):
-			fire_range *= data.tweaks["fuse_setting"]
-		# A better sight is the whole reason a precision weapon reaches
-		# further than its barrel alone would justify.
-		if data.tweaks.has("optic_power"):
-			fire_range *= data.tweaks["optic_power"]
-		# A longer accelerator spine means a faster particle and more reach.
-		if data.tweaks.has("focal_length"):
-			fire_range *= data.tweaks["focal_length"]
-		# INVERSE, like lens_aperture and containment above: a wider dish
-		# spreads the same power over a broader cone, so it covers more and
-		# reaches less. That trade is the whole point of the slider, and it
-		# only exists if range actually falls as the dish grows.
-		if data.tweaks.has("dish_aperture") and data.tweaks["dish_aperture"] > 0.0:
-			fire_range /= data.tweaks["dish_aperture"]
-		# Deployed bipod. Not a linear-scale tweak like the rest of these -
-		# it's a discrete either/or, and it's the only tweak in the roster
-		# that buys a stat with a CAPABILITY rather than with weight or
-		# cost. Deployed, the rifle reaches much further and hits harder at
-		# that reach; deployed, it also cannot fire while its vehicle is
-		# moving (_bipod_blocks_firing). That makes the choice a real
-		# question about how you intend to use the vehicle, which is what
-		# DESIGN_VISION.md wants out of a tweak, instead of a slider where
-		# more is simply better.
-		bipod_deployed = data.tweaks.get("bipod_deploy", 0.0) >= 0.5
-		if bipod_deployed:
-			fire_range *= BIPOD_RANGE_BONUS
 
-		# Audit (task 47/48): previously only barrel_length/elevation nudged
-		# traverse_speed, leaving most weapon types' actual tweaks
-		# (drum_size, motor_size, rail_length, etc.) with zero direct
-		# traverse effect - they only moved traverse indirectly through the
-		# weight-driven base formula above. Generalized to every "single
-		# part gets physically bigger" tweak name (ModuleCatalog.
-		# LINEAR_SCALE_WEAPON_TWEAKS, shared with module_data.gd's
-		# weight-scaling list) so a bigger/heavier part now also directly
-		# costs some traverse speed on top of its weight effect - a real,
-		# type-relevant tweak-to-traverse link for nearly every weapon in
-		# the roster, not just the two that happened to share a tweak name
-		# with heavy_howitzer/basic_cannon.
-		for tweak_name in ModuleCatalog.LINEAR_SCALE_WEAPON_TWEAKS:
-			if data.tweaks.has(tweak_name) and data.tweaks[tweak_name] > 0.0:
-				traverse_speed /= data.tweaks[tweak_name]
-		traverse_speed = clamp(traverse_speed, 0.15, 20.0)
+		# Range: the whole tweak chain lives in weapon_range.gd now, so the
+		# Design Lab can show the same reach combat uses instead of having to
+		# re-implement two dozen multipliers and then drift from them - which is
+		# exactly what happened to weight capacity before drivetrain.gd.
+		#
+		# barrel_length is the headline modifier and the one Chris called out:
+		# "longer barrel = greater velocity and range". Because munition speed is
+		# derived from fire_range (see _munition_speed), the velocity half of that
+		# falls out of the same number rather than needing its own parallel chain,
+		# and a longer barrel is also charged against traverse below - so the
+		# slider is a genuine trade rather than a free upgrade.
+		fire_range = WeaponRange.compute(type_id, data.tweaks, mount_faction)
+
+		# Read separately from the reach chain because it gates FIRING, not
+		# distance: deployed, the rifle reaches much further and hits harder at
+		# that reach, and it cannot shoot at all while its vehicle is moving
+		# (_bipod_blocks_firing). WeaponRange.compute applies the reach half; this
+		# is the capability half, and together they make the tweak a real question
+		# about how you intend to use the vehicle instead of a slider where more
+		# is simply better.
+		bipod_deployed = data.tweaks.get("bipod_deploy", 0.0) >= 0.5
+
+		# The blanket "divide traverse by every linear-scale tweak" pass that
+		# used to sit here is gone. It dated from an audit that found most
+		# tweaks had no direct traverse effect, and fixed that by charging EVERY
+		# one of ModuleCatalog.LINEAR_SCALE_WEAPON_TWEAKS a full division - on
+		# top of the weight-derived base, which those same tweaks had already
+		# driven up. So a tweak was charged twice, and a weapon carrying four
+		# such tweaks at 1.5 lost a factor of 5.06 in traverse from a mass
+		# increase of the same 5.06 - compounding to a rate no amount of
+		# per-type tuning could rescue.
+		#
+		# Weight is now charged exactly once, as a ratio (above), and length
+		# gets its own separate term because inertia genuinely scales with the
+		# square of the radius rather than with mass alone.
+		traverse_speed = clamp(traverse_speed, TRAVERSE_SPEED_MIN, TRAVERSE_SPEED_MAX)
 
 		# Apply Fire Rate Tweak Modifiers (Shot Intervals)
 		if data.tweaks.has("caliber"):
@@ -721,7 +802,6 @@ func _ready():
 			else:
 				energy_drain_per_shot = per_shot_damage * 0.5
 
-		fire_range *= FactionCatalog.get_passive(mount_faction, "range_mult", 1.0)
 
 	# Desynchronize initial reload timers
 	time_since_last_shot = randf_range(0.0, fire_rate)
@@ -903,6 +983,35 @@ func _physics_process(delta):
 # target as long as it's still a legal pick (alive, in range, in arc, not
 # fog-hidden, still the right kind of candidate for this weapon's mode)
 # avoids the thrash; only reacquire once it's actually no longer valid.
+# Can this weapon physically point at `dir`? Both halves of the envelope in one
+# place, called from every acquisition scan and from the keep-current-target
+# check, so no candidate can be accepted on one axis while failing the other.
+#
+# Previously all seven call sites tested yaw alone. That is why elevation had no
+# gameplay effect at all before this: a weapon's reachable set was a cone about
+# its resting heading, and a target directly overhead sat inside that cone for
+# any pintle mount (traverse_limit_angle == PI), howitzer included.
+func _can_aim_at(resting_forward: Vector3, dir: Vector3) -> bool:
+	if resting_forward.angle_to(dir) > max(traverse_limit_angle, MIN_ACQUISITION_ARC):
+		return false
+	return _within_elevation(dir)
+
+# Elevation half, split out so tests and the Design Lab can ask about it
+# directly. `dir` is a world-space unit vector toward the target.
+func _within_elevation(dir: Vector3) -> bool:
+	# The weapon's own up axis, NOT world up - placement aligns local +Y with
+	# the mount surface normal, so this is what makes a side- or belly-mounted
+	# weapon's stops mean the right thing.
+	var up := global_transform.basis.y.normalized()
+	# Signed angle off the weapon's own horizon: positive is elevation toward
+	# its up axis, negative is depression.
+	var pitch := asin(clampf(dir.dot(up), -1.0, 1.0))
+	if pitch > maxf(elevation_up_limit, MIN_ELEVATION_TOLERANCE) + ELEVATION_EPSILON:
+		return false
+	if -pitch > maxf(elevation_down_limit, MIN_DEPRESSION_TOLERANCE) + ELEVATION_EPSILON:
+		return false
+	return true
+
 func _is_current_target_still_valid(resting_forward: Vector3) -> bool:
 	if not target or not is_instance_valid(target):
 		return false
@@ -921,12 +1030,12 @@ func _is_current_target_still_valid(resting_forward: Vector3) -> bool:
 			var t_team = target.get_meta("team") if target.has_meta("team") else -1
 			if _teams_allied(t_team, my_team):
 				return false
-			if "fog_hidden" in target and target.fog_hidden:
+			if not _team_can_see(target):
 				return false
 	if global_position.distance_to(target.global_position) > fire_range:
 		return false
 	var dir = (target.global_position - global_position).normalized()
-	if resting_forward.angle_to(dir) > max(traverse_limit_angle, MIN_ACQUISITION_ARC):
+	if not _can_aim_at(resting_forward, dir):
 		return false
 	# Stop clinging to something our own hull is standing in front of -
 	# otherwise the weapon tracks an unshootable target indefinitely instead
@@ -954,6 +1063,25 @@ func _is_los_blocked_cached(candidate: Node3D) -> bool:
 # _teams_allied() defers to current_scene.is_allied(), so the Test Range and
 # every headless test fixture (neither has a real Skirmish) fall back to the
 # exact old full-roster scan unchanged.
+# The fog gate for target acquisition. Asks the skirmish controller for its
+# per-team answer, so a weapon can engage anything its OWN TEAM has spotted
+# rather than only what this one unit can see - the mechanic that makes the
+# Overwatch and Operational range tiers (ModuleCatalog.RANGE_TIERS) mean
+# anything, since those out-reach their own vision by 1.2x to 4.5x.
+#
+# Duck-typed through current_scene the same way _teams_allied() and
+# _damageable_candidates() already are: the Test Range and every headless test
+# fixture have no skirmish controller and fall back to the old per-construct
+# fog_hidden flag, which in those contexts is never set - i.e. unchanged
+# behaviour.
+func _team_can_see(c) -> bool:
+	if c == null or not is_instance_valid(c):
+		return false
+	var scene = get_tree().current_scene
+	if scene and scene.has_method("is_visible_to_team"):
+		return scene.is_visible_to_team(c, get_team())
+	return not ("fog_hidden" in c and c.fog_hidden)
+
 func _damageable_candidates(pos: Vector3, radius: float) -> Array:
 	var scene = get_tree().current_scene
 	if scene and scene.has_method("get_nearby_damageable"):
@@ -1029,7 +1157,7 @@ func _find_nearest_target(delta: float = -1.0):
 				var dist = global_position.distance_to(c.global_position)
 				if dist < closest_ally_dist:
 					var dir = (c.global_position - global_position).normalized()
-					if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC):
+					if _can_aim_at(resting_forward, dir):
 						closest_ally = c
 						closest_ally_dist = dist
 			target = closest_ally
@@ -1046,7 +1174,7 @@ func _find_nearest_target(delta: float = -1.0):
 				var dist_m = global_position.distance_to(m.global_position)
 				if dist_m < closest_m_dist:
 					var dir_m = (m.global_position - global_position).normalized()
-					if resting_forward.angle_to(dir_m) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC):
+					if _can_aim_at(resting_forward, dir_m):
 						closest_m = m
 						closest_m_dist = dist_m
 			if closest_m:
@@ -1060,17 +1188,16 @@ func _find_nearest_target(delta: float = -1.0):
 			var c_team = c.get_meta("team") if c.has_meta("team") else -1
 			if _teams_allied(c_team, my_team): continue
 			if "is_dead" in c and c.is_dead: continue
-			# Fog-of-war: can't target what hasn't been scouted. Only ever
-			# true for enemy-team constructs (skirmish.gd's fog scan never
-			# hides the player's own units), so this is a safe universal
-			# check regardless of which team's weapon is doing the
-			# targeting - it only ever filters out something that was
-			# already going to be a hostile candidate.
-			if "fog_hidden" in c and c.fog_hidden: continue
+			# Fog-of-war: can't target what the TEAM hasn't spotted. This is
+			# the spotter mechanic - the unit doing the looking and the unit
+			# doing the shooting are deliberately allowed to be different
+			# units on opposite sides of the field, which is the only reason
+			# a T5 weapon reaching 4x its own vision is usable at all.
+			if not _team_can_see(c): continue
 			var dist = global_position.distance_to(c.global_position)
 			if dist < closest_c_dist:
 				var dir = (c.global_position - global_position).normalized()
-				if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC) and not _is_los_blocked_to(c):
+				if _can_aim_at(resting_forward, dir) and not _is_los_blocked_to(c):
 					closest_c = c
 					closest_c_dist = dist
 		target = closest_c
@@ -1086,7 +1213,7 @@ func _find_nearest_target(delta: float = -1.0):
 				var dist = global_position.distance_to(m.global_position)
 				if dist < closest_dist:
 					var dir = (m.global_position - global_position).normalized()
-					if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC):
+					if _can_aim_at(resting_forward, dir):
 						closest = m
 						closest_dist = dist
 		target = closest
@@ -1103,7 +1230,7 @@ func _find_nearest_target(delta: float = -1.0):
 			var dist = global_position.distance_to(player.global_position)
 			if dist < fire_range:
 				var dir = (player.global_position - global_position).normalized()
-				if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC):
+				if _can_aim_at(resting_forward, dir):
 					target = player
 					return
 		target = null
@@ -1119,7 +1246,7 @@ func _find_nearest_target(delta: float = -1.0):
 			var dist = global_position.distance_to(t.global_position)
 			if dist < closest_dist:
 				var dir = (t.global_position - global_position).normalized()
-				if resting_forward.angle_to(dir) <= max(traverse_limit_angle, MIN_ACQUISITION_ARC) and not _is_los_blocked_to(t):
+				if _can_aim_at(resting_forward, dir) and not _is_los_blocked_to(t):
 					closest = t
 					closest_dist = dist
 	target = closest
@@ -1388,6 +1515,33 @@ func _fire_mortar_salvo():
 
 const WeaponMissileScene = preload("res://scripts/weapon_missile.gd")
 
+# --- Munition velocity -----------------------------------------------------
+# Every missile speed in here used to be an absolute units-per-second literal,
+# which silently coupled "how fast does this missile fly" to "how far does this
+# weapon reach": the cruise missile's deliberately-slow 9 u/s crossed its old
+# 42-unit range in 4.7s, and would have taken 19s to cross its new 170.
+#
+# Speed is now expressed as the time a munition takes to fly its weapon's OWN
+# maximum range, which is the quantity that actually matters for feel and the
+# one that should stay put when range is retuned. Two things fall out of it for
+# free:
+#
+#   - Retuning a range never quietly changes how long a shot takes to arrive.
+#     Every literal below is the weapon's old range divided by its old speed,
+#     so flight times are unchanged from before the retune to two decimals.
+#   - "Longer barrel = greater velocity and range" (Chris's spec) needs no
+#     separate velocity term at all. barrel_length already multiplies
+#     fire_range in _ready(); because speed is derived from fire_range, a
+#     longer barrel now literally throws the round faster as well as further,
+#     and the two stay consistent by construction rather than by two parallel
+#     tweak chains that can drift apart.
+#
+# Relative character between weapons is preserved exactly - the cruise missile
+# is still the slowest thing in the roster and the hypervelocity missile still
+# arrives roughly 8x quicker for its reach.
+func _munition_speed(seconds_to_max_range: float) -> float:
+	return maxf(fire_range / maxf(seconds_to_max_range, 0.05), 1.0)
+
 # Real, interceptable missile (FABLE_REVIEW.md 2.2/2.2) instead of a cosmetic
 # tween - see weapon_missile.gd. is_top_attack/target/damage must be set
 # before add_child() since _ready() reads them immediately.
@@ -1397,6 +1551,9 @@ func _fire_missile_projectile(is_top_attack: bool):
 	missile.set_script(WeaponMissileScene)
 	missile.position = global_position + Vector3(0, 0.5, 0)
 	missile.is_top_attack = is_top_attack
+	# Was weapon_missile.gd's bare default of 16 u/s - explicit now so it
+	# tracks fire_range like every other munition. guided_missile: 35 / 16.
+	missile.speed = _munition_speed(2.19)
 	missile.setup(target, self, dps * fire_rate, damage_class, get_team())
 	_effects_parent().add_child(missile)
 
@@ -1414,7 +1571,7 @@ func _fire_swarm_missiles():
 			var missile = Node3D.new()
 			missile.set_script(WeaponMissileScene)
 			missile.position = global_position + Vector3(randf_range(-0.3, 0.3), 0.3, randf_range(-0.3, 0.3))
-			missile.speed = 20.0
+			missile.speed = _munition_speed(1.50) # missile_pod: 30 / 20
 			missile.salvo_jitter = 1.2
 			missile.setup(target, self, per_missile_damage, damage_class, get_team())
 			_effects_parent().add_child(missile)
@@ -1422,6 +1579,12 @@ func _fire_swarm_missiles():
 
 
 # --- Roster expansion: indirect fire + missiles -----------------------------
+
+# The distance an arcing shell's authored flight_time/arc_height describe. Set
+# to roughly the old mortar/artillery reach, so a mid-range lob looks and feels
+# exactly as it did before range was retuned, and only the genuinely long shots
+# get the longer, higher trajectory.
+const ARC_REFERENCE_DISTANCE: float = 25.0
 
 # A lobbed shell that arcs to a point and detonates. Extracted because the
 # tween/AoE pattern was already inlined three times (artillery, mortar salvo,
@@ -1443,14 +1606,36 @@ func _fire_arcing_shell_at(shell_radius: float, arc_height: float, colour: Color
 
 	var start = global_position
 	var end = target.global_position + aim_offset
+
+	# Flight time and apex both scale with how far the shell actually has to
+	# travel. `flight_time` and `arc_height` are the values for a shot at
+	# ARC_REFERENCE_DISTANCE, not for every shot regardless of distance -
+	# previously they were absolute, so an artillery round crossed its full
+	# range in a flat 0.8s no matter what that range was. Harmless at the old
+	# 28-50 unit reaches; at 140 (ModuleCatalog.RANGE_TIERS) a shell would
+	# have crossed most of the map in under a second on a visually flat
+	# trajectory, which reads as a laser rather than a howitzer.
+	#
+	# This is also what gives the Operational tier its real weakness. AoE is
+	# resolved at `end`, which is locked in at launch (see the tween's
+	# finished handler) - so the longer the shot, the further a moving target
+	# can walk out of the impact point before it lands. Long-range indirect
+	# fire is a weapon for shelling positions and slow formations, not for
+	# hitting a scout, and now it plays that way instead of being a perfect
+	# instant-delivery sniper at four times its own vision.
+	var travel: float = start.distance_to(end)
+	var reach_mult: float = maxf(travel / ARC_REFERENCE_DISTANCE, 0.35)
+	var scaled_flight: float = flight_time * reach_mult
+	var scaled_apex: float = arc_height * 12.0 * reach_mult
+
 	var tween = create_tween()
 	tween.tween_method(func(val: float):
 		if not is_instance_valid(shell):
 			return
 		var pos = start.lerp(end, val)
-		pos.y += sin(val * PI) * arc_height * 12.0
+		pos.y += sin(val * PI) * scaled_apex
 		shell.global_position = pos
-	, 0.0, 1.0, flight_time)
+	, 0.0, 1.0, scaled_flight)
 	tween.finished.connect(func():
 		if is_instance_valid(shell):
 			shell.queue_free()
@@ -1515,7 +1700,7 @@ func _fire_hypervelocity_missile():
 			m.position = global_position + Vector3(randf_range(-0.15, 0.15), 0.35, 0.0)
 			# Roughly three times a normal missile. The whole proposition is
 			# that point defence has very little time to engage it.
-			m.speed = 48.0
+			m.speed = _munition_speed(0.55) # hypervelocity: 26 / 48
 			m.setup(target, self, per_dart, damage_class, get_team())
 			_effects_parent().add_child(m)
 		)
@@ -1531,7 +1716,7 @@ func _fire_sam_launcher():
 	var m = Node3D.new()
 	m.set_script(WeaponMissileScene)
 	m.position = global_position + Vector3(0, 0.5, 0)
-	m.speed = 26.0
+	m.speed = _munition_speed(1.15) # sam_launcher: 30 / 26
 	m.setup(target, self, dps * fire_rate, damage_class, get_team())
 	_effects_parent().add_child(m)
 
@@ -1551,7 +1736,7 @@ func _fire_loitering_munition():
 		m.set_script(WeaponMissileScene)
 		m.position = global_position + Vector3(0, 0.6, 0)
 		m.is_top_attack = true
-		m.speed = 14.0
+		m.speed = _munition_speed(2.71) # loitering_munition: 38 / 14
 		m.setup(locked, self, dps * fire_rate, damage_class, get_team())
 		_effects_parent().add_child(m)
 	)
@@ -1566,7 +1751,7 @@ func _fire_anti_radiation_missile():
 	var m = Node3D.new()
 	m.set_script(WeaponMissileScene)
 	m.position = global_position + Vector3(0, 0.5, 0)
-	m.speed = 22.0
+	m.speed = _munition_speed(1.55) # anti_radiation_missile: 34 / 22
 	m.setup(target, self, dps * fire_rate, damage_class, get_team())
 	_effects_parent().add_child(m)
 
@@ -1585,7 +1770,7 @@ func _fire_bunker_buster():
 	m.set_script(WeaponMissileScene)
 	m.position = global_position + Vector3(0, 0.5, 0)
 	m.is_top_attack = true
-	m.speed = 15.0
+	m.speed = _munition_speed(1.60) # bunker_buster: 24 / 15
 	m.setup(target, self, dmg, damage_class, get_team())
 	_effects_parent().add_child(m)
 
@@ -1597,7 +1782,7 @@ func _fire_cruise_missile():
 	var m = Node3D.new()
 	m.set_script(WeaponMissileScene)
 	m.position = global_position + Vector3(0, 0.6, 0)
-	m.speed = 9.0
+	m.speed = _munition_speed(4.67) # cruise_missile: 42 / 9
 	m.setup(target, self, dps * fire_rate, damage_class, get_team())
 	_effects_parent().add_child(m)
 
@@ -2191,7 +2376,7 @@ func _fire_grenade_launcher():
 const MUZZLE_STANDOFF: float = 1.1
 # Deployed bipod: a big reach bonus that costs the ability to shoot on the
 # move. See _bipod_blocks_firing() for the other half of the trade.
-const BIPOD_RANGE_BONUS: float = 1.45
+const BIPOD_RANGE_BONUS: float = WeaponRange.BIPOD_RANGE_BONUS
 const BIPOD_MOVING_SPEED: float = 0.35
 
 const BACKBLAST_RANGE: float = 4.5

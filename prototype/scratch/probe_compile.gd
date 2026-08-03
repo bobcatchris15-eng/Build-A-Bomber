@@ -8,6 +8,10 @@ extends SceneTree
 # Run: ./Godot_v4.3-stable_win64_console.exe --headless --script scratch/probe_compile.gd --path .
 
 const PATHS := [
+	"res://run_tests.gd",
+	"res://scripts/drivetrain.gd",
+	"res://scripts/battle_unit.gd",
+	"res://scripts/module_catalog.gd",
 	"res://scripts/skirmish.gd",
 	"res://scripts/stat_calculator.gd",
 	"res://scripts/tweak_callout.gd",
@@ -40,8 +44,17 @@ func _init():
 	var bad := 0
 	for p in PATHS:
 		var s = load(p)
+		# can_instantiate() is the check that actually catches a parse error.
+		# load() returns a non-null BROKEN GDScript for a file that failed to
+		# compile, so the old `s == null` test printed [ok] for a script Godot
+		# had just refused to parse - it only ever caught a missing file. Found
+		# while adding drivetrain.gd, which reported [ok] alongside its own
+		# "Parse error" on the line above.
 		if s == null:
 			print("  [FAIL] script did not load: ", p)
+			bad += 1
+		elif s is GDScript and not s.can_instantiate():
+			print("  [FAIL] script failed to compile: ", p)
 			bad += 1
 		else:
 			print("  [ok]   ", p)

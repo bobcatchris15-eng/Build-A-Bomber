@@ -227,6 +227,35 @@ func _physics_process(delta):
 	camera.global_position = camera.global_position.lerp(target_cam_pos, 5.0 * delta)
 	camera.look_at(vehicle.global_position + Vector3(0, 0.5, 0), Vector3.UP)
 
+## The arena floor's height, for battle_unit.gd's ground snap.
+##
+## Duck-typed exactly like skirmish.gd's terrain_height_at() - battle_unit.gd
+## checks `get_parent().has_method("terrain_height_at")` and, finding nothing
+## here, fell through to its gravity + is_on_floor() fallback instead. That
+## fallback rests the unit on whatever collider it has, and the only collider a
+## ground unit has is the one around its HULL - so the hull came to rest on the
+## floor with the wheels/legs/treads buried underneath it. That is the "the
+## locomotors fall through the ground in the test arena, leaving the vehicles
+## sliding around on their belly" report (Chris, 2026-08-03): Skirmish never
+## showed it because Skirmish DOES implement this method, so it used the
+## analytic snap and put the unit's origin - i.e. its ground contact point - on
+## the ground where it belongs.
+##
+## Constant because this arena is one flat slab, not a heightmap: the Ground
+## StaticBody3D is a 100x1x100 box centred at y=-0.5, so its top face is y=0.
+## Read from the node rather than hardcoded, so moving the slab in the scene
+## cannot silently desync the two.
+const ARENA_FLOOR_Y := 0.0
+
+func terrain_height_at(_pos: Vector3) -> float:
+	var ground := get_node_or_null("Ground") as Node3D
+	if ground == null:
+		return ARENA_FLOOR_Y
+	var shape := ground.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if shape == null or not (shape.shape is BoxShape3D):
+		return ARENA_FLOOR_Y
+	return ground.global_position.y + shape.position.y + (shape.shape as BoxShape3D).size.y * 0.5
+
 func _on_return_pressed():
 	get_tree().change_scene_to_file("res://scenes/MainLab.tscn")
 

@@ -778,6 +778,77 @@ func _active_reveal_beacons(viewing_team: int) -> Array:
 	_reveal_beacons = kept
 	return live
 
+# --- Per-team visibility ("who can my side see?") --------------------------
+# The fog scan used to compute visibility for the LOCAL team only, writing the
+# single fog_hidden flag on each enemy construct. That flag is what weapons
+# targeted against, which had two consequences once the range retune gave
+# weapons reach far past their own vision (ModuleCatalog.RANGE_TIERS):
+#
+#   - It is one flag, so it can only ever describe one team's knowledge. The
+#     AI side had no visibility gate at all (nothing sets fog_hidden on the
+#     player's units), so AI weapons could always shoot at maximum range while
+#     the player's had to have scouted first. Harmless when every weapon
+#     out-ranged its vision anyway; a large asymmetry once a T5 weapon reaches
+#     4x its own sight radius.
+#   - "Spotting" only worked in one direction. Chris's spec is that vision is
+#     a TEAM property - "if a scout can see something, then it can be targeted
+#     by distant long-range weapons" - which needs a per-team answer, for
+#     every team, not a single global bit.
+#
+# So visibility is now computed per viewing team on the same tick, cached as a
+# set of instance IDs, and queried through is_visible_to_team(). fog_hidden
+# survives unchanged as the LOCAL team's view, because that is what all the
+# rendering/minimap/intel code keys off.
+var _team_visible: Dictionary = {}
+
+# Can `viewing_team` currently see `c`? Allied constructs are always visible
+# to each other; hostiles have to have been spotted this tick by SOMETHING on
+# that team - which is the whole spotter mechanic, since the spotter and the
+# shooter need not be the same unit or anywhere near each other.
+func is_visible_to_team(c, viewing_team: int) -> bool:
+	if c == null or not is_instance_valid(c):
+		return false
+	if debug_reveal_all_fog:
+		return true
+	var c_team = c.get_meta("team") if c.has_meta("team") else -1
+	if is_allied(viewing_team, c_team):
+		return true
+	# Fails OPEN when no scan has run yet (first frames of a match, or a
+	# context that never calls _recalc_fog_of_war at all). A closed default
+	# would make every weapon in the game refuse to fire until the first fog
+	# tick landed, which is a much worse failure than a frame of over-sharing.
+	if not _team_visible.has(viewing_team):
+		return true
+	return _team_visible[viewing_team].has(c.get_instance_id())
+
+# Whether any of `viewers` can see `c` right now. Extracted verbatim from the
+# old inline fog loop so both the per-team scan and the local-team render pass
+# share one definition of "spotted".
+func _is_spotted_by(c, viewers: Array, beacons: Array, was_visible: bool) -> bool:
+	var c_flying = "is_flying" in c and c.is_flying
+	# Bayou Irregulars passive: shrinks the effective distance at which
+	# ANY observer can spot this specific construct - camouflage is a
+	# property of the thing being looked at, not the viewer.
+	var detection_mult = FactionCatalog.get_passive(_get_construct_faction(c), "detection_range_mult", 1.0)
+	for o in viewers:
+		if not is_instance_valid(o): continue
+		var vision = _get_effective_vision(o) * detection_mult
+		var effective_range = vision * FOG_HIDE_RANGE_MULT if was_visible else vision
+		var o_flying = "is_flying" in o and o.is_flying
+		if c.global_position.distance_to(o.global_position) <= effective_range:
+			# Flying viewers/targets skip the terrain-obstacle raycast
+			# entirely - already airborne regardless of what's on the
+			# ground below, same reasoning the elevation bonus above
+			# already uses for flying viewers.
+			if o_flying or c_flying or _has_line_of_sight(o.global_position, c.global_position):
+				return true
+	# Illumination flares: a lit area is simply seen, no LOS check (see
+	# _reveal_beacons above).
+	for b in beacons:
+		if c.global_position.distance_to(b.pos) <= b.radius:
+			return true
+	return false
+
 func _recalc_fog_of_war():
 	if game_over: return
 	# Alliance-aware (RTS_CORE_ROADMAP.md B2): "player_constructs" is
@@ -786,48 +857,51 @@ func _recalc_fog_of_war():
 	# allies (is_allied(PLAYER_TEAM, ENEMY_TEAM) is false with an empty
 	# allies list, same as the old != check).
 	var local_team = _local_team()
+	var by_team: Dictionary = {}
+	for team in _all_teams():
+		by_team[team] = get_team_units(team) + get_team_buildings(team)
+
+	# One pass per viewing team. Cost is the old scan times the team count
+	# (2 in every shipped mode), on a tick that already runs at FOG_INTERVAL
+	# rather than per frame.
+	var next_visible: Dictionary = {}
+	for viewing_team in by_team:
+		var viewers: Array = []
+		var targets: Array = []
+		for team in by_team:
+			if is_allied(viewing_team, team):
+				viewers += by_team[team]
+			else:
+				targets += by_team[team]
+		var team_beacons = _active_reveal_beacons(viewing_team)
+		var prev: Dictionary = _team_visible.get(viewing_team, {})
+		var seen_set: Dictionary = {}
+		for c in targets:
+			if not is_instance_valid(c): continue
+			# Reveal/hide hysteresis needs to know whether THIS team saw the
+			# construct last tick, which for a non-local team can't come off
+			# the shared fog_hidden flag - it comes from that team's own
+			# previous set.
+			var was_visible: bool = prev.has(c.get_instance_id())
+			if debug_reveal_all_fog or _is_spotted_by(c, viewers, team_beacons, was_visible):
+				seen_set[c.get_instance_id()] = true
+		next_visible[viewing_team] = seen_set
+	_team_visible = next_visible
+
+	# The local team's answer additionally drives fog_hidden, which is what
+	# every rendering/minimap/intel path keys off.
 	var player_constructs: Array = []
 	var enemy_constructs: Array = []
-	for team in _all_teams():
-		var group = get_team_units(team) + get_team_buildings(team)
+	for team in by_team:
 		if is_allied(local_team, team):
-			player_constructs += group
+			player_constructs += by_team[team]
 		else:
-			enemy_constructs += group
-	var beacons = _active_reveal_beacons(local_team)
+			enemy_constructs += by_team[team]
+	var local_seen: Dictionary = _team_visible.get(local_team, {})
 	for c in enemy_constructs:
 		if not is_instance_valid(c) or not c.has_method("set_fog_visible"): continue
-		var seen = false
-		var c_flying = "is_flying" in c and c.is_flying
-		var was_visible = not ("fog_hidden" in c and c.fog_hidden)
-		# Bayou Irregulars passive: shrinks the effective distance at which
-		# ANY observer can spot this specific construct - camouflage is a
-		# property of the thing being looked at, not the viewer.
-		var detection_mult = FactionCatalog.get_passive(_get_construct_faction(c), "detection_range_mult", 1.0)
-		for o in player_constructs:
-			if not is_instance_valid(o): continue
-			var vision = _get_effective_vision(o) * detection_mult
-			var effective_range = vision * FOG_HIDE_RANGE_MULT if was_visible else vision
-			var o_flying = "is_flying" in o and o.is_flying
-			if c.global_position.distance_to(o.global_position) <= effective_range:
-				# Flying viewers/targets skip the terrain-obstacle raycast
-				# entirely - already airborne regardless of what's on the
-				# ground below, same reasoning the elevation bonus above
-				# already uses for flying viewers.
-				if o_flying or c_flying or _has_line_of_sight(o.global_position, c.global_position):
-					seen = true
-					break
-		# Illumination flares: a lit area is simply seen, no LOS check (see
-		# _reveal_beacons above).
-		if not seen:
-			for b in beacons:
-				if c.global_position.distance_to(b.pos) <= b.radius:
-					seen = true
-					break
-		if debug_reveal_all_fog:
-			seen = true
-		c.set_fog_visible(seen)
-	_update_fog_shroud(player_constructs, beacons)
+		c.set_fog_visible(local_seen.has(c.get_instance_id()))
+	_update_fog_shroud(player_constructs, _active_reveal_beacons(local_team))
 	_update_minimap()
 	_update_enemy_intel()
 

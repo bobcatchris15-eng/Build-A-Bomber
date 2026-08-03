@@ -16,6 +16,7 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const GlobalConfigScript = preload("res://scripts/global_config.gd")
 const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
+const Drivetrain = preload("res://scripts/drivetrain.gd")
 
 var team: int = 0
 var max_hp: float = 400.0
@@ -51,6 +52,19 @@ var hull_node: Node3D = null
 var locomotion_type: String = ""
 var locomotion_settings: Dictionary = {}
 var move_speed: float = 5.0
+# Drivetrain figures, all set by _recalculate_move_speed() from one
+# Drivetrain.analyze() call. Held as fields rather than recomputed on demand
+# because that function re-runs whenever damage strips a subsystem: a unit
+# that has lost half its running gear is genuinely more overloaded than it
+# was at spawn, and anything reporting load has to see the current value.
+var total_weight: float = 0.0
+var weight_capacity: float = 0.0
+var load_ratio: float = 0.0
+var is_overloaded: bool = false
+# The design's clean top speed - thrust/weight capped by the chassis's own
+# rating, BEFORE the overload penalty. move_speed is what it actually does;
+# the gap between the two is what being overweight costs.
+var top_speed: float = 0.0
 # Terrain variety task: current surface's speed multiplier for this unit's
 # locomotion type (marsh/rocky/snow_mud/sand - see ModuleCatalog.
 # get_terrain_speed_multiplier()), recomputed every physics tick in
@@ -123,6 +137,10 @@ const KITE_STANDOFF_FRACTION: float = 0.45
 
 var selection_ring: MeshInstance3D = null
 var attack_range: float = 12.0
+# The longest fire_range mounted on this unit. Distinct from attack_range,
+# which is the SHORTEST weapon's reach and governs how close the unit drives.
+# This one only widens what the unit will consider a target at all.
+var max_weapon_range: float = 0.0
 
 # Auto-engage: a unit sitting IDLE (no order at all) had no way to notice a
 # hostile in sight - it would just sit there, only getting whatever passive
@@ -239,7 +257,15 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node, match_f
 		var box = BoxShape3D.new()
 		box.size = base_size * bulk
 		col_shape.shape = box
-		col_shape.position = Vector3(0, box.size.y / 2.0, 0)
+		# Centred on where the hull VISUAL actually sits, not on half its own
+		# height. Those are the same number only for a design with no ground
+		# locomotion; as soon as reconstruct_vehicle lifts the hull to put the
+		# running gear on the floor, the old expression left the collider a
+		# full ride-height BELOW the hull it is supposed to represent - so
+		# shots passed through the visible hull untouched and connected with
+		# empty air under it instead. The authored-mesh branch above already
+		# used hull_node.position for exactly this reason.
+		col_shape.position = Vector3(0, hull_node.position.y, 0)
 	add_child(col_shape)
 
 	# Running-gear collider (test arena "vehicle slides on its belly" fix):
@@ -399,6 +425,7 @@ func _recalculate_energy(hull_type_for_energy: String = ""):
 
 func _setup_weapons():
 	var min_weapon_range = INF
+	max_weapon_range = 0.0
 	for child in hull_node.get_children():
 		if child.has_meta("module_data"):
 			var data = child.get_meta("module_data")
@@ -444,6 +471,12 @@ func _setup_weapons():
 				if data.category == "weapon" and "fire_range" in child:
 					var effective_range = child.fire_range - child.position.length()
 					min_weapon_range = min(min_weapon_range, effective_range)
+					# The LONGEST reach on the unit, tracked separately and
+					# used only to widen the auto-engage search (see
+					# _try_auto_engage). It deliberately does NOT feed
+					# attack_range - the standoff stays the shortest weapon's
+					# reach for all the reasons above.
+					max_weapon_range = maxf(max_weapon_range, child.fire_range)
 				# Reuse the traverse angle auto_weapon.gd just computed (single
 				# source of truth) rather than re-deriving mount_style here.
 				if "traverse_limit_angle" in child and child.traverse_limit_angle <= 0.001:
@@ -469,140 +502,32 @@ func _detect_harvester():
 func _recalculate_move_speed():
 	if not is_instance_valid(hull_node):
 		return
-	# Hull weight is REAL now (FABLE_REVIEW.md 1.2): the hull's own mass -
-	# including its armor material/thickness and the Industrialists'
-	# armor-weight discount, which was previously display-only - enters the
-	# same weight total the thrust and overload math read. Armoring up
-	# finally costs speed in combat, not just in the sidebar label.
-	var speed_hull_type = hull_node.get_meta("type_id", "medium_hull")
-	var speed_thick = hull_node.get_meta("armor_thickness") if hull_node.has_meta("armor_thickness") else 1.0
-	var speed_mat = hull_node.get_meta("armor_material") if hull_node.has_meta("armor_material") else "hardened_steel"
-	var speed_hull_scale = hull_node.get_meta("hull_scale") if hull_node.has_meta("hull_scale") else Vector3.ONE
-	var speed_faction = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
-	var armor_wt_mult = FactionCatalog.get_passive(speed_faction, "armor_weight_mult", 1.0)
-	var total_weight = ModuleCatalog.compute_hull_weight(speed_hull_type, speed_thick, speed_mat, speed_hull_scale, armor_wt_mult)
-	var motor_thrust = 100.0
-	var total_weight_capacity = 0.0
-	var has_locomotion = false
-	for child in hull_node.get_children():
-		if child.has_meta("module_data") and not child.is_queued_for_deletion():
-			var data = child.get_meta("module_data")
-			total_weight += data.get_weight()
-			if data.category == "locomotion":
-				has_locomotion = true
-				# Batch E: axle-count/leg-count/tread-width tweaks now carry
-				# a REAL tradeoff instead of a single shared multiplier -
-				# thrust and capacity can move in opposite directions.
-				# wheels/helicopter_rotors: more of them = proportionally
-				# more of both (a straightforward "bigger rig" scale-up,
-				# no tradeoff - matches how axle count already worked
-				# before this pass).
-				# legs: more legs = more capacity (broader stance, more
-				# load-bearing contact points) but LESS thrust per leg
-				# once you're past 4 (more mechanical mass/drag to
-				# coordinate) - fewer legs trades stability for agility,
-				# per Chris's ask.
-				# tracked_treads: width already drove capacity before
-				# (wider = more contact area = more capacity, kept as-is);
-				# now ALSO trades against thrust (wider = more friction/
-				# less top speed, narrower = lighter and faster) instead
-				# of boosting both together.
-				var thrust_contrib = 1.0
-				var capacity_contrib = 1.0
-				if locomotion_type == "wheels":
-					# Total wheel count (axle positions x wheels-per-axle,
-					# dually) drives both thrust and load-bearing capacity,
-					# not just axle count, per Chris's ask.
-					var axles = float(locomotion_settings.get("num_axles", locomotion_settings.get("count", 4)))
-					var w_per_axle = float(locomotion_settings.get("wheels_per_axle", 1.0))
-					var c = (axles * w_per_axle) / 4.0
-					thrust_contrib = c
-					capacity_contrib = c
-				elif locomotion_type == "helicopter_rotors":
-					var c = float(locomotion_settings.get("count", 4)) / 4.0
-					thrust_contrib = c
-					capacity_contrib = c
-				elif locomotion_type == "legs":
-					var leg_count = float(locomotion_settings.get("count", 4))
-					capacity_contrib = leg_count / 4.0
-					thrust_contrib = 1.0 + (4.0 - leg_count) / 8.0
-				elif locomotion_type == "tracked_treads":
-					var width = locomotion_settings.get("tread_width", locomotion_settings.get("width", 1.0))
-					capacity_contrib = width
-					thrust_contrib = 1.0 + (1.0 - width) * 0.5
-				elif locomotion_type == "hover_engine":
-					# Pad count drives both thrust and capacity like wheels/
-					# rotors; Electron Megavoltage (emv_level) ALSO boosts
-					# capacity on top of that - Chris's ask, "increases the
-					# weight capacity... while requiring more resources to
-					# build" (the cost/weight side is in module_data.gd).
-					var pad_count = float(locomotion_settings.get("pad_count", 4))
-					var emv = float(locomotion_settings.get("emv_level", 1.0))
-					var c = pad_count / 4.0
-					thrust_contrib = c
-					capacity_contrib = c * emv
-				elif locomotion_type == "fixed_wing_engine":
-					# Engine count and turbine compression both drive real
-					# thrust (a bigger/more-compressed turbine core pushes
-					# harder) - unlike hover's emv_level, compression isn't
-					# framed as purely cosmetic, so it earns a capacity bump
-					# too (a physically larger turbine core carries more).
-					var engine_count = float(locomotion_settings.get("engine_count", 2))
-					var compression = float(locomotion_settings.get("turbine_compression", 1.0))
-					var c2 = engine_count / 2.0
-					thrust_contrib = c2 * compression
-					capacity_contrib = c2 * compression
-				motor_thrust += ModuleCatalog.get_thrust_coefficient(data.type_id) * child.scale.x * child.scale.z * thrust_contrib
-				# Weight capacity scales with the size/count/width factor
-				# above (a bigger/wider tread, more legs, or a 6-wheel
-				# setup carries more than a stock 4-wheel one), per-
-				# locomotor-type base from ModuleCatalog.get_base_weight_capacity().
-				total_weight_capacity += ModuleCatalog.get_base_weight_capacity(data.type_id) * child.scale.x * child.scale.z * capacity_contrib
-			# Mobility add-on modules (wing/thruster/propeller_prop/
-			# pusher_prop/paddle_wheel/ship_screw) - attachable, not a
-			# primary locomotion choice, so they contribute regardless of
-			# category: wings raise the weight budget before the overload
-			# penalty kicks in, the rest add real extra thrust on top of
-			# whatever the primary locomotion provides.
-			var mod_catalog = ModuleCatalog.get_module_data(data.type_id)
-			var wc_bonus = mod_catalog.get("weight_capacity_bonus", 0.0)
-			var thrust_bonus = mod_catalog.get("thrust_bonus", 0.0)
-			if wc_bonus > 0.0:
-				total_weight_capacity += wc_bonus * child.scale.x * child.scale.z
-			if thrust_bonus > 0.0:
-				motor_thrust += thrust_bonus * child.scale.x * child.scale.z
-	if not has_locomotion:
+	# All of the weight/capacity/thrust/top-speed math this function used to
+	# carry inline now lives in Drivetrain.analyze(), because the Design Lab
+	# needs the SAME numbers and its own abbreviated copy had drifted badly
+	# (see the header comment in drivetrain.gd). Everything below is just
+	# unpacking the result and the movement-side consequences.
+	#
+	# is_flying is passed explicitly rather than re-derived from traits: this
+	# unit already resolved it in setup(), and it is what the movement code
+	# actually branches on, so the Aerodrome Cartel's air-only speed passive
+	# cannot end up applying to a unit that does not fly.
+	var dt = Drivetrain.analyze(hull_node, locomotion_type, locomotion_settings, is_flying)
+
+	# Kept as fields so the in-match HUD, the after-action report and any
+	# future telemetry can report load and headroom without recomputing -
+	# and so a unit that has been slowed by subsystem loss (this function
+	# re-runs on damage) reports the CURRENT figures, not spawn-time ones.
+	total_weight = dt["weight"]
+	weight_capacity = dt["capacity"]
+	load_ratio = dt["load_ratio"]
+	is_overloaded = dt["is_overloaded"]
+	top_speed = dt["top_speed"]
+
+	if not dt["has_locomotion"]:
 		move_speed = 0.0
 		return
-	if total_weight > 0.0:
-		# Constant retuned 5.0 -> 10.0 alongside hull weight entering the
-		# denominator (roughly doubles typical totals), so a baseline bundled
-		# design keeps close to its old speed. Band widened (was 2.0-15.0):
-		# light builds were all converging on the old 15.0 ceiling, erasing
-		# thrust/weight differences between "different fast scouts"
-		# (FABLE_REVIEW.md 1.4), and the floor drops so a grossly overbuilt
-		# brick is genuinely slower than a merely heavy one.
-		move_speed = clamp((motor_thrust / total_weight) * 10.0, 1.5, 18.0)
-	# Overload penalty (task: "make the overall vehicle Weight stat actually
-	# matter"): weight beyond what the locomotion present is built for slows
-	# the unit down, on top of the thrust/weight ratio above. No penalty at
-	# or under capacity (multiplier 1.0). Beyond it, each 100% over capacity
-	# costs 60% of remaining speed, floored at 25% so overload is a real,
-	# punishing penalty without ever fully freezing a unit in place (that
-	# would look like a bug, not a balance mechanic).
-	if total_weight_capacity > 0.0 and total_weight > total_weight_capacity:
-		var overload_ratio = total_weight / total_weight_capacity
-		var overload_multiplier = clamp(1.0 - (overload_ratio - 1.0) * 0.6, 0.25, 1.0)
-		move_speed *= overload_multiplier
-	# Faction passive - table-driven (FactionCatalog.get_passive), covers
-	# every faction's own speed_mult (only technocrats/berserkers set one;
-	# everyone else falls through to the 1.0 default, unchanged).
-	var faction = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
-	move_speed *= FactionCatalog.get_passive(faction, "speed_mult", 1.0)
-	# Aerodrome Cartel passive: only applies to genuinely airborne units -
-	# a ground vehicle designed under this faction gets no speed change.
-	if is_flying:
-		move_speed *= FactionCatalog.get_passive(faction, "air_speed_mult", 1.0)
+	move_speed = dt["move_speed"]
 
 	# The nav agent's capture radii are derived from move_speed, and this
 	# function runs again whenever damage strips a subsystem. Without this
@@ -861,10 +786,25 @@ func _try_auto_engage(delta: float):
 	# in range currently has a clear line (so auto-engage still functions
 	# rather than going permanently idle the instant every scouted enemy
 	# happens to be terrain-occluded).
+	# Search radius is the unit's own vision OR its longest gun's reach,
+	# whichever is further. It used to be vision_range alone, which meant a
+	# unit could never even consider a target it was perfectly capable of
+	# shooting: with the range retune an artillery piece reaches 140 and sees
+	# 38 (ModuleCatalog.RANGE_TIERS), so every candidate between 38 and 140 -
+	# the entire reason to build the thing - was filtered out before the
+	# visibility check ever ran, and the unit sat idle next to a target its
+	# own team had spotted and it could have shelled.
+	#
+	# Widening the radius does NOT widen what the unit is allowed to know
+	# about: the team-visibility check below is unchanged and still has to
+	# pass, so a target out past this unit's own eyes only becomes engageable
+	# when something else on the team is actually looking at it. That is the
+	# spotter mechanic, and it is why this is safe to open up.
+	var search_radius: float = maxf(vision_range, max_weapon_range)
 	var closest: Node3D = null
-	var closest_dist: float = vision_range
+	var closest_dist: float = search_radius
 	var closest_visible: Node3D = null
-	var closest_visible_dist: float = vision_range
+	var closest_visible_dist: float = search_radius
 	for c in get_tree().get_nodes_in_group("damageable"):
 		if not is_instance_valid(c) or c == self:
 			continue
@@ -873,7 +813,7 @@ func _try_auto_engage(delta: float):
 		var c_team = c.get_meta("team") if c.has_meta("team") else -1
 		if _teams_allied(c_team, team):
 			continue
-		if "fog_hidden" in c and c.fog_hidden:
+		if not _team_can_see(c):
 			continue
 		var dist = global_position.distance_to(c.global_position)
 		if dist < closest_dist:
@@ -886,6 +826,20 @@ func _try_auto_engage(delta: float):
 	var engage_target = closest_visible if closest_visible else closest
 	if engage_target:
 		order_attack(engage_target)
+
+# Whether this unit's TEAM can currently see `c` - not whether this unit can.
+# Mirrors auto_weapon.gd's identically-named helper (kept as a separate small
+# copy for the same reason _get_colliders_recursive below is: a few lines of
+# duck-typed lookup, not worth a shared module). Deferring to the skirmish
+# controller's per-team answer rather than the single global fog_hidden flag is
+# what lets one unit's sightline enable another unit's shot.
+func _team_can_see(c) -> bool:
+	if c == null or not is_instance_valid(c):
+		return false
+	var scene = get_tree().current_scene
+	if scene and scene.has_method("is_visible_to_team"):
+		return scene.is_visible_to_team(c, team)
+	return not ("fog_hidden" in c and c.fog_hidden)
 
 # Recursively collects CollisionObject3D RIDs under a node, for LOS raycast
 # exclude lists. Mirrors auto_weapon.gd's own _get_colliders_recursive (kept

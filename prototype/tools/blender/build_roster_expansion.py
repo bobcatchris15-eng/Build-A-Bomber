@@ -513,10 +513,72 @@ def build_autocannon():
 
 	# Feed throat underneath
 	add_box(bm, (0, -0.015, -0.088), (0.092, 0.100, 0.040), bevel=0.007)
-	# Hose stubs off the back plate
+	# Breech backplate. This is now the face the buffer group below bolts to,
+	# rather than a bare end cap with two hoses on it.
 	add_box(bm, (0, -0.190, 0.010), (0.120, 0.024, 0.120), bevel=0.006)
+
+	# ------------------------------------------------------------------
+	# REARWARD BUFFER GROUP (Chris, 2026-08-03: "buffer tubes and mechanical
+	# parts projecting backwards from the trunnion").
+	#
+	# WHY. Every other gun in this family carries real hardware behind the
+	# trunnion, and the autocannon did not:
+	#   hmg_receiver    reaches y = -0.345 (rear plate, servo can, end bell,
+	#                   cable glands, junction box)
+	#   amr_buffer      reaches y = -0.360 (fat buffer tube with cooling ribs,
+	#                   twin hydraulic rams, accumulators, manifold)
+	#   recoilless      reaches y = -0.228 (flared venturi)
+	#   autocannon      reached y = -0.225, and that was a flat plate with two
+	#                   hose stubs on it - nothing with any mass to it.
+	# So from behind, or in profile past the trunnion, this read as a barrel
+	# stuck straight into a box while its siblings read as machinery.
+	#
+	# The exposed recoil-spring rails above (z = +0.048) are deliberately left
+	# alone and NOT enclosed: they are the visual tie to the mount's big open
+	# springs. The new group sits at and below trunnion height instead, so the
+	# rear stacks up in layers rather than one system hiding another.
+	#
+	# No charging handle, no spade grips, no gunner's controls - see
+	# build_hmg.py's note on why the HMG's spade grips became a servo can.
+	# Everything here is a gas/hydraulic part or a cable run.
+
+	# Central recuperator, straight back off the breech face on the trunnion
+	# axis - the "buffer tube" proper, and the dominant new mass.
+	add_cyl_y(bm, (0, -0.207, 0.006), 0.068, 0.030, segments=22)          # front gland
+	bolt_ring(bm, -0.207, 0.058, count=10, bolt_r=0.009, bolt_len=0.018)
+	add_cyl_y(bm, (0, -0.270, 0.006), 0.056, 0.140, segments=22)          # tube body
+	for i in range(4):                                                     # cooling ribs
+		add_cyl_y(bm, (0, -0.228 - i * 0.038, 0.006), 0.064, 0.015, segments=22)
+	add_cyl_y(bm, (0, -0.352, 0.006), 0.062, 0.022, segments=22)           # rear cap
+	add_cyl_y(bm, (0, -0.372, 0.006), 0.030, 0.018, segments=14)           # charging boss
+	add_cyl_y(bm, (0, -0.386, 0.006), 0.012, 0.012, segments=10)           # gas port
+
+	# Twin buffer cylinders flanking it, slung lower, with exposed rods running
+	# forward into the receiver - the same arrangement as amr_buffer's rams.
 	for side in (-1, 1):
-		add_cyl_y(bm, (side * 0.040, -0.212, 0.030), 0.010, 0.026, segments=6)
+		add_cyl_y(bm, (side * 0.088, -0.252, -0.048), 0.036, 0.145, segments=16)
+		add_cyl_y(bm, (side * 0.088, -0.176, -0.048), 0.042, 0.022, segments=16)   # gland
+		add_cyl_y(bm, (side * 0.088, -0.135, -0.048), 0.015, 0.068, segments=12)   # rod
+		add_cyl_y(bm, (side * 0.088, -0.332, -0.048), 0.042, 0.022, segments=16)   # rear cap
+		# Accumulator standing off each cylinder
+		add_cyl_z(bm, (side * 0.088, -0.286, -0.008), 0.025, 0.052, segments=14)
+		add_cyl_z(bm, (side * 0.088, -0.286, 0.026), 0.017, 0.016, segments=12)
+
+	# Rear yoke plate the three tubes pass through, tying them into one group
+	# instead of three separate sticks.
+	add_box(bm, (0, -0.312, -0.020), (0.215, 0.018, 0.125), bevel=0.005)
+	for side in (-1, 1):
+		add_cyl_y(bm, (side * 0.098, -0.312, 0.048), 0.012, 0.026, segments=8)
+
+	# Underslung hydraulic manifold with its ports, and the cable run forward
+	# to the receiver. Same role as hmg_receiver's junction box.
+	add_box(bm, (0, -0.262, -0.098), (0.165, 0.078, 0.038), bevel=0.006)
+	for i in range(4):
+		add_cyl_z(bm, (-0.052 + i * 0.035, -0.262, -0.126), 0.010, 0.026, segments=8)
+	for i in range(3):
+		add_cyl_x(bm, (0, -0.222 - i * 0.052, -0.082), 0.009, 0.205, segments=8)
+	add_tube_between(bm, (0.070, -0.226, -0.086), (0.070, -0.060, -0.070), 0.008, segments=6)
+	add_tube_between(bm, (-0.070, -0.226, -0.086), (-0.070, -0.060, -0.070), 0.008, segments=6)
 	export_bmesh(bm, "autocannon_receiver", "autocannon_receiver.glb", color=(0.20, 0.21, 0.23, 1.0))
 
 	# 3. BARREL - origin at receiver face, extends +Y. LONG and SLIM, with the

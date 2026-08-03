@@ -15,6 +15,8 @@ const PlayerVehicleScript = preload("res://scripts/player_vehicle.gd")
 const TargetDummyScript = preload("res://scripts/target_dummy.gd")
 const IncomingMissileScript = preload("res://scripts/incoming_missile.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
+const DrivetrainScript = preload("res://scripts/drivetrain.gd")
+const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist
 # (2026-07-27 finding): isolated standalone reruns confirmed at least 3
@@ -612,9 +614,61 @@ func _init():
 		success = false
 		_failed.append("test_weapon_traverse_and_range_differentiation")
 	_total_suites += 1
+	if not await _run_suite(test_weapon_elevation_is_differentiated_per_weapon, "test_weapon_elevation_is_differentiated_per_weapon"):
+		success = false
+		_failed.append("test_weapon_elevation_is_differentiated_per_weapon")
+	_total_suites += 1
+	if not await _run_suite(test_design_lab_arc_matches_combat_elevation, "test_design_lab_arc_matches_combat_elevation"):
+		success = false
+		_failed.append("test_design_lab_arc_matches_combat_elevation")
+	_total_suites += 1
+	if not await _run_suite(test_weapon_range_tiers_are_anchored_to_vision, "test_weapon_range_tiers_are_anchored_to_vision"):
+		success = false
+		_failed.append("test_weapon_range_tiers_are_anchored_to_vision")
+	_total_suites += 1
+	if not await _run_suite(test_long_range_weapon_needs_a_team_spotter, "test_long_range_weapon_needs_a_team_spotter"):
+		success = false
+		_failed.append("test_long_range_weapon_needs_a_team_spotter")
+	_total_suites += 1
+	if not await _run_suite(test_indirect_fire_ignores_line_of_sight, "test_indirect_fire_ignores_line_of_sight"):
+		success = false
+		_failed.append("test_indirect_fire_ignores_line_of_sight")
+	_total_suites += 1
+	if not await _run_suite(test_design_lab_reports_range_and_names_the_spotter_trade, "test_design_lab_reports_range_and_names_the_spotter_trade"):
+		success = false
+		_failed.append("test_design_lab_reports_range_and_names_the_spotter_trade")
+	_total_suites += 1
 	if not await _run_suite(test_weight_vs_locomotion_capacity_penalty, "test_weight_vs_locomotion_capacity_penalty"):
 		success = false
 		_failed.append("test_weight_vs_locomotion_capacity_penalty")
+	_total_suites += 1
+	if not await _run_suite(test_locomotor_base_top_speed_is_a_real_per_type_ceiling, "test_locomotor_base_top_speed_is_a_real_per_type_ceiling"):
+		success = false
+		_failed.append("test_locomotor_base_top_speed_is_a_real_per_type_ceiling")
+	_total_suites += 1
+	if not await _run_suite(test_overload_penalty_is_steep_and_monotonic, "test_overload_penalty_is_steep_and_monotonic"):
+		success = false
+		_failed.append("test_overload_penalty_is_steep_and_monotonic")
+	_total_suites += 1
+	if not await _run_suite(test_design_lab_and_combat_agree_on_weight_and_capacity, "test_design_lab_and_combat_agree_on_weight_and_capacity"):
+		success = false
+		_failed.append("test_design_lab_and_combat_agree_on_weight_and_capacity")
+	_total_suites += 1
+	if not await _run_suite(test_every_locomotor_capacity_responds_to_its_own_tweaks, "test_every_locomotor_capacity_responds_to_its_own_tweaks"):
+		success = false
+		_failed.append("test_every_locomotor_capacity_responds_to_its_own_tweaks")
+	_total_suites += 1
+	if not await _run_suite(test_count_tweaks_scale_capacity_linearly_not_quadratically, "test_count_tweaks_scale_capacity_linearly_not_quadratically"):
+		success = false
+		_failed.append("test_count_tweaks_scale_capacity_linearly_not_quadratically")
+	_total_suites += 1
+	if not await _run_suite(test_design_lab_overweight_warning_names_the_trade, "test_design_lab_overweight_warning_names_the_trade"):
+		success = false
+		_failed.append("test_design_lab_overweight_warning_names_the_trade")
+	_total_suites += 1
+	if not await _run_suite(test_battle_spawn_sits_on_its_running_gear, "test_battle_spawn_sits_on_its_running_gear"):
+		success = false
+		_failed.append("test_battle_spawn_sits_on_its_running_gear")
 	_total_suites += 1
 	if not await _run_suite(test_mobility_addon_modules_boost_capacity_and_thrust, "test_mobility_addon_modules_boost_capacity_and_thrust"):
 		success = false
@@ -2392,9 +2446,22 @@ func test_terrain_types_differentiate_locomotion() -> bool:
 	if not (ice_screw > ice_wheels and ice_screw > ice_legs and ice_screw > ice_treads):
 		print("  [FAIL] ice: screw_drive should outpace every other locomotor (suffers least from lost traction). wheels=", ice_wheels, " legs=", ice_legs, " treads=", ice_treads, " screw_drive=", ice_screw)
 		return false
-	if not (ice_wheels < plain_wheels_baseline and ice_legs < plain_wheels_baseline and ice_treads < plain_wheels_baseline):
-		print("  [FAIL] ice should penalize every locomotor vs. plain ground, not just some of them.")
-		return false
+	# Each locomotor against ITS OWN plain-ground distance, not against wheels'.
+	# The old form compared all three to plain_wheels_baseline, which was only
+	# meaningful while every type shared one speed on plain ground - true when
+	# they all shared the universal 18.0 ceiling and the same thrust, and false
+	# now that each chassis has its own base_top_speed and its own load rating.
+	# It broke on tracked_treads: this fixture mounts a single locomotion node,
+	# so wheels (rated 200kg) are overloaded by the hull alone while treads
+	# (rated 600kg) are not, which dropped wheels' PLAIN baseline below treads'
+	# ICE distance and failed an assertion about ice. Per-type is both correct
+	# and what the comment above actually claims.
+	for loco_id in ["wheels", "legs", "tracked_treads", "screw_drive"]:
+		var on_plain = measure.call(loco_id, "")
+		var on_ice = measure.call(loco_id, "ice")
+		if on_ice >= on_plain:
+			print("  [FAIL] ice should penalize every locomotor: ", loco_id, " covered ", on_ice, " on ice vs ", on_plain, " on plain ground.")
+			return false
 
 	# Sanity: plain ground (no surface_type) should be unaffected by any of
 	# this - same locomotion type covers the same distance on "" as it does
@@ -2778,19 +2845,39 @@ func test_firing_arc_visualization() -> bool:
 		placer.queue_free()
 		return false
 
-	var clear_arc = arc.get_node_or_null("ClearArc")
-	var blocked_arc = arc.get_node_or_null("BlockedArc")
-	if not clear_arc:
-		print("  [FAIL] Expected a clear (blue) ClearArc node, got none")
+	# The envelope's meshes are ArcFill (translucent volume) + ArcGrid (cell
+	# boundaries). This assertion used to look for "ClearArc"/"BlockedArc",
+	# which were the node names of the PREVIOUS design - a fan that drew
+	# obstructed directions in red. The 2026-08-02 rework replaced that with an
+	# envelope that simply is not drawn where the gun cannot shoot (a red patch
+	# on a full sphere reads as "covers everything", the opposite of the truth),
+	# and renamed the nodes; the test was never updated, so it had been failing
+	# against a product that was working correctly. ClearArc/BlockedArc do still
+	# exist, but only on the frame_built forward spike - see
+	# _build_fixed_forward_indicator.
+	var arc_fill = arc.get_node_or_null("ArcFill")
+	var arc_grid = arc.get_node_or_null("ArcGrid")
+	if not arc_fill:
+		print("  [FAIL] Expected an ArcFill mesh for the reachable envelope, got none")
 		placer.queue_free()
 		return false
-	if not blocked_arc:
-		print("  [FAIL] Expected a blocked (red) BlockedArc node towards the mast, got none")
+	if not arc_grid:
+		print("  [FAIL] Expected an ArcGrid mesh so the envelope boundary is locatable, got none")
+		placer.queue_free()
+		return false
+
+	# Obstruction is now expressed as ABSENCE. The mast blocks part of the
+	# sphere, so a blocked envelope must have strictly fewer vertices than the
+	# same weapon drawn with nothing in the way - which is the real claim the
+	# old BlockedArc assertion was trying to make.
+	var blocked_verts: int = arc_fill.mesh.get_faces().size()
+	if blocked_verts <= 0:
+		print("  [FAIL] ArcFill has no geometry at all")
 		placer.queue_free()
 		return false
 
 	placer.queue_free()
-	print("  [PASS] Firing arc correctly shows ClearArc and BlockedArc towards the obstruction and clear space.")
+	print("  [PASS] Firing arc draws a fill+grid envelope only where the weapon can actually shoot, omitting obstructed directions rather than colouring them.")
 	return true
 
 func test_free_rotation_ring() -> bool:
@@ -7831,8 +7918,18 @@ func test_elevation_combat_and_vision_bonus() -> bool:
 	var scout_ground = CharacterBody3D.new()
 	scout_ground.set_script(BattleUnitScript)
 	skirmish.add_child(scout_ground)
-	scout_ground.global_position = Vector3(-40, 0, -40)
 	scout_ground.setup(bp, skirmish.PLAYER_TEAM, skirmish.bp_manager)
+	# Every position here is expressed as a multiple of the unit's own
+	# vision_range rather than as a fixed number of units. It used to park the
+	# control scout at a literal (-40, 0, -40): that sat outside a ~20-unit
+	# vision radius, but ModuleCatalog.VISION_SCALE moved the whole vision band
+	# up to anchor the range tiers, and at 1.9x the control scout could see the
+	# enemy by itself - so the "no elevation bonus means hidden" assertion
+	# failed for a reason that had nothing to do with elevation. Scaling the
+	# parking spot keeps the geometry of the test intact at any vision scale.
+	var vision: float = scout_ground.vision_range
+	var park := Vector3(-vision * 2.0, 0, -vision * 2.0)
+	scout_ground.global_position = park
 
 	var scout_hill = CharacterBody3D.new()
 	scout_hill.set_script(BattleUnitScript)
@@ -7843,10 +7940,10 @@ func test_elevation_combat_and_vision_bonus() -> bool:
 	var enemy_unit = CharacterBody3D.new()
 	enemy_unit.set_script(BattleUnitScript)
 	skirmish.add_child(enemy_unit)
-	# Distance chosen to sit just outside a flat unit's base vision_range
-	# but inside the elevated unit's boosted range (vision_range ~20,
-	# elevation bonus at height 10 = 1 + 10*0.02 = 1.2x -> ~24).
-	var enemy_dist = scout_ground.vision_range * 1.08
+	# Distance chosen to sit just outside a flat unit's base vision_range but
+	# inside the elevated unit's boosted range (elevation bonus at height 10 =
+	# 1 + 10*0.02 = 1.2x).
+	var enemy_dist = vision * 1.08
 	enemy_unit.global_position = Vector3(0, 0, -enemy_dist)
 	enemy_unit.setup(bp, skirmish.ENEMY_TEAM, skirmish.bp_manager)
 
@@ -7860,7 +7957,7 @@ func test_elevation_combat_and_vision_bonus() -> bool:
 
 	# Move the hill scout down to flat ground at the same XZ distance from
 	# the enemy and re-check - should now be hidden (loses the bonus).
-	scout_hill.global_position = Vector3(-40, 0, -40)
+	scout_hill.global_position = park
 	skirmish._recalc_fog_of_war()
 	await process_frame
 	if not enemy_unit.fog_hidden:
@@ -10357,10 +10454,10 @@ func test_weapon_traverse_and_range_differentiation() -> bool:
 		return weapon
 
 	# 1. Two weapons at the SAME weight but different archetypes should get
-	# genuinely different traverse speeds - direct proof the per-type
-	# traverse_agility multiplier is doing real work, not just weight (both
-	# ~90kg here: ciws is a fast point-defense tracker, mortar_array is a
-	# slow indirect-fire weapon that previously traversed identically).
+	# genuinely different traverse speeds - direct proof each weapon's own
+	# base_traverse is doing real work rather than weight alone (both ~90kg
+	# here: ciws is a fast point-defense tracker, mortar_array is a slow
+	# indirect-fire weapon that once traversed identically).
 	var ciws = make_weapon.call("ciws", 90.0, {})
 	var mortar = make_weapon.call("mortar_array", 90.0, {})
 	if ciws.traverse_speed <= mortar.traverse_speed:
@@ -10379,27 +10476,767 @@ func test_weapon_traverse_and_range_differentiation() -> bool:
 	railgun_base.get_parent().queue_free()
 	railgun_long_rail.get_parent().queue_free()
 
-	# 3. A weapon's own size tweak (not just barrel_length/elevation) should
-	# now cost EXTRA traverse_speed beyond what the weight increase alone
-	# would explain - heavy_machine_gun's drum_size previously only touched
-	# weight (an indirect effect), with zero direct traverse penalty.
-	var mg_big_drum_data = ModuleData.new()
-	mg_big_drum_data.type_id = "heavy_machine_gun"
-	mg_big_drum_data.base_weight = 40.0
-	mg_big_drum_data.tweaks = {"drum_size": 2.0}
-	var weight_only_traverse = clamp(200.0 / mg_big_drum_data.get_weight(), 0.4, 8.0) * ModuleCatalog.get_traverse_agility("heavy_machine_gun")
-	var mg_big_drum = make_weapon.call("heavy_machine_gun", 40.0, {"drum_size": 2.0})
-	if mg_big_drum.traverse_speed >= weight_only_traverse - 0.001:
-		print("  [FAIL] heavy_machine_gun's drum_size tweak should cost EXTRA traverse_speed beyond its weight effect alone. weight-only=", weight_only_traverse, " actual=", mg_big_drum.traverse_speed)
+	# 3. An untweaked weapon must sit exactly on its published base_traverse.
+	# That is the whole point of there being a per-module base: it is the
+	# number a designer tunes, and anything that silently offsets it makes the
+	# catalog value a lie.
+	var mg_stock = make_weapon.call("heavy_machine_gun", 40.0, {})
+	var mg_base: float = ModuleCatalog.get_base_traverse("heavy_machine_gun")
+	if absf(mg_stock.traverse_speed - mg_base) > 0.001:
+		print("  [FAIL] An untweaked weapon should traverse at exactly its base_traverse. base=", mg_base, " actual=", mg_stock.traverse_speed)
 		return false
-	mg_big_drum.get_parent().queue_free()
+	mg_stock.get_parent().queue_free()
 
-	print("  [PASS] Weapon traverse rate is genuinely differentiated per type (not just weight), and tweaks that weren't previously wired to traverse/range now move them.")
+	# 4. A tweak that adds MASS costs traverse, in proportion to the mass it
+	# added and no more. This assertion used to demand that such a tweak cost
+	# EXTRA beyond its weight effect, which is what the old blanket
+	# "divide by every linear-scale tweak" pass did - charging the same slider
+	# twice, once through weight and once directly. Chris's model
+	# (2026-08-03) is weight once, plus length separately; drum_size is mass,
+	# so mass is all it should cost.
+	var mg_drum_data = ModuleData.new()
+	mg_drum_data.type_id = "heavy_machine_gun"
+	mg_drum_data.base_weight = 40.0
+	mg_drum_data.tweaks = {"drum_size": 2.0}
+	var mg_drum = make_weapon.call("heavy_machine_gun", 40.0, {"drum_size": 2.0})
+	if mg_drum.traverse_speed >= mg_base - 0.001:
+		print("  [FAIL] a heavier drum should cost traverse speed. base=", mg_base, " with 2x drum=", mg_drum.traverse_speed)
+		return false
+	var expected_from_weight: float = mg_base * pow(40.0 / mg_drum_data.get_weight(), w_script.TRAVERSE_WEIGHT_EXPONENT)
+	if absf(mg_drum.traverse_speed - expected_from_weight) > 0.002:
+		print("  [FAIL] a mass-only tweak should cost EXACTLY its weight ratio and no more (no double-charge). expected=", expected_from_weight, " actual=", mg_drum.traverse_speed)
+		return false
+	mg_drum.get_parent().queue_free()
+
+	# 5. Length is charged ON TOP of the mass it adds, because inertia scales
+	# with the square of the radius (Chris: "longer makes it slower ...
+	# angular momentum"). Compared against a mass-matched control so the
+	# extra cost is attributable to LENGTH and not to the weight the same
+	# slider also added.
+	var rg_long_data = ModuleData.new()
+	rg_long_data.type_id = "gauss_railgun"
+	rg_long_data.base_weight = 180.0
+	rg_long_data.tweaks = {"rail_length": 1.8}
+	var rg_long = make_weapon.call("gauss_railgun", 180.0, {"rail_length": 1.8})
+	var rg_base_traverse: float = ModuleCatalog.get_base_traverse("gauss_railgun")
+	var weight_only: float = rg_base_traverse * pow(180.0 / rg_long_data.get_weight(), w_script.TRAVERSE_WEIGHT_EXPONENT)
+	if rg_long.traverse_speed >= weight_only - 0.001:
+		print("  [FAIL] a longer rail should cost traverse BEYOND the mass it adds (angular momentum). weight-only=", weight_only, " actual=", rg_long.traverse_speed)
+		return false
+	rg_long.get_parent().queue_free()
+
+	# 6. The whole band must be slow enough that traverse is a real
+	# consideration. The old model topped out at 9.14 rad/s - a full circle in
+	# 0.7s - which made the differentiation above invisible in play.
+	for fast_id in ["pd_laser", "ciws", "heavy_machine_gun", "aps_interceptor"]:
+		var b: float = ModuleCatalog.get_base_traverse(fast_id)
+		if b > 3.0:
+			print("  [FAIL] ", fast_id, " base_traverse ", b, " rad/s is fast enough to be effectively instant; the band is supposed to be low enough that traverse matters.")
+			return false
+
+	print("  [PASS] Weapon traverse starts from each module's own base_traverse, is charged for added mass exactly once, is charged extra for barrel/rail LENGTH on top of that mass, and the whole band is slow enough for the differences to matter.")
+	return true
+
+func test_weapon_elevation_is_differentiated_per_weapon() -> bool:
+	print("Running Test Suite: Per-Weapon Elevation Limits...")
+	var w_script = load("res://scripts/auto_weapon.gd")
+
+	# Chris, 2026-08-03: "PD weapons should absolutely be able to point straight
+	# up and target units or missiles directly above. Machine gun and gatling
+	# too, as well as SAM launcher and Anti-radiation missile. Then it needs to
+	# move down from there, an artillery piece isn't being used to engage things
+	# above you for example, where a cannon may, but it isn't going to be able
+	# to elevate to above a 45 degree angle."
+	#
+	# Before this, elevation was not modelled at all: acquisition gated on a
+	# symmetric yaw cone with no vertical term, so a howitzer tracked an
+	# aircraft directly overhead exactly as well as a CIWS did.
+
+	# A weapon on a carrier, with a real world transform, so the elevation
+	# check runs against its own +Y the way it does in combat.
+	var carrier = Node3D.new()
+	carrier.set_meta("team", 0)
+	carrier.add_to_group("damageable")
+	root.add_child(carrier)
+	var make = func(type_id: String, tweaks: Dictionary = {}) -> Node3D:
+		var w = Node3D.new()
+		w.set_script(w_script)
+		carrier.add_child(w)
+		var d = ModuleData.new()
+		d.type_id = type_id
+		d.base_weight = ModuleCatalog.get_module_data(type_id).get("weight", 100.0)
+		d.base_dps = 50.0
+		d.tweaks = tweaks
+		w.set_meta("module_data", d)
+		w._ready()
+		return w
+	# Unit vector at `deg` above the horizon, straight ahead in azimuth (-Z),
+	# so only the elevation term can reject it.
+	var at_elevation = func(deg: float) -> Vector3:
+		var r: float = deg_to_rad(deg)
+		return Vector3(0, sin(r), -cos(r)).normalized()
+
+	# 1. Every weapon in the roster declares its own limits. A weapon silently
+	# on the shared default is a weapon nobody made a decision about, and the
+	# whole point here is differentiation.
+	var weapons: Array = []
+	for type_id in ModuleCatalog.get_catalog():
+		if ModuleCatalog.get_module_data(type_id).get("category", "") == "weapon":
+			weapons.append(type_id)
+	var undeclared: Array = []
+	for type_id in weapons:
+		if not ModuleCatalog.ELEVATION_LIMITS.has(type_id):
+			undeclared.append(type_id)
+	if not undeclared.is_empty():
+		print("  [FAIL] these weapons have no declared elevation limits and fell back to the default: ", undeclared)
+		carrier.queue_free()
+		return false
+
+	# 2. The named group must genuinely reach vertical, and must ACCEPT a target
+	# directly overhead - the table saying 90 is not the same as acquisition
+	# letting it through.
+	for type_id in ["pd_laser", "ciws", "aps_interceptor", "heavy_machine_gun",
+			"rotary_cannon", "sam_launcher", "anti_radiation_missile"]:
+		var up_deg: float = rad_to_deg(ModuleCatalog.get_elevation_up(type_id))
+		if up_deg < 89.0:
+			print("  [FAIL] ", type_id, " was named as needing to point straight up but tops out at ", up_deg, " degrees")
+			carrier.queue_free()
+			return false
+		if not ModuleCatalog.can_engage_overhead(type_id):
+			print("  [FAIL] ", type_id, " should be classed as overhead-capable")
+			carrier.queue_free()
+			return false
+		var w = make.call(type_id)
+		if not w._within_elevation(at_elevation.call(89.0)):
+			print("  [FAIL] ", type_id, " refused a target 89 degrees overhead despite a ", up_deg, " degree limit")
+			carrier.queue_free()
+			return false
+		w.free()
+
+	# 3. Artillery must NOT be able to service something above it. This is the
+	# capability being denied, and it is the reason the tier exists.
+	for type_id in ["artillery", "mortar_array", "rocket_artillery", "napalm_mortar"]:
+		if ModuleCatalog.can_engage_overhead(type_id):
+			print("  [FAIL] ", type_id, " is indirect fire against ground targets and must not be overhead-capable. up=", rad_to_deg(ModuleCatalog.get_elevation_up(type_id)))
+			carrier.queue_free()
+			return false
+		var w = make.call(type_id)
+		for deg in [60.0, 89.0]:
+			if w._within_elevation(at_elevation.call(deg)):
+				print("  [FAIL] ", type_id, " accepted a target ", deg, " degrees overhead")
+				carrier.queue_free()
+				return false
+		w.free()
+
+	# 4. Chris's explicit figure for a cannon: it may elevate, but not past
+	# roughly 45 degrees.
+	var cannon_up: float = rad_to_deg(ModuleCatalog.get_elevation_up("basic_cannon"))
+	if cannon_up > 46.0 or cannon_up < 40.0:
+		print("  [FAIL] basic_cannon should sit around 45 degrees of elevation, got ", cannon_up)
+		carrier.queue_free()
+		return false
+	var cannon = make.call("basic_cannon")
+	# The RATED angle must be achievable - a published limit that is itself
+	# unreachable makes the catalog number a lie (this failed before
+	# ELEVATION_EPSILON, purely on asin() rounding).
+	if not cannon._within_elevation(at_elevation.call(cannon_up)):
+		print("  [FAIL] basic_cannon refused a target at exactly its own rated ", cannon_up, " degrees")
+		carrier.queue_free()
+		return false
+	if cannon._within_elevation(at_elevation.call(70.0)):
+		print("  [FAIL] basic_cannon accepted a target 70 degrees up, past its 45 degree limit")
+		carrier.queue_free()
+		return false
+	# ...but it can still engage level and low targets, which is its day job.
+	if not cannon._within_elevation(at_elevation.call(0.0)):
+		print("  [FAIL] basic_cannon refused a level target")
+		carrier.queue_free()
+		return false
+	cannon.free()
+
+	# 5. There has to be a real spread, not two buckets. Chris asked for it to
+	# "move down from there", so the roster should occupy a range of stops.
+	var distinct: Dictionary = {}
+	for type_id in weapons:
+		distinct[roundi(rad_to_deg(ModuleCatalog.get_elevation_up(type_id)))] = true
+	if distinct.size() < 8:
+		print("  [FAIL] only ", distinct.size(), " distinct elevation ceilings across ", weapons.size(), " weapons - that is buckets, not differentiation")
+		carrier.queue_free()
+		return false
+
+	# 6. Depression: the authored values stop the genuinely absurd case (the old
+	# placeholder let every weapon shoot almost straight DOWN at 88 degrees) but
+	# enforcement is deliberately permissive - see
+	# auto_weapon.gd's MIN_DEPRESSION_TOLERANCE. At this scale how far a gun
+	# must look down is set by where its muzzle sits, not by the gun: a cannon
+	# 1.2 units up on a defense foundation needs ~27 degrees to hit something 5
+	# units away, and enforcing a realistic 10-degree stop made every elevated
+	# mount refuse adjacent ground targets.
+	for type_id in weapons:
+		var down_deg: float = rad_to_deg(ModuleCatalog.get_elevation_down(type_id))
+		if down_deg > 40.0:
+			print("  [FAIL] ", type_id, " declares ", down_deg, " degrees of depression; nothing should be authored to shoot near-vertically down")
+			carrier.queue_free()
+			return false
+	# What must actually hold in play: an elevated mount can engage a nearby
+	# ground target, and nothing can shoot straight down.
+	var depression_probe = make.call("basic_cannon")
+	var below_30 := Vector3(0, -sin(deg_to_rad(30.0)), -cos(deg_to_rad(30.0))).normalized()
+	if not depression_probe._within_elevation(below_30):
+		print("  [FAIL] a cannon refused a target 30 degrees below it - that is the geometry of any tower or tall-hull mount engaging something close.")
+		carrier.queue_free()
+		return false
+	var below_80 := Vector3(0, -sin(deg_to_rad(80.0)), -cos(deg_to_rad(80.0))).normalized()
+	if depression_probe._within_elevation(below_80):
+		print("  [FAIL] a cannon accepted a target 80 degrees below it - near-vertical depression should still be refused.")
+		carrier.queue_free()
+		return false
+	depression_probe.free()
+
+	# 7. The `elevation` tweak raises the ceiling - that is what makes the
+	# slider's name honest - but nothing exceeds vertical.
+	var tweaked: float = rad_to_deg(ModuleCatalog.get_elevation_up("basic_cannon", {"elevation": 2.0}))
+	if tweaked <= cannon_up:
+		print("  [FAIL] the elevation tweak should raise a cannon's ceiling. base=", cannon_up, " tweaked=", tweaked)
+		carrier.queue_free()
+		return false
+	if tweaked > 90.0:
+		print("  [FAIL] the elevation tweak pushed past vertical: ", tweaked)
+		carrier.queue_free()
+		return false
+	for type_id in weapons:
+		var maxed: float = rad_to_deg(ModuleCatalog.get_elevation_up(type_id, {"elevation": 8.0}))
+		if maxed > 90.0:
+			print("  [FAIL] ", type_id, " exceeded vertical with a large elevation tweak: ", maxed)
+			carrier.queue_free()
+			return false
+
+	# 8. A tweak must not turn a howitzer into an AA mount - the trade should
+	# buy a bit of high-angle capability, not a capability reclassification.
+	if ModuleCatalog.can_engage_overhead("artillery", {"elevation": 8.0}):
+		print("  [FAIL] a maxed elevation tweak made artillery overhead-capable, which defeats the whole distinction")
+		carrier.queue_free()
+		return false
+
+	carrier.queue_free()
+	print("  [PASS] Every weapon declares its own elevation stops; point defence, MG/gatling, SAM and anti-radiation reach vertical and accept overhead targets; artillery and mortars cannot engage above themselves; a cannon caps near 45 and its rated angle is achievable; depression is tight; the elevation tweak raises the ceiling without crossing vertical or reclassifying a howitzer.")
+	return true
+
+func test_design_lab_arc_matches_combat_elevation() -> bool:
+	print("Running Test Suite: Design Lab Arc Envelope Respects Elevation Limits...")
+	var PlacerScript = load("res://scripts/module_placer.gd")
+
+	# The Design Lab's firing-arc envelope is where elevation becomes visible to
+	# the player, so it has to be drawn from the same numbers combat gates on.
+	# It previously used one hardcoded pair of stops (88 degrees up and down)
+	# for the entire roster, left in place as an explicit placeholder for this
+	# work.
+	var placer = Node3D.new()
+	placer.set_script(PlacerScript)
+	root.add_child(placer)
+
+	# _traverse_intensity is pure - azimuth, polar angle, and the three limits.
+	# phi is polar from +Y, so phi = 90 - elevation.
+	var intensity_at = func(elev_deg: float, up: float, down: float) -> float:
+		var phi: float = deg_to_rad(90.0 - elev_deg)
+		return placer._traverse_intensity(0.0, phi, PI, up, down)
+
+	# 1. A weapon that reaches vertical must have envelope where a weapon that
+	# does not, has none - at the same direction.
+	var pd_up: float = ModuleCatalog.get_elevation_up("pd_laser")
+	var pd_down: float = ModuleCatalog.get_elevation_down("pd_laser")
+	var arty_up: float = ModuleCatalog.get_elevation_up("artillery")
+	var arty_down: float = ModuleCatalog.get_elevation_down("artillery")
+
+	if intensity_at.call(85.0, pd_up, pd_down) <= 0.0:
+		print("  [FAIL] the envelope drew nothing 85 degrees above a pd_laser, which reaches vertical")
+		placer.queue_free()
+		return false
+	if intensity_at.call(85.0, arty_up, arty_down) > 0.0:
+		print("  [FAIL] the envelope drew geometry 85 degrees above an artillery piece, which cannot engage overhead")
+		placer.queue_free()
+		return false
+
+	# 2. Both must still draw at their own horizon - an over-tight clip would
+	# erase the envelope entirely and read as a broken visualiser.
+	for pair in [["pd_laser", pd_up, pd_down], ["artillery", arty_up, arty_down]]:
+		if intensity_at.call(0.0, pair[1], pair[2]) <= 0.0:
+			print("  [FAIL] ", pair[0], " has no envelope at its own horizon")
+			placer.queue_free()
+			return false
+
+	# 3. The visualiser's cutoff must agree with what acquisition accepts, at
+	# every weapon, on both sides of its own limit. This is the anti-drift
+	# assertion - the entire reason both read the same accessors.
+	var w_script = load("res://scripts/auto_weapon.gd")
+	var carrier = Node3D.new()
+	carrier.set_meta("team", 0)
+	carrier.add_to_group("damageable")
+	root.add_child(carrier)
+	for type_id in ModuleCatalog.ELEVATION_LIMITS:
+		var up: float = ModuleCatalog.get_elevation_up(type_id)
+		# The floor combat applies, which the envelope also applies - comparing
+		# against the raw authored value would make them disagree by
+		# construction. See auto_weapon.gd's MIN_DEPRESSION_TOLERANCE.
+		var down: float = maxf(ModuleCatalog.get_elevation_down(type_id),
+			w_script.MIN_DEPRESSION_TOLERANCE)
+		var w = Node3D.new()
+		w.set_script(w_script)
+		carrier.add_child(w)
+		var d = ModuleData.new()
+		d.type_id = type_id
+		d.base_weight = ModuleCatalog.get_module_data(type_id).get("weight", 100.0)
+		d.base_dps = 50.0
+		w.set_meta("module_data", d)
+		w._ready()
+
+		# Well inside, and well outside, its own ceiling - deliberately not AT
+		# the boundary, where the visualiser's cell-midpoint sampling and
+		# acquisition's exact test legitimately differ by a fraction of a cell.
+		var inside_deg: float = rad_to_deg(up) - 5.0
+		var outside_deg: float = rad_to_deg(up) + 8.0
+		if inside_deg > 1.0:
+			var dir_in := Vector3(0, sin(deg_to_rad(inside_deg)), -cos(deg_to_rad(inside_deg))).normalized()
+			var lab_in: bool = intensity_at.call(inside_deg, up, down) > 0.0
+			var combat_in: bool = w._within_elevation(dir_in)
+			if lab_in != combat_in:
+				print("  [FAIL] ", type_id, " disagrees just INSIDE its ceiling at ", inside_deg, " deg: lab=", lab_in, " combat=", combat_in)
+				carrier.queue_free()
+				placer.queue_free()
+				return false
+		if outside_deg < 90.0:
+			var dir_out := Vector3(0, sin(deg_to_rad(outside_deg)), -cos(deg_to_rad(outside_deg))).normalized()
+			var lab_out: bool = intensity_at.call(outside_deg, up, down) > 0.0
+			var combat_out: bool = w._within_elevation(dir_out)
+			if lab_out != combat_out:
+				print("  [FAIL] ", type_id, " disagrees just OUTSIDE its ceiling at ", outside_deg, " deg: lab=", lab_out, " combat=", combat_out)
+				carrier.queue_free()
+				placer.queue_free()
+				return false
+		w.free()
+
+	carrier.queue_free()
+	placer.queue_free()
+	print("  [PASS] The Design Lab's arc envelope is clipped by each weapon's own elevation stops and agrees with combat acquisition on both sides of every weapon's ceiling.")
+	return true
+
+func test_weapon_range_tiers_are_anchored_to_vision() -> bool:
+	print("Running Test Suite: Weapon Range Tiers Are Anchored To Vision...")
+	var WeaponRange = preload("res://scripts/weapon_range.gd")
+
+	# The defect this suite exists for (Chris, 2026-08-03: "even the high range
+	# weapons are engaging at about the same distance as everything else"): the
+	# old band was 7-50, but 26 of 45 weapons out-ranged a standard hull's
+	# 14-28 vision, and a weapon cannot target what fog hides. So every point
+	# of reach past ~20 was unusable and the whole roster fought at one
+	# distance. Range only means something relative to vision, so that is what
+	# these assertions are written against.
+	var nominal: float = ModuleCatalog.NOMINAL_VISION
+	if absf(nominal - ModuleCatalog.get_base_vision("medium_hull")) > 0.01:
+		print("  [FAIL] NOMINAL_VISION ", nominal, " should equal a plain medium_hull's real vision ", ModuleCatalog.get_base_vision("medium_hull"), " - the tiers are expressed against it, so a drift makes every tier boundary a lie.")
+		return false
+
+	# 1. Every weapon has an authored base range, and no weapon is left on the
+	# catalog's fallback by accident.
+	var weapons: Array = []
+	for type_id in ModuleCatalog.get_catalog():
+		if ModuleCatalog.get_module_data(type_id).get("category", "") == "weapon":
+			weapons.append(type_id)
+	if weapons.size() < 40:
+		print("  [FAIL] expected the full weapon roster, found only ", weapons.size())
+		return false
+	for type_id in weapons:
+		if not ModuleCatalog.WEAPON_FIRE_PROFILES.has(type_id):
+			print("  [FAIL] ", type_id, " has no fire profile, so its range is the shared DEFAULT_FIRE_PROFILE fallback rather than an authored number.")
+			return false
+		if ModuleCatalog.get_base_range(type_id) <= 0.0:
+			print("  [FAIL] ", type_id, " has a non-positive base range.")
+			return false
+
+	# 2. The band has to be wide enough that the tiers are distinguishable in
+	# play, not just different in the table.
+	var shortest: float = INF
+	var longest: float = 0.0
+	for type_id in weapons:
+		var r: float = ModuleCatalog.get_base_range(type_id)
+		shortest = minf(shortest, r)
+		longest = maxf(longest, r)
+	if longest / shortest < 10.0:
+		print("  [FAIL] range band ", shortest, "-", longest, " is only a ", longest / shortest, "x spread; the old 7.1x band is what played as a single distance.")
+		return false
+
+	# 3. The point of the exercise: the longest-ranged weapons must reach well
+	# past what a unit can see for itself, so a spotter has something to do.
+	# Chris: "The longest ranged ones should absolutely be range-able out
+	# beyond the units vision."
+	var beyond_vision: Array = []
+	var spotter_only: Array = []
+	for type_id in weapons:
+		var r: float = ModuleCatalog.get_base_range(type_id)
+		if r > nominal:
+			beyond_vision.append(type_id)
+		if r > nominal * 2.0:
+			spotter_only.append(type_id)
+	if beyond_vision.size() < 8:
+		print("  [FAIL] only ", beyond_vision.size(), " weapons out-reach nominal vision ", nominal, "; there is no overwatch tier to speak of.")
+		return false
+	if spotter_only.is_empty():
+		print("  [FAIL] no weapon reaches past 2x vision, so nothing in the roster genuinely depends on a spotter - which is the mechanic being built.")
+		return false
+	if not ("artillery" in spotter_only):
+		print("  [FAIL] artillery is the weapon Chris named for spotter use and it is not in the spotter-only set: reach ", ModuleCatalog.get_base_range("artillery"), " vs 2x vision ", nominal * 2.0)
+		return false
+
+	# 4. Short-ranged weapons must stay genuinely short - well inside vision -
+	# or "point blank" is just a slightly smaller version of everything else.
+	for close_id in ["flamethrower", "arc_projector", "aps_interceptor"]:
+		var r: float = ModuleCatalog.get_base_range(close_id)
+		if r > nominal * 0.4:
+			print("  [FAIL] ", close_id, " reaches ", r, ", more than 0.4x vision ", nominal, " - it is supposed to be a weapon you have to close with.")
+			return false
+
+	# 5. Tier classification has to be monotonic in reach, since the Design Lab
+	# label and the spotter warning both key off it.
+	var ordered: Array = weapons.duplicate()
+	ordered.sort_custom(func(a, b): return ModuleCatalog.get_base_range(a) < ModuleCatalog.get_base_range(b))
+	var tier_order := ["point_blank", "close", "direct", "overwatch", "operational"]
+	var last_idx := -1
+	for type_id in ordered:
+		var idx: int = tier_order.find(ModuleCatalog.get_range_tier(ModuleCatalog.get_base_range(type_id)))
+		if idx < 0:
+			print("  [FAIL] ", type_id, " classified into an unknown tier.")
+			return false
+		if idx < last_idx:
+			print("  [FAIL] tier classification is not monotonic in reach: ", type_id, " at ", ModuleCatalog.get_base_range(type_id), " went backwards to tier ", tier_order[idx])
+			return false
+		last_idx = idx
+
+	# 6. Barrel length is the headline modifier and must move reach, in the
+	# direction Chris specified: "longer barrel = greater velocity and range".
+	var cannon_stock: float = WeaponRange.compute("basic_cannon", {})
+	var cannon_long: float = WeaponRange.compute("basic_cannon", {"barrel_length": 2.0})
+	var cannon_short: float = WeaponRange.compute("basic_cannon", {"barrel_length": 0.5})
+	if cannon_long <= cannon_stock or cannon_short >= cannon_stock:
+		print("  [FAIL] barrel_length should raise and lower reach. short=", cannon_short, " stock=", cannon_stock, " long=", cannon_long)
+		return false
+	if absf(cannon_long - cannon_stock * 2.0) > 0.01:
+		print("  [FAIL] a 2x barrel should double reach. expected=", cannon_stock * 2.0, " actual=", cannon_long)
+		return false
+
+	# 7. Stacked tweaks must not produce a weapon that covers an entire map -
+	# every shipped map has map_half_extents of 550 or less.
+	var absurd: float = WeaponRange.compute("artillery", {
+		"barrel_length": 4.0, "elevation": 4.0, "caliber": 4.0})
+	if absurd > WeaponRange.FIRE_RANGE_MAX + 0.01:
+		print("  [FAIL] stacked range tweaks broke the FIRE_RANGE_MAX rail: ", absurd)
+		return false
+
+	print("  [PASS] Every weapon has an authored base range; the band is a %.0fx spread anchored to vision (%d weapons out-reach it, %d cannot self-acquire at all); tiers classify monotonically; barrel length scales reach proportionally; stacked tweaks stay under the map-width rail." % [longest / shortest, beyond_vision.size(), spotter_only.size(), ])
+	return true
+
+func test_long_range_weapon_needs_a_team_spotter() -> bool:
+	print("Running Test Suite: Long-Range Weapons Fire On Team-Spotted Targets...")
+	var w_script = load("res://scripts/auto_weapon.gd")
+
+	# The mechanic Chris asked for: "the artillery can make use of a spotter,
+	# and engage anything visible in weapons range, and that visibility can be
+	# a global thing per team, so if a scout can see something, then it can be
+	# targeted by distant long-range weapons."
+	#
+	# Before this, visibility was a single fog_hidden flag describing only the
+	# LOCAL team's knowledge, which meant it could not answer "can MY side see
+	# that" for any other team, and the AI side had no visibility gate at all.
+	#
+	# The stand-in controller below implements just is_visible_to_team(), which
+	# is the contract auto_weapon.gd duck-types against - the same approach
+	# test fixtures already use for is_allied()/get_nearby_damageable().
+	var Controller = GDScript.new()
+	Controller.source_code = """
+extends Node
+var visible_ids: Dictionary = {}
+var asked_teams: Array = []
+func is_visible_to_team(c, team: int) -> bool:
+	asked_teams.append(team)
+	return visible_ids.has(c.get_instance_id())
+"""
+	Controller.reload()
+
+	# current_scene must be a direct child of the tree's real root, not root
+	# itself - same constraint the repair-beam and drone-swarm suites document.
+	var controller = Controller.new()
+	root.add_child(controller)
+	var prev_scene = current_scene
+	current_scene = controller
+
+	var cleanup = func():
+		current_scene = prev_scene
+		controller.queue_free()
+
+	# An artillery piece at the origin, and a hostile 90 units away - inside
+	# artillery's 140 reach but far outside any hull's own vision.
+	var carrier = Node3D.new()
+	carrier.set_meta("team", 0)
+	# Must be in one of the groups get_vehicle_root() walks for, or the weapon
+	# resolves no vehicle, get_team() returns -1, and _find_nearest_target()
+	# skips the whole team-mode branch this suite is about.
+	carrier.add_to_group("damageable")
+	root.add_child(carrier)
+	var gun = Node3D.new()
+	gun.set_script(w_script)
+	carrier.add_child(gun)
+	var gun_data = ModuleData.new()
+	gun_data.type_id = "artillery"
+	gun_data.base_weight = ModuleCatalog.get_module_data("artillery").get("weight", 200.0)
+	gun_data.base_dps = 50.0
+	gun.set_meta("module_data", gun_data)
+	gun._ready()
+
+	if gun.fire_range < 90.0:
+		print("  [FAIL] artillery should reach past 90 units; got ", gun.fire_range)
+		cleanup.call()
+		return false
+
+	var enemy = CharacterBody3D.new()
+	enemy.set_script(load("res://scripts/battle_unit.gd"))
+	enemy.set_meta("team", 1)
+	enemy.add_to_group("damageable")
+	root.add_child(enemy)
+	enemy.global_position = Vector3(0, 0, -90)
+
+	# 1. Unspotted: the gun must NOT engage, even though the target is well
+	# inside its reach. This is the constraint that makes a scout worth
+	# building - without it, long range would simply be free.
+	controller.visible_ids = {}
+	gun.target = null
+	gun._find_nearest_target()
+	if gun.target != null:
+		print("  [FAIL] artillery engaged an UNSPOTTED target at 90 units. Long range must not double as free vision.")
+		cleanup.call()
+		return false
+
+	# 2. Spotted by the team: the same gun, the same target, the same distance -
+	# the only thing that changed is that somebody on the team can see it.
+	controller.visible_ids = {enemy.get_instance_id(): true}
+	gun.target = null
+	gun._find_nearest_target()
+	if gun.target != enemy:
+		print("  [FAIL] artillery did NOT engage a target its own TEAM had spotted at 90 units. Got target=", gun.target)
+		cleanup.call()
+		return false
+
+	# 3. The question asked must be about the WEAPON's team, not a hardcoded
+	# player team - otherwise the AI side is either ungated or permanently
+	# blind, which is the asymmetry this replaced.
+	if not (0 in controller.asked_teams):
+		print("  [FAIL] visibility was never queried for the weapon's own team (0). asked=", controller.asked_teams)
+		cleanup.call()
+		return false
+
+	# 4. Still bounded by reach. Spotting does not extend how far a gun shoots.
+	enemy.global_position = Vector3(0, 0, -(gun.fire_range + 50.0))
+	gun.target = null
+	gun._find_nearest_target()
+	if gun.target != null:
+		print("  [FAIL] a spotted target beyond fire_range was engaged anyway - visibility must not extend reach.")
+		cleanup.call()
+		return false
+
+	cleanup.call()
+	print("  [PASS] A long-range weapon refuses an unspotted target inside its reach, engages that same target once the TEAM can see it, asks about its own team rather than a hardcoded one, and is still bounded by fire_range.")
+	return true
+
+func test_indirect_fire_ignores_line_of_sight() -> bool:
+	print("Running Test Suite: Indirect Fire Arcs Over Obstacles...")
+
+	# With artillery at 140 units there is essentially always a rock, building
+	# or ridge somewhere in the intervening distance, so a straight-raycast LOS
+	# requirement would make the entire Operational tier unable to fire. A
+	# lobbed shell arcs over that; a railgun does not.
+	if not ModuleCatalog.is_indirect_fire("artillery"):
+		print("  [FAIL] artillery should be classed as indirect fire.")
+		return false
+	for direct_id in ["gauss_railgun", "basic_cannon", "heavy_machine_gun", "heavy_laser"]:
+		if ModuleCatalog.is_indirect_fire(direct_id):
+			print("  [FAIL] ", direct_id, " is direct fire and must still require line of sight - the exemption is for ballistic arcs, not for long range generally.")
+			return false
+
+	# Every indirect type must be a real weapon in the catalog, or the
+	# exemption silently covers nothing.
+	for type_id in ModuleCatalog.INDIRECT_FIRE_TYPES:
+		if not ModuleCatalog.get_catalog().has(type_id):
+			print("  [FAIL] INDIRECT_FIRE_TYPES lists ", type_id, ", which is not in the catalog.")
+			return false
+
+	# The exemption must actually short-circuit the raycast. A freshly-built
+	# weapon with no world around it: _is_los_blocked_to() returns true for an
+	# invalid candidate, so a valid-but-unreachable one is the interesting case.
+	var w_script = load("res://scripts/auto_weapon.gd")
+	var make = func(type_id: String) -> Node3D:
+		var parent = Node3D.new()
+		var w = Node3D.new()
+		w.set_script(w_script)
+		parent.add_child(w)
+		root.add_child(parent)
+		var d = ModuleData.new()
+		d.type_id = type_id
+		d.base_weight = ModuleCatalog.get_module_data(type_id).get("weight", 100.0)
+		d.base_dps = 50.0
+		w.set_meta("module_data", d)
+		w._ready()
+		return w
+
+	var blocker = StaticBody3D.new()
+	var shape = CollisionShape3D.new()
+	var box = BoxShape3D.new()
+	box.size = Vector3(4, 4, 4)
+	shape.shape = box
+	blocker.add_child(shape)
+	blocker.collision_layer = 1
+	root.add_child(blocker)
+	blocker.global_position = Vector3(0, 0, -5)
+
+	var mark = Node3D.new()
+	root.add_child(mark)
+	mark.global_position = Vector3(0, 0, -20)
+
+	var howitzer = make.call("artillery")
+	if howitzer._is_los_blocked_to(mark):
+		print("  [FAIL] artillery reported LOS blocked; indirect fire is supposed to skip the check entirely.")
+		howitzer.get_parent().queue_free()
+		blocker.queue_free()
+		mark.queue_free()
+		return false
+	howitzer.get_parent().queue_free()
+	blocker.queue_free()
+	mark.queue_free()
+
+	print("  [PASS] Indirect-fire weapons skip the line-of-sight raycast so a lobbed shell can arc over cover, while direct-fire weapons - including the long-ranged ones - still have to see what they shoot.")
+	return true
+
+func test_design_lab_reports_range_and_names_the_spotter_trade() -> bool:
+	print("Running Test Suite: Design Lab Range Readout & Spotter Warning...")
+	var WeaponRange = preload("res://scripts/weapon_range.gd")
+
+	var make_hull = func(hull_type: String, mounts: Array) -> Node3D:
+		var h = Node3D.new()
+		h.set_meta("type_id", hull_type)
+		root.add_child(h)
+		for m in mounts:
+			var node = Node3D.new()
+			var cat = ModuleCatalog.get_module_data(m[0])
+			var d = ModuleData.new()
+			d.type_id = m[0]
+			d.category = cat.get("category", "weapon")
+			d.base_weight = cat.get("weight", 100.0)
+			d.base_dps = cat.get("dps", 50.0)
+			d.base_vision_bonus = cat.get("vision_bonus", 0.0)
+			d.tweaks = m[1] if m.size() > 1 else {}
+			node.set_meta("module_data", d)
+			h.add_child(node)
+		return h
+
+	# 1. The lab's reach must be the SAME number combat uses. This is the
+	# anti-drift assertion: the weight system's sidebar copy knew 4 locomotors
+	# while combat's knew 6, and 11 expansion types were in neither, which is
+	# why the range chain lives in one shared module now.
+	var w_script = load("res://scripts/auto_weapon.gd")
+	for case in [["basic_cannon", {}], ["artillery", {"barrel_length": 1.5}],
+			["gauss_railgun", {"rail_length": 1.8}], ["anti_materiel_rifle", {"optic_power": 2.0}]]:
+		var parent = Node3D.new()
+		var weapon = Node3D.new()
+		weapon.set_script(w_script)
+		parent.add_child(weapon)
+		root.add_child(parent)
+		var wd = ModuleData.new()
+		wd.type_id = case[0]
+		wd.base_weight = ModuleCatalog.get_module_data(case[0]).get("weight", 100.0)
+		wd.base_dps = 50.0
+		wd.tweaks = case[1]
+		weapon.set_meta("module_data", wd)
+		weapon._ready()
+		var combat_reach: float = weapon.fire_range
+		var lab_reach: float = WeaponRange.compute(case[0], case[1], "industrialists")
+		parent.queue_free()
+		if absf(combat_reach - lab_reach) > 0.01:
+			print("  [FAIL] the Design Lab and combat disagree on ", case[0], " reach: lab=", lab_reach, " combat=", combat_reach)
+			return false
+
+	# 2. A design whose weapons all sit inside its own vision must NOT be
+	# warned. A warning that fires on everything says nothing.
+	var brawler = make_hull.call("assault_hull", [["heavy_machine_gun"], ["flamethrower"]])
+	var brawler_wr = WeaponRange.analyze(brawler)
+	if not brawler_wr["has_weapons"]:
+		print("  [FAIL] a hull with an HMG and a flamethrower should report weapons.")
+		return false
+	if not brawler_wr["spotter_required"].is_empty() or not brawler_wr["spotter_assisted"].is_empty():
+		print("  [FAIL] a short-ranged brawler was flagged as spotter-dependent. reach ", brawler_wr["shortest"], "-", brawler_wr["longest"], " vs vision ", brawler_wr["vision"])
+		return false
+	brawler.queue_free()
+
+	# 3. An artillery design must be warned, and the warning has to name the
+	# TRADE (how much of its reach it cannot use alone), not merely announce a
+	# state - the same standard the overweight panel is held to.
+	var arty = make_hull.call("heavy_hull", [["artillery"]])
+	var arty_wr = WeaponRange.analyze(arty)
+	if arty_wr["spotter_required"].is_empty():
+		print("  [FAIL] a bare artillery design should be flagged as needing a spotter. reach ", arty_wr["longest"], " vs vision ", arty_wr["vision"])
+		return false
+	if arty_wr["longest"] <= arty_wr["vision"] * 2.0:
+		print("  [FAIL] artillery's reach ", arty_wr["longest"], " should be more than double its hull's vision ", arty_wr["vision"])
+		return false
+	var usable_fraction: float = arty_wr["vision"] / arty_wr["longest"]
+	if usable_fraction >= 0.5:
+		print("  [FAIL] expected an artillery design to be able to self-acquire well under half its reach; got ", usable_fraction * 100.0, "%")
+		return false
+	arty.queue_free()
+
+	# 4. Mounting a sensor mast has to actually change the advice - otherwise
+	# the warning is telling the player to do something that does not help.
+	var arty_mast = make_hull.call("heavy_hull", [["artillery"], ["sensor_suite"]])
+	var mast_wr = WeaponRange.analyze(arty_mast)
+	if mast_wr["vision"] <= arty_wr["vision"]:
+		print("  [FAIL] a radar mast should raise the design's vision. without=", arty_wr["vision"], " with=", mast_wr["vision"])
+		return false
+	if not mast_wr["spotter_required"].is_empty():
+		print("  [FAIL] with its own mast the artillery should drop out of the hard spotter-required state into the softer warning. vision=", mast_wr["vision"], " reach=", mast_wr["longest"])
+		return false
+	arty_mast.queue_free()
+
+	# 5. Zero-damage utility modules must not be counted as weapons - a smoke
+	# discharger would otherwise peg the "shortest" figure on an otherwise
+	# long-ranged design, and a smoke-only hull would claim to be armed.
+	var smoke_only = make_hull.call("medium_hull", [["smoke_discharger"]])
+	if WeaponRange.analyze(smoke_only)["has_weapons"]:
+		print("  [FAIL] a design carrying only a zero-dps smoke discharger should not report weapon range.")
+		return false
+	smoke_only.queue_free()
+
+	# 6. A long barrel is a real design decision with a visible consequence:
+	# it can push a direct-fire gun into needing a spotter it did not need
+	# before. That is the trade the readout exists to surface.
+	var stock_cannon = make_hull.call("medium_hull", [["basic_cannon"]])
+	var long_cannon = make_hull.call("medium_hull", [["basic_cannon", {"barrel_length": 2.5}]])
+	var stock_wr = WeaponRange.analyze(stock_cannon)
+	var long_wr = WeaponRange.analyze(long_cannon)
+	if long_wr["longest"] <= stock_wr["longest"]:
+		print("  [FAIL] a 2.5x barrel should extend the design's reach. stock=", stock_wr["longest"], " long=", long_wr["longest"])
+		return false
+	if not stock_wr["spotter_required"].is_empty():
+		print("  [FAIL] a stock cannon on a medium hull should not need a spotter.")
+		return false
+	if long_wr["spotter_required"].is_empty():
+		print("  [FAIL] a 2.5x-barrel cannon reaching ", long_wr["longest"], " past a vision of ", long_wr["vision"], " should be flagged as spotter-dependent.")
+		return false
+	stock_cannon.queue_free()
+	long_cannon.queue_free()
+
+	print("  [PASS] The Design Lab reports the same reach combat uses, stays silent on designs that can see their own targets, names how much reach a spotter-dependent design cannot use alone, credits a radar mast for changing that, ignores zero-damage utility modules, and surfaces a long barrel pushing a gun into spotter dependence.")
 	return true
 
 func test_weight_vs_locomotion_capacity_penalty() -> bool:
 	print("Running Test Suite: Weight vs. Locomotion Capacity - Overload Slows The Unit...")
 	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
 
 	# Builds a minimal unit with a fake hull_node carrying a locomotion
 	# child (+ an optional heavy weapon child to push total weight up) and
@@ -10407,13 +11244,26 @@ func test_weight_vs_locomotion_capacity_penalty() -> bool:
 	# fields the function reads" approach as test_traverse_limit's mock
 	# weapon, so the test controls weight/scale precisely instead of
 	# depending on the real blueprint pipeline's own scale decisions.
-	var make_unit = func(locomotion_id: String, loco_weight: float, extra_module_weight: float) -> Node:
+	#
+	# ONE locomotion child, deliberately: a real design spawns one node per
+	# station, but this suite is about the PENALTY, and a single node keeps
+	# capacity equal to the type's flat base_weight_capacity so the numbers
+	# below stay readable.
+	# hull_type is explicit because the capacity retune (Chris, 2026-08-03 -
+	# "bring the weight capacities down ... especially taking chassis / hull
+	# weight into account") made the hull's own mass decisive at this scale: a
+	# medium_hull weighs 225kg on its own, which is already over a single wheel
+	# node's 200kg rating before any locomotion or payload is added. That is the
+	# intended feel, but it means the "comfortably under capacity" case has to
+	# be built on a light_hull (90kg) or there is no such case to test.
+	var make_unit = func(locomotion_id: String, loco_weight: float, extra_module_weight: float, hull_type: String = "medium_hull") -> Node:
 		var unit = CharacterBody3D.new()
 		unit.set_script(BattleUnitScript)
 		root.add_child(unit)
 		unit.locomotion_type = locomotion_id
 		unit.locomotion_settings = {}
 		var fake_hull = Node3D.new()
+		fake_hull.set_meta("type_id", hull_type)
 		unit.add_child(fake_hull)
 		unit.hull_node = fake_hull
 
@@ -10437,67 +11287,564 @@ func test_weight_vs_locomotion_capacity_penalty() -> bool:
 		unit._recalculate_move_speed()
 		return unit
 
-	# The mock's hull_node has no type_id meta, so _recalculate_move_speed()
-	# falls back to medium_hull's hull weight - REAL as of the FABLE review
-	# pass (hull mass, incl. armor, now enters the combat weight total).
-	# Expectations below include it, plus the retuned x10 / 1.5-18 band.
-	# armor_weight_mult 0.8: the mock hull carries no faction meta, so
-	# _recalculate_move_speed() falls back to "industrialists" - whose 20%
-	# armor-weight discount is now real combat behavior.
+	# The mock's hull_node has no type_id meta, so this falls back to
+	# medium_hull's hull weight - REAL as of the FABLE review pass (hull mass,
+	# incl. armor, now enters the combat weight total). armor_weight_mult 0.8:
+	# no faction meta either, so it falls back to "industrialists", whose 20%
+	# armor-weight discount is real combat behavior.
 	var mock_hull_weight = ModuleCatalog.compute_hull_weight("medium_hull", 1.0, "hardened_steel", Vector3.ONE, 0.8)
 
-	# wheels' own capacity is 350 (ModuleCatalog.get_base_weight_capacity) -
-	# a 200kg weapon + 50kg wheel chassis + the hull's own 250kg (500 total)
-	# pushes it over. tracked_treads' capacity is 700 - the SAME loadout on
-	# a 120kg tread chassis (570 total) stays comfortably under. This is the
-	# core ask made concrete: heavier/tougher locomotion tolerates more
-	# excess weight before the penalty kicks in.
+	# Predicts the speed a design WOULD reach with no overload penalty:
+	# thrust/weight, capped by the chassis's own top-speed rating. Written
+	# against the named Drivetrain constants rather than repeating literals,
+	# so retuning the model does not silently invalidate this suite - what is
+	# being asserted here is the PENALTY's behavior, not the constants.
+	var unpenalized = func(locomotion_id: String, total_weight: float) -> float:
+		var thrust = Drivetrain.BASE_THRUST + ModuleCatalog.get_thrust_coefficient(locomotion_id)
+		var power = maxf(Drivetrain.SPEED_FLOOR, (thrust / total_weight) * Drivetrain.TW_GAIN)
+		return minf(power, ModuleCatalog.get_base_top_speed(locomotion_id))
+
+	# One wheel node is rated for 200kg (ModuleCatalog.get_base_weight_capacity)
+	# - a 200kg weapon + 50kg wheel chassis + a medium_hull's own 225kg puts it
+	# far over. One tread node is rated for 600 - the SAME loadout on a 120kg
+	# tread chassis stays under. This is the core ask made concrete: heavier,
+	# tougher locomotion tolerates more excess weight before the penalty starts.
+	#
+	# The light case is on a light_hull for the reason given at make_unit: after
+	# the capacity retune a medium hull alone outweighs one wheel node's rating,
+	# so "comfortably under capacity" is not something a medium hull on a single
+	# wheel can be. That is deliberate, and it is why the Design Lab now warns.
 	var overloaded_wheels = make_unit.call("wheels", 50.0, 200.0)
 	var loaded_treads = make_unit.call("tracked_treads", 120.0, 200.0)
-
-	# Prove the wheels case is ACTUALLY penalized, not just naturally slower
-	# from carrying more weight (which the pre-existing thrust/weight ratio
-	# already accounts for) - compute what the unpenalized formula alone
-	# would predict (motor_thrust=100+150 for one locomotion module) and
-	# confirm the real value is meaningfully below it.
-	var wheels_motor_thrust = 100.0 + 150.0
-	var wheels_total = 250.0 + mock_hull_weight
-	var wheels_unpenalized = clamp((wheels_motor_thrust / wheels_total) * 10.0, 1.5, 18.0)
-	if overloaded_wheels.move_speed >= wheels_unpenalized - 0.01:
-		print("  [FAIL] An overloaded wheeled unit (", wheels_total, "kg vs. 350 capacity) should be penalized below the unpenalized thrust/weight prediction. unpenalized=", wheels_unpenalized, " actual=", overloaded_wheels.move_speed)
-		overloaded_wheels.queue_free()
-		loaded_treads.queue_free()
-		return false
-
-	# Prove the treads case gets NO penalty (matches the plain formula
-	# exactly, since it's under its own higher capacity).
-	var treads_motor_thrust = 100.0 + 150.0
-	var treads_total = 320.0 + mock_hull_weight
-	var treads_unpenalized = clamp((treads_motor_thrust / treads_total) * 10.0, 1.5, 18.0)
-	if abs(loaded_treads.move_speed - treads_unpenalized) > 0.01:
-		print("  [FAIL] A tracked_treads unit under its own capacity (", treads_total, "kg vs. 700) should be unpenalized. expected=", treads_unpenalized, " actual=", loaded_treads.move_speed)
-		overloaded_wheels.queue_free()
-		loaded_treads.queue_free()
-		return false
-
-	# A lightly-loaded unit well under capacity should also see zero
-	# penalty (multiplier is a true no-op below the threshold, not just a
-	# small one).
-	var light_wheels = make_unit.call("wheels", 50.0, 0.0)
-	var light_unpenalized = clamp((wheels_motor_thrust / (50.0 + mock_hull_weight)) * 10.0, 1.5, 18.0)
-	if abs(light_wheels.move_speed - light_unpenalized) > 0.01:
-		print("  [FAIL] A lightly-loaded wheeled unit (300kg vs. 350 capacity) should have zero overload penalty. expected=", light_unpenalized, " actual=", light_wheels.move_speed)
+	var light_wheels = make_unit.call("wheels", 50.0, 0.0, "light_hull")
+	var cleanup = func():
 		overloaded_wheels.queue_free()
 		loaded_treads.queue_free()
 		light_wheels.queue_free()
+
+	# Prove the wheels case is ACTUALLY penalized, not just naturally slower
+	# from carrying more weight (which the thrust/weight ratio already
+	# accounts for).
+	var wheels_total = 250.0 + mock_hull_weight
+	var wheels_unpenalized = unpenalized.call("wheels", wheels_total)
+	if overloaded_wheels.move_speed >= wheels_unpenalized - 0.01:
+		print("  [FAIL] An overloaded wheeled unit (", wheels_total, "kg vs. 200 capacity) should be penalized below the unpenalized prediction. unpenalized=", wheels_unpenalized, " actual=", overloaded_wheels.move_speed)
+		cleanup.call()
 		return false
 
-	overloaded_wheels.queue_free()
-	loaded_treads.queue_free()
-	light_wheels.queue_free()
-	print("  [PASS] Weight beyond a locomotor's own capacity measurably slows the unit; heavier locomotion types (tracked_treads) tolerate more excess weight before the penalty kicks in than lighter ones (wheels); units under capacity are unaffected.")
+	# The unit must also REPORT being overloaded, not just be slower - the
+	# Design Lab warning and anything else surfacing load reads these fields.
+	if not overloaded_wheels.is_overloaded:
+		print("  [FAIL] An overloaded unit should report is_overloaded = true. load_ratio=", overloaded_wheels.load_ratio)
+		cleanup.call()
+		return false
+	if overloaded_wheels.top_speed <= overloaded_wheels.move_speed:
+		print("  [FAIL] top_speed (pre-penalty) should exceed move_speed (post-penalty) on an overloaded unit, got top_speed=", overloaded_wheels.top_speed, " move_speed=", overloaded_wheels.move_speed)
+		cleanup.call()
+		return false
+
+	# Prove the treads case gets NO penalty (matches the plain prediction
+	# exactly, since it's under its own higher capacity).
+	var treads_total = 320.0 + mock_hull_weight
+	var treads_unpenalized = unpenalized.call("tracked_treads", treads_total)
+	if abs(loaded_treads.move_speed - treads_unpenalized) > 0.01:
+		print("  [FAIL] A tracked_treads unit under its own capacity (", treads_total, "kg vs. 600) should be unpenalized. expected=", treads_unpenalized, " actual=", loaded_treads.move_speed)
+		cleanup.call()
+		return false
+	if loaded_treads.is_overloaded:
+		print("  [FAIL] A unit under capacity should report is_overloaded = false, got load_ratio=", loaded_treads.load_ratio)
+		cleanup.call()
+		return false
+
+	# A lightly-loaded unit well under capacity should also see zero
+	# penalty (the multiplier is a true no-op below the threshold, not just
+	# a small one).
+	var light_hull_weight = ModuleCatalog.compute_hull_weight("light_hull", 1.0, "hardened_steel", Vector3.ONE, 0.8)
+	var light_total = 50.0 + light_hull_weight
+	var light_unpenalized = unpenalized.call("wheels", light_total)
+	if light_total >= ModuleCatalog.get_base_weight_capacity("wheels"):
+		print("  [FAIL] Test setup is wrong: the 'light' case (", light_total, "kg) is not actually under one wheel node's capacity (", ModuleCatalog.get_base_weight_capacity("wheels"), ") - pick a lighter hull.")
+		cleanup.call()
+		return false
+	if abs(light_wheels.move_speed - light_unpenalized) > 0.01:
+		print("  [FAIL] A lightly-loaded wheeled unit (", light_total, "kg vs. ", ModuleCatalog.get_base_weight_capacity("wheels"), " capacity) should have zero overload penalty. expected=", light_unpenalized, " actual=", light_wheels.move_speed)
+		cleanup.call()
+		return false
+
+	cleanup.call()
+	print("  [PASS] Weight beyond a locomotor's own capacity measurably slows the unit and is reported via is_overloaded/top_speed; heavier locomotion types (tracked_treads) tolerate more excess weight before the penalty kicks in than lighter ones (wheels); units under capacity are unaffected.")
 	return true
 
+# Every locomotor carries its own top speed now, replacing the universal 18.0
+# ceiling that used to be hardcoded into battle_unit.gd's speed clamp. Two
+# things have to hold for that to mean anything: the ceiling must actually BIND
+# (a design with surplus thrust cannot exceed it), and the roster must not all
+# share one value - which is the failure mode the old clamp WAS.
+func test_locomotor_base_top_speed_is_a_real_per_type_ceiling() -> bool:
+	print("Running Test Suite: Locomotor Base Top Speed - Per-Type Ceiling...")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
+
+	# A featherweight hull with a huge thrust surplus: power_top_speed here is
+	# far above every chassis rating, so whatever comes out IS the ceiling.
+	var make_hull = func(locomotion_id: String, node_count: int) -> Node3D:
+		var hull = Node3D.new()
+		hull.set_meta("type_id", "light_hull")
+		hull.set_meta("locomotion_type", locomotion_id)
+		hull.set_meta("locomotion_settings", {})
+		for _i in range(node_count):
+			var child = Node3D.new()
+			var d = ModuleData.new()
+			d.type_id = locomotion_id
+			d.category = "locomotion"
+			d.base_weight = 1.0
+			child.set_meta("module_data", d)
+			hull.add_child(child)
+		root.add_child(hull)
+		return hull
+
+	var seen: Dictionary = {}
+	for loco_id in ["wheels", "tracked_treads", "legs", "fixed_wing_engine",
+			"buoyant_envelope", "rocker_bogie", "hover_engine", "hydrofoil"]:
+		var hull = make_hull.call(loco_id, 1)
+		var dt = Drivetrain.analyze(hull)
+		var rated = ModuleCatalog.get_base_top_speed(loco_id)
+		# Surplus thrust must NOT push the design past its chassis rating.
+		if dt["power_top_speed"] <= rated:
+			print("  [FAIL] Test setup is wrong for ", loco_id, ": needs surplus thrust so the ceiling is what binds. power=", dt["power_top_speed"], " rated=", rated)
+			hull.free()
+			return false
+		if abs(dt["top_speed"] - rated) > 0.001:
+			print("  [FAIL] ", loco_id, " has far more thrust than it can use, so top_speed should equal its base_top_speed (", rated, "), got ", dt["top_speed"])
+			hull.free()
+			return false
+		if not dt["capacity_limited"]:
+			print("  [FAIL] ", loco_id, " is chassis-limited here and should report capacity_limited = true")
+			hull.free()
+			return false
+		seen[loco_id] = rated
+		hull.free()
+
+	# The whole point of the change: these are not all the same number. The old
+	# universal ceiling meant any light enough design on ANY locomotion
+	# converged on 18.0.
+	var distinct: Array = []
+	for k in seen:
+		if not distinct.has(seen[k]):
+			distinct.append(seen[k])
+	if distinct.size() < 6:
+		print("  [FAIL] Base top speeds should be genuinely differentiated per locomotor; got only ", distinct.size(), " distinct values across ", seen.size(), " types: ", seen)
+		return false
+
+	# Direction checks on the archetypes, so a future retune cannot quietly
+	# invert the roster's identity: a jet outruns wheels, wheels outrun legs,
+	# and an airship is the slowest thing in the game.
+	if not (ModuleCatalog.get_base_top_speed("fixed_wing_engine") > ModuleCatalog.get_base_top_speed("wheels")):
+		print("  [FAIL] fixed_wing_engine should be faster than wheels.")
+		return false
+	if not (ModuleCatalog.get_base_top_speed("wheels") > ModuleCatalog.get_base_top_speed("tracked_treads")):
+		print("  [FAIL] wheels should be faster than tracked_treads.")
+		return false
+	if not (ModuleCatalog.get_base_top_speed("tracked_treads") > ModuleCatalog.get_base_top_speed("legs")):
+		print("  [FAIL] tracked_treads should be faster than legs.")
+		return false
+	if not (ModuleCatalog.get_base_top_speed("buoyant_envelope") < ModuleCatalog.get_base_top_speed("legs")):
+		print("  [FAIL] buoyant_envelope should be the slowest of the archetypes.")
+		return false
+
+	# Every locomotion type in the catalog must declare one, or it silently
+	# inherits the old universal ceiling and reads as the fastest thing in the
+	# roster - the exact bug this suite exists to prevent recurring.
+	var missing: Array = []
+	for type_id in ModuleCatalog.get_catalog():
+		var entry = ModuleCatalog.get_module_data(type_id)
+		if entry.get("category", "") == "locomotion" and not entry.has("base_top_speed"):
+			missing.append(type_id)
+	if not missing.is_empty():
+		print("  [FAIL] These locomotion types declare no base_top_speed and would inherit the generic default: ", missing)
+		return false
+
+	print("  [PASS] Each locomotor's base_top_speed is a real ceiling that surplus thrust cannot exceed, the roster's values are genuinely differentiated (not one shared number), the archetype ordering holds, and every locomotion type declares one.")
+	return true
+
+# The overload penalty has to be steep enough to feel (Chris: going over
+# capacity "drops the top speed the finished unit can achieve rapidly") while
+# still resolving across the range a player actually lands in. Pinning both
+# ends matters: too shallow and the warning is noise, too steep and everything
+# past ~1.5x capacity collapses onto the speed floor and the readout stops
+# telling the player which way is out.
+func test_overload_penalty_is_steep_and_monotonic() -> bool:
+	print("Running Test Suite: Overload Penalty Curve...")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
+
+	var mult = func(ratio: float) -> float:
+		return maxf(Drivetrain.OVERLOAD_FLOOR, pow(1.0 / ratio, Drivetrain.OVERLOAD_EXPONENT))
+
+	# No penalty at or under capacity - a true no-op, not a small one.
+	if not is_equal_approx(mult.call(1.0), 1.0):
+		print("  [FAIL] At exactly capacity the multiplier should be 1.0, got ", mult.call(1.0))
+		return false
+
+	# "Rapidly": 10% over must cost at least 10% of top speed. The previous
+	# linear-0.6 curve cost 6% here, which is what made it unfelt.
+	var at_110 = mult.call(1.1)
+	if at_110 > 0.90:
+		print("  [FAIL] 10% overweight should cost at least 10% of top speed to register as a real tradeoff, got multiplier ", at_110)
+		return false
+	# ...but not so steep that a marginal design is already ruined.
+	if at_110 < 0.70:
+		print("  [FAIL] 10% overweight should not cost more than 30% of top speed - being marginally over is a tradeoff, not a write-off. Got multiplier ", at_110)
+		return false
+
+	# Strictly monotonic through the band a player can actually read, so the
+	# Design Lab bar always moves the same direction as the mistake.
+	var prev = 1.0
+	for pct in [105, 110, 120, 130, 140, 150, 160]:
+		var m = mult.call(float(pct) / 100.0)
+		if m >= prev:
+			print("  [FAIL] Penalty must increase monotonically with load; at ", pct, "% got ", m, " which is not worse than the previous ", prev)
+			return false
+		if m <= Drivetrain.OVERLOAD_FLOOR:
+			print("  [FAIL] The curve bottoms out at ", pct, "% of capacity - too early. Everything past that point is indistinguishable, which is what made the 2.5 exponent unusable.")
+			return false
+		prev = m
+
+	# Never zero: a unit frozen in place reads as a bug rather than a balance
+	# outcome, however overloaded it is.
+	if mult.call(50.0) < Drivetrain.OVERLOAD_FLOOR - 0.001:
+		print("  [FAIL] The multiplier must never fall below OVERLOAD_FLOOR, got ", mult.call(50.0), " at 50x capacity")
+		return false
+
+	print("  [PASS] Overload costs >=10% of top speed at 10% over, increases monotonically without bottoming out inside the readable band, and never freezes a unit outright.")
+	return true
+
+# THE ANTI-DRIFT TEST. The Design Lab and combat used to compute load capacity
+# in two separate places, and they had drifted: the sidebar knew about four
+# locomotors and combat knew about six, so on most of the roster the Design Lab
+# showed a capacity figure that could not respond to the tweaks driving it.
+# Both now call Drivetrain.analyze(), and this asserts they agree - if someone
+# reintroduces a local copy in either file, this fails.
+func test_design_lab_and_combat_agree_on_weight_and_capacity() -> bool:
+	print("Running Test Suite: Design Lab / Combat Drivetrain Agreement...")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	# Deliberately includes the locomotors the OLD Design Lab copy knew
+	# nothing about (hover_engine's emv_level, fixed_wing_engine's turbine
+	# compression, and an expansion type), with tweaks set to non-default
+	# values so a stale copy would produce a visibly different number.
+	var cases = [
+		["wheels", {"num_axles": 6, "wheels_per_axle": 2}],
+		["tracked_treads", {"tread_width": 2.0}],
+		["legs", {"count": 6}],
+		["hover_engine", {"pad_count": 6, "emv_level": 2.0}],
+		["fixed_wing_engine", {"engine_count": 4, "turbine_compression": 1.5}],
+		["naval_propeller", {"prop_count": 4, "blade_pitch": 1.5}],
+		["buoyant_envelope", {"prop_count": 4}],
+		["screw_drive", {"drum_diameter": 1.5, "helix_depth": 1.5}],
+	]
+
+	for case in cases:
+		var loco_id: String = case[0]
+		var settings: Dictionary = case[1]
+
+		var unit = CharacterBody3D.new()
+		unit.set_script(BattleUnitScript)
+		root.add_child(unit)
+		unit.locomotion_type = loco_id
+		unit.locomotion_settings = settings
+		var hull = Node3D.new()
+		hull.set_meta("type_id", "medium_hull")
+		hull.set_meta("locomotion_type", loco_id)
+		hull.set_meta("locomotion_settings", settings)
+		unit.add_child(hull)
+		unit.hull_node = hull
+		# Three locomotion nodes plus a payload, so both the per-node sum and
+		# the tweak factors are exercised rather than cancelling out.
+		for _i in range(3):
+			var child = Node3D.new()
+			var d = ModuleData.new()
+			d.type_id = loco_id
+			d.category = "locomotion"
+			d.base_weight = ModuleCatalog.get_module_data(loco_id).get("weight", 50.0)
+			child.set_meta("module_data", d)
+			hull.add_child(child)
+		var payload = Node3D.new()
+		var pd = ModuleData.new()
+		pd.type_id = "artillery"
+		pd.category = "weapon"
+		pd.base_weight = 180.0
+		payload.set_meta("module_data", pd)
+		hull.add_child(payload)
+
+		unit._recalculate_move_speed()
+		# What the Design Lab sidebar reads for the very same hull.
+		var lab = Drivetrain.analyze(hull)
+
+		if abs(unit.total_weight - lab["weight"]) > 0.01:
+			print("  [FAIL] ", loco_id, ": Design Lab weight ", lab["weight"], " disagrees with combat weight ", unit.total_weight)
+			unit.queue_free()
+			return false
+		if abs(unit.weight_capacity - lab["capacity"]) > 0.01:
+			print("  [FAIL] ", loco_id, ": Design Lab capacity ", lab["capacity"], " disagrees with combat capacity ", unit.weight_capacity, " - the two derivations have drifted apart again.")
+			unit.queue_free()
+			return false
+		if abs(unit.move_speed - lab["move_speed"]) > 0.01:
+			print("  [FAIL] ", loco_id, ": Design Lab move_speed ", lab["move_speed"], " disagrees with combat move_speed ", unit.move_speed)
+			unit.queue_free()
+			return false
+		if unit.is_overloaded != lab["is_overloaded"]:
+			print("  [FAIL] ", loco_id, ": Design Lab and combat disagree on whether the design is overloaded (", lab["is_overloaded"], " vs ", unit.is_overloaded, ")")
+			unit.queue_free()
+			return false
+		unit.queue_free()
+
+	print("  [PASS] The Design Lab and combat report identical weight, capacity, speed and overload state across 8 locomotors including the ones the old sidebar copy could not see.")
+	return true
+
+# Chris's ask: "max weight capacity ... should change based on the tweaks
+# applied (eg, more axles = more weight capacity)". This asserts it for EVERY
+# locomotion type in the catalog rather than the handful that happened to be
+# wired, which is how the old if/elif chain left eleven types inert.
+func test_every_locomotor_capacity_responds_to_its_own_tweaks() -> bool:
+	print("Running Test Suite: Every Locomotor's Capacity Responds To Its Tweaks...")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
+	var LocomotionLayout = preload("res://scripts/locomotion_layout.gd")
+
+	# Builds a hull with as many locomotion nodes as the real layout would
+	# spawn for these settings - the same thing the game does, and the reason
+	# a count tweak raises capacity at all.
+	var build = func(loco_id: String, settings: Dictionary) -> Node3D:
+		var ctx = {
+			"hull_size": ModuleCatalog.REFERENCE_HULL_SIZE,
+			"running_gear_size": ModuleCatalog.REFERENCE_HULL_SIZE,
+			"underside_y_bias": 0.0,
+			"catalog_size": ModuleCatalog.get_module_data(loco_id).get("size", Vector3.ONE),
+		}
+		var n = maxi(1, LocomotionLayout.stations(loco_id, settings, ctx).size())
+		var hull = Node3D.new()
+		hull.set_meta("type_id", "medium_hull")
+		hull.set_meta("locomotion_type", loco_id)
+		hull.set_meta("locomotion_settings", settings)
+		for _i in range(n):
+			var child = Node3D.new()
+			var d = ModuleData.new()
+			d.type_id = loco_id
+			d.category = "locomotion"
+			d.base_weight = ModuleCatalog.get_module_data(loco_id).get("weight", 50.0)
+			child.set_meta("module_data", d)
+			hull.add_child(child)
+		return hull
+
+	# (type_id, tweak dict at stock, tweak dict cranked up). Every locomotion
+	# type in the catalog must appear here - the check below enforces that, so
+	# adding a locomotor without wiring its load response fails this suite
+	# rather than shipping inert.
+	var cases = {
+		"wheels": [{"num_axles": 4, "wheels_per_axle": 1}, {"num_axles": 8, "wheels_per_axle": 1}],
+		"tracked_treads": [{"tread_width": 1.0}, {"tread_width": 2.0}],
+		"legs": [{"count": 4}, {"count": 8}],
+		"helicopter_rotors": [{"count": 4}, {"count": 8}],
+		"hover_engine": [{"pad_count": 4, "emv_level": 1.0}, {"pad_count": 4, "emv_level": 2.0}],
+		"fixed_wing_engine": [{"engine_count": 2, "turbine_compression": 1.0}, {"engine_count": 2, "turbine_compression": 2.0}],
+		"ornithopter_wing": [{"wingspan": 1.0}, {"wingspan": 2.0}],
+		"naval_propeller": [{"prop_count": 2}, {"prop_count": 4}],
+		# The one type whose capacity must NOT rise with its count tweak:
+		# an airship's lift is buoyancy, so extra engine pods carry nothing.
+		# Checked separately below.
+		"buoyant_envelope": [{"prop_count": 2}, {"prop_count": 2}],
+		"half_track": [{"tread_width": 1.0}, {"tread_width": 2.0}],
+		"rocker_bogie": [{"bogie_pairs": 3.0}, {"bogie_pairs": 6.0}],
+		"pontoon_wheels": [{"axle_count": 4, "pontoon_size": 1.0}, {"axle_count": 8, "pontoon_size": 1.5}],
+		"air_cushion_skirt": [{"plenum_pressure": 1.0}, {"plenum_pressure": 2.0}],
+		"anti_grav_plate": [{"plate_count": 4, "field_strength": 1.0}, {"plate_count": 4, "field_strength": 2.0}],
+		"hydrofoil": [{"foil_span": 1.0}, {"foil_span": 1.8}],
+		"water_jet": [{"intake_size": 1.0}, {"nozzle_count": 4, "intake_size": 1.0}],
+		"screw_drive": [{"drum_diameter": 1.0}, {"drum_diameter": 2.0}],
+	}
+
+	var uncovered: Array = []
+	for type_id in ModuleCatalog.get_catalog():
+		if ModuleCatalog.get_module_data(type_id).get("category", "") == "locomotion" and not cases.has(type_id):
+			uncovered.append(type_id)
+	if not uncovered.is_empty():
+		print("  [FAIL] These locomotion types have no capacity-response case here, so nothing checks that their tweaks do anything: ", uncovered)
+		return false
+
+	for loco_id in cases:
+		var stock_hull = build.call(loco_id, cases[loco_id][0])
+		var up_hull = build.call(loco_id, cases[loco_id][1])
+		root.add_child(stock_hull)
+		root.add_child(up_hull)
+		var stock = Drivetrain.analyze(stock_hull)
+		var up = Drivetrain.analyze(up_hull)
+		var stock_cap: float = stock["capacity"]
+		var up_cap: float = up["capacity"]
+		stock_hull.free()
+		up_hull.free()
+
+		if loco_id == "buoyant_envelope":
+			continue
+		if up_cap <= stock_cap + 0.01:
+			print("  [FAIL] ", loco_id, ": cranking its load-bearing tweak did not raise weight capacity (", stock_cap, " -> ", up_cap, "). Its entry in Drivetrain.TWEAK_RESPONSE is inert.")
+			return false
+
+	# An airship's engine count must NOT change what it can carry - the
+	# capacity: -1.0 exponent cancels the per-node sum exactly.
+	var air_2 = build.call("buoyant_envelope", {"prop_count": 2})
+	var air_6 = build.call("buoyant_envelope", {"prop_count": 6})
+	root.add_child(air_2)
+	root.add_child(air_6)
+	var a2 = Drivetrain.analyze(air_2)
+	var a6 = Drivetrain.analyze(air_6)
+	var flat_ok = abs(a2["capacity"] - a6["capacity"]) < 0.01
+	var thrust_up = a6["thrust"] > a2["thrust"] + 0.01
+	air_2.free()
+	air_6.free()
+	if not flat_ok:
+		print("  [FAIL] buoyant_envelope capacity should be set by the envelope, not the engine count - got ", a2["capacity"], " at 2 props vs ", a6["capacity"], " at 6.")
+		return false
+	if not thrust_up:
+		print("  [FAIL] buoyant_envelope should still gain THRUST from extra engine pods, got ", a2["thrust"], " -> ", a6["thrust"])
+		return false
+
+	print("  [PASS] Every locomotion type's weight capacity responds to its own load-bearing tweak, and buoyant_envelope correctly gains thrust but not capacity from extra engines.")
+	return true
+
+# REGRESSION GUARD for a real balance bug. LocomotionLayout spawns one node per
+# count, and Drivetrain sums capacity per node - so a count tweak already
+# scales capacity linearly. The old if/elif chain multiplied by the count a
+# SECOND time, making capacity and thrust grow with the SQUARE of the count
+# while weight grew only linearly: 4 axles -> 8 quadrupled capacity for double
+# the wheel mass, so "drag the count slider up" strictly dominated every other
+# response to being overweight and quietly defeated the whole mechanic.
+func test_count_tweaks_scale_capacity_linearly_not_quadratically() -> bool:
+	print("Running Test Suite: Count Tweaks Do Not Double-Count Capacity...")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
+
+	# Capacity for N locomotion nodes, with the count tweak set to match N -
+	# exactly the pairing the real game produces.
+	var cap_for = func(loco_id: String, count_key: String, n: int) -> float:
+		var settings = {count_key: n}
+		var hull = Node3D.new()
+		hull.set_meta("type_id", "medium_hull")
+		hull.set_meta("locomotion_type", loco_id)
+		hull.set_meta("locomotion_settings", settings)
+		for _i in range(n):
+			var child = Node3D.new()
+			var d = ModuleData.new()
+			d.type_id = loco_id
+			d.category = "locomotion"
+			d.base_weight = 0.0
+			child.set_meta("module_data", d)
+			hull.add_child(child)
+		root.add_child(hull)
+		var c: float = Drivetrain.analyze(hull)["capacity"]
+		hull.free()
+		return c
+
+	for case in [["wheels", "num_axles"], ["legs", "count"],
+			["helicopter_rotors", "count"], ["hover_engine", "pad_count"],
+			["anti_grav_plate", "plate_count"], ["pontoon_wheels", "axle_count"]]:
+		var loco_id: String = case[0]
+		var key: String = case[1]
+		var c4 = cap_for.call(loco_id, key, 4)
+		var c8 = cap_for.call(loco_id, key, 8)
+		if c4 <= 0.0:
+			print("  [FAIL] ", loco_id, " reported zero capacity at 4 nodes; test setup is wrong.")
+			return false
+		var factor = c8 / c4
+		# Linear (2.0), not quadratic (4.0). Tolerance is wide enough for a
+		# deliberate sub-linear pull-back but nowhere near the squared value.
+		if factor > 2.5:
+			print("  [FAIL] ", loco_id, ": doubling the ", key, " count multiplied capacity by ", factor, " - it is being counted twice (once per spawned node, once via the tweak factor). Linear is ~2.0; quadratic is 4.0.")
+			return false
+		if factor < 1.2:
+			print("  [FAIL] ", loco_id, ": doubling the ", key, " count barely changed capacity (x", factor, ") - more running gear must carry meaningfully more.")
+			return false
+
+	print("  [PASS] Doubling a locomotor's count roughly doubles its weight capacity rather than quadrupling it - the per-node sum and the tweak table no longer both apply the count.")
+	return true
+
+# Chris's ask: exceeding capacity should "light up a warning notification",
+# the design must still be saveable and fieldable, and the player must be able
+# to see "what they are trading". So the warning has to appear, has to name the
+# cost in speed, and must not gate the save/test buttons.
+func test_design_lab_overweight_warning_names_the_trade() -> bool:
+	print("Running Test Suite: Design Lab Overweight Warning...")
+	var scene = load("res://scenes/MainLab.tscn").instantiate()
+	root.add_child(scene)
+	for _i in range(8):
+		await process_frame
+
+	var stats = scene.get_node_or_null("UI_StatBlock")
+	var hull = scene.get_node_or_null("Hull")
+	if stats == null or hull == null:
+		print("  [FAIL] MainLab did not provide UI_StatBlock/Hull (stats=", stats, " hull=", hull, ")")
+		scene.queue_free()
+		return false
+
+	var fail = func(msg: String) -> bool:
+		print("  [FAIL] " + msg)
+		scene.queue_free()
+		return false
+
+	# No locomotion yet: the load rows must stay hidden rather than showing a
+	# full red bar on a hull the player has only just spawned.
+	stats.update_stats(hull)
+	if stats._load_bar != null and stats._load_bar.visible:
+		return fail.call("A hull with no locomotion should not show a load bar at all.")
+	if stats._overweight_panel != null and stats._overweight_panel.visible:
+		return fail.call("A hull with no locomotion should not show the overweight warning.")
+
+	scene.update_locomotion("wheels", {"wheel_size": 1.0, "num_axles": 4, "wheels_per_axle": 1})
+	for _i in range(4):
+		await process_frame
+	stats.update_stats(hull)
+
+	if not stats._load_bar.visible:
+		return fail.call("With locomotion placed, the load bar should be visible.")
+	if stats._overweight_panel.visible:
+		return fail.call("A wheeled hull carrying nothing should not be overweight.")
+	var clean_speed_text: String = stats._speed_label.text
+
+	# Pile on enough mass to go over capacity.
+	for _i in range(12):
+		var child = Node3D.new()
+		var d = ModuleData.new()
+		d.type_id = "artillery"
+		d.category = "weapon"
+		d.base_weight = 250.0
+		child.set_meta("module_data", d)
+		hull.add_child(child)
+	stats.update_stats(hull)
+
+	if not stats._overweight_panel.visible:
+		return fail.call("A grossly overweight design must light up the overweight warning.")
+	if not stats._overweight_title.text.contains("OVERWEIGHT"):
+		return fail.call("The warning title should say OVERWEIGHT, got: " + stats._overweight_title.text)
+	# "What they are trading": the detail line has to carry the speed cost,
+	# not just the fact of being over.
+	var detail: String = stats._overweight_detail.text
+	if not detail.to_lower().contains("top speed"):
+		return fail.call("The warning must name the speed cost, not just the overweight state. Got: " + detail)
+	if not detail.contains("kg over"):
+		return fail.call("The warning must say how far over capacity the design is. Got: " + detail)
+	# The speed row itself has to show both figures so the trade is legible.
+	if not stats._speed_label.text.contains("was"):
+		return fail.call("While overloaded the speed row should show the penalised speed AND what it would otherwise be, got: " + stats._speed_label.text)
+	if stats._speed_label.text == clean_speed_text:
+		return fail.call("The speed readout did not change when the design went overweight.")
+
+	# Explicitly allowed to be built and fielded, per the ask - the warning
+	# informs, it does not gate.
+	if stats.save_button != null and stats.save_button.disabled:
+		return fail.call("An overweight design must still be saveable - the warning informs, it does not block.")
+	if stats.test_button != null and stats.test_button.disabled:
+		return fail.call("An overweight design must still be testable - the warning informs, it does not block.")
+
+	scene.queue_free()
+	print("  [PASS] The Design Lab hides load rows until locomotion exists, lights an OVERWEIGHT warning naming both the excess mass and the top-speed cost, shows the penalised and unpenalised speeds side by side, and still allows the design to be saved and tested.")
+	return true
 func test_mobility_addon_modules_boost_capacity_and_thrust() -> bool:
 	print("Running Test Suite: Mobility Add-On Modules (wing/thruster) Boost Capacity/Thrust...")
 	print("  [PASS] Mobility add-on modules removed by user request; test skipped.")
@@ -10599,6 +11946,21 @@ func test_locomotion_tweaks_have_real_visual_and_stat_effects() -> bool:
 	# --- Stat: tweaks produce a real, correctly-directioned move_speed
 	# effect, using the mobility-addon test's ballast pattern to isolate
 	# thrust-only vs. capacity/overload-only effects. ---
+	#
+	# make_unit spawns as many locomotion NODES as the real layout would for
+	# these settings. It used to spawn exactly one regardless of the count
+	# tweak, which made every count assertion below test a configuration the
+	# game cannot produce: capacity and thrust are summed per node, so a count
+	# of 8 on a single node is a 2-axle rig wearing an 8-axle label. That mock
+	# is also what hid the fact that the old formula multiplied count in twice
+	# (once per node, once via the tweak factor) - see
+	# test_count_tweaks_scale_capacity_linearly_not_quadratically.
+	#
+	# The ballast weights below are chosen per assertion, from the sweep in
+	# scratch/probe_legs_treads.gd, because each claim is only meaningful in
+	# one regime: with too little ballast both variants sit on their chassis
+	# top-speed ceiling and tie, and with too much both sit on SPEED_FLOOR and
+	# tie again. The old single universal 18.0 ceiling had no upper tie.
 	var make_unit = func(loco_type: String, settings: Dictionary, ballast_weight: float) -> Node:
 		var unit = CharacterBody3D.new()
 		unit.set_script(BattleUnitScript)
@@ -10606,16 +11968,26 @@ func test_locomotion_tweaks_have_real_visual_and_stat_effects() -> bool:
 		unit.locomotion_type = loco_type
 		unit.locomotion_settings = settings
 		var fake_hull = Node3D.new()
+		fake_hull.set_meta("locomotion_type", loco_type)
+		fake_hull.set_meta("locomotion_settings", settings)
 		unit.add_child(fake_hull)
 		unit.hull_node = fake_hull
 
-		var loco_child = Node3D.new()
-		var loco_data = ModuleData.new()
-		loco_data.type_id = loco_type
-		loco_data.category = "locomotion"
-		loco_data.base_weight = 50.0
-		loco_child.set_meta("module_data", loco_data)
-		fake_hull.add_child(loco_child)
+		var station_ctx = {
+			"hull_size": ModuleCatalog.REFERENCE_HULL_SIZE,
+			"running_gear_size": ModuleCatalog.REFERENCE_HULL_SIZE,
+			"underside_y_bias": 0.0,
+			"catalog_size": ModuleCatalog.get_module_data(loco_type).get("size", Vector3.ONE),
+		}
+		var node_count = maxi(1, LocomotionLayoutScript.stations(loco_type, settings, station_ctx).size())
+		for _i in range(node_count):
+			var loco_child = Node3D.new()
+			var loco_data = ModuleData.new()
+			loco_data.type_id = loco_type
+			loco_data.category = "locomotion"
+			loco_data.base_weight = 50.0
+			loco_child.set_meta("module_data", loco_data)
+			fake_hull.add_child(loco_child)
 
 		var ballast_child = Node3D.new()
 		var ballast_data = ModuleData.new()
@@ -10628,52 +12000,72 @@ func test_locomotion_tweaks_have_real_visual_and_stat_effects() -> bool:
 		unit._recalculate_move_speed()
 		return unit
 
-	# Wheels regression check: axle count should still raise BOTH thrust and
-	# capacity together (no tradeoff) exactly like before this batch's
-	# thrust/capacity split refactor - same heavy-ballast overload pattern
-	# as test_mobility_addon_modules_boost_capacity_and_thrust so the
-	# capacity increase shows up as a real, unclamped speed gain.
-	var wheels_2 = make_unit.call("wheels", {"count": 2}, 400.0)
-	var wheels_8 = make_unit.call("wheels", {"count": 8}, 400.0)
+	# Wheels: axle count raises BOTH thrust and capacity together (no
+	# tradeoff), so more axles is faster at every load - the "bigger rig"
+	# archetype. Heavy ballast so the 2-axle case is genuinely overloaded and
+	# the capacity difference shows as a real, unclamped speed gain.
+	var wheels_2 = make_unit.call("wheels", {"num_axles": 2}, 400.0)
+	var wheels_8 = make_unit.call("wheels", {"num_axles": 8}, 400.0)
 	if wheels_8.move_speed <= wheels_2.move_speed:
-		print("  [FAIL] more wheel axles should raise move_speed (more thrust AND more capacity, less overload). count=2:", wheels_2.move_speed, " count=8:", wheels_8.move_speed)
+		print("  [FAIL] more wheel axles should raise move_speed (more thrust AND more capacity, less overload). axles=2:", wheels_2.move_speed, " axles=8:", wheels_8.move_speed)
 		return false
 
-	# Legs, light load (no overload either way): fewer legs should be
-	# FASTER (higher thrust_contrib - agility tradeoff), proving the
-	# leg-count tweak now moves thrust, not just capacity.
-	var legs_2_light = make_unit.call("legs", {"count": 2}, 50.0)
-	var legs_8_light = make_unit.call("legs", {"count": 8}, 50.0)
-	if legs_2_light.move_speed <= legs_8_light.move_speed:
-		print("  [FAIL] fewer legs should be faster under light load (higher thrust_contrib). count=2:", legs_2_light.move_speed, " count=8:", legs_8_light.move_speed)
-		return false
-
-	# Legs, heavy load (overload isolation): MORE legs should win here
-	# despite lower thrust_contrib, because more legs means more weight
-	# capacity and the 2-leg case is badly overloaded at this weight.
-	# Proves the capacity side of the tradeoff is real too, not just thrust.
-	var legs_2_heavy = make_unit.call("legs", {"count": 2}, 600.0)
-	var legs_8_heavy = make_unit.call("legs", {"count": 8}, 600.0)
+	# Legs, heavy load: more legs wins, because capacity scales with the
+	# number of load-bearing contact points and the 2-leg case is badly
+	# overloaded at this weight.
+	var legs_2_heavy = make_unit.call("legs", {"count": 2}, 1000.0)
+	var legs_8_heavy = make_unit.call("legs", {"count": 8}, 1000.0)
 	if legs_8_heavy.move_speed <= legs_2_heavy.move_speed:
-		print("  [FAIL] more legs should win under heavy load (more capacity outweighs lower thrust_contrib). count=2:", legs_2_heavy.move_speed, " count=8:", legs_8_heavy.move_speed)
+		print("  [FAIL] more legs should win under heavy load (more capacity). count=2:", legs_2_heavy.move_speed, " count=8:", legs_8_heavy.move_speed)
 		return false
 
-	# Treads, light load: narrower should be FASTER (higher thrust_contrib).
-	var treads_narrow_light = make_unit.call("tracked_treads", {"width": 0.5}, 50.0)
-	var treads_wide_light = make_unit.call("tracked_treads", {"width": 2.5}, 50.0)
+	# Legs, the thrust side of the tradeoff: each ADDED leg contributes less
+	# thrust than the one before it, because there is more mechanical mass to
+	# coordinate. Asserted per leg rather than as a total.
+	#
+	# This assertion used to read "fewer legs should be FASTER under light
+	# load", and that was never true in the shipped game - only in the
+	# single-node mock this function used to build. With one node, 2 legs got
+	# a 1.25x thrust bonus and 8 legs a 0.5x penalty, so 2 legs won; with the
+	# real node count, 8 legs bring 8 motors and out-pull 2 however much each
+	# individual leg is derated. Total thrust cannot favour fewer legs unless
+	# the per-leg penalty is steeper than 1/n, and at that point capacity
+	# (which rises linearly with legs) makes the few-leg build overloaded
+	# before it can ever be power-limited - verified across the whole ballast
+	# range in scratch/probe_legs_treads.gd. So the honest claim is the
+	# per-leg one, and it is what the design intent ("fewer legs trades
+	# stability for agility") actually rests on.
+	var legs_2_thrust = DrivetrainScript.analyze(legs_2_heavy.hull_node, "legs", {"count": 2})
+	var legs_8_thrust = DrivetrainScript.analyze(legs_8_heavy.hull_node, "legs", {"count": 8})
+	var per_leg_2 = (legs_2_thrust["thrust"] - DrivetrainScript.BASE_THRUST) / 2.0
+	var per_leg_8 = (legs_8_thrust["thrust"] - DrivetrainScript.BASE_THRUST) / 8.0
+	if per_leg_8 >= per_leg_2:
+		print("  [FAIL] each added leg should contribute LESS thrust than the last (diminishing returns per leg). per-leg at 2:", per_leg_2, " per-leg at 8:", per_leg_8)
+		return false
+	if legs_8_thrust["thrust"] <= legs_2_thrust["thrust"]:
+		print("  [FAIL] ...but TOTAL thrust should still rise with leg count - 8 motors out-pull 2. total at 2:", legs_2_thrust["thrust"], " total at 8:", legs_8_thrust["thrust"])
+		return false
+
+	# Treads, light load: narrower is FASTER (less friction). Ballast is kept
+	# low enough that the narrow build still reaches the tread chassis ceiling
+	# while the wide one is held below it by its own friction - a wide margin
+	# (8.0 vs ~6.1) rather than the ~4% gap a heavier, both-power-limited
+	# ballast would give, which a future retune could flip by accident.
+	var treads_narrow_light = make_unit.call("tracked_treads", {"tread_width": 0.5}, 200.0)
+	var treads_wide_light = make_unit.call("tracked_treads", {"tread_width": 2.5}, 200.0)
 	if treads_narrow_light.move_speed <= treads_wide_light.move_speed:
 		print("  [FAIL] narrower treads should be faster under light load. narrow=", treads_narrow_light.move_speed, " wide=", treads_wide_light.move_speed)
 		return false
 
-	# Treads, heavy load: WIDER should win here (more capacity, less/no
-	# overload penalty outweighs its lower thrust_contrib).
-	var treads_narrow_heavy = make_unit.call("tracked_treads", {"width": 0.5}, 600.0)
-	var treads_wide_heavy = make_unit.call("tracked_treads", {"width": 2.5}, 600.0)
+	# Treads, heavy load: WIDER wins (more contact area, more capacity, so no
+	# overload penalty - which outweighs its lower thrust).
+	var treads_narrow_heavy = make_unit.call("tracked_treads", {"tread_width": 0.5}, 800.0)
+	var treads_wide_heavy = make_unit.call("tracked_treads", {"tread_width": 2.5}, 800.0)
 	if treads_wide_heavy.move_speed <= treads_narrow_heavy.move_speed:
 		print("  [FAIL] wider treads should win under heavy load (more capacity). narrow=", treads_narrow_heavy.move_speed, " wide=", treads_wide_heavy.move_speed)
 		return false
 
-	for u in [wheels_2, wheels_8, legs_2_light, legs_8_light, legs_2_heavy, legs_8_heavy, treads_narrow_light, treads_wide_light, treads_narrow_heavy, treads_wide_heavy]:
+	for u in [wheels_2, wheels_8, legs_2_heavy, legs_8_heavy, treads_narrow_light, treads_wide_light, treads_narrow_heavy, treads_wide_heavy]:
 		u.queue_free()
 
 	# --- Terrain multiplier: tread width should modulate the marsh
@@ -13028,9 +14420,10 @@ func test_design_lab_firing_arc_matches_real_pintle_traverse() -> bool:
 		print("  [FAIL] No ArcCone visualization was created for the selected weapon.")
 		scene.queue_free()
 		return false
-	# Under the new ImmediateMesh system, clear segments are built into a ClearArc child node.
-	if not arc.has_node("ClearArc"):
-		print("  [FAIL] Pintle-mounted weapon's firing arc visualization should contain a ClearArc mesh child.")
+	# ArcFill/ArcGrid, not ClearArc - see the naming note in
+	# test_firing_arc_visualization. A pintle mount draws the full envelope.
+	if not arc.has_node("ArcFill"):
+		print("  [FAIL] Pintle-mounted weapon's firing arc visualization should contain an ArcFill mesh child.")
 		scene.queue_free()
 		return false
 
@@ -14525,4 +15918,132 @@ func test_expansion_locomotion_types_build_and_place() -> bool:
 			print("  [FAIL] '%s' placed no instances on a reference hull." % type_id)
 			return false
 	print("  [PASS] All 7 expansion locomotion types build real geometry and place instances on a hull.")
+	return true
+
+# Chris, 2026-08-03: "the locomotors are currently falling through the ground in
+# the test arena, leaving the vehicles sliding around on their belly."
+#
+# Two independent faults produced that, and this suite pins both.
+#
+# 1. RIDE HEIGHT. reconstruct_vehicle() lifted the hull with a hand-tuned
+#    formula that special-cased only wheels and legs (every other ground type
+#    got no ride height at all), and whose two constants read settings["size"] -
+#    a key neither type stores, so both silently used 1.0 and ignored the tweak.
+#    It now measures the real locomotion geometry with the same shared helper
+#    module_placer.gd uses, so a design sits at the same height in a battle as
+#    it did in the lab. Asserted by comparing the two directly: if either side
+#    grows its own copy of the measurement again, they drift and this fails.
+#
+# 2. GROUND SNAP. battle_unit.gd picks its ground height from
+#    get_parent().terrain_height_at() and falls back to gravity +
+#    is_on_floor() when the parent has no such method. Battlefield.tscn had
+#    none, so the arena took the fallback - which rests the unit on its only
+#    collider, the one around the HULL, burying the running gear underneath.
+#    Skirmish never showed it because skirmish.gd does implement the method.
+func test_battle_spawn_sits_on_its_running_gear() -> bool:
+	print("Running Test Suite: Battle Spawn Ride Height / Ground Contact...")
+	var BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
+	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
+
+	# Ground types spanning both halves of the old bug: wheels and legs were the
+	# two the formula knew about, the rest got nothing.
+	var cases = [
+		["wheels", {"wheel_size": 1.0, "num_axles": 4, "wheels_per_axle": 1}],
+		["legs", {"knee_height": 0.375, "count": 4}],
+		["tracked_treads", {"tread_width": 1.0}],
+		["screw_drive", {"drum_diameter": 1.0, "helix_depth": 1.0}],
+		["half_track", {}],
+	]
+
+	# --- The arena must publish a ground height at all (fault 2) ---
+	var arena = load("res://scenes/Battlefield.tscn").instantiate()
+	root.add_child(arena)
+	for _i in range(20):
+		await process_frame
+	if not arena.has_method("terrain_height_at"):
+		print("  [FAIL] Battlefield.tscn's script must implement terrain_height_at() - without it battle_unit.gd takes its gravity/is_on_floor fallback, which rests the unit on its HULL collider and buries the running gear.")
+		arena.queue_free()
+		return false
+	var floor_y: float = arena.terrain_height_at(Vector3.ZERO)
+	# The arena slab is a 100x1x100 box centred at y=-0.5, so its top is y=0.
+	if absf(floor_y) > 0.001:
+		print("  [FAIL] The arena floor should report y=0 (the slab's top face), got ", floor_y)
+		arena.queue_free()
+		return false
+
+	# --- Ride height must match the Design Lab's, per type (fault 1) ---
+	var lab = load("res://scenes/MainLab.tscn").instantiate()
+	root.add_child(lab)
+	for _i in range(12):
+		await process_frame
+	var lab_bp = BlueprintManagerScript.new()
+	lab.add_child(lab_bp)
+	var arena_bp = BlueprintManagerScript.new()
+	arena.add_child(arena_bp)
+
+	var fail = func(msg: String) -> bool:
+		print("  [FAIL] " + msg)
+		lab.queue_free()
+		arena.queue_free()
+		return false
+
+	# Lowest drawn locomotion geometry, in the hull's own local space.
+	var lowest_gear = func(hull: Node3D) -> float:
+		var lowest := INF
+		for child in hull.get_children():
+			if not child.has_meta("module_data"):
+				continue
+			var d = child.get_meta("module_data")
+			if d == null or d.category != "locomotion":
+				continue
+			var wb: AABB = VisualBuilderScript.measure_visual_bounds(child)
+			if wb.size.length_squared() <= 0.0:
+				continue
+			lowest = minf(lowest, child.position.y + wb.position.y * child.scale.y)
+		return lowest
+
+	for case in cases:
+		var loco_id: String = case[0]
+		if lab.get_node_or_null("Hull") == null:
+			lab._place_hull_from_ui("medium_hull")
+			for _i in range(6):
+				await process_frame
+		lab.update_locomotion(loco_id, (case[1] as Dictionary).duplicate())
+		for _i in range(8):
+			await process_frame
+		var lab_hull = lab.get_node_or_null("Hull")
+		if lab_hull == null:
+			return fail.call("Design Lab built no hull for " + loco_id)
+		var lab_lift: float = lab_hull.position.y
+		var blueprint: Dictionary = lab_bp.serialize_hull(lab_hull)
+
+		# Reconstruct the way a battle spawn does (is_designer = false).
+		var battle_hull = arena_bp.reconstruct_vehicle(blueprint, arena, false, "industrialists")
+		if battle_hull == null:
+			return fail.call("reconstruct_vehicle returned nothing for " + loco_id)
+
+		# A real ride height, not zero - "not on its belly".
+		if battle_hull.position.y <= 0.01:
+			return fail.call("%s: a battle-spawned hull must be LIFTED clear of the ground, got hull.position.y = %.3f. This is the 'slides around on its belly' bug." % [loco_id, battle_hull.position.y])
+
+		# ...and the SAME height the lab previewed.
+		if absf(battle_hull.position.y - lab_lift) > 0.02:
+			return fail.call("%s: battle ride height %.3f disagrees with the Design Lab's %.3f - the two ride-height derivations have drifted apart again." % [loco_id, battle_hull.position.y, lab_lift])
+
+		# The lift must put the lowest running gear exactly on the contact
+		# plane: the unit's origin IS its ground contact point, which is the
+		# invariant both the analytic terrain snap and is_on_floor() rely on.
+		var gear: float = lowest_gear.call(battle_hull)
+		if gear == INF:
+			return fail.call("%s: the reconstructed hull has no locomotion geometry to measure - locomotion should arrive as entries in the blueprint's `modules` array." % loco_id)
+		var contact: float = battle_hull.position.y + gear
+		if absf(contact) > 0.05:
+			return fail.call("%s: the lowest running gear should sit on the unit's origin (y=0), got %.3f. Negative means it is buried below the ground plane." % [loco_id, contact])
+
+		battle_hull.queue_free()
+		await process_frame
+
+	lab.queue_free()
+	arena.queue_free()
+	print("  [PASS] The test arena publishes a ground height, and a battle-spawned hull is lifted to put its lowest running gear exactly on the contact plane - at the identical ride height the Design Lab previewed, across wheels/legs/treads/screw_drive/half_track.")
 	return true

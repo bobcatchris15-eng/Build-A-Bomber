@@ -25,6 +25,10 @@ const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
+# File-level, not the loop-local `var VisualBuilder = preload(...)` inside
+# reconstruct_vehicle's module loop - the ground-contact measurement at the end
+# of that function runs after the loop, where that local is out of scope.
+const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
 
 # Set by load_blueprint_into_designer() whenever it returns false, so
@@ -872,6 +876,76 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# both of which need the real, un-merged sub-part nodes to work on.
 		if not is_designer:
 			VisualBuilder.bake_module_visual(new_module)
+
+	# GROUND CONTACT, measured from the locomotion geometry that now exists.
+	#
+	# This is the fix for "the locomotors fall through the ground in the test
+	# arena, leaving the vehicles sliding around on their belly" (Chris,
+	# 2026-08-03). The provisional lift set before the module loop is the OLD
+	# standalone formula, and it is wrong in three separate ways:
+	#
+	#  1. It only special-cases wheels and legs. Every other ground type -
+	#     tracked_treads, screw_drive, half_track, rocker_bogie,
+	#     pontoon_wheels, hover_engine - gets hull_height/2 and no ride height
+	#     at all, so its running gear starts at or below the ground plane.
+	#  2. Its two constants read settings["size"], but wheels store
+	#     "wheel_size" and legs store "knee_height" - "size" is never present,
+	#     so both silently fall back to 1.0 and the lift ignores the tweak it
+	#     is supposed to track.
+	#  3. Even at its best it is a hand-tuned guess. module_placer.gd stopped
+	#     guessing (see its own GROUND CONTACT block): measured against the
+	#     reference hull, wheels floated 0.13 above the ground, half_track
+	#     0.30, pontoon_wheels 0.28, and legs sank 0.31 THROUGH it.
+	#
+	# That formula was only ever reachable as a fallback for when there was no
+	# running-gear slab to measure instead - and dropping the slab
+	# (ModuleCatalog.needs_running_gear() is now always false, per Chris
+	# 2026-08-02) made the fallback the only path, which is what re-exposed it.
+	#
+	# So: mirror module_placer.gd exactly, by calling the same static helper it
+	# uses. The hull rises until the lowest piece of running gear sits on y=0,
+	# which is the invariant the rest of the movement code assumes - a ground
+	# unit's ORIGIN is its ground contact point, which is what lets both the
+	# analytic terrain snap and is_on_floor() put it at the right height.
+	if ModuleCatalog.locomotion_touches_ground(loc_type):
+		var lowest := INF
+		for child in hull.get_children():
+			if not child.has_meta("module_data"):
+				continue
+			var child_data = child.get_meta("module_data")
+			if child_data == null or child_data.category != "locomotion":
+				continue
+			var wb: AABB = VisualBuilderScript.measure_visual_bounds(child)
+			if wb.size.length_squared() <= 0.0:
+				continue
+			lowest = minf(lowest, child.position.y + wb.position.y * child.scale.y)
+		if lowest < INF:
+			# Never BELOW the hull's own underside. The lift puts the lowest
+			# running gear on the contact plane, but the hull is part of the
+			# vehicle too: if a design's locomotion does not actually reach past
+			# the hull's bottom face, lifting by the gear alone leaves the hull
+			# itself dipping through the ground.
+			#
+			# In a battle that is not merely a cosmetic problem. A unit's
+			# collision_mask includes layer 1 (ground), so a hull sunk into the
+			# floor makes move_and_slide() spend every frame depenetrating it -
+			# the same pathology battle_unit.gd documents for a flyer flown
+			# inside a hill, where physics went from 2.38ms to 15.57ms and the
+			# unit stopped going where it was sent.
+			#
+			# Found by the headless suite, not by inspection: several navigation
+			# suites started reporting units that "barely moved" or were "stuck
+			# against the building". Their fixture mounts a tracked_treads
+			# module at local y=-0.4 inside a 1.0-tall hull, so the gear never
+			# reaches the hull's own underside and the measured lift put the
+			# hull bottom at -0.109.
+			# hull_size is the catalog size already multiplied by hull_scale and
+			# armor_bulk - the same figure the running-gear sizing above uses,
+			# and what battle_unit.gd builds its hull collider from. Taking the
+			# half-height from anywhere else is how module_placer.gd's copy of
+			# this floor ended up reading a fallback catalog entry instead of
+			# the hull in front of it.
+			hull.position.y = maxf(-lowest, hull_size.y / 2.0)
 
 	return hull
 

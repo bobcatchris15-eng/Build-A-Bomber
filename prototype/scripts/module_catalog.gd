@@ -127,7 +127,7 @@ static func module_exists(type_id: String) -> bool:
 # Merged into the catalog entries by _build_catalog_literal() below, so
 # `get_module_data(id).fire_rate` is the single source of truth.
 const WEAPON_FIRE_PROFILES = {
-	"basic_cannon":       {"fire_rate": 1.8,  "fire_range": 25.0, "laser_color": Color.ORANGE},
+	"basic_cannon":       {"fire_rate": 1.8,  "fire_range": 38.0, "laser_color": Color.ORANGE},
 	# 0.22 -> 0.66 is the largest single change the balance sweep asked for,
 	# and the one most likely to need a feel check: at 0.22s the HMG's
 	# per-shot damage (dps * fire_rate) was ~5.5, permanently under every
@@ -135,59 +135,59 @@ const WEAPON_FIRE_PROFILES = {
 	# territory dealing 15% damage to anything armored. At 0.66s it clears
 	# the lighter thresholds and becomes a real gun - but it also fires 3x
 	# slower, which reads more like a light autocannon than a machine gun.
-	"heavy_machine_gun":  {"fire_rate": 0.66, "fire_range": 15.0, "laser_color": Color.GOLD},
-	"rotary_cannon":      {"fire_rate": 0.05, "fire_range": 20.0, "laser_color": Color.GOLD},
-	"gauss_railgun":      {"fire_rate": 3.5,  "fire_range": 45.0, "laser_color": Color.BLUE_VIOLET},
-	"artillery":          {"fire_rate": 4.5,  "fire_range": 50.0, "laser_color": Color.SADDLE_BROWN},
-	"mortar_array":       {"fire_rate": 2.0,  "fire_range": 28.0, "laser_color": Color.OLIVE},
-	"guided_missile":     {"fire_rate": 3.0,  "fire_range": 35.0, "laser_color": Color.YELLOW},
-	"missile_pod":        {"fire_rate": 2.8,  "fire_range": 30.0, "laser_color": Color.DARK_ORANGE},
-	"drone_carrier":      {"fire_rate": 5.0,  "fire_range": 30.0, "laser_color": Color.NAVY_BLUE},
-	"cluster_dispenser":  {"fire_rate": 3.0,  "fire_range": 24.0, "laser_color": Color.CHOCOLATE},
-	"flamethrower":       {"fire_rate": 0.06, "fire_range": 9.0,  "laser_color": Color.CRIMSON},
-	"heavy_laser":        {"fire_rate": 0.05, "fire_range": 22.0, "laser_color": Color.DARK_RED},
-	"plasma_lobber":      {"fire_rate": 2.2,  "fire_range": 24.0, "laser_color": Color.MEDIUM_SPRING_GREEN},
-	"tesla_coil":         {"fire_rate": 1.4,  "fire_range": 14.0, "laser_color": Color.LIGHT_SKY_BLUE},
-	"arc_projector":      {"fire_rate": 0.9,  "fire_range": 10.0, "laser_color": Color.CYAN},
-	"ion_cannon":         {"fire_rate": 3.2,  "fire_range": 32.0, "laser_color": Color.SKY_BLUE},
+	"heavy_machine_gun":  {"fire_rate": 0.66, "fire_range": 26.0, "laser_color": Color.GOLD},
+	"rotary_cannon":      {"fire_rate": 0.05, "fire_range": 28.0, "laser_color": Color.GOLD},
+	"gauss_railgun":      {"fire_rate": 3.5,  "fire_range": 72.0, "laser_color": Color.BLUE_VIOLET},
+	"artillery":          {"fire_rate": 4.5,  "fire_range": 140.0, "laser_color": Color.SADDLE_BROWN},
+	"mortar_array":       {"fire_rate": 2.0,  "fire_range": 55.0, "laser_color": Color.OLIVE},
+	"guided_missile":     {"fire_rate": 3.0,  "fire_range": 55.0, "laser_color": Color.YELLOW},
+	"missile_pod":        {"fire_rate": 2.8,  "fire_range": 48.0, "laser_color": Color.DARK_ORANGE},
+	"drone_carrier":      {"fire_rate": 5.0,  "fire_range": 55.0, "laser_color": Color.NAVY_BLUE},
+	"cluster_dispenser":  {"fire_rate": 3.0,  "fire_range": 34.0, "laser_color": Color.CHOCOLATE},
+	"flamethrower":       {"fire_rate": 0.06, "fire_range": 11.0,  "laser_color": Color.CRIMSON},
+	"heavy_laser":        {"fire_rate": 0.05, "fire_range": 34.0, "laser_color": Color.DARK_RED},
+	"plasma_lobber":      {"fire_rate": 2.2,  "fire_range": 32.0, "laser_color": Color.MEDIUM_SPRING_GREEN},
+	"tesla_coil":         {"fire_rate": 1.4,  "fire_range": 18.0, "laser_color": Color.LIGHT_SKY_BLUE},
+	"arc_projector":      {"fire_rate": 0.9,  "fire_range": 12.0, "laser_color": Color.CYAN},
+	"ion_cannon":         {"fire_rate": 3.2,  "fire_range": 50.0, "laser_color": Color.SKY_BLUE},
 	# Cone denial. Short interval and low per-shot on purpose: it is not
 	# supposed to kill things, it is supposed to make their electronics stop
 	# working, which it does through the energy drain rather than the damage.
-	"microwave_emitter":  {"fire_rate": 0.35, "fire_range": 13.0, "laser_color": Color(0.95, 0.85, 0.45)},
+	"microwave_emitter":  {"fire_rate": 0.35, "fire_range": 20.0, "laser_color": Color(0.95, 0.85, 0.45)},
 	# The slowest cycle in the roster by a wide margin, and the biggest energy
 	# bill. 120 dps at a 5.5s interval is 660 per shot - well past even the
 	# anti-materiel rifle - but you only get it every five and a half seconds
 	# and only if the capacitor is charged.
-	"particle_lance":     {"fire_rate": 5.5,  "fire_range": 34.0, "laser_color": Color(0.70, 0.90, 1.0)},
-	"spigot_mortar":      {"fire_rate": 5.0,  "fire_range": 14.0, "laser_color": Color(0.85, 0.70, 0.40)},
-	"rocket_artillery":   {"fire_rate": 3.0,  "fire_range": 30.0, "laser_color": Color(0.95, 0.60, 0.25)},
-	"hypervelocity_missile": {"fire_rate": 2.2, "fire_range": 26.0, "laser_color": Color(0.85, 0.92, 1.0)},
-	"sam_launcher":       {"fire_rate": 2.6,  "fire_range": 30.0, "laser_color": Color(0.80, 0.85, 0.90)},
-	"loitering_munition": {"fire_rate": 4.0,  "fire_range": 38.0, "laser_color": Color(0.70, 0.78, 0.66)},
-	"anti_radiation_missile": {"fire_rate": 3.4, "fire_range": 34.0, "laser_color": Color(0.75, 0.80, 0.78)},
-	"bunker_buster":      {"fire_rate": 4.2,  "fire_range": 24.0, "laser_color": Color(0.70, 0.72, 0.75)},
-	"cruise_missile":     {"fire_rate": 5.0,  "fire_range": 42.0, "laser_color": Color(0.78, 0.80, 0.72)},
-	"chaff_dispenser":    {"fire_rate": 3.5,  "fire_range": 9.0,  "laser_color": Color(0.85, 0.86, 0.80)},
-	"laser_dazzler":      {"fire_rate": 0.7,  "fire_range": 16.0, "laser_color": Color(0.40, 0.95, 0.55)},
-	"aps_interceptor":    {"fire_rate": 0.9,  "fire_range": 7.0,  "laser_color": Color(1.0, 0.75, 0.35)},
-	"aa_autocannon":      {"fire_rate": 0.20, "fire_range": 20.0, "laser_color": Color(1.0, 0.85, 0.45)},
-	"jammer_mast":        {"fire_rate": 2.0,  "fire_range": 15.0, "laser_color": Color(0.55, 0.85, 0.90)},
-	"sentry_deployer":    {"fire_rate": 8.0,  "fire_range": 12.0, "laser_color": Color(0.70, 0.75, 0.60)},
-	"sensor_beacon_launcher": {"fire_rate": 6.0, "fire_range": 22.0, "laser_color": Color(0.65, 0.90, 0.75)},
-	"decoy_projector":    {"fire_rate": 10.0, "fire_range": 10.0, "laser_color": Color(0.80, 0.80, 0.65)},
-	"ciws":               {"fire_rate": 0.06, "fire_range": 14.0, "laser_color": Color.WHITE_SMOKE},
-	"pd_laser":           {"fire_rate": 0.1,  "fire_range": 16.0, "laser_color": Color.LIGHT_CORAL},
-	"flak_cannon":        {"fire_rate": 1.2,  "fire_range": 22.0, "laser_color": Color.DARK_GOLDENROD},
+	"particle_lance":     {"fire_rate": 5.5,  "fire_range": 58.0, "laser_color": Color(0.70, 0.90, 1.0)},
+	"spigot_mortar":      {"fire_rate": 5.0,  "fire_range": 16.0, "laser_color": Color(0.85, 0.70, 0.40)},
+	"rocket_artillery":   {"fire_rate": 3.0,  "fire_range": 100.0, "laser_color": Color(0.95, 0.60, 0.25)},
+	"hypervelocity_missile": {"fire_rate": 2.2, "fire_range": 44.0, "laser_color": Color(0.85, 0.92, 1.0)},
+	"sam_launcher":       {"fire_rate": 2.6,  "fire_range": 62.0, "laser_color": Color(0.80, 0.85, 0.90)},
+	"loitering_munition": {"fire_rate": 4.0,  "fire_range": 120.0, "laser_color": Color(0.70, 0.78, 0.66)},
+	"anti_radiation_missile": {"fire_rate": 3.4, "fire_range": 60.0, "laser_color": Color(0.75, 0.80, 0.78)},
+	"bunker_buster":      {"fire_rate": 4.2,  "fire_range": 36.0, "laser_color": Color(0.70, 0.72, 0.75)},
+	"cruise_missile":     {"fire_rate": 5.0,  "fire_range": 170.0, "laser_color": Color(0.78, 0.80, 0.72)},
+	"chaff_dispenser":    {"fire_rate": 3.5,  "fire_range": 12.0,  "laser_color": Color(0.85, 0.86, 0.80)},
+	"laser_dazzler":      {"fire_rate": 0.7,  "fire_range": 28.0, "laser_color": Color(0.40, 0.95, 0.55)},
+	"aps_interceptor":    {"fire_rate": 0.9,  "fire_range": 9.0,  "laser_color": Color(1.0, 0.75, 0.35)},
+	"aa_autocannon":      {"fire_rate": 0.20, "fire_range": 38.0, "laser_color": Color(1.0, 0.85, 0.45)},
+	"jammer_mast":        {"fire_rate": 2.0,  "fire_range": 30.0, "laser_color": Color(0.55, 0.85, 0.90)},
+	"sentry_deployer":    {"fire_rate": 8.0,  "fire_range": 16.0, "laser_color": Color(0.70, 0.75, 0.60)},
+	"sensor_beacon_launcher": {"fire_rate": 6.0, "fire_range": 46.0, "laser_color": Color(0.65, 0.90, 0.75)},
+	"decoy_projector":    {"fire_rate": 10.0, "fire_range": 14.0, "laser_color": Color(0.80, 0.80, 0.65)},
+	"ciws":               {"fire_rate": 0.06, "fire_range": 22.0, "laser_color": Color.WHITE_SMOKE},
+	"pd_laser":           {"fire_rate": 0.1,  "fire_range": 24.0, "laser_color": Color.LIGHT_CORAL},
+	"flak_cannon":        {"fire_rate": 1.2,  "fire_range": 40.0, "laser_color": Color.DARK_GOLDENROD},
 	# --- Roster expansion ---
 	# Belt-fed: fast for a grenade weapon, slow for an autogun.
-	"mk19_grenade_launcher": {"fire_rate": 0.5, "fire_range": 22.0, "laser_color": Color(0.55, 0.62, 0.30)},
+	"mk19_grenade_launcher": {"fire_rate": 0.5, "fire_range": 30.0, "laser_color": Color(0.55, 0.62, 0.30)},
 	# The slowest direct-fire cycle in the roster bar the ballista - one
 	# enormous HEAT round, then a long, exposed reload.
-	"recoilless_rifle":   {"fire_rate": 3.2,  "fire_range": 28.0, "laser_color": Color(1.0, 0.72, 0.35)},
+	"recoilless_rifle":   {"fire_rate": 3.2,  "fire_range": 38.0, "laser_color": Color(1.0, 0.72, 0.35)},
 	# Roughly half gauss_railgun's 3.5s cycle at a shorter reach - the
 	# turreted, affordable hitscan option.
-	"coil_gun":           {"fire_rate": 1.6,  "fire_range": 34.0, "laser_color": Color(0.55, 0.85, 1.0)},
-	"autocannon":         {"fire_rate": 0.28, "fire_range": 18.0, "laser_color": Color.GOLDENROD},
+	"coil_gun":           {"fire_rate": 1.6,  "fire_range": 52.0, "laser_color": Color(0.55, 0.85, 1.0)},
+	"autocannon":         {"fire_rate": 0.28, "fire_range": 30.0, "laser_color": Color.GOLDENROD},
 	# The roster's only PRECISION weapon. Everything else is DPS or splash;
 	# this one is a single very large per-shot number, which is the most
 	# interesting place on the damage curve because per-shot damage
@@ -195,21 +195,21 @@ const WEAPON_FIRE_PROFILES = {
 	# 4.5s interval its 78 dps becomes 351 per shot - straight through every
 	# armor threshold in the table, and utterly wasted on a scout it can only
 	# hit once every four and a half seconds.
-	"anti_materiel_rifle": {"fire_rate": 4.5, "fire_range": 36.0, "laser_color": Color(0.95, 0.92, 0.80)},
-	"napalm_mortar":      {"fire_rate": 2.6,  "fire_range": 26.0, "laser_color": Color(1.0, 0.45, 0.1)},
+	"anti_materiel_rifle": {"fire_rate": 4.5, "fire_range": 66.0, "laser_color": Color(0.95, 0.92, 0.80)},
+	"napalm_mortar":      {"fire_rate": 2.6,  "fire_range": 40.0, "laser_color": Color(1.0, 0.45, 0.1)},
 	# Short "range" because it is not really shooting - it lobs a mine a
 	# short way ahead and leaves it there.
-	"mine_layer":         {"fire_rate": 3.5,  "fire_range": 12.0, "laser_color": Color(0.62, 0.56, 0.30)},
+	"mine_layer":         {"fire_rate": 3.5,  "fire_range": 14.0, "laser_color": Color(0.62, 0.56, 0.30)},
 	# The slowest weapon in the game, by a distance. A torsion frame does
 	# not cycle quickly.
-	"ballista":           {"fire_rate": 4.0,  "fire_range": 26.0, "laser_color": Color(0.60, 0.46, 0.30)},
+	"ballista":           {"fire_rate": 4.0,  "fire_range": 34.0, "laser_color": Color(0.60, 0.46, 0.30)},
 	# Short-ranged and quick-cycling: a discharger lays a screen right in
 	# front of its own vehicle, it doesn't shell a distant position. dps is
 	# 0.0 in the catalog and every round it fires is a zero-damage
 	# obscurant, so fire_rate here is purely "how fast can it re-screen".
-	"smoke_discharger":   {"fire_rate": 2.5,  "fire_range": 18.0, "laser_color": Color(0.72, 0.72, 0.74)},
-	"resource_harvester": {"fire_rate": 0.1,  "fire_range": 15.0, "laser_color": Color.GOLD},
-	"repair_array":       {"fire_rate": 0.15, "fire_range": 12.0, "laser_color": Color.CYAN},
+	"smoke_discharger":   {"fire_rate": 2.5,  "fire_range": 20.0, "laser_color": Color(0.72, 0.72, 0.74)},
+	"resource_harvester": {"fire_rate": 0.1,  "fire_range": 18.0, "laser_color": Color.GOLD},
+	"repair_array":       {"fire_rate": 0.15, "fire_range": 22.0, "laser_color": Color.CYAN},
 }
 # Matches the old chain's trailing `else:` branch - any weapon-ish entry with
 # no profile row (including modded/hull-loaded ones) still gets sane values.
@@ -217,6 +217,82 @@ const DEFAULT_FIRE_PROFILE = {"fire_rate": 1.0, "fire_range": 15.0, "laser_color
 
 static func get_fire_profile(type_id: String) -> Dictionary:
 	return WEAPON_FIRE_PROFILES.get(type_id, DEFAULT_FIRE_PROFILE)
+
+# --- Range tiers -----------------------------------------------------------
+# Chris, 2026-08-03: "even the high range weapons are engaging at about the
+# same distance as everything else. The longest ranged ones should absolutely
+# be range-able out beyond the unit's vision, i.e. the artillery can make use
+# of a spotter."
+#
+# The old band was 7-50 across 45 weapons, which LOOKED like a 7x spread but
+# played as a single distance, because range was never the binding constraint:
+# a weapon refuses to target anything fog_hidden, fog is driven by
+# vision_range, and 26 of those 45 weapons out-ranged the vision of a standard
+# hull (scratch/probe_range.gd measured this). Everything past ~20 was reach
+# the game could not use. On real maps - map_half_extents runs 135 to 550, so
+# 270 to 1100 units across - the whole band also occupied 4-18% of the field.
+#
+# fire_range is now anchored to vision in explicit tiers, so the number tells
+# you HOW a weapon is meant to be used rather than just how big it is. VISION
+# below is nominal (medium_hull), not any particular hull's:
+#
+#   T1 point-blank   0.2-0.4x vision   self-defence; dies to anything kiting it
+#   T2 close         0.4-0.6x          has to be in the fight to contribute
+#   T3 direct        0.7-1.0x          shoots what its own hull can see
+#   T4 overwatch     1.2-1.9x          out-ranges its own eyes; a spotter helps
+#   T5 operational   2.6-4.5x          CANNOT self-acquire; spotter-only
+#
+# T4 and T5 are the point of the exercise. A T5 weapon's reach is 2.6x its own
+# vision or more, so it is structurally incapable of finding its own targets -
+# it is only useful when some other unit on the team is looking, which is what
+# makes a scout worth building and what "artillery can make use of a spotter"
+# means mechanically.
+const RANGE_TIERS = {
+	"point_blank": {"max_vision_mult": 0.4,  "label": "Point Blank"},
+	"close":       {"max_vision_mult": 0.65, "label": "Close"},
+	"direct":      {"max_vision_mult": 1.1,  "label": "Direct Fire"},
+	"overwatch":   {"max_vision_mult": 2.0,  "label": "Overwatch"},
+	"operational": {"max_vision_mult": INF,  "label": "Operational"},
+}
+
+# The vision every tier boundary above is expressed against - a plain
+# medium_hull's, post-VISION_SCALE. Used for classification and for the Design
+# Lab readout, never for a real unit's actual sight radius (that always comes
+# from its own hull).
+const NOMINAL_VISION: float = 38.0
+
+# A weapon's authored reach before any tweak touches it. Same role
+# base_traverse plays for traverse - the one number a design starts from.
+static func get_base_range(type_id: String) -> float:
+	return get_fire_profile(type_id).fire_range
+
+# Which tier a reach falls in, against nominal vision. Drives the Design Lab
+# label and the "needs a spotter" warning.
+static func get_range_tier(reach: float) -> String:
+	for tier in RANGE_TIERS:
+		if reach <= RANGE_TIERS[tier].max_vision_mult * NOMINAL_VISION:
+			return tier
+	return "operational"
+
+static func get_range_tier_label(reach: float) -> String:
+	return RANGE_TIERS[get_range_tier(reach)].label
+
+# Indirect fire: a lobbed round arcs over whatever is between the gun and the
+# target, so requiring an unbroken raycast to the target - which every other
+# weapon does, and rightly - would defeat the entire tier. Without this, a
+# 140-unit artillery piece is stopped by any rock or building in the 140 units
+# in front of it, which on a real map is essentially always. These are exactly
+# the weapons whose fire path is a ballistic arc (see auto_weapon.gd's
+# _fire_arcing_shell_at callers), not a general "long range" exemption:
+# gauss_railgun reaches 72 and still needs to see what it is shooting.
+const INDIRECT_FIRE_TYPES = [
+	"artillery", "mortar_array", "rocket_artillery", "spigot_mortar",
+	"napalm_mortar", "mk19_grenade_launcher", "cruise_missile",
+	"loitering_munition",
+]
+
+static func is_indirect_fire(type_id: String) -> bool:
+	return type_id in INDIRECT_FIRE_TYPES
 
 static func _build_catalog_literal() -> Dictionary:
 	var catalog = {
@@ -226,12 +302,12 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 100.0,
 			"weight": 80.0,
+			"base_traverse": 1.018,
 			"metal": 30,
 			"crystal": 0,
 			"dps": 40.0,
 			# Baseline turret traverse - every other weapon's agility is
 			# reasoned relative to this 1.0 anchor.
-			"traverse_agility": 1.0,
 			"size": Vector3(0.6, 0.6, 2.0),
 			"color": Color.DIM_GRAY
 		},
@@ -240,6 +316,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 60.0,
 			"weight": 40.0,
+			"base_traverse": 1.937,
 			"metal": 15,
 			"crystal": 0,
 			"dps": 32.5,
@@ -250,7 +327,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.15,
 			# Small, light gun on a light mount - swings fast, same real-world
 			# intuition as its pintle tolerance above.
-			"traverse_agility": 1.3,
 			"size": Vector3(0.3, 0.3, 1.0),
 			"color": Color.SLATE_GRAY
 		},
@@ -259,6 +335,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 80.0,
 			"weight": 110.0,
+			"base_traverse": 1.025,
 			"metal": 45,
 			"crystal": 5,
 			"dps": 105.0,
@@ -267,7 +344,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.15,
 			# Motor-driven gatling on a powered gimbal - agile but not as
 			# featherweight-quick as the single-barrel MG.
-			"traverse_agility": 1.2,
 			"size": Vector3(0.5, 0.5, 1.5),
 			"color": Color(0.2, 0.2, 0.2) # Charcoal
 		},
@@ -276,6 +352,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 120.0,
 			"weight": 180.0,
+			"base_traverse": 0.261,
 			"metal": 80,
 			"crystal": 40,
 			"dps": 99.0,
@@ -283,7 +360,6 @@ static func _build_catalog_literal() -> Dictionary:
 			# independently traverses in practice - this number only matters
 			# if that override is ever lifted, kept low for consistency with
 			# its long rigid accelerator rail.
-			"traverse_agility": 0.4,
 			"size": Vector3(0.6, 0.6, 2.8),
 			"color": Color.BLUE_VIOLET
 		},
@@ -294,12 +370,12 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 150.0,
 			"weight": 250.0,
+			"base_traverse": 0.217,
 			"metal": 100,
 			"crystal": 10,
 			"dps": 90.0,
 			# Frame_built like gauss_railgun - traverse is moot in practice,
 			# a low number matches its bulky fixed-elevation mount either way.
-			"traverse_agility": 0.4,
 			"size": Vector3(1.8, 1.8, 6.4),
 			"color": Color.SADDLE_BROWN
 		},
@@ -308,6 +384,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 80.0,
 			"weight": 90.0,
+			"base_traverse": 0.477,
 			"metal": 40,
 			"crystal": 0,
 			"dps": 50.0,
@@ -318,7 +395,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.55,
 			# Indirect-fire tube array - traverses slowly and deliberately,
 			# same "needs a level, stable aim" character as its pintle stance.
-			"traverse_agility": 0.5,
 			"size": Vector3(1.2, 0.6, 1.2),
 			"color": Color.OLIVE
 		},
@@ -329,6 +405,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 70.0,
 			"weight": 60.0,
+			"base_traverse": 1.073,
 			"metal": 30,
 			"crystal": 15,
 			"dps": 55.0,
@@ -338,7 +415,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.25,
 			# Self-correcting guidance means the launch rail doesn't need to
 			# snap-track a moving target the way a direct-fire gun does.
-			"traverse_agility": 0.9,
 			"size": Vector3(0.6, 0.4, 1.6),
 			"color": Color.GOLD
 		},
@@ -347,6 +423,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 100.0,
 			"weight": 150.0,
+			"base_traverse": 0.576,
 			"metal": 50,
 			"crystal": 10,
 			"dps": 72.0,
@@ -358,7 +435,6 @@ static func _build_catalog_literal() -> Dictionary:
 			# Boxy multi-tube launcher, unguided at launch - needs to actually
 			# aim the whole pod rather than let guidance correct after the
 			# fact, so it traverses slower than the guided missiles above.
-			"traverse_agility": 0.8,
 			"size": Vector3(1.2, 0.8, 1.5),
 			"color": Color.DARK_ORANGE
 		},
@@ -380,6 +456,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 90.0,
 			"weight": 100.0,
+			"base_traverse": 0.540,
 			"metal": 45,
 			"crystal": 10,
 			"dps": 65.0,
@@ -390,7 +467,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.45,
 			# Lobbing arc weapon like mortar_array/plasma_lobber, but a
 			# shorter lob range makes it a bit less deliberate to aim.
-			"traverse_agility": 0.6,
 			"size": Vector3(1.4, 0.8, 1.4),
 			"color": Color.CHOCOLATE
 		},
@@ -399,12 +475,12 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 70.0,
 			"weight": 50.0,
+			"base_traverse": 1.647,
 			# A hose-fed nozzle, not a rigid ballistic tube - shrugs off a
 			# steep mounting angle same as the light autoguns.
 			"pintle_min_up_alignment": 0.15,
 			# A free-swinging hose, not a rigid barrel - whips onto a target
 			# fast, forgiving of imprecise aim since it hits an area anyway.
-			"traverse_agility": 1.25,
 			# Balance pass: value/cost was 5.49 against a 2.86 category
 			# average - cheap for its dps relative to comparable short-range
 			# weapons (heavy_machine_gun aside, which is an intentionally
@@ -426,6 +502,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 70.0,
 			"weight": 70.0,
+			"base_traverse": 0.876,
 			"metal": 40,
 			"crystal": 45,
 			"dps": 72.0,
@@ -436,7 +513,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.4,
 			# Tall, top-heavy precision emitter - deliberate, controlled
 			# traverse rather than a fast snap-track.
-			"traverse_agility": 0.8,
 			"size": Vector3(0.5, 1.2, 0.5),
 			"color": Color.LIGHT_SKY_BLUE
 		},
@@ -445,13 +521,13 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 130.0,
 			"weight": 150.0,
+			"base_traverse": 0.540,
 			# The heaviest, longest energy weapon (2.6 long, 150kg) - wants a
 			# more stable base than the compact energy emitters, similar
 			# reasoning to the heavier kinetic guns.
 			"pintle_min_up_alignment": 0.4,
 			# Heaviest, longest energy weapon - a stable, deliberate-aim
 			# platform rather than a fast tracker.
-			"traverse_agility": 0.75,
 			# Balance pass: was the single worst value/cost weapon in the
 			# game (1.03 vs 2.86 average) even before accounting for its
 			# energy-drain utility (which this cost-model can't see) - the
@@ -477,10 +553,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 80.0,
 			"weight": 130.0,
+			"base_traverse": 0.428,
 			"metal": 38,
 			"crystal": 0,
 			"dps": 55.0,
-			"traverse_agility": 0.55,
 			"size": Vector3(0.6, 0.6, 1.2),
 			"color": Color(0.32, 0.34, 0.28)
 		},
@@ -492,10 +568,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 95.0,
 			"weight": 190.0,
+			"base_traverse": 0.379,
 			"metal": 52,
 			"crystal": 8,
 			"dps": 85.0,
-			"traverse_agility": 0.6,
 			"size": Vector3(0.9, 0.7, 1.8),
 			"color": Color(0.30, 0.33, 0.28)
 		},
@@ -509,10 +585,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 70.0,
 			"weight": 110.0,
+			"base_traverse": 0.854,
 			"metal": 34,
 			"crystal": 18,
 			"dps": 92.0,
-			"traverse_agility": 1.0,
 			"size": Vector3(0.6, 0.5, 1.3),
 			"color": Color(0.30, 0.32, 0.34)
 		},
@@ -524,10 +600,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 75.0,
 			"weight": 130.0,
+			"base_traverse": 0.857,
 			"metal": 40,
 			"crystal": 20,
 			"dps": 70.0,
-			"traverse_agility": 1.1,
 			"size": Vector3(0.7, 0.6, 1.4),
 			"color": Color(0.33, 0.35, 0.33)
 		},
@@ -539,10 +615,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 65.0,
 			"weight": 120.0,
+			"base_traverse": 0.733,
 			"metal": 36,
 			"crystal": 22,
 			"dps": 65.0,
-			"traverse_agility": 0.9,
 			"size": Vector3(0.7, 0.6, 1.2),
 			"color": Color(0.28, 0.31, 0.27)
 		},
@@ -555,10 +631,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 70.0,
 			"weight": 115.0,
+			"base_traverse": 0.792,
 			"metal": 33,
 			"crystal": 26,
 			"dps": 75.0,
-			"traverse_agility": 0.95,
 			"size": Vector3(0.6, 0.6, 1.4),
 			"color": Color(0.29, 0.31, 0.30)
 		},
@@ -570,10 +646,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 85.0,
 			"weight": 175.0,
+			"base_traverse": 0.331,
 			"metal": 48,
 			"crystal": 16,
 			"dps": 95.0,
-			"traverse_agility": 0.5,
 			"size": Vector3(0.7, 0.7, 1.5),
 			"color": Color(0.27, 0.28, 0.30)
 		},
@@ -585,10 +661,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 80.0,
 			"weight": 200.0,
+			"base_traverse": 0.246,
 			"metal": 55,
 			"crystal": 24,
 			"dps": 88.0,
-			"traverse_agility": 0.4,
 			"size": Vector3(0.8, 0.7, 2.0),
 			"color": Color(0.31, 0.33, 0.29)
 		},
@@ -601,10 +677,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 45.0,
 			"weight": 35.0,
+			"base_traverse": 1.603,
 			"metal": 16,
 			"crystal": 4,
 			"dps": 0.0,
-			"traverse_agility": 1.0,
 			"size": Vector3(0.5, 0.4, 0.5),
 			"color": Color(0.42, 0.44, 0.38)
 		},
@@ -616,10 +692,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 50.0,
 			"weight": 55.0,
+			"base_traverse": 2.001,
 			"metal": 18,
 			"crystal": 22,
 			"dps": 4.0,
-			"traverse_agility": 1.6,
 			"size": Vector3(0.5, 0.5, 0.7),
 			"color": Color(0.36, 0.42, 0.46)
 		},
@@ -632,10 +708,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 60.0,
 			"weight": 75.0,
+			"base_traverse": 2.109,
 			"metal": 28,
 			"crystal": 14,
 			"dps": 26.0,
-			"traverse_agility": 2.0,
 			"size": Vector3(0.6, 0.5, 0.6),
 			"color": Color(0.34, 0.36, 0.38)
 		},
@@ -647,10 +723,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 80.0,
 			"weight": 125.0,
+			"base_traverse": 1.194,
 			"metal": 42,
 			"crystal": 6,
 			"dps": 68.0,
-			"traverse_agility": 1.5,
 			"size": Vector3(0.7, 0.6, 1.5),
 			"color": Color(0.28, 0.31, 0.27)
 		},
@@ -663,10 +739,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 55.0,
 			"weight": 70.0,
+			"base_traverse": 0.876,
 			"metal": 22,
 			"crystal": 30,
 			"dps": 0.0,
-			"traverse_agility": 0.8,
 			"size": Vector3(0.6, 1.0, 0.6),
 			"color": Color(0.33, 0.37, 0.35)
 		},
@@ -678,10 +754,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 75.0,
 			"weight": 140.0,
+			"base_traverse": 0.524,
 			"metal": 46,
 			"crystal": 12,
 			"dps": 45.0,
-			"traverse_agility": 0.7,
 			"size": Vector3(0.7, 0.6, 0.9),
 			"color": Color(0.31, 0.34, 0.27)
 		},
@@ -693,11 +769,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 55.0,
 			"weight": 60.0,
+			"base_traverse": 1.311,
 			"metal": 22,
 			"crystal": 18,
 			"dps": 0.0,
-			"vision_bonus": 3.0,
-			"traverse_agility": 1.1,
+			# Scaled with VISION_SCALE - a vision bonus is added to a hull's
+			# post-scale base_vision, so leaving these on the authoring scale
+			# would quietly shrink every sensor module relative to the band it
+			# is meant to extend.
+			"vision_bonus": 5.5,
 			"size": Vector3(0.6, 0.5, 0.8),
 			"color": Color(0.34, 0.40, 0.36)
 		},
@@ -709,10 +789,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 50.0,
 			"weight": 50.0,
+			"base_traverse": 1.318,
 			"metal": 20,
 			"crystal": 10,
 			"dps": 0.0,
-			"traverse_agility": 1.0,
 			"size": Vector3(0.6, 0.5, 0.6),
 			"color": Color(0.38, 0.39, 0.32)
 		},
@@ -762,11 +842,11 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 70.0,
 			"weight": 85.0,
+			"base_traverse": 0.886,
 			"metal": 24,
 			"crystal": 26,
 			"dps": 22.0,
 			"energy_capacity": 0.0,
-			"traverse_agility": 0.9,
 			"size": Vector3(0.5, 0.5, 1.0),
 			"color": Color(0.30, 0.40, 0.48)
 		},
@@ -778,10 +858,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 65.0,
 			"weight": 105.0,
+			"base_traverse": 0.657,
 			"metal": 30,
 			"crystal": 32,
 			"dps": 30.0,
-			"traverse_agility": 0.75,
 			"size": Vector3(0.7, 0.6, 0.9),
 			"color": Color(0.52, 0.50, 0.42)
 		},
@@ -793,10 +873,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 90.0,
 			"weight": 220.0,
+			"base_traverse": 0.262,
 			"metal": 60,
 			"crystal": 55,
 			"dps": 120.0,
-			"traverse_agility": 0.45,
 			"size": Vector3(0.6, 0.6, 2.4),
 			"color": Color(0.34, 0.44, 0.52)
 		},
@@ -806,6 +886,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 75.0,
 			"weight": 60.0,
+			"base_traverse": 0.894,
 			"metal": 30,
 			"crystal": 20,
 			"dps": 112.0,
@@ -815,7 +896,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.4,
 			# Continuous-beam precision weapon over a long housing - benefits
 			# from a stable, deliberate traverse for sustained aim.
-			"traverse_agility": 0.75,
 			"size": Vector3(0.7, 0.7, 2.4),
 			"color": Color.DARK_RED
 		},
@@ -824,6 +904,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 110.0,
 			"weight": 120.0,
+			"base_traverse": 0.448,
 			"metal": 50,
 			"crystal": 60,
 			"dps": 95.0,
@@ -832,7 +913,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.5,
 			# Arcing lob weapon, same slow-deliberate character as the
 			# mortars/cluster_dispenser.
-			"traverse_agility": 0.55,
 			"size": Vector3(0.6, 0.6, 1.6),
 			"color": Color.MEDIUM_SPRING_GREEN
 		},
@@ -843,6 +923,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 80.0,
 			"weight": 90.0,
+			"base_traverse": 1.717,
 			"metal": 40,
 			"crystal": 15,
 			"dps": 10.0, # Visual DPS low, specialized vs ammo
@@ -851,7 +932,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.15,
 			# Point defense lives and dies by how fast it can snap onto a
 			# small, fast-moving threat - the quickest traverse in the roster.
-			"traverse_agility": 1.8,
 			"size": Vector3(0.6, 0.8, 0.6),
 			"color": Color.WHITE_SMOKE
 		},
@@ -860,6 +940,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 50.0,
 			"weight": 35.0,
+			"base_traverse": 2.565,
 			"metal": 20,
 			"crystal": 30,
 			# Small, light PD turret - tolerant like the other compact
@@ -867,7 +948,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.15,
 			# Small, light PD laser - the second-fastest tracker after CIWS,
 			# same reflex-driven point-defense logic.
-			"traverse_agility": 1.6,
 			"dps": 5.0,
 			"size": Vector3(0.4, 0.5, 0.4),
 			"color": Color.LIGHT_CORAL
@@ -877,6 +957,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 90.0,
 			"weight": 110.0,
+			"base_traverse": 1.196,
 			"metal": 45,
 			"crystal": 10,
 			"dps": 15.0,
@@ -887,7 +968,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.3,
 			# Bulkier than the other PD weapons but still needs to swing to
 			# steep anti-air elevations routinely - fast, just not CIWS-fast.
-			"traverse_agility": 1.4,
 			"size": Vector3(0.525, 0.525, 1.35),
 			"color": Color.DARK_GOLDENROD
 		},
@@ -906,6 +986,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 70.0,
 			"weight": 55.0,
+			"base_traverse": 1.375,
 			"metal": 28,
 			"crystal": 0,
 			"dps": 58.0,
@@ -913,7 +994,6 @@ static func _build_catalog_literal() -> Dictionary:
 			# weapon, though its low arc wants a slightly better stance than
 			# a pure flat-shooting autogun.
 			"pintle_min_up_alignment": 0.3,
-			"traverse_agility": 1.1,
 			"size": Vector3(0.4, 0.4, 1.1),
 			"color": Color(0.32, 0.36, 0.22)
 		},
@@ -928,11 +1008,11 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 80.0,
 			"weight": 70.0,
+			"base_traverse": 0.986,
 			"metal": 40,
 			"crystal": 5,
 			"dps": 85.0,
 			"pintle_min_up_alignment": 0.25,
-			"traverse_agility": 0.9,
 			"size": Vector3(0.35, 0.35, 2.0),
 			"color": Color(0.42, 0.40, 0.34)
 		},
@@ -946,11 +1026,11 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 90.0,
 			"weight": 120.0,
+			"base_traverse": 0.570,
 			"metal": 55,
 			"crystal": 30,
 			"dps": 88.0,
 			"pintle_min_up_alignment": 0.3,
-			"traverse_agility": 0.7,
 			"size": Vector3(0.5, 0.5, 2.2),
 			"color": Color(0.45, 0.62, 0.78)
 		},
@@ -963,11 +1043,11 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 75.0,
 			"weight": 65.0,
+			"base_traverse": 1.426,
 			"metal": 26,
 			"crystal": 0,
 			"dps": 62.0,
 			"pintle_min_up_alignment": 0.15,
-			"traverse_agility": 1.25,
 			"size": Vector3(0.35, 0.35, 1.4),
 			"color": Color(0.28, 0.30, 0.32)
 		},
@@ -981,11 +1061,11 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 60.0,
 			"weight": 95.0,
+			"base_traverse": 0.509,
 			"metal": 34,
 			"crystal": 18,
 			"dps": 78.0,
 			"pintle_min_up_alignment": 0.20,
-			"traverse_agility": 0.55,
 			"size": Vector3(0.4, 0.4, 2.2),
 			"color": Color(0.24, 0.28, 0.26)
 		},
@@ -998,12 +1078,12 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 85.0,
 			"weight": 95.0,
+			"base_traverse": 0.463,
 			"metal": 42,
 			"crystal": 12,
 			"dps": 45.0,
 			# Arcing tube, same ballistic-baseline reasoning as mortar_array.
 			"pintle_min_up_alignment": 0.55,
-			"traverse_agility": 0.5,
 			"size": Vector3(0.7, 0.6, 0.7),
 			"color": Color(0.78, 0.35, 0.12)
 		},
@@ -1016,11 +1096,11 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 90.0,
 			"weight": 85.0,
+			"base_traverse": 0.787,
 			"metal": 45,
 			"crystal": 5,
 			"dps": 40.0,
 			"pintle_min_up_alignment": 0.4,
-			"traverse_agility": 0.8,
 			"size": Vector3(0.9, 0.5, 0.9),
 			"color": Color(0.48, 0.44, 0.26)
 		},
@@ -1037,13 +1117,13 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 110.0,
 			"weight": 140.0,
+			"base_traverse": 0.337,
 			"metal": 35,
 			"crystal": 0,
 			"dps": 70.0,
 			# A big timber-and-torsion frame - it needs a level, solid base
 			# the way a mortar does, for much the same reason.
 			"pintle_min_up_alignment": 0.5,
-			"traverse_agility": 0.45,
 			"size": Vector3(1.2, 0.9, 2.4),
 			"color": Color(0.44, 0.33, 0.20)
 		},
@@ -1059,6 +1139,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"category": "weapon",
 			"hp": 40.0,
 			"weight": 30.0,
+			"base_traverse": 2.356,
 			"metal": 18,
 			"crystal": 0,
 			"dps": 0.0,
@@ -1067,7 +1148,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.15,
 			# Light, small, and aiming a cloud rather than a point target -
 			# it only needs to be pointed roughly the right way.
-			"traverse_agility": 1.35,
 			"size": Vector3(0.5, 0.4, 0.5),
 			"color": Color(0.55, 0.56, 0.58)
 		},
@@ -1116,7 +1196,9 @@ static func _build_catalog_literal() -> Dictionary:
 			# (Arsenal_Weapons_List.md) - previously stat-only cosmetic
 			# flavor text with no actual vision system behind it. Scales
 			# with the existing mast_height tweak in get_vision_bonus().
-			"vision_bonus": 25.0,
+			# Scaled with VISION_SCALE, same reasoning as
+			# sensor_beacon_launcher's above.
+			"vision_bonus": 47.5,
 			"size": Vector3(0.5, 2.5, 0.5),
 			"color": Color.MEDIUM_PURPLE
 		},
@@ -1179,7 +1261,15 @@ static func _build_catalog_literal() -> Dictionary:
 			# below): a light, high-speed wheeled chassis handles poorly
 			# overloaded - a real overloaded car sags and struggles - so this
 			# tolerates less excess weight than the heavier ground types.
-			"base_weight_capacity": 350.0,
+			"base_weight_capacity": 200.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Fastest thing that touches the ground - the archetype's whole
+			# point, and what its low capacity pays for.
+			"base_top_speed": 12.0,
 			"size": Vector3(0.6, 0.6, 0.6),
 			"color": Color.BLACK,
 			"traits": ["ground_contact", "high_speed"]
@@ -1194,7 +1284,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			# Heaviest, toughest ground locomotor - literally what tanks use
 			# to carry heavy armor. Highest ground-type capacity.
-			"base_weight_capacity": 700.0,
+			"base_weight_capacity": 600.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Tanks are not fast. Middling ceiling to go with the roster's
+			# highest ground capacity.
+			"base_top_speed": 8.0,
 			"size": Vector3(0.8, 0.6, 2.5),
 			"color": Color.DARK_OLIVE_GREEN,
 			"traits": ["ground_contact"]
@@ -1210,7 +1308,15 @@ static func _build_catalog_literal() -> Dictionary:
 			# Real helicopters have a notoriously strict max-takeoff-weight -
 			# rotary lift is the most weight-sensitive locomotion in the
 			# roster, so this gets the lowest capacity of all.
-			"base_weight_capacity": 250.0,
+			"base_weight_capacity": 140.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Quick, but rotary lift trades forward speed for the ability to
+			# hover - a fixed wing outruns it comfortably.
+			"base_top_speed": 11.0,
 			"size": Vector3(4.0, 0.2, 4.0),
 			"color": Color.SILVER,
 			"traits": ["airborne", "rotary_wing", "hovering"]
@@ -1225,7 +1331,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			# Ground-effect lift is weight-sensitive like a real hovercraft,
 			# though less extreme than a helicopter's rotor lift.
-			"base_weight_capacity": 300.0,
+			"base_weight_capacity": 155.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Nothing is dragging on the ground, so this is the fastest
+			# ground-following option in the roster.
+			"base_top_speed": 13.0,
 			"size": Vector3(1.2, 0.3, 1.2),
 			"color": Color.CYAN,
 			"traits": ["hovering"]
@@ -1240,7 +1354,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			# A mech walker's legs are built to bear real structural load,
 			# closer to tracked_treads than to a wheeled chassis.
-			"base_weight_capacity": 500.0,
+			"base_weight_capacity": 260.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Slowest of the mainline ground types: a walking gait cannot be
+			# geared up the way a wheel can, whatever you power it with.
+			"base_top_speed": 6.5,
 			"size": Vector3(0.5, 1.5, 0.5),
 			"color": Color.DARK_RED,
 			"traits": ["ground_contact"]
@@ -1256,7 +1378,15 @@ static func _build_catalog_literal() -> Dictionary:
 			# Fixed-wing lift scales with airspeed and wing area, giving it
 			# more payload tolerance than rotary/hover lift, but it's still
 			# a real aircraft weight budget, not a grounded vehicle's.
-			"base_weight_capacity": 380.0,
+			"base_weight_capacity": 240.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# The roster's ceiling, and the only type that keeps the old
+			# universal 18.0 - a jet is what that number was really describing.
+			"base_top_speed": 18.0,
 			"size": Vector3(1.0, 0.5, 1.5),
 			"color": Color.SLATE_BLUE,
 			"traits": ["airborne", "fixed_wing", "high_speed"]
@@ -1283,7 +1413,15 @@ static func _build_catalog_literal() -> Dictionary:
 			# fixed_wing_engine's generous airspeed-assisted one (380) - a
 			# flapping wing generates real lift like a fixed wing, but not
 			# as efficiently as one built for sustained forward flight.
-			"base_weight_capacity": 300.0,
+			"base_weight_capacity": 200.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Flapping flight is inefficient at speed; it buys maneuver and
+			# novelty, not pace.
+			"base_top_speed": 9.0,
 			"thrust_coefficient": 120.0,
 			"size": Vector3(2.0, 0.2, 1.0),
 			"color": Color(0.42, 0.32, 0.22),
@@ -1300,7 +1438,15 @@ static func _build_catalog_literal() -> Dictionary:
 			# Buoyancy carries the load, not the propeller - real ships
 			# routinely carry far more weight than any ground/air vehicle.
 			# Highest capacity in the roster.
-			"base_weight_capacity": 800.0,
+			"base_weight_capacity": 500.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Displacement hulls are hard-limited by their own bow wave - this
+			# is why hydrofoil exists as a separate, faster naval type.
+			"base_top_speed": 8.0,
 			"size": Vector3(0.5, 0.5, 0.8),
 			"color": Color.TEAL,
 			"traits": ["buoyant", "naval"]
@@ -1326,7 +1472,16 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 25,
 			"crystal": 15,
 			"dps": 0.0,
-			"base_weight_capacity": 1100.0,
+			"base_weight_capacity": 700.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# An airship is enormous, draggy, and in no hurry. Slowest in the
+			# roster, matching the lowest thrust_coefficient and the highest
+			# capacity - carry anything, arrive eventually.
+			"base_top_speed": 4.0,
 			"thrust_coefficient": 55.0,
 			"size": Vector3(1.0, 0.5, 1.0),
 			"color": Color(0.75, 0.72, 0.6),
@@ -1353,7 +1508,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			# Between wheels (350) and tracked_treads (700), nearer the middle
 			# than either - that IS the pitch.
-			"base_weight_capacity": 500.0,
+			"base_weight_capacity": 400.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Wheels up front for steering, belt at the back for load - splits
+			# the difference between its two parents, as the archetype should.
+			"base_top_speed": 8.5,
 			"size": Vector3(0.7, 0.6, 2.2),
 			"color": Color(0.30, 0.31, 0.26),
 			"traits": ["ground_contact"]
@@ -1371,7 +1534,23 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 45,
 			"crystal": 5,
 			"dps": 0.0,
-			"base_weight_capacity": 620.0,
+			"base_weight_capacity": 450.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# A rover linkage is built to crawl over obstacles without ever
+			# lifting a wheel. Deliberately near the bottom of the roster.
+			#
+			# 6.0 rather than the 4.5 first written here, for the same reason
+			# screw_drive was raised: this type's niche is rocky (1.15) and
+			# forest (1.00), and a bottom-of-roster ceiling multiplied by those
+			# left it slower on its OWN best ground than legs are. Not forced
+			# by a failing test the way screw_drive was - nothing asserts a
+			# rocker_bogie win - but it is the identical defect, and leaving it
+			# in place would just mean discovering it later.
+			"base_top_speed": 6.0,
 			"thrust_coefficient": 105.0,
 			"size": Vector3(0.65, 0.9, 2.6),
 			"color": Color(0.42, 0.38, 0.30),
@@ -1391,7 +1570,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 35,
 			"crystal": 20,
 			"dps": 0.0,
-			"base_weight_capacity": 560.0,
+			"base_weight_capacity": 620.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# A hovercraft rides on air over land AND water, with nothing to
+			# grip and nothing to slow it - near the top of the roster.
+			"base_top_speed": 12.5,
 			"thrust_coefficient": 135.0,
 			"size": Vector3(1.6, 0.45, 1.6),
 			"color": Color(0.55, 0.52, 0.42),
@@ -1411,7 +1598,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 20,
 			"crystal": 75,
 			"dps": 0.0,
-			"base_weight_capacity": 280.0,
+			"base_weight_capacity": 160.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Frictionless like hover_engine, but the plates are lift rather
+			# than propulsion, so the ceiling is lower.
+			"base_top_speed": 10.5,
 			"thrust_coefficient": 125.0,
 			"size": Vector3(0.9, 0.25, 0.9),
 			"color": Color(0.35, 0.65, 0.85),
@@ -1431,7 +1626,16 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 45,
 			"crystal": 10,
 			"dps": 0.0,
-			"base_weight_capacity": 420.0,
+			"base_weight_capacity": 260.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Once the foils lift the hull clear of the water the bow-wave
+			# limit stops applying - the fastest naval type by a wide margin,
+			# which is the entire reason to accept its low capacity.
+			"base_top_speed": 14.0,
 			"thrust_coefficient": 185.0,
 			"size": Vector3(0.6, 1.0, 2.4),
 			"color": Color(0.28, 0.40, 0.45),
@@ -1450,7 +1654,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 40,
 			"crystal": 10,
 			"dps": 0.0,
-			"base_weight_capacity": 640.0,
+			"base_weight_capacity": 450.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Faster than a screw and far more maneuverable, but still a
+			# displacement hull pushing water aside.
+			"base_top_speed": 10.0,
 			"thrust_coefficient": 160.0,
 			"size": Vector3(0.7, 0.7, 1.1),
 			"color": Color(0.30, 0.45, 0.48),
@@ -1468,7 +1680,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 25,
 			"crystal": 0,
 			"dps": 0.0,
-			"base_weight_capacity": 330.0,
+			"base_weight_capacity": 220.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Amphibious wheels drag their floats everywhere, on land as well
+			# as in water - slower than the plain wheels they are based on.
+			"base_top_speed": 7.5,
 			"thrust_coefficient": 120.0,
 			"size": Vector3(0.75, 0.7, 0.75),
 			"color": Color(0.36, 0.34, 0.30),
@@ -1495,7 +1715,25 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 55,
 			"crystal": 15,
 			"dps": 0.0,
-			"base_weight_capacity": 600.0,
+			"base_weight_capacity": 450.0,
+			# Base top speed (Chris: "each locomotor should also have a base
+			# top speed"): the hard ceiling on how fast this chassis can be
+			# driven, however much thrust is bolted to it. Replaces the single
+			# universal 18.0 clamp every type used to share - see
+			# Drivetrain.analyze() and get_base_top_speed() below.
+			# Augers claw through mud and snow at a walking pace. Slow by
+			# design; the terrain table is where it wins.
+			#
+			# 6.5, not the 5.0 first written here. A chassis ceiling and a
+			# terrain multiplier both scale the same speed, so a type whose
+			# entire niche is bad ground gets penalised TWICE if it also gets a
+			# bottom-of-roster ceiling: at 5.0 a tracked_treads unit was faster
+			# than this on ICE (5.0 x 0.75 = 3.75 against treads' 8.0 x 0.50 =
+			# 4.00), which erased the one surface screw_drive is supposed to
+			# own and broke test_terrain_types_differentiate_locomotion. Still
+			# the second-slowest ground type on good ground, which is the
+			# archetype; just not so slow that its bonus cannot show.
+			"base_top_speed": 6.5,
 			"thrust_coefficient": 110.0,
 			"size": Vector3(0.8, 0.8, 3.0),
 			"color": Color(0.32, 0.3, 0.24),
@@ -1897,9 +2135,26 @@ static func get_base_energy(hull_type_id: String) -> float:
 # Fog-of-war (built this pass, see PROGRESS.md): a hull's base_vision is
 # the starting sight radius before any sensor_suite modules are mounted -
 # same "hull base + module bonus" shape as Energy's base_energy.
+#
+# Vision is what actually gated engagement distance before the range retune
+# (see RANGE_TIERS): a hull saw 14-28 units, so nothing could be shot at
+# further than that no matter how far its guns reached. The tiers need a
+# bigger anchor than 20 to sit against, but the authored per-hull values are
+# duplicated across 21 mesh sidecars in assets/models/hulls, 14 assembly
+# JSONs in data/hull_assemblies, and tools/gen_kitbash_hulls.py - 35+ files
+# that would all have to move together and would leave every future hull
+# authored against a stale scale.
+#
+# So the scale-up is ONE multiplier, here, at the single point every caller
+# already goes through (battle_unit.gd and building.gd both read vision only
+# via this function). The JSON keeps saying 20 and means "20 on the authoring
+# scale"; the game sees 38. Retuning a specific hull still means editing that
+# hull's own base_vision, exactly as before - this only moves the whole band.
+const VISION_SCALE: float = 1.9
+
 static func get_base_vision(hull_type_id: String) -> float:
 	var data = get_module_data(hull_type_id)
-	return data.get("base_vision", 20.0)
+	return data.get("base_vision", 20.0) * VISION_SCALE
 
 # Whether this weapon-slot module's targeting should invert to same-team,
 # HP-deficit candidates instead of hostiles (repair_array's real fix -
@@ -2180,26 +2435,45 @@ static func get_mount_style(type_id: String, hull_type_id: String = "") -> Strin
 		return "frame_built"
 	return "pintle"
 
-# Per-weapon-type traverse character (task: "differentiate and tune weapon
-# traversal rates per weapon type"). auto_weapon.gd's base traverse_speed
-# formula (200.0/weight, clamped) is driven purely by weight - two weapons
-# of similar weight but very different archetypes (a fast-tracking CIWS vs.
-# a slow-lobbing mortar_array, both ~90kg) got IDENTICAL traverse speed
-# despite being nothing alike in real-world handling. This multiplier is
-# the type-specific character layered on top of the weight-driven base:
-# point-defense weapons need to snap onto small fast targets (fastest,
-# ~1.4-1.8), light autoguns are quick (~1.15-1.3), guided munitions don't
-# need to snap-track since the warhead corrects after launch (~0.8-0.9),
-# precision energy weapons favor a stable deliberate aim (~0.75-0.8), and
-# indirect/ballistic-arc weapons traverse slowest since the arc itself
-# depends on a controlled, deliberate aim (~0.5-0.6). Defaults to 1.0
-# (no change from the base formula) for any weapon without an explicit
-# entry, and for non-weapon modules (resource_harvester, repair_array,
-# sensor_suite, logistics_tank, drone_carrier) which were deliberately
-# left out of this per-type pass since they're not combat weapons being
-# "aimed" in the same sense.
-static func get_traverse_agility(type_id: String) -> float:
-	return get_module_data(type_id).get("traverse_agility", 1.0)
+# Per-weapon BASE traverse speed, in radians/second, before any tweak on the
+# instance. Chris, 2026-08-03: "the traverse speed of a weapons module should
+# start from a base value per weapon module, and then be impacted by tweaks."
+#
+# WHAT THIS REPLACES. auto_weapon.gd used to derive the base from the
+# instance's own weight - clamp(200/weight, 0.4, 8.0) - times a separate
+# per-type `traverse_agility` multiplier. Two problems:
+#
+#   1. Deriving the base from the TWEAKED weight conflated two different
+#      things: "this archetype is a heavy slow gun" and "this particular one
+#      has been built heavy". A weapon had no base of its own to be modified
+#      away from.
+#   2. The resulting band was 0.32 - 9.14 rad/s, i.e. 18 - 524 deg/s. At the
+#      top of that a gun crosses a full circle in 0.7 seconds, so traverse
+#      simply was not a consideration for half the roster, and whatever
+#      differentiation existed among the fast weapons was invisible because
+#      they were all effectively instant.
+#
+# The values here are 12 - 147 deg/s (a full circle in 2.4s at the fastest,
+# 29s at the slowest), and were generated as
+#     0.9 * (100 / catalog_weight)^0.55 * old_traverse_agility
+# so every weapon keeps its previously authored archetype character and its
+# relative ordering, on a band where the differences are felt. The 0.55
+# exponent is deliberately sub-linear: at 1.0 a 10x heavier weapon traverses
+# 10x slower, which is what stretched the old band across a 28x spread and
+# left the clamps doing the balancing.
+#
+# The archetype tiers folded in here, kept for whoever tunes these next:
+# point-defense snaps onto small fast targets (fastest), light autoguns are
+# quick, guided munitions do not need to snap-track since the warhead corrects
+# after launch, precision energy weapons favour a stable deliberate aim, and
+# indirect/ballistic-arc weapons are slowest because the arc depends on a
+# controlled aim. Non-weapon modules (resource_harvester, repair_array,
+# sensor_suite, logistics_tank, drone_carrier) deliberately have no entry -
+# they are not being aimed in this sense - and fall through to the default.
+const BASE_TRAVERSE_DEFAULT: float = 0.9
+
+static func get_base_traverse(type_id: String) -> float:
+	return get_module_data(type_id).get("base_traverse", BASE_TRAVERSE_DEFAULT)
 
 # --- Projectile class (FABLE_REVIEW.md 1.4 - the evasion model) ---
 # How a weapon's shot travels, which decides whether target SPEED can make
@@ -2497,6 +2771,29 @@ const THRUST_COEFFICIENT_DEFAULT: float = 150.0
 
 static func get_thrust_coefficient(type_id: String) -> float:
 	return get_module_data(type_id).get("thrust_coefficient", THRUST_COEFFICIENT_DEFAULT)
+
+# Per-locomotor-type top speed - the ceiling on how fast a chassis can be
+# driven no matter how much thrust is bolted to it (Chris: "each locomotor
+# should also have a base top speed").
+#
+# This replaces the universal 18.0 that used to be hardcoded as the upper
+# bound of battle_unit.gd's speed clamp. That single number meant a walker,
+# a tank, an airship and a jet all shared one answer to "how fast can this
+# possibly go", and the only thing separating them was how much thrust they
+# happened to make against their own mass - so a light enough design on ANY
+# locomotion converged on the same ceiling, which is exactly the flattening
+# FABLE_REVIEW.md 1.4 flagged for the speed band generally.
+#
+# Every value is set on each locomotion type's own catalog entry above, with
+# its reasoning; Drivetrain.analyze() applies them.
+#
+# The default is the old universal ceiling, so any locomotion type added
+# without one keeps the pre-existing behavior rather than silently becoming
+# the slowest thing in the game.
+const BASE_TOP_SPEED_DEFAULT: float = 18.0
+
+static func get_base_top_speed(type_id: String) -> float:
+	return get_module_data(type_id).get("base_top_speed", BASE_TOP_SPEED_DEFAULT)
 
 # Per-locomotor-type x per-surface-type speed multiplier (terrain variety
 # task: "genuinely differentiate locomotor types" via terrain, not just
@@ -3072,6 +3369,153 @@ static func get_traverse_limit_angle(type_id: String, _facet: String = "", hull_
 	if style in ["turret", "pintle"]:
 		return PI # 360 degrees
 	return PI # 360 degrees (every other mount is a pintle, all get 360)
+
+# --- Elevation limits ------------------------------------------------------
+# Chris, 2026-08-03: "we need to differentiate the elevation available to each
+# different weapon. PD weapons should absolutely be able to point straight up
+# and target units or missiles directly above. Machine gun and gatling too, as
+# well as SAM launcher and Anti-radiation missile. Then it needs to move down
+# from there, an artillery piece isn't being used to engage things above you
+# for example, where a cannon may, but it isn't going to be able to elevate to
+# above a 45 degree angle."
+#
+# Before this, elevation was not modelled AT ALL. auto_weapon.gd gated targets
+# on a single symmetric yaw cone with no vertical term, and the Design Lab's
+# arc visualiser used one hardcoded pair of stops (88 degrees up AND down) for
+# every weapon in the roster, with a comment saying it was a placeholder for
+# exactly this work. So a howitzer could track an aircraft directly overhead,
+# and a CIWS was no better at it than the howitzer.
+#
+# WHAT "up" MEANS HERE. This is ENGAGEMENT elevation - the angle above its own
+# horizon at which the weapon can acquire and hit something. It is deliberately
+# NOT the barrel's mechanical elevation. A howitzer's tube physically sits at
+# 45-70 degrees, but it is throwing a shell at a GROUND target over a distance;
+# it cannot service a target that is itself above it. Conflating the two would
+# hand artillery an anti-air capability it should never have. The ballistic use
+# of barrel angle is already modelled separately, and unchanged: the `elevation`
+# tweak buys fire_range in weapon_range.gd.
+#
+# Angles are degrees from the weapon's own horizon, and "up" is along the
+# weapon's OWN local +Y, which is the surface normal it was mounted on - so a
+# belly-mounted gun's "up" points at the ground, and it correctly cannot shoot
+# up through its own hull. Same convention auto_weapon.gd's LOS offset uses.
+const ELEVATION_DEFAULT := {"up": 55.0, "down": 12.0}
+
+const ELEVATION_LIMITS := {
+	# --- Straight up (90) -----------------------------------------------
+	# Point defence, named explicitly by Chris. Their entire job is killing
+	# things directly overhead, and a PD gun that cannot look up is furniture.
+	"pd_laser":            {"up": 90.0, "down": 20.0},
+	"ciws":                {"up": 90.0, "down": 20.0},
+	"aps_interceptor":     {"up": 90.0, "down": 25.0},
+	# Machine gun and gatling, also named. A pintle MG on a high ring mount
+	# genuinely does point vertically, and it is the classic light-AA answer.
+	"heavy_machine_gun":   {"up": 90.0, "down": 15.0},
+	"rotary_cannon":       {"up": 90.0, "down": 18.0},
+	# Named: both are launch rails, and a rail can be brought fully vertical.
+	"sam_launcher":        {"up": 90.0, "down": 5.0},
+	"anti_radiation_missile": {"up": 90.0, "down": 8.0},
+	# NOT in Chris's list, but included deliberately: these are the roster's
+	# two DEDICATED anti-air guns. It would be incoherent for a general-purpose
+	# machine gun to out-elevate the purpose-built AA autocannon sitting next
+	# to it, and an AA gun that cannot engage overhead has no reason to exist.
+	"aa_autocannon":       {"up": 88.0, "down": 10.0},
+	"flak_cannon":         {"up": 85.0, "down": 8.0},
+	# --- High, but not vertical (70-80) ---------------------------------
+	# Light/medium autoguns and short-range missiles: high-angle capable,
+	# stopping short of true vertical because the mount or the feed gets in
+	# the way.
+	"autocannon":          {"up": 78.0, "down": 12.0},
+	"missile_pod":         {"up": 75.0, "down": 6.0},
+	"hypervelocity_missile": {"up": 72.0, "down": 6.0},
+	"guided_missile":      {"up": 70.0, "down": 6.0},
+	"laser_dazzler":       {"up": 80.0, "down": 20.0},
+	"jammer_mast":         {"up": 85.0, "down": 20.0},
+	"chaff_dispenser":     {"up": 85.0, "down": 10.0},
+	"decoy_projector":     {"up": 80.0, "down": 15.0},
+	"sensor_beacon_launcher": {"up": 70.0, "down": 5.0},
+	# --- Directed energy (50-65) ----------------------------------------
+	# A beam has no recoil path to fight, but the emitter housing and its
+	# cooling still limit how far the whole assembly tips back.
+	"heavy_laser":         {"up": 60.0, "down": 15.0},
+	"ion_cannon":          {"up": 55.0, "down": 12.0},
+	"particle_lance":      {"up": 50.0, "down": 10.0},
+	"tesla_coil":          {"up": 65.0, "down": 15.0},
+	"arc_projector":       {"up": 60.0, "down": 20.0},
+	"microwave_emitter":   {"up": 65.0, "down": 18.0},
+	# --- Direct-fire guns (~45) -----------------------------------------
+	# Chris's own figure for a cannon: "a cannon may, but it isn't going to be
+	# able to elevate to above a 45 degree angle (probably)". The breech comes
+	# back into the turret roof or the hull deck long before vertical.
+	"basic_cannon":        {"up": 45.0, "down": 10.0},
+	"recoilless_rifle":    {"up": 45.0, "down": 12.0},
+	"anti_materiel_rifle": {"up": 42.0, "down": 15.0},
+	"coil_gun":            {"up": 40.0, "down": 10.0},
+	"gauss_railgun":       {"up": 30.0, "down": 8.0},
+	"ballista":            {"up": 45.0, "down": 10.0},
+	"flamethrower":        {"up": 40.0, "down": 20.0},
+	"plasma_lobber":       {"up": 50.0, "down": 10.0},
+	"cluster_dispenser":   {"up": 45.0, "down": 8.0},
+	"bunker_buster":       {"up": 40.0, "down": 10.0},
+	"smoke_discharger":    {"up": 60.0, "down": 5.0},
+	"sentry_deployer":     {"up": 30.0, "down": 5.0},
+	"mine_layer":          {"up": 15.0, "down": 10.0},
+	"resource_harvester":  {"up": 30.0, "down": 30.0},
+	"repair_array":        {"up": 60.0, "down": 30.0},
+	# --- Indirect fire: LOW engagement elevation (10-25) ----------------
+	# The counter-intuitive tier, and the one Chris called out. These weapons
+	# point their tubes STEEPLY - that is what makes them indirect - but every
+	# one of them is lobbing at something on the ground. None can service a
+	# target above it, which is exactly the capability being denied here. The
+	# steep barrel earns its keep through fire_range (the `elevation` tweak),
+	# not through overhead engagement.
+	"artillery":           {"up": 20.0, "down": 3.0},
+	"rocket_artillery":    {"up": 25.0, "down": 3.0},
+	"cruise_missile":      {"up": 25.0, "down": 3.0},
+	"loitering_munition":  {"up": 30.0, "down": 3.0},
+	"mortar_array":        {"up": 20.0, "down": 3.0},
+	"napalm_mortar":       {"up": 18.0, "down": 3.0},
+	"spigot_mortar":       {"up": 15.0, "down": 3.0},
+	"mk19_grenade_launcher": {"up": 35.0, "down": 8.0},
+	"drone_carrier":       {"up": 40.0, "down": 5.0},
+}
+
+# How much the `elevation` tweak can raise a weapon's ceiling. That tweak
+# already buys fire_range through the ballistic arc (weapon_range.gd); letting
+# it also raise the engagement ceiling is what makes the slider's NAME honest,
+# and it gives a player a real way to buy a bit of high-angle capability on a
+# gun that starts without it. Capped at 90 regardless - straight up is straight
+# up, and no tweak turns a howitzer into an AA mount.
+const ELEVATION_TWEAK_GAIN_MAX: float = 1.6
+const ELEVATION_CEILING: float = 90.0
+
+static func _elevation_entry(type_id: String) -> Dictionary:
+	return ELEVATION_LIMITS.get(type_id, ELEVATION_DEFAULT)
+
+# Max engagement elevation above the weapon's own horizon, in RADIANS.
+static func get_elevation_up(type_id: String, tweaks: Dictionary = {}) -> float:
+	var deg: float = _elevation_entry(type_id).get("up", ELEVATION_DEFAULT.up)
+	var t = tweaks.get("elevation", null)
+	if (typeof(t) == TYPE_FLOAT or typeof(t) == TYPE_INT) and float(t) > 0.0:
+		deg *= minf(float(t), ELEVATION_TWEAK_GAIN_MAX)
+	return deg_to_rad(minf(deg, ELEVATION_CEILING))
+
+# Max depression below the weapon's own horizon, in RADIANS. Kept separate
+# because it is a genuinely different mechanical constraint (the breech rising
+# into the mount, rather than the muzzle fouling it) and because the values are
+# far smaller - the old placeholder let every weapon in the game shoot almost
+# straight DOWN as well, which is just as wrong as the overhead case.
+static func get_elevation_down(type_id: String, _tweaks: Dictionary = {}) -> float:
+	return deg_to_rad(_elevation_entry(type_id).get("down", ELEVATION_DEFAULT.down))
+
+# Whether this weapon can meaningfully engage a target above it - the
+# capability the PD / MG / SAM group is supposed to have and the artillery
+# group is not. Threshold is 60 degrees: enough to service something high
+# overhead rather than merely up a hill.
+const OVERHEAD_ENGAGEMENT_MIN_DEG: float = 60.0
+
+static func can_engage_overhead(type_id: String, tweaks: Dictionary = {}) -> bool:
+	return get_elevation_up(type_id, tweaks) >= deg_to_rad(OVERHEAD_ENGAGEMENT_MIN_DEG)
 
 static func get_module_data(type_id: String) -> Dictionary:
 	var cat = get_catalog()

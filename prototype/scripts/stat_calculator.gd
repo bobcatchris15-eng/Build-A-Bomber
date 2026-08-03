@@ -24,6 +24,17 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 var stats_dock: Control = null
 var toolbar: Control = null
 var _rail_vbox: VBoxContainer = null
+
+# The current design's headline stats, published by update_stats() for readers
+# that want the numbers rather than the label text - fleet_comparison_panel.gd
+# is the existing one. `drivetrain` is the whole Drivetrain.analyze() result
+# (weight, capacity, load_ratio, top_speed, move_speed, is_overloaded, ...),
+# so a new reader does not need a new field here for every figure it wants.
+var total_hp: float = 0.0
+var total_weight: float = 0.0
+var total_dps: float = 0.0
+var drivetrain: Dictionary = {}
+var weapon_range: Dictionary = {}
 var _undo_btn: Button = null
 var _redo_btn: Button = null
 
@@ -59,6 +70,8 @@ var count_label_base: String = "Count"
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
+const Drivetrain = preload("res://scripts/drivetrain.gd")
+const WeaponRange = preload("res://scripts/weapon_range.gd")
 var current_selected_module: Node3D = null
 var is_updating_sliders: bool = false
 var _loco_slider_dragging: bool = false
@@ -979,17 +992,20 @@ func update_stats(hull: Node3D):
 	var total_cost_crystal = 0
 	var total_dps = 0.0
 	var total_energy_capacity = 0.0
-	# Approximates battle_unit.gd's _recalculate_move_speed() overload check
-	# (capacity-only - the thrust/move_speed side isn't needed for a
-	# design-time warning) so a player can see BEFORE combat that their
-	# design is overweight for its own locomotion, instead of only
-	# discovering it from a sluggish unit in an actual battle with no
-	# link back to why. Deliberately a simplified re-derivation, not a
-	# shared function with battle_unit.gd - this only needs to be "close
-	# enough to warn," not bit-for-bit identical to the real combat math.
-	var total_weight_capacity = 0.0
-	var locomotion_type = hull.get_meta("locomotion_type", "") if hull and hull.has_meta("locomotion_type") else ""
-	var locomotion_settings = hull.get_meta("locomotion_settings", {}) if hull and hull.has_meta("locomotion_settings") else {}
+	# Weight, load capacity, thrust and top speed all come from
+	# Drivetrain.analyze() - the SAME call battle_unit.gd makes when it spawns
+	# the unit for real, so every number this sidebar shows is a number combat
+	# will actually run.
+	#
+	# This replaces a local re-derivation that carried its own comment saying
+	# it only needed to be "close enough to warn". It was not: it knew about
+	# wheels, treads, rotors and legs, and nothing about hover pads, Electron
+	# Megavoltage, turbine compression, or any of the eleven expansion
+	# locomotors - so on most of the roster the capacity figure could not move
+	# when the player dragged the very tweaks that change it. See the header
+	# comment in drivetrain.gd for why the two copies are now one.
+	var dt = Drivetrain.analyze(hull)
+	var total_weight_capacity: float = dt["capacity"]
 
 	# Assume the hull itself has some base stats in a real implementation,
 	# but for the prototype we'll just sum the modules.
@@ -999,31 +1015,16 @@ func update_stats(hull: Node3D):
 				var data = child.get_meta("module_data") as ModuleDataResource
 				if data:
 					total_hp += data.get_hp()
-					total_weight += data.get_weight()
 					total_cost_metal += data.get_cost().x
 					total_cost_crystal += data.get_cost().y
 					total_dps += data.get_dps()
 					if data.category == "generator":
 						total_energy_capacity += data.get_energy_capacity()
-					if data.category == "locomotion":
-						var capacity_contrib = 1.0
-						if locomotion_type == "wheels":
-							# Total wheel count (axle positions x
-							# wheels-per-axle, dually) drives load-bearing
-							# capacity, not just axle count, per Chris's ask.
-							var axles = float(locomotion_settings.get("num_axles", locomotion_settings.get("count", 4)))
-							var w_per_axle = float(locomotion_settings.get("wheels_per_axle", 1.0))
-							capacity_contrib = (axles * w_per_axle) / 4.0
-						elif locomotion_type in ["helicopter_rotors", "legs"]:
-							capacity_contrib = float(locomotion_settings.get("count", 4)) / 4.0
-						elif locomotion_type == "tracked_treads":
-							capacity_contrib = locomotion_settings.get("tread_width", locomotion_settings.get("width", 1.0))
-						total_weight_capacity += ModuleCatalog.get_base_weight_capacity(data.type_id) * child.scale.x * child.scale.z * capacity_contrib
-					var mod_catalog_data = ModuleCatalog.get_module_data(data.type_id)
-					var wc_bonus = mod_catalog_data.get("weight_capacity_bonus", 0.0)
-					if wc_bonus > 0.0:
-						total_weight_capacity += wc_bonus * child.scale.x * child.scale.z
-				
+					# The locomotion-capacity and weight_capacity_bonus
+					# accumulation that used to live here is gone: both are
+					# Drivetrain.analyze()'s job now, and doing it twice is
+					# exactly how the two copies drifted apart.
+
 	var armor_material = "hardened_steel"
 	var armor_thickness = 1.0
 	var faction = "industrialists"
@@ -1047,14 +1048,18 @@ func update_stats(hull: Node3D):
 	var sidebar_hull_scale = hull.get_meta("hull_scale", Vector3.ONE) if hull else Vector3.ONE
 	var hull_hp = ModuleCatalog.compute_hull_max_hp(sidebar_hull_type, armor_thickness, armor_material, sidebar_hull_scale) \
 		* FactionCatalog.get_passive(faction, "hp_mult", 1.0)
-	var sidebar_armor_wt_mult = FactionCatalog.get_passive(faction, "armor_weight_mult", 1.0)
-	var hull_weight = ModuleCatalog.compute_hull_weight(sidebar_hull_type, armor_thickness, armor_material, sidebar_hull_scale, sidebar_armor_wt_mult)
+	# No hull_weight local any more - Drivetrain.analyze() computes it (with the
+	# same faction armor_weight_mult) as part of the total, above.
 	var hull_cost = ModuleCatalog.compute_hull_cost(sidebar_hull_type, armor_thickness, armor_material, sidebar_hull_scale)
 	# total_hp so far is the MODULE pool (separate strip pools in combat);
 	# keep it visible as its own figure next to the hull's real HP.
 	var module_hp_pool = total_hp
 	total_hp = hull_hp
-	total_weight = hull_weight + total_weight
+	# Straight from the drivetrain analysis rather than re-added here. It is
+	# the same sum (hull weight + every module's weight), and taking it from
+	# the one place that also derives capacity from it means the displayed
+	# weight and the displayed load percentage can never disagree.
+	total_weight = dt["weight"]
 	total_cost_metal += hull_cost.x
 	total_cost_crystal += hull_cost.y
 
@@ -1082,31 +1087,42 @@ func update_stats(hull: Node3D):
 	cost_label.text = "Cost: %d Metal, %d Crystal" % [total_cost_metal, total_cost_crystal]
 	dps_label.text = "Total DPS: %.1f" % total_dps
 
-	weight_label.text = "Total Weight: %.1f" % total_weight
+	weight_label.text = "Total Weight: %.1f kg" % total_weight
 
-	# Both the manufactory-tier note and the overweight warning below are
-	# tooltip-only, not visible sidebar text - this sidebar has zero
-	# vertical/horizontal layout slack left (confirmed by the project's
-	# own automated UI-overflow test, which failed on three separate
-	# attempts at a persistent label before landing on tooltips instead).
-	# Manufactory tier is determined entirely by the hull TYPE (see
-	# ModuleCatalog.get_hull_size_tier(), the same function skirmish.gd's
+	# Publish the figures for anything that reads this design's stats rather
+	# than the labels. fleet_comparison_panel.gd has always tried to
+	# (`stat_calc.total_weight if "total_weight" in stat_calc`), but these were
+	# LOCALS of this function, so that guard never passed and the WIP column of
+	# the comparison panel silently showed 0 HP / 0 kg / 0 DPS against a real
+	# saved design. Assigning them here is what makes the guard true.
+	# Assigned through `self` deliberately: the locals above shadow these
+	# members, so a bare `total_weight = total_weight` would be a self-
+	# assignment of the local and publish nothing.
+	self.total_hp = total_hp
+	self.total_weight = total_weight
+	self.total_dps = total_dps
+	self.drivetrain = dt
+	var wr = WeaponRange.analyze(hull)
+	self.weapon_range = wr
+
+	# The manufactory-tier note stays tooltip-only. Manufactory tier is
+	# determined entirely by the hull TYPE (see ModuleCatalog.
+	# get_hull_size_tier(), the same function skirmish.gd's
 	# _queue_player_unit() uses) - a player could previously only discover
 	# which manufactory they'd need via a failed build attempt mid-match.
 	var tier = ModuleCatalog.get_hull_size_tier(hull.get_meta("type_id", "medium_hull")) if hull and hull.has_meta("type_id") else ""
 	var tooltip_parts: Array = []
 	if tier != "":
 		tooltip_parts.append("Needs a %s Manufactory to build this design." % tier.capitalize())
-
-	# Overweight warning: same overload condition battle_unit.gd checks at
-	# combat time, so a player can see it BEFORE their unit turns out
-	# sluggish in an actual battle with no link back to why.
-	if total_weight_capacity > 0.0 and total_weight > total_weight_capacity:
-		weight_label.modulate = Color(1.0, 0.55, 0.35)
-		tooltip_parts.append("Overweight for its locomotion (capacity ~%.0f) - this design will move noticeably slower than one within capacity." % total_weight_capacity)
-	else:
-		weight_label.modulate = Color(1, 1, 1)
 	weight_label.tooltip_text = "\n".join(tooltip_parts)
+	# The overweight state is no longer said by tinting this label. It has its
+	# own bar, its own speed readout and its own warning panel below - a label
+	# turning orange was the entire previous treatment, and it neither said
+	# what the limit was nor what exceeding it cost.
+	weight_label.modulate = Color(1, 1, 1)
+
+	_update_drivetrain_readout(dt)
+	_update_range_readout(wr)
 
 	if not energy_label:
 		energy_label = Label.new()
@@ -1127,6 +1143,312 @@ func update_stats(hull: Node3D):
 		armor_threshold_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_rail_vbox.add_child(armor_threshold_label)
 	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
+
+# --- Drivetrain readout (load bar + top speed + overweight warning) ---------
+#
+# WHY THIS IS VISIBLE CHROME AND NOT A TOOLTIP. The overweight state used to be
+# communicated by tinting the weight label orange and putting a sentence in its
+# tooltip. The comment justifying that said the sidebar "has zero
+# vertical/horizontal layout slack left", and at the time it was right - it was
+# a fixed 210px-wide strip, and the project's own overflow test had rejected
+# three attempts at a persistent label.
+#
+# That constraint no longer exists. The TELEMETRY dock is a 320px UIDock whose
+# body is a ScrollContainer (see _build_rail_dock()), so it can hold real rows
+# and scroll them. A tooltip is also the wrong instrument for this specific
+# job: the player is DRAGGING a tweak slider and needs to watch the number
+# respond, and a tooltip is not on screen while the mouse is on the slider.
+#
+# Chris's ask was that exceeding capacity "light up a warning notification" and
+# that the player "be aware of the flaw and what they are trading" - so the
+# panel names the cost in the same units as the stat it is spending (speed),
+# rather than saying "overweight" and leaving the player to infer the rest.
+# Nothing here blocks saving or testing: an overloaded design is a legal,
+# fieldable design, per that same ask.
+var _load_bar: ProgressBar = null
+var _load_label: Label = null
+var _speed_label: Label = null
+var _overweight_panel: PanelContainer = null
+var _overweight_title: Label = null
+var _overweight_detail: Label = null
+# One stylebox per load state, built on first use and reused - same idiom as
+# skirmish.gd's _power_fill_style(). A ProgressBar fill is a STATE indicator,
+# which is the documented exception to "no local styleboxes": there is no
+# theme-side way to say "this bar is currently in its bad state", and the
+# StyleBoxTexture material plates carry no colour channel to vary.
+var _load_fill_styles: Dictionary = {}
+
+func _load_fill_style(state: String) -> StyleBoxFlat:
+	if not _load_fill_styles.has(state):
+		var sb := StyleBoxFlat.new()
+		match state:
+			"go": sb.bg_color = Tokens.SIGNAL_GO
+			"hazard": sb.bg_color = Tokens.SIGNAL_HAZARD
+			_: sb.bg_color = Tokens.SIGNAL_ALERT
+		sb.corner_radius_top_left = Tokens.RADIUS_CONTROL
+		sb.corner_radius_top_right = Tokens.RADIUS_CONTROL
+		sb.corner_radius_bottom_left = Tokens.RADIUS_CONTROL
+		sb.corner_radius_bottom_right = Tokens.RADIUS_CONTROL
+		_load_fill_styles[state] = sb
+	return _load_fill_styles[state]
+
+func _build_drivetrain_readout() -> void:
+	# Built once, lazily, then reused - matches how energy_label and
+	# armor_threshold_label are handled in update_stats(). Ordered directly
+	# after the weight row it explains, via move_child: lazily-added children
+	# otherwise land at the end of the rail, which would put the load bar
+	# below the save/test buttons.
+	_speed_label = Label.new()
+	_speed_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_speed_label)
+
+	_load_label = Label.new()
+	_load_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_load_label)
+
+	_load_bar = ProgressBar.new()
+	_load_bar.show_percentage = false
+	_load_bar.min_value = 0.0
+	# Deliberately 0-125 rather than 0-100: a bar that pins at full the moment
+	# a design crosses capacity cannot show HOW far over it is, and "how far
+	# over" is the whole quantity the player is trading against. Past 125% it
+	# does pin, and the warning panel carries the exact figure.
+	_load_bar.max_value = 125.0
+	_load_bar.custom_minimum_size = Vector2(0, 6)
+	_rail_vbox.add_child(_load_bar)
+
+	# The warning notification. HAZARD, not ALERT: an overweight design is a
+	# flaw the player is choosing to accept, not a failure or a destructive
+	# action - see ui_tokens.gd's role comments on the signal colours.
+	_overweight_panel = PanelContainer.new()
+	var pair := Tokens.signal_pair("hazard")
+	var warn_style := StyleBoxFlat.new()
+	warn_style.bg_color = pair["fill"]
+	warn_style.border_color = pair["edge"]
+	warn_style.border_width_left = Tokens.BORDER_EMPHASIS
+	warn_style.content_margin_left = Tokens.SPACE_SM
+	warn_style.content_margin_right = Tokens.SPACE_SM
+	warn_style.content_margin_top = Tokens.SPACE_XS
+	warn_style.content_margin_bottom = Tokens.SPACE_XS
+	_overweight_panel.add_theme_stylebox_override("panel", warn_style)
+	_overweight_panel.visible = false
+	var warn_box := VBoxContainer.new()
+	warn_box.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	_overweight_panel.add_child(warn_box)
+	_overweight_title = Label.new()
+	_overweight_title.theme_type_variation = "HeadingLabel"
+	_overweight_title.add_theme_color_override("font_color", pair["edge"])
+	warn_box.add_child(_overweight_title)
+	_overweight_detail = Label.new()
+	_overweight_detail.theme_type_variation = "HintLabel"
+	# These lines run past the rail's width; without a wrap the panel would
+	# stretch the whole dock. Same fix as armor_threshold_label above.
+	_overweight_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	warn_box.add_child(_overweight_detail)
+	_rail_vbox.add_child(_overweight_panel)
+
+	if weight_label and weight_label.get_parent() == _rail_vbox:
+		var at := weight_label.get_index()
+		_rail_vbox.move_child(_speed_label, at + 1)
+		_rail_vbox.move_child(_load_label, at + 2)
+		_rail_vbox.move_child(_load_bar, at + 3)
+		_rail_vbox.move_child(_overweight_panel, at + 4)
+
+func _update_drivetrain_readout(dt: Dictionary) -> void:
+	if _load_bar == null:
+		_build_drivetrain_readout()
+
+	# A design with no running gear yet has no speed and no capacity to be
+	# over. Showing "Top Speed 0.0" and a full-red load bar on a hull the
+	# player has only just spawned would read as a fault in the design rather
+	# than as an unfinished one.
+	if not dt["has_locomotion"]:
+		_speed_label.text = "Top Speed: - (no locomotion)"
+		_load_label.visible = false
+		_load_bar.visible = false
+		_overweight_panel.visible = false
+		return
+	_load_label.visible = true
+	_load_bar.visible = true
+
+	var top_speed: float = dt["top_speed"]
+	var move_speed: float = dt["move_speed"]
+	var load_pct: float = dt["load_ratio"] * 100.0
+
+	# Two different figures when overloaded, and the gap between them IS the
+	# trade. When not overloaded there is only one, so only one is shown -
+	# printing "9.7 (of 9.7)" would imply a penalty that isn't there.
+	#
+	# The gap is also suppressed when it rounds away. A design a fraction of a
+	# percent over capacity has a real but sub-0.05 penalty, and rendering that
+	# as "Top Speed: 5.0 (was 5.0)" reads as a broken label rather than as a
+	# negligible cost - caught in the 100%-load capture, not by the suite,
+	# which asserts the text only at 130% where the gap is wide.
+	if dt["is_overloaded"] and absf(top_speed - move_speed) >= 0.05:
+		_speed_label.text = "Top Speed: %.1f  (was %.1f)" % [move_speed, top_speed]
+	else:
+		_speed_label.text = "Top Speed: %.1f" % move_speed
+	# Says WHICH limit is binding, because the two have opposite fixes: a
+	# chassis-limited design needs different locomotion, a power-limited one
+	# needs more thrust or less mass. Without this the player has no way to
+	# tell why adding engines stopped helping.
+	if dt["capacity_limited"] and not dt["is_overloaded"]:
+		_speed_label.tooltip_text = "This chassis is rated for %.1f and is already there - more thrust will not make it faster. A different locomotion type will." % dt["chassis_top_speed"]
+	else:
+		_speed_label.tooltip_text = "Chassis rated %.1f; this design's power/weight allows %.1f." % [dt["chassis_top_speed"], dt["power_top_speed"]]
+
+	_load_label.text = "Load: %.0f / %.0f kg  (%.0f%%)" % [dt["weight"], dt["capacity"], load_pct]
+	_load_bar.value = minf(load_pct, _load_bar.max_value)
+	# HAZARD from 90% - the point of a warning is to arrive BEFORE the cliff,
+	# and a design at 95% is one armor plate away from the penalty.
+	var state := "go"
+	if dt["is_overloaded"]:
+		state = "alert"
+	elif load_pct >= 90.0:
+		state = "hazard"
+	_load_bar.add_theme_stylebox_override("fill", _load_fill_style(state))
+
+	_overweight_panel.visible = dt["is_overloaded"]
+	if dt["is_overloaded"]:
+		_overweight_title.text = "OVERWEIGHT - %.0f%% OF CAPACITY" % load_pct
+		# Same rounding guard as the speed row above: at a fraction of a
+		# percent over, "Top speed 5.0 instead of 5.0" reads as a broken
+		# label, so the cost is stated as a percentage alone until the two
+		# figures actually differ on screen.
+		var cost_pct: float = (1.0 - dt["overload_multiplier"]) * 100.0
+		var cost: String
+		if absf(top_speed - move_speed) >= 0.05:
+			cost = "Top speed %.1f instead of %.1f (-%.0f%%)." % [move_speed, top_speed, cost_pct]
+		else:
+			cost = "Top speed down %.1f%% so far, and falling steeply from here." % cost_pct
+		_overweight_detail.text = "%.0f kg over what this locomotion is rated to carry. %s Buildable and fieldable as-is - add locomotion, shed mass, or accept the loss." % [
+			dt["weight"] - dt["capacity"], cost]
+	_load_label.tooltip_text = "What this design's locomotion is rated to carry, tweaks included.\nOver capacity, top speed falls steeply - see the warning below."
+
+# --- Range readout ---------------------------------------------------------
+# The sidebar showed no range at all before this, which made a whole axis of
+# the design invisible: the player could drag barrel_length - the single
+# biggest lever on reach - and see the weight and cost move while the stat it
+# was actually buying stayed off-screen entirely.
+#
+# It reports three things, because the range retune (ModuleCatalog.RANGE_TIERS)
+# made them separable for the first time:
+#   - the reach span across the design's real weapons, and which tier the
+#     longest one lands in;
+#   - the design's own vision, since that is the line between "this weapon can
+#     find its own targets" and "this weapon needs somebody else to look";
+#   - a warning naming any weapon that reaches past that line, and what it
+#     costs. Exactly like the overweight panel, it does not block anything: a
+#     spotter-dependent design is a legitimate and often very strong design,
+#     it just isn't one you want to field by accident with no scout.
+var _range_label: Label = null
+var _vision_label: Label = null
+var _spotter_panel: PanelContainer = null
+var _spotter_title: Label = null
+var _spotter_detail: Label = null
+
+func _build_range_readout() -> void:
+	_range_label = Label.new()
+	_range_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_range_label)
+
+	_vision_label = Label.new()
+	_vision_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_vision_label)
+
+	# HAZARD, matching the overweight panel: a trade the player is choosing,
+	# not a failure. See ui_tokens.gd's role comments on the signal colours.
+	_spotter_panel = PanelContainer.new()
+	var pair := Tokens.signal_pair("hazard")
+	var warn_style := StyleBoxFlat.new()
+	warn_style.bg_color = pair["fill"]
+	warn_style.border_color = pair["edge"]
+	warn_style.border_width_left = Tokens.BORDER_EMPHASIS
+	warn_style.content_margin_left = Tokens.SPACE_SM
+	warn_style.content_margin_right = Tokens.SPACE_SM
+	warn_style.content_margin_top = Tokens.SPACE_XS
+	warn_style.content_margin_bottom = Tokens.SPACE_XS
+	_spotter_panel.add_theme_stylebox_override("panel", warn_style)
+	_spotter_panel.visible = false
+	var warn_box := VBoxContainer.new()
+	warn_box.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	_spotter_panel.add_child(warn_box)
+	_spotter_title = Label.new()
+	_spotter_title.theme_type_variation = "HeadingLabel"
+	_spotter_title.add_theme_color_override("font_color", pair["edge"])
+	warn_box.add_child(_spotter_title)
+	_spotter_detail = Label.new()
+	_spotter_detail.theme_type_variation = "HintLabel"
+	_spotter_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	warn_box.add_child(_spotter_detail)
+	_rail_vbox.add_child(_spotter_panel)
+
+	# Sits directly after the DPS row it belongs with, rather than at the end
+	# of the rail where lazily-added children otherwise land (which would put
+	# it below the save/test buttons). Same move_child idiom as the drivetrain
+	# rows above.
+	if dps_label and dps_label.get_parent() == _rail_vbox:
+		var at := dps_label.get_index()
+		_rail_vbox.move_child(_range_label, at + 1)
+		_rail_vbox.move_child(_vision_label, at + 2)
+		_rail_vbox.move_child(_spotter_panel, at + 3)
+
+func _update_range_readout(wr: Dictionary) -> void:
+	if _range_label == null:
+		_build_range_readout()
+
+	# A hull with no armed modules yet has no range to report. Showing
+	# "Range: 0.0" on a design the player has only started reads as a fault
+	# rather than as an unfinished build - same reasoning as the drivetrain
+	# readout's no-locomotion case.
+	if not wr.get("has_weapons", false):
+		_range_label.text = "Range: - (no weapons)"
+		_vision_label.visible = false
+		_spotter_panel.visible = false
+		return
+	_vision_label.visible = true
+
+	var shortest: float = wr["shortest"]
+	var longest: float = wr["longest"]
+	var vision: float = wr["vision"]
+
+	# One figure when every weapon reaches the same distance, a span otherwise -
+	# printing "Range: 38 - 38" implies a spread that isn't there.
+	if absf(longest - shortest) >= 0.5:
+		_range_label.text = "Range: %.0f - %.0f  (%s)" % [shortest, longest, wr["tier_label"]]
+	else:
+		_range_label.text = "Range: %.0f  (%s)" % [longest, wr["tier_label"]]
+	_range_label.tooltip_text = "Reach of this design's armed modules, tweaks included.\nBarrel length is the biggest lever: a longer barrel reaches further and throws faster, but traverses slower."
+
+	_vision_label.text = "Vision: %.0f" % vision
+	_vision_label.tooltip_text = "How far this design can see for itself.\nWeapons reaching past this can only fire that far at targets another unit on your team is looking at."
+
+	var required: Array = wr["spotter_required"]
+	var assisted: Array = wr["spotter_assisted"]
+	_spotter_panel.visible = not required.is_empty() or not assisted.is_empty()
+	if not _spotter_panel.visible:
+		return
+
+	# The stronger claim first. A weapon past 2x vision cannot meaningfully
+	# self-acquire at range at all, which is a different and much more
+	# consequential fact than "reaches a bit past its own eyes".
+	if not required.is_empty():
+		_spotter_title.text = "NEEDS A SPOTTER"
+		var names: Array = []
+		for w in required:
+			names.append("%s (%.0f)" % [w["name"], w["reach"]])
+		_spotter_detail.text = "%s %s far past this design's own %.0f vision. Without another unit of yours watching the target, it can only shoot as far as it can see - roughly %.0f%% of its reach. Pair it with a scout or a radar mast and it works at full range." % [
+			", ".join(names),
+			"reaches" if names.size() == 1 else "reach",
+			vision,
+			(vision / longest) * 100.0]
+	else:
+		_spotter_title.text = "OUT-REACHES ITS OWN VISION"
+		var names: Array = []
+		for w in assisted:
+			names.append("%s (%.0f)" % [w["name"], w["reach"]])
+		_spotter_detail.text = "%s can shoot further than this design can see (%.0f). Usable as-is, but a spotting unit or a radar mast is what unlocks the last %.0f units of that reach." % [
+			", ".join(names), vision, longest - vision]
 
 # Radial positions for infographic lines (prioritize a ring around the module).
 #
