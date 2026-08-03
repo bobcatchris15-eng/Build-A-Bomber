@@ -474,6 +474,95 @@ def build_ht_track_bogie():
 
 
 # ---------------------------------------------------------------------------
+# AIR-CUSHION SKIRT - was a small ring of boxes.
+#
+# Chris: "it should be the occluding bulky skirt all around the bottom edge of
+# the hull, cross section like a thick rounded wedge."
+#
+# So it is a SWEPT LOOP, not a ring of parts: one cross-section dragged around
+# a rounded-rectangle footprint. That footprint is authored at UNIT half-extent
+# (0.5 x 0.5) so the runtime can scale X and Z straight to the hull's own
+# length and width and have the skirt follow its bottom edge on any hull -
+# a circular skirt cannot do that, and a ring of segments leaves gaps at the
+# corners exactly where a hovercraft's bag needs to be continuous.
+#
+# AXIS: footprint on Blender XY, up on Blender Z. Blender Z maps to Godot Y and
+# Blender Y to Godot -Z, so the footprint lands on Godot's XZ plane, which is
+# the plan view the runtime scales against.
+# ---------------------------------------------------------------------------
+def _rounded_rect(half_x, half_y, radius, per_corner=7):
+	"""Closed CCW path around a rounded rectangle, as (x, y)."""
+	rx = min(radius, half_x * 0.95)
+	ry = min(radius, half_y * 0.95)
+	cx, cy = half_x - rx, half_y - ry
+	pts = []
+	for sx, sy, a0 in ((1, 1, 0.0), (-1, 1, math.pi * 0.5),
+					   (-1, -1, math.pi), (1, -1, math.pi * 1.5)):
+		for i in range(per_corner + 1):
+			a = a0 + (math.pi * 0.5) * (i / float(per_corner))
+			pts.append((cx * sx + math.cos(a) * rx, cy * sy + math.sin(a) * ry))
+	return pts
+
+
+def _sweep_closed(bm, path, section):
+	"""Sweep `section` - a closed list of (outward, up) - around `path`.
+
+	The section is oriented per sample by the path's outward normal, so the
+	bag's bulge always faces away from the vehicle rather than along a fixed
+	axis.
+	"""
+	n = len(path)
+	rings = []
+	for i in range(n):
+		x, y = path[i]
+		nx, ny = path[(i + 1) % n][0] - path[i - 1][0], path[(i + 1) % n][1] - path[i - 1][1]
+		# Outward normal = tangent rotated -90 degrees, normalised.
+		ln = math.hypot(nx, ny) or 1.0
+		ox, oy = ny / ln, -nx / ln
+		ring = []
+		for (u, v) in section:
+			ring.append(bm.verts.new((x + ox * u, y + oy * u, v)))
+		rings.append(ring)
+	bm.verts.ensure_lookup_table()
+	m = len(section)
+	for i in range(n):
+		a, b = rings[i], rings[(i + 1) % n]
+		for j in range(m):
+			k = (j + 1) % m
+			try:
+				bm.faces.new((a[j], a[k], b[k], b[j]))
+			except ValueError:
+				pass
+
+
+def build_acs_skirt():
+	# The wedge, as (outward, up), closed. Broad where it bolts to the hull,
+	# bulging out and down, narrowing to the contact edge that rides the
+	# ground cushion. Rounded by sampling the bulge as an arc rather than
+	# chamfering a box - this is a fabric bag, not a machined part.
+	section = [(-0.055, 0.010), (0.075, 0.010)]
+	for i in range(7):                        # outer bulge, top to bottom
+		a = math.radians(72.0) - math.radians(150.0) * (i / 6.0)
+		section.append((0.075 + math.cos(a) * 0.085, -0.075 + math.sin(a) * 0.085))
+	section += [(0.020, -0.205), (-0.020, -0.205)]
+	for i in range(4):                        # inner face, bottom back up
+		t = i / 3.0
+		section.append((-0.020 - 0.035 * t, -0.205 + 0.215 * t))
+
+	bm = bmesh.new()
+	path = _rounded_rect(0.5, 0.5, 0.22, per_corner=7)
+	_sweep_closed(bm, path, section)
+	# Attachment flange along the top edge, so it reads as bolted on rather
+	# than resting against the hull.
+	inner = _rounded_rect(0.5 - 0.035, 0.5 - 0.035, 0.20, per_corner=7)
+	_sweep_closed(bm, inner, [(-0.010, 0.010), (0.030, 0.010),
+							  (0.030, 0.055), (-0.010, 0.055)])
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+	export_bmesh(bm, "acs_skirt", "acs_skirt.glb",
+				 color=(0.24, 0.23, 0.21, 1.0), metallic=0.10, roughness=0.88)
+
+
+# ---------------------------------------------------------------------------
 # HOVER SKIRT - was 92 triangles: a plain ring.
 # Authored around the origin, Z up, per _build_hover_engine().
 # ---------------------------------------------------------------------------
@@ -741,6 +830,7 @@ if __name__ == "__main__":
 	build_leg_thigh()
 	build_leg_shin()
 	build_ht_track_bogie()
+	build_acs_skirt()
 	build_hover_skirt()
 	build_naval_propeller()
 	build_tread_belt_loop()

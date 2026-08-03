@@ -43,6 +43,9 @@ enum Pattern {
 	CORNER_SPAN,  ## One span per side, anchored fore and aft. Screw drums, hydrofoils.
 	ROOF_PAIRS,   ## N stations per side, above the hull. Reserved; rotors use SIDE_PAIRS
 	              ## with a positive Y offset, which is the same thing.
+	FOOTPRINT,    ## ONE station under the hull's centre, handed the hull's plan
+	              ## dimensions. For gear that is a single continuous thing
+	              ## wrapping the whole vehicle rather than a row of units.
 }
 
 ## How a placed instance's node.scale is decided.
@@ -193,7 +196,12 @@ const LAYOUTS := {
 		"mirror": true, "override_pos": true,
 	},
 	"air_cushion_skirt": {
-		"pattern": Pattern.RING_XZ,
+		# FOOTPRINT, not RING_XZ. A hovercraft's bag is ONE continuous loop
+		# around the hull's bottom edge (Chris), so spawning N instances round
+		# a ring gave N little skirts instead - "just a few little boxy
+		# things". The lift fans are still a ring, but they now live inside
+		# the single skirt instance where they belong.
+		"pattern": Pattern.FOOTPRINT,
 		"count_key": "lift_fan_count", "count_default": 3, "count_min": 2, "count_max": 6,
 		"geo_keys": {"skirt_diameter": 1.0, "plenum_pressure": 1.0},
 		"normal": Vector3.DOWN, "reach_keys": ReachKeys.XYZ,
@@ -657,6 +665,17 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				var st := _station(p, spec.get("normal", Vector3.BACK), geo, 0.0, false)
 				st["index"] = i
 				out.append(st)
+
+		Pattern.FOOTPRINT:
+			var geo := geo_base.duplicate()
+			# The builder knows its catalog size but not the hull's, and this
+			# part has to match the hull's plan outline exactly.
+			geo["footprint_x"] = hull_size.x
+			geo["footprint_z"] = hull_size.z
+			var st := _station(Vector3(0.0, -hull_size.y / 2.0 + bias, 0.0),
+				spec.get("normal", Vector3.UP), geo, 0.0, false)
+			st["index"] = 0
+			out.append(st)
 
 		Pattern.CORNER_SPAN:
 			# Chris, twice: "pin the gearboxes to the corners of the hull, have

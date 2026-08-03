@@ -6167,17 +6167,41 @@ static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_co
 ## Air-cushion skirt: one continuous bag around the module's footprint, with
 ## the lift fans set into the plenum deck above it.
 static func _build_air_cushion_skirt(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.55, 0.52, 0.42), tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "air_cushion_skirt", base_color, 1.0, float(tweaks.get("skirt_diameter", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	var diameter := float(tweaks.get("skirt_diameter", 1.0))
 	var fans := int(tweaks.get("lift_fan_count", 3.0))
 	var plenum := float(tweaks.get("plenum_pressure", 1.0))
+	# The hull's own plan dimensions, from locomotion_layout.gd's FOOTPRINT
+	# pattern. Internal geometry channel, not a player tweak.
+	var fx := float(tweaks.get("footprint_x", base_size.x))
+	var fz := float(tweaks.get("footprint_z", base_size.z))
 
+	# ONE skirt, wrapping the whole hull. acs_skirt is authored as a swept
+	# wedge around a UNIT rounded rectangle (half-extent 0.5), so scaling X and
+	# Z by the hull's own length and width lands the bag exactly on its bottom
+	# edge - see build_acs_skirt() in tools/blender/build_locomotion_rework.py.
+	# skirt_diameter now inflates it slightly PROUD of that edge rather than
+	# setting an absolute size, which is what it means on a part that has to
+	# match the hull it is fitted to.
 	var skirt_mesh := _part("acs_skirt")
 	if skirt_mesh:
-		var skirt := _mesh_inst(skirt_mesh, base_color)
-		# Plenum pressure inflates the bag rather than widening it - a
-		# separate axis from skirt_diameter, so both sliders read distinctly.
-		skirt.scale = Vector3(diameter, 0.85 + 0.30 * plenum, diameter)
+		var skirt := _mesh_inst(skirt_mesh, base_color.darkened(0.35))
+		# Fit against the mesh's MEASURED plan extent, not its nominal unit
+		# footprint. The path is authored at half-extent 0.5, but the wedge
+		# bulges 0.16 outboard of it, so the mesh is really 1.32 across - scale
+		# by the hull's size directly and the bag overhangs by that bulge on
+		# every edge (measured 7.26 against a 5.50 hull). Same measure-the-mesh
+		# rule the screw drum and the rocker arm both had to learn.
+		var sa: AABB = skirt_mesh.get_aabb()
+		var proud: float = 1.0 + 0.10 * (diameter - 1.0)
+		# Plenum pressure inflates the bag vertically rather than widening it -
+		# a separate axis from skirt_diameter, so both sliders read distinctly.
+		# Depth is its own number: tying it to the footprint made the bag
+		# deeper on longer hulls, which is not what a skirt does.
+		var depth: float = 0.55 * (0.85 + 0.30 * plenum)
+		skirt.scale = Vector3(
+			(fx * proud) / maxf(sa.size.x, 0.001),
+			depth / maxf(sa.size.y, 0.001),
+			(fz * proud) / maxf(sa.size.z, 0.001))
 		parent_node.add_child(skirt)
 
 	var fan_mesh := _part("acs_lift_fan")
@@ -6187,13 +6211,15 @@ static func _build_air_cushion_skirt(parent_node: Node3D, base_size: Vector3, ba
 			# Named so _animate_locomotion() spins it: a hovercraft with still
 			# fans is the same "is this broken?" read the frozen road wheels had.
 			fan_pivot.name = SPIN_PIVOT_TURBINE
-			var a: float = float(i) / float(maxi(1, fans)) * TAU
-			var r: float = 0.30 * diameter if fans > 1 else 0.0
-			fan_pivot.position = Vector3(cos(a) * r, 0.16, sin(a) * r)
+			# Spread down the vehicle's LENGTH inside the bag, which is where a
+			# hovercraft's lift fans actually sit - a ring of them made sense
+			# when each was its own module, but there is one plenum now.
+			var t: float = 0.0 if fans <= 1 else (float(i) / float(fans - 1)) - 0.5
+			fan_pivot.position = Vector3(0.0, 0.16, t * fz * 0.55)
 			fan_pivot.rotation = Vector3(PI / 2.0, 0, 0)
 			parent_node.add_child(fan_pivot)
 			var fan := _mesh_inst(fan_mesh, Color(0.30, 0.32, 0.34))
-			fan.scale = Vector3.ONE * (0.75 + 0.25 * diameter)
+			fan.scale = Vector3.ONE * (0.75 + 0.25 * diameter) * maxf(1.0, fx * 0.35)
 			fan_pivot.add_child(fan)
 
 

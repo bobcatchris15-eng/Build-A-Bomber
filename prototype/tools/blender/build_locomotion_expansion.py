@@ -238,20 +238,9 @@ def build_rocker_bogie():
 # ---------------------------------------------------------------------------
 def build_air_cushion_skirt():
 	# Skirt segment: the flexible bag, authored as a bulging finger segment.
-	bm = bmesh.new()
-	add_taper_z(bm, (0, 0, -0.075), 0.230, 0.185, 0.150, segments=20)
-	add_cyl_z(bm, (0, 0, -0.155), 0.215, 0.045, segments=20)             # bulge
-	add_taper_z(bm, (0, 0, -0.200), 0.215, 0.170, 0.045, segments=20)    # lower hem
-	for i in range(12):                                                   # skirt fingers
-		a = (i / 12) * math.tau
-		add_box(bm, (math.cos(a) * 0.200, math.sin(a) * 0.200, -0.190),
-				(0.055, 0.055, 0.080), bevel=0.010)
-	add_cyl_z(bm, (0, 0, 0.010), 0.245, 0.030, segments=20)              # attachment ring
-	for i in range(10):
-		a = (i / 10) * math.tau
-		add_cyl_z(bm, (math.cos(a) * 0.238, math.sin(a) * 0.238, 0.020), 0.011, 0.026, segments=6)
-	export_bmesh(bm, "acs_skirt", "acs_skirt.glb",
-				 color=(0.28, 0.27, 0.24, 1.0), metallic=0.15, roughness=0.85)
+	# acs_skirt moved to build_locomotion_rework.py - it needs a swept loop
+	# around a rounded-rectangle footprint to follow the hull's bottom edge,
+	# which is a different kind of authoring from the parts here.
 
 	# Lift fan: a ducted axial fan sitting in the plenum deck.
 	bm = bmesh.new()
