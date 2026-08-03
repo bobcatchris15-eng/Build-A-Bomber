@@ -99,6 +99,21 @@ const ROLES := {
 	# the glow via the emission arguments; this just keeps the substrate dark
 	# so the emission has something to read against.
 	"energized": {"metallic": 0.45, "roughness": 0.30, "tint": 0.60, "base": Color(0.14, 0.15, 0.18), "wear": 0.20},
+
+	# Gravitic and field hardware: hover rings, anti-grav emitter plates.
+	# Chris: they "should both look like they're made out of real materials if
+	# inexplicable in what and how." So: a real substance, just not one we
+	# have - a dark near-black alloy polished to almost a mirror, which is
+	# what sells "exotic" rather than emissive glow does. Nearly colour-immune
+	# for the same reason gunmetal is: the substance should not change when
+	# the team paint does. It is the polish that makes it read as engineered
+	# and the darkness that stops it competing with the field glow on top.
+	"exotic": {"metallic": 0.95, "roughness": 0.11, "tint": 0.18, "base": Color(0.085, 0.095, 0.115), "wear": 0.10},
+
+	# The working face of that hardware - emitter windows, ring cores. Glassy
+	# and non-metallic so the caller's emission reads as light coming FROM
+	# somewhere rather than paint that happens to be bright.
+	"fieldglass": {"metallic": 0.10, "roughness": 0.05, "tint": 0.45, "base": Color(0.05, 0.08, 0.11), "wear": 0.0},
 }
 
 const DEFAULT_ROLE := "steel"
@@ -112,6 +127,16 @@ const DEFAULT_ROLE := "steel"
 # which is a strict improvement on the flat-plastic it had before, so an
 # unmatched or modded part degrades to "fine" rather than to "broken".
 const ROLE_HINTS := [
+	# Gravitic hardware first: these part names also contain "plate" and
+	# "ring", which would otherwise fall through to steel.
+	# All of it is the ALLOY, not the glass. Routing the rings to fieldglass
+	# plus the emission the builders already pass rendered them as flat neon
+	# hoops with no material read at all - the opposite of Chris's "real
+	# materials if inexplicable". The polish is what sells it; the glow is a
+	# trim, not the substance.
+	["agp_", "exotic"],
+	["hover_ring", "exotic"],
+	["grav", "exotic"],
 	["muzzle", "scorched"],
 	["venturi", "scorched"],
 	["nozzle", "scorched"],

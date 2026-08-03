@@ -242,6 +242,9 @@ func _physics_process(delta):
 					var inner_ring = child.get_node_or_null("HoverRingInner")
 					if inner_ring:
 						inner_ring.rotate_y(18.0 * delta)
+						# See battle_unit.gd's matching comment - the inner
+						# ring tumbles on two axes, not one.
+						inner_ring.rotate_z(7.0 * delta)
 				elif data.type_id == "legs":
 					# Rotating on X, not Z - see battle_unit.gd's matching
 					# comment (Z swung sideways like a bird wing; X swings

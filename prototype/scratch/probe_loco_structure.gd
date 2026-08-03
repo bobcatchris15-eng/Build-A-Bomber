@@ -42,6 +42,12 @@ func _part_boxes(module: Node3D) -> Array:
 	for m in module.find_children("*", "MeshInstance3D", true, false):
 		if m.mesh == null:
 			continue
+		# Field effects are not structure. anti_grav_plate's GravLens quad is a
+		# screen-space distortion lying free under the plates BY DESIGN - it is
+		# a lens, not a part - so counting it made the module read as 2 islands
+		# and dragged its bulk figure with it.
+		if m.name.begins_with("GravLens"):
+			continue
 		var xf := Transform3D.IDENTITY
 		var walker: Node = m
 		while walker != null and walker != module:

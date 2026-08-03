@@ -1197,6 +1197,11 @@ func _animate_locomotion(delta: float) -> void:
 				var inner_ring = child.get_node_or_null("HoverRingInner")
 				if inner_ring:
 					inner_ring.rotate_y(18.0 * powered_rate * delta)
+					# Chris: the innermost ring should turn about a horizontal
+					# axis as well. One axis alone reads as a flat spin like
+					# the outer rings; a second, slower one about Z makes it
+					# tumble, which is what sells the gimbal.
+					inner_ring.rotate_z(7.0 * powered_rate * delta)
 			"legs":
 				# Simple sine-wave swing on the "LegSwing" pivot, not a full IK
 				# walk cycle. leg_phase staggers legs into a trot instead of

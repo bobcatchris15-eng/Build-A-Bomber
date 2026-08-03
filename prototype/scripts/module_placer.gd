@@ -171,6 +171,11 @@ func _process(delta: float):
 			var inner_ring = child.get_node_or_null("HoverRingInner")
 			if inner_ring:
 				inner_ring.rotate_y(18.0 * delta)
+				# Chris: the innermost ring should turn about a horizontal axis
+				# as well. One axis alone reads as a flat spin like the outer
+				# rings; a second, slower one about Z makes it tumble, which is
+				# what sells the gimbal.
+				inner_ring.rotate_z(7.0 * delta)
 
 func set_mirror_enabled(enabled: bool):
 	mirror_enabled = enabled

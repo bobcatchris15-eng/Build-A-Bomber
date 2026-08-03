@@ -382,7 +382,12 @@ const MAX_WIDTH_FACTOR := {
 	# but 2.69x read as a spider rather than a vehicle.
 	"legs": 1.9,
 	# Hover skirts and grav plates spread to carry the footprint.
-	"hover_engine": 1.7, "air_cushion_skirt": 1.6, "anti_grav_plate": 1.6,
+	# Raised for the two field types (Chris asked for both "larger and more
+	# prominent on the ends of their pylons"). At 1.6/1.7 the width clamp was
+	# shrinking the enlarged emitter heads straight back down - anti_grav_plate
+	# measured 0.018 bulk after the size-up, LOWER than the 0.107 it had
+	# before it.
+	"hover_engine": 2.3, "air_cushion_skirt": 1.6, "anti_grav_plate": 2.4,
 	# Naval gear is submerged and narrow.
 	"hydrofoil": 1.7, "water_jet": 1.4, "naval_propeller": 1.4,
 	# Air: span is the point. Rotors and engine clusters overhang by design;

@@ -4111,7 +4111,7 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 
 
 static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DEEP_SKY_BLUE, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "hover_engine", base_color, 1.0, float(tweaks.get("emv_level", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
+	build_mount_kit(parent_node, "hover_engine", Color(0.32, 0.34, 0.37).lerp(base_color, 0.12), 1.0, float(tweaks.get("emv_level", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	# Scifi hover pad, per Chris's redesign: three concentric rings instead
 	# of the old fan+skirt+single-ring combo. The outer ring stays fixed/
 	# horizontal; the middle ring spins continuously around local X and the
@@ -4124,13 +4124,24 @@ static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_co
 	# it reads as "denser hardware", not "bigger pad".
 	var emv = tweaks.get("emv_level", 1.0)
 	var ring_mesh = _part("hover_ring")
+	# The MOUNTING is steel, not team paint. hover_engine's catalog colour is
+	# DEEP_SKY_BLUE, and everything structural was being tinted with it - so
+	# the pylon and mount came out as bright cyan girders, which is most of why
+	# this module "looked terrible" (Chris). The field colour belongs to the
+	# field; the hardware holding it out there is metal with a hint of team
+	# tint, the same as every other locomotor's mount.
+	var struct_color := Color(0.32, 0.34, 0.37).lerp(base_color, 0.12)
 
 	# hover_ring is authored with major_radius=0.5, i.e. diameter=1.0 (see
 	# build_hover_ring in build_meshes.py) - ring_scale converts that to the
 	# catalog's actual footprint (base_size.x), and ring_radii nests three
 	# rings inside it (outer/mid/inner) at decreasing diameter.
 	var authored_diameter = 1.0
-	var ring_scale = base_size.x / authored_diameter
+	# Same prominence pass as anti_grav_plate: the rings ARE the module, and
+	# at 1.0 they read as a detail on the end of a strut rather than the
+	# working end of one (Chris).
+	const HEAD_SCALE := 2.1
+	var ring_scale = (base_size.x / authored_diameter) * HEAD_SCALE
 	var ring_radii = [1.0, 0.65, 0.35]
 	var ring_names = ["HoverRingOuter", "HoverRingMid", "HoverRingInner"]
 	var ring_y = base_size.y * 0.5
@@ -4138,7 +4149,11 @@ static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_co
 	for idx in range(3):
 		var ring: MeshInstance3D
 		if ring_mesh:
-			ring = _mesh_inst(ring_mesh, base_color, base_color, 1.0)
+			# Dark polished alloy with a FAINT field glow, not a neon hoop.
+			# At emission energy 1.0 in the module's own bright team colour
+			# the rings came out as flat cyan with no substance at all.
+			ring = _mesh_inst(ring_mesh, base_color.darkened(0.55),
+				Color(0.35, 0.72, 1.0), 0.28)
 			ring.scale = Vector3(ring_scale * ring_radii[idx], emv, ring_scale * ring_radii[idx])
 		else:
 			ring = MeshInstance3D.new()
@@ -4179,7 +4194,7 @@ static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_co
 		var right = dir.cross(reference).normalized()
 		var forward = right.cross(dir).normalized()
 		if strut_mesh:
-			var strut = _mesh_inst(strut_mesh, base_color.darkened(0.3))
+			var strut = _mesh_inst(strut_mesh, struct_color)
 			# Basis columns pre-scaled directly (right/forward stay unit-
 			# length - the flattened 3-to-1 cross-section is already baked
 			# into the authored mesh - dir scaled to strut_len) rather than
@@ -4192,7 +4207,7 @@ static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_co
 			# flattened box, no taper.
 			var mount_mesh = _part("rg_mount_box")
 			if mount_mesh:
-				var strut = _mesh_inst(mount_mesh, base_color.darkened(0.3))
+				var strut = _mesh_inst(mount_mesh, struct_color)
 				strut.transform = Transform3D(Basis(right * 0.6, dir * strut_len, forward * 0.2), Vector3.ZERO)
 				parent_node.add_child(strut)
 
@@ -6235,19 +6250,24 @@ static func _build_air_cushion_skirt(parent_node: Node3D, base_size: Vector3, ba
 ## motion cue is the ring - which is exactly why dropping the ring for speed
 ## is a visible trade and not just a number.
 static func _build_anti_grav_plate(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.35, 0.65, 0.85), tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "anti_grav_plate", base_color, 1.0, float(tweaks.get("field_strength", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
+	build_mount_kit(parent_node, "anti_grav_plate", Color(0.32, 0.34, 0.37).lerp(base_color, 0.12), 1.0, float(tweaks.get("field_strength", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
 	var plates := int(tweaks.get("plate_count", 4.0))
 	var field := float(tweaks.get("field_strength", 1.0))
 	var has_ring: bool = bool(tweaks.get("stabilizer_ring", true))
 
+	# PROMINENCE. Chris: both this and the hover pad "need to be larger and
+	# more prominent on the ends of their pylons". The emitter is the point of
+	# the module - the pylon is just what holds it out there - so the head
+	# grows and the mount does not.
+	const HEAD_SCALE := 2.3
 	var plate_mesh := _part("agp_plate")
 	if plate_mesh:
 		for i in range(plates):
 			var a: float = float(i) / float(maxi(1, plates)) * TAU
-			var r: float = 0.0 if plates <= 1 else 0.22
-			var plate := _mesh_inst(plate_mesh, base_color.darkened(0.35),
-				Color(0.30, 0.65, 0.95), 0.6 * field)
-			plate.scale = Vector3(0.8 + 0.3 * field, 1.0, 0.8 + 0.3 * field)
+			var r: float = 0.0 if plates <= 1 else 0.22 * HEAD_SCALE
+			var plate := _mesh_inst(plate_mesh, base_color.darkened(0.55),
+				Color(0.30, 0.65, 0.95), 0.30 * field)
+			plate.scale = Vector3(0.8 + 0.3 * field, 1.0, 0.8 + 0.3 * field) * HEAD_SCALE
 			plate.position = Vector3(cos(a) * r, 0.0, sin(a) * r)
 			parent_node.add_child(plate)
 
@@ -6256,13 +6276,59 @@ static func _build_anti_grav_plate(parent_node: Node3D, base_size: Vector3, base
 		if ring_mesh:
 			var ring_pivot := Node3D.new()
 			ring_pivot.name = SPIN_PIVOT_TURBINE
-			ring_pivot.position = Vector3(0, -0.10, 0)
+			ring_pivot.position = Vector3(0, -0.10 * HEAD_SCALE, 0)
 			ring_pivot.rotation = Vector3(PI / 2.0, 0, 0)
 			parent_node.add_child(ring_pivot)
-			var ring := _mesh_inst(ring_mesh, base_color,
-				Color(0.35, 0.75, 1.0), 1.1 * field)
-			ring.scale = Vector3.ONE * (0.9 + 0.25 * field)
+			var ring := _mesh_inst(ring_mesh, base_color.darkened(0.45),
+				Color(0.35, 0.75, 1.0), 0.45 * field)
+			ring.scale = Vector3.ONE * (0.9 + 0.25 * field) * HEAD_SCALE
 			ring_pivot.add_child(ring)
+
+	# THE FIELD ITSELF, in two parts: light cast onto the ground, and the
+	# ground seen through a lens. Chris asked for both - "a glow under them,
+	# and an effect that it looks like its bending light under them as well" -
+	# and they are genuinely different phenomena, so neither one fakes the
+	# other.
+	var head_r: float = 0.42 * HEAD_SCALE * (0.8 + 0.3 * field)
+
+	# 1. The glow. A real OmniLight3D, so it lights the actual terrain under
+	# the vehicle and moves with it, rather than a painted blob that would sit
+	# flat on whatever it is over.
+	var glow := OmniLight3D.new()
+	glow.name = "GravGlow"
+	glow.position = Vector3(0, -0.55 * HEAD_SCALE, 0)
+	glow.light_color = Color(0.34, 0.68, 1.0)
+	# 1.2, not 2.2: at the higher value the light washed the hull's whole
+	# underside flat blue and the hardware stopped reading as metal at all.
+	glow.light_energy = 1.2 * field
+	glow.omni_range = 3.4 * HEAD_SCALE * (0.7 + 0.3 * field)
+	glow.omni_attenuation = 1.6
+	glow.shadow_enabled = false
+	parent_node.add_child(glow)
+
+	# 2. The lens. A disc lying flat under the plates carrying
+	# gravitic_lens.gdshader, which displaces its screen sample radially - so
+	# what warps is whatever is really behind it. See that shader for why it
+	# is unshaded and never writes depth.
+	var lens_shader: Shader = load("res://shaders/gravitic_lens.gdshader")
+	if lens_shader:
+		var lens := MeshInstance3D.new()
+		lens.name = "GravLens"
+		var quad := QuadMesh.new()
+		quad.size = Vector2(head_r * 5.2, head_r * 5.2)
+		lens.mesh = quad
+		var mat := ShaderMaterial.new()
+		mat.shader = lens_shader
+		mat.set_shader_parameter("strength", 0.028 + 0.022 * field)
+		mat.set_shader_parameter("tint", Color(0.30, 0.62, 0.95))
+		lens.material_override = mat
+		# Flat, facing down at the ground it is bending.
+		lens.rotation = Vector3(PI / 2.0, 0, 0)
+		lens.position = Vector3(0, -0.62 * HEAD_SCALE, 0)
+		# The lens must not be culled when the plates themselves are on screen
+		# but its own small quad is not.
+		lens.extra_cull_margin = 4.0
+		parent_node.add_child(lens)
 
 
 ## Hydrofoil: struts down from the hull corners carrying lifting foils. The
