@@ -30,8 +30,47 @@ prototype/.tools/
 .antigravitycli/
 .claude/
 
-# Python bytecode from top-level blender_cleanup.py / run_tripo.py
+# Python bytecode
 __pycache__/
+
+# Dev screenshots. Every capture_*.gd writes into res://progress_captures and
+# nothing ever reads back out, so these are write-only output, not assets -
+# export_presets.cfg has always excluded them from builds. They were tracked
+# anyway and grew to 184MB, 46% of the whole tracked repo. Kept on disk so the
+# capture history stays browsable locally.
+progress_captures/
+prototype/progress_captures/
+
+# TripoSG input photos - the images that were fed to image-to-3D to produce
+# assets/models/parts/*.glb. Pipeline intermediates, superseded by the
+# procedural authoring in tools/blender/, and the four Python tools that read
+# them hardcode a checkout path that no longer exists.
+prototype/assets/temp_images/
+
+# One-shot diagnostic probes and their screenshot output. Nothing outside
+# scratch/ references any of it; each file is run by hand once
+# (godot --headless --script scratch/<x>.gd) and then superseded. The three
+# exceptions below are real inputs, not output: flow_source/ and flow_terrain/
+# are the Flow-generated source plates that tools/process_flow_*.gd read to
+# regenerate assets/textures/{factions,terrain}, fonts_download/ is the
+# original download of the Special Elite font credited in CREDITS.md, and
+# reimport_assets.sh is live infrastructure.
+prototype/scratch/*
+!prototype/scratch/flow_source/
+!prototype/scratch/flow_terrain/
+!prototype/scratch/fonts_download/
+!prototype/scratch/reimport_assets.sh
+
+# UI mockups and art reference that live outside the Godot project entirely -
+# no .gd/.tscn/.tres references any of them.
+ui_mockup/
+ui_mockup_v2/
+ui_assets_moodboard/
+
+# Godot MCP bridge - a local editor addon, not project source, and not enabled
+# in project.godot. Was previously neither tracked nor ignored, so it showed as
+# untracked noise in every `git status`.
+prototype/addons/godot_mcp_server/
 
 # Exported builds (regenerable via `godot --export-release`, not source) -
 # export_presets.cfg itself IS tracked, so any export stays reproducible.

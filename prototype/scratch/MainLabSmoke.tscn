@@ -1,9 +1,0 @@
-[gd_scene load_steps=3 format=3 uid="uid://cb1f5iwt1anju"]
-
-[ext_resource type="PackedScene" uid="uid://cxabmain1234" path="res://scenes/MainLab.tscn" id="1_lab"]
-[ext_resource type="Script" path="res://scratch/mainlab_smoke.gd" id="2_smoke"]
-
-[node name="MainLab" instance=ExtResource("1_lab")]
-
-[node name="Smoke" type="Node" parent="."]
-script = ExtResource("2_smoke")
