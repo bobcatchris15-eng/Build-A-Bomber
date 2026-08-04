@@ -1,5 +1,15 @@
 # Decisions Needed / Judgment Calls Log
 
+> **Status: dormant since 2026-07-18, kept as the rationale-of-record.** This log
+> stopped being appended to while work carried on daily — `PROGRESS.md` is the
+> live journal. Everything below the line is a completed FABLE_REVIEW cycle
+> (chunks H–M); there are no open **BLOCKING** items awaiting an answer.
+>
+> It stays at the repo root, and at full length, because it is cited from ~34
+> places in the source as the reason a thing is the way it is ("see
+> DECISIONS_NEEDED.md for why the other 6 hulls don't have this yet"). Moving or
+> trimming it would strand those citations. Read it as history, not as a queue.
+
 Newest entries first. Each entry: the question, the default I'm proceeding with, and why. Anything marked **BLOCKING** means I stopped that thread entirely and need Chris's input before continuing it — everything else is "proceeding on best judgment, flagging for review."
 
 ---

@@ -72,6 +72,13 @@ until the file was forced to parse in full. It now compiles and behaves the way
 its own (unreachable) logic implies; wiring it up for real is Hull Builder Chunk
 8 (undo/redo) per `HULL_BUILDER_PLAN.md`, out of scope for "make it compile."
 
+> Update 2026-08-04: that machinery has now been **removed** rather than left
+> parsing-but-unreachable — `_undo_stack`, `_update_undo_stack()`,
+> `_perform_undo()` and `_match_undo_action()` are gone from `hull_builder.gd`.
+> Nothing regressed, because nothing ever called them. Hull Builder Chunk 8 is
+> unaffected in substance but now starts from nothing instead of from this stub;
+> the stub is in git history if it is worth reviving as a starting point.
+
 ### 0.2 The test suite aborts on first failure, hiding 38 of 152 suites — ✅ FIXED 2026-07-27
 
 [run_tests.gd:118-177](prototype/run_tests.gd:118) chains suites as

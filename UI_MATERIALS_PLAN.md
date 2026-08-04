@@ -282,9 +282,16 @@ its own is a defect rather than a feature.
 
 ### 9. Apply — shell screens
 
-`map_select.gd`, `match_setup.gd`, `operations_setup.gd` already use
-`UIShell.build_screen()` and are the most coherent screens in the game — they mainly need
-the materials from items 1–3, which arrive for free.
+`match_setup.gd` and `operations_setup.gd` are the most coherent screens in the game —
+they mainly need the materials from items 1–3, which arrive for free.
+
+> Corrected 2026-08-04: this used to say these screens "already use
+> `UIShell.build_screen()`", and also listed `map_select.gd`. Neither held —
+> `build_screen()` had no call sites at all and has been removed along with the
+> rest of the unused shell API (`ui_shell.gd` is now just `stat_row()`), and
+> MapSelect was folded into `match_setup.gd`'s map dropdown. These two screens
+> build their layouts directly, so the materials pass has to style them as they
+> are rather than inheriting from a shared scaffold.
 
 `main_menu.gd` needs the item-0 revert first (green CRT palette, stars, emoji, inline
 styleboxes), then the dead middle third visible in `ui_pass12/main_menu.png` gets filled: a

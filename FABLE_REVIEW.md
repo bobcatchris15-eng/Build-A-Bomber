@@ -1,5 +1,14 @@
 # Independent Review — 2026-07-18 (Claude Fable 5)
 
+> **Status: acted on and closed.** The review's punch-list was worked through as
+> FABLE_REVIEW chunks H–M; see `DECISIONS_NEEDED.md` for the per-chunk rationale
+> and `PROGRESS.md` for what shipped. Nothing here is an open action item.
+>
+> Kept at the repo root because ~47 source comments cite it as the spec behind
+> shipped behaviour (`auto_weapon.gd`, `run_tests.gd` and others name it
+> directly), so it functions as reference material rather than as a finished
+> report that can be filed away.
+
 A fresh, independent creative + functional assessment, commissioned by Chris. Written after reading
 the design docs (DESIGN_VISION.md, PROGRESS.md, DECISIONS_NEEDED.md, the specs) and then reading the
 actual GDScript against them — every claim below is grounded in specific code, with file references.
