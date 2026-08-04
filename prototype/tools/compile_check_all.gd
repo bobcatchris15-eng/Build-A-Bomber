@@ -1,5 +1,5 @@
 extends SceneTree
-# Load EVERY .gd under scripts/ and tools/ and report any that fail to
+# Load EVERY .gd under scripts/, tools/ and tests/ and report any that fail to
 # compile. A targeted safety net for bulk edits - removing a top-level
 # declaration can silently orphan the closing bracket of a multi-line literal,
 # which only surfaces as a "Could not preload resource script" error from some
@@ -27,20 +27,24 @@ func _walk(dir_path: String, out: Array) -> void:
 
 func _init():
 	var files: Array = []
-	for root in ["res://scripts", "res://tools"]:
+	for root in ["res://scripts", "res://tools", "res://tests"]:
 		_walk(root, files)
 	files.sort()
 
 	var failed: Array = []
 	for f in files:
-		var res = load(f)
+		# CACHE_MODE_IGNORE matters: a plain load() will happily hand back an
+		# already-cached script object for a file that no longer parses, which
+		# made an earlier version of this tool report PASS while Godot was
+		# printing parse errors right next to it.
+		# Deliberately NOT res.reload() as a second check - reloading 100+
+		# interdependent scripts cascades and effectively hangs. The cache-miss
+		# load is enough: a file that does not parse comes back null.
+		var res = ResourceLoader.load(f, "", ResourceLoader.CACHE_MODE_IGNORE)
 		if res == null:
 			failed.append(f)
-		elif res is GDScript and not res.can_instantiate() and res.get_base_script() == null:
-			# Static-only utility scripts legitimately report this; not a failure.
-			pass
 
-	print("checked %d scripts under scripts/ and tools/" % files.size())
+	print("checked %d scripts under scripts/, tools/ and tests/" % files.size())
 	if failed.is_empty():
 		print("[PASS] every script compiled.")
 		quit(0)

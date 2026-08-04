@@ -1,0 +1,1499 @@
+extends "res://tests/suite_base.gd"
+# sim and stats suites, split out of the former single-file
+# run_tests.gd. Registration order lives in run_tests.gd's SUITE_ORDER,
+# not here - the runner drives that manifest so execution order is
+# identical to the pre-split single file.
+
+func test_stats_calculations() -> bool:
+	print("Running Test Suite 1: Stats Calculations...")
+	
+	# Instantiate MainLab scene to load UI and dependencies
+	var lab_scene = preload("res://scenes/MainLab.tscn").instantiate()
+	root.add_child(lab_scene)
+	
+	# Wait a frame for scene setup
+	await tree.process_frame
+	
+	var stat_ui = lab_scene.get_node_or_null("UI_StatBlock")
+	if not stat_ui:
+		print("  [FAIL] UI_StatBlock not found in MainLab.")
+		lab_scene.queue_free()
+		return false
+		
+	# Create a mock hull with custom metadata
+	var mock_hull = Node3D.new()
+	mock_hull.name = "MockHull"
+	mock_hull.set_meta("type_id", "medium_hull")
+	mock_hull.set_meta("faction", "industrialists") # 20% weight reduction
+	mock_hull.set_meta("armor_material", "hardened_steel") # 1.0 hp mult, 1.0 weight mult
+	mock_hull.set_meta("armor_thickness", 1.5)
+	
+	# Create a mock module (weapon)
+	var mock_weapon = Node3D.new()
+	var w_data = ModuleData.new()
+	w_data.type_id = "basic_cannon"
+	w_data.module_name = "Main Cannon"
+	w_data.category = "weapon"
+	w_data.base_hp = 100.0
+	w_data.base_weight = 80.0
+	w_data.cost_metal = 30
+	w_data.base_dps = 40.0
+	w_data.scale_multiplier = Vector3(1, 1, 1) # base volume scale 1.0
+	mock_weapon.set_meta("module_data", w_data)
+	mock_hull.add_child(mock_weapon)
+	
+	# Calculate stats using stat_calculator.gd script attached to UI_StatBlock
+	stat_ui.update_stats(mock_hull)
+	
+	# Expected Calculations (FABLE_REVIEW.md 2.6: the sidebar now shows the
+	# COMBAT formulas via the shared ModuleCatalog.compute_hull_* functions,
+	# not its old display-only module-sum-times-material math):
+	# "Hull HP" = the unit's real combat max_hp (hull base * thickness *
+	# material mult * volume) - the mock module's own HP is a separate
+	# strip pool shown alongside, not part of this figure.
+	var expected_hp = ModuleCatalog.compute_hull_max_hp("medium_hull", 1.5, "hardened_steel", Vector3.ONE)
+
+	# "Total Weight" = hull combat weight (incl. the Industrialists 20%
+	# armor-weight discount, which is now REAL in combat too) + module sum.
+	var expected_weight = ModuleCatalog.compute_hull_weight("medium_hull", 1.5, "hardened_steel", Vector3.ONE, 0.8) + 80.0
+	
+	# Expected Thresholds (from DamageResolver.ARMOR_TABLE's hardened_steel
+	# row - the sidebar reads this directly now, not a separate hardcoded
+	# copy; "E" is a real Energy threshold as of this pass, not the
+	# Explosive value mislabeled):
+	# Kinetic (K): Base K (15.0) * thickness (1.5) = 22.5
+	# Thermal (T): Base T (5.0) * thickness (1.5) = 7.5
+	# Energy (E): Base Energy (8.0) * thickness (1.5) = 12.0
+	var expected_k_thresh = 22.5
+	var expected_t_thresh = 7.5
+	var expected_e_thresh = 12.0
+	
+	# Retrieve calculated values from labels
+	var hp_label_text = stat_ui.hp_label.text
+	var weight_label_text = stat_ui.weight_label.text
+	var threshold_label_text = stat_ui.armor_threshold_label.text
+	
+	var got_hp = float(hp_label_text.split(":")[-1])
+	var got_weight = float(weight_label_text.split(":")[-1])
+	
+	# Parse thresholds: e.g. "Armor Thresholds: K: 22.5, T: 7.5, E: 15.0"
+	var tokens = threshold_label_text.split(",")
+	var got_k = float(tokens[0].split(":")[-1])
+	var got_t = float(tokens[1].split(":")[-1])
+	var got_e = float(tokens[2].split(":")[-1])
+	
+	var pass_hp = abs(got_hp - expected_hp) < 0.01
+	var pass_weight = abs(got_weight - expected_weight) < 0.01
+	var pass_thresholds = abs(got_k - expected_k_thresh) < 0.01 and abs(got_t - expected_t_thresh) < 0.01 and abs(got_e - expected_e_thresh) < 0.01
+	
+	if not pass_hp:
+		print("  [FAIL] HP calculation wrong. Expected: ", expected_hp, " Got: ", got_hp)
+	if not pass_weight:
+		print("  [FAIL] Weight calculation wrong. Expected: ", expected_weight, " Got: ", got_weight)
+	if not pass_thresholds:
+		print("  [FAIL] Thresholds wrong. Expected K/T/E: ", expected_k_thresh, "/", expected_t_thresh, "/", expected_e_thresh, " Got: ", got_k, "/", got_t, "/", got_e)
+		
+	# Clean up
+	mock_hull.queue_free()
+	lab_scene.queue_free()
+	
+	if pass_hp and pass_weight and pass_thresholds:
+		print("  [PASS] Stats Calculation matches all analytical models.")
+		return true
+	return false
+
+func test_modular_assembly_types_have_no_shadowed_monolithic_mesh() -> bool:
+	print("Running Test Suite: No MODULAR_ASSEMBLY_TYPES id has an unreachable monolithic mesh...")
+	# build_visual() loads a whole-module authored mesh with
+	#   _part(type_id) if not MODULAR_ASSEMBLY_TYPES.has(type_id) else null
+	# so for any id in that table the monolithic assets/models/parts/<id>.glb
+	# can NEVER be loaded. Seventeen such files existed and read like intended
+	# fallbacks while being unreachable (tracked_treads.glb alone was 257KB).
+	# They were deleted; this stops the table and the parts dir from drifting
+	# back into that ambiguity, in either direction - adding an id to the table
+	# without deleting its monolith, or re-authoring a monolith for an id that
+	# is already modular.
+	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
+	var offenders: Array = []
+	for type_id in VisualBuilderScript.MODULAR_ASSEMBLY_TYPES.keys():
+		if ResourceLoader.exists("res://assets/models/parts/%s.glb" % type_id):
+			offenders.append(type_id)
+
+	if not offenders.is_empty():
+		print("  [FAIL] %d modular type(s) have a shadowed monolithic .glb that build_visual() can never load: %s" % [offenders.size(), str(offenders)])
+		print("         Either delete assets/models/parts/<id>.glb, or remove the id from MODULAR_ASSEMBLY_TYPES.")
+		return false
+
+	print("  [PASS] All %d modular assembly types are free of unreachable monolithic meshes." % VisualBuilderScript.MODULAR_ASSEMBLY_TYPES.size())
+	return true
+
+
+func test_design_to_battle_integration() -> bool:
+	print("Running Test Suite: Design -> Serialize -> Battle-Spawn Integration...")
+	# Thursday integration pass: design a unit using several of this week's
+	# fixes together (legs at a non-default size, gauss_railgun's rail_length
+	# gizmo tweak, sensor_suite's mast_height tweak), then push it through the
+	# EXACT same reconstruct_vehicle() path Skirmish/Battlefield use to spawn
+	# real battle units, and confirm nothing was lost or silently reset.
+	#
+	# Deliberately does NOT call save_blueprint() / touch user://blueprints -
+	# that's Chris's real save directory with ~24 real designs in it, and
+	# this test doesn't need the disk round-trip to prove the pipeline works;
+	# serialize_hull() + reconstruct_vehicle() is the same code save/load uses.
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	var bm = Node.new()
+	bm.name = "BlueprintManager"
+	bm.set_script(preload("res://scripts/blueprint_manager.gd"))
+	placer.add_child(bm)
+	await tree.process_frame
+
+	placer._place_hull_from_ui("heavy_hull")
+	await tree.process_frame
+	placer._place_weapon_from_ui("gauss_railgun", Vector3(0, 0.75, -1.0), Vector3.UP)
+	await tree.process_frame
+	placer._place_weapon_from_ui("sensor_suite", Vector3(1.5, 0.75, 1.5), Vector3.UP)
+	await tree.process_frame
+	placer._place_weapon_from_ui("legs", Vector3.ZERO, Vector3.DOWN)
+	await tree.process_frame
+
+	# Apply this week's fixed tweaks directly (mirrors what the gizmo-drag /
+	# slider UI would write into module_data.tweaks / locomotion settings).
+	for child in placer.hull.get_children():
+		if child.has_meta("module_data"):
+			var data = child.get_meta("module_data")
+			if data.type_id == "gauss_railgun":
+				data.tweaks["rail_length"] = 1.8
+			elif data.type_id == "sensor_suite":
+				data.tweaks["mast_height"] = 1.6
+	placer.update_locomotion("legs", {"size": 1.7, "count": 4})
+	await tree.process_frame
+
+	var snapshot = bm.serialize_hull(placer.hull)
+	if snapshot.is_empty():
+		print("  [FAIL] serialize_hull produced an empty snapshot")
+		placer.queue_free()
+		return false
+
+	# Confirm the tweaks actually made it into the snapshot before we even
+	# get to reconstruction, so a failure below is unambiguous about which
+	# stage broke.
+	var found_rail_length = false
+	var found_mast_height = false
+	for mod in snapshot.get("modules", []):
+		if mod.get("type_id", "") == "gauss_railgun" and abs(mod.get("tweaks", {}).get("rail_length", 0.0) - 1.8) < 0.01:
+			found_rail_length = true
+		if mod.get("type_id", "") == "sensor_suite" and abs(mod.get("tweaks", {}).get("mast_height", 0.0) - 1.6) < 0.01:
+			found_mast_height = true
+	if not found_rail_length or not found_mast_height:
+		print("  [FAIL] Snapshot lost tweaks before reconstruction (rail_length=", found_rail_length, " mast_height=", found_mast_height, ")")
+		placer.queue_free()
+		return false
+
+	# Now spawn it the way Skirmish/Battlefield actually do: is_designer=false,
+	# into a plain parent, not the MainLab hull path.
+	var battle_parent = Node3D.new()
+	root.add_child(battle_parent)
+	var battle_hull = bm.reconstruct_vehicle(snapshot, battle_parent, false)
+	await tree.process_frame
+
+	if not battle_hull:
+		print("  [FAIL] reconstruct_vehicle returned null for battle spawn")
+		placer.queue_free()
+		battle_parent.queue_free()
+		return false
+
+	var legs_found = false
+	var legs_scale_ok = false
+	var railgun_tweak_ok = false
+	var sensor_tweak_ok = false
+	for child in battle_hull.get_children():
+		if not child.has_meta("module_data"): continue
+		var data = child.get_meta("module_data")
+		if data.type_id == "legs":
+			legs_found = true
+			# Batch E hull-relative scaling fix: the outer node's scale.y
+			# carries ONLY the hull's own height factor relative to the
+			# reference hull (module_placer.gd's update_locomotion()) - leg_length
+			# itself is baked directly into the thigh/shin/foot/mount sub-part
+			# scales inside _build_legs() (and into module_data.get_weight()/
+			# get_cost() via the tweaks dict), so the outer node is deliberately
+			# left unscaled by leg_length to avoid double-applying it (see
+			# module_placer.gd comments).
+			#
+			# Derived from the catalog rather than hardcoded: this used to
+			# assert 1.7 * 1.5 against a comment claiming heavy_hull.size.y
+			# was 1.5. The hull data has since been re-authored (it is 2.5
+			# now), so the literal silently went stale and the suite could
+			# only have passed by accident. It was invisible because Suite 7
+			# failed first and the `and` chain short-circuited every suite
+			# after it.
+			# The node scale is now FIXED at 1.0, not the hull-height factor
+			# this used to assert. Scaling a leg by the hull's height meant a
+			# taller body got taller legs, which raised the body further -
+			# enormous spider legs on anything above a scout (Chris,
+			# 2026-08-02). Ride height belongs to the running gear, so leg
+			# proportions are keyed to their own mount now; see the DROP
+			# comment in visual_builder.gd's _build_legs(). What this suite
+			# actually exists to prove is that the TWEAK survives the
+			# design -> serialize -> battle-spawn round trip, which it still
+			# does - so that is what it checks, plus that the scale is the
+			# fixed 1.0 and not some silently reintroduced hull factor.
+			var leg_length_ok = abs(data.tweaks.get("leg_length", 0.0) - 1.7) < 0.01
+			var hull_factor_ok = abs(child.scale.y - 1.0) < 0.05
+			if leg_length_ok and hull_factor_ok:
+				legs_scale_ok = true
+		elif data.type_id == "gauss_railgun":
+			if abs(data.tweaks.get("rail_length", 0.0) - 1.8) < 0.01:
+				railgun_tweak_ok = true
+		elif data.type_id == "sensor_suite":
+			if abs(data.tweaks.get("mast_height", 0.0) - 1.6) < 0.01:
+				sensor_tweak_ok = true
+
+	placer.queue_free()
+	battle_parent.queue_free()
+
+	if not legs_found or not legs_scale_ok:
+		print("  [FAIL] Battle-spawned legs lost their size tweak (found=", legs_found, " scale_ok=", legs_scale_ok, ")")
+		return false
+	if not railgun_tweak_ok:
+		print("  [FAIL] Battle-spawned gauss_railgun lost its rail_length tweak")
+		return false
+	if not sensor_tweak_ok:
+		print("  [FAIL] Battle-spawned sensor_suite lost its mast_height tweak")
+		return false
+
+	print("  [PASS] A unit designed with this week's fixed mechanics survives the full design -> serialize -> battle-spawn pipeline intact.")
+	return true
+
+func test_trait_system_composability() -> bool:
+	print("Running Test Suite: Unit-Class Trait System (composable tags, no hard-blocking)...")
+	# Traits union from whatever hull+locomotion combo is actually present -
+	# no validation anywhere. Chris's explicit constraint: a player can put
+	# treads on a naval hull if they want; this test only checks that
+	# traits compose correctly, not that any combination is rejected
+	# (nothing rejects combinations, by design).
+	var wheels_traits = ModuleCatalog.get_traits("medium_hull", "wheels")
+	if "ground_contact" not in wheels_traits or "high_speed" not in wheels_traits:
+		print("  [FAIL] medium_hull + wheels should carry ground_contact and high_speed traits, got ", wheels_traits)
+		return false
+
+	var heli_traits = ModuleCatalog.get_traits("light_hull", "helicopter_rotors")
+	if "airborne" not in heli_traits or "rotary_wing" not in heli_traits or "hovering" not in heli_traits:
+		print("  [FAIL] light_hull + helicopter_rotors should carry airborne/rotary_wing/hovering traits, got ", heli_traits)
+		return false
+
+	# A foundation hull should carry "static" automatically, derived from
+	# the existing is_foundation() mechanism rather than needing its own
+	# separate flag.
+	var foundation_traits = ModuleCatalog.get_traits("pillbox_foundation", "")
+	if "static" not in foundation_traits:
+		print("  [FAIL] pillbox_foundation should carry the 'static' trait (derived from is_foundation), got ", foundation_traits)
+		return false
+
+	# No hard-blocking: nothing prevents combining traits/locomotion that
+	# might seem to make no sense (e.g. legs on a foundation - foundations
+	# already block locomotion PLACEMENT at the design-lab level for a
+	# different, pre-existing reason, but get_traits() itself must never
+	# validate or throw - it just describes whatever's asked of it).
+	var weird_traits = ModuleCatalog.get_traits("pillbox_foundation", "hover_engine")
+	if "static" not in weird_traits or "hovering" not in weird_traits:
+		print("  [FAIL] get_traits() should compose even an unusual combination without rejecting it, got ", weird_traits)
+		return false
+
+	# All 7 hull types default to turreted_capable=true (nothing overrides
+	# it yet) - confirms the default doesn't silently break existing mounting.
+	for hull_id in ["light_hull", "medium_hull", "heavy_hull", "assault_hull", "pillbox_foundation", "tower_foundation"]:
+		if not ModuleCatalog.is_turreted_capable(hull_id):
+			print("  [FAIL] ", hull_id, " should default to turreted_capable=true")
+			return false
+
+	print("  [PASS] Traits compose from whatever hull+locomotion is present, derive 'static' from is_foundation, and never block a combination.")
+	return true
+
+func test_frame_built_whole_vehicle_aim() -> bool:
+	print("Running Test Suite: Frame-Built Weapons - Zero Traverse + Whole-Vehicle-Aim AI...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	# gauss_railgun is always frame_built per get_mount_style() - verify the
+	# traverse angle collapses to zero once facet/hull_type are supplied
+	# (omitting them keeps the old weapon-type-only angle, unaffected).
+	var angle = ModuleCatalog.get_traverse_limit_angle("gauss_railgun", "front", "medium_hull")
+	if angle > 0.001:
+		print("  [FAIL] gauss_railgun should have zero traverse when mount-aware, got ", angle)
+		return false
+	var turret_angle = ModuleCatalog.get_traverse_limit_angle("basic_cannon", "top", "medium_hull")
+	if turret_angle < PI - 0.01:
+		print("  [FAIL] basic_cannon should keep its full 360-degree traverse on a turreted-capable hull, got ", turret_angle)
+		return false
+
+	# auto_weapon.gd should read this mount context and never rotate its own
+	# local transform, regardless of where the target is.
+	var hull = Node3D.new()
+	hull.name = "Hull"
+	hull.set_meta("type_id", "medium_hull")
+	root.add_child(hull)
+	var weapon = Node3D.new()
+	weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	hull.add_child(weapon)
+	weapon.set_meta("facet", "front")
+	var w_data = ModuleData.new()
+	w_data.type_id = "gauss_railgun"
+	w_data.base_weight = 300.0
+	w_data.base_dps = 40.0
+	weapon.set_meta("module_data", w_data)
+	weapon._ready()
+	if weapon.traverse_limit_angle > 0.001:
+		print("  [FAIL] auto_weapon.gd should derive a zero traverse_limit_angle for a frame_built mount")
+		hull.queue_free()
+		return false
+
+	var los_target = Node3D.new()
+	los_target.add_to_group("damageable")
+	root.add_child(los_target)
+	los_target.global_position = weapon.global_position + Vector3(5, 0, 0) # off to the side, not straight ahead
+	var resting_before = weapon.resting_transform.basis
+	weapon.target = los_target
+	for i in range(20):
+		weapon._physics_process(0.1)
+	if not weapon.transform.basis.is_equal_approx(resting_before):
+		print("  [FAIL] A frame_built weapon's local transform should never rotate away from resting, regardless of target position")
+		hull.queue_free()
+		los_target.queue_free()
+		return false
+	hull.queue_free()
+	los_target.queue_free()
+
+	# Whole-vehicle-aim: a unit whose active weapon is frame_built should
+	# keep turning its whole hull to face the target while in range, not
+	# just stop and leave the weapon (which can't aim itself) pointed
+	# wherever the hull happened to be facing on arrival.
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.rotate_speed = 4.0
+	unit.attack_range = 20.0
+	unit.has_frame_built_weapon = true
+	unit.global_transform = Transform3D.IDENTITY # facing -Z
+	var side_target = Node3D.new()
+	root.add_child(side_target)
+	side_target.global_position = Vector3(10, 0, 0) # +X, 90 degrees off the current -Z facing, within range
+	unit.order_attack(side_target)
+	var initial_forward = -unit.global_transform.basis.z
+	var initial_angle = initial_forward.angle_to((side_target.global_position - unit.global_position).normalized())
+	for i in range(40):
+		unit._physics_process(0.05)
+	var final_forward = -unit.global_transform.basis.z
+	var final_angle = final_forward.angle_to((side_target.global_position - unit.global_position).normalized())
+	if final_angle >= initial_angle:
+		print("  [FAIL] A frame_built unit should keep turning to face its target while in range, not hold its arrival heading (initial angle ", initial_angle, ", final ", final_angle, ")")
+		unit.queue_free()
+		side_target.queue_free()
+		return false
+	var horizontal_speed = Vector2(unit.velocity.x, unit.velocity.z).length()
+	if horizontal_speed > 0.01:
+		print("  [FAIL] A frame_built unit turning in place while in range should not be translating, got horizontal speed ", horizontal_speed)
+		unit.queue_free()
+		side_target.queue_free()
+		return false
+
+	unit.queue_free()
+	side_target.queue_free()
+	print("  [PASS] frame_built weapons never independently traverse; the whole vehicle turns in place to aim them.")
+	return true
+
+func test_headless_combat_simulation() -> bool:
+	print("Running Test Suite 4: Headless Combat Simulation Tick Loop...")
+
+	# Field a known, POINT-DEFENCE-FREE design instead of whatever happens to
+	# be sitting in user://blueprint.json.
+	#
+	# Battlefield._spawn_vehicle() loads the player's real last-active design,
+	# and this suite drops a missile directly overhead and asserts the player
+	# takes damage from it. That only held while weapons could not aim
+	# straight up: Basis.looking_at(dir, Vector3.UP) is singular for a target
+	# directly above, so a CIWS/pd_laser/flak_cannon simply failed to track
+	# anything overhead. auto_weapon.gd's _looking_at_safe() fixed that (part
+	# of giving pintle mounts a genuine full-sphere envelope), at which point
+	# the user's current PD-heavy design started shooting the missile down at
+	# tick 2 - a correct interception, reported as "failed to apply damage".
+	#
+	# Same machine-state fix the Test Range suite already uses: write a known
+	# fixture, restore whatever was there afterwards.
+	var bp_path = "user://blueprint.json"
+	var had_prior_bp = FileAccess.file_exists(bp_path)
+	var prior_bp_content = ""
+	if had_prior_bp:
+		var rf = FileAccess.open(bp_path, FileAccess.READ)
+		prior_bp_content = rf.get_as_text()
+		rf.close()
+	var fixture_bp = {
+		"version": 1.0,
+		"hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"faction": "industrialists",
+		"locomotion": {"type_id": "wheels", "settings": {"count": 4}},
+		"modules": [
+			{"type_id": "wheels", "position": {"x": 0, "y": 0, "z": 0}, "normal": {"x": 0, "y": 1, "z": 0}},
+			{"type_id": "basic_cannon", "position": {"x": 0, "y": 1.0, "z": -1.5}, "normal": {"x": 0, "y": 1, "z": 0}}
+		]
+	}
+	var wf = FileAccess.open(bp_path, FileAccess.WRITE)
+	wf.store_string(JSON.stringify(fixture_bp))
+	wf.close()
+
+	# We simulate a dynamic combat scenario headlessly
+	var battlefield_scene = preload("res://scenes/Battlefield.tscn").instantiate()
+	root.add_child(battlefield_scene)
+	current_scene = battlefield_scene
+	await tree.process_frame
+
+	if had_prior_bp:
+		var rwf = FileAccess.open(bp_path, FileAccess.WRITE)
+		rwf.store_string(prior_bp_content)
+		rwf.close()
+	else:
+		DirAccess.remove_absolute(bp_path)
+
+	var player = battlefield_scene.get_node_or_null("PlayerVehicle")
+	if not player:
+		print("  [FAIL] Player vehicle not spawned in Battlefield.")
+		battlefield_scene.queue_free()
+		return false
+		
+	# Get starting player HP
+	var initial_hp = player.hp
+	var initial_modules_hp = 0.0
+	for m in player.get_active_modules():
+		initial_modules_hp += m.get_meta("current_hp") if m.has_meta("current_hp") else m.get_meta("module_data").get_hp()
+	
+	# Spawn a missile directly above the player and target it
+	var missile = Node3D.new()
+	missile.set_script(IncomingMissileScript)
+	battlefield_scene.add_child(missile)
+	missile.global_position = player.global_position + Vector3(0.5, 5.0, 0.5)
+	missile.target_node = player
+	missile.damage_amount = 80.0 # High enough to beat most armor thresholds
+	
+	# Process multiple ticks manually to simulate physics movement
+	var hit_detected = false
+	var ticks = 0
+	while ticks < 100:
+		await tree.process_frame
+		ticks += 1
+		if not is_instance_valid(missile) or missile.is_queued_for_deletion():
+			hit_detected = true
+			break
+			
+	# Check HP reduction
+	var hp_after_battle = player.hp
+	var end_modules_hp = 0.0
+	for m in player.get_active_modules():
+		if is_instance_valid(m):
+			end_modules_hp += m.get_meta("current_hp") if m.has_meta("current_hp") else m.get_meta("module_data").get_hp()
+			
+	var total_initial = initial_hp + initial_modules_hp
+	var total_end = hp_after_battle + end_modules_hp
+	
+	# Clean up. queue_free() is deferred - without waiting a frame, this
+	# scene's target dummies (now real "damageable" team-1 members, needed
+	# for Test Range parity) can still be alive and in-group when the very
+	# next test (test_team_targeting) runs immediately after, contaminating
+	# its own team-based targeting scan with leftover hostiles.
+	battlefield_scene.queue_free()
+	await tree.process_frame
+
+	if hit_detected and total_end < total_initial:
+		print("  [PASS] Headless combat simulation ticks successfully. Player total HP reduced from ", total_initial, " to ", total_end)
+		return true
+	else:
+		print("  [FAIL] Combat tick simulation failed to hit or apply damage. Hit: ", hit_detected, " Start HP: ", total_initial, " End HP: ", total_end)
+		return false
+
+func test_match_config_overrides_apply_to_skirmish() -> bool:
+	print("Running Test Suite: Pre-Match Settings - MatchConfig Overrides (Faction/Blueprint-Import/AI-Difficulty/Starting-Resources) Flow Into A Real Match...")
+	var match_config = root.get_node_or_null("MatchConfig")
+	if not match_config:
+		print("  [SKIP] MatchConfig autoload not present in this run context - nothing to verify.")
+		return true
+
+	# Save every field this test touches so no other test (which assumes
+	# MatchConfig's defaults) is affected by a leftover override - restored
+	# unconditionally at the end, on both the pass and fail paths.
+	var saved = {
+		"selected_map_id": match_config.selected_map_id if "selected_map_id" in match_config else "",
+		"player_faction": match_config.player_faction,
+		"enemy_faction": match_config.enemy_faction,
+		"selected_blueprint_paths": match_config.selected_blueprint_paths.duplicate(),
+		"ai_difficulty": match_config.ai_difficulty,
+		"starting_metal": match_config.starting_metal,
+		"starting_crystal": match_config.starting_crystal,
+	}
+
+	# This test's PLAYER_TEAM assertion below specifically verifies the
+	# infinite-resources cheat's override behavior, which now defaults OFF
+	# (UNIFIED_ROADMAP.md Phase 1.1) - force it on for this test rather than
+	# depending on the ambient default, so the test proves the override logic
+	# itself instead of just whatever DebugSettings.infinite_player_resources
+	# happens to default to.
+	var debug_settings = root.get_node_or_null("DebugSettings")
+	var saved_infinite_resources = debug_settings.infinite_player_resources if debug_settings else null
+	if debug_settings:
+		debug_settings.infinite_player_resources = true
+
+	# A deterministic test blueprint (independent of whatever the real
+	# %APPDATA% user:// blueprint folder happens to contain) so the
+	# blueprint-import override can be proven regardless of environment.
+	var test_bp_path = "user://blueprints/_test_matchconfig_override.json"
+	var source_bp = bp_manager_test_load("res://data/loadout/rattler_scout.json")
+	source_bp["name"] = "MatchConfigOverrideProbe"
+	var f = FileAccess.open(test_bp_path, FileAccess.WRITE)
+	f.store_string(JSON.stringify(source_bp))
+	f.close()
+
+	match_config.player_faction = "technocrats"
+	match_config.enemy_faction = "expansionists"
+	match_config.ai_difficulty = "hard"
+	match_config.starting_metal = 900
+	match_config.starting_crystal = 400
+	match_config.selected_blueprint_paths = [test_bp_path]
+
+	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
+	root.add_child(skirmish)
+	current_scene = skirmish
+	await tree.process_frame
+	await tree.process_frame
+
+	var ok = true
+	if skirmish.player_faction != "technocrats":
+		print("  [FAIL] MatchConfig.player_faction should override the roster-derived default, got ", skirmish.player_faction)
+		ok = false
+	if skirmish.enemy_faction != "expansionists":
+		print("  [FAIL] MatchConfig.enemy_faction should override the roster-derived default, got ", skirmish.enemy_faction)
+		ok = false
+	# ENEMY_TEAM only - Chris's infinite-resources testing cheat
+	# (skirmish.gd's debug_infinite_resources, RTS_CORE_ROADMAP.md A2) deliberately
+	# overrides PLAYER_TEAM's starting economy to a floor AFTER MatchConfig
+	# is applied, so the player's own starting_metal/crystal no longer
+	# reflects the override by design. The enemy's economy is untouched by
+	# the cheat, so it's still the right team to verify the override
+	# actually reaches Skirmish.
+	if skirmish.economy[skirmish.ENEMY_TEAM].metal != 900:
+		print("  [FAIL] MatchConfig.starting_metal should set the enemy's starting metal, got ", skirmish.economy)
+		ok = false
+	if skirmish.economy[skirmish.ENEMY_TEAM].crystal != 400:
+		print("  [FAIL] MatchConfig.starting_crystal should set the enemy's starting crystal, got ", skirmish.economy)
+		ok = false
+	if skirmish.economy[skirmish.PLAYER_TEAM].metal < skirmish.INFINITE_RESOURCE_FLOOR:
+		print("  [FAIL] PLAYER_TEAM should start at the infinite-resources testing floor regardless of MatchConfig, got ", skirmish.economy[skirmish.PLAYER_TEAM].metal)
+		ok = false
+	if skirmish.ai_difficulty != "hard":
+		print("  [FAIL] MatchConfig.ai_difficulty should flow into skirmish.ai_difficulty, got ", skirmish.ai_difficulty)
+		ok = false
+	var found_imported_blueprint = false
+	for e in skirmish.roster:
+		if e.name == "MatchConfigOverrideProbe":
+			found_imported_blueprint = true
+	if not found_imported_blueprint:
+		print("  [FAIL] selected_blueprint_paths should import exactly the chosen saved design into the roster")
+		ok = false
+	var ai = skirmish.get_node_or_null("EnemyAI")
+	if not ai or ai.wave_interval >= ai.WAVE_INTERVAL or ai.produce_interval >= ai.PRODUCE_INTERVAL:
+		print("  [FAIL] 'hard' AI difficulty should scale enemy_ai.gd's timers below their normal defaults, got produce=", ai.produce_interval if ai else "?", " wave=", ai.wave_interval if ai else "?")
+		ok = false
+
+	skirmish.queue_free()
+	await tree.process_frame
+	DirAccess.remove_absolute(test_bp_path)
+
+	match_config.selected_map_id = saved.selected_map_id
+	match_config.player_faction = saved.player_faction
+	match_config.enemy_faction = saved.enemy_faction
+	match_config.selected_blueprint_paths = saved.selected_blueprint_paths
+	match_config.ai_difficulty = saved.ai_difficulty
+	match_config.starting_metal = saved.starting_metal
+	match_config.starting_crystal = saved.starting_crystal
+	if debug_settings:
+		debug_settings.infinite_player_resources = saved_infinite_resources
+
+	if ok:
+		print("  [PASS] Player/enemy faction, blueprint-library import, starting resources, and AI difficulty overrides from MatchConfig all flow into a real Skirmish instance.")
+	return ok
+
+func test_evasion_model_speed_defends_against_ballistic_not_hitscan() -> bool:
+	print("Running Test Suite: Evasion Model - Speed Has Real Defensive Value (FABLE_REVIEW 1.4)...")
+	seed(1234) # deterministic roll sequence for the statistical assertions below
+
+	var fast_target = CharacterBody3D.new()
+	fast_target.velocity = Vector3(15.0, 0.0, 0.0) # well above the 0.5 "stationary" floor
+
+	var stationary_target = CharacterBody3D.new()
+	stationary_target.velocity = Vector3.ZERO
+
+	var ballistic_weapon = Node3D.new()
+	ballistic_weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	ballistic_weapon.type_id = "rotary_cannon" # ballistic class
+
+	var hitscan_weapon = Node3D.new()
+	hitscan_weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	hitscan_weapon.type_id = "heavy_laser" # hitscan class
+
+	var guided_weapon = Node3D.new()
+	guided_weapon.set_script(load("res://scripts/auto_weapon.gd"))
+	guided_weapon.type_id = "guided_missile" # guided class
+
+	# None of the 5 nodes above are ever added to the tree (this test only
+	# needs their scripts' pure functions, not a live scene) - Node is not
+	# RefCounted, so an un-parented, un-freed Node is a genuine engine-level
+	# leak, not just a GDScript reference dropped. Free them all through one
+	# path so every return below (pass or fail) cleans up.
+	var _to_free = [fast_target, stationary_target, ballistic_weapon, hitscan_weapon, guided_weapon]
+	var ok = true
+	var fail_msg = ""
+
+	# A fast mover should sometimes dodge a ballistic weapon - not a
+	# guarantee (that would make speed strictly dominant, same trap as the
+	# armor material dropdown in 1.2), but a real, non-trivial chance.
+	var misses = 0
+	var trials = 400
+	for i in range(trials):
+		if not ballistic_weapon._roll_hit(fast_target):
+			misses += 1
+	if ok and (misses < int(trials * 0.15) or misses > int(trials * 0.85)):
+		ok = false
+		fail_msg = "A fast target should have a real (but not near-0%% or near-100%%) miss chance against a ballistic weapon, got %d/%d misses" % [misses, trials]
+
+	# Hitscan and guided weapons never miss from speed - their counters are
+	# elsewhere (aim/traverse, PD interception), not target speed.
+	for i in range(50):
+		if ok and not hitscan_weapon._roll_hit(fast_target):
+			ok = false
+			fail_msg = "Hitscan weapons should never miss due to target speed"
+		if ok and not guided_weapon._roll_hit(fast_target):
+			ok = false
+			fail_msg = "Guided weapons should never miss due to target speed"
+
+	# A stationary target can't dodge anything - "fast but standing still"
+	# shouldn't accidentally read as evasive.
+	for i in range(50):
+		if ok and not ballistic_weapon._roll_hit(stationary_target):
+			ok = false
+			fail_msg = "A stationary target should never miss - it isn't moving to dodge anything"
+
+	for n in _to_free:
+		n.free()
+
+	if not ok:
+		print("  [FAIL] ", fail_msg)
+		return false
+	print("  [PASS] Ballistic fire can be dodged by a fast-moving target (", misses, "/", trials, " misses); hitscan/guided never miss from speed; stationary targets never dodge.")
+	return true
+
+func test_support_modules_get_combat_script_in_real_spawn() -> bool:
+	print("Running Test Suite: repair_array/drone_carrier Actually Get Scripted Through The Real Spawn Pipeline...")
+	# Real bug found while verifying the repair/drone fixes: every
+	# _setup_weapons()-equivalent only attached auto_weapon.gd when
+	# category=="weapon", but repair_array/drone_carrier are catalogued as
+	# category="module" - so in actual gameplay (setup()/reconstruct_vehicle(),
+	# not a synthetic test that manually attaches the script) neither module
+	# ever got its firing/targeting logic at all. This test goes through the
+	# REAL pipeline specifically to make sure that gap stays closed.
+	await tree.process_frame
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
+	root.add_child(bp_manager)
+
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": [
+			{"type_id": "repair_array", "name": "Repair Welder Array", "position": {"x": 0.0, "y": 0.5, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}},
+			{"type_id": "drone_carrier", "name": "Drone Carrier Bay", "position": {"x": 2.0, "y": 0.5, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.setup(bp, 0, bp_manager)
+
+	var repair_scripted = false
+	var drone_scripted = false
+	for child in unit.hull_node.get_children():
+		if not child.has_meta("module_data"): continue
+		var data = child.get_meta("module_data")
+		if data.type_id == "repair_array" and "targets_allies" in child:
+			repair_scripted = true
+		if data.type_id == "drone_carrier" and "fire_range" in child:
+			drone_scripted = true
+
+	unit.queue_free()
+	bp_manager.queue_free()
+
+	if not repair_scripted:
+		print("  [FAIL] repair_array should get auto_weapon.gd attached through the real setup() pipeline, not just in synthetic tests")
+		return false
+	if not drone_scripted:
+		print("  [FAIL] drone_carrier should get auto_weapon.gd attached through the real setup() pipeline, not just in synthetic tests")
+		return false
+
+	print("  [PASS] repair_array and drone_carrier both receive auto_weapon.gd through the real spawn pipeline (battle_unit.gd/battlefield.gd/building.gd all use ModuleCatalog.needs_combat_script()).")
+	return true
+
+func test_facet_aware_kiting() -> bool:
+	print("Running Test Suite: Facet-Aware Kiting - Repositions To Present Its Strongest Facet...")
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.move_speed = 6.0
+	unit.rotate_speed = 4.0
+	unit.attack_range = 20.0
+	unit.has_frame_built_weapon = false # turreted - kiting is only for these
+	unit.global_transform = Transform3D.IDENTITY # facing -Z ("front")
+	unit.global_position = Vector3.ZERO
+
+	# Real hull_node with a reinforced RIGHT facet - front/left/back stay at
+	# baseline (weaker). classify_facet's "right" normal is (1,0,0), not the
+	# 180-degree-opposite of "front" - deliberately NOT reinforcing "back",
+	# since a strongest-facet-is-back scenario degenerates to the same
+	# heading a plain retreat would already produce and wouldn't actually
+	# exercise the decoupled rotate-while-strafing behavior this test needs
+	# to distinguish from the older plain-retreat kiting.
+	var hull = Node3D.new()
+	hull.name = "Hull"
+	hull.set_meta("armor_material", "hardened_steel")
+	hull.set_meta("armor_thickness", 1.0)
+	unit.add_child(hull)
+	unit.hull_node = hull
+
+	var right_plate = Node3D.new()
+	right_plate.set_meta("facet", "right")
+	var plate_data = ModuleData.new()
+	plate_data.type_id = "armor_plating"
+	plate_data.category = "armor"
+	plate_data.base_hp = 500.0
+	right_plate.set_meta("module_data", plate_data)
+	hull.add_child(right_plate)
+
+	# Attacker directly in front (matches "front" facet's own normal,
+	# (0,0,-1)) - "front" has no reinforcement, so it's tied-weakest and
+	# selected deterministically (FACET_NORMALS iterates front first).
+	var attacker = Node3D.new()
+	root.add_child(attacker)
+	attacker.global_position = Vector3(0, 0, -3)
+	unit.attack_range = 20.0 # well outside 0.45x standoff (9.0), so distance(3) triggers kiting
+	unit.order_attack(attacker)
+
+	var extremes = unit._my_facet_extremes()
+	if extremes.strongest != "right" or extremes.weakest != "front":
+		print("  [FAIL] Setup sanity check failed - expected strongest=right/weakest=front, got ", extremes)
+		unit.queue_free(); attacker.queue_free()
+		return false
+
+	var initial_dist = unit.global_position.distance_to(attacker.global_position)
+	for i in range(50):
+		unit._physics_process(0.05)
+		# No floor collider in this synthetic test, so is_on_floor() is
+		# always false and gravity would free-fall the unit indefinitely,
+		# contaminating the facet math with a huge Y offset that never
+		# happens in a real level (which always has a floor). Keep it
+		# grounded, same as move_and_slide() would with a real floor.
+		unit.global_position.y = 0.0
+		unit.velocity.y = 0.0
+	var final_dist = unit.global_position.distance_to(attacker.global_position)
+
+	if final_dist <= initial_dist + 0.001:
+		print("  [FAIL] Facet-aware kiting should still increase distance from the attacker, went from ", initial_dist, " to ", final_dist)
+		unit.queue_free(); attacker.queue_free()
+		return false
+
+	# The real behavioral difference from plain kiting: the facet now
+	# facing the attacker should be the STRONGEST one, not still the
+	# weakest one it started with.
+	var final_local_dir = unit.global_transform.basis.inverse() * (attacker.global_position - unit.global_position)
+	var final_facing_facet = ModuleCatalog.classify_facet(final_local_dir)
+	if final_facing_facet != "right":
+		print("  [FAIL] After repositioning, the unit's STRONGEST facet (right) should face the attacker, got '", final_facing_facet, "' facing instead")
+		unit.queue_free(); attacker.queue_free()
+		return false
+
+	unit.queue_free()
+	attacker.queue_free()
+	print("  [PASS] A unit whose weakest facet initially faces the attacker repositions (rotate + strafe, not just retreat) to present its strongest facet instead, while still increasing distance.")
+	return true
+
+# Every locomotor carries its own top speed now, replacing the universal 18.0
+# ceiling that used to be hardcoded into battle_unit.gd's speed clamp. Two
+# things have to hold for that to mean anything: the ceiling must actually BIND
+# (a design with surplus thrust cannot exceed it), and the roster must not all
+# share one value - which is the failure mode the old clamp WAS.
+func test_locomotor_base_top_speed_is_a_real_per_type_ceiling() -> bool:
+	print("Running Test Suite: Locomotor Base Top Speed - Per-Type Ceiling...")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
+
+	# A featherweight hull with a huge thrust surplus: power_top_speed here is
+	# far above every chassis rating, so whatever comes out IS the ceiling.
+	var make_hull = func(locomotion_id: String, node_count: int) -> Node3D:
+		var hull = Node3D.new()
+		hull.set_meta("type_id", "light_hull")
+		hull.set_meta("locomotion_type", locomotion_id)
+		hull.set_meta("locomotion_settings", {})
+		for _i in range(node_count):
+			var child = Node3D.new()
+			var d = ModuleData.new()
+			d.type_id = locomotion_id
+			d.category = "locomotion"
+			d.base_weight = 1.0
+			child.set_meta("module_data", d)
+			hull.add_child(child)
+		root.add_child(hull)
+		return hull
+
+	var seen: Dictionary = {}
+	for loco_id in ["wheels", "tracked_treads", "legs", "fixed_wing_engine",
+			"buoyant_envelope", "rocker_bogie", "hover_engine", "hydrofoil"]:
+		var hull = make_hull.call(loco_id, 1)
+		var dt = Drivetrain.analyze(hull)
+		var rated = ModuleCatalog.get_base_top_speed(loco_id)
+		# Surplus thrust must NOT push the design past its chassis rating.
+		if dt["power_top_speed"] <= rated:
+			print("  [FAIL] Test setup is wrong for ", loco_id, ": needs surplus thrust so the ceiling is what binds. power=", dt["power_top_speed"], " rated=", rated)
+			hull.free()
+			return false
+		if abs(dt["top_speed"] - rated) > 0.001:
+			print("  [FAIL] ", loco_id, " has far more thrust than it can use, so top_speed should equal its base_top_speed (", rated, "), got ", dt["top_speed"])
+			hull.free()
+			return false
+		if not dt["capacity_limited"]:
+			print("  [FAIL] ", loco_id, " is chassis-limited here and should report capacity_limited = true")
+			hull.free()
+			return false
+		seen[loco_id] = rated
+		hull.free()
+
+	# The whole point of the change: these are not all the same number. The old
+	# universal ceiling meant any light enough design on ANY locomotion
+	# converged on 18.0.
+	var distinct: Array = []
+	for k in seen:
+		if not distinct.has(seen[k]):
+			distinct.append(seen[k])
+	if distinct.size() < 6:
+		print("  [FAIL] Base top speeds should be genuinely differentiated per locomotor; got only ", distinct.size(), " distinct values across ", seen.size(), " types: ", seen)
+		return false
+
+	# Direction checks on the archetypes, so a future retune cannot quietly
+	# invert the roster's identity: a jet outruns wheels, wheels outrun legs,
+	# and an airship is the slowest thing in the game.
+	if not (ModuleCatalog.get_base_top_speed("fixed_wing_engine") > ModuleCatalog.get_base_top_speed("wheels")):
+		print("  [FAIL] fixed_wing_engine should be faster than wheels.")
+		return false
+	if not (ModuleCatalog.get_base_top_speed("wheels") > ModuleCatalog.get_base_top_speed("tracked_treads")):
+		print("  [FAIL] wheels should be faster than tracked_treads.")
+		return false
+	if not (ModuleCatalog.get_base_top_speed("tracked_treads") > ModuleCatalog.get_base_top_speed("legs")):
+		print("  [FAIL] tracked_treads should be faster than legs.")
+		return false
+	if not (ModuleCatalog.get_base_top_speed("buoyant_envelope") < ModuleCatalog.get_base_top_speed("legs")):
+		print("  [FAIL] buoyant_envelope should be the slowest of the archetypes.")
+		return false
+
+	# Every locomotion type in the catalog must declare one, or it silently
+	# inherits the old universal ceiling and reads as the fastest thing in the
+	# roster - the exact bug this suite exists to prevent recurring.
+	var missing: Array = []
+	for type_id in ModuleCatalog.get_catalog():
+		var entry = ModuleCatalog.get_module_data(type_id)
+		if entry.get("category", "") == "locomotion" and not entry.has("base_top_speed"):
+			missing.append(type_id)
+	if not missing.is_empty():
+		print("  [FAIL] These locomotion types declare no base_top_speed and would inherit the generic default: ", missing)
+		return false
+
+	print("  [PASS] Each locomotor's base_top_speed is a real ceiling that surplus thrust cannot exceed, the roster's values are genuinely differentiated (not one shared number), the archetype ordering holds, and every locomotion type declares one.")
+	return true
+
+# The overload penalty has to be steep enough to feel (Chris: going over
+# capacity "drops the top speed the finished unit can achieve rapidly") while
+# still resolving across the range a player actually lands in. Pinning both
+# ends matters: too shallow and the warning is noise, too steep and everything
+# past ~1.5x capacity collapses onto the speed floor and the readout stops
+# telling the player which way is out.
+func test_overload_penalty_is_steep_and_monotonic() -> bool:
+	print("Running Test Suite: Overload Penalty Curve...")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
+
+	var mult = func(ratio: float) -> float:
+		return maxf(Drivetrain.OVERLOAD_FLOOR, pow(1.0 / ratio, Drivetrain.OVERLOAD_EXPONENT))
+
+	# No penalty at or under capacity - a true no-op, not a small one.
+	if not is_equal_approx(mult.call(1.0), 1.0):
+		print("  [FAIL] At exactly capacity the multiplier should be 1.0, got ", mult.call(1.0))
+		return false
+
+	# "Rapidly": 10% over must cost at least 10% of top speed. The previous
+	# linear-0.6 curve cost 6% here, which is what made it unfelt.
+	var at_110 = mult.call(1.1)
+	if at_110 > 0.90:
+		print("  [FAIL] 10% overweight should cost at least 10% of top speed to register as a real tradeoff, got multiplier ", at_110)
+		return false
+	# ...but not so steep that a marginal design is already ruined.
+	if at_110 < 0.70:
+		print("  [FAIL] 10% overweight should not cost more than 30% of top speed - being marginally over is a tradeoff, not a write-off. Got multiplier ", at_110)
+		return false
+
+	# Strictly monotonic through the band a player can actually read, so the
+	# Design Lab bar always moves the same direction as the mistake.
+	var prev = 1.0
+	for pct in [105, 110, 120, 130, 140, 150, 160]:
+		var m = mult.call(float(pct) / 100.0)
+		if m >= prev:
+			print("  [FAIL] Penalty must increase monotonically with load; at ", pct, "% got ", m, " which is not worse than the previous ", prev)
+			return false
+		if m <= Drivetrain.OVERLOAD_FLOOR:
+			print("  [FAIL] The curve bottoms out at ", pct, "% of capacity - too early. Everything past that point is indistinguishable, which is what made the 2.5 exponent unusable.")
+			return false
+		prev = m
+
+	# Never zero: a unit frozen in place reads as a bug rather than a balance
+	# outcome, however overloaded it is.
+	if mult.call(50.0) < Drivetrain.OVERLOAD_FLOOR - 0.001:
+		print("  [FAIL] The multiplier must never fall below OVERLOAD_FLOOR, got ", mult.call(50.0), " at 50x capacity")
+		return false
+
+	print("  [PASS] Overload costs >=10% of top speed at 10% over, increases monotonically without bottoming out inside the readable band, and never freezes a unit outright.")
+	return true
+
+func test_structural_pieces_resize_without_smearing_detail() -> bool:
+	print("Running Test Suite: Structural Pieces - Scale Isolation Keeps Authored Hardware Unstretched...")
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	var Gizmo = preload("res://scripts/gizmo_3d.gd")
+	var ModuleDataRes = preload("res://scripts/module_data.gd")
+	var ok = true
+
+	for type_id in ["structural_block", "structural_dome", "structural_slab",
+					"structural_wedge", "structural_girder", "structural_i_beam"]:
+		var cd = ModuleCatalog.get_module_data(type_id)
+		var module = Node3D.new()
+		root.add_child(module)
+		VisualBuilder.build_visual(type_id, module, cd.size, cd.color, {})
+
+		# Stand in for what module_placer builds: the layer-2 click target and
+		# the layer-16 mounting surface.
+		for layer in [2, 16]:
+			var sb = StaticBody3D.new()
+			sb.collision_layer = layer
+			var cs = CollisionShape3D.new()
+			var bx = BoxShape3D.new()
+			bx.size = cd.size
+			cs.shape = bx
+			sb.add_child(cs)
+			module.add_child(sb)
+
+		var data = ModuleDataRes.new()
+		data.type_id = type_id
+		data.category = "structural"
+		module.set_meta("module_data", data)
+
+		var base_hardware := 0
+		for m in module.find_children("*", "MeshInstance3D", true, false):
+			if m.name.begins_with(VisualBuilder.HARDWARE_PREFIX):
+				base_hardware += 1
+		if base_hardware < 4:
+			print("  [FAIL] %s built only %d authored hardware pieces - it's still a bare primitive" % [type_id, base_hardware])
+			ok = false
+
+		var gizmo = Node3D.new()
+		gizmo.set_script(Gizmo)
+		module.add_child(gizmo)
+		await tree.process_frame
+
+		var new_scale = Vector3(1.0, 1.0, 3.0)
+		gizmo._apply_scale_to_node(module, new_scale)
+
+		# THE point of the whole exercise. Writing node.scale is what used to
+		# happen and is what smeared every bolt head 3x along Z; the resize
+		# has to travel as a meta multiplier and come back as a rebuild.
+		if not module.scale.is_equal_approx(Vector3.ONE):
+			print("  [FAIL] %s wrote node.scale (%s) instead of isolating the resize" % [type_id, str(module.scale)])
+			ok = false
+		if not Vector3(module.get_meta("struct_scale", Vector3.ZERO)).is_equal_approx(new_scale):
+			print("  [FAIL] %s did not record struct_scale" % type_id)
+			ok = false
+
+		var grown_hardware := 0
+		for m in module.find_children("*", "MeshInstance3D", true, false):
+			if not m.name.begins_with(VisualBuilder.HARDWARE_PREFIX):
+				continue
+			grown_hardware += 1
+			# UNIFORM scale is allowed (see _hardware()'s uniform_scale note -
+			# an evenly bigger copy keeps every proportion). Anisotropic scale
+			# is the actual defect: that's what smears a bolt head into a
+			# capsule when the body is stretched.
+			if not (is_equal_approx(m.scale.x, m.scale.y) and is_equal_approx(m.scale.y, m.scale.z)):
+				print("  [FAIL] %s: hardware '%s' came out non-uniformly scaled %s - authored detail must never stretch" % [
+					type_id, m.name, str(m.scale)])
+				ok = false
+		# Stretching the body 3x has to buy MORE detail, not bigger detail.
+		if grown_hardware <= base_hardware:
+			print("  [FAIL] %s: hardware count %d -> %d after a 3x stretch; detail density should rise with size" % [
+				type_id, base_hardware, grown_hardware])
+			ok = false
+
+		# Both colliders have to follow, or the click target and the mounting
+		# surface stay the size the piece used to be.
+		var expect_size = cd.size * new_scale
+		for child in module.get_children():
+			if not (child is StaticBody3D):
+				continue
+			var shape = child.get_child(0)
+			if not shape.shape.size.is_equal_approx(expect_size):
+				print("  [FAIL] %s: collider on layer %d is %s, expected %s" % [
+					type_id, child.collision_layer, str(shape.shape.size), str(expect_size)])
+				ok = false
+
+		module.free()
+
+	if not ok:
+		return false
+	print("  [PASS] All six structural pieces isolate their resize, keep authored hardware at authored size, gain detail density with size, and keep both colliders in sync.")
+	return true
+
+func test_napalm_mortar_tube_points_upward() -> bool:
+	print("Running Test Suite: Napalm Mortar - Tube Elevates Instead Of Firing Into The Deck...")
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	var ok = true
+
+	var holder = Node3D.new()
+	root.add_child(holder)
+	var cd = ModuleCatalog.get_module_data("napalm_mortar")
+	VisualBuilder.build_visual("napalm_mortar", holder, cd.size, cd.color, {})
+
+	var pivot = holder.get_node_or_null("ElevationPivot")
+	if pivot == null:
+		print("  [FAIL] No ElevationPivot on the napalm mortar")
+		ok = false
+	else:
+		# The elevation was authored as deg_to_rad(-55.0) while artillery and
+		# the mortar array both use a POSITIVE angle. Parts are built with the
+		# bore along -Z and a positive X rotation pitches -Z up, so the
+		# negative sign pitched the whole assembly nose-down through the deck
+		# and put the flared muzzle underneath the breech - which is what read
+		# as the barrel being fitted upside down.
+		if pivot.rotation.x <= 0.0:
+			print("  [FAIL] ElevationPivot pitches DOWN (%.1f deg) - the tube fires into the deck" % rad_to_deg(pivot.rotation.x))
+			ok = false
+
+		# Assert the actual geometry, not just the sign: the muzzle end of the
+		# tube has to end up above the trunnion it swings on.
+		var muzzle_world = pivot.to_global(Vector3(0, 0, -0.55))
+		var breech_world = pivot.to_global(Vector3(0, 0, 0.05))
+		if muzzle_world.y <= breech_world.y:
+			print("  [FAIL] Muzzle (y=%.2f) sits at or below the breech (y=%.2f)" % [muzzle_world.y, breech_world.y])
+			ok = false
+
+	holder.free()
+	if not ok:
+		return false
+	print("  [PASS] The napalm mortar's tube elevates, with the muzzle above the breech.")
+	return true
+
+func test_anti_materiel_rifle_is_wired_and_trades_real_capability() -> bool:
+	print("Running Test Suite: Anti-Materiel Rifle - Full Wiring, Precision Damage Profile, And A Bipod That Costs Something...")
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+	var StatCalc = preload("res://scripts/stat_calculator.gd")
+	var EnemyAI = preload("res://scripts/enemy_ai.gd")
+	var ok = true
+	var tid = "anti_materiel_rifle"
+
+	# --- Registration: every point a weapon has to appear at ---------------
+	var cd = ModuleCatalog.get_module_data(tid)
+	if cd.get("category", "") != "weapon":
+		print("  [FAIL] No catalog entry")
+		ok = false
+	if not ModuleCatalog.WEAPON_FIRE_PROFILES.has(tid):
+		print("  [FAIL] No fire profile")
+		ok = false
+	if ModuleCatalog.get_module_flavor(tid) == "":
+		print("  [FAIL] No flavor line")
+		ok = false
+	if ModuleCatalog.get_module_role(tid, "weapon") != "Direct-Fire Guns":
+		print("  [FAIL] Not sorted into a parts-menu role drawer")
+		ok = false
+	if not StatCalc.TWEAK_SPECS.has(tid):
+		print("  [FAIL] No tweak specs - the module would be unmodifiable in the Lab")
+		ok = false
+	if tid not in EnemyAI.ANTI_ARMOR_WEAPONS:
+		print("  [FAIL] The AI does not recognise it as an anti-armor answer")
+		ok = false
+
+	# --- The whole design premise: one enormous per-shot number ------------
+	# Per-shot damage is dps * fire_rate (fire_rate is an INTERVAL), and
+	# per-shot is what damage_resolver's armor thresholds gate on. This
+	# weapon only justifies its cost if that number is the biggest among
+	# weapons you can actually POINT at a target - otherwise it is simply a
+	# worse cannon.
+	#
+	# Stated as a POSITIVE selection rather than as a growing list of
+	# exclusions, because this assertion has now been narrowed twice under
+	# pressure from new weapons and that is exactly how a test quietly stops
+	# meaning anything.
+	#
+	# The comparison set is: projectile class "hitscan" or "ballistic" (i.e.
+	# it goes where you point it and CANNOT be shot down), and not an energy
+	# weapon (i.e. it does not need a charged capacitor to fire at all).
+	#
+	# That set is the rifle's actual competition, and the exclusions are real
+	# mechanical differences rather than convenient ones:
+	#   - "arc" weapons cannot be aimed at what is in front of them.
+	#   - "guided" weapons register in the "missiles" group and are
+	#     interceptable by point defence - the cruise missile lands 440 and
+	#     the bunker buster 399, but either can be shot out of the air.
+	#   - energy weapons cannot fire at all on a design with no generator.
+	#
+	# So the claim is: the biggest hit you can get from something that always
+	# arrives and needs no power plant. Margin is thin - gauss_railgun is at
+	# 347 against the rifle's 351.
+	var profile = ModuleCatalog.get_fire_profile(tid)
+	var per_shot = cd.dps * profile.fire_rate
+	var best_other := 0.0
+	var best_name := ""
+	for other_id in ModuleCatalog.get_catalog().keys():
+		if other_id == tid:
+			continue
+		var od = ModuleCatalog.get_module_data(other_id)
+		if od.get("category", "") != "weapon" or od.get("dps", 0.0) <= 0.0:
+			continue
+		if ModuleCatalog.PROJECTILE_CLASS.get(other_id, "hitscan") not in ["hitscan", "ballistic"]:
+			continue
+		if other_id in preload("res://scripts/auto_weapon.gd").ENERGY_WEAPON_TYPES:
+			continue
+		var op = ModuleCatalog.get_fire_profile(other_id)
+		var ops = od.dps * op.get("fire_rate", 1.0)
+		if ops > best_other:
+			best_other = ops
+			best_name = other_id
+	if per_shot <= best_other:
+		print("  [FAIL] Per-shot %.0f is not the largest uninterceptable unpowered number in the roster (%s has %.0f) - it has no reason to exist" % [
+			per_shot, best_name, best_other])
+		ok = false
+
+	# --- Tweak plumbing traps ---------------------------------------------
+	# bipod_deploy ranges 0..1. If it ever gets added to one of module_data's
+	# blanket linear multiplier lists, an UNdeployed bipod multiplies the
+	# module weight by zero and the design mass silently vanishes.
+	var md = ModuleData.new()
+	md.type_id = tid
+	md.base_weight = cd.weight
+	md.cost_metal = cd.metal
+	md.cost_crystal = cd.crystal
+	md.base_dps = cd.dps
+	var base_weight = md.get_weight()
+	md.tweaks = {"bipod_deploy": 0.0}
+	var stowed_weight = md.get_weight()
+	md.tweaks = {"bipod_deploy": 1.0}
+	var deployed_weight = md.get_weight()
+	if stowed_weight <= 0.0 or not is_equal_approx(stowed_weight, base_weight):
+		print("  [FAIL] bipod_deploy=0 changed the weight to %.1f (base %.1f) - it is in a multiplier list" % [
+			stowed_weight, base_weight])
+		ok = false
+	if deployed_weight <= stowed_weight:
+		print("  [FAIL] Fitting a bipod is free (%.1f -> %.1f)" % [stowed_weight, deployed_weight])
+		ok = false
+
+	# optic_power buys REACH, and is paid for in crystal - it must not buy
+	# damage, or it stops being a trade and becomes a strictly-better slider.
+	md.tweaks = {}
+	var base_cost = md.get_cost()
+	var base_dps = md.get_dps()
+	md.tweaks = {"optic_power": 2.0}
+	var optic_cost = md.get_cost()
+	if not is_equal_approx(md.get_dps(), base_dps):
+		print("  [FAIL] optic_power changed dps %.1f -> %.1f; a sight must not make a round hit harder" % [
+			base_dps, md.get_dps()])
+		ok = false
+	if optic_cost.y <= base_cost.y:
+		print("  [FAIL] optic_power costs no extra crystal (%d -> %d)" % [base_cost.y, optic_cost.y])
+		ok = false
+	if md.get_weight() >= base_weight * 2.0:
+		print("  [FAIL] A 2x optic more than doubled the whole weapon mass (%.1f -> %.1f)" % [
+			base_weight, md.get_weight()])
+		ok = false
+
+	# --- Visual assembly ---------------------------------------------------
+	var holder = Node3D.new()
+	root.add_child(holder)
+	VisualBuilder.build_visual(tid, holder, cd.size, cd.color, {})
+	var stowed_parts = holder.find_children("*", "MeshInstance3D", true, false).size()
+	if stowed_parts < 4:
+		print("  [FAIL] Built from only %d meshes - it fell back to a primitive" % stowed_parts)
+		ok = false
+	holder.free()
+
+	# Deploying the bipod must be VISIBLE, or the player cannot tell a
+	# deployed rifle from a stowed one despite the real combat difference.
+	var holder2 = Node3D.new()
+	root.add_child(holder2)
+	VisualBuilder.build_visual(tid, holder2, cd.size, cd.color, {"bipod_deploy": 1.0})
+	var deployed_parts = holder2.find_children("*", "MeshInstance3D", true, false).size()
+	if deployed_parts <= stowed_parts:
+		print("  [FAIL] Deploying the bipod adds no visible geometry (%d -> %d)" % [stowed_parts, deployed_parts])
+		ok = false
+	holder2.free()
+
+	# A longer barrel must MOVE the muzzle brake, not stretch it - the same
+	# part-separation rule the rest of the roster follows.
+	var holder3 = Node3D.new()
+	root.add_child(holder3)
+	VisualBuilder.build_visual(tid, holder3, cd.size, cd.color, {"barrel_length": 2.2})
+	var stretched := 0
+	var unstretched := 0
+	for m in holder3.find_children("*", "MeshInstance3D", true, false):
+		if m.scale.z > 1.5:
+			stretched += 1
+		else:
+			unstretched += 1
+	if stretched != 1:
+		print("  [FAIL] barrel_length stretched %d parts; exactly the barrel should move" % stretched)
+		ok = false
+	if unstretched < 3:
+		print("  [FAIL] Only %d parts stayed at authored proportions under barrel_length" % unstretched)
+		ok = false
+	holder3.free()
+
+	# --- Firing, and the bipod actual cost ---------------------------------
+	var weapon = Node3D.new()
+	weapon.set_script(preload("res://scripts/auto_weapon.gd"))
+	var wdata = ModuleData.new()
+	wdata.type_id = tid
+	wdata.category = "weapon"
+	wdata.base_dps = cd.dps
+	wdata.tweaks = {"bipod_deploy": 1.0}
+	weapon.set_meta("module_data", wdata)
+	root.add_child(weapon)
+	await tree.process_frame
+
+	if not weapon.bipod_deployed:
+		print("  [FAIL] bipod_deploy=1 did not set bipod_deployed")
+		ok = false
+	if weapon.fire_range <= ModuleCatalog.get_fire_profile(tid).fire_range:
+		print("  [FAIL] A deployed bipod bought no extra range (%.1f)" % weapon.fire_range)
+		ok = false
+
+	# The other half of the trade. With no vehicle to read a velocity off it
+	# must fail OPEN - a Test Range dummy or a building-mounted rifle has no
+	# locomotion, and silently never firing there would be far worse than the
+	# mechanic is worth.
+	if weapon._bipod_blocks_firing():
+		print("  [FAIL] A deployed bipod with no owning vehicle blocked firing - it must fail open")
+		ok = false
+
+	var fake_vehicle = CharacterBody3D.new()
+	fake_vehicle.add_to_group("damageable")
+	root.add_child(fake_vehicle)
+	var mounted = Node3D.new()
+	mounted.set_script(preload("res://scripts/auto_weapon.gd"))
+	var mdata = ModuleData.new()
+	mdata.type_id = tid
+	mdata.category = "weapon"
+	mdata.base_dps = cd.dps
+	mdata.tweaks = {"bipod_deploy": 1.0}
+	mounted.set_meta("module_data", mdata)
+	fake_vehicle.add_child(mounted)
+	await tree.process_frame
+
+	fake_vehicle.velocity = Vector3.ZERO
+	if mounted._bipod_blocks_firing():
+		print("  [FAIL] A stationary vehicle blocked a deployed bipod from firing")
+		ok = false
+	fake_vehicle.velocity = Vector3(4.0, 0.0, 0.0)
+	if not mounted._bipod_blocks_firing():
+		print("  [FAIL] A moving vehicle did NOT block a deployed bipod - the tweak costs nothing")
+		ok = false
+	# Vertical motion alone is terrain, not travel.
+	fake_vehicle.velocity = Vector3(0.0, 5.0, 0.0)
+	if mounted._bipod_blocks_firing():
+		print("  [FAIL] Riding terrain undulations counted as moving")
+		ok = false
+
+	# A STOWED bipod must never gate firing, whatever the vehicle is doing.
+	var stowed_weapon = Node3D.new()
+	stowed_weapon.set_script(preload("res://scripts/auto_weapon.gd"))
+	var sdata = ModuleData.new()
+	sdata.type_id = tid
+	sdata.category = "weapon"
+	sdata.base_dps = cd.dps
+	sdata.tweaks = {"bipod_deploy": 0.0}
+	stowed_weapon.set_meta("module_data", sdata)
+	fake_vehicle.add_child(stowed_weapon)
+	await tree.process_frame
+	if stowed_weapon.bipod_deployed:
+		print("  [FAIL] bipod_deploy=0 still reported as deployed")
+		ok = false
+	fake_vehicle.velocity = Vector3(9.0, 0.0, 0.0)
+	if stowed_weapon._bipod_blocks_firing():
+		print("  [FAIL] A stowed bipod gated firing on a moving vehicle")
+		ok = false
+
+	weapon.free()
+	fake_vehicle.free()
+	if not ok:
+		return false
+	print("  [PASS] Fully wired, largest per-shot of anything that always arrives and needs no generator, optic buys reach not damage, and the bipod buys range at the real cost of firing on the move.")
+	return true
+
+func test_idle_units_auto_engage_sighted_enemies() -> bool:
+	print("Running Test Suite: Idle/Moving Units Auto-Engage Enemies In Sight...")
+	# Previously a unit only ever got an ATTACK order from an explicit
+	# external command (player right-click, or the enemy AI's wave-launch
+	# always targeting the player HQ specifically) - there was no logic for
+	# a unit to notice a nearby hostile on its own. An idle unit, or one
+	# marching toward an unrelated MOVE order, would walk right past an
+	# enemy, only getting whatever passive fire its own weapons' narrow
+	# traverse arcs happened to land, never actually maneuvering to fight.
+	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
+	root.add_child(bp_manager)
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+
+	var bp = {
+		"version": 1.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "wheels", "settings": {"count": 4}},
+		"modules": [
+			{"type_id": "wheels", "position": {"x": 0, "y": 0, "z": 0}, "normal": {"x": 0, "y": 1, "z": 0}},
+			{"type_id": "basic_cannon", "position": {"x": 0.0, "y": 1.4, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+		]
+	}
+
+	var idle_unit = CharacterBody3D.new()
+	idle_unit.set_script(BattleUnitScript)
+	root.add_child(idle_unit)
+	idle_unit.setup(bp, 0, bp_manager)
+	idle_unit.global_position = Vector3(0, 1, 0)
+
+	var moving_unit = CharacterBody3D.new()
+	moving_unit.set_script(BattleUnitScript)
+	root.add_child(moving_unit)
+	moving_unit.setup(bp, 0, bp_manager)
+	moving_unit.global_position = Vector3(30, 1, 30)
+	moving_unit.order_move(Vector3(30, 1, 0)) # heading somewhere unrelated
+
+	var enemy = CharacterBody3D.new()
+	enemy.set_script(BattleUnitScript)
+	root.add_child(enemy)
+	enemy.setup(bp, 1, bp_manager)
+	# Within the idle unit's vision_range, well outside the moving unit's.
+	enemy.global_position = Vector3(0, 1, min(idle_unit.vision_range * 0.5, 10.0))
+
+	if idle_unit.vision_range <= 0.0:
+		print("  [FAIL] Test assumption broken: medium_hull should have a real vision_range.")
+		idle_unit.queue_free(); moving_unit.queue_free(); enemy.queue_free(); bp_manager.queue_free()
+		return false
+
+	# Advance past both the idle-before-engaging grace period
+	# (IDLE_BEFORE_AUTO_ENGAGE, 1.5s - a move order is now inviolable, only
+	# an idle unit starts hunting on its own, and only after sitting idle
+	# that long) and the throttled scan interval on top of it (0.5s).
+	for i in range(200):
+		idle_unit._physics_process(0.05)
+		moving_unit._physics_process(0.05)
+		await tree.process_frame
+
+	var idle_engaged = idle_unit.order == idle_unit.OrderType.ATTACK and idle_unit.attack_target == enemy
+	var moving_still_moving = moving_unit.order == moving_unit.OrderType.MOVE
+
+	idle_unit.queue_free()
+	moving_unit.queue_free()
+	enemy.queue_free()
+	bp_manager.queue_free()
+
+	if not idle_engaged:
+		print("  [FAIL] An idle unit with an enemy within vision_range should have auto-engaged it, got order=", idle_unit.order, " attack_target=", idle_unit.attack_target)
+		return false
+	if not moving_still_moving:
+		print("  [FAIL] A unit with no enemy anywhere near its position should keep its existing MOVE order (auto-engage shouldn't fire on nothing), got order=", moving_unit.order)
+		return false
+
+	print("  [PASS] An idle unit with a hostile within vision_range automatically switches to attacking it, without disturbing a unit that has nothing nearby to engage.")
+	return true
+
+func test_audio_system() -> bool:
+	print("Running Test Suite: Audio System, Sound Effects & Ambient Music Assets...")
+	var sfx_list = [
+		"sfx_click.wav", "sfx_hover.wav", "sfx_error.wav", "sfx_select.wav", "sfx_place.wav",
+		"sfx_cannon.wav", "sfx_machine_gun.wav", "sfx_laser.wav", "sfx_missile.wav",
+		"sfx_explosion.wav", "sfx_hit.wav", "sfx_harvest.wav", "sfx_construct.wav",
+		"sfx_victory.wav", "sfx_defeat.wav"
+	]
+	for sfx in sfx_list:
+		var path = "res://assets/audio/sfx/" + sfx
+		if not ResourceLoader.exists(path):
+			print("  [FAIL] Missing SFX audio file: ", path)
+			return false
+	if not ResourceLoader.exists("res://assets/audio/music/music_main_theme.wav"):
+		print("  [FAIL] Missing ambient music track: res://assets/audio/music/music_main_theme.wav")
+		return false
+	if not ResourceLoader.exists("res://scripts/audio_manager.gd"):
+		print("  [FAIL] Missing res://scripts/audio_manager.gd")
+		return false
+
+	print("  [PASS] Audio System: All 15 procedural SFX files, ambient music track loop, and AudioManager autoload validated clean.")
+	return true
+
+# Guards against the class of bug DECISIONS_NEEDED.md already logged once
+# (a parts_menu.gd parse error would have broken the Design Lab while the
+# rest of this suite printed ALL TESTS PASSED) and that actually shipped
+# for real in hull_builder.gd - a scene's attached script can have a parse
+# error that no other test here happens to exercise. Uses GDScript.reload()
+# directly (the same entry point Godot's own "at: GDScript::reload" error
+# messages cite) rather than instantiating each scene, so a broken script
+# is caught as a real Error return code instead of a swallowed engine log line.
+func test_every_scene_script_parses_cleanly() -> bool:
+	print("Running Test Suite: Every Scene-Attached Script Parses Cleanly...")
+	var dir = DirAccess.open("res://scenes")
+	if not dir:
+		print("  [FAIL] Could not open res://scenes")
+		return false
+
+	var script_paths: Dictionary = {}
+	dir.list_dir_begin()
+	var fname = dir.get_next()
+	while fname != "":
+		if fname.ends_with(".tscn"):
+			var text = FileAccess.get_file_as_string("res://scenes/" + fname)
+			for line in text.split("\n"):
+				if line.begins_with("[ext_resource") and line.find("type=\"Script\"") != -1:
+					var path_start = line.find("path=\"")
+					if path_start != -1:
+						var start = path_start + 6
+						var end = line.find("\"", start)
+						if end != -1:
+							script_paths[line.substr(start, end - start)] = true
+		fname = dir.get_next()
+	dir.list_dir_end()
+
+	if script_paths.is_empty():
+		print("  [FAIL] No scene-attached scripts discovered - the scan itself is broken.")
+		return false
+
+	var all_ok = true
+	for path in script_paths.keys():
+		if not FileAccess.file_exists(path):
+			print("  [FAIL] %s is referenced by a scene but does not exist on disk." % path)
+			all_ok = false
+			continue
+		var gd = GDScript.new()
+		gd.source_code = FileAccess.get_file_as_string(path)
+		var err = gd.reload()
+		if err != OK:
+			print("  [FAIL] %s failed to parse (Error code %d) - see the SCRIPT ERROR line above for the exact line/reason." % [path, err])
+			all_ok = false
+
+	if all_ok:
+		print("  [PASS] All %d scene-attached scripts (across every .tscn under res://scenes) parse cleanly." % script_paths.size())
+	return all_ok
+

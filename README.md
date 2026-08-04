@@ -48,9 +48,7 @@ Bottom bar: buildings first (Factory, Refinery), then your unit blueprints (queu
 
 ## Tests
 
-Headless test suite (152 suites: stat math, clipping, damage model, firing arcs,
-stripping, team targeting, economy/production, terrain/navmesh, base building,
-faction/UI, win condition, and more). Run via the wrapper, not the raw Godot
+Headless test suite, 206 suites. Run via the wrapper, not the raw Godot
 invocation — the `.godot` import cache is gitignored and goes stale whenever a
 new autoload or `class_name` script lands, which breaks a direct
 `--headless --script run_tests.gd` run with a misleading
@@ -65,6 +63,42 @@ cd prototype
 The suite runs every registered test regardless of earlier failures and prints
 a full list of failing suite names at the end, rather than stopping at the
 first one.
+
+### Layout
+
+[`run_tests.gd`](prototype/run_tests.gd) is only the driver — the retry
+quarantine, the pass/fail tally, the exit code, and `SUITE_ORDER`, the manifest
+that fixes execution order. The suites themselves live in
+[`prototype/tests/`](prototype/tests), grouped by area, all extending
+`tests/suite_base.gd`:
+
+| File | Suites | Covers |
+|---|---|---|
+| `test_terrain_and_maps.gd` | 38 | terrain build, navmesh, pathing, map JSON, spawn fairness |
+| `test_economy_and_production.gd` | 34 | resources, harvesting, queues, manufactories, energy, repair |
+| `test_weapons_and_damage.gd` | 30 | damage model, armor facets, arcs, ammo, missiles, LOS |
+| `test_designer_lab.gd` | 21 | clipping, gizmos, tweaks, symmetry, blueprints, mounting |
+| `test_sim_and_stats.gd` | 18 | stat math, traits, combat sim, evasion, audio, parse checks |
+| `test_locomotion.gd` | 18 | all locomotion types, layout fixtures, drivetrain, animation |
+| `test_ai_and_win.gd` | 13 | enemy AI, waves, fog of war, team targeting, win condition |
+| `test_ui_and_camera.gd` | 13 | theme, icons, overflow, dock/flyout, RTS camera, control groups |
+| `test_base_building.gd` | 12 | placement legality, footprints, buildable area, ghost refunds |
+| `test_hull_and_armor.gd` | 9 | hull greebles, decals, foundations, factions, materials |
+
+`suite_base.gd` carries the shared preloads, golden fixtures and helpers, and
+hands each suite the `root`/`current_scene`/`tree` access it used to get for
+free by being the `SceneTree` itself. Adding a suite means writing the function
+in an area file **and** adding it to `SUITE_ORDER` — the manifest is explicit
+because several navmesh suites flake depending on what ran before them, so the
+order is deliberately pinned rather than derived.
+
+To check every script still parses (useful after any bulk edit — an orphaned
+bracket otherwise surfaces as an unrelated preload failure mid-run):
+
+```
+cd prototype
+./Godot_v4.3-stable_win64_console.exe --headless --script tools/compile_check_all.gd
+```
 
 ## Art pipeline
 
