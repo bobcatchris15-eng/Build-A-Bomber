@@ -8,7 +8,7 @@
 
 ## Where things stand today
 
-[hull_builder.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/hull_builder.gd) (670 lines) is partially implemented:
+[hull_builder.gd](prototype/scripts/hull_builder.gd) (670 lines) is partially implemented:
 
 | Working | Partially / Stub | Missing |
 |---------|-------------------|---------|
@@ -21,15 +21,15 @@
 | `.json` sidecar generation (Chunk 5, done) | | |
 | Registration in Design Lab catalog (Chunk 5/7, `.res` path done — `parts_menu.gd` domain-sort in 7b still open) | | |
 
-The [HullBuilder.tscn](file:///E:/Build-A-Bomber-GitHub/prototype/scenes/HullBuilder.tscn) scene has the skeleton UI: left panel (primitives palette), right panel (properties), bottom bar (status + Clear + Export + Smoothness slider + Bake Quality dropdown), designer camera, grid floor, `HullContainer` node.
+The [HullBuilder.tscn](prototype/scenes/HullBuilder.tscn) scene has the skeleton UI: left panel (primitives palette), right panel (properties), bottom bar (status + Clear + Export + Smoothness slider + Bake Quality dropdown), designer camera, grid floor, `HullContainer` node.
 
 ### Key integration points
 
-- **Mesh loading:** [mesh_asset_loader.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/mesh_asset_loader.gd) — loads a baked `.res` mesh or `.glb` from `res://assets/models/hulls/` or `user://mods/hulls/`, caches, supports runtime glTF import
-- **Hull metadata:** `.json` sidecar files alongside the mesh (e.g. [medium_hull.json](file:///E:/Build-A-Bomber-GitHub/prototype/assets/models/hulls/medium_hull.json)) — carries `name`, `hp`, `weight`, `metal`, `crystal`, `size`, `color`, etc.
-- **Design Lab registration:** [hull_loader.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/hull_loader.gd) discovers sidecars → [module_catalog.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/module_catalog.gd) exposes hull data → [parts_menu.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/parts_menu.gd) lists hulls in sidebar → [module_placer.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/module_placer.gd) loads hull into viewport
-- **Bake pipeline:** [sdf_mesh_baker.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/sdf_mesh_baker.gd) + [mc_tables.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/mc_tables.gd) — in-engine, no external Blender dependency for player-authored hulls. The built-in hulls' own Blender pipeline ([prototype/tools/blender/build_meshes.py](file:///E:/Build-A-Bomber-GitHub/prototype/tools/blender/build_meshes.py)) is separate and untouched.
-- **Gizmo system:** [gizmo_3d.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/gizmo_3d.gd) + [gizmo_handle.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/gizmo_handle.gd) + [gizmo_rotate_ring.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/gizmo_rotate_ring.gd) — translate/rotate/scale handles used in Design Lab but **not yet in Hull Builder**
+- **Mesh loading:** [mesh_asset_loader.gd](prototype/scripts/mesh_asset_loader.gd) — loads a baked `.res` mesh or `.glb` from `res://assets/models/hulls/` or `user://mods/hulls/`, caches, supports runtime glTF import
+- **Hull metadata:** `.json` sidecar files alongside the mesh (e.g. [medium_hull.json](prototype/assets/models/hulls/medium_hull.json)) — carries `name`, `hp`, `weight`, `metal`, `crystal`, `size`, `color`, etc.
+- **Design Lab registration:** [hull_loader.gd](prototype/scripts/hull_loader.gd) discovers sidecars → [module_catalog.gd](prototype/scripts/module_catalog.gd) exposes hull data → [parts_menu.gd](prototype/scripts/parts_menu.gd) lists hulls in sidebar → [module_placer.gd](prototype/scripts/module_placer.gd) loads hull into viewport
+- **Bake pipeline:** [sdf_mesh_baker.gd](prototype/scripts/sdf_mesh_baker.gd) + [mc_tables.gd](prototype/scripts/mc_tables.gd) — in-engine, no external Blender dependency for player-authored hulls. The built-in hulls' own Blender pipeline ([prototype/tools/blender/build_meshes.py](prototype/tools/blender/build_meshes.py)) is separate and untouched.
+- **Gizmo system:** [gizmo_3d.gd](prototype/scripts/gizmo_3d.gd) + [gizmo_handle.gd](prototype/scripts/gizmo_handle.gd) + [gizmo_rotate_ring.gd](prototype/scripts/gizmo_rotate_ring.gd) — translate/rotate/scale handles used in Design Lab but **not yet in Hull Builder**
 
 ---
 
@@ -45,7 +45,7 @@ The [HullBuilder.tscn](file:///E:/Build-A-Bomber-GitHub/prototype/scenes/HullBui
 
 ### 1b. Integrate the existing gizmo system
 
-The Hull Builder currently has its own inline drag-transform code (G/R/S keys + mouse delta, lines 118–398). The Design Lab already has a proper 3-axis gizmo ([gizmo_3d.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/gizmo_3d.gd)) with colored axis handles and rotation rings. Reuse it:
+The Hull Builder currently has its own inline drag-transform code (G/R/S keys + mouse delta, lines 118–398). The Design Lab already has a proper 3-axis gizmo ([gizmo_3d.gd](prototype/scripts/gizmo_3d.gd)) with colored axis handles and rotation rings. Reuse it:
 
 - Instance `Gizmo3D.tscn` as a child of the selected primitive's `StaticBody3D`
 - Wire `gizmo_handle.drag_started` / `drag_delta` / `drag_ended` signals to update the primitive's position/rotation/scale
@@ -190,7 +190,7 @@ Define a `hull_assembly.json` schema (distinct from the hull *sidecar* `.json` �
 > **Status: implemented**, and implemented differently than originally planned below (kept for history). The Blender subprocess approach was replaced with an in-engine bake so custom hulls work with no external Blender dependency (needed for a shipped build) and so overlapping primitives genuinely fuse (smooth-min blend) instead of just sitting as interpenetrating shells.
 
 **What actually shipped:**
-- [sdf_mesh_baker.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/sdf_mesh_baker.gd) — treats each primitive as a signed distance field, combines them with a polynomial smooth-min (`Smoothness` slider, 0 = hard union), and polygonizes the result with Marching Cubes ([mc_tables.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/mc_tables.gd)'s standard 256-entry tables) on a voxel grid sized to the assembly's AABB (`Bake Quality` dropdown: Low/Medium/High → 24/32/48 voxels along the longest axis).
+- [sdf_mesh_baker.gd](prototype/scripts/sdf_mesh_baker.gd) — treats each primitive as a signed distance field, combines them with a polynomial smooth-min (`Smoothness` slider, 0 = hard union), and polygonizes the result with Marching Cubes ([mc_tables.gd](prototype/scripts/mc_tables.gd)'s standard 256-entry tables) on a voxel grid sized to the assembly's AABB (`Bake Quality` dropdown: Low/Medium/High → 24/32/48 voxels along the longest axis).
 - `hull_builder.gd`'s `_on_export_confirmed()` calls `SDFMeshBaker.bake()`, saves the resulting `ArrayMesh` directly via `ResourceSaver.save()` to `user://mods/hulls/<name>.res`, and writes the `.json` sidecar to the same directory — no Blender process, no `.glb`, no intermediate JSON handoff file.
 - No UVs/tangents are generated — the hull faction shader (`hull_faction_material.gdshader`) is fully world-space triplanar and reads no mesh UV/TANGENT data at all, so this isn't a gap, just unnecessary work skipped.
 - `mesh_asset_loader.gd`'s `get_hull_mesh()` and `hull_loader.gd`'s shape-sanity warning both learned to recognize a sibling `.res` alongside/instead of a `.glb`.
@@ -267,7 +267,7 @@ Write `<hull_name>.json` to `res://assets/models/hulls/` alongside the `.glb`:
 }
 ```
 
-This matches the exact format of existing sidecars like [the_cube.json](file:///E:/Build-A-Bomber-GitHub/prototype/assets/models/hulls/the_cube.json).
+This matches the exact format of existing sidecars like [the_cube.json](prototype/assets/models/hulls/the_cube.json).
 
 ### Verification
 - Export a hull → both `.glb` and `.json` appear in `assets/models/hulls/`
@@ -282,7 +282,7 @@ This matches the exact format of existing sidecars like [the_cube.json](file:///
 
 ### 7a. Catalog discovery
 
-[hull_loader.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/hull_loader.gd) already scans for `.json` sidecars. Verify:
+[hull_loader.gd](prototype/scripts/hull_loader.gd) already scans for `.json` sidecars. Verify:
 
 - A newly exported `my_custom_hull.json` + `my_custom_hull.glb` is picked up on next catalog load
 - The `type_id` is derived from the filename stem (matches existing convention)
@@ -290,11 +290,11 @@ This matches the exact format of existing sidecars like [the_cube.json](file:///
 
 ### 7b. Parts menu domain sorting
 
-[parts_menu.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/parts_menu.gd) has a hardcoded `HULL_DOMAINS` dict. Custom hulls need to get sorted by their sidecar's `domain` field instead:
+[parts_menu.gd](prototype/scripts/parts_menu.gd) has a hardcoded `HULL_DOMAINS` dict. Custom hulls need to get sorted by their sidecar's `domain` field instead:
 
 - If `hull_loader.gd` already populates a `domain` field into the catalog entry, `parts_menu.gd` should read it from there instead of the hardcoded dict
 - Fall back to `"Ground"` if `domain` is missing (safe default)
-- This may already be partially implemented per [HULL_MODDING_PLAN.md §4c](file:///E:/Build-A-Bomber-GitHub/HULL_MODDING_PLAN.md) — check and complete
+- This may already be partially implemented per [HULL_MODDING_PLAN.md §4c](HULL_MODDING_PLAN.md) — check and complete
 
 ### 7c. End-to-end test
 
@@ -382,19 +382,19 @@ graph TD
 ### Modified files
 | File | Changes |
 |------|---------|
-| [hull_builder.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/hull_builder.gd) | All editor functionality — gizmo integration, delete/duplicate, save/load, export pipeline, stats dialog, undo/redo |
-| [HullBuilder.tscn](file:///E:/Build-A-Bomber-GitHub/prototype/scenes/HullBuilder.tscn) | UI additions — save/load/snap/mirror/name buttons, stats dialog, progress overlay |
-| [parts_menu.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/parts_menu.gd) | Read `domain` from catalog entry instead of hardcoded `HULL_DOMAINS` dict for custom hulls |
-| [hull_loader.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/hull_loader.gd) | Ensure `domain` field is carried through from sidecar to catalog entry |
+| [hull_builder.gd](prototype/scripts/hull_builder.gd) | All editor functionality — gizmo integration, delete/duplicate, save/load, export pipeline, stats dialog, undo/redo |
+| [HullBuilder.tscn](prototype/scenes/HullBuilder.tscn) | UI additions — save/load/snap/mirror/name buttons, stats dialog, progress overlay |
+| [parts_menu.gd](prototype/scripts/parts_menu.gd) | Read `domain` from catalog entry instead of hardcoded `HULL_DOMAINS` dict for custom hulls |
+| [hull_loader.gd](prototype/scripts/hull_loader.gd) | Ensure `domain` field is carried through from sidecar to catalog entry |
 
 ### Files that should NOT need changes
 | File | Why |
 |------|-----|
-| [mesh_asset_loader.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/mesh_asset_loader.gd) | Already handles arbitrary `.glb` files and runtime glTF import |
-| [module_placer.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/module_placer.gd) | Hull loading is fully data-driven from catalog `size` field |
-| [module_catalog.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/module_catalog.gd) | Hull entries are discovered from sidecar files, not hardcoded |
-| [designer_camera.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/designer_camera.gd) | Already used by Hull Builder, no changes needed |
-| [gizmo_3d.gd](file:///E:/Build-A-Bomber-GitHub/prototype/scripts/gizmo_3d.gd) | Reused as-is from Design Lab |
+| [mesh_asset_loader.gd](prototype/scripts/mesh_asset_loader.gd) | Already handles arbitrary `.glb` files and runtime glTF import |
+| [module_placer.gd](prototype/scripts/module_placer.gd) | Hull loading is fully data-driven from catalog `size` field |
+| [module_catalog.gd](prototype/scripts/module_catalog.gd) | Hull entries are discovered from sidecar files, not hardcoded |
+| [designer_camera.gd](prototype/scripts/designer_camera.gd) | Already used by Hull Builder, no changes needed |
+| [gizmo_3d.gd](prototype/scripts/gizmo_3d.gd) | Reused as-is from Design Lab |
 
 ---
 

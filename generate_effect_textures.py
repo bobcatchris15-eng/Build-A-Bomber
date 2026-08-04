@@ -1,20 +1,22 @@
 """
 Procedural texture generator for combat VFX (flames, smoke, scorch decals).
 
-Companion to generate_terrain_textures.py, but deliberately NOT using an
-image-generation API the way that one does: these are small, high-contrast,
-alpha-keyed sprites where exact control over the alpha falloff matters far
-more than photographic detail. A generated "photo of fire" comes back with
-baked-in black background and soft JPEG edges, which is exactly wrong for an
-additive billboard. Procedural fbm gives a clean premultiplied-safe alpha and
-costs nothing to re-tune.
+Deliberately NOT using an image-generation API, the way the project's original
+terrain-texture generator did: these are small, high-contrast, alpha-keyed
+sprites where exact control over the alpha falloff matters far more than
+photographic detail. A generated "photo of fire" comes back with baked-in black
+background and soft JPEG edges, which is exactly wrong for an additive
+billboard. Procedural fbm gives a clean premultiplied-safe alpha and costs
+nothing to re-tune. Terrain has since moved the same way - see
+prototype/tools/generate_terrain_textures.gd, which bakes its maps procedurally
+in-engine.
 
 Outputs (prototype/assets/textures/effects/):
   flame_flipbook.png   4x4 sheet, 512px  - additive fire, plays once per particle
   smoke_flipbook.png   4x4 sheet, 512px  - white/alpha smoke, tinted in-material
-  scorch_decal.png     512px             - burn mark albedo for Decal nodes
+  scorch_{0,1,2}_*.png 512px             - burn mark albedo/normal/orm variants
   scorch_emission.png  512px             - ember hotspots, emission channel
-  spark.png            64px              - single additive spark point
+  crater_{0,1}_*.png   512px             - crater albedo/normal/orm variants
 
 Run: python generate_effect_textures.py
 """

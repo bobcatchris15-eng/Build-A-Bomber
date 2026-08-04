@@ -397,7 +397,7 @@ this becomes paint-not-rects.
 
 Expand the roster beyond marsh/rocky/snow_mud/sand and make each read distinctly —
 both visually (per-surface ground texture/tint, using the existing
-`generate_terrain_textures.py`) and mechanically. Cross-check the multiplier table
+`prototype/tools/generate_terrain_textures.gd`) and mechanically. Cross-check the multiplier table
 against RA's own locomotor speeds (`mods/ra/rules/world.yaml:12-89`) as a balance
 reference, keeping this game's 4-navmesh split as the locomotor abstraction.
 

@@ -28,7 +28,7 @@ class_name VFXEffects
 # Textures are generated procedurally by generate_effect_textures.py at the
 # repo root (a 4x4 flipbook each for flame and smoke, plus scorch albedo and
 # an ember emission mask), not authored by hand - same
-# regenerate-from-source convention as generate_terrain_textures.py.
+# regenerate-from-source convention as tools/generate_terrain_textures.gd.
 #
 # Every material is cached per look and never mutated after creation, same
 # rule (and same reason) as vfx_burst.gd: many live emitters share one
