@@ -326,8 +326,23 @@ func _unhandled_input(event):
 				# the visible hull instead of jumping onto its bounding shell.
 				var result = surface_raycast(ray_origin, camera.project_ray_normal(mouse_pos), 1000.0, exclude_list)
 				if result:
-					_update_module_placement(selected_module, result.position, result.normal)
-					check_all_clipping()
+					# Same refusal the build bar applies, so a lobbing weapon
+					# cannot be dragged onto a wall it was not allowed to be
+					# placed on. Enforced HERE rather than inside
+					# _update_module_placement() so the rule lives on the one
+					# interactive path and direct callers (tests, scripted
+					# setup) keep working unchanged. The module simply stops
+					# following the cursor over a face it cannot occupy, which
+					# reads as "it won't go there" without a toast firing every
+					# frame of the drag.
+					var drag_data = selected_module.get_meta("module_data", null)
+					var drag_refused = false
+					if drag_data != null:
+						drag_refused = _placement_refusal_reason(
+							drag_data.type_id, drag_data.category, result.normal) != ""
+					if not drag_refused:
+						_update_module_placement(selected_module, result.position, result.normal)
+						check_all_clipping()
 
 func rotate_selected_module():
 	if not selected_module or selected_module == hull: return
@@ -340,13 +355,18 @@ func rotate_selected_module():
 	selected_module.set_meta("yaw_offset", yaw)
 	
 	selected_module.rotate_object_local(Vector3.UP, PI / 2.0)
-	
+	# A sponson blister is welded to the hull face, not to the gun spinning on
+	# it, so its counter-rotation has to be re-applied whenever yaw changes
+	# outside of a full rebuild.
+	VisualBuilderScript.refresh_sponson_blister(selected_module)
+
 	if selected_module.has_meta("mirrored_counterpart"):
 		var mirror = selected_module.get_meta("mirrored_counterpart")
 		if mirror and is_instance_valid(mirror):
 			mirror.set_meta("yaw_offset", -yaw)
 			mirror.rotate_object_local(Vector3.UP, -PI / 2.0)
-			
+			VisualBuilderScript.refresh_sponson_blister(mirror)
+
 	check_all_clipping()
 	_log("Rotated module to yaw_offset: " + str(yaw))
 	
@@ -561,9 +581,20 @@ var default_locomotion_settings = {
 }
 
 func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
-	push_undo_snapshot()
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var category = catalog_data.get("category", "module")
+
+	# Refused BEFORE push_undo_snapshot(), so a rejected click does not leave a
+	# do-nothing entry on the undo stack for the player to step back through.
+	var refusal = _placement_refusal_reason(type_id, category, normal)
+	if refusal != "":
+		var bm_toast = get_node_or_null("BlueprintManager")
+		if bm_toast and bm_toast.has_method("_show_toast"):
+			bm_toast._show_toast(refusal, true)
+		_log("Placement refused: " + refusal)
+		return
+
+	push_undo_snapshot()
 
 	if category == "locomotion":
 		# Foundations CAN take locomotion now - per Chris's explicit
@@ -943,12 +974,69 @@ func update_locomotion(type_id: String, settings: Dictionary):
 static func _visual_bounds(module: Node3D) -> AABB:
 	return VisualBuilderScript.measure_visual_bounds(module)
 
+# Re-fits a module's click collider to whatever geometry it currently has.
+#
+# Needed because a module can BECOME (or stop being) a sponson by being dragged
+# between facets, and the collider is otherwise only ever sized once at initial
+# placement. A weapon dragged onto a wall keeps its catalog-sized box, which is
+# then buried in the hull and unclickable; one dragged back off keeps an
+# oversized box measured around a blister it no longer has.
+static func _refit_module_collider(module: Node3D) -> void:
+	if module == null or not is_instance_valid(module):
+		return
+	# Found BY TYPE, not by name. The click body is added unnamed, so Godot
+	# names it after its class - but only while that name is free; on a
+	# collision it silently becomes "@StaticBody3D@N" instead, the same trap
+	# VisualBuilder._hardware() documents. A get_node_or_null("StaticBody3D")
+	# here would then no-op without a word and the collider would never re-fit.
+	var bodies: Array = module.find_children("*", "StaticBody3D", false, false)
+	if bodies.is_empty():
+		return
+	var body := bodies[0] as StaticBody3D
+	var shapes: Array = body.find_children("*", "CollisionShape3D", false, false)
+	if shapes.is_empty():
+		return
+	var shape := shapes[0] as CollisionShape3D
+	if not (shape.shape is BoxShape3D):
+		return
+	var bounds := _visual_bounds(module)
+	if bounds.size.length_squared() <= 0.0:
+		return
+	(shape.shape as BoxShape3D).size = bounds.size
+	body.position = bounds.get_center()
+
 func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bool = false, tweaks: Dictionary = {}) -> Node3D:
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var category = catalog_data.get("category", "module")
 	
 	var new_weapon = Node3D.new()
-	
+
+	# Mount classification is hoisted ABOVE build_visual() deliberately. The
+	# sponson blister is built inside build_visual() off the "sponson" meta
+	# (it has to be - build_visual clears every non-StaticBody3D child on
+	# entry, so anything attached afterwards is destroyed by the next rebuild),
+	# which means the meta must already exist by the time it runs. The rest of
+	# the mount metas are set here too rather than left at the bottom of this
+	# function, so there is one place that decides them instead of two.
+	#
+	# Only the NORMAL is needed this early; the grid snap below moves the
+	# position but cannot change which facet was hit.
+	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
+	var early_local_normal = normal
+	if hull:
+		early_local_normal = hull.global_transform.basis.inverse() * normal
+	var mount_style = ""
+	var wall_mount = false
+	var sponson = false
+	if category == "weapon":
+		mount_style = ModuleCatalog.get_mount_style(type_id, hull_type_for_mount)
+		wall_mount = _is_wall_mount(category, mount_style, type_id, early_local_normal)
+		sponson = wall_mount and ModuleCatalog.is_sponson_capable(type_id)
+		new_weapon.set_meta("mount_style", mount_style)
+		new_weapon.set_meta("mount_normal", normal)
+		new_weapon.set_meta("facet", ModuleCatalog.classify_facet(early_local_normal))
+		new_weapon.set_meta("sponson", sponson)
+
 	var VisualBuilder = preload("res://scripts/visual_builder.gd")
 	VisualBuilder.build_visual(type_id, new_weapon, catalog_data.get("size", Vector3.ONE), catalog_data.color, tweaks)
 	
@@ -974,7 +1062,30 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	# The builder already knows where it put things, so ask it. The other seven
 	# locomotion types never got an override at all and had been silently wrong
 	# in the same way; they are fixed by the same change.
-	if category == "locomotion":
+	#
+	# WEAPONS need it for the same reason, and this is a PRE-EXISTING bug that
+	# has nothing to do with sponsons - Chris hit it on ordinary top-deck
+	# pintle mounts too ("difficult to select in the normal pintle mount as
+	# well"). Two compounding causes:
+	#
+	#  1. Every monolithic authored mesh is yawed 90 degrees about Y at
+	#     visual_builder.gd:441 (the TripoSG orientation offset), which swings
+	#     the barrel from Z onto X. The catalog `size` it is NOT rotated with -
+	#     heavy_machine_gun is (0.3, 0.3, 1.0), so the click box is a thin
+	#     sliver lying ACROSS the gun rather than along it.
+	#  2. The mesh is then uniformly fit-scaled to the largest catalog axis, so
+	#     the other two axes rarely match the box either.
+	#
+	# Measuring solves both at once, because measure_visual_bounds() walks the
+	# child transforms and so accounts for that yaw and that scale. Same
+	# argument as the locomotion case above, which is where this was first
+	# found and fixed for one category only.
+	#
+	# Armor and structural are deliberately excluded: armor is auto-scaled to
+	# its facet right after this and structural colliders are separately kept
+	# in step with struct_scale (see blueprint_manager and gizmo_3d), so both
+	# have their own sizing story that this must not fight.
+	if category == "locomotion" or category == "weapon":
 		var visual_aabb := _visual_bounds(new_weapon)
 		if visual_aabb.size.length_squared() > 0.0:
 			col_size = visual_aabb.size
@@ -1047,18 +1158,11 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	
 	hull.add_child(new_weapon)
 
-	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
-	var mount_style = ""
-	if category == "weapon":
-		mount_style = ModuleCatalog.get_mount_style(type_id, hull_type_for_mount)
-
 	# Snap to 0.25m grid relative to hull local space
-	var final_pos = pos
 	var local_pos = Vector3.ZERO
-	var local_normal = Vector3.UP
+	var local_normal = early_local_normal
 	if hull:
 		local_pos = hull.to_local(pos)
-		local_normal = hull.global_transform.basis.inverse() * normal
 
 		var snap_interval = 0.25
 		if abs(local_normal.x) < 0.9:
@@ -1068,25 +1172,34 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 		if abs(local_normal.z) < 0.9:
 			local_pos.z = round(local_pos.z / snap_interval) * snap_interval
 
-		final_pos = hull.to_global(local_pos)
-
-	new_weapon.global_position = final_pos
-
 	# Weapon meshes are authored with their own mounting post/base baked in
 	# (bottom of the mesh sits at local Y=0 - see build_visual()'s
-	# monolithic-mesh placement above). Rotating local-up to the surface
-	# normal puts that baked-in post flush against whatever facet it landed
-	# on - flat deck, sloped glacis, or underside alike - replacing the old
-	# column-extrusion + procedurally-drawn hardware model (abandoned; see
-	# MOUNTING_AND_ARMOR_SPEC.md addendum, 2026-07-21). Applies uniformly
-	# across mount styles now - mount_style only still matters for combat
-	# traverse (get_traverse_limit_angle), not visual placement.
+	# monolithic-mesh placement above). For a flush mount, rotating local-up to
+	# the surface normal puts that baked-in post against whatever facet it
+	# landed on - flat deck, sloped glacis, or underside alike - replacing the
+	# old column-extrusion + procedurally-drawn hardware model (abandoned; see
+	# MOUNTING_AND_ARMOR_SPEC.md addendum, 2026-07-21).
 	#
-	# Every category goes through _align_up_to() now, not just weapons: a
-	# radar mast, armor plate or fuel tank dropped on the underside has the
-	# same "base against the hull, body projecting outward" requirement a gun
-	# does. See _align_up_to() for the antiparallel bug this fixes.
-	new_weapon.transform.basis = _align_up_to(local_normal)
+	# For a sponson the module is instead pushed INBOARD along the outboard
+	# axis so its post and body end up inside the hull and only the barrel
+	# protrudes - which is why position and basis are decided together by
+	# _mount_transform() rather than separately. See _is_sponson_mount().
+	#
+	# Every category goes through this, not just weapons: a radar mast, armor
+	# plate or fuel tank dropped on the underside has the same "base against
+	# the hull, body projecting outward" requirement a gun does (non-weapons
+	# never sponson, so they always take the flush branch). See _align_up_to()
+	# for the antiparallel bug this fixes.
+	# build_visual() ran above and, for a sponson, measured the real geometry
+	# to pick an embed that still leaves barrel showing. Use that exact number
+	# so the weapon and its housing agree on where the hull skin is.
+	var mount_xf := _mount_transform(local_pos, local_normal, type_id, wall_mount, sponson,
+		new_weapon.get_meta("sponson_embed", -1.0))
+	if hull:
+		new_weapon.position = mount_xf.origin
+	else:
+		new_weapon.global_position = pos
+	new_weapon.transform.basis = mount_xf.basis
 
 	# Auto-scale armor to fit facet
 	if category == "armor":
@@ -1135,13 +1248,10 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 			# treating all placed armor as one undifferentiated pool.
 			new_weapon.set_meta("facet", armor_facet)
 
-	# Face-based weapon mounting: mount_style still drives combat traverse
-	# (see get_traverse_limit_angle) but no longer changes how the weapon is
-	# placed - every style flush-mounts against the clicked facet now (see
-	# the rotation block above).
-	if category == "weapon":
-		new_weapon.set_meta("mount_style", mount_style)
-		new_weapon.set_meta("mount_normal", normal)
+	# The weapon mount metas (mount_style, mount_normal, facet, sponson) are
+	# set at the TOP of this function, not here: build_visual() needs the
+	# sponson flag before it runs, and having one place decide them is what
+	# keeps the four placement paths from drifting apart again.
 
 	# Notify the UI that a module was added
 	get_tree().call_group("stat_ui", "update_stats", hull)
@@ -1381,7 +1491,10 @@ func _build_firing_arc(module: Node3D, data) -> Node3D:
 		var local_mount_normal = hull.global_transform.basis.inverse() * module.get_meta("mount_normal")
 		arc_facet = ModuleCatalog.classify_facet(local_mount_normal)
 	var arc_hull_type = hull.get_meta("type_id", "") if hull else ""
-	var limit = ModuleCatalog.get_traverse_limit_angle(data.type_id, arc_facet, arc_hull_type)
+	# Same "sponson" meta auto_weapon._ready() reads, so the drawn envelope and
+	# the arc combat actually enforces come from one source.
+	var limit = ModuleCatalog.get_traverse_limit_angle(data.type_id, arc_facet, arc_hull_type,
+		module.get_meta("sponson", false))
 	# Read from the instance's own tweaks, not the bare type - the `elevation`
 	# tweak raises the ceiling, and the envelope has to show the weapon the
 	# player actually built rather than the catalog default.
@@ -1723,6 +1836,147 @@ static func _align_up_to(n: Vector3) -> Basis:
 		return Basis(Vector3.RIGHT, PI)
 	return Basis(Quaternion(Vector3.UP, target))
 
+# --- Wall and sponson mounting ---------------------------------------------
+# TWO decisions, deliberately separate, because conflating them got artillery
+# boxed into a housing it cannot shoot out of.
+#
+#   _is_wall_mount()    - should this module be LEVELLED, muzzle outboard?
+#   _is_sponson_mount() - should it additionally be EMBEDDED IN A HOUSING with
+#                         a narrowed arc?
+#
+# The first is a geometry fix and applies to every weapon. _align_up_to() puts
+# local +Y on the surface normal, which is right for a deck, a slope or a
+# belly but incoherent on a near-VERTICAL face, where "up" is horizontal.
+# Measured directly, that put a front-facet weapon's muzzle straight into the
+# ground, a rear-facet one straight at the sky, and rolled the side-facet ones
+# 90 degrees so their elevation cone opened sideways
+# (auto_weapon._within_elevation reads basis.y as "up").
+#
+# The second is a capability question, and for a mortar the answer is no - a
+# housing and a 60-degree arc deny exactly the open sky a lobbing weapon needs.
+# See ModuleCatalog.is_sponson_capable(). So an artillery piece on a wall is
+# levelled and aimed outboard on an open mount, keeping its full elevation and
+# full traverse; a machine gun in the same spot gets the blister.
+#
+# Deliberately narrow:
+#   * non-weapons never wall-mount. An armor plate MUST stay flush to the
+#     facet it auto-fits, and a fuel tank in a gun housing is nonsense.
+#   * absf(), so the BELLY stays a flush inverted pintle. That is spec'd
+#     behaviour (spec #3 "bottom"), not an accident of the old code.
+#
+# EVERY mount style wall-mounts, including "turret" and "frame_built". A first
+# pass admitted only "pintle", reading MOUNTING_AND_ARMOR_SPEC.md:25's "the
+# existing tank-cannon (enclosed turret) is already handled correctly - leave
+# it as-is" as covering all facets. It does not: that line is about the TOP
+# DECK, where a turret genuinely was already right. On a vertical face
+# basic_cannon was broken in exactly the same way as everything else - its
+# muzzle went into the ground on the front facet - and excluding it just left
+# the reported bug in place. A tank cannon buried in a hull side firing through
+# a housing is a casemate, which is a real thing and the correct read here.
+#
+# frame_built is admitted for the same reason: a railgun in the front glacis
+# should aim out of it, not at the dirt. Its traverse stays zero regardless,
+# because get_traverse_limit_angle() tests frame_built BEFORE the sponson flag.
+# `_mount_style` is kept in the signature (and unused) because every caller
+# already has it to hand and a future rule may well need it again - the four
+# call sites should not have to change shape for that.
+static func _is_wall_mount(category: String, _mount_style: String,
+						   type_id: String, local_normal: Vector3) -> bool:
+	if category != "weapon":
+		return false
+	if local_normal.length_squared() < 0.5:
+		return false
+	var n := local_normal.normalized()
+	if Vector3(n.x, 0.0, n.z).length_squared() < 0.000001:
+		return false
+	return absf(n.y) < ModuleCatalog.get_sponson_up_alignment(type_id)
+
+static func _is_sponson_mount(category: String, mount_style: String,
+							  type_id: String, local_normal: Vector3) -> bool:
+	return _is_wall_mount(category, mount_style, type_id, local_normal) \
+		and ModuleCatalog.is_sponson_capable(type_id)
+
+# Why a placement is refused, or "" to allow it.
+#
+# A DELIBERATE EXCEPTION to the no-hard-blocking rule
+# (MOUNTING_AND_ARMOR_SPEC.md:58, "traits compose and drive simulation
+# behavior - whatever that produces, including janky/suboptimal outcomes -
+# never validation logic that prevents 'weird' combinations"). Chris called
+# this one explicitly on 2026-08-04: an artillery piece or mortar on a vertical
+# hull face is not an interestingly-janky outcome, it is a nonsense one, and
+# there is no orientation that makes a lobbing weapon work off a wall. An
+# earlier pass tried levelling them on an open mount instead of blocking; the
+# call was that they should simply not go there.
+#
+# Kept as narrow as possible so it does not become a precedent: it refuses
+# exactly one combination - a weapon whose catalog says it cannot be sponsoned,
+# on a face steep enough to require one. Everything else, including every
+# genuinely weird trait combination the spec is protecting, still goes through.
+func _placement_refusal_reason(type_id: String, category: String, normal: Vector3) -> String:
+	if category != "weapon" or hull == null:
+		return ""
+	if ModuleCatalog.is_sponson_capable(type_id):
+		return ""
+	var local_normal = hull.global_transform.basis.inverse() * normal
+	var hull_type_for_mount = hull.get_meta("type_id", "")
+	var mount_style = ModuleCatalog.get_mount_style(type_id, hull_type_for_mount)
+	if not _is_wall_mount(category, mount_style, type_id, local_normal):
+		return ""
+	var display_name = ModuleCatalog.get_module_data(type_id).get("name", type_id)
+	return "%s can't mount on a vertical face - it needs to fire upward." % display_name
+
+# Orientation AND position for one placed module, in hull-local space.
+#
+# The single place this is decided. All four placement paths call it -
+# _place_weapon(), _update_module_placement(), that function's mirror block,
+# and _reclassify_module_after_drag() - because four hand-synchronised copies
+# of the rule is exactly how two facets ended up broken without anyone
+# noticing.
+#
+# `local_pos` must be the RAW snapped surface point, never an already-offset
+# one: the embed offset is applied HERE, and the mirror path derives its
+# position by negating X on the raw point, so passing a pre-offset position
+# would double the offset on one side only.
+#
+# `wall` levels the module and aims it outboard. `housed` additionally sinks it
+# inboard so its body sits inside the hull behind a blister. A wall mount that
+# is NOT housed stays at the clicked surface point: with no housing to cover
+# an aperture, embedding it would just look like the gun melting into the hull.
+#
+# `embed_override` is the depth VisualBuilder actually used when it built the
+# housing, measured off the real geometry (see sponson_geometry_for). Passing
+# it through rather than re-deriving is what keeps the weapon and its housing
+# on the same hole - a stubby barrel gets a shallower embed than the catalog
+# default so the muzzle still clears the hull, and the module has to move by
+# that same reduced amount. Negative means "no measurement available, use the
+# catalog default".
+static func _mount_transform(local_pos: Vector3, local_normal: Vector3,
+							 type_id: String, wall: bool, housed: bool,
+							 embed_override: float = -1.0) -> Transform3D:
+	if not wall:
+		return Transform3D(_align_up_to(local_normal), local_pos)
+	# Outboard is the surface normal with its vertical component dropped: on a
+	# truly vertical wall that IS the normal, and on one raked a few degrees it
+	# is the horizontal heading the housing is welded to face.
+	var outboard := Vector3(local_normal.x, 0.0, local_normal.z)
+	if outboard.length_squared() < 0.000001:
+		# No horizontal component at all means a deck or a belly, not a wall.
+		# Unreachable through _is_wall_mount()'s own guard; kept so this
+		# function is total for any caller.
+		return Transform3D(_align_up_to(local_normal), local_pos)
+	outboard = outboard.normalized()
+	# -Z is the muzzle axis everywhere in this project and +Y is hull-up, so
+	# the gun sits level, traverses about hull-up and elevates about its own X.
+	# This is the same Basis.looking_at idiom auto_weapon._looking_at_safe()
+	# uses to build its TRACKING basis - which is why resting and tracking now
+	# agree, instead of the weapon visibly snapping upright on acquisition.
+	var depth := 0.0
+	if housed:
+		depth = embed_override if embed_override >= 0.0 \
+			else ModuleCatalog.get_sponson_embed_depth(type_id)
+	return Transform3D(Basis.looking_at(outboard, Vector3.UP),
+					   local_pos - outboard * depth)
+
 func _get_parent_space_aabb(module: Node3D, size: Vector3) -> AABB:
 	var extents = size / 2.0
 	var local_corners = [
@@ -1966,10 +2220,21 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 
 	var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
 	var mount_style = ""
+	var wall_mount = false
+	var sponson = false
 	if category == "weapon":
 		mount_style = ModuleCatalog.get_mount_style(data.type_id, hull_type_for_mount)
+		wall_mount = _is_wall_mount(category, mount_style, data.type_id, local_normal)
+		sponson = wall_mount and ModuleCatalog.is_sponson_capable(data.type_id)
 		module.set_meta("mount_style", mount_style)
 		module.set_meta("mount_normal", normal)
+		# Weapons get a facet now too, not just armor. auto_weapon.gd reads
+		# this and has always received "" - it is what lets combat and the
+		# Design Lab arc agree on a sponson's narrowed traverse.
+		module.set_meta("facet", ModuleCatalog.classify_facet(local_normal))
+		# Must be set BEFORE rebuild_visual() below, which is what builds the
+		# blister off this meta.
+		module.set_meta("sponson", sponson)
 
 	# Non-weapons used to get an extra `normal * size.y / 2` push-off here,
 	# which _place_weapon() never applies. Module meshes are built with their
@@ -1978,11 +2243,16 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 	# surface - that extra half-height left every non-weapon module hovering
 	# off the hull the moment it was dragged, at a different height than where
 	# it was originally dropped.
-	module.position = local_pos
-
-	# Same alignment as initial placement, for every category - see
-	# _place_weapon() and _align_up_to().
-	module.transform.basis = _align_up_to(local_normal)
+	#
+	# Position and basis both come from _mount_transform() now: a sponson
+	# weapon is pushed INBOARD of the clicked point, so the two cannot be
+	# decided separately. Assigning .origin and .basis rather than the whole
+	# Transform3D, because the whole-transform form would drop node scale that
+	# the armor fit re-applies afterwards.
+	var mount_xf := _mount_transform(local_pos, local_normal, data.type_id, wall_mount, sponson,
+		module.get_meta("sponson_embed", -1.0))
+	module.position = mount_xf.origin
+	module.transform.basis = mount_xf.basis
 
 	var yaw_offset = module.get_meta("yaw_offset", 0.0)
 	module.rotate_object_local(Vector3.UP, yaw_offset)
@@ -1997,16 +2267,32 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 		var mirror = module.get_meta("mirrored_counterpart")
 		if mirror and is_instance_valid(mirror):
 			var mirrored_local_pos = Vector3(-local_pos.x, local_pos.y, local_pos.z)
-			mirror.position = mirrored_local_pos
-
 			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
 			var local_mirrored_normal = hull.global_transform.basis.inverse() * mirrored_normal
-			mirror.transform.basis = _align_up_to(local_mirrored_normal)
-
-			mirror.rotate_object_local(Vector3.UP, -yaw_offset)
+			# Classified independently rather than copying the primary's flag:
+			# mirroring is X-only, so outboard.x negates while outboard.z
+			# survives, and a right-side sponson becomes a genuine left-side
+			# one aiming outboard-left. Note this branch takes the RAW mirrored
+			# surface point - _mount_transform() applies the embed offset, and
+			# passing the primary's already-offset position would put the twin
+			# at the wrong depth.
+			var mirror_wall = _is_wall_mount(category, mount_style, data.type_id,
+				local_mirrored_normal)
+			var mirror_sponson = mirror_wall and ModuleCatalog.is_sponson_capable(data.type_id)
 			if category == "weapon":
 				mirror.set_meta("mount_style", mount_style)
 				mirror.set_meta("mount_normal", mirrored_normal)
+				mirror.set_meta("facet", ModuleCatalog.classify_facet(local_mirrored_normal))
+				mirror.set_meta("sponson", mirror_sponson)
+
+			var mirror_xf := _mount_transform(mirrored_local_pos, local_mirrored_normal,
+				data.type_id, mirror_wall, mirror_sponson,
+				mirror.get_meta("sponson_embed", -1.0))
+			mirror.position = mirror_xf.origin
+			mirror.transform.basis = mirror_xf.basis
+
+			mirror.rotate_object_local(Vector3.UP, -yaw_offset)
+			if category == "weapon":
 				var VisualBuilder = preload("res://scripts/visual_builder.gd")
 				VisualBuilder.rebuild_visual(mirror)
 			_apply_mirror_flip(mirror)
@@ -2060,12 +2346,23 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: b
 		var mount_style = ModuleCatalog.get_mount_style(data.type_id, hull_type_for_mount)
 		module.set_meta("mount_style", mount_style)
 		module.set_meta("mount_normal", normal)
-		# Position/rotation are already flush-mounted to the new facet by
-		# the last _update_module_placement() call during the drag - this
-		# just finalizes the mount_style classification and rebuilds the
-		# visual for the new facet's mesh (e.g. tweak deformations).
+		module.set_meta("facet", ModuleCatalog.classify_facet(local_normal))
+		# Recomputed, and set BEFORE rebuild_visual() below - a weapon dragged
+		# from the deck onto a wall has to grow a blister here, and one dragged
+		# the other way has to lose it. rebuild_visual() reads this meta.
+		module.set_meta("sponson",
+			_is_sponson_mount(category, mount_style, data.type_id, local_normal))
+		# Position/rotation are already mounted to the new facet by the last
+		# _update_module_placement() call during the drag - this just finalizes
+		# the classification and rebuilds the visual for the new facet's mesh
+		# (e.g. tweak deformations, and the blister).
 		var VisualBuilder = preload("res://scripts/visual_builder.gd")
 		VisualBuilder.rebuild_visual(module)
+		# AFTER the rebuild, so the collider is fitted to the geometry the
+		# module actually has now - with a blister if it just landed on a wall,
+		# without one if it just left. Otherwise a weapon dragged onto a facet
+		# becomes unclickable, which is the same bug initial placement has.
+		_refit_module_collider(module)
 		if module.get_meta("is_mirror", false):
 			_apply_mirror_flip(module)
 

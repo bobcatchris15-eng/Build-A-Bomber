@@ -402,7 +402,21 @@ static func _ring_of(parent: Node3D, count: int, radius: float, builder_func: Ca
 		var pos = Vector3(cos(angle) * radius, 0, sin(angle) * radius)
 		builder_func.call(parent, pos, angle, i)
 
+# Wrapper so the sponson blister is always built LAST, after the weapon's own
+# geometry exists. It has to be: the housing is sized and positioned by
+# MEASURING that geometry (_sponson_blister), so it can wrap the actual barrel
+# at the actual barrel height instead of guessing from catalog numbers. An
+# earlier version built it first and sat it at the module's base, which put a
+# housing round the gun's feet rather than its barrel.
+#
+# A wrapper rather than a call at each exit point, because _build_visual_body()
+# returns early on the monolithic-mesh path and would quietly grow more exits.
 static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}):
+	_build_visual_body(type_id, parent_node, base_size, base_color, tweaks)
+	if parent_node.get_meta("sponson", false):
+		_sponson_blister(parent_node, type_id)
+
+static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}):
 	# Clear any existing visual children. remove_child() BEFORE queue_free() -
 	# queue_free() alone doesn't actually detach the node until end-of-frame,
 	# so a caller that immediately calls build_visual() again on the same
@@ -5372,6 +5386,165 @@ static func _attach_ship_screw_blades(parent_node: Node3D, base_size: Vector3):
 # MOUNTING_AND_ARMOR_SPEC.md addendum. A weapon type still on the
 # procedural-primitive fallback path (no authored .glb yet) simply has no
 # extra mount geometry drawn until it gets one.
+#
+# THAT RULE STILL HOLDS, and _sponson_blister() below does not break it.
+# What was deleted drew a COLUMN and a BASE PLATE - a second mounting post
+# underneath a mesh that already had one baked in. The blister draws neither.
+# It is a HOUSING around the point where an embedded weapon's barrel leaves
+# the hull; the weapon's own post is inside the hull, unseen and unduplicated.
+# If you are ever tempted to add a post, hub or base plate to that function,
+# that is the moment it becomes the thing that was removed.
+
+const SPONSON_BLISTER_PART := "sponson_blister"
+const SPONSON_BLISTER_NODE := "SponsonBlister"
+# sponson_blister.glb's authored height, base at Y=0 (build_meshes.py's
+# build_sponson_blister default). Needed to re-centre it on the barrel axis;
+# keep in step if the mesh is re-authored taller or shorter.
+const SPONSON_BLISTER_AUTHORED_HEIGHT := 0.4
+# Neutral armour-plate grey. Not the weapon's own base_color - the housing is
+# hull, and tinting it to match the gun would undo that read.
+const HULL_PLATE_COLOR := Color(0.34, 0.35, 0.36)
+
+# The armoured housing an embedded weapon fires out through. Called from
+# build_visual() (NOT from the placer) because build_visual() destroys every
+# non-StaticBody3D child on entry - anything bolted on afterwards is wiped by
+# the next tweak-slider drag, blueprint reconstruct, or drag-reclassify.
+# Building it here means all four rebuild paths get it for free.
+#
+# MATERIAL, and this is a deliberate departure from _hardware(): the blister
+# reads as a piece of hull, not as a fastener, so it must NOT carry
+# HARDWARE_PREFIX (that prefix is the EXEMPTION that keeps bolts bare steel -
+# module_placer.gd:1028) and must not take _hardware_mat(). It uses the shared
+# "painted" role material, the same one _structural_body_mat() uses, for the
+# same reason given there: the Design Lab repaints structural pieces with the
+# faction hull shader but blueprint_manager's battle reconstruction does not,
+# so the role palette is what actually gets worn on the field. Going through
+# the shared palette also keeps bake_module_visual()'s material-identity merge
+# working. Upgrading this to the true faction hull shader would need faction +
+# armor material + texture world size plumbed into a static builder that has
+# no hull reference at first-placement time; the role material is consistent
+# everywhere instead of correct in one path and wrong in another.
+# How much barrel must stick out past the hull skin. Below this a stubby
+# weapon reads as swallowed by its own housing rather than mounted in it.
+const SPONSON_MIN_PROTRUSION := 0.30
+# Floor on the embed, so a weapon with almost no reach is still recessed
+# enough for the housing to have something to sit against.
+const SPONSON_MIN_EMBED := 0.10
+
+# Embed depth, barrel-axis height and wrap radius for one module, MEASURED off
+# its actual built geometry rather than guessed from catalog numbers.
+#
+# Three things this fixes that the catalog cannot answer:
+#   * where the barrel actually is vertically. The housing has to wrap the
+#     BARREL; sitting it at the module's base put it round the gun's feet.
+#   * whether the barrel still protrudes after embedding. A stubby weapon
+#     embedded by a flat fraction of its catalog depth disappeared into the
+#     hull entirely, which is what "make it protrude even for stubby barrels"
+#     is about - the embed is now capped by the weapon's own reach.
+#   * how wide the housing has to be to wrap what is actually there, tweaks
+#     and all, rather than the untweaked catalog size.
+#
+# Deterministic for a given module, so the placer and the blister builder can
+# both call it and cannot drift. The blister node itself is excluded from the
+# measurement or it would grow every rebuild.
+static func sponson_geometry_for(module: Node3D, type_id: String) -> Dictionary:
+	var catalog = preload("res://scripts/module_catalog.gd")
+	var fallback := {
+		"embed": catalog.get_sponson_embed_depth(type_id),
+		"axis_y": catalog.get_module_data(type_id).get("size", Vector3.ONE).y * 0.5,
+		"scale": catalog.get_sponson_blister_scale(type_id),
+	}
+	if module == null or not is_instance_valid(module):
+		return fallback
+	var existing = module.get_node_or_null(SPONSON_BLISTER_NODE)
+	if existing:
+		module.remove_child(existing)
+	var bounds := measure_visual_bounds(module)
+	if existing:
+		module.add_child(existing)
+		existing.name = SPONSON_BLISTER_NODE
+	if bounds.size.length_squared() < 0.000001:
+		return fallback
+
+	# -Z is the muzzle axis, so the barrel's reach is how far the geometry
+	# extends in -Z from the module origin.
+	var reach: float = maxf(0.0, -bounds.position.z)
+	var wanted: float = catalog.get_sponson_embed_depth(type_id)
+	var embed: float = clampf(minf(wanted, reach - SPONSON_MIN_PROTRUSION),
+		SPONSON_MIN_EMBED, catalog.SPONSON_EMBED_MAX)
+	# Barrel axis height: the vertical middle of what is actually built.
+	var axis_y: float = bounds.position.y + bounds.size.y * 0.5
+	# Wrap the larger of the two cross-section axes, with headroom, so the
+	# housing encloses the barrel instead of intersecting it.
+	var wrap: float = maxf(bounds.size.x, bounds.size.y) * catalog.SPONSON_BLISTER_COVER
+	return {
+		"embed": embed,
+		"axis_y": axis_y,
+		"scale": clampf(wrap, catalog.SPONSON_BLISTER_MIN, catalog.SPONSON_BLISTER_MAX),
+	}
+
+static func _sponson_blister(parent_node: Node3D, type_id: String) -> MeshInstance3D:
+	var mesh = _part(SPONSON_BLISTER_PART)
+	if mesh == null:
+		return null
+	var inst = MeshInstance3D.new()
+	inst.mesh = mesh
+	inst.material_override = PartMaterialsScript.get_material("painted", HULL_PLATE_COLOR)
+	var geo := sponson_geometry_for(parent_node, type_id)
+	var depth: float = geo["embed"]
+	var blister_scale: float = geo["scale"]
+	var axis_y: float = geo["axis_y"]
+	# Cached so module_placer can offset the module by the SAME embed without
+	# re-deriving it - one number, two readers, no drift between the hole and
+	# the thing covering it.
+	parent_node.set_meta("sponson_embed", depth)
+	# The module origin is buried `depth` inside the hull; the housing belongs
+	# back out at the skin. -Z is the muzzle axis, so that is -depth on Z.
+	#
+	# Then the yaw is cancelled. The blister is welded to the hull face while
+	# the gun spins on it, so BOTH its rotation and its offset have to be
+	# counter-rotated - rotating alone would leave it orbiting the module
+	# origin and swinging round to a different part of the hull at 90 degrees.
+	inst.transform = _sponson_blister_transform(parent_node.get_meta("yaw_offset", 0.0),
+		depth, blister_scale, axis_y)
+	parent_node.add_child(inst)
+	# Named after add_child for the same Godot 4 reason _hardware() documents:
+	# a colliding name set before parenting is discarded outright.
+	inst.name = SPONSON_BLISTER_NODE
+	return inst
+
+static func _sponson_blister_transform(yaw: float, depth: float, blister_scale: float,
+									   axis_y: float) -> Transform3D:
+	var counter := Basis(Vector3.UP, -yaw)
+	# sponson_blister.glb is authored base-at-Y=0 per the house convention, so
+	# drop it by half its scaled height to centre it on the barrel axis rather
+	# than stand it on the module's base. Standing it on the base is what left
+	# the housing sitting too low, under the barrel instead of around it.
+	var lift := axis_y - blister_scale * SPONSON_BLISTER_AUTHORED_HEIGHT * 0.5
+	# Y is NOT counter-rotated: the yaw cancellation is about the vertical
+	# axis, so height is unaffected by it, but the in-plane offset must be.
+	return Transform3D(counter.scaled(Vector3.ONE * blister_scale),
+		counter * Vector3(0, 0, -depth) + Vector3(0, lift, 0))
+
+# Re-applies the blister's yaw cancellation without rebuilding the whole
+# module. rotate_selected_module() and the gizmo's rotate ring change
+# yaw_offset without going through build_visual() - the ring does it every
+# frame of a drag, where a full rebuild would be wasteful - so the housing
+# would otherwise swing around the hull with the gun instead of staying
+# welded to the face it covers. No-ops on any module without a blister.
+static func refresh_sponson_blister(module: Node3D) -> void:
+	if module == null or not is_instance_valid(module):
+		return
+	var inst = module.get_node_or_null(SPONSON_BLISTER_NODE)
+	if inst == null:
+		return
+	var data = module.get_meta("module_data", null)
+	if data == null:
+		return
+	var geo := sponson_geometry_for(module, data.type_id)
+	inst.transform = _sponson_blister_transform(
+		module.get_meta("yaw_offset", 0.0),
+		geo["embed"], geo["scale"], geo["axis_y"])
 
 static func rebuild_visual(module: Node3D):
 	if not module or not module.has_meta("module_data"): return

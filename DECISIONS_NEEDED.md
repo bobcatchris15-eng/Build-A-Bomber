@@ -412,6 +412,29 @@ Rebuilt the precise before/after using `BlueprintManager.reconstruct_vehicle()` 
 
 ## 2026-07-17 — DESIGN DIRECTION (not decided, not implemented): collapse "turret" into a pintle-mount variant
 
+> **SUPERSEDED IN PART, 2026-08-04 — read this first.** The entry below is kept
+> verbatim as the record of the thinking at the time, but most of the code it
+> cites is gone and none of its line numbers resolve. Specifically:
+> `get_mount_style_for_normal()`, `get_pintle_min_up_alignment()` and
+> `add_mount_hardware()` were all **deleted** by the 2026-07-21 flush-mount
+> addendum, and the 5-value mount-style system it proposes collapsing was
+> already collapsed to 3 (`turret` / `frame_built` / `pintle`) by that same
+> change — so `pintle_top`, `pintle_bottom` and `sponson` no longer exist as
+> mount_style values.
+>
+> The underlying *idea* is untouched and still open: turret is still hardcoded
+> to `basic_cannon` alone, and "pintle + enclosure flag" is still a plausible
+> simplification.
+>
+> Two things have since changed in its favour. Sponson mounting came back on
+> 2026-08-04, but as a separate boolean alongside mount_style rather than as a
+> fourth style — precedent that mount *behaviour* can be added without widening
+> that enum, which is roughly what an enclosure toggle would need. And
+> `pintle_min_up_alignment` is live again, read by
+> `ModuleCatalog.get_sponson_up_alignment()`, so the per-weapon slope data this
+> entry describes as feeding the old normal-derived styles is real data again.
+> See MOUNTING_AND_ARMOR_SPEC.md's 2026-08-04 addendum.
+
 **Not blocking - Chris is still thinking this over, logging only so the idea isn't lost.** No investigation of feasibility done, no code touched.
 
 **Chris's proposed simplification:** the mount-style system currently has 5 distinct values (`"turret"`, `"frame_built"`, `"pintle_top"`, `"pintle_bottom"`, `"sponson"` - see `get_mount_style()`/`get_mount_style_for_normal()` in `module_catalog.gd:1275` and `:1516`), with `"turret"` handled as its own wholly separate case. His current thinking: a turret is mechanically just a `pintle_top` mount (central rotating column) with an enclosure built around it (walls + roof, muzzle poking through the front) - so instead of turret being a 5th independent mount style, it could become an optional "enclosure" toggle applicable to any pintle-eligible weapon, collapsing the system toward "pintle + enclosure flag" rather than 5 parallel styles.

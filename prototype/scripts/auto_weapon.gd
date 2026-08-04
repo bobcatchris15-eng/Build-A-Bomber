@@ -693,7 +693,13 @@ func _ready():
 		var mount_parent = get_parent()
 		if mount_parent and mount_parent.has_meta("type_id"):
 			mount_hull_type = mount_parent.get_meta("type_id")
-		traverse_limit_angle = ModuleCatalog.get_traverse_limit_angle(type_id, mount_facet, mount_hull_type)
+		# The sponson flag comes off the module the placer built, not
+		# re-derived from the normal here - re-deriving is how the Lab and
+		# combat drifted apart the last time (see
+		# test_design_lab_firing_arc_matches_real_pintle_traverse).
+		# Both sides read this same meta.
+		traverse_limit_angle = ModuleCatalog.get_traverse_limit_angle(
+			type_id, mount_facet, mount_hull_type, get_meta("sponson", false))
 		# Elevation stops, same shared-with-the-visualiser arrangement as the
 		# yaw limit above. Read once here rather than per-candidate, since
 		# acquisition asks about them for every hostile in reach every scan.
@@ -999,9 +1005,16 @@ func _can_aim_at(resting_forward: Vector3, dir: Vector3) -> bool:
 # Elevation half, split out so tests and the Design Lab can ask about it
 # directly. `dir` is a world-space unit vector toward the target.
 func _within_elevation(dir: Vector3) -> bool:
-	# The weapon's own up axis, NOT world up - placement aligns local +Y with
-	# the mount surface normal, so this is what makes a side- or belly-mounted
-	# weapon's stops mean the right thing.
+	# The weapon's own up axis, NOT world up. For a flush mount, placement
+	# aligns local +Y with the mount surface normal, which is what makes a
+	# belly-mounted weapon's stops mean the right thing (it correctly cannot
+	# shoot up through its own hull).
+	#
+	# For a SPONSON (near-vertical face, module_placer._is_sponson_mount) local
+	# +Y is hull-up instead, so this measures pitch against the real horizon.
+	# That is the fix, not an exception: when such a weapon was flush-mounted
+	# its +Y pointed outboard and this cone opened sideways - rejecting a
+	# target level and outboard, accepting one directly overhead.
 	var up := global_transform.basis.y.normalized()
 	# Signed angle off the weapon's own horizon: positive is elevation toward
 	# its up axis, negative is depression.

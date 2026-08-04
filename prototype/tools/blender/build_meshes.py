@@ -867,6 +867,100 @@ def build_pintle_mount(name, width=0.34, height=0.22, depth=0.22, wall=0.045,
 	return obj
 
 
+def build_sponson_blister(name, width=1.0, height=0.4, depth=0.6, wall=0.12,
+		color=(0.30, 0.30, 0.33)):
+	"""Armoured housing bolted to a near-vertical hull face, through which
+	an embedded weapon's barrel protrudes. Not mounting hardware - this
+	reads as a piece of HULL added to permit the mount, so it takes
+	faction paint (visual_builder._sponson_blister) rather than the bare
+	steel treatment build_pintle_mount gets.
+
+	ORIENTATION, and it is the opposite of most parts here: the aperture
+	faces Godot -Z, because -Z is the muzzle axis everywhere in this
+	project (barrels author along +Y then take the runtime PI/2 X
+	rotation). +Y is up and the base sits at Y=0, per the house
+	convention, so the housing rises alongside the weapon body it wraps.
+
+	Deliberately NOT built with add_recessed_embrasure(): that helper
+	bisects an outward-facing +Z wall and takes a wall_gate to avoid
+	carving the opposite side of a hull - both assumptions are wrong for
+	a free-standing part whose opening faces -Z. A stepped stub reads the
+	same at this scale and costs no bisect passes. Proportions follow
+	build_sponson_hull's "real stepped stub, not just a smooth taper".
+	"""
+	bm = bmesh.new()
+
+	# FACETED, not boxy. Two coaxial drums along the muzzle axis with a low
+	# segment count, so the silhouette reads as a machined, chamfered bulge
+	# rather than a crate bolted to the hull. 10 segments is the sweet spot -
+	# enough to round off, few enough that the flats still catch light
+	# individually.
+	#
+	# Built centred on Y=0 so the vertical flatten below scales about the
+	# blister's own midline, then lifted to the house base-at-Y=0 convention
+	# in one move at the end.
+	# A VERTICAL faceted prism, which is what gives the requested silhouette:
+	# add_cyl_y caps the top and bottom with flat n-gons (the "flat planes")
+	# while its side wall is a rounded, faceted sweep - and the part of that
+	# sweep pointing outboard is the rounded front face. 14 segments reads as
+	# curved-but-machined at this scale.
+	#
+	# Built at full width in X and then squashed in Z, so in plan it is a wide
+	# shallow ellipse hugging the hull rather than a protruding drum.
+	shaped = add_cyl_y(bm, (0, height / 2.0, 0), width / 2.0, height, segments=14)
+	bmesh.ops.scale(bm, verts=shaped, vec=GS(1.0, 1.0, depth / width))
+
+	# Punch the barrel aperture through the OUTBOARD wall by deleting the side
+	# faces that look along Godot -Z within the barrel's height band. Done by
+	# face-normal predicate rather than a boolean: there is no boolean helper
+	# in this file, and deleting a contiguous run of wall quads leaves exactly
+	# the faceted opening a barrel should emerge from. The flat top and bottom
+	# caps are untouched - their normals are +/-Y, so they never match.
+	aperture_half_h = height * 0.34
+	doomed = []
+	for f in bm.faces:
+		n = f.normal
+		c = f.calc_center_median()
+		# Godot -Z is Blender -Y; Godot Y is Blender Z.
+		facing_outboard = -n.y
+		if facing_outboard > 0.55 and abs(c.z - height / 2.0) < aperture_half_h:
+			doomed.append(f)
+	if doomed:
+		bmesh.ops.delete(bm, geom=doomed, context='FACES')
+
+	# Bolt pads directly on the curved wall - no weld flange. The flange was a
+	# flat slab standing proud of the bulge and read as a separate plate
+	# bolted on behind it rather than as part of the housing; Chris called it
+	# on sight. The bolts alone do the "fastened to the hull" job.
+	#
+	# Each pad is a small box rotated about Godot Y to lie flat on the wall at
+	# its own angle - add_box's rot_axis/rot_angle handle that, which is why
+	# these are boxes and not cylinders (a cylinder would need a per-angle
+	# orientation this file has no helper for).
+	#
+	# Skipped over the aperture arc: bolts floating in the barrel opening
+	# would be attached to nothing.
+	rx, rz = width / 2.0, depth / 2.0
+	pad_rows = (height * 0.24, height * 0.76)
+	for i in range(14):
+		a = i * (2.0 * math.pi / 14)
+		# Angle measured so that -Z (outboard) is where the aperture sits.
+		if math.cos(a) < -0.55:
+			continue
+		for y_level in pad_rows:
+			# Unbevelled on purpose. A tier-3 bevel takes each pad from 6 faces
+			# to ~26, and at this size the chamfer is invisible while the cost
+			# is not - the housing ships on every sponson weapon on every unit
+			# in a battle. 832 faces with bevels, ~350 without.
+			add_box(bm,
+				(math.sin(a) * rx * 0.99, y_level, math.cos(a) * rz * 0.99),
+				(0.07, 0.05, 0.05), rot_axis='y', rot_angle=a)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.7, roughness=0.42)
+	return obj
+
+
 def build_box_part(name, size=(0.5, 0.3, 0.4), bevel_amt=None, bolts=True,
 		color=(0.3, 0.3, 0.33)):
 	"""Beveled box - turret bases, launcher frames, weapon housings. A
@@ -2432,6 +2526,10 @@ def generate_parts():
 
 	export_and_cleanup(build_cylinder_part("turret_base_round", radius=0.4, height=0.35, color=(0.32, 0.32, 0.35)), PARTS_DIR, "turret_base_round")
 	export_and_cleanup(build_box_part("turret_base_box", size=(1.0, 0.5, 0.7), color=(0.32, 0.32, 0.35)), PARTS_DIR, "turret_base_box")
+
+	# Housing for a weapon embedded in a near-vertical hull face. Aperture
+	# faces -Z (the muzzle axis) - see build_sponson_blister's docstring.
+	export_and_cleanup(build_sponson_blister("sponson_blister"), PARTS_DIR, "sponson_blister")
 
 	export_and_cleanup(build_cylinder_part("ammo_drum", radius=0.5, height=0.4, color=(0.22, 0.24, 0.2)), PARTS_DIR, "ammo_drum")
 	export_and_cleanup(build_cylinder_part("canister_small", radius=0.4, height=1.0, color=(0.5, 0.15, 0.12)), PARTS_DIR, "canister_small")

@@ -128,6 +128,11 @@ func _on_rotated(delta_angle: float):
 	target_module.set_meta("yaw_offset", yaw)
 	var yaw_deg = rad_to_deg(yaw)
 	_show_telemetry_callout("∠ YAW: %.1f°" % yaw_deg, Vector3(0, 1.5, 0))
+	# A sponson blister stays welded to the hull face while the gun traverses
+	# on it, so its counter-rotation is re-applied here rather than letting it
+	# orbit away with the module. Cheaper than a rebuild, which matters on a
+	# per-frame ring drag; no-ops on modules without a blister.
+	VisualBuilder.refresh_sponson_blister(target_module)
 
 	if target_module.has_meta("mirrored_counterpart"):
 		var mirror = target_module.get_meta("mirrored_counterpart")
@@ -135,6 +140,7 @@ func _on_rotated(delta_angle: float):
 			mirror.rotate_object_local(Vector3.UP, -delta_angle)
 			var mirror_yaw = wrapf(mirror.get_meta("yaw_offset", 0.0) - delta_angle, 0.0, 2.0 * PI)
 			mirror.set_meta("yaw_offset", mirror_yaw)
+			VisualBuilder.refresh_sponson_blister(mirror)
 
 	var root = get_node_or_null("/root/MainLab")
 	if root and root.has_method("check_all_clipping"):

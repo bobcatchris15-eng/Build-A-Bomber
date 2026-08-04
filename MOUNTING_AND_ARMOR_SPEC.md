@@ -71,6 +71,39 @@ Directive #3 above (pintle-level-on-top / side-embed-with-sponson / inverted-bot
 
 **How to apply:** if a future weapon type ships without an authored mesh (still on the procedural-primitive fallback in `build_visual()`), it gets no mount-post geometry at all until one is authored - this was an accepted tradeoff, not an oversight.
 
+## Addendum, 2026-08-04: sponsons return for near-vertical faces only
+
+The 2026-07-21 flush-mount rule above was right about the *deck*, the *belly* and *slopes*, and wrong about *walls*. Measured directly, `_align_up_to()` on a near-vertical facet produced:
+
+| Facet | Muzzle direction | |
+|---|---|---|
+| Top (+Y), belly (−Y) | horizontal | fine |
+| Front (−Z) | `(0,−1,0)` | **straight into the ground** |
+| Back (+Z) | `(0,+1,0)` | **straight at the sky** |
+| Left/right (±X) | horizontal, but hull-*forward*, module rolled 90° | *accidentally* plausible |
+
+The sides only looked acceptable by coincidence — rotating +Y onto ±X about Z leaves −Z untouched. They were still rolled, so local +Y pointed outboard, and `auto_weapon._within_elevation()` reads `basis.y` as "up": a side gun's elevation cone opened *sideways*, rejecting a level outboard target and accepting one directly overhead. It also visibly snapped upright on acquisition, because `_looking_at_safe()` builds the tracking basis with `Vector3.UP` and the two bases disagreed.
+
+**New model, for near-vertical faces only.** The weapon is pushed *inboard* along the outboard axis so its body and its authored post end up inside the hull, and only the barrel protrudes, through an authored `sponson_blister.glb` housing. Its basis is `Basis.looking_at(outboard, Vector3.UP)` — muzzle outboard, +Y hull-up — so it sits level, elevates against the real horizon, and traverses about hull-up. Resting and tracking bases now agree, so the snap is gone.
+
+**This does not reintroduce what 2026-07-21 deleted.** That was a procedural *column plus base plate* — a second mounting post under a mesh that already had one. The blister is neither: it is a housing around the aperture, and the weapon's own post is inside the hull, unseen and unduplicated. **If anyone adds a post, hub or base plate to `VisualBuilder._sponson_blister()`, that is the moment it becomes the thing that was removed.**
+
+**Every mount style wall-mounts, including `turret` and `frame_built`.** A first pass admitted only `pintle`, reading directive #3's "the existing tank-cannon is already handled correctly - leave it as-is" as covering all facets. It does not: that line is about the **top deck**. On a wall `basic_cannon` was broken identically to everything else (muzzle into the ground on the front facet), and excluding it just left the bug in place. A tank cannon buried in a hull side firing through a housing is a casemate, which is the correct read. `frame_built` follows for the same reason — a railgun in the glacis should aim out of it — and keeps its zero traverse regardless, because `get_traverse_limit_angle()` tests `frame_built` before the sponson flag.
+
+Still flush, deliberately: every non-weapon category (an armor plate *must* stay flush to the facet it auto-fits), the deck, the belly (directive #3's inverted pintle), and any slope above the per-weapon threshold.
+
+**Indirect-fire weapons are REFUSED on vertical faces — a deliberate exception to the no-hard-blocking rule at `:58`.** Chris called this on 2026-08-04. There is no orientation that makes a lobbing weapon work off a wall: a housing and a narrowed arc deny it the sky it exists to use, and an intermediate attempt at levelling it on an open unhoused mount just relocated the problem. An artillery piece on a hull side is not an interestingly-janky emergent outcome of the kind `:58` protects; it is a nonsense one.
+
+The exception is kept as narrow as possible so it does not become a precedent — `module_placer._placement_refusal_reason()` refuses exactly one combination: a weapon whose catalog says `sponson_capable: false`, on a face steep enough to require a sponson. The deck, a 45° glacis, direct-fire weapons on the same facet, and every genuinely weird trait combination `:58` is about all still go through. It is enforced on the build bar and on the drag path, and reports a reason rather than failing silently.
+
+Note this partly reverses `module_placer.gd:573-579`, where a *previous* validation gate (foundations refusing locomotion) was deleted to honour `:58`. That deletion stands; this is a separate, argued exception, not a reopening of the general rule.
+
+**The threshold revives `pintle_min_up_alignment`**, which had sat unread on 23 weapon entries since 2026-07-21 — now `ModuleCatalog.get_sponson_up_alignment()`. Its highest authored value is 0.55, so a 45° glacis (`dot(UP)=0.707`) stays flush for every weapon in the roster. **Known residual:** a glacis gun therefore still leans, muzzle 45° down. Raising thresholds to ~0.75 would fix it but contradicts the per-weapon reasoning in `DECISIONS_NEEDED.md:1224`; splitting base-tilt from body-level would fix it but is the abandoned base-plate model. Left deliberately, priced, not an oversight.
+
+**Traverse narrowed, and this is a balance change.** A sponson cannot swing back through the hull it is buried in, so `get_traverse_limit_angle()` returns a 60° half-angle (120° sweep) for one, instead of unrestricted. That flag is passed explicitly and *not* derived from `facet` — facet is a dominant-axis label, and a 45° glacis mount is facet "front" too while being flush. Combat (`auto_weapon._ready`) and the Design Lab arc visualiser read the same `sponson` meta so they cannot drift.
+
 ## Known architecture constraint carried into this work
 
-Hull placement/collision currently uses a single axis-aligned `BoxShape3D` per hull (see `module_placer.gd`), regardless of the hull's actual authored mesh silhouette (which can be wedged/aerodynamic/octagonal). "Facet" for both armor-fitting and mount-leveling purposes means one of that box's 6 axis-aligned faces, not the true sloped mesh surface, unless/until a mesh-accurate placement system is built. This is a deliberate scope simplification, not an oversight — flagged here so it isn't mistaken for one later.
+~~Hull placement/collision currently uses a single axis-aligned `BoxShape3D` per hull.~~ **Outdated as of 2026-08-04** — corrected here because it was load-bearing for the sponson work and would have argued against it.
+
+Placement raycasts against a real **trimesh** of the authored hull silhouette: `hull_surface.gd:37` builds it with `create_trimesh_shape()`, `:51` sets `backface_collision = true`, and `module_placer.surface_raycast()` prefers that surface, falling back to the axis-aligned `BoxShape3D` only when a hull has no authored mesh. So a sloped glacis or a curved sponson flank yields a real, continuous surface normal, and `ModuleCatalog.classify_facet()` is a *classification of that continuous normal* into six labels — not an enumeration of six box faces. Armor fitting and centring still use the box's dimensions (`module_placer.gd`'s armor branch), which is where the box genuinely does remain the model.

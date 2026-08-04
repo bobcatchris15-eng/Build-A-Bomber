@@ -131,6 +131,14 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 				"mount_style": child.get_meta("mount_style", ""),
 				"mount_normal": _vec3_to_dict(child.get_meta("mount_normal", Vector3.UP)),
 				"facet": child.get_meta("facet", ""),
+				# Whether this weapon is embedded in a near-vertical face and
+				# fires out through a blister housing (module_placer's
+				# _is_sponson_mount). Optional and defaulting to false, so a
+				# blueprint written before sponsons existed loads byte-identical
+				# to how it always did. The orientation itself rides along in
+				# "rotation" like every other module's - this flag exists so
+				# rebuild_visual knows to put the housing back.
+				"sponson": bool(child.get_meta("sponson", false)),
 				# Chirality. A left-side leg/engine/wing is the REFLECTION of
 				# its right-side twin, not a second copy, and that reflection
 				# lives on the module's visual children (see
@@ -835,9 +843,14 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			new_module.set_meta("mount_normal", Vector3(mn.x, mn.y, mn.z))
 		if mod.get("facet", "") != "":
 			new_module.set_meta("facet", mod["facet"])
-		# Force mesh deformation rebuild (also re-applies mount hardware,
-		# see rebuild_visual()'s mount_style check). For a structural piece
-		# this is also what applies the struct_scale set above.
+		# Absent on every blueprint written before sponsons existed, which is
+		# exactly the right default. Must be set BEFORE rebuild_visual() below -
+		# that is what reads it and rebuilds the blister housing.
+		new_module.set_meta("sponson", bool(mod.get("sponson", false)))
+		# Force mesh deformation rebuild - this is also what re-creates the
+		# sponson blister (build_visual clears every visual child on entry, so
+		# the housing only exists because it is rebuilt here). For a structural
+		# piece it is additionally what applies the struct_scale set above.
 		VisualBuilder.rebuild_visual(new_module)
 
 		if category == "structural" and is_designer:

@@ -586,9 +586,10 @@ func test_face_based_weapon_mounting() -> bool:
 		return false
 
 	# heavy_machine_gun on a SIDE facet: still "pintle" (mount_style is
-	# facet-independent), flush against the side now (no outward column
-	# offset), rotated so its baked-in mount post sits flat against that
-	# facet - local-up rotated to match the RIGHT normal.
+	# facet-independent), but now a SPONSON - embedded inboard of the clicked
+	# point, sitting level with its muzzle aimed outboard rather than rolled 90
+	# degrees onto its side. See MOUNTING_AND_ARMOR_SPEC.md's 2026-08-04
+	# addendum for why the old flush behaviour was wrong here.
 	var side_click_pos = placer.hull.global_position + Vector3(3.0, 0.5, 0.0)
 	placer._place_weapon_from_ui("heavy_machine_gun", side_click_pos, Vector3.RIGHT)
 	await tree.process_frame
@@ -603,18 +604,83 @@ func test_face_based_weapon_mounting() -> bool:
 		print("  [FAIL] Side-facet heavy_machine_gun should be 'pintle'")
 		placer.queue_free()
 		return false
-	var side_local = placer.hull.to_local(side_mg.global_position)
-	if abs(side_local.x - 3.0) > 0.3:
-		print("  [FAIL] Weapon should sit flush at the clicked surface point, not offset outward, local x=", side_local.x, " (clicked at ~3.0)")
+	if not side_mg.get_meta("sponson", false):
+		print("  [FAIL] heavy_machine_gun on a vertical side facet should be a sponson mount")
 		placer.queue_free()
 		return false
-	if side_mg.global_transform.basis.y.dot(Vector3.RIGHT) < 0.999:
-		print("  [FAIL] Weapon placed on the right facet should have its local-up (baked-in mount post) rotated flush against that facet (basis.y ~= RIGHT), got ", side_mg.global_transform.basis.y)
+	# Embedded INBOARD by the shared embed depth, so the body is inside the
+	# hull and only the barrel protrudes. Same number the blister placement
+	# uses - if these two ever disagree the housing floats off the hole.
+	var expected_embed = ModuleCatalog.get_sponson_embed_depth("heavy_machine_gun")
+	var side_local = placer.hull.to_local(side_mg.global_position)
+	if abs(side_local.x - (3.0 - expected_embed)) > 0.15:
+		print("  [FAIL] Sponson weapon should be embedded inboard of the clicked point: expected local x ~= ",
+			3.0 - expected_embed, " (clicked 3.0, embed ", expected_embed, "), got ", side_local.x)
+		placer.queue_free()
+		return false
+	# THE bug this feature exists to fix. Before 2026-08-04 basis.y was RIGHT
+	# here (rolled 90 degrees), which made auto_weapon's elevation cone open
+	# sideways.
+	if side_mg.global_transform.basis.y.dot(Vector3.UP) < 0.999:
+		print("  [FAIL] Sponson weapon should sit LEVEL (basis.y ~= UP), got ", side_mg.global_transform.basis.y)
+		placer.queue_free()
+		return false
+	if (-side_mg.global_transform.basis.z).dot(Vector3.RIGHT) < 0.999:
+		print("  [FAIL] Sponson weapon on the right facet should aim OUTBOARD (muzzle -Z ~= RIGHT), got ", -side_mg.global_transform.basis.z)
 		placer.queue_free()
 		return false
 
-	# The flush-mount rotation must survive a tweak-driven rebuild_visual()
-	# call, not just the initial placement.
+	# The three facets that were measurably broken before 2026-08-04, none of
+	# which had any coverage: front put the muzzle in the ground, back put it
+	# in the sky, and the belly must NOT be swept up by the same change (it is
+	# a deliberate flush inverted pintle, spec #3 "bottom").
+	var facet_cases = [
+		{"name": "front", "click": Vector3(0, 0.5, -4.0), "normal": Vector3.FORWARD, "sponson": true},
+		{"name": "back", "click": Vector3(0, 0.5, 4.0), "normal": Vector3.BACK, "sponson": true},
+		{"name": "belly", "click": Vector3(-1.5, -0.75, 0), "normal": Vector3.DOWN, "sponson": false},
+	]
+	for fc in facet_cases:
+		var seen = {}
+		for c in placer.hull.get_children():
+			if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun":
+				seen[c] = true
+		placer._place_weapon_from_ui("heavy_machine_gun",
+			placer.hull.global_position + fc["click"], fc["normal"])
+		await tree.process_frame
+		var placed = null
+		for c in placer.hull.get_children():
+			if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun" and not seen.has(c):
+				placed = c
+				break
+		if placed == null:
+			print("  [FAIL] Could not place a heavy_machine_gun on the ", fc["name"], " facet")
+			placer.queue_free()
+			return false
+		if placed.get_meta("sponson", false) != fc["sponson"]:
+			print("  [FAIL] ", fc["name"], " facet sponson flag should be ", fc["sponson"],
+				", got ", placed.get_meta("sponson", false))
+			placer.queue_free()
+			return false
+		var muzzle = -placed.global_transform.basis.z
+		if fc["sponson"]:
+			if muzzle.dot(fc["normal"]) < 0.999:
+				print("  [FAIL] ", fc["name"], " facet muzzle should aim outboard along ", fc["normal"],
+					", got ", muzzle, " (before this fix front aimed at the ground and back at the sky)")
+				placer.queue_free()
+				return false
+			if placed.global_transform.basis.y.dot(Vector3.UP) < 0.999:
+				print("  [FAIL] ", fc["name"], " facet sponson should sit level, got basis.y ", placed.global_transform.basis.y)
+				placer.queue_free()
+				return false
+		else:
+			# Belly: unchanged flush inverted pintle, local +Y still on the normal.
+			if placed.global_transform.basis.y.dot(fc["normal"]) < 0.999:
+				print("  [FAIL] belly mount must stay flush (basis.y ~= DOWN), got ", placed.global_transform.basis.y)
+				placer.queue_free()
+				return false
+
+	# The mount rotation must survive a tweak-driven rebuild_visual() call, not
+	# just the initial placement - for the flush case and the sponson case.
 	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 	var mg_data = top_mg.get_meta("module_data")
 	mg_data.tweaks["drum_size"] = 1.8
@@ -624,9 +690,23 @@ func test_face_based_weapon_mounting() -> bool:
 		print("  [FAIL] Flush-mount rotation should survive rebuild_visual() (tweak-drag), but was lost")
 		placer.queue_free()
 		return false
+	VisualBuilderScript.rebuild_visual(side_mg)
+	await tree.process_frame
+	if (-side_mg.global_transform.basis.z).dot(Vector3.RIGHT) < 0.999:
+		print("  [FAIL] Sponson orientation should survive rebuild_visual(), but was lost")
+		placer.queue_free()
+		return false
+	if side_mg.get_node_or_null(VisualBuilderScript.SPONSON_BLISTER_NODE) == null:
+		print("  [FAIL] Sponson blister housing should be rebuilt by rebuild_visual(), but is missing")
+		placer.queue_free()
+		return false
+	if top_mg.get_node_or_null(VisualBuilderScript.SPONSON_BLISTER_NODE) != null:
+		print("  [FAIL] A top-deck flush mount must NOT get a sponson blister")
+		placer.queue_free()
+		return false
 
 	placer.queue_free()
-	print("  [PASS] Face-based mounting: every mount style flush-mounts at the clicked point, rotated to match the facet's surface normal; mount_style only affects combat traverse now.")
+	print("  [PASS] Face-based mounting: deck/slope/belly flush-mount to the facet normal; near-vertical facets sponson-mount level with the muzzle outboard and a blister housing that survives rebuild.")
 	return true
 
 func test_directional_armor_facet_resolution() -> bool:
@@ -2596,8 +2676,8 @@ func test_pintle_mounts_grant_full_traverse() -> bool:
 	# 360 degrees to a hardcoded whitelist of weapon type_ids (basic_cannon/
 	# ciws/pd_laser) regardless of where they were actually mounted; now it
 	# derives the limit from the real mount style, so ANY weapon mounted
-	# pintle-style (top or bottom) gets full traverse, while the same
-	# weapon sponson-embedded on a side facet gets a narrow forward arc.
+	# pintle-style gets full traverse - UNLESS it is sponson-housed, which is
+	# passed as its own flag rather than inferred from the facet (2026-08-04).
 	var top_angle = ModuleCatalog.get_traverse_limit_angle("rotary_cannon", "top", "medium_hull")
 	var bottom_angle = ModuleCatalog.get_traverse_limit_angle("rotary_cannon", "bottom", "medium_hull")
 	var side_angle = ModuleCatalog.get_traverse_limit_angle("rotary_cannon", "right", "medium_hull")
@@ -2608,8 +2688,35 @@ func test_pintle_mounts_grant_full_traverse() -> bool:
 	if not is_equal_approx(bottom_angle, PI):
 		print("  [FAIL] rotary_cannon pintle-mounted on bottom (e.g. helicopter belly mount) should get full 360-degree traverse (PI), got ", bottom_angle)
 		return false
+	# Facet alone must NOT narrow the arc: a weapon on a 45-degree glacis is
+	# facet "front" and still flush, so inferring "sponson" from the facet
+	# label would wrongly restrict it. This is the assertion that pins that.
 	if not is_equal_approx(side_angle, PI):
-		print("  [FAIL] rotary_cannon pintle-mounted on side should get full 360-degree traverse (PI), got ", side_angle)
+		print("  [FAIL] A side FACET alone must not narrow traverse (only the sponson flag does), got ", side_angle)
+		return false
+
+	# Sponson-housed: a real forward arc, because the weapon is buried in the
+	# hull and cannot swing back through it.
+	var sponson_angle = ModuleCatalog.get_traverse_limit_angle("rotary_cannon", "right", "medium_hull", true)
+	if not is_equal_approx(sponson_angle, ModuleCatalog.SPONSON_TRAVERSE_LIMIT):
+		print("  [FAIL] A sponson-housed rotary_cannon should get the narrowed sponson arc (",
+			ModuleCatalog.SPONSON_TRAVERSE_LIMIT, "), got ", sponson_angle)
+		return false
+	if sponson_angle >= PI:
+		print("  [FAIL] The sponson arc must actually be narrower than a free pintle, got ", sponson_angle)
+		return false
+	# Above auto_weapon's acquisition floor, or the restriction is silently
+	# widened back out at runtime and the whole thing is decorative.
+	var AutoWeapon = preload("res://scripts/auto_weapon.gd")
+	if sponson_angle <= AutoWeapon.MIN_ACQUISITION_ARC:
+		print("  [FAIL] The sponson arc must exceed MIN_ACQUISITION_ARC (",
+			AutoWeapon.MIN_ACQUISITION_ARC, ") or combat silently ignores it, got ", sponson_angle)
+		return false
+
+	# frame_built outranks the sponson flag - a railgun that somehow carried it
+	# still gets zero, because the whole vehicle aims.
+	if ModuleCatalog.get_traverse_limit_angle("gauss_railgun", "right", "medium_hull", true) != 0.0:
+		print("  [FAIL] frame_built must stay zero-traverse even with the sponson flag set")
 		return false
 
 	# basic_cannon's dedicated enclosed turret always gets full traverse
@@ -2627,7 +2734,383 @@ func test_pintle_mounts_grant_full_traverse() -> bool:
 		print("  [FAIL] gauss_railgun is frame_built and should have zero independent traverse, got ", railgun_angle)
 		return false
 
-	print("  [PASS] Pintle-mounted weapons (top, bottom, and side) get full 360-degree traverse, and mount-style exceptions (turret/frame_built) are unaffected by facet.")
+	print("  [PASS] Pintle mounts get full 360-degree traverse on any FACET; only the sponson flag narrows it (to a real forward arc above the acquisition floor), and turret/frame_built exceptions are unaffected by either.")
+	return true
+
+func test_turret_and_frame_built_also_wall_mount() -> bool:
+	print("Running Test Suite: Turret And Frame-Built Weapons Wall-Mount Too, Not Just Pintles (Chris, 2026-08-04)...")
+	# Regression: the first sponson pass admitted only mount_style "pintle",
+	# reading MOUNTING_AND_ARMOR_SPEC.md:25's "leave the enclosed turret as-is"
+	# as covering every facet. It does not - that line is about the TOP DECK.
+	# basic_cannon on a vertical face was left with its muzzle in the ground,
+	# exactly the bug the whole change exists to fix, and Chris reported it as
+	# "the sponson seems to be failing entirely for the basic_cannon module".
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await tree.process_frame
+	placer._place_hull_from_ui("heavy_hull")
+	await tree.process_frame
+
+	var VB = preload("res://scripts/visual_builder.gd")
+	# basic_cannon is "turret"; gauss_railgun is "frame_built". Both are
+	# direct-fire structures that belong in a casemate on a wall.
+	for case in [{"id": "basic_cannon", "style": "turret"},
+				 {"id": "gauss_railgun", "style": "frame_built"}]:
+		var type_id: String = case["id"]
+		if ModuleCatalog.get_mount_style(type_id, "heavy_hull") != case["style"]:
+			print("  [FAIL] Expected ", type_id, " to be mount_style '", case["style"], "'")
+			placer.queue_free()
+			return false
+		placer._place_weapon_from_ui(type_id,
+			placer.hull.global_position + Vector3(0.0, 0.5, -4.0), Vector3.FORWARD)
+		await tree.process_frame
+		var placed = null
+		for c in placer.hull.get_children():
+			if c.has_meta("module_data") and c.get_meta("module_data").type_id == type_id:
+				placed = c
+				break
+		if placed == null:
+			print("  [FAIL] ", type_id, " was not placed on the front facet")
+			placer.queue_free()
+			return false
+		if not placed.get_meta("sponson", false):
+			print("  [FAIL] ", type_id, " (", case["style"], ") should sponson-mount on a vertical face")
+			placer.queue_free()
+			return false
+		if (-placed.global_transform.basis.z).dot(Vector3.FORWARD) < 0.999:
+			print("  [FAIL] ", type_id, " on the front facet should aim outboard, got muzzle ",
+				-placed.global_transform.basis.z, " (the reported bug was this pointing at the ground)")
+			placer.queue_free()
+			return false
+		if placed.global_transform.basis.y.dot(Vector3.UP) < 0.999:
+			print("  [FAIL] ", type_id, " should sit level, got basis.y ", placed.global_transform.basis.y)
+			placer.queue_free()
+			return false
+		if placed.get_node_or_null(VB.SPONSON_BLISTER_NODE) == null:
+			print("  [FAIL] ", type_id, " should get a blister housing on a vertical face")
+			placer.queue_free()
+			return false
+
+	# frame_built keeps ZERO traverse even sponsoned - the whole vehicle aims,
+	# and get_traverse_limit_angle must test that before the sponson arc.
+	if ModuleCatalog.get_traverse_limit_angle("gauss_railgun", "front", "heavy_hull", true) != 0.0:
+		print("  [FAIL] A sponsoned frame_built weapon must still have zero independent traverse")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Turret and frame-built weapons wall-mount on vertical faces like pintles do - levelled, aimed outboard, housed - and frame_built keeps its zero traverse.")
+	return true
+
+func test_weapon_click_collider_matches_its_visual() -> bool:
+	print("Running Test Suite: A Weapon's Click Collider Matches The Geometry Actually Built (Chris, 2026-08-04)...")
+	# PRE-EXISTING bug, not a sponson one - reported on ordinary top-deck
+	# pintle mounts. The collider was a raw catalog-`size` box, but every
+	# monolithic authored mesh is yawed 90 degrees about Y
+	# (visual_builder.gd:441, the TripoSG orientation offset) and then
+	# uniformly fit-scaled. heavy_machine_gun's size is (0.3, 0.3, 1.0), so the
+	# box ran ACROSS the barrel as a 0.3-wide sliver instead of along it, and
+	# the gun was nearly impossible to click.
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await tree.process_frame
+	placer._place_hull_from_ui("heavy_hull")
+	await tree.process_frame
+
+	# Top deck, plain pintle - deliberately NOT a sponson, so this covers the
+	# ordinary case rather than the new one.
+	placer._place_weapon_from_ui("heavy_machine_gun", Vector3(1.0, 0.75, -1.0), Vector3.UP)
+	await tree.process_frame
+	var mg = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun":
+			mg = c
+			break
+	if mg == null:
+		print("  [FAIL] heavy_machine_gun was not placed")
+		placer.queue_free()
+		return false
+	if mg.get_meta("sponson", false):
+		print("  [FAIL] A top-deck mount must not be a sponson - this test is about the ordinary case")
+		placer.queue_free()
+		return false
+
+	# By TYPE, not by name: an unnamed node only gets its class name while that
+	# name is free, otherwise Godot generates "@StaticBody3D@N" and a
+	# name-based lookup silently misses.
+	var bodies: Array = mg.find_children("*", "StaticBody3D", false, false)
+	if bodies.is_empty():
+		print("  [FAIL] Weapon has no click collider body")
+		placer.queue_free()
+		return false
+	var body := bodies[0] as StaticBody3D
+	var shapes: Array = body.find_children("*", "CollisionShape3D", false, false)
+	if shapes.is_empty() or not (shapes[0].shape is BoxShape3D):
+		print("  [FAIL] Weapon has no box click collider")
+		placer.queue_free()
+		return false
+	var box := shapes[0].shape as BoxShape3D
+	var bounds: AABB = placer._visual_bounds(mg)
+	if bounds.size.length_squared() <= 0.0:
+		print("  [FAIL] Weapon built no measurable geometry")
+		placer.queue_free()
+		return false
+
+	# The collider must actually enclose what was drawn, on every axis. A
+	# generous tolerance: the point is "roughly the size of the gun", not an
+	# exact match.
+	for axis in range(3):
+		if box.size[axis] < bounds.size[axis] - 0.02:
+			print("  [FAIL] Click collider is smaller than the visual on axis ", axis,
+				": collider ", box.size, " vs visual ", bounds.size,
+				" - this is what made the weapon hard to click")
+			placer.queue_free()
+			return false
+	# And centred on it, not on the catalog's guess.
+	var centre_err: float = (body.position - bounds.get_center()).length()
+	if centre_err > 0.05:
+		print("  [FAIL] Click collider is offset from the visual by ", centre_err,
+			" (collider at ", body.position, ", visual centre ", bounds.get_center(), ")")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] A weapon's click collider is measured from its built geometry, so it encloses and is centred on the mesh the player can actually see - including the 90-degree monolithic yaw the catalog size does not account for.")
+	return true
+
+func test_sponson_weapon_stays_clickable() -> bool:
+	print("Running Test Suite: A Sponson-Embedded Weapon's Click Collider Reaches Outside The Hull (Chris, 2026-08-04)...")
+	# Regression: the default click collider is a catalog-sized box just above
+	# the module origin, and a sponson's origin is deliberately buried inside
+	# the hull - so the box was too, and selection raycasts (mask 7, nearest
+	# hit wins) always hit the hull first. Reported as "some of the weapons are
+	# very hard to select again after placement, the heavy machine gun for
+	# example". The collider is now measured off the built geometry instead.
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await tree.process_frame
+	placer._place_hull_from_ui("heavy_hull")
+	await tree.process_frame
+
+	placer._place_weapon_from_ui("heavy_machine_gun",
+		placer.hull.global_position + Vector3(3.0, 0.5, 0.0), Vector3.RIGHT)
+	await tree.process_frame
+	var mg = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun":
+			mg = c
+			break
+	if mg == null or not mg.get_meta("sponson", false):
+		print("  [FAIL] Expected a sponson-mounted heavy_machine_gun")
+		placer.queue_free()
+		return false
+
+	# By TYPE, not by name - see the note in
+	# test_weapon_click_collider_matches_its_visual. Looking this up by name is
+	# what made the first version of this test report a missing collider on a
+	# module that had one.
+	var bodies: Array = mg.find_children("*", "StaticBody3D", false, false)
+	if bodies.is_empty():
+		print("  [FAIL] Sponson weapon has no click collider body")
+		placer.queue_free()
+		return false
+	var body := bodies[0] as StaticBody3D
+	var shapes: Array = body.find_children("*", "CollisionShape3D", false, false)
+	if shapes.is_empty() or not (shapes[0].shape is BoxShape3D):
+		print("  [FAIL] Sponson weapon has no box click collider")
+		placer.queue_free()
+		return false
+	var shape := shapes[0] as CollisionShape3D
+
+	# Module-local geometry: the muzzle axis is -Z and the origin sits `embed`
+	# inside the hull, so the hull skin is the plane z = -embed. Anything with
+	# z below that is outside the hull and therefore clickable.
+	var embed: float = mg.get_meta("sponson_embed", -1.0)
+	if embed <= 0.0:
+		print("  [FAIL] Sponson weapon should record the embed depth it was placed with, got ", embed)
+		placer.queue_free()
+		return false
+	var box := shape.shape as BoxShape3D
+	var collider_min_z: float = body.position.z - box.size.z * 0.5
+	if collider_min_z >= -embed:
+		print("  [FAIL] The click collider is entirely inside the hull (its outboard edge is at z=",
+			collider_min_z, ", hull skin is at z=", -embed,
+			") - the weapon cannot be clicked without hitting the hull first")
+		placer.queue_free()
+		return false
+
+	# And the barrel really does clear the hull, which is what makes that
+	# collider reachable in the first place.
+	# Explicitly typed: placer is a dynamically-scripted Node3D here, so the
+	# call's return type is unknown at parse time and := cannot infer it.
+	var bounds: AABB = placer._visual_bounds(mg)
+	if bounds.position.z >= -embed:
+		print("  [FAIL] No geometry protrudes past the hull skin: visual reaches z=",
+			bounds.position.z, ", skin at z=", -embed)
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] A sponson weapon's click collider is measured from its built geometry and reaches outside the hull skin, so the protruding barrel and housing remain selectable.")
+	return true
+
+func test_sponson_elevation_cone_is_world_level() -> bool:
+	print("Running Test Suite: A Sponson-Mounted Weapon's Elevation Cone Opens Against The Real Horizon (Chris, 2026-08-04)...")
+	# THE gameplay consequence of the orientation fix, and it fails outright on
+	# the pre-2026-08-04 code. auto_weapon._within_elevation() measures pitch
+	# against the weapon's own basis.y. A side-mounted weapon used to be rolled
+	# 90 degrees so that axis pointed OUTBOARD - which meant a target level and
+	# outboard computed as 90 degrees of elevation (rejected) while one
+	# directly overhead computed as 0 (accepted). Exactly inverted.
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await tree.process_frame
+	placer._place_hull_from_ui("heavy_hull")
+	await tree.process_frame
+
+	placer._place_weapon_from_ui("heavy_machine_gun",
+		placer.hull.global_position + Vector3(3.0, 0.5, 0.0), Vector3.RIGHT)
+	await tree.process_frame
+	var mg = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "heavy_machine_gun":
+			mg = c
+			break
+	if mg == null:
+		print("  [FAIL] heavy_machine_gun was not placed")
+		placer.queue_free()
+		return false
+
+	# Read the same axis _within_elevation() reads, and reproduce its maths
+	# rather than instancing a full combat weapon - this is a placement test,
+	# and the arithmetic is the part that was wrong.
+	var up: Vector3 = mg.global_transform.basis.y.normalized()
+	var level_outboard := Vector3.RIGHT
+	var overhead := Vector3.UP
+	var pitch_level := rad_to_deg(asin(clampf(level_outboard.dot(up), -1.0, 1.0)))
+	var pitch_overhead := rad_to_deg(asin(clampf(overhead.dot(up), -1.0, 1.0)))
+
+	if abs(pitch_level) > 1.0:
+		print("  [FAIL] A target level with the horizon and straight outboard should read ~0 degrees of elevation, got ", pitch_level,
+			" (before this fix it read ~90 and was rejected)")
+		placer.queue_free()
+		return false
+	if pitch_overhead < 89.0:
+		print("  [FAIL] A target directly overhead should read ~90 degrees of elevation, got ", pitch_overhead,
+			" (before this fix it read ~0 and was wrongly accepted)")
+		placer.queue_free()
+		return false
+
+	# The other half of "world-level": a target BELOW the horizon must read as
+	# DEPRESSION, not elevation. Deliberately not asserted against a weapon's
+	# elevation ceiling - heavy_machine_gun's is 90 degrees (MGs are in the
+	# point-straight-up group per the 2026-08-03 elevation note), so a ceiling
+	# comparison here proves nothing about the axis being right.
+	var below := Vector3(1.0, -1.0, 0.0).normalized()
+	var pitch_below := rad_to_deg(asin(clampf(below.dot(up), -1.0, 1.0)))
+	if pitch_below > -44.0 or pitch_below < -46.0:
+		print("  [FAIL] A target 45 degrees below the horizon and outboard should read ~-45 degrees of DEPRESSION, got ", pitch_below,
+			" (with the old rolled basis this read ~0, so the gun thought the ground was level with it)")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] A sponson weapon's elevation is measured against the real horizon: level-outboard reads ~0 degrees, overhead reads ~90 and is correctly beyond the weapon's ceiling.")
+	return true
+
+func test_indirect_fire_weapons_are_refused_on_vertical_faces() -> bool:
+	print("Running Test Suite: Indirect-Fire Weapons Are Refused On A Vertical Hull Face (Chris, 2026-08-04)...")
+	# An artillery piece or mortar on a wall does not work in any orientation:
+	# a housing and a narrowed arc deny it the open sky it exists to lob
+	# through, and levelling it on an open mount just moves the problem. Chris
+	# called it - those weapons simply do not go there.
+	#
+	# This is a DELIBERATE, narrow exception to the no-hard-blocking rule in
+	# MOUNTING_AND_ARMOR_SPEC.md:58. The assertions below pin how narrow: only
+	# a non-sponson_capable weapon, only on a face steep enough to need one.
+	if ModuleCatalog.is_sponson_capable("artillery"):
+		print("  [FAIL] artillery must not be sponson_capable - it cannot lob out of a housing")
+		return false
+	if ModuleCatalog.is_sponson_capable("mortar_array"):
+		print("  [FAIL] mortar_array must not be sponson_capable")
+		return false
+	if not ModuleCatalog.is_sponson_capable("heavy_machine_gun"):
+		print("  [FAIL] heavy_machine_gun is direct-fire and should be sponson_capable")
+		return false
+
+	var placer = Node3D.new()
+	placer.name = "MainLab"
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await tree.process_frame
+	placer._place_hull_from_ui("heavy_hull")
+	await tree.process_frame
+
+	# REFUSED on a vertical side facet - nothing is created at all.
+	placer._place_weapon_from_ui("artillery",
+		placer.hull.global_position + Vector3(3.0, 0.5, 0.0), Vector3.RIGHT)
+	await tree.process_frame
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "artillery":
+			print("  [FAIL] artillery should have been refused on a vertical face, but a module was placed")
+			placer.queue_free()
+			return false
+
+	# The refusal must be reported, not silent - a click that does nothing with
+	# no explanation reads as a broken build bar.
+	var reason = placer._placement_refusal_reason("artillery", "weapon", Vector3.RIGHT)
+	if reason == "":
+		print("  [FAIL] Refusing the placement should produce a message for the player, got an empty reason")
+		placer.queue_free()
+		return false
+
+	# Still fine on the DECK - the block is about vertical faces only, not
+	# about banning the weapon from the design.
+	placer._place_weapon_from_ui("artillery",
+		placer.hull.global_position + Vector3(0.0, 0.75, -1.0), Vector3.UP)
+	await tree.process_frame
+	var deck_arty = null
+	for c in placer.hull.get_children():
+		if c.has_meta("module_data") and c.get_meta("module_data").type_id == "artillery":
+			deck_arty = c
+			break
+	if deck_arty == null:
+		print("  [FAIL] artillery must still place normally on the top deck - the refusal is facet-specific")
+		placer.queue_free()
+		return false
+	if deck_arty.get_meta("sponson", false):
+		print("  [FAIL] A deck-mounted artillery piece must not be a sponson")
+		placer.queue_free()
+		return false
+	if placer._placement_refusal_reason("artillery", "weapon", Vector3.UP) != "":
+		print("  [FAIL] The deck must never be refused")
+		placer.queue_free()
+		return false
+
+	# And a 45-degree glacis stays allowed: it is not steep enough to need a
+	# sponson, so the block must not catch it either.
+	if placer._placement_refusal_reason("artillery", "weapon",
+			Vector3(0, 0.7, -0.7).normalized()) != "":
+		print("  [FAIL] A 45-degree glacis is not a vertical face and must not be refused")
+		placer.queue_free()
+		return false
+
+	# A direct-fire weapon on the same vertical facet is of course still fine.
+	if placer._placement_refusal_reason("heavy_machine_gun", "weapon", Vector3.RIGHT) != "":
+		print("  [FAIL] Direct-fire weapons must still be allowed on vertical faces")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Indirect-fire weapons are refused on vertical faces with a reported reason, while the deck, a 45-degree glacis, and direct-fire weapons on the same facet are all still allowed.")
 	return true
 
 func test_design_lab_firing_arc_matches_real_pintle_traverse() -> bool:

@@ -321,7 +321,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"crystal": 0,
 			"dps": 32.5,
 			# Pintle-mount eligibility (MOUNTING_AND_ARMOR_SPEC.md #3 second
-			# correction - see PINTLE_MIN_UP_ALIGNMENT_DEFAULT's comment): a
+			# correction - see get_sponson_up_alignment()'s comment): a
 			# small, light, classic pintle weapon in real life - bolts onto
 			# almost anything short of a genuinely vertical wall.
 			"pintle_min_up_alignment": 0.15,
@@ -368,6 +368,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"artillery": {
 			"name": "Artillery",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 150.0,
 			"weight": 250.0,
 			"base_traverse": 0.217,
@@ -382,6 +386,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"mortar_array": {
 			"name": "Mortar Array",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 80.0,
 			"weight": 90.0,
 			"base_traverse": 0.477,
@@ -403,6 +411,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"guided_missile": {
 			"name": "Guided Missile TOW",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 70.0,
 			"weight": 60.0,
 			"base_traverse": 1.073,
@@ -421,6 +433,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"missile_pod": {
 			"name": "Swarm Missile Pod",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 100.0,
 			"weight": 150.0,
 			"base_traverse": 0.576,
@@ -454,6 +470,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"cluster_dispenser": {
 			"name": "Cluster Dispenser",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 90.0,
 			"weight": 100.0,
 			"base_traverse": 0.540,
@@ -551,6 +571,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"spigot_mortar": {
 			"name": "Spigot Mortar",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 80.0,
 			"weight": 130.0,
 			"base_traverse": 0.428,
@@ -566,6 +590,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"rocket_artillery": {
 			"name": "Rocket Artillery",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 95.0,
 			"weight": 190.0,
 			"base_traverse": 0.379,
@@ -583,6 +611,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"hypervelocity_missile": {
 			"name": "Hypervelocity Missile",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 70.0,
 			"weight": 110.0,
 			"base_traverse": 0.854,
@@ -598,6 +630,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"sam_launcher": {
 			"name": "SAM Launcher",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 75.0,
 			"weight": 130.0,
 			"base_traverse": 0.857,
@@ -613,6 +649,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"loitering_munition": {
 			"name": "Loitering Munition",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 65.0,
 			"weight": 120.0,
 			"base_traverse": 0.733,
@@ -629,6 +669,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"anti_radiation_missile": {
 			"name": "Anti-Radiation Missile",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 70.0,
 			"weight": 115.0,
 			"base_traverse": 0.792,
@@ -644,6 +688,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"bunker_buster": {
 			"name": "Bunker Buster",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 85.0,
 			"weight": 175.0,
 			"base_traverse": 0.331,
@@ -659,6 +707,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"cruise_missile": {
 			"name": "Cruise Missile",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 80.0,
 			"weight": 200.0,
 			"base_traverse": 0.246,
@@ -902,6 +954,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"plasma_lobber": {
 			"name": "Plasma Lobber",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 110.0,
 			"weight": 120.0,
 			"base_traverse": 0.448,
@@ -1006,6 +1062,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"recoilless_rifle": {
 			"name": "Recoilless Rifle",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 80.0,
 			"weight": 70.0,
 			"base_traverse": 0.986,
@@ -1076,6 +1136,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"napalm_mortar": {
 			"name": "Napalm Mortar",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 85.0,
 			"weight": 95.0,
 			"base_traverse": 0.463,
@@ -1115,6 +1179,10 @@ static func _build_catalog_literal() -> Dictionary:
 		"ballista": {
 			"name": "Ballista",
 			"category": "weapon",
+			# Indirect fire - needs open sky, so it is levelled on a vertical
+			# face but never enclosed in a sponson housing. See
+			# ModuleCatalog.is_sponson_capable().
+			"sponson_capable": false,
 			"hp": 110.0,
 			"weight": 140.0,
 			"base_traverse": 0.337,
@@ -2404,6 +2472,94 @@ static func get_mount_style(type_id: String, hull_type_id: String = "") -> Strin
 		return "frame_built"
 	return "pintle"
 
+# --- Sponson eligibility ---------------------------------------------------
+# Revives the "pintle_min_up_alignment" field that has sat on 23 weapon entries
+# unread since the 2026-07-21 flush-mount addendum deleted its only consumer.
+# Its meaning is unchanged: the least vertical alignment - dot(surface normal,
+# UP) - at which this weapon will still stand its own authored post directly
+# on the surface it was dropped on.
+#
+# Below it the face is too close to vertical for that to mean anything: "up"
+# there is horizontal, which is what left a front-facet gun pointing at the
+# ground and a rear-facet one at the sky. Those weapons get embedded into the
+# hull and fire out through a sponson blister instead - see
+# module_placer._is_sponson_mount(), which is the only caller.
+#
+# Per-type because it is a per-type judgement, and the authored values already
+# encode it: a compact MG bolts to almost anything (0.15), a mortar needs a
+# near-level base to aim its arc at all (0.55). Full per-weapon reasoning is in
+# DECISIONS_NEEDED.md's 2026-07-12 entry. Note the highest authored value is
+# 0.55, so a 45-degree glacis (0.707) stays flush for every weapon in the
+# roster - that is deliberate, not an oversight.
+const SPONSON_MAX_UP_ALIGNMENT_DEFAULT := 0.3
+
+static func get_sponson_up_alignment(type_id: String) -> float:
+	return get_module_data(type_id).get("pintle_min_up_alignment",
+		SPONSON_MAX_UP_ALIGNMENT_DEFAULT)
+
+# Whether this weapon can be ENCLOSED in a sponson housing, as opposed to
+# merely being levelled on a wall.
+#
+# These are two different questions and conflating them got it backwards
+# first time round. get_sponson_up_alignment() above answers "how level a base
+# does this weapon need before it has to be re-levelled" - and a mortar needs
+# a very level one (0.55), so it re-levels EAGERLY. This answers "can it live
+# in a box", and for the same mortar the answer is no: a housing plus a 60
+# degree arc denies exactly the open sky a lobbing weapon exists to use.
+# Reading the first field as if it answered the second made artillery the most
+# eager thing in the roster to be boxed in, which is precisely wrong.
+#
+# A weapon that is NOT sponson_capable is REFUSED outright on a near-vertical
+# face (module_placer._placement_refusal_reason) rather than mounted some other
+# way. An intermediate version levelled them on an open unhoused mount, which
+# looked fine and still left an artillery piece bolted to a wall - Chris's call
+# on 2026-08-04 was that they simply do not go there. This is the one
+# deliberate exception to MOUNTING_AND_ARMOR_SPEC.md:58's no-hard-blocking
+# rule; see that file's 2026-08-04 addendum for the argument.
+#
+# Defaults TRUE: direct-fire weapons are the common case, and a new weapon
+# author who wants otherwise should have to say so.
+static func is_sponson_capable(type_id: String) -> bool:
+	return get_module_data(type_id).get("sponson_capable", true)
+
+# How far INBOARD of the clicked surface point a sponson-mounted weapon's
+# origin sits, so its body and its authored post end up inside the hull and
+# only the barrel protrudes.
+#
+# This lives here, next to the blister scale below, for one reason: two
+# separate copies of "how deep" would drift, and the moment they do the
+# housing no longer lines up with the hole it is supposed to be covering.
+# module_placer._mount_transform() offsets the weapon by this, and
+# visual_builder._sponson_blister() places the housing at the same distance
+# back out along the muzzle axis. One number, two readers.
+const SPONSON_EMBED_FRACTION := 0.5
+const SPONSON_EMBED_MIN := 0.2
+const SPONSON_EMBED_MAX := 0.8
+
+static func get_sponson_embed_depth(type_id: String) -> float:
+	var size: Vector3 = get_module_data(type_id).get("size", Vector3.ONE)
+	return clampf(size.z * SPONSON_EMBED_FRACTION, SPONSON_EMBED_MIN, SPONSON_EMBED_MAX)
+
+# Uniform scale for the blister housing. sponson_blister.glb is authored one
+# unit wide, so the returned value IS the housing's final width in metres.
+#
+# Uniform on purpose - _hardware()'s contract (visual_builder.gd:208) is that
+# authored geometry never stretches anisotropically, and the blister is held
+# to the same rule even though it is painted plate rather than hardware. The
+# cover factor makes the housing wider than the weapon's own cross-section,
+# since it has to enclose the body rather than just abut it.
+#
+# Starting values, expected to be eyeballed in the Lab and adjusted - they are
+# a plausible ratio, not a derived truth.
+const SPONSON_BLISTER_COVER := 1.8
+const SPONSON_BLISTER_MIN := 0.4
+const SPONSON_BLISTER_MAX := 2.0
+
+static func get_sponson_blister_scale(type_id: String) -> float:
+	var size: Vector3 = get_module_data(type_id).get("size", Vector3.ONE)
+	return clampf(maxf(size.x, size.y) * SPONSON_BLISTER_COVER,
+		SPONSON_BLISTER_MIN, SPONSON_BLISTER_MAX)
+
 # Per-weapon BASE traverse speed, in radians/second, before any tweak on the
 # instance. Chris, 2026-08-03: "the traverse speed of a weapons module should
 # start from a base value per weapon module, and then be impacted by tweaks."
@@ -3321,12 +3477,30 @@ static func classify_facet(local_direction: Vector3) -> String:
 # Omitting hull_type_id keeps the original weapon-type-only behavior.
 # facet arg is kept for backward compat with any callers that still pass
 # it; it's ignored now since the new model is mount-style-only.
-static func get_traverse_limit_angle(type_id: String, _facet: String = "", hull_type_id: String = "") -> float:
+#
+# `sponson` narrows that: a weapon embedded in a near-vertical face
+# (module_placer._is_sponson_mount) sits in a housing and cannot swing back
+# through the hull it is buried in, so it gets a real forward arc rather than
+# free rotation. It is passed as its own flag and NOT derived from `facet`,
+# because facet is a dominant-axis label - a 45-degree glacis mount is facet
+# "front" too, and it is flush, not sponsoned. Combat reads the module's
+# "sponson" meta (auto_weapon._ready) and the Design Lab arc visualiser reads
+# the same meta, so the two cannot disagree.
+#
+# Half-angle, like every value this function returns: SPONSON_TRAVERSE_LIMIT
+# of 60 degrees means 60 either side of the housing's outboard heading, a
+# 120-degree total sweep. Comfortably above auto_weapon's
+# MIN_ACQUISITION_ARC (0.26 rad) floor, so it is never silently widened.
+const SPONSON_TRAVERSE_LIMIT := deg_to_rad(60.0)
+
+static func get_traverse_limit_angle(type_id: String, _facet: String = "", hull_type_id: String = "", sponson: bool = false) -> float:
 	if hull_type_id != "" and not is_turreted_capable(hull_type_id):
 		return 0.0
 	var style = get_mount_style(type_id, hull_type_id)
 	if style == "frame_built":
 		return 0.0
+	if sponson:
+		return SPONSON_TRAVERSE_LIMIT
 	if style in ["turret", "pintle"]:
 		return PI # 360 degrees
 	return PI # 360 degrees (every other mount is a pintle, all get 360)
@@ -3357,9 +3531,13 @@ static func get_traverse_limit_angle(type_id: String, _facet: String = "", hull_
 # tweak buys fire_range in weapon_range.gd.
 #
 # Angles are degrees from the weapon's own horizon, and "up" is along the
-# weapon's OWN local +Y, which is the surface normal it was mounted on - so a
-# belly-mounted gun's "up" points at the ground, and it correctly cannot shoot
-# up through its own hull. Same convention auto_weapon.gd's LOS offset uses.
+# weapon's OWN local +Y. For a flush mount that IS the surface normal it was
+# mounted on - so a belly-mounted gun's "up" points at the ground, and it
+# correctly cannot shoot up through its own hull. For a sponson (2026-08-04,
+# near-vertical faces) local +Y is hull-up instead, so these stops measure
+# against the real horizon; see auto_weapon._within_elevation() for why that
+# is the correct reading and not an exception. Same convention
+# auto_weapon.gd's LOS offset uses.
 const ELEVATION_DEFAULT := {"up": 55.0, "down": 12.0}
 
 const ELEVATION_LIMITS := {

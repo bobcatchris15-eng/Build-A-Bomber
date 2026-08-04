@@ -48,7 +48,7 @@ Bottom bar: buildings first (Factory, Refinery), then your unit blueprints (queu
 
 ## Tests
 
-Headless test suite, 206 suites. Run via the wrapper, not the raw Godot
+Headless test suite, 211 suites. Run via the wrapper, not the raw Godot
 invocation — the `.godot` import cache is gitignored and goes stale whenever a
 new autoload or `class_name` script lands, which breaks a direct
 `--headless --script run_tests.gd` run with a misleading
@@ -76,7 +76,7 @@ that fixes execution order. The suites themselves live in
 |---|---|---|
 | `test_terrain_and_maps.gd` | 38 | terrain build, navmesh, pathing, map JSON, spawn fairness |
 | `test_economy_and_production.gd` | 34 | resources, harvesting, queues, manufactories, energy, repair |
-| `test_weapons_and_damage.gd` | 30 | damage model, armor facets, arcs, ammo, missiles, LOS |
+| `test_weapons_and_damage.gd` | 35 | damage model, armor facets, arcs, ammo, missiles, LOS, sponson mounts |
 | `test_designer_lab.gd` | 21 | clipping, gizmos, tweaks, symmetry, blueprints, mounting |
 | `test_sim_and_stats.gd` | 18 | stat math, traits, combat sim, evasion, audio, parse checks |
 | `test_locomotion.gd` | 18 | all locomotion types, layout fixtures, drivetrain, animation |

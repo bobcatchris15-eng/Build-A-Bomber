@@ -4,6 +4,149 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-08-04 — Sponson mounts: weapons on near-vertical hull faces aim outboard
+
+**The bug.** Placement orientation was one line — `module_placer.gd`'s
+`_align_up_to(local_normal)`, a minimal-arc rotation putting a module's local
++Y on the surface normal. Correct for a deck, a slope or a belly; incoherent on
+a wall, where "up" is horizontal. Evaluated numerically per facet:
+
+| Facet | Muzzle (local −Z) ended up | |
+|---|---|---|
+| Top (+Y), belly (−Y) | horizontal | fine |
+| Front (−Z) | `(0,−1,0)` | **straight into the ground** |
+| Back (+Z) | `(0,+1,0)` | **straight at the sky** |
+| Left/right (±X) | horizontal but hull-*forward*, rolled 90° | *accidentally* plausible |
+
+The sides only looked right by coincidence: rotating +Y onto ±X about Z leaves
+−Z untouched. They were still rolled, so local +Y pointed outboard — and
+`auto_weapon._within_elevation()` reads `basis.y` as "up", so a side gun's
+elevation cone opened **sideways**, rejecting a level outboard target and
+accepting one directly overhead. It also visibly snapped upright on
+acquisition, because `_looking_at_safe()` builds the tracking basis with
+`Vector3.UP` and the two bases disagreed.
+
+**The fix.** On a near-vertical face a weapon is now levelled with
+`Basis.looking_at(outboard, Vector3.UP)` — muzzle outboard, +Y hull-up. It sits
+level, elevates against the real horizon, and traverses about hull-up.
+`yaw_offset` keeps working unchanged as the azimuth control. Resting and
+tracking bases now agree, so the snap is gone.
+
+Direct-fire weapons are additionally **embedded inboard** so their body and
+authored post sit inside the hull, firing out through a newly authored
+`sponson_blister.glb` housing — a faceted, low-profile bulge (two 10-segment
+drums flattened vertically, plus a bolted weld flange), not a box — with
+traverse narrowed to a 60° half-angle.
+
+**Every mount style wall-mounts, including `turret` and `frame_built`.** The
+first pass admitted only `pintle`, on a too-literal reading of spec `:25`
+("leave the enclosed turret as-is") — that line is about the *top deck*, and on
+a wall `basic_cannon` was broken exactly like everything else. Chris reported
+it as "the sponson seems to be failing entirely for the basic_cannon module".
+`frame_built` follows for the same reason and keeps its zero traverse.
+
+**This is not what 2026-07-21 deleted.** That was a procedural *column plus
+base plate* — a second mounting post under a mesh that already had one. The
+blister is a housing around the aperture; the weapon's own post is inside the
+hull, unseen and unduplicated. The no-double-mounting rule is intact, and
+`VisualBuilder._sponson_blister()` carries a comment saying so.
+
+**Split that Chris caught mid-implementation.** First cut used the revived
+`pintle_min_up_alignment` for both "should this be levelled" and "should this
+be boxed in". Backwards: that field is *highest* on artillery/mortars (0.55),
+so the weapons that most need open sky were the most eager to be enclosed. Now
+two questions:
+
+- `get_sponson_up_alignment()` — how level a base does it need, i.e. when to
+  **level** it. Mortars re-level eagerly. Correct as authored.
+- `is_sponson_capable()` — can it live in a box. New `sponson_capable` flag,
+  default true, set **false** on 17 indirect-fire entries (artillery, the three
+  mortars, plasma_lobber, ballista, cluster_dispenser, seven missile/rocket
+  types, recoilless_rifle).
+
+The first attempt at the second half levelled those weapons on an open,
+unhoused mount. Chris's follow-up call: that still leaves an artillery piece
+bolted to a wall, so **refuse the placement outright** instead. That is a
+deliberate, narrow exception to the no-hard-blocking rule at spec `:58` —
+`_placement_refusal_reason()` refuses exactly one combination (a
+non-`sponson_capable` weapon on a face steep enough to need a sponson),
+enforced on both the build bar and the drag path, with a toast rather than a
+silent no-op. The deck, a 45° glacis, and direct-fire weapons on the same facet
+all still go through. It does not reopen `:58` generally, and the earlier
+deletion of the foundations-refuse-locomotion gate stands.
+
+**Traverse parity.** Weapons now carry a `facet` meta (they never did —
+`auto_weapon.gd:691` had always read `""`), and the sponson flag is passed to
+`get_traverse_limit_angle()` **explicitly rather than inferred from the facet**,
+because a 45° glacis mount is facet "front" too while being flush. Combat and
+the Design Lab arc visualiser read the same meta.
+
+**Known residual, deliberate:** a 45° glacis is `dot(UP)=0.707`, above every
+authored threshold (max 0.55), so a gun there still leans with its muzzle 45°
+down. Both fixes were priced and rejected — see MOUNTING_AND_ARMOR_SPEC.md's
+2026-08-04 addendum.
+
+**Also corrected:** that spec's "hull placement uses a single axis-aligned
+`BoxShape3D`" note was outdated and argued against this work — placement has
+raycast a real trimesh since `hull_surface.gd` landed. Stale references to the
+long-deleted `get_mount_style_for_normal()` in `UNIFIED_ROADMAP.md`,
+`DECISIONS_NEEDED.md` and `HULL_MODDING_PLAN.md` got dated superseded-markers.
+
+**Follow-up round, same day, all from Chris looking at it on screen:**
+
+- **Housing sat too low, wrapping the gun's feet instead of its barrel.** Root
+  cause was ordering: it was built *before* the weapon geometry, so it had
+  nothing to measure and defaulted to the module base. `build_visual()` is now
+  a thin wrapper that builds the body first and the housing last, and
+  `VisualBuilder.sponson_geometry_for()` measures the real AABB for barrel-axis
+  height and wrap radius. Self-correcting: a barrel already centred yields a
+  ~0 lift.
+- **Stubby barrels vanished into the hull.** Embed depth was a flat fraction of
+  catalog depth. It is now capped by measured reach — `min(wanted, reach −
+  0.30)` — so barrel always clears the skin. Cached as a `sponson_embed` meta
+  that the placer reads, so the weapon and its housing offset by the same
+  number and cannot drift apart.
+- **Weapons became nearly unselectable** (reported against `heavy_machine_gun`).
+  Two separate causes, one of them long pre-existing:
+  - *Sponson-specific:* the click collider is a catalog-sized box just above
+    the module origin, which for a sponson is buried in the hull; selection
+    raycasts take the nearest hit, so the hull always won.
+  - *Pre-existing, and the bigger one:* Chris then found the same difficulty on
+    ordinary top-deck pintle mounts. Every monolithic authored mesh is yawed
+    90° about Y at `visual_builder.gd:441` (the TripoSG orientation offset),
+    which swings the barrel from Z onto X — but the catalog `size` the collider
+    is built from is not rotated with it. `heavy_machine_gun` is
+    `(0.3, 0.3, 1.0)`, so its click box was a 0.3-wide sliver lying *across*
+    the gun instead of along it. Uniform fit-scaling then mismatched the other
+    two axes as well.
+
+  Both are fixed by measuring: **all** weapon colliders (not just sponsons) are
+  now sized and centred from `measure_visual_bounds()`, which walks child
+  transforms and so accounts for the yaw and the scale. This generalises the
+  fix locomotion already had for the identical symptom. Armor and structural
+  are deliberately excluded — each has its own sizing story (facet auto-fit,
+  `struct_scale` sync) this must not fight. `_refit_module_collider()` re-fits
+  on the drag path so a weapon dragged onto or off a wall stays clickable.
+- **Shape:** flat weld flange deleted (it read as a separate plate bolted on
+  behind the bulge); bolt pads now sit directly on the curved wall, skipping
+  the aperture arc. The body is a vertical faceted prism, so the top and bottom
+  are genuine flat n-gon caps and the outboard face is rounded, with the barrel
+  aperture punched through by face-normal predicate. Left the pads unbevelled:
+  bevelling took the part from 256 to 832 faces for a chamfer invisible at
+  0.05 units, on a mesh that ships per-weapon per-unit.
+
+**Trap found and documented in passing:** `build_meshes.py`'s `add_cyl_axis()`
+names the axis it *rotates about*, not the one the cylinder lies along, and its
+docstring says the opposite. Verified empirically — `'x'` yields a Godot-Z
+cylinder, `'z'` yields a Godot-X one. Passing the intuitive `'z'` laid the
+blister sideways across the hull face. `build_sponson_blister()` now carries a
+comment; the helper itself was left alone because a dozen existing meshes bake
+in its current behaviour.
+
+Suites 206 → 211.
+
+---
+
 ## 2026-08-01 — Anti-materiel rifle, and the autocannon remodelled as an M230
 
 Follow-on from Chris off a shortlist of proposed archetypes: build the **anti-materiel rifle**, styled on "an advanced Bushmaster turret with expanded sensors and a longer greebled breech in the trunnions", and separately **remodel the autocannon as an M230** from an Apache's nose.

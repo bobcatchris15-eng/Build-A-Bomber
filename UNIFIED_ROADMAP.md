@@ -338,8 +338,12 @@ output on a sampled pixel grid across all 9 files, for every file including the
   confused by it, or a purge step in `reimport_assets.sh`.
 - **Dead code found in passing:** `visual_builder.gd:2413-2420`, `:2559-2566`,
   `:2588` are `elif`/`else` branches guarded on parts "not yet reimported" whose
-  `.glb` files now exist — unreachable. `module_catalog.gd:1558` documents
-  `get_mount_style_for_normal()` as an unused legacy stub.
+  `.glb` files now exist — unreachable. ~~`module_catalog.gd:1558` documents
+  `get_mount_style_for_normal()` as an unused legacy stub.~~ *(Superseded
+  2026-08-04: that stub was deleted outright, and the line number no longer
+  exists. Normal-derived mount classification now lives in
+  `module_placer._is_sponson_mount()` — see MOUNTING_AND_ARMOR_SPEC.md's
+  2026-08-04 addendum.)*
   `production_queue.gd:13` has a stale "D3 is a later chunk" comment (D3 landed in
   `5ceda9d`). `blueprint_manager.gd:182-185` still writes a legacy
   `user://blueprint.json` alongside the real save.

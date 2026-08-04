@@ -761,13 +761,39 @@ func test_module_drag_reclassifies_facet_and_mount() -> bool:
 		print("  [FAIL] Weapon dragged from top to a back-facing face should stay 'pintle', got mount_style='", mg.get_meta("mount_style", ""), "'")
 		placer.queue_free()
 		return false
-	if mg.global_transform.basis.y.dot(Vector3.BACK) < 0.999:
-		print("  [FAIL] Dragged weapon should rotate its baked-in mount post flush against the new (BACK) facet, basis.y=", mg.global_transform.basis.y)
+	# BACK is a vertical facet, so a heavy_machine_gun converts to a sponson on
+	# arrival rather than rolling onto its side. Before 2026-08-04 basis.y was
+	# asserted to be BACK here, which is the bug: it left the muzzle pointing
+	# straight at the sky.
+	if not mg.get_meta("sponson", false):
+		print("  [FAIL] Weapon dragged onto a vertical (BACK) facet should become a sponson mount")
+		placer.queue_free()
+		return false
+	if mg.global_transform.basis.y.dot(Vector3.UP) < 0.999:
+		print("  [FAIL] Dragged sponson weapon should sit level (basis.y ~= UP), got ", mg.global_transform.basis.y)
+		placer.queue_free()
+		return false
+	if (-mg.global_transform.basis.z).dot(Vector3.BACK) < 0.999:
+		print("  [FAIL] Dragged sponson weapon should aim outboard along BACK, got muzzle ", -mg.global_transform.basis.z)
+		placer.queue_free()
+		return false
+	# The drag path is the one most likely to lose the inboard embed, since it
+	# recomputes position every frame from the raw surface point.
+	var drag_embed = ModuleCatalog.get_sponson_embed_depth("heavy_machine_gun")
+	var drag_local_z = placer.hull.to_local(mg.global_position).z
+	if abs(drag_local_z - (3.0 - drag_embed)) > 0.15:
+		print("  [FAIL] Dragged sponson should be embedded inboard: expected local z ~= ",
+			3.0 - drag_embed, ", got ", drag_local_z)
+		placer.queue_free()
+		return false
+	var DragVisualBuilder = preload("res://scripts/visual_builder.gd")
+	if mg.get_node_or_null(DragVisualBuilder.SPONSON_BLISTER_NODE) == null:
+		print("  [FAIL] Weapon dragged onto a vertical facet should grow a sponson blister housing")
 		placer.queue_free()
 		return false
 
 	placer.queue_free()
-	print("  [PASS] Dragging a module to a new face re-runs facet/mount classification: armor refits+recenters, weapons keep the right mount_style and re-flush-mount against the new facet.")
+	print("  [PASS] Dragging a module to a new face re-runs facet/mount classification: armor refits+recenters, weapons keep the right mount_style, and a weapon dragged onto a vertical facet converts to a level outboard-aiming sponson with its housing.")
 	return true
 
 func test_angled_pintle_mount() -> bool:
@@ -825,6 +851,22 @@ func test_angled_pintle_mount() -> bool:
 	# brings its own post.
 	if gun.get_node_or_null("MountHardware"):
 		print("  [FAIL] No procedural MountHardware should be created anymore")
+		placer.queue_free()
+		return false
+
+	# A 45-degree glacis is dot(UP)=0.707, above every authored
+	# pintle_min_up_alignment in the roster (max 0.55), so it stays FLUSH and
+	# gets no sponson treatment. This pins that threshold deliberately: the
+	# sponson work of 2026-08-04 targets near-VERTICAL faces only, and if a
+	# future tweak starts putting housings under every sloped mount, this is
+	# the assertion that should stop it.
+	if gun.get_meta("sponson", false):
+		print("  [FAIL] A 45-degree glacis mount must NOT be a sponson - the threshold targets near-vertical faces only")
+		placer.queue_free()
+		return false
+	var GlacisVisualBuilder = preload("res://scripts/visual_builder.gd")
+	if gun.get_node_or_null(GlacisVisualBuilder.SPONSON_BLISTER_NODE) != null:
+		print("  [FAIL] A flush glacis mount must not grow a sponson blister housing")
 		placer.queue_free()
 		return false
 
