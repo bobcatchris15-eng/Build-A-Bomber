@@ -94,6 +94,10 @@ func _init():
 		success = false
 		_failed.append("test_no_dead_tweaks")
 	_total_suites += 1
+	if not await _run_suite(test_modular_assembly_types_have_no_shadowed_monolithic_mesh, "test_modular_assembly_types_have_no_shadowed_monolithic_mesh"):
+		success = false
+		_failed.append("test_modular_assembly_types_have_no_shadowed_monolithic_mesh")
+	_total_suites += 1
 	if not await _run_suite(test_designer_camera_pan, "test_designer_camera_pan"):
 		success = false
 		_failed.append("test_designer_camera_pan")
@@ -1546,6 +1550,32 @@ func test_sensor_mast_tweak_and_proportions() -> bool:
 
 	print("  [PASS] Sensor mast is proportionate and mast_height tweak scales height, not girth.")
 	return true
+
+func test_modular_assembly_types_have_no_shadowed_monolithic_mesh() -> bool:
+	print("Running Test Suite: No MODULAR_ASSEMBLY_TYPES id has an unreachable monolithic mesh...")
+	# build_visual() loads a whole-module authored mesh with
+	#   _part(type_id) if not MODULAR_ASSEMBLY_TYPES.has(type_id) else null
+	# so for any id in that table the monolithic assets/models/parts/<id>.glb
+	# can NEVER be loaded. Seventeen such files existed and read like intended
+	# fallbacks while being unreachable (tracked_treads.glb alone was 257KB).
+	# They were deleted; this stops the table and the parts dir from drifting
+	# back into that ambiguity, in either direction - adding an id to the table
+	# without deleting its monolith, or re-authoring a monolith for an id that
+	# is already modular.
+	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
+	var offenders: Array = []
+	for type_id in VisualBuilderScript.MODULAR_ASSEMBLY_TYPES.keys():
+		if ResourceLoader.exists("res://assets/models/parts/%s.glb" % type_id):
+			offenders.append(type_id)
+
+	if not offenders.is_empty():
+		print("  [FAIL] %d modular type(s) have a shadowed monolithic .glb that build_visual() can never load: %s" % [offenders.size(), str(offenders)])
+		print("         Either delete assets/models/parts/<id>.glb, or remove the id from MODULAR_ASSEMBLY_TYPES.")
+		return false
+
+	print("  [PASS] All %d modular assembly types are free of unreachable monolithic meshes." % VisualBuilderScript.MODULAR_ASSEMBLY_TYPES.size())
+	return true
+
 
 func test_no_dead_tweaks() -> bool:
 	print("Running Test Suite: No Dead Tweaks (every slider must change something)...")

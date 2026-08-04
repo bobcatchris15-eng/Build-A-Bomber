@@ -185,14 +185,15 @@ def build_flipbook(name, frame_fn, cells=4, cell_px=128):
     print(f"  {name}  {size}x{size}  ({cells}x{cells} frames)")
 
 
-def build_scorch(size=512):
+def build_scorch_emission(size=512):
     """
-    Burn mark for a Decal node: irregular charred blotch, soft edge.
+    Ember hotspots for a fresh burn, as an emission mask.
 
-    Albedo is near-black with brown grit; a matching emission map puts a few
-    dying embers inside the same silhouette so a fresh napalm pool can glow
-    and then be faded to a cold scorch by animating emission_energy alone -
-    one decal, two lifetimes, no second texture swap.
+    A fresh napalm pool can glow and then be faded to a cold scorch by
+    animating emission_energy alone - one decal, two lifetimes, no second
+    texture swap. The albedo half of that pair used to be written here as
+    scorch_decal.png; build_scorch_variants() below supersedes it with three
+    albedo/normal/orm sets, which is what vfx_effects.gd actually loads.
     """
     rng = np.random.default_rng(11)
     warp = fbm(size, size, octaves=5, base=3, rng=rng)
@@ -200,14 +201,6 @@ def build_scorch(size=512):
     # Perturb the distance field so the edge is ragged, not a circle.
     d = d + (warp - 0.5) * 0.42
     mask = 1.0 - smoothstep(0.55, 1.0, d)
-
-    grit = fbm(size, size, octaves=6, base=6, rng=np.random.default_rng(12))
-    char = 0.045 + 0.11 * grit          # near-black with soot variation
-    rgb = np.dstack([char * 1.25, char * 1.05, char * 0.9])  # faintly warm
-    alpha = np.clip(mask * (0.55 + 0.55 * grit), 0, 1)
-    Image.fromarray((np.clip(np.dstack([rgb, alpha]), 0, 1) * 255).astype(np.uint8), "RGBA") \
-        .save(OUT / "scorch_decal.png")
-    print(f"  scorch_decal.png  {size}x{size}")
 
     # Embers: sparse hot cells inside the burn, gated by the same mask.
     ember = fbm(size, size, octaves=4, base=10, rng=np.random.default_rng(13))
@@ -330,22 +323,11 @@ def build_craters(size=512, count=2):
         _save_rgb(build_orm(occl, rough), f"crater_{v}_orm.png")
 
 
-def build_spark(size=64):
-    d = radial(size, size, rx=0.5, ry=0.5)
-    core = 1.0 - smoothstep(0.0, 1.0, d)
-    a = np.clip(core ** 2.2 * 1.6, 0, 1)
-    rgb = np.dstack([np.ones_like(a), 0.72 + 0.28 * core, 0.35 * core])
-    Image.fromarray((np.clip(np.dstack([rgb, a]), 0, 1) * 255).astype(np.uint8), "RGBA") \
-        .save(OUT / "spark.png")
-    print(f"  spark.png  {size}x{size}")
-
-
 if __name__ == "__main__":
     print(f"Writing effect textures to {OUT}")
     build_flipbook("flame_flipbook.png", flame_frame)
     build_flipbook("smoke_flipbook.png", smoke_frame)
-    build_scorch()
+    build_scorch_emission()
     build_scorch_variants()
     build_craters()
-    build_spark()
     print("Done.")

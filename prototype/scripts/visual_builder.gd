@@ -433,10 +433,7 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 	var monolithic_mesh = _part(type_id) if not MODULAR_ASSEMBLY_TYPES.has(type_id) else null
 	if monolithic_mesh:
 		var inst = _mesh_inst(monolithic_mesh, base_color)
-		if type_id == "basic_cannon":
-			inst.rotation.y = 0.0
-		else:
-			inst.rotation.y = deg_to_rad(90.0) # TripoSG native orientation offset
+		inst.rotation.y = deg_to_rad(90.0) # TripoSG native orientation offset
 		# We scale the mesh uniformly so its largest dimension matches the largest dimension
 		# defined in base_size. This prevents squishing/stretching while ensuring it fits the scale curve.
 		var aabb = monolithic_mesh.get_aabb()

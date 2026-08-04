@@ -1572,66 +1572,6 @@ def build_tail_fin(name, height=0.5, width_bottom=0.3, width_top=0.12, thickness
 	return obj
 
 
-def build_rg_susp_beam(name, length=1.0, width=0.12, height=0.12, color=(0.18, 0.18, 0.2)):
-	bm = bmesh.new()
-	add_box(bm, (0, height * 0.5, 0), (width, height, length), bevel=0.015)
-	greeble_bolt_ring(bm, (0, height * 0.5, -length * 0.4), width * 0.4, count=4, axis='z')
-	greeble_bolt_ring(bm, (0, height * 0.5, length * 0.4), width * 0.4, count=4, axis='z')
-	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
-	return obj
-
-
-def build_rg_axle_stub(name, length=0.25, radius=0.04, color=(0.2, 0.2, 0.22)):
-	bm = bmesh.new()
-	add_cyl_axis(bm, (0, 0, 0), radius, length, 'x', segments=12)
-	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
-	return obj
-
-
-def build_rg_track_frame(name, length=1.4, width=0.14, height=0.2, color=(0.16, 0.16, 0.18)):
-	bm = bmesh.new()
-	add_box(bm, (0, height * 0.5, 0), (width, height, length), bevel=0.02)
-	greeble_bolt_ring(bm, (0, height * 0.5, 0), width * 0.4, count=6, axis='x')
-	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.55, roughness=0.45)
-	return obj
-
-
-def build_rg_road_bogie(name, width=0.18, height=0.15, depth=0.15, color=(0.2, 0.2, 0.22)):
-	bm = bmesh.new()
-	add_box(bm, (0, height * 0.5, 0), (width, height, depth), bevel=0.015)
-	add_cyl_axis(bm, (width * 0.5, height * 0.5, 0), 0.035, 0.1, 'x', segments=10)
-	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.5, roughness=0.5)
-	return obj
-
-
-def build_rg_hip_socket(name, size=(0.25, 0.25, 0.25), color=(0.22, 0.22, 0.25)):
-	bm = bmesh.new()
-	add_box(bm, (0, size[1] * 0.5, 0), size, bevel=0.02)
-	greeble_bolt_ring(bm, (0, size[1] * 0.5, 0), min(size[0], size[2]) * 0.35, count=6, axis='y')
-	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.6, roughness=0.4)
-	return obj
-
-
-def build_rg_screw_cradle(name, size=(0.3, 0.25, 0.35), color=(0.25, 0.22, 0.2)):
-	# Gearbox/bearing housing for amphibious screw-drive drums (Chris's
-	# ask, 2026-07-24: "a gearbox that projects out and down from the fore
-	# and aft corners of the hull"). 'x' (not 'z') on the bearing-bore
-	# cylinder is intentional - same add_cyl_axis swap as build_screw_drum
-	# above - 'x' yields the Godot-Z-long (fore-aft) bore the drum shaft
-	# actually passes through.
-	bm = bmesh.new()
-	add_box(bm, (0, size[1] * 0.5, 0), size, bevel=0.02)
-	add_cyl_axis(bm, (0, size[1] * 0.8, 0), size[0] * 0.35, size[2] * 0.9, 'x', segments=12)
-	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=0.5, roughness=0.5)
-	return obj
-
-
 def build_accessory(name, kind, color, **kwargs):
 	"""Standalone small greeble accessories - also usable directly as weapon
 	sub-parts (headlight cluster, exhaust, antenna, hatch, vent, toolbox)."""
@@ -2544,12 +2484,6 @@ def generate_parts():
 	export_and_cleanup(build_outrigger_strut("outrigger_strut"), PARTS_DIR, "outrigger_strut")
 	export_and_cleanup(build_tail_fin("tail_fin"), PARTS_DIR, "tail_fin")
 
-	export_and_cleanup(build_rg_susp_beam("rg_susp_beam"), PARTS_DIR, "rg_susp_beam")
-	export_and_cleanup(build_rg_axle_stub("rg_axle_stub"), PARTS_DIR, "rg_axle_stub")
-	export_and_cleanup(build_rg_track_frame("rg_track_frame"), PARTS_DIR, "rg_track_frame")
-	export_and_cleanup(build_rg_road_bogie("rg_road_bogie"), PARTS_DIR, "rg_road_bogie")
-	export_and_cleanup(build_rg_hip_socket("rg_hip_socket"), PARTS_DIR, "rg_hip_socket")
-	export_and_cleanup(build_rg_screw_cradle("rg_screw_cradle"), PARTS_DIR, "rg_screw_cradle")
 	export_and_cleanup(build_locomotion_mount_box("rg_mount_box"), PARTS_DIR, "rg_mount_box")
 	export_and_cleanup(build_wheel_driveshaft("wheel_driveshaft"), PARTS_DIR, "wheel_driveshaft")
 	export_and_cleanup(build_wheel_gearbox("wheel_gearbox"), PARTS_DIR, "wheel_gearbox")
