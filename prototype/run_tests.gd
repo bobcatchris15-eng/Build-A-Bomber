@@ -1,5 +1,5 @@
 extends SceneTree
-# Headless automated test runner for Build-A-Bomber.
+# Headless automated test runner for Kitbash Command.
 # Run via the wrapper, not directly: ./run_tests.ps1  (or ./run_tests.sh)
 #
 # The suites themselves live in tests/test_<area>.gd, all extending
@@ -273,7 +273,7 @@ func _run_suite(cb: Callable, name: String) -> bool:
 
 func _init():
 	print("\n==============================================")
-	print("    BUILD-A-BOMBER HEADLESS TEST RUNNER")
+	print("    KITBASH COMMAND HEADLESS TEST RUNNER")
 	print("==============================================\n")
 
 	# One instance per area file, built up front and reused across that area's

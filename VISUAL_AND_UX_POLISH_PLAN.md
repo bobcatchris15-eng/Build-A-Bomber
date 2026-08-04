@@ -1,4 +1,4 @@
-# Build-A-Bomber: Visual & UX Polish Plan (3D fidelity + interaction gaps)
+# Kitbash Command: Visual & UX Polish Plan (3D fidelity + interaction gaps)
 
 **Status (2026-07-25): planning only.** Written alongside `PERFORMANCE_PLAN.md`
 in response to Chris comparing the game's polish bar against `E:\OpenRA`

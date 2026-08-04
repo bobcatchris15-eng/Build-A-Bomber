@@ -6,7 +6,10 @@ MODLY_DIR = Path(r"C:\Users\Chris\Documents\Modly")
 EXT_DIR = MODLY_DIR / "extensions" / "triposg"
 VENDOR_DIR = EXT_DIR / "vendor"
 MODEL_DIR = MODLY_DIR / "models" / "triposg" / "generate"
-OUT_DIR = Path(r"e:\Build-A-Bomber-GitHub\prototype\assets\models\buildings")
+# Derived from this file's own location, not hardcoded. The previous value
+# was an absolute path into a checkout that no longer exists.
+_PROTO = Path(__file__).resolve().parent.parent
+OUT_DIR = _PROTO / "assets" / "models" / "buildings"
 
 if str(EXT_DIR) not in sys.path:
     sys.path.insert(0, str(EXT_DIR))
@@ -27,7 +30,7 @@ print(f"Loading pipeline on {device} ({dtype})...")
 pipe = TripoSGPipeline.from_pretrained(str(MODEL_DIR)).to(device, dtype)
 print("Pipeline loaded!")
 
-img_path = r"e:\Build-A-Bomber-GitHub\prototype\assets\temp_images\medium_manufactory.png"
+img_path = str(_PROTO / "assets" / "temp_images" / "medium_manufactory.png")
 image = Image.open(img_path).convert("RGB").resize((512, 512))
 
 print("Running TripoSG inference (20 steps)...")

@@ -1,4 +1,4 @@
-# Build-A-Bomber: RTS Core Roadmap (terrain, maps, base building, production)
+# Kitbash Command: RTS Core Roadmap (terrain, maps, base building, production)
 
 **Status (2026-07-26): A1, A2, B1–B7, B9, B10, C1, C2, C3, C4, D1, D2, D3, D4,
 E1 landed; B8 parked as future work (1 map landed -

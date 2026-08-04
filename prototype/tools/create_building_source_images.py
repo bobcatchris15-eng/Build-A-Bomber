@@ -1,7 +1,11 @@
 import os
 from PIL import Image, ImageDraw
 
-IMG_DIR = r"e:\Build-A-Bomber-GitHub\prototype\assets\temp_images"
+# Derived from this file's own location, not hardcoded. The previous
+# value was an absolute path into a checkout that no longer exists.
+IMG_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "temp_images")
+)
 os.makedirs(IMG_DIR, exist_ok=True)
 
 def draw_hq(d):

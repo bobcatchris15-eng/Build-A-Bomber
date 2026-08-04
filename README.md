@@ -1,4 +1,4 @@
-# Build-A-Bomber
+# Kitbash Command
 
 A prototype RTS where **you design the units** — Spore's vehicle creator meets Command & Conquer skirmishes.
 

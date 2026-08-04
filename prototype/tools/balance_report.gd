@@ -39,7 +39,7 @@ const WEIGHT_TAX: float = 0.05
 
 func _init():
 	print("\n==============================================")
-	print("    BUILD-A-BOMBER BALANCE REPORT")
+	print("    KITBASH COMMAND BALANCE REPORT")
 	print("==============================================\n")
 
 	var catalog = ModuleCatalog.get_catalog()

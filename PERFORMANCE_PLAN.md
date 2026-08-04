@@ -1,4 +1,4 @@
-# Build-A-Bomber: Performance Plan (battle-scale simulation cost)
+# Kitbash Command: Performance Plan (battle-scale simulation cost)
 
 **Status (2026-07-26): P1 (a/b/c/d all landed), P2, and P4 (per-module
 bake-at-spawn) landed; P3, P4d/e, P5 still planning.** Written after a

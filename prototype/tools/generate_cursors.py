@@ -1,7 +1,11 @@
 import os
 from PIL import Image, ImageDraw
 
-CURSOR_DIR = r"e:\Build-A-Bomber-GitHub\prototype\assets\cursors"
+# Derived from this file's own location, not hardcoded. The previous
+# value was an absolute path into a checkout that no longer exists.
+CURSOR_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "cursors")
+)
 os.makedirs(CURSOR_DIR, exist_ok=True)
 
 def create_cursor(name, draw_fn):

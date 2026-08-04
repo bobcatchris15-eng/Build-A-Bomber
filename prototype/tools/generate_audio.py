@@ -4,7 +4,11 @@ import struct
 import random
 import wave
 
-AUDIO_DIR = r"e:\Build-A-Bomber-GitHub\prototype\assets\audio"
+# Derived from this file's own location, not hardcoded. The previous
+# value was an absolute path into a checkout that no longer exists.
+AUDIO_DIR = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "audio")
+)
 SFX_DIR = os.path.join(AUDIO_DIR, "sfx")
 MUSIC_DIR = os.path.join(AUDIO_DIR, "music")
 

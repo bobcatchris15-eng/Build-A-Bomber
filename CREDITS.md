@@ -13,4 +13,4 @@
   - Author: Astigmatic (astigmatic.com)
 
 ## Vector Icons
-- Custom hand-authored SVG icons by Build-A-Bomber project contributors (`prototype/assets/icons/`).
+- Custom hand-authored SVG icons by Kitbash Command project contributors (`prototype/assets/icons/`).

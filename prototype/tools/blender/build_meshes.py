@@ -1,5 +1,5 @@
 """
-Build-A-Bomber mesh generator (Milestone: Visual Refinement pass 2)
+Kitbash Command mesh generator (Milestone: Visual Refinement pass 2)
 Run headlessly with UPBGE's bundled Blender:
   UPBGE-0.30-windows-x86_64\\blender.exe --background --python tools\\blender\\build_meshes.py
 

@@ -1,4 +1,4 @@
-# Build-A-Bomber — Faction & Terrain Visual Design Document
+# Kitbash Command — Faction & Terrain Visual Design Document
 
 ## 0. Design Premise
 Every hull/module uses one shared mesh per part, faction-agnostic. Faction identity is carried 100% by material parameters: paint color, wear, trim, surface finish — no bespoke geometry, no hand-painted unique textures per faction. Entire faction-identity system lives in a shared shader with a small number of exposed per-faction parameters, plus shared masks (wear masks, panel-line masks, trim masks) every faction's parameters multiply against.

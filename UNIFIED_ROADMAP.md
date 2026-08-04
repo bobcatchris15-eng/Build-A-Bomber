@@ -1,4 +1,4 @@
-# Build-A-Bomber: Unified Roadmap
+# Kitbash Command: Unified Roadmap
 
 **Written 2026-07-27** against `b1c5309`, after reading all 22 markdown docs in the
 repo plus a direct survey of `prototype/` (169 first-party `.gd`, ~44,600 lines).
@@ -718,8 +718,8 @@ These are genuinely large and none of them blocks the others. Pick by appetite.
 
 ### 3.1 Hull Builder — but rewrite the plan first
 
-`HULL_BUILDER_PLAN.md` is **not usable as written.** It references
-`E:/Build-A-Bomber-GitHub/` paths throughout (wrong checkout), states
+`HULL_BUILDER_PLAN.md` is **not usable as written.** Its stale absolute paths into
+a long-dead checkout have since been fixed, but it still states
 `hull_builder.gd` is 670 lines when it is 1,353, and describes as "missing" several
 things the file now attempts (undo stack, export pipeline, serialization). The
 `5df48c9` commit that claimed "Stage 1 — Implement Hull Builder export pipeline"
@@ -787,7 +787,7 @@ exist between matches"* — has no implementation. FABLE's verdict stands: the
 individual systems are far ahead of the loop that is supposed to connect them.
 
 This needs a **design decision from Chris before any plan can be written.** The
-question is roughly: is Build-A-Bomber a skirmish sandbox where the Design Lab is
+question is roughly: is Kitbash Command a skirmish sandbox where the Design Lab is
 the whole point, or a campaign where designs persist, get salvaged, and evolve
 between missions? Both are legitimate; they imply very different work.
 

@@ -13,8 +13,11 @@ MODLY_DIR = Path(r"C:\Users\Chris\Documents\Modly")
 EXT_DIR = MODLY_DIR / "extensions" / "triposg"
 VENDOR_DIR = EXT_DIR / "vendor"
 MODEL_DIR = MODLY_DIR / "models" / "triposg" / "generate"
-OUT_DIR = Path(r"e:\Build-A-Bomber-GitHub\prototype\assets\models\buildings")
-IMG_DIR = Path(r"e:\Build-A-Bomber-GitHub\prototype\assets\temp_images")
+# Derived from this file's own location, not hardcoded. The previous values
+# were absolute paths into a checkout that no longer exists.
+_PROTO = Path(__file__).resolve().parent.parent
+OUT_DIR = _PROTO / "assets" / "models" / "buildings"
+IMG_DIR = _PROTO / "assets" / "temp_images"
 
 sys.path.insert(0, str(VENDOR_DIR))
 from triposg.pipelines.pipeline_triposg import TripoSGPipeline

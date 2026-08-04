@@ -188,7 +188,7 @@ var _rows: Dictionary = {}     # type_id -> cached metrics row
 
 func _init():
 	print("\n=======================================================")
-	print("    BUILD-A-BOMBER COMBAT BALANCE OPTIMIZER")
+	print("    KITBASH COMMAND COMBAT BALANCE OPTIMIZER")
 	print("=======================================================\n")
 
 	_build_targets()

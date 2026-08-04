@@ -27,7 +27,8 @@ ICON_STROKE = "#ADA9A0"
 
 # Derived from this file's own location, not hardcoded. The previous value was
 # an absolute path into a checkout that no longer exists
-# (e:\Build-A-Bomber-GitHub), so running this script silently wrote 35 icons to a
+# (a since-removed e:\ checkout), so running this script silently wrote 35
+# icons to a
 # directory nobody reads and reported success.
 ICON_DIR = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "icons")

@@ -57,7 +57,7 @@ const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 # Working title. Deliberately one constant rather than a literal scattered
 # across screens, because this is expected to change and a rename shouldn't
 # be a search-and-replace across the UI.
-const TITLE := "BUILD-A-BOMBER"
+const TITLE := "KITBASH COMMAND"
 const TAGLINE := "Design bureau and proving ground"
 
 # The roster cap the status column reports against. Pulled out because it

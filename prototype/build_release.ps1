@@ -31,14 +31,14 @@ if (-not $versionLine) {
 }
 $version = $versionLine.Matches[0].Groups[1].Value
 $stamp = Get-Date -Format "yyyyMMdd"
-$base = "BuildABomber-v$version-$stamp"
+$base = "KitbashCommand-v$version-$stamp"
 
 # Short commit so a build can always be traced back to a tree state, even one
 # built from uncommitted work.
 $commit = (& git rev-parse --short HEAD 2>$null)
 $dirty = if ((& git status --porcelain 2>$null)) { " (dirty tree)" } else { "" }
 
-Write-Output "Build-A-Bomber release export"
+Write-Output "Kitbash Command release export"
 Write-Output "  version : $version"
 Write-Output "  date    : $stamp"
 Write-Output "  commit  : $commit$dirty"
