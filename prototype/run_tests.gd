@@ -11,6 +11,9 @@ extends SceneTree
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const ModuleData = preload("res://scripts/module_data.gd")
 const HullLoader = preload("res://scripts/hull_loader.gd")
+# player_vehicle.gd is no longer used in production - battlefield.gd:51 explains
+# why battle_unit.gd replaced it - but four damage-model suites still use it as a
+# minimal CharacterBody3D damage target, which is exactly what they want there.
 const PlayerVehicleScript = preload("res://scripts/player_vehicle.gd")
 const TargetDummyScript = preload("res://scripts/target_dummy.gd")
 const IncomingMissileScript = preload("res://scripts/incoming_missile.gd")

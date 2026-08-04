@@ -356,7 +356,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 80,
 			"crystal": 40,
 			"dps": 99.0,
-			# Frame_built (see get_mount_style_for_normal below), so it never
+			# Frame_built (see get_mount_style() below), so it never
 			# independently traverses in practice - this number only matters
 			# if that override is ever lifted, kept low for consistency with
 			# its long rigid accelerator rail.
@@ -1954,9 +1954,6 @@ static func hull_exists(type_id: String) -> bool:
 # nose already at -Z can opt out via its own "visual_yaw_offset_deg" catalog
 # field (or JSON sidecar field, for HullLoader-scanned mod hulls).
 const HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG: float = 90.0
-static func get_hull_visual_yaw_offset_deg(hull_type_id: String) -> float:
-	return get_module_data(hull_type_id).get("visual_yaw_offset_deg", HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG)
-
 # --- Hull mesh orientation + fit (single source of truth) -------------------
 #
 # module_placer.gd (fresh hull placed in the Design Lab) and
@@ -2095,34 +2092,6 @@ static func get_hull_mesh_fit(hull_type_id: String, mesh: Mesh, extra_scale: Vec
 	var position = -(basis * aabb.get_center())
 
 	return {"rotation": euler, "scale": final_scale, "position": position}
-
-# Diagnostic: hulls whose authored mesh proportions are far enough from their
-# catalog size that get_hull_mesh_fit() has to stretch them noticeably. These
-# are data problems (the .glb should be re-exported at its catalog
-# dimensions), not code problems - surfaced so they stay visible instead of
-# being silently absorbed by the per-axis fit.
-static func get_hull_mesh_fit_warnings(tolerance: float = 1.5) -> Array:
-	var out := []
-	var MeshAssetLoaderScript = load("res://scripts/mesh_asset_loader.gd")
-	for hull_id in get_catalog().keys():
-		if get_catalog()[hull_id].get("category", "") != "hull":
-			continue
-		var mesh = MeshAssetLoaderScript.get_hull_mesh(hull_id)
-		if not mesh:
-			continue
-		var fit = get_hull_mesh_fit(hull_id, mesh)
-		var s: Vector3 = fit["scale"]
-		var lo = min(s.x, min(s.y, s.z))
-		var hi = max(s.x, max(s.y, s.z))
-		if lo > 0.0001 and hi / lo > tolerance:
-			out.append({
-				"hull": hull_id,
-				"stretch": hi / lo,
-				"scale": s,
-				"rotation_deg": fit["rotation"] * (180.0 / PI),
-			})
-	out.sort_custom(func(a, b): return a["stretch"] > b["stretch"])
-	return out
 
 # Energy resource (ENERGY_AND_BALANCE_SPEC.md #1): a hull's base_energy is
 # the starting point for max_energy before any generator modules are
@@ -3315,14 +3284,6 @@ static func get_running_gear_size(hull_size: Vector3) -> Vector3:
 		clamp(hull_size.y * RUNNING_GEAR_HEIGHT_FRACTION, RUNNING_GEAR_HEIGHT_MIN, RUNNING_GEAR_HEIGHT_MAX),
 		hull_size.z * RUNNING_GEAR_XZ_INSET
 	)
-
-# Continuous alternative to get_mount_style()'s discrete facet matching,
-# from an early per-normal mount-hardware design that predates the current
-# flush-rotate-to-surface placement (see module_placer.gd's _place_weapon()).
-# (Unused now, kept as a stub for legacy blueprint reloads; new code should
-# not call this.)
-static func get_mount_style_for_normal(type_id: String, normal: Vector3, hull_type_id: String = "") -> String:
-	return get_mount_style(type_id, hull_type_id)
 
 # Facet = one of the hull's 6 axis-aligned box faces (see
 # MOUNTING_AND_ARMOR_SPEC.md's "Known architecture constraint"). Shared

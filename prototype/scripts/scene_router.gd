@@ -31,8 +31,6 @@ extends Node
 # wall time is unchanged - the window just stops lying about being dead.
 
 signal load_progress(fraction: float, label: String)
-signal load_finished()
-
 const LOADING_SCENE := "res://scenes/Loading.tscn"
 
 # Scene -> the script whose preload graph carries its weight. Only scenes
@@ -89,7 +87,6 @@ func run_load() -> void:
 	# Cache is warm now, so this is fast.
 	var packed: PackedScene = load(_target_path)
 	load_progress.emit(1.0, "Ready")
-	load_finished.emit()
 
 	_loading = false
 	if packed == null:
@@ -158,5 +155,3 @@ func _label_for(path: String) -> String:
 	return STEP_LABELS.get(stem, "Loading %s" % stem.replace("_", " "))
 
 
-func is_loading() -> bool:
-	return _loading

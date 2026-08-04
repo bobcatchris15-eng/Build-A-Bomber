@@ -296,8 +296,3 @@ static func get_material(role: String, tint: Color, emission: Color = Color(0, 0
 	_cache[key] = mat
 	return mat
 
-# Test/tooling hook. The cache is static and lives for the process, which is
-# correct at runtime but makes a test that wants to assert on cache behaviour
-# order-dependent.
-static func clear_cache() -> void:
-	_cache.clear()

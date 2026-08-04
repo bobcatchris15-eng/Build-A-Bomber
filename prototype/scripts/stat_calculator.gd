@@ -94,7 +94,6 @@ const LOCOMOTION_SIZE_KEY := {
 
 # Floating Popup Window fields
 var tweak_canvas: Control
-var popup_vbox: VBoxContainer
 var popup_name_label: Label
 var popup_stats_label: Label
 var popup_tweaks_container: VBoxContainer
@@ -390,15 +389,13 @@ var hull_spec_btn: Button
 var hull_spec_stash: VBoxContainer
 var _hull_spec_flyout: Node = null
 var energy_label: Label
-var nose_taper_label: Label
-var nose_taper_slider: HSlider
 
 # Wheels-only "dually" tweak (wheels_per_axle, 1-2): no scene node for this
 # exists in UI_StatBlock.tscn (only the generic Size/Count sliders shared by
-# every locomotion type), so it's built dynamically here, following the same
-# pattern nose_taper_slider already uses below - added as a sibling of
-# SizeContainer/CountContainer inside LocomotionTweaks so it reads as part of
-# the same panel instead of a separate floating control.
+# every locomotion type), so it's built dynamically here rather than in the
+# scene - added as a sibling of SizeContainer/CountContainer inside
+# LocomotionTweaks so it reads as part of the same panel instead of a separate
+# floating control.
 var wheels_per_axle_container: HBoxContainer
 var wheels_per_axle_label: Label
 var wheels_per_axle_slider: HSlider
@@ -701,27 +698,6 @@ func _ready():
 	_rail_vbox.add_child(hull_spec_btn)
 	hull_spec_btn.pressed.connect(_on_hull_spec_pressed)
 
-	# Per-hull-type custom deform proof-of-concept (MOUNTING_AND_ARMOR_SPEC.md
-	# #4) - only shown for interceptor_hull, see DECISIONS_NEEDED.md for why
-	# the other 6 hulls don't have this yet. Reshapes the nose region of the
-	# actual mesh (HullDeform.apply_nose_taper via MeshDataTool), distinct
-	# from the uniform hull-scale handles which stretch the whole hull evenly.
-	nose_taper_label = Label.new()
-	nose_taper_label.text = "Nose Taper"
-	_rail_vbox.add_child(nose_taper_label)
-
-	nose_taper_slider = HSlider.new()
-	nose_taper_slider.min_value = 0.3
-	nose_taper_slider.max_value = 1.5
-	nose_taper_slider.step = 0.05
-	nose_taper_slider.value = 1.0
-	_rail_vbox.add_child(nose_taper_slider)
-	UITheme.style_slider(nose_taper_slider)
-	nose_taper_slider.value_changed.connect(_on_nose_taper_changed)
-	nose_taper_slider.drag_started.connect(_push_undo)
-	nose_taper_slider.visible = false
-	nose_taper_label.visible = false
-
 	# Create Module Tweaks container
 	module_tweaks_container = VBoxContainer.new()
 	module_tweaks_container.name = "ModuleTweaksContainer"
@@ -922,15 +898,6 @@ func sync_hull_ui(hull: Node3D):
 		armor_thick_slider.value = thick
 		if armor_thick_label:
 			armor_thick_label.text = "Armor Thickness: %.1f" % thick
-	if nose_taper_slider and nose_taper_label:
-		var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
-		var is_interceptor = hull_type == "interceptor_hull"
-		nose_taper_slider.visible = is_interceptor
-		nose_taper_label.visible = is_interceptor
-		if is_interceptor:
-			var taper = hull.get_meta("nose_taper") if hull.has_meta("nose_taper") else 1.0
-			nose_taper_slider.value = taper
-			nose_taper_label.text = "Nose Taper: %.2fx" % taper
 	# Held as a member rather than looked up by node path. The old
 	# `$ScrollContainer/VBoxContainer.get_node_or_null("FactionDropdown")` broke
 	# the moment this control moved into the hull-spec flyout, and broke
@@ -2243,20 +2210,6 @@ func _on_armor_thickness_changed(value: float):
 	hull.set_meta("armor_thickness", value)
 	if armor_thick_label:
 		armor_thick_label.text = "Armor Thickness: %.1f" % value
-	if root.has_method("update_hull_appearance"):
-		root.update_hull_appearance()
-	update_stats(hull)
-
-func _on_nose_taper_changed(value: float):
-	if is_updating_sliders: return
-	var root = get_node_or_null("/root/MainLab")
-	if not root: return
-	var hull = root.get_node_or_null("Hull")
-	if not hull: return
-
-	hull.set_meta("nose_taper", value)
-	if nose_taper_label:
-		nose_taper_label.text = "Nose Taper: %.2fx" % value
 	if root.has_method("update_hull_appearance"):
 		root.update_hull_appearance()
 	update_stats(hull)

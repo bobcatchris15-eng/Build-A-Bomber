@@ -115,6 +115,3 @@ func play_music(track_name: String) -> void:
 	_music_player.stream = stream
 	_music_player.play()
 
-func stop_music() -> void:
-	if _music_player and _music_player.playing:
-		_music_player.stop()

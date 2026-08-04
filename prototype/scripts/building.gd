@@ -3,8 +3,6 @@ extends StaticBody3D
 # kind: "hq" | "refinery" | "light_manufactory" | "medium_manufactory" | "heavy_manufactory" | "power_plant" | "defense"
 
 signal died(building)
-signal unit_produced(unit)
-
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const MunitionPool = preload("res://scripts/munition_pool.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
@@ -539,7 +537,6 @@ func spawn_from_queue(blueprint_data: Dictionary):
 	if scene_root and scene_root.has_method("_on_resources_delivered"):
 		unit.resources_delivered.connect(scene_root._on_resources_delivered)
 	unit.order_move(rally_point)
-	emit_signal("unit_produced", unit)
 
 func get_active_modules() -> Array:
 	var list = []

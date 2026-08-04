@@ -108,9 +108,6 @@ var _gizmo_drag_start_scale: Vector3 = Vector3.ONE
 # Reference angle for rotate-ring drag (atan2 in XZ plane)
 var _gizmo_drag_start_angle: float = 0.0
 
-# Undo stack (see _update_undo_stack/_perform_undo below)
-var _undo_stack: Array = []
-
 # Handle collision is on layer 4 (translate/scale) and layer 8 (rotate ring),
 # kept on SEPARATE bits so _raycast_gizmo() can query them in two passes and
 # give translate/scale priority - the rotate ring necessarily lies flat in
@@ -226,8 +223,6 @@ var skin_color: Color = Color(0.45, 0.48, 0.52, 1.0)
 var _stage_bar: HBoxContainer = null
 var _stage_frame_btn: Button = null
 var _stage_finishing_btn: Button = null
-var _stage_banner: Label = null
-
 # ── Lifecycle ────────────────────────────────────────────────────────────────
 
 func _ready() -> void:
@@ -2242,47 +2237,6 @@ func _find_mesh_instances(node: Node3D) -> Array:
 		result.append_array(_find_mesh_instances(child))
 	return result
 
-# Status bar helper
-func _show_status_message(message: String, duration: float = 3.0) -> void:
-	if status_label:
-		status_label.text = message
-
-	if duration > 0:
-		await get_tree().create_timer(duration).timeout
-		status_label.text = "Ready"
-
-func _generate_color_for_primitive(type: PrimitiveType) -> Color:
-	# Generate a distinct color for each primitive type
-	match type:
-		PrimitiveType.BOX:
-			return Color(0.7, 0.7, 0.8, 1.0)
-		PrimitiveType.SPHERE:
-			return Color(0.8, 0.6, 0.4, 1.0)
-		PrimitiveType.CYLINDER:
-			return Color(0.6, 0.8, 0.7, 1.0)
-		PrimitiveType.WEDGE:
-			return Color(0.9, 0.7, 0.5, 1.0)
-		PrimitiveType.CONE:
-			return Color(0.8, 0.5, 0.6, 1.0)
-		PrimitiveType.TORUS:
-			return Color(0.5, 0.7, 0.8, 1.0)
-		_:
-			return Color(0.7, 0.7, 0.8, 1.0)
-
-func _update_undo_stack(action: Dictionary) -> void:
-	# Simple undo stack - just store last 10 actions
-	if _undo_stack.size() >= 10:
-		_undo_stack.remove_at(0)
-	_undo_stack.append(action)
-
-func _perform_undo() -> bool:
-	if _undo_stack.size() == 0:
-		return false
-
-	var action = _undo_stack.pop_at(_undo_stack.size() - 1)
-	_match_undo_action(action)
-	return true
-
 func _delete_primitive_at_position(index: int) -> void:
 	if index < 0 or index >= primitives.size():
 		return
@@ -2299,48 +2253,6 @@ func _delete_primitive_at_position(index: int) -> void:
 	if primitives.is_empty():
 		has_origin = false
 	_update_properties_panel()
-
-func _match_undo_action(action: Dictionary) -> void:
-	match action["type"]:
-		"add_primitive":
-			_delete_primitive_at_position(action["index"])
-		"delete_primitive":
-			# Restore deleted primitive (simplified - would need to store full state)
-			# For now, just show message
-			_update_status("Undo: primitive deletion restored")
-		"move_primitive":
-			# Restore position
-			var idx = action["index"]
-			if idx >= 0 and idx < primitives.size():
-				primitives[idx].position = action["old_position"]
-				if primitives[idx].node:
-					primitives[idx].node.position = action["old_position"]
-			_update_properties_panel()
-		"scale_primitive":
-			var idx = action["index"]
-			if idx >= 0 and idx < primitives.size():
-				primitives[idx].scale = action["old_scale"]
-				if primitives[idx].node:
-					primitives[idx].node.scale = action["old_scale"]
-			_update_properties_panel()
-		"rotate_primitive":
-			var idx = action["index"]
-			if idx >= 0 and idx < primitives.size():
-				primitives[idx].rotation = action["old_rotation"]
-				if primitives[idx].node:
-					primitives[idx].node.rotation = action["old_rotation"]
-			_update_properties_panel()
-		"color_primitive":
-			var idx = action["index"]
-			if idx >= 0 and idx < primitives.size():
-				primitives[idx].color = action["old_color"]
-				if primitives[idx].node:
-					for child in primitives[idx].node.get_children():
-						if child is MeshInstance3D:
-							var mat = child.material_override as StandardMaterial3D
-							if mat:
-								mat.albedo_color = action["old_color"]
-			_update_properties_panel()
 
 # Utility functions for data conversion
 # Saved assemblies store a primitive's type as its NAME, never its raw int
@@ -2562,7 +2474,3 @@ func _show_warning(msg: String) -> void:
 	await get_tree().create_timer(3.0).timeout
 	_update_status("Ready")
 
-func _show_info(msg: String) -> void:
-	_update_status("INFO: " + msg)
-	await get_tree().create_timer(3.0).timeout
-	_update_status("Ready")

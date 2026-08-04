@@ -99,13 +99,6 @@ func add_action(id: String, label: String, icon: String = "", enabled: bool = tr
 	queue_redraw()
 
 
-func set_action_enabled(id: String, enabled: bool) -> void:
-	for a in _actions:
-		if a["id"] == id:
-			a["enabled"] = enabled
-	queue_redraw()
-
-
 func is_open() -> bool:
 	return _is_open
 

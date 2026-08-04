@@ -60,10 +60,6 @@ const RANGE_TWEAKS_DOWN := [
 	"containment", "dish_aperture",
 ]
 
-# The headline tweak, called out separately because it is the one the player is
-# told about and the one velocity is derived from.
-const PRIMARY_RANGE_TWEAK := "barrel_length"
-
 static func _num(tweaks: Dictionary, key: String) -> float:
 	var v = tweaks.get(key, null)
 	if v == null:

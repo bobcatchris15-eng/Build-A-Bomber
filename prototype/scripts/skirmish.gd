@@ -88,8 +88,6 @@ const ENERGY_UPKEEP_PER_STATIC_BUILDING: float = 3.0
 # = 15.0, so this needed to rise from 10.0 to keep the same ~1.0 headroom
 # margin, not just the old 3-building value.
 const ENERGY_HQ_BASELINE_CAPACITY: float = 16.0
-var energy_tick_timer: float = 0.0
-
 # Fog-of-war (built this pass): real vision-radius system, no supporting
 # infrastructure existed before this - Technocrats' "+15% sensor/radar
 # vision" passive (Factions_and_Buildings.md) was unimplementable until

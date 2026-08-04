@@ -18,13 +18,6 @@ const EDGE_CORNERS := [
 	[0, 4], [1, 5], [2, 6], [3, 7], # verticals 8..11
 ]
 
-# Axis of each edge: 0 = X, 1 = Y, 2 = Z
-const EDGE_AXIS := [
-	0, 2, 0, 2, # 0..3
-	0, 2, 0, 2, # 4..7
-	1, 1, 1, 1  # 8..11
-]
-
 # For an edge starting at cell corner (ix, iy, iz) along axis X (0), Y (1), or Z (2),
 # these are the relative 4 cell indices (in order around the edge) that share the edge.
 # Format: Array of Vector3i per axis.

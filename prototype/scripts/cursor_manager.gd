@@ -49,5 +49,3 @@ func set_cursor(type: int) -> void:
 	var hotspot: Vector2 = CURSOR_CONFIGS[type]["hotspot"]
 	Input.set_custom_mouse_cursor(tex, Input.CURSOR_ARROW, hotspot)
 
-func get_current_cursor() -> int:
-	return _current_cursor

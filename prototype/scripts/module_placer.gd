@@ -5,7 +5,6 @@ const ModuleDataResource = preload("res://scripts/module_data.gd")
 const Gizmo3D = preload("res://scenes/Gizmo3D.tscn")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
-const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
@@ -1341,10 +1340,6 @@ func _deselect_module():
 # genuinely refuse to take. Clear directions read blue, occluded ones red.
 const ARC_AZIMUTH_SEGMENTS := 24
 const ARC_ELEVATION_SEGMENTS := 12
-# Fallback only. The envelope is normally sized from the hull - see
-# _arc_radius_for(): a fixed 3.0 sat inside a heavy hull and read as a bubble
-# stuck to the turret rather than as a field of fire around the vehicle.
-const ARC_RADIUS := 3.0
 # How far outside the hull's own bounding radius the envelope is drawn.
 const ARC_HULL_CLEARANCE := 3.2
 const ARC_RADIUS_MIN := 6.0

@@ -41,8 +41,6 @@ const BASE_400 = Color(0.404, 0.392, 0.360, 1.0)  # disabled text, hairlines
 const TEXT_PRIMARY = Color(0.937, 0.925, 0.898, 1.0)
 const TEXT_SECONDARY = Color(0.678, 0.663, 0.627, 1.0)
 const TEXT_DISABLED = Color(0.435, 0.424, 0.396, 1.0)
-const TEXT_INVERSE = Color(0.075, 0.074, 0.068, 1.0)  # on top of a signal fill
-
 # SIGNAL COLORS. Deliberately few, and each one means exactly one thing
 # everywhere it appears. This is the rule the old UI broke worst: it had a
 # saturated red "Delete", a saturated green "Save", and a saturated blue

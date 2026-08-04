@@ -94,9 +94,6 @@ func set_rotate_mode(enabled: bool) -> void:
 		ring.input_ray_pickable = enabled
 
 
-func is_rotate_mode() -> bool:
-	return _rotate_mode
-
 var _telemetry_label: Label3D = null
 
 func _get_telemetry_label() -> Label3D:
@@ -119,10 +116,6 @@ func _show_telemetry_callout(text: String, pos_offset: Vector3):
 	lbl.text = text
 	lbl.position = pos_offset
 	lbl.visible = true
-
-func _hide_telemetry_callout():
-	if _telemetry_label:
-		_telemetry_label.visible = false
 
 func _on_rotated(delta_angle: float):
 	# Free-form yaw rotation from the ring handle - continuous, not snapped

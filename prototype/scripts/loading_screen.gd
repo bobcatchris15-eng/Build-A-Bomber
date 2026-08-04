@@ -31,10 +31,6 @@ const LAMP_COUNT := 24
 const LAMP_SWEEP_SPEED := 1.5  # sweeps per second
 
 
-func set_context(text: String) -> void:
-	_context = text
-
-
 func _ready() -> void:
 	# SceneRouter can't configure the instance change_scene_to_packed()
 	# builds, so the context is handed over through the autoload.

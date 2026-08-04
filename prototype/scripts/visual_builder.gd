@@ -279,15 +279,6 @@ static func _beam_hardware(parent_node: Node3D, base_size: Vector3) -> void:
 			Vector3(0, base_size.y / 2.0, sz * base_size.z * 0.5),
 			Vector3(0, 0.0 if sz < 0.0 else PI, 0))
 
-# Scales a fixed-dimension authored part's Node3D to hit a target Godot-space
-# (width, height, depth) size, given the part's own authored base dimensions.
-static func _fit_scale(target: Vector3, authored_base: Vector3) -> Vector3:
-	return Vector3(
-		target.x / authored_base.x if authored_base.x > 0.0 else 1.0,
-		target.y / authored_base.y if authored_base.y > 0.0 else 1.0,
-		target.z / authored_base.z if authored_base.z > 0.0 else 1.0
-	)
-
 # Which monolithic authored parts get their mesh wrapped in a named animation
 # pivot, and under what name - see the pivot block in build_visual() below.
 #
@@ -5171,8 +5162,8 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	# see build_wheel_mount()'s own comment.
 	# drum_length (internal) is the corner-to-corner span - the
 	# gearboxes sit at exactly +-drum_length/2 (the corners' own Z), and
-	# the drum's authored tapered tip (which lands at 0.65x whatever length
-	# _fit_scale targets, not the full span - see fit_length below) is
+	# the drum's authored tapered tip (which lands at 0.65x the fitted
+	# length, not the full span - see fit_length below) is
 	# scaled to land at that exact same point, so the cone visually plugs
 	# straight into the gearbox face instead of floating short of or past
 	# it ("pin the ends of the cones to the gearbox faces... stretch the
@@ -5277,65 +5268,6 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	spin.position = Vector3(0, hub_y, 0)
 
 
-static func _build_wing(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# Flat swept panel - no aerodynamic simulation, purely a weight_capacity
-	# attachment (see module_catalog.gd's "weight_capacity_bonus").
-	var panel = MeshInstance3D.new()
-	var panel_box = BoxMesh.new()
-	panel_box.size = Vector3(base_size.x, base_size.y * 0.6, base_size.z)
-	panel.mesh = panel_box
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = base_color
-	mat.metallic = 0.5
-	mat.roughness = 0.4
-	panel.material_override = mat
-	parent_node.add_child(panel)
-
-	# Swept tip - a smaller box fused near the outer edge to break up the
-	# plain rectangle silhouette.
-	var tip = MeshInstance3D.new()
-	var tip_box = BoxMesh.new()
-	tip_box.size = Vector3(base_size.x * 0.25, base_size.y * 0.45, base_size.z * 0.6)
-	tip.mesh = tip_box
-	tip.material_override = mat
-	tip.position = Vector3(base_size.x * 0.45, 0, -base_size.z * 0.15)
-	parent_node.add_child(tip)
-
-
-static func _build_thruster(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# Jet/rocket nacelle - no visible blades (reads as reaction thrust, not
-	# a propeller), distinct from propeller_prop/pusher_prop/ship_screw.
-	var nacelle = MeshInstance3D.new()
-	var cyl = CylinderMesh.new()
-	cyl.top_radius = base_size.y * 0.5
-	cyl.bottom_radius = base_size.y * 0.45
-	cyl.height = base_size.z * 0.75
-	nacelle.mesh = cyl
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = base_color
-	mat.metallic = 0.75
-	mat.roughness = 0.3
-	nacelle.material_override = mat
-	nacelle.rotation = Vector3(PI / 2.0, 0, 0)
-	parent_node.add_child(nacelle)
-
-	var exhaust = MeshInstance3D.new()
-	var exhaust_cyl = CylinderMesh.new()
-	exhaust_cyl.top_radius = base_size.y * 0.5
-	exhaust_cyl.bottom_radius = base_size.y * 0.35
-	exhaust_cyl.height = base_size.z * 0.3
-	exhaust.mesh = exhaust_cyl
-	var exhaust_mat = StandardMaterial3D.new()
-	exhaust_mat.albedo_color = Color(1.0, 0.5, 0.1)
-	exhaust_mat.emission_enabled = true
-	exhaust_mat.emission = Color(1.0, 0.4, 0.05)
-	exhaust_mat.emission_energy_multiplier = 1.2
-	exhaust.material_override = exhaust_mat
-	exhaust.rotation = Vector3(PI / 2.0, 0, 0)
-	exhaust.position = Vector3(0, 0, base_size.z * 0.55)
-	parent_node.add_child(exhaust)
-
-
 ## Geometric Polish Pass (Section 3): a real thinning taper for
 ## propeller/screw blades - thick chord at the hub, narrow at the tip -
 ## instead of a constant-cross-section BoxMesh. Spans along local Y
@@ -5370,30 +5302,6 @@ static func _build_tapered_blade_mesh(thickness: float, root_chord: float, tip_c
 	return st.commit()
 
 
-static func _build_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color, pusher: bool):
-	# Flat 3-blade fan on a hub, forward-facing (tractor) by default -
-	# pusher_prop passes pusher=true to flip which end the blades sit on,
-	# the "visually distinct placement/orientation" the task asked for,
-	# with zero extra mount-system code (purely which local Z the blades
-	# and hub are authored toward).
-	var facing = 1.0 if pusher else -1.0
-	var hub = MeshInstance3D.new()
-	var hub_cyl = CylinderMesh.new()
-	hub_cyl.top_radius = base_size.x * 0.25
-	hub_cyl.bottom_radius = base_size.x * 0.22
-	hub_cyl.height = base_size.z * 0.5
-	hub.mesh = hub_cyl
-	var hub_mat = StandardMaterial3D.new()
-	hub_mat.albedo_color = base_color.darkened(0.3)
-	hub_mat.metallic = 0.7
-	hub.material_override = hub_mat
-	hub.rotation = Vector3(PI / 2.0, 0, 0)
-	hub.position = Vector3(0, 0, facing * base_size.z * 0.3)
-	parent_node.add_child(hub)
-
-	_attach_propeller_blades(parent_node, base_size, base_color, pusher)
-
-
 # 3-blade tractor/pusher fan, wrapped under a "PropBlades" pivot so it can
 # spin (about local Z, matching the rotate_z fan arrangement below)
 # independently of the (static) hub.
@@ -5415,28 +5323,6 @@ static func _attach_propeller_blades(parent_node: Node3D, base_size: Vector3, ba
 		pivot.add_child(blade)
 
 
-static func _build_paddle_wheel(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# Steamship-style side paddle wheel: a disc whose face points sideways
-	# (matching a side hull mount) with flat paddle blades radiating from
-	# the rim - distinct from ship_screw's twisted blades or
-	# naval_propeller's stern fan.
-	var disc = MeshInstance3D.new()
-	var disc_cyl = CylinderMesh.new()
-	disc_cyl.top_radius = base_size.x * 0.45
-	disc_cyl.bottom_radius = base_size.x * 0.45
-	disc_cyl.height = base_size.y * 0.2
-	disc.mesh = disc_cyl
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = base_color.darkened(0.1)
-	mat.metallic = 0.5
-	mat.roughness = 0.6
-	disc.material_override = mat
-	disc.rotation = Vector3(0, 0, PI / 2.0)
-	parent_node.add_child(disc)
-
-	_attach_paddle_wheel_blades(parent_node, base_size, base_color)
-
-
 # 6 radial paddle blades, wrapped under a "PropBlades" pivot so they can spin
 # (about local X, matching the rotate_x fan arrangement below) independently
 # of the (static) disc.
@@ -5456,27 +5342,6 @@ static func _attach_paddle_wheel_blades(parent_node: Node3D, base_size: Vector3,
 		paddle.rotation = Vector3(0, 0, PI / 2.0)
 		paddle.rotate_x(i * (TAU / 6.0))
 		pivot.add_child(paddle)
-
-
-static func _build_ship_screw(parent_node: Node3D, base_size: Vector3, base_color: Color):
-	# Twisted (pitched) blade screw propeller - the real distinguishing
-	# "screw" look vs. paddle_wheel's flat radial paddles or
-	# naval_propeller's flat 3-blade fan.
-	var hub = MeshInstance3D.new()
-	var hub_cyl = CylinderMesh.new()
-	hub_cyl.top_radius = base_size.x * 0.15
-	hub_cyl.bottom_radius = base_size.x * 0.15
-	hub_cyl.height = base_size.z * 0.7
-	hub.mesh = hub_cyl
-	var mat = StandardMaterial3D.new()
-	mat.albedo_color = base_color
-	mat.metallic = 0.75
-	mat.roughness = 0.3
-	hub.material_override = mat
-	hub.rotation = Vector3(PI / 2.0, 0, 0)
-	parent_node.add_child(hub)
-
-	_attach_ship_screw_blades(parent_node, base_size)
 
 
 # 4 twisted (pitched) blades, wrapped under a "PropBlades" pivot so they can
@@ -5783,32 +5648,6 @@ static func _wedge_slope_point(size: Vector3, t: float) -> Vector3:
 static func _wedge_slope_pitch(size: Vector3) -> float:
 	var run = size.z * (1.0 - WEDGE_DECK_FRACTION)
 	return atan2(size.y, max(0.001, run))
-
-# Compute smooth vertex normals for an indexed triangle mesh.
-static func _compute_smooth_normals(verts: PackedVector3Array, indices: PackedInt32Array) -> PackedVector3Array:
-	var normals = PackedVector3Array()
-	normals.resize(verts.size())
-	for i in verts.size():
-		normals[i] = Vector3.ZERO
-
-	for i in range(0, indices.size(), 3):
-		var i0 = indices[i]
-		var i1 = indices[i+1]
-		var i2 = indices[i+2]
-		var e1 = verts[i1] - verts[i0]
-		var e2 = verts[i2] - verts[i0]
-		var n = e1.cross(e2).normalized()
-		normals[i0] += n
-		normals[i1] += n
-		normals[i2] += n
-
-	for i in normals.size():
-		normals[i] = normals[i].normalized()
-
-	return normals
-
-
-
 
 static func _build_weapon_armor(parent_node: Node3D, stage: int, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}):
 	if stage <= 0:
@@ -6401,7 +6240,7 @@ static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_co
 	# AUTHORED_SPAN is rb_rocker_arm's MEASURED fore/aft extent (0.83 along Z),
 	# not a guessed round number - the first pass assumed 1.30 and the arms
 	# came out well short of the wheels they were meant to reach. Same mistake
-	# as the screw drum's stale _fit_scale divisors, so it is measured here
+	# as the screw drum's stale fit divisors, so it is measured here
 	# too: `span` is a half-extent, hence the doubling.
 	const AUTHORED_ARM_Z := 0.83
 	# Two factors, not one. z_s stretches the linkage fore/aft to cover the

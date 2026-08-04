@@ -158,12 +158,6 @@ static func get_visual(faction_id: String) -> Dictionary:
 static func get_visual_color(faction_id: String) -> Color:
 	return get_faction(faction_id).get("base_color", Color(0.6, 0.6, 0.65))
 
-static func get_visual_wear_color(faction_id: String) -> Color:
-	return get_faction(faction_id).get("wear_color", Color(0.3, 0.28, 0.25))
-
-static func get_visual_wear_amount(faction_id: String) -> float:
-	return get_faction(faction_id).get("wear_amount", 0.3)
-
 # decal_tint (VISUAL_ART_DIRECTION.md 1.4/2) mirrors detail_color today -
 # same value hull_material_builder.gd already passes as the hull shader's
 # (currently inert) decal_tint uniform, kept as its own accessor so

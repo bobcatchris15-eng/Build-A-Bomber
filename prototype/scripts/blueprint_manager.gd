@@ -18,7 +18,6 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const CURRENT_BLUEPRINT_VERSION: float = 2.0
 
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
-const HullDeformScript = preload("res://scripts/hull_deform.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")

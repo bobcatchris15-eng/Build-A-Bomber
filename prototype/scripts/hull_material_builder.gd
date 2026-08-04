@@ -181,14 +181,6 @@ static func apply_local_bounds(mat: ShaderMaterial, bounds_y: Vector2) -> void:
 		bounds_y = Vector2(-0.5, 0.5)
 	mat.set_shader_parameter("local_bounds_y", bounds_y)
 
-# Convenience for the common case: read the vertical bounds straight off a
-# mesh's AABB.
-static func apply_bounds_from_mesh(mat: ShaderMaterial, mesh: Mesh) -> void:
-	if mat == null or mesh == null:
-		return
-	var aabb: AABB = mesh.get_aabb()
-	apply_local_bounds(mat, Vector2(aabb.position.y, aabb.position.y + aabb.size.y))
-
 # Structural/base-plating material - the majority, non-armor surface of a
 # hull: matte/satin, reads as workmanlike structural plate rather than
 # polished armor. Reuses the SAME per-faction texture as build_hull_

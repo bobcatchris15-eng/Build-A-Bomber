@@ -1132,12 +1132,6 @@ static func _sdf_box(p: Vector3, half_extents: Vector3) -> float:
 	var outside := Vector3(max(q.x, 0.0), max(q.y, 0.0), max(q.z, 0.0))
 	return outside.length() + min(max(q.x, max(q.y, q.z)), 0.0)
 
-# Axis-aligned along Y, matching Godot's CylinderMesh convention.
-static func _sdf_cylinder(p: Vector3, radius: float, half_height: float) -> float:
-	var d := Vector2(Vector2(p.x, p.z).length() - radius, abs(p.y) - half_height)
-	var outside := Vector2(max(d.x, 0.0), max(d.y, 0.0))
-	return outside.length() + min(max(d.x, d.y), 0.0)
-
 # Capped cone, apex at +Y, base (radius base_radius) at -Y - matches
 # hull_builder.gd's CONE (a CylinderMesh with top_radius = 0). An
 # approximation (radius-vs-y isn't a true unit-gradient distance field) but

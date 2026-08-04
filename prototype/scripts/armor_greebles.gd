@@ -149,22 +149,3 @@ static func _build_shield_bubble(container: Node3D, hull_size: Vector3) -> void:
 	bubble.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	container.add_child(bubble)
 
-# Called when the shielded vehicle takes a hit, so the bubble flares at the
-# moment of impact rather than crackling on an indifferent loop. Safe to call
-# on a vehicle with no shield - it simply finds nothing.
-static func flash_shield(hull: Node3D, strength: float = 0.7) -> void:
-	if hull == null:
-		return
-	var container = hull.get_node_or_null(CONTAINER_NAME)
-	if container == null:
-		return
-	var bubble = container.get_node_or_null(SHIELD_NAME) as MeshInstance3D
-	if bubble == null or not (bubble.material_override is ShaderMaterial):
-		return
-	var mat := bubble.material_override as ShaderMaterial
-	mat.set_shader_parameter("impact_flash", clampf(strength, 0.0, 1.0))
-	var tween = bubble.create_tween()
-	tween.tween_method(func(v: float):
-		if is_instance_valid(bubble) and bubble.material_override is ShaderMaterial:
-			(bubble.material_override as ShaderMaterial).set_shader_parameter("impact_flash", v)
-	, clampf(strength, 0.0, 1.0), 0.0, 0.45)

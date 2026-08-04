@@ -7,7 +7,6 @@ class_name UITheme
 # Everything with a StyleBox belongs in tools/build_ui_theme.gd instead.
 # This file is for what has to happen at runtime.
 
-const PANEL_SHADER = preload("res://shaders/brushed_aluminum_panel.gdshader")
 const MATERIAL_SHADER = preload("res://shaders/ui_material.gdshader")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
