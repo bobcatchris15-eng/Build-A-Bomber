@@ -1,0 +1,493 @@
+{
+	"armor_material": "hardened_steel",
+	"armor_thickness": 0.8,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 3.0,
+		"y": 1.79999995231628,
+		"z": 5.5
+	},
+	"hull_type": "medium_hull",
+	"id": "bp_default_gravelgulper_no_7",
+	"locomotion": {
+		"settings": {
+			"num_axles": 8,
+			"wheel_size": 1.1,
+			"wheels_per_axle": 2
+		},
+		"type_id": "wheels"
+	},
+	"modules": [
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": -1.62000000476837,
+				"y": -0.873000025749207,
+				"z": -1.92499995231628
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": true,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 44,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 110.0
+			},
+			"tweaks": {
+				"kit_anchor_x": 0.746999979019165,
+				"kit_anchor_y": 0.139680027961731,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.1,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": -1.62000000476837,
+				"y": -0.873000025749207,
+				"z": -0.641666650772095
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": true,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 44,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 110.0
+			},
+			"tweaks": {
+				"kit_anchor_x": 0.746999979019165,
+				"kit_anchor_y": 0.139680027961731,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.1,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": -1.62000000476837,
+				"y": -0.873000025749207,
+				"z": 0.641666650772095
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": true,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 44,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 110.0
+			},
+			"tweaks": {
+				"kit_anchor_x": 0.746999979019165,
+				"kit_anchor_y": 0.139680027961731,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.1,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": -1.62000000476837,
+				"y": -0.873000025749207,
+				"z": 1.92499995231628
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": true,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 44,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 110.0
+			},
+			"tweaks": {
+				"kit_anchor_x": 0.746999979019165,
+				"kit_anchor_y": 0.139680027961731,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.1,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": 1.62000000476837,
+				"y": -0.873000025749207,
+				"z": -1.92499995231628
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 44,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 110.0
+			},
+			"tweaks": {
+				"kit_anchor_x": -0.746999979019165,
+				"kit_anchor_y": 0.139680027961731,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.1,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": 1.62000000476837,
+				"y": -0.873000025749207,
+				"z": -0.641666650772095
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 44,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 110.0
+			},
+			"tweaks": {
+				"kit_anchor_x": -0.746999979019165,
+				"kit_anchor_y": 0.139680027961731,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.1,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": 1.62000000476837,
+				"y": -0.873000025749207,
+				"z": 0.641666650772095
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 44,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 110.0
+			},
+			"tweaks": {
+				"kit_anchor_x": -0.746999979019165,
+				"kit_anchor_y": 0.139680027961731,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.1,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": 1.62000000476837,
+				"y": -0.873000025749207,
+				"z": 1.92499995231628
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 44,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 110.0
+			},
+			"tweaks": {
+				"kit_anchor_x": -0.746999979019165,
+				"kit_anchor_y": 0.139680027961731,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.1,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Resource Harvester",
+			"position": {
+				"x": 0.0,
+				"y": 0.706296443939209,
+				"z": 0.5
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 50,
+				"cost_metal": 100,
+				"dps": 0.0,
+				"hp": 150.0,
+				"weight": 80.0
+			},
+			"tweaks": {},
+			"type_id": "resource_harvester",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Radar Mast Suite",
+			"position": {
+				"x": 0.0,
+				"y": 0.377276182174683,
+				"z": -2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 30,
+				"cost_metal": 30,
+				"dps": 0.0,
+				"hp": 60.0,
+				"weight": 50.0
+			},
+			"tweaks": {},
+			"type_id": "sensor_suite",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Heavy Machine Gun",
+			"position": {
+				"x": 1.0,
+				"y": 0.377276182174683,
+				"z": -1.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 15,
+				"dps": 32.5,
+				"hp": 60.0,
+				"weight": 40.0
+			},
+			"tweaks": {},
+			"type_id": "heavy_machine_gun",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "GravelGulper No. 7",
+	"nose_taper": 1.0,
+	"version": 1.0
+}

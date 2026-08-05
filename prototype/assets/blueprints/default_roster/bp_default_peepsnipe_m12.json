@@ -1,6 +1,6 @@
 {
 	"armor_material": "hardened_steel",
-	"armor_thickness": 1.0,
+	"armor_thickness": 0.6,
 	"faction": "industrialists",
 	"hull_scale": {
 		"x": 1.0,
@@ -8,17 +8,15 @@
 		"z": 1.0
 	},
 	"hull_size": {
-		"x": 4.0,
-		"y": 2.5,
-		"z": 8.0
+		"x": 2.0,
+		"y": 1.20000004768372,
+		"z": 3.59999990463257
 	},
-	"hull_type": "heavy_hull",
-	"id": "bp_default_main_battle_tank",
+	"hull_type": "scout_hull",
+	"id": "bp_default_peepsnipe_m12",
 	"locomotion": {
-		"settings": {
-			"tread_width": 1.5
-		},
-		"type_id": "tracked_treads"
+		"settings": {},
+		"type_id": "rocker_bogie"
 	},
 	"modules": [
 		{
@@ -29,41 +27,42 @@
 				"z": 0.0
 			},
 			"mount_style": "",
-			"name": "Tracked Treads",
+			"name": "Rocker-Bogie Suspension",
 			"position": {
-				"x": -1.75999999046326,
-				"y": -0.75,
+				"x": -0.939999997615814,
+				"y": -0.5,
 				"z": 0.0
 			},
 			"rotation": {
 				"x": 0.0,
 				"y": 0.0,
-				"z": 1.57079637050629
+				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.585504710674286,
+				"y": 0.585504710674286,
+				"z": 0.585504710674286
 			},
-			"scale_flip_x": false,
+			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
-				"cost_crystal": 0,
-				"cost_metal": 60,
+				"cost_crystal": 2,
+				"cost_metal": 13,
 				"dps": 0.0,
-				"hp": 200.0,
-				"weight": 180.0
+				"hp": 61.5,
+				"weight": 22.0
 			},
 			"tweaks": {
-				"drive_sprocket": true,
-				"kit_anchor_x": 0.559999942779541,
-				"kit_anchor_y": 0.380000013113022,
+				"arm_length": 1.0,
+				"bogie_pairs": 3.0,
+				"kit_anchor_x": 0.375999987125397,
+				"kit_anchor_y": 0.0902400016784668,
 				"kit_anchor_z": 0.0,
-				"kit_reach": 0.3,
-				"target_length": 6.0,
-				"tread_width": 1.5
+				"kit_reach": 0.0,
+				"target_length": 3.59999990463257,
+				"wheel_size": 1.0
 			},
-			"type_id": "tracked_treads",
+			"type_id": "rocker_bogie",
 			"yaw_offset": 0.0
 		},
 		{
@@ -74,56 +73,57 @@
 				"z": 0.0
 			},
 			"mount_style": "",
-			"name": "Tracked Treads",
+			"name": "Rocker-Bogie Suspension",
 			"position": {
-				"x": 1.75999999046326,
-				"y": -0.75,
+				"x": 0.939999997615814,
+				"y": -0.5,
 				"z": 0.0
 			},
 			"rotation": {
 				"x": 0.0,
 				"y": 0.0,
-				"z": -1.57079637050629
+				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.585504710674286,
+				"y": 0.585504710674286,
+				"z": 0.585504710674286
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
-				"cost_crystal": 0,
-				"cost_metal": 60,
+				"cost_crystal": 2,
+				"cost_metal": 13,
 				"dps": 0.0,
-				"hp": 200.0,
-				"weight": 180.0
+				"hp": 61.5,
+				"weight": 22.0
 			},
 			"tweaks": {
-				"drive_sprocket": true,
-				"kit_anchor_x": -0.559999942779541,
-				"kit_anchor_y": 0.380000013113022,
+				"arm_length": 1.0,
+				"bogie_pairs": 3.0,
+				"kit_anchor_x": -0.375999987125397,
+				"kit_anchor_y": 0.0902400016784668,
 				"kit_anchor_z": 0.0,
-				"kit_reach": 0.3,
-				"target_length": 6.0,
-				"tread_width": 1.5
+				"kit_reach": 0.0,
+				"target_length": 3.59999990463257,
+				"wheel_size": 1.0
 			},
-			"type_id": "tracked_treads",
+			"type_id": "rocker_bogie",
 			"yaw_offset": 0.0
 		},
 		{
-			"facet": "top",
+			"facet": "",
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
 				"z": 0.0
 			},
-			"mount_style": "pintle",
-			"name": "Main Cannon",
+			"mount_style": "",
+			"name": "Radar Mast Suite",
 			"position": {
 				"x": 0.0,
-				"y": 1.25,
-				"z": -1.0
+				"y": 0.564000129699707,
+				"z": 0.75
 			},
 			"rotation": {
 				"x": 0.0,
@@ -138,14 +138,14 @@
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
-				"cost_crystal": 0,
+				"cost_crystal": 30,
 				"cost_metal": 30,
-				"dps": 40.0,
-				"hp": 100.0,
-				"weight": 80.0
+				"dps": 0.0,
+				"hp": 60.0,
+				"weight": 50.0
 			},
 			"tweaks": {},
-			"type_id": "heavy_cannon",
+			"type_id": "sensor_suite",
 			"yaw_offset": 0.0
 		},
 		{
@@ -156,11 +156,11 @@
 				"z": 0.0
 			},
 			"mount_style": "pintle",
-			"name": "Main Cannon",
+			"name": "Coil Gun",
 			"position": {
 				"x": 0.0,
-				"y": 1.25,
-				"z": 1.0
+				"y": 0.29542875289917,
+				"z": -0.75
 			},
 			"rotation": {
 				"x": 0.0,
@@ -175,18 +175,18 @@
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
-				"cost_crystal": 0,
-				"cost_metal": 30,
-				"dps": 40.0,
-				"hp": 100.0,
-				"weight": 80.0
+				"cost_crystal": 30,
+				"cost_metal": 55,
+				"dps": 88.0,
+				"hp": 90.0,
+				"weight": 120.0
 			},
 			"tweaks": {},
-			"type_id": "machine_gun",
+			"type_id": "coil_gun",
 			"yaw_offset": 0.0
 		}
 	],
-	"name": "M100 Thunder-Toad MBT",
+	"name": "PeepSnipe M12",
 	"nose_taper": 1.0,
 	"version": 1.0
 }

@@ -1,0 +1,317 @@
+{
+	"armor_material": "hardened_steel",
+	"armor_thickness": 0.9,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 2.5,
+		"y": 1.5,
+		"z": 4.0
+	},
+	"hull_type": "light_hull",
+	"id": "bp_default_skyswatter_no_9",
+	"locomotion": {
+		"settings": {
+			"num_axles": 4,
+			"wheel_size": 1.0,
+			"wheels_per_axle": 2
+		},
+		"type_id": "wheels"
+	},
+	"modules": [
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": -1.38125002384186,
+				"y": -0.738749980926514,
+				"z": -1.39999997615814
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 0.933583974838257,
+				"y": 0.933583974838257,
+				"z": 0.933583974838257
+			},
+			"scale_flip_x": true,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 34,
+				"dps": 0.0,
+				"hp": 85.0,
+				"weight": 81.5
+			},
+			"tweaks": {
+				"kit_anchor_x": 0.642499983310699,
+				"kit_anchor_y": 0.1182000041008,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.0,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": -1.38125002384186,
+				"y": -0.738749980926514,
+				"z": 1.39999997615814
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 0.933583974838257,
+				"y": 0.933583974838257,
+				"z": 0.933583974838257
+			},
+			"scale_flip_x": true,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 34,
+				"dps": 0.0,
+				"hp": 85.0,
+				"weight": 81.5
+			},
+			"tweaks": {
+				"kit_anchor_x": 0.642499983310699,
+				"kit_anchor_y": 0.1182000041008,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.0,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": 1.38125002384186,
+				"y": -0.738749980926514,
+				"z": -1.39999997615814
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 0.933583974838257,
+				"y": 0.933583974838257,
+				"z": 0.933583974838257
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 34,
+				"dps": 0.0,
+				"hp": 85.0,
+				"weight": 81.5
+			},
+			"tweaks": {
+				"kit_anchor_x": -0.642499983310699,
+				"kit_anchor_y": 0.1182000041008,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.0,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": 1.38125002384186,
+				"y": -0.738749980926514,
+				"z": 1.39999997615814
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 0.933583974838257,
+				"y": 0.933583974838257,
+				"z": 0.933583974838257
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 34,
+				"dps": 0.0,
+				"hp": 85.0,
+				"weight": 81.5
+			},
+			"tweaks": {
+				"kit_anchor_x": -0.642499983310699,
+				"kit_anchor_y": 0.1182000041008,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.0,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "AA Autocannon",
+			"position": {
+				"x": -0.5,
+				"y": 0.539378881454468,
+				"z": 0.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 6,
+				"cost_metal": 42,
+				"dps": 68.0,
+				"hp": 80.0,
+				"weight": 125.0
+			},
+			"tweaks": {},
+			"type_id": "aa_autocannon",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "AA Autocannon",
+			"position": {
+				"x": 0.5,
+				"y": 0.539378881454468,
+				"z": 0.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 6,
+				"cost_metal": 42,
+				"dps": 68.0,
+				"hp": 80.0,
+				"weight": 125.0
+			},
+			"tweaks": {},
+			"type_id": "aa_autocannon",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Radar Mast Suite",
+			"position": {
+				"x": 0.0,
+				"y": 0.269171237945557,
+				"z": -1.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 30,
+				"cost_metal": 30,
+				"dps": 0.0,
+				"hp": 60.0,
+				"weight": 50.0
+			},
+			"tweaks": {},
+			"type_id": "sensor_suite",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "SkySwatter No. 9",
+	"nose_taper": 1.0,
+	"version": 1.0
+}

@@ -1,0 +1,369 @@
+{
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.0,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 2.5,
+		"y": 1.5,
+		"z": 4.0
+	},
+	"hull_type": "light_hull",
+	"id": "bp_default_marshsled_m86",
+	"locomotion": {
+		"settings": {
+			"emv_level": 1.7
+		},
+		"type_id": "hover_engine"
+	},
+	"modified_unix": 1785962978.569,
+	"modules": [
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Swarm Missile Pod",
+			"position": {
+				"x": -1.0,
+				"y": 0.547592878341675,
+				"z": 0.75
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 10,
+				"cost_metal": 53,
+				"dps": 78.0,
+				"hp": 100.0,
+				"weight": 162.0
+			},
+			"tweaks": {
+				"grid_size": 6.0,
+				"motor_length": 0.8,
+				"warhead_size": 0.9
+			},
+			"type_id": "missile_pod",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Swarm Missile Pod",
+			"position": {
+				"x": 1.0,
+				"y": 0.547593116760254,
+				"z": 0.75
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 10,
+				"cost_metal": 53,
+				"dps": 78.0,
+				"hp": 100.0,
+				"weight": 162.0
+			},
+			"tweaks": {
+				"grid_size": 6.0,
+				"motor_length": 0.8,
+				"warhead_size": 0.9
+			},
+			"type_id": "missile_pod",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": 1.75,
+				"y": -0.75,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 0.877337574958801,
+				"y": 0.877337574958801,
+				"z": 0.877337574958801
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 49,
+				"cost_metal": 25,
+				"dps": 0.0,
+				"hp": 37.0,
+				"weight": 23.0
+			},
+			"tweaks": {
+				"emv_level": 1.7,
+				"kit_anchor_x": -1.01750001311302,
+				"kit_anchor_y": 0.12,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"mount_reach_x": -1.85000002384186,
+				"mount_reach_y": 0.75,
+				"mount_reach_z": 0.0
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": 0.0,
+				"y": -0.75,
+				"z": 2.5
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 0.877337574958801,
+				"y": 0.877337574958801,
+				"z": 0.877337574958801
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 49,
+				"cost_metal": 25,
+				"dps": 0.0,
+				"hp": 37.0,
+				"weight": 23.0
+			},
+			"tweaks": {
+				"emv_level": 1.7,
+				"kit_anchor_x": -6.23018467948756e-17,
+				"kit_anchor_y": 0.12,
+				"kit_anchor_z": -1.42999994754791,
+				"kit_reach": 0.0,
+				"mount_reach_x": -1.13276085081592e-16,
+				"mount_reach_y": 0.75,
+				"mount_reach_z": -2.59999990463257
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": -1.75,
+				"y": -0.75,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 0.877337574958801,
+				"y": 0.877337574958801,
+				"z": 0.877337574958801
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 49,
+				"cost_metal": 25,
+				"dps": 0.0,
+				"hp": 37.0,
+				"weight": 23.0
+			},
+			"tweaks": {
+				"emv_level": 1.7,
+				"kit_anchor_x": 1.01750001311302,
+				"kit_anchor_y": 0.12,
+				"kit_anchor_z": -1.75118705684924e-16,
+				"kit_reach": 0.0,
+				"mount_reach_x": 1.85000002384186,
+				"mount_reach_y": 0.75,
+				"mount_reach_z": -3.18397646699862e-16
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": 0.0,
+				"y": -0.75,
+				"z": -2.5
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 0.877337574958801,
+				"y": 0.877337574958801,
+				"z": 0.877337574958801
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 49,
+				"cost_metal": 25,
+				"dps": 0.0,
+				"hp": 37.0,
+				"weight": 23.0
+			},
+			"tweaks": {
+				"emv_level": 1.7,
+				"kit_anchor_x": 1.86905547663816e-16,
+				"kit_anchor_y": 0.12,
+				"kit_anchor_z": 1.42999994754791,
+				"kit_reach": 0.0,
+				"mount_reach_x": 3.39828268479666e-16,
+				"mount_reach_y": 0.75,
+				"mount_reach_z": 2.59999990463257
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Heavy Machine Gun",
+			"position": {
+				"x": 1.0,
+				"y": 0.273269534111023,
+				"z": -1.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 15,
+				"dps": 32.5,
+				"hp": 60.0,
+				"weight": 40.0
+			},
+			"tweaks": {},
+			"type_id": "heavy_machine_gun",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Cruise Missile",
+			"position": {
+				"x": 0.0,
+				"y": 0.547592639923096,
+				"z": 1.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 24,
+				"cost_metal": 55,
+				"dps": 88.0,
+				"hp": 80.0,
+				"weight": 200.0
+			},
+			"tweaks": {},
+			"type_id": "cruise_missile",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "MarshSled M86",
+	"nose_taper": 1.0,
+	"version": 1.0
+}

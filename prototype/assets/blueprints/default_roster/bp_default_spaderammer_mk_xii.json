@@ -1,0 +1,421 @@
+{
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.0,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 4.30000019073486,
+		"y": 2.40000009536743,
+		"z": 8.69999980926514
+	},
+	"hull_type": "landing_craft_hull",
+	"id": "bp_default_spaderammer_mk_xii",
+	"locomotion": {
+		"settings": {
+			"tread_width": 2.0
+		},
+		"type_id": "tracked_treads"
+	},
+	"modified_unix": 1785942588.387,
+	"modules": [
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Autocannon",
+			"position": {
+				"x": 2.0,
+				"y": 0.600000619888306,
+				"z": -2.75
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 26,
+				"dps": 62.0,
+				"hp": 75.0,
+				"weight": 65.0
+			},
+			"tweaks": {},
+			"type_id": "autocannon",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Autocannon",
+			"position": {
+				"x": -2.0,
+				"y": 0.600000619888306,
+				"z": -2.75
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 26,
+				"dps": 62.0,
+				"hp": 75.0,
+				"weight": 65.0
+			},
+			"tweaks": {},
+			"type_id": "autocannon",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Mortar Array",
+			"position": {
+				"x": 1.25,
+				"y": 0.0499999523162842,
+				"z": 2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 69,
+				"dps": 75.0,
+				"hp": 80.0,
+				"weight": 148.5
+			},
+			"tweaks": {
+				"ammo": "he",
+				"tube_count": 3.0
+			},
+			"type_id": "mortar_array",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Mortar Array",
+			"position": {
+				"x": -1.25,
+				"y": 0.0499999523162842,
+				"z": 2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 69,
+				"dps": 75.0,
+				"hp": 80.0,
+				"weight": 148.5
+			},
+			"tweaks": {
+				"ammo": "he",
+				"tube_count": 3.0
+			},
+			"type_id": "mortar_array",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.776420950889587,
+				"z": -0.630214750766754
+			},
+			"mount_style": "pintle",
+			"name": "Smoke Discharger",
+			"position": {
+				"x": 1.5,
+				"y": 0.0,
+				"z": -3.75
+			},
+			"rotation": {
+				"x": -0.681829631328583,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 14,
+				"dps": 0.0,
+				"hp": 40.0,
+				"weight": 28.5
+			},
+			"tweaks": {},
+			"type_id": "smoke_discharger",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.776420950889587,
+				"z": -0.630214750766754
+			},
+			"mount_style": "pintle",
+			"name": "Smoke Discharger",
+			"position": {
+				"x": -1.5,
+				"y": 0.0,
+				"z": -3.75
+			},
+			"rotation": {
+				"x": -0.681829631328583,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 14,
+				"dps": 0.0,
+				"hp": 40.0,
+				"weight": 28.5
+			},
+			"tweaks": {},
+			"type_id": "smoke_discharger",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "back",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 1.0
+			},
+			"mount_style": "pintle",
+			"name": "Sentry Deployer",
+			"position": {
+				"x": -1.25,
+				"y": -0.75,
+				"z": 4.14999914169312
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 3.14159274101257,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": true,
+			"stats": {
+				"cost_crystal": 12,
+				"cost_metal": 46,
+				"dps": 45.0,
+				"hp": 75.0,
+				"weight": 140.0
+			},
+			"tweaks": {},
+			"type_id": "sentry_deployer",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "back",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 1.0
+			},
+			"mount_style": "pintle",
+			"name": "Sentry Deployer",
+			"position": {
+				"x": 1.25,
+				"y": -0.75,
+				"z": 4.14999914169312
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 3.14159274101257,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": true,
+			"stats": {
+				"cost_crystal": 12,
+				"cost_metal": 46,
+				"dps": 45.0,
+				"hp": 75.0,
+				"weight": 140.0
+			},
+			"tweaks": {},
+			"type_id": "sentry_deployer",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Tracked Treads",
+			"position": {
+				"x": -1.89200007915497,
+				"y": -2.0,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": true,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 80,
+				"dps": 0.0,
+				"hp": 200.0,
+				"weight": 240.0
+			},
+			"tweaks": {
+				"drive_sprocket": true,
+				"kit_anchor_x": 0.601999998092651,
+				"kit_anchor_y": 0.912000060081482,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.720000028610229,
+				"target_length": 8.69999980926514,
+				"tread_width": 2.0
+			},
+			"type_id": "tracked_treads",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Tracked Treads",
+			"position": {
+				"x": 1.89200007915497,
+				"y": -2.0,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 80,
+				"dps": 0.0,
+				"hp": 200.0,
+				"weight": 240.0
+			},
+			"tweaks": {
+				"drive_sprocket": true,
+				"kit_anchor_x": -0.601999998092651,
+				"kit_anchor_y": 0.912000060081482,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.720000028610229,
+				"target_length": 8.69999980926514,
+				"tread_width": 2.0
+			},
+			"type_id": "tracked_treads",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "SpadeRammer Mk XII",
+	"nose_taper": 1.0,
+	"version": 1.0
+}

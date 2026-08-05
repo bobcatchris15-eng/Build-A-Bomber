@@ -1,0 +1,193 @@
+{
+	"armor_material": "ablative_ceramic",
+	"armor_thickness": 1,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1,
+		"y": 1,
+		"z": 1
+	},
+	"hull_size": {
+		"x": 2,
+		"y": 1.20000004768372,
+		"z": 3.59999990463257
+	},
+	"hull_type": "scout_hull",
+	"id": "bp_default_scrubmarshal_no_33",
+	"locomotion": {
+		"settings": {},
+		"type_id": "rocker_bogie"
+	},
+	"modified_unix": 1785939174.046,
+	"modules": [
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0,
+				"y": 1,
+				"z": 0
+			},
+			"mount_style": "pintle",
+			"name": "Coil Gun",
+			"position": {
+				"x": -0.5,
+				"y": 0.600000143051147,
+				"z": -0.25
+			},
+			"rotation": {
+				"x": 0,
+				"y": 0,
+				"z": 0
+			},
+			"scale": {
+				"x": 1,
+				"y": 1,
+				"z": 1
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 30,
+				"cost_metal": 55,
+				"dps": 88,
+				"hp": 90,
+				"weight": 120
+			},
+			"tweaks": {},
+			"type_id": "coil_gun",
+			"yaw_offset": 0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0,
+				"y": 1,
+				"z": 0
+			},
+			"mount_style": "pintle",
+			"name": "Coil Gun",
+			"position": {
+				"x": 0.5,
+				"y": 0.600000143051147,
+				"z": -0.25
+			},
+			"rotation": {
+				"x": 0,
+				"y": 0,
+				"z": 0
+			},
+			"scale": {
+				"x": 1,
+				"y": 1,
+				"z": 1
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 30,
+				"cost_metal": 55,
+				"dps": 88,
+				"hp": 90,
+				"weight": 120
+			},
+			"tweaks": {},
+			"type_id": "coil_gun",
+			"yaw_offset": 0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0,
+				"y": 1,
+				"z": 0
+			},
+			"mount_style": "",
+			"name": "Rocker-Bogie Suspension",
+			"position": {
+				"x": -1,
+				"y": -0.5,
+				"z": 0
+			},
+			"rotation": {
+				"x": 0,
+				"y": 0,
+				"z": 0
+			},
+			"scale": {
+				"x": 0.622877359390259,
+				"y": 0.622877359390259,
+				"z": 0.622877359390259
+			},
+			"scale_flip_x": true,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 2,
+				"cost_metal": 15,
+				"dps": 0,
+				"hp": 67,
+				"weight": 26.5
+			},
+			"tweaks": {
+				"arm_length": 1,
+				"bogie_pairs": 3,
+				"kit_anchor_x": 0.399999976158142,
+				"kit_anchor_y": 0.0960000157356262,
+				"kit_anchor_z": 0,
+				"kit_reach": 0,
+				"target_length": 3.59999990463257,
+				"wheel_size": 1
+			},
+			"type_id": "rocker_bogie",
+			"yaw_offset": 0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0,
+				"y": 1,
+				"z": 0
+			},
+			"mount_style": "",
+			"name": "Rocker-Bogie Suspension",
+			"position": {
+				"x": 1,
+				"y": -0.5,
+				"z": 0
+			},
+			"rotation": {
+				"x": 0,
+				"y": 0,
+				"z": 0
+			},
+			"scale": {
+				"x": 0.622877359390259,
+				"y": 0.622877359390259,
+				"z": 0.622877359390259
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 2,
+				"cost_metal": 15,
+				"dps": 0,
+				"hp": 67,
+				"weight": 26.5
+			},
+			"tweaks": {
+				"arm_length": 1,
+				"bogie_pairs": 3,
+				"kit_anchor_x": -0.39999997615814,
+				"kit_anchor_y": 0.0960000157356262,
+				"kit_anchor_z": 0,
+				"kit_reach": 0,
+				"target_length": 3.59999990463257,
+				"wheel_size": 1
+			},
+			"type_id": "rocker_bogie",
+			"yaw_offset": 0
+		}
+	],
+	"name": "ScrubMarshal No. 33",
+	"nose_taper": 1,
+	"version": 1
+}
