@@ -861,13 +861,12 @@ func _on_blueprint_name_changed(new_text: String):
 func _on_library_pressed():
 	var root = get_node_or_null("/root/MainLab")
 	if not root: return
-	# Avoid opening a second copy of the panel
-	if root.has_node("BlueprintLibraryPanel"):
-		return
-	var LibraryPanel = preload("res://scripts/blueprint_library_panel.gd")
-	var panel = LibraryPanel.new()
-	panel.name = "BlueprintLibraryPanel"
-	root.add_child(panel)
+	var router = get_node_or_null("/root/SceneRouter")
+	if router:
+		# Pass the lab as context so the library knows to return here
+		router.change_scene_async("res://scenes/BlueprintLibrary.tscn", "res://scenes/MainLab.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/BlueprintLibrary.tscn")
 
 func sync_hull_ui(hull: Node3D):
 	# An unnamed design now shows an EMPTY field with a suggestion behind it,

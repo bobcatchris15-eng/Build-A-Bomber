@@ -8,7 +8,7 @@
 # Usage: cd prototype; ./run_tests.ps1
 
 $ErrorActionPreference = "Continue"
-$godot = Join-Path $PSScriptRoot "Godot_v4.3-stable_win64_console.exe"
+$godot = Join-Path $PSScriptRoot "Godot_v4.7.1-stable_win64_console.exe"
 
 Write-Host "Reimporting assets (regenerating .godot import cache)..."
 & $godot --headless --editor --import --quit --path $PSScriptRoot 2>&1 | Out-Null

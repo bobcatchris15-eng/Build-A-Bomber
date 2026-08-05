@@ -1,0 +1,192 @@
+{
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.0,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 4.0,
+		"y": 2.5,
+		"z": 8.0
+	},
+	"hull_type": "heavy_hull",
+	"id": "bp_default_siege",
+	"locomotion": {
+		"settings": {
+			"tread_width": 1.5
+		},
+		"type_id": "tracked_treads"
+	},
+	"modules": [
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Tracked Treads",
+			"position": {
+				"x": -1.75999999046326,
+				"y": -0.75,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 1.57079637050629
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 60,
+				"dps": 0.0,
+				"hp": 200.0,
+				"weight": 180.0
+			},
+			"tweaks": {
+				"drive_sprocket": true,
+				"kit_anchor_x": 0.559999942779541,
+				"kit_anchor_y": 0.380000013113022,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.3,
+				"target_length": 6.0,
+				"tread_width": 1.5
+			},
+			"type_id": "tracked_treads",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Tracked Treads",
+			"position": {
+				"x": 1.75999999046326,
+				"y": -0.75,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": -1.57079637050629
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 60,
+				"dps": 0.0,
+				"hp": 200.0,
+				"weight": 180.0
+			},
+			"tweaks": {
+				"drive_sprocket": true,
+				"kit_anchor_x": -0.559999942779541,
+				"kit_anchor_y": 0.380000013113022,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.3,
+				"target_length": 6.0,
+				"tread_width": 1.5
+			},
+			"type_id": "tracked_treads",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Main Cannon",
+			"position": {
+				"x": -1.0,
+				"y": 1.25,
+				"z": -1.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 30,
+				"dps": 40.0,
+				"hp": 100.0,
+				"weight": 80.0
+			},
+			"tweaks": {},
+			"type_id": "heavy_cannon",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Main Cannon",
+			"position": {
+				"x": 1.0,
+				"y": 1.25,
+				"z": -1.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 30,
+				"dps": 40.0,
+				"hp": 100.0,
+				"weight": 80.0
+			},
+			"tweaks": {},
+			"type_id": "heavy_cannon",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "M120 Crater-Maker",
+	"nose_taper": 1.0,
+	"version": 1.0
+}

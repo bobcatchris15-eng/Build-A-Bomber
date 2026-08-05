@@ -620,47 +620,31 @@ static func _build_faceted_mesh(triangles: Array, _facet_angle_deg: float, cryst
 		n = n.normalized()
 		var center := (p0 + p1 + p2) / 3.0
 
-		# Defensive winding fix, matching the one _march_cell() has always had
-		# on the Marching Cubes path. Dual Contouring emits each quad's winding
-		# from the sign of the field at the edge's origin corner, which does NOT
-		# reliably produce outward-facing triangles: ~30% of every baked hull
-		# came out wound inward (heavy_hull: 481 of 1632). Inward faces are
-		# backface-culled, so they read as holes and dark patches, AND they are
-		# invisible to placement raycasts, because create_trimesh_shape()'s
-		# ConcavePolygonShape3D defaults to backface_collision = false. That is
-		# the "large portions of the hull won't accept a module" symptom.
-		#
-		# Must happen BEFORE the normal snap: snapping an inward normal picks
-		# the wrong cardinal target, so the lighting normal was wrong too.
-		#
-		# Decided against the SDF gradient, which is the same quantity the mesh's
-		# shading normals are derived from - so "outward" here means the same
-		# thing it means everywhere else in this file.
-		#
-		# The gradient is a central difference, and it vanishes in a couple of
-		# places (inside a sub-voxel-thin feature, exactly on a union seam) where
-		# _sdf_normal() would hand back its hard-coded Vector3.UP fallback and
-		# make the test a coin flip. Only in that degenerate case, fall back to
-		# sampling the field either side of the face: outside the solid the field
-		# reads higher, so the higher side is the outside.
-		#
-		# Field-sampling was tried as the PRIMARY test and was clearly worse -
-		# it disagreed with the gradient on up to 20 faces per hull, because at a
-		# concave seam both probe points can sit inside solid material. Gradient
-		# first, sampling only to break ties.
+		# Defensive winding fix: ensure clockwise winding for Godot front faces.
+		# For a clockwise triangle, n = (p1 - p0).cross(p2 - p0) points INWARD.
+		# We want all triangles clockwise, and all normals OUTWARD.
+		
 		var grad_raw := _sdf_gradient(center, primitives, smoothness, mirror_x)
-		var flip := false
+		var is_n_inward := false
 		if grad_raw.length_squared() > 1e-12:
-			flip = n.dot(grad_raw) < 0.0
+			# grad_raw points OUTWARD (from negative SDF to positive SDF).
+			# If n dots with grad_raw < 0, n points INWARD.
+			is_n_inward = n.dot(grad_raw) < 0.0
 		else:
 			var probe: float = max(voxel_size * 0.25, 0.001)
-			flip = scene_sdf(center + n * probe, primitives, smoothness, mirror_x) \
-				 < scene_sdf(center - n * probe, primitives, smoothness, mirror_x)
-		if flip:
+			is_n_inward = scene_sdf(center + n * probe, primitives, smoothness, mirror_x) \
+					 < scene_sdf(center - n * probe, primitives, smoothness, mirror_x)
+		
+		if is_n_inward:
+			# n is inward, meaning p0, p1, p2 is clockwise.
+			# Keep winding as is, just flip n so the vertex normal points outward.
+			n = -n
+		else:
+			# n is outward, meaning p0, p1, p2 is counter-clockwise.
+			# Swap p1 and p2 to make it clockwise, and keep n as outward normal.
 			var swap := p1
 			p1 = p2
 			p2 = swap
-			n = -n
 
 		n = _snap_constructed_normal(n, crystallinity, center, primitives, chamfer_edge_pct, mirror_x)
 
@@ -1441,12 +1425,13 @@ static func _march_cell(st: SurfaceTool, ix: int, iy: int, iz: int, dim_x: int, 
 		var nb := _sdf_normal(pb, primitives, smoothness, mirror_x)
 		var nc := _sdf_normal(pc, primitives, smoothness, mirror_x)
 
-		# Defensive winding fix: force triangle winding to agree with the
-		# outward SDF gradient regardless of the source table's assumed
-		# convention, so a winding mismatch can't silently backface-cull the
-		# whole bake into invisibility.
+		# Defensive winding fix: ensure clockwise winding for Godot front faces.
+		# For a clockwise triangle, face_n = (pb - pa).cross(pc - pa) points INWARD.
+		# If the triangle is counter-clockwise, face_n points OUTWARD, so its dot
+		# product with the outward normals (na + nb + nc) will be POSITIVE.
+		# We want clockwise, so if the dot product is positive, we swap pb and pc.
 		var face_n: Vector3 = (pb - pa).cross(pc - pa)
-		if face_n.dot(na + nb + nc) < 0.0:
+		if face_n.dot(na + nb + nc) > 0.0:
 			var tmp_p := pb
 			pb = pc
 			pc = tmp_p

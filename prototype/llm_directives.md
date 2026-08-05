@@ -1,0 +1,134 @@
+# LLM Directives & Coding Standards
+
+This document defines the architectural guidelines, GDScript style guides, testing practices, and deprecated/superseded patterns for **Kitbash Command** prototype (a Godot 4.7 RTS project).
+
+All future code changes and feature additions must adhere strictly to the rules laid out in this file.
+
+---
+
+## 1. Engine & Environment Configuration
+- **Godot Version**: `4.7.1-stable` (Win64 binaries are bundled in the `prototype/` directory).
+- **Primary Directories**:
+  - `res://scripts/`: Production game logic and controllers.
+  - `res://scenes/`: Game scenes (`.tscn`).
+  - `res://tests/`: Headless automated test suites (extend `suite_base.gd`).
+  - `res://tools/`: Development, baking, and validation utility scripts.
+  - `res://assets/blueprints/default_roster/`: Read-only pre-made player and enemy design files.
+
+---
+
+## 2. GDScript Style Guide & Conventions
+Follow Godot’s official GDScript guidelines with the following additions:
+
+### 2.1 Formatting & Indentation
+- **Indentation**: Use **tabs** for indentation (Godot editor default). Do not use spaces.
+- **Line Length**: Keep lines under **100 characters** (soft limit of 80 characters for simple statements).
+- **Spacing**:
+  - Surround operators with single spaces: `a + b`, not `a+b`.
+  - Put a space after commas in arrays/dictionaries/arguments: `[a, b, c]`.
+  - Put a space after colons in type definitions: `var speed: float = 10.0`.
+- **Blank Lines**: Keep a single blank line between functions. Use blank lines inside functions to group logical blocks.
+
+### 2.2 Naming Conventions
+- **Files & Folders**: `snake_case` (e.g., `blueprint_manager.gd`, `main_menu.gd`).
+- **Class Names**: `PascalCase` (e.g., `class_name MyClassName`).
+- **Variable & Function Names**: `snake_case` (e.g., `func get_hull_volume_factor()`).
+- **Constants**: `UPPER_SNAKE_CASE` (e.g., `const HULL_SCALE_MIN = 0.5`).
+- **Private/Internal Members**: Prefix with a leading underscore (e.g., `var _loading: bool`, `func _build_ui()`).
+
+### 2.3 Type Safety
+- **Static Typing**: Strongly type everything. Do not write dynamic types unless absolutely required.
+  - Variable declarations: `var height: float = 26.0` or `var vehicle: CharacterBody3D = null`.
+  - Function parameters & returns: `func rename_blueprint(id: String, new_name: String) -> bool:`.
+- **Inferred Types**: Avoid un-typed assignments. Use `:=` for type inference only when the type is obvious and explicit (e.g., `var dir := DirAccess.open(path)`).
+
+### 2.4 Script Member Order
+Organize script contents in this order:
+1. `extends` statement.
+2. `class_name` definition.
+3. `signal` declarations.
+4. `const` definitions.
+5. `enum` definitions.
+6. `@export` variables.
+7. Public variables (unprefixed).
+8. Private/Internal variables (prefixed with `_`).
+9. `@onready` variables.
+10. Engine lifecycle functions (`_init`, `_ready`, `_process`, `_physics_process`, `_input`, etc.).
+11. Public methods.
+12. Private/Internal methods (prefixed with `_`).
+
+---
+
+## 3. High-Level Systems & Architectural Rules
+
+### 3.1 Asynchronous Scene Transitions (`SceneRouter`)
+- **GDScript Compilation Delay**: Loading large scenes (`Skirmish.tscn`, `MainLab.tscn`) stalls the main thread due to recursive script compilation of `preload()` graphs.
+- **Rule**: Never load heavy scenes synchronously using `get_tree().change_scene_to_file()`.
+- **Instruction**: Use the `SceneRouter` autoload: `SceneRouter.change_scene_async(target_scene_path)`. The router parses script preloads and compiles them progressively frame-by-frame, keeping the throbber responsive.
+
+### 3.2 Blueprint Serialization & Pathing
+- **Roster vs. Scratch splits**:
+  - Explicit user "Save" writes permanently to `user://blueprints/<id>.json`.
+  - "Test in Arena" writes to a temporary scratch file `user://lab_scratch.json` (do not pollute the blueprint library folder).
+- **Built-in Blueprints**: Preload or read-only blueprints are fetched from `res://assets/blueprints/default_roster/`. User blueprints are fetched from `user://blueprints/`.
+- **Rule**: `blueprint_manager.gd` is the single source of truth for loading, serialization, and reconstruction of designs. Always use its helper functions.
+
+### 3.3 Combat, Damage, & Custom Mounts
+- **Threshold Model**: Resolves in `damage_resolver.gd`. Hits below an armor threshold deal chip damage (15% of reduced damage). Hits $\ge 4\times$ threshold bypass armor reduction.
+- **Subsystem Stripping**: 35% of damage impacts module attachments directly, potentially stripping weapons or disabling locomotion.
+- **Sponsons (Vertical Mounting)**: Sponsons align direct-fire weapons outboard on near-vertical walls via `Basis.looking_at(outboard, Vector3.UP)`.
+  - Sponson-capable weapons use a low-profile faceted housing blister (`sponson_blister.glb`).
+  - Sponson embed depth is automatically calculated via visual bounds measuring (`min(wanted, reach - 0.30)`).
+  - Mortars, artillery, and launchers cannot wall-mount; placement is rejected on vertical glacis (`!is_sponson_capable()`).
+
+### 3.4 Procedural Structural Modules
+- **Scale Isolation**: Girders, wedges, blocks, and plates must not be scaled using standard `Node3D.scale` properties, as this stretches textures and hardware details (screws, collars).
+- **Rule**: Send structural scales to the `struct_scale` metadata/property, keep `Node3D.scale` at `(1.0, 1.0, 1.0)`, and trigger a mesh re-bake. The body re-tessellates procedurally, and structural details are instanced at a $1:1$ ratio.
+
+### 3.5 UI System & Polish Rules
+- **No Emoji/Dingbats in UI**: All textual UI components (labels, buttons, etc.) must not contain decorative emojis, checkboxes, or stars. Unicode arrows and box-drawing symbols are allowed as technical notation. This is strictly audited by `ui_audit.gd`.
+- **Theme Tokens**: Style custom elements using colors and sizes defined in `res://scripts/ui_tokens.gd` and `res://scripts/ui_theme.gd` rather than hardcoding values.
+- **HP Bars & Selection Rings**: Use `WorldHPBar` (`res://scripts/world_hp_bar.gd`) to construct billboarded health bars and flat selection rings. Do not write raw `Label3D` ASCII trackers (`■□`) or default `TorusMesh` shapes.
+
+---
+
+## 4. Testing Guidelines & Practices
+
+### 4.1 Running Tests
+- **Wrapper Scripts**: Always run tests using `./run_tests.ps1` (Windows) or `./run_tests.sh` (Linux/Mac/Git Bash).
+- **Why**: Running raw `run_tests.gd` headless bypasses the resource import phase. A stale `.godot` cache causes confusing script compilation errors when script autoloads or class names change.
+- **Compile Verification**: After editing, run compile validation:
+  ```bash
+  ./Godot_v4.7.1-stable_win64_console.exe --headless --script tools/compile_check_all.gd
+  ```
+
+### 4.2 Test Order & Manifest
+- **Execution Order Flakes**: Several navigation mesh and Recast-bake suites flake due to shared-process memory leak or nondeterminism.
+- **Rule**: Pinned execution order is required. Do not sort or randomize the `SUITE_ORDER` list in `run_tests.gd`.
+- **Adding a Test**: Add your suite function to the correct category in `prototype/tests/` (e.g., `test_weapons_and_damage.gd`), then register the file category and function name under `SUITE_ORDER` in `run_tests.gd`.
+- **Quarantine Retries**: The test driver allows up to 2 attempts per suite to shield against navmesh flakes. Treat only consecutive failures as real breaks.
+
+### 4.3 Golden Locomotion Layouts
+- **Layout Parity**: Metrics for locomotion mount coordinates across three hull sizes are frozen under `GOLDEN_LOCOMOTION_LAYOUT` in `res://tests/suite_base.gd`.
+- **Rule**: Refactoring module placement must not alter the layout layout coordinates. Any intentional coordinate change must update the golden fixture in its own commit, with a clear explanation of the visual improvement.
+
+---
+
+## 5. Deprecated & Superseded Systems (DO NOT USE)
+
+Be aware of superseded files and patterns. Do not use, revive, or replicate them:
+
+1. **`res://scripts/player_vehicle.gd` (SUPERSEDED)**:
+   - **Production Status**: No longer used for the player vehicle in production.
+   - **Replacement**: `battle_unit.gd` is used for both AI and player-driven vehicles, ensuring unified behavior, auto-engagement, and kiting characteristics.
+   - **Test Exception**: `player_vehicle.gd` is kept only as a minimal CharacterBody3D damage target stub inside specific damage model test suites (e.g., `test_weapons_and_damage.gd`). Do not use it for gameplay.
+2. **`res://scripts/blueprint_library_panel.gd` (DELETED)**:
+   - **Replacement**: Entirely replaced by `res://scripts/blueprint_library_screen.gd` and the associated scene `res://scenes/BlueprintLibrary.tscn`.
+3. **Local Panel Styleboxes**:
+   - **Replacement**: Setting custom stylebox overrides directly in Panel nodes is deprecated. All panels must inherit theme classes via `bomber_theme.tres` or style through `ui_theme.gd`/`ui_tokens.gd`.
+4. **Hardcoded Map Lists**:
+   - **Replacement**: Do not write hardcoded map properties. Maps are JSON files stored under `data/maps/` and automatically discovered via directory scanning in `MapCatalog`.
+5. **Procedural Mount Columns**:
+   - **Replacement**: The old procedural mounting columns and base plates on weapons were deleted. Do not double-mount or add procedural cylinders under weapon meshes.
+6. **Lambda Closure Primitive Captures**:
+   - **Pitfall**: GDScript captures local primitives (like `float`, `int`, `bool`) **by value** in closures. If a lambda needs to mutate a captured variable and have it reflect outside, wrap it inside a reference type such as a single-element `Array`.

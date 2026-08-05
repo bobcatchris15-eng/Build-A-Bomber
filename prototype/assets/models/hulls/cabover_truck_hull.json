@@ -1,21 +1,21 @@
 {
-	"base_energy": 75,
-	"base_vision": 21,
+	"base_energy": 75.0,
+	"base_vision": 21.0,
 	"category": "hull",
 	"color": [
 		0.2,
 		0.34,
 		0.46,
-		1
+		1.0
 	],
-	"crystal": 18,
-	"hp": 340,
-	"metal": 100,
+	"crystal": 18.0,
+	"hp": 340.0,
+	"metal": 100.0,
 	"name": "Cabover Truck Hull",
 	"size": [
 		2.8,
 		2.8,
 		7.8
 	],
-	"weight": 240
+	"weight": 240.0
 }

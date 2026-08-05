@@ -1,0 +1,295 @@
+{
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.0,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 3.0,
+		"y": 1.79999995231628,
+		"z": 5.5
+	},
+	"hull_type": "medium_hull",
+	"id": "bp_default_attack_chopper",
+	"locomotion": {
+		"settings": {
+			"count": 4,
+			"size": 1.5
+		},
+		"type_id": "helicopter_rotors"
+	},
+	"modules": [
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Helicopter Rotors",
+			"position": {
+				"x": -3.25,
+				"y": 0.800000011920929,
+				"z": -2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 15,
+				"cost_metal": 45,
+				"dps": 0.0,
+				"hp": 30.0,
+				"weight": 45.0
+			},
+			"tweaks": {
+				"blade_count": 4.0,
+				"blade_length": 1.5,
+				"duct": false,
+				"kit_anchor_x": 2.0,
+				"kit_anchor_y": -1.21999998688698,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"mount_reach_x": 3.20000004768372,
+				"mount_reach_y": 0.800000011920929,
+				"mount_side": -1.0
+			},
+			"type_id": "helicopter_rotors",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Helicopter Rotors",
+			"position": {
+				"x": -3.25,
+				"y": 0.800000011920929,
+				"z": 2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 15,
+				"cost_metal": 45,
+				"dps": 0.0,
+				"hp": 30.0,
+				"weight": 45.0
+			},
+			"tweaks": {
+				"blade_count": 4.0,
+				"blade_length": 1.5,
+				"duct": false,
+				"kit_anchor_x": 2.0,
+				"kit_anchor_y": -1.21999998688698,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"mount_reach_x": 3.20000004768372,
+				"mount_reach_y": 0.800000011920929,
+				"mount_side": -1.0
+			},
+			"type_id": "helicopter_rotors",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Helicopter Rotors",
+			"position": {
+				"x": 3.25,
+				"y": 0.800000011920929,
+				"z": -2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 15,
+				"cost_metal": 45,
+				"dps": 0.0,
+				"hp": 30.0,
+				"weight": 45.0
+			},
+			"tweaks": {
+				"blade_count": 4.0,
+				"blade_length": 1.5,
+				"duct": false,
+				"kit_anchor_x": -2.0,
+				"kit_anchor_y": -1.21999998688698,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"mount_reach_x": 3.20000004768372,
+				"mount_reach_y": 0.800000011920929,
+				"mount_side": 1.0
+			},
+			"type_id": "helicopter_rotors",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Helicopter Rotors",
+			"position": {
+				"x": 3.25,
+				"y": 0.800000011920929,
+				"z": 2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 15,
+				"cost_metal": 45,
+				"dps": 0.0,
+				"hp": 30.0,
+				"weight": 45.0
+			},
+			"tweaks": {
+				"blade_count": 4.0,
+				"blade_length": 1.5,
+				"duct": false,
+				"kit_anchor_x": -2.0,
+				"kit_anchor_y": -1.21999998688698,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"mount_reach_x": 3.20000004768372,
+				"mount_reach_y": 0.800000011920929,
+				"mount_side": 1.0
+			},
+			"type_id": "helicopter_rotors",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Rocket Artillery",
+			"position": {
+				"x": 0.0,
+				"y": 0.899999976158142,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 8,
+				"cost_metal": 52,
+				"dps": 85.0,
+				"hp": 95.0,
+				"weight": 190.0
+			},
+			"tweaks": {},
+			"type_id": "rocket_artillery",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Rotary Gatling",
+			"position": {
+				"x": 0.0,
+				"y": 0.899999976158142,
+				"z": 2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 5,
+				"cost_metal": 45,
+				"dps": 105.0,
+				"hp": 80.0,
+				"weight": 110.0
+			},
+			"tweaks": {},
+			"type_id": "rotary_cannon",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "AH-66 Whirly-Dirge",
+	"nose_taper": 1.0,
+	"version": 1.0
+}

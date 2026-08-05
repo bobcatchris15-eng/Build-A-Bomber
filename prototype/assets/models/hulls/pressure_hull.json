@@ -1,21 +1,21 @@
 {
-	"base_energy": 110,
-	"base_vision": 20,
+	"base_energy": 110.0,
+	"base_vision": 20.0,
 	"category": "hull",
 	"color": [
 		0.3,
 		0.33,
 		0.36,
-		1
+		1.0
 	],
-	"crystal": 40,
-	"hp": 700,
-	"metal": 180,
+	"crystal": 40.0,
+	"hp": 700.0,
+	"metal": 180.0,
 	"name": "Pressure Hull",
 	"size": [
 		2.8,
 		3.3,
 		11.55
 	],
-	"weight": 520
+	"weight": 520.0
 }

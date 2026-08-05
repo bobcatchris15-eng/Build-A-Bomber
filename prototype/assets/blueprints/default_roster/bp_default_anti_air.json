@@ -1,0 +1,243 @@
+{
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.0,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 3.0,
+		"y": 1.79999995231628,
+		"z": 5.5
+	},
+	"hull_type": "medium_hull",
+	"id": "bp_default_anti_air",
+	"locomotion": {
+		"settings": {
+			"num_axles": 4,
+			"wheel_size": 1.2,
+			"wheels_per_axle": 2
+		},
+		"type_id": "wheels"
+	},
+	"modules": [
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": -2.25,
+				"y": -0.5,
+				"z": -2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 48,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 120.0
+			},
+			"tweaks": {
+				"kit_anchor_x": 0.980000019073486,
+				"kit_anchor_y": 0.0800000131130219,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.2,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": -2.25,
+				"y": -0.5,
+				"z": 2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 48,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 120.0
+			},
+			"tweaks": {
+				"kit_anchor_x": 0.980000019073486,
+				"kit_anchor_y": 0.0800000131130219,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.2,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": 2.25,
+				"y": -0.5,
+				"z": -2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 48,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 120.0
+			},
+			"tweaks": {
+				"kit_anchor_x": -0.980000019073486,
+				"kit_anchor_y": 0.0800000131130219,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.2,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Wheels",
+			"position": {
+				"x": 2.25,
+				"y": -0.5,
+				"z": 2.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 48,
+				"dps": 0.0,
+				"hp": 100.0,
+				"weight": 120.0
+			},
+			"tweaks": {
+				"kit_anchor_x": -0.980000019073486,
+				"kit_anchor_y": 0.0800000131130219,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"wheel_size": 1.2,
+				"wheels_per_axle": 2
+			},
+			"type_id": "wheels",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Main Cannon",
+			"position": {
+				"x": 0.0,
+				"y": 0.899999976158142,
+				"z": 0.5
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 30,
+				"dps": 40.0,
+				"hp": 100.0,
+				"weight": 80.0
+			},
+			"tweaks": {},
+			"type_id": "anti_air_missile",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "ZSU-44 Sky-Swatter",
+	"nose_taper": 1.0,
+	"version": 1.0
+}

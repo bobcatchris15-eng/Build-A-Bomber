@@ -259,8 +259,8 @@ static func _face_polygon(planes: Array, fi: int, extent: float) -> PackedVector
 		origin + u * r + v * r,
 		origin - u * r + v * r,
 	])
-	if (quad[1] - quad[0]).cross(quad[2] - quad[0]).dot(n) < 0.0:
-		quad.reverse()
+	if (quad[1] - quad[0]).cross(quad[2] - quad[0]).dot(n) > 0.0:
+		quad.reverse()  # swapped logic for clockwise
 
 	var poly := quad
 	for j in range(planes.size()):

@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-GODOT="./Godot_v4.3-stable_win64_console.exe"
+GODOT="./Godot_v4.7.1-stable_win64_console.exe"
 
 echo "Reimporting assets (regenerating .godot import cache)..."
 "$GODOT" --headless --editor --import --quit --path . > /dev/null 2>&1

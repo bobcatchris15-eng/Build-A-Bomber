@@ -31,7 +31,7 @@ const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
 
 # Set by load_blueprint_into_designer() whenever it returns false, so
-# callers (blueprint_library_panel.gd) can show a specific reason instead of
+# callers (blueprint_library_screen.gd) can show a specific reason instead of
 # a generic "corrupted" message - most importantly for a blueprint whose
 # hull_type is no longer installed (mod uninstalled, typo, hand-edited
 # save), which is a real and correct file, just referencing a hull that
@@ -400,25 +400,49 @@ func _generate_blueprint_id() -> String:
 func list_blueprints(named_only: bool = false) -> Array:
 	var results = []
 	DirAccess.make_dir_recursive_absolute("user://blueprints")
+	
+	# Load built-in default blueprints first
+	var default_dir = DirAccess.open("res://assets/blueprints/default_roster")
+	if default_dir:
+		default_dir.list_dir_begin()
+		var file_name = default_dir.get_next()
+		while file_name != "":
+			if not default_dir.current_is_dir() and file_name.ends_with(".json"):
+				var data = load_blueprint("res://assets/blueprints/default_roster/" + file_name)
+				if not data.is_empty() and (not named_only or is_named(data.get("name", ""))):
+					results.append({
+						"id": data.get("id", file_name.get_basename()),
+						"name": data.get("name", "Untitled Design"),
+						"hull_type": data.get("hull_type", "medium_hull"),
+						"faction": data.get("faction", "industrialists"),
+						"modified_unix": data.get("modified_unix", 0),
+						"path": "res://assets/blueprints/default_roster/" + file_name,
+						"read_only": true
+					})
+			file_name = default_dir.get_next()
+		default_dir.list_dir_end()
+	
+	# Load user blueprints
 	var dir = DirAccess.open("user://blueprints")
-	if not dir:
-		return results
-	dir.list_dir_begin()
-	var file_name = dir.get_next()
-	while file_name != "":
-		if not dir.current_is_dir() and file_name.ends_with(".json"):
-			var data = load_blueprint("user://blueprints/" + file_name)
-			if not data.is_empty() and (not named_only or is_named(data.get("name", ""))):
-				results.append({
-					"id": data.get("id", file_name.get_basename()),
-					"name": data.get("name", "Untitled Design"),
-					"hull_type": data.get("hull_type", "medium_hull"),
-					"faction": data.get("faction", "industrialists"),
-					"modified_unix": data.get("modified_unix", 0),
-					"path": "user://blueprints/" + file_name
-				})
-		file_name = dir.get_next()
-	dir.list_dir_end()
+	if dir:
+		dir.list_dir_begin()
+		var file_name = dir.get_next()
+		while file_name != "":
+			if not dir.current_is_dir() and file_name.ends_with(".json"):
+				var data = load_blueprint("user://blueprints/" + file_name)
+				if not data.is_empty() and (not named_only or is_named(data.get("name", ""))):
+					results.append({
+						"id": data.get("id", file_name.get_basename()),
+						"name": data.get("name", "Untitled Design"),
+						"hull_type": data.get("hull_type", "medium_hull"),
+						"faction": data.get("faction", "industrialists"),
+						"modified_unix": data.get("modified_unix", 0),
+						"path": "user://blueprints/" + file_name,
+						"read_only": false
+					})
+			file_name = dir.get_next()
+		dir.list_dir_end()
+		
 	results.sort_custom(func(a, b): return a["modified_unix"] > b["modified_unix"])
 	return results
 
@@ -452,8 +476,17 @@ func rename_blueprint(id: String, new_name: String) -> bool:
 	file.close()
 	return true
 
+func _resolve_blueprint_path(id: String) -> String:
+	var user_path = "user://blueprints/%s.json" % id
+	if FileAccess.file_exists(user_path):
+		return user_path
+	var res_path = "res://assets/blueprints/default_roster/%s.json" % id
+	if FileAccess.file_exists(res_path):
+		return res_path
+	return user_path
+
 func duplicate_blueprint(id: String) -> String:
-	var path = "user://blueprints/%s.json" % id
+	var path = _resolve_blueprint_path(id)
 	var data = load_blueprint(path)
 	if data.is_empty():
 		return ""
@@ -470,7 +503,7 @@ func duplicate_blueprint(id: String) -> String:
 
 func load_blueprint_into_designer(id: String) -> bool:
 	last_load_error = ""
-	var path = "user://blueprints/%s.json" % id
+	var path = _resolve_blueprint_path(id)
 	var data = load_blueprint(path)
 	if data.is_empty():
 		print("Could not load blueprint for designer: ", id)
