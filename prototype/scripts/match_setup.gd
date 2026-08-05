@@ -18,6 +18,7 @@ const UITheme = preload("res://scripts/ui_theme.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const MapCatalog = preload("res://scripts/map_catalog.gd")
 const RosterPickerScript = preload("res://scripts/roster_picker.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 
 var bg_rect: ColorRect
 
@@ -207,6 +208,12 @@ func _ready():
 	start_btn.theme_type_variation = "PrimaryButton"
 	start_btn.pressed.connect(_on_start_pressed)
 	button_row.add_child(start_btn)
+
+	# "confirm" on Start Match: it commits to a match, so it gets the radio
+	# acknowledgement rather than a click. The dropdown grid is "select".
+	UIFeedbackScript.wire(start_btn, "confirm")
+	UIFeedbackScript.wire(back_btn)
+	UIFeedbackScript.wire_tree(grid, "select")
 
 # Map list, sourced from MapCatalog so a newly-added map file appears here
 # with no code change - same discovery-over-declaration approach the terrain

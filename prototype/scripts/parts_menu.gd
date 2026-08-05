@@ -38,6 +38,7 @@ const UITheme = preload("res://scripts/ui_theme.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIAnim = preload("res://scripts/ui_anim.gd")
 const UIDockScript = preload("res://scripts/ui_dock.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 # --- Grouping ---------------------------------------------------------------
@@ -89,6 +90,9 @@ var _family: String = ""
 # Every section built, across all three families, so search can sweep them
 # without re-walking the scene tree on each keystroke.
 var _all_drawers: Array = []
+
+# family id -> its tier Control. Drives the accordion in _open_family_tier().
+var _family_tiers: Dictionary = {}
 
 # Retained so the old one-at-a-time API keeps working for any caller that still
 # sets them; the new panel does not enforce single-open.
@@ -277,7 +281,11 @@ func _populate(groups: Dictionary, order: Array, family: String) -> void:
 		for entry in entries:
 			cards.append(_build_part_card(entry.id, entry.data))
 		var section = _make_section(group, cards, family)
-		_sections_host.add_child(section)
+		# Into the family's tier body rather than straight into _sections_host, which
+		# is what makes the hierarchy structural. _all_drawers still gets every
+		# section, so sections_for() and the test suites are unaffected by the
+		# re-parenting.
+		_family_tier_body(family).add_child(section)
 		_all_drawers.append(section)
 
 
@@ -343,6 +351,118 @@ func _build_part_card(type_id: String, data: Dictionary) -> Button:
 
 # A titled group of cards. Independently collapsible - opening one no longer
 # closes another, because comparing two groups is a normal thing to want.
+# --- Tier 2: the family toolbox ---------------------------------------------
+# TIER STRUCTURE (Chris's toolbox model):
+#
+#   tier 1  the dock itself, collapsed to a 40px rail        (UIDock, existing)
+#   tier 2  one toolbox per FAMILY - Hulls / Modules / Drives   (this function)
+#   tier 3  one drawer per CATEGORY inside a family          (_make_section)
+#   tier 4  the part cards                                   (_build_part_card)
+#
+# Only tier 2 is new. The families and categories were already in the data - the
+# families were filter CHIPS and the categories were drawers in one flat column,
+# so the hierarchy existed conceptually but the player had to hold it in their
+# head. Making it structural means the column is short at rest and you descend to
+# what you want.
+#
+# ACCORDION at both levels: opening a family closes its siblings, and opening a
+# category closes its siblings within that family. At three levels deep a
+# keep-everything-open column runs to several screen-heights, which defeats the
+# collapsing this was built for.
+#
+# The sections keep living in _all_drawers regardless of which tier owns them in
+# the scene tree, which is what keeps sections_for() and the drawer metadata
+# contract (see _make_section) working - the test suites walk that array, not the
+# node hierarchy.
+# Returns the container a family's category drawers belong in, creating the tier
+# on first use so _populate() does not have to be ordered against tier setup.
+func _family_tier_body(family: String) -> VBoxContainer:
+	if not _family_tiers.has(family):
+		var label := family.capitalize()
+		for f in FAMILIES:
+			if f["id"] == family:
+				label = str(f["label"])
+				break
+		var tier := _make_family_tier(family, label)
+		_family_tiers[family] = tier
+		_sections_host.add_child(tier)
+	return _family_tiers[family].get_meta("tier_body")
+
+
+func _make_family_tier(family: String, label: String) -> Control:
+	var tier = VBoxContainer.new()
+	tier.name = "Family_%s" % family
+	tier.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var header = Button.new()
+	# TabButton, not ListButton: a family is a lid on a toolbox, and the theme's
+	# tab treatment inverts its bevel when inactive - so a closed family reads as
+	# pressed shut and the open one lifts. The categories below stay ListButton, so
+	# the two tiers are visually distinct rather than a wall of identical rows.
+	header.theme_type_variation = "TabButton"
+	header.custom_minimum_size = Vector2(0, Tokens.HIT_TARGET_MIN)
+	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	header.text = label
+	header.focus_mode = Control.FOCUS_NONE
+	header.toggle_mode = true
+	# Closed at rest. The whole point of the tier is that the dock opens showing
+	# three short rows rather than the entire catalogue.
+	header.button_pressed = false
+	tier.add_child(header)
+
+	var body = VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	body.visible = false
+	tier.add_child(body)
+
+	tier.set_meta("family", family)
+	tier.set_meta("tier_body", body)
+	tier.set_meta("header_btn", header)
+
+	header.toggled.connect(func(pressed: bool):
+		if pressed:
+			_open_family_tier(family)
+		else:
+			body.visible = false
+	)
+	UIFeedbackScript.wire(header, "select")
+	return tier
+
+
+# Opens one family and closes the rest.
+func _open_family_tier(family: String) -> void:
+	for f in _family_tiers.keys():
+		var tier: Control = _family_tiers[f]
+		if not is_instance_valid(tier):
+			continue
+		var is_target: bool = f == family
+		var body: Control = tier.get_meta("tier_body")
+		var header: Button = tier.get_meta("header_btn")
+		body.visible = is_target
+		# set_pressed_no_signal, or closing a sibling re-enters this function
+		# through its own toggled handler and the loop fights itself.
+		header.set_pressed_no_signal(is_target)
+		if is_target:
+			UIAnim.stagger_in(body, Vector2(-12, 0))
+
+
+# Opens one category drawer and closes its siblings within the same family.
+func _open_category(section: Control) -> void:
+	var family := str(section.get_meta("family", ""))
+	for other in _all_drawers:
+		if not is_instance_valid(other):
+			continue
+		if str(other.get_meta("family", "")) != family:
+			continue
+		var is_target: bool = other == section
+		var grid: Control = other.get_meta("content_container")
+		var header: Button = other.get_meta("header_btn")
+		grid.visible = is_target
+		header.set_pressed_no_signal(is_target)
+		other.set_meta("drawer_open", is_target)
+
+
 func _make_section(category: String, cards: Array, family: String) -> Control:
 	var section = VBoxContainer.new()
 	section.name = "Drawer_%s" % category.replace(" ", "_").replace("&", "and")
@@ -355,7 +475,9 @@ func _make_section(category: String, cards: Array, family: String) -> Control:
 	header_btn.text = category
 	header_btn.focus_mode = Control.FOCUS_NONE
 	header_btn.toggle_mode = true
-	header_btn.button_pressed = true
+	# Closed at rest now that categories sit inside a family tier - opening a
+	# family should reveal its category list, not its every part at once.
+	header_btn.button_pressed = false
 
 	# Count badge. With sections collapsed the player otherwise has no idea
 	# whether a group holds two parts or twelve, which makes deciding where to
@@ -383,6 +505,7 @@ func _make_section(category: String, cards: Array, family: String) -> Control:
 	grid.add_theme_constant_override("v_separation", Tokens.SPACE_XS)
 	for c in cards:
 		grid.add_child(c)
+	grid.visible = false
 	section.add_child(grid)
 
 	# METADATA CONTRACT. run_tests.gd reads these to check that roles, weight
@@ -392,14 +515,20 @@ func _make_section(category: String, cards: Array, family: String) -> Control:
 	# "drawer_category" and "drawer_tab" identify the group.
 	section.set_meta("drawer_category", category)
 	section.set_meta("drawer_tab", family)
-	section.set_meta("drawer_open", true)
+	section.set_meta("drawer_open", false)
 	section.set_meta("header_btn", header_btn)
 	section.set_meta("content_container", grid)
 	section.set_meta("family", family)
 
 	header_btn.toggled.connect(func(pressed: bool):
-		grid.visible = pressed
-		section.set_meta("drawer_open", pressed))
+		if pressed:
+			# Accordion within the family, so a three-deep column stays short.
+			_open_category(section)
+			UIAnim.stagger_in(grid)
+		else:
+			grid.visible = false
+			section.set_meta("drawer_open", false))
+	UIFeedbackScript.wire(header_btn, "select")
 
 	return section
 
@@ -446,7 +575,7 @@ func _apply_filters() -> void:
 			if _filter != "":
 				grid.visible = true
 				section.get_meta("header_btn").button_pressed = true
-				section.set_meta("drawer_open", true)
+				section.set_meta("drawer_open", false)
 
 	if _empty_hint:
 		_empty_hint.visible = not any_visible

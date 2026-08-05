@@ -17,6 +17,7 @@ extends Control
 # the chrome, and it degrades gracefully if the load finishes instantly.
 
 const UITheme = preload("res://scripts/ui_theme.gd")
+const UIShell = preload("res://scripts/ui_shell.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 
 var _context: String = ""
@@ -38,19 +39,11 @@ func _ready() -> void:
 	if router and "pending_context" in router and router.pending_context != "":
 		_context = router.pending_context
 
-	var backdrop = ColorRect.new()
-	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(backdrop)
-	UITheme.apply_backdrop(backdrop)
-
-	var frame = MarginContainer.new()
-	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
-	frame.add_theme_constant_override("margin_left", 72)
-	frame.add_theme_constant_override("margin_right", 72)
-	frame.add_theme_constant_override("margin_top", 56)
-	frame.add_theme_constant_override("margin_bottom", 48)
-	add_child(frame)
+	UIShell.backdrop(self)
+	# Canonical screen frame. Was 72/72/56/48 - none of those are spacing tokens,
+	# and it made the loading screen's content sit visibly further in than the
+	# screen it transitions to, so the frame appeared to jump on arrival.
+	var frame := UIShell.screen_frame(self)
 
 	var col = VBoxContainer.new()
 	col.add_theme_constant_override("separation", Tokens.SPACE_SM)

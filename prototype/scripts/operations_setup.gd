@@ -8,6 +8,10 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
 const MapCatalog = preload("res://scripts/map_catalog.gd")
 const OperationsManager = preload("res://scripts/operations_manager.gd")
+const UIShell = preload("res://scripts/ui_shell.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
+const UIAnimScript = preload("res://scripts/ui_anim.gd")
 
 var difficulty_btn: OptionButton
 var player_faction_btn: OptionButton
@@ -29,21 +33,16 @@ func _ready() -> void:
 		FACTIONS.append(fac_id)
 		FACTION_LABELS.append("%s - %s" % [FactionCatalog.get_faction_name(fac_id), FactionCatalog.get_passive(fac_id, "passive_summary", "")])
 
-	var backdrop = ColorRect.new()
-	backdrop.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(backdrop)
-	UITheme.apply_backdrop(backdrop)
+	# Also picks up MOUSE_FILTER_IGNORE, which this hand-rolled version was
+	# missing - a full-rect ColorRect with the default PASS filter sits under
+	# every control on the screen and eats clicks aimed past it.
+	UIShell.backdrop(self)
 
-	var frame = MarginContainer.new()
-	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
-	frame.add_theme_constant_override("margin_left", 48)
-	frame.add_theme_constant_override("margin_right", 48)
-	frame.add_theme_constant_override("margin_top", 36)
-	frame.add_theme_constant_override("margin_bottom", 36)
-	add_child(frame)
+	# Canonical screen frame. Was 48/48/36/36, none of them spacing tokens.
+	var frame := UIShell.screen_frame(self)
 
 	var vbox = VBoxContainer.new()
-	vbox.add_theme_constant_override("separation", 16)
+	vbox.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	frame.add_child(vbox)
 
 	# Header
@@ -60,14 +59,14 @@ func _ready() -> void:
 	# Main content HBox
 	var content_hbox = HBoxContainer.new()
 	content_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content_hbox.add_theme_constant_override("separation", 24)
+	content_hbox.add_theme_constant_override("separation", Tokens.SPACE_XL)
 	vbox.add_child(content_hbox)
 
 	# Left Column: Campaign Options & Itinerary
 	var left_col = VBoxContainer.new()
 	left_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left_col.size_flags_stretch_ratio = 1.0
-	left_col.add_theme_constant_override("separation", 12)
+	left_col.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	content_hbox.add_child(left_col)
 
 	var settings_heading = Label.new()
@@ -79,7 +78,7 @@ func _ready() -> void:
 	var diff_box = HBoxContainer.new()
 	var diff_label = Label.new()
 	diff_label.text = "AI Difficulty:"
-	diff_label.custom_minimum_size.x = 130
+	diff_label.custom_minimum_size.x = Tokens.SPACE_XL * 4
 	diff_box.add_child(diff_label)
 	difficulty_btn = OptionButton.new()
 	for d in DIFFICULTY_LABELS:
@@ -93,7 +92,7 @@ func _ready() -> void:
 	var fac_box = HBoxContainer.new()
 	var fac_label = Label.new()
 	fac_label.text = "Player Faction:"
-	fac_label.custom_minimum_size.x = 130
+	fac_label.custom_minimum_size.x = Tokens.SPACE_XL * 4
 	fac_box.add_child(fac_label)
 	player_faction_btn = OptionButton.new()
 	for fl in FACTION_LABELS:
@@ -120,11 +119,11 @@ func _ready() -> void:
 		var card = PanelContainer.new()
 		card.theme_type_variation = "InsetPanel"
 		var card_vbox = VBoxContainer.new()
-		card_vbox.add_theme_constant_override("separation", 2)
+		card_vbox.add_theme_constant_override("separation", Tokens.SPACE_XS)
 
 		var st_title = Label.new()
 		st_title.text = "%s — Map: %s" % [st.get("title", ""), st.get("map_id", "").replace("_", " ").capitalize()]
-		st_title.add_theme_font_size_override("font_size", 16)
+		st_title.theme_type_variation = "HeadingLabel"
 		card_vbox.add_child(st_title)
 
 		var map_info = MapCatalog.get_map(st.get("map_id", ""))
@@ -140,7 +139,7 @@ func _ready() -> void:
 	var right_col = VBoxContainer.new()
 	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right_col.size_flags_stretch_ratio = 1.0
-	right_col.add_theme_constant_override("separation", 12)
+	right_col.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	content_hbox.add_child(right_col)
 
 	var roster_heading = Label.new()
@@ -164,7 +163,7 @@ func _ready() -> void:
 
 	# Bottom Action Bar
 	var bottom_bar = HBoxContainer.new()
-	bottom_bar.add_theme_constant_override("separation", 16)
+	bottom_bar.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	vbox.add_child(bottom_bar)
 
 	var back_btn = Button.new()
@@ -183,6 +182,25 @@ func _ready() -> void:
 	start_btn.custom_minimum_size = Vector2(220, 44)
 	start_btn.pressed.connect(_on_start_operation_pressed)
 	bottom_bar.add_child(start_btn)
+
+	# Roles matter here: "Begin Operation" commits to a campaign, so it gets the
+	# radio acknowledgement rather than a click. wire_tree covers the dropdowns and
+	# the roster checkboxes in one pass.
+	UIFeedbackScript.wire(start_btn, "confirm")
+	UIFeedbackScript.wire(back_btn)
+	UIFeedbackScript.wire_tree(content_hbox, "select")
+
+	# The itinerary cards and the roster list both arrive as a sweep rather than
+	# all at once. Deferred: stagger_in reads each child's position, which is not
+	# final until the containers have laid out.
+	call_deferred("_animate_entrance", left_col, bp_list_vbox)
+
+func _animate_entrance(itinerary_col: Control, roster_list: Control) -> void:
+	if is_instance_valid(itinerary_col):
+		UIAnimScript.stagger_in(itinerary_col)
+	if is_instance_valid(roster_list):
+		UIAnimScript.stagger_in(roster_list)
+
 
 func _populate_blueprints(container: Control) -> void:
 	blueprint_checks.clear()

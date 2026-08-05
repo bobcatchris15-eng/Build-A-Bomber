@@ -79,7 +79,22 @@ const FONT_MICRO = 11    # dense tabular readouts, footnotes
 # spans the full width, and the first version had the parts catalogue drawn over
 # the top of it, clipping the mirror toggle to "ment [M]". Two scenes need the
 # same number, so the number belongs to the token set.
-const TOOLBAR_HEIGHT = 44
+#
+# 64, RAISED FROM 44, and the reason is worth recording because the failure mode
+# recurred: this token is what both docks inset their top by, but it does NOT
+# constrain the toolbar - a PanelContainer cannot render shorter than its content's
+# combined minimum size, so offset_bottom is a floor the buttons can exceed.
+#
+# When button padding went from SPACE_MD/SPACE_SM to SPACE_LG/SPACE_MD (the
+# "buttons look cramped" fix), the bar's real height became 64 while the docks
+# still inset by 44. The top 20px of each collapsed rail then covered the bottom
+# 20px of the toolbar - exactly the band holding UNDO/REDO on the left and
+# SAVE/TEST on the right, which is why those became unclickable.
+#
+# stat_calculator.gd's _build_toolbar() now warns at runtime if the bar's measured
+# height exceeds this token, so the next change to button padding says so instead
+# of silently eating the toolbar again.
+const TOOLBAR_HEIGHT = 64
 
 const SPACE_XS = 4
 const SPACE_SM = 8

@@ -7,6 +7,9 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const SceneRouter = preload("res://scripts/scene_router.gd")
+const UIShell = preload("res://scripts/ui_shell.gd")
+const UIAnimScript = preload("res://scripts/ui_anim.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 
 var list_vbox: VBoxContainer
 var blueprint_manager: Node
@@ -101,13 +104,7 @@ func _build_3d_background() -> void:
 	_turntable_node.add_child(_turntable_model_container)
 
 func _build_ui() -> void:
-	var frame = MarginContainer.new()
-	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
-	frame.add_theme_constant_override("margin_left", Tokens.SPACE_XL + Tokens.SPACE_LG)
-	frame.add_theme_constant_override("margin_right", Tokens.SPACE_XL + Tokens.SPACE_LG)
-	frame.add_theme_constant_override("margin_top", Tokens.SPACE_LG)
-	frame.add_theme_constant_override("margin_bottom", Tokens.SPACE_LG)
-	add_child(frame)
+	var frame := UIShell.screen_frame(self)
 	
 	var hbox = HBoxContainer.new()
 	frame.add_child(hbox)
@@ -121,10 +118,10 @@ func _build_ui() -> void:
 	hbox.add_child(left_panel)
 	
 	var margin = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_bottom", 16)
+	margin.add_theme_constant_override("margin_left", Tokens.SPACE_MD)
+	margin.add_theme_constant_override("margin_right", Tokens.SPACE_MD)
+	margin.add_theme_constant_override("margin_top", Tokens.SPACE_MD)
+	margin.add_theme_constant_override("margin_bottom", Tokens.SPACE_MD)
 	left_panel.add_child(margin)
 	
 	var vbox = VBoxContainer.new()
@@ -170,12 +167,23 @@ func _refresh_list() -> void:
 	if roster.is_empty():
 		var empty_lbl = Label.new()
 		empty_lbl.text = "No saved blueprints found."
-		empty_lbl.modulate = Color(1, 1, 1, 0.5)
+		# HintLabel rather than a 50% alpha modulate. Fading white to half opacity
+		# over a textured backdrop lets the grain read straight through the glyphs;
+		# TEXT_SECONDARY is a real colour that stays legible on it.
+		empty_lbl.theme_type_variation = "HintLabel"
 		list_vbox.add_child(empty_lbl)
 		return
 		
 	for entry in roster:
 		_add_entry_ui(entry)
+	# Deferred: stagger_in reads each child's position, which is not final until
+	# the VBox has laid the new rows out.
+	call_deferred("_animate_list_entrance")
+
+func _animate_list_entrance() -> void:
+	if is_instance_valid(list_vbox):
+		UIAnimScript.stagger_in(list_vbox)
+
 
 func _add_entry_ui(entry: Dictionary) -> void:
 	var entry_vbox = VBoxContainer.new()
@@ -272,27 +280,14 @@ func _preview_blueprint(path: String) -> void:
 		model_root.add_child(mesh_inst)
 		
 	# Apply scale model look
-	_apply_unpainted_scale_model_material(model_root)
+	HullMaterialBuilderScript.apply_scale_model_finish(model_root)
 	_turntable_model_container.add_child(model_root)
 
-func _apply_unpainted_scale_model_material(node: Node, mat: StandardMaterial3D = null) -> void:
-	if node.name == "HullGreebles":
-		return
-		
-	if mat == null:
-		mat = StandardMaterial3D.new()
-		mat.albedo_color = Color(0.38, 0.44, 0.37)
-		mat.metallic = 0.0
-		mat.roughness = 0.8
-		
-	if node is GeometryInstance3D:
-		node.material_override = mat
-		node.material_overlay = null
-	if node is MeshInstance3D and node.mesh:
-		for i in range(node.mesh.get_surface_count()):
-			node.set_surface_override_material(i, mat)
-	for child in node.get_children():
-		_apply_unpainted_scale_model_material(child, mat)
+# _apply_unpainted_scale_model_material() lived here as a verbatim duplicate of
+# main_menu.gd's copy. Both now call HullMaterialBuilder.apply_scale_model_finish(),
+# which is the file that exists to end exactly this copy-paste - and which also
+# holds the albedo colour that previously had two definitions as well as two
+# implementations.
 
 func _on_edit_pressed(id: String, path: String):
 	# The library is now a separate scene, so the Lab isn't in the tree to load into directly.

@@ -230,6 +230,7 @@ const VARIATION_BASES = {
 	"DangerButton": "Button",
 	"TabButton": "Button",
 	"ListButton": "Button",
+	"NavCard": "Button",
 	"DisplayLabel": "Label",
 	"TitleLabel": "Label",
 	"HeadingLabel": "Label",
@@ -352,6 +353,48 @@ func _build_buttons(theme: Theme) -> void:
 	# look like the control changed material.
 	var focus = _flat(Color(0, 0, 0, 0), Tokens.SIGNAL_HAZARD,
 		2, Tokens.RADIUS_CONTROL)
+
+	# NAVCARD - the main menu's destination cards.
+	#
+	# This resolves the open question in UI_IMPLEMENTATION_PLAN.md about whether
+	# these stay as per-instance styleboxes. They become a real variation, but
+	# deliberately a FLAT one rather than a plate: the card's identity is an
+	# asymmetric left gutter that thickens on hover, and a 9-sliced plate texture
+	# has no border properties at all (see _plate_tinted's comment) so it cannot
+	# express one. This is the one place a flat stylebox is the right answer.
+	#
+	# It replaces main_menu.gd's _create_industrial_button_style(), whose colours
+	# were hardcoded cool blue-greys - Color(0.12, 0.13, 0.15) and friends, the
+	# exact drifted off-palette accent ui_tokens.gd's header calls out - with
+	# 4px and 6px borders against a BORDER_EMPHASIS of 2.
+	var nav_normal := _flat(Tokens.BASE_800, Tokens.BASE_500,
+		Tokens.BORDER_HAIRLINE, Tokens.RADIUS_PANEL)
+	# The gutter. Wide on the left, hairline elsewhere - which is what makes the
+	# card read as a tab in a rack rather than as a boxed button.
+	nav_normal.border_width_left = 5
+	Tokens.apply_elevation(nav_normal, "raised")
+
+	var nav_hover := _flat(Tokens.BASE_700, Tokens.SIGNAL_HAZARD,
+		Tokens.BORDER_EMPHASIS, Tokens.RADIUS_PANEL)
+	nav_hover.border_width_left = 6
+	Tokens.apply_elevation(nav_hover, "floating")
+
+	# Pressed uses the DIM hazard fill, not the full signal colour: a card the
+	# player is holding down should warm, not light up like a warning.
+	var nav_pressed := _flat(Tokens.SIGNAL_HAZARD_DIM, Tokens.SIGNAL_HAZARD,
+		Tokens.BORDER_EMPHASIS, Tokens.RADIUS_PANEL)
+	nav_pressed.border_width_left = 6
+	Tokens.apply_elevation(nav_pressed, "flush")
+
+	var nav_pad := Vector2i(Tokens.SPACE_MD, Tokens.SPACE_SM)
+	theme.set_stylebox("normal", "NavCard", _pad(nav_normal, nav_pad.x, nav_pad.y))
+	theme.set_stylebox("hover", "NavCard", _pad(nav_hover, nav_pad.x, nav_pad.y))
+	theme.set_stylebox("pressed", "NavCard", _pad(nav_pressed, nav_pad.x, nav_pad.y))
+	theme.set_stylebox("disabled", "NavCard", _pad(nav_normal, nav_pad.x, nav_pad.y))
+	theme.set_stylebox("focus", "NavCard", focus)
+	theme.set_color("font_color", "NavCard", Tokens.TEXT_PRIMARY)
+	theme.set_color("font_hover_color", "NavCard", Tokens.TEXT_PRIMARY)
+	theme.set_color("font_pressed_color", "NavCard", Tokens.TEXT_PRIMARY)
 
 	for type in ["Button", "MenuButton", "OptionButton"]:
 		theme.set_stylebox("normal", type, normal)

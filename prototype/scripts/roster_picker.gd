@@ -19,6 +19,7 @@ class_name RosterPicker
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
 const BlueprintThumbnailScript = preload("res://scripts/blueprint_thumbnail.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 
 # The drag payload's type tag. Namespaced because _can_drop_data() is called for
 # EVERY drag that passes over a slot, including part drags from the Design Lab if
@@ -116,6 +117,9 @@ func _build_library(entries: Array) -> void:
 		var card := RosterCard.new()
 		card.configure(entry, _data_by_path.get(str(entry.get("path", "")), {}))
 		_library_row.add_child(card)
+	# The strip sweeps in rather than appearing whole. Deferred because stagger_in
+	# reads each child's position, which the HBox has not assigned yet.
+	call_deferred("_animate_library_entrance")
 
 
 func _build_slot_grid() -> void:
@@ -149,6 +153,13 @@ func _build_slot_grid() -> void:
 		slot.configure(i, self)
 		_slot_grid.add_child(slot)
 		_slots.append(slot)
+
+
+func _animate_library_entrance() -> void:
+	if is_instance_valid(_library_row):
+		# From the LEFT, not from below: the strip is a horizontal rack, and cards
+		# arriving upward would read as unrelated to the direction it scrolls.
+		UIAnimScript.stagger_in(_library_row, Vector2(-16, 0))
 
 
 func _bake_thumbnails(entries: Array) -> void:
@@ -429,6 +440,7 @@ class RosterSlot extends PanelContainer:
 
 		assign(path, str(data.get("name", "")), data.get("tex", null))
 		UIAnimScript.button_press_feedback(self)
+		UIFeedbackScript.play(self, "place")
 		if _picker:
 			_picker.notify_slot_changed(self)
 
@@ -452,6 +464,7 @@ class RosterSlot extends PanelContainer:
 		if event is InputEventMouseButton and event.pressed \
 				and event.button_index == MOUSE_BUTTON_RIGHT and entry_path != "":
 			clear_slot()
+			UIFeedbackScript.play(self, "select")
 			if _picker:
 				_picker.notify_slot_changed(self)
 			accept_event()

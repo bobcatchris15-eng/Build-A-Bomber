@@ -96,13 +96,7 @@ func _ready() -> void:
 		_build_3d_background()
 
 	# Main 2D UI Overlay
-	var frame = MarginContainer.new()
-	frame.set_anchors_preset(Control.PRESET_FULL_RECT)
-	frame.add_theme_constant_override("margin_left", Tokens.SPACE_XL + Tokens.SPACE_LG)
-	frame.add_theme_constant_override("margin_right", Tokens.SPACE_XL + Tokens.SPACE_LG)
-	frame.add_theme_constant_override("margin_top", Tokens.SPACE_LG)
-	frame.add_theme_constant_override("margin_bottom", Tokens.SPACE_LG)
-	add_child(frame)
+	var frame := UIShell.screen_frame(self)
 
 	var root_vbox = VBoxContainer.new()
 	root_vbox.add_theme_constant_override("separation", Tokens.SPACE_LG)
@@ -416,14 +410,12 @@ func _add_destination_card(parent: Control, title_text: String, description: Str
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	# Industrial shaped outlines and dark fill gradient styleboxes
-	var sb_normal = _create_industrial_button_style(Color(0.12, 0.13, 0.15, 0.95), Color(0.38, 0.40, 0.44, 0.95), 4, 1)
-	var sb_hover = _create_industrial_button_style(Color(0.18, 0.20, 0.23, 0.98), Tokens.SIGNAL_HAZARD, 6, 2)
-	var sb_pressed = _create_industrial_button_style(Color(0.24, 0.21, 0.14, 1.0), Tokens.SIGNAL_HAZARD, 6, 2)
-
-	btn.add_theme_stylebox_override("normal", sb_normal)
-	btn.add_theme_stylebox_override("hover", sb_hover)
-	btn.add_theme_stylebox_override("pressed", sb_pressed)
-	btn.add_theme_stylebox_override("focus", sb_hover)
+	# NavCard is now a registered theme variation (see build_ui_theme.gd), so the
+	# four per-instance stylebox overrides this used to build are gone. Those
+	# overrides also carried hardcoded cool blue-greys that appear nowhere in the
+	# palette - a local override always beats the theme, so they were actively
+	# holding the design system out of the most prominent control in the game.
+	btn.theme_type_variation = "NavCard"
 	parent.add_child(btn)
 
 	var margin = MarginContainer.new()
@@ -503,17 +495,9 @@ func _add_destination_card(parent: Control, title_text: String, description: Str
 		indicator.modulate.a = 0.0
 	)
 
-func _create_industrial_button_style(bg: Color, border: Color, border_left_w: int, border_other_w: int) -> StyleBoxFlat:
-	var sb = StyleBoxFlat.new()
-	sb.bg_color = bg
-	sb.border_color = border
-	sb.border_width_left = border_left_w
-	sb.border_width_top = border_other_w
-	sb.border_width_right = border_other_w
-	sb.border_width_bottom = border_other_w
-	sb.corner_radius_top_left = 3
-	sb.corner_radius_bottom_right = 3
-	return sb
+# _create_industrial_button_style() was here. Replaced by the NavCard theme
+# variation, which expresses the same asymmetric left gutter through a registered
+# flat stylebox instead of a per-instance one.
 
 func _build_status_column(parent: Control) -> void:
 	var col = VBoxContainer.new()

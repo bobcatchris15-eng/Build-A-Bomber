@@ -778,6 +778,7 @@ func _push_undo():
 		root.push_undo_snapshot()
 
 const UIStampScript = preload("res://scripts/ui_stamp.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 
 func _on_delete_pressed():
 	var root = get_node_or_null("/root/MainLab")
@@ -2077,6 +2078,31 @@ func _build_toolbar() -> void:
 		save_button.reparent(row)
 	if test_button:
 		test_button.reparent(row)
+
+	UIFeedbackScript.wire_tree(row)
+	# The docks inset their top by Tokens.TOOLBAR_HEIGHT, but nothing forces the
+	# BAR to that height - a PanelContainer cannot render shorter than its content,
+	# so a change to button padding silently makes the bar taller and the rails
+	# start covering its outermost buttons. That is exactly what happened once (see
+	# the token's own comment), and the symptom - UNDO/REDO and SAVE/TEST becoming
+	# unclickable - looks like an input bug rather than a layout one. Deferred
+	# because size is not final until layout has run.
+	call_deferred("_verify_toolbar_height")
+
+
+func _verify_toolbar_height() -> void:
+	if not is_instance_valid(toolbar):
+		return
+	var actual: float = toolbar.size.y
+	if actual > float(Tokens.TOOLBAR_HEIGHT) + 0.5:
+		push_warning(
+			"stat_calculator: toolbar renders %.0fpx but Tokens.TOOLBAR_HEIGHT is %d. "
+			% [actual, Tokens.TOOLBAR_HEIGHT]
+			+ "The docks inset by the token, so the bottom %.0fpx of the bar is now "
+			% [actual - float(Tokens.TOOLBAR_HEIGHT)]
+			+ "under the collapsed rails and its outermost buttons are unclickable. "
+			+ "Raise the token to match, or reduce the toolbar buttons' padding."
+		)
 
 
 func _toolbar_undo() -> void:
