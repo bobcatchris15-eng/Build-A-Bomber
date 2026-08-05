@@ -1,0 +1,158 @@
+class_name Structure
+extends StaticBody3D
+# A base building: HQ, refinery, manufactory, power plant.
+#
+# Thinner than the 687-line building.gd it replaces, because the things that file
+# also did - production queues, energy bookkeeping, repair, placement legality -
+# are services now. What is left is genuinely per-building: where it is, how much
+# of it is left, where units come out, and where harvesters dock.
+#
+# GEOMETRY IS A PLACEHOLDER, inherited deliberately from the old implementation.
+# Chris is replacing every building mesh with authored art later, so this pass is
+# data and wiring only and the boxes are on purpose.
+
+const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
+const LayersScript = preload("res://scripts/battle/battle_layers.gd")
+
+signal died(structure)
+
+var kind: String = "hq"
+var team: int = 0
+var max_hp: float = 1000.0
+var hp: float = 1000.0
+var is_dead: bool = false
+var footprint := Vector3(5, 3, 5)
+
+# bay index -> the unit holding it, or null. Fixed length, allocated at setup
+# from the catalog, so a refinery's capacity is authored data rather than an
+# emergent property of how many harvesters happen to be nearby.
+var _bays: Array = []
+var _bay_offsets: Array = []
+
+var _mesh: MeshInstance3D = null
+
+
+func _ready() -> void:
+	add_to_group("structures")
+	add_to_group("damageable")
+
+
+func setup(structure_kind: String, structure_team: int) -> void:
+	kind = structure_kind
+	team = structure_team
+	set_meta("team", team)
+	collision_layer = LayersScript.BUILDINGS
+	collision_mask = 0
+
+	var stats := BuildingCatalogScript.get_stats(kind)
+	max_hp = stats.get("hp", 1000.0)
+	hp = max_hp
+	footprint = stats.get("size", Vector3(5, 3, 5))
+
+	_bay_offsets = stats.get("dock_bays", [])
+	_bays.resize(_bay_offsets.size())
+	_bays.fill(null)
+
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = footprint
+	col.shape = box
+	col.position = Vector3(0, footprint.y * 0.5, 0)
+	add_child(col)
+
+	_mesh = MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = footprint
+	_mesh.mesh = mesh
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = stats.get("color", Color(0.6, 0.6, 0.6))
+	mat.roughness = 0.85
+	_mesh.material_override = mat
+	_mesh.position = Vector3(0, footprint.y * 0.5, 0)
+	add_child(_mesh)
+
+	_add_selection_proxy()
+
+
+# Structures are clickable for the same reason units are, and through the same
+# mechanism - a proxy on the selection layer carrying a back-reference. Clicking
+# a manufactory is how the radial menu for its queue is raised.
+func _add_selection_proxy() -> void:
+	var area := Area3D.new()
+	area.name = "SelectionProxy"
+	area.collision_layer = LayersScript.SELECTION
+	area.collision_mask = 0
+	area.monitoring = false
+	area.monitorable = true
+	area.set_meta("structure", self)
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = footprint
+	col.shape = box
+	col.position = Vector3(0, footprint.y * 0.5, 0)
+	area.add_child(col)
+	add_child(area)
+
+
+# --- Dock bays ---------------------------------------------------------------
+
+func bay_count() -> int:
+	return _bays.size()
+
+
+func bay_position(index: int) -> Vector3:
+	if index < 0 or index >= _bay_offsets.size():
+		return global_position
+	return global_position + (_bay_offsets[index] as Vector3)
+
+
+# Claims a free bay for `unit`, or returns -1 if all are taken.
+#
+# Idempotent: a unit that already holds a bay gets the same one back rather than
+# a second. Without that, a harvester re-asking on any state re-entry would leak
+# reservations until the refinery permanently reported itself full.
+func reserve_bay(unit: Node) -> int:
+	for i in range(_bays.size()):
+		if _bays[i] == unit:
+			return i
+	for i in range(_bays.size()):
+		# A reservation held by a freed unit is reclaimed here rather than
+		# needing the dying unit to have cleaned up. Deaths happen in any order.
+		if _bays[i] == null or not is_instance_valid(_bays[i]):
+			_bays[i] = unit
+			return i
+	return -1
+
+
+func release_bay(unit: Node) -> void:
+	for i in range(_bays.size()):
+		if _bays[i] == unit:
+			_bays[i] = null
+			return
+
+
+# --- Unit exit ---------------------------------------------------------------
+
+# Where a finished unit appears. Mirrored for team 1 so both bases eject toward
+# the middle of the map rather than one of them ejecting into its own back wall.
+func exit_position() -> Vector3:
+	var offset: Vector3 = BuildingCatalogScript.get_stat(kind, "exit_offset", Vector3(0, 0.5, 6.0))
+	if team != 0:
+		offset.z = -offset.z
+	return global_position + offset
+
+
+# --- Damage ------------------------------------------------------------------
+
+func take_damage(amount: float) -> void:
+	if is_dead:
+		return
+	hp -= amount
+	if hp <= 0.0:
+		hp = 0.0
+		is_dead = true
+		# Every held bay is freed, or harvesters queued on a dead refinery wait
+		# on a reservation that will never come.
+		_bays.fill(null)
+		died.emit(self)
+		queue_free()

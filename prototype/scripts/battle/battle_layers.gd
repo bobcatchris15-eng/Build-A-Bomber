@@ -18,6 +18,13 @@ const TERRAIN := 1 << 0    # 1  - ground heightmap, obstacles, and vehicle hulls
 const MODULES := 1 << 1    # 2  - per-module bodies, for subsystem-strip hits
 const UNITS := 1 << 2      # 4  - the CharacterBody3D of a mobile unit
 const BUILDINGS := 1 << 3  # 8  - static structures
+# ALREADY IN USE by resource_node.gd, which sets `collision_layer = 16` as a bare
+# literal. Named here rather than left implicit because SELECTION was originally
+# assigned this bit, and the clash was invisible: a frustum select would return
+# every ore patch inside the box, and only the has_meta("unit") filter downstream
+# kept it from showing up as a bug. Right-clicking a node to send harvesters
+# needs to pick this layer on purpose, so it gets a name.
+const RESOURCE_NODES := 1 << 4  # 16
 
 # NEW, and the reason this file is not just documentation.
 #
@@ -33,7 +40,7 @@ const BUILDINGS := 1 << 3  # 8  - static structures
 # what got bolted on. This is the same class of bug as the Design Lab's
 # unclickable heavy_machine_gun (see PROGRESS.md 2026-08-04): a click collider
 # derived from unrotated catalog dimensions does not match what is on screen.
-const SELECTION := 1 << 4  # 16 - click/frustum proxy, nothing else
+const SELECTION := 1 << 5  # 32 - click/frustum proxy, nothing else
 
 # What a selection frustum query should collide with: proxies only. Not UNITS -
 # hitting both would return each unit twice and make the caller dedupe.
@@ -41,3 +48,8 @@ const SELECTION_QUERY_MASK := SELECTION
 
 # What a ground-picking ray (right-click to move) should collide with.
 const GROUND_PICK_MASK := TERRAIN
+
+# A right-click has to distinguish "the ground", "a unit", "a building" and "an
+# ore patch" before it knows what the order even is, so it queries the union and
+# decides from what it hit.
+const ORDER_PICK_MASK := TERRAIN | BUILDINGS | RESOURCE_NODES

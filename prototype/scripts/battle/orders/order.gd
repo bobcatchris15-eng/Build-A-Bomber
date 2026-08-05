@@ -53,18 +53,31 @@ var target: Node3D = null
 # happened to be sent here". FlowField keys its cache on this in Phase 1.
 var group_id: int = 0
 
-static func move(to: Vector3, group: int = 0) -> Order:
+# Where the PLAYER clicked, as opposed to `position`, which is this unit's own
+# formation slot near it.
+#
+# Both are needed and they are not interchangeable. The flow field is built for
+# the clicked point and shared by the whole group, so a unit following the field
+# has to know it; the slot is what the unit finally steers to on arrival. Keeping
+# only the slot would mean a field per unit, which is the entire cost the field
+# exists to avoid. Defaults to `position` for a single-unit order, where they
+# genuinely are the same point.
+var group_destination: Vector3 = Vector3.ZERO
+
+static func move(to: Vector3, group: int = 0, group_to: Variant = null) -> Order:
 	var o := Order.new()
 	o.type = Type.MOVE
 	o.position = to
 	o.group_id = group
+	o.group_destination = to if group_to == null else group_to
 	return o
 
-static func attack_move(to: Vector3, group: int = 0) -> Order:
+static func attack_move(to: Vector3, group: int = 0, group_to: Variant = null) -> Order:
 	var o := Order.new()
 	o.type = Type.ATTACK_MOVE
 	o.position = to
 	o.group_id = group
+	o.group_destination = to if group_to == null else group_to
 	return o
 
 static func attack(what: Node3D) -> Order:

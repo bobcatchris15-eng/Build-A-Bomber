@@ -28,6 +28,8 @@ const SUITE_FILES := {
 	# is ever abandoned - unlike the ten area files above, which are a split of
 	# one historical monolith.
 	"battle_movement": preload("res://tests/battle/test_battle_movement.gd"),
+	"battle_command": preload("res://tests/battle/test_battle_command.gd"),
+	"battle_economy": preload("res://tests/battle/test_battle_economy.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -253,6 +255,16 @@ const SUITE_ORDER := [
 	["battle_movement", "test_steering_yaw_faces_the_requested_direction"],
 	["battle_movement", "test_steering_arrival_and_turn_rate"],
 	["battle_movement", "test_order_vocabulary_and_completion"],
+	["battle_command", "test_formation_gives_every_unit_a_distinct_slot"],
+	["battle_command", "test_formation_assignment_does_not_cross"],
+	["battle_command", "test_flow_field_integrates_and_points_home"],
+	["battle_command", "test_selection_frustum_geometry"],
+	["battle_command", "test_separation_and_stance_policy"],
+	["battle_economy", "test_production_uses_the_real_ra_speed_table"],
+	["battle_economy", "test_production_drip_feeds_cost_and_refunds_only_what_was_drawn"],
+	["battle_economy", "test_five_queues_are_independent_and_gated"],
+	["battle_economy", "test_power_gates_production_rate"],
+	["battle_economy", "test_refinery_bays_are_exclusive_and_reclaimable"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

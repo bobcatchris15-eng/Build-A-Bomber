@@ -27,11 +27,26 @@ const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const MapCatalog = preload("res://scripts/map_catalog.gd")
 const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
 const UnitScript = preload("res://scripts/battle/units/unit.gd")
-const OrderScript = preload("res://scripts/battle/orders/order.gd")
 const LayersScript = preload("res://scripts/battle/battle_layers.gd")
+const SelectionServiceScript = preload("res://scripts/battle/orders/selection_service.gd")
+const OrderServiceScript = preload("res://scripts/battle/orders/order_service.gd")
+const FlowFieldServiceScript = preload("res://scripts/battle/movement/flow_field_service.gd")
+const StanceScript = preload("res://scripts/battle/orders/stance.gd")
+const EconomyServiceScript = preload("res://scripts/battle/economy/economy_service.gd")
+const ProductionServiceScript = preload("res://scripts/battle/economy/production_service.gd")
+const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
+const StructureScript = preload("res://scripts/battle/buildings/structure.gd")
+const ResourceNodeScript = preload("res://scripts/resource_node.gd")
+const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
+const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
 
 const PLAYER_TEAM := 0
 const ENEMY_TEAM := 1
+
+# Neighbour lookup grid. One cell comfortably exceeds the largest separation
+# radius, so a unit only ever has to check its own cell and the eight around it.
+const NEIGHBOUR_CELL := 8.0
 
 # How far a right-click ray reaches. Longer than any map's diagonal so a click
 # near the horizon at full zoom-out still finds ground.
@@ -53,14 +68,37 @@ var _water_nav_region: RID
 var _amphibious_nav_region: RID
 var _deep_water_nav_region: RID
 
-# Phase 0 selection: a plain list, replaced by SelectionService in Phase 1 when
-# frustum querying and control groups arrive. It lives here now only so
-# right-click has something to command.
-var selected: Array = []
+var selection: SelectionService = null
+var orders: OrderService = null
+var flow_fields: FlowFieldService = null
+var economy: EconomyService = null
+var production: ProductionService = null
+var production_hud: ProductionHUD = null
 
-# Increments per group command so orders issued together share a group_id. The
-# flow field caches on it in Phase 1.
-var _next_group_id: int = 1
+# The designs this team can field. Bundled defaults for now; hand-picked roster
+# selection from MatchConfig arrives with the pre-match screen.
+var roster: Array = []
+
+# Starting bank. Enough for a refinery plus a light manufactory, so the opening
+# is a real choice rather than a forced single purchase.
+const STARTING_METAL := 400
+const STARTING_CRYSTAL := 100
+
+# Drag-select state. A press below SelectionService.DRAG_THRESHOLD_PX resolves as
+# a click instead.
+var _drag_origin := Vector2.ZERO
+var _dragging := false
+var _selection_rect: Panel = null
+
+# Armed one-shot modes: the next right-click means something other than "move".
+# Same convention OpenRA's sidebar icons use, and the same one the old runtime
+# used for repair/sell.
+var _attack_move_armed := false
+var _hud_hint: Label = null
+
+# cell -> Array of units, rebuilt each physics tick. Separation asks this rather
+# than scanning every unit, which would be O(n^2) per frame across the army.
+var _neighbour_grid: Dictionary = {}
 
 
 func _ready() -> void:
@@ -77,8 +115,37 @@ func _ready() -> void:
 		player_faction = match_config.player_faction
 	current_map = MapCatalog.get_map(map_id)
 
+	orders = OrderServiceScript.new()
+	flow_fields = FlowFieldServiceScript.new()
+
+	economy = EconomyServiceScript.new()
+	production = ProductionServiceScript.new()
+	production.setup(economy, self)
+	for t in [PLAYER_TEAM, ENEMY_TEAM]:
+		economy.add_team(t, STARTING_METAL, STARTING_CRYSTAL)
+		production.add_team(t)
+	production.unit_completed.connect(_on_unit_completed)
+
+	# Buildings BEFORE the bake, so their footprints go into the first navmesh
+	# rather than needing an immediate second one. A rebake inside the first few
+	# startup frames leaves a window where a unit's very first path query runs
+	# before NavigationServer3D has resynced, and the unit drives into the lake.
+	_spawn_resource_nodes()
+	_spawn_bases()
+
 	await _setup_terrain()
+
+	# After the bake: the flow field samples the ground navmesh for passability,
+	# so it needs the map RID that _setup_terrain() just produced.
+	flow_fields.setup(ground_nav_map, current_map.get("map_half_extents", 80.0))
+
+	selection = SelectionServiceScript.new()
+	selection.setup(camera, get_world_3d().direct_space_state, PLAYER_TEAM)
+	selection.group_recentre_requested.connect(_on_group_recentre)
+
+	_load_roster()
 	_spawn_starting_units()
+	_build_hud()
 
 
 # --- World ------------------------------------------------------------------
@@ -99,10 +166,11 @@ func _ready() -> void:
 # NavigationServer3D has resynced, and the unit wanders into the lake.
 func _setup_terrain() -> void:
 	var nav: Dictionary
+	var holes := _building_holes()
 	if DisplayServer.get_name() == "headless":
-		nav = TerrainBuilder.build_navmeshes(current_map, [])
+		nav = TerrainBuilder.build_navmeshes(current_map, holes)
 	else:
-		nav = TerrainBuilder.build_navmeshes_deferred(current_map, [])
+		nav = TerrainBuilder.build_navmeshes_deferred(current_map, holes)
 		for entry in nav["pending"]:
 			await get_tree().process_frame
 			TerrainBuilder.bake_pending_entry(entry, nav["cell_size"])
@@ -172,6 +240,14 @@ func get_surface_type_at(pos: Vector3) -> String:
 
 # Phase 0 spawns the bundled loadout at the player's spawn point so there is
 # something to drive. Rosters, production and the enemy arrive in Phase 2/3.
+func _load_roster() -> void:
+	roster.clear()
+	for path in _bundled_loadout_paths():
+		var design: Dictionary = bp_manager.load_blueprint(path)
+		if not design.is_empty():
+			roster.append(design)
+
+
 func _spawn_starting_units() -> void:
 	# MapCatalog decodes the JSON number-arrays into real Vector3s, so this is a
 	# world position already. Spawn ids are "player"/"enemy" - see data/maps/.
@@ -233,60 +309,568 @@ func get_team_units(for_team: int) -> Array:
 	return out
 
 
-# --- Input ------------------------------------------------------------------
+# --- Base and economy --------------------------------------------------------
+
+func _spawn_resource_nodes() -> void:
+	for entry in current_map.get("resource_nodes", []):
+		var node := StaticBody3D.new()
+		node.set_script(ResourceNodeScript)
+		add_child(node)
+		var pos: Vector3 = entry.get("position", Vector3.ZERO)
+		node.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
+		node.setup(entry.get("type", "metal"), entry.get("amount", 1000))
+
+
+func _spawn_bases() -> void:
+	for spawn in current_map.get("spawns", []):
+		var team := PLAYER_TEAM if spawn.get("id") == "player" else ENEMY_TEAM
+		# A starting HQ and refinery only. The manufactories are the player's
+		# first real decision rather than a gift - which is the whole point of
+		# splitting the building queue out.
+		_place_structure("hq", team, spawn.get("hq", Vector3.ZERO))
+		_place_structure("refinery", team, spawn.get("refinery", Vector3.ZERO))
+	for t in [PLAYER_TEAM, ENEMY_TEAM]:
+		economy.recalculate_power(t, get_team_structures(t))
+
+
+func _place_structure(kind: String, structure_team: int, at: Vector3) -> Structure:
+	var s := StructureScript.new()
+	add_child(s)
+	s.global_position = Vector3(at.x, terrain_height_at(at), at.z)
+	s.setup(kind, structure_team)
+	s.died.connect(_on_structure_died)
+	return s
+
+
+func get_team_structures(for_team: int) -> Array:
+	var out: Array = []
+	for s in get_tree().get_nodes_in_group("structures"):
+		if is_instance_valid(s) and not s.is_dead and s.team == for_team:
+			out.append(s)
+	return out
+
+
+# Every live structure's footprint, gathered fresh rather than cached. The set
+# only changes on placement and death, both of which already trigger a rebake, so
+# this is never stale when it actually runs.
+func _building_holes() -> Array:
+	var holes: Array = []
+	for s in get_tree().get_nodes_in_group("structures"):
+		# is_inside_tree() guards a real teardown race: queue_free() defers
+		# removal to end of frame, so a structure mid-teardown can still be
+		# is_instance_valid() while reading global_position throws.
+		if not is_instance_valid(s) or s.is_dead or not s.is_inside_tree():
+			continue
+		holes.append({
+			"center": s.global_position,
+			"half_extents": Vector2(s.footprint.x / 2.0, s.footprint.z / 2.0),
+		})
+	return holes
+
+
+func _on_structure_died(structure) -> void:
+	economy.recalculate_power(structure.team, get_team_structures(structure.team))
+	# Losing the last contributor to a queue refunds everything in it: that line
+	# can never advance again, so holding the money is a bug with extra steps.
+	production.cancel_unbuildable(structure.team)
+	# The navmesh had a hole carved for this building and no longer should, and
+	# every cached flow field was sampled against the old passability.
+	flow_fields.invalidate()
+
+
+# --- Contracts the economy systems look for ----------------------------------
+
+# --- Resource node work slots ------------------------------------------------
 #
-# Phase 0 wiring only: click to select one unit, right-click to move the
-# selection. Drag-box frustum selection, formations, stances and attack-move all
-# land in Phase 1, at which point this forwards to SelectionService and
-# OrderService instead of doing the work itself.
+# THE SAME PROBLEM AS THE REFINERY BAYS, AT THE OTHER END OF THE LOOP, and the
+# first version of this phase fixed only one of them. Docking was reserved, so
+# harvesters no longer piled onto the refinery - and then all three drove to the
+# nearest ore patch, steered at its exact origin, and stacked there instead
+# (measured: 0.12 m apart). Reserving one end of a round trip and not the other
+# just moves the scrum.
+#
+# So a node has work slots on a ring, claimed the same way a bay is, and node
+# selection prefers a patch with room. Kept here rather than on resource_node.gd
+# because that script is shared with the old Skirmish scene, which this rebuild
+# leaves alone.
+const NODE_WORK_SLOTS := 4
+const NODE_WORK_RADIUS := 3.2
+
+var _node_claims: Dictionary = {}
+
+
+func _claims_for(node: Node3D) -> Array:
+	var key := node.get_instance_id()
+	if not _node_claims.has(key):
+		var slots: Array = []
+		slots.resize(NODE_WORK_SLOTS)
+		slots.fill(null)
+		_node_claims[key] = slots
+	return _node_claims[key]
+
+
+func claim_node_slot(node: Node3D, unit: Node) -> int:
+	if not is_instance_valid(node):
+		return -1
+	var slots := _claims_for(node)
+	for i in range(slots.size()):
+		if slots[i] == unit:
+			return i
+	for i in range(slots.size()):
+		# A slot held by a freed unit is reclaimed here, so a harvester dying at
+		# an ore patch does not permanently shrink that patch's capacity.
+		if slots[i] == null or not is_instance_valid(slots[i]):
+			slots[i] = unit
+			return i
+	return -1
+
+
+func release_node_slot(node: Node3D, unit: Node) -> void:
+	if not is_instance_valid(node):
+		return
+	var slots := _claims_for(node)
+	for i in range(slots.size()):
+		if slots[i] == unit:
+			slots[i] = null
+			return
+
+
+func node_slot_position(node: Node3D, slot: int) -> Vector3:
+	if not is_instance_valid(node):
+		return Vector3.ZERO
+	if slot < 0:
+		return node.global_position
+	var angle := TAU * float(slot) / float(NODE_WORK_SLOTS)
+	return node.global_position + Vector3(cos(angle), 0.0, sin(angle)) * NODE_WORK_RADIUS
+
+
+func _free_slots(node: Node3D) -> int:
+	var free := 0
+	for holder in _claims_for(node):
+		if holder == null or not is_instance_valid(holder):
+			free += 1
+	return free
+
+
+# Nearest node WITH ROOM, falling back to nearest overall.
+#
+# Distance alone sends every harvester to the same patch, which is both a traffic
+# jam and bad economics - four trucks queueing at one patch while three others
+# sit untouched. The occupancy penalty spreads them without needing a scheduler.
+func nearest_resource_node(from: Vector3, requester: Node = null) -> Node3D:
+	var best: Node3D = null
+	var best_score := INF
+	var best_any: Node3D = null
+	var best_any_distance := INF
+	for n in get_tree().get_nodes_in_group("resource_nodes"):
+		if not is_instance_valid(n) or n.amount <= 0:
+			continue
+		var distance: float = from.distance_to(n.global_position)
+		if distance < best_any_distance:
+			best_any_distance = distance
+			best_any = n
+		if requester != null and _free_slots(n) <= 0:
+			continue
+		# Each occupant makes a patch read as this much further away. Enough that
+		# an empty patch a short walk further wins, small enough that a lone
+		# harvester does not cross the map to avoid one neighbour.
+		var occupied: int = NODE_WORK_SLOTS - _free_slots(n)
+		var score: float = distance + float(occupied) * 18.0
+		if score < best_score:
+			best_score = score
+			best = n
+	return best if best != null else best_any
+
+
+func nearest_refinery(from: Vector3, for_team: int) -> Node3D:
+	var best: Node3D = null
+	var best_distance := INF
+	for s in get_team_structures(for_team):
+		if s.kind != "refinery":
+			continue
+		var d: float = from.distance_squared_to(s.global_position)
+		if d < best_distance:
+			best_distance = d
+			best = s
+	return best
+
+
+func deliver(for_team: int, add_metal: int, add_crystal: int) -> void:
+	economy.credit(for_team, add_metal, add_crystal)
+
+
+func structures_of_kinds(for_team: int, kinds: Array) -> Array:
+	var out: Array = []
+	for s in get_team_structures(for_team):
+		if s.kind in kinds:
+			out.append(s)
+	return out
+
+
+# Anything parked on a finished unit's exit. A completed job waits rather than
+# spawning a unit on top of whatever is sitting there.
+func exit_blockers_for(for_team: int, queue_name: String) -> Array:
+	var factory := _exit_structure(for_team, queue_name)
+	if factory == null:
+		return []
+	var out: Array = []
+	var exit := factory.exit_position()
+	for u in get_tree().get_nodes_in_group("units"):
+		if is_instance_valid(u) and not u.is_dead and u.global_position.distance_to(exit) < 3.5:
+			out.append(u)
+	return out
+
+
+# Blockers get a real shove rather than being silently phased through.
+func nudge_blockers(for_team: int, queue_name: String, blockers: Array) -> void:
+	var factory := _exit_structure(for_team, queue_name)
+	if factory == null:
+		return
+	var exit := factory.exit_position()
+	for u in blockers:
+		if not is_instance_valid(u):
+			continue
+		var blocker_pos: Vector3 = u.global_position
+		var away := blocker_pos - exit
+		away.y = 0.0
+		if away.length() < 0.01:
+			away = Vector3(1, 0, 0)
+		orders.move([u], u.global_position + away.normalized() * 6.0)
+
+
+func _exit_structure(for_team: int, queue_name: String) -> Structure:
+	var candidates := structures_of_kinds(for_team, BuildingCatalogScript.contributors_for(queue_name))
+	return candidates[0] if not candidates.is_empty() else null
+
+
+func _on_unit_completed(for_team: int, queue_name: String, blueprint: Dictionary) -> void:
+	var factory := _exit_structure(for_team, queue_name)
+	var at: Vector3 = factory.exit_position() if factory != null else Vector3.ZERO
+	spawn_unit(blueprint, for_team, at)
+
+
+# Radial area damage. Used by the loaded-harvester detonation; the same call will
+# serve splash weapons when they land.
+func apply_explosion(at: Vector3, radius: float, damage: float, source: Node) -> void:
+	for target in get_tree().get_nodes_in_group("damageable"):
+		if target == source or not is_instance_valid(target) or target.is_dead:
+			continue
+		if not target.has_method("take_damage"):
+			continue
+		var distance: float = at.distance_to(target.global_position)
+		if distance > radius:
+			continue
+		# Linear falloff to zero at the rim, so standing at the edge of a blast
+		# is meaningfully better than standing in it.
+		target.take_damage(damage * (1.0 - distance / radius))
+
+
+# --- Per-tick bookkeeping ----------------------------------------------------
+
+func _physics_process(delta: float) -> void:
+	_rebuild_neighbour_grid()
+	if production:
+		production.tick(delta)
+
+
+# A coarse bucket grid, rebuilt from scratch each tick rather than maintained
+# incrementally. Rebuilding is O(n) and needs no invalidation; maintaining is
+# O(1) per move but has to be told about every spawn, death and teleport, and one
+# missed notification leaves a phantom neighbour shoving at nothing forever.
+func _rebuild_neighbour_grid() -> void:
+	_neighbour_grid.clear()
+	for u in get_tree().get_nodes_in_group("units"):
+		if not is_instance_valid(u) or u.is_dead:
+			continue
+		var key := _grid_key(u.global_position)
+		if not _neighbour_grid.has(key):
+			_neighbour_grid[key] = []
+		_neighbour_grid[key].append(u)
+
+
+func _grid_key(pos: Vector3) -> Vector2i:
+	return Vector2i(int(floor(pos.x / NEIGHBOUR_CELL)), int(floor(pos.z / NEIGHBOUR_CELL)))
+
+
+# --- Contracts the unit runtime looks for (movement side) --------------------
+
+# Positions of other units close enough to crowd `unit`. Positions rather than
+# nodes: separation only needs the geometry, and handing out node references
+# invites the movement layer to start reading state off its neighbours.
+func neighbour_positions(unit: Node3D, radius: float) -> Array:
+	var out: Array = []
+	var centre := _grid_key(unit.global_position)
+	var radius_sq := radius * radius
+	for dy in range(-1, 2):
+		for dx in range(-1, 2):
+			var bucket = _neighbour_grid.get(Vector2i(centre.x + dx, centre.y + dy))
+			if bucket == null:
+				continue
+			for other in bucket:
+				if other == unit or not is_instance_valid(other):
+					continue
+				var other_pos: Vector3 = other.global_position
+				var offset := other_pos - unit.global_position
+				offset.y = 0.0
+				if offset.length_squared() <= radius_sq:
+					out.append(other_pos)
+	return out
+
+
+# The shared field direction for an order's group, or ZERO if that group is too
+# small to have one.
+func flow_direction_for(order: Order, at: Vector3) -> Vector3:
+	if flow_fields == null or order.group_id == 0:
+		return Vector3.ZERO
+	# Trip length gates the field as much as group size does: over a short hop the
+	# search covers the whole reachable map to save a dozen cheap corridor
+	# searches, and the convergence it causes is paid for nothing.
+	var trip: float = at.distance_to(order.group_destination)
+	var field: FlowField = flow_fields.field_for(
+		order.group_destination, _group_size(order.group_id), trip)
+	if field == null or not field.has_route(at):
+		return Vector3.ZERO
+	return field.direction_at(at)
+
+
+func _group_size(group_id: int) -> int:
+	var n := 0
+	for u in get_tree().get_nodes_in_group("units"):
+		if is_instance_valid(u) and not u.is_dead and u.current_order != null \
+				and u.current_order.group_id == group_id:
+			n += 1
+	return n
+
+
+# --- Input ------------------------------------------------------------------
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not (event is InputEventMouseButton) or not event.pressed or camera == null:
+	if camera == null or selection == null:
 		return
+
+	if event is InputEventKey and event.pressed and not event.echo:
+		_handle_key(event)
+		return
+
+	if event is InputEventMouseMotion and _dragging:
+		_update_selection_rect(event.position)
+		return
+
+	if not (event is InputEventMouseButton):
+		return
+
 	if event.button_index == MOUSE_BUTTON_LEFT:
-		_select_at(event.position, event.shift_pressed)
-	elif event.button_index == MOUSE_BUTTON_RIGHT:
-		_order_move_to(event.position)
+		if event.pressed:
+			_drag_origin = event.position
+			_dragging = true
+		elif _dragging:
+			_dragging = false
+			_hide_selection_rect()
+			_resolve_left_release(event.position, event.shift_pressed)
+	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		if _attack_move_armed:
+			_set_armed(false)
+			_issue_at(event.position, true, event.shift_pressed)
+		else:
+			_issue_at(event.position, false, event.shift_pressed)
 
 
-# Picks the selection PROXY, not the unit body - see battle_layers.gd for why
-# they are different volumes. The proxy carries a back-reference to its unit so
-# this never has to guess how deep in the unit's tree the shape sits.
-func _select_at(screen_pos: Vector2, additive: bool) -> void:
-	var hit := _raycast(screen_pos, LayersScript.SELECTION_QUERY_MASK, true)
-	var picked: Node = null
-	if not hit.is_empty() and hit.collider.has_meta("unit"):
-		var candidate = hit.collider.get_meta("unit")
-		if is_instance_valid(candidate) and candidate.team == PLAYER_TEAM:
-			picked = candidate
-
-	if not additive:
-		for u in selected:
-			if is_instance_valid(u):
-				u.set_selected(false)
-		selected.clear()
-
-	if picked and not selected.has(picked):
-		picked.set_selected(true)
-		selected.append(picked)
-
-
-func _order_move_to(screen_pos: Vector2) -> void:
-	if selected.is_empty():
+func _handle_key(event: InputEventKey) -> void:
+	# Digits 1-9: assign with Ctrl, recall without. Double-tapping a recall
+	# recentres the camera, which SelectionService signals rather than doing, so
+	# it never needs to know a camera exists.
+	if event.keycode >= KEY_1 and event.keycode <= KEY_9:
+		var num := event.keycode - KEY_0
+		if event.ctrl_pressed:
+			selection.assign_group(num)
+		else:
+			selection.recall_group(num)
 		return
+
+	# NOT A AND S, THE CONVENTIONAL BINDINGS. rts_camera.gd polls WASD directly in
+	# _process() via Input.is_key_pressed() rather than consuming input events, so
+	# a command bound to A or S fires AND pans the camera - both handlers see the
+	# key and neither can mark it handled. The camera is shared with the old
+	# Skirmish scene, so rebinding it there to free up A/S is a change to a screen
+	# this rebuild is not touching. Commands go on free keys instead.
+	match event.keycode:
+		KEY_Q:
+			# Armed, one-shot: the next right-click is an attack-move.
+			_set_armed(not _attack_move_armed)
+		KEY_E:
+			orders.stop(selection.selected)
+			_flash("STOP")
+		KEY_Z:
+			orders.set_stance(selection.selected, StanceScript.Kind.AGGRESSIVE)
+			_flash("STANCE: AGGRESSIVE")
+		KEY_X:
+			orders.set_stance(selection.selected, StanceScript.Kind.RETURN_FIRE)
+			_flash("STANCE: RETURN FIRE")
+		KEY_C:
+			orders.hold(selection.selected)
+			_flash("STANCE: HOLD POSITION")
+		KEY_ESCAPE:
+			_set_armed(false)
+			selection.clear()
+
+
+# A left release is a drag if the mouse actually travelled, a click otherwise.
+# One threshold, so a slightly shaky click never silently becomes an empty
+# one-pixel drag that clears the selection.
+func _resolve_left_release(at: Vector2, additive: bool) -> void:
+	var rect := Rect2(_drag_origin, at - _drag_origin).abs()
+	var picked: Array = []
+	if rect.size.length() >= SelectionServiceScript.DRAG_THRESHOLD_PX:
+		picked = selection.units_in_rect(rect)
+	else:
+		# A click on one of our own structures raises its production ring rather
+		# than selecting anything. Checked BEFORE the unit pick, because a
+		# manufactory with a tank parked against it should still be clickable as
+		# a building - the structure is the larger, less mobile target and the
+		# player can always click the tank a metre to one side.
+		var structure := _structure_at(at)
+		if structure != null and production_hud != null:
+			selection.clear()
+			production_hud.open_structure_ring(structure, at)
+			return
+		var one := selection.unit_at_point(at)
+		if one != null:
+			picked = [one]
+
+	if additive:
+		selection.add_to_selection(picked)
+	else:
+		selection.set_selection(picked)
+
+
+# Our own structures only. An enemy building is a target, not a menu.
+func _structure_at(screen_pos: Vector2) -> Structure:
+	var hit := _raycast(screen_pos, LayersScript.SELECTION_QUERY_MASK, true)
+	if hit.is_empty() or not hit.collider.has_meta("structure"):
+		return null
+	var s = hit.collider.get_meta("structure")
+	if not is_instance_valid(s) or s.is_dead or s.team != PLAYER_TEAM:
+		return null
+	return s
+
+
+func _issue_at(screen_pos: Vector2, aggressive: bool, queued: bool) -> void:
+	if selection.selected.is_empty():
+		return
+	# WHAT WAS CLICKED DECIDES WHAT THE ORDER IS. An ore patch means "go work
+	# that", ground means "go there". Resource nodes are queried first because
+	# they sit ON the ground - a terrain-only ray would always find the dirt
+	# underneath and the patch would never be clickable.
+	if not aggressive:
+		var node_hit := _raycast(screen_pos, LayersScript.RESOURCE_NODES, false)
+		if not node_hit.is_empty() and node_hit.collider.is_in_group("resource_nodes"):
+			orders.harvest(selection.selected, node_hit.collider, queued)
+			# Anything in the selection that cannot harvest still needs an order,
+			# or right-clicking a patch with a mixed group leaves the tanks
+			# standing there having visibly ignored the click.
+			var combat: Array = []
+			for u in selection.selected:
+				if is_instance_valid(u) and not u.is_harvester:
+					combat.append(u)
+			if not combat.is_empty():
+				orders.move(combat, node_hit.collider.global_position, queued)
+			return
+
 	var hit := _raycast(screen_pos, LayersScript.GROUND_PICK_MASK, false)
 	if hit.is_empty():
 		return
+	if aggressive:
+		orders.attack_move(selection.selected, hit.position, queued)
+	else:
+		orders.move(selection.selected, hit.position, queued)
 
-	var group := _next_group_id
-	_next_group_id += 1
-	for u in selected:
-		if is_instance_valid(u):
-			# Straight onto the unit in Phase 0. Phase 1 routes this through
-			# OrderService so shift-queueing and formation slots have somewhere
-			# to live, and so the AI issues orders through the same door.
-			u.current_order = OrderScript.move(hit.position, group)
-			u.order_queue.clear()
+
+# Puts `centre` under the middle of the screen without touching zoom or pitch.
+#
+# Reuses rts_camera's own ray_plane_hit() rather than reinventing the geometry:
+# the camera looks down at an angle that varies with zoom (_apply_pitch lerps
+# -42 to -62 degrees), so "subtract the height from Z" is only right at one
+# zoom level. Asking where the screen centre currently lands and shifting by the
+# difference is correct at every zoom, and it is the same function zoom-to-cursor
+# already trusts.
+func _on_group_recentre(centre: Vector3) -> void:
+	if camera == null or not camera.has_method("ray_plane_hit"):
+		return
+	var screen_centre := get_viewport().get_visible_rect().size * 0.5
+	var looking_at = camera.ray_plane_hit(screen_centre, centre.y)
+	if looking_at == null:
+		return
+	camera.global_position.x += centre.x - looking_at.x
+	camera.global_position.z += centre.z - looking_at.z
+
+
+# --- HUD ---------------------------------------------------------------------
+#
+# Deliberately minimal. The real in-match HUD is Phase 4; this is the drag
+# rectangle plus a one-line mode readout, which are the two things the command
+# layer cannot be used without.
+
+# Built in headless too, deliberately. The obvious guard - skip the HUD when
+# there is no display - makes the entire production interface untestable, and
+# test_ui_and_camera already constructs UIDock headless without trouble. Control
+# nodes do not need a window; only rendering does.
+func _build_hud() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "UI"
+	add_child(layer)
+
+	_selection_rect = Panel.new()
+	_selection_rect.visible = false
+	_selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(Tokens.SIGNAL_GO.r, Tokens.SIGNAL_GO.g, Tokens.SIGNAL_GO.b, 0.12)
+	box.border_color = Tokens.SIGNAL_GO
+	box.set_border_width_all(1)
+	_selection_rect.add_theme_stylebox_override("panel", box)
+	layer.add_child(_selection_rect)
+
+	# The bindings, on screen, because they are not the conventional ones and
+	# nothing else in the build documents them yet.
+	var bindings := Label.new()
+	bindings.theme_type_variation = "HintLabel"
+	bindings.position = Vector2(Tokens.SPACE_MD, Tokens.SPACE_MD)
+	bindings.text = "DRAG SELECT  |  RMB MOVE  |  SHIFT+RMB QUEUE  |  Q ATTACK-MOVE  |  E STOP" \
+		+ "\nZ AGGRESSIVE  |  X RETURN FIRE  |  C HOLD  |  CTRL+1-9 SET GROUP  |  1-9 RECALL"
+	layer.add_child(bindings)
+
+	_hud_hint = Label.new()
+	_hud_hint.theme_type_variation = "HintLabel"
+	_hud_hint.position = Vector2(Tokens.SPACE_MD, Tokens.SPACE_MD + 44)
+	_hud_hint.text = ""
+	layer.add_child(_hud_hint)
+
+	production_hud = ProductionHUDScript.new()
+	layer.add_child(production_hud)
+	production_hud.setup(self)
+
+
+func _update_selection_rect(at: Vector2) -> void:
+	if _selection_rect == null:
+		return
+	var rect := Rect2(_drag_origin, at - _drag_origin).abs()
+	_selection_rect.visible = rect.size.length() >= SelectionServiceScript.DRAG_THRESHOLD_PX
+	_selection_rect.position = rect.position
+	_selection_rect.size = rect.size
+
+
+func _hide_selection_rect() -> void:
+	if _selection_rect:
+		_selection_rect.visible = false
+
+
+func _set_armed(value: bool) -> void:
+	_attack_move_armed = value
+	_flash("ATTACK-MOVE: RIGHT-CLICK A DESTINATION" if value else "")
+
+
+func _flash(text: String) -> void:
+	if _hud_hint:
+		_hud_hint.text = text
 
 
 func _raycast(screen_pos: Vector2, mask: int, areas: bool) -> Dictionary:

@@ -76,6 +76,44 @@ static func yaw_for(direction: Vector3, fallback: float) -> float:
 	return atan2(-flat.x, -flat.z)
 
 
+# Push away from crowding neighbours, weighted so the nearest shove hardest.
+#
+# WHY THIS AND NOT NavigationAgent3D's OWN AVOIDANCE. The built-in avoidance
+# (RVO) treats every nearby agent as an obstacle to swerve around. In a formation
+# that is exactly backwards: the neighbour a unit is deliberately lining up
+# beside is the thing avoidance most wants to escape, so the formation is
+# perpetually shoved apart by the system meant to keep it tidy. `avoidance_enabled`
+# is off in unit_assembly.gd for this reason.
+#
+# Separation is weaker and dumber, which is what is wanted: it resolves genuine
+# overlap without opinions about where anyone is going.
+#
+# Returns an unnormalised push. Scale it against move_speed at the call site so a
+# fast unit is not shoved proportionally harder than a slow one.
+static func separation(position: Vector3, neighbours: Array, radius: float) -> Vector3:
+	if radius <= 0.0:
+		return Vector3.ZERO
+	var push := Vector3.ZERO
+	for other in neighbours:
+		var other_pos: Vector3 = other
+		var offset := position - other_pos
+		offset.y = 0.0
+		var distance := offset.length()
+		if distance >= radius:
+			continue
+		if distance < 0.001:
+			# Exactly coincident. Any direction beats NaN, and a deterministic one
+			# beats a random one - two stacked units would otherwise pick
+			# opposing random directions every frame and vibrate.
+			push += Vector3(0.01, 0.0, 0.0)
+			continue
+		# Linear falloff. Inverse-square is the textbook choice and it is wrong
+		# here: it makes contact forces enormous, which turns a tight formation
+		# into an explosion.
+		push += (offset / distance) * (1.0 - distance / radius)
+	return push
+
+
 # How much a unit should be slowed for pointing the wrong way. A vehicle that has
 # to turn 180 degrees should pivot roughly in place rather than carving a wide
 # arc through whatever is behind it.
