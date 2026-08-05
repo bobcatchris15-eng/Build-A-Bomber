@@ -3,11 +3,17 @@ Procedural material plates for the interface theme.
 
 WHAT THIS PRODUCES, and why there are two kinds of output:
 
-  assets/textures/ui/plate_<material>_<state>.png   96x96, 12px 9-slice margin
-      Small repeated widgets - buttons, tabs, fields, list rows. These go into
-      StyleBoxTexture, which is a thing a Theme resource can CARRY, so the
-      whole game repaints from one theme rebuild with no call-site edits. That
-      is the entire reason this pipeline exists.
+  assets/textures/ui/plate_<material>_<state>.png   128x128 RGBA
+      A 96x96 opaque body inside a 16px transparent pad that carries the baked
+      elevation shadow, so the 9-slice margin Godot must not stretch is
+      MARGIN + PAD = 28px. Small repeated widgets - buttons, tabs, fields, list
+      rows. These go into StyleBoxTexture, which is a thing a Theme resource can
+      CARRY, so the whole game repaints from one theme rebuild with no call-site
+      edits. That is the entire reason this pipeline exists.
+
+      See the BAKED ELEVATION SHADOWS block below for why the shadow is in the
+      PNG at all, and for the expand_margin_* setting in build_ui_theme.gd that
+      this pad depends on.
 
   assets/textures/ui/field_<material>.png           512x512, seamless
       Large continuous surfaces - dock bodies, backdrops, the radial bezel -
@@ -36,13 +42,21 @@ each assigned a job:
     carbon      primary action only - sparing
     fiberglass  hazard placards, alert states
 
+NOTE ON THE NAME "bakelite": it is now a misnomer. The material started as dark
+marbled phenolic and is now matte finely-stippled injection-moulded ABS /
+powdercoated aluminium (see mat_bakelite). The key was left alone deliberately -
+it appears in 24 committed PNG filenames, build_ui_theme.gd, ui_theme.gd's
+MATERIALS/MATERIAL_DEFAULTS and the style guide, so renaming it is a mechanical
+sweep worth doing on its own rather than buried in an appearance change.
+
 Colours are the ui_tokens.gd palette. They are duplicated here as literals
 because this is a build-time Python script that cannot import GDScript - if
 the tokens move, these move with them. That coupling is stated rather than
 hidden; TOKEN_REFERENCE below names the constant each one mirrors.
 
 Run:  python tools/generate_ui_plates.py
-Then: Godot_v4.3-stable_win64_console.exe --headless --editor --import
+Then: Godot_v4.7.1-stable_win64_console.exe --headless --editor --import
+Then: Godot_v4.7.1-stable_win64_console.exe --headless --script tools/build_ui_theme.gd --quit-after 2
 """
 
 import zlib
@@ -62,6 +76,76 @@ MARGIN = 12
 # number.
 BEVEL_PX = 3.5
 FIELD = 512
+
+# ---------------------------------------------------------------------------
+# BAKED ELEVATION SHADOWS
+# ---------------------------------------------------------------------------
+# WHY THE SHADOW IS BAKED INTO THE PNG rather than set on the stylebox:
+# StyleBoxFlat has shadow_size/shadow_offset/shadow_color, but every panel
+# variation in the theme is a StyleBoxTexture (see build_ui_theme.gd's
+# _plate()), and StyleBoxTexture has NO shadow properties at all. Stacking a
+# second shadow-only box behind it is not available either - Godot draws exactly
+# one stylebox per control state, which build_ui_theme.gd already documents as
+# the reason signal colours became material modulation instead of borders. So
+# for a plate-backed surface the only place a shadow can live is the texture.
+#
+# THE TRANSPARENT PAD, and why the plate grew from 96 to 128: a stylebox is
+# drawn inside the control's rect, so a shadow baked flush against the plate's
+# edge would have nowhere to fall. The body stays 96x96 and gains a PAD ring of
+# initially-transparent pixels around it for the shadow to occupy.
+#
+# THE PIECE THAT MUST NOT BE FORGOTTEN: build_ui_theme.gd has to set
+# expand_margin_* = PAD alongside texture_margin_* = MARGIN + PAD. expand_margin
+# lets the box draw OUTSIDE the control rect, which is what keeps the panel's
+# content box and layout position exactly where they were. Without it every
+# panel in the game visually shrinks by PAD on all four sides and every
+# alignment in every screen shifts.
+PAD = 16
+
+# tier -> (blur radius px, downward offset px, peak alpha)
+#
+# Mirrors ui_tokens.gd's ELEVATION_* / SHADOW_OFFSET_* constants, under the same
+# stated-not-hidden duplication rule as the colour literals above. "modal" is
+# absent deliberately: no plate-backed variation is modal (dialogs use
+# CardPanel), and a 24px spread would not fit inside PAD.
+SHADOW_TIERS = {
+    "flush": (0.0, 0.0, 0.00),
+    "raised": (3.0, 1.0, 0.35),
+    "floating": (8.0, 3.0, 0.45),
+}
+
+# (material, state) -> tier. This table is the load-bearing coupling to
+# build_ui_theme.gd's variation assignments, so it is worth stating why it can
+# be keyed this coarsely: every variation sharing a (material, state) also
+# shares an elevation tier. powdercoat/normal backs Panel, CardPanel and
+# DockPanel - all raised. canvas/normal backs FlyoutPanel and CalloutPanel -
+# both floating. If a future variation needs a different tier from another
+# variation on the same plate, this table stops being sufficient and the plate
+# filenames have to carry the tier too.
+#
+# Every `pressed` state is flush by definition: a control that reads as pushed
+# IN must not simultaneously cast a shadow claiming it stands proud. Same for
+# `disabled`, which is meant to recede. `bakelite` is the button material and
+# stays raised-only - buttons sit in dense rows (the parts bin, the build bar),
+# and a floating-strength shadow on each one turns a toolbar into mud.
+SHADOW_ASSIGNMENT = {
+    ("powdercoat", "normal"): "raised",
+    ("powdercoat", "hover"): "raised",
+    ("steel", "normal"): "raised",
+    ("steel", "hover"): "raised",
+    ("canvas", "normal"): "floating",
+    ("canvas", "hover"): "floating",
+    ("bakelite", "normal"): "raised",
+    ("bakelite", "hover"): "raised",
+    ("carbon", "normal"): "raised",
+    ("carbon", "hover"): "raised",
+    ("fiberglass", "normal"): "raised",
+    ("fiberglass", "hover"): "raised",
+}
+
+# Warm near-black, matching ui_tokens.gd SHADOW_COLOR. A neutral or cool shadow
+# on this warm palette reads as grime rather than as absence of light.
+SHADOW_RGB = (0.035, 0.032, 0.026)
 
 # Fixed seed: these are committed artifacts, so a rerun must not silently
 # produce a different-looking interface.
@@ -174,7 +258,14 @@ def mat_powdercoat(h, w, rng):
     # Broad unevenness in coat thickness.
     roll = fbm(h, w, octaves=2, base=2, rng=rng)
 
-    base = np.array([0.150, 0.148, 0.132])
+    # BASE_800, the palette's "panel body". Was 0.150/0.148/0.132 (luminance
+    # 0.147, i.e. BASE_700) which is the RAISED CONTROL value - so panels and
+    # buttons were competing for the same tier. Dropping panels to BASE_800
+    # while bakelite rises to BASE_700 is what opens the gap that lets a button
+    # read as sitting on a panel rather than in it. Still comfortably above the
+    # backdrop, which lands near 0.084 (steel field x apply_backdrop's 0.42
+    # brightness), so the floor/surface/control stack stays strictly ascending.
+    base = np.array([0.112, 0.110, 0.098])
     lum = 1.0 + (peel - 0.5) * 0.14 + (grain - 0.5) * 0.05 + (roll - 0.5) * 0.10
     rgb = base[None, None, :] * lum[:, :, None]
     gloss = np.full((h, w), 0.22) + (peel - 0.5) * 0.10
@@ -197,28 +288,55 @@ def mat_steel(h, w, rng):
 
 
 def mat_bakelite(h, w, rng):
-    """Dark phenolic resin. Near-black brown, faint marbled swirl, semi-gloss."""
-    yy, xx = _coords(h, w)
-    # Marbling: a low-frequency field used to DISTORT a second one, which is
-    # what gives phenolic its characteristic smeared-swirl look. A single
-    # noise octave reads as dirt instead.
-    warp = fbm(h, w, octaves=3, base=3, rng=rng)
-    # The carrier frequency must be a WHOLE number of cycles across the
-    # texture or the swirl does not wrap. The first version used
-    # `xx / w * 6.0`, which is 6 radians end to end - not 6 cycles - so the
-    # left and right edges landed on unrelated phases and every bakelite
-    # button carried a visible vertical seam. `warp` is itself seamless, so
-    # distorting a periodic carrier with it stays periodic.
-    swirl_src = np.sin(2.0 * np.pi * 3.0 * xx / w + warp * 7.0) * 0.5 + 0.5
-    speck = fbm(h, w, octaves=2, base=40, rng=rng)
+    """
+    Injection-moulded ABS / powdercoated aluminium. Matte, finely stippled.
 
-    base = np.array([0.085, 0.073, 0.066])
-    lum = 1.0 + (swirl_src - 0.5) * 0.20 + (speck - 0.5) * 0.06
+    WAS dark marbled phenolic - a low-frequency swirl at semi-gloss. The swirl
+    was the problem: at button size a 3-cycle marble reads as a smear or a stain
+    rather than as a surface finish, and it fought every label sitting on it. A
+    moulded control's finish is uniform by construction, so the character has to
+    come from a FINE even stipple, not from large-scale figure.
+
+    HOW THIS STAYS DISTINCT FROM mat_powdercoat, which is also matte and also
+    stippled: powdercoat is a sprayed coating over brushed metal, so it carries
+    an anisotropic substrate grain and a broad thickness roll - the coat is
+    visibly uneven. This is a moulded polymer, which is dimensionally even by
+    nature: no directional grain and no broad undulation at all, just a dense
+    isotropic bead-blast stipple at roughly twice the frequency. Side by side the
+    panel looks sprayed and the button looks moulded, which is the correct
+    relationship - a faceplate fitted into a coated chassis.
+    """
+    # Bead-blasted mould finish. Deliberately much higher frequency than
+    # powdercoat's orange peel (base 48 vs 24) and lower amplitude: the flecks
+    # should be at the threshold of resolution so they read as tooth rather than
+    # as noise. Isotropic - a mould cavity has no grain direction.
+    stipple = fbm(h, w, octaves=4, base=48, rng=rng)
+    # A second, finer pass. Two scales of fleck is what keeps the stipple from
+    # looking like a regular screen pattern once the plate is tiled.
+    micro = fbm(h, w, octaves=2, base=96, rng=rng)
+
+    # BASE_700, the token palette's "raised control body". This was 0.085/0.073/
+    # 0.066 - luminance 0.075, which is exactly BASE_900, the value reserved for
+    # the DEEPEST RECESS and the modal scrim. Buttons were therefore rendered
+    # darker than the powdercoat panels they sit on, and a control darker than
+    # its own container cannot read as raised however good its bevel is. It also
+    # flattened every state: at base 0.075 the x1.18 hover reached 0.089, an
+    # absolute delta of 0.014, which is invisible. The luminance stack now
+    # ascends the way the palette intends - backdrop, then panel, then control.
+    #
+    # Neutral warm grey, NOT the old brown. Phenolic goes amber where it is thin;
+    # ABS and powdercoated aluminium do not go anywhere - they are one colour all
+    # the way through, so the red-channel warming the old version applied to its
+    # marbling is gone with the marbling.
+    base = np.array([0.152, 0.144, 0.134])
+    lum = 1.0 + (stipple - 0.5) * 0.085 + (micro - 0.5) * 0.045
     rgb = base[None, None, :] * lum[:, :, None]
-    # Warm the lighter marbling toward brown rather than grey - phenolic goes
-    # amber where it is thin, never neutral.
-    rgb[:, :, 0] *= 1.0 + (swirl_src - 0.5) * 0.10
-    gloss = np.full((h, w), 0.62)
+    # Matte. 0.30 against powdercoat's 0.22 - a moulded polymer has slightly more
+    # sheen than cured powder, but nowhere near the old 0.62 semi-gloss, which is
+    # what made these read as shiny toy plastic. Gloss only modulates how hard
+    # the bevel highlight reads (see the section header above), so dropping it
+    # this far is what actually turns the edge from a glint into a chamfer.
+    gloss = np.full((h, w), 0.30) + (stipple - 0.5) * 0.08
     return rgb, gloss
 
 
@@ -261,7 +379,14 @@ def mat_carbon(h, w, rng):
     # Individual filaments within each tow.
     filament = fbm(h, w, octaves=2, base=48, rng=rng, aniso=8.0)
 
-    base = np.array([0.072, 0.072, 0.078])
+    # Lifted from 0.072 (BASE_900) to BASE_800. Carbon backs PrimaryButton, and
+    # once bakelite rose to BASE_700 a BASE_900 carbon made the PRIMARY action
+    # the darkest control on the screen - it receded behind every ordinary
+    # button, which is precisely backwards. It still reads as the dark premium
+    # material (it stays the darkest of the control materials, below bakelite),
+    # and _plate_tinted's green cast lands it around panel luminance rather than
+    # below it. Cool-biased blue channel kept: carbon weave is never warm.
+    base = np.array([0.104, 0.104, 0.112])
     lum = 0.80 + weave * 0.55 + (filament - 0.5) * 0.10
     rgb = base[None, None, :] * lum[:, :, None]
     gloss = np.full((h, w), 0.72) + weave * 0.20
@@ -311,11 +436,20 @@ MATERIALS = {
 # the fill is what makes a pressed control read as physically pushed in - it
 # is the same cue build_ui_theme.gd already gets from swapping border widths,
 # and the two reinforce each other.
+# Gaps widened from 1.18/0.82 to 1.28/0.74. The old spread was chosen when
+# bakelite sat at luminance 0.075, where even a large multiplier moved the
+# absolute value almost not at all; now that controls start at BASE_700 the
+# multiplier translates into a delta the eye actually resolves (~0.041 up on
+# hover, ~0.038 down on press, against ~0.014 before).
+#
+# Bevel strength rises with the state too, not just brightness. A hover that
+# only brightens reads as a lighting change on a flat card; a hover that also
+# sharpens the chamfer reads as the control physically catching more light.
 STATES = {
     "normal":   (1.00, +1.0, 1.00),
-    "hover":    (1.18, +1.0, 1.15),
-    "pressed":  (0.82, -1.0, 0.90),
-    "disabled": (0.68, +1.0, 0.35),
+    "hover":    (1.28, +1.0, 1.30),
+    "pressed":  (0.74, -1.0, 1.10),
+    "disabled": (0.62, +1.0, 0.30),
 }
 
 
@@ -371,13 +505,90 @@ def _apply_bevel(rgb, gloss, direction, strength):
     return out
 
 
+def _box_blur(a, radius):
+    """
+    Separable box blur, run three times to approximate a Gaussian.
+
+    Hand-rolled because scipy is not a dependency of this pipeline and pulling
+    one in for a single blur would make a committed-artifact script harder to
+    reproduce. Three box passes is the standard cheap Gaussian approximation and
+    is indistinguishable from one at these radii.
+    """
+    r = int(round(radius))
+    if r < 1:
+        return a
+    k = 2 * r + 1
+    out = a
+    for _ in range(3):
+        # Pad with zeros: outside the plate there is no shadow to smear inward,
+        # and edge-replicate padding would drag the shadow out to the border and
+        # square off the corners.
+        p = np.pad(out, ((r, r), (0, 0)), mode="constant")
+        c = np.cumsum(p, axis=0)
+        c = np.pad(c, ((1, 0), (0, 0)), mode="constant")
+        out = (c[k:, :] - c[:-k, :]) / k
+        p = np.pad(out, ((0, 0), (r, r)), mode="constant")
+        c = np.cumsum(p, axis=1)
+        c = np.pad(c, ((0, 0), (1, 0)), mode="constant")
+        out = (c[:, k:] - c[:, :-k]) / k
+    return out
+
+
+def _shadow_alpha(tier):
+    """
+    The shadow's alpha channel over the full padded canvas.
+
+    The caster is the plate body: a hard PLATE-sized rectangle inset by PAD,
+    pushed down by the tier's offset, then blurred. Returns zeros for a flush
+    tier so callers do not have to branch.
+    """
+    size = PLATE + 2 * PAD
+    blur, offset, peak = SHADOW_TIERS[tier]
+    if peak <= 0.0:
+        return np.zeros((size, size), dtype=np.float64)
+
+    caster = np.zeros((size, size), dtype=np.float64)
+    top = PAD + int(round(offset))
+    caster[top:top + PLATE, PAD:PAD + PLATE] = 1.0
+
+    a = _box_blur(caster, blur)
+    # Normalise before scaling: three box passes lose a little peak amplitude at
+    # the centre, so scaling the raw result would make larger blurs quietly
+    # fainter than their configured alpha rather than merely softer.
+    m = a.max()
+    if m > 0.0:
+        a = a / m
+    return np.clip(a * peak, 0.0, 1.0)
+
+
 def build_plate(material, state, rng):
+    """
+    Returns (rgb, alpha) over the padded canvas.
+
+    The opaque 96x96 body sits centred in a PAD ring that carries only the
+    baked shadow. Material generation and bevelling still run at exactly PLATE
+    resolution - the pad is composited around the result rather than being fed
+    through the material functions, so the noise stays tileable and the bevel
+    still lands on the body's real edge instead of PAD pixels away from it.
+    """
     fn = MATERIALS[material]
     rgb, gloss = fn(PLATE, PLATE, rng)
     brightness, direction, strength = STATES[state]
     rgb = rgb * brightness
     rgb = _apply_bevel(rgb, gloss, direction, strength)
-    return np.clip(rgb, 0.0, 1.0)
+    body = np.clip(rgb, 0.0, 1.0)
+
+    size = PLATE + 2 * PAD
+    tier = SHADOW_ASSIGNMENT.get((material, state), "flush")
+    alpha = _shadow_alpha(tier)
+
+    out_rgb = np.empty((size, size, 3), dtype=np.float64)
+    out_rgb[:, :] = SHADOW_RGB
+    out_rgb[PAD:PAD + PLATE, PAD:PAD + PLATE] = body
+
+    # The body is fully opaque regardless of what the shadow ramp says under it.
+    alpha[PAD:PAD + PLATE, PAD:PAD + PLATE] = 1.0
+    return out_rgb, alpha
 
 
 def build_field(material, rng):
@@ -386,8 +597,21 @@ def build_field(material, rng):
     return np.clip(rgb, 0.0, 1.0)
 
 
-def save(arr, path):
-    img = Image.fromarray((arr * 255.0 + 0.5).astype(np.uint8), mode="RGB")
+def save(arr, path, alpha=None):
+    """
+    Writes RGB, or RGBA when an alpha channel is supplied.
+
+    Plates are RGBA now because the baked elevation shadow needs the pad ring to
+    be transparent; fields stay RGB, since they are sampled as opaque surface
+    texture by ui_material.gdshader and an alpha channel there would only cost
+    memory.
+    """
+    rgb = (arr * 255.0 + 0.5).astype(np.uint8)
+    if alpha is None:
+        img = Image.fromarray(rgb, mode="RGB")
+    else:
+        a = (alpha * 255.0 + 0.5).astype(np.uint8)
+        img = Image.fromarray(np.dstack([rgb, a]), mode="RGBA")
     img.save(path)
 
 
@@ -412,8 +636,8 @@ def main():
         # which reads as a texture pop rather than as a light change.
         for state in STATES:
             rng = np.random.default_rng(_seed(material))
-            arr = build_plate(material, state, rng)
-            save(arr, OUT / f"plate_{material}_{state}.png")
+            arr, alpha = build_plate(material, state, rng)
+            save(arr, OUT / f"plate_{material}_{state}.png", alpha)
         rng = np.random.default_rng(_seed(material) + 7)
         save(build_field(material, rng), OUT / f"field_{material}.png")
         print(f"  {material}: 4 plates + 1 field")

@@ -86,7 +86,8 @@ cd prototype
 - Fog-of-war: vision range from hull base + sensor modules; `fog_hidden` gates rendering and targetability.
 - Navigation: uses `NavigationAgent3D` when a real Skirmish match controller exists; falls back to direct-line steering in tests.
 
-**Design Lab** (`main_lab.gd`, `gizmo_3d.gd`, `module_placer.gd`, `visual_builder.gd`)
+**Design Lab** (`stat_calculator.gd`, `parts_menu.gd`, `gizmo_3d.gd`, `module_placer.gd`, `visual_builder.gd`)
+- There is no `main_lab.gd`. `scenes/MainLab.tscn` is only the 3D world plus two UI sub-scenes: `UI_StatBlock.tscn` (script `stat_calculator.gd` — the right-hand stat/tweak rail) and `UI_PartsMenu.tscn` (script `parts_menu.gd` — the parts bin).
 - 3D canvas for building blueprints. Drag parts from parts menu onto hull facets.
 - Gizmo handles for stretching barrels/calibers (live stat updates), bilateral symmetry (M), free rotation (R).
 - Clipping detection prevents overlapping modules.
@@ -150,9 +151,18 @@ Hulls and parts are authored procedurally in Blender via `tools/blender/build_me
 
 ## Important Notes
 
-- **Godot version**: 4.7.1 (bundled executables in `prototype/`). The README mentions 4.3 but the actual binaries are 4.7.1.
+- **Godot version**: 4.7.1 (bundled executables in `prototype/`, gitignored). The README mentions 4.3. A 4.3 pair may still be present from before the upgrade — **do not use it**: the project is authored for 4.4+ (126 `.uid` sidecars, `bomber_theme.tres` at `format=4`), and opening it in 4.3 downgrades `config/features` and can strip UIDs.
+- **`compile_check_all.gd` is not a "quick" check** at this codebase's size. It loads 200+ interdependent scripts with `CACHE_MODE_IGNORE`, and has been observed running 20+ minutes without completing. Prefer `run_tests.ps1`. Also note Godot block-buffers stdout when piped, so a direct `--script` run shows no output until it exits — and needs `--quit`/`--path`, which the wrapper supplies.
+
+### Art direction docs
+
+| Document | Owns |
+|---|---|
+| `CORE_DESIGN_LANGUAGE.md` | Whole-game identity: philosophy, camera optics, environment, unit finish, motion, FX/audio split. Start here. |
+| `VISUAL_ART_DIRECTION.md` | Faction material/shader parameters, the ten factions, per-terrain-type texture direction, weapon-module modelling rules. |
+| `prototype/docs/UI_STYLE_GUIDE.md` | Interface chrome only — tokens, type scale, materials, elevation, motion. |
 - **Test order matters**: `SUITE_ORDER` in `run_tests.gd` is pinned due to navmesh flakiness. Do not reorder.
 - **Golden fixtures**: `suite_base.gd` contains frozen locomotion layout data. Any intentional placement change must update the fixture in its own commit with explanation.
-- **No emoji/dingbats in UI text** — the UI audit (`ui_audit.gd`) enforces this. Box-drawing and arrows are allowed (technical notation).
+- **No emoji/dingbats in UI text** — a standing rule, but note it is **not** currently enforced by anything. `ui_audit.gd` only checks panel overflow, offscreen controls, theme-resource validity, icon assets and cursor assets. Box-drawing and arrows are allowed (technical notation).
 - **Blueprint version**: Only bumped when JSON schema changes could silently mis-load older saves (currently 2.0 after SDF/Marching-Cubes hull rebuild).
 - **Scratch vs Saved designs**: "Test in Arena" writes a scratch file (`user://lab_scratch.json`), never a roster entry. Only explicit Save creates `user://blueprints/<id>.json`.

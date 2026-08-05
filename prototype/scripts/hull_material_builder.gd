@@ -297,3 +297,50 @@ static func flash_hull(mesh_inst: MeshInstance3D, amount: float) -> void:
 		var mat = mesh_inst.get_surface_override_material(surf)
 		if mat is ShaderMaterial:
 			mat.set_shader_parameter("flash_amount", amount)
+
+
+# ---------------------------------------------------------------------------
+# UNPAINTED SCALE-MODEL FINISH
+# ---------------------------------------------------------------------------
+# Strips a reconstructed vehicle back to a single flat grey-green plastic, the
+# look of an unpainted injection-moulded kit. Used wherever a design is being
+# SHOWN rather than fought - the main menu turntable, the Blueprint Library
+# preview, roster thumbnails.
+#
+# Why not just use the faction material: on a showcase turntable the faction
+# paint is noise. The player is evaluating the SHAPE they built, and ten
+# factions' worth of livery on the same silhouette makes shapes harder to
+# compare, not easier. Flat plastic is also the honest metaphor - this is the
+# kit before it is painted.
+#
+# Lived as a verbatim duplicate in main_menu.gd and blueprint_library_screen.gd,
+# which is exactly the copy-paste this file was created to end. The colour is
+# the one already documented in UI_STYLE_GUIDE.md's 3D showcase section, so it
+# had two sources of truth as well as two implementations.
+#
+# HullGreebles is skipped deliberately: it is a decorative surface-detail child
+# that carries its own material, and overriding it flattens the greebling that
+# gives the silhouette its read.
+const SCALE_MODEL_ALBEDO = Color(0.38, 0.44, 0.37)
+
+static func build_scale_model_material() -> StandardMaterial3D:
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = SCALE_MODEL_ALBEDO
+	mat.metallic = 0.0
+	mat.roughness = 0.8
+	return mat
+
+
+static func apply_scale_model_finish(node: Node, mat: StandardMaterial3D = null) -> void:
+	if node.name == "HullGreebles":
+		return
+	if mat == null:
+		mat = build_scale_model_material()
+	if node is GeometryInstance3D:
+		node.material_override = mat
+		node.material_overlay = null
+	if node is MeshInstance3D and node.mesh:
+		for i in range(node.mesh.get_surface_count()):
+			node.set_surface_override_material(i, mat)
+	for child in node.get_children():
+		apply_scale_model_finish(child, mat)

@@ -141,37 +141,20 @@ static func apply_backdrop(node: CanvasItem, accent: Color = Color.WHITE, accent
 	})
 
 
-# Backwards-compatible entry point for the existing call sites (main_menu,
-# map_select, match_setup, parts_menu, skirmish, stat_calculator).
+# apply_brushed_panel() lived here as a back-compat shim over apply_backdrop()
+# while the call sites were migrated off faction-tinted chrome. All of them have
+# now moved - match_setup and the Design Lab call apply_backdrop() directly, and
+# skirmish's top bar became a HUDPanel theme variation - so the shim is gone.
+# Same for style_option_button() and style_slider(), which had already been
+# reduced to `pass` once OptionButton and HSlider were themed centrally: a no-op
+# that every screen still called only made it look like styling was happening.
 #
-# The faction argument is now deliberately IGNORED for tinting. It used to
-# repaint all UI chrome in the player's faction color, which collided with
-# faction color's real job on the battlefield - telling the player who owns
-# a unit. The parameter is kept so the call sites don't all have to change
-# in the same commit as the visual work, and so the intent of "this panel
-# belongs to the player" stays recorded at each site.
-static func apply_brushed_panel(node: CanvasItem, _faction: String, _tint_strength: float = 0.55) -> void:
-	apply_backdrop(node)
-
-
 # For a genuine faction-identity surface - the faction picker's preview
 # swatch, and nothing else. Kept separate so it can't be reached by accident.
 static func apply_faction_preview(node: CanvasItem, faction: String) -> void:
 	apply_backdrop(node, FactionCatalogScript.get_visual_color(faction), 0.45)
 
 
-static func style_option_button(btn: OptionButton) -> void:
-	# The theme covers OptionButton now; this remains only so existing
-	# callers keep working. Deliberately a no-op rather than a second,
-	# competing set of overrides - local overrides beat the theme, so the
-	# old version of this function was actively preventing the design system
-	# from reaching any dropdown in the game.
-	pass
-
-
-static func style_slider(_slider: HSlider) -> void:
-	# Same reasoning as style_option_button(): HSlider is themed centrally.
-	pass
 
 
 # Applies a theme type variation, with a clear failure mode. Typo'd

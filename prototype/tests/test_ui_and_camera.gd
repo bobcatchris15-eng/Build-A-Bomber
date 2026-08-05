@@ -391,14 +391,20 @@ func test_brushed_aluminum_ui_theme() -> bool:
 	# (Technocrat white chrome and Bayou swamp-green chrome are not the same
 	# UI). The assertions below are inverted on purpose, so the old
 	# behaviour can't quietly come back.
+	#
+	# Now targets apply_backdrop() directly. It used to go through
+	# apply_brushed_panel(), which took a faction argument and ignored it - a
+	# back-compat shim kept while the call sites migrated. All of them have, so
+	# the shim is gone and the faction arguments with it. The four assertions are
+	# unchanged: they were always really about apply_backdrop's behaviour.
 
 	var panel = Panel.new()
 	panel.size = Vector2(400, 300)
 	root.add_child(panel)
-	UITheme.apply_brushed_panel(panel, "industrialists")
+	UITheme.apply_backdrop(panel)
 	var mat_a = panel.material as ShaderMaterial
 	if not mat_a:
-		print("  [FAIL] apply_brushed_panel should assign a ShaderMaterial to the node's .material")
+		print("  [FAIL] apply_backdrop should assign a ShaderMaterial to the node's .material")
 		panel.queue_free()
 		return false
 	if mat_a.get_shader_parameter("tint_strength") != 0.0:
@@ -417,7 +423,7 @@ func test_brushed_aluminum_ui_theme() -> bool:
 
 	# Re-theming the SAME panel must reuse its ShaderMaterial rather than
 	# allocating a new one on every call.
-	UITheme.apply_brushed_panel(panel, "cybernetics")
+	UITheme.apply_backdrop(panel)
 	var mat_b = panel.material as ShaderMaterial
 	if mat_b != mat_a:
 		print("  [FAIL] Re-theming the same panel should reuse its existing ShaderMaterial instance, not replace it")

@@ -6,7 +6,6 @@ const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const ModuleDataScript = preload("res://scripts/module_data.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
-const UITheme = preload("res://scripts/ui_theme.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
 const UIIconsScript = preload("res://scripts/ui_icons.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
@@ -1730,16 +1729,23 @@ func _build_ui():
 	ui.name = "UI"
 	add_child(ui)
 
-	# Brushed-aluminum chrome behind the top info strip, tinted to the
-	# player's own faction - added first so it renders behind the labels.
+	# Chrome behind the top info strip - added first so it renders behind the
+	# labels. NOT faction-tinted, despite what the old comment here said: UI
+	# chrome stopped carrying faction colour so that faction colour could keep
+	# meaning "who owns this unit" on the battlefield.
+	#
+	# HUDPanel rather than a backdrop shader: it is the registered variation for
+	# recessed in-match chrome (powdercoat, pressed plate), so this strip now
+	# reads as a panel set into the frame and picks up the theme's elevation
+	# treatment for free instead of carrying its own ShaderMaterial.
 	var top_bar_bg = PanelContainer.new()
 	top_bar_bg.anchor_left = 0.0
 	top_bar_bg.anchor_right = 1.0
 	top_bar_bg.anchor_top = 0.0
 	top_bar_bg.anchor_bottom = 0.0
 	top_bar_bg.offset_bottom = 68
+	top_bar_bg.theme_type_variation = "HUDPanel"
 	ui.add_child(top_bar_bg)
-	UITheme.apply_brushed_panel(top_bar_bg, player_faction, 0.4)
 
 	resource_label = Label.new()
 	resource_label.position = Vector2(20, 14)
@@ -1778,7 +1784,11 @@ func _build_ui():
 
 	status_label = Label.new()
 	status_label.position = Vector2(20, 46)
-	status_label.modulate = Color(0.8, 0.85, 0.9)
+	# HintLabel: this is the controls-help line, which is secondary text by
+	# definition. Its resting colour now comes from the variation rather than
+	# from a modulate that was duplicated verbatim in _flash_status()'s reset -
+	# see there for why that mattered.
+	status_label.theme_type_variation = "HintLabel"
 	status_label.text = "Left-click/drag: select | Right-click: move / attack / harvest | Destroy the enemy HQ!"
 	ui.add_child(status_label)
 
@@ -1797,7 +1807,11 @@ func _build_ui():
 	intel_label.offset_right = -200
 	intel_label.offset_top = 14
 	intel_label.offset_bottom = 54
-	intel_label.modulate = Color(0.85, 0.75, 0.6)
+	# StatLabel is the monospace tabular variation. That matters here beyond
+	# colour: this readout re-renders every fog tick with changing counts, and a
+	# proportional font makes the whole block reflow horizontally each time a
+	# digit changes width. Monospace holds the columns still.
+	intel_label.theme_type_variation = "StatLabel"
 	intel_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	ui.add_child(intel_label)
 	_update_enemy_intel()
@@ -2420,7 +2434,11 @@ var _status_toast_tween: Tween = null
 func _flash_status(msg: String):
 	if status_label:
 		status_label.text = msg
-		status_label.modulate = Color(1.0, 0.8, 0.3)
+		# The one place amber is legitimate on this label: a status flash IS
+		# "attention required", which is SIGNAL_HAZARD's single documented job.
+		# A font_color override rather than modulate, so it tints the text and
+		# not the whole subtree, and so it can be cleanly REMOVED on reset.
+		status_label.add_theme_color_override("font_color", Tokens.SIGNAL_HAZARD)
 		# VISUAL_IMPROVEMENT_PLAN.md chunk G: a real slide+fade entrance
 		# instead of the text just snapping in place. Cache the label's own
 		# resting position once and reset to it before each toast (rather
@@ -2435,7 +2453,12 @@ func _flash_status(msg: String):
 		_status_toast_tween = UIAnimScript.toast_slide_fade(status_label)
 		get_tree().create_timer(2.5).timeout.connect(func():
 			if is_instance_valid(status_label):
-				status_label.modulate = Color(0.8, 0.85, 0.9)
+				# REMOVE the override rather than re-asserting a resting colour.
+				# The old version hardcoded the same literal the label was built
+				# with, in two places, so the resting colour had two sources of
+				# truth and changing the label's variation would have silently
+				# failed to take effect after the first status flash.
+				status_label.remove_theme_color_override("font_color")
 		)
 
 func _queue_player_unit(entry: Dictionary):

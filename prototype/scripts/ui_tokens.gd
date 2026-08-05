@@ -103,6 +103,68 @@ const BORDER_EMPHASIS = 2
 # the bottom command bar starts costing players fights.
 const HIT_TARGET_MIN = 32
 
+# ---------------------------------------------------------------------------
+# ELEVATION
+# ---------------------------------------------------------------------------
+# Four tiers of "how far off the backdrop does this surface sit". Before this,
+# nothing in the interface cast a shadow at all - every panel, dock, flyout and
+# tooltip sat in exactly the same plane, separated only by a 1px border. That
+# reads as a diagram of an interface rather than a stack of real hardware, and
+# it is the single biggest reason the chrome looked unfinished next to the 3D.
+#
+# The shadow is a WARM near-black, not black. On a warm neutral ground a
+# neutral or cool shadow doesn't read as shadow - it reads as grime, or as a
+# dark smudge painted onto the panel. Matching the base hue keeps it reading as
+# absence of light. Same reasoning as the palette's warm-vs-blue-black note.
+#
+# Offset is straight DOWN, never sideways. The plate textures are authored with
+# their bevel lit from the top-left (see the plate spec in
+# UI_IMPLEMENTATION_PLAN.md), so a light source above means the cast falls
+# below. A shadow offset that disagrees with the bevel highlight makes both
+# read as texture noise instead of as depth.
+const SHADOW_COLOR = Color(0.035, 0.032, 0.026, 1.0)
+
+# Blur radius in px. FLUSH is 0 because a recessed surface must not cast at
+# all - HUDPanel and InsetPanel are sunk INTO their parent, and giving them a
+# shadow would claim they float above the very thing they're set into.
+const ELEVATION_FLUSH = 0
+const ELEVATION_RAISED = 3     # cards, docks, header bands - sits on the backdrop
+const ELEVATION_FLOATING = 8   # flyouts, callouts, tooltips - sits over content
+const ELEVATION_MODAL = 18     # dialogs over a scrim - sits over everything
+
+# Deliberately much smaller than the blur. A large offset with a small blur is
+# the drop-shadow look of 2000s web design; hardware sitting on a surface has a
+# tight contact shadow directly beneath it.
+const SHADOW_OFFSET_RAISED = 1
+const SHADOW_OFFSET_FLOATING = 3
+const SHADOW_OFFSET_MODAL = 6
+
+# ---------------------------------------------------------------------------
+# MOTION
+# ---------------------------------------------------------------------------
+# These were previously private to ui_anim.gd, which meant the motion system
+# and the visual system had separate sources of truth and only ui_anim's own
+# call sites could reach the timings. The theme builder and the per-screen
+# scripts need them too (a hover transition has to match the hover plate swap),
+# so they belong with the rest of the language. ui_anim.gd re-exports its
+# original constant names as aliases onto these, so no existing call site moved.
+#
+# Everything is SHORT. Gritty means mechanical, not showy: a mechanism responds
+# immediately or it feels broken. Anything above DURATION_SLOW on an
+# interaction (as opposed to a scene transition) reads as the game hesitating.
+const DURATION_INSTANT = 0.06  # hover acknowledgement - must feel like no delay
+const DURATION_FAST = 0.12     # press feedback, ring pop
+const DURATION_NORMAL = 0.22   # panel/card entrance, toast
+const DURATION_SLOW = 0.4      # scene fade, full-screen overlay
+
+# Per-child delay for a staggered list entrance. At 35ms a 12-row list finishes
+# in ~0.4s, which reads as one gesture sweeping down the list. Much larger and
+# the last row arrives late enough to feel like a loading bug.
+const STAGGER_STEP = 0.035
+
+const EASE_STANDARD := Tween.EASE_OUT
+const TRANS_STANDARD := Tween.TRANS_CUBIC
+
 
 # Returns the fill/border pair for a signal role, so callers don't hand-pick
 # a dim variant and get the pairing subtly wrong.
@@ -116,3 +178,55 @@ static func signal_pair(role: String) -> Dictionary:
 			return {"fill": SIGNAL_GO_DIM, "edge": SIGNAL_GO}
 		_:
 			return {"fill": BASE_700, "edge": BASE_500}
+
+
+# Returns the shadow triple for an elevation tier, for the same reason
+# signal_pair() exists: the blur, the offset and the alpha are three numbers
+# that only look right in the combinations tuned here. Hand-picking a blur of 8
+# with an offset of 1 gives a floating panel a contact shadow, which reads as a
+# rendering mistake rather than as a different height.
+#
+# Returns size 0 / a fully transparent colour for "flush" so a caller can apply
+# the result unconditionally without branching on the tier - assigning these to
+# a StyleBoxFlat is a no-op rather than a faint smudge.
+static func elevation(tier: String) -> Dictionary:
+	match tier:
+		"raised":
+			return {
+				"size": ELEVATION_RAISED,
+				"offset": Vector2(0, SHADOW_OFFSET_RAISED),
+				"color": Color(SHADOW_COLOR, 0.35),
+			}
+		"floating":
+			return {
+				"size": ELEVATION_FLOATING,
+				"offset": Vector2(0, SHADOW_OFFSET_FLOATING),
+				"color": Color(SHADOW_COLOR, 0.45),
+			}
+		"modal":
+			return {
+				"size": ELEVATION_MODAL,
+				"offset": Vector2(0, SHADOW_OFFSET_MODAL),
+				"color": Color(SHADOW_COLOR, 0.55),
+			}
+		_:
+			return {
+				"size": ELEVATION_FLUSH,
+				"offset": Vector2.ZERO,
+				"color": Color(SHADOW_COLOR, 0.0),
+			}
+
+
+# Applies an elevation tier to a StyleBoxFlat. Kept here rather than in
+# build_ui_theme.gd because the runtime screens build state-indicator styleboxes
+# too (see stat_calculator.gd's load-bar fills) and should elevate them the same
+# way the theme does.
+#
+# StyleBoxTexture - which every plate-backed variation uses - has no shadow
+# properties at all, so it cannot go through this path. Those variations get
+# their depth from the plate's own baked bevel instead; see build_ui_theme.gd.
+static func apply_elevation(box: StyleBoxFlat, tier: String) -> void:
+	var e := elevation(tier)
+	box.shadow_size = e["size"]
+	box.shadow_offset = e["offset"]
+	box.shadow_color = e["color"]

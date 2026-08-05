@@ -1,0 +1,120 @@
+extends RefCounted
+class_name DesignStats
+# The design's numbers, computed once, from a live hull node.
+#
+# WHY THIS FILE EXISTS. Every figure below was previously computed inside
+# stat_calculator.gd's update_stats() - a 100-line block of locals interleaved
+# with the label assignments that displayed them. That made the numbers reachable
+# only by the Design Lab sidebar, which is why:
+#
+#   * fleet_comparison_panel.gd tried to read them off the stat_calculator node
+#     (`stat_calc.total_weight if "total_weight" in stat_calc`). They were
+#     function LOCALS, so that guard never passed and its comparison column
+#     silently showed 0 HP / 0 kg / 0 DPS. update_stats() now publishes them as
+#     members specifically to fix that - see its own comment - which is a
+#     workaround for the computation not being callable.
+#   * the roster cards in roster_picker.gd had no way to show real stats at all.
+#
+# THE RULE THIS FILE PROTECTS. Every number here comes from the same static call
+# combat makes. Nothing is re-derived. stat_calculator.gd learned that lesson
+# twice already and left the scars in its comments: a local weight/capacity
+# re-derivation that "only needed to be close enough to warn" knew about four
+# locomotion types out of seventeen, and a local armour-threshold table had
+# drifted so far it was showing the EXPLOSIVE threshold labelled as Energy. Both
+# were fixed by deleting the copy, not by correcting it.
+#
+# So: if a figure is wanted that is not here, add it here and let both callers
+# read it. Do not compute it at the call site.
+
+const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const Drivetrain = preload("res://scripts/drivetrain.gd")
+const WeaponRange = preload("res://scripts/weapon_range.gd")
+
+
+# `hull` must be a reconstructed or in-editor hull node: the metadata this reads
+# (type_id, hull_scale, armor_material, armor_thickness, faction,
+# locomotion_type, locomotion_settings) is set by
+# BlueprintManager.reconstruct_vehicle() and by the Design Lab's own placer, and
+# module figures come from each child's "module_data" meta.
+static func analyze(hull: Node3D) -> Dictionary:
+	var out := {
+		"hull_hp": 0.0,
+		"module_hp_pool": 0.0,
+		"dps": 0.0,
+		"weight": 0.0,
+		"cost_metal": 0,
+		"cost_crystal": 0,
+		"energy_capacity": 0.0,
+		"move_speed": 0.0,
+		"top_speed": 0.0,
+		"longest_range": 0.0,
+		"shortest_range": 0.0,
+		"vision": 0.0,
+		"has_weapons": false,
+		"drivetrain": {},
+		"weapon_range": {},
+	}
+	if not is_instance_valid(hull):
+		return out
+
+	# Same call battle_unit.gd makes when it spawns the unit for real, with no
+	# arguments because reconstruct_vehicle() writes locomotion_type and
+	# locomotion_settings onto the hull as metadata.
+	var dt: Dictionary = Drivetrain.analyze(hull)
+	var wr: Dictionary = WeaponRange.analyze(hull)
+	out["drivetrain"] = dt
+	out["weapon_range"] = wr
+
+	var armor_material := str(hull.get_meta("armor_material", "hardened_steel"))
+	var armor_thickness := float(hull.get_meta("armor_thickness", 1.0))
+	var faction := str(hull.get_meta("faction", "industrialists"))
+	var hull_type := str(hull.get_meta("type_id", "medium_hull"))
+	var hull_scale = hull.get_meta("hull_scale", Vector3.ONE)
+
+	# Hull HP is the unit's REAL combat health pool, from the shared
+	# ModuleCatalog function battle_unit.gd and building.gd also read, times the
+	# faction's hp passive. Module HP is a separate per-part pool that subsystem
+	# stripping drains without touching hull HP - so the two are reported
+	# separately rather than summed, which is a distinction an earlier version of
+	# the sidebar got wrong (an empty hull displayed 0 HP and fielded at 400).
+	out["hull_hp"] = ModuleCatalog.compute_hull_max_hp(
+		hull_type, armor_thickness, armor_material, hull_scale
+	) * FactionCatalog.get_passive(faction, "hp_mult", 1.0)
+
+	var hull_cost = ModuleCatalog.compute_hull_cost(
+		hull_type, armor_thickness, armor_material, hull_scale
+	)
+	out["cost_metal"] = int(hull_cost.x)
+	out["cost_crystal"] = int(hull_cost.y)
+
+	for child in hull.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		if child.is_queued_for_deletion():
+			continue
+		var data = child.get_meta("module_data")
+		if data == null:
+			continue
+		out["module_hp_pool"] += data.get_hp()
+		out["dps"] += data.get_dps()
+		var c = data.get_cost()
+		out["cost_metal"] += int(c.x)
+		out["cost_crystal"] += int(c.y)
+		if data.category == "generator":
+			out["energy_capacity"] += data.get_energy_capacity()
+
+	# Taken from the drivetrain analysis rather than re-added here, so the
+	# displayed weight and the displayed load percentage can never disagree.
+	out["weight"] = float(dt.get("weight", 0.0))
+	# move_speed is COMBAT speed - after overload penalty and faction passives.
+	# top_speed is the design's clean figure before those. The card wants
+	# move_speed, because that is what the unit will actually do.
+	out["move_speed"] = float(dt.get("move_speed", 0.0))
+	out["top_speed"] = float(dt.get("top_speed", 0.0))
+
+	out["longest_range"] = float(wr.get("longest", 0.0))
+	out["shortest_range"] = float(wr.get("shortest", 0.0))
+	out["vision"] = float(wr.get("vision", 0.0))
+	out["has_weapons"] = bool(wr.get("has_weapons", false))
+	return out

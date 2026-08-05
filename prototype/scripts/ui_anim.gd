@@ -6,11 +6,19 @@ class_name UIAnim
 # read as one consistent system - same standard durations/easings - instead
 # of each call site hand-rolling its own one-off Tween with its own timing.
 
-const DURATION_FAST: float = 0.12
-const DURATION_NORMAL: float = 0.22
-const DURATION_SLOW: float = 0.4
-const EASE_STANDARD := Tween.EASE_OUT
-const TRANS_STANDARD := Tween.TRANS_CUBIC
+# The timings themselves now live in ui_tokens.gd alongside the rest of the
+# visual language, because motion and appearance have to agree: a hover
+# transition that outlasts the theme's hover plate swap reads as two separate
+# effects. These are re-exported under their original names so the existing
+# call sites (skirmish.gd, ui_dock.gd, ui_flyout.gd, ui_radial_menu.gd,
+# parts_menu.gd) didn't all have to change in the same commit as the tokens.
+const DURATION_INSTANT: float = UITokens.DURATION_INSTANT
+const DURATION_FAST: float = UITokens.DURATION_FAST
+const DURATION_NORMAL: float = UITokens.DURATION_NORMAL
+const DURATION_SLOW: float = UITokens.DURATION_SLOW
+const STAGGER_STEP: float = UITokens.STAGGER_STEP
+const EASE_STANDARD := UITokens.EASE_STANDARD
+const TRANS_STANDARD := UITokens.TRANS_STANDARD
 
 # Slides a Control in from `from_offset` (relative to its own current/target
 # position) while fading it in - a panel/card's entrance.

@@ -3,7 +3,6 @@ const ModuleDataResource = preload("res://scripts/module_data.gd")
 
 
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
-const UITheme = preload("res://scripts/ui_theme.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const BlueprintNamerScript = preload("res://scripts/blueprint_namer.gd")
 const UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
@@ -70,8 +69,10 @@ var count_label_base: String = "Count"
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
-const Drivetrain = preload("res://scripts/drivetrain.gd")
-const WeaponRange = preload("res://scripts/weapon_range.gd")
+const DesignStatsScript = preload("res://scripts/design_stats.gd")
+# Drivetrain and WeaponRange are no longer preloaded here: both are now called
+# by design_stats.gd, which hands their results back in its return value, so this
+# file has no direct use for either.
 var current_selected_module: Node3D = null
 var is_updating_sliders: bool = false
 var _loco_slider_dragging: bool = false
@@ -537,7 +538,6 @@ func _ready():
 	wheels_per_axle_slider.value = 1.0
 	wheels_per_axle_slider.custom_minimum_size = Vector2(180, 0)
 	wheels_per_axle_container.add_child(wheels_per_axle_slider)
-	UITheme.style_slider(wheels_per_axle_slider)
 	wheels_per_axle_slider.value_changed.connect(_on_wheels_per_axle_changed)
 	wheels_per_axle_slider.drag_started.connect(_push_undo)
 	wheels_per_axle_container.visible = false
@@ -563,7 +563,6 @@ func _ready():
 	blade_count_slider.value = 4.0
 	blade_count_slider.custom_minimum_size = Vector2(180, 0)
 	blade_count_container.add_child(blade_count_slider)
-	UITheme.style_slider(blade_count_slider)
 	blade_count_slider.value_changed.connect(_on_blade_count_changed)
 	blade_count_slider.drag_started.connect(_push_undo)
 	blade_count_container.visible = false
@@ -590,7 +589,6 @@ func _ready():
 	blade_pitch_slider.value = 1.0
 	blade_pitch_slider.custom_minimum_size = Vector2(180, 0)
 	blade_pitch_container.add_child(blade_pitch_slider)
-	UITheme.style_slider(blade_pitch_slider)
 	blade_pitch_slider.value_changed.connect(_on_blade_pitch_changed)
 	blade_pitch_slider.drag_started.connect(_push_undo)
 	blade_pitch_container.visible = false
@@ -616,7 +614,6 @@ func _ready():
 	helix_depth_slider.value = 1.0
 	helix_depth_slider.custom_minimum_size = Vector2(180, 0)
 	helix_depth_container.add_child(helix_depth_slider)
-	UITheme.style_slider(helix_depth_slider)
 	helix_depth_slider.value_changed.connect(_on_helix_depth_changed)
 	helix_depth_slider.drag_started.connect(_push_undo)
 	helix_depth_container.visible = false
@@ -651,7 +648,6 @@ func _ready():
 	armor_mat_btn.add_item("Ablative Ceramic")
 	armor_mat_btn.add_item("Energy Shielding")
 	hull_spec_stash.add_child(armor_mat_btn)
-	UITheme.style_option_button(armor_mat_btn)
 	armor_mat_btn.item_selected.connect(_on_armor_material_selected)
 
 	faction_label = Label.new()
@@ -670,7 +666,6 @@ func _ready():
 		faction_btn.add_item(FactionCatalog.get_faction_name(fac_id))
 	faction_btn.name = "FactionDropdown"
 	hull_spec_stash.add_child(faction_btn)
-	UITheme.style_option_button(faction_btn)
 	faction_btn.item_selected.connect(_on_faction_selected)
 
 	armor_thick_label = Label.new()
@@ -683,7 +678,6 @@ func _ready():
 	armor_thick_slider.step = 0.1
 	armor_thick_slider.value = 1.0
 	hull_spec_stash.add_child(armor_thick_slider)
-	UITheme.style_slider(armor_thick_slider)
 	armor_thick_slider.value_changed.connect(_on_armor_thickness_changed)
 	armor_thick_slider.drag_started.connect(_push_undo)
 
@@ -952,16 +946,22 @@ func update_stats(hull: Node3D):
 	# recompute is about as far from that as the codebase got. The rail is
 	# POWDERCOAT from the dock now, the same in every faction; faction identity is
 	# carried by the units on the stage, which is where the player is looking.
-	var total_hp = 0.0
-	var total_weight = 0.0
-	var total_cost_metal = 0
-	var total_cost_crystal = 0
-	var total_dps = 0.0
-	var total_energy_capacity = 0.0
+	# The whole summation this function used to do inline now lives in
+	# DesignStats.analyze(), so the roster cards and the fleet comparison panel
+	# can read the same figures instead of only this sidebar being able to.
+	# Nothing about WHAT is computed changed - see design_stats.gd's header. The
+	# locals below are kept as locals so the label code further down reads
+	# unchanged.
+	var stats: Dictionary = DesignStatsScript.analyze(hull)
+	var total_cost_metal = stats["cost_metal"]
+	var total_cost_crystal = stats["cost_crystal"]
+	var total_dps = stats["dps"]
+	var total_energy_capacity = stats["energy_capacity"]
 	# Weight, load capacity, thrust and top speed all come from
 	# Drivetrain.analyze() - the SAME call battle_unit.gd makes when it spawns
 	# the unit for real, so every number this sidebar shows is a number combat
-	# will actually run.
+	# will actually run. DesignStats.analyze() made that call above and hands the
+	# result back, so it happens once per recompute rather than twice.
 	#
 	# This replaces a local re-derivation that carried its own comment saying
 	# it only needed to be "close enough to warn". It was not: it knew about
@@ -970,26 +970,10 @@ func update_stats(hull: Node3D):
 	# locomotors - so on most of the roster the capacity figure could not move
 	# when the player dragged the very tweaks that change it. See the header
 	# comment in drivetrain.gd for why the two copies are now one.
-	var dt = Drivetrain.analyze(hull)
-	var total_weight_capacity: float = dt["capacity"]
-
-	# Assume the hull itself has some base stats in a real implementation,
-	# but for the prototype we'll just sum the modules.
-	if hull:
-		for child in hull.get_children():
-			if child.has_meta("module_data"):
-				var data = child.get_meta("module_data") as ModuleDataResource
-				if data:
-					total_hp += data.get_hp()
-					total_cost_metal += data.get_cost().x
-					total_cost_crystal += data.get_cost().y
-					total_dps += data.get_dps()
-					if data.category == "generator":
-						total_energy_capacity += data.get_energy_capacity()
-					# The locomotion-capacity and weight_capacity_bonus
-					# accumulation that used to live here is gone: both are
-					# Drivetrain.analyze()'s job now, and doing it twice is
-					# exactly how the two copies drifted apart.
+	var dt: Dictionary = stats["drivetrain"]
+	# No total_weight_capacity local: it was assigned and never read (already dead
+	# at HEAD, not made dead by this refactor). _update_drivetrain_readout() takes
+	# the whole dt and reads capacity from it directly.
 
 	var armor_material = "hardened_steel"
 	var armor_thickness = 1.0
@@ -1010,24 +994,14 @@ func update_stats(hull: Node3D):
 	# come from the same shared ModuleCatalog.compute_hull_* functions
 	# battle_unit.gd/building.gd/blueprint_cost() read, so what you see in
 	# the Design Lab is what the simulation runs.
-	var sidebar_hull_type = hull.get_meta("type_id", "medium_hull") if hull else "medium_hull"
-	var sidebar_hull_scale = hull.get_meta("hull_scale", Vector3.ONE) if hull else Vector3.ONE
-	var hull_hp = ModuleCatalog.compute_hull_max_hp(sidebar_hull_type, armor_thickness, armor_material, sidebar_hull_scale) \
-		* FactionCatalog.get_passive(faction, "hp_mult", 1.0)
-	# No hull_weight local any more - Drivetrain.analyze() computes it (with the
-	# same faction armor_weight_mult) as part of the total, above.
-	var hull_cost = ModuleCatalog.compute_hull_cost(sidebar_hull_type, armor_thickness, armor_material, sidebar_hull_scale)
-	# total_hp so far is the MODULE pool (separate strip pools in combat);
-	# keep it visible as its own figure next to the hull's real HP.
-	var module_hp_pool = total_hp
-	total_hp = hull_hp
-	# Straight from the drivetrain analysis rather than re-added here. It is
-	# the same sum (hull weight + every module's weight), and taking it from
-	# the one place that also derives capacity from it means the displayed
-	# weight and the displayed load percentage can never disagree.
-	total_weight = dt["weight"]
-	total_cost_metal += hull_cost.x
-	total_cost_crystal += hull_cost.y
+	#
+	# Hull HP, the module pool and the weight all arrive from
+	# DesignStats.analyze(), which makes exactly those shared calls. The hull cost
+	# it computes is already folded into cost_metal/cost_crystal above, so there
+	# is no separate hull_cost addition here any more.
+	var module_hp_pool = stats["module_hp_pool"]
+	var total_hp = stats["hull_hp"]
+	var total_weight = stats["weight"]
 
 	# Read straight from DamageResolver.ARMOR_TABLE (single source of truth,
 	# same as combat) instead of a second hardcoded k_base/t_base/e_base
@@ -1068,7 +1042,9 @@ func update_stats(hull: Node3D):
 	self.total_weight = total_weight
 	self.total_dps = total_dps
 	self.drivetrain = dt
-	var wr = WeaponRange.analyze(hull)
+	# Already analysed inside DesignStats.analyze() above; taken from there rather
+	# than walking every module's range tweaks a second time per recompute.
+	var wr: Dictionary = stats["weapon_range"]
 	self.weapon_range = wr
 
 	# The manufactory-tier note stays tooltip-only. Manufactory tier is
@@ -2375,7 +2351,6 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 			slider.value = data.tweaks.get(spec.name, spec.default)
 			slider.custom_minimum_size = Vector2(180, 0)
 			container.add_child(slider)
-			UITheme.style_slider(slider)
 
 			if spec.step == 1.0:
 				label.text = "%d" % int(slider.value)

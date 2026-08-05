@@ -1,6 +1,9 @@
 # Bundled engine binaries (large, static, not source)
-prototype/Godot_v4.3-stable_win64.exe
-prototype/Godot_v4.3-stable_win64_console.exe
+# Globbed rather than listed version-by-version: the 4.3 -> 4.7.1 upgrade
+# otherwise leaves the new pair untracked-but-not-ignored, and they are ~179MB
+# each, so a stray `git add -A` commits them.
+prototype/Godot_v*-stable_win64.exe
+prototype/Godot_v*-stable_win64_console.exe
 prototype/godot.exe
 prototype/godot.zip
 prototype/UPBGE-0.30-windows-x86_64/

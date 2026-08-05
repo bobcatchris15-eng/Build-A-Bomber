@@ -77,6 +77,16 @@ func _pad(sb: StyleBox, h: int, v: int) -> StyleBox:
 const PLATE_DIR = "res://assets/textures/ui/"
 const PLATE_MARGIN = 12
 
+# The transparent ring around the plate body that carries its baked elevation
+# shadow. Mirrors PAD in tools/generate_ui_plates.py; the two must agree or the
+# 9-slice frame cuts through the shadow instead of around it.
+#
+# WHY THE SHADOW IS IN THE TEXTURE: StyleBoxTexture has no shadow properties,
+# and Godot draws exactly one stylebox per control state, so there is nowhere to
+# stack a shadow-only box behind the plate. Same constraint that made signal
+# colours material modulation rather than borders - see _plate_tinted().
+const PLATE_PAD = 16
+
 func _plate_texture(material: String, state: String) -> Texture2D:
 	var path = PLATE_DIR + "plate_%s_%s.png" % [material, state]
 	if not ResourceLoader.exists(path):
@@ -97,10 +107,24 @@ func _plate(material: String, state: String, h: int, v: int) -> StyleBox:
 			Tokens.BORDER_HAIRLINE, Tokens.RADIUS_CONTROL), h, v)
 	var sb = StyleBoxTexture.new()
 	sb.texture = tex
-	sb.texture_margin_left = PLATE_MARGIN
-	sb.texture_margin_right = PLATE_MARGIN
-	sb.texture_margin_top = PLATE_MARGIN
-	sb.texture_margin_bottom = PLATE_MARGIN
+	# The unstretched frame now has to cover the shadow pad as well as the bevel,
+	# or the 9-slice stretches the shadow along with the centre and every wide
+	# panel gets a smeared grey band down its sides.
+	var frame := PLATE_MARGIN + PLATE_PAD
+	sb.texture_margin_left = frame
+	sb.texture_margin_right = frame
+	sb.texture_margin_top = frame
+	sb.texture_margin_bottom = frame
+
+	# THE LOAD-BEARING PART. expand_margin lets the box draw OUTSIDE the
+	# control's rect, which is what keeps the 96px body aligned to the rect the
+	# layout actually assigned. Without it the visible panel shrinks by
+	# PLATE_PAD on every side and every margin, gutter and column alignment in
+	# every screen silently shifts by 16px.
+	sb.expand_margin_left = PLATE_PAD
+	sb.expand_margin_right = PLATE_PAD
+	sb.expand_margin_top = PLATE_PAD
+	sb.expand_margin_bottom = PLATE_PAD
 	return _pad(sb, h, v)
 
 
@@ -308,10 +332,20 @@ func _build_buttons(theme: Theme) -> void:
 	# tools/generate_ui_plates.py). A control that changes WHICH WAY it catches
 	# light reads as physically moving; one that merely darkens reads as
 	# changing colour.
-	var normal = _plate("bakelite", "normal", Tokens.SPACE_MD, Tokens.SPACE_SM)
-	var hover = _plate("bakelite", "hover", Tokens.SPACE_MD, Tokens.SPACE_SM)
-	var pressed = _plate("bakelite", "pressed", Tokens.SPACE_MD, Tokens.SPACE_SM)
-	var disabled = _plate("bakelite", "disabled", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	# Padding widened from MD/SM to LG/MD. A moulded switch has a bezel around
+	# its legend - the old 12/8 put the label almost on the bevel, which read as
+	# cramped and made the plate look like a tight box around text rather than a
+	# faceplate with text on it. LG/MD also carries the label clear of the 12px
+	# bevel ring, so the grain under small text stops competing with it.
+	#
+	# The vertical MD also puts the button's natural height at 12 + ~15 + 12 =
+	# ~39px, clear of Tokens.HIT_TARGET_MIN (32) without needing a per-call
+	# custom_minimum_size. Theme has no minimum-height constant for Button, so
+	# content margins are the only place this can be expressed centrally.
+	var normal = _plate("bakelite", "normal", Tokens.SPACE_LG, Tokens.SPACE_MD)
+	var hover = _plate("bakelite", "hover", Tokens.SPACE_LG, Tokens.SPACE_MD)
+	var pressed = _plate("bakelite", "pressed", Tokens.SPACE_LG, Tokens.SPACE_MD)
+	var disabled = _plate("bakelite", "disabled", Tokens.SPACE_LG, Tokens.SPACE_MD)
 
 	# Focus stays a hazard hairline. Focus is a state of the INTERFACE - where
 	# keyboard attention is - not a property of the object, so it should not
