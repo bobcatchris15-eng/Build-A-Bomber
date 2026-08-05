@@ -55,9 +55,18 @@ static func analyze(hull: Node3D) -> Dictionary:
 		"drivetrain": {},
 		"weapon_range": {},
 	}
-	if not is_instance_valid(hull):
-		return out
-
+	# Called UNCONDITIONALLY, before the hull validity check below, and this is
+	# load-bearing: both analyzers guard against a null hull internally and return
+	# a FULLY POPULATED dictionary for one (Drivetrain returns its
+	# has_locomotion: false variant, WeaponRange returns its zeroed `out`).
+	#
+	# An earlier version of this function returned `"drivetrain": {}` when the hull
+	# was invalid, which broke the Design Lab on load: clear_hull() calls
+	# update_stats(null), and _update_drivetrain_readout() then read
+	# dt["has_locomotion"] off an empty dictionary. The consumers reasonably expect
+	# these dictionaries to always carry their full key set, because that is what
+	# calling the analyzers directly always gave them.
+	#
 	# Same call battle_unit.gd makes when it spawns the unit for real, with no
 	# arguments because reconstruct_vehicle() writes locomotion_type and
 	# locomotion_settings onto the hull as metadata.
@@ -65,6 +74,16 @@ static func analyze(hull: Node3D) -> Dictionary:
 	var wr: Dictionary = WeaponRange.analyze(hull)
 	out["drivetrain"] = dt
 	out["weapon_range"] = wr
+	out["weight"] = float(dt.get("weight", 0.0))
+	out["move_speed"] = float(dt.get("move_speed", 0.0))
+	out["top_speed"] = float(dt.get("top_speed", 0.0))
+	out["longest_range"] = float(wr.get("longest", 0.0))
+	out["shortest_range"] = float(wr.get("shortest", 0.0))
+	out["vision"] = float(wr.get("vision", 0.0))
+	out["has_weapons"] = bool(wr.get("has_weapons", false))
+
+	if not is_instance_valid(hull):
+		return out
 
 	var armor_material := str(hull.get_meta("armor_material", "hardened_steel"))
 	var armor_thickness := float(hull.get_meta("armor_thickness", 1.0))
@@ -104,17 +123,13 @@ static func analyze(hull: Node3D) -> Dictionary:
 		if data.category == "generator":
 			out["energy_capacity"] += data.get_energy_capacity()
 
-	# Taken from the drivetrain analysis rather than re-added here, so the
+	# The drivetrain- and range-derived figures (weight, move_speed, top_speed,
+	# ranges, vision, has_weapons) are already set above, before the validity
+	# guard, so they are correct for an empty hull too. Weight in particular is
+	# taken from the drivetrain analysis rather than re-added here, so the
 	# displayed weight and the displayed load percentage can never disagree.
-	out["weight"] = float(dt.get("weight", 0.0))
-	# move_speed is COMBAT speed - after overload penalty and faction passives.
-	# top_speed is the design's clean figure before those. The card wants
-	# move_speed, because that is what the unit will actually do.
-	out["move_speed"] = float(dt.get("move_speed", 0.0))
-	out["top_speed"] = float(dt.get("top_speed", 0.0))
-
-	out["longest_range"] = float(wr.get("longest", 0.0))
-	out["shortest_range"] = float(wr.get("shortest", 0.0))
-	out["vision"] = float(wr.get("vision", 0.0))
-	out["has_weapons"] = bool(wr.get("has_weapons", false))
+	#
+	# On move_speed vs top_speed: move_speed is COMBAT speed, after the overload
+	# penalty and faction passives. top_speed is the design's clean figure before
+	# those. Callers showing one number to the player want move_speed.
 	return out
