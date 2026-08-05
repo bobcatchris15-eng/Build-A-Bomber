@@ -257,7 +257,11 @@ func terrain_height_at(_pos: Vector3) -> float:
 	return ground.global_position.y + shape.position.y + (shape.shape as BoxShape3D).size.y * 0.5
 
 func _on_return_pressed():
-	get_tree().change_scene_to_file("res://scenes/MainLab.tscn")
+	var router = get_node_or_null("/root/SceneRouter")
+	if router:
+		router.goto("res://scenes/MainLab.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/MainLab.tscn")
 
 func _on_reset_dummies_pressed():
 	_spawn_target_dummies()

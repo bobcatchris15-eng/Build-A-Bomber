@@ -194,7 +194,7 @@ func _ready():
 	back_btn.custom_minimum_size = Vector2(200, 48)
 	# Back now returns to the main menu, not to MapSelect - map choice is a
 	# column on this screen, so there is no intermediate screen to go back to.
-	back_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
+	back_btn.pressed.connect(_return_to_menu)
 	button_row.add_child(back_btn)
 
 	var start_btn = Button.new()
@@ -292,6 +292,18 @@ func _on_start_pressed():
 	if map_btn and map_btn.selected >= 0 and map_btn.selected < MAP_IDS.size():
 		map_name = MapCatalog.get_map_name(MAP_IDS[map_btn.selected])
 	if router:
-		router.change_scene_async("res://scenes/Skirmish.tscn", map_name)
+		router.goto("res://scenes/Skirmish.tscn", map_name)
 	else:
 		get_tree().change_scene_to_file("res://scenes/Skirmish.tscn")
+
+
+# Routed through SceneRouter so leaving this screen fades out rather than cutting.
+# The get_node_or_null guard keeps the direct call as a fallback, matching the
+# pattern the other router call sites in this file already use - a scene
+# instantiated outside the running game (a test fixture) has no autoloads.
+func _return_to_menu() -> void:
+	var router = get_node_or_null("/root/SceneRouter")
+	if router:
+		router.goto("res://scenes/MainMenu.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")

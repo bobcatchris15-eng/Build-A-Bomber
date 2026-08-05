@@ -88,6 +88,119 @@ static func toast_slide_fade(node: Control, duration: float = DURATION_NORMAL) -
 	tween.parallel().tween_property(node, "modulate:a", 1.0, duration)
 	return tween
 
+# A hover acknowledgement: a very small, very fast scale lift.
+#
+# DURATION_INSTANT (60ms) because hover must not feel like a delay - it is a
+# readiness cue, and anything slow enough to perceive as an animation reads as
+# lag on a control the player has not even committed to yet.
+#
+# 1.03, not 1.1. The theme already swaps to the hover plate, so this only has to
+# add physicality, not carry the whole state change. A large scale on a button in
+# a dense row (the parts bin, the build bar) also makes it overlap its
+# neighbours, which reads as a layout bug rather than as a lift.
+#
+# Sets pivot_offset so the lift is about the control's centre; without it a
+# Control scales from its top-left corner and appears to slide down-right.
+static func hover_lift(node: Control, duration: float = DURATION_INSTANT) -> Tween:
+	node.pivot_offset = node.size * 0.5
+	var tween = node.create_tween()
+	tween.set_trans(TRANS_STANDARD)
+	tween.set_ease(EASE_STANDARD)
+	tween.tween_property(node, "scale", Vector2(1.03, 1.03), duration)
+	return tween
+
+
+# Returns a hovered control to rest. Separate from hover_lift() rather than a
+# boolean flag, so a call site reads as the event that happened.
+static func hover_settle(node: Control, duration: float = DURATION_INSTANT) -> Tween:
+	node.pivot_offset = node.size * 0.5
+	var tween = node.create_tween()
+	tween.set_trans(TRANS_STANDARD)
+	tween.set_ease(EASE_STANDARD)
+	tween.tween_property(node, "scale", Vector2.ONE, duration)
+	return tween
+
+
+# A staggered entrance for a list or grid: each child slides in slightly after
+# the one before it, so the group arrives as one gesture sweeping across it
+# rather than as everything appearing at once.
+#
+# Drives slide_in() per child rather than reimplementing it, so a card entering a
+# list and a panel entering a screen move identically.
+#
+# The stagger is capped: at STAGGER_STEP per child a 40-row list would take 1.4s
+# to finish arriving, by which point it reads as a loading bug rather than as
+# polish. Past the cap the remaining children share the last delay.
+const STAGGER_MAX_TOTAL := 0.45
+
+static func stagger_in(parent: Node, from_offset: Vector2 = Vector2(0, 12)) -> void:
+	var kids: Array = []
+	for c in parent.get_children():
+		if c is Control:
+			kids.append(c)
+	if kids.is_empty():
+		return
+	var step: float = STAGGER_STEP
+	if float(kids.size()) * STAGGER_STEP > STAGGER_MAX_TOTAL:
+		step = STAGGER_MAX_TOTAL / float(kids.size())
+	for i in range(kids.size()):
+		var child: Control = kids[i]
+		var delay: float = step * float(i)
+		if delay <= 0.0:
+			slide_in(child, from_offset)
+			continue
+		# Hidden until its turn, otherwise every child is visible at full alpha
+		# for its delay and then jumps to the animation's start state.
+		child.modulate.a = 0.0
+		var t = child.create_tween()
+		t.tween_interval(delay)
+		t.tween_callback(func():
+			if is_instance_valid(child):
+				slide_in(child, from_offset)
+		)
+
+
+# A brief signal-colour pulse on a value that changed meaningfully - resources
+# spent, HP lost, power entering a bad state.
+#
+# Tweens font_color rather than modulate so it tints the TEXT and not the whole
+# subtree, and so it composes with a variation's own colour instead of
+# multiplying it. Returns to the theme colour by REMOVING the override rather
+# than setting one back, which is what keeps it correct if the label's variation
+# ever changes.
+static func value_flash(label: Label, role_color: Color,
+		duration: float = DURATION_NORMAL) -> Tween:
+	label.add_theme_color_override("font_color", role_color)
+	var tween = label.create_tween()
+	tween.tween_interval(duration)
+	tween.tween_callback(func():
+		if is_instance_valid(label):
+			label.remove_theme_color_override("font_color")
+	)
+	return tween
+
+
+# A short horizontal shake for rejected input - a build that cannot be afforded,
+# a slot that cannot accept a drop.
+#
+# Small and fast on purpose. A big shake is comedy, and the interface is on the
+# SINCERE side of the tone split (CORE_DESIGN_LANGUAGE.md section 1) - the
+# absurdity belongs to the units and the weapon audio, not the chrome.
+static func shake(node: Control, amplitude: float = 4.0) -> Tween:
+	var home := node.position
+	var tween = node.create_tween()
+	tween.set_trans(Tween.TRANS_SINE)
+	for i in range(3):
+		var dir := 1.0 if i % 2 == 0 else -1.0
+		var falloff := 1.0 - (float(i) / 3.0)
+		tween.tween_property(node, "position",
+			home + Vector2(amplitude * dir * falloff, 0.0), DURATION_FAST / 3.0)
+	# Always lands exactly back home rather than at whatever the last step left,
+	# so repeated rejections cannot drift the control across the screen.
+	tween.tween_property(node, "position", home, DURATION_FAST / 3.0)
+	return tween
+
+
 # Scene-transition fade (e.g. a victory/defeat dimming overlay) - sets the
 # starting alpha itself (like slide_in()/toast_slide_fade() set their own
 # starting position) so a caller doesn't have to remember to zero out

@@ -14,6 +14,7 @@ extends Control
 const UITheme = preload("res://scripts/ui_theme.gd")
 const UIShell = preload("res://scripts/ui_shell.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
@@ -402,15 +403,11 @@ func _build_left_column(parent: Control) -> void:
 	quit_btn.text = "EXIT BUREAU"
 	quit_btn.custom_minimum_size = Vector2(180, 44)
 	quit_btn.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	quit_btn.pressed.connect(func():
-		var audio = get_node_or_null("/root/AudioManager")
-		if audio: audio.play_sfx("click")
-		get_tree().quit()
-	)
-	quit_btn.mouse_entered.connect(func():
-		var audio = get_node_or_null("/root/AudioManager")
-		if audio: audio.play_sfx("hover")
-	)
+	# UIFeedback.wire() supplies the hover sound, the hover lift and the press
+	# response in one call - replacing a press-audio lambda plus a whole separate
+	# mouse_entered lambda that existed only to play a hover sound.
+	UIFeedbackScript.wire(quit_btn)
+	quit_btn.pressed.connect(func(): get_tree().quit())
 	col.add_child(quit_btn)
 
 func _add_destination_card(parent: Control, title_text: String, description: String, scene_path: String, badge_text: String) -> void:
@@ -487,15 +484,20 @@ func _add_destination_card(parent: Control, title_text: String, description: Str
 	badge_panel.add_child(badge)
 	hbox.add_child(badge_panel)
 
+	UIFeedbackScript.wire(btn)
 	btn.pressed.connect(func():
-		var audio = get_node_or_null("/root/AudioManager")
-		if audio: audio.play_sfx("click")
-		get_tree().change_scene_to_file(scene_path)
+		# Through the router so the destination arrives on a fade, and so the
+		# router decides whether this target needs the loading screen - the call
+		# site no longer has to know which scenes stall.
+		var router = get_node_or_null("/root/SceneRouter")
+		if router:
+			router.goto(scene_path)
+		else:
+			get_tree().change_scene_to_file(scene_path)
 	)
+	# Indicator only - the hover SOUND and lift come from UIFeedback.wire() above.
 	btn.mouse_entered.connect(func():
 		indicator.modulate.a = 1.0
-		var audio = get_node_or_null("/root/AudioManager")
-		if audio: audio.play_sfx("hover")
 	)
 	btn.mouse_exited.connect(func():
 		indicator.modulate.a = 0.0
@@ -533,11 +535,10 @@ func _build_status_column(parent: Control) -> void:
 	var cycle_btn = Button.new()
 	cycle_btn.text = "ROTATE HULL ▶"
 	cycle_btn.custom_minimum_size = Vector2(130, 28)
+	UIFeedbackScript.wire(cycle_btn)
 	cycle_btn.pressed.connect(func():
 		_showcase_timer = 0.0
 		_next_showcase_item()
-		var audio = get_node_or_null("/root/AudioManager")
-		if audio: audio.play_sfx("click")
 	)
 	heading_hbox.add_child(cycle_btn)
 

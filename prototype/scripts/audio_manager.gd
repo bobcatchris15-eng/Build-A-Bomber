@@ -17,7 +17,18 @@ const SFX_PATHS: Dictionary = {
 	"harvest": "res://assets/audio/sfx/sfx_harvest.wav",
 	"construct": "res://assets/audio/sfx/sfx_construct.wav",
 	"victory": "res://assets/audio/sfx/sfx_victory.wav",
-	"defeat": "res://assets/audio/sfx/sfx_defeat.wav"
+	"defeat": "res://assets/audio/sfx/sfx_defeat.wav",
+	# Radio and alert set. These four .wav files were committed but never
+	# registered here, so they were dead assets - loaded by nothing, playable by
+	# nothing. They belong to the SINCERE side of the audio split
+	# (CORE_DESIGN_LANGUAGE.md section 6): comms chatter and mechanical alerts stay
+	# straight, and it is the ordnance that gets vocalised. A calm clipped
+	# acknowledgement over weapons going "pew pew" is the whole thesis in one
+	# moment, so these carry real tonal weight for four files.
+	"radio_ack": "res://assets/audio/sfx/sfx_radio_ack.wav",
+	"radio_static": "res://assets/audio/sfx/sfx_radio_static.wav",
+	"order_ping": "res://assets/audio/sfx/sfx_order_ping.wav",
+	"warning_banner": "res://assets/audio/sfx/sfx_warning_banner.wav"
 }
 
 const MUSIC_PATHS: Dictionary = {

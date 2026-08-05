@@ -746,7 +746,7 @@ func _ready():
 	# Navigation back to the main menu
 	var menu_btn = Button.new()
 	menu_btn.text = "Main Menu"
-	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
+	menu_btn.pressed.connect(_return_to_menu)
 	_rail_vbox.add_child(menu_btn)
 
 	# Locomotion tweaks (Size/Count/Wheels-Per-Axle) move into the same
@@ -858,7 +858,7 @@ func _on_library_pressed():
 	var router = get_node_or_null("/root/SceneRouter")
 	if router:
 		# Pass the lab as context so the library knows to return here
-		router.change_scene_async("res://scenes/BlueprintLibrary.tscn", "res://scenes/MainLab.tscn")
+		router.goto("res://scenes/BlueprintLibrary.tscn", "res://scenes/MainLab.tscn")
 	else:
 		get_tree().change_scene_to_file("res://scenes/BlueprintLibrary.tscn")
 
@@ -2370,3 +2370,15 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 
 func _process(delta):
 	pass
+
+
+# Routed through SceneRouter so leaving this screen fades out rather than cutting.
+# The get_node_or_null guard keeps the direct call as a fallback, matching the
+# pattern the other router call sites in this file already use - a scene
+# instantiated outside the running game (a test fixture) has no autoloads.
+func _return_to_menu() -> void:
+	var router = get_node_or_null("/root/SceneRouter")
+	if router:
+		router.goto("res://scenes/MainMenu.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")

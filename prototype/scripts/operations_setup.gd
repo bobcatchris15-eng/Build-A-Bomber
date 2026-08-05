@@ -170,9 +170,7 @@ func _ready() -> void:
 	var back_btn = Button.new()
 	back_btn.text = "< Back to Main Menu"
 	back_btn.custom_minimum_size = Vector2(180, 44)
-	back_btn.pressed.connect(func():
-		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
-	)
+	back_btn.pressed.connect(_return_to_menu)
 	bottom_bar.add_child(back_btn)
 
 	var spacer = Control.new()
@@ -245,4 +243,20 @@ func _on_start_operation_pressed() -> void:
 		if not chosen_paths.is_empty():
 			match_config.selected_blueprint_paths = chosen_paths
 
-	get_tree().change_scene_to_file("res://scenes/Skirmish.tscn")
+	var router = get_node_or_null("/root/SceneRouter")
+	if router:
+		router.goto("res://scenes/Skirmish.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/Skirmish.tscn")
+
+
+# Routed through SceneRouter so leaving this screen fades out rather than cutting.
+# The get_node_or_null guard keeps the direct call as a fallback, matching the
+# pattern the other router call sites in this file already use - a scene
+# instantiated outside the running game (a test fixture) has no autoloads.
+func _return_to_menu() -> void:
+	var router = get_node_or_null("/root/SceneRouter")
+	if router:
+		router.goto("res://scenes/MainMenu.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")

@@ -2456,7 +2456,11 @@ func _on_clear_clicked() -> void:
 	_update_status("Cleared all primitives")
 
 func _on_back_clicked() -> void:
-	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
+	var router = get_node_or_null("/root/SceneRouter")
+	if router:
+		router.goto("res://scenes/MainMenu.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
 
 # ── Status helpers ────────────────────────────────────────────────────────────
 

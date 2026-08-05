@@ -1830,7 +1830,7 @@ func _build_ui():
 	# looked like all along. The old inline pair used a (0.20, 0.60, 0.85) cyan-blue
 	# border - the drifted accent ui_tokens.gd's header names explicitly - plus 4px
 	# corners the tokens' near-square geometry rejects.
-	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
+	menu_btn.pressed.connect(_return_to_menu)
 	ui.add_child(menu_btn)
 
 	if OS.is_debug_build():
@@ -3407,5 +3407,17 @@ func _on_hq_died(building):
 	var btn = Button.new()
 	btn.text = "Return to Menu"
 	btn.custom_minimum_size = Vector2(220, 50)
-	btn.pressed.connect(func(): get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
+	btn.pressed.connect(_return_to_menu)
 	vbox.add_child(btn)
+
+
+# Routed through SceneRouter so leaving this screen fades out rather than cutting.
+# The get_node_or_null guard keeps the direct call as a fallback, matching the
+# pattern the other router call sites in this file already use - a scene
+# instantiated outside the running game (a test fixture) has no autoloads.
+func _return_to_menu() -> void:
+	var router = get_node_or_null("/root/SceneRouter")
+	if router:
+		router.goto("res://scenes/MainMenu.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")

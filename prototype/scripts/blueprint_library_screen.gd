@@ -151,8 +151,12 @@ func _build_ui() -> void:
 		var target = "res://scenes/MainMenu.tscn"
 		if router and router.pending_context != "":
 			target = router.pending_context
+		# goto(), not change_scene_async(): `target` is often MainMenu, which has no
+		# WARM_SOURCES entry, and change_scene_async() put it behind the loading
+		# screen regardless. goto() only uses the loading screen for scenes that
+		# actually stall.
 		if router:
-			router.change_scene_async(target)
+			router.goto(target)
 		else:
 			get_tree().change_scene_to_file(target)
 	)
@@ -312,7 +316,7 @@ func _on_edit_pressed(id: String, path: String):
 		f.close()
 		var router = get_node_or_null("/root/SceneRouter")
 		if router:
-			router.change_scene_async("res://scenes/MainLab.tscn")
+			router.goto("res://scenes/MainLab.tscn")
 		else:
 			get_tree().change_scene_to_file("res://scenes/MainLab.tscn")
 	else:
@@ -329,7 +333,7 @@ func _on_test_pressed(id: String, path: String):
 		f.close()
 		var router = get_node_or_null("/root/SceneRouter")
 		if router:
-			router.change_scene_async("res://scenes/Battlefield.tscn", "res://scenes/BlueprintLibrary.tscn")
+			router.goto("res://scenes/Battlefield.tscn", "res://scenes/BlueprintLibrary.tscn")
 		else:
 			get_tree().change_scene_to_file("res://scenes/Battlefield.tscn")
 	else:
