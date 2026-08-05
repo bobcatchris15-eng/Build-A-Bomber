@@ -14,6 +14,7 @@ const SCENES := [
 	"res://scenes/BlueprintLibrary.tscn",
 	"res://scenes/OperationsSetup.tscn",
 	"res://scenes/Loading.tscn",
+	"res://scenes/Battle.tscn",
 ]
 
 func _init():

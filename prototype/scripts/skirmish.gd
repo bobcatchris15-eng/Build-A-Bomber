@@ -7,6 +7,7 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const ModuleDataScript = preload("res://scripts/module_data.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const UIIconsScript = preload("res://scripts/ui_icons.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const BattleUnitScript = preload("res://scripts/battle_unit.gd")
@@ -1831,6 +1832,7 @@ func _build_ui():
 	# border - the drifted accent ui_tokens.gd's header names explicitly - plus 4px
 	# corners the tokens' near-square geometry rejects.
 	menu_btn.pressed.connect(_return_to_menu)
+	UIFeedbackScript.wire(menu_btn)
 	ui.add_child(menu_btn)
 
 	if OS.is_debug_build():
@@ -2204,6 +2206,13 @@ func _build_tab_bar(parent: Container) -> void:
 	sell_btn.custom_minimum_size = Vector2(90, 26)
 	sell_btn.toggle_mode = true
 	tab_bar.add_child(sell_btn)
+
+	# One sweep over the bar: the three category tabs plus Repair and Sell. Sell
+	# arms a mode that destroys a structure for a refund, so it is wired with the
+	# danger role and gets the warning tone rather than a click - the two mode
+	# buttons sit side by side and confusing them costs a building.
+	UIFeedbackScript.wire_tree(tab_bar, "select")
+	UIFeedbackScript.wire(sell_btn, "danger")
 	repair_btn.pressed.connect(func():
 		repair_mode = repair_btn.button_pressed
 		if repair_mode:
@@ -2349,11 +2358,15 @@ func _add_build_button(parent: Container, text: String, icon_name: String, callb
 		# a left-aligned icon would push the text into a wrap.
 		btn.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 		btn.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	# VISUAL_IMPROVEMENT_PLAN.md chunk G: real tactile press feedback (a
-	# quick squash-release) alongside whatever the button's own click does -
-	# purely cosmetic, so it's a second connection rather than something
-	# `callback` itself needs to know about.
-	btn.pressed.connect(func(): UIAnimScript.button_press_feedback(btn))
+	# Full interactive response - hover sound, hover lift, press sound, press
+	# squash - in one call. This replaces a manual button_press_feedback()
+	# connection that supplied the squash only: a build button had tactile press
+	# feedback but was silent and gave nothing at all on hover, which on the one
+	# control the player uses most during a match was the biggest gap in the HUD.
+	#
+	# "confirm" rather than the default click: queueing a unit spends resources and
+	# commits a production slot, so it gets the radio acknowledgement.
+	UIFeedbackScript.wire(btn, "confirm")
 	btn.pressed.connect(callback)
 	parent.add_child(btn)
 	return btn
@@ -2376,6 +2389,12 @@ func _update_resource_ui():
 			_displayed_metal = target_metal
 			_displayed_crystal = target_crystal
 			resource_label.text = "Metal: %d    Crystal: %d" % [target_metal, target_crystal]
+			# A jump big enough to roll up is worth a flash: GO when the total rose
+			# (a delivery, a refund), ALERT when it fell (a purchase). Chrome only -
+			# the numbers themselves are unchanged.
+			var rose: bool = (target_metal + target_crystal) >= (_displayed_metal + _displayed_crystal)
+			UIAnimScript.value_flash(resource_label,
+				Tokens.SIGNAL_GO if rose else Tokens.SIGNAL_ALERT)
 		else:
 			if _resource_roll_tween and _resource_roll_tween.is_valid():
 				_resource_roll_tween.kill()
@@ -2412,7 +2431,15 @@ func _update_resource_ui():
 		# StyleBoxFlat each time, which is a resource allocation per tick for three
 		# values that never change.
 		power_bar.add_theme_stylebox_override("fill", _power_fill_style(state))
+		var was := power_status_label.text
 		power_status_label.text = "Base Power: %s" % state.capitalize()
+		# Flash only on a TRANSITION, not every tick: this runs on each power
+		# update, and a label that pulses continuously while the base is merely
+		# low stops reading as an event and becomes noise.
+		if was != power_status_label.text and state != "normal":
+			UIAnimScript.value_flash(power_status_label,
+				Tokens.SIGNAL_ALERT if state == "critical" else Tokens.SIGNAL_HAZARD)
+			UIFeedbackScript.play(power_status_label, "warning_banner")
 
 # One stylebox per power state, built on first use and reused thereafter.
 var _power_fill_styles: Dictionary = {}

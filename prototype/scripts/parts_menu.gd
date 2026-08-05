@@ -67,12 +67,29 @@ const HULL_GROUP_ORDER = ["Light Chassis", "Medium Chassis", "Heavy Chassis", "S
 # "ground_contact" and "amphibious" and belongs under Ground.
 const LOCO_GROUP_ORDER = ["Ground", "Hover", "Naval", "Air"]
 
-# The three families, as filter chips. "" is the all-pass chip.
-const FAMILIES = [
-	{"id": "", "label": "All"},
+# The four TOP-LEVEL TOOLBOXES, in the order they appear when the dock opens.
+#
+# This is a presentation axis and is deliberately NOT the same thing as a
+# section's `family` meta. Sections keep tagging themselves "hulls" / "modules" /
+# "locomotion", because that is the catalog CATEGORY they came from and it is what
+# sections_for() answers questions about - test_designer_lab and test_hull_and_armor
+# both ask by category. Splitting "modules" across two toolboxes is a decision
+# about where a player looks for a part, not a reclassification of the part.
+const TIERS = [
 	{"id": "hulls", "label": "Hulls"},
-	{"id": "modules", "label": "Modules"},
+	{"id": "weapons", "label": "Weapons"},
+	{"id": "support", "label": "Support"},
 	{"id": "locomotion", "label": "Drives"},
+]
+
+# Which module ROLES are weapons. Taken from the catalog's own wording rather
+# than invented here: MODULE_ROLES groups Deployables under the comment "weapons
+# that leave something behind on the field instead of resolving damage at a
+# target", so smoke and mines belong with the guns even at 0 dps. Everything the
+# list does not name (Armor, Power, Support, Structural) falls to Support.
+const WEAPON_ROLES = [
+	"Direct-Fire Guns", "Energy & Electromagnetic", "Indirect Fire",
+	"Missiles", "Point Defense", "Deployables",
 ]
 
 const CARD_MIN_WIDTH := 132
@@ -82,7 +99,6 @@ var _dock: UIDock
 var _search_box: LineEdit
 var _empty_hint: Label
 var _sections_host: VBoxContainer
-var _chip_buttons: Dictionary = {}
 
 var _filter: String = ""
 var _family: String = ""
@@ -91,8 +107,9 @@ var _family: String = ""
 # without re-walking the scene tree on each keystroke.
 var _all_drawers: Array = []
 
-# family id -> its tier Control. Drives the accordion in _open_family_tier().
-var _family_tiers: Dictionary = {}
+# The tier-2 toolbox. Created in _build_shell(); tiers are added lazily by
+# _family_tier_body() as _populate() encounters each one.
+var _toolbox: UIToolbox = null
 
 # Retained so the old one-at-a-time API keeps working for any caller that still
 # sets them; the new panel does not enforce single-open.
@@ -160,29 +177,17 @@ func _build_shell() -> void:
 	_search_box.text_changed.connect(_on_search_changed)
 	host.add_child(_search_box)
 
-	# --- Family filter chips ---------------------------------------------
-	# Chips rather than tabs: they are always visible, they read as filters
-	# rather than as pages, and they compose with the search box instead of
-	# fighting it.
-	var chips = HBoxContainer.new()
-	chips.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	host.add_child(chips)
-
-	for fam in FAMILIES:
-		var chip = Button.new()
-		chip.theme_type_variation = "TabButton"
-		chip.toggle_mode = true
-		chip.text = fam["label"]
-		chip.focus_mode = Control.FOCUS_NONE
-		chip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		chip.custom_minimum_size = Vector2(0, 26)
-		chip.button_pressed = fam["id"] == ""
-		var fam_id: String = fam["id"]
-		chip.pressed.connect(func(): _set_family(fam_id))
-		chips.add_child(chip)
-		_chip_buttons[fam_id] = chip
-
-	host.add_child(HSeparator.new())
+	# NO FAMILY CHIPS. They used to sit here, and with the tiered toolboxes in
+	# place they were the "odd hybrid" of two navigation systems: the chips and the
+	# tiers were the same axis expressed twice, so a player could filter to Hulls
+	# with a chip and then still have to open a Hulls tier, or worse, filter to
+	# Drives while the Weapons tier was the one expanded. One structural hierarchy
+	# replaces them - the tiers ARE the family selector now.
+	#
+	# Search stays. It is the only control here that does a different job:
+	# grouping helps BROWSING, search helps RETRIEVAL, and it cuts across all four
+	# toolboxes at once (see _force_open_family, which opens every tier holding a
+	# match rather than accordioning to one).
 
 	# --- Results ----------------------------------------------------------
 	var scroll = ScrollContainer.new()
@@ -195,6 +200,13 @@ func _build_shell() -> void:
 	_sections_host.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_sections_host.add_theme_constant_override("separation", Tokens.SPACE_XS)
 	scroll.add_child(_sections_host)
+
+	_toolbox = UIToolbox.new()
+	# Unfolds rightward out of its header - this dock lives on the LEFT edge, so
+	# content arriving from the left reads as coming out of the panel rather than
+	# in from off-screen.
+	_toolbox.stagger_from = Vector2(-12, 0)
+	_sections_host.add_child(_toolbox)
 
 	_empty_hint = Label.new()
 	_empty_hint.text = "No parts match."
@@ -212,10 +224,11 @@ func _build_shell() -> void:
 	host.add_child(hint)
 
 
+# Retained for any caller still driving the old filter axis (and because
+# _family is still honoured by _apply_filters), but nothing in the UI calls it
+# now that the tiers carry the family choice structurally.
 func _set_family(family: String) -> void:
 	_family = family
-	for id in _chip_buttons:
-		_chip_buttons[id].button_pressed = (id == family)
 	_apply_filters()
 
 
@@ -280,12 +293,16 @@ func _populate(groups: Dictionary, order: Array, family: String) -> void:
 		var cards := []
 		for entry in entries:
 			cards.append(_build_part_card(entry.id, entry.data))
+		var tier_id := _tier_for(family, group)
 		var section = _make_section(group, cards, family)
+		# The toolbox this group is filed under, kept separate from the `family`
+		# meta above - see the TIERS comment for why the two axes differ.
+		section.set_meta("tier", tier_id)
 		# Into the family's tier body rather than straight into _sections_host, which
 		# is what makes the hierarchy structural. _all_drawers still gets every
 		# section, so sections_for() and the test suites are unaffected by the
 		# re-parenting.
-		_family_tier_body(family).add_child(section)
+		_family_tier_body(tier_id).add_child(section)
 		_all_drawers.append(section)
 
 
@@ -351,109 +368,56 @@ func _build_part_card(type_id: String, data: Dictionary) -> Button:
 
 # A titled group of cards. Independently collapsible - opening one no longer
 # closes another, because comparing two groups is a normal thing to want.
-# --- Tier 2: the family toolbox ---------------------------------------------
+# --- Tier 2: the family toolboxes -------------------------------------------
 # TIER STRUCTURE (Chris's toolbox model):
 #
-#   tier 1  the dock itself, collapsed to a 40px rail        (UIDock, existing)
-#   tier 2  one toolbox per FAMILY - Hulls / Modules / Drives   (this function)
-#   tier 3  one drawer per CATEGORY inside a family          (_make_section)
-#   tier 4  the part cards                                   (_build_part_card)
+#   tier 1  the dock itself, collapsed to a small metallic box   UIDock
+#   tier 2  one toolbox per TIERS entry - Hulls/Weapons/Support/Drives  UIToolbox
+#   tier 3  one drawer per CATEGORY inside a toolbox            _make_section
+#   tier 4  the part cards                                      _build_part_card
 #
-# Only tier 2 is new. The families and categories were already in the data - the
-# families were filter CHIPS and the categories were drawers in one flat column,
-# so the hierarchy existed conceptually but the player had to hold it in their
-# head. Making it structural means the column is short at rest and you descend to
-# what you want.
+# Tier 2 is now UIToolbox, which also backs the Design Lab's right-hand document
+# actions - the widget was built twice here and in stat_calculator.gd before being
+# extracted. Accordion at tier 2 comes from UIToolbox; accordion at tier 3 is
+# _open_category below, because a category's siblings are the other drawers in the
+# same toolbox rather than the other toolboxes.
 #
-# ACCORDION at both levels: opening a family closes its siblings, and opening a
-# category closes its siblings within that family. At three levels deep a
-# keep-everything-open column runs to several screen-heights, which defeats the
-# collapsing this was built for.
-#
-# The sections keep living in _all_drawers regardless of which tier owns them in
-# the scene tree, which is what keeps sections_for() and the drawer metadata
-# contract (see _make_section) working - the test suites walk that array, not the
-# node hierarchy.
-# Returns the container a family's category drawers belong in, creating the tier
-# on first use so _populate() does not have to be ordered against tier setup.
-func _family_tier_body(family: String) -> VBoxContainer:
-	if not _family_tiers.has(family):
-		var label := family.capitalize()
-		for f in FAMILIES:
-			if f["id"] == family:
-				label = str(f["label"])
+# Sections keep living in _all_drawers regardless of which toolbox body owns them
+# in the scene tree, which is what preserves the drawer metadata contract - the
+# test suites walk that array, not the node hierarchy.
+# Presentation tier for a (category, group) pair. Only "modules" splits, into
+# Weapons and Support - see the TIERS and WEAPON_ROLES comments for why that is a
+# presentation decision rather than a reclassification.
+func _tier_for(family: String, group: String) -> String:
+	if family != "modules":
+		return family
+	return "weapons" if group in WEAPON_ROLES else "support"
+
+
+func _family_tier_body(tier_id: String) -> VBoxContainer:
+	if not _toolbox.has_tier(tier_id):
+		var label := tier_id.capitalize()
+		for t in TIERS:
+			if t["id"] == tier_id:
+				label = str(t["label"])
 				break
-		var tier := _make_family_tier(family, label)
-		_family_tiers[family] = tier
-		_sections_host.add_child(tier)
-	return _family_tiers[family].get_meta("tier_body")
+		_toolbox.add_tier(tier_id, label)
+	return _toolbox.body_of(tier_id)
 
 
-func _make_family_tier(family: String, label: String) -> Control:
-	var tier = VBoxContainer.new()
-	tier.name = "Family_%s" % family
-	tier.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-
-	var header = Button.new()
-	# TabButton, not ListButton: a family is a lid on a toolbox, and the theme's
-	# tab treatment inverts its bevel when inactive - so a closed family reads as
-	# pressed shut and the open one lifts. The categories below stay ListButton, so
-	# the two tiers are visually distinct rather than a wall of identical rows.
-	header.theme_type_variation = "TabButton"
-	header.custom_minimum_size = Vector2(0, Tokens.HIT_TARGET_MIN)
-	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	header.text = label
-	header.focus_mode = Control.FOCUS_NONE
-	header.toggle_mode = true
-	# Closed at rest. The whole point of the tier is that the dock opens showing
-	# three short rows rather than the entire catalogue.
-	header.button_pressed = false
-	tier.add_child(header)
-
-	var body = VBoxContainer.new()
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	body.visible = false
-	tier.add_child(body)
-
-	tier.set_meta("family", family)
-	tier.set_meta("tier_body", body)
-	tier.set_meta("header_btn", header)
-
-	header.toggled.connect(func(pressed: bool):
-		if pressed:
-			_open_family_tier(family)
-		else:
-			body.visible = false
-	)
-	UIFeedbackScript.wire(header, "select")
-	return tier
+# Opens a toolbox without the accordion, so filtering can reveal matches across
+# several at once.
+func _force_open_family(tier_id: String) -> void:
+	_toolbox.force_open(tier_id)
 
 
-# Opens one family and closes the rest.
-func _open_family_tier(family: String) -> void:
-	for f in _family_tiers.keys():
-		var tier: Control = _family_tiers[f]
-		if not is_instance_valid(tier):
-			continue
-		var is_target: bool = f == family
-		var body: Control = tier.get_meta("tier_body")
-		var header: Button = tier.get_meta("header_btn")
-		body.visible = is_target
-		# set_pressed_no_signal, or closing a sibling re-enters this function
-		# through its own toggled handler and the loop fights itself.
-		header.set_pressed_no_signal(is_target)
-		if is_target:
-			UIAnim.stagger_in(body, Vector2(-12, 0))
-
-
-# Opens one category drawer and closes its siblings within the same family.
+# Opens one category drawer and closes its siblings within the same toolbox.
 func _open_category(section: Control) -> void:
-	var family := str(section.get_meta("family", ""))
+	var tier_id := str(section.get_meta("tier", ""))
 	for other in _all_drawers:
 		if not is_instance_valid(other):
 			continue
-		if str(other.get_meta("family", "")) != family:
+		if str(other.get_meta("tier", "")) != tier_id:
 			continue
 		var is_target: bool = other == section
 		var grid: Control = other.get_meta("content_container")
@@ -574,11 +538,24 @@ func _apply_filters() -> void:
 			# would defeat the search.
 			if _filter != "":
 				grid.visible = true
-				section.get_meta("header_btn").button_pressed = true
-				section.set_meta("drawer_open", false)
+				section.get_meta("header_btn").set_pressed_no_signal(true)
+				# TRUE. This read `false` briefly, which is what
+				# test_module_roles_group_and_sort_the_parts_menu catches with
+				# "survived the filter but stayed shut" - the drawer was opened
+				# visually while recording itself as closed.
+				section.set_meta("drawer_open", true)
+				# ...and the family tier above it has to open too, or the match is
+				# revealed inside a collapsed tier and stays invisible. This is new
+				# with the tier structure: before it, a section had no ancestor that
+				# could be shut.
+				_force_open_family(str(section.get_meta("tier", family)))
 
 	if _empty_hint:
 		_empty_hint.visible = not any_visible
+
+
+# _force_open_family() moved up beside the other tier helpers when the tier
+# widget was extracted into UIToolbox; this was the second, now-stale copy.
 
 
 # --- Introspection ----------------------------------------------------------

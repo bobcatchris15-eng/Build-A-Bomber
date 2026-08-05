@@ -1,0 +1,50 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://scripts/battle/match_director.gd" id="1_director"]
+[ext_resource type="Script" path="res://scripts/rts_camera.gd" id="2_rtscam"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_bt"]
+sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+ground_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+
+[sub_resource type="Sky" id="Sky_bt"]
+sky_material = SubResource("ProceduralSkyMaterial_bt")
+
+[sub_resource type="Environment" id="Environment_bt"]
+background_mode = 2
+sky = SubResource("Sky_bt")
+tonemap_mode = 3
+ssao_enabled = true
+ssao_radius = 0.8
+ssao_intensity = 2.5
+glow_enabled = true
+glow_intensity = 0.9
+glow_bloom = 0.08
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
+size = Vector3(160, 1, 160)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground"]
+size = Vector3(160, 1, 160)
+
+[node name="Battle" type="Node3D"]
+script = ExtResource("1_director")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_bt")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 20, 0)
+shadow_enabled = true
+
+[node name="Camera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 26, 128)
+script = ExtResource("2_rtscam")
+
+[node name="Ground" type="StaticBody3D" parent="."]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground"]
+shape = SubResource("BoxShape3D_ground")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground"]
+mesh = SubResource("BoxMesh_ground")

@@ -23,6 +23,11 @@ const SUITE_FILES := {
 	"base_building": preload("res://tests/test_base_building.gd"),
 	"ai_and_win": preload("res://tests/test_ai_and_win.gd"),
 	"terrain_and_maps": preload("res://tests/test_terrain_and_maps.gd"),
+	# The rebuilt battle layer (scripts/battle/). Kept in its own subdirectory
+	# because it grows one file per phase and it retires as a unit if the rebuild
+	# is ever abandoned - unlike the ten area files above, which are a split of
+	# one historical monolith.
+	"battle_movement": preload("res://tests/battle/test_battle_movement.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -238,6 +243,16 @@ const SUITE_ORDER := [
 	["economy_and_production", "test_e3_losing_last_manufactory_of_a_tier_refunds_its_queued_items"],
 	["economy_and_production", "test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue"],
 	["ui_and_camera", "test_a4_world_hp_bar_and_selection_ring_real_wiring"],
+
+	# --- Rebuilt battle layer -------------------------------------------------
+	# APPENDED, never interleaved. The order above is pinned because several
+	# navmesh/Recast suites flake depending on what ran before them; inserting
+	# anything mid-list perturbs exactly the thing the pinning protects. These
+	# suites are pure value-in/value-out math with no scene, no navmesh and no
+	# physics, so running last costs nothing and disturbs nothing.
+	["battle_movement", "test_steering_yaw_faces_the_requested_direction"],
+	["battle_movement", "test_steering_arrival_and_turn_rate"],
+	["battle_movement", "test_order_vocabulary_and_completion"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

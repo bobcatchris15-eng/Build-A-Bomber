@@ -45,6 +45,20 @@ enum State { EXPANDED, RAILED, HIDDEN }
 enum Side { LEFT, RIGHT, BOTTOM }
 
 const RAIL_SIZE := 40.0
+# How far the dock is held off its window edge. SPACE_MD reads as a deliberate
+# gap at every window size without eating usable panel width.
+const EDGE_INSET := 12.0
+# The collapsed rectangle's OUTER size, which is not RAIL_SIZE.
+#
+# RAIL_SIZE is the inner extent the clip/minimum-size contract is written against
+# (outer_extent() returns it, and a suite in test_ui_and_camera asserts that), but
+# the dock's PLATE adds SPACE_SM of padding on each side and the rail button's own
+# plate margins sit inside that. The box therefore renders at RAIL_SIZE + 16.
+#
+# The offsets have to use the real outer figure or the collapsed rectangle
+# overhangs its own inset - measured as the right-hand dock spanning 1868..1924 on
+# a 1920 viewport, i.e. 4px off-screen, while its left edge looked correct.
+const RAIL_BOX := RAIL_SIZE + 16.0
 const TAB_SIZE := 10.0
 const MIN_EXPANDED := 180.0
 const MAX_EXPANDED := 640.0
@@ -277,6 +291,19 @@ func _apply_state(animate: bool) -> void:
 		_rail_btn.remove_theme_stylebox_override("pressed")
 		remove_theme_stylebox_override("panel")
 
+	# METALLIC WHEN COLLAPSED. DockRail is the steel variation - brushed bare
+	# sheet - against DockPanel's powdercoat body. Expanded, the dock is a panel
+	# you read from and powdercoat is right; collapsed it is a small machined tab
+	# you press, and steel is what makes it read as a piece of hardware rather
+	# than as a shrunken panel. Steel also sits highest in the material luminance
+	# stack, so the closed rectangle stays findable against the 3D viewport.
+	if _state == State.HIDDEN:
+		pass  # keeps the bare zero-margin tab style assigned above
+	elif expanded:
+		theme_type_variation = "DockPanel"
+	else:
+		theme_type_variation = "DockRail"
+
 	var extent := _target_extent()
 
 	if _tween and _tween.is_valid():
@@ -335,16 +362,45 @@ func _extent_vector(extent: float) -> Vector2:
 # on its own docked axis. Callers still own the ANCHORS; this only ever writes
 # offsets, and only on the axis the dock occupies.
 func _apply_edge_offsets(extent: float) -> void:
+	# INSET FROM THE EDGE rather than flush against it. A panel welded to the
+	# window edge reads as part of the window chrome; held off it by a margin it
+	# reads as an instrument sitting ON the console, which is the whole material
+	# metaphor. The inset also gives the collapsed rectangle's shadow somewhere to
+	# fall - flush against the edge, elevation is invisible on that side.
+	# Collapsed uses the real outer box (see RAIL_BOX); expanded uses the caller's
+	# requested extent, which already reads as an outer width.
+	var outer := extent if _state == State.EXPANDED else RAIL_BOX
 	match side:
 		Side.LEFT:
-			offset_left = 0.0
-			offset_right = extent
+			offset_left = EDGE_INSET
+			offset_right = EDGE_INSET + outer
 		Side.RIGHT:
-			offset_left = -extent
-			offset_right = 0.0
+			offset_left = -(EDGE_INSET + outer)
+			offset_right = -EDGE_INSET
 		_:
 			offset_top = -extent
 			offset_bottom = 0.0
+
+	# COLLAPSED IS A SMALL FLOATING RECTANGLE, not a full-height strip.
+	#
+	# A railed dock used to run the entire viewport height, which is a lot of ink
+	# for "there is a panel here" and made both edges of the Lab read as permanent
+	# furniture even when nothing was open. Collapsed, it now clamps to a squarish
+	# button that hovers near the top of its own side; expanded, it takes the height
+	# back.
+	#
+	# Only touches offset_bottom / anchor_bottom, never offset_top: the caller sets
+	# offset_top to clear the Design Lab's toolbar and that inset has to survive.
+	if side == Side.LEFT or side == Side.RIGHT:
+		if _state == State.EXPANDED:
+			anchor_bottom = 1.0
+			offset_bottom = -EDGE_INSET
+		else:
+			# anchor_bottom to the TOP anchor, so offset_bottom measures a fixed
+			# height down from wherever the caller pinned the top rather than up
+			# from the bottom of the screen.
+			anchor_bottom = anchor_top
+			offset_bottom = offset_top + RAIL_BOX
 
 
 # The hidden dock's grab tab: a flat sliver with NO content margins, so it can

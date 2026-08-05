@@ -75,6 +75,17 @@ const DESTINATIONS := [
 		"scene": "res://scenes/Battlefield.tscn",
 		"badge": "TEST // RANGE"
 	},
+	# The rebuilt battle layer (scripts/battle/), listed BESIDE Skirmish rather
+	# than replacing it. The old match controller stays playable and its ~120
+	# suites stay green until the new one reaches parity; at that point Skirmish
+	# above is deleted and this takes the name. The badge says WIP because for
+	# the moment it genuinely is one - see the phase plan.
+	{
+		"title": "BATTLE (REBUILD)",
+		"desc": "The new match layer. Under construction.",
+		"scene": "res://scenes/Battle.tscn",
+		"badge": "WIP // COMBAT"
+	},
 ]
 
 var _turntable_node: Node3D = null

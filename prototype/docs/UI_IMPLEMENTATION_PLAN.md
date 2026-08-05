@@ -1,244 +1,207 @@
 # Kitbash Command — UI Implementation Plan
-_Companion to UI_STYLE_GUIDE.md. Describes what is already done, what is outstanding, and the priority order for completing it._
-_Last updated: 2026-08-04_
+
+_Companion to UI_STYLE_GUIDE.md. What is done, what is outstanding, and what is deliberately not being done._
+_Last updated: 2026-08-05_
+
+> **This document was substantially wrong before this revision, and that cost real time.** It claimed the plate textures, field textures, the plate generator and the font files did not exist — all four were present. Its Priority 1a targeted `main_lab.gd`, a file that has never existed. Two of its three open questions were already answered by code in the repo, and one of its Priority 5 clean-ups had already been done. Anyone following it would have re-authored finished assets and hunted for phantom files.
+>
+> The lesson worth keeping: **a plan that describes intentions rather than the tree rots silently.** Every claim below is stated against a file that was checked. Where something is asserted as done, it is because it was verified, not because it was scheduled.
 
 ---
 
 ## Status: What Is Already In Place
 
-The following pieces of the design system are fully implemented and should not be re-invented or worked around:
+Fully implemented. Do not re-invent or work around any of these.
 
-| System | File(s) | Status |
+| System | File(s) | Notes |
 |---|---|---|
-| Token palette | `scripts/ui_tokens.gd` | ✅ Complete |
-| Theme builder | `tools/build_ui_theme.gd` | ✅ Complete |
-| Generated theme | `resources/bomber_theme.tres` | ✅ Built, checked in |
-| Runtime material applicator | `scripts/ui_theme.gd` | ✅ Complete |
-| Layout helpers | `scripts/ui_shell.gd` | ✅ (`stat_row` only) |
-| Main menu | `scripts/main_menu.gd` | ✅ Complete |
-| Blueprint library screen | `scripts/blueprint_library_screen.gd` | ✅ Complete |
-| Hull Material Builder | `scripts/hull_material_builder.gd` | ✅ Complete |
+| Token palette | `scripts/ui_tokens.gd` | Colour, type, spacing, geometry, **elevation**, **motion** |
+| Theme builder | `tools/build_ui_theme.gd` | 23 registered variations |
+| Generated theme | `resources/bomber_theme.tres` | Built, checked in |
+| Runtime material applicator | `scripts/ui_theme.gd` | `apply_material` / `apply_backdrop` / `apply_faction_preview` |
+| Material plates | `assets/textures/ui/plate_*.png` | 24 files, **128×128 RGBA** |
+| Material fields | `assets/textures/ui/field_*.png` | 6 files, 512×512 RGB |
+| Plate generator | `tools/generate_ui_plates.py` | Procedural, fixed seed |
+| Fonts | `assets/fonts/*.ttf` | All four present |
+| Motion library | `scripts/ui_anim.gd` | slide/fade/hover/stagger/flash/shake |
+| Feedback layer | `scripts/ui_feedback.gd` | Audio **and** motion in one call |
+| Toolbox widget | `scripts/ui_toolbox.gd` | Collapsible tiers with accordion |
+| Dock widget | `scripts/ui_dock.gd` | Edge dock, collapses to a small metallic box |
+| Layout helpers | `scripts/ui_shell.gd` | `stat_row`, `backdrop`, `screen_frame` |
+| Scene transitions | `scripts/scene_router.gd` | `goto()` fades every screen change |
 
-**The theme builder is the canonical method for adding new panel/button/label styles.** Do not add StyleBoxFlat overrides inline in screen scripts for anything that should be globally consistent. Add a variation to `build_ui_theme.gd` and rebuild.
-
----
-
-## Priority 1 — Screen Consistency Sweep
-
-The Design Lab, Skirmish HUD, and Match Setup screens all pre-date the current design system. They were partially updated but still contain:
-
-- Hardcoded colour literals not from `ui_tokens.gd`
-- `apply_brushed_panel` calls that are now no-ops (deprecated in `ui_theme.gd`) but still mark intent that was never followed through
-- Font sizes set per-control instead of through the type scale
-
-### 1a · Design Lab (`scenes/MainLab.tscn` + `scripts/stat_calculator.gd`)
-
-**Issues:**
-- Top toolbar uses hardcoded `BASE_700`-ish flat fill rather than a `HeaderPanel`
-- Part catalogue panel on the left is a plain `Panel` — should be `DockPanel`
-- Several inline `StyleBoxFlat` builds in `stat_calculator.gd` for the stat readout rows — should use `InsetPanel` + `stat_row()` from `UIShell`
-- Build action buttons (Confirm, Mirror, Delete) use saturated red/green literals — should use `DangerButton` / `PrimaryButton` / default `Button` theme variations respectively
-- The tweak slider row labels use `FONT_BODY` (15 px) in a dense context where `FONT_SMALL` (13 px) / `HintLabel` is appropriate
-
-**Target state:**
-- Toolbar → `HeaderPanel` variation, TOOLBAR_HEIGHT = 44 px
-- Left parts dock → `DockPanel` variation
-- Stats column → `CardPanel` with `stat_row()` calls
-- All build/confirm/cancel buttons → appropriate theme variations, no colour literals
-
-**File changes required:**
-- `scripts/stat_calculator.gd` — remove inline styleboxes; assign theme_type_variations
-- `scenes/MainLab.tscn` — check any in-scene panel node overrides
+**The theme builder is the canonical way to add a style.** Never add a `StyleBoxFlat` override inline in a screen script for anything that should be globally consistent — a local override *beats* the theme, so an inline style actively holds the design system out of that control. Add a variation and rebuild.
 
 ---
 
-### 1b · Skirmish HUD (`scripts/skirmish.gd` + `scripts/battlefield.gd`)
+## Priority 1 — Screen Consistency Sweep — **DONE**
 
-**Issues:**
-- Resource counters are plain Labels — should be `HUDValueLabel` (monospace, so counts don't reflow)
-- Action bar buttons carry per-instance colour overrides — should use `PrimaryButton` / `DangerButton` / `TabButton`
-- HP bars styled inline — should match `ProgressBar` theme entry (SIGNAL_GO_DIM fill + SIGNAL_GO edge)
-- Command panel uses alpha transparency to "blend with the battlefield" — this predates the material pass; a `HUDPanel` (pressed powdercoat) is opaque enough to read and dark enough not to compete
+Every out-of-match screen plus the Skirmish HUD has been swept. What that meant in practice:
 
-**Target state:**
-- All counters → `HUDValueLabel`
-- Action bar → themed `Button` / `PrimaryButton` variations
-- HP/resource bars → engine `ProgressBar` with themed fill
-- Command panel → `HUDPanel` variation
+- `modulate = Color(...)` literals replaced with theme variations or `font_color` overrides. `modulate` was the wrong mechanism regardless of value: it multiplies the whole subtree and cannot brighten.
+- Off-scale font sizes normalised. Several were near-misses on real tokens — an ad-hoc amber where `SIGNAL_HAZARD` was meant, a saturated web green for `SIGNAL_GO`'s deliberately desaturated olive.
+- `UIFeedback.wire()` on interactive controls; `stagger_in` on lists and grids.
 
-**File changes required:**
-- `scripts/skirmish.gd` — remove inline styleboxes; correct label variations
-- `scripts/battlefield.gd` — same
+### 1a · Design Lab — **DONE**
+
+**There is no `main_lab.gd`.** `scenes/MainLab.tscn` is the 3D world plus two UI sub-scenes: `UI_StatBlock.tscn` (`stat_calculator.gd`, the right rail) and `UI_PartsMenu.tscn` (`parts_menu.gd`, the catalogue). Every file reference in the previous version of this section was wrong.
+
+Current state:
+
+- **Left dock** — `parts_menu.gd` in a `UIDock`, holding a `UIToolbox` of four tiers: Hulls / Weapons / Support / Drives. Each tier holds category drawers; each drawer holds part cards. Accordion at both levels.
+- **Right dock** — `stat_calculator.gd` in a `UIDock`, with a `UIToolbox` `DOCUMENT` tier for the design name and Save / Library / Discard, above the telemetry rail.
+- **Top bar** — `HeaderPanel` band of transparent info slots (HULL / PARTS / FACTION) plus the global buttons. Slots read from the same `DesignStats` result the telemetry rail uses, so the two cannot disagree.
+
+**Three `StyleBoxFlat` builds in `stat_calculator.gd` are correct and must stay** (the load-bar fill and the two warning panels). They are the documented state-indicator exception: there is no theme-side way to say "this bar is in its bad state", and `StyleBoxTexture` carries no colour channel to vary. See the comment above `_load_fill_style()`.
+
+> **Trap, recorded because it bit once.** `Tokens.TOOLBAR_HEIGHT` is what both docks inset their top by, but it does **not** constrain the toolbar: a `PanelContainer` cannot render shorter than its content's combined minimum size, so `offset_bottom` is a floor the buttons can exceed. When button padding grew, the bar became 64 px while the docks still inset by 44, and the top 20 px of each collapsed rail covered the bottom 20 px of the toolbar — exactly the band holding UNDO/REDO and SAVE/TEST, which became unclickable. It presents as an input bug, not a layout one. `_verify_toolbar_height()` now warns at runtime if it recurs.
+
+### 1b · Skirmish HUD — **DONE (chrome only)**
+
+Counters are `HUDValueLabel`, the top bar is `HUDPanel`, panels carry variations, and there are zero per-control font-size overrides. Feedback is wired on the build bar, the tab bar and the menu button; `value_flash` fires on resource jumps and on power-state transitions.
+
+**Scope boundary — do not "fix" these.** They convey battlefield state, not chrome, and changing them alters gameplay readability:
+
+> `GHOST_COLOR_VALID` / `GHOST_COLOR_INVALID`, the fog shroud fills, `MINIMAP_*` and the terrain colour map, 3D `albedo_color` assignments, order markers, and the game-over scrim.
+
+`battlefield.gd` was listed here previously; its only UI is a return button, now routed through `SceneRouter.goto()`.
+
+### 1c · Match Setup / Operations Setup — **DONE**
+
+Match Setup's roster picker was rebuilt as drag-and-drop (`roster_picker.gd`) — see Priority 6.
+
+Two claims in the previous version were wrong: **neither screen has a map-preview SubViewport** to wrap in an `InsetPanel` (that referred to the deleted `MapSelect` screen; the map is now a dropdown on Match Setup). And `style_option_button()` was already a no-op stub; it has since been deleted along with the other dead wrappers.
 
 ---
 
-### 1c · Match Setup / Operations Setup (`scripts/match_setup.gd`, `scripts/operations_setup.gd`)
+## Priority 2 — Material Textures — **DONE**
 
-**Issues:**
-- Both screens build layouts from scratch without reusing `UIShell.stat_row()` for their key/value displays
-- Map preview panel is a SubViewportContainer with no panel wrapper — the viewport bleeds edge to edge with no chrome separating it from the controls beside it
-- Faction dropdown uses `style_option_button()` which is now a no-op; relies entirely on theme, but the theme's OptionButton style was not tested against this context
+Plates and fields are generated by `tools/generate_ui_plates.py` with a fixed seed, so a rerun is a no-op in the diff. **The authoring spec below supersedes the previous one, which described the plates as 96×96 RGB with a flat 12 px margin.**
 
-**Target state:**
-- All key/value readout rows → `UIShell.stat_row()`
-- Map preview → wrap in `InsetPanel` so there is a recessed well around the SubViewport
-- Faction/map dropdowns → verify `OptionButton` theme entry renders correctly
+Plates are **128×128 RGBA**: a 96×96 opaque body inside a **16 px transparent pad** carrying the baked elevation shadow. The 9-slice frame is therefore `MARGIN + PAD = 28 px`.
 
-**File changes required:**
-- `scripts/match_setup.gd`
-- `scripts/operations_setup.gd`
+> **Why the shadow is baked into the PNG.** `StyleBoxFlat` has shadow properties; `StyleBoxTexture` has none, and every panel variation is texture-backed. Godot draws exactly one stylebox per control state, so a shadow-only box cannot be stacked behind. The texture is the only place a shadow can live.
+>
+> **The part that must not be forgotten:** `build_ui_theme.gd` sets `expand_margin_* = PLATE_PAD` so the box draws *outside* the control rect. Without it every panel shrinks by 16 px per side and every alignment in every screen shifts.
 
----
-
-## Priority 2 — Material Texture Authoring
-
-The theme builder references plate PNGs that do not yet exist:
-
-```
-assets/textures/ui/plate_powdercoat_normal.png
-assets/textures/ui/plate_powdercoat_hover.png
-assets/textures/ui/plate_powdercoat_pressed.png
-assets/textures/ui/plate_powdercoat_disabled.png
-assets/textures/ui/plate_bakelite_*.png
-assets/textures/ui/plate_steel_*.png
-assets/textures/ui/plate_canvas_*.png
-assets/textures/ui/plate_carbon_*.png
-assets/textures/ui/plate_fiberglass_*.png
-```
-
-`build_ui_theme.gd` degrades gracefully to a flat `StyleBoxFlat` when these are missing (by design), so the game runs. But the physical material language — the whole reason the interface should feel like machined equipment rather than a game menu — does not land without them.
-
-### 2a · Plate authoring spec (for `tools/generate_ui_plates.py` or manual authoring)
-
-Each plate is `128 × 128` px, 9-sliced with a **12 px margin**. The margin contains the bevel and outline; the centre is flat and tileable.
-
-| State | Bevel direction | Fill brightness | Border |
-|---|---|---|---|
-| `normal` | Top-left lit (material sits proud) | Material mid | 1 px BASE_500 |
-| `hover` | Top-left lit, brighter | +10% over normal | 1 px BASE_400 |
-| `pressed` | Bottom-right lit (inverted) | Material mid | 1 px BASE_500 |
-| `disabled` | No bevel | -20% from normal | 1 px BASE_600 |
-
-Per-material tonal targets:
-
-| Material | Normal fill (approx) | Texture feel |
+| State | Brightness | Bevel |
 |---|---|---|
-| `powdercoat` | `BASE_800` (0.108) | Fine matte grain, slight sheen at bevel |
-| `bakelite` | `BASE_700` (0.145) | Heavier grain, strong bevel highlight |
-| `steel` | `BASE_700` (0.145, cooler tint) | Directional brushed lines |
-| `canvas` | `BASE_800` (0.108, cloth weave) | Matte, no specular bevel |
-| `carbon` | `BASE_900` (0.075) | Tight diagonal weave, satin catch |
-| `fiberglass` | `BASE_800` + slight warmth | Subtle laminate lines |
+| `normal` | ×1.00 | top-lit, strength 1.00 |
+| `hover` | ×1.28 | top-lit, strength 1.30 |
+| `pressed` | ×0.74 | **bottom-lit** (inverted), 1.10 |
+| `disabled` | ×0.62 | top-lit, 0.30 |
 
-### 2b · Field textures for runtime shader
+Bevel *strength* rises with state, not just brightness: a hover that only brightens reads as a lighting change on a flat card, while one that also sharpens the chamfer reads as the control catching more light.
 
-Separate from the plate PNGs, the `UITheme.apply_material()` shader path reads per-material field textures:
+### Material luminance stack
 
-```
-assets/textures/ui/field_powdercoat.png
-assets/textures/ui/field_steel.png
-assets/textures/ui/field_bakelite.png
-assets/textures/ui/field_canvas.png
-assets/textures/ui/field_carbon.png
-assets/textures/ui/field_fiberglass.png
-```
+This is load-bearing and was wrong for a long time. Bakelite — the **button** material — sat at 0.075, which is exactly `BASE_900`, the value reserved for the deepest recess. Buttons were therefore *darker than the panels they sat on*, and no bevel can make that read as raised. It also flattened every state: ×1.18 of 0.075 moves the absolute value by 0.014, which is invisible.
 
-These are tileable greyscale noise/grain maps read by `shaders/ui_material.gdshader`. The game runs without them (the shader falls back to flat base colour), but the backdrop and any `apply_material()` call sites will be flat until they exist.
+| Surface | Material | Luminance |
+|---|---|---|
+| backdrop | steel field × 0.42 | 0.084 |
+| panel body | `powdercoat` | 0.103 |
+| flyout / tooltip | `canvas` | 0.121 |
+| **control body** | `bakelite` | **0.154** |
+| alert placard | `fiberglass` | 0.156 |
+| rails, frames | `steel` | 0.206 |
+| primary action | `carbon` | 0.107 |
 
----
+The stack must stay strictly ascending from backdrop to control. `carbon` sits low because it is the dark premium material, but it was raised from 0.072 for a related reason: once bakelite rose, a `BASE_900` carbon made `PrimaryButton` the *darkest* control on screen, so the primary action receded behind every ordinary button.
 
-## Priority 3 — Font Assets
+### A note on the `bakelite` key
 
-The theme builder expects:
+The material is no longer bakelite. It was dark marbled phenolic; it is now matte finely-stippled injection-moulded ABS, because at button size a low-frequency marble reads as a stain and fought every label on it. It stays distinct from `powdercoat` by **frequency, not amplitude** — powdercoat is sprayed over brushed metal so it keeps an anisotropic substrate grain and a broad thickness roll, while this is moulded and has neither.
 
-```
-assets/fonts/UIFont-Regular.ttf     ← clean UI sans (Inter, Outfit, or similar)
-assets/fonts/UIFont-Bold.ttf
-assets/fonts/MonoFont-Regular.ttf   ← monospace (Roboto Mono, JetBrains Mono, etc.)
-assets/fonts/StencilFont-Regular.ttf ← worn stencil (Special Elite recommended)
-```
-
-The builder degrades to engine defaults when fonts are missing, so functionality is maintained. However, without the correct font files:
-- `DisplayLabel` / `TitleLabel` / `HeadingLabel` fall back to the engine sans, losing the stencil tone entirely
-- `StatLabel` / `HUDValueLabel` fall back to the engine proportional font, causing numeric readouts to reflow
-
-**Recommended sources (all OFL-licensed):**
-- UI sans: **Inter** (rsms.me/inter) or **Outfit** (Google Fonts)
-- Monospace: **JetBrains Mono** (jetbrains.com/mono)
-- Stencil: **Special Elite** (Google Fonts) — already referenced in build_ui_theme.gd comments
+**The key is a misnomer and renaming it is outstanding** — see Priority 7.
 
 ---
 
-## Priority 4 — New Screen Shells
+## Priority 3 — Font Assets — **DONE**
 
-When any new screen is added, it should follow this scaffold:
+All four files are present. Licensing is still open — see Open Questions.
+
+---
+
+## Priority 4 — New Screen Shells — **USE THE HELPERS**
+
+The hand-written scaffold that was here is replaced by `UIShell`:
 
 ```gdscript
 func _ready() -> void:
-    # 1. Full-bleed steel backdrop
-    var bg = ColorRect.new()
-    bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-    bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-    add_child(bg)
-    UITheme.apply_backdrop(bg)
-
-    # 2. Margin frame
-    var frame = MarginContainer.new()
-    frame.set_anchors_preset(Control.PRESET_FULL_RECT)
-    frame.add_theme_constant_override("margin_left", Tokens.SPACE_XL)
-    frame.add_theme_constant_override("margin_right", Tokens.SPACE_XL)
-    frame.add_theme_constant_override("margin_top", Tokens.SPACE_LG)
-    frame.add_theme_constant_override("margin_bottom", Tokens.SPACE_LG)
-    add_child(frame)
-
-    # 3. Root VBox
-    var root = VBoxContainer.new()
+    UIShell.backdrop(self)                  # full-bleed steel, MOUSE_FILTER_IGNORE
+    var frame := UIShell.screen_frame(self) # canonical margins
+    var root := VBoxContainer.new()
     root.add_theme_constant_override("separation", Tokens.SPACE_LG)
     frame.add_child(root)
-
-    # 4. Console bar (HeaderPanel)
-    _build_console_bar(root)
-
-    # 5. Content columns / panels (CardPanel, InsetPanel, DockPanel as needed)
-    _build_content(root)
+    # ... content, then:
+    UIFeedbackScript.wire_tree(root)        # hover + press, audio + motion
 ```
+
+`screen_frame()` exists because the frame had drifted to **three different margin sets across four screens**, two of them off the 4 px grid. That had a visible consequence: the loading screen's content sat further in than the screen it transitions to, so the frame appeared to jump on arrival.
+
+> **`UIShell` is deliberately small, and its history is the reason.** It once had `build_screen`, `column`, `field`, `action` and `select_row`. Only `stat_row` was ever adopted; the other five were deleted with zero call sites. **Do not add a helper here until a second screen needs it** — both current additions shipped with all their call sites migrated in the same change.
 
 ---
 
-## Priority 5 — Audit & Remove Stale Workarounds
+## Priority 5 — Stale Workarounds — **DONE**
 
-As part of the design system maturing, several temporary workarounds should be tracked and cleaned up:
+| Workaround | Outcome |
+|---|---|
+| `stat_calculator.gd` inline stat-row styleboxes | Not a workaround. The three survivors are the documented state exception — see 1a |
+| `main_menu.gd` `_create_industrial_button_style()` | Deleted. Now the `NavCard` variation |
+| Duplicate `_apply_unpainted_scale_model_material()` | Extracted to `HullMaterialBuilder.apply_scale_model_finish()` |
+| `_plate()` degrades silently | Already fixed before this plan was written — `_plate_texture()` calls `push_error` |
+| `apply_brushed_panel()` no-op wrapper | Deleted, with `style_option_button()` and `style_slider()`. All call sites migrated; `test_ui_and_camera.gd` retargeted at `apply_backdrop` |
 
-| Location | Workaround | Clean-up action |
-|---|---|---|
-| `scripts/stat_calculator.gd` | Inline StyleBoxFlat for stat rows | Replace with `InsetPanel` + `UIShell.stat_row()` |
-| `scripts/main_menu.gd` | `_create_industrial_button_style()` helper builds per-instance styleboxes for destination cards | Move to theme as a `NavCard` variation in `build_ui_theme.gd` |
-| `scripts/blueprint_library_screen.gd` | Duplicate of `_apply_unpainted_scale_model_material()` | Extract to a shared helper in `visual_builder.gd` or `hull_material_builder.gd` |
-| `tools/build_ui_theme.gd` | `_plate()` degrades to flat StyleBoxFlat silently | Add a visible "running in degraded mode" notice to each build so the degradation is obvious, not invisible |
-| Multiple screens | `UITheme.apply_brushed_panel()` call sites (now a no-op wrapper) | After material textures land and backdrop is verified, remove the wrapper and call `apply_backdrop()` directly |
+Also removed: `UITheme.variation()`, a typo-validating helper with **zero** call sites against 104 direct `theme_type_variation` assignments. Worth reviving only if it gets adopted.
+
+---
+
+## Priority 6 — Interaction Work — **DONE**
+
+Not in the original plan, but the substance of the AAA polish pass.
+
+- **Scene transitions.** `SceneRouter.goto()` is the single entry point and self-routes: scenes with a `WARM_SOURCES` entry get the loading screen, everything else swaps directly. The fade overlay lives on the **autoload** — a rect owned by the outgoing scene is freed mid-animation, and one owned by the incoming scene cannot cover the gap before that scene exists. `CanvasLayer` at layer 128 so it covers 3D viewports.
+- **Feedback.** `UIFeedback.wire(ctrl, role)` attaches hover sound, hover lift, press sound and press squash in one call. They share the call because they must fire together; wiring them separately is how they drift.
+- **Audio roles.** `default` → click, `confirm` → `radio_ack`, `select`, `place`, `reject` → error, `danger` → `warning_banner`. The four radio SFX were committed but unregistered — dead assets until this pass.
+- **Roster drag-and-drop.** `roster_picker.gd` replaces a CheckBox list that could express neither the order designs are fielded in nor the roster cap. Slot position *is* the order now; previously it was library sort order, so which designs survived `roster.slice(0, 12)` was incidental.
+- **Real stats on cards.** `design_stats.gd` — `DesignStats.analyze(hull)` makes the same `Drivetrain` / `WeaponRange` / `ModuleCatalog` calls `battle_unit.gd` makes on the unit it spawns. **Nothing is re-derived**, because `stat_calculator.gd` has twice had to delete a local re-derivation that drifted: a capacity calculation that knew 4 locomotion types of 17, and an armour table showing the explosive threshold labelled as energy.
+
+---
+
+## Priority 7 — Outstanding
+
+1. **Rename the `bakelite` material key.** A misnomer since the surface was re-authored. Touches 24 committed PNG filenames, `build_ui_theme.gd`, `ui_theme.gd`'s `MATERIALS`/`MATERIAL_DEFAULTS`, `generate_ui_plates.py` and the style guide. A mechanical sweep, worth its own commit.
+2. **Restructure the telemetry rail into toolbox tiers.** The `DOCUMENT` tier was added *above* the existing rail rather than re-homing it, because the readouts are positioned by index (`move_child(x, at + n)`) and re-parenting would silently reorder them. Needs its own verification.
+3. **Promote `tools/probe_scene_loads.gd` into `SUITE_ORDER`.** No suite instantiates `MainLab.tscn`, which is why a crash on the Design Lab's primary load path was invisible to an otherwise-green 211-suite run. A smoke test that every screen survives `_ready()` would have caught it in seconds. `SUITE_ORDER` is order-sensitive, so this is its own change.
+4. **`ui_audit.gd` does not enforce the no-emoji rule**, despite `CLAUDE.md` having claimed it did. It checks overflow, offscreen controls, theme validity, icons and cursors. The rule stands but is unenforced.
 
 ---
 
 ## Rebuild Commands
 
-After any change to `ui_tokens.gd` or `build_ui_theme.gd`, rebuild the theme:
+```bash
+# After ui_tokens.gd or build_ui_theme.gd changes
+./Godot_v4.7.1-stable_win64_console.exe --headless --script tools/build_ui_theme.gd --quit-after 2 --path .
 
-```powershell
-.\Godot_v4.7.1-stable_win64_console.exe --headless --script tools/build_ui_theme.gd --quit-after 2
+# After editing generate_ui_plates.py
+python tools/generate_ui_plates.py
+./Godot_v4.7.1-stable_win64_console.exe --headless --editor --import --quit --path .
 ```
 
-After any change to hull assembly JSONs, rebuild the hull meshes:
+`--quit` and `--path` are not optional on a headless run; without them the process finishes its work and never exits. Godot also block-buffers stdout when piped, so a direct `--script` run shows nothing until it terminates.
 
-```powershell
-.\Godot_v4.7.1-stable_win64_console.exe --headless --script tools/bake_hull_roster.gd
-```
+**Verification:** use `run_tests.ps1`. `tools/compile_check_all.gd` is not a "quick" check at this size — it loads 200+ interdependent scripts with `CACHE_MODE_IGNORE` and has run 20+ minutes without finishing. `tools/parse_check_some.gd` takes explicit paths for a fast targeted check.
 
 ---
 
 ## Open Questions
 
-1. **Plate authoring pipeline:** Should `generate_ui_plates.py` be a Python script that produces PNGs programmatically, or are the plates hand-authored in Aseprite/Photoshop? The current code references `generate_ui_plates.py` but that file does not exist in the repo. Decision needed before Priority 2 work begins.
+1. ~~Plate authoring pipeline~~ — **resolved.** `tools/generate_ui_plates.py` exists and is the pipeline. Procedural with a fixed seed, so the committed PNGs are reproducible.
 
-2. **NavCard theme variation vs. inline style:** The destination cards in the main menu use `_create_industrial_button_style()` helpers rather than a registered theme variation. The motivation was the asymmetric left border width (6 px left, 2 px others), which StyleBoxFlat expresses easily but a plate texture cannot. Options: (a) keep the inline approach for this one control, (b) register a `NavCard` variation with a flat stylebox fallback, (c) use a custom shader on the nav card buttons.
+2. ~~NavCard variation vs. inline style~~ — **resolved as option (b).** `NavCard` is registered, deliberately as a **flat** stylebox rather than a plate: its identity is an asymmetric left gutter that thickens on hover, and `StyleBoxTexture` has no border properties at all. The one place a flat stylebox is the right answer.
 
-3. **Font licensing:** Before shipping any build to players, confirm the exact font files and their licence terms. SIL OFL permits bundling in commercial products; other licences may not.
+3. **Font licensing** — still open. Confirm the exact files and licence terms before shipping a build. SIL OFL permits bundling in commercial products; other licences may not.
+
+4. **Does the elevation system reach the plate-backed variations well enough?** Shadows are baked per `(material, state)`, so every variation sharing a plate shares a tier. That holds today. If a future variation needs a different tier from another variation on the same plate, the plate filenames must carry the tier too — see `SHADOW_ASSIGNMENT` in the generator.

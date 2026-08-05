@@ -22,6 +22,9 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 # had to change; they use `_rail_vbox` now, captured before the move.
 var stats_dock: Control = null
 var toolbar: Control = null
+var _slot_hull_label: Label = null
+var _slot_parts_label: Label = null
+var _slot_faction_label: Label = null
 var _rail_vbox: VBoxContainer = null
 
 # The current design's headline stats, published by update_stats() for readers
@@ -779,6 +782,7 @@ func _push_undo():
 
 const UIStampScript = preload("res://scripts/ui_stamp.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
+const UIAnimScript = preload("res://scripts/ui_anim.gd")
 
 func _on_delete_pressed():
 	var root = get_node_or_null("/root/MainLab")
@@ -954,6 +958,7 @@ func update_stats(hull: Node3D):
 	# locals below are kept as locals so the label code further down reads
 	# unchanged.
 	var stats: Dictionary = DesignStatsScript.analyze(hull)
+	_update_toolbar_info(hull, stats)
 	var total_cost_metal = stats["cost_metal"]
 	var total_cost_crystal = stats["cost_crystal"]
 	var total_dps = stats["dps"]
@@ -2025,7 +2030,129 @@ func _build_rail_dock() -> void:
 		sc.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
+	_build_admin_toolbox()
 	_build_toolbar()
+
+
+# --- The right-hand admin toolbox -------------------------------------------
+# Chris's model: the right dock is a toolbox that expands into the document
+# actions. Uses UIToolbox, the same widget backing the parts catalogue's four
+# toolboxes on the opposite edge - it was built here first as a second copy and
+# has since been extracted, so both sides are now one implementation.
+#
+# ADDITIVE ON PURPOSE. This inserts one tier at the TOP of the rail and moves
+# nothing that was already there. The telemetry readouts below are positioned by
+# INDEX - _build_drivetrain_readout() and _build_range_readout() both use
+# _rail_vbox.move_child(x, at + n) to sit their labels directly after the row they
+# explain - so re-homing the existing rail contents into tiers would silently
+# reorder them. The stat rail is also the most heavily tested part of this screen.
+# Restructuring it is a separate change with its own verification.
+#
+# The action buttons are NEW INSTANCES wired to the same handlers, not the rail's
+# originals: those get reparented into the top toolbar by _build_toolbar(), and a
+# node has exactly one parent. Chris asked for both, so both exist - the cost is
+# that the copies must stay wired to the same methods, which is why they connect
+# to _on_save_pressed etc. rather than duplicating any logic.
+func _build_admin_toolbox() -> void:
+	if _rail_vbox == null:
+		return
+
+	var toolbox := UIToolbox.new()
+	# Positive x: this dock is on the RIGHT edge, so content should unfold leftward
+	# out of its header rather than in from off-screen.
+	toolbox.stagger_from = Vector2(12, 0)
+	# Single tier, so it opens with it already up - closing the only thing in the
+	# toolbox by default would just hide it.
+	var body := toolbox.add_tier("document", "DOCUMENT", true)
+
+	var name_hint := Label.new()
+	name_hint.text = "DESIGN NAME"
+	name_hint.theme_type_variation = "HintLabel"
+	body.add_child(name_hint)
+
+	# The name field itself, moved rather than copied: a LineEdit holds the text
+	# that Save reads, so two of them would be two different names.
+	if blueprint_name_edit:
+		blueprint_name_edit.reparent(body)
+
+	_admin_action(body, "SAVE BLUEPRINT", _on_save_pressed, "confirm")
+	_admin_action(body, "BLUEPRINT LIBRARY", _on_library_pressed, "default")
+	_admin_action(body, "DISCARD PART", _on_delete_pressed, "danger")
+
+	_rail_vbox.add_child(toolbox)
+	_rail_vbox.move_child(toolbox, 0)
+
+
+# One transparent top-bar slot: a caption over a value, with a hairline rule on
+# its trailing edge so the row reads as divided cells rather than as drifting text.
+#
+# Transparent deliberately - the slot is a REGION of the toolbar band, not a panel
+# sitting on it. Giving each slot its own plate would stack two materials in a
+# 64px strip and make the bar look like a row of buttons, which is the opposite of
+# "static info". The only drawn ink is the divider.
+func _info_slot(parent: Control, caption: String) -> Label:
+	var slot := VBoxContainer.new()
+	slot.add_theme_constant_override("separation", 0)
+	slot.custom_minimum_size = Vector2(Tokens.SPACE_XL * 3, 0)
+	slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(slot)
+
+	var cap := Label.new()
+	cap.text = caption
+	cap.theme_type_variation = "HintLabel"
+	slot.add_child(cap)
+
+	var value := Label.new()
+	value.text = "-"
+	# HUDValueLabel is the monospace readout variation, so a value changing width
+	# does not shove the slots beside it sideways.
+	value.theme_type_variation = "HUDValueLabel"
+	slot.add_child(value)
+
+	var rule := VSeparator.new()
+	parent.add_child(rule)
+	return value
+
+
+# Refreshed from update_stats()' DesignStats result, so the bar and the rail can
+# never show different numbers for the same design.
+func _update_toolbar_info(hull: Node3D, stats: Dictionary) -> void:
+	if _slot_hull_label:
+		var hull_type := "-"
+		if hull and hull.has_meta("type_id"):
+			hull_type = _prettify_id(str(hull.get_meta("type_id")))
+		_slot_hull_label.text = hull_type
+	if _slot_parts_label:
+		var n := 0
+		if hull:
+			for child in hull.get_children():
+				if child.has_meta("module_data"):
+					n += 1
+		_slot_parts_label.text = str(n)
+	if _slot_faction_label and hull and hull.has_meta("faction"):
+		_slot_faction_label.text = _prettify_id(str(hull.get_meta("faction")))
+
+
+func _prettify_id(id: String) -> String:
+	var out: Array = []
+	for w in id.split("_"):
+		if w.length() > 0:
+			out.append(w[0].to_upper() + w.substr(1))
+	return " ".join(PackedStringArray(out))
+
+
+func _admin_action(parent: Control, label: String, handler: Callable, role: String) -> Button:
+	var btn := Button.new()
+	btn.text = label
+	btn.custom_minimum_size = Vector2(0, Tokens.HIT_TARGET_MIN)
+	if role == "danger":
+		btn.theme_type_variation = "DangerButton"
+	elif role == "confirm":
+		btn.theme_type_variation = "PrimaryButton"
+	btn.pressed.connect(handler)
+	parent.add_child(btn)
+	UIFeedbackScript.wire(btn, role)
+	return btn
 
 
 # The thin top toolbar. STEEL band via HeaderPanel, which already carries the
@@ -2045,8 +2172,23 @@ func _build_toolbar() -> void:
 	toolbar = bar
 
 	var row = HBoxContainer.new()
-	row.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	# XS, not SM: the slots carry their own dividers now, so the gap between them
+	# only has to keep the rules off the content.
+	row.add_theme_constant_override("separation", Tokens.SPACE_XS)
 	bar.add_child(row)
+
+	# --- INFO SLOTS ---------------------------------------------------------
+	# Chris's model for the top bar: mostly transparent slots, each holding either
+	# one piece of static info or one global button. The readouts come first
+	# because they are read, not operated - the eye scans left, and putting the
+	# things you click at the ends keeps them away from the ones you don't.
+	#
+	# These are live: _update_toolbar_info() refreshes them from the same
+	# DesignStats result update_stats() already computed, so they cannot disagree
+	# with the telemetry rail.
+	_slot_hull_label = _info_slot(row, "HULL")
+	_slot_parts_label = _info_slot(row, "PARTS")
+	_slot_faction_label = _info_slot(row, "FACTION")
 
 	# Undo/Redo first: they act on the document, and reading order should match
 	# the fact that they are the two most-used controls in the Lab.

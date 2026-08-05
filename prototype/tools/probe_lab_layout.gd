@@ -20,6 +20,25 @@ func _init():
 			% [name, c.global_position.x, c.global_position.y, c.size.x, c.size.y,
 			   c.global_position.x + c.size.x, c.visible])
 
+	# Then force every dock RAILED and re-measure. The persisted layout
+	# (user://ui_layout.cfg, via UIDock.persist_key) means the state on load is
+	# whatever was last left open, so the collapsed shape has to be asked for
+	# explicitly rather than assumed to be the default.
+	print("\n--- forced RAILED ---")
+	for name in found:
+		var c: Control = found[name]
+		if not c.has_method("set_dock_state"):
+			continue
+		c.set_dock_state(1, false)  # State.RAILED
+	for _i in range(4):
+		await process_frame
+	for name in found:
+		var c: Control = found[name]
+		if not c.has_method("set_dock_state"):
+			continue
+		print("  %-22s pos=(%6.1f,%6.1f) size=(%6.1f,%6.1f)"
+			% [name, c.global_position.x, c.global_position.y, c.size.x, c.size.y])
+
 	# The specific question: does either dock's rect cover any part of the
 	# toolbar's vertical band?
 	if found.has("Toolbar"):

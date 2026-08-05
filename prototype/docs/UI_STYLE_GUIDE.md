@@ -1,6 +1,6 @@
 # Kitbash Command — UI Style Guide
-_Distilled from the current main_menu.gd, ui_tokens.gd, ui_theme.gd, and build_ui_theme.gd implementation._
-_Last updated: 2026-08-04_
+_Distilled from the current ui_tokens.gd, ui_theme.gd, build_ui_theme.gd, ui_anim.gd and ui_feedback.gd implementation._
+_Last updated: 2026-08-05_
 
 ---
 
@@ -131,8 +131,9 @@ Set `theme_type_variation` — do not override individual font/color properties 
 | `CalloutPanel` | PanelContainer | Canvas, XS padding — annotation callouts |
 | `PrimaryButton` | Button | Carbon tinted go-green — one per screen maximum |
 | `DangerButton` | Button | Fiberglass tinted alert-red — destructive actions |
-| `TabButton` | Button | Bakelite — inactive tabs are PRESSED, active tab lifts |
+| `TabButton` | Button | Bakelite — inactive tabs are PRESSED, active tab lifts. Also the header for a `UIToolbox` tier, so a closed tier reads as pressed shut |
 | `ListButton` | Button | Flat/borderless at rest, hazard left edge when selected |
+| `NavCard` | Button | Main-menu destination cards. The one **flat** stylebox variation: its identity is an asymmetric left gutter (5 px, 6 px on hover) that a 9-sliced plate cannot express, because `StyleBoxTexture` has no border properties |
 
 ---
 
@@ -164,6 +165,64 @@ Near-square corners. Stamped and machined panels have a barely-broken edge — 2
 | `RADIUS_CONTROL` | 2 px | button and input corners |
 | `BORDER_HAIRLINE` | 1 px | standard borders, dividers |
 | `BORDER_EMPHASIS` | 2 px | active states, focus rings, accent rules |
+
+---
+
+## 6a · Elevation
+
+Surfaces sit at one of four heights. Before this existed nothing in the interface cast a shadow at all — every panel, dock, flyout and tooltip occupied the same plane, separated only by a 1 px border. That reads as a *diagram* of an interface rather than a stack of hardware, and it was the largest single reason the chrome looked unfinished beside the 3D.
+
+| Tier | Blur | Offset | Used by |
+|---|---|---|---|
+| `flush` | 0 | 0 | `HUDPanel`, `InsetPanel` — recessed surfaces |
+| `raised` | 3 px | 1 px | `CardPanel`, `DockPanel`, `HeaderPanel`, `DockRail`, buttons |
+| `floating` | 8 px | 3 px | `FlyoutPanel`, `CalloutPanel`, `TooltipPanel` |
+| `modal` | 18 px | 6 px | dialogs over a scrim |
+
+Three rules, each of which cost something to learn:
+
+**The shadow is warm near-black, never neutral.** On a warm-neutral ground a cool or grey shadow does not read as shadow — it reads as grime, or as a dark smudge painted on the panel. Matching the base hue keeps it reading as absence of light. Same reasoning as the palette's warm-vs-blue-black note.
+
+**A recessed surface must not cast.** `flush` is 0, not "a small shadow". `HUDPanel` and `InsetPanel` are set *into* their parent; giving them a shadow would claim they float above the very thing they are sunk into.
+
+**The offset is much smaller than the blur, and always straight down.** A large offset with a small blur is the drop-shadow of 2000s web design; hardware resting on a surface has a tight contact shadow directly beneath it. Down rather than diagonal because the plate bevels are lit from the top-left — a shadow that disagrees with the bevel highlight makes both read as texture noise.
+
+Use `Tokens.elevation(tier)` or `Tokens.apply_elevation(box, tier)` rather than hand-picking the three numbers. They only look right in the tuned combinations: a blur of 8 with an offset of 1 gives a floating panel a contact shadow, which reads as a rendering mistake rather than as a different height.
+
+> **Implementation constraint worth knowing before you reach for a shadow.** `StyleBoxFlat` supports shadows; `StyleBoxTexture` does not, and every plate-backed variation is texture-backed. Godot draws exactly one stylebox per control state, so nothing can be stacked behind. Elevation for those variations is therefore **baked into the plate PNG** as a transparent pad, with `expand_margin` letting it draw outside the control rect. See UI_IMPLEMENTATION_PLAN.md Priority 2.
+
+---
+
+## 6b · Motion
+
+All timings live in `ui_tokens.gd`; `ui_anim.gd` re-exports them so motion and appearance cannot drift apart. A hover transition that outlasts the theme's hover plate swap reads as two separate effects.
+
+| Token | Duration | Interaction |
+|---|---|---|
+| `DURATION_INSTANT` | 60 ms | hover acknowledgement |
+| `DURATION_FAST` | 120 ms | press feedback, ring pop |
+| `DURATION_NORMAL` | 220 ms | panel/card entrance, toast, fade-in |
+| `DURATION_SLOW` | 400 ms | scene fade-out, full-screen overlay |
+| `STAGGER_STEP` | 35 ms | per-child delay in a list entrance |
+
+Standard easing is `EASE_OUT` with `TRANS_CUBIC`. **Everything is short.** Gritty means mechanical, not showy: a mechanism responds immediately or it feels broken, and anything above `DURATION_SLOW` on an *interaction* reads as the game hesitating.
+
+**The named primitives, and when each is right:**
+
+| Primitive | Use |
+|---|---|
+| `hover_lift` / `hover_settle` | 1.03 scale. The theme already swaps the plate, so this only adds physicality — a larger scale makes a button in a dense row overlap its neighbours |
+| `button_press_feedback` | Squash-release on press |
+| `slide_in` | A panel or card entering, from the edge it belongs to |
+| `stagger_in` | A list or grid. Total capped at 0.45 s — at 35 ms per child a 40-row list takes 1.4 s and reads as a loading bug rather than polish |
+| `ring_pop` | The radial menu only. The **one** sanctioned overshoot (`TRANS_BACK`), because a ring springing open is a mechanism |
+| `value_flash` | A number that changed meaningfully. Tweens `font_color`, not `modulate`, so it tints the text rather than the subtree |
+| `shake` | Rejected input. Small and fast — a big shake is comedy, and the chrome is on the sincere side of the tone split |
+| `fade` | Scene transitions and dimming overlays |
+
+**Asymmetry is deliberate.** Leaving a screen takes `DURATION_SLOW`; arriving takes `DURATION_NORMAL`. The player is already waiting to act on the new screen, and a symmetric slow fade-in is what makes a game feel sluggish rather than expensive.
+
+**Nothing bounces except the radial ring.** If a new animation wants an overshoot, that is a signal the interaction is being dramatised.
 
 ---
 
@@ -219,10 +278,34 @@ The current main menu establishes a pattern the other out-of-match screens shoul
 
 **Disabled:** The material's "disabled" plate (held darker, muted bevel) plus `TEXT_DISABLED` font colour. Icons dim alongside the control.
 
+### 8.1 Audio feedback
+
+Sound and motion are attached by the **same call** — `UIFeedback.wire(ctrl, role)` — and that is a rule, not a convenience. They have to fire within a few milliseconds of each other or they read as two separate effects. Wiring them separately is how they drift, and they already had: `main_menu.gd` was once the only screen in the game with any UI audio at all, hand-rolled at three sites, with no motion attached and every other screen silent.
+
+Hover is the same sound everywhere — it is a readiness cue, not meaningful state, so it does not vary by what the control does. **Press varies, because that is the moment the control's meaning lands:**
+
+| Role | Sound | For |
+|---|---|---|
+| `default` | click | ordinary navigation and toggles |
+| `confirm` | `radio_ack` | committing — starting a match, queueing a unit |
+| `select` | select | picking from a set — a part, a design, a tab |
+| `place` | place | putting something into the world or a slot |
+| `reject` | error | a refused interaction; pair with `shake` |
+| `danger` | `warning_banner` | destructive. Deleting a design must not sound like changing a dropdown |
+
+Two constraints:
+
+**Never let a UI click repeat identically.** `AudioManager.play_sfx()` varies pitch per play; flat repetition is a distinctly cheap-sounding tell.
+
+**Interface audio is on the SINCERE side of the tone split.** `CORE_DESIGN_LANGUAGE.md` §6 puts the absurdity in the *ordnance* — the weapons go "pew pew". Chrome, comms and alerts stay straight. Radio chatter over vocalised weapons is the whole thesis in one moment; a comedy sound on a button would spend the joke in the wrong place.
+
 ---
 
 ## 9 · What This Guide Does Not Cover
 
+- **Whole-game art direction** — philosophy, camera optics, environment, unit finish, the FX/audio split: see `CORE_DESIGN_LANGUAGE.md`, which is the umbrella document
 - **3D art direction** (hull materials, faction colours, terrain shaders) — see `VISUAL_ART_DIRECTION.md`
-- **HUD layout during battle** — the HUD has its own geometry constraints; this guide covers out-of-match screens
-- **Animation and audio feedback** — handled in `ui_anim.gd` and `audio_manager.gd`; not specified here
+- **HUD layout during battle** — the HUD has its own geometry constraints, so this guide is advisory on its *layout*. Its materials, type and elevation are governed here, and its chrome has been swept onto them
+- **What is implemented versus outstanding** — see `UI_IMPLEMENTATION_PLAN.md`
+
+Motion (§6b) and audio feedback (§8.1) **are** specified here now; they were previously deferred to `ui_anim.gd` and `audio_manager.gd`, which meant no one had written down what the interaction was supposed to feel like.
