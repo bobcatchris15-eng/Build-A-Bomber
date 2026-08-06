@@ -15,8 +15,9 @@ extends SceneTree
 #          --script tools/probe_battle_ai.gd
 
 const CommanderScript = preload("res://scripts/battle/ai/commander.gd")
+const HarvFSM = preload("res://scripts/battle/economy/harvester_fsm.gd")
 
-const TICKS := 3600
+const TICKS := 7200
 const SAMPLE_EVERY := 600
 
 
@@ -78,6 +79,27 @@ func _init():
 			print("  t=%4d metal=%4d harv=%d combat=%d manu=%d structures=%d  doing=%s"
 				% [tick, s["metal"], s["harvesters"], s["combat_units"], s["manufactories"],
 					battle.get_team_structures(1).size(), battle.commander.action_name(a)])
+			# The AI's metal never recovering means its harvesters are not
+			# delivering, which is invisible from the commander's side - it just
+			# looks like an AI that cannot afford anything.
+			var states: Array = []
+			for u in battle.get_team_units(1):
+				if u.is_harvester and u.harvester != null:
+					states.append("%s/cargo%d/bay%d" % [
+						HarvFSM.State.keys()[u.harvester.state], u.harvester.cargo(),
+						u.harvester.bay_index])
+			print("      AI harvesters: %s" % str(states))
+			# Income arriving and vanishing with an idle commander means a job is
+			# sitting in a queue drawing every credit as it lands.
+			var qd: Array = []
+			for qn in ["light", "medium", "heavy", "building", "defense"]:
+				var q: Array = battle.production.queue(1, qn)
+				if not q.is_empty():
+					qd.append("%s:%d head=%s left=%.1f metal_left=%d stalled=%s" % [
+						qn, q.size(), str(q[0].get("name", "?")),
+						q[0].get("time_left", -1.0), q[0].get("remaining_cost_metal", -1),
+						str(q[0].get("stalled", false))])
+			print("      AI queues: %s" % ("empty" if qd.is_empty() else str(qd)))
 
 	var end_structures: int = battle.get_team_structures(1).size()
 	var final: Dictionary = battle.commander.read_state()
@@ -122,10 +144,17 @@ func _init():
 			if placed <= 0:
 				failures.append("a queued defence never got placed")
 
-	if end_structures <= start_structures:
-		failures.append("the AI never completed a single building")
+	# NOT "did it build a structure". Both sides now start with all three
+	# manufactories, matching the mode this replaces, so an AI that builds no
+	# buildings at all is behaving correctly - it already has what it needs. What
+	# must be true is that it GREW: production completed something it did not
+	# start with.
+	var start_harvesters := 1
+	if final["harvesters"] <= start_harvesters and final["combat_units"] <= 0:
+		failures.append("the AI produced nothing at all - it started with %d harvester and still has %d, with no combat units"
+			% [start_harvesters, final["harvesters"]])
 	if final["harvesters"] <= 0:
-		failures.append("the AI never fielded a harvester - its economy cannot grow")
+		failures.append("the AI has no harvester - its economy cannot grow")
 	if seen_actions.size() <= 1:
 		failures.append("the AI only ever chose one action - it is not responding to state")
 

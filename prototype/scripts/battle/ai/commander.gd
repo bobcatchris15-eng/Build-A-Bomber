@@ -84,9 +84,15 @@ const WEIGHTS := {
 # static defence is a base that has spent its economy on ground it already holds.
 const DEFENCE_TARGET := 3
 
-# Target harvester count. Past this, more trucks queue at the refinery rather
-# than adding income, so the consideration should stop asking for them.
-const HARVESTER_TARGET := 4
+# Target harvester count, PER REFINERY.
+#
+# Three because a refinery has exactly three dock bays: a fourth truck cannot
+# unload any sooner than the queue lets it, so it costs a unit's worth of metal
+# to add nothing. The old value of 4 had the AI spending its entire income on a
+# truck that would only orbit - measured, it reached three harvesters and never
+# once fielded a combat unit, because every credit went into the next harvester
+# before anything else could compete.
+const HARVESTERS_PER_REFINERY := 3
 
 var team: int = 1
 var difficulty: String = "normal"
@@ -235,7 +241,8 @@ func _score(action: int, state: Dictionary) -> float:
 			# re-wins next tick - an AI that spends the whole match deciding to
 			# build a harvester it has no way to build.
 			return C.score(w, [
-				C.falloff(state["harvesters"], 0.0, HARVESTER_TARGET),
+				C.falloff(state["harvesters"], 0.0,
+					float(maxi(1, state["refineries"]) * HARVESTERS_PER_REFINERY)),
 				C.ramp(state["metal"], 100.0, 400.0),
 				1.0 if state["refineries"] > 0 else 0.0,
 				# "Can I build one", not "do I own a factory". Owning a light
@@ -295,8 +302,11 @@ func _score(action: int, state: Dictionary) -> float:
 		Action.BUILD_GENERAL:
 			# The floor. Deliberately low-weighted so it loses to anything with an
 			# actual reason, and wins when nothing else has one.
+			# The metal floor is deliberately BELOW what EXPAND_ECONOMY needs, so
+			# once the economy is running this can win a tick rather than being
+			# perpetually outbid by the next harvester.
 			return C.score(w, [
-				C.ramp(state["metal"], 200.0, 600.0),
+				C.ramp(state["metal"], 120.0, 400.0),
 				1.0 if state["manufactories"] > 0 else 0.0,
 			])
 		Action.DEFEND:

@@ -60,6 +60,7 @@ const PICK_RAY_LENGTH := 4000.0
 var map_id: String = MapCatalog.DEFAULT_MAP_ID
 var current_map: Dictionary = {}
 var player_faction: String = "industrialists"
+var enemy_faction: String = "technocrats"
 
 var bp_manager: Node = null
 var camera: Camera3D = null
@@ -101,8 +102,19 @@ var enemy_roster: Array = []
 
 # Starting bank. Enough for a refinery plus a light manufactory, so the opening
 # is a real choice rather than a forced single purchase.
-const STARTING_METAL := 400
-const STARTING_CRYSTAL := 100
+const STARTING_METAL := 450
+const STARTING_CRYSTAL := 150
+
+# The player's build bar tops out here, matching the old runtime's loadout limit.
+const ROSTER_LIMIT := 12
+# How many of the player's own saved designs get auto-drafted when they did not
+# hand-pick a roster. Deliberately short of ROSTER_LIMIT so bundled defaults
+# still fill the remainder - a roster of eight half-finished experiments with no
+# harvester is not a playable match.
+const ROSTER_AUTOPICK_LIMIT := 8
+# A match whose roster cannot mine is unwinnable, so this is force-added when
+# nothing else in the roster harvests.
+const FALLBACK_HARVESTER := "res://data/loadout/ore_trucker.json"
 
 # Drag-select state. A press below SelectionService.DRAG_THRESHOLD_PX resolves as
 # a click instead.
@@ -142,7 +154,16 @@ func _ready() -> void:
 	production = ProductionServiceScript.new()
 	production.setup(economy, self)
 	for t in [PLAYER_TEAM, ENEMY_TEAM]:
-		economy.add_team(t, STARTING_METAL, STARTING_CRYSTAL)
+		# The pre-match screen's resource preset, when it set one. Both sentinels
+		# are -1 rather than 0, because "start with nothing" is a legitimate
+		# choice and must be distinguishable from "not configured".
+		var start_metal: int = STARTING_METAL
+		var start_crystal: int = STARTING_CRYSTAL
+		if match_config and "starting_metal" in match_config and match_config.starting_metal >= 0:
+			start_metal = match_config.starting_metal
+		if match_config and "starting_crystal" in match_config and match_config.starting_crystal >= 0:
+			start_crystal = match_config.starting_crystal
+		economy.add_team(t, start_metal, start_crystal)
 		production.add_team(t)
 	production.unit_completed.connect(_on_unit_completed)
 	production.structure_ready.connect(_on_structure_ready)
@@ -294,26 +315,91 @@ func get_surface_type_at(pos: Vector3) -> String:
 
 # --- Units ------------------------------------------------------------------
 
-# Phase 0 spawns the bundled loadout at the player's spawn point so there is
-# something to drive. Rosters, production and the enemy arrive in Phase 2/3.
+# What each side can BUILD this match.
+#
+# THE ROSTER IS NOT THE STARTING FORCE. Phase 0 conflated the two - it spawned
+# every bundled design at the player's spawn so there was something to drive -
+# and that stops making sense the moment a roster means "the designs available
+# from the build bar". Starting units are handled separately below.
+#
+# Selection follows the rules the old runtime already settled on
+# (skirmish.gd:1160), because they encode decisions rather than accidents:
+#
+#   1. The exact designs the pre-match screen picked, if it picked any.
+#   2. Otherwise the player's newest NAMED saved designs. Named only - an
+#      unnamed scratch design left over from a test-range trip was never a
+#      choice to field, so it should not be auto-drafted into a match.
+#   3. Bundled defaults fill whatever room is left, so a player with no saved
+#      designs at all still has a full build bar.
+#   4. Capped at ROSTER_LIMIT.
+#   5. A harvester is GUARANTEED. A match whose roster cannot mine is
+#      unwinnable, and that is a much worse failure than an odd roster.
 func _load_roster() -> void:
 	roster.clear()
+	var match_config := get_node_or_null("/root/MatchConfig")
+
+	var chosen: Array = []
+	if match_config and "selected_blueprint_paths" in match_config:
+		chosen = match_config.selected_blueprint_paths
+	if not chosen.is_empty():
+		for path in chosen:
+			_append_design(roster, bp_manager.load_blueprint(path))
+	else:
+		for entry in bp_manager.list_blueprints(true):
+			if roster.size() >= ROSTER_AUTOPICK_LIMIT:
+				break
+			_append_design(roster, bp_manager.load_blueprint(entry.path))
+
 	for path in _bundled_loadout_paths():
-		var design: Dictionary = bp_manager.load_blueprint(path)
-		if not design.is_empty():
-			roster.append(design)
+		_append_design(roster, bp_manager.load_blueprint(path))
+	if roster.size() > ROSTER_LIMIT:
+		roster = roster.slice(0, ROSTER_LIMIT)
+
+	if _harvester_in(roster).is_empty():
+		_append_design(roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
+
+	# Factions: the pre-match choice wins; otherwise the roster's own lead design
+	# decides, which is the old behaviour and keeps a hand-built roster feeling
+	# like it belongs to somebody.
+	if match_config and "player_faction" in match_config and match_config.player_faction != "":
+		player_faction = match_config.player_faction
+	elif not roster.is_empty():
+		player_faction = roster[0].get("faction", "industrialists")
 
 	# ONE SHARED DEFAULT POOL (Chris's call). On a fresh install the player and
 	# the AI have the same designs available, so neither side is fighting with
 	# equipment the other could not have fielded.
 	#
-	# The AI still has to CHOOSE from it - design_fills_role() reads roles off
-	# what a design actually mounts - so a shared pool is not the same as a
-	# mirror match: which of these it builds depends on what it sees. Once the
-	# player starts saving their own designs, and once drafting lands in Phase 5,
-	# the two rosters diverge on their own without needing separate directories
-	# to force it.
-	enemy_roster = roster.duplicate()
+	# The AI draws from the BUNDLED defaults rather than from `roster`, because
+	# roster may now be the player's own saved designs - handing those to the
+	# opponent would field the player's army against them, which is a different
+	# game than the one they chose.
+	enemy_roster.clear()
+	for path in _bundled_loadout_paths():
+		_append_design(enemy_roster, bp_manager.load_blueprint(path))
+	if _harvester_in(enemy_roster).is_empty():
+		_append_design(enemy_roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
+
+	if match_config and "enemy_faction" in match_config and match_config.enemy_faction != "":
+		enemy_faction = match_config.enemy_faction
+	elif not enemy_roster.is_empty():
+		enemy_faction = enemy_roster[0].get("faction", "technocrats")
+
+
+# Skips empties rather than making every caller check. reconstruct_vehicle()
+# returns nothing for a design naming a hull the catalog no longer has, and a
+# roster slot holding a design that cannot be built is a build button that does
+# nothing.
+func _append_design(into: Array, design: Dictionary) -> void:
+	if not design.is_empty():
+		into.append(design)
+
+
+func _harvester_in(from: Array) -> Dictionary:
+	for design in from:
+		if CommanderScript.design_fills_role(design, "harvester"):
+			return design
+	return {}
 
 
 func _list_json(dir_path: String) -> Array:
@@ -328,47 +414,28 @@ func _list_json(dir_path: String) -> Array:
 	return out
 
 
-func _spawn_starting_units() -> void:
-	# MapCatalog decodes the JSON number-arrays into real Vector3s, so this is a
-	# world position already. Spawn ids are "player"/"enemy" - see data/maps/.
-	var spawn := MapCatalog.get_spawn(current_map, "player")
-	var origin: Vector3 = spawn.get("hq", Vector3.ZERO) if not spawn.is_empty() else Vector3.ZERO
-
-	var index := 0
-	for path in _bundled_loadout_paths():
-		var blueprint: Dictionary = bp_manager.load_blueprint(path)
-		if blueprint.is_empty():
-			continue
-		# Defences are BUILT, not fielded. The default pool now contains turret
-		# and bunker designs on foundation hulls, and spawning those here would
-		# park a row of immobile "units" on the player's spawn point that can
-		# never be ordered anywhere.
-		if is_defence_design(blueprint):
-			continue
-		# A short row, spaced wider than the biggest hull so nothing spawns
-		# inside anything else.
-		var offset := Vector3(float(index % 4) * 7.0 - 10.5, 0.0, floorf(index / 4.0) * 7.0)
-		spawn_unit(blueprint, PLAYER_TEAM, origin + offset)
-		index += 1
-
-	_spawn_enemy_starting_units()
-
-
-# The AI starts with a harvester, because the player does.
+# ONE HARVESTER PER SIDE, and nothing else.
 #
-# The player's bundled loadout includes ore_trucker, so the player opens with
-# income. The AI opened with none, and there is no way to earn the first credit
-# without a harvester: it spent its starting money on the factory needed to build
-# one, could no longer afford the harvester itself, and sat at 86 metal for the
-# rest of the match. Not an AI bug - it was starting a race a lap down.
-func _spawn_enemy_starting_units() -> void:
-	var spawn := MapCatalog.get_spawn(current_map, "enemy")
-	if spawn.is_empty():
-		return
-	var origin: Vector3 = spawn.get("hq", Vector3.ZERO)
-	var harvester := ai_design_for_role(ENEMY_TEAM, "harvester")
-	if not harvester.is_empty():
-		spawn_unit(harvester, ENEMY_TEAM, origin + Vector3(8.0, 0.0, -8.0))
+# Phase 0 fielded the entire bundled loadout at the player's spawn so there was
+# something to drive with no production yet. That was scaffolding: with a real
+# roster and a real build bar, handing the player a dozen free units is not a
+# starting force, it is the whole match already won. The old runtime starts each
+# side with exactly one harvester (skirmish.gd:1499) and everything else is
+# earned - matched here, because this mode is replacing that one.
+func _spawn_starting_units() -> void:
+	for team_id in [PLAYER_TEAM, ENEMY_TEAM]:
+		var spawn := MapCatalog.get_spawn(current_map,
+			"player" if team_id == PLAYER_TEAM else "enemy")
+		if spawn.is_empty():
+			continue
+		var pool: Array = roster if team_id == PLAYER_TEAM else enemy_roster
+		var harvester := _harvester_in(pool)
+		if harvester.is_empty():
+			continue
+		# The map authors a harvester start position; fall back to a corner of the
+		# base if it does not, rather than dropping the unit on the HQ itself.
+		var at: Vector3 = spawn.get("harvester", spawn.get("hq", Vector3.ZERO) + Vector3(8, 0, -8))
+		spawn_unit(harvester, team_id, at)
 
 
 # The bundled default designs. Phase 0 fields these directly so there is
@@ -398,7 +465,11 @@ func spawn_unit(blueprint: Dictionary, unit_team: int, at: Vector3) -> Node3D:
 	# to reach NavigationServer3D.
 	add_child(unit)
 	unit.global_position = Vector3(at.x, terrain_height_at(at), at.z)
-	if not unit.setup(blueprint, unit_team, bp_manager, self, player_faction):
+	# The unit wears its OWN side's faction. Passing player_faction for everything
+	# gave the AI's army the player's colours and the player's passives, which
+	# reads as a rendering oddity and is really a balance one.
+	var faction: String = player_faction if unit_team == PLAYER_TEAM else enemy_faction
+	if not unit.setup(blueprint, unit_team, bp_manager, self, faction):
 		# The blueprint named a hull the catalog no longer has. Drop it rather
 		# than leaving a half-assembled body on the field.
 		unit.queue_free()
@@ -429,11 +500,18 @@ func _spawn_resource_nodes() -> void:
 func _spawn_bases() -> void:
 	for spawn in current_map.get("spawns", []):
 		var team := PLAYER_TEAM if spawn.get("id") == "player" else ENEMY_TEAM
-		# A starting HQ and refinery only. The manufactories are the player's
-		# first real decision rather than a gift - which is the whole point of
-		# splitting the building queue out.
 		_place_structure("hq", team, spawn.get("hq", Vector3.ZERO))
 		_place_structure("refinery", team, spawn.get("refinery", Vector3.ZERO))
+		# ALL THREE MANUFACTORY TIERS, as the old runtime does
+		# (skirmish.gd:1517). This phase originally withheld them on the grounds
+		# that the first factory should be the player's own decision - which reads
+		# well and is unplayable here: the player has no ghost-placement UI yet, so
+		# a match starting without a manufactory is a match where they can never
+		# build anything at all. Parity with the mode this replaces wins.
+		var factory: Vector3 = spawn.get("factory", spawn.get("hq", Vector3.ZERO) + Vector3(0, 0, -14))
+		_place_structure("light_manufactory", team, factory)
+		_place_structure("medium_manufactory", team, factory + Vector3(12, 0, 0))
+		_place_structure("heavy_manufactory", team, factory + Vector3(-12, 0, 0))
 	for t in [PLAYER_TEAM, ENEMY_TEAM]:
 		economy.recalculate_power(t, get_team_structures(t))
 
@@ -886,8 +964,23 @@ func ai_build_unit(for_team: int, role: String) -> bool:
 
 	var cost: Vector2i = DesignCostingScript.blueprint_cost(pick)
 	var queue_name: String = DesignCostingScript.queue_for_design(pick)
+
+	# SELF-THROTTLE. The commander re-decides every DECISION_INTERVAL and calls
+	# this each time, so without a depth cap it enqueues another unit every two
+	# seconds forever. Production drip-feeds cost, so a deep queue drains every
+	# credit as it arrives: the AI sat pinned at 0 metal with three harvesters
+	# queued, and every other action - which all gate on having money - was
+	# vetoed. It looked like an AI with one idea and was really an AI that had
+	# spent everything before it could have a second one.
+	#
+	# Two deep, the same cap the old runtime used (enemy_ai.gd's _queue_entry).
+	if production.queue(for_team, queue_name).size() >= AI_MAX_QUEUE_DEPTH:
+		return false
 	return not production.enqueue_unit(for_team, pick, cost.x, cost.y,
 		DesignCostingScript.build_time_for_cost(cost), queue_name).is_empty()
+
+
+const AI_MAX_QUEUE_DEPTH := 2
 
 
 # A design on a foundation hull is a static defence, not a vehicle.
