@@ -31,6 +31,7 @@ func _state(overrides: Dictionary = {}) -> Dictionary:
 		"enemy_armour_share": 0.0,
 		"base_threatened": false,
 		"can_build_harvester": true,
+		"defences": 0,
 		"combat": [],
 	}
 	for k in overrides:

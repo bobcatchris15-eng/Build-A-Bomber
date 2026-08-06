@@ -2370,3 +2370,67 @@ func test_e3_losing_one_of_two_manufactories_of_a_tier_does_not_cancel_the_queue
 	print("  [PASS] Losing one of two same-tier manufactories leaves the queue alone - only losing the last one cancels it.")
 	return true
 
+
+
+# A harvester must be able to REACH the radius at which it unloads.
+#
+# THE BUG THIS PINS. The delivery check was a flat 4.5 m measured origin-to-
+# centre (battle_unit.gd's _process_harvest). A refinery is 5x5 - half-extent
+# 2.5 - and the default ore_trucker is a 5.5 m medium hull that approaches
+# nose-on, so its origin comes to rest about 2.75 m behind its nose: measured
+# closest approach 5.31 m against a 4.50 m trigger. It parked against the wall
+# and never delivered, resources never rose, and the truck sat there for the
+# rest of the match.
+#
+# Asserted as GEOMETRY rather than against a fixed number, because re-tuning the
+# constant would break again the first time somebody designs a longer harvester -
+# which is the entire point of the Design Lab.
+func test_harvester_delivery_radius_clears_hull_and_refinery() -> bool:
+	print("Running Test Suite: Harvester delivery radius clears the building and the hull...")
+	# battle_unit.gd extends CharacterBody3D, so it is attached to a body rather
+	# than constructed - the same way every other test in this file builds one.
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+
+	# A stand-in refinery: the function measures the building off its own box
+	# collider, so that is all it needs.
+	var refinery := StaticBody3D.new()
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(5, 3, 5)
+	col.shape = box
+	refinery.add_child(col)
+	root.add_child(refinery)
+
+	# And a hull carrying the size meta reconstruct_vehicle() writes.
+	var hull := Node3D.new()
+	hull.set_meta("base_hull_size", Vector3(3.0, 1.8, 5.5))
+	hull.set_meta("hull_scale", Vector3.ONE)
+	unit.add_child(hull)
+	unit.hull_node = hull
+
+	var reach: float = unit._refinery_deliver_distance(refinery)
+	# The floor: half the building plus half the hull is where the two solids
+	# touch. Anything at or below that is unreachable by definition.
+	var touching: float = 2.5 + 5.5 * 0.5
+	print("  delivery radius %.2f m, solids touch at %.2f m" % [reach, touching])
+	if reach <= touching:
+		print("  [FAIL] The delivery radius (%.2f) is inside the point where the harvester and the refinery collide (%.2f) - it can never trigger." % [reach, touching])
+		unit.queue_free(); refinery.queue_free()
+		return false
+
+	# It must also scale WITH the hull, or a longer harvester reintroduces the bug.
+	hull.set_meta("base_hull_size", Vector3(3.0, 1.8, 11.0))
+	var longer: float = unit._refinery_deliver_distance(refinery)
+	if longer <= reach:
+		print("  [FAIL] A hull twice as long did not widen the delivery radius (%.2f vs %.2f)" % [longer, reach])
+		unit.queue_free(); refinery.queue_free()
+		return false
+
+	unit.queue_free()
+	refinery.queue_free()
+	await tree.process_frame
+	print("  [PASS] Delivery radius is derived from the refinery footprint and the harvester's own hull, so it stays reachable for any design.")
+	return true

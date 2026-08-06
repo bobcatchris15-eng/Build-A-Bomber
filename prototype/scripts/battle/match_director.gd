@@ -303,18 +303,18 @@ func _load_roster() -> void:
 		if not design.is_empty():
 			roster.append(design)
 
-	# The AI fields its OWN designs, from res://data/enemy/, rather than the
-	# player's loadout. Sharing one roster would make every match a mirror and
-	# make counter-picking meaningless - the AI would only ever be able to answer
-	# a threat with the same design that posed it.
-	enemy_roster.clear()
-	for path in _list_json(ENEMY_ROSTER_DIR):
-		var design: Dictionary = bp_manager.load_blueprint(path)
-		if not design.is_empty():
-			enemy_roster.append(design)
+	# ONE SHARED DEFAULT POOL (Chris's call). On a fresh install the player and
+	# the AI have the same designs available, so neither side is fighting with
+	# equipment the other could not have fielded.
+	#
+	# The AI still has to CHOOSE from it - design_fills_role() reads roles off
+	# what a design actually mounts - so a shared pool is not the same as a
+	# mirror match: which of these it builds depends on what it sees. Once the
+	# player starts saving their own designs, and once drafting lands in Phase 5,
+	# the two rosters diverge on their own without needing separate directories
+	# to force it.
+	enemy_roster = roster.duplicate()
 
-
-const ENEMY_ROSTER_DIR := "res://data/enemy"
 
 func _list_json(dir_path: String) -> Array:
 	var out: Array = []
@@ -338,6 +338,12 @@ func _spawn_starting_units() -> void:
 	for path in _bundled_loadout_paths():
 		var blueprint: Dictionary = bp_manager.load_blueprint(path)
 		if blueprint.is_empty():
+			continue
+		# Defences are BUILT, not fielded. The default pool now contains turret
+		# and bunker designs on foundation hulls, and spawning those here would
+		# park a row of immobile "units" on the player's spawn point that can
+		# never be ordered anywhere.
+		if is_defence_design(blueprint):
 			continue
 		# A short row, spaced wider than the biggest hull so nothing spawns
 		# inside anything else.
@@ -749,9 +755,40 @@ func _on_structure_ready(for_team: int, queue_name: String, job: Dictionary) -> 
 		# the money; the site may open up when something dies.
 		return
 	production.claim_structure(for_team, queue_name)
-	_place_structure(job.get("kind", "power_plant"), for_team, site)
+	var blueprint: Dictionary = job.get("blueprint", {})
+	if not blueprint.is_empty():
+		_place_defence(blueprint, for_team, site)
+	else:
+		_place_structure(job.get("kind", "power_plant"), for_team, site)
 	economy.recalculate_power(for_team, get_team_structures(for_team))
 	_mark_navmesh_dirty()
+
+
+# A blueprint-built turret. Same lifecycle as any other structure - it carves the
+# navmesh, it dies through the same signal, it ends the match if it were an HQ -
+# it just gets its geometry and its guns from a design instead of the catalog.
+func _place_defence(blueprint: Dictionary, structure_team: int, at: Vector3) -> Structure:
+	var s := StructureScript.new()
+	add_child(s)
+	s.global_position = Vector3(at.x, terrain_height_at(at), at.z)
+	if not s.setup_from_blueprint(blueprint, structure_team, bp_manager):
+		# The design names a hull the catalog no longer has. A half-built turret
+		# is worse than none, and the money is already spent either way.
+		s.queue_free()
+		return null
+	s.died.connect(_on_structure_died)
+	return s
+
+
+# Queue a defensive structure from the AI's roster.
+func ai_build_defence(for_team: int) -> bool:
+	var design := ai_design_for_role(for_team, "defense")
+	if design.is_empty():
+		return false
+	var cost: Vector2i = DesignCostingScript.blueprint_cost(design)
+	return not production.enqueue_structure(for_team,
+		BuildingCatalogScript.QUEUE_DEFENSE, "defense",
+		cost.x, cost.y, DesignCostingScript.build_time_for_cost(cost), design).is_empty()
 
 
 # Where the AI puts its next building: an outward ring search from its HQ, taking
@@ -837,17 +874,13 @@ func apply_explosion(at: Vector3, radius: float, damage: float, source: Node) ->
 # mounts rather than from a hand-curated per-role list. A design the player built
 # would count as anti-air if it carries a CIWS.
 func ai_build_unit(for_team: int, role: String) -> bool:
-	var pool: Array = enemy_roster if not enemy_roster.is_empty() else roster
-	var pick: Dictionary = {}
-	for design in pool:
-		if CommanderScript.design_fills_role(design, role):
-			pick = design
-			break
-	# No design fills the role - fall back to anything at all rather than
-	# stalling. An AI that refuses to build because it has no dedicated AA is
-	# worse than one that builds a tank.
-	if pick.is_empty() and not pool.is_empty():
-		pick = pool[0]
+	var pick: Dictionary = ai_design_for_role(for_team, role)
+	# No design fills the role - fall back to any VEHICLE rather than stalling.
+	# An AI that refuses to build because it has no dedicated AA is worse than
+	# one that builds a tank. Routed through ai_design_for_role so the fallback
+	# cannot land on a turret and try to drive it out of a factory.
+	if pick.is_empty():
+		pick = ai_design_for_role(for_team, "general")
 	if pick.is_empty():
 		return false
 
@@ -857,11 +890,29 @@ func ai_build_unit(for_team: int, role: String) -> bool:
 		DesignCostingScript.build_time_for_cost(cost), queue_name).is_empty()
 
 
+# A design on a foundation hull is a static defence, not a vehicle.
+#
+# Worth a named helper rather than an inline check, because the two places that
+# need it fail in completely different and equally quiet ways: spawning one as a
+# starting unit gives you an immobile thing that looks like a unit, and queueing
+# one into a VEHICLE queue produces a turret that tries to drive out of a
+# factory exit.
+static func is_defence_design(blueprint: Dictionary) -> bool:
+	return ModuleCatalog.is_foundation(blueprint.get("hull_type", ""))
+
+
 # The design the AI would build for `role`, or {} if it has none.
+#
+# Foundations are excluded from every MOBILE role, including the catch-all
+# "general" - design_fills_role() answers true for anything there, so without
+# this filter the AI could pick a gun turret as its general-purpose tank.
 func ai_design_for_role(for_team: int, role: String) -> Dictionary:
 	var pool: Array = enemy_roster if not enemy_roster.is_empty() else roster
+	var want_defence := role == "defense"
 	for design in pool:
-		if CommanderScript.design_fills_role(design, role):
+		if is_defence_design(design) != want_defence:
+			continue
+		if want_defence or CommanderScript.design_fills_role(design, role):
 			return design
 	return {}
 

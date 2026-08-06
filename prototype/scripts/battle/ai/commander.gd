@@ -33,7 +33,12 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 # really are the roster's answers to air and to armour - it was only its consumer
 # that was weak. Rewriting the lists would throw away roster knowledge that has
 # nothing to do with why the old AI was bad.
-const ANTI_AIR_WEAPONS := ["ciws", "flak_cannon", "pd_laser"]
+#
+# sam_launcher ADDED. The original list predates the roster expansion, so the
+# one purpose-built surface-to-air weapon in the game was not recognised as an
+# answer to air - an AI holding a SAM turret design would keep scoring "build
+# anti-air" and pick something else.
+const ANTI_AIR_WEAPONS := ["ciws", "flak_cannon", "pd_laser", "sam_launcher"]
 const ANTI_ARMOR_WEAPONS := ["gauss_railgun", "artillery", "ion_cannon", "tesla_coil",
 	"coil_gun", "recoilless_rifle", "ballista", "anti_materiel_rifle"]
 
@@ -46,6 +51,7 @@ enum Action {
 	BUILD_ANTI_ARMOR,
 	BUILD_GENERAL,
 	DEFEND,           # pull squads home
+	BUILD_DEFENSE,    # a turret, which holds ground a squad would have to stand on
 	PUSH,             # commit to an attack
 }
 
@@ -70,8 +76,13 @@ const WEIGHTS := {
 	Action.BUILD_ANTI_ARMOR: 1.1,
 	Action.BUILD_GENERAL: 0.6,
 	Action.DEFEND: 1.6,
+	Action.BUILD_DEFENSE: 1.0,
 	Action.PUSH: 0.7,
 }
+
+# Turrets the AI will put up before it stops seeing the point. A base ringed with
+# static defence is a base that has spent its economy on ground it already holds.
+const DEFENCE_TARGET := 3
 
 # Target harvester count. Past this, more trucks queue at the refinery rather
 # than adding income, so the consideration should stop asking for them.
@@ -155,6 +166,7 @@ func read_state() -> Dictionary:
 		"enemy_armour_share": C.share(enemy_armour, enemy_seen),
 		"base_threatened": _base_threatened(),
 		"can_build_harvester": _world.ai_can_build_role(team, "harvester"),
+		"defences": _count_kind(own_structures, "defense"),
 		"combat": combat,
 	}
 
@@ -294,6 +306,16 @@ func _score(action: int, state: Dictionary) -> float:
 				1.0 if state["base_threatened"] else 0.0,
 				C.ramp(state["combat_units"], 1.0, 4.0),
 			])
+		Action.BUILD_DEFENSE:
+			# Wanted once the AI has SEEN something, and more so while its base is
+			# being hit - a turret holds ground that would otherwise cost a squad
+			# standing on it. Saturates at DEFENCE_TARGET so it does not turtle its
+			# whole economy into concrete.
+			return C.score(w, [
+				C.falloff(state["defences"], 0.0, float(DEFENCE_TARGET)),
+				C.ramp(state["metal"], 200.0, 500.0),
+				maxf(C.share(state["enemy_seen"], 4.0), 1.0 if state["base_threatened"] else 0.0),
+			])
 		Action.PUSH:
 			# Needs a real army AND something worth walking to. The MIN_PUSH_SQUAD
 			# floor is what stops the old trickle-attack behaviour.
@@ -341,6 +363,8 @@ func _execute(action: int, state: Dictionary) -> void:
 			_world.ai_build_unit(team, "general")
 		Action.DEFEND:
 			_world.ai_defend(team, state["combat"])
+		Action.BUILD_DEFENSE:
+			_world.ai_build_defence(team)
 		Action.PUSH:
 			_world.ai_push(team, state["combat"])
 

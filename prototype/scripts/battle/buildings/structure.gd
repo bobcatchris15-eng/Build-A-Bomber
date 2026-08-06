@@ -14,6 +14,8 @@ extends StaticBody3D
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const LayersScript = preload("res://scripts/battle/battle_layers.gd")
 const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
+const UnitAssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
+const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 
 signal died(structure)
 
@@ -23,6 +25,12 @@ var max_hp: float = 1000.0
 var hp: float = 1000.0
 var is_dead: bool = false
 var footprint := Vector3(5, 3, 5)
+
+# Set only on blueprint-built defences: the reconstructed hull carrying the
+# weapon modules. Null on every catalog building.
+var defense_hull: Node3D = null
+# Longest weapon reach, for the AI's siting decisions. Zero on anything unarmed.
+var attack_range: float = 0.0
 
 # bay index -> the unit holding it, or null. Fixed length, allocated at setup
 # from the catalog, so a refinery's capacity is authored data rather than an
@@ -73,6 +81,58 @@ func setup(structure_kind: String, structure_team: int) -> void:
 	add_child(_mesh)
 
 	_add_selection_proxy()
+
+
+# A DEFENCE built from a player blueprint rather than a catalog entry.
+#
+# This is what makes a turret design mean anything. Everything else a base builds
+# is a catalog kind with a box mesh; a defence is a design the player authored in
+# the Lab on a foundation hull, so it has to be reconstructed the way a unit is -
+# real hull geometry, real modules - and then armed, or it is a decorative box
+# that cannot shoot.
+#
+# It stays a Structure rather than becoming a unit: it has no locomotion, it
+# occupies a footprint, it carves the navmesh, and it dies like a building. The
+# only thing it borrows from the unit path is assembly.
+func setup_from_blueprint(blueprint: Dictionary, structure_team: int, bp_manager: Node) -> bool:
+	kind = "defense"
+	team = structure_team
+	set_meta("team", team)
+	collision_layer = LayersScript.BUILDINGS
+	collision_mask = 0
+
+	defense_hull = bp_manager.reconstruct_vehicle(blueprint, self, false, blueprint.get("faction", ""))
+	if defense_hull == null:
+		return false
+
+	var hull_type: String = blueprint.get("hull_type", "pillbox_foundation")
+	var thickness: float = blueprint.get("armor_thickness", 1.0)
+	var material: String = blueprint.get("armor_material", "hardened_steel")
+	var hull_scale: Vector3 = Vector3.ONE
+	if defense_hull.has_meta("hull_scale"):
+		hull_scale = defense_hull.get_meta("hull_scale")
+	max_hp = ModuleCatalog.compute_hull_max_hp(hull_type, thickness, material, hull_scale)
+	hp = max_hp
+
+	var catalog: Dictionary = ModuleCatalog.get_module_data(hull_type)
+	footprint = catalog.get("size", Vector3(3, 2, 3))
+	# Defences dock nothing, so they publish no bays. Leaving the array unsized
+	# would have reserve_bay() report a turret as a valid delivery point.
+	_bay_offsets = []
+	_bays.clear()
+
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = footprint
+	col.shape = box
+	col.position = Vector3(0, footprint.y * 0.5, 0)
+	add_child(col)
+
+	# The guns. Same script-swap the unit path uses, so a turret fires by exactly
+	# the same rules a tank does and needs no defence-specific weapon code.
+	attack_range = UnitAssemblyScript.attach_weapons(defense_hull)
+	_add_selection_proxy()
+	return true
 
 
 # Structures are clickable for the same reason units are, and through the same

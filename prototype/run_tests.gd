@@ -289,6 +289,7 @@ const SUITE_ORDER := [
 	["battle_ai", "test_roles_are_read_from_mounted_modules"],
 	["battle_ai", "test_squad_retreat_and_regroup_have_a_dead_zone"],
 	["battle_ai", "test_reinforcing_raises_the_health_bar"],
+	["economy_and_production", "test_harvester_delivery_radius_clears_hull_and_refinery"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

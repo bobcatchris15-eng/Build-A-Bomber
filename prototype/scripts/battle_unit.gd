@@ -1196,6 +1196,41 @@ func _animate_locomotion(delta: float) -> void:
 # next waypoint when a nav_agent is set up (real pathfinding, built this
 # pass), falling back to the old direct-line behavior otherwise (flying
 # units, or any synthetic/test context with no real Skirmish controller).
+# How close a harvester has to get to a refinery's CENTRE before it unloads.
+#
+# THIS WAS A FLAT 4.5 AND HARVESTERS COULD NOT REACH IT. _steer_towards measures
+# origin-to-centre, so the number has to clear the refinery's own footprint AND
+# half the harvester's hull. A refinery is 5x5 (half-extent 2.5) and the default
+# ore_trucker is a 5.5 m medium hull that approaches nose-on, putting its origin
+# ~2.75 m behind the nose: measured closest approach 5.31 m against a 4.50 m
+# trigger, so it parked against the wall and never delivered. Resources never
+# rose and the truck sat there for the rest of the match.
+#
+# Derived rather than re-tuned to another constant, because the same arithmetic
+# breaks again the moment someone designs a longer harvester - which the Design
+# Lab exists to let them do.
+const REFINERY_DOCK_PAD: float = 1.5
+
+func _refinery_deliver_distance(refinery) -> float:
+	# Measured off the building's own collider rather than looked up in
+	# building.gd's stat table: battle_unit.gd does not preload building.gd and
+	# adding that would couple a unit to a building for one number.
+	var building_half := 2.5
+	for child in refinery.get_children():
+		if child is CollisionShape3D and child.shape is BoxShape3D:
+			var box: Vector3 = (child.shape as BoxShape3D).size
+			building_half = maxf(building_half, maxf(box.x, box.z) * 0.5)
+			break
+
+	var hull_extent := 3.0
+	if is_instance_valid(hull_node) and hull_node.has_meta("base_hull_size"):
+		var hull_size: Vector3 = hull_node.get_meta("base_hull_size")
+		if hull_node.has_meta("hull_scale"):
+			hull_size *= hull_node.get_meta("hull_scale") as Vector3
+		hull_extent = maxf(hull_size.x, hull_size.z)
+	return building_half + hull_extent * 0.5 + REFINERY_DOCK_PAD
+
+
 func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 	var pos_diff = dest - global_position
 	pos_diff.y = 0.0
@@ -1374,7 +1409,7 @@ func _process_harvest(delta):
 			velocity.x = 0.0
 			velocity.z = 0.0
 			return
-		if _steer_towards(refinery.global_position, delta, 4.5):
+		if _steer_towards(refinery.global_position, delta, _refinery_deliver_distance(refinery)):
 			emit_signal("resources_delivered", team, cargo_metal, cargo_crystal)
 			cargo_metal = 0
 			cargo_crystal = 0

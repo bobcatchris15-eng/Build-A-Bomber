@@ -1,0 +1,50 @@
+{
+	"version": 1.0,
+	"id": "enemy_dart_skirmisher",
+	"name": "Dart Hover Skirmisher",
+	"hull_type": "light_hull",
+	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+	"hull_size": {"x": 3.0, "y": 1.0, "z": 4.0},
+	"armor_material": "energy_shielding",
+	"armor_thickness": 0.8,
+	"faction": "technocrats",
+	"locomotion": {
+		"type_id": "hover_engine",
+		"settings": {}
+	},
+	"modules": [
+		{
+			"type_id": "heavy_laser",
+			"name": "Continuous Laser",
+			"position": {"x": 0.0, "y": 0.5, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0,
+			"tweaks": {"lens_aperture": 1.2}
+		},
+		{
+			"type_id": "hover_engine", "name": "Hover Pad",
+			"position": {"x": 1.5, "y": -0.5, "z": 1.4},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+		},
+		{
+			"type_id": "hover_engine", "name": "Hover Pad",
+			"position": {"x": -1.5, "y": -0.5, "z": 1.4},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+		},
+		{
+			"type_id": "hover_engine", "name": "Hover Pad",
+			"position": {"x": 1.5, "y": -0.5, "z": -1.4},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+		},
+		{
+			"type_id": "hover_engine", "name": "Hover Pad",
+			"position": {"x": -1.5, "y": -0.5, "z": -1.4},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+		}
+	]
+}

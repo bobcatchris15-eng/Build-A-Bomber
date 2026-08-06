@@ -87,6 +87,41 @@ func _init():
 		% [final["harvesters"], final["combat_units"], final["manufactories"], final["metal"]])
 	print("  actions taken: %s" % str(seen_actions))
 
+	# Defensive designs must be BUILDABLE, not just present in the roster. A
+	# turret design nothing can place is decoration.
+	var defence: Dictionary = battle.ai_design_for_role(1, "defense")
+	print("  defence design available: %s" % (defence.get("name", "NONE")))
+	if defence.is_empty():
+		failures.append("the AI has no defensive design it can build")
+	else:
+		var before_def: int = battle.get_team_structures(1).size()
+		# Fund it. Whether the AI can AFFORD a turret is an economy question and is
+		# measured above; this is asking whether the placement path works at all,
+		# and a starved queue would answer neither.
+		battle.deliver(1, 3000, 800)
+		if not battle.ai_build_defence(1):
+			failures.append("ai_build_defence could not queue a turret")
+		else:
+			for _t in range(1800):
+				await physics_frame
+			var placed := 0
+			var armed := 0
+			for s2 in battle.get_team_structures(1):
+				if s2.kind == "defense":
+					placed += 1
+					# A turret that cannot shoot is a decorative box, and "placed"
+					# alone would report it as a success.
+					if s2.attack_range > 0.0:
+						armed += 1
+					print("    turret '%s' hp=%.0f reach=%.1f m"
+						% [s2.kind, s2.max_hp, s2.attack_range])
+			if placed > 0 and armed <= 0:
+				failures.append("a defence was placed but mounts no working weapon")
+			print("  turrets placed: %d (structures %d -> %d)"
+				% [placed, before_def, battle.get_team_structures(1).size()])
+			if placed <= 0:
+				failures.append("a queued defence never got placed")
+
 	if end_structures <= start_structures:
 		failures.append("the AI never completed a single building")
 	if final["harvesters"] <= 0:
