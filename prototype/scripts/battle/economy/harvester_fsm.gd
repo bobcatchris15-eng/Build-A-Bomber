@@ -19,8 +19,28 @@ extends RefCounted
 # travelling to it" is a different thing from "I am waiting for one", and the old
 # implementation had no way to say either.
 
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+
 const HARVEST_TIME := 3.0
-const UNLOAD_TIME := 2.0
+
+# How much comes out of a patch per HARVEST_TIME, before faction bonuses.
+#
+# 25, MATCHING THE OLD RUNTIME (battle_unit.gd:1396). The FSM rewrite quietly
+# dropped this to 10, which is not a tuning difference - it is 5 cycles to fill a
+# 50-unit hopper instead of 2, so the working half of a round trip went from 6 s
+# to 15 s. Chris felt it as harvesters being sluggish, which they were.
+const HARVEST_CHUNK := 25
+
+# The old runtime delivered the INSTANT a harvester reached the refinery, with no
+# unload phase at all. A short dwell is worth keeping - it is what makes a dock
+# read as a dock, and it gives the bay queue something to queue for - but 2 s was
+# invented, not measured, and on top of the chunk regression above it made the
+# whole loop feel stuck.
+#
+# Note the dwell is NOT what makes bay reservation work: reservations stop two
+# harvesters being routed to the same spot on the way IN, which matters whether
+# or not they linger once there.
+const UNLOAD_TIME := 0.6
 # How close counts as being at the node / at the bay.
 const WORK_DISTANCE := 3.0
 
@@ -187,7 +207,7 @@ func _harvest(delta: float) -> void:
 	if _timer < HARVEST_TIME:
 		return
 	_timer = 0.0
-	var take: int = mini(10, mini(node.amount, capacity - cargo()))
+	var take: int = mini(_chunk_size(), mini(node.amount, capacity - cargo()))
 	if take <= 0:
 		_head_home()
 		return
@@ -202,6 +222,19 @@ func _harvest(delta: float) -> void:
 
 # Claim a bay before setting off. The reservation is the whole point: without it
 # this is the old behaviour with extra steps.
+# Faction-scaled extraction rate.
+#
+# The `harvest_rate_mult` passive existed in the old runtime and the FSM rewrite
+# dropped it entirely, so a faction whose whole identity is faster extraction had
+# a passive that silently did nothing. Read off the hull, which is where
+# reconstruct_vehicle() writes it.
+func _chunk_size() -> int:
+	var faction := "industrialists"
+	if _unit != null and is_instance_valid(_unit.hull_node) and _unit.hull_node.has_meta("faction"):
+		faction = _unit.hull_node.get_meta("faction")
+	return maxi(1, int(HARVEST_CHUNK * FactionCatalog.get_passive(faction, "harvest_rate_mult", 1.0)))
+
+
 func _head_home() -> void:
 	# Give the ore patch back on the way out. A slot held by a truck that is
 	# halfway across the map is a slot removed from the economy for the whole

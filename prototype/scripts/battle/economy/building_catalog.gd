@@ -84,7 +84,14 @@ const STATS := {
 		# last metre against the building's own collider. It worked by centimetres
 		# (measured closest approach 1.97-1.99 m against a 2.0 m threshold) or it
 		# did not work at all.
-		"dock_bays": [Vector3(0, 0, 7.0), Vector3(7.0, 0, 0), Vector3(-7.0, 0, 0)],
+		# 9 m. 7 was already outside the raw footprint, but BUILDING_CLEARANCE
+		# (match_director) later widened every building's navmesh hole to keep
+		# wide hulls off the walls - which moved the walkable edge outward past
+		# the bays again, leaving two of the three measurably off-mesh and
+		# harvesters docking with a 0.1 m margin. That margin is not survivable:
+		# the dock tolerance scales with hull speed, so a SLOWER harvester gets a
+		# smaller one and can never close the gap at all.
+		"dock_bays": [Vector3(0, 0, 9.0), Vector3(9.0, 0, 0), Vector3(-9.0, 0, 0)],
 	},
 	"light_manufactory": {
 		"hp": 1400.0, "size": Vector3(5, 2.4, 6), "color": Color(0.68, 0.6, 0.42),
