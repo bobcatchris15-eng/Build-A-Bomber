@@ -143,6 +143,7 @@ func _ready():
 	# _ready() the sidebar's own _ready() may not have run yet, so its
 	# @onready references would still be null.
 	call_deferred("_restore_test_session")
+	call_deferred("_check_first_time_instructions")
 
 func _restore_test_session() -> void:
 	var bp_manager = get_node_or_null("BlueprintManager")
@@ -2542,3 +2543,206 @@ func _apply_mirror_flip(module: Node3D):
 	if not module or not is_instance_valid(module): return
 	if not module.get_meta("scale_flip_x", false): return
 	ModuleMirrorScript.apply(module)
+
+# --- First-Time Instructions Modal & Persistent Help ---
+var instructions_canvas_layer: CanvasLayer = null
+
+func _setup_instructions_ui() -> void:
+	var ui_layer = CanvasLayer.new()
+	ui_layer.name = "InstructionsUILayer"
+	ui_layer.layer = 90
+	add_child(ui_layer)
+
+	var btn = Button.new()
+	btn.name = "InstructionsButton"
+	btn.text = "❓ Instructions"
+	btn.position = Vector2(16, 16)
+	btn.custom_minimum_size = Vector2(120, 32)
+	
+	var style_normal = StyleBoxFlat.new()
+	style_normal.bg_color = UITokens.BASE_700
+	style_normal.border_width_left = 1
+	style_normal.border_width_top = 1
+	style_normal.border_width_right = 1
+	style_normal.border_width_bottom = 1
+	style_normal.border_color = UITokens.BASE_500
+	style_normal.set_corner_radius_all(4)
+
+	var style_hover = StyleBoxFlat.new()
+	style_hover.bg_color = UITokens.BASE_600
+	style_hover.border_width_left = 1
+	style_hover.border_width_top = 1
+	style_hover.border_width_right = 1
+	style_hover.border_width_bottom = 1
+	style_hover.border_color = UITokens.SIGNAL_HAZARD
+	style_hover.set_corner_radius_all(4)
+
+	btn.add_theme_stylebox_override("normal", style_normal)
+	btn.add_theme_stylebox_override("hover", style_hover)
+	btn.add_theme_color_override("font_color", UITokens.TEXT_PRIMARY)
+	btn.add_theme_color_override("font_hover_color", Color.WHITE)
+	btn.pressed.connect(func(): show_instructions_dialog(true))
+	ui_layer.add_child(btn)
+
+func _check_first_time_instructions() -> void:
+	_setup_instructions_ui()
+	var seen_path = "user://lab_instructions_seen.cfg"
+	if not FileAccess.file_exists(seen_path):
+		show_instructions_dialog(false)
+
+func show_instructions_dialog(is_manual_reopen: bool = false) -> void:
+	if is_instance_valid(instructions_canvas_layer):
+		instructions_canvas_layer.queue_free()
+
+	instructions_canvas_layer = CanvasLayer.new()
+	instructions_canvas_layer.name = "InstructionsModalLayer"
+	instructions_canvas_layer.layer = 100
+	add_child(instructions_canvas_layer)
+
+	var scrim = ColorRect.new()
+	scrim.name = "Scrim"
+	scrim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scrim.color = Color(0.04, 0.04, 0.04, 0.78)
+	instructions_canvas_layer.add_child(scrim)
+
+	var center = CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	scrim.add_child(center)
+
+	var panel = PanelContainer.new()
+	panel.custom_minimum_size = Vector2(760, 520)
+
+	var panel_style = StyleBoxFlat.new()
+	panel_style.bg_color = UITokens.BASE_800
+	panel_style.border_width_left = 2
+	panel_style.border_width_top = 2
+	panel_style.border_width_right = 2
+	panel_style.border_width_bottom = 2
+	panel_style.border_color = UITokens.SIGNAL_HAZARD
+	panel_style.set_corner_radius_all(8)
+	panel_style.content_margin_left = 28
+	panel_style.content_margin_top = 24
+	panel_style.content_margin_right = 28
+	panel_style.content_margin_bottom = 24
+	panel.add_theme_stylebox_override("panel", panel_style)
+	center.add_child(panel)
+
+	var vbox = VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 16)
+	panel.add_child(vbox)
+
+	var title_lbl = Label.new()
+	title_lbl.text = "DESIGN LAB MANUAL & CONTROLS"
+	title_lbl.add_theme_font_size_override("font_size", 22)
+	title_lbl.add_theme_color_override("font_color", UITokens.SIGNAL_HAZARD)
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(title_lbl)
+
+	var sub_lbl = Label.new()
+	sub_lbl.text = "Quick-start reference for constructing, customizing, and testing vehicles."
+	sub_lbl.add_theme_font_size_override("font_size", 13)
+	sub_lbl.add_theme_color_override("font_color", UITokens.TEXT_SECONDARY)
+	sub_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(sub_lbl)
+
+	var div = ColorRect.new()
+	div.custom_minimum_size = Vector2(0, 1)
+	div.color = UITokens.BASE_500
+	vbox.add_child(div)
+
+	var grid = HBoxContainer.new()
+	grid.add_theme_constant_override("separation", 24)
+	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(grid)
+
+	var col1 = VBoxContainer.new()
+	col1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col1.add_theme_constant_override("separation", 12)
+	grid.add_child(col1)
+
+	_add_section_header(col1, "🎥 CAMERA & NAVIGATION")
+	_add_bullet_item(col1, "Right Mouse (RMB)", "Hold & drag to orbit camera around vehicle")
+	_add_bullet_item(col1, "Middle Mouse / Shift+RMB", "Hold & drag to pan camera view")
+	_add_bullet_item(col1, "Scroll Wheel", "Zoom in & out on your vehicle")
+	_add_bullet_item(col1, "Focus Key (F)", "Focus camera on selected part or hull")
+
+	_add_section_header(col1, "🧱 BUILDING & ATTACHING")
+	_add_bullet_item(col1, "Drag & Drop Parts", "Drag components from left menu onto hull facets")
+	_add_bullet_item(col1, "Facet Auto-Snapping", "Modules & armor automatically align to hull faces")
+	_add_bullet_item(col1, "Mirror Mode (M)", "Toggle symmetry to mirror parts on opposite side")
+
+	var col2 = VBoxContainer.new()
+	col2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	col2.add_theme_constant_override("separation", 12)
+	grid.add_child(col2)
+
+	_add_section_header(col2, "🔄 MANIPULATION & EDITING")
+	_add_bullet_item(col2, "Select Part", "Click any attached module to highlight & edit")
+	_add_bullet_item(col2, "Rotate Part", "Drag 3D gizmo rings or press R / E / Q")
+	_add_bullet_item(col2, "Remove Part", "Press Delete / Backspace or click Delete Part")
+
+	_add_section_header(col2, "⚡ STATS & FIELD TESTING")
+	_add_bullet_item(col2, "Live Vehicle Stats", "Monitor DPS, Armor, HP, Mass & Speed on right panel")
+	_add_bullet_item(col2, "Test Range / Combat", "Click Test Range to test-drive & fight in combat")
+
+	var div2 = ColorRect.new()
+	div2.custom_minimum_size = Vector2(0, 1)
+	div2.color = UITokens.BASE_500
+	vbox.add_child(div2)
+
+	var btn_center = CenterContainer.new()
+	vbox.add_child(btn_center)
+
+	var close_btn = Button.new()
+	close_btn.text = "GOT IT! START BUILDING"
+	close_btn.custom_minimum_size = Vector2(260, 44)
+
+	var btn_style = StyleBoxFlat.new()
+	btn_style.bg_color = UITokens.SIGNAL_GO
+	btn_style.set_corner_radius_all(6)
+
+	var btn_hover = StyleBoxFlat.new()
+	btn_hover.bg_color = UITokens.SIGNAL_GO.lightened(0.15)
+	btn_hover.set_corner_radius_all(6)
+
+	close_btn.add_theme_stylebox_override("normal", btn_style)
+	close_btn.add_theme_stylebox_override("hover", btn_hover)
+	close_btn.add_theme_font_size_override("font_size", 15)
+	close_btn.add_theme_color_override("font_color", Color.WHITE)
+
+	close_btn.pressed.connect(func():
+		var f = FileAccess.open("user://lab_instructions_seen.cfg", FileAccess.WRITE)
+		if f:
+			f.store_line("seen=true")
+			f.close()
+		instructions_canvas_layer.queue_free()
+		instructions_canvas_layer = null
+	)
+	btn_center.add_child(close_btn)
+
+func _add_section_header(parent: Control, title: String) -> void:
+	var lbl = Label.new()
+	lbl.text = title
+	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.add_theme_color_override("font_color", UITokens.SIGNAL_HAZARD)
+	parent.add_child(lbl)
+
+func _add_bullet_item(parent: Control, key_name: String, desc: String) -> void:
+	var hbox = HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 6)
+
+	var k_lbl = Label.new()
+	k_lbl.text = "• " + key_name + ":"
+	k_lbl.add_theme_font_size_override("font_size", 12)
+	k_lbl.add_theme_color_override("font_color", UITokens.TEXT_PRIMARY)
+	hbox.add_child(k_lbl)
+
+	var d_lbl = Label.new()
+	d_lbl.text = desc
+	d_lbl.add_theme_font_size_override("font_size", 12)
+	d_lbl.add_theme_color_override("font_color", UITokens.TEXT_SECONDARY)
+	d_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	d_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hbox.add_child(d_lbl)
+
+	parent.add_child(hbox)
