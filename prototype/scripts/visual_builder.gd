@@ -387,7 +387,10 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"half_track": true, "rocker_bogie": true, "air_cushion_skirt": true,
 	"anti_grav_plate": true, "hydrofoil": true, "water_jet": true, "pontoon_wheels": true,
 	"structural_block": true, "structural_dome": true, "structural_slab": true,
-	"structural_wedge": true, "structural_girder": true, "structural_i_beam": true
+	"structural_wedge": true, "structural_girder": true, "structural_i_beam": true,
+	# Support modules with dedicated modular assembly code - must bypass the
+	# monolithic _part(type_id) path or their sub-part assembly branches are never reached.
+	"sensor_suite": true, "resource_harvester": true, "repair_array": true, "drone_carrier": true,
 }
 
 static func _repeat_along_axis(parent: Node3D, count: int, spacing: float, axis_vec: Vector3, builder_func: Callable):

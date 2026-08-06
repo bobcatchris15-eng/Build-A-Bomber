@@ -616,7 +616,8 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 			# top/bottom/front/back are already centered on the symmetry
 			# plane, so mirroring them would stack an identical duplicate
 			# plate directly on top of the original (MOUNTING_AND_ARMOR_SPEC.md #2).
-			var abs_n = normal.abs()
+			var local_n = hull.global_transform.basis.inverse() * normal if hull else normal
+			var abs_n = local_n.abs()
 			should_mirror = mirror_enabled and abs_n.x > abs_n.y and abs_n.x > abs_n.z
 		elif should_mirror and hull:
 			# Same class of bug, general case: placing ANY module dead-center
@@ -1204,49 +1205,54 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	# Auto-scale armor to fit facet
 	if category == "armor":
 		if hull:
-			var hull_size = Vector3(4.0, 1.0, 6.0)
-			var hull_shape = hull.get_node_or_null("CollisionShape3D")
-			if hull_shape and hull_shape.shape is BoxShape3D:
-				hull_size = hull_shape.shape.size
-				
-			# Determine which axis of the hull aligns with local X and Z of the module
-			var local_x = new_weapon.global_transform.basis.x.abs()
-			var local_z = new_weapon.global_transform.basis.z.abs()
-			
+			var facet_meas = _measure_hull_facet(hull, new_weapon.position, local_normal, new_weapon.transform.basis)
 			var target_x = 1.0
 			var target_z = 1.0
-			
-			if local_x.x > 0.5: target_x = hull_size.x
-			elif local_x.y > 0.5: target_x = hull_size.y
-			elif local_x.z > 0.5: target_x = hull_size.z
-			
-			if local_z.x > 0.5: target_z = hull_size.x
-			elif local_z.y > 0.5: target_z = hull_size.y
-			elif local_z.z > 0.5: target_z = hull_size.z
-			
-			# The module's base size is catalog_data.get("size", Vector3.ONE), so we scale by ratio
-			new_weapon.scale.x = target_x / catalog_data.get("size", Vector3.ONE).x
-			new_weapon.scale.z = target_z / catalog_data.get("size", Vector3.ONE).z
+			var armor_pos = new_weapon.position
 
-			# Center on the facet rather than leaving it at the clicked
-			# point: a plate that auto-fits the WHOLE face but stays
-			# positioned wherever the player happened to click would poke
-			# out past the hull edge on one side. Snap the two in-plane
-			# axes to hull-center (0) and keep only the surface-normal axis.
-			var armor_facet = ModuleCatalog.classify_facet(local_normal)
-			var centered_local = Vector3.ZERO
-			match armor_facet:
-				"left", "right":
-					centered_local = Vector3(sign(local_normal.x) * hull_size.x / 2.0, 0, 0)
-				"front", "back":
-					centered_local = Vector3(0, 0, sign(local_normal.z) * hull_size.z / 2.0)
-				_:
-					centered_local = Vector3(0, sign(local_normal.y) * hull_size.y / 2.0, 0)
-			new_weapon.global_position = hull.to_global(centered_local)
-			# Stored so combat (damage_resolver.gd) can resolve which
-			# specific armor module covers a given hit's facet, instead of
-			# treating all placed armor as one undifferentiated pool.
-			new_weapon.set_meta("facet", armor_facet)
+			if facet_meas["valid"]:
+				target_x = facet_meas["size"].x
+				target_z = facet_meas["size"].z
+				armor_pos = facet_meas["center"]
+			else:
+				var hull_size = Vector3(4.0, 1.0, 6.0)
+				var hull_shape = hull.get_node_or_null("CollisionShape3D")
+				if hull_shape and hull_shape.shape is BoxShape3D:
+					hull_size = hull_shape.shape.size
+
+				var local_x = new_weapon.transform.basis.x.abs()
+				var local_z = new_weapon.transform.basis.z.abs()
+
+				if local_x.x > 0.5: target_x = hull_size.x
+				elif local_x.y > 0.5: target_x = hull_size.y
+				elif local_x.z > 0.5: target_x = hull_size.z
+
+				if local_z.x > 0.5: target_z = hull_size.x
+				elif local_z.y > 0.5: target_z = hull_size.y
+				elif local_z.z > 0.5: target_z = hull_size.z
+
+				var armor_facet = ModuleCatalog.classify_facet(local_normal)
+				match armor_facet:
+					"left", "right":
+						var x_off = sign(local_normal.x) * hull_size.x / 2.0 if hull_shape else armor_pos.x
+						armor_pos = Vector3(x_off, 0, 0)
+					"front", "back":
+						var z_off = sign(local_normal.z) * hull_size.z / 2.0 if hull_shape else armor_pos.z
+						armor_pos = Vector3(0, 0, z_off)
+					_:
+						var y_off = sign(local_normal.y) * hull_size.y / 2.0 if hull_shape else armor_pos.y
+						armor_pos = Vector3(0, y_off, 0)
+
+			var cat_size = catalog_data.get("size", Vector3.ONE)
+			new_weapon.scale.x = target_x / cat_size.x
+			new_weapon.scale.z = target_z / cat_size.z
+			new_weapon.position = armor_pos
+
+			var mod_data = new_weapon.get_meta("module_data", null) as ModuleData
+			if mod_data:
+				mod_data.scale_multiplier = Vector3(new_weapon.scale.x, 1.0, new_weapon.scale.z)
+
+			new_weapon.set_meta("facet", ModuleCatalog.classify_facet(local_normal))
 
 	# The weapon mount metas (mount_style, mount_normal, facet, sponson) are
 	# set at the TOP of this function, not here: build_visual() needs the
@@ -1254,7 +1260,8 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	# keeps the four placement paths from drifting apart again.
 
 	# Notify the UI that a module was added
-	get_tree().call_group("stat_ui", "update_stats", hull)
+	if get_tree():
+		get_tree().call_group("stat_ui", "update_stats", hull)
 	check_all_clipping()
 	return new_weapon
 
@@ -1790,6 +1797,122 @@ const SURFACE_COLLISION_LAYER := HullSurfaceScript.SURFACE_COLLISION_LAYER
 func _rebuild_surface_body(target_hull: Node3D, source_mesh_inst: MeshInstance3D):
 	HullSurfaceScript.rebuild(target_hull, source_mesh_inst)
 
+static func _measure_hull_facet(hull: Node3D, local_pos: Vector3, local_normal: Vector3, module_basis: Basis) -> Dictionary:
+	var result = {
+		"size": Vector3.ZERO,
+		"center": local_pos,
+		"valid": false
+	}
+	if not hull or not is_instance_valid(hull):
+		return result
+
+	var mesh_inst = hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
+	if not mesh_inst:
+		mesh_inst = hull.get_node_or_null("PhysicsMesh") as MeshInstance3D
+	if not mesh_inst or not mesh_inst.mesh:
+		return result
+
+	var xform = mesh_inst.transform
+
+	var faces: PackedVector3Array = mesh_inst.mesh.get_faces()
+	if faces.is_empty() or faces.size() % 3 != 0:
+		return result
+
+	var norm = local_normal.normalized()
+	var bx = module_basis.x.normalized()
+	var bz = module_basis.z.normalized()
+
+	var num_tris = faces.size() / 3
+	var matching_tris = []
+	var tri_centers = []
+	var tri_verts_hull = []
+
+	for i in range(num_tris):
+		var v0 = xform * faces[i * 3 + 0]
+		var v1 = xform * faces[i * 3 + 1]
+		var v2 = xform * faces[i * 3 + 2]
+		var tri_n = (v1 - v0).cross(v2 - v0)
+		if tri_n.length_squared() < 1e-8:
+			continue
+		tri_n = tri_n.normalized()
+
+		if abs(tri_n.dot(norm)) > 0.90:
+			var center = (v0 + v1 + v2) / 3.0
+			var plane_dist = abs((center - local_pos).dot(norm))
+			if plane_dist < 0.20:
+				matching_tris.append(i)
+				tri_centers.append(center)
+				tri_verts_hull.append([v0, v1, v2])
+
+	if matching_tris.is_empty():
+		return result
+
+	# Find closest matching triangle to clicked local_pos
+	var start_idx = 0
+	var best_d = 1e9
+	for i in range(matching_tris.size()):
+		var d = (tri_centers[i] - local_pos).length_squared()
+		if d < best_d:
+			best_d = d
+			start_idx = i
+
+	# Flood-fill connected coplanar triangles from start_idx
+	var visited = {}
+	var queue = [start_idx]
+	visited[start_idx] = true
+	var facet_verts = []
+
+	while not queue.is_empty():
+		var curr = queue.pop_back()
+		var tv = tri_verts_hull[curr]
+		facet_verts.append(tv[0])
+		facet_verts.append(tv[1])
+		facet_verts.append(tv[2])
+
+		for n in range(matching_tris.size()):
+			if visited.has(n):
+				continue
+			var nv = tri_verts_hull[n]
+			var shares = false
+			for v_a in tv:
+				for v_b in nv:
+					if (v_a - v_b).length_squared() < 0.005:
+						shares = true
+						break
+				if shares:
+					break
+			if shares:
+				visited[n] = true
+				queue.append(n)
+
+	if facet_verts.is_empty():
+		return result
+
+	var min_x = 1e9
+	var max_x = -1e9
+	var min_z = 1e9
+	var max_z = -1e9
+
+	for v in facet_verts:
+		var rel = v - local_pos
+		var px = rel.dot(bx)
+		var pz = rel.dot(bz)
+		min_x = min(min_x, px)
+		max_x = max(max_x, px)
+		min_z = min(min_z, pz)
+		max_z = max(max_z, pz)
+
+	var size_x = max_x - min_x
+	var size_z = max_z - min_z
+	if size_x > 0.1 and size_z > 0.1:
+		var mid_x = (min_x + max_x) * 0.5
+		var mid_z = (min_z + max_z) * 0.5
+		result["size"] = Vector3(size_x, 0, size_z)
+		result["center"] = local_pos + bx * mid_x + bz * mid_z
+		result["valid"] = true
+
+	return result
+
 # Raycast used by every placement path. Traces the precise hull surface first
 # and only falls back to the bounding box if that misses, so a dropped module
 # sits on the hull you can see rather than on its bounding shell.
@@ -2044,17 +2167,9 @@ func check_all_clipping():
 				continue
 
 			var other_data_early = other_module.get_meta("module_data")
-			# Armor is a skin, not an obstruction. MOUNTING_AND_ARMOR_SPEC.md
-			# #2 has an armor plate "auto-scale to exactly fit the facet it's
-			# deployed on", and #3 has weapons/devices mounting onto those same
-			# facets - so armouring the deck and then mounting a deck gun is a
-			# completely ordinary design, yet every module on an armoured facet
-			# used to overlap the plate's AABB and flag the whole vehicle
-			# clipping-red. Exempt armor-vs-anything-else while still catching
-			# armor-vs-armor, which is a genuine conflict (two plates fighting
-			# over the same facet).
-			var one_is_armor = (my_data.category == "armor") != (other_data_early.category == "armor")
-			if one_is_armor:
+			# Armor is a skin, not an obstruction. Armor modules do not affect
+			# clipping of other modules or other armor modules.
+			if my_data.category == "armor" or other_data_early.category == "armor":
 				continue
 
 			var other_data = other_data_early
@@ -2314,32 +2429,48 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: b
 	if hull_shape and hull_shape.shape is BoxShape3D:
 		hull_size = hull_shape.shape.size
 	var local_normal = hull.global_transform.basis.inverse() * normal
-
 	if category == "armor":
-		var local_x = module.global_transform.basis.x.abs()
-		var local_z = module.global_transform.basis.z.abs()
+		var facet_meas = _measure_hull_facet(hull, module.position, local_normal, module.transform.basis)
 		var target_x = 1.0
 		var target_z = 1.0
-		if local_x.x > 0.5: target_x = hull_size.x
-		elif local_x.y > 0.5: target_x = hull_size.y
-		elif local_x.z > 0.5: target_x = hull_size.z
-		if local_z.x > 0.5: target_z = hull_size.x
-		elif local_z.y > 0.5: target_z = hull_size.y
-		elif local_z.z > 0.5: target_z = hull_size.z
+		var armor_pos = module.position
+
+		if facet_meas["valid"]:
+			target_x = facet_meas["size"].x
+			target_z = facet_meas["size"].z
+			armor_pos = facet_meas["center"]
+		else:
+			var hull_x = module.transform.basis.x.abs()
+			var hull_z = module.transform.basis.z.abs()
+			if hull_x.x > 0.5: target_x = hull_size.x
+			elif hull_x.y > 0.5: target_x = hull_size.y
+			elif hull_x.z > 0.5: target_x = hull_size.z
+
+			if hull_z.x > 0.5: target_z = hull_size.x
+			elif hull_z.y > 0.5: target_z = hull_size.y
+			elif hull_z.z > 0.5: target_z = hull_size.z
+
+			var armor_facet_fb = ModuleCatalog.classify_facet(local_normal)
+			match armor_facet_fb:
+				"left", "right":
+					var x_off = sign(local_normal.x) * hull_size.x / 2.0 if hull_shape else armor_pos.x
+					armor_pos = Vector3(x_off, 0, 0)
+				"front", "back":
+					var z_off = sign(local_normal.z) * hull_size.z / 2.0 if hull_shape else armor_pos.z
+					armor_pos = Vector3(0, 0, z_off)
+				_:
+					var y_off = sign(local_normal.y) * hull_size.y / 2.0 if hull_shape else armor_pos.y
+					armor_pos = Vector3(0, y_off, 0)
+
 		module.scale.x = target_x / catalog_data.get("size", Vector3.ONE).x
 		module.scale.z = target_z / catalog_data.get("size", Vector3.ONE).z
+		module.position = armor_pos
 
-		var armor_facet = ModuleCatalog.classify_facet(local_normal)
-		var centered_local = Vector3.ZERO
-		match armor_facet:
-			"left", "right":
-				centered_local = Vector3(sign(local_normal.x) * hull_size.x / 2.0, 0, 0)
-			"front", "back":
-				centered_local = Vector3(0, 0, sign(local_normal.z) * hull_size.z / 2.0)
-			_:
-				centered_local = Vector3(0, sign(local_normal.y) * hull_size.y / 2.0, 0)
-		module.global_position = hull.to_global(centered_local)
-		module.set_meta("facet", armor_facet)
+		var mod_data = module.get_meta("module_data", null) as ModuleData
+		if mod_data:
+			mod_data.scale_multiplier = Vector3(module.scale.x, 1.0, module.scale.z)
+
+		module.set_meta("facet", ModuleCatalog.classify_facet(local_normal))
 
 	elif category == "weapon":
 		var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""
