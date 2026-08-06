@@ -1,0 +1,21 @@
+{
+	"base_energy": 80.5,
+	"base_vision": 22.0,
+	"category": "hull",
+	"color": [
+		0.6,
+		0.63,
+		0.67,
+		1.0
+	],
+	"crystal": 23,
+	"hp": 560.0,
+	"metal": 140,
+	"name": "Medium Hull Mark II",
+	"size": [
+		3.3,
+		2.0,
+		6.0
+	],
+	"weight": 325.0
+}

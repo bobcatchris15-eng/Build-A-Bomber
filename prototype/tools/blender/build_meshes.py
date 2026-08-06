@@ -1701,7 +1701,8 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 		rear_flare=0.9, front_flare=1.0, color=(0.55, 0.56, 0.58), greebles=None, taper_slices=7,
 		nose_region=0.35, height_taper=0.0, bevel_pct=None, bevel_segments=None, bevel_angle_deg=20.0,
 		waist_inset=0.0, waist_height_frac=0.5, deck_line=0.0, deck_line_z_frac=(0.6, 0.95),
-		panel_line_fracs=None, speed_line_chamfer=False, armor_front_frac=0.4):
+		panel_line_fracs=None, speed_line_chamfer=False, armor_front_frac=0.4,
+		v_belly_depth=0.0, front_belly_slope=0.0, rear_belly_slope=0.0):
 	"""height_taper (0..1): brings the deck down toward the nose too, for
 	archetypes wanting a dart/wedge silhouette rather than just narrowing
 	in width (interceptor_hull's "extreme taper in width AND height").
@@ -1713,9 +1714,25 @@ def build_wedge_hull(name, size_x, size_y, size_z, nose_frac=0.0, spine_w=0.5, s
 	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
 	pts = []
-	# Flat belly rectangle, unchanged/full-width - the taper below only
-	# reshapes the top-deck silhouette, matching the original wedge look.
-	pts += [(-hx, -hy, -hz), (hx, -hy, -hz), (-hx, -hy, hz), (hx, -hy, hz)]
+
+	# Belly vertices - with V-belly keel and sloped ends if specified
+	keel_y = -hy + v_belly_depth * hy * 2.0 if v_belly_depth > 0.0 else -hy
+	front_belly_y = -hy + front_belly_slope * hy * 2.0 if front_belly_slope > 0.0 else -hy
+	rear_belly_y = -hy + rear_belly_slope * hy * 2.0 if rear_belly_slope > 0.0 else -hy
+
+	pts += [
+		(-hx, front_belly_y, -hz), (hx, front_belly_y, -hz),
+		(-hx, rear_belly_y, hz), (hx, rear_belly_y, hz)
+	]
+	if v_belly_depth > 0.0 or front_belly_slope > 0.0 or rear_belly_slope > 0.0:
+		pts.append((0.0, max(keel_y, front_belly_y), -hz))
+		pts.append((0.0, max(keel_y, rear_belly_y), hz))
+		for i in range(1, 5):
+			t = i / 5.0
+			z = -hz + t * size_z
+			mid_belly = front_belly_y + (rear_belly_y - front_belly_y) * t
+			interp_y = max(keel_y, mid_belly)
+			pts.append((0.0, interp_y, z))
 
 	# Top deck: a real multi-slice loft along Z with the non-linear
 	# (eased, nose-aggressive) taper curve instead of a single hard
@@ -1784,75 +1801,71 @@ def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, u
 		spine_w=0.5, spine_h=1.1, color=(0.55, 0.56, 0.58), greebles=None,
 		bevel_pct=None, bevel_segments=None, turret_ring=False, louver_panel=None,
 		waist_inset=0.0, waist_height_frac=0.5, deck_line=0.0, deck_line_z_frac=(0.6, 0.95),
-		panel_line_fracs=None, armor_front_frac=0.5):
-	"""Ground AFV hull built from three genuinely separate, interpenetrating
-	volumes instead of one tapered loft - a `bmesh.ops.convex_hull()` over a
-	single point cloud can never produce a re-entrant silhouette (any point
-	"inside" the hull of its neighbours is discarded), so a real lower-hull-
-	tub-plus-separate-upper-glacis relationship is structurally impossible
-	with build_wedge_hull's single-loft approach no matter how the taper/
-	bevel parameters are tuned. This builder uses the same proven no-
-	boolean technique build_tower_hull (per-tier convex hulls) and
-	build_sponson_hull (fused blisters) already rely on: multiple convex
-	hulls fused into the same bmesh, left deliberately interpenetrating
-	(never welded - welding is where non-manifold geometry and bevel
-	spikes come from). See HULL_MASSING_SPEC.md for the full design
-	rationale and per-hull-type parameter reasoning.
-
-	Volume A (tub): full-width slab, flat belly, light nose taper only -
-	  the glacis slope lives entirely in Volume B, not here.
-	Volume B (upper structure): narrower, a SEPARATE convex hull left
-	  interpenetrating the tub. Its point cloud is just 4 distinct (Z, Y)
-	  stations (nose-bottom / deck-front / deck-rear / rear-bottom), which
-	  is enough for a convex hull to produce a real sloped-glacis ->
-	  flat-deck -> vertical-rear cross-section with no lofting needed.
-	Volume C (fenders): flat fused boxes filling the gap between the
-	  tub's full width and the upper structure's narrower footprint - the
-	  "over the tracks" read, and the best sponson-embed side-mount
-	  real estate in the roster.
-
-	tub_frac: tub roof height as a fraction of total height.
-	upper_w: upper structure half-width as a fraction of hx.
-	glacis_len_frac: how far back from the nose the glacis rises to meet
-	  the flat deck - smaller = steeper/shorter glacis.
-	fender_frac: fender outer edge as a fraction of hx (1.0 = flush with
-	  the tub's own full width; set to upper_w or below to skip fenders).
-	louver_panel: optional dict {"z_frac":f (position along length as a
-	  multiple of hz, e.g. 0.72 = toward the rear), "width_frac"/"depth_frac"
-	  (size as fractions of hx/hz), "slats":n, "recess_frac":f} - a
-	  recessed engine-deck vent grate, applied to the silhouette before
-	  the tier-1 bevel (see greeble_louver_panel)."""
+		panel_line_fracs=None, armor_front_frac=0.5, v_belly_depth=0.0, rear_glacis_slope=0.0,
+		lateral_slope_frac=0.0, rear_belly_slope=0.0, front_belly_slope=0.0):
+	"""Ground AFV hull with configurable V-belly, lateral slopes, sloped rear glacis,
+	and sloped front/rear belly slopes. Uses multiple convex hull volumes fused together."""
 	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
 	R = hull_reference_dim(size_x, size_y)
 	bm = bmesh.new()
 
 	tub_top_y = -hy + 2.0 * hy * tub_frac
 
-	# Volume A: lower hull tub.
+	# ---- Volume A: Lower hull tub with V-belly and sloped belly ends ----
 	nose_x_scale = 1.0 - nose_frac * 0.3
+
+	keel_y = -hy + v_belly_depth * hy * 2.0 if v_belly_depth > 0.0 else -hy
+	front_belly_y = -hy + front_belly_slope * hy * 2.0 if front_belly_slope > 0.0 else -hy
+	rear_belly_y = -hy + rear_belly_slope * hy * 2.0 if rear_belly_slope > 0.0 else -hy
+
 	tub_pts = [
-		(-hx, -hy, -hz), (hx, -hy, -hz), (-hx, -hy, hz), (hx, -hy, hz),
+		# Front bottom corners (with front belly slope)
+		(-hx * nose_x_scale, front_belly_y, -hz), (hx * nose_x_scale, front_belly_y, -hz),
+		# Rear bottom corners (with rear belly slope)
+		(-hx, rear_belly_y, hz), (hx, rear_belly_y, hz),
+		# Front keel (center bottom at nose)
+		(0.0, max(keel_y, front_belly_y), -hz),
+		# Rear keel (center bottom at tail)
+		(0.0, max(keel_y, rear_belly_y), hz),
+		# Tub roof corners (front and rear)
 		(-hx * nose_x_scale, tub_top_y, -hz), (hx * nose_x_scale, tub_top_y, -hz),
 		(-hx, tub_top_y, hz), (hx, tub_top_y, hz),
 	]
+
+	# Add intermediate keel points along the length for a smooth V
+	if v_belly_depth > 0.0 or front_belly_slope > 0.0 or rear_belly_slope > 0.0:
+		for i in range(1, 5):
+			t = i / 5.0
+			z = -hz + t * size_z
+			mid_belly = front_belly_y + (rear_belly_y - front_belly_y) * t
+			interp_y = max(keel_y, mid_belly)
+			tub_pts.append((0.0, interp_y, z))
+
 	tub_verts = [bm.verts.new(GV(*p)) for p in tub_pts]
 	bmesh.ops.convex_hull(bm, input=tub_verts)
 
-	# Volume B: upper structure (glacis + casemate/engine deck) - a
-	# separate convex hull, deliberately left interpenetrating Volume A.
+	# ---- Volume B: Upper structure (glacis + casemate/engine deck) ----
 	uw = hx * upper_w
+	# Apply lateral slope - upper structure narrower at top
+	uw_top = uw * (1.0 - lateral_slope_frac) if lateral_slope_frac > 0.0 else uw
 	glacis_deck_z = -hz + size_z * glacis_len_frac
+	# Rear glacis - if rear_glacis_slope > 0, the rear slopes downward
+	rear_deck_z = hz - size_z * rear_glacis_slope if rear_glacis_slope > 0.0 else hz
+	rear_top_y = hy * (1.0 - rear_glacis_slope * 0.5) if rear_glacis_slope > 0.0 else hy
 	upper_pts = [
+		# Front bottom (at tub roof)
 		(-uw, tub_top_y, -hz), (uw, tub_top_y, -hz),
-		(-uw, hy, glacis_deck_z), (uw, hy, glacis_deck_z),
-		(-uw, hy, hz), (uw, hy, hz),
+		# Glacis top / deck front
+		(-uw_top, hy, glacis_deck_z), (uw_top, hy, glacis_deck_z),
+		# Rear deck (sloped if rear_glacis_slope > 0)
+		(-uw_top, rear_top_y, rear_deck_z), (uw_top, rear_top_y, rear_deck_z),
+		# Rear bottom (at tub roof)
 		(-uw, tub_top_y, hz), (uw, tub_top_y, hz),
 	]
 	upper_verts = [bm.verts.new(GV(*p)) for p in upper_pts]
 	bmesh.ops.convex_hull(bm, input=upper_verts)
 
-	# Spine ridge along the deck (mount rail), same convention as the
-	# wedge-hull family's own spine.
+	# ---- Volume S: Spine ridge along the deck (mount rail) ----
 	spine_pts = [
 		(-hx * spine_w, hy * spine_h, hz * 0.1), (hx * spine_w, hy * spine_h, hz * 0.1),
 		(-hx * spine_w, hy * spine_h, -hz * 0.3), (hx * spine_w, hy * spine_h, -hz * 0.3),
@@ -1862,7 +1875,7 @@ def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, u
 
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
 
-	# Volume C: flat fender/sponson shelves at the tub-roof seam.
+	# ---- Volume C: Fenders/sponson shelves at tub-roof seam ----
 	fender_outer = hx * fender_frac
 	if fender_outer > uw + 0.02:
 		fender_reach = fender_outer - uw
@@ -1886,32 +1899,16 @@ def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, u
 	if turret_ring:
 		add_cyl_y(bm, (0, hy * 1.05, hz * 0.1), min(hx, hz) * 0.32, hy * 0.12, segments=16)
 
-	# Tier-1 bevel on the CURRENT vert set (picks up A/B/C's real seams -
-	# tub roof, glacis crease, fender edges, spine, plus any bisect+shift
-	# cuts above) - same dihedral-angle selection every other hull uses,
-	# no hand-picked edge lists needed even with 3 fused volumes.
+	# Tier-1 bevel on the CURRENT vert set
 	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=bevel_pct, segments=bevel_segments)
 
-	# Hard-armor region (2026-07-17, Approach A multi-region rollout - see
-	# DECISIONS_NEEDED.md): the frontal glacis (Volume B's sloped nose-to-
-	# deck face) plus the tub's own nose-taper corner facets - the real
-	# highest-threat frontal arc on an AFV, per Chris's own "frontal
-	# glacis, corner facets" framing. Everything else (top deck, sides/
-	# fenders/side-skirts, rear, belly) stays structural/matte. Geometric
-	# criterion, not hand-picked faces: any CURRENT face whose normal
-	# faces sufficiently toward the nose (-Z in Godot terms, raw Blender
-	# -Y - see godot_forward_component()) - this naturally stays a minority
-	# of total area for an elongated hull without needing per-hull area
-	# bookkeeping, and correctly excludes the turret ring (its cylinder
-	# wall faces point radially outward in every direction, not just
-	# forward) even though that geometry already exists in bm by this
-	# point. Called BEFORE greebles so hatches/vents/antennae default to
-	# structural fixtures, not armor plate.
+	# Hard-armor region: frontal glacis + tub nose corners
 	armor_frac = mark_armor_faces(bm, frontal_armor_predicate(hz, front_frac=armor_front_frac))
 	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
 
-	if greebles:
-		greebles(bm, hx, hy, hz)
+	# NO GREEBLES - bare hulls as requested
+	# if greebles:
+	#     greebles(bm, hx, hy, hz)
 
 	obj = make_object_from_bmesh(bm, name)
 	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
@@ -2870,7 +2867,141 @@ def generate_hulls():
 	print("--- Hull library done ---")
 
 
-clear_scene()
-generate_parts()
-# generate_hulls()  # Protected: hulls remain unmodified
-print("=== Mesh generation complete ===")
+# ---------------------------------------------------------------------------
+# Mark II hull generation - modernized variants with more aerodynamic,
+# angled facets and oblique slopes (AFV/IFV/MBT styling)
+# ---------------------------------------------------------------------------
+
+def _scout_mk2_greebles(bm, hx, hy, hz):
+    """Bare hull with angular boxy cheek armor blocks and driver casemate protrusion."""
+    # Angular boxy cheek armor blocks
+    for side in (-1, 1):
+        add_box(bm, (side * hx * 0.88, 0, -hz * 0.3), (hx * 0.28, hy * 0.5, hz * 0.5), bevel=0.03)
+    # Driver casemate protrusion block on upper deck
+    add_box(bm, (0, hy * 0.8, -hz * 0.35), (hx * 0.45, hy * 0.22, hz * 0.4), bevel=0.03)
+
+
+def _light_mk2_greebles(bm, hx, hy, hz):
+    """Bare hull with blocky modular armor side cheek boxes and engine deck step."""
+    # Blocky side cheek armor boxes
+    for side in (-1, 1):
+        for z_pos in (-hz * 0.3, hz * 0.1):
+            add_box(bm, (side * hx * 0.9, -hy * 0.1, z_pos), (hx * 0.22, hy * 0.6, hz * 0.35), bevel=0.03)
+    # Engine deck housing step
+    add_box(bm, (0, hy * 0.65, hz * 0.45), (hx * 0.7, hy * 0.25, hz * 0.45), bevel=0.03)
+
+
+def _medium_mk2_greebles(bm, hx, hy, hz):
+    """Bare hull with bold boxy modular armor cheek blocks and side skirt slabs."""
+    # Heavy composite armor cheek blocks (Abrams/Challenger wedge cheeks)
+    for side in (-1, 1):
+        add_box(bm, (side * hx * 0.85, hy * 0.1, -hz * 0.25), (hx * 0.3, hy * 0.7, hz * 0.6), bevel=0.04)
+        add_box(bm, (side * hx * 0.92, -hy * 0.4, 0), (hx * 0.18, hy * 0.6, hz * 1.5), bevel=0.03)
+    # Rear engine deck blocky step
+    add_box(bm, (0, hy * 0.55, hz * 0.55), (hx * 0.75, hy * 0.3, hz * 0.4), bevel=0.03)
+
+
+def _heavy_mk2_greebles(bm, hx, hy, hz):
+    """Bare hull with extra-heavy boxy armor cheek slabs and turbine deck step."""
+    # Extra-heavy boxy armor cheek slabs
+    for side in (-1, 1):
+        add_box(bm, (side * hx * 0.82, hy * 0.15, -hz * 0.2), (hx * 0.35, hy * 0.8, hz * 0.7), bevel=0.05)
+        add_box(bm, (side * hx * 0.9, -hy * 0.45, 0), (hx * 0.2, hy * 0.7, hz * 1.7), bevel=0.04)
+    # Large boxy turbine deck step
+    add_box(bm, (0, hy * 0.5, hz * 0.5), (hx * 0.8, hy * 0.35, hz * 0.5), bevel=0.04)
+
+
+def _transport_mk2_greebles(bm, hx, hy, hz):
+    """Bare hull with modular side armor packs, cab roof riser, and troop ramp frame."""
+    # Modular armor side packs
+    for side in (-1, 1):
+        for z_pos in (-hz * 0.3, hz * 0.1, hz * 0.45):
+            add_box(bm, (side * hx * 0.88, 0, z_pos), (hx * 0.25, hy * 0.7, hz * 0.32), bevel=0.03)
+    # Boxy roof driver cab riser
+    add_box(bm, (0, hy * 0.7, -hz * 0.3), (hx * 0.75, hy * 0.28, hz * 0.5), bevel=0.03)
+    # Boxy rear troop ramp frame protrusion
+    add_box(bm, (0, -hy * 0.2, hz * 0.92), (hx * 0.75, hy * 0.6, 0.25), bevel=0.03)
+
+
+def generate_mk2_hulls():
+    print("--- Building Mark II hull library ---")
+
+    # Scout Mk2: V-belly, sloped ends, bare hull with boxy protrusions
+    export_and_cleanup(build_wedge_hull("scout_hull_mk2", 2.1, 1.1, 3.8,
+        nose_frac=0.85, spine_w=0.25, spine_h=1.02, rear_flare=0.8, front_flare=0.35,
+        nose_region=0.25, height_taper=0.35, bevel_pct=0.055, bevel_segments=1,
+        waist_inset=0.04, waist_height_frac=0.45,
+        panel_line_fracs=[0.3, 0.55],
+        armor_front_frac=0.5,
+        v_belly_depth=0.3, front_belly_slope=0.25, rear_belly_slope=0.22,
+        color=(0.45, 0.5, 0.55), greebles=_scout_mk2_greebles), HULLS_DIR, "scout_hull_mk2")
+
+    # Light Mk2: V-belly, sloped ends, bare hull with boxy protrusions
+    export_and_cleanup(build_afv_hull("light_hull_mk2", 2.7, 1.6, 4.4,
+        nose_frac=0.45, tub_frac=0.5, upper_w=0.75, glacis_len_frac=0.28,
+        fender_frac=1.1, fender_height_frac=0.18,
+        spine_w=0.45, spine_h=1.1,
+        turret_ring=True,
+        waist_inset=0.05, deck_line=0.06,
+        panel_line_fracs=[0.25, 0.5],
+        armor_front_frac=0.52,
+        v_belly_depth=0.32, front_belly_slope=0.22, rear_belly_slope=0.22, rear_glacis_slope=0.15, lateral_slope_frac=0.18,
+        color=(0.55, 0.58, 0.62), greebles=_light_mk2_greebles), HULLS_DIR, "light_hull_mk2")
+
+    # Medium Mk2: V-belly, sloped ends, bare hull with boxy protrusions
+    export_and_cleanup(build_afv_hull("medium_hull_mk2", 3.3, 2.0, 6.0,
+        nose_frac=0.35, tub_frac=0.55, upper_w=0.7, glacis_len_frac=0.25,
+        fender_frac=1.12, fender_height_frac=0.22,
+        spine_w=0.65, spine_h=1.15,
+        turret_ring=True,
+        waist_inset=0.06, deck_line=0.08,
+        panel_line_fracs=[0.22, 0.45, 0.68],
+        armor_front_frac=0.55,
+        v_belly_depth=0.36, front_belly_slope=0.25, rear_belly_slope=0.25, rear_glacis_slope=0.18, lateral_slope_frac=0.22,
+        color=(0.6, 0.63, 0.67), greebles=_medium_mk2_greebles), HULLS_DIR, "medium_hull_mk2")
+
+    # Heavy Mk2: V-belly, sloped ends, bare hull with boxy protrusions
+    export_and_cleanup(build_afv_hull("heavy_hull_mk2", 4.4, 2.8, 8.8,
+        nose_frac=0.28, tub_frac=0.6, upper_w=0.68, glacis_len_frac=0.2,
+        fender_frac=1.15, fender_height_frac=0.28,
+        spine_w=0.7, spine_h=1.2,
+        turret_ring=True,
+        waist_inset=0.07, deck_line=0.1,
+        panel_line_fracs=[0.2, 0.42, 0.65, 0.82],
+        armor_front_frac=0.58,
+        v_belly_depth=0.4, front_belly_slope=0.28, rear_belly_slope=0.28, rear_glacis_slope=0.2, lateral_slope_frac=0.25,
+        color=(0.5, 0.52, 0.55), greebles=_heavy_mk2_greebles), HULLS_DIR, "heavy_hull_mk2")
+
+    # Transport Mk2: Deep V-belly, sloped ends, bare hull with boxy protrusions
+    export_and_cleanup(build_afv_hull("transport_hull_mk2", 3.5, 2.4, 7.7,
+        nose_frac=0.4, tub_frac=0.55, upper_w=0.72, glacis_len_frac=0.32,
+        fender_frac=1.08, fender_height_frac=0.2,
+        spine_w=0.55, spine_h=1.12,
+        turret_ring=False,
+        waist_inset=0.05, deck_line=0.06,
+        panel_line_fracs=[0.28, 0.55],
+        armor_front_frac=0.5,
+        v_belly_depth=0.45, front_belly_slope=0.3, rear_belly_slope=0.25, rear_glacis_slope=0.15, lateral_slope_frac=0.2,
+        color=(0.52, 0.56, 0.6), greebles=_transport_mk2_greebles), HULLS_DIR, "transport_hull_mk2")
+
+    print("--- Mark II hull library done ---")
+
+
+def parse_args():
+    import sys
+    argv = sys.argv
+    if "--" in argv:
+        argv = argv[argv.index("--") + 1:]
+    else:
+        argv = []
+    return {"generate_mk2": "--generate-mk2" in argv}
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    clear_scene()
+    generate_parts()
+    if args["generate_mk2"]:
+        generate_mk2_hulls()
+    else:
+        print("=== Mesh generation complete (parts only; use --generate-mk2 for Mark II hulls) ===")
