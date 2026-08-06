@@ -91,6 +91,9 @@ static func measure_visual_bounds(module: Node3D) -> AABB:
 	for mesh_inst in module.find_children("*", "MeshInstance3D", true, false):
 		if mesh_inst.mesh == null:
 			continue
+		var m_name = mesh_inst.name
+		if m_name == "BarrierShield" or m_name.begins_with("BarrierShield") or m_name.begins_with("FiringArc") or m_name.begins_with("ArcCone"):
+			continue
 		var xf := Transform3D.IDENTITY
 		var walker: Node = mesh_inst
 		while walker != null and walker != module:

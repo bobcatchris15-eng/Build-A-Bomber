@@ -825,6 +825,9 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			collision_shape.shape = col_box_mod
 			static_body.add_child(collision_shape)
 			new_module.add_child(static_body)
+			
+			var ModulePlacerScript = preload("res://scripts/module_placer.gd")
+			ModulePlacerScript._refit_module_collider(new_module)
 		
 		var m_data = ModuleDataResource.new()
 		m_data.type_id = type_id

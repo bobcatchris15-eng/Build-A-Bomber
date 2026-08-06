@@ -262,11 +262,15 @@ func _unhandled_input(event):
 					# Hit the Hull itself
 					_select_module(hull)
 				else:
-					# We clicked a Module!
-					var module = result.collider
-					if not module.has_meta("module_data") and module.get_parent() != null and module.get_parent().has_meta("module_data"):
-						module = module.get_parent()
-					_select_module(module)
+					# We clicked a Module or sub-node!
+					var module: Node = result.collider
+					var curr: Node = module
+					while curr != null and curr != hull and curr != get_tree().root:
+						if curr.has_meta("module_data"):
+							module = curr
+							break
+						curr = curr.get_parent()
+					_select_module(module if (module != null and module.has_meta("module_data")) else result.collider)
 					
 					# Initialize drag movement if not locomotion
 					if module and module.has_meta("module_data"):
@@ -1004,7 +1008,12 @@ static func _refit_module_collider(module: Node3D) -> void:
 	var bounds := _visual_bounds(module)
 	if bounds.size.length_squared() <= 0.0:
 		return
-	(shape.shape as BoxShape3D).size = bounds.size
+	var fit_size = bounds.size
+	var min_dim = 0.35
+	fit_size.x = maxf(fit_size.x, min_dim)
+	fit_size.y = maxf(fit_size.y, min_dim)
+	fit_size.z = maxf(fit_size.z, min_dim)
+	(shape.shape as BoxShape3D).size = fit_size
 	body.position = bounds.get_center()
 
 func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bool = false, tweaks: Dictionary = {}) -> Node3D:
@@ -1087,11 +1096,15 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	# its facet right after this and structural colliders are separately kept
 	# in step with struct_scale (see blueprint_manager and gizmo_3d), so both
 	# have their own sizing story that this must not fight.
-	if category == "locomotion" or category == "weapon":
+	if category != "armor" and category != "structural":
 		var visual_aabb := _visual_bounds(new_weapon)
 		if visual_aabb.size.length_squared() > 0.0:
 			col_size = visual_aabb.size
 			col_center = visual_aabb.get_center()
+	var min_dim = 0.35
+	col_size.x = maxf(col_size.x, min_dim)
+	col_size.y = maxf(col_size.y, min_dim)
+	col_size.z = maxf(col_size.z, min_dim)
 	static_body.position = col_center
 	var collision_shape = CollisionShape3D.new()
 	var col_box = BoxShape3D.new()
