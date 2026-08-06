@@ -24,8 +24,10 @@ const AssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
 const StanceScript = preload("res://scripts/battle/orders/stance.gd")
 const FlowFieldServiceScript = preload("res://scripts/battle/movement/flow_field_service.gd")
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
+const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 signal died(unit)
 signal order_completed(unit)
@@ -61,6 +63,28 @@ var nav_agent: NavigationAgent3D = null
 var max_hp: float = 100.0
 var hp: float = 100.0
 var is_dead: bool = false
+
+# Capacitor. Feeds energy weapons and the barrier projector; regenerates from
+# hull base plus generator modules.
+var max_energy: float = 0.0
+var current_energy: float = 0.0
+var energy_regen_rate: float = 0.0
+
+# Set by the vision service. True means the LOCAL team cannot see this unit, so
+# it is neither rendered nor targetable by them.
+var fog_hidden: bool = false
+
+# Longest reach of anything mounted on this unit, and the range an ATTACK order
+# closes to. Derived from the weapons at assembly time.
+var attack_range: float = 0.0
+
+# How far this unit can SEE, which is a different number from how far it can
+# shoot - weapons routinely out-range their own sight, which is what makes
+# scouting and spotting matter.
+var vision_range: float = 0.0
+
+# Kept so energy and vision can be recomputed after a module is stripped.
+var _hull_type: String = ""
 
 var move_speed: float = 0.0
 var terrain_speed_multiplier: float = 1.0
@@ -132,6 +156,13 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	is_naval = facts["is_naval"]
 	is_amphibious = facts["is_amphibious"]
 
+	# Weapons before the nav agent so a unit is never briefly alive, mobile and
+	# unarmed - the AI acquires targets the frame a unit spawns.
+	attack_range = AssemblyScript.attach_weapons(hull_node)
+	_hull_type = facts["hull_type"]
+	_recalculate_energy()
+	_recalculate_vision()
+
 	nav_agent = AssemblyScript.build_nav_agent(self, facts, controller)
 	var base_size: Vector3 = facts["base_size"]
 	_separation_radius = maxf(base_size.x, base_size.z) * SEPARATION_RADIUS_MULT
@@ -140,6 +171,42 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	_create_selection_ring(base_size)
 	_detect_harvester(controller)
 	return true
+
+
+# Capacity and regen from hull base plus generators. Called again when a
+# generator is stripped, which is the whole reason it is a function.
+func _recalculate_energy() -> void:
+	var energy := AssemblyScript.compute_energy(hull_node, _hull_type)
+	var previous_max := max_energy
+	max_energy = energy["max_energy"]
+	energy_regen_rate = energy["energy_regen_rate"]
+	# A unit starts charged; after that the pool only ever shrinks to fit, so a
+	# stripped generator costs capacity without refilling what is left.
+	current_energy = max_energy if previous_max <= 0.0 else clampf(current_energy, 0.0, max_energy)
+
+
+# Hull base sight plus sensor modules, faction-scaled. The vision service reads
+# this; it does not compute it, because what a unit can see is a property of the
+# unit and what it is allowed to see is a property of the match.
+func _recalculate_vision() -> void:
+	var base: float = ModuleCatalog.get_base_vision(_hull_type)
+	var bonus := 0.0
+	var has_radar := false
+	for m in DamageModelScript.active_modules(hull_node):
+		var data = m.get_meta("module_data")
+		if data == null:
+			continue
+		if data.type_id == "sensor_suite":
+			bonus += data.get_vision_bonus()
+		elif data.type_id == "fire_control_radar":
+			has_radar = true
+	vision_range = (base + bonus) * FactionCatalog.get_passive(faction, "vision_mult", 1.0)
+	if is_instance_valid(hull_node):
+		# Read off the HULL by auto_weapon.gd's spotting check, not off the unit -
+		# a radar lets this unit's weapons engage out to their own reach rather
+		# than only as far as it can see.
+		hull_node.set_meta("has_fire_control_radar", has_radar)
+		hull_node.set_meta("fire_control_max_range", maxf(vision_range, attack_range))
 
 
 # A design is a harvester if it actually mounts the module. Derived from the
@@ -191,6 +258,8 @@ func _sync_nav_radii() -> void:
 func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
+	if current_energy < max_energy:
+		current_energy = minf(max_energy, current_energy + energy_regen_rate * delta)
 	_advance_orders()
 	_tick_economy(delta)
 	_apply_movement(delta)
@@ -252,7 +321,21 @@ func halt() -> void:
 
 func _apply_movement(delta: float) -> void:
 	var destination: Vector3
-	if current_order != null and current_order.has_destination():
+	if current_order != null and current_order.type == Order.Type.ATTACK:
+		if not _resolve_attack_station():
+			velocity.x = 0.0
+			velocity.z = 0.0
+			return
+		destination = _internal_destination
+	elif current_order != null and current_order.has_destination():
+		# ATTACK-MOVE stops for a fight. The order resumes on its own once nothing
+		# hostile is in reach, because this is re-evaluated every tick rather than
+		# latched - which is what makes a stalled advance restart without anyone
+		# having to notice the fight ended.
+		if current_order.type == Order.Type.ATTACK_MOVE and _hostile_within_reach():
+			velocity.x = 0.0
+			velocity.z = 0.0
+			return
 		destination = current_order.position
 	elif _has_internal_destination:
 		destination = _internal_destination
@@ -357,6 +440,67 @@ func _steer_direction(slot: Vector3) -> Vector3:
 	return blended.normalized() * own.length()
 
 
+# --- Engagement --------------------------------------------------------------
+#
+# The unit CLOSES; it does not shoot. Firing is auto_weapon.gd's business, and it
+# acquires its own targets off the `damageable` group without being told. What
+# the order layer owns is position: get within reach and stop, so a tank does not
+# drive into a fortress to deliver a shot it could have taken from 40 m.
+
+# How close is close enough to open fire. Inside the weapon's actual reach, so a
+# unit that arrives is comfortably in range rather than dancing on the boundary
+# as the target drifts a metre.
+const ENGAGEMENT_RANGE_FRACTION := 0.85
+
+func _engagement_distance() -> float:
+	# An unarmed unit has no standoff to keep, so it closes all the way. Harvesters
+	# and scouts get an arrive distance rather than parking at range zero forever.
+	if attack_range <= 0.0:
+		return _arrive_distance()
+	return maxf(attack_range * ENGAGEMENT_RANGE_FRACTION, _arrive_distance())
+
+
+# True when the unit should keep driving toward its ATTACK target, having set
+# _internal_destination to where it is going. False means stand still - either
+# already in range, or there is nothing left to shoot.
+func _resolve_attack_station() -> bool:
+	if current_order == null or not is_instance_valid(current_order.target):
+		return false
+	# HOLD_POSITION does not chase, even under a direct attack order. The order is
+	# still honoured - the guns engage if the target comes to them - but the wheels
+	# stay put, which is the entire point of parking artillery.
+	if stance == StanceScript.Kind.HOLD_POSITION:
+		return false
+	var gap: float = Vector2(
+		current_order.target.global_position.x - global_position.x,
+		current_order.target.global_position.z - global_position.z).length()
+	if gap <= _engagement_distance():
+		return false
+	_internal_destination = current_order.target.global_position
+	return true
+
+
+# Whether something shootable and hostile is close enough to stop an advance.
+#
+# Uses the controller's damageable lookup rather than a group scan, so this costs
+# a bucket walk and not a pass over every unit on the field, every tick, per unit.
+func _hostile_within_reach() -> bool:
+	if attack_range <= 0.0 or _controller == null \
+			or not _controller.has_method("get_nearby_damageable"):
+		return false
+	for c in _controller.get_nearby_damageable(global_position, attack_range):
+		if c == self or not is_instance_valid(c) or c.is_dead:
+			continue
+		var other_team: int = c.get_meta("team") if c.has_meta("team") else -1
+		if other_team == team:
+			continue
+		if _controller.has_method("is_visible_to_team") \
+				and not _controller.is_visible_to_team(c, team):
+			continue
+		return true
+	return false
+
+
 func _separation_push() -> Vector3:
 	if _controller == null or not _controller.has_method("neighbour_positions"):
 		return Vector3.ZERO
@@ -399,20 +543,44 @@ func request_repath() -> void:
 
 # --- Damage ------------------------------------------------------------------
 #
-# SCOPE NOTE. This is flat damage against a single HP pool. The real model -
-# damage classes against armour materials, per-facet thresholds, chip damage,
-# brute-force blending, subsystem stripping - lives in damage_resolver.gd, which
-# this rebuild keeps and does not reimplement. Routing hits through it needs the
-# attacker's facet and damage class, which arrive with weapons. Until then this
-# exists so that things which kill units (the harvester explosion below, and the
-# AI in Phase 3) have something to call.
-func take_damage(amount: float) -> void:
+# THE SIGNATURE IS THE CONTRACT. auto_weapon.gd calls
+# `take_damage(amount, damage_class, hit_origin)` on whatever it hits, and it
+# duck-types the target - anything in the `damageable` group with this method is
+# shootable. The three-argument form is not optional decoration: the defaults
+# exist for direct callers (the harvester explosion, tests) that genuinely have
+# no attacker, and every one of them loses facet-aware behaviour by saying so
+# explicitly rather than by accident.
+#
+# The rules live in damage_model.gd and the numbers in damage_resolver.gd. What
+# is here is this unit's own business: energy shields, the strip consequences
+# that only a vehicle has (losing locomotion, losing a generator), and death.
+func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = null) -> void:
 	if is_dead:
 		return
-	hp -= amount
+
+	var modules := DamageModelScript.active_modules(hull_node)
+
+	# Energy Barrier Projector: a frontal shield that spends the capacitor to eat
+	# the hit. Checked before armour because it is in front of the armour.
+	if hit_origin != null and current_energy > 0.0:
+		amount = _absorb_with_barrier(amount, modules, hit_origin)
+		if amount <= 0.0:
+			return
+
+	var resolved := DamageModelScript.resolve(hull_node, modules, damage_type, self, hit_origin)
+
+	# Subsystem stripping. A hit that lands on a module spends itself entirely on
+	# that module - it does not also come off the hull, which is what makes
+	# stripping a real trade for the attacker rather than a free bonus.
+	var facet := DamageModelScript.hit_facet(self, hit_origin)
+	var strippable := DamageModelScript.strippable(modules, facet)
+	if not strippable.is_empty() and randf() < DamageModelScript.MODULE_STRIP_CHANCE:
+		_strip_module(strippable.pick_random(), amount)
+		return
+
+	hp = maxf(0.0, hp - DamageModelScript.hull_damage(amount, resolved.x, resolved.y))
 	if hp > 0.0:
 		return
-	hp = 0.0
 	is_dead = true
 
 	# A LOADED HARVESTER DETONATES. Classic C&C, and a real tactical layer rather
@@ -431,6 +599,95 @@ func take_damage(amount: float) -> void:
 
 	died.emit(self)
 	queue_free()
+
+
+# Spend the capacitor to absorb a frontal hit, returning what is left of it.
+#
+# Frontal only, and that is the whole balance of the module: it rewards facing
+# the threat, so a flanked unit gets nothing from it. `local.z < 0` is Godot's
+# -Z-forward convention, the same one classify_facet() uses.
+func _absorb_with_barrier(amount: float, modules: Array, hit_origin) -> float:
+	var has_barrier := false
+	for m in modules:
+		var data = m.get_meta("module_data")
+		if data != null and data.type_id == "energy_barrier_projector":
+			has_barrier = true
+			break
+	if not has_barrier:
+		return amount
+	var origin: Vector3 = hit_origin if hit_origin is Vector3 else hit_origin.global_position
+	var local: Vector3 = global_transform.basis.inverse() * (origin - global_position)
+	if local.z >= 0.0:
+		return amount
+	var absorbed := minf(amount, current_energy)
+	current_energy -= absorbed
+	return amount - absorbed
+
+
+# Take a module off the unit and deal with what its loss means.
+#
+# The recalculations are deferred because this runs mid-hit: the module is only
+# queue_free()d here, so it is still a child of the hull until the tree flushes,
+# and recalculating now would count the module that just died.
+func _strip_module(module: Node3D, amount: float) -> void:
+	if not DamageModelScript.damage_module(module, amount):
+		return
+	var data = module.get_meta("module_data")
+	var was_locomotion: bool = data != null and data.category == "locomotion"
+	var was_generator: bool = data != null and data.category == "generator"
+	var was_sensor: bool = data != null and data.type_id in ["sensor_suite", "fire_control_radar"]
+	module.queue_free()
+	if was_locomotion:
+		# Losing the running gear is what immobilises a vehicle. Recalculating
+		# rather than zeroing: a design with six wheels that loses one is slower,
+		# not stopped, and Drivetrain.analyze() is what knows the difference.
+		call_deferred("_recalculate_move_speed")
+	if was_generator:
+		call_deferred("_recalculate_energy")
+	if was_sensor:
+		call_deferred("_recalculate_vision")
+
+
+# --- Energy ------------------------------------------------------------------
+#
+# All three are duck-typed by auto_weapon.gd. Absent, energy weapons fire for
+# free and drain/repair modules silently do nothing - a failure that looks like a
+# balance problem rather than a missing method, which is why they are here even
+# though nothing in this file calls them.
+
+# Checked before an energy-classed weapon fires. Returns false and spends nothing
+# when the capacitor is dry, which is the soft limit on sustained energy fire.
+func spend_energy(amount: float) -> bool:
+	if is_dead or current_energy < amount:
+		return false
+	current_energy -= amount
+	return true
+
+
+# An enemy drain weapon. Never restores HP and never goes negative: a drained
+# target simply cannot use its own energy weapons until it regenerates.
+func drain_energy(amount: float) -> void:
+	if is_dead:
+		return
+	current_energy = maxf(0.0, current_energy - amount)
+
+
+# A repair_array's ally-targeting beam.
+func repair_hp(amount: float) -> void:
+	if is_dead or hp >= max_hp:
+		return
+	hp = minf(max_hp, hp + amount)
+
+
+# --- Fog of war --------------------------------------------------------------
+#
+# Written by the vision service, not computed here: "am I visible" depends on
+# every construct on the opposing team, which only something that can see the
+# whole field can answer. Gates rendering and, via auto_weapon.gd, whether the
+# opposing team may target this unit at all.
+func set_fog_visible(value: bool) -> void:
+	fog_hidden = not value
+	visible = value
 
 
 func set_selected(value: bool) -> void:

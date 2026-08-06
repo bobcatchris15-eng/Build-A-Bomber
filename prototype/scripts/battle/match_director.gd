@@ -562,7 +562,81 @@ func apply_explosion(at: Vector3, radius: float, damage: float, source: Node) ->
 			continue
 		# Linear falloff to zero at the rim, so standing at the edge of a blast
 		# is meaningfully better than standing in it.
-		target.take_damage(damage * (1.0 - distance / radius))
+		#
+		# Explosive class, and the blast centre as the hit origin, so a splash hit
+		# gets the same facet-aware treatment a direct one does - catching a tank
+		# from behind with a shell should be worth what it is worth.
+		target.take_damage(damage * (1.0 - distance / radius), "explosive", at)
+
+
+# --- Weapon support ----------------------------------------------------------
+#
+# auto_weapon.gd duck-types every one of these off `get_tree().current_scene` and
+# guards each with has_method(), so a missing one degrades rather than crashes.
+# That is exactly why they are worth writing down: the degraded behaviours are
+# silent and individually plausible - weapons that never miss a fog check,
+# defences that ignore low power - so an absent method reads as a balance
+# problem rather than as a missing method.
+
+# Two teams, so alliance is equality. The legacy runtime carries a real alliance
+# table for multi-slot matches; that ports with the slot system, not before it,
+# and pretending otherwise here would be a stub that looks finished.
+func is_allied(a: int, b: int) -> bool:
+	return a == b
+
+
+# Whether `viewing_team` can currently see `c`.
+#
+# Fails OPEN until the vision service lands in Phase 4. A closed default would
+# stop every weapon in the game from firing, which is a far louder and more
+# confusing failure than over-sharing during a phase where there is no fog to
+# hide behind anyway.
+func is_visible_to_team(_c: Node, _viewing_team: int) -> bool:
+	return true
+
+
+# Reveal a patch of map for a while. Illumination ammo and sensor beacons call
+# this; inert until the vision service exists to have something to reveal.
+func reveal_area(_for_team: int, _pos: Vector3, _radius: float, _duration: float) -> void:
+	pass
+
+
+# Whether this team's defences should be firing at reduced effect. Delegated so
+# there is one definition of "low power" and the HUD, production and weapons all
+# read the same one.
+func is_low_power(for_team: int) -> bool:
+	return economy != null and economy.is_low_power(for_team)
+
+
+# Damageable things near `pos`, for weapon target acquisition.
+#
+# UNITS come from the neighbour grid the movement layer already rebuilds every
+# tick - an adapter over it, not a second spatial index, because two grids over
+# the same units is two chances to go stale in different directions.
+#
+# STRUCTURES are scanned directly, because they are deliberately NOT in that
+# grid. The grid feeds separation steering, which is about units flowing around
+# each other; putting buildings in it would have units treat their own base as a
+# crowd to squeeze through. There are tens of structures, not hundreds, and they
+# do not move, so a flat scan costs nothing worth indexing away.
+#
+# Leaving them out entirely is the trap here: weapons would silently be unable to
+# shoot buildings, which reads as "the AI ignores my base" rather than as a
+# missing branch, and it makes the HQ - the win condition - invulnerable.
+func get_nearby_damageable(pos: Vector3, radius: float) -> Array:
+	var out: Array = []
+	var cells := int(ceil(radius / NEIGHBOUR_CELL))
+	var centre := _grid_key(pos)
+	for dz in range(-cells, cells + 1):
+		for dx in range(-cells, cells + 1):
+			var bucket: Array = _neighbour_grid.get(centre + Vector2i(dx, dz), [])
+			for n in bucket:
+				if is_instance_valid(n) and pos.distance_to(n.global_position) <= radius:
+					out.append(n)
+	for s in get_tree().get_nodes_in_group("structures"):
+		if is_instance_valid(s) and not s.is_dead and pos.distance_to(s.global_position) <= radius:
+			out.append(s)
+	return out
 
 
 # --- Per-tick bookkeeping ----------------------------------------------------
@@ -625,9 +699,11 @@ func flow_direction_for(order: Order, at: Vector3) -> Vector3:
 	# Trip length gates the field as much as group size does: over a short hop the
 	# search covers the whole reachable map to save a dozen cheap corridor
 	# searches, and the convergence it causes is paid for nothing.
-	var trip: float = at.distance_to(order.group_destination)
+	#
+	# This is the length recorded when the order was issued, NOT the distance still
+	# to run - see Order.trip_length for why the difference matters.
 	var field: FlowField = flow_fields.field_for(
-		order.group_destination, _group_size(order.group_id), trip)
+		order.group_destination, _group_size(order.group_id), order.trip_length)
 	if field == null or not field.has_route(at):
 		return Vector3.ZERO
 	return field.direction_at(at)

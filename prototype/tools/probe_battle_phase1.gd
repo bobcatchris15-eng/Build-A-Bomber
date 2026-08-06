@@ -19,7 +19,7 @@ const FlowFieldServiceScript = preload("res://scripts/battle/movement/flow_field
 # Enough to cross the flow field's own threshold, so the field path is the one
 # under test rather than the per-agent fallback.
 const SQUAD_SIZE := 12
-const TICKS := 1800
+const TICKS := 4200
 
 
 func _init():
@@ -48,22 +48,47 @@ func _init():
 	var origin: Vector3 = spawn[0].global_position if not spawn.is_empty() else Vector3.ZERO
 	var squad: Array = []
 	for i in range(SQUAD_SIZE):
-		var at := origin + Vector3(float(i % 4) * 6.0, 0.0, float(i / 4) * 6.0 + 14.0)
+		# Laid out BEHIND the spawn point relative to the map centre, not in front
+		# of it. The original layout ran +14..+20 m outward, which put the back rank
+		# past the HQ and hard against the map boundary, where a unit has a valid
+		# field direction and simply cannot travel. That produced a permanent
+		# straggler and made the squad look like a movement failure it wasn't.
+		var at := origin + Vector3(float(i % 4) * 6.0 - 9.0, 0.0, -float(i / 4) * 6.0 - 14.0)
 		var u = battle.spawn_unit(blueprint, 0, at)
 		if u != null:
 			squad.append(u)
 	for _i in range(4):
 		await process_frame
 	print("  squad size: %d" % squad.size())
+	for s in battle.get_team_structures(0):
+		var nearest := 1.0e9
+		var who := -1
+		for i in range(squad.size()):
+			var d: float = Vector2(s.global_position.x - squad[i].global_position.x,
+				s.global_position.z - squad[i].global_position.z).length()
+			if d < nearest:
+				nearest = d
+				who = i
+		print("    structure %s at %s - nearest squad member [%d] at %.1f m"
+			% [s.kind, str(s.global_position.round()), who, nearest])
 	if squad.size() < FlowFieldServiceScript.FIELD_MIN_UNITS:
 		failures.append("squad too small to exercise the flow field")
 		_finish(battle, failures)
 		return
 
 	# --- Formation ----------------------------------------------------------
-	# The destination is well clear of the spawn so the units have to travel.
-	var destination := Vector3(origin.x + 10.0, 0.0, origin.z - 60.0)
+	# The destination is the mirror of the spawn across the map, not a fixed
+	# offset. The offset this used to use put the destination ~60 m away, under
+	# FlowFieldService.MIN_TRIP_DISTANCE, so no field was ever built and the whole
+	# probe silently measured the per-agent fallback - passing while the path it
+	# exists to test never ran. A cross-map trip is the case a field is FOR.
+	var destination := Vector3(origin.x, 0.0, -origin.z)
 	destination.y = battle.terrain_height_at(destination)
+	var trip: float = origin.distance_to(destination)
+	print("  trip length: %.1f m (field gate is %.1f m)"
+		% [trip, FlowFieldServiceScript.MIN_TRIP_DISTANCE])
+	if trip < FlowFieldServiceScript.MIN_TRIP_DISTANCE:
+		failures.append("trip is %.1f m, under the field gate - this probe would not test the field" % trip)
 	var group: int = battle.orders.move(squad, destination)
 	print("  group id: %d" % group)
 
@@ -88,7 +113,7 @@ func _init():
 		failures.append("%d pairs of units share a formation slot" % duplicates)
 
 	# --- Flow field ---------------------------------------------------------
-	var field = battle.flow_fields.field_for(destination, squad.size())
+	var field = battle.flow_fields.field_for(destination, squad.size(), trip)
 	if field == null:
 		failures.append("no flow field built for a %d-unit group" % squad.size())
 	else:
@@ -131,8 +156,22 @@ func _init():
 	# destination instead would score the rear rank of a box formation as
 	# "failed to arrive" when it is standing exactly where it was told to.
 	var assigned: Dictionary = {}
+	var start_positions: Dictionary = {}
 	for u in squad:
 		assigned[u] = u.current_order.position
+		start_positions[u] = u.global_position
+
+	# Confirm the field is actually steering before spending 1800 ticks measuring
+	# where everyone ended up. A zero direction here means the run below is the
+	# per-agent fallback again, and its numbers say nothing about the blend.
+	var probe_dir: Vector3 = battle.flow_direction_for(squad[0].current_order, squad[0].global_position)
+	var probe_weight: float = FlowFieldServiceScript.field_weight(
+		squad[0].global_position.distance_to(destination))
+	print("  field at departure: dir %s  weight %.2f" % [str(probe_dir.normalized()), probe_weight])
+	if probe_dir == Vector3.ZERO:
+		failures.append("the field is not steering at departure - the travel run below is the fallback path")
+	if probe_weight <= 0.0:
+		failures.append("field weight is zero at departure (blend never engages)")
 
 	for _i in range(TICKS):
 		await physics_frame
@@ -145,6 +184,25 @@ func _init():
 		distances.append(d)
 		if d < 8.0:
 			arrived += 1
+	# Per unit, so a single unit that never left the start line is distinguishable
+	# from a squad that is merely slow - the summary statistics read the same.
+	for i in range(squad.size()):
+		var u = squad[i]
+		var moved: float = start_positions[u].distance_to(u.global_position)
+		var route: bool = field != null and field.has_route(start_positions[u])
+		print("    [%2d] moved %6.1f m  to-slot %6.1f m  speed %4.1f  route-at-spawn %s"
+			% [i, moved, u.global_position.distance_to(assigned[u]),
+				Vector2(u.velocity.x, u.velocity.z).length(), str(route)])
+		# Anything that commanded full throttle and went nowhere is the interesting
+		# case: `velocity` above is the COMMANDED velocity, not the achieved one, so
+		# a pinned unit and a cruising one read identically. Dump its real state.
+		if moved < 20.0:
+			var here: Vector3 = u.global_position
+			var flow_here: Vector3 = battle.flow_direction_for(u.current_order, here)
+			print("         STUCK at %s  on_wall %s  nav_finished %s  field-route-here %s  flow %s"
+				% [str(here.round()), str(u.is_on_wall()),
+					str(u.nav_agent.is_navigation_finished()) if is_instance_valid(u.nav_agent) else "no-agent",
+					str(field != null and field.has_route(here)), str(flow_here.normalized().round())])
 	distances.sort()
 	# The distribution, not just the count: "five stragglers at 31 m" and "five
 	# wedged against a cliff at 120 m" are the same pass/fail but completely

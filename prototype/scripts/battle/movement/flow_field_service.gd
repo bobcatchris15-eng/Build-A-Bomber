@@ -46,12 +46,37 @@ const HANDOVER_DISTANCE := 28.0
 # Blending keeps what the field is actually for - one search instead of N, and a
 # route that already knows where the terrain is - while never letting it fully
 # override the fact that these units are going to different places.
+#
+# MEASURED, and the first two rows above were not a fair fight. Both were taken on
+# a ~60 m trip, which is under MIN_TRIP_DISTANCE, so no field was ever built: the
+# "pure agents" row is honest but the "hard switch" row was the fallback path too,
+# and the probe passed while never once exercising the thing it existed to test.
+# Re-measured on a 204 m cross-map trip with the field confirmed steering at
+# departure (weight 1.00, non-zero direction):
+#
+#   blend + trip gate, field genuinely engaged    median 2.6 m from slot,
+#                                                 8-9/12 arrived,
+#                                                 closest pair 4.4-7.3 m
+#
+# So the blend holds the formation while the field does the long haul - which is
+# the whole claim - and nothing stacks. What it does NOT yet do is get everyone
+# home: two or three units per run take a bad route and are still travelling at
+# cutoff, and WHICH units varies run to run. That is a straggler/route problem,
+# not a blend problem, and it is the next thing to chase here.
 const BLEND_BAND := 45.0
 
 # Below this trip length a field is not built at all. Its benefit is amortising
 # one search across many units on a LONG haul; over a short hop the search covers
 # the whole reachable map to save twelve corridor searches that were cheap
 # anyway, and the convergence cost is paid for nothing.
+#
+# CALLERS MUST PASS THE TRIP LENGTH RECORDED AT ISSUE TIME (Order.trip_length),
+# not the distance still to run. Passing the live remaining distance - which is
+# what match_director did originally - makes this gate fire mid-journey: on a
+# 200 m trip the field vanished the moment the unit came within 90 m, which is
+# still outside the blend band (HANDOVER_DISTANCE + BLEND_BAND = 73 m), so field
+# influence fell from 1.0 to 0.0 in a single frame. That is precisely the hard
+# switch BLEND_BAND exists to remove, reintroduced at the far end of the trip.
 const MIN_TRIP_DISTANCE := 90.0
 
 

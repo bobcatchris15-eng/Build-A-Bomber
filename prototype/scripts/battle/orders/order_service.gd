@@ -51,15 +51,23 @@ func _destination_order(units: Array, destination: Vector3, queued: bool, aggres
 	var group := _next_group_id
 	_next_group_id += 1
 
+	var positions: Array = []
+	for u in live:
+		positions.append(u.global_position)
+
 	var targets: Array = []
 	if live.size() >= FORMATION_MIN_UNITS:
-		var positions: Array = []
-		for u in live:
-			positions.append(u.global_position)
 		targets = FormationScript.destinations_for(positions, destination, _spacing_for(live))
 	else:
 		for _u in live:
 			targets.append(destination)
+
+	# Measured from the group's centroid, not per unit, so the whole group agrees
+	# on whether this journey earns a flow field. Per-unit trip lengths would let a
+	# straggler at the back qualify while the leaders did not, and half a group on
+	# the field and half on their agents is the one combination neither path was
+	# designed for.
+	var trip := _centroid(positions).distance_to(destination)
 
 	for i in range(live.size()):
 		# The clicked point rides along beside the slot so the movement layer can
@@ -67,8 +75,18 @@ func _destination_order(units: Array, destination: Vector3, queued: bool, aggres
 		# the arrival - see flow_field_service.gd for why that split exists.
 		var order: Order = OrderScript.attack_move(targets[i], group, destination) if aggressive \
 			else OrderScript.move(targets[i], group, destination)
+		order.trip_length = trip
 		_give(live[i], order, queued)
 	return group
+
+
+static func _centroid(positions: Array) -> Vector3:
+	if positions.is_empty():
+		return Vector3.ZERO
+	var sum := Vector3.ZERO
+	for p in positions:
+		sum += p
+	return sum / float(positions.size())
 
 
 func attack(units: Array, target: Node3D, queued: bool = false) -> void:

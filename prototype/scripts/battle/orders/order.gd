@@ -64,6 +64,19 @@ var group_id: int = 0
 # genuinely are the same point.
 var group_destination: Vector3 = Vector3.ZERO
 
+# How far this unit was from `group_destination` WHEN THE ORDER WAS ISSUED.
+#
+# The flow field's minimum-trip gate has to ask "is this journey long enough to
+# be worth one shared search", which is a property of the journey and therefore
+# fixed at issue time. Asking the live remaining distance instead - which is what
+# the gate did originally - gets the question wrong in a way that reintroduces
+# exactly the hard switch the blend exists to remove: on a 200 m trip the field
+# would vanish the instant the unit came within MIN_TRIP_DISTANCE, which is still
+# well outside the blend band, so field influence dropped from full to nothing in
+# one frame. Recording it once here makes field_weight() the only thing that
+# governs the handover, and it ramps.
+var trip_length: float = 0.0
+
 static func move(to: Vector3, group: int = 0, group_to: Variant = null) -> Order:
 	var o := Order.new()
 	o.type = Type.MOVE

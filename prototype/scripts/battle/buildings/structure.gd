@@ -13,6 +13,7 @@ extends StaticBody3D
 
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const LayersScript = preload("res://scripts/battle/battle_layers.gd")
+const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
 
 signal died(structure)
 
@@ -144,15 +145,51 @@ func exit_position() -> Vector3:
 
 # --- Damage ------------------------------------------------------------------
 
-func take_damage(amount: float) -> void:
+# Same three-argument contract as BattleUnitV2, because auto_weapon.gd does not
+# know or care which one it hit - it duck-types anything in the `damageable`
+# group. A one-argument version here is a runtime error on every shell that lands
+# on a building.
+#
+# Structures take the damage-class reduction but NOT the facet or subsystem
+# rules: a building has no armour facets to flank and no modules to strip, so
+# there is nothing for those to act on. Routing through the resolver anyway is
+# what keeps a thermal weapon good against buildings and a kinetic one mediocre,
+# instead of every gun doing flat damage to bases.
+func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = null) -> void:
 	if is_dead:
 		return
-	hp -= amount
-	if hp <= 0.0:
-		hp = 0.0
-		is_dead = true
-		# Every held bay is freed, or harvesters queued on a dead refinery wait
-		# on a reservation that will never come.
-		_bays.fill(null)
-		died.emit(self)
-		queue_free()
+
+	var resolved := DamageModelScript.resolve(null, [], damage_type, self, hit_origin)
+	hp = maxf(0.0, hp - DamageModelScript.hull_damage(amount, resolved.x, resolved.y))
+	if hp > 0.0:
+		return
+
+	is_dead = true
+	# Every held bay is freed, or harvesters queued on a dead refinery wait
+	# on a reservation that will never come.
+	_bays.fill(null)
+	died.emit(self)
+	queue_free()
+
+
+func repair_hp(amount: float) -> void:
+	if is_dead or hp >= max_hp:
+		return
+	hp = minf(max_hp, hp + amount)
+
+
+# --- Fog of war --------------------------------------------------------------
+#
+# Structures are THREE-state, unlike units. A building the player has seen once
+# stays drawn where it was after it leaves vision, because a base does not move
+# and forgetting it would be a lie the player can trivially disprove. Only a
+# never-seen building is hidden outright.
+var fog_hidden: bool = false
+var fog_ever_seen: bool = false
+
+
+func set_fog_visible(value: bool) -> void:
+	fog_hidden = not value
+	if value:
+		fog_ever_seen = true
+	visible = value or fog_ever_seen

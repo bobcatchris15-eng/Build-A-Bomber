@@ -207,6 +207,70 @@ static func _add_selection_proxy(body: CharacterBody3D, hull_node: Node3D,
 	body.add_child(area)
 
 
+# --- Weapons -----------------------------------------------------------------
+#
+# WEAPONS ARE ATTACHED BY SCRIPT SWAP, not by instancing a scene. Every module a
+# blueprint mounts is already a real node under the hull, positioned, scaled and
+# carrying its ModuleData - reconstruct_vehicle() built it. A weapon is that same
+# node with behaviour bolted on, so the only thing missing is the script.
+#
+# `_ready()` is called by hand because set_script() on a node already in the tree
+# does not re-run it, and auto_weapon.gd does all of its setup there - reading its
+# own module_data, facet and sponson metas, and its mount's faction.
+#
+# WHICH MODULES QUALIFY is ModuleCatalog.needs_combat_script()'s call and nothing
+# else's. It is the single source of truth precisely because three spawn paths
+# used to decide this independently, and repair_array and drone_carrier - which
+# are not category "weapon" - got missed by all of them in real matches while
+# passing in tests that attached the script by hand.
+#
+# Returns the longest reach mounted, which is what an ATTACK order closes to.
+static func attach_weapons(hull_node: Node3D) -> float:
+	if not is_instance_valid(hull_node):
+		return 0.0
+	var weapon_script := load("res://scripts/auto_weapon.gd")
+	var longest := 0.0
+	for child in hull_node.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		var data = child.get_meta("module_data")
+		if data == null or not ModuleCatalog.needs_combat_script(data.type_id):
+			continue
+		child.set_script(weapon_script)
+		child.set_physics_process(true)
+		child._ready()
+		if "fire_range" in child:
+			longest = maxf(longest, child.fire_range)
+	return longest
+
+
+# --- Energy ------------------------------------------------------------------
+#
+# Hull base capacity plus whatever generators are mounted, in the same "hull base
+# + module bonus" shape vision and HP already use. Recomputed rather than stored,
+# so losing a generator mid-battle shrinks the pool.
+#
+# Returns {max_energy, energy_regen_rate}.
+static func compute_energy(hull_node: Node3D, hull_type: String) -> Dictionary:
+	var capacity: float = ModuleCatalog.get_base_energy(hull_type)
+	var regen := 0.0
+	if is_instance_valid(hull_node):
+		for child in hull_node.get_children():
+			if not child.has_meta("module_data") or child.is_queued_for_deletion():
+				continue
+			var data = child.get_meta("module_data")
+			if data != null and data.category == "generator":
+				capacity += data.get_energy_capacity()
+				regen += data.get_energy_regen()
+	return {
+		"max_energy": capacity,
+		# A small share of the pool per second even with no generators, so a unit
+		# with none still trickles back; generators are what make sustained energy
+		# fire viable rather than what make it possible at all.
+		"energy_regen_rate": capacity * 0.08 + regen,
+	}
+
+
 # The four nav maps are duck-typed off the match controller, exactly as the old
 # runtime did it (`has_method("get_ground_nav_map")`), so a unit built standalone
 # in a test simply gets no agent and falls back to direct steering. That property
