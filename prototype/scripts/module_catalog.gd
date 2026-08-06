@@ -1259,16 +1259,42 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 30,
 			"crystal": 30,
 			"dps": 0.0,
-			# Fog-of-war (built this pass): "Pushes back fog of war...
-			# Mast Height: Drastically increases line-of-sight"
-			# (Arsenal_Weapons_List.md) - previously stat-only cosmetic
-			# flavor text with no actual vision system behind it. Scales
-			# with the existing mast_height tweak in get_vision_bonus().
-			# Scaled with VISION_SCALE, same reasoning as
-			# sensor_beacon_launcher's above.
 			"vision_bonus": 47.5,
 			"size": Vector3(0.5, 2.5, 0.5),
 			"color": Color.MEDIUM_PURPLE
+		},
+		"laser_designator": {
+			"name": "Laser Target Painter",
+			"category": "module",
+			"hp": 80.0,
+			"weight": 40.0,
+			"metal": 25,
+			"crystal": 35,
+			"dps": 0.0,
+			"size": Vector3(0.6, 0.7, 0.6),
+			"color": Color.PALE_VIOLET_RED
+		},
+		"energy_barrier_projector": {
+			"name": "Energy Barrier Projector",
+			"category": "armor",
+			"hp": 250.0,
+			"weight": 110.0,
+			"metal": 60,
+			"crystal": 50,
+			"dps": 0.0,
+			"size": Vector3(1.0, 0.4, 1.0),
+			"color": Color.DEEP_SKY_BLUE
+		},
+		"fire_control_radar": {
+			"name": "Fire Control Radar",
+			"category": "module",
+			"hp": 90.0,
+			"weight": 65.0,
+			"metal": 45,
+			"crystal": 40,
+			"dps": 0.0,
+			"size": Vector3(0.7, 1.8, 0.7),
+			"color": Color.DODGER_BLUE
 		},
 
 		"armor_plating": {
@@ -2250,7 +2276,7 @@ static func get_armor_module_bias(type_id: String, damage_type: String) -> float
 	return float(ARMOR_MODULE_BIAS[type_id].get(damage_type, 1.0))
 
 const SUPPORT_CATEGORIES = ["generator"]
-const SUPPORT_TYPE_IDS = ["repair_array", "drone_carrier", "resource_harvester", "sensor_suite"]
+const SUPPORT_TYPE_IDS = ["repair_array", "drone_carrier", "resource_harvester", "sensor_suite", "laser_designator", "energy_barrier_projector", "fire_control_radar"]
 
 # --- Roles (parts-menu grouping) -------------------------------------------
 # `category` is a mechanical classification - it tells the placer which gizmo

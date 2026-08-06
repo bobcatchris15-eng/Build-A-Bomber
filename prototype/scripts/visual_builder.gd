@@ -391,6 +391,7 @@ const MODULAR_ASSEMBLY_TYPES := {
 	# Support modules with dedicated modular assembly code - must bypass the
 	# monolithic _part(type_id) path or their sub-part assembly branches are never reached.
 	"sensor_suite": true, "resource_harvester": true, "repair_array": true, "drone_carrier": true,
+	"laser_designator": true, "energy_barrier_projector": true, "fire_control_radar": true,
 }
 
 static func _repeat_along_axis(parent: Node3D, count: int, spacing: float, axis_vec: Vector3, builder_func: Callable):
@@ -2001,6 +2002,52 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			dish.position = Vector3(0, dish_y, 0)
 		parent_node.add_child(dish)
 
+	elif type_id == "laser_designator":
+		var mount_mesh = _part("laser_designator_mount")
+		var mount: MeshInstance3D = _mesh_inst(mount_mesh, base_color.darkened(0.2)) if mount_mesh else MeshInstance3D.new()
+		parent_node.add_child(mount)
+
+		var head_mesh = _part("laser_designator_head")
+		var head: MeshInstance3D = _mesh_inst(head_mesh, Color(0.25, 0.28, 0.32)) if head_mesh else MeshInstance3D.new()
+		head.name = "laser_designator_head"
+		head.position = Vector3(0, 0.18, 0)
+		parent_node.add_child(head)
+
+	elif type_id == "energy_barrier_projector":
+		var mount_mesh = _part("energy_barrier_projector_mount")
+		var mount: MeshInstance3D = _mesh_inst(mount_mesh, base_color.darkened(0.2)) if mount_mesh else MeshInstance3D.new()
+		parent_node.add_child(mount)
+
+		var array_mesh = _part("energy_barrier_projector_array")
+		var array: MeshInstance3D = _mesh_inst(array_mesh, Color(0.15, 0.65, 0.85)) if array_mesh else MeshInstance3D.new()
+		array.name = "energy_barrier_projector_array"
+		parent_node.add_child(array)
+
+		var facet = parent_node.get_meta("facet", "front") if parent_node.has_meta("facet") else "front"
+		var hull_node = parent_node.get_parent()
+		var full_aabb = get_full_hull_aabb(hull_node) if is_instance_valid(hull_node) else AABB(Vector3(-2, -0.75, -3), Vector3(4, 1.5, 6))
+
+		var shield_arc = build_shield_facet_arc(facet, full_aabb, parent_node.transform)
+		shield_arc.name = "BarrierShield"
+		parent_node.add_child(shield_arc)
+
+	elif type_id == "fire_control_radar":
+		var mast_h = tweaks.get("mast_height", 1.0)
+		var mount_mesh = _part("fire_control_radar_mount")
+		var mount: MeshInstance3D = _mesh_inst(mount_mesh, base_color.darkened(0.2)) if mount_mesh else MeshInstance3D.new()
+		parent_node.add_child(mount)
+
+		var mast_mesh = _part("fire_control_radar_mast")
+		var mast: MeshInstance3D = _mesh_inst(mast_mesh, Color(0.25, 0.28, 0.32)) if mast_mesh else MeshInstance3D.new()
+		mast.scale = Vector3(1.0, mast_h, 1.0)
+		parent_node.add_child(mast)
+
+		var dish_mesh = _part("fire_control_radar_dish")
+		var dish: MeshInstance3D = _mesh_inst(dish_mesh, Color(0.80, 0.82, 0.85)) if dish_mesh else MeshInstance3D.new()
+		dish.name = "fire_control_radar_dish"
+		dish.position = Vector3(0, 0.80 * mast_h, 0)
+		parent_node.add_child(dish)
+
 	elif type_id == "resource_harvester":
 		var ext_size = tweaks.get("extractor_size", 1.0)
 
@@ -3513,8 +3560,112 @@ static func _attach_moving_parts(type_id: String, parent_node: Node3D, base_size
 			_attach_propeller_blades(parent_node, base_size, base_color, true)
 
 
-# Barrel ring for rotary_cannon, wrapped under a "BarrelCluster" pivot so it
-# can spin independently of the (static) base/mount - see auto_weapon.gd.
+static func get_full_hull_aabb(hull_node: Node3D) -> AABB:
+	if not is_instance_valid(hull_node):
+		return AABB(Vector3(-2.0, -0.75, -3.0), Vector3(4.0, 1.5, 6.0))
+
+	var combined_aabb := AABB()
+	var has_mesh := false
+
+	var stack = [hull_node]
+	while not stack.is_empty():
+		var curr = stack.pop_back()
+		for child in curr.get_children():
+			if child.has_meta("module_data"):
+				continue
+			if child is MeshInstance3D:
+				var m_aabb = child.get_aabb()
+				var rel_trans = hull_node.global_transform.affine_inverse() * child.global_transform
+				var loc_box = rel_trans * m_aabb
+				if not has_mesh:
+					combined_aabb = loc_box
+					has_mesh = true
+				else:
+					combined_aabb = combined_aabb.merge(loc_box)
+			if child.get_child_count() > 0:
+				stack.append(child)
+
+	if not has_mesh or combined_aabb.size.length_squared() < 0.01:
+		var hull_type = hull_node.get_meta("type_id", "medium_hull") if hull_node.has_meta("type_id") else "medium_hull"
+		var cat_data = ModuleCatalog.get_module_data(hull_type)
+		var h_scale = hull_node.get_meta("hull_scale", Vector3.ONE) if hull_node.has_meta("hull_scale") else Vector3.ONE
+		var sz = cat_data.get("size", Vector3(4.0, 1.5, 6.0)) * h_scale
+		combined_aabb = AABB(-sz / 2.0, sz)
+
+	return combined_aabb
+
+static func build_shield_facet_arc(facet: String, full_hull_aabb: AABB, module_transform: Transform3D = Transform3D.IDENTITY) -> MeshInstance3D:
+	var shield_inst = MeshInstance3D.new()
+
+	var full_size = full_hull_aabb.size
+	var full_center = full_hull_aabb.get_center()
+
+	var w = full_size.z * 1.05 if (facet == "left" or facet == "right") else full_size.x * 1.05
+	var h = full_size.y * 1.25 if (facet != "top" and facet != "bottom") else full_size.z * 1.05
+
+	var segs_u = 24
+	var segs_v = 18
+
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+
+	var standoff = 3.0
+	var bulge = 0.85
+
+	var local_center = module_transform.inverse() * full_center
+
+	for iv in range(segs_v + 1):
+		var tv = float(iv) / float(segs_v)
+		var v = lerpf(-PI / 2.0, PI / 2.0, tv)
+		var cos_v = cos(v)
+		var sin_v = sin(v)
+
+		for iu in range(segs_u + 1):
+			var tu = float(iu) / float(segs_u)
+			var u = lerpf(-PI / 2.0, PI / 2.0, tu)
+			var cos_u = cos(u)
+			var sin_u = sin(u)
+
+			var px = local_center.x + (w * 0.5) * sin_u
+			var py = standoff + bulge * cos_u * cos_v
+			var pz = local_center.z + (h * 0.5) * sin_v
+
+			var nx = sin_u
+			var ny = 1.2 * cos_u * cos_v
+			var nz = sin_v
+
+			st.set_normal(Vector3(nx, ny, nz).normalized())
+			st.set_uv(Vector2(tu, tv))
+			st.add_vertex(Vector3(px, py, pz))
+
+	for iv in range(segs_v):
+		for iu in range(segs_u):
+			var i0 = iv * (segs_u + 1) + iu
+			var i1 = i0 + 1
+			var i2 = (iv + 1) * (segs_u + 1) + iu
+			var i3 = i2 + 1
+
+			st.add_index(i0)
+			st.add_index(i1)
+			st.add_index(i2)
+
+			st.add_index(i1)
+			st.add_index(i3)
+			st.add_index(i2)
+
+	var arr_mesh = st.commit()
+	shield_inst.mesh = arr_mesh
+
+	var mat = ShaderMaterial.new()
+	mat.shader = preload("res://shaders/energy_shield.gdshader")
+	mat.set_shader_parameter("shield_color", Color(0.35, 0.72, 1.0))
+	mat.set_shader_parameter("base_opacity", 0.18)
+	mat.set_shader_parameter("fresnel_power", 2.2)
+	mat.set_shader_parameter("crackle_speed", 1.2)
+	shield_inst.material_override = mat
+	shield_inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return shield_inst
+
 static func _attach_rotary_barrels(parent_node: Node3D, base_size: Vector3, tweaks: Dictionary):
 	var pivot = Node3D.new()
 	pivot.name = "BarrelCluster"

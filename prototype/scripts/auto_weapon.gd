@@ -871,6 +871,30 @@ func _physics_process(delta):
 			dish.rotate_y(delta * 2.5)
 		return
 
+	if type_id == "fire_control_radar":
+		var dish = get_node_or_null("fire_control_radar_dish")
+		if not dish:
+			dish = get_node_or_null("RadarDish")
+		if dish:
+			dish.rotate_y(delta * 3.0)
+		return
+
+	if type_id == "energy_barrier_projector":
+		var arr = get_node_or_null("energy_barrier_projector_array")
+		if arr:
+			arr.rotate_y(delta * 1.5)
+		return
+
+	if type_id == "laser_designator":
+		_find_nearest_target(delta)
+		if target and is_instance_valid(target):
+			target.set_meta("is_laser_painted", true)
+			target.set_meta("laser_painted_timer", 0.5)
+			var head = get_node_or_null("laser_designator_head")
+			if head:
+				head.look_at(target.global_position, Vector3.UP)
+		return
+
 	time_since_last_shot += delta
 	_los_cache_timer -= delta
 	_recalculate_low_hp_dps_bonus()

@@ -1244,15 +1244,21 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 						armor_pos = Vector3(0, y_off, 0)
 
 			var cat_size = catalog_data.get("size", Vector3.ONE)
-			new_weapon.scale.x = target_x / cat_size.x
-			new_weapon.scale.z = target_z / cat_size.z
-			new_weapon.position = armor_pos
+			if type_id == "energy_barrier_projector":
+				new_weapon.scale = Vector3.ONE
+				new_weapon.position = armor_pos
+			else:
+				new_weapon.scale.x = target_x / cat_size.x
+				new_weapon.scale.z = target_z / cat_size.z
+				new_weapon.position = armor_pos
 
 			var mod_data = new_weapon.get_meta("module_data", null) as ModuleData
 			if mod_data:
 				mod_data.scale_multiplier = Vector3(new_weapon.scale.x, 1.0, new_weapon.scale.z)
 
 			new_weapon.set_meta("facet", ModuleCatalog.classify_facet(local_normal))
+			if type_id == "energy_barrier_projector":
+				VisualBuilder.build_visual(type_id, new_weapon, catalog_data.size, catalog_data.color, tweaks)
 
 	# The weapon mount metas (mount_style, mount_normal, facet, sponson) are
 	# set at the TOP of this function, not here: build_visual() needs the

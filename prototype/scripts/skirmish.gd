@@ -831,6 +831,8 @@ func _is_spotted_by(c, viewers: Array, beacons: Array, was_visible: bool) -> boo
 	for o in viewers:
 		if not is_instance_valid(o): continue
 		var vision = _get_effective_vision(o) * detection_mult
+		if o.has_meta("has_fire_control_radar") and o.get_meta("has_fire_control_radar"):
+			vision = maxf(vision, float(o.get_meta("fire_control_max_range", vision)))
 		var effective_range = vision * FOG_HIDE_RANGE_MULT if was_visible else vision
 		var o_flying = "is_flying" in o and o.is_flying
 		if c.global_position.distance_to(o.global_position) <= effective_range:

@@ -147,7 +147,8 @@ func _physics_process(delta):
 	if global_position.distance_to(dest) > 0.05:
 		look_at(dest, Vector3.UP)
 	var dir = (dest - global_position).normalized()
-	global_position += dir * speed * delta
+	var eff_speed = speed * 1.35 if (target and target.has_meta("is_laser_painted") and target.get_meta("is_laser_painted")) else speed
+	global_position += dir * eff_speed * delta
 
 	if _phase == 1 and global_position.distance_to(target.global_position + Vector3(0, 0.5, 0)) < 1.1:
 		# Warhead payload effects (smoke/incendiary/illumination ammo) land

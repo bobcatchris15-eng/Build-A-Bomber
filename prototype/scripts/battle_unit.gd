@@ -369,15 +369,21 @@ func _recalculate_vision(hull_type_for_vision: String = ""):
 		_hull_type_for_vision = hull_type_for_vision
 	var base = ModuleCatalog.get_base_vision(_hull_type_for_vision)
 	var bonus = 0.0
+	var has_fcr = false
 	if is_instance_valid(hull_node):
 		for child in hull_node.get_children():
 			if child.has_meta("module_data") and not child.is_queued_for_deletion():
 				var data = child.get_meta("module_data")
 				if data.type_id == "sensor_suite":
 					bonus += data.get_vision_bonus()
+				elif data.type_id == "fire_control_radar":
+					has_fcr = true
 	vision_range = base + bonus
 	var faction = hull_node.get_meta("faction", "industrialists") if is_instance_valid(hull_node) else "industrialists"
 	vision_range *= FactionCatalog.get_passive(faction, "vision_mult", 1.0)
+	if is_instance_valid(hull_node):
+		hull_node.set_meta("has_fire_control_radar", has_fcr)
+		hull_node.set_meta("fire_control_max_range", maxf(vision_range, max_weapon_range))
 
 # Logistics sharing aura (ENERGY_AND_BALANCE_SPEC.md #5): "not just
 # self-sufficiency" per Chris's instruction - logistics_tank does nothing
@@ -1522,6 +1528,25 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	# was actually shooting.
 	if hit_origin != null:
 		_request_smoke_screen(hit_origin if hit_origin is Vector3 else hit_origin.global_position)
+
+	# Energy Barrier Projector frontal shield absorption
+	if hit_origin != null and current_energy > 5.0:
+		var has_barrier = false
+		for m in get_active_modules():
+			var m_data = m.get_meta("module_data")
+			if m_data and m_data.type_id == "energy_barrier_projector":
+				has_barrier = true
+				break
+		if has_barrier:
+			var origin_pos = hit_origin if hit_origin is Vector3 else hit_origin.global_position
+			var local_hit_dir = global_transform.basis.inverse() * (origin_pos - global_position)
+			if local_hit_dir.z < 0.0: # Frontal 180° / 90° arc
+				var absorbed = minf(amount, current_energy)
+				current_energy -= absorbed
+				amount -= absorbed
+				_flash_shield()
+				if amount <= 0.0:
+					return
 
 	var active_modules = get_active_modules()
 	var resolved = DamageResolverScript.resolve(hull_node, active_modules, damage_type, self, hit_origin)

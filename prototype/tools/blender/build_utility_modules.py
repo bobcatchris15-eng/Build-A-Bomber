@@ -656,6 +656,131 @@ def build_drone_carrier_parts():
 
 
 # ---------------------------------------------------------------------------
+# LASER DESIGNATOR  (Target Painter)
+# ---------------------------------------------------------------------------
+# Two GLBs:
+#   laser_designator_mount.glb — static deck pedestal with servo drive
+#   laser_designator_head.glb  — pivoting optical gimbal head with lens & laser tube
+
+def build_laser_designator_mount():
+    bm = bmesh.new()
+    # Main octagonal pedestal base
+    add_cyl_z(bm, (0, 0, 0.04), 0.22, 0.08, segments=8)
+    add_cone_z(bm, (0, 0, 0.10), 0.15, 0.11, 0.04, segments=12)
+    # Azimuth servo housing yoke
+    for sx in (-0.08, 0.08):
+        add_box(bm, (sx, 0.0, 0.18), (0.04, 0.14, 0.12), bevel=0.008)
+    bolt_ring_z(bm, 0.08, 0.17, count=6)
+    export_bmesh(bm, "laser_designator_mount", "laser_designator_mount.glb",
+                 color=(0.20, 0.22, 0.26), metallic=0.75, roughness=0.30)
+
+
+def build_laser_designator_head():
+    bm = bmesh.new()
+    # Central optical camera housing
+    add_box(bm, (0, 0.0, 0.0), (0.16, 0.22, 0.14), bevel=0.01)
+    # Main optical camera lens disc on front (+Z in Godot, +Y in Blender)
+    add_cyl_y(bm, (0.0, 0.12, 0.02), 0.055, 0.03, segments=20)
+    # Secondary laser painter emitter barrel (coaxial under main lens)
+    add_cyl_y(bm, (0.04, 0.13, -0.03), 0.025, 0.05, segments=16)
+    # Cooling fins on rear (-Y in Blender)
+    for iz in range(4):
+        zh = -0.04 + iz * 0.025
+        add_box(bm, (0.0, -0.10, zh), (0.14, 0.02, 0.01), bevel=0.002)
+    export_bmesh(bm, "laser_designator_head", "laser_designator_head.glb",
+                 color=(0.25, 0.28, 0.32), metallic=0.60, roughness=0.35)
+
+
+# ---------------------------------------------------------------------------
+# ENERGY BARRIER PROJECTOR  (Directional Forcefield Shield)
+# ---------------------------------------------------------------------------
+# Three GLBs:
+#   energy_barrier_projector_mount.glb  — high-voltage junction base
+#   energy_barrier_projector_array.glb  — 4 curved field-focusing tines & capacitor
+#   energy_barrier_projector_shield.glb — translucent parabolic forcefield arc mesh
+
+def build_energy_barrier_projector_mount():
+    bm = bmesh.new()
+    add_cyl_z(bm, (0, 0, 0.04), 0.28, 0.08, segments=8)
+    add_box(bm, (0, 0, 0.12), (0.32, 0.32, 0.08), bevel=0.015)
+    # High-voltage cable conduit trunks
+    for sx in (-0.12, 0.12):
+        add_cyl_z(bm, (sx, 0.10, 0.18), 0.03, 0.06, segments=10)
+    bolt_ring_z(bm, 0.08, 0.22, count=8)
+    export_bmesh(bm, "energy_barrier_projector_mount", "energy_barrier_projector_mount.glb",
+                 color=(0.18, 0.20, 0.24), metallic=0.80, roughness=0.25)
+
+
+def build_energy_barrier_projector_array():
+    bm = bmesh.new()
+    # Central capacitor core cylinder
+    add_cyl_z(bm, (0, 0, 0.14), 0.10, 0.16, segments=16)
+    # 4 curved projector focusing tines
+    for i in range(4):
+        ang = i * (math.pi / 2.0)
+        tx = math.cos(ang) * 0.16
+        ty = math.sin(ang) * 0.16
+        add_box(bm, (tx, ty, 0.22), (0.03, 0.05, 0.20), bevel=0.008, rot_z=ang)
+        add_cone_z(bm, (tx * 1.15, ty * 1.15, 0.33), 0.02, 0.005, 0.06, segments=8)
+    export_bmesh(bm, "energy_barrier_projector_array", "energy_barrier_projector_array.glb",
+                 color=(0.15, 0.65, 0.85), metallic=0.40, roughness=0.20)
+
+
+def build_energy_barrier_projector_shield():
+    bm = bmesh.new()
+    # Glowing translucent parabolic shield barrier arc
+    add_cone_z(bm, (0, 0.50, 0.20), 1.20, 0.90, 0.10, segments=24)
+    export_bmesh(bm, "energy_barrier_projector_shield", "energy_barrier_projector_shield.glb",
+                 color=(0.20, 0.85, 1.0), metallic=0.10, roughness=0.10)
+
+
+# ---------------------------------------------------------------------------
+# FIRE CONTROL RADAR  (Long-Range Target Finder)
+# ---------------------------------------------------------------------------
+# Three GLBs:
+#   fire_control_radar_mount.glb — octagonal base pedestal with slip-ring motor
+#   fire_control_radar_mast.glb  — structural lattice mast column with waveguides
+#   fire_control_radar_dish.glb  — rotating planar array radar panel + feed horn
+
+def build_fire_control_radar_mount():
+    bm = bmesh.new()
+    add_cyl_z(bm, (0, 0, 0.04), 0.24, 0.08, segments=8)
+    add_cyl_z(bm, (0, 0, 0.10), 0.16, 0.04, segments=16)
+    bolt_ring_z(bm, 0.08, 0.19, count=8)
+    export_bmesh(bm, "fire_control_radar_mount", "fire_control_radar_mount.glb",
+                 color=(0.18, 0.20, 0.24), metallic=0.75, roughness=0.35)
+
+
+def build_fire_control_radar_mast():
+    bm = bmesh.new()
+    mast_h = 0.80
+    add_cone_z(bm, (0, 0, mast_h * 0.5), 0.04, 0.03, mast_h, segments=12)
+    for angle in (0, 90, 180, 270):
+        rad = math.radians(angle)
+        tx = math.cos(rad) * 0.07
+        ty = math.sin(rad) * 0.07
+        add_cyl_z(bm, (tx, ty, mast_h * 0.5), 0.012, mast_h, segments=8)
+    for iz in range(2):
+        zh = (iz + 1) * (mast_h / 3.0)
+        add_cyl_z(bm, (0, 0, zh), 0.08, 0.02, segments=12)
+    export_bmesh(bm, "fire_control_radar_mast", "fire_control_radar_mast.glb",
+                 color=(0.25, 0.28, 0.32), metallic=0.65, roughness=0.35)
+
+
+def build_fire_control_radar_dish():
+    bm = bmesh.new()
+    # Planar array radar panel (rectangular array face)
+    add_box(bm, (0, 0.06, 0.0), (0.42, 0.04, 0.28), bevel=0.01)
+    # Array face grid segments
+    add_box(bm, (0, 0.085, 0.0), (0.38, 0.01, 0.24), bevel=0.002)
+    # Feed horn receiver probe on front
+    add_cyl_y(bm, (0, 0.18, 0.0), 0.015, 0.15, segments=10)
+    add_cone_z(bm, (0, 0.26, 0.0), 0.03, 0.01, 0.04, segments=12)
+    export_bmesh(bm, "fire_control_radar_dish", "fire_control_radar_dish.glb",
+                 color=(0.80, 0.82, 0.85), metallic=0.50, roughness=0.40)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -687,8 +812,31 @@ def build_utility_parts():
     print("=== Building Drone Carrier (unchanged) ===")
     build_drone_carrier_parts()
 
+    print("=== Building Laser Designator ===")
+    clear_scene()
+    build_laser_designator_mount()
+    clear_scene()
+    build_laser_designator_head()
+
+    print("=== Building Energy Barrier Projector ===")
+    clear_scene()
+    build_energy_barrier_projector_mount()
+    clear_scene()
+    build_energy_barrier_projector_array()
+    clear_scene()
+    build_energy_barrier_projector_shield()
+
+    print("=== Building Fire Control Radar ===")
+    clear_scene()
+    build_fire_control_radar_mount()
+    clear_scene()
+    build_fire_control_radar_mast()
+    clear_scene()
+    build_fire_control_radar_dish()
+
     print("=== All utility modules exported successfully ===")
 
 
 if __name__ == "__main__":
     build_utility_parts()
+
