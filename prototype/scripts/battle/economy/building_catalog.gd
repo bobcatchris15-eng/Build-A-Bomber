@@ -74,7 +74,17 @@ const STATS := {
 		# Harvesters dock at numbered bays rather than converging on the origin.
 		# See harvester_fsm.gd - unreserved arrivals are what made the old
 		# implementation jam.
-		"dock_bays": [Vector3(0, 0, 4.5), Vector3(4.5, 0, 0), Vector3(-4.5, 0, 0)],
+		#
+		# 7 m, NOT 4.5. The building carves a hole in the navmesh and Recast then
+		# shrinks the walkable surface by the agent radius on top of that, so on a
+		# 5x5 footprint nothing is walkable until roughly 5.5 m from the centre. At
+		# 4.5 m the bays were measurably 0.44-0.98 m OFF the navmesh: no agent
+		# could path to one, they arrived at the nearest walkable point instead,
+		# and docking then depended on the direct-steering fallback closing the
+		# last metre against the building's own collider. It worked by centimetres
+		# (measured closest approach 1.97-1.99 m against a 2.0 m threshold) or it
+		# did not work at all.
+		"dock_bays": [Vector3(0, 0, 7.0), Vector3(7.0, 0, 0), Vector3(-7.0, 0, 0)],
 	},
 	"light_manufactory": {
 		"hp": 1400.0, "size": Vector3(5, 2.4, 6), "color": Color(0.68, 0.6, 0.42),

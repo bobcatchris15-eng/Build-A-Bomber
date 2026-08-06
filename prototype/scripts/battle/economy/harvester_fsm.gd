@@ -23,7 +23,29 @@ const HARVEST_TIME := 3.0
 const UNLOAD_TIME := 2.0
 # How close counts as being at the node / at the bay.
 const WORK_DISTANCE := 3.0
+
+# THE FLOOR, not the whole answer - see _dock_distance().
+#
+# A fixed 2.0 m was too tight to be reachable. A harvester's nav agent stops
+# within its own arrive distance, which scales with speed, and the unit is a
+# vehicle several metres long whose ORIGIN is what gets measured. Requiring that
+# origin within 2 m of a point beside a building asks a truck to park with a
+# tolerance smaller than its own arrive slop; it docked by centimetres when it
+# docked at all.
 const DOCK_DISTANCE := 2.0
+
+# A harvester that cannot reach its reserved bay must eventually give it up.
+#
+# THIS IS THE ONE THAT MATTERS. Before it, a harvester that could not close the
+# last metre stayed in MOVING_TO_BAY forever, holding a reservation nothing could
+# reclaim - so a refinery with three bays permanently lost one to a single stuck
+# truck, then another, and the economy quietly died. The geometry fixes above
+# make that unlikely; this makes it non-permanent, which matters more, because
+# any future building whose bays end up awkward reintroduces the same deadlock.
+const DOCK_TIMEOUT := 20.0
+# Progress means closing on the bay. Anything less than this over the timeout
+# window is not "slow", it is stuck.
+const DOCK_PROGRESS_EPSILON := 0.5
 # Where a harvester with no bay waits. Far enough out that the orbit never
 # obstructs the bays themselves, which would deadlock the queue it is waiting in.
 const HOLDING_RADIUS := 14.0
@@ -54,6 +76,12 @@ var capacity: int = 50
 
 var _timer: float = 0.0
 var _orbit_phase: float = 0.0
+# Stuck detection for the approach to a reserved bay.
+var _stuck_timer: float = 0.0
+var _closest_gap: float = INF
+# Set when QUEUED was entered to escape a failed approach rather than to wait for
+# a free bay. Gates re-reservation until the truck is actually clear.
+var _must_clear: bool = false
 
 var _unit: Node3D = null
 var _world = null
@@ -105,7 +133,7 @@ func tick(delta: float) -> void:
 		State.HARVESTING:
 			_harvest(delta)
 		State.MOVING_TO_BAY:
-			_move_to_bay()
+			_move_to_bay(delta)
 		State.QUEUED:
 			_wait_for_bay(delta)
 		State.UNLOADING:
@@ -191,11 +219,32 @@ func _head_home() -> void:
 		state = State.QUEUED
 		_orbit_phase = 0.0
 		return
+	_begin_bay_approach()
+
+
+# Every entry into MOVING_TO_BAY resets the stuck watch, or a harvester that had
+# a slow approach last trip arrives on this one with the clock already running.
+func _begin_bay_approach() -> void:
 	state = State.MOVING_TO_BAY
+	_stuck_timer = 0.0
+	_closest_gap = INF
 	_unit.set_internal_destination(refinery.bay_position(bay_index))
 
 
-func _move_to_bay() -> void:
+# How close this particular harvester has to get before it counts as docked.
+#
+# Derived from the unit rather than fixed, because the thing that has to fit is
+# the unit: its nav agent gives up inside its own arrive distance, and a bigger,
+# faster truck has a bigger one. Asking every hull to hit the same 2 m is what
+# made docking depend on centimetres.
+func _dock_distance() -> float:
+	var slop := 0.0
+	if _unit != null and _unit.has_method("_arrive_distance"):
+		slop = _unit._arrive_distance()
+	return maxf(DOCK_DISTANCE, slop + 1.5)
+
+
+func _move_to_bay(delta: float) -> void:
 	if not is_instance_valid(refinery):
 		# Blown up in transit. Find another one; the cargo survives.
 		bay_index = -1
@@ -203,12 +252,55 @@ func _move_to_bay() -> void:
 		_head_home()
 		return
 	var bay: Vector3 = refinery.bay_position(bay_index)
-	if _unit.global_position.distance_to(bay) <= DOCK_DISTANCE:
+	var gap: float = _unit.global_position.distance_to(bay)
+	if gap <= _dock_distance():
 		_unit.halt()
 		state = State.UNLOADING
 		_timer = 0.0
+		return
+
+	# Stuck check. Closing on the bay resets the clock; failing to close for
+	# DOCK_TIMEOUT means this approach is not working.
+	#
+	# THE RECOVERY HAS TO MOVE THE TRUCK, not just re-decide. The obvious version -
+	# release the bay and call _head_home() again - is a livelock: a harvester
+	# wedged on the refinery's corner immediately re-reserves a bay, steers at it
+	# from the exact spot it is jammed in, and re-jams. Measured doing precisely
+	# that, cycling its own stuck timer forever while never delivering.
+	#
+	# So it backs off to the holding ring first, via the same QUEUED state a
+	# harvester with no free bay uses. That clears the wall, and the re-approach
+	# comes in from a different angle rather than the one that failed.
+	if gap < _closest_gap - DOCK_PROGRESS_EPSILON:
+		_closest_gap = gap
+		_stuck_timer = 0.0
 	else:
-		_unit.set_internal_destination(bay)
+		_stuck_timer += delta
+		if _stuck_timer >= DOCK_TIMEOUT:
+			release()
+			_stuck_timer = 0.0
+			_closest_gap = INF
+			_back_off()
+			return
+	_unit.set_internal_destination(bay)
+
+
+# Retreat to the holding ring and re-queue. Keeps the cargo and the refinery, so
+# this is a re-approach rather than starting the round trip over.
+func _back_off() -> void:
+	refinery = _world.nearest_refinery(_unit.global_position, _unit.team)
+	if refinery == null:
+		_unit.halt()
+		state = State.SEARCHING
+		return
+	# A phase from the current bearing to the refinery, so the ring point it backs
+	# out to is the way it came rather than through the building.
+	var away: Vector3 = _unit.global_position - refinery.global_position
+	_orbit_phase = atan2(away.z, away.x)
+	state = State.QUEUED
+	_must_clear = true
+	_unit.set_internal_destination(refinery.global_position + Vector3(
+		cos(_orbit_phase) * HOLDING_RADIUS, 0.0, sin(_orbit_phase) * HOLDING_RADIUS))
 
 
 # Orbit a holding point rather than pressing against the refinery. Pressing is
@@ -219,10 +311,20 @@ func _wait_for_bay(delta: float) -> void:
 		refinery = null
 		_head_home()
 		return
+	# A harvester that got here by backing OFF a failed approach must actually
+	# reach the ring before it is allowed to reserve again. Without this gate it
+	# re-reserves on the very next tick, from the same wedged spot, and the back-off
+	# never happens - which is the livelock this whole path exists to break.
+	if _must_clear:
+		var out: float = _unit.global_position.distance_to(refinery.global_position)
+		if out < HOLDING_RADIUS * 0.9:
+			_unit.set_internal_destination(refinery.global_position + Vector3(
+				cos(_orbit_phase) * HOLDING_RADIUS, 0.0, sin(_orbit_phase) * HOLDING_RADIUS))
+			return
+		_must_clear = false
 	bay_index = refinery.reserve_bay(_unit)
 	if bay_index >= 0:
-		state = State.MOVING_TO_BAY
-		_unit.set_internal_destination(refinery.bay_position(bay_index))
+		_begin_bay_approach()
 		return
 	_orbit_phase += delta * 0.6
 	var centre: Vector3 = refinery.global_position
