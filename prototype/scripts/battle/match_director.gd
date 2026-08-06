@@ -40,6 +40,9 @@ const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
 const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.gd")
 const BattleHUDScript = preload("res://scripts/battle/hud/battle_hud.gd")
+const CommanderScript = preload("res://scripts/battle/ai/commander.gd")
+const SquadScript = preload("res://scripts/battle/ai/squad.gd")
+const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 
@@ -78,6 +81,12 @@ var production: ProductionService = null
 var production_hud: ProductionHUD = null
 var vision: VisionService = null
 var battle_hud: BattleHUD = null
+var commander: Commander = null
+
+# One live squad per AI team. Kept between decisions so a squad's state -
+# retreating, regrouping, and the peak health those are measured against -
+# survives; rebuilding it each tick would reset its memory every two seconds.
+var _squads: Dictionary = {}
 
 # Set when the match has been decided. Stops the vision scan and the win check
 # from running over a field nobody is playing on any more.
@@ -86,6 +95,9 @@ var game_over: bool = false
 # The designs this team can field. Bundled defaults for now; hand-picked roster
 # selection from MatchConfig arrives with the pre-match screen.
 var roster: Array = []
+# The AI's own designs, kept separate from the player's so a match is not a
+# mirror and counter-picking has something to pick from.
+var enemy_roster: Array = []
 
 # Starting bank. Enough for a refinery plus a light manufactory, so the opening
 # is a real choice rather than a forced single purchase.
@@ -133,6 +145,7 @@ func _ready() -> void:
 		economy.add_team(t, STARTING_METAL, STARTING_CRYSTAL)
 		production.add_team(t)
 	production.unit_completed.connect(_on_unit_completed)
+	production.structure_ready.connect(_on_structure_ready)
 
 	# Buildings BEFORE the bake, so their footprints go into the first navmesh
 	# rather than needing an immediate second one. A rebake inside the first few
@@ -156,6 +169,10 @@ func _ready() -> void:
 	_load_roster()
 	_spawn_starting_units()
 	_build_hud()
+
+	commander = CommanderScript.new()
+	commander.setup(self, ENEMY_TEAM,
+		match_config.ai_difficulty if match_config and "ai_difficulty" in match_config else "normal")
 
 
 # Vision runs on its own timer rather than in _physics_process. The scan is
@@ -286,6 +303,30 @@ func _load_roster() -> void:
 		if not design.is_empty():
 			roster.append(design)
 
+	# The AI fields its OWN designs, from res://data/enemy/, rather than the
+	# player's loadout. Sharing one roster would make every match a mirror and
+	# make counter-picking meaningless - the AI would only ever be able to answer
+	# a threat with the same design that posed it.
+	enemy_roster.clear()
+	for path in _list_json(ENEMY_ROSTER_DIR):
+		var design: Dictionary = bp_manager.load_blueprint(path)
+		if not design.is_empty():
+			enemy_roster.append(design)
+
+
+const ENEMY_ROSTER_DIR := "res://data/enemy"
+
+func _list_json(dir_path: String) -> Array:
+	var out: Array = []
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return out
+	for f in dir.get_files():
+		if f.ends_with(".json"):
+			out.append(dir_path + "/" + f)
+	out.sort()
+	return out
+
 
 func _spawn_starting_units() -> void:
 	# MapCatalog decodes the JSON number-arrays into real Vector3s, so this is a
@@ -303,6 +344,25 @@ func _spawn_starting_units() -> void:
 		var offset := Vector3(float(index % 4) * 7.0 - 10.5, 0.0, floorf(index / 4.0) * 7.0)
 		spawn_unit(blueprint, PLAYER_TEAM, origin + offset)
 		index += 1
+
+	_spawn_enemy_starting_units()
+
+
+# The AI starts with a harvester, because the player does.
+#
+# The player's bundled loadout includes ore_trucker, so the player opens with
+# income. The AI opened with none, and there is no way to earn the first credit
+# without a harvester: it spent its starting money on the factory needed to build
+# one, could no longer afford the harvester itself, and sat at 86 metal for the
+# rest of the match. Not an AI bug - it was starting a race a lap down.
+func _spawn_enemy_starting_units() -> void:
+	var spawn := MapCatalog.get_spawn(current_map, "enemy")
+	if spawn.is_empty():
+		return
+	var origin: Vector3 = spawn.get("hq", Vector3.ZERO)
+	var harvester := ai_design_for_role(ENEMY_TEAM, "harvester")
+	if not harvester.is_empty():
+		spawn_unit(harvester, ENEMY_TEAM, origin + Vector3(8.0, 0.0, -8.0))
 
 
 # The bundled default designs. Phase 0 fields these directly so there is
@@ -389,6 +449,27 @@ func get_team_structures(for_team: int) -> Array:
 	return out
 
 
+# How far past its own footprint a building's navmesh hole extends.
+#
+# WHY THIS IS NOT ZERO. The navmesh is baked with NavigationMesh's default
+# agent_radius of 0.5 m, so Recast keeps paths only half a metre clear of an
+# obstacle - but a vehicle is metres wide and is steered by its ORIGIN. A path
+# that is legal for a 0.5 m agent runs straight through the corner of a building
+# for a 4 m tank, which then grinds along the collider until something else
+# dislodges it. Measured: harvesters wedging on the refinery's corner for 20 s at
+# a time, and it is why their dock approach needed a stuck-recovery path at all.
+#
+# Inflating the HOLE rather than raising agent_radius on the bake is deliberate:
+# terrain_builder.gd is shared with the legacy Skirmish runtime and its navmesh
+# suites, and agent_radius would also shrink the walkable surface along every
+# cliff and shoreline on the map, not just around buildings. This is the same
+# correction applied only where the problem actually is.
+#
+# Sized from the widest hull the roster fields rather than an average - the cost
+# of being generous is a slightly wider detour, and the cost of being tight is a
+# stuck unit.
+const BUILDING_CLEARANCE := 2.5
+
 # Every live structure's footprint, gathered fresh rather than cached. The set
 # only changes on placement and death, both of which already trigger a rebake, so
 # this is never stale when it actually runs.
@@ -402,9 +483,44 @@ func _building_holes() -> Array:
 			continue
 		holes.append({
 			"center": s.global_position,
-			"half_extents": Vector2(s.footprint.x / 2.0, s.footprint.z / 2.0),
+			"half_extents": Vector2(
+				s.footprint.x / 2.0 + BUILDING_CLEARANCE,
+				s.footprint.z / 2.0 + BUILDING_CLEARANCE),
 		})
 	return holes
+
+
+# --- Runtime navmesh -----------------------------------------------------------
+#
+# The startup bake carves the STARTING buildings only, because at Phase 0 nothing
+# was ever built mid-match. The AI places buildings while the match runs, and a
+# structure that is not in the navmesh is one units cheerfully path straight
+# through - so placement and death both have to re-carve.
+#
+# Debounced to end-of-frame rather than run inline: several buildings can go up
+# or die in one frame (a blast, a wave completing), and a Recast bake per event
+# would be several hundred milliseconds of stall for one identical result.
+var _nav_rebake_pending: bool = false
+
+func _mark_navmesh_dirty() -> void:
+	if _nav_rebake_pending:
+		return
+	_nav_rebake_pending = true
+	_rebake_navmesh.call_deferred()
+
+
+func _rebake_navmesh() -> void:
+	_nav_rebake_pending = false
+	if not _ground_nav_region.is_valid():
+		return
+	TerrainBuilder.rebake_ground_and_amphibious(
+		current_map, _building_holes(), _ground_nav_region, _amphibious_nav_region)
+	# Every cached field was sampled against the OLD passability, and every live
+	# agent is following a path through what is now a wall.
+	flow_fields.invalidate()
+	for u in get_tree().get_nodes_in_group("units"):
+		if is_instance_valid(u) and not u.is_dead and u.has_method("request_repath"):
+			u.request_repath()
 
 
 func _on_structure_died(structure) -> void:
@@ -414,7 +530,7 @@ func _on_structure_died(structure) -> void:
 	production.cancel_unbuildable(structure.team)
 	# The navmesh had a hole carved for this building and no longer should, and
 	# every cached flow field was sampled against the old passability.
-	flow_fields.invalidate()
+	_mark_navmesh_dirty()
 	if structure.kind == "hq":
 		_end_match(PLAYER_TEAM if structure.team != PLAYER_TEAM else ENEMY_TEAM)
 
@@ -616,6 +732,73 @@ func _exit_structure(for_team: int, queue_name: String) -> Structure:
 	return candidates[0] if not candidates.is_empty() else null
 
 
+# A finished building, waiting for somewhere to go.
+#
+# The AI sites its own immediately. The PLAYER's is deliberately left in the
+# queue for ghost placement to claim - the player chooses where their buildings
+# go, and that UI does not exist in this runtime yet. Note that means a
+# player-queued structure currently parks its line until it does; that is a known
+# gap in the build flow, not something to paper over by auto-siting the player's
+# base for them.
+func _on_structure_ready(for_team: int, queue_name: String, job: Dictionary) -> void:
+	if for_team == PLAYER_TEAM:
+		return
+	var site := _ai_placement_site(for_team, job.get("kind", ""))
+	if site == Vector3.INF:
+		# Nowhere to put it. Leave it claimed-but-unplaced rather than dropping
+		# the money; the site may open up when something dies.
+		return
+	production.claim_structure(for_team, queue_name)
+	_place_structure(job.get("kind", "power_plant"), for_team, site)
+	economy.recalculate_power(for_team, get_team_structures(for_team))
+	_mark_navmesh_dirty()
+
+
+# Where the AI puts its next building: an outward ring search from its HQ, taking
+# the first spot that is on land and clear of what is already there.
+#
+# A ring rather than a random scatter so a base grows outward as a base rather
+# than sprawling, and the first valid ring keeps new buildings close enough to
+# defend together.
+const AI_SITE_RING_STEP := 9.0
+const AI_SITE_RINGS := 6
+const AI_SITE_SAMPLES := 12
+
+func _ai_placement_site(for_team: int, kind: String) -> Vector3:
+	var home := _team_home(for_team)
+	var footprint: Vector3 = BuildingCatalogScript.get_stat(kind, "size", Vector3(5, 3, 5))
+	var half: float = maxf(footprint.x, footprint.z) * 0.5
+	for ring in range(1, AI_SITE_RINGS + 1):
+		var radius := AI_SITE_RING_STEP * float(ring)
+		for i in range(AI_SITE_SAMPLES):
+			var angle := TAU * float(i) / float(AI_SITE_SAMPLES)
+			var candidate := home + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+			candidate.y = terrain_height_at(candidate)
+			if _site_is_clear(candidate, half):
+				return candidate
+	return Vector3.INF
+
+
+func _site_is_clear(at: Vector3, half: float) -> bool:
+	var extent: float = current_map.get("map_half_extents", 80.0)
+	# Keep well inside the boundary. A building on the map edge is a building
+	# whose dock bays and exit point are off the navmesh - the same class of bug
+	# the refinery bays already hit.
+	if absf(at.x) > extent - 12.0 or absf(at.z) > extent - 12.0:
+		return false
+	if TerrainBuilder.is_water_at(current_map, at.x, at.z):
+		return false
+	for s in get_tree().get_nodes_in_group("structures"):
+		if not is_instance_valid(s) or s.is_dead or not s.is_inside_tree():
+			continue
+		var other_half: float = maxf(s.footprint.x, s.footprint.z) * 0.5
+		# Clearance on top of both footprints, so buildings do not end up flush
+		# against each other with no lane between them for units to path through.
+		if at.distance_to(s.global_position) < half + other_half + BUILDING_CLEARANCE * 2.0:
+			return false
+	return true
+
+
 func _on_unit_completed(for_team: int, queue_name: String, blueprint: Dictionary) -> void:
 	var factory := _exit_structure(for_team, queue_name)
 	var at: Vector3 = factory.exit_position() if factory != null else Vector3.ZERO
@@ -640,6 +823,137 @@ func apply_explosion(at: Vector3, radius: float, damage: float, source: Node) ->
 		# gets the same facet-aware treatment a direct one does - catching a tank
 		# from behind with a shell should be worth what it is worth.
 		target.take_damage(damage * (1.0 - distance / radius), "explosive", at)
+
+
+# --- AI support --------------------------------------------------------------
+#
+# Everything the Commander can do to the world, and nothing more. Each of these
+# forwards to the SAME service the player's own UI calls - ProductionService to
+# build, OrderService to command - so there is no second path where AI-only
+# behaviour could accumulate. That is the structural reason the AI cannot cheat,
+# as opposed to a promise that it will not.
+
+# Queue a design filling `role`, chosen from the AI's roster by what it actually
+# mounts rather than from a hand-curated per-role list. A design the player built
+# would count as anti-air if it carries a CIWS.
+func ai_build_unit(for_team: int, role: String) -> bool:
+	var pool: Array = enemy_roster if not enemy_roster.is_empty() else roster
+	var pick: Dictionary = {}
+	for design in pool:
+		if CommanderScript.design_fills_role(design, role):
+			pick = design
+			break
+	# No design fills the role - fall back to anything at all rather than
+	# stalling. An AI that refuses to build because it has no dedicated AA is
+	# worse than one that builds a tank.
+	if pick.is_empty() and not pool.is_empty():
+		pick = pool[0]
+	if pick.is_empty():
+		return false
+
+	var cost: Vector2i = DesignCostingScript.blueprint_cost(pick)
+	var queue_name: String = DesignCostingScript.queue_for_design(pick)
+	return not production.enqueue_unit(for_team, pick, cost.x, cost.y,
+		DesignCostingScript.build_time_for_cost(cost), queue_name).is_empty()
+
+
+# The design the AI would build for `role`, or {} if it has none.
+func ai_design_for_role(for_team: int, role: String) -> Dictionary:
+	var pool: Array = enemy_roster if not enemy_roster.is_empty() else roster
+	for design in pool:
+		if CommanderScript.design_fills_role(design, role):
+			return design
+	return {}
+
+
+# Can the AI actually PRODUCE something filling `role` right now - not "does a
+# design exist" but "is there a factory that can build it".
+#
+# The distinction is the whole reason this exists. The AI's only harvester is a
+# MEDIUM hull, so owning a light manufactory and a harvester design still means
+# it cannot build one. Without this the commander scored "build a harvester"
+# highest, called a production path that silently returned false, and starved to
+# zero metal while deciding to fix its economy every two seconds.
+func ai_can_build_role(for_team: int, role: String) -> bool:
+	var design := ai_design_for_role(for_team, role)
+	if design.is_empty():
+		return false
+	return production.contributor_count(for_team,
+		DesignCostingScript.queue_for_design(design)) > 0
+
+
+# Which manufactory to put up next.
+#
+# Resolved HERE rather than in the commander, so the commander can stay at the
+# altitude of "I need more production" without knowing about hull tiers. It
+# builds whatever unblocks the harvester first - an economy that cannot start is
+# the only truly fatal state - and otherwise fills in the tiers it lacks.
+func ai_build_production(for_team: int) -> bool:
+	var wanted := ""
+	var harvester := ai_design_for_role(for_team, "harvester")
+	if not harvester.is_empty() and not ai_can_build_role(for_team, "harvester"):
+		wanted = _manufactory_for_queue(DesignCostingScript.queue_for_design(harvester))
+	if wanted == "":
+		for queue_name in [BuildingCatalogScript.QUEUE_LIGHT,
+				BuildingCatalogScript.QUEUE_MEDIUM, BuildingCatalogScript.QUEUE_HEAVY]:
+			if production.contributor_count(for_team, queue_name) <= 0:
+				wanted = _manufactory_for_queue(queue_name)
+				break
+	# Every tier covered - add another of the cheapest, which speeds that queue up
+	# via the RA table rather than opening a second line.
+	if wanted == "":
+		wanted = "light_manufactory"
+	return ai_build_structure(for_team, wanted)
+
+
+func _manufactory_for_queue(queue_name: String) -> String:
+	var kinds: Array = BuildingCatalogScript.CONTRIBUTORS.get(queue_name, [])
+	return kinds[0] if not kinds.is_empty() else "light_manufactory"
+
+
+func ai_build_structure(for_team: int, kind: String) -> bool:
+	var stats := BuildingCatalogScript.get_stats(kind)
+	if stats.is_empty():
+		return false
+	return not production.enqueue_structure(for_team,
+		BuildingCatalogScript.QUEUE_BUILDING, kind,
+		stats.get("cost_metal", 0), stats.get("cost_crystal", 0),
+		stats.get("build_time", 10.0)).is_empty()
+
+
+# Pull everything home. The rally is the AI's own HQ, which is the thing worth
+# defending - losing it ends the match.
+func ai_defend(for_team: int, combat: Array) -> void:
+	var home := _team_home(for_team)
+	_ai_squad(for_team, combat, home).objective = home
+
+
+# Commit to an attack on the enemy HQ.
+func ai_push(for_team: int, combat: Array) -> void:
+	var target := _team_home(PLAYER_TEAM if for_team != PLAYER_TEAM else ENEMY_TEAM)
+	_ai_squad(for_team, combat, _team_home(for_team)).objective = target
+
+
+func _team_home(for_team: int) -> Vector3:
+	for s in get_team_structures(for_team):
+		if s.kind == "hq":
+			return s.global_position
+	var spawn := MapCatalog.get_spawn(current_map,
+		"player" if for_team == PLAYER_TEAM else "enemy")
+	return spawn.get("hq", Vector3.ZERO) if not spawn.is_empty() else Vector3.ZERO
+
+
+# One squad per AI team, rebuilt from whatever is alive. Kept as a live object
+# rather than re-created each decision so its state - retreating, regrouping, and
+# the peak health those are measured against - survives between ticks.
+func _ai_squad(for_team: int, combat: Array, rally: Vector3):
+	if not _squads.has(for_team) or _squads[for_team].is_spent():
+		var squad = SquadScript.new()
+		squad.setup(self, orders, for_team, combat, rally)
+		_squads[for_team] = squad
+	else:
+		_squads[for_team].reinforce(combat)
+	return _squads[for_team]
 
 
 # --- Weapon support ----------------------------------------------------------
@@ -713,9 +1027,18 @@ func get_nearby_damageable(pos: Vector3, radius: float) -> Array:
 # --- Per-tick bookkeeping ----------------------------------------------------
 
 func _physics_process(delta: float) -> void:
+	if game_over:
+		return
 	_rebuild_neighbour_grid()
 	if production:
 		production.tick(delta)
+	if commander:
+		commander.tick(delta)
+	# Squads tick every frame while the commander re-decides every couple of
+	# seconds: the macro choice is slow, but a squad deciding to retreat cannot
+	# wait two seconds for the next decision window.
+	for squad in _squads.values():
+		squad.tick(delta)
 
 
 # A coarse bucket grid, rebuilt from scratch each tick rather than maintained

@@ -239,6 +239,13 @@ func _is_spotted(c, viewers: Array, beacons: Array, was_visible: bool) -> bool:
 		if not is_instance_valid(o):
 			continue
 		var vision := effective_vision(o) * detection_mult
+		# NO VISION MEANS NO VISION. Without this, the `distance <= reach` test
+		# below reads 0 <= 0 as true, so a construct with its sensors stripped -
+		# or one that never had any - still spots anything sharing its exact
+		# position. Degenerate in a real match, but it is the kind of edge that
+		# turns into a phantom reveal the moment two things stack.
+		if vision <= 0.0:
+			continue
 		# A fire-control radar lets a unit designate out to its weapons' reach
 		# rather than only as far as its own eyes.
 		if is_instance_valid(o.get("hull_node")) and o.hull_node.has_meta("has_fire_control_radar") \
@@ -287,8 +294,19 @@ func _all_constructs() -> Array:
 		return []
 	var out: Array = []
 	for c in _controller.get_tree().get_nodes_in_group("damageable"):
-		if is_instance_valid(c) and not c.is_dead:
-			out.append(c)
+		if not is_instance_valid(c):
+			continue
+		# `damageable` is a TREE-WIDE group and this service does not own who joins
+		# it. Reading .is_dead off whatever is in there crashed the whole scan the
+		# moment something joined without one - which is not hypothetical: it is
+		# how the vision suite first failed, on a node another suite had left
+		# behind. A construct that cannot say whether it is alive is not a thing
+		# vision has an opinion about, so it is skipped rather than assumed.
+		if not ("is_dead" in c) or c.is_dead:
+			continue
+		if not c.has_meta("team"):
+			continue
+		out.append(c)
 	return out
 
 

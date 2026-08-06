@@ -121,6 +121,28 @@ func _make_job(label: String, cost_metal: int, cost_crystal: int,
 	}
 
 
+# Takes the finished structure sitting at the head of `queue_name`, or {} if the
+# head is not one.
+#
+# A COMPLETED STRUCTURE BLOCKS ITS OWN QUEUE until this is called. That is by
+# design - the building is paid for and waiting for somewhere to go, and dropping
+# it because nobody claimed it in time would silently burn the player's money -
+# but it does mean an unconnected structure_ready signal stops that line dead.
+# Which is exactly how it first failed: the AI paid for a manufactory, the job
+# sat done at the head forever, and its economy froze with the money already
+# spent and nothing to show.
+func claim_structure(team: int, queue_name: String) -> Dictionary:
+	var q := queue(team, queue_name)
+	if q.is_empty():
+		return {}
+	var job: Dictionary = q[0]
+	if not job.get("is_structure", false) or not job.get("done", false):
+		return {}
+	q.pop_front()
+	queue_changed.emit(team, queue_name)
+	return job
+
+
 func cancel(team: int, queue_name: String, index: int) -> Dictionary:
 	var q := queue(team, queue_name)
 	if index < 0 or index >= q.size():

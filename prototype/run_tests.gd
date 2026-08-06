@@ -30,6 +30,9 @@ const SUITE_FILES := {
 	"battle_movement": preload("res://tests/battle/test_battle_movement.gd"),
 	"battle_command": preload("res://tests/battle/test_battle_command.gd"),
 	"battle_economy": preload("res://tests/battle/test_battle_economy.gd"),
+	"battle_combat": preload("res://tests/battle/test_battle_combat.gd"),
+	"battle_vision": preload("res://tests/battle/test_battle_vision.gd"),
+	"battle_ai": preload("res://tests/battle/test_battle_ai.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -265,6 +268,27 @@ const SUITE_ORDER := [
 	["battle_economy", "test_five_queues_are_independent_and_gated"],
 	["battle_economy", "test_power_gates_production_rate"],
 	["battle_economy", "test_refinery_bays_are_exclusive_and_reclaimable"],
+	["battle_combat", "test_take_damage_accepts_the_three_argument_weapon_contract"],
+	["battle_combat", "test_strip_eligibility_excludes_armour_and_respects_facet"],
+	["battle_combat", "test_module_damage_uses_the_resolver_fraction"],
+	["battle_combat", "test_active_modules_excludes_dying_children"],
+	["battle_combat", "test_weapon_attachment_covers_non_weapon_combat_modules"],
+	["battle_vision", "test_selection_layer_does_not_collide_with_smoke"],
+	["battle_vision", "test_vision_hides_the_distant_and_reveals_the_near"],
+	["battle_vision", "test_visibility_fails_open_before_the_first_scan"],
+	["battle_vision", "test_reveal_hide_hysteresis_has_a_dead_zone"],
+	["battle_vision", "test_reveal_beacons_light_an_area_and_expire"],
+	["battle_vision", "test_effective_vision_elevation_bonus_is_capped_and_skips_flyers"],
+	["battle_vision", "test_minimap_bakes_terrain_and_draws_blips"],
+	["battle_ai", "test_considerations_stay_normalised"],
+	["battle_ai", "test_a_zero_consideration_vetoes_the_action"],
+	["battle_ai", "test_opening_move_is_not_a_deadlock"],
+	["battle_ai", "test_harvester_wanting_tracks_buildability_not_factory_count"],
+	["battle_ai", "test_decisions_respond_to_the_battlefield"],
+	["battle_ai", "test_push_requires_a_real_army"],
+	["battle_ai", "test_roles_are_read_from_mounted_modules"],
+	["battle_ai", "test_squad_retreat_and_regroup_have_a_dead_zone"],
+	["battle_ai", "test_reinforcing_raises_the_health_bar"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist
