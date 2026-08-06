@@ -42,14 +42,33 @@ def main():
     
     # Export Windows
     print(f"[1/3] Exporting Windows: {win_out}...")
-    cmd_win = [godot_exe, "--headless", "--export-release", "Windows Desktop", win_out, "--path", proto_dir]
+    staging_dir = os.path.join(proto_dir, "temp_export")
+    os.makedirs(staging_dir, exist_ok=True)
+    stage_win = os.path.join(staging_dir, f"KitbashCommandPrototype_v{version}_{today_str}.exe")
+    if os.path.exists(stage_win):
+        try: os.remove(stage_win)
+        except Exception: pass
+
+    cmd_win = [godot_exe, "--headless", "--export-release", "Windows Desktop", stage_win, "--path", proto_dir]
     res_win = subprocess.run(cmd_win, capture_output=True, text=True)
-    if res_win.returncode == 0:
+    if res_win.returncode == 0 and os.path.exists(stage_win):
         print("  [PASS] Windows export succeeded.")
-        # Link/copy un-versioned fallback for quick launching
+        # Copy to final destination and un-versioned fallback
         link_win = os.path.join(win_dir, "KitbashCommandPrototype.exe")
-        with open(win_out, "rb") as sf, open(link_win, "wb") as df:
-            df.write(sf.read())
+        with open(stage_win, "rb") as sf:
+            data = sf.read()
+        try:
+            with open(win_out, "wb") as df:
+                df.write(data)
+        except PermissionError:
+            print("  [NOTE] KitbashCommandPrototype_v1.4.0_2026-08-05.exe is currently running in Windows and could not be overwritten.")
+        try:
+            with open(link_win, "wb") as df:
+                df.write(data)
+        except PermissionError:
+            print("  [NOTE] KitbashCommandPrototype.exe is currently running in Windows and could not be overwritten.")
+        try: os.remove(stage_win)
+        except Exception: pass
     else:
         print("  [FAIL] Windows export failed:\n", res_win.stderr)
         
