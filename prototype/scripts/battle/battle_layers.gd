@@ -40,7 +40,20 @@ const RESOURCE_NODES := 1 << 4  # 16
 # what got bolted on. This is the same class of bug as the Design Lab's
 # unclickable heavy_machine_gun (see PROGRESS.md 2026-08-04): a click collider
 # derived from unrotated catalog dimensions does not match what is on screen.
-const SELECTION := 1 << 5  # 32 - click/frustum proxy, nothing else
+# BIT 6, NOT BIT 5. Bit 5 (32) was already taken by smoke_volume.gd's
+# SMOKE_COLLISION_LAYER, and the clash was silent and nasty in both directions:
+#
+#   * The vision LOS raycast masks TERRAIN + smoke and opts into areas, because
+#     smoke has to deny scouting. With selection proxies on the same bit, that ray
+#     hit every unit's own proxy - so NOTHING was ever visible to anyone, and the
+#     fog read as "vision range is too small" rather than as a layer collision.
+#   * A frustum drag-select masks SELECTION, so it would have returned smoke
+#     clouds as selectable units.
+#
+# Exactly the failure mode the RESOURCE_NODES note above describes, one bit over
+# and caught later. Bits in use: 1 terrain, 2 modules, 4 units, 8 buildings,
+# 16 resource nodes, 32 smoke. 64 is the first free one.
+const SELECTION := 1 << 6  # 64 - click/frustum proxy, nothing else
 
 # What a selection frustum query should collide with: proxies only. Not UNITS -
 # hitting both would return each unit twice and make the caller dedupe.

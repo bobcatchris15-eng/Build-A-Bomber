@@ -38,6 +38,8 @@ const BuildingCatalogScript = preload("res://scripts/battle/economy/building_cat
 const StructureScript = preload("res://scripts/battle/buildings/structure.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
+const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.gd")
+const BattleHUDScript = preload("res://scripts/battle/hud/battle_hud.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 
@@ -74,6 +76,12 @@ var flow_fields: FlowFieldService = null
 var economy: EconomyService = null
 var production: ProductionService = null
 var production_hud: ProductionHUD = null
+var vision: VisionService = null
+var battle_hud: BattleHUD = null
+
+# Set when the match has been decided. Stops the vision scan and the win check
+# from running over a field nobody is playing on any more.
+var game_over: bool = false
 
 # The designs this team can field. Bundled defaults for now; hand-picked roster
 # selection from MatchConfig arrives with the pre-match screen.
@@ -143,9 +151,40 @@ func _ready() -> void:
 	selection.setup(camera, get_world_3d().direct_space_state, PLAYER_TEAM)
 	selection.group_recentre_requested.connect(_on_group_recentre)
 
+	_setup_vision()
+
 	_load_roster()
 	_spawn_starting_units()
 	_build_hud()
+
+
+# Vision runs on its own timer rather than in _physics_process. The scan is
+# O(viewers x targets) per team and its answer changing three times a second is
+# imperceptible; running it per frame would be the single most expensive thing in
+# the match for no visible gain.
+func _setup_vision() -> void:
+	vision = VisionServiceScript.new()
+	vision.setup(self, PLAYER_TEAM, current_map.get("map_half_extents", 80.0))
+	add_child(vision.build_shroud())
+
+	# The HUD refreshes on the SAME tick as vision, deliberately. The minimap
+	# draws what the player can see, so refreshing it more often than visibility
+	# is recomputed just redraws the same answer, and refreshing it less often
+	# would show blips the fog has already taken away.
+	var timer := Timer.new()
+	timer.name = "VisionTick"
+	timer.wait_time = VisionServiceScript.TICK_INTERVAL
+	timer.timeout.connect(_on_vision_tick)
+	add_child(timer)
+	timer.start()
+
+
+func _on_vision_tick() -> void:
+	if game_over:
+		return
+	vision.tick()
+	if battle_hud != null:
+		battle_hud.refresh()
 
 
 # --- World ------------------------------------------------------------------
@@ -376,6 +415,40 @@ func _on_structure_died(structure) -> void:
 	# The navmesh had a hole carved for this building and no longer should, and
 	# every cached flow field was sampled against the old passability.
 	flow_fields.invalidate()
+	if structure.kind == "hq":
+		_end_match(PLAYER_TEAM if structure.team != PLAYER_TEAM else ENEMY_TEAM)
+
+
+# --- Win condition -----------------------------------------------------------
+
+signal match_ended(winning_team)
+
+# Losing your HQ loses the match.
+#
+# Driven by the structure's own death signal rather than polled, so there is no
+# window in which the HQ is gone and the match has not noticed. Guarded against
+# re-entry because both HQs can die in the same frame to the same blast, and the
+# first result is the one that counts.
+func _end_match(winning_team: int) -> void:
+	if game_over:
+		return
+	game_over = true
+	match_ended.emit(winning_team)
+	_show_result(winning_team == PLAYER_TEAM)
+
+
+func _show_result(player_won: bool) -> void:
+	if battle_hud == null:
+		return
+	var banner := Label.new()
+	banner.name = "ResultBanner"
+	banner.text = "VICTORY" if player_won else "DEFEAT"
+	banner.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	banner.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	banner.offset_top = 120
+	banner.add_theme_color_override("font_color",
+		Tokens.SIGNAL_GO if player_won else Tokens.SIGNAL_ALERT)
+	battle_hud.add_child(banner)
 
 
 # --- Contracts the economy systems look for ----------------------------------
@@ -585,20 +658,18 @@ func is_allied(a: int, b: int) -> bool:
 	return a == b
 
 
-# Whether `viewing_team` can currently see `c`.
-#
-# Fails OPEN until the vision service lands in Phase 4. A closed default would
-# stop every weapon in the game from firing, which is a far louder and more
-# confusing failure than over-sharing during a phase where there is no fog to
-# hide behind anyway.
-func is_visible_to_team(_c: Node, _viewing_team: int) -> bool:
-	return true
+# Whether `viewing_team` can currently see `c`. Delegated, and fails open when
+# there is no vision service at all - a unit built in a synthetic test has no fog
+# to hide behind, and refusing to let its weapons fire would be a strange way to
+# express that.
+func is_visible_to_team(c: Node, viewing_team: int) -> bool:
+	return vision == null or vision.is_visible_to_team(c, viewing_team)
 
 
-# Reveal a patch of map for a while. Illumination ammo and sensor beacons call
-# this; inert until the vision service exists to have something to reveal.
-func reveal_area(_for_team: int, _pos: Vector3, _radius: float, _duration: float) -> void:
-	pass
+# Reveal a patch of map for a while. Illumination ammo and sensor beacons.
+func reveal_area(for_team: int, pos: Vector3, radius: float, duration: float) -> void:
+	if vision != null:
+		vision.reveal_area(for_team, pos, radius, duration)
 
 
 # Whether this team's defences should be firing at reduced effect. Delegated so
@@ -904,6 +975,11 @@ func _build_hud() -> void:
 	box.set_border_width_all(1)
 	_selection_rect.add_theme_stylebox_override("panel", box)
 	layer.add_child(_selection_rect)
+
+	battle_hud = BattleHUDScript.new()
+	battle_hud.name = "BattleHUD"
+	layer.add_child(battle_hud)
+	battle_hud.setup(self, PLAYER_TEAM, current_map)
 
 	# The bindings, on screen, because they are not the conventional ones and
 	# nothing else in the build documents them yet.
