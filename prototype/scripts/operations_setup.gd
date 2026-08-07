@@ -1,7 +1,17 @@
 extends Control
-# Setup screen for Operations Mode (Iterative Campaign)
-# Allows the player to view the 3-stage map itinerary, choose difficulty,
-# select their starting blueprint roster, and initiate the campaign loop.
+# Setup screen for Operations Mode (iterative campaign).
+#
+# An operation is 3-12 engagements of the same match Skirmish runs, with a draft
+# between each. So this screen is Match Settings plus an itinerary: the same
+# faction and difficulty controls, the same 12-slot RosterPicker, and a list of
+# maps rather than one.
+#
+# WHAT THIS REPLACES. The first version hardcoded a 3-stage itinerary you could
+# only read, and used a flat CheckBox list for the roster - the exact control
+# match_setup.gd replaced with RosterPicker, for reasons that apply here
+# identically: a checkbox list can express neither the ORDER designs are fielded
+# in nor the 12-slot cap as anything more than a warning string. Sharing the
+# picker also means the two setup screens cannot drift, which they already had.
 
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
@@ -12,16 +22,37 @@ const UIShell = preload("res://scripts/ui_shell.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
+const RosterPickerScript = preload("res://scripts/roster_picker.gd")
+
+# Matches match_setup.gd's cap and match_director.ROSTER_LIMIT. Kept as its own
+# constant rather than read off the director, which is not loaded at this point
+# in the flow.
+const ROSTER_CAP := 12
+
+# Index 0 of every map dropdown. Resolved to a concrete map when the operation
+# starts, so "Random" means a different rotation each run rather than a fixed
+# one dressed up as a surprise.
+const RANDOM_MAP_LABEL := "Random"
+
+const DIFFICULTIES = ["easy", "normal", "hard"]
+const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard"]
 
 var difficulty_btn: OptionButton
 var player_faction_btn: OptionButton
+var enemy_faction_btn: OptionButton
+var engagements_spin: SpinBox
+var itinerary_list: VBoxContainer
+var roster_picker: RosterPicker
 var bp_manager: Node
-var blueprint_checks: Array = []
-var selection_counter_label: Label
+
 var FACTIONS: Array = []
 var FACTION_LABELS: Array = []
-const DIFFICULTIES = ["easy", "normal", "hard"]
-const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard"]
+var MAP_IDS: Array = []
+
+# One OptionButton per engagement, index-aligned with the itinerary. Rebuilt
+# whenever the engagement count changes.
+var _map_pickers: Array = []
+
 
 func _ready() -> void:
 	bp_manager = BlueprintManagerScript.new()
@@ -31,140 +62,230 @@ func _ready() -> void:
 	FACTION_LABELS = ["Auto (from roster)"]
 	for fac_id in FactionCatalog.get_ids():
 		FACTIONS.append(fac_id)
-		FACTION_LABELS.append("%s - %s" % [FactionCatalog.get_faction_name(fac_id), FactionCatalog.get_passive(fac_id, "passive_summary", "")])
+		FACTION_LABELS.append("%s - %s" % [
+			FactionCatalog.get_faction_name(fac_id),
+			FactionCatalog.get_passive(fac_id, "passive_summary", "")])
 
-	# Also picks up MOUSE_FILTER_IGNORE, which this hand-rolled version was
-	# missing - a full-rect ColorRect with the default PASS filter sits under
-	# every control on the screen and eats clicks aimed past it.
+	MAP_IDS = MapCatalog.get_map_ids()
+
 	UIShell.backdrop(self)
-
-	# Canonical screen frame. Was 48/48/36/36, none of them spacing tokens.
 	var frame := UIShell.screen_frame(self)
 
 	var vbox = VBoxContainer.new()
 	vbox.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	frame.add_child(vbox)
 
-	# Header
 	var title = Label.new()
 	title.text = "OPERATIONS CAMPAIGN SETUP"
 	title.theme_type_variation = "DisplayLabel"
 	vbox.add_child(title)
 
 	var subtitle = Label.new()
-	subtitle.text = "Fight through a 3-stage operation. After each battle, inspect the After-Action Report and return to the Design Lab to adapt your roster."
+	subtitle.text = "Fight a run of engagements against the same opponent. Between each, read the After-Action Report and re-draft - the designs that worked stay, the ones that died get rebuilt."
 	subtitle.theme_type_variation = "HintLabel"
+	subtitle.autowrap_mode = TextServer.AUTOWRAP_WORD
 	vbox.add_child(subtitle)
 
-	# Main content HBox
 	var content_hbox = HBoxContainer.new()
 	content_hbox.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content_hbox.add_theme_constant_override("separation", Tokens.SPACE_XL)
 	vbox.add_child(content_hbox)
 
-	# Left Column: Campaign Options & Itinerary
+	_build_left_column(content_hbox)
+	_build_right_column(content_hbox)
+
+	vbox.add_child(HSeparator.new())
+	_build_action_bar(vbox, content_hbox)
+
+
+# --- Left: campaign settings and the itinerary --------------------------------
+
+func _build_left_column(parent: Control) -> void:
 	var left_col = VBoxContainer.new()
 	left_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	left_col.size_flags_stretch_ratio = 1.0
 	left_col.add_theme_constant_override("separation", Tokens.SPACE_MD)
-	content_hbox.add_child(left_col)
+	parent.add_child(left_col)
 
 	var settings_heading = Label.new()
 	settings_heading.text = "CAMPAIGN SETTINGS"
 	settings_heading.theme_type_variation = "HeadingLabel"
 	left_col.add_child(settings_heading)
 
-	# Difficulty selection
-	var diff_box = HBoxContainer.new()
-	var diff_label = Label.new()
-	diff_label.text = "AI Difficulty:"
-	diff_label.custom_minimum_size.x = Tokens.SPACE_XL * 4
-	diff_box.add_child(diff_label)
+	var grid = GridContainer.new()
+	grid.columns = 2
+	grid.add_theme_constant_override("h_separation", Tokens.SPACE_LG)
+	grid.add_theme_constant_override("v_separation", Tokens.SPACE_MD)
+	left_col.add_child(grid)
+
+	# Engagements. A SpinBox rather than a dropdown: the range is a count, and
+	# ten near-identical numbered items in a list is a worse way to say "3 to 12".
+	_add_grid_label(grid, "Engagements")
+	engagements_spin = SpinBox.new()
+	engagements_spin.min_value = OperationsManager.MIN_ENGAGEMENTS
+	engagements_spin.max_value = OperationsManager.MAX_ENGAGEMENTS
+	engagements_spin.value = 5
+	engagements_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	engagements_spin.tooltip_text = "How many battles the operation runs for. You re-draft your roster between each one."
+	engagements_spin.value_changed.connect(_on_engagements_changed)
+	grid.add_child(engagements_spin)
+
+	_add_grid_label(grid, "AI Difficulty")
 	difficulty_btn = OptionButton.new()
 	for d in DIFFICULTY_LABELS:
 		difficulty_btn.add_item(d)
-	difficulty_btn.selected = 1 # Normal
+	difficulty_btn.selected = 1
 	difficulty_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	diff_box.add_child(difficulty_btn)
-	left_col.add_child(diff_box)
+	# The ramp is real and is not obvious from a single dropdown, so it is said
+	# here rather than left for the player to infer from losing the last one.
+	difficulty_btn.tooltip_text = "Where the operation ENDS UP. The opening engagements run one tier easier, so the first battle is somewhere to find out what your roster does wrong."
+	difficulty_btn.item_selected.connect(func(_i): _rebuild_itinerary())
+	grid.add_child(difficulty_btn)
 
-	# Faction selection
-	var fac_box = HBoxContainer.new()
-	var fac_label = Label.new()
-	fac_label.text = "Player Faction:"
-	fac_label.custom_minimum_size.x = Tokens.SPACE_XL * 4
-	fac_box.add_child(fac_label)
+	_add_grid_label(grid, "Your Faction")
 	player_faction_btn = OptionButton.new()
 	for fl in FACTION_LABELS:
 		player_faction_btn.add_item(fl)
 	player_faction_btn.selected = 0
 	player_faction_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fac_box.add_child(player_faction_btn)
-	left_col.add_child(fac_box)
+	grid.add_child(player_faction_btn)
+
+	_add_grid_label(grid, "Enemy Faction")
+	enemy_faction_btn = OptionButton.new()
+	for fl in FACTION_LABELS:
+		enemy_faction_btn.add_item(fl)
+	# Same default the skirmish setup screen uses, so the two agree on what "the
+	# usual opponent" is.
+	var default_enemy: int = FACTIONS.find("technocrats")
+	enemy_faction_btn.selected = default_enemy if default_enemy >= 0 else 0
+	enemy_faction_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	grid.add_child(enemy_faction_btn)
 
 	left_col.add_child(HSeparator.new())
 
-	# Itinerary Display
 	var itin_heading = Label.new()
-	itin_heading.text = "OPERATION ITINERARY (3 STAGES)"
+	itin_heading.text = "ITINERARY"
 	itin_heading.theme_type_variation = "HeadingLabel"
 	left_col.add_child(itin_heading)
 
-	var ops_mgr = OperationsManager.new()
-	var itinerary = ops_mgr.stages_itinerary
-	ops_mgr.queue_free()
-
-	for i in range(itinerary.size()):
-		var st = itinerary[i]
-		var card = PanelContainer.new()
-		card.theme_type_variation = "InsetPanel"
-		var card_vbox = VBoxContainer.new()
-		card_vbox.add_theme_constant_override("separation", Tokens.SPACE_XS)
-
-		var st_title = Label.new()
-		st_title.text = "%s — Map: %s" % [st.get("title", ""), st.get("map_id", "").replace("_", " ").capitalize()]
-		st_title.theme_type_variation = "HeadingLabel"
-		card_vbox.add_child(st_title)
-
-		var map_info = MapCatalog.get_map(st.get("map_id", ""))
-		var st_desc = Label.new()
-		st_desc.text = map_info.get("description", "Standard battlefield.")
-		st_desc.theme_type_variation = "HintLabel"
-		card_vbox.add_child(st_desc)
-
-		card.add_child(card_vbox)
-		left_col.add_child(card)
-
-	# Right Column: Roster Selection
-	var right_col = VBoxContainer.new()
-	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right_col.size_flags_stretch_ratio = 1.0
-	right_col.add_theme_constant_override("separation", Tokens.SPACE_MD)
-	content_hbox.add_child(right_col)
-
-	var roster_heading = Label.new()
-	roster_heading.text = "DECK ROSTER (STARTING DESIGNS)"
-	roster_heading.theme_type_variation = "HeadingLabel"
-	right_col.add_child(roster_heading)
-
-	selection_counter_label = Label.new()
-	selection_counter_label.theme_type_variation = "HintLabel"
-	right_col.add_child(selection_counter_label)
+	var itin_hint = Label.new()
+	itin_hint.text = "Pick the ground for each engagement, or leave one on Random."
+	itin_hint.theme_type_variation = "HintLabel"
+	left_col.add_child(itin_hint)
 
 	var scroll = ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right_col.add_child(scroll)
+	left_col.add_child(scroll)
 
-	var bp_list_vbox = VBoxContainer.new()
-	bp_list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(bp_list_vbox)
+	itinerary_list = VBoxContainer.new()
+	itinerary_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	itinerary_list.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	scroll.add_child(itinerary_list)
 
-	_populate_blueprints(bp_list_vbox)
+	_rebuild_itinerary()
 
-	# Bottom Action Bar
+
+func _add_grid_label(parent: Control, text: String) -> void:
+	var label = Label.new()
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	label.custom_minimum_size.x = Tokens.SPACE_XL * 4
+	parent.add_child(label)
+
+
+func _on_engagements_changed(_value: float) -> void:
+	_rebuild_itinerary()
+
+
+# Rebuilt rather than resized, but the EXISTING CHOICES ARE CARRIED OVER: going
+# 5 -> 6 engagements must not silently reshuffle the five maps already picked.
+func _rebuild_itinerary() -> void:
+	if itinerary_list == null:
+		return
+	var previous: Array = []
+	for picker in _map_pickers:
+		if is_instance_valid(picker):
+			previous.append(picker.selected)
+
+	for child in itinerary_list.get_children():
+		child.queue_free()
+	_map_pickers.clear()
+
+	var count := int(engagements_spin.value)
+	var base_difficulty: String = DIFFICULTIES[difficulty_btn.selected]
+	var defaults: Array = OperationsManager.default_itinerary(count, base_difficulty)
+
+	for i in range(count):
+		var row = HBoxContainer.new()
+		row.add_theme_constant_override("separation", Tokens.SPACE_SM)
+
+		var index_label = Label.new()
+		index_label.text = "%d." % (i + 1)
+		index_label.custom_minimum_size.x = Tokens.SPACE_LG
+		row.add_child(index_label)
+
+		var map_btn = OptionButton.new()
+		map_btn.add_item(RANDOM_MAP_LABEL)
+		for map_id in MAP_IDS:
+			map_btn.add_item(MapCatalog.get_map_name(map_id))
+		map_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if i < previous.size():
+			map_btn.selected = previous[i]
+		else:
+			# +1 for the Random entry occupying index 0.
+			var default_idx: int = MAP_IDS.find(str(defaults[i].get("map_id", "")))
+			map_btn.selected = default_idx + 1 if default_idx >= 0 else 0
+		row.add_child(map_btn)
+		_map_pickers.append(map_btn)
+
+		# The per-engagement tier, shown because the ramp is what makes the
+		# difficulty dropdown mean something other than a flat setting.
+		var tier_label = Label.new()
+		tier_label.text = str(defaults[i].get("ai_difficulty", "normal")).to_upper()
+		tier_label.theme_type_variation = "HintLabel"
+		tier_label.custom_minimum_size.x = Tokens.SPACE_XL * 2
+		tier_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(tier_label)
+
+		itinerary_list.add_child(row)
+
+	UIFeedbackScript.wire_tree(itinerary_list, "select")
+
+
+# --- Right: the roster --------------------------------------------------------
+
+func _build_right_column(parent: Control) -> void:
+	var right_col = VBoxContainer.new()
+	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_col.size_flags_stretch_ratio = 1.4
+	right_col.add_theme_constant_override("separation", Tokens.SPACE_MD)
+	parent.add_child(right_col)
+
+	var roster_heading = Label.new()
+	roster_heading.text = "STARTING ROSTER"
+	roster_heading.theme_type_variation = "HeadingLabel"
+	right_col.add_child(roster_heading)
+
+	var hint = Label.new()
+	hint.text = "Drag designs into a slot. Leave it empty to field your newest designs. You re-draft between engagements."
+	hint.theme_type_variation = "HintLabel"
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD
+	right_col.add_child(hint)
+
+	# named_only, matching match_setup.gd: this is the "what goes into the match"
+	# list, so unnamed test leftovers stay in the Blueprint Library.
+	roster_picker = RosterPickerScript.new()
+	roster_picker.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_col.add_child(roster_picker)
+	roster_picker.setup(bp_manager.list_blueprints(true), ROSTER_CAP)
+
+
+# --- Bottom bar ---------------------------------------------------------------
+
+func _build_action_bar(parent: Control, feedback_root: Control) -> void:
 	var bottom_bar = HBoxContainer.new()
 	bottom_bar.add_theme_constant_override("separation", Tokens.SPACE_MD)
-	vbox.add_child(bottom_bar)
+	parent.add_child(bottom_bar)
 
 	var back_btn = Button.new()
 	back_btn.text = "< Back to Main Menu"
@@ -183,83 +304,62 @@ func _ready() -> void:
 	start_btn.pressed.connect(_on_start_operation_pressed)
 	bottom_bar.add_child(start_btn)
 
-	# Roles matter here: "Begin Operation" commits to a campaign, so it gets the
-	# radio acknowledgement rather than a click. wire_tree covers the dropdowns and
-	# the roster checkboxes in one pass.
+	# "Begin Operation" commits to a campaign, so it gets the radio
+	# acknowledgement rather than a click.
 	UIFeedbackScript.wire(start_btn, "confirm")
 	UIFeedbackScript.wire(back_btn)
-	UIFeedbackScript.wire_tree(content_hbox, "select")
+	UIFeedbackScript.wire_tree(feedback_root, "select")
 
-	# The itinerary cards and the roster list both arrive as a sweep rather than
-	# all at once. Deferred: stagger_in reads each child's position, which is not
-	# final until the containers have laid out.
-	call_deferred("_animate_entrance", left_col, bp_list_vbox)
-
-func _animate_entrance(itinerary_col: Control, roster_list: Control) -> void:
-	if is_instance_valid(itinerary_col):
-		UIAnimScript.stagger_in(itinerary_col)
-	if is_instance_valid(roster_list):
-		UIAnimScript.stagger_in(roster_list)
+	call_deferred("_animate_entrance")
 
 
-func _populate_blueprints(container: Control) -> void:
-	blueprint_checks.clear()
-	var blueprints: Array = bp_manager.list_blueprints(true)
+func _animate_entrance() -> void:
+	if is_instance_valid(itinerary_list):
+		UIAnimScript.stagger_in(itinerary_list)
 
-	if blueprints.is_empty():
-		var empty_lbl = Label.new()
-		empty_lbl.text = "No saved blueprints found in your library.\nDefault loadout will be used."
-		empty_lbl.theme_type_variation = "HintLabel"
-		container.add_child(empty_lbl)
-		_update_counter()
-		return
 
-	for bp in blueprints:
-		var cb = CheckBox.new()
-		cb.text = "%s (%s)" % [bp.get("name", "Unnamed"), bp.get("hull_type", "").replace("_", " ").capitalize()]
-		cb.button_pressed = true
-		cb.toggled.connect(func(_val): _update_counter())
-		container.add_child(cb)
-		blueprint_checks.append({"bp": bp, "cb": cb})
+# --- Starting the operation ---------------------------------------------------
 
-	_update_counter()
+# The itinerary the pickers currently describe. Public so a test can assert the
+# screen's output without driving its buttons - headless cannot press them.
+func build_itinerary() -> Array:
+	var count := int(engagements_spin.value)
+	var base_difficulty: String = DIFFICULTIES[difficulty_btn.selected]
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
 
-func _update_counter() -> void:
-	var count = 0
-	for item in blueprint_checks:
-		if item.cb.button_pressed:
-			count += 1
-	selection_counter_label.text = "Selected Blueprints: %d / %d" % [count, blueprint_checks.size()]
+	var out: Array = []
+	for i in range(count):
+		var map_id: String = ""
+		if i < _map_pickers.size():
+			var sel: int = _map_pickers[i].selected
+			if sel > 0 and sel - 1 < MAP_IDS.size():
+				map_id = str(MAP_IDS[sel - 1])
+		if map_id == "" and not MAP_IDS.is_empty():
+			map_id = str(MAP_IDS[rng.randi_range(0, MAP_IDS.size() - 1)])
+		out.append({
+			"map_id": map_id,
+			"ai_difficulty": OperationsManager.ramped_difficulty(i, count, base_difficulty),
+			"title": "Engagement %d of %d" % [i + 1, count],
+		})
+	return out
+
 
 func _on_start_operation_pressed() -> void:
-	var sel_diff = DIFFICULTIES[difficulty_btn.selected]
-	var sel_fac = FACTIONS[player_faction_btn.selected]
+	var itinerary := build_itinerary()
+	var sel_diff: String = DIFFICULTIES[difficulty_btn.selected]
 
-	# Configure Operation in singleton
+	# ONE manager, found or created. The previous version constructed a throwaway
+	# just to read the default itinerary and then a second one into /root - two
+	# instances, neither canonical. Reading the defaults is a static call now.
 	var ops_node = get_node_or_null("/root/OperationsManager")
 	if not ops_node:
-		ops_node = load("res://scripts/operations_manager.gd").new()
+		ops_node = OperationsManager.new()
 		ops_node.name = "OperationsManager"
 		get_tree().root.add_child(ops_node)
+	ops_node.start_new_operation(itinerary, sel_diff)
 
-	ops_node.start_new_operation([], sel_diff)
-
-	# Set match config for Stage 1
-	var stage_1 = ops_node.get_current_stage_info()
-	var match_config = get_node_or_null("/root/MatchConfig")
-	if match_config:
-		match_config.selected_map_id = stage_1.get("map_id", "open_plains")
-		match_config.ai_difficulty = sel_diff
-		if sel_fac != "auto":
-			match_config.player_faction = sel_fac
-
-		# Collect checked blueprints
-		var chosen_paths = []
-		for item in blueprint_checks:
-			if item.cb.button_pressed and "bp" in item and "path" in item.bp:
-				chosen_paths.append(item.bp.path)
-		if not chosen_paths.is_empty():
-			match_config.selected_blueprint_paths = chosen_paths
+	_write_match_config(ops_node.get_current_stage_info())
 
 	var router = get_node_or_null("/root/SceneRouter")
 	if router:
@@ -268,9 +368,30 @@ func _on_start_operation_pressed() -> void:
 		get_tree().change_scene_to_file("res://scenes/Battle.tscn")
 
 
+# Everything the first engagement needs. Split out because the between-rounds
+# loop has to do exactly this again for stage 2..N, and the two must not drift.
+func _write_match_config(stage: Dictionary) -> void:
+	var match_config = get_node_or_null("/root/MatchConfig")
+	if match_config == null:
+		return
+	match_config.selected_map_id = str(stage.get("map_id", MapCatalog.DEFAULT_MAP_ID))
+	match_config.ai_difficulty = str(stage.get("ai_difficulty", "normal"))
+
+	var player_fac: String = FACTIONS[player_faction_btn.selected]
+	if player_fac != "auto":
+		match_config.player_faction = player_fac
+	var enemy_fac: String = FACTIONS[enemy_faction_btn.selected]
+	if enemy_fac != "auto":
+		match_config.enemy_faction = enemy_fac
+
+	# An empty roster is a legitimate choice, not a mistake - it means "field my
+	# newest designs", which is what match_director falls back to. So it is
+	# written through as-is rather than being guarded against.
+	match_config.selected_blueprint_paths = roster_picker.ordered_paths()
+
+
 # Routed through SceneRouter so leaving this screen fades out rather than cutting.
-# The get_node_or_null guard keeps the direct call as a fallback, matching the
-# pattern the other router call sites in this file already use - a scene
+# The get_node_or_null guard keeps the direct call as a fallback - a scene
 # instantiated outside the running game (a test fixture) has no autoloads.
 func _return_to_menu() -> void:
 	var router = get_node_or_null("/root/SceneRouter")

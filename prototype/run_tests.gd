@@ -35,6 +35,7 @@ const SUITE_FILES := {
 	"battle_ai": preload("res://tests/battle/test_battle_ai.gd"),
 	"battle_placement": preload("res://tests/battle/test_battle_placement.gd"),
 	"battle_hud": preload("res://tests/battle/test_battle_hud.gd"),
+	"operations_setup": preload("res://tests/battle/test_operations_setup.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -249,6 +250,10 @@ const SUITE_ORDER := [
 	["battle_hud", "test_opening_a_queue_is_an_accordion"],
 	["battle_hud", "test_the_readout_tracks_progress"],
 	["battle_hud", "test_idle_toolboxes_retreat_and_busy_ones_do_not"],
+	["operations_setup", "test_operations_engagement_count_spans_three_to_twelve"],
+	["operations_setup", "test_operations_itinerary_resolves_every_map"],
+	["operations_setup", "test_operations_changing_the_count_keeps_chosen_maps"],
+	["operations_setup", "test_operations_difficulty_ramps_toward_the_choice"],
 	["economy_and_production", "test_harvester_delivery_radius_clears_hull_and_refinery"],
 ]
 

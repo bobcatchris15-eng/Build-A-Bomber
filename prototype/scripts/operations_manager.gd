@@ -4,23 +4,69 @@ extends Node
 # map rotation, player/AI roster state, and target blueprint pre-selection
 # for inter-round Design Lab iteration.
 
+const MapCatalogScript = preload("res://scripts/map_catalog.gd")
+
 signal operation_started(operation_data: Dictionary)
 signal stage_completed(stage_index: int, results: Dictionary)
 signal operation_completed(overall_results: Dictionary)
 
+# How many engagements an operation may be. The floor is 3 because two rounds
+# is not a campaign - there is only one draft between them, so nothing is
+# learned twice. The ceiling is 12 because that is where the itinerary editor
+# stops fitting a screen and where re-drafting stops being a decision.
+const MIN_ENGAGEMENTS := 3
+const MAX_ENGAGEMENTS := 12
+
 # Current active Operation session data
 var is_active_operation: bool = false
 var current_stage: int = 0
-var total_stages: int = 3
 var difficulty: String = "normal" # "easy", "normal", "hard"
 var target_iteration_blueprint: String = "" # Blueprint name queued to open in Design Lab
 
-# Stages itinerary: map IDs and AI difficulty parameters
-var stages_itinerary: Array = [
-	{"map_id": "open_plains", "ai_difficulty": "easy", "title": "Stage 1: Proving Ground"},
-	{"map_id": "highland_chokepoint", "ai_difficulty": "normal", "title": "Stage 2: Mountain Pass"},
-	{"map_id": "urban_sprawl", "ai_difficulty": "hard", "title": "Stage 3: Fortress Siege"}
-]
+# Stages itinerary: map IDs and AI difficulty parameters. Replaced wholesale by
+# start_new_operation() when the setup screen passes one in; this default is
+# what a campaign started without a screen (a test, a direct boot) gets.
+var stages_itinerary: Array = default_itinerary(3, "normal")
+
+
+# Total stages is the itinerary's length, not a separate field. It used to be
+# both, and the two could disagree the moment a custom itinerary was passed in -
+# start_new_operation() replaced the array and left the count at 3.
+var total_stages: int:
+	get:
+		return stages_itinerary.size()
+
+
+# The default rotation, for `count` engagements at a chosen difficulty.
+#
+# Static so the setup screen can read it without instantiating a manager it then
+# has to free - which is what it used to do, one line before constructing a
+# SECOND manager into /root.
+static func default_itinerary(count: int, base_difficulty: String = "normal") -> Array:
+	var maps := MapCatalogScript.get_map_ids()
+	var out: Array = []
+	var n: int = clampi(count, MIN_ENGAGEMENTS, MAX_ENGAGEMENTS)
+	for i in range(n):
+		out.append({
+			"map_id": str(maps[i % maps.size()]) if not maps.is_empty() else "open_plains",
+			"ai_difficulty": ramped_difficulty(i, n, base_difficulty),
+			"title": "Engagement %d" % (i + 1),
+		})
+	return out
+
+
+# An operation ramps: the chosen difficulty is where it ENDS, not a flat setting
+# applied to every round. The first third opens one tier easier so the opening
+# engagement is a place to find out what your roster does wrong, and the last
+# third is the tier that was actually picked.
+static func ramped_difficulty(index: int, count: int, base_difficulty: String) -> String:
+	var tiers := ["easy", "normal", "hard"]
+	var top: int = maxi(0, tiers.find(base_difficulty))
+	if count <= 1 or top <= 0:
+		return tiers[top]
+	# Rounds map onto [top-1 .. top], spending the first third below.
+	var progress: float = float(index) / float(count - 1)
+	return tiers[top - 1] if progress < 0.34 else tiers[top]
 
 # Round history tracking
 var stage_results_history: Array = []
