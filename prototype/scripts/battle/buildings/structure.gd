@@ -32,6 +32,21 @@ var defense_hull: Node3D = null
 # Longest weapon reach, for the AI's siting decisions. Zero on anything unarmed.
 var attack_range: float = 0.0
 
+# How far this building sees, which is what lifts fog around a base.
+#
+# THIS WAS MISSING ENTIRELY and buildings lifted no fog at all. VisionService
+# reads `vision_range` off anything in the `damageable` group and defaults to 0.0
+# for anything that does not declare one - a deliberately quiet default, because
+# not everything damageable is an observer - so structures counted as things to
+# be SEEN and never as things that SEE. A base that does not light its own ground
+# is the symptom; a missing property is the cause.
+#
+# 15.0 is the old runtime's own default (building.gd:94), carried over rather
+# than reinvented. Per-kind overrides come from the catalog so an HQ or a sensor
+# building can out-see a power plant without special-casing anything here.
+const DEFAULT_VISION_RANGE := 15.0
+var vision_range: float = DEFAULT_VISION_RANGE
+
 # bay index -> the unit holding it, or null. Fixed length, allocated at setup
 # from the catalog, so a refinery's capacity is authored data rather than an
 # emergent property of how many harvesters happen to be nearby.
@@ -57,6 +72,7 @@ func setup(structure_kind: String, structure_team: int) -> void:
 	max_hp = stats.get("hp", 1000.0)
 	hp = max_hp
 	footprint = stats.get("size", Vector3(5, 3, 5))
+	vision_range = stats.get("vision_range", DEFAULT_VISION_RANGE)
 
 	_bay_offsets = stats.get("dock_bays", [])
 	_bays.resize(_bay_offsets.size())
@@ -116,6 +132,12 @@ func setup_from_blueprint(blueprint: Dictionary, structure_team: int, bp_manager
 
 	var catalog: Dictionary = ModuleCatalog.get_module_data(hull_type)
 	footprint = catalog.get("size", Vector3(3, 2, 3))
+	# A turret sees off its own foundation hull, the way a vehicle sees off its
+	# hull - so a design with a sensor mast on it spots further, and a picket
+	# turret is worth placing forward for what it reveals as well as what it
+	# shoots. Falls back to the flat structure default for a hull the catalog has
+	# no base vision for.
+	vision_range = maxf(ModuleCatalog.get_base_vision(hull_type), DEFAULT_VISION_RANGE)
 	# Defences dock nothing, so they publish no bays. Leaving the array unsized
 	# would have reserve_bay() report a turret as a valid delivery point.
 	_bay_offsets = []

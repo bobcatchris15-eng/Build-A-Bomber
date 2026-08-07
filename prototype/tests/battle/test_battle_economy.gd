@@ -206,6 +206,55 @@ func test_power_gates_production_rate() -> bool:
 	return true
 
 
+# Income rate is what makes "0 metal because I am building" distinguishable from
+# "0 metal because my harvesters are dead". The commander's affordability now
+# reads a budget built on it, so the three properties that matter are: starting
+# resources are not counted as income, deliveries raise the rate, and the rate
+# decays back to nothing once deliveries stop.
+func test_income_rate_measures_deliveries_and_decays() -> bool:
+	print("Running Test Suite: Economy - income rate and planning budget...")
+	var economy = EconomyServiceScript.new()
+	economy.add_team(0, 450, 0)
+
+	# Opening money is set on the ledger directly, not credited, so a team must not
+	# appear to be earning at the moment the match starts.
+	if not is_zero_approx(economy.income_rate_metal(0)):
+		print("  [FAIL] starting resources counted as income: %f"
+			% economy.income_rate_metal(0))
+		return false
+
+	# Two harvester loads inside the window. The rate is the accumulator over
+	# INCOME_WINDOW, so 100 metal banked reads as 100/20 = 5 per second.
+	economy.credit(0, 50, 0)
+	economy.credit(0, 50, 0)
+	var rate: float = economy.income_rate_metal(0)
+	if not is_equal_approx(rate, 100.0 / EconomyServiceScript.INCOME_WINDOW):
+		print("  [FAIL] expected %f/s, got %f/s"
+			% [100.0 / EconomyServiceScript.INCOME_WINDOW, rate])
+		return false
+
+	# Budget is cash plus what is about to arrive. That is the whole point: a team
+	# at 0 in the bank and earning is not a team that can afford nothing.
+	var spent := economy.spend(0, 550, 0)
+	if not spent or economy.metal(0) != 0:
+		print("  [FAIL] could not drain the ledger for the budget check")
+		return false
+	if not is_equal_approx(economy.budget_metal(0, 30.0), rate * 30.0):
+		print("  [FAIL] budget at zero cash should be 30 s of income, got %f"
+			% economy.budget_metal(0, 30.0))
+		return false
+
+	# And it must fall away when the deliveries stop, or a team whose harvesters
+	# all died would keep planning against income it no longer has.
+	for _i in range(20):
+		economy.tick_income(10.0)
+	if economy.income_rate_metal(0) > 0.01:
+		print("  [FAIL] income rate did not decay: %f" % economy.income_rate_metal(0))
+		return false
+	print("  [PASS] income rate and budget")
+	return true
+
+
 func test_refinery_bays_are_exclusive_and_reclaimable() -> bool:
 	print("Running Test Suite: Structure - dock bay reservation...")
 	var refinery = StructureScript.new()

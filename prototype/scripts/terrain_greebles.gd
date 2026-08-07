@@ -23,16 +23,27 @@ class_name TerrainGreebles
 # decorations already use) so a given map always scatters identically
 # run to run - required for the screenshot-based verification convention
 # this project uses.
+#
+# CORE_DESIGN_LANGUAGE.md §3.1/§3.2: every prop function below takes a
+# `prop_scale` parameter (default 1.0, i.e. today's exact sizes) multiplying
+# every physical size, length, radius and within-clump jitter magnitude -
+# the mechanism that turns a pebble into a boulder and a grass blade into a
+# tree once WorldScale actually drives it (a later, separate commit; this
+# one is a pure refactor and must be visually IDENTICAL at prop_scale=1.0).
+# Deliberately NOT applied to _rand_point()'s placement offset - that's
+# bounded by zone.half_extents, which is already real map-space and scales
+# on its own once map geometry scales (see map_catalog.gd), so scaling it
+# again here would double-count.
 
-static func scatter(zone: Dictionary, parent: Node3D):
+static func scatter(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	match zone.get("surface_type", ""):
-		"marsh": _scatter_marsh(zone, parent)
-		"rocky": _scatter_rocky(zone, parent)
-		"snow_mud": _scatter_snow_mud(zone, parent)
-		"sand": _scatter_sand(zone, parent)
+		"marsh": _scatter_marsh(zone, parent, prop_scale)
+		"rocky": _scatter_rocky(zone, parent, prop_scale)
+		"snow_mud": _scatter_snow_mud(zone, parent, prop_scale)
+		"sand": _scatter_sand(zone, parent, prop_scale)
 
-static func scatter_shallow_water(zone: Dictionary, parent: Node3D):
-	_scatter_tide_pool_rocks(zone, parent)
+static func scatter_shallow_water(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
+	_scatter_tide_pool_rocks(zone, parent, prop_scale)
 
 static func _seeded_rng(center: Vector3) -> RandomNumberGenerator:
 	var rng = RandomNumberGenerator.new()
@@ -50,38 +61,55 @@ static func _flat_material(color: Color, roughness: float = 0.85) -> StandardMat
 	mat.roughness = roughness
 	return mat
 
+# CORE_DESIGN_LANGUAGE.md §3.2: prop_scale makes each individual prop bigger
+# (Chunk 5 above), but a zone's PHYSICAL footprint doesn't change alongside
+# it - that's map geometry, scaled separately once WorldScale reaches
+# map_catalog.gd. Left alone, the same fixed count-per-zone at 16x prop size
+# would be a wall of solid geometry instead of the same sparse coverage
+# fraction §3.1 calls for. Coverage fraction is roughly (count * prop_area) /
+# zone_area, and prop_area itself grows as prop_scale^2 (it's an area, prop
+# size scales linearly on each axis) - so dividing the base count by
+# prop_scale^2 holds coverage fraction constant. Deliberately INERT: at
+# prop_scale=1.0 this returns exactly base_count, unchanged from today's
+# hardcoded literal, and nothing calls scatter()/scatter_shallow_water()
+# with a non-1.0 prop_scale yet (that's Chunk 7).
+static func _scaled_count(base_count: int, prop_scale: float) -> int:
+	if prop_scale <= 0.0:
+		return base_count
+	return maxi(0, int(round(float(base_count) / (prop_scale * prop_scale))))
+
 # Marsh/swamp: reed tufts (thin tapered stalks standing in small clumps,
 # swaying angle varied per stalk) plus a couple of half-sunk driftwood logs -
 # the two most legible "this ground is wet and choked with growth" cues at
 # RTS camera distance, per the task's own suggested vocabulary.
-static func _scatter_marsh(zone: Dictionary, parent: Node3D):
+static func _scatter_marsh(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var rng = _seeded_rng(zone.center)
 	var reed_color = Color(0.28, 0.34, 0.16)
 	var wood_color = Color(0.24, 0.19, 0.13)
 
-	for cluster_i in range(7):
+	for cluster_i in range(_scaled_count(7, prop_scale)):
 		var p = _rand_point(rng, zone)
 		var stalk_count = rng.randi_range(3, 5)
 		for i in range(stalk_count):
 			var reed = MeshInstance3D.new()
 			var cyl = CylinderMesh.new()
-			var height = rng.randf_range(0.9, 1.6)
-			cyl.top_radius = 0.03
-			cyl.bottom_radius = 0.07
+			var height = rng.randf_range(0.9, 1.6) * prop_scale
+			cyl.top_radius = 0.03 * prop_scale
+			cyl.bottom_radius = 0.07 * prop_scale
 			cyl.height = height
 			reed.mesh = cyl
 			reed.material_override = _flat_material(reed_color.lightened(rng.randf_range(-0.08, 0.08)), 0.75)
 			parent.add_child(reed)
-			var jitter = Vector2(rng.randf_range(-0.35, 0.35), rng.randf_range(-0.35, 0.35))
+			var jitter = Vector2(rng.randf_range(-0.35, 0.35), rng.randf_range(-0.35, 0.35)) * prop_scale
 			reed.global_position = Vector3(zone.center.x + p.x + jitter.x, height / 2.0, zone.center.z + p.y + jitter.y)
 			reed.rotation = Vector3(rng.randf_range(-0.15, 0.15), rng.randf_range(0, TAU), rng.randf_range(-0.15, 0.15))
 
-	for i in range(3):
+	for i in range(_scaled_count(3, prop_scale)):
 		var p = _rand_point(rng, zone, 0.7)
 		var log_inst = MeshInstance3D.new()
 		var cyl = CylinderMesh.new()
-		var length = rng.randf_range(1.6, 2.8)
-		var radius = rng.randf_range(0.12, 0.2)
+		var length = rng.randf_range(1.6, 2.8) * prop_scale
+		var radius = rng.randf_range(0.12, 0.2) * prop_scale
 		cyl.top_radius = radius
 		cyl.bottom_radius = radius * 0.85
 		cyl.height = length
@@ -95,14 +123,14 @@ static func _scatter_marsh(zone: Dictionary, parent: Node3D):
 # contrast (VISUAL_ART_DIRECTION.md's "hard and blocky at a glance") plus
 # the original smaller rock bumps, all non-collidable (unlike terrain_
 # builder.gd's real rock-cluster OBSTACLES, this ground stays walkable).
-static func _scatter_rocky(zone: Dictionary, parent: Node3D):
+static func _scatter_rocky(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var rng = _seeded_rng(zone.center)
 
-	for i in range(3):
+	for i in range(_scaled_count(3, prop_scale)):
 		var p = _rand_point(rng, zone, 0.6)
 		var boulder = MeshInstance3D.new()
 		var box = BoxMesh.new()
-		var size = Vector3(rng.randf_range(0.9, 1.5), rng.randf_range(0.7, 1.1), rng.randf_range(0.9, 1.5))
+		var size = Vector3(rng.randf_range(0.9, 1.5), rng.randf_range(0.7, 1.1), rng.randf_range(0.9, 1.5)) * prop_scale
 		box.size = size
 		boulder.mesh = box
 		var shade = rng.randf_range(0.28, 0.4)
@@ -111,11 +139,11 @@ static func _scatter_rocky(zone: Dictionary, parent: Node3D):
 		boulder.global_position = Vector3(zone.center.x + p.x, size.y / 2.0, zone.center.z + p.y)
 		boulder.rotation.y = rng.randf_range(0, TAU)
 
-	for i in range(10):
+	for i in range(_scaled_count(10, prop_scale)):
 		var p = _rand_point(rng, zone)
 		var rock = MeshInstance3D.new()
 		var box = BoxMesh.new()
-		var size = Vector3(rng.randf_range(0.3, 0.7), rng.randf_range(0.2, 0.5), rng.randf_range(0.3, 0.7))
+		var size = Vector3(rng.randf_range(0.3, 0.7), rng.randf_range(0.2, 0.5), rng.randf_range(0.3, 0.7)) * prop_scale
 		box.size = size
 		rock.mesh = box
 		var shade = rng.randf_range(0.3, 0.45)
@@ -128,16 +156,16 @@ static func _scatter_rocky(zone: Dictionary, parent: Node3D):
 # mud-rut streaks lying flush with the ground - the streaks are flat rather
 # than raised (a "worn-through" patch, not a bump) to match the baked
 # texture's own recessed mud channels instead of fighting them.
-static func _scatter_snow_mud(zone: Dictionary, parent: Node3D):
+static func _scatter_snow_mud(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var rng = _seeded_rng(zone.center)
 	var snow_color = Color(0.85, 0.84, 0.8)
 	var mud_color = Color(0.18, 0.13, 0.09)
 
-	for i in range(5):
+	for i in range(_scaled_count(5, prop_scale)):
 		var p = _rand_point(rng, zone)
 		var mound = MeshInstance3D.new()
 		var sphere = SphereMesh.new()
-		var radius = rng.randf_range(0.5, 1.0)
+		var radius = rng.randf_range(0.5, 1.0) * prop_scale
 		sphere.radius = radius
 		sphere.height = radius * 1.1
 		mound.mesh = sphere
@@ -146,45 +174,45 @@ static func _scatter_snow_mud(zone: Dictionary, parent: Node3D):
 		parent.add_child(mound)
 		mound.global_position = Vector3(zone.center.x + p.x, radius * 0.45 * 0.5, zone.center.z + p.y)
 
-	for i in range(3):
+	for i in range(_scaled_count(3, prop_scale)):
 		var p = _rand_point(rng, zone, 0.7)
 		var rut = MeshInstance3D.new()
 		var box = BoxMesh.new()
-		var length = rng.randf_range(1.8, 3.2)
-		box.size = Vector3(0.35, 0.04, length)
+		var length = rng.randf_range(1.8, 3.2) * prop_scale
+		box.size = Vector3(0.35, 0.04, length) * Vector3(prop_scale, prop_scale, 1.0)
 		rut.mesh = box
 		var mat = _flat_material(mud_color.lightened(rng.randf_range(-0.03, 0.03)), 0.2)
 		rut.material_override = mat
 		parent.add_child(rut)
-		rut.global_position = Vector3(zone.center.x + p.x, 0.03, zone.center.z + p.y)
+		rut.global_position = Vector3(zone.center.x + p.x, 0.03 * prop_scale, zone.center.z + p.y)
 		rut.rotation.y = rng.randf_range(0, TAU)
 
 # Soft sand: long, low ripple ridges (echoing the baked texture's own dune
 # shape at a larger physical scale) plus a couple of sun-bleached rock
 # fragments - sparse, since a dune field's whole silhouette point is
 # "smooth and mostly empty," not busy.
-static func _scatter_sand(zone: Dictionary, parent: Node3D):
+static func _scatter_sand(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var rng = _seeded_rng(zone.center)
 	var sand_ridge_color = Color(0.7, 0.61, 0.42)
 	var bleached_color = Color(0.68, 0.63, 0.56)
 
-	for i in range(4):
+	for i in range(_scaled_count(4, prop_scale)):
 		var p = _rand_point(rng, zone, 0.65)
 		var ridge = MeshInstance3D.new()
 		var box = BoxMesh.new()
-		var length = rng.randf_range(2.5, 4.5)
-		box.size = Vector3(length, 0.18, rng.randf_range(0.8, 1.4))
+		var length = rng.randf_range(2.5, 4.5) * prop_scale
+		box.size = Vector3(length, 0.18 * prop_scale, rng.randf_range(0.8, 1.4) * prop_scale)
 		ridge.mesh = box
 		ridge.material_override = _flat_material(sand_ridge_color.lightened(rng.randf_range(-0.03, 0.05)), 0.9)
 		parent.add_child(ridge)
-		ridge.global_position = Vector3(zone.center.x + p.x, 0.06, zone.center.z + p.y)
+		ridge.global_position = Vector3(zone.center.x + p.x, 0.06 * prop_scale, zone.center.z + p.y)
 		ridge.rotation.y = rng.randf_range(0, TAU)
 
-	for i in range(2):
+	for i in range(_scaled_count(2, prop_scale)):
 		var p = _rand_point(rng, zone)
 		var rock = MeshInstance3D.new()
 		var box = BoxMesh.new()
-		var size = Vector3(rng.randf_range(0.25, 0.5), rng.randf_range(0.2, 0.35), rng.randf_range(0.25, 0.5))
+		var size = Vector3(rng.randf_range(0.25, 0.5), rng.randf_range(0.2, 0.35), rng.randf_range(0.25, 0.5)) * prop_scale
 		box.size = size
 		rock.mesh = box
 		rock.material_override = _flat_material(bleached_color.lightened(rng.randf_range(-0.04, 0.04)), 0.85)
@@ -196,15 +224,15 @@ static func _scatter_sand(zone: Dictionary, parent: Node3D):
 # exposed, some barely breaking the waterline - a wet, glossy dark rock
 # finish (unlike the matte rocky-terrain boulders) since these really do
 # sit wet at the water's edge.
-static func _scatter_tide_pool_rocks(zone: Dictionary, parent: Node3D):
+static func _scatter_tide_pool_rocks(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var rng = _seeded_rng(zone.center)
 	var wet_rock_color = Color(0.22, 0.24, 0.23)
 
-	for i in range(6):
+	for i in range(_scaled_count(6, prop_scale)):
 		var p = _rand_point(rng, zone, 0.8)
 		var rock = MeshInstance3D.new()
 		var box = BoxMesh.new()
-		var size = Vector3(rng.randf_range(0.4, 0.9), rng.randf_range(0.3, 0.7), rng.randf_range(0.4, 0.9))
+		var size = Vector3(rng.randf_range(0.4, 0.9), rng.randf_range(0.3, 0.7), rng.randf_range(0.4, 0.9)) * prop_scale
 		box.size = size
 		rock.mesh = box
 		var mat = _flat_material(wet_rock_color.lightened(rng.randf_range(-0.03, 0.05)), 0.35)
@@ -213,7 +241,7 @@ static func _scatter_tide_pool_rocks(zone: Dictionary, parent: Node3D):
 		# Vary how much of each rock breaks the waterline - some barely
 		# poke through (mostly submerged), others stand clear of it.
 		var exposure = rng.randf_range(0.25, 0.75)
-		rock.global_position = Vector3(zone.center.x + p.x, size.y * exposure - size.y / 2.0 + 0.06, zone.center.z + p.y)
+		rock.global_position = Vector3(zone.center.x + p.x, size.y * exposure - size.y / 2.0 + 0.06 * prop_scale, zone.center.z + p.y)
 		rock.rotation.y = rng.randf_range(0, TAU)
 
 # --- Baseline grassland/blue_water clutter ---
@@ -239,41 +267,52 @@ static func _scatter_tide_pool_rocks(zone: Dictionary, parent: Node3D):
 # already be the correct terrain height at that point (e.g. an elevation
 # plateau's top), not assumed to be 0 - a grass tuft dropped at world y=0
 # under a raised plateau would look buried.
-static func place_grassland_prop(pos: Vector3, variant_seed: int, parent: Node3D):
+#
+# CORE_DESIGN_LANGUAGE.md §2.1/§7.1 tension resolved by terrain_builder.gd's
+# own gate (see _spawn_grassland_clutter()'s two passes): unit readability
+# during a fight is a gameplay requirement, so tall clutter is never allowed
+# to grow up around where units actually fight. `tall` selects between the
+# three short variants above (roll < 1.0 always lands in one of them) and a
+# genuinely tall variant instead - the caller decides which is legal at a
+# given position, this function just builds whichever was asked for.
+static func place_grassland_prop(pos: Vector3, variant_seed: int, parent: Node3D, prop_scale: float = 1.0, tall: bool = false):
 	var rng = RandomNumberGenerator.new()
 	rng.seed = variant_seed
+	if tall:
+		_place_tall_brush(pos, rng, parent, prop_scale)
+		return
 	var roll = rng.randf()
 	if roll < 0.5:
-		_place_grass_tuft(pos, rng, parent)
+		_place_grass_tuft(pos, rng, parent, prop_scale)
 	elif roll < 0.8:
-		_place_grassland_rock(pos, rng, parent)
+		_place_grassland_rock(pos, rng, parent, prop_scale)
 	else:
-		_place_brush_clump(pos, rng, parent)
+		_place_brush_clump(pos, rng, parent, prop_scale)
 
 # A short tuft of upright blades - shorter and greener than marsh's reeds
 # (dry-ish open ground, not standing water), still enough of a cluster to
 # read as a real clump rather than a single blade of grass.
-static func _place_grass_tuft(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D):
+static func _place_grass_tuft(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D, prop_scale: float = 1.0):
 	var color = Color(0.3, 0.4, 0.17)
 	var blade_count = rng.randi_range(3, 5)
 	for i in range(blade_count):
 		var blade = MeshInstance3D.new()
 		var cyl = CylinderMesh.new()
-		var height = rng.randf_range(0.22, 0.42)
-		cyl.top_radius = 0.015
-		cyl.bottom_radius = 0.035
+		var height = rng.randf_range(0.22, 0.42) * prop_scale
+		cyl.top_radius = 0.015 * prop_scale
+		cyl.bottom_radius = 0.035 * prop_scale
 		cyl.height = height
 		blade.mesh = cyl
 		blade.material_override = _flat_material(color.lightened(rng.randf_range(-0.1, 0.1)), 0.8)
 		parent.add_child(blade)
-		var jitter = Vector2(rng.randf_range(-0.12, 0.12), rng.randf_range(-0.12, 0.12))
+		var jitter = Vector2(rng.randf_range(-0.12, 0.12), rng.randf_range(-0.12, 0.12)) * prop_scale
 		blade.global_position = Vector3(pos.x + jitter.x, pos.y + height / 2.0, pos.z + jitter.y)
 		blade.rotation = Vector3(rng.randf_range(-0.2, 0.2), rng.randf_range(0, TAU), rng.randf_range(-0.2, 0.2))
 
-static func _place_grassland_rock(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D):
+static func _place_grassland_rock(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D, prop_scale: float = 1.0):
 	var rock = MeshInstance3D.new()
 	var box = BoxMesh.new()
-	var size = Vector3(rng.randf_range(0.25, 0.5), rng.randf_range(0.18, 0.35), rng.randf_range(0.25, 0.5))
+	var size = Vector3(rng.randf_range(0.25, 0.5), rng.randf_range(0.18, 0.35), rng.randf_range(0.25, 0.5)) * prop_scale
 	box.size = size
 	rock.mesh = box
 	var shade = rng.randf_range(0.32, 0.42)
@@ -284,10 +323,10 @@ static func _place_grassland_rock(pos: Vector3, rng: RandomNumberGenerator, pare
 
 # A low scrubby clump of brush - a squashed sphere reads as a rounded bush
 # silhouette at RTS distance without needing real branch geometry.
-static func _place_brush_clump(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D):
+static func _place_brush_clump(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D, prop_scale: float = 1.0):
 	var bush = MeshInstance3D.new()
 	var sphere = SphereMesh.new()
-	var radius = rng.randf_range(0.3, 0.55)
+	var radius = rng.randf_range(0.3, 0.55) * prop_scale
 	sphere.radius = radius
 	sphere.height = radius * 1.4
 	bush.mesh = sphere
@@ -296,10 +335,37 @@ static func _place_brush_clump(pos: Vector3, rng: RandomNumberGenerator, parent:
 	parent.add_child(bush)
 	bush.global_position = Vector3(pos.x, pos.y + radius * 0.3, pos.z)
 
+# CORE_DESIGN_LANGUAGE.md §3.1: a genuinely tall clump - roughly 3-5x a
+# regular _place_brush_clump()'s radius, so at 16x prop_scale it stands
+# close to unit height, the "dense forest is a clump of marsh grass" cue at
+# full strength. terrain_builder.gd's _spawn_grassland_clutter() is the only
+# caller, and only for positions it has already determined are off the
+# playable surface (map edge margin or a slope too steep to fight on) - see
+# that function's own comment for why unit readability during a fight
+# forbids this everywhere else. A tuft of tall blades rather than a solid
+# clump reads better at the greater height than a single squashed sphere
+# would (a sphere stretched 3-5x tall stops reading as foliage).
+static func _place_tall_brush(pos: Vector3, rng: RandomNumberGenerator, parent: Node3D, prop_scale: float = 1.0):
+	var color = Color(0.22, 0.32, 0.13)
+	var blade_count = rng.randi_range(4, 6)
+	for i in range(blade_count):
+		var blade = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		var height = rng.randf_range(1.0, 1.8) * prop_scale
+		cyl.top_radius = 0.05 * prop_scale
+		cyl.bottom_radius = 0.11 * prop_scale
+		cyl.height = height
+		blade.mesh = cyl
+		blade.material_override = _flat_material(color.lightened(rng.randf_range(-0.1, 0.1)), 0.8)
+		parent.add_child(blade)
+		var jitter = Vector2(rng.randf_range(-0.4, 0.4), rng.randf_range(-0.4, 0.4)) * prop_scale
+		blade.global_position = Vector3(pos.x + jitter.x, pos.y + height / 2.0, pos.z + jitter.y)
+		blade.rotation = Vector3(rng.randf_range(-0.12, 0.12), rng.randf_range(0, TAU), rng.randf_range(-0.12, 0.12))
+
 # Blue water: a small fixed handful of floating driftwood/flotsam planks
 # per water rect - deliberately NOT area-scaled (see this section's header
 # comment) since real open water should read as mostly empty.
-static func scatter_blue_water(zone: Dictionary, parent: Node3D):
+static func scatter_blue_water(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var rng = _seeded_rng(zone.center)
 	var flotsam_color = Color(0.32, 0.26, 0.18)
 	var count = rng.randi_range(3, 6)
@@ -307,10 +373,10 @@ static func scatter_blue_water(zone: Dictionary, parent: Node3D):
 		var p = _rand_point(rng, zone, 0.85)
 		var plank = MeshInstance3D.new()
 		var box = BoxMesh.new()
-		var length = rng.randf_range(0.8, 1.6)
-		box.size = Vector3(length, 0.06, rng.randf_range(0.18, 0.32))
+		var length = rng.randf_range(0.8, 1.6) * prop_scale
+		box.size = Vector3(length, 0.06 * prop_scale, rng.randf_range(0.18, 0.32) * prop_scale)
 		plank.mesh = box
 		plank.material_override = _flat_material(flotsam_color.lightened(rng.randf_range(-0.05, 0.08)), 0.75)
 		parent.add_child(plank)
-		plank.global_position = Vector3(zone.center.x + p.x, 0.07, zone.center.z + p.y)
+		plank.global_position = Vector3(zone.center.x + p.x, 0.07 * prop_scale, zone.center.z + p.y)
 		plank.rotation.y = rng.randf_range(0, TAU)

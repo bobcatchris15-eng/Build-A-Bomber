@@ -11,7 +11,16 @@ extends Camera3D
 # smallest map. Pan speed already scales with height (see _process()
 # below), so raising this doesn't make traversal at max zoom-out feel
 # sluggish.
-@export var max_height: float = 240.0
+#
+# CORE_DESIGN_LANGUAGE.md §7.2: this used to be 240 against a min_height of
+# 10, which the doc calls out as "the macro language holds at the low end
+# and does not at 240" - past a certain height there is no plausible lens
+# that sees that much ground at that depth of field, and the miniature read
+# inverts into a map view. Lowered to where the DOF band (see
+# dof_band_half_width() below, which now WIDENS with height instead of
+# staying fixed) can still plausibly cover the visible ground, rather than
+# silently doing neither of the two things §7.2 says must be chosen between.
+@export var max_height: float = 160.0
 
 # VISUAL_AND_UX_POLISH_PLAN.md B1: edge-scroll + zoom-to-cursor - both core
 # RTS camera expectations this project had neither of. Edge margin in real
@@ -21,14 +30,91 @@ extends Camera3D
 
 var height: float = 26.0
 
+# CORE_DESIGN_LANGUAGE.md §2/§7.1: the battle camera previously had no DOF at
+# all, while designer_camera.gd implemented the full tilt-shift band - "the
+# largest gap between this document and the build". This is that band,
+# ported to the RTS camera's height-based zoom instead of designer_camera's
+# orbit distance. §2.1 is explicit that the focal BAND (near+far DOF working
+# together) is the whole effect, not a radial blur, and that the blur amount
+# must stay low (0.08) because unit readability at RTS zoom is a gameplay
+# requirement, not just an aesthetic one - see designer_camera.gd:26-41 for
+# the reference implementation this mirrors.
+var _cam_attributes: CameraAttributesPractical = null
+# CORE_DESIGN_LANGUAGE.md §7.2's other half of the fix: rather than a single
+# fixed band width (designer_camera.gd's orbit rig never zooms out far
+# enough to need one), the band WIDENS as height rises, so the macro read
+# fades out smoothly across the zoom range instead of snapping between
+# "miniature" and "map view" at some arbitrary height. At min_height it
+# matches designer_camera.gd's own 4.0 exactly.
+const DOF_BAND_MIN_HALF_WIDTH: float = 4.0
+const DOF_BAND_MAX_HALF_WIDTH: float = 30.0
+
+# How gradually blur ramps in beyond the sharp band, in metres.
+#
+# WIDENED 3x (was 6.0) because the effect read as too aggressive in play. This is
+# the "3x farther from centre transition" lever rather than the "a third the
+# intensity on units" one, because the latter is NOT AVAILABLE: Godot's DOF is a
+# screen-space post-process keyed on depth alone, applied by
+# CameraAttributesPractical to the whole frame. It has no per-object, per-layer
+# or per-material opt-out, and a unit standing on the ground is at essentially
+# the same depth as the terrain right behind it - so nothing about the effect can
+# distinguish the two. Blurring units less than the ground they stand on would
+# need a custom compositor pass rendering units to their own buffer, which is a
+# different and much larger piece of work.
+#
+# Widening the transition keeps the tilt-shift read at the extremes of the frame
+# while letting the playfield stay sharp much further from the focal plane, which
+# is the part that matters for unit readability.
+const DOF_TRANSITION: float = 18.0
+
+# Peak blur strength. Reduced to roughly a third of designer_camera.gd's 0.08 -
+# Chris's "a third the intensity", applied globally since it cannot be applied to
+# units alone. CORE_DESIGN_LANGUAGE.md §2.1 sets 0.08 as a CEILING for unit
+# readability, not a target, so going under it is within the design rather than a
+# departure from it.
+const DOF_BLUR_AMOUNT: float = 0.03
+
+# Pure function (no node state) so it's directly testable headless, same
+# reasoning as compute_edge_scroll_direction() above: linear interpolation
+# between the two band widths across the min/max height range, so it is
+# provably monotonic rather than "probably feels right."
+static func dof_band_half_width(height: float, min_h: float, max_h: float) -> float:
+	if max_h <= min_h:
+		return DOF_BAND_MIN_HALF_WIDTH
+	var t = clamp((height - min_h) / (max_h - min_h), 0.0, 1.0)
+	return lerp(DOF_BAND_MIN_HALF_WIDTH, DOF_BAND_MAX_HALF_WIDTH, t)
+
 func _ready():
 	height = clamp(global_position.y, min_height, max_height)
 	_apply_pitch()
+	_setup_tilt_shift_dof()
 
 func _apply_pitch():
 	# Steeper look-down when zoomed out
 	var t = (height - min_height) / (max_height - min_height)
 	rotation_degrees.x = lerp(-42.0, -62.0, t)
+
+func _setup_tilt_shift_dof():
+	_cam_attributes = CameraAttributesPractical.new()
+	_cam_attributes.dof_blur_far_enabled = true
+	_cam_attributes.dof_blur_far_transition = DOF_TRANSITION
+	_cam_attributes.dof_blur_near_enabled = true
+	_cam_attributes.dof_blur_near_transition = DOF_TRANSITION
+	_cam_attributes.dof_blur_amount = DOF_BLUR_AMOUNT
+	attributes = _cam_attributes
+	_apply_dof_distances_from(height)
+
+# The camera looks down at height from directly above its focal point (not
+# straight down the -Z axis the way designer_camera's orbit rig does), so the
+# near/far DOF distances track the camera's altitude itself rather than a
+# distance-to-pivot value - altitude already IS the camera's distance from
+# the ground plane it's focused on.
+func _apply_dof_distances_from(altitude: float) -> void:
+	if not _cam_attributes:
+		return
+	var half_width = dof_band_half_width(altitude, min_height, max_height)
+	_cam_attributes.dof_blur_far_distance = altitude + half_width
+	_cam_attributes.dof_blur_near_distance = max(1.0, altitude - half_width)
 
 # Pure function (no Input/viewport reads) so it's directly testable headless -
 # given where the mouse sits relative to the viewport and the margin, which
@@ -70,6 +156,10 @@ func _process(delta):
 		global_position.z += move.y
 
 	global_position.y = lerp(global_position.y, height, 10.0 * delta)
+	# Track the camera's REAL (lerped) altitude, not the target `height` -
+	# same reasoning as designer_camera.gd:38-41, whose DOF distances follow
+	# position.z every frame rather than the target distance.
+	_apply_dof_distances_from(global_position.y)
 
 # VISUAL_AND_UX_POLISH_PLAN.md B1: where the mouse ray hits a flat plane at
 # world Y=`plane_y` - the same "flat ground" approximation skirmish.gd's own
@@ -101,6 +191,7 @@ func zoom_to_cursor(new_height: float, screen_pos: Vector2) -> void:
 	# so the "after" raycast below is measured against the camera's REAL
 	# post-zoom transform, not a stale one mid-lerp.
 	global_position.y = height
+	_apply_dof_distances_from(height)
 	var after = ray_plane_hit(screen_pos)
 	if before != null and after != null:
 		global_position.x += before.x - after.x

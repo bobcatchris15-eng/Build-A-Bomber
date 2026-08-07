@@ -1777,3 +1777,395 @@ func test_b5_heightmap_navmesh_rejects_steep_slope() -> bool:
 	print("  [PASS] A heightmap-backed cliff is a genuine navmesh hole (unreachable across it), while flat ground elsewhere still paths normally.")
 	return true
 
+func test_world_scale_default_and_per_map_override() -> bool:
+	print("Running Test Suite: WorldScale - Default Factor and Per-Map Override...")
+	var WorldScaleScript = preload("res://scripts/world_scale.gd")
+
+	# No map context (null, {}, or a map_def that never declared the key)
+	# always falls back to DEFAULT_WORLD_SCALE - this is the "inert until
+	# a later commit flips it" contract every other chunk in this pass
+	# depends on.
+	if WorldScaleScript.for_map(null) != WorldScaleScript.DEFAULT_WORLD_SCALE:
+		print("  [FAIL] for_map(null) should return DEFAULT_WORLD_SCALE, got ", WorldScaleScript.for_map(null))
+		return false
+	if WorldScaleScript.for_map({}) != WorldScaleScript.DEFAULT_WORLD_SCALE:
+		print("  [FAIL] for_map({}) should return DEFAULT_WORLD_SCALE, got ", WorldScaleScript.for_map({}))
+		return false
+	var undeclared_map := {"name": "Some Map", "map_half_extents": 210.0}
+	if WorldScaleScript.for_map(undeclared_map) != WorldScaleScript.DEFAULT_WORLD_SCALE:
+		print("  [FAIL] A map_def without a world_scale key should fall back to the default.")
+		return false
+
+	# A map that DOES declare world_scale overrides the default - the
+	# per-map escape hatch for outlier maps (scattered_peaks etc).
+	var overridden_map := {"name": "Huge Map", "world_scale": 4.0}
+	if WorldScaleScript.for_map(overridden_map) != 4.0:
+		print("  [FAIL] A map_def with world_scale=4.0 should override the default, got ", WorldScaleScript.for_map(overridden_map))
+		return false
+
+	# A malformed override (wrong type, zero, negative) must not poison
+	# every downstream multiplication - fall back to the default instead
+	# of propagating a zero/negative scale into the whole map.
+	var bad_type_map := {"world_scale": "sixteen"}
+	if WorldScaleScript.for_map(bad_type_map) != WorldScaleScript.DEFAULT_WORLD_SCALE:
+		print("  [FAIL] A non-numeric world_scale should fall back to the default, got ", WorldScaleScript.for_map(bad_type_map))
+		return false
+	var zero_map := {"world_scale": 0.0}
+	if WorldScaleScript.for_map(zero_map) != WorldScaleScript.DEFAULT_WORLD_SCALE:
+		print("  [FAIL] world_scale=0.0 should fall back to the default, got ", WorldScaleScript.for_map(zero_map))
+		return false
+	var negative_map := {"world_scale": -2.0}
+	if WorldScaleScript.for_map(negative_map) != WorldScaleScript.DEFAULT_WORLD_SCALE:
+		print("  [FAIL] A negative world_scale should fall back to the default, got ", WorldScaleScript.for_map(negative_map))
+		return false
+
+	# The scaled_* helpers multiply by the resolved factor.
+	if WorldScaleScript.scaled_f(6.0, overridden_map) != 24.0:
+		print("  [FAIL] scaled_f(6.0) at world_scale=4.0 should be 24.0, got ", WorldScaleScript.scaled_f(6.0, overridden_map))
+		return false
+	if WorldScaleScript.scaled_v2(Vector2(1.0, 2.0), overridden_map) != Vector2(4.0, 8.0):
+		print("  [FAIL] scaled_v2 did not scale both axes by the resolved factor.")
+		return false
+	if WorldScaleScript.scaled_v3(Vector3(1.0, 2.0, 3.0), overridden_map) != Vector3(4.0, 8.0, 12.0):
+		print("  [FAIL] scaled_v3 did not scale all three axes by the resolved factor.")
+		return false
+
+	# At the (current, deliberately inert) default of 1.0, every helper is
+	# a no-op - the load-bearing property every OTHER chunk relies on
+	# before its own "turn it on" commit lands.
+	if WorldScaleScript.DEFAULT_WORLD_SCALE != 1.0:
+		print("  [FAIL] DEFAULT_WORLD_SCALE must still be 1.0 - flipping it is a separate, named chunk, not a side effect of this one.")
+		return false
+	if WorldScaleScript.scaled_f(6.0, null) != 6.0:
+		print("  [FAIL] scaled_f with no map context should be a no-op at the current default.")
+		return false
+
+	print("  [PASS] WorldScale defaults to 1.0, honours a valid per-map override, rejects malformed overrides, and its scaled_* helpers multiply correctly.")
+	return true
+
+# Deterministic per-zone RNG (_seeded_rng() hashes zone.center) means two
+# scatter() calls against the SAME zone dict produce the exact same sequence
+# of randf_range() draws regardless of prop_scale - so comparing prop sizes
+# index-by-index between a prop_scale=1.0 run and a prop_scale=2.0 run is a
+# real doubling check, not just "both non-empty."
+func _greeble_box_sizes(parent: Node3D) -> Array:
+	var sizes: Array = []
+	for child in parent.get_children():
+		if child is MeshInstance3D and child.mesh is BoxMesh:
+			sizes.append(child.mesh.size)
+	return sizes
+
+func test_greeble_prop_scale_is_inert_at_1_and_doubles_at_2() -> bool:
+	print("Running Test Suite: TerrainGreebles - prop_scale Is Inert At 1.0, Exactly Doubles Geometry At 2.0...")
+	var TerrainGreeblesScript = preload("res://scripts/terrain_greebles.gd")
+	var zone = {"center": Vector3(40, 0, -30), "half_extents": Vector2(15, 15)}
+
+	# Baseline: what today's (pre-Chunk-5) hardcoded literals would have
+	# produced. scatter_shallow_water()/_scatter_tide_pool_rocks is
+	# deliberately the subject here, not any of scatter()'s surface types:
+	# it is the ONLY function in this file with a single loop and nothing
+	# else - every surface_type in scatter() runs at least two passes
+	# through the SAME shared RandomNumberGenerator, and Chunk 6 makes each
+	# pass's iteration COUNT depend on prop_scale. A pass earlier in the
+	# function consuming a different number of rng.randf_range() draws at
+	# 1.0 vs 2.0 desyncs the rng stream for every pass after it - not just
+	# across passes (which broke an earlier version of this test using
+	# "rocky"), but even within what looked like a single BoxMesh pass
+	# (which broke a second version using "snow_mud", where the earlier
+	# SphereMesh mound pass silently desynced the later rut pass). A
+	# function with exactly one loop and no earlier pass has nothing to
+	# desync against.
+	var parent_default = Node3D.new()
+	root.add_child(parent_default)
+	TerrainGreeblesScript.scatter_shallow_water(zone, parent_default) # prop_scale defaults to 1.0
+	var default_sizes = _greeble_box_sizes(parent_default)
+
+	var parent_explicit_1 = Node3D.new()
+	root.add_child(parent_explicit_1)
+	TerrainGreeblesScript.scatter_shallow_water(zone, parent_explicit_1, 1.0)
+	var explicit_1_sizes = _greeble_box_sizes(parent_explicit_1)
+
+	if default_sizes.size() != explicit_1_sizes.size() or default_sizes.size() == 0:
+		print("  [FAIL] Expected the same non-zero number of BoxMesh props at the default and explicit prop_scale=1.0, got ", default_sizes.size(), " vs ", explicit_1_sizes.size())
+		parent_default.queue_free()
+		parent_explicit_1.queue_free()
+		return false
+	for i in range(default_sizes.size()):
+		if not default_sizes[i].is_equal_approx(explicit_1_sizes[i]):
+			print("  [FAIL] prop_scale=1.0 must be visually IDENTICAL to the old hardcoded sizes - prop ", i, ": ", default_sizes[i], " vs ", explicit_1_sizes[i])
+			parent_default.queue_free()
+			parent_explicit_1.queue_free()
+			return false
+
+	# NOTE: this compares per-prop SIZE only, not prop COUNT - Chunk 6 (see
+	# test_greeble_density_holds_coverage_fraction_as_prop_scale_rises)
+	# makes prop_scale also divide the scatter count by prop_scale^2, so at
+	# 2.0 fewer props are placed than at 1.0. Both passes' loop counts are
+	# read off in the exact same rng-draw ORDER regardless of how many
+	# iterations run, so the props that DO survive at 2.0 still line up
+	# index-for-index with the first N props at 1.0.
+	var parent_2x = Node3D.new()
+	root.add_child(parent_2x)
+	TerrainGreeblesScript.scatter_shallow_water(zone, parent_2x, 2.0)
+	var sizes_2x = _greeble_box_sizes(parent_2x)
+
+	var ok = true
+	if sizes_2x.is_empty():
+		print("  [FAIL] Expected at least one surviving prop at prop_scale=2.0 to compare sizes against.")
+		ok = false
+	elif sizes_2x.size() > default_sizes.size():
+		print("  [FAIL] prop_scale=2.0 should never place MORE props than prop_scale=1.0, got ", sizes_2x.size(), " vs ", default_sizes.size())
+		ok = false
+	else:
+		for i in range(sizes_2x.size()):
+			if not sizes_2x[i].is_equal_approx(default_sizes[i] * 2.0):
+				print("  [FAIL] prop_scale=2.0 should exactly double every box dimension - prop ", i, ": expected ", default_sizes[i] * 2.0, ", got ", sizes_2x[i])
+				ok = false
+				break
+
+	parent_default.queue_free()
+	parent_explicit_1.queue_free()
+	parent_2x.queue_free()
+	if not ok:
+		return false
+
+	print("  [PASS] prop_scale=1.0 reproduces today's exact prop sizes, and prop_scale=2.0 doubles every dimension for every prop that survives Chunk 6's density scaling.")
+	return true
+
+func test_greeble_density_holds_coverage_fraction_as_prop_scale_rises() -> bool:
+	print("Running Test Suite: TerrainGreebles - Scatter Density Divides By prop_scale^2 So Coverage Fraction Holds...")
+	var TerrainGreeblesScript = preload("res://scripts/terrain_greebles.gd")
+
+	# _scaled_count() itself is a pure function - test it directly rather
+	# than through node counting, since it's the actual thing Chunk 6 adds
+	# and a direct test pins its exact contract (inert at 1.0, divides by
+	# scale^2, never negative, no divide-by-zero).
+	if TerrainGreeblesScript._scaled_count(7, 1.0) != 7:
+		print("  [FAIL] _scaled_count must be inert at prop_scale=1.0 - base count should pass through unchanged, got ", TerrainGreeblesScript._scaled_count(7, 1.0))
+		return false
+	if TerrainGreeblesScript._scaled_count(16, 4.0) != 1:
+		print("  [FAIL] _scaled_count(16, 4.0) should divide by 4.0^2=16, got ", TerrainGreeblesScript._scaled_count(16, 4.0))
+		return false
+	if TerrainGreeblesScript._scaled_count(10, 0.0) < 0:
+		print("  [FAIL] _scaled_count must not crash or go negative on a degenerate prop_scale of 0.0, got ", TerrainGreeblesScript._scaled_count(10, 0.0))
+		return false
+
+	# End-to-end through scatter(): a rocky zone (3 boulders + 10 small
+	# rocks = 13 BoxMesh props at prop_scale=1.0) should place roughly
+	# 13/16 props at prop_scale=4.0 - "roughly" because each of the two
+	# passes rounds independently (3/16 rounds to 0, 10/16 rounds to 1).
+	var zone = {"center": Vector3(-20, 0, 55), "half_extents": Vector2(15, 15), "surface_type": "rocky"}
+
+	var parent_1x = Node3D.new()
+	root.add_child(parent_1x)
+	TerrainGreeblesScript.scatter(zone, parent_1x, 1.0)
+	var count_1x = _greeble_box_sizes(parent_1x).size()
+
+	var parent_4x = Node3D.new()
+	root.add_child(parent_4x)
+	TerrainGreeblesScript.scatter(zone, parent_4x, 4.0)
+	var count_4x = _greeble_box_sizes(parent_4x).size()
+
+	parent_1x.queue_free()
+	parent_4x.queue_free()
+
+	if count_1x != 13:
+		print("  [FAIL] Test setup: expected the rocky zone's known base count of 13 props at prop_scale=1.0, got ", count_1x)
+		return false
+	# _scaled_count(3, 4.0) rounds to 0, _scaled_count(10, 4.0) rounds to 1 -
+	# exactly 1 prop total survives at 4x, matching the per-pass rounding
+	# the direct _scaled_count() calls above already pinned.
+	var expected_4x = TerrainGreeblesScript._scaled_count(3, 4.0) + TerrainGreeblesScript._scaled_count(10, 4.0)
+	if count_4x != expected_4x:
+		print("  [FAIL] Expected ", expected_4x, " props at prop_scale=4.0 (sum of each pass's independently-rounded _scaled_count), got ", count_4x)
+		return false
+
+	print("  [PASS] _scaled_count is inert at 1.0 and divides by prop_scale^2, and scatter() end-to-end shrinks prop count accordingly without changing per-prop size logic.")
+	return true
+
+func test_spawn_visuals_threads_world_scale_into_every_greeble_call() -> bool:
+	print("Running Test Suite: TerrainBuilder.spawn_visuals() - Resolved World Scale Reaches Every Greeble Call Site (Chunk 7)...")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+
+	# Two otherwise-identical maps, one at the (current, inert) default and
+	# one that opts into a 2.0 world_scale via map_catalog.gd's Chunk-1
+	# per-map override key. surface_zones' "rocky" boulder pass is the
+	# subject - same reasoning as the direct TerrainGreebles tests above,
+	# it's a real BoxMesh, and this only needs to prove the multiplier
+	# ARRIVED at the greeble call, not re-litigate exact size math (that's
+	# already covered directly against TerrainGreebles itself).
+	var base_map = {
+		"map_half_extents": 80.0,
+		"surface_zones": [
+			{"center": Vector3(0, 0, 0), "half_extents": Vector2(15, 15), "surface_type": "rocky"},
+		],
+	}
+	var scaled_map = base_map.duplicate(true)
+	scaled_map["world_scale"] = 2.0
+
+	var parent_default = Node3D.new()
+	root.add_child(parent_default)
+	TerrainBuilderScript.spawn_visuals(base_map, parent_default)
+	await tree.process_frame
+
+	var parent_scaled = Node3D.new()
+	root.add_child(parent_scaled)
+	TerrainBuilderScript.spawn_visuals(scaled_map, parent_scaled)
+	await tree.process_frame
+
+	# Both zones share the same zone dict (only the map's world_scale key
+	# differs), so the boulder pass's FIRST prop is the same rng draw in
+	# both - same alignment reasoning as the TerrainGreebles tests, and
+	# valid here for the same reason (rocky's boulder pass runs before
+	# anything else consumes the shared rng in this zone's scatter() call).
+	var sizes_default: Array = []
+	var sizes_scaled: Array = []
+	for child in parent_default.get_children():
+		if child is MeshInstance3D and child.mesh is BoxMesh:
+			sizes_default.append(child.mesh.size)
+	for child in parent_scaled.get_children():
+		if child is MeshInstance3D and child.mesh is BoxMesh:
+			sizes_scaled.append(child.mesh.size)
+
+	parent_default.queue_free()
+	parent_scaled.queue_free()
+
+	if sizes_default.is_empty() or sizes_scaled.is_empty():
+		print("  [FAIL] Test setup: expected at least one BoxMesh prop from the rocky zone in both maps, got ", sizes_default.size(), " vs ", sizes_scaled.size())
+		return false
+	if not sizes_scaled[0].is_equal_approx(sizes_default[0] * 2.0):
+		print("  [FAIL] A map declaring world_scale=2.0 should produce greeble props exactly 2x the size of the same map at the default scale - expected ", sizes_default[0] * 2.0, ", got ", sizes_scaled[0])
+		return false
+
+	print("  [PASS] spawn_visuals() resolves the map's world_scale and threads it into the greeble call, so prop size actually tracks the map's declared scale.")
+	return true
+
+func test_tall_grassland_clutter_never_lands_on_the_navigable_interior() -> bool:
+	print("Running Test Suite: Tall Grassland Clutter Stays Off The Navigable Interior (Chunk 8, CORE_DESIGN_LANGUAGE.md §2.1/§7.1)...")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+
+	# Flat, obstacle-free map: the ONLY non-navigable area is the outer edge
+	# margin beyond half*0.94 (no hills means is_position_blocked() never
+	# trips on slope here) - so any tall prop found strictly inside that
+	# margin would be a real gate failure, not an artifact of this fixture.
+	var map_def = {
+		"map_half_extents": 100.0,
+	}
+	var parent = Node3D.new()
+	root.add_child(parent)
+	TerrainBuilderScript._spawn_grassland_clutter(map_def, parent)
+	await tree.process_frame
+
+	var half = 100.0
+	var interior_bound = half * 0.94
+	# _place_tall_brush() jitters each individual blade up to 0.4*prop_scale
+	# off its clump's gate-checked center position - the GATE is checked
+	# against the clump center, not each blade's final jittered position, so
+	# a blade whose clump sits right at the boundary can render up to ~0.4m
+	# on the interior side of interior_bound without that being a real gate
+	# failure. Padding the interior check by that same jitter magnitude
+	# (plus a hair of slack) tells a genuine violation (a clump placed deep
+	# in the interior, which would be off by metres, not centimetres) apart
+	# from this boundary rounding.
+	const BLADE_JITTER_MAGNITUDE = 0.4
+	var interior_bound_padded = interior_bound - BLADE_JITTER_MAGNITUDE - 0.1
+	# Grass tufts (the only interior CylinderMesh producer) top out at
+	# 0.42m; tall brush starts at 1.0m - comfortably separated, so a
+	# threshold check is unambiguous rather than needing to inspect which
+	# function placed a given node.
+	const TALL_HEIGHT_THRESHOLD = 1.0
+	var tall_seen = false
+	var ok = true
+	for child in parent.get_children():
+		if not (child is MeshInstance3D and child.mesh is CylinderMesh):
+			continue
+		var height = child.mesh.height
+		var on_interior = absf(child.global_position.x) <= interior_bound_padded and absf(child.global_position.z) <= interior_bound_padded
+		if height >= TALL_HEIGHT_THRESHOLD:
+			tall_seen = true
+			if on_interior:
+				print("  [FAIL] A tall-brush-height prop (height ", height, ") was placed on the navigable interior at ", child.global_position, " - it should only ever land in the edge margin or on a steep slope.")
+				ok = false
+				break
+
+	parent.queue_free()
+	if not ok:
+		return false
+	if not tall_seen:
+		print("  [FAIL] Test setup: expected at least one tall-brush prop in the edge margin, found none - the tall pass may not be running.")
+		return false
+
+	print("  [PASS] Tall grassland clutter only ever appears in the edge margin/off-slope, never on the navigable interior where it would hide a unit mid-fight.")
+	return true
+
+func test_ground_noise_stretches_with_world_scale_not_just_amplifies() -> bool:
+	print("Running Test Suite: Ground Noise Wavelength And Amplitude Both Track World Scale (Chunk 9)...")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+
+	# No hills/water_blobs/heightmap - isolates height_at() to the pure
+	# noise term (GROUND_NOISE_AMPLITUDE * noise(freq * xz)), so the
+	# relationship below is exact rather than muddied by other contributors.
+	var map_base = {"name": "chunk9_noise_test", "map_half_extents": 200.0}
+	var map_scaled = {"name": "chunk9_noise_test", "map_half_extents": 200.0, "world_scale": 3.0}
+
+	# height_at(scaled_map, x, z) should equal
+	# scale * height_at(base_map, x/scale, z/scale) - the SAME underlying
+	# noise field, just stretched (longer wavelength) and taller (bigger
+	# amplitude) by the same factor, so a hill that was N units wide and 1
+	# unit tall at scale=1 is 3N units wide and 3 units tall at scale=3,
+	# preserving its shape rather than just its height.
+	var scale = 3.0
+	var sample_points = [Vector2(12.0, -7.0), Vector2(-40.0, 55.0), Vector2(0.5, 0.5)]
+	for p in sample_points:
+		var scaled_height = TerrainBuilderScript.height_at(map_scaled, p.x, p.y)
+		var base_height = TerrainBuilderScript.height_at(map_base, p.x / scale, p.y / scale)
+		var expected = base_height * scale
+		if absf(scaled_height - expected) > 0.001:
+			print("  [FAIL] At (", p.x, ",", p.y, "): expected height_at(scaled) == scale * height_at(base, xz/scale) == ", expected, ", got ", scaled_height)
+			return false
+
+	# Inert at the (current, default) scale of 1.0 - the exact behavior
+	# every other test in this file that calls height_at()/is_position_
+	# blocked() on a map without a world_scale key already depends on.
+	var map_no_scale = {"name": "chunk9_noise_test_inert", "map_half_extents": 200.0}
+	var height_a = TerrainBuilderScript.height_at(map_no_scale, 30.0, -18.0)
+	var height_b = TerrainBuilderScript.height_at(map_no_scale, 30.0, -18.0)
+	if not is_equal_approx(height_a, height_b):
+		print("  [FAIL] height_at() should be deterministic for the same map/position, got ", height_a, " vs ", height_b)
+		return false
+
+	print("  [PASS] Ground noise wavelength and amplitude both scale with world_scale (a stretched/taller version of the same field, not just an amplified one), and stay exact at the default scale.")
+	return true
+
+func test_terrain_tile_density_scales_with_world_scale() -> bool:
+	print("Running Test Suite: Terrain Texture Tile Density Tracks World Scale (Chunk 9)...")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	var footprint = Vector2(60.0, 60.0)
+
+	var mat_default = TerrainBuilderScript._build_terrain_material("rocky", footprint)
+	var mat_2x = TerrainBuilderScript._build_terrain_material("rocky", footprint, Color.WHITE, "", 2.0)
+
+	# uv1_scale.xy = footprint / (TERRAIN_TILE_WORLD_SIZE * tile_scale) - a
+	# LARGER tile_scale means the SAME baked texture tile now represents
+	# more world-space, so fewer repeats fit across the same footprint: the
+	# xy repeat count should be exactly HALF at tile_scale=2.0. .z is
+	# deliberately excluded from this comparison - it's always a fixed 1.0
+	# (there's no third UV axis for a flat terrain plane), never multiplied
+	# by tile_scale, so halving it would be checking the wrong thing.
+	var expected_xy = Vector2(mat_default.uv1_scale.x, mat_default.uv1_scale.y) * 0.5
+	var got_xy = Vector2(mat_2x.uv1_scale.x, mat_2x.uv1_scale.y)
+	if not got_xy.is_equal_approx(expected_xy):
+		print("  [FAIL] tile_scale=2.0 should halve uv1_scale.xy (fewer texture repeats over the same footprint), expected ", expected_xy, ", got ", got_xy)
+		return false
+	if not is_equal_approx(mat_2x.uv1_scale.z, 1.0):
+		print("  [FAIL] uv1_scale.z should stay a fixed 1.0 regardless of tile_scale - there's no third UV axis, got ", mat_2x.uv1_scale.z)
+		return false
+
+	var mat_explicit_1 = TerrainBuilderScript._build_terrain_material("rocky", footprint, Color.WHITE, "", 1.0)
+	if not mat_explicit_1.uv1_scale.is_equal_approx(mat_default.uv1_scale):
+		print("  [FAIL] tile_scale=1.0 should be identical to the default (no tile_scale argument), expected ", mat_default.uv1_scale, ", got ", mat_explicit_1.uv1_scale)
+		return false
+
+	print("  [PASS] tile_scale=1.0 is inert (matches the no-argument default), and tile_scale=2.0 halves texture repeat density as expected.")
+	return true
+

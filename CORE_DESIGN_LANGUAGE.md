@@ -77,6 +77,18 @@ The test: **would a photograph of this object, with no size reference in frame, 
 
 Corollary: **never place a real-scale human-world object in frame.** A door, a window, a road marking or a fencepost instantly resolves the scale ambiguity and the miniature read dies. Urban structures, which [VISUAL_ART_DIRECTION.md §4](VISUAL_ART_DIRECTION.md) covers, are the risk area here — they should read as *models of buildings*, and their detail frequency must be authored to match.
 
+### 3.2 The ratio is 1:16, and it is the environment that moves
+
+§3.1 says units are miniature relative to their surroundings; this section commits to the actual number and to *which side of the equation implements it*.
+
+**The ratio.** Units are 1:16 scale models — a mock battle in a backyard, where the yard is a real yard. This is not a loose "small-ish" cue; it is a fixed multiplier applied consistently to every piece of environmental dressing, so the substitution table in §3.1 holds at a specific, checkable size rather than an art-direction feeling.
+
+**The inversion.** The intuitive implementation is shrinking units to a literal 1:16 scale inside the map sizes that exist today. That is the one version the engine actively refuses. Godot's Recast navmesh baker sizes its voxel grid from `NavigationMesh.cell_size`, and voxel count scales as `(extent / cell_size)²` — [terrain_builder.gd](prototype/scripts/terrain_builder.gd)'s own header records hard-won empirical numbers: `cell_size` 0.25 on a 480-unit map already bakes a 1920×1920 voxel grid in ~1585 ms, and the baker **segfaults outright** past a further threshold. A unit shrunk to roughly 0.4 m needs a cell size around 0.06 to stay resolvable at the same fidelity — about 256× the voxels of a setting already measured as unshippable. Physics margins, near-plane precision and particle scales are likewise tuned against today's absolute sizes.
+
+So the implementation runs the other way: **the environment is scaled up by 16×, and units, blueprints, combat math, `stat_calculator`, and `drivetrain` are left exactly as they are.** The picture is identical either way — a unit is 1:16 relative to a pebble regardless of which side of the ratio moved — but only this direction is buildable. It also means the battlefield genuinely gains 16× the space in unit-lengths, not just a rescaled look: a flank is a real commitment, and fog of war is genuinely blinding at ordinary vision ranges.
+
+`prototype/scripts/world_scale.gd` is the single source of truth for the multiplier, applied to map geometry, terrain dressing, and the various derived grids (navmesh, flow fields, vision, fog) that would otherwise need 256× the cells to keep pace.
+
 ### 3.2 Lighting specifics
 
 "Heavy overcast, flat diffused" is a deliberate constraint, not a mood note. It does three jobs at once:

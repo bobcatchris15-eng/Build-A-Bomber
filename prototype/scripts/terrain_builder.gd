@@ -1,6 +1,7 @@
 extends Node
 class_name TerrainBuilder
 const TerrainGreeblesScript = preload("res://scripts/terrain_greebles.gd")
+const WorldScaleScript = preload("res://scripts/world_scale.gd")
 # Turns a MapCatalog map Dictionary into: baked NavigationServer3D ground/
 # water maps, decorative terrain meshes (water planes, rock-cluster
 # obstacles), and pure query functions (terrain_height_at / is_position_
@@ -118,14 +119,27 @@ const MAX_WALKABLE_SLOPE: float = 0.7 # ~35 degrees
 
 static var _noise_cache: Dictionary = {}
 
+# CORE_DESIGN_LANGUAGE.md §3.2: at a larger world scale, ground undulation
+# needs a longer wavelength to stay the same size RELATIVE to the (also
+# larger) greeble dressing scattered on top of it - otherwise the terrain
+# itself would look like it shrank while everything standing on it grew.
+# Frequency is inverted (lower frequency = longer wavelength) so a bigger
+# world_scale stretches the noise out rather than compressing it. The
+# world_scale is folded into the cache key (not just used to build the
+# FastNoiseLite once) so a map can genuinely change scale between calls -
+# not that anything does yet at DEFAULT_WORLD_SCALE=1.0, but the naive
+# single-entry-per-map-name cache would otherwise silently keep serving a
+# stale frequency from before a scale change.
 static func _get_noise(map_def: Dictionary) -> FastNoiseLite:
-	var key: String = map_def.get("name", "default")
+	var scale = WorldScaleScript.for_map(map_def)
+	var map_name: String = map_def.get("name", "default")
+	var key: String = "%s@%s" % [map_name, scale]
 	if _noise_cache.has(key):
 		return _noise_cache[key]
 	var n = FastNoiseLite.new()
-	n.seed = hash(key)
+	n.seed = hash(map_name)
 	n.noise_type = FastNoiseLite.TYPE_SIMPLEX
-	n.frequency = GROUND_NOISE_FREQUENCY
+	n.frequency = GROUND_NOISE_FREQUENCY / scale
 	_noise_cache[key] = n
 	return n
 
@@ -309,7 +323,7 @@ static func height_at(map_def: Dictionary, x: float, z: float) -> float:
 		var height_scale: float = map_def.get("terrain", {}).get("height_scale", 20.0)
 		return _sample_heightmap_bilinear(heightmap_img, half, x, z) * height_scale
 
-	var h = _get_noise(map_def).get_noise_2d(x, z) * GROUND_NOISE_AMPLITUDE
+	var h = _get_noise(map_def).get_noise_2d(x, z) * GROUND_NOISE_AMPLITUDE * WorldScaleScript.for_map(map_def)
 	for hill in map_def.get("hills", []):
 		h += _hill_contribution(hill, x, z)
 	for blob in map_def.get("water_blobs", []):
@@ -829,19 +843,25 @@ static func bake_pending_entry(entry: Dictionary, cell_size: float) -> void:
 # --- Visuals ---
 
 static func spawn_visuals(map_def: Dictionary, parent: Node3D):
+	# CORE_DESIGN_LANGUAGE.md §3.1/§3.2: every greeble call below gets the
+	# map's resolved world scale, so a pebble stands in for a boulder at the
+	# ratio the map actually declares (WorldScaleScript.for_map() falls back
+	# to DEFAULT_WORLD_SCALE=1.0 for any map without a "world_scale" key -
+	# today's exact, unchanged appearance until that default itself moves).
+	var prop_scale = WorldScaleScript.for_map(map_def)
 	for w in map_def.get("water_areas", []):
-		_spawn_water_plane(w, parent)
+		_spawn_water_plane(w, parent, prop_scale)
 	for blob in map_def.get("water_blobs", []):
-		_spawn_water_blob(blob, parent)
+		_spawn_water_blob(blob, parent, prop_scale)
 	for o in map_def.get("obstacles", []):
 		_spawn_obstacle(o, parent)
 	for s in map_def.get("surface_zones", []):
-		_spawn_surface_zone(s, parent)
+		_spawn_surface_zone(s, parent, prop_scale)
 	for sw in map_def.get("shallow_water_areas", []):
-		_spawn_shallow_water_marker(sw, parent)
+		_spawn_shallow_water_marker(sw, parent, prop_scale)
 	for b in map_def.get("bridges", []):
 		_spawn_bridge(b, parent)
-	_spawn_grassland_clutter(map_def, parent)
+	_spawn_grassland_clutter(map_def, parent, prop_scale)
 
 # Real baked ground textures (see tools/generate_terrain_textures.gd) tiled
 # across each surface_zone's real-world footprint, replacing the old flat
@@ -925,7 +945,14 @@ static func _get_terrain_textures(surface_type: String, variant: String = "") ->
 	_terrain_texture_cache[key] = textures
 	return textures
 
-static func _build_terrain_material(surface_type: String, footprint: Vector2, tint: Color = Color.WHITE, variant: String = "") -> StandardMaterial3D:
+# `tile_scale` multiplies TERRAIN_TILE_WORLD_SIZE - CORE_DESIGN_LANGUAGE.md
+# §3.2: at a larger world scale, the ground texture's own texel density has
+# to grow along with the greeble dressing sitting on top of it (see Chunk 5-
+# 8 above), or the texture would read as shrinking relative to everything
+# else. Callers that already resolved a prop_scale for their greeble calls
+# (Chunk 7) pass the same value here - one resolved scale per call site, not
+# two independently-drifting ones.
+static func _build_terrain_material(surface_type: String, footprint: Vector2, tint: Color = Color.WHITE, variant: String = "", tile_scale: float = 1.0) -> StandardMaterial3D:
 	var mat = StandardMaterial3D.new()
 	var tex = _get_terrain_textures(surface_type, variant)
 	mat.albedo_texture = tex.albedo
@@ -934,7 +961,8 @@ static func _build_terrain_material(surface_type: String, footprint: Vector2, ti
 	mat.roughness = 1.0
 	mat.normal_enabled = true
 	mat.normal_texture = tex.normal
-	mat.uv1_scale = Vector3(footprint.x / TERRAIN_TILE_WORLD_SIZE, footprint.y / TERRAIN_TILE_WORLD_SIZE, 1.0)
+	var tile_size = TERRAIN_TILE_WORLD_SIZE * tile_scale
+	mat.uv1_scale = Vector3(footprint.x / tile_size, footprint.y / tile_size, 1.0)
 	return mat
 
 # The baseline ground plane's material - called by skirmish.gd for the map-
@@ -1071,7 +1099,7 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 
 	return {"mesh": mesh, "shape": shape, "samples": samples, "collision_scale": Vector3(COLLISION_HEIGHTMAP_STEP, 1.0, COLLISION_HEIGHTMAP_STEP)}
 
-static func _spawn_surface_zone(zone: Dictionary, parent: Node3D):
+static func _spawn_surface_zone(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var mesh_inst = MeshInstance3D.new()
 	var plane = PlaneMesh.new()
 	var footprint = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
@@ -1080,31 +1108,31 @@ static func _spawn_surface_zone(zone: Dictionary, parent: Node3D):
 	var surface_type = zone.get("surface_type", "")
 	mesh_inst.material_override = _build_terrain_material(
 		surface_type, footprint, Color.WHITE,
-		_variant_for_position(surface_type, zone.center.x, zone.center.z))
+		_variant_for_position(surface_type, zone.center.x, zone.center.z), prop_scale)
 	parent.add_child(mesh_inst)
 	mesh_inst.global_position = Vector3(zone.center.x, 0.03, zone.center.z)
 
-	TerrainGreeblesScript.scatter(zone, parent)
+	TerrainGreeblesScript.scatter(zone, parent, prop_scale)
 
 # A lighter, sandier-toned marker over the shallow sub-area of a water
 # zone (drawn on top of the main water plane, slightly higher Y) - purely
 # a visual cue that this patch is shallow-draught-only; the real
 # passability distinction lives in the deep_water_map navmesh (see
 # build_navmeshes()).
-static func _spawn_shallow_water_marker(zone: Dictionary, parent: Node3D):
+static func _spawn_shallow_water_marker(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var mesh_inst = MeshInstance3D.new()
 	var plane = PlaneMesh.new()
 	var footprint = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
 	plane.size = footprint
 	mesh_inst.mesh = plane
-	var mat = _build_terrain_material("shallow_water", footprint)
+	var mat = _build_terrain_material("shallow_water", footprint, Color.WHITE, "", prop_scale)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = Color(1, 1, 1, 0.8)
 	mesh_inst.material_override = mat
 	parent.add_child(mesh_inst)
 	mesh_inst.global_position = Vector3(zone.center.x, 0.06, zone.center.z)
 
-	TerrainGreeblesScript.scatter_shallow_water(zone, parent)
+	TerrainGreeblesScript.scatter_shallow_water(zone, parent, prop_scale)
 
 # Baseline deep water - the baked "blue_water" texture (deeper, more
 # desaturated, subtle current/glint - see generate_terrain_textures.gd)
@@ -1112,13 +1140,13 @@ static func _spawn_shallow_water_marker(zone: Dictionary, parent: Node3D):
 # shallow_water's marker (0.93 vs 0.8) so it deliberately reads more
 # opaque/deep rather than shallow_water's see-through/sandy-bed look, per
 # the two types' whole point of contrast.
-static func _spawn_water_plane(water: Dictionary, parent: Node3D):
+static func _spawn_water_plane(water: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var mesh_inst = MeshInstance3D.new()
 	var plane = PlaneMesh.new()
 	var footprint = Vector2(water.half_extents.x * 2.0, water.half_extents.y * 2.0)
 	plane.size = footprint
 	mesh_inst.mesh = plane
-	var mat = _build_terrain_material("blue_water", footprint)
+	var mat = _build_terrain_material("blue_water", footprint, Color.WHITE, "", prop_scale)
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = Color(1, 1, 1, 0.93)
 	mat.emission_enabled = true
@@ -1127,7 +1155,7 @@ static func _spawn_water_plane(water: Dictionary, parent: Node3D):
 	parent.add_child(mesh_inst)
 	mesh_inst.global_position = Vector3(water.center.x, 0.05, water.center.z)
 
-	TerrainGreeblesScript.scatter_blue_water(water, parent)
+	TerrainGreeblesScript.scatter_blue_water(water, parent, prop_scale)
 
 # Organic counterpart to _spawn_water_plane() - a real triangle-fan mesh
 # matching the blob's per-angle coastline (same geometry the navmesh hole
@@ -1137,12 +1165,12 @@ static func _spawn_water_plane(water: Dictionary, parent: Node3D):
 # world position (no per-mesh footprint to scale against, unlike a
 # PlaneMesh's built-in 0..1 UV), same tiling density as every other terrain
 # material via TERRAIN_TILE_WORLD_SIZE.
-static func _spawn_water_blob(blob: Dictionary, parent: Node3D):
+static func _spawn_water_blob(blob: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var verts = _water_blob_fan_verts(blob, 0.05)
 	var st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for v in verts:
-		st.set_uv(Vector2(v.x, v.z) / TERRAIN_TILE_WORLD_SIZE)
+		st.set_uv(Vector2(v.x, v.z) / (TERRAIN_TILE_WORLD_SIZE * prop_scale))
 		st.add_vertex(v)
 	st.generate_normals()
 
@@ -1162,7 +1190,7 @@ static func _spawn_water_blob(blob: Dictionary, parent: Node3D):
 	mesh_inst.material_override = mat
 	parent.add_child(mesh_inst)
 
-	TerrainGreeblesScript.scatter_blue_water({"center": blob.center, "half_extents": Vector2(blob.get("radius", 10.0), blob.get("radius", 10.0))}, parent)
+	TerrainGreeblesScript.scatter_blue_water({"center": blob.center, "half_extents": Vector2(blob.get("radius", 10.0), blob.get("radius", 10.0))}, parent, prop_scale)
 
 static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D):
 	var obstacle_type = obstacle.get("type", "rock")
@@ -1349,7 +1377,7 @@ static func _spawn_bridge(bridge: Dictionary, parent: Node3D):
 # tuft placed at y=0 under a raised plateau would look buried.
 const GRASSLAND_CLUTTER_AVOID_RADIUS: float = 7.0
 
-static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D):
+static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0):
 	var half: float = map_def.get("map_half_extents", 80.0)
 	var area = (half * 2.0) * (half * 2.0)
 	var count = clamp(int(area / 2000.0), 20, 50)
@@ -1397,8 +1425,42 @@ static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D):
 		if rejected:
 			continue
 		pos.y = terrain_height_at(map_def, pos)
-		TerrainGreeblesScript.place_grassland_prop(pos, rng.randi(), parent)
+		TerrainGreeblesScript.place_grassland_prop(pos, rng.randi(), parent, prop_scale)
 		placed += 1
+
+	# CORE_DESIGN_LANGUAGE.md §2.1/§7.1: tall clutter (TerrainGreebles.
+	# _place_tall_brush()) is only legal OFF the playable surface - the map's
+	# outer edge margin (beyond the 0.94 band the sprinkle above stays
+	# within) or a position a steep slope has already made unreachable
+	# (is_position_blocked() true for that reason, not because it's water or
+	# an obstacle, where nothing should render at all). Unit readability
+	# during a fight is a gameplay requirement, so this pass deliberately
+	# never lands on the interior navigable surface the loop above sprinkles
+	# short props across - full-height brush there would let a unit vanish
+	# behind foliage mid-engagement.
+	var tall_rng = RandomNumberGenerator.new()
+	tall_rng.seed = hash(map_def.get("name", "grassland")) + 1
+	var tall_placed = 0
+	var tall_attempts = 0
+	while tall_placed < count and tall_attempts < count * 8:
+		tall_attempts += 1
+		var pos = Vector3(tall_rng.randf_range(-half, half), 0, tall_rng.randf_range(-half, half))
+		if _is_over_water_or_obstacle(map_def, pos):
+			continue
+		var on_edge = absf(pos.x) > half * 0.94 or absf(pos.z) > half * 0.94
+		var steep_slope = not on_edge and is_position_blocked(map_def, pos)
+		if not (on_edge or steep_slope):
+			continue
+		var rejected = false
+		for rect in bridge_rects:
+			if _point_in_rect(pos, rect):
+				rejected = true
+				break
+		if rejected:
+			continue
+		pos.y = terrain_height_at(map_def, pos)
+		TerrainGreeblesScript.place_grassland_prop(pos, tall_rng.randi(), parent, prop_scale, true)
+		tall_placed += 1
 
 # --- Queries (pure functions, no Node dependency - callable from tests
 # directly against a MapCatalog dictionary) ---
@@ -1464,7 +1526,14 @@ static func is_water_at(map_def: Dictionary, x: float, z: float) -> bool:
 			return true
 	return false
 
-static func is_position_blocked(map_def: Dictionary, pos: Vector3) -> bool:
+# Water or an obstacle footprint, with no slope check - split out of
+# is_position_blocked() so the grassland-clutter tall/short decor split
+# (see _spawn_grassland_clutter()'s CORE_DESIGN_LANGUAGE.md §3.1 comment)
+# can ask "is this actually submerged/occupied" separately from "is this
+# unreachable because of slope" - grass shouldn't ever render floating on
+# water or poking through a building regardless of which decor tier it's
+# in, but a steep slope is exactly the terrain tall brush is FOR.
+static func _is_over_water_or_obstacle(map_def: Dictionary, pos: Vector3) -> bool:
 	for w in map_def.get("water_areas", []):
 		if _point_in_rect(pos, _rect_from(w.center, w.half_extents)):
 			return true
@@ -1474,6 +1543,11 @@ static func is_position_blocked(map_def: Dictionary, pos: Vector3) -> bool:
 	for blob in map_def.get("water_blobs", []):
 		if _point_in_water_blob(blob, pos.x, pos.z):
 			return true
+	return false
+
+static func is_position_blocked(map_def: Dictionary, pos: Vector3) -> bool:
+	if _is_over_water_or_obstacle(map_def, pos):
+		return true
 	# RTS_CORE_ROADMAP.md B4: a heightmap makes slope-blocking meaningful
 	# everywhere, not just near authored hills (_slope_at() calls
 	# height_at(), which already checks the heightmap first internally).

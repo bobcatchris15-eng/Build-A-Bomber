@@ -84,3 +84,11 @@ prototype/addons/godot_mcp_server/
 # Kept on disk as a safety net because the originals were never tracked,
 # but never committed - they would bloat history permanently.
 _mesh_backups/
+
+# Downloaded export template archives. Same category as the bundled engine
+# binaries above: engine artifacts, not project source. The win64 pack alone is
+# 1.2GB, well past GitHub's 100MB per-file hard limit.
+export_templates*.tpz
+export_templates*.zip
+prototype/export_templates*.tpz
+prototype/export_templates*.zip

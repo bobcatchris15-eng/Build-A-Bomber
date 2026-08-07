@@ -39,6 +39,11 @@ func add_team(team: int, metal: int = 0, crystal: int = 0) -> void:
 		"crystal": crystal,
 		"capacity": 0.0,
 		"draw": 0.0,
+		# Decaying accumulators behind income_rate_*(). Starting resources are set
+		# directly here rather than through credit(), so a team does not open the
+		# match appearing to earn its own starting money.
+		"income_metal": 0.0,
+		"income_crystal": 0.0,
 	}
 
 
@@ -79,7 +84,65 @@ func credit(team: int, add_metal: int, add_crystal: int) -> void:
 		return
 	_ledger[team].metal += add_metal
 	_ledger[team].crystal += add_crystal
+	_ledger[team].income_metal += add_metal
+	_ledger[team].income_crystal += add_crystal
 	resources_changed.emit(team)
+
+
+# --- Income rate --------------------------------------------------------------
+#
+# WHY THIS EXISTS. Production draws its cost gradually across the build rather
+# than up front, so a team with anything in its queue sits at or near zero metal
+# for the whole build - measured, the AI was at 0 with its queues stalled 40-66%
+# of the time while its harvesters were delivering perfectly well. Cash-on-hand
+# is therefore NOT a measure of whether a team can afford something; it is a
+# measure of whether it is currently building, and reading it as affordability
+# left the AI unable to score a single action for four minutes of a seven-minute
+# match.
+#
+# Income rate is the missing half. "I have 0 in the bank and I am making 6 a
+# second" and "I have 0 in the bank and my harvesters are dead" are the same
+# balance and completely different situations.
+#
+# NOT PRIVILEGED INFORMATION. This is a team's own income, which is exactly what
+# the player's own resource readout shows them. It is not a window into the
+# opponent, so the AI reading it does not breach the no-cheating rule the whole
+# rebuild is built on.
+
+# Seconds of history the rate is averaged over. Long enough to ride out the gap
+# between two harvester deliveries - which arrive in 50-metal lumps every fifteen
+# seconds or so, not continuously - and short enough that losing the harvesters
+# shows up as a collapsing income rather than a stale one.
+const INCOME_WINDOW := 20.0
+
+
+# Ages the accumulated credits toward zero, so the counters measure a RATE rather
+# than growing without bound. Exponential decay rather than a ring buffer of
+# samples: same smoothing, no per-team history to allocate and invalidate.
+func tick_income(delta: float) -> void:
+	if delta <= 0.0:
+		return
+	var keep: float = exp(-delta / INCOME_WINDOW)
+	for team in _ledger:
+		_ledger[team].income_metal *= keep
+		_ledger[team].income_crystal *= keep
+
+
+# Metal per second, averaged over roughly INCOME_WINDOW seconds.
+func income_rate_metal(team: int) -> float:
+	return _ledger.get(team, {}).get("income_metal", 0.0) / INCOME_WINDOW
+
+
+func income_rate_crystal(team: int) -> float:
+	return _ledger.get(team, {}).get("income_crystal", 0.0) / INCOME_WINDOW
+
+
+# What this team can realistically commit over the next `horizon` seconds: what
+# is in the bank plus what is about to arrive. This is the number an affordability
+# decision should be made against, and the one a human reads off their own HUD
+# without thinking about it.
+func budget_metal(team: int, horizon: float) -> float:
+	return float(metal(team)) + income_rate_metal(team) * horizon
 
 
 # --- Power ------------------------------------------------------------------

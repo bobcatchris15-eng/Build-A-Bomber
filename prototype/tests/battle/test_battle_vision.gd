@@ -12,6 +12,7 @@ const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.
 const BattleHUDScript = preload("res://scripts/battle/hud/battle_hud.gd")
 const BattleLayersScript = preload("res://scripts/battle/battle_layers.gd")
 const SmokeVolumeScript = preload("res://scripts/smoke_volume.gd")
+const StructureScript = preload("res://scripts/battle/buildings/structure.gd")
 
 # Deliberately NOT 0 and 1. The `damageable` group is tree-wide and other suites
 # leave constructs in it; scanning picks those up as extra observers on whatever
@@ -148,6 +149,59 @@ func test_vision_hides_the_distant_and_reveals_the_near() -> bool:
 		print("  [FAIL] a blind team can see - visibility is not per-team")
 		return false
 	print("  [PASS] per-team visibility")
+	return true
+
+
+# BUILDINGS HAVE TO SEE, and they did not.
+#
+# VisionService reads `vision_range` off anything in the `damageable` group and
+# defaults to 0.0 for whatever does not declare one - a deliberately quiet
+# default, since not everything damageable is an observer. Structure never
+# declared one, so a base counted as a thing to BE seen and never as a thing that
+# sees, and fog sat over the player's own buildings.
+#
+# Asserted through the real Structure rather than a stub construct, because the
+# defect was precisely that the real one was missing a property the stub would
+# have been given.
+func test_buildings_lift_fog_around_a_base() -> bool:
+	print("Running Test Suite: Vision - buildings light their own ground...")
+	_cleanup()
+	var vision = VisionServiceScript.new()
+	vision.setup(_controller(), TEAM_A, 80.0)
+
+	var hq := StructureScript.new()
+	root.add_child(hq)
+	hq.setup("hq", TEAM_A)
+	hq.global_position = Vector3.ZERO
+
+	if hq.vision_range <= 0.0:
+		print("  [FAIL] an HQ declares no vision range at all: %f" % hq.vision_range)
+		return false
+
+	# A hostile well inside the HQ's reach, with no friendly UNIT anywhere - so
+	# the only thing that can possibly be spotting it is the building.
+	var near := _construct(TEAM_B, Vector3(0, 0, hq.vision_range * 0.5))
+	var far := _construct(TEAM_B, Vector3(0, 0, hq.vision_range * 6.0))
+	vision.tick()
+
+	if not vision.is_visible_to_team(near, TEAM_A):
+		print("  [FAIL] a hostile %.1f m from the HQ is not visible - buildings lift no fog"
+			% (hq.vision_range * 0.5))
+		return false
+	# The other half, or this passes against a fog that is simply off.
+	if vision.is_visible_to_team(far, TEAM_A):
+		print("  [FAIL] a hostile far outside the HQ's reach is visible")
+		return false
+
+	# A power plant should not out-see the command building it is parked beside.
+	var plant := StructureScript.new()
+	root.add_child(plant)
+	plant.setup("power_plant", TEAM_A)
+	if plant.vision_range >= hq.vision_range:
+		print("  [FAIL] a power plant (%.1f) sees as far as the HQ (%.1f)"
+			% [plant.vision_range, hq.vision_range])
+		return false
+	print("  [PASS] HQ sees %.1f m, power plant %.1f m" % [hq.vision_range, plant.vision_range])
 	return true
 
 

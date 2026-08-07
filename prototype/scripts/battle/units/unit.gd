@@ -89,7 +89,22 @@ var _hull_type: String = ""
 var move_speed: float = 0.0
 var terrain_speed_multiplier: float = 1.0
 
+# The design this unit was built from. Read by MatchStats for attribution; not
+# used for anything the unit itself does.
+var blueprint: Dictionary = {}
+
 var is_flying: bool = false
+# Cruise height ABOVE THE GROUND for airborne units. 4.0 matches the old
+# runtime's battle_unit.gd:201, and it is what DamageResolver's 2.0
+# elevation-advantage threshold is calibrated against - see auto_weapon.gd:389,
+# which flattens an air-to-ground hit origin so a flyer does not get a permanent
+# elevation bonus it never earned.
+var target_altitude: float = 0.0
+const FLYER_CRUISE_ALTITUDE := 4.0
+# How quickly a flyer converges on its cruise height. Same rate as the old
+# runtime: fast enough to clear rising ground, slow enough to read as flight
+# rather than as a unit snapping to a height.
+const ALTITUDE_LERP := 3.0
 var is_fixed_wing: bool = false
 var is_naval: bool = false
 var is_amphibious: bool = false
@@ -137,6 +152,10 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 		controller: Node = null, match_faction: String = "") -> bool:
 	team = unit_team
 	_controller = controller
+	# KEPT, so the after-action report can say what a DESIGN did rather than what
+	# an anonymous body did. Everything MatchStats records is keyed on the design
+	# name, and that has to survive this particular unit dying.
+	blueprint = blueprint_data
 
 	var facts := AssemblyScript.build(self, blueprint_data, unit_team, bp_manager, match_faction)
 	if facts.is_empty():
@@ -153,6 +172,8 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	locomotion_settings = facts["locomotion_settings"]
 	is_flying = facts["is_flying"]
 	is_fixed_wing = facts["is_fixed_wing"]
+	if is_flying or is_fixed_wing:
+		target_altitude = FLYER_CRUISE_ALTITUDE
 	is_naval = facts["is_naval"]
 	is_amphibious = facts["is_amphibious"]
 
@@ -521,6 +542,31 @@ func _separation_push() -> Vector3:
 func _apply_vertical(delta: float) -> void:
 	if is_flying or is_fixed_wing:
 		velocity.y = 0.0
+		# ALTITUDE IS HEIGHT ABOVE THE GROUND, never an absolute world Y, and this
+		# is a regression the rebuild introduced by not porting the fix.
+		#
+		# battle_unit.gd:900-924 already solved this and recorded why. A flyer that
+		# does not hold an altitude sits at whatever Y it spawned at - a factory
+		# exit, so ground level - and a flyer inside the terrain collides with
+		# every obstacle body sitting on that ground, because its collision_mask is
+		# TERRAIN | BUILDINGS. move_and_slide() then spends the entire match
+		# depenetrating it.
+		#
+		# Measured in the old runtime (scratch/probe_flyer_plateau.gd): one flyer
+		# inside a summit took physics from 2.38 ms to 15.57 ms, a 6.5x cost from a
+		# SINGLE unit, and left it shoved above its own target altitude by the
+		# collision it should never have had. Holding an absolute y=4.0 has the
+		# same failure anywhere the terrain is taller than 4 m - twin_summits peaks
+		# at y=10 - which is why this samples the ground underneath rather than
+		# flying at a fixed height.
+		#
+		# Duck-typed on terrain_height_at() exactly like the ground branch below,
+		# so a unit built standalone in a test keeps a sane absolute altitude.
+		var ground_y := 0.0
+		if _controller != null and _controller.has_method("terrain_height_at"):
+			ground_y = _controller.terrain_height_at(global_position)
+		global_position.y = lerp(global_position.y, ground_y + target_altitude,
+			ALTITUDE_LERP * delta)
 		return
 	if _controller != null and _controller.has_method("terrain_height_at"):
 		var target_y: float = _controller.terrain_height_at(global_position)
@@ -578,10 +624,15 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 		_strip_module(strippable.pick_random(), amount)
 		return
 
-	hp = maxf(0.0, hp - DamageModelScript.hull_damage(amount, resolved.x, resolved.y))
+	var dealt := DamageModelScript.hull_damage(amount, resolved.x, resolved.y)
+	hp = maxf(0.0, hp - dealt)
+	if _controller != null and _controller.has_method("record_combat_damage"):
+		_controller.record_combat_damage(self, hit_origin, dealt, damage_type)
 	if hp > 0.0:
 		return
 	is_dead = true
+	if _controller != null and _controller.has_method("record_unit_lost"):
+		_controller.record_unit_lost(self, hit_origin)
 
 	# A LOADED HARVESTER DETONATES. Classic C&C, and a real tactical layer rather
 	# than flavour: it makes economic harassment worth timing, because catching a

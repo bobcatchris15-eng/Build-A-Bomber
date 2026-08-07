@@ -94,6 +94,24 @@ const DEFENCE_TARGET := 3
 # before anything else could compete.
 const HARVESTERS_PER_REFINERY := 3
 
+# How far ahead an affordability decision looks, in seconds.
+#
+# THE BUG THIS FIXES, because it is not obvious from the constant. Every action
+# below gates on a metal ramp with a floor of 100-200. Production draws its cost
+# gradually across the build, so a team with anything queued sits at ~0 metal for
+# the entire build - which means every one of those ramps read zero, score() vetoes
+# on any zero consideration, and the commander returned "no action at all".
+#
+# Measured before this change: `decision=NOTHING, scores: all zero` unbroken from
+# tick 3600 to 19800 of a match that ended at 27447. The AI still grew, but only
+# on the momentum of units queued in the first two seconds - it was not deciding
+# anything for two thirds of the match. It looked like a stalled economy and was
+# really a commander that had blinded itself by asking the wrong question.
+#
+# 30 s because that is roughly one build: the question worth asking is "can I pay
+# for this by the time it would finish", not "can I pay for it this instant".
+const PLANNING_HORIZON := 30.0
+
 var team: int = 1
 var difficulty: String = "normal"
 
@@ -162,6 +180,12 @@ func read_state() -> Dictionary:
 	return {
 		"metal": economy.metal(team),
 		"crystal": economy.crystal(team),
+		# What the affordability considerations below actually read. See
+		# PLANNING_HORIZON - cash-on-hand is the wrong number under drip-fed
+		# production, and reading it was why this commander scored every action at
+		# zero for four minutes of a seven-minute match.
+		"budget": economy.budget_metal(team, PLANNING_HORIZON),
+		"income_rate": economy.income_rate_metal(team),
 		"harvesters": harvesters,
 		"combat_units": combat.size(),
 		"refineries": _count_kind(own_structures, "refinery"),
@@ -243,7 +267,7 @@ func _score(action: int, state: Dictionary) -> float:
 			return C.score(w, [
 				C.falloff(state["harvesters"], 0.0,
 					float(maxi(1, state["refineries"]) * HARVESTERS_PER_REFINERY)),
-				C.ramp(state["metal"], 100.0, 400.0),
+				C.ramp(state["budget"], 100.0, 400.0),
 				1.0 if state["refineries"] > 0 else 0.0,
 				# "Can I build one", not "do I own a factory". Owning a light
 				# manufactory while the only harvester design is a medium hull is
@@ -255,7 +279,7 @@ func _score(action: int, state: Dictionary) -> float:
 			return C.score(w, [
 				C.falloff(state["refineries"], 0.0, 2.0),
 				C.ramp(state["harvesters"], 2.0, 5.0),
-				C.ramp(state["metal"], 200.0, 500.0),
+				C.ramp(state["budget"], 200.0, 500.0),
 			])
 		Action.ADD_POWER:
 			# A veto in reverse: worthless at full power, urgent in a brownout.
@@ -263,7 +287,7 @@ func _score(action: int, state: Dictionary) -> float:
 			# everything while it is true.
 			return C.score(w, [
 				1.0 if state["low_power"] else 0.0,
-				C.ramp(state["metal"], 100.0, 300.0),
+				C.ramp(state["budget"], 100.0, 300.0),
 			])
 		Action.ADD_PRODUCTION:
 			# More manufactories make the ONE queue faster (the RA speed table),
@@ -283,20 +307,20 @@ func _score(action: int, state: Dictionary) -> float:
 			var blocked: float = 0.0 if state["can_build_harvester"] else 1.0
 			return C.score(w, [
 				maxf(C.falloff(state["manufactories"], 1.0, 4.0), blocked),
-				maxf(C.ramp(state["metal"], 150.0, 700.0), blocked),
+				maxf(C.ramp(state["budget"], 150.0, 700.0), blocked),
 			]) + blocked * w * 2.0
 		Action.BUILD_ANTI_AIR:
 			# Curved hard: a scout flyer should not trigger a full AA pivot, but a
 			# real air army should outrank general production decisively.
 			return C.score(w, [
 				C.curve(state["enemy_air_share"], 1.6),
-				C.ramp(state["metal"], 150.0, 400.0),
+				C.ramp(state["budget"], 150.0, 400.0),
 				1.0 if state["manufactories"] > 0 else 0.0,
 			])
 		Action.BUILD_ANTI_ARMOR:
 			return C.score(w, [
 				C.curve(state["enemy_armour_share"], 1.6),
-				C.ramp(state["metal"], 150.0, 400.0),
+				C.ramp(state["budget"], 150.0, 400.0),
 				1.0 if state["manufactories"] > 0 else 0.0,
 			])
 		Action.BUILD_GENERAL:
@@ -306,7 +330,7 @@ func _score(action: int, state: Dictionary) -> float:
 			# once the economy is running this can win a tick rather than being
 			# perpetually outbid by the next harvester.
 			return C.score(w, [
-				C.ramp(state["metal"], 120.0, 400.0),
+				C.ramp(state["budget"], 120.0, 400.0),
 				1.0 if state["manufactories"] > 0 else 0.0,
 			])
 		Action.DEFEND:
@@ -323,7 +347,7 @@ func _score(action: int, state: Dictionary) -> float:
 			# whole economy into concrete.
 			return C.score(w, [
 				C.falloff(state["defences"], 0.0, float(DEFENCE_TARGET)),
-				C.ramp(state["metal"], 200.0, 500.0),
+				C.ramp(state["budget"], 200.0, 500.0),
 				maxf(C.share(state["enemy_seen"], 4.0), 1.0 if state["base_threatened"] else 0.0),
 			])
 		Action.PUSH:

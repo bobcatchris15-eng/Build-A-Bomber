@@ -62,12 +62,28 @@ func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
 	_director = director
 	_local_team = local_team
 	_half = current_map.get("map_half_extents", 80.0)
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	# TOP_LEFT plus an explicit size, NOT FULL_RECT - see ProductionHUD.setup().
+	# This HUD's parent is a CanvasLayer, which is not a Control and has no rect
+	# for anchors to be fractions of, so FULL_RECT collapses the node to (0, 0)
+	# and the top-RIGHT minimap renders at the far left on top of everything else.
+	set_anchors_preset(Control.PRESET_TOP_LEFT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fit_to_viewport()
+	var vp := get_viewport()
+	if vp != null and not vp.size_changed.is_connected(fit_to_viewport):
+		vp.size_changed.connect(fit_to_viewport)
 
 	_build_top_strip()
 	_bake_minimap(current_map)
 	_build_minimap()
+
+
+func fit_to_viewport() -> void:
+	var vp := get_viewport()
+	if vp == null:
+		return
+	position = Vector2.ZERO
+	size = vp.get_visible_rect().size
 
 
 # --- Top strip ---------------------------------------------------------------
@@ -75,13 +91,17 @@ func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
 # Offset from the very top edge rather than flush against it, so the readouts
 # float over the battlefield instead of framing it - the research pass called
 # this out and it matches what the UI style guide already asks for.
+# Named so match_director can stack the key bindings BELOW the strip instead of
+# guessing an offset that silently drifts the moment this changes.
+const TOP_STRIP_HEIGHT := 56.0
+
 func _build_top_strip() -> void:
 	var panel := PanelContainer.new()
 	panel.theme_type_variation = "HUDPanel"
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.set_anchors_preset(Control.PRESET_TOP_WIDE)
 	panel.offset_top = Tokens.SPACE_SM
-	panel.offset_bottom = Tokens.SPACE_SM + 56
+	panel.offset_bottom = Tokens.SPACE_SM + TOP_STRIP_HEIGHT
 	add_child(panel)
 
 	var row := HBoxContainer.new()

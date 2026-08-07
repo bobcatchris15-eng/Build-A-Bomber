@@ -33,9 +33,16 @@ func _state(overrides: Dictionary = {}) -> Dictionary:
 		"can_build_harvester": true,
 		"defences": 0,
 		"combat": [],
+		"income_rate": 6.0,
 	}
 	for k in overrides:
 		base[k] = overrides[k]
+	# The affordability considerations read `budget`, not `metal`. Mirroring it
+	# from metal by default keeps every test that perturbs "metal" saying what it
+	# always said - a rich AI and a poor one - while letting the tests that care
+	# about the difference set the two apart explicitly.
+	if not overrides.has("budget"):
+		base["budget"] = float(base["metal"])
 	return base
 
 
@@ -169,6 +176,42 @@ func test_harvester_wanting_tracks_buildability_not_factory_count() -> bool:
 		print("  [FAIL] will not build a harvester even when it can")
 		return false
 	print("  [PASS] buildability gating")
+	return true
+
+
+# Production drip-feeds cost, so a team that is BUILDING sits at ~0 metal for the
+# whole build. Scoring affordability off cash-on-hand therefore vetoed every
+# action for as long as anything was queued: measured, `decision=NOTHING, scores:
+# all zero` unbroken from tick 3600 to 19800 of a match that ended at 27447. The
+# AI still grew, on the momentum of what it queued in the opening two seconds, so
+# it read as a stalled economy rather than as a commander that had stopped
+# thinking - which is exactly why it survived two rounds of tuning.
+#
+# Broke while empty-handed and earning is the state that must still produce a
+# decision; broke and earning NOTHING is the state that legitimately must not.
+func test_a_busy_economy_can_still_decide() -> bool:
+	print("Running Test Suite: AI - being mid-build does not blind the commander...")
+	var commander := _commander()
+
+	var earning := _state({"metal": 0, "budget": 0.0 + 6.0 * CommanderScript.PLANNING_HORIZON,
+		"income_rate": 6.0})
+	var choice: int = commander.decide(earning)
+	if choice < 0:
+		print("  [FAIL] no action at all while at 0 metal with income arriving")
+		return false
+
+	# The veto still has to work, or this has simply removed affordability from
+	# the AI rather than measuring it correctly.
+	var destitute := _state({"metal": 0, "budget": 0.0, "income_rate": 0.0,
+		"harvesters": 0, "can_build_harvester": false, "combat_units": 0})
+	var scores: Dictionary = commander.score_all(destitute)
+	for action in [CommanderScript.Action.BUILD_GENERAL,
+			CommanderScript.Action.ADD_REFINERY, CommanderScript.Action.BUILD_DEFENSE]:
+		if scores[action] > 0.0:
+			print("  [FAIL] %s scored %.2f with no money and no income"
+				% [commander.action_name(action), scores[action]])
+			return false
+	print("  [PASS] decides while building, still vetoes when genuinely broke")
 	return true
 
 

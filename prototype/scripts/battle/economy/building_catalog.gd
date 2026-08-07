@@ -61,12 +61,17 @@ const MANUFACTORY_KINDS: Array[String] = [
 
 const STATS := {
 	"hq": {
+		# A base command building sees furthest - it is the one structure a team
+		# always has, so its reach is what stops a match opening inside a fog
+		# bubble. See Structure.vision_range for why any of these are needed.
+		"vision_range": 34.0,
 		"hp": 3000.0, "size": Vector3(7, 4, 7), "color": Color(0.75, 0.72, 0.55),
 		"cost_metal": 0, "cost_crystal": 0, "build_time": 0.0,
 		"gives_buildable_area": true, "requires_buildable_area": true,
 		"adjacent_m": DEFAULT_ADJACENT_M,
 	},
 	"refinery": {
+		"vision_range": 22.0,
 		"hp": 1200.0, "size": Vector3(5, 3, 5), "color": Color(0.55, 0.62, 0.75),
 		"cost_metal": 150, "cost_crystal": 0, "build_time": 14.0,
 		"gives_buildable_area": true, "requires_buildable_area": true,

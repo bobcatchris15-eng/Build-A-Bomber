@@ -36,6 +36,9 @@ const EconomyServiceScript = preload("res://scripts/battle/economy/economy_servi
 const ProductionServiceScript = preload("res://scripts/battle/economy/production_service.gd")
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const StructureScript = preload("res://scripts/battle/buildings/structure.gd")
+const PlacementServiceScript = preload("res://scripts/battle/buildings/placement_service.gd")
+const MatchStatsScript = preload("res://scripts/battle/match_stats.gd")
+const AfterActionReportScript = preload("res://scripts/after_action_report.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
 const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.gd")
@@ -80,6 +83,7 @@ var flow_fields: FlowFieldService = null
 var economy: EconomyService = null
 var production: ProductionService = null
 var production_hud: ProductionHUD = null
+var stats = null
 var vision: VisionService = null
 var battle_hud: BattleHUD = null
 var commander: Commander = null
@@ -191,6 +195,7 @@ func _ready() -> void:
 	_spawn_starting_units()
 	_build_hud()
 
+	stats = MatchStatsScript.new()
 	commander = CommanderScript.new()
 	commander.setup(self, ENEMY_TEAM,
 		match_config.ai_difficulty if match_config and "ai_difficulty" in match_config else "normal")
@@ -469,6 +474,10 @@ func spawn_unit(blueprint: Dictionary, unit_team: int, at: Vector3) -> Node3D:
 	# gave the AI's army the player's colours and the player's passives, which
 	# reads as a rendering oddity and is really a balance one.
 	var faction: String = player_faction if unit_team == PLAYER_TEAM else enemy_faction
+	if stats != null and unit_team == PLAYER_TEAM:
+		# Player only. The report is the player's own debrief, and mixing the
+		# opponent's designs into it would make every column meaningless.
+		stats.record_built(blueprint, DesignCostingScript.blueprint_cost(blueprint).x)
 	if not unit.setup(blueprint, unit_team, bp_manager, self, faction):
 		# The blueprint named a hull the catalog no longer has. Drop it rather
 		# than leaving a half-assembled body on the field.
@@ -586,11 +595,52 @@ func _building_holes() -> Array:
 # would be several hundred milliseconds of stall for one identical result.
 var _nav_rebake_pending: bool = false
 
-func _mark_navmesh_dirty() -> void:
+# A LAZY REBAKE, for changes that only OPEN ground.
+#
+# Measured (tools/probe_death_hitch.gd): killing one building cost a 4139 ms
+# frame against a 55 ms idle worst case. The whole of it is this rebake - a
+# synchronous Recast pass over the entire map - and end-of-frame debouncing does
+# not help, because one death is already one bake.
+#
+# The asymmetry that makes this fixable: PLACING a building must re-carve
+# promptly, or units walk straight through a wall that is visibly there.
+# DESTROYING one only frees space. Until the bake catches up, units route around
+# a hole where a building no longer stands - which costs them a slightly long way
+# round and nothing else. So a death can wait, and several deaths in a firefight
+# can wait together and cost ONE bake instead of one each.
+const NAV_LAZY_REBAKE_DELAY := 3.0
+
+var _nav_lazy_pending: bool = false
+var _nav_lazy_timer: float = 0.0
+
+
+# `urgent` carves immediately at end of frame; the default defers and coalesces.
+# Callers that make ground IMPASSABLE must pass true.
+func _mark_navmesh_dirty(urgent: bool = true) -> void:
+	if not urgent:
+		_nav_lazy_pending = true
+		_nav_lazy_timer = 0.0
+		return
 	if _nav_rebake_pending:
 		return
 	_nav_rebake_pending = true
+	# An urgent bake satisfies any lazy one already waiting.
+	_nav_lazy_pending = false
 	_rebake_navmesh.call_deferred()
+
+
+# Runs the deferred bake once the map has been quiet for NAV_LAZY_REBAKE_DELAY.
+# The timer RESETS on each new death, so a sustained firefight keeps postponing
+# it rather than stalling in the middle of the fight.
+func _tick_lazy_navmesh(delta: float) -> void:
+	if not _nav_lazy_pending:
+		return
+	_nav_lazy_timer += delta
+	if _nav_lazy_timer < NAV_LAZY_REBAKE_DELAY:
+		return
+	_nav_lazy_pending = false
+	_nav_lazy_timer = 0.0
+	_rebake_navmesh()
 
 
 func _rebake_navmesh() -> void:
@@ -614,7 +664,12 @@ func _on_structure_died(structure) -> void:
 	production.cancel_unbuildable(structure.team)
 	# The navmesh had a hole carved for this building and no longer should, and
 	# every cached flow field was sampled against the old passability.
-	_mark_navmesh_dirty()
+	#
+	# NOT URGENT. A dead building only frees ground - the worst that happens
+	# before the bake lands is that units take the long way round a hole where
+	# nothing stands. Baking inline here cost a 4139 ms frame; see
+	# NAV_LAZY_REBAKE_DELAY.
+	_mark_navmesh_dirty(false)
 	if structure.kind == "hq":
 		_end_match(PLAYER_TEAM if structure.team != PLAYER_TEAM else ENEMY_TEAM)
 
@@ -637,9 +692,19 @@ func _end_match(winning_team: int) -> void:
 	_show_result(winning_team == PLAYER_TEAM)
 
 
+# The end of a match, as an actual sequence rather than a word on the screen.
+#
+# WHAT THIS REPLACES. A bare "VICTORY" Label anchored to the top of the HUD, and
+# nothing else - no stats, no way out, no acknowledgement that the match was
+# over beyond the units stopping. after_action_report.gd has been fully written
+# and completely orphaned this whole time (OPERATIONS_PLAN.md names it), because
+# nothing produced the per-design statistics it takes. MatchStats does now.
 func _show_result(player_won: bool) -> void:
 	if battle_hud == null:
 		return
+
+	# The banner stays - it lands immediately, while the report needs a beat so
+	# the killing blow is actually seen rather than being instantly covered up.
 	var banner := Label.new()
 	banner.name = "ResultBanner"
 	banner.text = "VICTORY" if player_won else "DEFEAT"
@@ -649,6 +714,87 @@ func _show_result(player_won: bool) -> void:
 	banner.add_theme_color_override("font_color",
 		Tokens.SIGNAL_GO if player_won else Tokens.SIGNAL_ALERT)
 	battle_hud.add_child(banner)
+
+	_show_after_action_report.call_deferred(player_won)
+
+
+# How long the result banner is left alone before the report covers it.
+const RESULT_BEAT := 2.0
+
+
+func _show_after_action_report(player_won: bool) -> void:
+	if not is_inside_tree():
+		return
+	await get_tree().create_timer(RESULT_BEAT).timeout
+	if not is_inside_tree() or battle_hud == null:
+		return
+
+	var report := AfterActionReportScript.new()
+	report.name = "AfterActionReport"
+	report.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# Sized by hand for the same reason both HUDs are - see
+	# ProductionHUD.fit_to_viewport(). Parented to battle_hud, which is itself a
+	# CanvasLayer child, so there is still no Control rect to anchor against.
+	battle_hud.add_child(report)
+	report.position = Vector2.ZERO
+	report.size = battle_hud.size
+	report.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var duration: float = stats.duration() if stats != null else 0.0
+	var rows: Dictionary = stats.to_report() if stats != null else {}
+	# `false` for is_operation: a skirmish has no next stage to offer, and the
+	# report already branches on that flag - it is the seam Operations will use.
+	report.setup(player_won, duration, rows, false)
+	report.main_menu_requested.connect(_on_report_main_menu)
+	report.iterate_requested.connect(_on_report_iterate)
+
+
+func _on_report_main_menu() -> void:
+	get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
+
+
+# "Iterate on this design" hands straight back to the Design Lab, which is the
+# whole point of reporting per-design stats: the report is a debrief that turns
+# into the next edit.
+func _on_report_iterate(_blueprint_name: String) -> void:
+	get_tree().change_scene_to_file("res://scenes/MainLab.tscn")
+
+
+# --- Stat hooks the units call ------------------------------------------------
+#
+# Duck-typed from unit.gd, so a unit built standalone in a test needs no stats
+# service at all. Player designs only: this is the player's own debrief, and
+# folding the opponent's designs into it would make every column meaningless.
+
+func record_combat_damage(victim, source, amount: float, damage_class: String) -> void:
+	if stats == null:
+		return
+	stats.record_damage(_design_of(source), _design_of(victim), amount, damage_class)
+
+
+func record_unit_lost(victim, source) -> void:
+	if stats == null:
+		return
+	if "team" in victim and victim.team == PLAYER_TEAM:
+		stats.record_lost(_design_of(victim))
+	var killer := _design_of(source)
+	# Credited only when the blow names a design AND that design is the player's.
+	# Splash from a detonating harvester, or a unit that drove into the sea,
+	# lands in nobody's column rather than being guessed at.
+	if not killer.is_empty() and "team" in source and source.team == PLAYER_TEAM:
+		stats.record_kill(killer)
+
+
+# The design behind a damage source, which may be a unit, a structure, a bare
+# position, or nothing at all.
+func _design_of(thing) -> Dictionary:
+	if thing == null or thing is Vector3 or not is_instance_valid(thing):
+		return {}
+	if "blueprint" in thing and thing.blueprint is Dictionary:
+		if "team" in thing and thing.team != PLAYER_TEAM:
+			return {}
+		return thing.blueprint
+	return {}
 
 
 # --- Contracts the economy systems look for ----------------------------------
@@ -818,16 +964,16 @@ func _exit_structure(for_team: int, queue_name: String) -> Structure:
 
 # A finished building, waiting for somewhere to go.
 #
-# The AI sites its own immediately. The PLAYER's is deliberately left in the
-# queue for ghost placement to claim - the player chooses where their buildings
-# go, and that UI does not exist in this runtime yet. Note that means a
-# player-queued structure currently parks its line until it does; that is a known
-# gap in the build flow, not something to paper over by auto-siting the player's
-# base for them.
+# The AI sites its own immediately. The PLAYER's raises a ghost and waits for a
+# click - the player chooses where their buildings go, and until they do the job
+# stays at the head of its queue, paid for and blocking that line. That block is
+# deliberate (see ProductionService.claim_structure) and is now visible to the
+# player as a ghost on their cursor rather than as a queue that silently stopped.
 func _on_structure_ready(for_team: int, queue_name: String, job: Dictionary) -> void:
 	if for_team == PLAYER_TEAM:
+		begin_placement(queue_name, job)
 		return
-	var site := _ai_placement_site(for_team, job.get("kind", ""))
+	var site := _ai_placement_site(for_team, job.get("kind", ""), job.get("blueprint", {}))
 	if site == Vector3.INF:
 		# Nowhere to put it. Leave it claimed-but-unplaced rather than dropping
 		# the money; the site may open up when something dies.
@@ -840,6 +986,169 @@ func _on_structure_ready(for_team: int, queue_name: String, job: Dictionary) -> 
 		_place_structure(job.get("kind", "power_plant"), for_team, site)
 	economy.recalculate_power(for_team, get_team_structures(for_team))
 	_mark_navmesh_dirty()
+
+
+# --- Player ghost placement ---------------------------------------------------
+#
+# A finished player building follows the cursor until it is put somewhere. This
+# is the flow the rebuild was missing entirely: the AI sited its own buildings
+# and the player's completed jobs parked their queue forever.
+#
+# THE MONEY IS ALREADY SPENT by the time a ghost appears. Production drip-feeds
+# cost across the build, so a job that reached `done` has paid in full - the
+# ghost is not a purchase prompt, it is a delivery waiting for an address.
+# Cancelling therefore does NOT refund; it leaves the job at the head of its
+# queue for the player to place later, which is also what happens if they simply
+# ignore it. Refunding on Escape would let a player bank a completed building at
+# no tempo cost, which is a money printer with extra steps.
+
+const GHOST_COLOR_VALID := Color(0.35, 0.85, 0.45, 0.45)
+const GHOST_COLOR_INVALID := Color(0.9, 0.3, 0.25, 0.45)
+
+var placing: Dictionary = {}
+var placement_ghost: MeshInstance3D = null
+
+signal placement_started(kind: String)
+signal placement_finished(kind: String, placed: bool)
+
+
+func is_placing() -> bool:
+	return not placing.is_empty()
+
+
+# Raises the ghost for a finished job. Public because the probe and the tests
+# drive it directly - a placement flow that can only be entered by waiting out a
+# real build is a placement flow nothing can assert.
+func begin_placement(queue_name: String, job: Dictionary) -> void:
+	# One at a time. A second finished building while the first is still in hand
+	# waits its turn at the head of its own queue rather than replacing the ghost,
+	# which would silently strand the first one.
+	if is_placing():
+		return
+	placing = {
+		"queue": queue_name,
+		"kind": job.get("kind", "power_plant"),
+		"blueprint": job.get("blueprint", {}),
+	}
+	_build_ghost()
+	placement_started.emit(placing["kind"])
+	_flash("PLACE BUILDING  -  LEFT CLICK TO SITE, ESC TO HOLD")
+
+
+# Picks a held building back up. A player who pressed Escape, or who was busy
+# when the job finished, needs a way back to the ghost - without this the "hold"
+# in cancel_placement() is indistinguishable from losing the building.
+func resume_placement(queue_name: String) -> bool:
+	if is_placing():
+		return false
+	var q: Array = production.queue(PLAYER_TEAM, queue_name)
+	if q.is_empty():
+		return false
+	var job: Dictionary = q[0]
+	if not job.get("is_structure", false) or not job.get("done", false):
+		return false
+	begin_placement(queue_name, job)
+	return true
+
+
+func _build_ghost() -> void:
+	_clear_ghost()
+	var footprint: Vector3 = PlacementServiceScript.footprint_for(
+		placing["kind"], placing["blueprint"])
+	placement_ghost = MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = footprint
+	placement_ghost.mesh = box
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = GHOST_COLOR_INVALID
+	# Unshaded so the tint reads as a validity signal rather than as lighting. A
+	# green ghost in shadow and a red one in sun are otherwise hard to tell apart,
+	# which defeats the entire point of colouring it.
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	placement_ghost.material_override = mat
+	add_child(placement_ghost)
+
+
+func _clear_ghost() -> void:
+	if is_instance_valid(placement_ghost):
+		placement_ghost.queue_free()
+	placement_ghost = null
+
+
+# Moves the ghost to wherever the cursor is over the ground, and recolours it by
+# the SAME validity call the click uses - so the ghost can never show green over
+# a spot the click then refuses.
+func update_placement(screen_pos: Vector2) -> void:
+	if not is_placing() or not is_instance_valid(placement_ghost):
+		return
+	var hit := _raycast(screen_pos, LayersScript.GROUND_PICK_MASK, false)
+	if hit.is_empty():
+		return
+	var at: Vector3 = hit.position
+	at.y = terrain_height_at(at)
+	var result := placement_validity(at)
+	# Sat on the ground rather than centred in it, or half of every building is
+	# buried and the footprint reads as too small.
+	placement_ghost.global_position = at + Vector3(0, placement_ghost.mesh.size.y * 0.5, 0)
+	placement_ghost.material_override.albedo_color = \
+		GHOST_COLOR_VALID if result["valid"] else GHOST_COLOR_INVALID
+
+
+func placement_validity(at: Vector3) -> Dictionary:
+	if not is_placing():
+		return {"valid": false, "reason": "NOTHING TO PLACE"}
+	return PlacementServiceScript.validity(
+		self, PLAYER_TEAM, at, placing["kind"], placing["blueprint"])
+
+
+# Commits the ghost. Returns false and leaves the job in hand if the spot is
+# illegal, so a misclick costs nothing.
+func confirm_placement(at: Vector3) -> bool:
+	if not is_placing():
+		return false
+	at.y = terrain_height_at(at)
+	var result := placement_validity(at)
+	if not result["valid"]:
+		_flash(result["reason"])
+		return false
+
+	# Claim only once the site is known good. Claiming first and then failing to
+	# place would pop the job off its queue and destroy a paid-for building.
+	var job: Dictionary = production.claim_structure(PLAYER_TEAM, placing["queue"])
+	if job.is_empty():
+		# The queue moved under us - the job was cancelled, or its last contributor
+		# died and refunded the line. Drop the ghost rather than placing a building
+		# nothing is paying for.
+		_end_placement(false)
+		return false
+
+	var blueprint: Dictionary = placing["blueprint"]
+	var kind: String = placing["kind"]
+	if not blueprint.is_empty():
+		_place_defence(blueprint, PLAYER_TEAM, at)
+	else:
+		_place_structure(kind, PLAYER_TEAM, at)
+	economy.recalculate_power(PLAYER_TEAM, get_team_structures(PLAYER_TEAM))
+	_mark_navmesh_dirty()
+	_end_placement(true)
+	return true
+
+
+# Puts the ghost down without placing. The job stays at the head of its queue,
+# still paid for - see the note above on why this does not refund.
+func cancel_placement() -> void:
+	if not is_placing():
+		return
+	_flash("BUILDING HELD  -  CLICK ITS QUEUE TO PLACE")
+	_end_placement(false)
+
+
+func _end_placement(placed: bool) -> void:
+	var kind: String = placing.get("kind", "")
+	placing = {}
+	_clear_ghost()
+	placement_finished.emit(kind, placed)
 
 
 # A blueprint-built turret. Same lifecycle as any other structure - it carves the
@@ -869,49 +1178,14 @@ func ai_build_defence(for_team: int) -> bool:
 		cost.x, cost.y, DesignCostingScript.build_time_for_cost(cost), design).is_empty()
 
 
-# Where the AI puts its next building: an outward ring search from its HQ, taking
-# the first spot that is on land and clear of what is already there.
-#
-# A ring rather than a random scatter so a base grows outward as a base rather
-# than sprawling, and the first valid ring keeps new buildings close enough to
-# defend together.
-const AI_SITE_RING_STEP := 9.0
-const AI_SITE_RINGS := 6
-const AI_SITE_SAMPLES := 12
-
-func _ai_placement_site(for_team: int, kind: String) -> Vector3:
-	var home := _team_home(for_team)
-	var footprint: Vector3 = BuildingCatalogScript.get_stat(kind, "size", Vector3(5, 3, 5))
-	var half: float = maxf(footprint.x, footprint.z) * 0.5
-	for ring in range(1, AI_SITE_RINGS + 1):
-		var radius := AI_SITE_RING_STEP * float(ring)
-		for i in range(AI_SITE_SAMPLES):
-			var angle := TAU * float(i) / float(AI_SITE_SAMPLES)
-			var candidate := home + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
-			candidate.y = terrain_height_at(candidate)
-			if _site_is_clear(candidate, half):
-				return candidate
-	return Vector3.INF
-
-
-func _site_is_clear(at: Vector3, half: float) -> bool:
-	var extent: float = current_map.get("map_half_extents", 80.0)
-	# Keep well inside the boundary. A building on the map edge is a building
-	# whose dock bays and exit point are off the navmesh - the same class of bug
-	# the refinery bays already hit.
-	if absf(at.x) > extent - 12.0 or absf(at.z) > extent - 12.0:
-		return false
-	if TerrainBuilder.is_water_at(current_map, at.x, at.z):
-		return false
-	for s in get_tree().get_nodes_in_group("structures"):
-		if not is_instance_valid(s) or s.is_dead or not s.is_inside_tree():
-			continue
-		var other_half: float = maxf(s.footprint.x, s.footprint.z) * 0.5
-		# Clearance on top of both footprints, so buildings do not end up flush
-		# against each other with no lane between them for units to path through.
-		if at.distance_to(s.global_position) < half + other_half + BUILDING_CLEARANCE * 2.0:
-			return false
-	return true
+# Where the AI puts its next building. Delegates to PlacementService, which is
+# the same call the player's ghost validates against - so the AI is held to the
+# player's rules rather than to a looser private copy. It previously had one: a
+# bounds/water/overlap check that ignored buildable-area adjacency entirely, and
+# would happily site a power plant six rings out in open field.
+func _ai_placement_site(for_team: int, kind: String, blueprint: Dictionary = {}) -> Vector3:
+	return PlacementServiceScript.find_site(
+		self, for_team, _team_home(for_team), kind, blueprint)
 
 
 func _on_unit_completed(for_team: int, queue_name: String, blueprint: Dictionary) -> void:
@@ -1174,6 +1448,14 @@ func _physics_process(delta: float) -> void:
 	if game_over:
 		return
 	_rebuild_neighbour_grid()
+	_tick_lazy_navmesh(delta)
+	if stats:
+		stats.tick(delta)
+	if economy:
+		# Ages the income accumulators. Must run BEFORE production draws this tick's
+		# cost, so the rate reflects what came in rather than what is left after
+		# spending it - the distinction the whole measure exists to make.
+		economy.tick_income(delta)
 	if production:
 		production.tick(delta)
 	if commander:
@@ -1266,9 +1548,28 @@ func _unhandled_input(event: InputEvent) -> void:
 		_handle_key(event)
 		return
 
-	if event is InputEventMouseMotion and _dragging:
-		_update_selection_rect(event.position)
+	# PLACEMENT SWALLOWS THE MOUSE. While a ghost is up, a left click sites the
+	# building and a right click puts it down - neither may fall through to
+	# selection or to a move order, or siting a power plant would also send the
+	# whole army marching to where the player clicked.
+	if is_placing():
+		if event is InputEventMouseMotion:
+			update_placement(event.position)
+			return
+		if event is InputEventMouseButton and event.pressed:
+			if event.button_index == MOUSE_BUTTON_LEFT:
+				var hit := _raycast(event.position, LayersScript.GROUND_PICK_MASK, false)
+				if not hit.is_empty():
+					confirm_placement(hit.position)
+			elif event.button_index == MOUSE_BUTTON_RIGHT:
+				cancel_placement()
 		return
+
+	if event is InputEventMouseMotion:
+		_update_hover_cursor(event.position)
+		if _dragging:
+			_update_selection_rect(event.position)
+			return
 
 	if not (event is InputEventMouseButton):
 		return
@@ -1324,6 +1625,12 @@ func _handle_key(event: InputEventKey) -> void:
 			orders.hold(selection.selected)
 			_flash("STANCE: HOLD POSITION")
 		KEY_ESCAPE:
+			# Escape backs out of the most specific mode first. Clearing the
+			# selection out from under a player who meant "put this building down"
+			# is two mistakes in one keystroke.
+			if is_placing():
+				cancel_placement()
+				return
 			_set_armed(false)
 			selection.clear()
 
@@ -1358,6 +1665,87 @@ func _resolve_left_release(at: Vector2, additive: bool) -> void:
 
 
 # Our own structures only. An enemy building is a target, not a menu.
+# --- Cursor -------------------------------------------------------------------
+#
+# CursorManager is an autoload and has been since the old runtime; the rebuilt
+# battle layer simply never called it, so Battle ran on the bare OS arrow while
+# Skirmish had contextual cursors. This is that call.
+#
+# The cursor answers the same question the click will: what does pressing the
+# button here actually DO. So it is resolved from the same raycasts and the same
+# selection the order path uses, rather than from a parallel guess.
+func _update_hover_cursor(screen_pos: Vector2) -> void:
+	var cm = get_node_or_null("/root/CursorManager")
+	if cm == null or camera == null:
+		return
+
+	# Placing a building overrides everything: the only thing a click does here is
+	# site it, and whether the site is legal is the one fact worth showing.
+	if is_placing():
+		var hit := _raycast(screen_pos, LayersScript.GROUND_PICK_MASK, false)
+		var ok := false
+		if not hit.is_empty():
+			var at: Vector3 = hit.position
+			at.y = terrain_height_at(at)
+			ok = placement_validity(at)["valid"]
+		cm.set_cursor(cm.CursorType.BUILD if ok else cm.CursorType.INVALID)
+		return
+
+	# Our own structures raise a production ring on click, not an order.
+	if _structure_at(screen_pos) != null:
+		cm.set_cursor(cm.CursorType.POINTER)
+		return
+
+	if selection == null or selection.selected.is_empty():
+		cm.set_cursor(cm.CursorType.DEFAULT)
+		return
+
+	if _attack_move_armed:
+		cm.set_cursor(cm.CursorType.ATTACK)
+		return
+
+	# An ore patch, checked BEFORE the ground, exactly as _issue_at does - a
+	# terrain-only ray always finds the dirt underneath and the patch would never
+	# be hoverable.
+	var node_hit := _raycast(screen_pos, LayersScript.RESOURCE_NODES, false)
+	if not node_hit.is_empty() and node_hit.collider.is_in_group("resource_nodes"):
+		var can_harvest := false
+		for u in selection.selected:
+			if is_instance_valid(u) and u.is_harvester:
+				can_harvest = true
+				break
+		cm.set_cursor(cm.CursorType.HARVEST if can_harvest else cm.CursorType.MOVE)
+		return
+
+	# Anything hostile and visible under the cursor is an attack.
+	var target = _hostile_at(screen_pos)
+	if target != null:
+		cm.set_cursor(cm.CursorType.ATTACK)
+		return
+
+	cm.set_cursor(cm.CursorType.MOVE if not _raycast(
+		screen_pos, LayersScript.GROUND_PICK_MASK, false).is_empty()
+		else cm.CursorType.INVALID)
+
+
+# A visible enemy under the cursor, or null. Fog-gated, so the cursor never
+# reveals something the player cannot see by turning red over it.
+func _hostile_at(screen_pos: Vector2):
+	var hit := _raycast(screen_pos, LayersScript.SELECTION_QUERY_MASK, true)
+	if hit.is_empty():
+		return null
+	var thing = hit.collider.get_meta("structure") if hit.collider.has_meta("structure") \
+		else hit.collider.get_meta("unit") if hit.collider.has_meta("unit") else null
+	if thing == null or not is_instance_valid(thing) or thing.is_dead:
+		return null
+	if not ("team" in thing) or thing.team == PLAYER_TEAM:
+		return null
+	if vision != null and vision.has_method("is_visible_to_team") \
+			and not vision.is_visible_to_team(thing, PLAYER_TEAM):
+		return null
+	return thing
+
+
 func _structure_at(screen_pos: Vector2) -> Structure:
 	var hit := _raycast(screen_pos, LayersScript.SELECTION_QUERY_MASK, true)
 	if hit.is_empty() or not hit.collider.has_meta("structure"):
@@ -1448,18 +1836,27 @@ func _build_hud() -> void:
 	layer.add_child(battle_hud)
 	battle_hud.setup(self, PLAYER_TEAM, current_map)
 
+	# BELOW BattleHUD's top strip, not on top of it.
+	#
+	# All three of these were positioned independently against the top-left corner
+	# - the strip is a full-width band at y=8..64, the bindings sat at y=12 and the
+	# hint at y=56 - so the corner rendered as three overlapping texts. They are
+	# stacked deliberately now, measured off the strip's own height rather than
+	# from three separately-guessed constants.
+	var below_strip: float = Tokens.SPACE_SM + BattleHUDScript.TOP_STRIP_HEIGHT + Tokens.SPACE_SM
+
 	# The bindings, on screen, because they are not the conventional ones and
 	# nothing else in the build documents them yet.
 	var bindings := Label.new()
 	bindings.theme_type_variation = "HintLabel"
-	bindings.position = Vector2(Tokens.SPACE_MD, Tokens.SPACE_MD)
+	bindings.position = Vector2(Tokens.SPACE_MD, below_strip)
 	bindings.text = "DRAG SELECT  |  RMB MOVE  |  SHIFT+RMB QUEUE  |  Q ATTACK-MOVE  |  E STOP" \
 		+ "\nZ AGGRESSIVE  |  X RETURN FIRE  |  C HOLD  |  CTRL+1-9 SET GROUP  |  1-9 RECALL"
 	layer.add_child(bindings)
 
 	_hud_hint = Label.new()
 	_hud_hint.theme_type_variation = "HintLabel"
-	_hud_hint.position = Vector2(Tokens.SPACE_MD, Tokens.SPACE_MD + 44)
+	_hud_hint.position = Vector2(Tokens.SPACE_MD, below_strip + 44)
 	_hud_hint.text = ""
 	layer.add_child(_hud_hint)
 
