@@ -245,16 +245,21 @@ func _recalculate_vision() -> void:
 func _detect_harvester(controller: Node) -> void:
 	if not is_instance_valid(hull_node):
 		return
+	# COUNTED, not just detected. How many harvester modules a design mounts sets
+	# both its hopper and its extraction rate - see HarvesterFSM.configure() -
+	# so a second harvester arm is a real design decision rather than dead weight.
+	var modules := 0
 	for child in hull_node.get_children():
 		if not child.has_meta("module_data"):
 			continue
 		var data = child.get_meta("module_data")
 		if data != null and data.get("type_id") == "resource_harvester":
-			is_harvester = true
-			break
+			modules += 1
+	is_harvester = modules > 0
 	if is_harvester:
 		harvester = HarvesterFSMScript.new()
 		harvester.setup(self, controller)
+		harvester.configure(modules, _hull_type)
 
 
 # Speed, weight and overload all come from Drivetrain.analyze() - the same

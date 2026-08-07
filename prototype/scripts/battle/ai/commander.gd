@@ -161,6 +161,21 @@ func read_state() -> Dictionary:
 		else:
 			combat.append(u)
 
+	# IN-FLIGHT PRODUCTION COUNTS. This is the difference between an AI that
+	# builds an economy and one that never builds an army.
+	#
+	# Reading only LIVE harvesters means a truck that is paid for and 90% built
+	# does not exist yet, so EXPAND_ECONOMY keeps scoring highest and keeps
+	# queueing more. The queue depth cap (AI_MAX_QUEUE_DEPTH = 2) then fills
+	# permanently with harvesters, and every ai_build_unit() call for a COMBAT
+	# design is refused at the door because that queue is full.
+	#
+	# Measured before this: the medium queue sat at depth 2 with an Ore Trucker at
+	# its head for the entire match, the commander chose BUILD_GENERAL 3,702 times,
+	# and ZERO combat units were ever enqueued - let alone produced. It looked like
+	# an economy problem and survived the economy being fixed.
+	harvesters += _queued_harvesters()
+
 	var enemy_air := 0
 	var enemy_armour := 0
 	var enemy_seen := 0
@@ -206,6 +221,23 @@ func _count_kind(structures: Array, kind: String) -> int:
 	for s in structures:
 		if s.kind == kind:
 			n += 1
+	return n
+
+
+# Harvesters already paid for and moving through a production queue.
+#
+# Matched on the job's blueprint rather than on its label, so a design the PLAYER
+# built and the AI happened to draft still counts - the same "roles come from
+# modules" rule design_fills_role() follows everywhere else.
+func _queued_harvesters() -> int:
+	if _world == null or _world.production == null:
+		return 0
+	var n := 0
+	for queue_name in BuildingCatalogScript.QUEUES:
+		for job in _world.production.queue(team, queue_name):
+			var bp: Dictionary = job.get("blueprint", {})
+			if not bp.is_empty() and design_fills_role(bp, "harvester"):
+				n += 1
 	return n
 
 

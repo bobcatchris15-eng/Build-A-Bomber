@@ -38,6 +38,7 @@ const SUITE_FILES := {
 	"operations_setup": preload("res://tests/battle/test_operations_setup.gd"),
 	"after_action_report": preload("res://tests/battle/test_after_action_report.gd"),
 	"counter_draft": preload("res://tests/battle/test_counter_draft.gd"),
+	"economy_balance": preload("res://tests/battle/test_economy_balance.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -268,6 +269,9 @@ const SUITE_ORDER := [
 	["counter_draft", "test_counter_draft_never_demotes_the_harvester"],
 	["counter_draft", "test_counter_draft_ignores_a_token_threat"],
 	["counter_draft", "test_counter_draft_weights_recent_engagements"],
+	["economy_balance", "test_every_design_draws_the_same_rate_while_building"],
+	["economy_balance", "test_four_harvesters_meet_the_stated_target"],
+	["economy_balance", "test_harvester_capacity_comes_from_the_design"],
 	["economy_and_production", "test_harvester_delivery_radius_clears_hull_and_refinery"],
 ]
 

@@ -20,6 +20,7 @@ extends RefCounted
 # implementation had no way to say either.
 
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 
 const HARVEST_TIME := 3.0
 
@@ -29,7 +30,14 @@ const HARVEST_TIME := 3.0
 # dropped this to 10, which is not a tuning difference - it is 5 cycles to fill a
 # 50-unit hopper instead of 2, so the working half of a round trip went from 6 s
 # to 15 s. Chris felt it as harvesters being sluggish, which they were.
-const HARVEST_CHUNK := 25
+#
+# 2026-08-07, BALANCE PASS. Raised 25 -> 40 alongside capacity 50 -> 80, both by
+# the same 1.6x. Measured, not guessed: see ECONOMY_BALANCE.md. A round trip on
+# open_plains is ~10 s, of which only ~6 s is spent filling, so scaling ONLY the
+# hopper would have made trips longer without delivering more per second - the
+# chunk has to move with it to keep the number of extraction cycles (and the
+# rhythm the player watches) unchanged.
+const HARVEST_CHUNK := 40
 
 # The old runtime delivered the INSTANT a harvester reached the refinery, with no
 # unload phase at all. A short dwell is worth keeping - it is what makes a dock
@@ -92,7 +100,30 @@ var bay_index: int = -1
 var node_slot: int = -1
 var cargo_metal: int = 0
 var cargo_crystal: int = 0
-var capacity: int = 50
+# THE HOPPER, and it is a property of the DESIGN, not a constant.
+#
+# It used to be a flat 50 for everything, which in a game whose entire premise is
+# that you design the units meant a purpose-built ore hauler carried exactly as
+# much as a scout car with a harvester arm bolted on. Now it is
+# BASE_CAPACITY x modules x hull tier, so mounting a second harvester arm or
+# choosing a heavier chassis is a real economic decision with a real cost in
+# metal, weight and speed.
+#
+# 80 is the balance number: it is 50 x 1.6, the factor measured as the gap
+# between what four harvesters delivered and what Chris's spec asks for.
+const BASE_CAPACITY := 80
+# Bigger chassis, bigger hopper. Extraction scales with it (see _chunk_size) so
+# fill TIME is constant across tiers - the advantage of a heavy hauler is fewer
+# trips for the same ore, paid for in cost and speed, not in a longer dwell at
+# the patch.
+const TIER_CAPACITY_MULT := {"light": 0.7, "medium": 1.0, "heavy": 1.5}
+
+var capacity: int = BASE_CAPACITY
+# How many resource_harvester modules the design mounts. Scales hopper AND
+# extraction together, so a second arm doubles throughput per trip rather than
+# doubling the time spent filling.
+var modules: int = 1
+var _tier_mult: float = 1.0
 
 var _timer: float = 0.0
 var _orbit_phase: float = 0.0
@@ -110,6 +141,16 @@ var _world = null
 func setup(unit: Node3D, world) -> void:
 	_unit = unit
 	_world = world
+
+
+# Sizes the hopper and the extraction rate from the design. Called by unit.gd
+# right after setup(); a harvester that never gets configured keeps the medium
+# single-module defaults, which is what every synthetic test builds.
+func configure(module_count: int, hull_type: String) -> void:
+	modules = maxi(1, module_count)
+	var tier: String = ModuleCatalogScript.get_hull_size_tier(hull_type)
+	_tier_mult = float(TIER_CAPACITY_MULT.get(tier, 1.0))
+	capacity = maxi(1, int(round(float(BASE_CAPACITY) * float(modules) * _tier_mult)))
 
 
 func cargo() -> int:
@@ -232,7 +273,12 @@ func _chunk_size() -> int:
 	var faction := "industrialists"
 	if _unit != null and is_instance_valid(_unit.hull_node) and _unit.hull_node.has_meta("faction"):
 		faction = _unit.hull_node.get_meta("faction")
-	return maxi(1, int(HARVEST_CHUNK * FactionCatalog.get_passive(faction, "harvest_rate_mult", 1.0)))
+	# Scaled by modules and tier exactly as capacity is, so the number of
+	# extraction cycles per load - and therefore the time spent at the patch - is
+	# the same whatever the design. Without this, a bigger hopper would simply
+	# mean a longer dwell and no more ore per second.
+	var rate: float = float(HARVEST_CHUNK) * float(modules) * _tier_mult
+	return maxi(1, int(rate * FactionCatalog.get_passive(faction, "harvest_rate_mult", 1.0)))
 
 
 func _head_home() -> void:
