@@ -4764,7 +4764,7 @@ static func _apply_agp_hull_projectors_and_field(parent_node: Node3D, base_size:
 	# Diffuse under-hull AGP gravity glow
 	var glow := OmniLight3D.new()
 	glow.name = "AGPGlow"
-	glow.position = belly_center - belly_normal * 0.385
+	glow.position = belly_center - belly_normal * 0.25
 	glow.light_color = Color(0.32, 0.70, 1.0) if is_strike else Color(0.25, 0.85, 0.95)
 	glow.light_energy = 2.2 if is_strike else 1.8
 	glow.omni_range = maxf(hull_w, hull_l) * 2.2
@@ -4787,10 +4787,10 @@ static func _apply_agp_hull_projectors_and_field(parent_node: Node3D, base_size:
 		lens.material_override = mat
 		if center_proj.get("hit", false):
 			var lens_basis: Basis = center_proj.get("basis", Basis.IDENTITY)
-			lens.transform = Transform3D(lens_basis, belly_center - belly_normal * 0.165)
+			lens.transform = Transform3D(lens_basis, belly_center - belly_normal * 0.10)
 		else:
 			lens.rotation = Vector3(PI / 2.0, 0, 0)
-			lens.position = Vector3(0, belly_y - 0.50, 0)
+			lens.position = Vector3(0, belly_y - 0.10, 0)
 		lens.extra_cull_margin = 8.0
 		agp_container.add_child(lens)
 
