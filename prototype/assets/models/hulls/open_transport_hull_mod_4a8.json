@@ -1,0 +1,21 @@
+{
+  "name": "Open Transport Mod. 4A8",
+  "hp": 320.0,
+  "weight": 170.0,
+  "metal": 70,
+  "crystal": 12,
+  "base_energy": 55.0,
+  "base_vision": 24.0,
+  "size": [
+    2.7,
+    1.486,
+    6.2
+  ],
+  "color": [
+    0.54,
+    0.56,
+    0.6,
+    1.0
+  ],
+  "category": "hull"
+}

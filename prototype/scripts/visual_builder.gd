@@ -10,6 +10,7 @@ class_name VisualBuilder
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const GlobalConfigScript = preload("res://scripts/global_config.gd")
 const PartMaterialsScript = preload("res://scripts/part_materials.gd")
+const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 
 # mesh instance-id -> PartMaterials role, populated by _part() as assets load.
 #
@@ -4658,18 +4659,176 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 		swing.add_child(ankle)
 
 
+## AGP (Atmospheric Gravity Planing) Under-Hull Field & Projectors:
+## Adds boxy wave projector greebles along the hull belly, accompanied by a
+## diffuse under-vehicle gravity glow and a full-hull gravitic warp lens.
+## Attached ONCE directly to the vehicle's root hull node (chassis_node).
+static func _build_agp_hull_projectors_and_field(parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}, is_strike: bool = true) -> void:
+	if not is_instance_valid(parent_node):
+		return
+
+	if not parent_node.is_inside_tree() or parent_node.get_parent() == null:
+		if not parent_node.is_connected("tree_entered", Callable(VisualBuilder, "_on_agp_parent_tree_entered")):
+			parent_node.tree_entered.connect(_on_agp_parent_tree_entered.bind(parent_node, base_size, base_color, tweaks, is_strike), CONNECT_ONE_SHOT)
+		return
+
+	_apply_agp_hull_projectors_and_field(parent_node, base_size, base_color, tweaks, is_strike)
+
+static func _on_agp_parent_tree_entered(parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary, is_strike: bool) -> void:
+	_apply_agp_hull_projectors_and_field(parent_node, base_size, base_color, tweaks, is_strike)
+
+static func _apply_agp_hull_projectors_and_field(parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}, is_strike: bool = true) -> void:
+	if not is_instance_valid(parent_node) or not parent_node.is_inside_tree():
+		return
+
+	# parent_node is the per-engine mount node (placed on the side of the hull).
+	# parent_node.get_parent() is the chassis root node (centered at 0,0,0).
+	var chassis_node: Node3D = parent_node.get_parent() as Node3D if (parent_node.get_parent() != null and parent_node.get_parent() is Node3D) else parent_node
+
+	# Walk up to the root chassis / hull node (centered at 0,0,0)
+	while chassis_node != null and chassis_node.get_parent() != null and (chassis_node.get_parent() is Node3D) and not (chassis_node.get_parent() is SubViewport or chassis_node.get_parent() is Window):
+		if chassis_node.name.contains("Hull") or chassis_node.name.contains("Vehicle") or chassis_node.name == "VisualModel" or chassis_node.has_meta("hull_data"):
+			break
+		chassis_node = chassis_node.get_parent() as Node3D
+
+	if not is_instance_valid(chassis_node):
+		chassis_node = parent_node
+
+	# Guarantee applied ONLY ONCE per vehicle chassis
+	if chassis_node.has_node("AGPRunningGear"):
+		return
+
+	var agp_container := Node3D.new()
+	agp_container.name = "AGPRunningGear"
+	chassis_node.add_child(agp_container)
+
+	# Gather surface triangles specifically from the HULL's MeshInstance3D
+	# (excluding running gear, wheels, ground planes, or extra modules).
+	var surface_data := _gather_hull_only_surface(chassis_node)
+	var hull_aabb: AABB = surface_data.get("aabb", get_full_hull_aabb(chassis_node))
+	var hull_w := maxf(hull_aabb.size.x, base_size.x * 1.8)
+	var hull_l := maxf(hull_aabb.size.z, base_size.z * 2.5)
+	var belly_y := hull_aabb.position.y
+
+	# 1. Boxy AGP wave projector greeble blocks pinned directly onto the bottom facets
+	var box_mesh := _part("rg_mount_box")
+	var proj_color := Color(0.24, 0.26, 0.28).lerp(base_color, 0.15)
+	var count_z := 4 if is_strike else 6
+	var z_step := 0.65 / float(maxi(1, count_z - 1))
+	var z_start := 0.175
+
+	for i in range(count_z):
+		var z_norm := z_start + float(i) * z_step
+		for side in [-1, 1]:
+			var x_norm: float = 0.5 + float(side) * 0.28
+			# Raycast straight UP (Vector3.DOWN approach) at the bottom facets of the visible hull mesh
+			var proj_info := HullProjectionScript.project(surface_data, Vector3(x_norm, 0.0, z_norm), Vector3.DOWN)
+			var proj_pos := Vector3.ZERO
+			var proj_basis := Basis.IDENTITY
+			if proj_info.get("hit", false):
+				proj_pos = proj_info.get("position", Vector3.ZERO)
+				proj_basis = proj_info.get("basis", Basis.IDENTITY)
+			else:
+				var z_pos := -hull_l * 0.32 + float(i) * (hull_l * 0.65 / float(maxi(1, count_z - 1)))
+				proj_pos = Vector3(float(side) * (hull_w * 0.30), belly_y, z_pos)
+
+			if box_mesh:
+				var proj := _mesh_inst(box_mesh, proj_color)
+				if proj_info.get("hit", false):
+					proj.transform = Transform3D(proj_basis, proj_pos).scaled_local(Vector3(0.55, 0.25, 0.55))
+				else:
+					proj.scale = Vector3(0.55, 0.25, 0.55)
+					proj.position = proj_pos
+				agp_container.add_child(proj)
+			else:
+				var proj := MeshInstance3D.new()
+				var bm_box := BoxMesh.new()
+				bm_box.size = Vector3(0.35, 0.18, 0.35)
+				proj.mesh = bm_box
+				var mat := StandardMaterial3D.new()
+				mat.albedo_color = proj_color
+				mat.metallic = 0.6
+				mat.roughness = 0.3
+				proj.material_override = mat
+				if proj_info.get("hit", false):
+					proj.transform = Transform3D(proj_basis, proj_pos)
+				else:
+					proj.position = proj_pos
+				agp_container.add_child(proj)
+
+	# 2. Raycast center bottom facet for glow light and gravitic warp lens quad
+	var center_proj := HullProjectionScript.project(surface_data, Vector3(0.5, 0.0, 0.5), Vector3.DOWN)
+	var belly_center: Vector3 = center_proj.get("position", Vector3(0, belly_y, 0)) if center_proj.get("hit", false) else Vector3(0, belly_y, 0)
+	var belly_normal: Vector3 = center_proj.get("normal", Vector3.UP) if center_proj.get("hit", false) else Vector3.UP
+
+	# Diffuse under-hull AGP gravity glow
+	var glow := OmniLight3D.new()
+	glow.name = "AGPGlow"
+	glow.position = belly_center - belly_normal * 0.385
+	glow.light_color = Color(0.32, 0.70, 1.0) if is_strike else Color(0.25, 0.85, 0.95)
+	glow.light_energy = 2.2 if is_strike else 1.8
+	glow.omni_range = maxf(hull_w, hull_l) * 2.2
+	glow.omni_attenuation = 2.0
+	glow.shadow_enabled = false
+	agp_container.add_child(glow)
+
+	# Full-hull gravitic warp lens (gravitic_lens.gdshader)
+	var lens_shader: Shader = load("res://shaders/gravitic_lens.gdshader")
+	if lens_shader:
+		var lens := MeshInstance3D.new()
+		lens.name = "AGPLens"
+		var quad := QuadMesh.new()
+		quad.size = Vector2(hull_w * 2.4, hull_l * 1.8)
+		lens.mesh = quad
+		var mat := ShaderMaterial.new()
+		mat.shader = lens_shader
+		mat.set_shader_parameter("strength", 0.038 if is_strike else 0.028)
+		mat.set_shader_parameter("tint", Color(0.28, 0.65, 0.98) if is_strike else Color(0.22, 0.80, 0.92))
+		lens.material_override = mat
+		if center_proj.get("hit", false):
+			var lens_basis: Basis = center_proj.get("basis", Basis.IDENTITY)
+			lens.transform = Transform3D(lens_basis, belly_center - belly_normal * 0.165)
+		else:
+			lens.rotation = Vector3(PI / 2.0, 0, 0)
+			lens.position = Vector3(0, belly_y - 0.50, 0)
+		lens.extra_cull_margin = 8.0
+		agp_container.add_child(lens)
+
+
+static func _gather_hull_only_surface(chassis_node: Node3D) -> Dictionary:
+	var tris := PackedVector3Array()
+	var aabb := AABB()
+	var first := true
+	if not is_instance_valid(chassis_node):
+		return {"tris": tris, "aabb": aabb}
+
+	var hull_mi: MeshInstance3D = null
+	if chassis_node.has_node("MeshInstance3D") and chassis_node.get_node("MeshInstance3D") is MeshInstance3D:
+		hull_mi = chassis_node.get_node("MeshInstance3D") as MeshInstance3D
+	else:
+		for child in chassis_node.get_children():
+			if child is MeshInstance3D and not child.has_meta("module_data") and child.visible and not child.name.contains("Ground") and not child.name.contains("Greeble") and not child.name.contains("Shield") and not child.name.contains("AGP"):
+				hull_mi = child as MeshInstance3D
+				break
+
+	if hull_mi != null and hull_mi.mesh != null:
+		var xform := hull_mi.transform
+		var faces := hull_mi.mesh.get_faces()
+		for v in faces:
+			var world_v := xform * v
+			tris.append(world_v)
+			if first:
+				aabb = AABB(world_v, Vector3.ZERO)
+				first = false
+			else:
+				aabb = aabb.expand(world_v)
+
+	return {"tris": tris, "aabb": aabb, "hull_mi": hull_mi}
+
+
 static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.SLATE_GRAY, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "fixed_wing_engine", base_color, 1.0, float(tweaks.get("turbine_compression", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
-	# Redesign (Chris's ask): mounted out from the hull on a pylon like the
-	# rotors/hover pads, radially/elliptically distributed around the Y
-	# axis (module_placer.gd, engine_count 2-6) instead of a fixed pair.
-	# nacelle_size is no longer user-tweakable - turbine_compression takes
-	# over that "Size" slider slot, and unlike hover's purely cosmetic
-	# knee_height, IS wired into weight/cost (module_data.gd) since a
-	# physically longer turbine core is a real size change, not just a
-	# look.
-	var nacelle_size = tweaks.get("nacelle_size", 1.0)
-	var turbine_compression = tweaks.get("turbine_compression", 1.0)
+	var turbine_compression = float(tweaks.get("turbine_compression", 1.0))
+	var nacelle_size = turbine_compression
 	var afterburner = tweaks.get("afterburner", false)
 
 	var nacelle_mesh = _part("engine_nacelle")
@@ -4794,6 +4953,8 @@ static func _build_fixed_wing_engine(parent_node: Node3D, base_size: Vector3, ba
 				var strut = _mesh_inst(mount_mesh, base_color.darkened(0.2))
 				strut.transform = Transform3D(Basis(right * 1.4, dir * reach_len, forward * 0.7), Vector3.ZERO)
 				parent_node.add_child(strut)
+
+	_build_agp_hull_projectors_and_field(parent_node, base_size, base_color, tweaks, true)
 
 
 static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.BROWN, tweaks: Dictionary = {}):
@@ -5235,8 +5396,8 @@ static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, bas
 	# 1.0 placeholder, so a pod built from it came out as a speck bolted to the
 	# side of a real airship. pod_scale is the hull's own height, from
 	# locomotion_layout.gd's SIDE_PODS pattern.
-	# 0.92, was 1.15 - Chris asked for 20% off once the pod was legible.
-	var s: float = maxf(float(tweaks.get("pod_scale", base_size.x)), 0.5) * 0.92
+	var pod_mult: float = float(tweaks.get("engine_size", tweaks.get("size", tweaks.get("scale", 1.0))))
+	var s: float = maxf(float(tweaks.get("pod_scale", base_size.x)), 0.5) * 0.92 * pod_mult
 	const POD_Z := -0.20
 	var struct_color := base_color.darkened(0.25)
 
@@ -5316,6 +5477,8 @@ static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, bas
 		blade.scale = Vector3(blade_span, 0.9 * s, 0.9 * s)
 		p.add_child(blade)
 	)
+
+	_build_agp_hull_projectors_and_field(parent_node, base_size, base_color, tweaks, false)
 
 
 static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_GOLDENROD, tweaks: Dictionary = {}):

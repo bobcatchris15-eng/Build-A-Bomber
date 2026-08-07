@@ -1,0 +1,21 @@
+{
+  "name": "Heavy Transport Mod. 4A7",
+  "hp": 720.0,
+  "weight": 480.0,
+  "metal": 180,
+  "crystal": 35,
+  "base_energy": 110.0,
+  "base_vision": 19.0,
+  "size": [
+    4.45,
+    1.9,
+    8.2
+  ],
+  "color": [
+    0.44,
+    0.47,
+    0.5,
+    1.0
+  ],
+  "category": "hull"
+}

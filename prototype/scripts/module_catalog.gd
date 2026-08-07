@@ -1462,24 +1462,15 @@ static func _build_catalog_literal() -> Dictionary:
 			"traits": ["ground_contact"]
 		},
 		"fixed_wing_engine": {
-			"name": "Fixed-Wing Engine",
+			"name": "AGP Strike Drive",
 			"category": "locomotion",
+			"description": "Atmospheric Gravity Planing (AGP) Strike Drive - High-speed gravity planing drive for fast offensive strike vectoring.",
 			"hp": 70.0,
 			"weight": 60.0,
 			"metal": 60,
 			"crystal": 20,
 			"dps": 0.0,
-			# Fixed-wing lift scales with airspeed and wing area, giving it
-			# more payload tolerance than rotary/hover lift, but it's still
-			# a real aircraft weight budget, not a grounded vehicle's.
 			"base_weight_capacity": 240.0,
-			# Base top speed (Chris: "each locomotor should also have a base
-			# top speed"): the hard ceiling on how fast this chassis can be
-			# driven, however much thrust is bolted to it. Replaces the single
-			# universal 18.0 clamp every type used to share - see
-			# Drivetrain.analyze() and get_base_top_speed() below.
-			# The roster's ceiling, and the only type that keeps the old
-			# universal 18.0 - a jet is what that number was really describing.
 			"base_top_speed": 18.0,
 			"size": Vector3(1.0, 0.5, 1.5),
 			"color": Color.SLATE_BLUE,
@@ -1488,33 +1479,12 @@ static func _build_catalog_literal() -> Dictionary:
 		"ornithopter_wing": {
 			"name": "Ornithopter Wing",
 			"category": "locomotion",
-			# Batch E task 3: a genuinely different airborne flavor -
-			# flapping motion instead of a spinning prop/jet (fixed_wing_
-			# engine) or a lighter-than-air gasbag (buoyant_envelope). Still
-			# no aerodynamic lift simulation (standing rule) - mechanically
-			# it's a simple hover-capable flier like helicopter_rotors/
-			# hover_engine/anti_grav (deliberately NOT given the "fixed_wing"
-			# trait, so it skips the banking/minimum-airspeed movement
-			# paradigm and just arrives-and-stops like the rest of that
-			# group) - the differentiation here is visual/flavor, per
-			# Chris's explicit framing of this task, not a new physics model.
 			"hp": 65.0,
 			"weight": 55.0,
 			"metal": 45,
 			"crystal": 25,
 			"dps": 0.0,
-			# Between helicopter_rotors' strict hover-lift budget (250) and
-			# fixed_wing_engine's generous airspeed-assisted one (380) - a
-			# flapping wing generates real lift like a fixed wing, but not
-			# as efficiently as one built for sustained forward flight.
 			"base_weight_capacity": 200.0,
-			# Base top speed (Chris: "each locomotor should also have a base
-			# top speed"): the hard ceiling on how fast this chassis can be
-			# driven, however much thrust is bolted to it. Replaces the single
-			# universal 18.0 clamp every type used to share - see
-			# Drivetrain.analyze() and get_base_top_speed() below.
-			# Flapping flight is inefficient at speed; it buys maneuver and
-			# novelty, not pace.
 			"base_top_speed": 9.0,
 			"thrust_coefficient": 120.0,
 			"size": Vector3(2.0, 0.2, 1.0),
@@ -1529,52 +1499,22 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 35,
 			"crystal": 0,
 			"dps": 0.0,
-			# Buoyancy carries the load, not the propeller - real ships
-			# routinely carry far more weight than any ground/air vehicle.
-			# Highest capacity in the roster.
 			"base_weight_capacity": 500.0,
-			# Base top speed (Chris: "each locomotor should also have a base
-			# top speed"): the hard ceiling on how fast this chassis can be
-			# driven, however much thrust is bolted to it. Replaces the single
-			# universal 18.0 clamp every type used to share - see
-			# Drivetrain.analyze() and get_base_top_speed() below.
-			# Displacement hulls are hard-limited by their own bow wave - this
-			# is why hydrofoil exists as a separate, faster naval type.
 			"base_top_speed": 8.0,
 			"size": Vector3(0.5, 0.5, 0.8),
 			"color": Color.TEAL,
 			"traits": ["buoyant", "naval"]
 		},
 		"buoyant_envelope": {
-			"name": "Buoyant Envelope Drive",
+			"name": "AGP Loiter Drive",
 			"category": "locomotion",
-			# Airship judgment call (see DECISIONS_NEEDED.md): a rigid
-			# airship's lift comes from displacing air with a lighter-than-
-			# air gasbag, not from a propeller/engine actively fighting
-			# gravity like every other airborne locomotion type - so it
-			# gets its own distinct locomotion flavor rather than reusing
-			# fixed_wing_engine, specifically so that distinction can show
-			# up in the two systems that just got built to care about it:
-			# a very high base_weight_capacity (buoyancy scales generously
-			# with envelope size, so it can carry proportionally far more
-			# before the overload penalty) and a low thrust_coefficient
-			# (small cruise/steering motors only - lift is free, so it
-			# never needed big engines, and it's slow as a direct
-			# consequence, not a hand-tuned speed stat).
+			"description": "Atmospheric Gravity Planing (AGP) Loiter Drive - Sustained low-draw gravity planing drive optimized for long-endurance loitering and heavy payload transport.",
 			"hp": 40.0,
 			"weight": 35.0,
 			"metal": 25,
 			"crystal": 15,
 			"dps": 0.0,
 			"base_weight_capacity": 700.0,
-			# Base top speed (Chris: "each locomotor should also have a base
-			# top speed"): the hard ceiling on how fast this chassis can be
-			# driven, however much thrust is bolted to it. Replaces the single
-			# universal 18.0 clamp every type used to share - see
-			# Drivetrain.analyze() and get_base_top_speed() below.
-			# An airship is enormous, draggy, and in no hurry. Slowest in the
-			# roster, matching the lowest thrust_coefficient and the highest
-			# capacity - carry anything, arrive eventually.
 			"base_top_speed": 4.0,
 			"thrust_coefficient": 55.0,
 			"size": Vector3(1.0, 0.5, 1.0),
