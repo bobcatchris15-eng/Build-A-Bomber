@@ -89,6 +89,60 @@
 				24
 			],
 			"type": "metal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				48,
+				0,
+				64
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-48,
+				0,
+				64
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				48,
+				0,
+				-64
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-48,
+				0,
+				-64
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 1400,
+			"position": [
+				82,
+				0,
+				0
+			],
+			"type": "oil"
+		},
+		{
+			"amount": 1400,
+			"position": [
+				-82,
+				0,
+				0
+			],
+			"type": "oil"
 		}
 	],
 	"schema_version": 1,

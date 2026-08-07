@@ -98,6 +98,60 @@
 				-165
 			],
 			"type": "crystal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				47,
+				0,
+				143
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-47,
+				0,
+				143
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				47,
+				0,
+				-143
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-47,
+				0,
+				-143
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 1400,
+			"position": [
+				80,
+				0,
+				0
+			],
+			"type": "oil"
+		},
+		{
+			"amount": 1400,
+			"position": [
+				-80,
+				0,
+				0
+			],
+			"type": "oil"
 		}
 	],
 	"schema_version": 1,

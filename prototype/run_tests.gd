@@ -39,6 +39,7 @@ const SUITE_FILES := {
 	"after_action_report": preload("res://tests/battle/test_after_action_report.gd"),
 	"counter_draft": preload("res://tests/battle/test_counter_draft.gd"),
 	"economy_balance": preload("res://tests/battle/test_economy_balance.gd"),
+	"resource_fields": preload("res://tests/battle/test_resource_fields.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -272,6 +273,11 @@ const SUITE_ORDER := [
 	["economy_balance", "test_every_design_draws_the_same_rate_while_building"],
 	["economy_balance", "test_four_harvesters_meet_the_stated_target"],
 	["economy_balance", "test_harvester_capacity_comes_from_the_design"],
+	["resource_fields", "test_resource_catalog_aliases_metal_to_ore"],
+	["resource_fields", "test_resource_values_form_a_real_ladder"],
+	["resource_fields", "test_a_field_scatters_and_refills"],
+	["resource_fields", "test_oil_wells_are_single_points"],
+	["resource_fields", "test_every_map_offers_lumber_and_oil"],
 	["economy_and_production", "test_harvester_delivery_radius_clears_hull_and_refinery"],
 ]
 

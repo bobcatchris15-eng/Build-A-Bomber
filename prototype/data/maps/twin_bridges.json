@@ -158,6 +158,42 @@
 				-225
 			],
 			"type": "crystal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				60,
+				0,
+				192
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-60,
+				0,
+				192
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				60,
+				0,
+				-192
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-60,
+				0,
+				-192
+			],
+			"type": "lumber"
 		}
 	],
 	"schema_version": 1,

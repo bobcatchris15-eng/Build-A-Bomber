@@ -5,29 +5,29 @@
 		0.219999998807907,
 		0.200000002980232
 	],
-	"map_half_extents": 135,
+	"map_half_extents": 135.0,
 	"name": "Close Quarters",
 	"obstacles": [
 		{
 			"center": [
-				-36,
-				0,
-				0
+				-36.0,
+				0.0,
+				0.0
 			],
 			"half_extents": [
-				12,
-				54
+				12.0,
+				54.0
 			]
 		},
 		{
 			"center": [
-				36,
-				0,
-				0
+				36.0,
+				0.0,
+				0.0
 			],
 			"half_extents": [
-				12,
-				54
+				12.0,
+				54.0
 			]
 		}
 	],
@@ -35,113 +35,167 @@
 		{
 			"amount": 1000,
 			"position": [
-				-75,
-				0,
-				66
+				-75.0,
+				0.0,
+				66.0
 			],
 			"type": "metal"
 		},
 		{
 			"amount": 1000,
 			"position": [
-				75,
-				0,
-				66
+				75.0,
+				0.0,
+				66.0
 			],
 			"type": "metal"
 		},
 		{
 			"amount": 700,
 			"position": [
-				0,
-				0,
-				45
+				0.0,
+				0.0,
+				45.0
 			],
 			"type": "crystal"
 		},
 		{
 			"amount": 1000,
 			"position": [
-				75,
-				0,
-				-66
+				75.0,
+				0.0,
+				-66.0
 			],
 			"type": "metal"
 		},
 		{
 			"amount": 1000,
 			"position": [
-				-75,
-				0,
-				-66
+				-75.0,
+				0.0,
+				-66.0
 			],
 			"type": "metal"
 		},
 		{
 			"amount": 700,
 			"position": [
-				0,
-				0,
-				-45
+				0.0,
+				0.0,
+				-45.0
 			],
 			"type": "crystal"
 		},
 		{
 			"amount": 900,
 			"position": [
-				0,
-				0,
-				0
+				0.0,
+				0.0,
+				0.0
 			],
 			"type": "crystal"
+		},
+		{
+			"amount": 900,
+			"position": [
+				27.0,
+				0.0,
+				74.0
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-27.0,
+				0.0,
+				74.0
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				27.0,
+				0.0,
+				-74.0
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 900,
+			"position": [
+				-27.0,
+				0.0,
+				-74.0
+			],
+			"type": "lumber"
+		},
+		{
+			"amount": 1400,
+			"position": [
+				52.0,
+				0.0,
+				0.0
+			],
+			"type": "oil"
+		},
+		{
+			"amount": 1400,
+			"position": [
+				-49.0,
+				0.0,
+				5.1961522102356
+			],
+			"type": "oil"
 		}
 	],
-	"schema_version": 1,
+	"schema_version": 1.0,
 	"spawns": [
 		{
 			"factory": [
-				-24,
-				0,
-				84
+				-24.0,
+				0.0,
+				84.0
 			],
 			"harvester": [
-				15,
+				15.0,
 				1.5,
-				66
+				66.0
 			],
 			"hq": [
-				0,
-				0,
-				96
+				0.0,
+				0.0,
+				96.0
 			],
 			"id": "player",
 			"refinery": [
-				21,
-				0,
-				78
+				21.0,
+				0.0,
+				78.0
 			]
 		},
 		{
 			"factory": [
-				24,
-				0,
-				-84
+				24.0,
+				0.0,
+				-84.0
 			],
 			"harvester": [
-				-15,
+				-15.0,
 				1.5,
-				-66
+				-66.0
 			],
 			"hq": [
-				0,
-				0,
-				-96
+				0.0,
+				0.0,
+				-96.0
 			],
 			"id": "enemy",
 			"refinery": [
-				-21,
-				0,
-				-78
+				-21.0,
+				0.0,
+				-78.0
 			]
 		}
 	],

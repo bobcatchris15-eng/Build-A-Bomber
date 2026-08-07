@@ -21,6 +21,7 @@ extends RefCounted
 
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 
 const HARVEST_TIME := 3.0
 
@@ -31,13 +32,18 @@ const HARVEST_TIME := 3.0
 # 50-unit hopper instead of 2, so the working half of a round trip went from 6 s
 # to 15 s. Chris felt it as harvesters being sluggish, which they were.
 #
-# 2026-08-07, BALANCE PASS. Raised 25 -> 40 alongside capacity 50 -> 80, both by
-# the same 1.6x. Measured, not guessed: see ECONOMY_BALANCE.md. A round trip on
-# open_plains is ~10 s, of which only ~6 s is spent filling, so scaling ONLY the
-# hopper would have made trips longer without delivering more per second - the
-# chunk has to move with it to keep the number of extraction cycles (and the
-# rhythm the player watches) unchanged.
-const HARVEST_CHUNK := 40
+# 2026-08-07, BALANCE PASS. Measured, not guessed - see ECONOMY_BALANCE.md.
+#
+# First to 40 (with capacity 50 -> 80) to hit the income target. Then back to 28
+# (capacity 56) once value-weighted node selection landed: harvesters that chase
+# credits rather than metres earn ~37% more from the same fleet, so the hopper
+# had to come back down to hold the same target.
+#
+# THE CHUNK ALWAYS MOVES WITH THE HOPPER. A round trip on open_plains is ~10 s of
+# which only ~6 s is spent filling, so scaling the hopper alone lengthens the trip
+# by exactly what it adds to the load and delivers nothing - it looks like a
+# change and measures as none. Both stay at capacity / chunk = 2 cycles.
+const HARVEST_CHUNK := 28
 
 # The old runtime delivered the INSTANT a harvester reached the refinery, with no
 # unload phase at all. A short dwell is worth keeping - it is what makes a dock
@@ -98,8 +104,15 @@ var bay_index: int = -1
 # a dock bay: without it, every harvester on a patch steers at its exact origin
 # and they stand inside each other.
 var node_slot: int = -1
-var cargo_metal: int = 0
-var cargo_crystal: int = 0
+# THE HOPPER IS KEYED BY RESOURCE TYPE, not by destination pool.
+#
+# It used to be two ints, cargo_metal and cargo_crystal, which worked only while
+# there were exactly two resources and each was its own pool. With lumber and oil
+# added - and with all four heading for a single credits pool - what a truck is
+# carrying and what it is worth are different questions, and the hopper is the
+# wrong place to answer the second one. ResourceCatalog.deliver_value() does that
+# at the refinery door.
+var cargo_by_type: Dictionary = {}
 # THE HOPPER, and it is a property of the DESIGN, not a constant.
 #
 # It used to be a flat 50 for everything, which in a game whose entire premise is
@@ -109,9 +122,9 @@ var cargo_crystal: int = 0
 # choosing a heavier chassis is a real economic decision with a real cost in
 # metal, weight and speed.
 #
-# 80 is the balance number: it is 50 x 1.6, the factor measured as the gap
-# between what four harvesters delivered and what Chris's spec asks for.
-const BASE_CAPACITY := 80
+# 56 is the balance number, measured against Chris's spec rather than chosen.
+# See HARVEST_CHUNK above and ECONOMY_BALANCE.md for how it moved.
+const BASE_CAPACITY := 56
 # Bigger chassis, bigger hopper. Extraction scales with it (see _chunk_size) so
 # fill TIME is constant across tiers - the advantage of a heavy hauler is fewer
 # trips for the same ore, paid for in cost and speed, not in a longer dwell at
@@ -154,7 +167,10 @@ func configure(module_count: int, hull_type: String) -> void:
 
 
 func cargo() -> int:
-	return cargo_metal + cargo_crystal
+	var total := 0
+	for type_id in cargo_by_type:
+		total += int(cargo_by_type[type_id])
+	return total
 
 
 func is_full() -> bool:
@@ -253,10 +269,8 @@ func _harvest(delta: float) -> void:
 		_head_home()
 		return
 	node.amount -= take
-	if node.resource_type == "crystal":
-		cargo_crystal += take
-	else:
-		cargo_metal += take
+	var type_id: String = ResourceCatalogScript.canonical(node.resource_type)
+	cargo_by_type[type_id] = int(cargo_by_type.get(type_id, 0)) + take
 	if is_full():
 		_head_home()
 
@@ -415,8 +429,7 @@ func _unload(delta: float) -> void:
 	if not is_instance_valid(refinery):
 		# Destroyed while we were unloading. Whatever is left in the hopper is
 		# lost with it.
-		cargo_metal = 0
-		cargo_crystal = 0
+		cargo_by_type.clear()
 		bay_index = -1
 		refinery = null
 		_to_searching()
@@ -424,9 +437,13 @@ func _unload(delta: float) -> void:
 	_timer += delta
 	if _timer < UNLOAD_TIME:
 		return
-	_world.deliver(_unit.team, cargo_metal, cargo_crystal)
-	cargo_metal = 0
-	cargo_crystal = 0
+	# Converted per type at the door: a full hopper of oil is worth four times the
+	# same hopper of lumber, and the truck never had to know that.
+	var payout := Vector2i.ZERO
+	for type_id in cargo_by_type:
+		payout += ResourceCatalogScript.deliver_value(type_id, int(cargo_by_type[type_id]))
+	_world.deliver(_unit.team, payout.x, payout.y)
+	cargo_by_type.clear()
 	release()
 	_to_searching()
 

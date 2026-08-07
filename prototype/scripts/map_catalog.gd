@@ -38,7 +38,12 @@ class_name MapCatalog
 #     always fully span a water_areas rect along the crossing axis (so
 #     there's dry land - or at least the water's edge - on both ends);
 #     nothing enforces this automatically, it's a map-authoring convention.
-#   resource_nodes: [{position: Vector3, type: "metal"/"crystal", amount: int}, ...]
+#   resource_nodes: [{position: Vector3, type: String, amount: int}, ...]
+#     Each entry is a FIELD CENTRE, not a lump: resource_field.gd scatters
+#     collectibles around it and replaces them as they are worked out, with the
+#     scatter shape and respawn rate read per type from ResourceCatalog. `amount`
+#     is the whole deposit, divided across the scatter. Types are "ore" (alias
+#     "metal"), "crystal", "lumber" and "oil".
 #   spawns: [{id: String, hq, factory, refinery, harvester: Vector3}, ...]
 #     was player_start/enemy_start (B3) - "player"/"enemy" ids preserve the
 #     exact 2-spawn runtime behavior; real N-player spawn assignment (pick
@@ -342,7 +347,11 @@ const FIELD_SPEC: Dictionary = {
 	}},
 	"resource_nodes": {"type": "array", "required": false, "item": {
 		"position": {"type": "vector3", "required": true},
-		"type": {"type": "string", "required": true, "enum": ["metal", "crystal"]},
+		# "metal" is the historical id for ore and every bundled map still uses
+		# it; ResourceCatalog treats it as an alias rather than a rename, so both
+		# spellings validate and mean the same field.
+		"type": {"type": "string", "required": true,
+			"enum": ["metal", "ore", "crystal", "lumber", "oil"]},
 		"amount": {"type": "number", "required": true, "min": 1},
 	}},
 	# B3: was player_start/enemy_start (2 fixed dict fields); now a

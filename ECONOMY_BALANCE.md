@@ -55,7 +55,7 @@ So the economy could not sustain even a *single* production line, which is why
 the AI reached three harvesters and never fielded a combat unit — it was not a
 decision bug, it was arithmetic. Needed ×1.62.
 
-**After:**
+**After (first pass, two pools, nearest-node targeting):**
 
 ```
 capacity 80, chunk 40/3.0s, unload 0.6s
@@ -63,6 +63,19 @@ metal 7.11/s, crystal 12.44/s -> INCOME 32.00 cost-units/s  (8.00 per harvester)
 one line  (draw 20/s): GROWS  - net +12.0/s
 two lines (draw 40/s): keeps up 80%   (target 80%)
 ```
+
+**After (final, resource fields + value-weighted targeting):**
+
+```
+capacity 56, chunk 28/3.0s, unload 0.6s
+metal 7.18/s, crystal 12.22/s -> INCOME 31.63 credits/s  (7.91 per harvester)
+one line  (draw 20/s): GROWS  - net +11.6/s
+two lines (draw 40/s): keeps up 79%   (target 80%)
+```
+
+The hopper came back DOWN from 80 to 56 because harvesters that chase credits
+rather than metres earn ~37% more from the same fleet. Same target, richer
+trucks, smaller hoppers.
 
 ## THE AGGREGATE IS A LIE, AND THIS IS THE REAL FINDING
 
@@ -88,12 +101,17 @@ This is what the AI was dying of. After the queue fix below it correctly reaches
 for a Breaker TD — and then sits `stalled=true` at 0 metal with 155 crystal
 banked, for the rest of the match.
 
-**Not patched, deliberately.** Chris redirected the economy to a single
-"credits" pool fed by several gathered resource types on 2026-08-07, which
-dissolves this entire class of problem: with one pool the aggregate model above
-becomes literally true rather than a convenient fiction, and the ×1.6 income
-figure derived here holds exactly. Rebalancing the metal:crystal mix first would
-be work thrown away.
+**STILL TRUE after the resource-fields pass, and still deliberately unpatched.**
+`ResourceCatalog.deliver_value()` now makes one credit worth one cost-unit
+whichever pool it lands in, so the *aggregate* is honest — but there are still
+two pools, and metal is still the binding one at ~46% of a line while crystal
+runs a large surplus.
+
+Chris redirected the economy to a single "credits" pool on 2026-08-07 and chose
+to prototype the resource fields first. That conversion is what closes this:
+merging the pools makes the aggregate the only number, and every consumer already
+reads `ResourceCatalog.credits()`. Rebalancing the metal:crystal mix in between
+would be work thrown away.
 
 ## Why both constants had to move together
 
@@ -118,7 +136,7 @@ design the units, a purpose-built ore hauler carried exactly as much as a scout
 car with a harvester arm bolted on.
 
 ```
-capacity = 80 × harvester_modules × tier_multiplier
+capacity = 56 × harvester_modules × tier_multiplier
 tier:  light 0.7   medium 1.0   heavy 1.5
 ```
 
@@ -128,10 +146,10 @@ and speed — not in a longer dwell at the patch.
 
 | design | hopper |
 |---|---|
-| light hull, 1 module | 56 |
-| medium hull, 1 module (the bundled Ore Trucker) | 80 |
-| heavy hull, 1 module | 120 |
-| medium hull, 2 modules | 160 |
+| light hull, 1 module | 39 |
+| medium hull, 1 module (the bundled Ore Trucker) | 56 |
+| heavy hull, 1 module | 84 |
+| medium hull, 2 modules | 112 |
 
 ## Re-measuring
 
@@ -163,6 +181,36 @@ the AI reaches a Breaker TD within ~3,600 ticks.
 fields an army for the first time in this rebuild's history. Two units in seven
 minutes is still starvation pace — that is the metal-vs-crystal problem above,
 not this one — but the door is open where before it was bolted shut.
+
+## The resource rework (2026-08-07)
+
+Four gatherable types, differing by **value density and location** — any
+harvester works any field, so the decision is where to send trucks:
+
+| resource | credits/unit | field | respawn | where |
+|---|---|---|---|---|
+| lumber | 1.0 | 9 seedlings, 11 m | 20 s | close to each base |
+| ore | 1.5 | 7 rocks, 9 m | 35 s | the staple, mid-map |
+| crystal | 3.0 | 5 clusters, 8 m | 50 s | scarcer, further out |
+| oil | 4.0 | 1 well | 25 s | contested centre line |
+
+Every map entry is now a **field centre** rather than a lump — the schema did not
+change, so all ten maps and the fairness lint carried over untouched. Everything
+is renewable: a mined-out collectible is removed and the field puts a fresh one
+back.
+
+### Value-weighted targeting, and why it was mandatory
+
+Node selection scored distance, crowding and pool shortage — but never **value**.
+With lumber authored close to each base (deliberately, as the safe opening
+income), pure nearest-node targeting sent every truck to lumber and nothing else:
+**crystal income measured exactly 0.00/s** across a three-minute run. The cheapest
+resource on the map won every contest because it was the closest, which is the
+precise opposite of the design.
+
+`nearest_resource_node()` now divides distance by relative value, so oil reads at
+~0.4× its true distance and lumber at 1.5×. A truck will drive past a tree to
+reach a well, which is the whole point.
 
 ## Notes
 

@@ -45,6 +45,8 @@ const BattleFinishScript = preload("res://scripts/battle/battle_finish.gd")
 const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 const UnitAssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
+const ResourceFieldScript = preload("res://scripts/battle/economy/resource_field.gd")
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
 const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.gd")
 const BattleHUDScript = preload("res://scripts/battle/hud/battle_hud.gd")
@@ -553,14 +555,22 @@ func get_team_units(for_team: int) -> Array:
 
 # --- Base and economy --------------------------------------------------------
 
+# Each map entry is now a FIELD CENTRE, not a lump.
+#
+# The schema is unchanged - position, type, amount - so all ten bundled maps and
+# the spawn-fairness lint carry over untouched. What changed is what gets built
+# from it: resource_field.gd scatters collectibles around the point and replaces
+# them as they are worked out, per Chris's direction that ore and crystal "get
+# reworked into spread out fields around the central node that spawns the
+# collectible resource objects".
 func _spawn_resource_nodes() -> void:
 	for entry in current_map.get("resource_nodes", []):
-		var node := StaticBody3D.new()
-		node.set_script(ResourceNodeScript)
-		add_child(node)
+		var field := Node3D.new()
+		field.set_script(ResourceFieldScript)
+		add_child(field)
 		var pos: Vector3 = entry.get("position", Vector3.ZERO)
-		node.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
-		node.setup(entry.get("type", "metal"), entry.get("amount", 1000))
+		field.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
+		field.setup(entry.get("type", "metal"), entry.get("amount", 1000), self)
 
 
 func _spawn_bases() -> void:
@@ -1039,7 +1049,22 @@ func nearest_resource_node(from: Vector3, requester: Node = null) -> Node3D:
 		# an empty patch a short walk further wins, small enough that a lone
 		# harvester does not cross the map to avoid one neighbour.
 		var occupied: int = NODE_WORK_SLOTS - _free_slots(n)
-		var score: float = distance + float(occupied) * 18.0 \
+		# VALUE-WEIGHTED DISTANCE. A round trip costs the same time whatever is in
+		# the hopper, so what a harvester should maximise is credits per trip, not
+		# metres saved. Dividing by relative value expresses that as effective
+		# distance: oil at 4.0 credits reads at ~0.4x its real distance, lumber at
+		# 1.0 reads at 1.5x.
+		#
+		# WITHOUT THIS THE WHOLE RESOURCE DESIGN INVERTS. Measured: with lumber
+		# stands authored close to each base - deliberately, as the safe opening
+		# income - pure nearest-node targeting sent every truck to lumber and
+		# NOTHING else. Crystal income was exactly 0.00/s across a three-minute
+		# run. The cheapest resource on the map won every contest because it was
+		# the closest, which is the precise opposite of "resources differ by value
+		# density".
+		var value_scale: float = ResourceCatalogScript.credits("ore") \
+			/ maxf(0.01, ResourceCatalogScript.credits(n.resource_type))
+		var score: float = distance * value_scale + float(occupied) * 18.0 \
 			- _shortage_pull(requester, n.resource_type)
 		if score < best_score:
 			best_score = score
@@ -1075,7 +1100,11 @@ func _shortage_pull(requester: Node, resource_type: String) -> float:
 	if requester == null or economy == null:
 		return 0.0
 	var team: int = requester.team
-	var stock: float = float(economy.crystal(team)) if resource_type == "crystal" \
+	# Which pool this resource pays into - lumber and oil both feed metal today.
+	# ResourceCatalog owns that mapping so the credits pass has one place to
+	# delete rather than several.
+	var pays_crystal: bool = ResourceCatalogScript.deliver_value(resource_type, 1).y > 0
+	var stock: float = float(economy.crystal(team)) if pays_crystal \
 		else float(economy.metal(team))
 	var scarcity: float = clampf(1.0 - stock / SHORTAGE_REFERENCE, 0.0, 1.0)
 	return scarcity * SHORTAGE_PULL

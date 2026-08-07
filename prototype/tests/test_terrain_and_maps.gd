@@ -833,11 +833,34 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 	}
 
 	var loaded = MapCatalogScript.get_map("lake_crossing")
-	if loaded != expected_lake_crossing:
+
+	# EVERY FIELD EXCEPT resource_nodes IS STILL A STRICT DEEP-EQUAL. That is what
+	# this test is for: proving the const -> JSON migration did not corrupt a
+	# value in transcription.
+	#
+	# resource_nodes is checked as a SUPERSET instead, because a map file is
+	# content and content is supposed to grow - the 2026-08-07 resource rework
+	# added lumber stands and oil wells to all ten maps. A strict equality here
+	# would mean "no map may ever gain a deposit again", which is not a property
+	# worth defending; "the nine originals are still exactly where they were" is.
+	var loaded_nodes: Array = loaded.get("resource_nodes", [])
+	var expected_nodes: Array = expected_lake_crossing["resource_nodes"]
+	var loaded_rest: Dictionary = loaded.duplicate(true)
+	var expected_rest: Dictionary = expected_lake_crossing.duplicate(true)
+	loaded_rest.erase("resource_nodes")
+	expected_rest.erase("resource_nodes")
+
+	if loaded_rest != expected_rest:
 		print("  [FAIL] JSON-loaded lake_crossing does not deep-equal the checked-in snapshot of the old const's values.")
-		print("    Loaded:   ", loaded)
-		print("    Expected: ", expected_lake_crossing)
+		print("    Loaded:   ", loaded_rest)
+		print("    Expected: ", expected_rest)
 		return false
+
+	for node_data in expected_nodes:
+		if not loaded_nodes.has(node_data):
+			print("  [FAIL] An original lake_crossing resource node is missing or altered: ", node_data)
+			print("    Loaded nodes: ", loaded_nodes)
+			return false
 
 	# All 8 original bundled maps still present (the const had exactly 8) -
 	# "at least 8" rather than "exactly 8" since B8 has since added more
@@ -854,7 +877,8 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 			print("  [FAIL] Map '", id, "' failed validation after loading from JSON: ", errors)
 			return false
 
-	print("  [PASS] lake_crossing deep-equals the old const's exact values; every bundled map loads from JSON and validates clean.")
+	print("  [PASS] lake_crossing deep-equals the old const's exact values (all %d original resource nodes intact, %d total now); every bundled map loads from JSON and validates clean."
+		% [expected_nodes.size(), loaded_nodes.size()])
 	return true
 
 func test_b3_hand_broken_json_map_hard_fails_with_a_useful_message() -> bool:

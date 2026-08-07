@@ -1,5 +1,18 @@
 extends StaticBody3D
-# Harvestable map resource node. resource_type: "metal" | "crystal"
+# One harvestable collectible: a rock, a crystal cluster, a tree, a well.
+#
+# WHAT CHANGED, 2026-08-07. These used to BE the deposit - one node at one
+# coordinate holding the whole 1,100 units of ore, which made a "field" a single
+# point four trucks queued at and shoved over. They are now the scattered
+# children of resource_field.gd, which spawns them around a centre and replaces
+# them as they are worked out.
+#
+# resource_type is a ResourceCatalog id: "ore" (alias "metal"), "crystal",
+# "lumber" or "oil". Appearance and colour come from the catalog rather than from
+# an if/else chain here, so adding a fifth resource does not mean editing this
+# file.
+
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 
 var resource_type: String = "metal"
 var amount: int = 1000
@@ -24,7 +37,7 @@ var _time_since_harvest: float = REGROW_DELAY # a freshly-spawned full node has 
 var _regrow_accum: float = 0.0
 
 func setup(res_type: String, res_amount: int):
-	resource_type = res_type
+	resource_type = ResourceCatalogScript.canonical(res_type)
 	amount = res_amount
 	start_amount = res_amount
 	add_to_group("resource_nodes")
@@ -33,24 +46,46 @@ func setup(res_type: String, res_amount: int):
 
 	mesh_inst = MeshInstance3D.new()
 	var mat = StandardMaterial3D.new()
-	if resource_type == "crystal":
-		var prism = PrismMesh.new()
-		prism.size = Vector3(1.6, 2.2, 1.6)
-		mesh_inst.mesh = prism
-		mat.albedo_color = Color(0.5, 0.85, 1.0, 0.85)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.emission_enabled = true
-		mat.emission = Color(0.3, 0.6, 1.0)
-		mat.emission_energy_multiplier = 0.7
-		mesh_inst.position = Vector3(0, 1.1, 0)
-	else:
-		var sphere = SphereMesh.new()
-		sphere.radius = 1.2
-		sphere.height = 1.6
-		mesh_inst.mesh = sphere
-		mat.albedo_color = Color(0.55, 0.42, 0.28)
-		mat.roughness = 0.9
-		mesh_inst.position = Vector3(0, 0.6, 0)
+	mat.albedo_color = ResourceCatalogScript.color(resource_type)
+	match resource_type:
+		"crystal":
+			var prism = PrismMesh.new()
+			prism.size = Vector3(1.6, 2.2, 1.6)
+			mesh_inst.mesh = prism
+			mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			mat.albedo_color.a = 0.85
+			mat.emission_enabled = true
+			mat.emission = Color(0.3, 0.6, 1.0)
+			mat.emission_energy_multiplier = 0.7
+			mesh_inst.position = Vector3(0, 1.1, 0)
+		"lumber":
+			# A seedling cone, per Chris: a forest stand is "really just a group
+			# of tree seedlings" - the field spawns nine of these, so one of them
+			# is a tree, not a wood.
+			var tree = CylinderMesh.new()
+			tree.top_radius = 0.0
+			tree.bottom_radius = 1.0
+			tree.height = 3.0
+			mesh_inst.mesh = tree
+			mat.roughness = 1.0
+			mesh_inst.position = Vector3(0, 1.5, 0)
+		"oil":
+			# A squat derrick block. Deliberately dark and low - a well reads as
+			# infrastructure sitting on the ground, not as a mineral growing out
+			# of it, which is what says "neutral, and worth taking".
+			var derrick = BoxMesh.new()
+			derrick.size = Vector3(1.8, 2.6, 1.8)
+			mesh_inst.mesh = derrick
+			mat.metallic = 0.6
+			mat.roughness = 0.4
+			mesh_inst.position = Vector3(0, 1.3, 0)
+		_:
+			var sphere = SphereMesh.new()
+			sphere.radius = 1.2
+			sphere.height = 1.6
+			mesh_inst.mesh = sphere
+			mat.roughness = 0.9
+			mesh_inst.position = Vector3(0, 0.6, 0)
 	mesh_inst.material_override = mat
 	add_child(mesh_inst)
 
@@ -75,8 +110,8 @@ func _update_label():
 		label.text = "DEPLETED"
 		label.modulate = Color(0.5, 0.5, 0.5)
 	else:
-		label.text = "%s: %d" % ["CRYSTAL" if resource_type == "crystal" else "METAL", amount]
-		label.modulate = Color(0.5, 0.85, 1.0) if resource_type == "crystal" else Color(0.9, 0.75, 0.5)
+		label.text = "%s: %d" % [ResourceCatalogScript.label(resource_type), amount]
+		label.modulate = ResourceCatalogScript.color(resource_type)
 
 func _update_visual_scale():
 	if is_instance_valid(mesh_inst) and start_amount > 0:

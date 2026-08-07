@@ -25,6 +25,14 @@ const DRAW_PER_LINE := 20.0
 const TRIP_OVERHEAD_SECONDS := 4.1
 const TARGET_HARVESTERS := 4
 
+# Credits per raw unit of cargo, averaged over what harvesters actually choose to
+# gather. NOT 1.0: the four resources are worth 1.0 to 4.0 credits each and
+# value-weighted node selection deliberately biases trucks toward the expensive
+# ones, so a hopper of cargo is worth more than its size. Measured at 1.375 by
+# tools/probe_economy_balance.gd on open_plains; it is a map property, since it
+# depends on what is within reach of a base.
+const MEAN_CREDITS_PER_CARGO := 1.375
+
 
 # The load-bearing fact the whole balance rests on: build_time_for_cost() is
 # proportional to cost, and the drip-feed spends the whole cost across exactly
@@ -88,15 +96,14 @@ func test_four_harvesters_meet_the_stated_target() -> bool:
 	var capacity: float = float(fsm.capacity)
 	var cycles: float = ceil(capacity / float(fsm._chunk_size()))
 	var trip: float = cycles * HarvesterFSMScript.HARVEST_TIME + TRIP_OVERHEAD_SECONDS
-	# Cost-units, not raw cargo: a load of crystal is worth double a load of ore
-	# against the same build cost, and the bundled maps are a mix. The live probe
-	# measures ~1.6 cost-units per unit of cargo; using 1.0 here would understate
-	# income, so the honest conservative move is to assert against RAW cargo and
-	# let the real mix be upside.
-	var income: float = (capacity / trip) * float(TARGET_HARVESTERS)
+	# Converted to credits, because that is what a production queue spends. A
+	# hopper of oil and a hopper of lumber are the same cargo and four times apart
+	# in value, so asserting against raw cargo would be asserting against the one
+	# quantity the economy does not care about.
+	var income: float = (capacity / trip) * float(TARGET_HARVESTERS) * MEAN_CREDITS_PER_CARGO
 
 	var ok := true
-	print("    capacity %d, chunk %d, %d cycles, trip %.1fs -> %.1f cargo/s from %d harvesters"
+	print("    capacity %d, chunk %d, %d cycles, trip %.1fs -> %.1f credits/s from %d harvesters"
 		% [fsm.capacity, fsm._chunk_size(), int(cycles), trip, income, TARGET_HARVESTERS])
 
 	# One line: must GROW, and not marginally - a rounding-error surplus is not a

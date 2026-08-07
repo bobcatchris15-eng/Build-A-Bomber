@@ -3904,11 +3904,41 @@ const BELT_DRIVE_RADIUS := 0.46 # sprocket / idler radius
 const BELT_ROAD_DROP := 0.38    # road-wheel centre below the sprocket centreline
 const BELT_ROAD_RADIUS := 0.22  # road-wheel radius
 
+static func _deform_tread_loop_mesh(source_mesh: Mesh, front_z: float, rear_z: float, radius_scale: float, width_scale: float, belt_scale: float) -> ArrayMesh:
+	var target_wheel_bottom_y: float = -(BELT_ROAD_DROP + BELT_ROAD_RADIUS) * belt_scale
+	var new_mesh = ArrayMesh.new()
+	for surface_idx in range(source_mesh.get_surface_count()):
+		var mdt = MeshDataTool.new()
+		var err = mdt.create_from_surface(source_mesh, surface_idx)
+		if err != OK:
+			continue
+		for i in range(mdt.get_vertex_count()):
+			var v = mdt.get_vertex(i)
+			var new_z: float = v.z
+			if v.z <= -1.0:
+				# Front end arc: center at local z = -1.0. Pin center to front_z, scale radius curve by radius_scale.
+				new_z = front_z + (v.z + 1.0) * radius_scale
+			elif v.z >= 1.0:
+				# Rear end arc: center at local z = +1.0. Pin center to rear_z, scale radius curve by radius_scale.
+				new_z = rear_z + (v.z - 1.0) * radius_scale
+			else:
+				# Middle span: stretch Z to connect front_z and rear_z.
+				new_z = v.z * (abs(front_z))
+
+			var new_y: float = v.y * radius_scale
+			if v.y < -0.2:
+				# Bottom run: adjust flat middle section so its top inner surface touches the bottom of the road wheels
+				var y_bottom_flat: float = target_wheel_bottom_y + (v.y - (-0.62)) * belt_scale
+				var blend: float = clamp((abs(v.z) - 0.55) / 0.45, 0.0, 1.0)
+				new_y = lerp(y_bottom_flat, new_y, blend)
+
+			var new_x: float = v.x * width_scale
+			mdt.set_vertex(i, Vector3(new_x, new_y, new_z))
+		mdt.commit_to_surface(new_mesh)
+	return new_mesh
+
 static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
 	var width = tweaks.get("tread_width", tweaks.get("width", tweaks.get("size", 1.0)))
-	# Fixed at 3 - Chris's ask, no longer a user tweak (was road_wheel_count,
-	# 3-8 via a dedicated slider; removed along with the slider/catalog entry
-	# in stat_calculator.gd/module_catalog.gd/module_placer.gd/module_data.gd).
 	var road_wheels = 5
 	var sprocket = tweaks.get("drive_sprocket", true)
 
@@ -3918,36 +3948,10 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	var gearbox_mesh = _part("wheel_gearbox")
 	var driveshaft_mesh = _part("wheel_driveshaft")
 
-	# Snap the tread's overall length to the actual hull it's mounted on
-	# (target_length, passed in from module_placer.gd's update_locomotion() -
-	# the tread's own catalog base_size.z is just a small placeholder with
-	# no relationship to any specific hull, which is why the loop rendered
-	# as a small oval regardless of hull size before this). Height scales up
-	# PROPORTIONATELY from that same length ratio so the tread keeps its
-	# authored shape instead of stretching into a thin snake on a long hull
-	# or a squat blob on a short one. Sprockets end up centered at the
-	# hull's own front/rear ends this way (extending past the hull is fine,
-	# per Chris).
-	#
-	# actual_size.x deliberately does NOT fold in the tread_width tweak
-	# (`width`) - it used to, which meant every X-axis size/position derived
-	# from it (outboard_x, and via that sprocket_scale/wheel_scale/
-	# belt_center_x) drifted with tread_width too, so dragging the Tread
-	# Track Width slider visibly resized and repositioned the sprockets and
-	# road wheels right along with the belt (Chris: only the belt loop
-	# itself should widen). `width` is applied ONLY to the loop's own
-	# lateral scale below now - everything else here is sized purely off
-	# the hull.
 	var target_length = tweaks.get("target_length", base_size.z)
 	var length_scale = target_length / base_size.z
 	var actual_size = Vector3(base_size.x * length_scale, base_size.y * length_scale, target_length)
 
-	# Real rework, not a layout tweak: the belt is now a genuine closed
-	# LOOP (tread_belt_loop, authored via bmesh.ops.spin in build_meshes.py)
-	# that wraps all the way around the road-wheel/sprocket row, shaped as
-	# an "inverted trapezoid" like a real modern track - Chris's ask - not a
-	# plain symmetric oval: the top run is a simple straight line tangent to
-	# both sprockets, but the bottom run dips DOWN by authored_drop between
 	# two diagonal transitions, so the road wheels ride notably lower than
 	# the sprocket axle line. Because the authored mesh is asymmetric
 	# (top = +radius, bottom = -(radius+drop)), the loop's local origin is
@@ -4029,20 +4033,19 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# in the hull." So the belt is pushed back out by the same amount the
 	# station came in, and now rides just PROUD of the sprocket's outer face
 	# rather than centred half a sprocket-width inboard of it.
-	const BELT_OUTBOARD_NUDGE := 0.16
-	var belt_center_x = outboard_x - sprocket_width_authored * 0.5 * sprocket_scale 		+ actual_size.x * BELT_OUTBOARD_NUDGE
+	var belt_center_x = outboard_x - sprocket_width_authored * 0.5 * sprocket_scale
+	var front_z: float = -BELT_HALF_SPAN * belt_scale
+	var rear_z: float = BELT_HALF_SPAN * belt_scale
+	# Match radius of treads radius curves to wheels + 5% (1.05 * sprocket_radius)
+	var sprocket_radius: float = BELT_DRIVE_RADIUS * belt_scale
+	var tread_arc_radius: float = sprocket_radius * 1.05
+	var radius_scale_val: float = tread_arc_radius / 0.45
+	var width_scale_val: float = sprocket_scale * width
 
 	var loop: MeshInstance3D
 	if loop_mesh:
-		loop = _mesh_inst(loop_mesh, base_color)
-		# `width` (tread_width tweak) applied ONLY here, on top of the
-		# sprocket-covering baseline above - this is the one place tread_width
-		# is allowed to affect the tracked_treads assembly (Chris: "just the
-		# tread loop should get wider, the sprockets and wheels should stay
-		# as is"). The loop grows/shrinks symmetrically around belt_center_x
-		# (fixed, width-independent) rather than shifting it.
-		# Uniform on height and length; width is the one axis tread_width owns.
-		loop.scale = Vector3(sprocket_scale * width, belt_scale, belt_scale)
+		var deformed_loop_mesh = _deform_tread_loop_mesh(loop_mesh, front_z, rear_z, radius_scale_val, width_scale_val, belt_scale)
+		loop = _mesh_inst(deformed_loop_mesh, base_color)
 	else:
 		loop = MeshInstance3D.new()
 		var loop_box = BoxMesh.new()
@@ -4096,29 +4099,10 @@ static func _build_tracked_treads(parent_node: Node3D, base_size: Vector3, base_
 	# _repeat_along_axis), so half of actual_size.z puts them at +-25% of
 	# hull length, i.e. the center 50% - sized off THIS span first so
 	# wheel_radius_target doesn't shrink from the inward pull below.
-	var wheel_span = BELT_HALF_SPAN * 2.0 * belt_scale * 0.62
-	var spacing = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
-	# Sized and seated from the AUTHORED belt profile, not independently.
-	# tread_belt_loop is now a real track trapezoid (see _track_path in
-	# tools/blender/build_locomotion_rework.py): sprockets on the centreline,
-	# road wheels a fixed drop below it, belt bottom another road-radius below
-	# that. Choosing the road wheel radius by its own rule left the wheels
-	# hanging BELOW the belt instead of riding inside it - Chris's report - so
-	# both radius and seat now come from the same constants the mesh was built
-	# with, and the two cannot disagree.
-
+	var wheel_span = BELT_HALF_SPAN * 2.0 * belt_scale * 0.55
 	var wheel_radius_target = BELT_ROAD_RADIUS * belt_scale
-	# Not multiplied by `width` (tread_width) - same reasoning as
-	# sprocket_scale above, road wheels stay fixed size when the belt widens.
 	var wheel_scale = wheel_radius_target / 0.45
-
-	# Pull the outer wheels further in by half their own diameter (Chris's
-	# ask, on top of the center-50%-of-hull-length span above) - shrinks the
-	# span used for POSITIONING only, not the span used to size the wheels
-	# above, so this doesn't shrink the wheels themselves, just tucks them in
-	# closer together.
-	wheel_span = max(0.0, wheel_span - wheel_radius_target * 2.0)
-	spacing = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
+	var spacing = wheel_span / float(max(1, road_wheels - 1)) if road_wheels > 1 else target_radius
 
 	# Gearbox + driveshaft behind each road wheel, angled and sized to
 	# actually intersect the wheel - Chris's ask. The earlier attempt
