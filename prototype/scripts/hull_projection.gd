@@ -53,7 +53,7 @@ const OFFSET_MIN: float = 0.002
 # a structural frame bolted UNDER the hull, not hull skin, so rivets should not
 # grow out of its cross-members and unit markings should not project onto its
 # belly plate - the same reasoning that excludes placed modules.
-const EXCLUDED_NODES := ["HullDecals", "HullGreebles", "ArmorGreebles", "RunningGear"]
+const EXCLUDED_NODES := ["HullDecals", "HullGreebles", "RunningGear"]
 
 # The meta every PLACED MODULE carries (set by module_placer.gd and
 # blueprint_manager.gd before they parent it to the hull). Modules are children

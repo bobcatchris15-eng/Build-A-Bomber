@@ -688,13 +688,9 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	mesh_inst.position = phys_mesh.position
 	hull.add_child(mesh_inst)
 
-	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
+	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, faction_name)
 	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
-	# Armour-MATERIAL greebles, alongside the faction ones. Same call site and
-	# same size argument, because both want the hull's real post-scale extent;
-	# they land in separate containers ("HullGreebles" / "ArmorGreebles") so
-	# neither can clobber the other's rebuild.
-	ArmorGreeblesScript.apply(hull, armor_mat_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
+	ArmorGreeblesScript.apply(hull, "", catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	
 	# Re-create Hull's CollisionShape3D (only in designer)
@@ -848,16 +844,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# Set scale
 		var sc_dict = mod.get("scale", {"x": 1.0, "y": 1.0, "z": 1.0})
 		var mod_scale = Vector3(sc_dict.x, sc_dict.y, sc_dict.z)
-		if category == "structural":
-			# Scale isolation on the way back in, mirroring the save side and
-			# gizmo_3d.gd. Assigning node.scale here would stretch the
-			# fixed-size authored hardware, so a design that looked right in
-			# the Lab would come back from disk with smeared bolt heads and
-			# brackets - the resize has to go through the rebuild instead.
-			new_module.scale = Vector3.ONE
-			new_module.set_meta("struct_scale", mod_scale)
-		else:
-			new_module.scale = mod_scale
+		new_module.scale = mod_scale
 		m_data.scale_multiplier = mod_scale
 		new_module.set_meta("module_data", m_data)
 		
@@ -888,24 +875,6 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# the housing only exists because it is rebuilt here). For a structural
 		# piece it is additionally what applies the struct_scale set above.
 		VisualBuilder.rebuild_visual(new_module)
-
-		if category == "structural" and is_designer:
-			# The collider built above was sized from the raw catalog size,
-			# which is only right for an unresized piece - it has to track
-			# struct_scale the same way gizmo_3d.gd keeps it in sync during a
-			# live drag, or a stretched piece loads back with a click target
-			# the size it used to be.
-			var struct_target = mod_catalog_data.get("size", Vector3.ONE) * mod_scale
-			for sb in new_module.get_children():
-				if not (sb is StaticBody3D):
-					continue
-				sb.position = Vector3(0, struct_target.y / 2.0, 0)
-				for shp in sb.get_children():
-					if shp is CollisionShape3D and shp.shape is BoxShape3D:
-						if not shp.shape.resource_local_to_scene:
-							shp.shape = shp.shape.duplicate()
-						shp.shape.size = struct_target
-						shp.position = Vector3.ZERO
 
 		# Re-apply chirality AFTER rebuild_visual, which recreates the very
 		# children the reflection is applied to. Kept in sync with

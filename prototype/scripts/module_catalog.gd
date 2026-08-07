@@ -13,65 +13,28 @@ const GlobalConfigScript = preload("res://scripts/global_config.gd")
 # hull_scale affected nothing but mounting area - both were solved dominant
 # choices, the exact Forged-Battalion failure DESIGN_VISION.md warns about.
 
-const ARMOR_MATERIAL_HP_MULT = {
-	"hardened_steel": 1.0, "reactive_armor": 1.3, "ablative_ceramic": 1.6, "energy_shielding": 2.0,
-}
-const ARMOR_MATERIAL_WEIGHT_MULT = {
-	"hardened_steel": 1.0, "reactive_armor": 1.2, "ablative_ceramic": 0.9, "energy_shielding": 0.5,
-}
-# Per-material cost multipliers - the advanced materials finally have a
-# price. energy_shielding is deliberately crystal-hungry (3x): it keeps the
-# best HP-per-weight in the roster, but now bottlenecks the scarcer
-# resource instead of being a free strict upgrade.
-const ARMOR_MATERIAL_COST_MULT = {
-	"hardened_steel": {"metal": 1.0, "crystal": 1.0},
-	"reactive_armor": {"metal": 1.3, "crystal": 1.6},
-	"ablative_ceramic": {"metal": 1.25, "crystal": 1.9},
-	"energy_shielding": {"metal": 1.5, "crystal": 3.0},
-}
-
-# Hull scale handle bounds (per axis). RTS_Unit_Designer_Concept.md always
-# specced bounded scaling ("the size class dictates the upper and lower
-# bounds of this scaling") - the gizmo previously only clamped the low end,
-# so an unbounded max-size hull was free mounting real estate.
 const HULL_SCALE_MIN: float = 0.5
 const HULL_SCALE_MAX: float = 2.0
 
 static func get_hull_volume_factor(hull_scale: Vector3) -> float:
 	return hull_scale.x * hull_scale.y * hull_scale.z
 
-# Sub-linear volume scaling, same GlobalConfig factors modules already use -
-# a 2x-per-axis hull (8x volume) gets ~6.6x HP, ~8x weight, ~7.3x cost.
 static func _volume_scaled(base: float, hull_scale: Vector3, factor: float) -> float:
 	var v = get_hull_volume_factor(hull_scale)
 	return base + base * (v - 1.0) * factor
 
-# Armor mass model: roughly half a hull's mass is structure (unaffected by
-# the armor sliders), half is armor (scales with thickness x material
-# density, and is what the Industrialists' armor_weight_mult discounts).
-static func compute_hull_max_hp(hull_type_id: String, thickness: float, material: String, hull_scale: Vector3 = Vector3.ONE) -> float:
+static func compute_hull_max_hp(hull_type_id: String, _thickness: float = 1.0, _material: String = "hardened_steel", hull_scale: Vector3 = Vector3.ONE) -> float:
 	var base = get_module_data(hull_type_id).get("hp", 400.0)
-	var hp_mult = ARMOR_MATERIAL_HP_MULT.get(material, 1.0)
-	return _volume_scaled(base, hull_scale, GlobalConfigScript.hp_scale_factor) * thickness * hp_mult
+	return _volume_scaled(base, hull_scale, GlobalConfigScript.hp_scale_factor)
 
-static func compute_hull_weight(hull_type_id: String, thickness: float, material: String, hull_scale: Vector3 = Vector3.ONE, armor_weight_mult: float = 1.0) -> float:
+static func compute_hull_weight(hull_type_id: String, _thickness: float = 1.0, _material: String = "hardened_steel", hull_scale: Vector3 = Vector3.ONE, _armor_weight_mult: float = 1.0) -> float:
 	var base = get_module_data(hull_type_id).get("weight", 250.0)
-	var wt_mult = ARMOR_MATERIAL_WEIGHT_MULT.get(material, 1.0)
-	var armor_fraction = 0.5 + 0.5 * thickness * wt_mult * armor_weight_mult
-	return _volume_scaled(base, hull_scale, GlobalConfigScript.weight_scale_factor) * armor_fraction
+	return _volume_scaled(base, hull_scale, GlobalConfigScript.weight_scale_factor)
 
-# Armor cost curve is deliberately SUPERLINEAR in thickness (t^1.5): each
-# extra point of threshold/HP costs more than the last, so "max the slider"
-# stops being the automatic answer (Damage_And_Armor_Model.md's own
-# "drastically adding to weight and resource cost", implemented at last).
-static func compute_hull_cost(hull_type_id: String, thickness: float, material: String, hull_scale: Vector3 = Vector3.ONE) -> Vector2i:
+static func compute_hull_cost(hull_type_id: String, _thickness: float = 1.0, _material: String = "hardened_steel", hull_scale: Vector3 = Vector3.ONE) -> Vector2i:
 	var data = get_module_data(hull_type_id)
-	var mat_mult = ARMOR_MATERIAL_COST_MULT.get(material, ARMOR_MATERIAL_COST_MULT["hardened_steel"])
-	var armor_curve = 0.5 + 0.5 * pow(max(thickness, 0.0), 1.5)
 	var m = _volume_scaled(float(data.get("metal", 100)), hull_scale, GlobalConfigScript.cost_scale_factor)
 	var c = _volume_scaled(float(data.get("crystal", 0)), hull_scale, GlobalConfigScript.cost_scale_factor)
-	m *= 0.5 + 0.5 * armor_curve * mat_mult.metal
-	c *= 0.5 + 0.5 * armor_curve * mat_mult.crystal
 	return Vector2i(int(round(m)), int(round(c)))
 
 # Merged catalog cache (FABLE_REVIEW.md 3.5): get_catalog() used to rebuild
@@ -1773,70 +1736,6 @@ static func _build_catalog_literal() -> Dictionary:
 			"color": Color(0.32, 0.3, 0.24),
 			"traits": ["ground_contact", "amphibious"]
 		},
-
-		# --- STRUCTURAL PIECES (hull-space extenders) ---------------------------
-		# Modules that provide attachment surfaces for other modules. Placed on
-		# the hull (or on another structural piece), they carry their own
-		# collision body on layer 16 (SURFACE_COLLISION_LAYER) so the
-		# placement raycast can snap new modules onto them — effectively
-		# extending the mounting area outward from the hull. They contribute no
-		# special combat stats but do have weight and cost, so there's a
-		# meaningful tradeoff: heavier-than-air vehicles in particular lose
-		# payload capacity to structural over-extension.
-		"structural_block": {
-			"name": "Structure Block",
-			"category": "structural",
-			"hp": 200.0, "weight": 80.0,
-			"metal": 20, "crystal": 0, "dps": 0.0,
-			"size": Vector3(2.0, 2.0, 2.0),
-			"color": Color(0.35, 0.30, 0.25),
-			"hull": true
-		},
-		"structural_dome": {
-			"name": "Dome Turret Base",
-			"category": "structural",
-			"hp": 150.0, "weight": 60.0,
-			"metal": 15, "crystal": 5, "dps": 0.0,
-			"size": Vector3(2.5, 1.5, 2.5),
-			"color": Color(0.42, 0.36, 0.30),
-			"hull": true
-		},
-		"structural_slab": {
-			"name": "Armor Slab",
-			"category": "structural",
-			"hp": 300.0, "weight": 120.0,
-			"metal": 30, "crystal": 0, "dps": 0.0,
-			"size": Vector3(3.0, 0.5, 2.0),
-			"color": Color(0.32, 0.28, 0.25),
-			"hull": true
-		},
-		"structural_wedge": {
-			"name": "Wedge Breech",
-			"category": "structural",
-			"hp": 180.0, "weight": 70.0,
-			"metal": 25, "crystal": 0, "dps": 0.0,
-			"size": Vector3(2.0, 1.0, 3.0),
-			"color": Color(0.38, 0.32, 0.28),
-			"hull": true
-		},
-		"structural_girder": {
-			"name": "Support Girder",
-			"category": "structural",
-			"hp": 100.0, "weight": 40.0,
-			"metal": 10, "crystal": 0, "dps": 0.0,
-			"size": Vector3(0.4, 0.4, 4.0),
-			"color": Color(0.30, 0.28, 0.22),
-			"hull": true
-		},
-		"structural_i_beam": {
-			"name": "I-Beam Frame",
-			"category": "structural",
-			"hp": 120.0, "weight": 50.0,
-			"metal": 15, "crystal": 0, "dps": 0.0,
-			"size": Vector3(0.6, 0.6, 4.0),
-			"color": Color(0.33, 0.30, 0.25),
-			"hull": true
-		},
 	}
 
 	# Fold the fire profiles in so `get_module_data(id).fire_rate` works
@@ -1945,13 +1844,6 @@ const MODULE_FLAVOR = {
 	"naval_propeller": "Water only. On land it is ballast with a maintenance schedule.",
 	"buoyant_envelope": "Lighter than air, slower than everything, and a generously sized target.",
 	"screw_drive": "Amphibious augers. Crosses land and water equally badly, which counts as versatility.",
-	# Structural
-	"structural_block": "Structural filler. Holds things apart at the distance you specified.",
-	"structural_dome": "Turret base. Rotates. That is the entire specification.",
-	"structural_slab": "Flat plate. Stops things. Stops fewer things after it has stopped some things.",
-	"structural_wedge": "Angled breech. Deflects hits that arrive at the angle you were hoping for.",
-	"structural_girder": "Load-bearing span. Rated for loads well beyond anything you should be mounting.",
-	"structural_i_beam": "Frame member. Unglamorous, load-bearing, and quietly holding your design together.",
 }
 
 # Empty string when a module has no authored line - callers append
@@ -2302,13 +2194,6 @@ const MODULE_ROLES = {
 	"repair_array": "Support",
 	"resource_harvester": "Support",
 	"sensor_suite": "Support",
-
-	"structural_girder": "Structural",
-	"structural_i_beam": "Structural",
-	"structural_dome": "Structural",
-	"structural_wedge": "Structural",
-	"structural_block": "Structural",
-	"structural_slab": "Structural",
 }
 
 # Display order for the module tab's drawers. Roughly "things that shoot" ->
@@ -2316,7 +2201,7 @@ const MODULE_ROLES = {
 # order a build actually gets assembled in.
 const MODULE_ROLE_ORDER = [
 	"Direct-Fire Guns", "Energy & Electromagnetic", "Indirect Fire", "Missiles",
-	"Point Defense", "Deployables", "Armor", "Power", "Support", "Structural",
+	"Point Defense", "Deployables", "Armor", "Power", "Support",
 ]
 
 # Fallback for anything MODULE_ROLES doesn't name (a mod, or a part added here
@@ -2326,7 +2211,6 @@ const ROLE_BY_CATEGORY = {
 	"weapon": "Direct-Fire Guns",
 	"armor": "Armor",
 	"generator": "Power",
-	"structural": "Structural",
 	"module": "Support",
 }
 

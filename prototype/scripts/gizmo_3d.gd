@@ -321,40 +321,6 @@ func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
 			if is_instance_valid(child):
 				var start_pos = child_start_positions[child]
 				child.position = start_pos * scale_factor
-	elif node.has_meta("module_data") and node.get_meta("module_data").category == "structural":
-		# Structural pieces get SCALE ISOLATION, same as the Hull above and
-		# for the same reason. Writing node.scale here stretched the module's
-		# whole subtree, which since the structural rebuild means stretching
-		# the fixed-size authored hardware (bolt heads, brackets, splice
-		# collars) that exists specifically so it WON'T stretch - a girder
-		# pulled to 4x length came out with 4x-long bolts. Instead the resize
-		# is stored as a multiplier and the body is rebuilt at the new size,
-		# so the detail re-instances at its authored size and the COUNT grows.
-		# This is what makes these behave like hull-builder primitives.
-		var data = node.get_meta("module_data")
-		node.scale = Vector3.ONE
-		node.set_meta("struct_scale", new_scale)
-		data.scale_multiplier = new_scale
-		VisualBuilder.rebuild_visual(node)
-
-		# The colliders are children, so they used to be resized for free by
-		# the node scale that no longer happens. Both have to be driven by
-		# hand now: the layer-2 body is the click target, and the layer-16
-		# StructuralSurface is the mounting area other modules snap onto -
-		# a stale one there means new modules snap to where the piece used
-		# to end.
-		var catalog_size: Vector3 = ModuleCatalogScript.get_module_data(data.type_id).get("size", Vector3.ONE)
-		var target = Vector3(catalog_size.x * new_scale.x, catalog_size.y * new_scale.y, catalog_size.z * new_scale.z)
-		for child in node.get_children():
-			if not (child is StaticBody3D):
-				continue
-			child.position = Vector3(0, target.y / 2.0, 0)
-			for shape_node in child.get_children():
-				if shape_node is CollisionShape3D and shape_node.shape is BoxShape3D:
-					if not shape_node.shape.resource_local_to_scene:
-						shape_node.shape = shape_node.shape.duplicate()
-					shape_node.shape.size = target
-					shape_node.position = Vector3.ZERO
 	else:
 		# Standard module scaling
 		node.scale = new_scale

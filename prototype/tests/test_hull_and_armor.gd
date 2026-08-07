@@ -73,8 +73,8 @@ func test_hull_spec_flyout_round_trip() -> bool:
 		return false
 
 	var widgets: Array = stats._hull_spec_widgets()
-	if widgets.size() != 6:
-		print("  [FAIL] Expected 6 hull-spec widgets, got ", widgets.size())
+	if widgets.size() != 2:
+		print("  [FAIL] Expected 2 hull-spec widgets, got ", widgets.size())
 		scene.queue_free()
 		return false
 	for w in widgets:
@@ -100,8 +100,8 @@ func test_hull_spec_flyout_round_trip() -> bool:
 			print("  [FAIL] Widget ", w.name, " went nowhere on open.")
 			scene.queue_free()
 			return false
-	if not flyout.is_ancestor_of(stats.armor_mat_btn):
-		print("  [FAIL] Armor material dropdown did not move into the flyout.")
+	if not flyout.is_ancestor_of(stats.faction_btn):
+		print("  [FAIL] Faction dropdown did not move into the flyout.")
 		scene.queue_free()
 		return false
 
@@ -180,37 +180,13 @@ func test_faction_catalog_and_hull_material() -> bool:
 	# tints (default white), kept live only for building.gd's team-color
 	# override and a future damage-status overlay, NOT faction paint. The
 	# real per-faction differentiator to check is albedo_tex.
-	var mat_a = HullMaterialBuilder.build_hull_material("hardened_steel", "industrialists")
-	var mat_b = HullMaterialBuilder.build_hull_material("hardened_steel", "technocrats")
+	var mat_a = HullMaterialBuilder.build_hull_material("industrialists")
+	var mat_b = HullMaterialBuilder.build_hull_material("technocrats")
 	if mat_a.get_shader_parameter("albedo_tex") == mat_b.get_shader_parameter("albedo_tex"):
-		print("  [FAIL] Two different factions with the same armor material should get different baked paint textures")
-		return false
-	if mat_a.get_shader_parameter("metallic") != mat_b.get_shader_parameter("metallic") or mat_a.get_shader_parameter("roughness") != mat_b.get_shader_parameter("roughness"):
-		print("  [FAIL] Two different factions with the SAME armor material should share identical metallic/roughness (armor character is faction-independent)")
+		print("  [FAIL] Two different factions should get different baked paint textures")
 		return false
 	if mat_a.shader != mat_b.shader:
 		print("  [FAIL] Every faction should share the exact same shader resource (same mesh models, texture-only differentiation - no per-faction shader variants)")
-		return false
-
-	# Same faction, two different armor materials - paint texture should
-	# stay identical (ownership doesn't change), metallic/roughness should
-	# differ.
-	var mat_c = HullMaterialBuilder.build_hull_material("ablative_ceramic", "industrialists")
-	if mat_a.get_shader_parameter("albedo_tex") != mat_c.get_shader_parameter("albedo_tex"):
-		print("  [FAIL] The same faction with a different armor material should keep the same paint texture")
-		return false
-	if mat_a.get_shader_parameter("roughness") == mat_c.get_shader_parameter("roughness"):
-		print("  [FAIL] hardened_steel vs. ablative_ceramic should have different roughness")
-		return false
-
-	# energy_shielding should carry shield_mode=1.0 and reduced alpha,
-	# regardless of faction.
-	var shield_mat = HullMaterialBuilder.build_hull_material("energy_shielding", "glacier_syndicate")
-	if shield_mat.get_shader_parameter("shield_mode") < 0.5:
-		print("  [FAIL] energy_shielding should set shield_mode >= 0.5")
-		return false
-	if shield_mat.get_shader_parameter("alpha_base") >= 1.0:
-		print("  [FAIL] energy_shielding should be translucent (alpha_base < 1.0)")
 		return false
 
 	# Bayou Irregulars' camo is the one faction that blends accent into

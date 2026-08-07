@@ -55,18 +55,18 @@ func get_weight() -> float:
 	
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "dish_aperture", "charge_time", "focal_length", "wheel_size", "tread_width", "blade_length", "leg_length", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "drum_width", "drum_diameter", "wheels_per_axle", "foot_size", "cutter_head", "arm_reach", "projector_diameter", "optic_aperture", "mast_extension", "radar_size", "busbar_gauge", "reactor_length", "cooling_radiator", "bar_spacing", "standoff_distance", "air_gap", "foam_density", "skirt_diameter", "plenum_pressure", "field_strength", "strut_height", "intake_size", "front_axle_size", "arm_length"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "dish_aperture", "charge_time", "focal_length", "wheel_size", "tread_width", "blade_length", "leg_length", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "drum_width", "drum_diameter", "wheels_per_axle", "foot_size", "cutter_head", "arm_reach", "projector_diameter", "optic_aperture", "mast_extension", "radar_size", "busbar_gauge", "reactor_length", "cooling_radiator", "skirt_diameter", "plenum_pressure", "field_strength", "strut_height", "intake_size", "front_axle_size", "arm_length"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				weight *= val
 		elif tweak_name == "multi_barrel" and val == true:
 			weight *= 2.0
 		elif tweak_name == "barrel_count":
 			weight *= (val / 6.0)
-		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "engine_count", "array_faces", "layer_count", "tile_subdivision", "nozzle_count", "foil_count"]:
+		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "engine_count", "array_faces", "nozzle_count", "foil_count"]:
 			weight *= (val / 2.0)
 		elif tweak_name in ["grid_size", "num_axles", "blade_count", "rotor_units", "leg_count", "pad_count", "coil_count", "bank_capacity", "bogie_count", "bogie_pairs", "lift_fan_count", "plate_count"]:
 			weight *= (val / 4.0)
-		elif tweak_name in ["afterburner", "duct", "reinforcement_ribs", "stabilizer_ring", "reverser", "kort_nozzle"] and val == true:
+		elif tweak_name in ["afterburner", "duct", "stabilizer_ring", "reverser", "kort_nozzle"] and val == true:
 			weight *= 1.25
 		elif tweak_name == "launch_catapult":
 			weight *= val
@@ -101,7 +101,7 @@ func get_cost() -> Vector2i:
 
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "dish_aperture", "charge_time", "focal_length", "wheel_size", "tread_width", "blade_length", "leg_length", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "drum_width", "drum_diameter", "wheels_per_axle", "foot_size", "cutter_head", "arm_reach", "projector_diameter", "optic_aperture", "mast_extension", "radar_size", "busbar_gauge", "reactor_length", "cooling_radiator", "bar_spacing", "standoff_distance", "air_gap", "foam_density", "skirt_diameter", "plenum_pressure", "field_strength", "strut_height", "intake_size", "front_axle_size", "arm_length"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "dish_aperture", "charge_time", "focal_length", "wheel_size", "tread_width", "blade_length", "leg_length", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "drum_width", "drum_diameter", "wheels_per_axle", "foot_size", "cutter_head", "arm_reach", "projector_diameter", "optic_aperture", "mast_extension", "radar_size", "busbar_gauge", "reactor_length", "cooling_radiator", "skirt_diameter", "plenum_pressure", "field_strength", "strut_height", "intake_size", "front_axle_size", "arm_length"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				m = int(m * val)
 				c = int(c * val)
@@ -119,13 +119,13 @@ func get_cost() -> Vector2i:
 		elif tweak_name == "barrel_count":
 			m = int(m * (val / 6.0))
 			c = int(c * (val / 6.0))
-		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "engine_count", "array_faces", "layer_count", "tile_subdivision", "nozzle_count", "foil_count"]:
+		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "engine_count", "array_faces", "nozzle_count", "foil_count"]:
 			m = int(m * (val / 2.0))
 			c = int(c * (val / 2.0))
 		elif tweak_name in ["grid_size", "num_axles", "blade_count", "rotor_units", "leg_count", "pad_count", "coil_count", "bank_capacity", "bogie_count", "bogie_pairs", "lift_fan_count", "plate_count"]:
 			m = int(m * (val / 4.0))
 			c = int(c * (val / 4.0))
-		elif tweak_name in ["afterburner", "duct", "reinforcement_ribs", "stabilizer_ring", "reverser", "kort_nozzle"] and val == true:
+		elif tweak_name in ["afterburner", "duct", "stabilizer_ring", "reverser", "kort_nozzle"] and val == true:
 			m = int(m * 1.25)
 			c = int(c * 1.25)
 		elif tweak_name == "launch_catapult":

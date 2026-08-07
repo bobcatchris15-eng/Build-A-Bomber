@@ -374,22 +374,6 @@ const TWEAK_SPECS = {
 		{"name": "reactor_length", "label": "Reactor Core Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "cooling_radiator", "label": "Cooling Radiator Fins", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
-	"armor_plating": [
-		{"name": "plate_angle", "label": "Slope Angle", "min": -30.0, "max": 30.0, "step": 5.0, "default": 0.0},
-		{"name": "reinforcement_ribs", "label": "Waffle Ribs", "type": "bool", "default": false}
-	],
-	"slat_armor": [
-		{"name": "bar_spacing", "label": "Slat Density", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "standoff_distance", "label": "Standoff Distance", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
-	],
-	"spaced_composite": [
-		{"name": "air_gap", "label": "Cavity Standoff Gap", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "layer_count", "label": "Composite Layer Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0}
-	],
-	"ablative_foam": [
-		{"name": "foam_density", "label": "Foam Thickness", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "tile_subdivision", "label": "Tile Grid Size", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0}
-	],
 	# Previously documented in Arsenal_Weapons_List.md but missing from this
 	# dict entirely - drone_carrier rendered zero tweak sliders in the
 	# Design Lab (ENERGY_AND_BALANCE_SPEC.md #3).
@@ -700,48 +684,17 @@ func _ready():
 	hull_spec_stash.visible = false
 	add_child(hull_spec_stash)
 
-	armor_mat_label = Label.new()
-	armor_mat_label.text = "Armor Material"
-	hull_spec_stash.add_child(armor_mat_label)
-
-	armor_mat_btn = OptionButton.new()
-	armor_mat_btn.add_item("Hardened Steel")
-	armor_mat_btn.add_item("Reactive Armor")
-	armor_mat_btn.add_item("Ablative Ceramic")
-	armor_mat_btn.add_item("Energy Shielding")
-	hull_spec_stash.add_child(armor_mat_btn)
-	armor_mat_btn.item_selected.connect(_on_armor_material_selected)
-
 	faction_label = Label.new()
 	faction_label.text = "Faction Selection"
 	hull_spec_stash.add_child(faction_label)
 
 	faction_btn = OptionButton.new()
-	# clip_text - the roster grew from 3 factions to 10, some with longer
-	# names ("The Aerodrome Cartel") than any of the old 3 - without this,
-	# OptionButton auto-sizes to fit its longest item and was just barely
-	# pushing the whole sidebar past its fixed width (caught by the UI
-	# overflow audit test, not just eyeballing it). Still true inside a flyout,
-	# which sizes to its contents just as readily.
 	faction_btn.clip_text = true
 	for fac_id in FactionCatalog.get_ids():
 		faction_btn.add_item(FactionCatalog.get_faction_name(fac_id))
 	faction_btn.name = "FactionDropdown"
 	hull_spec_stash.add_child(faction_btn)
 	faction_btn.item_selected.connect(_on_faction_selected)
-
-	armor_thick_label = Label.new()
-	armor_thick_label.text = "Armor Thickness"
-	hull_spec_stash.add_child(armor_thick_label)
-
-	armor_thick_slider = HSlider.new()
-	armor_thick_slider.min_value = 0.5
-	armor_thick_slider.max_value = 3.0
-	armor_thick_slider.step = 0.1
-	armor_thick_slider.value = 1.0
-	hull_spec_stash.add_child(armor_thick_slider)
-	armor_thick_slider.value_changed.connect(_on_armor_thickness_changed)
-	armor_thick_slider.drag_started.connect(_push_undo)
 
 	# The trigger. Sits in the rail for now; item 7's top toolbar is where it
 	# belongs, and moving it there is a reparent of this one node.
@@ -2526,45 +2479,8 @@ func _on_hull_spec_closed() -> void:
 # panel and take the control with it.
 func _hull_spec_widgets() -> Array:
 	return [
-		armor_mat_label, armor_mat_btn,
 		faction_label, faction_btn,
-		armor_thick_label, armor_thick_slider,
 	]
-
-
-func _on_armor_material_selected(index: int):
-	if is_updating_sliders: return
-	var root = get_node_or_null("/root/MainLab")
-	if not root: return
-	var hull = root.get_node_or_null("Hull")
-	if not hull: return
-	_push_undo()
-
-	var mat_name = "hardened_steel"
-	match index:
-		0: mat_name = "hardened_steel"
-		1: mat_name = "reactive_armor"
-		2: mat_name = "ablative_ceramic"
-		3: mat_name = "energy_shielding"
-		
-	hull.set_meta("armor_material", mat_name)
-	if root.has_method("update_hull_appearance"):
-		root.update_hull_appearance()
-	update_stats(hull)
-
-func _on_armor_thickness_changed(value: float):
-	if is_updating_sliders: return
-	var root = get_node_or_null("/root/MainLab")
-	if not root: return
-	var hull = root.get_node_or_null("Hull")
-	if not hull: return
-	
-	hull.set_meta("armor_thickness", value)
-	if armor_thick_label:
-		armor_thick_label.text = "Armor Thickness: %.1f" % value
-	if root.has_method("update_hull_appearance"):
-		root.update_hull_appearance()
-	update_stats(hull)
 
 func _on_faction_selected(index: int):
 	if is_updating_sliders: return
@@ -2641,31 +2557,8 @@ func _mount_style_line(style: String) -> String:
 		"pintle": desc = "Pintle mount (full traverse)"
 	return "\n%s" % desc if desc != "" else ""
 
-const ARMOR_MATERIALS = ["hardened_steel", "reactive_armor", "ablative_ceramic", "energy_shielding"]
-const ARMOR_MATERIAL_LABELS = ["Hardened Steel", "Reactive Armor", "Ablative Ceramic", "Energy Shielding"]
-
 func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 	var type_id = data.type_id
-
-	if data.category == "armor":
-		var mat_container = VBoxContainer.new()
-		mat_container.add_theme_constant_override("separation", 2)
-
-		var current_mat = data.tweaks.get("material", "hardened_steel")
-		var current_idx = ARMOR_MATERIALS.find(current_mat)
-		if current_idx < 0: current_idx = 0
-
-		var mat_btn = OptionButton.new()
-		for lbl in ARMOR_MATERIAL_LABELS:
-			mat_btn.add_item(lbl)
-		mat_btn.selected = current_idx
-		mat_container.add_child(mat_btn)
-		mat_btn.item_selected.connect(func(index: int):
-			_push_undo()
-			data.tweaks["material"] = ARMOR_MATERIALS[index]
-			_on_tweak_changed()
-		)
-		_add_callout(module, "Plate Material", mat_container)
 
 	if ModuleCatalog.is_ammo_capable(type_id):
 		var ammo_options = ModuleCatalog.get_ammo_options(type_id)

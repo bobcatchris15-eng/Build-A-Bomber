@@ -171,8 +171,6 @@ const SUITE_ORDER := [
 	["hull_and_armor", "test_hull_modding_loader_scan_and_validation"],
 	["hull_and_armor", "test_hull_modding_parts_menu_two_buckets"],
 	["designer_lab", "test_module_roles_group_and_sort_the_parts_menu"],
-	["sim_and_stats", "test_structural_pieces_resize_without_smearing_detail"],
-	["designer_lab", "test_structural_resize_survives_a_blueprint_round_trip"],
 	["terrain_and_maps", "test_part_material_roles_differentiate_surfaces"],
 	["designer_lab", "test_clipping_highlight_does_not_corrupt_shared_materials"],
 	["sim_and_stats", "test_napalm_mortar_tube_points_upward"],

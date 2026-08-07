@@ -2,9 +2,9 @@ extends Node3D
 
 func _process(_delta):
 	var p = get_parent()
-	if p:
+	if p is Node3D:
 		var hull = p.get_parent()
-		if hull:
+		if hull is Node3D:
 			var forward = -p.global_transform.basis.z
 			var hull_up = hull.global_transform.basis.y
 			var proj_forward = (forward - hull_up * forward.dot(hull_up)).normalized()

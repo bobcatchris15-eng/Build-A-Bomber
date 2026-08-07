@@ -422,12 +422,6 @@ func _select_module(module: Node3D):
 				# Free-form yaw rotation ring (MOUNTING_AND_ARMOR_SPEC.md #3)
 				# replaces the old fixed-90-degree-only rotation for these.
 				if hy: hy.queue_free()
-			elif cat == "structural":
-				# Structural pieces resize freely in all 3 axes (X/Y/Z) so
-				# the player can stretch a block, lengthen a girder, or
-				# flatten a slab. No rotation ring — they should stay flush
-				# against the surface normal they were mounted on.
-				if hrot: hrot.queue_free()
 			elif cat == "hull":
 				# Hull scales in all 3 directions; whole-vehicle orientation
 				# isn't a placement tweak, so no rotation ring.
@@ -1096,7 +1090,7 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	# its facet right after this and structural colliders are separately kept
 	# in step with struct_scale (see blueprint_manager and gizmo_3d), so both
 	# have their own sizing story that this must not fight.
-	if category != "armor" and category != "structural":
+	if category != "armor":
 		var visual_aabb := _visual_bounds(new_weapon)
 		if visual_aabb.size.length_squared() > 0.0:
 			col_size = visual_aabb.size
@@ -1112,49 +1106,6 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	collision_shape.shape = col_box
 	static_body.add_child(collision_shape)
 	new_weapon.add_child(static_body)
-
-	# Structural pieces get a surface collision body on layer 16
-	# (SURFACE_COLLISION_LAYER) so subsequent modules can be placed onto
-	# their surfaces via surface_raycast() — same mechanism the hull's
-	# own HullSurface body uses, but a simple box collider matching the
-	# module's own size rather than a trimesh of the visual geometry.
-	if category == "structural":
-		var surf_body = StaticBody3D.new()
-		surf_body.name = "StructuralSurface"
-		surf_body.collision_layer = SURFACE_COLLISION_LAYER
-		surf_body.collision_mask = 0
-		var surf_col = CollisionShape3D.new()
-		var surf_box = BoxShape3D.new()
-		surf_box.size = catalog_data.get("size", Vector3.ONE)
-		surf_col.shape = surf_box
-		surf_col.position = col_center
-		surf_body.add_child(surf_col)
-		new_weapon.add_child(surf_body)
-
-		# Override the StandardMaterial3D meshes created by VisualBuilder
-		# with the hull shader (faction textures, wear, grime, ink border)
-		# so structural pieces inherit the faction's visual identity —
-		# same as the main hull. This is applied after build_visual so the
-		# geometry is correct but the material is the faction shader.
-		# Argument order is (armor_material, faction) - these were passed
-		# swapped until 2026-07-29, which silently forced every weapon's
-		# structural pieces to DEFAULT_FACTION textures instead of the hull's
-		# own faction. See building.gd's copy of this note for the mechanism.
-		var hull_faction = hull.get_meta("faction") if hull.has_meta("faction") else "industrialists"
-		#
-		# The authored hardware (bolt pads, brackets, splice collars, hatches
-		# - anything named with VisualBuilder.HARDWARE_PREFIX) is deliberately
-		# EXEMPT. Painting a bolt head in the same faction livery as the plate
-		# it's driven into flattens the piece back into one undifferentiated
-		# shader and throws away the detail the authored meshes exist to
-		# provide; leaving the hardware as bare dark steel is what makes the
-		# faction-painted structure read as painted structure.
-		var hull_mat = HullMaterialBuilderScript.build_hull_material("hardened_steel", hull_faction)
-		for child in new_weapon.find_children("*", "MeshInstance3D", true, false):
-			if child.name.begins_with(VisualBuilderScript.HARDWARE_PREFIX):
-				continue
-			child.material_override = hull_mat
-
 	var data = ModuleDataResource.new()
 	data.type_id = type_id
 	data.module_name = catalog_data.name
@@ -1343,14 +1294,10 @@ func update_hull_appearance():
 	# stale silhouette.
 	_rebuild_surface_body(hull, mesh_inst)
 
-	# Apply materials - shared faction+armor shader (see hull_material_builder.gd)
-	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, armor_mat_name, faction_name)
+	# Apply materials - shared faction shader (see hull_material_builder.gd)
+	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, faction_name)
 	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
-	# Armour-MATERIAL greebles, alongside the faction ones. Same call site and
-	# same size argument, because both want the hull's real post-scale extent;
-	# they land in separate containers ("HullGreebles" / "ArmorGreebles") so
-	# neither can clobber the other's rebuild.
-	ArmorGreeblesScript.apply(hull, armor_mat_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
+	ArmorGreeblesScript.apply(hull, "", catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	
 	# Also update collision shape size in the designer
@@ -2568,7 +2515,7 @@ func _setup_instructions_ui() -> void:
 
 	var btn = Button.new()
 	btn.name = "InstructionsButton"
-	btn.text = "❓ Instructions"
+	btn.text = "Instructions"
 	btn.position = Vector2(16, 16)
 	btn.custom_minimum_size = Vector2(120, 32)
 	

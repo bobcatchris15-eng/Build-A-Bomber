@@ -105,7 +105,7 @@ static func _collect(node: Node, into: Array) -> void:
 # renders plausibly while ignoring both inputs. building.gd shipped that bug for
 # months; the order is spelled out here so this copy does not reintroduce it.
 static func _apply_material(node: Node, faction: String, team: int) -> void:
-	var mat := HullMaterialBuilder.build_hull_material("hardened_steel", faction)
+	var mat := HullMaterialBuilder.build_hull_material(faction)
 	if team != 0 and mat is ShaderMaterial:
 		var tint: Color = FactionCatalog.get_visual_color(faction).lerp(
 			Color(0.85, 0.2, 0.2), 0.45)

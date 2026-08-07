@@ -283,11 +283,15 @@ func _roll_hit(t: Node3D) -> bool:
 # and fired blanks - target dummies sat at full health while every other
 # signal (target lock, line of sight, aim angle) looked perfectly healthy.
 # Falling back to the tree root keeps the projectile real in that case.
-func _effects_parent() -> Node:
+func _effects_parent() -> Node3D:
 	var t = get_tree()
 	if t == null:
 		return null
-	return t.current_scene if t.current_scene != null else t.root
+	if t.current_scene is Node3D:
+		return t.current_scene as Node3D
+	if t.root is Node3D:
+		return t.root as Node3D
+	return null
 
 # Small dirt-puff visual where a missed shot lands, so a miss reads as a
 # miss instead of silent nothing.

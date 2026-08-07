@@ -90,32 +90,12 @@ const EMITTER_SPEC := {
 const SHIELD_MARGIN := 1.75
 const SHIELD_MIN_RADIUS := 1.1
 
-static func apply(hull: Node3D, material: String, hull_size: Vector3) -> void:
-	if hull == null:
+static func apply(hull: Node3D, _material: String = "", _hull_size: Vector3 = Vector3.ONE) -> void:
+	if not is_instance_valid(hull):
 		return
 	var old = hull.get_node_or_null(CONTAINER_NAME)
 	if old:
-		hull.remove_child(old)
 		old.queue_free()
-
-	var container = Node3D.new()
-	container.name = CONTAINER_NAME
-	hull.add_child(container)
-
-	# Same compensation the other greeble systems apply, so a scaled hull does
-	# not scale its own rivets along with it.
-	var surface = HullProjectionScript.build_surface(hull)
-	if surface["tris"].size() < 3:
-		surface["aabb"] = AABB(-hull_size * 0.5, hull_size)
-	var comp = HullProjectionScript.attach_compensation(hull)
-	container.scale = comp["container_scale"]
-
-	for spec in MATERIAL_GREEBLES.get(material, []):
-		GreebleFieldScript.scatter(container, surface, hull_size, spec)
-
-	if material == "energy_shielding":
-		GreebleFieldScript.place_at_corners(container, surface, hull_size, EMITTER_SPEC, true)
-		_build_shield_bubble(container, hull_size)
 
 # The visible shield: a mostly-transparent ellipsoid with crackling arcs that
 # travel across it (energy_shield.gdshader). Not collidable and not on any
@@ -148,4 +128,3 @@ static func _build_shield_bubble(container: Node3D, hull_size: Vector3) -> void:
 	# shadow-casting bubble would darken the vehicle it is protecting.
 	bubble.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	container.add_child(bubble)
-
