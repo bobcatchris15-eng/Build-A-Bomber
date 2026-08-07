@@ -267,6 +267,10 @@ func _smoke_test_map(map_id: String) -> bool:
 		print("  [FAIL] Battle never finished building map '", map_id, "'")
 		battle.queue_free()
 		return false
+	if not await _await_nav_map(battle.ground_nav_map):
+		print("  [FAIL] Ground navigation map never synchronised on map '", map_id, "'")
+		battle.queue_free()
+		return false
 
 	if battle.map_id != map_id or battle.current_map.get("name", "") != map_def.name:
 		print("  [FAIL] Battle did not load the requested map '", map_id, "'")
@@ -349,6 +353,48 @@ func _smoke_test_map(map_id: String) -> bool:
 	battle.queue_free()
 	await tree.process_frame
 	return true
+
+
+# WAITING FOR world_is_ready IS NOT ENOUGH, and this is what made all ten map
+# smokes fail after the retirement commit.
+#
+# NavigationServer3D applies map_create/map_set_active/region_set_navigation_mesh
+# as QUEUED COMMANDS, flushed on its own sync pass, not immediately on call. In
+# headless, match_director._setup_terrain() takes the blocking bake path with no
+# awaits in it, so _ready() completes inside add_child() and world_is_ready is
+# already true on the first check - zero frames later, with the map created but
+# not yet synchronised. Every map_get_path() against it returns an EMPTY array,
+# which the helper correctly reported as "resource node is not reachable".
+#
+# The maps were never broken. Proof: the FIRST map in a process passed and every
+# subsequent one failed, purely because the first had spent a frame elsewhere.
+# The same shape as the map_get_closest_point()-returns-origin trap found on
+# 2026-08-06, and it deserves the same explicit wait.
+# MEASURED, not guessed. Building the B5 fixture's navmesh and sampling every
+# frame (tools/probe_nav_sync.gd):
+#
+#   frame 0: active=false regions=0 iteration=0 path=0 pts
+#   frame 1: active=true  regions=1 iteration=0 path=0 pts
+#   frame 2: active=true  regions=1 iteration=1 path=0 pts   <- NOT queryable yet
+#   frame 8: active=true  regions=1 iteration=2 path=29 pts  <- queryable
+#
+# So neither map_is_active nor a non-empty region list means the map can be
+# pathed on, and neither does the first iteration bump - the polygons land on the
+# SECOND one. Waiting a fixed one or two frames, which is what every one of these
+# suites did, is waiting on a number that happened to work on the machine it was
+# written on. This waits for the actual condition instead.
+func _await_nav_map(nav_map: RID, max_frames: int = 240) -> bool:
+	if not nav_map.is_valid():
+		return false
+	var waited := 0
+	while waited < max_frames:
+		if NavigationServer3D.map_is_active(nav_map) \
+				and not NavigationServer3D.map_get_regions(nav_map).is_empty() \
+				and NavigationServer3D.map_get_iteration_id(nav_map) >= 2:
+			return true
+		await tree.process_frame
+		waited += 1
+	return false
 
 
 func _find_hq(battle, team: int):

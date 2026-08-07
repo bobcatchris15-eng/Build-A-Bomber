@@ -83,8 +83,7 @@ func test_b6_heightmap_plateau_approachable_from_any_side() -> bool:
 	var map_def: Dictionary = json.get_data()
 
 	var nav = TerrainBuilderScript.build_navmeshes(map_def)
-	await tree.process_frame
-	await tree.process_frame
+	await _await_nav_map(nav.ground_map)
 
 	# The fixture's plateau: center [-40, 20], half_extents [6, 6], height
 	# 3, falloff 5 (walkable: slope 3/5=0.6 < MAX_WALKABLE_SLOPE 0.7) - so
@@ -171,8 +170,7 @@ func test_bridges_carve_a_real_ground_crossing_through_water() -> bool:
 	var end = Vector3(0, 0, 30)
 
 	var nav_no_bridge = TerrainBuilder.build_navmeshes(map_no_bridge)
-	await tree.process_frame
-	await tree.process_frame
+	await _await_nav_map(nav_no_bridge.ground_map)
 	var path_no_bridge = NavigationServer3D.map_get_path(nav_no_bridge.ground_map, start, end, true)
 	var reached_no_bridge = path_no_bridge.size() >= 2 and path_no_bridge[path_no_bridge.size() - 1].distance_to(end) <= 3.0
 	for k in ["ground_region", "water_region", "amphibious_region", "deep_water_region"]:
@@ -181,8 +179,7 @@ func test_bridges_carve_a_real_ground_crossing_through_water() -> bool:
 		NavigationServer3D.free_rid(nav_no_bridge[k])
 
 	var nav_with_bridge = TerrainBuilder.build_navmeshes(map_with_bridge)
-	await tree.process_frame
-	await tree.process_frame
+	await _await_nav_map(nav_with_bridge.ground_map)
 	var path_with_bridge = NavigationServer3D.map_get_path(nav_with_bridge.ground_map, start, end, true)
 	var reached_with_bridge = path_with_bridge.size() >= 2 and path_with_bridge[path_with_bridge.size() - 1].distance_to(end) <= 3.0
 	var crosses_via_bridge_strip = true
@@ -268,8 +265,7 @@ func test_amphibious_navmesh_crosses_water() -> bool:
 		"obstacles": [],
 	}
 	var nav = TerrainBuilder.build_navmeshes(map_def)
-	await tree.process_frame
-	await tree.process_frame
+	await _await_nav_map(nav.ground_map)
 
 	var start = Vector3(-30, 0, 0)
 	var goal = Vector3(30, 0, 0)
@@ -325,8 +321,7 @@ func test_deep_water_navmesh_blocks_shallow_draught_hulls() -> bool:
 		"obstacles": [],
 	}
 	var nav = TerrainBuilder.build_navmeshes(map_def)
-	await tree.process_frame
-	await tree.process_frame
+	await _await_nav_map(nav.ground_map)
 
 	var north = Vector3(0, 0, 20)
 	var south = Vector3(0, 0, -20)
@@ -466,7 +461,7 @@ func test_b8_large_map_navmesh_bake_does_not_crash_recast() -> bool:
 
 	# The actual bake - this is what used to segfault the whole process.
 	var nav = TerrainBuilderScript.build_navmeshes(map_def)
-	await tree.process_frame
+	await _await_nav_map(nav.ground_map)
 
 	# A region-map association check alone isn't enough here - a second
 	# real bug found via the actual Skirmish scene (not this isolated
@@ -551,7 +546,7 @@ func test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones() -> boo
 	for map_id in MapCatalogScript.get_map_ids():
 		var map_def = MapCatalogScript.get_map(map_id)
 		var nav = TerrainBuilderScript.build_navmeshes(map_def)
-		await tree.process_frame
+		await _await_nav_map(nav.ground_map)
 		var errors = MapCatalogScript.lint_spawn_fairness(map_def, nav.ground_map)
 		NavigationServer3D.free_rid(nav.ground_region)
 		NavigationServer3D.free_rid(nav.amphibious_region)
@@ -577,7 +572,7 @@ func test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones() -> boo
 		],
 	}
 	var blocked_nav = TerrainBuilderScript.build_navmeshes(blocked_map_def)
-	await tree.process_frame
+	await _await_nav_map(blocked_nav.ground_map)
 	var blocked_errors = MapCatalogScript.lint_spawn_fairness(blocked_map_def, blocked_nav.ground_map)
 	NavigationServer3D.free_rid(blocked_nav.ground_region)
 	NavigationServer3D.free_rid(blocked_nav.amphibious_region)
@@ -616,7 +611,7 @@ func test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones() -> boo
 		],
 	}
 	var lopsided_nav = TerrainBuilderScript.build_navmeshes(lopsided_map_def)
-	await tree.process_frame
+	await _await_nav_map(lopsided_nav.ground_map)
 	var lopsided_errors = MapCatalogScript.lint_spawn_fairness(lopsided_map_def, lopsided_nav.ground_map)
 	NavigationServer3D.free_rid(lopsided_nav.ground_region)
 	NavigationServer3D.free_rid(lopsided_nav.amphibious_region)
@@ -1004,7 +999,7 @@ func test_b5_heightmap_navmesh_rejects_steep_slope() -> bool:
 	var map_def: Dictionary = json.get_data()
 
 	var maps = TerrainBuilderScript.build_navmeshes(map_def)
-	await tree.process_frame # let NavigationServer3D finish baking before querying
+	await _await_nav_map(maps.ground_map)
 
 	# The fixture's cliff (line at x=52, height 18, hard near-zero
 	# transition) makes a genuine navmesh hole - a point just before it and
