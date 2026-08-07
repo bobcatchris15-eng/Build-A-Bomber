@@ -4,6 +4,10 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const GlobalConfig = preload("res://scripts/global_config.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const WeaponRange = preload("res://scripts/weapon_range.gd")
+# Battle-layer section timing. Inert (one static bool read) unless a profiling
+# run has switched it on; auto_weapon.gd is shared with the old runtime, which
+# never enables it.
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 # Shared unit meshes + cached materials for every munition visual below. See
 # munition_pool.gd's header for the measurements that motivated it; the short
@@ -862,6 +866,12 @@ func _owner_defense_low_power() -> bool:
 func _physics_process(delta):
 	if _owner_building_incomplete() or _owner_defense_low_power():
 		return
+	var _prof := Profiler.start()
+	_tick_weapon(delta)
+	Profiler.stop("weapons", _prof)
+
+
+func _tick_weapon(delta):
 	# Spin radar mast dish
 	if type_id == "sensor_suite":
 		var dish = get_node_or_null("sensor_suite_dish")

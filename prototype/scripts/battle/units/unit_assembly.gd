@@ -36,6 +36,71 @@ const ARMOR_BULK_PER_THICKNESS := 0.15
 # be reconstructed, which the caller must treat as "do not spawn this unit" -
 # reconstruct_vehicle() returns null for a blueprint naming a hull that no longer
 # exists in the catalog, and a half-built unit is worse than none.
+# ONE ASSEMBLED HULL PER DESIGN, DUPLICATED THEREAFTER.
+#
+# MEASURED: reconstruct_vehicle() is the entire cost of spawning a unit -
+# spawn_unit totalled 1069.94ms mean per call, of which spawn.assemble was
+# 1046.90ms, against 2.94ms for weapons and 0.07ms for the nav agent. Every unit
+# that rolls out of a factory rebuilds its hull from the blueprint, and the
+# blueprint version note in CLAUDE.md says why that is so expensive: the hulls
+# are SDF/marching-cubes geometry, generated rather than loaded.
+#
+# A player who queues four tanks therefore pays four multi-second stalls, and
+# they land when reinforcements ARRIVE - which is why the hitches looked like
+# they belonged to combat.
+#
+# WHAT MAKES THE DUPLICATE SAFE. The assembly code downstream reads the hull
+# through metadata (type_id, armor_thickness, armor_material, hull_scale,
+# faction, base_hull_size) and attach_weapons() reads module_data off each child,
+# so metadata surviving duplication is a correctness requirement, not a detail -
+# probe_spawn_cache.gd asserts a duplicated hull carries the identical metadata
+# and the same weapon count as a freshly built one.
+#
+# MATERIALS ARE SHARED between duplicates, deliberately. battle_finish.gd states
+# absolute targets (a floor and a ceiling) rather than applying a delta, so
+# applying it repeatedly to the same shared material is idempotent - and sharing
+# gives the renderer fewer distinct materials, which is the direction the ~31
+# draw calls per unit needs to move anyway.
+#
+# The cache is keyed on the blueprint's full content plus the faction, so two
+# designs that differ by one module or one armour value do not collide, and a
+# design edited between matches does not serve a stale hull.
+static var _hull_cache: Dictionary = {}
+
+
+# Dropped between matches. The templates are detached nodes owned by this
+# dictionary, so without this they would outlive the match that built them and,
+# worse, a design re-saved in the Lab would keep serving its old geometry.
+static func clear_hull_cache() -> void:
+	for template in _hull_cache.values():
+		if is_instance_valid(template):
+			template.free()
+	_hull_cache.clear()
+
+
+static func _acquire_hull(blueprint_data: Dictionary, body: Node3D,
+		bp_manager: Node, match_faction: String) -> Node3D:
+	var key := "%s|%s" % [JSON.stringify(blueprint_data), match_faction]
+	var template = _hull_cache.get(key)
+	if template == null or not is_instance_valid(template):
+		# Built into a detached holder rather than into `body`, so the template is
+		# never part of a live unit and cannot be freed when that unit dies.
+		var holder := Node3D.new()
+		var built: Node3D = bp_manager.reconstruct_vehicle(
+			blueprint_data, holder, false, match_faction)
+		if built == null:
+			holder.free()
+			return null
+		holder.remove_child(built)
+		holder.free()
+		_hull_cache[key] = built
+		template = built
+
+	var copy: Node3D = template.duplicate()
+	body.add_child(copy)
+	return copy
+
+
 static func build(body: CharacterBody3D, blueprint_data: Dictionary, team: int,
 		bp_manager: Node, match_faction: String = "") -> Dictionary:
 	body.set_meta("team", team)
@@ -57,7 +122,7 @@ static func build(body: CharacterBody3D, blueprint_data: Dictionary, team: int,
 	var hull_type_hint: String = blueprint_data.get("hull_type", "medium_hull")
 	var traits: Array = ModuleCatalog.get_traits(hull_type_hint, locomotion_type)
 
-	var hull_node: Node3D = bp_manager.reconstruct_vehicle(blueprint_data, body, false, match_faction)
+	var hull_node: Node3D = _acquire_hull(blueprint_data, body, bp_manager, match_faction)
 	if not hull_node:
 		return {}
 

@@ -62,9 +62,13 @@ var _fade_rect: ColorRect = null
 # Scene -> the script whose preload graph carries its weight. Only scenes
 # that actually stall need an entry; anything else loads directly.
 const WARM_SOURCES := {
-	"res://scenes/Skirmish.tscn": "res://scripts/skirmish.gd",
 	"res://scenes/MainLab.tscn": "res://scripts/module_placer.gd",
 	"res://scenes/Battlefield.tscn": "res://scripts/battlefield.gd",
+	# The rebuilt battle layer. It stalls for the same reason Skirmish does -
+	# match_director.gd's preload graph reaches blueprint_manager.gd and the unit
+	# and terrain scripts - and without an entry here goto() swapped straight to
+	# it, so the window simply froze on black instead of showing the lamps.
+	"res://scenes/Battle.tscn": "res://scripts/battle/match_director.gd",
 }
 
 var _target_path: String = ""
@@ -232,9 +236,108 @@ func run_load() -> void:
 	# on an empty stage that then pops into existence.
 	await get_tree().process_frame
 	await get_tree().process_frame
+	# The world finishes building BEHIND the black, then the player chooses when
+	# to drop in. Both are no-ops for a scene that does not declare `world_ready`.
+	await _await_world_ready()
+	await _deploy_gate()
 	await fade_in()
 	_transitioning = false
 	_target_path = ""
+
+
+# Holds the fade until the incoming scene says it is playable.
+#
+# TWO FRAMES IS NOT A UNIVERSAL RULE. It is enough for a scene whose _ready()
+# runs to completion synchronously, and wrong for one that awaits inside it:
+# match_director._ready() awaits its terrain bake, so it RETURNS at that await
+# and finishes many frames later. The fade lifted on a half-built Battle - bases
+# spawned and floating over an unbuilt map, no terrain, no HUD - because the
+# router had counted two frames and declared victory.
+#
+# Opt-in by convention rather than by type: any scene that declares `world_ready`
+# gets waited on, and everything else keeps the old behaviour. The router does
+# not need to know what a match is.
+#
+# THE TIMEOUT IS NOT OPTIONAL. If a scene errors out partway through its own
+# setup the signal never fires, and without a ceiling the player sits on a black
+# screen forever with no way back. Arriving early on a half-built map is bad;
+# arriving never is worse.
+const WORLD_READY_TIMEOUT := 30.0
+
+func _await_world_ready() -> void:
+	var scene := get_tree().current_scene
+	if scene == null or not scene.has_signal("world_ready"):
+		return
+	# Already finished while the fade was running. Awaiting a signal that has
+	# ALREADY been emitted hangs forever, which is why the scene carries a flag
+	# as well as a signal.
+	if "world_is_ready" in scene and scene.world_is_ready:
+		return
+	# POLLED RATHER THAN AWAITED ON THE SIGNAL. `await` takes exactly one signal
+	# and there is no "first of these two" form, so racing the signal against a
+	# timeout means watching the flag the scene sets alongside it. That flag is
+	# needed regardless - see the comment above - so this costs nothing extra.
+	var waited := 0.0
+	while not scene.world_is_ready and waited < WORLD_READY_TIMEOUT:
+		await get_tree().process_frame
+		waited += get_process_delta_time()
+		if not is_instance_valid(scene):
+			return
+
+
+# The DEPLOY gate: the last beat of the loading sequence.
+#
+# The alternative is dropping the player straight into a live match the instant
+# it finishes building, which is worse than it sounds - the match is REAL from
+# frame one, the AI commander is already deciding and harvesters are already
+# moving, so a player still reading the map is a player already behind. A button
+# makes entry deliberate.
+#
+# It is drawn on the router's own fade overlay rather than on the loading screen,
+# because by this point the loading screen has been freed: the world has to exist
+# in order to be ready, and it cannot exist until the scene swap. The overlay is
+# the only thing that survives that swap.
+func _deploy_gate() -> void:
+	var scene := get_tree().current_scene
+	if scene == null or not scene.has_signal("world_ready"):
+		return
+
+	var gate := CenterContainer.new()
+	gate.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# STOP so nothing behind the curtain can be clicked through it. The match is
+	# already live at this point - a stray click landing on the battlefield would
+	# issue a real order before the player has seen the map.
+	gate.mouse_filter = Control.MOUSE_FILTER_STOP
+	_fade_layer.add_child(gate)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", Tokens.SPACE_MD)
+	gate.add_child(col)
+
+	var ready_label := Label.new()
+	ready_label.text = "ALL SYSTEMS READY"
+	ready_label.theme_type_variation = "HintLabel"
+	ready_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(ready_label)
+
+	var button := Button.new()
+	button.text = "DEPLOY"
+	button.custom_minimum_size = Vector2(260, 56)
+	col.add_child(button)
+	button.grab_focus()
+
+	# HOLDS THE MATCH, not just the view. Without this the comment above is only
+	# half-solved: the world would be built AND RUNNING while the player looked at
+	# a DEPLOY button, so the AI commander would take its first decisions and the
+	# harvesters their first trips before anyone had pressed anything.
+	#
+	# The overlay opts out of the pause it causes - a paused pause-screen cannot
+	# be dismissed - and so does its own layer, or the button would not repaint.
+	_fade_layer.process_mode = Node.PROCESS_MODE_ALWAYS
+	get_tree().paused = true
+	await button.pressed
+	get_tree().paused = false
+	gate.queue_free()
 
 
 # Extracts a scene's heavy preload targets from its script SOURCE.
@@ -289,6 +392,23 @@ const STEP_LABELS := {
 	"module_catalog": "Indexing modules",
 	"faction_catalog": "Confirming faction records",
 	"skirmish": "Assembling battlefield",
+	# The rebuilt battle layer's own graph. Without these every step on the way
+	# into Battle reads as "Loading <script name>", which is the loading screen
+	# admitting it does not know what it is doing.
+	"match_director": "Assembling battlefield",
+	"commander": "Briefing opposition",
+	"economy_service": "Auditing stockpiles",
+	"production_service": "Opening production lines",
+	"structure": "Preparing structures",
+	"unit": "Preparing vehicle systems",
+	"vision_service": "Deploying sensors",
+	"flow_field_service": "Plotting movement lanes",
+	"placement_service": "Surveying build sites",
+	"selection_service": "Calibrating controls",
+	"order_service": "Calibrating controls",
+	"battle_hud": "Raising command deck",
+	"production_hud": "Raising command deck",
+	"after_action_report": "Preparing debrief",
 }
 
 func _label_for(path: String) -> String:

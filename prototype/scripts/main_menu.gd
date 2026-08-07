@@ -80,12 +80,6 @@ const DESTINATIONS := [
 	# suites stay green until the new one reaches parity; at that point Skirmish
 	# above is deleted and this takes the name. The badge says WIP because for
 	# the moment it genuinely is one - see the phase plan.
-	{
-		"title": "BATTLE (REBUILD)",
-		"desc": "The new match layer. Under construction.",
-		"scene": "res://scenes/Battle.tscn",
-		"badge": "WIP // COMBAT"
-	},
 ]
 
 var _turntable_node: Node3D = null

@@ -23,6 +23,7 @@ const SteeringScript = preload("res://scripts/battle/movement/steering.gd")
 const AssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
 const StanceScript = preload("res://scripts/battle/orders/stance.gd")
 const FlowFieldServiceScript = preload("res://scripts/battle/movement/flow_field_service.gd")
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
@@ -157,7 +158,9 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	# name, and that has to survive this particular unit dying.
 	blueprint = blueprint_data
 
+	var _p := Profiler.start()
 	var facts := AssemblyScript.build(self, blueprint_data, unit_team, bp_manager, match_faction)
+	Profiler.stop("spawn.assemble", _p)
 	if facts.is_empty():
 		# reconstruct_vehicle() returned null - the blueprint names a hull the
 		# catalog no longer has. A half-built unit is worse than no unit, so the
@@ -179,17 +182,23 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 
 	# Weapons before the nav agent so a unit is never briefly alive, mobile and
 	# unarmed - the AI acquires targets the frame a unit spawns.
+	_p = Profiler.start()
 	attack_range = AssemblyScript.attach_weapons(hull_node)
+	Profiler.stop("spawn.weapons", _p)
 	_hull_type = facts["hull_type"]
 	_recalculate_energy()
 	_recalculate_vision()
 
+	_p = Profiler.start()
 	nav_agent = AssemblyScript.build_nav_agent(self, facts, controller)
+	Profiler.stop("spawn.nav_agent", _p)
 	var base_size: Vector3 = facts["base_size"]
 	_separation_radius = maxf(base_size.x, base_size.z) * SEPARATION_RADIUS_MULT
 	_sync_nav_radii()
 	_recalculate_move_speed()
+	_p = Profiler.start()
 	_create_selection_ring(base_size)
+	Profiler.stop("spawn.selection_ring", _p)
 	_detect_harvester(controller)
 	return true
 
@@ -279,6 +288,7 @@ func _sync_nav_radii() -> void:
 func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
+	var _t := Profiler.start()
 	if current_energy < max_energy:
 		current_energy = minf(max_energy, current_energy + energy_regen_rate * delta)
 	_advance_orders()
@@ -286,6 +296,7 @@ func _physics_process(delta: float) -> void:
 	_apply_movement(delta)
 	_apply_vertical(delta)
 	move_and_slide()
+	Profiler.stop("units", _t)
 
 
 # The harvest loop runs when the unit has nothing else to do, or was explicitly

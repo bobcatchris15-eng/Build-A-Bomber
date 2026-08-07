@@ -26,7 +26,12 @@ const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 # these controls are ever reused there - an untagged payload would be accepted.
 const DRAG_TYPE = "roster_blueprint"
 
-const SLOT_SIZE = Vector2(96, 78)
+# A FLOOR, not a fixed size. The slots expand to share the full width of the
+# tray (see _build_slot_grid), so this only sets how small one is allowed to get
+# on a narrow window. Raised from 96x78: at that height the thumbnail had barely
+# 56px left under the name line, which is not enough to tell two similar
+# kitbashes apart at a glance - the entire job of the slot.
+const SLOT_SIZE = Vector2(104, 132)
 # Tall enough for the thumbnail plus a wrapped name plus a four-line spec block.
 # The first version was 120x104 and forced the name to a single ellipsised line,
 # which is the worst thing to truncate on a card whose whole job is telling two
@@ -138,19 +143,38 @@ func _build_slot_grid() -> void:
 	# InsetPanel is the recessed well variation - the grid is a tray the units
 	# are dropped INTO, so it should read as set into the screen, not floating.
 	well.theme_type_variation = "InsetPanel"
+	# The tray claims the full width of the screen frame; the grid inside it then
+	# shares that width out. Without this the well shrinks to the grid's minimum
+	# and the "fill the whole bottom segment" arrangement collapses back to a
+	# left-packed cluster.
+	well.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(well)
 
 	_slot_grid = GridContainer.new()
-	# 6x2 at capacity 12. Two rows of six reads as a magazine or a tray; a single
-	# row of twelve would force the slots too narrow for a thumbnail to be legible.
-	_slot_grid.columns = 6
+	# ONE ROW, spanning the full width of the tray.
+	#
+	# This was 6x2, on the reasoning that a single row of twelve would force the
+	# slots too narrow to read. That held only while the slots were a FIXED 96px:
+	# now they expand to share whatever width the tray has, so on any window wider
+	# than about 1300px a single row gives each slot MORE space than the two-row
+	# grid did, not less - and the roster reads as one ordered magazine rather
+	# than as two rows whose relationship has to be inferred.
+	#
+	# SLOT_SIZE remains the floor, so a narrow window degrades to smaller slots
+	# rather than to a horizontal scrollbar.
+	_slot_grid.columns = _capacity
 	_slot_grid.add_theme_constant_override("h_separation", Tokens.SPACE_SM)
 	_slot_grid.add_theme_constant_override("v_separation", Tokens.SPACE_SM)
+	_slot_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	well.add_child(_slot_grid)
 
 	for i in range(_capacity):
 		var slot := RosterSlot.new()
 		slot.configure(i, self)
+		# Every slot takes an equal share of the leftover width. Without this the
+		# GridContainer packs them at their minimum size and leaves the rest of the
+		# tray empty on the right.
+		slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_slot_grid.add_child(slot)
 		_slots.append(slot)
 

@@ -36,6 +36,7 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
 const ToolboxPlateScript = preload("res://scripts/battle/hud/toolbox_plate.gd")
+const StampedLabelScript = preload("res://scripts/battle/hud/stamped_label.gd")
 # NOT a preload of match_director.gd: it preloads this file, and the pair is a
 # cyclic reference. `is_defence_design` is reached through the director instance
 # instead, which keeps one definition of what makes a design a turret rather than
@@ -62,7 +63,7 @@ const CONTENT_WIDTH := TOOLBOX_WIDTH - PLATE_PADDING * 2.0
 # and it carries the stamped lettering, so it needs room to read as a plate
 # rather than as a tab.
 const HEADER_HEIGHT := 44.0
-const HEADER_FONT_SIZE := 16
+const HEADER_FONT_SIZE := 19
 # How tall a build list is allowed to get before it scrolls rather than growing
 # up off the top of the screen. The STRUCTURES tier already lists four prefabs
 # and the roster tiers grow with whatever the player has designed.
@@ -145,7 +146,7 @@ const CRT_FONT_SIZE := 12
 
 var _toolbar: Control = null
 var _slots: Dictionary = {}
-
+var _plates: Dictionary = {}
 
 func _build_toolbar() -> void:
 	_toolbar = Control.new()
@@ -153,6 +154,17 @@ func _build_toolbar() -> void:
 	_toolbar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_toolbar)
 
+	# ALL PLATES FIRST, THEN ALL SLOTS. Godot picks siblings in REVERSE child
+	# order, so an interleaved plate/slot/plate/slot arrangement puts one
+	# toolbox's decorative plate ahead of the NEXT toolbox's controls in the pick
+	# order - measured: a point inside the open STRUCTURES list resolved to
+	# defensePlate, so the list never saw the wheel and the camera did. Two passes
+	# guarantee every plate is behind every control.
+	for queue_name in BuildingCatalogScript.QUEUES:
+		var plate: Control = ToolboxPlateScript.new()
+		plate.name = queue_name + "Plate"
+		_plates[queue_name] = plate
+		_toolbar.add_child(plate)
 	for queue_name in BuildingCatalogScript.QUEUES:
 		_build_toolbox(queue_name)
 	_layout_toolboxes()
@@ -162,9 +174,7 @@ func _build_toolbox(queue_name: String) -> void:
 	# The plate goes in FIRST so it draws behind this toolbox's controls. Sibling
 	# order is draw order, and all five plates precede all five slots - which is
 	# safe only because the slots never overlap each other.
-	var plate: Control = ToolboxPlateScript.new()
-	plate.name = queue_name + "Plate"
-	_toolbar.add_child(plate)
+	var plate: Control = _plates[queue_name]
 
 	var slot := VBoxContainer.new()
 	slot.name = queue_name
@@ -175,7 +185,32 @@ func _build_toolbox(queue_name: String) -> void:
 	# mouse_exited on a parent are unreliable once children with their own filters
 	# sit on top of it - the parent reports "exited" the moment the cursor crosses
 	# onto one of its own buttons.
-	slot.mouse_filter = Control.MOUSE_FILTER_PASS
+	# STOP, NOT PASS - and this is what decouples list scrolling from world zoom.
+	#
+	# ScrollContainer accepts a wheel event ONLY when the scroll value actually
+	# changes (Godot compares the value before and after and calls accept_event()
+	# on a difference). So a list that fits its window, or one already at its top
+	# or bottom, DECLINES the wheel - and an unaccepted GUI event continues up the
+	# ANCESTOR chain, not to whatever is drawn behind. With PASS here it walked
+	# straight past the toolbox, past the IGNORE'd HUD root, and arrived at the
+	# camera's _unhandled_input as a zoom.
+	#
+	# STOP ends that walk at the toolbox. Children are still picked first, so the
+	# list scrolls normally whenever it has anywhere to scroll to; only the
+	# leftovers are absorbed.
+	slot.mouse_filter = Control.MOUSE_FILTER_STOP
+	# ...AND THE EVENT HAS TO BE ACCEPTED, not merely received. A STOP filter ends
+	# the walk up the ancestor chain, but the viewport only marks an event handled
+	# when some control ACCEPTS it - so an unaccepted wheel still fell through to
+	# _unhandled_input and zoomed. Measured: with STOP alone, a wheel in the middle
+	# of a scrollable list was absorbed (the ScrollContainer accepted it) while the
+	# same wheel at the BOTTOM of that list, where the ScrollContainer declines,
+	# still zoomed the world.
+	slot.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and (
+				event.button_index == MOUSE_BUTTON_WHEEL_UP
+				or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+			slot.accept_event())
 	_toolbar.add_child(slot)
 
 	# THE LIST IS FIRST IN CHILD ORDER so it renders ABOVE the header. These sit
@@ -201,13 +236,21 @@ func _build_toolbox(queue_name: String) -> void:
 	slot.add_child(panel)
 
 	var header := Button.new()
-	header.text = QUEUE_LABELS.get(queue_name, queue_name.to_upper())
+	# NO `text` ON THE BUTTON. The lettering is a StampedLabel drawn on top of it
+	# - a Button can only render one flat fill with one outline, and that is
+	# exactly the "printed on" look this replaced.
 	header.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	header.toggle_mode = true
 	header.focus_mode = Control.FOCUS_NONE
 	header.custom_minimum_size = Vector2(0, HEADER_HEIGHT)
 	_engrave(header)
 	slot.add_child(header)
+
+	var stamp: Control = StampedLabelScript.new()
+	stamp.text = QUEUE_LABELS.get(queue_name, queue_name.to_upper())
+	stamp.font_size = HEADER_FONT_SIZE
+	stamp.set_anchors_preset(Control.PRESET_FULL_RECT)
+	header.add_child(stamp)
 	UIFeedbackScript.wire(header, "select")
 	header.toggled.connect(func(pressed: bool):
 		if pressed:
@@ -239,39 +282,17 @@ func _build_toolbox(queue_name: String) -> void:
 		CONTENT_WIDTH, minf(LIST_MAX_HEIGHT, 48.0 * float(maxi(1, items.size()))))
 
 
-# Stamped-and-enamelled lettering on the header, per Chris's spec.
+# Strips the header Button back to a bare hit target.
 #
-# HOW THE ILLUSION WORKS, and why it is three overrides rather than a font. A
-# character cut into metal shows a dark shadowed wall on the side facing the
-# light and a bright lit lip on the far side, and the recess is then flooded with
-# coloured enamel. Godot gives exactly the three knobs that needs:
-#
-#   outline     - near-black, tight to the glyph: the cut wall.
-#   shadow      - one pixel DOWN and light-coloured: the lower lip catching the
-#                 same overhead light the plate's bevel is lit by. A dark shadow
-#                 here would read as embossed - raised - which is the opposite.
-#   font_color  - the enamel itself.
-#
-# The button's own styleboxes are cleared to fully transparent because the plate
-# behind it already IS the surface; a themed button body on top of a drawn plate
-# is two plates.
+# The drawn plate behind it already IS the surface and the StampedLabel on top of
+# it is already the lettering, so everything the theme would contribute here is a
+# second copy of something that exists: a themed button body over a drawn plate
+# is two plates, and the button's own `text` render is the flat printed-on fill
+# the stamped lettering replaced.
 func _engrave(button: Button) -> void:
 	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
 		var empty := StyleBoxEmpty.new()
 		button.add_theme_stylebox_override(state, empty)
-
-	button.add_theme_font_size_override("font_size", HEADER_FONT_SIZE)
-	button.add_theme_constant_override("outline_size", 4)
-	button.add_theme_color_override("font_outline_color", Tokens.BASE_900)
-	button.add_theme_constant_override("shadow_offset_x", 0)
-	button.add_theme_constant_override("shadow_offset_y", 1)
-	button.add_theme_color_override("font_shadow_color", Tokens.BASE_500)
-	# The enamel. Hazard on hover and while open, because that is the colour the
-	# rest of the UI already uses for "this is the thing you are acting on".
-	button.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
-	button.add_theme_color_override("font_hover_color", Tokens.SIGNAL_HAZARD)
-	button.add_theme_color_override("font_pressed_color", Tokens.SIGNAL_HAZARD)
-	button.add_theme_color_override("font_hover_pressed_color", Tokens.SIGNAL_HAZARD)
 
 
 # The readout under each header: a small black CRT with a green monospace line
@@ -445,8 +466,20 @@ func _process(delta: float) -> void:
 		if not is_equal_approx(current, target):
 			entry["hidden"] = move_toward(current, target, SLIDE_SPEED * delta)
 			moved = true
-	if moved:
-		_layout_toolboxes()
+
+	# UNCONDITIONALLY, not `if moved`.
+	#
+	# A VBoxContainer's combined minimum size does not update in the same frame a
+	# child's `visible` changes, so the _layout_toolboxes() call inside the toggle
+	# handler measured the slot as though the list were still closed. If nothing
+	# was animating that frame, `moved` stayed false and the layout was never
+	# recomputed - so an opened list kept the collapsed slot's height and was
+	# positioned hanging off the BOTTOM of the screen. Measured: the list panel
+	# landed at y=1053 with a height of 248 in a 1080px viewport, which is why a
+	# wheel over it found no Control at all and fell through to the camera.
+	#
+	# Five slots of arithmetic per frame is not worth guarding against.
+	_layout_toolboxes()
 
 
 # Is this queue doing anything the player would want to watch? Used to hold a

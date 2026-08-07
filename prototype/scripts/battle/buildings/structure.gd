@@ -16,6 +16,8 @@ const LayersScript = preload("res://scripts/battle/battle_layers.gd")
 const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
 const UnitAssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const BuildingMeshScript = preload("res://scripts/battle/buildings/building_mesh.gd")
+const BattleFinishScript = preload("res://scripts/battle/battle_finish.gd")
 
 signal died(structure)
 
@@ -85,18 +87,28 @@ func setup(structure_kind: String, structure_team: int) -> void:
 	col.position = Vector3(0, footprint.y * 0.5, 0)
 	add_child(col)
 
-	_mesh = MeshInstance3D.new()
-	var mesh := BoxMesh.new()
-	mesh.size = footprint
-	_mesh.mesh = mesh
-	var mat := StandardMaterial3D.new()
-	mat.albedo_color = stats.get("color", Color(0.6, 0.6, 0.6))
-	mat.roughness = 0.85
-	_mesh.material_override = mat
-	_mesh.position = Vector3(0, footprint.y * 0.5, 0)
-	add_child(_mesh)
+	# Authored art first, box second. Every catalog kind has a GLB in
+	# assets/models/buildings/ and the old runtime has been using them all along;
+	# the fallback stays because a kind added to the catalog before its model is
+	# authored should appear as a grey box rather than as nothing at all.
+	if BuildingMeshScript.build(self, kind, footprint,
+			FactionCatalog.DEFAULT_FACTION, team) == null:
+		_mesh = MeshInstance3D.new()
+		var mesh := BoxMesh.new()
+		mesh.size = footprint
+		_mesh.mesh = mesh
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = stats.get("color", Color(0.6, 0.6, 0.6))
+		mat.roughness = 0.85
+		_mesh.material_override = mat
+		_mesh.position = Vector3(0, footprint.y * 0.5, 0)
+		add_child(_mesh)
 
 	_add_selection_proxy()
+	# LAST, once every mesh this building will ever have exists - the GLB, its
+	# decals, the fallback box. The finish walks what is there when it runs, so
+	# calling it any earlier silently skips whatever is added afterwards.
+	BattleFinishScript.apply(self)
 
 
 # A DEFENCE built from a player blueprint rather than a catalog entry.
@@ -154,6 +166,10 @@ func setup_from_blueprint(blueprint: Dictionary, structure_team: int, bp_manager
 	# the same rules a tank does and needs no defence-specific weapon code.
 	attack_range = UnitAssemblyScript.attach_weapons(defense_hull)
 	_add_selection_proxy()
+	# Defences are built from a player blueprint, so they carry the same hull and
+	# module materials a unit does and need the same battlefield finish. Omitting
+	# it here left turrets glossy while the tanks beside them were not.
+	BattleFinishScript.apply(self)
 	return true
 
 

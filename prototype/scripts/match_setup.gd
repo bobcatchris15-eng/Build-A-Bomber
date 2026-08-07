@@ -298,10 +298,14 @@ func _on_start_pressed():
 	var map_name := ""
 	if map_btn and map_btn.selected >= 0 and map_btn.selected < MAP_IDS.size():
 		map_name = MapCatalog.get_map_name(MAP_IDS[map_btn.selected])
+	# Battle.tscn is the match runtime. It used to be Skirmish.tscn, and briefly a
+	# MatchConfig.target_scene indirection while both existed - that indirection
+	# died with the legacy runtime rather than being left as a seam pointing at
+	# one option.
 	if router:
-		router.goto("res://scenes/Skirmish.tscn", map_name)
+		router.goto("res://scenes/Battle.tscn", map_name)
 	else:
-		get_tree().change_scene_to_file("res://scenes/Skirmish.tscn")
+		get_tree().change_scene_to_file("res://scenes/Battle.tscn")
 
 
 # Routed through SceneRouter so leaving this screen fades out rather than cutting.

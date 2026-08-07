@@ -153,7 +153,7 @@ func _scenario_mainlab_module_popup():
 	await get_tree().process_frame
 
 func _scenario_skirmish_hud():
-	var scene = load("res://scenes/Skirmish.tscn").instantiate()
+	var scene = load("res://scenes/Battle.tscn").instantiate()
 	get_tree().root.add_child(scene)
 	get_tree().current_scene = scene
 	await get_tree().process_frame

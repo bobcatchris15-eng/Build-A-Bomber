@@ -26,3 +26,4 @@ var selected_blueprint_paths: Array = [] # [] = automatic top-8-newest-saved, ol
 var ai_difficulty: String = "normal" # "easy" / "normal" / "hard"
 var starting_metal: int = -1 # -1 = Skirmish's own default (450)
 var starting_crystal: int = -1 # -1 = Skirmish's own default (150)
+

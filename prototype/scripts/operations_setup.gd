@@ -263,9 +263,9 @@ func _on_start_operation_pressed() -> void:
 
 	var router = get_node_or_null("/root/SceneRouter")
 	if router:
-		router.goto("res://scenes/Skirmish.tscn")
+		router.goto("res://scenes/Battle.tscn")
 	else:
-		get_tree().change_scene_to_file("res://scenes/Skirmish.tscn")
+		get_tree().change_scene_to_file("res://scenes/Battle.tscn")
 
 
 # Routed through SceneRouter so leaving this screen fades out rather than cutting.

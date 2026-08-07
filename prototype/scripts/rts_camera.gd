@@ -198,7 +198,14 @@ func zoom_to_cursor(new_height: float, screen_pos: Vector2) -> void:
 		global_position.z += before.z - after.z
 
 func _unhandled_input(event):
-	if event is InputEventMouseButton:
+	# `event.pressed` IS LOAD-BEARING, not tidiness. A mouse wheel emits a pressed
+	# event AND a released one for every notch, so without this guard each notch
+	# zoomed twice - and, worse, a wheel that a Control had already consumed still
+	# zoomed the world on the release half. That is why scrolling a build list
+	# scrolled the list and zoomed the map at the same time: the fix belonged here,
+	# not in the HUD, and two attempts to absorb the event on the HUD side could
+	# never have worked.
+	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			zoom_to_cursor(height - zoom_speed, event.position)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:

@@ -244,21 +244,39 @@ func _smoke_test_map(map_id: String) -> bool:
 	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
 	var map_def = MapCatalogScript.get_map(map_id)
 
-	var skirmish = preload("res://scenes/Skirmish.tscn").instantiate()
-	skirmish.map_id = map_id
-	root.add_child(skirmish)
-	current_scene = skirmish
-	await tree.process_frame
-	await tree.process_frame
-	await tree.process_frame
-
-	if skirmish.map_id != map_id or skirmish.current_map.get("name", "") != map_def.name:
-		print("  [FAIL] Skirmish did not load the requested map '", map_id, "'")
-		skirmish.queue_free()
+	# MIGRATED FROM Skirmish.tscn TO Battle.tscn with the retirement of the legacy
+	# runtime. These ten per-map suites are about the MAPS - spawn legality,
+	# resource reachability, HQ-to-HQ connectivity, fairness lint - and none of
+	# that belongs to a particular match controller, so they were migrated rather
+	# than retired with the 62 suites that tested the legacy implementation itself.
+	#
+	# THE ONE STRUCTURAL DIFFERENCE: match_director._ready() awaits its terrain
+	# bake, so it is a coroutine and the scene is NOT ready after a fixed number of
+	# frames the way Skirmish was. Waiting on `world_is_ready` is required, not
+	# defensive - a fixed frame count here would assert against an unbuilt map and
+	# fail for reasons that have nothing to do with the map.
+	var battle = preload("res://scenes/Battle.tscn").instantiate()
+	battle.map_id = map_id
+	root.add_child(battle)
+	current_scene = battle
+	var guard := 0
+	while not battle.world_is_ready and guard < 3000:
+		await tree.process_frame
+		guard += 1
+	if not battle.world_is_ready:
+		print("  [FAIL] Battle never finished building map '", map_id, "'")
+		battle.queue_free()
 		return false
-	if not is_instance_valid(skirmish.player_hq) or not is_instance_valid(skirmish.enemy_hq):
+
+	if battle.map_id != map_id or battle.current_map.get("name", "") != map_def.name:
+		print("  [FAIL] Battle did not load the requested map '", map_id, "'")
+		battle.queue_free()
+		return false
+	var player_hq = _find_hq(battle, battle.PLAYER_TEAM)
+	var enemy_hq = _find_hq(battle, battle.ENEMY_TEAM)
+	if player_hq == null or enemy_hq == null:
 		print("  [FAIL] Player/enemy HQ failed to spawn on map '", map_id, "'")
-		skirmish.queue_free()
+		battle.queue_free()
 		return false
 
 	# RTS_CORE_ROADMAP.md B3: player_start/enemy_start became a spawns
@@ -273,7 +291,7 @@ func _smoke_test_map(map_id: String) -> bool:
 		for key in ["hq", "factory", "refinery"]:
 			if TerrainBuilderScript.is_position_blocked(map_def, start[key]):
 				print("  [FAIL] ", start_name, ".", key, " (", start[key], ") sits on blocked terrain (water/obstacle/ramp)")
-				skirmish.queue_free()
+				battle.queue_free()
 				return false
 
 	# Every resource node must be reachable from ITS side's harvester spawn.
@@ -281,10 +299,10 @@ func _smoke_test_map(map_id: String) -> bool:
 	var enemy_start_pos = enemy_start.harvester
 	for node_data in map_def.get("resource_nodes", []):
 		var from_pos = player_start_pos if node_data.position.distance_to(player_start_pos) < node_data.position.distance_to(enemy_start_pos) else enemy_start_pos
-		var path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, from_pos, node_data.position, true)
+		var path = NavigationServer3D.map_get_path(battle.ground_nav_map, from_pos, node_data.position, true)
 		if path.size() < 2 or path[path.size() - 1].distance_to(node_data.position) > 3.0:
 			print("  [FAIL] Resource node at ", node_data.position, " is not reachable by ground navmesh from the nearest base")
-			skirmish.queue_free()
+			battle.queue_free()
 			return false
 
 	# The two HQs must be mutually reachable (AI can path to the player,
@@ -293,57 +311,62 @@ func _smoke_test_map(map_id: String) -> bool:
 	# RTS_CORE_ROADMAP.md C1: a path can no longer reach the HQ's own exact
 	# center - the HQ IS a building now, so it carves its own navmesh hole
 	# same as any other. HQ_REACHABLE_MARGIN accounts for stopping at the
-	# hole's edge (largest static building's footprint diagonal, ~6.25 for
-	# heavy_manufactory, HQ itself is smaller) plus up to one GRID_CELL
-	# (4.0) of quantization slop - the old 5.0 was sized for a world with no
-	# building holes at all and started failing the instant C1 landed.
+	# hole's edge plus up to one GRID_CELL (4.0) of quantization slop.
 	const HQ_REACHABLE_MARGIN := 12.0
-	var hq_path = NavigationServer3D.map_get_path(skirmish.ground_nav_map, player_start.hq, enemy_start.hq, true)
+	var hq_path = NavigationServer3D.map_get_path(battle.ground_nav_map, player_start.hq, enemy_start.hq, true)
 	if hq_path.size() < 2 or hq_path[hq_path.size() - 1].distance_to(enemy_start.hq) > HQ_REACHABLE_MARGIN:
 		print("  [FAIL] Player and enemy HQs are not mutually reachable on the ground navmesh")
-		skirmish.queue_free()
+		battle.queue_free()
 		return false
 
-	# RTS_CORE_ROADMAP.md B10: the fairness lint every map has to clear -
-	# generalizes across however many spawns a map authors (today's maps
-	# all have exactly 2, so this mostly re-proves the checks above in a
-	# more general form, plus the two genuinely NEW ones: a minimum nearby
-	# economy per spawn, and pairwise spawn-distance variance).
-	var fairness_errors = MapCatalogScript.lint_spawn_fairness(map_def, skirmish.ground_nav_map)
+	# RTS_CORE_ROADMAP.md B10: the fairness lint every map has to clear.
+	var fairness_errors = MapCatalogScript.lint_spawn_fairness(map_def, battle.ground_nav_map)
 	if not fairness_errors.is_empty():
 		print("  [FAIL] Spawn fairness lint failed for map '", map_id, "': ", fairness_errors)
-		skirmish.queue_free()
+		battle.queue_free()
 		return false
 
-	# Economy/build loop still works: queue a unit, tick past its build
-	# time, confirm the factory actually produced it.
-	var factory = skirmish.get_team_factory(skirmish.PLAYER_TEAM)
-	if not factory:
-		print("  [FAIL] No player factory found on map '", map_id, "'")
-		skirmish.queue_free()
-		return false
-	var harv_bp = skirmish._find_harvester_blueprint(skirmish.roster)
+	# Economy/build loop still works: queue a unit, tick past its build time,
+	# confirm it was actually produced. Goes through ProductionService rather than
+	# through a factory node - production is a service in the new runtime, and the
+	# queue is global per tier rather than owned by a building.
+	var harv_bp = _find_harvester_blueprint(battle)
 	if harv_bp.is_empty():
 		print("  [FAIL] No harvester blueprint found in the roster for map '", map_id, "'")
-		skirmish.queue_free()
+		battle.queue_free()
 		return false
-	var units_before = skirmish.get_team_units(skirmish.PLAYER_TEAM).size()
-	factory.queue_unit(harv_bp, 0.05)
-	# Building.gd's production queue ticks in its own _physics_process(),
-	# which the engine calls automatically each real physics frame -
-	# awaiting enough frames here (well past the 0.05s build_time at any
-	# real frame rate) lets it complete without manually driving it.
+	var queue_name = preload("res://scripts/battle/economy/design_costing.gd").queue_for_design(harv_bp)
+	var units_before = battle.get_team_units(battle.PLAYER_TEAM).size()
+	battle.production.enqueue_unit(battle.PLAYER_TEAM, harv_bp, 0, 0, 0.05, queue_name)
 	for i in range(30):
 		await tree.process_frame
-	var units_after = skirmish.get_team_units(skirmish.PLAYER_TEAM).size()
+	var units_after = battle.get_team_units(battle.PLAYER_TEAM).size()
 	if units_after <= units_before:
-		print("  [FAIL] Factory did not produce a queued unit on map '", map_id, "' (before=", units_before, " after=", units_after, ")")
-		skirmish.queue_free()
+		print("  [FAIL] Production did not produce a queued unit on map '", map_id, "' (before=", units_before, " after=", units_after, ")")
+		battle.queue_free()
 		return false
 
-	skirmish.queue_free()
+	battle.queue_free()
 	await tree.process_frame
 	return true
+
+
+func _find_hq(battle, team: int):
+	for s in battle.get_team_structures(team):
+		if s.kind == "hq":
+			return s
+	return null
+
+
+func _find_harvester_blueprint(battle) -> Dictionary:
+	for design in battle.roster:
+		if battle.is_defence_design(design):
+			continue
+		for module in design.get("modules", []):
+			if str(module.get("type_id", "")) == "resource_harvester":
+				return design
+	return {}
+
 
 # RTS_CORE_ROADMAP.md B9: an 8-bit-per-channel Image (FORMAT_RGB8, what
 # _minimap_static_image/_minimap_image both use) quantizes/rounds a float

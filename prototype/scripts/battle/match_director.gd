@@ -39,6 +39,11 @@ const StructureScript = preload("res://scripts/battle/buildings/structure.gd")
 const PlacementServiceScript = preload("res://scripts/battle/buildings/placement_service.gd")
 const MatchStatsScript = preload("res://scripts/battle/match_stats.gd")
 const AfterActionReportScript = preload("res://scripts/after_action_report.gd")
+const PerfHUDScript = preload("res://scripts/perf_hud.gd")
+const AdminMenuScript = preload("res://scripts/battle/hud/admin_menu.gd")
+const BattleFinishScript = preload("res://scripts/battle/battle_finish.gd")
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
+const UnitAssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
 const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.gd")
@@ -84,6 +89,24 @@ var economy: EconomyService = null
 var production: ProductionService = null
 var production_hud: ProductionHUD = null
 var stats = null
+var _perf_hud: CanvasLayer = null
+var admin_menu: Control = null
+
+# Emitted once the match is genuinely playable: terrain baked, units spawned, HUD
+# built. SceneRouter waits on this before lifting its fade.
+#
+# WHY IT IS NEEDED. _ready() awaits _setup_terrain(), which makes _ready() a
+# COROUTINE - it returns to the engine at that await and finishes many frames
+# later. The router's "wait two frames for the incoming scene to build itself"
+# is true for an ordinary scene and false for this one, so the fade lifted on a
+# half-built match: bases already spawned (they are created before the await) and
+# floating over an unbuilt map, with no terrain and no HUD yet.
+#
+# The flag exists alongside the signal for the race where the world finishes
+# BEFORE the router gets around to awaiting - a signal already emitted is a
+# signal that never arrives, and awaiting one hangs forever.
+signal world_ready
+var world_is_ready: bool = false
 var vision: VisionService = null
 var battle_hud: BattleHUD = null
 var commander: Commander = null
@@ -138,6 +161,11 @@ var _neighbour_grid: Dictionary = {}
 
 
 func _ready() -> void:
+	# The hull-template cache is static and therefore outlives a match. Dropped at
+	# the start of every one, so a design re-saved in the Lab between matches is
+	# rebuilt rather than served from the previous match's geometry.
+	UnitAssemblyScript.clear_hull_cache()
+
 	bp_manager = BlueprintManagerScript.new()
 	bp_manager.name = "BlueprintManager"
 	add_child(bp_manager)
@@ -200,6 +228,9 @@ func _ready() -> void:
 	commander.setup(self, ENEMY_TEAM,
 		match_config.ai_difficulty if match_config and "ai_difficulty" in match_config else "normal")
 
+	world_is_ready = true
+	world_ready.emit()
+
 
 # Vision runs on its own timer rather than in _physics_process. The scan is
 # O(viewers x targets) per team and its answer changing three times a second is
@@ -225,9 +256,13 @@ func _setup_vision() -> void:
 func _on_vision_tick() -> void:
 	if game_over:
 		return
+	var t := Profiler.start()
 	vision.tick()
+	Profiler.stop("vision", t)
 	if battle_hud != null:
+		t = Profiler.start()
 		battle_hud.refresh()
+		Profiler.stop("hud_minimap", t)
 
 
 # --- World ------------------------------------------------------------------
@@ -464,6 +499,7 @@ func _bundled_loadout_paths() -> Array:
 
 
 func spawn_unit(blueprint: Dictionary, unit_team: int, at: Vector3) -> Node3D:
+	var _prof := Profiler.start()
 	var unit := UnitScript.new()
 	# Added to the tree BEFORE setup(): reconstruct_vehicle() and the nav agent
 	# both need the node to be inside the tree to resolve global transforms and
@@ -482,7 +518,12 @@ func spawn_unit(blueprint: Dictionary, unit_team: int, at: Vector3) -> Node3D:
 		# The blueprint named a hull the catalog no longer has. Drop it rather
 		# than leaving a half-assembled body on the field.
 		unit.queue_free()
+		Profiler.stop("spawn_unit", _prof)
 		return null
+	# The battlefield finish. Applied after assembly, because the materials do not
+	# exist until reconstruct_vehicle() has built the hull and its modules.
+	BattleFinishScript.apply(unit)
+	Profiler.stop("spawn_unit", _prof)
 	return unit
 
 
@@ -526,11 +567,13 @@ func _spawn_bases() -> void:
 
 
 func _place_structure(kind: String, structure_team: int, at: Vector3) -> Structure:
+	var _prof := Profiler.start()
 	var s := StructureScript.new()
 	add_child(s)
 	s.global_position = Vector3(at.x, terrain_height_at(at), at.z)
 	s.setup(kind, structure_team)
 	s.died.connect(_on_structure_died)
+	Profiler.stop("place_structure", _prof)
 	return s
 
 
@@ -647,10 +690,31 @@ func _rebake_navmesh() -> void:
 	_nav_rebake_pending = false
 	if not _ground_nav_region.is_valid():
 		return
-	TerrainBuilder.rebake_ground_and_amphibious(
-		current_map, _building_holes(), _ground_nav_region, _amphibious_nav_region)
-	# Every cached field was sampled against the OLD passability, and every live
-	# agent is following a path through what is now a wall.
+	# ASYNC. terrain_builder.gd has carried an async twin of this call since the
+	# old runtime, written for exactly this situation and documented in its own
+	# header as "the mid-match rebake is the one that must not block" - and the
+	# battle layer was calling the SYNCHRONOUS one anyway.
+	#
+	# Measured in a staged engagement: a single mid-match placement stalled one
+	# frame for 3940 ms. That is not a dropped frame, it is the game stopping
+	# dead, and it lands whenever the AI sites a building - which is why a hitch
+	# can appear to coincide with entering combat while having nothing to do with
+	# combat.
+	#
+	# Only the GDScript face generation stays on the main thread; Recast itself
+	# goes to a worker. The repath moves into the callback so units are steered
+	# against the FINISHED navmesh rather than a half-updated one.
+	TerrainBuilder.rebake_ground_and_amphibious_async(
+		current_map, _building_holes(), _ground_nav_region, _amphibious_nav_region,
+		_on_navmesh_rebaked)
+
+
+# Runs when both surfaces have finished baking. Every cached field was sampled
+# against the OLD passability, and every live agent is following a path through
+# what may now be a wall.
+func _on_navmesh_rebaked() -> void:
+	if not is_inside_tree():
+		return
 	flow_fields.invalidate()
 	for u in get_tree().get_nodes_in_group("units"):
 		if is_instance_valid(u) and not u.is_dead and u.has_method("request_repath"):
@@ -894,11 +958,46 @@ func nearest_resource_node(from: Vector3, requester: Node = null) -> Node3D:
 		# an empty patch a short walk further wins, small enough that a lone
 		# harvester does not cross the map to avoid one neighbour.
 		var occupied: int = NODE_WORK_SLOTS - _free_slots(n)
-		var score: float = distance + float(occupied) * 18.0
+		var score: float = distance + float(occupied) * 18.0 \
+			- _shortage_pull(requester, n.resource_type)
 		if score < best_score:
 			best_score = score
 			best = n
 	return best if best != null else best_any
+
+
+# How much closer a patch of `resource_type` reads when the team is short of it,
+# in metres of effective distance.
+#
+# WHY A DISTANCE DISCOUNT AND NOT A HARD PREFERENCE. Harvesters used to pick
+# purely on distance plus crowding, so a team sitting at zero metal with a full
+# crystal stockpile would keep sending every harvester to the crystal patch that
+# happened to be nearer - the economy starves on one axis while the other
+# overflows, and the player watches it happen with no way to intervene short of
+# manual orders.
+#
+# Expressed as a discount on the score rather than as a filter because the
+# alternative - "always take the scarce type" - makes harvesters walk past a
+# patch at their feet to cross the map, which costs more income than the
+# imbalance did. At SHORTAGE_PULL a completely empty stockpile is worth about
+# half the map's short axis; a patch further away than that is still not worth
+# the trip.
+#
+# The ramp is against a REFERENCE stock rather than against the other resource:
+# what matters is "can I afford to build things", not which pile is bigger.
+# Comparing the two piles directly would have a team with 20 metal and 10 crystal
+# behaving as though it were flush.
+const SHORTAGE_PULL := 55.0
+const SHORTAGE_REFERENCE := 700.0
+
+func _shortage_pull(requester: Node, resource_type: String) -> float:
+	if requester == null or economy == null:
+		return 0.0
+	var team: int = requester.team
+	var stock: float = float(economy.crystal(team)) if resource_type == "crystal" \
+		else float(economy.metal(team))
+	var scarcity: float = clampf(1.0 - stock / SHORTAGE_REFERENCE, 0.0, 1.0)
+	return scarcity * SHORTAGE_PULL
 
 
 func nearest_refinery(from: Vector3, for_team: int) -> Node3D:
@@ -1447,8 +1546,14 @@ func get_nearby_damageable(pos: Vector3, radius: float) -> Array:
 func _physics_process(delta: float) -> void:
 	if game_over:
 		return
+	var t := Profiler.start()
 	_rebuild_neighbour_grid()
+	Profiler.stop("neighbour_grid", t)
+
+	t = Profiler.start()
 	_tick_lazy_navmesh(delta)
+	Profiler.stop("navmesh", t)
+
 	if stats:
 		stats.tick(delta)
 	if economy:
@@ -1457,14 +1562,26 @@ func _physics_process(delta: float) -> void:
 		# spending it - the distinction the whole measure exists to make.
 		economy.tick_income(delta)
 	if production:
+		t = Profiler.start()
 		production.tick(delta)
+		Profiler.stop("production", t)
 	if commander:
+		t = Profiler.start()
 		commander.tick(delta)
+		Profiler.stop("commander", t)
 	# Squads tick every frame while the commander re-decides every couple of
 	# seconds: the macro choice is slow, but a squad deciding to retreat cannot
 	# wait two seconds for the next decision window.
+	t = Profiler.start()
 	for squad in _squads.values():
 		squad.tick(delta)
+	Profiler.stop("squads", t)
+
+	# LAST in the director's tick. Units and weapons own their own
+	# _physics_process and the engine runs a parent before its children, so this
+	# closes the frame on everything: whatever the sections above do not account
+	# for shows up as the gap between their sum and the frame total.
+	Profiler.end_frame()
 
 
 # A coarse bucket grid, rebuilt from scratch each tick rather than maintained
@@ -1624,15 +1741,41 @@ func _handle_key(event: InputEventKey) -> void:
 		KEY_C:
 			orders.hold(selection.selected)
 			_flash("STANCE: HOLD POSITION")
+		KEY_F3:
+			_toggle_perf_hud()
 		KEY_ESCAPE:
 			# Escape backs out of the most specific mode first. Clearing the
 			# selection out from under a player who meant "put this building down"
 			# is two mistakes in one keystroke.
+			if admin_menu != null and admin_menu.is_open():
+				admin_menu.toggle()
+				return
 			if is_placing():
 				cancel_placement()
 				return
-			_set_armed(false)
-			selection.clear()
+			if not selection.selected.is_empty() or _attack_move_armed:
+				_set_armed(false)
+				selection.clear()
+				return
+			# Nothing left to back out of, so Escape means the menu - which is
+			# where a player who has pressed it twice already expects to arrive.
+			if admin_menu != null:
+				admin_menu.toggle()
+
+
+# F3, matching Skirmish. Built on demand rather than left always-on for the
+# reason perf_hud.gd's own header gives: the offline harnesses cannot reproduce
+# the slowdown at 6-8 engaged units, so the numbers have to be readable during a
+# real match. The overlay is the instrument for the stutter report, not a fix
+# for it.
+func _toggle_perf_hud() -> void:
+	if is_instance_valid(_perf_hud):
+		_perf_hud.queue_free()
+		_perf_hud = null
+		return
+	_perf_hud = PerfHUDScript.new()
+	_perf_hud.name = "PerfHUD"
+	add_child(_perf_hud)
 
 
 # A left release is a drag if the mouse actually travelled, a click otherwise.
@@ -1863,6 +2006,17 @@ func _build_hud() -> void:
 	production_hud = ProductionHUDScript.new()
 	layer.add_child(production_hud)
 	production_hud.setup(self)
+
+	admin_menu = AdminMenuScript.new()
+	admin_menu.name = "AdminMenu"
+	layer.add_child(admin_menu)
+	admin_menu.main_menu_requested.connect(func():
+		var router = get_node_or_null("/root/SceneRouter")
+		if router != null:
+			router.goto("res://scenes/MainMenu.tscn")
+		else:
+			get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
+	admin_menu.quit_requested.connect(func(): get_tree().quit())
 
 
 func _update_selection_rect(at: Vector2) -> void:

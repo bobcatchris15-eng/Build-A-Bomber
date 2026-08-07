@@ -44,10 +44,22 @@ var accent: Color = Color(0, 0, 0, 0)
 
 
 func _init() -> void:
-	# The plate is decoration. Every click belongs to the controls on top of it,
-	# and a plate that swallowed them would break the header button underneath the
-	# cursor's own hover test.
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# STOP, so the plate absorbs anything the controls on top of it did not want -
+	# specifically the mouse wheel, which would otherwise reach the camera's
+	# _unhandled_input and zoom the world out from under a player who was reading
+	# a build list.
+	#
+	# THIS HAS TO BE THE ENGINE'S PICK ORDER RATHER THAN A GEOMETRIC TEST. The
+	# first attempt swallowed the wheel in _input() against the plate's rect, and
+	# _input runs BEFORE GUI does - so it also stole the event from the build
+	# list's own ScrollContainer and the list stopped scrolling. Here the plate is
+	# the LAST thing under the cursor: the slot's controls are later siblings, so
+	# they are picked first, and only what they decline lands here.
+	#
+	# It absorbs clicks too, which is correct - a click on the visible chamfered
+	# border of a toolbox is a click on the toolbox, not an order to move units to
+	# the ground behind it.
+	mouse_filter = Control.MOUSE_FILTER_STOP
 
 
 # The chamfered outline, inset by `inset` and offset by `offset`.
