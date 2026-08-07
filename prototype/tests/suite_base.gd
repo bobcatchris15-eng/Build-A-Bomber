@@ -341,7 +341,7 @@ func _smoke_test_map(map_id: String) -> bool:
 		return false
 	var queue_name = preload("res://scripts/battle/economy/design_costing.gd").queue_for_design(harv_bp)
 	var units_before = battle.get_team_units(battle.PLAYER_TEAM).size()
-	battle.production.enqueue_unit(battle.PLAYER_TEAM, harv_bp, 0, 0, 0.05, queue_name)
+	battle.production.enqueue_unit(battle.PLAYER_TEAM, harv_bp, 0, 0.05, queue_name)
 	for i in range(30):
 		await tree.process_frame
 	var units_after = battle.get_team_units(battle.PLAYER_TEAM).size()

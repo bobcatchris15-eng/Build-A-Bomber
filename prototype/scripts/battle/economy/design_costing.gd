@@ -14,9 +14,22 @@ extends RefCounted
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const ModuleDataScript = preload("res://scripts/module_data.gd")
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 
 
-static func blueprint_cost(data: Dictionary) -> Vector2i:
+# WHAT A DESIGN COSTS, IN CREDITS. The single number the economy actually spends.
+#
+# Materials are still summed as metal and crystal underneath - see
+# blueprint_materials() - because that pair is how the catalog authors "how
+# advanced is this", and crystal converts at 2x. A design leaning on optics,
+# energy weapons or exotic armour is simply more expensive.
+static func blueprint_cost(data: Dictionary) -> int:
+	return ResourceCatalogScript.credits_from_materials(blueprint_materials(data))
+
+
+# The raw metal/crystal breakdown. Kept for the Design Lab, which is where
+# "this tweak costs you crystal, hard" is a thing worth showing.
+static func blueprint_materials(data: Dictionary) -> Vector2i:
 	var hull_type: String = data.get("hull_type", "medium_hull")
 	var sc: Dictionary = data.get("hull_scale", {"x": 1.0, "y": 1.0, "z": 1.0})
 	var hull_cost: Vector2i = ModuleCatalog.compute_hull_cost(
@@ -46,10 +59,14 @@ static func blueprint_cost(data: Dictionary) -> Vector2i:
 	return Vector2i(metal, crystal)
 
 
-# Crystal counts double: it is the scarcer resource, so a crystal-heavy design
-# should cost tempo as well as money.
-static func build_time_for_cost(cost: Vector2i) -> float:
-	return clampf((cost.x + cost.y * 2) * 0.05, 3.0, 40.0)
+# Build time is proportional to price, which is what makes a production line
+# draw a FLAT 20 credits/s whatever it is building - the fact the whole economy
+# balance rests on (see ECONOMY_BALANCE.md). The `cost.x + cost.y * 2` this
+# replaces was the same arithmetic with the crystal weighting inlined; it now
+# lives in ResourceCatalog.CRYSTAL_TO_CREDITS, where the rest of the economy can
+# see it.
+static func build_time_for_cost(credits: int) -> float:
+	return clampf(float(credits) * 0.05, 3.0, 40.0)
 
 
 # Which of the five queues a unit design comes off, from its hull's weight tier.

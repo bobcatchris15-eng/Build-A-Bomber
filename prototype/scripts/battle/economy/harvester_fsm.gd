@@ -439,10 +439,10 @@ func _unload(delta: float) -> void:
 		return
 	# Converted per type at the door: a full hopper of oil is worth four times the
 	# same hopper of lumber, and the truck never had to know that.
-	var payout := Vector2i.ZERO
+	var payout := 0
 	for type_id in cargo_by_type:
-		payout += ResourceCatalogScript.deliver_value(type_id, int(cargo_by_type[type_id]))
-	_world.deliver(_unit.team, payout.x, payout.y)
+		payout += ResourceCatalogScript.deliver_credits(type_id, int(cargo_by_type[type_id]))
+	_world.deliver(_unit.team, payout)
 	cargo_by_type.clear()
 	release()
 	_to_searching()

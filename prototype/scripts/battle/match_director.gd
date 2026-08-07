@@ -132,8 +132,9 @@ var enemy_roster: Array = []
 
 # Starting bank. Enough for a refinery plus a light manufactory, so the opening
 # is a real choice rather than a forced single purchase.
-const STARTING_METAL := 450
-const STARTING_CRYSTAL := 150
+# 750 credits = the old 450 metal + 150 crystal at the 2x crystal rate, so the
+# opening bank buys exactly what it always did.
+const STARTING_CREDITS := 750
 
 # The player's build bar tops out here, matching the old runtime's loadout limit.
 const ROSTER_LIMIT := 12
@@ -192,13 +193,10 @@ func _ready() -> void:
 		# The pre-match screen's resource preset, when it set one. Both sentinels
 		# are -1 rather than 0, because "start with nothing" is a legitimate
 		# choice and must be distinguishable from "not configured".
-		var start_metal: int = STARTING_METAL
-		var start_crystal: int = STARTING_CRYSTAL
-		if match_config and "starting_metal" in match_config and match_config.starting_metal >= 0:
-			start_metal = match_config.starting_metal
-		if match_config and "starting_crystal" in match_config and match_config.starting_crystal >= 0:
-			start_crystal = match_config.starting_crystal
-		economy.add_team(t, start_metal, start_crystal)
+		var start_credits: int = STARTING_CREDITS
+		if match_config and "starting_credits" in match_config and match_config.starting_credits >= 0:
+			start_credits = match_config.starting_credits
+		economy.add_team(t, start_credits)
 		production.add_team(t)
 	production.unit_completed.connect(_on_unit_completed)
 	production.structure_ready.connect(_on_structure_ready)
@@ -531,7 +529,7 @@ func spawn_unit(blueprint: Dictionary, unit_team: int, at: Vector3) -> Node3D:
 	if stats != null and unit_team == PLAYER_TEAM:
 		# Player only. The report is the player's own debrief, and mixing the
 		# opponent's designs into it would make every column meaningless.
-		stats.record_built(blueprint, DesignCostingScript.blueprint_cost(blueprint).x)
+		stats.record_built(blueprint, DesignCostingScript.blueprint_cost(blueprint))
 	if not unit.setup(blueprint, unit_team, bp_manager, self, faction):
 		# The blueprint named a hull the catalog no longer has. Drop it rather
 		# than leaving a half-assembled body on the field.
@@ -1100,12 +1098,11 @@ func _shortage_pull(requester: Node, resource_type: String) -> float:
 	if requester == null or economy == null:
 		return 0.0
 	var team: int = requester.team
-	# Which pool this resource pays into - lumber and oil both feed metal today.
-	# ResourceCatalog owns that mapping so the credits pass has one place to
-	# delete rather than several.
-	var pays_crystal: bool = ResourceCatalogScript.deliver_value(resource_type, 1).y > 0
-	var stock: float = float(economy.crystal(team)) if pays_crystal \
-		else float(economy.metal(team))
+	# ONE POOL now, so scarcity is simply "am I broke" rather than "am I broke in
+	# the particular currency this patch happens to pay out". `resource_type` is
+	# kept in the signature because value weighting in nearest_resource_node()
+	# already differentiates the types, and a future rule may want to again.
+	var stock: float = float(economy.credits(team))
 	var scarcity: float = clampf(1.0 - stock / SHORTAGE_REFERENCE, 0.0, 1.0)
 	return scarcity * SHORTAGE_PULL
 
@@ -1123,8 +1120,8 @@ func nearest_refinery(from: Vector3, for_team: int) -> Node3D:
 	return best
 
 
-func deliver(for_team: int, add_metal: int, add_crystal: int) -> void:
-	economy.credit(for_team, add_metal, add_crystal)
+func deliver(for_team: int, amount: int) -> void:
+	economy.credit(for_team, amount)
 
 
 func structures_of_kinds(for_team: int, kinds: Array) -> Array:
@@ -1381,10 +1378,10 @@ func ai_build_defence(for_team: int) -> bool:
 	var design := ai_design_for_role(for_team, "defense")
 	if design.is_empty():
 		return false
-	var cost: Vector2i = DesignCostingScript.blueprint_cost(design)
+	var cost: int = DesignCostingScript.blueprint_cost(design)
 	return not production.enqueue_structure(for_team,
 		BuildingCatalogScript.QUEUE_DEFENSE, "defense",
-		cost.x, cost.y, DesignCostingScript.build_time_for_cost(cost), design).is_empty()
+		cost, DesignCostingScript.build_time_for_cost(cost), design).is_empty()
 
 
 # Where the AI puts its next building. Delegates to PlacementService, which is
@@ -1445,13 +1442,13 @@ func ai_build_unit(for_team: int, role: String) -> bool:
 	if pick.is_empty():
 		return false
 
-	var cost: Vector2i = DesignCostingScript.blueprint_cost(pick)
+	var cost: int = DesignCostingScript.blueprint_cost(pick)
 	var queue_name: String = DesignCostingScript.queue_for_design(pick)
 
 	# SELF-THROTTLE. The commander re-decides every DECISION_INTERVAL and calls
 	# this each time, so without a depth cap it enqueues another unit every two
 	# seconds forever. Production drip-feeds cost, so a deep queue drains every
-	# credit as it arrives: the AI sat pinned at 0 metal with three harvesters
+	# credit as it arrives: the AI sat pinned at 0 credits with three harvesters
 	# queued, and every other action - which all gate on having money - was
 	# vetoed. It looked like an AI with one idea and was really an AI that had
 	# spent everything before it could have a second one.
@@ -1459,7 +1456,7 @@ func ai_build_unit(for_team: int, role: String) -> bool:
 	# Two deep, the same cap the old runtime used (enemy_ai.gd's _queue_entry).
 	if production.queue(for_team, queue_name).size() >= AI_MAX_QUEUE_DEPTH:
 		return false
-	return not production.enqueue_unit(for_team, pick, cost.x, cost.y,
+	return not production.enqueue_unit(for_team, pick, cost,
 		DesignCostingScript.build_time_for_cost(cost), queue_name).is_empty()
 
 
@@ -1544,7 +1541,8 @@ func ai_build_structure(for_team: int, kind: String) -> bool:
 		return false
 	return not production.enqueue_structure(for_team,
 		BuildingCatalogScript.QUEUE_BUILDING, kind,
-		stats.get("cost_metal", 0), stats.get("cost_crystal", 0),
+		ResourceCatalogScript.credits_from_materials(Vector2i(
+			stats.get("cost_metal", 0), stats.get("cost_crystal", 0))),
 		stats.get("build_time", 10.0)).is_empty()
 
 

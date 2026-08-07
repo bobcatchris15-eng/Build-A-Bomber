@@ -68,13 +68,12 @@ func depth(team: int, name: String) -> int:
 # Returns the job, or an empty dictionary if the team has no live structure
 # feeding that queue - queueing a heavy tank with no heavy manufactory has to
 # fail loudly at the door rather than sit in a line that can never advance.
-func enqueue_unit(team: int, blueprint: Dictionary, cost_metal: int, cost_crystal: int,
+func enqueue_unit(team: int, blueprint: Dictionary, cost: int,
 		base_time: float, queue_name: String) -> Dictionary:
 	var contributors := _contributor_count(team, queue_name)
 	if contributors <= 0:
 		return {}
-	var job := _make_job(blueprint.get("name", "UNIT"), cost_metal, cost_crystal,
-		base_time, contributors)
+	var job := _make_job(blueprint.get("name", "UNIT"), cost, base_time, contributors)
 	job["blueprint"] = blueprint
 	job["is_structure"] = false
 	queue(team, queue_name).append(job)
@@ -85,12 +84,11 @@ func enqueue_unit(team: int, blueprint: Dictionary, cost_metal: int, cost_crysta
 # Adds a structure. `kind` is a BuildingCatalog key for the Building queue, or
 # the blueprint is a custom defence design for the Defense queue.
 func enqueue_structure(team: int, queue_name: String, kind: String,
-		cost_metal: int, cost_crystal: int, base_time: float,
-		blueprint: Dictionary = {}) -> Dictionary:
+		cost: int, base_time: float, blueprint: Dictionary = {}) -> Dictionary:
 	var contributors := _contributor_count(team, queue_name)
 	if contributors <= 0:
 		return {}
-	var job := _make_job(kind, cost_metal, cost_crystal, base_time, contributors)
+	var job := _make_job(kind, cost, base_time, contributors)
 	job["kind"] = kind
 	job["blueprint"] = blueprint
 	job["is_structure"] = true
@@ -103,18 +101,15 @@ func enqueue_structure(team: int, queue_name: String, kind: String,
 # losing a contributor later never retroactively re-times an item already in the
 # line - a job that was quoted 20 seconds takes 20 seconds. Only the low-power
 # rate is live, because that one is a penalty the player can see and fix.
-func _make_job(label: String, cost_metal: int, cost_crystal: int,
-		base_time: float, contributors: int) -> Dictionary:
+func _make_job(label: String, cost: int, base_time: float, contributors: int) -> Dictionary:
 	var index: int = clampi(contributors - 1, 0, SPEED_PCT.size() - 1)
 	var build_time: float = base_time * float(SPEED_PCT[index]) / 100.0
 	return {
 		"label": label,
 		"time_left": build_time,
 		"total_time": maxf(build_time, 0.001),
-		"total_cost_metal": cost_metal,
-		"total_cost_crystal": cost_crystal,
-		"remaining_cost_metal": float(cost_metal),
-		"remaining_cost_crystal": float(cost_crystal),
+		"total_cost": cost,
+		"remaining_cost": float(cost),
 		"paused": false,
 		"stalled": false,
 		"done": false,
@@ -151,11 +146,10 @@ func cancel(team: int, queue_name: String, index: int) -> Dictionary:
 	# Refund what was actually DRAWN, not the full price. Under the drip-fed
 	# model a job part-way through has only paid part of its cost, and refunding
 	# the whole thing would make queue-and-cancel a money printer.
-	var spent_metal: int = int(job["total_cost_metal"]) - int(round(job["remaining_cost_metal"]))
-	var spent_crystal: int = int(job["total_cost_crystal"]) - int(round(job["remaining_cost_crystal"]))
+	var spent: int = int(job["total_cost"]) - int(round(job["remaining_cost"]))
 	q.remove_at(index)
 	if _economy:
-		_economy.credit(team, spent_metal, spent_crystal)
+		_economy.credit(team, spent)
 	queue_changed.emit(team, queue_name)
 	return job
 
@@ -208,12 +202,10 @@ func _tick_queue(team: int, queue_name: String, delta: float) -> void:
 	# done - not the current one.
 	var new_time_left: float = maxf(0.0, job["time_left"] - delta)
 	var expected_fraction: float = new_time_left / job["total_time"]
-	var draw_metal := int(round(maxf(0.0,
-		job["remaining_cost_metal"] - job["total_cost_metal"] * expected_fraction)))
-	var draw_crystal := int(round(maxf(0.0,
-		job["remaining_cost_crystal"] - job["total_cost_crystal"] * expected_fraction)))
+	var draw := int(round(maxf(0.0,
+		job["remaining_cost"] - job["total_cost"] * expected_fraction)))
 
-	if not _economy.spend(team, draw_metal, draw_crystal):
+	if not _economy.spend(team, draw):
 		# NO progress this tick - a pause, not a slowdown. time_left and the
 		# remaining cost both stay exactly where they were, so a team that comes
 		# into money resumes rather than having silently lost ground.
@@ -221,8 +213,7 @@ func _tick_queue(team: int, queue_name: String, delta: float) -> void:
 		return
 
 	job["stalled"] = false
-	job["remaining_cost_metal"] -= draw_metal
-	job["remaining_cost_crystal"] -= draw_crystal
+	job["remaining_cost"] -= draw
 	job["time_left"] = new_time_left
 	if job["time_left"] > 0.0:
 		return

@@ -12,9 +12,8 @@ const MapCatalogScript = preload("res://scripts/map_catalog.gd")
 
 func _init():
 	print("=== PER-POOL DRAW (one production line) ===")
-	print("  %-24s %6s %8s %7s %9s %9s" % ["design", "metal", "crystal", "time", "metal/s", "cryst/s"])
+	print("  %-24s %6s %7s %9s" % ["design", "credits", "time", "credits/s"])
 	var total_m := 0.0
-	var total_c := 0.0
 	var n := 0
 	for name in ["rattler_scout", "bulwark_mbt", "warden_aa", "breaker_td",
 			"ore_trucker", "tide_corvette", "raptor_striker", "longarm_spg"]:
@@ -26,14 +25,13 @@ func _init():
 		file.close()
 		if typeof(d) != TYPE_DICTIONARY:
 			continue
-		var cost: Vector2i = DesignCostingScript.blueprint_cost(d)
+		var cost: int = DesignCostingScript.blueprint_cost(d)
 		var t: float = DesignCostingScript.build_time_for_cost(cost)
-		total_m += float(cost.x) / t
-		total_c += float(cost.y) / t
+		total_m += float(cost) / t
 		n += 1
-		print("  %-24s %6d %8d %7.1f %9.2f %9.2f"
-			% [str(d.get("name", name)), cost.x, cost.y, t, float(cost.x) / t, float(cost.y) / t])
-	print("  %-24s %6s %8s %7s %9.2f %9.2f" % ["MEAN", "", "", "", total_m / n, total_c / n])
+		print("  %-24s %6d %7.1f %9.2f"
+			% [str(d.get("name", name)), cost, t, float(cost) / t])
+	print("  %-24s %6s %7s %9.2f" % ["MEAN", "", "", total_m / n])
 
 	print("")
 	print("=== WHAT THE MAPS OFFER ===")

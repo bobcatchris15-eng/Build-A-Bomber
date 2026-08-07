@@ -42,8 +42,8 @@ func _init():
 			continue
 
 		var s: Dictionary = battle.commander.read_state()
-		print("  t=%4d metal=%4d crystal=%4d harv=%d combat=%d  doing=%s"
-			% [tick, s["metal"], s.get("crystal", 0), s["harvesters"], s["combat_units"],
+		print("  t=%4d credits=%4d harv=%d combat=%d  doing=%s"
+			% [tick, s["credits"], s["harvesters"], s["combat_units"],
 				battle.commander.action_name(battle.commander.last_action())])
 
 		for qn in ["light", "medium", "heavy", "building", "defense"]:
@@ -53,9 +53,9 @@ func _init():
 			var head: Dictionary = q[0]
 			# `done` with the job still in the queue is the smoking gun: the unit
 			# is paid for and finished, and something is refusing to let it out.
-			print("      %-8s depth=%d head='%s' time_left=%.1f/%.1f metal_left=%.0f stalled=%s done=%s"
+			print("      %-8s depth=%d head='%s' time_left=%.1f/%.1f left=%.0f cr stalled=%s done=%s"
 				% [qn, q.size(), head.get("label", "?"), head.get("time_left", -1.0),
-					head.get("total_time", -1.0), head.get("remaining_cost_metal", -1.0),
+					head.get("total_time", -1.0), head.get("remaining_cost", -1.0),
 					head.get("stalled", false), head.get("done", false)])
 			if head.get("done", false):
 				# exit_blockers_for() holds a finished unit until its factory door

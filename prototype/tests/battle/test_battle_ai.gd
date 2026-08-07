@@ -19,8 +19,7 @@ const SquadScript = preload("res://scripts/battle/ai/squad.gd")
 # A plausible mid-game state, which individual tests perturb one field at a time.
 func _state(overrides: Dictionary = {}) -> Dictionary:
 	var base := {
-		"metal": 500,
-		"crystal": 100,
+		"credits": 700,
 		"harvesters": 2,
 		"combat_units": 3,
 		"refineries": 1,
@@ -38,11 +37,11 @@ func _state(overrides: Dictionary = {}) -> Dictionary:
 	for k in overrides:
 		base[k] = overrides[k]
 	# The affordability considerations read `budget`, not `metal`. Mirroring it
-	# from metal by default keeps every test that perturbs "metal" saying what it
+	# from credits by default keeps every test that perturbs "credits" saying what it
 	# always said - a rich AI and a poor one - while letting the tests that care
 	# about the difference set the two apart explicitly.
 	if not overrides.has("budget"):
-		base["budget"] = float(base["metal"])
+		base["budget"] = float(base["credits"])
 	return base
 
 
@@ -132,7 +131,7 @@ func test_opening_move_is_not_a_deadlock() -> bool:
 	var commander := _commander()
 	var opening := _state({
 		"harvesters": 0, "manufactories": 0, "combat_units": 0,
-		"metal": 400, "can_build_harvester": false,
+		"credits": 400, "can_build_harvester": false,
 	})
 	var choice: int = commander.decide(opening)
 	if choice < 0:
@@ -193,7 +192,7 @@ func test_a_busy_economy_can_still_decide() -> bool:
 	print("Running Test Suite: AI - being mid-build does not blind the commander...")
 	var commander := _commander()
 
-	var earning := _state({"metal": 0, "budget": 0.0 + 6.0 * CommanderScript.PLANNING_HORIZON,
+	var earning := _state({"credits": 0, "budget": 0.0 + 6.0 * CommanderScript.PLANNING_HORIZON,
 		"income_rate": 6.0})
 	var choice: int = commander.decide(earning)
 	if choice < 0:
@@ -202,7 +201,7 @@ func test_a_busy_economy_can_still_decide() -> bool:
 
 	# The veto still has to work, or this has simply removed affordability from
 	# the AI rather than measuring it correctly.
-	var destitute := _state({"metal": 0, "budget": 0.0, "income_rate": 0.0,
+	var destitute := _state({"credits": 0, "budget": 0.0, "income_rate": 0.0,
 		"harvesters": 0, "can_build_harvester": false, "combat_units": 0})
 	var scores: Dictionary = commander.score_all(destitute)
 	for action in [CommanderScript.Action.BUILD_GENERAL,

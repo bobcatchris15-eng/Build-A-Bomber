@@ -5,7 +5,7 @@ extends RefCounted
 # WHY IT EXISTS. after_action_report.gd has been fully written and completely
 # orphaned since before this rebuild - OPERATIONS_PLAN.md calls that out - and
 # the reason it stayed orphaned is that nothing produced the dictionary it wants:
-# blueprint name -> {built, kills, damage_dealt, damage_taken_*, metal_spent,
+# blueprint name -> {built, kills, damage_dealt, damage_taken_*, credits_spent,
 # hull_type}. The battle layer knew how to spawn a design and how to kill one and
 # recorded neither.
 #
@@ -43,7 +43,7 @@ func _row(design_name: String, hull_type: String = "") -> Dictionary:
 			"damage_taken_thermal": 0.0,
 			"damage_taken_explosive": 0.0,
 			"damage_taken_energy": 0.0,
-			"metal_spent": 0,
+			"credits_spent": 0,
 			"hull_type": hull_type,
 		}
 	elif hull_type != "" and _designs[design_name]["hull_type"] == "":
@@ -51,10 +51,10 @@ func _row(design_name: String, hull_type: String = "") -> Dictionary:
 	return _designs[design_name]
 
 
-func record_built(blueprint: Dictionary, metal_cost: int) -> void:
+func record_built(blueprint: Dictionary, credits_cost: int) -> void:
 	var row := _row(_name_of(blueprint), blueprint.get("hull_type", ""))
 	row["built"] += 1
-	row["metal_spent"] += metal_cost
+	row["credits_spent"] += credits_cost
 
 
 func record_lost(blueprint: Dictionary) -> void:

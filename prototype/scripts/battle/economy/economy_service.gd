@@ -1,6 +1,19 @@
 class_name EconomyService
 extends RefCounted
-# The per-team ledger: metal, crystal, and base power.
+# The per-team ledger: CREDITS and base power.
+#
+# ONE POOL, from 2026-08-07. It used to be metal and crystal as separate,
+# non-fungible piles, which produced a failure nobody could see from the
+# aggregate: designs draw 87:13 metal:crystal, the maps supplied ~70:30, and
+# delivered income landed at 36:64 - so the economy starved on metal at 46% of a
+# single production line while crystal ran a 560% surplus and the AI sat at zero
+# metal with 155 crystal banked, unable to build anything.
+#
+# Chris's call: several gathered resource types funnelling into one spendable
+# pool. Everything gathered converts at ResourceCatalog.credits(), everything
+# built costs ResourceCatalog.credits_from_materials() - so a design leaning on
+# advanced (crystal-heavy) modules is simply MORE EXPENSIVE, which is the
+# intended pressure, rather than blocked on a resource the map may not offer.
 #
 # WHY IT IS ITS OWN OBJECT. In the old runtime the ledger was three dictionaries
 # and eleven methods on skirmish.gd, interleaved with fog of war and the minimap.
@@ -33,17 +46,15 @@ const UPKEEP_PER_STRUCTURE := 3.0
 var _ledger: Dictionary = {}
 
 
-func add_team(team: int, metal: int = 0, crystal: int = 0) -> void:
+func add_team(team: int, starting_credits: int = 0) -> void:
 	_ledger[team] = {
-		"metal": metal,
-		"crystal": crystal,
+		"credits": starting_credits,
 		"capacity": 0.0,
 		"draw": 0.0,
-		# Decaying accumulators behind income_rate_*(). Starting resources are set
+		# Decaying accumulator behind income_rate(). Starting credits are set
 		# directly here rather than through credit(), so a team does not open the
 		# match appearing to earn its own starting money.
-		"income_metal": 0.0,
-		"income_crystal": 0.0,
+		"income": 0.0,
 	}
 
 
@@ -51,41 +62,32 @@ func has_team(team: int) -> bool:
 	return _ledger.has(team)
 
 
-func metal(team: int) -> int:
-	return _ledger.get(team, {}).get("metal", 0)
+func credits(team: int) -> int:
+	return _ledger.get(team, {}).get("credits", 0)
 
 
-func crystal(team: int) -> int:
-	return _ledger.get(team, {}).get("crystal", 0)
-
-
-func can_afford(team: int, cost_metal: int, cost_crystal: int) -> bool:
+func can_afford(team: int, cost: int) -> bool:
 	if not _ledger.has(team):
 		return false
-	return _ledger[team].metal >= cost_metal and _ledger[team].crystal >= cost_crystal
+	return _ledger[team].credits >= cost
 
 
-# Deducts only if the whole cost is available. A partial spend would let a team
-# go into negative on one resource while the other covered it, which the drip-fed
-# production model would then compound every tick.
-func spend(team: int, cost_metal: int, cost_crystal: int) -> bool:
-	if cost_metal <= 0 and cost_crystal <= 0:
+# Deducts only if the whole cost is available.
+func spend(team: int, cost: int) -> bool:
+	if cost <= 0:
 		return true
-	if not can_afford(team, cost_metal, cost_crystal):
+	if not can_afford(team, cost):
 		return false
-	_ledger[team].metal -= cost_metal
-	_ledger[team].crystal -= cost_crystal
+	_ledger[team].credits -= cost
 	resources_changed.emit(team)
 	return true
 
 
-func credit(team: int, add_metal: int, add_crystal: int) -> void:
+func credit(team: int, amount: int) -> void:
 	if not _ledger.has(team):
 		return
-	_ledger[team].metal += add_metal
-	_ledger[team].crystal += add_crystal
-	_ledger[team].income_metal += add_metal
-	_ledger[team].income_crystal += add_crystal
+	_ledger[team].credits += amount
+	_ledger[team].income += amount
 	resources_changed.emit(team)
 
 
@@ -124,25 +126,20 @@ func tick_income(delta: float) -> void:
 		return
 	var keep: float = exp(-delta / INCOME_WINDOW)
 	for team in _ledger:
-		_ledger[team].income_metal *= keep
-		_ledger[team].income_crystal *= keep
+		_ledger[team].income *= keep
 
 
-# Metal per second, averaged over roughly INCOME_WINDOW seconds.
-func income_rate_metal(team: int) -> float:
-	return _ledger.get(team, {}).get("income_metal", 0.0) / INCOME_WINDOW
-
-
-func income_rate_crystal(team: int) -> float:
-	return _ledger.get(team, {}).get("income_crystal", 0.0) / INCOME_WINDOW
+# Credits per second, averaged over roughly INCOME_WINDOW seconds.
+func income_rate(team: int) -> float:
+	return _ledger.get(team, {}).get("income", 0.0) / INCOME_WINDOW
 
 
 # What this team can realistically commit over the next `horizon` seconds: what
 # is in the bank plus what is about to arrive. This is the number an affordability
 # decision should be made against, and the one a human reads off their own HUD
 # without thinking about it.
-func budget_metal(team: int, horizon: float) -> float:
-	return float(metal(team)) + income_rate_metal(team) * horizon
+func budget(team: int, horizon: float) -> float:
+	return float(credits(team)) + income_rate(team) * horizon
 
 
 # --- Power ------------------------------------------------------------------

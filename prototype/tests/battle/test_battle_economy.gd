@@ -14,7 +14,7 @@ const StructureScript = preload("res://scripts/battle/buildings/structure.gd")
 
 func _service() -> Array:
 	var economy = EconomyServiceScript.new()
-	economy.add_team(0, 10000, 10000)
+	economy.add_team(0, 30000)
 	var production = ProductionServiceScript.new()
 	production.setup(economy, null)
 	production.add_team(0)
@@ -45,8 +45,7 @@ func test_production_uses_the_real_ra_speed_table() -> bool:
 	# item already in the line - a job quoted 20 seconds takes 20 seconds.
 	var pair := _service()
 	var production = pair[1]
-	var job: Dictionary = production.enqueue_unit(0, {"name": "T"}, 100, 0, 20.0,
-		BuildingCatalogScript.QUEUE_MEDIUM)
+	var job: Dictionary = production.enqueue_unit(0, {"name": "T"}, 100, 20.0, BuildingCatalogScript.QUEUE_MEDIUM)
 	if job.is_empty():
 		print("  [FAIL] Could not enqueue against a stubbed world")
 		return false
@@ -67,34 +66,39 @@ func test_production_drip_feeds_cost_and_refunds_only_what_was_drawn() -> bool:
 	var economy = pair[0]
 	var production = pair[1]
 
-	production.enqueue_unit(0, {"name": "T"}, 100, 50, 10.0, BuildingCatalogScript.QUEUE_MEDIUM)
-	var before_metal: int = economy.metal(0)
+	# Bounds are a FRACTION of the price, not literals. They used to be 10..90
+	# against a hardcoded 100, so converting the economy to credits (which doubled
+	# the number) failed a test that was still measuring exactly the right thing.
+	const PRICE := 200
+	production.enqueue_unit(0, {"name": "T"}, PRICE, 10.0, BuildingCatalogScript.QUEUE_MEDIUM)
+	var before_credits: int = economy.credits(0)
 	# Half the build. Roughly half the cost should have been drawn - not all of
 	# it up front, and not none of it.
 	for _i in range(50):
 		production.tick(0.1)
-	var drawn: int = before_metal - economy.metal(0)
-	if drawn <= 10 or drawn >= 90:
-		print("  [FAIL] Half a build should have drawn roughly half the metal, drew ", drawn)
+	var drawn: int = before_credits - economy.credits(0)
+	if drawn <= int(PRICE * 0.1) or drawn >= int(PRICE * 0.9):
+		print("  [FAIL] Half a build (price %d) should have drawn roughly half, drew %d"
+			% [PRICE, drawn])
 		return false
 
 	# Cancel: refund what was drawn, NOT the sticker price. Refunding the full
 	# cost would make queue-and-cancel a money printer.
-	var after_cancel_expected: int = economy.metal(0) + drawn
+	var after_cancel_expected: int = economy.credits(0) + drawn
 	production.cancel(0, BuildingCatalogScript.QUEUE_MEDIUM, 0)
-	if absi(economy.metal(0) - after_cancel_expected) > 2:
+	if absi(economy.credits(0) - after_cancel_expected) > 2:
 		print("  [FAIL] Cancel refunded %d, expected about %d"
-			% [economy.metal(0) - (after_cancel_expected - drawn), drawn])
+			% [economy.credits(0) - (after_cancel_expected - drawn), drawn])
 		return false
 
 	# A team that cannot pay stalls in place. time_left must NOT advance, or a
 	# broke player silently loses the build they already part-paid for.
 	var broke = EconomyServiceScript.new()
-	broke.add_team(0, 0, 0)
+	broke.add_team(0, 0)
 	var p2 = ProductionServiceScript.new()
 	p2.setup(broke, null)
 	p2.add_team(0)
-	p2.enqueue_unit(0, {"name": "T"}, 500, 0, 10.0, BuildingCatalogScript.QUEUE_MEDIUM)
+	p2.enqueue_unit(0, {"name": "T"}, 500, 10.0, BuildingCatalogScript.QUEUE_MEDIUM)
 	var frozen: float = p2.queue(0, BuildingCatalogScript.QUEUE_MEDIUM)[0]["time_left"]
 	for _i in range(30):
 		p2.tick(0.1)
@@ -122,8 +126,8 @@ func test_five_queues_are_independent_and_gated() -> bool:
 
 	var pair := _service()
 	var production = pair[1]
-	production.enqueue_unit(0, {"name": "A"}, 10, 0, 5.0, BuildingCatalogScript.QUEUE_LIGHT)
-	production.enqueue_unit(0, {"name": "B"}, 10, 0, 5.0, BuildingCatalogScript.QUEUE_HEAVY)
+	production.enqueue_unit(0, {"name": "A"}, 10, 5.0, BuildingCatalogScript.QUEUE_LIGHT)
+	production.enqueue_unit(0, {"name": "B"}, 10, 5.0, BuildingCatalogScript.QUEUE_HEAVY)
 	if production.depth(0, BuildingCatalogScript.QUEUE_LIGHT) != 1 \
 			or production.depth(0, BuildingCatalogScript.QUEUE_HEAVY) != 1:
 		print("  [FAIL] Queues are not independent")
@@ -150,7 +154,7 @@ func test_five_queues_are_independent_and_gated() -> bool:
 func test_power_gates_production_rate() -> bool:
 	print("Running Test Suite: Economy - base power, and low power as a rate not a block...")
 	var economy = EconomyServiceScript.new()
-	economy.add_team(0, 100, 100)
+	economy.add_team(0, 300)
 
 	# Base power is NOT vehicle energy. Conflating them was a real bug: a
 	# generator module on a tank fed the base, so losing the tank browned out the
@@ -193,41 +197,42 @@ func test_power_gates_production_rate() -> bool:
 	for s in drain:
 		s.queue_free()
 
-	# A spend must be all or nothing. A partial deduction would let a team go
-	# negative on one resource while the other covered it, and the drip-fed model
-	# would compound that every tick.
-	if economy.spend(0, 500, 0):
+	# A spend must be all or nothing. A partial deduction would leave a team
+	# short by exactly what it could not pay, and the drip-fed model would
+	# compound that every tick.
+	var before_refusal: int = economy.credits(0)
+	if economy.spend(0, before_refusal + 400):
 		print("  [FAIL] An unaffordable spend should be refused")
 		return false
-	if economy.metal(0) != 100:
+	if economy.credits(0) != before_refusal:
 		print("  [FAIL] A refused spend must not deduct anything")
 		return false
 	print("  [PASS] Power and spending")
 	return true
 
 
-# Income rate is what makes "0 metal because I am building" distinguishable from
-# "0 metal because my harvesters are dead". The commander's affordability now
+# Income rate is what makes "0 credits because I am building" distinguishable from
+# "0 credits because my harvesters are dead". The commander's affordability now
 # reads a budget built on it, so the three properties that matter are: starting
 # resources are not counted as income, deliveries raise the rate, and the rate
 # decays back to nothing once deliveries stop.
 func test_income_rate_measures_deliveries_and_decays() -> bool:
 	print("Running Test Suite: Economy - income rate and planning budget...")
 	var economy = EconomyServiceScript.new()
-	economy.add_team(0, 450, 0)
+	economy.add_team(0, 450)
 
 	# Opening money is set on the ledger directly, not credited, so a team must not
 	# appear to be earning at the moment the match starts.
-	if not is_zero_approx(economy.income_rate_metal(0)):
+	if not is_zero_approx(economy.income_rate(0)):
 		print("  [FAIL] starting resources counted as income: %f"
-			% economy.income_rate_metal(0))
+			% economy.income_rate(0))
 		return false
 
 	# Two harvester loads inside the window. The rate is the accumulator over
-	# INCOME_WINDOW, so 100 metal banked reads as 100/20 = 5 per second.
-	economy.credit(0, 50, 0)
-	economy.credit(0, 50, 0)
-	var rate: float = economy.income_rate_metal(0)
+	# INCOME_WINDOW, so 100 credits banked reads as 100/20 = 5 per second.
+	economy.credit(0, 50)
+	economy.credit(0, 50)
+	var rate: float = economy.income_rate(0)
 	if not is_equal_approx(rate, 100.0 / EconomyServiceScript.INCOME_WINDOW):
 		print("  [FAIL] expected %f/s, got %f/s"
 			% [100.0 / EconomyServiceScript.INCOME_WINDOW, rate])
@@ -235,21 +240,21 @@ func test_income_rate_measures_deliveries_and_decays() -> bool:
 
 	# Budget is cash plus what is about to arrive. That is the whole point: a team
 	# at 0 in the bank and earning is not a team that can afford nothing.
-	var spent := economy.spend(0, 550, 0)
-	if not spent or economy.metal(0) != 0:
+	var spent := economy.spend(0, 550)
+	if not spent or economy.credits(0) != 0:
 		print("  [FAIL] could not drain the ledger for the budget check")
 		return false
-	if not is_equal_approx(economy.budget_metal(0, 30.0), rate * 30.0):
+	if not is_equal_approx(economy.budget(0, 30.0), rate * 30.0):
 		print("  [FAIL] budget at zero cash should be 30 s of income, got %f"
-			% economy.budget_metal(0, 30.0))
+			% economy.budget(0, 30.0))
 		return false
 
 	# And it must fall away when the deliveries stop, or a team whose harvesters
 	# all died would keep planning against income it no longer has.
 	for _i in range(20):
 		economy.tick_income(10.0)
-	if economy.income_rate_metal(0) > 0.01:
-		print("  [FAIL] income rate did not decay: %f" % economy.income_rate_metal(0))
+	if economy.income_rate(0) > 0.01:
+		print("  [FAIL] income rate did not decay: %f" % economy.income_rate(0))
 		return false
 	print("  [PASS] income rate and budget")
 	return true

@@ -48,7 +48,8 @@ const FIRE_RANGE_MAX: float = 260.0
 const RANGE_TWEAKS_UP := [
 	"barrel_length", "elevation", "engine_length", "radar_dish", "caliber",
 	"rail_length", "seeker_size", "ascent_thruster", "pressure_valve",
-	"fuse_setting", "optic_power", "focal_length",
+	"fuse_setting", "optic_power", "focal_length", "optic_aperture", "radar_size",
+	"mast_extension",
 ]
 
 # Tweaks that REDUCE reach. Each is a real trade rather than a drawback: a
@@ -57,7 +58,7 @@ const RANGE_TWEAKS_UP := [
 # mass to throw.
 const RANGE_TWEAKS_DOWN := [
 	"rod_thickness", "payload_size", "nozzle_width", "lens_aperture",
-	"containment", "dish_aperture",
+	"containment", "dish_aperture", "projector_diameter",
 ]
 
 static func _num(tweaks: Dictionary, key: String) -> float:

@@ -1,4 +1,5 @@
 extends Control
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 const ModuleDataResource = preload("res://scripts/module_data.gd")
 
 
@@ -94,6 +95,25 @@ const LOCOMOTION_SIZE_KEY := {
 	"fixed_wing_engine": "turbine_compression",
 	"screw_drive": "drum_diameter",
 	"pontoon_wheels": "pontoon_size",
+	"ornithopter_wing": "wingspan",
+	"hydrofoil": "foil_span",
+	"water_jet": "intake_size",
+	"half_track": "tread_width",
+	"rocker_bogie": "wheel_size",
+	"air_cushion_skirt": "skirt_diameter",
+	"anti_grav_plate": "field_strength",
+}
+
+const LOCOMOTION_SECONDARY_SIZE_KEY := {
+	"helicopter_rotors": "blade_count",
+	"naval_propeller": "blade_pitch",
+	"buoyant_envelope": "blade_pitch",
+	"screw_drive": "helix_depth",
+	"ornithopter_wing": "wing_sweep",
+	"hydrofoil": "strut_height",
+	"half_track": "front_axle_size",
+	"rocker_bogie": "arm_length",
+	"air_cushion_skirt": "plenum_pressure",
 }
 
 # Floating Popup Window fields
@@ -323,13 +343,52 @@ const TWEAK_SPECS = {
 		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
 	],
 	"resource_harvester": [
-		{"name": "extractor_size", "label": "Extractor Arm Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+		{"name": "extractor_size", "label": "Extractor Arm Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "cutter_head", "label": "Cutter Head Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
 	"repair_array": [
-		{"name": "welder_count", "label": "Welder Arm Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0}
+		{"name": "welder_count", "label": "Welder Arm Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0},
+		{"name": "arm_reach", "label": "Manipulator Arm Reach", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
 	"sensor_suite": [
-		{"name": "mast_height", "label": "Radar Mast Height", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+		{"name": "mast_height", "label": "Radar Mast Height", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "dish_aperture", "label": "Radar Dish Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"energy_barrier_projector": [
+		{"name": "projector_diameter", "label": "Array Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "coil_count", "label": "Capacitor Coil Count", "min": 2.0, "max": 6.0, "step": 1.0, "default": 4.0}
+	],
+	"laser_designator": [
+		{"name": "optic_aperture", "label": "Optics Aperture", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "mast_extension", "label": "Targeting Mast Height", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"fire_control_radar": [
+		{"name": "radar_size", "label": "Array Face Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "array_faces", "label": "Radar Panel Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0}
+	],
+	"capacitor_bank": [
+		{"name": "bank_capacity", "label": "Capacitor Cell Count", "min": 2.0, "max": 6.0, "step": 1.0, "default": 4.0},
+		{"name": "busbar_gauge", "label": "Busbar Gauge", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"fusion_generator": [
+		{"name": "reactor_length", "label": "Reactor Core Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "cooling_radiator", "label": "Cooling Radiator Fins", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"armor_plating": [
+		{"name": "plate_angle", "label": "Slope Angle", "min": -30.0, "max": 30.0, "step": 5.0, "default": 0.0},
+		{"name": "reinforcement_ribs", "label": "Waffle Ribs", "type": "bool", "default": false}
+	],
+	"slat_armor": [
+		{"name": "bar_spacing", "label": "Slat Density", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "standoff_distance", "label": "Standoff Distance", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"spaced_composite": [
+		{"name": "air_gap", "label": "Cavity Standoff Gap", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "layer_count", "label": "Composite Layer Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0}
+	],
+	"ablative_foam": [
+		{"name": "foam_density", "label": "Foam Thickness", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "tile_subdivision", "label": "Tile Grid Size", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0}
 	],
 	# Previously documented in Arsenal_Weapons_List.md but missing from this
 	# dict entirely - drone_carrier rendered zero tweak sliders in the
@@ -1030,7 +1089,8 @@ func update_stats(hull: Node3D):
 	# other label here was already %.1f/%.2f/%d formatted.
 	hp_label.text = "Hull HP: %.1f (modules +%.1f)" % [total_hp, module_hp_pool]
 	hp_label.tooltip_text = "Hull HP is the unit's real health pool in combat.\nModule HP is each mounted part's own pool - parts get shot off (subsystem stripping) without draining hull HP."
-	cost_label.text = "Cost: %d Metal, %d Crystal" % [total_cost_metal, total_cost_crystal]
+	cost_label.text = "Cost: %d credits" % ResourceCatalogScript.credits_from_materials(
+		Vector2i(total_cost_metal, total_cost_crystal))
 	dps_label.text = "Total DPS: %.1f" % total_dps
 
 	weight_label.text = "Total Weight: %.1f kg" % total_weight
@@ -1634,7 +1694,7 @@ func on_module_selected(module: Node3D):
 	var heal = data.get_heal_rate()
 	var last_line = "Heal Rate: %.1f/s" % heal if heal > 0.0 else "DPS: %.1f" % dps
 	var mount_line = _mount_style_line(module.get_meta("mount_style", ""))
-	popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s%s" % [hp, wt, cost.x, cost.y, last_line, mount_line]
+	popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d credits\n%s%s" % [hp, wt, ResourceCatalogScript.credits_from_materials(cost), last_line, mount_line]
 	
 	_add_callout(module, "Module Stats", stats_container)
 
@@ -1752,6 +1812,113 @@ func on_module_selected(module: Node3D):
 		size_slider.value = settings.get("drum_diameter", settings.get("drum_width", 1.0))
 		helix_depth_container.visible = true
 		helix_depth_slider.value = settings.get("helix_depth", 1.0)
+	elif type_id == "ornithopter_wing":
+		size_label_base = "Wingspan"
+		count_container.visible = false
+		size_slider.min_value = 0.5
+		size_slider.max_value = 2.5
+		size_slider.value = settings.get("wingspan", settings.get("size", 1.0))
+		blade_pitch_container.visible = true
+		blade_pitch_label.text = "Wing Sweep Angle:"
+		blade_pitch_slider.min_value = 0.5
+		blade_pitch_slider.max_value = 1.5
+		blade_pitch_slider.value = settings.get("wing_sweep", 1.0)
+	elif type_id == "hydrofoil":
+		size_label_base = "Foil Span"
+		size_slider.min_value = 0.6
+		size_slider.max_value = 2.0
+		size_slider.value = settings.get("foil_span", 1.0)
+		count_container.visible = true
+		count_slider.min_value = 2.0
+		count_slider.max_value = 4.0
+		count_slider.step = 1.0
+		count_slider.value = settings.get("foil_count", 2.0)
+		count_label_base = "Foil Count"
+		blade_pitch_container.visible = true
+		blade_pitch_label.text = "Strut Height:"
+		blade_pitch_slider.min_value = 0.6
+		blade_pitch_slider.max_value = 1.8
+		blade_pitch_slider.value = settings.get("strut_height", 1.0)
+	elif type_id == "water_jet":
+		size_label_base = "Intake Size"
+		size_slider.min_value = 0.6
+		size_slider.max_value = 1.8
+		size_slider.value = settings.get("intake_size", 1.0)
+		count_container.visible = true
+		count_slider.min_value = 1.0
+		count_slider.max_value = 4.0
+		count_slider.step = 1.0
+		count_slider.value = settings.get("nozzle_count", 2.0)
+		count_label_base = "Nozzle Count"
+		bool_tweak_key = "reverser"
+		bool_tweak_title = "Reverser Bucket"
+		duct_container.visible = true
+		duct_checkbox.tooltip_text = "Reverser Bucket"
+		duct_checkbox.button_pressed = settings.get("reverser", false)
+	elif type_id == "half_track":
+		size_label_base = "Track Width"
+		size_slider.min_value = 0.5
+		size_slider.max_value = 2.0
+		size_slider.value = settings.get("tread_width", 1.0)
+		count_container.visible = true
+		count_slider.min_value = 2.0
+		count_slider.max_value = 5.0
+		count_slider.step = 1.0
+		count_slider.value = settings.get("bogie_count", 3.0)
+		count_label_base = "Track Bogie Count"
+		blade_pitch_container.visible = true
+		blade_pitch_label.text = "Front Axle Size:"
+		blade_pitch_slider.min_value = 0.6
+		blade_pitch_slider.max_value = 1.8
+		blade_pitch_slider.value = settings.get("front_axle_size", 1.0)
+	elif type_id == "rocker_bogie":
+		size_label_base = "Wheel Size"
+		size_slider.min_value = 0.6
+		size_slider.max_value = 2.0
+		size_slider.value = settings.get("wheel_size", 1.0)
+		count_container.visible = true
+		count_slider.min_value = 2.0
+		count_slider.max_value = 4.0
+		count_slider.step = 1.0
+		count_slider.value = settings.get("bogie_pairs", 3.0)
+		count_label_base = "Bogie Pairs"
+		blade_pitch_container.visible = true
+		blade_pitch_label.text = "Rocker Arm Length:"
+		blade_pitch_slider.min_value = 0.6
+		blade_pitch_slider.max_value = 1.8
+		blade_pitch_slider.value = settings.get("arm_length", 1.0)
+	elif type_id == "air_cushion_skirt":
+		size_label_base = "Skirt Diameter"
+		size_slider.min_value = 0.6
+		size_slider.max_value = 2.0
+		size_slider.value = settings.get("skirt_diameter", 1.0)
+		count_container.visible = true
+		count_slider.min_value = 2.0
+		count_slider.max_value = 6.0
+		count_slider.step = 1.0
+		count_slider.value = settings.get("lift_fan_count", 3.0)
+		count_label_base = "Lift Fan Count"
+		blade_pitch_container.visible = true
+		blade_pitch_label.text = "Plenum Pressure:"
+		blade_pitch_slider.min_value = 0.5
+		blade_pitch_slider.max_value = 1.8
+		blade_pitch_slider.value = settings.get("plenum_pressure", 1.0)
+	elif type_id == "anti_grav_plate":
+		size_label_base = "Field Strength"
+		size_slider.min_value = 0.5
+		size_slider.max_value = 2.2
+		size_slider.value = settings.get("field_strength", 1.0)
+		count_container.visible = true
+		count_slider.min_value = 3.0
+		count_slider.max_value = 8.0
+		count_slider.step = 1.0
+		count_slider.value = settings.get("plate_count", 4.0)
+		count_label_base = "Plate Count"
+		bool_tweak_key = "stabilizer_ring"
+		bool_tweak_title = "Stabiliser Ring"
+		duct_container.visible = true
+		duct_checkbox.tooltip_text = "Stabiliser Ring"
+		duct_checkbox.button_pressed = settings.get("stabilizer_ring", true)
 	elif type_id == "pontoon_wheels":
 		# module_catalog.gd has declared these three since the type was added,
 		# but no UI branch ever read them, so the type came up with no
@@ -1845,7 +2012,8 @@ func _on_blade_pitch_changed(value: float):
 	var root = get_node_or_null("/root/MainLab")
 	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
 	var data = current_selected_module.get_meta("module_data")
-	root.update_locomotion_geometry_tweak(data.type_id, "blade_pitch", value)
+	var key = LOCOMOTION_SECONDARY_SIZE_KEY.get(data.type_id, "blade_pitch")
+	root.update_locomotion_geometry_tweak(data.type_id, key, value)
 
 func _on_helix_depth_changed(value: float):
 	_refresh_locomotion_labels()
@@ -1941,6 +2109,47 @@ func _apply_tweaks():
 		new_settings = {
 			"drum_diameter": size_slider.value,
 			"helix_depth": helix_depth_slider.value
+		}
+	elif type_id == "ornithopter_wing":
+		new_settings = {
+			"wingspan": size_slider.value,
+			"wing_sweep": blade_pitch_slider.value
+		}
+	elif type_id == "hydrofoil":
+		new_settings = {
+			"foil_span": size_slider.value,
+			"strut_height": blade_pitch_slider.value,
+			"foil_count": int(count_slider.value)
+		}
+	elif type_id == "water_jet":
+		new_settings = {
+			"intake_size": size_slider.value,
+			"nozzle_count": int(count_slider.value),
+			"reverser": duct_checkbox.button_pressed
+		}
+	elif type_id == "half_track":
+		new_settings = {
+			"tread_width": size_slider.value,
+			"bogie_count": int(count_slider.value),
+			"front_axle_size": blade_pitch_slider.value
+		}
+	elif type_id == "rocker_bogie":
+		new_settings = {
+			"wheel_size": size_slider.value,
+			"bogie_pairs": int(count_slider.value),
+			"arm_length": blade_pitch_slider.value
+		}
+	elif type_id == "air_cushion_skirt":
+		new_settings = {
+			"skirt_diameter": size_slider.value,
+			"lift_fan_count": int(count_slider.value),
+			"plenum_pressure": blade_pitch_slider.value
+		}
+	elif type_id == "anti_grav_plate":
+		new_settings = {
+			"field_strength": size_slider.value,
+			"plate_count": int(count_slider.value),
+			"stabilizer_ring": duct_checkbox.button_pressed
 		}
 
 	if root.has_method("update_locomotion"):
@@ -2409,7 +2618,7 @@ func _on_tweak_changed():
 				var heal = data.get_heal_rate()
 				var last_line = "Heal Rate: %.1f/s" % heal if heal > 0.0 else "DPS: %.1f" % dps
 				var mount_line = _mount_style_line(current_selected_module.get_meta("mount_style", ""))
-				popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d Metal, %d Crystal\n%s%s" % [hp, wt, cost.x, cost.y, last_line, mount_line]
+				popup_stats_label.text = "HP: %.1f | Weight: %.1f kg\nCost: %d credits\n%s%s" % [hp, wt, ResourceCatalogScript.credits_from_materials(cost), last_line, mount_line]
 		# Same root-not-child correction as the rotate sites above.
 		if root and root.has_method("check_all_clipping"):
 			root.check_all_clipping()

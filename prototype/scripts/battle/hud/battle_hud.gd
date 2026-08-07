@@ -18,6 +18,7 @@ extends Control
 # the same call for the same reason and it is carried over deliberately.
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
@@ -28,8 +29,6 @@ const UI_SIZE := 180.0
 const BLIP_RADIUS := 1
 
 const WATER_COLOR := Color(0.15, 0.32, 0.55)
-const METAL_COLOR := Color(0.85, 0.75, 0.4)
-const CRYSTAL_COLOR := Color(0.55, 0.75, 0.95)
 
 # One flat colour per surface - a swatch, not a material. Echoes the per-surface
 # tints the terrain generator uses so the minimap reads as the same map.
@@ -223,8 +222,14 @@ func _refresh_resources() -> void:
 	var economy = _director.economy
 	if economy == null:
 		return
-	_resource_label.text = "METAL %d    CRYSTAL %d" % [
-		int(economy.metal(_local_team)), int(economy.crystal(_local_team))]
+	# ONE NUMBER. The readout used to show METAL and CRYSTAL side by side, which
+	# was two numbers the player had to mentally combine to answer the only
+	# question they were asking - can I afford that. Income is alongside it
+	# because cash-on-hand alone is misleading under drip-fed production: sitting
+	# at zero while earning 30 a second and sitting at zero with dead harvesters
+	# look identical otherwise.
+	_resource_label.text = "%d cr    +%.0f/s" % [
+		int(economy.credits(_local_team)), economy.income_rate(_local_team)]
 
 	var capacity: float = economy.power_capacity(_local_team)
 	var draw: float = economy.power_draw(_local_team)
@@ -247,7 +252,9 @@ func _refresh_minimap() -> void:
 	for r in get_tree().get_nodes_in_group("resource_nodes"):
 		if not is_instance_valid(r):
 			continue
-		var rc: Color = CRYSTAL_COLOR if r.get("resource_type") == "crystal" else METAL_COLOR
+		# Per-type colour straight off the catalog, so lumber and oil are
+		# distinguishable on the minimap rather than all reading as ore.
+		var rc: Color = ResourceCatalogScript.color(str(r.get("resource_type")))
 		_blip(r.global_position.x, r.global_position.z, rc)
 
 	for c in get_tree().get_nodes_in_group("damageable"):

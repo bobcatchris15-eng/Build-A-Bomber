@@ -53,8 +53,8 @@ func _init():
 	# Scored directly rather than waited for, so a deadlock is reported as a
 	# deadlock instead of as "nothing happened for two minutes".
 	var opening: Dictionary = battle.commander.read_state()
-	print("  opening state: metal=%d harvesters=%d manufactories=%d refineries=%d"
-		% [opening["metal"], opening["harvesters"], opening["manufactories"], opening["refineries"]])
+	print("  opening state: credits=%d harvesters=%d manufactories=%d refineries=%d"
+		% [opening["credits"], opening["harvesters"], opening["manufactories"], opening["refineries"]])
 	var scores: Dictionary = battle.commander.score_all(opening)
 	var lines: Array = []
 	for action in scores:
@@ -76,8 +76,8 @@ func _init():
 			seen_actions[key] = seen_actions.get(key, 0) + 1
 		if tick % SAMPLE_EVERY == 0:
 			var s: Dictionary = battle.commander.read_state()
-			print("  t=%4d metal=%4d harv=%d combat=%d manu=%d structures=%d  doing=%s"
-				% [tick, s["metal"], s["harvesters"], s["combat_units"], s["manufactories"],
+			print("  t=%4d credits=%4d harv=%d combat=%d manu=%d structures=%d  doing=%s"
+				% [tick, s["credits"], s["harvesters"], s["combat_units"], s["manufactories"],
 					battle.get_team_structures(1).size(), battle.commander.action_name(a)])
 			# The AI's metal never recovering means its harvesters are not
 			# delivering, which is invisible from the commander's side - it just
@@ -95,9 +95,9 @@ func _init():
 			for qn in ["light", "medium", "heavy", "building", "defense"]:
 				var q: Array = battle.production.queue(1, qn)
 				if not q.is_empty():
-					qd.append("%s:%d head=%s left=%.1f metal_left=%d stalled=%s" % [
+					qd.append("%s:%d head=%s left=%.1f cost_left=%d stalled=%s" % [
 						qn, q.size(), str(q[0].get("name", "?")),
-						q[0].get("time_left", -1.0), q[0].get("remaining_cost_metal", -1),
+						q[0].get("time_left", -1.0), q[0].get("remaining_cost", -1),
 						str(q[0].get("stalled", false))])
 			print("      AI queues: %s" % ("empty" if qd.is_empty() else str(qd)))
 
@@ -105,8 +105,8 @@ func _init():
 	var final: Dictionary = battle.commander.read_state()
 	print("")
 	print("  structures %d -> %d" % [start_structures, end_structures])
-	print("  final: harvesters=%d combat=%d manufactories=%d metal=%d"
-		% [final["harvesters"], final["combat_units"], final["manufactories"], final["metal"]])
+	print("  final: harvesters=%d combat=%d manufactories=%d credits=%d"
+		% [final["harvesters"], final["combat_units"], final["manufactories"], final["credits"]])
 	print("  actions taken: %s" % str(seen_actions))
 
 	# Defensive designs must be BUILDABLE, not just present in the roster. A
@@ -120,7 +120,7 @@ func _init():
 		# Fund it. Whether the AI can AFFORD a turret is an economy question and is
 		# measured above; this is asking whether the placement path works at all,
 		# and a starved queue would answer neither.
-		battle.deliver(1, 3000, 800)
+		battle.deliver(1, 4600)
 		if not battle.ai_build_defence(1):
 			failures.append("ai_build_defence could not queue a turret")
 		else:

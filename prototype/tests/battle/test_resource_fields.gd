@@ -47,21 +47,31 @@ func test_resource_values_form_a_real_ladder() -> bool:
 					order[i + 1], ResourceCatalogScript.credits(order[i + 1])])
 			ok = false
 
-	# ONE CREDIT IS ONE COST-UNIT, whichever pool it lands in. Build costs weight
-	# crystal at 2x, so paying `amount * credits` into that pool applies the
-	# multiplier twice - which it did, and measured income leapt to 76/s against a
-	# 32 target with two thirds of it phantom.
+	# Gathering and spending have to agree on what a credit is, or the balance
+	# target measures one thing and the economy runs on another.
 	for type_id in ResourceCatalogScript.ids():
-		var paid: Vector2i = ResourceCatalogScript.deliver_value(type_id, 100)
-		var cost_units: float = float(paid.x) + 2.0 * float(paid.y)
+		var paid: int = ResourceCatalogScript.deliver_credits(type_id, 100)
 		var expected: float = 100.0 * ResourceCatalogScript.credits(type_id)
-		if absf(cost_units - expected) > 1.0:
-			print("  [FAIL] 100 %s pays %.0f cost-units, expected %.0f"
-				% [type_id, cost_units, expected])
+		if absf(float(paid) - expected) > 1.0:
+			print("  [FAIL] 100 %s pays %d credits, expected %.0f"
+				% [type_id, paid, expected])
 			ok = false
 
+	# THE COST SIDE. Crystal is the "advanced" material and converts at 2x, which
+	# is the whole mechanism by which advanced technology drives up price per unit
+	# rather than gating on a resource the map may not offer.
+	if ResourceCatalogScript.credits_from_materials(Vector2i(100, 0)) != 100:
+		print("  [FAIL] 100 metal of materials is not 100 credits")
+		ok = false
+	if ResourceCatalogScript.credits_from_materials(Vector2i(0, 100)) != 200:
+		print("  [FAIL] 100 crystal of materials is not 200 credits")
+		ok = false
+	if ResourceCatalogScript.credits_from_materials(Vector2i(50, 25)) != 100:
+		print("  [FAIL] mixed materials do not add up")
+		ok = false
+
 	if ok:
-		print("  [PASS] lumber 1.0 < ore 1.5 < crystal 3.0 < oil 4.0, and one credit is one cost-unit in either pool.")
+		print("  [PASS] lumber 1.0 < ore 1.5 < crystal 3.0 < oil 4.0; crystal costs 2x as a material.")
 	return ok
 
 

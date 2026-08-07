@@ -26,6 +26,8 @@ class_name DesignStats
 # So: if a figure is wanted that is not here, add it here and let both callers
 # read it. Do not compute it at the call site.
 
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
+
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
@@ -45,6 +47,10 @@ static func analyze(hull: Node3D) -> Dictionary:
 		"weight": 0.0,
 		"cost_metal": 0,
 		"cost_crystal": 0,
+		# What the design actually PRICES AT. Materials above are the authoring
+		# inputs - crystal is the "advanced" one and converts at 2x - and this is
+		# the single number the economy spends. See ResourceCatalog.
+		"cost_credits": 0,
 		"energy_capacity": 0.0,
 		"move_speed": 0.0,
 		"top_speed": 0.0,
@@ -122,6 +128,11 @@ static func analyze(hull: Node3D) -> Dictionary:
 		out["cost_crystal"] += int(c.y)
 		if data.category == "generator":
 			out["energy_capacity"] += data.get_energy_capacity()
+
+	# The price, from the materials. Crystal converts at 2x, so a design leaning
+	# on advanced modules simply costs more - see ResourceCatalog.
+	out["cost_credits"] = ResourceCatalogScript.credits_from_materials(
+		Vector2i(out["cost_metal"], out["cost_crystal"]))
 
 	# The drivetrain- and range-derived figures (weight, move_speed, top_speed,
 	# ranges, vision, has_weapons) are already set above, before the validity

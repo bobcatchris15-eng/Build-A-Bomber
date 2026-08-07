@@ -77,7 +77,39 @@ The hopper came back DOWN from 80 to 56 because harvesters that chase credits
 rather than metres earn ~37% more from the same fleet. Same target, richer
 trucks, smaller hoppers.
 
-## THE AGGREGATE IS A LIE, AND THIS IS THE REAL FINDING
+## RESOLVED: one pool (2026-08-07)
+
+The section below described the two-pool economy's central defect. It is fixed:
+there is one **credits** pool now, and the aggregate model everything was
+measured against is simply true rather than a convenient fiction.
+
+**The exchange rate was already in the codebase.** `build_time_for_cost()` had
+been `metal + 2 * crystal` since long before any of this; that weighting is now
+`ResourceCatalog.CRYSTAL_TO_CREDITS`, promoted from an implicit constant inside a
+time formula to the actual currency of the economy.
+
+**The catalog still authors costs as metal and crystal, deliberately.** Those two
+numbers carry design intent a single figure would flatten — crystal is the
+"advanced" material, and the module tweaks lean on it (`optic_power` scales
+crystal 1.60x against metal 1.20x, which is what makes the anti-materiel rifle
+the roster's most crystal-hungry non-energy weapon). Converting the *data* would
+have thrown that signal away. Converting at the till keeps it and delivers what
+Chris asked for: **advanced technology drives up price per unit**, rather than
+gating you on a resource the map may not offer.
+
+| design | materials | price |
+|---|---|---|
+| Rattler Scout Car | 186 m / 9 c | 204 cr |
+| Bulwark MBT | 361 m / 34 c | 429 cr |
+| Tide Corvette | 405 m / 62 c | 529 cr |
+
+Measured after the conversion: **32.75 credits/s, one line +12.8/s, two lines
+82%.** The target survived the currency change intact.
+
+<details>
+<summary>The two-pool defect this replaced, kept for the record</summary>
+
+### THE AGGREGATE IS A LIE, AND THIS IS THE REAL FINDING
 
 Everything above measures `metal + 2 × crystal`. That model assumes the two
 pools are **fungible**, and they are not — you cannot pay a metal bill with
@@ -112,6 +144,8 @@ to prototype the resource fields first. That conversion is what closes this:
 merging the pools makes the aggregate the only number, and every consumer already
 reads `ResourceCatalog.credits()`. Rebalancing the metal:crystal mix in between
 would be work thrown away.
+
+</details>
 
 ## Why both constants had to move together
 

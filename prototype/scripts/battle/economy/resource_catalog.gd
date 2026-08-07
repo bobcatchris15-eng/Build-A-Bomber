@@ -2,16 +2,11 @@ class_name ResourceCatalog
 extends RefCounted
 # The gatherable resources, what they are worth, and how they sit on the map.
 #
-# WHERE THIS IS GOING. Chris's direction, 2026-08-07: several resource types that
-# all funnel into a single "credits" pool the player spends. The `credits` value
-# below IS that number and is already the single source of truth for what a unit
-# of each resource is worth.
-#
-# WHERE IT IS TODAY. The economy still has two pools, metal and crystal, so each
-# resource declares which one it pays into via `pool`. That mapping is
-# SCAFFOLDING and is the only thing the credits pass has to delete - every other
-# consumer already reads `credits`. Chris chose to prototype the fields first and
-# convert to credits after, accepting exactly this temporary home.
+# ONE POOL. Chris's direction, 2026-08-07: several gathered resource types all
+# funnelling into a single "credits" pool the player spends. `credits` below is
+# the exchange rate for each, and is the single source of truth for what a unit
+# of anything is worth - on the way in from a field, and on the way out as the
+# price of a design.
 #
 # THE FOUR TYPES DIFFER BY VALUE DENSITY AND BY WHERE THEY SIT - not by needing
 # special gatherers or special buildings. Any harvester can work any field. The
@@ -31,7 +26,6 @@ const TYPES := {
 	"lumber": {
 		"label": "LUMBER",
 		"credits": 1.0,
-		"pool": "metal",
 		"color": Color(0.36, 0.52, 0.24),
 		# Collectibles per field, and how far they scatter from the centre. A
 		# forest stand is many small trees close together.
@@ -44,7 +38,6 @@ const TYPES := {
 	"ore": {
 		"label": "ORE",
 		"credits": 1.5,
-		"pool": "metal",
 		"color": Color(0.9, 0.75, 0.5),
 		"field_nodes": 7,
 		"field_radius": 9.0,
@@ -53,7 +46,6 @@ const TYPES := {
 	"crystal": {
 		"label": "CRYSTAL",
 		"credits": 3.0,
-		"pool": "crystal",
 		"color": Color(0.5, 0.85, 1.0),
 		"field_nodes": 5,
 		"field_radius": 8.0,
@@ -62,7 +54,6 @@ const TYPES := {
 	"oil": {
 		"label": "OIL",
 		"credits": 4.0,
-		"pool": "metal",
 		"color": Color(0.14, 0.13, 0.16),
 		# A well is a single point, not a field - that is what makes it
 		# contestable ground rather than an area you spread out over.
@@ -104,31 +95,34 @@ static func credits(type_id: String) -> float:
 	return float(get_data(type_id)["credits"])
 
 
-# Which of the two current pools this resource pays into, and how much. Cargo is
-# counted in RAW UNITS and converted here, so a truck full of oil is worth far
-# more than a truck full of lumber without the hopper needing to know why.
+# What a hopper of `type_id` is worth at the refinery door.
+static func deliver_credits(type_id: String, amount: int) -> int:
+	return int(round(float(amount) * credits(type_id)))
+
+
+# --- Costs -------------------------------------------------------------------
 #
-# THE ONE FUNCTION THE CREDITS PASS REPLACES: it becomes
-# `credits(type) * amount` into a single pool and every caller stays as it is.
-static func deliver_value(type_id: String, amount: int) -> Vector2i:
-	var data := get_data(type_id)
-	var value: float = float(amount) * float(data["credits"])
-	if str(data["pool"]) == "crystal":
-		# HALVED ON THE WAY INTO THE CRYSTAL POOL, and this is not a fudge.
-		#
-		# Build costs weight crystal at 2x metal (build_time_for_cost is
-		# `metal + 2*crystal`), so a unit of crystal already buys twice what a
-		# unit of metal does. Paying `amount * credits` into that pool would apply
-		# the value multiplier TWICE, which is exactly what happened when this was
-		# first written: measured income leapt to 76 cost-units/s against a 32
-		# target, two thirds of it phantom.
-		#
-		# Dividing by the pool's own weighting makes one credit worth one
-		# cost-unit whatever it was gathered as, so the intermediate two-pool
-		# economy already behaves like the credits economy it is becoming - and
-		# the balance target stays a single honest number across the transition.
-		return Vector2i(0, int(round(value / 2.0)))
-	return Vector2i(int(round(value)), 0)
+# What a unit of crystal is worth in credits. This IS the old build-cost
+# weighting - build_time_for_cost() was `metal + 2 * crystal` long before any of
+# this - promoted from an implicit constant buried in a time formula to the
+# actual exchange rate of the economy.
+#
+# THE CATALOG STILL AUTHORS COSTS AS METAL AND CRYSTAL, deliberately. Those two
+# numbers carry design intent a single figure would flatten: crystal is the
+# "advanced" material and the module tweaks lean on that - optic_power scales
+# crystal 1.60x against metal 1.20x, which is what makes the anti-materiel rifle
+# the roster's most crystal-hungry non-energy weapon. Converting the DATA would
+# throw that authoring signal away.
+#
+# Converting at the till keeps it, and delivers exactly what Chris asked for:
+# advanced technology drives up your price per unit, instead of gating you on a
+# resource the map may not even offer.
+const CRYSTAL_TO_CREDITS := 2.0
+
+
+# The one place materials become money.
+static func credits_from_materials(materials: Vector2i) -> int:
+	return int(round(float(materials.x) + float(materials.y) * CRYSTAL_TO_CREDITS))
 
 
 static func field_nodes(type_id: String) -> int:

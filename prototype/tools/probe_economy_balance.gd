@@ -16,14 +16,14 @@ extends SceneTree
 #
 #   DRAW     what a continuously-running production queue spends per second.
 #            This one IS derivable and the derivation is the interesting part:
-#            build_time_for_cost() is (metal + 2*crystal) * 0.05, and the
-#            drip-feed spends the whole cost across exactly that time, so a
-#            queue draws (m + 2c) / ((m + 2c) * 0.05) = 20 cost-units per second
+#            build_time_for_cost() is credits * 0.05, and the drip-feed spends
+#            the whole cost across exactly that time, so a queue draws
+#            credits / (credits * 0.05) = 20 CREDITS per second
 #            REGARDLESS OF WHAT IS BEING BUILT. Cheap scout or heavy tank, the
 #            spend rate is identical. Only the clamps (3 s floor, 40 s ceiling)
 #            break that, and only for designs outside 60..800 cost.
 #
-# So the target reduces to: income >= 1.6 x 20 = 32 cost-units/s, which also
+# So the target reduces to: income >= 1.6 x 20 = 32 credits/s, which also
 # satisfies "grows against one line" with 60% headroom.
 #
 # Run: Godot_v4.7.1-stable_win64_console.exe --headless --path . \
@@ -39,7 +39,7 @@ const WARMUP_SECONDS := 30.0
 
 const TARGET_HARVESTERS := 4
 
-# One production line's spend, in cost-units (metal + 2*crystal) per second.
+# One production line's spend, in CREDITS per second.
 const DRAW_PER_LINE := 20.0
 # Chris's spec: 80% of two lines.
 const TARGET_INCOME := DRAW_PER_LINE * 2.0 * 0.8
@@ -102,34 +102,29 @@ func _init():
 			HarvesterFSM.HARVEST_CHUNK, HarvesterFSM.HARVEST_TIME, HarvesterFSM.UNLOAD_TIME])
 
 	# --- Measure -------------------------------------------------------------
-	# Counted from the LEDGER, not from the income estimator: income_rate_metal()
+	# Counted from the LEDGER, not from the income estimator: income_rate()
 	# is an exponentially-weighted average built for the HUD, and averaging an
 	# average is a good way to measure something other than what happened.
 	# Production is idle here, so the ledger only moves when a harvester delivers.
 	for _i in range(int(WARMUP_SECONDS * 60.0)):
 		await physics_frame
 
-	var start_metal: int = battle.economy.metal(battle.PLAYER_TEAM)
-	var start_crystal: int = battle.economy.crystal(battle.PLAYER_TEAM)
+	var start_credits: int = battle.economy.credits(battle.PLAYER_TEAM)
 	var samples: Array = []
 	var ticks := int(MEASURE_SECONDS * 60.0)
 	for i in range(ticks):
 		await physics_frame
 		if i % 1800 == 0 and i > 0:
 			var t: float = float(i) / 60.0
-			var gained: float = float(battle.economy.metal(battle.PLAYER_TEAM) - start_metal) \
-				+ 2.0 * float(battle.economy.crystal(battle.PLAYER_TEAM) - start_crystal)
+			var gained: float = float(battle.economy.credits(battle.PLAYER_TEAM) - start_credits)
 			samples.append(gained / t)
-			print("    t=%3.0fs  income %.1f cost-units/s" % [t, gained / t])
+			print("    t=%3.0fs  income %.1f credits/s" % [t, gained / t])
 
-	var metal_gained: float = float(battle.economy.metal(battle.PLAYER_TEAM) - start_metal)
-	var crystal_gained: float = float(battle.economy.crystal(battle.PLAYER_TEAM) - start_crystal)
-	var income: float = (metal_gained + 2.0 * crystal_gained) / MEASURE_SECONDS
+	var income: float = float(battle.economy.credits(battle.PLAYER_TEAM) - start_credits) \
+		/ MEASURE_SECONDS
 
 	print("")
-	print("  metal   %.2f /s" % (metal_gained / MEASURE_SECONDS))
-	print("  crystal %.2f /s" % (crystal_gained / MEASURE_SECONDS))
-	print("  INCOME  %.2f cost-units/s  (%.2f per harvester)"
+	print("  INCOME  %.2f credits/s  (%.2f per harvester)"
 		% [income, income / float(maxi(1, _harvester_count(battle)))])
 
 	# --- Judge ---------------------------------------------------------------
@@ -169,9 +164,9 @@ func _report_draw() -> void:
 		file.close()
 		if typeof(data) != TYPE_DICTIONARY:
 			continue
-		var cost: Vector2i = DesignCostingScript.blueprint_cost(data)
+		var cost: int = DesignCostingScript.blueprint_cost(data)
 		var time: float = DesignCostingScript.build_time_for_cost(cost)
-		var units: float = float(cost.x) + 2.0 * float(cost.y)
-		print("    %-22s cost %d/%d  time %.1fs  draw %.1f cost-units/s%s"
-			% [str(data.get("name", "?")), cost.x, cost.y, time, units / time,
+		var units: float = float(cost)
+		print("    %-22s cost %5d cr  time %.1fs  draw %.1f cost-units/s%s"
+			% [str(data.get("name", "?")), cost, time, units / time,
 				"   <- CLAMPED" if is_equal_approx(time, 3.0) or is_equal_approx(time, 40.0) else ""])

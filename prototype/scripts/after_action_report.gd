@@ -8,7 +8,7 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 
 var is_victory: bool = false
 var match_duration: float = 0.0
-var bp_stats: Dictionary = {} # blueprint_name -> {built, kills, damage_dealt, damage_taken_kinetic, damage_taken_thermal, damage_taken_explosive, metal_spent, hull_type}
+var bp_stats: Dictionary = {} # blueprint_name -> {built, kills, damage_dealt, damage_taken_kinetic, damage_taken_thermal, damage_taken_explosive, credits_spent, hull_type}
 var is_operation: bool = false
 
 signal iterate_requested(blueprint_name: String)
@@ -104,7 +104,7 @@ func _build_ui() -> void:
 	# never showed it - and a design's loss rate is the single most useful number
 	# for deciding whether to redesign it. Built-vs-lost is the difference between
 	# "my Bulwark got 7 kills" and "my Bulwark got 7 kills and 6 of them died".
-	var headers = ["Blueprint", "Built", "Lost", "Kills", "Dmg Dealt", "Dmg Taken", "Metal", "Efficiency"]
+	var headers = ["Blueprint", "Built", "Lost", "Kills", "Dmg Dealt", "Dmg Taken", "Credits", "Efficiency"]
 
 	var grid = GridContainer.new()
 	# Driven off the header list rather than a literal, so adding a column cannot
@@ -146,7 +146,7 @@ func _build_ui() -> void:
 		var exp = data.get("damage_taken_explosive", 0.0)
 		var energy = data.get("damage_taken_energy", 0.0)
 		var dmg_taken = kin + therm + exp + energy
-		var metal = data.get("metal_spent", 0)
+		var spent = data.get("credits_spent", 0)
 
 		total_kin += kin
 		total_therm += therm
@@ -156,7 +156,7 @@ func _build_ui() -> void:
 		# A design that was never built cannot be the best performer. Its
 		# efficiency is 0/1 = 0, which beat the -1 sentinel and made an unbuilt
 		# design the MVP of any match where nothing dealt damage.
-		var eff = (dmg_dealt / maxf(1.0, float(metal))) * 100.0
+		var eff = (dmg_dealt / maxf(1.0, float(spent))) * 100.0
 		if built > 0 and eff > mvp_score:
 			mvp_score = eff
 			mvp_name = bp_name
@@ -167,7 +167,7 @@ func _build_ui() -> void:
 		_add_table_cell(grid, str(kills))
 		_add_table_cell(grid, "%.0f" % dmg_dealt)
 		_add_table_cell(grid, "%.0f" % dmg_taken)
-		_add_table_cell(grid, str(metal))
+		_add_table_cell(grid, str(spent))
 		_add_table_cell(grid, "%.1f" % eff)
 
 	# Right Side: MVP & Tactical Advice

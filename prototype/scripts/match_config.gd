@@ -24,6 +24,8 @@ var player_faction: String = "" # "" = derive from roster[0], old behavior
 var enemy_faction: String = "" # "" = derive from enemy_roster[0], old behavior
 var selected_blueprint_paths: Array = [] # [] = automatic top-8-newest-saved, old behavior
 var ai_difficulty: String = "normal" # "easy" / "normal" / "hard"
-var starting_metal: int = -1 # -1 = Skirmish's own default (450)
-var starting_crystal: int = -1 # -1 = Skirmish's own default (150)
+# -1 = the match's own default (MatchDirector.STARTING_CREDITS, 750). One pool
+# since 2026-08-07: what used to be 450 metal + 150 crystal is 750 credits at the
+# 2x crystal rate, so the opening bank buys exactly what it always did.
+var starting_credits: int = -1
 

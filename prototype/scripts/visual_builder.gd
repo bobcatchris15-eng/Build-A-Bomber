@@ -2029,7 +2029,7 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 
 		var facet = parent_node.get_meta("facet", "front") if parent_node.has_meta("facet") else "front"
 		var hull_node = parent_node.get_parent()
-		var full_aabb = get_full_hull_aabb(hull_node) if is_instance_valid(hull_node) else AABB(Vector3(-2, -0.75, -3), Vector3(4, 1.5, 6))
+		var full_aabb = get_full_hull_aabb(hull_node as Node3D) if (is_instance_valid(hull_node) and hull_node is Node3D) else AABB(Vector3(-2, -0.75, -3), Vector3(4, 1.5, 6))
 
 		var shield_arc = build_shield_facet_arc(facet, full_aabb, parent_node.transform)
 		shield_arc.name = "BarrierShield"

@@ -193,14 +193,13 @@ func read_state() -> Dictionary:
 				enemy_armour += 1
 
 	return {
-		"metal": economy.metal(team),
-		"crystal": economy.crystal(team),
+		"credits": economy.credits(team),
 		# What the affordability considerations below actually read. See
 		# PLANNING_HORIZON - cash-on-hand is the wrong number under drip-fed
 		# production, and reading it was why this commander scored every action at
 		# zero for four minutes of a seven-minute match.
-		"budget": economy.budget_metal(team, PLANNING_HORIZON),
-		"income_rate": economy.income_rate_metal(team),
+		"budget": economy.budget(team, PLANNING_HORIZON),
+		"income_rate": economy.income_rate(team),
 		"harvesters": harvesters,
 		"combat_units": combat.size(),
 		"refineries": _count_kind(own_structures, "refinery"),

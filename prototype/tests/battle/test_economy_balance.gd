@@ -55,9 +55,9 @@ func test_every_design_draws_the_same_rate_while_building() -> bool:
 		file.close()
 		if typeof(data) != TYPE_DICTIONARY:
 			continue
-		var cost: Vector2i = DesignCostingScript.blueprint_cost(data)
+		var cost: int = DesignCostingScript.blueprint_cost(data)
 		var time: float = DesignCostingScript.build_time_for_cost(cost)
-		var units: float = float(cost.x) + 2.0 * float(cost.y)
+		var units: float = float(cost)
 		# The clamps (3 s floor, 40 s ceiling) legitimately break proportionality
 		# for very cheap or very expensive designs. A bundled design hitting one
 		# is worth knowing about, but is not a failure of this rule.

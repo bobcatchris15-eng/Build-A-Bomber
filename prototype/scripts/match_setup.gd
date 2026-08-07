@@ -29,9 +29,10 @@ var FACTIONS: Array = []
 var FACTION_LABELS: Array = []
 const DIFFICULTIES = ["easy", "normal", "hard"]
 const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard"]
-# (metal, crystal); -1 means "use Skirmish's own default" (Standard reproduces
-# the old hardcoded 450/150 exactly, not just a same-looking copy of it).
-const RESOURCE_PRESETS = [Vector2i(-1, -1), Vector2i(250, 75), Vector2i(900, 400)]
+# Starting credits; -1 means "use the match's own default" (Standard reproduces
+# it exactly, not just a same-looking copy of it). The old (metal, crystal) pairs
+# were converted at the 2x crystal rate: 250/75 -> 400, 900/400 -> 1700.
+const RESOURCE_PRESETS = [-1, 400, 1700]
 const RESOURCE_LABELS = ["Standard", "Low (tight economy)", "High (build fast, fight fast)"]
 # Matches skirmish.gd's own hardcoded roster.slice(0, 12) - kept as a
 # separate constant here (not read from skirmish.gd, which isn't loaded
@@ -282,9 +283,7 @@ func _on_start_pressed():
 		match_config.player_faction = "" if FACTIONS[player_faction_btn.selected] == "auto" else FACTIONS[player_faction_btn.selected]
 		match_config.enemy_faction = "" if FACTIONS[enemy_faction_btn.selected] == "auto" else FACTIONS[enemy_faction_btn.selected]
 		match_config.ai_difficulty = DIFFICULTIES[difficulty_btn.selected]
-		var preset: Vector2i = RESOURCE_PRESETS[resources_btn.selected]
-		match_config.starting_metal = preset.x
-		match_config.starting_crystal = preset.y
+		match_config.starting_credits = RESOURCE_PRESETS[resources_btn.selected]
 		# Slot order, left to right and top to bottom, gaps skipped. Under the old
 		# checkbox list this was library sort order, which meant which designs
 		# survived skirmish.gd's roster.slice(0, 12) was effectively incidental.

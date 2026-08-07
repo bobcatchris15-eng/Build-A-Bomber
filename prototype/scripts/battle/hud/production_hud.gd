@@ -35,6 +35,7 @@ const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 const ToolboxPlateScript = preload("res://scripts/battle/hud/toolbox_plate.gd")
 const StampedLabelScript = preload("res://scripts/battle/hud/stamped_label.gd")
 # NOT a preload of match_director.gd: it preloads this file, and the pair is a
@@ -499,8 +500,11 @@ func _items_for(queue_name: String) -> Array:
 			out.append({
 				"kind": kind,
 				"label": kind.replace("_", " ").to_upper(),
-				"metal": BuildingCatalogScript.get_stat(kind, "cost_metal", 0),
-				"crystal": BuildingCatalogScript.get_stat(kind, "cost_crystal", 0),
+				# Buildings still author their price as materials, same as modules
+				# do, and convert at the till - see ResourceCatalog.
+				"cost": ResourceCatalogScript.credits_from_materials(Vector2i(
+					BuildingCatalogScript.get_stat(kind, "cost_metal", 0),
+					BuildingCatalogScript.get_stat(kind, "cost_crystal", 0))),
 				"time": BuildingCatalogScript.get_stat(kind, "build_time", 10.0),
 				"structure": true,
 			})
@@ -516,13 +520,12 @@ func _items_for(queue_name: String) -> Array:
 		for design in _director.roster:
 			if not _director.is_defence_design(design):
 				continue
-			var dcost: Vector2i = DesignCostingScript.blueprint_cost(design)
+			var dcost: int = DesignCostingScript.blueprint_cost(design)
 			defences.append({
 				"blueprint": design,
 				"kind": "defense",
 				"label": str(design.get("name", "DEFENCE")).to_upper(),
-				"metal": dcost.x,
-				"crystal": dcost.y,
+				"cost": dcost,
 				"time": DesignCostingScript.build_time_for_cost(dcost),
 				"structure": true,
 			})
@@ -536,12 +539,11 @@ func _items_for(queue_name: String) -> Array:
 			continue
 		if DesignCostingScript.queue_for_design(design) != queue_name:
 			continue
-		var cost: Vector2i = DesignCostingScript.blueprint_cost(design)
+		var cost: int = DesignCostingScript.blueprint_cost(design)
 		out.append({
 			"blueprint": design,
 			"label": str(design.get("name", "DESIGN")).to_upper(),
-			"metal": cost.x,
-			"crystal": cost.y,
+			"cost": cost,
 			"time": DesignCostingScript.build_time_for_cost(cost),
 			"structure": false,
 		})
@@ -550,7 +552,7 @@ func _items_for(queue_name: String) -> Array:
 
 func _add_item_button(parent: Control, queue_name: String, item: Dictionary) -> void:
 	var btn := Button.new()
-	btn.text = "%s\n%d M  %d C" % [item["label"], item["metal"], item["crystal"]]
+	btn.text = "%s\n%d cr" % [item["label"], item["cost"]]
 	btn.custom_minimum_size = Vector2(0, 44)
 	btn.focus_mode = Control.FOCUS_NONE
 	parent.add_child(btn)
@@ -566,15 +568,15 @@ func _enqueue(queue_name: String, item: Dictionary) -> void:
 		# building and a design-built turret. Dropping it here produced a power
 		# plant where the player ordered a gun turret.
 		_director.production.enqueue_structure(
-			team, queue_name, item["kind"], item["metal"], item["crystal"], item["time"],
+			team, queue_name, item["kind"], item["cost"], item["time"],
 			item.get("blueprint", {}))
 	else:
 		_director.production.enqueue_unit(
-			team, item["blueprint"], item["metal"], item["crystal"], item["time"], queue_name)
+			team, item["blueprint"], item["cost"], item["time"], queue_name)
 
 
 # NO RESOURCE READOUT HERE. There used to be one, anchored top-right, showing
-# metal, crystal and power - the same three numbers BattleHUD's top strip already
+# credits and power - the same numbers BattleHUD's top strip already
 # shows. Two readouts of one ledger is one too many: they cost a signal
 # connection each, they can disagree while one is mid-update, and on screen they
 # simply competed. BattleHUD keeps it, because its version also carries the power

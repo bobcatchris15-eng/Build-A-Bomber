@@ -41,7 +41,7 @@ class StubDirector:
 func _hud() -> Array:
 	var director := StubDirector.new()
 	director.economy = EconomyServiceScript.new()
-	director.economy.add_team(0, 1000, 500)
+	director.economy.add_team(0, 2000)
 	director.production = ProductionServiceScript.new()
 	director.production.setup(director.economy, null)
 	director.production.add_team(0)
@@ -221,7 +221,7 @@ func test_the_readout_tracks_progress() -> bool:
 	var hud: Node = pair[1]
 	var queue := BuildingCatalogScript.QUEUE_MEDIUM
 
-	director.production.enqueue_unit(0, {"name": "TESTER"}, 100, 0, 10.0, queue)
+	director.production.enqueue_unit(0, {"name": "TESTER"}, 100, 10.0, queue)
 	hud._refresh(queue)
 	var first: String = hud._strips[queue]["status"].text
 	var first_value: float = hud._strips[queue]["bar"].value
@@ -268,7 +268,7 @@ func test_idle_toolboxes_retreat_and_busy_ones_do_not() -> bool:
 		return false
 
 	# Now give it something to report. It must come back up on its own.
-	director.production.enqueue_unit(0, {"name": "TESTER"}, 100, 0, 10.0, queue)
+	director.production.enqueue_unit(0, {"name": "TESTER"}, 100, 10.0, queue)
 	if not hud._is_active(queue):
 		print("  [FAIL] a queue with a job in it does not read as active")
 		director.queue_free()
