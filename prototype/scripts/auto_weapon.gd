@@ -283,15 +283,28 @@ func _roll_hit(t: Node3D) -> bool:
 # and fired blanks - target dummies sat at full health while every other
 # signal (target lock, line of sight, aim angle) looked perfectly healthy.
 # Falling back to the tree root keeps the projectile real in that case.
+#
+# THE ROOT IS A Window, NOT A Node3D, so `t.root as Node3D` is always null and
+# a fallback written that way is not a fallback at all - it reinstates the
+# exact blank-firing bug described above for every harness that loads a scene
+# under the root. The return type is worth keeping (a projectile parented to a
+# non-spatial node inherits no transform), so the fallback has to find a real
+# 3D node instead of casting one into existence: the unit's own top-level
+# spatial ancestor, which is the match scene in play and the instantiated
+# scene under the root in a harness.
 func _effects_parent() -> Node3D:
 	var t = get_tree()
 	if t == null:
 		return null
 	if t.current_scene is Node3D:
 		return t.current_scene as Node3D
-	if t.root is Node3D:
-		return t.root as Node3D
-	return null
+	var best: Node3D = null
+	var node: Node = self
+	while node != null:
+		if node is Node3D:
+			best = node as Node3D
+		node = node.get_parent()
+	return best
 
 # Small dirt-puff visual where a missed shot lands, so a miss reads as a
 # miss instead of silent nothing.

@@ -179,6 +179,7 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 		target_altitude = FLYER_CRUISE_ALTITUDE
 	is_naval = facts["is_naval"]
 	is_amphibious = facts["is_amphibious"]
+	_resolve_terrain_collision()
 
 	# Weapons before the nav agent so a unit is never briefly alive, mobile and
 	# unarmed - the AI acquires targets the frame a unit spawns.
@@ -300,7 +301,13 @@ func _physics_process(delta: float) -> void:
 	_tick_economy(delta)
 	_apply_movement(delta)
 	_apply_vertical(delta)
+	# Kept as its own section: this call was 52 ms of a 56 ms frame until
+	# _resolve_terrain_collision() landed, and it is the one line here whose
+	# cost is set by physics state rather than by anything visible in this
+	# file - so if unit cost ever climbs again, this is the first read.
+	var _s := Profiler.start()
 	move_and_slide()
+	Profiler.stop("unit.move_and_slide", _s)
 	Profiler.stop("units", _t)
 
 
@@ -554,6 +561,41 @@ func _separation_push() -> Vector3:
 # rest a little above or below where the terrain says it should be, and
 # move_and_slide() then spends the rest of the match depenetrating it.
 #
+# TERRAIN COMES OUT OF THE COLLISION MASK when the heightmap owns Y.
+#
+# This was the single biggest cost in a match, and it is a conflict of
+# authority rather than a heavy computation. _apply_vertical() below WRITES
+# global_position.y from terrain_height_at() every tick - the heightmap is
+# authoritative and says so. But unit_assembly.gd masked TERRAIN as well, so
+# move_and_slide() then re-litigated the same axis against the terrain's
+# physics collider, which is only a SUBDIVIDED APPROXIMATION of the surface
+# the heightmap describes. The two never agree exactly, so every unit was
+# placed fractionally inside the mesh and depenetrated back out, every frame,
+# against a full-map trimesh.
+#
+# Measured, headless, 16 units on open_plains:
+#
+#     move_and_slide()   52.33 ms/frame  ->  0.66 ms/frame
+#     whole frame        56.41 ms        ->  4.11 ms
+#
+# The units never needed it. A ground unit's height is solved before
+# move_and_slide() is called, and its horizontal path is solved by the
+# navmesh - which is baked from the same heightmap, and is what actually
+# keeps it off cliffs. BUILDINGS stays masked, because that one really is a
+# backstop for a navmesh miss (see unit_assembly.gd's note).
+#
+# The gravity fallback is the exception and keeps TERRAIN: a unit built with
+# no controller - every synthetic test - has nothing to ask for a height and
+# genuinely does need the floor to land on.
+func _resolve_terrain_collision() -> void:
+	var heightmap_owns_y := _controller != null \
+		and _controller.has_method("terrain_height_at")
+	if heightmap_owns_y:
+		collision_mask &= ~BattleLayers.TERRAIN
+	else:
+		collision_mask |= BattleLayers.TERRAIN
+
+
 # Gravity is the fallback for when no controller can answer.
 func _apply_vertical(delta: float) -> void:
 	if is_flying or is_fixed_wing:
