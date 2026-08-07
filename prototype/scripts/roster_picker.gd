@@ -267,6 +267,34 @@ func slot_holding(path: String) -> RosterSlot:
 	return null
 
 
+# Fills the slots from an ordered list of paths, as the inverse of
+# ordered_paths(). Added for the Operations draft screen, which opens on the
+# roster you fielded last engagement rather than on twelve empty wells - between
+# rounds the common case is keeping what worked, so an empty default would make
+# holding a roster more work than changing it.
+#
+# A PATH THE LIBRARY NO LONGER HAS IS SKIPPED, not slotted blank: a design
+# deleted from the Blueprint Library between engagements must leave a gap you can
+# fill, not a slot that looks filled and fields nothing.
+func fill_from(paths: Array) -> int:
+	var filled := 0
+	for path in paths:
+		var path_str := str(path)
+		if filled >= _slots.size():
+			break
+		if not _data_by_path.has(path_str):
+			continue
+		if slot_holding(path_str) != null:
+			continue
+		var data: Dictionary = _data_by_path[path_str]
+		# null thumbnail: _bake_thumbnails() is still in flight from setup() and
+		# fills every slot holding this path when its render lands.
+		_slots[filled].assign(path_str, str(data.get("name", path_str.get_file())), null)
+		filled += 1
+	_update_counter()
+	return filled
+
+
 # THE OUTPUT CONTRACT. Left-to-right, top-to-bottom, gaps skipped.
 func ordered_paths() -> Array:
 	var out := []

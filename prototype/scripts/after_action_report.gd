@@ -63,7 +63,14 @@ func _build_ui() -> void:
 	var secs = int(match_duration) % 60
 	sub_header.text = "  |  Match Duration: %02d:%02d  |  AFTER-ACTION REPORT" % [mins, secs]
 	sub_header.theme_type_variation = "HeadingLabel"
-	sub_header.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	# horizontal_alignment, not alignment. Label has no `alignment` property -
+	# BoxContainer does - so this line raised "Invalid assignment of property or
+	# key 'alignment' ... on a base object of type 'Label'" and ABORTED _build_ui()
+	# right here, every time. The report has never rendered past its header: no
+	# per-design table, no iterate button, no way out except the escape key. Found
+	# by an end-to-end probe looking for the campaign's "Next Engagement" button
+	# and not finding any button at all.
+	sub_header.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	sub_header.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header_hbox.add_child(sub_header)
 	main_vbox.add_child(header_hbox)
@@ -231,7 +238,10 @@ func _build_ui() -> void:
 
 	if is_operation:
 		var next_btn = Button.new()
-		next_btn.text = "Next Operation Stage"
+		# "Engagement", matching what the setup and draft screens call a round.
+		# "Stage" was this file's own word for it and appeared nowhere else.
+		next_btn.text = "Next Engagement >"
+		next_btn.theme_type_variation = "PrimaryButton"
 		next_btn.custom_minimum_size = Vector2(200, 44)
 		next_btn.pressed.connect(func(): next_stage_requested.emit())
 		bottom_hbox.add_child(next_btn)

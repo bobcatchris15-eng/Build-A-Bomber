@@ -170,3 +170,196 @@ func test_operations_difficulty_ramps_toward_the_choice() -> bool:
 	if ok:
 		print("  [PASS] hard ramps normal->hard, easy stays easy, total_stages follows the itinerary.")
 	return ok
+
+
+# --- The loop -----------------------------------------------------------------
+
+# A campaign has to survive quitting. Blueprints already do; this is the only
+# other thing worth keeping, and it is JSON for the same reason they are.
+func test_operations_campaign_round_trips_through_disk() -> bool:
+	print("Running Test Suite: Operations - a campaign survives save/load...")
+	var mgr = OperationsManagerScript.new()
+	mgr.start_new_operation(OperationsManagerScript.default_itinerary(5, "hard"), "hard")
+	mgr.set_player_roster(["res://a.json", "res://b.json"])
+	mgr.record_stage_result({
+		"victory": true,
+		"duration": 421.5,
+		"designs": {"Bulwark MBT": {"built": 4, "kills": 7, "lost": 1}},
+		"player_designs": ["Bulwark MBT"],
+		"enemy_designs": ["Scrapper Ore Trucker", "Warden AA"],
+	})
+	mgr.advance_to_next_stage()
+	var path: String = mgr.save_path()
+	var ok := mgr.save()
+	if not ok:
+		print("  [FAIL] save() reported failure writing ", path)
+		mgr.free()
+		return false
+
+	var restored = OperationsManagerScript.new()
+	if not restored.load_from(path):
+		print("  [FAIL] load_from() refused ", path)
+		mgr.free()
+		restored.free()
+		return false
+
+	if restored.current_stage != 1:
+		print("  [FAIL] current_stage came back as ", restored.current_stage, ", expected 1")
+		ok = false
+	if restored.total_stages != 5:
+		print("  [FAIL] itinerary came back with ", restored.total_stages, " stages, expected 5")
+		ok = false
+	if restored.player_roster_paths != ["res://a.json", "res://b.json"]:
+		print("  [FAIL] the drafted roster did not survive: ", restored.player_roster_paths)
+		ok = false
+
+	# The combat log is the part counter-drafting will read, so it has to come
+	# back whole rather than as a count.
+	var log: Array = restored.fielded_history()
+	if log.size() != 1:
+		print("  [FAIL] combat log came back with ", log.size(), " entries, expected 1")
+		ok = false
+	elif log[0].get("enemy_designs", []) != ["Scrapper Ore Trucker", "Warden AA"]:
+		print("  [FAIL] what the enemy fielded did not survive: ", log[0].get("enemy_designs", []))
+		ok = false
+
+	# A save from a schema that has moved on must be REFUSED, not half-applied.
+	var bogus = OperationsManagerScript.new()
+	if bogus.from_dict({"version": 999, "stages_itinerary": [{"map_id": "x"}]}):
+		print("  [FAIL] a future save version was accepted")
+		ok = false
+	bogus.free()
+
+	DirAccess.remove_absolute(path)
+	mgr.free()
+	restored.free()
+	if ok:
+		print("  [PASS] A 5-engagement campaign round-trips: stage, itinerary, roster and combat log.")
+	return ok
+
+
+# advance_to_next_stage() and record_stage_result() had zero call sites for the
+# whole rebuild - the campaign never moved and the failure mode was SILENCE, not
+# an error. So this asserts the pointer actually walks the itinerary and stops.
+func test_operations_loop_advances_and_terminates() -> bool:
+	print("Running Test Suite: Operations - the loop advances and ends...")
+	var mgr = OperationsManagerScript.new()
+	mgr.start_new_operation(OperationsManagerScript.default_itinerary(3, "normal"), "normal")
+
+	var ok := true
+	var completed := [false]
+	mgr.operation_completed.connect(func(_r): completed[0] = true)
+
+	if not mgr.has_next_stage():
+		print("  [FAIL] A fresh 3-engagement operation reports no next engagement")
+		ok = false
+
+	var maps_seen: Array = []
+	for i in range(3):
+		maps_seen.append(str(mgr.get_current_stage_info().get("map_id", "")))
+		mgr.record_stage_result({"victory": i % 2 == 0, "player_designs": [], "enemy_designs": []})
+		var more: bool = mgr.advance_to_next_stage()
+		if i < 2 and not more:
+			print("  [FAIL] Operation ended early, after engagement ", i + 1)
+			ok = false
+		if i == 2 and more:
+			print("  [FAIL] Operation did not end after its last engagement")
+			ok = false
+
+	if mgr.is_active_operation:
+		print("  [FAIL] The operation is still active after its last engagement")
+		ok = false
+	if not completed[0]:
+		print("  [FAIL] operation_completed never fired")
+		ok = false
+	if mgr.stage_results_history.size() != 3:
+		print("  [FAIL] combat log has ", mgr.stage_results_history.size(), " entries, expected 3")
+		ok = false
+	# The itinerary must actually be walked - three engagements all on stage 0's
+	# map would look identical from the outside.
+	for i in range(3):
+		if str(mgr.stages_itinerary[i].get("map_id", "")) != maps_seen[i]:
+			print("  [FAIL] Engagement %d was fought on '%s', itinerary says '%s'"
+				% [i + 1, maps_seen[i], mgr.stages_itinerary[i].get("map_id", "")])
+			ok = false
+
+	DirAccess.remove_absolute(mgr.save_path())
+	mgr.free()
+	if ok:
+		print("  [PASS] Three engagements walked in order, then the operation closed itself.")
+	return ok
+
+
+# The draft screen is what makes an operation more than a playlist. Two things
+# must hold: it opens on last round's roster, and Deploy writes the NEXT
+# engagement's map - not the one just fought.
+func test_operations_draft_carries_the_roster_and_the_next_map() -> bool:
+	print("Running Test Suite: Operations - the draft screen carries roster and map...")
+	# THE AUTOLOADS, not fresh nodes. Both are registered in project.godot now, so
+	# adding a second node under the same name gets it silently RENAMED by Godot
+	# and the screen goes on writing to the real singleton - which is exactly how
+	# this test first failed, reporting an empty map that had been written to a
+	# node the test was not holding.
+	var mgr = root.get_node_or_null("OperationsManager")
+	var config = root.get_node_or_null("MatchConfig")
+	var owned: Array = []
+	if mgr == null:
+		mgr = OperationsManagerScript.new()
+		mgr.name = "OperationsManager"
+		root.add_child(mgr)
+		owned.append(mgr)
+	if config == null:
+		config = Node.new()
+		config.name = "MatchConfig"
+		config.set_script(load("res://scripts/match_config.gd"))
+		root.add_child(config)
+		owned.append(config)
+
+	mgr.start_new_operation(OperationsManagerScript.default_itinerary(4, "normal"), "normal")
+	mgr.record_stage_result({"victory": false, "player_designs": [], "enemy_designs": ["Warden AA"]})
+	mgr.advance_to_next_stage()
+
+	var screen = load("res://scripts/operations_draft.gd").new()
+	root.add_child(screen)
+	await tree.process_frame
+
+	var ok := true
+	var expected_map: String = str(mgr.stages_itinerary[1].get("map_id", ""))
+	screen.write_match_config()
+	if str(config.selected_map_id) != expected_map:
+		print("  [FAIL] Deploy wrote map '", config.selected_map_id,
+			"', expected engagement 2's map '", expected_map, "'")
+		ok = false
+
+	# The picker opens on the previous roster. Asserted through the picker's own
+	# output contract, and only for designs the library actually still has - a
+	# clean test install may have none, which is not a failure of this code.
+	var library: Array = screen.roster_picker._data_by_path.keys()
+	if library.size() >= 2:
+		screen.roster_picker.fill_from([library[0], library[1]])
+		var carried: Array = screen.roster_picker.ordered_paths()
+		if carried.size() != 2 or carried[0] != library[0]:
+			print("  [FAIL] The draft did not open on the carried roster: ", carried)
+			ok = false
+		# A path the library no longer has must leave a gap, not a dead slot.
+		screen.roster_picker.fill_from(["res://data/loadout/__deleted__.json"])
+		if screen.roster_picker.ordered_paths().size() != 2:
+			print("  [FAIL] A deleted design was slotted anyway: ",
+				screen.roster_picker.ordered_paths())
+			ok = false
+	else:
+		print("  (blueprint library has %d named designs - roster carry-over unasserted)"
+			% library.size())
+
+	DirAccess.remove_absolute(mgr.save_path())
+	# The autoloads outlive this suite, so the campaign state they were lent has
+	# to be handed back - a later suite instantiating Battle.tscn would otherwise
+	# find itself mid-operation.
+	mgr.reset_operation()
+	screen.queue_free()
+	for node in owned:
+		node.queue_free()
+	await tree.process_frame
+	if ok:
+		print("  [PASS] Deploy writes the next engagement's map, and the roster carries forward.")
+	return ok

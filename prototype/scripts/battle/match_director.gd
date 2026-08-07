@@ -806,11 +806,61 @@ func _show_after_action_report(player_won: bool) -> void:
 
 	var duration: float = stats.duration() if stats != null else 0.0
 	var rows: Dictionary = stats.to_report() if stats != null else {}
-	# `false` for is_operation: a skirmish has no next stage to offer, and the
-	# report already branches on that flag - it is the seam Operations will use.
-	report.setup(player_won, duration, rows, false)
+
+	# The campaign seam, live at last. is_operation was hardcoded `false` here,
+	# which is why the report never offered a next engagement and an Operation
+	# was a single match with a different setup screen.
+	var ops = _operations()
+	var in_operation: bool = ops != null and ops.is_active_operation
+	if in_operation:
+		ops.record_stage_result(_stage_result(player_won, duration, rows))
+	report.setup(player_won, duration, rows, in_operation and ops.has_next_stage())
 	report.main_menu_requested.connect(_on_report_main_menu)
 	report.iterate_requested.connect(_on_report_iterate)
+	report.next_stage_requested.connect(_on_report_next_stage)
+
+
+# The manager, or null outside a campaign. Looked up rather than preloaded so a
+# Battle scene instantiated by a test - no autoloads at all in that boot path -
+# behaves exactly as a skirmish, which is what it is.
+func _operations():
+	return get_node_or_null("/root/OperationsManager")
+
+
+# One engagement's line in the combat log. The per-design rows are the report's;
+# the roster lists are what counter-drafting will read, and this is the only
+# moment both sides' compositions are still in one place.
+func _stage_result(player_won: bool, duration: float, rows: Dictionary) -> Dictionary:
+	var player_designs: Array = []
+	for design in roster:
+		player_designs.append(str(design.get("name", "")))
+	var enemy_designs: Array = []
+	for design in enemy_roster:
+		enemy_designs.append(str(design.get("name", "")))
+	return {
+		"victory": player_won,
+		"duration": duration,
+		"designs": rows,
+		"player_designs": player_designs,
+		"enemy_designs": enemy_designs,
+	}
+
+
+# "Next Engagement". Advancing is the player's choice, made here rather than at
+# match end, so a lost engagement still leaves the campaign where it was until
+# they say otherwise.
+func _on_report_next_stage() -> void:
+	var ops = _operations()
+	if ops == null or not ops.advance_to_next_stage():
+		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
+		return
+	# Through the draft screen, not straight back into a match: re-drafting
+	# between rounds is the whole reason an operation is more than a playlist.
+	var router = get_node_or_null("/root/SceneRouter")
+	if router:
+		router.goto("res://scenes/OperationsDraft.tscn")
+	else:
+		get_tree().change_scene_to_file("res://scenes/OperationsDraft.tscn")
 
 
 func _on_report_main_menu() -> void:
@@ -820,7 +870,14 @@ func _on_report_main_menu() -> void:
 # "Iterate on this design" hands straight back to the Design Lab, which is the
 # whole point of reporting per-design stats: the report is a debrief that turns
 # into the next edit.
-func _on_report_iterate(_blueprint_name: String) -> void:
+func _on_report_iterate(blueprint_name: String) -> void:
+	# Which design the player asked to iterate on is remembered rather than
+	# dropped on the floor. queue_blueprint_iteration() had no call site either;
+	# the Lab reading it back is a separate, small piece of work, but the choice
+	# has to survive the scene change before that can be written at all.
+	var ops = _operations()
+	if ops != null and blueprint_name != "":
+		ops.queue_blueprint_iteration(blueprint_name)
 	get_tree().change_scene_to_file("res://scenes/MainLab.tscn")
 
 

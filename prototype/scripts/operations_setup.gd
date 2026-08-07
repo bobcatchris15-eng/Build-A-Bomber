@@ -349,9 +349,10 @@ func _on_start_operation_pressed() -> void:
 	var itinerary := build_itinerary()
 	var sel_diff: String = DIFFICULTIES[difficulty_btn.selected]
 
-	# ONE manager, found or created. The previous version constructed a throwaway
-	# just to read the default itinerary and then a second one into /root - two
-	# instances, neither canonical. Reading the defaults is a static call now.
+	# ONE manager, the autoload. It used to be constructed here - a throwaway to
+	# read the default itinerary, then a second one parented into /root - which
+	# is exactly why nothing else in the game could reach the campaign state.
+	# The fallback covers a fixture instantiated with no autoloads.
 	var ops_node = get_node_or_null("/root/OperationsManager")
 	if not ops_node:
 		ops_node = OperationsManager.new()
@@ -360,6 +361,7 @@ func _on_start_operation_pressed() -> void:
 	ops_node.start_new_operation(itinerary, sel_diff)
 
 	_write_match_config(ops_node.get_current_stage_info())
+	ops_node.set_player_roster(roster_picker.ordered_paths())
 
 	var router = get_node_or_null("/root/SceneRouter")
 	if router:

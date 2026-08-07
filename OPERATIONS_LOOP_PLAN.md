@@ -137,37 +137,43 @@ time to re-cover the second bullet against `ProductionService`.**
 
 ---
 
-## 1. Persistence (~half a day)
+## 1. Persistence — DONE 2026-08-07
 
-JSON to `user://operations/<id>.json`. Not `.tres` — blueprints are already JSON
-at schema v2.0 and `data/loadout/` is load-bearing JSON; one serialisation
-format.
+JSON to `user://operations/<id>.json`, versioned (`SAVE_VERSION = 1`). A save
+whose version has moved on is **refused, not half-applied** — `from_dict()`
+returns false and leaves the manager alone, because a silently mis-loaded
+campaign is worse than one that admits it cannot be restored.
 
-Holds: itinerary, current round, per-round result, the player's drafted roster,
-and the combat log section 4 needs.
+Holds the itinerary, current stage, difficulty, the drafted roster, and the
+combat log. Written on every state change (`start_new_operation`,
+`record_stage_result`, `advance_to_next_stage`, `set_player_roster`), so there
+is no "save" the player can forget to press. `list_saved()` enumerates them
+newest-first, which is what a Continue Operation entry will read.
 
-Write it as a plain dictionary round-trip with an explicit `version` field from
-day one. The blueprint schema earned its version the hard way.
+## 2. The loop — DONE 2026-08-07
 
-**Test:** round-trip a campaign and assert the roster and log survive.
+`OperationsManager` is an autoload now. `record_stage_result()` and
+`advance_to_next_stage()` have call sites at last:
 
-## 2. The loop (~half a day, mostly wiring)
+- `match_director._show_after_action_report()` records the result and passes a
+  real `is_operation` — it was hardcoded `false`, which is the single line that
+  made an Operation one match with a different setup screen.
+- The report's "Next Engagement" advances the pointer and routes to the draft
+  screen. **Advancing is the player's choice**, made there rather than at match
+  end, so a lost engagement leaves the campaign where it was until they say so.
+- `_stage_result()` records who won, how long it took, the per-design rows, and
+  **what each side fielded** — the last is the only moment both compositions are
+  still in one place, and it is what section 4 reads.
 
-`operations_manager.gd` already has the itinerary, `record_stage_result()` and
-`advance_to_next_stage()`. All three still have **zero call sites outside the
-file**. The work is wiring:
+### A bug this turned up
 
-- Register it as an autoload. It is currently instantiated into `/root` by
-  `operations_setup.gd`, which is why nothing else can reach it.
-- `match_director.match_ended` → `record_stage_result()` → after-action report →
-  draft screen → `advance_to_next_stage()` → next match.
-
-`after_action_report.gd` is **no longer orphaned** — it is wired to match end
-with real per-design stats from `match_stats.gd`. Its `is_operation` flag is
-still unused, and is the seam for the "continue campaign" button.
-
-**Test:** assert `advance_to_next_stage()` is actually reached from a match
-ending. The current failure mode is silence, not an error.
+`after_action_report.gd:66` assigned `Label.alignment`, which does not exist
+(`BoxContainer` has it; `Label` has `horizontal_alignment`). It raised at
+runtime and **aborted `_build_ui()` on that line, every time** — so the report
+has never rendered past its header: no per-design table, no iterate button, no
+way out but the escape key. Found by an end-to-end probe looking for the
+campaign's "Next Engagement" button and finding no button at all. This is why
+seams get a probe and not only unit tests.
 
 ### Setup screen — DONE 2026-08-07
 
@@ -196,16 +202,31 @@ random/hand-picked map resolution, resize preserving picks, and the ramp.
 Headless cannot press buttons, so they assert `build_itinerary()`, the screen's
 output contract, rather than driving input.
 
-## 3. Drafting (~half a day)
+## 3. Drafting — DONE 2026-08-07
 
-`roster_picker.gd` is working 12-slot drag-and-drop, now a single full-width row.
-Between rounds it becomes the draft screen. The one addition is showing what the
-opponent fielded last round — that is what makes re-drafting a decision.
+`scenes/OperationsDraft.tscn` / `operations_draft.gd`, between every engagement:
 
-## 4. Counter-drafting (~half a day)
+- The same 12-slot `RosterPicker`, **opening on last round's roster** via the new
+  `fill_from()` (the inverse of `ordered_paths()`). Between rounds the common
+  case is keeping what worked; an empty default would make holding a roster more
+  work than changing it. A design deleted from the library since last round
+  leaves a gap rather than a slot that looks filled and fields nothing.
+- **What the opponent fielded**, plus your own per-design built/kills/lost. This
+  is the whole point — re-drafting blind is a chore, re-drafting against a known
+  composition is the decision the operation is built on.
+- Deploy writes the *next* engagement's map and difficulty. Factions are not
+  rewritten: they were chosen once, for the operation.
+- Design Lab and Abandon Operation, since iterating between rounds is the
+  premise.
 
-Record what each side fielded per round into the combat log; at draft time the AI
-biases its roster from it.
+## 4. Counter-drafting (~half a day) — THE ONLY PART LEFT
+
+**Half of it is done.** The recording exists: `record_stage_result()` writes
+`player_designs` / `enemy_designs` per round and `fielded_history()` hands them
+back. What is missing is the *reading* — `match_director._load_roster()` still
+builds `enemy_roster` from the bundled defaults every engagement, identically,
+so the opponent fields the same army in round 6 as in round 1 no matter what beat
+it.
 
 The scoring exists: `Commander.design_fills_role()` reads roles off a design's
 mounted modules, so it can classify designs it has never seen, including ones the
@@ -235,7 +256,14 @@ Profiling harness is `tools/profile_battle_run.gd` (`-- [seconds] [on|off]`).
 Instrumentation overhead measured at 0.05 ms/frame (0.3%), so its numbers can be
 read as real.
 
-Baseline as of 2026-08-07: **6 failing of 208**. Sensor mast, modular assembly
+`test_target_dummies_actually_take_damage_in_test_range` is a **flake, not a
+regression**. Measured 1/4 passing run completely alone, which matches
+`run_tests.gd`'s own note that it "fails even run completely alone, a real
+timing race". Two quarantine attempts is not enough retries for a suite that
+passes a quarter of the time, so it will surface in a full run now and again.
+Worth fixing at the source rather than by adding attempts.
+
+Baseline as of 2026-08-07: **6 failing of 211**. Sensor mast, modular assembly
 meshes, locomotion golden fixture, design-to-battle integration, module drag, UI
 glyphs. All six are Design Lab / mesh suites and none are navmesh-related — the
 "four heightmap/navmesh suites" that used to sit in this list were the

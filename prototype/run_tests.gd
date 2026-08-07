@@ -254,6 +254,9 @@ const SUITE_ORDER := [
 	["operations_setup", "test_operations_itinerary_resolves_every_map"],
 	["operations_setup", "test_operations_changing_the_count_keeps_chosen_maps"],
 	["operations_setup", "test_operations_difficulty_ramps_toward_the_choice"],
+	["operations_setup", "test_operations_campaign_round_trips_through_disk"],
+	["operations_setup", "test_operations_loop_advances_and_terminates"],
+	["operations_setup", "test_operations_draft_carries_the_roster_and_the_next_map"],
 	["economy_and_production", "test_harvester_delivery_radius_clears_hull_and_refinery"],
 ]
 

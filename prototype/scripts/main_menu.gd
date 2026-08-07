@@ -59,7 +59,7 @@ const DESTINATIONS := [
 	},
 	{
 		"title": "OPERATIONS",
-		"desc": "Multi-stage campaign with after-action reports.",
+		"desc": "Three to twelve engagements. Re-draft your roster between each.",
 		"scene": "res://scenes/OperationsSetup.tscn",
 		"badge": "TAC // CAMPAIGN"
 	},

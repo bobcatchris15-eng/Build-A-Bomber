@@ -9,6 +9,9 @@ const SUITES := [
 	"test_operations_itinerary_resolves_every_map",
 	"test_operations_changing_the_count_keeps_chosen_maps",
 	"test_operations_difficulty_ramps_toward_the_choice",
+	"test_operations_campaign_round_trips_through_disk",
+	"test_operations_loop_advances_and_terminates",
+	"test_operations_draft_carries_the_roster_and_the_next_map",
 ]
 
 
