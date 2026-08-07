@@ -98,15 +98,23 @@ func _build_ui() -> void:
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	table_vbox.add_child(scroll)
 
+	# Table Headers.
+	#
+	# "Lost" is here because MatchStats has recorded it all along and this table
+	# never showed it - and a design's loss rate is the single most useful number
+	# for deciding whether to redesign it. Built-vs-lost is the difference between
+	# "my Bulwark got 7 kills" and "my Bulwark got 7 kills and 6 of them died".
+	var headers = ["Blueprint", "Built", "Lost", "Kills", "Dmg Dealt", "Dmg Taken", "Metal", "Efficiency"]
+
 	var grid = GridContainer.new()
-	grid.columns = 7
+	# Driven off the header list rather than a literal, so adding a column cannot
+	# silently shear every row by one cell.
+	grid.columns = headers.size()
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grid.add_theme_constant_override("h_separation", 16)
 	grid.add_theme_constant_override("v_separation", 8)
 	scroll.add_child(grid)
 
-	# Table Headers
-	var headers = ["Blueprint", "Built", "Kills", "Dmg Dealt", "Dmg Taken", "Metal", "Efficiency"]
 	for h in headers:
 		var lbl = Label.new()
 		lbl.text = h
@@ -119,29 +127,43 @@ func _build_ui() -> void:
 	var total_kin = 0.0
 	var total_therm = 0.0
 	var total_exp = 0.0
+	# ENERGY WAS BEING DROPPED ON THE FLOOR. MatchStats records
+	# damage_taken_energy - it is one of the four damage classes in
+	# damage_resolver.gd - and this report counted the other three only, so a
+	# match against energy weapons showed a "Dmg Taken" lower than what actually
+	# landed and an assessment that named the wrong threat. Never noticed because
+	# _build_ui() aborted before this code ever ran.
+	var total_energy = 0.0
 
 	for bp_name in bp_stats.keys():
 		var data = bp_stats[bp_name]
 		var built = data.get("built", 0)
+		var lost = data.get("lost", 0)
 		var kills = data.get("kills", 0)
 		var dmg_dealt = data.get("damage_dealt", 0.0)
 		var kin = data.get("damage_taken_kinetic", 0.0)
 		var therm = data.get("damage_taken_thermal", 0.0)
 		var exp = data.get("damage_taken_explosive", 0.0)
-		var dmg_taken = kin + therm + exp
+		var energy = data.get("damage_taken_energy", 0.0)
+		var dmg_taken = kin + therm + exp + energy
 		var metal = data.get("metal_spent", 0)
 
 		total_kin += kin
 		total_therm += therm
 		total_exp += exp
+		total_energy += energy
 
+		# A design that was never built cannot be the best performer. Its
+		# efficiency is 0/1 = 0, which beat the -1 sentinel and made an unbuilt
+		# design the MVP of any match where nothing dealt damage.
 		var eff = (dmg_dealt / maxf(1.0, float(metal))) * 100.0
-		if eff > mvp_score:
+		if built > 0 and eff > mvp_score:
 			mvp_score = eff
 			mvp_name = bp_name
 
 		_add_table_cell(grid, bp_name)
 		_add_table_cell(grid, str(built))
+		_add_table_cell(grid, str(lost))
 		_add_table_cell(grid, str(kills))
 		_add_table_cell(grid, "%.0f" % dmg_dealt)
 		_add_table_cell(grid, "%.0f" % dmg_taken)
@@ -186,11 +208,12 @@ func _build_ui() -> void:
 	advice_text.autowrap_mode = TextServer.AUTOWRAP_WORD
 	advice_text.theme_type_variation = "HintLabel"
 
-	var total_dmg_taken = total_kin + total_therm + total_exp
+	var total_dmg_taken = total_kin + total_therm + total_exp + total_energy
 	if total_dmg_taken > 0.0:
 		var kin_pct = (total_kin / total_dmg_taken) * 100.0
 		var therm_pct = (total_therm / total_dmg_taken) * 100.0
 		var exp_pct = (total_exp / total_dmg_taken) * 100.0
+		var energy_pct = (total_energy / total_dmg_taken) * 100.0
 
 		if kin_pct >= 50.0:
 			advice_text.text = "• Enemy fielded heavy Kinetic weaponry (%.0f%% of damage taken).\n• Recommendation: Increase armor thickness or switch to Steel/Ceramic armor plates." % kin_pct
@@ -198,6 +221,8 @@ func _build_ui() -> void:
 			advice_text.text = "• Enemy dealt high Thermal damage (%.0f%% of damage taken).\n• Recommendation: Mount Ablative or Ceramic armor plates to absorb thermal beams." % therm_pct
 		elif exp_pct >= 40.0:
 			advice_text.text = "• Enemy landed heavy Explosive/Missile damage (%.0f%% of damage taken).\n• Recommendation: Mount Reactive Armor plates or Point-Defense CIWS turrets." % exp_pct
+		elif energy_pct >= 40.0:
+			advice_text.text = "• Enemy leaned on Energy weapons (%.0f%% of damage taken).\n• Recommendation: Energy Shielding resists them where plate does not, and shields regenerate between engagements." % energy_pct
 		else:
 			advice_text.text = "• Damage taken was balanced across classes.\n• Tip: Check module traverse speeds and continuous tweak barrel lengths for range advantage."
 	else:

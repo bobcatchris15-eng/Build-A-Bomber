@@ -413,7 +413,14 @@ static func design_fills_role(blueprint: Dictionary, role: String) -> bool:
 				return true
 		return false
 	if role == "general":
-		return true
+		# "General" is the fallback COMBAT role, and a harvester is not a combat
+		# unit. It used to return true for literally anything, which was harmless
+		# only because the bundled roster happened to list the ore trucker eighth -
+		# the moment anything reordered that pool, BUILD_GENERAL started producing
+		# harvesters and the AI built an economy it had no army to protect.
+		# Found by the counter-draft promoting harvesters to the front for a
+		# completely different (and correct) reason.
+		return not design_fills_role(blueprint, "harvester")
 	var wanted: Array = ANTI_AIR_WEAPONS if role == "anti_air" else ANTI_ARMOR_WEAPONS
 	for m in blueprint.get("modules", []):
 		if m.get("type_id", "") in wanted:

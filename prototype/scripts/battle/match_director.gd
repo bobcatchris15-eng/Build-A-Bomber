@@ -49,6 +49,7 @@ const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd"
 const VisionServiceScript = preload("res://scripts/battle/vision/vision_service.gd")
 const BattleHUDScript = preload("res://scripts/battle/hud/battle_hud.gd")
 const CommanderScript = preload("res://scripts/battle/ai/commander.gd")
+const CounterDraftScript = preload("res://scripts/battle/ai/counter_draft.gd")
 const SquadScript = preload("res://scripts/battle/ai/squad.gd")
 const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
@@ -419,6 +420,21 @@ func _load_roster() -> void:
 		_append_design(enemy_roster, bp_manager.load_blueprint(path))
 	if _harvester_in(enemy_roster).is_empty():
 		_append_design(enemy_roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
+
+	# COUNTER-DRAFTING. In an operation the AI reorders its pool against what the
+	# player has actually fielded in engagements already fought - which is what
+	# stops it bringing an identical army to round 6 as to round 1.
+	#
+	# A REORDER, NOT A REBUILD. ai_design_for_role() takes the FIRST design in
+	# enemy_roster matching a role, so changing the order is the whole mechanism;
+	# no design is added or dropped, and the AI plays exactly as it always did.
+	# Outside an operation, or on round one, this is a no-op.
+	var ops = get_node_or_null("/root/OperationsManager")
+	if ops != null and ops.is_active_operation:
+		var history: Array = ops.fielded_history()
+		if not history.is_empty():
+			enemy_roster = CounterDraftScript.order_roster(enemy_roster, history)
+			print("[Operations] AI counter-draft: %s" % CounterDraftScript.explain(history))
 
 	if match_config and "enemy_faction" in match_config and match_config.enemy_faction != "":
 		enemy_faction = match_config.enemy_faction
@@ -832,8 +848,15 @@ func _operations():
 # moment both sides' compositions are still in one place.
 func _stage_result(player_won: bool, duration: float, rows: Dictionary) -> Dictionary:
 	var player_designs: Array = []
+	# THREATS ARE CLASSIFIED NOW, NOT AT DRAFT TIME. The blueprints are in hand
+	# here; three engagements later the player may have edited or deleted them,
+	# and re-classifying from the library would then describe an army that was
+	# never fielded. What the log records is what was actually brought.
+	var player_threats: Array = []
 	for design in roster:
 		player_designs.append(str(design.get("name", "")))
+		for tag in CounterDraftScript.threats_of(design):
+			player_threats.append(tag)
 	var enemy_designs: Array = []
 	for design in enemy_roster:
 		enemy_designs.append(str(design.get("name", "")))
@@ -842,6 +865,7 @@ func _stage_result(player_won: bool, duration: float, rows: Dictionary) -> Dicti
 		"duration": duration,
 		"designs": rows,
 		"player_designs": player_designs,
+		"player_threats": player_threats,
 		"enemy_designs": enemy_designs,
 	}
 

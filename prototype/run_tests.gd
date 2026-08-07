@@ -36,6 +36,8 @@ const SUITE_FILES := {
 	"battle_placement": preload("res://tests/battle/test_battle_placement.gd"),
 	"battle_hud": preload("res://tests/battle/test_battle_hud.gd"),
 	"operations_setup": preload("res://tests/battle/test_operations_setup.gd"),
+	"after_action_report": preload("res://tests/battle/test_after_action_report.gd"),
+	"counter_draft": preload("res://tests/battle/test_counter_draft.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -257,6 +259,15 @@ const SUITE_ORDER := [
 	["operations_setup", "test_operations_campaign_round_trips_through_disk"],
 	["operations_setup", "test_operations_loop_advances_and_terminates"],
 	["operations_setup", "test_operations_draft_carries_the_roster_and_the_next_map"],
+	["after_action_report", "test_after_action_report_builds_its_whole_self"],
+	["after_action_report", "test_after_action_report_counts_energy_damage"],
+	["after_action_report", "test_after_action_report_mvp_must_have_been_fielded"],
+	["after_action_report", "test_after_action_report_offers_the_next_engagement"],
+	["counter_draft", "test_counter_draft_classifies_real_designs"],
+	["counter_draft", "test_counter_draft_answers_an_air_force"],
+	["counter_draft", "test_counter_draft_never_demotes_the_harvester"],
+	["counter_draft", "test_counter_draft_ignores_a_token_threat"],
+	["counter_draft", "test_counter_draft_weights_recent_engagements"],
 	["economy_and_production", "test_harvester_delivery_radius_clears_hull_and_refinery"],
 ]
 

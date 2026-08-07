@@ -219,24 +219,53 @@ output contract, rather than driving input.
 - Design Lab and Abandon Operation, since iterating between rounds is the
   premise.
 
-## 4. Counter-drafting (~half a day) — THE ONLY PART LEFT
+## 4. Counter-drafting — DONE 2026-08-07
 
-**Half of it is done.** The recording exists: `record_stage_result()` writes
-`player_designs` / `enemy_designs` per round and `fielded_history()` hands them
-back. What is missing is the *reading* — `match_director._load_roster()` still
-builds `enemy_roster` from the bundled defaults every engagement, identically,
-so the opponent fields the same army in round 6 as in round 1 no matter what beat
-it.
+`scripts/battle/ai/counter_draft.gd`. **A reordering, not new AI.**
+`ai_design_for_role()` already takes the FIRST design in `enemy_roster` matching
+a role, so changing the order is the entire mechanism — no design is added or
+dropped, and the AI plays exactly as it always did.
 
-The scoring exists: `Commander.design_fills_role()` reads roles off a design's
-mounted modules, so it can classify designs it has never seen, including ones the
-player built. This is `enemy_roster` selection by the same considerations, not
-new AI.
+- **Threats are classified when the engagement ends**, not at draft time. The
+  blueprints are in hand at match end; three rounds later the player may have
+  edited or deleted them, and re-classifying from the library would describe an
+  army that was never fielded.
+- **Recency-weighted** (`RECENCY_FALLOFF = 0.6`). The player re-drafts too, so
+  countering the army they have already abandoned is worse than not countering.
+  Four aircraft last round outweigh three earlier rounds of armour, and armour
+  seen three rounds running still clears the floor.
+- **A threat floor** (`0.2`). One scout aircraft in twenty units is not an air
+  force, and an AI that rebuilds around a single sighting can be baited — which
+  would make baiting it the dominant strategy.
+- **Harvesters are never demoted.** Economy is not a counter-pick; an AI that
+  promoted flak trucks above its only ore hauler would answer the player's air
+  force by starving.
+- **Dedication, not qualification.** `role_strength()` scores the share of a
+  design's weapons that answer the role. The Longarm SPG mounts a CIWS beside
+  its howitzer, so `design_fills_role()` honestly says yes — but first-match-wins
+  fielded a howitzer against an air force. The Warden AA (2/2) now outranks it
+  (1/2).
+- **Visible.** The draft screen shows the AI's intent in its own words, from the
+  same function that does the reordering, so the two cannot describe different
+  plans. An opponent that adapts invisibly reads as an inconsistent one.
 
-Keep the handicap honest — a difficulty-scaled income trickle is the only
-concession. The AI reads the same services the player's HUD does.
+Five suites in `tests/battle/test_counter_draft.gd`, including the plan's own
+acceptance test verbatim, plus `tools/probe_operations_loop.gd` playing a real
+second engagement.
 
-**Test:** feed a log of all-air and assert the drafted roster gains anti-air.
+### Two bugs this turned up
+
+**`fielded_history()` dropped `player_threats`.** The projection listed the
+fields it wanted and the threat tags were not among them, so the counter-draft
+read an empty history and fielded a balanced force forever — with no error
+anywhere to say so.
+
+**`design_fills_role(x, "general")` returned true for literally anything,
+harvesters included.** Harmless only while the bundled roster happened to list
+the ore trucker eighth; the moment anything reordered that pool, `BUILD_GENERAL`
+started producing harvesters and the AI grew an economy with no army to protect
+it. Found because the counter-draft promotes harvesters to the front for a
+completely different and correct reason.
 
 ---
 

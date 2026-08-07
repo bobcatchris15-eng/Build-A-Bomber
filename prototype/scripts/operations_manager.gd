@@ -144,6 +144,11 @@ func fielded_history() -> Array:
 			"map_id": entry.get("map_id", ""),
 			"victory": entry.get("victory", false),
 			"player_designs": entry.get("player_designs", []),
+			# The threat tags are what CounterDraft actually reads. Leaving them
+			# out of this projection - which is what happened first - makes the
+			# counter-draft silently see an empty history and field a balanced
+			# force forever, with no error anywhere to say so.
+			"player_threats": entry.get("player_threats", []),
 			"enemy_designs": entry.get("enemy_designs", []),
 		})
 	return out

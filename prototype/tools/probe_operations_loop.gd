@@ -12,6 +12,7 @@ extends SceneTree
 #          --script tools/probe_operations_loop.gd
 
 const OperationsManagerScript = preload("res://scripts/operations_manager.gd")
+const CommanderScript = preload("res://scripts/battle/ai/commander.gd")
 
 
 func _init():
@@ -115,6 +116,51 @@ func _init():
 
 	battle.queue_free()
 	await process_frame
+
+	# --- Engagement 2: does the AI actually bring something different? --------
+	#
+	# The counter-draft is unit-tested as a pure reordering, but what matters is
+	# whether match_director APPLIES it - the log has to reach _load_roster()
+	# through the autoload, on a real second match. The first engagement above
+	# recorded whatever the bundled roster is; this overwrites the threat tags
+	# with an air force so the answer is unambiguous.
+	if not ops.stage_results_history.is_empty():
+		ops.stage_results_history[0]["player_threats"] = ["air", "air", "air", "air"]
+
+	var second = preload("res://scenes/Battle.tscn").instantiate()
+	root.add_child(second)
+	guard = 0
+	while not second.world_is_ready and guard < 3000:
+		await process_frame
+		guard += 1
+
+	# ASKED THROUGH ai_design_for_role(), not by reading the list. That function is
+	# what actually consumes the ordering, and it filters defence designs out of
+	# unit roles - so the raw first entry can legitimately be a SAM turret while
+	# the unit the AI builds is something else entirely. Checking the list
+	# directly measures the wrong thing.
+	var unit_pick: Dictionary = second.ai_design_for_role(second.ENEMY_TEAM, "anti_air")
+	var general_pick: Dictionary = second.ai_design_for_role(second.ENEMY_TEAM, "general")
+	var defence_pick: Dictionary = second.ai_design_for_role(second.ENEMY_TEAM, "defense")
+	print("  engagement 2: AA unit '%s', general '%s', defence '%s'" % [
+		unit_pick.get("name", "NONE"), general_pick.get("name", "NONE"),
+		defence_pick.get("name", "NONE")])
+
+	if unit_pick.is_empty():
+		failures.append("the AI cannot name an anti-air unit to build after an all-air engagement")
+
+	# The real question the reorder exists to answer: when the AI builds a
+	# GENERAL-purpose unit - its most common action by far - does the air threat
+	# change what it reaches for? Every design fills "general", so this is decided
+	# purely by roster order.
+	if not general_pick.is_empty() \
+			and not CommanderScript.design_fills_role(general_pick, "anti_air"):
+		failures.append("after an all-air engagement the AI's general-purpose pick is '%s', which cannot shoot at aircraft - the counter-draft is not reaching _load_roster()"
+			% general_pick.get("name", "?"))
+
+	second.queue_free()
+	await process_frame
+
 	DirAccess.remove_absolute(save_path)
 	ops.reset_operation()
 

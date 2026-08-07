@@ -317,6 +317,14 @@ func test_roles_are_read_from_mounted_modules() -> bool:
 	if not CommanderScript.design_fills_role({}, "general"):
 		print("  [FAIL] nothing fills the general role")
 		return false
+	# ...with one exception: a harvester is not a general-purpose COMBAT unit.
+	# "General" returning true for everything was harmless only while the bundled
+	# roster happened to list the ore trucker eighth; anything that reordered the
+	# pool made BUILD_GENERAL produce harvesters, so the AI grew an economy it had
+	# no army to protect.
+	if CommanderScript.design_fills_role(truck, "general"):
+		print("  [FAIL] a harvester counted as a general-purpose combat design")
+		return false
 	print("  [PASS] role matching")
 	return true
 

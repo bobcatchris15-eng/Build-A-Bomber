@@ -19,6 +19,7 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
 const RosterPickerScript = preload("res://scripts/roster_picker.gd")
+const CounterDraftScript = preload("res://scripts/battle/ai/counter_draft.gd")
 
 const ROSTER_CAP := 12
 
@@ -120,6 +121,23 @@ func _build_debrief(parent: Control) -> void:
 	enemy_label.theme_type_variation = "HintLabel"
 	enemy_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	col.add_child(enemy_label)
+
+	# WHAT THEY WILL BRING NEXT. The AI counter-drafts off this same history, and
+	# an opponent that adapts invisibly reads as an inconsistent one rather than
+	# a responsive one - the player has to be able to see the adaptation to draft
+	# against it. Stated in the AI's own words, from the same function that does
+	# the reordering, so the two cannot describe different plans.
+	var intent_heading = Label.new()
+	intent_heading.text = "THEY HAVE NOTICED"
+	intent_heading.theme_type_variation = "HeadingLabel"
+	col.add_child(intent_heading)
+
+	var intent = Label.new()
+	intent.text = CounterDraftScript.explain(history)
+	intent.theme_type_variation = "HintLabel"
+	intent.autowrap_mode = TextServer.AUTOWRAP_WORD
+	intent.add_theme_color_override("font_color", Tokens.SIGNAL_HAZARD)
+	col.add_child(intent)
 
 	col.add_child(HSeparator.new())
 
