@@ -304,14 +304,20 @@ func _setup_terrain() -> void:
 		# after every surface reports back), so nothing can query a region
 		# whose mesh has not landed yet.
 		nav = TerrainBuilder.build_navmeshes_deferred(current_map, holes)
+		# `remaining` MUST be a Dictionary (or other reference type), not a
+		# bool - GDScript closures capture locals BY VALUE. A `var done :=
+		# false` set from inside the callback below mutates only that
+		# lambda's own copy; the `while not done` loop below reads a
+		# never-updated outer copy and spins forever. That silently hung
+		# _setup_terrain() before world_is_ready could ever flip, so the
+		# HUD and map never appeared - the same lambda-capture bug
+		# test_battle_combat.gd's own `deaths` comment already documents,
+		# just hit for real instead of in a test.
 		var remaining := {"n": nav["pending"].size()}
-		var done := false
 		for entry in nav["pending"]:
 			TerrainBuilder.bake_pending_entry_async(entry, nav["cell_size"], func():
-				remaining["n"] -= 1
-				if remaining["n"] <= 0:
-					done = true)
-		while not done:
+				remaining["n"] -= 1)
+		while remaining["n"] > 0:
 			await get_tree().process_frame
 
 	ground_nav_map = nav.ground_map

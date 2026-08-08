@@ -28,6 +28,7 @@ extends RefCounted
 const C = preload("res://scripts/battle/ai/considerations.gd")
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const WorldScaleScript = preload("res://scripts/world_scale.gd")
 
 # Reused verbatim from enemy_ai.gd:109-118. The CLASSIFICATION was sound - these
 # really are the roster's answers to air and to armour - it was only its consumer
@@ -252,14 +253,23 @@ func _count_manufactories(structures: Array) -> int:
 # everything else: an AI that reacts to an attack it cannot see is cheating, and
 # a raid that goes unnoticed until the first structure burns is correct.
 func _base_threatened() -> bool:
-	const THREAT_RADIUS := 45.0
+	# Was a flat 45.0. Bases stay compact under world_scale (map_catalog.gd's
+	# _compact_spawns), but the enemy has to cross four times the map to
+	# reach one at world_scale=4 - a radius sized against a 1x base is now
+	# barely wider than the base's own footprint, so the AI would not
+	# register a threat until the attacker was already inside the walls.
+	# Scaling keeps the same relative warning distance regardless of world
+	# size.
+	var threat_radius := 45.0
+	if _world != null and "current_map" in _world:
+		threat_radius *= WorldScaleScript.for_map(_world.current_map)
 	for s in _world.get_team_structures(team):
 		for u in _world.get_team_units(0):
 			if not is_instance_valid(u) or u.is_dead or u.is_harvester:
 				continue
 			if _world.has_method("is_visible_to_team") and not _world.is_visible_to_team(u, team):
 				continue
-			if u.global_position.distance_to(s.global_position) <= THREAT_RADIUS:
+			if u.global_position.distance_to(s.global_position) <= threat_radius:
 				return true
 	return false
 
