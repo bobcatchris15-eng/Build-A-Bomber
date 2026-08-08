@@ -366,6 +366,24 @@ const FIELD_SPEC: Dictionary = {
 		"type": {"type": "string", "required": false, "enum": ["rock", "building"]},
 		"building_height": {"type": "number", "required": false, "min": 0.01, "scale": true},
 	}},
+	# Never previously in FIELD_SPEC at all, despite terrain_builder.gd's
+	# _hill_contribution() reading it unconditionally on every non-heightmap
+	# map - a hill authored at radius=20 rendered at exactly radius=20
+	# regardless of world_scale, shrinking to a bump relative to a map that
+	# had grown 4x around it. `height` is signed on purpose: the same
+	# radial falloff formula that makes a positive height a hill (real
+	# vantage - see vision_service.gd's ELEVATION_BONUS_PER_UNIT) makes a
+	# negative one a ravine (real cover - the same formula reduces vision
+	# for a unit standing in one), with no separate mechanism needed for
+	# either. _slope_at() rejects a hill's edge and a ravine's edge
+	# identically (it only measures magnitude), so both already produce a
+	# genuine, gated navmesh feature rather than a purely visual bump.
+	"hills": {"type": "array", "required": false, "item": {
+		"center": {"type": "vector3", "required": true, "scale": true},
+		"radius": {"type": "number", "required": false, "min": 0.0, "scale": true},
+		"falloff": {"type": "number", "required": false, "min": 0.0, "scale": true},
+		"height": {"type": "number", "required": false, "scale": true},
+	}},
 	"surface_zones": {"type": "array", "required": false, "item": {
 		"center": {"type": "vector3", "required": true, "scale": true},
 		"half_extents": {"type": "vector2", "required": true, "scale": true},
