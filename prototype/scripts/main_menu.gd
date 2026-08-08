@@ -39,6 +39,17 @@ const FALLBACK_HULL_TYPES := [
 ]
 
 const DESTINATIONS := [
+	# First in the list because it is the answer to "which of these do I press
+	# first", which nothing on this screen used to answer. Routes to the Design
+	# Lab like any other card - the only difference is that it arms
+	# TutorialManager on the way, and the Lab is where the loop starts.
+	{
+		"title": "TUTORIAL",
+		"desc": "Build a vehicle and test it under fire. Fifteen guided steps.",
+		"scene": "res://scenes/MainLab.tscn",
+		"badge": "SYS // TRAINING",
+		"tutorial": true
+	},
 	{
 		"title": "DESIGN LAB",
 		"desc": "Assemble blueprints from hulls, modules and drives.",
@@ -392,7 +403,8 @@ func _build_left_column(parent: Control) -> void:
 	col.add_child(nav)
 
 	for dest in DESTINATIONS:
-		_add_destination_card(nav, dest["title"], dest["desc"], dest["scene"], dest["badge"])
+		_add_destination_card(nav, dest["title"], dest["desc"], dest["scene"],
+			dest["badge"], dest.get("tutorial", false))
 
 	var gap_bottom = Control.new()
 	gap_bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -409,7 +421,7 @@ func _build_left_column(parent: Control) -> void:
 	quit_btn.pressed.connect(func(): get_tree().quit())
 	col.add_child(quit_btn)
 
-func _add_destination_card(parent: Control, title_text: String, description: String, scene_path: String, badge_text: String) -> void:
+func _add_destination_card(parent: Control, title_text: String, description: String, scene_path: String, badge_text: String, is_tutorial: bool = false) -> void:
 	var btn = Button.new()
 	btn.custom_minimum_size = Vector2(0, 64)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -483,6 +495,12 @@ func _add_destination_card(parent: Control, title_text: String, description: Str
 
 	UIFeedbackScript.wire(btn)
 	btn.pressed.connect(func():
+		# Armed BEFORE the route, so the Lab's own first-run check sees an active
+		# run and stands down rather than stacking its offer on top of it.
+		if is_tutorial:
+			var tutorial = get_node_or_null("/root/TutorialManager")
+			if tutorial:
+				tutorial.begin()
 		# Through the router so the destination arrives on a fade, and so the
 		# router decides whether this target needs the loading screen - the call
 		# site no longer has to know which scenes stall.

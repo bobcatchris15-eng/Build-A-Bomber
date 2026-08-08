@@ -99,13 +99,20 @@ const MAX_CACHED := 12
 
 var _nav_map: RID
 var _map_half_extents: float = 80.0
+# CORE_DESIGN_LANGUAGE.md §3.2: threaded through to FlowField.build() so its
+# cell size scales with the map instead of staying a flat 4m constant while
+# map_half_extents grows - see flow_field.gd's BASE_CELL_SIZE comment for
+# why an unscaled cell size is NOT self-bounding the way the navmesh bake's
+# own cell-size formula is.
+var _world_scale: float = 1.0
 var _fields: Dictionary = {}
 var _order: Array = []
 
 
-func setup(nav_map: RID, map_half_extents: float) -> void:
+func setup(nav_map: RID, map_half_extents: float, world_scale: float = 1.0) -> void:
 	_nav_map = nav_map
 	_map_half_extents = map_half_extents
+	_world_scale = world_scale
 
 
 static func should_use_field(unit_count: int) -> bool:
@@ -122,7 +129,7 @@ func field_for(destination: Vector3, unit_count: int, trip_distance: float = INF
 	if _fields.has(key):
 		return _fields[key]
 
-	var field: FlowField = FlowFieldScript.build(_nav_map, _map_half_extents, destination)
+	var field: FlowField = FlowFieldScript.build(_nav_map, _map_half_extents, destination, _world_scale)
 	_fields[key] = field
 	_order.append(key)
 	while _order.size() > MAX_CACHED:

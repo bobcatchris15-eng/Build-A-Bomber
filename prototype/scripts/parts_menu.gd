@@ -152,6 +152,9 @@ func _build_shell() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 
 	_dock = UIDockScript.new()
+	# Named for symmetry with stat_calculator's "StatsDock", and so anything
+	# reaching for this panel can find it without guessing at child order.
+	_dock.name = "PartsDock"
 	_dock.dock_title = "HARDWARE CATALOG"
 	# Identifies the rail when the dock is collapsed to 40px, where the title
 	# cannot fit - see ui_dock.gd's rail construction comment.
@@ -577,6 +580,42 @@ func sections_for(family: String) -> Array:
 		if is_instance_valid(section) and section.get_meta("family", "") == family:
 			out.append(section)
 	return out
+
+
+# The dock this panel lives in, for callers that need to expand it.
+func get_dock() -> Control:
+	return _dock
+
+
+# Opens the catalogue down to one specific part and hands back its card.
+#
+# Written for the tutorial, which has to point at "the Medium Hull" when the dock
+# starts collapsed (default_state is RAILED), its tier is closed, and its drawer
+# is closed - three layers between the player and the thing being described.
+# Returns null for an unknown type_id rather than asserting, so a step naming a
+# part that has since been retired from the catalog degrades to "no spotlight"
+# instead of taking the screen down.
+#
+# Built entirely on the existing drawer metadata contract (see _make_section) so
+# it cannot drift from how the panel actually works.
+func reveal_part(type_id: String) -> Button:
+	for section in _all_drawers:
+		if not is_instance_valid(section):
+			continue
+		var grid: Control = section.get_meta("content_container")
+		for card in grid.get_children():
+			if not (card is Button) or card.module_type_id != type_id:
+				continue
+			if _dock:
+				_dock.set_dock_state(UIDockScript.State.EXPANDED)
+			_force_open_family(str(section.get_meta("tier", "")))
+			# Through the header's toggle rather than _open_category() directly,
+			# so the drawer's own accordion and its pressed state stay in step.
+			var header: Button = section.get_meta("header_btn")
+			if not header.button_pressed:
+				header.button_pressed = true
+			return card
+	return null
 
 
 # --- Compatibility ----------------------------------------------------------

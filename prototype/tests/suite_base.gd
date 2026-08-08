@@ -100,11 +100,44 @@ const _GLYPH_RANGES := [
 # That is worth knowing before trusting a future failure to be the whole story:
 # re-run the regen tool, which diffs every entry, rather than fixing the one
 # line the suite happens to name.
+# UPDATED 2026-08-08 for the authored leg sets (NEW_LEGS). Only legs moved -
+# nothing else in the table changed at all. Full diff from
+# tools/regen_locomotion_fixture.gd, not from the suite, which reports only its
+# first mismatch:
+#
+#   small/legs       hull_y 1.3880 -> 1.9320   station scale 0.7958 -> 1.0000
+#   reference/legs   hull_y 1.8671 -> 2.1320
+#   large/legs       hull_y 2.4671 -> 2.7320
+#
+# WHY, and they are two separate reasons:
+#
+#   THE SCALE was never a chosen number. 0.7958 was the layout's outboard width
+#   clamp firing, because the procedural limb splayed ~2.7x the hull's width and
+#   had to be shrunk to fit. The four belly-mounted authored sets are narrow
+#   enough not to trip it, so they arrive unclamped at 1.0 - at their authored
+#   proportions rather than at emergency ones. (Mantis still trips it, which is
+#   the clamp doing its job on a set that genuinely reaches outboard.)
+#
+#   THE RIDE HEIGHT is a deliberate design change, requested on first sight of
+#   the new sets in the Lab: "the default legs need to be larger to sell it,
+#   probably half again as tall, and at least double the girthiness." So
+#   VisualBuilder.LEG_DROP_PER_LENGTH went to 1.632 - the previously-shipped
+#   effective drop of 1.088 times that half-again - and LEG_GIRTH widens the
+#   limb's cross-section without touching the height solve.
+#
+# The +0.544 is identical across all three hull sizes, which is itself worth
+# noting: the old build's drop grew with hull size and the new one does not, so
+# a walker now stands at a consistent height rather than getting leggier as it
+# gets bigger.
+#
+# This is a change justified by a design decision, unlike the 2026-08-07
+# re-point below it, which deliberately accepted drift.
+#
 const GOLDEN_LOCOMOTION_LAYOUT := {
 	"small": {
 		"wheels": {"hull_y": 0.9680, "stations": [[Vector3(-1.1500, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-1.1500, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.1500, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.1500, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"tracked_treads": {"hull_y": 0.5651, "stations": [[Vector3(-0.8800, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.8800, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"legs": {"hull_y": 1.3880, "stations": [[Vector3(-1.0000, -0.3000, -1.0500), Vector3(0.7958, 0.7958, 0.7958)], [Vector3(-1.0000, -0.3000, 1.0500), Vector3(0.7958, 0.7958, 0.7958)], [Vector3(1.0000, -0.3000, -1.0500), Vector3(0.7958, 0.7958, 0.7958)], [Vector3(1.0000, -0.3000, 1.0500), Vector3(0.7958, 0.7958, 0.7958)]]},
+		"legs": {"hull_y": 1.9320, "stations": [[Vector3(-1.0000, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-1.0000, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.0000, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.0000, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"hover_engine": {"hull_y": 0.5223, "stations": [[Vector3(-1.5000, -0.3000, 0.0000), Vector3(0.6239, 0.6239, 0.6239)], [Vector3(-0.0000, -0.3000, -2.0000), Vector3(0.6239, 0.6239, 0.6239)], [Vector3(0.0000, -0.3000, 2.0000), Vector3(0.6239, 0.6239, 0.6239)], [Vector3(1.5000, -0.3000, 0.0000), Vector3(0.6239, 0.6239, 0.6239)]]},
 		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-2.2500, 0.6000, -1.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(-2.2500, 0.6000, 1.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(2.2500, 0.6000, -1.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(2.2500, 0.6000, 1.0000), Vector3(0.3500, 0.3500, 0.3500)]]},
 		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-1.4000, 0.0000, 0.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.4000, 0.0000, 0.5000), Vector3(1.0000, 1.0000, 1.0000)]]},
@@ -116,7 +149,7 @@ const GOLDEN_LOCOMOTION_LAYOUT := {
 	"reference": {
 		"wheels": {"hull_y": 1.1680, "stations": [[Vector3(-2.1500, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-2.1500, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.1500, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.1500, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"tracked_treads": {"hull_y": 0.8802, "stations": [[Vector3(-1.7600, -0.7500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.7600, -0.7500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"legs": {"hull_y": 1.8671, "stations": [[Vector3(-2.0000, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-2.0000, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"legs": {"hull_y": 2.1320, "stations": [[Vector3(-2.0000, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-2.0000, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.5000, -2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.5000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"hover_engine": {"hull_y": 0.9094, "stations": [[Vector3(-2.5000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-0.0000, -0.5000, -3.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -0.5000, 3.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.5000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-3.2500, 0.8000, -2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-3.2500, 0.8000, 2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.2500, 0.8000, -2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.2500, 0.8000, 2.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-2.4000, 0.0000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.4000, 0.0000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
@@ -128,7 +161,7 @@ const GOLDEN_LOCOMOTION_LAYOUT := {
 	"large": {
 		"wheels": {"hull_y": 1.7680, "stations": [[Vector3(-3.6500, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-3.6500, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.6500, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.6500, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"tracked_treads": {"hull_y": 1.9887, "stations": [[Vector3(-3.0800, -1.7500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.0800, -1.7500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
-		"legs": {"hull_y": 2.4671, "stations": [[Vector3(-3.5000, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-3.5000, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.5000, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.5000, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)]]},
+		"legs": {"hull_y": 2.7320, "stations": [[Vector3(-3.5000, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-3.5000, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.5000, -1.1000, -3.8500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.5000, -1.1000, 3.8500), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"hover_engine": {"hull_y": 1.5315, "stations": [[Vector3(-4.0000, -1.1000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-0.0000, -1.1000, -6.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.0000, -1.1000, 6.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.0000, -1.1000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-4.7500, 1.4000, -3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-4.7500, 1.4000, 3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.7500, 1.4000, -3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.7500, 1.4000, 3.7500), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-3.9000, 0.0000, 1.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.9000, 0.0000, 1.7500), Vector3(1.0000, 1.0000, 1.0000)]]},
@@ -322,12 +355,18 @@ func _smoke_test_map(map_id: String) -> bool:
 				return false
 
 	# Every resource node must be reachable from ITS side's harvester spawn.
+	# CORE_DESIGN_LANGUAGE.md §3.2 (Chunk 19): the flat 3.0 tolerance was
+	# sized against world_scale=1.0's navmesh grid resolution - the same
+	# class of problem map_catalog.gd's own FAIRNESS_HQ_REACHABLE_MARGIN
+	# solves for HQ-to-HQ reachability, just for resource nodes instead.
+	var WorldScaleScript = preload("res://scripts/world_scale.gd")
+	var node_reachable_margin: float = 3.0 * WorldScaleScript.for_map(map_def)
 	var player_start_pos = player_start.harvester
 	var enemy_start_pos = enemy_start.harvester
 	for node_data in map_def.get("resource_nodes", []):
 		var from_pos = player_start_pos if node_data.position.distance_to(player_start_pos) < node_data.position.distance_to(enemy_start_pos) else enemy_start_pos
 		var path = NavigationServer3D.map_get_path(battle.ground_nav_map, from_pos, node_data.position, true)
-		if path.size() < 2 or path[path.size() - 1].distance_to(node_data.position) > 3.0:
+		if path.size() < 2 or path[path.size() - 1].distance_to(node_data.position) > node_reachable_margin:
 			print("  [FAIL] Resource node at ", node_data.position, " is not reachable by ground navmesh from the nearest base")
 			battle.queue_free()
 			return false
@@ -337,11 +376,14 @@ func _smoke_test_map(map_id: String) -> bool:
 	# islands by a badly-placed water/obstacle/elevation zone.
 	# RTS_CORE_ROADMAP.md C1: a path can no longer reach the HQ's own exact
 	# center - the HQ IS a building now, so it carves its own navmesh hole
-	# same as any other. HQ_REACHABLE_MARGIN accounts for stopping at the
-	# hole's edge plus up to one GRID_CELL (4.0) of quantization slop.
-	const HQ_REACHABLE_MARGIN := 12.0
+	# same as any other. Reuses MapCatalog's own FAIRNESS_HQ_REACHABLE_MARGIN
+	# baseline (stopping at the hole's edge plus grid-quantization slop)
+	# rather than a second hardcoded copy of the same number - CORE_DESIGN_
+	# LANGUAGE.md §3.2 (Chunk 19): that constant already scales with
+	# world_scale (Chunk 13), which a flat local copy would not.
+	var hq_reachable_margin: float = MapCatalogScript.FAIRNESS_HQ_REACHABLE_MARGIN * WorldScaleScript.for_map(map_def)
 	var hq_path = NavigationServer3D.map_get_path(battle.ground_nav_map, player_start.hq, enemy_start.hq, true)
-	if hq_path.size() < 2 or hq_path[hq_path.size() - 1].distance_to(enemy_start.hq) > HQ_REACHABLE_MARGIN:
+	if hq_path.size() < 2 or hq_path[hq_path.size() - 1].distance_to(enemy_start.hq) > hq_reachable_margin:
 		print("  [FAIL] Player and enemy HQs are not mutually reachable on the ground navmesh")
 		battle.queue_free()
 		return false

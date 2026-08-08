@@ -111,7 +111,16 @@ const LAYOUTS := {
 		"pattern": Pattern.SIDE_PAIRS,
 		"count_key": "leg_count", "count_fallback": "count", "count_default": 4,
 		"count_min": 2, "count_even": true,
-		"geo_keys": {"leg_length": 1.0, "foot_size": 1.0, "knee_height": 0.375},
+		# leg_type is in here for one reason: _resolve_geo() forwards ONLY the
+		# keys declared here into each module's tweaks dict, and the builder
+		# reads the fitted set out of those tweaks. Left out, the LAYOUT knew
+		# which set was chosen (it resolves the geometry row straight from
+		# settings) but _build_legs() did not - so picking Mantis moved the
+		# stations onto the hull flank and then built a Stryker limb on them.
+		# A string among the floats is fine: _resolve_geo copies values through
+		# without touching them.
+		"geo_keys": {"leg_length": 1.0, "foot_size": 1.0, "leg_width": 1.0,
+			"leg_type": "stryker"},
 		"geo_aliases": {"leg_length": ["size"]},
 		# The hip stays flush against the chassis; only the thigh/shin/foot
 		# chain splays outward, for a wide stance without a floating hip.
@@ -256,6 +265,20 @@ const GEOMETRY := {
 	"wheels":            {"x_pad": 0.15, "x_pad_scales_with": "wheel_size", "y": "underside", "z_span": 0.35},
 	"tracked_treads":    {"x_from": "running_gear", "x_inset_frac": 0.12, "y": "below_gear", "z_span": 0.0},
 	"legs":              {"x_from": "running_gear", "y": "underside", "z_span": 0.35},
+	# The SHOULDERED leg sets (Mantis, Crawler - see ModuleCatalog.LEG_TYPES)
+	# bolt to the hull's FLANK instead of its belly. Their Part1 reaches
+	# outboard before the limb proper begins, so under a hull that shoulder is
+	# buried in it.
+	#
+	# Selected per-variant by _leg_geometry() below, not by a second LAYOUTS
+	# entry: the count, mirroring, stance and scale rules are identical, and
+	# only the station differs.
+	#
+	# x_pad 0.0 against the hull's half-width puts the station exactly on the
+	# side plane, which is the surface the plate bolts to. y is a third of the
+	# way up the flank rather than at the underside, because a shoulder mounted
+	# at the very bottom corner reads as an underside mount that missed.
+	"legs_flank":        {"x_pad": 0.0, "y": "flank", "y_frac": 0.30, "z_span": 0.35},
 	"helicopter_rotors": {"x_pad": 1.2, "y_pad": 0.3, "y": "topside", "z_span": 0.35},
 	# On the ROOF EDGE, not floating beside the hull at mid-height. The old
 	# entry pushed the station further outboard as wingspan grew
@@ -503,6 +526,27 @@ static func _station(pos: Vector3, normal: Vector3, geo: Dictionary, side: float
 		"final_position": Vector3.ZERO, "meta": {},
 	}
 
+## The GEOMETRY row for a type, which for legs depends on which set is fitted.
+##
+## Every other locomotion type has exactly one row. Legs have two, because the
+## six authored sets split into belly-mounted and shoulder-mounted hardware and
+## that genuinely moves the station - it is not a cosmetic difference. Resolved
+## here rather than by giving the flank sets their own LAYOUTS entry, because
+## everything else about them (count, mirroring, stance, scale mode) is
+## identical and duplicating it would be two things to keep in step.
+static func _geometry_for(type_id: String, settings: Dictionary) -> Dictionary:
+	if type_id != "legs":
+		return GEOMETRY.get(type_id, {})
+	# Runtime load: module_catalog.gd preloads this file, so a preload back the
+	# other way would close a cycle.
+	var ModuleCatalogScript = load("res://scripts/module_catalog.gd")
+	if ModuleCatalogScript == null:
+		return GEOMETRY["legs"]
+	var leg_id: String = ModuleCatalogScript.get_leg_type(settings)
+	var mount: String = str(ModuleCatalogScript.get_leg_profile(leg_id).get("mount", "underside"))
+	return GEOMETRY["legs_flank"] if mount == "flank" else GEOMETRY["legs"]
+
+
 ## The whole layout, for one type on one hull.
 ##
 ## `ctx` carries what only the placer knows: hull_size, running_gear_size,
@@ -511,7 +555,7 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 	var spec: Dictionary = LAYOUTS.get(type_id, {})
 	if spec.is_empty():
 		return []
-	var geom: Dictionary = GEOMETRY.get(type_id, {})
+	var geom: Dictionary = _geometry_for(type_id, settings)
 	var hull_size: Vector3 = ctx.get("hull_size", ModuleCatalog.REFERENCE_HULL_SIZE)
 	var gear: Vector3 = ctx.get("running_gear_size", Vector3.ZERO)
 	var bias: float = ctx.get("underside_y_bias", 0.0)
@@ -577,6 +621,11 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				# visible hull mesh."
 				"below_gear": y = -hull_size.y / 2.0 + bias - hull_size.y * 0.30
 				"topside": y = hull_size.y / 2.0 + float(geom.get("y_pad", 0.0))
+				# Partway UP the hull's side, measured from its underside - where
+				# a shouldered leg bolts on. Deliberately distinct from the bare
+				# y_frac fallback below, which measures from the hull's CENTRE and
+				# so would put the same fraction somewhere else on a tall hull.
+				"flank": y = -hull_size.y / 2.0 + bias + hull_size.y * float(geom.get("y_frac", 0.0))
 				_: y = hull_size.y * float(geom.get("y_frac", 0.0))
 			var z_base := hull_size.z * float(geom.get("z_frac", 0.0))
 			var z_limit := hull_size.z * float(geom.get("z_span", 0.0))
@@ -587,6 +636,16 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 				geo_base[spec["hull_length_geo_key"]] = hull_size.z
 			if spec.has("stance_geo_key"):
 				geo_base[spec["stance_geo_key"]] = hull_size.x * float(spec.get("stance_frac", 0.0))
+			# How far this station sits ABOVE the hull's underside line.
+			#
+			# Zero for everything mounted under the belly, and legs are the whole
+			# point of it: a shouldered set bolts partway up the flank, so
+			# uncompensated its sole would stop short of the ground by exactly
+			# this much and the vehicle would stand higher on Mantis than on
+			# Stryker. _build_legs() adds it to the limb's target drop, which is
+			# what keeps ride height identical across all six sets - the property
+			# test_leg_sets_share_one_ride_height pins.
+			geo_base["mount_rise"] = maxf(0.0, y - (-hull_size.y / 2.0 + bias))
 			# A part that hangs BELOW the chassis (a leg) sits at its own
 			# half-length under it, rather than at the hull's underside.
 			var final_y := y
@@ -626,8 +685,17 @@ static func stations(type_id: String, settings: Dictionary, ctx: Dictionary) -> 
 						st["final_position"] = Vector3(pos.x, final_y, pos.z)
 					# Alternating walk-cycle phase: a checkerboard across the
 					# side/fore-aft grid, so adjacent legs swing opposite ways
-					# like a real trot. Read by battle_unit.gd's LegSwing.
-					if spec.has("drop_by_part_length"):
+					# like a real trot. Read by VisualBuilder.pose_leg().
+					#
+					# GATED ON THE TYPE, not on drop_by_part_length. It asked for
+					# a key the legs entry explicitly does NOT set - see its "No
+					# drop_by_part_length either" comment above - so the condition
+					# was never true, leg_phase was never written, and every leg
+					# on every walker read the 0.0 default and stepped in perfect
+					# unison. Silent for as long as it lasted, because a missing
+					# meta has a sensible-looking fallback and one rigid pivot
+					# swinging together does not obviously read as wrong.
+					if type_id == "legs":
 						var side_idx := 0 if side < 0.0 else 1
 						st["meta"]["leg_phase"] = PI if (side_idx + i) % 2 == 1 else 0.0
 					out.append(st)

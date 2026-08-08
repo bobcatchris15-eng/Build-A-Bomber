@@ -90,7 +90,7 @@ const LOCOMOTION_SIZE_KEY := {
 	"wheels": "wheel_size",
 	"tracked_treads": "tread_width",
 	"helicopter_rotors": "blade_length",
-	"legs": "knee_height",
+	"legs": "leg_length",
 	"hover_engine": "emv_level",
 	"fixed_wing_engine": "turbine_compression",
 	"screw_drive": "drum_diameter",
@@ -444,6 +444,12 @@ var energy_label: Label
 # LocomotionTweaks so it reads as part of the same panel instead of a separate
 # floating control.
 var wheels_per_axle_container: HBoxContainer
+var leg_type_container: VBoxContainer
+var leg_type_button: OptionButton
+var leg_type_desc: Label
+var leg_width_container: HBoxContainer
+var leg_width_label: Label
+var leg_width_slider: HSlider
 var wheels_per_axle_label: Label
 var wheels_per_axle_slider: HSlider
 
@@ -677,6 +683,63 @@ func _ready():
 	duct_checkbox.toggled.connect(_on_duct_toggled)
 	duct_container.visible = false
 
+	# The legs-only "Leg Width" slider. Its partner, Leg Length, rides the shared
+	# Size slider via LOCOMOTION_SIZE_KEY; width needs its own because a type can
+	# only claim one entry there.
+	leg_width_container = HBoxContainer.new()
+	leg_width_container.custom_minimum_size = Vector2(0, 24)
+	leg_width_container.add_theme_constant_override("separation", 4)
+	locomotion_tweaks.add_child(leg_width_container)
+	locomotion_tweaks.move_child(leg_width_container, duct_container.get_index() + 1)
+
+	leg_width_label = Label.new()
+	leg_width_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	leg_width_label.text = "Leg Width:"
+	leg_width_container.add_child(leg_width_label)
+
+	leg_width_slider = HSlider.new()
+	leg_width_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	leg_width_slider.size_flags_stretch_ratio = 2.0
+	leg_width_slider.min_value = 0.5
+	leg_width_slider.max_value = 2.0
+	leg_width_slider.step = 0.05
+	leg_width_slider.value = 1.0
+	leg_width_slider.custom_minimum_size = Vector2(180, 0)
+	leg_width_container.add_child(leg_width_slider)
+	leg_width_slider.value_changed.connect(_on_leg_width_changed)
+	leg_width_slider.drag_started.connect(_push_undo)
+	leg_width_container.visible = false
+
+	# The legs-only "Leg Set" picker. A dropdown plus a description line, which
+	# is the same two-control shape the weapon ammo selector uses (see
+	# _generate_custom_tweaks) - and deliberately so, because it is the same
+	# kind of choice: one named variant out of a short list, changing real
+	# stats, rather than a number to drag.
+	leg_type_container = VBoxContainer.new()
+	leg_type_container.add_theme_constant_override("separation", 2)
+	locomotion_tweaks.add_child(leg_type_container)
+	locomotion_tweaks.move_child(leg_type_container, duct_container.get_index() + 1)
+
+	var leg_type_caption = Label.new()
+	leg_type_caption.text = "Leg Set:"
+	leg_type_container.add_child(leg_type_caption)
+
+	leg_type_button = OptionButton.new()
+	leg_type_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	for leg_id in ModuleCatalog.get_leg_options():
+		leg_type_button.add_item(ModuleCatalog.get_leg_profile(leg_id).label)
+	leg_type_container.add_child(leg_type_button)
+
+	leg_type_desc = Label.new()
+	leg_type_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	leg_type_desc.custom_minimum_size.x = 220
+	leg_type_desc.add_theme_font_size_override("font_size", 11)
+	leg_type_desc.modulate = Color(1, 1, 1, 0.65)
+	leg_type_container.add_child(leg_type_desc)
+
+	leg_type_button.item_selected.connect(_on_leg_type_selected)
+	leg_type_container.visible = false
+
 	# The hull-spec controls. Built here, parked in an invisible stash, and
 	# shown in a flyout off the trigger button below - see hull_spec_stash's
 	# declaration for why they are reused rather than rebuilt per open.
@@ -771,11 +834,19 @@ func _ready():
 	# place near the selected module. These are reused/reparented (not
 	# rebuilt) each selection since on_module_selected()'s popup-clearing
 	# sweep below explicitly skips them - see that guard.
+	#
+	# This is the STASH, not the display path - _add_callout() pulls a widget out
+	# of here and into a floating callout when its locomotion type is selected,
+	# and _clear_callouts() puts it back. A widget missing from this list still
+	# works, because _add_callout() reparents whatever it is given; what it loses
+	# is a well-defined home between selections.
 	size_container.reparent(popup_tweaks_container)
 	count_container.reparent(popup_tweaks_container)
 	wheels_per_axle_container.reparent(popup_tweaks_container)
 	blade_count_container.reparent(popup_tweaks_container)
 	duct_container.reparent(popup_tweaks_container)
+	leg_type_container.reparent(popup_tweaks_container)
+	leg_width_container.reparent(popup_tweaks_container)
 	locomotion_tweaks.visible = false
 
 	# LAST, deliberately. _build_toolbar() reparents controls into the bar, and
@@ -1544,7 +1615,8 @@ func _add_callout(module: Node3D, title: String, control: Control):
 func _persistent_tweak_widgets() -> Array:
 	return [size_container, count_container, wheels_per_axle_container,
 		blade_count_container, blade_pitch_container, helix_depth_container,
-		duct_container, popup_name_label, popup_stats_label, popup_rotate_btn]
+		duct_container, leg_type_container, leg_width_container,
+		popup_name_label, popup_stats_label, popup_rotate_btn]
 
 func _clear_callouts():
 	if not tweak_canvas: return
@@ -1607,6 +1679,8 @@ func on_module_selected(module: Node3D):
 	blade_pitch_container.visible = false
 	helix_depth_container.visible = false
 	duct_container.visible = false
+	leg_type_container.visible = false
+	leg_width_container.visible = false
 
 	var root = get_node_or_null("/root/MainLab")
 	var hull = root.get_node_or_null("Hull") if root else null
@@ -1710,12 +1784,25 @@ func on_module_selected(module: Node3D):
 		duct_checkbox.tooltip_text = "Ducted Shroud"
 		duct_checkbox.button_pressed = settings.get("duct", false)
 	elif type_id == "legs":
-		size_label_base = "Knee Height"
+		# Leg Length (stride, drives thrust) and Leg Width (section, drives
+		# capacity) replaced Knee Height, which had nothing left to move once the
+		# limbs became authored models - see LOCOMOTION_TWEAKS in the catalog.
+		size_label_base = "Leg Length"
 		count_container.visible = true
-		size_slider.min_value = -0.5
-		size_slider.max_value = 1.5
-		size_slider.value = settings.get("knee_height", 0.375)
+		size_slider.min_value = 0.5
+		size_slider.max_value = 2.0
+		size_slider.value = settings.get("leg_length", settings.get("size", 1.0))
 		count_slider.value = settings.get("count", 4)
+		leg_width_container.visible = true
+		leg_width_slider.value = settings.get("leg_width", 1.0)
+		# Which of the six authored sets is fitted. Set without firing the
+		# signal - this runs on selection, and letting it emit would re-apply
+		# the tweak and respawn the legs every time the player clicked one.
+		leg_type_container.visible = true
+		var leg_options: Array = ModuleCatalog.get_leg_options()
+		var leg_id: String = ModuleCatalog.get_leg_type(settings)
+		leg_type_button.select(maxi(leg_options.find(leg_id), 0))
+		leg_type_desc.text = ModuleCatalog.get_leg_profile(leg_id).desc
 	elif type_id == "hover_engine":
 		size_label_base = "Electron Megavoltage"
 		count_container.visible = true
@@ -1904,14 +1991,23 @@ func on_module_selected(module: Node3D):
 	if blade_pitch_container.visible: _add_callout(module, "Blade Pitch", blade_pitch_container)
 	if helix_depth_container.visible: _add_callout(module, "Helix Depth", helix_depth_container)
 	if duct_container.visible: _add_callout(module, bool_tweak_title, duct_container)
-	
+	# THE LINE THAT ACTUALLY PUTS A TWEAK ON SCREEN. Setting .visible in the
+	# per-type branch above is necessary but not sufficient - a widget only
+	# reaches the player once it has been handed to _add_callout(), which lifts
+	# it out of the stash into a floating callout beside the selected module.
+	# Without this, the leg picker was built, wired, and permanently invisible.
+	if leg_width_container.visible: _add_callout(module, "Leg Width", leg_width_container)
+	if leg_type_container.visible: _add_callout(module, "Leg Set", leg_type_container)
+
 	is_updating_sliders = false
 
 func _refresh_locomotion_labels():
-	if size_label_base == "Knee Height":
-		size_label.text = "%s: %+.2fm" % [size_label_base, size_slider.value]
-	else:
-		size_label.text = "%s: %.2fx" % [size_label_base, size_slider.value]
+	# Every locomotion size tweak is now a MULTIPLIER, so they all read "1.25x".
+	# Knee Height was the one exception - it was a signed offset in metres and
+	# needed its own "+0.38m" format - and it is gone.
+	size_label.text = "%s: %.2fx" % [size_label_base, size_slider.value]
+	if leg_width_container.visible:
+		leg_width_label.text = "Leg Width: %.2fx" % leg_width_slider.value
 	if count_container.visible:
 		count_label.text = "%s: %d" % [count_label_base, int(count_slider.value)]
 	if wheels_per_axle_container.visible:
@@ -1976,6 +2072,17 @@ func _on_helix_depth_changed(value: float):
 	var data = current_selected_module.get_meta("module_data")
 	root.update_locomotion_geometry_tweak(data.type_id, "helix_depth", value)
 
+## Leg Width. A geometry tweak, so it takes the live rebuild path rather than
+## the full respawn - unlike leg_type, changing a limb's section does not move
+## the stations it mounts at.
+func _on_leg_width_changed(value: float):
+	_refresh_locomotion_labels()
+	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
+	var root = get_node_or_null("/root/MainLab")
+	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
+	var data = current_selected_module.get_meta("module_data")
+	root.update_locomotion_geometry_tweak(data.type_id, "leg_width", value)
+
 func _on_duct_toggled(pressed: bool):
 	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
 	_push_undo()
@@ -1983,6 +2090,37 @@ func _on_duct_toggled(pressed: bool):
 	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
 	var data = current_selected_module.get_meta("module_data")
 	root.update_locomotion_geometry_tweak(data.type_id, bool_tweak_key, pressed)
+
+## Picking a different leg set.
+##
+## Routed through the FULL update_locomotion() respawn rather than
+## update_locomotion_geometry_tweak(), which every other locomotion tweak on
+## this panel uses. That is not a stylistic choice: the geometry-tweak path only
+## calls rebuild_visual() on each existing module, and a leg set changes where
+## the modules BELONG - Mantis and Crawler mount to the hull's flank, the other
+## four to its belly. Rebuilding the mesh in place would leave a shouldered leg
+## hanging under the hull with its shoulder buried in it.
+##
+## No debounce, unlike the count slider: a dropdown has no drag to wait out.
+func _on_leg_type_selected(index: int) -> void:
+	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module):
+		return
+	var options: Array = ModuleCatalog.get_leg_options()
+	if index < 0 or index >= options.size():
+		return
+	_push_undo()
+	var picked: String = options[index]
+	leg_type_desc.text = ModuleCatalog.get_leg_profile(picked).desc
+
+	var root = get_node_or_null("/root/MainLab")
+	if not root or not root.has_method("update_locomotion"):
+		return
+	var settings: Dictionary = {}
+	if root.hull and root.hull.has_meta("locomotion_settings"):
+		settings = root.hull.get_meta("locomotion_settings").duplicate()
+	settings[ModuleCatalog.LEG_TWEAK_KEY] = picked
+	root.update_locomotion("legs", settings)
+	update_stats(root.hull)
 
 func _on_loco_drag_started():
 	_loco_slider_dragging = true
@@ -2026,8 +2164,15 @@ func _apply_tweaks():
 		}
 	elif type_id == "legs":
 		new_settings = {
-			"knee_height": size_slider.value,
-			"count": int(count_slider.value)
+			"leg_length": size_slider.value,
+			"leg_width": leg_width_slider.value,
+			"count": int(count_slider.value),
+			# Carried through, not read off the dropdown: this runs on a SLIDER
+			# change, and rebuilding new_settings from scratch without it would
+			# silently reset the player's leg set to the default every time they
+			# nudged leg count or knee height.
+			ModuleCatalog.LEG_TWEAK_KEY: ModuleCatalog.get_leg_type(
+				current_selected_module.get_meta("module_data").tweaks)
 		}
 	elif type_id == "pontoon_wheels":
 		# paddle_vanes rides along for the same reason blade_count does below:

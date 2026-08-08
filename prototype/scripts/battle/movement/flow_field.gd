@@ -30,12 +30,25 @@ extends RefCounted
 # 4 m is a bit over one medium hull. Fine enough that a field corner reads as a
 # curve rather than a staircase, coarse enough that a 320 m map is 80x80 = 6,400
 # cells rather than a quarter of a million.
-const CELL_SIZE := 4.0
+#
+# CORE_DESIGN_LANGUAGE.md §3.2: this is the world_scale=1.0 BASELINE - build()
+# multiplies it by the map's world_scale into the per-instance `cell_size`
+# below, same reasoning as a medium hull being "a bit over one cell" in the
+# first place. Left as a flat constant this would NOT be self-bounding the
+# way terrain_builder.gd's navmesh cell-size formulas are (Chunk 14) - a
+# map_half_extents that grows 16x under world_scale would grow this field's
+# CELL COUNT 256x (dims scale with half^2), not just its footprint. Scaling
+# the cell size alongside map_half_extents keeps cell count roughly constant
+# regardless of world_scale, exactly like a real RC-car-scale map would: the
+# same NUMBER of "tactical squares" across a bigger yard, each square bigger.
+const BASE_CELL_SIZE := 4.0
 
 # How far a cell centre may sit from the navmesh and still count as passable.
 # Slightly over half a diagonal, so a cell straddling the navmesh edge is
 # included rather than fraying the walkable region by a cell all the way round.
-const PASSABLE_TOLERANCE := CELL_SIZE * 0.75
+# Per-instance now (see cell_size below) - set from the same resolved cell
+# size in build().
+const BASE_PASSABLE_TOLERANCE := BASE_CELL_SIZE * 0.75
 
 # Sentinel for "not reached". Any real integrated cost is far below it.
 const UNREACHABLE := 1.0e20
@@ -51,6 +64,10 @@ const NEIGHBOURS: Array[Vector2i] = [
 var origin := Vector3.ZERO   # world position of cell (0,0)'s corner
 var dims := Vector2i.ZERO
 var destination := Vector3.ZERO
+# Resolved from BASE_CELL_SIZE * world_scale in build() - see that constant's
+# own comment for why this can't stay a flat class constant once maps scale.
+var cell_size := BASE_CELL_SIZE
+var passable_tolerance := BASE_PASSABLE_TOLERANCE
 
 var _passable: PackedByteArray = PackedByteArray()
 # FLOAT64, NOT FLOAT32, and this is not a precision nicety - it is correctness.
@@ -71,11 +88,13 @@ var _cost: PackedFloat64Array = PackedFloat64Array()
 var _flow: PackedVector2Array = PackedVector2Array()
 
 
-static func build(nav_map: RID, map_half_extents: float, to: Vector3) -> FlowField:
+static func build(nav_map: RID, map_half_extents: float, to: Vector3, world_scale: float = 1.0) -> FlowField:
 	var f := FlowField.new()
 	f.destination = to
+	f.cell_size = BASE_CELL_SIZE * world_scale
+	f.passable_tolerance = f.cell_size * 0.75
 	f.origin = Vector3(-map_half_extents, 0.0, -map_half_extents)
-	var side := int(ceil((map_half_extents * 2.0) / CELL_SIZE))
+	var side := int(ceil((map_half_extents * 2.0) / f.cell_size))
 	f.dims = Vector2i(side, side)
 	f._sample_passability(nav_map)
 	f._integrate()
@@ -97,15 +116,15 @@ func in_bounds(cell: Vector2i) -> bool:
 
 func cell_at(world: Vector3) -> Vector2i:
 	return Vector2i(
-		int(floor((world.x - origin.x) / CELL_SIZE)),
-		int(floor((world.z - origin.z) / CELL_SIZE)))
+		int(floor((world.x - origin.x) / cell_size)),
+		int(floor((world.z - origin.z) / cell_size)))
 
 
 func centre_of(cell: Vector2i) -> Vector3:
 	return Vector3(
-		origin.x + (float(cell.x) + 0.5) * CELL_SIZE,
+		origin.x + (float(cell.x) + 0.5) * cell_size,
 		0.0,
-		origin.z + (float(cell.y) + 0.5) * CELL_SIZE)
+		origin.z + (float(cell.y) + 0.5) * cell_size)
 
 
 func is_passable(cell: Vector2i) -> bool:
@@ -153,7 +172,7 @@ func _sample_passability(nav_map: RID) -> void:
 			# hilltop read as unreachable.
 			var dx := nearest.x - centre.x
 			var dz := nearest.z - centre.z
-			_passable[y * dims.x + x] = 1 if (dx * dx + dz * dz) <= (PASSABLE_TOLERANCE * PASSABLE_TOLERANCE) else 0
+			_passable[y * dims.x + x] = 1 if (dx * dx + dz * dz) <= (passable_tolerance * passable_tolerance) else 0
 
 
 # Dijkstra outward from the destination cell.

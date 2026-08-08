@@ -2713,6 +2713,111 @@ static func get_ammo_profile(ammo_id: String) -> Dictionary:
 # elevation) that happened to be wired up before.
 const LINEAR_SCALE_WEAPON_TWEAKS = ["caliber", "barrel_length", "barrel_count", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "dispersion", "elevation", "fuse_setting", "optic_power", "focal_length", "charge_rate", "burst_length", "burst_size", "arc_frequency", "surge_capacity", "tracking_speed"]
 
+
+# --- Leg sets ---------------------------------------------------------------
+# Which walking gear a legged chassis is fitted with. Structurally this is the
+# AMMO PATTERN above, and deliberately so: one catalog entry ("legs") whose
+# character is picked by a single string tweak, rather than six near-duplicate
+# locomotion entries that would each need their own layout row, tweak branch,
+# terrain table and drivetrain line.
+#
+# Every set is a three-segment authored chain
+# (Bone_Part1_HipMount > Bone_Part2_Thigh > Bone_Part3_ShinFoot) under
+# assets/models/parts/leg_<id>.glb, replacing the procedural thigh/shin/foot
+# build that visual_builder._build_legs() used to assemble from primitives.
+#
+# FIELDS
+#   mount     Where the leg attaches. "underside" bolts to the hull's belly;
+#             "flank" bolts to its side. Not cosmetic - it selects a different
+#             GEOMETRY row in locomotion_layout.gd, so the stations genuinely
+#             move. Mantis and Crawler are "flank" because they are built with
+#             a shoulder: their Part1 reaches outboard before the limb starts,
+#             and bolted under a hull that shoulder would be buried in it.
+#   drop      MEASURED hip-to-sole distance of the authored mesh, in its own
+#             units. _build_legs() divides the target ride height by this to
+#             get a uniform scale, which is what stops a taller model from
+#             standing the vehicle higher off the ground than a shorter one.
+#             If a .glb is re-exported at a different size, THIS NUMBER MUST
+#             BE REMEASURED - a stale value silently changes ride height.
+#   *_mult    Applied on top of the "legs" entry's own weight (80),
+#             base_weight_capacity (260) and base_top_speed (6.5).
+#
+# The spread is a starting shape to play against, not a balance claim: heavy
+# gear carries more and walks slower, light gear the reverse. Crawler is the
+# fastest because its foot is a wheel - it rolls rather than steps - and
+# Excavator is the load-bearer.
+const LEG_TYPES = {
+	"stryker": {
+		"label": "Stryker",
+		"mount": "underside", "drop": 3.55,
+		"weight_mult": 1.00, "capacity_mult": 1.00, "speed_mult": 1.00,
+		"desc": "Slim tubular strut on a square gearbox. The service standard: no bias in any direction.",
+	},
+	"apex": {
+		"label": "Apex",
+		"mount": "underside", "drop": 3.26,
+		"weight_mult": 1.10, "capacity_mult": 1.15, "speed_mult": 0.95,
+		"desc": "Carbon-shelled thigh over a heavier hip. Carries more than it costs you in pace.",
+	},
+	"raptor": {
+		"label": "Raptor",
+		"mount": "underside", "drop": 3.85,
+		"weight_mult": 0.90, "capacity_mult": 0.85, "speed_mult": 1.25,
+		"desc": "Long digitigrade stride. Quick and light, and it will not carry a heavy turret.",
+	},
+	"excavator": {
+		"label": "Excavator",
+		"mount": "underside", "drop": 3.83,
+		"weight_mult": 1.45, "capacity_mult": 1.60, "speed_mult": 0.75,
+		"desc": "Trussed thigh on hydraulic pistons. Plant-grade load capacity at a walking pace.",
+	},
+	"mantis": {
+		"label": "Mantis",
+		"mount": "flank", "drop": 2.50,
+		"weight_mult": 1.05, "capacity_mult": 0.95, "speed_mult": 1.10,
+		"desc": "Shoulder-mounted coxa with a spiked tibia. Mounts to the hull flank, not the belly.",
+	},
+	"crawler": {
+		"label": "Crawler",
+		"mount": "flank", "drop": 3.15,
+		"weight_mult": 1.20, "capacity_mult": 1.10, "speed_mult": 1.35,
+		"desc": "Suspension arm ending in a driven wheel. Rolls where the others step. Flank-mounted.",
+	},
+}
+
+const LEG_DEFAULT: String = "stryker"
+
+# The tweaks-dict key the leg set is stored under. Same constraint AMMO_TWEAK_KEY
+# documents for itself: deliberately NOT any name in module_data.gd's numeric
+# tweak lists or LINEAR_SCALE_WEAPON_TWEAKS, so this string value can never be
+# reached by code that expects to multiply by it.
+const LEG_TWEAK_KEY: String = "leg_type"
+
+
+static func get_leg_options() -> Array:
+	return LEG_TYPES.keys()
+
+
+# Resolves the leg set a module is actually fitted with. An unknown id - a
+# hand-edited blueprint, a save from a build that shipped a set since renamed,
+# a mod - degrades to the default rather than erroring, the same forgiving
+# contract get_ammo() and get_module_data() both have.
+static func get_leg_type(tweaks: Dictionary) -> String:
+	var chosen = tweaks.get(LEG_TWEAK_KEY, "")
+	if typeof(chosen) == TYPE_STRING and LEG_TYPES.has(chosen):
+		return chosen
+	return LEG_DEFAULT
+
+
+static func get_leg_profile(leg_id: String) -> Dictionary:
+	return LEG_TYPES.get(leg_id, LEG_TYPES[LEG_DEFAULT])
+
+
+## The .glb basename for a leg set. One place that knows the naming convention,
+## so renaming an asset is a one-line change rather than a grep.
+static func get_leg_part_name(leg_id: String) -> String:
+	return "leg_%s" % (leg_id if LEG_TYPES.has(leg_id) else LEG_DEFAULT)
+
 # Weight capacity fallback for any locomotion type_id missing its own
 # "base_weight_capacity" entry - a reasonable middle ground between the
 # most weight-sensitive type (helicopter_rotors, 250) and the most
@@ -2728,8 +2833,14 @@ const BASE_WEIGHT_CAPACITY_DEFAULT: float = 400.0
 # this across every locomotion module actually present (scaled by the same
 # size/count factors already used for motor_thrust), then applies a speed
 # penalty if the vehicle's total weight exceeds the sum.
-static func get_base_weight_capacity(type_id: String) -> float:
-	return get_module_data(type_id).get("base_weight_capacity", BASE_WEIGHT_CAPACITY_DEFAULT)
+## `tweaks` is optional and today only matters for legs, where the fitted set
+## (Excavator vs Raptor and so on) genuinely changes what the chassis will
+## carry. Optional rather than required so the ~dozen call sites that ask about
+## a type in the abstract - catalogue tooltips, balance tables - keep working
+## unchanged and keep getting the type's own baseline.
+static func get_base_weight_capacity(type_id: String, tweaks: Dictionary = {}) -> float:
+	var base: float = get_module_data(type_id).get("base_weight_capacity", BASE_WEIGHT_CAPACITY_DEFAULT)
+	return base * _leg_stat_mult(type_id, tweaks, "capacity_mult")
 
 # Per-locomotor-type thrust output. Every existing locomotion type used the
 # same flat 150.0-per-scaled-unit coefficient in battle_unit.gd's
@@ -2767,8 +2878,19 @@ static func get_thrust_coefficient(type_id: String) -> float:
 # the slowest thing in the game.
 const BASE_TOP_SPEED_DEFAULT: float = 18.0
 
-static func get_base_top_speed(type_id: String) -> float:
-	return get_module_data(type_id).get("base_top_speed", BASE_TOP_SPEED_DEFAULT)
+static func get_base_top_speed(type_id: String, tweaks: Dictionary = {}) -> float:
+	var base: float = get_module_data(type_id).get("base_top_speed", BASE_TOP_SPEED_DEFAULT)
+	return base * _leg_stat_mult(type_id, tweaks, "speed_mult")
+
+
+## The fitted leg set's multiplier on one stat, or 1.0 for anything that is not
+## a leg. One helper rather than an `if type_id == "legs"` at each of the three
+## stat sites, so a set can never end up heavier without also being slower
+## because someone patched two of the three.
+static func _leg_stat_mult(type_id: String, tweaks: Dictionary, key: String) -> float:
+	if type_id != "legs":
+		return 1.0
+	return float(get_leg_profile(get_leg_type(tweaks)).get(key, 1.0))
 
 # Per-locomotor-type x per-surface-type speed multiplier (terrain variety
 # task: "genuinely differentiate locomotor types" via terrain, not just
@@ -2978,9 +3100,15 @@ const LOCOMOTION_TWEAK_SPECS = {
 		{"name": "tread_width", "label": "Tread Track Width", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
 		{"name": "drive_sprocket", "label": "Exposed Sprocket", "type": "bool", "default": true}
 	],
+	# Knee Height is gone. It was meaningful while the limb was solved as two
+	# spans between computed points - it decided where the knee sat. The six
+	# authored sets have the knee where the artist put it, so the slider had
+	# nothing left to move; Leg Length and Leg Width are the two dimensions that
+	# still genuinely apply to a finished model.
 	"legs": [
 		{"name": "leg_count", "label": "Leg Count", "min": 2.0, "max": 8.0, "step": 2.0, "default": 4.0},
-		{"name": "knee_height", "label": "Knee Height", "min": -0.5, "max": 1.5, "step": 0.05, "default": 0.375},
+		{"name": "leg_length", "label": "Leg Length", "min": 0.5, "max": 2.0, "step": 0.05, "default": 1.0},
+		{"name": "leg_width", "label": "Leg Width", "min": 0.5, "max": 2.0, "step": 0.05, "default": 1.0},
 		{"name": "foot_size", "label": "Foot Pad Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
 	"hover_engine": [
@@ -3098,13 +3226,20 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 			var count = settings.get("leg_count", settings.get("count", 4.0))
 			var length = settings.get("leg_length", settings.get("size", 1.0))
 			var foot_size = settings.get("foot_size", 1.0)
-			var knee = settings.get("knee_height", 0.375)
-			# A high knee gives a long stride and real ground clearance; a low
-			# one is a crouched, stable stance that bears more load. Cosmetic
-			# until test_every_locomotion_type_is_fully_declared caught it -
-			# the slider reshaped the leg and changed nothing about the unit.
-			thrust = (count / 4.0) * length * (0.88 + 0.24 * clampf(knee, -0.5, 1.5))
-			capacity = (count / 4.0) * foot_size * 120.0 * (1.12 - 0.16 * clampf(knee, -0.5, 1.5))
+			var width = settings.get("leg_width", 1.0)
+			# The two dimensions pull in opposite directions, which is what makes
+			# choosing between them a decision rather than a slider to max out.
+			# LENGTH is stride: a longer leg covers more ground per step, so it
+			# drives thrust. WIDTH is section: a thicker limb bears more load but
+			# is more mass to swing, so it buys capacity and costs a little
+			# thrust. Both are 1.0 at their defaults, so a design that never
+			# touches them is unpenalised.
+			#
+			# This replaces knee_height, which had the same shape of tradeoff
+			# (stride vs stance) but no longer has any geometry to move now the
+			# limbs are authored - see the LOCOMOTION_TWEAKS comment above.
+			thrust = (count / 4.0) * length * (1.10 - 0.10 * clampf(width, 0.5, 2.0))
+			capacity = (count / 4.0) * foot_size * 120.0 * (0.72 + 0.28 * clampf(width, 0.5, 2.0))
 		"hover_engine":
 			var count = settings.get("pad_count", 4.0)
 			var emv = settings.get("emv_level", 1.0)

@@ -21,9 +21,17 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const WorldScaleScript = preload("res://scripts/world_scale.gd")
 
 # Coarser than the fog grid on purpose: a minimap needs a recognisable
 # silhouette, not per-vision-tick precision.
+#
+# CORE_DESIGN_LANGUAGE.md §3.2: world_scale=1.0 BASELINE - _bake_minimap()
+# scales it by the map's resolved world_scale, same self-bounding reasoning
+# as vision_service.gd's GRID_CELL (Chunk 16). The minimap is a fixed
+# UI_SIZE on screen regardless of map size, so its underlying resolution
+# should stay roughly constant too - left flat, a 16x-larger map would bake
+# an image with 256x the pixels for no visible benefit.
 const CELL := 8.0
 const UI_SIZE := 180.0
 const BLIP_RADIUS := 1
@@ -50,6 +58,7 @@ var _power_label: Label = null
 var _status_label: Label = null
 
 var _half: float = 80.0
+var _world_scale: float = 1.0
 var _dim: int = 0
 var _static_image: Image = null
 var _image: Image = null
@@ -61,6 +70,7 @@ func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
 	_director = director
 	_local_team = local_team
 	_half = current_map.get("map_half_extents", 80.0)
+	_world_scale = WorldScaleScript.for_map(current_map)
 	# TOP_LEFT plus an explicit size, NOT FULL_RECT - see ProductionHUD.setup().
 	# This HUD's parent is a CanvasLayer, which is not a Control and has no rect
 	# for anchors to be fractions of, so FULL_RECT collapses the node to (0, 0)
@@ -134,7 +144,8 @@ func _build_top_strip() -> void:
 # top, which is cheap because the image is small - repainting terrain per tick
 # would be the expensive part and it never changes.
 func _bake_minimap(current_map: Dictionary) -> void:
-	_dim = maxi(1, int(ceil((_half * 2.0) / CELL)))
+	var cell := CELL * _world_scale
+	_dim = maxi(1, int(ceil((_half * 2.0) / cell)))
 	# Map JSON carries this as a real Color once MapCatalog has parsed it, but the
 	# raw form is a [r, g, b] array - accept either rather than assuming which
 	# side of the parse this dictionary came from.
@@ -142,9 +153,9 @@ func _bake_minimap(current_map: Dictionary) -> void:
 	var ground_color: Color = raw if raw is Color else Color(raw[0], raw[1], raw[2])
 	_static_image = Image.create(_dim, _dim, false, Image.FORMAT_RGB8)
 	for gz in range(_dim):
-		var wz := -_half + (gz + 0.5) * CELL
+		var wz := -_half + (gz + 0.5) * cell
 		for gx in range(_dim):
-			var wx := -_half + (gx + 0.5) * CELL
+			var wx := -_half + (gx + 0.5) * cell
 			var color: Color
 			if TerrainBuilder.is_water_at(current_map, wx, wz):
 				color = WATER_COLOR
@@ -174,9 +185,10 @@ func _build_minimap() -> void:
 
 
 func world_to_cell(x: float, z: float) -> Vector2i:
+	var cell := CELL * _world_scale
 	return Vector2i(
-		clampi(int(floor((x + _half) / CELL)), 0, _dim - 1),
-		clampi(int(floor((z + _half) / CELL)), 0, _dim - 1))
+		clampi(int(floor((x + _half) / cell)), 0, _dim - 1),
+		clampi(int(floor((z + _half) / cell)), 0, _dim - 1))
 
 
 func _blip(world_x: float, world_z: float, color: Color) -> void:

@@ -43,6 +43,15 @@ var _stub: Node3D = null
 var _spawned: Array = []
 
 
+# A controller stand-in with a settable, non-zero terrain_height_at() -
+# effective_vision()'s elevation-bonus branch is otherwise untestable, since
+# _controller()'s plain Node3D stub has no such method (elevation reads 0).
+class FakeElevationController extends Node3D:
+	var elevation: float = 0.0
+	func terrain_height_at(_pos: Vector3) -> float:
+		return elevation
+
+
 func _controller() -> Node3D:
 	if _stub == null or not is_instance_valid(_stub):
 		_stub = Node3D.new()
@@ -348,6 +357,99 @@ func test_effective_vision_elevation_bonus_is_capped_and_skips_flyers() -> bool:
 	return true
 
 
+func test_elevation_bonus_scales_cap_with_world_scale_but_not_its_maximum() -> bool:
+	print("Running Test Suite: Vision - Elevation Cap Tracks world_scale, Max Bonus Stays Constant (Chunk 16)...")
+	_cleanup()
+
+	# world_scale=1.0 (the default): a hill exactly at ELEVATION_CAP should
+	# hit the same max bonus the existing capped-bonus test already pins.
+	var controller_1x := FakeElevationController.new()
+	root.add_child(controller_1x)
+	controller_1x.elevation = VisionServiceScript.ELEVATION_CAP
+	var vision_1x = VisionServiceScript.new()
+	vision_1x.setup(controller_1x, TEAM_A, 80.0) # world_scale defaults to 1.0
+	var unit_1x := _construct(TEAM_A, Vector3.ZERO, 50.0)
+	var expected_max: float = 50.0 * (1.0 + VisionServiceScript.ELEVATION_CAP * VisionServiceScript.ELEVATION_BONUS_PER_UNIT)
+	if not is_equal_approx(vision_1x.effective_vision(unit_1x), expected_max):
+		print("  [FAIL] At world_scale=1.0 and elevation==ELEVATION_CAP, expected the max bonus ", expected_max, ", got ", vision_1x.effective_vision(unit_1x))
+		controller_1x.free()
+		return false
+
+	# world_scale=4.0: the SAME relatively-as-tall hill is now 4x the raw
+	# elevation (terrain_height_at() already scales - Chunk 9/12) - the cap
+	# should scale to match, so this elevation STILL exactly reaches the cap
+	# and produces the IDENTICAL max bonus, not a smaller or larger one.
+	var controller_4x := FakeElevationController.new()
+	root.add_child(controller_4x)
+	controller_4x.elevation = VisionServiceScript.ELEVATION_CAP * 4.0
+	var vision_4x = VisionServiceScript.new()
+	vision_4x.setup(controller_4x, TEAM_A, 80.0, 4.0)
+	var unit_4x := _construct(TEAM_A, Vector3.ZERO, 50.0)
+	if not is_equal_approx(vision_4x.effective_vision(unit_4x), expected_max):
+		print("  [FAIL] At world_scale=4.0 with elevation scaled to match, expected the SAME max bonus ", expected_max, ", got ", vision_4x.effective_vision(unit_4x))
+		controller_1x.free()
+		controller_4x.free()
+		return false
+
+	# And the cap still genuinely BINDS at the new scale - an even taller
+	# hill must not exceed the same max bonus.
+	var controller_4x_over := FakeElevationController.new()
+	root.add_child(controller_4x_over)
+	controller_4x_over.elevation = VisionServiceScript.ELEVATION_CAP * 4.0 * 3.0 # well past the scaled cap
+	var vision_4x_over = VisionServiceScript.new()
+	vision_4x_over.setup(controller_4x_over, TEAM_A, 80.0, 4.0)
+	var unit_4x_over := _construct(TEAM_A, Vector3.ZERO, 50.0)
+	if not is_equal_approx(vision_4x_over.effective_vision(unit_4x_over), expected_max):
+		print("  [FAIL] The cap should still bind past it at world_scale=4.0 - expected ", expected_max, ", got ", vision_4x_over.effective_vision(unit_4x_over))
+		controller_1x.free()
+		controller_4x.free()
+		controller_4x_over.free()
+		return false
+
+	controller_1x.free()
+	controller_4x.free()
+	controller_4x_over.free()
+	print("  [PASS] The elevation cap scales with world_scale (a relatively-as-tall hill still saturates the bonus), and the maximum bonus itself stays identical regardless of scale.")
+	return true
+
+
+func test_shroud_grid_cell_scales_keeping_image_size_bounded() -> bool:
+	print("Running Test Suite: Vision - Shroud Grid Cell Scales With world_scale, Keeping Fog Image Size Bounded (Chunk 16)...")
+	_cleanup()
+
+	# world_scale=1.0 (default) is unchanged from before this chunk.
+	var vision_1x = VisionServiceScript.new()
+	vision_1x.setup(_controller(), TEAM_A, 200.0)
+	var expected_dim_1x: int = maxi(1, int(ceil((200.0 * 2.0) / VisionServiceScript.GRID_CELL)))
+	if vision_1x._dim != expected_dim_1x:
+		print("  [FAIL] At world_scale=1.0, _dim should match the unscaled formula, expected ", expected_dim_1x, ", got ", vision_1x._dim)
+		return false
+
+	# world_scale=4.0 on a map 4x as large (the realistic pairing, since
+	# map_half_extents scales alongside world_scale via Chunk 12): _dim
+	# should come out roughly the SAME as the unscaled case above, not 4x
+	# larger - the whole point of scaling the grid cell at all.
+	_cleanup()
+	var vision_4x = VisionServiceScript.new()
+	vision_4x.setup(_controller(), TEAM_A, 800.0, 4.0)
+	if vision_4x._dim != expected_dim_1x:
+		print("  [FAIL] Scaling both map_half_extents and world_scale by 4x should hold _dim roughly constant, expected ", expected_dim_1x, ", got ", vision_4x._dim)
+		return false
+
+	# The shroud plane's own world-space footprint must still track the
+	# REAL (unscaled-cell) half-extent, not shrink just because the grid
+	# got coarser - build_shroud() reads _half directly, independent of
+	# _dim/GRID_CELL.
+	var shroud := vision_4x.build_shroud()
+	var plane: PlaneMesh = shroud.mesh
+	if not plane.size.is_equal_approx(Vector2(1600.0, 1600.0)):
+		print("  [FAIL] Shroud plane size should match the real map footprint (800*2), got ", plane.size)
+		return false
+
+	print("  [PASS] The shroud grid cell scales with world_scale, keeping fog image size bounded regardless of map size, while the shroud plane itself still covers the real map footprint.")
+	return true
+
+
 # --- Minimap -----------------------------------------------------------------
 
 # The minimap is a real Image specifically so this assertion can exist: headless
@@ -394,4 +496,45 @@ func test_minimap_bakes_terrain_and_draws_blips() -> bool:
 			return false
 	hud.queue_free()
 	print("  [PASS] minimap bake and bounds")
+	return true
+
+
+func test_minimap_cell_scales_keeping_image_size_bounded() -> bool:
+	print("Running Test Suite: HUD - Minimap Grid Cell Scales With world_scale, Keeping Image Size Bounded (Chunk 17)...")
+	_cleanup()
+
+	# EXPLICIT world_scale=1.0 - Chunk 19 moved DEFAULT_WORLD_SCALE off
+	# 1.0, so a map with no key no longer means "1.0" and would silently
+	# break the expected_dim_1x formula below.
+	var hud_1x = BattleHUDScript.new()
+	root.add_child(hud_1x)
+	var map_1x: Dictionary = {"map_half_extents": 200.0, "world_scale": 1.0, "ground_color": Color(0.2, 0.25, 0.2)}
+	hud_1x.setup(_controller(), TEAM_A, map_1x)
+	var image_1x: Image = hud_1x.minimap_image()
+	var dim_1x := image_1x.get_width()
+	var expected_dim_1x: int = maxi(1, int(ceil((200.0 * 2.0) / BattleHUDScript.CELL)))
+	if dim_1x != expected_dim_1x:
+		print("  [FAIL] At world_scale=1.0, minimap dim should match the unscaled formula, expected ", expected_dim_1x, ", got ", dim_1x)
+		hud_1x.queue_free()
+		return false
+
+	# world_scale=4.0 on a map 4x as large (the realistic pairing - Chunk 12
+	# scales map_half_extents alongside world_scale): the baked image should
+	# come out roughly the SAME size, not 4x larger in each dimension (16x
+	# the pixels) for no visible benefit on a fixed-size UI element.
+	var hud_4x = BattleHUDScript.new()
+	root.add_child(hud_4x)
+	var map_4x: Dictionary = {"map_half_extents": 800.0, "world_scale": 4.0, "ground_color": Color(0.2, 0.25, 0.2)}
+	hud_4x.setup(_controller(), TEAM_A, map_4x)
+	var image_4x: Image = hud_4x.minimap_image()
+	var dim_4x := image_4x.get_width()
+	if dim_4x != expected_dim_1x:
+		print("  [FAIL] Scaling both map_half_extents and world_scale by 4x should hold minimap dim roughly constant, expected ", expected_dim_1x, ", got ", dim_4x)
+		hud_1x.queue_free()
+		hud_4x.queue_free()
+		return false
+
+	hud_1x.queue_free()
+	hud_4x.queue_free()
+	print("  [PASS] The minimap's grid cell scales with world_scale, keeping baked image size bounded regardless of map size.")
 	return true

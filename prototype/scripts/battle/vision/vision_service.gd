@@ -27,6 +27,7 @@ extends RefCounted
 
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const SmokeVolumeScript = preload("res://scripts/smoke_volume.gd")
+const WorldScaleScript = preload("res://scripts/world_scale.gd")
 
 # Vision scans on a timer, not per frame. Visibility changing 3x a second is
 # imperceptible and the scan is O(viewers x targets) per team.
@@ -34,9 +35,29 @@ const TICK_INTERVAL := 0.3
 
 # Height the LOS ray is cast at, so a unit in a shallow dip is not blindfolded by
 # the lip of it.
+#
+# CORE_DESIGN_LANGUAGE.md §3.2: deliberately NOT scaled - this is an offset
+# above a UNIT's own origin, and units are unit-space, fixed regardless of
+# world_scale (the whole "environment scales, units don't" premise).
 const EYE_HEIGHT := 1.5
 
 # Higher ground sees further, capped so a mountain is not an all-seeing eye.
+#
+# CORE_DESIGN_LANGUAGE.md §3.2: these ARE world_scale=1.0 baselines -
+# effective_vision() below scales them, unlike EYE_HEIGHT above. The
+# elevation they read (terrain_height_at()) is real terrain Y, which
+# already grows with world_scale (ground noise amplitude - Chunk 9 - and
+# any heightmap's terrain.height_scale, both FIELD_SPEC-flagged). Left
+# unscaled, a hill authored to just reach ELEVATION_CAP at world_scale=1
+# would tower 16x higher at world_scale=16 while the cap stayed put, so
+# the SAME relative hilltop would trip the cap at a small fraction of its
+# climb instead of at the top - elevation bonus would stop meaning "you're
+# on high ground" and start meaning "you're on ANY ground with the
+# faintest slope." ELEVATION_CAP scales WITH world_scale (same relative
+# hill still caps the bonus at the same relative height) and
+# ELEVATION_BONUS_PER_UNIT scales INVERSELY (so the maximum total bonus at
+# the cap - a balance number, not a distance - stays identical regardless
+# of scale).
 const ELEVATION_BONUS_PER_UNIT := 0.02
 const ELEVATION_CAP := 12.0
 
@@ -92,13 +113,23 @@ var _dim: int = 0
 var _image: Image = null
 var _texture: ImageTexture = null
 var _prev_cells: Dictionary = {}
+# CORE_DESIGN_LANGUAGE.md §3.2: scales the shroud grid cell (below) and the
+# elevation-bonus constants (effective_vision()) - see GRID_CELL and
+# ELEVATION_CAP's own comments for why each needs it.
+var _world_scale: float = 1.0
 
 
-func setup(controller: Node, local_team: int, map_half_extents: float) -> void:
+func setup(controller: Node, local_team: int, map_half_extents: float, world_scale: float = 1.0) -> void:
 	_controller = controller
 	_local_team = local_team
 	_half = map_half_extents
-	_dim = maxi(1, int(ceil((_half * 2.0) / GRID_CELL)))
+	_world_scale = world_scale
+	# Same self-bounding fix as flow_field.gd's BASE_CELL_SIZE: left flat,
+	# the shroud IMAGE would grow O(world_scale^2) as _half grows with it -
+	# the "77MB fog image" the plan's own cost table warns about. Scaling
+	# the cell alongside _half keeps _dim (and image memory) roughly
+	# constant regardless of world_scale.
+	_dim = maxi(1, int(ceil((_half * 2.0) / _cell_size())))
 	_image = Image.create(_dim, _dim, false, Image.FORMAT_RGBA8)
 	_image.fill(Color(0, 0, 0, UNEXPLORED_ALPHA))
 	_texture = ImageTexture.create_from_image(_image)
@@ -135,7 +166,9 @@ func effective_vision(o) -> float:
 	var elevation := 0.0
 	if _controller != null and _controller.has_method("terrain_height_at"):
 		elevation = _controller.terrain_height_at(o.global_position)
-	return vision * (1.0 + minf(elevation, ELEVATION_CAP) * ELEVATION_BONUS_PER_UNIT)
+	var cap := ELEVATION_CAP * _world_scale
+	var bonus_per_unit := ELEVATION_BONUS_PER_UNIT / _world_scale
+	return vision * (1.0 + minf(elevation, cap) * bonus_per_unit)
 
 
 # Can `viewing_team` see `c` right now?
@@ -312,8 +345,20 @@ func _all_constructs() -> Array:
 
 # --- Shroud ------------------------------------------------------------------
 
+# The resolved (world_scale-scaled) shroud cell size, matching setup()'s
+# own _dim computation. Every spatial use of GRID_CELL must go through this,
+# not the raw constant - a mismatch between how the shroud IMAGE is sized
+# and how world positions are mapped INTO it produces exactly the "strange
+# patches exposed and not exposed" bug this comment is here to prevent a
+# repeat of (GRID_CELL was scaled here in setup() but not in the three
+# other places that convert world position to a cell index, so vision
+# writes landed in different cells than the shroud reader expected).
+func _cell_size() -> float:
+	return GRID_CELL * _world_scale
+
 func _world_to_cell(x: float, z: float) -> Vector2i:
-	return Vector2i(int(floor((x + _half) / GRID_CELL)), int(floor((z + _half) / GRID_CELL)))
+	var cell := _cell_size()
+	return Vector2i(int(floor((x + _half) / cell)), int(floor((z + _half) / cell)))
 
 
 # Only cells that CHANGE STATE are written, so cost scales with how much vision
@@ -332,10 +377,11 @@ func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 		viewers.append({"pos": b.pos, "vision": b.radius})
 
 	var now_visible: Dictionary = {}
+	var cell_size := _cell_size()
 	for o in viewers:
 		var vision: float = o.vision
 		var centre: Vector3 = o.pos
-		var cell_radius := int(ceil(vision / GRID_CELL)) + 1
+		var cell_radius := int(ceil(vision / cell_size)) + 1
 		var c0 := _world_to_cell(centre.x, centre.z)
 		for dz in range(-cell_radius, cell_radius + 1):
 			var gz := c0.y + dz
@@ -345,8 +391,8 @@ func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 				var gx := c0.x + dx
 				if gx < 0 or gx >= _dim:
 					continue
-				var wx := -_half + (gx + 0.5) * GRID_CELL
-				var wz := -_half + (gz + 0.5) * GRID_CELL
+				var wx := -_half + (gx + 0.5) * cell_size
+				var wz := -_half + (gz + 0.5) * cell_size
 				if Vector2(wx - centre.x, wz - centre.z).length() <= vision:
 					now_visible[Vector2i(gx, gz)] = true
 

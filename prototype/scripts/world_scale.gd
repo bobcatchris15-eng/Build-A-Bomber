@@ -16,10 +16,15 @@ class_name WorldScale
 # math are left exactly as they are. Same picture, same 16x more
 # battlefield in unit-lengths, no navmesh/physics precision cliff.
 #
-# DELIBERATELY INERT AT 1.0. Every consumer of this class is wired in its
-# own commit before the multiplier itself changes, so "did the refactor
-# break it" and "did the new scale break it" stay two separate bisects.
-const DEFAULT_WORLD_SCALE: float = 1.0
+# Phase 1-2 of this pass (see the plan) wired every consumer of this class
+# in its OWN commit before this default ever moved off 1.0, so "did the
+# refactor break it" and "did the new scale break it" stayed two separate
+# bisects. This is that flip: 4.0 is the proving ground before 16.0 (the
+# real target) - it exercises every path at a scale the existing non-
+# streamed navmesh/flow-field/vision bakers can still survive, so Phase 3's
+# streaming work starts from a known-good baseline instead of debugging
+# scale bugs and streaming bugs at once. See the plan's Chunk 19/25.
+const DEFAULT_WORLD_SCALE: float = 4.0
 
 # Per-map override key. Cheap insurance for outlier maps - scattered_peaks
 # at 550 half-extent becomes 8800 at a flat 16x, which may end up wanting
@@ -31,8 +36,8 @@ const MAP_SCALE_KEY: String = "world_scale"
 # Takes the already-decoded map dictionary (or {} / null for "no map
 # context", which just returns the default) rather than a map_id, so
 # callers that already have the dict in hand (the common case - nearly
-# every caller in terrain_builder.gd/skirmish.gd/match_director.gd works
-# off map_def, not map_id) don't need an extra MapCatalog round-trip.
+# every caller in terrain_builder.gd/match_director.gd works off map_def,
+# not map_id) don't need an extra MapCatalog round-trip.
 static func for_map(map_def) -> float:
 	if map_def is Dictionary and map_def.has(MAP_SCALE_KEY):
 		var v = map_def[MAP_SCALE_KEY]

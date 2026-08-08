@@ -178,6 +178,52 @@ const HARDWARE_PREFIX := "Hardware_"
 const SPIN_PIVOT_WHEEL := "WheelSpin"
 const SPIN_PIVOT_TREAD := "TreadSpin"
 const SPIN_PIVOT_TURBINE := "TurbineFan"
+
+# The leg chain. LegSwing is ours - built by _build_legs() and, unlike the spin
+# pivots above, matched EXACTLY rather than as a prefix, because there is one
+# per leg module and Godot never has to uniquify it.
+#
+# The three Bone_* names come from the authored .glb files and are identical
+# across all six leg sets. That shared naming IS the contract that lets one
+# animation path drive every set - if a re-exported leg renames a bone, the limb
+# below it silently stops articulating, which is what
+# test_leg_sets_expose_the_full_bone_chain exists to catch.
+const LEG_PIVOT_SWING := "LegSwing"
+const LEG_PIVOT_HIP := "Bone_Part1_HipMount"
+const LEG_PIVOT_THIGH := "Bone_Part2_Thigh"
+const LEG_PIVOT_SHIN := "Bone_Part3_ShinFoot"
+
+# Where _build_legs() stashes a bone's rest rotation so the animator can add to
+# it instead of overwriting it. The .glb ships each bone in a posed rest
+# rotation; without this the first animated frame would snap it to zero and the
+# limb would look like it collapsed the moment the machine started walking.
+const LEG_REST_META := "leg_rest_x"
+
+# How far the sole hangs below the leg's station, per unit of leg_length.
+#
+# 1.632 is the previously-shipped ride height (1.088) times the half-again Chris
+# asked for after seeing the authored sets in the Lab: "the default legs need to
+# be larger to sell it, probably half again as tall".
+#
+# Where 1.088 came from, since it looks arbitrary: the procedural build used
+# 1.35 here, but its splayed assembly tripped the layout's outboard width clamp,
+# which scaled the whole module to 0.7958 - so what a player actually saw was
+# 1.35 * 0.7958 = 1.088. The authored sets are narrow enough not to trip that
+# clamp, so they arrive at scale 1.0 and the effective drop has to be spelled
+# out here instead of emerging from a clamp firing.
+#
+# Worth knowing before raising it further: "the body should sit LOW between the
+# legs" is a standing note, and two earlier passes had to undo giant-spider
+# proportions. This is the one number that decides it.
+const LEG_DROP_PER_LENGTH := 1.632
+
+# Cross-section multiplier, applied to the limb's X and Z but NOT its Y.
+#
+# The height solve owns Y (that is what lands the sole on the ground at a
+# predictable ride height), so "make them chunkier" cannot be a uniform scale -
+# it has to be the two axes the solve does not care about. Chris, on first
+# seeing them in the Lab: "at least double the girthiness".
+const LEG_GIRTH := 2.0
 const HARDWARE_COLOR := Color(0.27, 0.27, 0.30)
 
 static var _hardware_mat_cache: StandardMaterial3D = null
@@ -4081,215 +4127,264 @@ static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_co
 
 
 static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.GRAY, tweaks: Dictionary = {}):
-	var leg_length = tweaks.get("leg_length", tweaks.get("size", 1.0))
-	var foot_size = tweaks.get("foot_size", 1.0)
-	# Chris's ask: legs about 2x thicker all the way through (cross-section
-	# only - length/reach are untouched), except the knee joint block,
-	# which is 2.5x bigger all around instead.
-	# Slimmer than the old mammalian build: an insect leg is a thin spar under
-	# tension, and at 2.0 the segments read as stocky pistons (Chris) once the
-	# leg stopped being hull-length.
-	var thickness_mult = 1.15
-	var knee_mult = 2.0
-
-	var thigh_mesh = _part("leg_thigh")
-	var shin_mesh = _part("leg_shin")
-	var foot_mesh = _part("leg_foot")
-	var joint_mesh = _part("leg_joint")
-
-	# The hip is build_wheel_mount() - the same angled driveshaft and inboard
-	# gearbox the wheels and pontoons hang from, with a leg tacked on the
-	# outboard end instead of a wheel (Chris's ask: "just take those gearbox and
-	# strut assemblies, they are already positioned perfectly on the pontoon
-	# wheels"). A walking machine's hip actuator is a gearbox on the end of a
-	# drive housing, so the part reads correctly here without being restyled.
+	# AUTHORED, not procedural. This used to assemble a limb from four
+	# primitives (leg_thigh/leg_shin/leg_foot/leg_joint), solving a femur and a
+	# tibia as two spans between computed points, with the WHEELS' own
+	# build_wheel_mount() borrowed as a hip. It is now one of six authored sets
+	# under assets/models/parts/leg_<id>.glb, picked by the "leg_type" tweak the
+	# same way a weapon picks its ammo - see ModuleCatalog.LEG_TYPES.
 	#
-	# hip_y comes back from the mount rather than being computed against
-	# base_size, and everything below is already expressed RELATIVE to hip_y
-	# (knee_y and foot_y both subtract it), so the foot still lands on the
-	# ground plane at y=0.03 no matter where the mount puts the hip.
-	var mount_s: float = float(leg_length) * 1.4
-	var hip := build_wheel_mount(parent_node, base_color, mount_s, 0.0, 0.42 * mount_s)
-	var hip_y: float = hip.y
+	# Each set is a real three-segment chain:
+	#
+	#   Bone_Part1_HipMount  >  Bone_Part2_Thigh  >  Bone_Part3_ShinFoot
+	#
+	# with a mesh hanging off each bone and no baked animation, so the walk
+	# cycle stays code-driven - see pose_leg() below, which is what the three
+	# animator call sites share.
+	var leg_length: float = float(tweaks.get("leg_length", tweaks.get("size", 1.0)))
+	var leg_width: float = float(tweaks.get("leg_width", 1.0))
+	var foot_size: float = float(tweaks.get("foot_size", 1.0))
 
-	# Everything below (thigh/shin/foot/ankle joint) hangs off a "LegSwing"
-	# pivot, itself nested inside a static "leg_root" anchor rooted at the
-	# hip - NOT a single pivot directly under parent_node. module_placer.gd's
-	# _apply_mirror_flip() reflects every DIRECT child of the leg module
-	# once at placement time by rewriting its whole Transform3D; Godot then
-	# decomposes that reflected Transform3D back into .rotation/.scale, and
-	# for a pure X-mirror it's free to pick EITHER (rotation=0, scale=
-	# (-1,1,1)) OR (rotation=(PI,0,0), scale=(-1,-1,-1)) - both represent
-	# the identical transform, but confirmed via a headless test
-	# (scratch/debug_leg_mirror_swing.gd) that Godot 4.3 actually picks the
-	# second one here. The walk animation used to write swing.rotation.x
-	# directly onto that SAME node - which, on the mirrored side, means
-	# overwriting the baked-in PI (the mirror's own encoding) with the
-	# swing angle instead of adding to it, destroying the mirror and
-	# rendering the leg inside-out ("upside down," Chris's report). leg_root
-	# now carries the mirror and is never touched again after placement;
-	# the animation instead rotates the NESTED "LegSwing" pivot, which is
-	# always freshly created at identity and never mirrored itself (mirror-
-	# flip only walks parent_node's DIRECT children) - it just inherits
-	# leg_root's already-correct mirrored frame normally, the same way any
-	# child node does.
+	# Runtime load, not a preload: module_catalog.gd sits upstream of this file
+	# in the preload graph, so a preload here would close a cycle. Same reason
+	# mesh_asset_loader.gd resolves it this way.
+	var ModuleCatalogScript = load("res://scripts/module_catalog.gd")
+	var leg_id: String = ModuleCatalogScript.get_leg_type(tweaks)
+	var profile: Dictionary = ModuleCatalogScript.get_leg_profile(leg_id)
+	var is_flank: bool = str(profile.get("mount", "underside")) == "flank"
+
+	# RIDE HEIGHT, unchanged from the procedural build. The old code put the
+	# sole at exactly -1.35 * leg_length below the module origin (hip_y cancels
+	# out of its own foot_y maths), and every ride-height suite plus the golden
+	# layout fixture is calibrated to that. Keeping the target and solving the
+	# model's SCALE from it - rather than scaling the model by some nominal
+	# factor and letting the sole land where it lands - is what makes all six
+	# sets stand the hull at the same height despite spanning 2.50 to 3.85
+	# units of authored drop.
 	#
-	# The femur and tibia each SPAN from their own start point out to where
-	# they need to land - the same "compute a direction and length, orient a
-	# stretchable mesh along it" technique the rotor/hover pylons use - rather
-	# than translating a fixed assembly sideways, which left a gap between the
-	# fixed hip and a floating thigh instead of a real angled leg. leg_root
-	# itself stays at the hip, flush against the mount; only the segments below
-	# splay out from it. Authored assuming the canonical +X = outboard
-	# direction (unmirrored build); side<0 legs get mirrored for free via
-	# module_placer.gd's whole-subtree mirror-flip.
+	# mount_rise is how far above the hull's underside the layout put this
+	# station - zero for a belly mount, a third of the hull's height for a
+	# shouldered one. Added rather than ignored so a flank-mounted set reaches
+	# the same ground plane instead of leaving the vehicle standing taller on
+	# Mantis than on Stryker.
+	var target_drop: float = LEG_DROP_PER_LENGTH * leg_length + float(tweaks.get("mount_rise", 0.0))
+
+	# NO MOUNTING PLATE. There was one - a bolted steel slab standing in for the
+	# hardpoint - and it is gone at Chris's request: the legs "just mount
+	# directly to the VISIBLE hull mesh" instead. The seating is done by
+	# module_placer.gd's _seat_legs_on_hull_skin(), which raycasts the hull's
+	# real triangles and puts the module's origin on the skin, so the gearbox
+	# meets the hull wherever the hull actually IS rather than wherever its
+	# bounding box says it is.
 	#
-	# leg_stance_reach is no longer read here. It arrives as a fraction of the
-	# HULL'S WIDTH (~2.5 on a medium hull), and anything keyed to a hull
-	# dimension sets the leg's scale rather than influencing its pose - the
-	# repeated cause of both the giant-spider and the splayed-flat legs. The
-	# stance now comes out of knee_out/foot_out below, which are fractions of
-	# the leg's own drop.
-	var leg_root = Node3D.new()
-	# Named (not left auto-generated) so the animation code can reach the
-	# nested "LegSwing" pivot via the fixed path "LegRoot/LegSwing".
+	# That is why nothing here offsets the limb any more: the module origin is
+	# already on the surface by the time this geometry is seen.
+
+	# LegRoot / LegSwing, both preserved verbatim from the procedural build.
+	#
+	# module_placer.gd's _apply_mirror_flip() reflects every DIRECT child of the
+	# leg module once at placement time by rewriting its whole Transform3D;
+	# Godot then decomposes that reflected Transform3D back into
+	# .rotation/.scale, and for a pure X-mirror it is free to pick EITHER
+	# (rotation=0, scale=(-1,1,1)) OR (rotation=(PI,0,0), scale=(-1,-1,-1)) -
+	# both represent the identical transform, but Godot actually picks the
+	# second one here. Writing the swing angle onto that SAME node means
+	# overwriting the baked-in PI (the mirror's own encoding) instead of adding
+	# to it, which destroys the mirror and renders the leg inside-out ("upside
+	# down", Chris's report).
+	#
+	# So: LegRoot carries the mirror and is never touched again after placement;
+	# the animation rotates the NESTED LegSwing, which is always freshly created
+	# at identity and is never mirrored itself (mirror-flip only walks
+	# parent_node's DIRECT children) - it just inherits LegRoot's already-correct
+	# mirrored frame the way any child node does.
+	#
+	# This is a real, reproduced Godot behaviour, not a defensive guess. Do not
+	# collapse these two nodes into one.
+	var leg_root := Node3D.new()
 	leg_root.name = "LegRoot"
-	leg_root.position = Vector3(hip.x, hip_y, 0)
+	# At the module origin, which _seat_legs_on_hull_skin() has already placed on
+	# the hull's visible surface.
+	leg_root.position = Vector3.ZERO
 	parent_node.add_child(leg_root)
 
-	var swing = Node3D.new()
-	swing.name = "LegSwing"
+	var swing := Node3D.new()
+	swing.name = LEG_PIVOT_SWING
 	swing.position = Vector3.ZERO
 	leg_root.add_child(swing)
 
-	# INSECTILE STANCE. Chris: the legs "should resemble the insectile legs,
-	# carrying the body low between them."
-	#
-	# That is a specific arrangement, not just a longer leg: the FEMUR RISES
-	# from the hip out to a knee ABOVE the hull line, and the tibia drops from
-	# that knee back down and inward to the foot. The body then hangs low
-	# BETWEEN the knees rather than being propped up on top of the legs. A
-	# mammalian leg - knee below the hip, which is what the previous pass
-	# built - cannot do that at any length; it just gets stockier.
-	#
-	# Proportions are still keyed to the mount rather than to the hull (that
-	# was what produced the enormous spider legs two passes ago, when the knee
-	# tracked the hull's centreline and the stance tracked its width). DROP is
-	# the ride height from the module origin down to the sole.
-	var drop: float = 1.35 * float(leg_length)
-	# The knee is the outermost AND highest point of the limb; the foot tucks
-	# back inboard under the load. Both are fractions of the drop, so the leg
-	# keeps its shape at any scale.
-	var knee_out: float = 0.80 * drop
-	var foot_out: float = 0.60 * drop
+	var scene: PackedScene = MeshAssetLoader.get_part_scene(
+		ModuleCatalogScript.get_leg_part_name(leg_id))
+	if scene == null:
+		# No authored asset - leave the platform and the pivots in place rather
+		# than half-building a limb. The pivots existing keeps the animator's
+		# by-name lookups safe, and the module still has a visible hardpoint.
+		push_warning("VisualBuilder: no authored mesh for leg set '%s'" % leg_id)
+		return
 
-	# knee_height keeps its cosmetic job (Chris: "doesn't really make a stat
-	# difference, just looking cool") - it now sets how far the knee rises
-	# above the hip, which is the single most visible thing about an insect
-	# leg, instead of parking the knee at an absolute hull height.
-	var knee_height = tweaks.get("knee_height", 0.375)
-	var knee_rise: float = drop * clampf(0.30 + 0.30 * float(knee_height), 0.10, 0.90)
-	var knee_y: float = knee_rise - hip_y
-	var foot_y: float = -drop - hip_y
+	var limb: Node3D = scene.instantiate()
+	# Y is solved to land the sole on the ground; X and Z carry the girth on top
+	# of that. Not uniform, deliberately: a uniform scale cannot express "thicker
+	# but the same height", and the height is spoken for by the ride-height
+	# solve. LEG_GIRTH is the baseline chunkiness; leg_width is the player's
+	# multiplier on it.
+	var authored_drop: float = maxf(float(profile.get("drop", 1.0)), 0.001)
+	var fit: float = maxf(target_drop, 0.01) / authored_drop
+	var girth: float = fit * LEG_GIRTH * leg_width
+	limb.scale = Vector3(girth, fit, girth)
+	swing.add_child(limb)
 
-	var thigh_target = Vector3(knee_out, knee_y, 0)
-	var thigh_len = thigh_target.length()
-	var thigh_dir = thigh_target / thigh_len
-	var thigh_angle = atan2(-thigh_dir.x, thigh_dir.y)
-	var thigh: MeshInstance3D
-	if thigh_mesh:
-		thigh = _mesh_inst(thigh_mesh, base_color)
-		thigh.scale = Vector3(leg_length * thickness_mult, thigh_len / 0.55, leg_length * thickness_mult)
-	else:
-		thigh = MeshInstance3D.new()
-		var cyl = CylinderMesh.new()
-		cyl.top_radius = 0.12 * leg_length * thickness_mult
-		cyl.bottom_radius = 0.08 * leg_length * thickness_mult
-		cyl.height = thigh_len
-		thigh.mesh = cyl
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = base_color
-		thigh.material_override = mat
-	thigh.position = Vector3.ZERO
-	thigh.rotation = Vector3(0, 0, thigh_angle)
-	swing.add_child(thigh)
+	# CamTarget is an authoring aid (a framing helper for the model's own turntable
+	# renders), not part of the limb. Dropped rather than left as an invisible
+	# empty, so the node count per leg reflects what is actually rendered.
+	for child in limb.get_children():
+		if child.name == "CamTarget":
+			child.queue_free()
 
-	var knee_pos = thigh_target
-	# Negative X: the tibia comes back INBOARD from the knee down to the sole,
-	# which is what makes the knee the outermost point of the leg.
-	var shin_target = Vector3(foot_out - knee_out, foot_y - knee_y, 0)
-	var shin_len = shin_target.length()
-	var shin_dir = shin_target / shin_len
-	var shin_angle = atan2(-shin_dir.x, shin_dir.y)
-	var shin: MeshInstance3D
-	if shin_mesh:
-		shin = _mesh_inst(shin_mesh, Color(0.15, 0.15, 0.15))
-		shin.scale = Vector3(leg_length * thickness_mult, shin_len / 0.5, leg_length * thickness_mult)
-	else:
-		shin = MeshInstance3D.new()
-		var cyl = CylinderMesh.new()
-		cyl.top_radius = 0.08 * leg_length * thickness_mult
-		cyl.bottom_radius = 0.05 * leg_length * thickness_mult
-		cyl.height = shin_len
-		shin.mesh = cyl
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = Color(0.15, 0.15, 0.15)
-		shin.material_override = mat
-	shin.position = knee_pos
-	shin.rotation = Vector3(0, 0, shin_angle)
-	swing.add_child(shin)
+	_apply_authored_leg_materials(limb, base_color)
 
-	# Bulkier faceted knee joint (Chris's ask) - the raised knee bends the
-	# thigh and shin at a much sharper, more visible angle than the old
-	# straight-ish hang did, so unlike the hip/ankle joints this one is
-	# scaled generously specifically to bury that intersection rather than
-	# just decorate a joint that was already reading fine. Oriented halfway
-	# between the thigh's and shin's own angles so it doesn't visibly favor
-	# either segment's direction.
-	if joint_mesh:
-		var knee = _mesh_inst(joint_mesh, base_color.darkened(0.1))
-		# Non-uniform this time (Chris's ask) - scaled back on the mesh's
-		# own local Z (leg_joint is authored as a vertical drum, so local Z
-		# is its "depth"/thickness axis) and extended on local Y (its
-		# height axis) instead of the flat uniform 2.5x from before, so it
-		# reads as a taller, thinner joint rather than a chunky ball.
-		# Re-scaled against the leg's own thickness, not its old hull-driven
-		# length: at 0.75 the joint drum was wider than the 0.95 ride height
-		# once the leg shrank, and read as a boulder with limbs attached.
-		var knee_base = 0.26 * leg_length * knee_mult
-		knee.scale = Vector3(knee_base, knee_base * 1.4, knee_base * 0.55)
-		knee.position = knee_pos
-		knee.rotation = Vector3(0, 0, (thigh_angle + shin_angle) * 0.5)
-		swing.add_child(knee)
+	# EVERY animated bone records its rest rotation. pose_leg() assigns
+	# rotation.x outright each frame, so a bone with no recorded rest would be
+	# snapped to zero on the first animated frame - wiping the pose the artist
+	# built into the .glb and making the limb look like it collapsed the instant
+	# the machine started walking.
+	var thigh: Node3D = find_leg_bone(limb, LEG_PIVOT_THIGH)
+	var shin: Node3D = find_leg_bone(limb, LEG_PIVOT_SHIN)
+	if thigh:
+		thigh.set_meta(LEG_REST_META, thigh.rotation.x)
+	if shin:
+		shin.set_meta(LEG_REST_META, shin.rotation.x)
+		# foot_size scales the shin/foot segment alone, so a wider pad reads as
+		# the same leg wearing a bigger boot rather than as a bigger leg.
+		if not is_equal_approx(foot_size, 1.0):
+			shin.scale = Vector3.ONE * foot_size
 
-	var ankle_pos = knee_pos + shin_target
-	var foot: MeshInstance3D
-	if foot_mesh:
-		foot = _mesh_inst(foot_mesh, Color(0.18, 0.18, 0.2))
-		foot.scale = Vector3(foot_size, foot_size, foot_size)
-	else:
-		foot = MeshInstance3D.new()
-		var box = BoxMesh.new()
-		box.size = Vector3(base_size.x * 0.7 * foot_size, 0.06 * foot_size, base_size.z * 0.7 * foot_size)
-		foot.mesh = box
-		var mat = StandardMaterial3D.new()
-		mat.albedo_color = Color(0.15, 0.15, 0.15)
-		foot.material_override = mat
-	foot.position = ankle_pos
-	swing.add_child(foot)
 
-	# Bulkier faceted ankle joint where the shin meets the foot ("toe
-	# sections meet", Chris's ask) - previously a bare junction with
-	# nothing there at all. Piggybacks on foot.position (already tuned to
-	# sit at the shin/foot contact point) rather than re-deriving it from
-	# shin's own rotated end, offset up slightly so it reads as sitting
-	# above the foot pad, not buried inside it.
-	if joint_mesh:
-		var ankle = _mesh_inst(joint_mesh, Color(0.18, 0.18, 0.2))
-		ankle.scale = Vector3(1.0, 1.0, 1.0) * (0.20 * leg_length * foot_size * thickness_mult)
-		ankle.position = foot.position + Vector3(0, 0.09 * leg_length, 0)
-		ankle.rotation = Vector3(0, 0, shin_angle)
-		swing.add_child(ankle)
+## Repaints an instantiated leg's surfaces through the shared role materials.
+##
+## The .glb ships named materials (Gunmetal, CarbonBlack, IndustrialYellow, ...)
+## and they are deliberately NOT kept: every other part in the game resolves to
+## one of part_materials.gd's cached role materials, which is what makes faction
+## tint reach the right surfaces and lets the battle-side mesh merge collapse
+## them. Keeping the authored materials would have cost both.
+##
+## The authored NAME is still doing the work though - it is the artist saying
+## which surface is which substance, which is exactly the question ROLE_HINTS
+## answers from a filename for single-material parts.
+static func _apply_authored_leg_materials(node: Node, base_color: Color) -> void:
+	if node is MeshInstance3D:
+		var mi := node as MeshInstance3D
+		var mesh: Mesh = mi.mesh
+		if mesh != null:
+			for i in range(mesh.get_surface_count()):
+				var authored: Material = mesh.surface_get_material(i)
+				var mat_name: String = authored.resource_name if authored else ""
+				var role: String = PartMaterialsScript.role_for_authored_material(mat_name)
+				mi.set_surface_override_material(i,
+					PartMaterialsScript.get_material(role, base_color))
+	for child in node.get_children():
+		_apply_authored_leg_materials(child, base_color)
+
+
+## Finds one of the leg's authored bones beneath an instantiated set.
+##
+## By name and recursive, because the .glb wraps its chain in a per-set rig node
+## ("Apex_Rig", "Mantis_Rig", ...) whose name differs per set - so a fixed path
+## would need six of them. The BONE names are identical across all six, which is
+## the contract that makes one animation path work for every set.
+static func find_leg_bone(root: Node, bone_name: String) -> Node3D:
+	if root == null:
+		return null
+	if root.name == bone_name and root is Node3D:
+		return root as Node3D
+	for child in root.get_children():
+		var found := find_leg_bone(child, bone_name)
+		if found != null:
+			return found
+	return null
+
+
+## Poses one leg for a walk cycle. THE single implementation - battle_unit.gd,
+## battlefield.gd and the battle layer's unit script all call this.
+##
+## One copy rather than three because three copies is exactly how the Test
+## Range's rotors ended up spinning the wrong node for months (see the comment
+## in battlefield.gd's _physics_process): the pivot lookup drifted in one file
+## and nothing failed.
+##
+## `phase` is the per-leg walk offset locomotion_layout.gd already assigns so
+## adjacent legs step out of sync; `t` is elapsed seconds; `moving` parks the
+## limb in its rest pose when the machine is stationary.
+##
+## The three bones are driven against each other rather than in parallel: the
+## hip swings fore-aft, the thigh lifts as the hip comes forward, and the shin
+## counter-rotates so the sole stays roughly level through the stance instead of
+## sweeping through the ground like a pendulum. That counter-rotation is the
+## whole reason these sets are worth having over a single rigid pivot.
+const LEG_STRIDE := 0.42
+const LEG_LIFT := 0.30
+const LEG_TUCK := 0.55
+const LEG_GAIT_RATE := 6.0
+
+## `rate` is how fast the machine is actually moving, 0..1 - the same
+## ground_rate the wheel and tread spins are already driven by. At or below
+## MOVING_EPSILON the limb settles into its rest pose instead of holding a
+## mid-stride freeze, which is what a parked walker should do.
+const LEG_MOVING_EPSILON := 0.04
+const LEG_SETTLE_RATE := 8.0
+
+static func pose_leg(leg_module: Node3D, t: float, phase: float, rate: float,
+		delta: float = 0.0) -> void:
+	if not is_instance_valid(leg_module):
+		return
+	var swing := leg_module.get_node_or_null("LegRoot/%s" % LEG_PIVOT_SWING) as Node3D
+	if swing == null:
+		return
+
+	if rate <= LEG_MOVING_EPSILON:
+		# Settle, don't snap: stopping should read as the machine coming to
+		# rest, not as the animation being switched off. Frame-rate independent
+		# when a delta is supplied; the 0.15 fallback keeps a headless test that
+		# calls this without one behaving sensibly.
+		var w: float = clampf(LEG_SETTLE_RATE * delta, 0.0, 1.0) if delta > 0.0 else 0.15
+		swing.rotation.x = lerpf(swing.rotation.x, 0.0, w)
+		_pose_leg_bones(swing, 0.0, w)
+		return
+
+	# Gait speeds up with the machine, with a floor so a unit crawling under an
+	# overload penalty still visibly walks rather than sliding along.
+	var cycle: float = t * LEG_GAIT_RATE * maxf(rate, 0.35) + phase
+	swing.rotation.x = sin(cycle) * LEG_STRIDE
+	_pose_leg_bones(swing, cycle, 1.0)
+
+
+static func _pose_leg_bones(swing: Node3D, cycle: float, weight: float) -> void:
+	var limb: Node3D = null
+	for child in swing.get_children():
+		if child is Node3D:
+			limb = child
+			break
+	if limb == null:
+		return
+
+	# The lift half-cycle only: a leg rises on the forward swing and stays
+	# planted on the way back, which is what separates a walk from a paddle.
+	var lift: float = maxf(sin(cycle), 0.0)
+
+	var thigh := find_leg_bone(limb, LEG_PIVOT_THIGH)
+	if thigh:
+		# Added to the bone's authored rest pose, never replacing it - see
+		# LEG_REST_META.
+		var rest: float = float(thigh.get_meta(LEG_REST_META, 0.0))
+		thigh.rotation.x = lerpf(thigh.rotation.x, rest - lift * LEG_LIFT, weight)
+	var shin := find_leg_bone(limb, LEG_PIVOT_SHIN)
+	if shin:
+		# Counter-rotation, and MORE of it than the thigh gave - the knee has to
+		# fold further than the hip opens for the foot to clear the ground
+		# rather than being dragged forward through it.
+		var shin_rest: float = float(shin.get_meta(LEG_REST_META, 0.0))
+		shin.rotation.x = lerpf(shin.rotation.x, shin_rest + lift * LEG_TUCK, weight)
+
 
 
 ## AGP (Atmospheric Gravity Planing) Under-Hull Field & Projectors:

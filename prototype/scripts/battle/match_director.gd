@@ -26,6 +26,7 @@ extends Node3D
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const MapCatalog = preload("res://scripts/map_catalog.gd")
 const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
+const WorldScaleScript = preload("res://scripts/world_scale.gd")
 const UnitScript = preload("res://scripts/battle/units/unit.gd")
 const LayersScript = preload("res://scripts/battle/battle_layers.gd")
 const SelectionServiceScript = preload("res://scripts/battle/orders/selection_service.gd")
@@ -182,6 +183,13 @@ func _ready() -> void:
 	if match_config and "player_faction" in match_config and match_config.player_faction != "":
 		player_faction = match_config.player_faction
 	current_map = MapCatalog.get_map(map_id)
+	# CORE_DESIGN_LANGUAGE.md §3.2: pan/middle-drag speed track world_scale so
+	# a genuinely bigger map doesn't also feel proportionally slower to move
+	# around in - duck-typed the same way the rest of this file treats the
+	# camera, so a camera without the property (an older scene, a test stub)
+	# degrades to its own default rather than erroring.
+	if camera and "world_scale" in camera:
+		camera.world_scale = WorldScaleScript.for_map(current_map)
 
 	orders = OrderServiceScript.new()
 	flow_fields = FlowFieldServiceScript.new()
@@ -212,7 +220,7 @@ func _ready() -> void:
 
 	# After the bake: the flow field samples the ground navmesh for passability,
 	# so it needs the map RID that _setup_terrain() just produced.
-	flow_fields.setup(ground_nav_map, current_map.get("map_half_extents", 80.0))
+	flow_fields.setup(ground_nav_map, current_map.get("map_half_extents", 80.0), WorldScaleScript.for_map(current_map))
 
 	selection = SelectionServiceScript.new()
 	selection.setup(camera, get_world_3d().direct_space_state, PLAYER_TEAM)
@@ -239,7 +247,7 @@ func _ready() -> void:
 # the match for no visible gain.
 func _setup_vision() -> void:
 	vision = VisionServiceScript.new()
-	vision.setup(self, PLAYER_TEAM, current_map.get("map_half_extents", 80.0))
+	vision.setup(self, PLAYER_TEAM, current_map.get("map_half_extents", 80.0), WorldScaleScript.for_map(current_map))
 	add_child(vision.build_shroud())
 
 	# The HUD refreshes on the SAME tick as vision, deliberately. The minimap

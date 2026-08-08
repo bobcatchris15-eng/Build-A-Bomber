@@ -1163,17 +1163,14 @@ func _animate_locomotion(delta: float) -> void:
 					# tumble, which is what sells the gimbal.
 					inner_ring.rotate_z(7.0 * powered_rate * delta)
 			"legs":
-				# Simple sine-wave swing on the "LegSwing" pivot, not a full IK
-				# walk cycle. leg_phase staggers legs into a trot instead of
-				# every leg swinging in lockstep. Rotating on X swings the leg
-				# fore-aft along the direction of travel, like a real stride.
-				var swing = child.get_node_or_null("LegRoot/LegSwing")
-				if swing:
-					if ground_rate > 0.04:
-						var phase = child.get_meta("leg_phase", 0.0)
-						swing.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 6.0 * max(ground_rate, 0.35) + phase) * 0.5
-					else:
-						swing.rotation.x = lerp(swing.rotation.x, 0.0, 8.0 * delta)
+				# The whole gait lives in VisualBuilder.pose_leg() - hip swing
+				# plus the thigh/shin counter-rotation the six authored leg sets
+				# have real bones for. Called rather than reimplemented because
+				# the identical pose is needed here, in the Test Range and in the
+				# Design Lab, and three copies of a by-name pivot lookup is
+				# exactly how the Test Range ended up spinning the wrong node.
+				VisualBuilderScript.pose_leg(child, Time.get_ticks_msec() / 1000.0,
+					child.get_meta("leg_phase", 0.0), ground_rate, delta)
 			"screw_drive":
 				# The whole drum+helix turns as one rigid unit under "ScrewSpin".
 				var spin = child.get_node_or_null("ScrewSpin")
@@ -1298,8 +1295,18 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 	# Ease off on the final approach as well, so the unit settles into the
 	# arrival radius instead of arriving at full speed and overshooting it -
 	# an overshoot re-enters the same orbit from the other side.
+	#
+	# CORE_DESIGN_LANGUAGE.md §5 "Rigid Miniatures": "no deceleration curve
+	# worth noticing - velocity changes should be near-instant." The speed-
+	# proportional term used to be 0.45 (an 18 m/s design braked over ~8m,
+	# a real vehicle's stopping distance, not a toy's). Shrunk to 0.05 - a
+	# few physics ticks' worth of ramp, just enough to still avoid the
+	# overshoot-and-orbit failure this comment describes, not enough to
+	# read as inertia. The arrive_dist*2.0 floor is untouched: that's the
+	# orbit-avoidance capture-radius safety net (see _arrive_distance()'s
+	# own comment), a correctness concern, not a visual one.
 	var dist := pos_diff.length()
-	var slow_radius := maxf(arrive_dist * 2.0, move_speed * 0.45)
+	var slow_radius := maxf(arrive_dist * 2.0, move_speed * 0.05)
 	if dist < slow_radius and slow_radius > 0.01:
 		throttle *= clampf(dist / slow_radius, APPROACH_THROTTLE_MIN, 1.0)
 

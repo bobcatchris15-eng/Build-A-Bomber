@@ -29,6 +29,7 @@ const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
 
 signal died(unit)
 signal order_completed(unit)
@@ -284,6 +285,26 @@ func _arrive_distance() -> float:
 # an arc several metres wide and can sweep past a 1 m circle without ever
 # entering it, never advance, and loop back to try the same waypoint again. The
 # faster the design, the more certain the miss.
+#
+# CORE_DESIGN_LANGUAGE.md §3.2 (2026-08-08 playtest): there is a SECOND way to
+# miss a waypoint, found live and reproduced in test_real_unit_actually_
+# converges_toward_a_move_order_on_a_real_map - a unit sitting at its start
+# position, move_speed and nav_agent both real, jittering in a ~1.5m box for
+# 8 full seconds. path_desired_distance stayed a flat ~1.0m (unit-space, on
+# purpose - a fast unit's own turning arc is a unit property, not a map one),
+# but terrain_builder.gd's own navmesh bake cell_size is NOT unit-space - it
+# deliberately WIDENS as map_half_extents grows (Chunk 14's self-bounding
+# formula), and at world_scale=4 on an ordinary map that's already ~1.87m,
+# bigger than the 1.0m the agent was demanding. A corner's true position is
+# only precise to within the bake's own cell_size, so asking to get closer
+# to it than that quantization allows is asking for something the navmesh
+# cannot promise - the agent gets "almost there" forever and never advances,
+# which reads as a unit standing still and vibrating in place.
+#
+# Floored against the SAME cell_size formula the bake itself used, so this
+# is guaranteed consistent with the actual navmesh precision by
+# construction rather than a second guessed number that could drift out of
+# sync with it again.
 func _sync_nav_radii() -> void:
 	if not is_instance_valid(nav_agent):
 		return
@@ -421,8 +442,28 @@ func _apply_movement(delta: float) -> void:
 
 	# Arrival ramp measured against the REAL destination, not the next corner -
 	# braking for every path corner would make the unit crawl the whole route.
+	#
+	# CORE_DESIGN_LANGUAGE.md §5 "Rigid Miniatures" wants "no deceleration
+	# curve worth noticing," which an earlier version of this line chased by
+	# shrinking the speed-proportional term to a flat 0.05 - and that broke
+	# navigation outright. The line above (413-418) already documents WHY:
+	# at full throttle a unit's turning radius is v/TURN_RATE, and if
+	# slow_radius is smaller than that, the unit physically cannot align
+	# its heading before it's already past the capture zone - it overshoots,
+	# turns around, overshoots again, forever. An 18 m/s design has a ~6.9m
+	# turning radius; the flat-0.05 version produced a ~4.3m slow_radius,
+	# well inside it - "units just sit in one spot and go in a circle."
+	# Derived from the actual geometry instead of a magic coefficient, with
+	# a 30% margin over the minimum that geometry requires - genuinely
+	# tighter than the original 0.45 coefficient's ~17% margin, but not the
+	# near-instant stop §5 asks for. Getting further than this safely means
+	# also raising TURN_RATE (a faster-turning vehicle can tolerate a
+	# smaller slow_radius), which is a separate, deliberate change, not a
+	# side effect of retuning this line again.
+	const SLOW_RADIUS_TURN_SAFETY_MARGIN := 1.3
 	var remaining := Vector3(destination.x - global_position.x, 0.0, destination.z - global_position.z).length()
-	var slow_radius := maxf(_arrive_distance() * 2.0, move_speed * 0.45)
+	var turning_radius := move_speed / TURN_RATE
+	var slow_radius := maxf(_arrive_distance() * 2.0, turning_radius * SLOW_RADIUS_TURN_SAFETY_MARGIN)
 	var speed: float = SteeringScript.arrival_speed(remaining, move_speed, slow_radius) \
 		* terrain_speed_multiplier * throttle
 

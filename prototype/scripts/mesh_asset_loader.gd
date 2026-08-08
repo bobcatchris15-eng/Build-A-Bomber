@@ -41,6 +41,34 @@ static func get_part_mesh(part_name: String) -> Mesh:
 	var resolved: String = PART_NAME_ALIASES.get(part_name, part_name)
 	return _load_and_cache("res://assets/models/parts/%s.glb" % resolved)
 
+# The WHOLE part, hierarchy intact, rather than one flattened Mesh.
+#
+# get_part_mesh() above returns _find_first_mesh_instance()'s mesh - a single
+# Mesh resource, which is all a barrel or a wheel hub has ever needed. That is
+# lossy by design, and for a multi-part authored asset it is silently wrong: the
+# six leg sets are a three-segment chain
+# (Bone_Part1_HipMount > Bone_Part2_Thigh > Bone_Part3_ShinFoot, a mesh hanging
+# off each), and asking for its "mesh" returns whichever segment the walk hits
+# first. The leg would render as a lone gearbox with no limb under it.
+#
+# Anything that needs to POSE an authored part - i.e. anything with named
+# pivots the animator drives - has to come through here instead.
+#
+# Cached under a "scene://" key in the same dict, so a part name can never have
+# its PackedScene collide with its flattened-Mesh entry.
+static func get_part_scene(part_name: String) -> PackedScene:
+	var resolved: String = PART_NAME_ALIASES.get(part_name, part_name)
+	var path := "res://assets/models/parts/%s.glb" % resolved
+	var cache_key := "scene://%s" % path
+	if _cache.has(cache_key):
+		return _cache[cache_key]
+
+	var packed: PackedScene = null
+	if ResourceLoader.exists(path):
+		packed = load(path) as PackedScene
+	_cache[cache_key] = packed
+	return packed
+
 # Hull Builder's expanded primitive kit (tools/blender/build_hull_primitives.py)
 # - unit-sized shapes Godot has no native Mesh for (slope, frustum, chamfer
 # box, half-cylinder, i/l-beam, fender, hemisphere, canopy, ring). Same

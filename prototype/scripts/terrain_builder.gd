@@ -28,6 +28,16 @@ const GRID_CELL: float = 4.0
 # twin_bridges already used successfully - GRID_CELL itself is untouched
 # (and this returns exactly GRID_CELL) for every map at or under that
 # size, so this is zero-risk for the 9 maps that already worked.
+# CORE_DESIGN_LANGUAGE.md §3.2 / Chunk 14: this formula is a pure function
+# of `half`, which itself now grows under world_scale (map_half_extents is
+# a FIELD_SPEC-flagged field - see _apply_world_scale() in map_catalog.gd).
+# No separate re-tuning turned out to be needed: source-triangle grid cell
+# scales LINEARLY with half beyond the ~300 knee, so triangle count per
+# axis (half / grid_cell) converges toward a constant (~75) as half grows
+# without bound, rather than growing with it. A map that's 16x bigger
+# because world_scale=16 costs the SAME source-triangle budget as a map
+# that's 16x bigger because someone authored it that size by hand - the
+# formula can't tell the difference, which is exactly the point.
 static func _nav_grid_cell(map_def: Dictionary) -> float:
 	var half: float = map_def.get("map_half_extents", 80.0)
 	return max(GRID_CELL, half / 75.0)
@@ -79,6 +89,17 @@ static func _nav_grid_cell(map_def: Dictionary) -> float:
 # rebake_ground_and_amphibious_async() below, which moves Recast off the
 # main thread entirely - full resolution, no stall. Cost stays high, but
 # it is no longer paid where the player can feel it.
+# CORE_DESIGN_LANGUAGE.md §3.2 / Chunk 14: same self-bounding property as
+# _nav_grid_cell() above, and for the same reason - a pure function of
+# `half`, which now grows with world_scale automatically (Chunk 12). The
+# voxel grid dimension is 2*half/cell_size; beyond the 300 knee that's
+# 2*half / (0.25 + (half-300)*0.003), which converges to 2/0.003 =~ 667
+# voxels per axis as half -> infinity, REGARDLESS of how large half gets -
+# it does not keep growing the way a naive fixed cell_size would. Verified
+# directly (not just algebraically) by
+# test_scattered_peaks_navmesh_bakes_cleanly_at_world_scale_4 below:
+# scattered_peaks is the map that originally segfaulted the baker at its
+# native 550 half-extent, and it still bakes cleanly at 4x that.
 static func _nav_cell_size(map_def: Dictionary) -> float:
 	var half: float = map_def.get("map_half_extents", 80.0)
 	if half <= 300.0:
@@ -211,11 +232,23 @@ static func reset_heightmap_cache_for_tests() -> void:
 # and jitter) - matches Image's own get_pixel() bounds, just done manually
 # since bilinear needs the 4 neighbor pixels, one of which can be
 # out-of-bounds by exactly 1 at the extreme edge.
-static func _sample_heightmap_bilinear(img: Image, half_extents: float, x: float, z: float) -> float:
+# CORE_DESIGN_LANGUAGE.md §3.2 (Chunk 19): the heightmap PNG is a BAKED
+# asset - build_terrain.py wrote it once at 1 pixel per world_scale=1.0
+# world unit, for the map's ORIGINAL half_extents. It does not, and cannot,
+# re-bake itself just because world_scale changed. `world_scale` maps the
+# (already-scaled, per _apply_world_scale) incoming half_extents/x/z back
+# down to the ORIGINAL space the pixel grid was actually authored in -
+# without this, a scaled map's half_extents massively overshoots the real
+# image bounds and every sample clamps to the edge, reading whatever
+# happens to be there instead of the real terrain.
+static func _sample_heightmap_bilinear(img: Image, half_extents: float, x: float, z: float, world_scale: float = 1.0) -> float:
 	var dim = img.get_width()
+	var original_half = half_extents / world_scale
+	var original_x = x / world_scale
+	var original_z = z / world_scale
 	# World -> pixel space (float, sub-pixel precision for the bilinear lerp).
-	var fx = clamp(x + half_extents, 0.0, float(dim - 1))
-	var fz = clamp(z + half_extents, 0.0, float(dim - 1))
+	var fx = clamp(original_x + original_half, 0.0, float(dim - 1))
+	var fz = clamp(original_z + original_half, 0.0, float(dim - 1))
 	var x0 = int(floor(fx))
 	var z0 = int(floor(fz))
 	var x1 = min(x0 + 1, dim - 1)
@@ -247,10 +280,15 @@ static func _decode_heightmap_pixel(color: Color) -> float:
 # order exactly.
 const SURFACE_PALETTE: Array = ["", "marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice"]
 
-static func _sample_surfacemap(img: Image, half_extents: float, x: float, z: float) -> String:
+# Same "baked asset, not re-derived" reasoning as _sample_heightmap_
+# bilinear() above - see that function's comment.
+static func _sample_surfacemap(img: Image, half_extents: float, x: float, z: float, world_scale: float = 1.0) -> String:
 	var dim = img.get_width()
-	var px = int(round(clamp(x + half_extents, 0.0, float(dim - 1))))
-	var pz = int(round(clamp(z + half_extents, 0.0, float(dim - 1))))
+	var original_half = half_extents / world_scale
+	var original_x = x / world_scale
+	var original_z = z / world_scale
+	var px = int(round(clamp(original_x + original_half, 0.0, float(dim - 1))))
+	var pz = int(round(clamp(original_z + original_half, 0.0, float(dim - 1))))
 	var index = int(round(img.get_pixel(px, pz).r * 255.0))
 	if index < 0 or index >= SURFACE_PALETTE.size():
 		return ""
@@ -321,7 +359,11 @@ static func height_at(map_def: Dictionary, x: float, z: float) -> float:
 	if heightmap_img:
 		var half: float = map_def.get("map_half_extents", 80.0)
 		var height_scale: float = map_def.get("terrain", {}).get("height_scale", 20.0)
-		return _sample_heightmap_bilinear(heightmap_img, half, x, z) * height_scale
+		# height_scale is itself a FIELD_SPEC-flagged field (already scaled
+		# by _apply_world_scale, on purpose - a taller map should have
+		# taller hills) - only the PIXEL SAMPLING position needs the
+		# world_scale correction below, not the height magnitude.
+		return _sample_heightmap_bilinear(heightmap_img, half, x, z, WorldScaleScript.for_map(map_def)) * height_scale
 
 	var h = _get_noise(map_def).get_noise_2d(x, z) * GROUND_NOISE_AMPLITUDE * WorldScaleScript.for_map(map_def)
 	for hill in map_def.get("hills", []):
@@ -481,6 +523,24 @@ static func _corner_heights(map_def: Dictionary, half: float, cell: float) -> Di
 	_corner_height_cache[key] = out
 	return out
 
+# CORE_DESIGN_LANGUAGE.md §3.2 (2026-08-08 playtest): _nav_grid_cell()'s
+# formula (Chunk 14) deliberately widens the terrain SOURCE quad size as
+# map_half_extents grows, to keep triangle count bounded on huge maps - a
+# self-bounding choice proven safe for OPEN terrain. It was not, until now,
+# tested against small clustered features: at open_plains' world_scale=4
+# quad size (~11.2 units), a single building's few-metre footprint touching
+# ANY part of a quad OMITS THE ENTIRE QUAD (see the loop below - "blocked"
+# skips emitting it at all), and a compact base's several buildings each
+# swallowing a full quad can MERGE into a hole many times larger than the
+# buildings themselves. Confirmed live: a harvester's own compacted spawn
+# point ended up stranded in a ~20-unit hole next to its base, with
+# NavigationAgent3D permanently stuck offering the same near-spawn waypoint
+# (tools/probe_navmesh_grid.gd maps the exact shape). Below this threshold,
+# a coarse quad that touches a hard hole is re-tested at fine resolution
+# instead of omitted wholesale, so a small building only removes the area
+# it actually occupies.
+const HOLE_SUBDIVISION_CELL: float = 2.0
+
 static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) -> PackedVector3Array:
 	var verts = PackedVector3Array()
 	var half: float = map_def.get("map_half_extents", 80.0)
@@ -518,11 +578,21 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) ->
 		var z = -half
 		while z < half:
 			var z1 = min(z + cell, half)
-			var blocked = false
+			var hard_blocked = false
 			for h in hard_holes:
 				if _rect_overlaps(x, x1, z, z1, h):
-					blocked = true
+					hard_blocked = true
 					break
+			if hard_blocked and cell > HOLE_SUBDIVISION_CELL:
+				# See HOLE_SUBDIVISION_CELL's own comment. Flat Y=0 sub-
+				# quads even on a heightmap map - a small, known imprecision
+				# right at a building edge, far preferable to omitting the
+				# whole coarse quad the building only clips a corner of.
+				_emit_subdivided_ground_quad(verts, x, x1, z, z1, hard_holes, water_holes, bridges, has_blobs, map_def)
+				z = z1
+				zi += 1
+				continue
+			var blocked = hard_blocked
 			if not blocked:
 				for w in water_holes:
 					if _rect_overlaps(x, x1, z, z1, w) and not _cell_on_bridge(x, x1, z, z1, bridges):
@@ -557,6 +627,37 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) ->
 		xi += 1
 	return verts
 
+# Re-tests a single coarse quad at HOLE_SUBDIVISION_CELL resolution instead
+# of omitting it wholesale - see _build_ground_faces()'s header comment for
+# why. Deliberately re-runs the SAME hard_holes/water_holes/blob checks the
+# coarse loop already ran, just at finer granularity within this one quad,
+# so a fine sub-cell not actually touching any hole still gets emitted.
+static func _emit_subdivided_ground_quad(verts: PackedVector3Array, x0: float, x1: float, z0: float, z1: float,
+		hard_holes: Array, water_holes: Array, bridges: Array, has_blobs: bool, map_def: Dictionary) -> void:
+	var sub = HOLE_SUBDIVISION_CELL
+	var sx = x0
+	while sx < x1:
+		var sx1 = min(sx + sub, x1)
+		var sz = z0
+		while sz < z1:
+			var sz1 = min(sz + sub, z1)
+			var blocked = false
+			for h in hard_holes:
+				if _rect_overlaps(sx, sx1, sz, sz1, h):
+					blocked = true
+					break
+			if not blocked:
+				for w in water_holes:
+					if _rect_overlaps(sx, sx1, sz, sz1, w) and not _cell_on_bridge(sx, sx1, sz, sz1, bridges):
+						blocked = true
+						break
+			if not blocked and has_blobs and _cell_on_water_blob(sx, sx1, sz, sz1, map_def):
+				blocked = true
+			if not blocked:
+				_add_nav_quad(verts, Vector3(sx, 0, sz), Vector3(sx1, 0, sz), Vector3(sx1, 0, sz1), Vector3(sx, 0, sz1))
+			sz = sz1
+		sx = sx1
+
 # Same grid-quad sweep as _build_ground_faces(), but water is walkable
 # terrain here instead of a hole - only real obstacles block it. This is
 # what makes screw_drive locomotion (the amphibious auger-drum type)
@@ -589,7 +690,12 @@ static func _build_amphibious_faces(map_def: Dictionary, extra_holes: Array = []
 				if _rect_overlaps(x, x1, z, z1, h):
 					blocked = true
 					break
-			if not blocked:
+			if blocked and cell > HOLE_SUBDIVISION_CELL:
+				# Same fix as _build_ground_faces() - see that function's
+				# header comment. A screw_drive unit hits the exact same
+				# building-swallows-a-whole-coarse-quad failure on land.
+				_emit_subdivided_ground_quad(verts, x, x1, z, z1, holes, [], [], false, map_def)
+			elif not blocked:
 				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
 			z = z1
 		x = x1
@@ -632,10 +738,54 @@ static func _build_deep_water_faces(map_def: Dictionary) -> PackedVector3Array:
 # dynamic rebake) - one place that knows how to turn source verts into a
 # baked NavigationMesh, so the two bakers can't silently drift apart on
 # cell_size/agent settings.
+# CORE_DESIGN_LANGUAGE.md §3.2 (2026-08-08 playtest): NavigationMesh.
+# agent_max_climb was never set here, leaving it at Godot's own default
+# (0.25) - fine at cell_size 0.25 (quantizes to exactly 1 cell), silently
+# LETHAL once cell_size grows past 0.25 (Chunk 14's self-bounding formula
+# widens it well beyond that on any map bigger than 300 half-extent). Recast
+# quantizes agent_max_climb to whole cell_height units, FLOORING - confirmed
+# via the engine's own "agent_max_climb is floored to cell_height voxel
+# units" warning, and at cell_size 1.87 (open_plains, world_scale=4) that
+# floors 0.25 all the way to ZERO. A navmesh baked with zero climb tolerance
+# treats every tiny bit of terrain noise (GROUND_NOISE_AMPLITUDE, itself
+# real and present) as an impassable micro-cliff, fragmenting connectivity
+# right around wherever a unit happens to be standing - which reproduced
+# exactly as "units sit in place and go in a circle" (a live NavigationAgent3D
+# permanently stuck offering the same near-start corner - see tools/probe_
+# nav_scale_stall.gd) despite a raw NavigationServer3D.map_get_path() query
+# between the same two points succeeding, because that query doesn't hit the
+# SAME connectivity holes the agent's own local corridor search does. Scaled
+# with cell_size (not left flat) so it always survives the floor - 1.5 cells
+# of headroom regardless of how large a map's cell_size grows.
+const AGENT_MAX_CLIMB_CELLS: float = 1.5
+
+# CORE_DESIGN_LANGUAGE.md §3.2 (2026-08-08 playtest): cell_HEIGHT used to
+# just mirror cell_SIZE, which was fine while both were the same small
+# number (0.25 at world_scale=1) but silently broke vertical precision once
+# _nav_cell_size() started widening cell_size for big maps (Chunk 14 - a
+# deliberate, correct choice for HORIZONTAL triangle count, never meant to
+# also degrade vertical accuracy). Confirmed live: on a flat, non-heightmap
+# map the navmesh source geometry is deliberately Y=0 (see
+# _build_ground_faces()'s own comment), yet every query near a scaled-up
+# map returned Y~3.74 - exactly 2x cell_height at world_scale=4's cell_size
+# (1.87) - Recast's vertical voxelisation quantizing the flat ground up by
+# whole cell_height steps. That put the baked navmesh surface several units
+# above where a real unit's body actually stands (terrain_height_at() drives
+# the unit's real Y, and does NOT share this quantization), and the
+# resulting vertical mismatch was enough to make NavigationAgent3D's 3D-aware
+# path queries misbehave near real bases even though the horizontal geometry
+# (proven separately, see the HOLE_SUBDIVISION_CELL fix above) was already
+# correct. Decoupled from cell_size and kept fixed, small, and world_scale-
+# independent - vertical precision has no reason to get coarser just
+# because the map got wider.
+const NAV_CELL_HEIGHT: float = 0.25
+
 static func _bake_nav_mesh(verts: PackedVector3Array, cell_size: float) -> NavigationMesh:
 	var nav_mesh = NavigationMesh.new()
 	nav_mesh.cell_size = cell_size
-	nav_mesh.cell_height = cell_size
+	nav_mesh.cell_height = NAV_CELL_HEIGHT
+	nav_mesh.agent_max_climb = cell_size * AGENT_MAX_CLIMB_CELLS
+	nav_mesh.agent_radius = 0.1
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(verts, Transform3D.IDENTITY)
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
@@ -692,7 +842,14 @@ static func rebake_ground_and_amphibious_async(map_def: Dictionary, extra_holes:
 static func _bake_region_async(region: RID, verts: PackedVector3Array, cell_size: float, remaining: Dictionary, on_ready: Callable) -> void:
 	var nav_mesh = NavigationMesh.new()
 	nav_mesh.cell_size = cell_size
-	nav_mesh.cell_height = cell_size
+	# See _bake_nav_mesh()'s comments (both NAV_CELL_HEIGHT and
+	# agent_max_climb) - the same fixes are needed here, since this is the
+	# SECOND, independent NavigationMesh construction site (the async
+	# mid-match rebake path for buildings going up/down), not a call through
+	# the other one.
+	nav_mesh.cell_height = NAV_CELL_HEIGHT
+	nav_mesh.agent_max_climb = cell_size * AGENT_MAX_CLIMB_CELLS
+	nav_mesh.agent_radius = 0.1
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(verts, Transform3D.IDENTITY)
 	NavigationServer3D.bake_from_source_geometry_data_async(nav_mesh, source, func():
@@ -715,19 +872,19 @@ static func build_navmeshes(map_def: Dictionary, extra_holes: Array = []) -> Dic
 	var cell_size = _nav_cell_size(map_def)
 	var ground_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_cell_size(ground_map, cell_size)
-	NavigationServer3D.map_set_cell_height(ground_map, cell_size)
+	NavigationServer3D.map_set_cell_height(ground_map, NAV_CELL_HEIGHT)
 	NavigationServer3D.map_set_active(ground_map, true)
 	var water_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_cell_size(water_map, cell_size)
-	NavigationServer3D.map_set_cell_height(water_map, cell_size)
+	NavigationServer3D.map_set_cell_height(water_map, NAV_CELL_HEIGHT)
 	NavigationServer3D.map_set_active(water_map, true)
 	var amphibious_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_cell_size(amphibious_map, cell_size)
-	NavigationServer3D.map_set_cell_height(amphibious_map, cell_size)
+	NavigationServer3D.map_set_cell_height(amphibious_map, NAV_CELL_HEIGHT)
 	NavigationServer3D.map_set_active(amphibious_map, true)
 	var deep_water_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_cell_size(deep_water_map, cell_size)
-	NavigationServer3D.map_set_cell_height(deep_water_map, cell_size)
+	NavigationServer3D.map_set_cell_height(deep_water_map, NAV_CELL_HEIGHT)
 	NavigationServer3D.map_set_active(deep_water_map, true)
 
 	var ground_verts = _build_ground_faces(map_def, extra_holes)
@@ -788,19 +945,19 @@ static func build_navmeshes_deferred(map_def: Dictionary, extra_holes: Array = [
 	var cell_size = _nav_cell_size(map_def)
 	var ground_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_cell_size(ground_map, cell_size)
-	NavigationServer3D.map_set_cell_height(ground_map, cell_size)
+	NavigationServer3D.map_set_cell_height(ground_map, NAV_CELL_HEIGHT)
 	NavigationServer3D.map_set_active(ground_map, true)
 	var water_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_cell_size(water_map, cell_size)
-	NavigationServer3D.map_set_cell_height(water_map, cell_size)
+	NavigationServer3D.map_set_cell_height(water_map, NAV_CELL_HEIGHT)
 	NavigationServer3D.map_set_active(water_map, true)
 	var amphibious_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_cell_size(amphibious_map, cell_size)
-	NavigationServer3D.map_set_cell_height(amphibious_map, cell_size)
+	NavigationServer3D.map_set_cell_height(amphibious_map, NAV_CELL_HEIGHT)
 	NavigationServer3D.map_set_active(amphibious_map, true)
 	var deep_water_map = NavigationServer3D.map_create()
 	NavigationServer3D.map_set_cell_size(deep_water_map, cell_size)
-	NavigationServer3D.map_set_cell_height(deep_water_map, cell_size)
+	NavigationServer3D.map_set_cell_height(deep_water_map, NAV_CELL_HEIGHT)
 	NavigationServer3D.map_set_active(deep_water_map, true)
 
 	var pending: Array = []
@@ -1505,7 +1662,7 @@ static func get_surface_type_at(map_def: Dictionary, pos: Vector3) -> String:
 	var surfacemap_img = _get_surfacemap_image(map_def)
 	if surfacemap_img:
 		var half: float = map_def.get("map_half_extents", 80.0)
-		return _sample_surfacemap(surfacemap_img, half, pos.x, pos.z)
+		return _sample_surfacemap(surfacemap_img, half, pos.x, pos.z, WorldScaleScript.for_map(map_def))
 
 	for z in map_def.get("surface_zones", []):
 		if _point_in_rect(pos, _rect_from(z.center, z.half_extents)):

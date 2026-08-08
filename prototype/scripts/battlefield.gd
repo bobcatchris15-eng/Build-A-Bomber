@@ -1,6 +1,7 @@
 extends Node3D
 
 const BlueprintManager = preload("res://scripts/blueprint_manager.gd")
+const VisualBuilder = preload("res://scripts/visual_builder.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 
@@ -211,16 +212,17 @@ func _physics_process(delta):
 						# ring tumbles on two axes, not one.
 						inner_ring.rotate_z(7.0 * delta)
 				elif data.type_id == "legs":
-					# Rotating on X, not Z - see battle_unit.gd's matching
-					# comment (Z swung sideways like a bird wing; X swings
-					# fore-aft along the direction of travel instead).
-					var swing = child.get_node_or_null("LegRoot/LegSwing")
-					if swing:
-						if vehicle.velocity.length() > 0.3:
-							var phase = child.get_meta("leg_phase", 0.0)
-							swing.rotation.x = sin(Time.get_ticks_msec() / 1000.0 * 6.0 + phase) * 0.5
-						else:
-							swing.rotation.x = 0.0
+					# Shared with battle_unit.gd rather than copied. This block
+					# used to be its own second implementation, and the copy had
+					# already drifted: it snapped straight to 0 when parked
+					# instead of settling, and ignored speed entirely, so a
+					# walker crossing the Test Range strode at exactly the same
+					# cadence whether it was crawling or flat out. That is the
+					# same class of drift that left the rotors here spinning the
+					# wrong node - see the comment further up.
+					var rate: float = clampf(vehicle.velocity.length() / 6.0, 0.0, 1.0)
+					VisualBuilder.pose_leg(child, Time.get_ticks_msec() / 1000.0,
+						child.get_meta("leg_phase", 0.0), rate, delta)
 
 	# Update Camera to follow vehicle
 	var target_cam_pos = vehicle.global_position + Vector3(0, 12, 12)

@@ -336,8 +336,11 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 			if data.category == "locomotion":
 				has_locomotion = true
 				thrust += ModuleCatalog.get_thrust_coefficient(data.type_id) * footprint * factors["thrust"]
-				capacity += ModuleCatalog.get_base_weight_capacity(data.type_id) * footprint * factors["capacity"]
-				var chassis_top: float = ModuleCatalog.get_base_top_speed(data.type_id)
+				# tweaks passed through so a legged chassis is rated for the leg
+				# set actually fitted - an Excavator walker carries far more
+				# than a Raptor one, and walks slower for it.
+				capacity += ModuleCatalog.get_base_weight_capacity(data.type_id, data.tweaks) * footprint * factors["capacity"]
+				var chassis_top: float = ModuleCatalog.get_base_top_speed(data.type_id, data.tweaks)
 				if slowest_top_speed <= 0.0 or chassis_top < slowest_top_speed:
 					slowest_top_speed = chassis_top
 			# Mobility ADD-ONS (wing/thruster/propeller_prop/pusher_prop/

@@ -117,7 +117,7 @@ func test_flow_field_integrates_and_points_home() -> bool:
 	# within half a diagonal of that point.
 	var probe := Vector3(-13.0, 0.0, 41.0)
 	var centre: Vector3 = field.centre_of(field.cell_at(probe))
-	if Vector2(centre.x - probe.x, centre.z - probe.z).length() > FlowFieldScript.CELL_SIZE:
+	if Vector2(centre.x - probe.x, centre.z - probe.z).length() > FlowFieldScript.BASE_CELL_SIZE:
 		print("  [FAIL] cell_at/centre_of round trip drifted: ", probe, " -> ", centre)
 		return false
 
@@ -144,13 +144,13 @@ func test_flow_field_integrates_and_points_home() -> bool:
 	# looping - the failure mode a badly derived descent produces.
 	var walker := Vector3(-50, 0, 50)
 	var steps := 0
-	while walker.distance_to(destination) > FlowFieldScript.CELL_SIZE * 1.5 and steps < 500:
+	while walker.distance_to(destination) > FlowFieldScript.BASE_CELL_SIZE * 1.5 and steps < 500:
 		var d: Vector3 = field.direction_at(walker)
 		if d == Vector3.ZERO:
 			break
-		walker += d * FlowFieldScript.CELL_SIZE
+		walker += d * FlowFieldScript.BASE_CELL_SIZE
 		steps += 1
-	if walker.distance_to(destination) > FlowFieldScript.CELL_SIZE * 2.0:
+	if walker.distance_to(destination) > FlowFieldScript.BASE_CELL_SIZE * 2.0:
 		print("  [FAIL] Descending the field stalled %.1f m from the destination after %d steps"
 			% [walker.distance_to(destination), steps])
 		return false
@@ -164,6 +164,46 @@ func test_flow_field_integrates_and_points_home() -> bool:
 		print("  [FAIL] A group at the threshold should build a flow field")
 		return false
 	print("  [PASS] FlowField integration")
+	return true
+
+
+func test_flow_field_cell_size_scales_with_world_scale() -> bool:
+	print("Running Test Suite: FlowField - cell_size Scales With world_scale, Keeping Cell Count Bounded...")
+	# CORE_DESIGN_LANGUAGE.md §3.2: without this, a map that grows 16x under
+	# world_scale would grow a field's cell COUNT 256x (dims scale with
+	# half^2) - the "19M cells per field" the plan's own cost table warns
+	# about. Scaling cell_size alongside map_half_extents keeps dims roughly
+	# constant regardless of world_scale.
+	var half := 60.0
+	var destination := Vector3(20, 0, -20)
+
+	var field_default: FlowField = FlowFieldScript.build(RID(), half, destination)
+	if not is_equal_approx(field_default.cell_size, FlowFieldScript.BASE_CELL_SIZE):
+		print("  [FAIL] Default (no world_scale arg) should keep BASE_CELL_SIZE, got ", field_default.cell_size)
+		return false
+
+	var field_explicit_1: FlowField = FlowFieldScript.build(RID(), half, destination, 1.0)
+	if not is_equal_approx(field_explicit_1.cell_size, FlowFieldScript.BASE_CELL_SIZE):
+		print("  [FAIL] world_scale=1.0 should be identical to the default, got ", field_explicit_1.cell_size)
+		return false
+	if field_explicit_1.dims != field_default.dims:
+		print("  [FAIL] world_scale=1.0 should produce identical dims to the default, got ", field_explicit_1.dims, " vs ", field_default.dims)
+		return false
+
+	# At world_scale=4.0, BOTH map_half_extents (Chunk 12, not exercised
+	# directly here) and cell_size grow by the same factor - so dims (which
+	# depend on the RATIO of the two) should come out roughly the same as
+	# the unscaled field's, not 4x or 16x larger.
+	var scaled_half := half * 4.0
+	var field_scaled: FlowField = FlowFieldScript.build(RID(), scaled_half, destination, 4.0)
+	if not is_equal_approx(field_scaled.cell_size, FlowFieldScript.BASE_CELL_SIZE * 4.0):
+		print("  [FAIL] world_scale=4.0 should quadruple cell_size, expected ", FlowFieldScript.BASE_CELL_SIZE * 4.0, ", got ", field_scaled.cell_size)
+		return false
+	if field_scaled.dims != field_default.dims:
+		print("  [FAIL] Scaling both map_half_extents and world_scale by the same factor should hold dims roughly constant, expected ", field_default.dims, ", got ", field_scaled.dims)
+		return false
+
+	print("  [PASS] FlowField.cell_size is inert at world_scale=1.0 and scales proportionally at 4.0, keeping cell count bounded as the map grows.")
 	return true
 
 

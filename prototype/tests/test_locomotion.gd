@@ -1015,7 +1015,7 @@ func test_battle_spawn_sits_on_its_running_gear() -> bool:
 	# two the formula knew about, the rest got nothing.
 	var cases = [
 		["wheels", {"wheel_size": 1.0, "num_axles": 4, "wheels_per_axle": 1}],
-		["legs", {"knee_height": 0.375, "count": 4}],
+		["legs", {"leg_length": 1.0, "leg_width": 1.0, "count": 4}],
 		["tracked_treads", {"tread_width": 1.0}],
 		["screw_drive", {"drum_diameter": 1.0, "helix_depth": 1.0}],
 		["half_track", {}],
@@ -1597,3 +1597,478 @@ func test_ornithopter_wing_spawns_flaps_and_flies() -> bool:
 
 # --- Hull Modding (HULL_MODDING_PLAN.md) ---
 
+
+# --- Authored leg sets (NEW_LEGS, 2026-08-08) --------------------------------
+# The six authored sets replaced a fully procedural limb. What follows guards
+# the seams that swap created: an asset path (six .glb files that have to load
+# AND articulate), a placement fork (belly vs flank), a stat table, and a walk
+# cycle that now drives three bones instead of one.
+
+
+## Every set has to load AND expose the full chain. This is the one suite that
+## fails outright if an asset is missing, renamed, or re-exported with different
+## bone names - all of which look identical in the Design Lab (a leg that simply
+## does not articulate) and none of which any other suite would notice.
+func test_leg_sets_load_and_expose_the_bone_chain() -> bool:
+	print("Running Test Suite: Leg Sets - Assets Load And Articulate...")
+	var VisualBuilder = load("res://scripts/visual_builder.gd")
+	var ok := true
+
+	for leg_id in ModuleCatalog.get_leg_options():
+		var hull := _leg_test_hull()
+		var placer := _leg_test_placer(hull)
+		await tree.process_frame
+		placer.update_locomotion("legs", {"leg_type": leg_id})
+		await tree.process_frame
+
+		var modules := _leg_modules(hull)
+		if modules.is_empty():
+			print("  [FAIL] %s placed no leg modules at all" % leg_id)
+			ok = false
+		else:
+			var leg: Node3D = modules[0]
+			# The two-level nesting is load-bearing, not decoration - see the
+			# mirror comment in _build_legs(). Asserted as a PATH so collapsing
+			# them into one node fails here rather than as inside-out mirrored
+			# legs someone notices in a playtest.
+			var swing := leg.get_node_or_null("LegRoot/%s" % VisualBuilder.LEG_PIVOT_SWING)
+			if swing == null:
+				print("  [FAIL] %s has no LegRoot/LegSwing pivot" % leg_id)
+				ok = false
+			else:
+				for bone_name in [VisualBuilder.LEG_PIVOT_HIP,
+						VisualBuilder.LEG_PIVOT_THIGH, VisualBuilder.LEG_PIVOT_SHIN]:
+					var bone = VisualBuilder.find_leg_bone(swing, bone_name)
+					if bone == null:
+						print("  [FAIL] %s is missing bone %s" % [leg_id, bone_name])
+						ok = false
+					elif bone.find_children("*", "MeshInstance3D", false, false).is_empty():
+						print("  [FAIL] %s bone %s carries no mesh" % [leg_id, bone_name])
+						ok = false
+			# The authoring aid must not survive into the game.
+			if VisualBuilder.find_leg_bone(leg, "CamTarget") != null:
+				print("  [FAIL] %s kept its CamTarget authoring node" % leg_id)
+				ok = false
+			# Deliberately inverted. There WAS a bolted plate standing in for the
+			# hardpoint; Chris asked for the limbs to meet the hull directly
+			# instead, so a plate reappearing is a regression, not a repair.
+			if leg.get_node_or_null("LegPlatform") != null:
+				print("  [FAIL] %s built a mounting plate - legs mount to the hull skin now" % leg_id)
+				ok = false
+
+			# THE SET ACTUALLY FITTED, not just "a leg was built".
+			#
+			# This is the check that would have caught the real bug found in
+			# playtest: locomotion_layout._resolve_geo() only forwards the keys
+			# a type DECLARES in geo_keys, and leg_type was not among them - so
+			# the layout resolved the right stations from settings while the
+			# builder, reading the module's tweaks, saw no leg_type at all and
+			# built the DEFAULT limb every single time. Every structural
+			# assertion above still passed, because a Stryker has all the right
+			# bones. Asserted via the authored node names, which are the only
+			# thing that differs between the six.
+			var wants: String = str(ModuleCatalog.get_leg_profile(leg_id).label)
+			if VisualBuilder.find_leg_bone(leg, "%s_Rig" % wants) == null:
+				print("  [FAIL] %s built some other set - no %s_Rig under the module"
+					% [leg_id, wants])
+				ok = false
+
+		placer.free()
+		hull.free()
+		await tree.process_frame
+
+	if ok:
+		print("  [PASS] All %d leg sets load, expose the full three-bone chain, and carry no mounting plate."
+			% ModuleCatalog.get_leg_options().size())
+	return ok
+
+
+## Every set has to produce a SANE ride height - not an identical one.
+##
+## Chris, on seeing Mantis come out shorter than the rest: "having the legs at
+## different heights is fine as well." So this deliberately does not demand
+## uniformity - a shouldered set that reaches wide gets scaled down by the
+## layout's own width clamp, and that is the clamp working, not a bug.
+##
+## What it DOES pin is the pair of failures that would actually ship broken:
+## a set whose authored drop (2.50 to 3.85 raw units, against a ~1.6 target)
+## never got normalised, leaving the vehicle on stilts; or one scaled to
+## nothing, leaving the hull sitting on the dirt. A band around the default
+## catches both without freezing the artistic spread between them.
+func test_leg_sets_all_stand_on_the_ground() -> bool:
+	print("Running Test Suite: Leg Sets - Every Set Stands Sanely...")
+	var heights := {}
+
+	for leg_id in ModuleCatalog.get_leg_options():
+		var hull := _leg_test_hull()
+		var placer := _leg_test_placer(hull)
+		await tree.process_frame
+		placer.update_locomotion("legs", {"leg_type": leg_id})
+		await tree.process_frame
+		heights[leg_id] = hull.position.y
+		placer.free()
+		hull.free()
+		await tree.process_frame
+
+	var baseline: float = heights[ModuleCatalog.LEG_DEFAULT]
+	var ok := true
+	if baseline <= _LEG_TEST_HULL_SIZE.y * 0.5:
+		print("  [FAIL] the default set does not lift the hull clear of the ground at all (y=%.3f)" % baseline)
+		ok = false
+	for leg_id in heights:
+		var h: float = heights[leg_id]
+		# The raw authored drop is >2.5 and the target is ~1.6, so a set that
+		# skipped normalisation lands well outside this band rather than just
+		# looking a bit tall.
+		if h < baseline * 0.4 or h > baseline * 1.6:
+			print("  [FAIL] %s rides at %.3f, outside the sane band around the default %.3f"
+				% [leg_id, h, baseline])
+			ok = false
+	if ok:
+		print("  [PASS] All %d sets stand the hull clear of the ground (%.3f to %.3f)." % [
+			heights.size(), heights.values().min(), heights.values().max()])
+	return ok
+
+
+## Mantis and Crawler bolt to the hull flank; the other four to its belly.
+##
+## Asserted against where the stations ACTUALLY land, not against LEG_TYPES -
+## reading the table back would only prove the table equals itself, and the bug
+## worth catching is the layout fork silently not being consulted.
+func test_leg_mount_style_moves_the_stations() -> bool:
+	print("Running Test Suite: Leg Sets - Flank vs Belly Mounting...")
+	var ok := true
+	var underside_y := 0.0
+	var seen_underside := false
+
+	for leg_id in ModuleCatalog.get_leg_options():
+		var hull := _leg_test_hull()
+		var placer := _leg_test_placer(hull)
+		await tree.process_frame
+		placer.update_locomotion("legs", {"leg_type": leg_id})
+		await tree.process_frame
+
+		var modules := _leg_modules(hull)
+		var expect_flank: bool = str(ModuleCatalog.get_leg_profile(leg_id).mount) == "flank"
+		if modules.is_empty():
+			print("  [FAIL] %s placed nothing" % leg_id)
+			ok = false
+		else:
+			var station_y: float = modules[0].position.y
+			# The belly line for this hull, which is where a non-shouldered set
+			# must sit and where a shouldered one must NOT.
+			var belly: float = -_LEG_TEST_HULL_SIZE.y / 2.0
+			if expect_flank:
+				if station_y <= belly + 0.01:
+					print("  [FAIL] %s is shouldered but sits at the belly line (y=%.3f)"
+						% [leg_id, station_y])
+					ok = false
+			else:
+				if absf(station_y - belly) > 0.01:
+					print("  [FAIL] %s should sit at the belly line %.3f, sits at %.3f"
+						% [leg_id, belly, station_y])
+					ok = false
+				if seen_underside and absf(station_y - underside_y) > 0.001:
+					print("  [FAIL] belly-mounted sets disagree on station height")
+					ok = false
+				underside_y = station_y
+				seen_underside = true
+
+		placer.free()
+		hull.free()
+		await tree.process_frame
+
+	if ok:
+		print("  [PASS] Shouldered sets mount up the flank; the rest sit on the belly line.")
+	return ok
+
+
+## The set survives a save/load round trip, and a nonsense id degrades rather
+## than erroring - the same forgiving contract get_ammo() has for a hand-edited
+## blueprint or a save from a build that has since renamed a variant.
+func test_leg_type_round_trips_and_degrades() -> bool:
+	print("Running Test Suite: Leg Sets - Blueprint Round Trip...")
+	var ok := true
+
+	if ModuleCatalog.get_leg_type({}) != ModuleCatalog.LEG_DEFAULT:
+		print("  [FAIL] an empty tweaks dict did not resolve to the default set")
+		ok = false
+	if ModuleCatalog.get_leg_type({"leg_type": "no_such_leg"}) != ModuleCatalog.LEG_DEFAULT:
+		print("  [FAIL] an unknown leg id did not degrade to the default")
+		ok = false
+	if ModuleCatalog.get_leg_type({"leg_type": 7}) != ModuleCatalog.LEG_DEFAULT:
+		print("  [FAIL] a non-string leg id did not degrade to the default")
+		ok = false
+	if ModuleCatalog.get_leg_type({"leg_type": "mantis"}) != "mantis":
+		print("  [FAIL] a legal leg id was not honoured")
+		ok = false
+
+	# Through the real serializer, because the failure that matters is the tweak
+	# being dropped somewhere between the hull metadata and the JSON.
+	var hull := _leg_test_hull()
+	var placer := _leg_test_placer(hull)
+	await tree.process_frame
+	placer.update_locomotion("legs", {"leg_type": "excavator", "count": 4})
+	await tree.process_frame
+
+	var bm = load("res://scripts/blueprint_manager.gd").new()
+	root.add_child(bm)
+	var serialized: Dictionary = bm.serialize_hull(hull)
+	var loco: Dictionary = serialized.get("locomotion", {})
+	var round_tripped := str(loco.get("settings", {}).get("leg_type", "<missing>"))
+	if round_tripped != "excavator":
+		print("  [FAIL] leg_type serialized as %s, expected excavator" % round_tripped)
+		ok = false
+
+	bm.queue_free()
+	placer.free()
+	hull.free()
+	await tree.process_frame
+
+	if ok:
+		print("  [PASS] leg_type survives serialization and degrades safely on bad input.")
+	return ok
+
+
+## The sets have to differ MECHANICALLY, not just visually.
+##
+## Ordering rather than magic numbers, so retuning the LEG_TYPES table is a
+## balance decision rather than a test edit - but the shape of the spread (the
+## heavy set carries more and walks slower) is a design commitment and is
+## pinned.
+func test_leg_sets_have_a_real_stat_spread() -> bool:
+	print("Running Test Suite: Leg Sets - Stat Spread...")
+	var ok := true
+
+	var cap := func(id: String) -> float:
+		return ModuleCatalog.get_base_weight_capacity("legs", {"leg_type": id})
+	var spd := func(id: String) -> float:
+		return ModuleCatalog.get_base_top_speed("legs", {"leg_type": id})
+
+	if cap.call("excavator") <= cap.call("raptor"):
+		print("  [FAIL] Excavator should carry more than Raptor (%.1f vs %.1f)"
+			% [cap.call("excavator"), cap.call("raptor")])
+		ok = false
+	if spd.call("crawler") <= spd.call("excavator"):
+		print("  [FAIL] Crawler should outpace Excavator (%.2f vs %.2f)"
+			% [spd.call("crawler"), spd.call("excavator")])
+		ok = false
+	if spd.call("raptor") <= spd.call("stryker"):
+		print("  [FAIL] Raptor should outpace the baseline Stryker")
+		ok = false
+
+	# The default has to be the neutral one, or "I did not touch the dropdown"
+	# silently means "I took a stat penalty".
+	if not is_equal_approx(cap.call(ModuleCatalog.LEG_DEFAULT),
+			float(ModuleCatalog.get_module_data("legs").get("base_weight_capacity", 0.0))):
+		print("  [FAIL] the default set is not stat-neutral")
+		ok = false
+
+	# A non-leg type must be completely unaffected by a stray leg_type key.
+	if not is_equal_approx(ModuleCatalog.get_base_top_speed("wheels", {"leg_type": "excavator"}),
+			ModuleCatalog.get_base_top_speed("wheels")):
+		print("  [FAIL] a leg_type tweak leaked into a non-leg locomotor")
+		ok = false
+
+	if ok:
+		print("  [PASS] Leg sets differ in capacity and speed, the default is neutral, and nothing leaks.")
+	return ok
+
+
+## The walk cycle drives all THREE bones, and they disagree with each other.
+##
+## A regression to the old single-pivot swing would be silent - the leg would
+## still visibly move, just rigidly below the hip - which is exactly the kind of
+## quiet failure test_every_locomotion_type_animates_something was written for
+## after three types shipped with no pivot at all.
+func test_leg_walk_cycle_drives_all_three_bones() -> bool:
+	print("Running Test Suite: Leg Sets - Three-Bone Walk Cycle...")
+	var VisualBuilder = load("res://scripts/visual_builder.gd")
+	var ok := true
+
+	var hull := _leg_test_hull()
+	var placer := _leg_test_placer(hull)
+	await tree.process_frame
+	placer.update_locomotion("legs", {"leg_type": "raptor"})
+	await tree.process_frame
+
+	var modules := _leg_modules(hull)
+	if modules.is_empty():
+		print("  [FAIL] no leg modules to pose")
+		placer.free()
+		hull.free()
+		return false
+
+	var leg: Node3D = modules[0]
+	var swing := leg.get_node_or_null("LegRoot/%s" % VisualBuilder.LEG_PIVOT_SWING) as Node3D
+	var thigh: Node3D = VisualBuilder.find_leg_bone(leg, VisualBuilder.LEG_PIVOT_THIGH)
+	var shin: Node3D = VisualBuilder.find_leg_bone(leg, VisualBuilder.LEG_PIVOT_SHIN)
+
+	# Sampled across the cycle rather than at one instant: a bone parked at a
+	# constant non-zero angle is not animated, and one sample cannot tell the
+	# difference.
+	var seen := {"swing": [], "thigh": [], "shin": []}
+	for step in range(8):
+		VisualBuilder.pose_leg(leg, float(step) * 0.09, 0.0, 1.0, 0.016)
+		seen["swing"].append(swing.rotation.x)
+		seen["thigh"].append(thigh.rotation.x)
+		seen["shin"].append(shin.rotation.x)
+
+	for bone_name in seen:
+		var values: Array = seen[bone_name]
+		var lo: float = values.min()
+		var hi: float = values.max()
+		if hi - lo < 0.01:
+			print("  [FAIL] %s did not move across the cycle (range %.4f)" % [bone_name, hi - lo])
+			ok = false
+
+	# The knee must FOLD against the hip, not follow it. Identical motion would
+	# mean a rigid limb swinging from the hip - the thing this replaced.
+	var same := true
+	for i in range(seen["thigh"].size()):
+		if absf(float(seen["thigh"][i]) - float(seen["shin"][i])) > 0.001:
+			same = false
+			break
+	if same:
+		print("  [FAIL] thigh and shin moved identically - the limb is rigid below the hip")
+		ok = false
+
+	# Parked settles toward rest rather than freezing mid-stride.
+	for _i in range(60):
+		VisualBuilder.pose_leg(leg, 99.0, 0.0, 0.0, 0.016)
+	if absf(swing.rotation.x) > 0.05:
+		print("  [FAIL] a parked leg held a mid-stride pose (swing=%.3f)" % swing.rotation.x)
+		ok = false
+
+	# And the trot stagger has to actually be assigned - it was gated on a key
+	# the legs layout does not set, so every leg read 0.0 and stepped in unison.
+	var phases := {}
+	for m in modules:
+		phases[m.get_meta("leg_phase", 0.0)] = true
+	if phases.size() < 2:
+		print("  [FAIL] every leg shares one walk phase - they will step in lockstep")
+		ok = false
+
+	placer.free()
+	hull.free()
+	await tree.process_frame
+
+	if ok:
+		print("  [PASS] Hip, thigh and shin all animate, the knee folds against the hip, parked legs settle, and the trot is staggered.")
+	return ok
+
+
+## Legs bolt to the hull's VISIBLE mesh, not to its collision box.
+##
+## These are two genuinely different surfaces. LocomotionLayout positions every
+## station against hull_size - the box - and since the hull roster moved to the
+## SDF/marching-cubes bake, a baked hull is routinely narrower, wider or more
+## tapered than the box it declares. A leg left on the box plane therefore hangs
+## in clear air beside the model it is supposed to be bolted to, or buries its
+## gearbox inside it.
+##
+## Run against real authored hulls rather than the bare box the other leg suites
+## use, because a box hull is exactly the case where the bug is invisible: box
+## and skin agree, so the seating is a no-op and proves nothing.
+func test_legs_seat_on_the_visible_hull_mesh() -> bool:
+	print("Running Test Suite: Leg Sets - Seated On The Visible Hull...")
+	var HullProjection = load("res://scripts/hull_projection.gd")
+	var ok := true
+	var moved_any := false
+
+	for hull_type in ["medium_hull", "heavy_hull", "scout_hull"]:
+		var scene = load("res://scenes/MainLab.tscn").instantiate()
+		root.add_child(scene)
+		current_scene = scene
+		for _i in range(3):
+			await tree.process_frame
+		scene.clear_hull()
+		scene._place_hull_from_ui(hull_type)
+		await tree.process_frame
+		scene.update_locomotion("legs", {})
+		await tree.process_frame
+
+		var mesh_inst := scene.hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
+		var box_half: float = float(scene.hull.get_meta("base_hull_size").x) * 0.5
+		if mesh_inst == null or mesh_inst.mesh == null:
+			print("  [FAIL] %s has no visible mesh to seat against" % hull_type)
+			ok = false
+		else:
+			var surface: Dictionary = HullProjection.build_surface(mesh_inst)
+			for child in scene.hull.get_children():
+				if not child.has_meta("module_data"):
+					continue
+				var m = child.get_meta("module_data")
+				if m == null or m.category != "locomotion":
+					continue
+				var side: float = signf(child.position.x)
+				# The leg's own x must be ON the skin: fire a ray back at it from
+				# outside and the first triangle should be where the leg is.
+				# Sampled up the flank the same way the seating does, because a
+				# ray at the very belly line passes under a curved hull.
+				var found := false
+				for frac in [0.06, 0.18, 0.32, 0.50]:
+					var from := Vector3(side * box_half * 4.0,
+						child.position.y + float(scene.hull.get_meta("base_hull_size").y) * frac,
+						child.position.z)
+					var hit: Dictionary = HullProjection.raycast(
+						surface, from, Vector3(-side, 0.0, 0.0))
+					if hit.get("hit", false) and absf(absf(hit["position"].x) - absf(child.position.x)) < 0.02:
+						found = true
+						break
+				if not found:
+					print("  [FAIL] %s: a leg at x=%.3f is not on the hull's skin"
+						% [hull_type, child.position.x])
+					ok = false
+				if absf(absf(child.position.x) - box_half) > 0.02:
+					moved_any = true
+
+		scene.free()
+		await tree.process_frame
+
+	# At least one hull in the set must have skin that DISAGREES with its box,
+	# or this suite is passing on a technicality and would keep passing if the
+	# seating were deleted outright.
+	if not moved_any:
+		print("  [FAIL] no leg moved off the bounding box on any hull - the seating is not doing anything")
+		ok = false
+
+	if ok:
+		print("  [PASS] Legs land on the hull's real skin across three authored hulls, off the bounding box.")
+	return ok
+
+
+# --- Shared leg-suite helpers ------------------------------------------------
+# The same hull every leg suite measures against, so a moved station always
+# means the same thing across all of them.
+const _LEG_TEST_HULL_SIZE := Vector3(3.0, 1.2, 4.4)
+
+func _leg_test_hull() -> StaticBody3D:
+	var hull := StaticBody3D.new()
+	hull.name = "Hull"
+	var shape := CollisionShape3D.new()
+	shape.name = "CollisionShape3D"
+	var box := BoxShape3D.new()
+	box.size = _LEG_TEST_HULL_SIZE
+	shape.shape = box
+	hull.add_child(shape)
+	root.add_child(hull)
+	return hull
+
+func _leg_test_placer(hull: StaticBody3D) -> Node3D:
+	var placer := Node3D.new()
+	placer.set_script(load("res://scripts/module_placer.gd"))
+	placer.hull = hull
+	root.add_child(placer)
+	return placer
+
+func _leg_modules(hull: Node3D) -> Array:
+	var out: Array = []
+	for child in hull.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		var m = child.get_meta("module_data")
+		if m != null and m.category == "locomotion":
+			out.append(child)
+	out.sort_custom(func(a, b): return a.position.x < b.position.x)
+	return out

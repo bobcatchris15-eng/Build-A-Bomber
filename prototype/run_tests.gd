@@ -23,6 +23,7 @@ const SUITE_FILES := {
 	"base_building": preload("res://tests/test_base_building.gd"),
 	"ai_and_win": preload("res://tests/test_ai_and_win.gd"),
 	"terrain_and_maps": preload("res://tests/test_terrain_and_maps.gd"),
+	"tutorial": preload("res://tests/test_tutorial.gd"),
 	# The rebuilt battle layer (scripts/battle/). Kept in its own subdirectory
 	# because it grows one file per phase and it retires as a unit if the rebuild
 	# is ever abandoned - unlike the ten area files above, which are a split of
@@ -63,6 +64,7 @@ const SUITE_ORDER := [
 	["ui_and_camera", "test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse"],
 	["ui_and_camera", "test_rts_camera_tilt_shift_dof_band"],
 	["ui_and_camera", "test_rts_camera_dof_band_widens_monotonically_with_height"],
+	["ui_and_camera", "test_rts_camera_world_scale_property_defaults_inert"],
 	["terrain_and_maps", "test_world_scale_default_and_per_map_override"],
 	["terrain_and_maps", "test_greeble_prop_scale_is_inert_at_1_and_doubles_at_2"],
 	["terrain_and_maps", "test_greeble_density_holds_coverage_fraction_as_prop_scale_rises"],
@@ -70,6 +72,10 @@ const SUITE_ORDER := [
 	["terrain_and_maps", "test_tall_grassland_clutter_never_lands_on_the_navigable_interior"],
 	["terrain_and_maps", "test_ground_noise_stretches_with_world_scale_not_just_amplifies"],
 	["terrain_and_maps", "test_terrain_tile_density_scales_with_world_scale"],
+	["terrain_and_maps", "test_every_spatial_field_in_field_spec_is_flagged_for_scaling"],
+	["terrain_and_maps", "test_apply_world_scale_is_inert_at_1_and_scales_flagged_fields_at_2"],
+	["terrain_and_maps", "test_spawn_fairness_lint_passes_a_real_map_scaled_up_4x"],
+	["terrain_and_maps", "test_scattered_peaks_navmesh_bakes_cleanly_at_world_scale_4"],
 	["weapons_and_damage", "test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion"],
 	["locomotion", "test_every_locomotion_type_is_fully_declared"],
 	["locomotion", "test_expansion_locomotion_types_build_and_place"],
@@ -211,9 +217,11 @@ const SUITE_ORDER := [
 	["battle_movement", "test_steering_yaw_faces_the_requested_direction"],
 	["battle_movement", "test_steering_arrival_and_turn_rate"],
 	["battle_movement", "test_order_vocabulary_and_completion"],
+	["battle_movement", "test_real_unit_actually_converges_toward_a_move_order_on_a_real_map"],
 	["battle_command", "test_formation_gives_every_unit_a_distinct_slot"],
 	["battle_command", "test_formation_assignment_does_not_cross"],
 	["battle_command", "test_flow_field_integrates_and_points_home"],
+	["battle_command", "test_flow_field_cell_size_scales_with_world_scale"],
 	["battle_command", "test_selection_frustum_geometry"],
 	["battle_command", "test_separation_and_stance_policy"],
 	["battle_economy", "test_production_uses_the_real_ra_speed_table"],
@@ -234,7 +242,10 @@ const SUITE_ORDER := [
 	["battle_vision", "test_reveal_hide_hysteresis_has_a_dead_zone"],
 	["battle_vision", "test_reveal_beacons_light_an_area_and_expire"],
 	["battle_vision", "test_effective_vision_elevation_bonus_is_capped_and_skips_flyers"],
+	["battle_vision", "test_elevation_bonus_scales_cap_with_world_scale_but_not_its_maximum"],
+	["battle_vision", "test_shroud_grid_cell_scales_keeping_image_size_bounded"],
 	["battle_vision", "test_minimap_bakes_terrain_and_draws_blips"],
+	["battle_vision", "test_minimap_cell_scales_keeping_image_size_bounded"],
 	["battle_ai", "test_considerations_stay_normalised"],
 	["battle_ai", "test_a_zero_consideration_vetoes_the_action"],
 	["battle_ai", "test_opening_move_is_not_a_deadlock"],
@@ -280,6 +291,21 @@ const SUITE_ORDER := [
 	["resource_fields", "test_oil_wells_are_single_points"],
 	["resource_fields", "test_every_map_offers_lumber_and_oil"],
 	["economy_and_production", "test_harvester_delivery_radius_clears_hull_and_refinery"],
+	# APPENDED, not interleaved - the order above is pinned for navmesh reasons.
+	# Neither group touches a navigation map: the leg suites build a bare hull
+	# plus a module_placer, and the tutorial suites build MainLab.tscn.
+	["locomotion", "test_leg_sets_load_and_expose_the_bone_chain"],
+	["locomotion", "test_leg_sets_all_stand_on_the_ground"],
+	["locomotion", "test_leg_mount_style_moves_the_stations"],
+	["locomotion", "test_leg_type_round_trips_and_degrades"],
+	["locomotion", "test_leg_sets_have_a_real_stat_spread"],
+	["locomotion", "test_leg_walk_cycle_drives_all_three_bones"],
+	["locomotion", "test_legs_seat_on_the_visible_hull_mesh"],
+	["tutorial", "test_tutorial_step_table_is_well_formed"],
+	["tutorial", "test_tutorial_reveal_part_opens_the_catalog"],
+	["tutorial", "test_tutorial_lab_targets_all_resolve"],
+	["tutorial", "test_tutorial_advances_on_real_state"],
+	["tutorial", "test_tutorial_skip_clears_state"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

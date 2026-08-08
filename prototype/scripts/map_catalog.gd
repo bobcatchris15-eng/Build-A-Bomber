@@ -1,5 +1,6 @@
 extends Node
 class_name MapCatalog
+const WorldScaleScript = preload("res://scripts/world_scale.gd")
 # Skirmish map library. RTS_CORE_ROADMAP.md B3: maps are now JSON files
 # under res://data/maps/*.json, scanned and cached once (same lazy
 # scan-and-cache pattern as hull_loader.gd - a directory scan + N file
@@ -137,6 +138,13 @@ static func _load_map_file(map_id: String, path: String) -> void:
 	# indexed into and crashing), so a genuinely bad value still reaches
 	# validate_map_def() and gets reported with a useful message instead.
 	var decoded = _decode_dict(raw, FIELD_SPEC)
+	# CORE_DESIGN_LANGUAGE.md §3.2 / Chunk 12: applied AFTER decode (needs
+	# real Vector3/Vector2 to multiply, not JSON arrays) and BEFORE
+	# validate (so a scaled map still has to satisfy the same "min"
+	# bounds etc. everything else does - Chunk 13 makes those bounds
+	# themselves scale-relative). map_half_extents on disk never changes;
+	# this is the one place the multiplier actually touches map data.
+	decoded = _apply_world_scale(decoded)
 	var errors = validate_map_def(decoded)
 	if not errors.is_empty():
 		_fail_load(path, "failed schema validation:\n  %s" % "\n  ".join(errors))
@@ -246,6 +254,18 @@ const FAIRNESS_MAX_DISTANCE_COEFFICIENT_OF_VARIATION: float = 0.35
 # (~6.25, heavy_manufactory) plus up to one GRID_CELL (4.0) of navmesh
 # quantization slop. Harmless before C1 too (no building yet = the real
 # distance is ~0 regardless of how generous this margin is).
+#
+# CORE_DESIGN_LANGUAGE.md §3.2: this is the world_scale=1.0 BASELINE value -
+# lint_spawn_fairness() multiplies it by the map's resolved world_scale
+# before using it. The navmesh-quantization half of this margin genuinely
+# grows at a larger world scale (terrain_builder.gd's GRID_CELL/cell_size
+# both scale with it - see Chunk 14), so a fixed 12.0 would eventually read
+# as "spawns unreachable" purely from grid slop, not a real fairness
+# problem. The building-diagonal half does NOT grow (buildings are
+# unit-space, fixed per world_scale.gd's whole design) - scaling the WHOLE
+# margin is deliberately generous rather than precisely decomposing the
+# two halves, since an overly permissive reachability check only risks
+# missing a genuine problem, never manufacturing a false one.
 const FAIRNESS_HQ_REACHABLE_MARGIN: float = 12.0
 
 static func lint_spawn_fairness(map_def: Dictionary, ground_nav_map: RID) -> Array:
@@ -259,6 +279,7 @@ static func lint_spawn_fairness(map_def: Dictionary, ground_nav_map: RID) -> Arr
 	var half: float = map_def.get("map_half_extents", 80.0)
 	var resource_radius: float = half * FAIRNESS_RESOURCE_RADIUS_FRACTION
 	var resources: Array = map_def.get("resource_nodes", [])
+	var reachable_margin: float = FAIRNESS_HQ_REACHABLE_MARGIN * WorldScaleScript.for_map(map_def)
 
 	var distances: Array = []
 	for i in range(spawns.size()):
@@ -276,7 +297,7 @@ static func lint_spawn_fairness(map_def: Dictionary, ground_nav_map: RID) -> Arr
 		for j in range(i + 1, spawns.size()):
 			var b = spawns[j]
 			var path = NavigationServer3D.map_get_path(ground_nav_map, a.hq, b.hq, true)
-			if path.size() < 2 or path[path.size() - 1].distance_to(b.hq) > FAIRNESS_HQ_REACHABLE_MARGIN:
+			if path.size() < 2 or path[path.size() - 1].distance_to(b.hq) > reachable_margin:
 				errors.append("Spawns '%s' and '%s' are not mutually reachable on the ground navmesh" % [a.id, b.id])
 			distances.append(a.hq.distance_to(b.hq))
 
@@ -309,57 +330,81 @@ static func lint_spawn_fairness(map_def: Dictionary, ground_nav_map: RID) -> Arr
 # (Array) or directly (Dictionary) - same recursive shape used all the way
 # down, so obstacles/surface_zones/etc. get free per-subkey + unknown-key
 # checking without a bespoke validator each.
+# CORE_DESIGN_LANGUAGE.md §3.2 / world_scale.gd: every leaf field below that
+# represents a real-world-space position, extent, radius or length carries
+# a "scale": true flag. Nothing reads it yet - Chunk 12 walks FIELD_SPEC
+# off this flag to multiply every flagged value by the map's resolved
+# world_scale at load time, so authored map JSON on disk never has to
+# change and the flag list is the single place that decides what counts as
+# "spatial" vs. gameplay data (resource_nodes.amount, obstacles.type,
+# surface_zones.surface_type, spawns.id, schema_version, etc. are
+# deliberately UNFLAGGED - they're either not spatial at all or (amount)
+# a balance number the map-scale multiplier has no business touching).
 const FIELD_SPEC: Dictionary = {
 	"name": {"type": "string", "required": true},
 	"description": {"type": "string", "required": true},
-	"map_half_extents": {"type": "number", "required": true, "min": 1.0},
+	"map_half_extents": {"type": "number", "required": true, "min": 1.0, "scale": true},
 	"ground_color": {"type": "color", "required": true},
 	"water_blobs": {"type": "array", "required": false, "item": {
-		"center": {"type": "vector3", "required": true},
-		"radius": {"type": "number", "required": true, "min": 0.01},
+		"center": {"type": "vector3", "required": true, "scale": true},
+		"radius": {"type": "number", "required": true, "min": 0.01, "scale": true},
 		"irregularity": {"type": "number", "required": false},
-		"depth": {"type": "number", "required": false},
-		"shore_blend": {"type": "number", "required": false},
+		"depth": {"type": "number", "required": false, "scale": true},
+		"shore_blend": {"type": "number", "required": false, "scale": true},
 	}},
 	"water_areas": {"type": "array", "required": false, "item": {
-		"center": {"type": "vector3", "required": true},
-		"half_extents": {"type": "vector2", "required": true},
+		"center": {"type": "vector3", "required": true, "scale": true},
+		"half_extents": {"type": "vector2", "required": true, "scale": true},
 	}},
 	"shallow_water_areas": {"type": "array", "required": false, "item": {
-		"center": {"type": "vector3", "required": true},
-		"half_extents": {"type": "vector2", "required": true},
+		"center": {"type": "vector3", "required": true, "scale": true},
+		"half_extents": {"type": "vector2", "required": true, "scale": true},
 	}},
 	"obstacles": {"type": "array", "required": false, "item": {
-		"center": {"type": "vector3", "required": true},
-		"half_extents": {"type": "vector2", "required": true},
+		"center": {"type": "vector3", "required": true, "scale": true},
+		"half_extents": {"type": "vector2", "required": true, "scale": true},
 		"type": {"type": "string", "required": false, "enum": ["rock", "building"]},
-		"building_height": {"type": "number", "required": false, "min": 0.01},
+		"building_height": {"type": "number", "required": false, "min": 0.01, "scale": true},
 	}},
 	"surface_zones": {"type": "array", "required": false, "item": {
-		"center": {"type": "vector3", "required": true},
-		"half_extents": {"type": "vector2", "required": true},
+		"center": {"type": "vector3", "required": true, "scale": true},
+		"half_extents": {"type": "vector2", "required": true, "scale": true},
 		"surface_type": {"type": "string", "required": true, "enum": ["marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice"]},
 	}},
 	"bridges": {"type": "array", "required": false, "item": {
-		"center": {"type": "vector3", "required": true},
-		"half_extents": {"type": "vector2", "required": true},
-		"deck_height": {"type": "number", "required": false},
+		"center": {"type": "vector3", "required": true, "scale": true},
+		"half_extents": {"type": "vector2", "required": true, "scale": true},
+		"deck_height": {"type": "number", "required": false, "scale": true},
 	}},
 	"resource_nodes": {"type": "array", "required": false, "item": {
-		"position": {"type": "vector3", "required": true},
+		"position": {"type": "vector3", "required": true, "scale": true},
 		# "metal" is the historical id for ore and every bundled map still uses
 		# it; ResourceCatalog treats it as an alias rather than a rename, so both
 		# spellings validate and mean the same field.
 		"type": {"type": "string", "required": true,
 			"enum": ["metal", "ore", "crystal", "lumber", "oil"]},
+		# Deliberately unflagged: a resource node's yield is a balance
+		# number, not a distance. Node amount/density re-tuning at a new
+		# world scale is scoped to the separate resource-system rework,
+		# not this pass - see CORE_DESIGN_LANGUAGE.md §3.2.
 		"amount": {"type": "number", "required": true, "min": 1},
 	}},
 	# B3: was player_start/enemy_start (2 fixed dict fields); now a
 	# spawns array with an id per entry. "player"/"enemy" are the ids
 	# every bundled map uses today (see get_spawn()).
+	# CORE_DESIGN_LANGUAGE.md §3.2: only "hq" is flagged here. A player's
+	# base is unit-scale (buildings don't scale, same as units), not
+	# environment-scale - factory/refinery/harvester are deliberately
+	# UNFLAGGED and instead handled by _apply_world_scale()'s dedicated
+	# spawn-compaction step, which scales "hq" as the base's anchor point
+	# (so the whole base still lands in the right place on the bigger map)
+	# but keeps the other three buildings at their ORIGINAL offset from
+	# it - a compact base on a big map, not a base stretched 4x wider than
+	# the units garrisoning it. See CHUNK11_NON_SPATIAL_VECTOR_FIELDS in
+	# the test suite for why this isn't a "missing flag" bug.
 	"spawns": {"type": "array", "required": true, "item": {
 		"id": {"type": "string", "required": true},
-		"hq": {"type": "vector3", "required": true},
+		"hq": {"type": "vector3", "required": true, "scale": true},
 		"factory": {"type": "vector3", "required": true},
 		"refinery": {"type": "vector3", "required": true},
 		"harvester": {"type": "vector3", "required": true},
@@ -379,10 +424,15 @@ const FIELD_SPEC: Dictionary = {
 	# single-shape-per-field engine doesn't model; build_terrain.py itself
 	# raises a clear error on an unknown type or missing param. Worth
 	# revisiting if/when B6 migrates real maps onto this.
+	# height_scale is flagged: it converts the heightmap's normalized 0..1
+	# sample into a real world-space Y, so it's exactly as spatial as any
+	# other length here - Chunk 14 note: whether it should ALSO independently
+	# track world_scale or be left to author intent is a heightmap-specific
+	# call, not decided by this flag alone.
 	"terrain": {"type": "dictionary", "required": false, "item": {
 		"heightmap": {"type": "string", "required": false},
 		"surfacemap": {"type": "string", "required": false},
-		"height_scale": {"type": "number", "required": false, "min": 0.01},
+		"height_scale": {"type": "number", "required": false, "min": 0.01, "scale": true},
 		"features": {"type": "array", "required": false},
 	}},
 }
@@ -475,6 +525,92 @@ static func _validate_value(value, field_spec: Dictionary, full_key: String, err
 				_validate_dict(value, field_spec["item"], full_key + ".", errors)
 		_:
 			errors.append("Internal: unknown field-spec type '%s' for '%s'" % [t, full_key])
+
+# CORE_DESIGN_LANGUAGE.md §3.2: multiplies every FIELD_SPEC-flagged
+# ("scale": true, see Chunk 11) value in an already-DECODED map_def by the
+# map's resolved world_scale - the generic mechanism behind "environment
+# scales, units don't." Same recursive walk shape as _validate_dict/
+# _decode_dict on purpose, driven by the identical FIELD_SPEC so there is
+# still only one schema description.
+#
+# Deliberately a hard no-op at scale == 1.0 (today's default for every
+# bundled map) rather than "multiply by 1.0 and trust it comes out the
+# same" - multiplying an int field by a float scale would silently widen
+# it to a float even at 1.0, which test_b3_maps_are_json_and_byte_
+# identical_to_the_old_const and this chunk's own inertness test both
+# depend on NOT happening.
+static func _apply_world_scale(map_def: Dictionary) -> Dictionary:
+	var scale: float = WorldScaleScript.for_map(map_def)
+	if scale == 1.0:
+		return map_def
+	var result = _scale_dict(map_def, FIELD_SPEC, scale)
+	if result.has("spawns"):
+		result["spawns"] = _compact_spawns(map_def.get("spawns", []), result["spawns"])
+	return result
+
+# Keeps a base's internal layout compact even as the map around it grows -
+# see FIELD_SPEC's "spawns" comment for why (buildings are unit-scale, not
+# environment-scale). "hq" was already scaled by the generic walk above (it
+# anchors the base to its correct position on the bigger map); factory/
+# refinery/harvester are unflagged there, so they're still at their RAW
+# world-space position here - this repositions each one at its ORIGINAL
+# offset from hq, now measured from the hq's NEW scaled position, instead
+# of at its own independently-scaled (and now much farther-flung) spot.
+static func _compact_spawns(raw_spawns: Array, scaled_spawns: Array) -> Array:
+	var out: Array = []
+	for i in range(scaled_spawns.size()):
+		var scaled = scaled_spawns[i]
+		if i >= raw_spawns.size() or typeof(scaled) != TYPE_DICTIONARY:
+			out.append(scaled)
+			continue
+		var raw = raw_spawns[i]
+		var compacted: Dictionary = scaled.duplicate(true)
+		var raw_hq = raw.get("hq")
+		var scaled_hq = scaled.get("hq")
+		if typeof(raw_hq) == TYPE_VECTOR3 and typeof(scaled_hq) == TYPE_VECTOR3:
+			for key in ["factory", "refinery", "harvester"]:
+				if typeof(raw.get(key)) == TYPE_VECTOR3:
+					compacted[key] = scaled_hq + (raw[key] - raw_hq)
+		out.append(compacted)
+	return out
+
+static func _scale_dict(d: Dictionary, spec: Dictionary, scale: float) -> Dictionary:
+	var result: Dictionary = d.duplicate(true)
+	for key in spec.keys():
+		if not result.has(key):
+			continue
+		result[key] = _scale_value(result[key], spec[key], scale)
+	return result
+
+static func _scale_value(value, field_spec: Dictionary, scale: float):
+	var t: String = field_spec.get("type", "")
+	if field_spec.get("scale", false):
+		match t:
+			"number":
+				if typeof(value) == TYPE_INT or typeof(value) == TYPE_FLOAT:
+					return value * scale
+			"vector3":
+				if typeof(value) == TYPE_VECTOR3:
+					return (value as Vector3) * scale
+			"vector2":
+				if typeof(value) == TYPE_VECTOR2:
+					return (value as Vector2) * scale
+	# Not itself a scaled leaf - still need to recurse into arrays/
+	# dictionaries in case a NESTED field is flagged (e.g. spawns[].hq).
+	match t:
+		"array":
+			if typeof(value) == TYPE_ARRAY and field_spec.has("item"):
+				var out: Array = []
+				for elem in value:
+					if typeof(elem) == TYPE_DICTIONARY:
+						out.append(_scale_dict(elem, field_spec["item"], scale))
+					else:
+						out.append(elem)
+				return out
+		"dictionary":
+			if typeof(value) == TYPE_DICTIONARY and field_spec.has("item"):
+				return _scale_dict(value, field_spec["item"], scale)
+	return value
 
 # RTS_CORE_ROADMAP.md B3: turns raw JSON (arrays of numbers) back into real
 # Godot types, driven by the exact same FIELD_SPEC the validator walks -

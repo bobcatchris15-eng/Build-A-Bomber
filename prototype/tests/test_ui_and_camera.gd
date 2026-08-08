@@ -194,6 +194,38 @@ func test_rts_camera_dof_band_widens_monotonically_with_height() -> bool:
 	print("  [PASS] The DOF band widens monotonically with height, matches the reference band width at the zoom-in end, and is well-defined for a degenerate range.")
 	return true
 
+func test_rts_camera_world_scale_property_defaults_inert() -> bool:
+	print("Running Test Suite: RTS Camera - world_scale Property Defaults To 1.0 (Chunk 18)...")
+	# NOT a test of the actual pan-speed/middle-drag FEEL at a non-default
+	# world_scale - both live inside _process()'s Input.is_key_pressed() poll
+	# and _unhandled_input()'s Input.is_mouse_button_pressed() check, and
+	# this codebase's own steering.gd header documents why headless Godot
+	# cannot simulate held key/mouse-button state (confirmed empirically
+	# 2026-07-12). What IS headlessly verifiable: the property exists,
+	# defaults to the inert 1.0 (so a camera nothing ever sets it on - an
+	# older scene, a test stub - behaves exactly as before this chunk), and
+	# is real per-instance state rather than a shared/static value. Felt
+	# pan/middle-drag speed at a real world_scale is a play-test, per this
+	# plan's own verification note.
+	var cam = Camera3D.new()
+	cam.set_script(preload("res://scripts/rts_camera.gd"))
+	if not is_equal_approx(cam.world_scale, 1.0):
+		print("  [FAIL] world_scale should default to 1.0, got ", cam.world_scale)
+		return false
+	cam.world_scale = 4.0
+	if not is_equal_approx(cam.world_scale, 4.0):
+		print("  [FAIL] world_scale should be a plain settable field, got ", cam.world_scale, " after assigning 4.0")
+		return false
+	var cam2 = Camera3D.new()
+	cam2.set_script(preload("res://scripts/rts_camera.gd"))
+	if not is_equal_approx(cam2.world_scale, 1.0):
+		print("  [FAIL] world_scale should be PER-INSTANCE, not shared - a second camera should still default to 1.0 after the first was set to 4.0, got ", cam2.world_scale)
+		return false
+	cam.free()
+	cam2.free()
+	print("  [PASS] rts_camera.gd carries a per-instance world_scale property defaulting to the inert 1.0.")
+	return true
+
 func test_ui_no_overflow_or_offscreen() -> bool:
 	print("Running Test Suite: UI Overflow + Off-Screen Audit (headless, no windowed rendering needed)...")
 	# Validated technique (see PROGRESS.md): compare each fixed-size panel's

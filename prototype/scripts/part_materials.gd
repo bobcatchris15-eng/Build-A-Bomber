@@ -114,6 +114,22 @@ const ROLES := {
 	# and non-metallic so the caller's emission reads as light coming FROM
 	# somewhere rather than paint that happens to be bright.
 	"fieldglass": {"metallic": 0.10, "roughness": 0.05, "tint": 0.45, "base": Color(0.05, 0.08, 0.11), "wear": 0.0},
+
+	# Carbon composite: moulded limb shells, wrapped spars. Non-metallic and
+	# dark like rubber, but SEMI-GLOSS rather than matte - that difference is
+	# the whole read. Routed through "rubber" it looked like a tyre, and
+	# through "gunmetal" like polished steel; a composite thigh is neither.
+	"composite": {"metallic": 0.0, "roughness": 0.38, "tint": 0.20, "base": Color(0.085, 0.085, 0.095), "wear": 0.25},
+
+	# Machinery-yellow plant paint. Deliberately near colour-IMMUNE (tint
+	# 0.15, like gunmetal) rather than a "painted" variant: hazard yellow is
+	# a safety convention, not a livery choice, so it should read the same on
+	# every faction. A faction-tinted hazard stripe is not a hazard stripe.
+	"hazard": {"metallic": 0.20, "roughness": 0.58, "tint": 0.15, "base": Color(0.72, 0.56, 0.09), "wear": 0.90},
+
+	# The same argument in red - warning panels, pinch-point markings, the
+	# painted parts of a limb you are meant to stay clear of.
+	"warning": {"metallic": 0.20, "roughness": 0.58, "tint": 0.15, "base": Color(0.55, 0.13, 0.11), "wear": 0.90},
 }
 
 const DEFAULT_ROLE := "steel"
@@ -196,6 +212,39 @@ static func role_for_part(part_name: String) -> String:
 	for hint in ROLE_HINTS:
 		if lower.contains(hint[0]):
 			return hint[1]
+	return DEFAULT_ROLE
+
+
+# Role for a material AUTHORED INTO a .glb, by its name in the source file.
+#
+# ROLE_HINTS above answers "what is this part made of" from the part's own
+# filename, which is all a single-material part needs. A multi-surface authored
+# asset carries the answer per surface instead: the six leg sets name their
+# materials Gunmetal / DarkSteel / BrightAlloy / CarbonBlack / IndustrialYellow
+# / WarningRed, and a leg is genuinely several substances at once - a composite
+# thigh on a steel gearbox with a painted warning panel.
+#
+# Mapping them onto roles rather than keeping the authored materials verbatim is
+# what keeps faction tint and the battle-side mesh merge working: every surface
+# still resolves to one of the shared, cached role materials.
+#
+# An unlisted name falls through to the part-name hint, then to DEFAULT_ROLE -
+# so a re-export that renames or adds a material degrades to plain steel instead
+# of failing to build the limb.
+const AUTHORED_MATERIAL_ROLES := {
+	"Gunmetal": "gunmetal",
+	"DarkSteel": "gunmetal",
+	"BrightAlloy": "steel",
+	"CarbonBlack": "composite",
+	"IndustrialYellow": "hazard",
+	"WarningRed": "warning",
+}
+
+static func role_for_authored_material(material_name: String, fallback_part: String = "") -> String:
+	if AUTHORED_MATERIAL_ROLES.has(material_name):
+		return AUTHORED_MATERIAL_ROLES[material_name]
+	if fallback_part != "":
+		return role_for_part(fallback_part)
 	return DEFAULT_ROLE
 
 # --- Shared procedural surface texture --------------------------------------

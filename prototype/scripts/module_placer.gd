@@ -16,6 +16,7 @@ const UITokens = preload("res://scripts/ui_tokens.gd")
 const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
+const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 
 @export var hull_path: NodePath
@@ -570,6 +571,11 @@ func _place_hull_from_ui(type_id: String):
 var default_locomotion_settings = {
 	"wheels": {"wheel_size": 1.0, "num_axles": 4, "wheels_per_axle": 1},
 	"tracked_treads": {"tread_width": 1.0},
+	# Legs had no entry here at all, so a freshly-dragged set arrived with an
+	# empty settings dict and every default had to be re-derived downstream.
+	# leg_type in particular has to be present from the first placement, because
+	# it decides whether the stations go under the hull or on its flank.
+	"legs": {"leg_length": 1.0, "leg_width": 1.0, "count": 4, "leg_type": "stryker"},
 	"hover_engine": {},
 	"helicopter_rotors": {"size": 1.0, "count": 4},
 	"fixed_wing_engine": {"size": 1.0, "count": 2},
@@ -670,6 +676,76 @@ static func _resize_collider_to_visual(module: Node3D) -> void:
 				shape_node.shape.size = bounds.size
 				shape_node.position = Vector3.ZERO
 		return
+
+## Slides each leg inboard until its origin lands on the hull's VISIBLE skin.
+##
+## Chris: the legs should "mount directly to the VISIBLE hull mesh" - no plate,
+## no standoff. That is a different surface from the one the layout works in.
+## LocomotionLayout positions every station against hull_size, which is the
+## COLLISION BOX; since the hull roster moved to the SDF/marching-cubes bake, a
+## hull is routinely narrower or more tapered than its declared box, so a station
+## on the box plane can hang in clear air beside the model it is supposed to be
+## bolted to.
+##
+## Raycast inward along the mount axis and take the first triangle: that is where
+## the hull actually is. A miss leaves the leg exactly where the layout put it,
+## which is the current behaviour and a safe answer for a hull with no visible
+## mesh (a bare test rig, a primitive-shape hull mid-load).
+##
+## HullProjection rather than a physics query on purpose - it is pure
+## Moller-Trumbore over Mesh.get_faces(), so it works headless and needs no
+## physics step to have run, which matters because this runs during
+## construction. Same reasoning hull_decals.gd documents for using it.
+func _seat_legs_on_hull_skin(legs: Array, hull_size: Vector3) -> void:
+	if legs.is_empty() or not is_instance_valid(hull):
+		return
+	var mesh_inst := hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
+	if mesh_inst == null or mesh_inst.mesh == null:
+		return
+	var surface: Dictionary = HullProjectionScript.build_surface(mesh_inst)
+	if surface.get("tris", PackedVector3Array()).size() < 3:
+		return
+
+	for leg in legs:
+		if not is_instance_valid(leg):
+			continue
+		var side: float = signf(leg.position.x)
+		if is_zero_approx(side):
+			continue
+
+		# SAMPLED UP THE FLANK, not fired once at the station's own height.
+		#
+		# A leg station sits on the belly line, and a hull with any curve at all
+		# is pinching in by the time it reaches its lowest point - so a single
+		# horizontal ray at exactly that y passes UNDER the geometry and misses.
+		# Measured: medium_hull and heavy_hull hit, scout_hull and
+		# flying_wing_hull missed at every station, which would have left the
+		# legs on those two floating at the bounding box exactly as before.
+		#
+		# Sampling a short ladder up into the body of the hull and keeping the
+		# OUTERMOST hit finds the widest point the leg can bolt to, which is what
+		# a real hardpoint would use.
+		var best_x: float = INF * side
+		for frac in [0.06, 0.18, 0.32, 0.50]:
+			# Start outside the widest point the hull could possibly reach, so the
+			# first triangle is the OUTER skin rather than a far wall hit from
+			# inside.
+			var from := Vector3(side * hull_size.x,
+				leg.position.y + hull_size.y * frac, leg.position.z)
+			var hit: Dictionary = HullProjectionScript.raycast(
+				surface, from, Vector3(-side, 0.0, 0.0))
+			if not hit.get("hit", false):
+				continue
+			var x: float = hit["position"].x
+			if absf(x) > absf(best_x) or is_inf(best_x):
+				best_x = x
+		if is_inf(best_x):
+			continue
+		# x only. The layout owns y (belly line or flank height) and z (the
+		# fore/aft spread), and both are load-bearing elsewhere - y feeds the
+		# ride-height solve and z keeps the legs evenly spaced along the hull.
+		leg.position.x = best_x
+
 
 func update_locomotion_geometry_tweak(type_id: String, tweak_key: String, value) -> void:
 	if not hull: return
@@ -849,6 +925,8 @@ func update_locomotion(type_id: String, settings: Dictionary):
 			_resize_collider_to_visual(part)
 		spawned_wheels.append(part)
 
+	if type_id == "legs":
+		_seat_legs_on_hull_skin(spawned_wheels, hull_size)
 
 	# WIDTH CLAMP. Locomotion is laid out from hull dimensions, but each type's
 	# own parts are authored at a fixed size, so on a small hull an assembly can
@@ -2544,11 +2622,21 @@ func _setup_instructions_ui() -> void:
 	btn.pressed.connect(func(): show_instructions_dialog(true))
 	ui_layer.add_child(btn)
 
+# On a first visit the player is now OFFERED THE TUTORIAL rather than shown the
+# manual. The manual is not gone - _setup_instructions_ui() still builds its
+# button, and it works better as a reference you reach for than as a wall of text
+# that greets you before you have seen the thing it describes.
+#
+# TutorialManager owns the "have they been offered this" flag, so there is one
+# first-run gate rather than two that can disagree. It no-ops when a run is
+# already active, which is the case when the player arrived here by pressing
+# TUTORIAL on the main menu.
 func _check_first_time_instructions() -> void:
 	_setup_instructions_ui()
-	var seen_path = "user://lab_instructions_seen.cfg"
-	if not FileAccess.file_exists(seen_path):
-		show_instructions_dialog(false)
+	var tutorial = get_node_or_null("/root/TutorialManager")
+	if tutorial == null:
+		return
+	tutorial.offer_first_run()
 
 func show_instructions_dialog(is_manual_reopen: bool = false) -> void:
 	if is_instance_valid(instructions_canvas_layer):

@@ -906,7 +906,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	#     pontoon_wheels, hover_engine - gets hull_height/2 and no ride height
 	#     at all, so its running gear starts at or below the ground plane.
 	#  2. Its two constants read settings["size"], but wheels store
-	#     "wheel_size" and legs store "knee_height" - "size" is never present,
+	#     "wheel_size" and legs store "leg_length" - "size" is never present,
 	#     so both silently fall back to 1.0 and the lift ignores the tweak it
 	#     is supposed to track.
 	#  3. Even at its best it is a hand-tuned guess. module_placer.gd stopped

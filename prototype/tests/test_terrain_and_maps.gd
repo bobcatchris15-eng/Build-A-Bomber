@@ -81,6 +81,11 @@ func test_b6_heightmap_plateau_approachable_from_any_side() -> bool:
 	json.parse(file.get_as_text())
 	file.close()
 	var map_def: Dictionary = json.get_data()
+	# Read raw from disk, bypassing MapCatalog's _apply_world_scale - see
+	# test_b4_heightmap_terrain_pure_functions' identical comment for why
+	# this fixture needs an explicit world_scale=1.0 now that Chunk 19
+	# moved the global default off 1.0.
+	map_def["world_scale"] = 1.0
 
 	var nav = TerrainBuilderScript.build_navmeshes(map_def)
 	await _await_nav_map(nav.ground_map)
@@ -832,7 +837,37 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 		],
 	}
 
-	var loaded = MapCatalogScript.get_map("lake_crossing")
+	var WorldScaleScript = preload("res://scripts/world_scale.gd")
+	# Chunk 19: get_map() now returns values multiplied by the map's
+	# resolved world_scale (DEFAULT_WORLD_SCALE=4.0, and lake_crossing
+	# declares no override). This test's whole purpose is checking raw JSON
+	# transcription against historical values, which is orthogonal to that
+	# multiplier - so it's reversed here via the SAME FIELD_SPEC-driven walk
+	# _apply_world_scale() itself uses, just with the reciprocal factor,
+	# rather than hand-converting every expected coordinate to a 4x world.
+	var scaled = MapCatalogScript.get_map("lake_crossing")
+	var loaded = MapCatalogScript._scale_dict(scaled, MapCatalogScript.FIELD_SPEC, 1.0 / WorldScaleScript.for_map(scaled))
+
+	# spawns[].factory/refinery/harvester are NOT a simple multiplication
+	# (the building-spacing fix after Chunk 19's playtest made them
+	# hq-relative-offset-preserving instead - see FIELD_SPEC's own comment
+	# on "spawns"), so the generic per-leaf reversal above leaves them as
+	# their SCALED/compacted values, not the raw ones. Reversed by hand
+	# here using the same relationship _compact_spawns() applied forward:
+	# compacted = scaled_hq + (raw - raw_hq), so raw = reversed_hq +
+	# (compacted - scaled_hq). loaded.spawns[].hq is already the correctly-
+	# reversed raw_hq from the generic walk above; scaled.spawns[] still
+	# holds the original compacted values to diff against.
+	var reversed_spawns: Array = []
+	for i in range(loaded.get("spawns", []).size()):
+		var spawn: Dictionary = loaded.spawns[i].duplicate(true)
+		var scaled_spawn: Dictionary = scaled.spawns[i]
+		var reversed_hq: Vector3 = spawn.hq
+		var scaled_hq: Vector3 = scaled_spawn.hq
+		for key in ["factory", "refinery", "harvester"]:
+			spawn[key] = reversed_hq + ((scaled_spawn[key] as Vector3) - scaled_hq)
+		reversed_spawns.append(spawn)
+	loaded["spawns"] = reversed_spawns
 
 	# EVERY FIELD EXCEPT resource_nodes IS STILL A STRICT DEEP-EQUAL. That is what
 	# this test is for: proving the const -> JSON migration did not corrupt a
@@ -941,6 +976,14 @@ func test_b4_heightmap_terrain_pure_functions() -> bool:
 	# features' falloff zones overlap and stack) was generated via:
 	#   python tools/terrain/build_terrain.py data/test_fixtures/terrain/test_terrain.json
 	var map_def: Dictionary = json.get_data()
+	# This fixture is read raw from disk, bypassing MapCatalog's decode/
+	# _apply_world_scale entirely - so it carries no "world_scale" key, and
+	# since Chunk 19 moved DEFAULT_WORLD_SCALE off 1.0, height_at()'s
+	# WorldScaleScript.for_map(map_def) would otherwise silently treat this
+	# genuinely-1x fixture as 4x, dividing its coordinates by 4 before
+	# sampling the heightmap PNG. Explicit key keeps this fixture's
+	# hand-authored feature coordinates meaning what they say.
+	map_def["world_scale"] = 1.0
 
 	# A known ravine (center [10,-35], width 4, depth 8) samples lower at
 	# its center than at its rim (just past the half-width, still inside
@@ -1021,6 +1064,11 @@ func test_b5_heightmap_navmesh_rejects_steep_slope() -> bool:
 	json.parse(file.get_as_text())
 	file.close()
 	var map_def: Dictionary = json.get_data()
+	# Read raw from disk, bypassing MapCatalog's _apply_world_scale - see
+	# test_b4_heightmap_terrain_pure_functions' identical comment for why
+	# this fixture needs an explicit world_scale=1.0 now that Chunk 19
+	# moved the global default off 1.0.
+	map_def["world_scale"] = 1.0
 
 	var maps = TerrainBuilderScript.build_navmeshes(map_def)
 	await _await_nav_map(maps.ground_map)
@@ -1069,10 +1117,13 @@ func test_world_scale_default_and_per_map_override() -> bool:
 		return false
 
 	# A map that DOES declare world_scale overrides the default - the
-	# per-map escape hatch for outlier maps (scattered_peaks etc).
-	var overridden_map := {"name": "Huge Map", "world_scale": 4.0}
-	if WorldScaleScript.for_map(overridden_map) != 4.0:
-		print("  [FAIL] A map_def with world_scale=4.0 should override the default, got ", WorldScaleScript.for_map(overridden_map))
+	# per-map escape hatch for outlier maps (scattered_peaks etc). Uses a
+	# value distinct from DEFAULT_WORLD_SCALE (4.0 as of Chunk 19) so the
+	# override-vs-default distinction stays meaningful regardless of what
+	# the default itself currently is.
+	var overridden_map := {"name": "Huge Map", "world_scale": 8.0}
+	if WorldScaleScript.for_map(overridden_map) != 8.0:
+		print("  [FAIL] A map_def with world_scale=8.0 should override the default, got ", WorldScaleScript.for_map(overridden_map))
 		return false
 
 	# A malformed override (wrong type, zero, negative) must not poison
@@ -1092,27 +1143,29 @@ func test_world_scale_default_and_per_map_override() -> bool:
 		return false
 
 	# The scaled_* helpers multiply by the resolved factor.
-	if WorldScaleScript.scaled_f(6.0, overridden_map) != 24.0:
-		print("  [FAIL] scaled_f(6.0) at world_scale=4.0 should be 24.0, got ", WorldScaleScript.scaled_f(6.0, overridden_map))
+	if WorldScaleScript.scaled_f(6.0, overridden_map) != 48.0:
+		print("  [FAIL] scaled_f(6.0) at world_scale=8.0 should be 48.0, got ", WorldScaleScript.scaled_f(6.0, overridden_map))
 		return false
-	if WorldScaleScript.scaled_v2(Vector2(1.0, 2.0), overridden_map) != Vector2(4.0, 8.0):
+	if WorldScaleScript.scaled_v2(Vector2(1.0, 2.0), overridden_map) != Vector2(8.0, 16.0):
 		print("  [FAIL] scaled_v2 did not scale both axes by the resolved factor.")
 		return false
-	if WorldScaleScript.scaled_v3(Vector3(1.0, 2.0, 3.0), overridden_map) != Vector3(4.0, 8.0, 12.0):
+	if WorldScaleScript.scaled_v3(Vector3(1.0, 2.0, 3.0), overridden_map) != Vector3(8.0, 16.0, 24.0):
 		print("  [FAIL] scaled_v3 did not scale all three axes by the resolved factor.")
 		return false
 
-	# At the (current, deliberately inert) default of 1.0, every helper is
-	# a no-op - the load-bearing property every OTHER chunk relies on
-	# before its own "turn it on" commit lands.
-	if WorldScaleScript.DEFAULT_WORLD_SCALE != 1.0:
-		print("  [FAIL] DEFAULT_WORLD_SCALE must still be 1.0 - flipping it is a separate, named chunk, not a side effect of this one.")
+	# Chunk 19: DEFAULT_WORLD_SCALE flipped from the Phase-1 inert 1.0 to
+	# 4.0, the Phase-2 proving-ground value (16.0, the real target, is
+	# Chunk 25). Pinned here rather than left as an assumption, since every
+	# real bundled map (none declare an explicit world_scale override)
+	# depends on this being the actual current default.
+	if WorldScaleScript.DEFAULT_WORLD_SCALE != 4.0:
+		print("  [FAIL] DEFAULT_WORLD_SCALE should be 4.0 (Chunk 19's proving-ground value), got ", WorldScaleScript.DEFAULT_WORLD_SCALE)
 		return false
-	if WorldScaleScript.scaled_f(6.0, null) != 6.0:
-		print("  [FAIL] scaled_f with no map context should be a no-op at the current default.")
+	if WorldScaleScript.scaled_f(6.0, null) != 24.0:
+		print("  [FAIL] scaled_f with no map context should apply the current default (4.0), got ", WorldScaleScript.scaled_f(6.0, null))
 		return false
 
-	print("  [PASS] WorldScale defaults to 1.0, honours a valid per-map override, rejects malformed overrides, and its scaled_* helpers multiply correctly.")
+	print("  [PASS] WorldScale defaults to 4.0 (Chunk 19), honours a valid per-map override, rejects malformed overrides, and its scaled_* helpers multiply correctly.")
 	return true
 
 # Deterministic per-zone RNG (_seeded_rng() hashes zone.center) means two
@@ -1259,8 +1312,10 @@ func test_spawn_visuals_threads_world_scale_into_every_greeble_call() -> bool:
 	print("Running Test Suite: TerrainBuilder.spawn_visuals() - Resolved World Scale Reaches Every Greeble Call Site (Chunk 7)...")
 	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
 
-	# Two otherwise-identical maps, one at the (current, inert) default and
-	# one that opts into a 2.0 world_scale via map_catalog.gd's Chunk-1
+	# Two otherwise-identical maps, one EXPLICITLY at world_scale=1.0 (Chunk
+	# 19 moved the global default off 1.0, so "no key" no longer means
+	# "1.0" - an explicit key is required to keep testing a genuine
+	# baseline) and one that opts into 2.0 via map_catalog.gd's Chunk-1
 	# per-map override key. surface_zones' "rocky" boulder pass is the
 	# subject - same reasoning as the direct TerrainGreebles tests above,
 	# it's a real BoxMesh, and this only needs to prove the multiplier
@@ -1268,6 +1323,7 @@ func test_spawn_visuals_threads_world_scale_into_every_greeble_call() -> bool:
 	# already covered directly against TerrainGreebles itself).
 	var base_map = {
 		"map_half_extents": 80.0,
+		"world_scale": 1.0,
 		"surface_zones": [
 			{"center": Vector3(0, 0, 0), "half_extents": Vector2(15, 15), "surface_type": "rocky"},
 		],
@@ -1377,7 +1433,11 @@ func test_ground_noise_stretches_with_world_scale_not_just_amplifies() -> bool:
 	# No hills/water_blobs/heightmap - isolates height_at() to the pure
 	# noise term (GROUND_NOISE_AMPLITUDE * noise(freq * xz)), so the
 	# relationship below is exact rather than muddied by other contributors.
-	var map_base = {"name": "chunk9_noise_test", "map_half_extents": 200.0}
+	# map_base is EXPLICITLY world_scale=1.0 - Chunk 19 moved the global
+	# default off 1.0, so omitting the key here would no longer test the
+	# actual 1.0 baseline the "scale * height_at(base, xz/scale)" relation
+	# below assumes.
+	var map_base = {"name": "chunk9_noise_test", "map_half_extents": 200.0, "world_scale": 1.0}
 	var map_scaled = {"name": "chunk9_noise_test", "map_half_extents": 200.0, "world_scale": 3.0}
 
 	# height_at(scaled_map, x, z) should equal
@@ -1439,5 +1499,248 @@ func test_terrain_tile_density_scales_with_world_scale() -> bool:
 		return false
 
 	print("  [PASS] tile_scale=1.0 is inert (matches the no-argument default), and tile_scale=2.0 halves texture repeat density as expected.")
+	return true
+
+# Explicit exceptions to "every vector3/vector2 field must carry scale:true".
+# spawns[].factory/refinery/harvester are deliberately unflagged as of the
+# building-spacing fix that followed Chunk 19's playtest: a base is unit-
+# scale, not environment-scale, so _apply_world_scale()'s dedicated
+# _compact_spawns() step repositions them at their ORIGINAL offset from the
+# (still-scaled) hq anchor instead of scaling each one independently - see
+# FIELD_SPEC's own comment on "spawns". Exists so a genuinely non-spatial
+# vector field has somewhere to be named ON PURPOSE rather than the test
+# below just being weakened to pass.
+const CHUNK11_NON_SPATIAL_VECTOR_FIELDS: Array = [
+	"spawns.factory", "spawns.refinery", "spawns.harvester",
+]
+
+func _walk_field_spec_for_unflagged_vectors(spec: Dictionary, path: String, violations: Array) -> void:
+	for key in spec.keys():
+		var leaf: Dictionary = spec[key]
+		var full_path = path + key
+		var t: String = leaf.get("type", "")
+		if (t == "vector3" or t == "vector2") and not leaf.get("scale", false):
+			if not (full_path in CHUNK11_NON_SPATIAL_VECTOR_FIELDS):
+				violations.append(full_path)
+		if leaf.has("item"):
+			_walk_field_spec_for_unflagged_vectors(leaf["item"], full_path + ".", violations)
+
+func test_every_spatial_field_in_field_spec_is_flagged_for_scaling() -> bool:
+	print("Running Test Suite: map_catalog.FIELD_SPEC - Every vector3/vector2 Field Carries scale:true Or Is An Explicit Exception (Chunk 11)...")
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+
+	var violations: Array = []
+	_walk_field_spec_for_unflagged_vectors(MapCatalogScript.FIELD_SPEC, "", violations)
+	if not violations.is_empty():
+		print("  [FAIL] These vector3/vector2 fields have no scale:true flag and aren't in CHUNK11_NON_SPATIAL_VECTOR_FIELDS - either flag them or name them as a deliberate exception: ", violations)
+		return false
+
+	# Direct spot-check that the flag itself is actually readable off a few
+	# known fields, not just "the walker found nothing wrong" (which would
+	# also be true of a walker with a bug that visits nothing).
+	if not MapCatalogScript.FIELD_SPEC["map_half_extents"].get("scale", false):
+		print("  [FAIL] map_half_extents should carry scale:true.")
+		return false
+	if not MapCatalogScript.FIELD_SPEC["spawns"]["item"]["hq"].get("scale", false):
+		print("  [FAIL] spawns[].hq should carry scale:true.")
+		return false
+	if MapCatalogScript.FIELD_SPEC["resource_nodes"]["item"]["amount"].get("scale", false):
+		print("  [FAIL] resource_nodes[].amount is a balance number, not a distance - it should NOT carry scale:true.")
+		return false
+
+	print("  [PASS] Every vector3/vector2 field in FIELD_SPEC is flagged for scaling (or named as a deliberate exception), and non-spatial fields like resource amount stay unflagged.")
+	return true
+
+func test_apply_world_scale_is_inert_at_1_and_scales_flagged_fields_at_2() -> bool:
+	print("Running Test Suite: map_catalog._apply_world_scale() - Hard No-Op At 1.0, Scales Flagged Fields Only At 2.0 (Chunk 12)...")
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+
+	# Explicit world_scale:1.0 - Chunk 19 moved DEFAULT_WORLD_SCALE off 1.0,
+	# so "no key" no longer means "world_scale=1.0" the way it did when this
+	# test was first written. An explicit 1.0 keeps testing the genuine
+	# no-op path regardless of what the global default currently is.
+	var map_def = {
+		"name": "chunk12_test",
+		"map_half_extents": 100.0,
+		"schema_version": 2.0,
+		"world_scale": 1.0,
+		"resource_nodes": [
+			{"position": Vector3(10, 0, -5), "type": "metal", "amount": 500},
+		],
+		"spawns": [
+			{"id": "player", "hq": Vector3(20, 0, 20), "factory": Vector3(25, 0, 20),
+				"refinery": Vector3(15, 0, 20), "harvester": Vector3(20, 0, 15)},
+		],
+	}
+
+	# At world_scale=1.0, this must be a hard no-op - not "multiplied by 1.0
+	# and happens to compare equal," but literally the SAME Dictionary
+	# instance returned unchanged, so no int->float widening or duplication
+	# can sneak in.
+	var same_ref = MapCatalogScript._apply_world_scale(map_def)
+	if not is_same(same_ref, map_def):
+		print("  [FAIL] At world_scale=1.0, _apply_world_scale() should return the SAME Dictionary instance, not a scaled/duplicated copy.")
+		return false
+
+	# A map with NO world_scale key at all now picks up the current global
+	# default (4.0 as of Chunk 19), not 1.0 - the behavior
+	# test_b3_maps_are_json_and_byte_identical_to_the_old_const's reversal
+	# trick (1.0 / WorldScale.for_map(...)) depends on.
+	var WorldScaleScript = preload("res://scripts/world_scale.gd")
+	var no_key_map = map_def.duplicate(true)
+	no_key_map.erase("world_scale")
+	var no_key_result = MapCatalogScript._apply_world_scale(no_key_map)
+	if is_same(no_key_result, no_key_map):
+		print("  [FAIL] A map with no world_scale key should pick up the non-1.0 global default, not take the no-op path.")
+		return false
+	if no_key_result.map_half_extents != 100.0 * WorldScaleScript.DEFAULT_WORLD_SCALE:
+		print("  [FAIL] A map with no world_scale key should scale by DEFAULT_WORLD_SCALE, expected ", 100.0 * WorldScaleScript.DEFAULT_WORLD_SCALE, ", got ", no_key_result.map_half_extents)
+		return false
+
+	# A map that opts into world_scale=2.0 gets every FLAGGED field doubled...
+	var scaled_map = map_def.duplicate(true)
+	scaled_map["world_scale"] = 2.0
+	var result = MapCatalogScript._apply_world_scale(scaled_map)
+
+	if result.map_half_extents != 200.0:
+		print("  [FAIL] map_half_extents should double at world_scale=2.0, got ", result.map_half_extents)
+		return false
+	if not (result.resource_nodes[0].position as Vector3).is_equal_approx(Vector3(20, 0, -10)):
+		print("  [FAIL] resource_nodes[].position should double, got ", result.resource_nodes[0].position)
+		return false
+	if not (result.spawns[0].hq as Vector3).is_equal_approx(Vector3(40, 0, 40)):
+		print("  [FAIL] spawns[].hq should double, got ", result.spawns[0].hq)
+		return false
+
+	# ...but factory/refinery/harvester are COMPACTED, not independently
+	# scaled: each keeps its ORIGINAL offset from hq (factory was +5 on x,
+	# refinery -5 on x, harvester -5 on z), now measured from hq's NEW
+	# doubled position - not doubled themselves. A base stays the same
+	# physical size regardless of world_scale.
+	if not (result.spawns[0].factory as Vector3).is_equal_approx(Vector3(45, 0, 40)):
+		print("  [FAIL] spawns[].factory should keep its original +5x offset from the scaled hq (45,0,40), not double to (50,0,40) - got ", result.spawns[0].factory)
+		return false
+	if not (result.spawns[0].refinery as Vector3).is_equal_approx(Vector3(35, 0, 40)):
+		print("  [FAIL] spawns[].refinery should keep its original -5x offset from the scaled hq (35,0,40), got ", result.spawns[0].refinery)
+		return false
+	if not (result.spawns[0].harvester as Vector3).is_equal_approx(Vector3(40, 0, 35)):
+		print("  [FAIL] spawns[].harvester should keep its original -5z offset from the scaled hq (40,0,35), got ", result.spawns[0].harvester)
+		return false
+
+	# ...and every UNFLAGGED field stays exactly as authored - the whole
+	# point of Chunk 11's flag list existing at all.
+	if result.resource_nodes[0].amount != 500:
+		print("  [FAIL] resource_nodes[].amount is a balance number, not a distance - it must NOT scale, got ", result.resource_nodes[0].amount)
+		return false
+	if result.schema_version != 2.0:
+		print("  [FAIL] schema_version must NOT scale, got ", result.schema_version)
+		return false
+	if result.name != "chunk12_test":
+		print("  [FAIL] name (a string field) must be untouched, got ", result.name)
+		return false
+
+	print("  [PASS] _apply_world_scale() is a true no-op at world_scale=1.0, picks up the non-1.0 global default when no key is present, and at 2.0 scales only FIELD_SPEC-flagged fields, leaving balance numbers and strings exactly as authored.")
+	return true
+
+func test_spawn_fairness_lint_passes_a_real_map_scaled_up_4x() -> bool:
+	print("Running Test Suite: Spawn Fairness Lint Clears A Real Map At world_scale=4.0 (Chunk 13)...")
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	MapCatalogScript.reset_cache_for_tests()
+	TerrainBuilderScript.reset_heightmap_cache_for_tests()
+
+	# open_plains at world_scale=1.0 already clears the lint (see the B10
+	# suite above) - the real question this test answers is whether it
+	# STILL clears once every position/extent has been quadrupled by
+	# Chunk 12's _apply_world_scale(). Without Chunk 13's fix,
+	# FAIRNESS_HQ_REACHABLE_MARGIN stays a fixed 12.0 world units while the
+	# navmesh's own quantization slop (terrain_builder.gd's GRID_CELL,
+	# which scales with world_scale) grows - eventually reading two
+	# perfectly fine spawns as "not mutually reachable" purely from grid
+	# slop, not a real fairness problem.
+	#
+	# get_map() now applies DEFAULT_WORLD_SCALE (4.0 as of Chunk 19)
+	# automatically, so it's reversed back to the raw 1x values first (same
+	# trick as test_b3_maps_are_json_and_byte_identical_to_the_old_const)
+	# before applying the explicit 4.0 this test actually wants to isolate -
+	# otherwise this would silently test 16x (4.0 default * 4.0 override)
+	# instead of the 4x its own name promises.
+	var WorldScaleScript = preload("res://scripts/world_scale.gd")
+	var default_scaled_map = MapCatalogScript.get_map("open_plains")
+	var base_map = MapCatalogScript._scale_dict(default_scaled_map, MapCatalogScript.FIELD_SPEC, 1.0 / WorldScaleScript.for_map(default_scaled_map))
+	var scaled_map = base_map.duplicate(true)
+	scaled_map["world_scale"] = 4.0
+	scaled_map = MapCatalogScript._apply_world_scale(scaled_map)
+
+	var nav = TerrainBuilderScript.build_navmeshes(scaled_map)
+	await _await_nav_map(nav.ground_map)
+	var errors = MapCatalogScript.lint_spawn_fairness(scaled_map, nav.ground_map)
+	NavigationServer3D.free_rid(nav.ground_region)
+	NavigationServer3D.free_rid(nav.amphibious_region)
+	NavigationServer3D.free_rid(nav.ground_map)
+	NavigationServer3D.free_rid(nav.water_map)
+	NavigationServer3D.free_rid(nav.amphibious_map)
+	NavigationServer3D.free_rid(nav.deep_water_map)
+
+	if not errors.is_empty():
+		print("  [FAIL] open_plains at world_scale=4.0 should still clear the fairness lint (scale-relative margin), got: ", errors)
+		return false
+
+	print("  [PASS] A real map scaled 4x still clears spawn fairness - the reachability margin grew with it instead of staying a fixed absolute value.")
+	return true
+
+func test_scattered_peaks_navmesh_bakes_cleanly_at_world_scale_4() -> bool:
+	print("Running Test Suite: scattered_peaks Navmesh Still Bakes Cleanly At world_scale=4.0 (Chunk 14)...")
+	# scattered_peaks (550 half-extent) is the map that ORIGINALLY segfaulted
+	# Recast at its native size (see test_b8 above) - the standing regression
+	# guard for that crash class. This is the same guard at 4x the size, to
+	# confirm _nav_grid_cell()/_nav_cell_size() are self-bounding (a pure
+	# function of map_half_extents, which now grows with world_scale) rather
+	# than needing their own re-tuned constants for a scaled-up map.
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	MapCatalogScript.reset_cache_for_tests()
+	TerrainBuilderScript.reset_heightmap_cache_for_tests()
+
+	# Same reversal as test_spawn_fairness_lint_passes_a_real_map_scaled_up_4x
+	# above: get_map() already applies DEFAULT_WORLD_SCALE (4.0), so it's
+	# undone first or this would test 16x instead of the 4x this test name
+	# promises.
+	var WorldScaleScript = preload("res://scripts/world_scale.gd")
+	var default_scaled_map = MapCatalogScript.get_map("scattered_peaks")
+	var base_map = MapCatalogScript._scale_dict(default_scaled_map, MapCatalogScript.FIELD_SPEC, 1.0 / WorldScaleScript.for_map(default_scaled_map))
+	var scaled_map = base_map.duplicate(true)
+	scaled_map["world_scale"] = 4.0
+	scaled_map = MapCatalogScript._apply_world_scale(scaled_map)
+
+	var scaled_half: float = scaled_map.get("map_half_extents", 0.0)
+	if absf(scaled_half - base_map.get("map_half_extents", 0.0) * 4.0) > 0.01:
+		print("  [FAIL] Test setup: expected map_half_extents to be exactly 4x the base map's, got ", scaled_half, " vs base ", base_map.get("map_half_extents", 0.0))
+		return false
+
+	# The actual bake - this is what would segfault without the self-
+	# bounding property _nav_cell_size()/_nav_grid_cell() document.
+	var nav = TerrainBuilderScript.build_navmeshes(scaled_map)
+	await _await_nav_map(nav.ground_map)
+
+	# Real path query, same reasoning as test_b8 above: a region-map
+	# association check alone can't prove the mesh was genuinely accepted
+	# (region_set_navigation_mesh() silently rejects a cell_size mismatch
+	# while leaving the association looking "valid").
+	var far = scaled_half * 0.87 # inside the map, well clear of the edge
+	var path = NavigationServer3D.map_get_path(nav.ground_map, Vector3(0, 0, far), Vector3(0, 0, -far), true)
+
+	NavigationServer3D.free_rid(nav.ground_region)
+	NavigationServer3D.free_rid(nav.amphibious_region)
+	NavigationServer3D.free_rid(nav.ground_map)
+	NavigationServer3D.free_rid(nav.water_map)
+	NavigationServer3D.free_rid(nav.amphibious_map)
+	NavigationServer3D.free_rid(nav.deep_water_map)
+
+	if path.size() < 2:
+		print("  [FAIL] scattered_peaks at world_scale=4.0 should still support a real long-distance path query, got ", path.size(), " points.")
+		return false
+
+	print("  [PASS] scattered_peaks bakes cleanly and supports real pathing at 4x its native size - the grid-cell formulas are self-bounding, not tuned to a fixed map size.")
 	return true
 

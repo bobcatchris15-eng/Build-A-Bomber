@@ -28,6 +28,18 @@ extends Camera3D
 # doesn't trigger from a build-bar click a few pixels off the bottom edge.
 @export var edge_scroll_margin: float = 18.0
 
+# CORE_DESIGN_LANGUAGE.md §3.2: NOT the DOF/zoom ceiling (max_height stays
+# fixed - the miniature illusion breaks past a certain altitude regardless
+# of how big the map is, an art constraint independent of world size). This
+# instead scales PAN SPEED and middle-drag, so traversing a map that's now
+# genuinely bigger under world_scale doesn't get proportionally slower via
+# keyboard/edge-scroll/middle-drag - long cross-map travel time is the
+# accepted design (CORE_DESIGN_LANGUAGE.md §3.2's own "accept long
+# traversal" call), but getting there shouldn't fight the input itself. Set
+# by whichever runtime loads the map (match_director.gd) - defaults to 1.0
+# so a camera with nothing setting it behaves exactly as before this chunk.
+var world_scale: float = 1.0
+
 var height: float = 26.0
 
 # CORE_DESIGN_LANGUAGE.md §2/§7.1: the battle camera previously had no DOF at
@@ -151,7 +163,7 @@ func _process(delta):
 		move += edge_dir
 
 	if move != Vector2.ZERO:
-		move = move.normalized() * pan_speed * delta * (height / 26.0)
+		move = move.normalized() * pan_speed * world_scale * delta * (height / 26.0)
 		global_position.x += move.x
 		global_position.z += move.y
 
@@ -211,6 +223,6 @@ func _unhandled_input(event):
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			zoom_to_cursor(height + zoom_speed, event.position)
 	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
-		var factor = height / 500.0
+		var factor = (height / 500.0) * world_scale
 		global_position.x -= event.relative.x * factor
 		global_position.z -= event.relative.y * factor
