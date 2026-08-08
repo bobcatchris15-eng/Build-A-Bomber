@@ -81,9 +81,15 @@ var ground_nav_map: RID
 var water_nav_map: RID
 var amphibious_nav_map: RID
 var deep_water_nav_map: RID
-var _ground_nav_region: RID
+# Chunk 21: one region PER NAVMESH TILE, not one region for the whole
+# ground/amphibious surface - see terrain_builder.gd's NAV_TILE_SIZE header
+# comment. water/deep_water stay single-region; neither is ever rebaked
+# mid-match (buildings don't carve water) and neither was the fidelity
+# problem tiling exists to fix.
+var _ground_nav_regions: Array = []
+var _amphibious_nav_regions: Array = []
+var _nav_tile_rects: Array = []
 var _water_nav_region: RID
-var _amphibious_nav_region: RID
 var _deep_water_nav_region: RID
 
 var selection: SelectionService = null
@@ -324,9 +330,12 @@ func _setup_terrain() -> void:
 	water_nav_map = nav.water_map
 	amphibious_nav_map = nav.amphibious_map
 	deep_water_nav_map = nav.deep_water_map
-	_ground_nav_region = nav.ground_region
+	# Chunk 21: one region per navmesh TILE now, not one region for the
+	# whole map - see terrain_builder.gd's NAV_TILE_SIZE header comment.
+	_ground_nav_regions = nav.ground_regions
+	_amphibious_nav_regions = nav.amphibious_regions
+	_nav_tile_rects = nav.tile_rects
 	_water_nav_region = nav.water_region
-	_amphibious_nav_region = nav.amphibious_region
 	_deep_water_nav_region = nav.deep_water_region
 
 	var ground := get_node_or_null("Ground")
@@ -354,7 +363,8 @@ func _setup_terrain() -> void:
 # engine exit during the headless suite, which builds and frees a fresh match
 # scene many times per run.
 func _exit_tree() -> void:
-	for rid in [_ground_nav_region, _water_nav_region, _amphibious_nav_region, _deep_water_nav_region,
+	for rid in _ground_nav_regions + _amphibious_nav_regions + [
+			_water_nav_region, _deep_water_nav_region,
 			ground_nav_map, water_nav_map, amphibious_nav_map, deep_water_nav_map]:
 		if rid.is_valid():
 			NavigationServer3D.free_rid(rid)
@@ -739,7 +749,7 @@ func _tick_lazy_navmesh(delta: float) -> void:
 
 func _rebake_navmesh() -> void:
 	_nav_rebake_pending = false
-	if not _ground_nav_region.is_valid():
+	if _ground_nav_regions.is_empty():
 		return
 	# ASYNC. terrain_builder.gd has carried an async twin of this call since the
 	# old runtime, written for exactly this situation and documented in its own
@@ -755,8 +765,13 @@ func _rebake_navmesh() -> void:
 	# Only the GDScript face generation stays on the main thread; Recast itself
 	# goes to a worker. The repath moves into the callback so units are steered
 	# against the FINISHED navmesh rather than a half-updated one.
-	TerrainBuilder.rebake_ground_and_amphibious_async(
-		current_map, _building_holes(), _ground_nav_region, _amphibious_nav_region,
+	#
+	# Chunk 21: rebakes every tile, not just the one(s) the change touched -
+	# selective per-tile rebake (Chunk 22) is a further optimization on top
+	# of an already-async, already-non-blocking path, not a correctness
+	# requirement (see rebake_ground_amphibious_tiles_async()'s own comment).
+	TerrainBuilder.rebake_ground_amphibious_tiles_async(
+		current_map, _building_holes(), _ground_nav_regions, _amphibious_nav_regions, _nav_tile_rects,
 		_on_navmesh_rebaked)
 
 

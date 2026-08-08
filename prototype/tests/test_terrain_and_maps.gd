@@ -178,10 +178,7 @@ func test_bridges_carve_a_real_ground_crossing_through_water() -> bool:
 	await _await_nav_map(nav_no_bridge.ground_map)
 	var path_no_bridge = NavigationServer3D.map_get_path(nav_no_bridge.ground_map, start, end, true)
 	var reached_no_bridge = path_no_bridge.size() >= 2 and path_no_bridge[path_no_bridge.size() - 1].distance_to(end) <= 3.0
-	for k in ["ground_region", "water_region", "amphibious_region", "deep_water_region"]:
-		if nav_no_bridge[k].is_valid(): NavigationServer3D.free_rid(nav_no_bridge[k])
-	for k in ["ground_map", "water_map", "amphibious_map", "deep_water_map"]:
-		NavigationServer3D.free_rid(nav_no_bridge[k])
+	_free_nav_result(nav_no_bridge)
 
 	var nav_with_bridge = TerrainBuilder.build_navmeshes(map_with_bridge)
 	await _await_nav_map(nav_with_bridge.ground_map)
@@ -191,10 +188,7 @@ func test_bridges_carve_a_real_ground_crossing_through_water() -> bool:
 	for p in path_with_bridge:
 		if p.z > -6.0 and p.z < 6.0 and abs(p.x) > 5.0: # outside the bridge's x=[-4,4] footprint (+1 slack)
 			crosses_via_bridge_strip = false
-	for k in ["ground_region", "water_region", "amphibious_region", "deep_water_region"]:
-		if nav_with_bridge[k].is_valid(): NavigationServer3D.free_rid(nav_with_bridge[k])
-	for k in ["ground_map", "water_map", "amphibious_map", "deep_water_map"]:
-		NavigationServer3D.free_rid(nav_with_bridge[k])
+	_free_nav_result(nav_with_bridge)
 
 	if reached_no_bridge:
 		print("  [FAIL] Without a bridge, a full-width water band should completely block ground crossing")
@@ -277,16 +271,7 @@ func test_amphibious_navmesh_crosses_water() -> bool:
 	var ground_path = NavigationServer3D.map_get_path(nav.ground_map, start, goal, true)
 	var amphibious_path = NavigationServer3D.map_get_path(nav.amphibious_map, start, goal, true)
 
-	NavigationServer3D.free_rid(nav.ground_region)
-	if nav.water_region.is_valid():
-		NavigationServer3D.free_rid(nav.water_region)
-	NavigationServer3D.free_rid(nav.amphibious_region)
-	if nav.deep_water_region.is_valid():
-		NavigationServer3D.free_rid(nav.deep_water_region)
-	NavigationServer3D.free_rid(nav.ground_map)
-	NavigationServer3D.free_rid(nav.water_map)
-	NavigationServer3D.free_rid(nav.amphibious_map)
-	NavigationServer3D.free_rid(nav.deep_water_map)
+	_free_nav_result(nav)
 
 	# On ground_map (the water area is a hole), a straight line through the
 	# 30-unit-wide lake isn't available - any real path has to detour a long
@@ -333,16 +318,7 @@ func test_deep_water_navmesh_blocks_shallow_draught_hulls() -> bool:
 	var shallow_capable_path = NavigationServer3D.map_get_path(nav.water_map, north, south, true)
 	var deep_draught_path = NavigationServer3D.map_get_path(nav.deep_water_map, north, south, true)
 
-	NavigationServer3D.free_rid(nav.ground_region)
-	if nav.water_region.is_valid():
-		NavigationServer3D.free_rid(nav.water_region)
-	NavigationServer3D.free_rid(nav.amphibious_region)
-	if nav.deep_water_region.is_valid():
-		NavigationServer3D.free_rid(nav.deep_water_region)
-	NavigationServer3D.free_rid(nav.ground_map)
-	NavigationServer3D.free_rid(nav.water_map)
-	NavigationServer3D.free_rid(nav.amphibious_map)
-	NavigationServer3D.free_rid(nav.deep_water_map)
+	_free_nav_result(nav)
 
 	var shallow_dist = 0.0
 	for i in range(1, shallow_capable_path.size()):
@@ -481,12 +457,7 @@ func test_b8_large_map_navmesh_bake_does_not_crash_recast() -> bool:
 		print("  [FAIL] scattered_peaks' ground navmesh should support a real HQ-to-HQ path query, got ", path.size(), " points - the navmesh may have been silently rejected (mismatched map/mesh cell_size).")
 		return false
 
-	NavigationServer3D.free_rid(nav.ground_region)
-	NavigationServer3D.free_rid(nav.amphibious_region)
-	NavigationServer3D.free_rid(nav.ground_map)
-	NavigationServer3D.free_rid(nav.water_map)
-	NavigationServer3D.free_rid(nav.amphibious_map)
-	NavigationServer3D.free_rid(nav.deep_water_map)
+	_free_nav_result(nav)
 
 	print("  [PASS] A 550-half-extent map's navmesh bakes successfully (this specific crash is what killed the whole test process before the fix) with widened cell_size, while smaller maps keep Godot's own default.")
 	return true
@@ -553,12 +524,7 @@ func test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones() -> boo
 		var nav = TerrainBuilderScript.build_navmeshes(map_def)
 		await _await_nav_map(nav.ground_map)
 		var errors = MapCatalogScript.lint_spawn_fairness(map_def, nav.ground_map)
-		NavigationServer3D.free_rid(nav.ground_region)
-		NavigationServer3D.free_rid(nav.amphibious_region)
-		NavigationServer3D.free_rid(nav.ground_map)
-		NavigationServer3D.free_rid(nav.water_map)
-		NavigationServer3D.free_rid(nav.amphibious_map)
-		NavigationServer3D.free_rid(nav.deep_water_map)
+		_free_nav_result(nav)
 		if not errors.is_empty():
 			print("  [FAIL] Bundled map '", map_id, "' should clear the fairness lint cleanly, got: ", errors)
 			return false
@@ -579,12 +545,7 @@ func test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones() -> boo
 	var blocked_nav = TerrainBuilderScript.build_navmeshes(blocked_map_def)
 	await _await_nav_map(blocked_nav.ground_map)
 	var blocked_errors = MapCatalogScript.lint_spawn_fairness(blocked_map_def, blocked_nav.ground_map)
-	NavigationServer3D.free_rid(blocked_nav.ground_region)
-	NavigationServer3D.free_rid(blocked_nav.amphibious_region)
-	NavigationServer3D.free_rid(blocked_nav.ground_map)
-	NavigationServer3D.free_rid(blocked_nav.water_map)
-	NavigationServer3D.free_rid(blocked_nav.amphibious_map)
-	NavigationServer3D.free_rid(blocked_nav.deep_water_map)
+	_free_nav_result(blocked_nav)
 	var found_blocked = false
 	var found_resource = false
 	for e in blocked_errors:
@@ -618,12 +579,7 @@ func test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones() -> boo
 	var lopsided_nav = TerrainBuilderScript.build_navmeshes(lopsided_map_def)
 	await _await_nav_map(lopsided_nav.ground_map)
 	var lopsided_errors = MapCatalogScript.lint_spawn_fairness(lopsided_map_def, lopsided_nav.ground_map)
-	NavigationServer3D.free_rid(lopsided_nav.ground_region)
-	NavigationServer3D.free_rid(lopsided_nav.amphibious_region)
-	NavigationServer3D.free_rid(lopsided_nav.ground_map)
-	NavigationServer3D.free_rid(lopsided_nav.water_map)
-	NavigationServer3D.free_rid(lopsided_nav.amphibious_map)
-	NavigationServer3D.free_rid(lopsided_nav.deep_water_map)
+	_free_nav_result(lopsided_nav)
 	var found_variance = false
 	for e in lopsided_errors:
 		if "vary too much" in e:
@@ -1675,12 +1631,7 @@ func test_spawn_fairness_lint_passes_a_real_map_scaled_up_4x() -> bool:
 	var nav = TerrainBuilderScript.build_navmeshes(scaled_map)
 	await _await_nav_map(nav.ground_map)
 	var errors = MapCatalogScript.lint_spawn_fairness(scaled_map, nav.ground_map)
-	NavigationServer3D.free_rid(nav.ground_region)
-	NavigationServer3D.free_rid(nav.amphibious_region)
-	NavigationServer3D.free_rid(nav.ground_map)
-	NavigationServer3D.free_rid(nav.water_map)
-	NavigationServer3D.free_rid(nav.amphibious_map)
-	NavigationServer3D.free_rid(nav.deep_water_map)
+	_free_nav_result(nav)
 
 	if not errors.is_empty():
 		print("  [FAIL] open_plains at world_scale=4.0 should still clear the fairness lint (scale-relative margin), got: ", errors)
@@ -1730,12 +1681,7 @@ func test_scattered_peaks_navmesh_bakes_cleanly_at_world_scale_4() -> bool:
 	var far = scaled_half * 0.87 # inside the map, well clear of the edge
 	var path = NavigationServer3D.map_get_path(nav.ground_map, Vector3(0, 0, far), Vector3(0, 0, -far), true)
 
-	NavigationServer3D.free_rid(nav.ground_region)
-	NavigationServer3D.free_rid(nav.amphibious_region)
-	NavigationServer3D.free_rid(nav.ground_map)
-	NavigationServer3D.free_rid(nav.water_map)
-	NavigationServer3D.free_rid(nav.amphibious_map)
-	NavigationServer3D.free_rid(nav.deep_water_map)
+	_free_nav_result(nav)
 
 	if path.size() < 2:
 		print("  [FAIL] scattered_peaks at world_scale=4.0 should still support a real long-distance path query, got ", path.size(), " points.")

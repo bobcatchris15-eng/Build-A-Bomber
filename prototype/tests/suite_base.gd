@@ -462,6 +462,28 @@ func _await_nav_map(nav_map: RID, max_frames: int = 240) -> bool:
 	return false
 
 
+# Frees every RID a TerrainBuilder.build_navmeshes()/build_navmeshes_deferred()
+# result owns. Chunk 21: ground_region/amphibious_region became
+# ground_regions/amphibious_regions (Array, one RID per navmesh tile - see
+# terrain_builder.gd's NAV_TILE_SIZE header comment), so the old
+# `for k in ["ground_region", ...]` cleanup pattern several suites used
+# stopped matching the returned dict's keys entirely. Centralised here
+# instead of re-patched at each call site, so a future field never drifts
+# out of sync with this again.
+func _free_nav_result(nav: Dictionary) -> void:
+	for rid in nav.get("ground_regions", []) + nav.get("amphibious_regions", []):
+		if rid.is_valid():
+			NavigationServer3D.free_rid(rid)
+	for key in ["water_region", "deep_water_region"]:
+		var rid: RID = nav.get(key, RID())
+		if rid.is_valid():
+			NavigationServer3D.free_rid(rid)
+	for key in ["ground_map", "water_map", "amphibious_map", "deep_water_map"]:
+		var rid: RID = nav.get(key, RID())
+		if rid.is_valid():
+			NavigationServer3D.free_rid(rid)
+
+
 func _find_hq(battle, team: int):
 	for s in battle.get_team_structures(team):
 		if s.kind == "hq":

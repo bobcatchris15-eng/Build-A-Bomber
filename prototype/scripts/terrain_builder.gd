@@ -106,6 +106,126 @@ static func _nav_cell_size(map_def: Dictionary) -> float:
 		return 0.25
 	return 0.25 + (half - 300.0) * 0.003
 
+# Chunk 21: navmesh TILING. _nav_cell_size() above solves BAKE COST by
+# widening the cell as the map grows - it keeps Recast from segfaulting, but
+# the tradeoff is fidelity: tools/probe_streaming_wall.gd measured cell_size
+# reaching ~105 units on scattered_peaks at world_scale=16, wide enough for a
+# single voxel to swallow a whole building. That coarseness is what produced
+# the exit-position, dock-bay and vertical-slack bugs already fixed at
+# world_scale=4 (a few units of error each) - at 16x the same mechanism
+# would be measured in tens of units.
+#
+# Tiling changes what bounds Recast's voxel grid: instead of ONE region
+# covering the whole map (voxel count grows with map area), each surface
+# becomes many regions on the SAME NavigationServer3D map, one per
+# NAV_TILE_SIZE-square tile, and NavigationServer3D stitches same-map
+# regions together automatically wherever their edges meet - no consumer
+# (NavigationAgent3D, vision, flow fields, every existing test) has to know
+# or care, because they all query the MAP RID, never a region directly.
+# Per-tile voxel count now depends only on NAV_TILE_SIZE, so cell_size can
+# go back to a small, near-fixed value regardless of how large the map (or
+# world_scale) gets - fidelity and map size are decoupled.
+# Self-bounding the same way _nav_grid_cell() is (see that function's own
+# header) - a FIXED tile size would make tile COUNT grow as (2*half/size)^2.
+# On scattered_peaks at world_scale=4 (half=8800) a naive 128-unit tile
+# produced roughly 19,000 tiles: thousands of near-empty Recast bakes, and
+# the O(triangles x tiles) first pass at _bucket_verts_by_tile() (before it
+# was rewritten below to index directly) turned map load into a hang rather
+# than a slowdown. Widening the tile alongside half keeps tile count per
+# axis converging toward a constant instead of growing without bound - the
+# same trick, for the same reason, as _nav_grid_cell/_nav_cell_size.
+const NAV_TILE_SIZE_BASE: float = 128.0
+const NAV_TILES_PER_AXIS: float = 12.0
+
+# Target voxels per tile axis. A first version of this used a FLAT
+# a flat cell_size regardless of tile size - measured on
+# scattered_peaks (144 tiles, tile_size ~367), that gave each tile a
+# ~733x733 voxel grid, comparable to the ENTIRE old single-region bake
+# (Chunk 20 measured ~675x675 total), done 288 times: an 85-SECOND load
+# where the old approach took ~210ms. cell_size has to be derived from a
+# genuine per-tile voxel budget, not guessed - this is that budget, sized
+# so total voxel count across every tile stays in the same ballpark as the
+# old single-region bake (tools/probe_tile_bake.gd verifies the result).
+# 110, not 56. A voxel budget picked to reproduce the OLD single-region
+# formula's TOTAL voxel count turns out to reproduce very nearly its same
+# per-unit cell_size too (both converge toward ~half * 0.003 for large
+# half) - real at any map size, but it bought no actual fidelity, only the
+# tile architecture Chunk 22 needs. Measured (tools/probe_tile_bake.gd):
+# 110 roughly halves cell_size at scattered_peaks' scale while keeping the
+# full sync bake around 10s, in the same order of magnitude as the ~4s the
+# codebase already accepts for a full four-surface load.
+const NAV_TILE_VOXELS_PER_AXIS: float = 110.0
+
+static func _nav_tile_size(map_def: Dictionary) -> float:
+	var half: float = map_def.get("map_half_extents", 80.0)
+	return maxf(NAV_TILE_SIZE_BASE, (half * 2.0) / NAV_TILES_PER_AXIS)
+
+# Never coarser than the pre-tiling formula, even though the tile budget
+# above is sized for LARGE maps. A map small enough to fit in a single tile
+# (test_terrain.json's 60-half fixture: span 120 < NAV_TILE_SIZE_BASE 128,
+# exactly one tile, no boundary crossing at all) got cell_size 2.29 instead
+# of the old formula's crisp 0.25 purely because the tile-size FLOOR is
+# much larger than the whole map - a real regression on the one class of
+# map that already had headroom to spare, caught by
+# test_b5_heightmap_navmesh_rejects_steep_slope's flat-ground control path
+# landing 18 units short of its target.
+static func _nav_tile_cell_size(map_def: Dictionary) -> float:
+	return minf(_nav_tile_size(map_def) / NAV_TILE_VOXELS_PER_AXIS, _nav_cell_size(map_def))
+
+static func _nav_tile_rects(map_def: Dictionary) -> Array:
+	var half: float = map_def.get("map_half_extents", 80.0)
+	var tile_size := _nav_tile_size(map_def)
+	var rects: Array = []
+	var x := -half
+	while x < half:
+		var x1 := minf(x + tile_size, half)
+		var z := -half
+		while z < half:
+			var z1 := minf(z + tile_size, half)
+			rects.append({"x0": x, "x1": x1, "z0": z, "z1": z1})
+			z = z1
+		x = x1
+	return rects
+
+# Splits a flat quad-soup (verts is 6 entries per quad - two triangles, see
+# _add_nav_quad) into one PackedVector3Array per tile rect, bucketed by each
+# triangle's first vertex. A quad never straddles a tile boundary - every
+# quad emitter in this file sweeps in GRID_CELL-ish steps far smaller than a
+# tile, so "first vertex" is not an approximation of which tile a quad
+# belongs to, it IS the tile.
+#
+# Indexes directly via floor division rather than scanning every rect per
+# triangle (an O(triangles x tiles) first version of this function, back
+# when tile count could reach five figures on a large map, turned a several-
+# hundred-millisecond face build into an effective hang). `rects` must be
+# the grid _nav_tile_rects() produces - a regular row-major sweep from
+# (-half,-half) in `tile_size` steps - so cols/rows derived from that same
+# tile_size reproduce the exact same indexing without re-deriving rects.
+static func _bucket_verts_by_tile(verts: PackedVector3Array, map_def: Dictionary, rects: Array) -> Array:
+	var buckets: Array = []
+	buckets.resize(rects.size())
+	for i in range(buckets.size()):
+		buckets[i] = PackedVector3Array()
+	if rects.is_empty():
+		return buckets
+	var half: float = map_def.get("map_half_extents", 80.0)
+	var tile_size := _nav_tile_size(map_def)
+	var cols := int(ceil((half * 2.0) / tile_size))
+	var rows := int(ceil((half * 2.0) / tile_size))
+	var vcount := verts.size()
+	var i := 0
+	while i + 2 < vcount:
+		var p: Vector3 = verts[i]
+		var col: int = clampi(int(floor((p.x + half) / tile_size)), 0, cols - 1)
+		var row: int = clampi(int(floor((p.z + half) / tile_size)), 0, rows - 1)
+		var idx: int = col * rows + row
+		if idx >= 0 and idx < buckets.size():
+			var bucket: PackedVector3Array = buckets[idx]
+			bucket.append(verts[i]); bucket.append(verts[i + 1]); bucket.append(verts[i + 2])
+			buckets[idx] = bucket
+		i += 3
+	return buckets
+
 # Bridge deck height above water/ground level - just enough to read as a
 # real raised structure (and to keep the deck mesh visibly above the water
 # plane's own y=0.05) without needing an approach ramp of its own; bridges
@@ -911,39 +1031,79 @@ static func _bake_region_async(region: RID, verts: PackedVector3Array, cell_size
 		if remaining["n"] <= 0 and on_ready.is_valid():
 			on_ready.call())
 
-static func build_navmeshes(map_def: Dictionary, extra_holes: Array = []) -> Dictionary:
-	# RTS_CORE_ROADMAP.md B8: a NavigationServer3D MAP has its own
-	# cell_size/cell_height (default 0.25, independent of whatever a
-	# NavigationMesh RESOURCE assigned to one of its regions uses) -
-	# region_set_navigation_mesh() silently REJECTS the mesh (real error,
-	# not just a warning) if the two don't match, which a region-to-map
-	# association check alone doesn't reveal (that stays "valid" even when
-	# the mesh assignment itself was refused). Caught via the real Skirmish
-	# scene, not the isolated bake-only repro that first found the
-	# original segfault - that repro never created a map/region at all, so
-	# it couldn't have surfaced this.
-	var cell_size = _nav_cell_size(map_def)
-	var ground_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_cell_size(ground_map, cell_size)
-	NavigationServer3D.map_set_cell_height(ground_map, NAV_CELL_HEIGHT)
-	NavigationServer3D.map_set_active(ground_map, true)
-	var water_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_cell_size(water_map, cell_size)
-	NavigationServer3D.map_set_cell_height(water_map, NAV_CELL_HEIGHT)
-	NavigationServer3D.map_set_active(water_map, true)
-	var amphibious_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_cell_size(amphibious_map, cell_size)
-	NavigationServer3D.map_set_cell_height(amphibious_map, NAV_CELL_HEIGHT)
-	NavigationServer3D.map_set_active(amphibious_map, true)
-	var deep_water_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_cell_size(deep_water_map, cell_size)
-	NavigationServer3D.map_set_cell_height(deep_water_map, NAV_CELL_HEIGHT)
-	NavigationServer3D.map_set_active(deep_water_map, true)
-
+# Tiled twin of rebake_ground_and_amphibious_async(). Rebakes EVERY tile
+# rather than only the ones a changed building actually touches - simpler
+# and, per Chunk 20's own finding, not a real cost regression: the async
+# mid-match rebake already moved Recast off the main thread, so the thing
+# tiling improves here is fidelity (a per-tile cell_size derived from a fixed voxel budget
+# regardless of map size), not placement latency. Selective per-tile rebake
+# (Chunk 22) is a further optimization on top of an already-non-blocking
+# path, not a correctness requirement.
+static func rebake_ground_amphibious_tiles_async(map_def: Dictionary, extra_holes: Array,
+		ground_regions: Array, amphibious_regions: Array, tile_rects: Array,
+		on_ready: Callable = Callable()) -> void:
+	var tile_cell_size = _nav_tile_cell_size(map_def)
 	var ground_verts = _build_ground_faces(map_def, extra_holes)
-	var ground_region = NavigationServer3D.region_create()
-	NavigationServer3D.region_set_map(ground_region, ground_map)
-	NavigationServer3D.region_set_navigation_mesh(ground_region, _bake_nav_mesh(ground_verts, cell_size))
+	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
+	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects)
+	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects)
+	var remaining = {"n": ground_regions.size() + amphibious_regions.size()}
+	for i in range(tile_rects.size()):
+		_bake_region_async(ground_regions[i], ground_buckets[i], tile_cell_size, remaining, on_ready)
+		_bake_region_async(amphibious_regions[i], amphibious_buckets[i], tile_cell_size, remaining, on_ready)
+
+
+# Ground+amphibious halves of build_navmeshes()/build_navmeshes_deferred(),
+# tiled - see NAV_TILE_SIZE's own header comment for why. `ground_map` and
+# `amphibious_map` must already exist (map_create() + map_set_cell_size(...,
+# _nav_tile_cell_size(map_def)) + map_set_cell_height(..., NAV_CELL_HEIGHT) +
+# map_set_active(true)) - the B8 gotcha that a map's cell_size must match
+# every region assigned to it applies per-tile-region exactly as it did to
+# the old single region.
+#
+# `sync`: true bakes every tile to completion before returning (the headless/
+# initial-load path); false returns unbaked "pending" entries for the caller
+# to bake one at a time, exactly like build_navmeshes_deferred()'s water/
+# deep_water halves already do.
+static func build_ground_amphibious_tiles(map_def: Dictionary, extra_holes: Array,
+		ground_map: RID, amphibious_map: RID, sync: bool) -> Dictionary:
+	var tile_rects = _nav_tile_rects(map_def)
+	var tile_cell_size = _nav_tile_cell_size(map_def)
+	var ground_verts = _build_ground_faces(map_def, extra_holes)
+	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
+	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects)
+	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects)
+
+	var ground_regions: Array = []
+	var amphibious_regions: Array = []
+	var pending: Array = []
+	for i in range(tile_rects.size()):
+		var g_region = NavigationServer3D.region_create()
+		NavigationServer3D.region_set_map(g_region, ground_map)
+		ground_regions.append(g_region)
+		var a_region = NavigationServer3D.region_create()
+		NavigationServer3D.region_set_map(a_region, amphibious_map)
+		amphibious_regions.append(a_region)
+		if sync:
+			NavigationServer3D.region_set_navigation_mesh(g_region, _bake_nav_mesh(ground_buckets[i], tile_cell_size))
+			NavigationServer3D.region_set_navigation_mesh(a_region, _bake_nav_mesh(amphibious_buckets[i], tile_cell_size))
+		else:
+			pending.append({"region": g_region, "verts": ground_buckets[i], "label": "Surveying ground", "cell_size": tile_cell_size})
+			pending.append({"region": a_region, "verts": amphibious_buckets[i], "label": "Marking fording points", "cell_size": tile_cell_size})
+
+	return {"ground_regions": ground_regions, "amphibious_regions": amphibious_regions,
+		"tile_rects": tile_rects, "pending": pending, "cell_size": tile_cell_size}
+
+
+# Water+deep_water halves of build_navmeshes()/build_navmeshes_deferred() -
+# NOT tiled. Neither surface is ever rebaked mid-match (buildings do not
+# carve water) and neither was the fidelity problem Chunk 20 found, so a
+# single region per surface stays correct and simple. `water_map`/
+# `deep_water_map` must already exist (map_create() + cell_size/cell_height/
+# active), same as build_ground_amphibious_tiles().
+static func build_water_and_deep_water(map_def: Dictionary, water_map: RID, deep_water_map: RID, sync: bool) -> Dictionary:
+	var cell_size = _nav_cell_size(map_def)
+	var pending: Array = []
 
 	var water_verts = PackedVector3Array()
 	for w in map_def.get("water_areas", []):
@@ -956,99 +1116,118 @@ static func build_navmeshes(map_def: Dictionary, extra_holes: Array = []) -> Dic
 	if water_verts.size() > 0:
 		water_region = NavigationServer3D.region_create()
 		NavigationServer3D.region_set_map(water_region, water_map)
-		NavigationServer3D.region_set_navigation_mesh(water_region, _bake_nav_mesh(water_verts, cell_size))
-
-	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
-	var amphibious_region = NavigationServer3D.region_create()
-	NavigationServer3D.region_set_map(amphibious_region, amphibious_map)
-	NavigationServer3D.region_set_navigation_mesh(amphibious_region, _bake_nav_mesh(amphibious_verts, cell_size))
+		if sync:
+			NavigationServer3D.region_set_navigation_mesh(water_region, _bake_nav_mesh(water_verts, cell_size))
+		else:
+			pending.append({"region": water_region, "verts": water_verts, "label": "Charting waterways", "cell_size": cell_size})
 
 	var deep_water_verts = _build_deep_water_faces(map_def)
 	var deep_water_region: RID = RID()
 	if deep_water_verts.size() > 0:
 		deep_water_region = NavigationServer3D.region_create()
 		NavigationServer3D.region_set_map(deep_water_region, deep_water_map)
-		NavigationServer3D.region_set_navigation_mesh(deep_water_region, _bake_nav_mesh(deep_water_verts, cell_size))
+		if sync:
+			NavigationServer3D.region_set_navigation_mesh(deep_water_region, _bake_nav_mesh(deep_water_verts, cell_size))
+		else:
+			pending.append({"region": deep_water_region, "verts": deep_water_verts, "label": "Sounding deep water", "cell_size": cell_size})
 
-	return {"ground_map": ground_map, "water_map": water_map, "amphibious_map": amphibious_map, "deep_water_map": deep_water_map,
-		"ground_region": ground_region, "water_region": water_region, "amphibious_region": amphibious_region, "deep_water_region": deep_water_region}
+	return {"water_region": water_region, "deep_water_region": deep_water_region, "pending": pending, "cell_size": cell_size}
+
+
+# Creates and configures all four NavigationServer3D maps a match uses.
+# Ground/amphibious get _nav_tile_cell_size() (tiling bounds their voxel count
+# independent of map size); water/deep_water keep the old widening
+# _nav_cell_size() (untiled, and were never the fidelity problem).
+static func _create_nav_maps(map_def: Dictionary) -> Dictionary:
+	var tile_cell_size = _nav_tile_cell_size(map_def)
+	var open_water_cell_size = _nav_cell_size(map_def)
+	var maps := {}
+	for entry in [["ground_map", tile_cell_size], ["amphibious_map", tile_cell_size],
+			["water_map", open_water_cell_size], ["deep_water_map", open_water_cell_size]]:
+		var m = NavigationServer3D.map_create()
+		NavigationServer3D.map_set_cell_size(m, entry[1])
+		NavigationServer3D.map_set_cell_height(m, NAV_CELL_HEIGHT)
+		NavigationServer3D.map_set_active(m, true)
+		# Chunk 21 fallout: NavigationServer3D only auto-connects two regions
+		# on the same map if their edges land within this margin - default
+		# 0.25. Water/deep_water are still one region each, so this changes
+		# nothing for them, but ground/amphibious are now MANY regions (one
+		# per tile), and each tile is voxelized by an INDEPENDENT Recast
+		# bake - even though the source geometry lines up exactly at a tile
+		# boundary, each bake's own quantization can land the resulting
+		# polygon edge a cell_size or so away from its neighbour's. At
+		# cell_size several units wide, that is routinely bigger than 0.25,
+		# so tiles silently failed to connect at all: every resource node
+		# past the first tile came back unreachable (test_map_*_smoke's
+		# "not reachable by ground navmesh from the nearest base" failures).
+		# Set generously above the quantization error it needs to absorb.
+		NavigationServer3D.map_set_edge_connection_margin(m, entry[1] * 4.0)
+		maps[entry[0]] = m
+	return maps
+
+
+# RTS_CORE_ROADMAP.md B8: a NavigationServer3D MAP has its own cell_size/
+# cell_height (default 0.25, independent of whatever a NavigationMesh
+# RESOURCE assigned to one of its regions uses) - region_set_navigation_
+# mesh() silently REJECTS the mesh (real error, not just a warning) if the
+# two don't match, which a region-to-map association check alone doesn't
+# reveal. Every map/region created below goes through _create_nav_maps()
+# and build_ground_amphibious_tiles()/build_water_and_deep_water() for
+# exactly that reason - one place sets a map's cell_size, one place bakes
+# regions at that same cell_size, instead of the two drifting apart.
+#
+# Chunk 21: "ground_region"/"amphibious_region" (singular) are now
+# "ground_regions"/"amphibious_regions" (Array) - one per navmesh tile, see
+# NAV_TILE_SIZE's header comment. No caller outside this file and
+# match_director.gd's three touch points (assignment, teardown, mid-match
+# rebake) ever held a region RID directly; everything else - NavigationAgent3D,
+# vision, flow fields, every existing test - queries the MAP RID, which is
+# still exactly one RID per surface and completely unchanged in shape.
+static func build_navmeshes(map_def: Dictionary, extra_holes: Array = []) -> Dictionary:
+	var maps = _create_nav_maps(map_def)
+	var ga = build_ground_amphibious_tiles(map_def, extra_holes, maps.ground_map, maps.amphibious_map, true)
+	var wd = build_water_and_deep_water(map_def, maps.water_map, maps.deep_water_map, true)
+	return {"ground_map": maps.ground_map, "water_map": maps.water_map,
+		"amphibious_map": maps.amphibious_map, "deep_water_map": maps.deep_water_map,
+		"ground_regions": ga.ground_regions, "amphibious_regions": ga.amphibious_regions,
+		"tile_rects": ga.tile_rects,
+		"water_region": wd.water_region, "deep_water_region": wd.deep_water_region}
 
 
 # Same as build_navmeshes(), but WITHOUT baking: every map and region RID is
 # created and wired up, and the source geometry for each surface is returned
-# unbaked in "pending" so the caller can bake them one at a time with a frame
-# yielded in between.
+# unbaked in "pending" so the caller can bake them one at a time (or, since
+# bake_pending_entry_async() exists now, all at once off the main thread).
 #
-# WHY, given rebake_ground_and_amphibious_async() already exists. The async
-# API is the right tool mid-match, where the old navmesh stays usable until
-# the new one lands. It is the wrong tool at match load, because there IS no
-# previous navmesh - units spawn and take their first orders within a frame
-# or two of _ready(), and a path query against a region with no mesh yet
-# silently fails. So the load path still bakes to completion before the match
-# starts; it just stops doing all four surfaces inside a single frame.
-#
-# The cost is unchanged (~4s on lake_crossing, four surfaces at ~1s each).
-# What changes is that the main thread ticks between them, so the window
-# keeps pumping messages instead of going four seconds without one - which is
-# what made Windows grey the title bar and report Not Responding.
+# The load path still creates and returns every region before baking starts -
+# units spawn and take their first orders within a frame or two of _ready(),
+# and scene_router.gd's Deploy gate (see match_director.gd's
+# bake_pending_entry_async() wiring) is what makes it safe for the ACTUAL
+# bake to happen off-thread: nothing can query a region before world_is_ready
+# flips, regardless of how the mesh assignment itself is scheduled.
 #
 # Each pending entry is {"region": RID, "verts": PackedVector3Array, "label":
-# String}; feed them to bake_pending_entry() in order.
+# String, "cell_size": float}; feed them to bake_pending_entry() or
+# bake_pending_entry_async() in order (or all at once - see match_director.gd).
 static func build_navmeshes_deferred(map_def: Dictionary, extra_holes: Array = []) -> Dictionary:
-	var cell_size = _nav_cell_size(map_def)
-	var ground_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_cell_size(ground_map, cell_size)
-	NavigationServer3D.map_set_cell_height(ground_map, NAV_CELL_HEIGHT)
-	NavigationServer3D.map_set_active(ground_map, true)
-	var water_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_cell_size(water_map, cell_size)
-	NavigationServer3D.map_set_cell_height(water_map, NAV_CELL_HEIGHT)
-	NavigationServer3D.map_set_active(water_map, true)
-	var amphibious_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_cell_size(amphibious_map, cell_size)
-	NavigationServer3D.map_set_cell_height(amphibious_map, NAV_CELL_HEIGHT)
-	NavigationServer3D.map_set_active(amphibious_map, true)
-	var deep_water_map = NavigationServer3D.map_create()
-	NavigationServer3D.map_set_cell_size(deep_water_map, cell_size)
-	NavigationServer3D.map_set_cell_height(deep_water_map, NAV_CELL_HEIGHT)
-	NavigationServer3D.map_set_active(deep_water_map, true)
+	var maps = _create_nav_maps(map_def)
+	var ga = build_ground_amphibious_tiles(map_def, extra_holes, maps.ground_map, maps.amphibious_map, false)
+	var wd = build_water_and_deep_water(map_def, maps.water_map, maps.deep_water_map, false)
+	var pending: Array = ga.pending + wd.pending
+	return {"ground_map": maps.ground_map, "water_map": maps.water_map,
+		"amphibious_map": maps.amphibious_map, "deep_water_map": maps.deep_water_map,
+		"ground_regions": ga.ground_regions, "amphibious_regions": ga.amphibious_regions,
+		"tile_rects": ga.tile_rects,
+		"water_region": wd.water_region, "deep_water_region": wd.deep_water_region,
+		"pending": pending, "cell_size": ga.cell_size}
 
-	var pending: Array = []
-
-	var ground_region = NavigationServer3D.region_create()
-	NavigationServer3D.region_set_map(ground_region, ground_map)
-	pending.append({"region": ground_region, "verts": _build_ground_faces(map_def, extra_holes), "label": "Surveying ground"})
-
-	var water_verts = PackedVector3Array()
-	for w in map_def.get("water_areas", []):
-		var rect = _rect_from(w.center, w.half_extents)
-		_add_nav_quad(water_verts, Vector3(rect.x0, 0, rect.z0), Vector3(rect.x1, 0, rect.z0),
-			Vector3(rect.x1, 0, rect.z1), Vector3(rect.x0, 0, rect.z1))
-	for blob in map_def.get("water_blobs", []):
-		water_verts.append_array(_water_blob_fan_verts(blob, 0.0))
-	var water_region: RID = RID()
-	if water_verts.size() > 0:
-		water_region = NavigationServer3D.region_create()
-		NavigationServer3D.region_set_map(water_region, water_map)
-		pending.append({"region": water_region, "verts": water_verts, "label": "Charting waterways"})
-
-	var amphibious_region = NavigationServer3D.region_create()
-	NavigationServer3D.region_set_map(amphibious_region, amphibious_map)
-	pending.append({"region": amphibious_region, "verts": _build_amphibious_faces(map_def, extra_holes), "label": "Marking fording points"})
-
-	var deep_water_verts = _build_deep_water_faces(map_def)
-	var deep_water_region: RID = RID()
-	if deep_water_verts.size() > 0:
-		deep_water_region = NavigationServer3D.region_create()
-		NavigationServer3D.region_set_map(deep_water_region, deep_water_map)
-		pending.append({"region": deep_water_region, "verts": deep_water_verts, "label": "Sounding deep water"})
-
-	return {"ground_map": ground_map, "water_map": water_map, "amphibious_map": amphibious_map, "deep_water_map": deep_water_map,
-		"ground_region": ground_region, "water_region": water_region, "amphibious_region": amphibious_region, "deep_water_region": deep_water_region,
-		"pending": pending, "cell_size": cell_size}
-
-static func bake_pending_entry(entry: Dictionary, cell_size: float) -> void:
-	NavigationServer3D.region_set_navigation_mesh(entry["region"], _bake_nav_mesh(entry["verts"], cell_size))
+static func bake_pending_entry(entry: Dictionary, cell_size: float = 0.0) -> void:
+	# cell_size param kept (defaulted, unused when the entry carries its own -
+	# every current producer of "pending" entries now does, since ground/
+	# amphibious tiles and water/deep_water need DIFFERENT cell_size values)
+	# only so any external caller passing the old two-arg form still parses.
+	var effective: float = entry.get("cell_size", cell_size)
+	NavigationServer3D.region_set_navigation_mesh(entry["region"], _bake_nav_mesh(entry["verts"], effective))
 
 
 # Async twin of bake_pending_entry(). build_navmeshes_deferred() already
@@ -1066,10 +1245,14 @@ static func bake_pending_entry(entry: Dictionary, cell_size: float) -> void:
 # the synchronization point this needs: bake off-thread, and simply hold
 # world_is_ready (and therefore Deploy) until every surface reports back.
 static func bake_pending_entry_async(entry: Dictionary, cell_size: float, on_done: Callable) -> void:
+	# See bake_pending_entry()'s matching comment - entries now carry their
+	# own cell_size because ground/amphibious tiles and water/deep_water no
+	# longer share one.
+	var effective: float = entry.get("cell_size", cell_size)
 	var nav_mesh = NavigationMesh.new()
-	nav_mesh.cell_size = cell_size
+	nav_mesh.cell_size = effective
 	nav_mesh.cell_height = NAV_CELL_HEIGHT
-	nav_mesh.agent_max_climb = cell_size * AGENT_MAX_CLIMB_CELLS
+	nav_mesh.agent_max_climb = effective * AGENT_MAX_CLIMB_CELLS
 	nav_mesh.agent_radius = 0.1
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(entry["verts"], Transform3D.IDENTITY)
