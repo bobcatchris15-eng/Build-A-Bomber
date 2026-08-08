@@ -1405,7 +1405,32 @@ func _ai_placement_site(for_team: int, kind: String, blueprint: Dictionary = {})
 func _on_unit_completed(for_team: int, queue_name: String, blueprint: Dictionary) -> void:
 	var factory := _exit_structure(for_team, queue_name)
 	var at: Vector3 = factory.exit_position() if factory != null else Vector3.ZERO
-	spawn_unit(blueprint, for_team, at)
+	spawn_unit(blueprint, for_team, snap_to_navmesh(at))
+
+
+# The nearest genuinely walkable point to `at`.
+#
+# A unit spawned off the navmesh is not merely misplaced, it is inert: the agent
+# has no valid path start, so it accepts a move order and turns to face it but
+# never produces a waypoint it can leave. exit_position() is authored as a fixed
+# offset from the building centre, while the hole the building actually carves
+# depends on BUILDING_CLEARANCE, the navmesh grid quantisation and Recast's own
+# agent-radius erosion - three things the authored constant cannot see, and all
+# of which move with world scale. Snapping makes the spawn correct by
+# construction instead of by a margin that has now been re-tuned twice.
+#
+# The snap is refused if the nearest walkable point is implausibly far, which
+# means the navmesh is not built yet rather than that the exit is blocked;
+# spawning at the authored point is the better failure there.
+const MAX_SPAWN_SNAP := 25.0
+
+func snap_to_navmesh(at: Vector3) -> Vector3:
+	if not ground_nav_map.is_valid():
+		return at
+	var closest: Vector3 = NavigationServer3D.map_get_closest_point(ground_nav_map, at)
+	if Vector3(closest.x, 0.0, closest.z).distance_to(Vector3(at.x, 0.0, at.z)) > MAX_SPAWN_SNAP:
+		return at
+	return closest
 
 
 # Radial area damage. Used by the loaded-harvester detonation; the same call will

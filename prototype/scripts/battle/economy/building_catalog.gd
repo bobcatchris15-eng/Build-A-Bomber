@@ -72,7 +72,10 @@ const STATS := {
 	},
 	"refinery": {
 		"vision_range": 22.0,
-		"hp": 1200.0, "size": Vector3(5, 3, 5), "color": Color(0.55, 0.62, 0.75),
+		# A grain elevator, not a shed. The refinery is where the economy is
+		# visibly happening, so it reads as the largest thing in the base and
+		# its docks are legible from the RTS camera as actual parking bays.
+		"hp": 1600.0, "size": Vector3(12, 9, 10), "color": Color(0.55, 0.62, 0.75),
 		"cost_metal": 150, "cost_crystal": 0, "build_time": 14.0,
 		"gives_buildable_area": true, "requires_buildable_area": true,
 		"adjacent_m": DEFAULT_ADJACENT_M,
@@ -96,7 +99,15 @@ const STATS := {
 		# harvesters docking with a 0.1 m margin. That margin is not survivable:
 		# the dock tolerance scales with hull speed, so a SLOWER harvester gets a
 		# smaller one and can never close the gap at all.
-		"dock_bays": [Vector3(0, 0, 9.0), Vector3(9.0, 0, 0), Vector3(-9.0, 0, 0)],
+		#
+		# Third re-tune, and the reason these are now DERIVED (see
+		# dock_bays_for() below) rather than written down again: every previous
+		# number was measured against one particular footprint, one particular
+		# BUILDING_CLEARANCE and one particular navmesh grid, and each time one
+		# of those three moved the bays silently went off-mesh again. Enlarging
+		# the refinery moves the first of them, so hardcoding a fourth constant
+		# would just schedule the same bug.
+		"dock_bays": [],
 	},
 	"light_manufactory": {
 		"hp": 1400.0, "size": Vector3(5, 2.4, 6), "color": Color(0.68, 0.6, 0.42),
@@ -139,6 +150,40 @@ static func get_stats(kind: String) -> Dictionary:
 
 static func get_stat(kind: String, key: String, fallback = null):
 	return STATS.get(kind, {}).get(key, fallback)
+
+
+# Clearance a dock bay needs BEYOND the building's own half-extent, so the bay
+# lands on walkable navmesh rather than inside the hole the building carves.
+#
+# Covers three separate erosions that a raw footprint offset does not see:
+# match_director's BUILDING_CLEARANCE (2.5) widening the hole, the navmesh
+# grid quantising that hole outward, and Recast shrinking the walkable surface
+# by the agent radius on top. Measured worst case across the bundled maps was
+# about 3 m of quantisation-plus-erosion past the cleared footprint
+# (tools/probe_factory_exit.gd), so this is that plus a working margin.
+const DOCK_BAY_CLEARANCE := 6.5
+
+
+# Where harvesters park, derived from the footprint instead of hardcoded.
+#
+# Three bays: one off the front face, one off each side. Each sits clear of the
+# relevant half-extent, so changing the building's size moves its docks with it
+# instead of leaving them buried inside the new walls.
+static func dock_bays_for(kind: String) -> Array:
+	var stats: Dictionary = STATS.get(kind, {})
+	var authored: Array = stats.get("dock_bays", [])
+	if not authored.is_empty():
+		return authored
+	if kind != "refinery":
+		return []
+	var size: Vector3 = stats.get("size", Vector3(5, 3, 5))
+	var front: float = size.z * 0.5 + DOCK_BAY_CLEARANCE
+	var side: float = size.x * 0.5 + DOCK_BAY_CLEARANCE
+	return [
+		Vector3(0.0, 0.0, front),
+		Vector3(side, 0.0, 0.0),
+		Vector3(-side, 0.0, 0.0),
+	]
 
 
 static func is_manufactory(kind: String) -> bool:

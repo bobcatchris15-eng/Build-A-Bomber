@@ -76,7 +76,7 @@ func setup(structure_kind: String, structure_team: int) -> void:
 	footprint = stats.get("size", Vector3(5, 3, 5))
 	vision_range = stats.get("vision_range", DEFAULT_VISION_RANGE)
 
-	_bay_offsets = stats.get("dock_bays", [])
+	_bay_offsets = BuildingCatalogScript.dock_bays_for(kind)
 	_bays.resize(_bay_offsets.size())
 	_bays.fill(null)
 
@@ -104,6 +104,7 @@ func setup(structure_kind: String, structure_team: int) -> void:
 		_mesh.position = Vector3(0, footprint.y * 0.5, 0)
 		add_child(_mesh)
 
+	_add_dock_pads()
 	_add_selection_proxy()
 	# LAST, once every mesh this building will ever have exists - the GLB, its
 	# decals, the fallback box. The finish walks what is there when it runs, so
@@ -174,6 +175,51 @@ func setup_from_blueprint(blueprint: Dictionary, structure_team: int, bp_manager
 
 
 # Structures are clickable for the same reason units are, and through the same
+# Ground-level parking bays, so where a harvester unloads is something you can
+# SEE rather than an invisible offset in the catalog. Read as the apron of a
+# grain elevator: a dark slab per bay with a lighter kerb around it.
+#
+# Purely decorative - no collision and no navmesh hole. A pad marks walkable
+# ground, so giving it either would carve away the exact surface the harvester
+# has to stand on to use it.
+const DOCK_PAD_SIZE := Vector3(7.0, 0.08, 9.0)
+const DOCK_PAD_KERB := 0.6
+
+func _add_dock_pads() -> void:
+	if _bay_offsets.is_empty():
+		return
+	for offset in _bay_offsets:
+		var bay: Vector3 = offset
+		# The pad's long axis points at the building, so it reads as a bay you
+		# reverse into rather than a square patch.
+		var facing_x: bool = absf(bay.x) > absf(bay.z)
+		var pad_size := DOCK_PAD_SIZE
+		if facing_x:
+			pad_size = Vector3(DOCK_PAD_SIZE.z, DOCK_PAD_SIZE.y, DOCK_PAD_SIZE.x)
+
+		var kerb := MeshInstance3D.new()
+		var kerb_mesh := BoxMesh.new()
+		kerb_mesh.size = pad_size + Vector3(DOCK_PAD_KERB * 2.0, -0.02, DOCK_PAD_KERB * 2.0)
+		kerb.mesh = kerb_mesh
+		var kerb_mat := StandardMaterial3D.new()
+		kerb_mat.albedo_color = Color(0.62, 0.60, 0.54)
+		kerb_mat.roughness = 0.95
+		kerb.material_override = kerb_mat
+		kerb.position = Vector3(bay.x, 0.03, bay.z)
+		add_child(kerb)
+
+		var pad := MeshInstance3D.new()
+		var pad_mesh := BoxMesh.new()
+		pad_mesh.size = pad_size
+		pad.mesh = pad_mesh
+		var pad_mat := StandardMaterial3D.new()
+		pad_mat.albedo_color = Color(0.17, 0.17, 0.19)
+		pad_mat.roughness = 0.98
+		pad.material_override = pad_mat
+		pad.position = Vector3(bay.x, 0.07, bay.z)
+		add_child(pad)
+
+
 # mechanism - a proxy on the selection layer carrying a back-reference. Clicking
 # a manufactory is how the radial menu for its queue is raised.
 func _add_selection_proxy() -> void:

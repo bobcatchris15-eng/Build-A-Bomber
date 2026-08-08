@@ -348,6 +348,29 @@ static func _water_blob_height_contribution(blob: Dictionary, x: float, z: float
 # three - see below). Deliberately does NOT know about water_areas/
 # bridges; terrain_height_at() below still owns that logic entirely,
 # falling back to this function only where none of those apply.
+# The highest the terrain can reach on this map, without sampling it.
+#
+# Exists for the fog shroud, which is a flat plane and therefore has to be
+# placed above EVERY piece of ground or the ground renders through it. The
+# shroud constant used to be 0.4, silently equal to GROUND_NOISE_AMPLITUDE -
+# it was not "a small offset", it was exactly the terrain maximum, and the
+# equality was never written down. Chunk 9 scaled the noise and left the
+# shroud behind, so hilltops punched through the fog in elevation-shaped
+# patches, and any heightmap map (height_scale 20, scaled) was far worse.
+#
+# Deliberately an upper BOUND rather than a measured maximum: cheap, stable,
+# and erring high only lifts the shroud slightly.
+static func max_height(map_def: Dictionary) -> float:
+	var scale: float = WorldScaleScript.for_map(map_def)
+	if _get_heightmap_image(map_def):
+		# Heightmap samples are normalized 0..1, so height_scale IS the ceiling.
+		return float(map_def.get("terrain", {}).get("height_scale", 20.0))
+	var h: float = GROUND_NOISE_AMPLITUDE * scale
+	for hill in map_def.get("hills", []):
+		h += absf(float(hill.get("height", 0.0)))
+	return h
+
+
 static func height_at(map_def: Dictionary, x: float, z: float) -> float:
 	# RTS_CORE_ROADMAP.md B4/B6: a real heightmap FULLY REPLACES the
 	# analytic noise+hills+water_blobs path below (not layered on top of
@@ -539,7 +562,15 @@ static func _corner_heights(map_def: Dictionary, half: float, cell: float) -> Di
 # a coarse quad that touches a hard hole is re-tested at fine resolution
 # instead of omitted wholesale, so a small building only removes the area
 # it actually occupies.
-const HOLE_SUBDIVISION_CELL: float = 2.0
+#
+# 1.0, not 2.0. At 2.0 the re-test still rounded every hole OUTWARD by up to
+# two units, which is not a rounding error at this scale - it is larger than
+# the margin the exit_offset and dock_bay constants were tuned against. Every
+# manufactory's exit_position() measured 1.0-2.5 units INSIDE the baked hole
+# (tools/probe_factory_exit.gd), so a factory-built unit spawned off-mesh,
+# accepted its move order, turned to face it, and then circled forever with
+# no valid path start.
+const HOLE_SUBDIVISION_CELL: float = 1.0
 
 static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) -> PackedVector3Array:
 	var verts = PackedVector3Array()

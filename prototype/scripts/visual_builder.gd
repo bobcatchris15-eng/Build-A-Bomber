@@ -4177,7 +4177,7 @@ static func _build_legs(parent_node: Node3D, base_size: Vector3, base_color: Col
 	# meets the hull wherever the hull actually IS rather than wherever its
 	# bounding box says it is.
 	#
-	# That is why nothing here offsets the limb any more: the module origin is
+	# That is why nothing here offsets the limb any more: the module origin iss
 	# already on the surface by the time this geometry is seen.
 
 	# LegRoot / LegSwing, both preserved verbatim from the procedural build.

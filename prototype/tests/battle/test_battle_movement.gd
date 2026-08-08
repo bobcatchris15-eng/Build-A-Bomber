@@ -283,9 +283,22 @@ func test_real_unit_actually_converges_toward_a_move_order_on_a_real_map() -> bo
 	# The bar is "made real, substantial progress," not "arrived exactly" -
 	# this is a regression guard against total pathing failure (sitting
 	# still or looping in place), not a precision check.
-	if progress < initial_distance * 0.5:
+	#
+	# Measured against what this unit's OWN speed can cover in the window,
+	# not against a fraction of the trip. The bar used to be half the trip
+	# in 8 seconds, which silently assumed a unit crossing a 420m map at
+	# 15-20 m/s. At world_scale=4 the map is four times wider while
+	# move_speed is unit-space and deliberately unchanged, so half a trip
+	# became physically impossible and the test failed on a unit that was
+	# in fact pathing perfectly. Distance covered per second is the thing
+	# that actually distinguishes "moving" from "stuck", and it does not
+	# move with world scale.
+	var window_seconds := 480.0 / 60.0
+	var coverable: float = minf(unit.move_speed * window_seconds, initial_distance)
+	if progress < coverable * 0.25:
 		print("  [FAIL] Unit made only ", progress, "m of progress toward a ", initial_distance,
-			"m trip (closest approach ", closest_distance, "m, final ", final_distance,
+			"m trip in ", window_seconds, "s (it could cover ~", coverable,
+			"m at move_speed ", unit.move_speed, "); closest approach ", closest_distance, "m, final ", final_distance,
 			"m). Sampled positions (every 1s): ", positions,
 			". current_order=", unit.current_order, " move_speed=", unit.move_speed,
 			" nav_agent valid=", is_instance_valid(unit.nav_agent))

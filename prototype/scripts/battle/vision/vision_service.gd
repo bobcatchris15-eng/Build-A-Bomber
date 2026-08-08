@@ -1,5 +1,7 @@
 class_name VisionService
 extends RefCounted
+
+const TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
 # Who can see what, and the grey sheet drawn over what they cannot.
 #
 # PORTED, NOT REDESIGNED. The old implementation (skirmish.gd:735-1017) is good
@@ -72,7 +74,12 @@ const HIDE_RANGE_MULT := 1.15
 const GRID_CELL := 4.0
 const EXPLORED_ALPHA := 0.55
 const UNEXPLORED_ALPHA := 1.0
-const SHROUD_HEIGHT := 0.4
+# Clearance ABOVE the terrain maximum, not an absolute height. The old value
+# was a bare 0.4, which happened to equal GROUND_NOISE_AMPLITUDE exactly - it
+# sat on the terrain ceiling by coincidence rather than by rule, and once the
+# world scaled the ground grew straight through it. See
+# TerrainBuilderScript.max_height().
+const SHROUD_CLEARANCE := 0.4
 
 const SHROUD_SHADER := """
 shader_type spatial;
@@ -150,8 +157,18 @@ func build_shroud() -> MeshInstance3D:
 	mat.set_shader_parameter("shroud_tex", _texture)
 	mat.set_shader_parameter("map_half", _half)
 	inst.material_override = mat
-	inst.position = Vector3(0, SHROUD_HEIGHT, 0)
+	inst.position = Vector3(0, _shroud_height(), 0)
 	return inst
+
+
+# Above the highest ground on this map, so no hilltop renders through the fog.
+func _shroud_height() -> float:
+	var map_def: Dictionary = {}
+	if _controller != null and "current_map" in _controller:
+		map_def = _controller.current_map
+	if map_def.is_empty():
+		return SHROUD_CLEARANCE
+	return TerrainBuilderScript.max_height(map_def) + SHROUD_CLEARANCE
 
 
 # --- Queries -----------------------------------------------------------------
