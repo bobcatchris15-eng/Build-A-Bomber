@@ -296,10 +296,23 @@ func _setup_terrain() -> void:
 	if DisplayServer.get_name() == "headless":
 		nav = TerrainBuilder.build_navmeshes(current_map, holes)
 	else:
+		# Genuinely async, not just spread across frames - see
+		# bake_pending_entry_async()'s header for why the per-frame version
+		# still blocked long enough to trip Windows' Not Responding watchdog.
+		# Safe specifically because scene_router.gd's Deploy gate already
+		# withholds player control until world_is_ready (set below, only
+		# after every surface reports back), so nothing can query a region
+		# whose mesh has not landed yet.
 		nav = TerrainBuilder.build_navmeshes_deferred(current_map, holes)
+		var remaining := {"n": nav["pending"].size()}
+		var done := false
 		for entry in nav["pending"]:
+			TerrainBuilder.bake_pending_entry_async(entry, nav["cell_size"], func():
+				remaining["n"] -= 1
+				if remaining["n"] <= 0:
+					done = true)
+		while not done:
 			await get_tree().process_frame
-			TerrainBuilder.bake_pending_entry(entry, nav["cell_size"])
 
 	ground_nav_map = nav.ground_map
 	water_nav_map = nav.water_map

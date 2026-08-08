@@ -1050,6 +1050,34 @@ static func build_navmeshes_deferred(map_def: Dictionary, extra_holes: Array = [
 static func bake_pending_entry(entry: Dictionary, cell_size: float) -> void:
 	NavigationServer3D.region_set_navigation_mesh(entry["region"], _bake_nav_mesh(entry["verts"], cell_size))
 
+
+# Async twin of bake_pending_entry(). build_navmeshes_deferred() already
+# spreads Recast's ~1s-per-surface cost across separate FRAMES, but each of
+# those frames still blocks the main thread for the full duration of that
+# surface's bake - a scale=4 map's four surfaces are enough back-to-back
+# near-1-second stalls (with the message pump stalled between them, not
+# during) for Windows to grey the title bar and report Not Responding, which
+# is what a scale=1 map's much smaller surfaces never triggered. Recast
+# itself does not need the main thread - the mid-match rebake path already
+# proved that (_bake_region_async). The only reason the LOAD path used the
+# synchronous version was that a match with no loading gate needs the
+# navmesh before the first unit can act - but scene_router.gd's Deploy gate
+# already withholds control until world_is_ready flips, which is exactly
+# the synchronization point this needs: bake off-thread, and simply hold
+# world_is_ready (and therefore Deploy) until every surface reports back.
+static func bake_pending_entry_async(entry: Dictionary, cell_size: float, on_done: Callable) -> void:
+	var nav_mesh = NavigationMesh.new()
+	nav_mesh.cell_size = cell_size
+	nav_mesh.cell_height = NAV_CELL_HEIGHT
+	nav_mesh.agent_max_climb = cell_size * AGENT_MAX_CLIMB_CELLS
+	nav_mesh.agent_radius = 0.1
+	var source = NavigationMeshSourceGeometryData3D.new()
+	source.add_faces(entry["verts"], Transform3D.IDENTITY)
+	var region: RID = entry["region"]
+	NavigationServer3D.bake_from_source_geometry_data_async(nav_mesh, source, func():
+		NavigationServer3D.region_set_navigation_mesh(region, nav_mesh)
+		on_done.call())
+
 # --- Visuals ---
 
 static func spawn_visuals(map_def: Dictionary, parent: Node3D):
