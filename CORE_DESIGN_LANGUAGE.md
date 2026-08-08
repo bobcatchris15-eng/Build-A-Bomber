@@ -89,6 +89,8 @@ So the implementation runs the other way: **the environment is scaled up by 16×
 
 `prototype/scripts/world_scale.gd` is the single source of truth for the multiplier, applied to map geometry, terrain dressing, and the various derived grids (navmesh, flow fields, vision, fog) that would otherwise need 256× the cells to keep pace.
 
+**The wall is fidelity, not cost.** `tools/probe_streaming_wall.gd` swept `scattered_peaks` (the largest bundled map) from world_scale 4 through 16 and confirmed the self-bounding grid formulas in `terrain_builder.gd`/`flow_field.gd` do exactly what they were built for: bake time stays flat (~210 ms), voxel dimension stays flat (~675²), flow-field cell count stays flat (1.21M) at every scale up to 16× on a map whose half-extent reaches 35 km. Nothing segfaults and nothing gets slower. What changes is the cell itself — `cell_size` grows from ~26 to ~105 units across that sweep, and at 105 units a single voxel is wider than most buildings on the map. The navmesh stays cheap by getting too coarse to resolve gameplay-scale detail, not by running out of budget. That coarseness is exactly what produced the exit-position and dock-bay bugs fixed at world_scale=4 (a few units off-mesh); at 16× the same mechanism would be measured in tens of units. Tiling the navmesh (rather than one map-wide bake) is what buys fidelity back without paying the cost back — it is a precision fix, not a performance one.
+
 ### 3.2 Lighting specifics
 
 "Heavy overcast, flat diffused" is a deliberate constraint, not a mood note. It does three jobs at once:
