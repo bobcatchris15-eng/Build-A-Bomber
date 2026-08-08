@@ -1643,14 +1643,53 @@ static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D):
 	parent.add_child(body)
 	body.global_position = Vector3(obstacle.center.x, collider_height / 2.0, obstacle.center.z)
 
-# A rough rock cluster filling the footprint - primitive meshes, not a new
-# Blender asset (avoids the fragile import pipeline for pure decoration).
-# Seeded from position so a given map's obstacles always look the same run
-# to run (deterministic for screenshot verification). Returns the collider
-# height _spawn_obstacle() should use for this obstacle.
+# Authored boulders now exist (tools/blender/build_terrain_props.py) - a
+# rock cluster prefers a pool of 4 real boulder_N.glb variants, picked
+# deterministically from the obstacle's own position so a given map's
+# obstacles still look the same run to run. Falls back to the original
+# box-primitive jumble below if the authored assets are missing (a fresh
+# checkout before the Blender build has run, or an art pipeline hiccup) -
+# same "degrade to boxes rather than to nothing" contract as
+# building_mesh.gd's own build().
+const BOULDER_POOL_SIZE := 4
+const BOULDER_MODEL_DIR := "res://assets/models/terrain/boulder_%d.glb"
+
+# Checked ONCE, before adding anything - the whole pool is generated in a
+# single Blender batch (tools/blender/build_terrain_props.py), so "some but
+# not all of boulder_0..3.glb exist" isn't a real state worth handling. This
+# keeps the fallback all-or-nothing too: either every rock in a cluster is
+# authored art, or every rock is the box-primitive placeholder, never a mix.
+static func _spawn_authored_boulders(obstacle: Dictionary, parent: Node3D, rng: RandomNumberGenerator) -> bool:
+	if not ResourceLoader.exists(BOULDER_MODEL_DIR % 0):
+		return false
+	for i in range(4):
+		var idx: int = rng.randi() % BOULDER_POOL_SIZE
+		var packed := load(BOULDER_MODEL_DIR % idx) as PackedScene
+		if packed == null:
+			continue
+		var inst := packed.instantiate() as Node3D
+		if inst == null:
+			continue
+		var scale_factor := rng.randf_range(0.8, 1.4)
+		inst.scale = Vector3.ONE * scale_factor
+		var ox = rng.randf_range(-obstacle.half_extents.x * 0.7, obstacle.half_extents.x * 0.7)
+		var oz = rng.randf_range(-obstacle.half_extents.y * 0.7, obstacle.half_extents.y * 0.7)
+		inst.position = Vector3(obstacle.center.x + ox, 0.0, obstacle.center.z + oz)
+		inst.rotation.y = rng.randf_range(0, TAU)
+		parent.add_child(inst)
+	return true
+
+# A rough rock cluster filling the footprint - primitive meshes, the
+# fallback when the authored boulder pool above is unavailable (avoids the
+# fragile import pipeline entirely breaking obstacle visuals). Seeded from
+# position so a given map's obstacles still look the same run to run
+# (deterministic for screenshot verification). Returns the collider height
+# _spawn_obstacle() should use for this obstacle.
 static func _spawn_rock_obstacle(obstacle: Dictionary, parent: Node3D) -> float:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(obstacle.center)
+	if _spawn_authored_boulders(obstacle, parent, rng):
+		return 3.0
 	for i in range(5):
 		var rock = MeshInstance3D.new()
 		var box = BoxMesh.new()
