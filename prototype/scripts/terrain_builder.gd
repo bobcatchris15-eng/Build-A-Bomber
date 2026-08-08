@@ -371,6 +371,28 @@ static func max_height(map_def: Dictionary) -> float:
 	return h
 
 
+# How far the navmesh surface can sit from where a unit's body actually
+# stands, vertically.
+#
+# The ground navmesh SOURCE geometry is deliberately flat on maps without a
+# heightmap (see _build_ground_faces), while terrain_height_at() - which is
+# what actually positions a body - is not. That gap is by design and was
+# harmless at 0.4 units of relief. Scaling the world multiplied the relief
+# without touching NavigationAgent3D.path_desired_distance, which is measured
+# in 3D: at world_scale=4 the vertical error alone (~1 unit) consumed the
+# entire 1-unit corner tolerance, so an agent sat exactly at the threshold of
+# its first corner and never advanced. The unit then steered on a corner
+# offset of a few centimetres that flipped sign every tick - a stationary
+# wobble, which is what this looked like on screen.
+#
+# Heightmap maps emit real corner heights, so only the bake quantisation
+# applies there.
+static func nav_vertical_slack(map_def: Dictionary) -> float:
+	if _get_heightmap_image(map_def):
+		return NAV_CELL_HEIGHT * 2.0
+	return max_height(map_def) + NAV_CELL_HEIGHT
+
+
 static func height_at(map_def: Dictionary, x: float, z: float) -> float:
 	# RTS_CORE_ROADMAP.md B4/B6: a real heightmap FULLY REPLACES the
 	# analytic noise+hills+water_blobs path below (not layered on top of

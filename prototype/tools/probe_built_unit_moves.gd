@@ -55,6 +55,17 @@ func _init():
 		await process_frame
 
 	var destination := Vector3(0, 0, 0)
+	if is_instance_valid(unit.nav_agent):
+		var m: RID = unit.nav_agent.get_navigation_map()
+		print("unit nav_map=", m, " ground=", battle.get_ground_nav_map(),
+			" amphibious=", (battle.get_amphibious_nav_map() if battle.has_method("get_amphibious_nav_map") else RID()),
+			" water=", battle.get_water_nav_map())
+		print("is_amphibious=", unit.is_amphibious, " is_naval=", ("is_naval" in unit and unit.is_naval))
+		var pth = NavigationServer3D.map_get_path(m, unit.global_position, destination, true)
+		print("path on unit map: size=", pth.size(), " first=", (pth[0] if pth.size() > 0 else Vector3.ZERO),
+			" last=", (pth[-1] if pth.size() > 0 else Vector3.ZERO))
+		var gp = NavigationServer3D.map_get_path(battle.get_ground_nav_map(), unit.global_position, destination, true)
+		print("path on GROUND map: size=", gp.size())
 	battle.orders.move([unit], destination)
 
 	var start_dist: float = unit.global_position.distance_to(destination)
@@ -63,8 +74,18 @@ func _init():
 		await process_frame
 		var d: float = unit.global_position.distance_to(destination)
 		best = min(best, d)
-		if tick % 1000 == 0:
-			print("  tick ", tick, " pos=", unit.global_position, " dist=", d)
+		if tick % 500 == 0:
+			var st = -1
+			if unit.harvester != null:
+				st = unit.harvester.state
+			var nc = Vector3.ZERO
+			if is_instance_valid(unit.nav_agent):
+				nc = unit.nav_agent.get_next_path_position()
+			print("  tick ", tick, " pos=", unit.global_position, " dist=", d,
+				" order=", (unit.current_order.type if unit.current_order != null else -1),
+				" fsm_state=", st, " internal_dest=", unit._has_internal_destination,
+				" vel=", unit.velocity, " next_corner=", nc,
+				" is_harv=", unit.is_harvester)
 		if d < 12.0:
 			break
 
@@ -87,7 +108,7 @@ func _ground_blueprint(_battle) -> Dictionary:
 			continue
 		var loco = parsed.get("locomotion", {})
 		var type_id: String = str(loco.get("type_id", "")) if typeof(loco) == TYPE_DICTIONARY else str(loco)
-		if type_id in ["wheels", "tracked_treads", "half_track", "hover_engine"]:
+		if type_id == "wheels" and file.begins_with("ore_"):
 			print("using blueprint ", file, " locomotion=", type_id)
 			return parsed
 	return {}
