@@ -207,6 +207,13 @@ func test_power_gates_production_rate() -> bool:
 	if economy.credits(0) != before_refusal:
 		print("  [FAIL] A refused spend must not deduct anything")
 		return false
+	# queue_free() is deferred to end of frame; the test runner does not flush
+	# a frame between suites, so without this every structure `drain` (all
+	# left at the default Vector3.ZERO position, never given a real one)
+	# stays in the global "structures" group and can overlap a later suite's
+	# own placement checks near the origin. Cost the placement suite three
+	# failures the day the refinery's footprint grew enough to reach that far.
+	await tree.process_frame
 	print("  [PASS] Power and spending")
 	return true
 
@@ -305,5 +312,8 @@ func test_refinery_bays_are_exclusive_and_reclaimable() -> bool:
 	a.queue_free()
 	b.queue_free()
 	refinery.queue_free()
+	# See test_power_gates_production_rate()'s matching comment - queue_free()
+	# is deferred, and this refinery is left at the default Vector3.ZERO.
+	await tree.process_frame
 	print("  [PASS] Dock bays")
 	return true
