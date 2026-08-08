@@ -30,6 +30,8 @@ const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_cat
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+# For its static hopper formula only - no state machine is instantiated here.
+const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
 const WeaponRange = preload("res://scripts/weapon_range.gd")
 
@@ -60,6 +62,15 @@ static func analyze(hull: Node3D) -> Dictionary:
 		"has_weapons": false,
 		"drivetrain": {},
 		"weapon_range": {},
+		# Harvesting. A design that mounts a harvester arm is a fundamentally
+		# different KIND of thing from everything else in a roster - it is the
+		# only unit that makes money rather than spends it - and until now the
+		# only sign of that on a roster card was the word "unarmed", which a
+		# scout and a sensor platform also earn. Fielding twelve unarmed cards
+		# and discovering none of them harvest is a real way to lose a match.
+		"is_harvester": false,
+		"harvester_modules": 0,
+		"cargo_capacity": 0,
 	}
 	# Called UNCONDITIONALLY, before the hull validity check below, and this is
 	# load-bearing: both analyzers guard against a null hull internally and return
@@ -93,7 +104,10 @@ static func analyze(hull: Node3D) -> Dictionary:
 
 	var armor_material := str(hull.get_meta("armor_material", "hardened_steel"))
 	var armor_thickness := float(hull.get_meta("armor_thickness", 1.0))
-	var faction := str(hull.get_meta("faction", "industrialists"))
+	# See drivetrain.gd's matching default: absent meta means "no faction yet",
+	# which is the Design Lab, and NO_FACTION resolves every passive to its
+	# unmodified base value.
+	var faction := str(hull.get_meta("faction", FactionCatalog.NO_FACTION))
 	var hull_type := str(hull.get_meta("type_id", "medium_hull"))
 	var hull_scale = hull.get_meta("hull_scale", Vector3.ONE)
 
@@ -128,6 +142,20 @@ static func analyze(hull: Node3D) -> Dictionary:
 		out["cost_crystal"] += int(c.y)
 		if data.category == "generator":
 			out["energy_capacity"] += data.get_energy_capacity()
+		if data.type_id == "resource_harvester":
+			out["harvester_modules"] += 1
+
+	# Payload, quoted from HarvesterFSM's own formula rather than re-derived.
+	# The Design Lab's stat rail has twice had to delete a local re-derivation
+	# that drifted from combat (see drivetrain.gd's header); a roster card
+	# promising a hopper size the match does not honour would be the same bug
+	# in a new place, and "how much does it carry" is exactly what a player
+	# picks a hauler on.
+	out["is_harvester"] = out["harvester_modules"] > 0
+	if out["is_harvester"]:
+		out["cargo_capacity"] = HarvesterFSMScript.capacity_for(
+			out["harvester_modules"], hull_type,
+			ModuleCatalog.resource_bay_capacity(hull))
 
 	# The price, from the materials. Crystal converts at 2x, so a design leaning
 	# on advanced modules simply costs more - see ResourceCatalog.

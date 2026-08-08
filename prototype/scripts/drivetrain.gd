@@ -66,6 +66,49 @@ const OVERLOAD_EXPONENT := 1.8
 ## as SPEED_FLOOR. Reached at ~2.3x capacity.
 const OVERLOAD_FLOOR := 0.2
 
+## Underload response - the mirror of the three constants above, and Chris's
+## ask that "being significantly under weight limit should give you a speed
+## bonus as well".
+##
+## The point is to make running gear a real choice in BOTH directions. Before
+## this, over-speccing the drivetrain bought you exactly one thing: headroom
+## you were not using. Capacity was a wall you either hit or did not, so every
+## design that came in under it played identically whether it had 1% of slack
+## or 60%, and the only reason to fit more running gear than you needed was
+## fear of a future refit. Now light-and-overpowered is a build.
+##
+## Why a DEADZONE rather than a bonus that starts the moment you are under:
+## a design sitting at 0.95 load is not "light", it is merely legal, and
+## paying it a bonus would mean literally every non-overloaded design in the
+## game runs faster than its rated top speed - which makes the rating a lie
+## and the bonus invisible, since a universal multiplier is the same as none.
+## The bonus has to be earned by deliberately carrying less than you could,
+## so nothing happens until you are a quarter under.
+##
+## Why the ceiling is modest: this multiplies a speed that has ALREADY been
+## helped by being light, because weight is in the thrust/weight term feeding
+## power_top_speed. A stripped design is being paid twice, exactly as an
+## overweight one is punished twice (see OVERLOAD_EXPONENT). 1.25 is the
+## largest ceiling that did not let a bare hull on heavy running gear
+## out-run purpose-built scouts.
+##
+## The exponent is BELOW 1.0 where the overload exponent is above it, and
+## that asymmetry is deliberate: the penalty should bite hard and early
+## because it is a warning, while the reward should pay out early and then
+## flatten because it is an incentive. Concave means the first slice of
+## slack is worth the most and stripping a design to nothing has diminishing
+## returns, so there is a point past which shedding more weight stops being
+## the obvious answer.
+##
+##   load 0.75 -> 1.000   (nothing yet - this is the deadzone edge)
+##   load 0.60 -> 1.079
+##   load 0.50 -> 1.117
+##   load 0.25 -> 1.189
+##   load 0.00 -> 1.250
+const UNDERLOAD_THRESHOLD := 0.75
+const UNDERLOAD_CEILING := 1.25
+const UNDERLOAD_EXPONENT := 0.7
+
 ## Per-locomotor tweak response, replacing the if/elif chain that used to sit
 ## inside _recalculate_move_speed().
 ##
@@ -290,7 +333,14 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	var thickness := 1.0
 	var material := "hardened_steel"
 	var hull_scale := Vector3.ONE
-	var faction := "industrialists"
+	# NO_FACTION, not "industrialists". A hull with no faction meta is a Design
+	# Lab hull, and the Lab now shows base stats: defaulting to a real faction
+	# here meant an unassigned design was silently quoted with the
+	# Industrialists' -20% armour weight passive, so the weight and load figures
+	# the player tuned against were wrong for nine of the ten factions they
+	# could pick at match setup. Battle spawns always set the meta explicitly
+	# (blueprint_manager.reconstruct_vehicle), so nothing there changes.
+	var faction := FactionCatalog.NO_FACTION
 	if is_instance_valid(hull_node):
 		hull_type = str(hull_node.get_meta("type_id", "medium_hull"))
 		if hull_node.has_meta("armor_thickness"):
@@ -364,6 +414,8 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 			"has_locomotion": false, "weight": weight, "capacity": 0.0,
 			"thrust": thrust, "load_ratio": 0.0, "is_overloaded": false,
 			"overload_multiplier": 1.0, "chassis_top_speed": 0.0,
+			"underload_multiplier": 1.0, "is_underloaded": false,
+			"speed_gained_from_underload": 0.0,
 			"power_top_speed": 0.0, "top_speed": 0.0, "move_speed": 0.0,
 			"speed_lost_to_overload": 0.0, "capacity_limited": false,
 		}
@@ -388,7 +440,27 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	if load_ratio > 1.0:
 		overload_multiplier = maxf(OVERLOAD_FLOOR, pow(1.0 / load_ratio, OVERLOAD_EXPONENT))
 
-	var move_speed: float = maxf(SPEED_FLOOR, top_speed * overload_multiplier)
+	# The mirror image. Gated on capacity > 0 as well as on the ratio, because
+	# load_ratio is left at 0.0 when there is no capacity to divide by - a
+	# design whose running gear carries nothing would otherwise read as
+	# maximally light and collect the full bonus for having no drivetrain.
+	var underload_multiplier := 1.0
+	if capacity > 0.0 and load_ratio < UNDERLOAD_THRESHOLD:
+		var slack: float = clampf((UNDERLOAD_THRESHOLD - load_ratio) / UNDERLOAD_THRESHOLD, 0.0, 1.0)
+		underload_multiplier = 1.0 + (UNDERLOAD_CEILING - 1.0) * pow(slack, UNDERLOAD_EXPONENT)
+
+	# Only one of the two can ever be off 1.0 - they are opposite sides of the
+	# same threshold - so multiplying both is just the cheapest way to write
+	# "whichever applies" without a branch that could disagree with the
+	# reported figures below.
+	#
+	# Note this is applied AFTER the chassis cap rather than inside it, which
+	# means a very light design genuinely exceeds its chassis rating by up to
+	# 25%. That is intended: the cap is what a chassis does under its rated
+	# load, and on most of the roster the chassis is the binding constraint,
+	# so folding the bonus in underneath the cap would silently delete it for
+	# exactly the designs it is meant to reward.
+	var move_speed: float = maxf(SPEED_FLOOR, top_speed * overload_multiplier * underload_multiplier)
 
 	# Faction passives, applied here so the Design Lab reads the same number
 	# combat runs. air_speed_mult is gated on the design actually being
@@ -407,6 +479,12 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 		"load_ratio": load_ratio,
 		"is_overloaded": load_ratio > 1.0,
 		"overload_multiplier": overload_multiplier,
+		"underload_multiplier": underload_multiplier,
+		"is_underloaded": underload_multiplier > 1.0,
+		# Absolute speed gained from running light, in the same units as
+		# speed_lost_to_overload, so the Lab can state the reward and the
+		# penalty the same way.
+		"speed_gained_from_underload": maxf(0.0, top_speed * underload_multiplier - top_speed),
 		# What the chassis is rated for, before this design's mass.
 		"chassis_top_speed": chassis_top_speed,
 		# What thrust/weight alone would allow, before the chassis cap.

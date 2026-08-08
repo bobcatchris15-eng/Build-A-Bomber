@@ -159,11 +159,35 @@ func setup(unit: Node3D, world) -> void:
 # Sizes the hopper and the extraction rate from the design. Called by unit.gd
 # right after setup(); a harvester that never gets configured keeps the medium
 # single-module defaults, which is what every synthetic test builds.
-func configure(module_count: int, hull_type: String) -> void:
+func configure(module_count: int, hull_type: String, bay_capacity: float = 0.0) -> void:
 	modules = maxi(1, module_count)
 	var tier: String = ModuleCatalogScript.get_hull_size_tier(hull_type)
 	_tier_mult = float(TIER_CAPACITY_MULT.get(tier, 1.0))
-	capacity = maxi(1, int(round(float(BASE_CAPACITY) * float(modules) * _tier_mult)))
+	capacity = capacity_for(module_count, hull_type, bay_capacity)
+
+
+# The hopper formula, as a static so a UI can quote it without instantiating a
+# state machine. Extracted when the Blueprint Library and the match-setup roster
+# cards started showing a harvester's payload: a card that re-derived the number
+# is exactly how the Design Lab's stat rail drifted from combat twice before
+# (see drivetrain.gd's header), and "how much does this thing carry" is precisely
+# the figure a player picks a hauler on.
+static func capacity_for(module_count: int, hull_type: String, bay_capacity: float = 0.0) -> int:
+	var mods: int = maxi(1, module_count)
+	var tier: String = ModuleCatalogScript.get_hull_size_tier(hull_type)
+	var tier_mult: float = float(TIER_CAPACITY_MULT.get(tier, 1.0))
+	# Resource Bays are added AFTER the tier multiplier, not multiplied by it.
+	# A bay is a fixed physical volume bolted to the hull - it holds what it
+	# holds whether the chassis under it is light or heavy - whereas the tier
+	# multiplier models the hull's own built-in hopper. Folding bays inside it
+	# would have made the same bay worth twice as much on a heavy as on a light,
+	# which is backwards: bays exist so a LIGHT harvester has an answer to a long
+	# haul without having to become a heavy one.
+	#
+	# Defaulted to 0.0 so the synthetic tests that call configure(1, "medium_hull")
+	# keep their existing capacity exactly.
+	return maxi(1, int(round(
+		float(BASE_CAPACITY) * float(mods) * tier_mult + maxf(0.0, bay_capacity))))
 
 
 func cargo() -> int:

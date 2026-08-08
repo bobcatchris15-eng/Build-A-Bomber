@@ -1666,6 +1666,115 @@ def build_tail_fin(name, height=0.5, width_bottom=0.3, width_top=0.12, thickness
 	return obj
 
 
+def build_resource_bay_tub(name, width=1.0, height=1.0, depth=1.0, ribs=4,
+		color=(0.42, 0.36, 0.20)):
+	"""The Resource Bay's hopper body - an open-topped ore tub.
+
+	Built at unit dimensions so visual_builder.gd can scale it per-axis from
+	the bay's three tweaks: width from hatch_width, height from hopper_depth
+	and the whole thing from bay_volume. That is why the ribs run VERTICALLY
+	and the flange is a flat band rather than a moulding: both survive a
+	non-uniform scale without visibly shearing, which a diagonal brace or a
+	rounded lip would not.
+
+	The silhouette is deliberately industrial-mundane - a skip, not a
+	sci-fi container. It is the least glamorous part on the vehicle and it
+	should read that way at RTS camera distance: wide flat walls that catch
+	the key light, a heavy top flange to break the outline, and enough rib
+	rhythm along the sides that it never reads as a plain box.
+
+	Walls slope OUTWARD toward the top (the tub is narrower at the floor),
+	which is both how a real dump body is drawn and the thing that makes it
+	legible from directly above, where most of the game is played.
+	"""
+	bm = bmesh.new()
+	hw, hh, hd = width * 0.5, height * 0.5, depth * 0.5
+
+	# Floor pan, then four walls raked outward. Built as four boxes rather
+	# than an extruded shell so the tub keeps a real wall THICKNESS - the
+	# open top is the whole read of the part, and a zero-thickness rim looks
+	# like a hole rather than a container.
+	wall = 0.055
+	add_box(bm, (0, wall * 0.5, 0), (width * 0.9, wall, depth * 0.9), bevel=0.01)
+
+	rake = 0.10  # how far the top lip stands proud of the floor, per side
+	for sign in (-1, 1):
+		# Long walls (+/-X), raked out along X.
+		add_box(bm, (sign * (hw * 0.9 + rake * 0.5), hh, 0),
+			(wall, height, depth * 0.92),
+			rot_axis='z', rot_angle=math.radians(-sign * 4.5), bevel=0.012)
+		# End walls (+/-Z), raked out along Z.
+		add_box(bm, (0, hh, sign * (hd * 0.9 + rake * 0.5)),
+			(width * 0.92, height, wall),
+			rot_axis='x', rot_angle=math.radians(sign * 4.5), bevel=0.012)
+
+	# Top flange. One continuous band around the mouth, which is what stops
+	# the open top reading as a cut rather than as an edge.
+	flange = 0.07
+	for sign in (-1, 1):
+		add_box(bm, (sign * (hw + rake * 0.5), height, 0),
+			(flange * 1.6, flange, depth + flange * 2.0), bevel=0.015)
+		add_box(bm, (0, height, sign * (hd + rake * 0.5)),
+			(width + flange * 2.0, flange, flange * 1.6), bevel=0.015)
+
+	# Vertical stiffener ribs down the long walls, plus a bolt row along the
+	# floor seam. Rib count is a parameter so the part can be rebuilt heavier
+	# later without touching the proportions.
+	for sign in (-1, 1):
+		for i in range(ribs):
+			t = (i + 0.5) / ribs - 0.5
+			add_box(bm, (sign * (hw + rake * 0.55), hh * 0.95, t * depth * 0.82),
+				(0.05, height * 0.86, 0.09), bevel=0.008)
+		greeble_rivet_row(bm,
+			(sign * (hw * 0.92), wall * 1.2, -hd * 0.8),
+			(sign * (hw * 0.92), wall * 1.2, hd * 0.8),
+			7, radius=0.022, height=0.02, axis='x')
+
+	# Discharge chute on the -Z end, angled down: this is the end that lines
+	# up with a refinery bay, and having a visible unload point is what makes
+	# the module read as "carries ore" rather than "is a box".
+	add_box(bm, (0, height * 0.30, -(hd + rake * 0.5 + 0.10)),
+		(width * 0.42, height * 0.34, 0.20),
+		rot_axis='x', rot_angle=math.radians(14.0), bevel=0.02)
+	greeble_bolt_ring(bm, (0, height * 0.30, -(hd + rake * 0.5 + 0.20)),
+		width * 0.20, count=8, bolt_radius=0.022, axis='z')
+
+	# Fill-level sight gauge on one end - a small readable detail that gives
+	# the part an "up" and stops it being symmetric under mirroring.
+	add_box(bm, (hw * 0.55, hh, hd + rake * 0.55), (0.07, height * 0.7, 0.045), bevel=0.006)
+
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.35, roughness=0.68)
+	return obj
+
+
+def build_resource_bay_lid(name, width=1.0, depth=1.0, color=(0.30, 0.31, 0.33)):
+	"""The Bay's hinged spill cover, exported separately from the tub.
+
+	Two pieces rather than one so visual_builder.gd can scale the lid by
+	hatch_width alone while the tub also answers to hopper_depth - and so a
+	future open/closed animation has a node to rotate. It is modelled flat
+	and hinged along +Z, sitting at the tub's mouth.
+	"""
+	bm = bmesh.new()
+	add_box(bm, (0, 0, 0), (width, 0.055, depth), bevel=0.015)
+	# Diagonal-free bracing: two straight spines, for the same non-uniform
+	# scale reason as the tub's vertical ribs.
+	for sign in (-1, 1):
+		add_box(bm, (sign * width * 0.26, 0.045, 0), (0.06, 0.05, depth * 0.9), bevel=0.008)
+	add_box(bm, (0, 0.045, 0), (width * 0.9, 0.05, 0.06), bevel=0.008)
+	# Hinge knuckles along the +Z edge and a grab handle on the free edge.
+	for t in (-0.3, 0.0, 0.3):
+		add_cyl_axis(bm, (t * width, 0.0, depth * 0.5), 0.045, width * 0.12, 'x', segments=8)
+	add_box(bm, (0, 0.09, -depth * 0.42), (width * 0.3, 0.045, 0.045), bevel=0.01)
+
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.5, roughness=0.5)
+	return obj
+
+
 def build_accessory(name, kind, color, **kwargs):
 	"""Standalone small greeble accessories - also usable directly as weapon
 	sub-parts (headlight cluster, exhaust, antenna, hatch, vent, toolbox)."""
@@ -2510,6 +2619,198 @@ def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.
 
 
 # ---------------------------------------------------------------------------
+# Terrain props: boulders and resource-node dressing
+# ---------------------------------------------------------------------------
+# CORE_DESIGN_LANGUAGE.md's Sec 3.1/3.2 substitution table only holds if a
+# "boulder" reads as a boulder at 1:16 scale - terrain_builder.gd's
+# _spawn_rock_obstacle() has used raw BoxMesh clusters since obstacles first
+# shipped (deliberately, at the time: "avoids the fragile import pipeline
+# for pure decoration"), and resource_node.gd's four resource types are
+# similarly a bare PrismMesh/CylinderMesh/BoxMesh/SphereMesh per type. Both
+# already say in their own comments that this is a placeholder, not final
+# art.
+#
+# Every shape here comes from ONE seeded RNG rather than a hand-placed
+# sculpt, so a POOL of several variants per kind (obstacles/nodes pick by a
+# deterministic hash of world position - the same convention
+# _spawn_rock_obstacle already uses: rng.seed = hash(obstacle.center)) reads
+# as real variety instead of one asset stamped everywhere on the map.
+
+def build_boulder(name, radius=1.0, irregularity=0.4, subdivisions=2, flatten=0.75, seed=0,
+		color=(0.42, 0.4, 0.37), metallic=0.05, roughness=0.95):
+	"""An irregular rock: an icosphere with per-vertex radial noise and a
+	vertical squash, so it reads as a weathered boulder resting on the
+	ground rather than a smooth sphere. subdivisions=2 keeps facets large
+	and readable at RTS zoom - CORE_DESIGN_LANGUAGE.md's "toy physics"
+	aesthetic wants a few real facets, not a photoreal sculpt."""
+	import random
+	rng = random.Random(seed)
+	bm = bmesh.new()
+	ret = bmesh.ops.create_icosphere(bm, subdivisions=subdivisions, radius=radius)
+	verts = ret["verts"]
+	for v in verts:
+		n = v.co.normalized()
+		# Low-frequency lumps (a couple of dominant bulges) plus
+		# high-frequency per-vertex jitter, so the silhouette reads as
+		# irregular rather than uniformly noisy.
+		lump = 1.0 + irregularity * (
+			0.6 * math.sin(n.x * 2.3 + seed) * math.cos(n.z * 1.7 + seed * 0.5)
+			+ 0.4 * (rng.random() - 0.5))
+		v.co = v.co * lump
+	# Squashes Blender Z, which is Godot Y (up) per this file's own GV()/GS()
+	# convention - flattens the boulder's HEIGHT, not its footprint.
+	bmesh.ops.scale(bm, verts=verts, vec=(1.0, 1.0, flatten))
+	# Rests ON the ground rather than being buried or floating - every other
+	# part in this file is authored in final local space, same contract here.
+	min_z = min(v.co.z for v in verts)
+	bmesh.ops.translate(bm, verts=verts, vec=(0, 0, -min_z))
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=metallic, roughness=roughness)
+	return obj
+
+
+def build_ore_outcrop(name, radius=1.1, seed=0, color=(0.5, 0.42, 0.32)):
+	"""A boulder base with a couple of metallic ore veins breaking the
+	surface - reads as "worth mining" rather than "generic rock", the same
+	distinction the derelict/industrial faction language already draws
+	elsewhere in this file between plain and hard-armor material. Two
+	material slots, same convention as finalize_dual() (0=rock, 1=ore) -
+	built directly here rather than through finalize_dual() itself since
+	the rock body and the veins need genuinely different base geometry
+	(icosphere vs. boxes), not just a face-predicate split of one shape."""
+	import random
+	rng = random.Random(seed)
+	bm = bmesh.new()
+	ret = bmesh.ops.create_icosphere(bm, subdivisions=2, radius=radius)
+	verts = ret["verts"]
+	for v in verts:
+		n = v.co.normalized()
+		lump = 1.0 + 0.45 * (
+			0.6 * math.sin(n.x * 2.3 + seed) * math.cos(n.z * 1.7 + seed * 0.5)
+			+ 0.4 * (rng.random() - 0.5))
+		v.co = v.co * lump
+	bmesh.ops.scale(bm, verts=verts, vec=(1.0, 1.0, 0.7))
+	min_z = min(v.co.z for v in verts)
+	bmesh.ops.translate(bm, verts=verts, vec=(0, 0, -min_z))
+
+	for i in range(3):
+		angle = rng.uniform(0, math.tau)
+		r = radius * rng.uniform(0.55, 0.85)
+		pos = (math.cos(angle) * r, radius * rng.uniform(0.35, 0.75), math.sin(angle) * r)
+		# bevel=0.0 deliberately - add_box()'s bevel path REPLACES geometry
+		# via bmesh.ops.bevel, which invalidates the vert references it
+		# returns (a real crash here: ReferenceError, "BMesh data of type
+		# BMVert has been removed", the moment .link_faces was read on the
+		# stale verts afterward). A vein this small doesn't need the bevel
+		# anyway - it reads as a hard mineral edge against the rock's own
+		# soft, noisy silhouette either way.
+		vein_verts = add_box(bm, pos, (radius * 0.22, radius * 0.35, radius * 0.16),
+			rot_axis="y", rot_angle=rng.uniform(0, math.tau), bevel=0.0)
+		for f in {f for v in vein_verts for f in v.link_faces}:
+			f.material_index = 1
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize_dual(obj, name, structural_color=color, armor_color=(0.85, 0.65, 0.25),
+		structural_metallic=0.1, structural_roughness=0.85, armor_metallic=0.75, armor_roughness=0.3)
+	return obj
+
+
+def build_crystal_cluster(name, count=5, base_radius=0.5, height=2.2, seed=0,
+		color=(0.35, 0.55, 0.85)):
+	"""Several tapered spikes at varied height/rotation/lean, clustered
+	around a shared base - the multi-facet look resource_node.gd's single
+	PrismMesh could only gesture at."""
+	import random
+	rng = random.Random(seed)
+	bm = bmesh.new()
+	for i in range(count):
+		angle = (math.tau / count) * i + rng.uniform(-0.3, 0.3)
+		r = base_radius * rng.uniform(0.0, 0.6)
+		spike_h = height * rng.uniform(0.5, 1.0)
+		spike_r = base_radius * rng.uniform(0.22, 0.34)
+		pos = (math.cos(angle) * r, spike_h * 0.5, math.sin(angle) * r)
+		verts = add_cyl_y(bm, pos, spike_r, spike_h, segments=6, radius2=spike_r * 0.08)
+		lean_axis = "x" if i % 2 == 0 else "z"
+		bmesh.ops.rotate(bm, verts=verts, cent=GV(*pos), matrix=rot_matrix(lean_axis, rng.uniform(-0.12, 0.12)))
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.15, roughness=0.12)
+	return obj
+
+
+def build_tree_stand(name, count=3, seed=0, trunk_color=(0.32, 0.24, 0.16), canopy_color=(0.18, 0.32, 0.15)):
+	"""A small cluster of conifers at varied height/position - resource_
+	node.gd's own comment already frames a lumber field as "really just a
+	group of tree seedlings"; this is that idea with a trunk, not a bare
+	cone standing in for the whole tree. Two material slots (0=trunk,
+	1=canopy), same finalize_dual() convention as build_ore_outcrop()."""
+	import random
+	rng = random.Random(seed)
+	bm = bmesh.new()
+	for i in range(count):
+		angle = rng.uniform(0, math.tau)
+		r = rng.uniform(0.0, 0.9) if i > 0 else 0.0
+		tree_h = rng.uniform(2.6, 3.8)
+		trunk_h = tree_h * 0.22
+		pos = (math.cos(angle) * r, 0, math.sin(angle) * r)
+		add_cyl_y(bm, (pos[0], trunk_h * 0.5, pos[2]), 0.09, trunk_h, segments=6)
+		canopy_verts = add_cyl_y(bm, (pos[0], trunk_h + (tree_h - trunk_h) * 0.5, pos[2]),
+			tree_h * 0.24, tree_h - trunk_h, segments=8, radius2=0.0)
+		for f in {f for v in canopy_verts for f in v.link_faces}:
+			f.material_index = 1
+	obj = make_object_from_bmesh(bm, name)
+	finalize_dual(obj, name, structural_color=trunk_color, armor_color=canopy_color,
+		structural_metallic=0.0, structural_roughness=0.95, armor_metallic=0.0, armor_roughness=1.0)
+	return obj
+
+
+def build_oil_derrick(name, seed=0, color=(0.22, 0.22, 0.24)):
+	"""A squat pump-jack frame - reads as infrastructure sitting on the
+	ground rather than a mineral growing out of it, same intent
+	resource_node.gd's existing box "derrick" comment already states."""
+	import random
+	rng = random.Random(seed)
+	bm = bmesh.new()
+	add_box(bm, (0, 0.15, 0), (1.6, 0.3, 1.6), bevel=0.03)
+	for x_sign in (-1, 1):
+		for z_sign in (-1, 1):
+			add_cyl_y(bm, (x_sign * 0.6, 1.2, z_sign * 0.6), 0.06, 2.4, segments=6)
+	add_box(bm, (0, 2.4, 0), (1.5, 0.15, 0.5), bevel=0.02)
+	add_cyl_y(bm, (0, 1.2, 0), 0.08, 2.4, segments=6)
+	obj = make_object_from_bmesh(bm, name)
+	finalize(obj, name, color=color, metallic=0.65, roughness=0.4)
+	return obj
+
+
+def generate_terrain_props():
+	print("--- Building terrain props (boulders, resource-node dressing) ---")
+	import os as _os
+	terrain_dir = _os.path.join(PROJECT_ROOT, "assets", "models", "terrain")
+	_os.makedirs(terrain_dir, exist_ok=True)
+
+	for i in range(4):
+		export_and_cleanup(build_boulder("boulder_%d" % i, radius=1.0 + 0.35 * (i % 3),
+			seed=100 + i, flatten=0.6 + 0.1 * (i % 2)), terrain_dir, "boulder_%d" % i)
+
+	for i in range(3):
+		# Named "ore", not "metal" - ResourceCatalog.canonical() resolves the
+		# "metal" alias to "ore" (ALIASES = {"metal": "ore"}), and
+		# resource_node.gd looks up the authored pool by the CANONICAL id.
+		export_and_cleanup(build_ore_outcrop("resource_ore_%d" % i, seed=200 + i),
+			terrain_dir, "resource_ore_%d" % i)
+	for i in range(3):
+		export_and_cleanup(build_crystal_cluster("resource_crystal_%d" % i, seed=300 + i),
+			terrain_dir, "resource_crystal_%d" % i)
+	for i in range(3):
+		export_and_cleanup(build_tree_stand("resource_lumber_%d" % i, seed=400 + i),
+			terrain_dir, "resource_lumber_%d" % i)
+	for i in range(2):
+		export_and_cleanup(build_oil_derrick("resource_oil_%d" % i, seed=500 + i),
+			terrain_dir, "resource_oil_%d" % i)
+
+	print("--- Terrain props written to %s ---" % terrain_dir)
+
+
+# ---------------------------------------------------------------------------
 # Generate: reusable parts
 # ---------------------------------------------------------------------------
 
@@ -2552,6 +2853,13 @@ def generate_parts():
 	export_and_cleanup(build_tread_plate("tread_plate", color=(0.16, 0.16, 0.17)), PARTS_DIR, "tread_plate")
 	export_and_cleanup(build_tread_belt_loop("tread_belt_loop", color=(0.14, 0.14, 0.15)), PARTS_DIR, "tread_belt_loop")
 	export_and_cleanup(build_screw_drum("screw_drum", color=(0.35, 0.32, 0.28)), PARTS_DIR, "screw_drum")
+
+	# Resource Bay. Two pieces - see the builders' docstrings for why the lid
+	# is not fused into the tub.
+	export_and_cleanup(build_resource_bay_tub("resource_bay_tub", color=(0.42, 0.36, 0.20)),
+		PARTS_DIR, "resource_bay_tub")
+	export_and_cleanup(build_resource_bay_lid("resource_bay_lid", color=(0.30, 0.31, 0.33)),
+		PARTS_DIR, "resource_bay_lid")
 
 	export_and_cleanup(build_wheel_axle_bar("wheel_axle_bar"), PARTS_DIR, "wheel_axle_bar")
 	export_and_cleanup(build_rotor_mast("rotor_mast"), PARTS_DIR, "rotor_mast")

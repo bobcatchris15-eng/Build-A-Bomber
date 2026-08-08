@@ -64,7 +64,7 @@ func get_weight() -> float:
 	
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "dish_aperture", "charge_time", "focal_length", "wheel_size", "tread_width", "blade_length", "leg_length", "leg_width", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "drum_width", "drum_diameter", "wheels_per_axle", "foot_size", "cutter_head", "arm_reach", "projector_diameter", "optic_aperture", "mast_extension", "radar_size", "busbar_gauge", "reactor_length", "cooling_radiator", "skirt_diameter", "plenum_pressure", "field_strength", "strut_height", "intake_size", "front_axle_size", "arm_length"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "bay_volume", "mast_height", "dispersion", "elevation", "fuse_setting", "dish_aperture", "charge_time", "focal_length", "wheel_size", "tread_width", "blade_length", "leg_length", "leg_width", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "drum_width", "drum_diameter", "wheels_per_axle", "foot_size", "cutter_head", "arm_reach", "projector_diameter", "optic_aperture", "mast_extension", "radar_size", "busbar_gauge", "reactor_length", "cooling_radiator", "skirt_diameter", "plenum_pressure", "field_strength", "strut_height", "intake_size", "front_axle_size", "arm_length"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				weight *= val
 		elif tweak_name == "multi_barrel" and val == true:
@@ -116,7 +116,7 @@ func get_cost() -> Vector2i:
 
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "dish_aperture", "charge_time", "focal_length", "wheel_size", "tread_width", "blade_length", "leg_length", "leg_width", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "drum_width", "drum_diameter", "wheels_per_axle", "foot_size", "cutter_head", "arm_reach", "projector_diameter", "optic_aperture", "mast_extension", "radar_size", "busbar_gauge", "reactor_length", "cooling_radiator", "skirt_diameter", "plenum_pressure", "field_strength", "strut_height", "intake_size", "front_axle_size", "arm_length"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "bay_volume", "mast_height", "dispersion", "elevation", "fuse_setting", "dish_aperture", "charge_time", "focal_length", "wheel_size", "tread_width", "blade_length", "leg_length", "leg_width", "emv_level", "nacelle_size", "turbine_compression", "wingspan", "drum_width", "drum_diameter", "wheels_per_axle", "foot_size", "cutter_head", "arm_reach", "projector_diameter", "optic_aperture", "mast_extension", "radar_size", "busbar_gauge", "reactor_length", "cooling_radiator", "skirt_diameter", "plenum_pressure", "field_strength", "strut_height", "intake_size", "front_axle_size", "arm_length"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				m = int(m * val)
 				c = int(c * val)
@@ -219,7 +219,7 @@ func get_dps() -> float:
 	
 	for tweak_name in tweaks:
 		var val = tweaks[tweak_name]
-		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "mast_height", "dispersion", "elevation", "fuse_setting", "charge_time", "cutter_head", "projector_diameter", "coil_count"]:
+		if tweak_name in ["caliber", "barrel_length", "drum_size", "motor_size", "rail_length", "rod_thickness", "engine_length", "seeker_size", "warhead_size", "motor_length", "ascent_thruster", "payload_size", "nozzle_width", "pressure_valve", "lens_aperture", "containment", "radar_dish", "cooling_jacket", "extractor_size", "bay_volume", "mast_height", "dispersion", "elevation", "fuse_setting", "charge_time", "cutter_head", "projector_diameter", "coil_count"]:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				dps *= val
 		elif tweak_name == "multi_barrel" and val == true:

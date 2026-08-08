@@ -212,6 +212,25 @@ func _add_entry_ui(entry: Dictionary) -> void:
 	date_lbl.text = " | " + _format_modified(entry.get("modified_unix", 0))
 	date_lbl.modulate = Color(1, 1, 1, 0.4)
 	meta_hbox.add_child(date_lbl)
+
+	# The one row in this list that says what a design is FOR rather than what
+	# it is made of. Hull type and date do not distinguish an ore hauler from a
+	# tank built on the same chassis, and the Library is where a player goes to
+	# find "the harvester I made" among thirty saves.
+	#
+	# A tag, not another dim meta label: it is deliberately the brightest thing
+	# in this row after the name, because scanning for it is the whole job. It
+	# also carries the payload, so two harvesters in the list are comparable
+	# without opening either. It reads off the roster index entry rather than
+	# reconstructing the design - see list_blueprints(), which derives it while
+	# the blueprint JSON is already parsed and in hand.
+	if bool(entry.get("is_harvester", false)):
+		var harv_lbl = Label.new()
+		harv_lbl.text = "  HARVESTER %d" % int(entry.get("cargo_capacity", 0))
+		harv_lbl.theme_type_variation = "StatLabel"
+		harv_lbl.modulate = Color(1.0, 0.82, 0.35, 1.0)
+		harv_lbl.tooltip_text = "Mounts a Resource Harvester - this design can gather metal and crystal.\nThe number is its hopper: how much it carries per trip, Resource Bays included."
+		meta_hbox.add_child(harv_lbl)
 	
 	var btn_hbox = HBoxContainer.new()
 	entry_vbox.add_child(btn_hbox)

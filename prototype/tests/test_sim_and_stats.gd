@@ -858,6 +858,155 @@ func test_overload_penalty_is_steep_and_monotonic() -> bool:
 	print("  [PASS] Overload costs >=10% of top speed at 10% over, increases monotonically without bottoming out inside the readable band, and never freezes a unit outright.")
 	return true
 
+# The mirror of the suite above. Running significantly under capacity is
+# supposed to BUY something, and the two properties that make it a design
+# decision rather than a free lunch are: nothing happens until you are properly
+# light (or the "bonus" is universal and therefore invisible), and the payout
+# flattens (or stripping a design to nothing is always the right answer).
+func test_underload_bonus_has_a_deadzone_and_diminishing_returns() -> bool:
+	print("Running Test Suite: Underload Speed Bonus Curve...")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
+
+	var mult = func(ratio: float) -> float:
+		if ratio >= Drivetrain.UNDERLOAD_THRESHOLD:
+			return 1.0
+		var slack: float = clampf((Drivetrain.UNDERLOAD_THRESHOLD - ratio) / Drivetrain.UNDERLOAD_THRESHOLD, 0.0, 1.0)
+		return 1.0 + (Drivetrain.UNDERLOAD_CEILING - 1.0) * pow(slack, Drivetrain.UNDERLOAD_EXPONENT)
+
+	# The deadzone. A design that is merely legal is not "light", and paying it
+	# a bonus would mean every non-overloaded design in the game runs above its
+	# rated speed - which makes the rating a lie and the bonus unnoticeable.
+	for ratio in [1.0, 0.95, 0.85, Drivetrain.UNDERLOAD_THRESHOLD]:
+		if not is_equal_approx(mult.call(ratio), 1.0):
+			print("  [FAIL] At load ", ratio, " (at or above the ", Drivetrain.UNDERLOAD_THRESHOLD, " threshold) there should be no bonus, got ", mult.call(ratio))
+			return false
+
+	# It must actually pay inside the band, or the deadzone swallowed it.
+	var at_half = mult.call(0.5)
+	if at_half <= 1.02:
+		print("  [FAIL] At half capacity the bonus should be worth reading; got ", at_half)
+		return false
+
+	# Strictly monotonic - lighter is always at least as fast, never worse.
+	var prev = 1.0
+	for pct in [70, 60, 50, 40, 30, 20, 10, 0]:
+		var m = mult.call(float(pct) / 100.0)
+		if m < prev:
+			print("  [FAIL] Bonus must not decrease as the design gets lighter; at ", pct, "% load got ", m, " against ", prev, " at the heavier step")
+			return false
+		prev = m
+
+	# Capped, and capped where the constant says. An uncapped bonus multiplies a
+	# speed that is ALREADY helped by low mass through thrust/weight.
+	if mult.call(0.0) > Drivetrain.UNDERLOAD_CEILING + 0.0001:
+		print("  [FAIL] An empty design must not exceed UNDERLOAD_CEILING (", Drivetrain.UNDERLOAD_CEILING, "), got ", mult.call(0.0))
+		return false
+
+	# Concave: the first slice of slack is worth more than the last. This is the
+	# property that stops "shed everything" being the universal answer, and it is
+	# the deliberate asymmetry against OVERLOAD_EXPONENT, which is convex.
+	var first_half_gain = mult.call(0.375) - mult.call(Drivetrain.UNDERLOAD_THRESHOLD)
+	var second_half_gain = mult.call(0.0) - mult.call(0.375)
+	if second_half_gain >= first_half_gain:
+		print("  [FAIL] Returns should diminish: the first half of the slack band gained ", first_half_gain, " but the second gained ", second_half_gain, ". A linear or convex payout makes stripping a design strictly dominant.")
+		return false
+	if Drivetrain.UNDERLOAD_EXPONENT >= 1.0:
+		print("  [FAIL] UNDERLOAD_EXPONENT must be below 1.0 for the payout to be concave; got ", Drivetrain.UNDERLOAD_EXPONENT)
+		return false
+
+	print("  [PASS] Underload pays nothing until ", Drivetrain.UNDERLOAD_THRESHOLD, " load, then rises monotonically with diminishing returns to a hard ceiling of x", Drivetrain.UNDERLOAD_CEILING, ".")
+	return true
+
+
+# The curve above is arithmetic. This one checks it is actually WIRED: that a
+# real analysis reports the keys, that they only fire on the correct side of the
+# threshold, and - the part most likely to regress - that the bonus survives the
+# chassis cap. Most of the roster is chassis-limited, so folding the bonus in
+# underneath min(power, chassis) would silently delete it for exactly the
+# designs it exists to reward.
+func test_underload_bonus_is_wired_through_a_real_analysis() -> bool:
+	print("Running Test Suite: Underload Bonus - Wired Into Drivetrain.analyze...")
+	var Drivetrain = preload("res://scripts/drivetrain.gd")
+
+	# Every key must exist on the no-locomotion early return too, or a consumer
+	# reading dt["underload_multiplier"] crashes on an empty hull - which is the
+	# state the Design Lab starts in.
+	var bare: Dictionary = Drivetrain.analyze(null)
+	for key in ["underload_multiplier", "is_underloaded", "speed_gained_from_underload"]:
+		if not bare.has(key):
+			print("  [FAIL] The no-locomotion early return is missing '", key, "'. clear_hull() -> update_stats(null) reads this dictionary.")
+			return false
+	if bare["is_underloaded"]:
+		print("  [FAIL] A design with no locomotion has no capacity to be under; is_underloaded should be false.")
+		return false
+
+	# A featherweight hull on wheels: masses of surplus capacity, so this is
+	# deep inside the bonus band.
+	var make_hull = func(loco_weight: float, cargo: Array) -> Node3D:
+		var hull = Node3D.new()
+		hull.set_meta("type_id", "light_hull")
+		hull.set_meta("locomotion_type", "wheels")
+		hull.set_meta("locomotion_settings", {})
+		var child = Node3D.new()
+		var d = ModuleData.new()
+		d.type_id = "wheels"
+		d.category = "locomotion"
+		d.base_weight = loco_weight
+		child.set_meta("module_data", d)
+		hull.add_child(child)
+		for w in cargo:
+			var c = Node3D.new()
+			var cd = ModuleData.new()
+			cd.type_id = "heavy_cannon"
+			cd.base_weight = w
+			c.set_meta("module_data", cd)
+			hull.add_child(c)
+		root.add_child(hull)
+		return hull
+
+	var light = make_hull.call(1.0, [])
+	var dt_light: Dictionary = Drivetrain.analyze(light)
+	if not dt_light["is_underloaded"]:
+		print("  [FAIL] A bare light hull on wheels sits at load ", dt_light["load_ratio"], " and should be flagged underloaded.")
+		light.free()
+		return false
+	if dt_light["move_speed"] <= dt_light["top_speed"]:
+		print("  [FAIL] The bonus did not survive the chassis cap: move_speed ", dt_light["move_speed"], " should exceed top_speed ", dt_light["top_speed"], ". Applying it under min(power, chassis) deletes it for every chassis-limited design.")
+		light.free()
+		return false
+	if dt_light["speed_gained_from_underload"] <= 0.0:
+		print("  [FAIL] speed_gained_from_underload should be positive for an underloaded design, got ", dt_light["speed_gained_from_underload"])
+		light.free()
+		return false
+	var light_speed: float = dt_light["move_speed"]
+	light.free()
+
+	# The same running gear, loaded up past the threshold. Its combat speed must
+	# be lower - that is the whole decision the bonus creates.
+	var loaded = make_hull.call(1.0, [900.0])
+	var dt_loaded: Dictionary = Drivetrain.analyze(loaded)
+	if dt_loaded["load_ratio"] < Drivetrain.UNDERLOAD_THRESHOLD:
+		print("  [FAIL] Test setup is wrong: the loaded hull is at ", dt_loaded["load_ratio"], " and needs to be past the ", Drivetrain.UNDERLOAD_THRESHOLD, " threshold to be a contrast.")
+		loaded.free()
+		return false
+	if dt_loaded["is_underloaded"]:
+		print("  [FAIL] A design at load ", dt_loaded["load_ratio"], " is past the threshold and must not be flagged underloaded.")
+		loaded.free()
+		return false
+	if is_equal_approx(dt_loaded["underload_multiplier"], 1.0) == false:
+		print("  [FAIL] Past the threshold the multiplier must be exactly 1.0, got ", dt_loaded["underload_multiplier"])
+		loaded.free()
+		return false
+	if dt_loaded["move_speed"] >= light_speed:
+		print("  [FAIL] The loaded design (", dt_loaded["move_speed"], ") should be slower than the light one (", light_speed, ") on identical running gear.")
+		loaded.free()
+		return false
+	loaded.free()
+
+	print("  [PASS] Underload is reported by analyze(), fires only below the threshold, and lifts move_speed above the chassis cap where the bonus would otherwise be invisible.")
+	return true
+
+
 func test_napalm_mortar_tube_points_upward() -> bool:
 	print("Running Test Suite: Napalm Mortar - Tube Elevates Instead Of Firing Into The Deck...")
 	var VisualBuilder = preload("res://scripts/visual_builder.gd")

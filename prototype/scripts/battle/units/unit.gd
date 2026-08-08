@@ -261,7 +261,8 @@ func _detect_harvester(controller: Node) -> void:
 	if is_harvester:
 		harvester = HarvesterFSMScript.new()
 		harvester.setup(self, controller)
-		harvester.configure(modules, _hull_type)
+		harvester.configure(modules, _hull_type,
+			ModuleCatalog.resource_bay_capacity(hull_node))
 
 
 # Speed, weight and overload all come from Drivetrain.analyze() - the same

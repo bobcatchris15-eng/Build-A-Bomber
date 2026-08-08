@@ -438,7 +438,8 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"anti_grav_plate": true, "hydrofoil": true, "water_jet": true, "pontoon_wheels": true,
 	# Support modules with dedicated modular assembly code - must bypass the
 	# monolithic _part(type_id) path or their sub-part assembly branches are never reached.
-	"sensor_suite": true, "resource_harvester": true, "repair_array": true, "drone_carrier": true,
+	"sensor_suite": true, "resource_harvester": true, "resource_bay": true,
+	"repair_array": true, "drone_carrier": true,
 	"laser_designator": true, "energy_barrier_projector": true, "fire_control_radar": true,
 }
 
@@ -2157,6 +2158,53 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			drill.position = Vector3(0, 0.10, -0.45 * ext_size)
 			drill.rotation = Vector3(PI / 2, 0, 0)
 		parent_node.add_child(drill)
+
+	elif type_id == "resource_bay":
+		# An open ore tub with a hinged spill lid. Two authored parts rather
+		# than one, so the three tweaks can drive different axes of each - see
+		# build_resource_bay_tub()'s docstring in tools/blender/build_meshes.py
+		# for why the geometry is built to survive a non-uniform scale.
+		#
+		# bay_volume is the stat tweak, so it scales EVERYTHING - the part that
+		# carries more has to look like it carries more, or the one tweak that
+		# changes the unit's behaviour is the one tweak with no visual. The
+		# other two are pure proportion: hopper_depth is height, hatch_width is
+		# width, and neither touches capacity.
+		var vol: float = clampf(tweaks.get("bay_volume", 1.0), 0.5, 2.0)
+		var depth_t: float = clampf(tweaks.get("hopper_depth", 1.0), 0.6, 1.6)
+		var width_t: float = clampf(tweaks.get("hatch_width", 1.0), 0.6, 1.6)
+		# Cube root, not the raw value: bay_volume reads as a VOLUME and is
+		# spent as one (capacity is linear in it), so growing all three axes by
+		# the raw figure would make a 2.0 bay eight times the size on screen
+		# while carrying only twice the ore.
+		var vol_lin: float = pow(vol, 1.0 / 3.0)
+
+		var tub_mesh = _part("resource_bay_tub")
+		var tub: MeshInstance3D
+		if tub_mesh:
+			tub = _mesh_inst(tub_mesh, base_color)
+			tub.scale = Vector3(vol_lin * width_t, vol_lin * depth_t, vol_lin)
+			tub.position = Vector3.ZERO
+		else:
+			tub = MeshInstance3D.new()
+			var t_box = BoxMesh.new()
+			t_box.size = Vector3(vol_lin * width_t, vol_lin * depth_t, vol_lin)
+			tub.mesh = t_box
+			var t_mat = StandardMaterial3D.new()
+			t_mat.albedo_color = base_color
+			tub.material_override = t_mat
+			tub.position = Vector3(0, vol_lin * depth_t * 0.5, 0)
+		parent_node.add_child(tub)
+
+		var lid_mesh = _part("resource_bay_lid")
+		if lid_mesh:
+			var lid: MeshInstance3D = _mesh_inst(lid_mesh, base_color.darkened(0.35))
+			lid.scale = Vector3(vol_lin * width_t, 1.0, vol_lin)
+			# Sits at the tub's mouth. The tub is modelled with its floor at
+			# y=0 and a nominal height of 1.0, so the lip tracks the height
+			# scale exactly rather than needing its own constant.
+			lid.position = Vector3(0, vol_lin * depth_t * 1.03, 0)
+			parent_node.add_child(lid)
 
 	elif type_id == "tesla_coil":
 		# Chris explicitly invited some fun/silly weapons alongside the
@@ -5750,6 +5798,11 @@ const MONOLITHIC_TWEAK_AXES := {
 	"flak_cannon": {"caliber": Vector3(1, 1, 0), "barrel_length": Vector3(0, 0, 1), "barrel_count": Vector3(1, 0, 0), "fuse_setting": Vector3(1, 1, 1), "burst_size": Vector3(0, 0, 1)},
 	"drone_carrier": {"hangar_size": Vector3(1, 0, 0), "launch_catapult": Vector3(0, 0, 1)},
 	"resource_harvester": {"extractor_size": Vector3(1, 1, 1)},
+	# Which axis each bay tweak grows, for the footprint/clipping side. The
+	# builder applies the same mapping to the meshes; this is what makes a
+	# deeper hopper actually claim more deck height in the Lab, so "does a
+	# third bay fit" is answered by the geometry rather than by a guess.
+	"resource_bay": {"bay_volume": Vector3(1, 1, 1), "hopper_depth": Vector3(0, 1, 0), "hatch_width": Vector3(1, 0, 0)},
 	"sensor_suite": {"mast_height": Vector3(0, 1, 0)},
 	"cluster_dispenser": {"dispersion": Vector3(1, 0, 1), "payload_size": Vector3(1, 1, 1), "tube_count": Vector3(1, 0, 0)},
 	"mortar_array": {"tube_count": Vector3(1, 0, 1)},

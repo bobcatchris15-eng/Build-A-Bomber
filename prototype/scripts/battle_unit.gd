@@ -502,7 +502,12 @@ func _detect_harvester():
 			if data.type_id == "resource_harvester":
 				is_harvester = true
 				var extractor = data.tweaks.get("extractor_size", 1.0)
-				cargo_capacity = int(50 * extractor)
+				# Base hopper from the extractor arm, plus whatever Resource Bays
+				# are bolted on. Bays only do anything on a design that is
+				# already a harvester - a bay on a tank is dead weight, which is
+				# correct and needs no special case, because this line is the
+				# only thing that reads them.
+				cargo_capacity = int(50 * extractor + ModuleCatalog.resource_bay_capacity(hull_node))
 				break
 
 func _recalculate_move_speed():

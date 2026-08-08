@@ -4,6 +4,9 @@ const ModuleDataResource = preload("res://scripts/module_data.gd")
 
 
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+# Only for its tuning constants - the analysis itself arrives pre-computed
+# inside the DesignStats result, so this rail never calls analyze() itself.
+const DrivetrainScript = preload("res://scripts/drivetrain.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const BlueprintNamerScript = preload("res://scripts/blueprint_namer.gd")
 const UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
@@ -25,7 +28,7 @@ var stats_dock: Control = null
 var toolbar: Control = null
 var _slot_hull_label: Label = null
 var _slot_parts_label: Label = null
-var _slot_faction_label: Label = null
+var _slot_cost_label: Label = null
 var _rail_vbox: VBoxContainer = null
 
 # The current design's headline stats, published by update_stats() for readers
@@ -346,6 +349,19 @@ const TWEAK_SPECS = {
 		{"name": "extractor_size", "label": "Extractor Arm Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "cutter_head", "label": "Cutter Head Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
+	# Three levers, and they are deliberately not three flavours of the same one.
+	# bay_volume is the stat that matters (cargo carried, and the weight paid for
+	# it); hopper_depth and hatch_width are pure geometry, changing how the bay
+	# reads on the hull and how much deck it eats without touching capacity - the
+	# bay is a big part and where it fits is a real constraint on a crowded
+	# harvester. Sizing tweaks with no stat behind them would normally be dead
+	# tweaks, but these two change the module's own footprint, which is what
+	# decides whether a third bay fits at all.
+	"resource_bay": [
+		{"name": "bay_volume", "label": "Bay Volume", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "hopper_depth", "label": "Hopper Depth", "min": 0.6, "max": 1.6, "step": 0.1, "default": 1.0},
+		{"name": "hatch_width", "label": "Hatch Width", "min": 0.6, "max": 1.6, "step": 0.1, "default": 1.0}
+	],
 	"repair_array": [
 		{"name": "welder_count", "label": "Welder Arm Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0},
 		{"name": "arm_reach", "label": "Manipulator Arm Reach", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
@@ -430,8 +446,16 @@ var armor_threshold_label: Label
 # stash-and-reparent idiom _add_callout() already uses for tweak widgets, for
 # the same reason: a transient panel frees its children, and these must outlive
 # it.
-var faction_label: Label
-var faction_btn: OptionButton
+#
+# The faction dropdown that used to live here is GONE. Faction is a battle-time
+# property now, not a design-time one: reconstruct_vehicle()'s
+# match_faction_override has always had the final word at spawn, so a Lab
+# selector could only ever preview a livery that the match would overwrite -
+# and it also tinted the Lab's own stat readout with that faction's passives,
+# so the numbers a player tuned against were not the numbers the unit fielded
+# under whichever faction they actually picked at match setup. The Lab now
+# shows an unpainted design at its base stats, and both the paint and the
+# passives are applied once, at battle time.
 var hull_spec_btn: Button
 var hull_spec_stash: VBoxContainer
 var _hull_spec_flyout: Node = null
@@ -747,18 +771,6 @@ func _ready():
 	hull_spec_stash.visible = false
 	add_child(hull_spec_stash)
 
-	faction_label = Label.new()
-	faction_label.text = "Faction Selection"
-	hull_spec_stash.add_child(faction_label)
-
-	faction_btn = OptionButton.new()
-	faction_btn.clip_text = true
-	for fac_id in FactionCatalog.get_ids():
-		faction_btn.add_item(FactionCatalog.get_faction_name(fac_id))
-	faction_btn.name = "FactionDropdown"
-	hull_spec_stash.add_child(faction_btn)
-	faction_btn.item_selected.connect(_on_faction_selected)
-
 	# The trigger. Sits in the rail for now; item 7's top toolbar is where it
 	# belongs, and moving it there is a reparent of this one node.
 	#
@@ -766,7 +778,7 @@ func _ready():
 	# specification, so it says so, and it carries no glyph.
 	hull_spec_btn = Button.new()
 	hull_spec_btn.text = "HULL SPECIFICATION"
-	hull_spec_btn.tooltip_text = "Armor material, thickness and faction marking"
+	hull_spec_btn.tooltip_text = "Armor material and thickness"
 	_rail_vbox.add_child(hull_spec_btn)
 	hull_spec_btn.pressed.connect(_on_hull_spec_pressed)
 
@@ -979,18 +991,9 @@ func sync_hull_ui(hull: Node3D):
 		armor_thick_slider.value = thick
 		if armor_thick_label:
 			armor_thick_label.text = "Armor Thickness: %.1f" % thick
-	# Held as a member rather than looked up by node path. The old
-	# `$ScrollContainer/VBoxContainer.get_node_or_null("FactionDropdown")` broke
-	# the moment this control moved into the hull-spec flyout, and broke
-	# SILENTLY - get_node_or_null returns null, the `if` skips, and a loaded
-	# blueprint just quietly shows the wrong faction in the dropdown with no
-	# error anywhere. The dropdown now moves between stash and flyout on every
-	# open, so a path-based lookup could never be right again.
-	if faction_btn:
-		var fac = hull.get_meta("faction") if hull.has_meta("faction") else "industrialists"
-		var idx = FactionCatalog.get_ids().find(fac)
-		if idx >= 0:
-			faction_btn.selected = idx
+	# No faction sync: there is no faction control in the Lab any more. A
+	# blueprint saved before this change still carries its "faction" key and
+	# still deserializes, it simply has no effect until a match assigns one.
 	is_updating_sliders = false
 	update_stats(hull)
 
@@ -1316,8 +1319,16 @@ func _update_drivetrain_readout(dt: Dictionary) -> void:
 	# as "Top Speed: 5.0 (was 5.0)" reads as a broken label rather than as a
 	# negligible cost - caught in the 100%-load capture, not by the suite,
 	# which asserts the text only at 130% where the gap is wide.
+	#
+	# Running light is the same story told the other way, and it gets the same
+	# treatment: the bonus is only printed when it survives rounding, and it is
+	# stated as a gain rather than as a bare parenthetical so it cannot be
+	# misread as the penalty case at a glance.
 	if dt["is_overloaded"] and absf(top_speed - move_speed) >= 0.05:
 		_speed_label.text = "Top Speed: %.1f  (was %.1f)" % [move_speed, top_speed]
+	elif dt.get("is_underloaded", false) and absf(move_speed - top_speed) >= 0.05:
+		_speed_label.text = "Top Speed: %.1f  (+%.0f%% running light)" % [
+			move_speed, (dt["underload_multiplier"] - 1.0) * 100.0]
 	else:
 		_speed_label.text = "Top Speed: %.1f" % move_speed
 	# Says WHICH limit is binding, because the two have opposite fixes: a
@@ -1355,7 +1366,9 @@ func _update_drivetrain_readout(dt: Dictionary) -> void:
 			cost = "Top speed down %.1f%% so far, and falling steeply from here." % cost_pct
 		_overweight_detail.text = "%.0f kg over what this locomotion is rated to carry. %s Buildable and fieldable as-is - add locomotion, shed mass, or accept the loss." % [
 			dt["weight"] - dt["capacity"], cost]
-	_load_label.tooltip_text = "What this design's locomotion is rated to carry, tweaks included.\nOver capacity, top speed falls steeply - see the warning below."
+	_load_label.tooltip_text = "What this design's locomotion is rated to carry, tweaks included.\nOver capacity, top speed falls steeply - see the warning below.\nUnder %.0f%%, the design runs light and gains top speed, up to +%.0f%% empty." % [
+		DrivetrainScript.UNDERLOAD_THRESHOLD * 100.0,
+		(DrivetrainScript.UNDERLOAD_CEILING - 1.0) * 100.0]
 
 # --- Range readout ---------------------------------------------------------
 # The sidebar showed no range at all before this, which made a whole axis of
@@ -2436,8 +2449,10 @@ func _update_toolbar_info(hull: Node3D, stats: Dictionary) -> void:
 				if child.has_meta("module_data"):
 					n += 1
 		_slot_parts_label.text = str(n)
-	if _slot_faction_label and hull and hull.has_meta("faction"):
-		_slot_faction_label.text = _prettify_id(str(hull.get_meta("faction")))
+	if _slot_cost_label:
+		# Read from the stats dict rather than recomputed, so the toolbar and the
+		# telemetry rail's own Cost row are the same number by construction.
+		_slot_cost_label.text = "%d cr" % int(stats.get("cost_credits", 0))
 
 
 func _prettify_id(id: String) -> String:
@@ -2495,7 +2510,17 @@ func _build_toolbar() -> void:
 	# with the telemetry rail.
 	_slot_hull_label = _info_slot(row, "HULL")
 	_slot_parts_label = _info_slot(row, "PARTS")
-	_slot_faction_label = _info_slot(row, "FACTION")
+	# COST replaces the FACTION slot. Faction is no longer a Lab concept at all
+	# (it is chosen at battle time - see module_placer's scale-model finish), and
+	# what the slot's space is worth instead is the one number the player has to
+	# carry out of this screen and into a build queue.
+	#
+	# It is the SAME figure DesignCosting.blueprint_cost() charges, because both
+	# sides are ResourceCatalog.credits_from_materials() over the same metal and
+	# crystal sums - DesignStats.analyze() computes them from the live hull, and
+	# design_costing.gd computes them from the serialized blueprint. Two readers,
+	# one formula; there is no separate "lab price".
+	_slot_cost_label = _info_slot(row, "COST")
 
 	# Undo/Redo first: they act on the document, and reading order should match
 	# the fact that they are the two most-used controls in the Lab.
@@ -2623,25 +2648,12 @@ func _on_hull_spec_closed() -> void:
 # controls belong to the flyout - a mismatch would strand a widget in a freed
 # panel and take the control with it.
 func _hull_spec_widgets() -> Array:
+	# Empty since the faction dropdown left. The flyout, the stash and the
+	# reparent-on-close contract all stay: armour material and thickness are
+	# built into this same stash by the armour work, and the reclaim path is
+	# the fragile part worth keeping proven rather than re-deriving later.
 	return [
-		faction_label, faction_btn,
 	]
-
-func _on_faction_selected(index: int):
-	if is_updating_sliders: return
-	var root = get_node_or_null("/root/MainLab")
-	if not root: return
-	var hull = root.get_node_or_null("Hull")
-	if not hull: return
-	_push_undo()
-
-	var ids = FactionCatalog.get_ids()
-	var fac_name = ids[index] if index >= 0 and index < ids.size() else FactionCatalog.DEFAULT_FACTION
-
-	hull.set_meta("faction", fac_name)
-	if root.has_method("update_hull_appearance"):
-		root.update_hull_appearance()
-	update_stats(hull)
 
 func _initial_sync():
 	var root = get_node_or_null("/root/MainLab")

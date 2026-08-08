@@ -22,6 +22,9 @@ const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.g
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
+const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
+# For its static hopper formula, used to tag harvesters in the roster index.
+const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 # File-level, not the loop-local `var VisualBuilder = preload(...)` inside
@@ -415,6 +418,17 @@ func list_blueprints(named_only: bool = false) -> Array:
 						"name": data.get("name", "Untitled Design"),
 						"hull_type": data.get("hull_type", "medium_hull"),
 						"faction": data.get("faction", "industrialists"),
+						# Derived here rather than in the Library screen because
+						# `data` - the whole blueprint, modules and all - is in
+						# hand at this exact point and is thrown away on the next
+						# line. Any consumer that wanted this later would have to
+						# re-read and re-parse the JSON file to get it back.
+						"is_harvester": ModuleCatalogScript.blueprint_is_harvester(data),
+						"cargo_capacity": HarvesterFSMScript.capacity_for(
+							ModuleCatalogScript.blueprint_harvester_modules(data),
+							str(data.get("hull_type", "medium_hull")),
+							ModuleCatalogScript.blueprint_bay_capacity(data)
+						) if ModuleCatalogScript.blueprint_is_harvester(data) else 0,
 						"modified_unix": data.get("modified_unix", 0),
 						"path": "res://assets/blueprints/default_roster/" + file_name,
 						"read_only": true
@@ -436,6 +450,17 @@ func list_blueprints(named_only: bool = false) -> Array:
 						"name": data.get("name", "Untitled Design"),
 						"hull_type": data.get("hull_type", "medium_hull"),
 						"faction": data.get("faction", "industrialists"),
+						# Derived here rather than in the Library screen because
+						# `data` - the whole blueprint, modules and all - is in
+						# hand at this exact point and is thrown away on the next
+						# line. Any consumer that wanted this later would have to
+						# re-read and re-parse the JSON file to get it back.
+						"is_harvester": ModuleCatalogScript.blueprint_is_harvester(data),
+						"cargo_capacity": HarvesterFSMScript.capacity_for(
+							ModuleCatalogScript.blueprint_harvester_modules(data),
+							str(data.get("hull_type", "medium_hull")),
+							ModuleCatalogScript.blueprint_bay_capacity(data)
+						) if ModuleCatalogScript.blueprint_is_harvester(data) else 0,
 						"modified_unix": data.get("modified_unix", 0),
 						"path": "user://blueprints/" + file_name,
 						"read_only": false
@@ -630,9 +655,18 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	# manufactory production, defense placement); the Design Lab's own
 	# preview reconstructions (is_designer=true) never do, so a player can
 	# still preview/tag a faction while designing without it sticking.
+	#
+	# That last sentence is now stronger than "without it sticking": the Design
+	# Lab has no faction selector at all, and a designer reconstruction resolves
+	# to NO_FACTION unless a match assigned one. So a blueprint loaded into the
+	# Lab comes back unpainted and at base stats, exactly as it looked while it
+	# was being built - the saved "faction" key survives for schema
+	# compatibility and is simply inert until a match overrides it.
 	var faction_name = blueprint_data.get("faction", "industrialists")
 	if match_faction_override != "":
 		faction_name = match_faction_override
+	elif is_designer:
+		faction_name = FactionCatalogScript.NO_FACTION
 	var nose_taper = blueprint_data.get("nose_taper", 1.0)
 	hull.set_meta("armor_thickness", armor_thick)
 	hull.set_meta("armor_material", armor_mat_name)
@@ -688,10 +722,17 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	mesh_inst.position = phys_mesh.position
 	hull.add_child(mesh_inst)
 
-	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, faction_name)
 	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	ArmorGreeblesScript.apply(hull, "", catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
-	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
+	if is_designer:
+		# Unpainted kit finish, matching module_placer's update_hull_appearance()
+		# - see the long comment there for why the Lab shows no livery. Decals
+		# are skipped outright rather than drawn neutral; there is no neutral
+		# unit marking.
+		HullMaterialBuilderScript.apply_scale_model_finish(mesh_inst)
+	else:
+		HullMaterialBuilderScript.apply_hull_materials(mesh_inst, faction_name)
+		HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
 	
 	# Re-create Hull's CollisionShape3D (only in designer)
 	if is_designer:

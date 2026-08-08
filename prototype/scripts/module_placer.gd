@@ -14,7 +14,9 @@ const AutoWeaponScript = preload("res://scripts/auto_weapon.gd")
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const UITokens = preload("res://scripts/ui_tokens.gd")
 const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
-const HullDecalsScript = preload("res://scripts/hull_decals.gd")
+# hull_decals.gd is deliberately NOT preloaded any more - the Lab draws no
+# faction insignia. Battle spawns still get theirs via blueprint_manager.
+const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
@@ -1338,8 +1340,6 @@ func update_hull_appearance():
 	var hull_scale = hull.get_meta("hull_scale") if hull.has_meta("hull_scale") else Vector3(1,1,1)
 	var armor_thick = hull.get_meta("armor_thickness") if hull.has_meta("armor_thickness") else 1.0
 	var armor_mat_name = hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel"
-	var faction_name = hull.get_meta("faction") if hull.has_meta("faction") else "industrialists"
-	
 	# Bulk size based on thickness
 	var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
 	var authored_mesh = MeshAssetLoader.get_hull_mesh(type_id)
@@ -1372,12 +1372,57 @@ func update_hull_appearance():
 	# stale silhouette.
 	_rebuild_surface_body(hull, mesh_inst)
 
-	# Apply materials - shared faction shader (see hull_material_builder.gd)
-	HullMaterialBuilderScript.apply_hull_materials(mesh_inst, faction_name)
-	HullGreeblesScript.apply_greebles(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
-	ArmorGreeblesScript.apply(hull, "", catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
-	HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
-	
+	# UNPAINTED, DELIBERATELY. The Lab used to render the hull in a faction's
+	# full livery via apply_hull_materials(), plus that faction's greeble tint
+	# and its insignia decals. All three are gone from this screen.
+	#
+	# Faction is chosen at match setup, and reconstruct_vehicle()'s
+	# match_faction_override has always had the last word at spawn - so the
+	# livery shown here was a preview of a paint job the match would overwrite,
+	# picked from a dropdown whose only other effect (passives on the stat rail)
+	# was also wrong for nine factions out of ten. Showing a design in one
+	# faction's colours while it is being built implies a commitment the design
+	# does not actually carry.
+	#
+	# What replaces it is the finish the main menu turntable and the Blueprint
+	# Library previews already use - flat grey-green injection-moulded plastic,
+	# the kit before it is painted. That is the honest read for a screen whose
+	# whole subject is the SHAPE you are building, and it is the same call, so
+	# the Lab and the previews cannot drift apart.
+	#
+	# apply_greebles() is still CALLED with NO_FACTION rather than skipped, and
+	# the distinction matters: its first act is to delete any existing
+	# HullGreebles container, so calling it is what CLEARS the scrap, nets and
+	# pennants off a hull that was built under a faction before this change.
+	# Skipping the call would have left them attached forever. Under an unknown
+	# id its match statement falls to `_: pass`, so what it rebuilds is an empty
+	# container - faction greebles are identity, not silhouette, and there is no
+	# neutral version of a jury-rigged scrap antenna.
+	#
+	# The repaint pass below still walks that container, because
+	# apply_scale_model_finish() skips a node named "HullGreebles" by design
+	# (the right call on a battle mesh, where flattening the greebling costs the
+	# silhouette its read). It is a no-op today and stops being one the moment
+	# any faction-independent greeble is added.
+	var body_size: Vector3 = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
+	HullGreeblesScript.apply_greebles(hull, FactionCatalog.NO_FACTION, body_size)
+	ArmorGreeblesScript.apply(hull, "", body_size)
+
+	var kit_mat := HullMaterialBuilderScript.build_scale_model_material()
+	HullMaterialBuilderScript.apply_scale_model_finish(mesh_inst, kit_mat)
+	var greebles := hull.get_node_or_null("HullGreebles")
+	if greebles:
+		for child in greebles.get_children():
+			HullMaterialBuilderScript.apply_scale_model_finish(child, kit_mat)
+
+	# No HullDecals call at all. Decals are faction insignia - there is no
+	# neutral version of a unit marking, so the answer is not to draw one. Any
+	# decal node left over from a hull that was built before this change is
+	# removed rather than hidden, so a rebuild cannot resurrect it.
+	var stale_decals := hull.get_node_or_null("HullDecals")
+	if stale_decals:
+		stale_decals.queue_free()
+
 	# Also update collision shape size in the designer
 	var col = hull.get_node_or_null("CollisionShape3D") as CollisionShape3D
 	if col:

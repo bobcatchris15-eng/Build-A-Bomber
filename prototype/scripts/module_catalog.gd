@@ -1195,6 +1195,39 @@ static func _build_catalog_literal() -> Dictionary:
 			"size": Vector3(1.5, 1.0, 1.5),
 			"color": Color.DARK_GOLDENROD
 		},
+		# Cargo volume for a harvester, and nothing else. The harvester loop is
+		# drive out, fill up, drive back, unload - so a harvester's real output
+		# is capacity divided by round-trip time, and until now the ONLY lever on
+		# either half was the extractor arm (which buys fill rate and reach, not
+		# volume). Every harvester therefore made the same 50-unit trip whatever
+		# the map looked like, which meant a distant crystal patch was simply
+		# worse than a near metal one with no design answer available.
+		#
+		# A bay is the answer: it trades weight - a lot of it, 90kg for a part
+		# that shoots nothing - for fewer trips. On a short haul that trade is
+		# bad, because the drivetrain penalty costs you more round trips than the
+		# volume saves; on a long haul it is the difference between an economy
+		# that scales and one that does not. That is the decision the module
+		# exists to create, and it is why the weight is deliberately high enough
+		# to notice against the new underload speed bonus (see drivetrain.gd):
+		# bays are exactly the kind of mass that pushes a light harvester out of
+		# its bonus band.
+		#
+		# Deliberately NOT folded into resource_harvester as another tweak: it
+		# stacks, it mounts anywhere on the hull, and "how many bays fit on this
+		# chassis" is a shape question the Lab is already good at asking. A
+		# slider on the harvester could not express any of that.
+		"resource_bay": {
+			"name": "Resource Bay",
+			"category": "module",
+			"hp": 120.0,
+			"weight": 90.0,
+			"metal": 60,
+			"crystal": 10,
+			"dps": 0.0,
+			"size": Vector3(1.4, 1.0, 1.8),
+			"color": Color.DARK_GOLDENROD
+		},
 		"repair_array": {
 			"name": "Repair Welder Array",
 			"category": "module",
@@ -2699,6 +2732,79 @@ static func get_ammo(type_id: String, tweaks: Dictionary) -> String:
 
 static func get_ammo_profile(ammo_id: String) -> Dictionary:
 	return AMMO_TYPES.get(ammo_id, AMMO_TYPES[AMMO_DEFAULT])
+
+
+# --- Resource bays ----------------------------------------------------------
+# How much cargo one Resource Bay adds to a harvester, before its size tweak.
+#
+# 40 against a 50-unit base hopper, so the first bay is worth a bit less than
+# doubling the trip and the tweak spans 20 to 80. That ratio is the whole
+# balance of the module: big enough that one bay is obviously worth fitting on
+# a long haul, small enough that bays cannot trivially out-scale the extractor
+# arm, which is the other half of harvester throughput. Chosen against the 90kg
+# the bay weighs - a medium chassis fits two or three before the drivetrain
+# starts arguing, which is the band where the decision is interesting.
+const RESOURCE_BAY_CAPACITY := 40.0
+const RESOURCE_BAY_TWEAK_KEY: String = "bay_volume"
+
+
+# Total cargo a hull's Resource Bays contribute, tweaks included.
+#
+# Lives here rather than in either unit script because there are TWO harvester
+# implementations in the tree - battle_unit.gd's inline loop and
+# battle/units/unit.gd feeding HarvesterFSM - and a bay that only counted in
+# one of them would be a module that silently did nothing depending on which
+# battle runtime spawned the unit. This is the shared answer both ask for.
+#
+# Bays STACK, unlike most support modules: three bays are three times the
+# volume. That is intended - a dedicated hauler is a legitimate design, and the
+# thing that stops it running away with the economy is its own mass, not a cap
+# written here.
+# The same two questions, answered off a SERIALIZED blueprint instead of a live
+# hull. The Blueprint Library lists designs straight out of its JSON index and
+# never reconstructs them - reconstructing a dozen vehicles to draw a list would
+# be absurd - so "is this a harvester" has to be answerable from the modules
+# array alone.
+#
+# Kept beside the live-hull version deliberately: they read the same two type_ids
+# and the same tweak key, and splitting them across two files is how one of them
+# would eventually learn about a new harvesting module and the other would not.
+static func blueprint_harvester_modules(data: Dictionary) -> int:
+	var n := 0
+	for mod in data.get("modules", []):
+		if str(mod.get("type_id", "")) == "resource_harvester":
+			n += 1
+	return n
+
+
+static func blueprint_is_harvester(data: Dictionary) -> bool:
+	return blueprint_harvester_modules(data) > 0
+
+
+static func blueprint_bay_capacity(data: Dictionary) -> float:
+	var total := 0.0
+	for mod in data.get("modules", []):
+		if str(mod.get("type_id", "")) != "resource_bay":
+			continue
+		var tweaks: Dictionary = mod.get("tweaks", {})
+		var vol: float = float(tweaks.get(RESOURCE_BAY_TWEAK_KEY, 1.0))
+		total += RESOURCE_BAY_CAPACITY * clampf(vol, 0.5, 2.0)
+	return total
+
+
+static func resource_bay_capacity(hull_node) -> float:
+	if hull_node == null or not is_instance_valid(hull_node):
+		return 0.0
+	var total := 0.0
+	for child in hull_node.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		var data = child.get_meta("module_data")
+		if data == null or data.type_id != "resource_bay":
+			continue
+		var vol: float = float(data.tweaks.get(RESOURCE_BAY_TWEAK_KEY, 1.0))
+		total += RESOURCE_BAY_CAPACITY * clampf(vol, 0.5, 2.0)
+	return total
 
 # Tweak names that scale a single part's physical size/mass (shared meaning
 # with module_data.gd's get_weight() tweak list, weapon-relevant subset only

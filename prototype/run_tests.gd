@@ -167,6 +167,8 @@ const SUITE_ORDER := [
 	["locomotion", "test_weight_vs_locomotion_capacity_penalty"],
 	["sim_and_stats", "test_locomotor_base_top_speed_is_a_real_per_type_ceiling"],
 	["sim_and_stats", "test_overload_penalty_is_steep_and_monotonic"],
+	["sim_and_stats", "test_underload_bonus_has_a_deadzone_and_diminishing_returns"],
+	["sim_and_stats", "test_underload_bonus_is_wired_through_a_real_analysis"],
 	["locomotion", "test_design_lab_and_combat_agree_on_weight_and_capacity"],
 	["locomotion", "test_every_locomotor_capacity_responds_to_its_own_tweaks"],
 	["locomotion", "test_count_tweaks_scale_capacity_linearly_not_quadratically"],

@@ -46,7 +46,13 @@ const SLOT_SIZE = Vector2(104, 132)
 # be large enough that the ScrollContainer below does not clip a card whose name
 # wrapped to three lines. thumbnail 78 + wrapped name ~34 + four stat lines ~64 +
 # separations 12 + 40 of vertical padding is ~228, so 248 leaves headroom.
-const CARD_SIZE = Vector2(168, 248)
+# 248 -> 268 when stat_line() gained the HARVESTER row. An armed harvester now
+# prints five stat lines where the previous worst case was four, and the card's
+# height is a custom_minimum_size inside a scroll whose viewport is reserved
+# from this same constant - so a card that outgrew it would not scroll, it would
+# clip the new row off the bottom, hiding exactly the line that was added to be
+# noticed. 20px is one 13px monospace line plus its leading.
+const CARD_SIZE = Vector2(168, 268)
 const CARD_THUMB_H = 78
 # The drag ghost stays compact deliberately - it is not a card, it is a token of
 # one. A full spec block following the cursor obscures the wells it is about to
@@ -574,6 +580,18 @@ static func stat_line(stats: Dictionary) -> String:
 		lines.append("Range  %.0f" % float(stats.get("longest_range", 0.0)))
 	else:
 		lines.append("unarmed")
+	# HARVESTER is the one line here that describes a different KIND of unit
+	# rather than a different amount of the same stat, which is why it gets its
+	# own row instead of being folded into the "unarmed" branch: a harvester can
+	# also be armed, and an unarmed design is very often NOT a harvester. Reading
+	# "unarmed" and inferring "economy unit" is a real way to draft twelve slots
+	# of scouts and start a match with no income.
+	#
+	# The payload comes with it because that is the number a hauler is chosen
+	# on - a bare arm on a light hull and a bay-laden heavy are both "harvester"
+	# and are not remotely the same pick.
+	if bool(stats.get("is_harvester", false)):
+		lines.append("HARVESTER  %d" % int(stats.get("cargo_capacity", 0)))
 	return "\n".join(PackedStringArray(lines))
 
 

@@ -121,6 +121,18 @@ const FACTIONS = {
 
 const DEFAULT_FACTION: String = "industrialists"
 
+# "No faction has been assigned yet" - the Design Lab's state, since faction
+# became a battle-time property. It is deliberately an id that is NOT in
+# FACTIONS, because get_passive() looks up `FACTIONS.get(id, {})` and so
+# returns every caller's own default for an unknown id: passing NO_FACTION
+# gives base, unmodified stats without a single `if faction == ...` anywhere.
+#
+# Note get_faction() and get_visual() behave differently on purpose - they fall
+# back to DEFAULT_FACTION's row, because there is no such thing as "no
+# appearance" and something has to be drawn. Anything that wants a genuinely
+# neutral LOOK wants HullMaterialBuilder.apply_scale_model_finish(), not this.
+const NO_FACTION: String = ""
+
 static func get_ids() -> Array:
 	var ids = FACTIONS.keys()
 	ids.sort()
