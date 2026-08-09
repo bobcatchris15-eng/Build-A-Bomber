@@ -5,12 +5,45 @@ import re
 import datetime
 import subprocess
 
+import shutil
+
+def archive_old_builds(root_dir):
+    builds_dir = os.path.join(root_dir, "builds")
+    old_builds_dir = os.path.join(root_dir, "old_builds")
+    
+    platforms = ["windows", "linux", "macos"]
+    for os_name in platforms:
+        src_dir = os.path.join(builds_dir, os_name)
+        dst_dir = os.path.join(old_builds_dir, os_name)
+        if not os.path.exists(src_dir):
+            continue
+        os.makedirs(dst_dir, exist_ok=True)
+        for item in os.listdir(src_dir):
+            src_item = os.path.join(src_dir, item)
+            dst_item = os.path.join(dst_dir, item)
+            if os.path.isdir(src_item) and item.lower() in ["old builds", "old_builds"]:
+                continue
+            try:
+                if os.path.exists(dst_item):
+                    if os.path.isdir(dst_item):
+                        shutil.rmtree(dst_item, ignore_errors=True)
+                    else:
+                        os.remove(dst_item)
+                shutil.move(src_item, dst_item)
+                print(f"  [ARCHIVE] Moved {item} -> old_builds/{os_name}/")
+            except Exception as e:
+                print(f"  [ARCHIVE WARNING] Could not move {item}: {e}")
+
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     proto_dir = os.path.abspath(os.path.join(script_dir, ".."))
     root_dir = os.path.abspath(os.path.join(proto_dir, ".."))
     
-    # 1. Read version from project.godot
+    # 1. Archive old builds
+    print("=== Archiving Previous Builds ===")
+    archive_old_builds(root_dir)
+
+    # 2. Read version from project.godot
     godot_file = os.path.join(proto_dir, "project.godot")
     version = "1.0.0"
     if os.path.exists(godot_file):
