@@ -281,5 +281,47 @@
 			]
 		}
 	],
-	"water_areas": []
+	"water_areas": [],
+	"hills": [
+		{
+			"center": [
+				-140,
+				0,
+				75
+			],
+			"radius": 16,
+			"falloff": 20,
+			"height": 8
+		},
+		{
+			"center": [
+				-140,
+				0,
+				-75
+			],
+			"radius": 16,
+			"falloff": 20,
+			"height": 8
+		},
+		{
+			"center": [
+				140,
+				0,
+				75
+			],
+			"radius": 13,
+			"falloff": 17,
+			"height": -6
+		},
+		{
+			"center": [
+				140,
+				0,
+				-75
+			],
+			"radius": 13,
+			"falloff": 17,
+			"height": -6
+		}
+	]
 }

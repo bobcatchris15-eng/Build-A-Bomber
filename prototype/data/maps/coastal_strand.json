@@ -244,5 +244,37 @@
 				240
 			]
 		}
+	],
+	"hills": [
+		{
+			"center": [
+				-150,
+				0,
+				55
+			],
+			"radius": 20,
+			"falloff": 26,
+			"height": 10
+		},
+		{
+			"center": [
+				-150,
+				0,
+				-55
+			],
+			"radius": 20,
+			"falloff": 26,
+			"height": 10
+		},
+		{
+			"center": [
+				35,
+				0,
+				0
+			],
+			"radius": 16,
+			"falloff": 18,
+			"height": -7
+		}
 	]
 }

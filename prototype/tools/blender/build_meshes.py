@@ -197,17 +197,32 @@ def make_object_from_bmesh(bm, name):
 	return obj
 
 
-def finalize(obj, name, color=(0.55, 0.56, 0.58), metallic=0.75, roughness=0.35):
+def finalize(obj, name, color=(0.55, 0.56, 0.58), metallic=0.75, roughness=0.35, smooth=True):
+	"""smooth=False gives hard, faceted normals on every face.
+
+	Manufactured parts want the default smooth-with-auto-smooth-crease: a
+	machined surface is continuous, and the 35-degree crease keeps real edges
+	sharp anyway. Fractured rock wants the opposite. A boulder built from
+	planar cuts has genuine flat faces meeting at hard angles, and smooth
+	shading averages exactly those normals away, which is what made the old
+	boulders read as lumpy balls no matter how the silhouette was noised."""
 	obj.name = name
 	bpy.ops.object.select_all(action='DESELECT')
 	obj.select_set(True)
 	bpy.context.view_layer.objects.active = obj
-	bpy.ops.object.shade_smooth()
-	try:
-		obj.data.use_auto_smooth = True
-		obj.data.auto_smooth_angle = math.radians(35)
-	except Exception:
-		pass
+	if smooth:
+		bpy.ops.object.shade_smooth()
+		try:
+			obj.data.use_auto_smooth = True
+			obj.data.auto_smooth_angle = math.radians(35)
+		except Exception:
+			pass
+	else:
+		bpy.ops.object.shade_flat()
+		try:
+			obj.data.use_auto_smooth = False
+		except Exception:
+			pass
 	mat = new_material(name + "_mat", color, metallic, roughness)
 	if obj.data.materials:
 		obj.data.materials[0] = mat
@@ -2636,36 +2651,115 @@ def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.
 # _spawn_rock_obstacle already uses: rng.seed = hash(obstacle.center)) reads
 # as real variety instead of one asset stamped everywhere on the map.
 
+def _fracture(bm, cuts, radius, rng, bias_flat=0.0):
+	"""Slice the mesh with `cuts` random planes through near-centre points,
+	discarding the outboard side each time.
+
+	This is the technique that makes a rock look fractured rather than lumpy.
+	Displacement noise - what build_boulder used to rely on entirely - is a
+	continuous function over the surface, so it can only ever produce smooth
+	bumps; no amount of seed variation will make it yield a sharp broken edge.
+	Cutting with planes produces genuinely flat faces meeting at hard angles,
+	which is what a fresh fracture surface actually is.
+
+	bias_flat pulls the cutting planes toward horizontal, which produces the
+	stacked, shelf-like breaks of bedded rock rather than uniformly random
+	angular chunks.
+	"""
+	from mathutils import Vector as _V
+	for _ in range(cuts):
+		n = _V((rng.uniform(-1, 1), rng.uniform(-1, 1), rng.uniform(-1, 1)))
+		if n.length < 1e-4:
+			continue
+		n.normalize()
+		if bias_flat > 0.0:
+			n = n.lerp(_V((0, 0, 1 if n.z >= 0 else -1)), bias_flat)
+			n.normalize()
+		# Offset from centre controls how much the cut takes off: near the
+		# surface it shaves a facet, near the centre it would halve the rock.
+		# Kept in the shaving range so a boulder stays a boulder.
+		p = n * radius * rng.uniform(0.55, 0.86)
+		bmesh.ops.bisect_plane(bm,
+			geom=list(bm.verts) + list(bm.edges) + list(bm.faces),
+			plane_co=p, plane_no=n, clear_outer=True)
+		# The cut leaves an open boundary loop where geometry was removed;
+		# without capping it the rock is a hollow shell with a hole in it.
+		edges = [e for e in bm.edges if len(e.link_faces) == 1]
+		if edges:
+			bmesh.ops.holes_fill(bm, edges=edges)
+
+
 def build_boulder(name, radius=1.0, irregularity=0.4, subdivisions=2, flatten=0.75, seed=0,
-		color=(0.42, 0.4, 0.37), metallic=0.05, roughness=0.95):
-	"""An irregular rock: an icosphere with per-vertex radial noise and a
-	vertical squash, so it reads as a weathered boulder resting on the
-	ground rather than a smooth sphere. subdivisions=2 keeps facets large
-	and readable at RTS zoom - CORE_DESIGN_LANGUAGE.md's "toy physics"
-	aesthetic wants a few real facets, not a photoreal sculpt."""
+		color=(0.42, 0.4, 0.37), metallic=0.05, roughness=0.95, style="weathered"):
+	"""A fractured rock, in one of three silhouette families.
+
+	Playtest: rocks needed "rugged, organic, actual rocklike shapes." The
+	previous version was an icosphere with radial sine noise, which is a
+	continuous displacement and therefore can only round the silhouette - it
+	read as a lumpy ball. Every style below now gets real planar fracture
+	faces via _fracture(), light noise on top for weathering rather than as
+	the primary shape, and FLAT shading so those faces actually catch and lose
+	light at each angle change instead of being averaged smooth.
+
+	The three families exist because a real boulder field is not one shape
+	with randomized parameters:
+	  "weathered" - roughly equidimensional, more noise, fewer/softer cuts.
+	  "slab"      - a blocky broken chunk, cut from a box, hard and angular.
+	  "shelf"     - a low wide ledge, the cliff-base and ravine-wall debris
+	                _spawn_slope_rocks() concentrates on steep ground.
+	subdivisions=2 still keeps facets large and readable at RTS zoom, per
+	CORE_DESIGN_LANGUAGE.md's "a few real facets, not a photoreal sculpt".
+	"""
 	import random
 	rng = random.Random(seed)
 	bm = bmesh.new()
-	ret = bmesh.ops.create_icosphere(bm, subdivisions=subdivisions, radius=radius)
-	verts = ret["verts"]
-	for v in verts:
+
+	if style == "slab":
+		# A box already has nothing but flat faces and hard edges - starting
+		# from one and cutting it further gives the most angular family
+		# without fighting a sphere's curvature the whole way.
+		bmesh.ops.create_cube(bm, size=radius * 1.7)
+		bmesh.ops.scale(bm, verts=bm.verts, vec=(1.0, rng.uniform(0.65, 0.95), rng.uniform(0.5, 0.8)))
+		# More cuts than the other families: a cube contributes only 6 faces to
+		# start with, so at 5 cuts the slab landed at ~10 facets against the
+		# icosphere families' ~80 and read as conspicuously simpler rather than
+		# as deliberately blocky.
+		cuts, noise_amt, bias = 9, irregularity * 0.35, 0.15
+	elif style == "shelf":
+		bmesh.ops.create_icosphere(bm, subdivisions=subdivisions, radius=radius)
+		bmesh.ops.scale(bm, verts=bm.verts, vec=(1.25, 1.0, 0.42))
+		cuts, noise_amt, bias = 6, irregularity * 0.45, 0.55
+	else:
+		bmesh.ops.create_icosphere(bm, subdivisions=subdivisions, radius=radius)
+		cuts, noise_amt, bias = 4, irregularity * 0.8, 0.0
+
+	_fracture(bm, cuts, radius, rng, bias_flat=bias)
+
+	# Weathering pass, deliberately AFTER the cuts and deliberately light: it
+	# roughens the fracture faces instead of defining the shape. Run the other
+	# way round, the cuts would slice cleanly through the noise and erase it.
+	for v in bm.verts:
+		if v.co.length < 1e-5:
+			continue
 		n = v.co.normalized()
-		# Low-frequency lumps (a couple of dominant bulges) plus
-		# high-frequency per-vertex jitter, so the silhouette reads as
-		# irregular rather than uniformly noisy.
-		lump = 1.0 + irregularity * (
+		lump = 1.0 + noise_amt * (
 			0.6 * math.sin(n.x * 2.3 + seed) * math.cos(n.z * 1.7 + seed * 0.5)
 			+ 0.4 * (rng.random() - 0.5))
 		v.co = v.co * lump
+
 	# Squashes Blender Z, which is Godot Y (up) per this file's own GV()/GS()
-	# convention - flattens the boulder's HEIGHT, not its footprint.
-	bmesh.ops.scale(bm, verts=verts, vec=(1.0, 1.0, flatten))
+	# convention - flattens the boulder's HEIGHT, not its footprint. The shelf
+	# family already has its proportions baked in above and would be squashed
+	# into a wafer if it took this a second time.
+	if style != "shelf":
+		bmesh.ops.scale(bm, verts=list(bm.verts), vec=(1.0, 1.0, flatten))
 	# Rests ON the ground rather than being buried or floating - every other
 	# part in this file is authored in final local space, same contract here.
-	min_z = min(v.co.z for v in verts)
-	bmesh.ops.translate(bm, verts=verts, vec=(0, 0, -min_z))
+	min_z = min(v.co.z for v in bm.verts)
+	bmesh.ops.translate(bm, verts=list(bm.verts), vec=(0, 0, -min_z))
 	obj = make_object_from_bmesh(bm, name)
-	finalize(obj, name, color=color, metallic=metallic, roughness=roughness)
+	# smooth=False is the point of this rework - see finalize()'s own note.
+	finalize(obj, name, color=color, metallic=metallic, roughness=roughness, smooth=False)
 	return obj
 
 
@@ -2787,9 +2881,18 @@ def generate_terrain_props():
 	terrain_dir = _os.path.join(PROJECT_ROOT, "assets", "models", "terrain")
 	_os.makedirs(terrain_dir, exist_ok=True)
 
-	for i in range(4):
+	# Six boulders, two of each silhouette family - a real rock field mixes
+	# blocky fresh breaks with rounded weathered stone and low cliff-base
+	# ledges. Keep in step with BOULDER_POOL_SIZE in terrain_builder.gd, which
+	# indexes this pool by name; a pool size larger than what is exported here
+	# rolls indices at .glb files that do not exist and falls silently back to
+	# the primitive placeholder (exactly the bug AUTHORED_POOL_SIZES in
+	# resource_node.gd was added to stop repeating).
+	BOULDER_STYLES = ["weathered", "weathered", "slab", "slab", "shelf", "shelf"]
+	for i, style in enumerate(BOULDER_STYLES):
 		export_and_cleanup(build_boulder("boulder_%d" % i, radius=1.0 + 0.35 * (i % 3),
-			seed=100 + i, flatten=0.6 + 0.1 * (i % 2)), terrain_dir, "boulder_%d" % i)
+			seed=100 + i, flatten=0.6 + 0.1 * (i % 2), style=style),
+			terrain_dir, "boulder_%d" % i)
 
 	for i in range(3):
 		# Named "ore", not "metal" - ResourceCatalog.canonical() resolves the

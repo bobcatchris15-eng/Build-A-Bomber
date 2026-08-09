@@ -1798,7 +1798,13 @@ static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D, map_def: Dicti
 # checkout before the Blender build has run, or an art pipeline hiccup) -
 # same "degrade to boxes rather than to nothing" contract as
 # building_mesh.gd's own build().
-const BOULDER_POOL_SIZE := 4
+# 6, not 4: the pool now covers three distinct silhouette families (weathered,
+# slab, shelf), two variants each - see build_meshes.py's BOULDER_STYLES, which
+# this MUST stay in step with. A pool size larger than what Blender actually
+# exports rolls indices at .glb files that do not exist and drops silently to
+# the primitive fallback, which is the exact failure AUTHORED_POOL_SIZES in
+# resource_node.gd exists to document.
+const BOULDER_POOL_SIZE := 6
 const BOULDER_MODEL_DIR := "res://assets/models/terrain/boulder_%d.glb"
 
 # Checked ONCE, before adding anything - the whole pool is generated in a

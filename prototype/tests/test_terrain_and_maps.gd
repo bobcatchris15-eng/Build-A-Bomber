@@ -825,21 +825,32 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 		reversed_spawns.append(spawn)
 	loaded["spawns"] = reversed_spawns
 
-	# EVERY FIELD EXCEPT resource_nodes IS STILL A STRICT DEEP-EQUAL. That is what
-	# this test is for: proving the const -> JSON migration did not corrupt a
-	# value in transcription.
+	# EVERY FIELD EXCEPT resource_nodes AND hills IS STILL A STRICT DEEP-EQUAL.
+	# That is what this test is for: proving the const -> JSON migration did not
+	# corrupt a value in transcription.
 	#
 	# resource_nodes is checked as a SUPERSET instead, because a map file is
 	# content and content is supposed to grow - the 2026-08-07 resource rework
 	# added lumber stands and oil wells to all ten maps. A strict equality here
 	# would mean "no map may ever gain a deposit again", which is not a property
 	# worth defending; "the nine originals are still exactly where they were" is.
+	#
+	# hills is dropped outright rather than superset-checked, for a stronger
+	# reason than that: the old const had no "hills" key at all, so there is no
+	# historical value here to defend against transcription error, which is this
+	# test's entire subject. The terrain-variety pass authored hills and ravines
+	# into every analytic map, and asserting their absence would be asserting
+	# that maps must stay flat forever. Their actual correctness is covered
+	# where it belongs - the spawn-fairness lint, the navmesh smoke tests, and
+	# tools/probe_hills_ravine.gd.
 	var loaded_nodes: Array = loaded.get("resource_nodes", [])
 	var expected_nodes: Array = expected_lake_crossing["resource_nodes"]
 	var loaded_rest: Dictionary = loaded.duplicate(true)
 	var expected_rest: Dictionary = expected_lake_crossing.duplicate(true)
 	loaded_rest.erase("resource_nodes")
 	expected_rest.erase("resource_nodes")
+	loaded_rest.erase("hills")
+	expected_rest.erase("hills")
 
 	if loaded_rest != expected_rest:
 		print("  [FAIL] JSON-loaded lake_crossing does not deep-equal the checked-in snapshot of the old const's values.")
