@@ -1007,3 +1007,78 @@ func test_brownout_sheds_systems_in_priority_order() -> bool:
 
 	print("  [PASS] Thresholds are ordered shields/electronics/weapons, shedding is monotonic with hysteresis on recovery, vision dims without blinding, and a real overdrawn unit drains and sheds in that order.")
 	return true
+
+
+# Playtest item #1: harvesters need a visible bar showing how full their bays
+# are. Deliberately drives the bar functions directly against a hand-built
+# harvester rather than spawning a full blueprint-reconstructed unit - the bar
+# is pure presentation over HarvesterFSM.cargo()/capacity, and a real spawn
+# would drag in a blueprint, a controller and a match director without testing
+# anything more about THIS code.
+func test_harvester_cargo_bar_tracks_fill_fraction() -> bool:
+	print("Running Test Suite: Harvester Cargo Bar Tracks cargo()/capacity...")
+	var UnitScript = preload("res://scripts/battle/units/unit.gd")
+	var HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
+
+	var unit := CharacterBody3D.new()
+	unit.set_script(UnitScript)
+	var fsm = HarvesterFSMScript.new()
+	fsm.capacity = 100
+	unit.harvester = fsm
+	unit.is_harvester = true
+	unit._create_cargo_bar(Vector3(4, 2, 6))
+
+	if unit._cargo_bar_root == null or unit._cargo_fill == null:
+		print("  [FAIL] A harvester should have been given a cargo bar; got root=", unit._cargo_bar_root, " fill=", unit._cargo_fill)
+		unit.free()
+		return false
+
+	# Empty reads as hidden, not as an empty plate over every idle truck.
+	if unit._cargo_bar_root.visible:
+		print("  [FAIL] An empty harvester's cargo bar should be hidden.")
+		unit.free()
+		return false
+
+	for want in [0.25, 0.5, 1.0]:
+		# cargo() sums cargo_by_type, which is where a real harvest lands.
+		fsm.cargo_by_type = {"ore": int(fsm.capacity * want)}
+		unit._update_cargo_bar()
+		if not unit._cargo_bar_root.visible:
+			print("  [FAIL] A carrying harvester's bar should be visible at fill ", want)
+			unit.free()
+			return false
+		if absf(unit._cargo_fill.scale.x - want) > 0.001:
+			print("  [FAIL] Fill scale should be %.3f at %d/%d cargo, got %.3f" % [want, fsm.cargo(), fsm.capacity, unit._cargo_fill.scale.x])
+			unit.free()
+			return false
+		# Grows from the left edge: a bar that scaled about its own centre
+		# would read as shrinking rather than filling.
+		var want_x: float = -(unit._cargo_bar_width * 0.5) * (1.0 - want)
+		if absf(unit._cargo_fill.position.x - want_x) > 0.001:
+			print("  [FAIL] Fill should be left-anchored at x=%.3f for fill %.2f, got %.3f" % [want_x, want, unit._cargo_fill.position.x])
+			unit.free()
+			return false
+
+	# A zero capacity must not divide by zero or show a full bar.
+	fsm.capacity = 0
+	unit._update_cargo_bar()
+	if unit._cargo_bar_root.visible:
+		print("  [FAIL] A zero-capacity harvester should show no fill rather than a full bar.")
+		unit.free()
+		return false
+
+	# A combat unit must never carry the node at all.
+	var combat := CharacterBody3D.new()
+	combat.set_script(UnitScript)
+	combat.is_harvester = false
+	combat._create_cargo_bar(Vector3(4, 2, 6))
+	if combat._cargo_bar_root != null:
+		print("  [FAIL] A non-harvester should never be given a cargo bar.")
+		combat.free()
+		unit.free()
+		return false
+	combat.free()
+	unit.free()
+
+	print("  [PASS] Harvester cargo bar exists only on harvesters, hides when empty, is left-anchored, and its fill scale tracks cargo()/capacity exactly.")
+	return true

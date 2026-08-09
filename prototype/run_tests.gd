@@ -42,10 +42,16 @@ const SUITE_FILES := {
 	"counter_draft": preload("res://tests/battle/test_counter_draft.gd"),
 	"economy_balance": preload("res://tests/battle/test_economy_balance.gd"),
 	"resource_fields": preload("res://tests/battle/test_resource_fields.gd"),
+	"tech_tree": preload("res://tests/battle/test_tech_tree.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
 const SUITE_ORDER := [
+	["tech_tree", "test_building_catalog_prerequisites"],
+	["tech_tree", "test_module_catalog_building_requirements"],
+	["tech_tree", "test_design_costing_building_requirements"],
+	["tech_tree", "test_production_service_prerequisite_gating"],
+	["tech_tree", "test_building_glb_meshes_exist"],
 	["sim_and_stats", "test_stats_calculations"],
 	["designer_lab", "test_clipping_detection"],
 	["weapons_and_damage", "test_damage_mitigation"],
@@ -297,6 +303,7 @@ const SUITE_ORDER := [
 	["resource_fields", "test_oil_wells_are_single_points"],
 	["resource_fields", "test_every_map_offers_lumber_and_oil"],
 	["economy_and_production", "test_harvester_delivery_radius_clears_hull_and_refinery"],
+	["economy_and_production", "test_harvester_cargo_bar_tracks_fill_fraction"],
 	# APPENDED, not interleaved - the order above is pinned for navmesh reasons.
 	# Neither group touches a navigation map: the leg suites build a bare hull
 	# plus a module_placer, and the tutorial suites build MainLab.tscn.

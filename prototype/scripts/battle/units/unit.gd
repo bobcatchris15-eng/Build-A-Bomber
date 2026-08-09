@@ -145,6 +145,10 @@ var stance: int = StanceScript.DEFAULT
 # Economy. Present only on designs mounting a resource_harvester module; null on
 # everything else, which is what `is_harvester` really means.
 var is_harvester: bool = false
+# World-space cargo fill bar, harvesters only - see _create_cargo_bar().
+var _cargo_bar_root: Node3D = null
+var _cargo_fill: MeshInstance3D = null
+var _cargo_bar_width: float = 0.0
 var harvester: HarvesterFSM = null
 
 var _controller: Node = null
@@ -221,6 +225,7 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	_create_selection_ring(base_size)
 	Profiler.stop("spawn.selection_ring", _p)
 	_detect_harvester(controller)
+	_create_cargo_bar(base_size)
 	return true
 
 
@@ -403,6 +408,9 @@ func _physics_process(delta: float) -> void:
 func _tick_economy(delta: float) -> void:
 	if not is_harvester or harvester == null:
 		return
+	# Cheap enough to run on the economy tick rather than per-frame, and a fill
+	# level does not need per-frame precision the way a position does.
+	_update_cargo_bar()
 	var working := current_order == null or current_order.type == Order.Type.HARVEST
 	if not working:
 		# Both ends of the round trip hold reservations - a dock bay and a slot
@@ -923,6 +931,82 @@ func set_selected(value: bool) -> void:
 func is_selected() -> bool:
 	return _is_selected
 
+
+# Playtest: "the harvester units need a bar above them showing how full their
+# bays are."
+#
+# Built only on units that are actually harvesters - _detect_harvester() has
+# already run by the time this is called, so a combat unit never carries a dead
+# node for a state it can't have. The fill fraction needs no new economy
+# plumbing: HarvesterFSM already exposes cargo() and resolves `capacity` per
+# design via capacity_for(), which accounts for module count, hull tier and
+# resource-bay capacity, so cargo()/capacity IS the fill fraction.
+#
+# Two stacked quads - a dark backing plate and a colored fill - is the classic
+# RTS bar, and the fill is SCALED rather than re-meshed each tick, the same
+# idiom resource_node.gd's _update_visual_scale() already uses for depletion.
+# Billboarded and unshaded so it stays legible from any camera angle and
+# doesn't take terrain shading, matching _create_selection_ring()'s treatment
+# of the other piece of world-space unit UI.
+#
+# This is the game's first world-space status bar on a unit. Kept deliberately
+# plain for that reason: it sets the vocabulary anything later (ammo, capture
+# progress, build progress) will have to match, and a plain plate is easier to
+# build on than a styled one is to walk back.
+const CARGO_BAR_WIDTH_MULT: float = 1.15
+const CARGO_BAR_HEIGHT: float = 0.16
+
+func _create_cargo_bar(base_size: Vector3) -> void:
+	if not is_harvester or harvester == null:
+		return
+	var width: float = maxf(base_size.x, base_size.z) * CARGO_BAR_WIDTH_MULT
+	var root := Node3D.new()
+	root.name = "CargoBar"
+	# Clear of the hull's own top, not a fixed altitude - hulls differ in height
+	# by a lot across tiers.
+	root.position = Vector3(0, base_size.y * 0.5 + CARGO_BAR_HEIGHT * 3.0, 0)
+	add_child(root)
+
+	root.add_child(_cargo_bar_quad(width, CARGO_BAR_HEIGHT, Color(0.06, 0.07, 0.08, 0.85), 0.0))
+	# Drawn a hair in front of the backing plate. Both are billboarded, so they
+	# stay coplanar-facing and would z-fight without the offset.
+	_cargo_fill = _cargo_bar_quad(width, CARGO_BAR_HEIGHT * 0.72, Color(0.95, 0.78, 0.25, 1.0), 0.01)
+	root.add_child(_cargo_fill)
+	_cargo_bar_width = width
+	_cargo_bar_root = root
+	_update_cargo_bar()
+
+func _cargo_bar_quad(width: float, height: float, color: Color, z_offset: float) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(width, height)
+	mi.mesh = quad
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mat.albedo_color = color
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = Vector3(0, 0, z_offset)
+	return mi
+
+func _update_cargo_bar() -> void:
+	if not is_instance_valid(_cargo_bar_root) or harvester == null:
+		return
+	var cap: int = harvester.capacity
+	var frac: float = 0.0 if cap <= 0 else clampf(float(harvester.cargo()) / float(cap), 0.0, 1.0)
+	# Hidden when empty. An empty bar over every idle truck on the field is
+	# clutter that says nothing; the bar appearing IS the signal that this one
+	# is carrying something.
+	_cargo_bar_root.visible = frac > 0.0
+	if not is_instance_valid(_cargo_fill):
+		return
+	# Grows from the left edge rather than from the centre: scaling a quad about
+	# its own origin would shrink it toward the middle from both ends, which
+	# reads as a shrinking bar rather than a filling one.
+	_cargo_fill.scale.x = maxf(frac, 0.0001)
+	_cargo_fill.position.x = -(_cargo_bar_width * 0.5) * (1.0 - frac)
 
 func _create_selection_ring(base_size: Vector3) -> void:
 	var ring := MeshInstance3D.new()
