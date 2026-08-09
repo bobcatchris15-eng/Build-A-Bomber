@@ -1289,7 +1289,7 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 	for blob in map_def.get("water_blobs", []):
 		_spawn_water_blob(blob, parent, prop_scale)
 	for o in map_def.get("obstacles", []):
-		_spawn_obstacle(o, parent)
+		_spawn_obstacle(o, parent, map_def)
 	for s in map_def.get("surface_zones", []):
 		_spawn_surface_zone(s, parent, prop_scale, map_def)
 	for sw in map_def.get("shallow_water_areas", []):
@@ -1297,6 +1297,7 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 	for b in map_def.get("bridges", []):
 		_spawn_bridge(b, parent)
 	_spawn_grassland_clutter(map_def, parent, prop_scale)
+	_spawn_slope_rocks(map_def, parent)
 
 # Real baked ground textures (see tools/generate_terrain_textures.gd) tiled
 # across each surface_zone's real-world footprint, replacing the old flat
@@ -1744,13 +1745,28 @@ static func _spawn_water_blob(blob: Dictionary, parent: Node3D, prop_scale: floa
 
 	TerrainGreeblesScript.scatter_blue_water({"center": blob.center, "half_extents": Vector2(blob.get("radius", 10.0), blob.get("radius", 10.0))}, parent, prop_scale)
 
-static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D):
+# Ground level under an obstacle/prop, or 0 when no map_def was threaded
+# through (direct callers in probes and test fixtures).
+#
+# Everything in the obstacle path used to assume the ground was at exactly
+# y=0, which was very nearly true while ambient relief was 0.4 units. It is
+# not true now: boulders hung in the air over a dip and sank into a rise, and
+# their colliders with them. Grounding each footprint at its own centre keeps a
+# cluster internally consistent (one rock pile, one plinth) rather than each
+# rock independently chasing the surface and shearing the pile apart.
+static func _obstacle_ground_y(map_def: Dictionary, x: float, z: float) -> float:
+	if map_def.is_empty():
+		return 0.0
+	return terrain_height_at(map_def, Vector3(x, 0.0, z))
+
+static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D, map_def: Dictionary = {}):
 	var obstacle_type = obstacle.get("type", "rock")
+	var base_y = _obstacle_ground_y(map_def, obstacle.center.x, obstacle.center.z)
 	var collider_height = 3.0
 	if obstacle_type == "building":
-		collider_height = _spawn_building_obstacle(obstacle, parent)
+		collider_height = _spawn_building_obstacle(obstacle, parent, base_y)
 	else:
-		collider_height = _spawn_rock_obstacle(obstacle, parent)
+		collider_height = _spawn_rock_obstacle(obstacle, parent, base_y)
 
 	# Real collision (same "Ground only" layer as the flat terrain) so units
 	# physically can't clip through even if steering pushes them off-path,
@@ -1772,7 +1788,7 @@ static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D):
 	shape.shape = box_shape
 	body.add_child(shape)
 	parent.add_child(body)
-	body.global_position = Vector3(obstacle.center.x, collider_height / 2.0, obstacle.center.z)
+	body.global_position = Vector3(obstacle.center.x, base_y + collider_height / 2.0, obstacle.center.z)
 
 # Authored boulders now exist (tools/blender/build_terrain_props.py) - a
 # rock cluster prefers a pool of 4 real boulder_N.glb variants, picked
@@ -1790,7 +1806,7 @@ const BOULDER_MODEL_DIR := "res://assets/models/terrain/boulder_%d.glb"
 # not all of boulder_0..3.glb exist" isn't a real state worth handling. This
 # keeps the fallback all-or-nothing too: either every rock in a cluster is
 # authored art, or every rock is the box-primitive placeholder, never a mix.
-static func _spawn_authored_boulders(obstacle: Dictionary, parent: Node3D, rng: RandomNumberGenerator) -> bool:
+static func _spawn_authored_boulders(obstacle: Dictionary, parent: Node3D, rng: RandomNumberGenerator, base_y: float = 0.0) -> bool:
 	if not ResourceLoader.exists(BOULDER_MODEL_DIR % 0):
 		return false
 	for i in range(4):
@@ -1805,7 +1821,7 @@ static func _spawn_authored_boulders(obstacle: Dictionary, parent: Node3D, rng: 
 		inst.scale = Vector3.ONE * scale_factor
 		var ox = rng.randf_range(-obstacle.half_extents.x * 0.7, obstacle.half_extents.x * 0.7)
 		var oz = rng.randf_range(-obstacle.half_extents.y * 0.7, obstacle.half_extents.y * 0.7)
-		inst.position = Vector3(obstacle.center.x + ox, 0.0, obstacle.center.z + oz)
+		inst.position = Vector3(obstacle.center.x + ox, base_y, obstacle.center.z + oz)
 		inst.rotation.y = rng.randf_range(0, TAU)
 		parent.add_child(inst)
 	return true
@@ -1816,10 +1832,10 @@ static func _spawn_authored_boulders(obstacle: Dictionary, parent: Node3D, rng: 
 # position so a given map's obstacles still look the same run to run
 # (deterministic for screenshot verification). Returns the collider height
 # _spawn_obstacle() should use for this obstacle.
-static func _spawn_rock_obstacle(obstacle: Dictionary, parent: Node3D) -> float:
+static func _spawn_rock_obstacle(obstacle: Dictionary, parent: Node3D, base_y: float = 0.0) -> float:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(obstacle.center)
-	if _spawn_authored_boulders(obstacle, parent, rng):
+	if _spawn_authored_boulders(obstacle, parent, rng, base_y):
 		return 3.0
 	for i in range(5):
 		var rock = MeshInstance3D.new()
@@ -1835,7 +1851,7 @@ static func _spawn_rock_obstacle(obstacle: Dictionary, parent: Node3D) -> float:
 		parent.add_child(rock)
 		var ox = rng.randf_range(-obstacle.half_extents.x * 0.7, obstacle.half_extents.x * 0.7)
 		var oz = rng.randf_range(-obstacle.half_extents.y * 0.7, obstacle.half_extents.y * 0.7)
-		rock.global_position = Vector3(obstacle.center.x + ox, size.y / 2.0, obstacle.center.z + oz)
+		rock.global_position = Vector3(obstacle.center.x + ox, base_y + size.y / 2.0, obstacle.center.z + oz)
 		rock.rotation.y = rng.randf_range(0, TAU)
 	return 3.0
 
@@ -1846,7 +1862,7 @@ static func _spawn_rock_obstacle(obstacle: Dictionary, parent: Node3D) -> float:
 # cover, not decoration. Taller than a rock cluster by default (real
 # buildings are taller than a rock pile, and a taller collider makes the
 # vision/weapon LOS-blocking this enables much more visually legible).
-static func _spawn_building_obstacle(obstacle: Dictionary, parent: Node3D) -> float:
+static func _spawn_building_obstacle(obstacle: Dictionary, parent: Node3D, base_y: float = 0.0) -> float:
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(obstacle.center)
 	var height = obstacle.get("building_height", rng.randf_range(5.0, 8.0))
@@ -1861,7 +1877,7 @@ static func _spawn_building_obstacle(obstacle: Dictionary, parent: Node3D) -> fl
 	mat.roughness = 0.8
 	walls.material_override = mat
 	parent.add_child(walls)
-	walls.global_position = Vector3(obstacle.center.x, height / 2.0, obstacle.center.z)
+	walls.global_position = Vector3(obstacle.center.x, base_y + height / 2.0, obstacle.center.z)
 
 	var roof = MeshInstance3D.new()
 	var roof_box = BoxMesh.new()
@@ -1872,7 +1888,7 @@ static func _spawn_building_obstacle(obstacle: Dictionary, parent: Node3D) -> fl
 	roof_mat.roughness = 0.9
 	roof.material_override = roof_mat
 	parent.add_child(roof)
-	roof.global_position = Vector3(obstacle.center.x, height + 0.15, obstacle.center.z)
+	roof.global_position = Vector3(obstacle.center.x, base_y + height + 0.15, obstacle.center.z)
 
 	# Window-slit greebles on the two long faces - purely cosmetic, no
 	# collision of their own (the single wall box above already owns it).
@@ -1891,7 +1907,7 @@ static func _spawn_building_obstacle(obstacle: Dictionary, parent: Node3D) -> fl
 			window.material_override = wmat
 			parent.add_child(window)
 			var wx = obstacle.center.x + (col - (cols - 1) / 2.0) * (obstacle.half_extents.x * 2.0 / (cols + 1))
-			var wy = 1.2 + row * 1.6
+			var wy = base_y + 1.2 + row * 1.6
 			window.global_position = Vector3(wx, wy, obstacle.center.z + obstacle.half_extents.y + 0.03)
 	return height
 
@@ -2052,6 +2068,123 @@ static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D, prop_s
 		pos.y = terrain_height_at(map_def, pos)
 		TerrainGreeblesScript.place_grassland_prop(pos, tall_rng.randi(), parent, prop_scale, true)
 		tall_placed += 1
+
+# --- Slope-driven rock exposure ---
+#
+# Playtest: "the terrain / boulder greebles should be heaviest on slopes, the
+# steeper the slope the more boulders it will ordinarily expose", and "the
+# cliffs and ravines should match the boulders and rocks shapewise, so they
+# look like the same regions geography."
+#
+# Both asks are one mechanism. Nothing in terrain_greebles.gd was ever
+# slope-aware - every scatter function places props by zone and density alone -
+# so a steep hillside was dressed exactly like flat ground and read as steep
+# only because the navmesh silently declined to cover it. This pass walks the
+# map on its own coarse grid, samples the _slope_at() that already exists, and
+# biases boulder placement toward steep ground: near-flat terrain gets nothing,
+# ground approaching MAX_WALKABLE_SLOPE gets real rock cover, and genuinely
+# unwalkable slope gets the most (nothing needs to path through it anyway).
+#
+# The geology question answers itself as a consequence rather than needing its
+# own system: a ravine wall and a hillside cliff are both just "steep" to
+# _slope_at(), so both get dressed from the SAME boulder pool that the map's
+# authored rock obstacles use. Continuous geology, no cliff-specific asset
+# family, no second placement rule that could drift out of agreement with this
+# one.
+#
+# Purely decorative - no StaticBody3D, matching terrain_greebles.gd's own
+# contract. Rock that appeared on a slope and also blocked movement would turn
+# a visual cue into a silent gameplay change.
+const SLOPE_ROCK_GRID_DIVISIONS: int = 44
+# Below this slope, bare ground: flat terrain has no reason to be shedding
+# bedrock, and rocks everywhere would read as noise rather than as a cue.
+const SLOPE_ROCK_MIN_SLOPE: float = 0.12
+# Hard cap on how many this pass may add regardless of map size or how
+# mountainous the terrain turns out to be. A map that is steep nearly
+# everywhere would otherwise scale straight into a wall of geometry, which is
+# the same trap terrain_greebles.gd's _scaled_count() exists to avoid.
+const SLOPE_ROCK_MAX_COUNT: int = 260
+
+# Placement probability for a given local slope, 0..1. Reaches 1 only at
+# genuinely unwalkable ground, so the densest rock cover always coincides with
+# the terrain a unit cannot cross - the cue and the rule agree.
+static func slope_rock_density(slope: float) -> float:
+	if slope <= SLOPE_ROCK_MIN_SLOPE:
+		return 0.0
+	return clampf((slope - SLOPE_ROCK_MIN_SLOPE) / (MAX_WALKABLE_SLOPE - SLOPE_ROCK_MIN_SLOPE), 0.0, 1.0)
+
+static func _spawn_slope_rocks(map_def: Dictionary, parent: Node3D) -> int:
+	if not ResourceLoader.exists(BOULDER_MODEL_DIR % 0):
+		return 0
+	var half: float = map_def.get("map_half_extents", 80.0)
+	var step: float = (half * 2.0) / float(SLOPE_ROCK_GRID_DIVISIONS)
+
+	var bridge_rects = _collect_bridges(map_def)
+	var avoid_points: Array = []
+	for spawn in map_def.get("spawns", []):
+		for key in spawn.keys():
+			if key == "id": continue
+			avoid_points.append(spawn[key])
+	for r in map_def.get("resource_nodes", []):
+		avoid_points.append(r.position)
+
+	# Seeded off the map name, like every other scatter here, so a given map
+	# dresses identically run to run - the screenshot-verification convention
+	# this project uses depends on it.
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(map_def.get("name", "slope_rocks")) + 977
+	var placed := 0
+	var y := -half + step * 0.5
+	while y < half and placed < SLOPE_ROCK_MAX_COUNT:
+		var x := -half + step * 0.5
+		while x < half and placed < SLOPE_ROCK_MAX_COUNT:
+			var px: float = x + rng.randf_range(-step * 0.4, step * 0.4)
+			var pz: float = y + rng.randf_range(-step * 0.4, step * 0.4)
+			x += step
+			if rng.randf() > slope_rock_density(_slope_at(map_def, px, pz)):
+				continue
+			var pos := Vector3(px, 0.0, pz)
+			# Water and existing obstacles own their own footprints; a bridge
+			# deck should not sprout bedrock through it.
+			if _is_over_water_or_obstacle(map_def, pos):
+				continue
+			var rejected := false
+			for rect in bridge_rects:
+				if _point_in_rect(pos, rect):
+					rejected = true
+					break
+			if not rejected:
+				for a in avoid_points:
+					if Vector2(pos.x - a.x, pos.z - a.z).length() < GRASSLAND_CLUTTER_AVOID_RADIUS:
+						rejected = true
+						break
+			if rejected:
+				continue
+			var packed := load(BOULDER_MODEL_DIR % (rng.randi() % BOULDER_POOL_SIZE)) as PackedScene
+			if packed == null:
+				continue
+			var inst := packed.instantiate() as Node3D
+			if inst == null:
+				continue
+			inst.scale = Vector3.ONE * rng.randf_range(0.55, 1.5)
+			inst.rotation.y = rng.randf_range(0, TAU)
+			# A slight lean, and partly sunk into the slope rather than perched
+			# on it: exposed bedrock is embedded in the hillside, and a boulder
+			# sitting perfectly level on a steep face reads as a prop dropped
+			# onto the terrain instead of as part of it.
+			inst.rotation.x = rng.randf_range(-0.22, 0.22)
+			inst.rotation.z = rng.randf_range(-0.22, 0.22)
+			# position, not global_position, matching _spawn_authored_boulders()
+			# above: a Node3D outside the tree has no global transform, so a
+			# global_position assignment here would silently fall back to local
+			# (and log) for any caller whose parent isn't in the tree yet -
+			# tests and probes especially. See _spawn_bridge()'s own note on
+			# exactly this trap.
+			inst.position = Vector3(px, terrain_height_at(map_def, pos) - rng.randf_range(0.05, 0.45), pz)
+			parent.add_child(inst)
+			placed += 1
+		y += step
+	return placed
 
 # --- Queries (pure functions, no Node dependency - callable from tests
 # directly against a MapCatalog dictionary) ---
