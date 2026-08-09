@@ -133,6 +133,12 @@ const _GLYPH_RANGES := [
 # This is a change justified by a design decision, unlike the 2026-08-07
 # re-point below it, which deliberately accepted drift.
 #
+# UPDATED 2026-08-08: naval_propeller's three frozen rows (small/reference/
+# large) removed. The locomotion type itself was deleted along with hydrofoil
+# and water_jet - naval units and naval building never got real design
+# attention, so the theatre they served does not exist. Nothing else in the
+# table changed; buoyant_envelope and screw_drive are unaffected.
+#
 const GOLDEN_LOCOMOTION_LAYOUT := {
 	"small": {
 		"wheels": {"hull_y": 0.9680, "stations": [[Vector3(-1.1500, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-1.1500, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.1500, -0.3000, -1.0500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.1500, -0.3000, 1.0500), Vector3(1.0000, 1.0000, 1.0000)]]},
@@ -142,7 +148,6 @@ const GOLDEN_LOCOMOTION_LAYOUT := {
 		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-2.2500, 0.6000, -1.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(-2.2500, 0.6000, 1.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(2.2500, 0.6000, -1.0000), Vector3(0.3500, 0.3500, 0.3500)], [Vector3(2.2500, 0.6000, 1.0000), Vector3(0.3500, 0.3500, 0.3500)]]},
 		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-1.4000, 0.0000, 0.5000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.4000, 0.0000, 0.5000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(-1.0000, 0.2500, 0.0000), Vector3(1.0950, 0.5475, 1.0950)], [Vector3(1.0000, 0.2500, 0.0000), Vector3(1.0950, 0.5475, 1.0950)]]},
-		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-0.5000, -0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(0.5000, -0.0000, 2.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-2.1000, 0.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.1000, 0.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"screw_drive": {"hull_y": 0.8158, "stations": [[Vector3(-1.0000, -0.2500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.0000, -0.2500, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 	},
@@ -154,7 +159,6 @@ const GOLDEN_LOCOMOTION_LAYOUT := {
 		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-3.2500, 0.8000, -2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-3.2500, 0.8000, 2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.2500, 0.8000, -2.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.2500, 0.8000, 2.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-2.4000, 0.0000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.4000, 0.0000, 1.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(-2.0000, 0.5000, 0.0000), Vector3(2.0000, 1.0000, 2.0000)], [Vector3(2.0000, 0.5000, 0.0000), Vector3(2.0000, 1.0000, 2.0000)]]},
-		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-1.2500, -0.2500, 3.6000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(1.2500, -0.2500, 3.6000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-3.1000, 0.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.1000, 0.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"screw_drive": {"hull_y": 1.4430, "stations": [[Vector3(-2.0000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.5000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 	},
@@ -166,7 +170,6 @@ const GOLDEN_LOCOMOTION_LAYOUT := {
 		"helicopter_rotors": {"hull_y": 0.9000, "stations": [[Vector3(-4.7500, 1.4000, -3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(-4.7500, 1.4000, 3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.7500, 1.4000, -3.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.7500, 1.4000, 3.7500), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"fixed_wing_engine": {"hull_y": 0.9000, "stations": [[Vector3(-3.9000, 0.0000, 1.7500), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.9000, 0.0000, 1.7500), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"ornithopter_wing": {"hull_y": 0.9000, "stations": [[Vector3(-3.5000, 1.0000, 0.0000), Vector3(2.0000, 1.0000, 2.0000)], [Vector3(3.5000, 1.0000, 0.0000), Vector3(2.0000, 1.0000, 2.0000)]]},
-		"naval_propeller": {"hull_y": 0.9000, "stations": [[Vector3(-2.0000, -0.2500, 6.1000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(2.0000, -0.2500, 6.1000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"buoyant_envelope": {"hull_y": 0.9000, "stations": [[Vector3(-4.6000, 0.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(4.6000, 0.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 		"screw_drive": {"hull_y": 3.0746, "stations": [[Vector3(-3.5000, -1.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)], [Vector3(3.5000, -1.0000, 0.0000), Vector3(1.0000, 1.0000, 1.0000)]]},
 	},
