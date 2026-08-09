@@ -254,7 +254,21 @@ const BRIDGE_DECK_HEIGHT: float = 0.6
 # ground would look like units floating/sinking, so the two MUST move
 # together, which is exactly what this single function-plus-mesh-generator
 # pairing guarantees.
-const GROUND_NOISE_AMPLITUDE: float = 0.4
+# Raised 0.4 -> 1.2 after playtest: "the rest of the 'flat' terrain needs more
+# noise, it's far too flat and featureless." At the old value, an open_plains
+# grown to 840 half-extent had 2.75 units of ambient relief across 1680 units
+# of map - genuinely invisible from RTS camera height, and the reason authored
+# hills read as the ONLY terrain on the map.
+#
+# 3x is not a guess: tools/probe_noise_amplitude.gd measures the ambient noise
+# term's own slope distribution (hills and water_blobs stripped, so the
+# measurement isn't swamped by their authored slope) and projects it, which is
+# exact because height_at()'s noise term is linear in this constant. At 3x the
+# p99 slope is 0.37 against MAX_WALKABLE_SLOPE 0.7 - roughly half, real
+# headroom. 6x is where ordinary ground starts being rejected as unwalkable.
+# Re-run that probe before moving this again; amplitude and walkability are
+# coupled, and the coupling is not obvious from either constant alone.
+const GROUND_NOISE_AMPLITUDE: float = 1.2
 const GROUND_NOISE_FREQUENCY: float = 0.035
 const MAX_WALKABLE_SLOPE: float = 0.7 # ~35 degrees
 
@@ -1277,7 +1291,7 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 	for o in map_def.get("obstacles", []):
 		_spawn_obstacle(o, parent)
 	for s in map_def.get("surface_zones", []):
-		_spawn_surface_zone(s, parent, prop_scale)
+		_spawn_surface_zone(s, parent, prop_scale, map_def)
 	for sw in map_def.get("shallow_water_areas", []):
 		_spawn_shallow_water_marker(sw, parent, prop_scale)
 	for b in map_def.get("bridges", []):
@@ -1520,18 +1534,135 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 
 	return {"mesh": mesh, "shape": shape, "samples": samples, "collision_scale": Vector3(COLLISION_HEIGHTMAP_STEP, 1.0, COLLISION_HEIGHTMAP_STEP)}
 
-static func _spawn_surface_zone(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
-	var mesh_inst = MeshInstance3D.new()
-	var plane = PlaneMesh.new()
+# A rectangular zone footprint as a real subdivided mesh whose every vertex
+# samples height_at() - the same one source of truth build_ground_visual_mesh(),
+# _slope_at() and every unit's Y-snap already agree on.
+#
+# WHY THIS EXISTS. Surface zones (marsh/rocky/sand/...) used to be a single
+# un-subdivided PlaneMesh pinned at a FIXED y=0.03, which is correct only on
+# genuinely flat ground. Once the map has real relief - ambient ground noise,
+# and now authored hills/ravines - the ground mesh rises straight through the
+# zone's flat plane and the surface texture reads as a sheet of paper laid over
+# a lumpy floor, with the real ground poking out of it in patches. Raising
+# GROUND_NOISE_AMPLITUDE makes that strictly worse, which is why this landed
+# first.
+#
+# y_lift is a small constant offset ABOVE the sampled terrain height (not an
+# absolute Y): the zone is a dressing layer drawn on top of the base ground, so
+# it needs a consistent hair of clearance everywhere to avoid z-fighting,
+# rather than a single altitude that's only right in one spot.
+#
+# UVs are baked from ABSOLUTE world position, matching
+# build_ground_visual_mesh(), so adjacent zones and the base ground all share
+# one continuous texture grid instead of each restarting its own 0..1 sweep at
+# its own corner. Callers must therefore leave the material's uv1_scale at 1.
+static func _build_conforming_zone_mesh(map_def: Dictionary, center: Vector3, half_extents: Vector2, y_lift: float, tile_scale: float) -> ArrayMesh:
+	var h_cache: Dictionary = {}
+	var _h = func(hx: float, hz: float) -> float:
+		var key = Vector2(hx, hz)
+		if h_cache.has(key): return h_cache[key]
+		var v = height_at(map_def, hx, hz) + y_lift
+		h_cache[key] = v
+		return v
+
+	var x0: float = center.x - half_extents.x
+	var x_max: float = center.x + half_extents.x
+	var z0: float = center.z - half_extents.y
+	var z_max: float = center.z + half_extents.y
+	var tile: float = TERRAIN_TILE_WORLD_SIZE * tile_scale
+
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var x = x0
+	while x < x_max:
+		var x1 = min(x + GROUND_MESH_RESOLUTION, x_max)
+		var z = z0
+		while z < z_max:
+			var z1 = min(z + GROUND_MESH_RESOLUTION, z_max)
+			var a = Vector3(x, _h.call(x, z), z)
+			var b = Vector3(x1, _h.call(x1, z), z)
+			var c = Vector3(x1, _h.call(x1, z1), z1)
+			var d = Vector3(x, _h.call(x, z1), z1)
+			for v in [a, b, c, a, c, d]:
+				st.set_uv(Vector2(v.x, v.z) / tile)
+				st.set_color(Color(1, 1, 1, _zone_edge_alpha(v, center, half_extents)))
+				st.add_vertex(v)
+			z = z1
+		x = x1
+	st.generate_normals()
+	return st.commit()
+
+# Fraction of a zone's footprint, measured inward from each edge, over which it
+# fades out. Playtest: "the separate terrain types need to blend better into
+# each other." Each zone is its own opaque quad with a hard rectangular
+# footprint, so two adjacent zones met at a visible straight seam and every zone
+# met the base ground at one too - there was no blend mask, no vertex alpha, and
+# no shared shader anywhere that could have produced a gradient.
+#
+# This is the cheap half of the fix: fade each zone's own alpha to 0 over its
+# outer margin so it dissolves into whatever is beneath it, using the existing
+# StandardMaterial3D rather than new shader infrastructure. It genuinely blends
+# a zone into the BASE GROUND; where two zones overlap it blends them into each
+# other only in the ordinary alpha-over sense, which softens the seam but is not
+# a true splat. A real multi-texture blend shader is the correct long-term
+# answer and is deliberately scoped as its own task - see the plan.
+const ZONE_EDGE_FADE_FRACTION: float = 0.18
+
+static func _zone_edge_alpha(v: Vector3, center: Vector3, half_extents: Vector2) -> float:
+	# Distance from this vertex to the nearest footprint edge, expressed as a
+	# fraction of the fade margin on that axis, so a long thin zone fades over a
+	# proportionate band on each axis rather than one absolute distance that
+	# would swallow the short axis entirely.
+	var fx: float = half_extents.x * ZONE_EDGE_FADE_FRACTION
+	var fz: float = half_extents.y * ZONE_EDGE_FADE_FRACTION
+	var tx: float = 1.0 if fx <= 0.0 else clampf((half_extents.x - absf(v.x - center.x)) / fx, 0.0, 1.0)
+	var tz: float = 1.0 if fz <= 0.0 else clampf((half_extents.y - absf(v.z - center.z)) / fz, 0.0, 1.0)
+	# smoothstep, not linear: a linear ramp has a visible crease where it meets
+	# full opacity, which is the same hard-line artifact this is here to remove.
+	return smoothstep(0.0, 1.0, minf(tx, tz))
+
+# Clearance above the sampled terrain for each dressing layer. Ordered so the
+# stack is unambiguous where they overlap: surface zone lowest, water above it,
+# the shallow-water marker on top of the water it annotates. Same relative
+# ordering the old fixed-Y constants (0.03/0.05/0.06) encoded, now expressed as
+# offsets from real terrain rather than from absolute zero.
+const ZONE_Y_LIFT: float = 0.03
+
+static func _spawn_surface_zone(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0, map_def: Dictionary = {}):
 	var footprint = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
-	plane.size = footprint
-	mesh_inst.mesh = plane
 	var surface_type = zone.get("surface_type", "")
-	mesh_inst.material_override = _build_terrain_material(
+	var mesh_inst = MeshInstance3D.new()
+	var mat = _build_terrain_material(
 		surface_type, footprint, Color.WHITE,
 		_variant_for_position(surface_type, zone.center.x, zone.center.z), prop_scale)
-	parent.add_child(mesh_inst)
-	mesh_inst.global_position = Vector3(zone.center.x, 0.03, zone.center.z)
+
+	if map_def.is_empty():
+		# No map_def (a direct caller in a test fixture, or a future call site
+		# that hasn't threaded it through): fall back to the old flat plane
+		# rather than to nothing, same degrade-gracefully contract the authored-
+		# asset paths use.
+		var plane = PlaneMesh.new()
+		plane.size = footprint
+		mesh_inst.mesh = plane
+		mesh_inst.material_override = mat
+		parent.add_child(mesh_inst)
+		mesh_inst.global_position = Vector3(zone.center.x, ZONE_Y_LIFT, zone.center.z)
+	else:
+		# World-position UVs are baked into the mesh, so the footprint-relative
+		# tiling _build_terrain_material() set up would double-apply.
+		mat.uv1_scale = Vector3.ONE
+		# The mesh carries a per-vertex edge-fade alpha (_zone_edge_alpha); none
+		# of it does anything unless the material both reads vertex color and
+		# has real alpha blending turned on.
+		mat.vertex_color_use_as_albedo = true
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		# A transparent surface lying flat on opaque ground it barely clears
+		# would otherwise flicker against it depth-sorted per-frame.
+		mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_OPAQUE_ONLY
+		mesh_inst.mesh = _build_conforming_zone_mesh(
+			map_def, zone.center, zone.half_extents, ZONE_Y_LIFT, prop_scale)
+		mesh_inst.material_override = mat
+		parent.add_child(mesh_inst)
 
 	TerrainGreeblesScript.scatter(zone, parent, prop_scale)
 
