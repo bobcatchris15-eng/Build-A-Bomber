@@ -1557,7 +1557,16 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 # build_ground_visual_mesh(), so adjacent zones and the base ground all share
 # one continuous texture grid instead of each restarting its own 0..1 sweep at
 # its own corner. Callers must therefore leave the material's uv1_scale at 1.
-static func _build_conforming_zone_mesh(map_def: Dictionary, center: Vector3, half_extents: Vector2, y_lift: float, tile_scale: float) -> ArrayMesh:
+# Public entry point for any full-map overlay that has to lie ON the terrain
+# rather than float above its highest point - the fog shroud is the first
+# caller. resolution is exposed because a map-wide overlay cannot afford the
+# ground mesh's own 3-unit grid (an 840 half-extent map would be ~1.8M verts of
+# fog), and does not need it: it is following the same low-frequency relief the
+# ground noise produces, not rendering detail.
+static func build_conforming_overlay_mesh(map_def: Dictionary, half: float, y_lift: float, resolution: float) -> ArrayMesh:
+	return _build_conforming_zone_mesh(map_def, Vector3.ZERO, Vector2(half, half), y_lift, 1.0, resolution)
+
+static func _build_conforming_zone_mesh(map_def: Dictionary, center: Vector3, half_extents: Vector2, y_lift: float, tile_scale: float, resolution: float = GROUND_MESH_RESOLUTION) -> ArrayMesh:
 	var h_cache: Dictionary = {}
 	var _h = func(hx: float, hz: float) -> float:
 		var key = Vector2(hx, hz)
@@ -1576,10 +1585,10 @@ static func _build_conforming_zone_mesh(map_def: Dictionary, center: Vector3, ha
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var x = x0
 	while x < x_max:
-		var x1 = min(x + GROUND_MESH_RESOLUTION, x_max)
+		var x1 = min(x + resolution, x_max)
 		var z = z0
 		while z < z_max:
-			var z1 = min(z + GROUND_MESH_RESOLUTION, z_max)
+			var z1 = min(z + resolution, z_max)
 			var a = Vector3(x, _h.call(x, z), z)
 			var b = Vector3(x1, _h.call(x1, z), z)
 			var c = Vector3(x1, _h.call(x1, z1), z1)

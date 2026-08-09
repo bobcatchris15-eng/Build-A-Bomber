@@ -32,7 +32,19 @@ const WorldScaleScript = preload("res://scripts/world_scale.gd")
 # UI_SIZE on screen regardless of map size, so its underlying resolution
 # should stay roughly constant too - left flat, a 16x-larger map would bake
 # an image with 256x the pixels for no visible benefit.
-const CELL := 8.0
+# Lowered 8.0 -> 2.0 after playtest ("the minimap absolutely needs more
+# resolution"). At 8.0 with world_scale 4 the minimap baked one pixel per 32
+# world units - an 840 half-extent map came out ~52 pixels wide and was then
+# stretched over a 180-pixel UI element, which is why it read as blocky. At 2.0
+# the same map bakes ~210 pixels, so the texture is roughly 1:1 with the widget
+# rather than being magnified 3.5x.
+#
+# This does NOT undo the self-bounding property above: the cell still scales
+# with world_scale while _half scales with it too, so the baked dimension stays
+# roughly constant as the world grows. It just picks a better constant. At
+# ~210x210 RGB8 the image is ~130KB, which is not a budget worth defending
+# against a legibility complaint.
+const CELL := 2.0
 const UI_SIZE := 180.0
 const BLIP_RADIUS := 1
 
@@ -282,7 +294,59 @@ func _refresh_minimap() -> void:
 		_blip(c.global_position.x, c.global_position.z,
 			FactionCatalog.get_visual_color(_faction_of(c)))
 
+	_draw_view_indicator()
+
 	_texture.update(_image)
+
+
+# Playtest: the minimap needs a "current view" indicator. Drawn LAST so it sits
+# on top of the blips rather than being overwritten by them.
+#
+# The footprint comes from the real camera by raycasting its four viewport
+# corners onto the ground plane, so the box is genuinely what is on screen at
+# the current height and tilt rather than a guess reconstructed from camera
+# height. Every step is guarded: a controller without a camera, a camera not in
+# a viewport, or a corner ray pointing at or above the horizon (which has no
+# ground intersection at all) each skip the indicator rather than erroring or
+# drawing a box stretching to infinity.
+const VIEW_INDICATOR_COLOR := Color(0.95, 0.95, 0.98)
+
+func _draw_view_indicator() -> void:
+	if _director == null or not ("camera" in _director):
+		return
+	var cam = _director.camera
+	if not is_instance_valid(cam) or not (cam is Camera3D) or not cam.is_inside_tree():
+		return
+	var vp_size: Vector2 = cam.get_viewport().get_visible_rect().size
+	if vp_size.x <= 0.0 or vp_size.y <= 0.0:
+		return
+	var corners: Array = []
+	for p in [Vector2(0, 0), Vector2(vp_size.x, 0), Vector2(vp_size.x, vp_size.y), Vector2(0, vp_size.y)]:
+		var origin: Vector3 = cam.project_ray_origin(p)
+		var dir: Vector3 = cam.project_ray_normal(p)
+		# Looking level or upward: this corner never meets the ground.
+		if dir.y >= -0.001:
+			return
+		var t: float = -origin.y / dir.y
+		corners.append(origin + dir * t)
+	for i in range(corners.size()):
+		_draw_map_line(corners[i], corners[(i + 1) % corners.size()])
+
+
+# A world-space segment onto the minimap image, sampled at enough steps that a
+# long edge stays continuous instead of dotted.
+func _draw_map_line(a: Vector3, b: Vector3) -> void:
+	var from := world_to_cell(a.x, a.z)
+	var to := world_to_cell(b.x, b.z)
+	var steps: int = maxi(absi(to.x - from.x), absi(to.y - from.y))
+	if steps <= 0:
+		_image.set_pixel(from.x, from.y, VIEW_INDICATOR_COLOR)
+		return
+	for i in range(steps + 1):
+		var t: float = float(i) / float(steps)
+		var gx: int = clampi(int(round(lerpf(from.x, to.x, t))), 0, _dim - 1)
+		var gz: int = clampi(int(round(lerpf(from.y, to.y, t))), 0, _dim - 1)
+		_image.set_pixel(gx, gz, VIEW_INDICATOR_COLOR)
 
 
 func _faction_of(c) -> String:

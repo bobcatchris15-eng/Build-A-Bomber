@@ -72,14 +72,30 @@ const HIDE_RANGE_MULT := 1.15
 # Shroud resolution and the two dimmed states. Unexplored is opaque; explored is
 # partly lifted and never returns to full black once seen.
 const GRID_CELL := 4.0
-const EXPLORED_ALPHA := 0.55
+# Playtest: "the VISION needs to be brighter in comparison to the non-visible
+# parts of the explored map." Currently-visible ground is alpha 0 - fully clear,
+# and already as bright as the terrain itself gets - so the contrast has to come
+# from the other end: explored-but-not-currently-visible is dimmed harder.
+# Raised 0.55 -> 0.74, which keeps remembered terrain legible (that is the whole
+# point of explored state persisting) while making the lit, actively-seen area
+# read as unmistakably the live one.
+const EXPLORED_ALPHA := 0.74
 const UNEXPLORED_ALPHA := 1.0
-# Clearance ABOVE the terrain maximum, not an absolute height. The old value
-# was a bare 0.4, which happened to equal GROUND_NOISE_AMPLITUDE exactly - it
-# sat on the terrain ceiling by coincidence rather than by rule, and once the
-# world scaled the ground grew straight through it. See
-# TerrainBuilderScript.max_height().
-const SHROUD_CLEARANCE := 0.4
+# Clearance above the terrain AT EACH POINT, not above the map maximum.
+#
+# The shroud used to be a flat plane, which forced it to sit above the highest
+# ground anywhere on the map or hilltops would render through it. That worked
+# while maps were nearly flat. With real hills and ravines it means the fog
+# floats far above the floor of every low-lying area - a ceiling over the map
+# rather than a layer on the ground - which is what the playtest reported. The
+# mesh now follows height_at() and needs only a hair of local clearance, so
+# max_height() is no longer involved in placing it at all.
+const SHROUD_CLEARANCE := 1.0
+# Grid spacing for the shroud mesh, in world units before world_scale. The
+# ground mesh's own 3-unit grid would be ~1.8M verts across an 840 half-extent
+# map, and the shroud does not need it: it is following the same low-frequency
+# relief the ground noise produces, not rendering detail.
+const SHROUD_MESH_RESOLUTION := 3.0
 
 const SHROUD_SHADER := """
 shader_type spatial;
@@ -147,9 +163,7 @@ func setup(controller: Node, local_team: int, map_half_extents: float, world_sca
 func build_shroud() -> MeshInstance3D:
 	var inst := MeshInstance3D.new()
 	inst.name = "FogShroud"
-	var plane := PlaneMesh.new()
-	plane.size = Vector2(_half * 2.0, _half * 2.0)
-	inst.mesh = plane
+	inst.mesh = _shroud_mesh()
 	var shader := Shader.new()
 	shader.code = SHROUD_SHADER
 	var mat := ShaderMaterial.new()
@@ -157,18 +171,23 @@ func build_shroud() -> MeshInstance3D:
 	mat.set_shader_parameter("shroud_tex", _texture)
 	mat.set_shader_parameter("map_half", _half)
 	inst.material_override = mat
-	inst.position = Vector3(0, _shroud_height(), 0)
 	return inst
 
 
-# Above the highest ground on this map, so no hilltop renders through the fog.
-func _shroud_height() -> float:
+# A shroud that lies ON the terrain. Falls back to the old flat plane at a
+# fixed clearance when there is no map to sample - a test stub or a controller
+# without current_map - rather than to nothing, same degrade contract the rest
+# of the terrain code uses.
+func _shroud_mesh() -> Mesh:
 	var map_def: Dictionary = {}
 	if _controller != null and "current_map" in _controller:
 		map_def = _controller.current_map
 	if map_def.is_empty():
-		return SHROUD_CLEARANCE
-	return TerrainBuilderScript.max_height(map_def) + SHROUD_CLEARANCE
+		var plane := PlaneMesh.new()
+		plane.size = Vector2(_half * 2.0, _half * 2.0)
+		return plane
+	return TerrainBuilderScript.build_conforming_overlay_mesh(
+		map_def, _half, SHROUD_CLEARANCE, SHROUD_MESH_RESOLUTION * _world_scale)
 
 
 # --- Queries -----------------------------------------------------------------
