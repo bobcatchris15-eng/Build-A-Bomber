@@ -86,12 +86,36 @@ const DESTINATIONS := [
 		"scene": "res://scenes/Battlefield.tscn",
 		"badge": "TEST // RANGE"
 	},
-	# The rebuilt battle layer (scripts/battle/), listed BESIDE Skirmish rather
-	# than replacing it. The old match controller stays playable and its ~120
-	# suites stay green until the new one reaches parity; at that point Skirmish
-	# above is deleted and this takes the name. The badge says WIP because for
-	# the moment it genuinely is one - see the phase plan.
 ]
+
+# WHICH RUNTIME EACH COMBAT DESTINATION ACTUALLY REACHES, because it is not
+# obvious from the scene paths above and there are two unit scripts in the tree.
+#
+#   SKIRMISH        MatchSetup.tscn      -> Battle.tscn -> battle/match_director.gd
+#   OPERATIONS      OperationsSetup.tscn -> Battle.tscn -> battle/match_director.gd
+#   PROVING GROUND  Battlefield.tscn     -> battlefield.gd
+#
+# Skirmish and Operations both run the battle layer (scripts/battle/), whose
+# units are battle/units/unit.gd. There is no older controller underneath them:
+# skirmish.gd and Skirmish.tscn were deleted outright when the battle layer
+# reached parity, and nothing in scripts/battle/ references the legacy unit.
+#
+# THE PROVING GROUND IS THE EXCEPTION, and it is the one worth knowing about.
+# battlefield.gd still runs the legacy battle_unit.gd for both the player
+# vehicle and the target dummies. It reaches it through a runtime
+# `load("res://scripts/battle_unit.gd")` rather than a preload, so a search for
+# preloads finds only test files and the script looks dead when it is not.
+#
+# The practical consequence: any unit-level mechanic added to one script and not
+# the other works in Skirmish and silently does nothing in the Test Range, or
+# the reverse. The Resource Bay's cargo capacity, the power budget and the
+# brownout are all deliberately implemented in both for exactly this reason -
+# see the shared helpers they route through (ModuleCatalog.resource_bay_capacity,
+# PowerBudget.analyze) rather than duplicating the arithmetic.
+#
+# This block replaces a comment describing the battle layer as a work in
+# progress listed "BESIDE Skirmish" that would take its name at parity. That
+# already happened; the entry it documented no longer exists.
 
 var _turntable_node: Node3D = null
 var _turntable_model_container: Node3D = null
