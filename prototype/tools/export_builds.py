@@ -130,6 +130,38 @@ def main():
         print("  [FAIL] macOS export failed:\n", res_mac.stderr)
 
     print("\n=== Export Process Complete ===")
+    bump_patch_version(proto_dir, version)
+
+def bump_patch_version(proto_dir, current_version):
+    parts = current_version.split('.')
+    if len(parts) == 3 and parts[2].isdigit():
+        new_version = f"{parts[0]}.{parts[1]}.{int(parts[2]) + 1}"
+    elif len(parts) >= 2 and parts[-1].isdigit():
+        parts[-1] = str(int(parts[-1]) + 1)
+        new_version = '.'.join(parts)
+    else:
+        return current_version
+        
+    # Update project.godot
+    godot_file = os.path.join(proto_dir, "project.godot")
+    if os.path.exists(godot_file):
+        with open(godot_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        new_content = re.sub(r'config/version="[^"]+"', f'config/version="{new_version}"', content)
+        with open(godot_file, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+    # Update export_presets.cfg
+    presets_file = os.path.join(proto_dir, "export_presets.cfg")
+    if os.path.exists(presets_file):
+        with open(presets_file, "r", encoding="utf-8") as f:
+            content = f.read()
+        new_content = content.replace(current_version, new_version)
+        with open(presets_file, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+    print(f"=== [VERSION BUMP] Incremented version from {current_version} to {new_version} for next build ===")
+    return new_version
 
 if __name__ == "__main__":
     main()
