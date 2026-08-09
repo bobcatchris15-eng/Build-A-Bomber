@@ -107,12 +107,25 @@ func test_energy_pool_and_generators() -> bool:
 			{"type_id": "fusion_generator", "name": "Fusion Generator", "position": {"x": 0.0, "y": 0.5, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
 		]
 	}
+	# A GENERATOR NO LONGER RAISES max_energy, AND THAT IS THE POINT.
+	#
+	# This suite used to assert that mounting a fusion_generator pushed
+	# max_energy above the hull's base. That stopped being true when generation
+	# and storage were split into separate stats: the generator produces power
+	# and stores none, the capacitor stores and produces none. The assertion is
+	# inverted rather than deleted, because "a generator must NOT change the
+	# buffer size" is now the property worth protecting - a generator that
+	# quietly grew the pool again would be the old conflation coming back.
 	var unit_with_gen = CharacterBody3D.new()
 	unit_with_gen.set_script(BattleUnitScript)
 	root.add_child(unit_with_gen)
 	unit_with_gen.setup(bp_with_gen, 0, bp_manager)
-	if unit_with_gen.max_energy <= base_only:
-		print("  [FAIL] A mounted fusion_generator should raise max_energy above the hull's base_energy alone (base=", base_only, ", with generator=", unit_with_gen.max_energy, ")")
+	if not is_equal_approx(unit_with_gen.max_energy, base_only):
+		print("  [FAIL] A fusion_generator makes POWER, not storage - max_energy should be unchanged at ", base_only, ", got ", unit_with_gen.max_energy)
+		bp_manager.queue_free()
+		return false
+	if unit_with_gen.energy_regen_rate <= 0.0:
+		print("  [FAIL] A mounted fusion_generator should give a positive net regen rate, got ", unit_with_gen.energy_regen_rate)
 		bp_manager.queue_free()
 		return false
 
@@ -123,10 +136,25 @@ func test_energy_pool_and_generators() -> bool:
 		print("  [FAIL] Energy should regenerate over time from 0, got ", unit_with_gen.current_energy)
 		bp_manager.queue_free()
 		return false
-
 	unit_with_gen.queue_free()
+
+	# ...and a capacitor is the module that DOES raise it, with no generation.
+	var bp_with_cap = bp_no_gen.duplicate(true)
+	bp_with_cap["modules"] = [
+		{"type_id": "capacitor_bank", "name": "Capacitor Bank", "position": {"x": 0.0, "y": 0.5, "z": 0.0}, "rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}}
+	]
+	var unit_with_cap = CharacterBody3D.new()
+	unit_with_cap.set_script(BattleUnitScript)
+	root.add_child(unit_with_cap)
+	unit_with_cap.setup(bp_with_cap, 0, bp_manager)
+	if unit_with_cap.max_energy <= base_only:
+		print("  [FAIL] A capacitor_bank is the module that raises storage - max_energy should exceed ", base_only, ", got ", unit_with_cap.max_energy)
+		bp_manager.queue_free()
+		return false
+	unit_with_cap.queue_free()
+
 	bp_manager.queue_free()
-	print("  [PASS] Hulls carry a base energy pool; generator modules raise max_energy above it; energy regenerates over time.")
+	print("  [PASS] Hulls carry a base energy pool; a generator adds generation without adding storage; a capacitor adds storage without adding generation; energy regenerates over time.")
 	return true
 
 func test_repair_array_heals_allies_only() -> bool:
@@ -641,4 +669,341 @@ func test_harvester_delivery_radius_clears_hull_and_refinery() -> bool:
 	refinery.queue_free()
 	await tree.process_frame
 	print("  [PASS] Delivery radius is derived from the refinery footprint and the harvester's own hull, so it stays reachable for any design.")
+	return true
+
+
+# --- Power budget -----------------------------------------------------------
+#
+# Storage and generation used to be one number: the refill rate was derived as
+# `capacity * 0.08`, so storage manufactured generation and neither of the two
+# interesting shapes (big buffer that trickles, small buffer that refills fast)
+# could be built. This suite guards the split itself - if those two stats ever
+# start feeding each other again, everything downstream quietly collapses back
+# into a single axis with two names.
+func test_generation_and_storage_are_independent() -> bool:
+	print("Running Test Suite: Power - Generation And Storage Are Separate Stats...")
+	var PowerBudget = preload("res://scripts/power_budget.gd")
+
+	var make_hull = func(specs: Array) -> Node3D:
+		var hull = Node3D.new()
+		hull.set_meta("type_id", "medium_hull")
+		for spec in specs:
+			var n = Node3D.new()
+			var d = ModuleData.new()
+			d.type_id = spec["type_id"]
+			var cat: Dictionary = ModuleCatalog.get_module_data(spec["type_id"])
+			d.category = cat.get("category", "module")
+			d.base_energy_capacity = cat.get("energy_capacity", 0.0)
+			d.base_power_output = cat.get("power_output", 0.0)
+			d.tweaks = spec.get("tweaks", {})
+			n.set_meta("module_data", d)
+			hull.add_child(n)
+		root.add_child(hull)
+		return hull
+
+	var bare = make_hull.call([])
+	var base: Dictionary = PowerBudget.analyze(bare)
+	# The hull must bring BOTH of its own, or every design in the roster is
+	# broken out of the box until a generator is bolted on.
+	if base["storage"] <= 0.0 or base["generation"] <= 0.0:
+		print("  [FAIL] A bare hull must carry both storage and generation of its own; got storage=", base["storage"], " generation=", base["generation"])
+		bare.free()
+		return false
+	bare.free()
+
+	# A capacitor moves storage and ONLY storage.
+	var capped = make_hull.call([{"type_id": "capacitor_bank"}])
+	var cap: Dictionary = PowerBudget.analyze(capped)
+	if cap["storage"] <= base["storage"]:
+		print("  [FAIL] A capacitor_bank must raise storage; ", base["storage"], " -> ", cap["storage"])
+		capped.free()
+		return false
+	if not is_equal_approx(cap["generation"], base["generation"]):
+		print("  [FAIL] A capacitor_bank stores charge, it does not make any - generation should be unchanged at ", base["generation"], ", got ", cap["generation"])
+		capped.free()
+		return false
+	capped.free()
+
+	# A generator moves generation and ONLY generation.
+	var genned = make_hull.call([{"type_id": "fusion_generator"}])
+	var gen: Dictionary = PowerBudget.analyze(genned)
+	if gen["generation"] <= base["generation"]:
+		print("  [FAIL] A fusion_generator must raise generation; ", base["generation"], " -> ", gen["generation"])
+		genned.free()
+		return false
+	if not is_equal_approx(gen["storage"], base["storage"]):
+		print("  [FAIL] A fusion_generator makes power, it does not store it - storage should be unchanged at ", base["storage"], ", got ", gen["storage"])
+		genned.free()
+		return false
+	genned.free()
+
+	print("  [PASS] Hulls carry both stats; capacitors move storage alone and generators move generation alone.")
+	return true
+
+
+# Before the split, fusion_generator carried capacity AND regen while its two
+# tweaks scaled only regen - and capacitor_bank was the mirror image. So on each
+# module one pair of sliders tuned a stat the module also got from elsewhere,
+# and the other pair was simply inert. This asserts all four are live, which is
+# the concrete payoff of the split and exactly what a future rebalance could
+# silently undo by handing either module back the other stat.
+func test_all_four_power_module_tweaks_are_live() -> bool:
+	print("Running Test Suite: Power - Generator And Capacitor Tweaks All Do Something...")
+	var PowerBudget = preload("res://scripts/power_budget.gd")
+
+	var measure = func(type_id: String, tweaks: Dictionary, key: String) -> float:
+		var hull = Node3D.new()
+		hull.set_meta("type_id", "medium_hull")
+		var n = Node3D.new()
+		var d = ModuleData.new()
+		d.type_id = type_id
+		var cat: Dictionary = ModuleCatalog.get_module_data(type_id)
+		d.category = cat.get("category", "module")
+		d.base_energy_capacity = cat.get("energy_capacity", 0.0)
+		d.base_power_output = cat.get("power_output", 0.0)
+		d.tweaks = tweaks
+		n.set_meta("module_data", d)
+		hull.add_child(n)
+		root.add_child(hull)
+		var v: float = float(PowerBudget.analyze(hull)[key])
+		hull.free()
+		return v
+
+	# Generator tweaks -> generation.
+	var gen_base: float = measure.call("fusion_generator", {}, "generation")
+	for tweak in ["reactor_length", "cooling_radiator"]:
+		var raised: float = measure.call("fusion_generator", {tweak: 2.0}, "generation")
+		if raised <= gen_base:
+			print("  [FAIL] fusion_generator's '", tweak, "' is a dead slider: generation stayed at ", gen_base, " (got ", raised, "). Both its tweaks must move generation now that generation is all it has.")
+			return false
+
+	# Capacitor tweaks -> storage.
+	var store_base: float = measure.call("capacitor_bank", {}, "storage")
+	for tweak in [["bank_capacity", 6.0], ["busbar_gauge", 2.0]]:
+		var raised2: float = measure.call("capacitor_bank", {tweak[0]: tweak[1]}, "storage")
+		if raised2 <= store_base:
+			print("  [FAIL] capacitor_bank's '", tweak[0], "' is a dead slider: storage stayed at ", store_base, " (got ", raised2, ").")
+			return false
+
+	# ...and neither module's tweaks leak into the other's stat.
+	if not is_equal_approx(measure.call("fusion_generator", {"reactor_length": 2.0}, "storage"),
+			measure.call("fusion_generator", {}, "storage")):
+		print("  [FAIL] reactor_length changed the generator's STORAGE. A generation tweak must not grow the buffer.")
+		return false
+	if not is_equal_approx(measure.call("capacitor_bank", {"bank_capacity": 6.0}, "generation"),
+			measure.call("capacitor_bank", {}, "generation")):
+		print("  [FAIL] bank_capacity changed the capacitor's GENERATION. A storage tweak must not raise the refill rate.")
+		return false
+
+	print("  [PASS] All four tweaks move their own module's stat, and neither module's tweaks leak into the other's.")
+	return true
+
+
+# Consumption is the genuinely new quantity here - before it, electronics were
+# free and a generator was worth fitting only on an energy-weapon platform. This
+# checks draw is summed, that net is the difference, that firing cost is tracked
+# apart from always-on cost, and that the no-design path carries a full key set
+# (which the Design Lab depends on: clear_hull() calls update_stats(null), and a
+# partial dictionary there has broken that screen before).
+func test_power_budget_sums_draw_and_reports_net() -> bool:
+	print("Running Test Suite: Power - Draw Sums And The Budget Balances...")
+	var PowerBudget = preload("res://scripts/power_budget.gd")
+
+	var empty: Dictionary = PowerBudget.analyze(null)
+	for key in ["has_hull", "storage", "generation", "draw", "weapon_draw", "total_draw",
+			"net", "firing_net", "has_deficit", "firing_deficit_only", "endurance", "firing_endurance"]:
+		if not empty.has(key):
+			print("  [FAIL] The no-hull early return is missing '", key, "'. The Design Lab reads this dict unconditionally on clear_hull().")
+			return false
+	if empty["has_hull"] or empty["storage"] != 0.0 or empty["generation"] != 0.0:
+		print("  [FAIL] With no design there is nothing to report; expected has_hull=false and zeroed figures, got ", empty)
+		return false
+
+	var make_hull = func(ids: Array) -> Node3D:
+		var hull = Node3D.new()
+		hull.set_meta("type_id", "medium_hull")
+		for id in ids:
+			var n = Node3D.new()
+			var d = ModuleData.new()
+			d.type_id = id
+			var cat: Dictionary = ModuleCatalog.get_module_data(id)
+			d.category = cat.get("category", "module")
+			d.base_dps = cat.get("dps", 0.0)
+			d.base_energy_capacity = cat.get("energy_capacity", 0.0)
+			d.base_power_output = cat.get("power_output", 0.0)
+			n.set_meta("module_data", d)
+			hull.add_child(n)
+		root.add_child(hull)
+		return hull
+
+	# Draw is a SUM, not a max and not a flat per-design figure.
+	var one = make_hull.call(["sensor_suite"])
+	var three = make_hull.call(["sensor_suite", "fire_control_radar", "jammer_mast"])
+	var d1: Dictionary = PowerBudget.analyze(one)
+	var d3: Dictionary = PowerBudget.analyze(three)
+	var expected: float = ModuleCatalog.get_power_draw("sensor_suite") \
+		+ ModuleCatalog.get_power_draw("fire_control_radar") \
+		+ ModuleCatalog.get_power_draw("jammer_mast")
+	if not is_equal_approx(d3["draw"], expected):
+		print("  [FAIL] Draw must sum across every drawing module; expected ", expected, ", got ", d3["draw"])
+		one.free(); three.free()
+		return false
+	if d1["draw"] <= 0.0:
+		print("  [FAIL] A sensor_suite must cost something to run - electronics being free is what this table exists to end.")
+		one.free(); three.free()
+		return false
+
+	if not is_equal_approx(d3["net"], d3["generation"] - d3["draw"]):
+		print("  [FAIL] net should be generation - draw; got net=", d3["net"], " from generation=", d3["generation"], " draw=", d3["draw"])
+		one.free(); three.free()
+		return false
+	# Three power-hungry electronics on a bare medium hull must actually
+	# overdraw it, or the table is too timid to create a decision at all.
+	if not d3["has_deficit"]:
+		print("  [FAIL] Three electronics on a bare medium_hull should overdraw it; net was ", d3["net"])
+		one.free(); three.free()
+		return false
+	if d3["endurance"] >= INF or d3["endurance"] <= 0.0:
+		print("  [FAIL] A design in deficit must report a finite, positive endurance; got ", d3["endurance"])
+		one.free(); three.free()
+		return false
+	one.free(); three.free()
+
+	# An energy weapon is a FIRING cost, not an always-on one. Keeping them
+	# apart is what stops a legitimate burst design reading as permanently
+	# under-powered.
+	var gun = make_hull.call(["ion_cannon"])
+	var g: Dictionary = PowerBudget.analyze(gun)
+	if g["has_deficit"]:
+		print("  [FAIL] An energy weapon costs power only while firing; a design mounting one should not read as in deficit at rest.")
+		gun.free()
+		return false
+	if g["weapon_draw"] <= 0.0:
+		print("  [FAIL] An ion_cannon should report a nonzero sustained weapon draw, got ", g["weapon_draw"])
+		gun.free()
+		return false
+	if not g["firing_deficit_only"]:
+		print("  [FAIL] An ion_cannon on a bare hull should out-draw it WHILE FIRING (firing_net=", g["firing_net"], "), flagged separately from a resting deficit.")
+		gun.free()
+		return false
+	gun.free()
+
+	# Storage buys endurance, not solvency. This is the whole reason the two
+	# modules are different answers rather than one being strictly better.
+	var short_hull = make_hull.call(["sensor_suite", "fire_control_radar", "jammer_mast"])
+	var buffered = make_hull.call(["sensor_suite", "fire_control_radar", "jammer_mast", "capacitor_bank"])
+	var s: Dictionary = PowerBudget.analyze(short_hull)
+	var b: Dictionary = PowerBudget.analyze(buffered)
+	if not is_equal_approx(s["net"], b["net"]):
+		print("  [FAIL] A capacitor must not change the net rate; ", s["net"], " -> ", b["net"])
+		short_hull.free(); buffered.free()
+		return false
+	if b["endurance"] <= s["endurance"]:
+		print("  [FAIL] A capacitor must extend how long a deficit is survivable; endurance ", s["endurance"], " -> ", b["endurance"])
+		short_hull.free(); buffered.free()
+		return false
+	short_hull.free(); buffered.free()
+
+	print("  [PASS] Draw sums across modules, net is generation minus always-on draw, firing cost is tracked separately, and storage buys endurance without buying solvency.")
+	return true
+
+
+# The consequence. A design that cannot feed itself sheds systems in a fixed
+# order - shields, then electronics, then weapons - running from the loss that
+# is most recoverable to the one that ends the fight. Asserted as ORDERING and
+# as real runtime effect rather than against the threshold values, so retuning
+# those does not break this.
+func test_brownout_sheds_systems_in_priority_order() -> bool:
+	print("Running Test Suite: Power - Brownout Sheds In Priority Order...")
+	var PowerBudget = preload("res://scripts/power_budget.gd")
+
+	if not (PowerBudget.SHIELDS_OFFLINE > PowerBudget.ELECTRONICS_BROWNOUT
+			and PowerBudget.ELECTRONICS_BROWNOUT > PowerBudget.WEAPONS_OFFLINE):
+		print("  [FAIL] Shed order must be shields, then electronics, then weapons; thresholds are ",
+			PowerBudget.SHIELDS_OFFLINE, " / ", PowerBudget.ELECTRONICS_BROWNOUT, " / ", PowerBudget.WEAPONS_OFFLINE)
+		return false
+
+	# Walking the buffer down must never un-shed something.
+	var state := {}
+	var first_seen := {}
+	var step := 1.0
+	while step >= 0.0:
+		state = PowerBudget.brownout_state(step, state)
+		for key in ["shields_offline", "electronics_brownout", "weapons_offline"]:
+			if state[key] and not first_seen.has(key):
+				first_seen[key] = step
+		step -= 0.01
+	for key in ["shields_offline", "electronics_brownout", "weapons_offline"]:
+		if not first_seen.has(key):
+			print("  [FAIL] '", key, "' never shed even at an empty buffer.")
+			return false
+	if not (first_seen["shields_offline"] > first_seen["electronics_brownout"]
+			and first_seen["electronics_brownout"] > first_seen["weapons_offline"]):
+		print("  [FAIL] Systems shed out of order: shields at ", first_seen["shields_offline"],
+			", electronics at ", first_seen["electronics_brownout"], ", weapons at ", first_seen["weapons_offline"])
+		return false
+
+	# Hysteresis. A design hovering on a boundary must not flicker its vision
+	# radius every physics frame, which is what a bare threshold comparison does.
+	var h := {}
+	h = PowerBudget.brownout_state(PowerBudget.ELECTRONICS_BROWNOUT - 0.01, h)
+	if not h["electronics_brownout"]:
+		print("  [FAIL] Test setup wrong: below the threshold electronics should be shed.")
+		return false
+	h = PowerBudget.brownout_state(PowerBudget.ELECTRONICS_BROWNOUT + 0.01, h)
+	if not h["electronics_brownout"]:
+		print("  [FAIL] Electronics recovered the instant the buffer crossed back over the threshold - that is the flicker the hysteresis exists to prevent.")
+		return false
+	h = PowerBudget.brownout_state(PowerBudget.ELECTRONICS_BROWNOUT + PowerBudget.RECOVERY_HYSTERESIS + 0.01, h)
+	if h["electronics_brownout"]:
+		print("  [FAIL] Electronics never recovered once the buffer cleared the hysteresis margin - a brownout has to be temporary.")
+		return false
+
+	# Vision degrades but never to zero: a blind unit reads as a bug.
+	var dim: float = PowerBudget.vision_multiplier({"electronics_brownout": true})
+	if dim >= 1.0 or dim <= 0.0:
+		print("  [FAIL] A brownout must reduce vision without blinding the unit; multiplier was ", dim)
+		return false
+
+	# And the real thing, end to end.
+	var BattleUnitScript = preload("res://scripts/battle_unit.gd")
+	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
+	root.add_child(bp_manager)
+	var mods := []
+	for id in ["sensor_suite", "fire_control_radar", "jammer_mast"]:
+		mods.append({"type_id": id, "name": id, "position": {"x": 0.0, "y": 0.6, "z": 0.0},
+			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0}, "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+			"yaw_offset": 0.0, "tweaks": {}})
+	var unit = CharacterBody3D.new()
+	unit.set_script(BattleUnitScript)
+	root.add_child(unit)
+	unit.setup({
+		"version": 2.0, "hull_type": "medium_hull",
+		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},
+		"modules": mods,
+	}, 0, bp_manager)
+	if unit.energy_regen_rate >= 0.0:
+		print("  [FAIL] Test setup wrong: three electronics on a medium_hull should give a negative net rate, got ", unit.energy_regen_rate)
+		bp_manager.queue_free()
+		return false
+	var full_vision: float = unit.vision_range
+	var order := []
+	for i in range(400):
+		unit._tick_power(0.1)
+		for key in ["shields_offline", "electronics_brownout", "weapons_offline"]:
+			if unit._brownout[key] and not order.has(key):
+				order.append(key)
+	if order != ["shields_offline", "electronics_brownout", "weapons_offline"]:
+		print("  [FAIL] A real unit shed in the order ", order, ", expected shields, electronics, weapons.")
+		bp_manager.queue_free()
+		return false
+	if unit.vision_range >= full_vision:
+		print("  [FAIL] The brownout should have cut this unit's sight range; still ", unit.vision_range, " against a healthy ", full_vision)
+		bp_manager.queue_free()
+		return false
+	unit.queue_free()
+	bp_manager.queue_free()
+
+	print("  [PASS] Thresholds are ordered shields/electronics/weapons, shedding is monotonic with hysteresis on recovery, vision dims without blinding, and a real overdrawn unit drains and sheds in that order.")
 	return true

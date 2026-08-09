@@ -1197,7 +1197,7 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 	data.base_dps = catalog_data.dps
 	data.base_heal_rate = catalog_data.get("heal_rate", 0.0)
 	data.base_energy_capacity = catalog_data.get("energy_capacity", 0.0)
-	data.base_energy_regen = catalog_data.get("energy_regen", 0.0)
+	data.base_power_output = catalog_data.get("power_output", 0.0)
 	data.base_vision_bonus = catalog_data.get("vision_bonus", 0.0)
 	data.tweaks = tweaks.duplicate()
 	new_weapon.set_meta("module_data", data)

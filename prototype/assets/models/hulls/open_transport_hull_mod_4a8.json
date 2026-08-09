@@ -5,6 +5,7 @@
   "metal": 70,
   "crystal": 12,
   "base_energy": 55.0,
+  "base_power": 4.4,
   "base_vision": 24.0,
   "size": [
     2.7,

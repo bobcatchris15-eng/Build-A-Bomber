@@ -17,6 +17,7 @@ const GlobalConfigScript = preload("res://scripts/global_config.gd")
 const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
+const PowerBudgetScript = preload("res://scripts/power_budget.gd")
 
 var team: int = 0
 var max_hp: float = 400.0
@@ -28,9 +29,19 @@ var is_dead: bool = false
 # firing energy-classed weapons (auto_weapon.gd checks/deducts via
 # spend_energy() before it's allowed to fire) and can be drained directly
 # by an enemy's energy-drain weapon (drain_energy()).
+# Storage from the hull plus capacitors; the rate below is NET generation minus
+# the electronics' continuous draw, so it can be negative and the buffer can
+# genuinely run down. See PowerBudget.
 var max_energy: float = 0.0
 var current_energy: float = 0.0
 var energy_regen_rate: float = 0.0
+# Which systems the brownout has shed. Mirrors unit.gd; the thresholds and the
+# hysteresis both live in PowerBudget so the two runtimes cannot drift.
+var _brownout: Dictionary = {
+	"shields_offline": false,
+	"electronics_brownout": false,
+	"weapons_offline": false,
+}
 var _hull_type_for_energy: String = ""
 # Logistics sharing aura (ENERGY_AND_BALANCE_SPEC.md #5)
 var has_logistics_tank: bool = false
@@ -381,6 +392,9 @@ func _recalculate_vision(hull_type_for_vision: String = ""):
 	vision_range = base + bonus
 	var faction = hull_node.get_meta("faction", "industrialists") if is_instance_valid(hull_node) else "industrialists"
 	vision_range *= FactionCatalog.get_passive(faction, "vision_mult", 1.0)
+	# Brownout last, so it scales the finished figure rather than competing with
+	# the faction passive - see unit.gd's matching line.
+	vision_range *= PowerBudgetScript.vision_multiplier(_brownout)
 	if is_instance_valid(hull_node):
 		hull_node.set_meta("has_fire_control_radar", has_fcr)
 		hull_node.set_meta("fire_control_max_range", maxf(vision_range, max_weapon_range))
@@ -400,30 +414,28 @@ func _detect_logistics_tank():
 				has_logistics_tank = true
 				logistics_tank_strength += data.tweaks.get("tank_capacity", 1.0)
 
-# Energy resource: base_energy from the hull + sum of mounted generator
-# modules' energy_capacity/energy_regen. Public (not just called at setup)
-# because losing a generator module mid-battle should shrink max_energy -
+# Storage from the hull plus capacitors, generation from the hull plus
+# generators, minus the continuous draw of the electronics - all from the shared
+# PowerBudget analyzer rather than summed here. Public (not just called at
+# setup) because losing a generator module mid-battle should shrink the budget -
 # call sites that queue_free() a module should re-call this, same pattern
 # take_damage()'s subsystem-stripping branch uses for _recalculate_move_speed().
+#
+# This used to do its own sum and derive the refill rate as
+# `max_energy * 0.08 + bonus_regen`, which is the storage-manufactures-
+# generation conflation the power split exists to end. It is now the same call
+# unit_assembly.compute_energy() makes for the live runtime, so the two cannot
+# quote different numbers for the same design - the failure mode that made the
+# Resource Bay's capacity worth routing through one helper as well.
 func _recalculate_energy(hull_type_for_energy: String = ""):
 	if hull_type_for_energy != "":
 		_hull_type_for_energy = hull_type_for_energy
-	var base = ModuleCatalog.get_base_energy(_hull_type_for_energy)
-	var bonus_capacity = 0.0
-	var bonus_regen = 0.0
-	if is_instance_valid(hull_node):
-		for child in hull_node.get_children():
-			if child.has_meta("module_data") and not child.is_queued_for_deletion():
-				var data = child.get_meta("module_data")
-				if data.category == "generator":
-					bonus_capacity += data.get_energy_capacity()
-					bonus_regen += data.get_energy_regen()
+	var power: Dictionary = PowerBudgetScript.analyze(hull_node, _hull_type_for_energy)
 	var prev_max = max_energy
-	max_energy = base + bonus_capacity
-	# Base passive regen (a small % of max/sec) plus generators' own bonus -
-	# a unit with zero generators still trickle-regens off its base pool,
-	# gennies just make sustained energy-weapon fire actually viable.
-	energy_regen_rate = max_energy * 0.08 + bonus_regen
+	max_energy = power["storage"]
+	# NET, and therefore possibly negative - see _physics_process, which no
+	# longer guards the update on being below max.
+	energy_regen_rate = power["net"]
 	if prev_max <= 0.0:
 		current_energy = max_energy
 	else:
@@ -890,14 +902,33 @@ func _has_clear_sightline_to(candidate: Node3D) -> bool:
 	var result = space_state.intersect_ray(query)
 	return result.is_empty()
 
+# The buffer, and the brownout when it empties. Mirrors unit.gd's _tick_power()
+# and shares its constants through PowerBudget, so the two runtimes shed the
+# same systems at the same thresholds - a consequence that fires in only one of
+# them is one that appears and disappears depending on how the unit spawned.
+#
+# The `if current_energy < max_energy` guard this replaces had to go: the regen
+# rate is now NET and can be negative, and that guard meant a design in deficit
+# sat pinned at full forever, with its draw computed, displayed in the Lab, and
+# then never actually applied.
+func _tick_power(delta: float) -> void:
+	if max_energy <= 0.0:
+		return
+	current_energy = clampf(current_energy + energy_regen_rate * delta, 0.0, max_energy)
+
+	var before_electronics: bool = _brownout.get("electronics_brownout", false)
+	_brownout = PowerBudgetScript.brownout_state(current_energy / max_energy, _brownout)
+	if _brownout.get("electronics_brownout", false) != before_electronics:
+		_recalculate_vision()
+
+
 func _physics_process(delta):
 	if is_dead: return
 
 	_recalculate_terrain_speed_multiplier()
 	_try_auto_engage(delta)
 
-	if current_energy < max_energy:
-		current_energy = min(max_energy, current_energy + energy_regen_rate * delta)
+	_tick_power(delta)
 	if has_logistics_tank:
 		_share_energy_with_allies(delta)
 
@@ -1576,8 +1607,10 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	if hit_origin != null:
 		_request_smoke_screen(hit_origin if hit_origin is Vector3 else hit_origin.global_position)
 
-	# Energy Barrier Projector frontal shield absorption
-	if hit_origin != null and current_energy > 5.0:
+	# Energy Barrier Projector frontal shield absorption. Shields are the first
+	# system a brownout sheds - see unit.gd's matching gate for why dropping it
+	# early rather than at zero is the point.
+	if hit_origin != null and current_energy > 5.0 and not _brownout.get("shields_offline", false):
 		var has_barrier = false
 		for m in get_active_modules():
 			var m_data = m.get_meta("module_data")

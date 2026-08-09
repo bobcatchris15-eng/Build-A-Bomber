@@ -38,7 +38,13 @@ const NUMERIC_TYPES = [TYPE_INT, TYPE_FLOAT]
 # indicates a broken installation, not a normal modding scenario.
 const PROTECTED_MEDIUM_HULL_FALLBACK = {
 	"name": "Medium Hull", "hp": 400.0, "weight": 250.0, "metal": 100, "crystal": 20,
-	"dps": 0.0, "is_foundation": false, "base_energy": 70.0, "base_vision": 20.0,
+	# base_power (generation) tracks the shipped medium_hull.json sidecar, same
+	# as base_energy (storage) does. It is absent from REQUIRED_FIELDS below on
+	# purpose - a mod hull without it should load and generate nothing, not fail
+	# validation - but this fallback is a copy of a REAL hull, so it carries
+	# every field that hull actually has.
+	"dps": 0.0, "is_foundation": false, "base_energy": 70.0, "base_power": 5.6,
+	"base_vision": 20.0,
 	"draught": 0.5, "underside_y_bias": 0.0, "turreted_capable": true, "category": "hull",
 }
 
@@ -204,6 +210,18 @@ static func _validate_and_default(raw: Dictionary, source_path: String):
 		"color": Color(color_raw[0], color_raw[1], color_raw[2], color_raw[3] if color_raw.size() == 4 else 1.0),
 		"is_foundation": bool(raw.get("is_foundation", false)),
 		"base_energy": float(raw.get("base_energy", 0.0)),
+		# Generation, and a separate stat from base_energy (storage) - see
+		# ModuleCatalog.get_base_power(). Copied through explicitly like
+		# everything else here: this dict is built field by field rather than
+		# merged wholesale, so a sidecar key with no line of its own is silently
+		# dropped no matter how many files declare it.
+		#
+		# Defaulted to 0.0 rather than to some fraction of base_energy, which
+		# would quietly reintroduce the "storage manufactures generation"
+		# derivation this stat was split out to remove. A hull that declares no
+		# generation has none, and its designs will need a fusion generator -
+		# which is a legible outcome, unlike a hidden formula.
+		"base_power": float(raw.get("base_power", 0.0)),
 		"base_vision": float(raw.get("base_vision", 20.0)),
 		"draught": float(raw.get("draught", 0.5)),
 		"underside_y_bias": float(raw.get("underside_y_bias", 0.0)),

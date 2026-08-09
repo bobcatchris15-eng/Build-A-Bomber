@@ -27,6 +27,7 @@ const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
+const PowerBudgetScript = preload("res://scripts/power_budget.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
@@ -66,11 +67,29 @@ var max_hp: float = 100.0
 var hp: float = 100.0
 var is_dead: bool = false
 
-# Capacitor. Feeds energy weapons and the barrier projector; regenerates from
-# hull base plus generator modules.
+# The capacitor. Feeds energy weapons, the barrier projector and - since power
+# draw became a real quantity - the electronics, which now cost something to run
+# rather than being free.
+#
+# energy_regen_rate is NET: generation minus continuous draw. It can be
+# NEGATIVE, which is new and is the entire mechanism behind the brownout below.
+# A design that mounts more electronics than its hull and generators can feed
+# does not fail to build and does not fail to spawn; it runs down its buffer and
+# starts shedding systems, and how long that takes is what its storage bought.
 var max_energy: float = 0.0
 var current_energy: float = 0.0
 var energy_regen_rate: float = 0.0
+
+# Which systems are currently shed, from PowerBudget.brownout_state(). Held as
+# state rather than recomputed at each use site for two reasons: the thresholds
+# carry hysteresis, which needs the previous frame's answer to resolve, and
+# vision is a cached figure that has to be RECOMPUTED on a transition rather
+# than multiplied at read time.
+var _brownout: Dictionary = {
+	"shields_offline": false,
+	"electronics_brownout": false,
+	"weapons_offline": false,
+}
 
 # Set by the vision service. True means the LOCAL team cannot see this unit, so
 # it is neither rendered nor targetable by them.
@@ -233,6 +252,15 @@ func _recalculate_vision() -> void:
 		elif data.type_id == "fire_control_radar":
 			has_radar = true
 	vision_range = (base + bonus) * FactionCatalog.get_passive(faction, "vision_mult", 1.0)
+	# Brownout applied LAST, as a multiplier on the finished figure, so it
+	# composes with the faction passive above rather than competing with it: a
+	# Technocrat scout that browns out should lose the same PROPORTION of its
+	# sight as anyone else, not have its passive silently cancelled.
+	#
+	# This is also why _recalculate_vision() is called when the brownout state
+	# changes and not only when modules are lost - vision is recomputed from
+	# scratch each time, so a stale multiplier cannot accumulate.
+	vision_range *= PowerBudgetScript.vision_multiplier(_brownout)
 	if is_instance_valid(hull_node):
 		# Read off the HULL by auto_weapon.gd's spotting check, not off the unit -
 		# a radar lets this unit's weapons engage out to their own reach rather
@@ -323,12 +351,37 @@ func _sync_nav_radii() -> void:
 	nav_agent.path_desired_distance = maxf(maxf(1.0, move_speed * 0.06), slack)
 
 
+# The buffer, and what shedding load looks like when it empties.
+#
+# Two changes from the one-line version this replaces
+# (`if current_energy < max_energy: current_energy += rate * delta`):
+#
+# 1. The rate can now be NEGATIVE, so the guard had to go. Clamping the update
+#    to "only when below max" meant a design in deficit sat pinned at full
+#    forever - the draw would have been computed, reported in the Lab, and then
+#    silently never applied, which is the worst of both worlds. It now runs
+#    unconditionally and clamps to the 0..max range at the end.
+#
+# 2. Crossing a brownout threshold re-derives vision, rather than vision being
+#    multiplied at read time. vision_range is a cached figure that several
+#    systems read every frame; recomputing it only on a TRANSITION keeps that
+#    read cheap and means the multiplier cannot compound across frames.
+func _tick_power(delta: float) -> void:
+	if max_energy <= 0.0:
+		return
+	current_energy = clampf(current_energy + energy_regen_rate * delta, 0.0, max_energy)
+
+	var before_electronics: bool = _brownout.get("electronics_brownout", false)
+	_brownout = PowerBudgetScript.brownout_state(current_energy / max_energy, _brownout)
+	if _brownout.get("electronics_brownout", false) != before_electronics:
+		_recalculate_vision()
+
+
 func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 	var _t := Profiler.start()
-	if current_energy < max_energy:
-		current_energy = minf(max_energy, current_energy + energy_regen_rate * delta)
+	_tick_power(delta)
 	_advance_orders()
 	_tick_economy(delta)
 	_apply_movement(delta)
@@ -718,7 +771,17 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 
 	# Energy Barrier Projector: a frontal shield that spends the capacitor to eat
 	# the hit. Checked before armour because it is in front of the armour.
-	if hit_origin != null and current_energy > 0.0:
+	#
+	# Shields are the FIRST thing a brownout sheds (PowerBudget's threshold
+	# ordering), and this is where that happens. Deliberately gated on the
+	# brownout state rather than on `current_energy > 0` alone: without it, a
+	# design in deficit would keep eating hits with the last few points in its
+	# buffer, which is precisely the energy its weapons and optics need to stay
+	# up. Dropping the shield early is what leaves something in reserve for the
+	# systems that shed later, and it is the cue to the player that the design is
+	# under-powered - a shield that silently stops working at zero looks like a
+	# bug, one that drops at half looks like a consequence.
+	if hit_origin != null and current_energy > 0.0 and not _brownout.get("shields_offline", false):
 		amount = _absorb_with_barrier(amount, modules, hit_origin)
 		if amount <= 0.0:
 			return

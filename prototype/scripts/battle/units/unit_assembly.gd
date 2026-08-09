@@ -23,6 +23,7 @@ extends RefCounted
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
+const PowerBudgetScript = preload("res://scripts/power_budget.gd")
 # BattleLayers declares class_name, so it resolves globally with no preload here.
 
 # How much bigger the collider gets per point of armour thickness. Armour is
@@ -315,24 +316,32 @@ static func attach_weapons(hull_node: Node3D) -> float:
 # + module bonus" shape vision and HP already use. Recomputed rather than stored,
 # so losing a generator mid-battle shrinks the pool.
 #
-# Returns {max_energy, energy_regen_rate}.
+# Returns {max_energy, energy_regen_rate, power}.
+#
+# Delegates to PowerBudget.analyze() rather than summing here. It used to do the
+# sum itself and derive the refill rate as `capacity * 0.08 + regen`, which is
+# the conflation the power split exists to end: storage manufactured generation,
+# so no design could hold a big buffer and trickle, or hold a small one and
+# refill fast.
+#
+# energy_regen_rate is now NET - generation minus continuous draw - so a design
+# that draws more than it makes has a negative rate and genuinely empties. That
+# is what makes electronics cost something, and it is the whole mechanism behind
+# the brownout in unit.gd. The old formula could not go negative, because there
+# was nothing in it to subtract.
+#
+# The keys are unchanged so every existing caller keeps working; `power` is the
+# full analysis, for callers that want the breakdown rather than the two numbers
+# the runtime needs each frame.
 static func compute_energy(hull_node: Node3D, hull_type: String) -> Dictionary:
-	var capacity: float = ModuleCatalog.get_base_energy(hull_type)
-	var regen := 0.0
-	if is_instance_valid(hull_node):
-		for child in hull_node.get_children():
-			if not child.has_meta("module_data") or child.is_queued_for_deletion():
-				continue
-			var data = child.get_meta("module_data")
-			if data != null and data.category == "generator":
-				capacity += data.get_energy_capacity()
-				regen += data.get_energy_regen()
+	# hull_type passed explicitly: this function is handed the authoritative type
+	# by its caller, and a standalone or test-built hull does not always carry
+	# the type_id meta that analyze() would otherwise fall back on.
+	var power: Dictionary = PowerBudgetScript.analyze(hull_node, hull_type)
 	return {
-		"max_energy": capacity,
-		# A small share of the pool per second even with no generators, so a unit
-		# with none still trickles back; generators are what make sustained energy
-		# fire viable rather than what make it possible at all.
-		"energy_regen_rate": capacity * 0.08 + regen,
+		"max_energy": power["storage"],
+		"energy_regen_rate": power["net"],
+		"power": power,
 	}
 
 

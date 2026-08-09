@@ -46,13 +46,16 @@ const SLOT_SIZE = Vector2(104, 132)
 # be large enough that the ScrollContainer below does not clip a card whose name
 # wrapped to three lines. thumbnail 78 + wrapped name ~34 + four stat lines ~64 +
 # separations 12 + 40 of vertical padding is ~228, so 248 leaves headroom.
-# 248 -> 268 when stat_line() gained the HARVESTER row. An armed harvester now
-# prints five stat lines where the previous worst case was four, and the card's
-# height is a custom_minimum_size inside a scroll whose viewport is reserved
-# from this same constant - so a card that outgrew it would not scroll, it would
-# clip the new row off the bottom, hiding exactly the line that was added to be
-# noticed. 20px is one 13px monospace line plus its leading.
-const CARD_SIZE = Vector2(168, 268)
+# Grown twice as stat_line() gained rows: 248 -> 268 for HARVESTER, 268 -> 288
+# for PWR. The worst case is now six lines (HP, Speed, DPS, Range, HARVESTER,
+# PWR) where it was four.
+#
+# This has to track, because the card's height is a custom_minimum_size inside a
+# scroll whose viewport is reserved from this same constant - a card that
+# outgrew it would not scroll, it would clip the extra row off the bottom,
+# hiding exactly the line that was added to be noticed. 20px per row is one 13px
+# monospace line plus its leading.
+const CARD_SIZE = Vector2(168, 288)
 const CARD_THUMB_H = 78
 # The drag ghost stays compact deliberately - it is not a card, it is a token of
 # one. A full spec block following the cursor obscures the wells it is about to
@@ -592,6 +595,20 @@ static func stat_line(stats: Dictionary) -> String:
 	# and are not remotely the same pick.
 	if bool(stats.get("is_harvester", false)):
 		lines.append("HARVESTER  %d" % int(stats.get("cargo_capacity", 0)))
+	# Power, as the at-rest net. A design that cannot keep its own electronics
+	# running browns out in the field - shields first, then its sight, then its
+	# energy weapons - and that is not visible anywhere else on this card. HP and
+	# Speed both stay at their full printed values right up until the buffer
+	# empties, so a card without this row reads as perfectly healthy.
+	#
+	# The at-rest figure, not the firing one: a burst design that runs a tab
+	# against its buffer while shooting is a legitimate build, and flagging it
+	# here the same way as a permanently under-powered one would be wrong. The
+	# Design Lab draws that distinction in full; a roster card has room for the
+	# one that means "this design has a problem".
+	var pw: Dictionary = stats.get("power", {})
+	if not pw.is_empty():
+		lines.append("PWR   %+.1f/s" % float(pw.get("net", 0.0)))
 	return "\n".join(PackedStringArray(lines))
 
 

@@ -36,8 +36,10 @@ func _get_leg_profile() -> Dictionary:
 @export var cost_crystal: int = 0
 @export var base_dps: float = 0.0
 @export var base_heal_rate: float = 0.0
+# Storage (energy) and generation (energy/sec) - two separate stats, and no
+# module currently has both. See module_catalog.gd's generator entries.
 @export var base_energy_capacity: float = 0.0
-@export var base_energy_regen: float = 0.0
+@export var base_power_output: float = 0.0
 @export var base_vision_bonus: float = 0.0
 @export var tweaks: Dictionary = {}
 
@@ -169,14 +171,25 @@ func get_energy_capacity() -> float:
 		cap *= tweaks["busbar_gauge"]
 	return GlobalConfig.round_to_half(cap)
 
-func get_energy_regen() -> float:
+# GENERATION - energy per second this module contributes to its unit's refill
+# rate. Renamed from get_energy_regen() when generation and storage were split
+# into separate stats (see the generator entries in module_catalog.gd): "regen"
+# described a property of the POOL, which is exactly the conflation the split
+# exists to end. A generator does not regenerate a buffer it has no part of; it
+# produces power, and the buffer is somewhere else entirely.
+#
+# The two tweaks are unchanged and were always the right ones - they have only
+# ever scaled this quantity. What changed is that fusion_generator, the module
+# that owns them, now has generation as its ONLY output, so both are load
+# bearing rather than tuning one of its two stats while the other sat inert.
+func get_power_output() -> float:
 	var vol = _get_volume_mult()
-	var regen = base_energy_regen + (base_energy_regen * (vol - 1.0) * GlobalConfig.hp_scale_factor)
+	var out = base_power_output + (base_power_output * (vol - 1.0) * GlobalConfig.hp_scale_factor)
 	if tweaks.has("reactor_length"):
-		regen *= tweaks["reactor_length"]
+		out *= tweaks["reactor_length"]
 	if tweaks.has("cooling_radiator"):
-		regen *= tweaks["cooling_radiator"]
-	return GlobalConfig.round_to_half(regen)
+		out *= tweaks["cooling_radiator"]
+	return GlobalConfig.round_to_half(out)
 
 # Dedicated stat, not a reuse of dps (see DECISIONS_NEEDED.md for why that
 # was a deliberate stopgap) - repair_array's heal-per-second, kept out of

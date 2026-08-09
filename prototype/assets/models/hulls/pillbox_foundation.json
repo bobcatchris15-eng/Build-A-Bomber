@@ -1,5 +1,6 @@
 {
     "base_energy": 60,
+    "base_power": 4.8,
     "base_vision": 16,
     "color": [
         0.449999988079071,

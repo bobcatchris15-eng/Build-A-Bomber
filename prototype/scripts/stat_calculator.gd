@@ -459,7 +459,19 @@ var armor_threshold_label: Label
 var hull_spec_btn: Button
 var hull_spec_stash: VBoxContainer
 var _hull_spec_flyout: Node = null
-var energy_label: Label
+# --- Power breakout ---------------------------------------------------------
+# Replaces a single `energy_label` reading "Energy Capacity: +N", which was
+# hidden whenever the design had no generator - so the one screen where a player
+# decides how much power to fit showed nothing at all until they had already
+# fitted some. Capacity was never the interesting number anyway: generation
+# against draw is, and the buffer only says how long a shortfall is survivable.
+var _power_gen_label: Label = null
+var _power_storage_label: Label = null
+var _power_draw_label: Label = null
+var _power_net_label: Label = null
+var _power_panel: PanelContainer = null
+var _power_title: Label = null
+var _power_detail: Label = null
 
 # Wheels-only "dually" tweak (wheels_per_axle, 1-2): no scene node for this
 # exists in UI_StatBlock.tscn (only the generic Size/Count sliders shared by
@@ -1048,7 +1060,6 @@ func update_stats(hull: Node3D):
 	var total_cost_metal = stats["cost_metal"]
 	var total_cost_crystal = stats["cost_crystal"]
 	var total_dps = stats["dps"]
-	var total_energy_capacity = stats["energy_capacity"]
 	# Weight, load capacity, thrust and top speed all come from
 	# Drivetrain.analyze() - the SAME call battle_unit.gd makes when it spawns
 	# the unit for real, so every number this sidebar shows is a number combat
@@ -1158,12 +1169,7 @@ func update_stats(hull: Node3D):
 
 	_update_drivetrain_readout(dt)
 	_update_range_readout(wr)
-
-	if not energy_label:
-		energy_label = Label.new()
-		_rail_vbox.add_child(energy_label)
-	energy_label.text = "Energy Capacity: +%.1f" % total_energy_capacity
-	energy_label.visible = total_energy_capacity > 0.0
+	_update_power_readout(stats.get("power", {}))
 
 	if not armor_threshold_label:
 		armor_threshold_label = Label.new()
@@ -1228,8 +1234,8 @@ func _load_fill_style(state: String) -> StyleBoxFlat:
 	return _load_fill_styles[state]
 
 func _build_drivetrain_readout() -> void:
-	# Built once, lazily, then reused - matches how energy_label and
-	# armor_threshold_label are handled in update_stats(). Ordered directly
+	# Built once, lazily, then reused - matches how armor_threshold_label is
+	# handled in update_stats(). Ordered directly
 	# after the weight row it explains, via move_child: lazily-added children
 	# otherwise land at the end of the rail, which would put the load bar
 	# below the save/test buttons.
@@ -1288,6 +1294,157 @@ func _build_drivetrain_readout() -> void:
 		_rail_vbox.move_child(_load_label, at + 2)
 		_rail_vbox.move_child(_load_bar, at + 3)
 		_rail_vbox.move_child(_overweight_panel, at + 4)
+
+# --- Power readout ---------------------------------------------------------
+#
+# Four rows and a warning, built to the same pattern as the drivetrain block
+# above and placed directly under it, because they are the same kind of
+# statement: here is a budget, here is what you are spending against it, and
+# here is what exceeding it costs. A player who has learned to read the load bar
+# already knows how to read this.
+#
+# Why four rows rather than one "power: OK/short" summary. The three inputs fail
+# differently and have different fixes, and collapsing them hides which one the
+# player is short of:
+#
+#   Generation  too low  -> fit a fusion generator
+#   Storage     too low  -> fit a capacitor bank
+#   Draw        too high -> take some electronics off
+#
+# A single net figure cannot distinguish "needs a generator" from "needs a
+# capacitor", and those are genuinely different answers to genuinely different
+# problems - a design that is permanently slightly short needs generation, while
+# one that is fine except during a firefight needs buffer.
+func _build_power_readout() -> void:
+	_power_gen_label = Label.new()
+	_power_gen_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_power_gen_label)
+
+	_power_storage_label = Label.new()
+	_power_storage_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_power_storage_label)
+
+	_power_draw_label = Label.new()
+	_power_draw_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_power_draw_label)
+
+	_power_net_label = Label.new()
+	_power_net_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_power_net_label)
+
+	# HAZARD, matching the overweight panel exactly. A power deficit is the same
+	# class of thing: a flaw the player may be choosing deliberately, not a
+	# failure and not a destructive action. It does not block saving or fielding,
+	# for the same reason the overweight panel does not - a burst-heavy design
+	# that runs down its buffer in a short engagement and recharges between them
+	# is a legitimate build, and the Lab has no business deciding it is wrong.
+	_power_panel = PanelContainer.new()
+	var pair := Tokens.signal_pair("hazard")
+	var warn_style := StyleBoxFlat.new()
+	warn_style.bg_color = pair["fill"]
+	warn_style.border_color = pair["edge"]
+	warn_style.border_width_left = Tokens.BORDER_EMPHASIS
+	warn_style.content_margin_left = Tokens.SPACE_SM
+	warn_style.content_margin_right = Tokens.SPACE_SM
+	warn_style.content_margin_top = Tokens.SPACE_XS
+	warn_style.content_margin_bottom = Tokens.SPACE_XS
+	_power_panel.add_theme_stylebox_override("panel", warn_style)
+	_power_panel.visible = false
+	var warn_box := VBoxContainer.new()
+	warn_box.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	_power_panel.add_child(warn_box)
+	_power_title = Label.new()
+	_power_title.theme_type_variation = "HeadingLabel"
+	_power_title.add_theme_color_override("font_color", pair["edge"])
+	warn_box.add_child(_power_title)
+	_power_detail = Label.new()
+	_power_detail.theme_type_variation = "HintLabel"
+	# Same wrap as the overweight detail: these lines run past the rail's width
+	# and would otherwise stretch the whole dock.
+	_power_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	warn_box.add_child(_power_detail)
+	_rail_vbox.add_child(_power_panel)
+
+	# Sits under the drivetrain block rather than at the end of the rail, where
+	# lazily-added children otherwise land - which would put it below the
+	# save/test buttons. Same move_child ordering the drivetrain readout uses.
+	if _overweight_panel and _overweight_panel.get_parent() == _rail_vbox:
+		var at := _overweight_panel.get_index()
+		_rail_vbox.move_child(_power_gen_label, at + 1)
+		_rail_vbox.move_child(_power_storage_label, at + 2)
+		_rail_vbox.move_child(_power_draw_label, at + 3)
+		_rail_vbox.move_child(_power_net_label, at + 4)
+		_rail_vbox.move_child(_power_panel, at + 5)
+
+
+func _update_power_readout(pw: Dictionary) -> void:
+	if _power_net_label == null:
+		_build_power_readout()
+
+	# clear_hull() calls update_stats(null), and there is nothing to say about
+	# the power budget of a design that does not exist. Branches on has_hull
+	# exactly as the drivetrain readout branches on has_locomotion - the dict is
+	# always fully populated, so emptiness is a flag rather than a missing key.
+	if pw.is_empty() or not bool(pw.get("has_hull", false)):
+		for l in [_power_gen_label, _power_storage_label, _power_draw_label, _power_net_label]:
+			if l: l.visible = false
+		if _power_panel: _power_panel.visible = false
+		return
+	for l in [_power_gen_label, _power_storage_label, _power_draw_label, _power_net_label]:
+		if l: l.visible = true
+
+	var generation: float = float(pw.get("generation", 0.0))
+	var storage: float = float(pw.get("storage", 0.0))
+	var draw: float = float(pw.get("draw", 0.0))
+	var weapon_draw: float = float(pw.get("weapon_draw", 0.0))
+	var net: float = float(pw.get("net", 0.0))
+
+	_power_gen_label.text = "Generation: %.1f /s" % generation
+	_power_gen_label.tooltip_text = "Hull base output plus any Fusion Generators. This is the rate the buffer refills at."
+	_power_storage_label.text = "Storage: %.0f" % storage
+	_power_storage_label.tooltip_text = "Hull base capacity plus any Capacitor Banks.\nStorage does not make power - it decides how long a shortfall is survivable."
+
+	# The weapon share is called out separately because it is conditional in a
+	# way the rest is not: a unit that is not shooting is not paying it, so a
+	# design can be in deficit only while it fires. Merging the two would make
+	# an intermittent cost look permanent.
+	if weapon_draw > 0.0:
+		_power_draw_label.text = "Draw: %.1f /s  (%.1f firing)" % [draw, weapon_draw]
+		_power_draw_label.tooltip_text = "Continuous draw from electronics and shield upkeep, plus what sustained energy-weapon fire adds on top.\nThe second figure only applies while actually shooting."
+	else:
+		_power_draw_label.text = "Draw: %.1f /s" % draw
+		_power_draw_label.tooltip_text = "Continuous draw from electronics and shield upkeep."
+
+	_power_net_label.text = "Net: %+.1f /s" % net
+	if net < 0.0:
+		_power_net_label.add_theme_color_override("font_color", Tokens.signal_pair("hazard")["edge"])
+	else:
+		_power_net_label.remove_theme_color_override("font_color")
+	_power_net_label.tooltip_text = "Generation minus the always-on draw, so this is the design at rest.\nNegative means the buffer runs down even when it is not shooting."
+
+	# Two different warnings, because they are two different problems with two
+	# different fixes. PowerBudget makes them mutually exclusive
+	# (firing_deficit_only is false whenever has_deficit is true), so the order
+	# of these branches does not matter and neither can mask the other.
+	var has_deficit: bool = bool(pw.get("has_deficit", false))
+	var firing_only: bool = bool(pw.get("firing_deficit_only", false))
+	_power_panel.visible = has_deficit or firing_only
+	if has_deficit:
+		_power_title.text = "POWER DEFICIT - %.1f /s SHORT" % absf(net)
+		# Names the endurance and what sheds first, because "underpowered" alone
+		# tells the player neither how bad it is nor which way is out. The shed
+		# order matches PowerBudget's thresholds, so the panel cannot describe an
+		# order the runtime does not follow.
+		_power_detail.text = "A full buffer lasts %.0fs with everything running. Shields drop first, then sensors dim, then energy weapons stop. Buildable and fieldable as-is - fit a generator, add storage to ride it out, or drop some electronics." % float(pw.get("endurance", 0.0))
+	elif firing_only:
+		# Fine at rest and short only while shooting. A legitimate build rather
+		# than a fault - burst damage paid for out of the buffer and recharged
+		# between engagements - so it is stated as a duty cycle, not a warning to
+		# be fixed.
+		_power_title.text = "SUSTAINED FIRE OUTRUNS POWER"
+		_power_detail.text = "Fine at rest, but %.1f /s short while firing - about %.0fs of continuous fire from a full buffer before energy weapons cut out. Capacitors buy a longer burst; a generator buys sustain." % [
+			absf(float(pw.get("firing_net", 0.0))), float(pw.get("firing_endurance", 0.0))]
+
 
 func _update_drivetrain_readout(dt: Dictionary) -> void:
 	if _load_bar == null:

@@ -32,6 +32,7 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 # For its static hopper formula only - no state machine is instantiated here.
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
+const PowerBudgetScript = preload("res://scripts/power_budget.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
 const WeaponRange = preload("res://scripts/weapon_range.gd")
 
@@ -62,6 +63,11 @@ static func analyze(hull: Node3D) -> Dictionary:
 		"has_weapons": false,
 		"drivetrain": {},
 		"weapon_range": {},
+		# The power budget - generation, storage, draw and net. Empty here and
+		# filled from PowerBudget.analyze() below, alongside the other two
+		# analyzers and for the same reason: it returns a full key set on every
+		# path, so consumers can read into it unconditionally.
+		"power": {},
 		# Harvesting. A design that mounts a harvester arm is a fundamentally
 		# different KIND of thing from everything else in a roster - it is the
 		# only unit that makes money rather than spends it - and until now the
@@ -89,8 +95,10 @@ static func analyze(hull: Node3D) -> Dictionary:
 	# locomotion_settings onto the hull as metadata.
 	var dt: Dictionary = Drivetrain.analyze(hull)
 	var wr: Dictionary = WeaponRange.analyze(hull)
+	var pb: Dictionary = PowerBudgetScript.analyze(hull)
 	out["drivetrain"] = dt
 	out["weapon_range"] = wr
+	out["power"] = pb
 	out["weight"] = float(dt.get("weight", 0.0))
 	out["move_speed"] = float(dt.get("move_speed", 0.0))
 	out["top_speed"] = float(dt.get("top_speed", 0.0))

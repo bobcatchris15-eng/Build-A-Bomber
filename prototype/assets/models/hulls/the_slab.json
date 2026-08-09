@@ -18,6 +18,7 @@
     "dps": 0.0,
     "is_foundation": false,
     "base_energy": 50.0,
+    "base_power": 4.0,
     "base_vision": 20.0,
     "draught": 0.5,
     "underside_y_bias": 0.0,

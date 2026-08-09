@@ -1307,9 +1307,34 @@ static func _build_catalog_literal() -> Dictionary:
 
 		# --- GENERATORS (Energy resource, ENERGY_AND_BALANCE_SPEC.md #1) ---
 		# "generator" is its own module category, not a weapon/utility
-		# variant - it contributes to a unit's max_energy (and a bit of
-		# energy_regen) exactly like armor contributes to a facet's
-		# threshold: a placeable design choice, not a fixed hull number.
+		# variant - it contributes to a unit's power budget exactly like armor
+		# contributes to a facet's threshold: a placeable design choice, not a
+		# fixed hull number.
+		#
+		# THE TWO MODULES DO DIFFERENT JOBS, AND THAT IS NEW.
+		#
+		# Both used to carry energy_capacity AND energy_regen, which made them
+		# near-duplicates - the capacitor was simply a smaller, cheaper fusion
+		# generator. Worse, it made half of each module's tweaks dead: look at
+		# stat_calculator.gd's rows for them. fusion_generator's tweaks are
+		# reactor_length and cooling_radiator, which scale REGEN only
+		# (module_data.get_power_output). capacitor_bank's are bank_capacity and
+		# busbar_gauge, which scale CAPACITY only (get_energy_capacity). So
+		# nothing could tune the capacitor's regen and nothing could tune the
+		# generator's capacity - four sliders, two of them inert, on two modules
+		# whose own tweak lists had already assumed the split the catalog
+		# refused to make.
+		#
+		# Now the split is real, and all four tweaks are live:
+		#
+		#   fusion_generator  GENERATION - refills the buffer, holds nothing
+		#   capacitor_bank    STORAGE    - holds charge, generates nothing
+		#
+		# Which turns "I need more power" into an actual question. A design that
+		# is always slightly short wants a generator. One that is fine except
+		# during a firefight wants capacitors: the buffer covers the burst and
+		# refills between engagements. The two answers have different weights,
+		# different prices and different failure modes, which is the whole point.
 		"fusion_generator": {
 			"name": "Fusion Generator",
 			"category": "generator",
@@ -1318,8 +1343,12 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 90,
 			"crystal": 60,
 			"dps": 0.0,
-			"energy_capacity": 60.0,
-			"energy_regen": 8.0,
+			# 12.8, not the old 8.0: it absorbs the generation its 60 capacity
+			# used to imply through the `capacity * 0.08` derivation, so a design
+			# that mounted one before generates the same amount now. What it no
+			# longer does is silently grow the buffer as well.
+			"energy_capacity": 0.0,
+			"power_output": 12.8,
 			"size": Vector3(1.4, 1.2, 1.8),
 			"color": Color.ORANGE_RED
 		},
@@ -1331,8 +1360,13 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 35,
 			"crystal": 25,
 			"dps": 0.0,
-			"energy_capacity": 25.0,
-			"energy_regen": 4.0,
+			# 45, up from 25. It has to be worth fitting for storage ALONE now
+			# that it no longer smuggles in 4 regen plus another 2 from its own
+			# capacity - at 25 it would have been a strictly worse generator
+			# rather than a different answer. 45 against medium_hull's 70 base
+			# means one capacitor is a substantial extension of the buffer.
+			"energy_capacity": 45.0,
+			"power_output": 0.0,
 			"size": Vector3(0.8, 0.8, 1.0),
 			"color": Color.GOLD
 		},
@@ -2060,6 +2094,33 @@ static func get_base_energy(hull_type_id: String) -> float:
 	var data = get_module_data(hull_type_id)
 	return data.get("base_energy", 0.0)
 
+# A hull's base_power is its GENERATION - energy per second, the refill rate -
+# and is a genuinely separate stat from base_energy, which is STORAGE.
+#
+# They used to be one number. The refill rate was derived as
+# `base_energy * 0.08`, so storage manufactured generation and there was no way
+# to author a hull that holds a large buffer but trickles, or a small one that
+# refills fast. Those are the two most interesting shapes a power system has,
+# and neither was expressible.
+#
+# The shipped values are seeded at exactly that old 0.08 ratio, so introducing
+# the field changed no hull's behaviour on its own - every behavioural change
+# comes from consumption, which did not exist before (see POWER_DRAW). A
+# handful are then hand-graded off that ratio where the fiction argues for it:
+# locomotive_hull and pressure_hull generate above their storage tier because a
+# powerplant is the premise of both, airship_hull below because its lift budget
+# leaves little over, and scout hulls slightly above because a tiny buffer still
+# has to sustain the optics that are the hull's entire job.
+#
+# Same "absent means 0.0" contract as get_base_energy above, and for the same
+# reason: only hull and foundation entries carry the stat, and a weapon being
+# asked for its generation should answer "none" rather than error. That also
+# makes the field optional for mod hulls - see hull_loader.gd's REQUIRED_FIELDS,
+# which this is deliberately NOT added to.
+static func get_base_power(hull_type_id: String) -> float:
+	var data = get_module_data(hull_type_id)
+	return data.get("base_power", 0.0)
+
 # Fog-of-war (built this pass, see PROGRESS.md): a hull's base_vision is
 # the starting sight radius before any sensor_suite modules are mounted -
 # same "hull base + module bonus" shape as Energy's base_energy.
@@ -2142,6 +2203,45 @@ static func get_armor_module_bias(type_id: String, damage_type: String) -> float
 
 const SUPPORT_CATEGORIES = ["generator"]
 const SUPPORT_TYPE_IDS = ["repair_array", "drone_carrier", "resource_harvester", "sensor_suite", "laser_designator", "energy_barrier_projector", "fire_control_radar"]
+
+# --- Continuous power draw --------------------------------------------------
+# Energy per second a module consumes just by being alive and switched on.
+#
+# CONSUMPTION DID NOT EXIST BEFORE THIS TABLE. Energy was only ever spent in
+# discrete per-shot bites by five weapons (auto_weapon.ENERGY_WEAPON_TYPES),
+# which meant a generator was worth fitting only on an energy-weapon platform
+# and every other design carried a full, permanently untouched buffer. The
+# electronics in particular were free: a scout could mount a sensor suite, a
+# radar and a jammer, see half the map, and pay nothing for it.
+#
+# Everything here is a device that is doing work continuously, and the numbers
+# are ordered by how loud that work is rather than by how big the part is:
+# jammer_mast is the hungriest because flooding a band is genuinely the most
+# power-intensive thing on this list, and its own catalog blurb ("also
+# announces exactly where you are") already sold it as the loud option - now it
+# is loud in the budget too. fire_control_radar costs more than sensor_suite
+# because it is actively tracking rather than passively listening.
+#
+# ENERGY WEAPONS ARE DELIBERATELY ABSENT. They spend per shot through
+# spend_energy(), which is a burst cost, and putting them here as well would
+# bill them twice. Their sustained equivalent is derived for DISPLAY only, in
+# PowerBudget - so the Design Lab can quote one comparable "draw" figure -
+# without changing anything about how firing works.
+#
+# energy_barrier_projector appears because a field that is up is drawing even
+# when nothing has hit it. That upkeep is separate from, and much smaller than,
+# the pool it spends to absorb a hit (unit.gd's _absorb_with_barrier).
+const POWER_DRAW := {
+	"sensor_suite": 2.5,
+	"fire_control_radar": 4.0,
+	"jammer_mast": 6.0,
+	"laser_designator": 2.0,
+	"decoy_projector": 1.5,
+	"energy_barrier_projector": 5.0,
+}
+
+static func get_power_draw(type_id: String) -> float:
+	return float(POWER_DRAW.get(type_id, 0.0))
 
 # --- Roles (parts-menu grouping) -------------------------------------------
 # `category` is a mechanical classification - it tells the placer which gizmo

@@ -1,5 +1,6 @@
 {
 	"base_energy": 85.0,
+	"base_power": 5.8,
 	"base_vision": 16.0,
 	"category": "hull",
 	"color": [
