@@ -341,7 +341,6 @@ static func _beam_hardware(parent_node: Node3D, base_size: Vector3) -> void:
 const MONOLITHIC_ANIMATION_PIVOTS := {
 	"helicopter_rotors": "RotorBlades",
 	"ornithopter_wing": "WingPivot",
-	"naval_propeller": "PropBlades",
 	"ship_screw": "PropBlades",
 	"propeller_prop": "PropBlades",
 	"pusher_prop": "PropBlades",
@@ -351,9 +350,9 @@ const MONOLITHIC_ANIMATION_PIVOTS := {
 const LOCOMOTION_MODULAR_TYPES := {
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
-	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
+	"buoyant_envelope": true, "screw_drive": true,
 	"half_track": true, "rocker_bogie": true, "air_cushion_skirt": true,
-	"anti_grav_plate": true, "hydrofoil": true, "water_jet": true, "pontoon_wheels": true,
+	"anti_grav_plate": true, "pontoon_wheels": true,
 }
 
 # Firing elevation applied as a PIVOT ROTATION for the two weapons whose barrels
@@ -433,9 +432,9 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"sensor_beacon_launcher": true, "decoy_projector": true,
 	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
-	"naval_propeller": true, "buoyant_envelope": true, "screw_drive": true,
+	"buoyant_envelope": true, "screw_drive": true,
 	"half_track": true, "rocker_bogie": true, "air_cushion_skirt": true,
-	"anti_grav_plate": true, "hydrofoil": true, "water_jet": true, "pontoon_wheels": true,
+	"anti_grav_plate": true, "pontoon_wheels": true,
 	# Support modules with dedicated modular assembly code - must bypass the
 	# monolithic _part(type_id) path or their sub-part assembly branches are never reached.
 	"sensor_suite": true, "resource_harvester": true, "resource_bay": true,
@@ -577,15 +576,12 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			"legs": _build_legs(parent_node, base_size, base_color, tweaks)
 			"fixed_wing_engine": _build_fixed_wing_engine(parent_node, base_size, base_color, tweaks)
 			"ornithopter_wing": _build_ornithopter_wing(parent_node, base_size, base_color, tweaks)
-			"naval_propeller": _build_naval_propeller(parent_node, base_size, base_color, tweaks)
 			"buoyant_envelope": _build_buoyant_envelope(parent_node, base_size, base_color, tweaks)
 			"screw_drive": _build_screw_drive(parent_node, base_size, base_color, tweaks)
 			"half_track": _build_half_track(parent_node, base_size, base_color, tweaks)
 			"rocker_bogie": _build_rocker_bogie(parent_node, base_size, base_color, tweaks)
 			"air_cushion_skirt": _build_air_cushion_skirt(parent_node, base_size, base_color, tweaks)
 			"anti_grav_plate": _build_anti_grav_plate(parent_node, base_size, base_color, tweaks)
-			"hydrofoil": _build_hydrofoil(parent_node, base_size, base_color, tweaks)
-			"water_jet": _build_water_jet(parent_node, base_size, base_color, tweaks)
 			"pontoon_wheels": _build_pontoon_wheels(parent_node, base_size, base_color, tweaks)
 		_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
 
@@ -3295,8 +3291,6 @@ static func _attach_moving_parts(type_id: String, parent_node: Node3D, base_size
 			_attach_ornithopter_pivot(parent_node, base_size, base_color)
 		"sensor_suite":
 			_attach_radar_dish(parent_node, base_size, base_color)
-		"naval_propeller":
-			_attach_naval_propeller_blades(parent_node, base_size)
 		"ship_screw":
 			_attach_ship_screw_blades(parent_node, base_size)
 		"paddle_wheel":
@@ -3347,8 +3341,17 @@ static func build_shield_facet_arc(facet: String, full_hull_aabb: AABB, module_t
 	var full_size = full_hull_aabb.size
 	var full_center = full_hull_aabb.get_center()
 
-	var w = full_size.z * 1.05 if (facet == "left" or facet == "right") else full_size.x * 1.05
-	var h = full_size.y * 1.25 if (facet != "top" and facet != "bottom") else full_size.z * 1.05
+	var w: float
+	var h: float
+	if facet == "left" or facet == "right":
+		w = full_size.y * 1.25
+		h = full_size.z * 1.05
+	elif facet == "top" or facet == "bottom":
+		w = full_size.x * 1.05
+		h = full_size.z * 1.05
+	else:
+		w = full_size.x * 1.05
+		h = full_size.y * 1.25
 
 	var segs_u = 24
 	var segs_v = 18
@@ -3501,23 +3504,6 @@ static func _attach_ornithopter_pivot(parent_node: Node3D, base_size: Vector3, b
 	pivot.name = "WingPivot"
 	pivot.position = Vector3(base_size.x * 0.2, base_size.y * 0.15, 0)
 	parent_node.add_child(pivot)
-
-static func _attach_naval_propeller_blades(parent_node: Node3D, base_size: Vector3):
-	var pivot = Node3D.new()
-	pivot.name = "PropBlades"
-	parent_node.add_child(pivot)
-	for i in range(3):
-		var blade = MeshInstance3D.new()
-		var blade_box = BoxMesh.new()
-		blade_box.size = Vector3(0.04, base_size.x * 0.7, 0.12)
-		blade.mesh = blade_box
-		var blade_mat = StandardMaterial3D.new()
-		blade_mat.albedo_color = Color.SILVER
-		blade.material_override = blade_mat
-		blade.position = Vector3(0, 0, base_size.z * 0.4)
-		blade.rotate_z(i * (TAU / 3.0))
-		pivot.add_child(blade)
-
 
 ## The wheel mount: an angled driveshaft housing running up and inboard into a
 ## gearbox, with the hub hanging off the outboard end of it.
@@ -5023,23 +5009,18 @@ static func _build_ornithopter_wing_unit(parent_node: Node3D, base_size: Vector3
 	pivot.add_child(rib)
 
 
-# Shared by naval_propeller and buoyant_envelope (Chris's ask, 2026-07-24):
-# both used to spawn entirely inside the hull mesh with no visible
-# structure reaching them clear of it - a fixed offset (hull_size.z*0.42
-# for naval, side-mounted for buoyant) that landed well within the hull's
+# Used by buoyant_envelope (Chris's ask, 2026-07-24): it used to spawn
+# entirely inside the hull mesh with no visible structure reaching it clear
+# of it - a fixed side-mounted offset that landed well within the hull's
 # own collision box on most hull shapes. Rebuilt to reuse the exact stern/
 # reach-vector pylon technique already established for helicopter_rotors/
 # hover_engine/fixed_wing_engine: module_placer.gd now places the propeller
 # itself well aft of the hull's own mesh and passes a mount_reach vector
 # pointing back to the hull's geometric center, and this function builds a
 # mount_strut_aerofoil pylon along that vector, with the propeller hub+
-# blades at the far (outboard) end. hub_scale differentiates the two
-# "deformed" reuses of the same prop_housing/rotor_blade GLBs (buoyant_
-# envelope's smaller cruise motor vs naval_propeller's full-size boat
-# screw) without needing separate authored assets. Both types now share
-# the exact same tweak set (blade_count, blade_pitch, prop_count) - the old
-# prop_size/kort_nozzle/motor_size/tail_fins tweaks are gone entirely, not
-# just defaulted differently.
+# blades at the far (outboard) end. hub_scale scales this single reuse of
+# the prop_housing/rotor_blade GLBs (buoyant_envelope's smaller cruise
+# motor) without needing separate authored assets.
 static func _build_pylon_mounted_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary, hub_scale: float, blade_scale: float = 1.0):
 	var blade_count = int(tweaks.get("blade_count", 3.0))
 	var blade_pitch = tweaks.get("blade_pitch", 1.0)
@@ -5141,11 +5122,6 @@ static func _build_pylon_mounted_propeller(parent_node: Node3D, base_size: Vecto
 				var strut = _mesh_inst(mount_mesh, base_color.darkened(0.2))
 				strut.transform = Transform3D(Basis(right * 1.2, dir * reach_len, forward * 0.6), Vector3.ZERO)
 				parent_node.add_child(strut)
-
-
-static func _build_naval_propeller(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DARK_SLATE_GRAY, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "naval_propeller", base_color, 1.0, float(tweaks.get("blade_pitch", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
-	_build_pylon_mounted_propeller(parent_node, base_size, base_color, tweaks, 1.0)
 
 
 static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.TAN, tweaks: Dictionary = {}):
@@ -6760,65 +6736,6 @@ static func _build_anti_grav_plate(parent_node: Node3D, base_size: Vector3, base
 		# but its own small quad is not.
 		lens.extra_cull_margin = 4.0
 		parent_node.add_child(lens)
-
-
-## Hydrofoil: struts down from the hull corners carrying lifting foils. The
-## strut is what makes it fragile and the foil is what makes it fast, so they
-## are separate parts scaled by separate tweaks.
-static func _build_hydrofoil(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.28, 0.40, 0.45), tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "hydrofoil", base_color, 1.0, float(tweaks.get("strut_height", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
-	var span := float(tweaks.get("foil_span", 1.0))
-	var strut_h := float(tweaks.get("strut_height", 1.0))
-	var foils := int(tweaks.get("foil_count", 2.0))
-	var length := float(tweaks.get("drum_length", base_size.z))
-	var half := length * 0.5
-
-	var strut_mesh := _part("hf_strut")
-	var foil_mesh := _part("hf_foil")
-	for i in range(foils):
-		var t: float = 0.5 if foils <= 1 else float(i) / float(foils - 1)
-		var z: float = -half * 0.8 + 1.6 * half * 0.8 * t
-		if strut_mesh:
-			var strut := _mesh_inst(strut_mesh, base_color)
-			strut.scale = Vector3(1.0, strut_h, 1.0)
-			strut.position = Vector3(0, 0, z)
-			parent_node.add_child(strut)
-		if foil_mesh:
-			var foil := _mesh_inst(foil_mesh, base_color.darkened(0.12))
-			foil.scale = Vector3(span, 1.0, 1.0)
-			# Seated at the bottom of the strut, which is where strut_height
-			# put it - the foil must not float when the strut lengthens.
-			foil.position = Vector3(0, -0.86 * strut_h, z)
-			parent_node.add_child(foil)
-
-
-## Water jet: a through-hull pump feeding a steerable nozzle. The reverser
-## bucket is part of the nozzle, so it appears and disappears with the toggle
-## rather than being a permanently visible lump.
-static func _build_water_jet(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.30, 0.45, 0.48), tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "water_jet", base_color, 1.0, float(tweaks.get("intake_size", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
-	var intake := float(tweaks.get("intake_size", 1.0))
-	var has_reverser: bool = bool(tweaks.get("reverser", false))
-
-	var pump_mesh := _part("wj_pump")
-	if pump_mesh:
-		# The impeller is inside the duct, so the pump body itself is the only
-		# thing that can carry the motion cue. Turning it slowly reads as a
-		# running pump rather than a dead casting - and keeps water_jet from
-		# being the one naval type with nothing moving.
-		var impeller := Node3D.new()
-		impeller.name = SPIN_PIVOT_TURBINE
-		parent_node.add_child(impeller)
-		var pump := _mesh_inst(pump_mesh, base_color)
-		pump.scale = Vector3.ONE * intake
-		impeller.add_child(pump)
-
-	var nozzle_mesh := _part("wj_nozzle")
-	if nozzle_mesh:
-		var nozzle := _mesh_inst(nozzle_mesh, base_color.lightened(0.10))
-		nozzle.scale = Vector3(intake, intake, 1.0 if has_reverser else 0.72)
-		nozzle.position = Vector3(0, 0, 0.24 * intake)
-		parent_node.add_child(nozzle)
 
 
 ## Pontoon wheels: sealed buoyant drums that are simultaneously the wheel and

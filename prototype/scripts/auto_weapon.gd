@@ -166,7 +166,7 @@ var targets_allies: bool = false
 # vehicle root, duck-typed) and, for tesla_coil/ion_cannon, drain the
 # TARGET's energy pool alongside HP damage. arc_projector is the dedicated
 # pure-drain weapon.
-const ENERGY_WEAPON_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "microwave_emitter", "particle_lance"]
+const ENERGY_WEAPON_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "microwave_emitter", "particle_lance", "heavy_laser", "pd_laser", "laser_dazzler", "gauss_railgun", "coil_gun"]
 var energy_cost_per_shot: float = 0.0
 var energy_drain_per_shot: float = 0.0
 
@@ -826,8 +826,10 @@ func _ready():
 			energy_cost_per_shot = per_shot_damage * 0.4
 			if type_id == "arc_projector":
 				energy_drain_per_shot = per_shot_damage * 1.5
-			else:
+			elif type_id in ["tesla_coil", "ion_cannon", "microwave_emitter"]:
 				energy_drain_per_shot = per_shot_damage * 0.5
+			else:
+				energy_drain_per_shot = 0.0
 
 
 	# Desynchronize initial reload timers
