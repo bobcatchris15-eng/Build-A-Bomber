@@ -205,20 +205,25 @@ func _async_write_log(msg: String):
 
 func _unhandled_input(event):
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_M:
+		# Actions, not keycodes - see InputService's header for why this file's
+		# raw comparisons had to go. REDO IS TESTED BEFORE UNDO: its Ctrl+Shift+Z
+		# form also satisfies a permissively-matched Ctrl+Z, so checking undo
+		# first would swallow every redo. InputService._descriptors_equal()
+		# compares modifiers exactly for the same reason.
+		if event.is_action_pressed("lab_mirror"):
 			mirror_enabled = not mirror_enabled
 			_log("Mirror toggled: " + str(mirror_enabled))
 			var tree = get_tree()
 			if tree: tree.call_group("stat_ui", "set_mirror_toggle", mirror_enabled)
-		elif event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
+		elif event.is_action_pressed("lab_delete"):
 			delete_selected_module()
-		elif event.keycode == KEY_R:
+		elif event.is_action_pressed("lab_rotate"):
 			rotate_selected_module()
-		elif event.keycode == KEY_Z and event.ctrl_pressed and not event.shift_pressed:
-			undo()
-		elif (event.keycode == KEY_Y and event.ctrl_pressed) or (event.keycode == KEY_Z and event.ctrl_pressed and event.shift_pressed):
+		elif event.is_action_pressed("lab_redo"):
 			redo()
-		elif event.keycode == KEY_ESCAPE:
+		elif event.is_action_pressed("lab_undo"):
+			undo()
+		elif event.is_action_pressed("ui_cancel"):
 			if is_dragging_module:
 				is_dragging_module = false
 				selected_module.transform = drag_original_transform
@@ -582,7 +587,6 @@ var default_locomotion_settings = {
 	"helicopter_rotors": {"size": 1.0, "count": 4},
 	"fixed_wing_engine": {"size": 1.0, "count": 2},
 	"ornithopter_wing": {"size": 1.0, "count": 2},
-	"naval_propeller": {"prop_count": 2, "blade_count": 3, "blade_pitch": 1.0},
 	"buoyant_envelope": {"prop_count": 2, "blade_count": 3, "blade_pitch": 1.0},
 	"screw_drive": {"drum_diameter": 1.0, "helix_depth": 1.0}
 }

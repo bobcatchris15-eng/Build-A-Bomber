@@ -31,6 +31,7 @@ const PowerBudgetScript = preload("res://scripts/power_budget.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 
 signal died(unit)
 signal order_completed(unit)
@@ -163,6 +164,18 @@ var _separation_radius: float = 3.0
 var _internal_destination: Vector3 = Vector3.ZERO
 var _has_internal_destination: bool = false
 
+# Boost controller for burst speed parts (nitrous_injector, booster_rack)
+var boost_controller: BoostController = null
+# The last Drivetrain.analyze() result, cached by _recalculate_move_speed().
+# Read by BoostController, which needs the "boost" sub-dictionary from it.
+var drivetrain_analysis: Dictionary = {}
+# Exhaust plume while a boost is lit - periodic bursts rather than a
+# continuous emitter, so an idling boosted unit doesn't carry a live particle
+# system the rest of the time. Interval, not per-frame, to keep the cost of
+# a boosting group down.
+var _boost_vfx_timer: float = 0.0
+const BOOST_VFX_INTERVAL := 0.12
+
 
 func _ready() -> void:
 	add_to_group("units")
@@ -221,6 +234,21 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	_separation_radius = maxf(base_size.x, base_size.z) * SEPARATION_RADIUS_MULT
 	_sync_nav_radii()
 	_recalculate_move_speed()
+
+	# Boost controller for burst speed parts
+	boost_controller = BoostController.new()
+	# `facts["drivetrain"]` DID NOT EXIST. UnitAssembly.build_facts() returns
+	# sixteen keys and drivetrain is not among them, so this crashed on every
+	# single unit spawn with "Invalid access to property or key 'drivetrain' on a
+	# base object of type 'Dictionary'" - and because setup() aborted there, no
+	# unit ever finished spawning. That one missing key was upstream of twenty
+	# failing suites: production, damage, movement convergence and every map smoke
+	# test, none of which look like a boost-controller problem from the outside.
+	#
+	# _recalculate_move_speed() four lines above already computed exactly this
+	# analysis and discarded it; it now caches it instead.
+	boost_controller.setup(self, drivetrain_analysis)
+
 	_p = Profiler.start()
 	_create_selection_ring(base_size)
 	Profiler.stop("spawn.selection_ring", _p)
@@ -302,11 +330,25 @@ func _detect_harvester(controller: Node) -> void:
 # function the Design Lab's stat rail calls. They must agree: the number a player
 # sizes a drivetrain against in the Lab is the number it moves at in a battle.
 # An abbreviated second copy is exactly how the old ones drifted apart.
+#
+# Reads move_speed, not top_speed (2026-08-08 speed pass) - was reading the
+# latter, which is the clean pre-overload/pre-passive figure the Design Lab
+# quotes BEFORE the load penalty, the underload bonus and faction speed
+# passives are applied. That silently zeroed out all three in every real
+# Skirmish match: an overloaded unit never actually slowed down, a
+# stripped-down one never sped up, and the Glacier Syndicate/Aerodrome Cartel
+# speed passives had no effect on the units they were supposed to change.
+# battle_unit.gd's own _recalculate_move_speed() already read the right key;
+# this runtime did not.
 func _recalculate_move_speed() -> void:
 	if not is_instance_valid(hull_node):
 		return
 	var dt: Dictionary = Drivetrain.analyze(hull_node, locomotion_type, locomotion_settings, is_flying)
-	move_speed = dt["top_speed"] if dt["has_locomotion"] else 0.0
+	# CACHED, because BoostController needs the same analysis and there is no
+	# reason to run it twice. It also needs it AFTER this function has run, which
+	# is why setup() reads the member rather than being handed a value.
+	drivetrain_analysis = dt
+	move_speed = dt["move_speed"] if dt["has_locomotion"] else 0.0
 	_sync_nav_radii()
 
 
@@ -382,14 +424,90 @@ func _tick_power(delta: float) -> void:
 		_recalculate_vision()
 
 
+# Terrain variety task: surface terrain (marsh/rocky/snow_mud/sand/...) slows
+# or favors specific locomotion types - this looks up the CURRENT tile every
+# physics tick (position changes constantly, unlike move_speed which is only
+# recomputed when the design changes) and stores the multiplier for
+# _apply_movement() to apply. Flying/naval units never touch ground surface
+# terrain (is_flying skips this entirely; is_naval's "surface" is water,
+# which has no surface_zones), so both stay at the default 1.0. Duck-typed
+# like get_ground_nav_map()/terrain_height_at() - every synthetic test
+# without a real match controller falls through to the harmless 1.0 default,
+# unchanged.
+#
+# Ported from battle_unit.gd (2026-08-08 speed pass) - this runtime declared
+# terrain_speed_multiplier and read it in _apply_movement(), but nothing here
+# ever assigned it, so the whole per-surface locomotion table (and the tread-
+# width/Glacier Syndicate modifiers on top of it) was dead in every real
+# Skirmish match. It only ever ran in tests that built a battle_unit.gd unit
+# directly.
+func _recalculate_terrain_speed_multiplier() -> void:
+	if is_flying or is_naval:
+		terrain_speed_multiplier = 1.0
+		return
+	if _controller == null or not _controller.has_method("get_surface_type_at"):
+		terrain_speed_multiplier = 1.0
+		return
+	var surface_type = _controller.get_surface_type_at(global_position)
+	if surface_type == "":
+		terrain_speed_multiplier = 1.0
+		return
+	terrain_speed_multiplier = ModuleCatalog.get_terrain_speed_multiplier(locomotion_type, surface_type)
+	# Wider track spreads weight over more contact area (real flotation, less
+	# sinking), so it eats further into whatever penalty the base table
+	# already assigns; a narrower track digs in more and eats further into
+	# it. Only shifts the number tracked_treads already has for this
+	# surface, doesn't grant terrain immunity (clamped at 1.2).
+	if locomotion_type == "tracked_treads":
+		var width = locomotion_settings.get("tread_width", locomotion_settings.get("width", 1.0))
+		var width_delta = (width - 1.0) * 0.25
+		terrain_speed_multiplier = clamp(terrain_speed_multiplier + width_delta, 0.15, 1.2)
+
+	# Glacier Syndicate passive: negates a fraction of whatever terrain
+	# penalty is currently in effect (a multiplier BELOW 1.0 - a bonus above
+	# 1.0, e.g. screw_drive's marsh bonus, is left untouched, since "reduced
+	# penalty" only means something for an actual penalty).
+	if terrain_speed_multiplier < 1.0 and is_instance_valid(hull_node):
+		var terrain_faction = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
+		var reduction = FactionCatalog.get_passive(terrain_faction, "terrain_penalty_reduction", 0.0)
+		if reduction > 0.0:
+			terrain_speed_multiplier = 1.0 - (1.0 - terrain_speed_multiplier) * (1.0 - reduction)
+
+
+# Exhaust plume for whichever boost part is lit - one burst per
+# BOOST_VFX_INTERVAL rather than every physics tick, so a boosting group
+# doesn't carry a live particle system per unit per frame. Reset to 0.0
+# rather than left counting down while not boosting, so the FIRST tick a
+# boost engages always shows a burst immediately instead of waiting out
+# whatever was left on the timer from the last time it was lit.
+func _update_boost_vfx(delta: float, is_boosting: bool) -> void:
+	if not is_boosting:
+		_boost_vfx_timer = 0.0
+		return
+	_boost_vfx_timer -= delta
+	if _boost_vfx_timer > 0.0:
+		return
+	_boost_vfx_timer = BOOST_VFX_INTERVAL
+	VFXBurstScript.spawn(self, Vector3(0, 0.3, 0.8), Color(1.0, 0.65, 0.2), 5, 0.18, 40.0, 2.0, 4.0, Vector3.ZERO, 0.35, 0.7)
+
+
 func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 	var _t := Profiler.start()
 	_tick_power(delta)
+	_recalculate_terrain_speed_multiplier()
 	_advance_orders()
 	_tick_economy(delta)
-	_apply_movement(delta)
+
+	# Tick boost controller - must run before _apply_movement so its multiplier
+	# applies to this frame's speed.
+	var boost_mult: float = 1.0
+	if boost_controller != null:
+		boost_mult = boost_controller.tick(delta)
+	_update_boost_vfx(delta, boost_mult > 1.0)
+
+	_apply_movement(delta, boost_mult)
 	_apply_vertical(delta)
 	# Kept as its own section: this call was 52 ms of a 56 ms frame until
 	# _resolve_terrain_collision() landed, and it is the one line here whose
@@ -456,7 +574,53 @@ func halt() -> void:
 	velocity.z = 0.0
 
 
-func _apply_movement(delta: float) -> void:
+# --- Boost controller helper methods ---
+
+func get_remaining_distance() -> float:
+	if current_order != null and current_order.has_destination():
+		var dest := current_order.position
+		return Vector3(global_position.x - dest.x, 0.0, global_position.z - dest.z).length()
+	elif _has_internal_destination:
+		return Vector3(global_position.x - _internal_destination.x, 0.0, global_position.z - _internal_destination.z).length()
+	return 0.0
+
+func get_heading_throttle() -> float:
+	if current_order == null and not _has_internal_destination:
+		return 0.0
+	var destination: Vector3
+	if current_order != null and current_order.has_destination():
+		destination = current_order.position
+	elif _has_internal_destination:
+		destination = _internal_destination
+	else:
+		return 0.0
+	var to_point := _steer_direction(destination)
+	if to_point.length() < 0.05:
+		return 0.0
+	var current_yaw := rotation.y
+	var target_yaw := SteeringScript.yaw_for(to_point, current_yaw)
+	return SteeringScript.heading_throttle(current_yaw, target_yaw)
+
+func has_hostile_in_range() -> bool:
+	if attack_range <= 0.0:
+		return false
+	# Check nearby units - duck-typed to avoid import cycles
+	var enemies := get_tree().get_nodes_in_group("units")
+	for e in enemies:
+		if e == self:
+			continue
+		if e.team != team and not e.is_dead:
+			if e.global_position.distance_to(global_position) <= attack_range:
+				return true
+	return false
+
+func get_energy_fraction() -> float:
+	if max_energy <= 0.0:
+		return 0.0
+	return current_energy / max_energy
+
+
+func _apply_movement(delta: float, boost_mult: float = 1.0) -> void:
 	var destination: Vector3
 	if current_order != null and current_order.type == Order.Type.ATTACK:
 		if not _resolve_attack_station():
@@ -537,7 +701,7 @@ func _apply_movement(delta: float) -> void:
 	var turning_radius := move_speed / TURN_RATE
 	var slow_radius := maxf(_arrive_distance() * 2.0, turning_radius * SLOW_RADIUS_TURN_SAFETY_MARGIN)
 	var speed: float = SteeringScript.arrival_speed(remaining, move_speed, slow_radius) \
-		* terrain_speed_multiplier * throttle
+		* terrain_speed_multiplier * throttle * boost_mult
 
 	var forward := -transform.basis.z.normalized()
 	velocity.x = forward.x * speed

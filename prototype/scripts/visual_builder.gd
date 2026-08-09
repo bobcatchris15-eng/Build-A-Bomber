@@ -3245,6 +3245,14 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 						tube.rotation = Vector3(deg_to_rad(-55.0), splay, 0)
 						parent_node.add_child(tube)
 
+	elif type_id in ["turbocharger", "overdrive_gearbox", "hub_motor_array", "nitrous_injector", "booster_rack"]:
+		# --- Propulsion modules (speed pass, 2026-08-08) -----------------
+		# Same sub-part-per-tweak convention as recoilless_rifle above: the
+		# detail being tweaked is the piece that scales, nothing else. Parts
+		# authored in tools/blender/build_meshes.py's "Propulsion module
+		# parts" section; procedural fallback if the .glb isn't imported yet.
+		_build_propulsion_module(type_id, parent_node, base_color, tweaks)
+
 	else:
 		# Fallback: Simple box mesh for armor and basic parts
 		var mesh_inst = MeshInstance3D.new()
@@ -5814,12 +5822,198 @@ static func _monolithic_tweak_scale(type_id: String, tweaks: Dictionary, mesh_ro
 			value if axes.z > 0.5 else 1.0)
 	return (Basis.from_euler(mesh_rotation).transposed() * module_space).abs()
 
+# Propulsion modules (speed pass, 2026-08-08): one call per type_id, each
+# piece scaled ONLY by the tweak that names it - the rule the roster
+# expansion weapons above already follow (barrel_length stretches the tube,
+# never the breech). Parts are authored .glb files when present
+# (tools/blender/build_meshes.py's "Propulsion module parts" section) and
+# fall back to a plain primitive of roughly the same proportions otherwise,
+# so the module is placeable and testable before art lands.
+static func _build_propulsion_module(type_id: String, parent_node: Node3D, base_color: Color, tweaks: Dictionary) -> void:
+	match type_id:
+		"turbocharger":
+			var compression = tweaks.get("turbine_compression", 1.0)
+			var intake = tweaks.get("intake_size", 1.0)
+			var housing_mesh = _part("turbo_housing")
+			if housing_mesh:
+				var housing = _mesh_inst(housing_mesh, base_color.darkened(0.1))
+				housing.scale = Vector3.ONE * compression
+				housing.position = Vector3(0, 0.14, 0)
+				parent_node.add_child(housing)
+			else:
+				var housing = MeshInstance3D.new()
+				var h_sphere = SphereMesh.new()
+				h_sphere.radius = 0.18 * compression
+				h_sphere.height = h_sphere.radius * 1.5
+				housing.mesh = h_sphere
+				housing.material_override = _flat_mat(base_color.darkened(0.1))
+				housing.position = Vector3(0, 0.18, 0)
+				parent_node.add_child(housing)
+			var intake_mesh = _part("turbo_intake")
+			if intake_mesh:
+				var trunk = _mesh_inst(intake_mesh, base_color.darkened(0.25))
+				trunk.scale = Vector3(intake, 1.0, intake)
+				trunk.position = Vector3(0, 0.1, 0.2)
+				parent_node.add_child(trunk)
+			else:
+				var trunk = MeshInstance3D.new()
+				var t_cyl = CylinderMesh.new()
+				t_cyl.top_radius = 0.09 * intake
+				t_cyl.bottom_radius = 0.09 * intake
+				t_cyl.height = 0.32
+				trunk.mesh = t_cyl
+				trunk.material_override = _flat_mat(base_color.darkened(0.25))
+				trunk.position = Vector3(0, 0.1, 0.2)
+				trunk.rotation = Vector3(PI / 2, 0, 0)
+				parent_node.add_child(trunk)
+
+		"overdrive_gearbox":
+			var motor_size = tweaks.get("motor_size", 1.0)
+			var bell_mesh = _part("gearbox_bell")
+			if bell_mesh:
+				var bell = _mesh_inst(bell_mesh, base_color.darkened(0.15))
+				bell.scale = Vector3.ONE * motor_size
+				bell.position = Vector3(0, 0.17, 0)
+				parent_node.add_child(bell)
+			else:
+				var bell = MeshInstance3D.new()
+				var b_cyl = CylinderMesh.new()
+				b_cyl.top_radius = 0.2 * motor_size
+				b_cyl.bottom_radius = 0.2 * motor_size
+				b_cyl.height = 0.34 * motor_size
+				bell.mesh = b_cyl
+				bell.material_override = _flat_mat(base_color.darkened(0.15))
+				bell.position = Vector3(0, 0.17 * motor_size, 0)
+				parent_node.add_child(bell)
+
+		"hub_motor_array":
+			var motor_size = tweaks.get("motor_size", 1.0)
+			var coils = int(tweaks.get("coil_count", 4.0))
+			var can_mesh = _part("hub_motor_can")
+			if can_mesh:
+				var can = _mesh_inst(can_mesh, base_color)
+				can.scale = Vector3(motor_size, 1.0, motor_size)
+				can.position = Vector3(0, 0.07, 0)
+				parent_node.add_child(can)
+			else:
+				var can = MeshInstance3D.new()
+				var c_cyl = CylinderMesh.new()
+				c_cyl.top_radius = 0.16 * motor_size
+				c_cyl.bottom_radius = 0.16 * motor_size
+				c_cyl.height = 0.14
+				can.mesh = c_cyl
+				can.material_override = _flat_mat(base_color)
+				can.position = Vector3(0, 0.07, 0)
+				parent_node.add_child(can)
+			# Stator segments instanced around the can - count is the tweak,
+			# not size, so this is the one piece the coil_count slider moves.
+			var seg_mesh = _part("hub_stator_segment")
+			for i in range(max(coils, 1)):
+				# EXPLICIT `: float`, not `:=`. max() with untyped arguments returns
+				# Variant, so the inferred form is a parse error - and because
+				# visual_builder.gd is preloaded by blueprint_manager, module_placer
+				# and stat_calculator, that one error cascades into ~190 "Nonexistent
+				# function 'build_visual'" failures across the whole suite.
+				var angle: float = (float(i) / max(coils, 1)) * TAU
+				var radius: float = 0.16 * motor_size + 0.02
+				var seg: MeshInstance3D
+				if seg_mesh:
+					seg = _mesh_inst(seg_mesh, base_color.darkened(0.2))
+				else:
+					seg = MeshInstance3D.new()
+					var s_box = BoxMesh.new()
+					s_box.size = Vector3(0.05, 0.1, 0.03)
+					seg.mesh = s_box
+					seg.material_override = _flat_mat(base_color.darkened(0.2))
+				seg.position = Vector3(sin(angle) * radius, 0.07, cos(angle) * radius)
+				seg.rotation = Vector3(0, angle, 0)
+				parent_node.add_child(seg)
+
+		"nitrous_injector":
+			var drum_size = tweaks.get("drum_size", 1.0)
+			var pressure = tweaks.get("pressure_valve", 1.0)
+			var bottle_mesh = _part("nitrous_bottle")
+			if bottle_mesh:
+				var bottle = _mesh_inst(bottle_mesh, base_color)
+				bottle.scale = Vector3(drum_size, drum_size, drum_size)
+				bottle.position = Vector3(0, 0.28 * drum_size, 0)
+				parent_node.add_child(bottle)
+			else:
+				var bottle = MeshInstance3D.new()
+				var bt_cyl = CylinderMesh.new()
+				bt_cyl.top_radius = 0.11 * drum_size
+				bt_cyl.bottom_radius = 0.11 * drum_size
+				bt_cyl.height = 0.55 * drum_size
+				bottle.mesh = bt_cyl
+				bottle.material_override = _flat_mat(base_color)
+				bottle.position = Vector3(0, 0.28 * drum_size, 0)
+				parent_node.add_child(bottle)
+			var feed_mesh = _part("nitrous_feed_line")
+			if feed_mesh:
+				var feed = _mesh_inst(feed_mesh, base_color.darkened(0.3))
+				feed.scale = Vector3(pressure, 1.0, pressure)
+				feed.position = Vector3(0.1, 0.1, 0)
+				feed.rotation = Vector3(0, 0, PI / 2)
+				parent_node.add_child(feed)
+			else:
+				var feed = MeshInstance3D.new()
+				var f_cyl = CylinderMesh.new()
+				f_cyl.top_radius = 0.025 * pressure
+				f_cyl.bottom_radius = 0.025 * pressure
+				f_cyl.height = 0.4
+				feed.mesh = f_cyl
+				feed.material_override = _flat_mat(base_color.darkened(0.3))
+				feed.position = Vector3(0.1, 0.1, 0)
+				feed.rotation = Vector3(0, 0, PI / 2)
+				parent_node.add_child(feed)
+
+		"booster_rack":
+			var nozzles = int(tweaks.get("nozzle_count", 3.0))
+			var tube_length = tweaks.get("motor_length", 1.0)
+			# The rack frame is deliberately NOT scaled by either tweak - it
+			# is the one piece that stays put while the tubes it holds change.
+			var frame_mesh = _part("booster_rack_frame")
+			if frame_mesh:
+				var frame = _mesh_inst(frame_mesh, base_color.darkened(0.2))
+				frame.position = Vector3(0, 0.06, 0)
+				parent_node.add_child(frame)
+			else:
+				var frame = MeshInstance3D.new()
+				var fr_box = BoxMesh.new()
+				fr_box.size = Vector3(0.85, 0.12, 0.5)
+				frame.mesh = fr_box
+				frame.material_override = _flat_mat(base_color.darkened(0.2))
+				frame.position = Vector3(0, 0.06, 0)
+				parent_node.add_child(frame)
+			var tube_mesh = _part("booster_tube")
+			# Same Variant-from-max() inference trap as the stator block above.
+			var spacing: float = 0.85 / max(nozzles, 1)
+			var start_x: float = -0.85 / 2.0 + spacing / 2.0
+			for i in range(max(nozzles, 1)):
+				var tx: float = start_x + i * spacing
+				var tube: MeshInstance3D
+				if tube_mesh:
+					tube = _mesh_inst(tube_mesh, base_color.darkened(0.35))
+					tube.scale = Vector3(1.0, tube_length, 1.0)
+				else:
+					tube = MeshInstance3D.new()
+					var tb_cyl = CylinderMesh.new()
+					tb_cyl.top_radius = 0.09
+					tb_cyl.bottom_radius = 0.09
+					tb_cyl.height = 0.7 * tube_length
+					tube.mesh = tb_cyl
+					tube.material_override = _flat_mat(base_color.darkened(0.35))
+				tube.position = Vector3(tx, 0.12, 0.25)
+				tube.rotation = Vector3(PI / 2, 0, 0)
+				parent_node.add_child(tube)
+
+
 static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: Dictionary, base_size: Vector3):
 	var children = parent.get_children().filter(func(c): return c is MeshInstance3D)
 	if children.is_empty(): return
 
 	match type_id:
-		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle", "arc_projector", "microwave_emitter", "particle_lance", "spigot_mortar", "rocket_artillery", "hypervelocity_missile", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile", "chaff_dispenser", "laser_dazzler", "aps_interceptor", "aa_autocannon", "jammer_mast", "sentry_deployer", "sensor_beacon_launcher", "decoy_projector":
+		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle", "arc_projector", "microwave_emitter", "particle_lance", "spigot_mortar", "rocket_artillery", "hypervelocity_missile", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile", "chaff_dispenser", "laser_dazzler", "aps_interceptor", "aa_autocannon", "jammer_mast", "sentry_deployer", "sensor_beacon_launcher", "decoy_projector", "turbocharger", "overdrive_gearbox", "hub_motor_array", "nitrous_injector", "booster_rack":
 			return
 
 # Builds a wedge (triangular prism) mesh from a base_size Vector3.

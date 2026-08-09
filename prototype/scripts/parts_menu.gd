@@ -92,6 +92,13 @@ const WEAPON_ROLES = [
 	"Missiles", "Point Defense", "Deployables",
 ]
 
+# Which module ROLES route to the Drives toolbox rather than Weapons/Support.
+# Propulsion parts (turbocharger, overdrive_gearbox, ...) are category
+# "module" like everything above - a hull carrying only one is correctly
+# still an illegal build - but a player looking to make a design faster
+# looks where the locomotion types already live, not in a generators drawer.
+const DRIVE_ROLES = ["Propulsion"]
+
 const CARD_MIN_WIDTH := 132
 const CARD_HEIGHT := 46
 
@@ -389,11 +396,15 @@ func _build_part_card(type_id: String, data: Dictionary) -> Button:
 # in the scene tree, which is what preserves the drawer metadata contract - the
 # test suites walk that array, not the node hierarchy.
 # Presentation tier for a (category, group) pair. Only "modules" splits, into
-# Weapons and Support - see the TIERS and WEAPON_ROLES comments for why that is a
-# presentation decision rather than a reclassification.
+# Weapons, Propulsion (routed to the Drives toolbox, alongside the locomotion
+# types these parts modify - see DRIVE_ROLES) and Support - see the TIERS and
+# WEAPON_ROLES comments for why that is a presentation decision rather than a
+# reclassification.
 func _tier_for(family: String, group: String) -> String:
 	if family != "modules":
 		return family
+	if group in DRIVE_ROLES:
+		return "locomotion"
 	return "weapons" if group in WEAPON_ROLES else "support"
 
 

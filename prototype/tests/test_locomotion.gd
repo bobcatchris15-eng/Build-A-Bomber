@@ -19,8 +19,8 @@ func test_every_locomotion_type_is_fully_declared() -> bool:
 	for type_id in catalog:
 		if catalog[type_id].get("category", "") == "locomotion":
 			loco_ids.append(type_id)
-	if loco_ids.size() < 17:
-		print("  [FAIL] expected at least 17 locomotion types after the expansion, found %d." % loco_ids.size())
+	if loco_ids.size() < 14:
+		print("  [FAIL] expected at least 14 locomotion types after the expansion (naval drives removed), found %d." % loco_ids.size())
 		return false
 
 	for type_id in loco_ids:
@@ -92,7 +92,7 @@ func test_expansion_locomotion_types_build_and_place() -> bool:
 	print("Running Test Suite: Locomotion Expansion Types Build And Place...")
 	var VisualBuilder = load("res://scripts/visual_builder.gd")
 	var new_types := ["half_track", "rocker_bogie", "air_cushion_skirt",
-		"anti_grav_plate", "hydrofoil", "water_jet", "pontoon_wheels"]
+		"anti_grav_plate", "pontoon_wheels"]
 	for type_id in new_types:
 		var data = ModuleCatalog.get_module_data(type_id)
 		var probe := Node3D.new()
@@ -157,17 +157,12 @@ func test_every_locomotion_type_animates_something() -> bool:
 		"helicopter_rotors": ["RotorBlades", "powered"],
 		"hover_engine": ["HoverRingMid", "powered"],
 		"ornithopter_wing": ["WingPivotFore", "powered"],
-		"naval_propeller": ["PropBlades", "powered"],
 		"buoyant_envelope": ["PropBlades", "powered"],
 		"half_track": [VisualBuilder.SPIN_PIVOT_TREAD, "ground"],
 		"rocker_bogie": [VisualBuilder.SPIN_PIVOT_WHEEL, "ground"],
 		"pontoon_wheels": [VisualBuilder.SPIN_PIVOT_WHEEL, "ground"],
 		"air_cushion_skirt": [VisualBuilder.SPIN_PIVOT_TURBINE, "powered"],
 		"anti_grav_plate": [VisualBuilder.SPIN_PIVOT_TURBINE, "powered"],
-		"water_jet": [VisualBuilder.SPIN_PIVOT_TURBINE, "powered"],
-		# hydrofoil is deliberately absent: a lifting foil on a strut has no
-		# moving part. It is the one locomotor where stillness is correct, and
-		# saying so here is what stops it looking like another oversight.
 	}
 	for type_id in expected:
 		var pivot_name: String = expected[type_id][0]
@@ -368,7 +363,7 @@ func test_locomotion_rebuild_and_multipart_assemblies() -> bool:
 
 	var types = [
 		"wheels", "helicopter_rotors", "tracked_treads", "legs", "hover_engine",
-		"fixed_wing_engine", "ornithopter_wing", "naval_propeller", "buoyant_envelope", "screw_drive"
+		"fixed_wing_engine", "ornithopter_wing", "buoyant_envelope", "screw_drive"
 	]
 
 	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
@@ -400,7 +395,7 @@ func test_locomotion_rebuild_and_multipart_assemblies() -> bool:
 				print("  [FAIL] ornithopter_wing missing 'WingPivotFore'/'WingPivotHind' animation pivots")
 				parent.queue_free()
 				return false
-		elif type_id in ["naval_propeller", "buoyant_envelope"]:
+		elif type_id == "buoyant_envelope":
 			if not parent.has_node("PropBlades"):
 				print("  [FAIL] %s missing 'PropBlades' animation pivot" % type_id)
 				parent.queue_free()
@@ -515,27 +510,6 @@ func test_ship_hull_locomotion_mount_gap_fix() -> bool:
 		return false
 	if wheel_y <= naive_y:
 		print("  [FAIL] wheels on airship_hull should mount higher than the naive box-bottom calculation (", naive_y, "), got ", wheel_y, " - the underside_y_bias fix isn't being applied.")
-		placer.queue_free(); hull.queue_free()
-		return false
-
-	# 
-	# hull_size.z/2.0 edge (past the keel's real taper) - the other half of
-	# this bug pass's fix.
-	placer.update_locomotion("naval_propeller", {})
-	await tree.process_frame
-	var prop_z = 0.0
-	var found_prop = false
-	for child in hull.get_children():
-		if child.has_meta("module_data") and child.get_meta("module_data").type_id == "naval_propeller":
-			prop_z = child.position.z
-			found_prop = true
-			break
-	if not found_prop:
-		print("  [FAIL] Propeller should spawn on airship_hull.")
-		placer.queue_free(); hull.queue_free()
-		return false
-	if abs(prop_z - box.size.z / 2.0) < 0.01:
-		print("  [FAIL] naval_propeller should no longer mount at the exact stern edge (hull_size.z/2.0=", box.size.z / 2.0, ") - got ", prop_z, ", which is the old buggy position past the keel's real taper.")
 		placer.queue_free(); hull.queue_free()
 		return false
 
@@ -759,7 +733,6 @@ func test_design_lab_and_combat_agree_on_weight_and_capacity() -> bool:
 		["legs", {"count": 6}],
 		["hover_engine", {"pad_count": 6, "emv_level": 2.0}],
 		["fixed_wing_engine", {"engine_count": 4, "turbine_compression": 1.5}],
-		["naval_propeller", {"prop_count": 4, "blade_pitch": 1.5}],
 		["buoyant_envelope", {"prop_count": 4}],
 		["screw_drive", {"drum_diameter": 1.5, "helix_depth": 1.5}],
 	]
@@ -868,7 +841,6 @@ func test_every_locomotor_capacity_responds_to_its_own_tweaks() -> bool:
 		"hover_engine": [{"pad_count": 4, "emv_level": 1.0}, {"pad_count": 4, "emv_level": 2.0}],
 		"fixed_wing_engine": [{"engine_count": 2, "turbine_compression": 1.0}, {"engine_count": 2, "turbine_compression": 2.0}],
 		"ornithopter_wing": [{"wingspan": 1.0}, {"wingspan": 2.0}],
-		"naval_propeller": [{"prop_count": 2}, {"prop_count": 4}],
 		# The one type whose capacity must NOT rise with its count tweak:
 		# an airship's lift is buoyancy, so extra engine pods carry nothing.
 		# Checked separately below.
@@ -878,8 +850,6 @@ func test_every_locomotor_capacity_responds_to_its_own_tweaks() -> bool:
 		"pontoon_wheels": [{"axle_count": 4, "pontoon_size": 1.0}, {"axle_count": 8, "pontoon_size": 1.5}],
 		"air_cushion_skirt": [{"plenum_pressure": 1.0}, {"plenum_pressure": 2.0}],
 		"anti_grav_plate": [{"plate_count": 4, "field_strength": 1.0}, {"plate_count": 4, "field_strength": 2.0}],
-		"hydrofoil": [{"foil_span": 1.0}, {"foil_span": 1.8}],
-		"water_jet": [{"intake_size": 1.0}, {"nozzle_count": 4, "intake_size": 1.0}],
 		"screw_drive": [{"drum_diameter": 1.0}, {"drum_diameter": 2.0}],
 	}
 
@@ -2072,3 +2042,303 @@ func _leg_modules(hull: Node3D) -> Array:
 			out.append(child)
 	out.sort_custom(func(a, b): return a.position.x < b.position.x)
 	return out
+
+
+# --- Speed as a real, affectable stat (2026-08-08) -------------------------
+
+# The retuned band: every base_top_speed rose, the archetype ordering the
+# roster depends on held, and the fast end pulled further away from the slow
+# end rather than everything moving by the same amount - a flat lift would
+# have kept the roster exactly as flat as before, just at a higher number.
+func test_chassis_top_speeds_are_spread_and_ordered() -> bool:
+	print("Running Test Suite: Speed Pass - base_top_speed Band Is Wider, Not Just Higher...")
+	# (type_id, speed BEFORE the 2026-08-08 pass) - every one of these must be
+	# strictly higher now.
+	var before := {
+		"wheels": 12.0, "tracked_treads": 8.0, "helicopter_rotors": 11.0,
+		"hover_engine": 13.0, "legs": 6.5, "fixed_wing_engine": 18.0,
+		"ornithopter_wing": 9.0, "buoyant_envelope": 4.0, "half_track": 8.5,
+		"rocker_bogie": 6.0, "air_cushion_skirt": 12.5, "anti_grav_plate": 10.5,
+		"pontoon_wheels": 7.5, "screw_drive": 6.5,
+	}
+	for type_id in before:
+		var now: float = ModuleCatalog.get_base_top_speed(type_id)
+		if now <= before[type_id]:
+			print("  [FAIL] ", type_id, " should be faster than its pre-pass value ", before[type_id], ", got ", now)
+			return false
+
+	# Archetype ordering the roster's own design depends on (see the
+	# catalog's own base_top_speed comments) - retuning must not have
+	# scrambled it.
+	if not (ModuleCatalog.get_base_top_speed("fixed_wing_engine") > ModuleCatalog.get_base_top_speed("wheels")):
+		print("  [FAIL] fixed_wing_engine should still outrun wheels.")
+		return false
+	if not (ModuleCatalog.get_base_top_speed("wheels") > ModuleCatalog.get_base_top_speed("tracked_treads")):
+		print("  [FAIL] wheels should still outrun tracked_treads.")
+		return false
+	if not (ModuleCatalog.get_base_top_speed("tracked_treads") > ModuleCatalog.get_base_top_speed("legs")):
+		print("  [FAIL] tracked_treads should still outrun legs.")
+		return false
+	if not (ModuleCatalog.get_base_top_speed("buoyant_envelope") < ModuleCatalog.get_base_top_speed("legs")):
+		print("  [FAIL] buoyant_envelope should still be slower than legs.")
+		return false
+
+	# The spread itself widened - fastest/slowest ratio bigger than it was
+	# (18.0/4.0 = 4.5 before), not just every value scaled by the same factor.
+	var fastest: float = ModuleCatalog.get_base_top_speed("fixed_wing_engine")
+	var slowest: float = ModuleCatalog.get_base_top_speed("buoyant_envelope")
+	var old_ratio := 18.0 / 4.0
+	if fastest / slowest <= old_ratio:
+		print("  [FAIL] Fastest/slowest ratio should have widened past the old ", old_ratio, ", got ", fastest / slowest)
+		return false
+
+	print("  [PASS] Every locomotor is faster than before, the archetype ordering held, and the roster's speed spread genuinely widened.")
+	return true
+
+
+# Propulsion parts (turbocharger/overdrive_gearbox/hub_motor_array) change
+# Drivetrain.analyze()'s output through the thrust_bonus/top_speed_mult/
+# capacity_mult hooks - this is the regression guard for those hooks
+# actually being read, not just declared on the catalog entries.
+func test_propulsion_modules_change_drivetrain_output() -> bool:
+	print("Running Test Suite: Propulsion Modules Change Drivetrain Output...")
+
+	var make_hull := func(part_ids: Array) -> Node3D:
+		var hull := Node3D.new()
+		root.add_child(hull)
+		var loco := ModuleData.new()
+		loco.type_id = "wheels"
+		loco.category = "locomotion"
+		loco.base_weight = 50.0
+		var loco_child := Node3D.new()
+		loco_child.set_meta("module_data", loco)
+		hull.add_child(loco_child)
+		for part_id in part_ids:
+			var d := ModuleData.new()
+			d.type_id = part_id
+			d.category = "module"
+			d.base_weight = ModuleCatalog.get_module_data(part_id).get("weight", 40.0)
+			var child := Node3D.new()
+			child.set_meta("module_data", d)
+			hull.add_child(child)
+		return hull
+
+	# turbocharger: thrust rises, chassis ceiling does not.
+	var bare: Node3D = make_hull.call([])
+	var turbo: Node3D = make_hull.call(["turbocharger"])
+	var dt_bare: Dictionary = DrivetrainScript.analyze(bare, "wheels", {})
+	var dt_turbo: Dictionary = DrivetrainScript.analyze(turbo, "wheels", {})
+	bare.queue_free(); turbo.queue_free()
+	if dt_turbo["thrust"] <= dt_bare["thrust"]:
+		print("  [FAIL] A turbocharger should raise thrust. bare=", dt_bare["thrust"], " turbo=", dt_turbo["thrust"])
+		return false
+	if not is_equal_approx(dt_turbo["chassis_speed_mult"], 1.0):
+		print("  [FAIL] A turbocharger alone should not change chassis_speed_mult, got ", dt_turbo["chassis_speed_mult"])
+		return false
+
+	# overdrive_gearbox: chassis ceiling rises, capacity falls - the pure trade.
+	var gearbox: Node3D = make_hull.call(["overdrive_gearbox"])
+	var dt_gearbox: Dictionary = DrivetrainScript.analyze(gearbox, "wheels", {})
+	gearbox.queue_free()
+	if dt_gearbox["chassis_top_speed"] <= dt_bare["chassis_top_speed"]:
+		print("  [FAIL] An Overdrive Gearbox should raise the chassis ceiling. bare=", dt_bare["chassis_top_speed"], " gearbox=", dt_gearbox["chassis_top_speed"])
+		return false
+	if dt_gearbox["chassis_speed_mult"] <= 1.0:
+		print("  [FAIL] chassis_speed_mult should be reported > 1.0 with an Overdrive Gearbox fitted, got ", dt_gearbox["chassis_speed_mult"])
+		return false
+	if dt_gearbox["capacity"] >= dt_bare["capacity"]:
+		print("  [FAIL] An Overdrive Gearbox should trade away some capacity. bare=", dt_bare["capacity"], " gearbox=", dt_gearbox["capacity"])
+		return false
+
+	# Stacking parts must not blow past MAX_CHASSIS_SPEED_MULT.
+	var stacked: Node3D = make_hull.call([
+		"overdrive_gearbox", "overdrive_gearbox", "overdrive_gearbox",
+		"overdrive_gearbox", "overdrive_gearbox", "overdrive_gearbox",
+	])
+	var dt_stacked: Dictionary = DrivetrainScript.analyze(stacked, "wheels", {})
+	stacked.queue_free()
+	if dt_stacked["chassis_speed_mult"] > DrivetrainScript.MAX_CHASSIS_SPEED_MULT + 0.001:
+		print("  [FAIL] Six stacked Overdrive Gearboxes should be clamped at MAX_CHASSIS_SPEED_MULT (", DrivetrainScript.MAX_CHASSIS_SPEED_MULT, "), got ", dt_stacked["chassis_speed_mult"])
+		return false
+
+	# nitrous_injector/booster_rack surface as a boost summary, and the
+	# stronger of the two (by speed_mult) wins when both are fitted.
+	var boosted: Node3D = make_hull.call(["nitrous_injector", "booster_rack"])
+	var dt_boosted: Dictionary = DrivetrainScript.analyze(boosted, "wheels", {})
+	boosted.queue_free()
+	var booster_cat: Dictionary = ModuleCatalog.get_module_data("booster_rack")
+	if dt_boosted["boost"].is_empty():
+		print("  [FAIL] A design carrying boost parts should report a non-empty boost summary.")
+		return false
+	if not is_equal_approx(float(dt_boosted["boost"]["speed_mult"]), float(booster_cat["boost"]["speed_mult"])):
+		print("  [FAIL] With both boost parts fitted, the STRONGER one (booster_rack) should win. Got ", dt_boosted["boost"])
+		return false
+
+	print("  [PASS] turbocharger/overdrive_gearbox change thrust/ceiling/capacity as declared, the chassis_speed_mult stack is clamped, and boost summaries surface the strongest fitted part.")
+	return true
+
+
+# BoostController's own state machine, driven directly against a minimal
+# stub unit rather than a real battle unit - this is a test of the
+# engage/disengage RULES (long run, aimed, no enemy, charges, cooldown), not
+# of movement or assembly.
+# extends Node, not RefCounted: BoostController.setup()'s unit_node parameter
+# is typed Node, so a RefCounted stub would fail that type check at runtime.
+class _StubBoostUnit extends Node:
+	var remaining_distance: float = 100.0
+	var heading_throttle: float = 1.0
+	var hostile_in_range: bool = false
+	var energy_fraction: float = 1.0
+	func get_remaining_distance() -> float: return remaining_distance
+	func get_heading_throttle() -> float: return heading_throttle
+	func has_hostile_in_range() -> bool: return hostile_in_range
+	func get_energy_fraction() -> float: return energy_fraction
+
+func test_boost_controller_engages_and_expires() -> bool:
+	print("Running Test Suite: BoostController - Engage/Disengage Rules...")
+	var BoostControllerScript = preload("res://scripts/battle/units/boost_controller.gd")
+	# The stub units below are never added to the scene tree, so failure
+	# paths deliberately skip freeing them - harmless in a headless test
+	# process that exits shortly after, and not worth the noise of a free()
+	# before every early return.
+
+	# --- A finite-charge, no-cooldown boost (booster_rack shape) ---
+	var unit := _StubBoostUnit.new()
+	var bc = BoostControllerScript.new()
+	bc.setup(unit, {"boost": {"speed_mult": 2.2, "duration": 2.5, "cooldown": 0.0, "energy_per_sec": 0.0, "charges": 3}})
+
+	# Refuses to engage mid-turn (low heading throttle).
+	unit.heading_throttle = 0.2
+	if bc.tick(0.1) > 1.0:
+		print("  [FAIL] Should not engage while badly aimed (heading_throttle=0.2).")
+		return false
+	unit.heading_throttle = 1.0
+
+	# Refuses to engage on a short hop.
+	unit.remaining_distance = 5.0
+	if bc.tick(0.1) > 1.0:
+		print("  [FAIL] Should not engage on a short remaining distance (5m).")
+		return false
+	unit.remaining_distance = 100.0
+
+	# Refuses to engage with an enemy in range.
+	unit.hostile_in_range = true
+	if bc.tick(0.1) > 1.0:
+		print("  [FAIL] Should not engage with a hostile in attack range.")
+		return false
+	unit.hostile_in_range = false
+
+	# Now it should engage, and the returned multiplier should match the
+	# catalog's speed_mult.
+	var mult: float = bc.tick(0.1)
+	if not is_equal_approx(mult, 2.2):
+		print("  [FAIL] Expected the boost's speed_mult (2.2) once conditions are met, got ", mult)
+		return false
+
+	# Burns down for its declared duration, then expires back to 1.0.
+	for i in range(30):
+		mult = bc.tick(0.1)
+	if mult > 1.0:
+		print("  [FAIL] A 2.5s boost should have expired after 3.0s of ticking, still returned ", mult)
+		return false
+
+	# No cooldown on this part, so it can engage again immediately - and each
+	# engagement burns a charge, so three uses exhausts it.
+	bc.tick(0.1)  # 2nd charge
+	for i in range(30): bc.tick(0.1)
+	bc.tick(0.1)  # 3rd charge
+	for i in range(30): bc.tick(0.1)
+	# 3 charges spent - a 4th attempt must not engage.
+	var after_exhaustion: float = bc.tick(0.1)
+	if after_exhaustion > 1.0:
+		print("  [FAIL] A 3-charge booster should refuse to engage a 4th time, got multiplier ", after_exhaustion)
+		return false
+
+	# --- A cooldown-gated, unlimited-charge boost (nitrous_injector shape) ---
+	var unit2 := _StubBoostUnit.new()
+	var bc2 = BoostControllerScript.new()
+	bc2.setup(unit2, {"boost": {"speed_mult": 1.45, "duration": 5.0, "cooldown": 14.0, "energy_per_sec": 6.0, "charges": 0}})
+	bc2.tick(0.1)
+	# Immediately after one engagement+expiry it should be in cooldown, not
+	# free to engage again - the entire point of a cooldown-gated part.
+	for i in range(60): bc2.tick(0.1)  # burn the 5s duration
+	var mid_cooldown: float = bc2.tick(0.1)
+	if mid_cooldown > 1.0:
+		print("  [FAIL] Should still be on cooldown immediately after the boost expired.")
+		return false
+
+	unit.free()
+	unit2.free()
+	print("  [PASS] BoostController engages only on a long, aimed, uncontested run, applies the catalog's speed_mult, expires on schedule, burns charges, and respects cooldown.")
+	return true
+
+
+# The regression guard for the live Battle runtime speed fix (2026-08-08):
+# BattleUnitV2 (scripts/battle/units/unit.gd) used to read dt["top_speed"] -
+# the clean, pre-penalty figure - instead of dt["move_speed"], and never
+# assigned terrain_speed_multiplier at all despite reading it every tick in
+# _apply_movement(). Both made real Skirmish combat silently ignore
+# overload/underload, faction speed passives, and the entire terrain table.
+func test_live_runtime_uses_combat_speed_and_terrain() -> bool:
+	print("Running Test Suite: Live Battle Runtime (unit.gd) Uses Combat Speed And Computes Terrain...")
+	var UnitScript = preload("res://scripts/battle/units/unit.gd")
+
+	# --- Part 1: an overloaded design moves at move_speed, not top_speed ---
+	var unit = CharacterBody3D.new()
+	unit.set_script(UnitScript)
+	root.add_child(unit)
+	var hull := Node3D.new()
+	unit.add_child(hull)
+	unit.hull_node = hull
+	unit.locomotion_type = "wheels"
+	unit.locomotion_settings = {}
+
+	var loco_data := ModuleData.new()
+	loco_data.type_id = "wheels"
+	loco_data.category = "locomotion"
+	loco_data.base_weight = 900.0  # far past wheels' own weight capacity
+	var loco_child := Node3D.new()
+	loco_child.set_meta("module_data", loco_data)
+	hull.add_child(loco_child)
+
+	unit._recalculate_move_speed()
+	var dt: Dictionary = DrivetrainScript.analyze(hull, "wheels", {})
+
+	if not dt["is_overloaded"]:
+		print("  [FAIL] Test setup: expected an overloaded design, load_ratio=", dt["load_ratio"])
+		unit.queue_free()
+		return false
+	if not is_equal_approx(unit.move_speed, dt["move_speed"]):
+		print("  [FAIL] unit.move_speed (", unit.move_speed, ") should equal Drivetrain's move_speed (", dt["move_speed"], ") - the combat figure AFTER the overload penalty - not top_speed (", dt["top_speed"], "), the clean pre-penalty figure the Design Lab quotes.")
+		unit.queue_free()
+		return false
+	if unit.move_speed >= dt["top_speed"] - 0.001:
+		print("  [FAIL] An overloaded unit's move_speed should be measurably below its clean top_speed - got move_speed=", unit.move_speed, " top_speed=", dt["top_speed"])
+		unit.queue_free()
+		return false
+
+	# --- Part 2: terrain_speed_multiplier is actually computed ---
+	var controller_script = preload("res://scripts/fake_surface_controller.gd")
+	var controller := Node.new()
+	controller.set_script(controller_script)
+	controller.surface_type = "snow_mud"
+	root.add_child(controller)
+	unit._controller = controller
+	unit.is_flying = false
+	unit.is_naval = false
+	unit._recalculate_terrain_speed_multiplier()
+
+	if is_equal_approx(unit.terrain_speed_multiplier, 1.0):
+		print("  [FAIL] terrain_speed_multiplier should reflect the snow_mud penalty for wheels, stayed at the 1.0 default - the live runtime never assigns it.")
+		unit.queue_free(); controller.queue_free()
+		return false
+	var expected: float = ModuleCatalog.get_terrain_speed_multiplier("wheels", "snow_mud")
+	if not is_equal_approx(unit.terrain_speed_multiplier, expected):
+		print("  [FAIL] terrain_speed_multiplier=", unit.terrain_speed_multiplier, " does not match ModuleCatalog's own table value ", expected, " for wheels/snow_mud.")
+		unit.queue_free(); controller.queue_free()
+		return false
+
+	unit.queue_free()
+	controller.queue_free()
+	print("  [PASS] The live Battle runtime reads combat speed (post-overload/passives), not the clean design-time figure, and computes real per-surface terrain multipliers instead of leaving the dead 1.0 default.")
+	return true

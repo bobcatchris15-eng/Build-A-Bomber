@@ -745,7 +745,7 @@ func test_locomotor_base_top_speed_is_a_real_per_type_ceiling() -> bool:
 
 	var seen: Dictionary = {}
 	for loco_id in ["wheels", "tracked_treads", "legs", "fixed_wing_engine",
-			"buoyant_envelope", "rocker_bogie", "hover_engine", "hydrofoil"]:
+			"buoyant_envelope", "rocker_bogie", "hover_engine"]:
 		var hull = make_hull.call(loco_id, 1)
 		var dt = Drivetrain.analyze(hull)
 		var rated = ModuleCatalog.get_base_top_speed(loco_id)

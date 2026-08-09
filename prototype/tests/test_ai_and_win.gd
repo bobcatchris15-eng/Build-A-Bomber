@@ -73,12 +73,15 @@ func test_ai_flanking_targets_weakest_facet() -> bool:
 
 func test_enemy_roster_new_movement_archetypes() -> bool:
 	print("Running Test Suite: Enemy Roster - New Movement Archetypes Exercised By Real AI Units...")
-	# Armor phase / Traits B3 built fixed_wing_engine and naval_propeller as
-	# generic mechanics usable by any hull, but nothing in the actual enemy
-	# roster used them - the new strafing/surface-lock AI only ever ran in
-	# synthetic tests, never a real AI-controlled Skirmish unit. These two
-	# bundled blueprints (data/enemy/raptor_striker.json, tide_corvette.json)
-	# close that gap.
+	# Armor phase / Traits B3 built fixed_wing_engine as a generic mechanic
+	# usable by any hull, but nothing in the actual enemy roster used it -
+	# the new strafing AI only ever ran in synthetic tests, never a real
+	# AI-controlled Skirmish unit. This bundled blueprint
+	# (data/enemy/raptor_striker.json) closes that gap.
+	#
+	# tide_corvette.json (naval_propeller, is_naval/surface-lock) was removed
+	# along with the naval locomotors - naval units never got real design
+	# attention, so its half of this test went with it.
 	var bp_manager = preload("res://scripts/blueprint_manager.gd").new()
 	bp_manager.name = "BlueprintManager"
 	root.add_child(bp_manager)
@@ -109,32 +112,8 @@ func test_enemy_roster_new_movement_archetypes() -> bool:
 		return false
 	raptor.queue_free()
 
-	var corvette_data = bp_manager.load_blueprint("res://data/enemy/tide_corvette.json")
-	if corvette_data.is_empty():
-		print("  [FAIL] tide_corvette.json failed to parse")
-		bp_manager.queue_free()
-		return false
-	var corvette = CharacterBody3D.new()
-	corvette.set_script(BattleUnitScript)
-	root.add_child(corvette)
-	corvette.global_position = Vector3(30, 5.0, 30) # start above the waterline
-	corvette.setup(corvette_data, 1, bp_manager)
-	if not corvette.is_naval:
-		print("  [FAIL] tide_corvette should derive is_naval from its naval_propeller locomotion trait")
-		corvette.queue_free()
-		bp_manager.queue_free()
-		return false
-	for i in range(30):
-		corvette._physics_process(0.1)
-	if abs(corvette.global_position.y - 0.3) > 1.0:
-		print("  [FAIL] tide_corvette should settle to the surface waterline regardless of its spawn height, got y=", corvette.global_position.y)
-		corvette.queue_free()
-		bp_manager.queue_free()
-		return false
-	corvette.queue_free()
-
 	bp_manager.queue_free()
-	print("  [PASS] New enemy roster entries (fixed-wing raptor, naval corvette) reconstruct correctly and exercise the new movement traits.")
+	print("  [PASS] The fixed-wing enemy roster entry (raptor_striker) reconstructs correctly and exercises the strafing movement trait.")
 	return true
 
 func test_team_targeting() -> bool:

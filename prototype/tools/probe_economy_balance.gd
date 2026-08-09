@@ -155,8 +155,7 @@ func _harvester_count(battle) -> int:
 func _report_draw() -> void:
 	print("  --- draw per production line ---")
 	for path in ["res://data/loadout/rattler_scout.json",
-			"res://data/loadout/bulwark_mbt.json",
-			"res://data/loadout/tide_corvette.json"]:
+			"res://data/loadout/bulwark_mbt.json"]:
 		var file := FileAccess.open(path, FileAccess.READ)
 		if file == null:
 			continue

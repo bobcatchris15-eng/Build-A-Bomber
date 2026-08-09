@@ -86,6 +86,17 @@ var top_speed: float = 0.0
 var terrain_speed_multiplier: float = 1.0
 var rotate_speed: float = 4.0
 
+# Burst speed boost (nitrous_injector/booster_rack) - see boost_controller.gd.
+# Set up from the same Drivetrain.analyze() result _recalculate_move_speed()
+# already unpacks, so its "boost" key never disagrees with what the Design
+# Lab quotes. null on any design with no boost part fitted; setup() itself
+# handles that case by leaving state at IDLE and tick() a permanent no-op.
+var boost_controller: BoostController = null
+# Exhaust plume while a boost is lit - see unit.gd's matching field for why
+# this is a periodic burst rather than a continuous emitter.
+var _boost_vfx_timer: float = 0.0
+const BOOST_VFX_INTERVAL := 0.12
+
 # Steering throttle constants - see _steer_towards() for the derivation.
 # Heading alignment (forward · desired) at or below which the unit is
 # considered to be pointed the wrong way and should pivot rather than drive.
@@ -552,6 +563,16 @@ func _recalculate_move_speed():
 		return
 	move_speed = dt["move_speed"]
 
+	# Built once, here, rather than in setup() directly - _recalculate_move_
+	# speed() is the one place both the initial spawn and every later re-run
+	# (subsystem damage) already pass through, so this is the single place
+	# that needs to know about boost at all. Not rebuilt on every re-run: a
+	# unit that has already spent charges or is mid-cooldown must not have
+	# that state reset by an unrelated module getting stripped elsewhere.
+	if boost_controller == null:
+		boost_controller = BoostController.new()
+		boost_controller.setup(self, dt)
+
 	# The nav agent's capture radii are derived from move_speed, and this
 	# function runs again whenever damage strips a subsystem. Without this
 	# the radii keep the values they were given at spawn, so a unit that has
@@ -619,6 +640,19 @@ func _recalculate_terrain_speed_multiplier():
 		var reduction = FactionCatalog.get_passive(terrain_faction, "terrain_penalty_reduction", 0.0)
 		if reduction > 0.0:
 			terrain_speed_multiplier = 1.0 - (1.0 - terrain_speed_multiplier) * (1.0 - reduction)
+
+
+# Exhaust plume for whichever boost part is lit - see unit.gd's matching
+# function for why this is a periodic burst rather than a continuous emitter.
+func _update_boost_vfx(delta: float, is_boosting: bool) -> void:
+	if not is_boosting:
+		_boost_vfx_timer = 0.0
+		return
+	_boost_vfx_timer -= delta
+	if _boost_vfx_timer > 0.0:
+		return
+	_boost_vfx_timer = BOOST_VFX_INTERVAL
+	VFXBurstScript.spawn(self, Vector3(0, 0.3, 0.8), Color(1.0, 0.65, 0.2), 5, 0.18, 40.0, 2.0, 4.0, Vector3.ZERO, 0.35, 0.7)
 
 func _create_selection_ring(base_size: Vector3):
 	var radius = max(base_size.x, base_size.z) * 0.65
@@ -995,6 +1029,17 @@ func _physics_process(delta):
 		else:
 			velocity.y = -1.0
 
+	# Only the MOVE order threads the boost multiplier through - ATTACK's
+	# approach/kite steering and HARVEST's node/refinery legs are all short,
+	# combat-adjacent hops the auto-engage rule (long remaining distance, no
+	# hostile in range) would refuse to light anyway, so ticking it once here
+	# rather than at every _steer_towards() call site is not a behavior
+	# difference, just fewer places that have to know about it.
+	var boost_mult := 1.0
+	if boost_controller != null:
+		boost_mult = boost_controller.tick(delta)
+	_update_boost_vfx(delta, boost_mult > 1.0)
+
 	match order:
 		OrderType.MOVE:
 			if is_fixed_wing:
@@ -1008,7 +1053,7 @@ func _physics_process(delta):
 			# metre to cover, and the unit grinds in a tight circle at the
 			# destination. That radius is now speed-scaled, so reading it here
 			# is the only way to stay in sync.
-			elif _steer_towards(move_target, delta, _arrive_distance()):
+			elif _steer_towards(move_target, delta, _arrive_distance(), boost_mult):
 				order = OrderType.IDLE
 		OrderType.ATTACK:
 			if not is_instance_valid(attack_target) or ("is_dead" in attack_target and attack_target.is_dead):
@@ -1157,9 +1202,9 @@ func _animate_locomotion(delta: float) -> void:
 					dir = 1.0
 				for axle in child.find_children(VisualBuilderScript.SPIN_PIVOT_WHEEL + "*", "Node3D", true, false):
 					axle.rotate_x(8.0 * ground_rate * dir * delta)
-			"air_cushion_skirt", "anti_grav_plate", "water_jet":
-				# Powered lift/thrust: lift fans, a stabiliser toroid and a jet
-				# impeller all idle with the engine and spool up under way.
+			"air_cushion_skirt", "anti_grav_plate":
+				# Powered lift/thrust: lift fans and a stabiliser toroid both
+				# idle with the engine and spool up under way.
 				for spin in child.find_children(VisualBuilderScript.SPIN_PIVOT_TURBINE + "*", "Node3D", true, false):
 					spin.rotate_z(14.0 * powered_rate * delta)
 			"fixed_wing_engine":
@@ -1212,7 +1257,7 @@ func _animate_locomotion(delta: float) -> void:
 				var spin = child.get_node_or_null("ScrewSpin")
 				if spin:
 					spin.rotate_z(6.0 * ground_rate * delta)
-			"propeller_prop", "pusher_prop", "naval_propeller", "ship_screw", "paddle_wheel", "buoyant_envelope":
+			"propeller_prop", "pusher_prop", "ship_screw", "paddle_wheel", "buoyant_envelope":
 				var prop = child.get_node_or_null("PropBlades")
 				if prop:
 					if child_type_id == "paddle_wheel":
@@ -1264,7 +1309,47 @@ func _refinery_deliver_distance(refinery) -> float:
 	return building_half + hull_extent * 0.5 + REFINERY_DOCK_PAD
 
 
-func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
+# --- Boost controller helper methods ---
+# Same contract as unit.gd's own copies (see that file's "Boost controller
+# helper methods" section) so boost_controller.gd's duck-typed has_method()
+# calls work identically against either runtime, despite the two having
+# entirely different order/state representations (Order objects there vs.
+# OrderType + move_target/attack_target here).
+
+func get_remaining_distance() -> float:
+	if order == OrderType.MOVE:
+		return Vector3(global_position.x - move_target.x, 0.0, global_position.z - move_target.z).length()
+	return 0.0
+
+func get_heading_throttle() -> float:
+	if order != OrderType.MOVE:
+		return 0.0
+	var pos_diff = move_target - global_position
+	pos_diff.y = 0.0
+	if pos_diff.length() < 0.05:
+		return 0.0
+	var forward_dir = -global_transform.basis.z.normalized()
+	var alignment := forward_dir.dot(pos_diff.normalized())
+	return clampf((alignment - ALIGN_FLOOR) / (1.0 - ALIGN_FLOOR), 0.0, 1.0)
+
+func has_hostile_in_range() -> bool:
+	if attack_range <= 0.0:
+		return false
+	for e in get_tree().get_nodes_in_group("units"):
+		if e == self:
+			continue
+		if "team" in e and e.team != team and not ("is_dead" in e and e.is_dead):
+			if e.global_position.distance_to(global_position) <= attack_range:
+				return true
+	return false
+
+func get_energy_fraction() -> float:
+	if max_energy <= 0.0:
+		return 0.0
+	return current_energy / max_energy
+
+
+func _steer_towards(dest: Vector3, delta: float, arrive_dist: float, boost_mult: float = 1.0) -> bool:
 	var pos_diff = dest - global_position
 	pos_diff.y = 0.0
 	if pos_diff.length() < arrive_dist:
@@ -1346,7 +1431,7 @@ func _steer_towards(dest: Vector3, delta: float, arrive_dist: float) -> bool:
 	if dist < slow_radius and slow_radius > 0.01:
 		throttle *= clampf(dist / slow_radius, APPROACH_THROTTLE_MIN, 1.0)
 
-	var speed := move_speed * terrain_speed_multiplier * throttle
+	var speed := move_speed * terrain_speed_multiplier * throttle * boost_mult
 	velocity.x = forward_dir.x * speed
 	velocity.z = forward_dir.z * speed
 	return false

@@ -171,13 +171,6 @@ const LAYOUTS := {
 		"geo_keys": {"turbine_compression": 1.0, "afterburner": false},
 		"normal": Vector3.RIGHT, "reach_keys": ReachKeys.XYZ,
 	},
-	"naval_propeller": {
-		"pattern": Pattern.STERN_ROW,
-		"count_key": "prop_count", "count_fallback": "count", "count_default": 2,
-		"count_min": 1, "count_max": 5,
-		"geo_keys": {"blade_count": 3.0, "blade_pitch": 1.0},
-		"normal": Vector3.BACK, "reach_keys": ReachKeys.XYZ,
-	},
 	"buoyant_envelope": {
 		# SIDE_PODS, not STERN_ROW. An airship's cruise engines hang off
 		# outriggers along the flanks, not in a row across the stern, and Chris
@@ -232,17 +225,6 @@ const LAYOUTS := {
 		"geo_keys": {"field_strength": 1.0, "stabilizer_ring": true},
 		"normal": Vector3.DOWN, "reach_keys": ReachKeys.XYZ,
 	},
-	"hydrofoil": {
-		"pattern": Pattern.CORNER_SPAN,
-		"geo_keys": {"foil_span": 1.0, "strut_height": 1.0, "foil_count": 2.0},
-		"normal_is_side": true, "reach_keys": ReachKeys.FORE_AFT,
-	},
-	"water_jet": {
-		"pattern": Pattern.STERN_ROW,
-		"count_key": "nozzle_count", "count_default": 2, "count_min": 1, "count_max": 4,
-		"geo_keys": {"intake_size": 1.0, "reverser": false},
-		"normal": Vector3.BACK, "reach_keys": ReachKeys.XYZ,
-	},
 	"screw_drive": {
 		"pattern": Pattern.CORNER_SPAN,
 		"geo_keys": {"drum_diameter": 1.0, "helix_depth": 1.0},
@@ -291,8 +273,6 @@ const GEOMETRY := {
 	# RING_*: ellipse radii and the fixed offset on the third axis.
 	"hover_engine":      {"pad_from_catalog": true, "y": "underside"},
 	"fixed_wing_engine": {"x_pad": 0.4, "y_pad": 0.4, "z_frac": 0.15},
-	# STERN_ROW: how wide the row spreads, how far aft, how high.
-	"naval_propeller":   {"x_frac": 0.3, "z_clearance": 0.6, "y_frac": -0.15},
 	# SIDE_PODS: how far outboard the pylon reaches, how far the row spreads
 	# fore/aft, and how far below the hull the belly pod hangs.
 	# Standoff doubled (Chris): 0.55 -> 1.10 outboard, and the belly pod drops
@@ -316,8 +296,6 @@ const GEOMETRY := {
 	# hull footprint rather than outboard of it like hover_engine's pads.
 	"air_cushion_skirt": {"pad_from_catalog": false, "y": "underside"},
 	"anti_grav_plate":   {"pad_from_catalog": true, "y": "underside"},
-	"hydrofoil":         {"drum_offset_frac": 0.9, "reach_fraction": 0.7},
-	"water_jet":         {"x_frac": 0.26, "z_clearance": 0.35, "y_frac": -0.12},
 }
 
 ## MOUNT KITS - the structural interface between a hull and its running gear.
@@ -357,12 +335,9 @@ const MOUNT_KITS := {
 	# and bearing blocks hanging below the belt, which is the object Chris kept
 	# seeing under the bottom run. One structure per assembly, not two.
 	"tracked_treads":    {"kit": Kit.NONE, "drop": 0.0, "stations": 0},
-	"hydrofoil":         {"kit": Kit.STRUT_LEG, "drop": 0.18, "stations": 1},
 	"helicopter_rotors": {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
 	"fixed_wing_engine": {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
-	"naval_propeller":   {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
 	"buoyant_envelope":  {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
-	"water_jet":         {"kit": Kit.PYLON, "drop": 0.0, "stations": 1},
 	"hover_engine":      {"kit": Kit.HARDPOINT_PAD, "drop": 0.16, "stations": 4},
 	"air_cushion_skirt": {"kit": Kit.HARDPOINT_PAD, "drop": 0.14, "stations": 4},
 	"anti_grav_plate":   {"kit": Kit.HARDPOINT_PAD, "drop": 0.12, "stations": 3},
@@ -417,8 +392,6 @@ const MAX_WIDTH_FACTOR := {
 	# measured 0.018 bulk after the size-up, LOWER than the 0.107 it had
 	# before it.
 	"hover_engine": 2.3, "air_cushion_skirt": 1.6, "anti_grav_plate": 2.4,
-	# Naval gear is submerged and narrow.
-	"hydrofoil": 1.7, "water_jet": 1.4, "naval_propeller": 1.4,
 	# Air: span is the point. Rotors and engine clusters overhang by design;
 	# the ornithopter was still absurd at 4.25x.
 	"helicopter_rotors": 2.4, "fixed_wing_engine": 1.8,

@@ -30,8 +30,16 @@ const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const BASE_THRUST := 100.0
 
 ## Converts a thrust/weight ratio into speed units. Retuned 5.0 -> 10.0 when
-## hull mass entered the denominator (FABLE_REVIEW.md 1.2); unchanged since.
-const TW_GAIN := 10.0
+## hull mass entered the denominator (FABLE_REVIEW.md 1.2).
+##
+## Retuned again, 10.0 -> 11.0 (2026-08-08, "make speed a real, affectable
+## factor"): a ~10% lift for every power-limited design, which pushes more of
+## the roster up against its own chassis ceiling - the number the retuned
+## base_top_speed band (module_catalog.gd) and the new propulsion parts
+## actually change. At 10.0 too many designs sat comfortably under their
+## ceiling with slack to spare, which made both the wider band and a part
+## that raises the ceiling read as invisible.
+const TW_GAIN := 11.0
 
 ## No design is slower than this, however overweight or underpowered - a unit
 ## that cannot visibly move reads as a bug rather than as a balance outcome.
@@ -108,6 +116,16 @@ const OVERLOAD_FLOOR := 0.2
 const UNDERLOAD_THRESHOLD := 0.75
 const UNDERLOAD_CEILING := 1.25
 const UNDERLOAD_EXPONENT := 0.7
+
+## Ceiling on the combined top_speed_mult from every propulsion part fitted
+## (turbocharger, overdrive_gearbox, hub_motor_array, ...). Without a cap,
+## stacking gearboxes is strictly the answer to every speed question a
+## player has - this is the same "an unbounded multiplier makes the whole
+## rest of the system optional" failure OVERLOAD_FLOOR/UNDERLOAD_CEILING
+## already guard against, applied to the newest multiplier in the chain.
+## 1.6 chosen so two Overdrive Gearboxes (1.18 each, ~1.39 combined) still
+## has headroom, but four or more genuinely hits the wall.
+const MAX_CHASSIS_SPEED_MULT := 1.6
 
 ## Per-locomotor tweak response, replacing the if/elif chain that used to sit
 ## inside _recalculate_move_speed().
@@ -198,14 +216,6 @@ const TWEAK_RESPONSE := {
 	"ornithopter_wing": [
 		{"keys": ["wingspan", "size"], "ref": 1.0, "thrust": 1.0, "capacity": 1.0},
 	],
-	# Screws push; the hull's displacement is what carries the load. Prop
-	# count adds thrust linearly (correct, via the sum) but should NOT add
-	# capacity linearly - bolting on a fifth screw does not make the hull
-	# float higher - so capacity is pulled back to sub-linear.
-	"naval_propeller": [
-		{"keys": ["prop_count", "count"], "ref": 2.0, "thrust": 0.0, "capacity": -0.5},
-		{"keys": ["blade_pitch"], "ref": 1.0, "thrust": 0.6, "capacity": 0.0},
-	],
 	# An airship's lift is buoyancy, not thrust: extra cruise engines make it
 	# faster and carry nothing extra. The -1.0 exactly cancels the per-node
 	# sum, so capacity is set by the envelope alone however many engine pods
@@ -246,20 +256,6 @@ const TWEAK_RESPONSE := {
 	# plate_count is a count; field_strength is not.
 	"anti_grav_plate": [
 		{"keys": ["field_strength"], "ref": 1.0, "thrust": 0.0, "capacity": 1.0},
-	],
-	# Foils trade load for speed: they only work once the hull is up out of
-	# the water, and a heavier boat never gets there. foil_count is a GEO key
-	# for this type, not a count key - a hydrofoil is always 2 nodes - so it
-	# keeps a real exponent.
-	"hydrofoil": [
-		{"keys": ["foil_count"], "ref": 2.0, "thrust": 0.5, "capacity": 1.0},
-		{"keys": ["foil_span"], "ref": 1.0, "thrust": -0.2, "capacity": 1.0},
-	],
-	# nozzle_count is a count; capacity pulled sub-linear for the same reason
-	# as naval_propeller (jets push, the hull floats).
-	"water_jet": [
-		{"keys": ["nozzle_count", "count"], "ref": 2.0, "thrust": 0.0, "capacity": -0.7},
-		{"keys": ["intake_size"], "ref": 1.0, "thrust": 0.6, "capacity": 0.2},
 	],
 	# Augers: a fatter drum floats and carries, a deeper helix bites harder.
 	"screw_drive": [
@@ -369,6 +365,22 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 
 	var factors := tweak_factors(loco_type, loco_settings)
 
+	# Propulsion parts (turbocharger, overdrive_gearbox, hub_motor_array, ...)
+	# raise the chassis ceiling and/or trade capacity for it, on top of the
+	# thrust_bonus/weight_capacity_bonus hooks below. Multiplicative and
+	# accumulated across every part fitted, then clamped once at the end -
+	# see MAX_CHASSIS_SPEED_MULT for why a stack of gearboxes doesn't just
+	# keep compounding.
+	var chassis_speed_mult := 1.0
+	var propulsion_capacity_mult := 1.0
+	# The strongest burst-boost part fitted, for the Design Lab to display and
+	# for BoostController to read - see boost_controller.gd. Deliberately not
+	# folded into chassis_top_speed/move_speed here: this is the design-time
+	# analysis, and a burst that inflated the quoted top speed would make the
+	# Lab's number a lie. "Strongest" by speed_mult, since a design fitting
+	# more than one boost part in practice only ever gets to use one at a time.
+	var boost_summary := {}
+
 	if is_instance_valid(hull_node):
 		for child in hull_node.get_children():
 			if not child.has_meta("module_data"):
@@ -394,9 +406,10 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 				if slowest_top_speed <= 0.0 or chassis_top < slowest_top_speed:
 					slowest_top_speed = chassis_top
 			# Mobility ADD-ONS (wing/thruster/propeller_prop/pusher_prop/
-			# paddle_wheel/ship_screw) are attachable parts, not a primary
-			# locomotion choice, so they contribute from any category: wings
-			# raise the load budget, the rest add real thrust.
+			# paddle_wheel/ship_screw/propulsion parts) are attachable parts,
+			# not a primary locomotion choice, so they contribute from any
+			# category: wings raise the load budget, the rest add real
+			# thrust or reshape the chassis ceiling.
 			var catalog_entry := ModuleCatalog.get_module_data(data.type_id)
 			var wc_bonus: float = catalog_entry.get("weight_capacity_bonus", 0.0)
 			var thrust_bonus: float = catalog_entry.get("thrust_bonus", 0.0)
@@ -404,6 +417,25 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 				capacity += wc_bonus * footprint
 			if thrust_bonus > 0.0:
 				thrust += thrust_bonus * footprint
+			# Propulsion parts scale their bonus by their OWN tweak-driven
+			# mass rather than a separate size stat - a bigger turbo makes
+			# more thrust and weighs more, with no new scaling table. Ratio
+			# against base_weight rather than absolute weight so a part
+			# authored heavier for flavor doesn't silently punch above its
+			# catalog thrust_bonus/top_speed_mult.
+			var part_scale := 1.0
+			if data.base_weight > 0.0:
+				part_scale = data.get_weight() / data.base_weight
+			var top_speed_mult: float = catalog_entry.get("top_speed_mult", 1.0)
+			if top_speed_mult != 1.0:
+				chassis_speed_mult *= 1.0 + (top_speed_mult - 1.0) * part_scale
+			var capacity_mult: float = catalog_entry.get("capacity_mult", 1.0)
+			if capacity_mult != 1.0:
+				propulsion_capacity_mult *= 1.0 + (capacity_mult - 1.0) * part_scale
+			var boost: Dictionary = catalog_entry.get("boost", {})
+			if not boost.is_empty():
+				if boost_summary.is_empty() or float(boost.get("speed_mult", 1.0)) > float(boost_summary.get("speed_mult", 1.0)):
+					boost_summary = boost
 
 	# A design with no locomotion does not move, and has no capacity to be
 	# over - reporting a load ratio here would light the overweight warning
@@ -418,6 +450,7 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 			"speed_gained_from_underload": 0.0,
 			"power_top_speed": 0.0, "top_speed": 0.0, "move_speed": 0.0,
 			"speed_lost_to_overload": 0.0, "capacity_limited": false,
+			"chassis_speed_mult": 1.0, "boost": {},
 		}
 
 	# What the engines alone would deliver against this much mass.
@@ -425,12 +458,24 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	if weight > 0.0:
 		power_top_speed = maxf(SPEED_FLOOR, (thrust / weight) * TW_GAIN)
 
+	# Propulsion parts' capacity trade (overdrive_gearbox's tall gearing, for
+	# instance) lands on the raw chassis capacity, same place the leg-set and
+	# per-locomotor tweak factors already land - so it participates in
+	# load_ratio/overload/underload exactly like any other capacity change.
+	capacity *= propulsion_capacity_mult
+
 	# ...capped by what the chassis can physically do with it. This is the
 	# per-locomotor "base top speed" (Chris's ask): a hull on legs does not
 	# become a racing car because you bolted enough thrust to it, and the
 	# universal 18.0 ceiling this replaces gave every locomotor in the roster
 	# the same answer to that question.
-	var chassis_top_speed: float = slowest_top_speed if slowest_top_speed > 0.0 else ModuleCatalog.BASE_TOP_SPEED_DEFAULT
+	#
+	# chassis_speed_mult is what a propulsion part (Overdrive Gearbox) buys:
+	# the one way to raise this ceiling without changing locomotion type.
+	# Clamped so stacking parts cannot make the cap meaningless - see
+	# MAX_CHASSIS_SPEED_MULT.
+	chassis_speed_mult = minf(chassis_speed_mult, MAX_CHASSIS_SPEED_MULT)
+	var chassis_top_speed: float = (slowest_top_speed if slowest_top_speed > 0.0 else ModuleCatalog.BASE_TOP_SPEED_DEFAULT) * chassis_speed_mult
 	var top_speed: float = minf(power_top_speed, chassis_top_speed)
 
 	var load_ratio := 0.0
@@ -498,4 +543,13 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 		# design back - the Design Lab says so, because the fix is different
 		# (change locomotion type, not add thrust or shed weight).
 		"capacity_limited": chassis_top_speed < power_top_speed,
+		# What propulsion parts did to the chassis ceiling, already folded
+		# into chassis_top_speed above - reported separately so the Design
+		# Lab can say an Overdrive Gearbox is why the number moved. 1.0 when
+		# no propulsion part is fitted.
+		"chassis_speed_mult": chassis_speed_mult,
+		# The strongest burst-boost part fitted (nitrous_injector,
+		# booster_rack, ...), or {} when none. NOT applied to move_speed/
+		# top_speed above - see the header comment on boost_summary.
+		"boost": boost_summary,
 	}

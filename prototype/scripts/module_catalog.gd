@@ -296,6 +296,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"rotary_cannon": {
 			"name": "Rotary Gatling",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			"hp": 80.0,
 			"weight": 110.0,
 			"base_traverse": 1.025,
@@ -313,6 +314,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"gauss_railgun": {
 			"name": "Gauss Railgun",
 			"category": "weapon",
+			"required_building": "physics_lab",
 			"hp": 120.0,
 			"weight": 180.0,
 			"base_traverse": 0.261,
@@ -331,6 +333,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"artillery": {
 			"name": "Artillery",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			# Indirect fire - needs open sky, so it is levelled on a vertical
 			# face but never enclosed in a sponson housing. See
 			# ModuleCatalog.is_sponson_capable().
@@ -396,6 +399,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"missile_pod": {
 			"name": "Swarm Missile Pod",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			# Indirect fire - needs open sky, so it is levelled on a vertical
 			# face but never enclosed in a sponson housing. See
 			# ModuleCatalog.is_sponson_capable().
@@ -420,6 +424,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"drone_carrier": {
 			"name": "Drone Carrier Bay",
 			"category": "module",
+			"required_building": "exotics_lab",
 			"hp": 250.0,
 			"weight": 350.0,
 			"metal": 180,
@@ -433,6 +438,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"cluster_dispenser": {
 			"name": "Cluster Dispenser",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			# Indirect fire - needs open sky, so it is levelled on a vertical
 			# face but never enclosed in a sponson housing. See
 			# ModuleCatalog.is_sponson_capable().
@@ -832,6 +838,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"spaced_composite": {
 			"name": "Spaced Composite",
 			"category": "armor",
+			"required_building": "tech_lab",
 			"hp": 620.0,
 			"weight": 155.0,
 			"metal": 68,
@@ -843,6 +850,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"ablative_foam": {
 			"name": "Ablative Foam",
 			"category": "armor",
+			"required_building": "tech_lab",
 			"hp": 340.0,
 			"weight": 70.0,
 			"metal": 26,
@@ -855,6 +863,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"arc_projector": {
 			"name": "Arc Projector",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			"hp": 70.0,
 			"weight": 85.0,
 			"base_traverse": 0.886,
@@ -871,6 +880,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"microwave_emitter": {
 			"name": "Microwave Emitter",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			"hp": 65.0,
 			"weight": 105.0,
 			"base_traverse": 0.657,
@@ -886,6 +896,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"particle_lance": {
 			"name": "Particle Lance",
 			"category": "weapon",
+			"required_building": "exotics_lab",
 			"hp": 90.0,
 			"weight": 220.0,
 			"base_traverse": 0.262,
@@ -917,6 +928,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"plasma_lobber": {
 			"name": "Plasma Lobber",
 			"category": "weapon",
+			"required_building": "exotics_lab",
 			# Indirect fire - needs open sky, so it is levelled on a vertical
 			# face but never enclosed in a sponson housing. See
 			# ModuleCatalog.is_sponson_capable().
@@ -974,6 +986,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"flak_cannon": {
 			"name": "Flak Cannon PD",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			"hp": 90.0,
 			"weight": 110.0,
 			"base_traverse": 1.196,
@@ -1047,6 +1060,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"coil_gun": {
 			"name": "Coil Gun",
 			"category": "weapon",
+			"required_building": "physics_lab",
 			"hp": 90.0,
 			"weight": 120.0,
 			"base_traverse": 0.570,
@@ -1082,6 +1096,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"anti_materiel_rifle": {
 			"name": "Anti-Materiel Rifle",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			"hp": 60.0,
 			"weight": 95.0,
 			"base_traverse": 0.509,
@@ -1099,6 +1114,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"napalm_mortar": {
 			"name": "Napalm Mortar",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			# Indirect fire - needs open sky, so it is levelled on a vertical
 			# face but never enclosed in a sponson housing. See
 			# ModuleCatalog.is_sponson_capable().
@@ -1121,6 +1137,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"mine_layer": {
 			"name": "Mine Layer",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			"hp": 90.0,
 			"weight": 85.0,
 			"base_traverse": 0.787,
@@ -1142,6 +1159,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"ballista": {
 			"name": "Ballista",
 			"category": "weapon",
+			"required_building": "tech_lab",
 			# Indirect fire - needs open sky, so it is levelled on a vertical
 			# face but never enclosed in a sponson housing. See
 			# ModuleCatalog.is_sponson_capable().
@@ -1231,6 +1249,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"repair_array": {
 			"name": "Repair Welder Array",
 			"category": "module",
+			"required_building": "tech_lab",
 			"hp": 100.0,
 			"weight": 70.0,
 			"metal": 40,
@@ -1262,6 +1281,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"laser_designator": {
 			"name": "Laser Target Painter",
 			"category": "module",
+			"required_building": "tech_lab",
 			"hp": 80.0,
 			"weight": 40.0,
 			"metal": 25,
@@ -1273,6 +1293,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"energy_barrier_projector": {
 			"name": "Energy Barrier Projector",
 			"category": "armor",
+			"required_building": "exotics_lab",
 			"hp": 250.0,
 			"weight": 110.0,
 			"metal": 60,
@@ -1284,6 +1305,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"fire_control_radar": {
 			"name": "Fire Control Radar",
 			"category": "module",
+			"required_building": "tech_lab",
 			"hp": 90.0,
 			"weight": 65.0,
 			"metal": 45,
@@ -1338,6 +1360,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"fusion_generator": {
 			"name": "Fusion Generator",
 			"category": "generator",
+			"required_building": "tech_lab",
 			"hp": 140.0,
 			"weight": 160.0,
 			"metal": 90,
@@ -1371,6 +1394,105 @@ static func _build_catalog_literal() -> Dictionary:
 			"color": Color.GOLD
 		},
 
+		# --- PROPULSION MODULES ---
+		# Speed as a real, affectable stat (2026-08-08): weight, armor and every
+		# module up to now only ever COST speed - there was no "go faster"
+		# decision anywhere in the Design Lab. These are ordinary category
+		# "module" parts, not a new locomotion category: they carry no
+		# base_top_speed/base_weight_capacity of their own and mount on any
+		# hull, contributing through the same weight_capacity_bonus/
+		# thrust_bonus hooks every mobility add-on already used (see
+		# Drivetrain.analyze()), plus two new hooks - top_speed_mult and
+		# capacity_mult - that raise or trade against the chassis ceiling
+		# itself. A hull carrying only one of these and no weapon/support
+		# module is still correctly an illegal build (validate_build_legality
+		# never treats "module" category as satisfying that check on its own).
+		#
+		# role "Propulsion" (see MODULE_ROLES/MODULE_ROLE_ORDER below) routes
+		# them to the Design Lab's Drives toolbox alongside the locomotion
+		# types they modify, not into Support with the generators.
+		"turbocharger": {
+			"name": "Turbocharger",
+			"category": "module",
+			"description": "Forced induction for the drivetrain. Real thrust, real weight - does nothing once the chassis is already at its own speed ceiling.",
+			"hp": 45.0,
+			"weight": 40.0,
+			"metal": 30,
+			"crystal": 5,
+			"dps": 0.0,
+			# Pure thrust, no ceiling change - the honest turbo. A design
+			# already capacity_limited (see Drivetrain.analyze()) gains
+			# nothing from this, and the Lab says so.
+			"thrust_bonus": 90.0,
+			"size": Vector3(0.6, 0.5, 0.6),
+			"color": Color(0.5, 0.5, 0.55)
+		},
+		"overdrive_gearbox": {
+			"name": "Overdrive Gearbox",
+			"category": "module",
+			"description": "Taller final drive gearing. Raises the chassis's own speed ceiling; trades away some of its load capacity to do it.",
+			"hp": 50.0,
+			"weight": 45.0,
+			"metal": 35,
+			"crystal": 10,
+			"dps": 0.0,
+			# The pure trade: +18% chassis ceiling for -15% capacity. Unlike
+			# turbocharger, this raises the ceiling itself, so it helps a
+			# design that is ALREADY capacity_limited - which is exactly the
+			# case a bigger engine cannot fix.
+			"top_speed_mult": 1.18,
+			"capacity_mult": 0.85,
+			"size": Vector3(0.55, 0.55, 0.7),
+			"color": Color(0.45, 0.42, 0.4)
+		},
+		"hub_motor_array": {
+			"name": "Electric Hub Motors",
+			"category": "module",
+			"description": "Direct-drive motors at each wheel or drum. Real thrust and a real ceiling gain, paid for out of the power budget rather than the load budget.",
+			"hp": 40.0,
+			"weight": 35.0,
+			"metal": 25,
+			"crystal": 35,
+			"dps": 0.0,
+			"thrust_bonus": 70.0,
+			"top_speed_mult": 1.08,
+			"size": Vector3(0.5, 0.4, 0.5),
+			"color": Color(0.3, 0.55, 0.75)
+		},
+		"nitrous_injector": {
+			"name": "Coolant Injection",
+			"category": "module",
+			"description": "A chemical speed burst: markedly faster for a short window, then a real cooldown before it can fire again. Drains the energy buffer while lit.",
+			"hp": 30.0,
+			"weight": 25.0,
+			"metal": 15,
+			"crystal": 15,
+			"dps": 0.0,
+			# See BoostController - the burst is applied to live movement, not
+			# to this design-time analysis, so it never inflates the quoted
+			# top speed. duration/cooldown in seconds; energy_per_sec drains
+			# the buffer only while the boost is actually lit.
+			"boost": {"speed_mult": 1.45, "duration": 5.0, "cooldown": 14.0, "energy_per_sec": 6.0, "charges": 0},
+			"size": Vector3(0.5, 0.5, 0.9),
+			"color": Color(0.65, 0.85, 0.95)
+		},
+		"booster_rack": {
+			"name": "Solid-Fuel Booster Rack",
+			"category": "module",
+			"description": "Strap-on solid rocket motors. Absurd and short-lived: three of the hardest kicks in the game, and once they're spent, they're spent.",
+			"hp": 35.0,
+			"weight": 55.0,
+			"metal": 40,
+			"crystal": 5,
+			"dps": 0.0,
+			# The wild card. No cooldown at all - only three charges, ever,
+			# for this design's whole battle. Heavy enough that fitting it is
+			# a real decision, not a free extra gear.
+			"boost": {"speed_mult": 2.2, "duration": 2.5, "cooldown": 0.0, "energy_per_sec": 0.0, "charges": 3},
+			"size": Vector3(0.9, 0.5, 1.1),
+			"color": Color(0.75, 0.25, 0.2)
+		},
+
 		# --- LOCOMOTION ARCHETYPES ---
 		"wheels": {
 			"name": "Wheels",
@@ -1393,7 +1515,12 @@ static func _build_catalog_literal() -> Dictionary:
 			# Drivetrain.analyze() and get_base_top_speed() below.
 			# Fastest thing that touches the ground - the archetype's whole
 			# point, and what its low capacity pays for.
-			"base_top_speed": 12.0,
+			#
+			# 15.0, not the original 12.0 (2026-08-08 speed pass): the mainline
+			# ground band was too flat top-to-bottom to read as different
+			# vehicles, so the fast end was pushed further from it rather than
+			# the slow end pulled up.
+			"base_top_speed": 15.0,
 			"size": Vector3(0.6, 0.6, 0.6),
 			"color": Color.BLACK,
 			"traits": ["ground_contact", "high_speed"]
@@ -1416,7 +1543,10 @@ static func _build_catalog_literal() -> Dictionary:
 			# Drivetrain.analyze() and get_base_top_speed() below.
 			# Tanks are not fast. Middling ceiling to go with the roster's
 			# highest ground capacity.
-			"base_top_speed": 8.0,
+			#
+			# 9.0, not 8.0 (2026-08-08 speed pass): part of a general lift to
+			# the whole band, kept proportionally behind wheels.
+			"base_top_speed": 9.0,
 			"size": Vector3(0.8, 0.6, 2.5),
 			"color": Color.DARK_OLIVE_GREEN,
 			"traits": ["ground_contact"]
@@ -1424,6 +1554,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"helicopter_rotors": {
 			"name": "Helicopter Rotors",
 			"category": "locomotion",
+			"required_building": "tech_lab",
 			"hp": 30.0,
 			"weight": 30.0,
 			"metal": 30,
@@ -1440,7 +1571,10 @@ static func _build_catalog_literal() -> Dictionary:
 			# Drivetrain.analyze() and get_base_top_speed() below.
 			# Quick, but rotary lift trades forward speed for the ability to
 			# hover - a fixed wing outruns it comfortably.
-			"base_top_speed": 11.0,
+			#
+			# 13.0, not 11.0 (2026-08-08 speed pass): the air band was widened
+			# along with the ground band, keeping the same ordering.
+			"base_top_speed": 13.0,
 			"size": Vector3(4.0, 0.2, 4.0),
 			"color": Color.SILVER,
 			"traits": ["airborne", "rotary_wing", "hovering"]
@@ -1448,6 +1582,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"hover_engine": {
 			"name": "Hover Pad",
 			"category": "locomotion",
+			"required_building": "tech_lab",
 			"hp": 50.0,
 			"weight": 20.0,
 			"metal": 20,
@@ -1463,7 +1598,10 @@ static func _build_catalog_literal() -> Dictionary:
 			# Drivetrain.analyze() and get_base_top_speed() below.
 			# Nothing is dragging on the ground, so this is the fastest
 			# ground-following option in the roster.
-			"base_top_speed": 13.0,
+			#
+			# 16.0, not 13.0 (2026-08-08 speed pass): part of the general lift,
+			# kept ahead of wheels since nothing here touches the ground.
+			"base_top_speed": 16.0,
 			"size": Vector3(1.2, 0.3, 1.2),
 			"color": Color.CYAN,
 			"traits": ["hovering"]
@@ -1486,7 +1624,10 @@ static func _build_catalog_literal() -> Dictionary:
 			# Drivetrain.analyze() and get_base_top_speed() below.
 			# Slowest of the mainline ground types: a walking gait cannot be
 			# geared up the way a wheel can, whatever you power it with.
-			"base_top_speed": 6.5,
+			#
+			# 7.0, not 6.5 (2026-08-08 speed pass): the smallest bump in the
+			# roster, on purpose - legs stay the archetype's floor.
+			"base_top_speed": 7.0,
 			"size": Vector3(0.5, 1.5, 0.5),
 			"color": Color.DARK_RED,
 			"traits": ["ground_contact"]
@@ -1494,6 +1635,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"fixed_wing_engine": {
 			"name": "AGP Strike Drive",
 			"category": "locomotion",
+			"required_building": "tech_lab",
 			"description": "Atmospheric Gravity Planing (AGP) Strike Drive - High-speed gravity planing drive for fast offensive strike vectoring.",
 			"hp": 70.0,
 			"weight": 60.0,
@@ -1501,7 +1643,10 @@ static func _build_catalog_literal() -> Dictionary:
 			"crystal": 20,
 			"dps": 0.0,
 			"base_weight_capacity": 240.0,
-			"base_top_speed": 18.0,
+			# 22.0, not the original 18.0 (2026-08-08 speed pass): still the
+			# roster's outright top speed, widened along with everything else
+			# to keep the gap over wheels/hover meaningful.
+			"base_top_speed": 22.0,
 			"size": Vector3(1.0, 0.5, 1.5),
 			"color": Color.SLATE_BLUE,
 			"traits": ["airborne", "fixed_wing", "high_speed"]
@@ -1509,35 +1654,24 @@ static func _build_catalog_literal() -> Dictionary:
 		"ornithopter_wing": {
 			"name": "Ornithopter Wing",
 			"category": "locomotion",
+			"required_building": "tech_lab",
 			"hp": 65.0,
 			"weight": 55.0,
 			"metal": 45,
 			"crystal": 25,
 			"dps": 0.0,
 			"base_weight_capacity": 200.0,
-			"base_top_speed": 9.0,
+			# 10.5, not 9.0 (2026-08-08 speed pass): part of the general lift.
+			"base_top_speed": 10.5,
 			"thrust_coefficient": 120.0,
 			"size": Vector3(2.0, 0.2, 1.0),
 			"color": Color(0.42, 0.32, 0.22),
 			"traits": ["airborne", "flapping_wing"]
 		},
-		"naval_propeller": {
-			"name": "Naval Propeller",
-			"category": "locomotion",
-			"hp": 90.0,
-			"weight": 70.0,
-			"metal": 35,
-			"crystal": 0,
-			"dps": 0.0,
-			"base_weight_capacity": 500.0,
-			"base_top_speed": 8.0,
-			"size": Vector3(0.5, 0.5, 0.8),
-			"color": Color.TEAL,
-			"traits": ["buoyant", "naval"]
-		},
 		"buoyant_envelope": {
 			"name": "AGP Loiter Drive",
 			"category": "locomotion",
+			"required_building": "tech_lab",
 			"description": "Atmospheric Gravity Planing (AGP) Loiter Drive - Sustained low-draw gravity planing drive optimized for long-endurance loitering and heavy payload transport.",
 			"hp": 40.0,
 			"weight": 35.0,
@@ -1545,7 +1679,9 @@ static func _build_catalog_literal() -> Dictionary:
 			"crystal": 15,
 			"dps": 0.0,
 			"base_weight_capacity": 700.0,
-			"base_top_speed": 4.0,
+			# 4.5, not 4.0 (2026-08-08 speed pass): the smallest bump in the
+			# roster, on purpose - this stays the floor.
+			"base_top_speed": 4.5,
 			"thrust_coefficient": 55.0,
 			"size": Vector3(1.0, 0.5, 1.0),
 			"color": Color(0.75, 0.72, 0.6),
@@ -1557,6 +1693,13 @@ static func _build_catalog_literal() -> Dictionary:
 		# These seven bring ground to 5, hover to 3, naval to 3 and amphibious
 		# to 2, and air stays at 4. Every one exists to offer a decision the
 		# roster could not previously express; none is a stat reshuffle.
+		#
+		# The naval trio (naval_propeller, hydrofoil, water_jet) was later
+		# removed outright - naval units and naval building never got real
+		# design attention, so the theatre they served does not exist. Water
+		# navmeshes, hull draught and the amphibious drives below stay: those
+		# are ground/hover locomotion whose water-crossing is a terrain
+		# answer, not a naval one.
 		"half_track": {
 			"name": "Half-Track",
 			"category": "locomotion",
@@ -1580,7 +1723,10 @@ static func _build_catalog_literal() -> Dictionary:
 			# Drivetrain.analyze() and get_base_top_speed() below.
 			# Wheels up front for steering, belt at the back for load - splits
 			# the difference between its two parents, as the archetype should.
-			"base_top_speed": 8.5,
+			#
+			# 10.0, not 8.5 (2026-08-08 speed pass): part of the general lift,
+			# kept between tracked_treads and wheels.
+			"base_top_speed": 10.0,
 			"size": Vector3(0.7, 0.6, 2.2),
 			"color": Color(0.30, 0.31, 0.26),
 			"traits": ["ground_contact"]
@@ -1588,6 +1734,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"rocker_bogie": {
 			"name": "Rocker-Bogie Suspension",
 			"category": "locomotion",
+			"required_building": "tech_lab",
 			# The terrain specialist: slow everywhere, but the only ground
 			# locomotor that is FASTER on rock than on gravel. A rocker-bogie
 			# keeps every wheel loaded over broken ground by letting the arms
@@ -1614,7 +1761,10 @@ static func _build_catalog_literal() -> Dictionary:
 			# by a failing test the way screw_drive was - nothing asserts a
 			# rocker_bogie win - but it is the identical defect, and leaving it
 			# in place would just mean discovering it later.
-			"base_top_speed": 6.0,
+			#
+			# 6.5, not 6.0 (2026-08-08 speed pass): the smallest bump in the
+			# roster, on purpose - this stays near the floor.
+			"base_top_speed": 6.5,
 			"thrust_coefficient": 105.0,
 			"size": Vector3(0.65, 0.9, 2.6),
 			"color": Color(0.42, 0.38, 0.30),
@@ -1623,6 +1773,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"air_cushion_skirt": {
 			"name": "Air-Cushion Skirt",
 			"category": "locomotion",
+			"required_building": "tech_lab",
 			# A real hovercraft rather than a sci-fi pad: a big flexible skirt
 			# and lift fans. Crosses water AND marsh at full speed - it carries
 			# "amphibious" so it routes onto the combined navmesh - and is
@@ -1642,7 +1793,9 @@ static func _build_catalog_literal() -> Dictionary:
 			# Drivetrain.analyze() and get_base_top_speed() below.
 			# A hovercraft rides on air over land AND water, with nothing to
 			# grip and nothing to slow it - near the top of the roster.
-			"base_top_speed": 12.5,
+			#
+			# 15.0, not 12.5 (2026-08-08 speed pass): part of the general lift.
+			"base_top_speed": 15.0,
 			"thrust_coefficient": 135.0,
 			"size": Vector3(1.6, 0.45, 1.6),
 			"color": Color(0.55, 0.52, 0.42),
@@ -1651,6 +1804,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"anti_grav_plate": {
 			"name": "Anti-Grav Plate",
 			"category": "locomotion",
+			"required_building": "exotics_lab",
 			# The crystal sink. Flat 1.0 on every surface is the entire product
 			# - it is the only locomotor that does not care what it is over -
 			# and it pays for that with the roster's worst capacity-per-cost and
@@ -1670,71 +1824,19 @@ static func _build_catalog_literal() -> Dictionary:
 			# Drivetrain.analyze() and get_base_top_speed() below.
 			# Frictionless like hover_engine, but the plates are lift rather
 			# than propulsion, so the ceiling is lower.
-			"base_top_speed": 10.5,
+			#
+			# 12.0, not 10.5 (2026-08-08 speed pass): part of the general lift,
+			# kept behind hover_engine.
+			"base_top_speed": 12.0,
 			"thrust_coefficient": 125.0,
 			"size": Vector3(0.9, 0.25, 0.9),
 			"color": Color(0.35, 0.65, 0.85),
 			"traits": ["hovering"]
 		},
-		"hydrofoil": {
-			"name": "Hydrofoil",
-			"category": "locomotion",
-			# Gives the naval group the speed/fragility axis it entirely
-			# lacked - naval_propeller was the only option and it was the
-			# highest-capacity locomotor in the game. A hydrofoil lifts the
-			# hull clear of the water at speed, which is fast and efficient and
-			# very bad at carrying things. Low HP: the struts are the whole
-			# vulnerability.
-			"hp": 70.0,
-			"weight": 60.0,
-			"metal": 45,
-			"crystal": 10,
-			"dps": 0.0,
-			"base_weight_capacity": 260.0,
-			# Base top speed (Chris: "each locomotor should also have a base
-			# top speed"): the hard ceiling on how fast this chassis can be
-			# driven, however much thrust is bolted to it. Replaces the single
-			# universal 18.0 clamp every type used to share - see
-			# Drivetrain.analyze() and get_base_top_speed() below.
-			# Once the foils lift the hull clear of the water the bow-wave
-			# limit stops applying - the fastest naval type by a wide margin,
-			# which is the entire reason to accept its low capacity.
-			"base_top_speed": 14.0,
-			"thrust_coefficient": 185.0,
-			"size": Vector3(0.6, 1.0, 2.4),
-			"color": Color(0.28, 0.40, 0.45),
-			"traits": ["buoyant", "naval"]
-		},
-		"water_jet": {
-			"name": "Water Jet",
-			"category": "locomotion",
-			# The hydrofoil's opposite number: an impeller in a duct instead of
-			# an exposed screw, so it works in shallow water and near debris
-			# where a propeller would be destroyed. High thrust, and it loses
-			# efficiency as it loads up - the pump does not care how heavy you
-			# are until suddenly it does.
-			"hp": 110.0,
-			"weight": 80.0,
-			"metal": 40,
-			"crystal": 10,
-			"dps": 0.0,
-			"base_weight_capacity": 450.0,
-			# Base top speed (Chris: "each locomotor should also have a base
-			# top speed"): the hard ceiling on how fast this chassis can be
-			# driven, however much thrust is bolted to it. Replaces the single
-			# universal 18.0 clamp every type used to share - see
-			# Drivetrain.analyze() and get_base_top_speed() below.
-			# Faster than a screw and far more maneuverable, but still a
-			# displacement hull pushing water aside.
-			"base_top_speed": 10.0,
-			"thrust_coefficient": 160.0,
-			"size": Vector3(0.7, 0.7, 1.1),
-			"color": Color(0.30, 0.45, 0.48),
-			"traits": ["buoyant", "naval"]
-		},
 		"pontoon_wheels": {
 			"name": "Pontoon Wheels",
 			"category": "locomotion",
+			"required_building": "tech_lab",
 			# The light amphibious option, against screw_drive's heavy one.
 			# Sealed buoyant drums with paddle vanes: mediocre on land, mediocre
 			# on water, blocked by neither, and cheap. The scout-tier answer to
@@ -1752,7 +1854,10 @@ static func _build_catalog_literal() -> Dictionary:
 			# Drivetrain.analyze() and get_base_top_speed() below.
 			# Amphibious wheels drag their floats everywhere, on land as well
 			# as in water - slower than the plain wheels they are based on.
-			"base_top_speed": 7.5,
+			#
+			# 8.5, not 7.5 (2026-08-08 speed pass): part of the general lift,
+			# kept behind plain wheels.
+			"base_top_speed": 8.5,
 			"thrust_coefficient": 120.0,
 			"size": Vector3(0.75, 0.7, 0.75),
 			"color": Color(0.36, 0.34, 0.30),
@@ -1761,6 +1866,7 @@ static func _build_catalog_literal() -> Dictionary:
 		"screw_drive": {
 			"name": "Amphibious Screw Drive",
 			"category": "locomotion",
+			"required_building": "tech_lab",
 			# Real historical "screw-propelled vehicle" (SPV) locomotion -
 			# Soviet ZIL screw-drive trucks, the Fordson "Snow Devil" - twin
 			# helical auger drums replace wheels/tracks entirely, letting
@@ -1797,7 +1903,12 @@ static func _build_catalog_literal() -> Dictionary:
 			# own and broke test_terrain_types_differentiate_locomotion. Still
 			# the second-slowest ground type on good ground, which is the
 			# archetype; just not so slow that its bonus cannot show.
-			"base_top_speed": 6.5,
+			#
+			# 8.0, not 6.5 (2026-08-08 speed pass): raised more than its
+			# neighbours specifically to preserve this same wheels/screw ratio
+			# on ice under the retuned band - both moved, so the margin the
+			# test above depends on had to move with them.
+			"base_top_speed": 8.0,
 			"thrust_coefficient": 110.0,
 			"size": Vector3(0.8, 0.8, 3.0),
 			"color": Color(0.32, 0.3, 0.24),
@@ -1908,7 +2019,6 @@ const MODULE_FLAVOR = {
 	"legs": "Walks over what others drive around. Complexity per kilometre is considerable.",
 	"fixed_wing_engine": "Requires forward speed to stay airborne. Hovering is not among the options.",
 	"ornithopter_wing": "Flaps. Reviewed twice by engineering. Approved twice. Nobody is entirely sure why.",
-	"naval_propeller": "Water only. On land it is ballast with a maintenance schedule.",
 	"buoyant_envelope": "Lighter than air, slower than everything, and a generously sized target.",
 	"screw_drive": "Amphibious augers. Crosses land and water equally badly, which counts as versatility.",
 }
@@ -2327,6 +2437,16 @@ const MODULE_ROLES = {
 	"repair_array": "Support",
 	"resource_harvester": "Support",
 	"sensor_suite": "Support",
+
+	# Speed as a real, affectable stat (2026-08-08): category "module" like
+	# everything above, but browsed with the locomotion types they modify
+	# rather than with the generators - see the TIERS/DRIVE_ROLES comment in
+	# parts_menu.gd for why that split doesn't need a new top-level toolbox.
+	"turbocharger": "Propulsion",
+	"overdrive_gearbox": "Propulsion",
+	"hub_motor_array": "Propulsion",
+	"nitrous_injector": "Propulsion",
+	"booster_rack": "Propulsion",
 }
 
 # Display order for the module tab's drawers. Roughly "things that shoot" ->
@@ -2334,7 +2454,7 @@ const MODULE_ROLES = {
 # order a build actually gets assembled in.
 const MODULE_ROLE_ORDER = [
 	"Direct-Fire Guns", "Energy & Electromagnetic", "Indirect Fire", "Missiles",
-	"Point Defense", "Deployables", "Armor", "Power", "Support",
+	"Point Defense", "Deployables", "Armor", "Propulsion", "Power", "Support",
 ]
 
 # Fallback for anything MODULE_ROLES doesn't name (a mod, or a part added here
@@ -2353,6 +2473,37 @@ static func get_module_role(type_id: String, category: String = "") -> String:
 	if category != "" and ROLE_BY_CATEGORY.has(category):
 		return ROLE_BY_CATEGORY[category]
 	return "Support"
+
+# --- Tech Tree Building Prerequisites ---
+const HULL_REQUIREMENTS = {
+	"heavy_hull": "tech_lab",
+	"interceptor_hull": "tech_lab",
+	"sponson_hull": "tech_lab",
+	"fuselage_hull": "tech_lab",
+	"small_boat_hull": "tech_lab",
+	"amphibious_hull": "tech_lab",
+	"dreadnought_hull": "physics_lab",
+	"heavy_cruiser_hull": "physics_lab",
+	"airship_hull": "exotics_lab",
+}
+
+const ARMOR_MATERIAL_REQUIREMENTS = {
+	"hardened_steel": "",
+	"reactive_armor": "tech_lab",
+	"ablative_ceramic": "tech_lab",
+	"energy_shielding": "exotics_lab",
+}
+
+static func get_required_building(type_id: String) -> String:
+	if HULL_REQUIREMENTS.has(type_id):
+		return HULL_REQUIREMENTS[type_id]
+	if ARMOR_MATERIAL_REQUIREMENTS.has(type_id):
+		return ARMOR_MATERIAL_REQUIREMENTS[type_id]
+	if AMMO_TYPES.has(type_id):
+		return AMMO_TYPES[type_id].get("required_building", "")
+	if module_exists(type_id):
+		return get_module_data(type_id).get("required_building", "")
+	return ""
 
 # Build-legality gate (ENERGY_AND_BALANCE_SPEC.md #3/DECISIONS_NEEDED.md):
 # a design must have a hull, must have a weapon or a legitimate support/
@@ -2683,6 +2834,7 @@ const AMMO_TYPES = {
 		"label": "Standard",
 		"damage_class": "", "damage_mult": 1.0, "light_mult": 1.0, "aoe_mult": 1.0,
 		"weight_mult": 1.0, "metal_mult": 1.0, "crystal_mult": 1.0,
+		"required_building": "",
 		"desc": "Balanced service round. No specialisation, no surprises.",
 	},
 	# Kinetic penetrator: all the energy in one spot, nothing left over for
@@ -2692,6 +2844,7 @@ const AMMO_TYPES = {
 		"label": "Armor-Piercing",
 		"damage_class": "kinetic", "damage_mult": 1.25, "light_mult": 0.4, "aoe_mult": 0.0,
 		"weight_mult": 1.15, "metal_mult": 1.25, "crystal_mult": 1.0,
+		"required_building": "",
 		"desc": "Solid penetrator. Concentrates everything on one point and splashes nothing.",
 	},
 	# Blast round: trades per-shot punch for a much wider blast. Reactive
@@ -2701,6 +2854,7 @@ const AMMO_TYPES = {
 		"label": "High-Explosive",
 		"damage_class": "explosive", "damage_mult": 0.85, "light_mult": 1.3, "aoe_mult": 1.6,
 		"weight_mult": 1.1, "metal_mult": 1.15, "crystal_mult": 1.0,
+		"required_building": "",
 		"desc": "Blast-fragmentation filler. Wide effect, poor penetration against sloped plate.",
 	},
 	# Thermal: hardened_steel's thermal threshold is 5 (its softest row),
@@ -2710,6 +2864,7 @@ const AMMO_TYPES = {
 		"label": "Incendiary",
 		"damage_class": "thermal", "damage_mult": 0.7, "light_mult": 1.2, "aoe_mult": 1.2,
 		"weight_mult": 1.1, "metal_mult": 1.1, "crystal_mult": 1.3,
+		"required_building": "tech_lab",
 		"desc": "Thickened fuel filler. Burns on after impact. Ineffective against ablative plate.",
 	},
 	# Anti-swarm: a wide cone of sub-projectiles. Weak per fragment, but
@@ -2720,6 +2875,7 @@ const AMMO_TYPES = {
 		"label": "Flechette Canister",
 		"damage_class": "kinetic", "damage_mult": 0.55, "light_mult": 3.5, "aoe_mult": 2.2,
 		"weight_mult": 1.0, "metal_mult": 1.1, "crystal_mult": 1.0,
+		"required_building": "tech_lab",
 		"desc": "Sub-calibre dart canister. Devastating to light frames, irrelevant to armour.",
 	},
 	# Energy shell: drains the target's capacitor alongside light HP damage,
@@ -2729,6 +2885,7 @@ const AMMO_TYPES = {
 		"label": "EMP Shell",
 		"damage_class": "energy", "damage_mult": 0.5, "light_mult": 1.0, "aoe_mult": 1.0,
 		"weight_mult": 1.05, "metal_mult": 1.0, "crystal_mult": 1.7,
+		"required_building": "exotics_lab",
 		"desc": "Capacitor-discharge warhead. Strips power reserves. Barely scratches structure.",
 	},
 	# Utility rounds: no HP damage at all. That IS the tradeoff - a gun
@@ -2737,12 +2894,14 @@ const AMMO_TYPES = {
 		"label": "Smoke",
 		"damage_class": "", "damage_mult": 0.0, "light_mult": 1.0, "aoe_mult": 1.0,
 		"weight_mult": 0.95, "metal_mult": 0.8, "crystal_mult": 1.0,
+		"required_building": "tech_lab",
 		"desc": "Obscurant round. Deals no damage. Blocks sightlines and breaks missile lock.",
 	},
 	"illumination": {
 		"label": "Illumination",
 		"damage_class": "", "damage_mult": 0.0, "light_mult": 1.0, "aoe_mult": 1.0,
 		"weight_mult": 0.95, "metal_mult": 0.8, "crystal_mult": 1.1,
+		"required_building": "tech_lab",
 		"desc": "Parachute flare. Deals no damage. Burns off fog of war where it lands.",
 	},
 }
@@ -3026,8 +3185,8 @@ static func get_leg_part_name(leg_id: String) -> String:
 
 # Weight capacity fallback for any locomotion type_id missing its own
 # "base_weight_capacity" entry - a reasonable middle ground between the
-# most weight-sensitive type (helicopter_rotors, 250) and the most
-# tolerant (naval_propeller, 800).
+# most weight-sensitive type (helicopter_rotors, 140) and the most
+# tolerant (air_cushion_skirt, 620).
 const BASE_WEIGHT_CAPACITY_DEFAULT: float = 400.0
 
 # Per-locomotor-type weight capacity (task: "make the overall vehicle
@@ -3284,9 +3443,9 @@ const LOCOMOTION_TYPES_USING_RUNNING_GEAR: Array = [
 	"legs", "screw_drive", "hover_engine",
 	# The new ground/amphibious types mount to the chassis for the same reason
 	# the originals do: they need a real surface to bolt to, and the unit's
-	# collider rests on the chassis bottom. anti_grav_plate and the two naval
-	# types are deliberately absent - they project from the underside or the
-	# stern, and a slab under them would be visual noise.
+	# collider rests on the chassis bottom. anti_grav_plate is deliberately
+	# absent - it projects from the underside, and a slab under it would be
+	# visual noise.
 	"half_track", "rocker_bogie", "pontoon_wheels", "air_cushion_skirt",
 ]
 
@@ -3330,29 +3489,11 @@ const LOCOMOTION_TWEAK_SPECS = {
 		{"name": "wingspan", "label": "Wingspan", "min": 0.5, "max": 2.5, "step": 0.1, "default": 1.0},
 		{"name": "wing_sweep", "label": "Wing Sweep Angle", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0}
 	],
-	# naval_propeller and buoyant_envelope share an identical tweak set
-	# (Chris's ask, 2026-07-24: pylon-mounted rebuild) - both now mount a
-	# stern pylon reaching back from the hull's own center to a propeller
-	# hub+blades assembly built from the same shared GLBs, "deformed"
-	# (scaled/tilted) per instance rather than needing distinct authored
-	# parts per type. prop_size/kort_nozzle/motor_size/tail_fins are gone,
-	# not just defaulted differently - see the matching removals in
-	# module_data.gd's weight/cost tweak tables and visual_builder.gd's
-	# shared _build_pylon_mounted_propeller().
-	# naval_propeller and buoyant_envelope share the pylon-mounted propeller
-	# geometry (a 2026-07-24 rebuild, and still the right call - one prop
-	# assembly deformed per type beats two near-identical authored sets). What
-	# they did NOT deserve was a byte-identical tweak spec: picking between them
-	# was a stats choice with no design choice attached. One unique slider each
-	# is enough to make them distinct decisions.
-	"naval_propeller": [
-		{"name": "prop_count", "label": "Propeller Count", "min": 1.0, "max": 5.0, "step": 1.0, "default": 2.0},
-		{"name": "blade_count", "label": "Blades per Propeller", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
-		{"name": "blade_pitch", "label": "Blade Pitch", "min": 0.5, "max": 1.5, "step": 0.1, "default": 1.0},
-		# A Kort nozzle is a shroud around the screw: much more thrust at low
-		# speed, a lower top end. The classic tug-vs-runabout trade.
-		{"name": "kort_nozzle", "label": "Kort Nozzle", "type": "bool", "default": false}
-	],
+	# Was one of a pair with naval_propeller, which shared this pylon-mounted
+	# propeller geometry (a 2026-07-24 rebuild) and got its own unique slider
+	# so the two were a design choice, not just a stats choice. naval_propeller
+	# is gone (the naval theatre never got real design attention); this stays,
+	# since buoyant_envelope is airborne, not naval.
 	"buoyant_envelope": [
 		{"name": "prop_count", "label": "Propeller Count", "min": 1.0, "max": 5.0, "step": 1.0, "default": 2.0},
 		{"name": "blade_count", "label": "Blades per Propeller", "min": 2.0, "max": 6.0, "step": 1.0, "default": 3.0},
@@ -3380,16 +3521,6 @@ const LOCOMOTION_TWEAK_SPECS = {
 		{"name": "plate_count", "label": "Plate Count", "min": 3.0, "max": 8.0, "step": 1.0, "default": 4.0},
 		{"name": "field_strength", "label": "Field Strength", "min": 0.5, "max": 2.2, "step": 0.1, "default": 1.0},
 		{"name": "stabilizer_ring", "label": "Stabiliser Ring", "type": "bool", "default": true}
-	],
-	"hydrofoil": [
-		{"name": "foil_span", "label": "Foil Span", "min": 0.6, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "strut_height", "label": "Strut Height", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
-		{"name": "foil_count", "label": "Foil Count", "min": 2.0, "max": 4.0, "step": 1.0, "default": 2.0}
-	],
-	"water_jet": [
-		{"name": "intake_size", "label": "Intake Size", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
-		{"name": "nozzle_count", "label": "Nozzle Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 2.0},
-		{"name": "reverser", "label": "Reverser Bucket", "type": "bool", "default": false}
 	],
 	"pontoon_wheels": [
 		{"name": "pontoon_size", "label": "Pontoon Size", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0},
@@ -3481,20 +3612,8 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 			# and changed nothing the player was choosing between.
 			thrust = wingspan * (0.85 + 0.30 * sweep)
 			capacity = wingspan * 70.0 * (1.15 - 0.25 * sweep)
-		"naval_propeller":
-			var count = settings.get("prop_count", settings.get("count", 2.0))
-			var pitch = settings.get("blade_pitch", 1.0)
-			var blades = settings.get("blade_count", 3.0)
-			var kort = settings.get("kort_nozzle", false)
-			# A Kort nozzle is a shroud around the screw: markedly more thrust
-			# at working speed, a lower top end. Modelled as thrust up, and the
-			# top-end loss shows up as the reason not to fit one to a runabout.
-			# More blades bite more water per revolution - more thrust, slightly
-			# less efficient. blade_count was cosmetic on both prop types.
-			thrust = (count / 2.0) * pitch * (0.85 + 0.05 * blades) * (1.25 if kort else 1.0)
-			capacity = (count / 2.0) * pitch * 120.0
 		"buoyant_envelope":
-			# Same pylon-mounted prop formula as naval_propeller, but
+			# Same pylon-mounted prop formula the old naval_propeller used, but
 			# attenuated (0.6x) - buoyancy does the lifting here, not the
 			# motors (see the catalog entry's own comment), so a bigger
 			# prop cluster shouldn't scale thrust as hard as it does for a
@@ -3542,23 +3661,6 @@ static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Di
 			# The stabiliser ring is the trade: steadier and stronger lift, or
 			# drop it for raw speed and carry less.
 			capacity = (plates / 4.0) * field * (110.0 if ring else 70.0)
-		"hydrofoil":
-			var span = settings.get("foil_span", 1.0)
-			var strut = settings.get("strut_height", 1.0)
-			var foils = settings.get("foil_count", 2.0)
-			# Foil area lifts the hull clear, which is where the speed comes
-			# from - but a foil that has to carry more sits deeper and stops
-			# foiling, so capacity scales far more weakly than thrust.
-			thrust = span * (foils / 2.0) * (1.0 + 0.15 * strut)
-			capacity = span * (foils / 2.0) * 95.0
-		"water_jet":
-			var intake = settings.get("intake_size", 1.0)
-			var nozzles = settings.get("nozzle_count", 2.0)
-			var reverser = settings.get("reverser", false)
-			# A ducted impeller makes real thrust, and a reverser bucket buys
-			# manoeuvring at the cost of some of it.
-			thrust = intake * (nozzles / 2.0) * (0.92 if reverser else 1.0)
-			capacity = intake * 150.0
 		"pontoon_wheels":
 			var psize = settings.get("pontoon_size", 1.0)
 			var axles = settings.get("axle_count", 4.0)

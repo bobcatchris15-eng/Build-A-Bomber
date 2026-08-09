@@ -12,6 +12,8 @@ const BlueprintNamerScript = preload("res://scripts/blueprint_namer.gd")
 const UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
 const UIIconsScript = preload("res://scripts/ui_icons.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
+const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
+const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
 
 # --- Rail structure (VISUAL/UI plan item 7) ---------------------------------
 # The rail used to be a bare anchored `Panel` in UI_StatBlock.tscn carrying an
@@ -99,8 +101,6 @@ const LOCOMOTION_SIZE_KEY := {
 	"screw_drive": "drum_diameter",
 	"pontoon_wheels": "pontoon_size",
 	"ornithopter_wing": "wingspan",
-	"hydrofoil": "foil_span",
-	"water_jet": "intake_size",
 	"half_track": "tread_width",
 	"rocker_bogie": "wheel_size",
 	"air_cushion_skirt": "skirt_diameter",
@@ -109,11 +109,9 @@ const LOCOMOTION_SIZE_KEY := {
 
 const LOCOMOTION_SECONDARY_SIZE_KEY := {
 	"helicopter_rotors": "blade_count",
-	"naval_propeller": "blade_pitch",
 	"buoyant_envelope": "blade_pitch",
 	"screw_drive": "helix_depth",
 	"ornithopter_wing": "wing_sweep",
-	"hydrofoil": "strut_height",
 	"half_track": "front_axle_size",
 	"rocker_bogie": "arm_length",
 	"air_cushion_skirt": "plenum_pressure",
@@ -424,6 +422,30 @@ const TWEAK_SPECS = {
 	"ion_cannon": [
 		{"name": "lens_aperture", "label": "Ion Focusing Lens", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 4.0, "step": 1.0, "default": 0.0}
+	],
+	# --- Propulsion modules (speed pass, 2026-08-08) ---
+	# Every tweak name here is reused from LINEAR_SCALE_WEAPON_TWEAKS/
+	# module_data.gd's scaling lists rather than invented, so weight/cost
+	# scaling works with no new plumbing - the same convention the roster
+	# expansion weapons above already follow.
+	"turbocharger": [
+		{"name": "turbine_compression", "label": "Turbine Compression", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "intake_size", "label": "Intake Size", "min": 0.6, "max": 1.8, "step": 0.1, "default": 1.0}
+	],
+	"overdrive_gearbox": [
+		{"name": "motor_size", "label": "Gearcase Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"hub_motor_array": [
+		{"name": "motor_size", "label": "Hub Motor Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "coil_count", "label": "Stator Coil Count", "min": 2.0, "max": 8.0, "step": 1.0, "default": 4.0}
+	],
+	"nitrous_injector": [
+		{"name": "drum_size", "label": "Coolant Bottle Size", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "pressure_valve", "label": "Feed Pressure", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"booster_rack": [
+		{"name": "nozzle_count", "label": "Booster Tube Count", "min": 1.0, "max": 4.0, "step": 1.0, "default": 3.0},
+		{"name": "motor_length", "label": "Booster Tube Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	]
 }
 
@@ -432,6 +454,7 @@ var armor_mat_btn: OptionButton
 var armor_thick_label: Label
 var armor_thick_slider: HSlider
 var armor_threshold_label: Label
+var tech_req_label: Label
 
 # --- Hull spec flyout (VISUAL/UI plan item 7) -------------------------------
 # Armour material, faction and armour thickness used to be six controls parked
@@ -501,9 +524,10 @@ var blade_count_container: HBoxContainer
 var blade_count_label: Label
 var blade_count_slider: HSlider
 
-# "Blade Pitch" tweak (blade_pitch, 0.5-1.5): naval_propeller/
-# buoyant_envelope only (Chris's ask, 2026-07-24) - same dynamic-widget/
-# geometry-tweak pattern as blade_count above.
+# "Blade Pitch" tweak (blade_pitch, 0.5-1.5): buoyant_envelope originally
+# (Chris's ask, 2026-07-24) - same dynamic-widget/geometry-tweak pattern as
+# blade_count above. Now also reused (relabelled) by several other types'
+# secondary slider - see the elif chain below.
 var blade_pitch_container: HBoxContainer
 var blade_pitch_label: Label
 var blade_pitch_slider: HSlider
@@ -655,8 +679,8 @@ func _ready():
 	blade_count_slider.drag_started.connect(_push_undo)
 	blade_count_container.visible = false
 
-	# Dynamically build the naval_propeller/buoyant_envelope-only "Blade
-	# Pitch" slider (Chris's ask, 2026-07-24).
+	# Dynamically build the buoyant_envelope-only "Blade Pitch" slider
+	# (Chris's ask, 2026-07-24).
 	blade_pitch_container = HBoxContainer.new()
 	blade_pitch_container.custom_minimum_size = Vector2(0, 24)
 	blade_pitch_container.add_theme_constant_override("separation", 4)
@@ -782,6 +806,34 @@ func _ready():
 	hull_spec_stash = VBoxContainer.new()
 	hull_spec_stash.visible = false
 	add_child(hull_spec_stash)
+
+	var mat_cont = VBoxContainer.new()
+	mat_cont.name = "ArmorMaterialContainer"
+	var mat_label = Label.new()
+	mat_label.text = "Armor Material:"
+	mat_cont.add_child(mat_label)
+	armor_mat_btn = OptionButton.new()
+	armor_mat_btn.add_item("Hardened Steel")
+	armor_mat_btn.add_item("Reactive Armor")
+	armor_mat_btn.add_item("Ablative Ceramic")
+	armor_mat_btn.add_item("Energy Shielding")
+	armor_mat_btn.item_selected.connect(_on_armor_mat_selected)
+	mat_cont.add_child(armor_mat_btn)
+	hull_spec_stash.add_child(mat_cont)
+
+	var thick_cont = VBoxContainer.new()
+	thick_cont.name = "ArmorThicknessContainer"
+	armor_thick_label = Label.new()
+	armor_thick_label.text = "Armor Thickness: 1.0"
+	thick_cont.add_child(armor_thick_label)
+	armor_thick_slider = HSlider.new()
+	armor_thick_slider.min_value = 0.5
+	armor_thick_slider.max_value = 3.0
+	armor_thick_slider.step = 0.1
+	armor_thick_slider.value = 1.0
+	armor_thick_slider.value_changed.connect(_on_armor_thick_changed)
+	thick_cont.add_child(armor_thick_slider)
+	hull_spec_stash.add_child(thick_cont)
 
 	# The trigger. Sits in the rail for now; item 7's top toolbar is where it
 	# belongs, and moving it there is a reparent of this one node.
@@ -1182,8 +1234,30 @@ func update_stats(hull: Node3D):
 		# instead of a hardcoded width, since threshold values can grow to
 		# more digits than today's baseline numbers.
 		armor_threshold_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		_rail_vbox.add_child(armor_threshold_label)
 	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
+
+	if not tech_req_label:
+		tech_req_label = Label.new()
+		tech_req_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_rail_vbox.add_child(tech_req_label)
+
+	var req_buildings: Array[String] = []
+	if hull:
+		var root = get_node_or_null("/root/Main")
+		var bm = root.get_node_or_null("BlueprintManager") if root else null
+		if bm and bm.has_method("serialize_hull"):
+			var bp_data: Dictionary = bm.serialize_hull(hull)
+			req_buildings = DesignCostingScript.blueprint_required_buildings(bp_data)
+
+	if req_buildings.is_empty():
+		tech_req_label.visible = false
+	else:
+		tech_req_label.visible = true
+		var names: Array = []
+		for r in req_buildings:
+			names.append(ProductionHUDScript._format_building_name(r))
+		tech_req_label.text = "Required Buildings: %s" % ", ".join(names)
+
 
 # --- Drivetrain readout (load bar + top speed + overweight warning) ---------
 #
@@ -1492,10 +1566,19 @@ func _update_drivetrain_readout(dt: Dictionary) -> void:
 	# chassis-limited design needs different locomotion, a power-limited one
 	# needs more thrust or less mass. Without this the player has no way to
 	# tell why adding engines stopped helping.
+	#
+	# chassis_top_speed already HAS a propulsion part's top_speed_mult folded
+	# in (Drivetrain.analyze() applies it before returning the figure), so an
+	# Overdrive Gearbox is already visible in the number itself - this just
+	# names why it moved, the same way the overload/underload rows above name
+	# their own multipliers rather than leaving the player to infer them.
+	var mult_note := ""
+	if dt.get("chassis_speed_mult", 1.0) > 1.001:
+		mult_note = " (+%.0f%% from fitted propulsion)" % [(dt["chassis_speed_mult"] - 1.0) * 100.0]
 	if dt["capacity_limited"] and not dt["is_overloaded"]:
-		_speed_label.tooltip_text = "This chassis is rated for %.1f and is already there - more thrust will not make it faster. A different locomotion type will." % dt["chassis_top_speed"]
+		_speed_label.tooltip_text = "This chassis is rated for %.1f%s and is already there - more thrust will not make it faster. A different locomotion type (or a part that raises the ceiling itself) will." % [dt["chassis_top_speed"], mult_note]
 	else:
-		_speed_label.tooltip_text = "Chassis rated %.1f; this design's power/weight allows %.1f." % [dt["chassis_top_speed"], dt["power_top_speed"]]
+		_speed_label.tooltip_text = "Chassis rated %.1f%s; this design's power/weight allows %.1f." % [dt["chassis_top_speed"], mult_note, dt["power_top_speed"]]
 
 	_load_label.text = "Load: %.0f / %.0f kg  (%.0f%%)" % [dt["weight"], dt["capacity"], load_pct]
 	_load_bar.value = minf(load_pct, _load_bar.max_value)
@@ -1526,6 +1609,48 @@ func _update_drivetrain_readout(dt: Dictionary) -> void:
 	_load_label.tooltip_text = "What this design's locomotion is rated to carry, tweaks included.\nOver capacity, top speed falls steeply - see the warning below.\nUnder %.0f%%, the design runs light and gains top speed, up to +%.0f%% empty." % [
 		DrivetrainScript.UNDERLOAD_THRESHOLD * 100.0,
 		(DrivetrainScript.UNDERLOAD_CEILING - 1.0) * 100.0]
+
+	# Boost row - shows burst speed parts if fitted
+	_update_boost_readout(dt)
+
+
+# --- Boost readout ---------------------------------------------------------
+# The Design Lab shows the burst boost as its own row, separate from the
+# steady-state top speed. This is deliberate: a burst that inflated the
+# quoted top speed would make the Lab's number a lie (Drivetrain.analyze()
+# is design-time; boost is combat-time only).
+var _boost_label: Label = null
+
+func _build_boost_readout() -> void:
+	_boost_label = Label.new()
+	_boost_label.theme_type_variation = "StatLabel"
+	_boost_label.visible = false
+	_rail_vbox.add_child(_boost_label)
+	# Place after the load bar row - find the overweight_panel and insert before it
+	if _overweight_panel and _overweight_panel.get_parent() == _rail_vbox:
+		var at := _overweight_panel.get_index()
+		_rail_vbox.move_child(_boost_label, at)
+
+func _update_boost_readout(dt: Dictionary) -> void:
+	if _boost_label == null:
+		_build_boost_readout()
+
+	var boost: Dictionary = dt.get("boost", {})
+	if boost.is_empty():
+		_boost_label.visible = false
+		return
+
+	var speed_mult: float = float(boost.get("speed_mult", 1.0))
+	var duration: float = float(boost.get("duration", 0.0))
+	var cooldown: float = float(boost.get("cooldown", 0.0))
+	var charges: int = int(boost.get("charges", 0))
+
+	_boost_label.visible = true
+	if charges == 0:
+		_boost_label.text = "Boost: x%.2f for %.1fs (%.1fs cooldown)" % [speed_mult, duration, cooldown]
+	else:
+		_boost_label.text = "Boost: x%.2f for %.1fs (%d charges)" % [speed_mult, duration, charges]
+	_boost_label.tooltip_text = "Burst speed from a fitted propulsion part. Engages automatically on long straight runs when no enemy is in range.\nDoes not inflate the quoted top speed above - that is steady-state only."
 
 # --- Range readout ---------------------------------------------------------
 # The sidebar showed no range at all before this, which made a whole axis of
@@ -1915,10 +2040,10 @@ func on_module_selected(module: Node3D):
 	count_slider.max_value = 8.0
 	count_slider.step = 2.0
 	# blade_count_container is now shared between helicopter_rotors and
-	# naval_propeller/buoyant_envelope (Chris's ask, 2026-07-24) - reset
-	# unconditionally so it doesn't stay visible after switching away from
-	# whichever of those types last showed it (only helicopter_rotors used
-	# it before, so this never came up).
+	# buoyant_envelope (Chris's ask, 2026-07-24) - reset unconditionally so
+	# it doesn't stay visible after switching away from whichever of those
+	# types last showed it (only helicopter_rotors used it before, so this
+	# never came up).
 	blade_count_container.visible = false
 	blade_pitch_container.visible = false
 	count_label_base = "Count"
@@ -1992,17 +2117,15 @@ func on_module_selected(module: Node3D):
 		count_slider.max_value = 6.0
 		count_slider.step = 1.0
 		count_slider.value = settings.get("engine_count", 2)
-	elif type_id in ["naval_propeller", "buoyant_envelope"]:
+	elif type_id == "buoyant_envelope":
 		# Pylon-mounted rebuild (Chris's ask, 2026-07-24): no Size tweak at
-		# all for either type - Count doubles as Propeller Count (1-5),
-		# plus the shared Blade Count slider (reused from helicopter_rotors
-		# above) and a new Blade Pitch slider.
+		# all - Count doubles as Propeller Count, plus the shared Blade Count
+		# slider (reused from helicopter_rotors above) and a new Blade Pitch
+		# slider.
 		size_container.visible = false
 		count_container.visible = true
 		count_slider.min_value = 1.0
-		# 6, not 5: buoyant_envelope's pod progression runs to three per side
-		# (Chris). naval_propeller shares this branch and is unaffected - its
-		# own layout still clamps at 5.
+		# 6: buoyant_envelope's pod progression runs to three per side (Chris).
 		count_slider.max_value = 6.0
 		count_slider.step = 1.0
 		count_slider.value = settings.get("prop_count", settings.get("count", 2))
@@ -2033,38 +2156,6 @@ func on_module_selected(module: Node3D):
 		blade_pitch_slider.min_value = 0.5
 		blade_pitch_slider.max_value = 1.5
 		blade_pitch_slider.value = settings.get("wing_sweep", 1.0)
-	elif type_id == "hydrofoil":
-		size_label_base = "Foil Span"
-		size_slider.min_value = 0.6
-		size_slider.max_value = 2.0
-		size_slider.value = settings.get("foil_span", 1.0)
-		count_container.visible = true
-		count_slider.min_value = 2.0
-		count_slider.max_value = 4.0
-		count_slider.step = 1.0
-		count_slider.value = settings.get("foil_count", 2.0)
-		count_label_base = "Foil Count"
-		blade_pitch_container.visible = true
-		blade_pitch_label.text = "Strut Height:"
-		blade_pitch_slider.min_value = 0.6
-		blade_pitch_slider.max_value = 1.8
-		blade_pitch_slider.value = settings.get("strut_height", 1.0)
-	elif type_id == "water_jet":
-		size_label_base = "Intake Size"
-		size_slider.min_value = 0.6
-		size_slider.max_value = 1.8
-		size_slider.value = settings.get("intake_size", 1.0)
-		count_container.visible = true
-		count_slider.min_value = 1.0
-		count_slider.max_value = 4.0
-		count_slider.step = 1.0
-		count_slider.value = settings.get("nozzle_count", 2.0)
-		count_label_base = "Nozzle Count"
-		bool_tweak_key = "reverser"
-		bool_tweak_title = "Reverser Bucket"
-		duct_container.visible = true
-		duct_checkbox.tooltip_text = "Reverser Bucket"
-		duct_checkbox.button_pressed = settings.get("reverser", false)
 	elif type_id == "half_track":
 		size_label_base = "Track Width"
 		size_slider.min_value = 0.5
@@ -2217,11 +2308,11 @@ func _on_blade_count_changed(value: float):
 	if is_updating_sliders or not current_selected_module or not is_instance_valid(current_selected_module): return
 	var root = get_node_or_null("/root/MainLab")
 	if not root or not root.has_method("update_locomotion_geometry_tweak"): return
-	# Shared between helicopter_rotors and naval_propeller/buoyant_envelope
-	# (Chris's ask, 2026-07-24) - was hardcoded to "helicopter_rotors",
-	# which silently no-opped this slider for the other two types (their
-	# module_data.tweaks never actually get a "blade_count" key written,
-	# since update_locomotion_geometry_tweak() matches children by type_id).
+	# Shared between helicopter_rotors and buoyant_envelope (Chris's ask,
+	# 2026-07-24) - was hardcoded to "helicopter_rotors", which silently
+	# no-opped this slider for buoyant_envelope (its module_data.tweaks never
+	# actually got a "blade_count" key written, since
+	# update_locomotion_geometry_tweak() matches children by type_id).
 	var data = current_selected_module.get_meta("module_data")
 	root.update_locomotion_geometry_tweak(data.type_id, "blade_count", int(value))
 
@@ -2363,7 +2454,7 @@ func _apply_tweaks():
 			"turbine_compression": size_slider.value,
 			"engine_count": int(count_slider.value)
 		}
-	elif type_id in ["naval_propeller", "buoyant_envelope"]:
+	elif type_id == "buoyant_envelope":
 		# Count (Propeller Count) is structural here too - changing it
 		# respawns every prop instance, so blade_count/blade_pitch have to
 		# ride along in the same settings dict or they'd silently reset to
@@ -2382,18 +2473,6 @@ func _apply_tweaks():
 		new_settings = {
 			"wingspan": size_slider.value,
 			"wing_sweep": blade_pitch_slider.value
-		}
-	elif type_id == "hydrofoil":
-		new_settings = {
-			"foil_span": size_slider.value,
-			"strut_height": blade_pitch_slider.value,
-			"foil_count": int(count_slider.value)
-		}
-	elif type_id == "water_jet":
-		new_settings = {
-			"intake_size": size_slider.value,
-			"nozzle_count": int(count_slider.value),
-			"reverser": duct_checkbox.button_pressed
 		}
 	elif type_id == "half_track":
 		new_settings = {
@@ -2804,13 +2883,35 @@ func _on_hull_spec_closed() -> void:
 # Declared in display order once, so open and close cannot disagree about which
 # controls belong to the flyout - a mismatch would strand a widget in a freed
 # panel and take the control with it.
+func _on_armor_mat_selected(idx: int) -> void:
+	if is_updating_sliders: return
+	var root = get_node_or_null("/root/MainLab")
+	var hull = root.get_node_or_null("Hull") if root else null
+	if not hull: return
+	_push_undo()
+	var materials = ["hardened_steel", "reactive_armor", "ablative_ceramic", "energy_shielding"]
+	var selected_mat = materials[clampi(idx, 0, materials.size() - 1)]
+	hull.set_meta("armor_material", selected_mat)
+	update_stats(hull)
+
+func _on_armor_thick_changed(val: float) -> void:
+	if is_updating_sliders: return
+	var root = get_node_or_null("/root/MainLab")
+	var hull = root.get_node_or_null("Hull") if root else null
+	if not hull: return
+	_push_undo()
+	hull.set_meta("armor_thickness", val)
+	if armor_thick_label:
+		armor_thick_label.text = "Armor Thickness: %.1f" % val
+	update_stats(hull)
+
 func _hull_spec_widgets() -> Array:
-	# Empty since the faction dropdown left. The flyout, the stash and the
-	# reparent-on-close contract all stay: armour material and thickness are
-	# built into this same stash by the armour work, and the reclaim path is
-	# the fragile part worth keeping proven rather than re-deriving later.
-	return [
-	]
+	var out: Array = []
+	if armor_mat_btn and is_instance_valid(armor_mat_btn):
+		out.append(armor_mat_btn.get_parent())
+	if armor_thick_slider and is_instance_valid(armor_thick_slider):
+		out.append(armor_thick_slider.get_parent())
+	return out
 
 func _initial_sync():
 	var root = get_node_or_null("/root/MainLab")

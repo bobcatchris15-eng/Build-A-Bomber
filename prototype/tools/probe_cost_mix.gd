@@ -16,7 +16,7 @@ func _init():
 	var total_m := 0.0
 	var n := 0
 	for name in ["rattler_scout", "bulwark_mbt", "warden_aa", "breaker_td",
-			"ore_trucker", "tide_corvette", "raptor_striker", "longarm_spg"]:
+			"ore_trucker", "raptor_striker", "longarm_spg"]:
 		var path := "res://data/loadout/%s.json" % name
 		var file := FileAccess.open(path, FileAccess.READ)
 		if file == null:

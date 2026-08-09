@@ -3002,6 +3002,23 @@ def generate_parts():
 	export_and_cleanup(build_accessory("tool_box", "toolbox", (0.28, 0.32, 0.24), size=(0.5, 0.28, 0.32), metallic=0.3, roughness=0.6), PARTS_DIR, "tool_box")
 	export_and_cleanup(build_accessory("sensor_mast", "sensor_mast", (0.15, 0.15, 0.15), height=1.0, metallic=0.6, roughness=0.4), PARTS_DIR, "sensor_mast")
 
+	# --- Propulsion module parts (speed pass, 2026-08-08) ---
+	# One piece per tweak, same convention recoilless_rifle established:
+	# visual_builder.gd scales each piece independently by the tweak that
+	# names it, so "dial up the fuel injection" thickens the feed line and
+	# nothing else. Built from the existing generic primitives above rather
+	# than new bmesh topology - a turbo housing is a squashed dome, a hub
+	# motor can is a drum, a booster tube is a barrel.
+	export_and_cleanup(build_dome("turbo_housing", radius=0.18, squash=0.75, color=(0.35, 0.36, 0.4)), PARTS_DIR, "turbo_housing")
+	export_and_cleanup(build_cylinder_part("turbo_intake", radius=0.09, height=0.32, bolts=False, color=(0.3, 0.31, 0.34)), PARTS_DIR, "turbo_intake")
+	export_and_cleanup(build_cylinder_part("gearbox_bell", radius=0.2, height=0.34, color=(0.32, 0.3, 0.28)), PARTS_DIR, "gearbox_bell")
+	export_and_cleanup(build_cylinder_part("hub_motor_can", radius=0.16, height=0.14, bolts=False, color=(0.25, 0.4, 0.55)), PARTS_DIR, "hub_motor_can")
+	export_and_cleanup(build_box_part("hub_stator_segment", size=(0.05, 0.1, 0.03), bolts=False, color=(0.2, 0.35, 0.5)), PARTS_DIR, "hub_stator_segment")
+	export_and_cleanup(build_cylinder_part("nitrous_bottle", radius=0.11, height=0.55, bolts=False, color=(0.65, 0.85, 0.95)), PARTS_DIR, "nitrous_bottle")
+	export_and_cleanup(build_barrel("nitrous_feed_line", length=0.4, radius=0.025, muzzle_radius=0.025, segments=8, fins=0), PARTS_DIR, "nitrous_feed_line")
+	export_and_cleanup(build_barrel("booster_tube", length=0.7, radius=0.09, muzzle_radius=0.09, segments=12, fins=0), PARTS_DIR, "booster_tube")
+	export_and_cleanup(build_box_part("booster_rack_frame", size=(0.85, 0.12, 0.5), bolts=True, color=(0.4, 0.15, 0.12)), PARTS_DIR, "booster_rack_frame")
+
 	print("--- Parts library done ---")
 
 

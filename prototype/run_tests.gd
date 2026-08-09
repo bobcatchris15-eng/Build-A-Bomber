@@ -18,6 +18,8 @@ const SUITE_FILES := {
 	"weapons_and_damage": preload("res://tests/test_weapons_and_damage.gd"),
 	"economy_and_production": preload("res://tests/test_economy_and_production.gd"),
 	"ui_and_camera": preload("res://tests/test_ui_and_camera.gd"),
+	"input_and_settings": preload("res://tests/test_input_and_settings.gd"),
+	"scene_loads": preload("res://tests/test_scene_loads.gd"),
 	"locomotion": preload("res://tests/test_locomotion.gd"),
 	"hull_and_armor": preload("res://tests/test_hull_and_armor.gd"),
 	"base_building": preload("res://tests/test_base_building.gd"),
@@ -43,10 +45,14 @@ const SUITE_FILES := {
 	"economy_balance": preload("res://tests/battle/test_economy_balance.gd"),
 	"resource_fields": preload("res://tests/battle/test_resource_fields.gd"),
 	"tech_tree": preload("res://tests/battle/test_tech_tree.gd"),
+	"debug_cheats": preload("res://tests/battle/test_debug_cheats.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
 const SUITE_ORDER := [
+	["debug_cheats", "test_infinite_resources_cheat"],
+	["debug_cheats", "test_instant_build_cheat"],
+	["debug_cheats", "test_reveal_all_fog_cheat"],
 	["tech_tree", "test_building_catalog_prerequisites"],
 	["tech_tree", "test_module_catalog_building_requirements"],
 	["tech_tree", "test_design_costing_building_requirements"],
@@ -66,6 +72,18 @@ const SUITE_ORDER := [
 	["designer_lab", "test_ui_anim_motion_library"],
 	["designer_lab", "test_part_button_custom_tooltip_card"],
 	["economy_and_production", "test_resource_node_regrows_gradually_after_being_mined"],
+	# Input and settings foundations. Placed immediately before the camera suites
+	# because the camera now reads its pan/rotate/edge-scroll values from
+	# SettingsService and its bindings from InputService - if those are broken,
+	# the camera failures downstream are a consequence rather than a cause, and
+	# seeing them in this order says so.
+	["input_and_settings", "test_input_action_table_is_well_formed"],
+	["input_and_settings", "test_input_modifiers_compared_exactly"],
+	["input_and_settings", "test_input_rebind_persists_and_reports_conflicts"],
+	["input_and_settings", "test_command_bindings_avoid_camera_keys"],
+	["input_and_settings", "test_settings_defaults_are_complete_and_typed"],
+	["input_and_settings", "test_settings_unknown_key_is_refused"],
+	["input_and_settings", "test_camera_pan_is_yaw_relative"],
 	["ui_and_camera", "test_rts_camera_edge_scroll_direction"],
 	["ui_and_camera", "test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse"],
 	["ui_and_camera", "test_rts_camera_tilt_shift_dof_band"],
@@ -319,6 +337,20 @@ const SUITE_ORDER := [
 	["tutorial", "test_tutorial_lab_targets_all_resolve"],
 	["tutorial", "test_tutorial_advances_on_real_state"],
 	["tutorial", "test_tutorial_skip_clears_state"],
+	# APPENDED, not interleaved - speed pass (2026-08-08). None of these touch
+	# navigation maps: pure catalog checks, synthetic hulls, a stub-driven
+	# BoostController, and one BattleUnitV2 built directly (no Battle scene).
+	["locomotion", "test_chassis_top_speeds_are_spread_and_ordered"],
+	["locomotion", "test_propulsion_modules_change_drivetrain_output"],
+	["locomotion", "test_boost_controller_engages_and_expires"],
+	["locomotion", "test_live_runtime_uses_combat_speed_and_terrain"],
+
+	# LAST, DELIBERATELY. This is the only suite that instantiates whole screens,
+	# so it is the one most likely to leave residue - autoload state touched by a
+	# screen's _ready(), a stray CanvasLayer, a freed-next-frame node. Running it
+	# after everything else means it cannot perturb the pinned navmesh order that
+	# the rest of SUITE_ORDER exists to protect.
+	["scene_loads", "test_every_screen_survives_ready"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist
