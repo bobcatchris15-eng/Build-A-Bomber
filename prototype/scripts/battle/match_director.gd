@@ -196,6 +196,7 @@ func _ready() -> void:
 	# degrades to its own default rather than erroring.
 	if camera and "world_scale" in camera:
 		camera.world_scale = WorldScaleScript.for_map(current_map)
+	_scale_lighting_to_world()
 
 	orders = OrderServiceScript.new()
 	flow_fields = FlowFieldServiceScript.new()
@@ -296,6 +297,40 @@ func _on_vision_tick() -> void:
 # runs, so their footprints go into the FIRST bake - a second same-frame rebake
 # leaves a window where a unit's very first path query runs before
 # NavigationServer3D has resynced, and the unit wanders into the lake.
+# Playtest: "maybe some lighting tricks can make [elevation] more apparent."
+#
+# Both of the settings below were authored in Battle.tscn against a world that
+# has since grown, and both are measured in absolute world units, so neither
+# followed it - the same class of scale-exposed constant as the fog shroud
+# height and the AI threat radius before them.
+#
+# directional_shadow_max_distance is the bigger one and was never set at all,
+# leaving Godot's default of 100 world units. On an open_plains grown to 840
+# half-extent, terrain shadows simply stopped existing a short way out from the
+# camera, so the relief that did exist cast nothing to read it by - which is
+# most of why elevation looked flat regardless of how deep it actually was.
+#
+# ssao_radius is the sampling radius for ambient occlusion. At 0.8 units it
+# only ever found tiny crevices; a ravine 8 units deep and tens of units wide
+# is invisible to it. Widening it is what makes a dip read as a dip even where
+# no direct shadow falls into it.
+#
+# Driven off WorldScale rather than re-authored in the .tscn so it tracks any
+# future scale change instead of needing to be re-tuned by hand each time -
+# and duck-typed/null-guarded like every other optional node here, so a test
+# stub or a scene without them degrades rather than erroring.
+const SHADOW_DISTANCE_BASE: float = 320.0
+const SSAO_RADIUS_BASE: float = 0.8
+
+func _scale_lighting_to_world() -> void:
+	var scale: float = WorldScaleScript.for_map(current_map)
+	var light := get_node_or_null("DirectionalLight3D") as DirectionalLight3D
+	if light:
+		light.directional_shadow_max_distance = SHADOW_DISTANCE_BASE * scale
+	var world_env := get_node_or_null("WorldEnvironment") as WorldEnvironment
+	if world_env and world_env.environment:
+		world_env.environment.ssao_radius = SSAO_RADIUS_BASE * scale
+
 func _setup_terrain() -> void:
 	var nav: Dictionary
 	var holes := _building_holes()
