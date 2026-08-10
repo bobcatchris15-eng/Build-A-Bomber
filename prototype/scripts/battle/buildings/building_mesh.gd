@@ -4,8 +4,9 @@ extends RefCounted
 # WHY IT WAS MISSING. structure.gd's header says the boxes are a deliberate
 # placeholder "until Chris replaces every building mesh with authored art
 # later". That comment was already stale when it was written: assets/models/
-# buildings/ has a GLB for all six catalog kinds and the old runtime has been
-# loading them since building.gd:615. The battle layer simply never looked.
+# buildings/ has a GLB for every catalog kind (six originally, plus the three
+# tech-tree labs) and the old runtime has been loading them since
+# building.gd:615. The battle layer simply never looked.
 #
 # LIFTED FROM building.gd RATHER THAN REWRITTEN, because the fiddly part is not
 # loading the scene - it is that an authored mesh has its own arbitrary size and

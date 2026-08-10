@@ -1,240 +1,266 @@
 {
-	"description": "Two hills, not one - each sits closer to one side's own territory. Grab yours quickly, then decide whether to contest the other deep in enemy ground. No water; open lanes connect everything.",
-	"ground_color": [
-		0.25,
-		0.239999994635582,
-		0.189999997615814
-	],
-	"map_half_extents": 234,
-	"name": "Twin Summits",
-	"obstacles": [],
-	"resource_nodes": [
-		{
-			"amount": 900,
-			"position": [
-				-145,
-				0,
-				5
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 700,
-			"position": [
-				-145,
-				0,
-				103
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 900,
-			"position": [
-				145,
-				0,
-				-5
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 700,
-			"position": [
-				145,
-				0,
-				-103
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 1100,
-			"position": [
-				-45,
-				0,
-				150
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 1100,
-			"position": [
-				45,
-				0,
-				150
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 800,
-			"position": [
-				0,
-				0,
-				165
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 1100,
-			"position": [
-				45,
-				0,
-				-150
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 1100,
-			"position": [
-				-45,
-				0,
-				-150
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 800,
-			"position": [
-				0,
-				0,
-				-165
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 900,
-			"position": [
-				47,
-				0,
-				143
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-47,
-				0,
-				143
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				47,
-				0,
-				-143
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-47,
-				0,
-				-143
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				80,
-				0,
-				0
-			],
-			"type": "oil"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				-80,
-				0,
-				0
-			],
-			"type": "oil"
-		}
-	],
-	"schema_version": 1,
-	"spawns": [
-		{
-			"factory": [
-				-30,
-				0,
-				165
-			],
-			"harvester": [
-				18,
-				1.5,
-				144
-			],
-			"hq": [
-				0,
-				0,
-				180
-			],
-			"id": "player",
-			"refinery": [
-				27,
-				0,
-				159
-			]
-		},
-		{
-			"factory": [
-				30,
-				0,
-				-165
-			],
-			"harvester": [
-				-18,
-				1.5,
-				-144
-			],
-			"hq": [
-				0,
-				0,
-				-180
-			],
-			"id": "enemy",
-			"refinery": [
-				-27,
-				0,
-				-159
-			]
-		}
-	],
-	"terrain": {
-		"features": [
-			{
-				"center": [
-					-84,
-					54
-				],
-				"falloff": 24,
-				"half_extents": [
-					27,
-					27
-				],
-				"height": 10,
-				"type": "plateau"
-			},
-			{
-				"center": [
-					84,
-					-54
-				],
-				"falloff": 24,
-				"half_extents": [
-					27,
-					27
-				],
-				"height": 10,
-				"type": "plateau"
-			}
-		],
-		"height_scale": 10.0,
-		"heightmap": "res://data/maps/twin_summits_height.png",
-		"surfacemap": "res://data/maps/twin_summits_surface.png"
-	},
-	"water_areas": []
+ "description": "Two hills, not one - each sits closer to one side's own territory. Grab yours quickly, then decide whether to contest the other deep in enemy ground. No water; open lanes connect everything.",
+ "ground_color": [
+  0.25,
+  0.239999994635582,
+  0.189999997615814
+ ],
+ "map_half_extents": 234,
+ "name": "Twin Summits",
+ "obstacles": [],
+ "resource_nodes": [
+  {
+   "amount": 900,
+   "position": [
+    -145,
+    0,
+    5
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 700,
+   "position": [
+    -145,
+    0,
+    103
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 900,
+   "position": [
+    145,
+    0,
+    -5
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 700,
+   "position": [
+    145,
+    0,
+    -103
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 1100,
+   "position": [
+    -45,
+    0,
+    150
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 1100,
+   "position": [
+    45,
+    0,
+    150
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 800,
+   "position": [
+    0,
+    0,
+    165
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 1100,
+   "position": [
+    45,
+    0,
+    -150
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 1100,
+   "position": [
+    -45,
+    0,
+    -150
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 800,
+   "position": [
+    0,
+    0,
+    -165
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 900,
+   "position": [
+    47,
+    0,
+    143
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -47,
+    0,
+    143
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    47,
+    0,
+    -143
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -47,
+    0,
+    -143
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    80,
+    0,
+    0
+   ],
+   "type": "oil"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    -80,
+    0,
+    0
+   ],
+   "type": "oil"
+  }
+ ],
+ "base_zones": [
+  {
+   "id": "north",
+   "center": [
+    0.0,
+    0.0,
+    180.0
+   ],
+   "half_extents": [
+    17.5,
+    17.5
+   ]
+  },
+  {
+   "id": "south",
+   "center": [
+    0.0,
+    0.0,
+    -180.0
+   ],
+   "half_extents": [
+    17.5,
+    17.5
+   ]
+  }
+ ],
+ "schema_version": 1,
+ "spawns": [
+  {
+   "factory": [
+    -30,
+    0,
+    165
+   ],
+   "harvester": [
+    18,
+    1.5,
+    144
+   ],
+   "hq": [
+    0,
+    0,
+    180
+   ],
+   "id": "player",
+   "refinery": [
+    27,
+    0,
+    159
+   ]
+  },
+  {
+   "factory": [
+    30,
+    0,
+    -165
+   ],
+   "harvester": [
+    -18,
+    1.5,
+    -144
+   ],
+   "hq": [
+    0,
+    0,
+    -180
+   ],
+   "id": "enemy",
+   "refinery": [
+    -27,
+    0,
+    -159
+   ]
+  }
+ ],
+ "terrain": {
+  "features": [
+   {
+    "center": [
+     -84,
+     54
+    ],
+    "falloff": 24,
+    "half_extents": [
+     27,
+     27
+    ],
+    "height": 10,
+    "type": "plateau"
+   },
+   {
+    "center": [
+     84,
+     -54
+    ],
+    "falloff": 24,
+    "half_extents": [
+     27,
+     27
+    ],
+    "height": 10,
+    "type": "plateau"
+   }
+  ],
+  "height_scale": 10.0,
+  "heightmap": "res://data/maps/twin_summits_height.png",
+  "surfacemap": "res://data/maps/twin_summits_surface.png"
+ },
+ "water_areas": []
 }

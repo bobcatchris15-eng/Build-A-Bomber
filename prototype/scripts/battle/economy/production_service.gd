@@ -24,6 +24,7 @@ extends RefCounted
 # tuned, already benchmarked, and already what the old suites assert. Keeping it.
 
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
+const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
 
 # Percent of normal build time, indexed by (contributing structures - 1), held at
 # the last entry for 4 or more. Straight from RA.
@@ -73,6 +74,8 @@ func enqueue_unit(team: int, blueprint: Dictionary, cost: int,
 	var contributors := _contributor_count(team, queue_name)
 	if contributors <= 0:
 		return {}
+	if not _missing_required_buildings(team, blueprint).is_empty():
+		return {}
 	var job := _make_job(blueprint.get("name", "UNIT"), cost, base_time, contributors)
 	job["blueprint"] = blueprint
 	job["is_structure"] = false
@@ -87,6 +90,11 @@ func enqueue_structure(team: int, queue_name: String, kind: String,
 		cost: int, base_time: float, blueprint: Dictionary = {}) -> Dictionary:
 	var contributors := _contributor_count(team, queue_name)
 	if contributors <= 0:
+		return {}
+	# Only a blueprint-built defence has anything to gate on - a prefab kind off
+	# the Building queue (a manufactory, a lab itself) is never itself required
+	# to already own a lab.
+	if not blueprint.is_empty() and not _missing_required_buildings(team, blueprint).is_empty():
 		return {}
 	var job := _make_job(kind, cost, base_time, contributors)
 	job["kind"] = kind
@@ -265,6 +273,32 @@ func _contributor_count(team: int, queue_name: String) -> int:
 
 func contributor_count(team: int, queue_name: String) -> int:
 	return _contributor_count(team, queue_name)
+
+
+# --- Tech tree gate ------------------------------------------------------------
+
+# The design's required labs the team does NOT currently have a live copy of.
+# Empty means the design is clear to queue.
+#
+# No world means no gate, same reasoning as _contributor_count(): a test
+# exercising the queue maths directly (no match_director behind it) has no
+# structures to check against, and refusing every enqueue in that context would
+# make the maths untestable rather than making the gate correct.
+func _missing_required_buildings(team: int, blueprint: Dictionary) -> Array[String]:
+	var required: Array[String] = DesignCostingScript.blueprint_required_buildings(blueprint)
+	if required.is_empty():
+		return []
+	if _world == null or not _world.has_method("structures_of_kinds"):
+		return []
+	var missing: Array[String] = []
+	for kind in required:
+		if _world.structures_of_kinds(team, [kind]).is_empty():
+			missing.append(kind)
+	return missing
+
+
+func missing_required_buildings(team: int, blueprint: Dictionary) -> Array[String]:
+	return _missing_required_buildings(team, blueprint)
 
 
 # What the HUD needs to draw one queue strip, without reaching into the job dicts.

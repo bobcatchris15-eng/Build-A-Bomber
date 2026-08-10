@@ -1,327 +1,353 @@
 {
-	"description": "A city block grid fills the middle of the map - real buildings that block movement AND sightlines, not just decoration. Fight street to street; a contested resource sits in the central plaza, hidden from both bases until someone scouts it.",
-	"ground_color": [
-		0.200000002980232,
-		0.200000002980232,
-		0.219999998807907
-	],
-	"map_half_extents": 204.0,
-	"name": "Urban Sprawl",
-	"obstacles": [
-		{
-			"building_height": 6.0,
-			"center": [
-				-60.0,
-				0.0,
-				-60.0
-			],
-			"half_extents": [
-				15.0,
-				15.0
-			],
-			"type": "building"
-		},
-		{
-			"building_height": 7.0,
-			"center": [
-				0.0,
-				0.0,
-				-60.0
-			],
-			"half_extents": [
-				15.0,
-				15.0
-			],
-			"type": "building"
-		},
-		{
-			"building_height": 5.0,
-			"center": [
-				60.0,
-				0.0,
-				-60.0
-			],
-			"half_extents": [
-				15.0,
-				15.0
-			],
-			"type": "building"
-		},
-		{
-			"building_height": 8.0,
-			"center": [
-				-60.0,
-				0.0,
-				0.0
-			],
-			"half_extents": [
-				15.0,
-				15.0
-			],
-			"type": "building"
-		},
-		{
-			"building_height": 6.0,
-			"center": [
-				60.0,
-				0.0,
-				0.0
-			],
-			"half_extents": [
-				15.0,
-				15.0
-			],
-			"type": "building"
-		},
-		{
-			"building_height": 5.0,
-			"center": [
-				-60.0,
-				0.0,
-				60.0
-			],
-			"half_extents": [
-				15.0,
-				15.0
-			],
-			"type": "building"
-		},
-		{
-			"building_height": 7.0,
-			"center": [
-				0.0,
-				0.0,
-				60.0
-			],
-			"half_extents": [
-				15.0,
-				15.0
-			],
-			"type": "building"
-		},
-		{
-			"building_height": 6.0,
-			"center": [
-				60.0,
-				0.0,
-				60.0
-			],
-			"half_extents": [
-				15.0,
-				15.0
-			],
-			"type": "building"
-		}
-	],
-	"resource_nodes": [
-		{
-			"amount": 1100,
-			"position": [
-				-45.0,
-				0.0,
-				165.0
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 1100,
-			"position": [
-				45.0,
-				0.0,
-				165.0
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 800,
-			"position": [
-				0.0,
-				0.0,
-				180.0
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 1100,
-			"position": [
-				45.0,
-				0.0,
-				-165.0
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 1100,
-			"position": [
-				-45.0,
-				0.0,
-				-165.0
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 800,
-			"position": [
-				0.0,
-				0.0,
-				-180.0
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 900,
-			"position": [
-				0.0,
-				0.0,
-				0.0
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 900,
-			"position": [
-				41.0,
-				0.0,
-				117.0
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-41.0,
-				0.0,
-				117.0
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				41.0,
-				0.0,
-				-117.0
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-41.0,
-				0.0,
-				-117.0
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				81.0,
-				0.0,
-				0.0
-			],
-			"type": "oil"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				-79.3923034667969,
-				0.0,
-				6.0
-			],
-			"type": "oil"
-		}
-	],
-	"schema_version": 1.0,
-	"spawns": [
-		{
-			"factory": [
-				-30.0,
-				0.0,
-				132.0
-			],
-			"harvester": [
-				18.0,
-				1.5,
-				108.0
-			],
-			"hq": [
-				0.0,
-				0.0,
-				150.0
-			],
-			"id": "player",
-			"refinery": [
-				27.0,
-				0.0,
-				126.0
-			]
-		},
-		{
-			"factory": [
-				30.0,
-				0.0,
-				-132.0
-			],
-			"harvester": [
-				-18.0,
-				1.5,
-				-108.0
-			],
-			"hq": [
-				0.0,
-				0.0,
-				-150.0
-			],
-			"id": "enemy",
-			"refinery": [
-				-27.0,
-				0.0,
-				-126.0
-			]
-		}
-	],
-	"water_areas": [],
-	"hills": [
-		{
-			"center": [
-				-140,
-				0,
-				75
-			],
-			"radius": 16,
-			"falloff": 20,
-			"height": 8
-		},
-		{
-			"center": [
-				-140,
-				0,
-				-75
-			],
-			"radius": 16,
-			"falloff": 20,
-			"height": 8
-		},
-		{
-			"center": [
-				140,
-				0,
-				75
-			],
-			"radius": 13,
-			"falloff": 17,
-			"height": -6
-		},
-		{
-			"center": [
-				140,
-				0,
-				-75
-			],
-			"radius": 13,
-			"falloff": 17,
-			"height": -6
-		}
-	]
+ "description": "A city block grid fills the middle of the map - real buildings that block movement AND sightlines, not just decoration. Fight street to street; a contested resource sits in the central plaza, hidden from both bases until someone scouts it.",
+ "ground_color": [
+  0.200000002980232,
+  0.200000002980232,
+  0.219999998807907
+ ],
+ "map_half_extents": 204.0,
+ "name": "Urban Sprawl",
+ "obstacles": [
+  {
+   "building_height": 6.0,
+   "center": [
+    -60.0,
+    0.0,
+    -60.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  },
+  {
+   "building_height": 7.0,
+   "center": [
+    0.0,
+    0.0,
+    -60.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  },
+  {
+   "building_height": 5.0,
+   "center": [
+    60.0,
+    0.0,
+    -60.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  },
+  {
+   "building_height": 8.0,
+   "center": [
+    -60.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  },
+  {
+   "building_height": 6.0,
+   "center": [
+    60.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  },
+  {
+   "building_height": 5.0,
+   "center": [
+    -60.0,
+    0.0,
+    60.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  },
+  {
+   "building_height": 7.0,
+   "center": [
+    0.0,
+    0.0,
+    60.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  },
+  {
+   "building_height": 6.0,
+   "center": [
+    60.0,
+    0.0,
+    60.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  }
+ ],
+ "resource_nodes": [
+  {
+   "amount": 1100,
+   "position": [
+    -45.0,
+    0.0,
+    165.0
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 1100,
+   "position": [
+    45.0,
+    0.0,
+    165.0
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 800,
+   "position": [
+    0.0,
+    0.0,
+    180.0
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 1100,
+   "position": [
+    45.0,
+    0.0,
+    -165.0
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 1100,
+   "position": [
+    -45.0,
+    0.0,
+    -165.0
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 800,
+   "position": [
+    0.0,
+    0.0,
+    -180.0
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 900,
+   "position": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 900,
+   "position": [
+    41.0,
+    0.0,
+    117.0
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -41.0,
+    0.0,
+    117.0
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    41.0,
+    0.0,
+    -117.0
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -41.0,
+    0.0,
+    -117.0
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    81.0,
+    0.0,
+    0.0
+   ],
+   "type": "oil"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    -79.3923034667969,
+    0.0,
+    6.0
+   ],
+   "type": "oil"
+  }
+ ],
+ "base_zones": [
+  {
+   "id": "north",
+   "center": [
+    0.0,
+    0.0,
+    150.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ]
+  },
+  {
+   "id": "south",
+   "center": [
+    0.0,
+    0.0,
+    -150.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ]
+  }
+ ],
+ "schema_version": 1.0,
+ "spawns": [
+  {
+   "factory": [
+    -30.0,
+    0.0,
+    132.0
+   ],
+   "harvester": [
+    18.0,
+    1.5,
+    108.0
+   ],
+   "hq": [
+    0.0,
+    0.0,
+    150.0
+   ],
+   "id": "player",
+   "refinery": [
+    27.0,
+    0.0,
+    126.0
+   ]
+  },
+  {
+   "factory": [
+    30.0,
+    0.0,
+    -132.0
+   ],
+   "harvester": [
+    -18.0,
+    1.5,
+    -108.0
+   ],
+   "hq": [
+    0.0,
+    0.0,
+    -150.0
+   ],
+   "id": "enemy",
+   "refinery": [
+    -27.0,
+    0.0,
+    -126.0
+   ]
+  }
+ ],
+ "water_areas": [],
+ "hills": [
+  {
+   "center": [
+    -140,
+    0,
+    75
+   ],
+   "radius": 16,
+   "falloff": 20,
+   "height": 8
+  },
+  {
+   "center": [
+    -140,
+    0,
+    -75
+   ],
+   "radius": 16,
+   "falloff": 20,
+   "height": 8
+  },
+  {
+   "center": [
+    140,
+    0,
+    75
+   ],
+   "radius": 13,
+   "falloff": 17,
+   "height": -6
+  },
+  {
+   "center": [
+    140,
+    0,
+    -75
+   ],
+   "radius": 13,
+   "falloff": 17,
+   "height": -6
+  }
+ ]
 }

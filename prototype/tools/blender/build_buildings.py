@@ -135,6 +135,12 @@ def add_vents(bm, center, count, spacing, z, w=0.5, d=0.35, h=0.22):
         add_box(bm, (center[0] + t, center[1], z + h / 2), (w, d, h))
 
 
+def add_sphere(bm, center, radius, segments=12, rings=8):
+    m = mathutils.Matrix.Translation(mathutils.Vector(center))
+    bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=rings,
+                              radius=radius, matrix=m)
+
+
 def add_door(bm, center, w, h, depth=0.12):
     """A recessed roll-up door: frame plus slats."""
     add_box(bm, (center[0], center[1], center[2] + h / 2), (w + 0.3, depth, h + 0.25))
@@ -295,6 +301,77 @@ def build_manufactory(name, sx, sy, sz, stacks, bays, color):
     export_bmesh(bm, name, name + ".glb", color=color)
 
 
+# ---------------------------------------------------------------------------
+# TECH LABS - three unlock buildings, none of them feeding a production queue
+# (BuildingCatalog.CONTRIBUTORS has no entry for them). Each gates a tier of
+# ModuleCatalog parts via required_building (see design_costing.gd); the
+# silhouette escalates with the tier so "how far up the tree is this base" is
+# readable from the RTS camera without opening a menu.
+# ---------------------------------------------------------------------------
+
+# TECH LAB - a workshop shed with a roof-mounted sensor dish array. The
+# baseline unlock: unassuming, close to the manufactory silhouette it feeds
+# parts into.
+def build_tech_lab():
+    bm = bmesh.new()
+    add_box(bm, (0, 0, 0.3), (4.4, 4.4, 0.6))            # apron
+    add_box(bm, (0, 0, 0.6 + 1.1), (3.6, 3.6, 2.2))      # workshop shed
+    add_box(bm, (0, 0, 0.6 + 2.2 + 0.15), (3.9, 3.9, 0.3))  # roof lip
+    add_roof_ribs(bm, (0, 0), 3.6, 3.6, 0.6 + 2.2 + 0.3, 4)
+    add_door(bm, (0, -1.8, 0.6), 1.3, 1.4)
+    add_vents(bm, (1.0, 1.85), 2, 0.8, 1.7, w=0.35, d=0.25)
+
+    for sx in (-0.9, 0.9):                                # dish mast pair
+        add_cyl(bm, (sx, 0, 0.6 + 2.2 + 0.55), 0.09, 1.0)
+        add_taper(bm, (sx, 0, 0.6 + 2.2 + 1.15), 0.55, 0.10, 0.3, segments=10)
+    add_railing(bm, (0, 0, 0), 3.6, 3.6, 0.6 + 2.2 + 0.3)
+    export_bmesh(bm, "tech_lab", "tech_lab.glb", color=(0.42, 0.55, 0.58, 1.0))
+
+
+# PHYSICS LAB - the tech lab's shed with a particle-ring collector bolted to
+# the roof, reading as a step up in ambition rather than a new building
+# language.
+def build_physics_lab():
+    bm = bmesh.new()
+    add_box(bm, (0, 0, 0.3), (4.8, 4.8, 0.6))
+    add_box(bm, (0, -0.3, 0.6 + 1.3), (4.0, 3.8, 2.6))   # taller shed
+    add_box(bm, (0, -0.3, 0.6 + 2.6 + 0.15), (4.3, 4.1, 0.3))
+    add_roof_ribs(bm, (0, -0.3), 4.0, 3.8, 0.6 + 2.6 + 0.3, 5)
+    add_door(bm, (0, -2.2, 0.6), 1.4, 1.5)
+    add_vents(bm, (1.2, 1.55), 2, 0.9, 2.0, w=0.4, d=0.3)
+
+    add_cyl(bm, (0, 1.9, 0.6 + 2.6 + 0.85), 0.12, 1.1)   # ring support mast
+    ring_z = 0.6 + 2.6 + 1.55
+    for i in range(10):                                   # collector ring
+        ang = (i / 10.0) * math.tau
+        add_box(bm, (0, 1.9 + 0.85 * math.cos(ang), ring_z + 0.85 * math.sin(ang)),
+                (0.5, 0.16, 0.16))
+    add_railing(bm, (0, -0.3, 0), 4.0, 3.8, 0.6 + 2.6 + 0.3)
+    export_bmesh(bm, "physics_lab", "physics_lab.glb", color=(0.45, 0.48, 0.62, 1.0))
+
+
+# EXOTICS LAB - the top of the tree: a hexagonal containment chamber holding a
+# levitated sphere, ringed by an emitter collar. The one building on this list
+# that is not a shed with a thing on the roof - it earns a distinct shape for
+# being the last stop.
+def build_exotics_lab():
+    bm = bmesh.new()
+    add_box(bm, (0, 0, 0.3), (5.4, 5.4, 0.6))
+    add_cyl(bm, (0, 0, 0.6 + 1.4), 2.2, 2.8, segments=8)  # octagonal-ish drum
+    add_taper(bm, (0, 0, 0.6 + 2.8 + 0.35), 2.2, 1.5, 0.7, segments=8)  # domed cap
+    add_door(bm, (0, -2.35, 0.6), 1.3, 1.5)
+    add_vents(bm, (0, 2.35), 3, 0.9, 1.4, w=0.35, d=0.25)
+
+    add_sphere(bm, (0, 0, 0.6 + 1.4), 0.9, segments=14, rings=10)  # containment core
+    collar_z = 0.6 + 1.4
+    for i in range(12):                                    # emitter collar
+        ang = (i / 12.0) * math.tau
+        add_box(bm, (1.35 * math.cos(ang), 1.35 * math.sin(ang), collar_z),
+                (0.18, 0.18, 0.45))
+    add_railing(bm, (0, 0, 0), 4.4, 4.4, 0.6 + 2.8 + 0.65)
+    export_bmesh(bm, "exotics_lab", "exotics_lab.glb", color=(0.55, 0.38, 0.58, 1.0))
+
+
 if __name__ == "__main__":
     bpy.ops.wm.read_factory_settings(use_empty=True)
     os.makedirs(OUT_DIR, exist_ok=True)
@@ -304,4 +381,7 @@ if __name__ == "__main__":
     build_manufactory("light_manufactory", 5.0, 6.0, 2.2, 2, 3, (0.66, 0.58, 0.42, 1.0))
     build_manufactory("medium_manufactory", 6.0, 8.0, 2.8, 3, 4, (0.70, 0.53, 0.40, 1.0))
     build_manufactory("heavy_manufactory", 7.5, 10.0, 3.6, 4, 5, (0.58, 0.41, 0.34, 1.0))
+    build_tech_lab()
+    build_physics_lab()
+    build_exotics_lab()
     print("All building meshes rebuilt.")

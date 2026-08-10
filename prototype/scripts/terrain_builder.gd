@@ -2,6 +2,7 @@ extends Node
 class_name TerrainBuilder
 const TerrainGreeblesScript = preload("res://scripts/terrain_greebles.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
+const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 # Turns a MapCatalog map Dictionary into: baked NavigationServer3D ground/
 # water maps, decorative terrain meshes (water planes, rock-cluster
 # obstacles), and pure query functions (terrain_height_at / is_position_
@@ -967,12 +968,44 @@ const AGENT_MAX_CLIMB_CELLS: float = 1.5
 # because the map got wider.
 const NAV_CELL_HEIGHT: float = 0.25
 
+# 2026-08-10 (Chris playtest): harvesters were driving into the SIDE of
+# buildings and stopping, instead of routing around. The cause was a
+# 0.1 m agent_radius on the baked navmesh - Recast uses that radius to
+# erode walkable area near walls and buildings, so the resulting paths
+# had 10 cm clearance to a structure. A harvester hull is ~3 m wide; it
+# could not fit through the gap the path reserved, so it followed the
+# path until its own CharacterBody3D (collision_mask = TERRAIN |
+# BUILDINGS) physically stopped it against the wall.
+#
+# 1.0 m. Recast quantises agent_radius to whole cell_size voxels and
+# warns about it ("agent_radius is ceiled to cell_size voxel units and
+# loses precision") - the warning is loud but on the maps the project
+# ships, 1.0 m maps to 1 voxel at every cell_size from 0.25 (the
+# small-map floor) up to ~1.87 (open_plains at world_scale=4), so the
+# effective clearance is 1.0 m or one cell, whichever is larger. A
+# wider value (1.5) was tried and BROKE test_spawn_fairness_lint_
+# passes_a_real_map_scaled_up_4x - at large world_scale the cells get
+# bigger and the ceiling makes a 1.5 m radius effectively 2-3 cells,
+# eating the corridors that the existing maps rely on. 1.0 m is the
+# largest value that stays legal everywhere the project has been
+# tested; per-agent radius (set on NavigationAgent3D per hull size)
+# is the right shape for the very widest hulls and a separate change.
+#
+# Not the navmesh's NAV_TILE_VOXELS_PER_AXIS or cell_size - those are
+# spatial discretisations, this is the agent's physical size. A single
+# constant is the limit of what one shared navmesh can offer; the
+# right long-term shape is per-actor types so a scout is not
+# constrained by a hauler's width, but the wide-unit case does not
+# exist yet in practice (no scout is going to clip a building today)
+# and the per-actor-types refactor is a much bigger lift.
+const NAV_AGENT_RADIUS: float = 1.0
+
 static func _bake_nav_mesh(verts: PackedVector3Array, cell_size: float) -> NavigationMesh:
 	var nav_mesh = NavigationMesh.new()
 	nav_mesh.cell_size = cell_size
 	nav_mesh.cell_height = NAV_CELL_HEIGHT
 	nav_mesh.agent_max_climb = cell_size * AGENT_MAX_CLIMB_CELLS
-	nav_mesh.agent_radius = 0.1
+	nav_mesh.agent_radius = NAV_AGENT_RADIUS
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(verts, Transform3D.IDENTITY)
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
@@ -1297,6 +1330,14 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 	for b in map_def.get("bridges", []):
 		_spawn_bridge(b, parent)
 	_spawn_grassland_clutter(map_def, parent, prop_scale)
+	# Ambient forest + ambient ore (2026-08-10, paired passes).
+	# _spawn_ambient_trees runs first and RETURNS the placed positions,
+	# which _spawn_ambient_ores then uses as an extra avoidance set
+	# so an ore and a tree never overlap. Order matters: flipping it
+	# would let trees land on top of ore deposits, which reads as a
+	# single composite prop rather than two distinct finds.
+	var ambient_tree_positions: Array = _spawn_ambient_trees(map_def, parent, prop_scale)
+	_spawn_ambient_ores(map_def, parent, prop_scale, ambient_tree_positions)
 	_spawn_slope_rocks(map_def, parent)
 
 # Real baked ground textures (see tools/generate_terrain_textures.gd) tiled
@@ -2083,6 +2124,227 @@ static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D, prop_s
 		pos.y = terrain_height_at(map_def, pos)
 		TerrainGreeblesScript.place_grassland_prop(pos, tall_rng.randi(), parent, prop_scale, true)
 		tall_placed += 1
+
+# --- Ambient harvestable trees ------------------------------------------------
+#
+# The "ambient forest" pass. Spawns individual ResourceNode trees across
+# the whole map's baseline ground, parented to the world root (NOT to a
+# ResourceField), each carrying a small lumber amount. resource_node.gd's
+# is_ambient=true flag is what makes them: (a) draw from the
+# ambient_tree_*.glb pool instead of the 3-variant resource_lumber_* one,
+# (b) NEVER regrow once depleted.
+#
+# AVOIDANCE IS THE SAME SET AS _spawn_grassland_clutter ABOVE - water,
+# obstacles, bridges, surface_zones, spawn structures, AND the
+# harvestable resource_nodes themselves (the lumber fields that DO
+# regrow). The avoid radius is larger than the grass-tuft 7.0 because
+# trees are bigger and a forest grown right up to an HQ is busy enough
+# to compete visually with the buildings.
+#
+# DENSITY: ~1 tree per AMBIENT_TREE_DENSITY_M2 of eligible area, capped
+# so a 4x-scaled map (world_scale) doesn't multiply the tree count by
+# 16x the way area does. The cap is the same order of magnitude as
+# `_spawn_slope_rocks` (SLOPE_ROCK_MAX_COUNT = 260) - deliberately NOT
+# a fixed-per-half-extent, since the user-facing constraint is
+# "looks like a forest" rather than "exactly N trees per map."
+# 2026-08-10 (Chris): ambient trees were trimmed by ~1/3 to free up
+# scatter budget for the new ambient ore pass (see _spawn_ambient_ores
+# below). Density 90 -> 150 m²/tree is the ~1/3 reduction (since
+# (150 - 90) / 90 = 0.667, i.e. we now fit 2/3 of the trees in the
+# same area). The MAX_COUNT cap also drops so the visual ratio of
+# trees-to-ore on a typical map reads as "a forest with some ore in
+# it," not "a forest with as much ore as trees."
+const AMBIENT_TREE_AVOID_RADIUS: float = 8.0
+const AMBIENT_TREE_DENSITY_M2: float = 150.0
+const AMBIENT_TREE_MAX_COUNT: int = 1000
+const AMBIENT_TREE_MIN_COUNT: int = 25
+
+# AMBIENT ORE (Chris 2026-08-10, paired with the ambient-tree trim).
+# Scatter budget comes from the trees that were removed: a typical
+# 210-half map now produces ~900 ambient trees and ~750 ambient ore
+# deposits. Same avoidance set as the trees (so an ore and a tree are
+# not allowed to land on the same spot, or inside a spawn / on water
+# / etc.), but a slightly LARGER per-item avoid radius - an ambient
+# ore uses the same 3-variant "ore outcrop" visual as harvestable
+# ore, which is bigger than a single tree, and a tighter cluster of
+# ore would read as "a real deposit" rather than "a scattering of
+# finds."
+#
+# DENSITY: same per-item ~1/150 m² basis as the trimmed tree pass,
+# so the two passes are visually equivalent in sparseness even though
+# ore is 1.5x the credit value (40 lumber -> 60 ore, deliberately
+# matching ResourceCatalog.TYPES.ore.credits / lumber.credits).
+# Per-item amount is AMBIENT_ORE_AMOUNT in resource_node.gd; the
+# constant is exported through the script rather than re-declared
+# here so a future "tune ambient yields" edit is one line, not two.
+const AMBIENT_ORE_AVOID_RADIUS: float = 9.0
+const AMBIENT_ORE_DENSITY_M2: float = 180.0
+const AMBIENT_ORE_MAX_COUNT: int = 800
+const AMBIENT_ORE_MIN_COUNT: int = 20
+
+static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0) -> Array:
+	var half: float = map_def.get("map_half_extents", 80.0)
+	# Area of the playable rectangle; doesn't account for the avoidance
+	# holes (water, surface_zones, etc.) so the actual count comes out
+	# a bit lower, which is fine - the cap is the real ceiling.
+	var area = (half * 2.0) * (half * 2.0)
+	var count = clampi(int(area / AMBIENT_TREE_DENSITY_M2), AMBIENT_TREE_MIN_COUNT, AMBIENT_TREE_MAX_COUNT)
+	# prop_scale is intentionally NOT applied to the count - see
+	# _spawn_grassland_clutter()'s same reasoning: a bigger world is a
+	# bigger forest, not a denser one. The trees themselves do scale
+	# with prop_scale (passed through to ResourceNode via the
+	# resource_node.gd's mesh scaling, same path as every other
+	# terrain prop), so coverage fraction holds.
+
+	# Avoidance set, identical to _spawn_grassland_clutter() so the two
+	# passes can't disagree on "where is it legal to put a prop."
+	var avoid_points: Array = []
+	for spawn in map_def.get("spawns", []):
+		for key in spawn.keys():
+			if key == "id": continue
+			avoid_points.append(spawn[key])
+	# Resource nodes are ALREADY in avoid_points via the spawns loop
+	# above (no - they're not; the spawns are HQ/factory/refinery/
+	# harvester, and resource_nodes are a SEPARATE top-level field).
+	# Pull them in explicitly so an ambient tree doesn't sprout
+	# INSIDE a harvestable lumber field (where it'd be redundant and
+	# visually confusing - the field is already 9 trees).
+	for r in map_def.get("resource_nodes", []):
+		avoid_points.append(r.position)
+	var bridge_rects = _collect_bridges(map_def)
+	var surface_rects = []
+	for s in map_def.get("surface_zones", []):
+		surface_rects.append(_rect_from(s.center, s.half_extents))
+
+	# Seeded off the map name (same convention as _spawn_grassland_
+	# clutter): a given map dresses identically run to run, which is
+	# what the screenshot-verification convention this project uses
+	# requires. The seed is OFFSET (vs. grassland's seed) so the two
+	# passes never draw the same RNG sequence for the same map - if
+	# they shared a seed, an ambient tree at position P would be
+	# deterministic on P, and the grass scatter also deterministic on
+	# P, and a future bug where they coincidentally aligned would
+	# look like one passes over the other.
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(map_def.get("name", "ambient")) + 0xA1B2C3D4
+	var placed = 0
+	var attempts = 0
+	# Returned for the ambient-ore pass to consume as an avoidance set,
+	# so an ore and a tree never overlap. Empty Array (not null) is the
+	# right "no trees placed" return - the ore pass can iterate it
+	# without a null check.
+	var placed_positions: Array = []
+	# attempts cap mirrors grassland's `count * 8`: at the density
+	# we're targeting, well over 1/2 of attempted positions survive
+	# all the avoidance checks on a typical map, so `count * 8` is
+	# plenty of headroom before bailing.
+	while placed < count and attempts < count * 8:
+		attempts += 1
+		var pos = Vector3(rng.randf_range(-half * 0.94, half * 0.94), 0, rng.randf_range(-half * 0.94, half * 0.94))
+		if is_position_blocked(map_def, pos):
+			continue
+		var rejected = false
+		for rect in bridge_rects:
+			if _point_in_rect(pos, rect):
+				rejected = true
+				break
+		if not rejected:
+			for rect in surface_rects:
+				if _point_in_rect(pos, rect):
+					rejected = true
+					break
+		if not rejected:
+			for a in avoid_points:
+				if Vector2(pos.x - a.x, pos.z - a.z).length() < AMBIENT_TREE_AVOID_RADIUS:
+					rejected = true
+					break
+		if rejected:
+			continue
+		pos.y = terrain_height_at(map_def, pos)
+		# Per-tree amount comes from resource_node.gd (AMBIENT_TREE_AMOUNT).
+		# We pass it explicitly so a future "rarer ambient tree with more
+		# lumber" override (e.g. a 2x-amount subset of the pool) doesn't
+		# need a new constant here. The variant_seed rolls from the same
+		# RNG as the position so the same attempt always yields the same
+		# tree (deterministic scatter).
+		TerrainGreeblesScript.spawn_ambient_tree(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_TREE_AMOUNT)
+		placed_positions.append(pos)
+		placed += 1
+	return placed_positions
+
+# AMBIENT ORE PASS. Same overall pattern as _spawn_ambient_trees above
+# (sparse scatter across playable ground, no field, no regrow), but:
+#   * Spawns via TerrainGreeblesScript.spawn_ambient_ore, which routes
+#     through resource_node.gd's existing 3-variant resource_ore_* pool
+#     (no new Blender work; the harvestable outcrop IS the ambient
+#     silhouette, deliberately - see resource_node.gd's
+#     _try_spawn_ambient_authored comment).
+#   * Density, avoid radius, and per-find amount are smaller-bigger-
+#     same respectively vs. the trees (see the constants above).
+#   * MUST RUN AFTER _spawn_ambient_trees, and consumes the trees'
+#     already-placed positions as an extra avoidance set so an ore
+#     doesn't land on top of a tree (or vice versa on a future pass).
+#   * Uses its OWN RNG seed (off the map name, +0xB5C6D7E8) so the
+#     same map-name determinism contract holds and the two passes
+#     never draw the same RNG sequence for the same attempt.
+static func _spawn_ambient_ores(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0, ambient_tree_positions: Array = []):
+	var half: float = map_def.get("map_half_extents", 80.0)
+	var area = (half * 2.0) * (half * 2.0)
+	var count = clampi(int(area / AMBIENT_ORE_DENSITY_M2), AMBIENT_ORE_MIN_COUNT, AMBIENT_ORE_MAX_COUNT)
+
+	# Same avoidance set as the trees, plus the trees themselves (an
+	# ore and a tree are NOT allowed to overlap - a 2x2 metre stack
+	# of foliage on an outcrop reads as a glitch, not a feature).
+	var avoid_points: Array = []
+	for spawn in map_def.get("spawns", []):
+		for key in spawn.keys():
+			if key == "id": continue
+			avoid_points.append(spawn[key])
+	for r in map_def.get("resource_nodes", []):
+		avoid_points.append(r.position)
+	var bridge_rects = _collect_bridges(map_def)
+	var surface_rects = []
+	for s in map_def.get("surface_zones", []):
+		surface_rects.append(_rect_from(s.center, s.half_extents))
+
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(map_def.get("name", "ambient_ore")) + 0xB5C6D7E8
+	var placed = 0
+	var attempts = 0
+	while placed < count and attempts < count * 8:
+		attempts += 1
+		var pos = Vector3(rng.randf_range(-half * 0.94, half * 0.94), 0, rng.randf_range(-half * 0.94, half * 0.94))
+		if is_position_blocked(map_def, pos):
+			continue
+		var rejected = false
+		for rect in bridge_rects:
+			if _point_in_rect(pos, rect):
+				rejected = true
+				break
+		if not rejected:
+			for rect in surface_rects:
+				if _point_in_rect(pos, rect):
+					rejected = true
+					break
+		if not rejected:
+			for a in avoid_points:
+				if Vector2(pos.x - a.x, pos.z - a.z).length() < AMBIENT_ORE_AVOID_RADIUS:
+					rejected = true
+					break
+		# Avoid the already-placed ambient trees too. Using the LARGER
+		# of the two avoid radii (AMBIENT_ORE_AVOID_RADIUS) - an ore
+		# landing right next to a tree is fine, but a tree-ore pair
+		# under 8m apart starts to look like a single composite prop.
+		if not rejected:
+			for t in ambient_tree_positions:
+				if Vector2(pos.x - t.x, pos.z - t.z).length() < AMBIENT_ORE_AVOID_RADIUS:
+					rejected = true
+					break
+		if rejected:
+			continue
+		pos.y = terrain_height_at(map_def, pos)
+		TerrainGreeblesScript.spawn_ambient_ore(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_ORE_AMOUNT)
+		placed += 1
 
 # --- Slope-driven rock exposure ---
 #

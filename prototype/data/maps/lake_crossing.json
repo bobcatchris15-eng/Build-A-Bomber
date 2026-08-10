@@ -1,252 +1,278 @@
 {
-	"description": "A single lake splits the map roughly in two - ground units detour around it, naval units are confined to it. No high ground.",
-	"ground_color": [
-		0.200000002980232,
-		0.259999990463257,
-		0.209999993443489
-	],
-	"map_half_extents": 240,
-	"name": "Lake Crossing",
-	"obstacles": [],
-	"resource_nodes": [
-		{
-			"amount": 1200,
-			"position": [
-				-66,
-				0,
-				54
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 1000,
-			"position": [
-				-84,
-				0,
-				36
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 1200,
-			"position": [
-				66,
-				0,
-				-54
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 1000,
-			"position": [
-				84,
-				0,
-				-36
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 800,
-			"position": [
-				0,
-				0,
-				0
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 700,
-			"position": [
-				-90,
-				0,
-				-75
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 700,
-			"position": [
-				90,
-				0,
-				75
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-15,
-				0,
-				-24
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 900,
-			"position": [
-				15,
-				0,
-				24
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 900,
-			"position": [
-				48,
-				0,
-				64
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-48,
-				0,
-				64
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				48,
-				0,
-				-64
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-48,
-				0,
-				-64
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				82,
-				0,
-				0
-			],
-			"type": "oil"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				-82,
-				0,
-				0
-			],
-			"type": "oil"
-		}
-	],
-	"schema_version": 1,
-	"spawns": [
-		{
-			"factory": [
-				-30,
-				0,
-				90
-			],
-			"harvester": [
-				18,
-				1.5,
-				72
-			],
-			"hq": [
-				0,
-				0,
-				102
-			],
-			"id": "player",
-			"refinery": [
-				27,
-				0,
-				84
-			]
-		},
-		{
-			"factory": [
-				30,
-				0,
-				-90
-			],
-			"harvester": [
-				-18,
-				1.5,
-				-72
-			],
-			"hq": [
-				0,
-				0,
-				-102
-			],
-			"id": "enemy",
-			"refinery": [
-				-27,
-				0,
-				-84
-			]
-		}
-	],
-	"water_blobs": [
-		{
-			"center": [
-				54,
-				0,
-				0
-			],
-			"depth": 1.3,
-			"irregularity": 0.3,
-			"radius": 22,
-			"shore_blend": 8
-		}
-	],
-	"hills": [
-		{
-			"center": [
-				-140,
-				0,
-				95
-			],
-			"radius": 18,
-			"falloff": 24,
-			"height": 9
-		},
-		{
-			"center": [
-				-140,
-				0,
-				-95
-			],
-			"radius": 18,
-			"falloff": 24,
-			"height": 9
-		},
-		{
-			"center": [
-				140,
-				0,
-				95
-			],
-			"radius": 14,
-			"falloff": 18,
-			"height": -6
-		},
-		{
-			"center": [
-				140,
-				0,
-				-95
-			],
-			"radius": 14,
-			"falloff": 18,
-			"height": -6
-		}
-	]
+ "description": "A single lake splits the map roughly in two - ground units detour around it, naval units are confined to it. No high ground.",
+ "ground_color": [
+  0.200000002980232,
+  0.259999990463257,
+  0.209999993443489
+ ],
+ "map_half_extents": 240,
+ "name": "Lake Crossing",
+ "obstacles": [],
+ "resource_nodes": [
+  {
+   "amount": 1200,
+   "position": [
+    -66,
+    0,
+    54
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 1000,
+   "position": [
+    -84,
+    0,
+    36
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 1200,
+   "position": [
+    66,
+    0,
+    -54
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 1000,
+   "position": [
+    84,
+    0,
+    -36
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 800,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 700,
+   "position": [
+    -90,
+    0,
+    -75
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 700,
+   "position": [
+    90,
+    0,
+    75
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -15,
+    0,
+    -24
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 900,
+   "position": [
+    15,
+    0,
+    24
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 900,
+   "position": [
+    48,
+    0,
+    64
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -48,
+    0,
+    64
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    48,
+    0,
+    -64
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -48,
+    0,
+    -64
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    82,
+    0,
+    0
+   ],
+   "type": "oil"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    -82,
+    0,
+    0
+   ],
+   "type": "oil"
+  }
+ ],
+ "base_zones": [
+  {
+   "id": "north",
+   "center": [
+    0.0,
+    0.0,
+    102.0
+   ],
+   "half_extents": [
+    17.5,
+    17.5
+   ]
+  },
+  {
+   "id": "south",
+   "center": [
+    0.0,
+    0.0,
+    -102.0
+   ],
+   "half_extents": [
+    17.5,
+    17.5
+   ]
+  }
+ ],
+ "schema_version": 1,
+ "spawns": [
+  {
+   "factory": [
+    -30,
+    0,
+    90
+   ],
+   "harvester": [
+    18,
+    1.5,
+    72
+   ],
+   "hq": [
+    0,
+    0,
+    102
+   ],
+   "id": "player",
+   "refinery": [
+    27,
+    0,
+    84
+   ]
+  },
+  {
+   "factory": [
+    30,
+    0,
+    -90
+   ],
+   "harvester": [
+    -18,
+    1.5,
+    -72
+   ],
+   "hq": [
+    0,
+    0,
+    -102
+   ],
+   "id": "enemy",
+   "refinery": [
+    -27,
+    0,
+    -84
+   ]
+  }
+ ],
+ "water_blobs": [
+  {
+   "center": [
+    54,
+    0,
+    0
+   ],
+   "depth": 1.3,
+   "irregularity": 0.3,
+   "radius": 22,
+   "shore_blend": 8
+  }
+ ],
+ "hills": [
+  {
+   "center": [
+    -140,
+    0,
+    95
+   ],
+   "radius": 18,
+   "falloff": 24,
+   "height": 9
+  },
+  {
+   "center": [
+    -140,
+    0,
+    -95
+   ],
+   "radius": 18,
+   "falloff": 24,
+   "height": 9
+  },
+  {
+   "center": [
+    140,
+    0,
+    95
+   ],
+   "radius": 14,
+   "falloff": 18,
+   "height": -6
+  },
+  {
+   "center": [
+    140,
+    0,
+    -95
+   ],
+   "radius": 14,
+   "falloff": 18,
+   "height": -6
+  }
+ ]
 }

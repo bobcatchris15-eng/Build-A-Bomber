@@ -4,6 +4,45 @@ extends "res://tests/suite_base.gd"
 # not here - the runner drives that manifest so execution order is
 # identical to the pre-split single file.
 
+# The real MatchDirector. Loaded here as a const so the inner test
+# class below can extend it via the GDScript 2 inner-class path.
+const MatchDirectorScript = preload("res://scripts/battle/match_director.gd")
+
+# A no-op-_ready MatchDirector used by the pre-game HQ-placement suites.
+#
+# Why this exists. The real MatchDirector's _ready() is a coroutine that
+# does a synchronous block of setup (services, _spawn_resource_nodes,
+# _spawn_bases) and then awaits _setup_terrain (a full Recast navmesh
+# bake). The pre-game tests only want to exercise _spawn_bases() in
+# isolation - the trim from "HQ + refinery + 3 manufactories" to "HQ
+# only" and the new place_hq_for_human() hook - and the navmesh bake
+# is both expensive and not what those tests are about.
+#
+# Two failures this subclass prevents:
+#   1. add_child(test_director) would also fire _ready, which would
+#      call _spawn_bases once before the test could, doubling every
+#      structure count and breaking every "expected N" assertion in
+#      a way the test can't tell from a real regression.
+#   2. _ready awaits a real map's navmesh bake; on a minimal map_def
+#      the bake either errors out (the agent_max_climb warning seen
+#      on the first attempt) or hangs the test, neither of which
+#      tells you anything about _spawn_bases() itself.
+#
+# What it does NOT skip. _spawn_bases() itself, _place_structure(),
+# _base_zone_centre(), place_hq_for_human() and get_team_structures()
+# all run normally - they're the surface these suites are pinning.
+class TestMatchDirector:
+	extends "res://scripts/battle/match_director.gd"
+
+	func _ready() -> void:
+		# Deliberately empty. The real director's _ready() would set
+		# up services, run _spawn_resource_nodes + _spawn_bases, and
+		# then await a navmesh bake. The pre-game tests want to call
+		# _spawn_bases themselves with a controlled current_map, so
+		# none of that should run.
+		pass
+
+
 func test_balance_report_covers_every_catalog_entry() -> bool:
 	print("Running Test Suite: Balance Report Tool - Scores Every Catalog Entry Without Erroring...")
 	# Not a balance-correctness check (balance is subjective, tuned by
@@ -825,9 +864,9 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 		reversed_spawns.append(spawn)
 	loaded["spawns"] = reversed_spawns
 
-	# EVERY FIELD EXCEPT resource_nodes AND hills IS STILL A STRICT DEEP-EQUAL.
-	# That is what this test is for: proving the const -> JSON migration did not
-	# corrupt a value in transcription.
+	# EVERY FIELD EXCEPT resource_nodes, hills, AND base_zones IS STILL A
+	# STRICT DEEP-EQUAL. That is what this test is for: proving the const ->
+	# JSON migration did not corrupt a value in transcription.
 	#
 	# resource_nodes is checked as a SUPERSET instead, because a map file is
 	# content and content is supposed to grow - the 2026-08-07 resource rework
@@ -843,6 +882,14 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 	# that maps must stay flat forever. Their actual correctness is covered
 	# where it belongs - the spawn-fairness lint, the navmesh smoke tests, and
 	# tools/probe_hills_ravine.gd.
+	#
+	# base_zones is dropped the same way hills is, for the same family of
+	# reasons: the const had no zones (zones are a 2026-08-10 addition for
+	# the new pre-game HQ-placement phase), and there is no historical
+	# position to defend. The zone data's correctness is covered by
+	# test_base_zones_field_in_field_spec and test_assign_base_zones_spreads_
+	# them_apart - this test's job is to make sure the old map values did
+	# not regress while the new field was added.
 	var loaded_nodes: Array = loaded.get("resource_nodes", [])
 	var expected_nodes: Array = expected_lake_crossing["resource_nodes"]
 	var loaded_rest: Dictionary = loaded.duplicate(true)
@@ -851,6 +898,8 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 	expected_rest.erase("resource_nodes")
 	loaded_rest.erase("hills")
 	expected_rest.erase("hills")
+	loaded_rest.erase("base_zones")
+	expected_rest.erase("base_zones")
 
 	if loaded_rest != expected_rest:
 		print("  [FAIL] JSON-loaded lake_crossing does not deep-equal the checked-in snapshot of the old const's values.")
@@ -1701,3 +1750,1122 @@ func test_scattered_peaks_navmesh_bakes_cleanly_at_world_scale_4() -> bool:
 	print("  [PASS] scattered_peaks bakes cleanly and supports real pathing at 4x its native size - the grid-cell formulas are self-bounding, not tuned to a fixed map size.")
 	return true
 
+
+func test_navmesh_path_routes_around_building_with_clearance() -> bool:
+	print("Running Test Suite: Navmesh Path Routes Around A Placed Building With >Agent-Radius Clearance (Chris 2026-08-10)...")
+	# 2026-08-10 playtest: harvesters were driving into the SIDE of
+	# buildings and stopping, because the navmesh was baked with
+	# agent_radius=0.1 - the resulting paths had 10 cm of clearance to
+	# structures, which a 2-3 m wide hull physically cannot fit through.
+	# The unit followed the path until its own CharacterBody3D
+	# (collision_mask = TERRAIN|BUILDINGS) physically stopped it.
+	#
+	# This test reproduces the failure on a real baked navmesh: place a
+	# building, query a path that has to cross its footprint, and confirm
+	# the path CORNERS around the structure with at least NAV_AGENT_RADIUS
+	# of clearance to the building's edge. If it goes through, the
+	# collision would mask the failure visually - a harvester "appears
+	# to stop at the wall" - but the path itself was always wrong.
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+
+	# Flat, featureless fixture - the path's only constraint is the
+	# building. 200 half-extents is large enough that a 6x6 building
+	# in the middle has plenty of walkable ground to either side.
+	var map_def: Dictionary = {
+		"map_half_extents": 200.0,
+		"world_scale": 1.0,
+	}
+	# A realistic manufactory footprint (~6x6) at the map's centre. The
+	# build_navmeshes() entry point also takes an extra_holes Array, so
+	# this is the same hook the dynamic rebake uses - a live building
+	# and a baked-test hole go through the exact same path. Sized
+	# deliberately to leave 30+ m of corridor to either side, so a
+	# "path sneaks through a 0.1m gap" failure mode is geometrically
+	# impossible.
+	var building_center: Vector3 = Vector3(0, 0, 0)
+	var building_half: Vector2 = Vector2(3, 3)
+	var extra_holes: Array = [
+		{"center": building_center, "half_extents": building_half},
+	]
+	var nav = TerrainBuilderScript.build_navmeshes(map_def, extra_holes)
+	if not await _await_nav_map(nav.ground_map):
+		print("  [FAIL] Ground navmesh never synchronised for clearance test fixture")
+		_free_nav_result(nav)
+		return false
+
+	# Path A: due-east to due-west, crossing the building's footprint.
+	# At agent_radius=0.1 the path would clip through the hole the
+	# building carves; at agent_radius>=1.0 it has to route around.
+	var west = Vector3(-40, 0, 0)
+	var east = Vector3(40, 0, 0)
+	var path_east_west = NavigationServer3D.map_get_path(nav.ground_map, west, east, true)
+	if path_east_west.size() < 2:
+		print("  [FAIL] A west-to-east path across a 6x6 building should still resolve (route around), got ", path_east_west.size(), " points")
+		_free_nav_result(nav)
+		return false
+
+	# Path B: due-north to due-south, same idea, perpendicular approach.
+	# Two perpendicular paths catch the case where the path "goes around"
+	# by sliding along a single face only.
+	var north = Vector3(0, 0, -40)
+	var south = Vector3(0, 0, 40)
+	var path_north_south = NavigationServer3D.map_get_path(nav.ground_map, north, south, true)
+	if path_north_south.size() < 2:
+		print("  [FAIL] A north-to-south path across a 6x6 building should still resolve (route around), got ", path_north_south.size(), " points")
+		_free_nav_result(nav)
+		return false
+
+	_free_nav_result(nav)
+
+	# What the test is ACTUALLY checking: the path keeps at least the
+	# navmesh's own agent_radius (a lower bound on usable clearance)
+	# from the building's edge at every point. A path that comes within
+	# 0.5 m of a wall is unusable by a 2 m wide hull, regardless of
+	# the navmesh's nominal radius.
+	#
+	# Why "min distance to building rect >= agent_radius" and not "to
+	# building center >= building half + agent_radius + small margin":
+	# the actual constraint Recast enforces IS the agent_radius margin
+	# from the obstacle's wall (the navmesh's erosion), not from its
+	# center. Testing against the wall is the spec-accurate check.
+	var agent_r: float = TerrainBuilderScript.NAV_AGENT_RADIUS
+	var min_required_clearance: float = agent_r  # floor: 1.0 m
+	var worst_east_west := INF
+	for p in path_east_west:
+		var dx: float = maxf(0.0, absf(p.x - building_center.x) - building_half.x)
+		var dz: float = maxf(0.0, absf(p.z - building_center.z) - building_half.y)
+		var dist_to_wall: float = sqrt(dx * dx + dz * dz)
+		worst_east_west = minf(worst_east_west, dist_to_wall)
+	var worst_north_south := INF
+	for p in path_north_south:
+		var dx2: float = maxf(0.0, absf(p.x - building_center.x) - building_half.x)
+		var dz2: float = maxf(0.0, absf(p.z - building_center.z) - building_half.y)
+		var dist_to_wall2: float = sqrt(dx2 * dx2 + dz2 * dz2)
+		worst_north_south = minf(worst_north_south, dist_to_wall2)
+
+	if worst_east_west < min_required_clearance:
+		print("  [FAIL] East-west path came within ", worst_east_west, " m of the building wall - below the ", min_required_clearance, " m clearance the navmesh's agent_radius is supposed to guarantee. Full path: ", path_east_west)
+		return false
+	if worst_north_south < min_required_clearance:
+		print("  [FAIL] North-south path came within ", worst_north_south, " m of the building wall - below the ", min_required_clearance, " m clearance the navmesh's agent_radius is supposed to guarantee. Full path: ", path_north_south)
+		return false
+
+	print("  [PASS] Both perpendicular paths route around a 6x6 building with at least ", min_required_clearance, " m clearance to the wall (worst: E/W ", worst_east_west, " m, N/S ", worst_north_south, " m).")
+	return true
+
+
+func test_base_zones_field_in_field_spec() -> bool:
+	print("Running Test Suite: base_zones Field Validates Against FIELD_SPEC...")
+	# 2026-08-10 (Chris): the new base_zones block must round-trip
+	# through MapCatalog's validator. Wrong shapes (missing id, vector3
+	# vs vector2 mixup on half_extents, etc.) need to fail with the
+	# same useful messages FIELD_SPEC produces for the rest of the
+	# map schema, not silently drop the field on parse.
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+
+	# A minimally-valid zone entry, exactly the shape FIELD_SPEC declares.
+	# Real bundled maps are JSON-parsed (so center is Vector3 already);
+	# the test feeds VALIDATED Godot types directly, which is what
+	# validate_map_def() sees after _decode_dict() has run.
+	var good: Dictionary = {
+		"name": "Test",
+		"description": "Test map",
+		"map_half_extents": 80.0,
+		"ground_color": Color(0.3, 0.3, 0.3),
+		"base_zones": [
+			{"id": "a", "center": Vector3(0, 0, 0), "half_extents": Vector2(10, 10)},
+			{"id": "b", "center": Vector3(40, 0, 40), "half_extents": Vector2(10, 10)},
+		],
+		"spawns": [
+			{"id": "player", "hq": Vector3(0, 0, 0), "factory": Vector3(10, 0, 0), "refinery": Vector3(-10, 0, 0), "harvester": Vector3(0, 0, 10)},
+			{"id": "enemy", "hq": Vector3(40, 0, 40), "factory": Vector3(50, 0, 40), "refinery": Vector3(30, 0, 40), "harvester": Vector3(40, 0, 50)},
+		],
+		"schema_version": 1,
+	}
+	var good_errors: Array = MapCatalogScript.validate_map_def(good)
+	if not good_errors.is_empty():
+		for e in good_errors:
+			print("  [FAIL] A minimally-valid map with base_zones should pass validation, got: ", e)
+		return false
+
+	# Missing id is a required-field violation, not a quiet drop.
+	var missing_id: Dictionary = good.duplicate(true)
+	missing_id["base_zones"] = [{"center": Vector3(0, 0, 0), "half_extents": Vector2(10, 10)}]
+	var missing_id_errors: Array = MapCatalogScript.validate_map_def(missing_id)
+	var found_missing_id: bool = false
+	for e in missing_id_errors:
+		if "base_zones" in e and "id" in e:
+			found_missing_id = true
+			break
+	if not found_missing_id:
+		print("  [FAIL] A base_zone missing its id should fail validation with a useful message, got: ", missing_id_errors)
+		return false
+
+	# half_extents as Vector3 instead of Vector2 should also fail. This
+	# is the bug FIELD_SPEC was specifically designed to catch - an
+	# "obviously rectangular" zone silently accepted with the Y
+	# component ignored would land placement logic on a non-validated
+	# field.
+	var wrong_type: Dictionary = good.duplicate(true)
+	wrong_type["base_zones"] = [{"id": "a", "center": Vector3(0, 0, 0), "half_extents": Vector3(10, 10, 10)}]
+	var wrong_type_errors: Array = MapCatalogScript.validate_map_def(wrong_type)
+	var found_wrong_type: bool = false
+	for e in wrong_type_errors:
+		# FIELD_SPEC emits type names with a capital ("Vector2"), so the
+		# substring match is case-sensitive on the capitalised form.
+		if "base_zones" in e and ("Vector2" in e or "Vector3" in e):
+			found_wrong_type = true
+			break
+	if not found_wrong_type:
+		print("  [FAIL] A base_zone with Vector3 half_extents (should be Vector2) should fail validation, got: ", wrong_type_errors)
+		return false
+
+	print("  [PASS] base_zones validates, rejects missing id, and rejects Vector3 half_extents.")
+	return true
+
+
+func test_assign_base_zones_spreads_them_apart() -> bool:
+	print("Running Test Suite: assign_base_zones() spreads slots across the map (no two adjacent)...")
+	# 2026-08-10 (Chris): the base-zone counterpart of assign_spawns()
+	# must use the same OpenRA max-distance-spread algorithm, so two
+	# players on a 2-zone map get the two zones that are furthest
+	# apart - the same fairness property assign_spawns() proves for
+	# the spawns themselves. A 4-player, 4-zone map must assign all
+	# four zones (no double-claim), and a 2-zone, 3-player map must
+	# refuse rather than silently collapsing to 2 picks.
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	var zones: Array = [
+		{"id": "north", "center": Vector3(0, 0, -40), "half_extents": Vector2(10, 10)},
+		{"id": "east", "center": Vector3(40, 0, 0), "half_extents": Vector2(10, 10)},
+		{"id": "south", "center": Vector3(0, 0, 40), "half_extents": Vector2(10, 10)},
+		{"id": "west", "center": Vector3(-40, 0, 0), "half_extents": Vector2(10, 10)},
+	]
+
+	# 2-player / 4-zone: pick the two furthest apart (north+south or
+	# east+west - the algorithm is deterministic given the same RNG,
+	# so seed it and assert the exact pair it picks).
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = 42
+	var two_player: Dictionary = MapCatalogScript.assign_base_zones(zones, ["player", "enemy"], rng)
+	if two_player.size() != 2:
+		print("  [FAIL] 2 players, 4 zones should yield 2 assignments, got ", two_player.size())
+		return false
+	var two_ids: Array = [two_player["player"], two_player["enemy"]]
+	if two_ids[0] == two_ids[1]:
+		print("  [FAIL] Two players were assigned the SAME zone: ", two_ids)
+		return false
+	# A diagonal pair (north+south OR east+west) is the only correct
+	# answer for "maximise distance across 4 points, pick 2"; the
+	# algorithm's first iteration seeds claimed_centres with the
+	# first pick (any zone, here "north"), then the second iteration
+	# picks the zone with the largest squared distance from "north"
+	# which is "south". Lock the test to that result.
+	if not (two_player["player"] == "north" and two_player["enemy"] == "south"):
+		print("  [FAIL] 2 players on a 4-zone cardinal map should be assigned the diagonal pair north+south, got ", two_player)
+		return false
+
+	# 4-player / 4-zone: every slot gets a unique zone, no double-claim.
+	var four_player: Dictionary = MapCatalogScript.assign_base_zones(zones, ["a", "b", "c", "d"], RandomNumberGenerator.new())
+	if four_player.size() != 4:
+		print("  [FAIL] 4 players, 4 zones should yield 4 assignments, got ", four_player.size())
+		return false
+	var seen: Array = []
+	for slot in four_player:
+		if seen.has(four_player[slot]):
+			print("  [FAIL] Two slots were assigned the same zone: ", four_player)
+			return false
+		seen.append(four_player[slot])
+
+	# 3-player / 2-zone: must REFUSE, not silently pick the first
+	# zone twice. Empty Dictionary return is the explicit under-
+	# provisioned signal; the orchestrator decides what to do with
+	# it (the orchestrator's choice is its own concern, not this
+	# function's). A "first zone wins" collapse here is the bug this
+	# case exists to catch.
+	var under: Dictionary = MapCatalogScript.assign_base_zones(
+		[{"id": "a", "center": Vector3(0, 0, 0), "half_extents": Vector2(10, 10)},
+		{"id": "b", "center": Vector3(40, 0, 0), "half_extents": Vector2(10, 10)}],
+		["a", "b", "c"])
+	if not under.is_empty():
+		print("  [FAIL] 3 players on a 2-zone map should refuse (under-provisioned), got ", under)
+		return false
+
+	# 0-player / N-zone: empty result, no crashes.
+	var zero: Dictionary = MapCatalogScript.assign_base_zones(zones, [])
+	if not zero.is_empty():
+		print("  [FAIL] 0 players should yield an empty assignment, got ", zero)
+		return false
+
+	print("  [PASS] assign_base_zones: 2-player picks the diagonal pair, 4-player claims all 4 zones uniquely, 3/2 refuses, 0/N returns empty.")
+	return true
+
+
+# --- Pre-game HQ-placement phase (Chris 2026-08-10) ---------------------------
+#
+# The new flow replaces the old "auto-spawn HQ + refinery + 3 manufactories"
+# boot with: each player is assigned a base zone, drops their HQ inside it, and
+# then the match is live. The refinery and 2 manufactories are now built
+# NORMALLY during play, paid for out of a starting bank. These suites assert
+# the four load-bearing pieces of that contract:
+#
+#   1. STARTING_CREDITS covers the smart opening (refinery + 2 of any
+#      manufactory tier) without forcing the player to wait on income.
+#   2. _spawn_bases() only places the HQ - the refinery and the three
+#      manufactories the old runtime dropped are gone.
+#   3. The AI auto-places its HQ at the centre of its assigned zone (no
+#      human-placement UX for the AI; the same _spawn_bases() path).
+#   4. The human-placement hook refuses positions outside the assigned
+#      zone, refuses a second HQ for the same team, and otherwise
+#      commits - the property the placement-UI layer will lean on.
+
+# Reads the starting-bank constant and the building costs from the catalogs
+# they live in, then asserts the bank covers the worst-case smart opening.
+# This is a CONSTANT-FOLLOWING test on purpose: if anyone bumps STARTING_CREDITS
+# without re-running the worst case through the catalog, this fails with the
+# new number, which is the exact signal that the bank was changed and the
+# opening economy should be re-evaluated.
+func test_starting_bank_covers_refinery_plus_two_manufactories() -> bool:
+	print("Running Test Suite: Starting Bank Covers Refinery + 2 Manufactories...")
+	var BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
+	var bank: int = MatchDirectorScript.STARTING_CREDITS
+	if bank <= 0:
+		print("  [FAIL] STARTING_CREDITS is non-positive: ", bank)
+		return false
+	# The "smart opening" is refinery + 2 of the SAME tier. Worst case is
+	# the most expensive tier (heavy_manufactory), so test against that.
+	# Crystal cost is intentionally ignored: the bank is metal-only at
+	# match start, and crystal is mined normally - the bank only has to
+	# cover the metal side of the opening.
+	var refinery_metal: int = int(BuildingCatalogScript.STATS["refinery"].get("cost_metal", 0))
+	var heavy_metal: int = int(BuildingCatalogScript.STATS["heavy_manufactory"].get("cost_metal", 0))
+	if refinery_metal <= 0 or heavy_metal <= 0:
+		print("  [FAIL] Building catalog returned non-positive costs (refinery=", refinery_metal,
+			", heavy_manufactory=", heavy_metal, ") - this test assumes those are the canonical numbers")
+		return false
+	var worst_case: int = refinery_metal + 2 * heavy_metal
+	if bank < worst_case:
+		print("  [FAIL] STARTING_CREDITS=", bank, " doesn't cover the worst-case smart opening (refinery ",
+			refinery_metal, " + 2 heavy_manufactory ", heavy_metal, " = ", worst_case, ")")
+		return false
+	# And every other tier pair - the smart opening shouldn't fail because
+	# the player picked a cheaper tier. Belt-and-braces over just heavy.
+	for tier in BuildingCatalogScript.MANUFACTORY_KINDS:
+		var m: int = int(BuildingCatalogScript.STATS[tier].get("cost_metal", 0))
+		if bank < refinery_metal + 2 * m:
+			print("  [FAIL] STARTING_CREDITS=", bank, " doesn't cover refinery + 2 ", tier,
+				" (refinery ", refinery_metal, " + 2 ", tier, " ", m, " = ", refinery_metal + 2 * m, ")")
+			return false
+	print("  [PASS] STARTING_CREDITS=", bank, " covers refinery (", refinery_metal, " metal) + 2 of any manufactory tier (worst: 2 heavy = ", 2 * heavy_metal, " metal, total ", worst_case, ").")
+	return true
+
+
+# Asserts the post-trim _spawn_bases() only places HQs - no refinery, no
+# manufactories, no other auto-spawned structures. This is the property the
+# pre-game phase contract rests on: a match starting "live" with anything
+# other than an HQ would be a match where the new flow's claim ("player
+# builds the rest") is false.
+#
+# Spins up a real MatchDirector with a minimal map (north+south base_zones,
+# matching player+enemy spawns) and reads the structures group after
+# _spawn_bases() returns. Both the spawning and the post-spawn power recalc
+# are exercised, so a regression in either path shows up here.
+func test_spawn_bases_drops_only_hq_not_refinery_or_manufactories() -> bool:
+	print("Running Test Suite: _spawn_bases() Drops Only HQs (no refinery, no manufactories)...")
+	var EconomyServiceScript = preload("res://scripts/battle/economy/economy_service.gd")
+	var director := TestMatchDirector.new()
+	director.current_map = {
+		"id": "test_two_zones_hq_only",
+		"map_half_extents": 80.0,
+		"world_scale": 1,
+		"terrain": {"size": Vector2(160, 160)},
+		"spawns": [
+			{"id": "player", "hq": Vector3(0, 0, 50)},
+			{"id": "enemy", "hq": Vector3(0, 0, -50)},
+		],
+		"base_zones": [
+			{"id": "north", "center": Vector3(0, 0, 50), "half_extents": Vector2(15, 15)},
+			{"id": "south", "center": Vector3(0, 0, -50), "half_extents": Vector2(15, 15)},
+		],
+	}
+	director.economy = EconomyServiceScript.new()
+	director.economy.add_team(0, 1200)
+	director.economy.add_team(1, 1200)
+	root.add_child(director)
+	director._spawn_bases()
+
+	# Walk the structures group rather than counting on add_child side
+	# effects - the same lookup place_hq_for_human() uses, so the
+	# count here is what the placement-UI layer would observe.
+	# Filter to structures parented to this director, so a previous
+	# test's leaked structure (if any) can't poison the count.
+	var hqs: Array = []
+	var refineries: Array = []
+	var manufactories: Array = []
+	var others: Array = []
+	for s in director.get_tree().get_nodes_in_group("structures"):
+		if not is_instance_valid(s) or s.get_parent() != director:
+			continue
+		match s.kind:
+			"hq": hqs.append(s)
+			"refinery": refineries.append(s)
+			"light_manufactory", "medium_manufactory", "heavy_manufactory":
+				manufactories.append(s)
+			_: others.append(s)
+
+	director.queue_free()
+
+	if hqs.size() != 2:
+		print("  [FAIL] expected exactly 2 HQs (one per team), got ", hqs.size())
+		return false
+	if refineries.size() != 0:
+		print("  [FAIL] expected 0 refineries (player must build their own), got ", refineries.size())
+		return false
+	if manufactories.size() != 0:
+		print("  [FAIL] expected 0 manufactories (player must build their own), got ", manufactories.size())
+		return false
+	if others.size() != 0:
+		print("  [FAIL] expected 0 other auto-spawned structures, got ", others.size(), " (kinds: ", others.map(func(s): return s.kind), ")")
+		return false
+	print("  [PASS] _spawn_bases() placed exactly 2 HQs (player + enemy) and no refinery, no manufactory, no other structure.")
+	return true
+
+
+# The AI gets no placement UI - it auto-drops its HQ at the centre of its
+# assigned base zone, the same way the old runtime used the spawn.hq
+# coordinate. This is the assertion that contract still holds under the
+# new base-zones flow: a player on a north-zone map and an AI on the
+# south-zone map should see the AI HQ at the south-zone centre, not at
+# spawn.hq, not at (0,0,0).
+func test_ai_auto_places_hq_in_assigned_base_zone() -> bool:
+	print("Running Test Suite: AI Auto-Places HQ at Centre of Its Assigned Base Zone...")
+	var EconomyServiceScript = preload("res://scripts/battle/economy/economy_service.gd")
+	var director := TestMatchDirector.new()
+	# Asymmetric map: spawn.hq says one thing, the AI's base zone is
+	# somewhere else on purpose. If _spawn_bases() were still using
+	# spawn.hq, the AI HQ would land at (0,0,-50), not at the zone
+	# centre - the failure mode the test is built to catch.
+	director.current_map = {
+		"id": "test_ai_zone_autoplace",
+		"map_half_extents": 120.0,
+		"world_scale": 1,
+		"terrain": {"size": Vector2(240, 240)},
+		"spawns": [
+			{"id": "player", "hq": Vector3(0, 0, 50)},
+			{"id": "enemy", "hq": Vector3(0, 0, -50)},
+		],
+		"base_zones": [
+			{"id": "north", "center": Vector3(20, 0, 70), "half_extents": Vector2(15, 15)},
+			{"id": "south", "center": Vector3(-25, 0, -90), "half_extents": Vector2(15, 15)},
+		],
+	}
+	director.economy = EconomyServiceScript.new()
+	director.economy.add_team(0, 1200)
+	director.economy.add_team(1, 1200)
+	root.add_child(director)
+	director._spawn_bases()
+
+	# Find the enemy HQ. Use the global_position (terrain-snapped Y) so
+	# the test isn't sensitive to the exact snap value, only to X/Z.
+	# Filter to structures parented to this director, so a previous
+	# test's leaked structure can't be confused for a fresh one.
+	var enemy_hq = null
+	for s in director.get_tree().get_nodes_in_group("structures"):
+		if is_instance_valid(s) and s.get_parent() == director and s.kind == "hq" and s.team == 1:
+			enemy_hq = s
+			break
+	if enemy_hq == null:
+		print("  [FAIL] no enemy HQ was placed by _spawn_bases()")
+		director.queue_free()
+		return false
+
+	# With exactly 2 slots and 2 zones, the max-distance-spread lands
+	# slot 0 on north (20,0,70) (closer to the player spawn at (0,0,50))
+	# and slot 1 on south (-25,0,-90) (further from it). The
+	# PLAYER_TEAM=0, ENEMY_TEAM=1 ordering in _spawn_bases() keeps
+	# the convention.
+	var expected_centre: Vector3 = Vector3(-25, 0, -90)
+	var got: Vector3 = enemy_hq.global_position
+	if absf(got.x - expected_centre.x) > 0.5 or absf(got.z - expected_centre.z) > 0.5:
+		print("  [FAIL] enemy HQ at (", got.x, ", ", got.z, "), expected near (",
+			expected_centre.x, ", ", expected_centre.z, ") - AI is not using the zone centre")
+		director.queue_free()
+		return false
+
+	# Sanity: the PLAYER HQ is at its own zone centre, not at the
+	# original spawn.hq, which proves the same fix applies to both teams.
+	var player_hq = null
+	for s in director.get_tree().get_nodes_in_group("structures"):
+		if is_instance_valid(s) and s.get_parent() == director and s.kind == "hq" and s.team == 0:
+			player_hq = s
+			break
+	director.queue_free()
+	if player_hq == null:
+		print("  [FAIL] no player HQ was placed by _spawn_bases()")
+		return false
+	var expected_player: Vector3 = Vector3(20, 0, 70)
+	var pg: Vector3 = player_hq.global_position
+	if absf(pg.x - expected_player.x) > 0.5 or absf(pg.z - expected_player.z) > 0.5:
+		print("  [FAIL] player HQ at (", pg.x, ", ", pg.z, "), expected near (",
+			expected_player.x, ", ", expected_player.z, ")")
+		return false
+	print("  [PASS] Both HQs placed at their assigned base-zone centres (player: (",
+		pg.x, ",", pg.z, "), enemy: (", got.x, ",", got.z, ")) - not at the legacy spawn.hq coordinates.")
+	return true
+
+
+# The human-placement hook must:
+#   - REFUSE positions outside the assigned zone (half_extents rectangle);
+#   - REFUSE a second call while a live player HQ already exists;
+#   - COMMIT on a valid first call.
+# All three are the contract the placement-UI layer will lean on, and
+# they're cheap to test in isolation. The valid-commit case is checked
+# by counting structures in the group after a successful call.
+func test_place_hq_for_human_refuses_outside_zone_and_double_place() -> bool:
+	print("Running Test Suite: place_hq_for_human() Refuses Outside Zone and Double-Place...")
+	var MapCatalogScript = preload("res://scripts/map_catalog.gd")
+	var EconomyServiceScript = preload("res://scripts/battle/economy/economy_service.gd")
+	var director := TestMatchDirector.new()
+	director.current_map = {
+		"id": "test_hq_human_placement",
+		"map_half_extents": 80.0,
+		"world_scale": 1,
+		"terrain": {"size": Vector2(160, 160)},
+		"spawns": [
+			{"id": "player", "hq": Vector3(0, 0, 40)},
+			{"id": "enemy", "hq": Vector3(0, 0, -40)},
+		],
+		"base_zones": [
+			# 15x15 zone centred at (0,0,40) - inside is X in [-15,15],
+			# Z in [25,55]. Anything past those edges is outside.
+			{"id": "north", "center": Vector3(0, 0, 40), "half_extents": Vector2(15, 15)},
+			{"id": "south", "center": Vector3(0, 0, -40), "half_extents": Vector2(15, 15)},
+		],
+	}
+	director.economy = EconomyServiceScript.new()
+	director.economy.add_team(0, 1200)
+	director.economy.add_team(1, 1200)
+	root.add_child(director)
+	director._spawn_bases()
+
+	# Snapshot: after _spawn_bases() there's exactly one player HQ at the
+	# zone centre, which the hook itself is allowed to interact with.
+	# The double-place test below REQUIRES the player HQ to already be
+	# live, so we don't try to call the hook before _spawn_bases().
+	# Filter to structures parented to this director (see TestMatchDirector
+	# header for why this matters across the retry path).
+	var hq_count_before: int = 0
+	for s in director.get_tree().get_nodes_in_group("structures"):
+		if is_instance_valid(s) and s.get_parent() == director and s.kind == "hq" and s.team == 0:
+			hq_count_before += 1
+	if hq_count_before != 1:
+		print("  [FAIL] precondition: expected 1 player HQ after _spawn_bases(), got ", hq_count_before)
+		director.queue_free()
+		return false
+
+	# OUTSIDE the zone. Zone is X[-15,15], Z[25,55]. (100, 0, 100) is
+	# well past both edges. Hook must refuse.
+	var refused_outside: bool = not director.place_hq_for_human(Vector3(100, 0, 100))
+	if not refused_outside:
+		print("  [FAIL] place_hq_for_human() accepted (100,0,100), which is outside the X[-15,15] Z[25,55] zone")
+		director.queue_free()
+		return false
+
+	# Just OUTSIDE one axis. X=14 is in, X=16 is out. Catches off-by-one
+	# in the half_extents comparison (using >= instead of > would let
+	# X=15 through, which is a 0-width sliver at the edge - the spec
+	# says inside-the-rectangle, edge is a degenerate case the test
+	# pins down).
+	var refused_edge_x: bool = not director.place_hq_for_human(Vector3(16, 0, 40))
+	if not refused_edge_x:
+		print("  [FAIL] place_hq_for_human() accepted (16,0,40), which is X-out-of-zone (X edge is 15)")
+		director.queue_free()
+		return false
+	var refused_edge_z: bool = not director.place_hq_for_human(Vector3(0, 0, 56))
+	if not refused_edge_z:
+		print("  [FAIL] place_hq_for_human() accepted (0,0,56), which is Z-out-of-zone (Z edge is 55)")
+		director.queue_free()
+		return false
+
+	# DOUBLE-PLACE: an in-zone call (10, 0, 40) should also refuse,
+	# because the player already has a live HQ from _spawn_bases().
+	# This is the "one human HQ per match" invariant.
+	var refused_double: bool = not director.place_hq_for_human(Vector3(10, 0, 40))
+	if not refused_double:
+		print("  [FAIL] place_hq_for_human() accepted a second call while a live player HQ exists")
+		director.queue_free()
+		return false
+
+	# STRUCTURE COUNT: after the four refused calls, still exactly one
+	# player HQ. No phantom HQs from any of the refused attempts.
+	var hq_count_after: int = 0
+	for s in director.get_tree().get_nodes_in_group("structures"):
+		if is_instance_valid(s) and s.get_parent() == director and s.kind == "hq" and s.team == 0:
+			hq_count_after += 1
+	director.queue_free()
+	# queue_free is DEFERRED - it actually frees at end-of-frame. The next
+	# director (clean_director below) is added to the tree within the same
+	# test function, which means without this await, the first director's
+	# HQ is still in the "structures" group when the second part of the
+	# test runs. place_hq_for_human's double-place check walks the WHOLE
+	# group (the orchestrator owns one match, so it has no reason to
+	# filter), and would see the leaked HQ and refuse the legitimate
+	# commit. One frame's wait is enough; the actual free is queued,
+	# not just delayed.
+	await tree.process_frame
+	if hq_count_after != 1:
+		print("  [FAIL] after 4 refused calls, expected 1 player HQ, got ", hq_count_after)
+		return false
+
+	# The COMMIT path needs a director with NO live player HQ - the
+	# realistic case is the placement-UI flow calling this hook before
+	# _spawn_bases() ever runs (zone auto-place is gated to the AI
+	# only; the human flow defers HQ placement). Re-spin a clean
+	# director and confirm the commit path works in isolation.
+	var clean_director := TestMatchDirector.new()
+	clean_director.current_map = {
+		"id": "test_hq_human_commit_only",
+		"map_half_extents": 80.0,
+		"world_scale": 1,
+		"terrain": {"size": Vector2(160, 160)},
+		"spawns": [
+			{"id": "player", "hq": Vector3(0, 0, 40)},
+			{"id": "enemy", "hq": Vector3(0, 0, -40)},
+		],
+		"base_zones": [
+			{"id": "north", "center": Vector3(0, 0, 40), "half_extents": Vector2(15, 15)},
+			{"id": "south", "center": Vector3(0, 0, -40), "half_extents": Vector2(15, 15)},
+		],
+	}
+	clean_director.economy = EconomyServiceScript.new()
+	clean_director.economy.add_team(0, 1200)
+	clean_director.economy.add_team(1, 1200)
+	root.add_child(clean_director)
+	# Skip _spawn_bases() to simulate the human-placement-first path.
+	# We still need _team_base_zone set, which is what _spawn_bases
+	# would have done. Do it inline so the hook can resolve the zone.
+	clean_director._team_base_zone = MapCatalogScript.assign_base_zones(
+		clean_director.current_map.get("base_zones", []),
+		[0, 1])
+	var placed: bool = clean_director.place_hq_for_human(Vector3(5, 0, 35))
+	if not placed:
+		print("  [FAIL] place_hq_for_human() refused a valid in-zone commit (5,0,35)")
+		clean_director.queue_free()
+		return false
+	var hq_at_5: bool = false
+	for s in clean_director.get_tree().get_nodes_in_group("structures"):
+		if is_instance_valid(s) and s.get_parent() == clean_director and s.kind == "hq" and s.team == 0:
+			var gp: Vector3 = s.global_position
+			if absf(gp.x - 5) < 0.5 and absf(gp.z - 35) < 0.5:
+				hq_at_5 = true
+	clean_director.queue_free()
+	if not hq_at_5:
+		print("  [FAIL] commit returned true but no player HQ landed at (5,0,35)")
+		return false
+
+	print("  [PASS] place_hq_for_human() refuses outside-zone (incl. one-axis edge), refuses double-place, and commits on a valid in-zone call.")
+	return true
+
+
+# --- Ambient harvestable trees (Chris 2026-08-10) -----------------------------
+#
+# The "ambient forest" feature: a 20-variant .glb pool of single trees
+# (build_meshes.build_ambient_tree, exported as ambient_tree_0..19.glb
+# alongside the existing resource_lumber_*.glb family) is scattered as
+# individual ResourceNode instances across every map's baseline ground.
+# Ambient trees are HARVESTABLE (resource_type = "lumber", join the
+# resource_nodes group, harvest() drains their amount) but they do NOT
+# regrow (resource_node.gd's is_ambient flag suppresses both the
+# per-collectible regrow and the per-field respawn). The 4 harvestable
+# LUMBER FIELDS in open_plains.json still work exactly as they did -
+# this suite covers the NEW code path, not the old one.
+
+func test_ambient_tree_pool_size_matches_constant() -> bool:
+	print("Running Test Suite: Ambient Tree Pool - exported .glb count matches AMBIENT_TREE_POOL_SIZE constant...")
+	# The constant in resource_node.gd is the source of truth the loader
+	# rolls against (`idx = randi() % AMBIENT_TREE_POOL_SIZE`). A constant
+	# larger than the number of files on disk rolls indices at missing
+	# .glb files and falls through to the procedural cylinder - exactly
+	# the silent-fallback bug AUTHORED_POOL_SIZES exists to prevent at
+	# the harvestable scale, now mirrored at the ambient scale.
+	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
+	var pool_size: int = ResourceNodeScript.AMBIENT_TREE_POOL_SIZE
+	if pool_size <= 0:
+		print("  [FAIL] AMBIENT_TREE_POOL_SIZE is non-positive: ", pool_size)
+		return false
+	for i in range(pool_size):
+		var path: String = ResourceNodeScript.AMBIENT_TREE_MODEL_DIR % i
+		if not ResourceLoader.exists(path):
+			print("  [FAIL] Expected ambient tree pool file missing: ", path,
+				" (AMBIENT_TREE_POOL_SIZE=", pool_size, " but only ", i, " files exist on disk)")
+			return false
+	print("  [PASS] AMBIENT_TREE_POOL_SIZE=", pool_size, " matches the ", pool_size, " exported ambient_tree_*.glb files.")
+	return true
+
+
+func test_ambient_tree_uses_ambient_pool_not_lumber_pool() -> bool:
+	print("Running Test Suite: Ambient Tree Setup Picks From ambient_tree_* Pool, Not resource_lumber_*...")
+	# An ambient tree with resource_type = "lumber" and is_ambient = true
+	# must NOT pick from AUTHORED_POOL_SIZES["lumber"] = 3 (the
+	# harvestable "stand" family), and must NOT use the procedural lumber
+	# cone fallback. It has to instantiate one of the 20 single-tree
+	# .glb files. Failure mode: a tile showing a 3-tree clumped "stand"
+	# at a position that was supposed to be a single tree - visually
+	# wrong AND it makes the scatter read as "duplicate lumber fields,"
+	# not "ambient forest."
+	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
+	var node = ResourceNodeScript.new()
+	node.is_ambient = true
+	root.add_child(node)
+	node.global_position = Vector3(17.5, 0, -23.0)
+	node.setup("lumber", 40)
+	await tree.process_frame
+
+	if node.resource_type != "lumber":
+		print("  [FAIL] Ambient tree should keep resource_type='lumber' (so harvesters credit it as lumber), got '", node.resource_type, "'")
+		node.queue_free()
+		return false
+	if not node.is_ambient:
+		print("  [FAIL] is_ambient flag was reset by setup()")
+		node.queue_free()
+		return false
+	if node.mesh_inst == null:
+		print("  [FAIL] Ambient tree got no mesh - authored pool AND procedural fallback both returned null")
+		node.queue_free()
+		return false
+	# The ambient_tree_*.glb pool is selected by a SCENE load via
+	# PackedScene.instantiate(), not a Mesh load - so the right
+	# "where did this come from" property is Node.scene_file_path (the
+	# file the PackedScene was loaded from), NOT resource_path (which
+	# is a Resource property and is null on Node3D instances). The
+	# root mesh_inst carries scene_file_path back to one of the
+	# ambient_tree_N.glb files; descendant MeshInstance3D children
+	# carry .mesh.resource_path. Either chain is a valid signal.
+	var got_ambient: bool = false
+	var root_path: String = String(node.mesh_inst.scene_file_path) if node.mesh_inst != null else ""
+	if "ambient_tree_" in root_path:
+		got_ambient = true
+	# Walk the mesh tree looking for a MeshInstance3D whose .mesh
+	# resource_path points at an ambient_tree_*.glb (descendants
+	# also carry the source, redundantly, for any test that didn't
+	# keep a handle on the root).
+	if not got_ambient:
+		var stack: Array = [node.mesh_inst]
+		while not stack.is_empty():
+			var n: Node = stack.pop_back()
+			for c in n.get_children():
+				stack.append(c)
+			if n is MeshInstance3D and n.mesh != null:
+				var mp: String = String(n.mesh.resource_path)
+				if "ambient_tree_" in mp:
+					got_ambient = true
+					break
+	node.queue_free()
+	if not got_ambient:
+		print("  [FAIL] Ambient tree setup did not load any ambient_tree_*.glb (mesh_inst scene_file_path was: ", root_path, ")")
+		return false
+	print("  [PASS] Ambient tree setup instantiates from the ambient_tree_*.glb pool, not the harvestable resource_lumber_* family.")
+	return true
+
+
+func test_ambient_tree_does_not_regrow_after_harvest() -> bool:
+	print("Running Test Suite: Ambient Tree Harvester Drain - amount stays at 0, no regrow, removed from resource_nodes group...")
+	# The whole point of the ambient flag: a harvester that empties an
+	# ambient tree should find it gone for the rest of the match, NOT
+	# regrow back to full after 15s the way a harvestable lumber
+	# collectible does. Verified two ways: amount stays at 0 across a
+	# physics tick window longer than REGROW_DELAY, AND the node is
+	# removed from the resource_nodes group (which is what gates
+	# "find nearest resource" in battle_unit.gd's _auto_find_harvest_
+	# work - so even if a bug let amount stay positive, the harvester
+	# would still walk past it).
+	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
+	var node = ResourceNodeScript.new()
+	node.is_ambient = true
+	root.add_child(node)
+	node.global_position = Vector3(5.0, 0, 5.0)
+	node.setup("lumber", 40)
+	await tree.process_frame
+
+	# Harvest the full amount in one call.
+	var got: int = node.harvest(40)
+	if got != 40:
+		print("  [FAIL] Ambient tree should have yielded 40 on a full harvest, got ", got)
+		node.queue_free()
+		return false
+	if node.amount != 0:
+		print("  [FAIL] Ambient tree amount should be 0 after a full harvest, got ", node.amount)
+		node.queue_free()
+		return false
+	if node.is_in_group("resource_nodes"):
+		print("  [FAIL] Empty ambient tree should be removed from the resource_nodes group (so harvesters don't see it)")
+		node.queue_free()
+		return false
+
+	# Tick physics well past REGROW_DELAY (15s) - if regrow is not
+	# actually suppressed, amount would be back at start_amount by now.
+	# 30 physics ticks * 1.0s = 30s, twice the delay.
+	for i in range(30):
+		node._physics_process(1.0)
+	if node.amount != 0:
+		print("  [FAIL] Ambient tree regrew from 0 to ", node.amount, " after 30s of physics ticks - is_ambient should suppress regrow entirely")
+		node.queue_free()
+		return false
+	if node.is_in_group("resource_nodes"):
+		print("  [FAIL] Ambient tree was re-added to the resource_nodes group after regrow window - is_ambient should stay out")
+		node.queue_free()
+		return false
+
+	# The negative case: a non-ambient (field) node on the same fixture
+	# MUST still regrow - confirms the suppress only applies to ambient
+	# and didn't break the existing path.
+	var field_node = ResourceNodeScript.new()
+	field_node.is_ambient = false
+	root.add_child(field_node)
+	field_node.global_position = Vector3(-5.0, 0, -5.0)
+	field_node.setup("lumber", 40)
+	await tree.process_frame
+	field_node.harvest(40)
+	if field_node.is_in_group("resource_nodes"):
+		print("  [FAIL] Non-ambient (field) node was also removed from resource_nodes on empty - regrow was suppressed for the wrong type")
+		field_node.queue_free()
+		node.queue_free()
+		return false
+	# Tick past REGROW_DELAY and confirm amount comes back.
+	for i in range(30):
+		field_node._physics_process(1.0)
+	if field_node.amount <= 0:
+		print("  [FAIL] Non-ambient field node failed to regrow - the is_ambient gate may have broken the regrow path for field nodes too")
+		field_node.queue_free()
+		node.queue_free()
+		return false
+
+	field_node.queue_free()
+	node.queue_free()
+	print("  [PASS] Ambient tree stays at 0 and out of the resource_nodes group after a full harvest; field nodes still regrow as before.")
+	return true
+
+
+func test_ambient_trees_scatter_is_deterministic() -> bool:
+	print("Running Test Suite: Ambient Tree Scatter - same map name yields identical placement (screenshot-verification contract)...")
+	# A given map dresses identically run to run, both for visual diff
+	# and for the scatter-distance / avoid-radius asserts that would
+	# otherwise flake on re-seed. Two passes of the same fixture must
+	# produce ResourceNodes at the same positions with the same picked
+	# pool indices. We assert the Nth spawned node's global_position
+	# matches exactly between runs (the strongest possible determinism
+	# contract - same seed, same draws, same positions).
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	var map_def_a = {
+		"map_half_extents": 100.0,
+		"name": "ambient_determinism",
+	}
+	var map_def_b = {
+		"map_half_extents": 100.0,
+		"name": "ambient_determinism",
+	}
+	var parent_a := Node3D.new()
+	root.add_child(parent_a)
+	TerrainBuilderScript._spawn_ambient_trees(map_def_a, parent_a)
+	await tree.process_frame
+	var parent_b := Node3D.new()
+	root.add_child(parent_b)
+	TerrainBuilderScript._spawn_ambient_trees(map_def_b, parent_b)
+	await tree.process_frame
+
+	var positions_a: Array = []
+	var positions_b: Array = []
+	for child in parent_a.get_children():
+		positions_a.append(child.global_position)
+	for child in parent_b.get_children():
+		positions_b.append(child.global_position)
+	parent_a.queue_free()
+	parent_b.queue_free()
+
+	if positions_a.is_empty():
+		print("  [FAIL] No ambient trees scattered on the test map - density formula may be off")
+		return false
+	if positions_a.size() != positions_b.size():
+		print("  [FAIL] Same map fixture produced ", positions_a.size(), " ambient trees on run A and ", positions_b.size(), " on run B - count diverges (non-deterministic)")
+		return false
+	for i in range(positions_a.size()):
+		var pa: Vector3 = positions_a[i]
+		var pb: Vector3 = positions_b[i]
+		if pa != pb:
+			print("  [FAIL] Ambient tree ", i, " at ", pa, " (run A) vs ", pb, " (run B) - same map must produce identical scatter")
+			return false
+	print("  [PASS] Same map fixture produces ", positions_a.size(), " ambient trees at identical positions on two independent scatter runs.")
+	return true
+
+
+func test_ambient_trees_respect_avoid_radii() -> bool:
+	print("Running Test Suite: Ambient Tree Scatter - respects avoid radii (water / surface_zones / spawns / resource_nodes / bridges)...")
+	# An ambient tree that landed on a water rectangle, inside a
+	# surface_zone (which gets its OWN scatter), on top of a harvestable
+	# resource_node (the field would be invisible behind a forest), or
+	# inside a spawn's HQ/factory/refinery/harvester position (clutter
+	# on a player's own base) would all be visible bugs. A tree that
+	# landed in a bridge rect would look like foliage on a road. None
+	# of these positions are real ambient-forest ground.
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	var map_def = {
+		"map_half_extents": 100.0,
+		"name": "ambient_avoidance",
+		"water_areas": [{"center": Vector3(40, 0, 0), "half_extents": Vector2(20, 20)}],
+		"surface_zones": [{"center": Vector3(-50, 0, 0), "half_extents": Vector2(15, 15), "surface_type": "marsh"}],
+		"bridges": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(20, 5)}],
+		"obstacles": [{"center": Vector3(0, 0, 50), "half_extents": Vector2(8, 8), "type": "rock"}],
+		"resource_nodes": [
+			{"position": Vector3(60, 0, 60), "type": "lumber", "amount": 900},
+		],
+		"spawns": [
+			{"id": "player", "hq": Vector3(-30, 0, -30), "factory": Vector3(-30, 0, -20), "refinery": Vector3(-30, 0, -10), "harvester": Vector3(-30, 0, 0)},
+			{"id": "enemy", "hq": Vector3(30, 0, 30), "factory": Vector3(30, 0, 20), "refinery": Vector3(30, 0, 10), "harvester": Vector3(30, 0, 0)},
+		],
+	}
+	var parent := Node3D.new()
+	root.add_child(parent)
+	TerrainBuilderScript._spawn_ambient_trees(map_def, parent)
+	await tree.process_frame
+
+	var AMBIENT_AVOID: float = TerrainBuilderScript.AMBIENT_TREE_AVOID_RADIUS
+	# Bridges only forbid a tree landing ON the rect (rect overlap), not
+	# the per-point radius - the existing _spawn_grassland_clutter
+	# uses the same per-rect rejection for bridges.
+	var violations: Array = []
+	for child in parent.get_children():
+		var p: Vector3 = child.global_position
+		# Water
+		if absf(p.x - 40.0) < 20.0 and absf(p.z - 0.0) < 20.0:
+			violations.append("tree at %s inside water_area" % p)
+		# Surface zone (rect)
+		if absf(p.x - (-50.0)) < 15.0 and absf(p.z - 0.0) < 15.0:
+			violations.append("tree at %s inside surface_zone 'marsh'" % p)
+		# Bridge rect
+		if absf(p.x - 0.0) < 20.0 and absf(p.z - 0.0) < 5.0:
+			violations.append("tree at %s on bridge rect" % p)
+		# Resource node
+		if Vector2(p.x - 60.0, p.z - 60.0).length() < AMBIENT_AVOID:
+			violations.append("tree at %s within %s of resource_node at (60,60)" % [p, AMBIENT_AVOID])
+		# Spawn positions (HQ / factory / refinery / harvester)
+		for spawn_pt in [Vector3(-30, 0, -30), Vector3(-30, 0, -20), Vector3(-30, 0, -10), Vector3(-30, 0, 0),
+						 Vector3(30, 0, 30), Vector3(30, 0, 20), Vector3(30, 0, 10), Vector3(30, 0, 0)]:
+			if Vector2(p.x - spawn_pt.x, p.z - spawn_pt.z).length() < AMBIENT_AVOID:
+				violations.append("tree at %s within %s of spawn point %s" % [p, AMBIENT_AVOID, spawn_pt])
+	parent.queue_free()
+
+	if not violations.is_empty():
+		for v in violations:
+			print("  [FAIL] ", v)
+		return false
+	print("  [PASS] No ambient tree landed on water, on a surface_zone, on a bridge, on a resource_node, or within ", AMBIENT_AVOID, " of any spawn structure.")
+	return true
+
+
+# --- Ambient ore (2026-08-10, paired with the ambient-tree trim) ---------------
+#
+# The tree-trim freed up scatter budget for an ambient ore pass, and
+# the test below verifies the four properties the ore pass has to
+# hold for the design to be sound:
+#   1. Ambient ore instantiates from the existing 3-variant
+#      resource_ore_*.glb pool (NOT the 20-variant ambient_tree_* one
+#      - a separate ambient_ore_* family was considered and rejected;
+#      the existing outcrop IS the right "single find" silhouette).
+#   2. The is_ambient flag suppresses regrow the same way it does for
+#      trees - covered in test_ambient_tree_does_not_regrow_after_
+#      harvest above for the flag in general; the test here is just
+#      the ore-specific path through the same gate.
+#   3. The scatter is deterministic from the map name (same contract
+#      as the trees).
+#   4. An ambient ore never lands on top of an ambient tree (the
+#      cross-pass avoidance set), or on water / surface_zones /
+#      bridges / harvestable resource_nodes / within the spawn
+#      avoid radius.
+
+func test_ambient_ore_picks_from_resource_ore_pool() -> bool:
+	print("Running Test Suite: Ambient Ore Setup Picks From resource_ore_* Pool, Not ambient_tree_*...")
+	# The whole architectural point of the ore pass: it reuses the
+	# existing harvestable ore outcrop (3 variants) rather than
+	# spawning a parallel ambient_ore_* family. A failure here means
+	# either (a) _try_spawn_ambient_authored's "non-lumber falls
+	# through to harvestable pool" branch is broken, or (b) someone
+	# added an ambient_ore_* family that drifted from the
+	# harvestable one.
+	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
+	var node = ResourceNodeScript.new()
+	node.is_ambient = true
+	root.add_child(node)
+	node.global_position = Vector3(-7.3, 0, 11.8)
+	node.setup("ore", 60)
+	await tree.process_frame
+
+	if node.resource_type != "ore":
+		print("  [FAIL] Ambient ore should keep resource_type='ore', got '", node.resource_type, "'")
+		node.queue_free()
+		return false
+	if not node.is_ambient:
+		print("  [FAIL] is_ambient flag was reset by setup()")
+		node.queue_free()
+		return false
+	if node.mesh_inst == null:
+		print("  [FAIL] Ambient ore got no mesh - authored pool AND procedural fallback both returned null")
+		node.queue_free()
+		return false
+	# Must be from resource_ore_*.glb - either via the scene_file_path
+	# on the root, or via the .mesh.resource_path on a descendant
+	# MeshInstance3D.
+	var got_ore: bool = false
+	var root_path: String = String(node.mesh_inst.scene_file_path) if node.mesh_inst != null else ""
+	if "resource_ore_" in root_path:
+		got_ore = true
+	if not got_ore:
+		var stack: Array = [node.mesh_inst]
+		while not stack.is_empty():
+			var n: Node = stack.pop_back()
+			for c in n.get_children():
+				stack.append(c)
+			if n is MeshInstance3D and n.mesh != null:
+				var mp: String = String(n.mesh.resource_path)
+				if "resource_ore_" in mp:
+					got_ore = true
+					break
+	# Negative case: must NOT be from ambient_tree_*.glb. A failure
+	# here would mean _try_spawn_ambient_authored's lumber branch is
+	# being taken for an ore-typed call, which would land an actual
+	# tree where an outcrop should be - the "wrong species" bug.
+	var got_tree: bool = false
+	if "ambient_tree_" in root_path:
+		got_tree = true
+	if not got_tree:
+		var stack2: Array = [node.mesh_inst]
+		while not stack2.is_empty():
+			var n: Node = stack2.pop_back()
+			for c in n.get_children():
+				stack2.append(c)
+			if n is MeshInstance3D and n.mesh != null:
+				var mp: String = String(n.mesh.resource_path)
+				if "ambient_tree_" in mp:
+					got_tree = true
+					break
+	node.queue_free()
+	if not got_ore:
+		print("  [FAIL] Ambient ore setup did not load any resource_ore_*.glb (scene_file_path was: ", root_path, ")")
+		return false
+	if got_tree:
+		print("  [FAIL] Ambient ore loaded an ambient_tree_*.glb instead of a resource_ore_*.glb - _try_spawn_ambient_authored's lumber branch is being taken for an ore-typed call")
+		return false
+	print("  [PASS] Ambient ore instantiates from the resource_ore_*.glb pool (and never from ambient_tree_*).")
+	return true
+
+
+func test_ambient_ore_does_not_regrow() -> bool:
+	print("Running Test Suite: Ambient Ore Harvester Drain - no regrow, removed from resource_nodes group...")
+	# Same contract as ambient trees; the is_ambient flag's regrow
+	# suppression is type-agnostic (resource_node.gd's _physics_process
+	# checks the flag before the type), so the test is structurally
+	# identical to test_ambient_tree_does_not_regrow_after_harvest but
+	# for ore. Catches a future regression where someone might
+	# type-conditional the gate and accidentally let ore regrow.
+	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
+	var node = ResourceNodeScript.new()
+	node.is_ambient = true
+	root.add_child(node)
+	node.global_position = Vector3(3.0, 0, 3.0)
+	node.setup("ore", 60)
+	await tree.process_frame
+
+	var got: int = node.harvest(60)
+	if got != 60:
+		print("  [FAIL] Ambient ore should yield 60 on a full harvest, got ", got)
+		node.queue_free()
+		return false
+	if node.amount != 0:
+		print("  [FAIL] Ambient ore amount should be 0 after full harvest, got ", node.amount)
+		node.queue_free()
+		return false
+	if node.is_in_group("resource_nodes"):
+		print("  [FAIL] Empty ambient ore should be removed from the resource_nodes group")
+		node.queue_free()
+		return false
+	for i in range(30):
+		node._physics_process(1.0)
+	if node.amount != 0:
+		print("  [FAIL] Ambient ore regrew to ", node.amount, " after 30s of physics ticks")
+		node.queue_free()
+		return false
+	node.queue_free()
+	print("  [PASS] Ambient ore stays at 0 and out of resource_nodes after a full harvest.")
+	return true
+
+
+func test_ambient_ores_respect_avoid_radii_and_dont_overlap_trees() -> bool:
+	print("Running Test Suite: Ambient Ore Scatter - respects avoid radii AND never lands on an ambient tree...")
+	# The new cross-pass constraint (2026-08-10): an ore and a tree
+	# must never overlap. Without that, the same spot could end up
+	# with both an outcrop mesh and a tree mesh stacked, which reads
+	# as a single broken prop rather than two finds. The avoidance
+	# set is also the same as the trees' (water, surface_zones,
+	# bridges, harvestable resource_nodes, spawn positions).
+	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
+	var map_def = {
+		"map_half_extents": 100.0,
+		"name": "ambient_ore_avoidance",
+		"water_areas": [{"center": Vector3(30, 0, 0), "half_extents": Vector2(15, 15)}],
+		"surface_zones": [{"center": Vector3(-40, 0, 0), "half_extents": Vector2(12, 12), "surface_type": "marsh"}],
+		"bridges": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(20, 5)}],
+		"obstacles": [{"center": Vector3(0, 0, 40), "half_extents": Vector2(6, 6), "type": "rock"}],
+		"resource_nodes": [
+			{"position": Vector3(50, 0, 50), "type": "lumber", "amount": 900},
+			{"position": Vector3(-50, 0, 50), "type": "ore", "amount": 1100},
+		],
+		"spawns": [
+			{"id": "player", "hq": Vector3(-30, 0, -30), "factory": Vector3(-30, 0, -20), "refinery": Vector3(-30, 0, -10), "harvester": Vector3(-30, 0, 0)},
+		],
+	}
+	var parent := Node3D.new()
+	root.add_child(parent)
+	var tree_positions: Array = TerrainBuilderScript._spawn_ambient_trees(map_def, parent)
+	TerrainBuilderScript._spawn_ambient_ores(map_def, parent, 1.0, tree_positions)
+	await tree.process_frame
+
+	# Distinguish ambient ore from ambient tree by resource_type, since
+	# both are is_ambient children of the same parent.
+	var ore_nodes: Array = []
+	for child in parent.get_children():
+		if "resource_type" in child and child.resource_type == "ore" and child.is_ambient:
+			ore_nodes.append(child)
+	if ore_nodes.is_empty():
+		print("  [FAIL] Test setup: no ambient ore scattered on the fixture")
+		parent.queue_free()
+		return false
+
+	var ORE_AVOID: float = TerrainBuilderScript.AMBIENT_ORE_AVOID_RADIUS
+	var violations: Array = []
+	for n in ore_nodes:
+		var p: Vector3 = n.global_position
+		# Water / surface_zone / bridge rect
+		if absf(p.x - 30.0) < 15.0 and absf(p.z - 0.0) < 15.0:
+			violations.append("ore at %s inside water_area" % p)
+		if absf(p.x - (-40.0)) < 12.0 and absf(p.z - 0.0) < 12.0:
+			violations.append("ore at %s inside surface_zone" % p)
+		if absf(p.x - 0.0) < 20.0 and absf(p.z - 0.0) < 5.0:
+			violations.append("ore at %s on bridge rect" % p)
+		# Harvestable resource_nodes
+		for rn_pos in [Vector3(50, 0, 50), Vector3(-50, 0, 50)]:
+			if Vector2(p.x - rn_pos.x, p.z - rn_pos.z).length() < ORE_AVOID:
+				violations.append("ore at %s within %s of resource_node at %s" % [p, ORE_AVOID, rn_pos])
+		# Spawn positions
+		for sp in [Vector3(-30, 0, -30), Vector3(-30, 0, -20), Vector3(-30, 0, -10), Vector3(-30, 0, 0)]:
+			if Vector2(p.x - sp.x, p.z - sp.z).length() < ORE_AVOID:
+				violations.append("ore at %s within %s of spawn point %s" % [p, ORE_AVOID, sp])
+		# Cross-pass: never within ORE_AVOID of an ambient tree
+		for tp in tree_positions:
+			if Vector2(p.x - tp.x, p.z - tp.z).length() < ORE_AVOID:
+				violations.append("ore at %s within %s of ambient tree at %s" % [p, ORE_AVOID, tp])
+	parent.queue_free()
+
+	if not violations.is_empty():
+		for v in violations:
+			print("  [FAIL] ", v)
+		return false
+	print("  [PASS] ", ore_nodes.size(), " ambient ore deposits all respect water/surface_zone/bridge/resource_node/spawn avoidance, and none landed on an ambient tree.")
+	return true

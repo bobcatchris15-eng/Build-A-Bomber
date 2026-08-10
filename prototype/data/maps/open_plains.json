@@ -194,6 +194,32 @@
    "type": "oil"
   }
  ],
+ "base_zones": [
+  {
+   "id": "north",
+   "center": [
+    0.0,
+    0.0,
+    78.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ]
+  },
+  {
+   "id": "south",
+   "center": [
+    0.0,
+    0.0,
+    -78.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ]
+  }
+ ],
  "schema_version": 1,
  "spawns": [
   {

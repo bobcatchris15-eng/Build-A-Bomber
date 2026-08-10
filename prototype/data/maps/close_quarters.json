@@ -1,245 +1,271 @@
 {
-	"description": "A tight, small map - two rock walls split it into three lanes (west/center/east). No room for a long buildup; whoever controls the lanes controls the fight. A single contested resource sits exactly at the map's center.",
-	"ground_color": [
-		0.239999994635582,
-		0.219999998807907,
-		0.200000002980232
-	],
-	"map_half_extents": 135.0,
-	"name": "Close Quarters",
-	"obstacles": [
-		{
-			"center": [
-				-36.0,
-				0.0,
-				0.0
-			],
-			"half_extents": [
-				12.0,
-				54.0
-			]
-		},
-		{
-			"center": [
-				36.0,
-				0.0,
-				0.0
-			],
-			"half_extents": [
-				12.0,
-				54.0
-			]
-		}
-	],
-	"resource_nodes": [
-		{
-			"amount": 1000,
-			"position": [
-				-75.0,
-				0.0,
-				66.0
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 1000,
-			"position": [
-				75.0,
-				0.0,
-				66.0
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 700,
-			"position": [
-				0.0,
-				0.0,
-				45.0
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 1000,
-			"position": [
-				75.0,
-				0.0,
-				-66.0
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 1000,
-			"position": [
-				-75.0,
-				0.0,
-				-66.0
-			],
-			"type": "metal"
-		},
-		{
-			"amount": 700,
-			"position": [
-				0.0,
-				0.0,
-				-45.0
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 900,
-			"position": [
-				0.0,
-				0.0,
-				0.0
-			],
-			"type": "crystal"
-		},
-		{
-			"amount": 900,
-			"position": [
-				27.0,
-				0.0,
-				74.0
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-27.0,
-				0.0,
-				74.0
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				27.0,
-				0.0,
-				-74.0
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-27.0,
-				0.0,
-				-74.0
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				52.0,
-				0.0,
-				0.0
-			],
-			"type": "oil"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				-49.0,
-				0.0,
-				5.1961522102356
-			],
-			"type": "oil"
-		}
-	],
-	"schema_version": 1.0,
-	"spawns": [
-		{
-			"factory": [
-				-24.0,
-				0.0,
-				84.0
-			],
-			"harvester": [
-				15.0,
-				1.5,
-				66.0
-			],
-			"hq": [
-				0.0,
-				0.0,
-				96.0
-			],
-			"id": "player",
-			"refinery": [
-				21.0,
-				0.0,
-				78.0
-			]
-		},
-		{
-			"factory": [
-				24.0,
-				0.0,
-				-84.0
-			],
-			"harvester": [
-				-15.0,
-				1.5,
-				-66.0
-			],
-			"hq": [
-				0.0,
-				0.0,
-				-96.0
-			],
-			"id": "enemy",
-			"refinery": [
-				-21.0,
-				0.0,
-				-78.0
-			]
-		}
-	],
-	"water_areas": [],
-	"hills": [
-		{
-			"center": [
-				58,
-				0,
-				30
-			],
-			"radius": 12,
-			"falloff": 16,
-			"height": 7
-		},
-		{
-			"center": [
-				58,
-				0,
-				-30
-			],
-			"radius": 12,
-			"falloff": 16,
-			"height": 7
-		},
-		{
-			"center": [
-				-58,
-				0,
-				30
-			],
-			"radius": 10,
-			"falloff": 14,
-			"height": -5
-		},
-		{
-			"center": [
-				-58,
-				0,
-				-30
-			],
-			"radius": 10,
-			"falloff": 14,
-			"height": -5
-		}
-	]
+ "description": "A tight, small map - two rock walls split it into three lanes (west/center/east). No room for a long buildup; whoever controls the lanes controls the fight. A single contested resource sits exactly at the map's center.",
+ "ground_color": [
+  0.239999994635582,
+  0.219999998807907,
+  0.200000002980232
+ ],
+ "map_half_extents": 135.0,
+ "name": "Close Quarters",
+ "obstacles": [
+  {
+   "center": [
+    -36.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    12.0,
+    54.0
+   ]
+  },
+  {
+   "center": [
+    36.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    12.0,
+    54.0
+   ]
+  }
+ ],
+ "resource_nodes": [
+  {
+   "amount": 1000,
+   "position": [
+    -75.0,
+    0.0,
+    66.0
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 1000,
+   "position": [
+    75.0,
+    0.0,
+    66.0
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 700,
+   "position": [
+    0.0,
+    0.0,
+    45.0
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 1000,
+   "position": [
+    75.0,
+    0.0,
+    -66.0
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 1000,
+   "position": [
+    -75.0,
+    0.0,
+    -66.0
+   ],
+   "type": "metal"
+  },
+  {
+   "amount": 700,
+   "position": [
+    0.0,
+    0.0,
+    -45.0
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 900,
+   "position": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "type": "crystal"
+  },
+  {
+   "amount": 900,
+   "position": [
+    27.0,
+    0.0,
+    74.0
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -27.0,
+    0.0,
+    74.0
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    27.0,
+    0.0,
+    -74.0
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -27.0,
+    0.0,
+    -74.0
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    52.0,
+    0.0,
+    0.0
+   ],
+   "type": "oil"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    -49.0,
+    0.0,
+    5.1961522102356
+   ],
+   "type": "oil"
+  }
+ ],
+ "base_zones": [
+  {
+   "id": "north",
+   "center": [
+    0.0,
+    0.0,
+    96.0
+   ],
+   "half_extents": [
+    12.5,
+    12.5
+   ]
+  },
+  {
+   "id": "south",
+   "center": [
+    0.0,
+    0.0,
+    -96.0
+   ],
+   "half_extents": [
+    12.5,
+    12.5
+   ]
+  }
+ ],
+ "schema_version": 1.0,
+ "spawns": [
+  {
+   "factory": [
+    -24.0,
+    0.0,
+    84.0
+   ],
+   "harvester": [
+    15.0,
+    1.5,
+    66.0
+   ],
+   "hq": [
+    0.0,
+    0.0,
+    96.0
+   ],
+   "id": "player",
+   "refinery": [
+    21.0,
+    0.0,
+    78.0
+   ]
+  },
+  {
+   "factory": [
+    24.0,
+    0.0,
+    -84.0
+   ],
+   "harvester": [
+    -15.0,
+    1.5,
+    -66.0
+   ],
+   "hq": [
+    0.0,
+    0.0,
+    -96.0
+   ],
+   "id": "enemy",
+   "refinery": [
+    -21.0,
+    0.0,
+    -78.0
+   ]
+  }
+ ],
+ "water_areas": [],
+ "hills": [
+  {
+   "center": [
+    58,
+    0,
+    30
+   ],
+   "radius": 12,
+   "falloff": 16,
+   "height": 7
+  },
+  {
+   "center": [
+    58,
+    0,
+    -30
+   ],
+   "radius": 12,
+   "falloff": 16,
+   "height": 7
+  },
+  {
+   "center": [
+    -58,
+    0,
+    30
+   ],
+   "radius": 10,
+   "falloff": 14,
+   "height": -5
+  },
+  {
+   "center": [
+    -58,
+    0,
+    -30
+   ],
+   "radius": 10,
+   "falloff": 14,
+   "height": -5
+  }
+ ]
 }

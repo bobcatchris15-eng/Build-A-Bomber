@@ -69,6 +69,51 @@ static func build_time_for_cost(credits: int) -> float:
 	return clampf(float(credits) * 0.05, 3.0, 40.0)
 
 
+# Prerequisite structures a design needs before it can be produced, as the union
+# of every per-part gate ModuleCatalog authors.
+#
+# FIVE sources of a gate, not one. The hull, the armour material, the
+# locomotion, each module and each ammo-capable module's LOADED ROUND all carry
+# their own `required_building`, and a design is gated by all of them together.
+# Counting only the modules is the tempting version and it reads wrong in the
+# obvious cases: an ablative-ceramic light hull with a basic cannon looks
+# buildable from turn one, when the armour alone needs a Tech Lab.
+#
+# An unknown module type_id is skipped for the same reason blueprint_materials()
+# skips it - reconstruct_vehicle() never builds it, so it cannot gate anything.
+static func blueprint_required_buildings(data: Dictionary) -> Array[String]:
+	var loco: Dictionary = data.get("locomotion", {})
+	var gated_ids: Array[String] = [
+		str(data.get("hull_type", "medium_hull")),
+		str(data.get("armor_material", "hardened_steel")),
+		str(loco.get("type_id", "")),
+	]
+	for mod in data.get("modules", []):
+		var type_id: String = str(mod.get("type_id", ""))
+		if not ModuleCatalog.module_exists(type_id):
+			continue
+		gated_ids.append(type_id)
+		if ModuleCatalog.is_ammo_capable(type_id):
+			gated_ids.append(ModuleCatalog.get_ammo(type_id, mod.get("tweaks", {})))
+
+	var needed := {}
+	for id in gated_ids:
+		var req: String = ModuleCatalog.get_required_building(id)
+		if req != "":
+			needed[req] = true
+
+	var out: Array[String] = []
+	for kind in BuildingCatalogScript.TECH_LAB_KINDS:
+		if needed.has(kind):
+			out.append(kind)
+	# Any gate naming a structure the tier list has not heard of still has to
+	# reach the player, or a newly authored lab silently stops being required.
+	for kind in needed:
+		if not out.has(kind):
+			out.append(str(kind))
+	return out
+
+
 # Which of the five queues a unit design comes off, from its hull's weight tier.
 static func queue_for_design(data: Dictionary) -> String:
 	var tier: String = ModuleCatalog.get_hull_size_tier(data.get("hull_type", "medium_hull"))

@@ -75,6 +75,60 @@ const AUTHORED_MODEL_DIR := "res://assets/models/terrain/resource_%s_%d.glb"
 # never load and every node of that type would sit on the procedural fallback
 # with nothing logged.
 
+# AMBIENT TREE POOL - the per-tree mesh family for the ambient
+# harvestable trees scattered across the whole map (see
+# terrain_greebles.gd's scatter_ambient_trees). Separate family from
+# AUTHORED_POOL_SIZES above on purpose:
+#   * These are SCATTERED DIRECTLY as individual ResourceNode instances
+#     by terrain_greebles.gd, never parented under a ResourceField
+#     (so they have NO field, NO respawn, NO regrow).
+#   * They use lumber credits (resource_type = "lumber") - a harvester
+#     can pick one up the same way it picks up a regular lumber node,
+#     the difference is just "this one is gone after you cut it."
+#   * The model files (ambient_tree_0..N.glb) are a SEPARATE family from
+#     resource_lumber_*.glb - the harvestable 3-tree "stand" that
+#     ResourceField scatters is its own visual species, deliberately
+#     different so the per-tree ambient mesh doesn't read as a piece of
+#     a "real" lumber deposit. See CHRIS 2026-08-10 direction.
+#
+# AMBIENT_TREE_POOL_SIZE MUST match the count build_meshes.generate_
+# terrain_props() exports (currently 20); a size larger than what is
+# on disk rolls indices at missing files and the same silent-fallback
+# to the procedural cylinder that AUTHORED_POOL_SIZES exists to
+# prevent.
+const AMBIENT_TREE_POOL_SIZE: int = 20
+const AMBIENT_TREE_MODEL_DIR := "res://assets/models/terrain/ambient_tree_%d.glb"
+# Per-tree amount for ambient trees. Deliberately MUCH smaller than a
+# field's per-node amount (~100 for a 9-node lumber field): a single
+# tree holds a small trickle, not a deposit, and the whole point is
+# "you can always grab a little." Summed across the ~900 scattered
+# trees on a 210-half-extent map (post-2026-08-10 trim), the total
+# ambient lumber pool is a real income source but still firmly below
+# the harvestable lumber fields' yield.
+const AMBIENT_TREE_AMOUNT: int = 40
+# Ambient ore amount. Pairs with AMBIENT_TREE_AMOUNT above. Scaled
+# 1.5x to mirror ResourceCatalog.TYPES.ore.credits / lumber.credits
+# (1.5 / 1.0), so per-find ore is worth the same credit-chunk as
+# per-find lumber at the same density - the value-curve is preserved
+# in the ambient pass exactly the way it is in the harvestable
+# fields. As with the trees, deliberately MUCH smaller than a
+# harvestable ore field's per-node amount (~157 for a 7-node field):
+# a single ambient find is a trickle, not a deposit.
+const AMBIENT_ORE_AMOUNT: int = 60
+
+# True for trees scattered by terrain_greebles.gd.scatter_ambient_trees
+# (and ONLY for those). The flag controls three things:
+#   * harvest() does NOT arm the regrow timer (no regrow ever).
+#   * _physics_process() does not run the regrow tick (the node stays
+#     "DEPLETED" and is removed from the resource_nodes group forever,
+#     so harvesters can no longer pick it).
+#   * The authored mesh comes from AMBIENT_TREE_MODEL_DIR, not the
+#     resource-type pool (otherwise every ambient tree would be one of
+#     the 3 harvestable stand variants - wrong species, wrong scale).
+# Default FALSE so the existing 4 type's spawn paths (lumber/ore/
+# crystal/oil fields) are byte-for-byte unchanged.
+var is_ambient: bool = false
+
 func _try_spawn_authored(res_type: String) -> Node3D:
 	if not ResourceLoader.exists(AUTHORED_MODEL_DIR % [res_type, 0]):
 		return null
@@ -86,6 +140,42 @@ func _try_spawn_authored(res_type: String) -> Node3D:
 	if packed == null:
 		return null
 	return packed.instantiate() as Node3D
+
+
+# Separate path for the ambient-tree family. Same deterministic-per-
+# position contract as _try_spawn_authored (seeded off global_position
+# so a given scatter point always picks the same variant, run to run),
+# but reads AMBIENT_TREE_POOL_SIZE / AMBIENT_TREE_MODEL_DIR. Returns
+# null (and the caller falls through to the procedural cylinder) if
+# the first ambient_tree_0.glb is missing, mirroring the
+# "degrade to something" contract the harvestable pool already has.
+#
+# TYPE-AWARE (2026-08-10): ambient LUMBER uses the dedicated
+# 20-variant ambient_tree_* family (the "separate species" Chris
+# asked for); ambient ORE/CRYSTAL/OIL fall through to the regular
+# harvestable pool (e.g. resource_ore_*.glb), which is the same
+# visual a real ore field uses. A separate ambient_ore_* family was
+# considered and rejected - the existing 3-variant outcrop IS the
+# "ambient" look, and a second family would just drift. Lumber is
+# the one type where the harvestable visual (3-tree clumped "stand")
+# is the wrong silhouette for a single scattered find, which is why
+# it gets its own pool and nothing else does.
+func _try_spawn_ambient_authored(res_type: String) -> Node3D:
+	if res_type == "lumber":
+		if not ResourceLoader.exists(AMBIENT_TREE_MODEL_DIR % 0):
+			return null
+		var rng = RandomNumberGenerator.new()
+		rng.seed = hash(global_position)
+		var idx: int = rng.randi() % AMBIENT_TREE_POOL_SIZE
+		var packed := load(AMBIENT_TREE_MODEL_DIR % idx) as PackedScene
+		if packed == null:
+			return null
+		return packed.instantiate() as Node3D
+	# Non-lumber ambient types share the regular harvestable pool.
+	# The is_ambient flag still suppresses regrow on the resulting
+	# node, so the gameplay side is fully "no refill"; the visual is
+	# just the standard outcrop / crystal / derrick at that type.
+	return _try_spawn_authored(res_type)
 
 
 func setup(res_type: String, res_amount: int):
@@ -102,7 +192,14 @@ func setup(res_type: String, res_amount: int):
 	# tree's trunk vs. canopy, an outcrop's rock vs. ore vein), so it is
 	# NEVER given a flat material_override the way the procedural fallback
 	# below is.
-	mesh_inst = _try_spawn_authored(resource_type)
+	# Ambient trees route through their own pool (AMBIENT_TREE_MODEL_DIR),
+	# not AUTHORED_POOL_SIZES, for the species reason noted at the top of
+	# this file - and so an ambient tree's pick is seeded from the same
+	# hash(global_position) contract as every other resource, so scatter is
+	# deterministic. Ambient ore (and any future ambient type) falls
+	# through to the regular harvestable pool via _try_spawn_ambient_
+	# authored's own internal branch - see that function's header.
+	mesh_inst = _try_spawn_ambient_authored(resource_type) if is_ambient else _try_spawn_authored(resource_type)
 	if mesh_inst == null:
 		var fallback := MeshInstance3D.new()
 		var mat = StandardMaterial3D.new()
@@ -157,13 +254,24 @@ func setup(res_type: String, res_amount: int):
 	col.position = Vector3(0, 1.2, 0)
 	add_child(col)
 
-	label = Label3D.new()
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.font_size = 20
-	label.outline_size = 4
-	label.position = Vector3(0, 3.0, 0)
-	add_child(label)
-	_update_label()
+	# Skip the per-tree label on ambient trees. A 4-field map scatters
+	# 9 labels per field, so 36 billboards total - cheap. The ambient
+	# pass scatters up to AMBIENT_TREE_MAX_COUNT (=1500) trees across
+	# the same map, and an always-on "LUMBER: 40" billboard on every
+	# one of them is a real visual + perf cost (Label3D is its own
+	# GeometryInstance3D + text-shader draw). The existing 4 harvestable
+	# fields still get their labels (they're the "this is a deposit"
+	# affordance the player wants to see) - ambient trees get the
+	# resource_nodes group membership instead, which is what the
+	# harvester actually uses to find them.
+	if not is_ambient:
+		label = Label3D.new()
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.font_size = 20
+		label.outline_size = 4
+		label.position = Vector3(0, 3.0, 0)
+		add_child(label)
+		_update_label()
 
 func _update_label():
 	if not is_instance_valid(label): return
@@ -182,7 +290,17 @@ func _update_visual_scale():
 func harvest(want: int) -> int:
 	var got = min(want, amount)
 	amount -= got
-	if got > 0:
+	# Ambient trees do NOT regrow. The regrow timer is what eventually
+	# refills a node, and a partially-depleted ambient tree should NOT
+	# inch its way back to full between harvester trips - the design
+	# contract is "you cut it, it's gone, for the whole match." Leaving
+	# _time_since_harvest alone here would do nothing on its own
+	# (this function never reads it), but _physics_process() does, so
+	# the gate is on _physics_process() side; this comment is the
+	# "and no, the timer is NOT being armed either" record.
+	# If NOT ambient, arm the regrow timer on every successful harvest
+	# (C&C Tiberium-style - a contested field rewards holding it).
+	if got > 0 and not is_ambient:
 		_time_since_harvest = 0.0
 	_update_label()
 	_update_visual_scale() # Shrink visually as it depletes
@@ -191,6 +309,16 @@ func harvest(want: int) -> int:
 	return got
 
 func _physics_process(delta: float) -> void:
+	# Ambient trees: no regrow, period. Once depleted, the node sits
+	# DEPLETED for the rest of the match and harvesters walk past it
+	# (the resource_nodes group removal in harvest() above is what
+	# gates "find nearest resource" - by the time _physics_process
+	# sees amount<=0, the node is already invisible to harvesters).
+	# Bailing out before the regrow tick is what makes that contract
+	# enforceable; the alternative (setting regrow rate to 0) would
+	# still tick the timer and waste cycles.
+	if is_ambient:
+		return
 	if amount >= start_amount:
 		return
 	_time_since_harvest += delta

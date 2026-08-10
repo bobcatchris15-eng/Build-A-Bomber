@@ -126,6 +126,22 @@ var commander: Commander = null
 # survives; rebuilding it each tick would reset its memory every two seconds.
 var _squads: Dictionary = {}
 
+# Per-team assigned base zone, indexed by team id.
+#
+# Set once during _spawn_bases() from MapCatalog.assign_base_zones() and held
+# for the lifetime of the match. Two reasons for storing it rather than re-
+# assigning on demand:
+#   1. The assignment is a deterministic max-distance spread - re-running it
+#      would just return the same value, but would couple every later query
+#      to the same rng/state the orchestrator used on match start, and to
+#      the map being still loaded. Holding the result means a UI layer that
+#      wants to draw the zone ("drop HQ here") doesn't have to know either.
+#   2. The human-placement hook (place_hq_for_human) needs to know which
+#      zone belongs to the human, and that lookup happens in the input
+#      layer, far from _spawn_bases. A precomputed table is the cheapest
+#      contract for both.
+var _team_base_zone: Dictionary = {}
+
 # Set when the match has been decided. Stops the vision scan and the win check
 # from running over a field nobody is playing on any more.
 var game_over: bool = false
@@ -137,11 +153,29 @@ var roster: Array = []
 # mirror and counter-picking has something to pick from.
 var enemy_roster: Array = []
 
-# Starting bank. Enough for a refinery plus a light manufactory, so the opening
-# is a real choice rather than a forced single purchase.
-# 750 credits = the old 450 metal + 150 crystal at the 2x crystal rate, so the
-# opening bank buys exactly what it always did.
-const STARTING_CREDITS := 750
+# 2026-08-10 (Chris): the pre-game HQ-placement change removed the
+# auto-spawned refinery + 3 manufactories from the match start, so
+# the player now has to BUILD them with their own credits. The bank
+# is sized for "refinery + 2 manufactories of your choice" - the
+# smart opening the user described, where the refinery comes with
+# the free roster harvester and the 2 manufactories are an actual
+# choice (2 light = cheap + flexible, 2 heavy = expensive but
+# immediate late-game access).
+#
+# Worst case (refinery + 2 heavy): 150 + 320 + 320 = 790 metal,
+# 0 + 85 + 85 = 170 crystal = 1130 credits at the 2x crystal
+# rate. 1200 is 70 credits of buffer past that, small enough that
+# a player who wants a power plant on top has to make a real
+# choice between the heavy + power-plant combination and the
+# refinery + 2 light + power-plant combination, which is what the
+# "choice" framing implies.
+#
+# Pre-change bank was 750 (the old 450 metal + 150 crystal at 2x),
+# which bought a single refinery and a single light manufactory with
+# nothing left over - effectively forcing the rest of the
+# manufactories to be built slowly from income. 1200 buys the
+# "smart opening" the new flow is balanced around.
+const STARTING_CREDITS := 1200
 
 # The player's build bar tops out here, matching the old runtime's loadout limit.
 const ROSTER_LIMIT := 12
@@ -718,22 +752,101 @@ func _spawn_resource_nodes() -> void:
 
 
 func _spawn_bases() -> void:
+	# Per-team assigned base zone, indexed by team id (PLAYER_TEAM / ENEMY_TEAM).
+	#
+	# Two things this assignment does for the orchestrator:
+	#   1. Decides WHICH zone each team starts in, using the same OpenRA
+	#      max-distance-spread iteration assign_spawns() uses. With exactly
+	#      two slots and two zones, this picks the zones farthest apart so
+	#      no map boots with a player and an AI spawn in the same corner.
+	#   2. Pins the result for the lifetime of the match, so the human
+	#      placement hook (place_hq_for_human) and the AI auto-placer can
+	#      both look up the same zone without re-running the spread step.
+	#
+	# Old order argument is preserved verbatim: assign_spawns and
+	# assign_base_zones are called with the same [PLAYER_TEAM, ENEMY_TEAM]
+	# list, so the i-th slot's spawn and its zone are decided together
+	# and the "max-distance spread" lands on the same side for both -
+	# a map with a 0-distance spawn pair will have the same 0-distance
+	# zone pair, which is what made the old code testable in isolation.
+	_team_base_zone = MapCatalog.assign_base_zones(
+		current_map.get("base_zones", []),
+		[PLAYER_TEAM, ENEMY_TEAM])
 	for spawn in current_map.get("spawns", []):
-		var team := PLAYER_TEAM if spawn.get("id") == "player" else ENEMY_TEAM
-		_place_structure("hq", team, spawn.get("hq", Vector3.ZERO))
-		_place_structure("refinery", team, spawn.get("refinery", Vector3.ZERO))
-		# ALL THREE MANUFACTORY TIERS, as the old runtime does
-		# (skirmish.gd:1517). This phase originally withheld them on the grounds
-		# that the first factory should be the player's own decision - which reads
-		# well and is unplayable here: the player has no ghost-placement UI yet, so
-		# a match starting without a manufactory is a match where they can never
-		# build anything at all. Parity with the mode this replaces wins.
-		var factory: Vector3 = spawn.get("factory", spawn.get("hq", Vector3.ZERO) + Vector3(0, 0, -14))
-		_place_structure("light_manufactory", team, factory)
-		_place_structure("medium_manufactory", team, factory + Vector3(12, 0, 0))
-		_place_structure("heavy_manufactory", team, factory + Vector3(-12, 0, 0))
+		var team: int = PLAYER_TEAM if spawn.get("id") == "player" else ENEMY_TEAM
+		var zone_id: String = _team_base_zone.get(team, "")
+		# Prefer the zone centre. Fall back to the (still-authored) spawn.hq
+		# when this map has no base_zones - keeps older/modder maps booting.
+		var hq_pos: Vector3 = _base_zone_centre(zone_id) if zone_id != "" else spawn.get("hq", Vector3.ZERO)
+		_place_structure("hq", team, hq_pos)
 	for t in [PLAYER_TEAM, ENEMY_TEAM]:
 		economy.recalculate_power(t, get_team_structures(t))
+
+
+# Centre of the zone a slot has been assigned to, in world space. Vector3.ZERO
+# on miss (no zone, no map, empty zone) - _spawn_bases() already gates on a
+# non-empty zone_id before calling, and the only other caller is the human
+# placement hook, which also gates. Keeping the fallthrough silent rather
+# than asserting is the right call: the orchestrator is a wrapper around
+# map data, and a malformed map is a map data problem, not a runtime one.
+func _base_zone_centre(zone_id: String) -> Vector3:
+	if zone_id == "":
+		return Vector3.ZERO
+	var zone: Dictionary = MapCatalog.get_base_zone(current_map, zone_id)
+	if zone.is_empty():
+		return Vector3.ZERO
+	var center: Vector3 = zone.get("center", Vector3.ZERO)
+	return center
+
+
+# Drops the human HQ at `at` and goes live.
+#
+# The free HQ is the one building the new pre-game phase gives the player
+# without spending from the starting bank - the rest of the base (refinery,
+# manufactories, harvester) is bought and built normally with the credits
+# the bank hands out. This hook is what the placement-UI layer calls when
+# the human clicks the ghost:
+#   - refuses outside the assigned zone (half_extents-bounded rectangle,
+#     because zone shapes are axis-aligned and the math is two absf()s;
+#     a non-axis-aligned zone would need a point-in-polygon test, which
+#     the FIELD_SPEC doesn't claim to support);
+#   - refuses if a live player HQ already exists (the zone assignment
+#     pins a single HQ per team, and a second one is a stale ghost);
+#   - places via the same _place_structure path the auto-spawn uses, so
+#     terrain snap, died.connect and the power recalc are identical.
+#
+# Returns true on commit, false on refusal. UI layer treats a false
+# return as "keep the ghost up" rather than as an error.
+#
+# WHY NOT GO THROUGH confirm_placement. confirm_placement() pulls the
+# build job out of a production queue and decrements resources. The free
+# HQ has neither - it is given to the player, not produced. Bypassing
+# that path is what makes "free HQ" mean anything, and it is why this
+# hook is its own function rather than a flag on begin_placement.
+func place_hq_for_human(at: Vector3) -> bool:
+	var zone_id: String = _team_base_zone.get(PLAYER_TEAM, "")
+	var zone: Dictionary = MapCatalog.get_base_zone(current_map, zone_id)
+	if zone.is_empty():
+		return false
+	var center: Vector3 = zone.get("center", Vector3.ZERO)
+	var half: Vector2 = zone.get("half_extents", Vector2.ZERO)
+	# Axis-aligned rectangle test. absf()s so the sign of the offset
+	# (which side of the centre) doesn't matter - a click on the +X
+	# edge and a click on the -X edge are equally "inside" if both
+	# are within half.x. Equal halves on either side is what
+	# half_extents:Vector2 means; the FIELD_SPEC comment is the
+	# contract.
+	if absf(at.x - center.x) > half.x or absf(at.z - center.z) > half.y:
+		return false
+	# One human HQ per match. A second one means a stale ghost or a
+	# double-fire on the input layer, both of which are UI bugs -
+	# the orchestrator just refuses and lets the caller decide.
+	for s in get_tree().get_nodes_in_group("structures"):
+		if is_instance_valid(s) and not s.is_dead and s.team == PLAYER_TEAM and s.kind == "hq":
+			return false
+	_place_structure("hq", PLAYER_TEAM, at)
+	economy.recalculate_power(PLAYER_TEAM, get_team_structures(PLAYER_TEAM))
+	return true
 
 
 func _place_structure(kind: String, structure_team: int, at: Vector3) -> Structure:

@@ -380,3 +380,81 @@ static func scatter_blue_water(zone: Dictionary, parent: Node3D, prop_scale: flo
 		parent.add_child(plank)
 		plank.global_position = Vector3(zone.center.x + p.x, 0.07 * prop_scale, zone.center.z + p.y)
 		plank.rotation.y = rng.randf_range(0, TAU)
+
+# --- Ambient harvestable trees -------------------------------------------------
+#
+# THE "AMBIENT FOREST" PASS. Scatters individual ResourceNode instances
+# (one tree each) across the whole map's baseline ground, NOT under a
+# ResourceField - so the trees are in the resource_nodes group (harvesters
+# find them) but have no field, no respawn, no regrow. resource_node.gd's
+# is_ambient flag is what enforces the no-regrow contract once a
+# harvester empties one.
+#
+# WHY A NEW PASS INSTEAD OF REUSING place_grassland_prop(). The grassland
+# scatter produces DECORATION (a MeshInstance3D with no game logic).
+# These are GAME ENTITIES (a StaticBody3D that takes harvest calls, holds
+# an amount, joins the resource_nodes group). They share the same
+# avoidance set and seeded-RNG discipline - just produce a different
+# thing at each accepted point.
+#
+# CALLED FROM terrain_builder.gd._spawn_ambient_trees(), which owns the
+# avoidance lists (water/obstacles/bridges/surface_zones/spawns/
+# resource_nodes) and the density budget. This function is the
+# per-point WHAT: load the ambient pool, build one ResourceNode, set
+# is_ambient=true, place at the validated point.
+#
+# Density and avoidance are NOT this function's job. The reason
+# mirrors every other greeble function in this file: the WHAT (one
+# ambient tree) and the WHERE (which positions to even consider) live
+# in different files so the "where" can change without churning the
+# "what" and vice versa.
+const ResourceNodeScript = preload("res://scripts/resource_node.gd")
+const AMBIENT_TREE_Y_LIFT: float = 0.0
+# Yaw is a free rotation, not from a normal. Trees are NOT surface-
+# aligned props (that's the place_grassland_prop convention); each one
+# is a vertical silhouette and a yaw per-instance is what stops the
+# forest reading as a "lollipop" field where every trunk faces the
+# camera.
+static func spawn_ambient_tree(pos: Vector3, parent: Node3D, variant_seed: int, amount: int):
+	var node = ResourceNodeScript.new()
+	node.is_ambient = true
+	parent.add_child(node)
+	node.global_position = pos
+	# The variant_seed already incorporates the position via the caller's
+	# hash-per-position seeding (same convention _try_spawn_ambient_
+	# authored() inside resource_node.gd uses for re-rolling at load
+	# time), so a given scatter point always picks the same variant.
+	# We don't pass the seed in - resource_node.gd seeds off its own
+	# global_position at setup() time, which is identical to the
+	# caller's seed, so the two paths stay in lockstep.
+	node.setup("lumber", amount)
+	# Per-instance yaw for visual variety. The authored meshes are
+	# already radially-symmetric cylinders/cones/spheres, so a pure
+	# yaw rotation never breaks the silhouette. Z rotation would
+	# tip the tree, which is wrong for an upright tree.
+	node.rotation.y = float(variant_seed & 0xFF) / 256.0 * TAU
+
+
+# AMBIENT ORE (2026-08-10, paired with the ambient-tree trim above).
+# Same shape as spawn_ambient_tree() - a bare ResourceNode with
+# is_ambient=true, no field, no regrow - but with resource_type="ore"
+# and a different visual family. The ore visual comes from the
+# EXISTING 3-variant resource_ore_*.glb pool (no new Blender
+# authoring) because the harvestable outcrop is already the right
+# "single find" silhouette; a separate ambient_ore_* family would
+# just be a parallel set that drifted over time. See
+# _try_spawn_ambient_authored()'s own branch in resource_node.gd for
+# why lumber is the special case and everything else isn't.
+static func spawn_ambient_ore(pos: Vector3, parent: Node3D, variant_seed: int, amount: int):
+	var node = ResourceNodeScript.new()
+	node.is_ambient = true
+	parent.add_child(node)
+	node.global_position = pos
+	# Same position-seeded determinism as spawn_ambient_tree - the
+	# scatter point hash picks the variant, not the variant_seed arg
+	# (which is only used for the per-instance yaw below).
+	node.setup("ore", amount)
+	# Per-instance yaw. Ore outcrops are roughly rock-shaped, so a
+	# pure yaw rotation is the only legal one - tipping the rock
+	# (any X or Z rotation) would make it look like it fell over.
+	node.rotation.y = float(variant_seed & 0xFF) / 256.0 * TAU

@@ -545,6 +545,29 @@ def add_cyl_y(bm, center, radius, height, segments=12, radius2=None):
 	return ret['verts']
 
 
+def add_sphere(bm, center, radius=1.0, segments=10, rings=8, scale_y=1.0):
+	"""UV-sphere centered at `center`. `scale_y` < 1 squashes the sphere
+	along Godot-Y to read as a drooping canopy / fat ball / whatever
+	direction needs a non-spherical silhouette. segments=radius
+	subdivisions (around the equator), rings=vertical subdivisions.
+
+	Icosphere was the obvious alternative; UV-sphere wins for canopies
+	because (a) the pole-aligned vertices give a flat-cap-friendly mesh
+	that the icosphere's equilateral-triangle pattern doesn't, and (b) the
+	vert count is exactly predictable, which matters when dozens of these
+	end up in a single ambient-tree pool file."""
+	ret = bmesh.ops.create_uvsphere(bm, u_segments=segments, v_segments=rings, radius=radius)
+	if scale_y != 1.0:
+		# Scale the verts in place rather than calling bmesh.ops.scale,
+		# which would scale everything in `bm` if we passed the wrong
+		# geom set. `ret['verts']` is exactly the new verts, so the
+		# transformation is guaranteed local to this sphere.
+		for v in ret['verts']:
+			v.co.y *= scale_y
+	bmesh.ops.translate(bm, verts=ret['verts'], vec=GV(*center))
+	return ret['verts']
+
+
 def add_cyl_axis(bm, center, radius, length, godot_axis, segments=10, radius2=None):
 	"""Cylinder lying along a horizontal Godot axis ('x' or 'z'), centered at `center`."""
 	r2 = radius2 if radius2 is not None else radius
@@ -2857,6 +2880,227 @@ def build_tree_stand(name, count=3, seed=0, trunk_color=(0.32, 0.24, 0.16), cano
 	return obj
 
 
+# Six deliberate silhouettes spread across AMBIENT_TREE_POOL_SIZE (=20):
+# the goal is "looks like a real forest" rather than "20 trees that are
+# really the same tree mutated slightly" - same lesson the harvestable
+# build_tree_stand learned for the field scale, applied at the per-tree
+# scale. Each species defines the canopy SHAPE routine; dimensions are
+# rolled per-instance from the seed so the same species ships 3-4 visibly
+# distinct variants, not 4 identical ones.
+#
+# 0,1,2  narrow conifer  - spruce-like, 1-2 stacked tight cones
+# 3,4,5  fat conifer     - fir-like, single fat low cone
+# 6,7,8,9 broadleaf round - tall trunk + a single fat sphere canopy
+# 10..13  broadleaf sparse - tall trunk + 2-3 small offset sphere canopies
+# 14,15,16 dead snag      - just a bare trunk, no canopy
+# 17,18,19 juvenile       - small sapling, single small cone
+def _ambient_canopy_narrow_conifer(bm, pos, rng):
+	height = rng.uniform(2.4, 4.2)
+	radius_base = rng.uniform(0.55, 0.95)
+	trunk_h = height * rng.uniform(0.18, 0.28)
+	stacks = rng.choice([1, 2, 2, 3])
+	canopy_h = height - trunk_h
+	for s in range(stacks):
+		# Each stacked cone is a fraction of the canopy height, narrower as
+		# it goes up. Stacking is what makes a conifer read as a conifer
+		# rather than a "very pointy egg" - the silhouette is the layered
+		# outline, not a single smooth shape.
+		frac = (s + 1) / float(stacks)
+		seg_h = canopy_h / stacks
+		seg_r = radius_base * (0.4 + 0.6 * (1.0 - (s / float(stacks)) * 0.4))
+		cy = trunk_h + seg_h * (s + 0.5)
+		verts = add_cyl_y(bm, (pos[0], cy, pos[2]), seg_r, seg_h, segments=8, radius2=0.0)
+		for f in {f for v in verts for f in v.link_faces}:
+			f.material_index = 1
+	return height, trunk_h
+
+
+def _ambient_canopy_fat_conifer(bm, pos, rng):
+	height = rng.uniform(2.6, 4.0)
+	radius_base = rng.uniform(1.0, 1.5)
+	trunk_h = height * rng.uniform(0.15, 0.22)
+	canopy_h = height - trunk_h
+	verts = add_cyl_y(bm, (pos[0], trunk_h + canopy_h * 0.5, pos[2]),
+		radius_base, canopy_h, segments=10, radius2=radius_base * 0.35)
+	for f in {f for v in verts for f in v.link_faces}:
+		f.material_index = 1
+	return height, trunk_h
+
+
+def _ambient_canopy_broadleaf_round(bm, pos, rng):
+	height = rng.uniform(2.8, 4.5)
+	radius_base = rng.uniform(0.7, 1.2)
+	trunk_h = height * rng.uniform(0.45, 0.6)
+	canopy_h = height - trunk_h
+	canopy_r = rng.uniform(0.75, 1.4)
+	# A squashed sphere reads as a broadleaf round canopy at RTS distance;
+	# a full sphere would look like a balloon, a flat disk would lose the
+	# volume. Slight downward bias (1.0x/0.7x) for a "drooping" leaf mass.
+	verts = add_sphere(bm, (pos[0], trunk_h + canopy_h * 0.45, pos[2]),
+		radius=canopy_r, segments=12, rings=8, scale_y=0.7)
+	for f in {f for v in verts for f in v.link_faces}:
+		f.material_index = 1
+	return height, trunk_h
+
+
+def _ambient_canopy_broadleaf_sparse(bm, pos, rng):
+	height = rng.uniform(3.0, 4.5)
+	trunk_h = height * rng.uniform(0.55, 0.7)
+	canopy_h = height - trunk_h
+	canopy_r = rng.uniform(0.45, 0.7)
+	# 2-3 small offset canopies rather than one fat one - the sparse-
+	# leaf silhouette is a real broadleaf species, not a rendering bug.
+	n_clusters = rng.randint(2, 3)
+	for c in range(n_clusters):
+		offset = (rng.uniform(-0.6, 0.6), rng.uniform(-0.2, 0.3), rng.uniform(-0.6, 0.6))
+		cy = trunk_h + canopy_h * (0.4 + 0.3 * c / max(1, n_clusters - 1))
+		cx = pos[0] + offset[0] * canopy_r
+		cz = pos[2] + offset[2] * canopy_r
+		verts = add_sphere(bm, (cx, cy, cz),
+			radius=canopy_r * rng.uniform(0.85, 1.15), segments=10, rings=6, scale_y=0.7)
+		for f in {f for v in verts for f in v.link_faces}:
+			f.material_index = 1
+	return height, trunk_h
+
+
+def _ambient_canopy_dead_snag(bm, pos, rng):
+	# No canopy at all - just a tall thin bare trunk. A "standing dead" snag
+	# is a real ecological category and adds a weathered texture to the
+	# silhouette mix; 3 variants in the pool is enough to read as a recurring
+	# prop without crowding out the living species. Slight per-variant lean
+	# so the three dead-snag entries don't look like three identical poles.
+	height = rng.uniform(3.2, 4.5)
+	trunk_h = height
+	trunk_r = rng.uniform(0.12, 0.18)
+	add_cyl_y(bm, (pos[0], trunk_h * 0.5, pos[2]), trunk_r, trunk_h, segments=6)
+	return height, trunk_h
+
+
+def _ambient_canopy_juvenile(bm, pos, rng):
+	# A short sapling - single tight cone, small trunk, deliberately below
+	# the ~2.5m adult-species floor. Adds an age-class mix to the forest
+	# rather than a single uniform maturity - real regeneration in a
+	# forest looks like a mix, not a single cohort.
+	height = rng.uniform(1.2, 2.0)
+	trunk_h = height * rng.uniform(0.25, 0.35)
+	canopy_r = rng.uniform(0.3, 0.55)
+	verts = add_cyl_y(bm, (pos[0], trunk_h + (height - trunk_h) * 0.5, pos[2]),
+		canopy_r, height - trunk_h, segments=6, radius2=0.0)
+	for f in {f for v in verts for f in v.link_faces}:
+		f.material_index = 1
+	return height, trunk_h
+
+
+def build_ambient_tree(name, seed=0):
+	"""A SINGLE tree of varied species and proportion - the ambient tree
+	pool (resource_node.gd's AMBIENT_TREE_POOL_SIZE = 20) picks from this
+	family for the harvestable-but-not-regrowing trees scattered across
+	the whole map. Distinct from build_tree_stand(): that one author the
+	HARVESTABLE LUMBER COLLECTIBLES (3-variant pool, 3 trees per variant,
+	clumped into a "stand" by a field centre); this one author the
+	AMBIENT per-tree mesh, with one tree per variant and a deliberate
+	species mix (narrow conifer / fat conifer / broadleaf round / sparse
+	/ dead snag / juvenile) so 20 variants actually look like 20 trees.
+
+	Two material slots (0=trunk, 1=canopy), finalize_dual() convention
+	identical to build_tree_stand() and build_ore_outcrop() - resource_
+	node.gd's _try_spawn_ambient_authored() can use the same load path
+	without a separate material switch. Trunk/canopy colours are seeded
+	too, so two narrow conifers aren't literally the same green."""
+	import random
+	rng = random.Random(seed)
+	bm = bmesh.new()
+
+	# Small XZ jitter for the whole tree so a scatter that draws variant
+	# k at integer positions still has slight sub-position randomness for
+	# the leaf cluster (no per-tree axis offset yet - that's terrain_
+	# greebles.gd's call). Trunk leans a fraction of a degree for the
+	# same reason; the lean is tiny because at RTS camera distance a 5
+	# degree lean reads as "broken" rather than "natural".
+	pos = (rng.uniform(-0.05, 0.05), 0.0, rng.uniform(-0.05, 0.05))
+	lean = rng.uniform(-0.04, 0.04)
+	lean_axis = rng.choice(['x', 'z'])
+
+	# Species index is the seed mod 6 - the same species ships multiple
+	# variants (3-4 of each), and within a species the dimensions/colors
+	# roll from the same RNG so the family is self-contained.
+	species = seed % 6
+	# Pool size 20 -> 0..19; the last 3 (17,18,19) are juvenile so the
+	# forest has a small but visible age-class spread. The other 17
+	# roughly split across the 5 adult species.
+	within_species = seed % 20
+	if within_species < 3:
+		species = 0  # narrow conifer
+	elif within_species < 6:
+		species = 1  # fat conifer
+	elif within_species < 10:
+		species = 2  # broadleaf round
+	elif within_species < 14:
+		species = 3  # broadleaf sparse
+	elif within_species < 17:
+		species = 4  # dead snag
+	else:
+		species = 5  # juvenile
+
+	canopy_fn = (
+		_ambient_canopy_narrow_conifer if species == 0
+		else _ambient_canopy_fat_conifer if species == 1
+		else _ambient_canopy_broadleaf_round if species == 2
+		else _ambient_canopy_broadleaf_sparse if species == 3
+		else _ambient_canopy_dead_snag if species == 4
+		else _ambient_canopy_juvenile
+	)
+	total_h, trunk_h = canopy_fn(bm, pos, rng)
+
+	# Trunk goes in last so its top sits flush with whatever the canopy
+	# routine stacked on top. A trunk that was added FIRST and then a
+	# canopy function inserted geometry above it would z-fight at the
+	# trunk top.
+	trunk_r = rng.uniform(0.08, 0.16) if species != 4 else rng.uniform(0.12, 0.18)
+	add_cyl_y(bm, (pos[0], trunk_h * 0.5, pos[2]), trunk_r, trunk_h, segments=6)
+	if lean != 0.0:
+		bmesh.ops.rotate(bm, verts=bm.verts, cent=(pos[0], 0, pos[2]),
+			matrix=rot_matrix(lean_axis, lean))
+
+	# Trunk/canopy colour from a tight, deliberate palette per slot.
+	# Seeding the colours (not picking a fixed value) is what makes two
+	# "narrow conifer" entries look like two different trees rather than
+	# the same tree seen twice.
+	trunk_color = (
+		rng.uniform(0.30, 0.42),  # brown band
+		rng.uniform(0.22, 0.32),
+		rng.uniform(0.14, 0.22),
+	)
+	# A dead snag's canopy is the trunk itself, so re-roll the canopy
+	# colour toward a greyed-out trunk palette and let it apply to the
+	# whole mesh (no canopy mesh exists to need a different colour).
+	if species == 4:
+		canopy_color = (
+			rng.uniform(0.40, 0.55),  # bleached-grey band
+			rng.uniform(0.38, 0.50),
+			rng.uniform(0.32, 0.42),
+		)
+		# Both slots get the snag palette: trunk and "canopy" are the same
+		# material in this case. finalize_dual still wants two distinct
+		# Blender materials, so reuse the same value.
+		trunk_color = canopy_color
+	else:
+		# Healthy canopy: green band 0.16..0.32, intentionally narrow
+		# because two "different green" canopies that are wildly different
+		# read as two seasons rather than one forest.
+		canopy_color = (
+			rng.uniform(0.16, 0.32),
+			rng.uniform(0.28, 0.45),
+			rng.uniform(0.13, 0.22),
+		)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize_dual(obj, name, structural_color=trunk_color, armor_color=canopy_color,
+		structural_metallic=0.0, structural_roughness=0.95,
+		armor_metallic=0.0, armor_roughness=1.0)
+	return obj
+
+
 def build_oil_derrick(name, seed=0, color=(0.22, 0.22, 0.24)):
 	"""A squat pump-jack frame - reads as infrastructure sitting on the
 	ground rather than a mineral growing out of it, same intent
@@ -2909,6 +3153,16 @@ def generate_terrain_props():
 	for i in range(2):
 		export_and_cleanup(build_oil_derrick("resource_oil_%d" % i, seed=500 + i),
 			terrain_dir, "resource_oil_%d" % i)
+
+	# AMBIENT_TREE_POOL_SIZE in resource_node.gd MUST match this range - the
+	# loader rolls `idx = randi() % AMBIENT_TREE_POOL_SIZE`, so any index
+	# with no exported .glb falls through to the procedural cylinder
+	# fallback. The same trim-the-pool-to-what-exists guard that
+	# AUTHORED_POOL_SIZES exists for at the harvestable-resource scale,
+	# applied at the ambient-tree scale.
+	for i in range(20):
+		export_and_cleanup(build_ambient_tree("ambient_tree_%d" % i, seed=600 + i),
+			terrain_dir, "ambient_tree_%d" % i)
 
 	print("--- Terrain props written to %s ---" % terrain_dir)
 

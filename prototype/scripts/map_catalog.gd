@@ -230,6 +230,77 @@ static func assign_spawns(spawn_defs: Array, order: Array, explicit_picks: Dicti
 		claimed_hqs.append(picked.hq)
 	return assignment
 
+
+# 2026-08-10 (Chris): base-zone assignment, the placement counterpart of
+# assign_spawns(). One zone per slot, never the same zone twice, with
+# the same OpenRA "maximise the squared distance to everything already
+# claimed" spread algorithm assign_spawns() uses - on the zones' centres
+# rather than on the HQs, because the HQs are no longer authored (the
+# player drops them inside the zone). The match-level orchestrator
+# (match_director.gd) calls BOTH assign_spawns and assign_base_zones
+# with the same `order` so the i-th slot's spawn and zone are decided
+# by the same distance-spread iteration, which keeps the result
+# deterministic and testable in isolation.
+#
+# `base_zones`: a list of {id, center: Vector3, half_extents: Vector2}
+# - the same shape FIELD_SPEC.base_zones validates, so the validator
+# has already done the type-check before the assignment runs.
+#
+# Returns {slot_key -> zone_id} on success, or an empty Dictionary if
+# there are fewer zones than slots in `order`. The orchestrator treats
+# the under-provisioned case as a hard error (a future 4-player match
+# against a 2-zone map needs explicit handling, not silent fallthrough
+# to a "first zone wins" guess), and the early-empty return makes the
+# failure surface here rather than at the placement-UI layer.
+static func assign_base_zones(base_zones: Array, order: Array, rng: RandomNumberGenerator = null) -> Dictionary:
+	if base_zones.is_empty():
+		return {}
+	if order.size() > base_zones.size():
+		# Surface the mismatch here; the caller is the right place to
+		# decide whether to fail the match, drop excess slots, or fall
+		# back to something. Returning {} on purpose rather than picking
+		# the first zone N times - that pattern silently passed two
+		# related bugs already (see assign_spawns()'s own header for
+		# the OpenRA "explicit pick > max-spread > uniform random"
+		# ordering) and a per-zone distance metric is what the spread
+		# step needs to do its job.
+		return {}
+	var claimed_ids: Array = []
+	var claimed_centres: Array = []
+	var assignment: Dictionary = {}
+	for slot_key in order:
+		var candidates: Array = []
+		for z in base_zones:
+			if not claimed_ids.has(z.id):
+				candidates.append(z)
+		if candidates.is_empty():
+			break
+		var picked: Dictionary = candidates[0]
+		var best_score: float = -1.0
+		for c in candidates:
+			var score: float = 0.0
+			for centre in claimed_centres:
+				score += c.center.distance_squared_to(centre)
+			if score > best_score:
+				best_score = score
+				picked = c
+		assignment[slot_key] = picked.id
+		claimed_ids.append(picked.id)
+		claimed_centres.append(picked.center)
+	return assignment
+
+
+# The base zone a slot has been assigned to, in a map_def that's gone
+# through the loader. Empty Dictionary if the map has no base_zones
+# (older bundled maps, before the field existed) or the slot is
+# unknown. Same lookup shape as get_spawn() so the orchestrator can
+# resolve slot -> {spawn, base_zone} with two parallel calls.
+static func get_base_zone(map_def: Dictionary, zone_id: String) -> Dictionary:
+	for z in map_def.get("base_zones", []):
+		if z.get("id") == zone_id:
+			return z
+	return {}
+
 # RTS_CORE_ROADMAP.md B10: this project has a REAL baked navmesh at
 # map-load time, unlike OpenRA (which only lints spawn counts/duplicates) -
 # so this goes further and lints actual per-spawn FAIRNESS: is the HQ pad
@@ -426,6 +497,29 @@ const FIELD_SPEC: Dictionary = {
 		"factory": {"type": "vector3", "required": true},
 		"refinery": {"type": "vector3", "required": true},
 		"harvester": {"type": "vector3", "required": true},
+	}},
+	# 2026-08-10 (Chris): pre-game HQ-placement zones. Each map declares
+	# one or more flat-enough rectangles a player may drop their HQ in,
+	# and the spawn-assignment algorithm hands one zone per slot. The
+	# the player places the HQ INSIDE the assigned zone (current
+	# behaviour) or wherever the AI decides (next change). The other
+	# three buildings (refinery/factories/harvester) are no longer
+	# pre-placed at hard-coded offsets - the player has a starting bank
+	# to build them normally, so the per-spawn factory/refinery/harvester
+	# fields above are vestigial today and a future cleanup pass will
+	# drop them once the runtime no longer reads them. Kept required here
+	# so the existing 9 maps keep validating unchanged.
+	#
+	# `id` is the stable key the assignment algorithm returns; `center`/
+	# `half_extents` are the rectangle the player may drop the HQ in.
+	# Deliberately Vector2 half_extents (not Vector3) - these are XZ
+	# ground rects, Y is the terrain height, and Vector3 half_extents
+	# would invite a stray Y value to silently fail validation here
+	# (Z would be checked, the Y component silently ignored).
+	"base_zones": {"type": "array", "required": false, "item": {
+		"id": {"type": "string", "required": true},
+		"center": {"type": "vector3", "required": true, "scale": true},
+		"half_extents": {"type": "vector2", "required": true, "scale": true},
 	}},
 	"schema_version": {"type": "number", "required": true, "min": 1},
 	# Reserved fields (B3): not authored by any of the 8 bundled maps yet,

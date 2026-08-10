@@ -137,7 +137,51 @@ const STATS := {
 		"gives_buildable_area": true, "requires_buildable_area": true,
 		"adjacent_m": DEFAULT_ADJACENT_M,
 	},
+
+	# THE TECH TREE. These three feed no production queue - CONTRIBUTORS has no
+	# entry for any of them - and exist purely to be OWNED. ModuleCatalog's
+	# required_building tables name these same three ids on individual hulls,
+	# armour materials, modules and ammo, and DesignCosting.
+	# blueprint_required_buildings() reads a design against them. A design
+	# naming a lab the team has not built cannot be queued - see
+	# ProductionService's prerequisite gate - which is the entire point of a
+	# tech tree: it gates DESIGNS, not queues.
+	#
+	# Escalating cost/build_time/hp mirrors the escalating unlock tier
+	# (tech_lab is the baseline gate on 30 parts, exotics_lab the rarest at 8),
+	# so committing to the top of the tree is also the biggest tempo bet.
+	"tech_lab": {
+		"vision_range": 20.0,
+		"hp": 900.0, "size": Vector3(4.4, 2.9, 4.4), "color": Color(0.42, 0.55, 0.58),
+		"cost_metal": 200, "cost_crystal": 60, "build_time": 18.0,
+		"gives_buildable_area": true, "requires_buildable_area": true,
+		"adjacent_m": DEFAULT_ADJACENT_M,
+	},
+	"physics_lab": {
+		"vision_range": 22.0,
+		"hp": 1100.0, "size": Vector3(4.8, 3.8, 4.8), "color": Color(0.45, 0.48, 0.62),
+		"cost_metal": 280, "cost_crystal": 110, "build_time": 26.0,
+		"gives_buildable_area": true, "requires_buildable_area": true,
+		"adjacent_m": DEFAULT_ADJACENT_M,
+	},
+	"exotics_lab": {
+		"vision_range": 24.0,
+		"hp": 1300.0, "size": Vector3(5.4, 4.5, 5.4), "color": Color(0.55, 0.38, 0.58),
+		"cost_metal": 340, "cost_crystal": 180, "build_time": 34.0,
+		"gives_buildable_area": true, "requires_buildable_area": true,
+		"adjacent_m": DEFAULT_ADJACENT_M,
+	},
 }
+
+# The three tech-tree kinds, in unlock-tier order. Kept alongside STATS as the
+# canonical list rather than re-derived (e.g. "every kind CONTRIBUTORS has no
+# entry for" would also catch a future non-lab, non-queue building), since the
+# tests and the tree UI both need this exact set and this exact order.
+const TECH_LAB_KINDS: Array[String] = ["tech_lab", "physics_lab", "exotics_lab"]
+
+
+static func is_tech_lab(kind: String) -> bool:
+	return kind in TECH_LAB_KINDS
 
 
 static func has_kind(kind: String) -> bool:

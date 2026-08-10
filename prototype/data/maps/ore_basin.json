@@ -1,319 +1,345 @@
 {
-	"name": "Ore Basin",
-	"description": "A direct crib from C&C's own Tiberium fields (Chris's own call): resources sit in three clustered fields - one anchored near each base, and a bigger, riskier one dead center - instead of a handful of big scattered nodes. All three regrow gradually if left alone, so holding a field still pays off even after the obvious harvest. No water or high ground; two rock clusters flank the contested center field for cover during the fight over it.",
-	"map_half_extents": 210,
-	"ground_color": [
-		0.32,
-		0.27,
-		0.18
-	],
-	"obstacles": [
-		{
-			"center": [
-				45,
-				0,
-				0
-			],
-			"half_extents": [
-				8,
-				8
-			],
-			"type": "rock"
-		},
-		{
-			"center": [
-				-45,
-				0,
-				0
-			],
-			"half_extents": [
-				8,
-				8
-			],
-			"type": "rock"
-		}
-	],
-	"resource_nodes": [
-		{
-			"position": [
-				14,
-				0,
-				58
-			],
-			"type": "metal",
-			"amount": 500
-		},
-		{
-			"position": [
-				-14,
-				0,
-				58
-			],
-			"type": "metal",
-			"amount": 450
-		},
-		{
-			"position": [
-				18,
-				0,
-				40
-			],
-			"type": "crystal",
-			"amount": 400
-		},
-		{
-			"position": [
-				-18,
-				0,
-				40
-			],
-			"type": "crystal",
-			"amount": 400
-		},
-		{
-			"position": [
-				0,
-				0,
-				34
-			],
-			"type": "metal",
-			"amount": 550
-		},
-		{
-			"position": [
-				-14,
-				0,
-				-58
-			],
-			"type": "metal",
-			"amount": 500
-		},
-		{
-			"position": [
-				14,
-				0,
-				-58
-			],
-			"type": "metal",
-			"amount": 450
-		},
-		{
-			"position": [
-				-18,
-				0,
-				-40
-			],
-			"type": "crystal",
-			"amount": 400
-		},
-		{
-			"position": [
-				18,
-				0,
-				-40
-			],
-			"type": "crystal",
-			"amount": 400
-		},
-		{
-			"position": [
-				0,
-				0,
-				-34
-			],
-			"type": "metal",
-			"amount": 550
-		},
-		{
-			"position": [
-				20,
-				0,
-				20
-			],
-			"type": "metal",
-			"amount": 650
-		},
-		{
-			"position": [
-				-20,
-				0,
-				20
-			],
-			"type": "metal",
-			"amount": 650
-		},
-		{
-			"position": [
-				20,
-				0,
-				-20
-			],
-			"type": "crystal",
-			"amount": 600
-		},
-		{
-			"position": [
-				-20,
-				0,
-				-20
-			],
-			"type": "crystal",
-			"amount": 600
-		},
-		{
-			"position": [
-				0,
-				0,
-				0
-			],
-			"type": "crystal",
-			"amount": 700
-		},
-		{
-			"amount": 900,
-			"position": [
-				42,
-				0,
-				56
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-42,
-				0,
-				56
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				42,
-				0,
-				-56
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 900,
-			"position": [
-				-42,
-				0,
-				-56
-			],
-			"type": "lumber"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				71,
-				0,
-				0
-			],
-			"type": "oil"
-		},
-		{
-			"amount": 1400,
-			"position": [
-				-71,
-				0,
-				0
-			],
-			"type": "oil"
-		}
-	],
-	"schema_version": 1,
-	"spawns": [
-		{
-			"id": "player",
-			"hq": [
-				0,
-				0,
-				90
-			],
-			"factory": [
-				-27,
-				0,
-				78
-			],
-			"refinery": [
-				24,
-				0,
-				72
-			],
-			"harvester": [
-				15,
-				1.5,
-				66
-			]
-		},
-		{
-			"id": "enemy",
-			"hq": [
-				0,
-				0,
-				-90
-			],
-			"factory": [
-				27,
-				0,
-				-78
-			],
-			"refinery": [
-				-24,
-				0,
-				-72
-			],
-			"harvester": [
-				-15,
-				1.5,
-				-66
-			]
-		}
-	],
-	"water_areas": [],
-	"hills": [
-		{
-			"center": [
-				-130,
-				0,
-				70
-			],
-			"radius": 18,
-			"falloff": 24,
-			"height": 9
-		},
-		{
-			"center": [
-				-130,
-				0,
-				-70
-			],
-			"radius": 18,
-			"falloff": 24,
-			"height": 9
-		},
-		{
-			"center": [
-				130,
-				0,
-				70
-			],
-			"radius": 14,
-			"falloff": 18,
-			"height": -6
-		},
-		{
-			"center": [
-				130,
-				0,
-				-70
-			],
-			"radius": 14,
-			"falloff": 18,
-			"height": -6
-		}
-	]
+ "name": "Ore Basin",
+ "description": "A direct crib from C&C's own Tiberium fields (Chris's own call): resources sit in three clustered fields - one anchored near each base, and a bigger, riskier one dead center - instead of a handful of big scattered nodes. All three regrow gradually if left alone, so holding a field still pays off even after the obvious harvest. No water or high ground; two rock clusters flank the contested center field for cover during the fight over it.",
+ "map_half_extents": 210,
+ "ground_color": [
+  0.32,
+  0.27,
+  0.18
+ ],
+ "obstacles": [
+  {
+   "center": [
+    45,
+    0,
+    0
+   ],
+   "half_extents": [
+    8,
+    8
+   ],
+   "type": "rock"
+  },
+  {
+   "center": [
+    -45,
+    0,
+    0
+   ],
+   "half_extents": [
+    8,
+    8
+   ],
+   "type": "rock"
+  }
+ ],
+ "resource_nodes": [
+  {
+   "position": [
+    14,
+    0,
+    58
+   ],
+   "type": "metal",
+   "amount": 500
+  },
+  {
+   "position": [
+    -14,
+    0,
+    58
+   ],
+   "type": "metal",
+   "amount": 450
+  },
+  {
+   "position": [
+    18,
+    0,
+    40
+   ],
+   "type": "crystal",
+   "amount": 400
+  },
+  {
+   "position": [
+    -18,
+    0,
+    40
+   ],
+   "type": "crystal",
+   "amount": 400
+  },
+  {
+   "position": [
+    0,
+    0,
+    34
+   ],
+   "type": "metal",
+   "amount": 550
+  },
+  {
+   "position": [
+    -14,
+    0,
+    -58
+   ],
+   "type": "metal",
+   "amount": 500
+  },
+  {
+   "position": [
+    14,
+    0,
+    -58
+   ],
+   "type": "metal",
+   "amount": 450
+  },
+  {
+   "position": [
+    -18,
+    0,
+    -40
+   ],
+   "type": "crystal",
+   "amount": 400
+  },
+  {
+   "position": [
+    18,
+    0,
+    -40
+   ],
+   "type": "crystal",
+   "amount": 400
+  },
+  {
+   "position": [
+    0,
+    0,
+    -34
+   ],
+   "type": "metal",
+   "amount": 550
+  },
+  {
+   "position": [
+    20,
+    0,
+    20
+   ],
+   "type": "metal",
+   "amount": 650
+  },
+  {
+   "position": [
+    -20,
+    0,
+    20
+   ],
+   "type": "metal",
+   "amount": 650
+  },
+  {
+   "position": [
+    20,
+    0,
+    -20
+   ],
+   "type": "crystal",
+   "amount": 600
+  },
+  {
+   "position": [
+    -20,
+    0,
+    -20
+   ],
+   "type": "crystal",
+   "amount": 600
+  },
+  {
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "type": "crystal",
+   "amount": 700
+  },
+  {
+   "amount": 900,
+   "position": [
+    42,
+    0,
+    56
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -42,
+    0,
+    56
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    42,
+    0,
+    -56
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 900,
+   "position": [
+    -42,
+    0,
+    -56
+   ],
+   "type": "lumber"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    71,
+    0,
+    0
+   ],
+   "type": "oil"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    -71,
+    0,
+    0
+   ],
+   "type": "oil"
+  }
+ ],
+ "base_zones": [
+  {
+   "id": "north",
+   "center": [
+    0.0,
+    0.0,
+    90.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ]
+  },
+  {
+   "id": "south",
+   "center": [
+    0.0,
+    0.0,
+    -90.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ]
+  }
+ ],
+ "schema_version": 1,
+ "spawns": [
+  {
+   "id": "player",
+   "hq": [
+    0,
+    0,
+    90
+   ],
+   "factory": [
+    -27,
+    0,
+    78
+   ],
+   "refinery": [
+    24,
+    0,
+    72
+   ],
+   "harvester": [
+    15,
+    1.5,
+    66
+   ]
+  },
+  {
+   "id": "enemy",
+   "hq": [
+    0,
+    0,
+    -90
+   ],
+   "factory": [
+    27,
+    0,
+    -78
+   ],
+   "refinery": [
+    -24,
+    0,
+    -72
+   ],
+   "harvester": [
+    -15,
+    1.5,
+    -66
+   ]
+  }
+ ],
+ "water_areas": [],
+ "hills": [
+  {
+   "center": [
+    -130,
+    0,
+    70
+   ],
+   "radius": 18,
+   "falloff": 24,
+   "height": 9
+  },
+  {
+   "center": [
+    -130,
+    0,
+    -70
+   ],
+   "radius": 18,
+   "falloff": 24,
+   "height": 9
+  },
+  {
+   "center": [
+    130,
+    0,
+    70
+   ],
+   "radius": 14,
+   "falloff": 18,
+   "height": -6
+  },
+  {
+   "center": [
+    130,
+    0,
+    -70
+   ],
+   "radius": 14,
+   "falloff": 18,
+   "height": -6
+  }
+ ]
 }

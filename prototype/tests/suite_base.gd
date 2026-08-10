@@ -408,6 +408,34 @@ func _smoke_test_map(map_id: String) -> bool:
 		battle.queue_free()
 		return false
 	var queue_name = preload("res://scripts/battle/economy/design_costing.gd").queue_for_design(harv_bp)
+
+	# The pre-game HQ-placement phase (2026-08-10) dropped the old "auto-spawn
+	# refinery + 3 manufactories at match start" - the player now has to build
+	# a manufactory before any unit can be queued. Mirror that here: place the
+	# manufactory this harvester's tier feeds (light/medium/heavy), right next
+	# to the player HQ at the same offset the old auto-spawn used (factory =
+	# spawn.hq + (0, 0, -14)). Without this, enqueue_unit() short-circuits to
+	# an empty job ("queueing with no live contributor has to fail loudly at
+	# the door rather than sit in a line that can never advance" -
+	# production_service.gd:enqueue_unit), and the unit never spawns, and
+	# the assertion below fires for the wrong reason.
+	#
+	# The assertion still tests what it always tested: that the production
+	# service produces a queued unit given a live contributor. The only
+	# thing that moved is who puts the contributor there - the old runtime
+	# did it in _spawn_bases(), this test does it explicitly, which is
+	# closer to the new player-driven flow anyway.
+	var BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
+	var kinds: Array = BuildingCatalogScript.contributors_for(queue_name)
+	if kinds.is_empty():
+		print("  [FAIL] No manufactory kinds registered for queue '", queue_name, "' on map '", map_id, "'")
+		battle.queue_free()
+		return false
+	var manufactory_kind: String = kinds[0]
+	var factory_pos: Vector3 = player_start.hq + Vector3(0, 0, -14)
+	battle._place_structure(manufactory_kind, battle.PLAYER_TEAM, factory_pos)
+	battle.economy.recalculate_power(battle.PLAYER_TEAM, battle.get_team_structures(battle.PLAYER_TEAM))
+
 	var units_before = battle.get_team_units(battle.PLAYER_TEAM).size()
 	battle.production.enqueue_unit(battle.PLAYER_TEAM, harv_bp, 0, 0.05, queue_name)
 	for i in range(30):
