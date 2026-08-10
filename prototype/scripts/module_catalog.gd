@@ -271,7 +271,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 40.0,
 			# Baseline turret traverse - every other weapon's agility is
 			# reasoned relative to this 1.0 anchor.
-			"size": Vector3(0.6, 0.6, 2.0),
+			"size": Vector3(1.0, 1.0, 3.3),
 			"color": Color.DIM_GRAY
 		},
 		"heavy_machine_gun": {
@@ -308,7 +308,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.15,
 			# Motor-driven gatling on a powered gimbal - agile but not as
 			# featherweight-quick as the single-barrel MG.
-			"size": Vector3(0.5, 0.5, 1.5),
+			"size": Vector3(0.8, 0.8, 2.0),
 			"color": Color(0.2, 0.2, 0.2) # Charcoal
 		},
 		"gauss_railgun": {
@@ -325,7 +325,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# independently traverses in practice - this number only matters
 			# if that override is ever lifted, kept low for consistency with
 			# its long rigid accelerator rail.
-			"size": Vector3(0.6, 0.6, 2.8),
+			"size": Vector3(1.2, 1.2, 5.0),
 			"color": Color.BLUE_VIOLET
 		},
 
@@ -369,7 +369,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.55,
 			# Indirect-fire tube array - traverses slowly and deliberately,
 			# same "needs a level, stable aim" character as its pintle stance.
-			"size": Vector3(1.2, 0.6, 1.2),
+			"size": Vector3(1.6, 0.8, 1.6),
 			"color": Color.OLIVE
 		},
 
@@ -393,7 +393,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.25,
 			# Self-correcting guidance means the launch rail doesn't need to
 			# snap-track a moving target the way a direct-fire gun does.
-			"size": Vector3(0.6, 0.4, 1.6),
+			"size": Vector3(0.8, 0.5, 2.0),
 			"color": Color.GOLD
 		},
 		"missile_pod": {
@@ -418,7 +418,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Boxy multi-tube launcher, unguided at launch - needs to actually
 			# aim the whole pod rather than let guidance correct after the
 			# fact, so it traverses slower than the guided missiles above.
-			"size": Vector3(1.2, 0.8, 1.5),
+			"size": Vector3(1.6, 1.2, 2.2),
 			"color": Color.DARK_ORANGE
 		},
 		"drone_carrier": {
@@ -456,7 +456,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.45,
 			# Lobbing arc weapon like mortar_array/plasma_lobber, but a
 			# shorter lob range makes it a bit less deliberate to aim.
-			"size": Vector3(1.4, 0.8, 1.4),
+			"size": Vector3(2.0, 1.2, 2.0),
 			"color": Color.CHOCOLATE
 		},
 		"flamethrower": {
@@ -477,7 +477,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 35,
 			"crystal": 15,
 			"dps": 112.0,
-			"size": Vector3(0.5, 0.5, 1.6),
+			"size": Vector3(0.6, 0.6, 2.0),
 			"color": Color.CRIMSON
 		},
 
@@ -502,7 +502,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.4,
 			# Tall, top-heavy precision emitter - deliberate, controlled
 			# traverse rather than a fast snap-track.
-			"size": Vector3(0.5, 1.2, 0.5),
+			"size": Vector3(1.0, 3.0, 1.0),
 			"color": Color.LIGHT_SKY_BLUE
 		},
 		"ion_cannon": {
@@ -526,7 +526,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 70,
 			"crystal": 65,
 			"dps": 97.5,
-			"size": Vector3(0.8, 0.8, 2.8),
+			"size": Vector3(1.5, 1.5, 4.5),
 			"color": Color.SKY_BLUE
 		},
 		# Activating a module that was already 80% built: fire profile, fire
@@ -550,7 +550,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 38,
 			"crystal": 0,
 			"dps": 55.0,
-			"size": Vector3(0.6, 0.6, 1.2),
+			"size": Vector3(1.0, 1.0, 1.8),
 			"color": Color(0.32, 0.34, 0.28)
 		},
 
@@ -569,7 +569,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 52,
 			"crystal": 8,
 			"dps": 85.0,
-			"size": Vector3(0.9, 0.7, 1.8),
+			"size": Vector3(2.0, 1.8, 5.5),
 			"color": Color(0.30, 0.33, 0.28)
 		},
 
@@ -590,7 +590,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 34,
 			"crystal": 18,
 			"dps": 92.0,
-			"size": Vector3(0.6, 0.5, 1.3),
+			"size": Vector3(0.8, 0.6, 3.0),
 			"color": Color(0.30, 0.32, 0.34)
 		},
 
@@ -609,7 +609,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 40,
 			"crystal": 20,
 			"dps": 70.0,
-			"size": Vector3(0.7, 0.6, 1.4),
+			"size": Vector3(1.5, 1.2, 4.0),
 			"color": Color(0.33, 0.35, 0.33)
 		},
 
@@ -628,7 +628,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 36,
 			"crystal": 22,
 			"dps": 65.0,
-			"size": Vector3(0.7, 0.6, 1.2),
+			"size": Vector3(1.0, 0.8, 2.5),
 			"color": Color(0.28, 0.31, 0.27)
 		},
 
@@ -648,7 +648,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 33,
 			"crystal": 26,
 			"dps": 75.0,
-			"size": Vector3(0.6, 0.6, 1.4),
+			"size": Vector3(0.8, 0.8, 2.6),
 			"color": Color(0.29, 0.31, 0.30)
 		},
 
@@ -667,7 +667,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 48,
 			"crystal": 16,
 			"dps": 95.0,
-			"size": Vector3(0.7, 0.7, 1.5),
+			"size": Vector3(1.0, 1.0, 3.6),
 			"color": Color(0.27, 0.28, 0.30)
 		},
 
@@ -686,7 +686,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 55,
 			"crystal": 24,
 			"dps": 88.0,
-			"size": Vector3(0.8, 0.7, 2.0),
+			"size": Vector3(1.2, 1.2, 4.0),
 			"color": Color(0.31, 0.33, 0.29)
 		},
 
@@ -702,7 +702,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 16,
 			"crystal": 4,
 			"dps": 0.0,
-			"size": Vector3(0.5, 0.4, 0.5),
+			"size": Vector3(0.8, 0.6, 0.8),
 			"color": Color(0.42, 0.44, 0.38)
 		},
 
@@ -717,7 +717,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 18,
 			"crystal": 22,
 			"dps": 4.0,
-			"size": Vector3(0.5, 0.5, 0.7),
+			"size": Vector3(0.8, 0.8, 1.2),
 			"color": Color(0.36, 0.42, 0.46)
 		},
 
@@ -733,7 +733,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 28,
 			"crystal": 14,
 			"dps": 26.0,
-			"size": Vector3(0.6, 0.5, 0.6),
+			"size": Vector3(0.8, 0.6, 0.8),
 			"color": Color(0.34, 0.36, 0.38)
 		},
 
@@ -748,7 +748,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 42,
 			"crystal": 6,
 			"dps": 68.0,
-			"size": Vector3(0.7, 0.6, 1.5),
+			"size": Vector3(1.2, 1.0, 2.5),
 			"color": Color(0.28, 0.31, 0.27)
 		},
 
@@ -764,7 +764,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 22,
 			"crystal": 30,
 			"dps": 0.0,
-			"size": Vector3(0.6, 1.0, 0.6),
+			"size": Vector3(0.8, 3.5, 0.8),
 			"color": Color(0.33, 0.37, 0.35)
 		},
 
@@ -779,7 +779,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 46,
 			"crystal": 12,
 			"dps": 45.0,
-			"size": Vector3(0.7, 0.6, 0.9),
+			"size": Vector3(1.2, 1.0, 1.5),
 			"color": Color(0.31, 0.34, 0.27)
 		},
 
@@ -799,7 +799,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# would quietly shrink every sensor module relative to the band it
 			# is meant to extend.
 			"vision_bonus": 5.5,
-			"size": Vector3(0.6, 0.5, 0.8),
+			"size": Vector3(0.8, 0.6, 1.2),
 			"color": Color(0.34, 0.40, 0.36)
 		},
 
@@ -814,7 +814,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 20,
 			"crystal": 10,
 			"dps": 0.0,
-			"size": Vector3(0.6, 0.5, 0.6),
+			"size": Vector3(0.8, 0.6, 0.8),
 			"color": Color(0.38, 0.39, 0.32)
 		},
 
@@ -871,7 +871,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"crystal": 26,
 			"dps": 22.0,
 			"energy_capacity": 0.0,
-			"size": Vector3(0.5, 0.5, 1.0),
+			"size": Vector3(0.8, 0.8, 1.8),
 			"color": Color(0.30, 0.40, 0.48)
 		},
 
@@ -887,7 +887,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 30,
 			"crystal": 32,
 			"dps": 30.0,
-			"size": Vector3(0.7, 0.6, 0.9),
+			"size": Vector3(1.0, 0.8, 1.5),
 			"color": Color(0.52, 0.50, 0.42)
 		},
 
@@ -903,7 +903,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 60,
 			"crystal": 55,
 			"dps": 120.0,
-			"size": Vector3(0.6, 0.6, 2.4),
+			"size": Vector3(1.2, 1.2, 5.5),
 			"color": Color(0.34, 0.44, 0.52)
 		},
 
@@ -922,7 +922,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.4,
 			# Continuous-beam precision weapon over a long housing - benefits
 			# from a stable, deliberate traverse for sustained aim.
-			"size": Vector3(0.7, 0.7, 2.4),
+			"size": Vector3(1.0, 1.0, 3.5),
 			"color": Color.DARK_RED
 		},
 		"plasma_lobber": {
@@ -944,7 +944,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.5,
 			# Arcing lob weapon, same slow-deliberate character as the
 			# mortars/cluster_dispenser.
-			"size": Vector3(0.6, 0.6, 1.6),
+			"size": Vector3(1.2, 1.2, 2.5),
 			"color": Color.MEDIUM_SPRING_GREEN
 		},
 
@@ -963,7 +963,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.15,
 			# Point defense lives and dies by how fast it can snap onto a
 			# small, fast-moving threat - the quickest traverse in the roster.
-			"size": Vector3(0.6, 0.8, 0.6),
+			"size": Vector3(1.2, 3.0, 1.2),
 			"color": Color.WHITE_SMOKE
 		},
 		"pd_laser": {
@@ -980,7 +980,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Small, light PD laser - the second-fastest tracker after CIWS,
 			# same reflex-driven point-defense logic.
 			"dps": 5.0,
-			"size": Vector3(0.4, 0.5, 0.4),
+			"size": Vector3(0.6, 0.8, 0.6),
 			"color": Color.LIGHT_CORAL
 		},
 		"flak_cannon": {
@@ -1000,7 +1000,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.3,
 			# Bulkier than the other PD weapons but still needs to swing to
 			# steep anti-air elevations routinely - fast, just not CIWS-fast.
-			"size": Vector3(0.525, 0.525, 1.35),
+			"size": Vector3(1.0, 1.0, 2.8),
 			"color": Color.DARK_GOLDENROD
 		},
 
@@ -1026,7 +1026,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# weapon, though its low arc wants a slightly better stance than
 			# a pure flat-shooting autogun.
 			"pintle_min_up_alignment": 0.3,
-			"size": Vector3(0.4, 0.4, 1.1),
+			"size": Vector3(0.4, 0.4, 0.8),
 			"color": Color(0.32, 0.36, 0.22)
 		},
 
@@ -1049,7 +1049,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"crystal": 5,
 			"dps": 85.0,
 			"pintle_min_up_alignment": 0.25,
-			"size": Vector3(0.35, 0.35, 2.0),
+			"size": Vector3(0.5, 0.5, 1.5),
 			"color": Color(0.42, 0.40, 0.34)
 		},
 
@@ -1068,7 +1068,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"crystal": 30,
 			"dps": 88.0,
 			"pintle_min_up_alignment": 0.3,
-			"size": Vector3(0.5, 0.5, 2.2),
+			"size": Vector3(0.8, 0.8, 3.0),
 			"color": Color(0.45, 0.62, 0.78)
 		},
 
@@ -1085,7 +1085,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"crystal": 0,
 			"dps": 62.0,
 			"pintle_min_up_alignment": 0.15,
-			"size": Vector3(0.35, 0.35, 1.4),
+			"size": Vector3(0.5, 0.5, 1.8),
 			"color": Color(0.28, 0.30, 0.32)
 		},
 
@@ -1104,7 +1104,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"crystal": 18,
 			"dps": 78.0,
 			"pintle_min_up_alignment": 0.20,
-			"size": Vector3(0.4, 0.4, 2.2),
+			"size": Vector3(0.5, 0.5, 2.2),
 			"color": Color(0.24, 0.28, 0.26)
 		},
 
@@ -1127,7 +1127,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 45.0,
 			# Arcing tube, same ballistic-baseline reasoning as mortar_array.
 			"pintle_min_up_alignment": 0.55,
-			"size": Vector3(0.7, 0.6, 0.7),
+			"size": Vector3(1.0, 0.8, 1.2),
 			"color": Color(0.78, 0.35, 0.12)
 		},
 
@@ -1145,7 +1145,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"crystal": 5,
 			"dps": 40.0,
 			"pintle_min_up_alignment": 0.4,
-			"size": Vector3(0.9, 0.5, 0.9),
+			"size": Vector3(1.4, 0.8, 1.4),
 			"color": Color(0.48, 0.44, 0.26)
 		},
 
@@ -1173,7 +1173,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# A big timber-and-torsion frame - it needs a level, solid base
 			# the way a mortar does, for much the same reason.
 			"pintle_min_up_alignment": 0.5,
-			"size": Vector3(1.2, 0.9, 2.4),
+			"size": Vector3(2.0, 1.5, 4.0),
 			"color": Color(0.44, 0.33, 0.20)
 		},
 
@@ -1197,7 +1197,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"pintle_min_up_alignment": 0.15,
 			# Light, small, and aiming a cloud rather than a point target -
 			# it only needs to be pointed roughly the right way.
-			"size": Vector3(0.5, 0.4, 0.5),
+			"size": Vector3(0.8, 0.6, 0.8),
 			"color": Color(0.55, 0.56, 0.58)
 		},
 

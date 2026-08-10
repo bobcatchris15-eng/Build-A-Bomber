@@ -442,6 +442,76 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"laser_designator": true, "energy_barrier_projector": true, "fire_control_radar": true,
 }
 
+const MODULAR_AUTHORED_SIZES := {
+	"basic_cannon": Vector3(0.6, 0.6, 2.0),
+	"heavy_machine_gun": Vector3(0.3, 0.3, 1.0),
+	"rotary_cannon": Vector3(0.5, 0.5, 1.5),
+	"gauss_railgun": Vector3(0.6, 0.6, 2.8),
+	"artillery": Vector3(1.8, 1.8, 6.4),
+	"mortar_array": Vector3(1.2, 0.6, 1.2),
+	"guided_missile": Vector3(0.6, 0.4, 1.6),
+	"missile_pod": Vector3(1.2, 0.8, 1.5),
+	"cluster_dispenser": Vector3(1.4, 0.8, 1.4),
+	"flamethrower": Vector3(0.5, 0.5, 1.6),
+	"tesla_coil": Vector3(0.5, 1.2, 0.5),
+	"ion_cannon": Vector3(0.8, 0.8, 2.8),
+	"heavy_laser": Vector3(0.7, 0.7, 2.4),
+	"plasma_lobber": Vector3(0.6, 0.6, 1.6),
+	"ciws": Vector3(0.6, 0.8, 0.6),
+	"pd_laser": Vector3(0.4, 0.5, 0.4),
+	"flak_cannon": Vector3(0.525, 0.525, 1.35),
+	"smoke_discharger": Vector3(0.5, 0.4, 0.5),
+	"mk19_grenade_launcher": Vector3(0.4, 0.4, 1.1),
+	"recoilless_rifle": Vector3(0.35, 0.35, 2.0),
+	"coil_gun": Vector3(0.5, 0.5, 2.2),
+	"autocannon": Vector3(0.35, 0.35, 1.4),
+	"napalm_mortar": Vector3(0.7, 0.6, 0.7),
+	"mine_layer": Vector3(0.9, 0.5, 0.9),
+	"ballista": Vector3(1.2, 0.9, 2.4),
+	"anti_materiel_rifle": Vector3(0.4, 0.4, 2.2),
+	"arc_projector": Vector3(0.5, 0.5, 1.0),
+	"microwave_emitter": Vector3(0.7, 0.6, 0.9),
+	"particle_lance": Vector3(0.6, 0.6, 2.4),
+	"spigot_mortar": Vector3(0.6, 0.6, 1.2),
+	"rocket_artillery": Vector3(0.9, 0.7, 1.8),
+	"hypervelocity_missile": Vector3(0.6, 0.5, 1.3),
+	"sam_launcher": Vector3(0.7, 0.6, 1.4),
+	"loitering_munition": Vector3(0.7, 0.6, 1.2),
+	"anti_radiation_missile": Vector3(0.6, 0.6, 1.4),
+	"bunker_buster": Vector3(0.7, 0.7, 1.5),
+	"cruise_missile": Vector3(0.8, 0.7, 2.0),
+	"chaff_dispenser": Vector3(0.5, 0.4, 0.5),
+	"laser_dazzler": Vector3(0.5, 0.5, 0.7),
+	"aps_interceptor": Vector3(0.6, 0.5, 0.6),
+	"aa_autocannon": Vector3(0.7, 0.6, 1.5),
+	"jammer_mast": Vector3(0.6, 1.0, 0.6),
+	"sentry_deployer": Vector3(0.7, 0.6, 0.9),
+	"sensor_beacon_launcher": Vector3(0.6, 0.5, 0.8),
+	"decoy_projector": Vector3(0.6, 0.5, 0.6),
+	"wheels": Vector3(0.6, 0.6, 0.6),
+	"helicopter_rotors": Vector3(4.0, 0.2, 4.0),
+	"tracked_treads": Vector3(0.8, 0.6, 2.5),
+	"legs": Vector3(0.5, 1.5, 0.5),
+	"hover_engine": Vector3(1.2, 0.3, 1.2),
+	"fixed_wing_engine": Vector3(1.0, 0.5, 1.5),
+	"ornithopter_wing": Vector3(2.0, 0.2, 1.0),
+	"buoyant_envelope": Vector3(1.0, 0.5, 1.0),
+	"screw_drive": Vector3(0.8, 0.8, 3.0),
+	"half_track": Vector3(0.7, 0.6, 2.2),
+	"rocker_bogie": Vector3(0.65, 0.9, 2.6),
+	"air_cushion_skirt": Vector3(1.6, 0.45, 1.6),
+	"anti_grav_plate": Vector3(0.9, 0.25, 0.9),
+	"pontoon_wheels": Vector3(0.75, 0.7, 0.75),
+	"sensor_suite": Vector3(0.5, 2.5, 0.5),
+	"resource_harvester": Vector3(1.5, 1.0, 1.5),
+	"resource_bay": Vector3(1.4, 1.0, 1.8),
+	"repair_array": Vector3(0.8, 0.8, 1.0),
+	"drone_carrier": Vector3(2.0, 1.2, 3.0),
+	"laser_designator": Vector3(0.6, 0.7, 0.6),
+	"energy_barrier_projector": Vector3(1.0, 0.4, 1.0),
+	"fire_control_radar": Vector3(0.7, 1.8, 0.7)
+}
+
 static func _repeat_along_axis(parent: Node3D, count: int, spacing: float, axis_vec: Vector3, builder_func: Callable):
 	var start_pos = -axis_vec * ((count - 1) * spacing / 2.0)
 	for i in range(count):
@@ -586,6 +656,20 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 		_apply_tweak_deformations(type_id, parent_node, tweaks, base_size)
 
 		return
+
+	if MODULAR_ASSEMBLY_TYPES.has(type_id) and MODULAR_AUTHORED_SIZES.has(type_id):
+		var old_size: Vector3 = MODULAR_AUTHORED_SIZES[type_id]
+		var max_old = max(old_size.x, max(old_size.y, old_size.z))
+		var max_new = max(base_size.x, max(base_size.y, base_size.z))
+		var visual_scale = max_new / max_old if max_old > 0.0 else 1.0
+		
+		if not is_equal_approx(visual_scale, 1.0):
+			var wrapper = Node3D.new()
+			wrapper.name = "ModularScaleWrapper"
+			wrapper.scale = Vector3(visual_scale, visual_scale, visual_scale)
+			parent_node.add_child(wrapper)
+			parent_node = wrapper
+			base_size = old_size
 
 
 	if type_id == "basic_cannon":
