@@ -247,6 +247,80 @@ func _ready() -> void:
 	world_is_ready = true
 	world_ready.emit()
 
+	_setup_audio()
+
+
+# --- Audio -------------------------------------------------------------------
+#
+# set_combat_intensity() feeds a combat-intensity mixer in AudioManager. When
+# the skirmish track has separate bed/rhythm/lead stems (the procedural
+# renderer in tools/audio/tracks/skirmish.py), it raises the rhythm and lead
+# layers as a real engagement heats up. The currently-shipped soundtrack
+# (tools/audio/curated_music.py) is finished single-master tracks with no stem
+# split, so this call is a no-op for the extra layers and the track just
+# plays - still correct, just without the dynamic layering. See
+# scripts/audio_manager.gd's _refresh_music_targets.
+
+var _audio: Node = null
+# Decays toward zero every frame; damage events push it back up. Effectively a
+# leaky integrator over "how much shooting is happening", which is a far better
+# signal for the music than unit counts or proximity - it only rises when shots
+# are actually landing.
+var _combat_heat: float = 0.0
+const COMBAT_HEAT_DECAY := 0.22        # per second
+const COMBAT_HEAT_PER_DAMAGE := 0.014  # per point of damage dealt
+var _ambience_check := 0.0
+
+
+func _setup_audio() -> void:
+	_audio = get_node_or_null("/root/AudioManager")
+	if _audio == null:
+		return
+	_audio.play_music("skirmish")
+	_audio.set_combat_intensity(0.0)
+	match_ended.connect(_on_match_ended_audio)
+	if production != null:
+		production.unit_completed.connect(_on_unit_completed_audio)
+		production.structure_ready.connect(_on_structure_ready_audio)
+
+
+func _on_match_ended_audio(winning_team: int) -> void:
+	if _audio == null:
+		return
+	_audio.play_music("victory" if winning_team == PLAYER_TEAM else "defeat")
+
+
+func _on_unit_completed_audio(team: int, _queue: String, _blueprint: Dictionary) -> void:
+	if _audio == null or team != PLAYER_TEAM:
+		return
+	_audio.play_sfx("unit_rollout")
+	_audio.play_voice("radio_ready")
+
+
+func _on_structure_ready_audio(team: int, _queue: String, _job: Dictionary) -> void:
+	if _audio == null or team != PLAYER_TEAM:
+		return
+	_audio.play_sfx("construct_done")
+
+
+func _tick_audio(delta: float) -> void:
+	if _audio == null:
+		return
+	_combat_heat = maxf(0.0, _combat_heat - COMBAT_HEAT_DECAY * delta)
+	_audio.set_combat_intensity(_combat_heat)
+
+	# Ambience follows the surface under the camera. Sampled a few times a
+	# second rather than per frame: the answer changes only when the player pans
+	# across a biome boundary, and get_surface_type_at does real work.
+	_ambience_check -= delta
+	if _ambience_check <= 0.0:
+		_ambience_check = 0.5
+		var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+		if cam != null:
+			var surface := get_surface_type_at(cam.global_position)
+			if surface != "":
+				_audio.play_ambience("ambience_" + surface)
+
 
 # Vision runs on its own timer rather than in _physics_process. The scan is
 # O(viewers x targets) per team and its answer changing three times a second is
@@ -835,6 +909,11 @@ func _on_structure_died(structure) -> void:
 	# nothing stands. Baking inline here cost a 4139 ms frame; see
 	# NAV_LAZY_REBAKE_DELAY.
 	_mark_navmesh_dirty(false)
+	# The sincere comms layer reporting a loss, over whatever is still going
+	# "pew" out there. CORE_DESIGN_LANGUAGE.md 6.2 calls that pairing the whole
+	# thesis in one moment.
+	if _audio != null and structure.team == PLAYER_TEAM:
+		_audio.play_voice("radio_structure_lost")
 	if structure.kind == "hq":
 		_end_match(PLAYER_TEAM if structure.team != PLAYER_TEAM else ENEMY_TEAM)
 
@@ -997,12 +1076,21 @@ func _on_report_iterate(blueprint_name: String) -> void:
 # folding the opponent's designs into it would make every column meaningless.
 
 func record_combat_damage(victim, source, amount: float, damage_class: String) -> void:
+	# Feeds the music as well as the debrief. Damage landing anywhere on the
+	# field raises combat heat, which _tick_audio bleeds off again - so the
+	# rhythm and lead stems rise during a real engagement and settle afterwards
+	# without anything having to decide when a "battle" starts or ends.
+	_combat_heat = minf(1.0, _combat_heat + amount * COMBAT_HEAT_PER_DAMAGE)
+
 	if stats == null:
 		return
 	stats.record_damage(_design_of(source), _design_of(victim), amount, damage_class)
 
 
 func record_unit_lost(victim, source) -> void:
+	if _audio != null and "team" in victim and victim.team == PLAYER_TEAM:
+		_audio.play_voice("radio_unit_lost")
+
 	if stats == null:
 		return
 	if "team" in victim and victim.team == PLAYER_TEAM:
@@ -1756,6 +1844,8 @@ func get_nearby_damageable(pos: Vector3, radius: float) -> Array:
 func _physics_process(delta: float) -> void:
 	if game_over:
 		return
+	_tick_audio(delta)
+
 	var t := Profiler.start()
 	_rebuild_neighbour_grid()
 	Profiler.stop("neighbour_grid", t)

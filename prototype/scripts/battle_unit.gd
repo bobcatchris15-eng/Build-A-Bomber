@@ -959,6 +959,7 @@ func _tick_power(delta: float) -> void:
 func _physics_process(delta):
 	if is_dead: return
 
+	_tick_engine_audio()
 	_recalculate_terrain_speed_multiplier()
 	_try_auto_engage(delta)
 
@@ -1788,8 +1789,18 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 		_flash_hull()
 	hp = max(0.0, hp - final_damage)
 	_update_hp_bar()
-	if get_node_or_null("/root/AudioManager"):
-		get_node("/root/AudioManager").play_sfx_3d("hit", global_position, null, 35.0)
+
+	# IMPACTS ARE READABLE BY OUTCOME. damage_resolver.gd already distinguishes
+	# a sub-threshold chip from a hit that got through, and that distinction was
+	# invisible to the player because every impact played the same "hit" sample.
+	# A bounce is now bright, short and toppy; a penetration is low with a tear
+	# in it. Hearing that your shots are bouncing is the single most useful
+	# piece of feedback an armour model can give, and it costs one branch.
+	var audio := get_node_or_null("/root/AudioManager")
+	if audio != null:
+		audio.play_sfx_3d("impact_chip" if amount < threshold else "impact_penetrate",
+			global_position, null, 35.0)
+
 	if hp <= 0.0:
 		die()
 
@@ -1877,14 +1888,83 @@ func _spawn_explosion(pos: Vector3, size: float):
 	# swap, not a new design).
 	VFXBurstScript.spawn(scene, pos, Color(1.0, 0.55, 0.15), 6, 0.6, 60.0, 5.0 * size, 8.0 * size, Vector3.ZERO, size, size * 1.6, VFXBurstScript.get_box_mesh())
 
+# --- Engine audio ------------------------------------------------------------
+#
+# The SINCERE half of the audio split (CORE_DESIGN_LANGUAGE.md 6.2): engines,
+# treads, rotors and servos are real mechanical recordings in register, while it
+# is the ordnance that gets vocalised. A unit that goes "pew" but rolls around
+# in total silence only lands half the joke - the machinery has to be played
+# straight for the weapons to be funny.
+
+# locomotion_type -> the loop bank to attach. Types absent from this map get no
+# loop rather than a wrong one; a silent unit is a smaller error than a tracked
+# vehicle that sounds like a helicopter.
+const LOCOMOTION_LOOPS := {
+	# Ground, rolling.
+	"wheels": "wheel_loop",
+	"rocker_bogie": "wheel_loop",
+	"pontoon_wheels": "wheel_loop",
+	# Ground, tracked.
+	"tracked_treads": "tread_loop",
+	"half_track": "tread_loop",
+	# Walkers - servos rather than a powerplant.
+	"legs": "servo_loop",
+	# Amphibious auger.
+	"screw_drive": "screw_loop",
+	# Air-cushion and jet.
+	"hover_engine": "engine_turbine",
+	"air_cushion_skirt": "engine_turbine",
+	"fixed_wing_engine": "engine_turbine",
+	# Rotary wing.
+	"helicopter_rotors": "rotor_loop",
+	"ornithopter_wing": "rotor_loop",
+	# Near-silent exotics: an electrical hum, not a motor.
+	"anti_grav_plate": "engine_electric",
+	"buoyant_envelope": "engine_electric",
+}
+
+var _engine_loop_key: String = ""
+
+
+func _tick_engine_audio() -> void:
+	var audio := get_node_or_null("/root/AudioManager")
+	if audio == null:
+		return
+
+	if _engine_loop_key == "":
+		_engine_loop_key = LOCOMOTION_LOOPS.get(locomotion_type, "")
+		if _engine_loop_key == "":
+			# Nothing to play for this locomotion type. Marked so the dictionary
+			# lookup does not run every physics frame for the rest of the match.
+			_engine_loop_key = "-"
+			return
+		audio.attach_loop(self, _engine_loop_key)
+
+	if _engine_loop_key == "-":
+		return
+
+	# Normalised against the unit's own top speed, so a slow siege platform at
+	# full throttle sounds like it is working as hard as a fast scout does.
+	var speed := Vector2(velocity.x, velocity.z).length()
+	var normalised := speed / top_speed if top_speed > 0.01 else 0.0
+	audio.set_loop_intensity(self, normalised)
+
+
 func die():
 	if is_dead: return
 	is_dead = true
 	remove_from_group("damageable")
 	collision_layer = 0
 	_spawn_explosion(global_position, 1.5)
-	if get_node_or_null("/root/AudioManager"):
-		get_node("/root/AudioManager").play_sfx_3d("explosion", global_position, null, 60.0)
+	var audio := get_node_or_null("/root/AudioManager")
+	if audio != null:
+		# The engine note stops the instant the unit does. Left attached, the
+		# loop would keep running on the node right through the death tween.
+		audio.detach_loop(self)
+		# A kill is the one impact allowed to be big - it is the end of a unit.
+		# Still SINCERE: the vocalised "kaBOOM" is what the firing WEAPON says,
+		# not what the target does when it dies.
+		audio.play_sfx_3d("impact_catastrophic", global_position, null, 60.0)
 	emit_signal("died", self)
 	var tween = create_tween()
 	tween.tween_property(self, "scale", Vector3(0.01, 0.01, 0.01), 0.4)

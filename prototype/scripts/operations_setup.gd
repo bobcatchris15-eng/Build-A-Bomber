@@ -58,6 +58,12 @@ func _ready() -> void:
 	bp_manager = BlueprintManagerScript.new()
 	add_child(bp_manager)
 
+	# Between the menu and the skirmish in intensity: a briefing room, not an
+	# engagement. Marching snare, no guitar.
+	var audio := get_node_or_null("/root/AudioManager")
+	if audio != null:
+		audio.play_music("operations")
+
 	FACTIONS = ["auto"]
 	FACTION_LABELS = ["Auto (from roster)"]
 	for fac_id in FactionCatalog.get_ids():

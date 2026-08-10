@@ -21,6 +21,9 @@ const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
+const SpecPlacardScript = preload("res://scripts/ui/spec_placard.gd")
+const WordmarkScript = preload("res://scripts/ui/wordmark.gd")
+const DesignStatsScript = preload("res://scripts/design_stats.gd")
 
 const TITLE := "KITBASH COMMAND"
 const TAGLINE := "Design bureau and proving ground"
@@ -38,55 +41,71 @@ const FALLBACK_HULL_TYPES := [
 	"pillbox_foundation"
 ]
 
-const DESTINATIONS := [
-	# First in the list because it is the answer to "which of these do I press
-	# first", which nothing on this screen used to answer. Routes to the Design
-	# Lab like any other card - the only difference is that it arms
-	# TutorialManager on the way, and the Lab is where the loop starts.
+# UX_REDESIGN_PLAN.md's target information architecture: three activities plus
+# a system layer, replacing seven equal-weight cards with none of them
+# answering "which do I press first". First-run still shows exactly one card
+# (see _build_left_column) regardless of what is declared here - GROUPS is the
+# steady-state menu a returning player sees.
+const GROUPS := [
 	{
-		"title": "TUTORIAL",
-		"desc": "Build a vehicle and test it under fire. Fifteen guided steps.",
-		"scene": "res://scenes/MainLab.tscn",
-		"badge": "SYS // TRAINING",
-		"tutorial": true
+		"section": "DEPLOY",
+		"items": [
+			{
+				"title": "SKIRMISH",
+				"desc": "Select a map and a roster, then engage enemy forces.",
+				"scene": "res://scenes/MatchSetup.tscn",
+				"badge": "COMBAT // SKIRMISH"
+			},
+			{
+				"title": "OPERATIONS",
+				"desc": "Three to twelve engagements. Re-draft your roster between each.",
+				"scene": "res://scenes/OperationsSetup.tscn",
+				"badge": "TAC // CAMPAIGN"
+			},
+			{
+				"title": "PROVING GROUND",
+				"desc": "Field the current design against target dummies.",
+				"scene": "res://scenes/Battlefield.tscn",
+				"badge": "TEST // RANGE"
+			},
+		],
 	},
 	{
-		"title": "DESIGN LAB",
-		"desc": "Assemble blueprints from hulls, modules and drives.",
-		"scene": "res://scenes/MainLab.tscn",
-		"badge": "SYS // BUILD"
-	},
-	{
-		"title": "BLUEPRINT LIBRARY",
-		"desc": "Browse, manage, and preview your vehicle designs.",
-		"scene": "res://scenes/BlueprintLibrary.tscn",
-		"badge": "SYS // ARCHIVE"
-	},
-	{
-		"title": "HULL AUTHORING",
-		"desc": "Shape new hull forms from primitives.",
-		"scene": "res://scenes/HullBuilder.tscn",
-		"badge": "CAD // MESH"
-	},
-	{
-		"title": "OPERATIONS",
-		"desc": "Three to twelve engagements. Re-draft your roster between each.",
-		"scene": "res://scenes/OperationsSetup.tscn",
-		"badge": "TAC // CAMPAIGN"
-	},
-	{
-		"title": "SKIRMISH",
-		"desc": "Select a map and a roster, then engage enemy forces.",
-		"scene": "res://scenes/MatchSetup.tscn",
-		"badge": "COMBAT // SKIRMISH"
-	},
-	{
-		"title": "PROVING GROUND",
-		"desc": "Field the current design against target dummies.",
-		"scene": "res://scenes/Battlefield.tscn",
-		"badge": "TEST // RANGE"
+		"section": "DESIGN",
+		"items": [
+			{
+				"title": "DESIGN LAB",
+				"desc": "Assemble blueprints from hulls, modules and drives.",
+				"scene": "res://scenes/MainLab.tscn",
+				"badge": "SYS // BUILD"
+			},
+			{
+				"title": "BLUEPRINT LIBRARY",
+				"desc": "Browse, manage, and preview your vehicle designs.",
+				"scene": "res://scenes/BlueprintLibrary.tscn",
+				"badge": "SYS // ARCHIVE"
+			},
+			{
+				"title": "HULL AUTHORING",
+				"desc": "Shape new hull forms from primitives.",
+				"scene": "res://scenes/HullBuilder.tscn",
+				"badge": "CAD // MESH"
+			},
+		],
 	},
 ]
+
+# First-run card, shown INSTEAD of GROUPS until the player has completed (or
+# skipped) the tutorial once - "no seven-door problem when there is one door".
+# Routes to the Lab like any other card; the only difference is arming
+# TutorialManager on the way, and the Lab is where the guided loop starts.
+const TUTORIAL_CARD := {
+	"title": "BUILD YOUR FIRST VEHICLE",
+	"desc": "Fifteen guided steps, then field it under fire.",
+	"scene": "res://scenes/MainLab.tscn",
+	"badge": "SYS // TRAINING",
+	"tutorial": true
+}
 
 # WHICH RUNTIME EACH COMBAT DESTINATION ACTUALLY REACHES, because it is not
 # obvious from the scene paths above and there are two unit scripts in the tree.
@@ -119,6 +138,8 @@ const DESTINATIONS := [
 
 var _turntable_node: Node3D = null
 var _turntable_model_container: Node3D = null
+var _showcase_vehicle: Node3D = null
+var _spec_placard: Control = null
 var _showcase_items: Array = []
 var _current_showcase_index: int = 0
 var _showcase_timer: float = 0.0
@@ -162,6 +183,14 @@ func _ready() -> void:
 	# Initial 3D & Placard sync
 	_update_showcase_display()
 
+	# THE FIRST MUSIC CALL THE GAME HAS EVER MADE. AudioManager.play_music()
+	# existed for the whole life of the project with zero callers anywhere, so
+	# the menu track shipped unreachable. Safe to call unconditionally: the
+	# manager no-ops on a repeat request and when running headless.
+	var audio := get_node_or_null("/root/AudioManager")
+	if audio != null:
+		audio.play_music("menu")
+
 func _process(delta: float) -> void:
 	if is_instance_valid(_turntable_node):
 		_turntable_node.rotation.y += 0.25 * delta
@@ -175,20 +204,27 @@ func _process(delta: float) -> void:
 func _gather_showcase_items() -> void:
 	_showcase_items.clear()
 
-	# 1. Saved Player Blueprints
+	# 1. Saved Player Blueprints, MOST RECENT FIRST - "the player's latest
+	# design on the turntable rather than a stock chassis" (UX_REDESIGN_PLAN.md
+	# Phase 2). Sorted by the file's own mtime rather than roster order, which
+	# reflects nothing about recency.
 	var mgr = BlueprintManagerScript.new()
 	var roster: Array = mgr.list_blueprints(true)
+	var blueprint_entries: Array = []
 	for entry in roster:
 		var path := str(entry.get("path", ""))
 		if path != "":
 			var full_bp: Dictionary = mgr.load_blueprint(path)
 			if not full_bp.is_empty():
-				_showcase_items.append({
+				blueprint_entries.append({
 					"type": "blueprint",
 					"name": entry.get("name", "UNNAMED DESIGN"),
 					"blueprint": full_bp,
-					"summary": entry
+					"summary": entry,
+					"mtime": FileAccess.get_modified_time(path),
 				})
+	blueprint_entries.sort_custom(func(a, b): return a["mtime"] > b["mtime"])
+	_showcase_items.append_array(blueprint_entries)
 
 	# 2. Add Standard Hull Chassis types so there is always a rich variety
 	for hull_id in FALLBACK_HULL_TYPES:
@@ -304,6 +340,7 @@ func _build_3d_showcase_model(item: Dictionary, parent: Node3D) -> void:
 	model_root.position = Vector3(0, 0.1, 0)
 
 	var item_type: String = item.get("type", "hull")
+	_showcase_vehicle = null
 
 	if item_type == "blueprint":
 		var bp: Dictionary = item.get("blueprint", {})
@@ -312,6 +349,12 @@ func _build_3d_showcase_model(item: Dictionary, parent: Node3D) -> void:
 		if vehicle == null:
 			var hull_id := str(bp.get("hull_type", "medium_hull"))
 			_build_hull_mesh_node(hull_id, model_root)
+		else:
+			# Kept for the SpecPlacard sync below - the SAME live node
+			# DesignStats.analyze() reads elsewhere (the Lab rail, the battle
+			# selection panel), so the Front Desk placard shows the identical
+			# weight/speed/dps/range figures rather than a re-derivation.
+			_showcase_vehicle = vehicle
 	else:
 		var hull_id: String = item.get("hull_type", "medium_hull")
 		_build_hull_mesh_node(hull_id, model_root)
@@ -407,32 +450,73 @@ func _build_left_column(parent: Control) -> void:
 	col.add_theme_constant_override("separation", Tokens.SPACE_SM)
 	parent.add_child(col)
 
-	var title = Label.new()
-	title.text = TITLE
-	title.theme_type_variation = "DisplayLabel"
-	col.add_child(title)
-
-	var tagline = Label.new()
-	tagline.text = TAGLINE.to_upper()
-	tagline.theme_type_variation = "HintLabel"
-	tagline.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
-	col.add_child(tagline)
+	var mark := WordmarkScript.new()
+	mark.lockup = WordmarkScript.Lockup.HORIZONTAL
+	mark.part_number = TAGLINE.to_upper()
+	col.add_child(mark)
 
 	var gap_top = Control.new()
 	gap_top.custom_minimum_size = Vector2(0, Tokens.SPACE_MD)
 	col.add_child(gap_top)
 
 	var nav = VBoxContainer.new()
-	nav.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	nav.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	col.add_child(nav)
 
-	for dest in DESTINATIONS:
-		_add_destination_card(nav, dest["title"], dest["desc"], dest["scene"],
-			dest["badge"], dest.get("tutorial", false))
+	var tutorial_manager = get_node_or_null("/root/TutorialManager")
+	var first_run: bool = tutorial_manager == null or not tutorial_manager.has_been_seen()
+
+	if first_run:
+		# "No seven-door problem when there is one door" - a returning player
+		# who explicitly wants the full menu can still reach it via SYSTEM ->
+		# Replay training once that exists (Phase 7); until then, finishing or
+		# skipping the tutorial is what unlocks GROUPS below.
+		var single := VBoxContainer.new()
+		single.add_theme_constant_override("separation", Tokens.SPACE_SM)
+		nav.add_child(single)
+		_add_destination_card(single, TUTORIAL_CARD["title"], TUTORIAL_CARD["desc"],
+			TUTORIAL_CARD["scene"], TUTORIAL_CARD["badge"], true)
+	else:
+		for group in GROUPS:
+			_add_section_header(nav, group["section"])
+			var section := VBoxContainer.new()
+			section.add_theme_constant_override("separation", Tokens.SPACE_SM)
+			nav.add_child(section)
+			for item in group["items"]:
+				_add_destination_card(section, item["title"], item["desc"],
+					item["scene"], item["badge"], item.get("tutorial", false))
 
 	var gap_bottom = Control.new()
 	gap_bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(gap_bottom)
+
+	var bottom_row := HBoxContainer.new()
+	bottom_row.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	col.add_child(bottom_row)
+
+	var records_btn = Button.new()
+	records_btn.text = "RECORDS"
+	records_btn.custom_minimum_size = Vector2(140, 44)
+	UIFeedbackScript.wire(records_btn)
+	records_btn.pressed.connect(func():
+		var router = get_node_or_null("/root/SceneRouter")
+		if router:
+			router.goto("res://scenes/BlueprintLibrary.tscn")
+		else:
+			get_tree().change_scene_to_file("res://scenes/BlueprintLibrary.tscn")
+	)
+	bottom_row.add_child(records_btn)
+
+	var settings_btn = Button.new()
+	settings_btn.text = "SYSTEM"
+	settings_btn.custom_minimum_size = Vector2(140, 44)
+	UIFeedbackScript.wire(settings_btn)
+	settings_btn.pressed.connect(func():
+		var system_layer = get_node_or_null("/root/SystemLayer")
+		if system_layer:
+			system_layer.open()
+	)
+	bottom_row.add_child(settings_btn)
 
 	var quit_btn = Button.new()
 	quit_btn.text = "EXIT BUREAU"
@@ -443,7 +527,17 @@ func _build_left_column(parent: Control) -> void:
 	# mouse_entered lambda that existed only to play a hover sound.
 	UIFeedbackScript.wire(quit_btn)
 	quit_btn.pressed.connect(func(): get_tree().quit())
-	col.add_child(quit_btn)
+	bottom_row.add_child(quit_btn)
+
+
+# A stamped, non-clickable L3 section label - "everything stays one click
+# deep" per UX_REDESIGN_PLAN.md, so these organise rather than navigate.
+func _add_section_header(parent: Control, text: String) -> void:
+	var label := Label.new()
+	label.text = text
+	label.theme_type_variation = "HintLabel"
+	label.add_theme_color_override("font_color", Tokens.SIGNAL_HAZARD)
+	parent.add_child(label)
 
 func _add_destination_card(parent: Control, title_text: String, description: String, scene_path: String, badge_text: String, is_tutorial: bool = false) -> void:
 	var btn = Button.new()

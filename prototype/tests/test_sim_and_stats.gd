@@ -1121,27 +1121,211 @@ func test_idle_units_auto_engage_sighted_enemies() -> bool:
 	print("  [PASS] An idle unit with a hostile within vision_range automatically switches to attacking it, without disturbing a unit that has nothing nearby to engage.")
 	return true
 
+# WHAT THE OLD VERSION OF THIS SUITE CHECKED, AND WHY IT WAS NOT ENOUGH.
+# It asserted that 15 hardcoded filenames existed on disk. That would not have
+# caught a single one of the defects this pass fixed:
+#
+#   * play_music() having no callers anywhere in the project
+#   * eight of ui_feedback.gd's roles mapping to SFX keys that did not exist
+#   * a music stem set whose members were different lengths
+#   * a variant picker that repeats the same file back to back
+#
+# A list of filenames maintained by hand in a test cannot detect drift between
+# two OTHER lists maintained by hand. So these assertions are all relational:
+# they check that the manifest, the manager, ui_feedback.gd and auto_weapon.gd
+# agree with each other, rather than that some particular file exists.
+const AUDIO_MANIFEST_PATH := "res://assets/audio/audio_manifest.json"
+# Read rather than restated: the whole point of the role check below is that it
+# compares against the REAL table, so a role added there without a matching
+# sound fails here instead of going silent.
+const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
+
+
 func test_audio_system() -> bool:
-	print("Running Test Suite: Audio System, Sound Effects & Ambient Music Assets...")
-	var sfx_list = [
-		"sfx_click.wav", "sfx_hover.wav", "sfx_error.wav", "sfx_select.wav", "sfx_place.wav",
-		"sfx_cannon.wav", "sfx_machine_gun.wav", "sfx_laser.wav", "sfx_missile.wav",
-		"sfx_explosion.wav", "sfx_hit.wav", "sfx_harvest.wav", "sfx_construct.wav",
-		"sfx_victory.wav", "sfx_defeat.wav"
-	]
-	for sfx in sfx_list:
-		var path = "res://assets/audio/sfx/" + sfx
-		if not ResourceLoader.exists(path):
-			print("  [FAIL] Missing SFX audio file: ", path)
-			return false
-	if not ResourceLoader.exists("res://assets/audio/music/music_main_theme.wav"):
-		print("  [FAIL] Missing ambient music track: res://assets/audio/music/music_main_theme.wav")
-		return false
+	print("Running Test Suite: Audio System, Banks, Music Stems & Role Coverage...")
+
 	if not ResourceLoader.exists("res://scripts/audio_manager.gd"):
 		print("  [FAIL] Missing res://scripts/audio_manager.gd")
 		return false
+	if not FileAccess.file_exists(AUDIO_MANIFEST_PATH):
+		print("  [FAIL] Missing ", AUDIO_MANIFEST_PATH,
+			" - run: python tools/generate_audio.py")
+		return false
 
-	print("  [PASS] Audio System: All 15 procedural SFX files, ambient music track loop, and AudioManager autoload validated clean.")
+	var manifest = JSON.parse_string(FileAccess.get_file_as_string(AUDIO_MANIFEST_PATH))
+	if typeof(manifest) != TYPE_DICTIONARY:
+		print("  [FAIL] Audio manifest is not a JSON object")
+		return false
+
+	# --- 1. Every bank resolves, and none is empty -------------------------
+	var sfx: Dictionary = manifest.get("sfx", {})
+	if sfx.is_empty():
+		print("  [FAIL] Audio manifest declares no SFX banks at all")
+		return false
+	var total_files := 0
+	for key in sfx:
+		var files: Array = sfx[key].get("files", [])
+		if files.is_empty():
+			print("  [FAIL] Audio bank '", key, "' declares no files")
+			return false
+		for path in files:
+			if not ResourceLoader.exists(path):
+				print("  [FAIL] Audio bank '", key, "' references a missing file: ", path)
+				return false
+		total_files += files.size()
+
+	# --- 2. Every ui_feedback.gd role maps to a real bank -------------------
+	# THE DRIFT GUARD. This is the assertion that would have caught the eight
+	# silent UI roles, and it is the reason this suite reads ui_feedback.gd's
+	# table rather than restating it.
+	var role_sfx: Dictionary = UIFeedbackScript.ROLE_SFX
+	for role in role_sfx:
+		var key: String = role_sfx[role]
+		if not sfx.has(key):
+			print("  [FAIL] ui_feedback.gd role '", role, "' maps to sfx key '", key,
+				"' which does not exist in the audio manifest")
+			return false
+	# `hover` is played directly by ui_feedback.gd rather than via ROLE_SFX.
+	if not sfx.has("hover"):
+		print("  [FAIL] ui_feedback.gd plays 'hover' directly but no such bank exists")
+		return false
+
+	# --- 3. Every weapon class auto_weapon.gd can select resolves -----------
+	# auto_weapon.gd:1332 maps ~50 weapon archetypes onto these six keys. A
+	# rename on the audio side would otherwise silently mute a whole class.
+	for key in ["cannon", "machine_gun", "laser", "missile", "harvest"]:
+		if not sfx.has(key):
+			print("  [FAIL] auto_weapon.gd fires sfx key '", key,
+				"' which does not exist in the audio manifest")
+			return false
+	# battle_unit.gd's impact tiers.
+	for key in ["impact_chip", "impact_penetrate", "impact_catastrophic"]:
+		if not sfx.has(key):
+			print("  [FAIL] battle_unit.gd plays '", key, "' which is not in the manifest")
+			return false
+
+	# --- 4. Music states, and stem sample-length lock ----------------------
+	var music: Dictionary = manifest.get("music", {})
+	for state in ["menu", "lab", "skirmish", "operations", "victory", "defeat"]:
+		if not music.has(state):
+			print("  [FAIL] Audio manifest is missing music state '", state, "'")
+			return false
+
+	for state in music:
+		var stems: Dictionary = music[state].get("stems", {})
+		if stems.is_empty():
+			print("  [FAIL] Music state '", state, "' declares no stems")
+			return false
+		# A stem's manifest value is EITHER a single path (one track) OR a JSON
+		# array (a rotation pool - currently only skirmish's "bed", see
+		# curated_music.py). Every path in either form has to actually resolve;
+		# only the single-track form participates in the sync-lock check below.
+		var single_lengths: Array = []
+		for stem_name in stems:
+			var raw = stems[stem_name]
+			var paths: Array = raw if raw is Array else [raw]
+			if paths.is_empty():
+				print("  [FAIL] Music '", state, "' stem '", stem_name,
+					"' declares no files")
+				return false
+			for path in paths:
+				if not ResourceLoader.exists(path):
+					print("  [FAIL] Music '", state, "' stem '", stem_name,
+						"' references a missing file: ", path)
+					return false
+			if paths.size() == 1:
+				single_lengths.append((load(paths[0]) as AudioStream).get_length())
+		# THE SYNC GUARANTEE, for states whose stems are all single tracks (the
+		# procedural bed/rhythm/lead split). audio_manager.gd starts every stem
+		# of such a state in the same frame and never resynchronises them, so
+		# stems of unequal length would drift apart and phase. A rotation pool
+		# has nothing to stay in phase with and is exempt - see the "9-track
+		# array" note in curated_music.py.
+		if single_lengths.size() == stems.size():
+			for i in range(1, single_lengths.size()):
+				# 1ms tolerance: Ogg/MP3 report length from frame boundaries,
+				# which can differ from the source by a frame.
+				if absf(float(single_lengths[i]) - float(single_lengths[0])) > 0.001:
+					print("  [FAIL] Music '", state, "' stems are not the same length: ",
+						single_lengths, " - synchronised playback would drift and phase")
+					return false
+
+	# Skirmish is a ROTATION POOL, not a fixed bed/rhythm/lead split. The
+	# shipped soundtrack (tools/audio/curated_music.py) is finished
+	# single-master tracks with no stem separation, so combat-intensity layering
+	# is replaced with track-to-track variety instead: "bed" holds several
+	# tracks and audio_manager.gd advances through them with no immediate
+	# repeat each time one finishes. set_combat_intensity() still degrades
+	# gracefully with no rhythm/lead stem present - a missing stem is silence,
+	# not an error. The procedural renderer (opt-in via
+	# `generate_audio.py --procedural-music`) still produces the full
+	# bed/rhythm/lead split if that engine is used instead.
+	var skirmish_bed = music["skirmish"].get("stems", {}).get("bed", [])
+	var skirmish_pool: Array = skirmish_bed if skirmish_bed is Array else [skirmish_bed]
+	if skirmish_pool.size() < 2:
+		print("  [FAIL] Skirmish music should be a rotation pool (>=2 tracks), got ",
+			skirmish_pool.size())
+		return false
+
+	# --- 5. The live manager agrees with the manifest ----------------------
+	var audio: Node = Engine.get_main_loop().root.get_node_or_null("AudioManager")
+	if audio == null:
+		print("  [FAIL] AudioManager autoload is not present")
+		return false
+	for key in sfx:
+		if not audio.has_sound(key):
+			print("  [FAIL] AudioManager did not load bank '", key, "' from the manifest")
+			return false
+	if audio.bank_bus("radio_ack") != "Voice":
+		print("  [FAIL] Comms must route to the Voice bus, got '",
+			audio.bank_bus("radio_ack"), "'")
+		return false
+	# The ordnance vocalisations are absurd but they are WEAPONS: muting the
+	# Voice slider must never silence combat. See CORE_DESIGN_LANGUAGE.md 6.2.
+	if audio.bank_bus("cannon") != "SFX":
+		print("  [FAIL] Ordnance must route to the SFX bus so the Voice slider ",
+			"cannot silence combat, got '", audio.bank_bus("cannon"), "'")
+		return false
+
+	# THE MANAGER'S MUSIC, NOT JUST THE MANIFEST'S. Checking only the JSON was a
+	# real gap: this suite passed while the running manager was warning "no
+	# music state 'lab'" in the very same log, because the two were never
+	# compared. Everything above this point could be green with music
+	# completely broken at runtime.
+	var loaded_states: Array = audio.music_states()
+	for state in music:
+		if not loaded_states.has(state):
+			print("  [FAIL] AudioManager did not load music state '", state,
+				"' that the manifest declares")
+			return false
+	# Matches the manifest-level check above: only "bed" is guaranteed now that
+	# the shipped soundtrack is curated single-master tracks rather than the
+	# procedural bed/rhythm/lead split.
+	if not audio.music_stems("skirmish").has("bed"):
+		print("  [FAIL] AudioManager loaded skirmish without a 'bed' stem")
+		return false
+
+	# --- 6. The variant picker never repeats consecutively -----------------
+	var multi := ""
+	for key in sfx:
+		if audio.bank_size(key) >= 3:
+			multi = key
+			break
+	if multi != "":
+		var last := -1
+		for i in range(200):
+			var idx: int = audio.pick_index(multi)
+			if idx == last:
+				print("  [FAIL] Variant picker returned index ", idx,
+					" twice in a row for bank '", multi, "'")
+				return false
+			last = idx
+
+	print("  [PASS] Audio System: ", sfx.size(), " banks / ", total_files,
+		" files resolve, all ", role_sfx.size() + 1,
+		" ui_feedback roles are covered, ", music.size(),
+		" music states load with sample-locked stems, buses split correctly, ",
+		"and the variant picker never repeats.")
 	return true
 
 # Guards against the class of bug DECISIONS_NEEDED.md already logged once

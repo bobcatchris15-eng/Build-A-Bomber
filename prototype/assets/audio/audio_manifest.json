@@ -1,0 +1,594 @@
+{
+  "sfx": {
+    "hover": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/hover_01.wav",
+        "res://assets/audio/sfx/hover_02.wav",
+        "res://assets/audio/sfx/hover_03.wav"
+      ]
+    },
+    "click": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/click_01.wav",
+        "res://assets/audio/sfx/click_02.wav",
+        "res://assets/audio/sfx/click_03.wav",
+        "res://assets/audio/sfx/click_04.wav",
+        "res://assets/audio/sfx/click_05.wav"
+      ]
+    },
+    "select": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/select_01.wav",
+        "res://assets/audio/sfx/select_02.wav",
+        "res://assets/audio/sfx/select_03.wav",
+        "res://assets/audio/sfx/select_04.wav"
+      ]
+    },
+    "place": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/place_01.wav",
+        "res://assets/audio/sfx/place_02.wav",
+        "res://assets/audio/sfx/place_03.wav",
+        "res://assets/audio/sfx/place_04.wav"
+      ]
+    },
+    "error": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/error_01.wav",
+        "res://assets/audio/sfx/error_02.wav",
+        "res://assets/audio/sfx/error_03.wav"
+      ]
+    },
+    "ui_toggle_on": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_toggle_on_01.wav",
+        "res://assets/audio/sfx/ui_toggle_on_02.wav",
+        "res://assets/audio/sfx/ui_toggle_on_03.wav"
+      ]
+    },
+    "ui_toggle_off": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_toggle_off_01.wav",
+        "res://assets/audio/sfx/ui_toggle_off_02.wav",
+        "res://assets/audio/sfx/ui_toggle_off_03.wav"
+      ]
+    },
+    "ui_dial": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_dial_01.wav",
+        "res://assets/audio/sfx/ui_dial_02.wav",
+        "res://assets/audio/sfx/ui_dial_03.wav",
+        "res://assets/audio/sfx/ui_dial_04.wav"
+      ]
+    },
+    "ui_tick": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_tick_01.wav",
+        "res://assets/audio/sfx/ui_tick_02.wav",
+        "res://assets/audio/sfx/ui_tick_03.wav",
+        "res://assets/audio/sfx/ui_tick_04.wav"
+      ]
+    },
+    "ui_drawer": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_drawer_01.wav",
+        "res://assets/audio/sfx/ui_drawer_02.wav",
+        "res://assets/audio/sfx/ui_drawer_03.wav"
+      ]
+    },
+    "ui_plate": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_plate_01.wav",
+        "res://assets/audio/sfx/ui_plate_02.wav",
+        "res://assets/audio/sfx/ui_plate_03.wav"
+      ]
+    },
+    "ui_latch": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_latch_01.wav",
+        "res://assets/audio/sfx/ui_latch_02.wav",
+        "res://assets/audio/sfx/ui_latch_03.wav"
+      ]
+    },
+    "ui_mode": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_mode_01.wav",
+        "res://assets/audio/sfx/ui_mode_02.wav",
+        "res://assets/audio/sfx/ui_mode_03.wav"
+      ]
+    },
+    "ui_menu_open": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_menu_open_01.wav",
+        "res://assets/audio/sfx/ui_menu_open_02.wav"
+      ]
+    },
+    "ui_menu_close": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/ui_menu_close_01.wav",
+        "res://assets/audio/sfx/ui_menu_close_02.wav"
+      ]
+    },
+    "warning_banner": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/warning_banner_01.wav",
+        "res://assets/audio/sfx/warning_banner_02.wav",
+        "res://assets/audio/sfx/warning_banner_03.wav"
+      ]
+    },
+    "cannon": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/cannon_01.wav",
+        "res://assets/audio/sfx/cannon_02.wav",
+        "res://assets/audio/sfx/cannon_03.wav",
+        "res://assets/audio/sfx/cannon_04.wav",
+        "res://assets/audio/sfx/cannon_05.wav",
+        "res://assets/audio/sfx/cannon_06.wav",
+        "res://assets/audio/sfx/cannon_07.wav"
+      ]
+    },
+    "machine_gun": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/machine_gun_01.wav",
+        "res://assets/audio/sfx/machine_gun_02.wav",
+        "res://assets/audio/sfx/machine_gun_03.wav",
+        "res://assets/audio/sfx/machine_gun_04.wav",
+        "res://assets/audio/sfx/machine_gun_05.wav",
+        "res://assets/audio/sfx/machine_gun_06.wav",
+        "res://assets/audio/sfx/machine_gun_07.wav"
+      ]
+    },
+    "laser": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/laser_01.wav",
+        "res://assets/audio/sfx/laser_02.wav",
+        "res://assets/audio/sfx/laser_03.wav",
+        "res://assets/audio/sfx/laser_04.wav",
+        "res://assets/audio/sfx/laser_05.wav",
+        "res://assets/audio/sfx/laser_06.wav",
+        "res://assets/audio/sfx/laser_07.wav"
+      ]
+    },
+    "missile": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/missile_01.wav",
+        "res://assets/audio/sfx/missile_02.wav",
+        "res://assets/audio/sfx/missile_03.wav",
+        "res://assets/audio/sfx/missile_04.wav",
+        "res://assets/audio/sfx/missile_05.wav",
+        "res://assets/audio/sfx/missile_06.wav",
+        "res://assets/audio/sfx/missile_07.wav"
+      ]
+    },
+    "explosion": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/explosion_01.wav",
+        "res://assets/audio/sfx/explosion_02.wav",
+        "res://assets/audio/sfx/explosion_03.wav",
+        "res://assets/audio/sfx/explosion_04.wav",
+        "res://assets/audio/sfx/explosion_05.wav",
+        "res://assets/audio/sfx/explosion_06.wav",
+        "res://assets/audio/sfx/explosion_07.wav"
+      ]
+    },
+    "hit": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/hit_01.wav",
+        "res://assets/audio/sfx/hit_02.wav",
+        "res://assets/audio/sfx/hit_03.wav",
+        "res://assets/audio/sfx/hit_04.wav",
+        "res://assets/audio/sfx/hit_05.wav",
+        "res://assets/audio/sfx/hit_06.wav",
+        "res://assets/audio/sfx/hit_07.wav"
+      ]
+    },
+    "harvest": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/harvest_01.wav",
+        "res://assets/audio/sfx/harvest_02.wav",
+        "res://assets/audio/sfx/harvest_03.wav",
+        "res://assets/audio/sfx/harvest_04.wav",
+        "res://assets/audio/sfx/harvest_05.wav",
+        "res://assets/audio/sfx/harvest_06.wav",
+        "res://assets/audio/sfx/harvest_07.wav"
+      ]
+    },
+    "radio_ack": {
+      "bus": "Voice",
+      "files": [
+        "res://assets/audio/voice/radio_ack_01.wav",
+        "res://assets/audio/voice/radio_ack_02.wav",
+        "res://assets/audio/voice/radio_ack_03.wav",
+        "res://assets/audio/voice/radio_ack_04.wav"
+      ]
+    },
+    "radio_affirm": {
+      "bus": "Voice",
+      "files": [
+        "res://assets/audio/voice/radio_affirm_01.wav",
+        "res://assets/audio/voice/radio_affirm_02.wav",
+        "res://assets/audio/voice/radio_affirm_03.wav",
+        "res://assets/audio/voice/radio_affirm_04.wav"
+      ]
+    },
+    "radio_negative": {
+      "bus": "Voice",
+      "files": [
+        "res://assets/audio/voice/radio_negative_01.wav",
+        "res://assets/audio/voice/radio_negative_02.wav",
+        "res://assets/audio/voice/radio_negative_03.wav",
+        "res://assets/audio/voice/radio_negative_04.wav"
+      ]
+    },
+    "radio_engaging": {
+      "bus": "Voice",
+      "files": [
+        "res://assets/audio/voice/radio_engaging_01.wav",
+        "res://assets/audio/voice/radio_engaging_02.wav",
+        "res://assets/audio/voice/radio_engaging_03.wav",
+        "res://assets/audio/voice/radio_engaging_04.wav"
+      ]
+    },
+    "radio_structure_lost": {
+      "bus": "Voice",
+      "files": [
+        "res://assets/audio/voice/radio_structure_lost_01.wav",
+        "res://assets/audio/voice/radio_structure_lost_02.wav",
+        "res://assets/audio/voice/radio_structure_lost_03.wav",
+        "res://assets/audio/voice/radio_structure_lost_04.wav"
+      ]
+    },
+    "radio_low_power": {
+      "bus": "Voice",
+      "files": [
+        "res://assets/audio/voice/radio_low_power_01.wav",
+        "res://assets/audio/voice/radio_low_power_02.wav",
+        "res://assets/audio/voice/radio_low_power_03.wav",
+        "res://assets/audio/voice/radio_low_power_04.wav"
+      ]
+    },
+    "radio_ready": {
+      "bus": "Voice",
+      "files": [
+        "res://assets/audio/voice/radio_ready_01.wav",
+        "res://assets/audio/voice/radio_ready_02.wav",
+        "res://assets/audio/voice/radio_ready_03.wav",
+        "res://assets/audio/voice/radio_ready_04.wav"
+      ]
+    },
+    "radio_unit_lost": {
+      "bus": "Voice",
+      "files": [
+        "res://assets/audio/voice/radio_unit_lost_01.wav",
+        "res://assets/audio/voice/radio_unit_lost_02.wav",
+        "res://assets/audio/voice/radio_unit_lost_03.wav",
+        "res://assets/audio/voice/radio_unit_lost_04.wav"
+      ]
+    },
+    "radio_static": {
+      "bus": "Voice",
+      "files": [
+        "res://assets/audio/voice/radio_static_01.wav",
+        "res://assets/audio/voice/radio_static_02.wav"
+      ]
+    },
+    "order_ping": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/order_ping_01.wav",
+        "res://assets/audio/sfx/order_ping_02.wav",
+        "res://assets/audio/sfx/order_ping_03.wav"
+      ]
+    },
+    "engine_diesel": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/engine_diesel_01.wav",
+        "res://assets/audio/sfx/engine_diesel_02.wav"
+      ]
+    },
+    "engine_turbine": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/engine_turbine_01.wav",
+        "res://assets/audio/sfx/engine_turbine_02.wav"
+      ]
+    },
+    "engine_electric": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/engine_electric_01.wav",
+        "res://assets/audio/sfx/engine_electric_02.wav"
+      ]
+    },
+    "engine_heavy": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/engine_heavy_01.wav",
+        "res://assets/audio/sfx/engine_heavy_02.wav"
+      ]
+    },
+    "tread_loop": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/tread_loop_01.wav",
+        "res://assets/audio/sfx/tread_loop_02.wav"
+      ]
+    },
+    "wheel_loop": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/wheel_loop_01.wav",
+        "res://assets/audio/sfx/wheel_loop_02.wav"
+      ]
+    },
+    "servo_loop": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/servo_loop_01.wav",
+        "res://assets/audio/sfx/servo_loop_02.wav"
+      ]
+    },
+    "hydraulic_loop": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/hydraulic_loop_01.wav",
+        "res://assets/audio/sfx/hydraulic_loop_02.wav"
+      ]
+    },
+    "rotor_loop": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/rotor_loop_01.wav",
+        "res://assets/audio/sfx/rotor_loop_02.wav"
+      ]
+    },
+    "screw_loop": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/screw_loop_01.wav",
+        "res://assets/audio/sfx/screw_loop_02.wav"
+      ]
+    },
+    "turret_start": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/turret_start_01.wav",
+        "res://assets/audio/sfx/turret_start_02.wav",
+        "res://assets/audio/sfx/turret_start_03.wav"
+      ]
+    },
+    "turret_stop": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/turret_stop_01.wav",
+        "res://assets/audio/sfx/turret_stop_02.wav",
+        "res://assets/audio/sfx/turret_stop_03.wav"
+      ]
+    },
+    "impact_chip": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/impact_chip_01.wav",
+        "res://assets/audio/sfx/impact_chip_02.wav",
+        "res://assets/audio/sfx/impact_chip_03.wav",
+        "res://assets/audio/sfx/impact_chip_04.wav",
+        "res://assets/audio/sfx/impact_chip_05.wav"
+      ]
+    },
+    "impact_penetrate": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/impact_penetrate_01.wav",
+        "res://assets/audio/sfx/impact_penetrate_02.wav",
+        "res://assets/audio/sfx/impact_penetrate_03.wav",
+        "res://assets/audio/sfx/impact_penetrate_04.wav",
+        "res://assets/audio/sfx/impact_penetrate_05.wav"
+      ]
+    },
+    "impact_module_lost": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/impact_module_lost_01.wav",
+        "res://assets/audio/sfx/impact_module_lost_02.wav",
+        "res://assets/audio/sfx/impact_module_lost_03.wav",
+        "res://assets/audio/sfx/impact_module_lost_04.wav"
+      ]
+    },
+    "impact_immobilised": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/impact_immobilised_01.wav",
+        "res://assets/audio/sfx/impact_immobilised_02.wav",
+        "res://assets/audio/sfx/impact_immobilised_03.wav"
+      ]
+    },
+    "impact_catastrophic": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/impact_catastrophic_01.wav",
+        "res://assets/audio/sfx/impact_catastrophic_02.wav",
+        "res://assets/audio/sfx/impact_catastrophic_03.wav",
+        "res://assets/audio/sfx/impact_catastrophic_04.wav"
+      ]
+    },
+    "construct": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/construct_01.wav",
+        "res://assets/audio/sfx/construct_02.wav",
+        "res://assets/audio/sfx/construct_03.wav"
+      ]
+    },
+    "construct_loop": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/construct_loop_01.wav",
+        "res://assets/audio/sfx/construct_loop_02.wav"
+      ]
+    },
+    "construct_done": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/construct_done_01.wav",
+        "res://assets/audio/sfx/construct_done_02.wav",
+        "res://assets/audio/sfx/construct_done_03.wav"
+      ]
+    },
+    "unit_rollout": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/unit_rollout_01.wav",
+        "res://assets/audio/sfx/unit_rollout_02.wav",
+        "res://assets/audio/sfx/unit_rollout_03.wav"
+      ]
+    },
+    "harvester_dock": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/harvester_dock_01.wav",
+        "res://assets/audio/sfx/harvester_dock_02.wav",
+        "res://assets/audio/sfx/harvester_dock_03.wav"
+      ]
+    },
+    "harvester_full": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/harvester_full_01.wav",
+        "res://assets/audio/sfx/harvester_full_02.wav",
+        "res://assets/audio/sfx/harvester_full_03.wav"
+      ]
+    },
+    "repair_loop": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/sfx/repair_loop_01.wav",
+        "res://assets/audio/sfx/repair_loop_02.wav"
+      ]
+    },
+    "ambience_marsh": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/ambience/ambience_marsh_01.wav"
+      ]
+    },
+    "ambience_rocky": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/ambience/ambience_rocky_01.wav"
+      ]
+    },
+    "ambience_snow_mud": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/ambience/ambience_snow_mud_01.wav"
+      ]
+    },
+    "ambience_sand": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/ambience/ambience_sand_01.wav"
+      ]
+    },
+    "ambience_gravel": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/ambience/ambience_gravel_01.wav"
+      ]
+    },
+    "ambience_forest": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/ambience/ambience_forest_01.wav"
+      ]
+    },
+    "ambience_ice": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/ambience/ambience_ice_01.wav"
+      ]
+    },
+    "ambience_lab": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/ambience/ambience_lab_01.wav"
+      ]
+    },
+    "ambience_artillery": {
+      "bus": "SFX",
+      "files": [
+        "res://assets/audio/ambience/ambience_artillery_01.wav"
+      ]
+    }
+  },
+  "music": {
+    "menu": {
+      "loop": true,
+      "stems": {
+        "bed": "res://assets/audio/music/music_menu_bed.mp3"
+      }
+    },
+    "lab": {
+      "loop": true,
+      "stems": {
+        "bed": "res://assets/audio/music/music_lab_bed.mp3"
+      }
+    },
+    "operations": {
+      "loop": true,
+      "stems": {
+        "bed": "res://assets/audio/music/music_operations_bed.mp3"
+      }
+    },
+    "victory": {
+      "loop": false,
+      "stems": {
+        "bed": "res://assets/audio/music/music_victory_bed.mp3"
+      }
+    },
+    "defeat": {
+      "loop": false,
+      "stems": {
+        "bed": "res://assets/audio/music/music_defeat_bed.mp3"
+      }
+    },
+    "skirmish": {
+      "loop": false,
+      "stems": {
+        "bed": [
+          "res://assets/audio/music/music_skirmish_hostile_perimeter_breach.mp3",
+          "res://assets/audio/music/music_skirmish_grinding_steel_mandate.mp3",
+          "res://assets/audio/music/music_skirmish_iron_under_noon.mp3",
+          "res://assets/audio/music/music_skirmish_iron_undergrowth.mp3",
+          "res://assets/audio/music/music_skirmish_midnight_treads.mp3",
+          "res://assets/audio/music/music_skirmish_panic_at_the_perimeter.mp3",
+          "res://assets/audio/music/music_skirmish_silo_protocol.mp3",
+          "res://assets/audio/music/music_skirmish_winter_in_the_bunker.mp3"
+        ]
+      }
+    }
+  }
+}

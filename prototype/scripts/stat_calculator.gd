@@ -14,6 +14,8 @@ const UIIconsScript = preload("res://scripts/ui_icons.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
 const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
+const DesignVerdictScript = preload("res://scripts/design_verdict.gd")
+const PhosphorPanelScript = preload("res://scripts/ui/phosphor_panel.gd")
 
 # --- Rail structure (VISUAL/UI plan item 7) ---------------------------------
 # The rail used to be a bare anchored `Panel` in UI_StatBlock.tscn carrying an
@@ -45,6 +47,15 @@ var drivetrain: Dictionary = {}
 var weapon_range: Dictionary = {}
 var _undo_btn: Button = null
 var _redo_btn: Button = null
+
+# The verdict block (UX_REDESIGN_PLAN.md Phase 4, item 1): leads the rail with
+# a plain-language judgement before any of the numbers below it, the same way
+# Fusion 360 says "Fully Constrained" before a single dimension. Built lazily
+# on the first update_stats() call rather than in _ready(), because it anchors
+# to hp_label's parent - which only exists once the rail itself is built.
+var _verdict_panel: Control = null
+var _verdict_headline: Label = null
+var _verdict_detail: Label = null
 
 @onready var hp_label = $ScrollContainer/VBoxContainer/HPLabel
 @onready var weight_label = $ScrollContainer/VBoxContainer/WeightLabel
@@ -557,6 +568,14 @@ var bool_tweak_title := "Ducted"
 
 func _ready():
 	add_to_group("stat_ui")
+
+	# The Design Lab bed plus a workshop room tone. Deliberately the sparsest
+	# track in the game (no kit, no hook, no melody) because the Lab is where a
+	# player sits longest on one concentrated task - see tools/audio/tracks/lab.py.
+	var audio := get_node_or_null("/root/AudioManager")
+	if audio != null:
+		audio.play_music("lab")
+		audio.play_ambience("ambience_lab")
 	# Captured BEFORE _build_rail_dock() moves the subtree, because this one is
 	# used as a parent for dynamically-added rows throughout the file.
 	# Resolved here because the rest of _ready() adds rows to it. The dock itself
@@ -1108,6 +1127,7 @@ func update_stats(hull: Node3D):
 	# locals below are kept as locals so the label code further down reads
 	# unchanged.
 	var stats: Dictionary = DesignStatsScript.analyze(hull)
+	_update_verdict(stats)
 	_update_toolbar_info(hull, stats)
 	var total_cost_metal = stats["cost_metal"]
 	var total_cost_crystal = stats["cost_crystal"]
@@ -3067,3 +3087,47 @@ func _return_to_menu() -> void:
 		router.goto("res://scenes/MainMenu.tscn")
 	else:
 		get_tree().change_scene_to_file("res://scenes/MainMenu.tscn")
+
+
+# --- Verdict block (UX_REDESIGN_PLAN.md Phase 4, item 1) --------------------
+#
+# ANCHORED TO hp_label.get_parent(), NOT $ScrollContainer/VBoxContainer. The
+# rail's container gets reparented into a UIDock at runtime by _build_shell(),
+# so a re-resolved literal path is null by the time this runs - hp_label's own
+# @onready reference stays valid across that move (see this file's header
+# comment on why every @onready here does), and its parent IS the rail vbox.
+func _build_verdict_block() -> void:
+	if _verdict_panel != null and is_instance_valid(_verdict_panel):
+		return
+	var parent := hp_label.get_parent()
+	if parent == null:
+		return
+
+	_verdict_panel = PhosphorPanelScript.new()
+	_verdict_panel.tube = PhosphorPanelScript.Tube.AMBER
+	parent.add_child(_verdict_panel)
+	parent.move_child(_verdict_panel, 0)
+
+	_verdict_headline = _verdict_panel.add_readout("")
+	_verdict_headline.theme_type_variation = "HeadingLabel"
+	_verdict_detail = _verdict_panel.add_readout("")
+	_verdict_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+# NOTHING HERE RE-DERIVES. `stats` is the exact analyze() result the rest of
+# update_stats() already reads - DesignVerdict.evaluate() only compares and
+# phrases fields already present in it. See design_verdict.gd's own header
+# for why that rule is non-negotiable in this file specifically.
+func _update_verdict(stats: Dictionary) -> void:
+	_build_verdict_block()
+	if _verdict_panel == null or not is_instance_valid(_verdict_panel):
+		return
+	var top: Dictionary = DesignVerdictScript.headline(stats)
+	if top.is_empty():
+		_verdict_panel.visible = false
+		return
+	_verdict_panel.visible = true
+	_verdict_headline.text = top.get("headline", "")
+	_verdict_headline.add_theme_color_override(
+		"font_color", DesignVerdictScript.color_for(top.get("severity", DesignVerdictScript.Severity.NOTE)))
+	_verdict_detail.text = top.get("detail", "")
