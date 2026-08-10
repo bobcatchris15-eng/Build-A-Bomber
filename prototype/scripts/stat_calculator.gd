@@ -16,6 +16,7 @@ const DesignCostingScript = preload("res://scripts/battle/economy/design_costing
 const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
 const DesignVerdictScript = preload("res://scripts/design_verdict.gd")
 const PhosphorPanelScript = preload("res://scripts/ui/phosphor_panel.gd")
+const MeshIconScript = preload("res://scripts/ui/mesh_icon.gd")
 
 # --- Rail structure (VISUAL/UI plan item 7) ---------------------------------
 # The rail used to be a bare anchored `Panel` in UI_StatBlock.tscn carrying an
@@ -56,6 +57,7 @@ var _redo_btn: Button = null
 var _verdict_panel: Control = null
 var _verdict_headline: Label = null
 var _verdict_detail: Label = null
+var _mirror_icon: Control = null
 
 @onready var hp_label = $ScrollContainer/VBoxContainer/HPLabel
 @onready var weight_label = $ScrollContainer/VBoxContainer/WeightLabel
@@ -617,6 +619,7 @@ func _ready():
 	library_button.text = "BLUEPRINT LIBRARY"
 	delete_button.text = "DISCARD PART"
 
+	_build_mirror_icon()
 	mirror_checkbox.toggled.connect(_on_mirror_toggled)
 	delete_button.pressed.connect(_on_delete_pressed)
 	save_button.pressed.connect(_on_save_pressed)
@@ -1102,6 +1105,8 @@ func _on_test_pressed():
 		get_tree().change_scene_to_file("res://scenes/Battlefield.tscn")
 
 func _on_mirror_toggled(button_pressed: bool):
+	if _mirror_icon:
+		_mirror_icon.set_active(button_pressed)
 	var root = get_node("/root/MainLab")
 	if root and root.has_method("set_mirror_enabled"):
 		root.set_mirror_enabled(button_pressed)
@@ -1110,6 +1115,23 @@ func set_mirror_toggle(enabled: bool):
 	if mirror_checkbox:
 		# Set without triggering the signal to avoid infinite loops
 		mirror_checkbox.set_pressed_no_signal(enabled)
+	if _mirror_icon:
+		_mirror_icon.set_active(enabled)
+
+# Chris: "do not fail to author meshes for toggles and switches... especially
+# in the Design Lab." mirror_checkbox is scene-tree furniture from
+# UI_StatBlock.tscn rather than built in code, so the icon is spliced in as a
+# sibling right before it instead of assuming a container shape to build into.
+func _build_mirror_icon() -> void:
+	var parent := mirror_checkbox.get_parent()
+	if parent == null:
+		return
+	_mirror_icon = MeshIconScript.new()
+	_mirror_icon.mesh_path = "res://assets/models/ui/ui_toggle_switch.glb"
+	_mirror_icon.icon_size = Vector2i(28, 28)
+	parent.add_child(_mirror_icon)
+	parent.move_child(_mirror_icon, mirror_checkbox.get_index())
+	_mirror_icon.set_active(mirror_checkbox.button_pressed)
 
 func update_stats(hull: Node3D):
 	# The faction re-tint that used to happen here is gone with the `Panel` node

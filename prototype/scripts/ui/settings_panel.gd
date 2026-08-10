@@ -18,6 +18,11 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIToolboxScript = preload("res://scripts/ui_toolbox.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const InputServiceScript = preload("res://scripts/core/input_service.gd")
+const MeshIconScript = preload("res://scripts/ui/mesh_icon.gd")
+
+const TOGGLE_MESH := "res://assets/models/ui/ui_toggle_switch.glb"
+const ROTARY_MESH := "res://assets/models/ui/ui_rotary_selector.glb"
+const DIAL_MESH := "res://assets/models/ui/ui_knurled_dial.glb"
 
 # How each setting is edited. A key absent from here is rendered read-only rather
 # than guessed at, so adding a setting without deciding its widget produces a
@@ -153,20 +158,32 @@ func _build_row(parent: Control, key: String) -> void:
 
 
 func _build_check(row: Control, key: String) -> void:
+	var icon := MeshIconScript.new()
+	icon.mesh_path = TOGGLE_MESH
+	icon.icon_size = Vector2i(32, 32)
+	row.add_child(icon)
+
 	var box := CheckBox.new()
 	box.button_pressed = bool(_settings.get_value(key))
+	icon.set_active(box.button_pressed)
 	# A latched control needs to SOUND latched, and in the right direction.
 	# wire() picks one role, so the direction-specific sound is played from the
 	# toggled handler instead of relying on the press role.
 	UIFeedbackScript.wire(box, "toggle_on")
 	box.toggled.connect(func(v: bool):
 		_settings.set_value(key, v)
+		icon.set_active(v)
 		if not v:
 			UIFeedbackScript.play(box, "ui_toggle_off"))
 	row.add_child(box)
 
 
 func _build_slider(row: Control, key: String, spec: Dictionary) -> void:
+	var icon := MeshIconScript.new()
+	icon.mesh_path = DIAL_MESH
+	icon.icon_size = Vector2i(32, 32)
+	row.add_child(icon)
+
 	var slider := HSlider.new()
 	slider.min_value = spec.get("min", 0.0)
 	slider.max_value = spec.get("max", 1.0)
@@ -182,6 +199,12 @@ func _build_slider(row: Control, key: String, spec: Dictionary) -> void:
 	readout.text = _format(slider.value, slider.step)
 	row.add_child(readout)
 
+	# The dial's turn tracks the slider's own fraction, not a separate state -
+	# an analogue read of the exact same value the linear track shows, the way
+	# a real console pairs a knob with a fader for the same channel.
+	var span: float = maxf(slider.max_value - slider.min_value, 0.0001)
+	icon.set_turn_fraction((slider.value - slider.min_value) / span)
+
 	# TICK ON A STEP BOUNDARY, not on every value_changed. A slider dragged across
 	# its range emits dozens of changes; playing a sound on each is a rattle. The
 	# readout still updates continuously.
@@ -189,6 +212,7 @@ func _build_slider(row: Control, key: String, spec: Dictionary) -> void:
 	slider.value_changed.connect(func(v: float):
 		readout.text = _format(v, slider.step)
 		_settings.set_value(key, v)
+		icon.set_turn_fraction((v - slider.min_value) / span)
 		var step_index := int(round(v / maxf(slider.step, 0.0001)))
 		if step_index != last_step[0]:
 			last_step[0] = step_index
@@ -213,6 +237,11 @@ func _build_slider(row: Control, key: String, spec: Dictionary) -> void:
 
 
 func _build_option(row: Control, key: String, spec: Dictionary) -> void:
+	var icon := MeshIconScript.new()
+	icon.mesh_path = ROTARY_MESH
+	icon.icon_size = Vector2i(32, 32)
+	row.add_child(icon)
+
 	var opt := OptionButton.new()
 	var choices: Array = spec.get("choices", [])
 	for i in range(choices.size()):
@@ -225,9 +254,17 @@ func _build_option(row: Control, key: String, spec: Dictionary) -> void:
 		opt.selected = int(current)
 	else:
 		opt.selected = maxi(0, values.find(current))
+
+	# The selector's pointer sweeps across the full choice set, one detent per
+	# option - a 3-choice quality preset and an 8-choice roster picker both
+	# read as "the same kind of control", just with fewer stops used.
+	var count: int = maxi(choices.size(), 1)
+	icon.set_turn_fraction(float(opt.selected) / maxf(float(count - 1), 1.0))
+
 	UIFeedbackScript.wire(opt, "dial")
 	opt.item_selected.connect(func(idx: int):
-		_settings.set_value(key, idx if values.is_empty() else values[idx]))
+		_settings.set_value(key, idx if values.is_empty() else values[idx])
+		icon.set_turn_fraction(float(idx) / maxf(float(count - 1), 1.0)))
 	row.add_child(opt)
 
 
