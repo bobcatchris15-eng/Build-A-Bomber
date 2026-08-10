@@ -115,8 +115,16 @@ func _resolve_target(target: String) -> Rect2:
 
 	match target:
 		"parts_dock":
+			# The bottom strip of four toolboxes + magnifying glass.
+			# The dock is gone - there is no UIDock to expand - so the
+			# spotlight is the union rect of the bar's plates, not a
+			# dock's expanded panel.
 			var parts := _parts_menu()
-			return _control_rect(parts.get_dock() if parts else null)
+			if parts and parts.has_method("get_bar_focus_rect"):
+				var r: Rect2 = parts.get_bar_focus_rect()
+				if r.size.x > 0.0 and r.size.y > 0.0:
+					return r
+			return Rect2()
 		"telemetry_dock":
 			return _control_rect(_stat_member("stats_dock"))
 		"name_field":
@@ -160,11 +168,10 @@ func _reveal_target_host(target: String) -> void:
 			_card_target = parts_panel.reveal_part(
 				target.substr(TutorialSteps.PART_CARD_PREFIX.length()))
 	elif target == "parts_dock":
-		var parts := _parts_menu()
-		if parts:
-			var dock = parts.get_dock()
-			if dock:
-				dock.set_dock_state(UIDockScript.State.EXPANDED)
+		# The bottom strip is always visible - no expansion to do. The
+		# "find" half of the tutorial step happens through the body
+		# text; the strip does not collapse.
+		pass
 	elif target in ["telemetry_dock", "name_field"]:
 		var dock2 = _stat_member("stats_dock")
 		if dock2:

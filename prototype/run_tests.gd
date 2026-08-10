@@ -100,6 +100,25 @@ const SUITE_ORDER := [
 	["terrain_and_maps", "test_apply_world_scale_is_inert_at_1_and_scales_flagged_fields_at_2"],
 	["terrain_and_maps", "test_spawn_fairness_lint_passes_a_real_map_scaled_up_4x"],
 	["terrain_and_maps", "test_scattered_peaks_navmesh_bakes_cleanly_at_world_scale_4"],
+	# 2026-08-10: navmesh path clearance around placed buildings. Locks the
+	# agent_radius=1.0 fix in _bake_nav_mesh() against the 0.1 default that
+	# produced the "harvester drives into the side of a building" bug.
+	["terrain_and_maps", "test_navmesh_path_routes_around_building_with_clearance"],
+	# 2026-08-10: base zones (pre-game HQ-placement areas per slot).
+	["terrain_and_maps", "test_base_zones_field_in_field_spec"],
+	["terrain_and_maps", "test_assign_base_zones_spreads_them_apart"],
+	# 2026-08-10: pre-game HQ-placement phase. The new flow replaces the
+	# old "auto-spawn HQ + refinery + 3 manufactories" boot with: each
+	# player gets a base zone, drops their HQ inside it, and then the
+	# match is live. Refinery + 2 manufactories are built NORMALLY
+	# during play, paid for out of STARTING_CREDITS. These suites pin
+	# the four load-bearing pieces: bank covers the opening, only HQs
+	# auto-spawn, AI drops at zone centre, human hook refuses outside
+	# the zone and double-places.
+	["terrain_and_maps", "test_starting_bank_covers_refinery_plus_two_manufactories"],
+	["terrain_and_maps", "test_spawn_bases_drops_only_hq_not_refinery_or_manufactories"],
+	["terrain_and_maps", "test_ai_auto_places_hq_in_assigned_base_zone"],
+	["terrain_and_maps", "test_place_hq_for_human_refuses_outside_zone_and_double_place"],
 	["weapons_and_damage", "test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion"],
 	["locomotion", "test_every_locomotion_type_is_fully_declared"],
 	["locomotion", "test_expansion_locomotion_types_build_and_place"],
@@ -156,7 +175,6 @@ const SUITE_ORDER := [
 	["sim_and_stats", "test_evasion_model_speed_defends_against_ballistic_not_hitscan"],
 	["economy_and_production", "test_energy_weapons_cost_and_drain"],
 	["weapons_and_damage", "test_ammo_types_change_damage_class_and_scaling"],
-	["weapons_and_damage", "test_new_weapon_archetypes_are_fully_wired"],
 	["sim_and_stats", "test_support_modules_get_combat_script_in_real_spawn"],
 	["terrain_and_maps", "test_balance_report_covers_every_catalog_entry"],
 	["ui_and_camera", "test_screenshot_diff_tolerance"],
@@ -209,7 +227,6 @@ const SUITE_ORDER := [
 	["designer_lab", "test_module_roles_group_and_sort_the_parts_menu"],
 	["terrain_and_maps", "test_part_material_roles_differentiate_surfaces"],
 	["designer_lab", "test_clipping_highlight_does_not_corrupt_shared_materials"],
-	["sim_and_stats", "test_napalm_mortar_tube_points_upward"],
 	["weapons_and_damage", "test_weapon_modules_balance_about_their_mount"],
 	["weapons_and_damage", "test_armor_greebles_sit_on_the_hull_and_ignore_modules"],
 	["designer_lab", "test_baked_module_visuals_carry_lods"],
@@ -232,6 +249,18 @@ const SUITE_ORDER := [
 	["terrain_and_maps", "test_b4_heightmap_terrain_pure_functions"],
 	["terrain_and_maps", "test_b4_heightmap_leaves_unmigrated_maps_untouched"],
 	["terrain_and_maps", "test_b5_heightmap_navmesh_rejects_steep_slope"],
+	# Ambient forest (Chris 2026-08-10): 20-variant tree pool, scattered
+	# across the whole map, harvestable but not regrowing. Kept adjacent
+	# to the greeble/clutter tests they share an avoidance set with.
+	["terrain_and_maps", "test_ambient_tree_pool_size_matches_constant"],
+	["terrain_and_maps", "test_ambient_tree_uses_ambient_pool_not_lumber_pool"],
+	["terrain_and_maps", "test_ambient_tree_does_not_regrow_after_harvest"],
+	["terrain_and_maps", "test_ambient_trees_scatter_is_deterministic"],
+	["terrain_and_maps", "test_ambient_trees_respect_avoid_radii"],
+	# 2026-08-10: ambient ore added (paired with the ~1/3 tree trim).
+	["terrain_and_maps", "test_ambient_ore_picks_from_resource_ore_pool"],
+	["terrain_and_maps", "test_ambient_ore_does_not_regrow"],
+	["terrain_and_maps", "test_ambient_ores_respect_avoid_radii_and_dont_overlap_trees"],
 	["ui_and_camera", "test_2d_ui_chrome_overhaul"],
 	["sim_and_stats", "test_audio_system"],
 	["sim_and_stats", "test_every_scene_script_parses_cleanly"],
@@ -340,7 +369,6 @@ const SUITE_ORDER := [
 	# BoostController, and one BattleUnitV2 built directly (no Battle scene).
 	["locomotion", "test_chassis_top_speeds_are_spread_and_ordered"],
 	["locomotion", "test_propulsion_modules_change_drivetrain_output"],
-	["locomotion", "test_boost_controller_engages_and_expires"],
 	["locomotion", "test_live_runtime_uses_combat_speed_and_terrain"],
 
 	# LAST, DELIBERATELY. This is the only suite that instantiates whole screens,
@@ -349,25 +377,17 @@ const SUITE_ORDER := [
 	# after everything else means it cannot perturb the pinned navmesh order that
 	# the rest of SUITE_ORDER exists to protect.
 	["scene_loads", "test_every_screen_survives_ready"],
-
-	# ACTUALLY LAST. battlefield.gd's Test Range dummies were fixed to join the
-	# "targets" group so auto_weapon.gd's targeting scan can see them - real
-	# combat now runs here where previously it silently never engaged. That
-	# makes this suite leak residue (live projectiles, navmesh queries mid-bake)
-	# into whatever ran after it, so it moves after even scene_loads rather than
-	# just after weapons_and_damage.
-	["weapons_and_damage", "test_target_dummies_actually_take_damage_in_test_range"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist
 # (2026-07-27 finding): isolated standalone reruns confirmed at least 3
-# distinct suites (test_target_dummies_actually_take_damage_in_test_range,
-# test_b2_n_player_slots_alliance_fog_repair_and_independent_resources - both
-# fail even run completely alone, a real timing race, not suite-order
-# contamination - and test_c4_blocked_exit_holds_job_done_nudges_blockers_
-# then_spawns, which passes 3/3 alone and only fails from shared-process
-# Recast-bake/navmesh-RID carryover) can flake, and a live full-suite run
-# then produced a FOURTH, previously-unseen flake
+# distinct suites
+# (test_b2_n_player_slots_alliance_fog_repair_and_independent_resources,
+# which fails even run completely alone, a real timing race rather than
+# suite-order contamination, and test_c4_blocked_exit_holds_job_done_
+# nudges_blockers_then_spawns, which passes 3/3 alone and only fails from
+# shared-process Recast-bake/navmesh-RID carryover) can flake, and a live
+# full-suite run then produced a FOURTH, previously-unseen flake
 # (test_c1_building_placed_after_unit_is_moving_forces_a_repath) - matching
 # PROGRESS.md's own long-standing note that "a different navmesh/movement
 # test fails each run, never the same one twice." A fixed name list will

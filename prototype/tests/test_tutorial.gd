@@ -115,11 +115,11 @@ func test_tutorial_step_table_is_well_formed() -> bool:
 	return ok
 
 
-# reveal_part() has to get through three closed layers - the dock is RAILED by
-# default, its tier is closed, and the category drawer inside it is closed.
+# reveal_part() has to get through the closed layers between the player and
+# the part: every family is closed by default, and the sub-family drawer
+# holding the card is closed.
 func test_tutorial_reveal_part_opens_the_catalog() -> bool:
 	print("Running Test Suite: Tutorial - reveal_part() Opens The Catalog...")
-	var UIDockScript = preload("res://scripts/ui_dock.gd")
 
 	root.size = Vector2i(1280, 720)
 	var scene = load("res://scenes/MainLab.tscn").instantiate()
@@ -134,13 +134,13 @@ func test_tutorial_reveal_part_opens_the_catalog() -> bool:
 		scene.queue_free()
 		return false
 
-	var dock = parts.get_dock()
-	if dock == null:
-		print("  [FAIL] parts menu exposes no dock")
+	# The dock is gone. The strip is always visible; only the per-family
+	# accordion has open/close state.
+	if parts.get_dock() != null:
+		print("  [FAIL] parts menu should not expose a UIDock anymore")
 		scene.queue_free()
 		return false
 	# The precondition the whole method exists to defeat.
-	dock.set_dock_state(UIDockScript.State.RAILED, false)
 	parts.collapse_all_drawers()
 
 	var ok := true
@@ -151,9 +151,6 @@ func test_tutorial_reveal_part_opens_the_catalog() -> bool:
 	else:
 		if card.module_type_id != "medium_hull":
 			print("  [FAIL] returned card is for '%s'" % card.module_type_id)
-			ok = false
-		if dock.get_dock_state() != UIDockScript.State.EXPANDED:
-			print("  [FAIL] the dock was left collapsed")
 			ok = false
 		# The card's own drawer has to be open, or the card is parented into a
 		# hidden grid and has no on-screen rect to point at.
@@ -169,7 +166,7 @@ func test_tutorial_reveal_part_opens_the_catalog() -> bool:
 
 	scene.queue_free()
 	if ok:
-		print("  [PASS] reveal_part() expands the dock, opens the tier and drawer, and returns the card.")
+		print("  [PASS] reveal_part() opens the family, the tier and drawer, and returns the card.")
 	return ok
 
 

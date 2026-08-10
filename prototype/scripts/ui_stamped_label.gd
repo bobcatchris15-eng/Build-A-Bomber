@@ -2,6 +2,11 @@ class_name StampedLabel
 extends Control
 # Lettering stamped into a metal plate and flooded with enamel.
 #
+# MOVED 2026-08-10 from battle/hud/ to scripts/ alongside ToolboxPlate - both
+# are shared visual chrome now, used by the Skirmish build queue and the new
+# design lab bottom toolboxes (see ui_design_lab_toolboxes.gd). The class_name
+# is unchanged so every existing caller keeps compiling.
+#
 # WHY THIS IS NOT A Label WITH THEME OVERRIDES. The previous attempt was, and
 # Chris's read of it was exactly right: "still reads as text printed on". Theme
 # overrides give one outline colour at one width and one shadow offset, which

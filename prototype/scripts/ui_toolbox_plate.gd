@@ -2,6 +2,13 @@ class_name ToolboxPlate
 extends Control
 # The physical plate a production toolbox sits on.
 #
+# MOVED 2026-08-10 from battle/hud/ to scripts/. The plate and its sibling
+# StampedLabel are no longer battle-specific chrome - the design lab's new
+# bottom toolboxes (see ui_design_lab_toolboxes.gd) want the same chamfered
+# metal and the same enamel lettering. The class_name is unchanged so every
+# existing caller (battle/hud/production_hud.gd, battle/hud/admin_menu.gd,
+# and the new design-lab widget) keeps compiling.
+#
 # WHY THIS IS A CUSTOM _draw() AND NOT A StyleBoxFlat. Chris asked for "heavily
 # chamfered corners". StyleBoxFlat cannot do that - it offers `corner_radius`,
 # which is a ROUNDED corner, and a heavy radius reads as a soft lozenge, the

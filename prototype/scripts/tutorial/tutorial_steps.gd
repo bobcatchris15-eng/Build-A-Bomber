@@ -39,10 +39,11 @@ const STEPS := [
 	{
 		"scene": SCENE_LAB,
 		"title": "THE HARDWARE CATALOG",
-		"body": "Every part you can bolt on lives in this catalog, filed under four "
-			+ "toolboxes: Hulls, Weapons, Support and Drives. Open a toolbox, then a "
-			+ "drawer inside it, to see the parts.\n\n"
-			+ "The search box cuts across all four at once.",
+		"body": "Every part you can bolt on lives along the bottom of the screen, "
+			+ "filed under four toolboxes: Hulls, Weapons, Support and Drives. "
+			+ "Open a toolbox, then a drawer inside it, to see the parts.\n\n"
+			+ "The magnifying-glass icon at the right opens a search box that "
+			+ "cuts across all four at once.",
 		"target": "parts_dock",
 		"advance": "next_button",
 	},

@@ -26,8 +26,8 @@ extends Control
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
-const ToolboxPlateScript = preload("res://scripts/battle/hud/toolbox_plate.gd")
-const StampedLabelScript = preload("res://scripts/battle/hud/stamped_label.gd")
+const ToolboxPlateScript = preload("res://scripts/ui_toolbox_plate.gd")
+const StampedLabelScript = preload("res://scripts/ui_stamped_label.gd")
 
 signal main_menu_requested
 signal quit_requested

@@ -919,8 +919,13 @@ func _ready():
 	# column"), so they are built in _build_toolbar() now. Their behaviour is
 	# unchanged and still mirrors the Ctrl+Z / Ctrl+Y bindings in module_placer.gd.
 
-	# Navigation back to the main menu
+	# Navigation back to the main menu - captured in a holder, reparented into
+	# the top toolbar by _build_toolbar(). It belongs with the document actions
+	# (the rest of which moved into the DOCUMENT toolbox body), and it does not
+	# belong stacked under the stat readouts - that was the old "everything
+	# in the rail" pattern the new layout explicitly replaced.
 	var menu_btn = Button.new()
+	menu_btn.name = "MainMenuButton"
 	menu_btn.text = "Main Menu"
 	menu_btn.pressed.connect(_return_to_menu)
 	_rail_vbox.add_child(menu_btn)
@@ -1276,12 +1281,27 @@ func update_stats(hull: Node3D):
 		# instead of a hardcoded width, since threshold values can grow to
 		# more digits than today's baseline numbers.
 		armor_threshold_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_rail_vbox.add_child(armor_threshold_label)
+		# Place it after the DPS row - the other readouts use the same
+		# "directly after the row it explains" move_child pattern
+		# (_build_drivetrain_readout / _build_range_readout / _build_power_readout
+		# all do this). Without it, the label lands at the end of the
+		# VBox, below the action buttons - which is what made it
+		# invisible for so long (test_sim_and_stats.gd reads the text and
+		# the value is correct, but no player ever sees it).
+		if dps_label and dps_label.get_parent() == _rail_vbox:
+			_rail_vbox.move_child(armor_threshold_label, dps_label.get_index() + 1)
 	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
 
 	if not tech_req_label:
 		tech_req_label = Label.new()
 		tech_req_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_rail_vbox.add_child(tech_req_label)
+		# Same "directly after the row it explains" pattern - tech
+		# requirements belong with the armor block they describe, not
+		# below the action buttons.
+		if armor_threshold_label and armor_threshold_label.get_parent() == _rail_vbox:
+			_rail_vbox.move_child(tech_req_label, armor_threshold_label.get_index() + 1)
 
 	var req_buildings: Array[String] = []
 	if hull:
@@ -1349,6 +1369,92 @@ func _load_fill_style(state: String) -> StyleBoxFlat:
 		_load_fill_styles[state] = sb
 	return _load_fill_styles[state]
 
+# --- Warning panel primitive -----------------------------------------------
+#
+# All three warning panels (overweight, power, spotter) share the same
+# shape: a coloured panel with a left-border accent, holding a title row
+# (the thing that changes - "OVERWEIGHT", "POWER SHORTFALL", "SPOTTER
+# REQUIRED") and a detail row below it (the why). Extracted into one
+# builder so the three call sites cannot drift on the visual language,
+# and so a future change to the panel shape (e.g. adding an icon, or
+# a different separator) lands in one place.
+#
+# THE SHAPE:
+#
+#   +-----------------------------------+
+#   |  ! TITLE                         |   <- "HeadingLabel" in edge colour,
+#   |  ----------------------------     |      with a "!" prefix as the
+#   |  detail text wraps here, one     |      thematic icon the detail
+#   |  short paragraph.                 |      used to visually crowd.
+#   +-----------------------------------+
+#
+# The hairline rule between title and detail is what fixes the
+# "detail overlaps the title" read the old layout had: with only
+# 4px of VBox separation and no rule, the two lines blurred into
+# one block. The rule also matches the UIFlyout.set_title() pattern
+# (ui_flyout.gd:82-90), so the rail and the popover agree on what
+# a "titled section" looks like.
+#
+# The detail uses TEXT_PRIMARY rather than the HintLabel's default
+# TEXT_SECONDARY: against the dim-amber fill of a hazard panel, the
+# secondary text reads as muddy. TEXT_PRIMARY is the warm off-white
+# and has the contrast the warning actually needs to be readable.
+#
+# Returns [PanelContainer, Label(title), Label(detail)] so the caller
+# stores them in its own _panel/_title/_detail fields and updates the
+# text from update_stats() / update_*_readout() as before.
+func _build_warning_panel(role: String) -> Array:
+	var pair := Tokens.signal_pair(role)
+	var panel := PanelContainer.new()
+	var warn_style := StyleBoxFlat.new()
+	warn_style.bg_color = pair["fill"]
+	warn_style.border_color = pair["edge"]
+	warn_style.border_width_left = Tokens.BORDER_EMPHASIS
+	warn_style.content_margin_left = Tokens.SPACE_SM
+	warn_style.content_margin_right = Tokens.SPACE_SM
+	warn_style.content_margin_top = Tokens.SPACE_XS
+	warn_style.content_margin_bottom = Tokens.SPACE_XS
+	panel.add_theme_stylebox_override("panel", warn_style)
+	panel.visible = false
+
+	var warn_box := VBoxContainer.new()
+	warn_box.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	panel.add_child(warn_box)
+
+	# Title row. HeadingLabel in the panel's edge colour, with a leading
+	# "!" as the thematic icon. The "!" is plain ASCII, not a glyph or
+	# emoji - it renders in the same Source Sans Pro Bold face the
+	# rest of the title uses, so the title reads as one typographic
+	# line rather than as "icon + text" stuck together.
+	var title := Label.new()
+	title.theme_type_variation = "HeadingLabel"
+	title.add_theme_color_override("font_color", pair["edge"])
+	warn_box.add_child(title)
+
+	# Hairline rule - sits BETWEEN the title and the detail, so the
+	# detail has a clear "underneath the title" position. Same role
+	# the HSeparator plays in UIFlyout.set_title() (ui_flyout.gd:88-90).
+	var rule := HSeparator.new()
+	# The rule's own separation is a bit wider than the warn_box's
+	# default SPACE_XS (4px) so the title and the detail feel like
+	# distinct regions, not two lines of the same paragraph.
+	rule.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	rule.add_theme_color_override("separator", pair["edge"])
+	warn_box.add_child(rule)
+
+	# Detail row. TEXT_PRIMARY (not the HintLabel default of
+	# TEXT_SECONDARY) for contrast against the dim-amber fill -
+	# a warning the player cannot read is not a useful warning.
+	# autowrap is mandatory: these lines run past the rail's width
+	# and a non-wrapping label would stretch the whole dock.
+	var detail := Label.new()
+	detail.add_theme_color_override("font_color", Tokens.TEXT_PRIMARY)
+	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	warn_box.add_child(detail)
+
+	return [panel, title, detail]
+
+
 func _build_drivetrain_readout() -> void:
 	# Built once, lazily, then reused - matches how armor_threshold_label is
 	# handled in update_stats(). Ordered directly
@@ -1377,31 +1483,10 @@ func _build_drivetrain_readout() -> void:
 	# The warning notification. HAZARD, not ALERT: an overweight design is a
 	# flaw the player is choosing to accept, not a failure or a destructive
 	# action - see ui_tokens.gd's role comments on the signal colours.
-	_overweight_panel = PanelContainer.new()
-	var pair := Tokens.signal_pair("hazard")
-	var warn_style := StyleBoxFlat.new()
-	warn_style.bg_color = pair["fill"]
-	warn_style.border_color = pair["edge"]
-	warn_style.border_width_left = Tokens.BORDER_EMPHASIS
-	warn_style.content_margin_left = Tokens.SPACE_SM
-	warn_style.content_margin_right = Tokens.SPACE_SM
-	warn_style.content_margin_top = Tokens.SPACE_XS
-	warn_style.content_margin_bottom = Tokens.SPACE_XS
-	_overweight_panel.add_theme_stylebox_override("panel", warn_style)
-	_overweight_panel.visible = false
-	var warn_box := VBoxContainer.new()
-	warn_box.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	_overweight_panel.add_child(warn_box)
-	_overweight_title = Label.new()
-	_overweight_title.theme_type_variation = "HeadingLabel"
-	_overweight_title.add_theme_color_override("font_color", pair["edge"])
-	warn_box.add_child(_overweight_title)
-	_overweight_detail = Label.new()
-	_overweight_detail.theme_type_variation = "HintLabel"
-	# These lines run past the rail's width; without a wrap the panel would
-	# stretch the whole dock. Same fix as armor_threshold_label above.
-	_overweight_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	warn_box.add_child(_overweight_detail)
+	var w_overweight := _build_warning_panel("hazard")
+	_overweight_panel = w_overweight[0]
+	_overweight_title = w_overweight[1]
+	_overweight_detail = w_overweight[2]
 	_rail_vbox.add_child(_overweight_panel)
 
 	if weight_label and weight_label.get_parent() == _rail_vbox:
@@ -1454,31 +1539,10 @@ func _build_power_readout() -> void:
 	# for the same reason the overweight panel does not - a burst-heavy design
 	# that runs down its buffer in a short engagement and recharges between them
 	# is a legitimate build, and the Lab has no business deciding it is wrong.
-	_power_panel = PanelContainer.new()
-	var pair := Tokens.signal_pair("hazard")
-	var warn_style := StyleBoxFlat.new()
-	warn_style.bg_color = pair["fill"]
-	warn_style.border_color = pair["edge"]
-	warn_style.border_width_left = Tokens.BORDER_EMPHASIS
-	warn_style.content_margin_left = Tokens.SPACE_SM
-	warn_style.content_margin_right = Tokens.SPACE_SM
-	warn_style.content_margin_top = Tokens.SPACE_XS
-	warn_style.content_margin_bottom = Tokens.SPACE_XS
-	_power_panel.add_theme_stylebox_override("panel", warn_style)
-	_power_panel.visible = false
-	var warn_box := VBoxContainer.new()
-	warn_box.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	_power_panel.add_child(warn_box)
-	_power_title = Label.new()
-	_power_title.theme_type_variation = "HeadingLabel"
-	_power_title.add_theme_color_override("font_color", pair["edge"])
-	warn_box.add_child(_power_title)
-	_power_detail = Label.new()
-	_power_detail.theme_type_variation = "HintLabel"
-	# Same wrap as the overweight detail: these lines run past the rail's width
-	# and would otherwise stretch the whole dock.
-	_power_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	warn_box.add_child(_power_detail)
+	var w_power := _build_warning_panel("hazard")
+	_power_panel = w_power[0]
+	_power_title = w_power[1]
+	_power_detail = w_power[2]
 	_rail_vbox.add_child(_power_panel)
 
 	# Sits under the drivetrain block rather than at the end of the rail, where
@@ -1546,7 +1610,7 @@ func _update_power_readout(pw: Dictionary) -> void:
 	var firing_only: bool = bool(pw.get("firing_deficit_only", false))
 	_power_panel.visible = has_deficit or firing_only
 	if has_deficit:
-		_power_title.text = "POWER DEFICIT - %.1f /s SHORT" % absf(net)
+		_power_title.text = "!  POWER DEFICIT - %.1f /s SHORT" % absf(net)
 		# Names the endurance and what sheds first, because "underpowered" alone
 		# tells the player neither how bad it is nor which way is out. The shed
 		# order matches PowerBudget's thresholds, so the panel cannot describe an
@@ -1557,7 +1621,7 @@ func _update_power_readout(pw: Dictionary) -> void:
 		# than a fault - burst damage paid for out of the buffer and recharged
 		# between engagements - so it is stated as a duty cycle, not a warning to
 		# be fixed.
-		_power_title.text = "SUSTAINED FIRE OUTRUNS POWER"
+		_power_title.text = "!  SUSTAINED FIRE OUTRUNS POWER"
 		_power_detail.text = "Fine at rest, but %.1f /s short while firing - about %.0fs of continuous fire from a full buffer before energy weapons cut out. Capacitors buy a longer burst; a generator buys sustain." % [
 			absf(float(pw.get("firing_net", 0.0))), float(pw.get("firing_endurance", 0.0))]
 
@@ -1635,7 +1699,7 @@ func _update_drivetrain_readout(dt: Dictionary) -> void:
 
 	_overweight_panel.visible = dt["is_overloaded"]
 	if dt["is_overloaded"]:
-		_overweight_title.text = "OVERWEIGHT - %.0f%% OF CAPACITY" % load_pct
+		_overweight_title.text = "!  OVERWEIGHT - %.0f%% OF CAPACITY" % load_pct
 		# Same rounding guard as the speed row above: at a fraction of a
 		# percent over, "Top speed 5.0 instead of 5.0" reads as a broken
 		# label, so the cost is stated as a percentage alone until the two
@@ -1727,29 +1791,10 @@ func _build_range_readout() -> void:
 
 	# HAZARD, matching the overweight panel: a trade the player is choosing,
 	# not a failure. See ui_tokens.gd's role comments on the signal colours.
-	_spotter_panel = PanelContainer.new()
-	var pair := Tokens.signal_pair("hazard")
-	var warn_style := StyleBoxFlat.new()
-	warn_style.bg_color = pair["fill"]
-	warn_style.border_color = pair["edge"]
-	warn_style.border_width_left = Tokens.BORDER_EMPHASIS
-	warn_style.content_margin_left = Tokens.SPACE_SM
-	warn_style.content_margin_right = Tokens.SPACE_SM
-	warn_style.content_margin_top = Tokens.SPACE_XS
-	warn_style.content_margin_bottom = Tokens.SPACE_XS
-	_spotter_panel.add_theme_stylebox_override("panel", warn_style)
-	_spotter_panel.visible = false
-	var warn_box := VBoxContainer.new()
-	warn_box.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	_spotter_panel.add_child(warn_box)
-	_spotter_title = Label.new()
-	_spotter_title.theme_type_variation = "HeadingLabel"
-	_spotter_title.add_theme_color_override("font_color", pair["edge"])
-	warn_box.add_child(_spotter_title)
-	_spotter_detail = Label.new()
-	_spotter_detail.theme_type_variation = "HintLabel"
-	_spotter_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	warn_box.add_child(_spotter_detail)
+	var w_spotter := _build_warning_panel("hazard")
+	_spotter_panel = w_spotter[0]
+	_spotter_title = w_spotter[1]
+	_spotter_detail = w_spotter[2]
 	_rail_vbox.add_child(_spotter_panel)
 
 	# Sits directly after the DPS row it belongs with, rather than at the end
@@ -1802,7 +1847,7 @@ func _update_range_readout(wr: Dictionary) -> void:
 	# self-acquire at range at all, which is a different and much more
 	# consequential fact than "reaches a bit past its own eyes".
 	if not required.is_empty():
-		_spotter_title.text = "NEEDS A SPOTTER"
+		_spotter_title.text = "!  NEEDS A SPOTTER"
 		var names: Array = []
 		for w in required:
 			names.append("%s (%.0f)" % [w["name"], w["reach"]])
@@ -1812,7 +1857,7 @@ func _update_range_readout(wr: Dictionary) -> void:
 			vision,
 			(vision / longest) * 100.0]
 	else:
-		_spotter_title.text = "OUT-REACHES ITS OWN VISION"
+		_spotter_title.text = "!  OUT-REACHES ITS OWN VISION"
 		var names: Array = []
 		for w in assisted:
 			names.append("%s (%.0f)" % [w["name"], w["reach"]])
@@ -2651,6 +2696,13 @@ func _build_rail_dock() -> void:
 # node has exactly one parent. Chris asked for both, so both exist - the cost is
 # that the copies must stay wired to the same methods, which is why they connect
 # to _on_save_pressed etc. rather than duplicating any logic.
+#
+# The DELETE button is the one exception: the rail's original "Delete Selected
+# Part" fires the same handler as the toolbox's "DISCARD PART", so showing
+# both on screen at once reads as a duplicate rather than as a second entry
+# point. The toolbox is the "official" home for document actions, so the
+# rail's original is hidden below - the @onready var and its pressed signal
+# stay wired, so the Delete keyboard binding keeps working.
 func _build_admin_toolbox() -> void:
 	if _rail_vbox == null:
 		return
@@ -2673,12 +2725,33 @@ func _build_admin_toolbox() -> void:
 	if blueprint_name_edit:
 		blueprint_name_edit.reparent(body)
 
+	# The Roll button that _setup_name_roller() built beside the name field
+	# was originally a sibling of the LineEdit in a BlueprintNameRow in the
+	# rail. That row is now orphaned (the LineEdit moved here), so the row
+	# moves with the field - both live in the DOCUMENT section, and the
+	# BlueprintNameRow's HBoxContainer layout still applies.
+	var name_row := _rail_vbox.get_node_or_null("BlueprintNameRow")
+	if name_row:
+		name_row.reparent(body)
+		# Reparent leaves the old FULL_RECT anchors on the row, which would
+		# make it fill the body and cover the buttons below. Re-anchor it
+		# to the top of the body so it sits between the name_hint label and
+		# the action buttons.
+		name_row.set_anchors_preset(Control.PRESET_TOP_WIDE)
+		name_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
 	_admin_action(body, "SAVE BLUEPRINT", _on_save_pressed, "confirm")
 	_admin_action(body, "BLUEPRINT LIBRARY", _on_library_pressed, "default")
 	_admin_action(body, "DISCARD PART", _on_delete_pressed, "danger")
 
 	_rail_vbox.add_child(toolbox)
 	_rail_vbox.move_child(toolbox, 0)
+
+	# Hide the rail's original DeleteButton - the toolbox's DISCARD PART is
+	# the visible home for this action. The @onready var and its pressed
+	# signal stay wired so the Delete keyboard binding keeps working.
+	if delete_button:
+		delete_button.visible = false
 
 
 # One transparent top-bar slot: a caption over a value, with a hairline rule on
@@ -2830,6 +2903,15 @@ func _build_toolbar() -> void:
 		save_button.reparent(row)
 	if test_button:
 		test_button.reparent(row)
+
+	# Navigation back to the main menu - reparented from the rail (where it
+	# used to live below the stats) so it sits with the other "leave the
+	# screen" controls at the right end. Placed AFTER test_button so the
+	# two commits (save, test) sit next to each other and the menu sits at
+	# the absolute right edge, away from the read-only info slots.
+	var menu_btn := _rail_vbox.get_node_or_null("MainMenuButton")
+	if menu_btn:
+		menu_btn.reparent(row)
 
 	UIFeedbackScript.wire_tree(row)
 	# The docks inset their top by Tokens.TOOLBAR_HEIGHT, but nothing forces the
@@ -3130,10 +3212,47 @@ func _build_verdict_block() -> void:
 	parent.add_child(_verdict_panel)
 	parent.move_child(_verdict_panel, 0)
 
-	_verdict_headline = _verdict_panel.add_readout("")
+	# WHY A VBox INSIDE THE PhosphorPanel, NOT PanelContainer's OWN STACKING.
+	# PhosphorPanel.add_readout() wraps each Label in a MarginContainer, and
+	# the parent PanelContainer is supposed to stack those MarginContainers
+	# vertically. In practice it does not - every readout lands at y=0,
+	# with the detail text drawn ON TOP of the headline (visible in the
+	# the "UNARMED / No weapon fitted" overlap, where the headline's
+	# amber pixels and the detail's white pixels occupy the same row and
+	# the shader composites them into one unreadable line). The VBox below
+	# is a hard workaround: a Container we know stacks its children, with
+	# explicit separation between headline, separator and detail.
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	_verdict_panel.add_child(stack)
+
+	# Headline. Same HeadingLabel theme variation the other rail headings
+	# use (so the visual language stays consistent across the screen),
+	# and the "!" prefix added in _update_verdict() below is the icon the
+	# detail was overlaying.
+	_verdict_headline = Label.new()
 	_verdict_headline.theme_type_variation = "HeadingLabel"
-	_verdict_detail = _verdict_panel.add_readout("")
+	_verdict_headline.add_theme_color_override("font_color", Color.WHITE)
+	stack.add_child(_verdict_headline)
+
+	# Hairline rule between headline and detail. The phosphor's shader
+	# treats the separator's white pixels as excitation and tints them
+	# with the tube colour, so the rule reads as part of the display's
+	# own glow rather than as a foreign StyleBoxFlat smuggled in.
+	var rule := HSeparator.new()
+	rule.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	stack.add_child(rule)
+
+	# Detail. StatLabel (the theme's tabular face) so the number-prefixed
+	# lines line up under each other when the verdict text carries
+	# numbers, and the same WHITE the headline uses so the shader
+	# tints both with the same tube colour rather than reading the two
+	# as different surfaces.
+	_verdict_detail = Label.new()
+	_verdict_detail.theme_type_variation = "StatLabel"
+	_verdict_detail.add_theme_color_override("font_color", Color.WHITE)
 	_verdict_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(_verdict_detail)
 
 
 # NOTHING HERE RE-DERIVES. `stats` is the exact analyze() result the rest of
@@ -3149,7 +3268,15 @@ func _update_verdict(stats: Dictionary) -> void:
 		_verdict_panel.visible = false
 		return
 	_verdict_panel.visible = true
-	_verdict_headline.text = top.get("headline", "")
+	# "!" prefix is the icon - the design_verdict.gd headline text is the
+	# unprefixed label ("UNARMED", "OVER CAPACITY", ...) because the test
+	# suite asserts on it verbatim, and the test's contract is the raw
+	# string, not the display rendering. The prefix is added HERE so
+	# the icon is a presentation concern of the rail, not a data concern
+	# of the verdict evaluator. The two-space gap after the "!" keeps
+	# it from merging with the first letter under the phosphor's tight
+	# letter-spacing.
+	_verdict_headline.text = "!  %s" % top.get("headline", "")
 	_verdict_headline.add_theme_color_override(
 		"font_color", DesignVerdictScript.color_for(top.get("severity", DesignVerdictScript.Severity.NOTE)))
 	_verdict_detail.text = top.get("detail", "")

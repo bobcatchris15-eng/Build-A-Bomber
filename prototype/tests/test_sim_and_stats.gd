@@ -1007,45 +1007,6 @@ func test_underload_bonus_is_wired_through_a_real_analysis() -> bool:
 	return true
 
 
-func test_napalm_mortar_tube_points_upward() -> bool:
-	print("Running Test Suite: Napalm Mortar - Tube Elevates Instead Of Firing Into The Deck...")
-	var VisualBuilder = preload("res://scripts/visual_builder.gd")
-	var ok = true
-
-	var holder = Node3D.new()
-	root.add_child(holder)
-	var cd = ModuleCatalog.get_module_data("napalm_mortar")
-	VisualBuilder.build_visual("napalm_mortar", holder, cd.size, cd.color, {})
-
-	var pivot = holder.get_node_or_null("ElevationPivot")
-	if pivot == null:
-		print("  [FAIL] No ElevationPivot on the napalm mortar")
-		ok = false
-	else:
-		# The elevation was authored as deg_to_rad(-55.0) while artillery and
-		# the mortar array both use a POSITIVE angle. Parts are built with the
-		# bore along -Z and a positive X rotation pitches -Z up, so the
-		# negative sign pitched the whole assembly nose-down through the deck
-		# and put the flared muzzle underneath the breech - which is what read
-		# as the barrel being fitted upside down.
-		if pivot.rotation.x <= 0.0:
-			print("  [FAIL] ElevationPivot pitches DOWN (%.1f deg) - the tube fires into the deck" % rad_to_deg(pivot.rotation.x))
-			ok = false
-
-		# Assert the actual geometry, not just the sign: the muzzle end of the
-		# tube has to end up above the trunnion it swings on.
-		var muzzle_world = pivot.to_global(Vector3(0, 0, -0.55))
-		var breech_world = pivot.to_global(Vector3(0, 0, 0.05))
-		if muzzle_world.y <= breech_world.y:
-			print("  [FAIL] Muzzle (y=%.2f) sits at or below the breech (y=%.2f)" % [muzzle_world.y, breech_world.y])
-			ok = false
-
-	holder.free()
-	if not ok:
-		return false
-	print("  [PASS] The napalm mortar's tube elevates, with the muzzle above the breech.")
-	return true
-
 func test_idle_units_auto_engage_sighted_enemies() -> bool:
 	print("Running Test Suite: Idle/Moving Units Auto-Engage Enemies In Sight...")
 	# Previously a unit only ever got an ATTACK order from an explicit

@@ -36,8 +36,8 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const BuildingCatalogScript = preload("res://scripts/battle/economy/building_catalog.gd")
 const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
-const ToolboxPlateScript = preload("res://scripts/battle/hud/toolbox_plate.gd")
-const StampedLabelScript = preload("res://scripts/battle/hud/stamped_label.gd")
+const ToolboxPlateScript = preload("res://scripts/ui_toolbox_plate.gd")
+const StampedLabelScript = preload("res://scripts/ui_stamped_label.gd")
 # NOT a preload of match_director.gd: it preloads this file, and the pair is a
 # cyclic reference. `is_defence_design` is reached through the director instance
 # instead, which keeps one definition of what makes a design a turret rather than
@@ -493,13 +493,28 @@ func _is_active(queue_name: String) -> bool:
 # What can be ordered from this queue. Units come from the player's roster,
 # filtered by the weight tier their hull puts them in; the Building queue lists
 # the prefab structures.
+# A structure kind's player-facing name, in Title Case.
+#
+# Static because the Design Lab's tech-requirement readout needs the same names
+# this HUD uses without a live HUD to ask - a design's prerequisites are named
+# in the Lab, where the design is made, and in the build bar, where it is
+# ordered, and those two must not drift apart.
+#
+# Casing is deliberately NOT baked in. Every caller in this HUD upper-cases the
+# result, because the engraved toolbox plates are upper-case as a material
+# choice; the Lab's stat rail is Title Case like every other label on it. The
+# name is the shared thing, the shouting is not.
+static func _format_building_name(kind: String) -> String:
+	return kind.replace("_", " ").capitalize()
+
+
 func _items_for(queue_name: String) -> Array:
 	if queue_name == BuildingCatalogScript.QUEUE_BUILDING:
 		var out: Array = []
 		for kind in BuildingCatalogScript.buildable_kinds():
 			out.append({
 				"kind": kind,
-				"label": kind.replace("_", " ").to_upper(),
+				"label": _format_building_name(kind).to_upper(),
 				# Buildings still author their price as materials, same as modules
 				# do, and convert at the till - see ResourceCatalog.
 				"cost": ResourceCatalogScript.credits_from_materials(Vector2i(
@@ -528,6 +543,8 @@ func _items_for(queue_name: String) -> Array:
 				"cost": dcost,
 				"time": DesignCostingScript.build_time_for_cost(dcost),
 				"structure": true,
+				"missing": _director.production.missing_required_buildings(
+					_director.PLAYER_TEAM, design),
 			})
 		return defences
 	var out: Array = []
@@ -546,6 +563,8 @@ func _items_for(queue_name: String) -> Array:
 			"cost": cost,
 			"time": DesignCostingScript.build_time_for_cost(cost),
 			"structure": false,
+			"missing": _director.production.missing_required_buildings(
+				_director.PLAYER_TEAM, design),
 		})
 	return out
 
@@ -557,7 +576,21 @@ func _add_item_button(parent: Control, queue_name: String, item: Dictionary) -> 
 	btn.focus_mode = Control.FOCUS_NONE
 	parent.add_child(btn)
 	UIFeedbackScript.wire(btn)
-	btn.pressed.connect(func(): _enqueue(queue_name, item))
+
+	# A design gated on a lab the player has not built yet is disabled rather
+	# than silently swallowing the click - enqueue_unit()/enqueue_structure()
+	# already refuse it at the door (ProductionService's tech-tree gate), and a
+	# button that looks live but does nothing is worse than one that visibly
+	# cannot be pressed.
+	var missing: Array = item.get("missing", [])
+	if not missing.is_empty():
+		var names: Array = []
+		for kind in missing:
+			names.append(_format_building_name(str(kind)))
+		btn.disabled = true
+		btn.tooltip_text = "Requires: %s" % ", ".join(names)
+	else:
+		btn.pressed.connect(func(): _enqueue(queue_name, item))
 
 
 func _enqueue(queue_name: String, item: Dictionary) -> void:
@@ -633,7 +666,7 @@ func _contributor_hint(queue_name: String) -> String:
 	var kinds: Array = BuildingCatalogScript.contributors_for(queue_name)
 	if kinds.is_empty():
 		return "SOURCE"
-	return str(kinds[0]).replace("_", " ").to_upper()
+	return _format_building_name(str(kinds[0])).to_upper()
 
 
 # --- Radial menu on a structure ----------------------------------------------
@@ -650,7 +683,7 @@ func open_structure_ring(structure: Node3D, screen_pos: Vector2) -> void:
 
 	_ring = UIRadialScript.new()
 	_ring.target_node = structure
-	_ring.subject_label = str(structure.kind).replace("_", " ").to_upper()
+	_ring.subject_label = _format_building_name(str(structure.kind)).to_upper()
 	_ring.add_action("open", "BUILD", "", true)
 	# Pause and cancel act on the head of the queue, which for a global queue is
 	# unambiguous - there is only one thing in progress per type.
