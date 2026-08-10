@@ -23,3 +23,21 @@ var infinite_player_resources: bool = false
 
 var reveal_all_fog: bool = false
 var instant_build: bool = false
+
+# Cross-instance reference set in _init(), not _enter_tree(). A gameplay service
+# constructed and add_child()'d while the SceneTree is still inside its OWN
+# _init() (the exact shape run_tests.gd's headless boot uses) never fires
+# _enter_tree() for children added at that point - a genuine Godot timing quirk,
+# confirmed by direct probing - and Engine.get_main_loop() also returns null for
+# that same window, so the usual get_node_or_null("/root/DebugSettings") lookup
+# cannot work either. _init() runs unconditionally the moment the node is
+# constructed, so it is the one hook guaranteed to fire in time.
+static var active: Node = null
+
+
+func _init() -> void:
+	active = self
+
+
+static func get_active() -> Node:
+	return active

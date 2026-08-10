@@ -62,11 +62,25 @@ func has_team(team: int) -> bool:
 	return _ledger.has(team)
 
 
+const DebugSettingsScript = preload("res://scripts/debug_settings.gd")
+
+# Infinite Resources debug cheat: a display/gate value only - the ledger itself
+# is never touched, so turning the cheat back off reverts to the real balance
+# rather than whatever was left after spending while it was on.
+func _infinite_resources() -> bool:
+	var ds = DebugSettingsScript.get_active()
+	return ds != null and ds.infinite_player_resources
+
+
 func credits(team: int) -> int:
+	if _infinite_resources():
+		return 999999
 	return _ledger.get(team, {}).get("credits", 0)
 
 
 func can_afford(team: int, cost: int) -> bool:
+	if _infinite_resources():
+		return true
 	if not _ledger.has(team):
 		return false
 	return _ledger[team].credits >= cost
@@ -75,6 +89,8 @@ func can_afford(team: int, cost: int) -> bool:
 # Deducts only if the whole cost is available.
 func spend(team: int, cost: int) -> bool:
 	if cost <= 0:
+		return true
+	if _infinite_resources():
 		return true
 	if not can_afford(team, cost):
 		return false

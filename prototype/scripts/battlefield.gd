@@ -4,6 +4,8 @@ const BlueprintManager = preload("res://scripts/blueprint_manager.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
+const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
+const ResourceFieldScript = preload("res://scripts/battle/economy/resource_field.gd")
 
 @onready var vehicle_spawn_point = $VehicleSpawnPoint
 @onready var camera = $Camera3D
@@ -14,7 +16,40 @@ var target_dummies: Array[Node] = []
 var target_destination: Vector3 = Vector3.ZERO
 var locomotion_type: String = "wheels" # still used for the rotor-spin cosmetic
 
+var current_map: Dictionary = {
+	"name": "test_range",
+	"map_half_extents": 100.0,
+	"surface_zones": [
+		{"type": "marsh", "center": Vector3(15, 0, -10), "half_extents": Vector2(5, 20)},
+		{"type": "rocky", "center": Vector3(27, 0, -10), "half_extents": Vector2(5, 20)},
+		{"type": "snow_mud", "center": Vector3(39, 0, -10), "half_extents": Vector2(5, 20)},
+		{"type": "sand", "center": Vector3(51, 0, -10), "half_extents": Vector2(5, 20)},
+		{"type": "gravel", "center": Vector3(63, 0, -10), "half_extents": Vector2(5, 20)},
+		{"type": "forest", "center": Vector3(75, 0, -10), "half_extents": Vector2(5, 20)},
+		{"type": "ice", "center": Vector3(87, 0, -10), "half_extents": Vector2(5, 20)}
+	],
+	"resource_nodes": [
+		{"type": "metal", "amount": 1000, "position": Vector3(-15, 0, -10)},
+		{"type": "crystal", "amount": 1000, "position": Vector3(-25, 0, -10)},
+		{"type": "lumber", "amount": 1000, "position": Vector3(-35, 0, -10)},
+		{"type": "oil", "amount": 1000, "position": Vector3(-45, 0, -10)}
+	],
+	"ground_color": Color(0.2, 0.26, 0.21)
+}
+
+var ground_nav_map: RID
+var water_nav_map: RID
+var amphibious_nav_map: RID
+var deep_water_nav_map: RID
+var _ground_nav_regions: Array = []
+var _amphibious_nav_regions: Array = []
+var _nav_tile_rects: Array = []
+var _water_nav_region: RID
+var _deep_water_nav_region: RID
+
 func _ready():
+	_setup_terrain()
+	_spawn_resources()
 	_spawn_vehicle()
 	_spawn_target_dummies()
 	
@@ -122,20 +157,102 @@ func _spawn_target_dummies():
 	target_dummies.clear()
 	
 	var points = [
-		Vector3(-10, 0.5, -10),
-		Vector3(10, 0.5, -15),
-		Vector3(0, 0.5, -20),
-		Vector3(-15, 0.5, -5),
-		Vector3(15, 0.5, -5)
+		Vector3(-5, 1.0, -15),
+		Vector3(5, 1.0, -15),
+		Vector3(15, 1.0, -15)
 	]
 	
-	for pos in points:
-		var dummy_scene = load("res://scenes/TargetDummy.tscn")
-		if dummy_scene:
-			var dummy = dummy_scene.instantiate()
-			add_child(dummy)
-			dummy.global_position = pos
-			target_dummies.append(dummy)
+	var bp_manager = BlueprintManager.new()
+	add_child(bp_manager)
+	
+	var bps = ["res://data/loadout/bulwark_mbt.json", "res://data/loadout/rattler_scout.json", "res://data/loadout/wasp_rocket_buggy.json"]
+	
+	for i in range(points.size()):
+		var pos = points[i]
+		var dummy_unit = CharacterBody3D.new()
+		dummy_unit.name = "EnemyTarget"
+		dummy_unit.set_script(load("res://scripts/battle_unit.gd"))
+		add_child(dummy_unit)
+		
+		var dummy_bp = bp_manager.load_blueprint(bps[i])
+		dummy_unit.setup(dummy_bp, 1, bp_manager, "technocrats")
+		dummy_unit.add_to_group("targets") # auto_weapon.gd's targeting scan requires this group
+
+		# Set height above ground
+		var spawn_pos = pos
+		spawn_pos.y = terrain_height_at(pos)
+		spawn_pos.y += dummy_unit.target_altitude if dummy_unit.is_flying else 1.0
+		dummy_unit.global_position = spawn_pos
+		
+		target_dummies.append(dummy_unit)
+		
+		dummy_unit.set_meta("pace_timer", 0.0)
+		dummy_unit.set_meta("pace_dir", 1.0)
+		dummy_unit.set_meta("start_x", pos.x)
+		
+	bp_manager.queue_free()
+
+func _spawn_resources():
+	for entry in current_map.get("resource_nodes", []):
+		var field := Node3D.new()
+		field.set_script(ResourceFieldScript)
+		add_child(field)
+		var pos: Vector3 = entry.get("position", Vector3.ZERO)
+		field.global_position = Vector3(pos.x, terrain_height_at(pos), pos.z)
+		field.setup(entry.get("type", "metal"), entry.get("amount", 1000), self)
+
+func get_ground_nav_map() -> RID:
+	return ground_nav_map
+
+func get_water_nav_map() -> RID:
+	return water_nav_map
+
+func get_amphibious_nav_map() -> RID:
+	return amphibious_nav_map
+
+func get_deep_water_nav_map() -> RID:
+	return deep_water_nav_map
+
+func terrain_height_at(pos: Vector3) -> float:
+	return TerrainBuilder.height_at(current_map, pos.x, pos.z)
+
+func get_surface_type_at(pos: Vector3) -> String:
+	return TerrainBuilder.get_surface_type_at(current_map, pos)
+
+func _setup_terrain():
+	var holes = []
+	var nav = TerrainBuilder.build_navmeshes(current_map, holes)
+	ground_nav_map = nav.ground_map
+	water_nav_map = nav.water_map
+	amphibious_nav_map = nav.amphibious_map
+	deep_water_nav_map = nav.deep_water_map
+	_ground_nav_regions = nav.ground_regions
+	_amphibious_nav_regions = nav.amphibious_regions
+	_nav_tile_rects = nav.tile_rects
+	_water_nav_region = nav.water_region
+	_deep_water_nav_region = nav.deep_water_region
+	
+	var ground = get_node_or_null("Ground")
+	if ground:
+		ground.position = Vector3.ZERO
+		var generated = TerrainBuilder.build_ground_visual_mesh(current_map)
+		var mesh_inst = ground.get_node_or_null("MeshInstance3D")
+		if mesh_inst:
+			mesh_inst.mesh = generated.mesh
+			mesh_inst.material_override = TerrainBuilder.build_ground_material_heightmap(current_map.get("ground_color", Color(0.2, 0.26, 0.21)))
+		var col = ground.get_node_or_null("CollisionShape3D")
+		if col:
+			col.shape = generated.shape
+			col.scale = generated.get("collision_scale", Vector3.ONE)
+	
+	TerrainBuilder.spawn_visuals(current_map, self)
+
+func _exit_tree() -> void:
+	for rid in _ground_nav_regions + _amphibious_nav_regions + [
+			_water_nav_region, _deep_water_nav_region,
+			ground_nav_map, water_nav_map, amphibious_nav_map, deep_water_nav_map]:
+		if rid.is_valid():
+			NavigationServer3D.free_rid(rid)
 
 func _unhandled_input(event):
 	# Click to move vehicle (Right click or Left click on ground)
@@ -182,6 +299,21 @@ func _physics_process(delta):
 	# own _physics_process (Godot calls it automatically, no manual
 	# invocation needed here) and already does everything the block that
 	# used to live here did by hand, plus the combat AI it never had.
+	
+	# Pace target dummies
+	for dummy in target_dummies:
+		if is_instance_valid(dummy):
+			var t = dummy.get_meta("pace_timer", 0.0)
+			t += delta
+			if t > 4.0:
+				var dir = dummy.get_meta("pace_dir", 1.0) * -1.0
+				dummy.set_meta("pace_dir", dir)
+				var start_x = dummy.get_meta("start_x", dummy.global_position.x)
+				dummy.order_move(Vector3(start_x + dir * 6.0, dummy.global_position.y, dummy.global_position.z))
+				dummy.set_meta("pace_timer", 0.0)
+			else:
+				dummy.set_meta("pace_timer", t)
+
 	if not is_instance_valid(vehicle):
 		return
 
@@ -229,34 +361,7 @@ func _physics_process(delta):
 	camera.global_position = camera.global_position.lerp(target_cam_pos, 5.0 * delta)
 	camera.look_at(vehicle.global_position + Vector3(0, 0.5, 0), Vector3.UP)
 
-## The arena floor's height, for battle_unit.gd's ground snap.
-##
-## Duck-typed exactly like skirmish.gd's terrain_height_at() - battle_unit.gd
-## checks `get_parent().has_method("terrain_height_at")` and, finding nothing
-## here, fell through to its gravity + is_on_floor() fallback instead. That
-## fallback rests the unit on whatever collider it has, and the only collider a
-## ground unit has is the one around its HULL - so the hull came to rest on the
-## floor with the wheels/legs/treads buried underneath it. That is the "the
-## locomotors fall through the ground in the test arena, leaving the vehicles
-## sliding around on their belly" report (Chris, 2026-08-03): Skirmish never
-## showed it because Skirmish DOES implement this method, so it used the
-## analytic snap and put the unit's origin - i.e. its ground contact point - on
-## the ground where it belongs.
-##
-## Constant because this arena is one flat slab, not a heightmap: the Ground
-## StaticBody3D is a 100x1x100 box centred at y=-0.5, so its top face is y=0.
-## Read from the node rather than hardcoded, so moving the slab in the scene
-## cannot silently desync the two.
-const ARENA_FLOOR_Y := 0.0
-
-func terrain_height_at(_pos: Vector3) -> float:
-	var ground := get_node_or_null("Ground") as Node3D
-	if ground == null:
-		return ARENA_FLOOR_Y
-	var shape := ground.get_node_or_null("CollisionShape3D") as CollisionShape3D
-	if shape == null or not (shape.shape is BoxShape3D):
-		return ARENA_FLOOR_Y
-	return ground.global_position.y + shape.position.y + (shape.shape as BoxShape3D).size.y * 0.5
+# terrain_height_at is now handled by TerrainBuilder.
 
 func _on_return_pressed():
 	var router = get_node_or_null("/root/SceneRouter")

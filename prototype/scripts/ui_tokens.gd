@@ -245,3 +245,39 @@ static func apply_elevation(box: StyleBoxFlat, tier: String) -> void:
 	box.shadow_size = e["size"]
 	box.shadow_offset = e["offset"]
 	box.shadow_color = e["color"]
+
+
+# ---------------------------------------------------------------------------
+# L2 PHOSPHOR - the CRT substrate. Amber = Design Lab, green = battle. These
+# are a SUBSTRATE, not a state - never reused for warning/go/etc even where a
+# colour happens to be close. See shaders/phosphor_display.gdshader's header
+# and PhosphorPanel for how the pair is actually applied.
+# ---------------------------------------------------------------------------
+
+const PHOSPHOR_AMBER = Color(1.0, 0.690, 0.0, 1.0)
+const PHOSPHOR_AMBER_DIM = Color(0.220, 0.145, 0.020, 1.0)
+const PHOSPHOR_GREEN = Color(0.365, 1.0, 0.494, 1.0)
+const PHOSPHOR_GREEN_DIM = Color(0.055, 0.196, 0.078, 1.0)
+const PHOSPHOR_GLASS = Color(0.031, 0.043, 0.035, 1.0)
+
+# Screen-pixel scanline pitch, not UV - see the shader header, note 1. Kept
+# here rather than hardcoded in the shader's default so every phosphor surface
+# in the game shares one tuned value.
+const SCANLINE_PITCH = 3.0
+const PERSISTENCE_DECAY = 0.4
+
+# How far a phosphor readout insets its content from the bezel edge - the L2
+# equivalent of a plate's own margin, called out separately because a glass
+# surface with no inset reads as content bleeding off a broken screen.
+const BEZEL_INSET = 6
+
+
+# Returns the lit/unlit/glass triple for a tube colour, so a caller cannot
+# assemble the wrong pairing (e.g. green lit against an amber unlit) the way
+# hand-picking three separate constants would allow.
+static func phosphor_pair(tube: String) -> Dictionary:
+	match tube:
+		"green":
+			return {"lit": PHOSPHOR_GREEN, "unlit": PHOSPHOR_GREEN_DIM, "glass": PHOSPHOR_GLASS}
+		_:
+			return {"lit": PHOSPHOR_AMBER, "unlit": PHOSPHOR_AMBER_DIM, "glass": PHOSPHOR_GLASS}

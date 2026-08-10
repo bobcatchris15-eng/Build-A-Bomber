@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Runner: the sprue bar the part is still attached to. Deliberately plain
+       and slightly off-centre, because a runner is stock material, not design. -->
+  <rect x="6" y="8" width="52" height="7" rx="1.5" fill="#4A473E"/>
+  <!-- Gate: the thin neck you cut. Narrow enough to read as "about to break". -->
+  <rect x="29" y="15" width="6" height="7" fill="#676358"/>
+  <!-- Chevron: the part itself. Hazard amber so the mark has one saturated
+       accent and the rest stays equipment-grey.
+       ONE CHEVRON, NOT TWO. The first version stacked a smaller grey chevron
+       beneath this for a rank-insignia cadence. Rasterised at 32px it vanished
+       into the dark ground and left a smear under the amber - the mark got
+       busier and less legible at exactly the size that matters most. The sprue
+       plus one part IS the concept; the second chevron was decoration. -->
+  <path d="M32 24 L58 58 L45 58 L32 41 L19 58 L6 58 Z" fill="#E0AA2E"/>
+</svg>

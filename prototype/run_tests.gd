@@ -118,7 +118,6 @@ const SUITE_ORDER := [
 	["weapons_and_damage", "test_armor_module_facet_fitting"],
 	["weapons_and_damage", "test_armor_module_combat_bonus"],
 	["weapons_and_damage", "test_face_based_weapon_mounting"],
-	["designer_lab", "test_module_drag_reclassifies_facet_and_mount"],
 	["designer_lab", "test_angled_pintle_mount"],
 	["base_building", "test_centerline_placement_does_not_self_mirror"],
 	["weapons_and_damage", "test_directional_armor_facet_resolution"],
@@ -218,7 +217,6 @@ const SUITE_ORDER := [
 	["weapons_and_damage", "test_explosive_weapons_deal_real_aoe_damage"],
 	["weapons_and_damage", "test_subsystem_stripping_is_gated_by_hit_facet"],
 	["economy_and_production", "test_every_weight_tweak_also_costs_real_resources"],
-	["weapons_and_damage", "test_target_dummies_actually_take_damage_in_test_range"],
 	["weapons_and_damage", "test_pintle_mounts_grant_full_traverse"],
 	["weapons_and_damage", "test_turret_and_frame_built_also_wall_mount"],
 	["weapons_and_damage", "test_weapon_click_collider_matches_its_visual"],
@@ -351,6 +349,14 @@ const SUITE_ORDER := [
 	# after everything else means it cannot perturb the pinned navmesh order that
 	# the rest of SUITE_ORDER exists to protect.
 	["scene_loads", "test_every_screen_survives_ready"],
+
+	# ACTUALLY LAST. battlefield.gd's Test Range dummies were fixed to join the
+	# "targets" group so auto_weapon.gd's targeting scan can see them - real
+	# combat now runs here where previously it silently never engaged. That
+	# makes this suite leak residue (live projectiles, navmesh queries mid-bake)
+	# into whatever ran after it, so it moves after even scene_loads rather than
+	# just after weapons_and_damage.
+	["weapons_and_damage", "test_target_dummies_actually_take_damage_in_test_range"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

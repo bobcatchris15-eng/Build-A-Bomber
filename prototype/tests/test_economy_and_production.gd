@@ -315,7 +315,7 @@ func test_energy_weapons_cost_and_drain() -> bool:
 	return true
 
 func test_energy_damage_class_reclassification() -> bool:
-	print("Running Test Suite: heavy_laser/plasma_lobber/pd_laser Reclassified To Energy Damage (not capacitor-limited)...")
+	print("Running Test Suite: heavy_laser/plasma_lobber/pd_laser Reclassified To Energy Damage...")
 	# damage_resolver.gd previously had no "energy" row in ARMOR_TABLE at
 	# all, so anything dealing damage_class=="energy" silently fell back to
 	# resolving as EXPLOSIVE damage (row.get(damage_type, row["explosive"])) -
@@ -353,16 +353,19 @@ func test_energy_damage_class_reclassification() -> bool:
 			print("  [FAIL] ", type_id, " should be reclassified to damage_class 'energy', got '", weapon.damage_class, "'")
 			weapon.queue_free()
 			return false
-		# Must NOT pick up the capacitor-cost/drain mechanic - that's
-		# scoped to tesla_coil/arc_projector/ion_cannon only.
-		if weapon.energy_cost_per_shot != 0.0:
-			print("  [FAIL] ", type_id, " should NOT cost the shooter's own Energy pool to fire (that's only tesla_coil/arc_projector/ion_cannon), got cost=", weapon.energy_cost_per_shot)
+		# Every energy weapon costs the shooter's own capacitor to fire (Chris:
+		# "all the energy weapons should"), not only tesla_coil/arc_projector/
+		# ion_cannon - damage_class and capacitor cost are two separate lists
+		# (see ENERGY_DAMAGE_CLASS_TYPES's comment in auto_weapon.gd) that
+		# happen to agree for every weapon in the game today.
+		if weapon.energy_cost_per_shot <= 0.0:
+			print("  [FAIL] ", type_id, " should cost the shooter's own Energy pool to fire, got cost=", weapon.energy_cost_per_shot)
 			weapon.queue_free()
 			return false
 		weapon.queue_free()
 
 	await tree.process_frame
-	print("  [PASS] damage_resolver.gd has a real energy armor row; heavy_laser/plasma_lobber/pd_laser deal energy damage but stay capacitor-free.")
+	print("  [PASS] damage_resolver.gd has a real energy armor row; heavy_laser/plasma_lobber/pd_laser deal energy damage and cost the shooter's capacitor.")
 	return true
 
 func test_weapon_range_tiers_are_anchored_to_vision() -> bool:

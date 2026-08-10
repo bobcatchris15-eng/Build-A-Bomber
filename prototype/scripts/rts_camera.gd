@@ -1,8 +1,11 @@
 extends Camera3D
-# Classic RTS camera: WASD/arrow pan, mouse-wheel zoom, middle-mouse drag pan.
+# Classic RTS camera: WASD/arrow pan (yaw-relative), Q/E rotate, mouse-wheel
+# zoom, middle-mouse drag pan. Reads InputService's cam_* actions rather than
+# raw keycodes - see scripts/core/input_service.gd's header for why.
 
 @export var pan_speed: float = 30.0
 @export var zoom_speed: float = 8.0
+@export var rotate_speed: float = 90.0
 @export var min_height: float = 10.0
 # Skirmish refinement pass: maps grew to ~3x their original size (see
 # map_catalog.gd - two scale-up passes, 1.5x then another 2x after the
@@ -148,11 +151,7 @@ static func compute_edge_scroll_direction(mouse_pos: Vector2, viewport_size: Vec
 	return dir
 
 func _process(delta):
-	var move = Vector2.ZERO
-	if Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP): move.y -= 1
-	if Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN): move.y += 1
-	if Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT): move.x -= 1
-	if Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT): move.x += 1
+	var move := Input.get_vector("cam_pan_left", "cam_pan_right", "cam_pan_up", "cam_pan_down")
 
 	# Edge-scroll only while the window actually has input focus - otherwise
 	# a mouse merely sitting near the edge of an unfocused window (e.g. this
@@ -162,10 +161,15 @@ func _process(delta):
 		var edge_dir = compute_edge_scroll_direction(vp.get_mouse_position(), vp.get_visible_rect().size, edge_scroll_margin)
 		move += edge_dir
 
+	if Input.is_action_pressed("cam_rotate_left"): rotation_degrees.y += rotate_speed * delta
+	if Input.is_action_pressed("cam_rotate_right"): rotation_degrees.y -= rotate_speed * delta
+	if Input.is_action_just_pressed("cam_reset_rotation"): rotation_degrees.y = 0.0
+
 	if move != Vector2.ZERO:
 		move = move.normalized() * pan_speed * world_scale * delta * (height / 26.0)
-		global_position.x += move.x
-		global_position.z += move.y
+		var world_move := pan_to_world(move, rotation_degrees.y)
+		global_position.x += world_move.x
+		global_position.z += world_move.y
 
 	global_position.y = lerp(global_position.y, height, 10.0 * delta)
 	# Track the camera's REAL (lerped) altitude, not the target `height` -
@@ -217,12 +221,15 @@ func _unhandled_input(event):
 	# scrolled the list and zoomed the map at the same time: the fix belonged here,
 	# not in the HUD, and two attempts to absorb the event on the HUD side could
 	# never have worked.
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			zoom_to_cursor(height - zoom_speed, event.position)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			zoom_to_cursor(height + zoom_speed, event.position)
+	if event.is_action_pressed("cam_zoom_in"):
+		zoom_to_cursor(height - zoom_speed, get_viewport().get_mouse_position())
+	elif event.is_action_pressed("cam_zoom_out"):
+		zoom_to_cursor(height + zoom_speed, get_viewport().get_mouse_position())
 	if event is InputEventMouseMotion and Input.is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE):
 		var factor = (height / 500.0) * world_scale
-		global_position.x -= event.relative.x * factor
-		global_position.z -= event.relative.y * factor
+		var drag := pan_to_world(Vector2(-event.relative.x, -event.relative.y) * factor, rotation_degrees.y)
+		global_position.x += drag.x
+		global_position.z += drag.y
+
+static func pan_to_world(pan_dir: Vector2, yaw_deg: float) -> Vector2:
+	return pan_dir.rotated(deg_to_rad(yaw_deg))

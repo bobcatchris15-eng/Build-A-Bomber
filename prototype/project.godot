@@ -30,6 +30,9 @@ OperationsManager="*res://scripts/operations_manager.gd"
 DebugSettings="*res://scripts/debug_settings.gd"
 CursorManager="*res://scripts/cursor_manager.gd"
 AudioManager="*res://scripts/audio_manager.gd"
+SettingsService="*res://scripts/core/settings_service.gd"
+InputService="*res://scripts/core/input_service.gd"
+SystemLayer="*res://scripts/ui/system_layer.gd"
 
 [debug]
 

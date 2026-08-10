@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 140" width="240" height="140">
+  <!-- Plate body. Two stacked rects rather than one with a stroke: the lighter
+       upper edge and darker lower edge are the chamfer catching a light from
+       above, which is the same top-left lighting convention every 9-slice plate
+       in assets/textures/ui is baked with. A shadow that disagrees with those
+       reads as texture noise. -->
+  <rect x="1" y="1" width="238" height="138" rx="3" fill="#252420"/>
+  <path d="M5 1 H235 L239 5 V135
+           L235 139 H5 L1 135
+           V5 Z"
+        fill="none" stroke="#676358" stroke-width="1.2" opacity="0.75"/>
+  <path d="M5 2.4 H235" stroke="#EFE9E5"
+        stroke-width="1" opacity="0.18"/>
+  <circle cx="14" cy="10" r="3.2" fill="#13130F"/>
+  <circle cx="14" cy="10" r="3.2" fill="none" stroke="#676358" stroke-width="0.8"/>
+  <circle cx="14" cy="130" r="3.2" fill="#13130F"/>
+  <circle cx="14" cy="130" r="3.2" fill="none" stroke="#676358" stroke-width="0.8"/>
+  <circle cx="226" cy="10" r="3.2" fill="#13130F"/>
+  <circle cx="226" cy="10" r="3.2" fill="none" stroke="#676358" stroke-width="0.8"/>
+  <circle cx="226" cy="130" r="3.2" fill="#13130F"/>
+  <circle cx="226" cy="130" r="3.2" fill="none" stroke="#676358" stroke-width="0.8"/>
+  <path d="M24 122 H216" stroke="#676358" stroke-width="1" opacity="0.6"/>
+</svg>

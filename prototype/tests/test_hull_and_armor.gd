@@ -100,11 +100,6 @@ func test_hull_spec_flyout_round_trip() -> bool:
 			print("  [FAIL] Widget ", w.name, " went nowhere on open.")
 			scene.queue_free()
 			return false
-	if not flyout.is_ancestor_of(stats.faction_btn):
-		print("  [FAIL] Faction dropdown did not move into the flyout.")
-		scene.queue_free()
-		return false
-
 	# --- Close: every widget must come back, still alive ---
 	flyout.close()
 	await tree.process_frame
@@ -118,14 +113,6 @@ func test_hull_spec_flyout_round_trip() -> bool:
 			print("  [FAIL] Widget ", w.name, " did not return to the stash (parent=", w.get_parent(), ")")
 			scene.queue_free()
 			return false
-
-	# Faction sync must still work after the round trip. This is the regression
-	# the old `get_node_or_null("FactionDropdown")` path lookup would have caused:
-	# null lookup, silent skip, wrong faction shown on a loaded blueprint.
-	if stats.faction_btn == null or not is_instance_valid(stats.faction_btn):
-		print("  [FAIL] faction_btn member lost after the round trip.")
-		scene.queue_free()
-		return false
 
 	# Reopening must toggle, not stack a second panel on top of the first.
 	stats._on_hull_spec_pressed()

@@ -2253,7 +2253,7 @@ func test_target_dummies_actually_take_damage_in_test_range() -> bool:
 		return false
 	var initial_total_health = 0.0
 	for d in dummies:
-		initial_total_health += d.health
+		initial_total_health += d.hp
 
 	# Same target must stay locked across consecutive ticks (stickiness),
 	# and total dummy health must actually drop within a generous window.
@@ -2288,7 +2288,7 @@ func test_target_dummies_actually_take_damage_in_test_range() -> bool:
 	var end_total_health = 0.0
 	for d in dummies:
 		if is_instance_valid(d):
-			end_total_health += d.health
+			end_total_health += d.hp
 
 	battlefield_scene.queue_free()
 	# queue_free() is deferred - without waiting a frame, the scene's target

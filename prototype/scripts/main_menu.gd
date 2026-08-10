@@ -17,7 +17,6 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const FactionCatalog = preload("res://scripts/faction_catalog.gd")
-const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
@@ -143,11 +142,6 @@ var _spec_placard: Control = null
 var _showcase_items: Array = []
 var _current_showcase_index: int = 0
 var _showcase_timer: float = 0.0
-
-# 2D Placard UI Nodes for live update
-var _placard_title_label: Label = null
-var _placard_subtitle_label: Label = null
-var _placard_body_vbox: VBoxContainer = null
 
 func _ready() -> void:
 	_gather_showcase_items()
@@ -667,91 +661,32 @@ func _build_status_column(parent: Control) -> void:
 	)
 	heading_hbox.add_child(cycle_btn)
 
-	var panel = PanelContainer.new()
-	panel.theme_type_variation = "CardPanel"
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	col.add_child(panel)
-
-	var margin = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", Tokens.SPACE_MD)
-	margin.add_theme_constant_override("margin_right", Tokens.SPACE_MD)
-	margin.add_theme_constant_override("margin_top", Tokens.SPACE_MD)
-	margin.add_theme_constant_override("margin_bottom", Tokens.SPACE_MD)
-	panel.add_child(margin)
-
-	_placard_body_vbox = VBoxContainer.new()
-	_placard_body_vbox.add_theme_constant_override("separation", Tokens.SPACE_SM)
-	margin.add_child(_placard_body_vbox)
+	# SpecPlacard.Level.FRONT_DESK: the same widget the Lab rail, the battle
+	# selection panel and the after-action report render, at the detail level
+	# this screen wants (UX_REDESIGN_PLAN.md's "unifying component"). Replaces
+	# a hand-built stat table that was this screen's own private vocabulary.
+	_spec_placard = SpecPlacardScript.new()
+	_spec_placard.level = SpecPlacardScript.Level.FRONT_DESK
+	_spec_placard.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(_spec_placard)
 
 func _update_placard_ui(item: Dictionary) -> void:
-	if _placard_body_vbox == null:
+	if _spec_placard == null:
 		return
 
-	for child in _placard_body_vbox.get_children():
-		child.queue_free()
-
 	var item_type: String = item.get("type", "hull")
-
-	var sub_header = Label.new()
-	sub_header.text = "ACTIVE SHOWCASE OBJECT // 30S CYCLE"
-	sub_header.theme_type_variation = "HintLabel"
-	sub_header.add_theme_color_override("font_color", Tokens.SIGNAL_HAZARD)
-	_placard_body_vbox.add_child(sub_header)
-
-	var name_label = Label.new()
-	name_label.text = str(item.get("name", "UNKNOWN")).to_upper()
-	name_label.theme_type_variation = "TitleLabel"
-	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_placard_body_vbox.add_child(name_label)
-
-	_placard_body_vbox.add_child(HSeparator.new())
+	var design_name := str(item.get("name", "UNKNOWN")).to_upper()
 
 	if item_type == "blueprint":
 		var bp: Dictionary = item.get("blueprint", {})
-		var summary: Dictionary = item.get("summary", {})
-		var mgr = BlueprintManagerScript.new()
-
-		UIShell.stat_row(_placard_body_vbox, "Type", "Certified Player Blueprint")
-		UIShell.stat_row(_placard_body_vbox, "Hull Class", _prettify(str(summary.get("hull_type", ""))))
-		UIShell.stat_row(_placard_body_vbox, "Affiliation", _prettify(str(summary.get("faction", ""))))
-
-		var hs: Dictionary = bp.get("hull_size", {})
-		if hs.has("x"):
-			UIShell.stat_row(_placard_body_vbox, "Envelope (LxWxH)", "%.1f x %.1f x %.1f m" % [
-				float(hs.get("z", 0.0)), float(hs.get("x", 0.0)), float(hs.get("y", 0.0))])
-
-		var module_count: int = (bp.get("modules", []) as Array).size()
-		UIShell.stat_row(_placard_body_vbox, "Fitted Modules", str(module_count))
-
-		var material := str(bp.get("armor_material", "hardened_steel"))
-		var thickness := float(bp.get("armor_thickness", 1.0))
-		UIShell.stat_row(_placard_body_vbox, "Armour Rating", "%s, %.1fx" % [_prettify(material), thickness])
-
-		var k: Vector2 = DamageResolverScript.get_material_threshold(material, "kinetic", thickness)
-		var t: Vector2 = DamageResolverScript.get_material_threshold(material, "thermal", thickness)
-		var e: Vector2 = DamageResolverScript.get_material_threshold(material, "explosive", thickness)
-		var table = Label.new()
-		table.text = "THRESHOLDS  [ K: %.1f | T: %.1f | E: %.1f ]" % [k.x, t.x, e.x]
-		table.theme_type_variation = "StatLabel"
-		table.add_theme_color_override("font_color", Tokens.SIGNAL_GO)
-		_placard_body_vbox.add_child(table)
+		var stats: Dictionary = {}
+		if _showcase_vehicle != null and is_instance_valid(_showcase_vehicle):
+			stats = DesignStatsScript.analyze(_showcase_vehicle)
+		_spec_placard.from_blueprint(design_name, "CERTIFIED PLAYER BLUEPRINT", bp, stats)
 	else:
 		var hull_id: String = item.get("hull_type", "medium_hull")
-		var hull_data: Dictionary = ModuleCatalogScript.get_module_data(hull_id)
-		var dim: Vector3 = hull_data.get("dimensions", Vector3(3.8, 1.1, 5.4))
-
-		UIShell.stat_row(_placard_body_vbox, "Type", "Standard Bureau Chassis")
-		UIShell.stat_row(_placard_body_vbox, "Hull Class", _prettify(hull_id))
-		UIShell.stat_row(_placard_body_vbox, "Category", _prettify(str(hull_data.get("category", "hull"))))
-		UIShell.stat_row(_placard_body_vbox, "Envelope (LxWxH)", "%.1f x %.1f x %.1f m" % [dim.z, dim.x, dim.y])
-		UIShell.stat_row(_placard_body_vbox, "Base Structural HP", str(int(hull_data.get("hp", 400))))
-		UIShell.stat_row(_placard_body_vbox, "Base Chassis Mass", str(int(hull_data.get("weight", 250))) + " kg")
-
-		var stamp_label = Label.new()
-		stamp_label.text = "STATUS: BARE CHASSIS // READY FOR ASSEMBLY"
-		stamp_label.theme_type_variation = "HintLabel"
-		stamp_label.add_theme_color_override("font_color", Tokens.SIGNAL_INFO)
-		_placard_body_vbox.add_child(stamp_label)
+		_spec_placard.from_blueprint(design_name, "STANDARD BUREAU CHASSIS // READY FOR ASSEMBLY",
+			{"hull_type": hull_id})
 
 func _prettify(id: String) -> String:
 	if id == "":

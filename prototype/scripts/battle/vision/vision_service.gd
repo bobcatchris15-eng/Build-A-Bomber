@@ -212,10 +212,17 @@ func effective_vision(o) -> float:
 # FAILS OPEN before the first scan. A closed default would make every weapon in
 # the game refuse to fire until the first fog tick landed - a far louder and more
 # confusing failure than one tick of over-sharing on a map nobody has moved on.
+const DebugSettingsScript = preload("res://scripts/debug_settings.gd")
+
+func _reveal_all_cheat() -> bool:
+	var ds = DebugSettingsScript.get_active()
+	return ds != null and ds.reveal_all_fog
+
+
 func is_visible_to_team(c, viewing_team: int) -> bool:
 	if c == null or not is_instance_valid(c):
 		return false
-	if reveal_all:
+	if reveal_all or _reveal_all_cheat():
 		return true
 	var c_team: int = c.get_meta("team") if c.has_meta("team") else -1
 	if c_team == viewing_team:
@@ -451,6 +458,8 @@ func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 # Whether a map cell has ever been seen. Exposed for the minimap, which draws
 # terrain only where the player has been.
 func cell_explored(x: float, z: float) -> bool:
+	if _reveal_all_cheat():
+		return true
 	if _image == null:
 		return false
 	var cell := _world_to_cell(x, z)

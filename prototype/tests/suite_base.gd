@@ -494,14 +494,25 @@ func _find_hq(battle, team: int):
 	return null
 
 
+# Prefers a harvester design with no tech-tree building prerequisites, since a
+# match always starts with only the HQ built. The old version returned
+# whatever harvester came first in the roster, which on maps whose default
+# roster leads with a gated design left production silently unable to start -
+# a map-data problem masquerading as a production bug.
 func _find_harvester_blueprint(battle) -> Dictionary:
+	var DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
+	var fallback: Dictionary = {}
 	for design in battle.roster:
 		if battle.is_defence_design(design):
 			continue
 		for module in design.get("modules", []):
 			if str(module.get("type_id", "")) == "resource_harvester":
-				return design
-	return {}
+				if fallback.is_empty():
+					fallback = design
+				if DesignCostingScript.blueprint_required_buildings(design).is_empty():
+					return design
+				break
+	return fallback
 
 
 # RTS_CORE_ROADMAP.md B9: an 8-bit-per-channel Image (FORMAT_RGB8, what

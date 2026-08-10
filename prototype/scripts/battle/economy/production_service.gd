@@ -101,9 +101,18 @@ func enqueue_structure(team: int, queue_name: String, kind: String,
 # losing a contributor later never retroactively re-times an item already in the
 # line - a job that was quoted 20 seconds takes 20 seconds. Only the low-power
 # rate is live, because that one is a penalty the player can see and fix.
+const DebugSettingsScript = preload("res://scripts/debug_settings.gd")
+
+func _instant_build_cheat() -> bool:
+	var ds = DebugSettingsScript.get_active()
+	return ds != null and ds.instant_build
+
+
 func _make_job(label: String, cost: int, base_time: float, contributors: int) -> Dictionary:
 	var index: int = clampi(contributors - 1, 0, SPEED_PCT.size() - 1)
 	var build_time: float = base_time * float(SPEED_PCT[index]) / 100.0
+	if _instant_build_cheat():
+		build_time = 0.001
 	return {
 		"label": label,
 		"time_left": build_time,

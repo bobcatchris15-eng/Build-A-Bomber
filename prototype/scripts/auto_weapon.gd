@@ -166,7 +166,7 @@ var targets_allies: bool = false
 # vehicle root, duck-typed) and, for tesla_coil/ion_cannon, drain the
 # TARGET's energy pool alongside HP damage. arc_projector is the dedicated
 # pure-drain weapon.
-const ENERGY_WEAPON_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "microwave_emitter", "particle_lance", "heavy_laser", "pd_laser", "laser_dazzler", "gauss_railgun", "coil_gun"]
+const ENERGY_WEAPON_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "microwave_emitter", "particle_lance", "heavy_laser", "pd_laser", "laser_dazzler", "gauss_railgun", "coil_gun", "plasma_lobber"]
 var energy_cost_per_shot: float = 0.0
 var energy_drain_per_shot: float = 0.0
 
@@ -174,13 +174,14 @@ var energy_drain_per_shot: float = 0.0
 # deferred, then revisited once damage_resolver.gd actually had a real
 # "energy" armor-table row to resolve against): heavy_laser/plasma_lobber/
 # pd_laser are thematically directed-energy weapons, reclassified to
-# damage_class "energy" for real armor-matchup purposes. Deliberately kept
-# OUT of ENERGY_WEAPON_TYPES above - they don't cost the shooter's own
-# Energy pool to fire or drain the target's, only tesla_coil/arc_projector/
-# ion_cannon (this pass's new weapons) have that mechanic. Mixing the two
-# lists would have silently turned three week-old weapons into
-# capacitor-limited ones, which is a much bigger change than "which armor
-# threshold they resolve against."
+# damage_class "energy" for real armor-matchup purposes. This list and
+# ENERGY_WEAPON_TYPES above stay separate because they answer different
+# questions - which armor threshold a hit resolves against, versus whether
+# firing costs the shooter's own capacitor - and every energy weapon happens
+# to answer both the same way (Chris: "all the energy weapons should"), not
+# because the two concepts are the same thing. A weapon that dealt energy
+# damage without a capacitor cost, or vice versa, would still belong in only
+# one of these two lists.
 const ENERGY_DAMAGE_CLASS_TYPES = ["tesla_coil", "arc_projector", "ion_cannon", "heavy_laser", "plasma_lobber", "pd_laser", "microwave_emitter", "particle_lance", "laser_dazzler", "jammer_mast"]
 
 # --- Ammunition (ModuleCatalog.AMMO_TYPES) ---
