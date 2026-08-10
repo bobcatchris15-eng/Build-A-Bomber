@@ -2333,6 +2333,23 @@ func _issue_at(screen_pos: Vector2, aggressive: bool, queued: bool) -> void:
 			if not combat.is_empty():
 				orders.move(combat, node_hit.collider.global_position, queued)
 			return
+		# RAYCAST MISS FALLBACK (2026-08-10). Ambient resource nodes (the
+		# scattered single-tree / single-ore decorative scatter) have NO
+		# per-tree physics body - the broadphase cost of 1800+ StaticBody3D
+		# entries in the scatter was crashing the per-frame budget. The
+		# raycast against layer 16 (RESOURCE_NODES) only hits the 4
+		# harvestable fields' 36 colliders now. To keep "right-click on a
+		# tree" working for ambient scatter, find the nearest ambient
+		# resource to the GROUND click point (the second raycast below).
+		# This is the same "nearest to the click" semantics the player
+		# got before, just resolved against the resource_nodes group
+		# rather than a physics shape.
+		var ground_hit := _raycast(screen_pos, LayersScript.GROUND_PICK_MASK, false)
+		if not ground_hit.is_empty():
+			var ambient_target: Node3D = _nearest_ambient_to(ground_hit.position)
+			if ambient_target != null:
+				orders.harvest(selection.selected, ambient_target, queued)
+				return
 
 	var hit := _raycast(screen_pos, LayersScript.GROUND_PICK_MASK, false)
 	if hit.is_empty():
@@ -2341,6 +2358,32 @@ func _issue_at(screen_pos: Vector2, aggressive: bool, queued: bool) -> void:
 		orders.attack_move(selection.selected, hit.position, queued)
 	else:
 		orders.move(selection.selected, hit.position, queued)
+
+
+# Nearest ambient resource node to `pos` (XZ distance). Bounded search by the
+# AMBIENT_NODE_PICK_RADIUS so a right-click on empty ground doesn't auto-find
+# a tree 200m away - the player clicked on THIS patch, treat the click as
+# local. Returns null if nothing within radius. The harvester's auto-find
+# (battle_unit.gd's _auto_find_harvest_work) does the same kind of search
+# but on every tick, and that one DOES search the whole map because the
+# harvester is idle and looking for any work - this is a click-driven pick
+# and the locality is the player-facing contract.
+const AMBIENT_NODE_PICK_RADIUS: float = 8.0
+func _nearest_ambient_to(pos: Vector3) -> Node3D:
+	var best: Node3D = null
+	var best_d_sq: float = AMBIENT_NODE_PICK_RADIUS * AMBIENT_NODE_PICK_RADIUS
+	for n in get_tree().get_nodes_in_group("resource_nodes"):
+		if not is_instance_valid(n):
+			continue
+		if not ("is_ambient" in n) or not n.is_ambient:
+			continue
+		if n.amount <= 0:
+			continue
+		var d_sq: float = pos.distance_squared_to(n.global_position)
+		if d_sq < best_d_sq:
+			best = n
+			best_d_sq = d_sq
+	return best
 
 
 # Puts `centre` under the middle of the screen without touching zoom or pitch.

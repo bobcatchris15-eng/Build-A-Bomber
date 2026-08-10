@@ -119,6 +119,11 @@ const SUITE_ORDER := [
 	["terrain_and_maps", "test_spawn_bases_drops_only_hq_not_refinery_or_manufactories"],
 	["terrain_and_maps", "test_ai_auto_places_hq_in_assigned_base_zone"],
 	["terrain_and_maps", "test_place_hq_for_human_refuses_outside_zone_and_double_place"],
+	# 2026-08-10: ambient nodes opt out of shadow casting. Up to 1000
+	# ambient trees on a 4096 shadow atlas was the suspect behind
+	# skirmish dropping to 2-4 fps; locks the off path so a future
+	# "tidy setup()" doesn't re-enable shadows on 300+ decorative trees.
+	["terrain_and_maps", "test_ambient_nodes_opt_out_of_shadow_casting"],
 	["weapons_and_damage", "test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion"],
 	["locomotion", "test_every_locomotion_type_is_fully_declared"],
 	["locomotion", "test_expansion_locomotion_types_build_and_place"],

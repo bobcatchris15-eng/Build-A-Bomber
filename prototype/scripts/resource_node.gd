@@ -183,7 +183,26 @@ func setup(res_type: String, res_amount: int):
 	amount = res_amount
 	start_amount = res_amount
 	add_to_group("resource_nodes")
-	collision_layer = 16
+	# AMBIENT NODES HAVE NO PHYSICS BODY. A 1000-tree + 800-ore scatter
+	# makes 1800 StaticBody3D entries in Godot's broadphase, which is
+	# catastrophic: per-frame AABB sweeps against every moving unit,
+	# per-click raycasts, and a per-tree bookkeeping overhead that
+	# scales linearly with the scatter count. The body class itself
+	# stays (so the existing StaticBody3D-shaped callers still see
+	# valid RIDs on the harvestable field nodes), but the per-tree
+	# CollisionShape3D is gated to NON-AMBIENT ONLY.
+	#
+	# The right-click pick on a single ambient tree is the cost of this:
+	# match_director.gd's _raycast against RESOURCE_NODES (layer 16) no
+	# longer hits an individual ambient tree. The harvester's auto-find
+	# path (battle_unit.gd's _auto_find_harvest_work, group iteration)
+	# still works - and it is the right UX for a 1000-tree scatter
+	# anyway, since clicking through a forest to find the specific tree
+	# you want is exactly the friction the auto-find was designed to
+	# remove. The 4 harvestable field stands keep their full colliders
+	# (36 of them, visible gameplay element, picking is the
+	# affordance the player uses).
+	collision_layer = 0 if is_ambient else 16
 	collision_mask = 0
 
 	# Authored art first, procedural primitive second - same "degrade to the
@@ -200,6 +219,29 @@ func setup(res_type: String, res_amount: int):
 	# through to the regular harvestable pool via _try_spawn_ambient_
 	# authored's own internal branch - see that function's header.
 	mesh_inst = _try_spawn_ambient_authored(resource_type) if is_ambient else _try_spawn_authored(resource_type)
+	# AMBIENT SHADOWS ARE OFF. A 10-20-variant ambient scatter places 60-1000
+	# static trees across the whole map; with Godot's default 4096x4096 shadow
+	# atlas that's hundreds of shadow casters doing a full depth pass per
+	# frame for no visual gain (the top-down RTS camera looks straight down on
+	# the tree's own canopy, so a self-shadow reads as a tiny smudge on the
+	# canopy, not a ground shadow). Worse: those tree shadows fall on the
+	# SAME ground pixels where a unit's gameplay-relevant shadow is, and a
+	# dark tree shadow under a tank obscures the tank's shadow the player
+	# actually needs. The harvestable 4-field stands keep their shadows on
+	# because there are 36 trees total, not 300, and the stand is a visible
+	# gameplay element (not a decorative scatter) so the visual is part of
+	# the silhouette. Only the ambient branch opts out.
+	#
+	# WHY WALK DESCENDANTS. The pool's PackedScene root is a Node3D (a glTF
+	# import always wraps a node around the mesh tree), not a MeshInstance3D
+	# itself - setting cast_shadow on the root has no effect. The actual
+	# MeshInstance3D children are at the leaves of the imported tree, so
+	# disable shadows on every GeometryInstance3D under the root. The
+	# fallback MeshInstance3D branch on the procedural cylinder IS itself a
+	# GeometryInstance3D, so the recursive walk hits it without a separate
+	# code path.
+	if is_ambient:
+		_disable_shadows_recursive(mesh_inst)
 	if mesh_inst == null:
 		var fallback := MeshInstance3D.new()
 		var mat = StandardMaterial3D.new()
@@ -247,12 +289,18 @@ func setup(res_type: String, res_amount: int):
 		mesh_inst = fallback
 	add_child(mesh_inst)
 
-	var col = CollisionShape3D.new()
-	var shape = BoxShape3D.new()
-	shape.size = Vector3(2.4, 2.4, 2.4)
-	col.shape = shape
-	col.position = Vector3(0, 1.2, 0)
-	add_child(col)
+	# Per-tree collider: NON-AMBIENT ONLY. See the collision_layer gate
+	# at the top of setup() for the why. Ambient nodes are still in the
+	# "resource_nodes" group and still respond to harvest() - what they
+	# lose is the right-click pickability on a single tree, which the
+	# harvester's auto-find replaces.
+	if not is_ambient:
+		var col = CollisionShape3D.new()
+		var shape = BoxShape3D.new()
+		shape.size = Vector3(2.4, 2.4, 2.4)
+		col.shape = shape
+		col.position = Vector3(0, 1.2, 0)
+		add_child(col)
 
 	# Skip the per-tree label on ambient trees. A 4-field map scatters
 	# 9 labels per field, so 36 billboards total - cheap. The ambient
@@ -272,6 +320,21 @@ func setup(res_type: String, res_amount: int):
 		label.position = Vector3(0, 3.0, 0)
 		add_child(label)
 		_update_label()
+
+
+# Walk the imported scene tree under `root` and set cast_shadow=OFF on every
+# GeometryInstance3D. Used only by the ambient branch - see the block at the
+# top of setup() for why. Bounded by the tree depth of a single glTF import
+# (a few levels), so a plain recursive walk is fine; a BFS via an Array
+# stack would be no faster in practice.
+func _disable_shadows_recursive(root: Node) -> void:
+	if root == null:
+		return
+	if root is GeometryInstance3D:
+		root.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for c in root.get_children():
+		_disable_shadows_recursive(c)
+
 
 func _update_label():
 	if not is_instance_valid(label): return

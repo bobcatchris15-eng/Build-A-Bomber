@@ -2545,6 +2545,101 @@ func test_ambient_tree_does_not_regrow_after_harvest() -> bool:
 	return true
 
 
+# Ambient trees must NOT cast shadows. The 2026-08-10 ambient scatter
+# places up to 1000 trees across a map; with Godot's default 4096x4096
+# shadow atlas that's hundreds of shadow casters doing a full depth pass
+# per frame, for almost no visual gain on a top-down RTS camera (the
+# camera looks straight down on a tree's own canopy, so the only shadow
+# is a smudge on the canopy itself - and worse, it sits on the same
+# ground pixels as the gameplay-relevant unit shadow the player actually
+# needs to read). The harvestable 4-field stands keep their shadows
+# (36 trees total, visible gameplay element). This test pins the rule
+# so a future "tidy up setup()" doesn't silently re-enable shadows on
+# 300+ decorative trees and tank framerate again.
+func test_ambient_nodes_opt_out_of_shadow_casting() -> bool:
+	print("Running Test Suite: Ambient Nodes Don't Cast Shadows (perf guard for 300+ tree scatter)...")
+	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
+	# Ambient branch. Use a lumber scatter position (not an existing map
+	# node, since this is a unit-of-the-class test not a fixture) so the
+	# pool picks a real variant - the failure mode is "setup never set
+	# cast_shadow OFF at all", which a procedural fallback (no mesh_inst
+	# to check) would mask.
+	var ambient = ResourceNodeScript.new()
+	ambient.is_ambient = true
+	root.add_child(ambient)
+	ambient.global_position = Vector3(11.0, 0, 7.0)
+	ambient.setup("lumber", 40)
+	await tree.process_frame
+	if not is_instance_valid(ambient.mesh_inst):
+		print("  [FAIL] Ambient tree setup() didn't produce a mesh_inst - can't assert shadow state")
+		ambient.queue_free()
+		return false
+	# The pool's PackedScene root is a Node3D (a glTF import wraps the
+	# mesh tree in a node), not a MeshInstance3D - the actual meshes are
+	# MeshInstance3D children. resource_node.gd walks the descendants,
+	# so the assertion has to do the same.
+	var ambient_meshes: Array = _collect_geometry_instances(ambient.mesh_inst)
+	if ambient_meshes.is_empty():
+		print("  [FAIL] Ambient tree's mesh_inst tree has no GeometryInstance3D - can't assert shadow state")
+		ambient.queue_free()
+		return false
+	for m in ambient_meshes:
+		if m.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+			print("  [FAIL] Ambient tree's ", m.get_class(), " still casts shadows (", m.cast_shadow,
+				") - 300+ ambient trees on a 4096 shadow atlas will tank framerate. resource_node.gd:setup() must set cast_shadow=OFF on every GeometryInstance3D under mesh_inst for is_ambient nodes.")
+			ambient.queue_free()
+			return false
+	ambient.queue_free()
+
+	# Non-ambient (field) branch: shadows STAY ON. There are only ~36 of
+	# these on a map (4 fields x 9 trees) so the shadow cost is bounded,
+	# and a forest stand is a visible gameplay element whose shadow
+	# contributes to the visual identity (occlusion cue, depth read at
+	# RTS camera distance). The asymmetry is the whole point of the
+	# is_ambient gate; this assertion pins it.
+	var field = ResourceNodeScript.new()
+	field.is_ambient = false
+	root.add_child(field)
+	field.global_position = Vector3(-13.0, 0, -9.0)
+	field.setup("lumber", 40)
+	await tree.process_frame
+	if not is_instance_valid(field.mesh_inst):
+		print("  [FAIL] Field tree setup() didn't produce a mesh_inst - can't assert shadow state")
+		field.queue_free()
+		return false
+	var field_meshes: Array = _collect_geometry_instances(field.mesh_inst)
+	if field_meshes.is_empty():
+		print("  [FAIL] Field tree's mesh_inst tree has no GeometryInstance3D - can't assert shadow state")
+		field.queue_free()
+		return false
+	var any_field_off: bool = false
+	for m in field_meshes:
+		if m.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+			any_field_off = true
+			break
+	if any_field_off:
+		print("  [FAIL] Field tree (non-ambient) has shadows OFF on at least one mesh - the 4 harvestable fields should keep their shadows. The is_ambient gate is too aggressive.")
+		field.queue_free()
+		return false
+	field.queue_free()
+	print("  [PASS] Ambient trees cast no shadows (perf guard), field trees keep their shadows (visual identity).")
+	return true
+
+
+# Walk a subtree and return every GeometryInstance3D - mirrors
+# resource_node.gd's _disable_shadows_recursive so the test sees the same
+# set of nodes the fix touches. Bounded depth (a glTF import is a few
+# levels), plain recursion is fine.
+func _collect_geometry_instances(root: Node, out: Array = []) -> Array:
+	if root == null:
+		return out
+	if root is GeometryInstance3D:
+		out.append(root)
+	for c in root.get_children():
+		_collect_geometry_instances(c, out)
+	return out
+
+
 func test_ambient_trees_scatter_is_deterministic() -> bool:
 	print("Running Test Suite: Ambient Tree Scatter - same map name yields identical placement (screenshot-verification contract)...")
 	# A given map dresses identically run to run, both for visual diff
