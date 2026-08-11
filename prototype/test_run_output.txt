@@ -1,0 +1,16 @@
+Reimporting assets (regenerating .godot import cache)...
+Running headless test suite...
+Godot Engine v4.7.1.stable.official.a13da4feb - https://godotengine.org
+
+
+==============================================
+    KITBASH COMMAND HEADLESS TEST RUNNER
+==============================================
+
+=== Running Design Lab Instructions Unit Test ===
+  [PASS] Instructions modal creation verified.
+=== All Design Lab Instruction Tests Passed Successfully! ===
+SCRIPT ERROR: Invalid assignment of property or key 'tree' with value of type 'SceneTree (run_tests.gd)' on a base object of type 'SceneTree (test_lab_instructions.gd)'.
+   at: _init (res://run_tests.gd:342)
+   GDScript backtrace (most recent call first):
+       [0] _init (res://run_tests.gd:342)

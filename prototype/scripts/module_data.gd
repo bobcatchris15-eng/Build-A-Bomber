@@ -22,6 +22,14 @@ func _get_ammo_profile() -> Dictionary:
 # this unconditionally the way it already does for ammo.
 const _NO_LEG_PROFILE := {}
 
+# The count tweaks that scale DAMAGE, as opposed to the full set in
+# ModuleCatalog.COUNT_TWEAK_LEGACY_DIVISORS that scales weight and cost. Every
+# name here is a launcher count - barrels, tubes, rocket cells, welder heads -
+# so "more of them" straightforwardly means "more output per second". A pad
+# count or a hangar size does not, which is why the list is short and explicit
+# rather than derived. See get_dps() for the branch that reads it.
+const DPS_COUNT_TWEAKS := ["barrel_count", "tube_count", "grid_size", "welder_count"]
+
 func _get_leg_profile() -> Dictionary:
 	if type_id != "legs":
 		return _NO_LEG_PROFILE
@@ -57,6 +65,9 @@ func get_hp() -> float:
 	if tweaks.has("protectedness"):
 		var p = tweaks["protectedness"]
 		if typeof(p) == TYPE_FLOAT or typeof(p) == TYPE_INT:
+			# +25% per level, UNCHANGED. What Armor Level buys was never the
+			# problem; what it charged was. See the weight branch in
+			# get_weight() for the full trade and the reasoning behind it.
 			hp *= 1.0 + (p * 0.25)
 	return GlobalConfig.round_to_half(hp)
 
@@ -71,12 +82,14 @@ func get_weight() -> float:
 				weight *= val
 		elif tweak_name == "multi_barrel" and val == true:
 			weight *= 2.0
-		elif tweak_name == "barrel_count":
-			weight *= (val / 6.0)
-		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "engine_count", "array_faces", "nozzle_count", "foil_count"]:
-			weight *= (val / 2.0)
-		elif tweak_name in ["grid_size", "num_axles", "blade_count", "rotor_units", "leg_count", "pad_count", "coil_count", "bank_capacity", "bogie_count", "bogie_pairs", "lift_fan_count", "plate_count"]:
-			weight *= (val / 4.0)
+		elif ModuleCatalogScript.is_count_tweak(tweak_name):
+			# Counts normalize against the module's OWN declared default, not
+			# against a literal - see ModuleCatalog.count_tweak_normalizer()
+			# for the nine weapons the literals used to mis-scale. This is one
+			# branch where there were three (a /6, a /2 and a /4 list) because
+			# with a per-module normalizer the three groups are the same rule.
+			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
+				weight *= float(val) / ModuleCatalogScript.count_tweak_normalizer(type_id, tweak_name)
 		elif tweak_name in ["afterburner", "duct", "stabilizer_ring", "reverser", "kort_nozzle"] and val == true:
 			weight *= 1.25
 		elif tweak_name == "launch_catapult":
@@ -96,8 +109,47 @@ func get_weight() -> float:
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				weight += base_weight * 0.06 * float(val)
 		elif tweak_name == "protectedness":
+			# ARMOR LEVEL'S PRICE IS MASS, and until 2026-08-11 it was not
+			# charged. At the old +15%/level the slider was strictly dominant:
+			# level 4 gave 2.00x hp for 1.60x weight, which is 1.25x HP PER
+			# KILOGRAM, so bolting plate onto a module made it tougher AND more
+			# mass-efficient at the same time. There was no design, no hull and
+			# no drivetrain for which taking less armor was the right answer,
+			# so every optimised build simply maxed every Armor Level in it. A
+			# slider that presents as a trade and resolves as a free win is the
+			# Forged Battalion trap docs/design/DESIGN_VISION.md warns about,
+			# one tweak down from the whole-part level it usually describes.
+			#
+			# At +35%/level the two curves cross the right way round: more armor
+			# is always tougher and always worse per kilogram.
+			#
+			#   p    hp     weight   hp/kg    metal   hp/metal
+			#   0    1.00   1.00     1.000    1.00    1.000
+			#   1    1.25   1.35     0.926    1.20    1.042
+			#   2    1.50   1.70     0.882    1.40    1.071
+			#   3    1.75   2.05     0.854    1.60    1.094
+			#   4    2.00   2.40     0.833    1.80    1.111
+			#
+			# Whether losing a sixth of your mass efficiency matters is then the
+			# actual decision, and it is settled by the drivetrain rather than
+			# here: weight sits inside the thrust/weight term AND is charged
+			# again past capacity at OVERLOAD_EXPONENT 1.8 (drivetrain.gd), so
+			# a design with headroom pays almost nothing for full armor while
+			# one already at its limit pays for it twice. Same slider, opposite
+			# answer per chassis - which is the point.
+			#
+			# COST is deliberately left at +20%/level (get_cost() below), so hp
+			# per credit still IMPROVES with armor. Armor is meant to stay an
+			# attractive thing to buy; the pressure this introduces should be
+			# felt in the speed readout, not in the metal counter.
+			#
+			# Linear, not quadratic. A curve like p*0.15 + p*p*0.05 reaches the
+			# same 2.40 at level 4 and reads better in isolation, but it makes
+			# level 1 mass-efficient (1.042 hp/kg) before it turns punitive,
+			# which restores exactly the "one free level" dominance this is
+			# fixing. Monotonic is the property that matters.
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
-				weight *= 1.0 + (val * 0.15)
+				weight *= 1.0 + (val * 0.35)
 
 	# Ammo stowage mass - AP penetrators and HE filler weigh more than a
 	# plain service round, obscurant canisters slightly less.
@@ -133,15 +185,13 @@ func get_cost() -> Vector2i:
 		elif tweak_name == "multi_barrel" and val == true:
 			m *= 2
 			c *= 2
-		elif tweak_name == "barrel_count":
-			m = int(m * (val / 6.0))
-			c = int(c * (val / 6.0))
-		elif tweak_name in ["tube_count", "welder_count", "hangar_size", "prop_count", "engine_count", "array_faces", "nozzle_count", "foil_count"]:
-			m = int(m * (val / 2.0))
-			c = int(c * (val / 2.0))
-		elif tweak_name in ["grid_size", "num_axles", "blade_count", "rotor_units", "leg_count", "pad_count", "coil_count", "bank_capacity", "bogie_count", "bogie_pairs", "lift_fan_count", "plate_count"]:
-			m = int(m * (val / 4.0))
-			c = int(c * (val / 4.0))
+		elif ModuleCatalogScript.is_count_tweak(tweak_name):
+			# Same normalizer as get_weight() above, called rather than copied
+			# so the two can never disagree about what one barrel is worth.
+			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
+				var count_mult := float(val) / ModuleCatalogScript.count_tweak_normalizer(type_id, tweak_name)
+				m = int(m * count_mult)
+				c = int(c * count_mult)
 		elif tweak_name in ["afterburner", "duct", "stabilizer_ring", "reverser", "kort_nozzle"] and val == true:
 			m = int(m * 1.25)
 			c = int(c * 1.25)
@@ -149,6 +199,10 @@ func get_cost() -> Vector2i:
 			m = int(m * val)
 			c = int(c * val)
 		elif tweak_name == "protectedness":
+			# +20% per level, held where it was on purpose while the weight
+			# coefficient moved. See get_weight()'s protectedness branch: armor
+			# is supposed to stay cheap in credits and expensive in mass, so
+			# the choice is made against the drivetrain and not the economy.
 			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
 				m = int(m * (1.0 + (val * 0.20)))
 				c = int(c * (1.0 + (val * 0.20)))
@@ -166,7 +220,12 @@ func get_energy_capacity() -> float:
 	var vol = _get_volume_mult()
 	var cap = base_energy_capacity + (base_energy_capacity * (vol - 1.0) * GlobalConfig.hp_scale_factor)
 	if tweaks.has("bank_capacity"):
-		cap *= (tweaks["bank_capacity"] / 4.0)
+		# capacitor_bank's declared default IS 4, so this reads identically to
+		# the literal it replaces. Routed through the shared normalizer anyway,
+		# so that a second module gaining a cell-count slider cannot quietly
+		# inherit capacitor_bank's default the way nine weapons inherited
+		# rotary_cannon's six barrels.
+		cap *= float(tweaks["bank_capacity"]) / ModuleCatalogScript.count_tweak_normalizer(type_id, "bank_capacity")
 	if tweaks.has("busbar_gauge"):
 		cap *= tweaks["busbar_gauge"]
 	return GlobalConfig.round_to_half(cap)
@@ -200,7 +259,7 @@ func get_heal_rate() -> float:
 	var vol = _get_volume_mult()
 	var heal = base_heal_rate + (base_heal_rate * (vol - 1.0) * GlobalConfig.dps_scale_factor)
 	if tweaks.has("welder_count"):
-		heal *= (tweaks["welder_count"] / 2.0)
+		heal *= float(tweaks["welder_count"]) / ModuleCatalogScript.count_tweak_normalizer(type_id, "welder_count")
 	if tweaks.has("arm_reach"):
 		heal *= tweaks["arm_reach"]
 	return GlobalConfig.round_to_half(heal)
@@ -223,7 +282,7 @@ func get_vision_bonus() -> float:
 	if tweaks.has("radar_size"):
 		bonus *= tweaks["radar_size"]
 	if tweaks.has("array_faces"):
-		bonus *= (tweaks["array_faces"] / 2.0)
+		bonus *= float(tweaks["array_faces"]) / ModuleCatalogScript.count_tweak_normalizer(type_id, "array_faces")
 	return GlobalConfig.round_to_half(bonus)
 
 func get_dps() -> float:
@@ -237,13 +296,16 @@ func get_dps() -> float:
 				dps *= val
 		elif tweak_name == "multi_barrel" and val == true:
 			dps *= 2.0
-		elif tweak_name == "barrel_count":
-			dps *= (val / 6.0)
-		elif tweak_name == "tube_count":
-			dps *= (val / 2.0)
-		elif tweak_name == "grid_size":
-			dps *= (val / 4.0)
-		elif tweak_name == "welder_count":
-			dps *= (val / 2.0)
+		elif tweak_name in DPS_COUNT_TWEAKS:
+			# Same per-module normalizer as get_weight()/get_cost(), but
+			# deliberately over a NARROWER set of counts than those two. Weight
+			# and cost scale with every count in the catalog because more of
+			# anything is more machine to carry and pay for; damage only scales
+			# with the counts that are actually launchers. Widening this to the
+			# full COUNT_TWEAK_LEGACY_DIVISORS set would start giving a
+			# drone_carrier hull damage for carrying more drones, which is a
+			# balance decision and not part of fixing the divisor.
+			if typeof(val) == TYPE_FLOAT or typeof(val) == TYPE_INT:
+				dps *= float(val) / ModuleCatalogScript.count_tweak_normalizer(type_id, tweak_name)
 
 	return GlobalConfig.round_to_half(dps)

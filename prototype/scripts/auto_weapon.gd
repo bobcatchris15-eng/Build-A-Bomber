@@ -14,6 +14,14 @@ const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 # time at 8 units than the units themselves. Everything it returns is shared
 # and must not be mutated - size munitions via the node's scale.
 const MunitionPool = preload("res://scripts/munition_pool.gd")
+# The simulation random stream. This file is the reason the split exists: it
+# makes roughly forty cosmetic draws per engagement (sparks, muzzle scatter,
+# debris, smoke) interleaved with a handful that decide outcomes - the hit roll,
+# the reacquire stagger, the initial fire phase, and the salvo scatter that
+# moves where an AoE centre lands. Cosmetic draws stay on the global randf();
+# anything a second client must agree on goes through SimRNG. See its header for
+# the rule and for why it is a static holder rather than an injected instance.
+const SimRNG = preload("res://scripts/battle/sim_rng.gd")
 
 var target: Node3D = null
 var fire_range: float = 12.0
@@ -269,7 +277,12 @@ func _roll_hit(t: Node3D) -> bool:
 		var s = t.hull_node.get_meta("base_hull_size") * t.hull_node.get_meta("hull_scale")
 		size_factor = clamp(sqrt((s.x * s.z) / (4.0 * 6.0)), 0.6, 1.6)
 	var miss_chance = clamp(target_speed * factor / size_factor, 0.0, MISS_CHANCE_CAP)
-	return randf() >= miss_chance
+	# SIM. The hit/miss roll - the single most outcome-defining draw in the file.
+	# Note the early returns above deliberately do NOT draw: a hitscan weapon, a
+	# guided round and a stationary target all return true without touching the
+	# stream, so two clients that agree on the rules consume the same number of
+	# draws whether or not the shot could have missed.
+	return SimRNG.randf() >= miss_chance
 
 # Parent node for spawned projectiles, tracers and impact VFX.
 #
@@ -316,6 +329,10 @@ func _spawn_miss_puff(t: Node3D):
 	puff.scale = Vector3(0.6, 0.6, 0.6)
 	puff.material_override = MunitionPool.alpha(Color(0.5, 0.45, 0.35, 0.7))
 	_effects_parent().add_child(puff)
+	# COSMETIC. Where the dirt puff appears is presentation only - the miss has
+	# already been decided by _roll_hit() and no damage is dealt here. Left on
+	# the global stream on purpose: a client that culls this effect (offscreen,
+	# low graphics settings) must not thereby shift the next hit roll.
 	var side = Vector3(randf_range(-1.0, 1.0), 0, randf_range(-1.0, 1.0)).normalized()
 	puff.global_position = t.global_position + side * randf_range(1.2, 2.2)
 	var tween = create_tween()
@@ -645,7 +662,12 @@ func _ready():
 	resting_transform = transform
 	# PERFORMANCE_PLAN.md P1a: random phase so every weapon doesn't reacquire
 	# on the same physics frame as every other weapon.
-	_reacquire_timer = randf() * REACQUIRE_INTERVAL
+	#
+	# SIM. This looks like a performance detail but it decides WHEN a weapon
+	# re-scans for a target, and therefore which target it acquires when two come
+	# into range within the same 0.2s window. Two clients that staggered
+	# differently would pick different targets from the same world state.
+	_reacquire_timer = SimRNG.randf() * REACQUIRE_INTERVAL
 	if has_meta("module_data"):
 		var data = get_meta("module_data")
 		type_id = data.type_id
@@ -832,8 +854,12 @@ func _ready():
 				energy_drain_per_shot = 0.0
 
 
-	# Desynchronize initial reload timers
-	time_since_last_shot = randf_range(0.0, fire_rate)
+	# Desynchronize initial reload timers.
+	#
+	# SIM. The starting fire phase decides which of two identical units shoots
+	# first, which decides which one dies. As outcome-defining as the hit roll,
+	# despite reading like a presentation nicety.
+	time_since_last_shot = SimRNG.randf_range(0.0, fire_rate)
 
 # Crimson Concordat's passive: desperation damage that ramps up as this
 # weapon's own vehicle approaches death (linear 0 at full HP -> bonus_max at
@@ -1564,7 +1590,10 @@ func _fire_mortar_salvo():
 			_effects_parent().add_child(shell)
 			
 			var start = global_position
-			var end = target.global_position + Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5))
+			# SIM. `end` is the AoE centre resolved in the tween's finished
+			# handler below, not just where the shell mesh flies - the salvo's
+			# spread is the weapon's accuracy, so it decides what gets hit.
+			var end = target.global_position + SimRNG.scatter_xz(0.5)
 			var tween = create_tween()
 			var height = 6.0
 			var callable = func(val: float):
@@ -1638,7 +1667,11 @@ func _fire_swarm_missiles():
 			if not is_instance_valid(target): return
 			var missile = Node3D.new()
 			missile.set_script(WeaponMissileScene)
-			missile.position = global_position + Vector3(randf_range(-0.3, 0.3), 0.3, randf_range(-0.3, 0.3))
+			# SIM. A weapon_missile is a real interceptable entity in the
+			# "missiles" group, not a tweened visual - where it starts changes
+			# its flight time and the geometry point defence gets to engage it
+			# at, so the launch offset is part of the simulation.
+			missile.position = global_position + SimRNG.scatter_xz(0.3) + Vector3(0.0, 0.3, 0.0)
 			missile.speed = _munition_speed(1.50) # missile_pod: 30 / 20
 			missile.salvo_jitter = 1.2
 			missile.setup(target, self, per_missile_damage, damage_class, get_team())
@@ -1741,7 +1774,10 @@ func _fire_rocket_artillery():
 		get_tree().create_timer(i * 0.14).timeout.connect(func():
 			if not is_instance_valid(self):
 				return
-			var scatter = Vector3(randf_range(-1.0, 1.0), 0.0, randf_range(-1.0, 1.0)) * spread * 1.6
+			# SIM. This is the dispersion the whole weapon is balanced around -
+			# it becomes _fire_arcing_shell_at's aim_offset, which becomes the
+			# `end` that _deal_aoe_damage() detonates on.
+			var scatter = SimRNG.scatter_xz(1.0) * spread * 1.6
 			_fire_arcing_shell_at(0.25, 0.45, laser_color, 2.4 * spread, per_rocket, scatter, 0.7)
 		)
 
@@ -1765,7 +1801,11 @@ func _fire_hypervelocity_missile():
 				return
 			var m = Node3D.new()
 			m.set_script(WeaponMissileScene)
-			m.position = global_position + Vector3(randf_range(-0.15, 0.15), 0.35, 0.0)
+			# SIM, for the same reason as the swarm launcher above - a real
+			# interceptable missile's start point. Written inline rather than
+			# via scatter_xz() because the ripple offsets the tubes across the
+			# rack only, with no depth component: one draw, not two.
+			m.position = global_position + Vector3(SimRNG.randf_range(-0.15, 0.15), 0.35, 0.0)
 			# Roughly three times a normal missile. The whole proposition is
 			# that point defence has very little time to engage it.
 			m.speed = _munition_speed(0.55) # hypervelocity: 26 / 48
@@ -1905,6 +1945,11 @@ func _fire_chaff_dispenser():
 	var burst = global_position + up * 1.6 + forward * 1.2
 	SmokeVolume.spawn(parent, burst, CHAFF_CLOUD_RADIUS, CHAFF_CLOUD_LIFETIME)
 	# Visual: a fast bright scatter rather than a rolling cloud.
+	#
+	# COSMETIC, despite chaff having a very real simulation effect. The lock
+	# breaking is done entirely by the SmokeVolume spawned above, whose radius
+	# and lifetime are constants - the flecks are decoration flying away from
+	# it and touch nothing a missile's seeker reads.
 	for i in range(10):
 		var fleck = MeshInstance3D.new()
 		fleck.mesh = MunitionPool.unit_sphere()
@@ -2091,7 +2136,9 @@ func _fire_drone_swarm():
 		var drone = Node3D.new()
 		drone.set_script(load("res://scripts/drone_unit.gd"))
 		_effects_parent().add_child(drone)
-		drone.global_position = global_position + Vector3(randf_range(-0.5, 0.5), 1.0, randf_range(-0.5, 0.5))
+		# SIM. A drone_unit is an autonomous entity that flies, engages and can
+		# be shot down - its launch position is world state, not decoration.
+		drone.global_position = global_position + SimRNG.scatter_xz(0.5) + Vector3(0.0, 1.0, 0.0)
 		drone.carrier = carrier
 		drone.target = target
 		drone.speed = 14.0
@@ -2144,6 +2191,12 @@ func _fire_cluster_dispenser():
 			canister.material_override = MunitionPool.emissive(Color(0.70, 0.40, 0.20), Color.ORANGE_RED)
 			_effects_parent().add_child(canister)
 
+			# COSMETIC, and this one is worth being explicit about because it
+			# sits three lines from a SIM draw in the same function. `start`
+			# only ever feeds the canister MESH's tween and the `mid` point the
+			# bomblet meshes are released from; the damage is resolved at
+			# `scatter_dest` below, which is computed from `end` and never from
+			# `start`. Moving the canister's muzzle jitter cannot move a hit.
 			var start = global_position + Vector3(randf_range(-0.1, 0.1), 0.3, randf_range(-0.1, 0.1))
 			var end = target.global_position
 			canister.global_position = start
@@ -2164,7 +2217,10 @@ func _fire_cluster_dispenser():
 					_effects_parent().add_child(sub)
 					sub.global_position = mid
 
-					var scatter_dest = end + Vector3(randf_range(-scatter_radius, scatter_radius), 0.0, randf_range(-scatter_radius, scatter_radius))
+					# SIM. Each bomblet's own impact point - _deal_aoe_damage()
+					# detonates on exactly this vector two lines below, so the
+					# dispersion tweak's spread IS the weapon's damage pattern.
+					var scatter_dest = end + SimRNG.scatter_xz(scatter_radius)
 					var st = create_tween()
 					st.tween_property(sub, "global_position", scatter_dest, 0.2)
 					st.finished.connect(func():
@@ -2626,7 +2682,10 @@ func _fire_mine_layer():
 	var drop = global_position.lerp(aim, 0.45)
 
 	for i in range(count):
-		var scatter = Vector3(randf_range(-1.6, 1.6), 0.0, randf_range(-1.6, 1.6))
+		# SIM. A proximity mine is a persistent world entity that outlives its
+		# layer and detonates on whatever drives over it - where it comes to
+		# rest is the minefield's actual coverage.
+		var scatter = SimRNG.scatter_xz(1.6)
 		var dest = drop + scatter
 		dest.y = drop.y
 
@@ -2793,6 +2852,10 @@ func _fire_tesla_coil():
 		var t = float(i) / float(segments)
 		var pos = global_position.lerp(end_pos, t)
 		if i < segments:
+			# COSMETIC. The zigzag is drawn, not traced - damage is dealt to
+			# `target` directly below regardless of where the segments wandered,
+			# and the last segment is deliberately unjittered so the bolt still
+			# terminates on the target.
 			pos += Vector3(randf_range(-0.4, 0.4), randf_range(-0.3, 0.3), randf_range(-0.4, 0.4))
 		var bolt = MeshInstance3D.new()
 		bolt.mesh = MunitionPool.unit_cylinder()

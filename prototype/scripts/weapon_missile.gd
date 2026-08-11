@@ -1,5 +1,6 @@
 extends Node3D
 const MunitionPool = preload("res://scripts/munition_pool.gd")
+const SimRNG = preload("res://scripts/battle/sim_rng.gd")
 # Real, interceptable weapon missile (FABLE_REVIEW.md 2.2). Fired by
 # guided_missile / dual_stage_missile / missile_pod instead of the old
 # cosmetic tweened meshes - those never registered in the "missiles" group,
@@ -58,7 +59,12 @@ func setup(missile_target: Node3D, weapon: Node3D, dmg: float, dclass: String, m
 func _ready():
 	add_to_group("missiles")
 	set_meta("team", team)
-	_weave_seed = randf() * TAU
+	# SIM. The weave is not a shader wobble - it is added to `dest` in
+	# _physics_process, so it moves the missile's actual world position every
+	# tick. That changes its flight time to impact and the geometry point
+	# defence has to solve to intercept it, both of which a second client must
+	# agree on.
+	_weave_seed = SimRNG.randf() * TAU
 	_phase = 0 if is_top_attack else 1
 	_climb_target_y = global_position.y + 9.0
 

@@ -44,11 +44,26 @@ const RANDOM_MAP_LABEL := "Random"
 const DIFFICULTIES = ["easy", "normal", "hard"]
 const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard"]
 
+# Height of the resume list's scroll box. Three rows of 36px plus their gaps,
+# with the fourth row's top edge showing - a list that is exactly N rows tall
+# gives no hint that there is an N+1th, and this one has no other affordance.
+const RESUME_LIST_HEIGHT := 132
+
 var difficulty_btn: OptionButton
 var engagements_spin: SpinBox
 var itinerary_list: VBoxContainer
 var roster_picker: RosterPicker
 var bp_manager: Node
+
+# The resume list. `resume_section` is built unconditionally and hidden when
+# there is nothing to resume, so discarding the last saved campaign has a place
+# to leave from rather than needing the column rebuilt around it.
+var resume_section: VBoxContainer = null
+var resume_list: VBoxContainer = null
+# The list_saved() entries currently drawn, in row order. Public for the same
+# reason build_itinerary() is: headless cannot press a RESUME button, so the
+# test asserts what the screen decided to OFFER.
+var resume_entries: Array = []
 
 # The 10-faction pickers are gone - the player authors one livery of their own
 # (livery.gd), it is a profile setting rather than a per-operation choice, and

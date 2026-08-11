@@ -3545,6 +3545,124 @@ const LOCOMOTION_TWEAK_SPECS = {
 	]
 }
 
+# --- Count-style tweak normalization ---------------------------------------
+# A "count" tweak is declared as a raw quantity - 4 tubes, 6 barrels, 3 lift
+# fans - but every stat that reads one wants a MULTIPLIER relative to the
+# module as shipped. module_data.gd used to get that multiplier by dividing by
+# a literal: barrel_count/6.0, tube_count/2.0, grid_size/4.0. Each of those
+# literals is exactly one module's declared default and therefore the wrong
+# number for every other module that owns the same tweak.
+#
+# It stayed invisible because `tweaks` is empty until a slider is touched. An
+# untouched basic_cannon is 40 dps / 80 kg / 30 metal; the first nudge of its
+# Barrel Count slider rewrote it to 6.7 dps / 13 kg / 5 metal - a 1/6 haircut,
+# because its default is one barrel and the divisor was six - and the Design
+# Lab then saved that into the blueprint. Nine weapons were mis-scaled this
+# way. rotary_cannon, the module the 6.0 was copied from, was the only one the
+# divisor ever fitted.
+#
+# So the normalizer is keyed by (type_id, tweak) and IS the module's own
+# declared default. The multiplier is then exactly 1.0 for an untouched module
+# and scales linearly from there, which is what every call site already
+# assumed it did.
+
+# Mirror of the "default" field of every count-style tweak in
+# stat_calculator.gd's TWEAK_SPECS. A mirror because the dependency runs one
+# way only: stat_calculator.gd preloads module_data.gd, which preloads this
+# file, so this file cannot reach back for TWEAK_SPECS without a cycle.
+#
+# Mirrored tables in this codebase drift - see the comments in
+# design_verdict.gd and drivetrain.gd for the last two times one did. The
+# guard here is tests/test_stat_model.gd's
+# test_count_tweak_normalizer_matches_declared_defaults, which walks both spec
+# tables and fails the moment one of these numbers stops matching its slider.
+const COUNT_TWEAK_DEFAULTS := {
+	"basic_cannon":             {"barrel_count": 1.0},
+	"rotary_cannon":            {"barrel_count": 6.0},
+	"artillery":                {"barrel_count": 1.0},
+	"guided_missile":           {"barrel_count": 1.0},
+	"flak_cannon":              {"barrel_count": 2.0},
+	"mortar_array":             {"tube_count": 2.0},
+	"cluster_dispenser":        {"tube_count": 2.0},
+	"chaff_dispenser":          {"tube_count": 4.0},
+	"rocket_artillery":         {"tube_count": 4.0},
+	"hypervelocity_missile":    {"tube_count": 2.0},
+	"sam_launcher":             {"tube_count": 2.0},
+	"loitering_munition":       {"tube_count": 2.0},
+	"anti_radiation_missile":   {"tube_count": 2.0},
+	"mine_layer":               {"tube_count": 1.0},
+	"smoke_discharger":         {"tube_count": 4.0},
+	"missile_pod":              {"grid_size": 4.0},
+	"sentry_deployer":          {"hangar_size": 2.0},
+	"drone_carrier":            {"hangar_size": 2.0},
+	"repair_array":             {"welder_count": 2.0},
+	"energy_barrier_projector": {"coil_count": 4.0},
+	"hub_motor_array":          {"coil_count": 4.0},
+	"fire_control_radar":       {"array_faces": 2.0},
+	"capacitor_bank":           {"bank_capacity": 4.0},
+	"booster_rack":             {"nozzle_count": 3.0},
+}
+
+# Which tweak names are counts at all, mapped to the literal divisor
+# module_data.gd applied before any of this was per-module. Serves two jobs:
+# it is the membership test ("is this a count tweak?") and it is the fallback
+# for a type that carries one of these tweaks without declaring it in either
+# spec table. Falling back to the old literal means such a type keeps behaving
+# exactly as it did rather than dividing by zero, or by a 1.0 nobody chose.
+#
+# foil_count is declared by nothing in TWEAK_SPECS or LOCOMOTION_TWEAK_SPECS -
+# it is a leftover in module_data.gd's list. Kept at its old 2.0 because
+# deleting it is an unrelated change, not because anything reaches it.
+const COUNT_TWEAK_LEGACY_DIVISORS := {
+	"barrel_count": 6.0,
+	"tube_count": 2.0,
+	"welder_count": 2.0,
+	"hangar_size": 2.0,
+	"prop_count": 2.0,
+	"engine_count": 2.0,
+	"array_faces": 2.0,
+	"nozzle_count": 2.0,
+	"foil_count": 2.0,
+	"grid_size": 4.0,
+	"num_axles": 4.0,
+	"blade_count": 4.0,
+	"rotor_units": 4.0,
+	"leg_count": 4.0,
+	"pad_count": 4.0,
+	"coil_count": 4.0,
+	"bank_capacity": 4.0,
+	"bogie_count": 4.0,
+	"bogie_pairs": 4.0,
+	"lift_fan_count": 4.0,
+	"plate_count": 4.0,
+}
+
+static func is_count_tweak(tweak_name: String) -> bool:
+	return COUNT_TWEAK_LEGACY_DIVISORS.has(tweak_name)
+
+# The divisor that turns a raw count into a multiplier for this module. Returns
+# the module's declared default, so count == default yields exactly 1.0.
+static func count_tweak_normalizer(type_id: String, tweak_name: String) -> float:
+	var declared := -1.0
+	var per_type: Dictionary = COUNT_TWEAK_DEFAULTS.get(type_id, {})
+	if per_type.has(tweak_name):
+		declared = float(per_type[tweak_name])
+	elif LOCOMOTION_TWEAK_SPECS.has(type_id):
+		# Locomotion needs no mirror at all: LOCOMOTION_TWEAK_SPECS is declared
+		# forty lines up in this same file, so the declared default is read
+		# straight off it and there is nothing that can drift.
+		for spec in LOCOMOTION_TWEAK_SPECS[type_id]:
+			if spec.get("name", "") == tweak_name:
+				declared = float(spec.get("default", -1.0))
+				break
+	# A count of zero is not a real default and dividing by it produces INF
+	# rather than a stat, so anything without a usable declared default drops
+	# to the pre-fix literal - which at worst reproduces the old behaviour
+	# instead of inventing a new one.
+	if declared > 0.0:
+		return declared
+	return float(COUNT_TWEAK_LEGACY_DIVISORS.get(tweak_name, 1.0))
+
 static func get_locomotion_contribs(type_id: String, settings: Dictionary) -> Dictionary:
 	var thrust = 1.0
 	var capacity = 0.0

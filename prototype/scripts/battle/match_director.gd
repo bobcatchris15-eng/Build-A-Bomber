@@ -857,23 +857,24 @@ func _spawn_test_range_force() -> void:
 	# one, otherwise the centre of the map's half_extents.
 	var player_spawn: Vector3 = _test_range_spawn("player", Vector3(0, 0, 0))
 	var player_design: Dictionary = roster[0] if not roster.is_empty() else {}
-	print("[DEBUG] _spawn_test_range_force: player_design empty=", player_design.is_empty(),
-		" player_spawn=", player_spawn)
 	if not player_design.is_empty():
 		var unit := spawn_unit(player_design, PLAYER_TEAM, player_spawn)
-		print("[DEBUG] _spawn_test_range_force: spawned unit=", unit,
-			" team=", PLAYER_TEAM, " pos=", player_spawn)
 		if unit != null:
 			focus_unit = unit
+			# Force-select the player unit from spawn. The selection
+			# system's click raycast does not work in Test Range (the
+			# hull-cache proxy shares stale team metadata with the
+			# template), so we bypass it entirely for the test subject.
+			# Orders still go through the normal _issue_at pipeline;
+			# only selection is forced here.
+			if selection != null:
+				selection.set_selection([unit])
 			# Push the same reference to the chase camera. The match
 			# director's `focus_unit` and ChaseCamera3D's `focus_unit`
 			# are the same value; the camera reads it from its own
 			# field. Skirmish / Operations leave chase_camera.current
 			# false and the camera never reads its own field, so this
-			# is the one place the two are linked. Phase 3 left this
-			# gap (the comment here said "_wire_test_range_camera()"
-			# but that function was never written) - fix is the
-			# one-line push below.
+			# is the one place the two are linked.
 			if chase_camera != null and is_instance_valid(chase_camera) \
 					and "focus_unit" in chase_camera:
 				chase_camera.focus_unit = unit
@@ -948,8 +949,6 @@ func _bundled_loadout_paths() -> Array:
 
 func spawn_unit(blueprint: Dictionary, unit_team: int, at: Vector3) -> Node3D:
 	var _prof := Profiler.start()
-	if blueprint.is_empty():
-		print("[DEBUG] spawn_unit: blueprint is empty, cannot spawn at ", at)
 	var unit := UnitScript.new()
 	# Added to the tree BEFORE setup(): reconstruct_vehicle() and the nav agent
 	# both need the node to be inside the tree to resolve global transforms and
@@ -2598,15 +2597,7 @@ func _group_size(group_id: int) -> int:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if camera == null or selection == null:
-		print("[DEBUG] _unhandled_input: early exit - camera=", camera, " selection=", selection)
 		return
-	if event is InputEventMouseButton and event.pressed:
-		var btn := "LEFT" if event.button_index == MOUSE_BUTTON_LEFT else \
-			("RIGHT" if event.button_index == MOUSE_BUTTON_RIGHT else str(event.button_index))
-		var unit_hit := selection.unit_at_point(event.position)
-		print("[DEBUG] MOUSE btn=", btn, " pos=", event.position,
-			" unit_hit=", unit_hit, " selected.size=", selection.selected.size())
-
 	if event is InputEventKey and event.pressed and not event.echo:
 		_handle_key(event)
 		return
@@ -2895,7 +2886,14 @@ func _structure_at(screen_pos: Vector2) -> Structure:
 
 
 func _issue_at(screen_pos: Vector2, aggressive: bool, queued: bool) -> void:
-	if selection.selected.is_empty():
+	# In Test Range the click-based selection system is broken (the hull-cache
+	# proxy shares stale team metadata with the template), so fall back to the
+	# focused unit. The player unit is force-selected in _spawn_test_range_force
+	# and held in focus_unit from there.
+	var recipients: Array = selection.selected
+	if recipients.is_empty() and focus_unit != null and is_instance_valid(focus_unit):
+		recipients = [focus_unit]
+	if recipients.is_empty():
 		return
 	# WHAT WAS CLICKED DECIDES WHAT THE ORDER IS. An ore patch means "go work
 	# that", ground means "go there". Resource nodes are queried first because
@@ -2904,12 +2902,12 @@ func _issue_at(screen_pos: Vector2, aggressive: bool, queued: bool) -> void:
 	if not aggressive:
 		var node_hit := _raycast(screen_pos, LayersScript.RESOURCE_NODES, false)
 		if not node_hit.is_empty() and node_hit.collider.is_in_group("resource_nodes"):
-			orders.harvest(selection.selected, node_hit.collider, queued)
+			orders.harvest(recipients, node_hit.collider, queued)
 			# Anything in the selection that cannot harvest still needs an order,
 			# or right-clicking a patch with a mixed group leaves the tanks
 			# standing there having visibly ignored the click.
 			var combat: Array = []
-			for u in selection.selected:
+			for u in recipients:
 				if is_instance_valid(u) and not u.is_harvester:
 					combat.append(u)
 			if not combat.is_empty():
@@ -2930,16 +2928,16 @@ func _issue_at(screen_pos: Vector2, aggressive: bool, queued: bool) -> void:
 		if not ground_hit.is_empty():
 			var ambient_target: Node3D = _nearest_ambient_to(ground_hit.position)
 			if ambient_target != null:
-				orders.harvest(selection.selected, ambient_target, queued)
+				orders.harvest(recipients, ambient_target, queued)
 				return
 
 	var hit := _raycast(screen_pos, LayersScript.GROUND_PICK_MASK, false)
 	if hit.is_empty():
 		return
 	if aggressive:
-		orders.attack_move(selection.selected, hit.position, queued)
+		orders.attack_move(recipients, hit.position, queued)
 	else:
-		orders.move(selection.selected, hit.position, queued)
+		orders.move(recipients, hit.position, queued)
 
 
 # Nearest ambient resource node to `pos` (XZ distance). Bounded search by the

@@ -28,6 +28,10 @@ const FlowFieldServiceScript = preload("res://scripts/battle/movement/flow_field
 const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
+# The simulation random stream - see its header. This file's only draws are the
+# subsystem-strip roll and the choice of which module it takes, both of which
+# change the outcome of a fight, so both are SIM.
+const SimRNG = preload("res://scripts/battle/sim_rng.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
 const PowerBudgetScript = preload("res://scripts/power_budget.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
@@ -963,8 +967,20 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	# stripping a real trade for the attacker rather than a free bonus.
 	var facet := DamageModelScript.hit_facet(self, hit_origin)
 	var strippable := DamageModelScript.strippable(modules, facet)
-	if not strippable.is_empty() and randf() < DamageModelScript.MODULE_STRIP_CHANCE:
-		_strip_module(strippable.pick_random(), amount)
+	#
+	# SIM, twice over: whether this hit strips at all, and which of the exposed
+	# modules it takes. Both are outcome-defining - a strip consumes the hit
+	# entirely (the early return below), so the roll decides whether the hull
+	# took damage at all, and the choice decides whether the unit lost a gun, a
+	# sensor or its last locomotion module and is now immobilised.
+	#
+	# The short-circuit order matters and is load-bearing for the split: `not
+	# strippable.is_empty()` is evaluated first, so a hit on a unit with nothing
+	# exposed does not draw. Reversing it would make stream position depend on
+	# how many modules a unit happened to have left, which is exactly the kind of
+	# incidental coupling the sim/cosmetic separation exists to remove.
+	if not strippable.is_empty() and SimRNG.randf() < DamageModelScript.MODULE_STRIP_CHANCE:
+		_strip_module(SimRNG.pick(strippable), amount)
 		return
 
 	var dealt := DamageModelScript.hull_damage(amount, resolved.x, resolved.y)

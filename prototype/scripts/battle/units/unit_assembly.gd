@@ -99,6 +99,13 @@ static func _acquire_hull(blueprint_data: Dictionary, body: Node3D,
 		template = built
 
 	var copy: Node3D = template.duplicate()
+	# duplicate() copies metadata, so the proxy's "unit" meta now points to
+	# the TEMPLATE's body (the first one that populated the cache), not the
+	# live `body` we just built. Fix it: the proxy's meta must reference the
+	# actual spawned unit so team checks and selection work correctly.
+	var proxy: Node3D = copy.find_child("SelectionProxy", false, false)
+	if proxy != null and proxy.has_meta("unit"):
+		proxy.set_meta("unit", body)
 	body.add_child(copy)
 	return copy
 

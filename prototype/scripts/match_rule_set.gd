@@ -133,6 +133,34 @@ var operation_id: String = ""                   # Operations only
 var stage_index: int = 0                        # Operations only (0..N-1)
 var ai_difficulty: String = "normal"
 
+# --- Simulation seed ----------------------------------------------------------
+#
+# The seed for the simulation random stream (scripts/battle/sim_rng.gd). This
+# is the rule set's home rather than the match director's because the seed is
+# per-match CONFIGURATION, not per-match runtime state: it belongs with the map,
+# the factions and the roster, and it has to travel the same path they do. Two
+# consequences fall straight out of putting it here - to_dict() already
+# serialises it, so a replay file or a future netcode handshake carries the seed
+# alongside everything else needed to reconstruct the match, and a test can pin
+# a match's randomness by setting one field on the rule set it was already
+# building.
+#
+# 0 MEANS "UNSET", NOT "SEED ZERO". An int field defaults to 0, so leaving this
+# alone is the overwhelmingly common case and it must mean "roll me a fresh
+# one". SimRNG.seed_with() is the single place that decision is made: it
+# substitutes a real entropy-derived seed for 0 and writes the resolved value
+# back onto this field, so after begin_match() this always holds the number that
+# actually reproduces the match. Without that substitution every unseeded match
+# in the game would run the identical sequence of hit rolls and strip choices -
+# a silent failure that reads as balance drift rather than as a bug, which is
+# why the sentinel is handled at one chokepoint instead of trusted to callers.
+#
+# None of the three factories set it. A caller that wants a reproducible match
+# assigns it explicitly after construction; everything else gets a fresh roll
+# and can read the resolved value back off this field (or SimRNG.current_seed())
+# once the match has started.
+var sim_seed: int = 0
+
 
 # --- Order legality ----------------------------------------------------------
 #
@@ -268,7 +296,7 @@ static func test_range(player_blueprint_path: String,
 	# Camera + HUD. BattleHUD is on (selection rings, HP bars, the player's
 	# HP label all live there). Minimap, production HUD, and admin menu
 	# are off - there is nothing to put in them.
-	rs.camera_mode = CameraMode.CHASE
+	rs.camera_mode = CameraMode.RTS
 	rs.enable_minimap = false
 	rs.enable_production_hud = false
 	rs.enable_admin_menu = false
@@ -318,4 +346,10 @@ func to_dict() -> Dictionary:
 		"operation_id": operation_id,
 		"stage_index": stage_index,
 		"ai_difficulty": ai_difficulty,
+		# Written unconditionally, including when it is still the 0 sentinel.
+		# A dict captured before the match started honestly says "unseeded";
+		# one captured after begins_match() carries the real seed and is
+		# therefore replayable. Dropping the key when it is 0 would make those
+		# two cases indistinguishable from a missing field on an older save.
+		"sim_seed": sim_seed,
 	}
