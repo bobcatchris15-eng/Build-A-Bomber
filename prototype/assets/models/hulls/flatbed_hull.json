@@ -1,0 +1,22 @@
+{
+	"base_energy": 68.8,
+	"base_power": 7.44,
+	"base_vision": 22.0,
+	"category": "hull",
+	"color": [
+		0.52,
+		0.5,
+		0.44,
+		1.0
+	],
+	"crystal": 19,
+	"hp": 413.7,
+	"metal": 93,
+	"name": "Flatbed Hull",
+	"size": [
+		3.2,
+		2.2,
+		7.8
+	],
+	"weight": 245.9
+}

@@ -1,0 +1,22 @@
+{
+	"base_energy": 66.7,
+	"base_power": 5.36,
+	"base_vision": 20.0,
+	"category": "hull",
+	"color": [
+		0.5,
+		0.53,
+		0.6,
+		1.0
+	],
+	"crystal": 19,
+	"hp": 381.0,
+	"metal": 96,
+	"name": "Octaplate Hull",
+	"size": [
+		5.6,
+		1.5,
+		5.6
+	],
+	"weight": 237.1
+}

@@ -1,0 +1,22 @@
+{
+	"base_energy": 29.4,
+	"base_power": 2.88,
+	"base_vision": 24.0,
+	"category": "hull",
+	"color": [
+		0.48,
+		0.5,
+		0.46,
+		1.0
+	],
+	"crystal": 10,
+	"hp": 186.5,
+	"metal": 49,
+	"name": "Tandem Runner",
+	"size": [
+		2.4,
+		1.5,
+		6.0
+	],
+	"weight": 110.4
+}

@@ -1,0 +1,22 @@
+{
+	"base_energy": 230.2,
+	"base_power": 13.06,
+	"base_vision": 18.0,
+	"category": "hull",
+	"color": [
+		0.42,
+		0.4,
+		0.44,
+		1.0
+	],
+	"crystal": 56,
+	"hp": 1252.7,
+	"metal": 280,
+	"name": "Citadel Spire",
+	"size": [
+		3.8,
+		7.0,
+		3.8
+	],
+	"weight": 721.7
+}

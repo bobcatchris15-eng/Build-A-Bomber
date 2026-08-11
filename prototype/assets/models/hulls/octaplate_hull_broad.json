@@ -1,0 +1,22 @@
+{
+	"base_energy": 124.3,
+	"base_power": 7.05,
+	"base_vision": 18.0,
+	"category": "hull",
+	"color": [
+		0.46,
+		0.49,
+		0.56,
+		1.0
+	],
+	"crystal": 30,
+	"hp": 676.7,
+	"metal": 151,
+	"name": "Broad Octaplate",
+	"size": [
+		7.0,
+		1.7,
+		5.2
+	],
+	"weight": 389.8
+}

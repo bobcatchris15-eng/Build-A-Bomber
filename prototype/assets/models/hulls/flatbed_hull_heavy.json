@@ -1,0 +1,22 @@
+{
+	"base_energy": 134.0,
+	"base_power": 14.5,
+	"base_vision": 22.0,
+	"category": "hull",
+	"color": [
+		0.48,
+		0.46,
+		0.4,
+		1.0
+	],
+	"crystal": 36,
+	"hp": 806.2,
+	"metal": 180,
+	"name": "Heavy Flatbed",
+	"size": [
+		4.2,
+		2.6,
+		9.8
+	],
+	"weight": 479.3
+}
