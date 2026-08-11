@@ -24,6 +24,12 @@ const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
 const RosterPickerScript = preload("res://scripts/roster_picker.gd")
 const StampedButtonScript = preload("res://scripts/ui_stamped_button.gd")
+# MatchRuleSet uses class_name, not the older *Script preload pattern
+# (the class is in match_rule_set.gd, which registers itself under that
+# name). The old name leaked into this file when the class was renamed
+# and a pre-existing check never got re-run, so the test runner bailed
+# at the parse step whenever this file got included.
+const MatchRuleSet = preload("res://scripts/match_rule_set.gd")
 
 # Matches match_setup.gd's cap and match_director.ROSTER_LIMIT. Kept as its own
 # constant rather than read off the director, which is not loaded at this point
@@ -368,7 +374,7 @@ func _write_match_config(stage: Dictionary, operation_id: String, stage_index: i
 	var ai_difficulty: String = str(stage.get("ai_difficulty", "normal"))
 	var paths: Array = roster_picker.ordered_paths()
 	match_config.selected_map_id = map_id
-	match_config.rule_set = MatchRuleSetScript.operations(
+	match_config.rule_set = MatchRuleSet.operations(
 		map_id,
 		# Fixed ids rather than a player choice - see the note by the
 		# removed pickers above. operations_draft.gd reads the rule set

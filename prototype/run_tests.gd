@@ -88,6 +88,13 @@ const SUITE_ORDER := [
 	["tech_tree", "test_design_costing_building_requirements"],
 	["tech_tree", "test_production_service_prerequisite_gating"],
 	["tech_tree", "test_building_glb_meshes_exist"],
+	# 2026-08-11: the playtest bug "built a tech_lab, gated units stayed
+	# disabled forever". The gate was correct at button-creation time
+	# but stale after the structure was placed. Locks both halves: the
+	# data (gate re-evaluates against the live team structures) and
+	# the signal (structure_built / structure_lost fire on the right
+	# transitions).
+	["tech_tree", "test_gate_re_evaluates_after_structure_placed"],
 	["designer_lab", "test_clipping_detection"],
 	["designer_lab", "test_rotation_popup_and_deforms"],
 	["designer_lab", "test_sensor_mast_tweak_and_proportions"],
@@ -138,6 +145,13 @@ const SUITE_ORDER := [
 	["terrain_and_maps", "test_spawn_bases_drops_only_hq_not_refinery_or_manufactories"],
 	["terrain_and_maps", "test_ai_auto_places_hq_in_assigned_base_zone"],
 	["terrain_and_maps", "test_place_hq_for_human_refuses_outside_zone_and_double_place"],
+	# 2026-08-11: the pre-game placement MODE (ghost cursor + zone
+	# outline + clamp + commit/refuse + signal lifecycle) is its own
+	# state, not a sibling of the build-queue placement. Locks the
+	# full lifecycle: enter on a zoned map, ghost/outline live and
+	# unshadowed, clamp+commit+refuse behave, signals fire on the
+	# right transitions.
+	["terrain_and_maps", "test_pre_game_hq_placement_mode_lifecycle"],
 	# 2026-08-10: ambient nodes opt out of shadow casting. Up to 1000
 	# ambient trees on a 4096 shadow atlas was the suspect behind
 	# skirmish dropping to 2-4 fps; locks the off path so a future

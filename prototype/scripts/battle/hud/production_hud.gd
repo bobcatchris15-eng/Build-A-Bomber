@@ -75,6 +75,17 @@ var _strips: Dictionary = {}
 var _tier_bodies: Dictionary = {}
 var _ring: UIRadialMenu = null
 
+# Every build button ever created, with the (queue_name, item) pair it
+# was generated from. The button's `disabled` state was set at creation
+# time from the same `missing_required_buildings()` call that drives the
+# gating at enqueue - and that call was correct at THAT moment, but a
+# structure built or destroyed since the button was created makes the
+# answer stale. _re-evaluate_gates() walks this list and re-runs the
+# query against the current state. The list is the only place the
+# closure-captured `item` reference is retained, so a re-eval has to go
+# through here rather than the button itself.
+var _item_buttons: Array = []
+
 
 func setup(director: Node) -> void:
 	_director = director
@@ -93,7 +104,30 @@ func setup(director: Node) -> void:
 		vp.size_changed.connect(fit_to_viewport)
 	_build_toolbar()
 	_director.production.queue_changed.connect(_on_queue_changed)
+	# Re-evaluate every build button's tech-tree gate when a structure
+	# goes live or dies. The buttons were created with `disabled = true`
+	# if their gate wasn't met at the time; a placed tech_lab resolves
+	# that gate the same frame, and a destroyed lab re-blocks it. The
+	# 5 Hz throttled refresh below would also catch this, but with up
+	# to 200 ms of stale UI between "lab done" and "button now live",
+	# which is the exact failure mode the playtest hit. See
+	# _re_evaluate_gates() for the cost rationale.
+	if _director.has_signal("structure_built"):
+		_director.structure_built.connect(_on_structure_built_for_gates)
+	if _director.has_signal("structure_lost"):
+		_director.structure_lost.connect(_on_structure_lost_for_gates)
 	_refresh_all()
+
+
+# Pass-throughs so the lambda-captured callable stays a real method
+# (GDScript lambdas for signal handlers are flaky when reassigned, and
+# a real method makes the call stack readable in a profile).
+func _on_structure_built_for_gates(_team: int, _kind: String) -> void:
+	_re_evaluate_gates()
+
+
+func _on_structure_lost_for_gates(_team: int, _kind: String) -> void:
+	_re_evaluate_gates()
 
 
 # Sizes this Control to the viewport by hand.
@@ -632,6 +666,86 @@ func _add_item_button(parent: Control, queue_name: String, item: Dictionary) -> 
 		btn.tooltip_text = "Requires: %s" % ", ".join(names)
 	else:
 		btn.pressed.connect(func(): _enqueue(queue_name, item))
+
+	# The (queue_name, item) pair is what _re_evaluate_gates() needs to re-run
+	# the gate query for this specific design. The closure-captured reference
+	# inside the pressed.connect lambda above is not reachable from the
+	# outside, so the only way to keep it for a later re-eval is to also
+	# store it on _item_buttons. Bounded: one entry per buildable item per
+	# queue, called once on _ready and never again, so the list is
+	# effectively a constant.
+	_item_buttons.append({"btn": btn, "queue_name": queue_name, "item": item})
+
+
+# Re-runs the tech-tree gate query for every build button and updates its
+# `disabled` state. Called from _on_structure_built and _on_structure_lost
+# in match_director, so a placed tech_lab (or any other structure that
+# resolves a gate) flips its gated designs from disabled to live the same
+# frame, and a destroyed one flips them back. Without this, the only time
+# the gate was queried was at button creation - the failure mode the
+# playtest hit was "built the lab, the gated units are still greyed out
+# forever".
+#
+# The query is O(buttons) per structure event. A build bar has ~50-80
+# buttons across 5 queues, each running missing_required_buildings()
+# which itself walks the (much smaller) structures group, so the cost
+# is bounded by a few hundred dictionary lookups per event. The events
+# fire rarely (one per build completion or structure loss) so a refresh
+# per event is the right call rather than a periodic poll.
+#
+# Three states per button:
+#   - was live, still live:   no change (the press handler is connected)
+#   - was live, now blocked:  disconnect the press handler + disable
+#   - was blocked, now live:  connect a fresh press handler + enable
+# Press-handler swap is the only place we need the closure-captured
+# `item` reference, so the bookkeeping is per-button rather than
+# per-state.
+func _re_evaluate_gates() -> void:
+	if _director == null:
+		return
+	for entry in _item_buttons:
+		var btn: Button = entry["btn"]
+		var item: Dictionary = entry["item"]
+		var queue_name: String = entry["queue_name"]
+		# The pre-stored `missing` came from missing_required_buildings() at
+		# build time. Re-run the same query against the live state.
+		var design: Dictionary = item.get("blueprint", {})
+		var missing: Array = []
+		if not design.is_empty() or item.get("structure", false):
+			# Every item we track carries a blueprint (units and design-built
+			# defences) or a kind (prefab structures). For prefab structures
+			# the "gate" is a no-op (a tech_lab does not require its own
+			# tier), so the empty-blueprint case maps to "no gate" - and the
+			# prefab structure button stays live, which is what the player
+			# needs to be able to order the very first lab in the first
+			# place.
+			missing = _director.production.missing_required_buildings(
+				_director.PLAYER_TEAM, design)
+		var was_blocked: bool = btn.disabled
+		var is_blocked: bool = not missing.is_empty()
+		if was_blocked == is_blocked:
+			continue
+		if is_blocked:
+			# Block became blocked: disable and disconnect. The old press
+			# handler is held in the button's connections list; disconnecting
+			# by name is the safe way because we don't have the lambda
+			# reference any more (it was captured in the closure passed to
+			# pressed.connect above).
+			for c in btn.pressed.get_connections():
+				btn.pressed.disconnect(c["callable"])
+			var names: Array = []
+			for kind in missing:
+				names.append(_format_building_name(str(kind)))
+			btn.disabled = true
+			btn.tooltip_text = "Requires: %s" % ", ".join(names)
+		else:
+			# Block lifted: re-enable and re-wire the press handler. A fresh
+			# lambda is required because the old one's captured `item` is
+			# still there but the button's connection list was just drained
+			# above, so the call would no-op.
+			btn.disabled = false
+			btn.tooltip_text = ""
+			btn.pressed.connect(func(): _enqueue(queue_name, item))
 
 
 func _enqueue(queue_name: String, item: Dictionary) -> void:

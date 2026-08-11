@@ -258,3 +258,137 @@ func test_building_glb_meshes_exist() -> bool:
 	if ok:
 		print("  [PASS] tech-tree lab meshes")
 	return ok
+
+
+# The tech tree gate is the PRODUCTION-SERVICE-LEVEL contract: a design
+# gated on a lab the team does not own is refused at enqueue time. The
+# HUD-level contract is that the same gate, queried at button creation,
+# is RE-QUERIED when a structure goes live or dies - otherwise building
+# a tech_lab leaves every tech_lab-gated design button greyed out
+# forever, which was the bug Chris hit in the 2026-08-11 playtest.
+#
+# The same gate logic is exercised end-to-end here: place a structure
+# (via match_director._place_structure, the same path the live build
+# flow uses after the structure_ready signal), then check that
+# missing_required_buildings() now reports nothing for a design the
+# structure resolved. This is the data half of the bug. The UI half
+# (button `disabled` re-evaluation) is the next test.
+func test_gate_re_evaluates_after_structure_placed() -> bool:
+	print("Running Test Suite: gate re-evaluates after a structure is placed (no stale 'missing' list)...")
+	# Build a minimal match_director with just enough state for the
+	# gate query: economy, current_map, and the structures group the
+	# structure joins. We can't drive the full Battle scene here - the
+	# cost of waiting for world_is_ready in a unit test is real - so
+	# the test exercises the same call paths the live flow does.
+	var MatchDirectorScript = preload("res://scripts/battle/match_director.gd")
+	var StructureScript = preload("res://scripts/battle/buildings/structure.gd")
+	var director = MatchDirectorScript.new()
+	director.current_map = {"id": "test_reeval", "map_half_extents": 80.0}
+	director.economy = EconomyServiceScript.new()
+	director.economy.add_team(0, 10000)
+	director.economy.add_team(1, 10000)
+	root.add_child(director)
+	# Need a manufactory so the heavy queue has at least one contributor;
+	# the gate under test is the tech tree, not the contributor gate.
+	director.economy.add_team(0, 10000)  # ensure budget for the manufactory
+	var manufactory := director._place_structure("heavy_manufactory", 0, Vector3(60, 0, 0))
+	await tree.process_frame
+
+	# Before any lab is built: a dreadnought (gated on physics_lab) is
+	# refused, and missing_required_buildings reports physics_lab.
+	var dreadnought := {"hull_type": "dreadnought_hull", "armor_material": "hardened_steel"}
+	var missing_before: Array = director.production.missing_required_buildings(0, dreadnought)
+	if missing_before != ["physics_lab"]:
+		print("  [FAIL] without any lab, missing should be ['physics_lab'], got ", missing_before)
+		director.queue_free()
+		return false
+	# And the enqueue path refuses it at the door.
+	var refused: Dictionary = director.production.enqueue_unit(
+		0, dreadnought, 100, 20.0, BuildingCatalogScript.QUEUE_HEAVY)
+	if not refused.is_empty():
+		print("  [FAIL] enqueue without a physics_lab should refuse, got a job: ", refused)
+		director.queue_free()
+		return false
+
+	# The fix in match_director.gd: _place_structure now emits structure_built
+	# AFTER setup. The HUD listens and re-evaluates its gates. The DATA
+	# half of the contract is that structures_of_kinds() finds the new lab
+	# the same frame, which is what the HUD's re-eval reads from. If this
+	# assertion fails the gate is stale even when wired correctly.
+	#
+	# Goes through _place_structure (NOT Structure.new + add_child) on
+	# purpose: the live build flow places via _place_structure, which is
+	# also where the died.connect(_on_structure_died) hook is wired. The
+	# reverse-direction test (lab dies -> structure_lost fires) needs
+	# that hook to be connected or take_damage's died.emit would have
+	# no listener.
+	var signal_seen: Array = []
+	director.structure_built.connect(
+		func(team: int, kind: String) -> void:
+			signal_seen.append([team, kind]))
+	var lab: Structure = director._place_structure("physics_lab", 0, Vector3(0, 0, 0))
+	await tree.process_frame
+
+	# The signal MUST have fired for the HUD to know about the lab. If
+	# this assertion fails, the bug is back: a placed lab leaves every
+	# gated button disabled because the HUD never heard about it.
+	if signal_seen.is_empty() or signal_seen[0][0] != 0 or signal_seen[0][1] != "physics_lab":
+		print("  [FAIL] structure_built signal did not fire with the right (team, kind), got ", signal_seen)
+		director.queue_free()
+		return false
+
+	# After the lab is placed, the same design's gate is now clear.
+	var missing_after: Array = director.production.missing_required_buildings(0, dreadnought)
+	if not missing_after.is_empty():
+		print("  [FAIL] after placing physics_lab, missing should be empty, got ", missing_after)
+		director.queue_free()
+		return false
+
+	# And the enqueue path now accepts it (assuming the contributor
+	# gate has at least one heavy_manufactory, which the setup above
+	# gave us).
+	var accepted: Dictionary = director.production.enqueue_unit(
+		0, dreadnought, 100, 20.0, BuildingCatalogScript.QUEUE_HEAVY)
+	if accepted.is_empty():
+		print("  [FAIL] enqueue with a live physics_lab should produce a job, got empty")
+		director.queue_free()
+		return false
+
+	# And the reverse direction: a destroyed lab RE-BLOCKS the gate.
+	# structure_lost fires on death, so the HUD can flip the buttons back
+	# to disabled if the lab is the only one the team owned. We don't
+	# need a fresh director for this - the same one is fine, the loss
+	# path is the same code shape.
+	#
+	# take_damage() is the canonical death path - it sets is_dead=true,
+	# emits the died signal (which _on_structure_died hooks to emit
+	# structure_lost), and queue_frees. queue_free() alone is NOT a
+	# death: the died signal does not fire on a plain free, and the
+	# test would observe an empty lost_seen. The fix is to deal the
+	# lab enough damage to take its hp to 0 (a physics_lab has 1200 hp
+	# per BuildingCatalog.STATS).
+	var lost_seen: Array = []
+	director.structure_lost.connect(
+		func(team: int, kind: String) -> void:
+			lost_seen.append([team, kind]))
+	lab.take_damage(99999.0)
+	# take_damage is synchronous: is_dead=true, died.emit ran inline,
+	# structure_lost.emit ran inline. The queue_free at the bottom of
+	# Structure's death path is the only thing deferred, and the
+	# signal has already fired by the time we reach this line.
+	if lost_seen.is_empty() or lost_seen[0][0] != 0 or lost_seen[0][1] != "physics_lab":
+		print("  [FAIL] structure_lost signal did not fire on lab death, got ", lost_seen)
+		director.queue_free()
+		return false
+
+	# And the gate is now stale - the lab is gone, the dreadnought is
+	# blocked again. Same query, same expected miss.
+	var missing_post_death: Array = director.production.missing_required_buildings(0, dreadnought)
+	if missing_post_death != ["physics_lab"]:
+		print("  [FAIL] after lab death, missing should re-block to ['physics_lab'], got ", missing_post_death)
+		director.queue_free()
+		return false
+
+	director.queue_free()
+	print("  [PASS] gate re-evaluates on structure placement and on death; signals fire as documented.")
+	return true

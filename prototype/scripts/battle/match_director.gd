@@ -62,6 +62,20 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const PLAYER_TEAM := 0
 const ENEMY_TEAM := 1
 
+# Cached rule set for the current match. Resolved from /root/MatchConfig in
+# _ready() and read by every later function that needs to know which mode
+# the match is in (Skirmish / Operations / Test Range) or any per-mode
+# override (cameras, factions, fog, starting credits, HUD toggles).
+#
+# WHY A MEMBER, NOT A LOCAL. _ready() awaits _setup_terrain(), and GDScript
+# drops any local declared before an `await` once that await resumes - the
+# same identifier becomes "not declared" past the await point at parse
+# time. A function called from _ready() after the await (e.g. _setup_vision
+# reading rs.enable_fog_of_war) would also need the local re-passed, which
+# is a contract that scales poorly. A member costs one assignment and is
+# visible everywhere for the lifetime of the match.
+var _match_rule_set: MatchRuleSet = null
+
 # Neighbour lookup grid. One cell comfortably exceeds the largest separation
 # radius, so a unit only ever has to check its own cell and the eight around it.
 const NEIGHBOUR_CELL := 8.0
@@ -252,8 +266,8 @@ func _ready() -> void:
 	# harmless - the camera sits at the world origin and waits).
 	if match_config and "rule_set" in match_config and match_config.rule_set != null \
 			and chase_camera != null and is_instance_valid(chase_camera):
-		var rs: MatchRuleSet = match_config.rule_set
-		if rs.camera_mode == MatchRuleSetScript.CameraMode.CHASE:
+		_match_rule_set = match_config.rule_set
+		if _match_rule_set.camera_mode == MatchRuleSetScript.CameraMode.CHASE:
 			chase_camera.current = true
 			if camera != null and is_instance_valid(camera):
 				camera.current = false
@@ -273,16 +287,15 @@ func _ready() -> void:
 	# instantiates Battle.tscn without the autoload at all still gets a
 	# null match_config and falls through to the hardcoded director
 	# defaults - the same posture every prior phase preserved.
-	var rs: MatchRuleSet = null
 	if match_config and "rule_set" in match_config:
-		rs = match_config.rule_set
-	if rs != null:
-		if rs.map_id != "":
-			map_id = rs.map_id
-		if rs.player_faction != "":
-			player_faction = rs.player_faction
-		if rs.enemy_faction != "":
-			enemy_faction = rs.enemy_faction
+		_match_rule_set = match_config.rule_set
+	if _match_rule_set != null:
+		if _match_rule_set.map_id != "":
+			map_id = _match_rule_set.map_id
+		if _match_rule_set.player_faction != "":
+			player_faction = _match_rule_set.player_faction
+		if _match_rule_set.enemy_faction != "":
+			enemy_faction = _match_rule_set.enemy_faction
 	current_map = MapCatalog.get_map(map_id)
 	# CORE_DESIGN_LANGUAGE.md §3.2: pan/middle-drag speed track world_scale so
 	# a genuinely bigger map doesn't also feel proportionally slower to move
@@ -305,8 +318,8 @@ func _ready() -> void:
 		# director's own default" (STARTING_CREDITS, 750). The legacy
 		# MatchConfig.starting_credits field is retired.
 		var start_credits: int = STARTING_CREDITS
-		if rs != null and rs.starting_credits >= 0:
-			start_credits = rs.starting_credits
+		if _match_rule_set != null and _match_rule_set.starting_credits >= 0:
+			start_credits = _match_rule_set.starting_credits
 		economy.add_team(t, start_credits)
 		production.add_team(t)
 	production.unit_completed.connect(_on_unit_completed)
@@ -349,9 +362,9 @@ func _ready() -> void:
 	# case via the same duck-typed null guard.
 	var ai_enabled: bool = true
 	var ai_diff: String = "normal"
-	if rs != null:
-		ai_enabled = rs.enable_ai
-		ai_diff = rs.ai_difficulty
+	if _match_rule_set != null:
+		ai_enabled = _match_rule_set.enable_ai
+		ai_diff = _match_rule_set.ai_difficulty
 	if ai_enabled:
 		commander = CommanderScript.new()
 		commander.setup(self, ENEMY_TEAM, ai_diff)
@@ -441,6 +454,12 @@ func _tick_audio(delta: float) -> void:
 func _setup_vision() -> void:
 	vision = VisionServiceScript.new()
 	vision.setup(self, PLAYER_TEAM, current_map.get("map_half_extents", 80.0), WorldScaleScript.for_map(current_map))
+	# _match_rule_set is the cached rule set from _ready(). Fog of war is
+	# the per-mode opt-out: Skirmish / Operations leave it on (the default
+	# when no rule set is mounted), Test Range's launcher turns it off so
+	# the dummies are visible across the whole range.
+	if _match_rule_set != null and not _match_rule_set.enable_fog_of_war:
+		return
 	add_child(vision.build_shroud())
 
 	# The HUD refreshes on the SAME tick as vision, deliberately. The minimap
@@ -645,7 +664,12 @@ func _load_roster() -> void:
 	# the mode is TEST_RANGE. The legacy _bundled_loadout_paths() seed
 	# still runs on top in either path, so a roster that comes in with
 	# fewer than ROSTER_LIMIT designs is still filled.
-	var rs: MatchRuleSet = match_config.rule_set if match_config and "rule_set" in match_config and match_config.rule_set != null else null
+	var rs: MatchRuleSet = _match_rule_set
+	# Computed once up here so the player-roster branch (and the enemy-roster
+	# branch below) can both read it without re-deriving from `rs`. Single
+	# source of truth within this function, declared at the top because
+	# GDScript locals are visible only from their declaration forward.
+	var is_test_range: bool = rs != null and rs.mode == MatchRuleSetScript.Mode.TEST_RANGE
 
 	var chosen: Array = []
 	if rs != null and rs.mode == MatchRuleSetScript.Mode.TEST_RANGE and rs.player_blueprint_path != "":
@@ -663,13 +687,25 @@ func _load_roster() -> void:
 				break
 			_append_design(roster, bp_manager.load_blueprint(entry.path))
 
-	for path in _bundled_loadout_paths():
-		_append_design(roster, bp_manager.load_blueprint(path))
-	if roster.size() > ROSTER_LIMIT:
-		roster = roster.slice(0, ROSTER_LIMIT)
+	# In test range mode the player roster is already set to exactly one
+	# design (the test subject). Don't pollute it with the bundled defaults.
+	#
+	# is_test_range is computed at the top of this function (next to the
+	# rule-set lookup, before the player-roster branch reads it) and again
+	# near the enemy-roster branch. The reason: GDScript locals are not
+	# visible past an `await`, and the rule-set reference `rs` is local
+	# to this function. One declaration up here, one in the enemy block,
+	# both reading the same `rs.mode` - they are short boolean expressions
+	# and the duplication is the price of not promoting `rs` to a member
+	# just for the test_range gate.
+	if not is_test_range:
+		for path in _bundled_loadout_paths():
+			_append_design(roster, bp_manager.load_blueprint(path))
+		if roster.size() > ROSTER_LIMIT:
+			roster = roster.slice(0, ROSTER_LIMIT)
 
-	if _harvester_in(roster).is_empty():
-		_append_design(roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
+		if _harvester_in(roster).is_empty():
+			_append_design(roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
 
 	# Factions: the pre-match choice wins; otherwise the roster's own lead design
 	# decides, which is the old behaviour and keeps a hand-built roster feeling
@@ -700,11 +736,20 @@ func _load_roster() -> void:
 	# roster may now be the player's own saved designs - handing those to the
 	# opponent would field the player's army against them, which is a different
 	# game than the one they chose.
-	enemy_roster.clear()
-	for path in _bundled_loadout_paths():
-		_append_design(enemy_roster, bp_manager.load_blueprint(path))
-	if _harvester_in(enemy_roster).is_empty():
-		_append_design(enemy_roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
+	#
+	# SKIP IN TEST RANGE. The test_range block above already populated
+	# enemy_roster with the three dummies from the rule set (or the bundled
+	# defaults as a fallback). This block was overwriting that result on every
+	# launch - lines 687-693 set it correctly and lines 703-707 immediately
+	# clobbered it. Guarded now; the test_range block already handles the
+	# harvester fallback. `is_test_range` is the function-top local declared
+	# above - not redeclared here, to keep the test-range gate one source.
+	if not is_test_range:
+		enemy_roster.clear()
+		for path in _bundled_loadout_paths():
+			_append_design(enemy_roster, bp_manager.load_blueprint(path))
+		if _harvester_in(enemy_roster).is_empty():
+			_append_design(enemy_roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
 
 	# COUNTER-DRAFTING. In an operation the AI reorders its pool against what the
 	# player has actually fielded in engagements already fought - which is what
@@ -772,11 +817,10 @@ func _spawn_starting_units() -> void:
 	# total per the rule set) so a direct loop is fine; a Skirmish
 	# unit's first move is the production queue, which is what the
 	# legacy path here keeps doing.
-	var rs: MatchRuleSet = null
-	var mc := get_node_or_null("/root/MatchConfig")
-	if mc != null and "rule_set" in mc and mc.rule_set != null:
-		rs = mc.rule_set
-	var test_range_mode: bool = rs != null and rs.mode == MatchRuleSetScript.Mode.TEST_RANGE
+	# _match_rule_set is the cached rule set from _ready(); reading from
+	# the member keeps the mode gate in the same idiom the rest of the
+	# director uses.
+	var test_range_mode: bool = _match_rule_set != null and _match_rule_set.mode == MatchRuleSetScript.Mode.TEST_RANGE
 	if test_range_mode:
 		_spawn_test_range_force()
 		return
@@ -813,8 +857,12 @@ func _spawn_test_range_force() -> void:
 	# one, otherwise the centre of the map's half_extents.
 	var player_spawn: Vector3 = _test_range_spawn("player", Vector3(0, 0, 0))
 	var player_design: Dictionary = roster[0] if not roster.is_empty() else {}
+	print("[DEBUG] _spawn_test_range_force: player_design empty=", player_design.is_empty(),
+		" player_spawn=", player_spawn)
 	if not player_design.is_empty():
 		var unit := spawn_unit(player_design, PLAYER_TEAM, player_spawn)
+		print("[DEBUG] _spawn_test_range_force: spawned unit=", unit,
+			" team=", PLAYER_TEAM, " pos=", player_spawn)
 		if unit != null:
 			focus_unit = unit
 			# Push the same reference to the chase camera. The match
@@ -900,6 +948,8 @@ func _bundled_loadout_paths() -> Array:
 
 func spawn_unit(blueprint: Dictionary, unit_team: int, at: Vector3) -> Node3D:
 	var _prof := Profiler.start()
+	if blueprint.is_empty():
+		print("[DEBUG] spawn_unit: blueprint is empty, cannot spawn at ", at)
 	var unit := UnitScript.new()
 	# Added to the tree BEFORE setup(): reconstruct_vehicle() and the nav agent
 	# both need the node to be inside the tree to resolve global transforms and
@@ -956,6 +1006,14 @@ func _spawn_resource_nodes() -> void:
 
 
 func _spawn_bases() -> void:
+	# Test Range has no bases. _spawn_test_range_force() handles player + dummies
+	# and the rule set has no HQ to place. Skipping here mirrors the same guard
+	# in _spawn_starting_units so the two are consistent. _match_rule_set is
+	# the cached rule set from _ready(); reading from the member is what every
+	# other phase of the director does, no need to re-resolve off /root here.
+	if _match_rule_set != null and _match_rule_set.mode == MatchRuleSetScript.Mode.TEST_RANGE:
+		return
+
 	# Per-team assigned base zone, indexed by team id (PLAYER_TEAM / ENEMY_TEAM).
 	#
 	# Two things this assignment does for the orchestrator:
@@ -973,18 +1031,42 @@ func _spawn_bases() -> void:
 	# and the "max-distance spread" lands on the same side for both -
 	# a map with a 0-distance spawn pair will have the same 0-distance
 	# zone pair, which is what made the old code testable in isolation.
+	#
+	# The PLAYER team does NOT get an auto-placed HQ - instead, the
+	# pre-game phase below raises a placement ghost and waits for the
+	# player to drop the HQ in their assigned zone. The AI auto-places
+	# as before (no UI for the AI to interact with). On older maps that
+	# have no base_zones, the player falls through to the legacy
+	# auto-place at the spawn.hq coordinate, so modder maps without
+	# zones still boot the old way.
 	_team_base_zone = MapCatalog.assign_base_zones(
 		current_map.get("base_zones", []),
 		[PLAYER_TEAM, ENEMY_TEAM])
+	var player_zone_id: String = _team_base_zone.get(PLAYER_TEAM, "")
+	var has_zones: bool = not _team_base_zone.is_empty()
 	for spawn in current_map.get("spawns", []):
 		var team: int = PLAYER_TEAM if spawn.get("id") == "player" else ENEMY_TEAM
 		var zone_id: String = _team_base_zone.get(team, "")
 		# Prefer the zone centre. Fall back to the (still-authored) spawn.hq
 		# when this map has no base_zones - keeps older/modder maps booting.
 		var hq_pos: Vector3 = _base_zone_centre(zone_id) if zone_id != "" else spawn.get("hq", Vector3.ZERO)
+		# AI auto-places always. Player auto-places ONLY on maps without
+		# base_zones (the legacy boot path). On maps with base_zones the
+		# player gets a placement ghost instead - see _enter_hq_placement
+		# below. The same auto-place-then-raise-ghost path is the only
+		# other thing that calls _place_structure, so this is the one
+		# and only place the player-HQ decision lives.
+		if team == PLAYER_TEAM and has_zones:
+			continue
 		_place_structure("hq", team, hq_pos)
 	for t in [PLAYER_TEAM, ENEMY_TEAM]:
 		economy.recalculate_power(t, get_team_structures(t))
+
+	# Enter the pre-game placement phase for the player on maps that
+	# have a base zone assigned. A failed or no-zone map already has
+	# the player HQ at the legacy spot, so this is a no-op.
+	if has_zones:
+		_enter_hq_placement()
 
 
 # Centre of the zone a slot has been assigned to, in world space. Vector3.ZERO
@@ -1061,6 +1143,15 @@ func _place_structure(kind: String, structure_team: int, at: Vector3) -> Structu
 	s.setup(kind, structure_team)
 	s.died.connect(_on_structure_died)
 	Profiler.stop("place_structure", _prof)
+	# A new live structure can change which designs pass the tech-tree gate
+	# (a fresh tech_lab unlocks every tech_lab-gated design, a fresh refinery
+	# unlocks nothing, a fresh HQ unlocks nothing, etc.). The HUD's button
+	# `disabled` state is set at button-creation time only, so it would stay
+	# stale until the HUD rebuilt every button - which it never does.
+	# Emitting here lets ProductionHUD re-evaluate the gates immediately on
+	# structure placement, rather than on the next 5 Hz refresh tick (200 ms
+	# of stale UI is the failure mode the playtest hit).
+	structure_built.emit(structure_team, kind)
 	return s
 
 
@@ -1218,6 +1309,11 @@ func _on_structure_died(structure) -> void:
 	# Losing the last contributor to a queue refunds everything in it: that line
 	# can never advance again, so holding the money is a bug with extra steps.
 	production.cancel_unbuildable(structure.team)
+	# See structure_lost comment in the signal declaration. We emit BEFORE
+	# the audio / navmesh / end-match work so the HUD's re-eval lands on
+	# the same frame the player notices the death, not after the audio
+	# line and not after the rebake debounce.
+	structure_lost.emit(structure.team, structure.kind)
 	# The navmesh had a hole carved for this building and no longer should, and
 	# every cached flow field was sampled against the old passability.
 	#
@@ -1699,6 +1795,18 @@ var placement_ghost: MeshInstance3D = null
 signal placement_started(kind: String)
 signal placement_finished(kind: String, placed: bool)
 
+# A live structure was just added (post-_place_structure) or just lost
+# (post-_on_structure_died, before the queue cancellation runs). The HUD
+# listens to this to re-evaluate its tech-tree gates - a placed tech_lab
+# flips every tech_lab-gated design from "disabled" to "live", and a lost
+# tech_lab flips them back. team is the owning team, kind is the catalog
+# id of the structure (so the HUD can filter on tech_lab/physics_lab/
+# exotics_lab if it ever wants to - the current re-eval runs over the
+# full set, which is correct because any structure can in principle
+# unblock some gate).
+signal structure_built(team: int, kind: String)
+signal structure_lost(team: int, kind: String)
+
 
 func is_placing() -> bool:
 	return not placing.is_empty()
@@ -1837,6 +1945,220 @@ func _end_placement(placed: bool) -> void:
 	placing = {}
 	_clear_ghost()
 	placement_finished.emit(kind, placed)
+
+
+# --- Pre-game HQ placement ---------------------------------------------------
+#
+# The pre-game phase is its own placement mode, NOT a sibling of the build-queue
+# ghost. Three reasons it sits in its own state:
+#   1. The HQ is FREE. It is given to the player, not produced - so the path
+#      cannot go through confirm_placement() (which claims a job from a
+#      production queue and decrements resources). The whole flow is its own
+#      chain: begin_hq_placement -> update_hq_placement -> confirm_hq_placement
+#      which ends at place_hq_for_human().
+#   2. The validity rule is ZONE-CONSTRAINED, not the standard
+#      PlacementServiceScript.validity() block-tests / no-overlap / etc. The
+#      player must drop the HQ INSIDE their assigned half_extents rectangle
+#      (place_hq_for_human already enforces this - the ghost just visualises
+#      the rule, never re-implements it).
+#   3. The ghost needs TWO meshes, not one: the HQ footprint following the
+#      cursor, AND a wireframe of the assigned base zone. The wireframe is
+#      what tells the player "drop it here" - a 15x15 rectangle is a much
+#      stronger affordance than a single HQ ghost hovering over empty ground.
+#
+# Mouse wiring reuses the same _unhandled_input switch as the build-queue
+# placement - a separate code path is unnecessary because the only thing
+# different about pre-game clicks is which commit function runs at the end.
+var placing_hq: bool = false
+var hq_ghost: MeshInstance3D = null
+var hq_zone_outline: MeshInstance3D = null
+var hq_ghost_pos: Vector3 = Vector3.ZERO  # last valid (clamped) position; survives raycast misses
+
+# A pre-game HQ placement lifecycle signal. The BattleHUD listens to
+# this to swap its prompt banner between "DROP YOUR HQ IN THE HIGHLIGHTED
+# ZONE" (placement_started) and the normal in-match UI (placement_finished
+# with placed=true). The signal name mirrors placement_started/finished so
+# the HUD can use a single subscription pattern for both phases.
+signal hq_placement_started
+signal hq_placement_finished(placed: bool)
+
+
+func is_placing_hq() -> bool:
+	return placing_hq
+
+
+# Arms the pre-game phase. Called from _spawn_bases() after the base-zone
+# assignment on maps that HAVE base zones; no-op otherwise. The same input
+# flow as build-queue placement takes over from here.
+func _enter_hq_placement() -> void:
+	if placing_hq:
+		return
+	# Don't enter pre-game placement in Test Range. Test Range drives its
+	# own spawn flow and expects the player HQ to be live from frame 1.
+	# _match_rule_set is the cached rule set from _ready(); reading from
+	# the member is the same pattern _spawn_bases() and _setup_vision()
+	# use to gate on mode.
+	if _match_rule_set != null and _match_rule_set.mode == MatchRuleSetScript.Mode.TEST_RANGE:
+		return
+	placing_hq = true
+	_build_hq_zone_outline()
+	_build_hq_ghost()
+	hq_placement_started.emit()
+	_flash("PLACE YOUR HQ  -  CLICK IN THE HIGHLIGHTED ZONE")
+
+
+# Public. The BattleHUD or any test driver can call this to drop out
+# of the pre-game phase without placing (cancels). Used by the AI-vs-AI
+# smoke path and by the "skip pre-game" affordance if one is ever added.
+func cancel_hq_placement() -> void:
+	if not placing_hq:
+		return
+	_exit_hq_placement(false)
+
+
+# Ground-following ghost. Same raycast + ground-pick as update_placement;
+# the difference is what happens after the raycast lands:
+#   - the ground hit is CLAMPED to the assigned base zone (a point outside
+#     the half_extents rectangle is dragged to the closest point inside it,
+#     so the ghost slides along the zone edge instead of going red);
+#   - the ghost is recoloured by the zone test, not the placement service.
+# This is why there is no _ghosting helper for both: the colour logic is
+# a 2-line zone test, not the multi-rule block-tests the build queue runs.
+func update_hq_placement(screen_pos: Vector2) -> void:
+	if not placing_hq or not is_instance_valid(hq_ghost):
+		return
+	var hit := _raycast(screen_pos, LayersScript.GROUND_PICK_MASK, false)
+	if hit.is_empty():
+		return
+	hq_ghost_pos = _clamp_to_player_zone(hit.position)
+	hq_ghost.global_position = Vector3(
+		hq_ghost_pos.x,
+		terrain_height_at(hq_ghost_pos),
+		hq_ghost_pos.z)
+	# Colour by the SAME test the click uses - the ghost never lies
+	# about whether the click will go through. Inside the zone = green,
+	# outside = red. After the clamp above the ghost is ALWAYS inside
+	# the zone, so the red branch is effectively dead code, but kept
+	# for the future where the zone might be a non-axis-aligned polygon
+	# that the clamp can't handle.
+	var inside: bool = _is_inside_player_zone(hq_ghost_pos)
+	hq_ghost.material_override.albedo_color = \
+		GHOST_COLOR_VALID if inside else GHOST_COLOR_INVALID
+
+
+# Public. The click handler routes here from _unhandled_input when
+# placing_hq is true. place_hq_for_human does the actual placement and
+# the validity check - this wrapper just gates the path and exits the
+# placement mode on success.
+func confirm_hq_placement() -> bool:
+	if not placing_hq:
+		return false
+	if place_hq_for_human(hq_ghost_pos):
+		_exit_hq_placement(true)
+		return true
+	return false
+
+
+# Tear-down. Symmetric with _end_placement above. The wireframe is the
+# last thing the player sees in the pre-game phase, so it's freed last
+# (queue_free order is LIFO, so the wireframe at the bottom of this
+# function is actually freed first - on the next frame, the HQ ghost
+# disappears, then the zone outline).
+func _exit_hq_placement(placed: bool) -> void:
+	placing_hq = false
+	if is_instance_valid(hq_ghost):
+		hq_ghost.queue_free()
+	hq_ghost = null
+	if is_instance_valid(hq_zone_outline):
+		hq_zone_outline.queue_free()
+	hq_zone_outline = null
+	hq_placement_finished.emit(placed)
+
+
+# The zone visual: a thin hollow box outline at the player's base zone.
+# Hollow is critical - a solid box would HIDE the ground under the zone,
+# which is the worst possible affordance for a "drop your HQ here" hint.
+# An outline draws on top of the ground without occluding it.
+func _build_hq_zone_outline() -> void:
+	var zone_id: String = _team_base_zone.get(PLAYER_TEAM, "")
+	if zone_id == "":
+		return
+	var zone: Dictionary = MapCatalog.get_base_zone(current_map, zone_id)
+	if zone.is_empty():
+		return
+	var center: Vector3 = zone.get("center", Vector3.ZERO)
+	var half: Vector2 = zone.get("half_extents", Vector2.ZERO)
+	# Box mesh with size = 2 * half + a little Y so the box is thin (flat
+	# on the ground, not a 30m tall column).
+	var outline := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3(half.x * 2.0, 0.05, half.y * 2.0)
+	outline.mesh = box
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(0.35, 0.85, 0.45, 0.25)  # green tint, transparent
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	outline.material_override = mat
+	outline.global_position = Vector3(center.x, terrain_height_at(center) + 0.03, center.z)
+	# No shadow casting. The wireframe is a UI affordance, not a 3D object.
+	outline.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(outline)
+	hq_zone_outline = outline
+
+
+# The HQ ghost itself: a flat box sized to the HQ's footprint, follows
+# the cursor (clamped to the zone), recoloured by the zone test. Same
+# shader / material pattern as the build-queue ghost - same unshaded +
+# transparent tints so the green-vs-red reads the same to the player.
+func _build_hq_ghost() -> void:
+	var footprint: Vector3 = PlacementServiceScript.footprint_for("hq", {})
+	hq_ghost = MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = footprint
+	hq_ghost.mesh = box
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = GHOST_COLOR_INVALID
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	hq_ghost.material_override = mat
+	hq_ghost.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(hq_ghost)
+
+
+# Clamp a point to the player's base zone (axis-aligned half_extents
+# rectangle). The clamp drags an outside point to the closest point
+# inside, so a player dragging the cursor just past the zone edge
+# sees the ghost slide along the edge rather than flip red.
+func _clamp_to_player_zone(p: Vector3) -> Vector3:
+	var zone_id: String = _team_base_zone.get(PLAYER_TEAM, "")
+	if zone_id == "":
+		return p
+	var zone: Dictionary = MapCatalog.get_base_zone(current_map, zone_id)
+	if zone.is_empty():
+		return p
+	var center: Vector3 = zone.get("center", Vector3.ZERO)
+	var half: Vector2 = zone.get("half_extents", Vector2.ZERO)
+	var clamped_x: float = clampf(p.x, center.x - half.x, center.x + half.x)
+	var clamped_z: float = clampf(p.z, center.z - half.y, center.z + half.y)
+	return Vector3(clamped_x, p.y, clamped_z)
+
+
+# Inside-the-zone test, mirroring place_hq_for_human's own absf() check.
+# The double implementation is intentional: a future non-axis-aligned
+# zone shape would change this test but not place_hq_for_human, and the
+# ghost would then LIE about whether the click will go through. Both
+# need to be updated in lockstep, which is what the comment on
+# place_hq_for_human is for.
+func _is_inside_player_zone(p: Vector3) -> bool:
+	var zone_id: String = _team_base_zone.get(PLAYER_TEAM, "")
+	if zone_id == "":
+		return false
+	var zone: Dictionary = MapCatalog.get_base_zone(current_map, zone_id)
+	if zone.is_empty():
+		return false
+	var center: Vector3 = zone.get("center", Vector3.ZERO)
+	var half: Vector2 = zone.get("half_extents", Vector2.ZERO)
+	return absf(p.x - center.x) <= half.x and absf(p.z - center.z) <= half.y
 
 
 # A blueprint-built turret. Same lifecycle as any other structure - it carves the
@@ -2276,7 +2598,14 @@ func _group_size(group_id: int) -> int:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if camera == null or selection == null:
+		print("[DEBUG] _unhandled_input: early exit - camera=", camera, " selection=", selection)
 		return
+	if event is InputEventMouseButton and event.pressed:
+		var btn := "LEFT" if event.button_index == MOUSE_BUTTON_LEFT else \
+			("RIGHT" if event.button_index == MOUSE_BUTTON_RIGHT else str(event.button_index))
+		var unit_hit := selection.unit_at_point(event.position)
+		print("[DEBUG] MOUSE btn=", btn, " pos=", event.position,
+			" unit_hit=", unit_hit, " selected.size=", selection.selected.size())
 
 	if event is InputEventKey and event.pressed and not event.echo:
 		_handle_key(event)
@@ -2297,6 +2626,33 @@ func _unhandled_input(event: InputEvent) -> void:
 					confirm_placement(hit.position)
 			elif event.button_index == MOUSE_BUTTON_RIGHT:
 				cancel_placement()
+		return
+
+	# PRE-GAME HQ PLACEMENT. Mirrors the build-queue placement block above:
+	# left click commits via the dedicated hook (place_hq_for_human via
+	# confirm_hq_placement), right click cancels out. Mouse motion tracks
+	# the ghost via the same raycast, with the zone clamp and validity test
+	# handled by update_hq_placement. A build-queue placement and a
+	# pre-game placement are mutually exclusive - is_placing() and
+	# is_placing_hq() are never both true - so the early return above
+	# (when is_placing() is true) keeps the two flows from racing.
+	if is_placing_hq():
+		if event is InputEventMouseMotion:
+			update_hq_placement(event.position)
+			return
+		if event is InputEventMouseButton and event.pressed:
+			if event.button_index == MOUSE_BUTTON_LEFT:
+				# No need to raycast here - update_hq_placement already
+				# clamped to the zone and stored the result in
+				# hq_ghost_pos. The click commits whatever the ghost
+				# is currently on, not whatever the cursor is over.
+				confirm_hq_placement()
+			# Right click is intentionally a no-op for the pre-game
+			# phase: the player can never "skip" the HQ - the match
+			# needs a player HQ before it can start. The ghost just
+			# stays where it is; a re-click at a different spot
+			# drops the HQ at the new position. (Test Range bypasses
+			# the entire pre-game flow, so it never sees this.)
 		return
 
 	if event is InputEventMouseMotion:
@@ -2653,11 +3009,12 @@ func _build_hud() -> void:
 	# minimap lives inside BattleHUD - turning it off cleanly is a
 	# deeper change to BattleHUD itself, deferred until Phase 3 (Test
 	# Range launcher) wires the chase camera and the slim HUD together.
-	var match_config := get_node_or_null("/root/MatchConfig")
-	var rs: MatchRuleSet = match_config.rule_set if match_config and "rule_set" in match_config and match_config.rule_set != null else null
-	var enable_battle_hud: bool = rs.enable_battle_hud if rs != null else true
-	var enable_production_hud: bool = rs.enable_production_hud if rs != null else true
-	var enable_admin_menu: bool = rs.enable_admin_menu if rs != null else true
+	# _match_rule_set is the cached rule set from _ready(); reading from
+	# the member is the same pattern _spawn_bases / _setup_vision / etc
+	# use. The local match_config lookup above is no longer needed here.
+	var enable_battle_hud: bool = _match_rule_set.enable_battle_hud if _match_rule_set != null else true
+	var enable_production_hud: bool = _match_rule_set.enable_production_hud if _match_rule_set != null else true
+	var enable_admin_menu: bool = _match_rule_set.enable_admin_menu if _match_rule_set != null else true
 
 	_selection_rect = Panel.new()
 	_selection_rect.visible = false
