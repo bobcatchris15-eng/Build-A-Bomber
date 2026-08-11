@@ -119,7 +119,7 @@ func bake(blueprint_data: Dictionary) -> ImageTexture:
 	# obviously irrelevant rather than merely happening to be safe).
 	#
 	# This is the whole reason the stats are trustworthy: DesignStats.analyze()
-	# makes the same Drivetrain/WeaponRange/ModuleCatalog calls battle_unit.gd
+	# makes the same Drivetrain/WeaponRange/ModuleCatalog calls unit.gd
 	# makes on the unit it spawns, against a real hull node - not a re-derivation
 	# from the JSON. Reconstructing was already necessary for the picture, so the
 	# numbers cost nothing extra.

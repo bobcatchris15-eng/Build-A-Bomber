@@ -2,7 +2,7 @@ extends RefCounted
 ## Drivetrain: weight, load capacity, thrust and top speed for one design.
 ##
 ## WHY THIS FILE EXISTS. This math used to live twice - once in
-## battle_unit.gd's _recalculate_move_speed() (the real combat numbers) and
+## unit.gd's _recalculate_move_speed() (the real combat numbers) and
 ## once, abbreviated, in stat_calculator.gd's update_stats() (the Design Lab
 ## sidebar). The Design Lab copy carried its own comment admitting it was
 ## "deliberately a simplified re-derivation, not a shared function ... this
@@ -23,7 +23,7 @@ extends RefCounted
 ## instance, nothing to add to a tree.
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 
 ## Thrust every unit gets before any locomotion module contributes. Keeps a
 ## barely-powered design from dividing by ~nothing and reading as immobile.
@@ -186,7 +186,7 @@ const TWEAK_RESPONSE := {
 	],
 	# Wider track = more contact area = real flotation and load spread, paid
 	# for in friction. Always 2 nodes, so this is pure geometry. See also
-	# battle_unit.gd's terrain multiplier, where width earns a second,
+	# unit.gd's terrain multiplier, where width earns a second,
 	# separate bonus on soft ground.
 	"tracked_treads": [
 		{"keys": ["tread_width", "width", "size"], "ref": 1.0, "thrust": -0.35, "capacity": 1.0},
@@ -303,13 +303,13 @@ static func tweak_factors(locomotion_type: String, settings: Dictionary) -> Dict
 ## module children, which is what makes one function serve both.
 ##
 ## `locomotion_type`/`locomotion_settings` are passed in rather than read from
-## the hull because battle_unit.gd already holds them as fields (parsed from
+## the hull because unit.gd already holds them as fields (parsed from
 ## the blueprint) and they are the authority there; pass "" / {} to have them
 ## read from hull metadata instead, which is what the Design Lab does.
 ##
 ## `is_airborne` gates the Aerodrome Cartel's air-only speed passive. Left null
 ## it is derived from the trait system, which is what the Design Lab wants;
-## battle_unit.gd passes its own already-resolved is_flying instead, so the
+## unit.gd passes its own already-resolved is_flying instead, so the
 ## faction bonus cannot start disagreeing with the movement code that decides
 ## whether a unit actually flies.
 ##
@@ -336,7 +336,7 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	# the player tuned against were wrong for nine of the ten factions they
 	# could pick at match setup. Battle spawns always set the meta explicitly
 	# (blueprint_manager.reconstruct_vehicle), so nothing there changes.
-	var faction := FactionCatalog.NO_FACTION
+	var faction := LiveryScript.NO_LIVERY
 	if is_instance_valid(hull_node):
 		hull_type = str(hull_node.get_meta("type_id", "medium_hull"))
 		if hull_node.has_meta("armor_thickness"):
@@ -351,7 +351,7 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	# The hull's own mass, armor included, is REAL weight (FABLE_REVIEW.md
 	# 1.2) - it was display-only before that pass, which meant armoring up
 	# cost nothing in combat.
-	var armor_wt_mult: float = FactionCatalog.get_passive(faction, "armor_weight_mult", 1.0)
+	var armor_wt_mult: float = 1.0
 	var weight: float = ModuleCatalog.compute_hull_weight(hull_type, thickness, material, hull_scale, armor_wt_mult)
 
 	var thrust := BASE_THRUST
@@ -507,14 +507,10 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	# exactly the designs it is meant to reward.
 	var move_speed: float = maxf(SPEED_FLOOR, top_speed * overload_multiplier * underload_multiplier)
 
-	# Faction passives, applied here so the Design Lab reads the same number
-	# combat runs. air_speed_mult is gated on the design actually being
-	# airborne, which comes from the trait system rather than a type_id list.
-	move_speed *= FactionCatalog.get_passive(faction, "speed_mult", 1.0)
-	var airborne: bool = bool(is_airborne) if is_airborne != null \
-		else "airborne" in ModuleCatalog.get_traits(hull_type, loco_type)
-	if airborne:
-		move_speed *= FactionCatalog.get_passive(faction, "air_speed_mult", 1.0)
+	# Faction speed passives (a flat speed_mult, plus an airborne-only
+	# air_speed_mult) used to be applied here. They are gone with the factions
+	# themselves (see livery.gd), so move_speed is now the drivetrain's answer
+	# alone - which is the point: speed comes from what the player built.
 
 	return {
 		"has_locomotion": true,

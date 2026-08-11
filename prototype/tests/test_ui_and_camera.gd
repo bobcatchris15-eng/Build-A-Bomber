@@ -510,7 +510,7 @@ func test_ui_icons_share_one_stroke_colour() -> bool:
 func test_brushed_aluminum_ui_theme() -> bool:
 	print("Running Test Suite: UI Chrome - Backdrop Shader & Faction/Chrome Separation...")
 	var UITheme = preload("res://scripts/ui_theme.gd")
-	var FactionCatalog = preload("res://scripts/faction_catalog.gd")
+	var Livery = preload("res://scripts/livery.gd")
 
 	# This suite used to assert the OPPOSITE of what it asserts now: that UI
 	# chrome is repainted in the player's faction color. That behaviour was
@@ -566,15 +566,15 @@ func test_brushed_aluminum_ui_theme() -> bool:
 	var swatch = Panel.new()
 	swatch.size = Vector2(120, 80)
 	root.add_child(swatch)
-	UITheme.apply_faction_preview(swatch, "crimson_concordat")
+	UITheme.apply_faction_preview(swatch, "player")
 	var swatch_mat = swatch.material as ShaderMaterial
 	if not swatch_mat or swatch_mat.get_shader_parameter("tint_strength") <= 0.0:
-		print("  [FAIL] apply_faction_preview should apply a non-zero faction tint")
+		print("  [FAIL] apply_faction_preview should apply a non-zero livery tint")
 		panel.queue_free()
 		swatch.queue_free()
 		return false
-	if swatch_mat.get_shader_parameter("accent_tint") != FactionCatalog.get_visual_color("crimson_concordat"):
-		print("  [FAIL] Faction preview swatch should carry the Crimson Concordat catalog color")
+	if swatch_mat.get_shader_parameter("accent_tint") != Livery.zone_color("player", "hull_upper"):
+		print("  [FAIL] livery preview swatch should carry the livery's own hull-upper colour")
 		panel.queue_free()
 		swatch.queue_free()
 		return false
@@ -591,15 +591,17 @@ func test_brushed_aluminum_ui_theme() -> bool:
 		swatch.queue_free()
 		setup_scene.queue_free()
 		return false
-	# ...and changing faction must NOT repaint it.
+	# ...and it stays NEUTRAL. This used to drive the faction dropdown and
+	# assert the backdrop did not repaint; that dropdown is gone with the
+	# premade factions (livery.gd), so what is left to pin is the rule it was
+	# really protecting - screen chrome carries no team colour at all, because
+	# colour's job on screen is telling the player who owns a unit, and chrome
+	# that borrows it stops being a reliable ownership signal.
 	var before_tint = setup_scene.bg_rect.material.get_shader_parameter("tint_strength")
-	var concordat_idx = setup_scene.FACTIONS.find("crimson_concordat")
-	setup_scene.player_faction_btn.selected = concordat_idx
-	setup_scene.player_faction_btn.item_selected.emit(concordat_idx)
 	await tree.process_frame
 	var after_tint = setup_scene.bg_rect.material.get_shader_parameter("tint_strength")
 	if before_tint != 0.0 or after_tint != 0.0:
-		print("  [FAIL] Changing the faction dropdown must leave the backdrop neutral, got before=", before_tint, " after=", after_tint)
+		print("  [FAIL] The setup screen backdrop must stay neutral, got before=", before_tint, " after=", after_tint)
 		panel.queue_free()
 		swatch.queue_free()
 		setup_scene.queue_free()

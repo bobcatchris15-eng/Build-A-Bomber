@@ -1,4 +1,4 @@
-class_name SpecPlacard
+﻿class_name SpecPlacard
 extends PanelContainer
 # ONE specification widget, rendered in four places.
 #
@@ -182,7 +182,7 @@ static func values_from(blueprint: Dictionary, stats: Dictionary = {}) -> Dictio
 		out["thresholds"] = "K %.0f  T %.0f  E %.0f" % [k.x, t.x, e.x]
 
 	# Everything below comes from DesignStats.analyze(), which makes the same
-	# Drivetrain / WeaponRange / ModuleCatalog calls battle_unit.gd makes on the
+	# Drivetrain / WeaponRange / ModuleCatalog calls unit.gd makes on the
 	# unit it spawns. If it is absent the rows are simply skipped.
 	# KEY NAMES ARE DesignStats.analyze()'s OWN, checked against its schema rather
 	# than guessed. The plausible-sounding "total_weight" / "total_cost" /
@@ -203,7 +203,7 @@ static func values_from(blueprint: Dictionary, stats: Dictionary = {}) -> Dictio
 	if stats.has("longest_range"):
 		out["range"] = "%.0f m" % float(stats["longest_range"])
 	# Structure is the hull plus the pool its modules contribute, which is what
-	# battle_unit.gd actually fights with - hull_hp alone understates it.
+	# unit.gd actually fights with - hull_hp alone understates it.
 	if stats.has("hull_hp"):
 		out["health"] = str(int(float(stats["hull_hp"])
 			+ float(stats.get("module_hp_pool", 0.0))))

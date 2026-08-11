@@ -257,7 +257,11 @@ func _build_toolbox(queue_name: String) -> void:
 		if pressed:
 			_close_all_except(queue_name)
 		panel.visible = pressed
-		_layout_toolboxes())
+		# Sync call lays out now; the deferred call picks up the VBoxContainer's
+		# post-visibility-change combined minimum size on the next frame, which
+		# is the one a per-frame conditional layout would have missed.
+		_layout_toolboxes()
+		call_deferred("_layout_toolboxes"))
 
 	var crt := _build_crt(slot)
 
@@ -364,6 +368,9 @@ func open_queue(queue_name: String) -> void:
 	_slots[queue_name]["panel"].visible = true
 	_slots[queue_name]["header"].set_pressed_no_signal(true)
 	_layout_toolboxes()
+	# Deferred: pick up the post-visibility-change combined minimum size on the
+	# next frame (see _process header comment for the full reasoning).
+	call_deferred("_layout_toolboxes")
 
 
 func is_queue_open(queue_name: String) -> bool:
@@ -423,10 +430,29 @@ func _layout_toolboxes() -> void:
 # Hover is resolved here rather than through mouse_entered/mouse_exited because
 # those fire against a parent unreliably once children with their own mouse
 # filters sit on top of it, and every toolbox is full of buttons.
+#
+# Per-frame work is throttled. The OLD shape called _refresh_all() every
+# frame, which re-queried production.status() and production.contributor_count()
+# for all five queues every frame, and contributor_count() walks the
+# `structures` scene-tree group on every call. With one building that is
+# five group scans per frame; with the typical match (a few structures,
+# thirty-plus units) it is the kind of standing cost that explains a
+# "FPS dropped and never recovered" report. The progress bar updates
+# smoothly at REFRESH_INTERVAL (5 Hz) which is the human eye's
+# responsiveness threshold for a build progress indicator; the signal
+# handler at _on_queue_changed (line 619) covers lifecycle events
+# (enqueue, claim, cancel) so a finished job, a paused queue, or a
+# cancelled build still updates the bar without a 200ms lag.
+const REFRESH_INTERVAL := 0.2
+var _refresh_acc: float = 0.0
+
 func _process(delta: float) -> void:
 	if _director == null or _slots.is_empty():
 		return
-	_refresh_all()
+	_refresh_acc += delta
+	if _refresh_acc >= REFRESH_INTERVAL:
+		_refresh_acc = 0.0
+		_refresh_all()
 
 	var mouse := get_global_mouse_position()
 	var moved := false
@@ -468,19 +494,29 @@ func _process(delta: float) -> void:
 			entry["hidden"] = move_toward(current, target, SLIDE_SPEED * delta)
 			moved = true
 
-	# UNCONDITIONALLY, not `if moved`.
+	# ONLY WHEN SOMETHING MOVED. The previous unconditional `_layout_toolboxes()`
+	# call ran `slot.get_combined_minimum_size()` on every slot every frame.
+	# That looks like "five slots of arithmetic" - the comment that lived here
+	# before this change - but `get_combined_minimum_size()` is a recursive
+	# walk of every visible child. A closed slot has one button; an OPEN slot
+	# with the Building queue's list of buildable items has a dozen. The cost
+	# is directly proportional to "how many toolboxes the player has open",
+	# which is exactly what happens the moment a build starts (the Building
+	# queue is the one they open to enqueue). The cost stayed low for the
+	# closed-state baseline and jumped the frame the queue opened, which is
+	# the timing of the "FPS dropped and never recovered" report.
 	#
-	# A VBoxContainer's combined minimum size does not update in the same frame a
-	# child's `visible` changes, so the _layout_toolboxes() call inside the toggle
-	# handler measured the slot as though the list were still closed. If nothing
-	# was animating that frame, `moved` stayed false and the layout was never
-	# recomputed - so an opened list kept the collapsed slot's height and was
-	# positioned hanging off the BOTTOM of the screen. Measured: the list panel
-	# landed at y=1053 with a height of 248 in a 1080px viewport, which is why a
-	# wheel over it found no Control at all and fell through to the camera.
-	#
-	# Five slots of arithmetic per frame is not worth guarding against.
-	_layout_toolboxes()
+	# The reason the original author made it unconditional, captured in the
+	# comment this replaces: a VBoxContainer's combined minimum size does not
+	# update in the same frame a child's `visible` changes, so an immediate
+	# post-toggle layout call measures the slot as though the list were still
+	# closed - the list panel landed at y=1053 (off-screen) in the 1080px
+	# viewport. The fix for that race is a deferred call right after the
+	# panel toggles; every state-changing site (panel toggle, open_queue,
+	# _add_item_button) does `call_deferred("_layout_toolboxes")` so the
+	# post-visibility-change size is correct on the next frame.
+	if moved:
+		_layout_toolboxes()
 
 
 # Is this queue doing anything the player would want to watch? Used to hold a
@@ -575,6 +611,11 @@ func _add_item_button(parent: Control, queue_name: String, item: Dictionary) -> 
 	btn.custom_minimum_size = Vector2(0, 44)
 	btn.focus_mode = Control.FOCUS_NONE
 	parent.add_child(btn)
+	# Deferred layout: a new child of a VBoxContainer changes the slot's combined
+	# minimum size on the next frame, not this one. Without the deferred call,
+	# the freshly-opened list would briefly report its old (collapsed) height and
+	# clip off the bottom of the screen.
+	call_deferred("_layout_toolboxes")
 	UIFeedbackScript.wire(btn)
 
 	# A design gated on a lab the player has not built yet is disabled rather

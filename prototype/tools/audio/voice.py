@@ -395,7 +395,7 @@ def utter(spec: VoiceSpec, seed: str) -> np.ndarray:
 # --- The ordnance set --------------------------------------------------------
 #
 # One entry per sfx key that auto_weapon.gd's weapon switch can select
-# (scripts/auto_weapon.gd:1332-1338), plus the two impact keys battle_unit.gd
+# (scripts/auto_weapon.gd:1332-1338), plus the two impact keys unit.gd
 # plays. f0 ranges are the informative channel: a player hears a 70 Hz "ka-POW"
 # and a 380 Hz "pyoo" as different weapons before parsing either as a word.
 

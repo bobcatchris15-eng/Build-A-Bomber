@@ -13,6 +13,7 @@ extends StaticBody3D
 # file.
 
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
+const AmbientScatterScript = preload("res://scripts/ambient_scatter.gd")
 
 var resource_type: String = "metal"
 var amount: int = 1000
@@ -27,6 +28,13 @@ var start_amount: int = 1000
 # equally support as Node3D members.
 var mesh_inst: Node3D = null
 var label: Label3D = null
+
+# Set only on an ambient node whose visual was taken over by the shared
+# MultiMesh batcher (ambient_scatter.gd). When these are non-null mesh_inst is
+# null and vice versa - the two are mutually exclusive rendering paths, and
+# every read of mesh_inst outside setup() has a matching branch here.
+var _scatter: Node3D = null
+var _scatter_handle = null
 
 # Crib from C&C/Tiberium fields (Chris's own call, 2026-07-27): a node left
 # alone for a while gradually regrows, whether it's merely been picked at
@@ -160,6 +168,31 @@ func _try_spawn_authored(res_type: String) -> Node3D:
 # the one type where the harvestable visual (3-tree clumped "stand")
 # is the wrong silhouette for a single scattered find, which is why
 # it gets its own pool and nothing else does.
+# Which .glb an ambient node WOULD instantiate, as a path rather than an
+# instance. ambient_scatter.gd keys its per-species MultiMesh on this path and
+# instantiates each species exactly once, so handing it an instance to inspect
+# and throw away would reintroduce the per-item instantiation cost that
+# batching exists to remove.
+#
+# RNG consumption is identical to the two _try_spawn_* functions below (same
+# seed = hash(global_position), same single randi() against the same pool
+# size), so the batched path picks the SAME variant per scatter point as the
+# per-node path did. That equality is the whole reason this is a separate
+# function rather than a rewrite of them - map scatter has to stay
+# deterministic run-to-run.
+func _ambient_scene_path(res_type: String) -> String:
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(global_position)
+	if res_type == "lumber":
+		if not ResourceLoader.exists(AMBIENT_TREE_MODEL_DIR % 0):
+			return ""
+		return AMBIENT_TREE_MODEL_DIR % (rng.randi() % AMBIENT_TREE_POOL_SIZE)
+	if not ResourceLoader.exists(AUTHORED_MODEL_DIR % [res_type, 0]):
+		return ""
+	var pool: int = maxi(1, int(AUTHORED_POOL_SIZES.get(res_type, 1)))
+	return AUTHORED_MODEL_DIR % [res_type, rng.randi() % pool]
+
+
 func _try_spawn_ambient_authored(res_type: String) -> Node3D:
 	if res_type == "lumber":
 		if not ResourceLoader.exists(AMBIENT_TREE_MODEL_DIR % 0):
@@ -195,7 +228,7 @@ func setup(res_type: String, res_amount: int):
 	# The right-click pick on a single ambient tree is the cost of this:
 	# match_director.gd's _raycast against RESOURCE_NODES (layer 16) no
 	# longer hits an individual ambient tree. The harvester's auto-find
-	# path (battle_unit.gd's _auto_find_harvest_work, group iteration)
+	# path (unit.gd's _auto_find_harvest_work, group iteration)
 	# still works - and it is the right UX for a 1000-tree scatter
 	# anyway, since clicking through a forest to find the specific tree
 	# you want is exactly the friction the auto-find was designed to
@@ -204,6 +237,28 @@ func setup(res_type: String, res_amount: int):
 	# affordance the player uses).
 	collision_layer = 0 if is_ambient else 16
 	collision_mask = 0
+
+	# AND NO PER-TREE PHYSICS TICK EITHER. The collider gate above removed
+	# these nodes from the broadphase, but every one of them was still
+	# registered as a _physics_process callback - and an idle scatter is
+	# the common case, so all 1895 of them ran only to hit the `if
+	# is_ambient: return` guard on the first line of _physics_process().
+	#
+	# That guard made the FUNCTION free while leaving the DISPATCH in
+	# place, which is the part that actually costs: measured headless with
+	# tools/probe_skirmish_census.gd on a built skirmish world, turning
+	# these off is -40.6% of total physics-tick CPU (4.03 ms -> 2.40 ms at
+	# 16 units), making decorative scenery the single largest consumer of
+	# the tick - larger than every unit, weapon and the match director
+	# combined. An early return cannot fix that; only not being registered
+	# can.
+	#
+	# Non-ambient nodes are gated too, on the same reasoning one level in:
+	# a field node at full amount also returns immediately (nothing to
+	# regrow), so it only needs to tick while a regrow is actually pending.
+	# harvest() re-arms it; _physics_process() switches itself back off on
+	# reaching start_amount.
+	set_physics_process(not is_ambient and amount < start_amount)
 
 	# Authored art first, procedural primitive second - same "degrade to the
 	# placeholder rather than to nothing" contract as building_mesh.gd's own
@@ -218,7 +273,25 @@ func setup(res_type: String, res_amount: int):
 	# deterministic. Ambient ore (and any future ambient type) falls
 	# through to the regular harvestable pool via _try_spawn_ambient_
 	# authored's own internal branch - see that function's header.
-	mesh_inst = _try_spawn_ambient_authored(resource_type) if is_ambient else _try_spawn_authored(resource_type)
+	#
+	# AMBIENT NODES DRAW THROUGH A SHARED MULTIMESH, NOT THEIR OWN SUBTREE.
+	# Registering with the batcher hands off only the VISUAL; everything below
+	# this node (group membership, amount, harvest(), the no-regrow contract)
+	# is untouched, because that is per-item gameplay state a harvester
+	# queries and it cannot live in a vertex buffer. See ambient_scatter.gd's
+	# header for the measurement that motivated this (4292 scenery surfaces
+	# before a single unit spawns). Falls through to the per-node path if the
+	# batcher can't take it - a missing species asset must degrade to a
+	# visible placeholder, not to nothing.
+	if is_ambient:
+		var scatter := AmbientScatterScript.get_or_create(get_parent())
+		var path := _ambient_scene_path(resource_type)
+		if scatter != null and path != "":
+			_scatter_handle = scatter.register(path, self)
+			if _scatter_handle != null:
+				_scatter = scatter
+	if _scatter_handle == null:
+		mesh_inst = _try_spawn_ambient_authored(resource_type) if is_ambient else _try_spawn_authored(resource_type)
 	# AMBIENT SHADOWS ARE OFF. A 10-20-variant ambient scatter places 60-1000
 	# static trees across the whole map; with Godot's default 4096x4096 shadow
 	# atlas that's hundreds of shadow casters doing a full depth pass per
@@ -242,7 +315,11 @@ func setup(res_type: String, res_amount: int):
 	# code path.
 	if is_ambient:
 		_disable_shadows_recursive(mesh_inst)
-	if mesh_inst == null:
+	# A batched ambient node has no subtree of its own and must NOT fall
+	# through to the procedural placeholder below - it is already being drawn,
+	# by the MultiMesh, and a cylinder here would render a second time inside
+	# the tree it registered.
+	if mesh_inst == null and _scatter_handle == null:
 		var fallback := MeshInstance3D.new()
 		var mat = StandardMaterial3D.new()
 		mat.albedo_color = ResourceCatalogScript.color(resource_type)
@@ -287,7 +364,8 @@ func setup(res_type: String, res_amount: int):
 				fallback.position = Vector3(0, 0.6, 0)
 		fallback.material_override = mat
 		mesh_inst = fallback
-	add_child(mesh_inst)
+	if mesh_inst != null:
+		add_child(mesh_inst)
 
 	# Per-tree collider: NON-AMBIENT ONLY. See the collision_layer gate
 	# at the top of setup() for the why. Ambient nodes are still in the
@@ -346,9 +424,18 @@ func _update_label():
 		label.modulate = ResourceCatalogScript.color(resource_type)
 
 func _update_visual_scale():
-	if is_instance_valid(mesh_inst) and start_amount > 0:
-		var pct = clamp(float(amount) / float(start_amount), 0.15, 1.0) if amount > 0 else 0.15
+	if start_amount <= 0:
+		return
+	var pct = clamp(float(amount) / float(start_amount), 0.15, 1.0) if amount > 0 else 0.15
+	if is_instance_valid(mesh_inst):
 		mesh_inst.scale = Vector3(pct, pct, pct)
+	elif _scatter_handle != null and is_instance_valid(_scatter):
+		# Same shrink, applied to this item's slot in the shared MultiMesh.
+		# scaled_local (not scaled) so the shrink happens about the item's own
+		# origin the way a child MeshInstance3D's .scale did - scaling the
+		# global transform instead would drag the tree toward the map origin
+		# as it depleted.
+		_scatter.set_node_transform(_scatter_handle, global_transform.scaled_local(Vector3(pct, pct, pct)))
 
 func harvest(want: int) -> int:
 	var got = min(want, amount)
@@ -365,6 +452,9 @@ func harvest(want: int) -> int:
 	# (C&C Tiberium-style - a contested field rewards holding it).
 	if got > 0 and not is_ambient:
 		_time_since_harvest = 0.0
+		# Re-arm the regrow tick this node switched off when it last
+		# topped up (see the set_physics_process() note in setup()).
+		set_physics_process(true)
 	_update_label()
 	_update_visual_scale() # Shrink visually as it depletes
 	if amount <= 0:
@@ -381,8 +471,13 @@ func _physics_process(delta: float) -> void:
 	# enforceable; the alternative (setting regrow rate to 0) would
 	# still tick the timer and waste cycles.
 	if is_ambient:
+		set_physics_process(false)
 		return
 	if amount >= start_amount:
+		# Fully regrown - nothing left to do until the next harvest()
+		# re-arms us. Stop being dispatched rather than early-returning
+		# forever; see setup()'s note on why the dispatch is the cost.
+		set_physics_process(false)
 		return
 	_time_since_harvest += delta
 	if _time_since_harvest < REGROW_DELAY:

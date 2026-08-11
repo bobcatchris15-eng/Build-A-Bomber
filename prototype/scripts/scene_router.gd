@@ -8,7 +8,7 @@ extends Node
 #     of which skirmish.gd         ~978 ms
 #       of which its 13 top-level `const X = preload(...)` targets ~968 ms
 #         blueprint_manager.gd      479 ms
-#         battle_unit.gd            157 ms
+#         unit.gd (was battle_unit.gd pre-2026-08-10) ~157 ms
 #         terrain_builder.gd         90 ms
 #         building.gd                79 ms
 #         ...
@@ -63,11 +63,14 @@ var _fade_rect: ColorRect = null
 # that actually stall need an entry; anything else loads directly.
 const WARM_SOURCES := {
 	"res://scenes/MainLab.tscn": "res://scripts/module_placer.gd",
-	"res://scenes/Battlefield.tscn": "res://scripts/battlefield.gd",
 	# The rebuilt battle layer. It stalls for the same reason Skirmish does -
 	# match_director.gd's preload graph reaches blueprint_manager.gd and the unit
 	# and terrain scripts - and without an entry here goto() swapped straight to
 	# it, so the window simply froze on black instead of showing the lamps.
+	# 2026-08-10: Battlefield.tscn / battlefield.gd retired in the
+	# battle-system unification's Phase 4; the Test Range now boots
+	# on Battle.tscn via TestRangeLauncher (see main_menu's PROVING
+	# GROUND card and stat_calculator's "Test in Arena" button).
 	"res://scenes/Battle.tscn": "res://scripts/battle/match_director.gd",
 }
 
@@ -390,7 +393,7 @@ const STEP_LABELS := {
 	"map_catalog": "Consulting map registry",
 	"resource_node": "Locating resource deposits",
 	"module_catalog": "Indexing modules",
-	"faction_catalog": "Confirming faction records",
+	"livery": "Mixing paint",
 	"skirmish": "Assembling battlefield",
 	# The rebuilt battle layer's own graph. Without these every step on the way
 	# into Battle reads as "Loading <script name>", which is the loading screen

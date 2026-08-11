@@ -73,14 +73,14 @@ cd prototype
 - `blueprint_manager.gd` handles serialize/deserialize, reconstruction into live vehicles, and the scratch vs. saved design split (scratch for test-range trips, saved only on explicit user Save).
 - `module_catalog.gd` defines all hull types, weapon modules, locomotion types, armor materials, and their stats.
 
-**Combat & Damage Model** (`damage_resolver.gd`, `battle_unit.gd`, `auto_weapon.gd`)
+**Combat & Damage Model** (`damage_resolver.gd`, `battle/units/unit.gd`, `auto_weapon.gd`)
 - **Damage classes**: kinetic, thermal, explosive, energy.
 - **Armor materials**: hardened_steel, reactive_armor, ablative_ceramic, energy_shielding — each with per-class thresholds and reduction multipliers.
 - **Threshold system**: hits below threshold deal chip damage (15% of reduced damage); brute-force hits (≥4× threshold) blend reduction toward 1.0.
 - **Subsystem stripping**: 35% of hits target exposed modules; losing all locomotion immobilizes.
 - **Directional armor**: armor modules only protect the facet facing the attacker.
 
-**Unit Runtime** (`battle_unit.gd`)
+**Unit Runtime** (`battle/units/unit.gd`)
 - Generic team-aware combat unit built from blueprint via `BlueprintManager.reconstruct_vehicle()`.
 - Handles armor/damage, subsystem stripping, movement orders, flying/naval/screw-drive locomotion, harvester economy loop.
 - Fog-of-war: vision range from hull base + sensor modules; `fog_hidden` gates rendering and targetability.

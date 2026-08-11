@@ -10,7 +10,7 @@ extends SceneTree
 # will be more important than seam matching on terrain maps and buildings" -
 # so this optimises for making neighbouring patches look DIFFERENT, and
 # deliberately does not run the mirror-blend seam pass that
-# process_flow_faction_textures.gd applies to hulls.
+# process_flow_hull_texture.gd applies to hulls.
 #
 # Variant numbering: variant 0 is the existing fully-procedural bake from
 # generate_terrain_textures.gd, which keeps its unsuffixed filename

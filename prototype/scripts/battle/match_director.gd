@@ -29,6 +29,7 @@ const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
 const UnitScript = preload("res://scripts/battle/units/unit.gd")
 const LayersScript = preload("res://scripts/battle/battle_layers.gd")
+const MatchRuleSetScript = preload("res://scripts/match_rule_set.gd")
 const SelectionServiceScript = preload("res://scripts/battle/orders/selection_service.gd")
 const OrderServiceScript = preload("res://scripts/battle/orders/order_service.gd")
 const FlowFieldServiceScript = preload("res://scripts/battle/movement/flow_field_service.gd")
@@ -76,6 +77,17 @@ var enemy_faction: String = "technocrats"
 
 var bp_manager: Node = null
 var camera: Camera3D = null
+# The chase camera, when present, follows a single unit instead of
+# framing the whole battlefield. Battle-system unification (Phase 3):
+# Test Range sets this active and routes focus_unit to the player
+# unit; Skirmish and Operations leave it inactive and use the RTS
+# camera. Both are Camera3D children of Battle.tscn; only one has
+# `current = true` at a time.
+var chase_camera: Camera3D = null
+# The unit the chase camera tracks. Set by _wire_test_range_camera()
+# from the rule set's player roster. Null in any mode that is not
+# Test Range.
+var focus_unit: Node3D = null
 
 var ground_nav_map: RID
 var water_nav_map: RID
@@ -192,6 +204,16 @@ const FALLBACK_HARVESTER := "res://data/loadout/ore_trucker.json"
 # a click instead.
 var _drag_origin := Vector2.ZERO
 var _dragging := false
+# Right-click moves a unit; right-click + drag orbits the chase camera
+# in Test Range. The two are disambiguated by whether the press and
+# release positions are within DRAG_CLICK_THRESHOLD pixels of each
+# other - a stationary click issues a move order, a dragged click is
+# owned by the camera. Pre-existing left-click drag (selection
+# rectangle) is unchanged.
+const DRAG_CLICK_THRESHOLD: float = 4.0
+var _right_press_pos: Vector2 = Vector2.ZERO
+var _right_press_active: bool = false
+var _right_dragged: bool = false
 var _selection_rect: Panel = null
 
 # Armed one-shot modes: the next right-click means something other than "move".
@@ -216,12 +238,51 @@ func _ready() -> void:
 	add_child(bp_manager)
 
 	camera = get_node_or_null("Camera3D")
-
+	chase_camera = get_node_or_null("ChaseCamera")
+	# MatchConfig is the source of truth for both the camera-mode gate below
+	# AND the per-mode rule set the rest of this function reads. Resolve it
+	# ONCE at the top so the camera pick and the rule set lookup cannot
+	# disagree about whether the autoload is mounted.
 	var match_config := get_node_or_null("/root/MatchConfig")
-	if match_config and "selected_map_id" in match_config and match_config.selected_map_id != "":
-		map_id = match_config.selected_map_id
-	if match_config and "player_faction" in match_config and match_config.player_faction != "":
-		player_faction = match_config.player_faction
+	# Battle-system unification (Phase 3). The rule set, when set,
+	# picks which camera is `current`. Test Range activates the chase
+	# camera and wires it to the player unit; Skirmish and Operations
+	# leave the RTS camera active (the chase camera is null-defended
+	# so a Test Range launcher that forgets to set focus_unit is
+	# harmless - the camera sits at the world origin and waits).
+	if match_config and "rule_set" in match_config and match_config.rule_set != null \
+			and chase_camera != null and is_instance_valid(chase_camera):
+		var rs: MatchRuleSet = match_config.rule_set
+		if rs.camera_mode == MatchRuleSetScript.CameraMode.CHASE:
+			chase_camera.current = true
+			if camera != null and is_instance_valid(camera):
+				camera.current = false
+		else:
+			chase_camera.current = false
+			if camera != null and is_instance_valid(camera):
+				camera.current = true
+
+	# Battle-system unification (Phase 5, 2026-08-10). The seven legacy
+	# pre-match fields on MatchConfig (selected_map_id, player_faction,
+	# enemy_faction, selected_blueprint_paths, ai_difficulty, starting_credits)
+	# are retired. The per-mode rule set written by match_setup.gd /
+	# operations_draft.gd / test_range_launcher.gd is the single source
+	# of truth; its fields are read here, with the rule set's own defaults
+	# (set in MatchRuleSetScript.skirmish/operations/test_range) carrying
+	# the case where the caller did not specify a value. A test path that
+	# instantiates Battle.tscn without the autoload at all still gets a
+	# null match_config and falls through to the hardcoded director
+	# defaults - the same posture every prior phase preserved.
+	var rs: MatchRuleSet = null
+	if match_config and "rule_set" in match_config:
+		rs = match_config.rule_set
+	if rs != null:
+		if rs.map_id != "":
+			map_id = rs.map_id
+		if rs.player_faction != "":
+			player_faction = rs.player_faction
+		if rs.enemy_faction != "":
+			enemy_faction = rs.enemy_faction
 	current_map = MapCatalog.get_map(map_id)
 	# CORE_DESIGN_LANGUAGE.md §3.2: pan/middle-drag speed track world_scale so
 	# a genuinely bigger map doesn't also feel proportionally slower to move
@@ -239,12 +300,13 @@ func _ready() -> void:
 	production = ProductionServiceScript.new()
 	production.setup(economy, self)
 	for t in [PLAYER_TEAM, ENEMY_TEAM]:
-		# The pre-match screen's resource preset, when it set one. Both sentinels
-		# are -1 rather than 0, because "start with nothing" is a legitimate
-		# choice and must be distinguishable from "not configured".
+		# 2026-08-10: the per-team starting credit bank comes from the
+		# per-mode rule set, with a sentinel of -1 meaning "use the
+		# director's own default" (STARTING_CREDITS, 750). The legacy
+		# MatchConfig.starting_credits field is retired.
 		var start_credits: int = STARTING_CREDITS
-		if match_config and "starting_credits" in match_config and match_config.starting_credits >= 0:
-			start_credits = match_config.starting_credits
+		if rs != null and rs.starting_credits >= 0:
+			start_credits = rs.starting_credits
 		economy.add_team(t, start_credits)
 		production.add_team(t)
 	production.unit_completed.connect(_on_unit_completed)
@@ -274,9 +336,25 @@ func _ready() -> void:
 	_build_hud()
 
 	stats = MatchStatsScript.new()
-	commander = CommanderScript.new()
-	commander.setup(self, ENEMY_TEAM,
-		match_config.ai_difficulty if match_config and "ai_difficulty" in match_config else "normal")
+	# Battle-system unification (Phase 2). Test Range's rule set has
+	# enable_ai=false, which is the per-mode gate for "does the AI
+	# commander run at all". Skirmish and Operations both leave it on
+	# (the default), so the legacy behaviour is unchanged for the modes
+	# that exist today. The gate is forward-looking: Phase 3 wires the
+	# Test Range launcher to use Battle.tscn, and this branch is what
+	# makes Test Range not spin up a Commander at all.
+	# 2026-08-10: rule set is the single source; legacy ai_difficulty fallback
+	# is gone. enable_ai + ai_difficulty both come from the rule set, with
+	# the rule set's own defaults (true / "normal") carrying the no-rule-set
+	# case via the same duck-typed null guard.
+	var ai_enabled: bool = true
+	var ai_diff: String = "normal"
+	if rs != null:
+		ai_enabled = rs.enable_ai
+		ai_diff = rs.ai_difficulty
+	if ai_enabled:
+		commander = CommanderScript.new()
+		commander.setup(self, ENEMY_TEAM, ai_diff)
 
 	world_is_ready = true
 	world_ready.emit()
@@ -558,10 +636,24 @@ func get_surface_type_at(pos: Vector3) -> String:
 func _load_roster() -> void:
 	roster.clear()
 	var match_config := get_node_or_null("/root/MatchConfig")
+	# Battle-system unification (Phase 2). Same precedence as in _ready():
+	# the per-mode rule set wins if it was written; otherwise the seven
+	# legacy fields on MatchConfig stay in charge. Test Range's rule set
+	# has player_blueprint_path (singular) and enemy_blueprint_paths
+	# (plural) instead of selected_blueprint_paths, so the rule set has
+	# to also seed the player roster and the enemy roster directly when
+	# the mode is TEST_RANGE. The legacy _bundled_loadout_paths() seed
+	# still runs on top in either path, so a roster that comes in with
+	# fewer than ROSTER_LIMIT designs is still filled.
+	var rs: MatchRuleSet = match_config.rule_set if match_config and "rule_set" in match_config and match_config.rule_set != null else null
 
 	var chosen: Array = []
-	if match_config and "selected_blueprint_paths" in match_config:
-		chosen = match_config.selected_blueprint_paths
+	if rs != null and rs.mode == MatchRuleSetScript.Mode.TEST_RANGE and rs.player_blueprint_path != "":
+		# Test Range: exactly one player design, plus the bundled defaults
+		# if there's room.
+		chosen = [rs.player_blueprint_path]
+	elif rs != null and rs.selected_blueprint_paths.size() > 0:
+		chosen = rs.selected_blueprint_paths
 	if not chosen.is_empty():
 		for path in chosen:
 			_append_design(roster, bp_manager.load_blueprint(path))
@@ -581,11 +673,24 @@ func _load_roster() -> void:
 
 	# Factions: the pre-match choice wins; otherwise the roster's own lead design
 	# decides, which is the old behaviour and keeps a hand-built roster feeling
-	# like it belongs to somebody.
-	if match_config and "player_faction" in match_config and match_config.player_faction != "":
-		player_faction = match_config.player_faction
+	# like it belongs to somebody. Rule set (when set) is the single source
+	# of truth - 2026-08-10: legacy MatchConfig.player_faction fallback gone.
+	if rs != null and rs.player_faction != "":
+		player_faction = rs.player_faction
 	elif not roster.is_empty():
 		player_faction = roster[0].get("faction", "industrialists")
+
+	# Test Range's enemy roster comes from the rule set rather than from
+	# the bundled defaults. The legacy code path (Skirmish, Operations)
+	# also reads `enemy_faction` further down and falls back to the
+	# enemy_roster lead design - that path is unchanged.
+	if rs != null and rs.mode == MatchRuleSetScript.Mode.TEST_RANGE \
+			and rs.enemy_blueprint_paths.size() > 0:
+		enemy_roster.clear()
+		for path in rs.enemy_blueprint_paths:
+			_append_design(enemy_roster, bp_manager.load_blueprint(path))
+		if _harvester_in(enemy_roster).is_empty():
+			_append_design(enemy_roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
 
 	# ONE SHARED DEFAULT POOL (Chris's call). On a fresh install the player and
 	# the AI have the same designs available, so neither side is fighting with
@@ -616,8 +721,8 @@ func _load_roster() -> void:
 			enemy_roster = CounterDraftScript.order_roster(enemy_roster, history)
 			print("[Operations] AI counter-draft: %s" % CounterDraftScript.explain(history))
 
-	if match_config and "enemy_faction" in match_config and match_config.enemy_faction != "":
-		enemy_faction = match_config.enemy_faction
+	if rs != null and rs.enemy_faction != "":
+		enemy_faction = rs.enemy_faction
 	elif not enemy_roster.is_empty():
 		enemy_faction = enemy_roster[0].get("faction", "technocrats")
 
@@ -659,6 +764,23 @@ func _list_json(dir_path: String) -> Array:
 # side with exactly one harvester (skirmish.gd:1499) and everything else is
 # earned - matched here, because this mode is replacing that one.
 func _spawn_starting_units() -> void:
+	# Battle-system unification (Phase 3). Test Range spawns EVERY
+	# design in both rosters, not just the harvester, because Test
+	# Range's rule set has enable_production=false - the production
+	# queue is the wrong tool for "show the player their unit and
+	# three dummies on a small map". The lineup is small (4 units
+	# total per the rule set) so a direct loop is fine; a Skirmish
+	# unit's first move is the production queue, which is what the
+	# legacy path here keeps doing.
+	var rs: MatchRuleSet = null
+	var mc := get_node_or_null("/root/MatchConfig")
+	if mc != null and "rule_set" in mc and mc.rule_set != null:
+		rs = mc.rule_set
+	var test_range_mode: bool = rs != null and rs.mode == MatchRuleSetScript.Mode.TEST_RANGE
+	if test_range_mode:
+		_spawn_test_range_force()
+		return
+
 	for team_id in [PLAYER_TEAM, ENEMY_TEAM]:
 		var spawn := MapCatalog.get_spawn(current_map,
 			"player" if team_id == PLAYER_TEAM else "enemy")
@@ -672,6 +794,88 @@ func _spawn_starting_units() -> void:
 		# base if it does not, rather than dropping the unit on the HQ itself.
 		var at: Vector3 = spawn.get("harvester", spawn.get("hq", Vector3.ZERO) + Vector3(8, 0, -8))
 		spawn_unit(harvester, team_id, at)
+
+
+# Test Range places the player unit and the dummies on the map
+# directly. The placement uses the test_range map's authored spawn
+# points when it has them, falling back to a line-up across the
+# map's centre for a map that does not (the Phase 3 ship map will
+# author its own spawns).
+#
+# The player unit is captured into focus_unit so the chase camera
+# has a target. The dummies are not auto-engaging on spawn - their
+# normal BattleUnitV2 AI runs from the moment they are on the map,
+# which is what the player wanted when they picked the COMBAT-flagged
+# dummies; the legacy TARGET_DUMMY_SCRIPT hover-and-pace is gone
+# with the battlefield.gd retirement.
+func _spawn_test_range_force() -> void:
+	# Player unit: use the test_range map's player spawn if it has
+	# one, otherwise the centre of the map's half_extents.
+	var player_spawn: Vector3 = _test_range_spawn("player", Vector3(0, 0, 0))
+	var player_design: Dictionary = roster[0] if not roster.is_empty() else {}
+	if not player_design.is_empty():
+		var unit := spawn_unit(player_design, PLAYER_TEAM, player_spawn)
+		if unit != null:
+			focus_unit = unit
+			# Push the same reference to the chase camera. The match
+			# director's `focus_unit` and ChaseCamera3D's `focus_unit`
+			# are the same value; the camera reads it from its own
+			# field. Skirmish / Operations leave chase_camera.current
+			# false and the camera never reads its own field, so this
+			# is the one place the two are linked. Phase 3 left this
+			# gap (the comment here said "_wire_test_range_camera()"
+			# but that function was never written) - fix is the
+			# one-line push below.
+			if chase_camera != null and is_instance_valid(chase_camera) \
+					and "focus_unit" in chase_camera:
+				chase_camera.focus_unit = unit
+
+	# Dummies: a row in front of the player, each ~6m apart so weapons
+	# engage at sensible ranges. The exact spacing does not matter for
+	# behaviour, only for the player's read of the field. The dummy
+	# row's anchor is the player_spawn + (0, 0, 24) so dummies sit 24m
+	# south of the player by default; the map's enemy HQ is used as a
+	# directional hint (dummies spread on the line the player takes to
+	# reach that HQ) rather than as a literal spawn point. Maps without
+	# an enemy spawn fall back to the player-relative anchor.
+	var enemy_anchor: Vector3 = _test_range_spawn("enemy", Vector3.ZERO)
+	var has_enemy_spawn: bool = enemy_anchor != Vector3.ZERO
+	var base_anchor: Vector3 = player_spawn + Vector3(0.0, 0.0, 24.0)
+	var right: Vector3 = Vector3(0.0, 0.0, 1.0)  # default: spread along Z
+	if has_enemy_spawn:
+		# Use the map's enemy HQ as the row's centre, not as a per-dummy
+		# position. Spread dummies perpendicular to the line from player
+		# to enemy HQ so they read as "the things between me and the
+		# objective" rather than three units stacked on one point.
+		var to_enemy: Vector3 = enemy_anchor - player_spawn
+		to_enemy.y = 0.0
+		var fwd: Vector3 = to_enemy.normalized() if to_enemy.length() > 0.01 else Vector3(0, 0, 1)
+		right = fwd.cross(Vector3.UP).normalized()
+		base_anchor = player_spawn + to_enemy * 0.5  # midpoint of the engagement
+	var dummy_index: int = 0
+	for design in enemy_roster:
+		if design.is_empty():
+			dummy_index += 1
+			continue
+		var side_offset: float = float(dummy_index - (enemy_roster.size() - 1) * 0.5) * 6.0
+		var spawn_pos: Vector3 = base_anchor + right * side_offset
+		spawn_unit(design, ENEMY_TEAM, spawn_pos)
+		dummy_index += 1
+
+
+# Spawn point lookup for Test Range. Reads the test_range map's
+# authored spawns ("player" / "enemy") if the map provides them,
+# otherwise returns a sensible default derived from the map's
+# half_extents. The legacy Battlefield.tscn map shipped with hard-
+# coded spawns in the script (battlefield.gd:19-38); the unified
+# map catalog inherits those as default.
+func _test_range_spawn(spawn_id: String, fallback: Vector3) -> Vector3:
+	var spawns: Array = current_map.get("spawns", [])
+	for s in spawns:
+		if str(s.get("id", "")) == spawn_id:
+			var hq: Vector3 = s.get("hq", Vector3.ZERO)
+			return hq
+	return fallback
 
 
 # The bundled default designs. Phase 0 fields these directly so there is
@@ -2100,6 +2304,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		if _dragging:
 			_update_selection_rect(event.position)
 			return
+		# Right-button drag: mark so a stationary press+release does
+		# not look like a move order. The chase camera owns the drag
+		# itself - this is just a flag the match director reads on
+		# release to decide whether to issue the move order.
+		if _right_press_active and event.position.distance_to(_right_press_pos) > DRAG_CLICK_THRESHOLD:
+			_right_dragged = true
 
 	if not (event is InputEventMouseButton):
 		return
@@ -2112,12 +2322,28 @@ func _unhandled_input(event: InputEvent) -> void:
 			_dragging = false
 			_hide_selection_rect()
 			_resolve_left_release(event.position, event.shift_pressed)
-	elif event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		if _attack_move_armed:
-			_set_armed(false)
-			_issue_at(event.position, true, event.shift_pressed)
+	elif event.button_index == MOUSE_BUTTON_RIGHT:
+		if event.pressed:
+			# Record press position. The move order is issued on
+			# release UNLESS the player dragged - in which case the
+			# chase camera owns the input and the match director
+			# stays out of the way.
+			_right_press_pos = event.position
+			_right_press_active = true
+			_right_dragged = false
 		else:
-			_issue_at(event.position, false, event.shift_pressed)
+			# Release. Only fire the move order if the press was
+			# stationary (no drag).
+			if _right_press_active and not _right_dragged \
+					and event.position.distance_to(_right_press_pos) <= DRAG_CLICK_THRESHOLD:
+				if _attack_move_armed:
+					_set_armed(false)
+					_issue_at(event.position, true, event.shift_pressed)
+				else:
+					_issue_at(event.position, false, event.shift_pressed)
+			_right_press_pos = Vector2.ZERO
+			_right_press_active = false
+			_right_dragged = false
 
 
 func _handle_key(event: InputEventKey) -> void:
@@ -2364,7 +2590,7 @@ func _issue_at(screen_pos: Vector2, aggressive: bool, queued: bool) -> void:
 # AMBIENT_NODE_PICK_RADIUS so a right-click on empty ground doesn't auto-find
 # a tree 200m away - the player clicked on THIS patch, treat the click as
 # local. Returns null if nothing within radius. The harvester's auto-find
-# (battle_unit.gd's _auto_find_harvest_work) does the same kind of search
+# (unit.gd's _auto_find_harvest_work) does the same kind of search
 # but on every tick, and that one DOES search the whole map because the
 # harvester is idle and looking for any work - this is a click-driven pick
 # and the locality is the player-facing contract.
@@ -2420,6 +2646,19 @@ func _build_hud() -> void:
 	layer.name = "UI"
 	add_child(layer)
 
+	# Battle-system unification (Phase 2). The per-mode rule set is the
+	# single source of truth for which sub-HUDs exist. The default
+	# Skirmish values (all on) keep the legacy path identical; Test
+	# Range's rule set flips production_hud and admin_menu off. The
+	# minimap lives inside BattleHUD - turning it off cleanly is a
+	# deeper change to BattleHUD itself, deferred until Phase 3 (Test
+	# Range launcher) wires the chase camera and the slim HUD together.
+	var match_config := get_node_or_null("/root/MatchConfig")
+	var rs: MatchRuleSet = match_config.rule_set if match_config and "rule_set" in match_config and match_config.rule_set != null else null
+	var enable_battle_hud: bool = rs.enable_battle_hud if rs != null else true
+	var enable_production_hud: bool = rs.enable_production_hud if rs != null else true
+	var enable_admin_menu: bool = rs.enable_admin_menu if rs != null else true
+
 	_selection_rect = Panel.new()
 	_selection_rect.visible = false
 	_selection_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -2430,49 +2669,52 @@ func _build_hud() -> void:
 	_selection_rect.add_theme_stylebox_override("panel", box)
 	layer.add_child(_selection_rect)
 
-	battle_hud = BattleHUDScript.new()
-	battle_hud.name = "BattleHUD"
-	layer.add_child(battle_hud)
-	battle_hud.setup(self, PLAYER_TEAM, current_map)
+	if enable_battle_hud:
+		battle_hud = BattleHUDScript.new()
+		battle_hud.name = "BattleHUD"
+		layer.add_child(battle_hud)
+		battle_hud.setup(self, PLAYER_TEAM, current_map)
 
-	# BELOW BattleHUD's top strip, not on top of it.
-	#
-	# All three of these were positioned independently against the top-left corner
-	# - the strip is a full-width band at y=8..64, the bindings sat at y=12 and the
-	# hint at y=56 - so the corner rendered as three overlapping texts. They are
-	# stacked deliberately now, measured off the strip's own height rather than
-	# from three separately-guessed constants.
-	var below_strip: float = Tokens.SPACE_SM + BattleHUDScript.TOP_STRIP_HEIGHT + Tokens.SPACE_SM
+		# BELOW BattleHUD's top strip, not on top of it.
+		#
+		# All three of these were positioned independently against the top-left corner
+		# - the strip is a full-width band at y=8..64, the bindings sat at y=12 and the
+		# hint at y=56 - so the corner rendered as three overlapping texts. They are
+		# stacked deliberately now, measured off the strip's own height rather than
+		# from three separately-guessed constants.
+		var below_strip: float = Tokens.SPACE_SM + BattleHUDScript.TOP_STRIP_HEIGHT + Tokens.SPACE_SM
 
-	# The bindings, on screen, because they are not the conventional ones and
-	# nothing else in the build documents them yet.
-	var bindings := Label.new()
-	bindings.theme_type_variation = "HintLabel"
-	bindings.position = Vector2(Tokens.SPACE_MD, below_strip)
-	bindings.text = "DRAG SELECT  |  RMB MOVE  |  SHIFT+RMB QUEUE  |  Q ATTACK-MOVE  |  E STOP" \
-		+ "\nZ AGGRESSIVE  |  X RETURN FIRE  |  C HOLD  |  CTRL+1-9 SET GROUP  |  1-9 RECALL"
-	layer.add_child(bindings)
+		# The bindings, on screen, because they are not the conventional ones and
+		# nothing else in the build documents them yet.
+		var bindings := Label.new()
+		bindings.theme_type_variation = "HintLabel"
+		bindings.position = Vector2(Tokens.SPACE_MD, below_strip)
+		bindings.text = "DRAG SELECT  |  RMB MOVE  |  SHIFT+RMB QUEUE  |  Q ATTACK-MOVE  |  E STOP" \
+			+ "\nZ AGGRESSIVE  |  X RETURN FIRE  |  C HOLD  |  CTRL+1-9 SET GROUP  |  1-9 RECALL"
+		layer.add_child(bindings)
 
-	_hud_hint = Label.new()
-	_hud_hint.theme_type_variation = "HintLabel"
-	_hud_hint.position = Vector2(Tokens.SPACE_MD, below_strip + 44)
-	_hud_hint.text = ""
-	layer.add_child(_hud_hint)
+		_hud_hint = Label.new()
+		_hud_hint.theme_type_variation = "HintLabel"
+		_hud_hint.position = Vector2(Tokens.SPACE_MD, below_strip + 44)
+		_hud_hint.text = ""
+		layer.add_child(_hud_hint)
 
-	production_hud = ProductionHUDScript.new()
-	layer.add_child(production_hud)
-	production_hud.setup(self)
+	if enable_production_hud:
+		production_hud = ProductionHUDScript.new()
+		layer.add_child(production_hud)
+		production_hud.setup(self)
 
-	admin_menu = AdminMenuScript.new()
-	admin_menu.name = "AdminMenu"
-	layer.add_child(admin_menu)
-	admin_menu.main_menu_requested.connect(func():
-		var router = get_node_or_null("/root/SceneRouter")
-		if router != null:
-			router.goto("res://scenes/MainMenu.tscn")
-		else:
-			get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
-	admin_menu.quit_requested.connect(func(): get_tree().quit())
+	if enable_admin_menu:
+		admin_menu = AdminMenuScript.new()
+		admin_menu.name = "AdminMenu"
+		layer.add_child(admin_menu)
+		admin_menu.main_menu_requested.connect(func():
+			var router = get_node_or_null("/root/SceneRouter")
+			if router != null:
+				router.goto("res://scenes/MainMenu.tscn")
+			else:
+				get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
+		admin_menu.quit_requested.connect(func(): get_tree().quit())
 
 
 func _update_selection_rect(at: Vector2) -> void:
@@ -2500,8 +2742,19 @@ func _flash(text: String) -> void:
 
 
 func _raycast(screen_pos: Vector2, mask: int, areas: bool) -> Dictionary:
-	var from := camera.project_ray_origin(screen_pos)
-	var to := from + camera.project_ray_normal(screen_pos) * PICK_RAY_LENGTH
+	# Project the click from whichever camera is currently rendering the
+	# scene. The `camera` field still names the RTS Camera3D, but the
+	# chase camera takes over in Test Range - a click projected from the
+	# RTS camera in that mode would land on a coordinate the player
+	# cannot see and a move order would send the unit to a spot off
+	# screen. get_viewport().get_camera_3d() returns the active one.
+	var ray_cam := get_viewport().get_camera_3d() if camera != null else null
+	if ray_cam == null:
+		ray_cam = camera
+	if ray_cam == null:
+		return {}
+	var from := ray_cam.project_ray_origin(screen_pos)
+	var to := from + ray_cam.project_ray_normal(screen_pos) * PICK_RAY_LENGTH
 	var query := PhysicsRayQueryParameters3D.create(from, to)
 	query.collision_mask = mask
 	query.collide_with_areas = areas

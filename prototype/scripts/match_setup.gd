@@ -13,20 +13,26 @@ extends Control
 # defaults, it doesn't replace them.
 
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const MapCatalog = preload("res://scripts/map_catalog.gd")
 const RosterPickerScript = preload("res://scripts/roster_picker.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
+const MatchRuleSetScript = preload("res://scripts/match_rule_set.gd")
+const StampedButtonScript = preload("res://scripts/ui_stamped_button.gd")
 
 var bg_rect: ColorRect
 
-# Built in _ready() from FactionCatalog.get_ids() (all 10 factions), not a
-# hardcoded 3-item const - adding an 11th faction later needs zero changes
-# here.
-var FACTIONS: Array = []
-var FACTION_LABELS: Array = []
+# WAS a 10-entry faction picker built from FactionCatalog.get_ids(). The
+# premade factions are gone: the player authors ONE livery of their own
+# (livery.gd), it is a persistent profile setting rather than a per-match
+# choice, and it carries no mechanical bonus - so there is nothing left for
+# this screen to ask. Enemy teams roll their own livery deterministically from
+# their team id.
+#
+# The two ids below are what the match still needs to plumb through, and they
+# are constants now rather than dropdown state.
 const DIFFICULTIES = ["easy", "normal", "hard"]
 const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard"]
 # Starting credits; -1 means "use the match's own default" (Standard reproduces
@@ -43,8 +49,6 @@ const ROSTER_CAP = 12
 var map_btn: OptionButton
 var map_desc_label: Label
 var MAP_IDS: Array = []
-var player_faction_btn: OptionButton
-var enemy_faction_btn: OptionButton
 var difficulty_btn: OptionButton
 var resources_btn: OptionButton
 var bp_manager: Node
@@ -54,11 +58,6 @@ func _ready():
 	bp_manager = BlueprintManagerScript.new()
 	add_child(bp_manager)
 
-	FACTIONS = ["auto"]
-	FACTION_LABELS = ["Auto (from roster)"]
-	for fac_id in FactionCatalog.get_ids():
-		FACTIONS.append(fac_id)
-		FACTION_LABELS.append("%s - %s" % [FactionCatalog.get_faction_name(fac_id), FactionCatalog.get_passive(fac_id, "passive_summary", "")])
 
 	bg_rect = ColorRect.new()
 	bg_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -129,7 +128,7 @@ func _ready():
 	map_btn.tooltip_text = "Where the match is fought."
 	_sync_map_selection()
 
-	player_faction_btn = _add_dropdown(grid, "Your Faction", FACTION_LABELS)
+
 	# There used to be a _refresh_theme() re-theme wired to this dropdown, on the
 	# premise that the screen's chrome repainted in the player's faction colour.
 	# That premise is gone: UI chrome deliberately stopped being faction-tinted,
@@ -137,10 +136,7 @@ func _ready():
 	# the battlefield and repainting the menus in it collided with that. The
 	# backdrop is now the same steel for every faction, so there is nothing left
 	# to refresh and no handler to connect.
-	enemy_faction_btn = _add_dropdown(grid, "Enemy Faction", FACTION_LABELS)
-	var default_enemy_idx = FACTIONS.find("technocrats") # matches the old hardcoded enemy default
-	if default_enemy_idx >= 0:
-		enemy_faction_btn.selected = default_enemy_idx
+
 	difficulty_btn = _add_dropdown(grid, "AI Difficulty", DIFFICULTY_LABELS)
 	difficulty_btn.selected = 1 # Normal
 	# Real, not cosmetic (enemy_ai.gd's own DIFFICULTY_TIMER_MULT/PITY_MULT) -
@@ -191,22 +187,26 @@ func _ready():
 	button_row.add_theme_constant_override("separation", Tokens.SPACE_LG)
 	root_vbox.add_child(button_row)
 
-	var back_btn = Button.new()
-	back_btn.text = "Back"
+	# GHOST variant for Back: the screen is not asking the player to commit,
+	# just to leave. The 3D mesh renders with a lighter, less metallic finish
+	# and no signal emission, so the visual hierarchy reads PRIMARY > GHOST.
+	var back_btn = StampedButtonScript.new()
+	back_btn.legend = "BACK"
+	back_btn.variant = StampedButtonScript.Variant.GHOST
 	back_btn.custom_minimum_size = Vector2(200, 48)
 	# Back now returns to the main menu, not to MapSelect - map choice is a
 	# column on this screen, so there is no intermediate screen to go back to.
 	back_btn.pressed.connect(_return_to_menu)
 	button_row.add_child(back_btn)
 
-	var start_btn = Button.new()
-	start_btn.text = "Start Match"
+	# PRIMARY variant for Start Match. The single commit point on this screen -
+	# the style guide allows at most one PRIMARY, and "this is the match you
+	# are about to fight" is unambiguously it. The 3D mesh carries the green
+	# emission on its chamfer; the legend stays amber for consistency.
+	var start_btn = StampedButtonScript.new()
+	start_btn.legend = "START MATCH"
+	start_btn.variant = StampedButtonScript.Variant.PRIMARY
 	start_btn.custom_minimum_size = Vector2(240, 48)
-	# PrimaryButton is carbon tinted toward SIGNAL_GO - the one primary action a
-	# screen is allowed, which this is. The 0.5/1.0/0.5 modulate it replaces was
-	# a saturated web green nowhere in the palette; SIGNAL_GO is a deliberately
-	# desaturated olive so it reads as "ready" without competing with the units.
-	start_btn.theme_type_variation = "PrimaryButton"
 	start_btn.pressed.connect(_on_start_pressed)
 	button_row.add_child(start_btn)
 
@@ -280,14 +280,41 @@ func _add_dropdown(parent: Control, label_text: String, labels: PackedStringArra
 func _on_start_pressed():
 	var match_config = get_node_or_null("/root/MatchConfig")
 	if match_config:
-		match_config.player_faction = "" if FACTIONS[player_faction_btn.selected] == "auto" else FACTIONS[player_faction_btn.selected]
-		match_config.enemy_faction = "" if FACTIONS[enemy_faction_btn.selected] == "auto" else FACTIONS[enemy_faction_btn.selected]
-		match_config.ai_difficulty = DIFFICULTIES[difficulty_btn.selected]
-		match_config.starting_credits = RESOURCE_PRESETS[resources_btn.selected]
+		# Fixed ids rather than a player choice - see the note at the top of
+		# this file. LiveryScript resolves PLAYER_ID to the player's authored
+		# scheme and any other id to a deterministic roll, so "enemy" is a
+		# stable, distinct look with nothing to persist.
+		var player_faction: String = LiveryScript.PLAYER_ID
+		var enemy_faction: String = "enemy"
+		var ai_difficulty: String = DIFFICULTIES[difficulty_btn.selected]
+		var starting_credits: int = RESOURCE_PRESETS[resources_btn.selected]
 		# Slot order, left to right and top to bottom, gaps skipped. Under the old
 		# checkbox list this was library sort order, which meant which designs
 		# survived skirmish.gd's roster.slice(0, 12) was effectively incidental.
-		match_config.selected_blueprint_paths = roster_picker.ordered_paths() if roster_picker else []
+		var paths: Array = roster_picker.ordered_paths() if roster_picker else []
+		# selected_map_id is still on MatchConfig (battle_hud / after-action
+		# report read it for display) - not part of the rule set.
+		match_config.selected_map_id = MAP_IDS[map_btn.selected] if map_btn.selected >= 0 and map_btn.selected < MAP_IDS.size() else MapCatalog.DEFAULT_MAP_ID
+
+		# Battle-system unification (Phase 1, now Phase 5 final form). The
+		# per-mode rule set is the single source of truth; the seven
+		# legacy pre-match fields (player_faction / enemy_faction /
+		# selected_blueprint_paths / ai_difficulty / starting_credits) are
+		# retired. Everything below is what MatchConfig now carries.
+		match_config.rule_set = MatchRuleSetScript.skirmish(
+			match_config.selected_map_id,
+			player_faction,
+			enemy_faction,
+			paths,
+			ai_difficulty,
+		)
+		# The skirmish() factory doesn't take starting_credits because the
+		# factory exists to enforce the rule set's SHAPE; the bank preset
+		# is a screen value, not a mode-level one. Set it on the rule
+		# set after construction - sentinel -1 keeps MatchRuleSet's own
+		# default of "use the director's STARTING_CREDITS" intact when
+		# the screen does not override.
+		match_config.rule_set.starting_credits = starting_credits
 
 	# Routed through SceneRouter rather than change_scene_to_file(): loading
 	# Skirmish.tscn synchronously blocks the main thread for over a second,

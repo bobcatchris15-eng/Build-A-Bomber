@@ -77,7 +77,17 @@ const ROUTES := {
 		"links": [LAB, LIBRARY],
 	},
 	PROVING_GROUND: {
-		"scene": "res://scenes/Battlefield.tscn",
+		# 2026-08-10: Battlefield.tscn retired. The Test Range now boots on
+		# Battle.tscn via main_menu's PROVING GROUND card (which uses
+		# TestRangeLauncher to write a MatchRuleSet.test_range into
+		# MatchConfig) and stat_calculator's "Test in Arena" button
+		# (same launcher). This entry is the legacy navigation route
+		# for any screen that still calls goto() on PROVING_GROUND
+		# directly; it now lands on Battle.tscn with whatever the
+		# current MatchConfig says, which is fine for a "go back to
+		# the menu" flow because the Test Range launcher has already
+		# populated it by the time this route is reachable.
+		"scene": "res://scenes/Battle.tscn",
 		"title": "PROVING GROUND",
 		"parent": LAB,
 		"links": [LAB],

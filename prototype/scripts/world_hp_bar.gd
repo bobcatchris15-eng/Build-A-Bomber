@@ -2,7 +2,8 @@ extends RefCounted
 class_name WorldHPBar
 # VISUAL_AND_UX_POLISH_PLAN.md A4 / VISUAL_IMPROVEMENT_PLAN.md chunk F:
 # replaces the `Label3D` + `■□` ASCII bar pattern duplicated three times
-# (battle_unit.gd, building.gd, target_dummy.gd) with the already-authored
+# (unit.gd, building.gd, and the now-retired target_dummy.gd) with the
+# already-authored
 # but never-wired `inworld_hp_bar.gdshader`/`selection_ring.gdshader`
 # (found under `res://shaders/`, dated before this session - a real
 # segmented-bar gradient + damage-flash shader and a self-animating

@@ -2,7 +2,6 @@ extends Node3D
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const GlobalConfig = preload("res://scripts/global_config.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const WeaponRange = preload("res://scripts/weapon_range.gd")
 # Battle-layer section timing. Inert (one static bool read) unless a profiling
 # run has switched it on; auto_weapon.gd is shared with the old runtime, which
@@ -90,11 +89,11 @@ const REACQUIRE_INTERVAL: float = 0.2
 
 # frame_built weapons (ModuleCatalog.get_traverse_limit_angle == 0.0 exactly -
 # the barrel is fixed to the hull, so the whole vehicle aims instead, see
-# battle_unit.gd's has_frame_built_weapon) still need a real, reachable
+# unit.gd's has_frame_built_weapon) still need a real, reachable
 # ACQUISITION tolerance. Every target-scan below used to gate on
 # `angle_to(dir) <= traverse_limit_angle` directly, which for a frame_built
 # weapon means literally 0.0 - bit-exact alignment with a continuous slerp
-# (battle_unit.gd's _turn_toward) essentially never produces that, so target
+# (unit.gd's _turn_toward) essentially never produces that, so target
 # stayed permanently null and these weapons almost never fired regardless of
 # how well the hull was actually aimed (the "flaky firing" bug report).
 # Flooring the comparison at this tolerance (same 0.26 rad/~15 degrees the
@@ -597,7 +596,7 @@ func _is_los_blocked_to(candidate: Node3D) -> bool:
 
 	# Own-hull self-occlusion (DECISIONS_NEEDED.md 2026-07-17 "sponson
 	# weapons may be able to shoot through their own hull"): a battle-spawned
-	# hull's collider lives on battle_unit.gd's own CharacterBody3D (layer
+	# hull's collider lives on unit.gd's own CharacterBody3D (layer
 	# 4, "units" - see setup()'s CollisionShape3D and the running-gear
 	# collider), the very layer the query above deliberately omits so other
 	# units never block a shot. That omission meant a weapon's OWN hull
@@ -651,7 +650,7 @@ func _ready():
 		var data = get_meta("module_data")
 		type_id = data.type_id
 		var mount_faction = get_parent().get_meta("faction", "industrialists") if get_parent() and get_parent().has_meta("faction") else "industrialists"
-		base_dps = data.get_dps() * FactionCatalog.get_passive(mount_faction, "dps_mult", 1.0)
+		base_dps = data.get_dps()
 		dps = base_dps
 		heal_rate = data.get_heal_rate()
 		
@@ -846,7 +845,9 @@ func _recalculate_low_hp_dps_bonus():
 	if not vehicle or not ("hp" in vehicle) or not ("max_hp" in vehicle) or vehicle.max_hp <= 0.0:
 		return
 	var mount_faction = get_parent().get_meta("faction", "industrialists") if get_parent() and get_parent().has_meta("faction") else "industrialists"
-	var bonus_max = FactionCatalog.get_passive(mount_faction, "low_hp_dps_bonus_max", 0.0)
+	# Crimson Concordat's desperation curve (more DPS the closer to death) was
+	# a faction passive; those are gone (see livery.gd), so this is always 0.
+	var bonus_max = 0.0
 	if bonus_max <= 0.0:
 		return
 	var hp_ratio = clamp(vehicle.hp / vehicle.max_hp, 0.0, 1.0)
@@ -942,7 +943,7 @@ func _tick_weapon(delta):
 		# frame_built (traverse_limit_angle == 0): the barrel is fixed
 		# relative to the hull by definition - skip the independent-aim
 		# slerp entirely and stay at resting_transform. The whole vehicle
-		# has to turn to bring it to bear (battle_unit.gd's
+		# has to turn to bring it to bear (unit.gd's
 		# _has_frame_built_weapon/whole-vehicle-aim handles that), and the
 		# angle_to_target check just below naturally reflects that since
 		# global_transform now tracks the hull's own facing 1:1.
@@ -1179,7 +1180,7 @@ func _find_nearest_target(delta: float = -1.0):
 	#
 	# It now only fires when actually asked to, by one of two paths:
 	#   - request_screen(), the automatic self-screen a unit triggers when it
-	#     starts taking fire (battle_unit.gd's take_damage) - aimed along the
+	#     starts taking fire (unit.gd's take_damage) - aimed along the
 	#     bearing the fire came FROM, which is the direction that needs
 	#     blocking;
 	#   - a player ctrl+right-click attack-ground order, handled by the
@@ -2214,7 +2215,7 @@ const OBSCURANT_TYPES := ["smoke_discharger"]
 
 # Automatic self-screen: put a cloud between me and whatever is shooting.
 #
-# `threat_pos` is where the fire came from (battle_unit.gd passes
+# `threat_pos` is where the fire came from (unit.gd passes
 # take_damage's hit_origin). The screen goes on the line toward it rather
 # than on top of it - a screen you hide behind has to be between you and the
 # observer, and smoke blocks line of sight BOTH ways (it is checked by

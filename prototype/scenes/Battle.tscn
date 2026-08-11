@@ -1,7 +1,8 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://scripts/battle/match_director.gd" id="1_director"]
 [ext_resource type="Script" path="res://scripts/rts_camera.gd" id="2_rtscam"]
+[ext_resource type="Script" path="res://scripts/chase_camera.gd" id="3_chasecam"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_bt"]
 sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
@@ -40,6 +41,12 @@ shadow_enabled = true
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 26, 128)
 script = ExtResource("2_rtscam")
+current = true
+
+[node name="ChaseCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 7, 14)
+script = ExtResource("3_chasecam")
+current = false
 
 [node name="Ground" type="StaticBody3D" parent="."]
 

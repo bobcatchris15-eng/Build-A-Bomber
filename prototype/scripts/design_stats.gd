@@ -29,7 +29,7 @@ class_name DesignStats
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 # For its static hopper formula only - no state machine is instantiated here.
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const PowerBudgetScript = preload("res://scripts/power_budget.gd")
@@ -90,7 +90,7 @@ static func analyze(hull: Node3D) -> Dictionary:
 	# these dictionaries to always carry their full key set, because that is what
 	# calling the analyzers directly always gave them.
 	#
-	# Same call battle_unit.gd makes when it spawns the unit for real, with no
+	# Same call unit.gd makes when it spawns the unit for real, with no
 	# arguments because reconstruct_vehicle() writes locomotion_type and
 	# locomotion_settings onto the hull as metadata.
 	var dt: Dictionary = Drivetrain.analyze(hull)
@@ -115,19 +115,19 @@ static func analyze(hull: Node3D) -> Dictionary:
 	# See drivetrain.gd's matching default: absent meta means "no faction yet",
 	# which is the Design Lab, and NO_FACTION resolves every passive to its
 	# unmodified base value.
-	var faction := str(hull.get_meta("faction", FactionCatalog.NO_FACTION))
+	var faction := str(hull.get_meta("faction", LiveryScript.NO_LIVERY))
 	var hull_type := str(hull.get_meta("type_id", "medium_hull"))
 	var hull_scale = hull.get_meta("hull_scale", Vector3.ONE)
 
 	# Hull HP is the unit's REAL combat health pool, from the shared
-	# ModuleCatalog function battle_unit.gd and building.gd also read, times the
+	# ModuleCatalog function unit.gd and building.gd also read, times the
 	# faction's hp passive. Module HP is a separate per-part pool that subsystem
 	# stripping drains without touching hull HP - so the two are reported
 	# separately rather than summed, which is a distinction an earlier version of
 	# the sidebar got wrong (an empty hull displayed 0 HP and fielded at 400).
 	out["hull_hp"] = ModuleCatalog.compute_hull_max_hp(
 		hull_type, armor_thickness, armor_material, hull_scale
-	) * FactionCatalog.get_passive(faction, "hp_mult", 1.0)
+	)
 
 	var hull_cost = ModuleCatalog.compute_hull_cost(
 		hull_type, armor_thickness, armor_material, hull_scale

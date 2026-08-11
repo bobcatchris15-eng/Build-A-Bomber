@@ -16,7 +16,7 @@ const UITokens = preload("res://scripts/ui_tokens.gd")
 const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 # hull_decals.gd is deliberately NOT preloaded any more - the Lab draws no
 # faction insignia. Battle spawns still get theirs via blueprint_manager.
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
@@ -155,7 +155,7 @@ func _restore_test_session() -> void:
 		
 func _process(delta: float):
 	# Live idle spin for helicopter_rotors blades while designing - the
-	# Design Lab canvas never had this at all (battle_unit.gd/battlefield.gd
+	# Design Lab canvas never had this at all (unit.gd in combat now,
 	# spin them in combat/Test Range, but nothing did it here), which read
 	# as "the animation is broken" when the actual issue was that it never
 	# existed on this screen. Same rotate_y(15/sec) on the "RotorBlades"
@@ -1409,7 +1409,7 @@ func update_hull_appearance():
 	# silhouette its read). It is a no-op today and stops being one the moment
 	# any faction-independent greeble is added.
 	var body_size: Vector3 = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
-	HullGreeblesScript.apply_greebles(hull, FactionCatalog.NO_FACTION, body_size)
+	HullGreeblesScript.apply_greebles(hull, LiveryScript.NO_LIVERY, body_size)
 	ArmorGreeblesScript.apply(hull, "", body_size)
 
 	var kit_mat := HullMaterialBuilderScript.build_scale_model_material()

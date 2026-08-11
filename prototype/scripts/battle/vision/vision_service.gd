@@ -27,7 +27,7 @@ const TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
 #   per grid cell per construct per tick would be thousands of casts for an
 #   effect nobody can distinguish from a plain radius.
 
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const SmokeVolumeScript = preload("res://scripts/smoke_volume.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
 
@@ -307,14 +307,13 @@ func tick() -> void:
 
 func _is_spotted(c, viewers: Array, beacons: Array, was_visible: bool) -> bool:
 	var c_flying: bool = "is_flying" in c and c.is_flying
-	# Camouflage is a property of the thing being LOOKED AT, not of the viewer, so
-	# it scales every observer's effective range against this one construct.
-	var detection_mult: float = FactionCatalog.get_passive(
-		_faction_of(c), "detection_range_mult", 1.0)
+	# The Bayou Irregulars' camouflage passive scaled every observer's range
+	# against the thing being looked at. Faction passives are gone (see
+	# livery.gd); spotting range is now the viewer's alone.
 	for o in viewers:
 		if not is_instance_valid(o):
 			continue
-		var vision := effective_vision(o) * detection_mult
+		var vision := effective_vision(o)
 		# NO VISION MEANS NO VISION. Without this, the `distance <= reach` test
 		# below reads 0 <= 0 as true, so a construct with its sensors stripped -
 		# or one that never had any - still spots anything sharing its exact
@@ -362,7 +361,7 @@ func _faction_of(c) -> String:
 		return c.faction
 	if "hull_node" in c and is_instance_valid(c.hull_node) and c.hull_node.has_meta("faction"):
 		return c.hull_node.get_meta("faction")
-	return FactionCatalog.DEFAULT_FACTION
+	return LiveryScript.PLAYER_ID
 
 
 func _all_constructs() -> Array:

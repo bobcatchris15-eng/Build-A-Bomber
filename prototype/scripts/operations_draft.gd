@@ -20,6 +20,8 @@ const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
 const RosterPickerScript = preload("res://scripts/roster_picker.gd")
 const CounterDraftScript = preload("res://scripts/battle/ai/counter_draft.gd")
+const MatchRuleSetScript = preload("res://scripts/match_rule_set.gd")
+const StampedButtonScript = preload("res://scripts/ui_stamped_button.gd")
 
 const ROSTER_CAP := 12
 
@@ -221,14 +223,20 @@ func _build_action_bar(parent: Control) -> void:
 
 	# Between-rounds iteration is the whole premise - the report's "iterate on
 	# this design" goes to the Lab, and this is the way back to it from here.
-	var lab_btn = Button.new()
-	lab_btn.text = "< Design Lab"
+	# Lab and Abandon are both GHOST - this screen's commit point is Deploy.
+	var lab_btn = StampedButtonScript.new()
+	lab_btn.legend = "< DESIGN LAB"
+	lab_btn.variant = StampedButtonScript.Variant.GHOST
 	lab_btn.custom_minimum_size = Vector2(180, 44)
 	lab_btn.pressed.connect(func(): _goto("res://scenes/MainLab.tscn"))
 	bar.add_child(lab_btn)
 
-	var abandon_btn = Button.new()
-	abandon_btn.text = "Abandon Operation"
+	# DANGER variant for Abandon: the action is destructive (it cancels the
+	# whole operation), and the red emission on the chamfer signals that
+	# before the player reads the legend.
+	var abandon_btn = StampedButtonScript.new()
+	abandon_btn.legend = "ABANDON OPERATION"
+	abandon_btn.variant = StampedButtonScript.Variant.DANGER
 	abandon_btn.custom_minimum_size = Vector2(180, 44)
 	abandon_btn.pressed.connect(_on_abandon)
 	bar.add_child(abandon_btn)
@@ -237,9 +245,9 @@ func _build_action_bar(parent: Control) -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(spacer)
 
-	var deploy_btn = Button.new()
-	deploy_btn.text = "Deploy >"
-	deploy_btn.theme_type_variation = "PrimaryButton"
+	var deploy_btn = StampedButtonScript.new()
+	deploy_btn.legend = "DEPLOY >"
+	deploy_btn.variant = StampedButtonScript.Variant.PRIMARY
 	deploy_btn.custom_minimum_size = Vector2(220, 44)
 	deploy_btn.pressed.connect(_on_deploy)
 	bar.add_child(deploy_btn)
@@ -269,11 +277,30 @@ func write_match_config() -> void:
 	if match_config == null or _ops == null:
 		return
 	var stage: Dictionary = _ops.get_current_stage_info()
-	match_config.selected_map_id = str(stage.get("map_id", MapCatalog.DEFAULT_MAP_ID))
-	match_config.ai_difficulty = str(stage.get("ai_difficulty", "normal"))
-	# Factions are NOT rewritten: they were chosen once, for the operation, and
-	# MatchConfig is an autoload that still holds them.
-	match_config.selected_blueprint_paths = roster_picker.ordered_paths()
+	var map_id: String = str(stage.get("map_id", MapCatalog.DEFAULT_MAP_ID))
+	var ai_difficulty: String = str(stage.get("ai_difficulty", "normal"))
+	# Factions were chosen once for the whole operation (operations_setup.gd
+	# writes them into the rule set) and stay stable per operation. Same
+	# shape as the pre-Phase-5 code: no per-stage rewrite.
+	var player_faction: String = LiveryScript.PLAYER_ID
+	var enemy_faction: String = "enemy"
+	var paths: Array = roster_picker.ordered_paths()
+	# selected_map_id is still on MatchConfig (battle_hud / after-action
+	# report read it for display) - not part of the rule set.
+	match_config.selected_map_id = map_id
+
+	# Battle-system unification (Phase 1, Phase 5 final form). The
+	# per-mode rule set is the single source of truth; the seven
+	# legacy pre-match fields are retired.
+	match_config.rule_set = MatchRuleSetScript.operations(
+		map_id,
+		player_faction,
+		enemy_faction,
+		paths,
+		ai_difficulty,
+		_ops.operation_id,
+		_ops.current_stage,
+	)
 
 
 func _goto(path: String) -> void:

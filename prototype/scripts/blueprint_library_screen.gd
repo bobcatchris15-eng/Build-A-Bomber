@@ -10,6 +10,8 @@ const SceneRouter = preload("res://scripts/scene_router.gd")
 const UIShell = preload("res://scripts/ui_shell.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
+const TestRangeLauncherScript = preload("res://scripts/test_range_launcher.gd")
+const StampedButtonScript = preload("res://scripts/ui_stamped_button.gd")
 
 var list_vbox: VBoxContainer
 var blueprint_manager: Node
@@ -140,9 +142,11 @@ func _build_ui() -> void:
 	list_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(list_vbox)
 	
-	var back_btn = Button.new()
-	back_btn.text = "RETURN"
+	var back_btn = StampedButtonScript.new()
+	back_btn.legend = "RETURN"
+	back_btn.variant = StampedButtonScript.Variant.GHOST
 	back_btn.custom_minimum_size = Vector2(0, 48)
+	back_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	back_btn.pressed.connect(func():
 		var router = get_node_or_null("/root/SceneRouter")
 		var target = "res://scenes/MainMenu.tscn"
@@ -234,34 +238,48 @@ func _add_entry_ui(entry: Dictionary) -> void:
 	
 	var btn_hbox = HBoxContainer.new()
 	entry_vbox.add_child(btn_hbox)
-	
-	var edit_btn = Button.new()
-	edit_btn.text = "Edit in Lab"
-	edit_btn.modulate = Color(0.4, 1.0, 0.4, 1)
+
+	# Per-row action buttons. Variants carry the visual role - the old
+	# modulate=Color(0.4,1,0.4) green / Color(1,0.8,0.2) amber / Color(1,0.4,0.4)
+	# red were the original "color the flat button" hack and are now retired;
+	# PRIMARY / DANGER on the chamfer do the same job without the
+	# off-palette saturated tinting.
+	#
+	# Edit in Lab is the row's primary action (sends the design to the Lab
+	# to keep iterating). Test in Arena is a side-quest (kicks off a one-
+	# off Test Range). Delete is destructive. Duplicate and Rename are
+	# default neutral.
+	var edit_btn = StampedButtonScript.new()
+	edit_btn.legend = "EDIT IN LAB"
+	edit_btn.variant = StampedButtonScript.Variant.PRIMARY
+	edit_btn.custom_minimum_size = Vector2(140, 36)
 	edit_btn.pressed.connect(_on_edit_pressed.bind(entry.get("id", ""), entry.get("path", "")))
 	btn_hbox.add_child(edit_btn)
-	
-	var test_btn = Button.new()
-	test_btn.text = "Test in Arena"
-	test_btn.modulate = Color(1.0, 0.8, 0.2, 1)
+
+	var test_btn = StampedButtonScript.new()
+	test_btn.legend = "TEST IN ARENA"
+	test_btn.custom_minimum_size = Vector2(140, 36)
 	test_btn.pressed.connect(_on_test_pressed.bind(entry.get("id", ""), entry.get("path", "")))
 	btn_hbox.add_child(test_btn)
-	
-	var dup_btn = Button.new()
-	dup_btn.text = "Duplicate"
+
+	var dup_btn = StampedButtonScript.new()
+	dup_btn.legend = "DUPLICATE"
+	dup_btn.custom_minimum_size = Vector2(110, 36)
 	dup_btn.pressed.connect(_on_duplicate_pressed.bind(entry.get("id", "")))
 	btn_hbox.add_child(dup_btn)
-	
-	var rename_btn = Button.new()
-	rename_btn.text = "Rename"
+
+	var rename_btn = StampedButtonScript.new()
+	rename_btn.legend = "RENAME"
+	rename_btn.custom_minimum_size = Vector2(110, 36)
 	rename_btn.pressed.connect(_on_rename_pressed.bind(entry.get("id", ""), entry.get("name", "Untitled Design")))
 	if entry.get("read_only", false):
 		rename_btn.disabled = true
 	btn_hbox.add_child(rename_btn)
-	
-	var del_btn = Button.new()
-	del_btn.text = "Delete"
-	del_btn.modulate = Color(1, 0.4, 0.4, 1)
+
+	var del_btn = StampedButtonScript.new()
+	del_btn.legend = "DELETE"
+	del_btn.variant = StampedButtonScript.Variant.DANGER
+	del_btn.custom_minimum_size = Vector2(110, 36)
 	del_btn.pressed.connect(_on_delete_pressed.bind(entry.get("id", ""), entry.get("name", "Untitled Design")))
 	if entry.get("read_only", false):
 		del_btn.disabled = true
@@ -345,11 +363,16 @@ func _on_test_pressed(id: String, path: String):
 	if f:
 		f.store_string(json_string)
 		f.close()
-		var router = get_node_or_null("/root/SceneRouter")
-		if router:
-			router.goto("res://scenes/Battlefield.tscn", "res://scenes/BlueprintLibrary.tscn")
-		else:
-			get_tree().change_scene_to_file("res://scenes/Battlefield.tscn")
+		# 2026-08-10: Battlefield.tscn retired; the Test Range now boots on
+		# Battle.tscn via TestRangeLauncher. Same flow as stat_calculator's
+		# "Test in Arena" button - the launcher writes a Test Range rule
+		# set and routes through SceneRouter so the loading screen and fade
+		# are still the same as every other launcher.
+		var launcher = TestRangeLauncherScript.new()
+		add_child(launcher)
+		if not launcher.launch("blueprint_library"):
+			launcher.queue_free()
+			get_tree().change_scene_to_file("res://scenes/Battle.tscn")
 	else:
 		_show_error("Failed to write test scratch file.")
 

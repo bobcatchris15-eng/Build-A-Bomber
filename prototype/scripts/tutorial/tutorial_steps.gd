@@ -23,7 +23,15 @@ extends RefCounted
 # scene-scanning UI tone suite cannot (this text lives in a script, not a .tscn).
 
 const SCENE_LAB := "res://scenes/MainLab.tscn"
-const SCENE_ARENA := "res://scenes/Battlefield.tscn"
+# 2026-08-10: Battlefield.tscn retired. The Test Range now boots on Battle.tscn
+# via TestRangeLauncher (the launcher writes a MatchRuleSet.test_range into
+# MatchConfig and routes through SceneRouter). The tutorial manager no
+# longer routes to a separate proving-ground scene; the Test Range step
+# is reached by triggering TestRangeLauncher directly from the manager.
+# This constant is kept as a hint for any future step that wants to
+# show the player "this is where you'd land in the Test Range"; nothing
+# currently reads it (use TestRangeLauncher.launch("tutorial") instead).
+const SCENE_ARENA := "res://scenes/Battle.tscn"
 
 const STEPS := [
 	{

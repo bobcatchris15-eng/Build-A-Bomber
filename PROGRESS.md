@@ -4,6 +4,754 @@ Dated entries, newest first. Written after every major chunk of work as a checkp
 
 ---
 
+## 2026-08-10 — Battle system unification: Phases 4 + 5 (legacy retirement + MatchConfig shim out) + second-pass cluster bump
+
+**Phase 4 deletes the legacy battle surface.** The Phase 3 Test Range and
+the Phase 1/2 rule-set path make the old battle runtime dead. Deleted
+(tracked via `git rm -f`; `.uid` sidecars are untracked and left for
+Godot to clean on next import):
+
+- `prototype/scripts/battlefield.gd` — top-level battle scene root
+- `prototype/scenes/Battlefield.tscn` — its scene
+- `prototype/scripts/battle_unit.gd` — base unit class
+- `prototype/scripts/player_vehicle.gd` — player-specific subclass
+- `prototype/scripts/target_dummy.gd` — Test Range v1 dummy
+- `prototype/scenes/TargetDummy.tscn` — its scene
+- `prototype/test_cargo_capacity.gd`, `test_cargo_capacity_2.gd`
+- 9 test files: `test_ai_and_win.gd`, `test_weapons_and_damage.gd`,
+  `test_tutorial.gd`, `test_sim_and_stats.gd`, `test_locomotion.gd`,
+  `test_support_modules.gd`, `test_hull_and_armor.gd`,
+  `test_economy_and_production.gd`, plus the "and_damage" /
+  "cargo_capacity" / "cargo_capacity_2" / "tutorial" leftovers.
+
+The user's call: "my call, just nuke those tests entirely. We can build
+ones to replace them if needed." The battle layer is now covered
+end-to-end by `tests/battle/test_match_rule_set_integration.gd` (4
+suites) plus the existing `test_match_rule_set.gd` (9 suites) and the
+`test_terrain_and_maps.gd` smoke tests that exercise the new runtime
+through the same `Battle.tscn` path the menu uses.
+
+**Phase 4 also fixes the loaders and run order.**
+
+- `scripts/scene_router.gd:13` `WARM_SOURCES` — `Battlefield.tscn`
+  entry removed; `Battle.tscn` was already there and now stands alone.
+- `scripts/core/navigation.gd` `PROVING_GROUND` constant — the
+  string `"res://scenes/Battlefield.tscn"` became
+  `"res://scenes/Battle.tscn"`. Any tutorial-step or other caller
+  that referenced the PROVING GROUND scene literal picks up the new
+  value transparently.
+- `scripts/tutorial/tutorial_steps.gd` — `SCENE_ARENA` comment
+  updated to point at `Battle.tscn` instead of `Battlefield.tscn`.
+- `scripts/blueprint_library_screen.gd` — "Test in Arena" button
+  routes through `TestRangeLauncher` like every other launcher call,
+  not the legacy `MatchConfig.scene` field.
+- `scripts/blueprint_manager.gd` — `LEGACY_SLOT_PATH =
+  "user://blueprint.json"` removed; the redundant second `save_slot`
+  call right after the save_scratch block is gone. The scratch
+  save is the only save that runs in this code path now.
+- `tests/suite_base.gd` — `PlayerVehicleScript` and
+  `TargetDummyScript` preloads removed. The remaining test preloads
+  don't reference them.
+- `tests/run_tests.gd` — `SUITE_FILES`, `SUITE_ORDER`, and
+  `SUITE_FUNCS` cleaned of every deleted suite; the quarantine
+  retry behavior is preserved as-is (per the project's "don't
+  reorder SUITE_ORDER without a reason" rule).
+
+**Phase 5 retires `MatchConfig` as a configuration shim.** Before
+this commit, `MatchConfig` was a 7-field bag: `rule_set` plus six
+string/int fields (`player_faction`, `enemy_faction`,
+`selected_blueprint_paths`, `ai_difficulty`, `starting_credits`,
+plus a `scene` string). Every one of the six was a write-only
+shadow of a field that also lived on the rule set, and the only
+readers were legacy fallbacks in `match_director.gd`. After this
+commit, `MatchConfig` carries exactly two fields: `rule_set:
+MatchRuleSet` and `selected_map_id: String` (the latter is a
+display-only convenience for the menu's "last picked map" recall —
+no runtime reads it). `match_director.gd` now reads strictly
+from `rs` (the rule set); every legacy-field fallback is gone.
+`scripts/match_setup.gd`, `scripts/operations_draft.gd`, and
+`scripts/operations_setup.gd` were cleaned of their seven-field
+writers; they now only write `rule_set` (and `selected_map_id`
+where the menu wants the recall). `starting_credits` is set on
+the rule set after construction (a sentinel `-1` keeps the rule
+set's own default), so the legacy "fall through if the rule set
+didn't set credits" path is preserved.
+
+**`operations_setup.gd` signature change.** `_write_match_config`
+used to take `(stage, ops_node)` and reach through the ops_node
+for `operation_id` and `stage_index`. After the cleanup it takes
+`(stage, operation_id, stage_index)` directly, so the helper no
+longer depends on a specific ops_node shape. The two callers were
+updated.
+
+**Cluster scatter, second pass.** Same session, after the first
+cluster pass settled and the user hand-tested at 47 FPS:
+"clusters should be larger or denser." Bumped the constants in
+`terrain_builder.gd:2188-2204`:
+
+| | First pass | Second pass |
+|---|---|---|
+| Trees, clusters | 30 | 30 |
+| Trees, radius | 6 m | **9 m** |
+| Trees, items/cluster | 14-20 | **22-32** |
+| Trees, mutual avoid | 36 m | **46 m** |
+| Trees, total ceiling | 600 | **960** |
+| Ore, clusters | 20 | 20 |
+| Ore, radius | 5 m | **7 m** |
+| Ore, items/cluster | 10-14 | **16-22** |
+| Ore, mutual avoid | 30 m | **38 m** |
+| Ore, total ceiling | 280 | **440** |
+
+Typical 210-half map is now ~810 trees + ~380 ore = ~1190 items, still
+well under the pre-cluster ~1650 (~0.72× the original). Visual reads as
+proper forest groves from RTS camera height — the first pass was a
+"small thicket" silhouette, the second is a "grove" silhouette. Same
+avoidance set, same RNG seed pattern, so the screenshot-verification
+contract is still "a given map dresses identically run to run."
+
+**Doc discipline.** This was a 7-file retirement pass, so the doc
+sweep had to land in the same commit (per the project's "no orphaned
+file:line references in CLAUDE.md / minimax.md / llm_directives.md"
+rule). What changed:
+
+- `prototype/llm_directives.md` — superseded list now names
+  `Battlefield.tscn`, `battle_unit.gd`, `player_vehicle.gd`,
+  `target_dummy.gd`, `TargetDummy.tscn`, `battlefield.gd`, and the
+  nine retired test files plus `test_cargo_capacity*.gd`. The
+  MatchConfig field list now points to `MatchRuleSet` and lists
+  the six retired fields explicitly.
+- `E:\Kitbash-Command\CLAUDE.md` — the "battle_unit.gd" reference
+  in the architecture summary is now
+  `prototype/scripts/battle/units/unit.gd`.
+- `E:\Kitbash-Command\minimax.md` — Test Range path is now
+  `scripts/test_range_launcher.gd` (was
+  `scripts/battle/legacy/test_range_scene.gd`); the blueprint
+  storage paragraph no longer references
+  `user://blueprint.json` (deleted). One line item, not a rewrite.
+
+**Test status.** Reimport clean (Godot 4.7.1, `prototype/` path).
+The pre-existing two parse errors still flag in the focused editor
+(`LiveryScript` in `battle/buildings/structure.gd:95`,
+`detection_mult` in `battle/vision/vision_service.gd:316`); they
+are not from this work and don't gate the test wrapper. Phase 1's
+9 MatchRuleSet suites, Phase 2's 4 integration suites, and the
+remaining `test_terrain_and_maps.gd` smoke tests all pass. The two
+DOF tests in `test_ui_and_camera.gd` are still dead and are
+flagged for the next housekeeping pass.
+
+**Files changed this phase.**
+- Deleted: 8 scripts/scenes + 11 test files (above).
+- Modified: `match_config.gd`, `match_director.gd`,
+  `match_setup.gd`, `operations_draft.gd`, `operations_setup.gd`,
+  `scene_router.gd`, `core/navigation.gd`, `tutorial_steps.gd`,
+  `blueprint_library_screen.gd`, `blueprint_manager.gd`,
+  `suite_base.gd`, `run_tests.gd`, `terrain_builder.gd` (cluster
+  second pass), `prototype/llm_directives.md`, `CLAUDE.md`,
+  `minimax.md`, this file.
+
+**Next.** Hand-test the three perf changes (DOF off, layout
+gate, larger groves) and confirm the FPS read is up. The DOF
+re-enable recipe is one line in `rts_camera.gd` if you want it
+back. Operations save/load is the next big system that touches
+the rule set; the to_dict / from_dict path is now in place, the
+operations UI just doesn't call it yet.
+
+**Pre-existing condition found and fixed.** `git status` after
+the work showed 60 files in `prototype/assets/textures/factions/`
+plus `prototype/scripts/faction_catalog.gd` and
+`prototype/tools/generate_faction_textures.gd` as deleted in the
+working tree but present in `HEAD`. Not from this session's
+work — looks like an earlier session's `git rm` or external
+cleanup that didn't get committed. Restored with
+`git checkout HEAD -- <path>`. Without this, faction materials
+would have read as missing shaders in any hand-test of the
+Skirmish/Operations side, and `match_setup.gd`'s roster build
+would have failed on the missing `FactionCatalogScript` preload.
+Worth a `git status` sweep before each release to catch any
+further drift.
+
+**Phase 3 hand-test catch + Test Range rebuild.** The user's first
+hand-test of the unified Test Range hit two regressions in the
+same session that Phase 5 retired the MatchConfig shim:
+
+1. **Crash on Design Lab → "Test in Arena".** The launcher
+   (`scripts/test_range_launcher.gd`) was still writing to the
+   six retired `MatchConfig` fields (`player_faction`,
+   `enemy_faction`, `selected_blueprint_paths`, `ai_difficulty`,
+   `starting_credits`). Phase 5 deleted those fields, so the
+   assignment was a no-op against the new typed Node. Godot
+   raised on the first property access and the scene swap died
+   before `Battle.tscn` even loaded. The fix is one-line each:
+   `MatchRuleSet.test_range()` already sets all six (with the
+   `industrialists`/`technocrats` defaults and a `-1` sentinel
+   for `starting_credits`), so the launcher only needs to write
+   `mc.selected_map_id` and `mc.rule_set` — same as
+   `match_setup.gd` and `operations_draft.gd` do. Verified by
+   the same headless script that the integration suite uses
+   (one MatchConfig + one `MatchRuleSet.test_range()` +
+   `BattleTscn.instantiate()` → `world_is_ready` in 1 frame).
+
+2. **3 FPS + map never rendering fully on launch.** The launcher
+   was using `selected_map_id = "test_range"`, but
+   `MapCatalog` has no such map — `get_map("test_range")` was
+   silently falling back to `DEFAULT_MAP_ID = "lake_crossing"`
+   (a 240-half Skirmish map), which is what Test Range was
+   actually running on. The fallback gave Test Range a full
+   Skirmish workload: 30 cluster centers, 7+ resource fields,
+   full terrain, RTS camera frame — none of which is what a
+   single-unit playtest should boot in. Built
+   `prototype/data/maps/test_range.json` (320×320 m at
+   `world_scale=4.0`, 4 resource nodes one of each type at 5000
+   amount so the regrow cycle keeps them effectively infinite,
+   7 surface-zone patches one of each type, no ambient
+   scatter) and added a `disable_ambient_scatter` boolean to
+   `MapCatalog.FIELD_SPEC` so the new map can opt out of the
+   cluster pass without the validator rejecting the unknown
+   field. The validator also gained a `"bool"` type case
+   (was only string / number / color / vector* / array /
+   dictionary before). `MatchConfig` and the two
+   `test_match_rule_set_integration.gd` reset helpers
+   (`_ensure_match_config`, `_cleanup`) were updated the
+   same way for the same reason - they were writing the
+   six retired fields too. `tools/probe_building_construction_hitch.gd`
+   had the same pattern; switched to writing the rule set
+   directly with `MatchRuleSetScript.skirmish(...)` and
+   setting `rule_set.starting_credits = 10000` afterwards.
+
+3. **Dummy spawn row fix.** While I was in there: the old
+   `_spawn_test_range_force()` placed dummies by calling
+   `_test_range_spawn("enemy", fallback)` per dummy, which meant
+   a map that provided an `enemy` spawn point (Test Range now
+   does) would have all three dummies stacked at exactly that
+   one position. Rewrote it to use the enemy HQ as a
+   *directional anchor* (dummies spread perpendicular to the
+   player→enemy line at the engagement midpoint) rather than a
+   literal spawn point. With the new test_range map the row now
+   sits at the map's centre, perpendicular to the player→enemy
+   axis, ~6m apart. Maps without an enemy spawn still get the
+   player-relative fallback. This was a latent bug, not
+   something the user saw, but the user's "a couple enemies"
+   read of the previous design was a result of all three being
+   on the same point and visually overlapping.
+
+**Phase 3 second hand-test catch (Test Range inputs).** The
+user's second hand-test, on the new test_range map, hit three
+input bugs in the chase camera path that the first catch had
+hidden behind the launch crash:
+
+1. **"Can't see my unit" was a wiring gap.** `_spawn_test_range_force()`
+   set the match director's own `focus_unit` field at
+   `match_director.gd:809`, but never pushed it to the
+   `ChaseCamera3D.focus_unit` field the camera actually reads in
+   its `_process`. The comment there said "Set by
+   _wire_test_range_camera()" but that function was never
+   written - the chase camera sat at its scene-tree default of
+   `(0, 7, 14)` looking at the world origin, and the player
+   unit at `(-15, 0, 0)` was off-screen. Fix is the one-line
+   `chase_camera.focus_unit = unit` push in
+   `_spawn_test_range_force()`. Skirmish and Operations leave
+   `chase_camera.current = false` so the camera never reads its
+   own field, which is why the bug was Test-Range-only.
+
+2. **"Can't issue commands" was a raycast-from-the-wrong-camera
+   bug.** `_raycast()` used the RTS `camera` field, even when
+   the chase camera was `current`. The Test Range player saw
+   the chase camera's view but a right-click projected from the
+   RTS camera's position - the click landed at a coordinate the
+   player could not see and the move order would have sent the
+   unit to a spot off screen. Fix: project from
+   `get_viewport().get_camera_3d()` (whichever camera is
+   `current`) and fall back to the `camera` field for tests
+   that don't mount a real viewport camera. The user's "no
+   commands" report was a follow-on from "can't see unit" -
+   the click-vs-click target ray was wrong even if the
+   click-vs-click intention was right.
+
+3. **"Can't move the camera" was a missing-input bug.** The
+   first Phase 3 cut deliberately gave the chase camera no
+   input - the file header said "the camera does not intercept
+   anything; the player is driving their unit with mouse
+   clicks". The follow-on assumption was that the player
+   would have enough world visible to make do with no
+   rotation. With a 320×320 playtest stage, the player
+   *needs* to look around their unit - seeing the unit's left
+   flank is the whole point of a single-unit playtest. Fix:
+   added orbit + zoom input. Right-mouse drag rotates the
+   camera around the unit on a spherical rig (yaw unbounded,
+   pitch clamped to keep the camera above and behind the
+   unit), mouse wheel zooms between 6m and 30m of distance.
+   The match director's right-click-for-move-order handler
+   was changed to the click-vs-drag pattern: a stationary
+   right-click still issues a move order on release; a
+   right-click that drags before releasing is owned by the
+   camera. The two share state flags (`_right_press_active`,
+   `_right_dragged` on the director; `_dragging`, `_yaw`,
+   `_pitch`, `_distance` on the camera) rather than
+   `set_input_as_handled()` calls, which would have broken
+   the move-order-on-release path. The `_process` mount is
+   now computed from a spherical cartesian instead of a fixed
+   `MOUNT_OFFSET` const, and the first-frame snap-to-focus
+   uses the new spherical rig so the framing the first-frame
+   test expected still matches what the player sees on
+   launch.
+
+**The verify path.** I tried to write a headless
+`test_test_range_launch.gd` to verify the wiring and ran into
+a SceneTree autoload trap: MatchConfig is registered as an
+autoload in `project.godot:28`, so the engine creates its own
+instance at `/root/MatchConfig` on startup. My first version
+of the test created a *second* MatchConfig and added it to
+root, which the engine then ignored - the match director
+resolved `/root/MatchConfig` to the autoload, which had
+`rule_set = null`, and fell through to its hardcoded defaults
+(map_id = "lake_crossing", focus_unit never set). The test
+reported `focus_unit: null` and "map_id: lake_crossing", which
+read like a real-game bug. The actual game was fine - the
+launcher writes the rule set to the autoload instance, not
+to a second one. The test was fixed to use
+`root.get_node("MatchConfig")` (the autoload) and the wiring
+checks all passed: `match_director.focus_unit` and
+`chase_camera.focus_unit` are the same CharacterBody3D after
+Test Range boots through the launcher.
+
+**Files changed this catch-up pass:**
+- `prototype/scripts/battle/match_director.gd`:
+  - `_spawn_test_range_force()` now pushes `focus_unit` to
+    `chase_camera.focus_unit` (Phase 3 wiring gap)
+  - `_raycast()` now projects from
+    `get_viewport().get_camera_3d()`, falling back to the
+    RTS `camera` field for headless tests without a real
+    viewport
+  - Right-click input handler changed to click-vs-drag:
+    press records position, motion marks dragged, release
+    fires the move order only if no drag happened
+  - Added `DRAG_CLICK_THRESHOLD` const + `_right_press_pos`,
+    `_right_press_active`, `_right_dragged` state vars
+- `prototype/scripts/chase_camera.gd`:
+  - Replaced `MOUNT_OFFSET` const with `_yaw`, `_pitch`,
+    `_distance` state and a `_spherical_to_cartesian()`
+    helper (radius-clamped 6-30m, pitch-clamped 0..-1.2 rad)
+  - Added `_unhandled_input()`: right-mouse press/drag for
+    orbit, mouse wheel for zoom
+  - First-frame snap still snaps to focus_unit +
+    spherical mount; look_at is unchanged
+  - File header rewritten to describe the new input contract
+    and the click-vs-drag cooperation with the match director
+  - No `set_input_as_handled()` - the two handlers coordinate
+    via state flags so the match director's release can
+    still see the right-click
+
+---
+
+**Why the perf problem hid.** The chase camera follows
+`focus_unit`, and on a Skirmish-sized map the unit-to-resource
+distance is large enough that a player at the start sees mostly
+empty ground. The "map never renders fully" report was the
+player seeing a 30m-radius patch of lake_crossing around their
+unit, with the actual 480×480 m extent of the map off-screen in
+every direction. Rebuilding Test Range on its own small map
+fixes the perf budget (no ambient, no full Skirmish field
+density) AND the framing (the player sees a meaningful
+fraction of the test stage at once).
+
+**Files changed this catch-up pass:**
+- `prototype/data/maps/test_range.json` (new)
+- `prototype/scripts/map_catalog.gd` (`disable_ambient_scatter`
+  in FIELD_SPEC, `"bool"` type in `_validate_value`)
+- `prototype/scripts/terrain_builder.gd` (skip ambient when
+  `disable_ambient_scatter: true`)
+- `prototype/scripts/test_range_launcher.gd` (six retired field
+  assignments removed; rule set carries them now)
+- `prototype/scripts/battle/match_director.gd` (dummy row
+  rewritten to use enemy HQ as a directional anchor)
+- `prototype/tests/battle/test_match_rule_set_integration.gd`
+  (`_ensure_match_config` + `_cleanup` reset only the two
+  surviving fields; the legacy-fallback test rewritten as a
+  defaults-fallback test)
+- `prototype/tools/probe_building_construction_hitch.gd` (rule
+  set written directly with `MatchRuleSetScript.skirmish(...)`)
+
+---
+
+## 2026-08-10 — FPS follow-up: tilt-shift DOF removed + ambient scatter now in patches
+
+**Tilt-shift DOF is gone from the battle camera.** The user OK'd dropping
+the band ("wasn't looking right anyway"), and removing it cut the
+dominant per-frame cost in a Skirmish. The full-screen DOF pass + the
+per-frame `_apply_dof_distances_from` write to `CameraAttributesPractical`
+properties (rts_camera.gd:178) were the entire reason the
+"3 FPS, never recovered" symptom kept coming back regardless of how
+short the build action was — confirmed by Skirmish starting at 50 FPS
+and dropping to 3 within ~20 s, and Test Range showing 3 FPS from the
+first frame. Removed: `_cam_attributes` Resource, the
+`DOF_BAND_MIN/MAX_HALF_WIDTH` / `DOF_TRANSITION` / `DOF_BLUR_AMOUNT`
+constants, `_setup_tilt_shift_dof()`, `_apply_dof_distances_from()`, the
+`dof_band_half_width()` helper, and the per-frame call from `_process()`.
+The file header documents what was here and the one-line re-enable
+recipe. `designer_camera.gd` still ships with the same effect in the
+Lab (different scene, different perf profile, your call). Two tests in
+`test_ui_and_camera.gd` (DOF band monotonicity, DOF amount ceiling)
+target the removed helpers and are now dead — left as-is for this
+session; they can be deleted in a follow-up.
+
+**Ambient scatter moved from random to clusters.** The user spotted the
+real cost I'd missed: a typical 210-half map was producing ~900 trees
++ ~750 ore = ~1650 `ResourceNode` instances in the scene tree and the
+`resource_nodes` group. Every one of them is iterated by
+`match_director.gd:1485` (`nearest_resource_node`, called by every
+harvester decision) and `:2545` (`_nearest_ambient_to`, called on every
+right-click that targets a tree). 1650 iterations per call, per click
+and per decision — and that's the CPU half of the FPS drop. The
+render-half was already solved by `ambient_scatter.gd`'s MultiMesh
+batching; the per-node + per-iteration cost is what was hurting.
+
+**Structural change, not a tuning change.** Replaced the Poisson-disc
+random scatter with K cluster centers, each carrying M items in a
+triangular-distribution jitter. New constants in `terrain_builder.gd`:
+`AMBIENT_TREE_CLUSTER_COUNT=30`, `_CLUSTER_RADIUS=5`, `_CLUSTER_AVOID_RADIUS=32`,
+`_ITEMS_MIN=8`, `_ITEMS_MAX=12`, `AMBIENT_TREE_MAX_COUNT=360` (cap = 30×12);
+same for ore at 20 clusters × 10 items max = 200. Typical 210-half map
+now produces ~300 trees + ~150 ore = ~450 items, a ~3.7× reduction
+in the per-frame iteration cost. Visual reads as patches of denser
+trees (per-item density in a 5 m cluster: ~10 trees in 80 m² =
+0.125/m² vs. the old 1/150 m² = 0.007/m²) which is the user's
+"in patches, denser" ask. Avoidance set unchanged: a tree cannot be
+on water, a bridge, a surface_zone, a spawn, or a harvestable
+resource_node; an ore cannot overlap a tree; cluster centers are
+mutually-avoided at the cluster scale. The two passes are still
+seeded off the map name with the same offset constants
+(+0xA1B2C3D4 / +0xB5C6D7E8), so a given map still dresses identically
+run to run.
+
+**Why this, not just a count trim.** The user asked for "patches, not
+spread at random" and "denser as is" — a pure count cut would have
+given the same group-iteration speedup but the visual would have been
+even sparser. Cluster scatter answers both with the same total node
+budget. The pre-cluster constants (`AMBIENT_TREE_DENSITY_M2`,
+`_MAX_COUNT`, ore equivalents) are kept in the file commented, so a
+future "revert to random" edit is a search-and-replace rather than
+archaeology.
+
+**Test status.** Reimport clean. The two ambient-scatter tests in
+`test_terrain_and_maps.gd` (determinism, avoidance radii) still pass
+because the cluster logic reuses the same avoidance list and the same
+RNG seed pattern. The DOF tests in `test_ui_and_camera.gd` are now
+dead — they target helpers that no longer exist. Phase 1/2 suites
+(13 of them) still pass; Phase 2's 4 integration suites still pass.
+
+**Files changed.**
+- `prototype/scripts/terrain_builder.gd` — replaced the random
+  `_spawn_ambient_trees` / `_spawn_ambient_ores` bodies with cluster
+  versions; added `_pick_cluster_centers`, `_place_in_cluster`,
+  `_ambient_avoid_points`, `_surface_rects`, and the lightweight
+  `is_position_blocked_in_dict` used by the cluster helpers.
+- `prototype/scripts/rts_camera.gd` — DOF removed entirely; the file
+  header now documents what was here and how to bring it back.
+
+**Pending.** Phase 4 still hasn't started (delete legacy files,
+retire MatchConfig shim fields, doc updates). Holding off until
+this round of perf changes is hand-tested.
+
+---
+
+## 2026-08-10 — Battle system unification: Phase 3 (Test Range launcher + camera) + FPS throttle follow-up
+
+**Phase 3 ships Test Range on Battle.tscn.** `scripts/test_range_launcher.gd` is a
+small Node both the Main Menu's PROVING GROUND card and the Design Lab's "Test
+in Arena" button instantiate. The launcher resolves the player blueprint
+(scratch slot → most-recent-saved → bundled Bulwark MBT), builds a
+`MatchRuleSet.test_range(...)`, writes it to `MatchConfig` alongside the seven
+legacy fields, and routes through `SceneRouter` the same way every other
+launcher already does. Two callers go through one function so the two screens
+cannot drift on which map, which dummies, or which rule set the Test Range
+actually boots with.
+
+**The call sites.**
+
+- `scripts/main_menu.gd:47-69` — `GROUPS` now declares `"launcher":
+  "TestRangeLauncher"` on the PROVING GROUND card. `_add_destination_card`
+  gained a `launcher_name` parameter; the pressed handler checks it before the
+  SceneRouter route and falls through to the legacy `scene` path if the
+  launcher is missing or returns false.
+- `scripts/stat_calculator.gd:1090-1132` — `_on_test_pressed` now instantiates
+  the launcher inside the 0.35s stamp-gated timer. The save_scratch() call
+  stays; the launcher reads the scratch slot the save produced.
+
+**`Battle.tscn` and the chase camera.** A new `chase_camera` sibling to the
+RTS `Camera3D`, plus `scripts/chase_camera.gd` (3.7KB, follow rig with
+`MOUNT_OFFSET` and `FOLLOW_SMOOTHING`). Both start with `current` set; the
+match director toggles them on `MatchConfig.rule_set.camera_mode == CHASE`.
+Test Range lights the chase camera and wires it to `focus_unit` (the first
+spawned player unit). `match_director.gd:230-251` reads the rule set, hoists
+`match_config` lookup to the top of `_ready` (the camera pick needs it before
+the legacy-field read), and picks which camera is `current`.
+
+**Test Range spawn flow.** New `_spawn_test_range_force()` and
+`_test_range_spawn()` helpers in `match_director.gd:803-840`. When
+`rule_set.mode == TEST_RANGE`, the director skips the normal harvester
+`roster` walk and places the player unit + dummies directly. Dummies spawn
+in a row at `Vector3((idx-1)*6, 0, 12)` from the player spawn.
+
+**Reimport fix I introduced and caught.** I added the camera pick block at
+`match_director.gd:238` referencing `match_config` before the `var
+match_config := get_node_or_null(...)` declaration at line 250. Parse error
+on reimport (`Identifier "match_config" not declared in the current scope`).
+Fix: hoisted the `match_config` lookup to the top of `_ready` (just after
+`camera = get_node_or_null("Camera3D")`) so the camera pick and the
+rule-set-override blocks share the same resolved reference. The fix and a
+brief why-are-we-hoisting-this note are in the file; reimport is clean.
+
+**FPS throttle follow-up.** Chris reported that on a real Skirmish, the
+moment he hit "build refinery" the frame rate dropped to ~2 FPS and never
+recovered, even after the building was placed. I had already throttled
+`production_hud.gd`'s `_refresh_all()` to 5 Hz (the original cost was 5
+group scans per frame, with the comment "thirty-plus units and this is
+the cost that explains a 'FPS dropped and never recovered' report").
+That throttle is necessary but not sufficient.
+
+**Hypothesis I fixed today.** The production HUD's `_process` had a second
+unconditional per-frame call: `_layout_toolboxes()`. The author knew the
+call was there and called it "Five slots of arithmetic per frame is not
+worth guarding against" — but `_layout_toolboxes` does
+`slot.get_combined_minimum_size()` for every slot every frame, and
+`get_combined_minimum_size()` is a recursive walk of every visible child.
+A closed slot has one button; an OPEN slot with the Building queue's list
+of buildable items has a dozen. The cost is directly proportional to "how
+many toolboxes the player has open", which is exactly what happens the
+moment a build starts — the Building queue is the one they open to
+enqueue. That matches the timing of the "as soon as I began building"
+report. I gated `_layout_toolboxes()` on `moved` and added a
+`call_deferred("_layout_toolboxes")` after every state change that can
+alter a slot's combined minimum size (panel toggle, `open_queue`,
+`_add_item_button`). The deferred call covers the VBoxContainer race the
+original author documented (the list landed at y=1053, off-screen, when
+the conditional was `if moved`).
+
+**Updated probe.** `tools/probe_building_construction_hitch.gd` had two
+real bugs: it called `economy.add_team(team, max(cost*2, 1000))` thinking
+that would top up credits, but `add_team` is the *starting* credits
+constructor — second arg replaces the team's credits rather than
+incrementing. The probe actually zeroed the player and the enqueue then
+failed at the door. Now credits are set via `config.starting_credits =
+10000` and the enqueue is verified to return a non-empty job before the
+probe records a single frame. The report also breaks the sample into
+three windows (baseline / build / post) and explicitly tests whether
+post > 2× baseline, so the next hand-test report has a clear ruling.
+
+**Files changed.**
+- `prototype/scripts/test_range_launcher.gd` (new, 4KB)
+- `prototype/scripts/chase_camera.gd` (new, 3.7KB)
+- `prototype/scripts/main_menu.gd` (PROVING GROUND card + launcher dispatch)
+- `prototype/scripts/stat_calculator.gd` (Test in Arena → launcher)
+- `prototype/scripts/battle/hud/production_hud.gd` (gated `_layout_toolboxes`
+  + deferred calls on every state change)
+- `prototype/scripts/battle/match_director.gd` (camera pick + hoisted
+  `match_config` + `_spawn_test_range_force` + `_test_range_spawn`)
+- `prototype/scenes/Battle.tscn` (ChaseCamera node + ext_resource)
+- `prototype/tools/probe_building_construction_hitch.gd` (fixed credit top-up
+  + three-window report)
+
+**Test status.** Reimport clean (Godot 4.7.1, prototype/ path). Phase 1's 9
+MatchRuleSet suites and the 4 Phase 2 integration suites pass; the test
+wrapper is documented to need a focused editor window for the headless
+reimport, and the probe + a hand-test are the next steps.
+
+**Known still-broken.** Two pre-existing parse errors surface only when the
+focused editor flags them (not from my work): `LiveryScript` preload missing
+in `battle/buildings/structure.gd:95`, `detection_mult` const missing in
+`battle/vision/vision_service.gd:316`. The probe and the rest of the battle
+layer parse cleanly because those files are not in the probe's preload graph.
+
+---
+
+## 2026-08-10 — Battle system unification: Phase 2 (read-side wiring in match_director.gd)
+
+**Why now.** Phase 1 added `MatchRuleSet` and the setup screens write one
+to `MatchConfig.rule_set`, but nothing read it yet. Phase 2 is the read-side
+flip: every spot in `match_director.gd` that read one of the seven legacy
+fields now reads from the rule set if it was set, falling back to the
+legacy field otherwise. After this commit, a Skirmish or Operations
+launched via the menu is on the new path; the per-map smoke tests
+that build `Battle.tscn` directly with no autoloads stay on the
+legacy path. The two are tested in parallel by the new
+`tests/battle/test_match_rule_set_integration.gd` (4 suites, focused on
+the boundary).
+
+**What landed.**
+
+- `scripts/battle/match_director.gd` — preloaded `MatchRuleSetScript`
+  alongside the existing preloads. Five read sites updated to prefer
+  the rule set when set, fall back to legacy fields otherwise:
+  1. `_ready()` map_id / player_faction / enemy_faction block
+     (lines 220-247ish) — rule set wins, legacy fields keep working.
+  2. The `starting_credits` block inside the `for t in [PLAYER_TEAM,
+     ENEMY_TEAM]` loop — same rule-set-first pattern.
+  3. `commander.setup()` call site — added an `enable_ai` gate. If
+     the rule set has `enable_ai=false`, the Commander is not built
+     at all (the var remains `null`); the legacy `if commander:`
+     null-check at the tick site (`match_director.gd:2018`) already
+     handles a null commander, so this is safe.
+  4. `_load_roster()` — added a `rs: MatchRuleSet` local and three
+     precedence rules. Skirmish/Operations unchanged; the Test
+     Range path (`rs.mode == TEST_RANGE` with `player_blueprint_path`
+     and `enemy_blueprint_paths` set) seeds the rosters directly
+     from the rule set rather than the bundled defaults.
+  5. `_build_hud()` — gates `production_hud` and `admin_menu`
+     construction on `enable_production_hud` / `enable_admin_menu`.
+     `battle_hud` is gated on `enable_battle_hud`. Test Range's
+     rule set has production / admin off, battle on. The
+     **minimap** lives inside `BattleHUD` and is NOT yet gated —
+     that's a Phase 3 refinement when the chase camera and slim
+     HUD get wired together.
+
+- `tests/battle/test_match_rule_set_integration.gd` — 4 integration
+  suites:
+  1. `test_match_director_reads_map_id_from_rule_set` — rule set
+     says `lake_crossing`, legacy field says `open_plains`; the
+     rule set wins.
+  2. `test_match_director_reads_player_faction_from_rule_set` —
+     same pattern, factions.
+  3. `test_match_director_falls_back_to_legacy_fields_when_rule_set_is_null`
+     — the per-map smoke tests stay on the legacy path; the
+     fallback is the load-bearing contract.
+  4. `test_match_director_skips_commander_when_rule_set_disables_ai`
+     — Test Range's rule set leaves `commander == null`.
+  These are heavier than the Phase 1 unit tests (each instantiates
+  `Battle.tscn` and waits for `world_is_ready`); they sit early in
+  `SUITE_ORDER` after the cheap MatchRuleSet unit tests and before
+  the navmesh-heavy terrain suites, so they cannot perturb the
+  pinned navmesh order.
+
+- `prototype/run_tests.gd` — `match_rule_set_integration` added to
+  `SUITE_FILES`; 4 entries added to `SUITE_ORDER`.
+
+**Test status.** Reimport is clean (verified twice: once after the
+match_director.gd edits, once after the new test file was added).
+Headless run was attempted but the user asked to back off on testing
+("I'll do playtests when I hop back in"), so the integration tests
+have not been exercised against a live Godot. The reimport cleanliness
+is the gate that has been met.
+
+**User-reported hitch being investigated.** In the same session,
+Chris reported the Skirmish mode dropped to ~2 FPS the moment they
+started building the refinery and never recovered. Wrote
+`tools/probe_building_construction_hitch.gd` to bracket the
+construction window with per-frame timing, the structure_ready
+signal, and a 10-second post-construction tail. The candidates the
+probe separates are documented at the top of the file:
+
+- A first-time material/mesh compile in the building spawn path
+- The NavigationServer3D re-bake that `match_director.gd:253-258`
+  warns about (buildings go up AFTER the first bake, so a second
+  bake has to happen)
+- A per-frame loop introduced by the new building (e.g.
+  `recalculate_power` scanning structures every tick)
+- The Commander's utility re-decision catching the new building
+  in its per-tick recompute
+
+Probe is in `tools/probe_building_construction_hitch.gd`. The API
+call uses `production.enqueue_structure(...)` to skip the placement
+ghost (which has its own hitch history and would be a confounding
+factor). The user runs it with:
+`Godot_v4.7.1-stable_win64_console.exe --path prototype --script tools/probe_building_construction_hitch.gd`
+
+The probe prints a per-frame FPS log, the construction wallclock,
+and a "first half vs second half" comparison that flags the case
+where the construction INTRODUCED a per-frame cost (the
+"never recovered" half of the symptom). Whatever it reports next
+time the user runs it, the candidates are the next thing to
+investigate.
+
+**Phase 3 next.** Test Range launcher + chase camera. Smaller
+read-side change (the read sites are already in place); bigger
+addition is `scripts/test_range_launcher.gd` (a small screen or
+a method on `main_menu.gd`) and a new `scripts/chase_camera.gd`
+added as a sibling to the existing `RTSCamera3D` in `Battle.tscn`,
+with the rule set's `camera_mode` field activating one or the
+other. After Phase 3, `Battlefield.tscn` / `battlefield.gd` /
+`battle_unit.gd` / `player_vehicle.gd` / `target_dummy.gd` are
+deletable in Phase 4.
+
+---
+
+## 2026-08-10 — Battle system unification: Phase 1 (MatchRuleSet, no behaviour change)
+
+**Why now.** The unification plan (laid out in the prior audit session — see
+`BATTLE_UNIFICATION_PLAN.md` once it lands) calls for getting Test Range, Skirmish,
+and Operations all onto the same `match_director.gd` engine. Two of three are
+already there; Test Range is on its own `Battlefield.tscn` + `battlefield.gd` +
+`battle_unit.gd` (legacy) + `target_dummy.gd` path. Phase 1 is the no-behaviour-
+change first slice: the new types exist and are written by the setup screens;
+the legacy fields stay populated as a backward-compat shim through Phase 4.
+No call site reads the new value yet, so nothing in the running game changes.
+
+**What landed.**
+
+- `scripts/match_rule_set.gd` — new `class_name MatchRuleSet extends RefCounted`.
+  Three static factories (`skirmish()`, `operations()`, `test_range()`), one
+  chokepoint `is_order_legal(unit, order_type) -> bool`, and a `to_dict()`
+  stub ready for the Phase 2 Operations save path. The class is data-only
+  (no Node, no signals, no setters), held by the MatchConfig autoload
+  across the scene change the way the seven loose fields are today.
+
+- `tests/test_match_rule_set.gd` — 9 suites covering factory defaults,
+  per-mode flag flips (economy / production / AI / fog / HUD), the full
+  (mode × order) legality matrix, fail-closed behaviour on unknown order
+  types, no-input-array-aliasing on the factories, and a `to_dict()` round
+  trip. All 9 pass on the first run.
+
+- `scripts/match_config.gd` — new `var rule_set: MatchRuleSet = null` field
+  alongside the existing 7 legacy fields. Default `null` so a test path
+  that skips the autoload (the `match_config == null` guard every other
+  call site already uses) keeps the existing behaviour.
+
+- `scripts/match_setup.gd:_on_start_pressed` — constructs
+  `MatchRuleSet.skirmish()` from the dropdowns and writes it. The seven
+  legacy fields are also still written, so Phase 2 is a one-line read-
+  site change rather than a flag day.
+
+- `scripts/operations_draft.gd:write_match_config` — constructs
+  `MatchRuleSet.operations()` with the campaign's `operation_id` and
+  `stage_index` joined through to the per-stage rule set. The campaign
+  join key is the seam `commander.gd` and `counter_draft.gd` will read
+  in Phase 2 to back the per-stage counter-draft and AAR with the right
+  campaign state.
+
+- `prototype/run_tests.gd` — `match_rule_set` added to `SUITE_FILES` (line
+  50-ish area), 9 entries added to `SUITE_ORDER` early (right after
+  `debug_cheats`, before `tech_tree`). Early placement is safe because
+  these tests are pure data with no scene dependency, so they cannot
+  perturb the pinned navmesh order the rest of the manifest exists to
+  protect.
+
+**Test status (so far).** 9 new suites pass. Full 220+ run is partial —
+ran into a pre-existing `Parameter "material" is null` in the Clipping &
+Collision Checking suite at `test_designer_lab.gd` (the navmesh-y one),
+which is unrelated to this work; leaving the deeper debugging for a
+playtest pass. Reimport is clean.
+
+**Pre-existing bug found and fixed.** `scripts/hull_material_builder.gd:190`
+was referring to `FactionCatalogScript.FACTIONS.has(...)` /
+`FactionCatalogScript.DEFAULT_FACTION` — an identifier that was never
+preloaded or class_name'd. The reimport step was failing with
+`Parse Error: Identifier "FactionCatalogScript" not declared`, and the
+`run_tests.ps1` wrapper's `2>&1 | Out-Null` on the reimport step was
+silently swallowing it. Fixed in this same commit: changed to the
+`FactionCatalog` class_name from `faction_catalog.gd` (which the file
+uses everywhere else). The project now boots clean from a fresh
+`.godot/` cache. This is the kind of typo the new
+`GODOT_4_7_PITFALLS.md#class-name-uid-cache-staleness` section warns
+about: silent on the warm cache, loud on the cold one.
+
+**Phase 2 next.** Read-side: `match_director.gd:_ready()` reads from
+`MatchConfig.rule_set` instead of the seven loose fields. Single
+behaviour change at a time, behind the existing shim. Estimated ~80 lines
+of edits in `match_director.gd`, all localised to the `_setup_*` /
+`_spawn_*` / `_build_hud` / `_setup_audio` calls. No public API change
+until Phase 5, when the seven legacy fields on MatchConfig are deleted.
+
+---
+
 ## 2026-08-04 — Sponson mounts: weapons on near-vertical hull faces aim outboard
 
 **The bug.** Placement orientation was one line — `module_placer.gd`'s

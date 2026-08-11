@@ -1,14 +1,22 @@
 extends SceneTree
 # Objective seamlessness score for a candidate tileable texture.
 #
-# Context: the faction albedos currently in assets/textures/factions/ are
-# rendered hero images of metal plates - rounded corners, a drop shadow, a
-# grey background border, and one large accent stripe. Triplanar projection
-# can't carry composition like that, which is why hull SIDES read as
-# stratified banding while the top looks fine. Replacing them means sourcing
-# genuinely tileable swatches, and image generators do NOT guarantee that
-# opposite edges match. This measures whether they actually do, instead of
-# leaving it to eyeballing a thumbnail.
+# Context: hull surfaces are sampled TRIPLANAR in world space (hull meshes
+# aren't UV-unwrapped - see shaders/hull_faction_material.gdshader), so the
+# texture repeats many times across a single unit. A wrap-boundary mismatch
+# therefore isn't a subtle artifact, it's a hard line ruled down the side of
+# every vehicle in the match, at whatever period texture_scale works out to.
+#
+# The shared set in assets/textures/hull/ is baked by
+# tools/generate_hull_surface_texture.gd from PERIODIC value noise and
+# wrapping central differences, so in principle it tiles by construction. This
+# checks that the guarantee actually holds rather than trusting it - the
+# wrapping is spread across a lattice hash, a panel/rivet grid whose period has
+# to divide TEX_SIZE, and a normal-map derivative pass, and any one of those
+# losing its wrap (a panel size that no longer divides evenly, a clamped
+# gradient) reintroduces a seam silently. It also still serves its original
+# purpose: vetting an externally-sourced candidate plate BEFORE it goes in,
+# since image generators do NOT guarantee that opposite edges match.
 #
 # Method: a texture tiles seamlessly iff the discontinuity across the wrap
 # boundary is no worse than the discontinuity anywhere else in the image. So
@@ -22,13 +30,20 @@ extends SceneTree
 # join. The ratio is what makes the number comparable between a smooth swatch
 # and a busy one.
 #
-# Run:
-#   ./Godot_v4.3-stable_win64_console.exe --headless \
-#       --script tools/check_texture_seam.gd --path . -- <path> [<path> ...]
-# With no paths given it checks every faction albedo currently in the repo,
-# which is useful as a baseline for how bad the present ones are.
+# Run (from prototype/):
+#   ./Godot_v4.7.1-stable_win64_console.exe --headless --path . \
+#       --script tools/check_texture_seam.gd [-- <path> [<path> ...]]
+# With no paths given it checks the whole shared hull surface set, which is the
+# regression check to run after any edit to generate_hull_surface_texture.gd.
 
-const FACTION_DIR = "res://assets/textures/factions/"
+const HULL_TEX_DIR = "res://assets/textures/hull/"
+
+# All three maps, not just the albedo. The normal and roughness maps are
+# derived from the same height field but through their OWN passes (central
+# differences for the normal, a separate per-pixel formula for roughness), so
+# "the albedo wraps" does not imply the other two do - a gradient pass that
+# clamped instead of wrapping would leave the albedo spotless and put a seam
+# in the lighting response only.
 
 # Ratio above which a seam is likely to be visible in game. Calibrated as a
 # starting point, not a law - a texture at 1.8 with very low absolute deltas
@@ -39,18 +54,18 @@ func _init():
 	var args = OS.get_cmdline_user_args()
 	var paths: Array = []
 	if args.is_empty():
-		var dir = DirAccess.open(FACTION_DIR)
+		var dir = DirAccess.open(HULL_TEX_DIR)
 		if dir:
 			for f in dir.get_files():
-				if f.ends_with("_albedo.png"):
-					paths.append(FACTION_DIR + f)
+				if f.ends_with(".png"):
+					paths.append(HULL_TEX_DIR + f)
 		paths.sort()
 	else:
 		for a in args:
 			paths.append(a)
 
 	if paths.is_empty():
-		print("No textures to check.")
+		print("No textures to check (looked in %s)." % HULL_TEX_DIR)
 		quit(1)
 
 	print("%-38s %10s %10s %8s  %s" % ["TEXTURE", "SEAM", "INTERIOR", "RATIO", "VERDICT"])

@@ -16,13 +16,18 @@ const UIShell = preload("res://scripts/ui_shell.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.gd")
 const SpecPlacardScript = preload("res://scripts/ui/spec_placard.gd")
 const WordmarkScript = preload("res://scripts/ui/wordmark.gd")
 const DesignStatsScript = preload("res://scripts/design_stats.gd")
+# Test Range launcher (battle-system unification Phase 3). Same launcher the
+# Design Lab's "Test in Arena" button uses, so the two entry points cannot
+# drift on which map, which dummies, and which rule set the Test Range actually
+# boots with. The card data declares a `launcher` field; the destination card's
+# pressed handler routes through it instead of the legacy scene path.
+const TestRangeLauncherScript = preload("res://scripts/test_range_launcher.gd")
 
 const TITLE := "KITBASH COMMAND"
 const TAGLINE := "Design bureau and proving ground"
@@ -64,6 +69,12 @@ const GROUPS := [
 			{
 				"title": "PROVING GROUND",
 				"desc": "Field the current design against target dummies.",
+				# launcher wins over scene: the Test Range entry point
+				# resolves the player blueprint, builds a MatchRuleSet, and
+				# routes through SceneRouter. Battlefield.tscn stays here
+				# as a fallback for the day the launcher is retired, so the
+				# card never lands on a broken scene if `launcher` is removed.
+				"launcher": "TestRangeLauncher",
 				"scene": "res://scenes/Battlefield.tscn",
 				"badge": "TEST // RANGE"
 			},
@@ -107,33 +118,28 @@ const TUTORIAL_CARD := {
 }
 
 # WHICH RUNTIME EACH COMBAT DESTINATION ACTUALLY REACHES, because it is not
-# obvious from the scene paths above and there are two unit scripts in the tree.
+# obvious from the scene paths above.
 #
-#   SKIRMISH        MatchSetup.tscn      -> Battle.tscn -> battle/match_director.gd
-#   OPERATIONS      OperationsSetup.tscn -> Battle.tscn -> battle/match_director.gd
-#   PROVING GROUND  Battlefield.tscn     -> battlefield.gd
+#   SKIRMISH        MatchSetup.tscn       -> Battle.tscn -> battle/match_director.gd
+#   OPERATIONS      OperationsSetup.tscn  -> Battle.tscn -> battle/match_director.gd
+#   PROVING GROUND  (TestRangeLauncher)   -> Battle.tscn -> battle/match_director.gd
 #
-# Skirmish and Operations both run the battle layer (scripts/battle/), whose
-# units are battle/units/unit.gd. There is no older controller underneath them:
-# skirmish.gd and Skirmish.tscn were deleted outright when the battle layer
-# reached parity, and nothing in scripts/battle/ references the legacy unit.
-#
-# THE PROVING GROUND IS THE EXCEPTION, and it is the one worth knowing about.
-# battlefield.gd still runs the legacy battle_unit.gd for both the player
-# vehicle and the target dummies. It reaches it through a runtime
-# `load("res://scripts/battle_unit.gd")` rather than a preload, so a search for
-# preloads finds only test files and the script looks dead when it is not.
-#
-# The practical consequence: any unit-level mechanic added to one script and not
-# the other works in Skirmish and silently does nothing in the Test Range, or
-# the reverse. The Resource Bay's cargo capacity, the power budget and the
-# brownout are all deliberately implemented in both for exactly this reason -
-# see the shared helpers they route through (ModuleCatalog.resource_bay_capacity,
-# PowerBudget.analyze) rather than duplicating the arithmetic.
+# All three reach the same battle layer (scripts/battle/), whose units are
+# battle/units/unit.gd. There is no second unit script in the tree: the
+# legacy battlefield.gd / battle_unit.gd / player_vehicle.gd / target_dummy.gd
+# set was retired on 2026-08-10 in the unification's Phase 4. The
+# per-mode gating is a MatchRuleSet that match_director.gd reads at _ready;
+# see scripts/match_rule_set.gd and tests/battle/test_match_rule_set_integration.gd
+# for the rules. TestRangeLauncher is a Node (not a static helper) so the
+# SceneRouter routes through it the same way every other launcher does,
+# and the Main Menu's PROVING GROUND card and the Design Lab's
+# "Test in Arena" button share one function.
 #
 # This block replaces a comment describing the battle layer as a work in
-# progress listed "BESIDE Skirmish" that would take its name at parity. That
-# already happened; the entry it documented no longer exists.
+# progress listed "BESIDE Skirmish" that would take its name at parity, and
+# a follow-up about "THE PROVING GROUND IS THE EXCEPTION" that documented
+# the now-retired Battlefield.tscn / battle_unit.gd split. Both
+# superseded; the unification finished in 2026-08-10.
 
 var _turntable_node: Node3D = null
 var _turntable_model_container: Node3D = null
@@ -469,7 +475,7 @@ func _build_left_column(parent: Control) -> void:
 		single.add_theme_constant_override("separation", Tokens.SPACE_SM)
 		nav.add_child(single)
 		_add_destination_card(single, TUTORIAL_CARD["title"], TUTORIAL_CARD["desc"],
-			TUTORIAL_CARD["scene"], TUTORIAL_CARD["badge"], true)
+			TUTORIAL_CARD["scene"], TUTORIAL_CARD["badge"], true, "")
 	else:
 		for group in GROUPS:
 			_add_section_header(nav, group["section"])
@@ -478,7 +484,8 @@ func _build_left_column(parent: Control) -> void:
 			nav.add_child(section)
 			for item in group["items"]:
 				_add_destination_card(section, item["title"], item["desc"],
-					item["scene"], item["badge"], item.get("tutorial", false))
+					item["scene"], item["badge"], item.get("tutorial", false),
+					item.get("launcher", ""))
 
 	var gap_bottom = Control.new()
 	gap_bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -500,6 +507,23 @@ func _build_left_column(parent: Control) -> void:
 			get_tree().change_scene_to_file("res://scenes/BlueprintLibrary.tscn")
 	)
 	bottom_row.add_child(records_btn)
+
+	# The player's own colours. Sits next to RECORDS because both are profile
+	# screens - things you own between matches - rather than anything you set
+	# up per battle, which is why this replaced the per-match faction dropdown
+	# on MatchSetup rather than moving it.
+	var livery_btn = Button.new()
+	livery_btn.text = "LIVERY"
+	livery_btn.custom_minimum_size = Vector2(140, 44)
+	UIFeedbackScript.wire(livery_btn)
+	livery_btn.pressed.connect(func():
+		var router = get_node_or_null("/root/SceneRouter")
+		if router:
+			router.goto("res://scenes/Livery.tscn")
+		else:
+			get_tree().change_scene_to_file("res://scenes/Livery.tscn")
+	)
+	bottom_row.add_child(livery_btn)
 
 	var settings_btn = Button.new()
 	settings_btn.text = "SYSTEM"
@@ -533,7 +557,7 @@ func _add_section_header(parent: Control, text: String) -> void:
 	label.add_theme_color_override("font_color", Tokens.SIGNAL_HAZARD)
 	parent.add_child(label)
 
-func _add_destination_card(parent: Control, title_text: String, description: String, scene_path: String, badge_text: String, is_tutorial: bool = false) -> void:
+func _add_destination_card(parent: Control, title_text: String, description: String, scene_path: String, badge_text: String, is_tutorial: bool = false, launcher_name: String = "") -> void:
 	var btn = Button.new()
 	btn.custom_minimum_size = Vector2(0, 64)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -613,6 +637,20 @@ func _add_destination_card(parent: Control, title_text: String, description: Str
 			var tutorial = get_node_or_null("/root/TutorialManager")
 			if tutorial:
 				tutorial.begin()
+		# LAUNCHER WINS OVER SCENE PATH. The PROVING GROUND card declares a
+		# launcher; the launcher builds a MatchRuleSet, writes MatchConfig, and
+		# routes through SceneRouter itself. A card that omits the launcher (or
+		# the launcher returns false - no blueprint, failed to mount) falls
+		# through to the legacy scene path so the card never lands on nothing.
+		if launcher_name != "":
+			if launcher_name == "TestRangeLauncher":
+				var launcher = TestRangeLauncherScript.new()
+				add_child(launcher)
+				if launcher.launch("main_menu"):
+					return
+				launcher.queue_free()
+			else:
+				push_warning("[MainMenu] Unknown launcher '%s' on card '%s' - falling through to scene path" % [launcher_name, title_text])
 		# Through the router so the destination arrives on a fade, and so the
 		# router decides whether this target needs the loading screen - the call
 		# site no longer has to know which scenes stall.

@@ -8,7 +8,6 @@ extends RefCounted
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const PowerBudget = preload("res://scripts/power_budget.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 # Minimum distance remaining to destination before a boost can engage.
 # Prevents lighting a booster for a 5 m reposition.

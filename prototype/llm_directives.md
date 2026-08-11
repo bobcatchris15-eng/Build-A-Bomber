@@ -118,17 +118,29 @@ Organize script contents in this order:
 
 Be aware of superseded files and patterns. Do not use, revive, or replicate them:
 
-1. **`res://scripts/player_vehicle.gd` (SUPERSEDED)**:
-   - **Production Status**: No longer used for the player vehicle in production.
-   - **Replacement**: `battle_unit.gd` is used for both AI and player-driven vehicles, ensuring unified behavior, auto-engagement, and kiting characteristics.
-   - **Test Exception**: `player_vehicle.gd` is kept only as a minimal CharacterBody3D damage target stub inside specific damage model test suites (e.g., `test_weapons_and_damage.gd`). Do not use it for gameplay.
-2. **`res://scripts/blueprint_library_panel.gd` (DELETED)**:
+1. **`res://scripts/battle_unit.gd` (DELETED, 2026-08-10)**:
+   - **Production Status**: Retired in the battle-system unification's Phase 4. New combat work goes in `res://scripts/battle/units/unit.gd` + `damage_model.gd` + `unit_assembly.gd` + `boost_controller.gd`.
+   - **Test Exception**: The damage-model test suites that used `BattleUnitScript` as a full unit fixture were retired in the same pass per Chris's "nuke those tests entirely" call. The replacement coverage is the `tests/battle/` suite (battle_movement, battle_combat, battle_ai, etc.), which exercises the same surface through the new runtime.
+2. **`res://scripts/player_vehicle.gd` (DELETED, 2026-08-10)**:
+   - **Production Status**: Retired with `battle_unit.gd` and the rest of the pre-unification Test Range. The "minimal CharacterBody3D damage target" pattern it served is gone with the suites that used it.
+3. **`res://scripts/target_dummy.gd` and `res://scenes/TargetDummy.tscn` (DELETED, 2026-08-10)**:
+   - **Production Status**: Retired with the pre-unification Test Range. The Test Range now uses the 3 bundled default dummies on `Battle.tscn` via `TestRangeLauncher` (the launcher's `DUMMY_BLUEPRINT_PATHS` constant).
+4. **`res://scripts/battlefield.gd` and `res://scenes/Battlefield.tscn` (DELETED, 2026-08-10)**:
+   - **Production Status**: The pre-unification Test Range scene and its controller script. The Test Range now boots on `Battle.tscn` via `TestRangeLauncher` with a `MatchRuleSet.test_range(...)` rule set.
+5. **`prototype/test_cargo_capacity.gd` and `prototype/test_cargo_capacity_2.gd` (DELETED, 2026-08-10)**:
+   - **Production Status**: Throwaway one-off probes that depended on `battle_unit.gd`. Gone with their dep.
+6. **`MatchConfig`'s seven legacy pre-match fields (RETIRED, 2026-08-10)**:
+   - `selected_map_id` (as a rule-set input; still on MatchConfig as a display field), `player_faction`, `enemy_faction`, `selected_blueprint_paths`, `ai_difficulty`, `starting_credits`.
+   - **Replacement**: `MatchConfig.rule_set` (a `MatchRuleSet` written by `match_setup.gd` / `operations_draft.gd` / `operations_setup.gd` / `test_range_launcher.gd`). `match_director.gd` reads only the rule set now.
+7. **`blueprint_manager.gd`'s `LEGACY_SLOT_PATH = "user://blueprint.json"` (DELETED, 2026-08-10)**:
+   - The Test Range now reads `SCRATCH_PATH = "user://lab_scratch.json"` (which is also what the Design Lab writes) via `TestRangeLauncher`. No second write, no second file.
+8. **`res://scripts/blueprint_library_panel.gd` (DELETED earlier)**:
    - **Replacement**: Entirely replaced by `res://scripts/blueprint_library_screen.gd` and the associated scene `res://scenes/BlueprintLibrary.tscn`.
-3. **Local Panel Styleboxes**:
+9. **Local Panel Styleboxes**:
    - **Replacement**: Setting custom stylebox overrides directly in Panel nodes is deprecated. All panels must inherit theme classes via `bomber_theme.tres` or style through `ui_theme.gd`/`ui_tokens.gd`.
-4. **Hardcoded Map Lists**:
-   - **Replacement**: Do not write hardcoded map properties. Maps are JSON files stored under `data/maps/` and automatically discovered via directory scanning in `MapCatalog`.
-5. **Procedural Mount Columns**:
-   - **Replacement**: The old procedural mounting columns and base plates on weapons were deleted. Do not double-mount or add procedural cylinders under weapon meshes.
-6. **Lambda Closure Primitive Captures**:
-   - **Pitfall**: GDScript captures local primitives (like `float`, `int`, `bool`) **by value** in closures. If a lambda needs to mutate a captured variable and have it reflect outside, wrap it inside a reference type such as a single-element `Array`.
+10. **Hardcoded Map Lists**:
+    - **Replacement**: Do not write hardcoded map properties. Maps are JSON files stored under `data/maps/` and automatically discovered via directory scanning in `MapCatalog`.
+11. **Procedural Mount Columns**:
+    - **Replacement**: The old procedural mounting columns and base plates on weapons were deleted. Do not double-mount or add procedural cylinders under weapon meshes.
+12. **Lambda Closure Primitive Captures**:
+    - **Pitfall**: GDScript captures local primitives (like `float`, `int`, `bool`) **by value** in closures. If a lambda needs to mutate a captured variable and have it reflect outside, wrap it inside a reference type such as a single-element `Array`.

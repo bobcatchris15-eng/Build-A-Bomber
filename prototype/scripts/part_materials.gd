@@ -65,9 +65,25 @@ const ROLES := {
 	# takes the most paint mottling of anything here.
 	"painted": {"metallic": 0.25, "roughness": 0.62, "tint": 1.0, "base": Color(0.35, 0.35, 0.35), "wear": 0.85},
 
-	# Barrels, rails, bolts, breeches. Dark, hard, and almost colour-immune -
-	# a barrel is gunmetal on a red gun and on a green gun alike.
-	"gunmetal": {"metallic": 0.80, "roughness": 0.34, "tint": 0.15, "base": Color(0.13, 0.135, 0.145), "wear": 0.30},
+	# Barrels, rails, tubes, bores. Dark, hard, and almost colour-immune to an
+	# INCIDENTAL tint - a barrel is gunmetal on a red gun and on a green gun
+	# alike, which is what `tint` 0.15 protects.
+	#
+	# `zone_tint` is the separate, much higher weight used when the player's
+	# own livery is driving this role (see ZONE_BY_ROLE). The two cases are
+	# genuinely different: a catalog colour bleeding onto a barrel is noise and
+	# should be resisted, whereas a colour the player deliberately chose for
+	# the barrel zone has to actually appear. Collapsing them into one number
+	# meant a red WEAPON turned its own barrel red even with no livery active.
+	"gunmetal": {"metallic": 0.80, "roughness": 0.34, "tint": 0.15, "zone_tint": 0.78, "base": Color(0.13, 0.135, 0.145), "wear": 0.30},
+
+	# Receivers, breeches, bolts - the ACTION, as distinct from the barrel.
+	# Split out of gunmetal (identical PBR, so nothing changed visually on its
+	# own) purely so the two halves of a weapon can be separate livery zones,
+	# which is what Chris's "two zones per weapon, action and barrel" needs.
+	# ROLE_HINTS already told them apart by part name; they just both landed
+	# on gunmetal before.
+	"action": {"metallic": 0.80, "roughness": 0.34, "tint": 0.15, "zone_tint": 0.78, "base": Color(0.13, 0.135, 0.145), "wear": 0.30},
 
 	# The last few inches of a barrel and any muzzle device: heat-scorched,
 	# rougher and browner than the tube behind it. Reads as "this end is the
@@ -134,6 +150,57 @@ const ROLES := {
 
 const DEFAULT_ROLE := "steel"
 
+# --- Livery zones -----------------------------------------------------------
+# Chris's spec is two zones per weapon: ACTION and BARREL. Roles are already
+# the right granularity for that - ROLE_HINTS classifies every part by name -
+# so the zone is a property of the role rather than a second parallel table
+# that would drift from it.
+#
+# Only these five roles are zoned. The rest are SUBSTANCE roles whose whole
+# job is to be colour-immune: rubber stays black, brass stays brass, optics
+# stay glass, hazard/warning stay their safety convention. Painting those with
+# the player's livery is what would make a unit read as a solid plastic toy
+# rather than as assembled hardware, which is the exact failure part_materials
+# was created to fix.
+#
+# Note this reaches beyond weapons: "steel" and "painted" also cover
+# locomotion frames and utility housings, so those take the action colour too.
+# That is deliberate and reads as one coherent paint scheme across the whole
+# machine - the alternative, colouring guns but not the mounts they sit on,
+# looks like a mistake.
+const ZONE_BY_ROLE := {
+	"gunmetal": "weapon_barrel",
+	"scorched": "weapon_barrel",
+	"action": "weapon_action",
+	"steel": "weapon_action",
+	"painted": "weapon_action",
+}
+
+const LiveryScript = preload("res://scripts/livery.gd")
+
+# The livery currently being painted, as a RENDER CONTEXT rather than an
+# argument.
+#
+# Threading a livery id down to every material call would mean adding a
+# parameter to visual_builder.build_visual() and to all ~100 of its internal
+# _mesh_inst() calls, which is a large, error-prone edit for something that is
+# genuinely ambient state: one unit is built at a time, start to finish, and
+# every part of it wears the same livery.
+#
+# The contract that makes this safe is that a build is SYNCHRONOUS -
+# blueprint_manager.reconstruct_vehicle() sets this, builds, and clears it
+# within one call, with no await in between - so two units can never be
+# interleaved. Left empty (the default) nothing is zoned and every role keeps
+# its authored colour, which is what the Design Lab's unpainted scale-model
+# view wants.
+static var _livery_id: String = ""
+
+static func set_livery(livery_id: String) -> void:
+	_livery_id = livery_id
+
+static func clear_livery() -> void:
+	_livery_id = ""
+
 # --- Name-driven role hints -------------------------------------------------
 # Mapped off the authored part FILENAME, checked as substrings in this order
 # (first match wins, so the more specific entries come first). This is what
@@ -177,14 +244,17 @@ const ROLE_HINTS := [
 	["rail_array", "energized"],
 	["railgun_rails", "energized"],
 	["emitter", "energized"],
+	# Barrel-zone parts (the tube itself) vs action-zone parts (the mechanism
+	# behind it). Both were "gunmetal" before; splitting them is what lets the
+	# player colour a weapon's two halves separately - see ZONE_BY_ROLE.
 	["barrel", "gunmetal"],
-	["receiver", "gunmetal"],
-	["breech", "gunmetal"],
-	["action", "gunmetal"],
-	["bolt", "gunmetal"],
 	["rail", "gunmetal"],
 	["tube", "gunmetal"],
 	["bore", "gunmetal"],
+	["receiver", "action"],
+	["breech", "action"],
+	["action", "action"],
+	["bolt", "action"],
 	# More specific than the generic "ammo" -> brass below, and checked
 	# first. A belt-fed can with exposed links reads as brass; a sealed
 	# linkless drum magazine is a painted steel housing, and rendering it in
@@ -295,7 +365,34 @@ static func _quantise(c: Color) -> String:
 static func get_material(role: String, tint: Color, emission: Color = Color(0, 0, 0, 0),
 						 emission_energy: float = 0.0) -> StandardMaterial3D:
 	var spec: Dictionary = ROLES.get(role, ROLES[DEFAULT_ROLE])
-	var key := "%s|%s|%s|%.2f" % [role, _quantise(tint), _quantise(emission), emission_energy]
+	# LIVERY OVERRIDE. When a livery is being painted and this role belongs to
+	# one of its zones, the player's chosen colour REPLACES the caller's tint
+	# and the chosen finish replaces the role's metallic/roughness. The role
+	# still contributes its base colour and tint weight, so a barrel in a pale
+	# livery is a pale gunmetal rather than pale paint - the substance survives
+	# the paint job.
+	var zone: String = ZONE_BY_ROLE.get(role, "") if _livery_id != "" else ""
+	var effective_tint := tint
+	var tint_weight: float = float(spec["tint"])
+	var metallic: float = spec["metallic"]
+	var roughness: float = spec["roughness"]
+	if zone != "":
+		effective_tint = LiveryScript.zone_color(_livery_id, zone)
+		# A role may declare a higher tint weight for the livery case than for
+		# an incidental caller tint - see gunmetal's note.
+		tint_weight = float(spec.get("zone_tint", spec["tint"]))
+		var finish := LiveryScript.zone_finish(_livery_id, zone)
+		metallic = LiveryScript.finish_metallic(finish)
+		# finish_roughness() is the satin-capped read - never the raw table
+		# value - so a player-chosen finish can't reintroduce the near-mirror
+		# specular that hull_material_builder.gd's ARMOR_PBR note records.
+		roughness = LiveryScript.finish_roughness(finish)
+
+	# Cache key carries the zone AND the livery id: two liveries paint the same
+	# role differently, and without this the first one built would be handed
+	# out to every subsequent unit on the map.
+	var key := "%s|%s|%s|%.2f|%s|%s" % [role, _quantise(effective_tint), _quantise(emission),
+		emission_energy, zone, _livery_id if zone != "" else ""]
 	if _cache.has(key):
 		return _cache[key]
 
@@ -304,9 +401,9 @@ static func get_material(role: String, tint: Color, emission: Color = Color(0, 0
 	# by the role's tint weight. This is the mechanism that lets a barrel stay
 	# gunmetal on a weapon whose catalog colour is bright red, while the
 	# weapon's painted housing takes that red in full.
-	mat.albedo_color = Color(spec["base"]).lerp(tint, float(spec["tint"]))
-	mat.metallic = spec["metallic"]
-	mat.roughness = spec["roughness"]
+	mat.albedo_color = Color(spec["base"]).lerp(effective_tint, tint_weight)
+	mat.metallic = metallic
+	mat.roughness = roughness
 
 	# CULL_DISABLED preserved from the _mesh_inst() this replaces. Several
 	# authored parts are single-sided shells (wing membranes, skirts, the

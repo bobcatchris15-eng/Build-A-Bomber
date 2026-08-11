@@ -21,7 +21,7 @@ class_name HullDecals
 # hand-authored art quality no pixel-math function can reasonably fake.
 # Chris's own framing invited exactly this call. See DECISIONS_NEEDED.md.
 
-const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 
 const DECAL_TEXTURE_SIZE: int = 256
@@ -209,21 +209,21 @@ static func _draw_circle_badge(img: Image):
 			if sqrt(dx * dx + dy * dy) <= radius:
 				img.set_pixel(x, y, Color(1, 1, 1, 1))
 
-const MASCOT_SHAPES = {
-	"industrialists": "gear",
-	"technocrats": "hex",
-	"expansionists": "star_compass",
-	"salvage_union": "cross",
-	"crimson_concordat": "blade",
-	"glacier_syndicate": "star_snowflake",
-	"dune_runners": "star_sunburst",
-	"ledger_combine": "diamond",
-	"bayou_irregulars": "leaf",
-	"aerodrome_cartel": "star_propeller",
-}
+# The ten shapes were keyed by faction id. With the factions gone (see
+# livery.gd) that dictionary would have matched nothing and every construct in
+# the game would have worn the "gear" default - the same insignia for the
+# player and every AI team, which is the one thing an insignia must not do.
+#
+# Picked by hash of the livery id instead, so the whole library stays in use,
+# a given id always gets the same badge (an enemy team's marking is stable for
+# the match, exactly like its colours), and two different ids reliably differ.
+const MASCOT_SHAPES: Array = [
+	"gear", "hex", "star_compass", "cross", "blade",
+	"star_snowflake", "star_sunburst", "diamond", "leaf", "star_propeller",
+]
 
 static func _get_mascot_texture(faction: String) -> ImageTexture:
-	var shape = MASCOT_SHAPES.get(faction, "gear")
+	var shape: String = MASCOT_SHAPES[abs(hash(faction)) % MASCOT_SHAPES.size()]
 	match shape:
 		"gear": return _get_texture("mascot_gear", _draw_gear)
 		"hex": return _get_texture("mascot_hex", _draw_hex)
@@ -307,7 +307,7 @@ static func apply_decals(hull: Node3D, faction: String, hull_size: Vector3):
 		# self-consistent instead of hovering above the roof.
 		surface["aabb"] = AABB(-hull_size * 0.5, hull_size)
 
-	var tint = FactionCatalogScript.get_visual_decal_tint(faction)
+	var tint = LiveryScript.zone_color(faction, "hull_stripe")
 	var hazard_tex = _get_texture("hazard", _draw_hazard)
 
 	# 2 hazard-stripe strips near the top edge of the tail panel (a real cut

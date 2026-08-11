@@ -543,6 +543,118 @@ def build_latch():
     return finish(obj, bm)
 
 
+# --- Chunky push button (StampedButton's 3D face) -----------------------------
+# The "worn toolbox and stamped enamelled label" the design lab and battle
+# production HUD already carry, taken one step further: the button itself
+# is a real piece of hardware, not a flat plate with a 2D label.
+#
+# SHAPE: a low-profile chunky cylinder with a slightly dished top, a small
+# chamfer on the top edge, and a closed bottom. Real industrial push
+# buttons (factory control panels, emergency stops, machine consoles) all
+# read as this silhouette - "a thing that you press with your finger" -
+# which is what makes the StampedButton family feel pressed even before the
+# user has touched one.
+#
+# PHASE 3 PASS WILL ADD, on top of this procedural base:
+#   * An HD albedo (manufacturer mark stamped into the dish, part number
+#     stamp near the rim, a real chamfered screw at each cardinal point).
+#   * A normal map encoding the same surface detail the albedo carries,
+#     so the dish and the stamp read under raking light.
+#   * Variant-specific tinting baked in: PRIMARY gets a green pinstripe
+#     under the chamfer, DANGER gets a red one, etc.
+# None of that needs a mesh change - this geometry is what the HD textures
+# wrap around. Phase 3 is a paint job, not a rebuild.
+
+def build_push_button():
+    obj, bm = new_mesh("ui_push_button")
+
+    # DIMENSIONS. A 1.0-unit footprint is the convention build_ui_props.py
+    # already uses for the other six UI meshes (see the script's own header),
+    # so a single import-scale setting works for all seven.
+    RADIUS = 0.50
+    HEIGHT = 0.20
+    # How deep the top dish is. ~10% of the radius - "slightly" dished, as
+    # the brief said. A deeper dish starts to look like a sink; shallower
+    # looks like a moulded-paint dimple.
+    DISH_DEPTH = 0.05
+    # Dish profile exponent. pow(1-r, FALLOFF) where FALLOFF>1 = centre-most
+    # of the dish is deeper, edges blend smoothly to the chamfer. 2.0 is the
+    # canonical sphere-cap profile; higher values exaggerate the centre
+    # depression, lower values flatten it.
+    DISH_FALLOFF = 2.0
+    # Top edge chamfer width. 0.03 is small enough to read as "machined
+    # edge" rather than "tapered mushroom cap" but large enough that a
+    # beveled highlight lands on it under the SubViewport's key light.
+    CHAMFER = 0.03
+    # Dish subdivision. Six rings is the right density for a 96x96-pixel
+    # button - finer and the polygons are smaller than the rendered
+    # texel size, coarser and the dish silhouettes into a faceted bowl.
+    TOP_RINGS = 6
+    # Radial subdivision. 48 is more than enough at this size and matches
+    # the toggle/rocker meshes for visual consistency.
+    SEG = 48
+
+    def ring(radius, y):
+        return [bm.verts.new(GV(math.cos(i / SEG * math.tau) * radius, y,
+                                math.sin(i / SEG * math.tau) * radius))
+                for i in range(SEG)]
+
+    # --- Side wall: bottom (r0) up to the chamfer start (r1) ---
+    r0 = ring(RADIUS, 0.0)
+    r1 = ring(RADIUS, HEIGHT - CHAMFER)
+    for i in range(SEG):
+        j = (i + 1) % SEG
+        bm.faces.new((r0[i], r0[j], r1[j], r1[i]))
+
+    # --- Chamfer: a flat 45-degree strip at the top edge ---
+    # r1 sits at the full cylinder radius; r2 sits at (RADIUS - CHAMFER),
+    # a hair inset, so the strip slopes INWARD as it rises. This is the
+    # canonical machined chamfer - a flat, sloped band rather than a
+    # curved fillet - which is what catches the key light in a strip the
+    # eye reads as "this edge was cut on a lathe".
+    r2 = ring(RADIUS - CHAMFER, HEIGHT)
+    for i in range(SEG):
+        j = (i + 1) % SEG
+        bm.faces.new((r1[i], r1[j], r2[j], r2[i]))
+
+    # --- Dish: r2 (outer rim) down to a centre vertex ---
+    # The dish is built as concentric rings. Each ring's Y is on the
+    # sphere-cap profile pow(1-r_norm, DISH_FALLOFF) so the centre is the
+    # deepest point and the rim blends smoothly to the chamfer.
+    dish_outer = RADIUS - CHAMFER
+    dish_rings = [r2]
+    for i in range(1, TOP_RINGS):
+        r_norm = float(i) / TOP_RINGS
+        r = dish_outer * r_norm
+        y = HEIGHT - DISH_DEPTH * pow(1.0 - r_norm, DISH_FALLOFF)
+        dish_rings.append(ring(r, y))
+    center = bm.verts.new(GV(0.0, HEIGHT - DISH_DEPTH, 0.0))
+
+    # Connect the dish rings into a smooth fan.
+    for i in range(len(dish_rings) - 1):
+        lower = dish_rings[i]
+        upper = dish_rings[i + 1]
+        for j in range(SEG):
+            k = (j + 1) % SEG
+            bm.faces.new((lower[j], lower[k], upper[k], upper[j]))
+
+    # Innermost ring to centre vertex.
+    innermost = dish_rings[-1]
+    for j in range(SEG):
+        k = (j + 1) % SEG
+        bm.faces.new((innermost[j], innermost[k], center))
+
+    # --- Bottom: closed so the silhouette is solid from any menu angle ---
+    # Winding reversed from the side wall so the normal points DOWN.
+    bot_center = bm.verts.new(GV(0.0, 0.0, 0.0))
+    for j in range(SEG):
+        k = (j + 1) % SEG
+        bm.faces.new((r0[k], r0[j], bot_center))
+
+    bm.normal_update()
+    return finish(obj, bm)
+
+
 def main():
     clear_scene()
     export_glb(build_turntable(), "turntable_base")
@@ -560,6 +672,8 @@ def main():
     export_glb(build_dzus_fastener(), "ui_dzus_fastener")
     clear_scene()
     export_glb(build_latch(), "ui_latch")
+    clear_scene()
+    export_glb(build_push_button(), "ui_push_button")
     clear_scene()
     print("\nUI props written to %s" % OUT_DIR)
 

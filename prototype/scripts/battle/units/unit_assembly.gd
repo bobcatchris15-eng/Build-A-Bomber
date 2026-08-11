@@ -9,11 +9,13 @@ extends RefCounted
 # function is why battle_unit.gd reached 1,701 lines and why there was no way to
 # build a unit for a test without also getting its AI.
 #
-# WHY IT IS A COPY RATHER THAN AN EXTRACTION. battle_unit.gd still runs the old
-# Skirmish scene, which stays playable until the new layer reaches parity (see
-# the retirement note in the plan). Extracting would mean editing a file behind
-# ~120 passing suites for the benefit of code that does not ship yet. The
-# duplication is deliberate and ends when battle_unit.gd is deleted.
+# WHY IT IS A COPY RATHER THAN AN EXTRACTION. battle_unit.gd still ran the old
+# Skirmish scene when unit_assembly was first split out. Extracting would have
+# meant editing a file behind ~120 passing suites for the benefit of code that
+# did not ship yet, so the duplication was deliberate. battle_unit.gd and its
+# Skirmish scene were retired on 2026-08-10 in the unification's Phase 4;
+# the duplication ended then. unit.gd calls into unit_assembly directly and
+# there is no parallel hand-copy to maintain.
 #
 # The physics values, the convex-hull rationale and the running-gear collider are
 # carried over as-is - they encode real bugs that were found the hard way (a
@@ -21,7 +23,6 @@ extends RefCounted
 # geometry). What is NEW here is the selection proxy.
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const PowerBudgetScript = preload("res://scripts/power_budget.gd")
 # BattleLayers declares class_name, so it resolves globally with no preload here.
@@ -136,8 +137,7 @@ static func build(body: CharacterBody3D, blueprint_data: Dictionary, team: int,
 
 	# One shared HP function across combat, defences and the Design Lab sidebar,
 	# so the number the player sizes a hull against is the number it fights with.
-	var max_hp: float = ModuleCatalog.compute_hull_max_hp(hull_type, thickness, material, hull_scale) \
-		* FactionCatalog.get_passive(faction, "hp_mult", 1.0)
+	var max_hp: float = ModuleCatalog.compute_hull_max_hp(hull_type, thickness, material, hull_scale)
 
 	var base_size: Vector3 = catalog_data.get("size", Vector3.ONE)
 	if hull_node.has_meta("base_hull_size") and hull_node.has_meta("hull_scale"):

@@ -55,9 +55,12 @@ prototype/assets/temp_images/
 # (godot --headless --script scratch/<x>.gd) and then superseded. The three
 # exceptions below are real inputs, not output: flow_source/ and flow_terrain/
 # are the Flow-generated source plates that tools/process_flow_*.gd read to
-# regenerate assets/textures/{factions,terrain}, fonts_download/ is the
+# regenerate assets/textures/{hull,terrain}, fonts_download/ is the
 # original download of the Special Elite font credited in CREDITS.md, and
 # reimport_assets.sh is live infrastructure.
+# NOTE: the ten {faction}.jpg plates still in flow_source/ are the inputs to
+# the pre-livery per-faction bake and no longer feed anything - the hull side
+# of that pipeline now wants ONE neutral plate (flow_source/hull_surface.jpg).
 prototype/scratch/*
 !prototype/scratch/flow_source/
 !prototype/scratch/flow_terrain/
@@ -92,3 +95,4 @@ export_templates*.tpz
 export_templates*.zip
 prototype/export_templates*.tpz
 prototype/export_templates*.zip
+.hilo/

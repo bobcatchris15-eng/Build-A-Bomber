@@ -3,7 +3,6 @@ const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_cat
 const ModuleDataResource = preload("res://scripts/module_data.gd")
 
 
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 # Only for its tuning constants - the analysis itself arrives pre-computed
 # inside the DesignStats result, so this rail never calls analyze() itself.
 const DrivetrainScript = preload("res://scripts/drivetrain.gd")
@@ -14,6 +13,13 @@ const UIIconsScript = preload("res://scripts/ui_icons.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
 const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
+# Test Range launcher (battle-system unification Phase 3). The Design Lab's
+# "Test in Arena" button routes through this so the Lab's most-recent-saved
+# blueprint (or its scratch slot) is the design the Test Range boots with,
+# identical to the Main Menu's PROVING GROUND card. Replaces the legacy
+# direct `change_scene_to_file(Battlefield.tscn)` calls, which reached a
+# scene the battle unification is retiring.
+const TestRangeLauncherScript = preload("res://scripts/test_range_launcher.gd")
 const DesignVerdictScript = preload("res://scripts/design_verdict.gd")
 const PhosphorPanelScript = preload("res://scripts/ui/phosphor_panel.gd")
 const MeshIconScript = preload("res://scripts/ui/mesh_icon.gd")
@@ -1095,8 +1101,17 @@ func _on_test_pressed():
 		var success = blueprint_manager.save_scratch()
 		if success:
 			UIStampScript.spawn_stamp(get_tree().root, "DESTRUCTIVE TEST PERMIT", "hazard")
+			# Battle-system unification Phase 3: route through TestRangeLauncher
+			# rather than the legacy Battlefield.tscn. The launcher reads the
+			# scratch slot we just saved, builds a Test Range MatchRuleSet, and
+			# routes through SceneRouter. The 0.35s stamp gate still fires so
+			# the player sees the DESTRUCTIVE TEST PERMIT stamp clear before
+			# the screen swaps.
 			get_tree().create_timer(0.35).timeout.connect(func():
-				get_tree().change_scene_to_file("res://scenes/Battlefield.tscn")
+				var launcher = TestRangeLauncherScript.new()
+				add_child(launcher)
+				if not launcher.launch("design_lab"):
+					launcher.queue_free()
 			)
 		else:
 			var ui = get_tree().get_first_node_in_group("stat_ui")
@@ -1107,7 +1122,13 @@ func _on_test_pressed():
 						ui.get_node("ScrollContainer/VBoxContainer/Title").text = "Blueprint Stats"
 				)
 	else:
-		get_tree().change_scene_to_file("res://scenes/Battlefield.tscn")
+		# No BlueprintManager in the tree (headless test path). Fall back to
+		# the launcher; it will resolve the bundled default (Bulwark MBT) when
+		# the scratch slot is empty and no saved designs exist.
+		var launcher = TestRangeLauncherScript.new()
+		add_child(launcher)
+		if not launcher.launch("design_lab"):
+			launcher.queue_free()
 
 func _on_mirror_toggled(button_pressed: bool):
 	if _mirror_icon:
@@ -1160,7 +1181,7 @@ func update_stats(hull: Node3D):
 	var total_cost_crystal = stats["cost_crystal"]
 	var total_dps = stats["dps"]
 	# Weight, load capacity, thrust and top speed all come from
-	# Drivetrain.analyze() - the SAME call battle_unit.gd makes when it spawns
+	# Drivetrain.analyze() - the SAME call unit.gd makes when it spawns
 	# the unit for real, so every number this sidebar shows is a number combat
 	# will actually run. DesignStats.analyze() made that call above and hands the
 	# result back, so it happens once per recompute rather than twice.
@@ -1194,7 +1215,7 @@ func update_stats(hull: Node3D):
 	# (an empty hull showed 0.0 but fielded at 400), and "Total Weight"
 	# applied material multipliers the combat weight sum didn't. Both now
 	# come from the same shared ModuleCatalog.compute_hull_* functions
-	# battle_unit.gd/building.gd/blueprint_cost() read, so what you see in
+	# unit.gd/building.gd/blueprint_cost() read, so what you see in
 	# the Design Lab is what the simulation runs.
 	#
 	# Hull HP, the module pool and the weight all arrive from

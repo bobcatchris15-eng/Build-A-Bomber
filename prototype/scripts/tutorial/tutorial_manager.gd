@@ -249,8 +249,11 @@ func _has_module_of_category(categories: Array) -> bool:
 	return false
 
 
-# target_dummy.gd has no death signal - die() just frees the node - so counting
-# the survivors is the available route.
+# target_dummy.gd had no death signal - die() just freed the node - so
+# counting survivors was the available route. target_dummy.gd and its
+# arena.target_dummies list were retired 2026-08-10 in the unification's
+# Phase 4, so this function is now dead unless a future step reintroduces
+# the equivalent field on the Test Range's match_director (TODO).
 func _live_dummies(arena: Node) -> int:
 	var n := 0
 	for dummy in arena.target_dummies:

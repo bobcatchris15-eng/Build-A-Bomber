@@ -1,4 +1,4 @@
-class_name VisualBuilder
+﻿class_name VisualBuilder
 # Assembles the visual mesh tree for a placed module. Prefers authored .glb
 # "kit" parts (tools/blender/build_meshes.py) for a detailed/greebled look,
 # falling back to the original procedural primitives when no authored asset
@@ -48,11 +48,11 @@ static func _part(part_name: String) -> Mesh:
 #    on hulls whose underside doesn't sit at the catalog bottom (per the
 #    underside_y_bias hack). A real chassis reads as a deliberate
 #    intermediary between hull and running gear.
-# 2. Physics grounding: the CharacterBody3D's collider in battle_unit.gd
+# 2. Physics grounding: the CharacterBody3D's collider in unit.gd
 #    was sized to the hull only, so a wheeled unit sat on the hull's
 #    underside with wheels dangling in midair (test arena: "vehicle slides
 #    on its belly"). The unit's collider now extends to include the
-#    running-gear height (see battle_unit.gd), and the running gear's
+#    running-gear height (see unit.gd), and the running gear's
 #    StaticBody3D carries the matching physics shape so designer-mode ray
 #    casts and click-to-select also see a flat bottom, not a hull-bottom.
 #
@@ -64,10 +64,10 @@ static func _part(part_name: String) -> Mesh:
 #
 # collision_layer defaults to 1 (matching the designer-mode hull's own
 # StaticBody3D layer, for click/raycast selection) but MUST be 0 when built
-# under a battle_unit.gd CharacterBody3D: that body's collision_mask is 1
+# under a unit.gd CharacterBody3D: that body's collision_mask is 1
 # ("Ground only"), so a layer-1 RunningGear sitting right at its own feet
 # reads as terrain and it perpetually pushes itself off its own chassis -
-# the battle-arena "constantly bouncing" bug. battle_unit.gd's own
+# the battle-arena "constantly bouncing" bug. unit.gd's own
 # CollisionShape3D already provides the real physics collider in that case;
 # this body's collider is purely for the designer-raycast/dimension-lookup
 # use, so it can safely be collision-free there.
@@ -166,7 +166,7 @@ static func _flat_mat(color: Color) -> StandardMaterial3D:
 const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 const HARDWARE_PREFIX := "Hardware_"
 
-# Names of the pivot nodes battle_unit.gd spins. Locomotion animation has always
+# Names of the pivot nodes unit.gd spins. Locomotion animation has always
 # worked by looking a pivot up BY NAME, but the names were string literals
 # duplicated across the builder and the animator, and three types
 # (wheels, tracked_treads, fixed_wing_engine) simply never got a pivot - so a
@@ -588,7 +588,7 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 		# centered.
 		inst.position = Vector3(0, -aabb.position.y * fit_scale, 0)
 
-		# Animation pivot. battle_unit.gd and auto_weapon.gd animate moving
+		# Animation pivot. unit.gd and auto_weapon.gd animate moving
 		# parts by looking up a child node BY NAME ("WingPivot", "RotorBlades",
 		# "PropBlades") - names the procedural build creates. A monolithic
 		# authored mesh has no such child, so those lookups came back null and
@@ -3696,7 +3696,7 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 		# straight to the module. A wheel has to rotate about its OWN axle, and
 		# the axle is offset from the module origin - spinning the module node
 		# would swing the whole cluster around the mount point instead. Named
-		# so battle_unit.gd can find it: same by-name pivot convention as
+		# so unit.gd can find it: same by-name pivot convention as
 		# "RotorBlades", "PropBlades", "LegSwing" and "ScrewSpin".
 		var axle = Node3D.new()
 		axle.name = SPIN_PIVOT_WHEEL
@@ -4148,7 +4148,7 @@ static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_co
 	# Scifi hover pad, per Chris's redesign: three concentric rings instead
 	# of the old fan+skirt+single-ring combo. The outer ring stays fixed/
 	# horizontal; the middle ring spins continuously around local X and the
-	# inner ring around local Y (battle_unit.gd/battlefield.gd/
+	# inner ring around local Y (unit.gd/battlefield.gd/
 	# module_placer.gd all spin "HoverRingMid"/"HoverRingInner" by name,
 	# same by-name-pivot pattern as helicopter_rotors' "RotorBlades"). No
 	# pad_size/skirt tweaks anymore - footprint is fixed off the hull
@@ -4430,7 +4430,7 @@ static func find_leg_bone(root: Node, bone_name: String) -> Node3D:
 	return null
 
 
-## Poses one leg for a walk cycle. THE single implementation - battle_unit.gd,
+## Poses one leg for a walk cycle. THE single implementation - unit.gd,
 ## battlefield.gd and the battle layer's unit script all call this.
 ##
 ## One copy rather than three because three copies is exactly how the Test
@@ -4815,7 +4815,7 @@ static func _build_ornithopter_wing(parent_node: Node3D, base_size: Vector3, bas
 	# Dragonfly-style rebuild (Chris's ask, 2026-07-24): TWO independent
 	# wing pairs per mount node (fore + hind, like a dragonfly's wing
 	# root) instead of one wing on one pivot, each on its own named pivot
-	# ("WingPivotFore"/"WingPivotHind") so battle_unit.gd can flap them in
+	# ("WingPivotFore"/"WingPivotHind") so unit.gd can flap them in
 	# opposition to each other - real dragonflies beat their fore and hind
 	# wing pairs roughly 180 degrees out of phase. The wings themselves are
 	# also now authored substantially longer and narrower (see
@@ -5152,7 +5152,7 @@ static func _build_pylon_mounted_propeller(parent_node: Node3D, base_size: Vecto
 			# for helicopter_rotors, which spins its blades around Y (a
 			# Z-reaching blade sweeps properly through the horizontal
 			# plane there). This hub spins around Z instead (PropBlades
-			# rotates_z in battle_unit.gd, matching a boat/aircraft
+			# rotates_z in unit.gd, matching a boat/aircraft
 			# propeller shaft), and rotating a Z-REACHING blade around Z
 			# does nothing - Z-axis rotation leaves the Z component
 			# unchanged, which is exactly why every blade used to end up
@@ -5291,7 +5291,7 @@ static func _build_buoyant_envelope(parent_node: Node3D, base_size: Vector3, bas
 		block.position = Vector3(0, 0, POD_Z * s)
 		parent_node.add_child(block)
 
-	# THE PROP: wide and slow. battle_unit.gd spins "PropBlades" about Z at the
+	# THE PROP: wide and slow. unit.gd spins "PropBlades" about Z at the
 	# airship's own reduced rate.
 	var pivot := Node3D.new()
 	pivot.name = "PropBlades"
@@ -5749,7 +5749,7 @@ static func rebuild_visual(module: Node3D):
 # procedural equivalents the modular-assembly branches build under the same
 # names - BarrelCluster, RotorBlades, WingPivot, PropBlades) are left
 # untouched: those rotate independently every frame (auto_weapon.gd's
-# rotary-cannon spin-up, battle_unit.gd's rotor/prop animation) and merging
+# rotary-cannon spin-up, unit.gd's rotor/prop animation) and merging
 # them into a static mesh would freeze that motion.
 const _ANIMATED_PART_NAMES := ["BarrelCluster", "RotorBlades", "WingPivot", "PropBlades"]
 

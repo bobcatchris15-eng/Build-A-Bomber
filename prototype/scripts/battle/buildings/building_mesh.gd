@@ -21,6 +21,7 @@ extends RefCounted
 # commit and a dependency on it would block that.
 
 const HullMaterialBuilder = preload("res://scripts/hull_material_builder.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 
 const MODEL_DIR := "res://assets/models/buildings/%s.glb"
@@ -108,7 +109,7 @@ static func _collect(node: Node, into: Array) -> void:
 static func _apply_material(node: Node, faction: String, team: int) -> void:
 	var mat := HullMaterialBuilder.build_hull_material(faction)
 	if team != 0 and mat is ShaderMaterial:
-		var tint: Color = FactionCatalog.get_visual_color(faction).lerp(
+		var tint: Color = LiveryScript.zone_color(faction, "hull_upper").lerp(
 			Color(0.85, 0.2, 0.2), 0.45)
 		mat.set_shader_parameter("base_color", tint)
 	_assign(node, mat)

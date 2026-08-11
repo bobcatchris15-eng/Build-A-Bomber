@@ -20,7 +20,7 @@ extends Control
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
 
 # Coarser than the fog grid on purpose: a minimap needs a recognisable
@@ -292,7 +292,7 @@ func _refresh_minimap() -> void:
 		if team != _local_team and "fog_hidden" in c and c.fog_hidden:
 			continue
 		_blip(c.global_position.x, c.global_position.z,
-			FactionCatalog.get_visual_color(_faction_of(c)))
+			LiveryScript.zone_color(_faction_of(c), "hull_upper"))
 
 	_draw_view_indicator()
 
@@ -354,4 +354,4 @@ func _faction_of(c) -> String:
 		return c.faction
 	if "hull_node" in c and is_instance_valid(c.hull_node) and c.hull_node.has_meta("faction"):
 		return c.hull_node.get_meta("faction")
-	return FactionCatalog.DEFAULT_FACTION
+	return LiveryScript.PLAYER_ID

@@ -3,7 +3,8 @@ extends RefCounted
 # The harvest loop as an explicit state machine, with bay reservation.
 #
 # WHAT WAS WRONG BEFORE. The old loop was `_process_harvest()`, forty lines
-# inside battle_unit.gd's order switch (battle_unit.gd:1363). It had no states -
+# inside battle_unit.gd's order switch (battle_unit.gd:1363; battle_unit.gd
+# retired 2026-08-10 in the unification's Phase 4). It had no states -
 # it inferred what to do each tick from whether cargo was full and whether the
 # node still existed - and, critically, no notion of a refinery having a finite
 # number of places to stand. Every harvester steered at the refinery's ORIGIN. So
@@ -19,7 +20,6 @@ extends RefCounted
 # travelling to it" is a different thing from "I am waiting for one", and the old
 # implementation had no way to say either.
 
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
 
@@ -27,7 +27,8 @@ const HARVEST_TIME := 3.0
 
 # How much comes out of a patch per HARVEST_TIME, before faction bonuses.
 #
-# 25, MATCHING THE OLD RUNTIME (battle_unit.gd:1396). The FSM rewrite quietly
+# 25, MATCHING THE OLD RUNTIME (battle_unit.gd:1396; retired 2026-08-10).
+# The FSM rewrite quietly
 # dropped this to 10, which is not a tuning difference - it is 5 cycles to fill a
 # 50-unit hopper instead of 2, so the working half of a round trip went from 6 s
 # to 15 s. Chris felt it as harvesters being sluggish, which they were.
@@ -316,7 +317,7 @@ func _chunk_size() -> int:
 	# the same whatever the design. Without this, a bigger hopper would simply
 	# mean a longer dwell and no more ore per second.
 	var rate: float = float(HARVEST_CHUNK) * float(modules) * _tier_mult
-	return maxi(1, int(rate * FactionCatalog.get_passive(faction, "harvest_rate_mult", 1.0)))
+	return maxi(1, int(rate))
 
 
 func _head_home() -> void:

@@ -2026,6 +2026,9 @@ const MODULE_FLAVOR = {
 # Empty string when a module has no authored line - callers append
 # conditionally, so a missing entry degrades to "no flavor row" rather than
 # a blank row or an error.
+
+
+
 static func get_module_flavor(type_id: String) -> String:
 	return MODULE_FLAVOR.get(type_id, "")
 
@@ -2245,7 +2248,7 @@ static func get_base_power(hull_type_id: String) -> float:
 # authored against a stale scale.
 #
 # So the scale-up is ONE multiplier, here, at the single point every caller
-# already goes through (battle_unit.gd and building.gd both read vision only
+# already goes through (unit.gd and building.gd both read vision only
 # via this function). The JSON keeps saying 20 and means "20 on the authoring
 # scale"; the game sees 38. Retuning a specific hull still means editing that
 # hull's own base_vision, exactly as before - this only moves the whole band.
@@ -2265,8 +2268,9 @@ static func targets_allies(type_id: String) -> bool:
 	return data.get("targets_allies", false)
 
 # Real bug found while fixing repair_array/drone_carrier for real (Energy
-# batch): every _setup_weapons()-equivalent (battle_unit.gd, battlefield.gd,
-# building.gd) only attaches auto_weapon.gd when category=="weapon" -
+# batch): every _setup_weapons()-equivalent (unit.gd, building.gd, and the
+# retired battle_unit.gd / battlefield.gd when they ran the old Skirmish
+# scene) only attaches auto_weapon.gd when category=="weapon" -
 # repair_array and drone_carrier are catalogued as category="module" (like
 # resource_harvester/sensor_suite/logistics_tank, which don't need the
 # script - they're driven by other systems entirely). That meant neither
@@ -3010,9 +3014,11 @@ const RESOURCE_BAY_TWEAK_KEY: String = "bay_volume"
 # Total cargo a hull's Resource Bays contribute, tweaks included.
 #
 # Lives here rather than in either unit script because there are TWO harvester
-# implementations in the tree - battle_unit.gd's inline loop and
-# battle/units/unit.gd feeding HarvesterFSM - and a bay that only counted in
-# one of them would be a module that silently did nothing depending on which
+# implementations in the tree - unit.gd feeding HarvesterFSM is the only one
+# now (battle_unit.gd's inline loop was retired 2026-08-10 in the unification's
+# Phase 4) - and a bay that only counted in some past version of the tree
+# would be a module that silently did nothing depending on which runtime it
+# was loaded under.
 # battle runtime spawned the unit. This is the shared answer both ask for.
 #
 # Bays STACK, unlike most support modules: three bays are three times the
@@ -3194,7 +3200,7 @@ const BASE_WEIGHT_CAPACITY_DEFAULT: float = 400.0
 # how much weight it's "built for" carrying, with weight in excess of that
 # slowing the unit down). Real-world load-bearing intuition drives each
 # value - full reasoning logged as a comment on each locomotion type's own
-# catalog entry above. battle_unit.gd's _recalculate_move_speed() sums
+# catalog entry above. unit.gd's _recalculate_move_speed() sums
 # this across every locomotion module actually present (scaled by the same
 # size/count factors already used for motor_thrust), then applies a speed
 # penalty if the vehicle's total weight exceeds the sum.
@@ -3208,7 +3214,7 @@ static func get_base_weight_capacity(type_id: String, tweaks: Dictionary = {}) -
 	return base * _leg_stat_mult(type_id, tweaks, "capacity_mult")
 
 # Per-locomotor-type thrust output. Every existing locomotion type used the
-# same flat 150.0-per-scaled-unit coefficient in battle_unit.gd's
+# same flat 150.0-per-scaled-unit coefficient in unit.gd's
 # _recalculate_move_speed() - fine when every locomotor's propulsion was
 # "an engine/motor fighting for speed," but buoyant_envelope's lift is
 # free (buoyancy, not thrust), so its actual engines are small
@@ -3228,7 +3234,7 @@ static func get_thrust_coefficient(type_id: String) -> float:
 # should also have a base top speed").
 #
 # This replaces the universal 18.0 that used to be hardcoded as the upper
-# bound of battle_unit.gd's speed clamp. That single number meant a walker,
+# bound of unit.gd's speed clamp. That single number meant a walker,
 # a tank, an airship and a jet all shared one answer to "how fast can this
 # possibly go", and the only thing separating them was how much thrust they
 # happened to make against their own mass - so a light enough design on ANY
@@ -3262,7 +3268,7 @@ static func _leg_stat_mult(type_id: String, tweaks: Dictionary, key: String) -> 
 # elevation/water/obstacles). Only ground-contact locomotion types that
 # actually touch the surface are listed - airborne types (helicopter_rotors/
 # hover_engine/anti_grav/fixed_wing_engine/buoyant_envelope) skip ground
-# navigation entirely already (battle_unit.gd's is_flying branch), so they
+# navigation entirely already (unit.gd's is_flying branch), so they
 # never consult this table at all; that's what "hover/anti-grav ignore it"
 # means mechanically, not a row of 1.0s here. naval_propeller doesn't touch
 # land surface zones either (is_naval routes to water_map only). Any
@@ -3323,7 +3329,7 @@ static func _leg_stat_mult(type_id: String, tweaks: Dictionary, key: String) -> 
 #                   (its auger bites into ice rather than relying on
 #                   friction the way wheels/treads/legs all do).
 # Every GROUND-NAVIGATING locomotion type must appear in every row. Airborne
-# types (the "airborne" trait sets battle_unit.gd's is_flying) and naval ones
+# types (the "airborne" trait sets unit.gd's is_flying) and naval ones
 # skip ground navigation entirely and never consult this table, so they are
 # deliberately absent rather than missing - see TERRAIN_EXEMPT_TRAITS below,
 # which is what test_every_ground_locomotion_type_has_terrain_character()
@@ -3379,7 +3385,7 @@ const HULL_DRAUGHT_DEFAULT: float = 0.5
 
 # Deep-draught-vs-shallow-water cutoff. naval_hull (0.9) and small_boat_hull
 # (0.35) both stay under this; heavy_cruiser_hull (1.8) is well over it -
-# see battle_unit.gd's _setup_navigation() for where this actually routes
+# see unit.gd's _setup_navigation() for where this actually routes
 # a unit onto deep_water_map instead of water_map.
 const SHALLOW_WATER_DRAUGHT_THRESHOLD: float = 1.0
 
@@ -3723,7 +3729,7 @@ static func needs_running_gear(_locomotion_type: String) -> bool:
 	return false
 
 # Deterministic running-gear dimensions for a given (already-scaled) hull
-# size. Pure/static so battle_unit.gd can compute the chassis height for
+# size. Pure/static so unit.gd can compute the chassis height for
 # the CharacterBody3D's collider without needing the chassis to actually
 # exist as a node yet - and so it stays in sync with whatever
 # module_placer.gd / blueprint_manager.gd build.

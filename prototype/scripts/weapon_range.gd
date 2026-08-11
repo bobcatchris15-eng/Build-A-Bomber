@@ -18,7 +18,6 @@ extends RefCounted
 # call it. Adding a range-affecting tweak means editing one function.
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 # Deployed bipod: a big reach bonus that costs the ability to shoot on the
 # move. See auto_weapon.gd's _bipod_blocks_firing() for the other half.
@@ -72,7 +71,10 @@ static func _num(tweaks: Dictionary, key: String) -> float:
 	return float(v)
 
 # A weapon's reach, from its authored base through every tweak that touches it.
-# `faction` applies the roster-wide range_mult passive; pass "" to skip it.
+# `faction` is vestigial: it used to apply a roster-wide range_mult passive,
+# and faction passives are gone (see livery.gd). Kept as an accepted-and-
+# ignored argument rather than removed, because it is threaded through several
+# call sites and range is now genuinely uniform - there is nothing for it to do.
 static func compute(type_id: String, tweaks: Dictionary, faction: String = "") -> float:
 	var reach: float = ModuleCatalog.get_base_range(type_id)
 
@@ -87,9 +89,6 @@ static func compute(type_id: String, tweaks: Dictionary, faction: String = "") -
 
 	if _num(tweaks, "bipod_deploy") >= 0.5:
 		reach *= BIPOD_RANGE_BONUS
-
-	if faction != "":
-		reach *= FactionCatalog.get_passive(faction, "range_mult", 1.0)
 
 	return minf(reach, FIRE_RANGE_MAX)
 
@@ -124,7 +123,7 @@ static func analyze(hull_node: Node3D) -> Dictionary:
 	var faction: String = hull_node.get_meta("faction", "") if hull_node.has_meta("faction") else ""
 	var vision: float = ModuleCatalog.get_base_vision(hull_type)
 
-	# Same "hull base + sensor module bonus" sum battle_unit.gd's
+	# Same "hull base + sensor module bonus" sum unit.gd's
 	# _recalculate_vision() does, so the lab and the field agree.
 	for child in hull_node.get_children():
 		if not child.has_meta("module_data"):
@@ -133,8 +132,6 @@ static func analyze(hull_node: Node3D) -> Dictionary:
 		if data == null or data.type_id != "sensor_suite":
 			continue
 		vision += data.get_vision_bonus()
-	if faction != "":
-		vision *= FactionCatalog.get_passive(faction, "vision_mult", 1.0)
 	out["vision"] = vision
 
 	var shortest: float = INF

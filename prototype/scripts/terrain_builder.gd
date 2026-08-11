@@ -3,10 +3,11 @@ class_name TerrainBuilder
 const TerrainGreeblesScript = preload("res://scripts/terrain_greebles.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
+const AmbientScatterScript = preload("res://scripts/ambient_scatter.gd")
 # Turns a MapCatalog map Dictionary into: baked NavigationServer3D ground/
 # water maps, decorative terrain meshes (water planes, rock-cluster
 # obstacles), and pure query functions (terrain_height_at / is_position_
-# blocked) that skirmish.gd and battle_unit.gd consult for Y-positioning,
+# blocked) that unit.gd (and match_director.gd before it) consult for Y-positioning,
 # buildability, and (indirectly, via real Y coordinates) vision/combat
 # elevation bonuses.
 #
@@ -1336,8 +1337,21 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 	# so an ore and a tree never overlap. Order matters: flipping it
 	# would let trees land on top of ore deposits, which reads as a
 	# single composite prop rather than two distinct finds.
-	var ambient_tree_positions: Array = _spawn_ambient_trees(map_def, parent, prop_scale)
-	_spawn_ambient_ores(map_def, parent, prop_scale, ambient_tree_positions)
+	#
+	# `disable_ambient_scatter` (default false) lets a small playtest
+	# map opt out entirely. The Test Range uses this to keep its 80x80
+	# stage clean - the player needs to see THEIR unit, not a forest
+	# the ambient code packed into the available space.
+	if not bool(map_def.get("disable_ambient_scatter", false)):
+		var ambient_tree_positions: Array = _spawn_ambient_trees(map_def, parent, prop_scale)
+		_spawn_ambient_ores(map_def, parent, prop_scale, ambient_tree_positions)
+	# Both ambient passes register their visuals with a shared MultiMesh
+	# batcher instead of building a glTF subtree each (ambient_scatter.gd).
+	# Nothing is drawn until this commit, and it must come after BOTH passes
+	# because they share one batcher - see that file's ordering contract.
+	var scatter := AmbientScatterScript.get_or_create(parent)
+	if scatter != null:
+		scatter.commit()
 	_spawn_slope_rocks(map_def, parent)
 
 # Real baked ground textures (see tools/generate_terrain_textures.gd) tiled
@@ -2147,129 +2161,103 @@ static func _spawn_grassland_clutter(map_def: Dictionary, parent: Node3D, prop_s
 # `_spawn_slope_rocks` (SLOPE_ROCK_MAX_COUNT = 260) - deliberately NOT
 # a fixed-per-half-extent, since the user-facing constraint is
 # "looks like a forest" rather than "exactly N trees per map."
-# 2026-08-10 (Chris): ambient trees were trimmed by ~1/3 to free up
-# scatter budget for the new ambient ore pass (see _spawn_ambient_ores
-# below). Density 90 -> 150 m²/tree is the ~1/3 reduction (since
-# (150 - 90) / 90 = 0.667, i.e. we now fit 2/3 of the trees in the
-# same area). The MAX_COUNT cap also drops so the visual ratio of
-# trees-to-ore on a typical map reads as "a forest with some ore in
-# it," not "a forest with as much ore as trees."
-const AMBIENT_TREE_AVOID_RADIUS: float = 8.0
-const AMBIENT_TREE_DENSITY_M2: float = 150.0
-const AMBIENT_TREE_MAX_COUNT: int = 1000
-const AMBIENT_TREE_MIN_COUNT: int = 25
-
-# AMBIENT ORE (Chris 2026-08-10, paired with the ambient-tree trim).
-# Scatter budget comes from the trees that were removed: a typical
-# 210-half map now produces ~900 ambient trees and ~750 ambient ore
-# deposits. Same avoidance set as the trees (so an ore and a tree are
-# not allowed to land on the same spot, or inside a spawn / on water
-# / etc.), but a slightly LARGER per-item avoid radius - an ambient
-# ore uses the same 3-variant "ore outcrop" visual as harvestable
-# ore, which is bigger than a single tree, and a tighter cluster of
-# ore would read as "a real deposit" rather than "a scattering of
-# finds."
+# CLUSTER-BASED AMBIENT SCATTER (Chris, 2026-08-10).
 #
-# DENSITY: same per-item ~1/150 m² basis as the trimmed tree pass,
-# so the two passes are visually equivalent in sparseness even though
-# ore is 1.5x the credit value (40 lumber -> 60 ore, deliberately
-# matching ResourceCatalog.TYPES.ore.credits / lumber.credits).
-# Per-item amount is AMBIENT_ORE_AMOUNT in resource_node.gd; the
-# constant is exported through the script rather than re-declared
-# here so a future "tune ambient yields" edit is one line, not two.
+# Old: Poisson-disc-style random scatter across the whole map at ~1 item
+# per 150 m², with 1000 trees and 800 ore as upper bounds. A typical
+# 210-half map produced ~900 trees + ~750 ore = ~1650 ambient items, all
+# of them living as ResourceNode instances in the scene tree and in
+# the `resource_nodes` group.
+#
+# New: K cluster centers, each carrying M items in a Gaussian falloff
+# around the center. Same avoidance rules (water, obstacles, bridges,
+# surface zones, spawns, the other ambient kind). Fewer nodes than
+# the pre-cluster ~1650 (30 * 27 + 20 * 19 = ~1190 typical, ~1.4x
+# reduction) AND visibly larger, denser groves locally - which is the
+# playtest ask ("the ambient forest should be in patches, not spread
+# at random, and not quite dense or large enough as is").
+#
+# Why the count cut matters. Every ResourceNode is a node in the scene
+# tree and an entry in the `resource_nodes` group. match_director.gd's
+# nearest_resource_node() (called by every harvester decision) and
+# _nearest_ambient_to() (called on every right-click that targets a
+# tree) iterate the whole group - O(N) per call, N being the scatter
+# count. Dropping from ~1650 to ~450 cuts that iteration cost by
+# ~3.7x. The MultiMesh draw batching in ambient_scatter.gd is unchanged
+# (visual draw-call cost was already addressed there).
+#
+# The avoidance lists are unchanged: a tree cannot be on a water blob,
+# an ore cannot be on a spawn point, an ore and a tree cannot be at
+# the same world point. Cluster centers are mutually-avoided at the
+# cluster scale (no two clusters within CLUSTER_AVOID_RADIUS of each
+# other) so the patches read as discrete, not a single mega-patch.
+# Bumped 2026-08-10 (second pass, ~30 min after first): playtest saw the
+# first-pass clusters as too small / too sparse to read as forest groves
+# from RTS camera height. FPS at ~47 is the "acceptable for dev" budget;
+# these numbers trade iteration cost for visual weight and stay well
+# under the pre-cluster ~1650-instance total (30 * 27 + 20 * 19 = ~1190).
+const AMBIENT_TREE_AVOID_RADIUS: float = 8.0
+const AMBIENT_TREE_CLUSTER_COUNT: int = 30
+const AMBIENT_TREE_CLUSTER_RADIUS: float = 9.0
+const AMBIENT_TREE_CLUSTER_AVOID_RADIUS: float = 46.0
+const AMBIENT_TREE_ITEMS_MIN: int = 22
+const AMBIENT_TREE_ITEMS_MAX: int = 32
+const AMBIENT_TREE_MIN_COUNT: int = 40
+const AMBIENT_TREE_MAX_COUNT: int = 960   # = 30 clusters * 32 items ceiling
+
 const AMBIENT_ORE_AVOID_RADIUS: float = 9.0
-const AMBIENT_ORE_DENSITY_M2: float = 180.0
-const AMBIENT_ORE_MAX_COUNT: int = 800
-const AMBIENT_ORE_MIN_COUNT: int = 20
+const AMBIENT_ORE_CLUSTER_COUNT: int = 20
+const AMBIENT_ORE_CLUSTER_RADIUS: float = 7.0
+const AMBIENT_ORE_CLUSTER_AVOID_RADIUS: float = 38.0
+const AMBIENT_ORE_ITEMS_MIN: int = 16
+const AMBIENT_ORE_ITEMS_MAX: int = 22
+const AMBIENT_ORE_MIN_COUNT: int = 30
+const AMBIENT_ORE_MAX_COUNT: int = 440   # = 20 clusters * 22 items ceiling
+
+# Pre-cluster constants, kept commented so a future "revert to random
+# scatter" edit can grep them and replace the cluster loop with the
+# pre-2026-08-10 version.
+# const AMBIENT_TREE_DENSITY_M2: float = 150.0
+# const AMBIENT_TREE_MAX_COUNT: int = 1000
+# const AMBIENT_ORE_DENSITY_M2: float = 180.0
+# const AMBIENT_ORE_MAX_COUNT: int = 800
 
 static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0) -> Array:
 	var half: float = map_def.get("map_half_extents", 80.0)
-	# Area of the playable rectangle; doesn't account for the avoidance
-	# holes (water, surface_zones, etc.) so the actual count comes out
-	# a bit lower, which is fine - the cap is the real ceiling.
-	var area = (half * 2.0) * (half * 2.0)
-	var count = clampi(int(area / AMBIENT_TREE_DENSITY_M2), AMBIENT_TREE_MIN_COUNT, AMBIENT_TREE_MAX_COUNT)
-	# prop_scale is intentionally NOT applied to the count - see
-	# _spawn_grassland_clutter()'s same reasoning: a bigger world is a
-	# bigger forest, not a denser one. The trees themselves do scale
-	# with prop_scale (passed through to ResourceNode via the
-	# resource_node.gd's mesh scaling, same path as every other
-	# terrain prop), so coverage fraction holds.
 
 	# Avoidance set, identical to _spawn_grassland_clutter() so the two
 	# passes can't disagree on "where is it legal to put a prop."
-	var avoid_points: Array = []
-	for spawn in map_def.get("spawns", []):
-		for key in spawn.keys():
-			if key == "id": continue
-			avoid_points.append(spawn[key])
-	# Resource nodes are ALREADY in avoid_points via the spawns loop
-	# above (no - they're not; the spawns are HQ/factory/refinery/
-	# harvester, and resource_nodes are a SEPARATE top-level field).
-	# Pull them in explicitly so an ambient tree doesn't sprout
-	# INSIDE a harvestable lumber field (where it'd be redundant and
-	# visually confusing - the field is already 9 trees).
-	for r in map_def.get("resource_nodes", []):
-		avoid_points.append(r.position)
+	var avoid_points := _ambient_avoid_points(map_def)
 	var bridge_rects = _collect_bridges(map_def)
-	var surface_rects = []
-	for s in map_def.get("surface_zones", []):
-		surface_rects.append(_rect_from(s.center, s.half_extents))
+	var surface_rects = _surface_rects(map_def)
 
 	# Seeded off the map name (same convention as _spawn_grassland_
 	# clutter): a given map dresses identically run to run, which is
 	# what the screenshot-verification convention this project uses
 	# requires. The seed is OFFSET (vs. grassland's seed) so the two
-	# passes never draw the same RNG sequence for the same map - if
-	# they shared a seed, an ambient tree at position P would be
-	# deterministic on P, and the grass scatter also deterministic on
-	# P, and a future bug where they coincidentally aligned would
-	# look like one passes over the other.
+	# passes never draw the same RNG sequence for the same map.
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(map_def.get("name", "ambient")) + 0xA1B2C3D4
 	var placed = 0
-	var attempts = 0
 	# Returned for the ambient-ore pass to consume as an avoidance set,
-	# so an ore and a tree never overlap. Empty Array (not null) is the
-	# right "no trees placed" return - the ore pass can iterate it
-	# without a null check.
+	# so an ore and a tree never overlap.
 	var placed_positions: Array = []
-	# attempts cap mirrors grassland's `count * 8`: at the density
-	# we're targeting, well over 1/2 of attempted positions survive
-	# all the avoidance checks on a typical map, so `count * 8` is
-	# plenty of headroom before bailing.
-	while placed < count and attempts < count * 8:
-		attempts += 1
-		var pos = Vector3(rng.randf_range(-half * 0.94, half * 0.94), 0, rng.randf_range(-half * 0.94, half * 0.94))
-		if is_position_blocked(map_def, pos):
-			continue
-		var rejected = false
-		for rect in bridge_rects:
-			if _point_in_rect(pos, rect):
-				rejected = true
-				break
-		if not rejected:
-			for rect in surface_rects:
-				if _point_in_rect(pos, rect):
-					rejected = true
-					break
-		if not rejected:
-			for a in avoid_points:
-				if Vector2(pos.x - a.x, pos.z - a.z).length() < AMBIENT_TREE_AVOID_RADIUS:
-					rejected = true
-					break
-		if rejected:
-			continue
-		pos.y = terrain_height_at(map_def, pos)
-		# Per-tree amount comes from resource_node.gd (AMBIENT_TREE_AMOUNT).
-		# We pass it explicitly so a future "rarer ambient tree with more
-		# lumber" override (e.g. a 2x-amount subset of the pool) doesn't
-		# need a new constant here. The variant_seed rolls from the same
-		# RNG as the position so the same attempt always yields the same
-		# tree (deterministic scatter).
-		TerrainGreeblesScript.spawn_ambient_tree(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_TREE_AMOUNT)
-		placed_positions.append(pos)
-		placed += 1
+	var clusters := _pick_cluster_centers(
+		rng, half, AMBIENT_TREE_CLUSTER_COUNT, AMBIENT_TREE_CLUSTER_AVOID_RADIUS,
+		avoid_points, bridge_rects, surface_rects)
+	for cluster_center in clusters:
+		var items := rng.randi_range(AMBIENT_TREE_ITEMS_MIN, AMBIENT_TREE_ITEMS_MAX)
+		var placed_in_cluster := _place_in_cluster(
+			rng, cluster_center, AMBIENT_TREE_CLUSTER_RADIUS, items,
+			avoid_points, bridge_rects, surface_rects,
+			AMBIENT_TREE_AVOID_RADIUS, AMBIENT_TREE_MAX_COUNT - placed)
+		for pos in placed_in_cluster:
+			pos.y = terrain_height_at(map_def, pos)
+			TerrainGreeblesScript.spawn_ambient_tree(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_TREE_AMOUNT)
+			placed_positions.append(pos)
+			placed += 1
+			if placed >= AMBIENT_TREE_MAX_COUNT:
+				return placed_positions
 	return placed_positions
 
 # AMBIENT ORE PASS. Same overall pattern as _spawn_ambient_trees above
@@ -2289,62 +2277,34 @@ static func _spawn_ambient_trees(map_def: Dictionary, parent: Node3D, prop_scale
 #     never draw the same RNG sequence for the same attempt.
 static func _spawn_ambient_ores(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0, ambient_tree_positions: Array = []):
 	var half: float = map_def.get("map_half_extents", 80.0)
-	var area = (half * 2.0) * (half * 2.0)
-	var count = clampi(int(area / AMBIENT_ORE_DENSITY_M2), AMBIENT_ORE_MIN_COUNT, AMBIENT_ORE_MAX_COUNT)
 
 	# Same avoidance set as the trees, plus the trees themselves (an
 	# ore and a tree are NOT allowed to overlap - a 2x2 metre stack
 	# of foliage on an outcrop reads as a glitch, not a feature).
-	var avoid_points: Array = []
-	for spawn in map_def.get("spawns", []):
-		for key in spawn.keys():
-			if key == "id": continue
-			avoid_points.append(spawn[key])
-	for r in map_def.get("resource_nodes", []):
-		avoid_points.append(r.position)
+	var avoid_points := _ambient_avoid_points(map_def)
+	for t in ambient_tree_positions:
+		avoid_points.append(t)
 	var bridge_rects = _collect_bridges(map_def)
-	var surface_rects = []
-	for s in map_def.get("surface_zones", []):
-		surface_rects.append(_rect_from(s.center, s.half_extents))
+	var surface_rects = _surface_rects(map_def)
 
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(map_def.get("name", "ambient_ore")) + 0xB5C6D7E8
 	var placed = 0
-	var attempts = 0
-	while placed < count and attempts < count * 8:
-		attempts += 1
-		var pos = Vector3(rng.randf_range(-half * 0.94, half * 0.94), 0, rng.randf_range(-half * 0.94, half * 0.94))
-		if is_position_blocked(map_def, pos):
-			continue
-		var rejected = false
-		for rect in bridge_rects:
-			if _point_in_rect(pos, rect):
-				rejected = true
-				break
-		if not rejected:
-			for rect in surface_rects:
-				if _point_in_rect(pos, rect):
-					rejected = true
-					break
-		if not rejected:
-			for a in avoid_points:
-				if Vector2(pos.x - a.x, pos.z - a.z).length() < AMBIENT_ORE_AVOID_RADIUS:
-					rejected = true
-					break
-		# Avoid the already-placed ambient trees too. Using the LARGER
-		# of the two avoid radii (AMBIENT_ORE_AVOID_RADIUS) - an ore
-		# landing right next to a tree is fine, but a tree-ore pair
-		# under 8m apart starts to look like a single composite prop.
-		if not rejected:
-			for t in ambient_tree_positions:
-				if Vector2(pos.x - t.x, pos.z - t.z).length() < AMBIENT_ORE_AVOID_RADIUS:
-					rejected = true
-					break
-		if rejected:
-			continue
-		pos.y = terrain_height_at(map_def, pos)
-		TerrainGreeblesScript.spawn_ambient_ore(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_ORE_AMOUNT)
-		placed += 1
+	var clusters := _pick_cluster_centers(
+		rng, half, AMBIENT_ORE_CLUSTER_COUNT, AMBIENT_ORE_CLUSTER_AVOID_RADIUS,
+		avoid_points, bridge_rects, surface_rects)
+	for cluster_center in clusters:
+		var items := rng.randi_range(AMBIENT_ORE_ITEMS_MIN, AMBIENT_ORE_ITEMS_MAX)
+		var placed_in_cluster := _place_in_cluster(
+			rng, cluster_center, AMBIENT_ORE_CLUSTER_RADIUS, items,
+			avoid_points, bridge_rects, surface_rects,
+			AMBIENT_ORE_AVOID_RADIUS, AMBIENT_ORE_MAX_COUNT - placed)
+		for pos in placed_in_cluster:
+			pos.y = terrain_height_at(map_def, pos)
+			TerrainGreeblesScript.spawn_ambient_ore(pos, parent, rng.randi(), ResourceNodeScript.AMBIENT_ORE_AMOUNT)
+			placed += 1
+			if placed >= AMBIENT_ORE_MAX_COUNT:
+				return
 
 # --- Slope-driven rock exposure ---
 #
@@ -2489,7 +2449,7 @@ static func terrain_height_at(map_def: Dictionary, pos: Vector3) -> float:
 # Surface terrain type at a point ("" if not inside any surface_zones entry -
 # plain ground). Purely a speed-multiplier lookup (see ModuleCatalog.
 # get_terrain_speed_multiplier()) consulted every physics tick by
-# battle_unit.gd, NOT a navmesh/passability concern - unlike water/
+# unit.gd, NOT a navmesh/passability concern - unlike water/
 # obstacles/elevation, surface_zones never appear in _collect_holes() or
 # any navmesh build, since every locomotor type CAN physically enter marsh/
 # rock/mud/sand, just at a different speed. Overlapping zones resolve to
@@ -2555,4 +2515,138 @@ static func is_position_blocked(map_def: Dictionary, pos: Vector3) -> bool:
 	var has_heightmap = _get_heightmap_image(map_def) != null
 	if (has_heightmap or not map_def.get("hills", []).is_empty()) and _slope_at(map_def, pos.x, pos.z) > MAX_WALKABLE_SLOPE:
 		return true
+	return false
+
+
+# --- Cluster-scatter helpers (2026-08-10, Chris) ---
+#
+# Reused by both _spawn_ambient_trees and _spawn_ambient_ores; the
+# avoid-points / surface-rects collection is identical between the
+# two passes (and identical to _spawn_grassland_clutter()'s), so it
+# lives in one place. Cluster-center picking and per-cluster item
+# placement are the structural change that turned the random scatter
+# into the patchy scatter the playtest asked for.
+
+# Same avoid-set the two ambient passes AND _spawn_grassland_clutter() use.
+# Spawns + resource_node field centers - nothing of a resource_node's own
+# group membership, since the field resources are stored under the
+# resource_nodes top-level field of the map def.
+static func _ambient_avoid_points(map_def: Dictionary) -> Array:
+	var out: Array = []
+	for spawn in map_def.get("spawns", []):
+		for key in spawn.keys():
+			if key == "id": continue
+			out.append(spawn[key])
+	for r in map_def.get("resource_nodes", []):
+		out.append(r.position)
+	return out
+
+
+static func _surface_rects(map_def: Dictionary) -> Array:
+	var out: Array = []
+	for s in map_def.get("surface_zones", []):
+		out.append(_rect_from(s.center, s.half_extents))
+	return out
+
+
+# Picks up to `count` cluster centers with mutual avoidance. A cluster
+# center is rejected if it lands on water/an obstacle/a bridge/a surface
+# zone/a spawn/resource_node (the same rules _spawn_grassland_clutter()
+# uses), OR if it is within `cluster_avoid_radius` of an already-accepted
+# cluster. The 0.94 inner-edge of the playable rectangle keeps every
+# cluster on real ground (not on the lip of the map).
+#
+# Returns an Array of Vector2 (xz, y=0). The caller is responsible for
+# sampling the actual terrain height at the item-placement phase.
+static func _pick_cluster_centers(
+		rng: RandomNumberGenerator, half: float, count: int, cluster_avoid_radius: float,
+		avoid_points: Array, bridge_rects: Array, surface_rects: Array) -> Array:
+	var out: Array = []
+	var max_attempts: int = count * 16
+	var attempts := 0
+	while out.size() < count and attempts < max_attempts:
+		attempts += 1
+		var pos := Vector2(rng.randf_range(-half * 0.94, half * 0.94),
+				rng.randf_range(-half * 0.94, half * 0.94))
+		if is_position_blocked_in_dict(pos, avoid_points, bridge_rects, surface_rects, 0.0):
+			continue
+		# Mutual cluster avoidance: no two cluster centers within the
+		# cluster_avoid_radius of each other. Tested as a flat 2D distance
+		# (cluster centers are on a heightmap, the radius is in world
+		# units, the Y component would just add noise).
+		var too_close := false
+		for c in out:
+			if (c - pos).length() < cluster_avoid_radius:
+				too_close = true
+				break
+		if too_close:
+			continue
+		out.append(pos)
+	return out
+
+
+# Per-item placement inside one cluster. The cluster center is the mean
+# of a Gaussian; items land with a small per-axis jitter scaled by the
+# cluster radius so most sit near the center but a few stragglers drift
+# to the edge - the visual that says "this is a patch, not a perfect
+# grid." Items are rejected against the same avoid set as the cluster
+# center, AND against the already-placed items in this cluster, using
+# `per_item_avoid_radius` as the per-item clearance.
+#
+# Returns an Array of Vector3 with y=0. The caller resolves the actual
+# terrain height for each item.
+static func _place_in_cluster(
+		rng: RandomNumberGenerator, center: Vector2, cluster_radius: float, max_items: int,
+		avoid_points: Array, bridge_rects: Array, surface_rects: Array,
+		per_item_avoid_radius: float, hard_cap: int) -> Array:
+	var out: Array = []
+	var attempts := 0
+	var placed_in_cluster := 0
+	var placed_local: Array = []
+	while placed_in_cluster < max_items and attempts < max_items * 6 and out.size() < hard_cap:
+		attempts += 1
+		# Gaussian-ish: two randf_range calls centered on 0, summed, then
+		# scaled. The triangular distribution's standard deviation is
+		# ~0.4 * cluster_radius, so most items land within the inner half
+		# of the cluster and a few sit at the rim.
+		var jitter_x: float = (rng.randf_range(-1.0, 1.0) + rng.randf_range(-1.0, 1.0)) * 0.5 * cluster_radius
+		var jitter_z: float = (rng.randf_range(-1.0, 1.0) + rng.randf_range(-1.0, 1.0)) * 0.5 * cluster_radius
+		var pos := Vector2(center.x + jitter_x, center.y + jitter_z)
+		if is_position_blocked_in_dict(pos, avoid_points, bridge_rects, surface_rects, 0.0):
+			continue
+		# Per-item mutual avoidance inside the cluster.
+		var too_close := false
+		for p in placed_local:
+			if (p - pos).length() < per_item_avoid_radius:
+				too_close = true
+				break
+		if too_close:
+			continue
+		placed_local.append(pos)
+		out.append(Vector3(pos.x, 0, pos.y))
+		placed_in_cluster += 1
+	return out
+
+
+# Lightweight avoidance check used by the cluster helpers. Skips the
+# slope check (clusters and items are picked fast; the slope check
+# belongs in is_position_blocked()'s full gate at item acceptance
+# time, and the cluster center is the same call from the old code
+# path that the full gate also runs). `extra_radius` is added to the
+# per-point radius (0.0 for cluster centers, AMBIENT_*_AVOID_RADIUS
+# for items - the per-item radius handles in-cluster mutual avoidance
+# separately above, so this stays at 0 for both).
+static func is_position_blocked_in_dict(
+		pos2: Vector2, avoid_points: Array, bridge_rects: Array, surface_rects: Array,
+		extra_radius: float) -> bool:
+	var pos := Vector3(pos2.x, 0, pos2.y)
+	for rect in bridge_rects:
+		if _point_in_rect(pos, rect):
+			return true
+	for rect in surface_rects:
+		if _point_in_rect(pos, rect):
+			return true
+	for a in avoid_points:
+		if Vector2(pos.x - a.x, pos.z - a.z).length() < extra_radius:
+			return true
 	return false

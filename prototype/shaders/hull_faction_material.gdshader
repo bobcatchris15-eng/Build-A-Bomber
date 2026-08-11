@@ -83,7 +83,7 @@ uniform float normal_strength : hint_range(0.0, 2.0) = 0.45;
 // tints to whichever faction is wearing it, via emissive_color).
 uniform float shield_mode : hint_range(0.0, 1.0) = 0.0;
 uniform float alpha_base : hint_range(0.0, 1.0) = 1.0;
-// Damage-flash feedback (battle_unit.gd's _flash_hull()) - briefly pushed to
+// Damage-flash feedback (unit.gd's _flash_hull()) - briefly pushed to
 // 1.0 and back on a hit.
 uniform float flash_amount : hint_range(0.0, 1.0) = 0.0;
 // Cel-shaded ink border strength - a bold, graphic edge/corner line,
@@ -126,23 +126,67 @@ uniform float ink_rim_strength : hint_range(0.0, 1.0) = 0.55;
 // doesn't depend on the texture's aspect or the hull's proportions. The
 // baked textures become pure tileable SURFACE (grain, rivets, seams, wear)
 // with no composition, which is what triplanar actually wants.
-uniform vec4 stripe_color : source_color = vec4(1.0, 0.75, 0.1, 1.0);
-// DEFAULT OFF until the tileable faction swatches land. The stripe is the
-// second half of a two-part fix - it only makes sense once the baked albedo
-// has had its own composition (the wide accent band) REMOVED, otherwise a
-// hull carries both the baked stripe and this one. Two things still to do
-// before flipping this on:
-//   1. local_bounds_y must actually be plumbed from the mesh AABB (see
-//      hull_material_builder.apply_bounds_from_mesh, written but not yet
-//      called anywhere) - on the default unit-height bounds the stripe
-//      smears into a broad band instead of a trim line.
-//   2. side_mask needs a harder gate: these hulls have sloped upper faces
-//      where tri_w.y is partial, so the stripe currently bleeds onto them
-//      rather than staying on the vertical sides.
-uniform float stripe_enabled : hint_range(0.0, 1.0) = 0.0;
-// Height of the stripe's centre as a 0-1 fraction of the hull's local
-// vertical extent. 0.5 = midline; a little above centre usually reads best
-// on a vehicle.
+// --- THREE-ZONE HULL LIVERY (2026-08-10, replaces the 10 premade factions) ---
+// The player authors their own scheme now (scripts/livery.gd), and the hull
+// half of it is three zones: everything below a belt line, everything above
+// it, and a stripe. Each zone carries its own COLOUR and its own
+// METALLIC/ROUGHNESS, because a colour alone cannot tell matte primer from
+// anodised metal and that difference is most of what makes a livery look
+// authored rather than tinted.
+//
+// This supersedes the 2026-07-29 stripe block that used to live here. That
+// one was written but never wired into fragment() - it was waiting on
+// tileable swatches and on local_bounds_y actually being plumbed. Both
+// landed since (hull_material_builder.apply_local_bounds() is called from
+// the hull build path), so the stripe is now real, and it grew two siblings.
+//
+// WHY THE ZONE SPLIT IS IN THE SHADER and not three materials: a hull is one
+// mesh with per-surface armor/structural overrides already claiming both
+// surface slots, and the zone boundary is a horizontal plane through the
+// middle of a shape that the Design Lab lets the player stretch continuously.
+// Only something evaluated per-fragment against the hull's own local bounds
+// can hold a belt line straight through that.
+// EVERY DEFAULT HERE IS A NO-OP, and that is deliberate. This shader is
+// shared by paths that do not (yet) drive a livery at all - the Design Lab's
+// unpainted scale-model finish, building_mesh.gd's team-tinted structures,
+// any material built before hull_material_builder.gd sets these. Colours
+// default to white because they MULTIPLY, metallic defaults to 1.0 because it
+// SCALES the material-wide `metallic`, and livery_mix defaults to 0 so the
+// roughness path below stays on the old `roughness` uniform outright. An
+// unwired material therefore renders byte-identically to before this block
+// existed, and a wired one is a pure override.
+uniform vec4 zone_lower_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform vec4 zone_upper_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform vec4 stripe_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform float zone_lower_metallic : hint_range(0.0, 1.0) = 1.0;
+uniform float zone_lower_roughness : hint_range(0.0, 1.0) = 0.85;
+uniform float zone_upper_metallic : hint_range(0.0, 1.0) = 1.0;
+uniform float zone_upper_roughness : hint_range(0.0, 1.0) = 0.85;
+uniform float zone_stripe_metallic : hint_range(0.0, 1.0) = 1.0;
+uniform float zone_stripe_roughness : hint_range(0.0, 1.0) = 0.85;
+// 0 = ignore the zone roughness entirely and use the material-wide
+// `roughness` (which is what ARMOR_PBR sets per armor material); 1 = the
+// player's chosen finishes drive it. hull_material_builder.gd raises this
+// only on the paths that actually paint a livery.
+uniform float livery_mix : hint_range(0.0, 1.0) = 0.0;
+// Height of the belt line splitting lower from upper, as a 0-1 fraction of
+// the hull's local vertical extent. Slightly below centre so the "upper"
+// zone gets the larger share - it is the face the top-down RTS camera
+// actually sees, so it is the one the player is really choosing.
+uniform float zone_split : hint_range(0.0, 1.0) = 0.45;
+// Softness of the belt line itself. Nonzero so it doesn't alias into a
+// crawling line at RTS zoom-out, small so it still reads as a paint edge.
+uniform float zone_split_softness : hint_range(0.0, 0.2) = 0.012;
+uniform float stripe_enabled : hint_range(0.0, 1.0) = 1.0;
+// STRIPE AXIS. 0.0 = a longitudinal racing stripe down the hull's centreline
+// (banded on local X, running front-to-back over the top). 1.0 = a horizontal
+// belt band at stripe_center (the 2026-07-29 behaviour).
+//
+// Longitudinal is the default because the other two zones are ALREADY a
+// horizontal split: a height-banded stripe would just be a thicker version of
+// the boundary between them, whereas a centreline stripe is a genuinely third
+// direction and is what "a stripe down the middle" means on a vehicle.
+uniform float stripe_axis : hint_range(0.0, 1.0) = 0.0;
 uniform float stripe_center : hint_range(0.0, 1.0) = 0.62;
 uniform float stripe_width : hint_range(0.0, 0.5) = 0.11;
 // Soft edge on the stripe, in the same normalized units. Small but nonzero
@@ -156,6 +200,10 @@ uniform float stripe_edge_darken : hint_range(0.0, 1.0) = 0.45;
 // hull_material_builder.gd; the default covers a unit-height mesh so an
 // unplumbed material still renders a sane stripe rather than nothing.
 uniform vec2 local_bounds_y = vec2(-0.5, 0.5);
+// Same, for the X extent - the longitudinal stripe needs the hull's WIDTH to
+// place a centreline band of consistent real-world width regardless of how
+// wide the player stretched the chassis.
+uniform vec2 local_bounds_x = vec2(-0.5, 0.5);
 
 // --- Toon / comic-book lighting (Chris, 2026-07-29) ---
 // Tone target: units are the cartoon objects, terrain stays photoreal - the
@@ -178,16 +226,26 @@ uniform float toon_bands : hint_range(1.0, 6.0) = 3.0;
 // crisp while staying stable when a unit is small on screen.
 uniform float toon_softness : hint_range(0.0, 0.5) = 0.06;
 // Shadowed bands get tinted rather than just darkened - flat multiplication
-// toward black is what makes naive cel-shading look muddy. A cool tint
-// against the warm key light is the standard comic-print solution.
-uniform vec3 toon_shadow_tint : source_color = vec3(0.42, 0.46, 0.62);
+// toward black is what makes naive cel-shading look muddy. A neutral warm
+// grey against the warm key light agrees with the world (warm dirt, warm
+// metal) - the previous cool blue tint (0.42, 0.46, 0.62) was the
+// "looks reflective" reading the gloss bug report caught. Cool shadow
+// tints are the comic-print solution for printed paper; they read as
+// reflection on a screen lit by a warm key.
+uniform vec3 toon_shadow_tint : source_color = vec3(0.55, 0.50, 0.42);
 // Floor on the darkest band, so unlit faces still read their faction color
 // instead of going to silhouette. Terrain has no such floor, which further
 // separates the two.
 uniform float toon_shadow_floor : hint_range(0.0, 0.8) = 0.28;
 // Hard specular blob (the classic comic highlight). Driven by ROUGHNESS so
-// a glossy faction still reads glossier than a matte one.
-uniform float toon_specular_strength : hint_range(0.0, 2.0) = 0.5;
+// a glossy faction still reads glossier than a matte one. 0.5 -> 0.25
+// (2026-08-10): at 0.5 the comic highlight on a top-facing hull face
+// read as wet plastic, which the gloss bug report called out. 0.25
+// keeps the highlight as a "this is a top-facing panel" cue without
+// claiming "this is chrome". A glossy finish with high metallic still
+// reads glossier than a matte one because the underlying PBR specular
+// is unchanged; the toon blob is a comic-print addition on top.
+uniform float toon_specular_strength : hint_range(0.0, 2.0) = 0.25;
 // Saturation multiplier on the baked faction albedo. The pre-baked textures
 // were authored for a PBR response; under banded lighting they read washed
 // out, so the "saturated comic color" half of the brief is a push here
@@ -251,12 +309,48 @@ void fragment() {
 	vec3 tex_albedo = triplanar_sample(albedo_tex, tex_pos, tri_w).rgb;
 	float tex_roughness = triplanar_sample(roughness_tex, tex_pos, tri_w).r;
 
-	// tex_albedo carries full faction identity now (color, wear, grime,
-	// panel lines, trim) baked in by generate_faction_textures.gd.
-	// base_color/accent_color are neutral (white) multiplicative tints by
-	// default - see header comment for why they're kept live rather than
-	// removed (building.gd's team-color override, future damage overlay).
-	vec3 color = tex_albedo * base_color.rgb * accent_color.rgb;
+	// THE LIVERY ZONES. tex_albedo is now pure tileable SURFACE (grain,
+	// rivets, seams, wear) with no colour identity of its own - the identity
+	// comes from the player's three hull zones, multiplied over that grain so
+	// the paint sits ON the panel detail instead of replacing it.
+	//
+	// Normalized height within the hull's own local bounds, so a belt line
+	// lands at the same proportion of the hull whatever the Design Lab
+	// stretched it to.
+	float zone_h = clamp((model_pos.y - local_bounds_y.x)
+		/ max(local_bounds_y.y - local_bounds_y.x, 0.0001), 0.0, 1.0);
+	float upper_mask = smoothstep(zone_split - zone_split_softness,
+		zone_split + zone_split_softness, zone_h);
+
+	// Stripe band. Longitudinal (default) measures distance from the hull's
+	// own centreline in X; the horizontal variant bands on height instead.
+	// mix() rather than a branch so both paths cost the same and neither can
+	// diverge under a partially-derivative-dependent compiler.
+	float zone_x = clamp((model_pos.x - local_bounds_x.x)
+		/ max(local_bounds_x.y - local_bounds_x.x, 0.0001), 0.0, 1.0);
+	float stripe_coord = mix(abs(zone_x - 0.5) * 2.0, abs(zone_h - stripe_center), stripe_axis);
+	float stripe_half = max(stripe_width, 0.0001);
+	float stripe_mask = (1.0 - smoothstep(stripe_half - stripe_softness,
+		stripe_half + stripe_softness, stripe_coord)) * stripe_enabled;
+	// Piping: a thin darker line just OUTSIDE the band, which is what stops a
+	// painted stripe reading as a flat decal laid on top of the hull.
+	float piping = (smoothstep(stripe_half - stripe_softness, stripe_half + stripe_softness, stripe_coord)
+		- smoothstep(stripe_half + stripe_softness * 3.0, stripe_half + stripe_softness * 6.0, stripe_coord))
+		* stripe_edge_darken * stripe_enabled;
+
+	vec3 zone_albedo = mix(zone_lower_color.rgb, zone_upper_color.rgb, upper_mask);
+	float zone_metallic = mix(zone_lower_metallic, zone_upper_metallic, upper_mask);
+	float zone_roughness = mix(zone_lower_roughness, zone_upper_roughness, upper_mask);
+	zone_albedo = mix(zone_albedo, stripe_color.rgb, stripe_mask);
+	zone_metallic = mix(zone_metallic, zone_stripe_metallic, stripe_mask);
+	zone_roughness = mix(zone_roughness, zone_stripe_roughness, stripe_mask);
+	zone_albedo *= (1.0 - piping);
+
+	// base_color/accent_color are kept live as neutral (white) multiplicative
+	// tints on top - see the header comment for why (building.gd's team-color
+	// override, damage overlay), which must still be able to tint a hull
+	// whatever livery it wears.
+	vec3 color = tex_albedo * zone_albedo * base_color.rgb * accent_color.rgb;
 
 	// Comic-color grade, applied BEFORE the ink line so the line itself
 	// isn't saturated along with the paint. Luma weights are Rec.709.
@@ -309,17 +403,34 @@ void fragment() {
 	color = mix(color, vec3(1.0, 0.05, 0.05), flash_amount);
 	ALBEDO = color;
 
-	METALLIC = clamp(metallic * (1.0 - edge_ink * 0.85), 0.0, 1.0);
+	// Metallic/roughness come from the ZONE the fragment is in, not from the
+	// material-wide uniforms - that is what makes a satin-enamel upper over a
+	// gunmetal lower read as two different finishes rather than two tints of
+	// one. The `metallic`/`roughness` uniforms survive as a multiplier and an
+	// offset respectively, which is how the armor-material character
+	// (hull_material_builder.gd's ARMOR_PBR) still modulates the player's
+	// choice instead of being overwritten by it.
+	METALLIC = clamp(zone_metallic * metallic * (1.0 - edge_ink * 0.85), 0.0, 1.0);
 	// Ink border reads matte, same as the baked texture's own ink seams - a
 	// graphic ink line with a shiny specular highlight running through it
 	// would look wrong, like a groove rather than a painted line.
-	// roughness_bias (per-faction finish character) and a stronger
-	// tex_roughness weight (0.5 -> 0.85 - the baked texture's own roughness
-	// map already differs per faction via corrosion/grain/overlay density,
-	// it just wasn't weighted enough to read) both push surface FINISH to
-	// vary by faction, the same way ALBEDO already does, not just by armor
-	// material.
-	ROUGHNESS = clamp(roughness + roughness_bias + (tex_roughness - 0.5) * 0.85 + edge_ink * 0.45, 0.0, 1.0);
+	//
+	// SATIN FLOOR. The 0.35 lower clamp is the shader-side half of
+	// livery.gd's SATIN_ROUGHNESS_FLOOR, and it is not redundant with it:
+	// roughness_bias and the tex_roughness term below can both push the final
+	// value DOWN from whatever the finish authored, and without a floor here
+	// a satin finish plus a negative bias plus a dark spot in the roughness
+	// map lands back in the near-mirror range that caused the "whole game
+	// looks glossy" regression. Clamping at the point of use is the only
+	// place that cannot be routed around.
+	float base_roughness = mix(roughness, zone_roughness, livery_mix);
+	// The satin floor applies only where a livery is actually being painted.
+	// energy_shielding deliberately sits at roughness 0.1 - it is an active
+	// energy field, one of the few things in the game that IS supposed to read
+	// as glossy (see hull_material_builder.gd's ARMOR_PBR note) - and a floor
+	// that ignored livery_mix would clamp that away on every shielded hull.
+	float rough_floor = mix(0.0, 0.35, livery_mix);
+	ROUGHNESS = clamp(base_roughness + roughness_bias + (tex_roughness - 0.5) * 0.85 + edge_ink * 0.45, rough_floor, 1.0);
 	// Texture-driven normal bump (rivets/panel grooves the mesh itself
 	// doesn't model at this fine a scale), blended with the real geometric
 	// normal and converted to view space.

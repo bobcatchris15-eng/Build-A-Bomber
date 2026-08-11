@@ -1,0 +1,59 @@
+{
+	"schema_version": 1.0,
+	"name": "Test Range",
+	"description": "Single-unit test playtest map for the Design Lab's 'Test in Arena' button (battle-system unification Phase 3, 2026-08-10). Tiny 80x80 m world, no ambient clutter, one node of each resource type that regrows in place, a 20m square patch of every surface type so the player can see their unit's per-surface behaviour side by side, and a 3x3 patch of empty ground to baseline on. There is no economy, no production, no AI commander, no fog of war (MatchRuleSet.test_range() flips those off); the map itself is just a stage.",
+	"map_half_extents": 40.0,
+	"ground_color": [0.36, 0.34, 0.30],
+	"disable_ambient_scatter": true,
+	"base_zones": [],
+	"water_areas": [],
+	"hills": [],
+	"obstacles": [],
+	"spawns": [
+		{
+			"id": "player",
+			"hq": [-15.0, 0.0, 0.0],
+			"factory": [-15.0, 0.0, 0.0],
+			"refinery": [-15.0, 0.0, 0.0],
+			"harvester": [-15.0, 0.0, 0.0]
+		},
+		{
+			"id": "enemy",
+			"hq": [15.0, 0.0, 0.0],
+			"factory": [15.0, 0.0, 0.0],
+			"refinery": [15.0, 0.0, 0.0],
+			"harvester": [15.0, 0.0, 0.0]
+		}
+	],
+	"resource_nodes": [
+		{
+			"type": "metal",
+			"position": [-10.0, 0.0, -10.0],
+			"amount": 5000
+		},
+		{
+			"type": "crystal",
+			"position": [10.0, 0.0, -10.0],
+			"amount": 5000
+		},
+		{
+			"type": "lumber",
+			"position": [-10.0, 0.0, 10.0],
+			"amount": 5000
+		},
+		{
+			"type": "oil",
+			"position": [10.0, 0.0, 10.0],
+			"amount": 5000
+		}
+	],
+	"surface_zones": [
+		{ "surface_type": "marsh",    "center": [-30.0, 0.0, -30.0], "half_extents": [10.0, 10.0] },
+		{ "surface_type": "rocky",    "center": [-15.0, 0.0, -30.0], "half_extents": [10.0, 10.0] },
+		{ "surface_type": "snow_mud", "center": [  0.0, 0.0, -30.0], "half_extents": [10.0, 10.0] },
+		{ "surface_type": "sand",     "center": [ 15.0, 0.0, -30.0], "half_extents": [10.0, 10.0] },
+		{ "surface_type": "gravel",   "center": [ 30.0, 0.0, -30.0], "half_extents": [10.0, 10.0] },
+		{ "surface_type": "forest",   "center": [-30.0, 0.0,  30.0], "half_extents": [10.0, 10.0] },
+		{ "surface_type": "ice",      "center": [ 30.0, 0.0,  30.0], "half_extents": [10.0, 10.0] }
+	]
+}

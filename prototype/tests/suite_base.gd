@@ -31,11 +31,15 @@ var current_scene: Node:
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const ModuleData = preload("res://scripts/module_data.gd")
 const HullLoader = preload("res://scripts/hull_loader.gd")
-# player_vehicle.gd is no longer used in production - battlefield.gd:51 explains
-# why battle_unit.gd replaced it - but four damage-model suites still use it as a
-# minimal CharacterBody3D damage target, which is exactly what they want there.
-const PlayerVehicleScript = preload("res://scripts/player_vehicle.gd")
-const TargetDummyScript = preload("res://scripts/target_dummy.gd")
+# 2026-08-10 (Chris): battle_unit.gd, player_vehicle.gd, target_dummy.gd,
+# Battlefield.tscn, battlefield.gd, test_cargo_capacity(_2).gd all retired
+# in the battle-system unification's Phase 4. The damage-target tests that
+# used PlayerVehicleScript and the AI-targeting tests that used
+# TargetDummyScript were nuked in the same pass per Chris's "my call, just
+# nuke those tests entirely" call - we can rebuild them against the new
+# battle layer (battle/units/unit.gd) if/when we need them. The Incoming
+# Missile script and the Damage Resolver still ship - the rebuild tests
+# in tests/battle/ cover them now.
 const IncomingMissileScript = preload("res://scripts/incoming_missile.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const DrivetrainScript = preload("res://scripts/drivetrain.gd")
@@ -43,8 +47,10 @@ const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 
 # Ranges deliberately EXCLUDE the Geometric Shapes block (0x25xx) and Latin/
 # punctuation. Box-drawing and geometric characters are legitimate technical
-# notation in this project - battle_unit.gd's health bars are built from them -
-# whereas emoji and dingbats are the decoration item 0 bans.
+# notation in this project - whereas emoji and dingbats are the decoration
+# item 0 bans. (The "battle_unit.gd's health bars" sentence lived here
+# until 2026-08-10 when battle_unit.gd was retired; the rule still applies
+# anywhere a `■□` style bar might be re-introduced.)
 const _GLYPH_RANGES := [
 	[0x2190, 0x21FF],   # arrows
 	[0x2600, 0x27BF],   # misc symbols + dingbats (stars, ✓, ⚙, ⚡)

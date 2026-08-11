@@ -260,14 +260,27 @@ func test_building_obstacle_spawns_taller_real_cover_than_rock_cluster() -> bool
 	TerrainBuilder.spawn_visuals(map_def, parent)
 	await tree.process_frame
 
+	# OBSTACLE BODIES ONLY. spawn_visuals() also scatters the ambient forest
+	# into this same parent, and an ambient scatter node is a StaticBody3D
+	# with NO CollisionShape3D (it was taken out of the broadphase for the
+	# 1800-node scatter cost). Matching on "is a StaticBody3D" alone therefore
+	# picked up a tree as the rock, found no shape under it, and crashed on a
+	# null. Requiring a real collider is what actually identifies an obstacle.
 	var rock_body = null
 	var building_body = null
 	for child in parent.get_children():
-		if child is StaticBody3D:
-			if child.global_position.x < 15:
-				rock_body = child
-			else:
-				building_body = child
+		if not (child is StaticBody3D):
+			continue
+		var has_shape := false
+		for c in child.get_children():
+			if c is CollisionShape3D:
+				has_shape = true
+		if not has_shape:
+			continue
+		if child.global_position.x < 15:
+			rock_body = child
+		else:
+			building_body = child
 	if not rock_body or not building_body:
 		print("  [FAIL] Expected one real StaticBody3D collider per obstacle, got rock=", rock_body, " building=", building_body)
 		parent.queue_free()
@@ -2413,55 +2426,50 @@ func test_ambient_tree_uses_ambient_pool_not_lumber_pool() -> bool:
 	# wrong AND it makes the scatter read as "duplicate lumber fields,"
 	# not "ambient forest."
 	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
+	var AmbientScatterScript = preload("res://scripts/ambient_scatter.gd")
+	# Parented under its own container because that is where the shared
+	# MultiMesh batcher gets created (ambient_scatter.gd's get_or_create takes
+	# the node's PARENT), and this test needs a handle on it.
+	var holder := Node3D.new()
+	root.add_child(holder)
 	var node = ResourceNodeScript.new()
 	node.is_ambient = true
-	root.add_child(node)
+	holder.add_child(node)
 	node.global_position = Vector3(17.5, 0, -23.0)
 	node.setup("lumber", 40)
 	await tree.process_frame
 
 	if node.resource_type != "lumber":
 		print("  [FAIL] Ambient tree should keep resource_type='lumber' (so harvesters credit it as lumber), got '", node.resource_type, "'")
-		node.queue_free()
+		holder.queue_free()
 		return false
 	if not node.is_ambient:
 		print("  [FAIL] is_ambient flag was reset by setup()")
-		node.queue_free()
+		holder.queue_free()
 		return false
-	if node.mesh_inst == null:
-		print("  [FAIL] Ambient tree got no mesh - authored pool AND procedural fallback both returned null")
-		node.queue_free()
-		return false
-	# The ambient_tree_*.glb pool is selected by a SCENE load via
-	# PackedScene.instantiate(), not a Mesh load - so the right
-	# "where did this come from" property is Node.scene_file_path (the
-	# file the PackedScene was loaded from), NOT resource_path (which
-	# is a Resource property and is null on Node3D instances). The
-	# root mesh_inst carries scene_file_path back to one of the
-	# ambient_tree_N.glb files; descendant MeshInstance3D children
-	# carry .mesh.resource_path. Either chain is a valid signal.
+	# An ambient node no longer builds its own mesh subtree - its visual is a
+	# slot in a shared MultiMesh (ambient_scatter.gd), so "which pool did it
+	# pick from" is now answered by the mesh the BATCH is drawing. The rule
+	# under test is unchanged: it must be an ambient_tree_*.glb and not one of
+	# the 3 harvestable "stand" variants.
+	var batcher = AmbientScatterScript.get_or_create(holder)
+	batcher.commit()
+	await tree.process_frame
 	var got_ambient: bool = false
-	var root_path: String = String(node.mesh_inst.scene_file_path) if node.mesh_inst != null else ""
-	if "ambient_tree_" in root_path:
-		got_ambient = true
-	# Walk the mesh tree looking for a MeshInstance3D whose .mesh
-	# resource_path points at an ambient_tree_*.glb (descendants
-	# also carry the source, redundantly, for any test that didn't
-	# keep a handle on the root).
+	var seen_paths: Array = []
+	var stack: Array = [batcher]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children():
+			stack.append(c)
+		if n is MultiMeshInstance3D and n.multimesh != null and n.multimesh.mesh != null:
+			var mp: String = String(n.multimesh.mesh.resource_path)
+			seen_paths.append(mp)
+			if "ambient_tree_" in mp:
+				got_ambient = true
+	holder.queue_free()
 	if not got_ambient:
-		var stack: Array = [node.mesh_inst]
-		while not stack.is_empty():
-			var n: Node = stack.pop_back()
-			for c in n.get_children():
-				stack.append(c)
-			if n is MeshInstance3D and n.mesh != null:
-				var mp: String = String(n.mesh.resource_path)
-				if "ambient_tree_" in mp:
-					got_ambient = true
-					break
-	node.queue_free()
-	if not got_ambient:
-		print("  [FAIL] Ambient tree setup did not load any ambient_tree_*.glb (mesh_inst scene_file_path was: ", root_path, ")")
+		print("  [FAIL] Ambient tree registered no ambient_tree_*.glb geometry with the scatter batcher (batched meshes were: ", seen_paths, ")")
 		return false
 	print("  [PASS] Ambient tree setup instantiates from the ambient_tree_*.glb pool, not the harvestable resource_lumber_* family.")
 	return true
@@ -2475,7 +2483,7 @@ func test_ambient_tree_does_not_regrow_after_harvest() -> bool:
 	# collectible does. Verified two ways: amount stays at 0 across a
 	# physics tick window longer than REGROW_DELAY, AND the node is
 	# removed from the resource_nodes group (which is what gates
-	# "find nearest resource" in battle_unit.gd's _auto_find_harvest_
+	# "find nearest resource" in unit.gd's _auto_find_harvest_
 	# work - so even if a bug let amount stay positive, the harvester
 	# would still walk past it).
 	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
@@ -2564,32 +2572,35 @@ func test_ambient_nodes_opt_out_of_shadow_casting() -> bool:
 	# pool picks a real variant - the failure mode is "setup never set
 	# cast_shadow OFF at all", which a procedural fallback (no mesh_inst
 	# to check) would mask.
+	#
+	# The ambient visual no longer lives under the node's own mesh_inst - it
+	# is a slot in a shared MultiMesh (ambient_scatter.gd), so the assertion
+	# follows it there. The RULE is unchanged and is what this test exists
+	# for; only where cast_shadow has to be set moved.
+	var scatter_parent := Node3D.new()
+	root.add_child(scatter_parent)
 	var ambient = ResourceNodeScript.new()
 	ambient.is_ambient = true
-	root.add_child(ambient)
+	scatter_parent.add_child(ambient)
 	ambient.global_position = Vector3(11.0, 0, 7.0)
 	ambient.setup("lumber", 40)
 	await tree.process_frame
-	if not is_instance_valid(ambient.mesh_inst):
-		print("  [FAIL] Ambient tree setup() didn't produce a mesh_inst - can't assert shadow state")
-		ambient.queue_free()
-		return false
-	# The pool's PackedScene root is a Node3D (a glTF import wraps the
-	# mesh tree in a node), not a MeshInstance3D - the actual meshes are
-	# MeshInstance3D children. resource_node.gd walks the descendants,
-	# so the assertion has to do the same.
-	var ambient_meshes: Array = _collect_geometry_instances(ambient.mesh_inst)
+	var AmbientScatterScript = preload("res://scripts/ambient_scatter.gd")
+	var batcher = AmbientScatterScript.get_or_create(scatter_parent)
+	batcher.commit()
+	await tree.process_frame
+	var ambient_meshes: Array = _collect_geometry_instances(batcher)
 	if ambient_meshes.is_empty():
-		print("  [FAIL] Ambient tree's mesh_inst tree has no GeometryInstance3D - can't assert shadow state")
-		ambient.queue_free()
+		print("  [FAIL] Ambient tree produced no batched GeometryInstance3D - can't assert shadow state")
+		scatter_parent.queue_free()
 		return false
 	for m in ambient_meshes:
 		if m.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
 			print("  [FAIL] Ambient tree's ", m.get_class(), " still casts shadows (", m.cast_shadow,
-				") - 300+ ambient trees on a 4096 shadow atlas will tank framerate. resource_node.gd:setup() must set cast_shadow=OFF on every GeometryInstance3D under mesh_inst for is_ambient nodes.")
-			ambient.queue_free()
+				") - 300+ ambient trees on a 4096 shadow atlas will tank framerate. ambient_scatter.gd:commit() must set cast_shadow=OFF on every MultiMeshInstance3D it builds.")
+			scatter_parent.queue_free()
 			return false
-	ambient.queue_free()
+	scatter_parent.queue_free()
 
 	# Non-ambient (field) branch: shadows STAY ON. There are only ~36 of
 	# these on a map (4 fields x 9 trees) so the shadow cost is bounded,
@@ -2728,6 +2739,13 @@ func test_ambient_trees_respect_avoid_radii() -> bool:
 	# uses the same per-rect rejection for bridges.
 	var violations: Array = []
 	for child in parent.get_children():
+		# TREES ONLY. The scatter parent also holds the shared MultiMesh
+		# batcher (ambient_scatter.gd), which is a plain Node3D sitting at the
+		# container origin - counting it as a tree reported a phantom
+		# "tree at (0,0,0) on bridge rect" on every run. Each real tree is a
+		# ResourceNode, i.e. a StaticBody3D.
+		if not (child is StaticBody3D):
+			continue
 		var p: Vector3 = child.global_position
 		# Water
 		if absf(p.x - 40.0) < 20.0 and absf(p.z - 0.0) < 20.0:
@@ -2786,64 +2804,56 @@ func test_ambient_ore_picks_from_resource_ore_pool() -> bool:
 	# added an ambient_ore_* family that drifted from the
 	# harvestable one.
 	var ResourceNodeScript = preload("res://scripts/resource_node.gd")
+	var AmbientScatterScript = preload("res://scripts/ambient_scatter.gd")
+	# Own container, because that is where the shared MultiMesh batcher is
+	# created (get_or_create takes the node's PARENT) and this test needs it.
+	var holder := Node3D.new()
+	root.add_child(holder)
 	var node = ResourceNodeScript.new()
 	node.is_ambient = true
-	root.add_child(node)
+	holder.add_child(node)
 	node.global_position = Vector3(-7.3, 0, 11.8)
 	node.setup("ore", 60)
 	await tree.process_frame
 
 	if node.resource_type != "ore":
 		print("  [FAIL] Ambient ore should keep resource_type='ore', got '", node.resource_type, "'")
-		node.queue_free()
+		holder.queue_free()
 		return false
 	if not node.is_ambient:
 		print("  [FAIL] is_ambient flag was reset by setup()")
-		node.queue_free()
+		holder.queue_free()
 		return false
-	if node.mesh_inst == null:
-		print("  [FAIL] Ambient ore got no mesh - authored pool AND procedural fallback both returned null")
-		node.queue_free()
-		return false
-	# Must be from resource_ore_*.glb - either via the scene_file_path
-	# on the root, or via the .mesh.resource_path on a descendant
-	# MeshInstance3D.
+	# An ambient node draws through the shared MultiMesh rather than its own
+	# subtree now, so "which pool" is answered by the batched mesh. The rule
+	# is unchanged: ore must come from the harvestable resource_ore_* family,
+	# NOT from a parallel ambient_ore_* one.
+	var batcher = AmbientScatterScript.get_or_create(holder)
+	batcher.commit()
+	await tree.process_frame
 	var got_ore: bool = false
-	var root_path: String = String(node.mesh_inst.scene_file_path) if node.mesh_inst != null else ""
-	if "resource_ore_" in root_path:
-		got_ore = true
-	if not got_ore:
-		var stack: Array = [node.mesh_inst]
-		while not stack.is_empty():
-			var n: Node = stack.pop_back()
-			for c in n.get_children():
-				stack.append(c)
-			if n is MeshInstance3D and n.mesh != null:
-				var mp: String = String(n.mesh.resource_path)
-				if "resource_ore_" in mp:
-					got_ore = true
-					break
+	var seen_paths: Array = []
+	var stack: Array = [batcher]
+	while not stack.is_empty():
+		var n: Node = stack.pop_back()
+		for c in n.get_children():
+			stack.append(c)
+		if n is MultiMeshInstance3D and n.multimesh != null and n.multimesh.mesh != null:
+			var mp: String = String(n.multimesh.mesh.resource_path)
+			seen_paths.append(mp)
+			if "resource_ore_" in mp:
+				got_ore = true
 	# Negative case: must NOT be from ambient_tree_*.glb. A failure
 	# here would mean _try_spawn_ambient_authored's lumber branch is
 	# being taken for an ore-typed call, which would land an actual
 	# tree where an outcrop should be - the "wrong species" bug.
 	var got_tree: bool = false
-	if "ambient_tree_" in root_path:
-		got_tree = true
-	if not got_tree:
-		var stack2: Array = [node.mesh_inst]
-		while not stack2.is_empty():
-			var n: Node = stack2.pop_back()
-			for c in n.get_children():
-				stack2.append(c)
-			if n is MeshInstance3D and n.mesh != null:
-				var mp: String = String(n.mesh.resource_path)
-				if "ambient_tree_" in mp:
-					got_tree = true
-					break
-	node.queue_free()
+	for p in seen_paths:
+		if "ambient_tree_" in str(p):
+			got_tree = true
+	holder.queue_free()
 	if not got_ore:
-		print("  [FAIL] Ambient ore setup did not load any resource_ore_*.glb (scene_file_path was: ", root_path, ")")
+		print("  [FAIL] Ambient ore registered no resource_ore_*.glb geometry with the scatter batcher (batched meshes were: ", seen_paths, ")")
 		return false
 	if got_tree:
 		print("  [FAIL] Ambient ore loaded an ambient_tree_*.glb instead of a resource_ore_*.glb - _try_spawn_ambient_authored's lumber branch is being taken for an ore-typed call")

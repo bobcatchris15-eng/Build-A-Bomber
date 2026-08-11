@@ -153,7 +153,7 @@ callers to subscribe, not to poll. `AudioManager` similar.
 
 ```
 MainMenu ──► MainLab (Design Lab)      ──► BlueprintLibrary
-         ──► Skirmish / Battle / Battlefield (Test Range)
+         ──► Skirmish / Battle / Test Range (lands on Battle.tscn via TestRangeLauncher)
          ──► MatchSetup / OperationsSetup / OperationsDraft
          ──► Loading (transitional)
          ──► AfterActionReport
@@ -195,13 +195,20 @@ Design Lab (3D scene)
               │
               ▼
    blueprint_manager.gd  ←→  user://blueprints/<id>.json   (saved roster)
-                          ←→  user://lab_scratch.json      (in-progress design)
-                          ←→  user://blueprint.json        (legacy single-slot
-                                                            pointer read by
-                                                            Battlefield.tscn)
+                          ←→  user://lab_scratch.json      (in-progress design,
+                                                            also the Test Range
+                                                            read target via
+                                                            TestRangeLauncher)
                           ←→  data/loadout/*.json          (shipped defaults)
                           ←→  data/enemy/*.json            (AI rosters)
 ```
+
+Note: `user://blueprint.json` (legacy single-slot pointer) and the
+`LEGACY_SLOT_PATH` it was reachable through were retired 2026-08-10
+with the rest of the pre-unification battle path. The Test Range now
+reads `user://lab_scratch.json` (the Design Lab's own scratch slot)
+via `TestRangeLauncher`, which falls back to the most-recent-saved
+named blueprint and then to the bundled Bulwark MBT.
 
 - **Scratch vs. saved is enforced at the file level.** "Test in Arena"
   writes the scratch file only; a real Save creates the roster entry. See
@@ -306,8 +313,7 @@ same kind of contract** for sound: add the entry in `tools/audio/sfx.py`'s
 ### 4.3 Per-user storage (`user://`)
 
 - `user://blueprints/<id>.json` — saved player designs (roster)
-- `user://lab_scratch.json` — in-progress Design Lab design
-- `user://blueprint.json` — legacy single-slot pointer (Battlefield reads)
+- `user://lab_scratch.json` — in-progress Design Lab design AND Test Range read target (via TestRangeLauncher)
 - `user://settings.cfg` — `SettingsService` config
 - `user://ui_layout.cfg` — UI dock collapsed state (own file, by design)
 - `user://tutorial_seen.cfg` — single bool, tutorial gating
@@ -795,8 +801,10 @@ letter-spacing.
     bus. The rule is in `CORE_DESIGN_LANGUAGE.md §6`.
 14. **Subsystem stripping math is now in `damage_resolver.gd`** (was
     duplicated across `battle_unit.gd` and `player_vehicle.gd` and
-    silently broken). If you see a stripping calculation anywhere else,
-    it's a bug.
+    silently broken - both of which are now retired, 2026-08-10, so
+    the only live callers of this math are `battle/units/unit.gd` and
+    `battle/buildings/structure.gd`). If you see a stripping
+    calculation anywhere else, it's a bug.
 15. **Stat rounding is at compute time** (`GlobalConfig.round_to_half`).
     Don't display-round after compute-rounding; the two should agree.
 16. **Test order is pinned in `SUITE_ORDER`** (see `run_tests.gd:51`).

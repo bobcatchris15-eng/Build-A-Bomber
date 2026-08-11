@@ -55,7 +55,6 @@ const ToolboxPlateScript = preload("res://scripts/ui_toolbox_plate.gd")
 const StampedLabelScript = preload("res://scripts/ui_stamped_label.gd")
 const UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 
 # --- Grouping (unchanged from the previous build) ----------------------------
 # Weight is the right sort key here rather than cost or name: it is the one

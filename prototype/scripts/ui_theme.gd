@@ -9,7 +9,7 @@ class_name UITheme
 
 const MATERIAL_SHADER = preload("res://shaders/ui_material.gdshader")
 const Tokens = preload("res://scripts/ui_tokens.gd")
-const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 
 # ---------------------------------------------------------------------------
 # MATERIAL VOCABULARY
@@ -152,7 +152,7 @@ static func apply_backdrop(node: CanvasItem, accent: Color = Color.WHITE, accent
 # For a genuine faction-identity surface - the faction picker's preview
 # swatch, and nothing else. Kept separate so it can't be reached by accident.
 static func apply_faction_preview(node: CanvasItem, faction: String) -> void:
-	apply_backdrop(node, FactionCatalogScript.get_visual_color(faction), 0.45)
+	apply_backdrop(node, LiveryScript.zone_color(faction, "hull_upper"), 0.45)
 
 
 

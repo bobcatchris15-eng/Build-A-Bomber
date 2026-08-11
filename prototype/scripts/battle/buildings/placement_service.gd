@@ -75,6 +75,28 @@ static func validity(world, team: int, at: Vector3, kind: String,
 	for n in tree.get_nodes_in_group("resource_nodes"):
 		if not is_instance_valid(n):
 			continue
+		# AMBIENT SCATTER DOES NOT VETO A BUILD SITE.
+		#
+		# The rule above is about DEPOSITS: a player should not be able to wall
+		# in an ore patch, and a building on one strands the harvesters routed
+		# to it. Both of those are arguments about the ~36 nodes belonging to
+		# the four harvestable fields.
+		#
+		# The ambient forest/ore pass scatters up to 1000 trees + 800 ore at
+		# roughly one per 82 m2 of map, with a floor of 8 m between them - and
+		# every one of those joined this same group. With NODE_EXCLUSION 6.0
+		# plus a building's own half-footprint, each scattered tree vetoes a
+		# disc about as wide as the gap between trees, so the exclusion discs
+		# tile the entire playable area and there is essentially nowhere legal
+		# left to build. That is what these three placement suites were
+		# reporting ("a clear spot beside the HQ was rejected: ON A RESOURCE
+		# NODE", "the control site was not clear to begin with").
+		#
+		# A scattered tree is scenery you clear to build, not a deposit you
+		# must not bury - so it is skipped here. It stays fully harvestable;
+		# only its veto over construction goes away.
+		if n.get("is_ambient"):
+			continue
 		if at.distance_to(n.global_position) < half + NODE_EXCLUSION:
 			return _no(ON_RESOURCE)
 

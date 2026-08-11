@@ -16,8 +16,10 @@ extends CharacterBody3D
 # hold the current Order, ask Steering what velocity that implies, and apply it.
 #
 # NAME. `BattleUnitV2` rather than `BattleUnit` because battle_unit.gd already
-# claims that class_name and still runs the old Skirmish scene. The name is
-# temporary and goes away with the retirement commit.
+# claims that class_name and was still running the old Skirmish scene when
+# this file was first authored. battle_unit.gd was retired 2026-08-10 in the
+# unification's Phase 4; the V2 name is now historical and tracked in
+# PROGRESS.md as a follow-up rename to `BattleUnit`.
 
 const SteeringScript = preload("res://scripts/battle/movement/steering.gd")
 const AssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
@@ -29,7 +31,6 @@ const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
 const PowerBudgetScript = preload("res://scripts/power_budget.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
 const TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
 const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 
@@ -284,7 +285,7 @@ func _recalculate_vision() -> void:
 			bonus += data.get_vision_bonus()
 		elif data.type_id == "fire_control_radar":
 			has_radar = true
-	vision_range = (base + bonus) * FactionCatalog.get_passive(faction, "vision_mult", 1.0)
+	vision_range = base + bonus
 	# Brownout applied LAST, as a multiplier on the finished figure, so it
 	# composes with the faction passive above rather than competing with it: a
 	# Technocrat scout that browns out should lose the same PROPORTION of its
@@ -339,7 +340,7 @@ func _detect_harvester(controller: Node) -> void:
 # stripped-down one never sped up, and the Glacier Syndicate/Aerodrome Cartel
 # speed passives had no effect on the units they were supposed to change.
 # battle_unit.gd's own _recalculate_move_speed() already read the right key;
-# this runtime did not.
+# the new runtime did not. battle_unit.gd retired 2026-08-10.
 func _recalculate_move_speed() -> void:
 	if not is_instance_valid(hull_node):
 		return
@@ -435,7 +436,8 @@ func _tick_power(delta: float) -> void:
 # without a real match controller falls through to the harmless 1.0 default,
 # unchanged.
 #
-# Ported from battle_unit.gd (2026-08-08 speed pass) - this runtime declared
+# Ported from battle_unit.gd (2026-08-08 speed pass; battle_unit.gd retired
+# 2026-08-10 in the unification's Phase 4) - this runtime declared
 # terrain_speed_multiplier and read it in _apply_movement(), but nothing here
 # ever assigned it, so the whole per-surface locomotion table (and the tread-
 # width/Glacier Syndicate modifiers on top of it) was dead in every real
@@ -463,15 +465,9 @@ func _recalculate_terrain_speed_multiplier() -> void:
 		var width_delta = (width - 1.0) * 0.25
 		terrain_speed_multiplier = clamp(terrain_speed_multiplier + width_delta, 0.15, 1.2)
 
-	# Glacier Syndicate passive: negates a fraction of whatever terrain
-	# penalty is currently in effect (a multiplier BELOW 1.0 - a bonus above
-	# 1.0, e.g. screw_drive's marsh bonus, is left untouched, since "reduced
-	# penalty" only means something for an actual penalty).
-	if terrain_speed_multiplier < 1.0 and is_instance_valid(hull_node):
-		var terrain_faction = hull_node.get_meta("faction") if hull_node.has_meta("faction") else "industrialists"
-		var reduction = FactionCatalog.get_passive(terrain_faction, "terrain_penalty_reduction", 0.0)
-		if reduction > 0.0:
-			terrain_speed_multiplier = 1.0 - (1.0 - terrain_speed_multiplier) * (1.0 - reduction)
+	# The Glacier Syndicate's terrain-penalty reduction used to be applied here.
+	# Faction passives are gone (see livery.gd) - terrain now affects every
+	# unit identically, by its locomotion type alone.
 
 
 # Exhaust plume for whichever boost part is lit - one burst per
@@ -880,7 +876,9 @@ func _apply_vertical(delta: float) -> void:
 		# ALTITUDE IS HEIGHT ABOVE THE GROUND, never an absolute world Y, and this
 		# is a regression the rebuild introduced by not porting the fix.
 		#
-		# battle_unit.gd:900-924 already solved this and recorded why. A flyer that
+		# battle_unit.gd:900-924 already solved this and recorded why
+		# (battle_unit.gd retired 2026-08-10; the ported fix is what this
+		# block now does). A flyer that
 		# does not hold an altitude sits at whatever Y it spawned at - a factory
 		# exit, so ground level - and a flyer inside the terrain collides with
 		# every obstacle body sitting on that ground, because its collision_mask is

@@ -22,7 +22,8 @@ const HullMaterialBuilderScript = preload("res://scripts/hull_material_builder.g
 const HullGreeblesScript = preload("res://scripts/hull_greebles.gd")
 const ArmorGreeblesScript = preload("res://scripts/armor_greebles.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
-const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
+const PartMaterialsScript = preload("res://scripts/part_materials.gd")
 # For its static hopper formula, used to tag harvesters in the roster index.
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
@@ -56,8 +57,13 @@ var last_load_error: String = ""
 #   SAVED    - user://blueprints/<id>.json, created only by an explicit
 #              Save with a real name. This is what the roster reads.
 const SCRATCH_PATH = "user://lab_scratch.json"
-# Legacy single-slot pointer that Battlefield.tscn (the Test Range) reads.
-const LEGACY_SLOT_PATH = "user://blueprint.json"
+# 2026-08-10: the legacy single-slot pointer at user://blueprint.json and
+# the LEGACY_SLOT_PATH / save_blueprint() block that wrote it are gone.
+# The Test Range now reads the SCRATCH_PATH above (via TestRangeLauncher,
+# which falls back to the most-recently-saved blueprint and then to the
+# bundled Bulwark MBT). Keeping a second write would have been a
+# user-data compat shim for the retired Battlefield.tscn path, and
+# Battle.tscn never read user://blueprint.json in the first place.
 
 # The name a design has when the player hasn't given it one. A design still
 # carrying this is by definition not something they chose to keep.
@@ -267,13 +273,6 @@ func save_blueprint() -> bool:
 		file.close()
 		print("Blueprint '%s' saved (id=%s)" % [bp_name, bp_id])
 
-	# Legacy single-slot pointer, kept in sync so the existing single-unit
-	# weapon test range (Battlefield.tscn / "Test in Arena") keeps working unchanged.
-	var legacy_file = FileAccess.open("user://blueprint.json", FileAccess.WRITE)
-	if legacy_file:
-		legacy_file.store_string(json_string)
-		legacy_file.close()
-
 	_show_toast("Saved '%s'!" % bp_name)
 	# An explicit save supersedes whatever was in the scratch slot - the
 	# design is now a real, named file, so there is no unsaved work left for
@@ -312,9 +311,8 @@ func save_scratch(mark_for_lab_restore: bool = true) -> bool:
 	blueprint["pending_lab_restore"] = mark_for_lab_restore
 
 	var json_string = JSON.stringify(blueprint, "\t")
-	for path in [SCRATCH_PATH, LEGACY_SLOT_PATH]:
-		var f = FileAccess.open(path, FileAccess.WRITE)
-		if f:
+	var f = FileAccess.open(SCRATCH_PATH, FileAccess.WRITE)
+	if f:
 			f.store_string(json_string)
 			f.close()
 	return true
@@ -646,7 +644,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	var armor_thick = blueprint_data.get("armor_thickness", 1.0)
 	var armor_mat_name = blueprint_data.get("armor_material", "hardened_steel")
 	# Match faction overrides the blueprint's own saved tag entirely - both
-	# stats (hull.set_meta("faction") below, read by battle_unit.gd's passive
+	# stats (hull.set_meta("faction") below, read by unit.gd's passive
 	# lookups) and looks (HullMaterialBuilder/Greebles/Decals below all take
 	# this same faction_name). Chris's explicit resolution of FABLE_REVIEW
 	# 1.7: whichever faction was selected in the Design Lab while designing
@@ -662,11 +660,20 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	# Lab comes back unpainted and at base stats, exactly as it looked while it
 	# was being built - the saved "faction" key survives for schema
 	# compatibility and is simply inert until a match overrides it.
-	var faction_name = blueprint_data.get("faction", "industrialists")
+	var faction_name = blueprint_data.get("faction", LiveryScript.PLAYER_ID)
 	if match_faction_override != "":
 		faction_name = match_faction_override
 	elif is_designer:
-		faction_name = FactionCatalogScript.NO_FACTION
+		faction_name = LiveryScript.NO_LIVERY
+
+	# Arms the weapon-zone livery for every module built below. This is a
+	# render context rather than an argument because a livery id would
+	# otherwise have to be threaded through build_visual() and all ~100 of
+	# visual_builder's internal _mesh_inst() calls - see part_materials.gd's
+	# own note. Its safety contract is that this function is SYNCHRONOUS, so
+	# two vehicles can never be part-built at once; the matching
+	# clear_livery() is at the single return point at the end.
+	PartMaterialsScript.set_livery(faction_name)
 	var nose_taper = blueprint_data.get("nose_taper", 1.0)
 	hull.set_meta("armor_thickness", armor_thick)
 	hull.set_meta("armor_material", armor_mat_name)
@@ -788,7 +795,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	var locomotion = blueprint_data.get("locomotion", {})
 	var loc_type = locomotion.get("type_id", "")
 	var settings = locomotion.get("settings", {})
-	# battle_unit.gd's thrust/capacity-per-locomotion-setting math (count,
+	# unit.gd's thrust/capacity-per-locomotion-setting math (count,
 	# width, wheels_per_axle etc.) reads these two metas off the hull - never
 	# set here before, so that math silently no-op'd (flat 1.0 contribution)
 	# for every battle-spawned unit regardless of its locomotion tweaks; it
@@ -806,7 +813,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# is a plain Node3D under a CharacterBody3D whose collision_mask is
 		# 1 "Ground only" - a layer-1 chassis right at its own unit's feet
 		# would read as terrain and the unit would perpetually push itself
-		# off its own running gear). battle_unit.gd's own CollisionShape3D
+		# off its own running gear). unit.gd's own CollisionShape3D
 		# is the real physics collider for this chassis in battle.
 		var gear_layer = 1 if is_designer else 0
 		var gear_body: StaticBody3D = RunningGearBuilder.build_running_gear(hull, running_gear_size, catalog_data.color, gear_layer, loc_type)
@@ -987,7 +994,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			# In a battle that is not merely a cosmetic problem. A unit's
 			# collision_mask includes layer 1 (ground), so a hull sunk into the
 			# floor makes move_and_slide() spend every frame depenetrating it -
-			# the same pathology battle_unit.gd documents for a flyer flown
+			# the same pathology unit.gd documents for a flyer flown
 			# inside a hill, where physics went from 2.38ms to 15.57ms and the
 			# unit stopped going where it was sent.
 			#
@@ -999,12 +1006,16 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			# hull bottom at -0.109.
 			# hull_size is the catalog size already multiplied by hull_scale and
 			# armor_bulk - the same figure the running-gear sizing above uses,
-			# and what battle_unit.gd builds its hull collider from. Taking the
+			# and what unit.gd builds its hull collider from. Taking the
 			# half-height from anywhere else is how module_placer.gd's copy of
 			# this floor ended up reading a fallback catalog entry instead of
 			# the hull in front of it.
 			hull.position.y = maxf(-lowest, hull_size.y / 2.0)
 
+	# Matching clear for the set_livery() above. Must run on EVERY exit from
+	# this function or the next vehicle built inherits this one's paint; this
+	# is the only return, which is why the context is safe to hold this way.
+	PartMaterialsScript.clear_livery()
 	return hull
 
 # Delegates to ModuleMirror so the reconstruct path and the live-placement

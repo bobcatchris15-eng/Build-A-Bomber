@@ -166,7 +166,7 @@ Not in the original plan, but the substance of the AAA polish pass.
 - **Feedback.** `UIFeedback.wire(ctrl, role)` attaches hover sound, hover lift, press sound and press squash in one call. They share the call because they must fire together; wiring them separately is how they drift.
 - **Audio roles.** `default` → click, `confirm` → `radio_ack`, `select`, `place`, `reject` → error, `danger` → `warning_banner`. The four radio SFX were committed but unregistered — dead assets until this pass.
 - **Roster drag-and-drop.** `roster_picker.gd` replaces a CheckBox list that could express neither the order designs are fielded in nor the roster cap. Slot position *is* the order now; previously it was library sort order, so which designs survived `roster.slice(0, 12)` was incidental.
-- **Real stats on cards.** `design_stats.gd` — `DesignStats.analyze(hull)` makes the same `Drivetrain` / `WeaponRange` / `ModuleCatalog` calls `battle_unit.gd` makes on the unit it spawns. **Nothing is re-derived**, because `stat_calculator.gd` has twice had to delete a local re-derivation that drifted: a capacity calculation that knew 4 locomotion types of 17, and an armour table showing the explosive threshold labelled as energy.
+- **Real stats on cards.** `design_stats.gd` — `DesignStats.analyze(hull)` makes the same `Drivetrain` / `WeaponRange` / `ModuleCatalog` calls `unit.gd` makes on the unit it spawns. **Nothing is re-derived**, because `stat_calculator.gd` has twice had to delete a local re-derivation that drifted: a capacity calculation that knew 4 locomotion types of 17, and an armour table showing the explosive threshold labelled as energy.
 
 ---
 

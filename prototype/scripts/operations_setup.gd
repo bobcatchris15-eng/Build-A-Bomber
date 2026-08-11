@@ -14,7 +14,7 @@ extends Control
 # picker also means the two setup screens cannot drift, which they already had.
 
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
-const FactionCatalog = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
 const MapCatalog = preload("res://scripts/map_catalog.gd")
 const OperationsManager = preload("res://scripts/operations_manager.gd")
@@ -23,6 +23,7 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
 const RosterPickerScript = preload("res://scripts/roster_picker.gd")
+const StampedButtonScript = preload("res://scripts/ui_stamped_button.gd")
 
 # Matches match_setup.gd's cap and match_director.ROSTER_LIMIT. Kept as its own
 # constant rather than read off the director, which is not loaded at this point
@@ -38,15 +39,14 @@ const DIFFICULTIES = ["easy", "normal", "hard"]
 const DIFFICULTY_LABELS = ["Easy", "Normal", "Hard"]
 
 var difficulty_btn: OptionButton
-var player_faction_btn: OptionButton
-var enemy_faction_btn: OptionButton
 var engagements_spin: SpinBox
 var itinerary_list: VBoxContainer
 var roster_picker: RosterPicker
 var bp_manager: Node
 
-var FACTIONS: Array = []
-var FACTION_LABELS: Array = []
+# The 10-faction pickers are gone - the player authors one livery of their own
+# (livery.gd), it is a profile setting rather than a per-operation choice, and
+# it carries no mechanical bonus, so there is nothing here to choose.
 var MAP_IDS: Array = []
 
 # One OptionButton per engagement, index-aligned with the itinerary. Rebuilt
@@ -63,14 +63,6 @@ func _ready() -> void:
 	var audio := get_node_or_null("/root/AudioManager")
 	if audio != null:
 		audio.play_music("operations")
-
-	FACTIONS = ["auto"]
-	FACTION_LABELS = ["Auto (from roster)"]
-	for fac_id in FactionCatalog.get_ids():
-		FACTIONS.append(fac_id)
-		FACTION_LABELS.append("%s - %s" % [
-			FactionCatalog.get_faction_name(fac_id),
-			FactionCatalog.get_passive(fac_id, "passive_summary", "")])
 
 	MAP_IDS = MapCatalog.get_map_ids()
 
@@ -147,25 +139,6 @@ func _build_left_column(parent: Control) -> void:
 	difficulty_btn.tooltip_text = "Where the operation ENDS UP. The opening engagements run one tier easier, so the first battle is somewhere to find out what your roster does wrong."
 	difficulty_btn.item_selected.connect(func(_i): _rebuild_itinerary())
 	grid.add_child(difficulty_btn)
-
-	_add_grid_label(grid, "Your Faction")
-	player_faction_btn = OptionButton.new()
-	for fl in FACTION_LABELS:
-		player_faction_btn.add_item(fl)
-	player_faction_btn.selected = 0
-	player_faction_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_child(player_faction_btn)
-
-	_add_grid_label(grid, "Enemy Faction")
-	enemy_faction_btn = OptionButton.new()
-	for fl in FACTION_LABELS:
-		enemy_faction_btn.add_item(fl)
-	# Same default the skirmish setup screen uses, so the two agree on what "the
-	# usual opponent" is.
-	var default_enemy: int = FACTIONS.find("technocrats")
-	enemy_faction_btn.selected = default_enemy if default_enemy >= 0 else 0
-	enemy_faction_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_child(enemy_faction_btn)
 
 	left_col.add_child(HSeparator.new())
 
@@ -293,8 +266,9 @@ func _build_action_bar(parent: Control, feedback_root: Control) -> void:
 	bottom_bar.add_theme_constant_override("separation", Tokens.SPACE_MD)
 	parent.add_child(bottom_bar)
 
-	var back_btn = Button.new()
-	back_btn.text = "< Back to Main Menu"
+	var back_btn = StampedButtonScript.new()
+	back_btn.legend = "< BACK TO MAIN MENU"
+	back_btn.variant = StampedButtonScript.Variant.GHOST
 	back_btn.custom_minimum_size = Vector2(180, 44)
 	back_btn.pressed.connect(_return_to_menu)
 	bottom_bar.add_child(back_btn)
@@ -303,9 +277,9 @@ func _build_action_bar(parent: Control, feedback_root: Control) -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bottom_bar.add_child(spacer)
 
-	var start_btn = Button.new()
-	start_btn.text = "Begin Operation >"
-	start_btn.theme_type_variation = "PrimaryButton"
+	var start_btn = StampedButtonScript.new()
+	start_btn.legend = "BEGIN OPERATION >"
+	start_btn.variant = StampedButtonScript.Variant.PRIMARY
 	start_btn.custom_minimum_size = Vector2(220, 44)
 	start_btn.pressed.connect(_on_start_operation_pressed)
 	bottom_bar.add_child(start_btn)
@@ -366,7 +340,7 @@ func _on_start_operation_pressed() -> void:
 		get_tree().root.add_child(ops_node)
 	ops_node.start_new_operation(itinerary, sel_diff)
 
-	_write_match_config(ops_node.get_current_stage_info())
+	_write_match_config(ops_node.get_current_stage_info(), ops_node.operation_id, ops_node.current_stage)
 	ops_node.set_player_roster(roster_picker.ordered_paths())
 
 	var router = get_node_or_null("/root/SceneRouter")
@@ -378,24 +352,36 @@ func _on_start_operation_pressed() -> void:
 
 # Everything the first engagement needs. Split out because the between-rounds
 # loop has to do exactly this again for stage 2..N, and the two must not drift.
-func _write_match_config(stage: Dictionary) -> void:
+#
+# 2026-08-10: writes only the rule set and the display-only selected_map_id.
+# The seven legacy pre-match fields on MatchConfig are retired; everything
+# match_director needs (player_faction, enemy_faction, blueprint paths,
+# ai_difficulty) now lives on the rule set. selected_map_id stays on
+# MatchConfig itself because battle_hud's minimap title and the
+# after-action report read it for display purposes - it is not a
+# match-config input, just a "what map is this" label.
+func _write_match_config(stage: Dictionary, operation_id: String, stage_index: int) -> void:
 	var match_config = get_node_or_null("/root/MatchConfig")
 	if match_config == null:
 		return
-	match_config.selected_map_id = str(stage.get("map_id", MapCatalog.DEFAULT_MAP_ID))
-	match_config.ai_difficulty = str(stage.get("ai_difficulty", "normal"))
-
-	var player_fac: String = FACTIONS[player_faction_btn.selected]
-	if player_fac != "auto":
-		match_config.player_faction = player_fac
-	var enemy_fac: String = FACTIONS[enemy_faction_btn.selected]
-	if enemy_fac != "auto":
-		match_config.enemy_faction = enemy_fac
-
-	# An empty roster is a legitimate choice, not a mistake - it means "field my
-	# newest designs", which is what match_director falls back to. So it is
-	# written through as-is rather than being guarded against.
-	match_config.selected_blueprint_paths = roster_picker.ordered_paths()
+	var map_id: String = str(stage.get("map_id", MapCatalog.DEFAULT_MAP_ID))
+	var ai_difficulty: String = str(stage.get("ai_difficulty", "normal"))
+	var paths: Array = roster_picker.ordered_paths()
+	match_config.selected_map_id = map_id
+	match_config.rule_set = MatchRuleSetScript.operations(
+		map_id,
+		# Fixed ids rather than a player choice - see the note by the
+		# removed pickers above. operations_draft.gd reads the rule set
+		# back rather than these legacy fields, so the literals here
+		# become the per-stage constants and the rest of the campaign
+		# never has to re-think them.
+		LiveryScript.PLAYER_ID,
+		"enemy",
+		paths,
+		ai_difficulty,
+		operation_id,
+		stage_index,
+	)
 
 
 # Routed through SceneRouter so leaving this screen fades out rather than cutting.

@@ -16,6 +16,7 @@ const LayersScript = preload("res://scripts/battle/battle_layers.gd")
 const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
 const UnitAssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const BuildingMeshScript = preload("res://scripts/battle/buildings/building_mesh.gd")
 const BattleFinishScript = preload("res://scripts/battle/battle_finish.gd")
 
@@ -92,7 +93,7 @@ func setup(structure_kind: String, structure_team: int) -> void:
 	# the fallback stays because a kind added to the catalog before its model is
 	# authored should appear as a grey box rather than as nothing at all.
 	if BuildingMeshScript.build(self, kind, footprint,
-			FactionCatalog.DEFAULT_FACTION, team) == null:
+			LiveryScript.PLAYER_ID, team) == null:
 		_mesh = MeshInstance3D.new()
 		var mesh := BoxMesh.new()
 		mesh.size = footprint

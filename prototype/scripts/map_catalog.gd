@@ -416,6 +416,12 @@ const FIELD_SPEC: Dictionary = {
 	"description": {"type": "string", "required": true},
 	"map_half_extents": {"type": "number", "required": true, "min": 1.0, "scale": true},
 	"ground_color": {"type": "color", "required": true},
+	# A playtest map can opt out of the ambient tree/ore scatter
+	# (the 30-cluster pass that pads Skirmish-sized maps). The Test
+	# Range uses this to keep its 80x80 stage clean - the player
+	# needs to see their unit, not a forest the ambient code packed
+	# into whatever space it found. Default false (ambient on).
+	"disable_ambient_scatter": {"type": "bool", "required": false},
 	"water_blobs": {"type": "array", "required": false, "item": {
 		"center": {"type": "vector3", "required": true, "scale": true},
 		"radius": {"type": "number", "required": true, "min": 0.01, "scale": true},
@@ -609,6 +615,9 @@ static func _validate_value(value, field_spec: Dictionary, full_key: String, err
 				return
 			if field_spec.has("min") and value < field_spec["min"]:
 				errors.append("'%s' value %s is below minimum %s" % [full_key, value, field_spec["min"]])
+		"bool":
+			if typeof(value) != TYPE_BOOL:
+				errors.append("'%s' should be a Bool, got type %d" % [full_key, typeof(value)])
 		"color":
 			if typeof(value) != TYPE_COLOR:
 				errors.append("'%s' should be a Color, got type %d" % [full_key, typeof(value)])

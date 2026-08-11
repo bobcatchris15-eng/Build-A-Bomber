@@ -1,6 +1,7 @@
 class_name DamageResolver
-# Shared armor/threshold resolution for battle_unit.gd (Skirmish),
-# player_vehicle.gd (Test Range), and building.gd (defense structures).
+# Shared armor/threshold resolution for unit.gd (Skirmish + Test Range,
+# the only unit script in the tree post-2026-08-10 retirement of
+# battle_unit.gd / player_vehicle.gd) and building.gd (defense structures).
 # Previously this math was duplicated inline across all three and already
 # drifted once (had to be manually kept in sync when the armor-module bonus
 # was added) - single source of truth from here on. See DECISIONS_NEEDED.md
@@ -48,8 +49,9 @@ const ARMOR_TABLE = {
 }
 
 # --- Hit damage math (FABLE_REVIEW.md 1.1 / 3.6 / 2.5) ---
-# Shared by battle_unit.gd / player_vehicle.gd / building.gd so the three
-# take_damage() implementations can't drift (same reason resolve() exists).
+# Shared by unit.gd / building.gd so the two take_damage() implementations
+# can't drift (same reason resolve() exists). player_vehicle.gd and
+# battle_unit.gd were retired 2026-08-10.
 #
 # CHIP_THROUGH_FACTOR: a hit below the armor threshold is no longer fully
 # negated - it deals a small "chip" fraction of its post-reduction damage.

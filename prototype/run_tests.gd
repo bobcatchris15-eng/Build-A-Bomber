@@ -11,24 +11,31 @@ extends SceneTree
 # on what ran before them, so SUITE_ORDER preserves the exact order the old
 # single-file runner used. Grouping suites into files is presentation only.
 # Adding a suite means adding its name here as well as writing the function.
+#
+# 2026-08-10: the battle-system unification's Phase 4 retired the
+# pre-unification test areas (test_weapons_and_damage, test_locomotion,
+# test_tutorial, test_sim_and_stats, test_support_modules, test_hull_and_armor,
+# test_ai_and_win, test_economy_and_production) along with the legacy
+# scripts they depended on (battle_unit.gd, player_vehicle.gd,
+# target_dummy.gd, Battlefield.tscn, battlefield.gd). Per Chris's "nuke
+# those tests entirely" call - we can rebuild them against the new
+# battle layer (tests/battle/) when needed. The pre-loaded constants,
+# SUITE_FILES entries and SUITE_ORDER rows for the retired suites are
+# removed; the remaining battle/* suites below already cover the same
+# surface (combat, AI, vision, placement, HUD) through the new runtime.
 
 const SUITE_FILES := {
-	"sim_and_stats": preload("res://tests/test_sim_and_stats.gd"),
 	"designer_lab": preload("res://tests/test_designer_lab.gd"),
-	"weapons_and_damage": preload("res://tests/test_weapons_and_damage.gd"),
-	"economy_and_production": preload("res://tests/test_economy_and_production.gd"),
 	"ui_and_camera": preload("res://tests/test_ui_and_camera.gd"),
 	"input_and_settings": preload("res://tests/test_input_and_settings.gd"),
 	"scene_loads": preload("res://tests/test_scene_loads.gd"),
-	"locomotion": preload("res://tests/test_locomotion.gd"),
-	"hull_and_armor": preload("res://tests/test_hull_and_armor.gd"),
 	"base_building": preload("res://tests/test_base_building.gd"),
-	"ai_and_win": preload("res://tests/test_ai_and_win.gd"),
+	"design_verdict": preload("res://tests/test_design_verdict.gd"),
+	"lab_instructions": preload("res://tests/test_lab_instructions.gd"),
 	"terrain_and_maps": preload("res://tests/test_terrain_and_maps.gd"),
-	"tutorial": preload("res://tests/test_tutorial.gd"),
 	# The rebuilt battle layer (scripts/battle/). Kept in its own subdirectory
 	# because it grows one file per phase and it retires as a unit if the rebuild
-	# is ever abandoned - unlike the ten area files above, which are a split of
+	# is ever abandoned - unlike the area files above, which are a split of
 	# one historical monolith.
 	"battle_movement": preload("res://tests/battle/test_battle_movement.gd"),
 	"battle_command": preload("res://tests/battle/test_battle_command.gd"),
@@ -46,37 +53,54 @@ const SUITE_FILES := {
 	"resource_fields": preload("res://tests/battle/test_resource_fields.gd"),
 	"tech_tree": preload("res://tests/battle/test_tech_tree.gd"),
 	"debug_cheats": preload("res://tests/battle/test_debug_cheats.gd"),
+	"match_rule_set": preload("res://tests/test_match_rule_set.gd"),
+	"match_rule_set_integration": preload("res://tests/battle/test_match_rule_set_integration.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
+# Pre-2026-08-10: this list interleaved the pre-unification suites (now
+# retired) with the catalog and input-and-settings foundations. The
+# foundation suites stayed in their historical positions; the retired
+# suites have been removed and what remains is the foundation block
+# followed by the rebuilt battle layer. The order is preserved by
+# importance: catalog/input first (everything depends on them), then
+# terrain and base-building (share the navmesh with the perf suites),
+# then designer_lab (last because it instantiates the heaviest screen).
 const SUITE_ORDER := [
 	["debug_cheats", "test_infinite_resources_cheat"],
 	["debug_cheats", "test_instant_build_cheat"],
 	["debug_cheats", "test_reveal_all_fog_cheat"],
+	["match_rule_set", "test_skirmish_factory_sets_required_fields"],
+	["match_rule_set", "test_operations_factory_sets_campaign_fields"],
+	["match_rule_set", "test_test_range_factory_flips_economy_and_hud_off"],
+	["match_rule_set", "test_is_order_legal_allows_movement_in_every_mode"],
+	["match_rule_set", "test_is_order_legal_allows_idle_and_hold_always"],
+	["match_rule_set", "test_is_order_legal_blocks_harvest_in_test_range"],
+	["match_rule_set", "test_is_order_legal_blocks_unknown_order_types"],
+	["match_rule_set", "test_factory_does_not_alias_input_array"],
+	["match_rule_set", "test_to_dict_round_trip_preserves_fields"],
+	["match_rule_set_integration", "test_match_director_reads_map_id_from_rule_set"],
+	["match_rule_set_integration", "test_match_director_reads_player_faction_from_rule_set"],
+	["match_rule_set_integration", "test_match_director_falls_back_to_legacy_fields_when_rule_set_is_null"],
+	["match_rule_set_integration", "test_match_director_skips_commander_when_rule_set_disables_ai"],
 	["tech_tree", "test_building_catalog_prerequisites"],
 	["tech_tree", "test_module_catalog_building_requirements"],
 	["tech_tree", "test_design_costing_building_requirements"],
 	["tech_tree", "test_production_service_prerequisite_gating"],
 	["tech_tree", "test_building_glb_meshes_exist"],
-	["sim_and_stats", "test_stats_calculations"],
 	["designer_lab", "test_clipping_detection"],
-	["weapons_and_damage", "test_damage_mitigation"],
-	["weapons_and_damage", "test_traverse_limit"],
-	["weapons_and_damage", "test_subsystem_stripping"],
 	["designer_lab", "test_rotation_popup_and_deforms"],
 	["designer_lab", "test_sensor_mast_tweak_and_proportions"],
 	["designer_lab", "test_no_dead_tweaks"],
-	["sim_and_stats", "test_modular_assembly_types_have_no_shadowed_monolithic_mesh"],
 	["designer_lab", "test_designer_camera_pan"],
 	["designer_lab", "test_designer_camera_zoom_smoothing"],
 	["designer_lab", "test_ui_anim_motion_library"],
 	["designer_lab", "test_part_button_custom_tooltip_card"],
-	["economy_and_production", "test_resource_node_regrows_gradually_after_being_mined"],
-	# Input and settings foundations. Placed immediately before the camera suites
-	# because the camera now reads its pan/rotate/edge-scroll values from
-	# SettingsService and its bindings from InputService - if those are broken,
-	# the camera failures downstream are a consequence rather than a cause, and
-	# seeing them in this order says so.
+	# Input and settings foundations. Placed immediately before the camera
+	# suites because the camera now reads its pan/rotate/edge-scroll values
+	# from SettingsService and its bindings from InputService - if those are
+	# broken, the camera failures downstream are a consequence rather than a
+	# cause, and seeing them in this order says so.
 	["input_and_settings", "test_input_action_table_is_well_formed"],
 	["input_and_settings", "test_input_modifiers_compared_exactly"],
 	["input_and_settings", "test_input_rebind_persists_and_reports_conflicts"],
@@ -86,8 +110,6 @@ const SUITE_ORDER := [
 	["input_and_settings", "test_camera_pan_is_yaw_relative"],
 	["ui_and_camera", "test_rts_camera_edge_scroll_direction"],
 	["ui_and_camera", "test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse"],
-	["ui_and_camera", "test_rts_camera_tilt_shift_dof_band"],
-	["ui_and_camera", "test_rts_camera_dof_band_widens_monotonically_with_height"],
 	["ui_and_camera", "test_rts_camera_world_scale_property_defaults_inert"],
 	["terrain_and_maps", "test_world_scale_default_and_per_map_override"],
 	["terrain_and_maps", "test_greeble_prop_scale_is_inert_at_1_and_doubles_at_2"],
@@ -111,10 +133,7 @@ const SUITE_ORDER := [
 	# old "auto-spawn HQ + refinery + 3 manufactories" boot with: each
 	# player gets a base zone, drops their HQ inside it, and then the
 	# match is live. Refinery + 2 manufactories are built NORMALLY
-	# during play, paid for out of STARTING_CREDITS. These suites pin
-	# the four load-bearing pieces: bank covers the opening, only HQs
-	# auto-spawn, AI drops at zone centre, human hook refuses outside
-	# the zone and double-places.
+	# during play, paid for out of STARTING_CREDITS.
 	["terrain_and_maps", "test_starting_bank_covers_refinery_plus_two_manufactories"],
 	["terrain_and_maps", "test_spawn_bases_drops_only_hq_not_refinery_or_manufactories"],
 	["terrain_and_maps", "test_ai_auto_places_hq_in_assigned_base_zone"],
@@ -124,69 +143,33 @@ const SUITE_ORDER := [
 	# skirmish dropping to 2-4 fps; locks the off path so a future
 	# "tidy setup()" doesn't re-enable shadows on 300+ decorative trees.
 	["terrain_and_maps", "test_ambient_nodes_opt_out_of_shadow_casting"],
-	["weapons_and_damage", "test_a2_vfx_burst_replaces_muzzle_flash_and_death_explosion"],
-	["locomotion", "test_every_locomotion_type_is_fully_declared"],
-	["locomotion", "test_expansion_locomotion_types_build_and_place"],
-	["locomotion", "test_every_locomotion_type_animates_something"],
-	["locomotion", "test_locomotion_layout_matches_golden_fixture"],
-	["locomotion", "test_locomotion_tweak_parity"],
-	["locomotion", "test_locomotion_rebuild_and_multipart_assemblies"],
-	["locomotion", "test_new_locomotion_types_spawn_and_differentiate"],
-	["locomotion", "test_ship_hull_locomotion_mount_gap_fix"],
+	# 2026-08-10: cluster-based ambient scatter. The 30+20 cluster pattern
+	# replaces the pre-2026-08-10 random scatter; these tests pin the
+	# "patches, not spread" and the determinism invariants.
+	["terrain_and_maps", "test_ambient_tree_pool_size_matches_constant"],
+	["terrain_and_maps", "test_ambient_tree_uses_ambient_pool_not_lumber_pool"],
+	["terrain_and_maps", "test_ambient_tree_does_not_regrow_after_harvest"],
+	["terrain_and_maps", "test_ambient_trees_scatter_is_deterministic"],
+	["terrain_and_maps", "test_ambient_trees_respect_avoid_radii"],
+	["terrain_and_maps", "test_ambient_ore_picks_from_resource_ore_pool"],
+	["terrain_and_maps", "test_ambient_ore_does_not_regrow"],
+	["terrain_and_maps", "test_ambient_ores_respect_avoid_radii_and_dont_overlap_trees"],
 	["designer_lab", "test_undo_redo"],
 	["designer_lab", "test_foundation_design_lab_parity"],
-	["hull_and_armor", "test_fortress_wall_foundation_spawns_correctly"],
-	["sim_and_stats", "test_design_to_battle_integration"],
-	["weapons_and_damage", "test_firing_arc_visualization"],
-	["designer_lab", "test_free_rotation_ring"],
-	["weapons_and_damage", "test_armor_module_facet_fitting"],
-	["weapons_and_damage", "test_armor_module_combat_bonus"],
-	["weapons_and_damage", "test_face_based_weapon_mounting"],
-	["designer_lab", "test_angled_pintle_mount"],
 	["base_building", "test_centerline_placement_does_not_self_mirror"],
-	["weapons_and_damage", "test_directional_armor_facet_resolution"],
-	["weapons_and_damage", "test_per_module_armor_material"],
-	["weapons_and_damage", "test_sloped_armor_angle_of_incidence"],
-	["ai_and_win", "test_ai_flanking_targets_weakest_facet"],
-	["sim_and_stats", "test_trait_system_composability"],
-	["locomotion", "test_fixed_wing_and_naval_movement"],
-	["sim_and_stats", "test_frame_built_whole_vehicle_aim"],
-	["weapons_and_damage", "test_ranged_unit_kiting"],
-	["ai_and_win", "test_enemy_roster_new_movement_archetypes"],
+	["designer_lab", "test_free_rotation_ring"],
+	["designer_lab", "test_angled_pintle_mount"],
+	["designer_lab", "test_tweak_callout_uses_theme_not_local_stylebox"],
+	["designer_lab", "test_blueprint_roster_gating"],
+	["designer_lab", "test_module_mirror_chirality"],
+	["base_building", "test_ui_flyout_placement"],
 	["ui_and_camera", "test_ui_no_overflow_or_offscreen"],
 	["ui_and_camera", "test_ui_audit_has_real_teeth"],
-	["base_building", "test_ui_flyout_placement"],
-	["hull_and_armor", "test_hull_spec_flyout_round_trip"],
-	["designer_lab", "test_tweak_callout_uses_theme_not_local_stylebox"],
 	["ui_and_camera", "test_ui_dock_state_cycle"],
 	["ui_and_camera", "test_ui_tone_no_decorative_glyphs"],
 	["ui_and_camera", "test_ui_icons_share_one_stroke_colour"],
-	["sim_and_stats", "test_headless_combat_simulation"],
-	["ai_and_win", "test_team_targeting"],
-	["hull_and_armor", "test_faction_catalog_and_hull_material"],
 	["ui_and_camera", "test_brushed_aluminum_ui_theme"],
-	["designer_lab", "test_blueprint_roster_gating"],
-	["designer_lab", "test_module_mirror_chirality"],
-	["hull_and_armor", "test_hull_greebles"],
-	["hull_and_armor", "test_hull_decals"],
-	["economy_and_production", "test_energy_pool_and_generators"],
-	["economy_and_production", "test_generation_and_storage_are_independent"],
-	["economy_and_production", "test_all_four_power_module_tweaks_are_live"],
-	["economy_and_production", "test_power_budget_sums_draw_and_reports_net"],
-	["economy_and_production", "test_brownout_sheds_systems_in_priority_order"],
-	["economy_and_production", "test_repair_array_heals_allies_only"],
-	["weapons_and_damage", "test_drone_carrier_spawns_real_drones"],
-	["weapons_and_damage", "test_missile_weapons_spawn_real_interceptable_missiles"],
-	["sim_and_stats", "test_evasion_model_speed_defends_against_ballistic_not_hitscan"],
-	["economy_and_production", "test_energy_weapons_cost_and_drain"],
-	["weapons_and_damage", "test_ammo_types_change_damage_class_and_scaling"],
-	["sim_and_stats", "test_support_modules_get_combat_script_in_real_spawn"],
-	["terrain_and_maps", "test_balance_report_covers_every_catalog_entry"],
 	["ui_and_camera", "test_screenshot_diff_tolerance"],
-	["economy_and_production", "test_energy_damage_class_reclassification"],
-	["sim_and_stats", "test_facet_aware_kiting"],
-	["ai_and_win", "test_vision_range_computation"],
-	["ai_and_win", "test_fog_hidden_excluded_from_targeting"],
 	["terrain_and_maps", "test_terrain_builder_pure_functions"],
 	["terrain_and_maps", "test_b6_heightmap_plateau_approachable_from_any_side"],
 	["terrain_and_maps", "test_b7_open_plains_surfacemap_covers_all_7_surface_types"],
@@ -207,68 +190,16 @@ const SUITE_ORDER := [
 	["terrain_and_maps", "test_b8_large_map_navmesh_bake_does_not_crash_recast"],
 	["terrain_and_maps", "test_b10_spawn_assignment_picks_explicit_then_maximizes_separation"],
 	["terrain_and_maps", "test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones"],
-	["weapons_and_damage", "test_weapon_traverse_and_range_differentiation"],
-	["weapons_and_damage", "test_weapon_elevation_is_differentiated_per_weapon"],
-	["weapons_and_damage", "test_design_lab_arc_matches_combat_elevation"],
-	["economy_and_production", "test_weapon_range_tiers_are_anchored_to_vision"],
-	["ai_and_win", "test_long_range_weapon_needs_a_team_spotter"],
-	["weapons_and_damage", "test_indirect_fire_ignores_line_of_sight"],
-	["ai_and_win", "test_design_lab_reports_range_and_names_the_spotter_trade"],
-	["locomotion", "test_weight_vs_locomotion_capacity_penalty"],
-	["sim_and_stats", "test_locomotor_base_top_speed_is_a_real_per_type_ceiling"],
-	["sim_and_stats", "test_overload_penalty_is_steep_and_monotonic"],
-	["sim_and_stats", "test_underload_bonus_has_a_deadzone_and_diminishing_returns"],
-	["sim_and_stats", "test_underload_bonus_is_wired_through_a_real_analysis"],
-	["locomotion", "test_design_lab_and_combat_agree_on_weight_and_capacity"],
-	["locomotion", "test_every_locomotor_capacity_responds_to_its_own_tweaks"],
-	["locomotion", "test_count_tweaks_scale_capacity_linearly_not_quadratically"],
-	["economy_and_production", "test_design_lab_overweight_warning_names_the_trade"],
-	["locomotion", "test_battle_spawn_sits_on_its_running_gear"],
-	["locomotion", "test_terrain_types_differentiate_locomotion"],
-	["locomotion", "test_locomotion_tweaks_have_real_visual_and_stat_effects"],
-	["locomotion", "test_ornithopter_wing_spawns_flaps_and_flies"],
-	["hull_and_armor", "test_hull_modding_loader_scan_and_validation"],
-	["hull_and_armor", "test_hull_modding_parts_menu_two_buckets"],
-	["designer_lab", "test_module_roles_group_and_sort_the_parts_menu"],
-	["terrain_and_maps", "test_part_material_roles_differentiate_surfaces"],
-	["designer_lab", "test_clipping_highlight_does_not_corrupt_shared_materials"],
-	["weapons_and_damage", "test_weapon_modules_balance_about_their_mount"],
-	["weapons_and_damage", "test_armor_greebles_sit_on_the_hull_and_ignore_modules"],
-	["designer_lab", "test_baked_module_visuals_carry_lods"],
-	["hull_and_armor", "test_hull_modding_hard_fail_on_unknown_hull"],
-	["weapons_and_damage", "test_explosive_weapons_deal_real_aoe_damage"],
-	["weapons_and_damage", "test_subsystem_stripping_is_gated_by_hit_facet"],
-	["economy_and_production", "test_every_weight_tweak_also_costs_real_resources"],
-	["weapons_and_damage", "test_pintle_mounts_grant_full_traverse"],
-	["weapons_and_damage", "test_turret_and_frame_built_also_wall_mount"],
-	["weapons_and_damage", "test_weapon_click_collider_matches_its_visual"],
-	["weapons_and_damage", "test_sponson_weapon_stays_clickable"],
-	["weapons_and_damage", "test_sponson_elevation_cone_is_world_level"],
-	["weapons_and_damage", "test_indirect_fire_weapons_are_refused_on_vertical_faces"],
-	["weapons_and_damage", "test_design_lab_firing_arc_matches_real_pintle_traverse"],
-	["weapons_and_damage", "test_firing_arc_disappears_after_dragging_the_weapon"],
-	["sim_and_stats", "test_idle_units_auto_engage_sighted_enemies"],
 	["terrain_and_maps", "test_map_schema_validator"],
 	["terrain_and_maps", "test_b3_maps_are_json_and_byte_identical_to_the_old_const"],
 	["terrain_and_maps", "test_b3_hand_broken_json_map_hard_fails_with_a_useful_message"],
 	["terrain_and_maps", "test_b4_heightmap_terrain_pure_functions"],
 	["terrain_and_maps", "test_b4_heightmap_leaves_unmigrated_maps_untouched"],
 	["terrain_and_maps", "test_b5_heightmap_navmesh_rejects_steep_slope"],
-	# Ambient forest (Chris 2026-08-10): 20-variant tree pool, scattered
-	# across the whole map, harvestable but not regrowing. Kept adjacent
-	# to the greeble/clutter tests they share an avoidance set with.
-	["terrain_and_maps", "test_ambient_tree_pool_size_matches_constant"],
-	["terrain_and_maps", "test_ambient_tree_uses_ambient_pool_not_lumber_pool"],
-	["terrain_and_maps", "test_ambient_tree_does_not_regrow_after_harvest"],
-	["terrain_and_maps", "test_ambient_trees_scatter_is_deterministic"],
-	["terrain_and_maps", "test_ambient_trees_respect_avoid_radii"],
-	# 2026-08-10: ambient ore added (paired with the ~1/3 tree trim).
-	["terrain_and_maps", "test_ambient_ore_picks_from_resource_ore_pool"],
-	["terrain_and_maps", "test_ambient_ore_does_not_regrow"],
-	["terrain_and_maps", "test_ambient_ores_respect_avoid_radii_and_dont_overlap_trees"],
-	["ui_and_camera", "test_2d_ui_chrome_overhaul"],
-	["sim_and_stats", "test_audio_system"],
-	["sim_and_stats", "test_every_scene_script_parses_cleanly"],
+	["terrain_and_maps", "test_balance_report_covers_every_catalog_entry"],
+	["terrain_and_maps", "test_part_material_roles_differentiate_surfaces"],
+	["design_verdict", "test_design_verdict_flags_overweight_with_real_numbers"],
+	["lab_instructions", "test_lab_instructions_table_is_well_formed"],
 
 	# --- Rebuilt battle layer -------------------------------------------------
 	# APPENDED, never interleaved. The order above is pinned because several
@@ -352,29 +283,6 @@ const SUITE_ORDER := [
 	["resource_fields", "test_a_field_scatters_and_refills"],
 	["resource_fields", "test_oil_wells_are_single_points"],
 	["resource_fields", "test_every_map_offers_lumber_and_oil"],
-	["economy_and_production", "test_harvester_delivery_radius_clears_hull_and_refinery"],
-	["economy_and_production", "test_harvester_cargo_bar_tracks_fill_fraction"],
-	# APPENDED, not interleaved - the order above is pinned for navmesh reasons.
-	# Neither group touches a navigation map: the leg suites build a bare hull
-	# plus a module_placer, and the tutorial suites build MainLab.tscn.
-	["locomotion", "test_leg_sets_load_and_expose_the_bone_chain"],
-	["locomotion", "test_leg_sets_all_stand_on_the_ground"],
-	["locomotion", "test_leg_mount_style_moves_the_stations"],
-	["locomotion", "test_leg_type_round_trips_and_degrades"],
-	["locomotion", "test_leg_sets_have_a_real_stat_spread"],
-	["locomotion", "test_leg_walk_cycle_drives_all_three_bones"],
-	["locomotion", "test_legs_seat_on_the_visible_hull_mesh"],
-	["tutorial", "test_tutorial_step_table_is_well_formed"],
-	["tutorial", "test_tutorial_reveal_part_opens_the_catalog"],
-	["tutorial", "test_tutorial_lab_targets_all_resolve"],
-	["tutorial", "test_tutorial_advances_on_real_state"],
-	["tutorial", "test_tutorial_skip_clears_state"],
-	# APPENDED, not interleaved - speed pass (2026-08-08). None of these touch
-	# navigation maps: pure catalog checks, synthetic hulls, a stub-driven
-	# BoostController, and one BattleUnitV2 built directly (no Battle scene).
-	["locomotion", "test_chassis_top_speeds_are_spread_and_ordered"],
-	["locomotion", "test_propulsion_modules_change_drivetrain_output"],
-	["locomotion", "test_live_runtime_uses_combat_speed_and_terrain"],
 
 	# LAST, DELIBERATELY. This is the only suite that instantiates whole screens,
 	# so it is the one most likely to leave residue - autoload state touched by a
@@ -386,21 +294,15 @@ const SUITE_ORDER := [
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist
 # (2026-07-27 finding): isolated standalone reruns confirmed at least 3
-# distinct suites
-# (test_b2_n_player_slots_alliance_fog_repair_and_independent_resources,
-# which fails even run completely alone, a real timing race rather than
-# suite-order contamination, and test_c4_blocked_exit_holds_job_done_
-# nudges_blockers_then_spawns, which passes 3/3 alone and only fails from
-# shared-process Recast-bake/navmesh-RID carryover) can flake, and a live
-# full-suite run then produced a FOURTH, previously-unseen flake
-# (test_c1_building_placed_after_unit_is_moving_forces_a_repath) - matching
-# PROGRESS.md's own long-standing note that "a different navmesh/movement
-# test fails each run, never the same one twice." A fixed name list will
-# always lag one flake behind reality, so every suite gets one bounded,
-# logged retry instead. This is a strictly weaker safety net than a
-# regression would need to slip through twice in a row, and every retry
-# prints plainly - nothing is silently swallowed. See UNIFIED_ROADMAP.md 0.4
-# for the actual Recast-nondeterminism investigation this doesn't replace.
+# distinct suites can flake, and a live full-suite run then produced a
+# FOURTH, previously-unseen flake - matching PROGRESS.md's own long-standing
+# note that "a different navmesh/movement test fails each run, never the
+# same one twice." A fixed name list will always lag one flake behind
+# reality, so every suite gets one bounded, logged retry instead. This is
+# a strictly weaker safety net than a regression would need to slip through
+# twice in a row, and every retry prints plainly - nothing is silently
+# swallowed. See UNIFIED_ROADMAP.md 0.4 for the actual Recast-nondeterminism
+# investigation this doesn't replace.
 const _SUITE_RETRY_ATTEMPTS: int = 2
 
 
@@ -446,14 +348,16 @@ func _init():
 			success = false
 			_failed.append(suite_name)
 
-	print("\n==============================================")
-	if success:
-		print("    ALL AUTOMATED TESTS PASSED SUCCESSFULLY!")
-		print("==============================================\n")
-		quit(0)
+	print("")
+	print("Ran %d suites across %d files." % [_total_suites, SUITE_FILES.size()])
+	if _failed.is_empty():
+		print("All suites PASSED.")
 	else:
-		print("    TEST SUITE FAILED! %d/%d suites failed:" % [_failed.size(), _total_suites])
-		for f in _failed:
-			print("        [FAIL] " + f)
-		print("==============================================\n")
-		quit(1)
+		print("FAILED suites (%d):" % _failed.size())
+		for name in _failed:
+			print("  - %s" % name)
+	print("")
+
+	# A non-zero exit on any failure is what the CI step keys on. Headless
+	# dev runs of the same harness just see the printed verdict.
+	quit(0 if success else 1)

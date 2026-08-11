@@ -19,7 +19,7 @@ class_name HullGreebles
 # tint color varies by faction, same "shared library, just re-tinted"
 # pattern the design doc already established for hull paint).
 
-const FactionCatalogScript = preload("res://scripts/faction_catalog.gd")
+const LiveryScript = preload("res://scripts/livery.gd")
 const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 
 const CARD_TEXTURE_SIZE: int = 256
@@ -234,7 +234,7 @@ static func _build_scrap(container: Node3D, faction: String, hull_size: Vector3,
 # few cards (this is about breaking up the WHOLE silhouette, not scattered
 # small detail), reading as camouflage netting thrown over the hull.
 static func _build_net(container: Node3D, faction: String, hull_size: Vector3, surface: Dictionary):
-	var color = FactionCatalogScript.get_visual_color(faction).darkened(0.1)
+	var color = LiveryScript.zone_color(faction, "hull_upper").darkened(0.1)
 	var ext = _extents(surface, hull_size)
 	# Netting is nearly hull-sized, so it is the one greeble that cannot be a
 	# flat card at all: a single quad is tangent to the hull at exactly one
@@ -265,7 +265,7 @@ static func _drape(container: Node3D, surface: Dictionary, color: Color,
 # trailing past the hull's actual tail - the "kill-marks and banners as
 # doctrine" aesthetic made literal.
 static func _build_pennants(container: Node3D, faction: String, hull_size: Vector3, surface: Dictionary):
-	var color = FactionCatalogScript.get_visual_color(faction)
+	var color = LiveryScript.zone_color(faction, "hull_upper")
 	var ext = _extents(surface, hull_size)
 	# Banner height comes off the hull's HEIGHT, not its length. The old
 	# ext.z * 0.55 made a heavy hull's pennant 4.4 units tall - taller than the
@@ -289,7 +289,7 @@ static func _build_pennants(container: Node3D, faction: String, hull_size: Vecto
 # Aerodrome Cartel: two swept art-deco tailfins at the rear, raked back -
 # streamers/glamour fins, not functional control surfaces.
 static func _build_streamers(container: Node3D, faction: String, hull_size: Vector3, surface: Dictionary):
-	var color = FactionCatalogScript.get_visual_color(faction)
+	var color = LiveryScript.zone_color(faction, "hull_upper")
 	var ext = _extents(surface, hull_size)
 	var fin_size = Vector2(ext.z * 0.5, ext.y * 0.7)
 	# A tailfin is a VERTICAL surface running fore-aft, so the card lies in the
