@@ -75,13 +75,93 @@ func _make_custom_tooltip(for_text: String) -> Control:
 	return panel
 
 func _get_drag_data(at_position: Vector2):
-	# Create a simple preview label for the drag
-	var preview_label = Label.new()
+	# DRAG PREVIEW. The old version was a plain Label with the part's name,
+	# which read as a drag-ANYWHERE-and-look-for-the-text bookmark rather
+	# than as a visual handle. The player is choosing a shape, and the
+	# shape is the thing the cursor should be carrying.
+	#
+	# Implementation: a small PanelContainer with a TextureRect of the
+	# rendered part (see part_thumbnail.gd) above a one-line label. The
+	# thumbnail is fetched from the MainLab PartThumbnailCache - cached on
+	# first request, so the second-and-later drags of the same part are
+	# instant. The first drag of a session pays one frame for the bake.
+	#
+	# Backed by a PanelContainer (not a bare TextureRect) so the preview
+	# has the same dark drop-shadow + hairline border the parts-menu cards
+	# do - otherwise the dragged icon would look like a screenshot
+	# pasted onto the cursor, instead of a piece of the same UI.
+	var preview_control := PanelContainer.new()
+	preview_control.theme_type_variation = "FlyoutPanel"
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 4)
+	preview_control.add_child(vbox)
+
+	var preview_tex := TextureRect.new()
+	preview_tex.custom_minimum_size = Vector2(96, 96)
+	preview_tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	preview_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	# Hard-coded tint if the bake was not ready (cache miss + first
+	# async bake in flight) so the preview is never empty. A TextureRect
+	# with a null texture paints a black rectangle, which would look like
+	# the part had loaded as a hole.
+	preview_tex.modulate = Color(1, 1, 1, 1)
+	vbox.add_child(preview_tex)
+
+	# Sync cache path. If the bake for this type_id has already run for
+	# any other drag this session, hand the texture back right now and
+	# skip the async wait - the cursor is moving every frame and any
+	# frame spent waiting is a frame the player sees a blank icon.
+	var cache := _get_thumbnail_cache()
+	if cache != null:
+		# cache is typed Node (not PartThumbnailCache) so the dynamic call
+		# is untyped; declare the receiver's type explicitly so the strict
+		# parser can infer.
+		var existing: Texture2D = cache.get_thumbnail_now(module_type_id)
+		if existing != null:
+			preview_tex.texture = existing
+
+	var preview_label := Label.new()
 	preview_label.text = text
-	var preview_control = Control.new()
-	preview_control.add_child(preview_label)
-	
+	preview_label.theme_type_variation = "StatLabel"
+	preview_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vbox.add_child(preview_label)
+
 	set_drag_preview(preview_control)
-	
-	# Pass a dictionary containing the drag payload
+
+	# Async path. The first drag of a session triggers the actual bake.
+	# When it finishes, the preview TextureRect is updated in place - the
+	# drag_control is now a child of the viewport's drag layer, so a late
+	# mutation is the only safe way to swap in the texture after the
+	# drag has already started. The cursor is already visible, so there
+	# is a one-frame window where the preview shows a black box; that is
+	# the exact cost the same trade blueprint_thumbnail.gd accepts.
+	if cache != null and preview_tex.texture == null:
+		_run_bake(cache, preview_tex)
+
 	return {"type": "module_part", "id": module_type_id}
+
+
+# The cache lives on MainLab as a sibling node (see MainLab.tscn). The
+# button is created in the parts menu deep inside UI_PartsMenu, so a
+# direct path lookup is the cleanest reach. Returns null if MainLab has
+# been torn down (test teardown, scene swap) so the preview falls back
+# to the label-only form rather than crashing.
+func _get_thumbnail_cache() -> Node:
+	var root := get_tree().root if get_tree() != null else null
+	if root == null:
+		return null
+	var lab := root.get_node_or_null("MainLab")
+	if lab == null:
+		return null
+	return lab.get_node_or_null("PartThumbnailCache")
+
+
+func _run_bake(cache: Node, target: TextureRect) -> void:
+	var tex: Texture2D = await cache.get_thumbnail(module_type_id)
+	# The button or the texture rect can have been freed between the
+	# bake and its await resuming (parts-menu rebuild, scene swap, a
+	# fast second click). is_instance_valid guards both without having
+	# to track ownership.
+	if tex != null and is_instance_valid(target):
+		target.texture = tex

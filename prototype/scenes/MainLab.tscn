@@ -1,4 +1,4 @@
-[gd_scene load_steps=13 format=3 uid="uid://cxabmain1234"]
+[gd_scene load_steps=14 format=3 uid="uid://cxabmain1234"]
 
 [ext_resource type="Script" path="res://scripts/module_placer.gd" id="1_placer"]
 [ext_resource type="Script" path="res://scripts/designer_camera.gd" id="2_camera"]
@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://bro62gj1p12oc" path="res://scenes/UI_PartsMenu.tscn" id="4_parts"]
 [ext_resource type="Script" path="res://scripts/drag_drop_manager.gd" id="5_drop"]
 [ext_resource type="Script" path="res://scripts/blueprint_manager.gd" id="6_blueprint"]
+[ext_resource type="Script" path="res://scripts/part_thumbnail.gd" id="7_thumbs"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_x3k"]
 sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
@@ -93,3 +94,6 @@ script = ExtResource("5_drop")
 
 [node name="BlueprintManager" type="Node" parent="."]
 script = ExtResource("6_blueprint")
+
+[node name="PartThumbnailCache" type="Node" parent="."]
+script = ExtResource("7_thumbs")

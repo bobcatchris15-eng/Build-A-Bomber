@@ -7,41 +7,62 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 var ghost_mesh: Node3D = null
 var ghost_mesh_mirror: Node3D = null
 var current_ghost_type: String = ""
+# Cached "where the bottom of this part's visual is" in module-local space.
+# Recomputed only when the type_id changes, not every mouse move - the
+# same part dragged across the whole hull has the same AABB.
+var _ghost_visual_bottom_y: float = 0.0
 var _cached_ghost_material: Material = null
 var _ghost_shader: Shader = null
 
 func _get_ghost_shader() -> Shader:
 	if _ghost_shader != null:
 		return _ghost_shader
-		
+
 	var shader = Shader.new()
 	shader.code = """
 shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_always, cull_back;
 
-uniform vec4 line_color : source_color = vec4(0.2, 1.0, 0.4, 0.9);
+uniform vec4 line_color : source_color = vec4(0.95, 0.95, 0.55, 0.9);
 
 void fragment() {
 	float NdotV = abs(dot(NORMAL, VIEW));
 	float fresnel = pow(1.0 - clamp(NdotV, 0.0, 1.0), 2.0);
-	float line_alpha = smoothstep(0.15, 0.65, fresnel);
-	
+	float line_alpha = smoothstep(0.10, 0.55, fresnel);
+
 	ALBEDO = line_color.rgb;
-	ALPHA = line_color.a * line_alpha;
+	ALPHA = line_alpha;
 }
 """
 	_ghost_shader = shader
 	return _ghost_shader
 
+# Ghost material the rest of the lab reads as "preview, not real".
+#
+# Earlier: 0.42 alpha teal-green across the whole part. The player could
+# not tell a placed module from the ghost preview at a glance - they were
+# both dim teal blobs, with the ghost being a thinner blob because the
+# mesh's thin barrel is barely visible through 42% alpha. The "the
+# autocannon ghost is just a plain box" symptom was this: the part's
+# actual mesh was being drawn, but at 42% on a thin barrel over a
+# textured hull it visually collapsed to a smudge.
+#
+# Now: catalog color at 0.78 alpha (still translucent, so the player can
+# see the hull surface through the part - "where it will land" stays a
+# read, not a paint-over) plus the edge contour at a brighter outline
+# yellow that survives against a busy hull. Same family as the green
+# material the firing arc uses; the interface is signalling "this is
+# metadata, not a real object" by the same colour cue throughout.
 func _get_foggy_part_material() -> Material:
 	if _cached_ghost_material != null:
 		return _cached_ghost_material
-		
+
 	var foggy_mat = StandardMaterial3D.new()
 	foggy_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	foggy_mat.albedo_color = Color(0.10, 0.26, 0.20, 0.42) # Foggy translucent teal-grey
+	foggy_mat.albedo_color = Color(0.10, 0.26, 0.20, 0.78)
 	foggy_mat.roughness = 0.2
 	foggy_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
+	foggy_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
 	# Feature Edge Contour Pass (renders clean vector lines around part contours, avoiding micro-triangle shell clutter)
 	var edge_mat = ShaderMaterial.new()
@@ -61,17 +82,28 @@ func _build_module_ghost_node(type_id: String) -> Node3D:
 	var container = Node3D.new()
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var cat_size = catalog_data.get("size", Vector3.ONE)
-	
-	VisualBuilder.build_visual(type_id, container, cat_size, Color.WHITE, {})
-	
-	# Fallback box mesh if no visual children were spawned
+
+	# The catalog's own color, not Color.WHITE. The old WHITE made every
+	# ghost the same washed-out teal regardless of which part was being
+	# dragged; the player could not tell an autocannon from a radar mast
+	# from a missile pod until they had stopped and read the parts menu.
+	# A coloured ghost renders the silhouette in the colour the placed
+	# copy will wear, which is enough to read the shape at a glance.
+	VisualBuilder.build_visual(type_id, container, cat_size,
+		catalog_data.get("color", Color.WHITE), {})
+
+	# Fallback box mesh if no visual children were spawned (an authored
+	# part whose .glb is missing AND whose procedural fallback produced
+	# nothing). Bare box is genuinely the right read here - it signals
+	# "this part has nothing to preview" rather than a "plain box" that
+	# looks like the actual visual.
 	if container.get_child_count() == 0:
 		var mi = MeshInstance3D.new()
 		var box = BoxMesh.new()
 		box.size = cat_size
 		mi.mesh = box
 		container.add_child(mi)
-		
+
 	_apply_ghost_materials_recursive(container, _get_foggy_part_material())
 	return container
 
@@ -79,7 +111,7 @@ func _build_hull_ghost_node(type_id: String) -> Node3D:
 	var container = Node3D.new()
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var cat_size = catalog_data.get("size", Vector3.ONE)
-	
+
 	var hull_mesh = MeshAssetLoader.get_hull_mesh(type_id)
 	var mi = MeshInstance3D.new()
 	if hull_mesh != null:
@@ -89,7 +121,7 @@ func _build_hull_ghost_node(type_id: String) -> Node3D:
 		box.size = cat_size
 		mi.mesh = box
 	container.add_child(mi)
-	
+
 	_apply_ghost_materials_recursive(container, _get_foggy_part_material())
 	return container
 
@@ -98,32 +130,32 @@ func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 		var type_id = data["id"]
 		var catalog_data = ModuleCatalog.get_module_data(type_id)
 		var category = catalog_data.get("category", "module")
-		
+
 		var root = get_node("/root/MainLab")
 		if category == "hull":
 			_update_ghost_mesh_hull(type_id)
 			return true
-			
+
 		# Normal modules require a hull to exist first!
 		if not root or root.get_node_or_null("Hull") == null:
 			_destroy_ghost_mesh()
 			return false
-			
+
 		# Normal modules require raycast
 		_update_ghost_mesh(at_position, type_id)
 		return true
-		
+
 	_destroy_ghost_mesh()
 	return false
 
 func _drop_data(at_position: Vector2, data: Variant):
 	_destroy_ghost_mesh()
-	
+
 	if typeof(data) == TYPE_DICTIONARY and data.has("type") and data["type"] == "module_part":
 		var type_id = data["id"]
 		var catalog_data = ModuleCatalog.get_module_data(type_id)
 		var category = catalog_data.get("category", "module")
-		
+
 		var root = get_node("/root/MainLab")
 		if category == "hull":
 			if root:
@@ -148,18 +180,22 @@ func _collapse_parts_menu():
 func _update_ghost_mesh_hull(type_id: String):
 	var root = get_node_or_null("/root/MainLab")
 	if not root: return
-	
+
 	if current_ghost_type != type_id or ghost_mesh == null:
 		_destroy_ghost_mesh()
 		_collapse_parts_menu()
 		ghost_mesh = _build_hull_ghost_node(type_id)
 		root.add_child(ghost_mesh)
 		current_ghost_type = type_id
+		# Hull is centred on its own origin (the catalog `size` is its
+		# box, not its base). Lift it by half its height so the bottom
+		# of the hull sits on the ground plane, matching the placement
+		# code in _place_hull_from_ui().
+		var catalog_data = ModuleCatalog.get_module_data(type_id)
+		_ghost_visual_bottom_y = -catalog_data.get("size", Vector3.ONE).y / 2.0
 
 	ghost_mesh.visible = true
-	var catalog_data = ModuleCatalog.get_module_data(type_id)
-	var cat_size = catalog_data.get("size", Vector3.ONE)
-	ghost_mesh.position = Vector3(0, cat_size.y / 2.0, 0)
+	ghost_mesh.position = Vector3(0, -_ghost_visual_bottom_y, 0)
 
 # Helper to create/update the ghost mesh preview
 func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
@@ -171,21 +207,43 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 
 	var root = get_node_or_null("/root/MainLab")
 	if not root: return
-		
-	var catalog_data = ModuleCatalog.get_module_data(type_id)
-	var cat_size = catalog_data.get("size", Vector3.ONE)
-	
+
 	if current_ghost_type != type_id or ghost_mesh == null:
 		_destroy_ghost_mesh()
 		_collapse_parts_menu()
 		ghost_mesh = _build_module_ghost_node(type_id)
 		root.add_child(ghost_mesh)
 		current_ghost_type = type_id
+		# Cache the visual's bottom-Y in the module's own local frame. The
+		# module's local origin is conventionally at the bottom of its
+		# mount/base, so the bottom is 0 for everything that has a mount
+		# at y=0 (most weapons and support modules) and a non-zero value
+		# for the few parts whose bottom is offset (sensor masts that
+		# float above a base ring, etc.). Measured from the actually-built
+		# visual, not from the catalog `size` - the two disagree for
+		# every authored weapon because the catalog box is a fitting
+		# envelope, not the actual mesh AABB.
+		#
+		# Old code: position = result + Vector3(0, cat_size.y/2, 0),
+		# i.e. the ghost was placed so its AABB CENTRE was at the surface
+		# plus half the catalog height. For a 0.3-high HMG that lifted
+		# the ghost 0.15 above the surface, which combined with the
+		# visual AABB being centred slightly above y=0 (the receiver
+		# top is around y=0.28) put the ghost entirely above the hull
+		# instead of on it. This measured-from-visual path is the fix.
+		var aabb := _ghost_visual_aabb(ghost_mesh)
+		_ghost_visual_bottom_y = aabb.position.y if aabb.size.length_squared() > 0.0 else 0.0
 
 	ghost_mesh.visible = true
-	ghost_mesh.position = result.position + Vector3(0, cat_size.y / 2.0, 0)
+	# The placement normal in the module's local frame is +Y (mount
+	# axis), so the offset the ghost needs is along its own +Y. The
+	# surface position from the raycast is the CONTACT point, and the
+	# ghost's local origin sits at the bottom of the mount, so we lift
+	# the ghost by however far the visual's bottom is above the
+	# local origin.
+	ghost_mesh.position = result.position + Vector3(0, _ghost_visual_bottom_y, 0)
 
-	var is_symmetric = catalog_data.get("is_symmetric", true)
+	var is_symmetric = catalog_data_for(type_id).get("is_symmetric", true)
 	if not is_symmetric and abs(result.position.x) > 0.1:
 		if ghost_mesh_mirror == null:
 			ghost_mesh_mirror = _build_module_ghost_node(type_id)
@@ -195,6 +253,33 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 	else:
 		if ghost_mesh_mirror:
 			ghost_mesh_mirror.visible = false
+
+func catalog_data_for(type_id: String) -> Dictionary:
+	return ModuleCatalog.get_module_data(type_id)
+
+func _ghost_visual_aabb(node: Node3D) -> AABB:
+	# Walk every MeshInstance3D under the ghost, transform each mesh's
+	# AABB by its world transform, and merge. Same walk
+	# measure_visual_bounds() does, but written here against the ghost
+	# rather than reaching into VisualBuilder - the ghost has its own
+	# material overrides and possible fallback box, so passing a
+	# different subtree to the existing helper would mean carving up
+	# that helper's API.
+	var bounds := AABB()
+	var seen := false
+	for mi in node.find_children("*", "MeshInstance3D", true, false):
+		if mi.mesh == null:
+			continue
+		var xf := Transform3D.IDENTITY
+		var walker: Node = mi
+		while walker != null and walker != node:
+			if walker is Node3D:
+				xf = walker.transform * xf
+			walker = walker.get_parent()
+		var part: AABB = xf * mi.mesh.get_aabb()
+		bounds = part if not seen else bounds.merge(part)
+		seen = true
+	return bounds
 
 func _notification(what: int):
 	if what == NOTIFICATION_DRAG_END:
@@ -208,6 +293,7 @@ func _destroy_ghost_mesh():
 		ghost_mesh_mirror.queue_free()
 		ghost_mesh_mirror = null
 	current_ghost_type = ""
+	_ghost_visual_bottom_y = 0.0
 
 func _raycast_from_screen(screen_pos: Vector2):
 	var camera = get_viewport().get_camera_3d()
@@ -230,3 +316,4 @@ func _raycast_from_screen(screen_pos: Vector2):
 	var query = PhysicsRayQueryParameters3D.create(ray_origin, ray_origin + ray_dir * 1000.0)
 	query.collision_mask = 3 # Hits Hull (1) and Modules (2)
 	return space_state.intersect_ray(query)
+

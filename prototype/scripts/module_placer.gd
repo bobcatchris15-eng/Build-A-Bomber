@@ -665,10 +665,25 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 ## size slider feeling "laggy"/unresponsive compared to weapon tweaks).
 ## Re-fits a placed module's click target to whatever it currently renders.
 ## Shared by initial placement and by live tweak drags so the two cannot drift.
+## Same click-margin policy as _place_weapon() so a tweak drag cannot shrink
+## the click area back down to the bare visual bounds.
+const _CLICK_MARGIN := 0.10
 static func _resize_collider_to_visual(module: Node3D) -> void:
 	var bounds := _visual_bounds(module)
 	if bounds.size.length_squared() <= 0.0:
 		return
+	var size := bounds.size
+	size.x += _CLICK_MARGIN * 2.0
+	size.y += _CLICK_MARGIN * 2.0
+	size.z += _CLICK_MARGIN * 2.0
+	# Floor: a tweak can in principle strip every visible mesh (e.g. setting
+	# every authorable dimension to 0). Without a floor the click target
+	# collapses to a point, which a player would experience as the
+	# module suddenly becoming unselectable mid-drag.
+	var _min_dim = 0.35
+	size.x = maxf(size.x, _min_dim)
+	size.y = maxf(size.y, _min_dim)
+	size.z = maxf(size.z, _min_dim)
 	for child in module.get_children():
 		if not (child is StaticBody3D):
 			continue
@@ -679,7 +694,7 @@ static func _resize_collider_to_visual(module: Node3D) -> void:
 				# would silently resize every other module using the same box.
 				if not shape_node.shape.resource_local_to_scene:
 					shape_node.shape = shape_node.shape.duplicate()
-				shape_node.shape.size = bounds.size
+				shape_node.shape.size = size
 				shape_node.position = Vector3.ZERO
 		return
 
@@ -1087,6 +1102,14 @@ static func _refit_module_collider(module: Node3D) -> void:
 	if bounds.size.length_squared() <= 0.0:
 		return
 	var fit_size = bounds.size
+	# Same click-margin policy as initial placement. Without this, a
+	# module dragged across a facet and re-fit would lose the +0.10 comfort
+	# margin that _place_weapon() gave it on the way in - the same
+	# "hard to select" symptom recurring mid-edit, on a part the player
+	# already proved they could click once.
+	fit_size.x += _CLICK_MARGIN * 2.0
+	fit_size.y += _CLICK_MARGIN * 2.0
+	fit_size.z += _CLICK_MARGIN * 2.0
 	var min_dim = 0.35
 	fit_size.x = maxf(fit_size.x, min_dim)
 	fit_size.y = maxf(fit_size.y, min_dim)
@@ -1179,6 +1202,26 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 		if visual_aabb.size.length_squared() > 0.0:
 			col_size = visual_aabb.size
 			col_center = visual_aabb.get_center()
+	# CLICK COMFORT MARGIN. The old code floored each axis at 0.35, which
+	# made the X/Y of a thin gun (HMG receiver is 0.14 wide) a little wider
+	# than the visible part, but did nothing for the other two thirds of
+	# the visible mesh - the barrel is the longest part of a gun and the
+	# "near miss" the player keeps hitting is the gap between barrel and
+	# receiver. A per-axis margin extends the collider uniformly OUTSIDE
+	# the visible bounds (not into them, so it cannot make clipping
+	# detection fire on an already-correctly-placed part), and the floor
+	# stays as a backstop for the rare part that builds no mesh.
+	#
+	# Tuned: at 0.10 the autocannon and HMG are noticeably easier to hit,
+	# adjacent modules (typically 0.5+ apart on a deck) do not start
+	# stealing each other's clicks. A larger value is tempting, but a 0.20
+	# margin over a small part (e.g. a 0.3x0.3 catalog) pushes the click
+	# box out to 0.7 - bigger than the part itself, which is the exact
+	# "click a different part by accident" failure this is trying to avoid.
+	var click_margin := 0.10
+	col_size.x += click_margin * 2.0
+	col_size.y += click_margin * 2.0
+	col_size.z += click_margin * 2.0
 	var min_dim = 0.35
 	col_size.x = maxf(col_size.x, min_dim)
 	col_size.y = maxf(col_size.y, min_dim)
