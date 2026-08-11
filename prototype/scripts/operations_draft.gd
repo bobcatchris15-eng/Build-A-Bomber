@@ -18,6 +18,13 @@ const UIShell = preload("res://scripts/ui_shell.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
+# write_match_config() reads LiveryScript.PLAYER_ID for the player faction id.
+# This preload was missing since the Phase 1-5 unification (0a8226a), so the
+# whole script failed to compile with `Identifier "LiveryScript" not declared`
+# and the Operations draft screen could not load at all - the same defect
+# DECISIONS.md logged against battle/buildings/structure.gd, which got its
+# preload while this twin did not. Declared identically to structure.gd:19.
+const LiveryScript = preload("res://scripts/livery.gd")
 const RosterPickerScript = preload("res://scripts/roster_picker.gd")
 const CounterDraftScript = preload("res://scripts/battle/ai/counter_draft.gd")
 const MatchRuleSetScript = preload("res://scripts/match_rule_set.gd")

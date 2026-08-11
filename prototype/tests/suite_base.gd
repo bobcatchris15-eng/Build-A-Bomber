@@ -341,10 +341,23 @@ func _smoke_test_map(map_id: String) -> bool:
 		print("  [FAIL] Battle did not load the requested map '", map_id, "'")
 		battle.queue_free()
 		return false
-	var player_hq = _find_hq(battle, battle.PLAYER_TEAM)
-	var enemy_hq = _find_hq(battle, battle.ENEMY_TEAM)
-	if player_hq == null or enemy_hq == null:
-		print("  [FAIL] Player/enemy HQ failed to spawn on map '", map_id, "'")
+	# 2026-08-11: this used to require BOTH HQs to have auto-spawned, and that
+	# is why all ten per-map smokes were failing. Commit e7b4f1f made the player
+	# HQ player-placed: _spawn_bases() now does `if team == PLAYER_TEAM and
+	# has_zones: continue` and raises a pre-game placement ghost instead, and
+	# every bundled map has base_zones, so a player HQ can never be present at
+	# this point in a headless boot. The assertion was checking for something
+	# the game deliberately stopped doing.
+	#
+	# The ENEMY half is still real and still worth asserting - the AI always
+	# auto-places, on zoned and unzoned maps alike, and it is the one HQ whose
+	# absence would be a genuine per-map bug (a base zone that resolves to
+	# nowhere placeable). Narrowed rather than deleted for that reason. Nothing
+	# downstream needed the node handles anyway: the HQ-to-HQ reachability check
+	# below paths between the map def's authored spawn.hq COORDINATES, not
+	# between these structures, so it is unaffected either way.
+	if _find_hq(battle, battle.ENEMY_TEAM) == null:
+		print("  [FAIL] Enemy HQ failed to auto-spawn on map '", map_id, "'")
 		battle.queue_free()
 		return false
 

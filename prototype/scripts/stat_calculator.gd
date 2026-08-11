@@ -98,6 +98,12 @@ const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const DesignStatsScript = preload("res://scripts/design_stats.gd")
+# For its REGIME_* names only - the analysis itself arrives pre-computed inside
+# the DesignStats result, exactly like Drivetrain above. The rail needs the
+# constants because it colours a row by which regime the shot is in, and a
+# stringly-typed "chip" spelled out here is how this file and weapon_alpha.gd
+# would eventually disagree about spelling.
+const WeaponAlphaScript = preload("res://scripts/weapon_alpha.gd")
 # Drivetrain and WeaponRange are no longer preloaded here: both are now called
 # by design_stats.gd, which hands their results back in its return value, so this
 # file has no direct use for either.
@@ -1341,6 +1347,16 @@ func update_stats(hull: Node3D):
 			names.append(ProductionHUDScript._format_building_name(r))
 		tech_req_label.text = "Required Buildings: %s" % ", ".join(names)
 
+	# LAST, and that is the whole reason it is down here rather than up with the
+	# other three _update_*_readout() calls. This block anchors itself at
+	# dps_label.get_index() + 1, and so does armor_threshold_label above - so
+	# whichever runs last ends up adjacent to the DPS row. Alpha is the row that
+	# QUALIFIES the DPS figure ("this is what one hit of that is worth"), and it
+	# has to sit against it to read as a correction rather than as a separate
+	# topic; the armour thresholds are about what this design's own plate stops,
+	# which is the next subject, not the same one.
+	_update_alpha_readout(stats.get("alpha", {}))
+
 
 # --- Drivetrain readout (load bar + top speed + overweight warning) ---------
 #
@@ -1884,6 +1900,198 @@ func _update_range_readout(wr: Dictionary) -> void:
 			names.append("%s (%.0f)" % [w["name"], w["reach"]])
 		_spotter_detail.text = "%s can shoot further than this design can see (%.0f). Usable as-is, but a spotting unit or a radar mast is what unlocks the last %.0f units of that reach." % [
 			", ".join(names), vision, longest - vision]
+
+# --- Alpha readout (per-shot damage and what it is worth vs armour) ---------
+#
+# WHAT THIS FIXES. "Total DPS" one row up is, by construction, the one figure
+# the caliber and barrel_length sliders cannot say anything interesting with.
+# Both tweaks sit in the linear multiplier lists of ModuleData.get_dps(),
+# get_weight() AND get_cost(), so dragging either moved all three rows by the
+# same factor: DPS-per-kg and DPS-per-credit were perfectly FLAT across the
+# whole slider range. A player who dragged the bar, watched three numbers rise
+# together and concluded it did not matter was reading this rail correctly.
+#
+# The trade is real and lives one layer down. caliber also multiplies the shot
+# INTERVAL (auto_weapon.gd's cadence chain, mirrored in WeaponAlpha.
+# shot_interval()), so a bigger bore is FEWER, HARDER hits at roughly the same
+# nominal DPS. That matters because damage_resolver.gd gates on the SHOT, never
+# on the DPS: under the material's threshold a hit delivers CHIP_THROUGH_FACTOR
+# of its already-reduced damage, and from BRUTE_FORCE_RATIO x threshold upward
+# the reduction blends back toward 1.0. Same weapon, same DPS, roughly a 6.7x
+# swing in what actually lands - decided entirely by alpha.
+#
+# So the block prints the two things the rail was missing:
+#   - the per-shot alpha, and the cadence it is bought at;
+#   - one row per armour material: the effective DPS this design lands on that
+#     plate, and which regime the hardest shot is in against it.
+#
+# DESIGN_VISION.md's test ("two players building the same concept must diverge
+# through continuous tweaks") is decided almost entirely here, which is why
+# this is visible chrome and not a tooltip - the player is DRAGGING the slider
+# and needs to watch the regime word flip while the mouse is on the handle.
+#
+# NO WARNING PANEL, unlike the drivetrain/power/spotter blocks. The chip-regime
+# failure already leads the rail in the verdict block at the top ("CHIPS ONLY",
+# see design_verdict.gd), and a fourth hazard placard restating it eight rows
+# further down would be the same sentence twice on one screen. The colour on
+# the material rows is the in-place signal; the verdict is the headline.
+var _alpha_label: Label = null
+var _alpha_head: Label = null
+var _alpha_rows: Array[Label] = []
+
+# The regime column, as it is drawn. Two things carry the state, not one:
+#
+#   colour - CHIP is SIGNAL_ALERT (this design's shots are being stopped, which
+#            is a failure state for the thing being measured), BRUTE is
+#            SIGNAL_GO, and the ordinary through-regime keeps StatLabel's own
+#            TEXT_SECONDARY so the two extremes are the only rows that pull the
+#            eye. Same go/hazard/alert vocabulary the load bar uses for its
+#            fill, applied to the same kind of question.
+#   case   - the two extremes are SHOUTED and the middle is not. This is not
+#            decoration: it is the redundant channel that keeps the regime
+#            legible for a colour-blind player, and it survives a greyscale
+#            screenshot, which the colour alone does not.
+func _alpha_regime_word(regime: String) -> String:
+	if regime == WeaponAlphaScript.REGIME_CHIP:
+		return "CHIP"
+	if regime == WeaponAlphaScript.REGIME_BRUTE:
+		return "BRUTE"
+	return "through"
+
+
+# Returns null for the ordinary regime rather than a colour, so the caller can
+# clear the override and fall back to StatLabel's own TEXT_SECONDARY instead of
+# this file hardcoding what "normal text" is a second time.
+func _alpha_regime_color(regime: String) -> Variant:
+	if regime == WeaponAlphaScript.REGIME_CHIP:
+		return Tokens.SIGNAL_ALERT
+	if regime == WeaponAlphaScript.REGIME_BRUTE:
+		return Tokens.SIGNAL_GO
+	return null
+
+
+func _build_alpha_readout() -> void:
+	_alpha_label = Label.new()
+	_alpha_label.theme_type_variation = "StatLabel"
+	# Insurance only - the format below is sized to fit the 320px dock on one
+	# line. A hand-edited blueprint with an absurd alpha is the case this
+	# catches, and a wrapped row is a much better outcome than one that spills
+	# past the panel edge (which is exactly what armor_threshold_label used to
+	# do before the headless overflow audit found it).
+	_alpha_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_rail_vbox.add_child(_alpha_label)
+
+	_alpha_head = Label.new()
+	_alpha_head.theme_type_variation = "StatLabel"
+	# FONT_MICRO is the token's documented "dense tabular readouts" step, and
+	# the five rows below it are exactly that. StatLabel is the theme's MONO
+	# face, so the space-padded columns actually line up as columns.
+	_alpha_head.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
+	_rail_vbox.add_child(_alpha_head)
+
+	# One row per material IN THE TABLE, not four hardcoded rows. Same reasoning
+	# as WeaponAlpha.short_label()'s id-derived fallback: a material added to
+	# ARMOR_TABLE renders on the day it lands rather than silently going
+	# missing from the only readout that compares them.
+	_alpha_rows.clear()
+	for _i in range(DamageResolverScript.ARMOR_TABLE.size()):
+		var row := Label.new()
+		row.theme_type_variation = "StatLabel"
+		row.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
+		_rail_vbox.add_child(row)
+		_alpha_rows.append(row)
+
+	# Directly under the DPS row it qualifies, via the same move_child idiom the
+	# drivetrain, range and power blocks use - lazily-added children otherwise
+	# land at the end of the VBox, below the save/test buttons, which is what
+	# kept armor_threshold_label invisible for so long. This one is inserted
+	# LAST of all the rail's readouts (see the call at the foot of
+	# update_stats()), so it ends up immediately after DPS and pushes the armour
+	# threshold rows down one - deliberate ordering: "what this design deals"
+	# belongs with the DPS row, and "what this design's own plate stops" reads
+	# as the next topic rather than as part of it.
+	if dps_label and dps_label.get_parent() == _rail_vbox:
+		var at := dps_label.get_index()
+		_rail_vbox.move_child(_alpha_label, at + 1)
+		_rail_vbox.move_child(_alpha_head, at + 2)
+		for i in range(_alpha_rows.size()):
+			_rail_vbox.move_child(_alpha_rows[i], at + 3 + i)
+
+
+func _update_alpha_readout(wa: Dictionary) -> void:
+	if _alpha_label == null:
+		_build_alpha_readout()
+
+	# Same shape as the range readout's no-weapons case, and for the same
+	# reason: a hull the player has only just started has no shot to report, and
+	# printing "Alpha: 0.0" against a full table of zeroes reads as a broken
+	# design rather than an unfinished one.
+	if not wa.get("has_weapons", false):
+		_alpha_label.text = "Alpha: - (no weapons)"
+		_alpha_label.tooltip_text = "Per-shot damage, once this design has an armed module fitted."
+		_alpha_head.visible = false
+		for row in _alpha_rows:
+			row.visible = false
+		return
+	_alpha_head.visible = true
+
+	var per_shot: float = float(wa.get("per_shot", 0.0))
+	var interval: float = float(wa.get("interval", 0.0))
+	var weapons: Array = wa.get("weapons", [])
+
+	_alpha_label.text = "Alpha: %.1f / shot  (%.2fs)" % [per_shot, interval]
+	# The tooltip is where the MECHANISM goes. The row itself has to stay a row,
+	# but a player who has just noticed that dragging caliber barely moves Total
+	# DPS while moving this number a lot deserves the sentence that explains why.
+	_alpha_label.tooltip_text = ("What one hit is worth before armour, and the seconds between hits.\n"
+		+ "Armour thresholds gate on THIS, never on total DPS - a shot under the threshold delivers a small chip fraction, and a shot far over it punches through the reduction.\n"
+		+ "Caliber multiplies damage and the shot interval together: total DPS barely moves, but fewer, harder hits is what crosses a threshold.\n"
+		+ "Hardest of %d armed module(s): %s (%s damage).") % [
+			weapons.size(), str(wa.get("hardest", "")), str(wa.get("hardest_class", ""))]
+
+	_alpha_head.text = "Effective DPS vs %.1f plate" % float(wa.get("reference_thickness", 1.0))
+	_alpha_head.tooltip_text = ("What this design actually lands per second on each armour material, summed across every armed module.\n"
+		+ "Quoted at a reference plate thickness rather than at this design's own armour: this table is about what the design DEALS, and the defender it meets has whatever plate its own builder chose.\n"
+		+ "The word on each row is the regime the HARDEST shot is in against that material - hover a row for the per-weapon breakdown.")
+
+	var effective: Dictionary = wa.get("effective_dps", {})
+	var regimes: Dictionary = wa.get("regime", {})
+	var idx := 0
+	for material in effective:
+		if idx >= _alpha_rows.size():
+			break
+		var row: Label = _alpha_rows[idx]
+		idx += 1
+		row.visible = true
+		var regime: String = str(regimes.get(material, WeaponAlphaScript.REGIME_THROUGH))
+		row.text = "%-9s %7.1f  %s" % [
+			WeaponAlphaScript.short_label(material),
+			float(effective[material]),
+			_alpha_regime_word(regime)]
+		var tint = _alpha_regime_color(regime)
+		if tint == null:
+			row.remove_theme_color_override("font_color")
+		else:
+			row.add_theme_color_override("font_color", tint)
+		# The per-weapon breakdown, which is the part that cannot fit on a row.
+		# Every armed module's own alpha, its own threshold against THIS material
+		# (thresholds are per damage class, so a thermal round and an AP round out
+		# of the same hull are answered by different numbers) and its own regime.
+		var lines: Array = ["%s plate:" % WeaponAlphaScript.short_label(material)]
+		for w in weapons:
+			var vs: Dictionary = w.get("vs", {}).get(material, {})
+			lines.append("  %s - %.1f per shot vs %.1f threshold: %s (%.1f dps, %s)" % [
+				str(w.get("name", "")),
+				float(w.get("per_shot", 0.0)),
+				float(vs.get("threshold", 0.0)),
+				_alpha_regime_word(str(vs.get("regime", ""))),
+				float(vs.get("dps", 0.0)),
+				str(w.get("damage_class", ""))])
+		row.tooltip_text = "\n".join(lines)
+
+	while idx < _alpha_rows.size():
+		_alpha_rows[idx].visible = false
+		idx += 1
 
 # Radial positions for infographic lines (prioritize a ring around the module).
 #

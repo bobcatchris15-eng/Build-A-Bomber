@@ -31,7 +31,6 @@ const TestRangeLauncherScript = preload("res://scripts/test_range_launcher.gd")
 
 const TITLE := "KITBASH COMMAND"
 const TAGLINE := "Design bureau and proving ground"
-const ROSTER_CAP := 15
 const SHOWCASE_CYCLE_INTERVAL := 30.0
 
 const FALLBACK_HULL_TYPES := [
@@ -71,11 +70,15 @@ const GROUPS := [
 				"desc": "Field the current design against target dummies.",
 				# launcher wins over scene: the Test Range entry point
 				# resolves the player blueprint, builds a MatchRuleSet, and
-				# routes through SceneRouter. Battlefield.tscn stays here
-				# as a fallback for the day the launcher is retired, so the
-				# card never lands on a broken scene if `launcher` is removed.
+				# routes through SceneRouter. The fallback below is what the
+				# card lands on if `launcher` is ever removed, so it has to be
+				# a scene that exists - it used to name Battlefield.tscn, which
+				# was DELETED in the 2026-08-10 unification (DECISIONS.md §7),
+				# making the one entry that existed to prevent a broken route
+				# the only broken route in this table. Battle.tscn is both real
+				# and what TestRangeLauncher routes to anyway.
 				"launcher": "TestRangeLauncher",
-				"scene": "res://scenes/Battlefield.tscn",
+				"scene": "res://scenes/Battle.tscn",
 				"badge": "TEST // RANGE"
 			},
 		],

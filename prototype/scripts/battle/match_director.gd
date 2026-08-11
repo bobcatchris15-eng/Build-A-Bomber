@@ -30,6 +30,7 @@ const WorldScaleScript = preload("res://scripts/world_scale.gd")
 const UnitScript = preload("res://scripts/battle/units/unit.gd")
 const LayersScript = preload("res://scripts/battle/battle_layers.gd")
 const MatchRuleSetScript = preload("res://scripts/match_rule_set.gd")
+const SimRNG = preload("res://scripts/battle/sim_rng.gd")
 const SelectionServiceScript = preload("res://scripts/battle/orders/selection_service.gd")
 const OrderServiceScript = preload("res://scripts/battle/orders/order_service.gd")
 const FlowFieldServiceScript = preload("res://scripts/battle/movement/flow_field_service.gd")
@@ -296,6 +297,17 @@ func _ready() -> void:
 			player_faction = _match_rule_set.player_faction
 		if _match_rule_set.enemy_faction != "":
 			enemy_faction = _match_rule_set.enemy_faction
+
+	# SEED THE SIMULATION STREAM HERE, and nowhere else. This has to happen
+	# after the rule set is resolved (it carries sim_seed) and BEFORE anything
+	# spawns: auto_weapon.gd's reacquire stagger and its initial fire-phase
+	# offset are both sim draws taken during _ready(), so a unit built ahead of
+	# this line would be drawing from the previous match's tail. A null rule set
+	# is fine - begin_match() rolls a fresh seed and writes it back, which is
+	# what the Test Range and the headless fixtures get. SimRNG.current_seed()
+	# is then the number a replay header or a netcode handshake would carry.
+	SimRNG.begin_match(_match_rule_set)
+
 	current_map = MapCatalog.get_map(map_id)
 	# CORE_DESIGN_LANGUAGE.md §3.2: pan/middle-drag speed track world_scale so
 	# a genuinely bigger map doesn't also feel proportionally slower to move

@@ -14,6 +14,7 @@ extends "res://tests/suite_base.gd"
 const BattleTscn = preload("res://scenes/Battle.tscn")
 const MatchRuleSetScript = preload("res://scripts/match_rule_set.gd")
 const MatchConfigScript = preload("res://scripts/match_config.gd")
+const MapCatalogScript = preload("res://scripts/map_catalog.gd")
 
 
 # THE CORE GUARANTEE OF PHASE 2. When MatchConfig.rule_set is set before
@@ -50,9 +51,20 @@ func test_match_director_reads_map_id_from_rule_set() -> bool:
 		battle.queue_free()
 		_cleanup(match_config)
 		return false
-	if battle.current_map.get("name", "") != "lake_crossing":
-		print("  [FAIL] current_map.name should be 'lake_crossing', got '",
-			battle.current_map.get("name", ""), "'")
+	# 2026-08-11: this used to compare current_map.name against the raw id
+	# "lake_crossing" and had been failing on 'Lake Crossing'. `name` is the
+	# human display string out of the map JSON; the id is the catalog key and
+	# the filename, and it is never a field on the map dict at all (get_map()
+	# returns the decoded JSON untouched - see map_catalog.gd:165). The id half
+	# of the contract is already asserted above via battle.map_id, so what is
+	# left for this check to prove is that the director actually LOADED that
+	# map rather than just storing the string and booting the default - hence
+	# comparing against the catalog's own display name for the id, which fails
+	# if the wrong map's dict ends up in current_map.
+	var expected_map_name: String = MapCatalogScript.get_map_name("lake_crossing")
+	if battle.current_map.get("name", "") != expected_map_name:
+		print("  [FAIL] current_map should be the lake_crossing map dict (name '",
+			expected_map_name, "'), got '", battle.current_map.get("name", ""), "'")
 		battle.queue_free()
 		_cleanup(match_config)
 		return false
@@ -137,8 +149,20 @@ func test_match_director_falls_back_to_defaults_when_rule_set_is_null() -> bool:
 		_cleanup(match_config)
 		return false
 
-	if battle.map_id != "open_plains":
-		print("  [FAIL] map_id should come from selected_map_id 'open_plains', got '", battle.map_id, "'")
+	# selected_map_id is DISPLAY-ONLY and must NOT steer the runtime. Phase 5
+	# retired the six legacy MatchConfig fields and left this one purely as the
+	# menu's "last picked map" recall (DECISIONS.md section 7); match_director
+	# reads its map strictly from the rule set, and with no rule set at all it
+	# falls through to its own default. This assertion used to require
+	# 'open_plains' - the pre-Phase-5 contract - which contradicted the name of
+	# the test it lives in. It never caught the change because a stale
+	# SUITE_ORDER row meant this function had never once executed until
+	# 2026-08-11. Setting selected_map_id above and requiring it to be IGNORED
+	# is the real check: it proves the display-only field stayed display-only.
+	if battle.map_id != MapCatalogScript.DEFAULT_MAP_ID:
+		print("  [FAIL] map_id should fall back to the director default '",
+			MapCatalogScript.DEFAULT_MAP_ID, "' and ignore the display-only ",
+			"selected_map_id, got '", battle.map_id, "'")
 		battle.queue_free()
 		_cleanup(match_config)
 		return false

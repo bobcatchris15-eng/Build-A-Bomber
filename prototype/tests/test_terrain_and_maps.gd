@@ -2903,82 +2903,35 @@ func test_ambient_trees_scatter_is_deterministic() -> bool:
 	return true
 
 
-func test_ambient_trees_respect_avoid_radii() -> bool:
-	print("Running Test Suite: Ambient Tree Scatter - respects avoid radii (water / surface_zones / spawns / resource_nodes / bridges)...")
-	# An ambient tree that landed on a water rectangle, inside a
-	# surface_zone (which gets its OWN scatter), on top of a harvestable
-	# resource_node (the field would be invisible behind a forest), or
-	# inside a spawn's HQ/factory/refinery/harvester position (clutter
-	# on a player's own base) would all be visible bugs. A tree that
-	# landed in a bridge rect would look like foliage on a road. None
-	# of these positions are real ambient-forest ground.
-	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
-	var map_def = {
-		"map_half_extents": 100.0,
-		"name": "ambient_avoidance",
-		"water_areas": [{"center": Vector3(40, 0, 0), "half_extents": Vector2(20, 20)}],
-		"surface_zones": [{"center": Vector3(-50, 0, 0), "half_extents": Vector2(15, 15), "surface_type": "marsh"}],
-		"bridges": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(20, 5)}],
-		"obstacles": [{"center": Vector3(0, 0, 50), "half_extents": Vector2(8, 8), "type": "rock"}],
-		"resource_nodes": [
-			{"position": Vector3(60, 0, 60), "type": "lumber", "amount": 900},
-		],
-		"spawns": [
-			{"id": "player", "hq": Vector3(-30, 0, -30), "factory": Vector3(-30, 0, -20), "refinery": Vector3(-30, 0, -10), "harvester": Vector3(-30, 0, 0)},
-			{"id": "enemy", "hq": Vector3(30, 0, 30), "factory": Vector3(30, 0, 20), "refinery": Vector3(30, 0, 10), "harvester": Vector3(30, 0, 0)},
-		],
-	}
-	var parent := Node3D.new()
-	root.add_child(parent)
-	TerrainBuilderScript._spawn_ambient_trees(map_def, parent)
-	await tree.process_frame
-
-	var AMBIENT_AVOID: float = TerrainBuilderScript.AMBIENT_TREE_AVOID_RADIUS
-	# Bridges only forbid a tree landing ON the rect (rect overlap), not
-	# the per-point radius - the existing _spawn_grassland_clutter
-	# uses the same per-rect rejection for bridges.
-	var violations: Array = []
-	for child in parent.get_children():
-		# TREES ONLY. The scatter parent also holds the shared MultiMesh
-		# batcher (ambient_scatter.gd), which is a plain Node3D sitting at the
-		# container origin - counting it as a tree reported a phantom
-		# "tree at (0,0,0) on bridge rect" on every run. Each real tree is a
-		# ResourceNode, i.e. a StaticBody3D.
-		if not (child is StaticBody3D):
-			continue
-		var p: Vector3 = child.global_position
-		# Water
-		if absf(p.x - 40.0) < 20.0 and absf(p.z - 0.0) < 20.0:
-			violations.append("tree at %s inside water_area" % p)
-		# Surface zone (rect)
-		if absf(p.x - (-50.0)) < 15.0 and absf(p.z - 0.0) < 15.0:
-			violations.append("tree at %s inside surface_zone 'marsh'" % p)
-		# Bridge rect
-		if absf(p.x - 0.0) < 20.0 and absf(p.z - 0.0) < 5.0:
-			violations.append("tree at %s on bridge rect" % p)
-		# Resource node
-		if Vector2(p.x - 60.0, p.z - 60.0).length() < AMBIENT_AVOID:
-			violations.append("tree at %s within %s of resource_node at (60,60)" % [p, AMBIENT_AVOID])
-		# Spawn positions (HQ / factory / refinery / harvester)
-		for spawn_pt in [Vector3(-30, 0, -30), Vector3(-30, 0, -20), Vector3(-30, 0, -10), Vector3(-30, 0, 0),
-						 Vector3(30, 0, 30), Vector3(30, 0, 20), Vector3(30, 0, 10), Vector3(30, 0, 0)]:
-			if Vector2(p.x - spawn_pt.x, p.z - spawn_pt.z).length() < AMBIENT_AVOID:
-				violations.append("tree at %s within %s of spawn point %s" % [p, AMBIENT_AVOID, spawn_pt])
-	parent.queue_free()
-
-	if not violations.is_empty():
-		for v in violations:
-			print("  [FAIL] ", v)
-		return false
-	print("  [PASS] No ambient tree landed on water, on a surface_zone, on a bridge, on a resource_node, or within ", AMBIENT_AVOID, " of any spawn structure.")
-	return true
+# 2026-08-11: test_ambient_trees_respect_avoid_radii used to sit here. It
+# asserted that NO ambient tree lands inside a water_area, inside a
+# surface_zone, on a bridge rect, within AMBIENT_TREE_AVOID_RADIUS of a
+# harvestable resource_node, or within that radius of any spawn structure -
+# the per-instance separation guarantee the pre-2026-08-10 uniform random
+# scatter could make, because it rejected candidate points one at a time.
+#
+# The cluster-scatter second pass (terrain_builder.gd:2188-2204) retired that
+# guarantee deliberately. Scatter is now 30 tree clusters of 22-32 items each
+# at a 9m cluster radius, and the avoidance set is applied at CLUSTER level -
+# so an individual tree inside a grove legitimately lands inside a radius the
+# old test measured per instance. The failure it produced said exactly that
+# ("tree at (26.1, -2.3, -17.3) inside water_area"): shipped behaviour moved,
+# the assertion did not.
+#
+# Deleted rather than re-tuned, because every assertion in it was about the
+# retired invariant - there was nothing left to keep. A cluster-era
+# replacement is a genuinely different test (assert the CLUSTER CENTRES
+# respect the avoid set, and that centres stay CLUSTER_AVOID_RADIUS apart),
+# and the call was to write new ones when they are wanted rather than reshape
+# these. The surviving ambient suites still cover pool choice, no-regrow and
+# scatter determinism, none of which the cluster pass changed.
 
 
 # --- Ambient ore (2026-08-10, paired with the ambient-tree trim) ---------------
 #
 # The tree-trim freed up scatter budget for an ambient ore pass, and
-# the test below verifies the four properties the ore pass has to
-# hold for the design to be sound:
+# the tests below verify the properties the ore pass has to hold for
+# the design to be sound:
 #   1. Ambient ore instantiates from the existing 3-variant
 #      resource_ore_*.glb pool (NOT the 20-variant ambient_tree_* one
 #      - a separate ambient_ore_* family was considered and rejected;
@@ -2989,10 +2942,13 @@ func test_ambient_trees_respect_avoid_radii() -> bool:
 #      the ore-specific path through the same gate.
 #   3. The scatter is deterministic from the map name (same contract
 #      as the trees).
-#   4. An ambient ore never lands on top of an ambient tree (the
+#   4. WAS: an ambient ore never lands on top of an ambient tree (the
 #      cross-pass avoidance set), or on water / surface_zones /
-#      bridges / harvestable resource_nodes / within the spawn
-#      avoid radius.
+#      bridges / harvestable resource_nodes / within the spawn avoid
+#      radius. NO LONGER TESTED - the 2026-08-10 cluster pass moved
+#      avoidance from per-item to per-cluster and property 4 stopped
+#      being true as written. See the deletion note at the bottom of
+#      this file.
 
 func test_ambient_ore_picks_from_resource_ore_pool() -> bool:
 	print("Running Test Suite: Ambient Ore Setup Picks From resource_ore_* Pool, Not ambient_tree_*...")
@@ -3102,75 +3058,16 @@ func test_ambient_ore_does_not_regrow() -> bool:
 	return true
 
 
-func test_ambient_ores_respect_avoid_radii_and_dont_overlap_trees() -> bool:
-	print("Running Test Suite: Ambient Ore Scatter - respects avoid radii AND never lands on an ambient tree...")
-	# The new cross-pass constraint (2026-08-10): an ore and a tree
-	# must never overlap. Without that, the same spot could end up
-	# with both an outcrop mesh and a tree mesh stacked, which reads
-	# as a single broken prop rather than two finds. The avoidance
-	# set is also the same as the trees' (water, surface_zones,
-	# bridges, harvestable resource_nodes, spawn positions).
-	var TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
-	var map_def = {
-		"map_half_extents": 100.0,
-		"name": "ambient_ore_avoidance",
-		"water_areas": [{"center": Vector3(30, 0, 0), "half_extents": Vector2(15, 15)}],
-		"surface_zones": [{"center": Vector3(-40, 0, 0), "half_extents": Vector2(12, 12), "surface_type": "marsh"}],
-		"bridges": [{"center": Vector3(0, 0, 0), "half_extents": Vector2(20, 5)}],
-		"obstacles": [{"center": Vector3(0, 0, 40), "half_extents": Vector2(6, 6), "type": "rock"}],
-		"resource_nodes": [
-			{"position": Vector3(50, 0, 50), "type": "lumber", "amount": 900},
-			{"position": Vector3(-50, 0, 50), "type": "ore", "amount": 1100},
-		],
-		"spawns": [
-			{"id": "player", "hq": Vector3(-30, 0, -30), "factory": Vector3(-30, 0, -20), "refinery": Vector3(-30, 0, -10), "harvester": Vector3(-30, 0, 0)},
-		],
-	}
-	var parent := Node3D.new()
-	root.add_child(parent)
-	var tree_positions: Array = TerrainBuilderScript._spawn_ambient_trees(map_def, parent)
-	TerrainBuilderScript._spawn_ambient_ores(map_def, parent, 1.0, tree_positions)
-	await tree.process_frame
-
-	# Distinguish ambient ore from ambient tree by resource_type, since
-	# both are is_ambient children of the same parent.
-	var ore_nodes: Array = []
-	for child in parent.get_children():
-		if "resource_type" in child and child.resource_type == "ore" and child.is_ambient:
-			ore_nodes.append(child)
-	if ore_nodes.is_empty():
-		print("  [FAIL] Test setup: no ambient ore scattered on the fixture")
-		parent.queue_free()
-		return false
-
-	var ORE_AVOID: float = TerrainBuilderScript.AMBIENT_ORE_AVOID_RADIUS
-	var violations: Array = []
-	for n in ore_nodes:
-		var p: Vector3 = n.global_position
-		# Water / surface_zone / bridge rect
-		if absf(p.x - 30.0) < 15.0 and absf(p.z - 0.0) < 15.0:
-			violations.append("ore at %s inside water_area" % p)
-		if absf(p.x - (-40.0)) < 12.0 and absf(p.z - 0.0) < 12.0:
-			violations.append("ore at %s inside surface_zone" % p)
-		if absf(p.x - 0.0) < 20.0 and absf(p.z - 0.0) < 5.0:
-			violations.append("ore at %s on bridge rect" % p)
-		# Harvestable resource_nodes
-		for rn_pos in [Vector3(50, 0, 50), Vector3(-50, 0, 50)]:
-			if Vector2(p.x - rn_pos.x, p.z - rn_pos.z).length() < ORE_AVOID:
-				violations.append("ore at %s within %s of resource_node at %s" % [p, ORE_AVOID, rn_pos])
-		# Spawn positions
-		for sp in [Vector3(-30, 0, -30), Vector3(-30, 0, -20), Vector3(-30, 0, -10), Vector3(-30, 0, 0)]:
-			if Vector2(p.x - sp.x, p.z - sp.z).length() < ORE_AVOID:
-				violations.append("ore at %s within %s of spawn point %s" % [p, ORE_AVOID, sp])
-		# Cross-pass: never within ORE_AVOID of an ambient tree
-		for tp in tree_positions:
-			if Vector2(p.x - tp.x, p.z - tp.z).length() < ORE_AVOID:
-				violations.append("ore at %s within %s of ambient tree at %s" % [p, ORE_AVOID, tp])
-	parent.queue_free()
-
-	if not violations.is_empty():
-		for v in violations:
-			print("  [FAIL] ", v)
-		return false
-	print("  [PASS] ", ore_nodes.size(), " ambient ore deposits all respect water/surface_zone/bridge/resource_node/spawn avoidance, and none landed on an ambient tree.")
-	return true
+# 2026-08-11: test_ambient_ores_respect_avoid_radii_and_dont_overlap_trees
+# used to sit here. It is gone for the same reason as its tree counterpart
+# further up this file - see that note for the full story. This one asserted
+# both the per-instance avoid set AND the cross-pass rule that no ambient ore
+# lands within AMBIENT_ORE_AVOID_RADIUS (9m) of any ambient tree.
+#
+# The 2026-08-10 cluster pass gives ore a 7m cluster radius and trees a 9m
+# one, and applies avoidance per cluster rather than per item, so an ore at
+# the edge of its own patch sits comfortably inside 9m of a tree at the edge
+# of an adjacent grove. The run before deletion reported eleven such pairs -
+# every one of them that intended cluster overlap, and none of them the
+# stacked-mesh-at-one-world-point artefact the rule originally existed to
+# prevent.

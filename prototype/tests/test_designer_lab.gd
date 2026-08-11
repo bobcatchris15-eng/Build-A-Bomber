@@ -1359,3 +1359,244 @@ func test_baked_module_visuals_carry_lods() -> bool:
 	print("  [PASS] A %d-triangle merged module keeps full detail at LOD 0 and sheds to %d triangles across %d levels." % [full, coarsest, levels])
 	return true
 
+
+# --- Per-shot alpha readout -------------------------------------------------
+#
+# These three suites exist because of the specific way the Design Lab used to
+# LIE BY OMISSION about the caliber slider. caliber and barrel_length sit in
+# the linear multiplier lists of ModuleData.get_dps(), get_weight() AND
+# get_cost(), so dragging either moved all three of the rail's headline numbers
+# by the same factor - DPS-per-kg and DPS-per-credit were perfectly flat across
+# the whole range. The trade lives one layer down, in the shot INTERVAL, and it
+# only pays off through damage_resolver.gd's thresholds. DESIGN_VISION.md's
+# differentiation test ("two players building the same concept must diverge
+# through continuous tweaks") is decided here more than anywhere else, so what
+# these assert is not the formatting of a row - it is that the slider has a
+# visible consequence at all.
+#
+# Built from bare Node3D hulls rather than MainLab.tscn on purpose: the whole
+# chain under test (WeaponAlpha -> DesignStats -> DesignVerdict) is static and
+# scene-free, the same property test_design_verdict.gd leans on.
+const WeaponAlphaScript = preload("res://scripts/weapon_alpha.gd")
+const DesignStatsScript = preload("res://scripts/design_stats.gd")
+const DesignVerdictScript = preload("res://scripts/design_verdict.gd")
+
+
+# A catalogue-accurate weapon module, so the figures under test are the ones
+# the real Lab would show rather than invented ones.
+func _alpha_weapon(type_id: String, tweaks: Dictionary) -> ModuleData:
+	var cat: Dictionary = ModuleCatalog.get_catalog().get(type_id, {})
+	var d := ModuleData.new()
+	d.type_id = type_id
+	d.module_name = cat.get("name", type_id)
+	d.category = cat.get("category", "weapon")
+	d.base_hp = cat.get("hp", 0.0)
+	d.base_weight = cat.get("weight", 0.0)
+	d.cost_metal = cat.get("metal", 0)
+	d.cost_crystal = cat.get("crystal", 0)
+	d.base_dps = cat.get("dps", 0.0)
+	d.tweaks = tweaks
+	return d
+
+
+func _alpha_hull(weapons: Array) -> Node3D:
+	var hull := Node3D.new()
+	hull.set_meta("type_id", "medium_hull")
+	hull.set_meta("armor_material", "hardened_steel")
+	hull.set_meta("armor_thickness", 1.0)
+	hull.set_meta("hull_scale", Vector3.ONE)
+	for w in weapons:
+		var node := Node3D.new()
+		node.set_meta("module_data", w)
+		hull.add_child(node)
+	return hull
+
+
+func _alpha_has(verdicts: Array, headline: String) -> bool:
+	for v in verdicts:
+		if v["headline"] == headline:
+			return true
+	return false
+
+
+# THE HEADLINE SUITE. One weapon, two positions on one slider. If the numbers
+# below ever converge, the Design Lab is back to being a screen where the
+# player drags a bar and correctly concludes that nothing happened.
+func test_alpha_readout_surfaces_the_caliber_trade() -> bool:
+	print("Running Test Suite: Alpha Readout - Caliber Trades Cadence For Alpha...")
+	var low := _alpha_hull([_alpha_weapon("heavy_machine_gun", {"caliber": 0.5})])
+	var high := _alpha_hull([_alpha_weapon("heavy_machine_gun", {"caliber": 2.0})])
+	var st_low: Dictionary = DesignStatsScript.analyze(low)
+	var st_high: Dictionary = DesignStatsScript.analyze(high)
+	var wa_low: Dictionary = st_low["alpha"]
+	var wa_high: Dictionary = st_high["alpha"]
+	low.free()
+	high.free()
+
+	# Fewer, harder hits: the alpha must rise and the cadence must slow. These
+	# two moving in OPPOSITE directions is the trade; if they moved together the
+	# slider would just be a power dial.
+	if not (float(wa_high["per_shot"]) > float(wa_low["per_shot"])):
+		print("  [FAIL] More caliber must mean a harder shot: %.2f -> %.2f" % [
+			float(wa_low["per_shot"]), float(wa_high["per_shot"])])
+		return false
+	if not (float(wa_high["interval"]) > float(wa_low["interval"])):
+		print("  [FAIL] More caliber must mean a slower cadence: %.2fs -> %.2fs" % [
+			float(wa_low["interval"]), float(wa_high["interval"])])
+		return false
+
+	var moved := 0
+	var flipped := 0
+	for material in wa_low["effective_dps"]:
+		if absf(float(wa_low["effective_dps"][material]) - float(wa_high["effective_dps"][material])) > 0.5:
+			moved += 1
+		if str(wa_low["regime"][material]) != str(wa_high["regime"][material]):
+			flipped += 1
+	if moved == 0:
+		print("  [FAIL] Effective DPS is identical at both settings against every material - the readout says nothing.")
+		return false
+	if flipped == 0:
+		print("  [FAIL] No regime transition anywhere across the slider: %s vs %s" % [
+			str(wa_low["regime"]), str(wa_high["regime"])])
+		return false
+
+	# And the part that makes this worth a row of its own: effective DPS must
+	# NOT be a rescaling of Total DPS. Total DPS is linear in caliber; effective
+	# DPS is not, because crossing a threshold changes what a hit is worth. If
+	# the two ratios matched, the new rows would be Total DPS in a hat.
+	var nominal_ratio := float(st_high["dps"]) / maxf(float(st_low["dps"]), 0.001)
+	var steel_ratio := float(wa_high["effective_dps"]["hardened_steel"]) \
+		/ maxf(float(wa_low["effective_dps"]["hardened_steel"]), 0.001)
+	if steel_ratio <= nominal_ratio * 1.05:
+		print("  [FAIL] Effective DPS scaled x%.2f against Total DPS's x%.2f - thresholds are not showing." % [
+			steel_ratio, nominal_ratio])
+		return false
+
+	print("  [PASS] Caliber 0.5 -> 2.0: alpha %.1f -> %.1f, cadence %.2fs -> %.2fs, regime flips on %d/%d materials, effective DPS x%.2f against Total DPS x%.2f." % [
+		float(wa_low["per_shot"]), float(wa_high["per_shot"]),
+		float(wa_low["interval"]), float(wa_high["interval"]),
+		flipped, int(wa_low["material_count"]), steel_ratio, nominal_ratio])
+	return true
+
+
+# THE DRIFT GUARD. This codebase has twice deleted a Design Lab re-derivation
+# that fell out of step with combat - a weight capacity that knew 4 locomotion
+# types out of 17, and an armour table showing the explosive threshold labelled
+# as energy. A damage readout is the highest-stakes place for that to happen
+# again, so every cell is re-checked against DamageResolver itself.
+func test_alpha_block_never_re_derives_the_damage_math() -> bool:
+	print("Running Test Suite: Alpha Readout - Every Cell Comes From DamageResolver...")
+	# clear_hull() calls update_stats(null). An earlier DesignStats returned a
+	# keyless drivetrain on that path and took the whole Lab down; the alpha
+	# block has to hold the same contract.
+	var empty: Dictionary = DesignStatsScript.analyze(null)
+	if not empty.has("alpha"):
+		print("  [FAIL] DesignStats.analyze() does not publish an 'alpha' block at all.")
+		return false
+	var blank: Dictionary = empty["alpha"]
+	for key in ["has_weapons", "per_shot", "interval", "weapons", "effective_dps",
+			"regime", "chipped_by", "material_count", "reference_thickness"]:
+		if not blank.has(key):
+			print("  [FAIL] A null hull returned an alpha block missing '%s'." % key)
+			return false
+	if int(blank["material_count"]) != DamageResolverScript.ARMOR_TABLE.size():
+		print("  [FAIL] A null hull reported %d materials against ARMOR_TABLE's %d." % [
+			int(blank["material_count"]), DamageResolverScript.ARMOR_TABLE.size()])
+		return false
+
+	# A mixed design, so the per-weapon rows are exercised across two different
+	# damage classes (kinetic and explosive resolve against different columns).
+	var hull := _alpha_hull([
+		_alpha_weapon("basic_cannon", {"caliber": 1.2}),
+		_alpha_weapon("artillery", {"caliber": 0.8}),
+	])
+	var wa: Dictionary = DesignStatsScript.analyze(hull)["alpha"]
+	hull.free()
+	if int(wa["weapons"].size()) != 2:
+		print("  [FAIL] Expected 2 armed modules in the breakdown, got %d." % int(wa["weapons"].size()))
+		return false
+
+	for material in DamageResolverScript.ARMOR_TABLE:
+		var summed := 0.0
+		for w in wa["weapons"]:
+			var pair: Vector2 = DamageResolverScript.get_material_threshold(
+				material, str(w["damage_class"]), WeaponAlphaScript.REFERENCE_THICKNESS)
+			var direct: float = DamageResolverScript.compute_hull_damage(
+				float(w["per_shot"]), pair.x, pair.y) / float(w["interval"])
+			var row: Dictionary = w["vs"][material]
+			if absf(float(row["dps"]) - direct) > 0.001:
+				print("  [FAIL] %s vs %s: readout %.4f, resolver %.4f." % [
+					str(w["name"]), material, float(row["dps"]), direct])
+				return false
+			if absf(float(row["threshold"]) - pair.x) > 0.001:
+				print("  [FAIL] %s vs %s: threshold %.4f, resolver %.4f." % [
+					str(w["name"]), material, float(row["threshold"]), pair.x])
+				return false
+			summed += direct
+		if absf(float(wa["effective_dps"][material]) - summed) > 0.001:
+			print("  [FAIL] %s: summed effective DPS %.4f, per-weapon total %.4f." % [
+				material, float(wa["effective_dps"][material]), summed])
+			return false
+	print("  [PASS] All %d materials x 2 damage classes reproduce DamageResolver exactly, and a null hull returns a full key set." % DamageResolverScript.ARMOR_TABLE.size())
+	return true
+
+
+# The verdict half. Chipping SOME plate is ARMOR_TABLE's rock-paper-scissors
+# working as designed - every material is meant to have something it answers -
+# so only the every-material case is a fault worth a headline. A note on the
+# partial case would fire on most legitimate designs and bury BALANCED.
+func test_alpha_verdict_only_scolds_a_design_that_chips_everything() -> bool:
+	print("Running Test Suite: Alpha Readout - CHIPS ONLY Fires Only When Nothing Penetrates...")
+	var cases := {0.5: "all", 0.8: "partial", 2.0: "none"}
+	var seen := {}
+	for caliber in cases:
+		var hull := _alpha_hull([_alpha_weapon("heavy_machine_gun", {"caliber": caliber})])
+		var stats: Dictionary = DesignStatsScript.analyze(hull)
+		hull.free()
+		var wa: Dictionary = stats["alpha"]
+		var chipped: int = wa["chipped_by"].size()
+		var total: int = int(wa["material_count"])
+		var scolded := _alpha_has(DesignVerdictScript.evaluate(stats), "CHIPS ONLY")
+		seen[caliber] = "%d/%d" % [chipped, total]
+		match str(cases[caliber]):
+			"all":
+				if chipped != total:
+					print("  [FAIL] caliber %s should chip every material, chipped %d/%d." % [caliber, chipped, total])
+					return false
+				if not scolded:
+					print("  [FAIL] caliber %s chips every material but raised no CHIPS ONLY verdict." % caliber)
+					return false
+			"partial":
+				if chipped <= 0 or chipped >= total:
+					print("  [FAIL] caliber %s was meant to be the partial case, chipped %d/%d." % [caliber, chipped, total])
+					return false
+				if scolded:
+					print("  [FAIL] caliber %s chips only %d/%d and must not raise CHIPS ONLY." % [caliber, chipped, total])
+					return false
+			_:
+				if chipped != 0:
+					print("  [FAIL] caliber %s should clear every threshold, chipped %d/%d." % [caliber, chipped, total])
+					return false
+				if scolded:
+					print("  [FAIL] caliber %s penetrates everything but still raised CHIPS ONLY." % caliber)
+					return false
+
+	# The verdict has to name the cheapest line to cross, not just complain -
+	# and it has to quote a real threshold from the result it was handed.
+	var weak := _alpha_hull([_alpha_weapon("heavy_machine_gun", {"caliber": 0.5})])
+	var weak_stats: Dictionary = DesignStatsScript.analyze(weak)
+	weak.free()
+	var detail := ""
+	for v in DesignVerdictScript.evaluate(weak_stats):
+		if v["headline"] == "CHIPS ONLY":
+			detail = str(v["detail"])
+	var lowest := INF
+	for c in weak_stats["alpha"]["chipped_by"]:
+		lowest = minf(lowest, float(c["threshold"]))
+	if not (("%.1f" % lowest) in detail):
+		print("  [FAIL] CHIPS ONLY should name the lowest threshold (%.1f), got '%s'." % [lowest, detail])
+		return false
+	print("  [PASS] CHIPS ONLY fires at %s chipped, stays quiet at %s and %s, and names the %.1f threshold to beat." % [
+		str(seen.get(0.5, "?")), str(seen.get(0.8, "?")), str(seen.get(2.0, "?")), lowest])
+	return true
+

@@ -49,6 +49,7 @@ static func evaluate(stats: Dictionary) -> Array:
 	var dt: Dictionary = stats.get("drivetrain", {})
 	var wr: Dictionary = stats.get("weapon_range", {})
 	var power: Dictionary = stats.get("power", {})
+	var alpha: Dictionary = stats.get("alpha", {})
 
 	# --- Blocking: the design cannot do its job at all ------------------------
 
@@ -114,6 +115,49 @@ static func evaluate(stats: Dictionary) -> Array:
 		out.append(_v(Severity.WARNING, "OUTRANGES ITS OWN VISION",
 			"%d weapon(s) reach past this design's sight. Without a spotter they cannot engage." % [
 				needs_spotter.size()]))
+
+	# --- Striking power -------------------------------------------------------
+	# A design whose HARDEST single hit lands under EVERY armour threshold in the
+	# table is not just weak - it is weak in a way the rail's own Total DPS row
+	# actively conceals. damage_resolver.gd delivers a sub-threshold hit at
+	# CHIP_THROUGH_FACTOR of its already-reduced value, so a unit can print a
+	# large DPS figure and still be unable to meaningfully hurt anything plated.
+	# Nothing else on this screen says so, and the fix - fewer, heavier shots -
+	# is not inferable from a DPS number that does not move when you make the
+	# trade. WeaponAlpha did the measuring; this only reads its chipped_by list.
+	#
+	# ONLY the every-material case is a verdict, deliberately. Chipping against
+	# SOME plate is ARMOR_TABLE working exactly as designed - it is a rock-paper-
+	# scissors table, and every material is supposed to have something it answers.
+	# A note for the partial case would fire on most legitimate designs and bury
+	# BALANCED under noise. The rail prints the per-material regime rows directly
+	# beneath the DPS row, so "which plates stop me" is already on screen; the
+	# verdict is reserved for "all of them do".
+	var chipped: Array = alpha.get("chipped_by", [])
+	var material_count: int = int(alpha.get("material_count", 0))
+	if bool(alpha.get("has_weapons", false)) and material_count > 0 \
+			and chipped.size() >= material_count:
+		# The lowest threshold among the ones being chipped: the cheapest line to
+		# cross, so the verdict names a target and not only a problem. A min-scan
+		# over figures already in the result - the thresholds were resolved by
+		# DamageResolver.get_material_threshold() inside WeaponAlpha, and nothing
+		# here re-derives one.
+		var lowest := INF
+		var lowest_label := ""
+		for c in chipped:
+			var t := float(c.get("threshold", 0.0))
+			if t < lowest:
+				lowest = t
+				lowest_label = str(c.get("label", ""))
+		# %.1f rather than _round() here, unlike every other figure in this file.
+		# Weights and power budgets run to hundreds and a decimal on them reads as
+		# machine output; alpha and thresholds live in single and double digits,
+		# where the decimal IS the difference between clearing a threshold and not.
+		out.append(_v(Severity.WARNING, "CHIPS ONLY",
+			("Hardest hit is %.1f, under every armour threshold there is - these shots chip rather than penetrate, "
+			+ "and land a fraction of their face value. %s is the lowest line at %.1f. "
+			+ "Fewer, heavier shots is what crosses it: more caliber, and accept the slower cadence.") % [
+				float(alpha.get("per_shot", 0.0)), lowest_label, lowest]))
 
 	# --- All clear ------------------------------------------------------------
 	# Only when nothing else fired. "BALANCED" alongside a warning would be the

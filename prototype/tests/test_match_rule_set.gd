@@ -122,9 +122,15 @@ func test_test_range_factory_flips_economy_and_hud_off() -> bool:
 	if not rs.enable_battle_hud:
 		print("  [FAIL] Test Range should keep battle HUD on (HP bars, selection rings)")
 		return false
-	if rs.camera_mode != RuleSetScript.CameraMode.CHASE:
-		print("  [FAIL] Test Range should use CHASE camera")
-		return false
+	# 2026-08-11: the camera_mode assertion that used to sit here (CHASE) is
+	# gone. Commit 6c5652f deliberately switched Test Range back to the RTS
+	# camera so WASD panning works while you drive the design around, so the
+	# factory now sets CameraMode.RTS and the old assertion was asserting the
+	# opposite of shipped behaviour. Not replaced with an RTS assertion: RTS is
+	# the field's declared default, so a test for it would pass even if
+	# test_range() stopped setting camera_mode at all - it would guard nothing.
+	# The rest of this suite (mode, blueprint paths, economy/production/AI/fog
+	# off, HUD flags, win condition, after-match action) is untouched.
 	if rs.win_condition != RuleSetScript.WinCondition.KILL_ALL_DUMMIES:
 		print("  [FAIL] Test Range should default to KILL_ALL_DUMMIES")
 		return false

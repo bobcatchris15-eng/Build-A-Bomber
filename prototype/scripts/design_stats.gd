@@ -35,6 +35,7 @@ const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.g
 const PowerBudgetScript = preload("res://scripts/power_budget.gd")
 const Drivetrain = preload("res://scripts/drivetrain.gd")
 const WeaponRange = preload("res://scripts/weapon_range.gd")
+const WeaponAlpha = preload("res://scripts/weapon_alpha.gd")
 
 
 # `hull` must be a reconstructed or in-editor hull node: the metadata this reads
@@ -63,6 +64,20 @@ static func analyze(hull: Node3D) -> Dictionary:
 		"has_weapons": false,
 		"drivetrain": {},
 		"weapon_range": {},
+		# What one HIT is worth, and what it is worth once it meets armour.
+		#
+		# `dps` above is the figure the Design Lab has always shown, and it is
+		# the one figure the caliber slider CANNOT move in an interesting way:
+		# caliber multiplies get_dps(), get_weight() and get_cost() by the same
+		# factor, so DPS-per-kg and DPS-per-credit are flat across the whole
+		# slider. The trade it actually makes is one layer down - caliber also
+		# multiplies the shot INTERVAL, so a bigger bore is fewer, harder hits -
+		# and only alpha decides which side of an armour threshold a hit lands
+		# on. Between the chip regime and the brute-force regime that is roughly
+		# a 6.7x swing in delivered damage off the same nominal DPS. See
+		# weapon_alpha.gd's header; the whole point of carrying this alongside
+		# `dps` is that the two disagree, and the disagreement is the design.
+		"alpha": {},
 		# The power budget - generation, storage, draw and net. Empty here and
 		# filled from PowerBudget.analyze() below, alongside the other two
 		# analyzers and for the same reason: it returns a full key set on every
@@ -96,9 +111,14 @@ static func analyze(hull: Node3D) -> Dictionary:
 	var dt: Dictionary = Drivetrain.analyze(hull)
 	var wr: Dictionary = WeaponRange.analyze(hull)
 	var pb: Dictionary = PowerBudgetScript.analyze(hull)
+	# Fourth analyzer, same contract as the other three: guards a null hull
+	# internally and returns its fully-keyed zeroed `out`, so the rail and the
+	# verdict can read into it without a validity check of their own.
+	var wa: Dictionary = WeaponAlpha.analyze(hull)
 	out["drivetrain"] = dt
 	out["weapon_range"] = wr
 	out["power"] = pb
+	out["alpha"] = wa
 	out["weight"] = float(dt.get("weight", 0.0))
 	out["move_speed"] = float(dt.get("move_speed", 0.0))
 	out["top_speed"] = float(dt.get("top_speed", 0.0))

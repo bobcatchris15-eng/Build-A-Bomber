@@ -25,13 +25,26 @@ extends SceneTree
 # surface (combat, AI, vision, placement, HUD) through the new runtime.
 
 const SUITE_FILES := {
+	"stat_model": preload("res://tests/test_stat_model.gd"),
 	"designer_lab": preload("res://tests/test_designer_lab.gd"),
 	"ui_and_camera": preload("res://tests/test_ui_and_camera.gd"),
 	"input_and_settings": preload("res://tests/test_input_and_settings.gd"),
 	"scene_loads": preload("res://tests/test_scene_loads.gd"),
 	"base_building": preload("res://tests/test_base_building.gd"),
 	"design_verdict": preload("res://tests/test_design_verdict.gd"),
-	"lab_instructions": preload("res://tests/test_lab_instructions.gd"),
+	# tests/test_lab_instructions.gd is DELIBERATELY NOT HERE. It is a legacy
+	# standalone `@tool extends SceneTree` script that runs its own check from
+	# _init(), not a suite_base.gd suite, and registering it here hung the whole
+	# runner: the instances loop below does `SUITE_FILES[key].new()`, which for a
+	# SceneTree-derived script constructs a second SceneTree and immediately
+	# executes its _init(), and the very next line - `inst.tree = self` - then
+	# fails because a SceneTree has no assignable `tree`. The driver never
+	# reached quit(), so the process idled at 100% CPU forever instead of
+	# failing. It also declared zero test_* functions while SUITE_ORDER named
+	# one, so it could never have run as a suite anyway.
+	# Run it directly if you want it:
+	#   ./Godot_v4.7.1-stable_win64_console.exe --headless --path . \
+	#       --script tests/test_lab_instructions.gd
 	"terrain_and_maps": preload("res://tests/test_terrain_and_maps.gd"),
 	# The rebuilt battle layer (scripts/battle/). Kept in its own subdirectory
 	# because it grows one file per phase and it retires as a unit if the rebuild
@@ -67,6 +80,32 @@ const SUITE_FILES := {
 # terrain and base-building (share the navmesh with the perf suites),
 # then designer_lab (last because it instantiates the heaviest screen).
 const SUITE_ORDER := [
+	# FIRST, and safe anywhere. Pure stat arithmetic on ModuleData/ModuleCatalog -
+	# no scene, no navmesh, no autoload state - so it cannot perturb the pinned
+	# order below and gets to fail fast if the count-tweak normalizer or the
+	# Armor Level mass curve regresses. Both are load-bearing for every other
+	# number in the game, so a break here explains a break almost anywhere else.
+	["stat_model", "test_count_tweak_normalizer_matches_declared_defaults"],
+	["stat_model", "test_count_tweaks_are_neutral_at_their_declared_default"],
+	["stat_model", "test_count_tweaks_scale_linearly_from_their_default"],
+	["stat_model", "test_armor_level_costs_more_mass_than_it_buys"],
+
+	# REGISTERED 2026-08-11, having never run. test_design_verdict.gd was in
+	# SUITE_FILES but its only manifest row named a function that does not
+	# exist (test_design_verdict_flags_overweight_with_real_numbers), so when
+	# that stale row was removed the file was left with ZERO rows - six written,
+	# passing tests that the runner had never once executed. Found by
+	# tools/check_suite_manifest.gd, which now guards both directions: a row
+	# with no function, and a function with no row. Pure and scene-free by
+	# design (see design_verdict.gd's header), so like stat_model above they
+	# are safe anywhere and sit here to fail fast.
+	["design_verdict", "test_verdict_clean_design_reports_balanced"],
+	["design_verdict", "test_verdict_ranks_worst_first"],
+	["design_verdict", "test_verdict_overload_uses_the_drivetrains_own_flag"],
+	["design_verdict", "test_verdict_does_not_scold_legitimate_unarmed_designs"],
+	["design_verdict", "test_verdict_flags_weapons_that_outrange_vision"],
+	["design_verdict", "test_verdict_survives_a_junk_result"],
+
 	["debug_cheats", "test_infinite_resources_cheat"],
 	["debug_cheats", "test_instant_build_cheat"],
 	["debug_cheats", "test_reveal_all_fog_cheat"],
@@ -81,7 +120,16 @@ const SUITE_ORDER := [
 	["match_rule_set", "test_to_dict_round_trip_preserves_fields"],
 	["match_rule_set_integration", "test_match_director_reads_map_id_from_rule_set"],
 	["match_rule_set_integration", "test_match_director_reads_player_faction_from_rule_set"],
-	["match_rule_set_integration", "test_match_director_falls_back_to_legacy_fields_when_rule_set_is_null"],
+	# 2026-08-11 RENAMED, not removed. This row used to read
+	# "test_match_director_falls_back_to_legacy_fields_when_rule_set_is_null".
+	# Phase 5 retired the seven legacy MatchConfig fields, so on 2026-08-10 the
+	# suite was rewritten in place as a defaults-fallback test and given a new
+	# name - and this row was never renamed with it. The runner then called a
+	# function that did not exist, which is why the rewritten test has never
+	# actually run once. Repointing the row is the fix; dropping it would have
+	# thrown away a test that matches shipped behaviour and was only ever
+	# unreachable because of the stale name here.
+	["match_rule_set_integration", "test_match_director_falls_back_to_defaults_when_rule_set_is_null"],
 	["match_rule_set_integration", "test_match_director_skips_commander_when_rule_set_disables_ai"],
 	["tech_tree", "test_building_catalog_prerequisites"],
 	["tech_tree", "test_module_catalog_building_requirements"],
@@ -116,7 +164,16 @@ const SUITE_ORDER := [
 	["input_and_settings", "test_settings_unknown_key_is_refused"],
 	["input_and_settings", "test_camera_pan_is_yaw_relative"],
 	["ui_and_camera", "test_rts_camera_edge_scroll_direction"],
-	["ui_and_camera", "test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse"],
+	# 2026-08-11 REMOVED (row + function):
+	# test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse. Commit
+	# 0a8226a folded rts_camera.gd's public zoom_to_cursor(target_height,
+	# screen_pos) into the private _on_zoom(screen_pos, height_delta) input
+	# handler, so the test drove a method that no longer exists. The invariant
+	# it guarded - the world point under the cursor is the same before and
+	# after a zoom - still lives in _on_zoom's before/after ray_plane_hit()
+	# compensation, and is now unguarded. Re-adding this row means first
+	# writing a test against _on_zoom's signature; it is a new test, not a
+	# rename, which is why it was dropped rather than repointed.
 	["ui_and_camera", "test_rts_camera_world_scale_property_defaults_inert"],
 	["terrain_and_maps", "test_world_scale_default_and_per_map_override"],
 	["terrain_and_maps", "test_greeble_prop_scale_is_inert_at_1_and_doubles_at_2"],
@@ -164,10 +221,20 @@ const SUITE_ORDER := [
 	["terrain_and_maps", "test_ambient_tree_uses_ambient_pool_not_lumber_pool"],
 	["terrain_and_maps", "test_ambient_tree_does_not_regrow_after_harvest"],
 	["terrain_and_maps", "test_ambient_trees_scatter_is_deterministic"],
-	["terrain_and_maps", "test_ambient_trees_respect_avoid_radii"],
 	["terrain_and_maps", "test_ambient_ore_picks_from_resource_ore_pool"],
 	["terrain_and_maps", "test_ambient_ore_does_not_regrow"],
-	["terrain_and_maps", "test_ambient_ores_respect_avoid_radii_and_dont_overlap_trees"],
+	# 2026-08-11 REMOVED (rows + functions): test_ambient_trees_respect_avoid_
+	# radii and test_ambient_ores_respect_avoid_radii_and_dont_overlap_trees.
+	# Both encoded the PRE-cluster random-scatter separation guarantees: every
+	# instance individually outside every avoid radius, and no ore within
+	# AMBIENT_ORE_AVOID_RADIUS of any tree. The 2026-08-10 cluster-scatter
+	# second pass (terrain_builder.gd:2188-2204) deliberately widened the
+	# cluster radii (trees 9m, ore 7m) and raised the per-cluster item counts so
+	# the patches read as groves from RTS camera height - which necessarily puts
+	# instances inside a neighbouring cluster's radius. The invariants are gone
+	# on purpose, not broken, so the tests went with them. The surviving ambient
+	# rows above still cover pool choice, no-regrow and determinism, which the
+	# cluster pass did not change.
 	["designer_lab", "test_undo_redo"],
 	["designer_lab", "test_foundation_design_lab_parity"],
 	["base_building", "test_centerline_placement_does_not_self_mirror"],
@@ -176,6 +243,19 @@ const SUITE_ORDER := [
 	["designer_lab", "test_tweak_callout_uses_theme_not_local_stylebox"],
 	["designer_lab", "test_blueprint_roster_gating"],
 	["designer_lab", "test_module_mirror_chirality"],
+
+	# The alpha-vs-armour readout (2026-08-11). These guard the one thing the
+	# Design Lab could not previously show: that per-shot alpha, not Total DPS,
+	# is what the armour thresholds gate on. The first pins that moving caliber
+	# alone swings effective damage against steel far harder than it swings the
+	# DPS figure - if that stops being true the readout has stopped earning its
+	# rail space. The second asserts the block never re-derives the damage math
+	# locally, which is the drift this codebase has already had to delete twice
+	# (see design_verdict.gd's header). Scene-free, so they do not depend on
+	# MainLab.tscn.
+	["designer_lab", "test_alpha_readout_surfaces_the_caliber_trade"],
+	["designer_lab", "test_alpha_block_never_re_derives_the_damage_math"],
+	["designer_lab", "test_alpha_verdict_only_scolds_a_design_that_chips_everything"],
 	["base_building", "test_ui_flyout_placement"],
 	["ui_and_camera", "test_ui_no_overflow_or_offscreen"],
 	["ui_and_camera", "test_ui_audit_has_real_teeth"],
@@ -212,8 +292,16 @@ const SUITE_ORDER := [
 	["terrain_and_maps", "test_b5_heightmap_navmesh_rejects_steep_slope"],
 	["terrain_and_maps", "test_balance_report_covers_every_catalog_entry"],
 	["terrain_and_maps", "test_part_material_roles_differentiate_surfaces"],
-	["design_verdict", "test_design_verdict_flags_overweight_with_real_numbers"],
-	["lab_instructions", "test_lab_instructions_table_is_well_formed"],
+	# 2026-08-11 REMOVED (row only): ["design_verdict",
+	# "test_design_verdict_flags_overweight_with_real_numbers"]. The function is
+	# no longer declared in tests/test_design_verdict.gd, so the runner was
+	# calling nothing. The row is dropped here rather than the file being
+	# touched, because test_design_verdict.gd and design_verdict.gd are being
+	# rewritten concurrently. NOTE: this leaves "design_verdict" in SUITE_FILES
+	# with zero rows in this manifest - the preload is retained deliberately so
+	# the rewrite has somewhere to register into. If that rewrite is abandoned,
+	# drop the SUITE_FILES entry too; an area file nothing points at is the
+	# mirror image of the stale-row bug this cleanup was fixing.
 
 	# --- Rebuilt battle layer -------------------------------------------------
 	# APPENDED, never interleaved. The order above is pinned because several

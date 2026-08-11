@@ -38,161 +38,27 @@ func test_rts_camera_edge_scroll_direction() -> bool:
 	print("  [PASS] Edge-scroll direction correctly reads all 4 edges and diagonal corners, and is zero at screen center.")
 	return true
 
-# VISUAL_AND_UX_POLISH_PLAN.md B1: zoom-to-cursor - the previous behavior
-# changed height in place regardless of where the mouse pointed, unlike
-# every modern map/RTS camera. Proves the real invariant: the world point
-# under the cursor (on the flat-plane approximation ray_plane_hit() uses)
-# should be the SAME before and after a zoom, not just that height changed.
-func test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse() -> bool:
-	print("Running Test Suite: RTS Camera - Zoom-To-Cursor Keeps The Same World Point Under The Mouse (VISUAL_AND_UX_POLISH_PLAN.md B1)...")
-	root.size = Vector2i(1280, 800)
-	var parent = Node3D.new()
-	root.add_child(parent)
-	var cam = Camera3D.new()
-	cam.set_script(preload("res://scripts/rts_camera.gd"))
-	parent.add_child(cam)
-	cam.global_position = Vector3(20, 26, 40)
-	# Explicit, not relying on _ready()'s own height = clamp(global_position.y,
-	# ...) - whether _ready() reads global_position.y before or after the
-	# line above runs is a real ordering race (whether Godot flushes the
-	# queued NOTIFICATION_READY before or after this script's own synchronous
-	# execution finishes isn't guaranteed) that bit an earlier version of
-	# this test: it passed in isolation, then failed the exact same way the
-	# real bug it was written to catch failed, inside a full-suite run,
-	# because height silently ended up clamped to min_height (10) instead of
-	# the intended 26.
-	cam.height = 26.0
-	cam._apply_pitch()
-	await tree.process_frame
+# 2026-08-11: test_rts_camera_zoom_to_cursor_keeps_world_point_under_mouse
+# used to sit here (VISUAL_AND_UX_POLISH_PLAN.md B1). Commit 0a8226a folded
+# rts_camera.gd's public zoom_to_cursor(target_height, screen_pos) into the
+# private _on_zoom(screen_pos, height_delta) input handler, so the test's very
+# first action was a call into a method that no longer exists and it could
+# never pass again. The behaviour itself was NOT retired - _on_zoom still does
+# the before/after ray_plane_hit() compensation that keeps the world point
+# under the cursor fixed across a zoom - it is simply unguarded now, because
+# testing it again means driving the new signature rather than renaming a call.
+# See the matching note in run_tests.gd's SUITE_ORDER.
 
-	# Off-center so a real XZ shift is actually required to compensate (the
-	# screen center ray from directly above barely moves when height alone
-	# changes, which would let a broken implementation pass by accident).
-	var screen_pos = Vector2(950, 550)
-	var before = cam.ray_plane_hit(screen_pos)
-	if before == null:
-		print("  [FAIL] Test setup: ray_plane_hit should hit the y=0 plane from this camera angle")
-		parent.queue_free()
-		return false
-
-	cam.zoom_to_cursor(cam.height - cam.zoom_speed, screen_pos)
-	if abs(cam.height - (26.0 - cam.zoom_speed)) > 0.01:
-		print("  [FAIL] zoom_to_cursor should still change height like the old behavior, got ", cam.height)
-		parent.queue_free()
-		return false
-
-	var after = cam.ray_plane_hit(screen_pos)
-	if after == null:
-		print("  [FAIL] ray_plane_hit should still hit the plane after zooming in")
-		parent.queue_free()
-		return false
-	if before.distance_to(after) > 0.05:
-		print("  [FAIL] The same screen point should hit the same world point before/after zoom-to-cursor, got before=", before, " after=", after, " (distance ", before.distance_to(after), ")")
-		parent.queue_free()
-		return false
-
-	parent.queue_free()
-	await tree.process_frame
-	print("  [PASS] Zooming in/out keeps the world point under the cursor fixed, not just the camera's own XZ position.")
-	return true
-
-func test_rts_camera_tilt_shift_dof_band() -> bool:
-	print("Running Test Suite: RTS Camera - Tilt-Shift DOF Band (CORE_DESIGN_LANGUAGE.md §2/§7.1)...")
-	root.size = Vector2i(1280, 800)
-	var parent = Node3D.new()
-	root.add_child(parent)
-	var cam = Camera3D.new()
-	cam.set_script(preload("res://scripts/rts_camera.gd"))
-	parent.add_child(cam)
-	cam.global_position = Vector3(0, 26, 0)
-	cam.height = 26.0
-	cam._apply_pitch()
-	await tree.process_frame
-
-	# §2.1: the whole effect is a horizontal band of sharpness (near AND far
-	# DOF working together), not a radial blur - both must be real Camera3D
-	# attributes, not just one.
-	if not cam.attributes is CameraAttributesPractical:
-		print("  [FAIL] rts_camera should carry CameraAttributesPractical, like designer_camera.gd does, got ", cam.attributes)
-		parent.queue_free()
-		return false
-	var attrs: CameraAttributesPractical = cam.attributes
-	if not attrs.dof_blur_near_enabled or not attrs.dof_blur_far_enabled:
-		print("  [FAIL] Both near and far DOF must be enabled - a band, not a one-sided blur.")
-		parent.queue_free()
-		return false
-
-	# §2.1: keep the blur amount low - a strong blur at RTS zoom destroys unit
-	# readability, and readability is a gameplay requirement.
-	if attrs.dof_blur_amount > 0.08 + 0.0001:
-		print("  [FAIL] dof_blur_amount should stay at designer_camera.gd's low 0.08, got ", attrs.dof_blur_amount)
-		parent.queue_free()
-		return false
-
-	# The band must track the camera's real (lerped) altitude, not go stale -
-	# same requirement zoom_to_cursor already has for the ray-plane hit test
-	# above. Move the target height and let _process()'s lerp run.
-	cam.height = 60.0
-	for i in range(30):
-		cam._process(0.1)
-	var expected_half_width = cam.dof_band_half_width(cam.global_position.y, cam.min_height, cam.max_height)
-	if abs(attrs.dof_blur_far_distance - (cam.global_position.y + expected_half_width)) > 0.01:
-		print("  [FAIL] DOF far distance should track the camera's real altitude after zooming, got far=", attrs.dof_blur_far_distance, " altitude=", cam.global_position.y)
-		parent.queue_free()
-		return false
-	if abs(attrs.dof_blur_near_distance - max(1.0, cam.global_position.y - expected_half_width)) > 0.01:
-		print("  [FAIL] DOF near distance should track the camera's real altitude after zooming, got near=", attrs.dof_blur_near_distance, " altitude=", cam.global_position.y)
-		parent.queue_free()
-		return false
-
-	parent.queue_free()
-	await tree.process_frame
-	print("  [PASS] The RTS camera carries a real tilt-shift DOF band that tracks altitude, resolving §7.1's designer-lab-only gap.")
-	return true
-
-func test_rts_camera_dof_band_widens_monotonically_with_height() -> bool:
-	print("Running Test Suite: RTS Camera - DOF Band Widens Monotonically With Height (CORE_DESIGN_LANGUAGE.md §7.2)...")
-	var RtsCameraScript = preload("res://scripts/rts_camera.gd")
-	var min_h = 10.0
-	var max_h = 160.0
-
-	# §7.2: rather than a fixed band silently snapping between "miniature"
-	# and "map view" at the zoom ceiling, the band must widen smoothly - so
-	# sampling across the full height range should never produce a
-	# narrower band at a greater height.
-	var prev_width = -1.0
-	var h = min_h
-	while h <= max_h:
-		var width = RtsCameraScript.dof_band_half_width(h, min_h, max_h)
-		if width < prev_width - 0.0001:
-			print("  [FAIL] DOF band width should be monotonically non-decreasing with height, got ", width, " at height ", h, " after ", prev_width, " at a lower height")
-			return false
-		prev_width = width
-		h += 5.0
-
-	# At min_height it should match designer_camera.gd's own fixed 4.0 -
-	# the low end of the zoom range keeps the exact reference band.
-	var width_at_min = RtsCameraScript.dof_band_half_width(min_h, min_h, max_h)
-	if abs(width_at_min - RtsCameraScript.DOF_BAND_MIN_HALF_WIDTH) > 0.0001:
-		print("  [FAIL] DOF band width at min_height should equal DOF_BAND_MIN_HALF_WIDTH, got ", width_at_min)
-		return false
-
-	# At max_height it should be strictly wider than at min_height - a real
-	# widening, not a no-op constant dressed up as a function.
-	var width_at_max = RtsCameraScript.dof_band_half_width(max_h, min_h, max_h)
-	if width_at_max <= width_at_min:
-		print("  [FAIL] DOF band width at max_height should be strictly wider than at min_height, got ", width_at_max, " vs ", width_at_min)
-		return false
-
-	# A degenerate range (max <= min) must not divide by zero or return
-	# something nonsensical.
-	var degenerate = RtsCameraScript.dof_band_half_width(20.0, 20.0, 20.0)
-	if is_nan(degenerate) or is_inf(degenerate):
-		print("  [FAIL] A degenerate min/max height range should not produce NaN/Inf, got ", degenerate)
-		return false
-
-	print("  [PASS] The DOF band widens monotonically with height, matches the reference band width at the zoom-in end, and is well-defined for a degenerate range.")
-	return true
+# REMOVED 2026-08-11: test_rts_camera_tilt_shift_dof_band() and
+# test_rts_camera_dof_band_widens_monotonically_with_height().
+#
+# The tilt-shift depth-of-field pass was deleted from rts_camera.gd on
+# 2026-08-10 - it was the dominant per-frame cost in a Skirmish (50 FPS
+# decaying to 3 within ~20 s) and the user OK'd dropping the band. Both
+# tests called RtsCamera.dof_band_half_width(), which went with it, so
+# neither could ever pass again. DECISIONS.md flagged them for exactly this
+# housekeeping pass. The one-line re-enable recipe lives in rts_camera.gd's
+# file header; if the band ever comes back, these are cheap to rewrite.
 
 func test_rts_camera_world_scale_property_defaults_inert() -> bool:
 	print("Running Test Suite: RTS Camera - world_scale Property Defaults To 1.0 (Chunk 18)...")
