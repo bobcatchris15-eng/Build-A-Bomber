@@ -74,6 +74,10 @@ extends SceneTree
 
 const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
+# The shared damage classifier, mirroring auto_weapon.gd's _ready() chain
+# verbatim. Called rather than re-typed - see _damage_class_for() below for
+# what the previous hand-copy had drifted into.
+const WeaponAlphaScript = preload("res://scripts/weapon_alpha.gd")
 
 # --- Tuning knobs for the optimizer itself ---
 
@@ -275,18 +279,46 @@ func _build_weapons() -> void:
 	_tunable.sort()
 
 
-# Mirrors auto_weapon.gd's _ready() classification. Duplicated rather than
-# imported because that logic is inline in a Node's _ready() and can't be
+# Delegates to the shared classifier. The old comment here said this was
+# duplicated "because that logic is inline in a Node's _ready() and can't be
 # called headlessly - if it ever moves to a static helper, call it here
-# instead.
+# instead." It has (weapon_alpha.gd, 2026-08-11), so it does.
+#
+# WHAT THE HAND-COPY WAS GETTING WRONG, because it is worth recording. The
+# three lists here had drifted to 5 kinetic / 6 explosive / 3 energy against
+# combat's 12 / 17 / 10. Every list was a strict SUBSET, so all 25 missing
+# weapons fell through to the `else` and were classified THERMAL. 23 of them
+# actually reach the sweep - smoke_discharger and jammer_mast carry dps <= 0
+# and are filtered out above - which is 23 of the 40 armed weapons this tool
+# tunes, i.e. well over half:
+#
+#   kinetic   -> thermal : coil_gun, autocannon, ballista, anti_materiel_rifle,
+#                          hypervelocity_missile, aa_autocannon, aps_interceptor
+#   explosive -> thermal : smoke_discharger, mk19_grenade_launcher,
+#                          recoilless_rifle, mine_layer, spigot_mortar,
+#                          rocket_artillery, sam_launcher, loitering_munition,
+#                          anti_radiation_missile, bunker_buster, cruise_missile
+#   energy    -> thermal : heavy_laser, plasma_lobber, pd_laser,
+#                          microwave_emitter, particle_lance, laser_dazzler,
+#                          jammer_mast
+#
+# That is over half the armed roster tuned against the wrong ARMOR_TABLE
+# column, and the error ran in BOTH directions rather than as a constant bias:
+# the kinetic guns read far too weak against ablative_ceramic (thermal 25/0.30
+# vs kinetic 8/0.90), while the explosive launchers read far too strong against
+# reactive_armor (thermal 10/0.80 vs explosive 30/0.40) - reactive armour's
+# entire purpose - and the energy weapons too strong against energy_shielding
+# (thermal 20/0.50 vs energy 35/0.30). Since _simulate() compares per-shot
+# alpha against these thresholds, a misclassification flips whole weapons
+# between the chip regime and full penetration.
+#
+# Passing an empty tweaks dict is correct here and not a shortcut: this sweep
+# reads BASE catalog stats with no per-design tweaks, and get_ammo(type_id, {})
+# resolves the weapon's default round - the same thing auto_weapon.gd does for
+# an untouched module. It also means the simulator now honours a default
+# round's own damage_class override, which the hand-copy could not see at all.
 func _damage_class_for(type_id: String) -> String:
-	if type_id in ["basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "ciws"]:
-		return "kinetic"
-	if type_id in ["artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flak_cannon"]:
-		return "explosive"
-	if type_id in ["tesla_coil", "arc_projector", "ion_cannon"]:
-		return "energy"
-	return "thermal"
+	return WeaponAlphaScript.damage_class(type_id, {})
 
 
 # --- Simulation ------------------------------------------------------------
