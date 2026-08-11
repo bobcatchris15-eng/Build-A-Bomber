@@ -96,3 +96,31 @@ export_templates*.zip
 prototype/export_templates*.tpz
 prototype/export_templates*.zip
 .hilo/
+
+# Music source (license holds, never tracked - CREDITS.md music licensing is a
+# release blocker; keeping the .mp3s out of git history is the whole point) and
+# old per-platform build outputs from prior export runs. Both kept on disk but
+# not source.
+Tracks/
+old_builds/
+
+# One-off test scratch and reimport logs. Ad-hoc probes dump output to
+# prototype/test_<verb>_<noun>.<ext> and prototype/<thing>_test_output.txt; the
+# no-op stub scripts (header literally says "kept as a no-op so the file path
+# is stable") and the Godot reimport log are write-only too. Prevent future
+# re-occurrences so a stray `git add -A` doesn't re-commit them.
+prototype/test_run_*.txt
+prototype/test_full_*.txt
+prototype/test_chase_*.txt
+prototype/hq_test_output.txt
+prototype/test_test_range_launch.gd
+prototype/test_chase_wiring.gd
+prototype/test_loader.gd
+prototype/.godot_reimport.log
+
+# Staging directory for files that have been removed from their original
+# location but are kept on disk for the user to confirm before final delete.
+# The dir name is timestamped so multiple cleanups don't collide. Not
+# intended to live long - once the user eyeballs the contents, the dir
+# can be removed wholesale.
+__cleanup_trash_*/
