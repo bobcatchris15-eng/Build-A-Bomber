@@ -218,3 +218,84 @@ trimesh-on-drag-end + one fallback literal),
 battle/units/unit_assembly.gd (one fallback literal),
 tests/test_designer_lab.gd (two suites), run_tests.gd
 (manifest).
+
+## 9. Test Arena System Menu (2026-08-11)
+
+**The complaint.** The Test Arena launched from the Design Lab had
+no in-match menu - the only chrome on screen was the minimap, and
+there was no way to leave the arena back to the Design Lab without
+killing all dummies first and waiting for the AAR.
+
+**What this is.** A test-range branch in
+`scripts/ui/system_layer.gd:_rebuild_menu()`. The menu is the same
+`SystemLayer` autoload the Main Menu opens from its SYSTEM button
+and Skirmish / Operations open on Escape, so the player gets the
+exact same panel, scrim, and pause-on-open behaviour they already
+know. The test-range branch hides OBJECTIVES (no production, no
+objective tracker to read) and CONCEDE MATCH (would just route to
+the Main Menu - already the row below it) and shows RETURN TO LAB
+in their place, on the assumption that the Lab is the screen the
+player actually came here from.
+
+**Why the existing SystemLayer and not a new menu.** SystemLayer
+is already mounted everywhere, already pauses the tree correctly,
+already has the Settings panel hook, and the player already
+recognises the SYSTEM box from the Main Menu. Adding a second
+pause-menu surface for the Test Arena alone would be a second
+visual contract to teach, a second scrim to position, and a second
+place where "the menu covers the world and pauses the game" has to
+be re-implemented. The only new behaviour is one rule-set read
+and one scene-router path.
+
+**What the four items are.**
+
+- `RESUME` (in match) - closes the menu, unpauses. Same as
+  every other mode.
+- `SETTINGS` - the existing Settings panel, which is the same
+  panel every other mode opens. Reachable mid-test so a player
+  can crank the audio down before triggering a loud fight.
+- `RETURN TO LAB` - new. Routes to `res://scenes/MainLab.tscn`
+  through `SceneRouter`, with the same fade every other scene
+  change uses. The launcher that built the Test Arena already
+  wrote the design to `user://lab_scratch.json` and flagged
+  `pending_lab_restore`, so the Lab picks up the design
+  automatically on next load.
+- `RETURN TO FRONT DESK` and `QUIT` - unchanged from every
+  other mode.
+
+**Why the rule set is the source of truth, not the scene.**
+`_in_test_range()` reads `/root/MatchConfig.rule_set.mode` and
+compares it to `MatchRuleSet.Mode.TEST_RANGE`. The scene tree
+also knows it is in a match (the `world_ready` signal on the
+match director), but the rule set is what `TestRangeLauncher`
+and the design-lab launch button both write before they swap
+scenes, and the rule set is the only thing the test path has
+even when there is no real current_scene. The mode comparison
+uses `int(rs.get("mode", -1))` rather than a typed enum read
+so a unit test that mounts the script without a typed
+`MatchRuleSet` instance still works.
+
+**Skirmish and Operations are unchanged.** OBJECTIVES + CONCEDE
+MATCH still appear there. The test-range branch is a pure
+additive - the existing menu is the `else` branch.
+
+**Files changed.** scripts/ui/system_layer.gd (one preload,
+one helper, one leave-helper, one branch in `_rebuild_menu`).
+No other file needed editing: the launcher already writes the
+scratch slot, the Lab already reads it on next load, and
+`SceneRouter.goto()` already handles the fade.
+
+**Verification.** Intended as
+`tests/test_system_layer.gd` (5 suites: detector true / false
+/ null / test-range menu shape / Skirmish menu shape
+unchanged). The file is on disk but not registered in
+`SUITE_ORDER` because the headless test runner has a
+pre-existing crash at `match_rule_set_integration` (line 27
+of `tests/battle/test_match_rule_set_integration.gd`,
+`!is_inside_tree()` on the battle scene) that prevents later
+suites from running. When the runner is fixed, register the
+file with `preload` + 5 `["system_layer", ...]` rows in
+`SUITE_ORDER`. Manual verification path: boot the game, hit
+Escape in the Test Arena, confirm the menu reads RESUME,
+SETTINGS, RETURN TO LAB, RETURN TO FRONT DESK, QUIT, and that
+no OBJECTIVES or CONCEDE MATCH row exists.

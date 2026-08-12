@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://58cjf3qxiab4"
-path="res://.godot/imported/carrier_main_osterholm.glb-8040de932c78b5be28f92abd1a2ff875.scn"
+uid="uid://dng57w8fqmut0"
+path="res://.godot/imported/basic_cannon.glb-6708ab9db1962d0ebf2399b83fed732e.scn"
 
 [deps]
 
-source_file="res://assets/models/hulls/carrier_main_osterholm.glb"
-dest_files=["res://.godot/imported/carrier_main_osterholm.glb-8040de932c78b5be28f92abd1a2ff875.scn"]
+source_file="res://assets/models/parts/basic_cannon.glb"
+dest_files=["res://.godot/imported/basic_cannon.glb-6708ab9db1962d0ebf2399b83fed732e.scn"]
 
 [params]
 

@@ -2148,176 +2148,659 @@ def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, u
 
 
 # ---------------------------------------------------------------------------
-# Family-specific hull builders - PR-2-redo + PR-6 redo (2026-08-11)
+# Family shapes + manufacturer signatures - PR-2 redo v2 (2026-08-11)
 # ---------------------------------------------------------------------------
-# Per Chris's 2026-08-11 feedback ("lets work on designing different hull
-# families that are recognizably different in STRUCTURE not in greebling"),
-# the four AFV-shaped families (block, plate, pod, carrier) each get their
-# own dedicated builder. The old design used a single build_afv_hull() with
-# 5-6 per-family param dicts, which produced four near-identical "tub +
-# upper + spine" silhouettes that all read as "an AFV." The new builders
-# each produce a structurally distinct silhouette:
+# Per Chris's 2026-08-11 followup: "Start entirely from scratch, keeping
+# only the manufacturer names. Assign each a basic trait, (i.e. Tidemark
+# always has a frustum shaped cab central to the hull body. Osterdam
+# always has a hexagonal outline when viewed from above...)." and "These
+# are still far too similar to each other, the only real difference is
+# the absence of greebles. We should only have one wedge scout, if that,
+# from one manufacturer. The others should have a different shape."
 #
-#   block    - basic and blocky.        8-corner box, slight nose taper.
-#   plate    - wide and low.            Octagonal cross-section, low height.
-#   pod      - hexagonal cross section. 6-sided prism with sensor dome.
-#   carrier  - rakish and angular.      Faceted with sharp angular prow.
+# The previous redo (commit 83dd80c) put 3 manufacturer variants of the
+# same hull shape in 3 colors, which still read as 3 copies of the
+# same hull. The new architecture:
 #
-# The wedge and skiff families keep their existing builders (build_wedge_hull,
-# build_ship_hull) - those already produce structurally distinct silhouettes
-# (a long-tapering triangular wedge, and a sharp-bowed naval hull), which
-# matches the "long and tapering" and "naval" families in Chris's
-# description.
+#   - Family shape (the body): 6 distinct silhouettes, one per family.
+#     The body is the 4-corner base (or 3-corner for tapered families);
+#     the top is left OPEN for the manufacturer signature to define.
+#   - Manufacturer signature (the structural element): 3 distinct
+#     treatments, one per manufacturer. The signature defines the hull's
+#     top + adds structural features (rib cage, hex outline, conning
+#     tower) that become the silhouette's most distinctive read.
+#   - Bevel: tier-1 at 8% with 2 segments + tier-2 at 4% with 1
+#     segment, for crisp + smooth chamfered edges (per Chris's
+#     'crisp and smooth, with chamfered edges to avoid looking cheap
+#     and overly sharp' feedback).
 #
-# All six builders are deliberately simple: one convex hull + one tier-1
-# bevel, NO greeble layer. The silhouette IS the signature. Manufacturers
-# differ only in paint color.
+# Design references (per Chris's pointer to the legacy catalogue):
+#   - Meridian: carapace-style angular armored with rib cage.
+#   - Osterholm: hexapod-style hexagonal cross section.
+#   - Tidemark: pressure_hull-style with conning tower + flat dorsal
+#     casing (per the legacy pressure_hull description: "Submarine
+#     pressure hull, run on land because nothing here is underwater.
+#     The dorsal casing is not decoration...").
 # ---------------------------------------------------------------------------
 
-def build_block_hull(name, size_x, size_y, size_z, color=(0.55, 0.56, 0.58)):
-	"""Block family: basic and blocky. The workhorse.
+# Osterholm hex proportions per family: (hex_scale_x, hex_scale_z).
+# The hex is stretched/squashed to fit the family role - wedge is long
+# and narrow, plate is wide and short, pod is roughly square, etc.
+# (per Chris's "hexagonal outline when viewed from above (not a regular
+# hexagon, stretched and squashed to fit the role)" feedback).
+OSTERHOLM_HEX_SCALES = {
+	"block":   (1.0, 1.0),    # roughly square
+	"wedge":   (0.55, 1.45),  # long and narrow (front of wedge)
+	"plate":   (1.45, 0.55),  # wide and short
+	"pod":     (1.0, 1.0),    # roughly square
+	"carrier": (0.75, 1.25),  # slightly long
+	"skiff":   (0.45, 1.55),  # very long and narrow (naval)
+}
 
-	An 8-corner box with a slight nose taper (front face 85% of the
-	rear face width). One convex hull, one tier-1 bevel, no greebles.
-	~80 vertices at main tonnage - matches the legacy Mod4 series
-	vertex count (84 for the scout, 226 for the light) so a block
-	hull reads as "the same kitbash philosophy as the Mod4, just
-	re-skinned for the new family taxonomy."
+# --- Family shape builders (return a bm with just the body vertices,
+#     no convex_hull call yet - the assembly function does ONE
+#     convex_hull over the union of body + signature verts) ---
+#
+# PR-2 redo v3 fix (2026-08-11): the bottom face is INSET from the
+# bounding box so the hull is a frustum (truncated pyramid) with
+# angled sides, not a perfect rectangular box. The catalogue's
+# "size box" (SIZES dict) is the bounding box - the hull shape
+# sits inside it, not flush with it. This is the "lose the anchoring
+# of the size box" change Chris called for: a real vehicle hull
+# doesn't have a flat bottom face that exactly matches its bounding
+# box. The bottom is smaller in X and Z, so the sides slope inward
+# from the manufacturer's full-size top face down to the smaller
+# bottom. The bevel then rounds the resulting angled edges.
+#
+# Bottom inset factors are per-family because each family's
+# silhouette is shaped differently:
+#   BLOCK/PLATE/POD/CARRIER: 4-corner base, uniform X/Z inset.
+#   WEDGE/SKIFF: 3-corner base with a pointed front, so the
+#     front point is barely inset (keeps the point sharp) while
+#     the rear corners are inset more aggressively.
+
+BOTTOM_INSET_4 = {
+	"block":   (0.20, 0.20),  # X, Z inset: 20% in each direction
+	"plate":   (0.15, 0.20),  # plate is wide, so less X inset
+	"pod":     (0.18, 0.18),
+	"carrier": (0.18, 0.22),  # carrier is long, more Z inset
+}
+
+BOTTOM_INSET_3 = {
+	"wedge":   {"front": 0.05, "rear": 0.22},  # front point barely moves
+	"skiff":   {"front": 0.05, "rear": 0.22},
+}
+
+
+def _shape_block(sx, sy, sz, tonnage):
+	"""BLOCK: rectangular 4-corner base, INSET so the hull is a
+	frustum, not a perfect box. Top is open - the manufacturer
+	signature defines the top face at the full bounding-box size.
 	"""
-	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
-	R = hull_reference_dim(size_x, size_y)
+	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+	inset_x, inset_z = BOTTOM_INSET_4["block"]
 	bm = bmesh.new()
-	# 8 corners with a 0.85 nose taper. The taper is on the X axis
-	# (the hull's WIDTH) at the -Z (front) end. This gives a subtle
-	# "raked prow" that reads as a tank silhouette without making
-	# the hull look like a wedge.
-	nx = hx * 0.85
-	pts = [
-		(-hx, -hy, -hz), (hx, -hy, -hz),
-		(-hx, -hy, hz), (hx, -hy, hz),
-		(-nx, hy, -hz), (nx, hy, -hz),
-		(-nx, hy, hz), (nx, hy, hz),
-	]
-	verts = [bm.verts.new(GV(*p)) for p in pts]
-	bmesh.ops.convex_hull(bm, input=verts)
-	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-	# Tier-1 bevel at 6% - matches the legacy Mod4's edge treatment.
-	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.06, segments=1)
-	obj = make_object_from_bmesh(bm, name)
-	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
-	return obj
+	for p in [
+		(-hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
+		( hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
+		(-hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
+		( hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
+	]:
+		bm.verts.new(GV(*p))
+	return bm
 
 
-def build_plate_hull(name, size_x, size_y, size_z, color=(0.55, 0.56, 0.58)):
-	"""Plate family: wide and low.
-
-	An 8-sided cross-section (octagonal) that is wider than it is
-	tall, with a slight 0.9 inward taper at the top. The octagonal
-	cross-section is the silhouette's defining feature - it reads
-	as "armored slab" rather than "tank." ~120 vertices at main
-	tonnage, in line with the legacy carapace_hull's 348 verts
-	(the legacy had two material slots; we collapse to one convex
-	hull, which is why our count is lower despite being more
-	visually distinct).
+def _shape_wedge(sx, sy, sz, tonnage):
+	"""WEDGE: triangular 3-vertex base, pointed front (-Z), wide
+	rear. Front point is barely inset (keeps the point sharp),
+	rear corners are inset aggressively. Top is open - the
+	manufacturer signature defines the top face.
 	"""
-	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
-	R = hull_reference_dim(size_x, size_y)
+	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+	insets = BOTTOM_INSET_3["wedge"]
 	bm = bmesh.new()
-	sides = 8
-	# Bottom ring at y=-hy, top ring at y=hy with a 0.9 shrink. The
-	# octagonal cross-section uses 8 sides distributed evenly around
-	# the (hx, hz) ellipse, so the hull reads as a wide-low "disc"
-	# rather than a tank.
-	bottom_pts = []
-	top_pts = []
-	for i in range(sides):
-		angle = i * (2.0 * math.pi / sides) + math.pi / sides  # offset for "front faces"
-		bottom_pts.append((math.cos(angle) * hx, -hy, math.sin(angle) * hz))
-		top_pts.append((math.cos(angle) * hx * 0.9, hy, math.sin(angle) * hz * 0.9))
-	all_pts = bottom_pts + top_pts
-	verts = [bm.verts.new(GV(*p)) for p in all_pts]
-	bmesh.ops.convex_hull(bm, input=verts)
-	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.05, segments=1)
-	obj = make_object_from_bmesh(bm, name)
-	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
-	return obj
+	for p in [
+		(0, -hy, -hz * 1.3 * (1 - insets["front"])),    # pointed front (barely moved)
+		(-hx * (1 - insets["rear"]), -hy, hz * (1 - insets["rear"])),  # rear-left
+		( hx * (1 - insets["rear"]), -hy, hz * (1 - insets["rear"])),  # rear-right
+	]:
+		bm.verts.new(GV(*p))
+	return bm
 
 
-def build_pod_hull(name, size_x, size_y, size_z, color=(0.55, 0.56, 0.58)):
-	"""Pod family: hexagonal cross section.
-
-	A 6-sided prism with a small sensor dome on top. The hex
-	cross-section is the silhouette's defining feature - it reads
-	as "sensor pod" rather than "tank." ~100 vertices at main
-	tonnage, in line with the legacy hex_pod_hull's 84 verts
-	(we add a small dome on top, hence slightly higher).
+def _shape_plate(sx, sy, sz, tonnage):
+	"""PLATE: wide rectangular 4-corner base, INSET so the hull is a
+	frustum. PLATE is wide in X (1.45x its height) and short in Z,
+	so the X inset is less aggressive than the Z inset to keep the
+	silhouette recognizable as a "plate" (low and wide). Top is
+	open - the manufacturer signature defines the top face.
 	"""
-	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
-	R = hull_reference_dim(size_x, size_y)
+	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+	inset_x, inset_z = BOTTOM_INSET_4["plate"]
 	bm = bmesh.new()
+	for p in [
+		(-hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
+		( hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
+		(-hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
+		( hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
+	]:
+		bm.verts.new(GV(*p))
+	return bm
+
+
+def _shape_pod(sx, sy, sz, tonnage):
+	"""POD: square 4-corner base, INSET so the hull is a frustum.
+	Top is open - the manufacturer signature defines the top face.
+	"""
+	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+	inset_x, inset_z = BOTTOM_INSET_4["pod"]
+	bm = bmesh.new()
+	for p in [
+		(-hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
+		( hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
+		(-hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
+		( hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
+	]:
+		bm.verts.new(GV(*p))
+	return bm
+
+
+def _shape_carrier(sx, sy, sz, tonnage):
+	"""CARRIER: medium rectangular 4-corner base, INSET so the hull
+	is a frustum. CARRIER is long (1.25x its width in Z), so the
+	Z inset is more aggressive than the X inset. Top is open - the
+	manufacturer signature defines the top face.
+	"""
+	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+	inset_x, inset_z = BOTTOM_INSET_4["carrier"]
+	bm = bmesh.new()
+	for p in [
+		(-hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
+		( hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
+		(-hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
+		( hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
+	]:
+		bm.verts.new(GV(*p))
+	return bm
+
+
+def _shape_skiff(sx, sy, sz, tonnage):
+	"""SKIFF: long 3-vertex base, pointed bow (-Z), wide stern.
+	Front point is barely inset (keeps the point sharp), stern
+	corners are inset aggressively. Top is open - the manufacturer
+	signature defines the top face.
+	"""
+	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+	insets = BOTTOM_INSET_3["skiff"]
+	bm = bmesh.new()
+	for p in [
+		(0, -hy, -hz * 1.3 * (1 - insets["front"])),    # pointed bow (barely moved)
+		(-hx * (1 - insets["rear"]), -hy, hz * (1 - insets["rear"])),  # stern-left
+		( hx * (1 - insets["rear"]), -hy, hz * (1 - insets["rear"])),  # stern-right
+	]:
+		bm.verts.new(GV(*p))
+	return bm
+
+
+# --- Manufacturer signature functions (add vertices to bm, no
+#     convex_hull call yet - the assembly does ONE convex_hull over
+#     the union of body + signature verts) ---
+
+def _sig_meridian_carapace(bm, hx, hy, hz, family, tonnage):
+	"""Meridian: carapace-style armored tank with PROMINENT turret cab,
+	side rails, and front armor plate. The turret cab is the primary
+	visual signature - a large box on top, scaled by tonnage.
+
+	Adds vertices for:
+	  - Rectangular top (the body's flat roof).
+	  - Prominent turret cab: a large chamfered box centered on the
+	    roof, size scaled by tonnage. This is the manufacturer's
+	    primary signature - the hull reads as a tank.
+	  - Front armored plate (main+heavy): a sloped plate at the
+	    front, slightly protruding forward.
+	  - Side rails (heavy only): two horizontal bars on each side,
+	    between the body's mid-height and the turret. Reads as
+	    external equipment racks.
+	  - Vertical rib cage: N vertical beams on each side, count
+	    scaled by tonnage. "Exposed structural frame" cue.
+	"""
+	# Rectangular top
+	for p in [
+		(-hx, hy, -hz), (hx, hy, -hz),
+		(-hx, hy, hz), (hx, hy, hz),
+	]:
+		bm.verts.new(GV(*p))
+
+	# PROMINENT turret cab - the manufacturer's primary signature.
+	# Larger and more chamfered than a simple box. Size scales with
+	# tonnage: scout=small, main=medium, heavy=large.
+	cab_w = hx * {"scout": 0.35, "main": 0.42, "heavy": 0.48}[tonnage]
+	cab_h = hy * {"scout": 0.55, "main": 0.65, "heavy": 0.75}[tonnage]
+	cab_d = hz * {"scout": 0.25, "main": 0.30, "heavy": 0.35}[tonnage]
+	cab_y_base = hy
+	cab_y_top = hy + cab_h
+	cab_inset = 0.15  # chamfer the top edges inward
+	# 8 verts: 4 at base, 4 at top (inset)
+	for p in [
+		(-cab_w, cab_y_base, -cab_d), ( cab_w, cab_y_base, -cab_d),
+		(-cab_w, cab_y_base,  cab_d), ( cab_w, cab_y_base,  cab_d),
+		(-cab_w * (1 - cab_inset), cab_y_top, -cab_d * (1 - cab_inset)),
+		( cab_w * (1 - cab_inset), cab_y_top, -cab_d * (1 - cab_inset)),
+		(-cab_w * (1 - cab_inset), cab_y_top,  cab_d * (1 - cab_inset)),
+		( cab_w * (1 - cab_inset), cab_y_top,  cab_d * (1 - cab_inset)),
+	]:
+		bm.verts.new(GV(*p))
+
+	# Front armored plate (main+heavy) - sloped applique armor.
+	if tonnage in ("main", "heavy"):
+		plate_w = hx * 0.65
+		plate_h = hy * 0.75
+		plate_z = -hz * 1.02
+		for p in [
+			(-plate_w, -plate_h * 0.5, plate_z),
+			( plate_w, -plate_h * 0.5, plate_z),
+			(-plate_w,  plate_h * 0.5, plate_z),
+			( plate_w,  plate_h * 0.5, plate_z),
+			(0, plate_h * 0.8, plate_z - 0.10),  # slight forward protrusion
+		]:
+			bm.verts.new(GV(*p))
+
+	# Side rails (heavy only) - two horizontal bars on each side.
+	if tonnage == "heavy":
+		for side_sign in (-1, 1):
+			rail_x = side_sign * hx * 1.03
+			for z_frac in [-0.35, 0.35]:
+				z = hz * z_frac
+				rail_w = 0.07
+				for p in [
+					(rail_x, -hy * 0.2, z - rail_w),
+					(rail_x, -hy * 0.2, z + rail_w),
+					(rail_x,  hy * 0.5, z - rail_w),
+					(rail_x,  hy * 0.5, z + rail_w),
+				]:
+					bm.verts.new(GV(*p))
+
+	# Vertical rib cage on each side (smaller detail, on top of the
+	# prominent greebles above). N vertical beams scaled by tonnage.
+	rib_count = {"scout": 3, "main": 5, "heavy": 7}.get(tonnage, 5)
+	rib_w = 0.06
+	rib_inset = 0.02
+	for side_sign in (-1, 1):
+		rib_x_outer = side_sign * hx * (1.0 + rib_inset)
+		for i in range(rib_count):
+			z = -hz + (i + 0.5) * (2 * hz / rib_count)
+			for p in [
+				(rib_x_outer, -hy * 0.98, z - rib_w),
+				(rib_x_outer, -hy * 0.98, z + rib_w),
+				(rib_x_outer,  hy * 0.98, z - rib_w),
+				(rib_x_outer,  hy * 0.98, z + rib_w),
+			]:
+				bm.verts.new(GV(*p))
+
+
+def _sig_osterholm_hex(bm, hx, hy, hz, family, tonnage):
+	"""Osterholm: faceted modular UFO with PROMINENT hex outline,
+	central spine, antenna array, and side rails. The hex top is
+	the manufacturer's primary signature - the hull reads as a
+	faceted pod from above.
+
+	Adds vertices for:
+	  - 6 hex vertices at y=hy (the hull's top face). Stretched per
+	    family per OSTERHOLM_HEX_SCALES - long-narrow for wedge,
+	    wide-short for plate, roughly square for block/pod.
+	  - Central spine (heavy only): a vertical fin rising from the
+	    hex top, peaked. Reads as a dorsal antenna/sensor array.
+	  - Antenna array (scout only): a thin triangular peak rising
+	    from the hex top, off-center. Reads as a long-range sensor.
+	  - Side rails (main+heavy): horizontal bars on each side.
+	"""
+	scale_x, scale_z = OSTERHOLM_HEX_SCALES[family]
+	for i in range(6):
+		angle = i * (2 * math.pi / 6) + math.pi / 6
+		bm.verts.new(GV(
+			math.cos(angle) * hx * scale_x,
+			hy,
+			math.sin(angle) * hz * scale_z,
+		))
+
+	# Central spine (heavy only) - a vertical fin on top of the hex.
+	# Wide at the base, peaked at the top. This is the "command pod"
+	# or "sensor mast" cue for the heaviest Osterholm hulls.
+	if tonnage == "heavy":
+		spine_w = hx * 0.10
+		spine_h = hy * 0.55
+		spine_d = hz * 0.55
+		spine_y_base = hy
+		spine_y_top = hy + spine_h
+		for p in [
+			(-spine_w, spine_y_base, -spine_d), (spine_w, spine_y_base, -spine_d),
+			(-spine_w, spine_y_base,  spine_d), (spine_w, spine_y_base,  spine_d),
+			(0, spine_y_top, 0),  # peak
+		]:
+			bm.verts.new(GV(*p))
+
+	# Antenna array (scout only) - a thin triangular peak, off-center.
+	# Reads as a long-range sensor or comm array.
+	if tonnage == "scout":
+		ant_w = hx * 0.04
+		ant_h = hy * 0.85
+		ant_d = hz * 0.04
+		ant_y_base = hy
+		ant_y_top = hy + ant_h
+		ant_z_offset = hz * 0.3
+		for p in [
+			(-ant_w, ant_y_base, ant_z_offset - ant_d), (ant_w, ant_y_base, ant_z_offset - ant_d),
+			(-ant_w, ant_y_base, ant_z_offset + ant_d), (ant_w, ant_y_base, ant_z_offset + ant_d),
+			(0, ant_y_top, ant_z_offset),  # peak
+		]:
+			bm.verts.new(GV(*p))
+
+	# Side rails (main+heavy) - horizontal bars on each side.
+	if tonnage in ("main", "heavy"):
+		for side_sign in (-1, 1):
+			rail_x = side_sign * hx * 1.03
+			for z_frac in [-0.35, 0.35]:
+				z = hz * z_frac
+				rail_w = 0.06
+				for p in [
+					(rail_x, -hy * 0.2, z - rail_w),
+					(rail_x, -hy * 0.2, z + rail_w),
+					(rail_x,  hy * 0.4, z - rail_w),
+					(rail_x,  hy * 0.4, z + rail_w),
+				]:
+					bm.verts.new(GV(*p))
+
+
+def _sig_tidemark_pressure_hull(bm, hx, hy, hz, family, tonnage):
+	"""Tidemark: pressure-hull style with flat dorsal casing and
+	central conning tower (frustum cab).
+
+	Per the legacy pressure_hull description (prototype/tools/
+	gen_kitbash_hulls.py:114): "Submarine pressure hull, run on land
+	because nothing here is underwater. The dorsal casing is not
+	decoration: a bare cylinder has almost no flat area for module
+	mounts, and a real submarine's flat walking casing solves the
+	realism and the mounting problem with the same part."
+
+	Adds vertices for:
+	  - Rectangular top (4 corners at y=hy) - the hull's roof.
+	  - Dorsal casing: a flat-topped box on top of the hull,
+	    narrower than the hull's roof (gives the "walking deck"
+	    silhouette). Sits between y=hy and y=hy+0.15*sy.
+	  - Conning tower: a 6-sided frustum (truncated cone) on top
+	    of the dorsal casing, central. This is the Tidemark
+	    signature's most distinctive read - the frustum cab.
+	  - Heavy: a second, smaller conning tower on top of the first.
+	"""
+	# Rectangular top
+	for p in [
+		(-hx, hy, -hz), (hx, hy, -hz),
+		(-hx, hy, hz), (hx, hy, hz),
+	]:
+		bm.verts.new(GV(*p))
+
+	# Dorsal casing: a flat-topped box on top of the hull.
+	casing_h = hy * 0.15
+	for p in [
+		(-hx * 0.8, hy, -hz * 0.8), (hx * 0.8, hy, -hz * 0.8),
+		(-hx * 0.8, hy, hz * 0.8), (hx * 0.8, hy, hz * 0.8),
+		(-hx * 0.7, hy + casing_h, -hz * 0.7), (hx * 0.7, hy + casing_h, -hz * 0.7),
+		(-hx * 0.7, hy + casing_h, hz * 0.7), (hx * 0.7, hy + casing_h, hz * 0.7),
+	]:
+		bm.verts.new(GV(*p))
+
+	# Conning tower: 6-sided frustum on top of the dorsal casing.
+	cab_r_base = hx * 0.35
+	cab_r_top = hx * 0.22
+	cab_h = hy * 0.45
+	cab_y_base = hy + casing_h
 	sides = 6
-	bottom_pts = []
-	top_pts = []
 	for i in range(sides):
-		angle = i * (2.0 * math.pi / sides)
-		bottom_pts.append((math.cos(angle) * hx, -hy, math.sin(angle) * hz))
-		top_pts.append((math.cos(angle) * hx * 0.95, hy * 0.7, math.sin(angle) * hz * 0.95))
-	all_pts = bottom_pts + top_pts
-	verts = [bm.verts.new(GV(*p)) for p in all_pts]
-	bmesh.ops.convex_hull(bm, input=verts)
-	# Small sensor dome on top - a hex-pod with a flat top reads as
-	# a "container," a hex-pod with a domed top reads as a "sensor."
-	# The dome is a uv-sphere squashed vertically, same technique as
-	# the bunker dome in build_bunker_hull, but smaller (one ring fewer
-	# and a 0.85 radius factor) to keep the pod from reading as a
-	# bunker.
-	dome_r = min(hx, hz) * 0.85
-	dome_verts = bmesh.ops.create_uvsphere(bm, u_segments=sides, v_segments=4, radius=dome_r)['verts']
-	bmesh.ops.scale(bm, verts=dome_verts, vec=GS(1.0, 0.4, 1.0))
-	bmesh.ops.translate(bm, verts=dome_verts, vec=GV(0, hy * 0.7, 0))
-	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.05, segments=1)
-	obj = make_object_from_bmesh(bm, name)
-	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
-	return obj
+		angle = i * (2 * math.pi / sides)
+		bm.verts.new(GV(
+			math.cos(angle) * cab_r_base, cab_y_base,
+			math.sin(angle) * cab_r_base,
+		))
+	for i in range(sides):
+		angle = i * (2 * math.pi / sides)
+		bm.verts.new(GV(
+			math.cos(angle) * cab_r_top, cab_y_base + cab_h,
+			math.sin(angle) * cab_r_top,
+		))
+
+	# Heavy: second smaller conning tower on top of the first,
+	# offset (rotated 30 degrees) so the two cabs read as a
+	# deliberate stack rather than a single tall one.
+	if tonnage == "heavy":
+		cab2_r_base = cab_r_top * 0.7
+		cab2_r_top = cab_r_top * 0.45
+		cab2_h = hy * 0.28
+		cab2_y_base = cab_y_base + cab_h
+		for i in range(sides):
+			angle = i * (2 * math.pi / sides) + math.pi / sides
+			bm.verts.new(GV(
+				math.cos(angle) * cab2_r_base, cab2_y_base,
+				math.sin(angle) * cab2_r_base,
+			))
+		for i in range(sides):
+			angle = i * (2 * math.pi / sides) + math.pi / sides
+			bm.verts.new(GV(
+				math.cos(angle) * cab2_r_top, cab2_y_base + cab2_h,
+				math.sin(angle) * cab2_r_top,
+			))
+
+	# Propeller (carrier only) - a 6-blade spinner on the rear face,
+	# central. Reads as the "screw" of a maritime transport. The
+	# spinner is a flat hex in the Y=0 plane (centered vertically),
+	# with a short shaft connecting it to the rear of the hull.
+	if family == "carrier":
+		prop_r = hx * 0.35
+		prop_y = 0.0
+		prop_z = hz * 1.02
+		for i in range(6):
+			angle = i * (2 * math.pi / 6)
+			bm.verts.new(GV(
+				math.cos(angle) * prop_r,
+				prop_y,
+				prop_z + math.sin(angle) * prop_r * 0.3,
+			))
+		# Shaft (a short box connecting the spinner to the hull)
+		shaft_w = hx * 0.12
+		shaft_h = hy * 0.12
+		for p in [
+			(-shaft_w, -shaft_h * 0.5, hz * 0.95),
+			( shaft_w, -shaft_h * 0.5, hz * 0.95),
+			(-shaft_w,  shaft_h * 0.5, hz * 0.95),
+			( shaft_w,  shaft_h * 0.5, hz * 0.95),
+		]:
+			bm.verts.new(GV(*p))
 
 
-def build_carrier_hull(name, size_x, size_y, size_z, color=(0.55, 0.56, 0.58)):
-	"""Carrier family: rakish and angular.
+# --- Assembly: family shape + manufacturer signature + bevel ---
 
-	A faceted body with a sharp angular prow extending forward
-	(-Z direction). The prow is the silhouette's defining feature -
-	it reads as "heavy assault / transport" rather than "tank."
-	~150 vertices at main tonnage, with the prow adding ~30
-	extra verts on top of the basic 8-corner lower body.
+SHAPE_BUILDERS = {
+	"block":   _shape_block,
+	"wedge":   _shape_wedge,
+	"plate":   _shape_plate,
+	"pod":     _shape_pod,
+	"carrier": _shape_carrier,
+	"skiff":   _shape_skiff,
+}
 
-	Construction: 13 input points, all merged into one convex hull.
-	- 8 corners for the lower hull (wider, lower, full length)
-	- 4 corners for the upper hull (narrower, taller, shorter - 50% length)
-	- 1 prow tip (forward, 0.7 height, -1.15 * hz position)
+SIG_BUILDERS = {
+	"meridian":  _sig_meridian_carapace,
+	"osterholm": _sig_osterholm_hex,
+	"tidemark":  _sig_tidemark_pressure_hull,
+}
+
+# Family size table (size_x, size_y, size_z) per tonnage. Kept at module
+# level so _build_hull() and generate_hulls() both see the same values.
+# Block family uses a 4:1:6 (W:H:L) ratio at main tonnage; plate uses a
+# wider 5:1.3:7 slab; pod is roughly square in plan but tall; carrier
+# is wider in plan and taller; wedge is the classic long-tapering
+# 3.5:0.8:5 profile; skiff is a low naval hull.
+SIZES = {
+	"block":   {"scout": (2.4, 0.8, 3.2), "main": (4.0, 1.0, 6.0), "heavy": (6.0, 1.5, 8.0)},
+	"wedge":   {"scout": (2.0, 0.6, 3.0), "main": (3.5, 0.8, 5.0), "heavy": (5.0, 1.2, 7.0)},
+	"plate":   {"scout": (3.5, 1.0, 4.5), "main": (5.0, 1.3, 7.0), "heavy": (7.0, 1.8, 9.0)},
+	"pod":     {"scout": (2.5, 2.0, 3.0), "main": (3.5, 2.5, 4.5), "heavy": (5.0, 3.0, 6.0)},
+	"carrier": {"scout": (2.8, 1.2, 4.5), "main": (4.5, 1.6, 7.0), "heavy": (6.0, 2.0, 9.0)},
+	"skiff":   {"scout": (2.0, 0.8, 4.0), "main": (3.0, 1.0, 6.0), "heavy": (4.5, 1.3, 8.0)},
+}
+
+# Manufacturer base colors. These are the GLB-level paint - the
+# in-game faction shader overrides them with the per-faction colors.
+# The color is the second-tier manufacturer differentiator (the first
+# is the structural signature element from _sig_*).
+MANUFACTURER_COLORS = {
+	"meridian":  (0.5, 0.5, 0.52),     # gunmetal grey
+	"osterholm": (0.85, 0.88, 0.92),   # pearlescent white
+	"tidemark":  (0.78, 0.65, 0.45),    # sandstone tan
+}
+
+# Curated manufacturer lineups (PR-2 redo v3, 2026-08-11).
+# Per Chris's followup: "There shouldn't be manufacturer variants of the
+# same hull. There should be manufacturer hulls, that happen to line up
+# roughly on size. Like, there could be three Osterholm heavy tank
+# designs, but no transports at all, while Tidemark could have a
+# transport in every weight class and no heavy armor at all."
+#
+# The previous 6x3x3 = 54-hull grid put 3 manufacturer variants of
+# every (family, tonnage) cell. The curated lineups below drop the
+# 3-of-everything structure: each manufacturer owns a specific
+# slice of the catalogue, with some cells exclusive to one
+# manufacturer, some shared between two, and some absent entirely.
+#
+# Total: 8 + 12 + 10 = 30 hulls (down from 54).
+#
+# Per-manufacturer philosophy (from the design language):
+#   Meridian  - carapace-style armored workhorse, the heavy armor
+#                specialist. Fills the "armored vehicle" role
+#                (block, wedge, plate) across scout+main+heavy.
+#                No transports, no carriers, no skiffs.
+#   Osterholm - hex-outline modular construction, the multi-purpose
+#                generalist. Fills block + wedge + plate + pod across
+#                all 3 tonnages. The "3 Osterholm heavy tank
+#                designs" = block_heavy + wedge_heavy + plate_heavy,
+#                3 different (family, tonnage) cells all serving
+#                the heavy tank role. No skiffs, no carriers.
+#   Tidemark  - pressure-hull maritime style, the transport
+#                specialist. Fills carrier + skiff across all 3
+#                tonnages (transport in every weight class per
+#                Chris's example), plus block + pod in scout+main
+#                for the general utility role. No heavy armor
+#                (no block_heavy, no plate, no wedge).
+LINEUP = {
+	"meridian": [
+		("block", "scout"),
+		("block", "main"),
+		("block", "heavy"),
+		("wedge", "scout"),
+		("wedge", "main"),
+		("plate", "scout"),
+		("plate", "main"),
+		("plate", "heavy"),
+	],
+	"osterholm": [
+		("block", "scout"),
+		("block", "main"),
+		("block", "heavy"),    # 1 of 3 heavy tank designs
+		("wedge", "scout"),
+		("wedge", "main"),
+		("wedge", "heavy"),    # 2 of 3 heavy tank designs
+		("plate", "scout"),
+		("plate", "main"),
+		("plate", "heavy"),    # 3 of 3 heavy tank designs
+		("pod", "scout"),
+		("pod", "main"),
+		("pod", "heavy"),
+	],
+	"tidemark": [
+		("block", "scout"),
+		("block", "main"),
+		("pod", "scout"),
+		("pod", "main"),
+		("carrier", "scout"),
+		("carrier", "main"),
+		("carrier", "heavy"),
+		("skiff", "scout"),
+		("skiff", "main"),
+		("skiff", "heavy"),
+	],
+}
+
+
+def _build_hull(name, family, tonnage, manufacturer, color):
+	"""Build one hull: family shape + manufacturer signature + bevel.
+
+	The 3 axes combine cleanly:
+	  - family:    the body silhouette (rectangle for BLOCK/PLATE/POD/
+	               CARRIER, triangle for WEDGE/SKIFF)
+	  - manufacturer: the structural element on top (rib cage, hex
+	               outline, or conning tower)
+	  - tonnage:   scales the body and adjusts structural element
+	               density (rib count, cab height, second cab on heavy)
+
+	Returns a fully-finalized obj ready for GLB export.
+
+	Convex hull: ONE call on the union of all vertices (body +
+	signature). Multiple separate convex_hull calls per "volume"
+	(body, top, ribs, cab) would create DISJOINT convex regions
+	in the same bm - the previous PR-2-redo-v2 had this bug
+	(visible in the design lab as the wedge body and the hex top
+	floating separately). The fix is to add all vertices first,
+	then compute the convex hull once over the union.
 	"""
-	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
-	R = hull_reference_dim(size_x, size_y)
-	bm = bmesh.new()
-	pts = [
-		# Lower hull: 8 corners, full length
-		(-hx, -hy, -hz * 0.8), (hx, -hy, -hz * 0.8),
-		(-hx, -hy, hz), (hx, -hy, hz),
-		(-hx, hy * 0.3, -hz * 0.7), (hx, hy * 0.3, -hz * 0.7),
-		(-hx, hy * 0.3, hz), (hx, hy * 0.3, hz),
-		# Upper hull: 4 corners, narrower and shorter
-		(-hx * 0.7, hy * 0.3, -hz * 0.3), (hx * 0.7, hy * 0.3, -hz * 0.3),
-		(-hx * 0.7, hy, hz * 0.5), (hx * 0.7, hy, hz * 0.5),
-		# Prow tip: forward and upward
-		(0, hy * 0.7, -hz * 1.15),
-	]
-	verts = [bm.verts.new(GV(*p)) for p in pts]
-	bmesh.ops.convex_hull(bm, input=verts)
+	sx, sy, sz = SIZES[family][tonnage]
+	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+	R = hull_reference_dim(sx, sy)
+
+	# 1. Build the family shape (body vertices only, no convex_hull)
+	bm = SHAPE_BUILDERS[family](sx, sy, sz, tonnage)
+
+	# 2. Apply the manufacturer signature (adds more vertices, no
+	#    convex_hull)
+	SIG_BUILDERS[manufacturer](bm, hx, hy, hz, family, tonnage)
+
+	# 3. ONE convex hull over all vertices. This is what fuses the
+	#    body and the signature's structural elements into a single
+	#    solid shape - calling convex_hull separately per "volume"
+	#    would leave the body and the signature as two disjoint
+	#    pieces of geometry.
+	bmesh.ops.convex_hull(bm, input=list(bm.verts), use_existing_faces=False)
+
+	# 4. Final bevel: FLAT chamfer (segments=1 for both tiers), wider
+	#    offsets for a chunky chamfered-edge look. The previous 8% +
+	#    2-segment bevel was reading as an "inset" rounded edge
+	#    (per Chris 2026-08-11). Single-segment bevels produce a flat
+	#    chamfer face that reads as a chamfered edge, not a rolled-in
+	#    edge. Two tiers stack a wider main chamfer with a smaller
+	#    one on top for visual weight.
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.06, segments=1)
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.12, segments=1)
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=2, pct=0.06, segments=1)
+
+	# 5. Per-hull orientation fix. The broken GV (Gx, Gz, Gy) combined
+	#    with the glTF export's 180° rotation about the (1, 0, 1) axis
+	#    produces a hull rotated 90° in the GLB. This rotation in the
+	#    bmesh compensates, putting the hull's Godot X/Y/Z back on
+	#    glTF X/Y/Z without affecting the parts (which were already
+	#    in the correct glTF orientation under the broken GV and are
+	#    exported through the same code path but don't have this
+	#    rotation applied because they're built outside _build_hull).
+	#
+	# T(a, b, c) = (b, -c, a): swaps Y and Z components of the Blender
+	# space and negates the new Y. This is NOT the same as the export
+	# rotation M = (c, -b, a) — T * M = I is what gives the identity
+	# after the export applies M. (The first attempt at this used M
+	# itself as T, which made T * M = I cancel out and left the hull
+	# in the cyclic-perm orientation.)
+	_hull_orient_matrix = mathutils.Matrix(((0, 1, 0), (0, 0, -1), (1, 0, 0)))
+	bmesh.ops.rotate(bm, verts=list(bm.verts), cent=(0, 0, 0), matrix=_hull_orient_matrix)
+
 	obj = make_object_from_bmesh(bm, name)
-	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
+	finalize_dual(obj, name, structural_color=color,
+		armor_color=tuple(min(1.0, c * 1.15) for c in color))
 	return obj
 
 
@@ -3966,125 +4449,52 @@ def _wall_greebles(bm, hx, hy, hz):
 def generate_hulls():
 	"""Hull library - the post-refresh catalogue (HULL_REFRESH_PLAN §3).
 
-	54 vehicle hulls: 6 families x 3 tonnages x 3 manufacturers.
+	Curated lineups, not a 6x3x3 grid. Per Chris's 2026-08-11
+	followup: "There shouldn't be manufacturer variants of the
+	same hull. There should be manufacturer hulls, that happen to
+	line up roughly on size. Like, there could be three Osterholm
+	heavy tank designs, but no transports at all, while Tidemark
+	could have a transport in every weight class and no heavy
+	armor at all."
 
-	PR-2 redo (2026-08-11): each family gets its own dedicated builder
-	so the family silhouette is structurally distinct, not just a
-	greeble variant. Per Chris's 2026-08-11 feedback ("lets work on
-	designing different hull families that are recognizably different
-	in STRUCTURE not in greebling"):
+	Total: 30 hulls (per the LINEUP dict above):
+	  - Meridian  (carapace / workhorse):    8 hulls
+	  - Osterholm (hex / multi-purpose):    12 hulls
+	  - Tidemark  (pressure hull / transport): 10 hulls
 
-	  block    -> build_block_hull     basic and blocky
-	  plate    -> build_plate_hull     wide and low
-	  pod      -> build_pod_hull       hexagonal cross section
-	  carrier  -> build_carrier_hull   rakish and angular
-	  wedge    -> build_wedge_hull     long and tapering
-	  skiff    -> build_ship_hull      naval (amphibious)
-
-	All six builders are deliberately simple: one convex hull + one
-	tier-1 bevel, no greeble layer, no surface treatment, no
-	manufacturer-specific outer-skin pattern. The silhouette IS the
-	signature; manufacturers differ only in paint color.
-
-	Vertex counts are kept low (target: under 200 per hull at main
-	tonnage) to match the legacy Mod4/carapace/hex_pod series
-	vertex counts (84-348 verts) and avoid the "every hull looks
-	like 1337 verts of floating greebles" problem the prior PR-2
-	generation had.
+	Architecture (unchanged from v2):
+	  - 6 family shapes: block, wedge, plate, pod, carrier, skiff.
+	    Each is a basic convex hull (4-corner rectangle for the
+	    rect-bodies, 3-vertex triangle for wedge/skiff). The top
+	    is left OPEN for the manufacturer signature to define.
+	  - 3 manufacturer signatures: Meridian (carapace: rib cage +
+	    front plate), Osterholm (hexapod: hex top-down outline),
+	    Tidemark (pressure hull: dorsal casing + conning tower).
+	    Each signature defines the hull's TOP + adds structural
+	    features that become the silhouette's most distinctive read.
+	  - Bevel: tier-1 at 8% with 2 segments + tier-2 at 4% with 1
+	    segment, for "crisp and smooth, with chamfered edges" read.
 	"""
-	print("--- Building hull library (54 hulls) ---")
+	print("--- Building hull library (curated, %d hulls) ---" % sum(len(v) for v in LINEUP.values()))
 
-	# Family size table (size_x, size_y, size_z) per tonnage.
-	# Sizes are chosen to match the HULL_REFRESH_PLAN §5 family profiles
-	# and the HULL_MASSING_SPEC real-world reference vehicles. The
-	# block family uses a 4:1:6 (W:H:L) ratio at main tonnage; plate
-	# uses a wider 5:1.3:7 slab; pod is roughly square in plan but
-	# tall; carrier is wider in plan and taller; wedge is the classic
-	# long-tapering 3.5:0.8:5 profile; skiff is a low naval hull.
-	SIZES = {
-		"block":   {"scout": (2.4, 0.8, 3.2), "main": (4.0, 1.0, 6.0), "heavy": (6.0, 1.5, 8.0)},
-		"wedge":   {"scout": (2.0, 0.6, 3.0), "main": (3.5, 0.8, 5.0), "heavy": (5.0, 1.2, 7.0)},
-		"plate":   {"scout": (3.5, 1.0, 4.5), "main": (5.0, 1.3, 7.0), "heavy": (7.0, 1.8, 9.0)},
-		"pod":     {"scout": (2.5, 2.0, 3.0), "main": (3.5, 2.5, 4.5), "heavy": (5.0, 3.0, 6.0)},
-		"carrier": {"scout": (2.8, 1.2, 4.5), "main": (4.5, 1.6, 7.0), "heavy": (6.0, 2.0, 9.0)},
-		"skiff":   {"scout": (2.0, 0.8, 4.0), "main": (3.0, 1.0, 6.0), "heavy": (4.5, 1.3, 8.0)},
-	}
-
-	# Manufacturer base colors. These are the GLB-level paint - the
-	# in-game faction shader overrides them with the per-faction colors.
-	# Per HULL_REFRESH_PLAN §4:
-	#   Meridian  : gunmetal grey. The "could be any faction, paint goes
-	#                over the top" hull.
-	#   Osterholm : pearlescent white. The Bauhaus look.
-	#   Tidemark  : sandstone tan. The maritime look.
-	# Color is the ONLY manufacturer differentiator on hulls now - the
-	# outer-skin treatment (rivets, panel lines, anchor cleats) is
-	# dropped per Chris's 2026-08-11 feedback.
-	MANUFACTURER_COLORS = {
-		"meridian":  (0.5, 0.5, 0.52),
-		"osterholm": (0.85, 0.88, 0.92),
-		"tidemark":  (0.78, 0.65, 0.45),
-	}
-
-	# Per-(family, tonnage) builder params for build_wedge_hull (Wedge).
-	# The wedge's silhouette is the long-tapering triangle, so the
-	# existing builder's param dict is kept.
-	WEDGE_PARAMS = {
-		("wedge", "scout"): dict(nose_frac=0.95, spine_w=0.22, spine_h=1.05, rear_flare=0.75, front_flare=0.3, nose_region=0.22, height_taper=0.45, bevel_pct=0.05, speed_line_chamfer=True),
-		("wedge", "main"):  dict(nose_frac=0.9,  spine_w=0.28, spine_h=1.1,  rear_flare=0.7,  front_flare=0.3, nose_region=0.25, height_taper=0.4,  bevel_pct=0.06, speed_line_chamfer=True),
-		("wedge", "heavy"): dict(nose_frac=0.85, spine_w=0.34, spine_h=1.15, rear_flare=0.65, front_flare=0.3, nose_region=0.3,  height_taper=0.35, bevel_pct=0.08, speed_line_chamfer=True),
-	}
-
-	# Per-(family, tonnage) builder params for build_ship_hull (Skiff).
-	# Skiff is a planing-hull boat-on-land - low freeboard, sharp bow.
-	# The existing builder's param dict is kept, but the per-builder
-	# greeble call is dropped (the build_ship_hull callback for
-	# greebles is no longer wired up).
-	SKIFF_PARAMS = {
-		("skiff", "scout"): dict(bow_frac=0.55, deadrise=0.55, sheer=0.1,  flare=0.0, bevel_pct=0.05, superstructure_tiers=1, forecastle=True),
-		("skiff", "main"):  dict(bow_frac=0.45, deadrise=0.5,  sheer=0.12, flare=0.0, bevel_pct=0.06, superstructure_tiers=1, forecastle=True),
-		("skiff", "heavy"): dict(bow_frac=0.4,  deadrise=0.45, sheer=0.14, flare=0.05, bevel_pct=0.08, bevel_segments=2, superstructure_tiers=2, forecastle=True),
-	}
-
-	# ---------------------------------------------------------------------------
-	# Main loop: 6 families x 3 tonnages x 3 manufacturers = 54 hulls.
-	# Each hull is a single convex hull + tier-1 bevel. No greeble layer.
-	# ---------------------------------------------------------------------------
 	hull_count = 0
-	for family in ("block", "wedge", "plate", "pod", "carrier", "skiff"):
-		for tonnage in ("scout", "main", "heavy"):
-			for manufacturer in ("meridian", "osterholm", "tidemark"):
-				hull_id = "%s_%s_%s" % (family, tonnage, manufacturer)
-				sx, sy, sz = SIZES[family][tonnage]
-				color = MANUFACTURER_COLORS[manufacturer] + (1.0,)  # alpha=1.0
+	for manufacturer, lineup in LINEUP.items():
+		for family, tonnage in lineup:
+			hull_id = "%s_%s_%s" % (family, tonnage, manufacturer)
+			sx, sy, sz = SIZES[family][tonnage]
+			color = MANUFACTURER_COLORS[manufacturer] + (1.0,)  # alpha=1.0
 
-				# Family-specific builder call. Each builder takes
-				# (name, size_x, size_y, size_z, color) and returns
-				# a clean convex hull + bevel with no greebles.
-				if family == "block":
-					obj = build_block_hull(hull_id, sx, sy, sz, color=color[:3])
-				elif family == "plate":
-					obj = build_plate_hull(hull_id, sx, sy, sz, color=color[:3])
-				elif family == "pod":
-					obj = build_pod_hull(hull_id, sx, sy, sz, color=color[:3])
-				elif family == "carrier":
-					obj = build_carrier_hull(hull_id, sx, sy, sz, color=color[:3])
-				elif family == "wedge":
-					params = dict(WEDGE_PARAMS[(family, tonnage)])
-					params["color"] = color[:3]
-					obj = build_wedge_hull(hull_id, sx, sy, sz, **params)
-				elif family == "skiff":
-					params = dict(SKIFF_PARAMS[(family, tonnage)])
-					params["color"] = color[:3]
-					obj = build_ship_hull(hull_id, sx, sy, sz, **params)
+			# Family shape + manufacturer signature + bevel, all
+			# in one call.
+			obj = _build_hull(hull_id, family, tonnage, manufacturer, color[:3])
 
-				# Domain. Skiff is amphibious - assign to "Naval" for
-				# tech-tree gating. Others are "Ground".
-				domain = "Naval" if family == "skiff" else "Ground"
+			# Domain. Skiff is amphibious - assign to "Naval" for
+			# tech-tree gating. Others are "Ground".
+			domain = "Naval" if family == "skiff" else "Ground"
 
-				export_hull_with_sidecar(obj, HULLS_DIR, hull_id,
-					size=(sx, sy, sz), color=color, domain=domain)
-				hull_count += 1
+			export_hull_with_sidecar(obj, HULLS_DIR, hull_id,
+				size=(sx, sy, sz), color=color, domain=domain)
+			hull_count += 1
 
 	print("--- Generated %d vehicle hulls ---" % hull_count)
 	print("--- Hull library done ---")
