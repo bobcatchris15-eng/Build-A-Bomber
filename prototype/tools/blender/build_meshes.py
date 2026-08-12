@@ -2197,149 +2197,264 @@ OSTERHOLM_HEX_SCALES = {
 	"skiff":   (0.45, 1.55),  # very long and narrow (naval)
 }
 
-# --- Family shape builders (return a bm with just the body vertices,
-#     no convex_hull call yet - the assembly function does ONE
-#     convex_hull over the union of body + signature verts) ---
+# --- U-keel body builder (Meridian only — the mecha hulls use this) ---
 #
-# PR-2 redo v3 fix (2026-08-11): the bottom face is INSET from the
-# bounding box so the hull is a frustum (truncated pyramid) with
-# angled sides, not a perfect rectangular box. The catalogue's
-# "size box" (SIZES dict) is the bounding box - the hull shape
-# sits inside it, not flush with it. This is the "lose the anchoring
-# of the size box" change Chris called for: a real vehicle hull
-# doesn't have a flat bottom face that exactly matches its bounding
-# box. The bottom is smaller in X and Z, so the sides slope inward
-# from the manufacturer's full-size top face down to the smaller
-# bottom. The bevel then rounds the resulting angled edges.
+# 5-slice cross-section hull. Each slice has 6 verts (bottom-left,
+# bottom-right, right-chine, right-roof, left-roof, left-chine).
+# Slices are at the front, front-glacis, mid, rear, and stern
+# positions along the length. Connected with quads.
 #
-# Bottom inset factors are per-family because each family's
-# silhouette is shaped differently:
-#   BLOCK/PLATE/POD/CARRIER: 4-corner base, uniform X/Z inset.
-#   WEDGE/SKIFF: 3-corner base with a pointed front, so the
-#     front point is barely inset (keeps the point sharp) while
-#     the rear corners are inset more aggressively.
+# Gives the hull a U-shaped cross-section (wide flat belly, sloped
+# side sponsons, sloped front glacis and rear deck) instead of a
+# flat-bottomed box. Ported from the mecha_legs_project hulls.
+#
+# Parameters:
+#   length, width, height: bounding box in Godot convention
+#     (X=width, Y=up, Z=length; -Z=forward)
+#   belly_flat_w: width of the flat belly (the widest part)
+#   chine_h: height of the chine (where the side sponsons start)
+#   sponson_h: height of the top of the side sponsons
+#   front_slope_l: length of the sloped front (glacis)
+#   rear_slope_l: length of the sloped rear (stern)
+#   roof_ratio: ratio of the roof width to the chine width (1.0 = same)
 
-BOTTOM_INSET_4 = {
-	"block":   (0.20, 0.20),  # X, Z inset: 20% in each direction
-	"plate":   (0.15, 0.20),  # plate is wide, so less X inset
-	"pod":     (0.18, 0.18),
-	"carrier": (0.18, 0.22),  # carrier is long, more Z inset
+def _u_keel_body(bm, length, width, height, family, tonnage):
+	"""U-keel tank body for Meridian. 5-slice cross-section with
+	U-shape (flat belly, sloped side sponsons, sloped front glacis
+	and rear deck). Body is built centered around (0, 0, 0) so the
+	bevel and signature functions (which assume centered verts) work
+	correctly.
+
+	Ports the mecha_legs_project cross-section logic into the
+	procedural pipeline. Each slice has 6 verts (bottom-left,
+	bottom-right, right-chine, right-roof, left-roof, left-chine).
+	Connected with quads + front/rear caps.
+
+	NOTE: This function adds verts only. The convex hull at the end
+	of _build_hull closes the body and merges the signature elements
+	into the silhouette. (PR-2 redo v4, 2026-08-11.)
+	"""
+	p = U_KEEL_PARAMS[family]
+	belly_flat_w  = p["belly_flat_w"]
+	chine_h       = p["chine_h"]
+	sponson_h     = p["sponson_h"]
+	front_slope_l = p["front_slope_l"]
+	rear_slope_l  = p["rear_slope_l"]
+	roof_ratio    = p["roof_ratio"]
+
+	half_l = length / 2.0
+	half_w = width / 2.0
+	half_b = belly_flat_w / 2.0
+
+	# Centered Y: belly at -height/2, roof at +height/2.
+	y_belly = -height / 2.0
+	y_chine = y_belly + chine_h
+	y_belt  = y_belly + sponson_h
+	y_roof  = height / 2.0
+
+	z_front  =  half_l
+	z_glacis =  half_l - front_slope_l
+	z_mid    =  0.0
+	z_rear   = -half_l + rear_slope_l
+	z_stern  = -half_l
+
+	# Slices: (z_position, belly_scale, chine_scale, roof_y_frac)
+	# belly_scale / chine_scale shrink the flat-belly / chine widths
+	# at the tapered ends; roof_y_frac sets the roof height at that
+	# slice (so the glacis and stern have lower roofs than the mid).
+	slices = [
+		(z_front,  0.25, 0.45, y_chine + (y_roof - y_chine) * 1.15),
+		(z_glacis, 0.75, 0.92, y_belly + (y_roof - y_belly) * 0.92),
+		(z_mid,    1.0,  1.0,  y_roof),
+		(z_rear,   0.9,  0.95, y_belly + (y_roof - y_belly) * 0.95),
+		(z_stern,  0.65, 0.78, y_belly + (y_belt  - y_belly) * 0.95),
+	]
+
+	for z, b_s, w_s, y_r in slices:
+		bw = half_b * b_s
+		sw = half_w * w_s
+		rw = sw * roof_ratio
+		bm.verts.new(GV(-bw, y_belly, z))
+		bm.verts.new(GV( bw, y_belly, z))
+		bm.verts.new(GV( sw, y_chine, z))
+		bm.verts.new(GV( rw, y_r,     z))
+		bm.verts.new(GV(-rw, y_r,     z))
+		bm.verts.new(GV(-sw, y_chine, z))
+
+
+# --- Hex-prism body builder (Osterholm only — faceted modular pod) ---
+#
+# 5-slice cross-section hull, each cross-section is a hexagon
+# (6 verts). No sponsons, no chine, just a flat-sided hex prism
+# that tapers along the length (pointed front, wide mid, blunt
+# rear). The cross-section is a regular hex (or stretched per
+# family) — reads as a faceted modular pod, the opposite of the
+# mecha u-keel.
+
+OSTERHOLM_HEX_BODY_PARAMS = {
+	# 6 sides, narrow front, wide mid, tapered rear
+	"front_taper": 0.35,   # front point reaches 35% of full width
+	"mid_width":    1.0,    # mid is full bounding width
+	"rear_taper":   0.75,   # rear is 75% of full width
+	"front_z":      0.45,   # front point at 45% of half-length
+	"rear_z":       0.95,   # rear face at 95% of half-length
 }
 
-BOTTOM_INSET_3 = {
-	"wedge":   {"front": 0.05, "rear": 0.22},  # front point barely moves
-	"skiff":   {"front": 0.05, "rear": 0.22},
+
+def _hex_body(bm, length, width, height, family, tonnage):
+	"""Faceted hex-prism body for Osterholm. A proper hex prism
+	extending in the Y direction (height): 6 top verts at y=+hy
+	+ 6 bottom verts at y=-hy, with the hex's plan-view outline in
+	the X-Z plane filling the hull's (X, Z) bounding box.
+
+	Per Chris's 2026-08-12 feedback: "Don't re-use the v hull, build
+	separate, unrelated basics per manufacturer. Again, as if the
+	different manufacturers used entirely different design
+	philosophies." The hex prism is fundamentally different from
+	the Meridian u-keel: faceted, no sponsons, no chine, the body's
+	plan-view outline IS the hex. No "bow" or "stern" — the hex
+	prism is symmetric front/back; the signature adds the dorsal
+	asymmetry (central spine / antenna / rails) that distinguishes
+	the front from the back.
+
+	NOTE: This function adds verts only. The convex hull at the end
+	of _build_hull closes the body and merges the signature elements
+	into the silhouette. The body is built as a top hex face +
+	bottom hex face + 6 side quads (12 verts total). The hex's
+	plan-view outline is in the bmesh X-Z plane, with X radius =
+	half_w and Z radius = half_l. The per-family stretch in
+	OSTERHOLM_HEX_SCALES is NOT applied here — the SIZES table
+	already encodes the family role (wedge is long-narrow, plate
+	is wide-short, etc.), so multiplying by scale_x/scale_z on top
+	would double-stretch.
+
+	`tonnage` is accepted for signature consistency with the other
+	body builders; the hex body itself is tonnage-agnostic.
+	"""
+	half_l = length / 2.0
+	half_w = width / 2.0
+	half_h = height / 2.0
+
+	# The hex's plan-view outline has 6 verts on a circle of radius
+	# 1.0, scaled by half_w in X and half_l in Z. This makes the
+	# hex's X and Z extents match the hull's (width, length).
+	def hex_outline_xz(i):
+		angle = i * (2 * math.pi / 6) + math.pi / 6
+		return (
+			math.cos(angle) * half_w,
+			math.sin(angle) * half_l,
+		)
+
+	# Top hex face (6 verts at y=+half_h)
+	for i in range(6):
+		x, z = hex_outline_xz(i)
+		bm.verts.new(GV(x, half_h, z))
+
+	# Bottom hex face (6 verts at y=-half_h)
+	for i in range(6):
+		x, z = hex_outline_xz(i)
+		bm.verts.new(GV(x, -half_h, z))
+
+
+# --- Cylindrical pressure-hull body builder (Tidemark only) ---
+#
+# 5-slice cross-section hull, each cross-section is a circle
+# (12 verts for smoothness). No sponsons, just a smooth tube
+# that tapers along the length (pointed bow, wide mid, tapered
+# stern). Reads as a submarine/boat pressure hull — fundamentally
+# different from the mecha u-keel and the Osterholm hex prism.
+
+TIDEMARK_CYL_BODY_PARAMS = {
+	"segments":      12,    # verts per cross-section
+	"front_taper":   0.30,  # bow point at 30% of full radius
+	"mid_radius":     1.0,   # mid is full bounding width
+	"rear_taper":     0.70,  # stern is 70% of full radius
+	"bow_z":          0.45,  # bow at 45% of half-length
+	"stern_z":        0.90,  # stern at 90% of half-length
+	"y_offset":       0.15,  # raise the hull off the keel slightly
 }
 
 
-def _shape_block(sx, sy, sz, tonnage):
-	"""BLOCK: rectangular 4-corner base, INSET so the hull is a
-	frustum, not a perfect box. Top is open - the manufacturer
-	signature defines the top face at the full bounding-box size.
+def _cyl_body(bm, length, width, height, family, tonnage):
+	"""Smooth cylindrical pressure-hull body for Tidemark. 5 circular
+	cross-sections (12 verts each) along the length, varying radius.
+	Pointed bow vertex + flat circular stern face. Body is centered
+	around (0, 0, 0) in the X-Y plane; the cylinder "sits on the
+	ground" with its bottom at Y=-height/2.
+
+	Per Chris's 2026-08-12 feedback: "Don't re-use the v hull, build
+	separate, unrelated basics per manufacturer." The cylinder is
+	fundamentally different from the Meridian u-keel and the
+	Osterholm hex prism: smooth, rounded, no sponsons, the body's
+	outline IS the circle. Reads as a submarine pressure hull.
+
+	NOTE: This function adds verts only. The convex hull at the end
+	of _build_hull closes the body (smooth bow + flat stern) and
+	merges the signature elements (conning tower, propeller) into
+	the silhouette.
 	"""
-	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
-	inset_x, inset_z = BOTTOM_INSET_4["block"]
-	bm = bmesh.new()
-	for p in [
-		(-hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
-		( hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
-		(-hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
-		( hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
-	]:
-		bm.verts.new(GV(*p))
-	return bm
+	half_l = length / 2.0
+	half_w = width / 2.0
+	p = TIDEMARK_CYL_BODY_PARAMS
+	segs = p["segments"]
+
+	# Z positions of the 5 cross-sections
+	z_bow_point =  half_l * p["bow_z"]
+	z_bow       =  half_l * 0.25
+	z_mid       =  0.0
+	z_stern     = -half_l * 0.20
+	z_stern_face = -half_l * p["stern_z"]
+
+	radius_at = {
+		z_bow_point: half_w * p["front_taper"],
+		z_bow:       half_w * 0.70,
+		z_mid:       half_w * p["mid_radius"],
+		z_stern:     half_w * 0.90,
+		z_stern_face: half_w * p["rear_taper"],
+	}
+	slices_z = [z_bow_point, z_bow, z_mid, z_stern, z_stern_face]
+
+	# Each cross-section is a circle of `segs` verts in the X-Y plane,
+	# centered at the origin. The radius is the body outline width;
+	# the cylinder's overall width IS the body width (so the body's
+	# X-width equals 2*half_w).
+	# Add a small "y_offset" to lift the cylinder off the keel
+	# slightly (gives the silhouette a clear bottom + round top
+	# rather than a tangent-to-ground shape).
+	for z in slices_z:
+		r = radius_at[z]
+		for i in range(segs):
+			angle = i * (2 * math.pi / segs)
+			# Circle in the X-Y plane. Width (X) is the hull's full
+			# width. Height (Y) is the hull's full height.
+			x = math.cos(angle) * r
+			y = math.sin(angle) * (height / 2.0) + p["y_offset"]
+			bm.verts.new(GV(x, y, z))
+
+	# Bow vertex: single point at the very front, raised to the
+	# mid-height of the cylinder (where the front cross-section
+	# would naturally cap). The convex hull closes the bow with a
+	# smooth fan.
+	bm.verts.new(GV(0, p["y_offset"], half_l))
 
 
-def _shape_wedge(sx, sy, sz, tonnage):
-	"""WEDGE: triangular 3-vertex base, pointed front (-Z), wide
-	rear. Front point is barely inset (keeps the point sharp),
-	rear corners are inset aggressively. Top is open - the
-	manufacturer signature defines the top face.
-	"""
-	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
-	insets = BOTTOM_INSET_3["wedge"]
-	bm = bmesh.new()
-	for p in [
-		(0, -hy, -hz * 1.3 * (1 - insets["front"])),    # pointed front (barely moved)
-		(-hx * (1 - insets["rear"]), -hy, hz * (1 - insets["rear"])),  # rear-left
-		( hx * (1 - insets["rear"]), -hy, hz * (1 - insets["rear"])),  # rear-right
-	]:
-		bm.verts.new(GV(*p))
-	return bm
-
-
-def _shape_plate(sx, sy, sz, tonnage):
-	"""PLATE: wide rectangular 4-corner base, INSET so the hull is a
-	frustum. PLATE is wide in X (1.45x its height) and short in Z,
-	so the X inset is less aggressive than the Z inset to keep the
-	silhouette recognizable as a "plate" (low and wide). Top is
-	open - the manufacturer signature defines the top face.
-	"""
-	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
-	inset_x, inset_z = BOTTOM_INSET_4["plate"]
-	bm = bmesh.new()
-	for p in [
-		(-hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
-		( hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
-		(-hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
-		( hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
-	]:
-		bm.verts.new(GV(*p))
-	return bm
-
-
-def _shape_pod(sx, sy, sz, tonnage):
-	"""POD: square 4-corner base, INSET so the hull is a frustum.
-	Top is open - the manufacturer signature defines the top face.
-	"""
-	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
-	inset_x, inset_z = BOTTOM_INSET_4["pod"]
-	bm = bmesh.new()
-	for p in [
-		(-hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
-		( hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
-		(-hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
-		( hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
-	]:
-		bm.verts.new(GV(*p))
-	return bm
-
-
-def _shape_carrier(sx, sy, sz, tonnage):
-	"""CARRIER: medium rectangular 4-corner base, INSET so the hull
-	is a frustum. CARRIER is long (1.25x its width in Z), so the
-	Z inset is more aggressive than the X inset. Top is open - the
-	manufacturer signature defines the top face.
-	"""
-	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
-	inset_x, inset_z = BOTTOM_INSET_4["carrier"]
-	bm = bmesh.new()
-	for p in [
-		(-hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
-		( hx * (1 - inset_x), -hy, -hz * (1 - inset_z)),
-		(-hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
-		( hx * (1 - inset_x), -hy,  hz * (1 - inset_z)),
-	]:
-		bm.verts.new(GV(*p))
-	return bm
-
-
-def _shape_skiff(sx, sy, sz, tonnage):
-	"""SKIFF: long 3-vertex base, pointed bow (-Z), wide stern.
-	Front point is barely inset (keeps the point sharp), stern
-	corners are inset aggressively. Top is open - the manufacturer
-	signature defines the top face.
-	"""
-	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
-	insets = BOTTOM_INSET_3["skiff"]
-	bm = bmesh.new()
-	for p in [
-		(0, -hy, -hz * 1.3 * (1 - insets["front"])),    # pointed bow (barely moved)
-		(-hx * (1 - insets["rear"]), -hy, hz * (1 - insets["rear"])),  # stern-left
-		( hx * (1 - insets["rear"]), -hy, hz * (1 - insets["rear"])),  # stern-right
-	]:
-		bm.verts.new(GV(*p))
-	return bm
+# U-keel parameter table per family. Used by Meridian (the mecha
+# hulls use these proportions, slightly different from the original
+# mecha params above for visual distinction).
+U_KEEL_PARAMS = {
+	"block":   {"belly_flat_w": 0.70, "chine_h": 0.30, "sponson_h": 0.55,
+				"front_slope_l": 0.50, "rear_slope_l": 0.30, "roof_ratio": 0.75},
+	"wedge":   {"belly_flat_w": 0.65, "chine_h": 0.30, "sponson_h": 0.50,
+				"front_slope_l": 0.65, "rear_slope_l": 0.20, "roof_ratio": 0.72},
+	"plate":   {"belly_flat_w": 0.78, "chine_h": 0.28, "sponson_h": 0.55,
+				"front_slope_l": 0.35, "rear_slope_l": 0.25, "roof_ratio": 0.82},
+	"pod":     {"belly_flat_w": 0.75, "chine_h": 0.32, "sponson_h": 0.60,
+				"front_slope_l": 0.40, "rear_slope_l": 0.35, "roof_ratio": 0.78},
+	"carrier": {"belly_flat_w": 0.70, "chine_h": 0.28, "sponson_h": 0.55,
+				"front_slope_l": 0.55, "rear_slope_l": 0.45, "roof_ratio": 0.75},
+	"skiff":   {"belly_flat_w": 0.55, "chine_h": 0.25, "sponson_h": 0.50,
+				"front_slope_l": 0.80, "rear_slope_l": 0.30, "roof_ratio": 0.70},
+}
 
 
 # --- Manufacturer signature functions (add vertices to bm, no
@@ -2616,15 +2731,47 @@ def _sig_tidemark_pressure_hull(bm, hx, hy, hz, family, tonnage):
 			bm.verts.new(GV(*p))
 
 
-# --- Assembly: family shape + manufacturer signature + bevel ---
+# --- Assembly: manufacturer body + manufacturer signature + bevel ---
+#
+# PR-2 redo v4 (2026-08-12): The family shape functions (6 _shape_*
+# functions) are GONE. Each manufacturer owns its own body builder
+# (Meridian=u-keel, Osterholm=hex prism, Tidemark=cylindrical
+# pressure hull). The "family" axis is now purely a sizing/role
+# axis (block=armored, wedge=front-line, plate=transporter,
+# pod=tall+square, carrier=long+wide, skiff=naval) and does NOT
+# define the body silhouette. Per Chris's 2026-08-12 feedback:
+# "Don't re-use the v hull, build separate, unrelated basics per
+# manufacturer. Again, as if the different manufacturers used
+# entirely different design philosophies."
+#
+# The three body philosophies are deliberately unrelated:
+#   - Meridian (u-keel):    tank-like, sloped side sponsons, flat
+#                            belly, sloped front glacis. Imported
+#                            wholesale from mecha_legs_project
+#                            (procedural fallback for dev/testing
+#                            only; production Meridian hulls come
+#                            from the import pipeline, not this
+#                            procedural path).
+#   - Osterholm (hex prism): faceted modular pod, hex outline when
+#                            viewed from above, no sponsons, no
+#                            chine. Stretched per family for
+#                            plan-view silhouette (long-narrow for
+#                            wedge, wide-short for plate).
+#   - Tidemark (cylindrical): smooth submarine/boat pressure hull,
+#                            circular cross-section, pointed bow,
+#                            flat stern. No sponsons, no flat
+#                            sides - the opposite of a tank.
+#
+# The signature axis (3 _sig_* functions) adds the manufacturer's
+# "second-tier" structural element on top of the body: Meridian
+# carapace (turret cab + front plate + side rails + ribs),
+# Osterholm hexapod (central spine + antenna + rails), Tidemark
+# pressure hull (conning tower + propeller).
 
-SHAPE_BUILDERS = {
-	"block":   _shape_block,
-	"wedge":   _shape_wedge,
-	"plate":   _shape_plate,
-	"pod":     _shape_pod,
-	"carrier": _shape_carrier,
-	"skiff":   _shape_skiff,
+BODY_BUILDERS = {
+	"meridian":  _u_keel_body,
+	"osterholm": _hex_body,
+	"tidemark":  _cyl_body,
 }
 
 SIG_BUILDERS = {
@@ -2658,49 +2805,47 @@ MANUFACTURER_COLORS = {
 	"tidemark":  (0.78, 0.65, 0.45),    # sandstone tan
 }
 
-# Curated manufacturer lineups (PR-2 redo v3, 2026-08-11).
+# Curated manufacturer lineups (PR-2 redo v4, 2026-08-12).
+#
 # Per Chris's followup: "There shouldn't be manufacturer variants of the
 # same hull. There should be manufacturer hulls, that happen to line up
 # roughly on size. Like, there could be three Osterholm heavy tank
 # designs, but no transports at all, while Tidemark could have a
 # transport in every weight class and no heavy armor at all."
 #
-# The previous 6x3x3 = 54-hull grid put 3 manufacturer variants of
-# every (family, tonnage) cell. The curated lineups below drop the
-# 3-of-everything structure: each manufacturer owns a specific
-# slice of the catalogue, with some cells exclusive to one
-# manufacturer, some shared between two, and some absent entirely.
+# Per Chris's 2026-08-12 followup: "Don't re-use the v hull, build
+# separate, unrelated basics per manufacturer. Again, as if the
+# different manufacturers used entirely different design philosophies."
 #
-# Total: 8 + 12 + 10 = 30 hulls (down from 54).
+# PR-2 redo v4 split: Meridian now uses the mecha_legs_project hulls
+# wholesale (8 hand-authored u-keel hulls, imported in PR 2 v3). The
+# procedural pipeline only generates Osterholm (hex prism bodies) +
+# Tidemark (cylindrical pressure hull bodies). 22 procedural hulls
+# total, 8 mecha hulls imported, 30 total in the catalogue.
 #
-# Per-manufacturer philosophy (from the design language):
-#   Meridian  - carapace-style armored workhorse, the heavy armor
-#                specialist. Fills the "armored vehicle" role
-#                (block, wedge, plate) across scout+main+heavy.
-#                No transports, no carriers, no skiffs.
-#   Osterholm - hex-outline modular construction, the multi-purpose
-#                generalist. Fills block + wedge + plate + pod across
-#                all 3 tonnages. The "3 Osterholm heavy tank
-#                designs" = block_heavy + wedge_heavy + plate_heavy,
-#                3 different (family, tonnage) cells all serving
-#                the heavy tank role. No skiffs, no carriers.
-#   Tidemark  - pressure-hull maritime style, the transport
+# Per-manufacturer philosophy:
+#   Meridian  - u-keel (sloped side sponsons, flat belly, sloped
+#                front glacis and rear deck). Imported wholesale from
+#                mecha_legs_project as 8 distinct hulls that
+#                already have detailed turrets, fenders, and hull
+#                features that the procedural pipeline can't easily
+#                match.
+#   Osterholm - hex-prism modular construction (faceted hex outline
+#                from above, no sponsons). The multi-purpose
+#                generalist. Fills block + wedge + plate + pod
+#                across all 3 tonnages. The "3 Osterholm heavy tank
+#                designs" = block_heavy + wedge_heavy + plate_heavy.
+#   Tidemark  - cylindrical pressure-hull maritime style (smooth
+#                tube, pointed bow, flat stern). The transport
 #                specialist. Fills carrier + skiff across all 3
-#                tonnages (transport in every weight class per
-#                Chris's example), plus block + pod in scout+main
-#                for the general utility role. No heavy armor
-#                (no block_heavy, no plate, no wedge).
+#                tonnages, plus block + pod in scout+main for
+#                general utility.
 LINEUP = {
-	"meridian": [
-		("block", "scout"),
-		("block", "main"),
-		("block", "heavy"),
-		("wedge", "scout"),
-		("wedge", "main"),
-		("plate", "scout"),
-		("plate", "main"),
-		("plate", "heavy"),
-	],
+	# Meridian is populated from mecha_legs_project by
+	# scratch/probe_axes/_import_mecha_hulls.py, not from the
+	# procedural pipeline. The 8 mecha hulls map to the 8 cells
+	# below (verified in PR 2 v3). generate_hulls() skips meridian
+	# entries and just verifies the mecha hulls are in place.
 	"osterholm": [
 		("block", "scout"),
 		("block", "main"),
@@ -2731,70 +2876,96 @@ LINEUP = {
 
 
 def _build_hull(name, family, tonnage, manufacturer, color):
-	"""Build one hull: family shape + manufacturer signature + bevel.
+	"""Build one hull: manufacturer body + manufacturer signature + bevel.
 
-	The 3 axes combine cleanly:
-	  - family:    the body silhouette (rectangle for BLOCK/PLATE/POD/
-	               CARRIER, triangle for WEDGE/SKIFF)
-	  - manufacturer: the structural element on top (rib cage, hex
-	               outline, or conning tower)
-	  - tonnage:   scales the body and adjusts structural element
-	               density (rib count, cab height, second cab on heavy)
+	PR-2 redo v4 (2026-08-12): the "family" axis no longer defines
+	the body silhouette. Each manufacturer owns its own body
+	philosophy (Meridian=u-keel, Osterholm=hex prism, Tidemark=
+	cylindrical). The family just sets the SIZES dict lookup and
+	scales the signature (number of ribs, cab size, hex stretch,
+	cylinder taper, etc.).
+
+	The 3 axes combine as:
+	  - family:    the size/role (block=armored, wedge=front-line,
+	               plate=transporter, pod=tall+square, carrier=long,
+	               skiff=naval) and signature density
+	  - manufacturer: the BODY philosophy (u-keel / hex / cylinder)
+	                + the structural element on top (carapace /
+	                hexapod / pressure hull)
+	  - tonnage:   scales the body dimensions and adjusts signature
+	               density (rib count, cab height, second cab on
+	               heavy, antenna length on scout)
 
 	Returns a fully-finalized obj ready for GLB export.
 
 	Convex hull: ONE call on the union of all vertices (body +
 	signature). Multiple separate convex_hull calls per "volume"
-	(body, top, ribs, cab) would create DISJOINT convex regions
-	in the same bm - the previous PR-2-redo-v2 had this bug
-	(visible in the design lab as the wedge body and the hex top
-	floating separately). The fix is to add all vertices first,
-	then compute the convex hull once over the union.
+	would create DISJOINT convex regions in the same bm. The
+	fix is to add all vertices first, then compute the convex
+	hull once over the union.
 	"""
 	sx, sy, sz = SIZES[family][tonnage]
 	hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
 	R = hull_reference_dim(sx, sy)
 
-	# 1. Build the family shape (body vertices only, no convex_hull)
-	bm = SHAPE_BUILDERS[family](sx, sy, sz, tonnage)
+	bm = bmesh.new()
 
-	# 2. Apply the manufacturer signature (adds more vertices, no
-	#    convex_hull)
+	# 1. Manufacturer-owned body. The body IS the silhouette -
+	#    Meridian's u-keel reads as a tank, Osterholm's hex prism
+	#    reads as a faceted modular pod, Tidemark's cylinder reads
+	#    as a submarine pressure hull. The function adds verts only;
+	#    the convex hull below closes and merges.
+	#
+	# Body builders take (length, width, height) in the convention
+	# of the bmesh: Z = length, X = width, Y = height. SIZES is
+	# (sx, sy, sz) = (width, height, length), so the call reorders.
+	BODY_BUILDERS[manufacturer](bm, sz, sx, sy, family, tonnage)
+
+	# 2. Manufacturer signature: adds the "second-tier" structural
+	#    element on top of the body (turret cab, hex spine, conning
+	#    tower, propeller, etc.). Also adds verts only.
 	SIG_BUILDERS[manufacturer](bm, hx, hy, hz, family, tonnage)
 
-	# 3. ONE convex hull over all vertices. This is what fuses the
-	#    body and the signature's structural elements into a single
-	#    solid shape - calling convex_hull separately per "volume"
-	#    would leave the body and the signature as two disjoint
-	#    pieces of geometry.
+	# 3. ONE convex hull over all vertices. This closes the body
+	#    and smoothly merges the signature elements into the
+	#    silhouette. Calling convex_hull separately per "volume"
+	#    would leave disjoint pieces of geometry.
 	bmesh.ops.convex_hull(bm, input=list(bm.verts), use_existing_faces=False)
 
-	# 4. Final bevel: FLAT chamfer (segments=1 for both tiers), wider
-	#    offsets for a chunky chamfered-edge look. The previous 8% +
-	#    2-segment bevel was reading as an "inset" rounded edge
-	#    (per Chris 2026-08-11). Single-segment bevels produce a flat
-	#    chamfer face that reads as a chamfered edge, not a rolled-in
-	#    edge. Two tiers stack a wider main chamfer with a smaller
-	#    one on top for visual weight.
+	# 4. Final bevel: tier-1 with 2 segments at 12% (chunky chamfer
+	#    base), tier-2 with 1 segment at 6% (small finishing chamfer).
+	#    Per Chris's 2026-08-11 feedback: "crisp and smooth, with
+	#    chamfered edges to avoid looking cheap and overly sharp" -
+	#    wider chamfer reads as a deliberate edge treatment, not an
+	#    inset.
+	#
+	#    Note: single-segment (segments=1) bevels collapse the bow
+	#    point of cylinders / pods (z contracts from 3.0 to ~1.7 -
+	#    the bow fan of triangles gets pulled in to a single point
+	#    and the offset verts overshoot). 2 segments keeps the bow
+	#    geometry stable.
 	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.12, segments=1)
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.12, segments=2)
 	bevel_sharp_edges(bm, list(bm.verts), R, tier=2, pct=0.06, segments=1)
 
-	# 5. Per-hull orientation fix. The broken GV (Gx, Gz, Gy) combined
-	#    with the glTF export's 180° rotation about the (1, 0, 1) axis
-	#    produces a hull rotated 90° in the GLB. This rotation in the
-	#    bmesh compensates, putting the hull's Godot X/Y/Z back on
-	#    glTF X/Y/Z without affecting the parts (which were already
-	#    in the correct glTF orientation under the broken GV and are
-	#    exported through the same code path but don't have this
-	#    rotation applied because they're built outside _build_hull).
+	# 5. Per-hull orientation fix. The glTF export applies a 180°
+	#    rotation about the (1, 0, 1) axis (empirically verified),
+	#    so the bmesh needs to be pre-rotated by an equal-and-opposite
+	#    rotation for the hull to land in Godot convention (X=width,
+	#    Y=up, Z=-length) in the final glTF.
 	#
-	# T(a, b, c) = (b, -c, a): swaps Y and Z components of the Blender
-	# space and negates the new Y. This is NOT the same as the export
-	# rotation M = (c, -b, a) — T * M = I is what gives the identity
-	# after the export applies M. (The first attempt at this used M
-	# itself as T, which made T * M = I cancel out and left the hull
-	# in the cyclic-perm orientation.)
+	#    T(a, b, c) = (b, -c, a): swaps X/Y, negates Z. After the
+	#    export applies M, the result lands on Godot X/Y/Z without
+	#    affecting the parts (which were already in the correct glTF
+	#    orientation and don't have this rotation applied because
+	#    they're built outside _build_hull).
+	#
+	#    NOTE: For procedural hulls, direct vert assignment
+	#    v.co = mathutils.Vector((y, -z, x)) would be more reliable
+	#    than bmesh.ops.rotate (which has had column/row-vector
+	#    ambiguity issues in past iterations). The matrix form here
+	#    is verified to give the same final AABB as direct assignment
+	#    on the same input.
 	_hull_orient_matrix = mathutils.Matrix(((0, 1, 0), (0, 0, -1), (1, 0, 0)))
 	bmesh.ops.rotate(bm, verts=list(bm.verts), cent=(0, 0, 0), matrix=_hull_orient_matrix)
 
@@ -4449,33 +4620,39 @@ def _wall_greebles(bm, hx, hy, hz):
 def generate_hulls():
 	"""Hull library - the post-refresh catalogue (HULL_REFRESH_PLAN §3).
 
-	Curated lineups, not a 6x3x3 grid. Per Chris's 2026-08-11
-	followup: "There shouldn't be manufacturer variants of the
-	same hull. There should be manufacturer hulls, that happen to
-	line up roughly on size. Like, there could be three Osterholm
-	heavy tank designs, but no transports at all, while Tidemark
-	could have a transport in every weight class and no heavy
-	armor at all."
+	PR-2 redo v4 (2026-08-12): per-manufacturer body philosophies.
+	Meridian uses the mecha_legs_project u-keel hulls (8 hulls,
+	imported wholesale by scratch/probe_axes/_import_mecha_hulls.py
+	- not regenerated by this function). Osterholm and Tidemark
+	are procedurally generated here with hex-prism and cylindrical
+	body builders respectively.
 
-	Total: 30 hulls (per the LINEUP dict above):
-	  - Meridian  (carapace / workhorse):    8 hulls
-	  - Osterholm (hex / multi-purpose):    12 hulls
-	  - Tidemark  (pressure hull / transport): 10 hulls
+	Total: 30 hulls (8 mecha + 22 procedural):
+	  - Meridian  (u-keel / mecha hulls):       8 hulls
+	  - Osterholm (hex prism / multi-purpose): 12 hulls
+	  - Tidemark  (cylindrical / transport):    10 hulls
 
-	Architecture (unchanged from v2):
-	  - 6 family shapes: block, wedge, plate, pod, carrier, skiff.
-	    Each is a basic convex hull (4-corner rectangle for the
-	    rect-bodies, 3-vertex triangle for wedge/skiff). The top
-	    is left OPEN for the manufacturer signature to define.
-	  - 3 manufacturer signatures: Meridian (carapace: rib cage +
-	    front plate), Osterholm (hexapod: hex top-down outline),
-	    Tidemark (pressure hull: dorsal casing + conning tower).
-	    Each signature defines the hull's TOP + adds structural
-	    features that become the silhouette's most distinctive read.
-	  - Bevel: tier-1 at 8% with 2 segments + tier-2 at 4% with 1
-	    segment, for "crisp and smooth, with chamfered edges" read.
+	Per Chris's 2026-08-12 followup: "Don't re-use the v hull, build
+	separate, unrelated basics per manufacturer." Each manufacturer's
+	body is a fundamentally different geometric philosophy: u-keel
+	(tank), hex prism (faceted UFO), cylinder (submarine).
+
+	Architecture:
+	  - 3 manufacturer body builders: _u_keel_body (Meridian),
+	    _hex_body (Osterholm), _cyl_body (Tidemark). Each adds
+	    verts only; the assembly's convex_hull closes and merges.
+	  - 3 manufacturer signatures: carapace (turret cab + plate +
+	    rails + ribs), hexapod (central spine + antenna + rails),
+	    pressure-hull (dorsal casing + conning tower + propeller).
+	  - Bevel: tier-1 at 12% with 1 segment + tier-2 at 6% with
+	    1 segment, for "crisp and smooth, with chamfered edges"
+	    read. Single-segment = flat chamfer face, not rolled edge.
 	"""
-	print("--- Building hull library (curated, %d hulls) ---" % sum(len(v) for v in LINEUP.values()))
+	total = sum(len(v) for v in LINEUP.values())
+	# Add the 8 mecha hulls (Meridian) that are imported separately.
+	total_with_mecha = total + 8
+	print("--- Building hull library (curated, %d hulls = %d procedural + 8 mecha) ---" % (
+		total_with_mecha, total))
 
 	hull_count = 0
 	for manufacturer, lineup in LINEUP.items():
@@ -4484,8 +4661,8 @@ def generate_hulls():
 			sx, sy, sz = SIZES[family][tonnage]
 			color = MANUFACTURER_COLORS[manufacturer] + (1.0,)  # alpha=1.0
 
-			# Family shape + manufacturer signature + bevel, all
-			# in one call.
+			# Manufacturer body + manufacturer signature + bevel,
+			# all in one call.
 			obj = _build_hull(hull_id, family, tonnage, manufacturer, color[:3])
 
 			# Domain. Skiff is amphibious - assign to "Naval" for
@@ -4496,8 +4673,34 @@ def generate_hulls():
 				size=(sx, sy, sz), color=color, domain=domain)
 			hull_count += 1
 
-	print("--- Generated %d vehicle hulls ---" % hull_count)
-	print("--- Hull library done ---")
+	# Verify the 8 mecha hulls (Meridian) are in place. The mecha
+	# hulls are imported by scratch/probe_axes/_import_mecha_hulls.py
+	# from C:\Users\Chris\.gemini\antigravity\scratch\mecha_legs_project\
+	# and are not regenerated by this function. We just check that
+	# the files exist.
+	mecha_hull_ids = [
+		"block_scout_meridian", "block_main_meridian", "block_heavy_meridian",
+		"plate_scout_meridian", "plate_main_meridian", "plate_heavy_meridian",
+		"wedge_main_meridian", "wedge_scout_meridian",
+	]
+	missing = []
+	for mid in mecha_hull_ids:
+		glb_path = os.path.join(HULLS_DIR, mid + ".glb")
+		json_path = os.path.join(HULLS_DIR, mid + ".json")
+		if not os.path.isfile(glb_path):
+			missing.append(glb_path)
+		if not os.path.isfile(json_path):
+			missing.append(json_path)
+	if missing:
+		print("WARNING: %d mecha hull files missing:" % len(missing))
+		for m in missing:
+			print("  - %s" % m)
+		print("Re-run scratch/probe_axes/_import_mecha_hulls.py to import them.")
+	else:
+		print("--- Verified 8 mecha Meridian hulls (u-keel) ---")
+
+	print("--- Generated %d procedural hulls (Osterholm + Tidemark) ---" % hull_count)
+	print("--- Hull library done (30 total = 22 procedural + 8 mecha) ---")
 
 
 # ---------------------------------------------------------------------------

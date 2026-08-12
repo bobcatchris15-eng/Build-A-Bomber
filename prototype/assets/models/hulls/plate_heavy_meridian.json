@@ -1,13 +1,13 @@
 {
   "name": "Plate Heavy Meridian",
-  "hp": 2368.0,
-  "weight": 1751.0,
-  "metal": 587,
-  "crystal": 118,
+  "hp": 1678.0,
+  "weight": 1186.0,
+  "metal": 402,
+  "crystal": 83,
   "size": [
-    7.0,
-    1.8,
-    9.0
+    4.45,
+    1.9,
+    8.2
   ],
   "color": [
     0.5,

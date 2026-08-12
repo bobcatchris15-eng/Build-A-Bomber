@@ -1,13 +1,13 @@
 {
   "name": "Wedge Scout Meridian",
-  "hp": 172.0,
-  "weight": 104.0,
-  "metal": 38,
-  "crystal": 8,
+  "hp": 1037.0,
+  "weight": 733.0,
+  "metal": 248,
+  "crystal": 51,
   "size": [
-    2.0,
-    0.6,
-    3.0
+    3.6,
+    1.7,
+    7.0
   ],
   "color": [
     0.5,

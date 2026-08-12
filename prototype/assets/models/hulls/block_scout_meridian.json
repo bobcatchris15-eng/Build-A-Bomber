@@ -1,13 +1,13 @@
 {
   "name": "Block Scout Meridian",
-  "hp": 222.9,
-  "weight": 142.2,
-  "metal": 50,
-  "crystal": 11,
+  "hp": 240.0,
+  "weight": 169.0,
+  "metal": 57,
+  "crystal": 12,
   "size": [
-    2.4,
-    0.8,
-    3.2
+    2.2,
+    1.0,
+    4.5
   ],
   "color": [
     0.5,

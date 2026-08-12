@@ -1,13 +1,13 @@
 {
   "name": "Plate Main Meridian",
-  "hp": 1010.0,
-  "weight": 732.5,
-  "metal": 247,
-  "crystal": 50,
+  "hp": 604.0,
+  "weight": 427.0,
+  "metal": 145,
+  "crystal": 30,
   "size": [
-    5.0,
-    1.3,
-    7.0
+    2.7,
+    1.49,
+    6.2
   ],
   "color": [
     0.5,
