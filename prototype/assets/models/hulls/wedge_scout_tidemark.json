@@ -1,0 +1,23 @@
+{
+  "name": "Wedge Scout Tidemark",
+  "hp": 172.0,
+  "weight": 104.0,
+  "metal": 38,
+  "crystal": 8,
+  "size": [
+    2.0,
+    0.6,
+    3.0
+  ],
+  "color": [
+    0.78,
+    0.7,
+    0.55,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull"
+}

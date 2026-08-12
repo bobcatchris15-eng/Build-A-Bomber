@@ -1,0 +1,23 @@
+{
+  "name": "Block Main Meridian",
+  "hp": 580.0,
+  "weight": 410.0,
+  "metal": 140,
+  "crystal": 29,
+  "size": [
+    4.0,
+    1.0,
+    6.0
+  ],
+  "color": [
+    0.5,
+    0.5,
+    0.52,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull"
+}

@@ -1,0 +1,23 @@
+{
+  "name": "Skiff Main Osterholm",
+  "hp": 460.0,
+  "weight": 320.0,
+  "metal": 110,
+  "crystal": 23,
+  "size": [
+    3.0,
+    1.0,
+    6.0
+  ],
+  "color": [
+    0.85,
+    0.88,
+    0.92,
+    1.0
+  ],
+  "domain": "Naval",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull"
+}

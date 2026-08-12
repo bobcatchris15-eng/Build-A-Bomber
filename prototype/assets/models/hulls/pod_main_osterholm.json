@@ -1,0 +1,23 @@
+{
+  "name": "Pod Main Osterholm",
+  "hp": 887.5,
+  "weight": 640.6,
+  "metal": 216,
+  "crystal": 44,
+  "size": [
+    3.5,
+    2.5,
+    4.5
+  ],
+  "color": [
+    0.85,
+    0.88,
+    0.97,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull"
+}

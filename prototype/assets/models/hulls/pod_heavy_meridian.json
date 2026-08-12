@@ -1,0 +1,23 @@
+{
+  "name": "Pod Heavy Meridian",
+  "hp": 1900.0,
+  "weight": 1400.0,
+  "metal": 470,
+  "crystal": 95,
+  "size": [
+    5.0,
+    3.0,
+    6.0
+  ],
+  "color": [
+    0.5,
+    0.5,
+    0.57,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull"
+}
