@@ -1,0 +1,61 @@
+{
+  "hull_name": "axis_probe",
+  "primitives": [
+    {
+      "type": 0,
+      "position": [0.0, 0.0, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [2.0, 2.0, 2.0],
+      "color": [0.7, 0.7, 0.7, 1.0],
+      "name": "core_cube"
+    },
+    {
+      "type": 0,
+      "position": [1.5, 0.0, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [1.0, 0.2, 0.2],
+      "color": [1.0, 0.2, 0.2, 1.0],
+      "name": "marker_x_pos"
+    },
+    {
+      "type": 0,
+      "position": [-1.5, 0.0, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [1.0, 0.2, 0.2],
+      "color": [0.6, 0.0, 0.0, 1.0],
+      "name": "marker_x_neg"
+    },
+    {
+      "type": 0,
+      "position": [0.0, 1.5, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [0.2, 1.0, 0.2],
+      "color": [0.2, 1.0, 0.2, 1.0],
+      "name": "marker_y_pos"
+    },
+    {
+      "type": 0,
+      "position": [0.0, -1.5, 0.0],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [0.2, 1.0, 0.2],
+      "color": [0.0, 0.6, 0.0, 1.0],
+      "name": "marker_y_neg"
+    },
+    {
+      "type": 0,
+      "position": [0.0, 0.0, 1.5],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [0.2, 0.2, 1.0],
+      "color": [0.2, 0.4, 1.0, 1.0],
+      "name": "marker_z_pos"
+    },
+    {
+      "type": 0,
+      "position": [0.0, 0.0, -1.5],
+      "rotation": [0.0, 0.0, 0.0],
+      "scale": [0.2, 0.2, 1.0],
+      "color": [0.0, 0.1, 0.6, 1.0],
+      "name": "marker_z_neg"
+    }
+  ]
+}

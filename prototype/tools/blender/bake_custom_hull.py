@@ -35,14 +35,39 @@ def clear_scene():
 def create_primitive_mesh(prim_type, position, rotation, scale, color):
     """Create a Blender mesh object for a primitive type."""
 
-    # Godot to Blender coordinate conversion
-    # Godot: X (right), Y (up), Z (depth/forward)
-    # Blender: X (right), Y (depth/forward), Z (up)
-    # So we swap Y and Z coordinates
+    # Godot to Blender coordinate conversion.
+    #
+    # Godot convention (from _greeble.py:14-15 and the existing
+    # hand-authored heavy_hull_mk2.glb whose turret-top vertices
+    # sit at glTF -Z, confirming "forward = -Z"):
+    #   X (right), Y (up), Z (depth/forward; -Z is "forward").
+    #
+    # Blender convention used by every build_*.py in this folder:
+    #   X (right), Y (depth; +Y is "forward" in this codebase), Z (up).
+    #
+    # The glTF exporter's `export_yup=True` applies a -90° rotation
+    # about the X axis to re-express Z-up as Y-up, which is
+    # glTF (X, Y, Z) = Blender (X, Z, -Y). Working backwards, the
+    # round-trip Godot -> Blender -> glTF needs:
+    #   X_b = X (Godot X)
+    #   Z_b = Y (Godot Y)        (since glTF Y = Blender Z)
+    #   Y_b = -Z (Godot Z)       (since glTF Z = -Blender Y)
+    #
+    # So pos_b = (Gx, -Gz, Gy). Same derivation for scale and
+    # rotation, with the sign flip on the Godot-Z component.
+    #
+    # Without this fix, a Godot (0, 0, 1.5) primitive lands at
+    # glTF (0, 0, -1.5) - the Z axis is inverted relative to the
+    # existing assets, which would mean any hull baked via JSON
+    # would face backward in-game.
+    #
+    # Verified empirically with scratch/probe_axes/run_probe.ps1
+    # on 2026-08-11 against Blender 5.2; cross-checked against
+    # the hand-authored assets under prototype/assets/models/.
 
-    pos_b = (position[0], position[2], position[1])
-    rot_b = (rotation[0], rotation[2], rotation[1])  # Euler angles
-    scale_b = (scale[0], scale[2], scale[1])
+    pos_b = (position[0], -position[2], position[1])
+    rot_b = (rotation[0], -rotation[2], rotation[1])  # Euler angles
+    scale_b = (scale[0], -scale[2], scale[1])
 
     obj = None
 
@@ -262,6 +287,16 @@ def main():
 
     joined_obj = bpy.context.active_object
     joined_obj.name = hull_name
+
+    # CRITICAL: Blender 5.2's glTF exporter's `export_apply=True`
+    # does NOT reliably bake per-primitive location/scale into the
+    # exported vertices. Without an explicit `transform_apply` call
+    # before the join, the resulting GLB has the joined mesh at
+    # the origin with no scale, and every per-primitive offset is
+    # silently dropped. Verified empirically: with the apply call,
+    # the test marker at Godot (1.5, 0, 0) lands at glTF X=1.5
+    # correctly; without it, the same marker collapses to X=0.
+    bpy.ops.object.transform_apply(location=True, scale=True, rotation=True)
 
     print("Joined all primitives into single mesh")
 
