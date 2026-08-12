@@ -23,19 +23,19 @@ const STATS := {
 		"built": 6, "lost": 4, "kills": 9, "damage_dealt": 4200.0,
 		"damage_taken_kinetic": 900.0, "damage_taken_thermal": 120.0,
 		"damage_taken_explosive": 60.0, "damage_taken_energy": 1500.0,
-		"metal_spent": 1800, "hull_type": "heavy_hull",
+		"metal_spent": 1800, "hull_type": "block_heavy_meridian_a",
 	},
 	"Scrapper Ore Trucker": {
 		"built": 3, "lost": 1, "kills": 0, "damage_dealt": 0.0,
 		"damage_taken_kinetic": 200.0, "damage_taken_thermal": 0.0,
 		"damage_taken_explosive": 0.0, "damage_taken_energy": 0.0,
-		"metal_spent": 450, "hull_type": "medium_hull",
+		"metal_spent": 450, "hull_type": "block_main_meridian_a",
 	},
 	"Never Fielded": {
 		"built": 0, "lost": 0, "kills": 0, "damage_dealt": 0.0,
 		"damage_taken_kinetic": 0.0, "damage_taken_thermal": 0.0,
 		"damage_taken_explosive": 0.0, "damage_taken_energy": 0.0,
-		"metal_spent": 0, "hull_type": "light_hull",
+		"metal_spent": 0, "hull_type": "block_scout_meridian_a",
 	},
 }
 

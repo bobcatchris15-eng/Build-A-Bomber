@@ -26,23 +26,30 @@ const MOD_DIR = "user://mods/hulls"
 const REQUIRED_FIELDS = ["name", "hp", "weight", "metal", "crystal", "size", "color"]
 const NUMERIC_TYPES = [TYPE_INT, TYPE_FLOAT]
 
-# medium_hull is a hardcoded fallback default in 7+ call sites across the
-# codebase (battle_unit.gd, battlefield.gd, blueprint_manager.gd,
-# module_placer.gd, stat_calculator.gd, enemy_ai.gd, skirmish.gd) - it must
-# always exist and always be loadable. A moddable hull system can't let that
-# guarantee depend on a third-party-editable sidecar file never going
-# missing/corrupt, so this is a last-resort embedded copy of its own shipped
-# sidecar (assets/models/hulls/medium_hull.json) - only ever used if that
-# file is somehow missing or fails validation, which should never happen in
-# a normal install and is loud (push_error) specifically because it
-# indicates a broken installation, not a normal modding scenario.
-const PROTECTED_MEDIUM_HULL_FALLBACK = {
-	"name": "Medium Hull", "hp": 400.0, "weight": 250.0, "metal": 100, "crystal": 20,
-	# base_power (generation) tracks the shipped medium_hull.json sidecar, same
-	# as base_energy (storage) does. It is absent from REQUIRED_FIELDS below on
-	# purpose - a mod hull without it should load and generate nothing, not fail
-	# validation - but this fallback is a copy of a REAL hull, so it carries
-	# every field that hull actually has.
+# block_main_meridian_a is the post-refresh default hull (HULL_REFRESH_PLAN.md
+# §3.1: Block family, Main tonnage, Meridian manufacturer, variant A). The
+# legacy "block_main_meridian_a" is gone after PR 1, and the same 7+ call sites
+# (battle_unit.gd, battlefield.gd, blueprint_manager.gd, module_placer.gd,
+# stat_calculator.gd, enemy_ai.gd, skirmish.gd) that used to hardcode
+# "block_main_meridian_a" as their safe fallback now hardcode
+# "block_main_meridian_a" instead - it must always exist and always be
+# loadable. A moddable hull system can't let that guarantee depend on a
+# third-party-editable sidecar file never going missing/corrupt, so this
+# is a last-resort embedded copy of its own shipped sidecar
+# (assets/models/hulls/block_main_meridian_a.json) - only ever used if
+# that file is somehow missing or fails validation, which should never
+# happen in a normal install and is loud (push_error) specifically
+# because it indicates a broken installation, not a normal modding
+# scenario.
+const PROTECTED_DEFAULT_HULL_ID := "block_main_meridian_a"
+const PROTECTED_DEFAULT_HULL_FALLBACK = {
+	"name": "Block Main / Meridian A", "hp": 400.0, "weight": 250.0, "metal": 100, "crystal": 20,
+	# base_power (generation) tracks the shipped block_main_meridian_a.json
+	# sidecar, same as base_energy (storage) does. It is absent from
+	# REQUIRED_FIELDS below on purpose - a mod hull without it should load
+	# and generate nothing, not fail validation - but this fallback is a
+	# copy of a REAL hull, so it carries every field that hull actually
+	# has.
 	"dps": 0.0, "is_foundation": false, "base_energy": 70.0, "base_power": 5.6,
 	"base_vision": 20.0,
 	"draught": 0.5, "underside_y_bias": 0.0, "turreted_capable": true, "category": "hull",
@@ -81,7 +88,7 @@ static func _ensure_scanned() -> void:
 	DirAccess.make_dir_recursive_absolute(MOD_DIR)
 	_scan_directory(BUILTIN_DIR, false)
 	_scan_directory(MOD_DIR, true)
-	_ensure_medium_hull_protected()
+	_ensure_default_hull_protected()
 	_scanned = true
 
 static func _scan_directory(dir_path: String, is_mod: bool) -> void:
@@ -249,11 +256,11 @@ static func _validate_and_default(raw: Dictionary, source_path: String):
 
 	return out
 
-static func _ensure_medium_hull_protected() -> void:
-	if _cache.has("medium_hull"):
+static func _ensure_default_hull_protected() -> void:
+	if _cache.has(PROTECTED_DEFAULT_HULL_ID):
 		return
-	push_error("HullLoader: medium_hull sidecar is missing or invalid at %s/medium_hull.json - falling back to an embedded protected default. This should never happen in a normal install; 7+ scripts hardcode medium_hull as their safe fallback hull." % BUILTIN_DIR)
-	var fallback = PROTECTED_MEDIUM_HULL_FALLBACK.duplicate()
+	push_error("HullLoader: %s sidecar is missing or invalid at %s/%s.json - falling back to an embedded protected default. This should never happen in a normal install; 7+ scripts hardcode %s as their safe fallback hull." % [PROTECTED_DEFAULT_HULL_ID, BUILTIN_DIR, PROTECTED_DEFAULT_HULL_ID, PROTECTED_DEFAULT_HULL_ID])
+	var fallback = PROTECTED_DEFAULT_HULL_FALLBACK.duplicate()
 	fallback["size"] = Vector3(4.0, 1.0, 6.0)
 	fallback["color"] = Color(0.745098054409027, 0.745098054409027, 0.745098054409027, 1.0)
-	_cache["medium_hull"] = fallback
+	_cache[PROTECTED_DEFAULT_HULL_ID] = fallback

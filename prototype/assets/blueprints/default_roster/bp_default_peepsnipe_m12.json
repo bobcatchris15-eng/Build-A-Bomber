@@ -12,7 +12,7 @@
 		"y": 1.20000004768372,
 		"z": 3.59999990463257
 	},
-	"hull_type": "scout_hull",
+	"hull_type": "wedge_scout_meridian_a",
 	"id": "bp_default_peepsnipe_m12",
 	"locomotion": {
 		"settings": {},

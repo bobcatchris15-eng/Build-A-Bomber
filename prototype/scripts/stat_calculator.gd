@@ -1282,7 +1282,7 @@ func update_stats(hull: Node3D):
 	# get_hull_size_tier(), the same function skirmish.gd's
 	# _queue_player_unit() uses) - a player could previously only discover
 	# which manufactory they'd need via a failed build attempt mid-match.
-	var tier = ModuleCatalog.get_hull_size_tier(hull.get_meta("type_id", "medium_hull")) if hull and hull.has_meta("type_id") else ""
+	var tier = ModuleCatalog.get_hull_size_tier(hull.get_meta("type_id", "block_main_meridian_a")) if hull and hull.has_meta("type_id") else ""
 	var tooltip_parts: Array = []
 	if tier != "":
 		tooltip_parts.append("Needs a %s Manufactory to build this design." % tier.capitalize())

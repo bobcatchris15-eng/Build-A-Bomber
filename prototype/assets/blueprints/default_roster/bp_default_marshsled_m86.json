@@ -12,7 +12,7 @@
 		"y": 1.5,
 		"z": 4.0
 	},
-	"hull_type": "light_hull",
+	"hull_type": "block_scout_meridian_a",
 	"id": "bp_default_marshsled_m86",
 	"locomotion": {
 		"settings": {

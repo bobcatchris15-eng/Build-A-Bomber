@@ -95,7 +95,7 @@ func test_module_catalog_building_requirements() -> bool:
 	if ModuleCatalogScript.get_required_building("dreadnought_hull") != "physics_lab":
 		print("  [FAIL] dreadnought_hull should require physics_lab")
 		ok = false
-	if ModuleCatalogScript.get_required_building("medium_hull") != "":
+	if ModuleCatalogScript.get_required_building("block_main_meridian_a") != "":
 		print("  [FAIL] medium_hull should require nothing")
 		ok = false
 
@@ -124,7 +124,7 @@ func test_design_costing_building_requirements() -> bool:
 
 	# A bare, ungated design requires nothing.
 	var bare: Array = DesignCostingScript.blueprint_required_buildings(
-		{"hull_type": "medium_hull", "armor_material": "hardened_steel"})
+		{"hull_type": "block_main_meridian_a", "armor_material": "hardened_steel"})
 	if not bare.is_empty():
 		print("  [FAIL] a bare medium/hardened-steel design should require nothing, got ", bare)
 		ok = false
@@ -140,7 +140,7 @@ func test_design_costing_building_requirements() -> bool:
 
 	# A single gate repeated across hull AND armour de-dupes to one entry.
 	var deduped: Array = DesignCostingScript.blueprint_required_buildings(
-		{"hull_type": "heavy_hull", "armor_material": "ablative_ceramic"})
+		{"hull_type": "block_heavy_meridian_a", "armor_material": "ablative_ceramic"})
 	if deduped != ["tech_lab"]:
 		print("  [FAIL] a repeated tech_lab gate should collapse to one entry, got ", deduped)
 		ok = false

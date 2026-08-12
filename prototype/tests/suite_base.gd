@@ -273,7 +273,7 @@ func bp_manager_test_load(path: String) -> Dictionary:
 # which production.enqueue() requires before a job ever reaches the queue.
 func _d1_test_blueprint() -> Dictionary:
 	return {
-		"version": 1.0, "hull_type": "medium_hull",
+		"version": 1.0, "hull_type": "block_main_meridian_a",
 		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
 		"armor_material": "hardened_steel", "armor_thickness": 1.0,
 		"locomotion": {"type_id": "tracked_treads", "settings": {"width": 1.0}},

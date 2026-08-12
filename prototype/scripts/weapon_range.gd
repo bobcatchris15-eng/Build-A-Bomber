@@ -119,7 +119,7 @@ static func analyze(hull_node: Node3D) -> Dictionary:
 	if hull_node == null or not is_instance_valid(hull_node):
 		return out
 
-	var hull_type: String = hull_node.get_meta("type_id", "medium_hull") if hull_node.has_meta("type_id") else "medium_hull"
+	var hull_type: String = hull_node.get_meta("type_id", "block_main_meridian_a") if hull_node.has_meta("type_id") else "block_main_meridian_a"
 	var faction: String = hull_node.get_meta("faction", "") if hull_node.has_meta("faction") else ""
 	var vision: float = ModuleCatalog.get_base_vision(hull_type)
 

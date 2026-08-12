@@ -18,7 +18,7 @@ func test_centerline_placement_does_not_self_mirror() -> bool:
 	root.add_child(placer)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("heavy_hull")
+	placer._place_hull_from_ui("block_heavy_meridian_a")
 	await tree.process_frame
 	placer._place_weapon_from_ui("gauss_railgun", Vector3(0, 0.75, 2.0), Vector3.UP)
 	await tree.process_frame

@@ -3419,7 +3419,7 @@ static func get_full_hull_aabb(hull_node: Node3D) -> AABB:
 				stack.append(child)
 
 	if not has_mesh or combined_aabb.size.length_squared() < 0.01:
-		var hull_type = hull_node.get_meta("type_id", "medium_hull") if hull_node.has_meta("type_id") else "medium_hull"
+		var hull_type = hull_node.get_meta("type_id", "block_main_meridian_a") if hull_node.has_meta("type_id") else "block_main_meridian_a"
 		var cat_data = ModuleCatalog.get_module_data(hull_type)
 		var h_scale = hull_node.get_meta("hull_scale", Vector3.ONE) if hull_node.has_meta("hull_scale") else Vector3.ONE
 		var sz = cat_data.get("size", Vector3(4.0, 1.5, 6.0)) * h_scale

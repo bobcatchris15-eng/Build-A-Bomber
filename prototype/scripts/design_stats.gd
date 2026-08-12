@@ -136,7 +136,7 @@ static func analyze(hull: Node3D) -> Dictionary:
 	# which is the Design Lab, and NO_FACTION resolves every passive to its
 	# unmodified base value.
 	var faction := str(hull.get_meta("faction", LiveryScript.NO_LIVERY))
-	var hull_type := str(hull.get_meta("type_id", "medium_hull"))
+	var hull_type := str(hull.get_meta("type_id", "block_main_meridian_a"))
 	var hull_scale = hull.get_meta("hull_scale", Vector3.ONE)
 
 	# Hull HP is the unit's REAL combat health pool, from the shared

@@ -27,7 +27,7 @@ units = [
     {
         "id": "bp_default_scout",
         "name": "M41 Jackrabbit Scout Buggy",
-        "hull_type": "scout_hull",
+        "hull_type": "wedge_scout_meridian_a",
         "locomotion_type": "wheels",
         "locomotion_settings": {"num_axles": 2, "wheel_size": 1.0, "wheels_per_axle": 2},
         "weapons": [
@@ -37,7 +37,7 @@ units = [
     {
         "id": "bp_default_light_tank",
         "name": "M22 Poodle Light Tank",
-        "hull_type": "light_hull",
+        "hull_type": "block_scout_meridian_a",
         "locomotion_type": "tracked_treads",
         "locomotion_settings": {"tread_width": 1.0},
         "weapons": [
@@ -47,7 +47,7 @@ units = [
     {
         "id": "bp_default_medium_tank",
         "name": "M4 Sherman-Rex Medium Tank",
-        "hull_type": "medium_hull",
+        "hull_type": "block_main_meridian_a",
         "locomotion_type": "tracked_treads",
         "locomotion_settings": {"tread_width": 1.2},
         "weapons": [
@@ -57,7 +57,7 @@ units = [
     {
         "id": "bp_default_main_battle_tank",
         "name": "M100 Thunder-Toad MBT",
-        "hull_type": "heavy_hull",
+        "hull_type": "block_heavy_meridian_a",
         "locomotion_type": "tracked_treads",
         "locomotion_settings": {"tread_width": 1.5},
         "weapons": [
@@ -68,7 +68,7 @@ units = [
     {
         "id": "bp_default_heavy_brawler",
         "name": "M33 Rhino-Puncher",
-        "hull_type": "assault_hull",
+        "hull_type": "plate_heavy_meridian_a",
         "locomotion_type": "tracked_treads",
         "locomotion_settings": {"tread_width": 1.8},
         "weapons": [
@@ -78,7 +78,7 @@ units = [
     {
         "id": "bp_default_anti_air",
         "name": "ZSU-44 Sky-Swatter",
-        "hull_type": "medium_hull",
+        "hull_type": "block_main_meridian_a",
         "locomotion_type": "wheels",
         "locomotion_settings": {"num_axles": 4, "wheel_size": 1.2, "wheels_per_axle": 2},
         "weapons": [
@@ -88,7 +88,7 @@ units = [
     {
         "id": "bp_default_artillery",
         "name": "M88 Boom-Lobber",
-        "hull_type": "medium_hull",
+        "hull_type": "block_main_meridian_a",
         "locomotion_type": "tracked_treads",
         "locomotion_settings": {"tread_width": 1.2},
         "weapons": [
@@ -98,7 +98,7 @@ units = [
     {
         "id": "bp_default_siege",
         "name": "M120 Crater-Maker",
-        "hull_type": "heavy_hull",
+        "hull_type": "block_heavy_meridian_a",
         "locomotion_type": "tracked_treads",
         "locomotion_settings": {"tread_width": 1.5},
         "weapons": [
@@ -109,7 +109,7 @@ units = [
     {
         "id": "bp_default_attack_chopper",
         "name": "AH-66 Whirly-Dirge",
-        "hull_type": "medium_hull",
+        "hull_type": "block_main_meridian_a",
         "locomotion_type": "helicopter_rotors",
         "locomotion_settings": {"size": 1.5, "count": 4},
         "weapons": [
@@ -120,7 +120,7 @@ units = [
     {
         "id": "bp_default_drone_carrier",
         "name": "CV-99 Hive-Mind",
-        "hull_type": "assault_hull",
+        "hull_type": "plate_heavy_meridian_a",
         "locomotion_type": "hover_engine",
         "locomotion_settings": {},
         "weapons": [
@@ -130,7 +130,7 @@ units = [
     {
         "id": "bp_default_ew_radar",
         "name": "M195 Batfrog Electronic Warfare Vehicle",
-        "hull_type": "scout_hull",
+        "hull_type": "wedge_scout_meridian_a",
         "locomotion_type": "wheels",
         "locomotion_settings": {"num_axles": 2, "wheel_size": 1.1, "wheels_per_axle": 2},
         "weapons": [
@@ -140,7 +140,7 @@ units = [
     {
         "id": "bp_default_heavy_bomber",
         "name": "B-52 Carpet-Bagger",
-        "hull_type": "assault_hull",
+        "hull_type": "plate_heavy_meridian_a",
         "locomotion_type": "fixed_wing_engine",
         "locomotion_settings": {"size": 2.0, "count": 4},
         "weapons": [

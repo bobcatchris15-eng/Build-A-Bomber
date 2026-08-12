@@ -175,10 +175,10 @@ const LOCKED_TYPES = [
 # at the thickness shown, using ModuleCatalog.compute_hull_max_hp() - the
 # same function the Design Lab sidebar and battle_unit.gd use.
 const TARGET_HULLS = [
-	{"hull": "scout_hull", "thickness": 0.6},
-	{"hull": "light_hull", "thickness": 1.0},
-	{"hull": "medium_hull", "thickness": 1.4},
-	{"hull": "heavy_hull", "thickness": 2.0},
+	{"hull": "wedge_scout_meridian_a", "thickness": 0.6},
+	{"hull": "block_scout_meridian_a", "thickness": 1.0},
+	{"hull": "block_main_meridian_a", "thickness": 1.4},
+	{"hull": "block_heavy_meridian_a", "thickness": 2.0},
 ]
 const TARGET_MATERIALS = ["hardened_steel", "reactive_armor", "ablative_ceramic", "energy_shielding"]
 

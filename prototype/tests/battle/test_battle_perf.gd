@@ -62,7 +62,7 @@ func _spawn(controller: Node):
 	var unit = UnitScript.new()
 	_track(unit)
 	var blueprint := {
-		"hull_type": "medium_hull",
+		"hull_type": "block_main_meridian_a",
 		"modules": [],
 		"locomotion": {"type_id": "wheels", "settings": {}},
 	}

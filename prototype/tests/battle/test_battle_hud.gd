@@ -46,7 +46,7 @@ func _hud() -> Array:
 	director.production.setup(director.economy, null)
 	director.production.add_team(0)
 	director.roster = [
-		{"name": "Test Tank", "hull_type": "medium_hull", "modules": []},
+		{"name": "Test Tank", "hull_type": "block_main_meridian_a", "modules": []},
 	]
 	root.add_child(director)
 

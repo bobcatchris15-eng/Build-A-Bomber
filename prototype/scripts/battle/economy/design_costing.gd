@@ -30,7 +30,7 @@ static func blueprint_cost(data: Dictionary) -> int:
 # The raw metal/crystal breakdown. Kept for the Design Lab, which is where
 # "this tweak costs you crystal, hard" is a thing worth showing.
 static func blueprint_materials(data: Dictionary) -> Vector2i:
-	var hull_type: String = data.get("hull_type", "medium_hull")
+	var hull_type: String = data.get("hull_type", "block_main_meridian_a")
 	var sc: Dictionary = data.get("hull_scale", {"x": 1.0, "y": 1.0, "z": 1.0})
 	var hull_cost: Vector2i = ModuleCatalog.compute_hull_cost(
 		hull_type,
@@ -84,7 +84,7 @@ static func build_time_for_cost(credits: int) -> float:
 static func blueprint_required_buildings(data: Dictionary) -> Array[String]:
 	var loco: Dictionary = data.get("locomotion", {})
 	var gated_ids: Array[String] = [
-		str(data.get("hull_type", "medium_hull")),
+		str(data.get("hull_type", "block_main_meridian_a")),
 		str(data.get("armor_material", "hardened_steel")),
 		str(loco.get("type_id", "")),
 	]
@@ -116,5 +116,5 @@ static func blueprint_required_buildings(data: Dictionary) -> Array[String]:
 
 # Which of the five queues a unit design comes off, from its hull's weight tier.
 static func queue_for_design(data: Dictionary) -> String:
-	var tier: String = ModuleCatalog.get_hull_size_tier(data.get("hull_type", "medium_hull"))
+	var tier: String = ModuleCatalog.get_hull_size_tier(data.get("hull_type", "block_main_meridian_a"))
 	return BuildingCatalogScript.queue_for_hull_tier(tier)

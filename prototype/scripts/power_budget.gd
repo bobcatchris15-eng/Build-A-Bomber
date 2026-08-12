@@ -89,7 +89,7 @@ static func analyze(hull_node, hull_type_override: String = "") -> Dictionary:
 	# medium_hull only as a last resort for a hull that exists but carries no
 	# type_id - a standalone or test-built node. Something has to be assumed
 	# there, and the roster's own default is the least surprising choice.
-	var hull_type := "medium_hull"
+	var hull_type := "block_main_meridian_a"
 	if hull_type_override != "":
 		hull_type = hull_type_override
 	elif is_instance_valid(hull_node) and hull_node.has_meta("type_id"):

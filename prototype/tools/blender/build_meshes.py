@@ -3471,26 +3471,26 @@ def _wall_greebles(bm, hx, hy, hz):
 def generate_hulls():
 	print("--- Building hull library ---")
 
-	export_and_cleanup(build_afv_hull("light_hull", 3.0, 1.0, 4.0,
+	export_and_cleanup(build_afv_hull("block_scout_meridian_a", 3.0, 1.0, 4.0,
 		nose_frac=0.6, tub_frac=0.45, upper_w=0.82, glacis_len_frac=0.35,
 		spine_w=0.35, spine_h=1.08, fender_height_frac=0.05,
 		bevel_pct=0.06,
-		color=(0.72, 0.73, 0.75), greebles=_light_hull_greebles), HULLS_DIR, "light_hull")
+		color=(0.72, 0.73, 0.75), greebles=_light_hull_greebles), HULLS_DIR, "block_scout_meridian_a")
 
-	export_and_cleanup(build_afv_hull("medium_hull", 4.0, 1.0, 6.0,
+	export_and_cleanup(build_afv_hull("block_main_meridian_a", 4.0, 1.0, 6.0,
 		nose_frac=0.25, tub_frac=0.55, upper_w=0.78, glacis_len_frac=0.3,
 		spine_w=0.6, spine_h=1.15, turret_ring=True,
 		louver_panel={"z_frac": 0.72, "width_frac": 0.85, "depth_frac": 0.3, "slats": 5},
 		waist_inset=0.0, deck_line=0.0,
 		panel_line_fracs=[0.28], armor_front_frac=0.55,
-		color=(0.5, 0.5, 0.52), greebles=_medium_hull_greebles), HULLS_DIR, "medium_hull")
+		color=(0.5, 0.5, 0.52), greebles=_medium_hull_greebles), HULLS_DIR, "block_main_meridian_a")
 
-	export_and_cleanup(build_afv_hull("heavy_hull", 6.0, 1.5, 8.0,
+	export_and_cleanup(build_afv_hull("block_heavy_meridian_a", 6.0, 1.5, 8.0,
 		nose_frac=0.08, tub_frac=0.6, upper_w=0.9, glacis_len_frac=0.22,
 		spine_w=0.75, spine_h=1.2, turret_ring=True,
 		louver_panel={"z_frac": 0.75, "width_frac": 0.85, "depth_frac": 0.28, "slats": 6},
 		bevel_pct=0.09, bevel_segments=3,
-		color=(0.32, 0.32, 0.34), greebles=_heavy_hull_greebles), HULLS_DIR, "heavy_hull")
+		color=(0.32, 0.32, 0.34), greebles=_heavy_hull_greebles), HULLS_DIR, "block_heavy_meridian_a")
 
 	export_and_cleanup(build_wedge_hull("interceptor_hull", 2.4, 0.8, 3.2,
 		nose_frac=0.95, spine_w=0.22, spine_h=1.05, rear_flare=0.75, front_flare=0.3,
@@ -3498,11 +3498,11 @@ def generate_hulls():
 		speed_line_chamfer=True,
 		color=(0.55, 0.65, 0.78), greebles=_interceptor_hull_greebles), HULLS_DIR, "interceptor_hull")
 
-	export_and_cleanup(build_afv_hull("assault_hull", 5.0, 1.3, 7.0,
+	export_and_cleanup(build_afv_hull("plate_heavy_meridian_a", 5.0, 1.3, 7.0,
 		nose_frac=0.3, tub_frac=0.55, upper_w=0.82, glacis_len_frac=0.32,
 		spine_w=0.7, spine_h=1.22,
 		bevel_pct=0.085, bevel_segments=3,
-		color=(0.4, 0.32, 0.28), greebles=_assault_hull_greebles), HULLS_DIR, "assault_hull")
+		color=(0.4, 0.32, 0.28), greebles=_assault_hull_greebles), HULLS_DIR, "plate_heavy_meridian_a")
 
 	export_and_cleanup(build_bunker_hull("pillbox_foundation", 3.0, 1.2, 3.0,
 		sides=8, taper=0.7,

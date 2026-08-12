@@ -91,7 +91,7 @@ func test_every_design_draws_the_same_rate_while_building() -> bool:
 func test_four_harvesters_meet_the_stated_target() -> bool:
 	print("Running Test Suite: Economy - 4 harvesters vs 1 and 2 production lines...")
 	var fsm = HarvesterFSMScript.new()
-	fsm.configure(1, "medium_hull")
+	fsm.configure(1, "block_main_meridian_a")
 
 	var capacity: float = float(fsm.capacity)
 	var cycles: float = ceil(capacity / float(fsm._chunk_size()))
@@ -135,13 +135,13 @@ func test_harvester_capacity_comes_from_the_design() -> bool:
 	var ok := true
 
 	var one = HarvesterFSMScript.new()
-	one.configure(1, "medium_hull")
+	one.configure(1, "block_main_meridian_a")
 	var two = HarvesterFSMScript.new()
-	two.configure(2, "medium_hull")
+	two.configure(2, "block_main_meridian_a")
 	var heavy = HarvesterFSMScript.new()
-	heavy.configure(1, "heavy_hull")
+	heavy.configure(1, "block_heavy_meridian_a")
 	var light = HarvesterFSMScript.new()
-	light.configure(1, "light_hull")
+	light.configure(1, "block_scout_meridian_a")
 
 	if two.capacity <= one.capacity:
 		print("  [FAIL] A second harvester module does not raise the hopper: %d vs %d"

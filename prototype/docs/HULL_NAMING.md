@@ -1,0 +1,107 @@
+# Hull naming scheme (HULL_REFRESH_PLAN §3)
+
+The hull catalogue uses a 4-segment naming scheme:
+
+    <family>_<tonnage>_<manufacturer>[_<variant>]
+
+Example: `block_main_meridian_a` is the Block-family, Main-tonnage,
+Meridian-manufacturer, variant A hull.
+
+## Families (6)
+
+The first segment is the silhouette family. Six families, all chosen
+for their convexity and faceting potential (per the catalog's
+"regular, convex, faceted" rule, HULL_REFRESH_PLAN §6).
+
+| Slug | Slug | Reference vocabulary |
+|---|---|---|
+| `block` | Boxy, conventional, sloped glacis | T-34, M4 Sherman, Leopard 1 |
+| `wedge` | Streamlined, dart-like, single taper | Wiesel, CV90, Stryker Dragoon |
+| `plate` | Heavy plate-armour, faceted, fortress-on-wheels | Maus, IS-3, Object 279 |
+| `pod` | Spherical / multi-axis sensor vehicle | Ho-Ri, Strv 103, modern C2 |
+| `carrier` | Cab-forward, open platform, modular | M939, M1078 LMTV, RCB |
+| `skiff` | Planing-hull, boat-on-land, low-slung | BTR-80, LAV-25, AAV-7 |
+
+## Tonnage (3)
+
+The second segment is the tonnage band, a parameter variant of the
+same family silhouette. Three bands per family.
+
+| Tonnage | Typical footprint | Role |
+|---|---|---|
+| `scout` | 0.6× width, 0.5× height | Recon, cheap expendable |
+| `main` | 1.0× width, 1.0× height | Workhorse |
+| `heavy` | 1.4× width, 1.4× height | Assault, breakthrough |
+
+## Manufacturer (3 committed + 1 reserve)
+
+The third segment is the in-fiction factory of origin. Three
+committed, one reserve.
+
+| Slug | Visual signature | Cue at distance |
+|---|---|---|
+| `meridian` | Conservative engineering, lots of bolts, plate seams, exposed rivets | A slight overhang of the upper superstructure past the lower tub ("Marine Crocodile" silhouette), a flat front face |
+| `osterholm` | Bauhaus / industrial-design, hard 90° corners, no rivets on broad faces, thin panel lines on a 1-unit grid | Flat top deck with no turret ring (the pintle sits on an integrated pad), perfectly square front face |
+| `tidemark` | Maritime-origin engineering, low freeboard, long horizontal paneling, slight sheer-line in side profile, cleats, anchor fittings | Sheer line in side profile (deck higher at the ends), small pilothouse offset forward, long flat cargo deck aft |
+| (reserve) `vane_forst` | (not yet authored; takes overflow variants only) | |
+
+## Variant letter (a/b/c/d)
+
+The fourth segment, when present, distinguishes variants within the
+same (family, tonnage, manufacturer) tuple. Used for sub-variants like
+dozer-plate, open-top, fast-attack, etc. Defaults to `a` when omitted.
+
+## Default hull
+
+`block_main_meridian_a` is the post-refresh default hull. The legacy
+`medium_hull` is gone; the same 7+ call sites that used to hardcode
+`medium_hull` as their safe fallback now hardcode
+`block_main_meridian_a` instead. The fallback constant
+`PROTECTED_DEFAULT_HULL_FALLBACK` in
+[`prototype/scripts/hull_loader.gd:51`](../scripts/hull_loader.gd)
+is keyed on this id.
+
+## What was retired (PR 1)
+
+The 51 legacy + modern hull entries, all of which used the old
+"military-typology" or "abstract" naming, are deleted as part of the
+refresh. The 8 WIP files at `NEW_HULLS/` at the repo root are also
+deleted. The 3 foundations (`pillbox`, `tower`, `fortress_wall`)
+are renamed in PR 6, not retired in PR 1.
+
+| Retired naming | Replaced by (per family) |
+|---|---|
+| `scout_hull`, `light_hull`, `medium_hull`, `heavy_hull` | `block_scout_*`, `block_main_*`, `block_heavy_*` (and wedge / plate variants for advanced units) |
+| `transport_hull`, `heavy_transport_hull`, `open_transport_hull` | `carrier_main_*`, `carrier_heavy_*`, `carrier_open_*` |
+| `assault_hull` | `plate_heavy_*` |
+| `capsule_hull`, `carapace_hull`, `catamaran_hull`, `crawler_hull`, `delta_plate_hull`, `flatbed_hull`, `gantry_hull`, `hex_pod_hull`, `octaplate_hull`, `spire_hull`, `tandem_hull`, `tank_drum_hull` | Replaced wholesale by the 6-family structure above |
+| `_mk2`, `_mod_4a*` variants | All retired; the new catalogue uses manufacturer variants, not versioned mod-id suffixes |
+| `NEW_HULLS/hull_0[1-8]_*.glb` (8 WIP files at repo root) | Reference-only; not shipped |
+
+## What survives (PR 1's keep list)
+
+- `block_main_meridian_a` (renamed in place from the legacy
+  `medium_hull` — placeholder geometry until PR 2 ships the
+  real Block family hull)
+- `pillbox_foundation` / `tower_foundation` / `fortress_wall_foundation`
+  (the 3 foundations; renamed in PR 6, untouched in PR 1)
+- All `parts/*.glb` and `buildings/*.glb` (separate catalogues, not
+  part of the hull retirement)
+
+## Foundations (separate family taxonomy, §5.7)
+
+Foundations use a different taxonomy because they are static
+defenses, not vehicles. The foundation naming is:
+
+    <foundation_family>_main_<manufacturer>
+
+| Slug | Reference vocabulary |
+|---|---|
+| `bunker` | M8 pillbox, WWII Atlantic-wall casemate |
+| `tower` | WWII fire-control tower, watchtower |
+| `rampart` | Sectional fortification, merlon-and-embrasure curtain wall |
+| `battery` | Coast-artillery casemate, missile launch pad |
+
+The three existing foundations become
+`bunker_main_meridian` / `tower_main_meridian` /
+`rampart_main_meridian` in PR 6.

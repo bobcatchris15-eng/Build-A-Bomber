@@ -34,12 +34,12 @@ const TAGLINE := "Design bureau and proving ground"
 const SHOWCASE_CYCLE_INTERVAL := 30.0
 
 const FALLBACK_HULL_TYPES := [
-	"medium_hull",
-	"heavy_hull",
-	"scout_hull",
+	"block_main_meridian_a",
+	"block_heavy_meridian_a",
+	"wedge_scout_meridian_a",
 	"flying_wing_hull",
 	"super_heavy_hull",
-	"light_hull",
+	"block_scout_meridian_a",
 	"tri_hull",
 	"pillbox_foundation"
 ]
@@ -350,7 +350,7 @@ func _build_3d_showcase_model(item: Dictionary, parent: Node3D) -> void:
 		var mgr = BlueprintManagerScript.new()
 		var vehicle = mgr.reconstruct_vehicle(bp, model_root, true)
 		if vehicle == null:
-			var hull_id := str(bp.get("hull_type", "medium_hull"))
+			var hull_id := str(bp.get("hull_type", "block_main_meridian_a"))
 			_build_hull_mesh_node(hull_id, model_root)
 		else:
 			# Kept for the SpecPlacard sync below - the SAME live node
@@ -359,7 +359,7 @@ func _build_3d_showcase_model(item: Dictionary, parent: Node3D) -> void:
 			# weight/speed/dps/range figures rather than a re-derivation.
 			_showcase_vehicle = vehicle
 	else:
-		var hull_id: String = item.get("hull_type", "medium_hull")
+		var hull_id: String = item.get("hull_type", "block_main_meridian_a")
 		_build_hull_mesh_node(hull_id, model_root)
 
 	# Apply uniform matte greenish-grey plastic finish (unpainted scale model sprue look)
@@ -725,7 +725,7 @@ func _update_placard_ui(item: Dictionary) -> void:
 			stats = DesignStatsScript.analyze(_showcase_vehicle)
 		_spec_placard.from_blueprint(design_name, "CERTIFIED PLAYER BLUEPRINT", bp, stats)
 	else:
-		var hull_id: String = item.get("hull_type", "medium_hull")
+		var hull_id: String = item.get("hull_type", "block_main_meridian_a")
 		_spec_placard.from_blueprint(design_name, "STANDARD BUREAU CHASSIS // READY FOR ASSEMBLY",
 			{"hull_type": hull_id})
 

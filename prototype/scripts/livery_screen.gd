@@ -338,7 +338,7 @@ func _rebuild_preview() -> void:
 	# makes two liveries genuinely comparable.
 	var blueprint := {
 		"version": 2.0,
-		"hull_type": "medium_hull",
+		"hull_type": "block_main_meridian_a",
 		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
 		"armor_material": "hardened_steel",
 		"faction": LiveryScript.PLAYER_ID,
