@@ -1,193 +1,224 @@
 {
-	"armor_material": "ablative_ceramic",
-	"armor_thickness": 1,
+	"armor_material": "hardened_steel",
+	"armor_thickness": 0.7,
 	"faction": "industrialists",
 	"hull_scale": {
-		"x": 1,
-		"y": 1,
-		"z": 1
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
 	},
 	"hull_size": {
-		"x": 2,
-		"y": 1.20000004768372,
-		"z": 3.59999990463257
+		"x": 2.48300004005432,
+		"y": 1.44968998432159,
+		"z": 4.09999990463257
 	},
-	"hull_type": "wedge_scout_meridian_a",
+	"hull_type": "orrin_scout_a",
 	"id": "bp_default_scrubmarshal_no_33",
 	"locomotion": {
 		"settings": {},
 		"type_id": "rocker_bogie"
 	},
-	"modified_unix": 1785939174.046,
 	"modules": [
-		{
-			"facet": "top",
-			"mount_normal": {
-				"x": 0,
-				"y": 1,
-				"z": 0
-			},
-			"mount_style": "pintle",
-			"name": "Coil Gun",
-			"position": {
-				"x": -0.5,
-				"y": 0.600000143051147,
-				"z": -0.25
-			},
-			"rotation": {
-				"x": 0,
-				"y": 0,
-				"z": 0
-			},
-			"scale": {
-				"x": 1,
-				"y": 1,
-				"z": 1
-			},
-			"scale_flip_x": false,
-			"sponson": false,
-			"stats": {
-				"cost_crystal": 30,
-				"cost_metal": 55,
-				"dps": 88,
-				"hp": 90,
-				"weight": 120
-			},
-			"tweaks": {},
-			"type_id": "coil_gun",
-			"yaw_offset": 0
-		},
-		{
-			"facet": "top",
-			"mount_normal": {
-				"x": 0,
-				"y": 1,
-				"z": 0
-			},
-			"mount_style": "pintle",
-			"name": "Coil Gun",
-			"position": {
-				"x": 0.5,
-				"y": 0.600000143051147,
-				"z": -0.25
-			},
-			"rotation": {
-				"x": 0,
-				"y": 0,
-				"z": 0
-			},
-			"scale": {
-				"x": 1,
-				"y": 1,
-				"z": 1
-			},
-			"scale_flip_x": false,
-			"sponson": false,
-			"stats": {
-				"cost_crystal": 30,
-				"cost_metal": 55,
-				"dps": 88,
-				"hp": 90,
-				"weight": 120
-			},
-			"tweaks": {},
-			"type_id": "coil_gun",
-			"yaw_offset": 0
-		},
 		{
 			"facet": "",
 			"mount_normal": {
-				"x": 0,
-				"y": 1,
-				"z": 0
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
 			},
 			"mount_style": "",
 			"name": "Rocker-Bogie Suspension",
 			"position": {
-				"x": -1,
-				"y": -0.5,
-				"z": 0
+				"x": -1.24309992790222,
+				"y": -0.702099978923798,
+				"z": 0.0
 			},
 			"rotation": {
-				"x": 0,
-				"y": 0,
-				"z": 0
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
 			},
 			"scale": {
-				"x": 0.622877359390259,
-				"y": 0.622877359390259,
-				"z": 0.622877359390259
+				"x": 0.573799610137939,
+				"y": 0.573799610137939,
+				"z": 0.573799610137939
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 2,
-				"cost_metal": 15,
-				"dps": 0,
-				"hp": 67,
-				"weight": 26.5
+				"cost_metal": 13,
+				"dps": 0.0,
+				"hp": 59.5,
+				"weight": 21.0
 			},
 			"tweaks": {
-				"arm_length": 1,
-				"bogie_pairs": 3,
-				"kit_anchor_x": 0.399999976158142,
-				"kit_anchor_y": 0.0960000157356262,
-				"kit_anchor_z": 0,
-				"kit_reach": 0,
-				"target_length": 3.59999990463257,
-				"wheel_size": 1
+				"arm_length": 1.0,
+				"bogie_pairs": 3.0,
+				"chine_belly_drop": 0.0569000244140625,
+				"chine_clear_x": 0.0569000244140625,
+				"chine_flank_height": 1.46109998226166,
+				"chine_half_width": 1.29999995231628,
+				"chine_normal_x": 0.707107067108154,
+				"chine_normal_y": -0.707106471061707,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.707106471061707,
+				"chine_up_y": 0.707107067108154,
+				"kit_anchor_x": 0.496599972248077,
+				"kit_anchor_y": 0.115975201129913,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -1.24309992790222,
+				"station_y": -0.702099978923798,
+				"station_z": 0.0,
+				"target_length": 4.09999990463257,
+				"wheel_size": 1.0
 			},
 			"type_id": "rocker_bogie",
-			"yaw_offset": 0
+			"yaw_offset": 0.0
 		},
 		{
 			"facet": "",
 			"mount_normal": {
-				"x": 0,
-				"y": 1,
-				"z": 0
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
 			},
 			"mount_style": "",
 			"name": "Rocker-Bogie Suspension",
 			"position": {
-				"x": 1,
-				"y": -0.5,
-				"z": 0
+				"x": 1.2430499792099,
+				"y": -0.702099978923798,
+				"z": 0.0
 			},
 			"rotation": {
-				"x": 0,
-				"y": 0,
-				"z": 0
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
 			},
 			"scale": {
-				"x": 0.622877359390259,
-				"y": 0.622877359390259,
-				"z": 0.622877359390259
+				"x": 0.573799610137939,
+				"y": 0.573799610137939,
+				"z": 0.573799610137939
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 2,
-				"cost_metal": 15,
-				"dps": 0,
-				"hp": 67,
-				"weight": 26.5
+				"cost_metal": 13,
+				"dps": 0.0,
+				"hp": 59.5,
+				"weight": 21.0
 			},
 			"tweaks": {
-				"arm_length": 1,
-				"bogie_pairs": 3,
-				"kit_anchor_x": -0.39999997615814,
-				"kit_anchor_y": 0.0960000157356262,
-				"kit_anchor_z": 0,
-				"kit_reach": 0,
-				"target_length": 3.59999990463257,
-				"wheel_size": 1
+				"arm_length": 1.0,
+				"bogie_pairs": 3.0,
+				"chine_belly_drop": 0.0569000244140625,
+				"chine_clear_x": 0.0569499731063843,
+				"chine_flank_height": 1.46109998226166,
+				"chine_half_width": 1.29999995231628,
+				"chine_normal_x": 0.706876933574677,
+				"chine_normal_y": -0.70733654499054,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.70733654499054,
+				"chine_up_y": 0.706876933574677,
+				"kit_anchor_x": -0.496599972248077,
+				"kit_anchor_y": 0.115975201129913,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 1.2430499792099,
+				"station_y": -0.702099978923798,
+				"station_z": 0.0,
+				"target_length": 4.09999990463257,
+				"wheel_size": 1.0
 			},
 			"type_id": "rocker_bogie",
-			"yaw_offset": 0
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Coil Gun",
+			"position": {
+				"x": -0.75,
+				"y": 0.724844932556152,
+				"z": -0.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 30,
+				"cost_metal": 55,
+				"dps": 88.0,
+				"hp": 90.0,
+				"weight": 120.0
+			},
+			"tweaks": {},
+			"type_id": "coil_gun",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Coil Gun",
+			"position": {
+				"x": 0.75,
+				"y": 0.724844932556152,
+				"z": -0.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 30,
+				"cost_metal": 55,
+				"dps": 88.0,
+				"hp": 90.0,
+				"weight": 120.0
+			},
+			"tweaks": {},
+			"type_id": "coil_gun",
+			"yaw_offset": 0.0
 		}
 	],
 	"name": "ScrubMarshal No. 33",
-	"nose_taper": 1,
-	"version": 1
+	"nose_taper": 1.0,
+	"version": 1.0
 }

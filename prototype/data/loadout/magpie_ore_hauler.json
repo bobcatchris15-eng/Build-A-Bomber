@@ -8,12 +8,12 @@
 		"z": 1.0
 	},
 	"hull_size": {
-		"x": 3.78299999237061,
-		"y": 1.80710995197296,
-		"z": 8.89999961853027
+		"x": 4.1710000038147,
+		"y": 2.00789999961853,
+		"z": 8.10000038146973
 	},
-	"hull_type": "tallow_transport_a",
-	"id": "bp_default_gravelgulper_no_7",
+	"hull_type": "orrin_transport_a",
+	"id": "default_magpie_ore_hauler",
 	"locomotion": {
 		"settings": {
 			"num_axles": 8,
@@ -33,9 +33,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": -1.8147999048233,
-				"y": -0.93149995803833,
-				"z": -3.11499977111816
+				"x": -1.71363425254822,
+				"y": -0.943295180797577,
+				"z": -2.83500003814697
 			},
 			"rotation": {
 				"x": 0.0,
@@ -57,26 +57,26 @@
 				"weight": 110.0
 			},
 			"tweaks": {
-				"chine_belly_drop": 0.0,
-				"chine_clear_x": 0.135200023651123,
-				"chine_flank_height": 0.935203022090718,
-				"chine_half_width": 1.94999992847443,
-				"chine_normal_x": 0.504249095916748,
-				"chine_normal_y": -0.863558292388916,
+				"chine_belly_drop": 0.091704785823822,
+				"chine_clear_x": 0.049430251121521,
+				"chine_flank_height": 1.22953218221664,
+				"chine_half_width": 1.76306450366974,
+				"chine_normal_x": 0.707077860832214,
+				"chine_normal_y": -0.707135736942291,
 				"chine_seated": 1.0,
-				"chine_up_x": 0.863558292388916,
-				"chine_up_y": 0.504249095916748,
-				"kit_anchor_x": 0.921600103378296,
-				"kit_anchor_y": 0.144568800926209,
+				"chine_up_x": 0.707135736942291,
+				"chine_up_y": 0.707077860832214,
+				"kit_anchor_x": 0.999200105667114,
+				"kit_anchor_y": 0.160632014274597,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
 				"mount_rise": 0.0,
 				"node_scale_x": 1.0,
 				"node_scale_y": 1.0,
 				"node_scale_z": 1.0,
-				"station_x": -1.8147999048233,
-				"station_y": -0.93149995803833,
-				"station_z": -3.11499977111816,
+				"station_x": -1.71363425254822,
+				"station_y": -0.943295180797577,
+				"station_z": -2.83500003814697,
 				"wheel_size": 1.1,
 				"wheels_per_axle": 2
 			},
@@ -93,9 +93,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": -1.85760509967804,
-				"y": -0.888694763183594,
-				"z": -1.03833329677582
+				"x": -2.08649778366089,
+				"y": -0.957401990890503,
+				"z": -0.945000052452087
 			},
 			"rotation": {
 				"x": 0.0,
@@ -117,26 +117,26 @@
 				"weight": 110.0
 			},
 			"tweaks": {
-				"chine_belly_drop": 0.0428051948547363,
-				"chine_clear_x": 0.0923948287963867,
-				"chine_flank_height": 1.82019472122192,
-				"chine_half_width": 1.94999992847443,
-				"chine_normal_x": 0.920982480049133,
-				"chine_normal_y": -0.38960388302803,
+				"chine_belly_drop": 0.077597975730896,
+				"chine_clear_x": 0.0635020732879639,
+				"chine_flank_height": 1.49060195684433,
+				"chine_half_width": 2.14999985694885,
+				"chine_normal_x": 0.70710688829422,
+				"chine_normal_y": -0.707106649875641,
 				"chine_seated": 1.0,
-				"chine_up_x": 0.389603912830353,
-				"chine_up_y": 0.920982539653778,
-				"kit_anchor_x": 0.921600103378296,
-				"kit_anchor_y": 0.144568800926209,
+				"chine_up_x": 0.707106649875641,
+				"chine_up_y": 0.70710688829422,
+				"kit_anchor_x": 0.999200105667114,
+				"kit_anchor_y": 0.160632014274597,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
 				"mount_rise": 0.0,
 				"node_scale_x": 1.0,
 				"node_scale_y": 1.0,
 				"node_scale_z": 1.0,
-				"station_x": -1.85760509967804,
-				"station_y": -0.888694763183594,
-				"station_z": -1.03833329677582,
+				"station_x": -2.08649778366089,
+				"station_y": -0.957401990890503,
+				"station_z": -0.945000052452087,
 				"wheel_size": 1.1,
 				"wheels_per_axle": 2
 			},
@@ -153,9 +153,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": -1.90717351436615,
-				"y": -0.839126408100128,
-				"z": 1.03833329677582
+				"x": -2.07238626480103,
+				"y": -0.971513628959656,
+				"z": 0.945000052452087
 			},
 			"rotation": {
 				"x": 0.0,
@@ -177,26 +177,26 @@
 				"weight": 110.0
 			},
 			"tweaks": {
-				"chine_belly_drop": 0.0923735499382019,
-				"chine_clear_x": 0.0428264141082764,
-				"chine_flank_height": 1.77062636613846,
-				"chine_half_width": 1.94999992847443,
-				"chine_normal_x": 0.932796955108643,
-				"chine_normal_y": -0.360402286052704,
+				"chine_belly_drop": 0.0634863376617432,
+				"chine_clear_x": 0.0776135921478271,
+				"chine_flank_height": 2.00651359558105,
+				"chine_half_width": 2.14999985694885,
+				"chine_normal_x": 0.70710688829422,
+				"chine_normal_y": -0.707106649875641,
 				"chine_seated": 1.0,
-				"chine_up_x": 0.360402315855026,
-				"chine_up_y": 0.932797014713287,
-				"kit_anchor_x": 0.921600103378296,
-				"kit_anchor_y": 0.144568800926209,
+				"chine_up_x": 0.707106649875641,
+				"chine_up_y": 0.70710688829422,
+				"kit_anchor_x": 0.999200105667114,
+				"kit_anchor_y": 0.160632014274597,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
 				"mount_rise": 0.0,
 				"node_scale_x": 1.0,
 				"node_scale_y": 1.0,
 				"node_scale_z": 1.0,
-				"station_x": -1.90717351436615,
-				"station_y": -0.839126408100128,
-				"station_z": 1.03833329677582,
+				"station_x": -2.07238626480103,
+				"station_y": -0.971513628959656,
+				"station_z": 0.945000052452087,
 				"wheel_size": 1.1,
 				"wheels_per_axle": 2
 			},
@@ -213,9 +213,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": -1.82155191898346,
-				"y": -0.924747943878174,
-				"z": 3.11499977111816
+				"x": -2.02168226242065,
+				"y": -0.985620498657227,
+				"z": 2.83500003814697
 			},
 			"rotation": {
 				"x": 0.0,
@@ -237,26 +237,26 @@
 				"weight": 110.0
 			},
 			"tweaks": {
-				"chine_belly_drop": 0.00675201416015625,
-				"chine_clear_x": 0.128448009490967,
-				"chine_flank_height": 1.8562479019165,
-				"chine_half_width": 1.94999992847443,
-				"chine_normal_x": 0.723739504814148,
-				"chine_normal_y": -0.690073192119598,
+				"chine_belly_drop": 0.0493794679641724,
+				"chine_clear_x": 0.0917854309082031,
+				"chine_flank_height": 2.02062046527863,
+				"chine_half_width": 2.11346769332886,
+				"chine_normal_x": 0.706978142261505,
+				"chine_normal_y": -0.707235455513,
 				"chine_seated": 1.0,
-				"chine_up_x": 0.690073251724243,
-				"chine_up_y": 0.723739564418793,
-				"kit_anchor_x": 0.921600103378296,
-				"kit_anchor_y": 0.144568800926209,
+				"chine_up_x": 0.707235455513,
+				"chine_up_y": 0.706978142261505,
+				"kit_anchor_x": 0.999200105667114,
+				"kit_anchor_y": 0.160632014274597,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
 				"mount_rise": 0.0,
 				"node_scale_x": 1.0,
 				"node_scale_y": 1.0,
 				"node_scale_z": 1.0,
-				"station_x": -1.82155191898346,
-				"station_y": -0.924747943878174,
-				"station_z": 3.11499977111816,
+				"station_x": -2.02168226242065,
+				"station_y": -0.985620498657227,
+				"station_z": 2.83500003814697,
 				"wheel_size": 1.1,
 				"wheels_per_axle": 2
 			},
@@ -273,9 +273,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": 1.82146823406219,
-				"y": -0.924736738204956,
-				"z": -3.11499977111816
+				"x": 1.67125964164734,
+				"y": -0.985604763031006,
+				"z": -2.83500003814697
 			},
 			"rotation": {
 				"x": 0.0,
@@ -297,26 +297,26 @@
 				"weight": 110.0
 			},
 			"tweaks": {
-				"chine_belly_drop": 0.00676321983337402,
-				"chine_clear_x": 0.128531694412231,
-				"chine_flank_height": 0.928439802257344,
-				"chine_half_width": 1.94999992847443,
-				"chine_normal_x": 0.723577678203583,
-				"chine_normal_y": -0.690243005752563,
+				"chine_belly_drop": 0.0493952035903931,
+				"chine_clear_x": 0.0917696952819824,
+				"chine_flank_height": 1.27184176445007,
+				"chine_half_width": 1.76302933692932,
+				"chine_normal_x": 0.707012295722961,
+				"chine_normal_y": -0.707201242446899,
 				"chine_seated": 1.0,
-				"chine_up_x": 0.690243005752563,
-				"chine_up_y": 0.723577678203583,
-				"kit_anchor_x": -0.921600103378296,
-				"kit_anchor_y": 0.144568800926209,
+				"chine_up_x": 0.707201242446899,
+				"chine_up_y": 0.707012295722961,
+				"kit_anchor_x": -0.999200105667114,
+				"kit_anchor_y": 0.160632014274597,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
 				"mount_rise": 0.0,
 				"node_scale_x": 1.0,
 				"node_scale_y": 1.0,
 				"node_scale_z": 1.0,
-				"station_x": 1.82146823406219,
-				"station_y": -0.924736738204956,
-				"station_z": -3.11499977111816,
+				"station_x": 1.67125964164734,
+				"station_y": -0.985604763031006,
+				"station_z": -2.83500003814697,
 				"wheel_size": 1.1,
 				"wheels_per_axle": 2
 			},
@@ -333,9 +333,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": 1.90716314315796,
-				"y": -0.839105188846588,
-				"z": -1.03833329677582
+				"x": 2.07234692573547,
+				"y": -0.97149795293808,
+				"z": -0.945000052452087
 			},
 			"rotation": {
 				"x": 0.0,
@@ -357,26 +357,26 @@
 				"weight": 110.0
 			},
 			"tweaks": {
-				"chine_belly_drop": 0.0923947691917419,
-				"chine_clear_x": 0.0428367853164673,
-				"chine_flank_height": 1.77060514688492,
-				"chine_half_width": 1.94999992847443,
-				"chine_normal_x": 0.932755053043365,
-				"chine_normal_y": -0.360510915517807,
+				"chine_belly_drop": 0.0635020136833191,
+				"chine_clear_x": 0.0776529312133789,
+				"chine_flank_height": 1.50469791889191,
+				"chine_half_width": 2.14999985694885,
+				"chine_normal_x": 0.706921517848969,
+				"chine_normal_y": -0.707292020320892,
 				"chine_seated": 1.0,
-				"chine_up_x": 0.360510915517807,
-				"chine_up_y": 0.932755053043365,
-				"kit_anchor_x": -0.921600103378296,
-				"kit_anchor_y": 0.144568800926209,
+				"chine_up_x": 0.707292020320892,
+				"chine_up_y": 0.706921517848969,
+				"kit_anchor_x": -0.999200105667114,
+				"kit_anchor_y": 0.160632014274597,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
 				"mount_rise": 0.0,
 				"node_scale_x": 1.0,
 				"node_scale_y": 1.0,
 				"node_scale_z": 1.0,
-				"station_x": 1.90716314315796,
-				"station_y": -0.839105188846588,
-				"station_z": -1.03833329677582,
+				"station_x": 2.07234692573547,
+				"station_y": -0.97149795293808,
+				"station_z": -0.945000052452087,
 				"wheel_size": 1.1,
 				"wheels_per_axle": 2
 			},
@@ -393,9 +393,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": 1.85755813121796,
-				"y": -0.888673543930054,
-				"z": 1.03833329677582
+				"x": 2.08646845817566,
+				"y": -0.957386314868927,
+				"z": 0.945000052452087
 			},
 			"rotation": {
 				"x": 0.0,
@@ -417,26 +417,26 @@
 				"weight": 110.0
 			},
 			"tweaks": {
-				"chine_belly_drop": 0.0428264141082764,
-				"chine_clear_x": 0.0924417972564697,
-				"chine_flank_height": 1.82017350196838,
-				"chine_half_width": 1.94999992847443,
-				"chine_normal_x": 0.920926153659821,
-				"chine_normal_y": -0.389737099409103,
+				"chine_belly_drop": 0.0776136517524719,
+				"chine_clear_x": 0.0635313987731934,
+				"chine_flank_height": 1.99238628149033,
+				"chine_half_width": 2.14999985694885,
+				"chine_normal_x": 0.706921517848969,
+				"chine_normal_y": -0.707291901111603,
 				"chine_seated": 1.0,
-				"chine_up_x": 0.389737129211426,
-				"chine_up_y": 0.920926213264465,
-				"kit_anchor_x": -0.921600103378296,
-				"kit_anchor_y": 0.144568800926209,
+				"chine_up_x": 0.707291960716248,
+				"chine_up_y": 0.706921577453613,
+				"kit_anchor_x": -0.999200105667114,
+				"kit_anchor_y": 0.160632014274597,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
 				"mount_rise": 0.0,
 				"node_scale_x": 1.0,
 				"node_scale_y": 1.0,
 				"node_scale_z": 1.0,
-				"station_x": 1.85755813121796,
-				"station_y": -0.888673543930054,
-				"station_z": 1.03833329677582,
+				"station_x": 2.08646845817566,
+				"station_y": -0.957386314868927,
+				"station_z": 0.945000052452087,
 				"wheel_size": 1.1,
 				"wheels_per_axle": 2
 			},
@@ -453,9 +453,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": 1.94324290752411,
-				"y": -0.803052008152008,
-				"z": 3.11499977111816
+				"x": 2.06405329704285,
+				"y": -0.943279445171356,
+				"z": 2.83500003814697
 			},
 			"rotation": {
 				"x": 0.0,
@@ -477,26 +477,26 @@
 				"weight": 110.0
 			},
 			"tweaks": {
-				"chine_belly_drop": 0.128447949886322,
-				"chine_clear_x": 0.00675702095031738,
-				"chine_flank_height": 1.73455196619034,
-				"chine_half_width": 1.94999992847443,
-				"chine_normal_x": 0.85746967792511,
-				"chine_normal_y": -0.514534473419189,
+				"chine_belly_drop": 0.0917205214500427,
+				"chine_clear_x": 0.0494143962860107,
+				"chine_flank_height": 1.97827941179276,
+				"chine_half_width": 2.11346769332886,
+				"chine_normal_x": 0.706921517848969,
+				"chine_normal_y": -0.707291960716248,
 				"chine_seated": 1.0,
-				"chine_up_x": 0.514534533023834,
-				"chine_up_y": 0.857469737529755,
-				"kit_anchor_x": -0.921600103378296,
-				"kit_anchor_y": 0.144568800926209,
+				"chine_up_x": 0.707292020320892,
+				"chine_up_y": 0.706921577453613,
+				"kit_anchor_x": -0.999200105667114,
+				"kit_anchor_y": 0.160632014274597,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
 				"mount_rise": 0.0,
 				"node_scale_x": 1.0,
 				"node_scale_y": 1.0,
 				"node_scale_z": 1.0,
-				"station_x": 1.94324290752411,
-				"station_y": -0.803052008152008,
-				"station_z": 3.11499977111816,
+				"station_x": 2.06405329704285,
+				"station_y": -0.943279445171356,
+				"station_z": 2.83500003814697,
 				"wheel_size": 1.1,
 				"wheels_per_axle": 2
 			},
@@ -514,8 +514,8 @@
 			"name": "Resource Harvester",
 			"position": {
 				"x": 0.0,
-				"y": 0.801510691642761,
-				"z": 0.75
+				"y": 0.699662089347839,
+				"z": 1.0
 			},
 			"rotation": {
 				"x": 0.0,
@@ -551,8 +551,8 @@
 			"name": "Resource Bay",
 			"position": {
 				"x": -1.0,
-				"y": 0.801510691642761,
-				"z": 3.0
+				"y": 0.699662089347839,
+				"z": 2.75
 			},
 			"rotation": {
 				"x": 0.0,
@@ -588,8 +588,8 @@
 			"name": "Resource Bay",
 			"position": {
 				"x": 1.0,
-				"y": 0.801510691642761,
-				"z": 3.0
+				"y": 0.699662089347839,
+				"z": 2.75
 			},
 			"rotation": {
 				"x": 0.0,
@@ -625,11 +625,11 @@
 			"name": "Radar Mast Suite",
 			"position": {
 				"x": 0.0,
-				"y": -0.320584177970886,
+				"y": 0.514574408531189,
 				"z": -1.5
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": -0.0525471307337284,
 				"y": 0.0,
 				"z": 0.0
 			},
@@ -655,25 +655,25 @@
 			"facet": "top",
 			"mount_normal": {
 				"x": 0.0,
-				"y": 0.96582156419754,
-				"z": 0.259207785129547
+				"y": 0.950019598007202,
+				"z": -0.312190175056458
 			},
 			"mount_style": "pintle",
 			"name": "Heavy Machine Gun",
 			"position": {
-				"x": 1.0,
-				"y": -0.0272713899612427,
+				"x": 0.0,
+				"y": 0.25626814365387,
 				"z": -3.0
 			},
 			"rotation": {
-				"x": 0.262201905250549,
+				"x": -0.317497611045837,
 				"y": 0.0,
 				"z": 0.0
 			},
 			"scale": {
 				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"y": 0.999999940395355,
+				"z": 0.999999940395355
 			},
 			"scale_flip_x": false,
 			"sponson": false,
@@ -689,7 +689,7 @@
 			"yaw_offset": 0.0
 		}
 	],
-	"name": "GravelGulper No. 7",
+	"name": "Magpie Ore Hauler",
 	"nose_taper": 1.0,
 	"version": 1.0
 }

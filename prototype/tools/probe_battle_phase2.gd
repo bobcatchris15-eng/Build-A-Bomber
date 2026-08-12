@@ -109,12 +109,12 @@ func _init():
 			harvesters.append(u)
 	print("  harvesters in the starting force: %d" % harvesters.size())
 	if harvesters.is_empty():
-		failures.append("no harvester spawned - ore_trucker.json should mount resource_harvester")
+		failures.append("no harvester spawned - magpie_ore_hauler.json should mount resource_harvester")
 		_finish(battle, failures)
 		return
 
 	# Add more so several return together, which is the case that used to jam.
-	var trucker: Dictionary = battle.bp_manager.load_blueprint("res://data/loadout/ore_trucker.json")
+	var trucker: Dictionary = battle.bp_manager.load_blueprint("res://data/loadout/magpie_ore_hauler.json")
 	var origin: Vector3 = harvesters[0].global_position
 	for i in range(3):
 		var extra = battle.spawn_unit(trucker, 0, origin + Vector3(float(i) * 5.0 - 5.0, 0, 6.0))

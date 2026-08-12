@@ -27,6 +27,7 @@ extends SceneTree
 const SUITE_FILES := {
 	"stat_model": preload("res://tests/test_stat_model.gd"),
 	"designer_lab": preload("res://tests/test_designer_lab.gd"),
+	"locomotion_mounting": preload("res://tests/test_locomotion_mounting.gd"),
 	"ui_and_camera": preload("res://tests/test_ui_and_camera.gd"),
 	"input_and_settings": preload("res://tests/test_input_and_settings.gd"),
 	"scene_loads": preload("res://tests/test_scene_loads.gd"),
@@ -147,6 +148,15 @@ const SUITE_ORDER := [
 	# the signal (structure_built / structure_lost fire on the right
 	# transitions).
 	["tech_tree", "test_gate_re_evaluates_after_structure_placed"],
+	# Locomotion mounting. Placed immediately before the designer_lab block
+	# because it instantiates the same MainLab-style rig and shares its setup
+	# cost, and after everything else for the reason designer_lab is last: these
+	# are the heaviest screens in the suite.
+	["locomotion_mounting", "test_chine_solver_holds_across_the_hull_roster"],
+	["locomotion_mounting", "test_seated_stations_lie_on_the_hull_mesh"],
+	["locomotion_mounting", "test_running_gear_stands_clear_of_the_hull"],
+	["locomotion_mounting", "test_only_ground_and_hovering_types_seat_to_the_chine"],
+	["locomotion_mounting", "test_hull_carries_exactly_one_locomotion_chassis"],
 	["designer_lab", "test_clipping_detection"],
 	["designer_lab", "test_rotation_popup_and_deforms"],
 	["designer_lab", "test_sensor_mast_tweak_and_proportions"],

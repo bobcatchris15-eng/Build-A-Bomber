@@ -46,7 +46,7 @@ func test_every_design_draws_the_same_rate_while_building() -> bool:
 	print("Running Test Suite: Economy - a production line draws a flat rate...")
 	var ok := true
 	var checked := 0
-	for name in ["rattler_scout", "bulwark_mbt", "warden_aa", "ore_trucker"]:
+	for name in ["rattler_scout", "bulwark_mbt", "warden_aa", "magpie_ore_hauler"]:
 		var path := "res://data/loadout/%s.json" % name
 		if not FileAccess.file_exists(path):
 			continue

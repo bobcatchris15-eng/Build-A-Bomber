@@ -1,38 +1,200 @@
 {
-	"version": 1.0,
-	"id": "enemy_raptor_striker",
-	"name": "Raptor Strike Fighter",
-	"hull_type": "kestrel_scout_a",
-	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-	"hull_size": {"x": 2.4, "y": 0.8, "z": 3.2},
 	"armor_material": "hardened_steel",
-	"armor_thickness": 0.6,
+	"armor_thickness": 0.5,
 	"faction": "technocrats",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 2.96000003814697,
+		"y": 1.34032499790192,
+		"z": 5.30000019073486
+	},
+	"hull_type": "kestrel_light_a",
+	"id": "default_raptor_striker",
 	"locomotion": {
-		"type_id": "fixed_wing_engine",
-		"settings": {"size": 1.0}
+		"settings": {},
+		"type_id": "fixed_wing_engine"
 	},
 	"modules": [
 		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "AGP Strike Drive",
+			"position": {
+				"x": 1.87999999523163,
+				"y": 0.0,
+				"z": 0.75
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 20,
+				"cost_metal": 60,
+				"dps": 0.0,
+				"hp": 70.0,
+				"weight": 60.0
+			},
+			"tweaks": {
+				"afterburner": false,
+				"kit_reach": 0.0,
+				"mount_reach_x": -1.87999999523163,
+				"mount_reach_y": 0.0,
+				"mount_reach_z": -0.795000016689301,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 1.87999999523163,
+				"station_y": 0.0,
+				"station_z": 0.795000016689301,
+				"turbine_compression": 1.0
+			},
+			"type_id": "fixed_wing_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "AGP Strike Drive",
+			"position": {
+				"x": -1.87999999523163,
+				"y": 0.0,
+				"z": 0.75
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 20,
+				"cost_metal": 60,
+				"dps": 0.0,
+				"hp": 70.0,
+				"weight": 60.0
+			},
+			"tweaks": {
+				"afterburner": false,
+				"kit_reach": 0.0,
+				"mount_reach_x": 1.87999999523163,
+				"mount_reach_y": -0.000000000000000131052778780508,
+				"mount_reach_z": -0.795000016689301,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -1.87999999523163,
+				"station_y": 0.000000000000000131052778780508,
+				"station_z": 0.795000016689301,
+				"turbine_compression": 1.0
+			},
+			"type_id": "fixed_wing_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Rotary Gatling",
+			"position": {
+				"x": 0.0,
+				"y": 0.2890625,
+				"z": 0.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 5,
+				"cost_metal": 45,
+				"dps": 105.0,
+				"hp": 80.0,
+				"weight": 110.0
+			},
+			"tweaks": {},
 			"type_id": "rotary_cannon",
-			"name": "Nose Cannon",
-			"position": {"x": 0.0, "y": 0.4, "z": -1.6},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-			"yaw_offset": 0.0,
-			"tweaks": {}
+			"yaw_offset": 0.0
 		},
 		{
-			"type_id": "fixed_wing_engine", "name": "Fixed-Wing Engine",
-			"position": {"x": 1.6, "y": 0.0, "z": 0.32},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
-		},
-		{
-			"type_id": "fixed_wing_engine", "name": "Fixed-Wing Engine",
-			"position": {"x": -1.6, "y": 0.0, "z": 0.32},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.997561633586884,
+				"z": 0.069791704416275
+			},
+			"mount_style": "pintle",
+			"name": "Swarm Missile Pod",
+			"position": {
+				"x": 0.0,
+				"y": 0.329913914203644,
+				"z": 1.75
+			},
+			"rotation": {
+				"x": 0.0698484852910042,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 10,
+				"cost_metal": 50,
+				"dps": 72.0,
+				"hp": 100.0,
+				"weight": 150.0
+			},
+			"tweaks": {},
+			"type_id": "missile_pod",
+			"yaw_offset": 0.0
 		}
-	]
+	],
+	"name": "Raptor Strike Fighter",
+	"nose_taper": 1.0,
+	"version": 1.0
 }

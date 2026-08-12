@@ -55,7 +55,7 @@ func _init():
 		if u.is_harvester:
 			harvesters.append(u)
 	# A couple more, so bay contention is part of the picture.
-	var hb: Dictionary = battle.bp_manager.load_blueprint("res://data/loadout/ore_trucker.json")
+	var hb: Dictionary = battle.bp_manager.load_blueprint("res://data/loadout/magpie_ore_hauler.json")
 	if not hb.is_empty():
 		for i in range(2):
 			var h = battle.spawn_unit(hb, 0, refinery.global_position + Vector3(10.0 + i * 6.0, 0, 10.0))

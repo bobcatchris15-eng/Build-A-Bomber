@@ -1,6 +1,6 @@
 {
 	"armor_material": "hardened_steel",
-	"armor_thickness": 1.0,
+	"armor_thickness": 1.2,
 	"faction": "industrialists",
 	"hull_scale": {
 		"x": 1.0,
@@ -8,322 +8,20 @@
 		"z": 1.0
 	},
 	"hull_size": {
-		"x": 4.30000019073486,
-		"y": 2.40000009536743,
-		"z": 8.69999980926514
+		"x": 4.22300004959106,
+		"y": 2.06102991104126,
+		"z": 7.69999980926514
 	},
-	"hull_type": "landing_craft_hull",
+	"hull_type": "halvorsen_transport_a",
 	"id": "bp_default_spaderammer_mk_xii",
 	"locomotion": {
 		"settings": {
+			"drive_sprocket": true,
 			"tread_width": 2.0
 		},
 		"type_id": "tracked_treads"
 	},
-	"modified_unix": 1785942588.387,
 	"modules": [
-		{
-			"facet": "top",
-			"mount_normal": {
-				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
-			},
-			"mount_style": "pintle",
-			"name": "Autocannon",
-			"position": {
-				"x": 2.0,
-				"y": 0.600000619888306,
-				"z": -2.75
-			},
-			"rotation": {
-				"x": 0.0,
-				"y": 0.0,
-				"z": 0.0
-			},
-			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
-			},
-			"scale_flip_x": false,
-			"sponson": false,
-			"stats": {
-				"cost_crystal": 0,
-				"cost_metal": 26,
-				"dps": 62.0,
-				"hp": 75.0,
-				"weight": 65.0
-			},
-			"tweaks": {},
-			"type_id": "autocannon",
-			"yaw_offset": 0.0
-		},
-		{
-			"facet": "top",
-			"mount_normal": {
-				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
-			},
-			"mount_style": "pintle",
-			"name": "Autocannon",
-			"position": {
-				"x": -2.0,
-				"y": 0.600000619888306,
-				"z": -2.75
-			},
-			"rotation": {
-				"x": 0.0,
-				"y": 0.0,
-				"z": 0.0
-			},
-			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
-			},
-			"scale_flip_x": false,
-			"sponson": false,
-			"stats": {
-				"cost_crystal": 0,
-				"cost_metal": 26,
-				"dps": 62.0,
-				"hp": 75.0,
-				"weight": 65.0
-			},
-			"tweaks": {},
-			"type_id": "autocannon",
-			"yaw_offset": 0.0
-		},
-		{
-			"facet": "top",
-			"mount_normal": {
-				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
-			},
-			"mount_style": "pintle",
-			"name": "Mortar Array",
-			"position": {
-				"x": 1.25,
-				"y": 0.0499999523162842,
-				"z": 2.0
-			},
-			"rotation": {
-				"x": 0.0,
-				"y": 0.0,
-				"z": 0.0
-			},
-			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
-			},
-			"scale_flip_x": false,
-			"sponson": false,
-			"stats": {
-				"cost_crystal": 0,
-				"cost_metal": 69,
-				"dps": 75.0,
-				"hp": 80.0,
-				"weight": 148.5
-			},
-			"tweaks": {
-				"ammo": "he",
-				"tube_count": 3.0
-			},
-			"type_id": "mortar_array",
-			"yaw_offset": 0.0
-		},
-		{
-			"facet": "top",
-			"mount_normal": {
-				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
-			},
-			"mount_style": "pintle",
-			"name": "Mortar Array",
-			"position": {
-				"x": -1.25,
-				"y": 0.0499999523162842,
-				"z": 2.0
-			},
-			"rotation": {
-				"x": 0.0,
-				"y": 0.0,
-				"z": 0.0
-			},
-			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
-			},
-			"scale_flip_x": false,
-			"sponson": false,
-			"stats": {
-				"cost_crystal": 0,
-				"cost_metal": 69,
-				"dps": 75.0,
-				"hp": 80.0,
-				"weight": 148.5
-			},
-			"tweaks": {
-				"ammo": "he",
-				"tube_count": 3.0
-			},
-			"type_id": "mortar_array",
-			"yaw_offset": 0.0
-		},
-		{
-			"facet": "top",
-			"mount_normal": {
-				"x": 0.0,
-				"y": 0.776420950889587,
-				"z": -0.630214750766754
-			},
-			"mount_style": "pintle",
-			"name": "Smoke Discharger",
-			"position": {
-				"x": 1.5,
-				"y": 0.0,
-				"z": -3.75
-			},
-			"rotation": {
-				"x": -0.681829631328583,
-				"y": 0.0,
-				"z": 0.0
-			},
-			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
-			},
-			"scale_flip_x": false,
-			"sponson": false,
-			"stats": {
-				"cost_crystal": 0,
-				"cost_metal": 14,
-				"dps": 0.0,
-				"hp": 40.0,
-				"weight": 28.5
-			},
-			"tweaks": {},
-			"type_id": "smoke_discharger",
-			"yaw_offset": 0.0
-		},
-		{
-			"facet": "top",
-			"mount_normal": {
-				"x": 0.0,
-				"y": 0.776420950889587,
-				"z": -0.630214750766754
-			},
-			"mount_style": "pintle",
-			"name": "Smoke Discharger",
-			"position": {
-				"x": -1.5,
-				"y": 0.0,
-				"z": -3.75
-			},
-			"rotation": {
-				"x": -0.681829631328583,
-				"y": 0.0,
-				"z": 0.0
-			},
-			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
-			},
-			"scale_flip_x": false,
-			"sponson": false,
-			"stats": {
-				"cost_crystal": 0,
-				"cost_metal": 14,
-				"dps": 0.0,
-				"hp": 40.0,
-				"weight": 28.5
-			},
-			"tweaks": {},
-			"type_id": "smoke_discharger",
-			"yaw_offset": 0.0
-		},
-		{
-			"facet": "back",
-			"mount_normal": {
-				"x": 0.0,
-				"y": 0.0,
-				"z": 1.0
-			},
-			"mount_style": "pintle",
-			"name": "Sentry Deployer",
-			"position": {
-				"x": -1.25,
-				"y": -0.75,
-				"z": 4.14999914169312
-			},
-			"rotation": {
-				"x": 0.0,
-				"y": 3.14159274101257,
-				"z": 0.0
-			},
-			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
-			},
-			"scale_flip_x": false,
-			"sponson": true,
-			"stats": {
-				"cost_crystal": 12,
-				"cost_metal": 46,
-				"dps": 45.0,
-				"hp": 75.0,
-				"weight": 140.0
-			},
-			"tweaks": {},
-			"type_id": "sentry_deployer",
-			"yaw_offset": 0.0
-		},
-		{
-			"facet": "back",
-			"mount_normal": {
-				"x": 0.0,
-				"y": 0.0,
-				"z": 1.0
-			},
-			"mount_style": "pintle",
-			"name": "Sentry Deployer",
-			"position": {
-				"x": 1.25,
-				"y": -0.75,
-				"z": 4.14999914169312
-			},
-			"rotation": {
-				"x": 0.0,
-				"y": 3.14159274101257,
-				"z": 0.0
-			},
-			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
-			},
-			"scale_flip_x": false,
-			"sponson": true,
-			"stats": {
-				"cost_crystal": 12,
-				"cost_metal": 46,
-				"dps": 45.0,
-				"hp": 75.0,
-				"weight": 140.0
-			},
-			"tweaks": {},
-			"type_id": "sentry_deployer",
-			"yaw_offset": 0.0
-		},
 		{
 			"facet": "",
 			"mount_normal": {
@@ -334,8 +32,8 @@
 			"mount_style": "",
 			"name": "Tracked Treads",
 			"position": {
-				"x": -1.89200007915497,
-				"y": -2.0,
+				"x": -2.30338001251221,
+				"y": -1.37148535251617,
 				"z": 0.0
 			},
 			"rotation": {
@@ -358,12 +56,28 @@
 				"weight": 240.0
 			},
 			"tweaks": {
+				"chine_belly_drop": 0.608999967575073,
+				"chine_clear_x": 0.0,
+				"chine_flank_height": 1.39199995994568,
+				"chine_half_width": 2.04999995231628,
+				"chine_normal_x": 0.980883479118347,
+				"chine_normal_y": -0.194596186280251,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.194596186280251,
+				"chine_up_y": 0.980883479118347,
 				"drive_sprocket": true,
-				"kit_anchor_x": 0.601999998092651,
-				"kit_anchor_y": 0.912000060081482,
+				"kit_anchor_x": 0.591220021247864,
+				"kit_anchor_y": 0.783191394805908,
 				"kit_anchor_z": 0.0,
-				"kit_reach": 0.720000028610229,
-				"target_length": 8.69999980926514,
+				"kit_reach": 0.618308973312378,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -2.30338001251221,
+				"station_y": -1.37148535251617,
+				"station_z": 0.0,
+				"target_length": 7.69999980926514,
 				"tread_width": 2.0
 			},
 			"type_id": "tracked_treads",
@@ -379,8 +93,8 @@
 			"mount_style": "",
 			"name": "Tracked Treads",
 			"position": {
-				"x": 1.89200007915497,
-				"y": -2.0,
+				"x": 2.30338001251221,
+				"y": -1.37148535251617,
 				"z": 0.0
 			},
 			"rotation": {
@@ -403,15 +117,327 @@
 				"weight": 240.0
 			},
 			"tweaks": {
+				"chine_belly_drop": 0.608999967575073,
+				"chine_clear_x": 0.0,
+				"chine_flank_height": 1.39199995994568,
+				"chine_half_width": 2.04999995231628,
+				"chine_normal_x": 0.980883479118347,
+				"chine_normal_y": -0.194596186280251,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.194596186280251,
+				"chine_up_y": 0.980883479118347,
 				"drive_sprocket": true,
-				"kit_anchor_x": -0.601999998092651,
-				"kit_anchor_y": 0.912000060081482,
+				"kit_anchor_x": -0.591220021247864,
+				"kit_anchor_y": 0.783191394805908,
 				"kit_anchor_z": 0.0,
-				"kit_reach": 0.720000028610229,
-				"target_length": 8.69999980926514,
+				"kit_reach": 0.618308973312378,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 2.30338001251221,
+				"station_y": -1.37148535251617,
+				"station_z": 0.0,
+				"target_length": 7.69999980926514,
 				"tread_width": 2.0
 			},
 			"type_id": "tracked_treads",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Autocannon",
+			"position": {
+				"x": -1.0,
+				"y": 0.462985157966614,
+				"z": -1.5
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 26,
+				"dps": 62.0,
+				"hp": 75.0,
+				"weight": 65.0
+			},
+			"tweaks": {},
+			"type_id": "autocannon",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Autocannon",
+			"position": {
+				"x": 1.0,
+				"y": 0.462985157966614,
+				"z": -1.5
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 26,
+				"dps": 62.0,
+				"hp": 75.0,
+				"weight": 65.0
+			},
+			"tweaks": {},
+			"type_id": "autocannon",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Mortar Array",
+			"position": {
+				"x": -1.0,
+				"y": 0.462985634803772,
+				"z": 0.5
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 40,
+				"dps": 50.0,
+				"hp": 80.0,
+				"weight": 90.0
+			},
+			"tweaks": {},
+			"type_id": "mortar_array",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Mortar Array",
+			"position": {
+				"x": 1.0,
+				"y": 0.462985634803772,
+				"z": 0.5
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 40,
+				"dps": 50.0,
+				"hp": 80.0,
+				"weight": 90.0
+			},
+			"tweaks": {},
+			"type_id": "mortar_array",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.999762117862701,
+				"z": 0.0218120738863945
+			},
+			"mount_style": "pintle",
+			"name": "Sentry Deployer",
+			"position": {
+				"x": -1.0,
+				"y": 0.455346822738647,
+				"z": 2.0
+			},
+			"rotation": {
+				"x": 0.021813802421093,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 12,
+				"cost_metal": 46,
+				"dps": 45.0,
+				"hp": 75.0,
+				"weight": 140.0
+			},
+			"tweaks": {},
+			"type_id": "sentry_deployer",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.999762117862701,
+				"z": 0.0218120776116848
+			},
+			"mount_style": "pintle",
+			"name": "Sentry Deployer",
+			"position": {
+				"x": 1.0,
+				"y": 0.455346345901489,
+				"z": 2.0
+			},
+			"rotation": {
+				"x": 0.0218138061463833,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 12,
+				"cost_metal": 46,
+				"dps": 45.0,
+				"hp": 75.0,
+				"weight": 140.0
+			},
+			"tweaks": {},
+			"type_id": "sentry_deployer",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.978761374950409,
+				"z": 0.20500285923481
+			},
+			"mount_style": "pintle",
+			"name": "Smoke Discharger",
+			"position": {
+				"x": -1.0,
+				"y": 0.344712138175964,
+				"z": 3.25
+			},
+			"rotation": {
+				"x": 0.206466630101204,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 14,
+				"dps": 0.0,
+				"hp": 40.0,
+				"weight": 28.5
+			},
+			"tweaks": {},
+			"type_id": "smoke_discharger",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.978761374950409,
+				"z": 0.20500285923481
+			},
+			"mount_style": "pintle",
+			"name": "Smoke Discharger",
+			"position": {
+				"x": 1.0,
+				"y": 0.344712138175964,
+				"z": 3.25
+			},
+			"rotation": {
+				"x": 0.206466630101204,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 14,
+				"dps": 0.0,
+				"hp": 40.0,
+				"weight": 28.5
+			},
+			"tweaks": {},
+			"type_id": "smoke_discharger",
 			"yaw_offset": 0.0
 		}
 	],

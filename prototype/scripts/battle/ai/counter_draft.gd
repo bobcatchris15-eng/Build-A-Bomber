@@ -62,12 +62,28 @@ static func threats_of(blueprint: Dictionary) -> Array:
 	# heavily it is plated - a medium hull under thick composite is an
 	# anti-armour problem whatever the catalog calls its chassis.
 	#
-	# 1.5 is calibrated against the bundled designs, where mobile armour runs
-	# 0.6-1.6 (Bulwark MBT 1.6, Breaker TD 1.4, Raptor 0.6). Foundations sit
-	# higher still but are buildings, and a static turret is not a threat the AI
-	# answers by drafting anti-armour units.
+	# The class comes off the hull's own sidecar, NOT off its slug. This used to
+	# read `hull.begins_with("heavy") or hull.begins_with("assault")`, which was
+	# true of the old catalogue's names (heavy_*, assault_*) and is true of
+	# nothing at all under the family slugs the 81-hull rebuild introduced -
+	# every heavy hull is now named <manufacturer>_heavy_<variant>, so the class
+	# is the middle token and the prefix test silently never fired. Every design
+	# that still classified as armour after the rename did so on thickness alone.
+	#
+	# Deliberately the DECLARED class and not get_hull_size_tier(), which folds
+	# Transport and Oddball into its "heavy" tier for production-cost purposes.
+	# That is right for costing and wrong here: an ore hauler on a transport
+	# chassis is not an anti-armour problem.
+	#
+	# The thickness arm stays at 1.5 and is now the exception rather than the
+	# rule: it exists for a medium chassis a player has plated up past what its
+	# class implies. Bundled mobile armour runs 0.5-1.4 and is caught by class.
+	# Foundations sit higher still but are buildings, and a static turret is not
+	# a threat the AI answers by drafting anti-armour units.
+	var hull_class: String = str(
+		ModuleCatalogScript.get_module_data(hull).get("hull_class", "")).to_lower()
 	var thickness: float = float(blueprint.get("armor_thickness", 0.0))
-	if hull.begins_with("heavy") or hull.begins_with("assault") or thickness >= 1.5:
+	if hull_class == "heavy" or thickness >= 1.5:
 		out.append("armor")
 
 	return out
@@ -115,7 +131,7 @@ static func wanted_roles(profile: Dictionary) -> Array:
 #
 # 1.0 is a purpose-built platform; a low score is a design that merely carries
 # something which qualifies. The Warden AA (flak cannon + CIWS, 2/2) has to
-# outrank the Longarm SPG (howitzer + CIWS, 1/2) when the player brings
+# outrank the Culverin SPG (artillery + CIWS, 1/2) when the player brings
 # aircraft, and pool order alone will not do that.
 static func role_strength(blueprint: Dictionary, role: String) -> float:
 	var wanted: Array = CommanderScript.ANTI_AIR_WEAPONS if role == "anti_air" \
@@ -159,7 +175,7 @@ static func order_roster(pool: Array, history: Array) -> Array:
 	for role in roles:
 		# Sorted by how much of the design is actually devoted to the role, not
 		# merely whether it qualifies. design_fills_role() answers a yes/no
-		# question honestly - the Longarm SPG really does mount a CIWS and really
+		# question honestly - the Culverin SPG really does mount a CIWS and really
 		# can shoot at aircraft - but a howitzer with point defence bolted on is
 		# not the answer to an air force, and taking the first qualifying design
 		# in pool order fielded exactly that.

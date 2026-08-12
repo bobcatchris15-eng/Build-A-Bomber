@@ -11,6 +11,7 @@ const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 const GlobalConfigScript = preload("res://scripts/global_config.gd")
 const PartMaterialsScript = preload("res://scripts/part_materials.gd")
 const HullProjectionScript = preload("res://scripts/hull_projection.gd")
+const MountReachScript = preload("res://scripts/mount_reach.gd")
 
 # mesh instance-id -> PartMaterials role, populated by _part() as assets load.
 #
@@ -3681,9 +3682,34 @@ static func _attach_ornithopter_pivot(parent_node: Node3D, base_size: Vector3, b
 ## inside the hull however deep the hub goes.
 static func build_wheel_mount(parent_node: Node3D, base_color: Color,
 		s: float = 1.0, z: float = 0.0, span: float = 0.3,
-		hub_drop: float = -1.0) -> Vector3:
+		hub_drop: float = -1.0, tweaks: Dictionary = {}) -> Vector3:
+	# THE INVARIANT IN THE DOC COMMENT ABOVE IS NOW ACTUALLY TRUE.
+	#
+	# It claimed the module origin already sits at the hull's underside, so a
+	# shaft angling up and inboard arrives inside the hull's solid volume by
+	# construction. That held on a literal box and failed on everything else:
+	# module_placer.gd put the origin at the fitted collision box's underside,
+	# which on a keeled, chamfered or tumblehome hull is in open air, so the
+	# shaft angled up into nothing and the whole assembly read as floating.
+	# Measured across the roster, that point sat a mean of 0.335 units - max
+	# 2.09 - from the hull's real lower edge.
+	#
+	# locomotion_mount.gd now seats the origin on the real chine, so the premise
+	# this mount was built on finally holds, and the four types that share it
+	# inherit the fix without their own geometry changing.
+	#
+	# Nothing generic is added on top: the driveshaft and gearbox below ARE this
+	# family's mounting gear, and they only ever read as floating because they
+	# were anchored to a point that was not on the hull. See the CHINE MOUNT
+	# FRAME note for the bracket that was tried here and removed.
+	# OUTBOARD STANDOFF. With the origin now on the hull skin rather than out at
+	# the box corner, every x below is measured from the body itself, so the whole
+	# assembly shifts out by the clearance the gear needs. Zero when unseated, so
+	# the pre-existing look is untouched on anything this does not apply to.
+	var stand: float = chine_standoff(chine_frame_from(tweaks), s)
+
 	var hub_y: float = -0.2 * s if hub_drop < 0.0 else -hub_drop
-	var gearbox_x := -0.24 * s
+	var gearbox_x := stand - 0.24 * s
 	var ds_mesh := _part("wheel_driveshaft")
 	var gb_mesh := _part("wheel_gearbox")
 	if ds_mesh:
@@ -3711,6 +3737,21 @@ static func build_wheel_mount(parent_node: Node3D, base_color: Color,
 			shaft_angle = atan2(run, rise)
 			shaft_len = sqrt(run * run + rise * rise)
 		var bottom_target := Vector3(gearbox_x + 0.05 * s, hub_y, z)
+
+		# SOLVED TO REACH THE HULL, not left at its authored length.
+		#
+		# Chris, 2026-08-12: "the wheels axles not poke up through small hulls".
+		# The 1.0 * s default was eyeballed against the reference hull (4 x 1 x 6);
+		# on a shallow scout hull that shaft is longer than the hull is tall, so it
+		# came out through the roof, and on a deep hull it stopped short inside.
+		# The shaft starts below and outboard of the body and runs up and inboard,
+		# so casting along its own axis gives the exact distance to the skin, and
+		# MountReach adds the bite past it.
+		shaft_len = MountReachScript.solve(parent_node,
+			MountReachScript.station_from(tweaks), bottom_target,
+			Vector3(-sin(shaft_angle), cos(shaft_angle), 0.0), shaft_len,
+			MountReachScript.node_scale_from(tweaks))
+
 		var drop := Vector3(sin(shaft_angle), -cos(shaft_angle), 0.0) * shaft_len
 		shaft.scale = Vector3(0.32 * s, shaft_len, span)
 		shaft.position = bottom_target - drop
@@ -3731,7 +3772,15 @@ static func build_wheel_mount(parent_node: Node3D, base_color: Color,
 	# the stations themselves had collapsed onto the centreline (see the
 	# missing `else` in locomotion_layout.gd's x_offset block). This value is
 	# left where it was rather than "fixed" alongside the real bug.
-	return Vector3(-0.05 * s, hub_y, z)
+	#
+	# The -0.05 is now relative to the STANDOFF rather than to the hull skin. It
+	# was authored when the module origin sat out at the box corner, where pulling
+	# the hub slightly inboard of the origin overlapped it with the gearbox. The
+	# origin has since moved onto the hull, so keeping the offset absolute would
+	# have pulled the hub INTO the body - the overlap it was tuned for is now
+	# between the hub and the gearbox at the outboard end, which is where it was
+	# always meant to be.
+	return Vector3(stand - 0.05 * s, hub_y, z)
 
 
 static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.BLACK, tweaks: Dictionary = {}):
@@ -3747,7 +3796,7 @@ static func _build_wheels(parent_node: Node3D, base_size: Vector3, base_color: C
 	# the hull mount point. build_wheel_mount() puts the gearbox inboard of it
 	# and returns the hub point just outboard, keeping the whole cluster inside
 	# the vehicle's footprint instead of hanging past its silhouette.
-	var hub := build_wheel_mount(parent_node, base_color, wheel_size, 0.0, cluster_width)
+	var hub := build_wheel_mount(parent_node, base_color, wheel_size, 0.0, cluster_width, -1.0, tweaks)
 	var hub_x_offset := hub.x
 	var wheel_y := hub.y
 
@@ -4087,6 +4136,23 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 	var hull_center = Vector3(-mount_reach_x * mount_side, -mount_reach_y, 0)
 	var strut_len = hull_center.length()
 	var strut_dir = hull_center / strut_len
+	# SOLVED AGAINST THE MESH, replacing "aim at the box centre and overshoot".
+	#
+	# Chris, 2026-08-12: "help the helicopter rotors mounting hardware actually
+	# reach the hull". mount_reach_x/y are derived from the fitted collision BOX,
+	# so pointing at the box's centre and travelling the full distance was only
+	# guaranteed to plunge into a hull that fills its box. On a tapered or curved
+	# one - which is most of the roster since the SDF bake - the strut stopped in
+	# open air beside the body.
+	#
+	# Casting along the strut's own axis to the real skin and biting 0.05 past it
+	# is both correct and less violent than the old overshoot: it no longer buries
+	# most of the pylon inside the hull to be sure of touching it.
+	var strut_reach: float = MountReachScript.solve(parent_node,
+		MountReachScript.station_from(tweaks), Vector3.ZERO, strut_dir, -1.0,
+		MountReachScript.node_scale_from(tweaks))
+	if strut_reach > 0.0:
+		strut_len = strut_reach
 	# rg_mount_box/mount_strut_tapered are both authored spanning local
 	# Y=[0, authored_len] - rotating by strut_angle about Z maps that Y span
 	# to world direction (-sin(angle), cos(angle), 0), so solving
@@ -4122,6 +4188,14 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 			-mount_reach_y - base_size.y * 1.35, 0.0)
 		var lower_len := lower_target.length()
 		var lower_dir := lower_target / lower_len
+		# Same solve for the brace. It aims lower down the hull's side, so its own
+		# distance to the skin is genuinely different from the main spar's - using
+		# the spar's would reopen the gap on one of the two members.
+		var lower_reach: float = MountReachScript.solve(parent_node,
+			MountReachScript.station_from(tweaks), Vector3.ZERO, lower_dir, -1.0,
+			MountReachScript.node_scale_from(tweaks))
+		if lower_reach > 0.0:
+			lower_len = lower_reach
 		var brace = _mesh_inst(strut_mesh, base_color.darkened(0.3))
 		brace.scale = Vector3(0.30, lower_len, 0.22)
 		brace.position = Vector3.ZERO
@@ -4205,7 +4279,7 @@ static func _build_helicopter_rotors(parent_node: Node3D, base_size: Vector3, ba
 
 
 static func _build_hover_engine(parent_node: Node3D, base_size: Vector3, base_color: Color = Color.DEEP_SKY_BLUE, tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "hover_engine", Color(0.32, 0.34, 0.37).lerp(base_color, 0.12), 1.0, float(tweaks.get("emv_level", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
+	build_mount_kit(parent_node, "hover_engine", Color(0.32, 0.34, 0.37).lerp(base_color, 0.12), 1.0, float(tweaks.get("emv_level", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))), tweaks)
 	# Scifi hover pad, per Chris's redesign: three concentric rings instead
 	# of the old fan+skirt+single-ring combo. The outer ring stays fixed/
 	# horizontal; the middle ring spins continuously around local X and the
@@ -5498,7 +5572,7 @@ static func _build_screw_drive(parent_node: Node3D, base_size: Vector3, base_col
 	var hub_y := 0.0
 	for z_end in [span * 0.5 * STRUT_INSET, -span * 0.5 * STRUT_INSET]:
 		var hub := build_wheel_mount(parent_node, base_color, mount_s, z_end,
-			mount_ref * 0.7, mount_ref * 1.0)
+			mount_ref * 0.7, mount_ref * 1.0, tweaks)
 		hub_y = hub.y
 
 	# The drum hangs at the mounts' own hub line, not at the module origin,
@@ -6857,7 +6931,7 @@ static func _build_rocker_bogie(parent_node: Node3D, base_size: Vector3, base_co
 	# hull's underside.
 	const WHEEL_GROWTH := 2.2
 	var pivot_s: float = 0.55 * v_scale
-	var hub := build_wheel_mount(parent_node, base_color, pivot_s, 0.0, 0.45 * pivot_s)
+	var hub := build_wheel_mount(parent_node, base_color, pivot_s, 0.0, 0.45 * pivot_s, -1.0, tweaks)
 
 	var chain := Node3D.new()
 	chain.position = hub
@@ -6990,7 +7064,7 @@ static func _build_air_cushion_skirt(parent_node: Node3D, base_size: Vector3, ba
 ## motion cue is the ring - which is exactly why dropping the ring for speed
 ## is a visible trade and not just a number.
 static func _build_anti_grav_plate(parent_node: Node3D, base_size: Vector3, base_color: Color = Color(0.35, 0.65, 0.85), tweaks: Dictionary = {}):
-	build_mount_kit(parent_node, "anti_grav_plate", Color(0.32, 0.34, 0.37).lerp(base_color, 0.12), 1.0, float(tweaks.get("field_strength", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))))
+	build_mount_kit(parent_node, "anti_grav_plate", Color(0.32, 0.34, 0.37).lerp(base_color, 0.12), 1.0, float(tweaks.get("field_strength", 1.0)), float(tweaks.get("kit_reach", 0.0)), Vector3(float(tweaks.get("kit_anchor_x", 0.0)), float(tweaks.get("kit_anchor_y", 0.0)), float(tweaks.get("kit_anchor_z", 0.0))), tweaks)
 	var plates := int(tweaks.get("plate_count", 4.0))
 	var field := float(tweaks.get("field_strength", 1.0))
 	var has_ring: bool = bool(tweaks.get("stabilizer_ring", true))
@@ -7093,7 +7167,7 @@ static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_
 	# to the drum only - scaling `psize` instead would grow the gearbox and
 	# driveshaft in lockstep and leave the proportions exactly where they were.
 	const DRUM_SCALE := 1.5
-	var hub := build_wheel_mount(parent_node, base_color, psize, 0.0, 0.3 * psize)
+	var hub := build_wheel_mount(parent_node, base_color, psize, 0.0, 0.3 * psize, -1.0, tweaks)
 
 	var pontoon_mesh := _part("pw_pontoon")
 	if pontoon_mesh:
@@ -7107,6 +7181,97 @@ static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_
 		var d := psize * DRUM_SCALE
 		drum.scale = Vector3(d * (1.0 if vanes else 0.82), d, d)
 		axle.add_child(drum)
+
+
+# ===========================================================================
+# CHINE MOUNT FRAME
+#
+# The measured attachment frame each seated locomotion instance receives, and
+# the standoff it needs to clear the hull. locomotion_mount.gd solves these off
+# the real mesh (hull_chine.gd) and publishes them through the tweaks dict; the
+# helpers below just read them back out.
+#
+# THERE IS DELIBERATELY NO GENERIC MOUNT BRACKET HERE.
+#
+# One was written and removed the same day. The reasoning for building it: with
+# stations seated onto the hull skin there is no gap left for build_mount_kit()'s
+# MountArm to span (it would be a degenerate zero-length beam), so the arm should
+# give way to something that provides contact AREA instead - a plate lying along
+# the flank with its lower edge on the chine.
+#
+# The reasoning for removing it, which is better (Chris, 2026-08-12): "A wheel
+# wouldn't have that sticking out over it. You're also adding on mounting gear to
+# the mounting gear that the old system generated."
+#
+# Both halves of that are right. Every seated type ALREADY has authored mount
+# geometry - a driveshaft and gearbox for the four types sharing
+# build_wheel_mount(), a track frame for the treads, an authored hip for the leg
+# sets, pads and standoffs for the kit types. A generic plate on top of those is
+# a second structure doing the first one's job, which is the same
+# two-structures mistake the retired running-gear slab and subframe both made.
+#
+# And it looked wrong for a specific geometric reason worth recording: on a
+# 45-degree chine the flank_up axis is diagonal, so a plate tall enough to read
+# as structure travels roughly as far OUTBOARD as it does up, and ends up
+# projecting over the top of the wheel it was supposed to be mounting.
+#
+# What actually fixed the mounting was seating the stations (they were computed
+# against the bounding box, a mean of 0.335 units off the real hull edge) and
+# then standing the gear off the body. The existing per-type geometry was never
+# the problem; it was correct geometry anchored to the wrong point.
+# ===========================================================================
+
+## Reads the measured mount frame out of a builder's tweaks dict.
+##
+## Returns an empty dict when this instance was not seated - an airborne type, a
+## centreline station, or a hull whose mesh could not be sliced. Every caller
+## treats that as "build the old way", so an unseated instance is unchanged
+## rather than broken.
+static func chine_frame_from(tweaks: Dictionary) -> Dictionary:
+	if float(tweaks.get("chine_seated", 0.0)) < 0.5:
+		return {}
+	var n := Vector3(float(tweaks.get("chine_normal_x", 0.0)),
+		float(tweaks.get("chine_normal_y", 0.0)), 0.0)
+	var u := Vector3(float(tweaks.get("chine_up_x", 0.0)),
+		float(tweaks.get("chine_up_y", 0.0)), 0.0)
+	if n.length_squared() < 1e-8 or u.length_squared() < 1e-8:
+		return {}
+	return {
+		"normal": n.normalized(),
+		"up": u.normalized(),
+		"flank_height": float(tweaks.get("chine_flank_height", 0.0)),
+		"belly_drop": float(tweaks.get("chine_belly_drop", 0.0)),
+		"half_width": float(tweaks.get("chine_half_width", 0.0)),
+		"clear_x": float(tweaks.get("chine_clear_x", 0.0)),
+	}
+
+
+## How far outboard running gear must sit, in module space, to clear the hull.
+##
+## Chris, 2026-08-12: "The wheels are too close to the hull body."
+##
+## That was a real regression from chine seating and worth naming precisely. The
+## old box placement put a station at the fitted collision box's side, which on
+## any hull with a chamfer or tumblehome is OUTBOARD of the mesh - so the wheels
+## were being held clear of the hull by the very error this pass removed. Seating
+## the station onto the real chine deleted that accidental clearance along with
+## the gap it came from, and the gear closed onto the body.
+##
+## The clearance now has to be asked for explicitly, which is the right way round:
+## it is a design quantity (running gear stands off the hull) rather than a
+## by-product of a measurement mistake. Two terms, both real:
+##   clear_x   the hull's own bulge above the chine, so the tyre misses the body
+##   margin    an air gap, scaled, so gear and hull never visually kiss
+##
+## An earlier version added a third term for the thickness of a generic mount
+## bracket. That bracket has since been removed (see the note at the top of this
+## section), so the term was padding the standoff on behalf of geometry that is
+## no longer built - which pushed the gearbox outboard of the hull side it is
+## supposed to tuck against.
+static func chine_standoff(frame: Dictionary, s: float = 1.0) -> float:
+	if frame.is_empty():
+		return 0.0
+	return float(frame.get("clear_x", 0.0)) + 0.18 * s
 
 
 # ===========================================================================
@@ -7131,11 +7296,17 @@ static func _build_pontoon_wheels(parent_node: Node3D, base_size: Vector3, base_
 ## once and mirrored here rather than authored twice.
 static func build_mount_kit(parent_node: Node3D, type_id: String,
 		base_color: Color, outboard: float = 1.0, scale_hint: float = 1.0,
-		kit_reach: float = 0.0, anchor: Vector3 = Vector3.ZERO) -> Node3D:
+		kit_reach: float = 0.0, anchor: Vector3 = Vector3.ZERO,
+		tweaks: Dictionary = {}) -> Node3D:
 	var spec: Dictionary = LocomotionLayoutScript.mount_kit(type_id)
 	var kit: int = int(spec.get("kit", 0))
 	if kit == LocomotionLayoutScript.Kit.NONE:
 		return null
+
+	# A seated station has no gap to span: locomotion_mount.gd has already put the
+	# origin on the hull skin, so the arm below would be a degenerate beam of
+	# length ~0. See the CHINE MOUNT FRAME retirement note.
+	var seated := not chine_frame_from(tweaks).is_empty()
 
 	var root := Node3D.new()
 	root.name = "MountKit"
@@ -7157,7 +7328,7 @@ static func build_mount_kit(parent_node: Node3D, type_id: String,
 	# module space. The member is built one unit long on -Z, then scaled to the
 	# vector's length and rotated onto it - so it spans exactly, at any size, for
 	# any type, with no per-type numbers at all.
-	if anchor.length() > 0.05:
+	if anchor.length() > 0.05 and not seated:
 		var span_len := anchor.length()
 		var arm := Node3D.new()
 		arm.name = "MountArm"

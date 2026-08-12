@@ -1,50 +1,400 @@
 {
-	"version": 1.0,
-	"id": "enemy_vulture_harvester",
-	"name": "Vulture Harvester",
-	"hull_type": "brenntal_medium_a",
-	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-	"hull_size": {"x": 4.0, "y": 1.0, "z": 6.0},
-	"armor_material": "ablative_ceramic",
-	"armor_thickness": 1.0,
+	"armor_material": "hardened_steel",
+	"armor_thickness": 0.7,
 	"faction": "technocrats",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 3.62899994850159,
+		"y": 2.24043011665344,
+		"z": 8.69999980926514
+	},
+	"hull_type": "kestrel_transport_a",
+	"id": "default_vulture_harvester",
 	"locomotion": {
-		"type_id": "hover_engine",
-		"settings": {}
+		"settings": {},
+		"type_id": "hover_engine"
 	},
 	"modules": [
 		{
-			"type_id": "resource_harvester",
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": 1.5051816701889,
+				"y": -1.17299997806549,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {
+				"chine_belly_drop": 0.0,
+				"chine_clear_x": 0.166800022125244,
+				"chine_flank_height": 1.35629996657372,
+				"chine_half_width": 1.67198169231415,
+				"chine_normal_x": 0.873551189899445,
+				"chine_normal_y": -0.486732214689255,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.486732244491577,
+				"chine_up_y": 0.873551249504089,
+				"emv_level": 1.0,
+				"kit_anchor_x": -1.32797499895096,
+				"kit_anchor_y": 0.179234390258789,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"mount_reach_x": -2.41449999809265,
+				"mount_reach_y": 1.12021493911743,
+				"mount_reach_z": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 1.5051816701889,
+				"station_y": -1.17299997806549,
+				"station_z": 0.0
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": 0.0,
+				"y": -1.12021493911743,
+				"z": 5.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {
+				"emv_level": 1.0,
+				"kit_anchor_x": -0.0000000000000000813123306699955,
+				"kit_anchor_y": 0.179234390258789,
+				"kit_anchor_z": -2.72249989509583,
+				"kit_reach": 0.0,
+				"mount_reach_x": -0.000000000000000147840601218174,
+				"mount_reach_y": 1.12021493911743,
+				"mount_reach_z": -4.94999980926514,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 0.000000000000000147840601218174,
+				"station_y": -1.12021493911743,
+				"station_z": 4.94999980926514
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": -1.5051816701889,
+				"y": -1.17299997806549,
+				"z": 0.000000000000000606180134554165
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {
+				"chine_belly_drop": 0.0,
+				"chine_clear_x": 0.166800022125244,
+				"chine_flank_height": 1.35629996657372,
+				"chine_half_width": 1.67198169231415,
+				"chine_normal_x": -0.873551309108734,
+				"chine_normal_y": -0.486732065677643,
+				"chine_seated": 1.0,
+				"chine_up_x": -0.486732065677643,
+				"chine_up_y": 0.873551309108734,
+				"emv_level": 1.0,
+				"kit_anchor_x": 1.32797499895096,
+				"kit_anchor_y": 0.179234390258789,
+				"kit_anchor_z": -0.000000000000000333399074004791,
+				"kit_reach": 0.0,
+				"mount_reach_x": 2.41449999809265,
+				"mount_reach_y": 1.12021493911743,
+				"mount_reach_z": -0.000000000000000606180134554165,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -1.5051816701889,
+				"station_y": -1.17299997806549,
+				"station_z": 0.000000000000000606180134554165
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": 0.0,
+				"y": -1.12021493911743,
+				"z": -5.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {
+				"emv_level": 1.0,
+				"kit_anchor_x": 0.000000000000000243936992009986,
+				"kit_anchor_y": 0.179234390258789,
+				"kit_anchor_z": 2.72249989509583,
+				"kit_reach": 0.0,
+				"mount_reach_x": 0.000000000000000443521803654521,
+				"mount_reach_y": 1.12021493911743,
+				"mount_reach_z": 4.94999980926514,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -0.000000000000000443521803654521,
+				"station_y": -1.12021493911743,
+				"station_z": -4.94999980926514
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
 			"name": "Resource Harvester",
-			"position": {"x": 0.0, "y": 0.5, "z": 0.0},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-			"yaw_offset": 0.0,
-			"tweaks": {}
+			"position": {
+				"x": 0.0,
+				"y": 0.166666150093079,
+				"z": 0.75
+			},
+			"rotation": {
+				"x": 0.0469163730740547,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 50,
+				"cost_metal": 100,
+				"dps": 0.0,
+				"hp": 150.0,
+				"weight": 80.0
+			},
+			"tweaks": {},
+			"type_id": "resource_harvester",
+			"yaw_offset": 0.0
 		},
 		{
-			"type_id": "hover_engine", "name": "Hover Pad",
-			"position": {"x": 2.0, "y": -0.5, "z": 2.1},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Resource Bay",
+			"position": {
+				"x": -1.0,
+				"y": 1.12021481990814,
+				"z": 2.75
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 10,
+				"cost_metal": 60,
+				"dps": 0.0,
+				"hp": 120.0,
+				"weight": 90.0
+			},
+			"tweaks": {},
+			"type_id": "resource_bay",
+			"yaw_offset": 0.0
 		},
 		{
-			"type_id": "hover_engine", "name": "Hover Pad",
-			"position": {"x": -2.0, "y": -0.5, "z": 2.1},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Resource Bay",
+			"position": {
+				"x": 1.0,
+				"y": 1.12021481990814,
+				"z": 2.75
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 10,
+				"cost_metal": 60,
+				"dps": 0.0,
+				"hp": 120.0,
+				"weight": 90.0
+			},
+			"tweaks": {},
+			"type_id": "resource_bay",
+			"yaw_offset": 0.0
 		},
 		{
-			"type_id": "hover_engine", "name": "Hover Pad",
-			"position": {"x": 2.0, "y": -0.5, "z": -2.1},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
-		},
-		{
-			"type_id": "hover_engine", "name": "Hover Pad",
-			"position": {"x": -2.0, "y": -0.5, "z": -2.1},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Radar Mast Suite",
+			"position": {
+				"x": 0.0,
+				"y": 0.5,
+				"z": -2.5
+			},
+			"rotation": {
+				"x": -0.0677741542458534,
+				"y": -0.0197364669293165,
+				"z": 0.566556990146637
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 0.999999940395355,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 30,
+				"cost_metal": 30,
+				"dps": 0.0,
+				"hp": 60.0,
+				"weight": 50.0
+			},
+			"tweaks": {},
+			"type_id": "sensor_suite",
+			"yaw_offset": 0.0
 		}
-	]
+	],
+	"name": "Vulture Harvester",
+	"nose_taper": 1.0,
+	"version": 1.0
 }

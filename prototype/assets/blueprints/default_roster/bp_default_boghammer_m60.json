@@ -8,14 +8,15 @@
 		"z": 1.0
 	},
 	"hull_size": {
-		"x": 4.0,
-		"y": 2.5,
-		"z": 8.0
+		"x": 4.98199892044067,
+		"y": 2.77932000160217,
+		"z": 7.5
 	},
-	"hull_type": "block_heavy_meridian_a",
+	"hull_type": "brenntal_heavy_a",
 	"id": "bp_default_boghammer_m60",
 	"locomotion": {
 		"settings": {
+			"drive_sprocket": true,
 			"tread_width": 1.6
 		},
 		"type_id": "tracked_treads"
@@ -31,8 +32,8 @@
 			"mount_style": "",
 			"name": "Tracked Treads",
 			"position": {
-				"x": -1.86559987068176,
-				"y": -2.0,
+				"x": -2.64891982078552,
+				"y": -1.81127750873566,
 				"z": 0.0
 			},
 			"rotation": {
@@ -55,12 +56,28 @@
 				"weight": 192.0
 			},
 			"tweaks": {
+				"chine_belly_drop": 0.100831151008606,
+				"chine_clear_x": 0.100868701934814,
+				"chine_flank_height": 2.40350317955017,
+				"chine_half_width": 2.34999990463257,
+				"chine_normal_x": 0.707106828689575,
+				"chine_normal_y": -0.707106828689575,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.707106828689575,
+				"chine_up_y": 0.707106828689575,
 				"drive_sprocket": true,
-				"kit_anchor_x": 0.593599915504456,
-				"kit_anchor_y": 1.00699996948242,
+				"kit_anchor_x": 0.697479963302612,
+				"kit_anchor_y": 1.05614151954651,
 				"kit_anchor_z": 0.0,
-				"kit_reach": 0.794999957084656,
-				"target_length": 8.0,
+				"kit_reach": 0.833795928955078,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -2.64891982078552,
+				"station_y": -1.81127750873566,
+				"station_z": 0.0,
+				"target_length": 7.5,
 				"tread_width": 1.6
 			},
 			"type_id": "tracked_treads",
@@ -76,8 +93,8 @@
 			"mount_style": "",
 			"name": "Tracked Treads",
 			"position": {
-				"x": 1.86559987068176,
-				"y": -2.0,
+				"x": 2.64891982078552,
+				"y": -1.81127750873566,
 				"z": 0.0
 			},
 			"rotation": {
@@ -100,12 +117,28 @@
 				"weight": 192.0
 			},
 			"tweaks": {
+				"chine_belly_drop": 0.100868821144104,
+				"chine_clear_x": 0.100831270217896,
+				"chine_flank_height": 2.40346550941467,
+				"chine_half_width": 2.34999990463257,
+				"chine_normal_x": 0.707106828689575,
+				"chine_normal_y": -0.707106828689575,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.707106828689575,
+				"chine_up_y": 0.707106828689575,
 				"drive_sprocket": true,
-				"kit_anchor_x": -0.593599915504456,
-				"kit_anchor_y": 1.00699996948242,
+				"kit_anchor_x": -0.697479963302612,
+				"kit_anchor_y": 1.05614151954651,
 				"kit_anchor_z": 0.0,
-				"kit_reach": 0.794999957084656,
-				"target_length": 8.0,
+				"kit_reach": 0.833795928955078,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 2.64891982078552,
+				"station_y": -1.81127750873566,
+				"station_z": 0.0,
+				"target_length": 7.5,
 				"tread_width": 1.6
 			},
 			"type_id": "tracked_treads",
@@ -115,18 +148,18 @@
 			"facet": "top",
 			"mount_normal": {
 				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
+				"y": 0.99944794178009,
+				"z": 0.0332241095602512
 			},
 			"mount_style": "turret",
 			"name": "Main Cannon",
 			"position": {
 				"x": 0.0,
-				"y": 1.01492166519165,
+				"y": 1.36947512626648,
 				"z": -1.0
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": 0.033230222761631,
 				"y": 0.0,
 				"z": 0.0
 			},
@@ -139,10 +172,10 @@
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 23,
-				"dps": 31.0,
+				"cost_metal": 140,
+				"dps": 187.0,
 				"hp": 100.0,
-				"weight": 62.5
+				"weight": 374.5
 			},
 			"tweaks": {
 				"barrel_count": 3.0,
@@ -156,18 +189,18 @@
 			"facet": "top",
 			"mount_normal": {
 				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
+				"y": 0.986453175544739,
+				"z": 0.164043098688126
 			},
 			"mount_style": "pintle",
 			"name": "Rotary Gatling",
 			"position": {
-				"x": 1.0,
-				"y": 1.01492166519165,
-				"z": 1.0
+				"x": 1.25,
+				"y": 1.03211140632629,
+				"z": 1.5
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": 0.164787888526917,
 				"y": 0.0,
 				"z": 0.0
 			},
@@ -193,18 +226,18 @@
 			"facet": "top",
 			"mount_normal": {
 				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
+				"y": 0.986453175544739,
+				"z": 0.164043098688126
 			},
 			"mount_style": "pintle",
 			"name": "CIWS Gatling PD",
 			"position": {
-				"x": -1.0,
-				"y": 1.01492166519165,
-				"z": 1.0
+				"x": -1.25,
+				"y": 1.03211140632629,
+				"z": 1.5
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": 0.164787888526917,
 				"y": 0.0,
 				"z": 0.0
 			},

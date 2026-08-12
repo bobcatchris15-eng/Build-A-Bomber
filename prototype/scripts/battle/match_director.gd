@@ -215,7 +215,7 @@ const ROSTER_LIMIT := 12
 const ROSTER_AUTOPICK_LIMIT := 8
 # A match whose roster cannot mine is unwinnable, so this is force-added when
 # nothing else in the roster harvests.
-const FALLBACK_HARVESTER := "res://data/loadout/ore_trucker.json"
+const FALLBACK_HARVESTER := "res://data/loadout/magpie_ore_hauler.json"
 
 # Drag-select state. A press below SelectionService.DRAG_THRESHOLD_PX resolves as
 # a click instead.

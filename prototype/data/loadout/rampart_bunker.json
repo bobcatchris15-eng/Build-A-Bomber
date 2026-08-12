@@ -1,46 +1,63 @@
 {
- "version": 1.0,
- "id": "default_rampart_bunker",
- "name": "Rampart Bunker",
- "hull_type": "rampart_main_meridian",
- "hull_scale": {
-  "x": 1.0,
-  "y": 1.0,
-  "z": 1.0
- },
- "hull_size": {
-  "x": 4.0,
-  "y": 3.0,
-  "z": 4.0
- },
- "armor_material": "ablative_ceramic",
- "armor_thickness": 3.0,
- "faction": "industrialists",
- "locomotion": {
-  "type_id": "",
-  "settings": {}
- },
- "modules": [
-  {
-   "type_id": "heavy_machine_gun",
-   "name": "Firing Port",
-   "position": {
-    "x": 0.0,
-    "y": 1.2,
-    "z": 0.0
-   },
-   "rotation": {
-    "x": 0.0,
-    "y": 0.0,
-    "z": 0.0
-   },
-   "scale": {
-    "x": 1.0,
-    "y": 1.0,
-    "z": 1.0
-   },
-   "yaw_offset": 0.0,
-   "tweaks": {}
-  }
- ]
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.8,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 4.48000001907349,
+		"y": 3.35999989509583,
+		"z": 4.0
+	},
+	"hull_type": "rampart_main_meridian",
+	"id": "default_rampart_bunker",
+	"locomotion": {
+		"settings": {},
+		"type_id": ""
+	},
+	"modules": [
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "Heavy Machine Gun",
+			"position": {
+				"x": 0.0,
+				"y": 1.04670262336731,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 0,
+				"cost_metal": 15,
+				"dps": 32.5,
+				"hp": 60.0,
+				"weight": 40.0
+			},
+			"tweaks": {},
+			"type_id": "heavy_machine_gun",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "Rampart Bunker",
+	"nose_taper": 1.0,
+	"version": 1.0
 }

@@ -20,6 +20,7 @@ const LiveryScript = preload("res://scripts/livery.gd")
 const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
+const LocomotionMountScript = preload("res://scripts/locomotion_mount.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -738,76 +739,6 @@ static func _resize_collider_to_visual(module: Node3D) -> void:
 				shape_node.position = Vector3.ZERO
 		return
 
-## Slides each leg inboard until its origin lands on the hull's VISIBLE skin.
-##
-## Chris: the legs should "mount directly to the VISIBLE hull mesh" - no plate,
-## no standoff. That is a different surface from the one the layout works in.
-## LocomotionLayout positions every station against hull_size, which is the
-## COLLISION BOX; since the hull roster moved to the SDF/marching-cubes bake, a
-## hull is routinely narrower or more tapered than its declared box, so a station
-## on the box plane can hang in clear air beside the model it is supposed to be
-## bolted to.
-##
-## Raycast inward along the mount axis and take the first triangle: that is where
-## the hull actually is. A miss leaves the leg exactly where the layout put it,
-## which is the current behaviour and a safe answer for a hull with no visible
-## mesh (a bare test rig, a primitive-shape hull mid-load).
-##
-## HullProjection rather than a physics query on purpose - it is pure
-## Moller-Trumbore over Mesh.get_faces(), so it works headless and needs no
-## physics step to have run, which matters because this runs during
-## construction. Same reasoning hull_decals.gd documents for using it.
-func _seat_legs_on_hull_skin(legs: Array, hull_size: Vector3) -> void:
-	if legs.is_empty() or not is_instance_valid(hull):
-		return
-	var mesh_inst := hull.get_node_or_null("MeshInstance3D") as MeshInstance3D
-	if mesh_inst == null or mesh_inst.mesh == null:
-		return
-	var surface: Dictionary = HullProjectionScript.build_surface(mesh_inst)
-	if surface.get("tris", PackedVector3Array()).size() < 3:
-		return
-
-	for leg in legs:
-		if not is_instance_valid(leg):
-			continue
-		var side: float = signf(leg.position.x)
-		if is_zero_approx(side):
-			continue
-
-		# SAMPLED UP THE FLANK, not fired once at the station's own height.
-		#
-		# A leg station sits on the belly line, and a hull with any curve at all
-		# is pinching in by the time it reaches its lowest point - so a single
-		# horizontal ray at exactly that y passes UNDER the geometry and misses.
-		# Measured: medium_hull and heavy_hull hit, scout_hull and
-		# flying_wing_hull missed at every station, which would have left the
-		# legs on those two floating at the bounding box exactly as before.
-		#
-		# Sampling a short ladder up into the body of the hull and keeping the
-		# OUTERMOST hit finds the widest point the leg can bolt to, which is what
-		# a real hardpoint would use.
-		var best_x: float = INF * side
-		for frac in [0.06, 0.18, 0.32, 0.50]:
-			# Start outside the widest point the hull could possibly reach, so the
-			# first triangle is the OUTER skin rather than a far wall hit from
-			# inside.
-			var from := Vector3(side * hull_size.x,
-				leg.position.y + hull_size.y * frac, leg.position.z)
-			var hit: Dictionary = HullProjectionScript.raycast(
-				surface, from, Vector3(-side, 0.0, 0.0))
-			if not hit.get("hit", false):
-				continue
-			var x: float = hit["position"].x
-			if absf(x) > absf(best_x) or is_inf(best_x):
-				best_x = x
-		if is_inf(best_x):
-			continue
-		# x only. The layout owns y (belly line or flank height) and z (the
-		# fore/aft spread), and both are load-bearing elsewhere - y feeds the
-		# ride-height solve and z keeps the legs evenly spaced along the hull.
-		leg.position.x = best_x
-
-
 func update_locomotion_geometry_tweak(type_id: String, tweak_key: String, value) -> void:
 	if not hull: return
 	var VisualBuilder = load("res://scripts/visual_builder.gd")
@@ -864,250 +795,26 @@ func refresh_locomotion() -> void:
 	var settings: Dictionary = hull.get_meta("locomotion_settings", {})
 	update_locomotion(type_id, settings.duplicate())
 
-func update_locomotion(type_id: String, settings: Dictionary):
-	if not hull: return
-
-	# Save settings on hull metadata
-	hull.set_meta("locomotion_type", type_id)
-	hull.set_meta("locomotion_settings", settings)
-
-	# Delete any existing locomotion parts first
-	for child in hull.get_children():
-		if child.has_meta("module_data"):
-			var m_data = child.get_meta("module_data")
-			if m_data and m_data.category == "locomotion":
-				child.queue_free()
-
-	# Same class of cleanup for the running-gear chassis slab: if a previous
-	# locomotion type created one and the new type either doesn't want one
-	# (hover_engine/anti_grav) or wants it freshly sized (the new hull might
-	# be a different size), tear it down before deciding whether to rebuild.
-	# ModuleDataResource is already preloaded at the top of this file.
-	var existing_gear = hull.get_node_or_null("RunningGear")
+func update_locomotion(type_id: String, settings: Dictionary) -> void:
+	if not hull:
+		return
+	# Locomotion mounting lives in locomotion_mount.gd now. What used to be ~490
+	# lines here - clear, lay out, place, clamp, lift, group - is one call, and
+	# every station it places is SEATED onto the hull's real lower chine instead of
+	# onto the fitted collision box. See that file's header, and hull_chine.gd for
+	# the geometry.
+	#
+	# The RunningGear teardown stays here rather than moving with the rest. The
+	# chassis slab is a retired concept - LocomotionLayout.SUBFRAME_TYPES is empty
+	# and ModuleCatalog.needs_running_gear() hard-returns false - so nothing builds
+	# one any more, and the only reason to still tear one down is a blueprint saved
+	# before it was retired. That is a load-compatibility concern, not part of
+	# mounting, and putting it in the new file would have implied the slab was
+	# still live.
+	var existing_gear := hull.get_node_or_null("RunningGear")
 	if existing_gear:
 		existing_gear.queue_free()
-
-	var catalog_data = ModuleCatalog.get_module_data(type_id)
-
-	# hull_size is the COLLIDER's box - the fitted AABB, since
-	# _place_hull_from_ui / update_hull_appearance set the box to the fitted
-	# size rather than the catalog box. The reference constant is the
-	# "no hull loaded" safety net: same as the pre-change (4, 1, 6) literal
-	# but now reads as the named anchor.
-	var hull_size: Vector3 = Vector3(ModuleCatalog.REFERENCE_HULL_SIZE)
-	var hull_scale = Vector3(1.0, 1.0, 1.0)
-	if hull.has_meta("hull_scale"):
-		hull_scale = hull.get_meta("hull_scale")
-	var hull_shape = hull.get_node_or_null("CollisionShape3D")
-	if hull_shape and hull_shape.shape is BoxShape3D:
-		hull_size = hull_shape.shape.size
-
-	# NO RUNNING-GEAR SLAB, AND NO SUBFRAME. Chris, 2026-08-02: "Drop the
-	# running gear / subframe (from everything actually)."
-	#
-	# It was introduced to solve "the vehicle slides on its belly" by putting a
-	# procedural chassis under the hull for the gear to sit on. Ground contact
-	# is now MEASURED from where the locomotion geometry actually ends (see the
-	# lift block further down), which solves that properly and for every type,
-	# so the slab was doing nothing but adding a second structure under every
-	# vehicle - the same two-structures mistake the subframe made, and the
-	# reason parts kept reading as mounted to a box rather than to the hull.
-	#
-	# running_gear_size stays as a zero Vector3 rather than being deleted: it is
-	# still read as a layout input by several patterns, and zeroing it is what
-	# tells them there is nothing under the hull.
-	var running_gear_size := Vector3.ZERO
-
-	# Visual bug pass finding: several hulls' visual mesh doesn't fill its
-	# collision box symmetrically (ship hulls' tapered keel, airship_hull's
-	# curved envelope) - underside-mounted locomotion (wheels/legs/
-	# hover_engine/anti_grav) computed purely from -hull_size.y/2.0 floated
-	# visibly below the actual hull on those. Raises the underside mount
-	# point by however much that specific hull needs (0.0 for every
-	# box-ish hull, unaffected).
-	var underside_y_bias = 0.0
-	if hull.has_meta("type_id"):
-		underside_y_bias = ModuleCatalog.get_underside_y_bias(hull.get_meta("type_id"))
-
-	# Locomotion visuals were previously built at a fixed absolute size (each
-	# _build_X() in visual_builder.gd only ever sees the LOCOMOTION module's
-	# own catalog size field, never the hull's) - giant legs on a paper-thin
-	# wing, tiny rotors on a huge cruiser, etc. Two hull-relative factors,
-	# benchmarked against medium_hull (the size everything was originally
-	# eyeballed against, so this is a no-op there): a HEIGHT factor for parts
-	# whose scale should track hull height/ground-clearance (wheels radius,
-	# leg length), and a FOOTPRINT factor (sqrt of plan-view area) for parts
-	# whose scale should track overall hull bulk (rotor span, hover/anti-grav
-	# pad size, engine pod size, prop size). Clamped so an extreme hull
-	# (tiny drone / huge cruiser) still gets a legible part instead of a
-	# vanishing sliver or a comically oversized blob.
-	var hull_height_factor = clamp(hull_size.y / ModuleCatalog.REFERENCE_HULL_SIZE.y, 0.45, 2.25)
-	var hull_footprint_factor = clamp(sqrt((hull_size.x * hull_size.z) / (ModuleCatalog.REFERENCE_HULL_SIZE.x * ModuleCatalog.REFERENCE_HULL_SIZE.z)), 0.45, 2.25)
-
-	var spawned_wheels = []
-	
-	# One generic placement loop, replacing the ten hand-written branches this
-	# used to be. Every branch did the same six things - resolve tweaks, compute
-	# a mount pattern, build a geo_tweaks dict, place, reset the transform,
-	# mirror - and only the pattern was ever per-type. The patterns now live in
-	# locomotion_layout.gd as data, so adding a locomotion type is a table entry
-	# rather than another elif and another copy of the other five steps.
-	var layout_ctx := {
-		"hull_size": hull_size,
-		"running_gear_size": running_gear_size,
-		"underside_y_bias": underside_y_bias,
-		"catalog_size": catalog_data.get("size", Vector3.ONE),
-	}
-	var node_scale := LocomotionLayoutScript.node_scale_for(type_id, hull_height_factor)
-	var scale_mult := LocomotionLayoutScript.scale_multiplier_for(type_id)
-	for station in LocomotionLayoutScript.stations(type_id, settings, layout_ctx):
-		var station_pos: Vector3 = station["position"]
-		var part := _place_weapon(type_id, hull.global_position + station_pos,
-			station["normal"], false, station["geo"])
-		if part == null:
-			continue
-		# _place_weapon() aligns the node to the mount normal and snaps it to a
-		# 0.25m grid; locomotion wants neither - it is laid out analytically and
-		# its meshes are authored already-oriented.
-		part.scale = node_scale
-		part.rotation = Vector3.ZERO
-		if station["has_final_position"]:
-			part.position = station["final_position"]
-		if part.has_meta("module_data"):
-			part.get_meta("module_data").scale_multiplier = scale_mult
-		for meta_key in station["meta"]:
-			part.set_meta(meta_key, station["meta"][meta_key])
-		if station["mirror"]:
-			part.set_meta("scale_flip_x", true)
-			_apply_mirror_flip(part)
-			# The mirror reflects each child's own transform in module space, so
-			# geometry that sat off-centre (a wheel's hub offset, a leg's splayed
-			# stance, a wing's shoulder) lands somewhere new. The collider was
-			# measured before that happened, so the port-side instance of every
-			# asymmetric type had a click target sitting where the starboard one's
-			# geometry would have been - mirrored parts were the hardest of all to
-			# click, on top of the per-type drift this pass already removed.
-			_resize_collider_to_visual(part)
-		spawned_wheels.append(part)
-
-	if type_id == "legs":
-		_seat_legs_on_hull_skin(spawned_wheels, hull_size)
-
-	# WIDTH CLAMP. Locomotion is laid out from hull dimensions, but each type's
-	# own parts are authored at a fixed size, so on a small hull an assembly can
-	# end up wider than the vehicle it is carrying. Measured against the
-	# reference hull: ornithopter_wing came out 4.25x the hull's width and legs
-	# 2.69x, against ~1.1-1.2x for the tracked and wheeled types. That is not a
-	# style difference, it is the same part failing to scale with its hull.
-	#
-	# Clamped by scaling the instances rather than moving them: scale shrinks
-	# each assembly about its own station, so the mount stays exactly where the
-	# layout put it and only the outboard reach comes in. Limits are per type
-	# because a rotor disc SHOULD overhang and a road wheel should not.
-	var width_limit := LocomotionLayoutScript.max_width_factor(type_id)
-	if width_limit > 0.0 and not spawned_wheels.is_empty():
-		# Solve for the scale directly rather than applying a ratio. An
-		# instance's outboard reach is |station.x| + scale.x * local_extent, and
-		# only the second term shrinks - the station is where the layout put the
-		# mount and must not move. Scaling by allowed/reach ignores that and
-		# under-corrects badly on exactly the types that need it most: the first
-		# attempt took ornithopter_wing from 4.25x to 4.14x. It also has to read
-		# the CURRENT scale, since ornithopter_wing already carries a deliberate
-		# 2x and legs a hull-height factor.
-		# OUTBOARD extent, not |x|. absf() counted a part reaching INBOARD -
-		# toward the vehicle's centreline - as if it stuck out sideways, and
-		# build_wheel_mount()'s whole job is to reach inboard into the hull. On
-		# screw_drive that inboard driveshaft measured further from the module
-		# origin than the drum did, so the clamp fired on it and shrank the
-		# entire assembly UNIFORMLY - which is why the drum kept coming out
-		# short of the hull's ends and tucked up high (Chris, three times)
-		# despite the layout handing the builder the hull's full length. The
-		# side sign comes from which side of the hull the station sits on.
-		var mount_reach := 0.0
-		var local_extent := 0.0
-		for w in spawned_wheels:
-			var wb := _visual_bounds(w)
-			if wb.size.length_squared() <= 0.0:
-				continue
-			var out_sign: float = signf(w.position.x)
-			if out_sign == 0.0:
-				out_sign = 1.0
-			mount_reach = maxf(mount_reach, absf(w.position.x))
-			local_extent = maxf(local_extent, out_sign * wb.position.x * w.scale.x)
-			local_extent = maxf(local_extent, out_sign * (wb.position.x + wb.size.x) * w.scale.x)
-		local_extent = maxf(local_extent, 0.0)
-		var allowed: float = hull_size.x * 0.5 * width_limit
-		if mount_reach + local_extent > allowed and local_extent > 0.001:
-			# Never invert or vanish the part, even if the mount alone already
-			# exceeds the budget - a sliver reads worse than a slight overhang.
-			var shrink: float = clampf((allowed - mount_reach) / local_extent, 0.35, 1.0)
-			for w in spawned_wheels:
-				w.scale *= shrink
-				if w.has_meta("module_data"):
-					w.get_meta("module_data").scale_multiplier *= shrink
-				_resize_collider_to_visual(w)
-
-	# GROUND CONTACT. The hull lift used to be computed from the chassis height
-	# (or, before that, a per-type hand-tuned constant), which is only right if
-	# every part happens to end exactly at the chassis bottom - and none of them
-	# did. Measured against the reference hull, wheels floated 0.13 above the
-	# ground, half_track 0.30, pontoon_wheels 0.28, while legs sank 0.31 through
-	# it. Measuring where the geometry ACTUALLY ends and lifting the hull by that
-	# is both simpler and correct for every type, including the seven new ones
-	# that never had a constant of their own.
-	var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "brenntal_medium_a"
-	# default_lift comes off the COLLIDER (which is now the fitted AABB, set
-	# by _place_hull_from_ui / update_hull_appearance), not the catalog entry.
-	# Same source every station position above is derived from, and the same
-	# source blueprint_manager.gd's reconstruct_vehicle() uses for its matching
-	# "hull sits on the ground" lift - so a design sits at the same height in
-	# the lab, the test range, and a battle.
-	var default_lift: float = (hull_size.y * hull_scale.y) / 2.0 + running_gear_size.y
-	hull.position.y = default_lift
-	if ModuleCatalog.locomotion_touches_ground(type_id):
-		var lowest := INF
-		for w in spawned_wheels:
-			var wb := _visual_bounds(w)
-			if wb.size.length_squared() <= 0.0:
-				continue
-			lowest = minf(lowest, w.position.y + wb.position.y * w.scale.y)
-		if lowest < INF:
-			# Floored at the hull's own half-height for the reason spelled out
-			# in blueprint_manager.gd's matching block: locomotion that does not
-			# reach past the hull's underside would otherwise sink the hull
-			# itself through the ground plane. Kept identical to that copy so a
-			# design sits at the same height in the lab and in a match.
-			#
-			# Measured from hull_size - the hull's OWN collision box, the same
-			# source every station position above is derived from - and NOT from
-			# default_lift. default_lift comes off the CATALOG entry for
-			# hull.get_meta("type_id"), which falls back to medium_hull when
-			# there is no such meta: that made the floor 0.9 for a hull actually
-			# 0.6 tall, and moved the layout golden fixture's small/tracked_
-			# treads row from 0.4886 to 0.9 - a hull hoisted a third of a metre
-			# into the air on a floor that had no business binding at all.
-			hull.position.y = maxf(-lowest, hull_size.y / 2.0)
-				
-	# Link them in a group
-	for w in spawned_wheels:
-		w.set_meta("locomotion_group", spawned_wheels)
-
-	# Each _place_weapon() call above already ran check_all_clipping() as
-	# part of placing that single instance, but at that point locomotion_group
-	# wasn't set on ANY of the spawned instances yet (it's only assigned in
-	# the loop just above, after every instance already exists as a hull
-	# child) - so multi-instance types (wheels/legs/rotors/etc, count/width
-	# tweaks especially) could get a same-group pair flagged as clipping-red
-	# by that stale mid-placement check and never get re-evaluated, since
-	# nothing else here calls check_all_clipping() again. Surfaced by the
-	# Batch E hull-relative scaling fix - larger locomotion instances on
-	# large hulls made transient same-group overlaps during placement much
-	# more likely to actually happen. Re-checking now (with the group
-	# exemption finally in place) clears any false positive immediately
-	# instead of leaving it stuck red until the player's next click/drag.
-	check_all_clipping()
-
-	get_tree().call_group("stat_ui", "update_stats", hull)
+	LocomotionMountScript.rebuild(self, type_id, settings)
 	
 ## The bounds of everything a module actually renders, in the module's own
 ## local space. Empty AABB if it has no meshes yet.

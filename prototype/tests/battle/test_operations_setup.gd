@@ -186,7 +186,7 @@ func test_operations_campaign_round_trips_through_disk() -> bool:
 		"duration": 421.5,
 		"designs": {"Bulwark MBT": {"built": 4, "kills": 7, "lost": 1}},
 		"player_designs": ["Bulwark MBT"],
-		"enemy_designs": ["Scrapper Ore Trucker", "Warden AA"],
+		"enemy_designs": ["Magpie Ore Hauler", "Warden AA"],
 	})
 	mgr.advance_to_next_stage()
 	var path: String = mgr.save_path()
@@ -219,7 +219,7 @@ func test_operations_campaign_round_trips_through_disk() -> bool:
 	if log.size() != 1:
 		print("  [FAIL] combat log came back with ", log.size(), " entries, expected 1")
 		ok = false
-	elif log[0].get("enemy_designs", []) != ["Scrapper Ore Trucker", "Warden AA"]:
+	elif log[0].get("enemy_designs", []) != ["Magpie Ore Hauler", "Warden AA"]:
 		print("  [FAIL] what the enemy fielded did not survive: ", log[0].get("enemy_designs", []))
 		ok = false
 

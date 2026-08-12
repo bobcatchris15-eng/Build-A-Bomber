@@ -8,11 +8,11 @@
 		"z": 1.0
 	},
 	"hull_size": {
-		"x": 3.0,
-		"y": 1.79999995231628,
-		"z": 5.5
+		"x": 3.40000009536743,
+		"y": 1.72500002384186,
+		"z": 6.30000019073486
 	},
-	"hull_type": "brenntal_medium_a",
+	"hull_type": "tallow_medium_a",
 	"id": "bp_default_patchwagon_mk_iv",
 	"locomotion": {
 		"settings": {
@@ -33,9 +33,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": -1.64999997615814,
-				"y": -0.899999976158142,
-				"z": -1.92499995231628
+				"x": -1.68726992607117,
+				"y": -0.620629906654358,
+				"z": -2.20500016212463
 			},
 			"rotation": {
 				"x": 0.0,
@@ -43,24 +43,40 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.924238204956055,
+				"y": 0.924238204956055,
+				"z": 0.924238204956055
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 40,
+				"cost_metal": 34,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 100.0
+				"hp": 83.0,
+				"weight": 79.0
 			},
 			"tweaks": {
-				"kit_anchor_x": 0.75,
-				"kit_anchor_y": 0.143999993801117,
+				"chine_belly_drop": 0.241870045661926,
+				"chine_clear_x": 0.0127300024032593,
+				"chine_flank_height": 1.46962988376617,
+				"chine_half_width": 1.69999992847443,
+				"chine_normal_x": 0.70710688829422,
+				"chine_normal_y": -0.707106649875641,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.707106649875641,
+				"chine_up_y": 0.70710688829422,
+				"kit_anchor_x": 0.830000042915344,
+				"kit_anchor_y": 0.138000011444092,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -1.68726992607117,
+				"station_y": -0.620629906654358,
+				"station_z": -2.20500016212463,
 				"wheel_size": 1.0,
 				"wheels_per_axle": 2
 			},
@@ -77,9 +93,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": -1.64999997615814,
-				"y": -0.899999976158142,
-				"z": 1.92499995231628
+				"x": -1.45810163021088,
+				"y": -0.849798321723938,
+				"z": 2.20500016212463
 			},
 			"rotation": {
 				"x": 0.0,
@@ -87,24 +103,40 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.924238204956055,
+				"y": 0.924238204956055,
+				"z": 0.924238204956055
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 40,
+				"cost_metal": 34,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 100.0
+				"hp": 83.0,
+				"weight": 79.0
 			},
 			"tweaks": {
-				"kit_anchor_x": 0.75,
-				"kit_anchor_y": 0.143999993801117,
+				"chine_belly_drop": 0.0127016305923462,
+				"chine_clear_x": 0.24189829826355,
+				"chine_flank_height": 1.1189983189106,
+				"chine_half_width": 1.69999992847443,
+				"chine_normal_x": 0.707106828689575,
+				"chine_normal_y": -0.707106828689575,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.707106828689575,
+				"chine_up_y": 0.707106828689575,
+				"kit_anchor_x": 0.830000042915344,
+				"kit_anchor_y": 0.138000011444092,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -1.45810163021088,
+				"station_y": -0.849798321723938,
+				"station_z": 2.20500016212463,
 				"wheel_size": 1.0,
 				"wheels_per_axle": 2
 			},
@@ -121,9 +153,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": 1.64999997615814,
-				"y": -0.899999976158142,
-				"z": -1.92499995231628
+				"x": 1.45803499221802,
+				"y": -0.84977000951767,
+				"z": -2.20500016212463
 			},
 			"rotation": {
 				"x": 0.0,
@@ -131,24 +163,40 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.924238204956055,
+				"y": 0.924238204956055,
+				"z": 0.924238204956055
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 40,
+				"cost_metal": 34,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 100.0
+				"hp": 83.0,
+				"weight": 79.0
 			},
 			"tweaks": {
-				"kit_anchor_x": -0.75,
-				"kit_anchor_y": 0.143999993801117,
+				"chine_belly_drop": 0.0127299427986145,
+				"chine_clear_x": 0.241964936256409,
+				"chine_flank_height": 1.69876998662949,
+				"chine_half_width": 1.69999992847443,
+				"chine_normal_x": 0.732442617416382,
+				"chine_normal_y": -0.680828809738159,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.680828809738159,
+				"chine_up_y": 0.732442617416382,
+				"kit_anchor_x": -0.830000042915344,
+				"kit_anchor_y": 0.138000011444092,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 1.45803499221802,
+				"station_y": -0.84977000951767,
+				"station_z": -2.20500016212463,
 				"wheel_size": 1.0,
 				"wheels_per_axle": 2
 			},
@@ -165,9 +213,9 @@
 			"mount_style": "",
 			"name": "Wheels",
 			"position": {
-				"x": 1.64999997615814,
-				"y": -0.899999976158142,
-				"z": 1.92499995231628
+				"x": 1.4452999830246,
+				"y": -0.862499952316284,
+				"z": 2.20500016212463
 			},
 			"rotation": {
 				"x": 0.0,
@@ -175,24 +223,40 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.924238204956055,
+				"y": 0.924238204956055,
+				"z": 0.924238204956055
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 40,
+				"cost_metal": 34,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 100.0
+				"hp": 83.0,
+				"weight": 79.0
 			},
 			"tweaks": {
-				"kit_anchor_x": -0.75,
-				"kit_anchor_y": 0.143999993801117,
+				"chine_belly_drop": 0.0,
+				"chine_clear_x": 0.254699945449829,
+				"chine_flank_height": 1.13169994950294,
+				"chine_half_width": 1.69999992847443,
+				"chine_normal_x": 0.194596186280251,
+				"chine_normal_y": -0.980883479118347,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.980883479118347,
+				"chine_up_y": 0.194596186280251,
+				"kit_anchor_x": -0.830000042915344,
+				"kit_anchor_y": 0.138000011444092,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 1.4452999830246,
+				"station_y": -0.862499952316284,
+				"station_z": 2.20500016212463,
 				"wheel_size": 1.0,
 				"wheels_per_axle": 2
 			},
@@ -210,7 +274,7 @@
 			"name": "Repair Welder Array",
 			"position": {
 				"x": 0.0,
-				"y": 0.728140592575073,
+				"y": 0.269199371337891,
 				"z": 0.5
 			},
 			"rotation": {
@@ -240,25 +304,25 @@
 			"facet": "top",
 			"mount_normal": {
 				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
+				"y": 0.957826316356659,
+				"z": 0.287347912788391
 			},
 			"mount_style": "pintle",
 			"name": "Smoke Discharger",
 			"position": {
 				"x": -1.0,
-				"y": 0.388944864273071,
-				"z": -1.5
+				"y": 0.727499961853027,
+				"z": -1.75
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": 0.291456818580627,
 				"y": 0.0,
 				"z": 0.0
 			},
 			"scale": {
 				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"y": 0.999999940395355,
+				"z": 0.999999940395355
 			},
 			"scale_flip_x": false,
 			"sponson": false,
@@ -277,25 +341,25 @@
 			"facet": "top",
 			"mount_normal": {
 				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
+				"y": 0.957826316356659,
+				"z": 0.287347912788391
 			},
 			"mount_style": "pintle",
 			"name": "Smoke Discharger",
 			"position": {
 				"x": 1.0,
-				"y": 0.388944864273071,
-				"z": -1.5
+				"y": 0.727499961853027,
+				"z": -1.75
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": 0.291456818580627,
 				"y": 0.0,
 				"z": 0.0
 			},
 			"scale": {
 				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"y": 0.999999940395355,
+				"z": 0.999999940395355
 			},
 			"scale_flip_x": false,
 			"sponson": false,

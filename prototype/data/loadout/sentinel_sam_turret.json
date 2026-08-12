@@ -1,67 +1,100 @@
 {
- "version": 1.0,
- "id": "default_sentinel_sam",
- "name": "Sentinel SAM Turret",
- "hull_type": "tower_main_meridian",
- "hull_scale": {
-  "x": 1.0,
-  "y": 1.0,
-  "z": 1.0
- },
- "hull_size": {
-  "x": 3.0,
-  "y": 5.0,
-  "z": 3.0
- },
- "armor_material": "hardened_steel",
- "armor_thickness": 1.8,
- "faction": "industrialists",
- "locomotion": {
-  "type_id": "",
-  "settings": {}
- },
- "modules": [
-  {
-   "type_id": "sam_launcher",
-   "name": "SAM Rack",
-   "position": {
-    "x": 0.0,
-    "y": 2.4,
-    "z": 0.0
-   },
-   "rotation": {
-    "x": 0.0,
-    "y": 0.0,
-    "z": 0.0
-   },
-   "scale": {
-    "x": 1.0,
-    "y": 1.0,
-    "z": 1.0
-   },
-   "yaw_offset": 0.0,
-   "tweaks": {}
-  },
-  {
-   "type_id": "ciws",
-   "name": "Close-In Defence",
-   "position": {
-    "x": 0.0,
-    "y": 1.0,
-    "z": 0.9
-   },
-   "rotation": {
-    "x": 0.0,
-    "y": 0.0,
-    "z": 0.0
-   },
-   "scale": {
-    "x": 1.0,
-    "y": 1.0,
-    "z": 1.0
-   },
-   "yaw_offset": 0.0,
-   "tweaks": {}
-  }
- ]
+	"armor_material": "hardened_steel",
+	"armor_thickness": 1.2,
+	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 3.08999991416931,
+		"y": 5.14999914169312,
+		"z": 3.0
+	},
+	"hull_type": "tower_main_meridian",
+	"id": "default_sentinel_sam_turret",
+	"locomotion": {
+		"settings": {},
+		"type_id": ""
+	},
+	"modules": [
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "SAM Launcher",
+			"position": {
+				"x": 0.0,
+				"y": 2.57500028610229,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 20,
+				"cost_metal": 40,
+				"dps": 70.0,
+				"hp": 75.0,
+				"weight": 130.0
+			},
+			"tweaks": {},
+			"type_id": "sam_launcher",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "pintle",
+			"name": "CIWS Gatling PD",
+			"position": {
+				"x": 1.0,
+				"y": 0.604218006134033,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 15,
+				"cost_metal": 40,
+				"dps": 10.0,
+				"hp": 80.0,
+				"weight": 90.0
+			},
+			"tweaks": {},
+			"type_id": "ciws",
+			"yaw_offset": 0.0
+		}
+	],
+	"name": "Sentinel SAM Turret",
+	"nose_taper": 1.0,
+	"version": 1.0
 }

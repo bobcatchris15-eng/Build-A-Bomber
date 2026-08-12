@@ -252,13 +252,13 @@ func test_factory_does_not_alias_input_array() -> bool:
 	var bps: Array = ["res://data/loadout/bulwark_mbt.json",
 			"res://data/loadout/rattler_scout.json"]
 	var sk := RuleSetScript.skirmish("open_plains", "industrialists", "technocrats", bps)
-	bps.append("res://data/loadout/ore_trucker.json")
+	bps.append("res://data/loadout/magpie_ore_hauler.json")
 	if sk.selected_blueprint_paths.size() != 2:
 		print("  [FAIL] Skirmish should have duplicated the input array; got size ",
 			sk.selected_blueprint_paths.size(), " after caller mutation")
 		return false
 	var dummies: Array = ["res://data/loadout/bulwark_mbt.json"]
-	var tr := RuleSetScript.test_range("res://data/loadout/ore_trucker.json", dummies)
+	var tr := RuleSetScript.test_range("res://data/loadout/magpie_ore_hauler.json", dummies)
 	dummies.clear()
 	if tr.enemy_blueprint_paths.size() != 1:
 		print("  [FAIL] Test Range should have duplicated enemy_blueprint_paths; got size ",
@@ -275,7 +275,7 @@ func test_to_dict_round_trip_preserves_fields() -> bool:
 	# today means the save format has a lock-in point before any
 	# operation writes a campaign file in the new shape.
 	var rs := RuleSetScript.operations("open_plains", "expansionists",
-			"technocrats", ["res://data/loadout/ore_trucker.json"], "hard",
+			"technocrats", ["res://data/loadout/magpie_ore_hauler.json"], "hard",
 			"op-test-001", 3)
 	rs.spawn_resource_fields = [
 		{"type": "metal", "position": Vector3(10, 0, 10), "amount": 1000},

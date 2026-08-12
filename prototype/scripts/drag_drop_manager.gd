@@ -320,6 +320,26 @@ func _ghost_visual_aabb(node: Node3D) -> AABB:
 func _notification(what: int):
 	if what == NOTIFICATION_DRAG_END:
 		_destroy_ghost_mesh()
+		# THE FACET HIGHLIGHT IS CLEARED HERE, NOT IN _destroy_ghost_mesh().
+		#
+		# MainLab.surface_raycast() shows the highlight as a side effect of every
+		# successful ray, which is what makes it track the cursor while a part is
+		# being dragged over the hull. Nothing turned it back off on this path, so
+		# after a drop the highlighted facet stayed lit for the rest of the
+		# session (Chris, 2026-08-12: "the facet gets highlighted, and the
+		# highlight never goes away"). Re-dragging an ALREADY-PLACED module did
+		# clear it - module_placer.gd hides it on drag finish and cancel - which
+		# is why this only showed up when placing something new.
+		#
+		# It has to be this notification and not _destroy_ghost_mesh(), even
+		# though that is the other "the preview is over" hook: _drop_data() calls
+		# _destroy_ghost_mesh() FIRST and then raycasts again to find the drop
+		# point, so hiding it there would be immediately undone by the very drop
+		# that needs it cleared. DRAG_END fires after _drop_data() returns, and
+		# fires on a cancelled drag too, so it covers both exits.
+		var root = get_node_or_null("/root/MainLab")
+		if root and root.has_method("_hide_facet_highlight"):
+			root._hide_facet_highlight()
 
 func _destroy_ghost_mesh():
 	var cleared_something = false

@@ -1,50 +1,326 @@
 {
-	"version": 1.0,
-	"id": "enemy_dart_skirmisher",
-	"name": "Dart Hover Skirmisher",
-	"hull_type": "kestrel_scout_a",
-	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-	"hull_size": {"x": 3.0, "y": 1.0, "z": 4.0},
 	"armor_material": "energy_shielding",
-	"armor_thickness": 0.8,
+	"armor_thickness": 0.7,
 	"faction": "technocrats",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 2.67400002479553,
+		"y": 1.58148002624512,
+		"z": 5.5
+	},
+	"hull_type": "calder_light_c",
+	"id": "default_dart_skirmisher",
 	"locomotion": {
-		"type_id": "hover_engine",
-		"settings": {}
+		"settings": {},
+		"type_id": "hover_engine"
 	},
 	"modules": [
 		{
-			"type_id": "heavy_laser",
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": 1.05266678333282,
+				"y": -0.749890029430389,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {
+				"chine_belly_drop": 0.0781099200248718,
+				"chine_clear_x": 0.0780900716781616,
+				"chine_flank_height": 0.859244577586651,
+				"chine_half_width": 1.13075685501099,
+				"chine_normal_x": 0.707106649875641,
+				"chine_normal_y": -0.707106828689575,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.70710688829422,
+				"chine_up_y": 0.707106709480286,
+				"emv_level": 1.0,
+				"kit_anchor_x": -1.06535001993179,
+				"kit_anchor_y": 0.126518402099609,
+				"kit_anchor_z": 0.0,
+				"kit_reach": 0.0,
+				"mount_reach_x": -1.93700003623962,
+				"mount_reach_y": 0.790740013122559,
+				"mount_reach_z": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 1.05266678333282,
+				"station_y": -0.749890029430389,
+				"station_z": 0.0
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": 0.0,
+				"y": -0.790740013122559,
+				"z": 3.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {
+				"emv_level": 1.0,
+				"kit_anchor_x": -0.0000000000000000652317205245384,
+				"kit_anchor_y": 0.126518402099609,
+				"kit_anchor_z": -1.84249994754791,
+				"kit_reach": 0.0,
+				"mount_reach_x": -0.000000000000000118603128226433,
+				"mount_reach_y": 0.790740013122559,
+				"mount_reach_z": -3.34999990463257,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 0.000000000000000118603128226433,
+				"station_y": -0.790740013122559,
+				"station_z": 3.34999990463257
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": -1.05269694328308,
+				"y": -0.7499098777771,
+				"z": 0.00000000000000041024312323654
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {
+				"chine_belly_drop": 0.0780900716781616,
+				"chine_clear_x": 0.0781098604202271,
+				"chine_flank_height": 0.859264425933361,
+				"chine_half_width": 1.13080680370331,
+				"chine_normal_x": -0.707022905349731,
+				"chine_normal_y": -0.707190573215485,
+				"chine_seated": 1.0,
+				"chine_up_x": -0.707190632820129,
+				"chine_up_y": 0.707022964954376,
+				"emv_level": 1.0,
+				"kit_anchor_x": 1.06535001993179,
+				"kit_anchor_y": 0.126518402099609,
+				"kit_anchor_z": -0.000000000000000225633717780097,
+				"kit_reach": 0.0,
+				"mount_reach_x": 1.93700003623962,
+				"mount_reach_y": 0.790740013122559,
+				"mount_reach_z": -0.00000000000000041024312323654,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -1.05269694328308,
+				"station_y": -0.7499098777771,
+				"station_z": 0.00000000000000041024312323654
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Hover Pad",
+			"position": {
+				"x": 0.0,
+				"y": -0.790740013122559,
+				"z": -3.25
+			},
+			"rotation": {
+				"x": 0.0,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 40,
+				"cost_metal": 20,
+				"dps": 0.0,
+				"hp": 50.0,
+				"weight": 20.0
+			},
+			"tweaks": {
+				"emv_level": 1.0,
+				"kit_anchor_x": 0.000000000000000195695154294426,
+				"kit_anchor_y": 0.126518402099609,
+				"kit_anchor_z": 1.84249994754791,
+				"kit_reach": 0.0,
+				"mount_reach_x": 0.000000000000000355809371444411,
+				"mount_reach_y": 0.790740013122559,
+				"mount_reach_z": 3.34999990463257,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -0.000000000000000355809371444411,
+				"station_y": -0.790740013122559,
+				"station_z": -3.34999990463257
+			},
+			"type_id": "hover_engine",
+			"yaw_offset": 0.0
+		},
+		{
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 0.996255338191986,
+				"z": -0.0864600464701653
+			},
+			"mount_style": "pintle",
 			"name": "Continuous Laser",
-			"position": {"x": 0.0, "y": 0.5, "z": 0.0},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-			"yaw_offset": 0.0,
-			"tweaks": {"lens_aperture": 1.2}
+			"position": {
+				"x": 0.0,
+				"y": 0.0349571704864502,
+				"z": -0.75
+			},
+			"rotation": {
+				"x": -0.0865681245923042,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 20,
+				"cost_metal": 30,
+				"dps": 112.0,
+				"hp": 75.0,
+				"weight": 60.0
+			},
+			"tweaks": {},
+			"type_id": "heavy_laser",
+			"yaw_offset": 0.0
 		},
 		{
-			"type_id": "hover_engine", "name": "Hover Pad",
-			"position": {"x": 1.5, "y": -0.5, "z": 1.4},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
-		},
-		{
-			"type_id": "hover_engine", "name": "Hover Pad",
-			"position": {"x": -1.5, "y": -0.5, "z": 1.4},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
-		},
-		{
-			"type_id": "hover_engine", "name": "Hover Pad",
-			"position": {"x": 1.5, "y": -0.5, "z": -1.4},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
-		},
-		{
-			"type_id": "hover_engine", "name": "Hover Pad",
-			"position": {"x": -1.5, "y": -0.5, "z": -1.4},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0}, "yaw_offset": 0.0, "tweaks": {}
+			"facet": "",
+			"mount_normal": {
+				"x": 0.0,
+				"y": 1.0,
+				"z": 0.0
+			},
+			"mount_style": "",
+			"name": "Radar Mast Suite",
+			"position": {
+				"x": 0.0,
+				"y": 0.401967525482178,
+				"z": 1.5
+			},
+			"rotation": {
+				"x": 0.102709747850895,
+				"y": 0.0,
+				"z": 0.0
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 30,
+				"cost_metal": 30,
+				"dps": 0.0,
+				"hp": 60.0,
+				"weight": 50.0
+			},
+			"tweaks": {},
+			"type_id": "sensor_suite",
+			"yaw_offset": 0.0
 		}
-	]
+	],
+	"name": "Dart Hover Skirmisher",
+	"nose_taper": 1.0,
+	"version": 1.0
 }

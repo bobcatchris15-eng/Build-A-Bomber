@@ -16,7 +16,7 @@ func _pool() -> Array:
 	var bp = BlueprintManagerScript.new()
 	root.add_child(bp)
 	var out: Array = []
-	for path in ["res://data/loadout/ore_trucker.json",
+	for path in ["res://data/loadout/magpie_ore_hauler.json",
 			"res://data/loadout/bulwark_mbt.json",
 			"res://data/loadout/rattler_scout.json",
 			"res://data/loadout/warden_aa.json",
@@ -120,14 +120,14 @@ func test_counter_draft_answers_an_air_force() -> bool:
 		print("  [FAIL] Roster changed size: %d -> %d" % [pool.size(), drafted.size()])
 		ok = false
 
-	# DEDICATION, not just qualification. The Longarm SPG mounts a CIWS alongside
-	# its howitzer, so design_fills_role() honestly says yes - but a howitzer with
+	# DEDICATION, not just qualification. The Culverin SPG mounts a CIWS alongside
+	# its artillery piece, so design_fills_role() honestly says yes - but a howitzer with
 	# point defence bolted on is not the answer to an air force, and taking the
 	# first qualifying design in pool order fielded exactly that.
 	var bp = BlueprintManagerScript.new()
 	root.add_child(bp)
 	var warden: Dictionary = bp.load_blueprint("res://data/loadout/warden_aa.json")
-	var spg: Dictionary = bp.load_blueprint("res://data/loadout/longarm_spg.json")
+	var spg: Dictionary = bp.load_blueprint("res://data/loadout/culverin_spg.json")
 	if not warden.is_empty() and not spg.is_empty():
 		var w: float = CounterDraftScript.role_strength(warden, "anti_air")
 		var s: float = CounterDraftScript.role_strength(spg, "anti_air")

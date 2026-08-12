@@ -1,35 +1,100 @@
 {
-	"version": 1.0,
-	"id": "default_gatling_pillbox",
-	"name": "Gatling Pillbox",
-	"hull_type": "bunker_main_meridian",
-	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-	"hull_size": {"x": 3.0, "y": 1.2, "z": 3.0},
 	"armor_material": "hardened_steel",
-	"armor_thickness": 2.0,
+	"armor_thickness": 1.3,
 	"faction": "industrialists",
+	"hull_scale": {
+		"x": 1.0,
+		"y": 1.0,
+		"z": 1.0
+	},
+	"hull_size": {
+		"x": 3.13499999046326,
+		"y": 2.08999991416931,
+		"z": 3.0
+	},
+	"hull_type": "bunker_main_meridian",
+	"id": "default_gatling_pillbox",
 	"locomotion": {
-		"type_id": "",
-		"settings": {}
+		"settings": {},
+		"type_id": ""
 	},
 	"modules": [
 		{
-			"type_id": "rotary_cannon",
+			"facet": "top",
+			"mount_normal": {
+				"x": -0.37961682677269,
+				"y": 0.910398244857788,
+				"z": -0.164517819881439
+			},
+			"mount_style": "pintle",
 			"name": "Rotary Gatling",
-			"position": {"x": 0.75, "y": 0.6, "z": 0.0},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-			"yaw_offset": 0.0,
-			"tweaks": {"barrel_count": 6}
+			"position": {
+				"x": -0.75,
+				"y": 0.909197926521301,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": -0.165269166231155,
+				"y": -0.0331491529941559,
+				"z": 0.395057111978531
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 5,
+				"cost_metal": 45,
+				"dps": 105.0,
+				"hp": 80.0,
+				"weight": 110.0
+			},
+			"tweaks": {},
+			"type_id": "rotary_cannon",
+			"yaw_offset": 0.0
 		},
 		{
-			"type_id": "rotary_cannon",
+			"facet": "top",
+			"mount_normal": {
+				"x": 0.379611372947693,
+				"y": 0.910385072231293,
+				"z": -0.164603263139725
+			},
+			"mount_style": "pintle",
 			"name": "Rotary Gatling",
-			"position": {"x": -0.75, "y": 0.6, "z": 0.0},
-			"rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
-			"scale": {"x": 1.0, "y": 1.0, "z": 1.0},
-			"yaw_offset": 0.0,
-			"tweaks": {"barrel_count": 6}
+			"position": {
+				"x": 0.75,
+				"y": 0.909198403358459,
+				"z": 0.0
+			},
+			"rotation": {
+				"x": -0.165355771780014,
+				"y": 0.0331666022539139,
+				"z": -0.395057111978531
+			},
+			"scale": {
+				"x": 1.0,
+				"y": 1.0,
+				"z": 1.0
+			},
+			"scale_flip_x": false,
+			"sponson": false,
+			"stats": {
+				"cost_crystal": 5,
+				"cost_metal": 45,
+				"dps": 105.0,
+				"hp": 80.0,
+				"weight": 110.0
+			},
+			"tweaks": {},
+			"type_id": "rotary_cannon",
+			"yaw_offset": 0.0
 		}
-	]
+	],
+	"name": "Gatling Pillbox",
+	"nose_taper": 1.0,
+	"version": 1.0
 }

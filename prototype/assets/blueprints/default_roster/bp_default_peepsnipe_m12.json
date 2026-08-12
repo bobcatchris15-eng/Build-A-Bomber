@@ -8,11 +8,11 @@
 		"z": 1.0
 	},
 	"hull_size": {
-		"x": 2.0,
-		"y": 1.20000004768372,
-		"z": 3.59999990463257
+		"x": 2.06800007820129,
+		"y": 1.23233997821808,
+		"z": 4.30000019073486
 	},
-	"hull_type": "wedge_scout_meridian_a",
+	"hull_type": "calder_scout_b",
 	"id": "bp_default_peepsnipe_m12",
 	"locomotion": {
 		"settings": {},
@@ -29,8 +29,8 @@
 			"mount_style": "",
 			"name": "Rocker-Bogie Suspension",
 			"position": {
-				"x": -0.939999997615814,
-				"y": -0.5,
+				"x": -0.832909226417542,
+				"y": -0.655499994754791,
 				"z": 0.0
 			},
 			"rotation": {
@@ -39,27 +39,43 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 0.585504710674286,
-				"y": 0.585504710674286,
-				"z": 0.585504710674286
+				"x": 0.615418076515198,
+				"y": 0.615418076515198,
+				"z": 0.615418076515198
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 2,
-				"cost_metal": 13,
+				"cost_metal": 14,
 				"dps": 0.0,
-				"hp": 61.5,
-				"weight": 22.0
+				"hp": 65.5,
+				"weight": 25.5
 			},
 			"tweaks": {
 				"arm_length": 1.0,
 				"bogie_pairs": 3.0,
-				"kit_anchor_x": 0.375999987125397,
-				"kit_anchor_y": 0.0902400016784668,
+				"chine_belly_drop": 0.0,
+				"chine_clear_x": 0.0964000225067139,
+				"chine_flank_height": 0.520552694797516,
+				"chine_half_width": 0.929309248924255,
+				"chine_normal_x": 0.707106828689575,
+				"chine_normal_y": -0.707106828689575,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.707106828689575,
+				"chine_up_y": 0.707106828689575,
+				"kit_anchor_x": 0.413600027561188,
+				"kit_anchor_y": 0.0985872149467468,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
-				"target_length": 3.59999990463257,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": -0.832909226417542,
+				"station_y": -0.655499994754791,
+				"station_z": 0.0,
+				"target_length": 4.30000019073486,
 				"wheel_size": 1.0
 			},
 			"type_id": "rocker_bogie",
@@ -75,8 +91,8 @@
 			"mount_style": "",
 			"name": "Rocker-Bogie Suspension",
 			"position": {
-				"x": 0.939999997615814,
-				"y": -0.5,
+				"x": 0.832909226417542,
+				"y": -0.655499994754791,
 				"z": 0.0
 			},
 			"rotation": {
@@ -85,27 +101,43 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 0.585504710674286,
-				"y": 0.585504710674286,
-				"z": 0.585504710674286
+				"x": 0.615418076515198,
+				"y": 0.615418076515198,
+				"z": 0.615418076515198
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 2,
-				"cost_metal": 13,
+				"cost_metal": 14,
 				"dps": 0.0,
-				"hp": 61.5,
-				"weight": 22.0
+				"hp": 65.5,
+				"weight": 25.5
 			},
 			"tweaks": {
 				"arm_length": 1.0,
 				"bogie_pairs": 3.0,
-				"kit_anchor_x": -0.375999987125397,
-				"kit_anchor_y": 0.0902400016784668,
+				"chine_belly_drop": 0.0,
+				"chine_clear_x": 0.0964000225067139,
+				"chine_flank_height": 0.520552694797516,
+				"chine_half_width": 0.929309248924255,
+				"chine_normal_x": 0.70710676908493,
+				"chine_normal_y": -0.70710676908493,
+				"chine_seated": 1.0,
+				"chine_up_x": 0.707106828689575,
+				"chine_up_y": 0.707106828689575,
+				"kit_anchor_x": -0.413600027561188,
+				"kit_anchor_y": 0.0985872149467468,
 				"kit_anchor_z": 0.0,
 				"kit_reach": 0.0,
-				"target_length": 3.59999990463257,
+				"mount_rise": 0.0,
+				"node_scale_x": 1.0,
+				"node_scale_y": 1.0,
+				"node_scale_z": 1.0,
+				"station_x": 0.832909226417542,
+				"station_y": -0.655499994754791,
+				"station_z": 0.0,
+				"target_length": 4.30000019073486,
 				"wheel_size": 1.0
 			},
 			"type_id": "rocker_bogie",
@@ -122,11 +154,11 @@
 			"name": "Radar Mast Suite",
 			"position": {
 				"x": 0.0,
-				"y": 0.564000129699707,
+				"y": -0.0864061117172241,
 				"z": 0.75
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": -0.0504536405205727,
 				"y": 0.0,
 				"z": 0.0
 			},
@@ -152,18 +184,18 @@
 			"facet": "top",
 			"mount_normal": {
 				"x": 0.0,
-				"y": 1.0,
-				"z": 0.0
+				"y": 0.998727023601532,
+				"z": -0.0504404157400131
 			},
 			"mount_style": "pintle",
 			"name": "Coil Gun",
 			"position": {
 				"x": 0.0,
-				"y": 0.29542875289917,
-				"z": -0.75
+				"y": -0.172349095344543,
+				"z": -1.0
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": -0.050461832433939,
 				"y": 0.0,
 				"z": 0.0
 			},
