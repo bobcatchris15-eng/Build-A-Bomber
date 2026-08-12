@@ -19,7 +19,7 @@ extends "res://tests/suite_base.gd"
 #      the weight coefficient above the HP coefficient in module_data.gd;
 #      guarded here by asserting HP-per-kilogram strictly falls as armor rises.
 
-const StatCalcScript = preload("res://scripts/stat_calculator.gd")
+const LabDocumentScript = preload("res://scripts/lab_document.gd")
 
 
 # ModuleData built from a type's real catalog entry, so the numbers under test
@@ -43,8 +43,8 @@ func _module(type_id: String, tweaks: Dictionary) -> ModuleData:
 # sets are disjoint and the loop below asserts nothing about that either way.
 func _all_tweak_specs() -> Array:
 	var out := []
-	for type_id in StatCalcScript.TWEAK_SPECS:
-		for spec in StatCalcScript.TWEAK_SPECS[type_id]:
+	for type_id in LabDocumentScript.TWEAK_SPECS:
+		for spec in LabDocumentScript.TWEAK_SPECS[type_id]:
 			out.append([type_id, spec])
 	for type_id in ModuleCatalog.LOCOMOTION_TWEAK_SPECS:
 		for spec in ModuleCatalog.LOCOMOTION_TWEAK_SPECS[type_id]:
@@ -194,8 +194,8 @@ func test_armor_level_costs_more_mass_than_it_buys() -> bool:
 	# light module is where a shallow curve would first flatten into a tie.
 	var inversions := []
 	var modules_checked := 0
-	for type_id in StatCalcScript.TWEAK_SPECS:
-		for spec in StatCalcScript.TWEAK_SPECS[type_id]:
+	for type_id in LabDocumentScript.TWEAK_SPECS:
+		for spec in LabDocumentScript.TWEAK_SPECS[type_id]:
 			if spec.get("name", "") != "protectedness":
 				continue
 			modules_checked += 1

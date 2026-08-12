@@ -181,12 +181,12 @@ func _on_zoom(screen_pos: Vector2, height_delta: float):
 
 
 func _unhandled_input(event):
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_on_zoom(event.position, -zoom_speed * world_scale)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_on_zoom(event.position, zoom_speed * world_scale)
-		elif event.button_index == MOUSE_BUTTON_MIDDLE:
+	if event.is_action_pressed("cam_zoom_in"):
+		_on_zoom(get_viewport().get_mouse_position(), -zoom_speed * world_scale)
+	elif event.is_action_pressed("cam_zoom_out"):
+		_on_zoom(get_viewport().get_mouse_position(), zoom_speed * world_scale)
+	elif event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_MIDDLE:
 			_middle_drag_origin = event.position
 			_middle_drag_last = event.position
 	elif event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_MIDDLE:

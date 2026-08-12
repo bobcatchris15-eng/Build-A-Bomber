@@ -208,7 +208,7 @@ func _gui_input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if not _is_open:
 		return
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+	if event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
 		close()
 

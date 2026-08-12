@@ -41,7 +41,7 @@ const NUMERIC_TYPES = [TYPE_INT, TYPE_FLOAT]
 # happen in a normal install and is loud (push_error) specifically
 # because it indicates a broken installation, not a normal modding
 # scenario.
-const PROTECTED_DEFAULT_HULL_ID := "block_main_meridian_a"
+const PROTECTED_DEFAULT_HULL_ID := "block_main_meridian"
 const PROTECTED_DEFAULT_HULL_FALLBACK = {
 	"name": "Block Main / Meridian A", "hp": 400.0, "weight": 250.0, "metal": 100, "crystal": 20,
 	# base_power (generation) tracks the shipped block_main_meridian_a.json

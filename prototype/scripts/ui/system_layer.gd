@@ -246,7 +246,11 @@ func _in_test_range() -> bool:
 	var rs = mc.get("rule_set")
 	if rs == null:
 		return false
-	return int(rs.get("mode", -1)) == int(MatchRuleSetScript.Mode.TEST_RANGE)
+	# rs.mode is a typed Mode enum, so it is always defined on a real
+	# MatchRuleSet instance. The dict-style two-arg .get(key, default)
+	# is what tripped the prior implementation - Object.get() takes one
+	# arg, and the two-arg form is only on Dictionary.
+	return int(rs.mode) == int(MatchRuleSetScript.Mode.TEST_RANGE)
 
 
 func _leave(path: String) -> void:

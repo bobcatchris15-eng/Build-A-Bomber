@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://cxabstat123"]
 
-[ext_resource type="Script" path="res://scripts/stat_calculator.gd" id="1_stats"]
+[ext_resource type="Script" path="res://scripts/lab_document.gd" id="1_stats"]
 
 [node name="UI_StatBlock" type="Control"]
 layout_mode = 3
@@ -57,27 +57,35 @@ custom_minimum_size = Vector2(0, 24)
 layout_mode = 2
 custom_minimum_size = Vector2(0, 8)
 
-[node name="HPLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
+[node name="HPLabel" type="RichTextLabel" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 theme_type_variation = &"StatLabel"
+bbcode_enabled = true
+fit_content = true
 text = "Total HP: 0.0"
 custom_minimum_size = Vector2(0, 20)
 
-[node name="WeightLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
+[node name="WeightLabel" type="RichTextLabel" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 theme_type_variation = &"StatLabel"
+bbcode_enabled = true
+fit_content = true
 text = "Total Weight: 0.0"
 custom_minimum_size = Vector2(0, 20)
 
-[node name="CostLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
+[node name="CostLabel" type="RichTextLabel" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 theme_type_variation = &"StatLabel"
+bbcode_enabled = true
+fit_content = true
 text = "Cost (Metal): 0"
 custom_minimum_size = Vector2(0, 20)
 
-[node name="DPSLabel" type="Label" parent="ScrollContainer/VBoxContainer"]
+[node name="DPSLabel" type="RichTextLabel" parent="ScrollContainer/VBoxContainer"]
 layout_mode = 2
 theme_type_variation = &"StatLabel"
+bbcode_enabled = true
+fit_content = true
 text = "Total DPS: 0.0"
 custom_minimum_size = Vector2(0, 20)
 

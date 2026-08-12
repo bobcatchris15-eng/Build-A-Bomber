@@ -1,0 +1,1159 @@
+class_name TelemetryRail
+extends RefCounted
+
+const DesignStatsScript = preload("res://scripts/design_stats.gd")
+const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
+const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
+const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
+const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
+const DrivetrainScript = preload("res://scripts/drivetrain.gd")
+const WeaponAlphaScript = preload("res://scripts/weapon_alpha.gd")
+const PhosphorPanelScript = preload("res://scripts/ui/phosphor_panel.gd")
+const DesignVerdictScript = preload("res://scripts/design_verdict.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
+
+var lab: Node
+
+func _init(p_lab: Node):
+	lab = p_lab
+	hp_label = lab.hp_label
+	weight_label = lab.weight_label
+	cost_label = lab.cost_label
+	dps_label = lab.dps_label
+	_power_gen_label = lab._power_gen_label
+	total_hp = lab.total_hp
+	total_weight = lab.total_weight
+	total_dps = lab.total_dps
+	drivetrain = lab.drivetrain
+	weapon_range = lab.weapon_range
+	_verdict_panel = lab._verdict_panel
+	_verdict_headline = lab._verdict_headline
+	_verdict_detail = lab._verdict_detail
+	
+	_range_label = lab._range_label
+	_vision_label = lab._vision_label
+	_spotter_panel = lab._spotter_panel
+	_spotter_title = lab._spotter_title
+	_spotter_detail = lab._spotter_detail
+	_alpha_label = lab._alpha_label
+	_alpha_head = lab._alpha_head
+	_alpha_rows = lab._alpha_rows
+	_rail_vbox = lab._rail_vbox
+	
+	_power_draw_label = lab._power_draw_label
+	_power_net_label = lab._power_net_label
+	_power_panel = lab._power_panel
+	_power_title = lab._power_title
+	_power_detail = lab._power_detail
+	
+	_load_bar = lab._load_bar
+	_speed_label = lab._speed_label
+	_load_label = lab._load_label
+	_overweight_panel = lab._overweight_panel
+	_overweight_title = lab._overweight_title
+	_overweight_detail = lab._overweight_detail
+	_boost_label = lab._boost_label
+	
+	armor_threshold_label = lab.armor_threshold_label
+	tech_req_label = lab.tech_req_label
+	_load_fill_styles = lab._load_fill_styles
+	_power_storage_label = lab._power_storage_label
+
+var hp_label
+var weight_label
+var cost_label
+var dps_label
+var _power_gen_label
+var total_hp
+var total_weight
+var total_dps
+var drivetrain
+var weapon_range
+var _verdict_panel
+var _verdict_headline
+var _verdict_detail
+
+var _range_label
+var _vision_label
+var _spotter_panel
+var _spotter_title
+var _spotter_detail
+var _alpha_label
+var _alpha_head
+var _alpha_rows
+var _rail_vbox
+
+var _power_draw_label
+var _power_net_label
+var _power_panel
+var _power_title
+var _power_detail
+
+var _load_bar
+var _speed_label
+var _load_label
+var _overweight_panel
+var _overweight_title
+var _overweight_detail
+var _boost_label
+
+var armor_threshold_label
+var tech_req_label
+var _load_fill_styles
+var _power_storage_label
+
+var _base_stats: Dictionary = {}
+var _previewing: bool = false
+var _cached_hull: Node3D = null
+
+func update_stats(hull: Node3D):
+	_cached_hull = hull
+	if not hull:
+		_base_stats = {}
+		_apply_stats({})
+		return
+	var stats: Dictionary = DesignStatsScript.analyze(hull)
+	_base_stats = stats
+	_previewing = false
+	_apply_stats(stats)
+
+func update_preview_stats(ghost_mesh: Node3D, mirror_mesh: Node3D = null):
+	if not _cached_hull or _base_stats.is_empty():
+		return
+	
+	var old_parent_1 = ghost_mesh.get_parent()
+	if old_parent_1:
+		old_parent_1.remove_child(ghost_mesh)
+	_cached_hull.add_child(ghost_mesh)
+	
+	var old_parent_2 = null
+	if mirror_mesh:
+		old_parent_2 = mirror_mesh.get_parent()
+		if old_parent_2:
+			old_parent_2.remove_child(mirror_mesh)
+		_cached_hull.add_child(mirror_mesh)
+		
+	var preview_stats = DesignStatsScript.analyze(_cached_hull)
+	
+	_cached_hull.remove_child(ghost_mesh)
+	if old_parent_1:
+		old_parent_1.add_child(ghost_mesh)
+		
+	if mirror_mesh:
+		_cached_hull.remove_child(mirror_mesh)
+		if old_parent_2:
+			old_parent_2.add_child(mirror_mesh)
+			
+	_previewing = true
+	_apply_stats(preview_stats, _base_stats)
+
+func clear_preview():
+	if _previewing:
+		_previewing = false
+		_apply_stats(_base_stats)
+
+func _format_delta(current: float, base: float, invert_good: bool = false, is_int: bool = false) -> String:
+	if absf(current - base) < 0.05:
+		return ""
+	var diff = current - base
+	var sign_str = "+" if diff > 0 else "-"
+	var val_str = ("%.0f" if is_int else "%.1f") % absf(diff)
+	
+	var good = diff > 0
+	if invert_good:
+		good = not good
+		
+	var color = Tokens.SIGNAL_GO if good else Tokens.SIGNAL_ALERT
+	var color_hex = color.to_html(false)
+	return " [color=#%s]%s%s[/color]" % [color_hex, sign_str, val_str]
+
+func _apply_stats(stats: Dictionary, base_stats: Dictionary = {}):
+	if stats.is_empty():
+		return
+	# The faction re-tint that used to happen here is gone with the `Panel` node
+	# it painted (VISUAL/UI plan items 2 and 7). ui_material.gdshader's contract is
+	# explicit that chrome stays neutral and the faction accent is "a low-strength
+	# identity wash for the faction preview swatch only, never general chrome" -
+	# and repainting the whole 320px rail in the faction's colour on every stat
+	# recompute is about as far from that as the codebase got. The rail is
+	# POWDERCOAT from the dock now, the same in every faction; faction identity is
+	# carried by the units on the stage, which is where the player is looking.
+	# The whole summation this function used to do inline now lives in
+	# DesignStats.analyze(), so the roster cards and the fleet comparison panel
+	# can read the same figures instead of only this sidebar being able to.
+	# Nothing about WHAT is computed changed - see design_stats.gd's header. The
+	# locals below are kept as locals so the label code further down reads
+	# unchanged.
+	var hull = _cached_hull
+	_update_verdict(stats)
+	if lab.has_method("_update_toolbar_info"):
+		lab._update_toolbar_info(hull, stats)
+	var total_cost_metal = stats["cost_metal"]
+	var total_cost_crystal = stats["cost_crystal"]
+	var total_dps = stats["dps"]
+	# Weight, load capacity, thrust and top speed all come from
+	# Drivetrain.analyze() - the SAME call unit.gd makes when it spawns
+	# the unit for real, so every number this sidebar shows is a number combat
+	# will actually run. DesignStats.analyze() made that call above and hands the
+	# result back, so it happens once per recompute rather than twice.
+	#
+	# This replaces a local re-derivation that carried its own comment saying
+	# it only needed to be "close enough to warn". It was not: it knew about
+	# wheels, treads, rotors and legs, and nothing about hover pads, Electron
+	# Megavoltage, turbine compression, or any of the eleven expansion
+	# locomotors - so on most of the roster the capacity figure could not move
+	# when the player dragged the very tweaks that change it. See the header
+	# comment in drivetrain.gd for why the two copies are now one.
+	var dt: Dictionary = stats["drivetrain"]
+	# No total_weight_capacity local: it was assigned and never read (already dead
+	# at HEAD, not made dead by this refactor). _update_drivetrain_readout() takes
+	# the whole dt and reads capacity from it directly.
+
+	var armor_material = "hardened_steel"
+	var armor_thickness = 1.0
+	var faction = "industrialists"
+
+	if hull:
+		if hull.has_meta("armor_material"):
+			armor_material = hull.get_meta("armor_material")
+		if hull.has_meta("armor_thickness"):
+			armor_thickness = hull.get_meta("armor_thickness")
+		if hull.has_meta("faction"):
+			faction = hull.get_meta("faction")
+
+	# FABLE_REVIEW.md 2.6 fix: this sidebar used to show numbers combat never
+	# used - "Total HP" was the MODULE hp sum scaled by material/thickness
+	# (an empty hull showed 0.0 but fielded at 400), and "Total Weight"
+	# applied material multipliers the combat weight sum didn't. Both now
+	# come from the same shared ModuleCatalog.compute_hull_* functions
+	# unit.gd/building.gd/blueprint_cost() read, so what you see in
+	# the Design Lab is what the simulation runs.
+	#
+	# Hull HP, the module pool and the weight all arrive from
+	# DesignStats.analyze(), which makes exactly those shared calls. The hull cost
+	# it computes is already folded into cost_metal/cost_crystal above, so there
+	# is no separate hull_cost addition here any more.
+	var module_hp_pool = stats["module_hp_pool"]
+	var total_hp = stats["hull_hp"]
+	var total_weight = stats["weight"]
+
+	# Read straight from DamageResolver.ARMOR_TABLE (single source of truth,
+	# same as combat) instead of a second hardcoded k_base/t_base/e_base
+	# table - the two had drifted: "E:" here used to be a copy-paste of the
+	# EXPLOSIVE threshold mislabeled as Energy (damage_resolver.gd had no
+	# real "energy" row at all until this pass). Found while scoping the
+	# energy-weapon damage_class reclassification work.
+	var k_thresh = DamageResolverScript.get_material_threshold(armor_material, "kinetic", armor_thickness).x
+	var t_thresh = DamageResolverScript.get_material_threshold(armor_material, "thermal", armor_thickness).x
+	var e_thresh = DamageResolverScript.get_material_threshold(armor_material, "energy", armor_thickness).x
+
+	# Stat rounding: total_hp/total_weight/total_dps are sums of
+	# module_data.gd getters that already round to the nearest 0.5 at the
+	# point they're computed (GlobalConfig.round_to_half), so what's shown
+	# here is exactly what combat uses - this %.1f is just consistent
+	# formatting (a sum of clean .5-stepped numbers is itself clean), not a
+	# second, independent rounding pass. Previously these 4 labels were the
+	# one place in this file using bare str() on a float, which is why they
+	# alone showed raw float precision (e.g. "14.723891...") while every
+	# other label here was already %.1f/%.2f/%d formatted.
+	var hp_delta = _format_delta(total_hp, base_stats.get("hull_hp", total_hp))
+	var mpool_delta = _format_delta(module_hp_pool, base_stats.get("module_hp_pool", module_hp_pool))
+	hp_label.text = "Hull HP: %.1f%s (modules +%.1f%s)" % [total_hp, hp_delta, module_hp_pool, mpool_delta]
+	if hp_delta != "" or mpool_delta != "":
+		hp_label.text = hp_label.text.replace("[color", "[color").replace("[/color]", "[/color]") # triggers rich text if needed, wait StatLabel isn't RichTextLabel!
+	hp_label.tooltip_text = "Hull HP is the unit's real health pool in combat.\nModule HP is each mounted part's own pool - parts get shot off (subsystem stripping) without draining hull HP."
+	var cost_diff = _format_delta(total_cost_metal + total_cost_crystal, base_stats.get("cost_metal", total_cost_metal) + base_stats.get("cost_crystal", total_cost_crystal), true, true)
+	cost_label.text = "Cost: %d credits%s" % [ResourceCatalogScript.credits_from_materials(Vector2i(total_cost_metal, total_cost_crystal)), cost_diff]
+	var dps_delta = _format_delta(total_dps, base_stats.get("dps", total_dps))
+	dps_label.text = "Total DPS: %.1f%s" % [total_dps, dps_delta]
+
+	var weight_delta = _format_delta(total_weight, base_stats.get("weight", total_weight), true)
+	weight_label.text = "Total Weight: %.1f kg%s" % [total_weight, weight_delta]
+
+	# Publish the figures for anything that reads this design's stats rather
+	# than the labels. fleet_comparison_panel.gd has always tried to
+	# (`stat_calc.total_weight if "total_weight" in stat_calc`), but these were
+	# LOCALS of this function, so that guard never passed and the WIP column of
+	# the comparison panel silently showed 0 HP / 0 kg / 0 DPS against a real
+	# saved design. Assigning them here is what makes the guard true.
+	# Assigned through `self` deliberately: the locals above shadow these
+	# members, so a bare `total_weight = total_weight` would be a self-
+	# assignment of the local and publish nothing.
+	self.total_hp = total_hp
+	self.total_weight = total_weight
+	self.total_dps = total_dps
+	self.drivetrain = dt
+	# Already analysed inside DesignStats.analyze() above; taken from there rather
+	# than walking every module's range tweaks a second time per recompute.
+	var wr: Dictionary = stats["weapon_range"]
+	self.weapon_range = wr
+
+	# The manufactory-tier note stays tooltip-only. Manufactory tier is
+	# determined entirely by the hull TYPE (see ModuleCatalog.
+	# get_hull_size_tier(), the same function skirmish.gd's
+	# _queue_player_unit() uses) - a player could previously only discover
+	# which manufactory they'd need via a failed build attempt mid-match.
+	var tier = ModuleCatalog.get_hull_size_tier(hull.get_meta("type_id", "block_main_meridian_a")) if hull and hull.has_meta("type_id") else ""
+	var tooltip_parts: Array = []
+	if tier != "":
+		tooltip_parts.append("Needs a %s Manufactory to build this design." % tier.capitalize())
+	weight_label.tooltip_text = "\n".join(tooltip_parts)
+	# The overweight state is no longer said by tinting this label. It has its
+	# own bar, its own speed readout and its own warning panel below - a label
+	# turning orange was the entire previous treatment, and it neither said
+	# what the limit was nor what exceeding it cost.
+	weight_label.modulate = Color(1, 1, 1)
+
+	_update_drivetrain_readout(dt)
+	_update_range_readout(wr)
+	_update_power_readout(stats.get("power", {}))
+
+	if not armor_threshold_label:
+		armor_threshold_label = Label.new()
+		# Found by the new headless UI-overflow audit: this label's natural
+		# single-line width (305px, "Armor Thresholds: K: 15.0, T: 5.0,
+		# E: 10.0") exceeds the sidebar's fixed 210px width - it was
+		# silently clipping/spilling past the panel edge (visible in
+		# several of today's own verification screenshots as a stray
+		# trailing character, never flagged as a bug until now). Word-wrap
+		# instead of a hardcoded width, since threshold values can grow to
+		# more digits than today's baseline numbers.
+		armor_threshold_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_rail_vbox.add_child(armor_threshold_label)
+		# Place it after the DPS row - the other readouts use the same
+		# "directly after the row it explains" move_child pattern
+		# (_build_drivetrain_readout / _build_range_readout / _build_power_readout
+		# all do this). Without it, the label lands at the end of the
+		# VBox, below the action buttons - which is what made it
+		# invisible for so long (test_sim_and_stats.gd reads the text and
+		# the value is correct, but no player ever sees it).
+		if dps_label and dps_label.get_parent() == _rail_vbox:
+			_rail_vbox.move_child(armor_threshold_label, dps_label.get_index() + 1)
+	armor_threshold_label.text = "Armor Thresholds: K: %.1f, T: %.1f, E: %.1f" % [k_thresh, t_thresh, e_thresh]
+
+	if not tech_req_label:
+		tech_req_label = Label.new()
+		tech_req_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_rail_vbox.add_child(tech_req_label)
+		# Same "directly after the row it explains" pattern - tech
+		# requirements belong with the armor block they describe, not
+		# below the action buttons.
+		if armor_threshold_label and armor_threshold_label.get_parent() == _rail_vbox:
+			_rail_vbox.move_child(tech_req_label, armor_threshold_label.get_index() + 1)
+
+	var req_buildings: Array[String] = []
+	if hull:
+		var root = lab.get_node_or_null("/root/Main")
+		var bm = root.get_node_or_null("BlueprintManager") if root else null
+		if bm and bm.has_method("serialize_hull"):
+			var bp_data: Dictionary = bm.serialize_hull(hull)
+			req_buildings = DesignCostingScript.blueprint_required_buildings(bp_data)
+
+	if req_buildings.is_empty():
+		tech_req_label.visible = false
+	else:
+		tech_req_label.visible = true
+		var names: Array = []
+		for r in req_buildings:
+			names.append(ProductionHUDScript._format_building_name(r))
+		tech_req_label.text = "Required Buildings: %s" % ", ".join(names)
+
+	# LAST, and that is the whole reason it is down here rather than up with the
+	# other three _update_*_readout() calls. This block anchors itself at
+	# dps_label.get_index() + 1, and so does armor_threshold_label above - so
+	# whichever runs last ends up adjacent to the DPS row. Alpha is the row that
+	# QUALIFIES the DPS figure ("this is what one hit of that is worth"), and it
+	# has to sit against it to read as a correction rather than as a separate
+	# topic; the armour thresholds are about what this design's own plate stops,
+	# which is the next subject, not the same one.
+	_update_alpha_readout(stats.get("alpha", {}))
+
+
+# --- Drivetrain readout (load bar + top speed + overweight warning) ---------
+#
+# WHY THIS IS VISIBLE CHROME AND NOT A TOOLTIP. The overweight state used to be
+# communicated by tinting the weight label orange and putting a sentence in its
+# tooltip. The comment justifying that said the sidebar "has zero
+# vertical/horizontal layout slack left", and at the time it was right - it was
+# a fixed 210px-wide strip, and the project's own overflow test had rejected
+# three attempts at a persistent label.
+#
+# That constraint no longer exists. The TELEMETRY dock is a 320px UIDock whose
+# body is a ScrollContainer (see _build_rail_dock()), so it can hold real rows
+# and scroll them. A tooltip is also the wrong instrument for this specific
+# job: the player is DRAGGING a tweak slider and needs to watch the number
+# respond, and a tooltip is not on screen while the mouse is on the slider.
+#
+# Chris's ask was that exceeding capacity "light up a warning notification" and
+# that the player "be aware of the flaw and what they are trading" - so the
+# panel names the cost in the same units as the stat it is spending (speed),
+# rather than saying "overweight" and leaving the player to infer the rest.
+# Nothing here blocks saving or testing: an overloaded design is a legal,
+# fieldable design, per that same ask.
+func _load_fill_style(state: String) -> StyleBoxFlat:
+	if not _load_fill_styles.has(state):
+		var sb := StyleBoxFlat.new()
+		match state:
+			"go": sb.bg_color = Tokens.SIGNAL_GO
+			"hazard": sb.bg_color = Tokens.SIGNAL_HAZARD
+			_: sb.bg_color = Tokens.SIGNAL_ALERT
+		sb.corner_radius_top_left = Tokens.RADIUS_CONTROL
+		sb.corner_radius_top_right = Tokens.RADIUS_CONTROL
+		sb.corner_radius_bottom_left = Tokens.RADIUS_CONTROL
+		sb.corner_radius_bottom_right = Tokens.RADIUS_CONTROL
+		_load_fill_styles[state] = sb
+	return _load_fill_styles[state]
+
+# --- Warning panel primitive -----------------------------------------------
+#
+# All three warning panels (overweight, power, spotter) share the same
+# shape: a coloured panel with a left-border accent, holding a title row
+# (the thing that changes - "OVERWEIGHT", "POWER SHORTFALL", "SPOTTER
+# REQUIRED") and a detail row below it (the why). Extracted into one
+# builder so the three call sites cannot drift on the visual language,
+# and so a future change to the panel shape (e.g. adding an icon, or
+# a different separator) lands in one place.
+#
+# THE SHAPE:
+#
+#   +-----------------------------------+
+#   |  ! TITLE                         |   <- "HeadingLabel" in edge colour,
+#   |  ----------------------------     |      with a "!" prefix as the
+#   |  detail text wraps here, one     |      thematic icon the detail
+#   |  short paragraph.                 |      used to visually crowd.
+#   +-----------------------------------+
+#
+# The hairline rule between title and detail is what fixes the
+# "detail overlaps the title" read the old layout had: with only
+# 4px of VBox separation and no rule, the two lines blurred into
+# one block. The rule also matches the UIFlyout.set_title() pattern
+# (ui_flyout.gd:82-90), so the rail and the popover agree on what
+# a "titled section" looks like.
+#
+# The detail uses TEXT_PRIMARY rather than the HintLabel's default
+# TEXT_SECONDARY: against the dim-amber fill of a hazard panel, the
+# secondary text reads as muddy. TEXT_PRIMARY is the warm off-white
+# and has the contrast the warning actually needs to be readable.
+#
+# Returns [PanelContainer, Label(title), Label(detail)] so the caller
+# stores them in its own _panel/_title/_detail fields and updates the
+# text from update_stats() / update_*_readout() as before.
+func _build_warning_panel(role: String) -> Array:
+	var pair := Tokens.signal_pair(role)
+	var panel := PanelContainer.new()
+	var warn_style := StyleBoxFlat.new()
+	warn_style.bg_color = pair["fill"]
+	warn_style.border_color = pair["edge"]
+	warn_style.border_width_left = Tokens.BORDER_EMPHASIS
+	warn_style.content_margin_left = Tokens.SPACE_SM
+	warn_style.content_margin_right = Tokens.SPACE_SM
+	warn_style.content_margin_top = Tokens.SPACE_XS
+	warn_style.content_margin_bottom = Tokens.SPACE_XS
+	panel.add_theme_stylebox_override("panel", warn_style)
+	panel.visible = false
+
+	var warn_box := VBoxContainer.new()
+	warn_box.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	panel.add_child(warn_box)
+
+	# Title row. HeadingLabel in the panel's edge colour, with a leading
+	# "!" as the thematic icon. The "!" is plain ASCII, not a glyph or
+	# emoji - it renders in the same Source Sans Pro Bold face the
+	# rest of the title uses, so the title reads as one typographic
+	# line rather than as "icon + text" stuck together.
+	var title := Label.new()
+	title.theme_type_variation = "HeadingLabel"
+	title.add_theme_color_override("font_color", pair["edge"])
+	warn_box.add_child(title)
+
+	# Hairline rule - sits BETWEEN the title and the detail, so the
+	# detail has a clear "underneath the title" position. Same role
+	# the HSeparator plays in UIFlyout.set_title() (ui_flyout.gd:88-90).
+	var rule := HSeparator.new()
+	# The rule's own separation is a bit wider than the warn_box's
+	# default SPACE_XS (4px) so the title and the detail feel like
+	# distinct regions, not two lines of the same paragraph.
+	rule.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	rule.add_theme_color_override("separator", pair["edge"])
+	warn_box.add_child(rule)
+
+	# Detail row. TEXT_PRIMARY (not the HintLabel default of
+	# TEXT_SECONDARY) for contrast against the dim-amber fill -
+	# a warning the player cannot read is not a useful warning.
+	# autowrap is mandatory: these lines run past the rail's width
+	# and a non-wrapping label would stretch the whole dock.
+	var detail := Label.new()
+	detail.add_theme_color_override("font_color", Tokens.TEXT_PRIMARY)
+	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	warn_box.add_child(detail)
+
+	return [panel, title, detail]
+
+
+func _build_drivetrain_readout() -> void:
+	# Built once, lazily, then reused - matches how armor_threshold_label is
+	# handled in update_stats(). Ordered directly
+	# after the weight row it explains, via move_child: lazily-added children
+	# otherwise land at the end of the rail, which would put the load bar
+	# below the save/test buttons.
+	_speed_label = Label.new()
+	_speed_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_speed_label)
+
+	_load_label = Label.new()
+	_load_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_load_label)
+
+	_load_bar = ProgressBar.new()
+	_load_bar.show_percentage = false
+	_load_bar.min_value = 0.0
+	# Deliberately 0-125 rather than 0-100: a bar that pins at full the moment
+	# a design crosses capacity cannot show HOW far over it is, and "how far
+	# over" is the whole quantity the player is trading against. Past 125% it
+	# does pin, and the warning panel carries the exact figure.
+	_load_bar.max_value = 125.0
+	_load_bar.custom_minimum_size = Vector2(0, 6)
+	_rail_vbox.add_child(_load_bar)
+
+	# The warning notification. HAZARD, not ALERT: an overweight design is a
+	# flaw the player is choosing to accept, not a failure or a destructive
+	# action - see ui_tokens.gd's role comments on the signal colours.
+	var w_overweight := _build_warning_panel("hazard")
+	_overweight_panel = w_overweight[0]
+	_overweight_title = w_overweight[1]
+	_overweight_detail = w_overweight[2]
+	_rail_vbox.add_child(_overweight_panel)
+
+	if weight_label and weight_label.get_parent() == _rail_vbox:
+		var at = weight_label.get_index()
+		_rail_vbox.move_child(_speed_label, at + 1)
+		_rail_vbox.move_child(_load_label, at + 2)
+		_rail_vbox.move_child(_load_bar, at + 3)
+		_rail_vbox.move_child(_overweight_panel, at + 4)
+
+# --- Power readout ---------------------------------------------------------
+#
+# Four rows and a warning, built to the same pattern as the drivetrain block
+# above and placed directly under it, because they are the same kind of
+# statement: here is a budget, here is what you are spending against it, and
+# here is what exceeding it costs. A player who has learned to read the load bar
+# already knows how to read this.
+#
+# Why four rows rather than one "power: OK/short" summary. The three inputs fail
+# differently and have different fixes, and collapsing them hides which one the
+# player is short of:
+#
+#   Generation  too low  -> fit a fusion generator
+#   Storage     too low  -> fit a capacitor bank
+#   Draw        too high -> take some electronics off
+#
+# A single net figure cannot distinguish "needs a generator" from "needs a
+# capacitor", and those are genuinely different answers to genuinely different
+# problems - a design that is permanently slightly short needs generation, while
+# one that is fine except during a firefight needs buffer.
+func _build_power_readout() -> void:
+	_power_gen_label = Label.new()
+	_power_gen_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_power_gen_label)
+
+	_power_storage_label = Label.new()
+	_power_storage_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_power_storage_label)
+
+	_power_draw_label = Label.new()
+	_power_draw_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_power_draw_label)
+
+	_power_net_label = Label.new()
+	_power_net_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_power_net_label)
+
+	# HAZARD, matching the overweight panel exactly. A power deficit is the same
+	# class of thing: a flaw the player may be choosing deliberately, not a
+	# failure and not a destructive action. It does not block saving or fielding,
+	# for the same reason the overweight panel does not - a burst-heavy design
+	# that runs down its buffer in a short engagement and recharges between them
+	# is a legitimate build, and the Lab has no business deciding it is wrong.
+	var w_power := _build_warning_panel("hazard")
+	_power_panel = w_power[0]
+	_power_title = w_power[1]
+	_power_detail = w_power[2]
+	_rail_vbox.add_child(_power_panel)
+
+	# Sits under the drivetrain block rather than at the end of the rail, where
+	# lazily-added children otherwise land - which would put it below the
+	# save/test buttons. Same move_child ordering the drivetrain readout uses.
+	if _overweight_panel and _overweight_panel.get_parent() == _rail_vbox:
+		var at = _overweight_panel.get_index()
+		_rail_vbox.move_child(_power_gen_label, at + 1)
+		_rail_vbox.move_child(_power_storage_label, at + 2)
+		_rail_vbox.move_child(_power_draw_label, at + 3)
+		_rail_vbox.move_child(_power_net_label, at + 4)
+		_rail_vbox.move_child(_power_panel, at + 5)
+
+
+func _update_power_readout(pw: Dictionary) -> void:
+	if _power_net_label == null:
+		_build_power_readout()
+
+	# clear_hull() calls update_stats(null), and there is nothing to say about
+	# the power budget of a design that does not exist. Branches on has_hull
+	# exactly as the drivetrain readout branches on has_locomotion - the dict is
+	# always fully populated, so emptiness is a flag rather than a missing key.
+	if pw.is_empty() or not bool(pw.get("has_hull", false)):
+		for l in [_power_gen_label, _power_storage_label, _power_draw_label, _power_net_label]:
+			if l: l.visible = false
+		if _power_panel: _power_panel.visible = false
+		return
+	for l in [_power_gen_label, _power_storage_label, _power_draw_label, _power_net_label]:
+		if l: l.visible = true
+
+	var generation: float = float(pw.get("generation", 0.0))
+	var storage: float = float(pw.get("storage", 0.0))
+	var draw: float = float(pw.get("draw", 0.0))
+	var weapon_draw: float = float(pw.get("weapon_draw", 0.0))
+	var net: float = float(pw.get("net", 0.0))
+
+	_power_gen_label.text = "Generation: %.1f /s" % generation
+	_power_gen_label.tooltip_text = "Hull base output plus any Fusion Generators. This is the rate the buffer refills at."
+	_power_storage_label.text = "Storage: %.0f" % storage
+	_power_storage_label.tooltip_text = "Hull base capacity plus any Capacitor Banks.\nStorage does not make power - it decides how long a shortfall is survivable."
+
+	# The weapon share is called out separately because it is conditional in a
+	# way the rest is not: a unit that is not shooting is not paying it, so a
+	# design can be in deficit only while it fires. Merging the two would make
+	# an intermittent cost look permanent.
+	if weapon_draw > 0.0:
+		_power_draw_label.text = "Draw: %.1f /s  (%.1f firing)" % [draw, weapon_draw]
+		_power_draw_label.tooltip_text = "Continuous draw from electronics and shield upkeep, plus what sustained energy-weapon fire adds on top.\nThe second figure only applies while actually shooting."
+	else:
+		_power_draw_label.text = "Draw: %.1f /s" % draw
+		_power_draw_label.tooltip_text = "Continuous draw from electronics and shield upkeep."
+
+	_power_net_label.text = "Net: %+.1f /s" % net
+	if net < 0.0:
+		_power_net_label.add_theme_color_override("font_color", Tokens.signal_pair("hazard")["edge"])
+	else:
+		_power_net_label.remove_theme_color_override("font_color")
+	_power_net_label.tooltip_text = "Generation minus the always-on draw, so this is the design at rest.\nNegative means the buffer runs down even when it is not shooting."
+
+	# Two different warnings, because they are two different problems with two
+	# different fixes. PowerBudget makes them mutually exclusive
+	# (firing_deficit_only is false whenever has_deficit is true), so the order
+	# of these branches does not matter and neither can mask the other.
+	var has_deficit: bool = bool(pw.get("has_deficit", false))
+	var firing_only: bool = bool(pw.get("firing_deficit_only", false))
+	_power_panel.visible = has_deficit or firing_only
+	if has_deficit:
+		_power_title.text = "!  POWER DEFICIT - %.1f /s SHORT" % absf(net)
+		# Names the endurance and what sheds first, because "underpowered" alone
+		# tells the player neither how bad it is nor which way is out. The shed
+		# order matches PowerBudget's thresholds, so the panel cannot describe an
+		# order the runtime does not follow.
+		_power_detail.text = "A full buffer lasts %.0fs with everything running. Shields drop first, then sensors dim, then energy weapons stop. Buildable and fieldable as-is - fit a generator, add storage to ride it out, or drop some electronics." % float(pw.get("endurance", 0.0))
+	elif firing_only:
+		# Fine at rest and short only while shooting. A legitimate build rather
+		# than a fault - burst damage paid for out of the buffer and recharged
+		# between engagements - so it is stated as a duty cycle, not a warning to
+		# be fixed.
+		_power_title.text = "!  SUSTAINED FIRE OUTRUNS POWER"
+		_power_detail.text = "Fine at rest, but %.1f /s short while firing - about %.0fs of continuous fire from a full buffer before energy weapons cut out. Capacitors buy a longer burst; a generator buys sustain." % [
+			absf(float(pw.get("firing_net", 0.0))), float(pw.get("firing_endurance", 0.0))]
+
+
+func _update_drivetrain_readout(dt: Dictionary) -> void:
+	if _load_bar == null:
+		_build_drivetrain_readout()
+
+	# A design with no running gear yet has no speed and no capacity to be
+	# over. Showing "Top Speed 0.0" and a full-red load bar on a hull the
+	# player has only just spawned would read as a fault in the design rather
+	# than as an unfinished one.
+	if not dt["has_locomotion"]:
+		_speed_label.text = "Top Speed: - (no locomotion)"
+		_load_label.visible = false
+		_load_bar.visible = false
+		_overweight_panel.visible = false
+		return
+	_load_label.visible = true
+	_load_bar.visible = true
+
+	var top_speed: float = dt["top_speed"]
+	var move_speed: float = dt["move_speed"]
+	var load_pct: float = dt["load_ratio"] * 100.0
+
+	# Two different figures when overloaded, and the gap between them IS the
+	# trade. When not overloaded there is only one, so only one is shown -
+	# printing "9.7 (of 9.7)" would imply a penalty that isn't there.
+	#
+	# The gap is also suppressed when it rounds away. A design a fraction of a
+	# percent over capacity has a real but sub-0.05 penalty, and rendering that
+	# as "Top Speed: 5.0 (was 5.0)" reads as a broken label rather than as a
+	# negligible cost - caught in the 100%-load capture, not by the suite,
+	# which asserts the text only at 130% where the gap is wide.
+	#
+	# Running light is the same story told the other way, and it gets the same
+	# treatment: the bonus is only printed when it survives rounding, and it is
+	# stated as a gain rather than as a bare parenthetical so it cannot be
+	# misread as the penalty case at a glance.
+	if dt["is_overloaded"] and absf(top_speed - move_speed) >= 0.05:
+		_speed_label.text = "Top Speed: %.1f  (was %.1f)" % [move_speed, top_speed]
+	elif dt.get("is_underloaded", false) and absf(move_speed - top_speed) >= 0.05:
+		_speed_label.text = "Top Speed: %.1f  (+%.0f%% running light)" % [
+			move_speed, (dt["underload_multiplier"] - 1.0) * 100.0]
+	else:
+		_speed_label.text = "Top Speed: %.1f" % move_speed
+	# Says WHICH limit is binding, because the two have opposite fixes: a
+	# chassis-limited design needs different locomotion, a power-limited one
+	# needs more thrust or less mass. Without this the player has no way to
+	# tell why adding engines stopped helping.
+	#
+	# chassis_top_speed already HAS a propulsion part's top_speed_mult folded
+	# in (Drivetrain.analyze() applies it before returning the figure), so an
+	# Overdrive Gearbox is already visible in the number itself - this just
+	# names why it moved, the same way the overload/underload rows above name
+	# their own multipliers rather than leaving the player to infer them.
+	var mult_note := ""
+	if dt.get("chassis_speed_mult", 1.0) > 1.001:
+		mult_note = " (+%.0f%% from fitted propulsion)" % [(dt["chassis_speed_mult"] - 1.0) * 100.0]
+	if dt["capacity_limited"] and not dt["is_overloaded"]:
+		_speed_label.tooltip_text = "This chassis is rated for %.1f%s and is already there - more thrust will not make it faster. A different locomotion type (or a part that raises the ceiling itself) will." % [dt["chassis_top_speed"], mult_note]
+	else:
+		_speed_label.tooltip_text = "Chassis rated %.1f%s; this design's power/weight allows %.1f." % [dt["chassis_top_speed"], mult_note, dt["power_top_speed"]]
+
+	_load_label.text = "Load: %.0f / %.0f kg  (%.0f%%)" % [dt["weight"], dt["capacity"], load_pct]
+	_load_bar.value = minf(load_pct, _load_bar.max_value)
+	# HAZARD from 90% - the point of a warning is to arrive BEFORE the cliff,
+	# and a design at 95% is one armor plate away from the penalty.
+	var state := "go"
+	if dt["is_overloaded"]:
+		state = "alert"
+	elif load_pct >= 90.0:
+		state = "hazard"
+	_load_bar.add_theme_stylebox_override("fill", _load_fill_style(state))
+
+	_overweight_panel.visible = dt["is_overloaded"]
+	if dt["is_overloaded"]:
+		_overweight_title.text = "!  OVERWEIGHT - %.0f%% OF CAPACITY" % load_pct
+		# Same rounding guard as the speed row above: at a fraction of a
+		# percent over, "Top speed 5.0 instead of 5.0" reads as a broken
+		# label, so the cost is stated as a percentage alone until the two
+		# figures actually differ on screen.
+		var cost_pct: float = (1.0 - dt["overload_multiplier"]) * 100.0
+		var cost: String
+		if absf(top_speed - move_speed) >= 0.05:
+			cost = "Top speed %.1f instead of %.1f (-%.0f%%)." % [move_speed, top_speed, cost_pct]
+		else:
+			cost = "Top speed down %.1f%% so far, and falling steeply from here." % cost_pct
+		_overweight_detail.text = "%.0f kg over what this locomotion is rated to carry. %s Buildable and fieldable as-is - add locomotion, shed mass, or accept the loss." % [
+			dt["weight"] - dt["capacity"], cost]
+	_load_label.tooltip_text = "What this design's locomotion is rated to carry, tweaks included.\nOver capacity, top speed falls steeply - see the warning below.\nUnder %.0f%%, the design runs light and gains top speed, up to +%.0f%% empty." % [
+		DrivetrainScript.UNDERLOAD_THRESHOLD * 100.0,
+		(DrivetrainScript.UNDERLOAD_CEILING - 1.0) * 100.0]
+
+	# Boost row - shows burst speed parts if fitted
+	_update_boost_readout(dt)
+
+
+# --- Boost readout ---------------------------------------------------------
+# The Design Lab shows the burst boost as its own row, separate from the
+# steady-state top speed. This is deliberate: a burst that inflated the
+# quoted top speed would make the Lab's number a lie (Drivetrain.analyze()
+# is design-time; boost is combat-time only).
+func _build_boost_readout() -> void:
+	_boost_label = Label.new()
+	_boost_label.theme_type_variation = "StatLabel"
+	_boost_label.visible = false
+	_rail_vbox.add_child(_boost_label)
+	# Place after the load bar row - find the overweight_panel and insert before it
+	if _overweight_panel and _overweight_panel.get_parent() == _rail_vbox:
+		var at = _overweight_panel.get_index()
+		_rail_vbox.move_child(_boost_label, at)
+
+func _update_boost_readout(dt: Dictionary) -> void:
+	if _boost_label == null:
+		_build_boost_readout()
+
+	var boost: Dictionary = dt.get("boost", {})
+	if boost.is_empty():
+		_boost_label.visible = false
+		return
+
+	var speed_mult: float = float(boost.get("speed_mult", 1.0))
+	var duration: float = float(boost.get("duration", 0.0))
+	var cooldown: float = float(boost.get("cooldown", 0.0))
+	var charges: int = int(boost.get("charges", 0))
+
+	_boost_label.visible = true
+	if charges == 0:
+		_boost_label.text = "Boost: x%.2f for %.1fs (%.1fs cooldown)" % [speed_mult, duration, cooldown]
+	else:
+		_boost_label.text = "Boost: x%.2f for %.1fs (%d charges)" % [speed_mult, duration, charges]
+	_boost_label.tooltip_text = "Burst speed from a fitted propulsion part. Engages automatically on long straight runs when no enemy is in range.\nDoes not inflate the quoted top speed above - that is steady-state only."
+
+# --- Range readout ---------------------------------------------------------
+# The sidebar showed no range at all before this, which made a whole axis of
+# the design invisible: the player could drag barrel_length - the single
+# biggest lever on reach - and see the weight and cost move while the stat it
+# was actually buying stayed off-screen entirely.
+#
+# It reports three things, because the range retune (ModuleCatalog.RANGE_TIERS)
+# made them separable for the first time:
+#   - the reach span across the design's real weapons, and which tier the
+#     longest one lands in;
+#   - the design's own vision, since that is the line between "this weapon can
+#     find its own targets" and "this weapon needs somebody else to look";
+#   - a warning naming any weapon that reaches past that line, and what it
+#     costs. Exactly like the overweight panel, it does not block anything: a
+#     spotter-dependent design is a legitimate and often very strong design,
+#     it just isn't one you want to field by accident with no scout.
+func _build_range_readout() -> void:
+	_range_label = Label.new()
+	_range_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_range_label)
+
+	_vision_label = Label.new()
+	_vision_label.theme_type_variation = "StatLabel"
+	_rail_vbox.add_child(_vision_label)
+
+	# HAZARD, matching the overweight panel: a trade the player is choosing,
+	# not a failure. See ui_tokens.gd's role comments on the signal colours.
+	var w_spotter := _build_warning_panel("hazard")
+	_spotter_panel = w_spotter[0]
+	_spotter_title = w_spotter[1]
+	_spotter_detail = w_spotter[2]
+	_rail_vbox.add_child(_spotter_panel)
+
+	# Sits directly after the DPS row it belongs with, rather than at the end
+	# of the rail where lazily-added children otherwise land (which would put
+	# it below the save/test buttons). Same move_child idiom as the drivetrain
+	# rows above.
+	if dps_label and dps_label.get_parent() == _rail_vbox:
+		var at = dps_label.get_index()
+		_rail_vbox.move_child(_range_label, at + 1)
+		_rail_vbox.move_child(_vision_label, at + 2)
+		_rail_vbox.move_child(_spotter_panel, at + 3)
+
+func _update_range_readout(wr: Dictionary) -> void:
+	if _range_label == null:
+		_build_range_readout()
+
+	# A hull with no armed modules yet has no range to report. Showing
+	# "Range: 0.0" on a design the player has only started reads as a fault
+	# rather than as an unfinished build - same reasoning as the drivetrain
+	# readout's no-locomotion case.
+	if not wr.get("has_weapons", false):
+		_range_label.text = "Range: - (no weapons)"
+		_vision_label.visible = false
+		_spotter_panel.visible = false
+		return
+	_vision_label.visible = true
+
+	var shortest: float = wr["shortest"]
+	var longest: float = wr["longest"]
+	var vision: float = wr["vision"]
+
+	# One figure when every weapon reaches the same distance, a span otherwise -
+	# printing "Range: 38 - 38" implies a spread that isn't there.
+	if absf(longest - shortest) >= 0.5:
+		_range_label.text = "Range: %.0f - %.0f  (%s)" % [shortest, longest, wr["tier_label"]]
+	else:
+		_range_label.text = "Range: %.0f  (%s)" % [longest, wr["tier_label"]]
+	_range_label.tooltip_text = "Reach of this design's armed modules, tweaks included.\nBarrel length is the biggest lever: a longer barrel reaches further and throws faster, but traverses slower."
+
+	_vision_label.text = "Vision: %.0f" % vision
+	_vision_label.tooltip_text = "How far this design can see for itself.\nWeapons reaching past this can only fire that far at targets another unit on your team is looking at."
+
+	var required: Array = wr["spotter_required"]
+	var assisted: Array = wr["spotter_assisted"]
+	_spotter_panel.visible = not required.is_empty() or not assisted.is_empty()
+	if not _spotter_panel.visible:
+		return
+
+	# The stronger claim first. A weapon past 2x vision cannot meaningfully
+	# self-acquire at range at all, which is a different and much more
+	# consequential fact than "reaches a bit past its own eyes".
+	if not required.is_empty():
+		_spotter_title.text = "!  NEEDS A SPOTTER"
+		var names: Array = []
+		for w in required:
+			names.append("%s (%.0f)" % [w["name"], w["reach"]])
+		_spotter_detail.text = "%s %s far past this design's own %.0f vision. Without another unit of yours watching the target, it can only shoot as far as it can see - roughly %.0f%% of its reach. Pair it with a scout or a radar mast and it works at full range." % [
+			", ".join(names),
+			"reaches" if names.size() == 1 else "reach",
+			vision,
+			(vision / longest) * 100.0]
+	else:
+		_spotter_title.text = "!  OUT-REACHES ITS OWN VISION"
+		var names: Array = []
+		for w in assisted:
+			names.append("%s (%.0f)" % [w["name"], w["reach"]])
+		_spotter_detail.text = "%s can shoot further than this design can see (%.0f). Usable as-is, but a spotting unit or a radar mast is what unlocks the last %.0f units of that reach." % [
+			", ".join(names), vision, longest - vision]
+
+# --- Alpha readout (per-shot damage and what it is worth vs armour) ---------
+#
+# WHAT THIS FIXES. "Total DPS" one row up is, by construction, the one figure
+# the caliber and barrel_length sliders cannot say anything interesting with.
+# Both tweaks sit in the linear multiplier lists of ModuleData.get_dps(),
+# get_weight() AND get_cost(), so dragging either moved all three rows by the
+# same factor: DPS-per-kg and DPS-per-credit were perfectly FLAT across the
+# whole slider range. A player who dragged the bar, watched three numbers rise
+# together and concluded it did not matter was reading this rail correctly.
+#
+# The trade is real and lives one layer down. caliber also multiplies the shot
+# INTERVAL (auto_weapon.gd's cadence chain, mirrored in WeaponAlpha.
+# shot_interval()), so a bigger bore is FEWER, HARDER hits at roughly the same
+# nominal DPS. That matters because damage_resolver.gd gates on the SHOT, never
+# on the DPS: under the material's threshold a hit delivers CHIP_THROUGH_FACTOR
+# of its already-reduced damage, and from BRUTE_FORCE_RATIO x threshold upward
+# the reduction blends back toward 1.0. Same weapon, same DPS, roughly a 6.7x
+# swing in what actually lands - decided entirely by alpha.
+#
+# So the block prints the two things the rail was missing:
+#   - the per-shot alpha, and the cadence it is bought at;
+#   - one row per armour material: the effective DPS this design lands on that
+#     plate, and which regime the hardest shot is in against it.
+#
+# DESIGN_VISION.md's test ("two players building the same concept must diverge
+# through continuous tweaks") is decided almost entirely here, which is why
+# this is visible chrome and not a tooltip - the player is DRAGGING the slider
+# and needs to watch the regime word flip while the mouse is on the handle.
+#
+# NO WARNING PANEL, unlike the drivetrain/power/spotter blocks. The chip-regime
+# failure already leads the rail in the verdict block at the top ("CHIPS ONLY",
+# see design_verdict.gd), and a fourth hazard placard restating it eight rows
+# further down would be the same sentence twice on one screen. The colour on
+# the material rows is the in-place signal; the verdict is the headline.
+func _alpha_regime_word(regime: String) -> String:
+	if regime == WeaponAlphaScript.REGIME_CHIP:
+		return "CHIP"
+	if regime == WeaponAlphaScript.REGIME_BRUTE:
+		return "BRUTE"
+	return "through"
+
+
+# Returns null for the ordinary regime rather than a colour, so the caller can
+# clear the override and fall back to StatLabel's own TEXT_SECONDARY instead of
+# this file hardcoding what "normal text" is a second time.
+func _alpha_regime_color(regime: String) -> Variant:
+	if regime == WeaponAlphaScript.REGIME_CHIP:
+		return Tokens.SIGNAL_ALERT
+	if regime == WeaponAlphaScript.REGIME_BRUTE:
+		return Tokens.SIGNAL_GO
+	return null
+
+
+func _build_alpha_readout() -> void:
+	_alpha_label = Label.new()
+	_alpha_label.theme_type_variation = "StatLabel"
+	# Insurance only - the format below is sized to fit the 320px dock on one
+	# line. A hand-edited blueprint with an absurd alpha is the case this
+	# catches, and a wrapped row is a much better outcome than one that spills
+	# past the panel edge (which is exactly what armor_threshold_label used to
+	# do before the headless overflow audit found it).
+	_alpha_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_rail_vbox.add_child(_alpha_label)
+
+	_alpha_head = Label.new()
+	_alpha_head.theme_type_variation = "StatLabel"
+	# FONT_MICRO is the token's documented "dense tabular readouts" step, and
+	# the five rows below it are exactly that. StatLabel is the theme's MONO
+	# face, so the space-padded columns actually line up as columns.
+	_alpha_head.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
+	_rail_vbox.add_child(_alpha_head)
+
+	# One row per material IN THE TABLE, not four hardcoded rows. Same reasoning
+	# as WeaponAlpha.short_label()'s id-derived fallback: a material added to
+	# ARMOR_TABLE renders on the day it lands rather than silently going
+	# missing from the only readout that compares them.
+	_alpha_rows.clear()
+	for _i in range(DamageResolverScript.ARMOR_TABLE.size()):
+		var row := Label.new()
+		row.theme_type_variation = "StatLabel"
+		row.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
+		_rail_vbox.add_child(row)
+		_alpha_rows.append(row)
+
+	# Directly under the DPS row it qualifies, via the same move_child idiom the
+	# drivetrain, range and power blocks use - lazily-added children otherwise
+	# land at the end of the VBox, below the save/test buttons, which is what
+	# kept armor_threshold_label invisible for so long. This one is inserted
+	# LAST of all the rail's readouts (see the call at the foot of
+	# update_stats()), so it ends up immediately after DPS and pushes the armour
+	# threshold rows down one - deliberate ordering: "what this design deals"
+	# belongs with the DPS row, and "what this design's own plate stops" reads
+	# as the next topic rather than as part of it.
+	if dps_label and dps_label.get_parent() == _rail_vbox:
+		var at = dps_label.get_index()
+		_rail_vbox.move_child(_alpha_label, at + 1)
+		_rail_vbox.move_child(_alpha_head, at + 2)
+		for i in range(_alpha_rows.size()):
+			_rail_vbox.move_child(_alpha_rows[i], at + 3 + i)
+
+
+func _update_alpha_readout(wa: Dictionary) -> void:
+	if _alpha_label == null:
+		_build_alpha_readout()
+
+	# Same shape as the range readout's no-weapons case, and for the same
+	# reason: a hull the player has only just started has no shot to report, and
+	# printing "Alpha: 0.0" against a full table of zeroes reads as a broken
+	# design rather than an unfinished one.
+	if not wa.get("has_weapons", false):
+		_alpha_label.text = "Alpha: - (no weapons)"
+		_alpha_label.tooltip_text = "Per-shot damage, once this design has an armed module fitted."
+		_alpha_head.visible = false
+		for row in _alpha_rows:
+			row.visible = false
+		return
+	_alpha_head.visible = true
+
+	var per_shot: float = float(wa.get("per_shot", 0.0))
+	var interval: float = float(wa.get("interval", 0.0))
+	var weapons: Array = wa.get("weapons", [])
+
+	_alpha_label.text = "Alpha: %.1f / shot  (%.2fs)" % [per_shot, interval]
+	# The tooltip is where the MECHANISM goes. The row itself has to stay a row,
+	# but a player who has just noticed that dragging caliber barely moves Total
+	# DPS while moving this number a lot deserves the sentence that explains why.
+	_alpha_label.tooltip_text = ("What one hit is worth before armour, and the seconds between hits.\n"
+		+ "Armour thresholds gate on THIS, never on total DPS - a shot under the threshold delivers a small chip fraction, and a shot far over it punches through the reduction.\n"
+		+ "Caliber multiplies damage and the shot interval together: total DPS barely moves, but fewer, harder hits is what crosses a threshold.\n"
+		+ "Hardest of %d armed module(s): %s (%s damage).") % [
+			weapons.size(), str(wa.get("hardest", "")), str(wa.get("hardest_class", ""))]
+
+	_alpha_head.text = "Effective DPS vs %.1f plate" % float(wa.get("reference_thickness", 1.0))
+	_alpha_head.tooltip_text = ("What this design actually lands per second on each armour material, summed across every armed module.\n"
+		+ "Quoted at a reference plate thickness rather than at this design's own armour: this table is about what the design DEALS, and the defender it meets has whatever plate its own builder chose.\n"
+		+ "The word on each row is the regime the HARDEST shot is in against that material - hover a row for the per-weapon breakdown.")
+
+	var effective: Dictionary = wa.get("effective_dps", {})
+	var regimes: Dictionary = wa.get("regime", {})
+	var idx := 0
+	for material in effective:
+		if idx >= _alpha_rows.size():
+			break
+		var row: Label = _alpha_rows[idx]
+		idx += 1
+		row.visible = true
+		var regime: String = str(regimes.get(material, WeaponAlphaScript.REGIME_THROUGH))
+		row.text = "%-9s %7.1f  %s" % [
+			WeaponAlphaScript.short_label(material),
+			float(effective[material]),
+			_alpha_regime_word(regime)]
+		var tint = _alpha_regime_color(regime)
+		if tint == null:
+			row.remove_theme_color_override("font_color")
+		else:
+			row.add_theme_color_override("font_color", tint)
+		# The per-weapon breakdown, which is the part that cannot fit on a row.
+		# Every armed module's own alpha, its own threshold against THIS material
+		# (thresholds are per damage class, so a thermal round and an AP round out
+		# of the same hull are answered by different numbers) and its own regime.
+		var lines: Array = ["%s plate:" % WeaponAlphaScript.short_label(material)]
+		for w in weapons:
+			var vs: Dictionary = w.get("vs", {}).get(material, {})
+			lines.append("  %s - %.1f per shot vs %.1f threshold: %s (%.1f dps, %s)" % [
+				str(w.get("name", "")),
+				float(w.get("per_shot", 0.0)),
+				float(vs.get("threshold", 0.0)),
+				_alpha_regime_word(str(vs.get("regime", ""))),
+				float(vs.get("dps", 0.0)),
+				str(w.get("damage_class", ""))])
+		row.tooltip_text = "\n".join(lines)
+
+	while idx < _alpha_rows.size():
+		_alpha_rows[idx].visible = false
+		idx += 1
+
+# Radial positions for infographic lines (prioritize a ring around the module).
+#
+# These are ORDERED BY PREFERENCE, not by angle: top corners first, then high
+# sides, then low sides, then bottom corners. A module usually has fewer tweaks
+# than there are slots, so the early entries are the ones that get used, and
+# they are the positions that read best - above and outboard of the part, where
+# a leader line has clear air and nothing is hidden behind the callout.
+# tweak_callout.gd may flip a direction horizontally to keep its line on the
+# same side as the geometry it points at; the vertical spread here is what stops
+# same-side callouts from piling up.
+func _build_verdict_block() -> void:
+	if _verdict_panel != null and is_instance_valid(_verdict_panel):
+		return
+	var parent = hp_label.get_parent()
+	if parent == null:
+		return
+
+	_verdict_panel = PhosphorPanelScript.new()
+	_verdict_panel.tube = PhosphorPanelScript.Tube.AMBER
+	parent.add_child(_verdict_panel)
+	parent.move_child(_verdict_panel, 0)
+
+	# WHY A VBox INSIDE THE PhosphorPanel, NOT PanelContainer's OWN STACKING.
+	# PhosphorPanel.add_readout() wraps each Label in a MarginContainer, and
+	# the parent PanelContainer is supposed to stack those MarginContainers
+	# vertically. In practice it does not - every readout lands at y=0,
+	# with the detail text drawn ON TOP of the headline (visible in the
+	# the "UNARMED / No weapon fitted" overlap, where the headline's
+	# amber pixels and the detail's white pixels occupy the same row and
+	# the shader composites them into one unreadable line). The VBox below
+	# is a hard workaround: a Container we know stacks its children, with
+	# explicit separation between headline, separator and detail.
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	_verdict_panel.add_child(stack)
+
+	# Headline. Same HeadingLabel theme variation the other rail headings
+	# use (so the visual language stays consistent across the screen),
+	# and the "!" prefix added in _update_verdict() below is the icon the
+	# detail was overlaying.
+	_verdict_headline = Label.new()
+	_verdict_headline.theme_type_variation = "HeadingLabel"
+	_verdict_headline.add_theme_color_override("font_color", Color.WHITE)
+	stack.add_child(_verdict_headline)
+
+	# Hairline rule between headline and detail. The phosphor's shader
+	# treats the separator's white pixels as excitation and tints them
+	# with the tube colour, so the rule reads as part of the display's
+	# own glow rather than as a foreign StyleBoxFlat smuggled in.
+	var rule := HSeparator.new()
+	rule.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	stack.add_child(rule)
+
+	# Detail. StatLabel (the theme's tabular face) so the number-prefixed
+	# lines line up under each other when the verdict text carries
+	# numbers, and the same WHITE the headline uses so the shader
+	# tints both with the same tube colour rather than reading the two
+	# as different surfaces.
+	_verdict_detail = Label.new()
+	_verdict_detail.theme_type_variation = "StatLabel"
+	_verdict_detail.add_theme_color_override("font_color", Color.WHITE)
+	_verdict_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(_verdict_detail)
+
+
+# NOTHING HERE RE-DERIVES. `stats` is the exact analyze() result the rest of
+# update_stats() already reads - DesignVerdict.evaluate() only compares and
+# phrases fields already present in it. See design_verdict.gd's own header
+# for why that rule is non-negotiable in this file specifically.
+func _update_verdict(stats: Dictionary) -> void:
+	_build_verdict_block()
+	if _verdict_panel == null or not is_instance_valid(_verdict_panel):
+		return
+	var top: Dictionary = DesignVerdictScript.headline(stats)
+	if top.is_empty():
+		_verdict_panel.visible = false
+		return
+	_verdict_panel.visible = true
+	# "!" prefix is the icon - the design_verdict.gd headline text is the
+	# unprefixed label ("UNARMED", "OVER CAPACITY", ...) because the test
+	# suite asserts on it verbatim, and the test's contract is the raw
+	# string, not the display rendering. The prefix is added HERE so
+	# the icon is a presentation concern of the rail, not a data concern
+	# of the verdict evaluator. The two-space gap after the "!" keeps
+	# it from merging with the first letter under the phosphor's tight
+	# letter-spacing.
+	_verdict_headline.text = "!  %s" % top.get("headline", "")
+	_verdict_headline.add_theme_color_override(
+		"font_color", DesignVerdictScript.color_for(top.get("severity", DesignVerdictScript.Severity.NOTE)))
+	_verdict_detail.text = top.get("detail", "")

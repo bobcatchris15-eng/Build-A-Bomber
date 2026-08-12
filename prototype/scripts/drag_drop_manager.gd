@@ -72,6 +72,38 @@ func _get_foggy_part_material() -> Material:
 	_cached_ghost_material = foggy_mat
 	return _cached_ghost_material
 
+var _cached_invalid_material: Material = null
+
+func _get_invalid_part_material() -> Material:
+	if _cached_invalid_material != null:
+		return _cached_invalid_material
+
+	var invalid_mat = StandardMaterial3D.new()
+	invalid_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	invalid_mat.albedo_color = Color(1.0, 0.1, 0.1, 0.78)
+	invalid_mat.roughness = 0.2
+	invalid_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
+	invalid_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+
+	var edge_mat = ShaderMaterial.new()
+	var shader = Shader.new()
+	shader.code = """
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_always, cull_back;
+uniform vec4 line_color : source_color = vec4(1.0, 0.2, 0.2, 0.9);
+void fragment() {
+	float NdotV = abs(dot(NORMAL, VIEW));
+	float fresnel = pow(1.0 - clamp(NdotV, 0.0, 1.0), 2.0);
+	float line_alpha = smoothstep(0.10, 0.55, fresnel);
+	ALBEDO = line_color.rgb;
+	ALPHA = line_alpha;
+}
+"""
+	edge_mat.shader = shader
+	invalid_mat.next_pass = edge_mat
+	_cached_invalid_material = invalid_mat
+	return _cached_invalid_material
+
 func _apply_ghost_materials_recursive(node: Node, mat: Material):
 	if node is MeshInstance3D:
 		(node as MeshInstance3D).material_override = mat
@@ -105,6 +137,24 @@ func _build_module_ghost_node(type_id: String) -> Node3D:
 		container.add_child(mi)
 
 	_apply_ghost_materials_recursive(container, _get_foggy_part_material())
+	
+	var mod_data = preload("res://scripts/module_data.gd").new()
+	mod_data.type_id = type_id
+	mod_data.category = catalog_data.get("category", "module")
+	mod_data.module_name = catalog_data.get("name", "Unknown Module")
+	mod_data.base_hp = catalog_data.get("base_hp", 100.0)
+	mod_data.base_weight = catalog_data.get("base_weight", 50.0)
+	mod_data.cost_metal = catalog_data.get("cost_metal", 10)
+	mod_data.cost_crystal = catalog_data.get("cost_crystal", 0)
+	mod_data.base_dps = catalog_data.get("base_dps", 0.0)
+	mod_data.base_energy_capacity = catalog_data.get("base_energy_capacity", 0.0)
+	mod_data.base_power_output = catalog_data.get("base_power_output", 0.0)
+	mod_data.base_heal_rate = catalog_data.get("base_heal_rate", 0.0)
+	mod_data.base_vision_bonus = catalog_data.get("base_vision_bonus", 0.0)
+	if catalog_data.has("default_tweaks"):
+		mod_data.tweaks = catalog_data["default_tweaks"].duplicate()
+	container.set_meta("module_data", mod_data)
+	
 	return container
 
 func _build_hull_ghost_node(type_id: String) -> Node3D:
@@ -242,7 +292,7 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 	# the ghost by however far the visual's bottom is above the
 	# local origin.
 	ghost_mesh.position = result.position + Vector3(0, _ghost_visual_bottom_y, 0)
-
+	
 	var is_symmetric = catalog_data_for(type_id).get("is_symmetric", true)
 	if not is_symmetric and abs(result.position.x) > 0.1:
 		if ghost_mesh_mirror == null:
@@ -253,6 +303,25 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 	else:
 		if ghost_mesh_mirror:
 			ghost_mesh_mirror.visible = false
+			
+	var is_clipping = false
+	if root.has_method("is_ghost_clipping"):
+		is_clipping = root.is_ghost_clipping(ghost_mesh.transform, type_id)
+		if not is_clipping and ghost_mesh_mirror and ghost_mesh_mirror.visible:
+			is_clipping = root.is_ghost_clipping(ghost_mesh_mirror.transform, type_id)
+			
+	if is_clipping:
+		_apply_ghost_materials_recursive(ghost_mesh, _get_invalid_part_material())
+		if ghost_mesh_mirror and ghost_mesh_mirror.visible:
+			_apply_ghost_materials_recursive(ghost_mesh_mirror, _get_invalid_part_material())
+	else:
+		_apply_ghost_materials_recursive(ghost_mesh, _get_foggy_part_material())
+		if ghost_mesh_mirror and ghost_mesh_mirror.visible:
+			_apply_ghost_materials_recursive(ghost_mesh_mirror, _get_foggy_part_material())
+			
+	var lab_doc = root.get_node_or_null("LabDocument")
+	if lab_doc and lab_doc.telemetry_rail:
+		lab_doc.telemetry_rail.update_preview_stats(ghost_mesh, ghost_mesh_mirror)
 
 func catalog_data_for(type_id: String) -> Dictionary:
 	return ModuleCatalog.get_module_data(type_id)
@@ -286,14 +355,24 @@ func _notification(what: int):
 		_destroy_ghost_mesh()
 
 func _destroy_ghost_mesh():
+	var cleared_something = false
 	if ghost_mesh:
 		ghost_mesh.queue_free()
 		ghost_mesh = null
+		cleared_something = true
 	if ghost_mesh_mirror:
 		ghost_mesh_mirror.queue_free()
 		ghost_mesh_mirror = null
+		cleared_something = true
 	current_ghost_type = ""
 	_ghost_visual_bottom_y = 0.0
+	
+	if cleared_something:
+		var root = get_node_or_null("/root/MainLab")
+		if root:
+			var lab_doc = root.get_node_or_null("LabDocument")
+			if lab_doc and lab_doc.telemetry_rail:
+				lab_doc.telemetry_rail.clear_preview()
 
 func _raycast_from_screen(screen_pos: Vector2):
 	var camera = get_viewport().get_camera_3d()

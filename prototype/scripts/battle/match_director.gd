@@ -32,6 +32,7 @@ const LayersScript = preload("res://scripts/battle/battle_layers.gd")
 const MatchRuleSetScript = preload("res://scripts/match_rule_set.gd")
 const SimRNG = preload("res://scripts/battle/sim_rng.gd")
 const SelectionServiceScript = preload("res://scripts/battle/orders/selection_service.gd")
+const AlertServiceScript = preload("res://scripts/battle/alert_service.gd")
 const OrderServiceScript = preload("res://scripts/battle/orders/order_service.gd")
 const FlowFieldServiceScript = preload("res://scripts/battle/movement/flow_field_service.gd")
 const StanceScript = preload("res://scripts/battle/orders/stance.gd")
@@ -121,6 +122,7 @@ var _deep_water_nav_region: RID
 
 var selection: SelectionService = null
 var orders: OrderService = null
+var alerts: AlertService = null
 var flow_fields: FlowFieldService = null
 var economy: EconomyService = null
 var production: ProductionService = null
@@ -353,6 +355,9 @@ func _ready() -> void:
 	selection = SelectionServiceScript.new()
 	selection.setup(camera, get_world_3d().direct_space_state, PLAYER_TEAM)
 	selection.group_recentre_requested.connect(_on_group_recentre)
+	
+	alerts = AlertServiceScript.new()
+	add_child(alerts)
 
 	_setup_vision()
 
@@ -2706,59 +2711,48 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _handle_key(event: InputEventKey) -> void:
-	# Digits 1-9: assign with Ctrl, recall without. Double-tapping a recall
-	# recentres the camera, which SelectionService signals rather than doing, so
-	# it never needs to know a camera exists.
-	if event.keycode >= KEY_1 and event.keycode <= KEY_9:
-		var num := event.keycode - KEY_0
-		if event.ctrl_pressed:
-			selection.assign_group(num)
-		else:
-			selection.recall_group(num)
-		return
+	for i in range(1, 10):
+		if event.is_action_pressed("cmd_group_assign_%d" % i):
+			selection.assign_group(i)
+			return
+		elif event.is_action_pressed("cmd_group_%d" % i):
+			selection.recall_group(i)
+			return
 
-	# NOT A AND S, THE CONVENTIONAL BINDINGS. rts_camera.gd polls WASD directly in
-	# _process() via Input.is_key_pressed() rather than consuming input events, so
-	# a command bound to A or S fires AND pans the camera - both handlers see the
-	# key and neither can mark it handled. The camera is shared with the old
-	# Skirmish scene, so rebinding it there to free up A/S is a change to a screen
-	# this rebuild is not touching. Commands go on free keys instead.
-	match event.keycode:
-		KEY_Q:
-			# Armed, one-shot: the next right-click is an attack-move.
-			_set_armed(not _attack_move_armed)
-		KEY_E:
-			orders.stop(selection.selected)
-			_flash("STOP")
-		KEY_Z:
-			orders.set_stance(selection.selected, StanceScript.Kind.AGGRESSIVE)
-			_flash("STANCE: AGGRESSIVE")
-		KEY_X:
-			orders.set_stance(selection.selected, StanceScript.Kind.RETURN_FIRE)
-			_flash("STANCE: RETURN FIRE")
-		KEY_C:
-			orders.hold(selection.selected)
-			_flash("STANCE: HOLD POSITION")
-		KEY_F3:
-			_toggle_perf_hud()
-		KEY_ESCAPE:
-			# Escape backs out of the most specific mode first. Clearing the
-			# selection out from under a player who meant "put this building down"
-			# is two mistakes in one keystroke.
-			if admin_menu != null and admin_menu.is_open():
-				admin_menu.toggle()
-				return
-			if is_placing():
-				cancel_placement()
-				return
-			if not selection.selected.is_empty() or _attack_move_armed:
-				_set_armed(false)
-				selection.clear()
-				return
-			# Nothing left to back out of, so Escape means the menu - which is
-			# where a player who has pressed it twice already expects to arrive.
-			if admin_menu != null:
-				admin_menu.toggle()
+	if event.is_action_pressed("cmd_attack_move"):
+		_set_armed(not _attack_move_armed)
+	elif event.is_action_pressed("cmd_stop"):
+		orders.stop(selection.selected)
+		_flash("STOP")
+	elif event.is_action_pressed("cmd_stance_aggressive"):
+		orders.set_stance(selection.selected, StanceScript.Kind.AGGRESSIVE)
+		_flash("STANCE: AGGRESSIVE")
+	elif event.is_action_pressed("cmd_stance_return_fire"):
+		orders.set_stance(selection.selected, StanceScript.Kind.RETURN_FIRE)
+		_flash("STANCE: RETURN FIRE")
+	elif event.is_action_pressed("cmd_hold"):
+		orders.hold(selection.selected)
+		_flash("STANCE: HOLD POSITION")
+	elif event.is_action_pressed("cmd_jump_alert"):
+		var latest = alerts.get_latest_alert()
+		if latest != null and camera != null:
+			camera.global_position.x = latest.world_pos.x
+			camera.global_position.z = latest.world_pos.z
+	elif event.is_action_pressed("sys_perf"):
+		_toggle_perf_hud()
+	elif event.is_action_pressed("ui_cancel"):
+		if admin_menu != null and admin_menu.is_open():
+			admin_menu.toggle()
+			return
+		if is_placing():
+			cancel_placement()
+			return
+		if not selection.selected.is_empty() or _attack_move_armed:
+			_set_armed(false)
+			selection.clear()
+			return
+		if admin_menu != null:
+			admin_menu.toggle()
 
 
 # F3, matching Skirmish. Built on demand rather than left always-on for the
@@ -3024,7 +3018,8 @@ func _build_hud() -> void:
 	# use. The local match_config lookup above is no longer needed here.
 	var enable_battle_hud: bool = _match_rule_set.enable_battle_hud if _match_rule_set != null else true
 	var enable_production_hud: bool = _match_rule_set.enable_production_hud if _match_rule_set != null else true
-	var enable_admin_menu: bool = _match_rule_set.enable_admin_menu if _match_rule_set != null else true
+	var is_debug := OS.has_feature("editor") or OS.is_debug_build() or "--cheats" in OS.get_cmdline_args()
+	var enable_admin_menu: bool = (_match_rule_set.enable_admin_menu if _match_rule_set != null else true) and is_debug
 
 	_selection_rect = Panel.new()
 	_selection_rect.visible = false
@@ -3051,18 +3046,9 @@ func _build_hud() -> void:
 		# from three separately-guessed constants.
 		var below_strip: float = Tokens.SPACE_SM + BattleHUDScript.TOP_STRIP_HEIGHT + Tokens.SPACE_SM
 
-		# The bindings, on screen, because they are not the conventional ones and
-		# nothing else in the build documents them yet.
-		var bindings := Label.new()
-		bindings.theme_type_variation = "HintLabel"
-		bindings.position = Vector2(Tokens.SPACE_MD, below_strip)
-		bindings.text = "DRAG SELECT  |  RMB MOVE  |  SHIFT+RMB QUEUE  |  Q ATTACK-MOVE  |  E STOP" \
-			+ "\nZ AGGRESSIVE  |  X RETURN FIRE  |  C HOLD  |  CTRL+1-9 SET GROUP  |  1-9 RECALL"
-		layer.add_child(bindings)
-
 		_hud_hint = Label.new()
 		_hud_hint.theme_type_variation = "HintLabel"
-		_hud_hint.position = Vector2(Tokens.SPACE_MD, below_strip + 44)
+		_hud_hint.position = Vector2(Tokens.SPACE_MD, below_strip)
 		_hud_hint.text = ""
 		layer.add_child(_hud_hint)
 

@@ -1,4 +1,4 @@
-﻿class_name VisualBuilder
+class_name VisualBuilder
 # Assembles the visual mesh tree for a placed module. Prefers authored .glb
 # "kit" parts (tools/blender/build_meshes.py) for a detailed/greebled look,
 # falling back to the original procedural primitives when no authored asset
@@ -7372,3 +7372,47 @@ static func build_subframe(body: StaticBody3D, dimensions: Vector3,
 		boss_inst.rotation = Vector3(0, 0, PI / 2.0)
 		boss_inst.position = Vector3(pad_x + signf(pad_x) * tube_r * 1.4, p.y, p.z)
 		body.add_child(boss_inst)
+
+
+# --- Analytical View Modes ---------------------------------------------------
+
+static var _stored_materials: Dictionary = {}
+
+static func apply_analytical_mode(root: Node, mode: int) -> void:
+	if root == null or not is_instance_valid(root):
+		return
+
+	var mesh_instances = root.find_children("*", "MeshInstance3D", true, false)
+	for mesh_inst in mesh_instances:
+		var inst_id = mesh_inst.get_instance_id()
+
+		# Store original material override if not already saved
+		if not _stored_materials.has(inst_id):
+			_stored_materials[inst_id] = mesh_inst.material_override
+
+		match mode:
+			0: # DEFAULT
+				mesh_inst.material_override = _stored_materials[inst_id]
+			1: # WIREFRAME
+				var mat = StandardMaterial3D.new()
+				mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+				mat.albedo_color = Color(0.2, 0.9, 0.4, 0.8)
+				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				mesh_inst.material_override = mat
+			2: # XRAY
+				var mat = StandardMaterial3D.new()
+				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				mat.albedo_color = Color(0.4, 0.6, 0.9, 0.3)
+				mesh_inst.material_override = mat
+			3: # STRUCTURAL
+				var mat = StandardMaterial3D.new()
+				var m_name = mesh_inst.name.to_lower()
+				if "hull" in m_name or "plate" in m_name:
+					mat.albedo_color = Color(0.8, 0.3, 0.3) # Red for Hull/Armor
+				elif "weapon" in m_name or "cannon" in m_name or "turret" in m_name:
+					mat.albedo_color = Color(0.9, 0.8, 0.2) # Yellow for Weapons
+				elif "engine" in m_name or "tread" in m_name or "wheel" in m_name:
+					mat.albedo_color = Color(0.2, 0.7, 0.9) # Blue for Propulsion
+				else:
+					mat.albedo_color = Color(0.5, 0.5, 0.5) # Gray for Chassis/Other
+				mesh_inst.material_override = mat

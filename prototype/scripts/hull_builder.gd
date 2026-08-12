@@ -451,24 +451,19 @@ func _input(event: InputEvent) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	# ── Keyboard shortcuts ───────────────────────────────────────────────────
-	if event is InputEventKey and event.pressed and not event.echo:
-		match event.keycode:
-			KEY_DELETE, KEY_KP_PERIOD:
-				_delete_selected()
-
-			KEY_D:
-				if event.ctrl_pressed:
-					_duplicate_selected()
-
-			KEY_ESCAPE:
-				if is_dragging_from_palette:
-					is_dragging_from_palette = false
-					if preview_node:
-						preview_node.queue_free()
-						preview_node = null
-					_update_status("Cancelled")
-				else:
-					_deselect()
+	if event.is_action_pressed("lab_delete"):
+		_delete_selected()
+	elif event.is_action_pressed("lab_duplicate"):
+		_duplicate_selected()
+	elif event.is_action_pressed("ui_cancel"):
+		if is_dragging_from_palette:
+			is_dragging_from_palette = false
+			if preview_node:
+				preview_node.queue_free()
+				preview_node = null
+			_update_status("Cancelled")
+		else:
+			_deselect()
 
 	# ── Viewport mouse input ─────────────────────────────────────────────────
 	_on_viewport_input(event)
@@ -2126,6 +2121,9 @@ func _on_export_confirmed(dialog: AcceptDialog) -> void:
 	if mesh == null:
 		_show_error("Bake produced no geometry - try lowering Smoothness or adding more primitives")
 		return
+		
+	# Generate WFC Armor
+	_generate_armor(mesh)
 
 	var mod_dir = "user://mods/hulls"
 	DirAccess.make_dir_recursive_absolute(mod_dir)
@@ -2174,6 +2172,51 @@ func _on_export_confirmed(dialog: AcceptDialog) -> void:
 
 	var tri_count = mesh.get_faces().size() / 3
 	_update_status("Exported '%s' - %d triangles baked to user://mods/hulls/" % [hull_name, tri_count])
+
+func _generate_armor(mesh: ArrayMesh):
+	var wfc = WFCSolver.new()
+	# Basic set of tiles
+	wfc.add_tile("plate_flat", { Vector3i.RIGHT: "edge", Vector3i.LEFT: "edge", Vector3i.FORWARD: "edge", Vector3i.BACK: "edge" })
+	wfc.add_tile("plate_corner", { Vector3i.RIGHT: "corner", Vector3i.FORWARD: "corner", Vector3i.LEFT: "edge", Vector3i.BACK: "edge" })
+	wfc.set_opposite_sockets({"edge": "edge", "corner": "corner"})
+	
+	# Extract surface cells from mesh AABB
+	var aabb = mesh.get_aabb()
+	var cell_size = 1.0
+	var min_bound = Vector3i(floor(aabb.position.x / cell_size), floor(aabb.position.y / cell_size), floor(aabb.position.z / cell_size))
+	var max_bound = min_bound + Vector3i(ceil(aabb.size.x / cell_size), ceil(aabb.size.y / cell_size), ceil(aabb.size.z / cell_size))
+	
+	var surface_cells: Array[Vector3i] = []
+	for x in range(min_bound.x, max_bound.x + 1):
+		for y in range(min_bound.y, max_bound.y + 1):
+			for z in range(min_bound.z, max_bound.z + 1):
+				# For this prototype, just pick the top-most cells as surface
+				if y == max_bound.y:
+					surface_cells.append(Vector3i(x, y, z))
+					
+	wfc.set_grid(surface_cells)
+	var result = wfc.solve()
+	
+	var armor_root = get_node_or_null("WFCArmor")
+	if not armor_root:
+		armor_root = Node3D.new()
+		armor_root.name = "WFCArmor"
+		add_child(armor_root)
+	else:
+		for child in armor_root.get_children():
+			child.queue_free()
+			
+	for coord in result:
+		var tile_id = result[coord]
+		var mi = MeshInstance3D.new()
+		var box = BoxMesh.new()
+		box.size = Vector3(0.9, 0.1, 0.9)
+		mi.mesh = box
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.3, 0.3, 0.35)
+		mi.material_override = mat
+		mi.position = Vector3(coord.x * cell_size, coord.y * cell_size, coord.z * cell_size)
+		armor_root.add_child(mi)
 
 func _write_hull_sidecar(hull_name: String, data: Dictionary) -> bool:
 	var json = JSON.new()

@@ -1,6 +1,9 @@
 extends Control
+
+signal part_hovered(type_id: String)
+signal part_unhovered()
+
 # The Design Lab's hardware catalog.
-#
 # REWRITTEN 2026-08-10. The previous incarnation parked the catalog in a
 # left-side UIDock, RAILED by default, with a TabContainer inside, a search
 # box at the top, and accordion-within-accordion drill-in. The dock took
@@ -628,6 +631,8 @@ func _build_part_card(type_id: String, data: Dictionary) -> Button:
 	var btn = Button.new()
 	btn.set_script(preload("res://scripts/part_button.gd"))
 	btn.module_type_id = type_id
+	btn.mouse_entered.connect(func(): part_hovered.emit(type_id))
+	btn.mouse_exited.connect(func(): part_unhovered.emit())
 	btn.text = data["name"]
 	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	btn.clip_text = true

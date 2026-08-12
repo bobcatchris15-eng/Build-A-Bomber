@@ -9,6 +9,7 @@ extends Camera3D
 var _pivot: Node3D
 var _distance: float = 15.0
 var _cam_attributes: CameraAttributesPractical = null
+var zoom_service: SemanticZoomService = SemanticZoomService.new()
 
 func _ready():
 	_pivot = Node3D.new()
@@ -39,6 +40,8 @@ func _process(delta):
 	if _cam_attributes:
 		_cam_attributes.dof_blur_far_distance = position.z + 4.0
 		_cam_attributes.dof_blur_near_distance = max(1.0, position.z - 4.0)
+	if zoom_service:
+		zoom_service.update_distance(position.z)
 
 func _input(event):
 	pass

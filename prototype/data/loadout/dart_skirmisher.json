@@ -2,7 +2,7 @@
 	"version": 1.0,
 	"id": "enemy_dart_skirmisher",
 	"name": "Dart Hover Skirmisher",
-	"hull_type": "block_scout_meridian_a",
+	"hull_type": "block_scout_meridian",
 	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
 	"hull_size": {"x": 3.0, "y": 1.0, "z": 4.0},
 	"armor_material": "energy_shielding",

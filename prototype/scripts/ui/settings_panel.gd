@@ -359,7 +359,7 @@ func _input_event_captured(event: InputEvent) -> void:
 		return
 	# Escape aborts rather than binding itself. Binding Escape to a game action
 	# is how a player loses the ability to leave a menu.
-	if event is InputEventKey and event.keycode == KEY_ESCAPE:
+	if event.is_action_pressed("ui_cancel"):
 		_end_rebind()
 		return
 	_input_svc.rebind(_rebinding_action, [descriptor])

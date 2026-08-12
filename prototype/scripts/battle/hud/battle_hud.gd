@@ -22,6 +22,9 @@ const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_cat
 const TerrainBuilder = preload("res://scripts/terrain_builder.gd")
 const LiveryScript = preload("res://scripts/livery.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
+const CommandCardScript = preload("res://scripts/ui/command_card.gd")
+const SpecPlacardScript = preload("res://scripts/ui/spec_placard.gd")
+const EdgeMarkerScript = preload("res://scripts/ui/edge_marker.gd")
 
 # Coarser than the fog grid on purpose: a minimap needs a recognisable
 # silhouette, not per-vision-tick precision.
@@ -76,6 +79,9 @@ var _static_image: Image = null
 var _image: Image = null
 var _texture: ImageTexture = null
 var minimap_rect: TextureRect = null
+var command_card: Control = null
+var placard: Control = null
+var edge_marker: Control = null
 
 
 func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
@@ -97,6 +103,11 @@ func setup(director: Node, local_team: int, current_map: Dictionary) -> void:
 	_build_top_strip()
 	_bake_minimap(current_map)
 	_build_minimap()
+	_build_command_card()
+	
+	edge_marker = EdgeMarkerScript.new()
+	add_child(edge_marker)
+	edge_marker.setup(_director)
 
 
 func fit_to_viewport() -> void:
@@ -196,6 +207,40 @@ func _build_minimap() -> void:
 	add_child(minimap_rect)
 
 
+func _build_command_card() -> void:
+	command_card = CommandCardScript.new()
+	command_card.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	command_card.offset_right = -Tokens.SPACE_MD
+	command_card.offset_bottom = -Tokens.SPACE_MD
+	add_child(command_card)
+	command_card.setup(_director)
+	
+	placard = SpecPlacardScript.new()
+	placard.level = SpecPlacardScript.Level.BATTLE
+	placard.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	placard.offset_right = -Tokens.SPACE_MD - 180 # adjacent to command card
+	placard.offset_bottom = -Tokens.SPACE_MD
+	add_child(placard)
+	
+	_director.selection.selection_changed.connect(_on_selection_changed)
+
+func _on_selection_changed(selected: Array) -> void:
+	if selected.is_empty():
+		placard.visible = false
+		return
+	var primary = selected[0]
+	if not is_instance_valid(primary) or primary.is_dead:
+		placard.visible = false
+		return
+	var blueprint = primary.get_meta("blueprint") if primary.has_meta("blueprint") else {}
+	var design_name = primary.get_meta("design_name") if primary.has_meta("design_name") else "Unit"
+	var title = design_name
+	if selected.size() > 1:
+		title += " (+%d)" % (selected.size() - 1)
+	placard.from_blueprint(title, "", blueprint, primary.get_meta("design_stats") if primary.has_meta("design_stats") else {})
+	placard.visible = true
+
+
 func world_to_cell(x: float, z: float) -> Vector2i:
 	var cell := CELL * _world_scale
 	return Vector2i(
@@ -240,6 +285,34 @@ func _on_minimap_input(event: InputEvent) -> void:
 func refresh() -> void:
 	_refresh_resources()
 	_refresh_minimap()
+	_refresh_placard()
+
+func _refresh_placard() -> void:
+	if not placard.visible or _director.selection.selected.is_empty():
+		return
+	var primary = _director.selection.selected[0]
+	if not is_instance_valid(primary) or primary.is_dead:
+		return
+	var vals := {}
+	
+	if "health" in primary and "max_health" in primary:
+		var hp = clampf(float(primary.health) / float(primary.max_health), 0.0, 1.0)
+		vals["health"] = "%d%%" % int(hp * 100)
+		
+	if "current_order_name" in primary:
+		vals["order"] = str(primary.current_order_name)
+	elif "current_order" in primary and primary.current_order != null:
+		if "name" in primary.current_order:
+			vals["order"] = primary.current_order.name
+		else:
+			vals["order"] = str(primary.current_order)
+	else:
+		vals["order"] = "IDLE"
+		
+	if "stance" in primary:
+		vals["stance"] = str(primary.stance)
+		
+	placard.update_values(vals)
 
 
 func _refresh_resources() -> void:

@@ -38,6 +38,7 @@ var drag_start_module: Node3D = null
 var drag_original_transform: Transform3D
 var drag_original_mirror_transform: Transform3D
 var drag_has_mirror: bool = false
+var _facet_highlight: MeshInstance3D = null
 
 # --- Undo/Redo (Design_Lab_UI_UX.md top-bar spec) ---
 # Snapshot-based: each entry is a full serialized-hull dictionary (same shape
@@ -241,6 +242,7 @@ func _unhandled_input(event):
 						mirror.transform = drag_original_mirror_transform
 				_select_module(selected_module)
 				check_all_clipping()
+				_hide_facet_highlight()
 				_log("Module dragging cancelled.")
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -314,6 +316,7 @@ func _unhandled_input(event):
 				_select_module(selected_module)
 				get_tree().call_group("stat_ui", "update_stats", hull)
 				check_all_clipping()
+				_hide_facet_highlight()
 				_log("Module dragging finished.")
 			drag_pending = false
 			drag_start_module = null
@@ -2135,11 +2138,56 @@ func surface_raycast(ray_origin: Vector3, ray_dir: Vector3, length: float = 1000
 	precise.exclude = exclude
 	var hit = space_state.intersect_ray(precise)
 	if hit:
+		_update_facet_highlight(hit.position, hit.normal)
 		return hit
 	var fallback = PhysicsRayQueryParameters3D.create(ray_origin, to)
 	fallback.collision_mask = 1
 	fallback.exclude = exclude
-	return space_state.intersect_ray(fallback)
+	var fb_hit = space_state.intersect_ray(fallback)
+	if fb_hit:
+		_update_facet_highlight(fb_hit.position, fb_hit.normal)
+		return fb_hit
+	_hide_facet_highlight()
+	return {}
+
+func _update_facet_highlight(pos: Vector3, normal: Vector3):
+	if not _facet_highlight:
+		_facet_highlight = MeshInstance3D.new()
+		var quad = QuadMesh.new()
+		quad.size = Vector2(1, 1)
+		_facet_highlight.mesh = quad
+		var mat = StandardMaterial3D.new()
+		mat.albedo_color = Color(0.2, 0.8, 0.2, 0.5)
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mat.emission_enabled = true
+		mat.emission = Color(0.2, 0.8, 0.2)
+		mat.emission_energy_multiplier = 0.5
+		_facet_highlight.material_override = mat
+		add_child(_facet_highlight)
+	
+	_facet_highlight.visible = true
+	var base_basis = _align_up_to(normal)
+	_facet_highlight.global_transform.basis = base_basis * Basis(Vector3.RIGHT, -PI/2.0)
+	_facet_highlight.global_position = pos + normal * 0.02
+	
+	if hull and is_instance_valid(hull):
+		var local_pos = hull.to_local(pos)
+		var local_normal = hull.global_transform.basis.inverse() * normal
+		var mod_basis = _align_up_to(local_normal)
+		var facet_info = _measure_hull_facet(hull, local_pos, local_normal, mod_basis)
+		if facet_info.get("valid", false):
+			var facet_size = facet_info["size"]
+			if _facet_highlight.mesh is QuadMesh:
+				_facet_highlight.mesh.size = Vector2(max(0.1, facet_size.x), max(0.1, facet_size.z))
+			var global_center = hull.to_global(facet_info["center"])
+			_facet_highlight.global_position = global_center + normal * 0.02
+		else:
+			if _facet_highlight.mesh is QuadMesh:
+				_facet_highlight.mesh.size = Vector2(1, 1)
+
+func _hide_facet_highlight():
+	if _facet_highlight:
+		_facet_highlight.visible = false
 
 # Basis that rotates the module's local +Y (its "up", i.e. the direction the
 # body projects away from its baked-in mounting base) onto `n`, the surface
@@ -2345,6 +2393,15 @@ func check_all_clipping():
 	if not hull:
 		return
 		
+	var clipping_root = hull.get_node_or_null("ClippingVolumes")
+	if not clipping_root:
+		clipping_root = Node3D.new()
+		clipping_root.name = "ClippingVolumes"
+		hull.add_child(clipping_root)
+	else:
+		for child in clipping_root.get_children():
+			child.queue_free()
+			
 	var modules = []
 	for child in hull.get_children():
 		if child.has_meta("module_data") and not child.is_queued_for_deletion():
@@ -2388,13 +2445,44 @@ func check_all_clipping():
 			var other_size = other_catalog.size * other_module.get_meta("struct_scale", other_module.scale)
 			var aabb_b = _get_parent_space_aabb(other_module, other_size)
 			
-			# Shrink AABB slightly to allow touching/adjacent modules
 			if aabb_a.grow(-0.05).intersects(aabb_b.grow(-0.05)):
 				clipping_set[my_module] = true
 				clipping_set[other_module] = true
 				clipping_detected = true
 				
-	# Apply visual changes to each module
+				# Generate CSG Intersection
+				var intersection_root = CSGCombiner3D.new()
+				intersection_root.operation = CSGShape3D.OPERATION_INTERSECTION
+				# We don't want the CSG to be solid, we want it glowing red.
+				var csg_mat = _clipping_material()
+				intersection_root.material_override = csg_mat
+				clipping_root.add_child(intersection_root)
+				
+				# Group A (Union)
+				var group_a = CSGCombiner3D.new()
+				group_a.operation = CSGShape3D.OPERATION_UNION
+				intersection_root.add_child(group_a)
+				var meshes_a = []
+				_find_meshes_recursive(my_module, meshes_a)
+				for m_inst in meshes_a:
+					var csg_m = CSGMesh3D.new()
+					csg_m.mesh = m_inst.mesh
+					csg_m.global_transform = m_inst.global_transform
+					group_a.add_child(csg_m)
+					
+				# Group B (Union)
+				var group_b = CSGCombiner3D.new()
+				group_b.operation = CSGShape3D.OPERATION_UNION
+				intersection_root.add_child(group_b)
+				var meshes_b = []
+				_find_meshes_recursive(other_module, meshes_b)
+				for m_inst in meshes_b:
+					var csg_m = CSGMesh3D.new()
+					csg_m.mesh = m_inst.mesh
+					csg_m.global_transform = m_inst.global_transform
+					group_b.add_child(csg_m)
+				
+	# Restore all visual materials (since we no longer override them for clipping)
 	for m in modules:
 		var is_clipping = clipping_set[m]
 		var my_data = m.get_meta("module_data")
@@ -2422,13 +2510,55 @@ func check_all_clipping():
 		for mesh in meshes:
 			if not mesh.has_meta("base_material"):
 				mesh.set_meta("base_material", mesh.material_override)
-			if is_clipping:
-				mesh.material_override = _clipping_material()
-			else:
-				mesh.material_override = mesh.get_meta("base_material")
+			mesh.material_override = mesh.get_meta("base_material")
 
 	_refresh_firing_arc()
 	_update_cog_crosshair()
+
+func is_ghost_clipping(ghost_transform: Transform3D, ghost_type_id: String) -> bool:
+	var my_catalog = ModuleCatalog.get_module_data(ghost_type_id)
+	var my_size = my_catalog.size
+	
+	var extents = my_size / 2.0
+	var local_corners = [
+		Vector3(-extents.x, -extents.y, -extents.z),
+		Vector3(-extents.x, -extents.y, extents.z),
+		Vector3(-extents.x, extents.y, -extents.z),
+		Vector3(-extents.x, extents.y, extents.z),
+		Vector3(extents.x, -extents.y, -extents.z),
+		Vector3(extents.x, -extents.y, extents.z),
+		Vector3(extents.x, extents.y, -extents.z),
+		Vector3(extents.x, extents.y, extents.z)
+	]
+	
+	var min_p = ghost_transform * local_corners[0]
+	var max_p = min_p
+	for i in range(1, 8):
+		var p = ghost_transform * local_corners[i]
+		min_p.x = min(min_p.x, p.x)
+		min_p.y = min(min_p.y, p.y)
+		min_p.z = min(min_p.z, p.z)
+		max_p.x = max(max_p.x, p.x)
+		max_p.y = max(max_p.y, p.y)
+		max_p.z = max(max_p.z, p.z)
+		
+	var aabb_a = AABB(min_p, max_p - min_p)
+	
+	var modules = hull.get_children().filter(func(c): return c is Node3D and c.has_meta("module_data"))
+	
+	for other_module in modules:
+		var other_data = other_module.get_meta("module_data")
+		if my_catalog.category == "armor" or other_data.category == "armor":
+			continue
+			
+		var other_catalog = ModuleCatalog.get_module_data(other_data.type_id)
+		var other_size = other_catalog.size * other_module.get_meta("struct_scale", other_module.scale)
+		var aabb_b = _get_parent_space_aabb(other_module, other_size)
+		
+		if aabb_a.grow(-0.05).intersects(aabb_b.grow(-0.05)):
+			return true
+			
+	return false
 
 var _cog_node: Node3D = null
 

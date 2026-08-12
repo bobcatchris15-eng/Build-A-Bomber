@@ -495,7 +495,7 @@ func test_undo_redo() -> bool:
 	placer.add_child(bm)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("block_main_meridian_a")
+	placer._place_hull_from_ui("block_main_meridian")
 	await tree.process_frame
 
 	if placer.can_undo():
@@ -635,7 +635,7 @@ func test_free_rotation_ring() -> bool:
 	root.add_child(placer)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("block_main_meridian_a")
+	placer._place_hull_from_ui("block_main_meridian")
 	await tree.process_frame
 	placer._place_weapon_from_ui("basic_cannon", Vector3(1.0, 0.5, 0.0), Vector3.UP)
 	await tree.process_frame
@@ -697,7 +697,7 @@ func test_angled_pintle_mount() -> bool:
 	var ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 
 	# Pure function check first.
-	if ModuleCatalogScript.get_mount_style("rotary_cannon", "block_scout_meridian_a") != "pintle":
+	if ModuleCatalogScript.get_mount_style("rotary_cannon", "block_scout_meridian") != "pintle":
 		print("  [FAIL] rotary_cannon should resolve to pintle")
 		return false
 
@@ -718,7 +718,7 @@ func test_angled_pintle_mount() -> bool:
 	placer.add_child(bm)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("block_scout_meridian_a")
+	placer._place_hull_from_ui("block_scout_meridian")
 	await tree.process_frame
 
 	var glacis_normal = Vector3(0, 0.7, -0.7).normalized()

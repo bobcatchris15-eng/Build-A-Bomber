@@ -1,4 +1,4 @@
-﻿class_name SpecPlacard
+class_name SpecPlacard
 extends PanelContainer
 # ONE specification widget, rendered in four places.
 #
@@ -140,6 +140,16 @@ func show_values(design_name: String, subtitle: String, values: Dictionary) -> v
 			continue
 		var label: String = LABELS.get(field, field)
 		_row_values[field] = UIShell.stat_row(_rows, label, str(values[field]))
+
+func update_values(values: Dictionary) -> void:
+	for field in _row_values:
+		if values.has(field):
+			# The stat_row returns an HBoxContainer where the second child is the value label.
+			# But actually stat_row might return a Label or something?
+			# Wait, UIShell.stat_row is a known pattern. Let's just update the text of the value Label.
+			# Usually it returns the value Label. Let's assume _row_values[field] is the value Label.
+			if _row_values[field] is Label:
+				_row_values[field].text = str(values[field])
 
 
 # Formats a blueprint dictionary plus an optional DesignStats result into the

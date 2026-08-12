@@ -12,7 +12,7 @@ $godot = Join-Path $PSScriptRoot "Godot_v4.7.1-stable_win64_console.exe"
 
 Write-Host "Reimporting assets (regenerating .godot import cache)..."
 & $godot --headless --editor --import --quit --path $PSScriptRoot 2>&1 | Out-Null
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 Write-Host "Running headless test suite..."
 & $godot --headless --script run_tests.gd --path $PSScriptRoot

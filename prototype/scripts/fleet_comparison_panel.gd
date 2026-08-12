@@ -5,7 +5,7 @@ extends Control
 const UITheme = preload("res://scripts/ui_theme.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
-const StatCalculatorScript = preload("res://scripts/stat_calculator.gd")
+const LabDocumentScript = preload("res://scripts/lab_document.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 
 var target_blueprint: Dictionary = {}

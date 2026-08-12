@@ -1,6 +1,6 @@
 extends Node3D
 
-const StatCalculatorScript = preload("res://scripts/stat_calculator.gd")
+const LabDocumentScript = preload("res://scripts/lab_document.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 
@@ -173,7 +173,7 @@ func _on_dragged(offset_3d: Vector3, axis: Vector3):
 		var type_id = data.type_id
 		var tweak_name = get_tweak_for_axis(type_id, axis)
 		if tweak_name != "":
-			var specs = StatCalculatorScript.TWEAK_SPECS
+			var specs = preload("res://scripts/lab_document.gd").TWEAK_SPECS
 			var spec = null
 			if type_id in specs:
 				for s in specs[type_id]:

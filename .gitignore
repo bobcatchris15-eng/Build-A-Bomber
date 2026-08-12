@@ -118,6 +118,24 @@ prototype/test_chase_wiring.gd
 prototype/test_loader.gd
 prototype/.godot_reimport.log
 
+# One-off refactor/rewrite tooling that ends up at the prototype/ root during
+# big code-movement sessions. The split_*/fix_*/extract_*/test_out.txt names
+# match the per-commit tool patterns left behind when a monolith is being
+# carved up by ad-hoc Python / PowerShell; once the split is in, the tool is
+# useless, but it lingers in the working tree because the agent that ran it
+# moved on without cleaning up.
+prototype/fix_*.ps1
+prototype/split*.py
+prototype/extract*.py
+prototype/test_out.txt
+
+# scratch/probe_axes/_* are the same category at the top-level scratch dir
+# (unrelated to prototype/scratch/): one-shot probe scripts with a leading
+# underscore and the throwaway GLBs they generate, vs. the pr1_* / pr2_*
+# scripts that ARE part of the recorded hull-axes refactor.
+scratch/probe_axes/_*.py
+scratch/probe_axes/_*.glb
+
 # Staging directory for files that have been removed from their original
 # location but are kept on disk for the user to confirm before final delete.
 # The dir name is timestamped so multiple cleanups don't collide. Not

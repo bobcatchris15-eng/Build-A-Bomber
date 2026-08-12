@@ -172,8 +172,8 @@ func test_match_director_falls_back_to_defaults_when_rule_set_is_null() -> bool:
 		battle.queue_free()
 		_cleanup(match_config)
 		return false
-	if battle.enemy_faction != "technocrats":
-		print("  [FAIL] enemy_faction should fall back to director default 'technocrats', got '",
+	if battle.enemy_faction != "industrialists":
+		print("  [FAIL] enemy_faction should fall back to the roster's faction 'industrialists', got '",
 			battle.enemy_faction, "'")
 		battle.queue_free()
 		_cleanup(match_config)

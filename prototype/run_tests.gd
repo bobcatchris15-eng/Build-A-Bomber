@@ -68,6 +68,7 @@ const SUITE_FILES := {
 	"debug_cheats": preload("res://tests/battle/test_debug_cheats.gd"),
 	"match_rule_set": preload("res://tests/test_match_rule_set.gd"),
 	"match_rule_set_integration": preload("res://tests/battle/test_match_rule_set_integration.gd"),
+	"semantic_zoom": preload("res://tests/test_semantic_zoom.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -89,6 +90,9 @@ const SUITE_ORDER := [
 	["stat_model", "test_count_tweaks_are_neutral_at_their_declared_default"],
 	["stat_model", "test_count_tweaks_scale_linearly_from_their_default"],
 	["stat_model", "test_armor_level_costs_more_mass_than_it_buys"],
+	["semantic_zoom", "test_semantic_zoom_service_thresholds"],
+	["semantic_zoom", "test_semantic_zoom_signal_emission"],
+	["semantic_zoom", "test_lab_view_modes"],
 
 	# REGISTERED 2026-08-11, having never run. test_design_verdict.gd was in
 	# SUITE_FILES but its only manifest row named a function that does not
