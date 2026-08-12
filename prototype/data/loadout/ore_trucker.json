@@ -2,7 +2,7 @@
 	"version": 1.0,
 	"id": "default_ore_trucker",
 	"name": "Scrapper Ore Trucker",
-	"hull_type": "block_main_meridian",
+	"hull_type": "brenntal_medium_a",
 	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
 	"hull_size": {"x": 4.0, "y": 1.0, "z": 6.0},
 	"armor_material": "hardened_steel",

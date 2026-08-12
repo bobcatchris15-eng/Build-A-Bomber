@@ -66,8 +66,27 @@ const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 # constraint it is the number a player is actually budgeting against while
 # browsing. Alphabetical would scatter the light starter parts through the
 # list; cost would put the crystal-heavy exotics next to the cheap junk.
-const HULL_LIGHT_MAX := 200.0
-const HULL_MEDIUM_MAX := 450.0
+## Chassis bins come from the hull's DECLARED class, not from its weight.
+##
+## They used to be pure weight thresholds at 200 / 450, picked against the old
+## catalogue. Against the 60-hull one they collapsed: the lightest hull in the
+## game weighs 197, so "Light Chassis" contained exactly ONE entry and the other
+## seven scouts sat under Medium next to genuine mediums.
+##
+## Bumping the thresholds alone cannot fix it cleanly either, because the
+## classes overlap by weight - the heaviest Medium is 666 and the lightest
+## Transport is 657, so no single number separates them. The class is the
+## authoritative answer and every shipped hull declares it.
+##
+## ModuleCatalog.get_hull_size_tier() already maps the six classes onto three
+## tiers for the manufactory system; reusing HULL_TIER_BY_CLASS here keeps the
+## parts bin and the production tiers from ever disagreeing about what counts as
+## a light chassis.
+const HULL_TIER_TO_GROUP := {
+	"light": "Light Chassis",
+	"medium": "Medium Chassis",
+	"heavy": "Heavy Chassis",
+}
 const HULL_GROUP_ORDER = ["Light Chassis", "Medium Chassis", "Heavy Chassis", "Static Foundations"]
 
 # Locomotion: derived from the traits array each entry already declares, so a
@@ -554,10 +573,15 @@ func _bucket(groups: Dictionary, group: String, type_id: String, data: Dictionar
 func _hull_group(data: Dictionary) -> String:
 	if data.get("is_foundation", false):
 		return "Static Foundations"
+	var declared := str(data.get("hull_class", "")).to_lower()
+	if ModuleCatalog.HULL_TIER_BY_CLASS.has(declared):
+		return HULL_TIER_TO_GROUP[ModuleCatalog.HULL_TIER_BY_CLASS[declared]]
+	# Mod hull with no declared class. Same weight breakpoints
+	# get_hull_size_tier() falls back to, so the two paths agree.
 	var w = float(data.get("weight", 0.0))
-	if w < HULL_LIGHT_MAX:
+	if w <= ModuleCatalog.HULL_TIER_LIGHT_MAX_WEIGHT:
 		return "Light Chassis"
-	if w < HULL_MEDIUM_MAX:
+	if w <= ModuleCatalog.HULL_TIER_MEDIUM_MAX_WEIGHT:
 		return "Medium Chassis"
 	return "Heavy Chassis"
 

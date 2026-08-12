@@ -3,30 +3,11 @@ extends Control
 var telemetry_rail
 var lab_toolbar
 var tweak_callout_manager
-const ResourceCatalogScript = preload("res://scripts/battle/economy/resource_catalog.gd")
-const ModuleDataResource = preload("res://scripts/module_data.gd")
 
 
-# Only for its tuning constants - the analysis itself arrives pre-computed
-# inside the DesignStats result, so this rail never calls analyze() itself.
-const DrivetrainScript = preload("res://scripts/drivetrain.gd")
 const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
-const BlueprintNamerScript = preload("res://scripts/blueprint_namer.gd")
 const UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
-const UIIconsScript = preload("res://scripts/ui_icons.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
-const DesignCostingScript = preload("res://scripts/battle/economy/design_costing.gd")
-const ProductionHUDScript = preload("res://scripts/battle/hud/production_hud.gd")
-# Test Range launcher (battle-system unification Phase 3). The Design Lab's
-# "Test in Arena" button routes through this so the Lab's most-recent-saved
-# blueprint (or its scratch slot) is the design the Test Range boots with,
-# identical to the Main Menu's PROVING GROUND card. Replaces the legacy
-# direct `change_scene_to_file(Battlefield.tscn)` calls, which reached a
-# scene the battle unification is retiring.
-const TestRangeLauncherScript = preload("res://scripts/test_range_launcher.gd")
-const DesignVerdictScript = preload("res://scripts/design_verdict.gd")
-const PhosphorPanelScript = preload("res://scripts/ui/phosphor_panel.gd")
-const MeshIconScript = preload("res://scripts/ui/mesh_icon.gd")
 
 # --- Rail structure (VISUAL/UI plan item 7) ---------------------------------
 # The rail used to be a bare anchored `Panel` in UI_StatBlock.tscn carrying an
@@ -40,7 +21,6 @@ const MeshIconScript = preload("res://scripts/ui/mesh_icon.gd")
 # re-resolved `$ScrollContainer/VBoxContainer` on every call are the ones that
 # had to change; they use `_rail_vbox` now, captured before the move.
 var stats_dock: Control = null
-var toolbar: Control = null
 var _slot_hull_label: Label = null
 var _slot_parts_label: Label = null
 var _slot_cost_label: Label = null
@@ -56,18 +36,7 @@ var total_weight: float = 0.0
 var total_dps: float = 0.0
 var drivetrain: Dictionary = {}
 var weapon_range: Dictionary = {}
-var _undo_btn: Button = null
-var _redo_btn: Button = null
 
-# The verdict block (UX_REDESIGN_PLAN.md Phase 4, item 1): leads the rail with
-# a plain-language judgement before any of the numbers below it, the same way
-# Fusion 360 says "Fully Constrained" before a single dimension. Built lazily
-# on the first update_stats() call rather than in _ready(), because it anchors
-# to hp_label's parent - which only exists once the rail itself is built.
-var _verdict_panel: Control = null
-var _verdict_headline: Label = null
-var _verdict_detail: Label = null
-var _mirror_icon: Control = null
 
 @onready var hp_label = $ScrollContainer/VBoxContainer/HPLabel
 @onready var weight_label = $ScrollContainer/VBoxContainer/WeightLabel
@@ -79,7 +48,6 @@ var _mirror_icon: Control = null
 @onready var test_button = $ScrollContainer/VBoxContainer/TestButton
 @onready var blueprint_name_edit = $ScrollContainer/VBoxContainer/BlueprintNameEdit
 @onready var library_button = $ScrollContainer/VBoxContainer/LibraryButton
-var _name_roll_button: Button = null
 
 @onready var locomotion_tweaks = $ScrollContainer/VBoxContainer/LocomotionTweaks
 @onready var size_container = $ScrollContainer/VBoxContainer/LocomotionTweaks/SizeContainer
@@ -89,25 +57,9 @@ var _name_roll_button: Button = null
 @onready var count_slider = $ScrollContainer/VBoxContainer/LocomotionTweaks/CountContainer/CountSlider
 @onready var count_label = $ScrollContainer/VBoxContainer/LocomotionTweaks/CountContainer/CountLabel
 
-# Locomotion Size/Count sliders previously showed only a static base label
-# ("Wheel Size:") with no live numeric readout, unlike every other slider
-# in the Design Lab (armor thickness, weapon tweaks) which all show the
-# current value - a real, noticed inconsistency. These track the base
-# name so _refresh_locomotion_labels() can append the live value on top
-# of whatever branch in on_module_selected() set it.
-var size_label_base: String = "Size"
-var count_label_base: String = "Count"
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
-const DamageResolverScript = preload("res://scripts/damage_resolver.gd")
-const DesignStatsScript = preload("res://scripts/design_stats.gd")
-# For its REGIME_* names only - the analysis itself arrives pre-computed inside
-# the DesignStats result, exactly like Drivetrain above. The rail needs the
-# constants because it colours a row by which regime the shot is in, and a
-# stringly-typed "chip" spelled out here is how this file and weapon_alpha.gd
-# would eventually disagree about spelling.
-const WeaponAlphaScript = preload("res://scripts/weapon_alpha.gd")
 # Drivetrain and WeaponRange are no longer preloaded here: both are now called
 # by design_stats.gd, which hands their results back in its return value, so this
 # file has no direct use for either.
@@ -478,12 +430,9 @@ const TWEAK_SPECS = {
 	]
 }
 
-var armor_mat_label: Label
 var armor_mat_btn: OptionButton
 var armor_thick_label: Label
 var armor_thick_slider: HSlider
-var armor_threshold_label: Label
-var tech_req_label: Label
 
 # --- Hull spec flyout (VISUAL/UI plan item 7) -------------------------------
 # Armour material, faction and armour thickness used to be six controls parked
@@ -511,19 +460,6 @@ var tech_req_label: Label
 var hull_spec_btn: Button
 var hull_spec_stash: VBoxContainer
 var _hull_spec_flyout: Node = null
-# --- Power breakout ---------------------------------------------------------
-# Replaces a single `energy_label` reading "Energy Capacity: +N", which was
-# hidden whenever the design had no generator - so the one screen where a player
-# decides how much power to fit showed nothing at all until they had already
-# fitted some. Capacity was never the interesting number anyway: generation
-# against draw is, and the buffer only says how long a shortfall is survivable.
-var _power_gen_label: Label = null
-var _power_storage_label: Label = null
-var _power_draw_label: Label = null
-var _power_net_label: Label = null
-var _power_panel: PanelContainer = null
-var _power_title: Label = null
-var _power_detail: Label = null
 
 # Wheels-only "dually" tweak (wheels_per_axle, 1-2): no scene node for this
 # exists in UI_StatBlock.tscn (only the generic Size/Count sliders shared by
@@ -986,9 +922,7 @@ func _ready():
 	# Initial sync of armor UI
 	call_deferred("_initial_sync")
 
-const UIStampScript = preload("res://scripts/ui_stamp.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
-const UIAnimScript = preload("res://scripts/ui_anim.gd")
 
 func sync_hull_ui(hull: Node3D):
 	# An unnamed design now shows an EMPTY field with a suggestion behind it,
@@ -1025,12 +959,6 @@ func sync_hull_ui(hull: Node3D):
 	is_updating_sliders = false
 	update_stats(hull)
 
-var _load_bar: ProgressBar = null
-var _load_label: Label = null
-var _speed_label: Label = null
-var _overweight_panel: PanelContainer = null
-var _overweight_title: Label = null
-var _overweight_detail: Label = null
 # One stylebox per load state, built on first use and reused - same idiom as
 # skirmish.gd's _power_fill_style(). A ProgressBar fill is a STATE indicator,
 # which is the documented exception to "no local styleboxes": there is no
@@ -1038,16 +966,7 @@ var _overweight_detail: Label = null
 # StyleBoxTexture material plates carry no colour channel to vary.
 var _load_fill_styles: Dictionary = {}
 
-var _boost_label: Label = null
 
-var _range_label: Label = null
-var _vision_label: Label = null
-var _spotter_panel: PanelContainer = null
-var _spotter_title: Label = null
-var _spotter_detail: Label = null
-
-var _alpha_label: Label = null
-var _alpha_head: Label = null
 var _alpha_rows: Array[Label] = []
 
 # The regime column, as it is drawn. Two things carry the state, not one:
@@ -1069,10 +988,6 @@ var _callout_dirs = [
 	Vector2(0.8, 1.2), Vector2(-0.8, 1.2)    # Bottom corners
 ]
 var _current_callout_idx = 0
-
-# The radial action ring (scripts/ui_radial_menu.gd). One at a time; opening a
-# new one on a fresh selection closes the old.
-var _action_ring: UIRadialMenu = null
 
 
 # Opens the action ring on `module`.

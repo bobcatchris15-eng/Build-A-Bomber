@@ -107,7 +107,7 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 
 	var blueprint = {
 		"version": 1.0,
-		"hull_type": hull.get_meta("type_id") if hull.has_meta("type_id") else "block_main_meridian_a",
+		"hull_type": hull.get_meta("type_id") if hull.has_meta("type_id") else "brenntal_medium_a",
 		"hull_scale": {"x": hull.get_meta("hull_scale").x, "y": hull.get_meta("hull_scale").y, "z": hull.get_meta("hull_scale").z} if hull.has_meta("hull_scale") else {"x": 1.0, "y": 1.0, "z": 1.0},
 		"hull_size": {"x": hull_size.x, "y": hull_size.y, "z": hull_size.z},
 		"armor_material": hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel",
@@ -341,7 +341,7 @@ func restore_scratch_into_designer() -> bool:
 	if data.is_empty():
 		return false
 
-	var hull_type = data.get("hull_type", "block_main_meridian_a")
+	var hull_type = data.get("hull_type", "brenntal_medium_a")
 	if not ModuleCatalogScript.hull_exists(hull_type):
 		last_load_error = "Couldn't restore your design: hull '%s' is not installed." % hull_type
 		_show_toast(last_load_error, true)
@@ -420,7 +420,7 @@ func list_blueprints(named_only: bool = false) -> Array:
 					results.append({
 						"id": data.get("id", file_name.get_basename()),
 						"name": data.get("name", "Untitled Design"),
-						"hull_type": data.get("hull_type", "block_main_meridian_a"),
+						"hull_type": data.get("hull_type", "brenntal_medium_a"),
 						"faction": data.get("faction", "industrialists"),
 						# Derived here rather than in the Library screen because
 						# `data` - the whole blueprint, modules and all - is in
@@ -430,7 +430,7 @@ func list_blueprints(named_only: bool = false) -> Array:
 						"is_harvester": ModuleCatalogScript.blueprint_is_harvester(data),
 						"cargo_capacity": HarvesterFSMScript.capacity_for(
 							ModuleCatalogScript.blueprint_harvester_modules(data),
-							str(data.get("hull_type", "block_main_meridian_a")),
+							str(data.get("hull_type", "brenntal_medium_a")),
 							ModuleCatalogScript.blueprint_bay_capacity(data)
 						) if ModuleCatalogScript.blueprint_is_harvester(data) else 0,
 						"modified_unix": data.get("modified_unix", 0),
@@ -452,7 +452,7 @@ func list_blueprints(named_only: bool = false) -> Array:
 					results.append({
 						"id": data.get("id", file_name.get_basename()),
 						"name": data.get("name", "Untitled Design"),
-						"hull_type": data.get("hull_type", "block_main_meridian_a"),
+						"hull_type": data.get("hull_type", "brenntal_medium_a"),
 						"faction": data.get("faction", "industrialists"),
 						# Derived here rather than in the Library screen because
 						# `data` - the whole blueprint, modules and all - is in
@@ -462,7 +462,7 @@ func list_blueprints(named_only: bool = false) -> Array:
 						"is_harvester": ModuleCatalogScript.blueprint_is_harvester(data),
 						"cargo_capacity": HarvesterFSMScript.capacity_for(
 							ModuleCatalogScript.blueprint_harvester_modules(data),
-							str(data.get("hull_type", "block_main_meridian_a")),
+							str(data.get("hull_type", "brenntal_medium_a")),
 							ModuleCatalogScript.blueprint_bay_capacity(data)
 						) if ModuleCatalogScript.blueprint_is_harvester(data) else 0,
 						"modified_unix": data.get("modified_unix", 0),
@@ -547,7 +547,7 @@ func load_blueprint_into_designer(id: String) -> bool:
 	# itself also refuses (returns null) as a second line of defense for
 	# every other caller (skirmish spawns, battlefield, defense buildings),
 	# but only this path can say exactly which design and which hull.
-	var hull_type = data.get("hull_type", "block_main_meridian_a")
+	var hull_type = data.get("hull_type", "brenntal_medium_a")
 	if not ModuleCatalogScript.hull_exists(hull_type):
 		var bp_name = data.get("name", "Untitled Design")
 		last_load_error = "Can't load '%s': hull '%s' is not installed. Reinstall the mod that adds it, or choose a different design." % [bp_name, hull_type]
@@ -616,7 +616,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	var ModuleCatalog = preload("res://scripts/module_catalog.gd")
 	var ModuleData = preload("res://scripts/module_data.gd")
 
-	var hull_type = blueprint_data.get("hull_type", "block_main_meridian_a")
+	var hull_type = blueprint_data.get("hull_type", "brenntal_medium_a")
 
 	# Hard-fail, not ModuleCatalog.get_module_data()'s always-succeeds
 	# fallback (which returns basic_cannon's WEAPON data for an unknown

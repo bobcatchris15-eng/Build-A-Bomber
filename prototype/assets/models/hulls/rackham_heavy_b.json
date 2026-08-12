@@ -1,0 +1,28 @@
+{
+  "name": "Rackham Siege Engine",
+  "hp": 1439.0,
+  "weight": 1054.3,
+  "metal": 354,
+  "crystal": 71,
+  "size": [
+    4.7,
+    2.553,
+    7.7
+  ],
+  "color": [
+    0.34,
+    0.33,
+    0.31,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Rackham Forge",
+  "hull_class": "Heavy"
+}

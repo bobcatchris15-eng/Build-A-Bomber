@@ -16,59 +16,68 @@ var lab: Node
 
 func _init(p_lab: Node):
 	lab = p_lab
-	hp_label = lab.hp_label
-	weight_label = lab.weight_label
-	cost_label = lab.cost_label
-	dps_label = lab.dps_label
-	_power_gen_label = lab._power_gen_label
-	total_hp = lab.total_hp
-	total_weight = lab.total_weight
-	total_dps = lab.total_dps
-	drivetrain = lab.drivetrain
-	weapon_range = lab.weapon_range
-	_verdict_panel = lab._verdict_panel
-	_verdict_headline = lab._verdict_headline
-	_verdict_detail = lab._verdict_detail
-	
-	_range_label = lab._range_label
-	_vision_label = lab._vision_label
-	_spotter_panel = lab._spotter_panel
-	_spotter_title = lab._spotter_title
-	_spotter_detail = lab._spotter_detail
-	_alpha_label = lab._alpha_label
-	_alpha_head = lab._alpha_head
-	_alpha_rows = lab._alpha_rows
-	_rail_vbox = lab._rail_vbox
-	
-	_power_draw_label = lab._power_draw_label
-	_power_net_label = lab._power_net_label
-	_power_panel = lab._power_panel
-	_power_title = lab._power_title
-	_power_detail = lab._power_detail
-	
-	_load_bar = lab._load_bar
-	_speed_label = lab._speed_label
-	_load_label = lab._load_label
-	_overweight_panel = lab._overweight_panel
-	_overweight_title = lab._overweight_title
-	_overweight_detail = lab._overweight_detail
-	_boost_label = lab._boost_label
-	
-	armor_threshold_label = lab.armor_threshold_label
-	tech_req_label = lab.tech_req_label
-	_load_fill_styles = lab._load_fill_styles
-	_power_storage_label = lab._power_storage_label
 
-var hp_label
-var weight_label
-var cost_label
-var dps_label
+# --- Owned by the LAB, read through on every access ------------------------
+#
+# These twelve used to be snapshotted in _init as `x = lab.x`. That is the
+# pattern that stranded the Design Lab's HULL/PARTS/COST readout and its
+# HULL SPECIFICATION button, so it is gone here too: a read-through cannot go
+# stale however lab_document.gd's _ready() is ordered later. Getter-only,
+# because this class never assigned any of them anywhere except that snapshot.
+var hp_label:
+	get: return lab.hp_label
+var weight_label:
+	get: return lab.weight_label
+var cost_label:
+	get: return lab.cost_label
+var dps_label:
+	get: return lab.dps_label
+var _alpha_rows:
+	get: return lab._alpha_rows
+var _rail_vbox:
+	get: return lab._rail_vbox
+var _load_fill_styles:
+	get: return lab._load_fill_styles
+
+# --- The Lab's PUBLISHED headline stats: read/write proxies -----------------
+#
+# update_stats() ends by writing these (`self.total_hp = ...`), and
+# lab_document.gd's own comment says why they exist: "published by update_stats()
+# for readers that want the numbers rather than the label text -
+# fleet_comparison_panel.gd is the existing one". That reader does
+# `root.get_node("UI_StatBlock").total_hp`, i.e. it reads them off the LAB.
+#
+# They were separate variables: this class snapshotted the Lab's 0.0 in _init and
+# then wrote its own copy, so the Lab's stayed 0.0 forever and the fleet
+# comparison panel compared every design against 0 HP / 0 weight / 0 DPS. Its
+# `if "total_hp" in stat_calc else 0.0` guard passes - the field exists, it is
+# just never populated - so nothing ever complained.
+#
+# Getter AND setter, unlike the read-only block above: the write is the whole
+# point. A getter-only property would silently swallow it, which is exactly the
+# failure this replaced.
+var total_hp:
+	get: return lab.total_hp
+	set(v): lab.total_hp = v
+var total_weight:
+	get: return lab.total_weight
+	set(v): lab.total_weight = v
+var total_dps:
+	get: return lab.total_dps
+	set(v): lab.total_dps = v
+var drivetrain:
+	get: return lab.drivetrain
+	set(v): lab.drivetrain = v
+var weapon_range:
+	get: return lab.weapon_range
+	set(v): lab.weapon_range = v
+
+# --- Built and owned by THIS class ------------------------------------------
+# Every one of these is created by the rail's own build methods. They were also
+# being seeded from `lab.*` in _init, which only ever captured null (the Lab
+# declares them but never assigns them) and was overwritten moments later. Those
+# seeds are gone, and so are the Lab's vestigial declarations.
 var _power_gen_label
-var total_hp
-var total_weight
-var total_dps
-var drivetrain
-var weapon_range
 var _verdict_panel
 var _verdict_headline
 var _verdict_detail
@@ -80,8 +89,6 @@ var _spotter_title
 var _spotter_detail
 var _alpha_label
 var _alpha_head
-var _alpha_rows
-var _rail_vbox
 
 var _power_draw_label
 var _power_net_label
@@ -99,7 +106,6 @@ var _boost_label
 
 var armor_threshold_label
 var tech_req_label
-var _load_fill_styles
 var _power_storage_label
 
 var _base_stats: Dictionary = {}
@@ -293,7 +299,7 @@ func _apply_stats(stats: Dictionary, base_stats: Dictionary = {}):
 	# get_hull_size_tier(), the same function skirmish.gd's
 	# _queue_player_unit() uses) - a player could previously only discover
 	# which manufactory they'd need via a failed build attempt mid-match.
-	var tier = ModuleCatalog.get_hull_size_tier(hull.get_meta("type_id", "block_main_meridian_a")) if hull and hull.has_meta("type_id") else ""
+	var tier = ModuleCatalog.get_hull_size_tier(hull.get_meta("type_id", "brenntal_medium_a")) if hull and hull.has_meta("type_id") else ""
 	var tooltip_parts: Array = []
 	if tier != "":
 		tooltip_parts.append("Needs a %s Manufactory to build this design." % tier.capitalize())

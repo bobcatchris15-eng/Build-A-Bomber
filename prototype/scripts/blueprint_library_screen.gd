@@ -310,7 +310,7 @@ func _preview_blueprint(path: String) -> void:
 	model_root.position = Vector3(0, 0.1, 0)
 	var vehicle = blueprint_manager.reconstruct_vehicle(bp, model_root, true)
 	if vehicle == null:
-		var hull_id = str(bp.get("hull_type", "block_main_meridian_a"))
+		var hull_id = str(bp.get("hull_type", "brenntal_medium_a"))
 		var mesh = MeshAssetLoader.get_hull_mesh(hull_id)
 		var mesh_inst = MeshInstance3D.new()
 		mesh_inst.mesh = mesh

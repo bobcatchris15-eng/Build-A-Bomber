@@ -137,7 +137,7 @@ func _enter_step() -> void:
 
 	# Absolutes cannot express "the player replaced the hull" - the Lab ships a
 	# placeholder Hull node and module_placer._ready() stamps type_id
-	# "block_main_meridian_a" onto it, so "a medium hull exists" is true before the player
+	# "brenntal_medium_a" onto it, so "a medium hull exists" is true before the player
 	# has touched anything. Capturing the identity at step entry and watching for
 	# it to change is what makes the step real; drag_drop_manager._drop_data()
 	# calls clear_hull() then _place_hull_from_ui(), so the node is genuinely a

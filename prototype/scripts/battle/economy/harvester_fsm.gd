@@ -185,7 +185,7 @@ static func capacity_for(module_count: int, hull_type: String, bay_capacity: flo
 	# which is backwards: bays exist so a LIGHT harvester has an answer to a long
 	# haul without having to become a heavy one.
 	#
-	# Defaulted to 0.0 so the synthetic tests that call configure(1, "block_main_meridian_a")
+	# Defaulted to 0.0 so the synthetic tests that call configure(1, "brenntal_medium_a")
 	# keep their existing capacity exactly.
 	return maxi(1, int(round(
 		float(BASE_CAPACITY) * float(mods) * tier_mult + maxf(0.0, bay_capacity))))

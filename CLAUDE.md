@@ -155,11 +155,47 @@ cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --headless --editor --im
 
 ## Art Pipeline
 
-Hulls and parts are authored procedurally in Blender via `tools/blender/build_meshes.py`, not hand-modeled. Outputs:
-- `assets/models/hulls/*.glb` — one greebled chassis/foundation per hull entry
-- `assets/models/parts/*.glb` — barrels, breeches, drums, domes, missiles, wheels, legs, rings
+Everything is authored procedurally in Blender, not hand-modeled. **Two
+separate scripts, and the split matters:**
+
+| Script | Owns | Outputs |
+|---|---|---|
+| `tools/blender/build_vehicle_hulls.py` (+ `hull_forge.py`) | The 81 **vehicle hulls** — 8 manufacturers × 6 classes | `assets/models/hulls/*.glb` + matching `.json` sidecars (non-foundation) |
+| `tools/blender/build_meshes.py` | Parts, foundations, buildings, terrain props | `assets/models/parts/*.glb`, the 13 `is_foundation: true` hulls, buildings |
+
+`build_meshes.py`'s `generate_hulls()` is **retired and raises if called**. It
+authored through an axis helper with determinant −1 and then applied a second
+determinant −1 matrix *after* `recalc_face_normals`, so every hull it produced
+shipped inside out. Do not resurrect it; see
+[`prototype/docs/HULL_NAMING.md`](prototype/docs/HULL_NAMING.md) for the
+measured Blender↔Godot axis chain, the two winding checks, and the rule that
+**forward is local −Z**. Foundations and buildings are unaffected — they never
+went through that path.
 
 `visual_builder.gd` falls back to procedural primitives for any part not yet authored in Blender.
+
+```bash
+# Rebuild the vehicle hull catalogue, then reimport
+cd prototype && "/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" --background --python tools/blender/build_vehicle_hulls.py
+```
+
+Hull-specific gotcha when adding one: an element's **vertical extent must be a
+function of the hull's height alone**. Deriving it from width makes the
+`autofit()` envelope solve non-convergent, and `hull_forge.normalize()` raises
+rather than silently squashing the hull.
+
+**Orrin uses tumblehome** — the cross-section is wider at the bottom (full
+underside) and narrower at the top (`mass_w * tumblehome_frac`, default 0.80).
+The tumblehome slope is part of the outline, not a post-process.
+
+**Prominent greebles (masts, spines, barbettes) are integrated as
+cross-section peaks** for Orrin, Kestrel, Rackham, Calder and Pillar — each
+peak is a 4-vertex mesa bump on top of the chassis, active only in a small
+z range, with the peak vertices held in the outline at every z (collapsed
+to a flat segment on the deck when not active) so the cross-section point
+count stays constant for the loft. This kills the "floating detail" look
+that bolted-on `add_chamfered_box()` greebles used to leave behind on the
+drone tender, command car, prospector and similar hulls.
 
 ## Audio Pipeline
 

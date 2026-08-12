@@ -1,0 +1,28 @@
+{
+  "name": "Orrin Skulker",
+  "hp": 334.5,
+  "weight": 225.9,
+  "metal": 78,
+  "crystal": 16,
+  "size": [
+    2.6,
+    1.518,
+    4.1
+  ],
+  "color": [
+    0.451,
+    0.341,
+    0.259,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Orrin Collective",
+  "hull_class": "Scout"
+}

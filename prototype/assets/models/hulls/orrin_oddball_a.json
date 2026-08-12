@@ -1,0 +1,28 @@
+{
+  "name": "Orrin Crab",
+  "hp": 1160.3,
+  "weight": 845.2,
+  "metal": 285,
+  "crystal": 58,
+  "size": [
+    5.1,
+    2.277,
+    6.3
+  ],
+  "color": [
+    0.451,
+    0.341,
+    0.259,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Orrin Collective",
+  "hull_class": "Oddball"
+}

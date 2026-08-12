@@ -281,7 +281,7 @@ func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
 		# the visible mesh until some later full rebuild (FABLE_REVIEW.md 3.8).
 		var armor_thick = node.get_meta("armor_thickness") if node.has_meta("armor_thickness") else 1.0
 		var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
-		var hull_type = node.get_meta("type_id") if node.has_meta("type_id") else "block_main_meridian_a"
+		var hull_type = node.get_meta("type_id") if node.has_meta("type_id") else "brenntal_medium_a"
 		var mesh_inst = node.get_node_or_null("MeshInstance3D")
 		var phys_mesh = node.get_node_or_null("PhysicsMesh")
 		if mesh_inst and mesh_inst.mesh is BoxMesh:

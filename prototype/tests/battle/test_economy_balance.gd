@@ -91,7 +91,7 @@ func test_every_design_draws_the_same_rate_while_building() -> bool:
 func test_four_harvesters_meet_the_stated_target() -> bool:
 	print("Running Test Suite: Economy - 4 harvesters vs 1 and 2 production lines...")
 	var fsm = HarvesterFSMScript.new()
-	fsm.configure(1, "block_main_meridian_a")
+	fsm.configure(1, "brenntal_medium_a")
 
 	var capacity: float = float(fsm.capacity)
 	var cycles: float = ceil(capacity / float(fsm._chunk_size()))
@@ -135,13 +135,18 @@ func test_harvester_capacity_comes_from_the_design() -> bool:
 	var ok := true
 
 	var one = HarvesterFSMScript.new()
-	one.configure(1, "block_main_meridian_a")
+	one.configure(1, "brenntal_medium_a")
 	var two = HarvesterFSMScript.new()
-	two.configure(2, "block_main_meridian_a")
+	two.configure(2, "brenntal_medium_a")
 	var heavy = HarvesterFSMScript.new()
-	heavy.configure(1, "block_heavy_meridian_a")
+	# Was "block_heavy_meridian_a", a hull id that never shipped - the
+	# catalogue's heavy Meridian was "block_heavy_meridian", with no variant
+	# suffix. configure() fell back to the default hull, so `heavy` was a
+	# second copy of `one` and the tier assertion below could not pass. Named
+	# against a hull that actually exists now.
+	heavy.configure(1, "brenntal_heavy_d")
 	var light = HarvesterFSMScript.new()
-	light.configure(1, "block_scout_meridian_a")
+	light.configure(1, "kestrel_scout_a")
 
 	if two.capacity <= one.capacity:
 		print("  [FAIL] A second harvester module does not raise the hopper: %d vs %d"

@@ -1,0 +1,28 @@
+{
+  "name": "Kestrel Recon Fuselage",
+  "hp": 335.7,
+  "weight": 226.8,
+  "metal": 78,
+  "crystal": 16,
+  "size": [
+    2.5,
+    1.587,
+    4.1
+  ],
+  "color": [
+    0.717,
+    0.729,
+    0.749,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Kestrel Aeroworks",
+  "hull_class": "Scout"
+}

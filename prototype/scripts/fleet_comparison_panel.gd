@@ -131,31 +131,31 @@ func _get_wip_stats() -> Dictionary:
 		"hp": stat_calc.total_hp if "total_hp" in stat_calc else 0.0,
 		"weight": stat_calc.total_weight if "total_weight" in stat_calc else 0.0,
 		"dps": stat_calc.total_dps if "total_dps" in stat_calc else 0.0,
-		"metal": stat_calc.total_metal if "total_metal" in stat_calc else 0,
-		"crystal": stat_calc.total_crystal if "total_crystal" in stat_calc else 0,
-		"power": stat_calc.base_energy if "base_energy" in stat_calc else 0.0,
+		# No metal / crystal / power. Those read stat_calc.total_metal,
+		# .total_crystal and .base_energy, which are from an older implementation
+		# and have not existed on the Lab for a long time. The `in stat_calc`
+		# guards meant they resolved to 0 / 0 / 0.0 on every call instead of
+		# failing, so the panel showed a WIP design costing nothing and drawing
+		# no power, and the Metal delta badge was always minus the target's
+		# whole metal cost.
 	}
 
 func _get_target_stats(bp: Dictionary) -> Dictionary:
 	var stats = bp.get("stats", {})
 	var modules = bp.get("modules", [])
 	
-	# Estimate stats from blueprint data if not pre-cached
+	# Estimate stats from blueprint data if not pre-cached. Kept to the three
+	# the WIP side can actually supply - a column the other column cannot match
+	# is not a comparison.
 	var hp: float = float(stats.get("total_hp", 300.0))
 	var weight: float = float(stats.get("total_weight", 200.0))
 	var dps: float = float(stats.get("total_dps", 50.0))
-	var metal: int = int(stats.get("total_metal", 100))
-	var crystal: int = int(stats.get("total_crystal", 20))
-	var power: float = float(stats.get("base_energy", 50.0))
 
 	return {
 		"name": bp.get("name", "Saved Unit"),
 		"hp": hp,
 		"weight": weight,
 		"dps": dps,
-		"metal": metal,
-		"crystal": crystal,
-		"power": power,
 	}
 
 func _build_unit_column(title_text: String, s: Dictionary, title_color: Color) -> PanelContainer:
@@ -177,9 +177,6 @@ func _build_unit_column(title_text: String, s: Dictionary, title_color: Color) -
 	vbox.add_child(_make_stat_row("Health (HP)", "%.0f" % s.get("hp", 0.0)))
 	vbox.add_child(_make_stat_row("Total Mass", "%.1f kg" % s.get("weight", 0.0)))
 	vbox.add_child(_make_stat_row("Firepower (DPS)", "%.1f" % s.get("dps", 0.0)))
-	vbox.add_child(_make_stat_row("Metal Cost", "%d M" % s.get("metal", 0)))
-	vbox.add_child(_make_stat_row("Crystal Cost", "%d C" % s.get("crystal", 0)))
-	vbox.add_child(_make_stat_row("Base Power", "%.1f kW" % s.get("power", 0.0)))
 
 	return pc
 
@@ -214,12 +211,10 @@ func _build_delta_column(wip: Dictionary, target: Dictionary) -> PanelContainer:
 	var hp_delta = float(wip.get("hp", 0)) - float(target.get("hp", 0))
 	var mass_delta = float(wip.get("weight", 0)) - float(target.get("weight", 0))
 	var dps_delta = float(wip.get("dps", 0)) - float(target.get("dps", 0))
-	var metal_delta = int(wip.get("metal", 0)) - int(target.get("metal", 0))
 
 	vbox.add_child(_make_delta_badge("HP", hp_delta, "", true))
 	vbox.add_child(_make_delta_badge("Mass", mass_delta, "kg", false)) # Lighter mass is better
 	vbox.add_child(_make_delta_badge("DPS", dps_delta, "", true))
-	vbox.add_child(_make_delta_badge("Metal", metal_delta, "M", false))
 
 	return pc
 

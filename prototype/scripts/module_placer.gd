@@ -140,7 +140,7 @@ func _ready():
 			if not hull.has_meta("hull_scale"):
 				hull.set_meta("hull_scale", Vector3(1.0, 1.0, 1.0))
 			if not hull.has_meta("type_id"):
-				hull.set_meta("type_id", "block_main_meridian_a")
+				hull.set_meta("type_id", "brenntal_medium_a")
 			if not hull.has_meta("armor_material"):
 				hull.set_meta("armor_material", "hardened_steel")
 			if not hull.has_meta("armor_thickness"):
@@ -1055,7 +1055,7 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	# it. Measuring where the geometry ACTUALLY ends and lifting the hull by that
 	# is both simpler and correct for every type, including the seven new ones
 	# that never had a constant of their own.
-	var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "block_main_meridian_a"
+	var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "brenntal_medium_a"
 	# default_lift comes off the COLLIDER (which is now the fitted AABB, set
 	# by _place_hull_from_ui / update_hull_appearance), not the catalog entry.
 	# Same source every station position above is derived from, and the same
@@ -1433,7 +1433,7 @@ func update_hull_appearance():
 		phys_mesh.visible = false
 		hull.add_child(phys_mesh)
 
-	var type_id = hull.get_meta("type_id") if hull.has_meta("type_id") else "block_main_meridian_a"
+	var type_id = hull.get_meta("type_id") if hull.has_meta("type_id") else "brenntal_medium_a"
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	
 	var hull_scale = hull.get_meta("hull_scale") if hull.has_meta("hull_scale") else Vector3(1,1,1)

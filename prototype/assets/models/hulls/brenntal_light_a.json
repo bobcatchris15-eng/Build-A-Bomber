@@ -1,0 +1,28 @@
+{
+  "name": "Brenntal Casemate Gun",
+  "hp": 442.7,
+  "weight": 307.0,
+  "metal": 105,
+  "crystal": 22,
+  "size": [
+    3.2,
+    1.449,
+    5.1
+  ],
+  "color": [
+    0.298,
+    0.302,
+    0.322,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Brenntal Schwerbau",
+  "hull_class": "Light"
+}

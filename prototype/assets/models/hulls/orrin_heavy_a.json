@@ -1,0 +1,28 @@
+{
+  "name": "Orrin Wrecker",
+  "hp": 1571.5,
+  "weight": 1153.6,
+  "metal": 387,
+  "crystal": 78,
+  "size": [
+    4.9,
+    2.691,
+    7.7
+  ],
+  "color": [
+    0.451,
+    0.341,
+    0.259,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Orrin Collective",
+  "hull_class": "Heavy"
+}

@@ -8,31 +8,50 @@ var _action_ring
 
 func _init(p_lab: Node):
 	lab = p_lab
-	locomotion_tweaks = lab.locomotion_tweaks
-	size_container = lab.size_container
-	size_label = lab.size_label
-	size_slider = lab.size_slider
-	count_container = lab.count_container
-	count_slider = lab.count_slider
-	count_label = lab.count_label
-	size_label_base = lab.size_label_base
-	count_label_base = lab.count_label_base
-	tweak_canvas = lab.tweak_canvas
-	popup_name_label = lab.popup_name_label
-	popup_tweaks_container = lab.popup_tweaks_container
 
-var locomotion_tweaks
-var size_container
-var size_label
-var size_slider
-var count_container
-var count_slider
-var count_label
-var size_label_base
-var count_label_base
-var tweak_canvas
-var popup_name_label
-var popup_tweaks_container
+# --- Live read-throughs to `lab`, NOT cached copies -------------------------
+#
+# These were all snapshotted in _init(), and that was a real bug rather than a
+# style question. lab_document.gd constructs this manager at line ~605 of its
+# _ready(), but does not create tweak_canvas until ~903, popup_tweaks_container
+# until ~910, or popup_name_label until ~915. The snapshot therefore captured
+# null for those three and held it for the entire session, so every callout path
+# died on "Nonexistent function 'add_child' in base 'Nil'" - _add_callout()'s
+# tweak_canvas.add_child() and _clear_callouts()' step-2
+# popup_tweaks_container.add_child() both.
+#
+# A "call bind() after the UI exists" fix would work today and break the next
+# time _ready() is reordered. Reading through on every access cannot go stale.
+# They are deliberately getter-only: assigning to one is now a parse error,
+# which is the invariant these should have had all along.
+var locomotion_tweaks:
+	get: return lab.locomotion_tweaks
+var size_container:
+	get: return lab.size_container
+var size_label:
+	get: return lab.size_label
+var size_slider:
+	get: return lab.size_slider
+var count_container:
+	get: return lab.count_container
+var count_slider:
+	get: return lab.count_slider
+var count_label:
+	get: return lab.count_label
+var tweak_canvas:
+	get: return lab.tweak_canvas
+var popup_name_label:
+	get: return lab.popup_name_label
+var popup_tweaks_container:
+	get: return lab.popup_tweaks_container
+
+# This class's OWN state, not handles on lab-owned nodes: the per-drive-type
+# match blocks below assign them ("Wheel Size", "Tread Width", ...). They were
+# seeded from lab.* in _init, which only captured the Lab's placeholder and was
+# overwritten on the first selection - the Lab's own declarations were dead and
+# have been removed.
+var size_label_base := "Size"
+var count_label_base := "Count"
 func _open_action_ring(module: Node3D, designation: String) -> void:
 	_close_action_ring()
 	if tweak_canvas == null or module == null:
@@ -119,6 +138,10 @@ func _on_ring_action(action_id: String) -> void:
 			lab.lab_toolbar._on_delete_pressed()
 
 func _add_callout(module: Node3D, title: String, control: Control):
+	# Same guard as _clear_callouts(): reached from on_module_selected(), which
+	# the Lab can fire before its UI layer exists.
+	if not tweak_canvas or not popup_tweaks_container or control == null:
+		return
 	if control.get_parent():
 		control.reparent(tweak_canvas) # Temporarily avoid issues if it's already in the tree somewhere
 	var dir = lab._callout_dirs[lab._current_callout_idx % lab._callout_dirs.size()]
@@ -140,7 +163,10 @@ func _persistent_tweak_widgets() -> Array:
 		popup_name_label, lab.popup_stats_label, lab.popup_rotate_btn]
 
 func _clear_callouts():
-	if not tweak_canvas: return
+	# Both, not just tweak_canvas: lab_document.gd creates them seven lines
+	# apart, so there is a window where one exists and the other does not, and
+	# steps 2 and 3 below dereference popup_tweaks_container unconditionally.
+	if not tweak_canvas or not popup_tweaks_container: return
 
 	# STEP 1: reclaim every callout's control into the invisible stash BEFORE
 	# anything is freed.

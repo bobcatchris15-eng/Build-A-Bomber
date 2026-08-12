@@ -1,0 +1,28 @@
+{
+  "name": "Halvorsen Gunboat",
+  "hp": 409.1,
+  "weight": 281.8,
+  "metal": 97,
+  "crystal": 20,
+  "size": [
+    2.8,
+    1.587,
+    4.8
+  ],
+  "color": [
+    0.376,
+    0.435,
+    0.415,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Halvorsen Yard",
+  "hull_class": "Light"
+}

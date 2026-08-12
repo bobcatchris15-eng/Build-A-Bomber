@@ -26,33 +26,38 @@ const MOD_DIR = "user://mods/hulls"
 const REQUIRED_FIELDS = ["name", "hp", "weight", "metal", "crystal", "size", "color"]
 const NUMERIC_TYPES = [TYPE_INT, TYPE_FLOAT]
 
-# block_main_meridian_a is the post-refresh default hull (HULL_REFRESH_PLAN.md
-# §3.1: Block family, Main tonnage, Meridian manufacturer, variant A). The
-# legacy "block_main_meridian_a" is gone after PR 1, and the same 7+ call sites
-# (battle_unit.gd, battlefield.gd, blueprint_manager.gd, module_placer.gd,
-# stat_calculator.gd, enemy_ai.gd, skirmish.gd) that used to hardcode
-# "block_main_meridian_a" as their safe fallback now hardcode
-# "block_main_meridian_a" instead - it must always exist and always be
-# loadable. A moddable hull system can't let that guarantee depend on a
-# third-party-editable sidecar file never going missing/corrupt, so this
-# is a last-resort embedded copy of its own shipped sidecar
-# (assets/models/hulls/block_main_meridian_a.json) - only ever used if
-# that file is somehow missing or fails validation, which should never
-# happen in a normal install and is loud (push_error) specifically
-# because it indicates a broken installation, not a normal modding
-# scenario.
-const PROTECTED_DEFAULT_HULL_ID := "block_main_meridian"
+# brenntal_medium_a is the default hull: Brenntal Schwerbau, Medium class,
+# variant A - the plainest two-tier casemate in the catalogue, which is what a
+# fallback should be. The same 7+ call sites (battle_unit.gd, battlefield.gd,
+# blueprint_manager.gd, module_placer.gd, stat_calculator.gd, enemy_ai.gd,
+# skirmish.gd) that hardcode a safe fallback hull name this one, so it must
+# always exist and always be loadable. A moddable hull system can't let that
+# guarantee depend on a third-party-editable sidecar file never going
+# missing/corrupt, so this is a last-resort embedded copy of its own shipped
+# sidecar (assets/models/hulls/brenntal_medium_a.json) - only ever used if
+# that file is somehow missing or fails validation, which should never happen
+# in a normal install and is loud (push_error) specifically because it
+# indicates a broken installation, not a normal modding scenario.
+#
+# Keep the numbers below in sync with that sidecar by hand if it is
+# regenerated: tools/blender/build_vehicle_hulls.py derives them from the
+# hull's volume, so changing its design envelope changes these.
+const PROTECTED_DEFAULT_HULL_ID := "brenntal_medium_a"
 const PROTECTED_DEFAULT_HULL_FALLBACK = {
-	"name": "Block Main / Meridian A", "hp": 400.0, "weight": 250.0, "metal": 100, "crystal": 20,
-	# base_power (generation) tracks the shipped block_main_meridian_a.json
-	# sidecar, same as base_energy (storage) does. It is absent from
-	# REQUIRED_FIELDS below on purpose - a mod hull without it should load
-	# and generate nothing, not fail validation - but this fallback is a
-	# copy of a REAL hull, so it carries every field that hull actually
-	# has.
-	"dps": 0.0, "is_foundation": false, "base_energy": 70.0, "base_power": 5.6,
+	"name": "Brenntal Casemate Medium", "hp": 694.7, "weight": 496.0, "metal": 168, "crystal": 34,
+	# base_energy (storage) and base_power (generation) are both 0 across the
+	# whole vehicle catalogue - hulls store and generate nothing, and a design
+	# that wants energy weapons carries a generator module. base_power is
+	# absent from REQUIRED_FIELDS below on purpose: a mod hull without it
+	# should load and generate nothing, not fail validation.
+	"dps": 0.0, "is_foundation": false, "base_energy": 0.0, "base_power": 0.0,
 	"base_vision": 20.0,
 	"draught": 0.5, "underside_y_bias": 0.0, "turreted_capable": true, "category": "hull",
+	# Authored nose-at--Z with the AABB already equal to `size`, so the
+	# orientation search must not run - see build_vehicle_hulls.py's
+	# write_sidecar().
+	"visual_yaw_offset_deg": 0.0, "visual_pitch_offset_deg": 0.0,
+	"visual_roll_offset_deg": 0.0,
 }
 
 static var _cache: Dictionary = {}
@@ -235,6 +240,19 @@ static func _validate_and_default(raw: Dictionary, source_path: String):
 		"turreted_capable": bool(raw.get("turreted_capable", true)),
 	}
 
+	# Catalogue provenance, written by tools/blender/build_vehicle_hulls.py.
+	# Copied through explicitly because this dict is rebuilt field by field and
+	# silently drops anything without a line of its own.
+	#
+	# "hull_class" is load-bearing, not cosmetic: ModuleCatalog's
+	# get_hull_size_tier() prefers it over the weight breakpoints, so a hull
+	# that declares "Medium" lands in the medium production tier and gets the
+	# medium harvester-hopper multiplier regardless of how the weight formula
+	# drifts. Optional - a mod hull that omits it falls back to weight.
+	for passthrough in ["manufacturer", "hull_class"]:
+		if raw.has(passthrough) and typeof(raw[passthrough]) == TYPE_STRING:
+			out[passthrough] = raw[passthrough]
+
 	# A hull whose shape IS a plain primitive declares it here instead of
 	# shipping a .glb (see MeshAssetLoader.get_hull_mesh). "box" | "sphere" |
 	# "cylinder", built at unit size and stretched to the hull's own `size` by
@@ -261,6 +279,8 @@ static func _ensure_default_hull_protected() -> void:
 		return
 	push_error("HullLoader: %s sidecar is missing or invalid at %s/%s.json - falling back to an embedded protected default. This should never happen in a normal install; 7+ scripts hardcode %s as their safe fallback hull." % [PROTECTED_DEFAULT_HULL_ID, BUILTIN_DIR, PROTECTED_DEFAULT_HULL_ID, PROTECTED_DEFAULT_HULL_ID])
 	var fallback = PROTECTED_DEFAULT_HULL_FALLBACK.duplicate()
-	fallback["size"] = Vector3(4.0, 1.0, 6.0)
-	fallback["color"] = Color(0.745098054409027, 0.745098054409027, 0.745098054409027, 1.0)
+	# Typed values the dictionary literal above can't hold. Both mirror
+	# assets/models/hulls/brenntal_medium_a.json.
+	fallback["size"] = Vector3(3.6, 1.4, 5.9)
+	fallback["color"] = Color(0.298, 0.302, 0.322, 1.0)
 	_cache[PROTECTED_DEFAULT_HULL_ID] = fallback

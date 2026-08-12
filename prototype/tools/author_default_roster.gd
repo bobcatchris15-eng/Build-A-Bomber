@@ -44,7 +44,7 @@ const ROSTER := [
 	{
 		"name": "GravelGulper No. 7",
 		"role": "resource gathering",
-		"hull": "block_main_meridian_a",
+		"hull": "brenntal_medium_a",
 		"loco": "wheels",
 		# num_axles is TOTAL WHEEL STATIONS, not axle pairs: locomotion_layout.gd's
 		# wheels spec is SIDE_PAIRS, so 8 gives four stations a side. It is also the
@@ -65,7 +65,7 @@ const ROSTER := [
 	{
 		"name": "PatchWagon Mk IV",
 		"role": "field repair",
-		"hull": "block_main_meridian_a",
+		"hull": "brenntal_medium_a",
 		"loco": "wheels",
 		"loco_settings": {"wheel_size": 1.0, "num_axles": 4, "wheels_per_axle": 2},
 		"armor": "hardened_steel", "thickness": 1.0,
@@ -99,7 +99,7 @@ const ROSTER := [
 	{
 		"name": "SkySwatter No. 9",
 		"role": "anti-air",
-		"hull": "block_scout_meridian_a",
+		"hull": "kestrel_scout_a",
 		"loco": "wheels",
 		# 4, not 2. Two stations is ONE axle - a vehicle balanced on a single pair of
 		# wheels - and it is below stat_calculator.gd's count_slider.min_value of 4,
@@ -115,7 +115,7 @@ const ROSTER := [
 	{
 		"name": "LobToad M77",
 		"role": "artillery",
-		"hull": "block_main_meridian_a",
+		"hull": "brenntal_medium_a",
 		"loco": "tracked_treads",
 		"loco_settings": {"tread_width": 1.3},
 		"armor": "hardened_steel", "thickness": 1.1,

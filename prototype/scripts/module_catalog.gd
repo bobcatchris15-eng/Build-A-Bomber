@@ -1507,7 +1507,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# below): a light, high-speed wheeled chassis handles poorly
 			# overloaded - a real overloaded car sags and struggles - so this
 			# tolerates less excess weight than the heavier ground types.
-			"base_weight_capacity": 200.0,
+			"base_weight_capacity": 360.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1535,7 +1535,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			# Heaviest, toughest ground locomotor - literally what tanks use
 			# to carry heavy armor. Highest ground-type capacity.
-			"base_weight_capacity": 600.0,
+			"base_weight_capacity": 1080.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1563,7 +1563,7 @@ static func _build_catalog_literal() -> Dictionary:
 			# Real helicopters have a notoriously strict max-takeoff-weight -
 			# rotary lift is the most weight-sensitive locomotion in the
 			# roster, so this gets the lowest capacity of all.
-			"base_weight_capacity": 140.0,
+			"base_weight_capacity": 252.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1590,7 +1590,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			# Ground-effect lift is weight-sensitive like a real hovercraft,
 			# though less extreme than a helicopter's rotor lift.
-			"base_weight_capacity": 155.0,
+			"base_weight_capacity": 279.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1616,7 +1616,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			# A mech walker's legs are built to bear real structural load,
 			# closer to tracked_treads than to a wheeled chassis.
-			"base_weight_capacity": 260.0,
+			"base_weight_capacity": 468.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1642,7 +1642,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 60,
 			"crystal": 20,
 			"dps": 0.0,
-			"base_weight_capacity": 240.0,
+			"base_weight_capacity": 432.0,
 			# 22.0, not the original 18.0 (2026-08-08 speed pass): still the
 			# roster's outright top speed, widened along with everything else
 			# to keep the gap over wheels/hover meaningful.
@@ -1660,7 +1660,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 45,
 			"crystal": 25,
 			"dps": 0.0,
-			"base_weight_capacity": 200.0,
+			"base_weight_capacity": 360.0,
 			# 10.5, not 9.0 (2026-08-08 speed pass): part of the general lift.
 			"base_top_speed": 10.5,
 			"thrust_coefficient": 120.0,
@@ -1678,7 +1678,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 25,
 			"crystal": 15,
 			"dps": 0.0,
-			"base_weight_capacity": 700.0,
+			"base_weight_capacity": 1260.0,
 			# 4.5, not 4.0 (2026-08-08 speed pass): the smallest bump in the
 			# roster, on purpose - this stays the floor.
 			"base_top_speed": 4.5,
@@ -1715,7 +1715,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"dps": 0.0,
 			# Between wheels (350) and tracked_treads (700), nearer the middle
 			# than either - that IS the pitch.
-			"base_weight_capacity": 400.0,
+			"base_weight_capacity": 720.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1745,7 +1745,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 45,
 			"crystal": 5,
 			"dps": 0.0,
-			"base_weight_capacity": 450.0,
+			"base_weight_capacity": 810.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1785,7 +1785,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 35,
 			"crystal": 20,
 			"dps": 0.0,
-			"base_weight_capacity": 620.0,
+			"base_weight_capacity": 1116.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1816,7 +1816,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 20,
 			"crystal": 75,
 			"dps": 0.0,
-			"base_weight_capacity": 160.0,
+			"base_weight_capacity": 288.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1846,7 +1846,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 25,
 			"crystal": 0,
 			"dps": 0.0,
-			"base_weight_capacity": 220.0,
+			"base_weight_capacity": 396.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -1885,7 +1885,7 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 55,
 			"crystal": 15,
 			"dps": 0.0,
-			"base_weight_capacity": 450.0,
+			"base_weight_capacity": 810.0,
 			# Base top speed (Chris: "each locomotor should also have a base
 			# top speed"): the hard ceiling on how fast this chassis can be
 			# driven, however much thrust is bolted to it. Replaces the single
@@ -3155,7 +3155,7 @@ const LINEAR_SCALE_WEAPON_TWEAKS = ["caliber", "barrel_length", "barrel_count", 
 #             If a .glb is re-exported at a different size, THIS NUMBER MUST
 #             BE REMEASURED - a stale value silently changes ride height.
 #   *_mult    Applied on top of the "legs" entry's own weight (80),
-#             base_weight_capacity (260) and base_top_speed (6.5).
+#             base_weight_capacity (468) and base_top_speed (6.5).
 #
 # The spread is a starting shape to play against, not a balance claim: heavy
 # gear carries more and walks slower, light gear the reverse. Crawler is the
@@ -3235,9 +3235,19 @@ static func get_leg_part_name(leg_id: String) -> String:
 
 # Weight capacity fallback for any locomotion type_id missing its own
 # "base_weight_capacity" entry - a reasonable middle ground between the
-# most weight-sensitive type (helicopter_rotors, 140) and the most
-# tolerant (air_cushion_skirt, 620).
-const BASE_WEIGHT_CAPACITY_DEFAULT: float = 400.0
+# most weight-sensitive type (helicopter_rotors, 252) and the most
+# tolerant (buoyant_envelope, 1260).
+#
+# 2026-08-12: every base_weight_capacity in this file, and this default, were
+# multiplied by 1.8. The 60-hull catalogue that replaced the old one is
+# substantially heavier - the baseline medium chassis went from 293 to 496, and
+# the lightest hull in the game from 104 to 197 - so drives tuned against the
+# old weights left most designs overloaded before a single weapon was mounted.
+# A uniform factor was used deliberately: the RELATIVE spread between drive
+# types is tuned balance (heavy gear carries more and moves slower, light gear
+# the reverse) and scaling everything by the same number lifts the band without
+# disturbing any of those tradeoffs.
+const BASE_WEIGHT_CAPACITY_DEFAULT: float = 720.0
 
 # Per-locomotor-type weight capacity (task: "make the overall vehicle
 # Weight stat actually matter" - build a formula, per locomotor type, for
@@ -3445,16 +3455,41 @@ static func get_hull_draught(hull_type_id: String) -> float:
 # shipyard/airfield idea. Foundations (pillbox/tower/fortress_wall) return
 # "" - static defenses are built directly via the Armory placement flow,
 # never queued from a manufactory at all, so a tier is meaningless for them.
-# Breakpoints chosen to split the current 12 mobile hulls into even
-# (4/4/4) groups - see DECISIONS_NEEDED.md for the exact per-hull mapping
-# and reasoning.
-const HULL_TIER_LIGHT_MAX_WEIGHT: float = 150.0
-const HULL_TIER_MEDIUM_MAX_WEIGHT: float = 400.0
+# The tier comes from the hull's DECLARED class when it has one, and only
+# falls back to weight breakpoints when it doesn't.
+#
+# Weight alone used to decide it, with breakpoints picked to split a
+# 12-mobile-hull catalogue into even 4/4/4 groups. That catalogue is gone, and
+# the breakpoints did not survive it: every hull in the current 60-hull
+# catalogue weighs more than the old 150 "light" ceiling (the lightest, a
+# Tallow Runabout, is 197), so nothing would have been light and almost
+# everything would have been heavy. The concrete symptom was
+# brenntal_medium_a - the catalogue's own baseline medium - tiering as HEAVY
+# and handing every default harvester a 1.5x hopper.
+#
+# Deriving from hull_class instead makes the mapping legible and immune to the
+# stat formula drifting: build_vehicle_hulls.py writes the class into every
+# sidecar, and the six classes collapse onto the three production tiers below.
+# Transports and oddballs sit in "heavy" because both are big-chassis hulls -
+# the lightest transport still outweighs every medium.
+const HULL_TIER_BY_CLASS := {
+	"scout": "light", "light": "light",
+	"medium": "medium",
+	"heavy": "heavy", "transport": "heavy", "oddball": "heavy",
+}
+# Fallback only, for mod hulls that declare no class. Recalibrated to the
+# current catalogue's weight distribution: mediums run 451-666, and the
+# heaviest light-class hull is 352.
+const HULL_TIER_LIGHT_MAX_WEIGHT: float = 400.0
+const HULL_TIER_MEDIUM_MAX_WEIGHT: float = 690.0
 
 static func get_hull_size_tier(hull_type_id: String) -> String:
 	var data = get_module_data(hull_type_id)
 	if data.get("is_foundation", false):
 		return ""
+	var declared: String = str(data.get("hull_class", "")).to_lower()
+	if HULL_TIER_BY_CLASS.has(declared):
+		return HULL_TIER_BY_CLASS[declared]
 	var weight = data.get("weight", 0.0)
 	if weight <= HULL_TIER_LIGHT_MAX_WEIGHT:
 		return "light"

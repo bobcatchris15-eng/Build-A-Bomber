@@ -1,0 +1,28 @@
+{
+  "name": "Brenntal Casemate Medium",
+  "hp": 694.7,
+  "weight": 496.0,
+  "metal": 168,
+  "crystal": 34,
+  "size": [
+    3.6,
+    1.932,
+    5.9
+  ],
+  "color": [
+    0.298,
+    0.302,
+    0.322,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Brenntal Schwerbau",
+  "hull_class": "Medium"
+}

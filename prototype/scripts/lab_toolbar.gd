@@ -13,41 +13,69 @@ var lab: Node
 
 func _init(p_lab: Node):
 	lab = p_lab
-	save_button = lab.save_button
-	test_button = lab.test_button
-	library_button = lab.library_button
-	delete_button = lab.delete_button
-	blueprint_name_edit = lab.blueprint_name_edit
-	_undo_btn = lab._undo_btn
-	_redo_btn = lab._redo_btn
-	_mirror_icon = lab._mirror_icon
-	mirror_checkbox = lab.mirror_checkbox
-	_name_roll_button = lab._name_roll_button
-	toolbar = lab.toolbar
-	
-	_slot_hull_label = lab._slot_hull_label
-	_slot_parts_label = lab._slot_parts_label
-	_slot_cost_label = lab._slot_cost_label
-	hull_spec_btn = lab.hull_spec_btn
-	_rail_vbox = lab._rail_vbox
 
-var save_button
-var test_button
-var library_button
-var delete_button
-var blueprint_name_edit
+# --- Live read-throughs to `lab` (nodes the LAB owns) -----------------------
+#
+# These were snapshotted in _init(), and for hull_spec_btn that was a silent
+# bug. lab_document.gd constructs this toolbar at line ~604 of its _ready() but
+# does not create hull_spec_btn until ~890, so the snapshot captured null. The
+# reparent at _build_row()'s "if hull_spec_btn: hull_spec_btn.reparent(row)" is
+# guarded, so nothing crashed - the HULL SPECIFICATION button just never moved
+# out of the right-hand rail into the top toolbar, which is exactly where
+# lab_document.gd's own comment at that line says it belongs.
+#
+# Reading through on every access cannot go stale however _ready() is ordered.
+# Getter-only on purpose: these belong to the Lab, and assigning to one here
+# would write the toolbar's private copy while the Lab's stayed null - which is
+# the failure mode the plain vars below still have to be careful about.
+var save_button:
+	get: return lab.save_button
+var test_button:
+	get: return lab.test_button
+var library_button:
+	get: return lab.library_button
+var delete_button:
+	get: return lab.delete_button
+var blueprint_name_edit:
+	get: return lab.blueprint_name_edit
+var mirror_checkbox:
+	get: return lab.mirror_checkbox
+var hull_spec_btn:
+	get: return lab.hull_spec_btn
+var _rail_vbox:
+	get: return lab._rail_vbox
+
+# --- Built here, READ by the Lab: proxies, so there is one instance ---------
+#
+# This class creates the three info slots (_build_row's lab._info_slot calls)
+# but lab_document.gd is what updates their text, in sync_hull_ui() at
+# lines 1239-1254. Those used to be two separate variables: the snapshot in
+# _init() copied the Lab's null, this class then overwrote its OWN copy with the
+# real Label, and the Lab's stayed null forever. Its update path is written
+# `if _slot_hull_label: _slot_hull_label.text = ...`, so it silently skipped and
+# the HULL / PARTS / COST readout sat on "-" for the whole session.
+#
+# A getter AND a setter, unlike the read-only block above: the write has to
+# reach the Lab, because the Lab is the consumer.
+var _slot_hull_label:
+	get: return lab._slot_hull_label
+	set(v): lab._slot_hull_label = v
+var _slot_parts_label:
+	get: return lab._slot_parts_label
+	set(v): lab._slot_parts_label = v
+var _slot_cost_label:
+	get: return lab._slot_cost_label
+	set(v): lab._slot_cost_label = v
+
+# --- The toolbar's OWN widgets ---------------------------------------------
+# Built by this class and read by nothing else, so a private copy is correct.
+# They were also being seeded from `lab.*` in _init, which was meaningless - the
+# Lab holds nothing for them at that point and this class overwrites them.
 var _undo_btn
 var _redo_btn
 var _mirror_icon
-var mirror_checkbox
 var _name_roll_button
 var toolbar
-
-var _slot_hull_label
-var _slot_parts_label
-var _slot_cost_label
-var hull_spec_btn
-var _rail_vbox
 
 func _push_undo():
 	var root = lab.get_node_or_null("/root/MainLab")
@@ -263,11 +291,18 @@ func _build_toolbar() -> void:
 	
 	row.add_child(VSeparator.new())
 
+	# No "VIEW: " prefix on the items. An OptionButton's minimum width is set by
+	# its LONGEST item, and every item repeating the control's own purpose bought
+	# ~50px of nothing. That mattered once hull_spec_btn started reaching this row
+	# (it used to be silently stranded in the rail, see the read-throughs at the
+	# top of this file): the row's combined minimum hit 1936px against a 1920
+	# viewport and tripped the UI overflow audit. The tooltip carries the noun.
 	var view_mode_btn = OptionButton.new()
-	view_mode_btn.add_item("VIEW: DEFAULT", 0)
-	view_mode_btn.add_item("VIEW: WIREFRAME", 1)
-	view_mode_btn.add_item("VIEW: XRAY", 2)
-	view_mode_btn.add_item("VIEW: STRUCTURAL", 3)
+	view_mode_btn.tooltip_text = "Viewport render mode"
+	view_mode_btn.add_item("DEFAULT", 0)
+	view_mode_btn.add_item("WIREFRAME", 1)
+	view_mode_btn.add_item("XRAY", 2)
+	view_mode_btn.add_item("STRUCTURAL", 3)
 	var LabViewModesScript = preload("res://scripts/lab_view_modes.gd")
 	var lab_view_modes = LabViewModesScript.new(lab)
 	view_mode_btn.item_selected.connect(func(idx: int):
@@ -384,22 +419,20 @@ func _on_auto_armor_pressed():
 	var result = wfc.solve()
 	
 	var VisualBuilder = preload("res://scripts/visual_builder.gd")
-	var ModuleCatalog = preload("res://scripts/module_catalog.gd")
-	
+
 	for coord in result:
-		var tile_id = result[coord]
 		var type_id = "armor_plating"
-		
-		# If the player already placed armor near here, we might want to skip, 
+
+		# If the player already placed armor near here, we might want to skip,
 		# but for this prototype, we'll just spawn them all.
+		# build_module() already sets both "type_id" and a "module_data"
+		# ModuleData object. This used to overwrite the latter with
+		# get_module_data()'s raw Dictionary, which design_stats.analyze()
+		# cannot read - it accesses the payload as `data.type_id`, and a
+		# Dictionary does not answer to property access - so every plate this
+		# autofill placed was silently absent from the design's stats.
 		var module = VisualBuilder.build_module(type_id)
-		
 		module.position = Vector3(coord.x * cell_size, coord.y * cell_size + cell_size * 0.5, coord.z * cell_size)
-		
-		# Give it the standard stats payload so it works like a placed module
-		module.set_meta("module_data", ModuleCatalog.get_module_data(type_id))
-		module.set_meta("type_id", type_id)
-		
 		hull.add_child(module)
 		
 	# Refresh UI stats and visually update

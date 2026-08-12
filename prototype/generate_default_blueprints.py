@@ -37,7 +37,7 @@ units = [
     {
         "id": "bp_default_light_tank",
         "name": "M22 Poodle Light Tank",
-        "hull_type": "block_scout_meridian_a",
+        "hull_type": "kestrel_scout_a",
         "locomotion_type": "tracked_treads",
         "locomotion_settings": {"tread_width": 1.0},
         "weapons": [
@@ -47,7 +47,7 @@ units = [
     {
         "id": "bp_default_medium_tank",
         "name": "M4 Sherman-Rex Medium Tank",
-        "hull_type": "block_main_meridian_a",
+        "hull_type": "brenntal_medium_a",
         "locomotion_type": "tracked_treads",
         "locomotion_settings": {"tread_width": 1.2},
         "weapons": [
@@ -78,7 +78,7 @@ units = [
     {
         "id": "bp_default_anti_air",
         "name": "ZSU-44 Sky-Swatter",
-        "hull_type": "block_main_meridian_a",
+        "hull_type": "brenntal_medium_a",
         "locomotion_type": "wheels",
         "locomotion_settings": {"num_axles": 4, "wheel_size": 1.2, "wheels_per_axle": 2},
         "weapons": [
@@ -88,7 +88,7 @@ units = [
     {
         "id": "bp_default_artillery",
         "name": "M88 Boom-Lobber",
-        "hull_type": "block_main_meridian_a",
+        "hull_type": "brenntal_medium_a",
         "locomotion_type": "tracked_treads",
         "locomotion_settings": {"tread_width": 1.2},
         "weapons": [
@@ -109,7 +109,7 @@ units = [
     {
         "id": "bp_default_attack_chopper",
         "name": "AH-66 Whirly-Dirge",
-        "hull_type": "block_main_meridian_a",
+        "hull_type": "brenntal_medium_a",
         "locomotion_type": "helicopter_rotors",
         "locomotion_settings": {"size": 1.5, "count": 4},
         "weapons": [

@@ -176,8 +176,8 @@ const LOCKED_TYPES = [
 # same function the Design Lab sidebar and battle_unit.gd use.
 const TARGET_HULLS = [
 	{"hull": "wedge_scout_meridian_a", "thickness": 0.6},
-	{"hull": "block_scout_meridian_a", "thickness": 1.0},
-	{"hull": "block_main_meridian_a", "thickness": 1.4},
+	{"hull": "kestrel_scout_a", "thickness": 1.0},
+	{"hull": "brenntal_medium_a", "thickness": 1.4},
 	{"hull": "block_heavy_meridian_a", "thickness": 2.0},
 ]
 const TARGET_MATERIALS = ["hardened_steel", "reactive_armor", "ablative_ceramic", "energy_shielding"]

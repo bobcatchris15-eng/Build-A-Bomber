@@ -1,0 +1,28 @@
+{
+  "name": "Brenntal Assault Gun",
+  "hp": 1273.1,
+  "weight": 929.9,
+  "metal": 313,
+  "crystal": 63,
+  "size": [
+    4.5,
+    2.277,
+    7.9
+  ],
+  "color": [
+    0.298,
+    0.302,
+    0.322,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Brenntal Schwerbau",
+  "hull_class": "Heavy"
+}

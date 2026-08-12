@@ -189,7 +189,7 @@ func test_real_unit_actually_converges_toward_a_move_order_on_a_real_map() -> bo
 	root.add_child(unit)
 	# A REAL bundled design from the match's own roster, not a hand-rolled
 	# minimal blueprint - a first version of this test used {"hull_type":
-	# "block_main_meridian_a", "modules": [], "locomotion": {...}} directly and got
+	# "brenntal_medium_a", "modules": [], "locomotion": {...}} directly and got
 	# move_speed=0.0 (Drivetrain.analyze() reported has_locomotion=false),
 	# which turned out to be an artifact of that skeletal blueprint missing
 	# whatever the assembly pipeline actually needs, not a world_scale bug -

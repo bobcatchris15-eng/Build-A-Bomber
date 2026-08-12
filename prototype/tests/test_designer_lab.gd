@@ -495,7 +495,7 @@ func test_undo_redo() -> bool:
 	placer.add_child(bm)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("block_main_meridian")
+	placer._place_hull_from_ui("brenntal_medium_a")
 	await tree.process_frame
 
 	if placer.can_undo():
@@ -635,7 +635,7 @@ func test_free_rotation_ring() -> bool:
 	root.add_child(placer)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("block_main_meridian")
+	placer._place_hull_from_ui("brenntal_medium_a")
 	await tree.process_frame
 	placer._place_weapon_from_ui("basic_cannon", Vector3(1.0, 0.5, 0.0), Vector3.UP)
 	await tree.process_frame
@@ -697,7 +697,7 @@ func test_angled_pintle_mount() -> bool:
 	var ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 
 	# Pure function check first.
-	if ModuleCatalogScript.get_mount_style("rotary_cannon", "block_scout_meridian") != "pintle":
+	if ModuleCatalogScript.get_mount_style("rotary_cannon", "kestrel_scout_a") != "pintle":
 		print("  [FAIL] rotary_cannon should resolve to pintle")
 		return false
 
@@ -718,7 +718,7 @@ func test_angled_pintle_mount() -> bool:
 	placer.add_child(bm)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("block_scout_meridian")
+	placer._place_hull_from_ui("kestrel_scout_a")
 	await tree.process_frame
 
 	var glacis_normal = Vector3(0, 0.7, -0.7).normalized()
@@ -908,7 +908,7 @@ func test_blueprint_roster_gating() -> bool:
 	var named_id = "test_named_%d" % (randi() % 1000000)
 	var unnamed_id = "test_unnamed_%d" % (randi() % 1000000)
 	var base_bp = {
-		"version": 2.0, "hull_type": "block_main_meridian_a",
+		"version": 2.0, "hull_type": "brenntal_medium_a",
 		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
 		"armor_material": "hardened_steel", "armor_thickness": 1.0,
 		"faction": "industrialists",
@@ -1401,7 +1401,7 @@ func _alpha_weapon(type_id: String, tweaks: Dictionary) -> ModuleData:
 
 func _alpha_hull(weapons: Array) -> Node3D:
 	var hull := Node3D.new()
-	hull.set_meta("type_id", "block_main_meridian_a")
+	hull.set_meta("type_id", "brenntal_medium_a")
 	hull.set_meta("armor_material", "hardened_steel")
 	hull.set_meta("armor_thickness", 1.0)
 	hull.set_meta("hull_scale", Vector3.ONE)
@@ -1613,40 +1613,43 @@ func test_hull_collider_matches_visual_aabb() -> bool:
 	await tree.process_frame
 	await tree.process_frame
 
-	# The roster is split into two groups by how much the catalog box
-	# disagrees with the actual mesh:
+	# The bug this exists to catch: the collider was built from the CATALOG
+	# box while the visible mesh was smaller, so modules dropped onto the hull
+	# floated off the silhouette. The fix routes both through
+	# get_hull_fitted_aabb(), and what is asserted below is that the collider,
+	# the base_hull_size meta and that helper all agree.
 	#
-	#   "shaped"  - hulls the SDF / marching-cubes bake, or hulls with
-	#               tapers / curves, whose fitted AABB is noticeably smaller
-	#               than the catalog box on at least one axis. These are
-	#               where the bug showed up: the catalog box was wider or
-	#               taller than the visible mesh, and modules dropped onto
-	#               it floated off the silhouette.
+	# This used to split the roster into "shaped" hulls (fitted AABB smaller
+	# than the catalog box) and "cube" hulls (primitive_shape, stretched to the
+	# catalog box exactly). Both halves are gone:
 	#
-	#   "cube"    - the primitive-shaped hulls whose visual mesh is built
-	#               at unit size and then stretched to the catalog size
-	#               exactly. Fitted AABB == catalog box. The check here is
-	#               that the refactor didn't accidentally break them - if
-	#               _place_hull_from_ui() dropped the primitive path, the
-	#               collider would be zero.
+	#   - The catalogue no longer contains a hull whose AABB disagrees with its
+	#     catalog size. build_vehicle_hulls.py normalizes every hull onto its
+	#     declared envelope and writes that same envelope into the sidecar, so
+	#     the two agree BY CONSTRUCTION. The old "shaped" group could only be
+	#     re-populated by re-introducing the mismatch the refactor removed.
+	#   - "the_cube" and "the_rod" never shipped. No primitive_shape hull has
+	#     ever had a sidecar, so those two rows were asserting against hull ids
+	#     that resolve to nothing, and the zero-AABB check below failed on them
+	#     every run.
 	#
-	# Both groups must produce a collider whose size matches the visual
-	# mesh's AABB, within rounding noise. The catalog value is the wrong
-	# answer for the shaped group; it is the right answer for the cube
-	# group.
-	var shaped_hulls: Array = [
-		"block_main_meridian_a",         # catalog [3, 1.8, 5.5]; .glb authored along X
-		"bunker_main_meridian",  # short and wide, the "fits in a box" archetype
-	]
-	var cube_hulls: Array = [
-		"the_cube",
-		"the_rod",
+	# So the roster is now just a spread of real hulls whose meshes stress the
+	# fitting differently: a solid box, a hull with outboard ledges, one built
+	# from two disjoint volumes, one that is mostly open air inside its box, an
+	# asymmetric one, and a foundation.
+	var sample_hulls: Array = [
+		"brenntal_medium_a",     # stacked orthogonal blocks, fills its box
+		"halvorsen_heavy_c",     # chine section + full-length sponson ledges
+		"kestrel_oddball_a",     # twin tail booms - two disjoint volumes
+		"tallow_transport_a",    # open spaceframe, mostly air inside its box
+		"orrin_oddball_a",       # deliberately asymmetric, off-centre mass
+		"bunker_main_meridian",  # foundation, short and wide
 	]
 
 	# Each hull is sampled twice: once via _place_hull_from_ui (the Lab
 	# path) and once via BlueprintManager.reconstruct_vehicle (the load
 	# path). Both must produce the same fitted AABB for the same hull type.
-	for type_id in shaped_hulls + cube_hulls:
+	for type_id in sample_hulls:
 		var catalog_data: Dictionary = ModuleCatalog.get_module_data(type_id)
 		if catalog_data.is_empty():
 			print("  [FAIL] Catalog has no entry for '%s' (skip in this test)." % type_id)
@@ -1664,29 +1667,18 @@ func test_hull_collider_matches_visual_aabb() -> bool:
 			return false
 
 		var catalog_size: Vector3 = catalog_data.get("size", Vector3.ONE)
-		# For SHAPED hulls, the fitted AABB must differ noticeably from the
-		# catalog box on at least one axis. If it doesn't, the catalog
-		# entries here have drifted toward the mesh's real extents and the
-		# test no longer covers the bug it was written for - re-pick hulls.
-		if type_id in shaped_hulls:
-			var any_axis_diff := false
-			for axis in ["x", "y", "z"]:
-				if absf(visual_aabb.size[axis] - catalog_size[axis]) > 0.05 * maxf(catalog_size[axis], 1.0):
-					any_axis_diff = true
-					break
-			if not any_axis_diff:
-				print("  [WARN] %s: fitted AABB (%s) matches catalog size (%s) - this hull is no longer a 'shaped' test case. Re-pick." % [
+		# Every vehicle hull is authored so its mesh AABB IS its catalog size.
+		# A drift here means either the .glb and its sidecar were regenerated
+		# out of step, or the orientation search kicked in and rotated the
+		# mesh - both are real problems, so this is a hard failure rather than
+		# the warning it used to be. Foundations are exempt: they come from
+		# build_meshes.py's own pipeline, which never made that guarantee.
+		if not catalog_data.get("is_foundation", false):
+			if visual_aabb.size.distance_to(catalog_size) > 0.05:
+				print("  [FAIL] %s: fitted AABB %s != catalog size %s - the .glb and its sidecar disagree." % [
 					type_id, visual_aabb.size, catalog_size])
-		# For CUBE hulls, the fitted AABB must match the catalog box. The
-		# primitive-shape path stretches a unit BoxMesh to catalog_size, so
-		# they are the same by construction. This is an info check, not a
-		# hard fail - if it ever trips it means the primitive path
-		# regressed, which the agreement check below would also catch.
-		if type_id in cube_hulls:
-			for axis in ["x", "y", "z"]:
-				if absf(visual_aabb.size[axis] - catalog_size[axis]) > 0.01:
-					print("  [WARN] %s is a primitive hull but fitted AABB (%s) doesn't match catalog size (%s) - this is informative, the collider agreement below is the real check." % [
-						type_id, visual_aabb.size, catalog_size])
+				placer.queue_free()
+				return false
 
 		# Drive the actual _place_hull_from_ui path: the collider's size
 		# must equal the visual AABB, and the base_hull_size meta must
@@ -1716,17 +1708,6 @@ func test_hull_collider_matches_visual_aabb() -> bool:
 			print("  [FAIL] %s: base_hull_size meta %s != fitted AABB %s." % [type_id, meta_size, visual_aabb.size])
 			placer.queue_free()
 			return false
-		# And the collider must NOT equal the catalog size on a shaped hull
-		# (it would have, before the refactor). This is a SOFT warning,
-		# not a hard fail: some 'shaped' hulls may have been re-authored
-		# at the catalog size in sidecar updates, in which case the
-		# fitted AABB and the catalog size agree - the test still covers
-		# them via the agreement check above, but the catalog-diff warning
-		# flags when a future hull migrates and the test should re-pick.
-		if type_id in shaped_hulls:
-			if col_size.distance_to(catalog_size) < 0.01:
-				print("  [WARN] %s: collider matches catalog size %s - this hull is no longer a 'shaped' test case (the refactor still covered it via the agreement check)." % [type_id, catalog_size])
-
 		# Hull must sit on the ground: hull.position.y == fitted_size.y / 2.0.
 		if absf(hull_node.position.y - visual_aabb.size.y / 2.0) > 0.05:
 			print("  [FAIL] %s: hull.position.y %.3f != fitted_size.y / 2 (%.3f) - the hull will float or sink." % [
@@ -1735,7 +1716,7 @@ func test_hull_collider_matches_visual_aabb() -> bool:
 			return false
 
 	placer.queue_free()
-	print("  [PASS] Hull collider + base_hull_size meta track the fitted mesh AABB for both shaped and primitive hulls.")
+	print("  [PASS] Collider, base_hull_size meta and get_hull_fitted_aabb() agree across %d hulls, and each sits on the ground." % sample_hulls.size())
 	return true
 
 # Re-fitting on a scale gizmo drag: the collider has to scale with the visual
@@ -1751,7 +1732,7 @@ func test_hull_collider_rebuilt_on_scale() -> bool:
 	await tree.process_frame
 	await tree.process_frame
 
-	placer._place_hull_from_ui("block_main_meridian_a")
+	placer._place_hull_from_ui("brenntal_medium_a")
 	var hull_node: Node3D = placer.hull
 	if not hull_node:
 		print("  [FAIL] _place_hull_from_ui('medium_hull') did not set placer.hull.")

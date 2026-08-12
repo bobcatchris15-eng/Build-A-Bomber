@@ -29,13 +29,13 @@ const STATS := {
 		"built": 3, "lost": 1, "kills": 0, "damage_dealt": 0.0,
 		"damage_taken_kinetic": 200.0, "damage_taken_thermal": 0.0,
 		"damage_taken_explosive": 0.0, "damage_taken_energy": 0.0,
-		"metal_spent": 450, "hull_type": "block_main_meridian_a",
+		"metal_spent": 450, "hull_type": "brenntal_medium_a",
 	},
 	"Never Fielded": {
 		"built": 0, "lost": 0, "kills": 0, "damage_dealt": 0.0,
 		"damage_taken_kinetic": 0.0, "damage_taken_thermal": 0.0,
 		"damage_taken_explosive": 0.0, "damage_taken_energy": 0.0,
-		"metal_spent": 0, "hull_type": "block_scout_meridian_a",
+		"metal_spent": 0, "hull_type": "kestrel_scout_a",
 	},
 }
 

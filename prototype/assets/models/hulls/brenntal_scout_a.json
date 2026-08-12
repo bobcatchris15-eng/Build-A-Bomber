@@ -1,0 +1,28 @@
+{
+  "name": "Brenntal Recon Casemate",
+  "hp": 337.6,
+  "weight": 228.2,
+  "metal": 79,
+  "crystal": 16,
+  "size": [
+    2.7,
+    1.518,
+    4.0
+  ],
+  "color": [
+    0.298,
+    0.302,
+    0.322,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Brenntal Schwerbau",
+  "hull_class": "Scout"
+}

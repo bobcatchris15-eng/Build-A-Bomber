@@ -128,14 +128,14 @@ static func build(body: CharacterBody3D, blueprint_data: Dictionary, team: int,
 	# Movement paradigm comes from the TRAIT system, not from matching type_id
 	# strings, so a hull/locomotion combination added later picks up the right
 	# behaviour without this function learning its name.
-	var hull_type_hint: String = blueprint_data.get("hull_type", "block_main_meridian_a")
+	var hull_type_hint: String = blueprint_data.get("hull_type", "brenntal_medium_a")
 	var traits: Array = ModuleCatalog.get_traits(hull_type_hint, locomotion_type)
 
 	var hull_node: Node3D = _acquire_hull(blueprint_data, body, bp_manager, match_faction)
 	if not hull_node:
 		return {}
 
-	var hull_type: String = hull_node.get_meta("type_id") if hull_node.has_meta("type_id") else "block_main_meridian_a"
+	var hull_type: String = hull_node.get_meta("type_id") if hull_node.has_meta("type_id") else "brenntal_medium_a"
 	var catalog_data: Dictionary = ModuleCatalog.get_module_data(hull_type)
 	var thickness: float = hull_node.get_meta("armor_thickness") if hull_node.has_meta("armor_thickness") else 1.0
 	var material: String = hull_node.get_meta("armor_material") if hull_node.has_meta("armor_material") else "hardened_steel"

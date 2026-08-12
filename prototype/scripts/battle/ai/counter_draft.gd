@@ -46,7 +46,7 @@ const THREAT_FLOOR := 0.2
 # with a railgun is both.
 static func threats_of(blueprint: Dictionary) -> Array:
 	var out: Array = []
-	var hull: String = str(blueprint.get("hull_type", "block_main_meridian_a"))
+	var hull: String = str(blueprint.get("hull_type", "brenntal_medium_a"))
 	# Locomotion is a TOP-LEVEL key on the blueprint, not an entry in `modules`.
 	# Scanning the module list for it finds nothing and quietly classifies every
 	# aircraft in the game as ground.

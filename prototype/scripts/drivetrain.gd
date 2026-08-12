@@ -325,7 +325,7 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 		if loco_settings.is_empty() and hull_node.has_meta("locomotion_settings"):
 			loco_settings = hull_node.get_meta("locomotion_settings")
 
-	var hull_type := "block_main_meridian_a"
+	var hull_type := "brenntal_medium_a"
 	var thickness := 1.0
 	var material := "hardened_steel"
 	var hull_scale := Vector3.ONE
@@ -338,7 +338,7 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	# (blueprint_manager.reconstruct_vehicle), so nothing there changes.
 	var faction := LiveryScript.NO_LIVERY
 	if is_instance_valid(hull_node):
-		hull_type = str(hull_node.get_meta("type_id", "block_main_meridian_a"))
+		hull_type = str(hull_node.get_meta("type_id", "brenntal_medium_a"))
 		if hull_node.has_meta("armor_thickness"):
 			thickness = float(hull_node.get_meta("armor_thickness"))
 		if hull_node.has_meta("armor_material"):

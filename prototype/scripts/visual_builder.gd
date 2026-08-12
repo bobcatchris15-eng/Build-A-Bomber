@@ -538,6 +538,67 @@ static func build_visual(type_id: String, parent_node: Node3D, base_size: Vector
 	if parent_node.get_meta("sponson", false):
 		_sponson_blister(parent_node, type_id)
 
+
+# One self-contained module node, visual + stats payload, ready to parent.
+#
+# build_visual() POPULATES a node you already own; this CREATES one. Three call
+# sites wanted the second thing and called a "build_module" that did not exist
+# (lab_document.gd's hover preview, lab_toolbar.gd's armor autofill), which
+# raised "Nonexistent function 'build_module' in base 'GDScript'" the moment you
+# hovered a part in the Lab. drag_drop_manager.gd had privately reimplemented it
+# as _build_module_ghost_node() and was the only path that worked.
+#
+# The "module_data" meta must be a ModuleData OBJECT, not the catalog
+# Dictionary: design_stats.analyze() reads it with property access
+# (`data.type_id`), which a Dictionary does not answer to. Anything that
+# overwrites this meta with get_module_data()'s raw dict re-breaks stats for
+# that module.
+static func build_module(type_id: String) -> Node3D:
+	var container := Node3D.new()
+	var catalog_data: Dictionary = ModuleCatalog.get_module_data(type_id)
+	var cat_size: Vector3 = catalog_data.get("size", Vector3.ONE)
+
+	container.name = type_id
+	build_visual(type_id, container, cat_size,
+		catalog_data.get("color", Color.WHITE), {})
+
+	# A part whose .glb is missing AND whose procedural fallback produced
+	# nothing. A bare box reads as "no preview available" rather than
+	# pretending to be the real silhouette.
+	if container.get_child_count() == 0:
+		var mi := MeshInstance3D.new()
+		var box := BoxMesh.new()
+		box.size = cat_size
+		mi.mesh = box
+		container.add_child(mi)
+
+	container.set_meta("type_id", type_id)
+	container.set_meta("module_data", make_module_data(type_id))
+	return container
+
+
+# The catalog-Dictionary -> ModuleData translation, in one place. Every field is
+# copied explicitly and defaulted, because ModuleData is a Resource with typed
+# properties and a missing catalog key would otherwise assign null.
+static func make_module_data(type_id: String) -> ModuleData:
+	var catalog_data: Dictionary = ModuleCatalog.get_module_data(type_id)
+	var mod_data := ModuleData.new()
+	mod_data.type_id = type_id
+	mod_data.category = catalog_data.get("category", "module")
+	mod_data.module_name = catalog_data.get("name", "Unknown Module")
+	mod_data.base_hp = catalog_data.get("base_hp", 100.0)
+	mod_data.base_weight = catalog_data.get("base_weight", 50.0)
+	mod_data.cost_metal = catalog_data.get("cost_metal", 10)
+	mod_data.cost_crystal = catalog_data.get("cost_crystal", 0)
+	mod_data.base_dps = catalog_data.get("base_dps", 0.0)
+	mod_data.base_energy_capacity = catalog_data.get("base_energy_capacity", 0.0)
+	mod_data.base_power_output = catalog_data.get("base_power_output", 0.0)
+	mod_data.base_heal_rate = catalog_data.get("base_heal_rate", 0.0)
+	mod_data.base_vision_bonus = catalog_data.get("base_vision_bonus", 0.0)
+	if catalog_data.has("default_tweaks"):
+		mod_data.tweaks = catalog_data["default_tweaks"].duplicate()
+	return mod_data
+
 static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: Vector3, base_color: Color, tweaks: Dictionary = {}):
 	# Clear any existing visual children. remove_child() BEFORE queue_free() -
 	# queue_free() alone doesn't actually detach the node until end-of-frame,
@@ -3419,7 +3480,7 @@ static func get_full_hull_aabb(hull_node: Node3D) -> AABB:
 				stack.append(child)
 
 	if not has_mesh or combined_aabb.size.length_squared() < 0.01:
-		var hull_type = hull_node.get_meta("type_id", "block_main_meridian_a") if hull_node.has_meta("type_id") else "block_main_meridian_a"
+		var hull_type = hull_node.get_meta("type_id", "brenntal_medium_a") if hull_node.has_meta("type_id") else "brenntal_medium_a"
 		var cat_data = ModuleCatalog.get_module_data(hull_type)
 		var h_scale = hull_node.get_meta("hull_scale", Vector3.ONE) if hull_node.has_meta("hull_scale") else Vector3.ONE
 		var sz = cat_data.get("size", Vector3(4.0, 1.5, 6.0)) * h_scale

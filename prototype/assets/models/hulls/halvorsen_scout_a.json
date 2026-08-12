@@ -1,0 +1,28 @@
+{
+  "name": "Halvorsen Picket Launch",
+  "hp": 315.3,
+  "weight": 211.5,
+  "metal": 73,
+  "crystal": 15,
+  "size": [
+    2.4,
+    1.587,
+    3.9
+  ],
+  "color": [
+    0.376,
+    0.435,
+    0.415,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Halvorsen Yard",
+  "hull_class": "Scout"
+}

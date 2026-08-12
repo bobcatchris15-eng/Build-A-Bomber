@@ -111,50 +111,17 @@ func _apply_ghost_materials_recursive(node: Node, mat: Material):
 		_apply_ghost_materials_recursive(child, mat)
 
 func _build_module_ghost_node(type_id: String) -> Node3D:
-	var container = Node3D.new()
-	var catalog_data = ModuleCatalog.get_module_data(type_id)
-	var cat_size = catalog_data.get("size", Vector3.ONE)
-
-	# The catalog's own color, not Color.WHITE. The old WHITE made every
-	# ghost the same washed-out teal regardless of which part was being
-	# dragged; the player could not tell an autocannon from a radar mast
-	# from a missile pod until they had stopped and read the parts menu.
-	# A coloured ghost renders the silhouette in the colour the placed
-	# copy will wear, which is enough to read the shape at a glance.
-	VisualBuilder.build_visual(type_id, container, cat_size,
-		catalog_data.get("color", Color.WHITE), {})
-
-	# Fallback box mesh if no visual children were spawned (an authored
-	# part whose .glb is missing AND whose procedural fallback produced
-	# nothing). Bare box is genuinely the right read here - it signals
-	# "this part has nothing to preview" rather than a "plain box" that
-	# looks like the actual visual.
-	if container.get_child_count() == 0:
-		var mi = MeshInstance3D.new()
-		var box = BoxMesh.new()
-		box.size = cat_size
-		mi.mesh = box
-		container.add_child(mi)
-
+	# VisualBuilder.build_module() is the shared version of what used to be
+	# inlined here - same node, same "module_data" ModuleData payload, same
+	# missing-mesh box fallback. It also builds the visual in the CATALOG's own
+	# colour rather than Color.WHITE, which is what stopped every ghost being
+	# the same washed-out teal: the player could not tell an autocannon from a
+	# radar mast from a missile pod without stopping to read the parts menu.
+	#
+	# The only thing left here is the ghost material, which is this drag
+	# preview's business and not the builder's.
+	var container := VisualBuilder.build_module(type_id)
 	_apply_ghost_materials_recursive(container, _get_foggy_part_material())
-	
-	var mod_data = preload("res://scripts/module_data.gd").new()
-	mod_data.type_id = type_id
-	mod_data.category = catalog_data.get("category", "module")
-	mod_data.module_name = catalog_data.get("name", "Unknown Module")
-	mod_data.base_hp = catalog_data.get("base_hp", 100.0)
-	mod_data.base_weight = catalog_data.get("base_weight", 50.0)
-	mod_data.cost_metal = catalog_data.get("cost_metal", 10)
-	mod_data.cost_crystal = catalog_data.get("cost_crystal", 0)
-	mod_data.base_dps = catalog_data.get("base_dps", 0.0)
-	mod_data.base_energy_capacity = catalog_data.get("base_energy_capacity", 0.0)
-	mod_data.base_power_output = catalog_data.get("base_power_output", 0.0)
-	mod_data.base_heal_rate = catalog_data.get("base_heal_rate", 0.0)
-	mod_data.base_vision_bonus = catalog_data.get("base_vision_bonus", 0.0)
-	if catalog_data.has("default_tweaks"):
-		mod_data.tweaks = catalog_data["default_tweaks"].duplicate()
-	container.set_meta("module_data", mod_data)
-	
 	return container
 
 func _build_hull_ghost_node(type_id: String) -> Node3D:

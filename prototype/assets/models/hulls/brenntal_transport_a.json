@@ -1,0 +1,28 @@
+{
+  "name": "Brenntal Armoured Carrier",
+  "hp": 1110.2,
+  "weight": 807.7,
+  "metal": 272,
+  "crystal": 55,
+  "size": [
+    4.1,
+    2.208,
+    7.7
+  ],
+  "color": [
+    0.298,
+    0.302,
+    0.322,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Brenntal Schwerbau",
+  "hull_class": "Transport"
+}

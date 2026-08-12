@@ -95,7 +95,7 @@ func test_module_catalog_building_requirements() -> bool:
 	if ModuleCatalogScript.get_required_building("dreadnought_hull") != "physics_lab":
 		print("  [FAIL] dreadnought_hull should require physics_lab")
 		ok = false
-	if ModuleCatalogScript.get_required_building("block_main_meridian_a") != "":
+	if ModuleCatalogScript.get_required_building("brenntal_medium_a") != "":
 		print("  [FAIL] medium_hull should require nothing")
 		ok = false
 
@@ -124,7 +124,7 @@ func test_design_costing_building_requirements() -> bool:
 
 	# A bare, ungated design requires nothing.
 	var bare: Array = DesignCostingScript.blueprint_required_buildings(
-		{"hull_type": "block_main_meridian_a", "armor_material": "hardened_steel"})
+		{"hull_type": "brenntal_medium_a", "armor_material": "hardened_steel"})
 	if not bare.is_empty():
 		print("  [FAIL] a bare medium/hardened-steel design should require nothing, got ", bare)
 		ok = false

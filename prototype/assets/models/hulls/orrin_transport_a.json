@@ -1,0 +1,28 @@
+{
+  "name": "Orrin Scav Hauler",
+  "hp": 1144.9,
+  "weight": 833.7,
+  "metal": 281,
+  "crystal": 57,
+  "size": [
+    4.3,
+    2.07,
+    8.1
+  ],
+  "color": [
+    0.451,
+    0.341,
+    0.259,
+    1.0
+  ],
+  "domain": "Ground",
+  "base_energy": 0.0,
+  "base_vision": 20.0,
+  "is_foundation": false,
+  "category": "hull",
+  "visual_yaw_offset_deg": 0.0,
+  "visual_pitch_offset_deg": 0.0,
+  "visual_roll_offset_deg": 0.0,
+  "manufacturer": "Orrin Collective",
+  "hull_class": "Transport"
+}
