@@ -2073,7 +2073,7 @@ const HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG: float = 90.0
 # 1. ORIENTATION. The old code applied a blanket 90-degree yaw to every hull
 #    (HULL_VISUAL_YAW_OFFSET_DEFAULT_DEG). That happens to be right for the
 #    ~13 authored meshes whose long axis is X, but it is wrong for the ones
-#    authored along Z (pillbox_foundation and the since-retired flying wing),
+#    authored along Z (bunker_main_meridian and the since-retired flying wing),
 #    wrong for a mod hull authored correctly in the first place,
 #    and useless for the ones standing on their tail with their long axis on
 #    Y (interceptor_hull, fuselage_hull) - a yaw can never lay those down.
@@ -3486,7 +3486,7 @@ static func get_underside_y_bias(hull_type_id: String) -> float:
 # Excluded: helicopter_rotors, fixed_wing_engine, ornithopter_wing (all
 # mounted ABOVE the hull, not on the underside), naval_propeller (stern),
 # buoyant_envelope (under the envelope, not the hull). Foundation hulls
-# (pillbox_foundation, fortress_wall_foundation, tower_foundation) take no
+# (bunker_main_meridian, rampart_main_meridian, tower_main_meridian) take no
 # locomotion at all, so they never need a running gear either.
 const LOCOMOTION_TYPES_USING_RUNNING_GEAR: Array = [
 	"wheels", "tracked_treads",

@@ -215,7 +215,7 @@ func test_production_service_prerequisite_gating() -> bool:
 	# exotics_lab, so this is refused by the tech-tree gate specifically, not
 	# by having no contributor at all.
 	var defence_design := {
-		"hull_type": "pillbox_foundation", "armor_material": "energy_shielding"}
+		"hull_type": "bunker_main_meridian", "armor_material": "energy_shielding"}
 	var def_blocked: Dictionary = production.enqueue_structure(
 		0, BuildingCatalogScript.QUEUE_DEFENSE, "defense", 50, 10.0, defence_design)
 	if not def_blocked.is_empty():

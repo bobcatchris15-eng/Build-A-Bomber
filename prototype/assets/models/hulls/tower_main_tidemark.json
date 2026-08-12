@@ -1,0 +1,24 @@
+{
+  "name": "Tower Main Tidemark",
+  "hp": 1450,
+  "weight": 0.0,
+  "metal": 190,
+  "crystal": 25,
+  "size": [
+    3.0,
+    5.0,
+    3.0
+  ],
+  "color": [
+    0.58,
+    0.52,
+    0.42,
+    1.0
+  ],
+  "domain": "Static Defense",
+  "base_energy": 95,
+  "base_vision": 28,
+  "is_foundation": true,
+  "category": "hull",
+  "base_power": 7.5
+}

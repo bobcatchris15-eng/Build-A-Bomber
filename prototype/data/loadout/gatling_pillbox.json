@@ -2,7 +2,7 @@
 	"version": 1.0,
 	"id": "default_gatling_pillbox",
 	"name": "Gatling Pillbox",
-	"hull_type": "pillbox_foundation",
+	"hull_type": "bunker_main_meridian",
 	"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
 	"hull_size": {"x": 3.0, "y": 1.2, "z": 3.0},
 	"armor_material": "hardened_steel",

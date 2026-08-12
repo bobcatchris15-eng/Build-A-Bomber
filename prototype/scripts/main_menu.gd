@@ -41,7 +41,7 @@ const FALLBACK_HULL_TYPES := [
 	"super_heavy_hull",
 	"block_scout_meridian_a",
 	"tri_hull",
-	"pillbox_foundation"
+	"bunker_main_meridian"
 ]
 
 # UX_REDESIGN_PLAN.md's target information architecture: three activities plus

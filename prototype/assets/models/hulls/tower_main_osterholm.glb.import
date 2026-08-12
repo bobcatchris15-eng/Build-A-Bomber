@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://cgcev3qqavoqm"
-path="res://.godot/imported/fortress_wall_foundation.glb-de8f5b2c39469fd63c29913f88ee13cc.scn"
+uid="uid://yadjbe3kgmsw"
+path="res://.godot/imported/tower_main_osterholm.glb-4146bbb65a3ba54ed5db6e97c4e8b35f.scn"
 
 [deps]
 
-source_file="res://assets/models/hulls/fortress_wall_foundation.glb"
-dest_files=["res://.godot/imported/fortress_wall_foundation.glb-de8f5b2c39469fd63c29913f88ee13cc.scn"]
+source_file="res://assets/models/hulls/tower_main_osterholm.glb"
+dest_files=["res://.godot/imported/tower_main_osterholm.glb-4146bbb65a3ba54ed5db6e97c4e8b35f.scn"]
 
 [params]
 
@@ -40,6 +40,6 @@ materials/extract=0
 materials/extract_format=0
 materials/extract_path=""
 _subresources={}
-gltf/naming_version=1
+gltf/naming_version=2
 gltf/embedded_image_handling=1
-gltf/texture_map_mode=0
+gltf/texture_map_mode=1

@@ -2,7 +2,7 @@
  "version": 1.0,
  "id": "default_rampart_bunker",
  "name": "Rampart Bunker",
- "hull_type": "fortress_wall_foundation",
+ "hull_type": "rampart_main_meridian",
  "hull_scale": {
   "x": 1.0,
   "y": 1.0,

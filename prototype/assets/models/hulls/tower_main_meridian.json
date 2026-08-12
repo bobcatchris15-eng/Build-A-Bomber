@@ -1,0 +1,24 @@
+{
+  "name": "Tower Main Meridian",
+  "hp": 1400,
+  "weight": 0.0,
+  "metal": 160,
+  "crystal": 20,
+  "size": [
+    3.0,
+    5.0,
+    3.0
+  ],
+  "color": [
+    0.5,
+    0.48,
+    0.44,
+    1.0
+  ],
+  "domain": "Static Defense",
+  "base_energy": 100,
+  "base_vision": 28,
+  "is_foundation": true,
+  "category": "hull",
+  "base_power": 8.0
+}

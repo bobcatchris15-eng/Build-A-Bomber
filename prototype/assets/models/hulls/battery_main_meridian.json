@@ -1,0 +1,24 @@
+{
+  "name": "Battery Main Meridian",
+  "hp": 700,
+  "weight": 0.0,
+  "metal": 120,
+  "crystal": 10,
+  "size": [
+    4.5,
+    1.5,
+    4.5
+  ],
+  "color": [
+    0.4,
+    0.4,
+    0.36,
+    1.0
+  ],
+  "domain": "Static Defense",
+  "base_energy": 80,
+  "base_vision": 18,
+  "is_foundation": true,
+  "category": "hull",
+  "base_power": 6.4
+}

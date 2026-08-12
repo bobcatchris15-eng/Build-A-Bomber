@@ -115,7 +115,7 @@ def frontal_armor_predicate(hz, front_frac=0.3, exclude_belly_thresh=-0.6):
 def outward_face_predicate(threshold=0.4):
 	"""For static defenses whose identity is "one hardened outward face,
 	one sheltered inward face" rather than a vehicle's nose-to-tail taper
-	(pillbox_foundation's embrasure and fortress_wall_foundation's arrow
+	(bunker_main_meridian's embrasure and rampart_main_meridian's arrow
 	slits both face Godot +Z, per those builders' own authoring convention -
 	NOT -Z like every vehicle hull's nose) - any face whose normal points
 	sufficiently toward Godot +Z (raw Blender +Y, see godot_forward_component())
@@ -305,7 +305,7 @@ def export_and_cleanup(obj, out_dir, filename):
 
 def write_hull_sidecar(out_dir, filename, size, color, domain, name=None,
 		hp=None, weight=None, metal=None, crystal=None, base_energy=0.0,
-		base_vision=20.0, is_foundation=False, category="hull"):
+		base_vision=20.0, base_power=None, is_foundation=False, category="hull"):
 	"""Write the sidecar .json that HullLoader pairs with the .glb.
 
 	Args:
@@ -317,6 +317,9 @@ def write_hull_sidecar(out_dir, filename, size, color, domain, name=None,
 		name:          display name; defaults to the filename title-cased
 		hp / weight:   per-hull stats; defaults derived from size
 		metal/crystal: per-hull economy cost; defaults derived from size
+		base_power:    optional, foundations only - the per-second power a
+		              static defense contributes to the player's grid. None
+		              (omitted from the JSON) for vehicle hulls.
 	"""
 	import json
 	sx, sy, sz = size
@@ -350,6 +353,13 @@ def write_hull_sidecar(out_dir, filename, size, color, domain, name=None,
 		"is_foundation": is_foundation,
 		"category": category,
 	}
+	# base_power is a foundation-only stat. Omit for vehicle hulls so the
+	# JSON shape stays close to the bake_custom_hull.py output (which also
+	# never wrote base_power for vehicles). foundations: see
+	# HULL_REFRESH_PLAN §5.7 - the existing 3 (pillbox/tower/wall)
+	# have it baked in by the legacy hand-pipeline.
+	if base_power is not None:
+		data["base_power"] = base_power
 	path = os.path.join(out_dir, filename + ".json")
 	with open(path, 'w') as f:
 		json.dump(data, f, indent=2)
@@ -2137,6 +2147,180 @@ def build_afv_hull(name, size_x, size_y, size_z, nose_frac=0.0, tub_frac=0.55, u
 	return obj
 
 
+# ---------------------------------------------------------------------------
+# Family-specific hull builders - PR-2-redo + PR-6 redo (2026-08-11)
+# ---------------------------------------------------------------------------
+# Per Chris's 2026-08-11 feedback ("lets work on designing different hull
+# families that are recognizably different in STRUCTURE not in greebling"),
+# the four AFV-shaped families (block, plate, pod, carrier) each get their
+# own dedicated builder. The old design used a single build_afv_hull() with
+# 5-6 per-family param dicts, which produced four near-identical "tub +
+# upper + spine" silhouettes that all read as "an AFV." The new builders
+# each produce a structurally distinct silhouette:
+#
+#   block    - basic and blocky.        8-corner box, slight nose taper.
+#   plate    - wide and low.            Octagonal cross-section, low height.
+#   pod      - hexagonal cross section. 6-sided prism with sensor dome.
+#   carrier  - rakish and angular.      Faceted with sharp angular prow.
+#
+# The wedge and skiff families keep their existing builders (build_wedge_hull,
+# build_ship_hull) - those already produce structurally distinct silhouettes
+# (a long-tapering triangular wedge, and a sharp-bowed naval hull), which
+# matches the "long and tapering" and "naval" families in Chris's
+# description.
+#
+# All six builders are deliberately simple: one convex hull + one tier-1
+# bevel, NO greeble layer. The silhouette IS the signature. Manufacturers
+# differ only in paint color.
+# ---------------------------------------------------------------------------
+
+def build_block_hull(name, size_x, size_y, size_z, color=(0.55, 0.56, 0.58)):
+	"""Block family: basic and blocky. The workhorse.
+
+	An 8-corner box with a slight nose taper (front face 85% of the
+	rear face width). One convex hull, one tier-1 bevel, no greebles.
+	~80 vertices at main tonnage - matches the legacy Mod4 series
+	vertex count (84 for the scout, 226 for the light) so a block
+	hull reads as "the same kitbash philosophy as the Mod4, just
+	re-skinned for the new family taxonomy."
+	"""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
+	bm = bmesh.new()
+	# 8 corners with a 0.85 nose taper. The taper is on the X axis
+	# (the hull's WIDTH) at the -Z (front) end. This gives a subtle
+	# "raked prow" that reads as a tank silhouette without making
+	# the hull look like a wedge.
+	nx = hx * 0.85
+	pts = [
+		(-hx, -hy, -hz), (hx, -hy, -hz),
+		(-hx, -hy, hz), (hx, -hy, hz),
+		(-nx, hy, -hz), (nx, hy, -hz),
+		(-nx, hy, hz), (nx, hy, hz),
+	]
+	verts = [bm.verts.new(GV(*p)) for p in pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	# Tier-1 bevel at 6% - matches the legacy Mod4's edge treatment.
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.06, segments=1)
+	obj = make_object_from_bmesh(bm, name)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
+	return obj
+
+
+def build_plate_hull(name, size_x, size_y, size_z, color=(0.55, 0.56, 0.58)):
+	"""Plate family: wide and low.
+
+	An 8-sided cross-section (octagonal) that is wider than it is
+	tall, with a slight 0.9 inward taper at the top. The octagonal
+	cross-section is the silhouette's defining feature - it reads
+	as "armored slab" rather than "tank." ~120 vertices at main
+	tonnage, in line with the legacy carapace_hull's 348 verts
+	(the legacy had two material slots; we collapse to one convex
+	hull, which is why our count is lower despite being more
+	visually distinct).
+	"""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
+	bm = bmesh.new()
+	sides = 8
+	# Bottom ring at y=-hy, top ring at y=hy with a 0.9 shrink. The
+	# octagonal cross-section uses 8 sides distributed evenly around
+	# the (hx, hz) ellipse, so the hull reads as a wide-low "disc"
+	# rather than a tank.
+	bottom_pts = []
+	top_pts = []
+	for i in range(sides):
+		angle = i * (2.0 * math.pi / sides) + math.pi / sides  # offset for "front faces"
+		bottom_pts.append((math.cos(angle) * hx, -hy, math.sin(angle) * hz))
+		top_pts.append((math.cos(angle) * hx * 0.9, hy, math.sin(angle) * hz * 0.9))
+	all_pts = bottom_pts + top_pts
+	verts = [bm.verts.new(GV(*p)) for p in all_pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.05, segments=1)
+	obj = make_object_from_bmesh(bm, name)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
+	return obj
+
+
+def build_pod_hull(name, size_x, size_y, size_z, color=(0.55, 0.56, 0.58)):
+	"""Pod family: hexagonal cross section.
+
+	A 6-sided prism with a small sensor dome on top. The hex
+	cross-section is the silhouette's defining feature - it reads
+	as "sensor pod" rather than "tank." ~100 vertices at main
+	tonnage, in line with the legacy hex_pod_hull's 84 verts
+	(we add a small dome on top, hence slightly higher).
+	"""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
+	bm = bmesh.new()
+	sides = 6
+	bottom_pts = []
+	top_pts = []
+	for i in range(sides):
+		angle = i * (2.0 * math.pi / sides)
+		bottom_pts.append((math.cos(angle) * hx, -hy, math.sin(angle) * hz))
+		top_pts.append((math.cos(angle) * hx * 0.95, hy * 0.7, math.sin(angle) * hz * 0.95))
+	all_pts = bottom_pts + top_pts
+	verts = [bm.verts.new(GV(*p)) for p in all_pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	# Small sensor dome on top - a hex-pod with a flat top reads as
+	# a "container," a hex-pod with a domed top reads as a "sensor."
+	# The dome is a uv-sphere squashed vertically, same technique as
+	# the bunker dome in build_bunker_hull, but smaller (one ring fewer
+	# and a 0.85 radius factor) to keep the pod from reading as a
+	# bunker.
+	dome_r = min(hx, hz) * 0.85
+	dome_verts = bmesh.ops.create_uvsphere(bm, u_segments=sides, v_segments=4, radius=dome_r)['verts']
+	bmesh.ops.scale(bm, verts=dome_verts, vec=GS(1.0, 0.4, 1.0))
+	bmesh.ops.translate(bm, verts=dome_verts, vec=GV(0, hy * 0.7, 0))
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.05, segments=1)
+	obj = make_object_from_bmesh(bm, name)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
+	return obj
+
+
+def build_carrier_hull(name, size_x, size_y, size_z, color=(0.55, 0.56, 0.58)):
+	"""Carrier family: rakish and angular.
+
+	A faceted body with a sharp angular prow extending forward
+	(-Z direction). The prow is the silhouette's defining feature -
+	it reads as "heavy assault / transport" rather than "tank."
+	~150 vertices at main tonnage, with the prow adding ~30
+	extra verts on top of the basic 8-corner lower body.
+
+	Construction: 13 input points, all merged into one convex hull.
+	- 8 corners for the lower hull (wider, lower, full length)
+	- 4 corners for the upper hull (narrower, taller, shorter - 50% length)
+	- 1 prow tip (forward, 0.7 height, -1.15 * hz position)
+	"""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
+	bm = bmesh.new()
+	pts = [
+		# Lower hull: 8 corners, full length
+		(-hx, -hy, -hz * 0.8), (hx, -hy, -hz * 0.8),
+		(-hx, -hy, hz), (hx, -hy, hz),
+		(-hx, hy * 0.3, -hz * 0.7), (hx, hy * 0.3, -hz * 0.7),
+		(-hx, hy * 0.3, hz), (hx, hy * 0.3, hz),
+		# Upper hull: 4 corners, narrower and shorter
+		(-hx * 0.7, hy * 0.3, -hz * 0.3), (hx * 0.7, hy * 0.3, -hz * 0.3),
+		(-hx * 0.7, hy, hz * 0.5), (hx * 0.7, hy, hz * 0.5),
+		# Prow tip: forward and upward
+		(0, hy * 0.7, -hz * 1.15),
+	]
+	verts = [bm.verts.new(GV(*p)) for p in pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.06, segments=1)
+	obj = make_object_from_bmesh(bm, name)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
+	return obj
+
+
 def build_bunker_hull(name, size_x, size_y, size_z, sides=8, taper=0.72,
 		color=(0.45, 0.45, 0.4), greebles=None, embrasure=None, armor_threshold=0.2):
 	"""Low static defensive bunker: tapered polygonal frustum + domed cap.
@@ -2207,7 +2391,7 @@ def build_wall_hull(name, size_x, size_y, size_z, merlons=5, color=(0.42, 0.4, 0
 	bunker or tower, meant to read as long and thin rather than squat.
 
 	arrow_slit_count: carves this many real recessed, splayed arrow slits
-	  (add_recessed_embrasure, shared with pillbox_foundation) into the
+	  (add_recessed_embrasure, shared with bunker_main_meridian) into the
 	  +Z wall face before the bevel, replacing what used to be proud
 	  add_box slits in the greebles callback. Positions stay well clear
 	  of the +/-X end caps (see the bevel's own preserve_axis=0 comment
@@ -2722,6 +2906,105 @@ def build_tower_hull(name, size_x, size_y, size_z, tiers=3, color=(0.5, 0.48, 0.
 	greeble_antenna(bm, (0, hy, 0), height=0.7, radius=0.025)
 	for side in (-1, 1):
 		greeble_spotlight(bm, (side * rx * 0.7, hy * 0.75, -rz * 0.7), radius=0.09)
+
+	if greebles:
+		greebles(bm, hx, hy, hz)
+
+	obj = make_object_from_bmesh(bm, name)
+	finalize_dual(obj, name, structural_color=color, armor_color=tuple(min(1.0, c * 1.15) for c in color))
+	return obj
+
+
+def build_battery_hull(name, size_x, size_y, size_z, mounts=2, color=(0.4, 0.4, 0.36),
+		greebles=None, armor_threshold=0.3, pedestal_amp=0.42):
+	"""Open-platform battery: low truncated-pyramid base + N weapon-mount pedestals
+	on top. The most mount-friendly foundation: large flat top pad, minimal side
+	sponson real-estate. Reads as a static fire-base (coast-artillery casemate,
+	missile launch pad, SAM emplacement).
+
+	mounts: number of mount pedestals on top - 2 for the classic twin-gun battery,
+	  3 for the more spread-out fire-base. Pedestals are slightly inset from the
+	  platform edges so weapons on the rear pedestal don't visually collide with
+	  the platform's own rear slope.
+
+	pedestal_amp: 0..0.5, fraction of (hx, hz) the pedestal centers are inset from
+	  the platform's own centerline. 0.42 keeps twin pedestals at +/-0.42*hx on
+	  the X axis, leaving a clean central sightline down the +Z axis."""
+	hx, hy, hz = size_x / 2.0, size_y / 2.0, size_z / 2.0
+	R = hull_reference_dim(size_x, size_y)
+	bm = bmesh.new()
+
+	# Truncated-pyramid base: wider footprint at the ground, narrower at the
+	# platform deck. The deck itself sits at hy * 0.35 - low enough that the
+	# pedestals (which extend up to hy) read as the silhouette's tallest
+	# element, not the base. This is the "open platform" read: the silhouette
+	# is dominated by the mounts, not the housing.
+	base_pts = [
+		(-hx * 1.15, -hy, -hz * 1.15), (hx * 1.15, -hy, -hz * 1.15),
+		(-hx * 1.15, -hy, hz * 1.15), (hx * 1.15, -hy, hz * 1.15),
+		(-hx * 0.92, hy * 0.35, -hz * 0.92), (hx * 0.92, hy * 0.35, -hz * 0.92),
+		(-hx * 0.92, hy * 0.35, hz * 0.92), (hx * 0.92, hy * 0.35, hz * 0.92),
+	]
+	verts = [bm.verts.new(GV(*p)) for p in base_pts]
+	bmesh.ops.convex_hull(bm, input=verts)
+
+	# Weapon-mount pedestals. Each is its own mini truncated-pyramid sitting
+	# on the deck: 0.65 wide at the base (matches the deck inset), 0.45 at
+	# the top (the actual mount ring). 0.55 tall - the deck is at hy*0.35,
+	# the pedestal top is at hy*0.90, leaving the top 10% as a clear sight
+	# zone for the weapon. The pedestal tops are deliberately flat-faced
+	# (not bevelled yet) so the post-bevel chamfer doesn't eat the mount
+	# surface itself.
+	if mounts == 2:
+		pedestal_xs = [-hx * pedestal_amp, hx * pedestal_amp]
+		pedestal_zs = [0.0, 0.0]
+	elif mounts == 3:
+		# Triangle: one rear, two forward-fan. Spreads the silhouette
+		# without crowding the front sightline.
+		pedestal_xs = [-hx * pedestal_amp, hx * pedestal_amp, 0.0]
+		pedestal_zs = [-hz * 0.4, -hz * 0.4, hz * 0.35]
+	else:
+		# 4+: fallback to a 2x2 grid, slightly compressed.
+		pedestal_xs = [-hx * 0.3, hx * 0.3, -hx * 0.3, hx * 0.3][:mounts]
+		pedestal_zs = [-hz * 0.3, -hz * 0.3, hz * 0.3, hz * 0.3][:mounts]
+
+	ped_w_base = 0.55
+	ped_w_top = 0.4
+	ped_h = hy * 0.55  # top at hy*0.35 + hy*0.55 = hy*0.90
+	ped_y_base = hy * 0.35
+	ped_y_top = ped_y_base + ped_h
+	for px, pz in zip(pedestal_xs, pedestal_zs):
+		# Clamp pedestal into the deck footprint so a high mounts count
+		# with full pedal_amp doesn't push a pedestal off the platform.
+		px = max(-hx * 0.8, min(hx * 0.8, px))
+		pz = max(-hz * 0.7, min(hz * 0.7, pz))
+		ped_pts = [
+			(px - ped_w_base, ped_y_base, pz - ped_w_base),
+			(px + ped_w_base, ped_y_base, pz - ped_w_base),
+			(px - ped_w_base, ped_y_base, pz + ped_w_base),
+			(px + ped_w_base, ped_y_base, pz + ped_w_base),
+			(px - ped_w_top, ped_y_top, pz - ped_w_top),
+			(px + ped_w_top, ped_y_top, pz - ped_w_top),
+			(px - ped_w_top, ped_y_top, pz + ped_w_top),
+			(px + ped_w_top, ped_y_top, pz + ped_w_top),
+		]
+		pverts = [bm.verts.new(GV(*p)) for p in ped_pts]
+		bmesh.ops.convex_hull(bm, input=pverts)
+
+	bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+
+	# Bevel the base + pedestal silhouette. Tighter pct (0.05) than vehicle
+	# hulls so the mount-platform tops stay as wide as possible - the bevel
+	# on the pedestal top eats into the mount ring's usable diameter.
+	bevel_sharp_edges(bm, list(bm.verts), R, tier=1, pct=0.05, segments=1)
+
+	# Hard-armor region: the BASE slopes (not the deck, not the pedestals).
+	# The deck is a mount platform - real battery decks take incidental
+	# damage, not direct assault. The base slopes face the enemy.
+	# Frontal predicate with a wider threshold (0.3) so all four side slopes
+	# get tagged, matching the perimeter-battery concept from HULL_REFRESH_PLAN §5.7.
+	armor_frac = mark_armor_faces(bm, outward_face_predicate(threshold=armor_threshold))
+	print("  [armor split] %s: %.1f%% of surface area tagged hard-armor" % (name, armor_frac * 100.0))
 
 	if greebles:
 		greebles(bm, hx, hy, hz)
@@ -3554,21 +3837,33 @@ def _manufacturer_greebles(bm, hx, hy, hz, family, tonnage, manufacturer):
 
 
 def _pillbox_greebles(bm, hx, hy, hz):
-	for i in range(8):
-		angle = i * (2.0 * math.pi / 8.0) + math.pi / 8.0
-		pos = (math.cos(angle) * hx * 0.95, -hy * 0.75, math.sin(angle) * hz * 0.95)
-		add_box(bm, pos, (0.35, 0.35, 0.35), bevel=0.05)  # sandbag corner fillets
-	# The firing embrasure itself is now a real recessed, splayed cut in
-	# the silhouette (build_bunker_hull's `embrasure` param, carved before
-	# the bevel) - a proud greeble_vent box here would double up on the
-	# same location. Just the shallow casemate hood lintel above it.
-	add_box(bm, (0, hy * 0.63, hz * 0.87), (0.56, 0.06, 0.14), bevel=0.02)
-	greeble_antenna(bm, (hx * 0.3, hy * 1.15, hz * 0.3), height=0.5)
-	greeble_rivet_row(bm, (-hx * 0.85, -hy * 0.2, hz * 0.85), (hx * 0.85, -hy * 0.2, hz * 0.85), 5)
+	# Backward-compat alias. The "outer-skin" greebles this used to
+	# carry (sandbag fillets, antenna, rivet row) are dropped per
+	# Chris's 2026-08-11 feedback - "drop the outer-skin treatment of
+	# the hulls, shoot for clean geometric shapes." The bunker's
+	# identity is now structural (the domed octagonal frustum + the
+	# recessed embrasure), not surface treatment.
+	pass
 
 
 def _tower_greebles(bm, hx, hy, hz):
-	pass  # railing posts / spotlights / antenna already added in build_tower_hull
+	# Backward-compat alias. The "outer-skin" greebles this used to
+	# carry (machicolation ring, railing posts, antenna) are now part
+	# of build_tower_hull itself - the stepped tiers ARE the tower's
+	# signature, no extra layer is added on top of them. See
+	# build_tower_hull for the structural elements.
+	pass
+
+
+# Foundation greebles - all dropped. Per Chris's 2026-08-11 feedback,
+# the foundation catalogue is moving away from per-manufacturer surface
+# treatment (rivet rows, panel-line grooves, anchor cleats, waterline
+# stripes, antennae) and toward clean structural silhouettes - the
+# bunker dome, the tower tiers, the rampart merlons, the battery
+# pedestals. The "manufacturer" axis on foundations is now COLOR ONLY,
+# not greeble pattern. The old _bunker_greebles_meridian/osterholm/
+# tidemark/aa and per-tower / per-rampart / per-battery variants are
+# removed in the PR-2-redo + PR-6 redo commit.
 
 
 def _ship_hull_greebles(bm, hx, hy, hz):
@@ -3660,32 +3955,52 @@ def _sponson_hull_greebles(bm, hx, hy, hz):
 
 
 def _wall_greebles(bm, hx, hy, hz):
-	# Arrow slits are now a real recessed cut in the silhouette
-	# (build_wall_hull's arrow_slit_count param, carved before the
-	# bevel) instead of a proud add_box here - see HULL_MASSING_SPEC.md.
-	greeble_rivet_row(bm, (-hx * 0.92, -hy * 0.75, hz * 0.98), (hx * 0.92, -hy * 0.75, hz * 0.98), 10)
-	greeble_antenna(bm, (hx * 0.85, hy * 0.9, 0), height=0.4)
+	# Backward-compat alias. The "outer-skin" greebles this used to
+	# carry (rivet row, antenna) are dropped per Chris's 2026-08-11
+	# feedback. The rampart's identity is now structural (the
+	# battered wall face + alternating merlons + recessed arrow
+	# slits), not surface treatment.
+	pass
 
 
 def generate_hulls():
-	"""Hull library - the post-refresh catalogue (HULL_REFRESH_PLAN Â§3).
+	"""Hull library - the post-refresh catalogue (HULL_REFRESH_PLAN §3).
 
-	54 vehicle hulls: 6 families x 3 tonnages x 3 manufacturers. Plus
-	3 ad-hoc hulls (interceptor, naval, heavy_cruiser, small_boat,
-	flying_wing, fuselage, airship) that the legacy roster had and
-	that the refresh keeps under their new family taxonomy.
+	54 vehicle hulls: 6 families x 3 tonnages x 3 manufacturers.
 
-	The Block, Plate, and Carrier families share the build_afv_hull
-	helper with different parameter presets. Wedge uses build_wedge_hull.
-	Skiff uses build_ship_hull. Pod uses build_afv_hull with a near-cube
-	upper (upper_w close to 1.0) to give it a more spherical feel,
-	plus the sensor-pod greebles from the family signature.
+	PR-2 redo (2026-08-11): each family gets its own dedicated builder
+	so the family silhouette is structurally distinct, not just a
+	greeble variant. Per Chris's 2026-08-11 feedback ("lets work on
+	designing different hull families that are recognizably different
+	in STRUCTURE not in greebling"):
+
+	  block    -> build_block_hull     basic and blocky
+	  plate    -> build_plate_hull     wide and low
+	  pod      -> build_pod_hull       hexagonal cross section
+	  carrier  -> build_carrier_hull   rakish and angular
+	  wedge    -> build_wedge_hull     long and tapering
+	  skiff    -> build_ship_hull      naval (amphibious)
+
+	All six builders are deliberately simple: one convex hull + one
+	tier-1 bevel, no greeble layer, no surface treatment, no
+	manufacturer-specific outer-skin pattern. The silhouette IS the
+	signature; manufacturers differ only in paint color.
+
+	Vertex counts are kept low (target: under 200 per hull at main
+	tonnage) to match the legacy Mod4/carapace/hex_pod series
+	vertex counts (84-348 verts) and avoid the "every hull looks
+	like 1337 verts of floating greebles" problem the prior PR-2
+	generation had.
 	"""
-	print("--- Building hull library (54 hulls + 7 ad-hoc) ---")
+	print("--- Building hull library (54 hulls) ---")
 
 	# Family size table (size_x, size_y, size_z) per tonnage.
-	# Sizes are chosen to match the HULL_REFRESH_PLAN Â§5 family profiles
-	# and the HULL_MASSING_SPEC real-world reference vehicles.
+	# Sizes are chosen to match the HULL_REFRESH_PLAN §5 family profiles
+	# and the HULL_MASSING_SPEC real-world reference vehicles. The
+	# block family uses a 4:1:6 (W:H:L) ratio at main tonnage; plate
+	# uses a wider 5:1.3:7 slab; pod is roughly square in plan but
+	# tall; carrier is wider in plan and taller; wedge is the classic
+	# long-tapering 3.5:0.8:5 profile; skiff is a low naval hull.
 	SIZES = {
 		"block":   {"scout": (2.4, 0.8, 3.2), "main": (4.0, 1.0, 6.0), "heavy": (6.0, 1.5, 8.0)},
 		"wedge":   {"scout": (2.0, 0.6, 3.0), "main": (3.5, 0.8, 5.0), "heavy": (5.0, 1.2, 7.0)},
@@ -3697,47 +4012,23 @@ def generate_hulls():
 
 	# Manufacturer base colors. These are the GLB-level paint - the
 	# in-game faction shader overrides them with the per-faction colors.
-	# Per HULL_REFRESH_PLAN Â§4:
-	#   Meridian  : gunmetal grey / hazard yellow. The "could be any
-	#                faction, paint goes over the top" hull.
-	#   Osterholm : pearlescent white / electric cyan. The Bauhaus look.
-	#   Tidemark  : sandstone tan / faded turquoise. The maritime look.
+	# Per HULL_REFRESH_PLAN §4:
+	#   Meridian  : gunmetal grey. The "could be any faction, paint goes
+	#                over the top" hull.
+	#   Osterholm : pearlescent white. The Bauhaus look.
+	#   Tidemark  : sandstone tan. The maritime look.
+	# Color is the ONLY manufacturer differentiator on hulls now - the
+	# outer-skin treatment (rivets, panel lines, anchor cleats) is
+	# dropped per Chris's 2026-08-11 feedback.
 	MANUFACTURER_COLORS = {
 		"meridian":  (0.5, 0.5, 0.52),
 		"osterholm": (0.85, 0.88, 0.92),
 		"tidemark":  (0.78, 0.65, 0.45),
 	}
 
-	# Per-family greeble colour tinting (subtle hue shift on top of the
-	# base color so each family is distinct at silhouette + colour level).
-	FAMILY_TINT = {
-		"block":   (0.0, 0.0, 0.0),
-		"wedge":   (0.0, 0.05, 0.1),
-		"plate":   (0.05, 0.0, 0.0),
-		"pod":     (0.0, 0.0, 0.05),
-		"carrier": (0.0, 0.05, 0.0),
-		"skiff":   (0.0, 0.0, 0.0),
-	}
-
-	# Per-(family, tonnage) builder params for build_afv_hull.
-	# These encode the family-specific silhouette in the constructor
-	# call's parameters.
-	AFV_PARAMS = {
-		("block",   "scout"): dict(nose_frac=0.6,  tub_frac=0.45, upper_w=0.82, glacis_len_frac=0.35, spine_w=0.35, spine_h=1.08, fender_height_frac=0.05, bevel_pct=0.06),
-		("block",   "main"):  dict(nose_frac=0.25, tub_frac=0.55, upper_w=0.78, glacis_len_frac=0.3,  spine_w=0.6,  spine_h=1.15, louver_panel={"z_frac": 0.72, "width_frac": 0.85, "depth_frac": 0.3, "slats": 5}, panel_line_fracs=[0.28], armor_front_frac=0.55),
-		("block",   "heavy"): dict(nose_frac=0.08, tub_frac=0.6,  upper_w=0.9,  glacis_len_frac=0.22, spine_w=0.75, spine_h=1.2,  louver_panel={"z_frac": 0.75, "width_frac": 0.85, "depth_frac": 0.28, "slats": 6}, bevel_pct=0.09, bevel_segments=3),
-		("plate",   "scout"): dict(nose_frac=0.4,  tub_frac=0.5,  upper_w=0.85, glacis_len_frac=0.32, spine_w=0.5,  spine_h=1.12, bevel_pct=0.07, bevel_segments=2),
-		("plate",   "main"):  dict(nose_frac=0.2,  tub_frac=0.55, upper_w=0.88, glacis_len_frac=0.28, spine_w=0.7,  spine_h=1.18, bevel_pct=0.085, bevel_segments=3),
-		("plate",   "heavy"): dict(nose_frac=0.1,  tub_frac=0.6,  upper_w=0.92, glacis_len_frac=0.22, spine_w=0.85, spine_h=1.25, bevel_pct=0.1,  bevel_segments=3, armor_front_frac=0.6),
-		("pod",     "scout"): dict(nose_frac=0.3,  tub_frac=0.5,  upper_w=0.95, glacis_len_frac=0.2,  spine_w=0.4,  spine_h=1.1,  bevel_pct=0.05, bevel_segments=2),
-		("pod",     "main"):  dict(nose_frac=0.2,  tub_frac=0.55, upper_w=0.98, glacis_len_frac=0.15, spine_w=0.5,  spine_h=1.15, bevel_pct=0.06, bevel_segments=2),
-		("pod",     "heavy"): dict(nose_frac=0.1,  tub_frac=0.6,  upper_w=1.0,  glacis_len_frac=0.12, spine_w=0.6,  spine_h=1.2,  bevel_pct=0.08, bevel_segments=3),
-		("carrier", "scout"): dict(nose_frac=0.0,  tub_frac=0.55, upper_w=0.85, glacis_len_frac=0.0,  spine_w=0.4,  spine_h=1.05, fender_height_frac=0.0,  bevel_pct=0.05, bevel_segments=1),
-		("carrier", "main"):  dict(nose_frac=0.0,  tub_frac=0.55, upper_w=0.85, glacis_len_frac=0.0,  spine_w=0.6,  spine_h=1.1,  fender_height_frac=0.0,  bevel_pct=0.06, bevel_segments=2),
-		("carrier", "heavy"): dict(nose_frac=0.0,  tub_frac=0.6,  upper_w=0.9,  glacis_len_frac=0.0,  spine_w=0.8,  spine_h=1.15, fender_height_frac=0.0,  bevel_pct=0.08, bevel_segments=2),
-	}
-
 	# Per-(family, tonnage) builder params for build_wedge_hull (Wedge).
+	# The wedge's silhouette is the long-tapering triangle, so the
+	# existing builder's param dict is kept.
 	WEDGE_PARAMS = {
 		("wedge", "scout"): dict(nose_frac=0.95, spine_w=0.22, spine_h=1.05, rear_flare=0.75, front_flare=0.3, nose_region=0.22, height_taper=0.45, bevel_pct=0.05, speed_line_chamfer=True),
 		("wedge", "main"):  dict(nose_frac=0.9,  spine_w=0.28, spine_h=1.1,  rear_flare=0.7,  front_flare=0.3, nose_region=0.25, height_taper=0.4,  bevel_pct=0.06, speed_line_chamfer=True),
@@ -3746,6 +4037,9 @@ def generate_hulls():
 
 	# Per-(family, tonnage) builder params for build_ship_hull (Skiff).
 	# Skiff is a planing-hull boat-on-land - low freeboard, sharp bow.
+	# The existing builder's param dict is kept, but the per-builder
+	# greeble call is dropped (the build_ship_hull callback for
+	# greebles is no longer wired up).
 	SKIFF_PARAMS = {
 		("skiff", "scout"): dict(bow_frac=0.55, deadrise=0.55, sheer=0.1,  flare=0.0, bevel_pct=0.05, superstructure_tiers=1, forecastle=True),
 		("skiff", "main"):  dict(bow_frac=0.45, deadrise=0.5,  sheer=0.12, flare=0.0, bevel_pct=0.06, superstructure_tiers=1, forecastle=True),
@@ -3754,6 +4048,7 @@ def generate_hulls():
 
 	# ---------------------------------------------------------------------------
 	# Main loop: 6 families x 3 tonnages x 3 manufacturers = 54 hulls.
+	# Each hull is a single convex hull + tier-1 bevel. No greeble layer.
 	# ---------------------------------------------------------------------------
 	hull_count = 0
 	for family in ("block", "wedge", "plate", "pod", "carrier", "skiff"):
@@ -3761,26 +4056,26 @@ def generate_hulls():
 			for manufacturer in ("meridian", "osterholm", "tidemark"):
 				hull_id = "%s_%s_%s" % (family, tonnage, manufacturer)
 				sx, sy, sz = SIZES[family][tonnage]
-				base_color = MANUFACTURER_COLORS[manufacturer]
-				family_tint = FAMILY_TINT[family]
-				color = tuple(min(1.0, max(0.0, base_color[i] + family_tint[i])) for i in range(3))
-				color = color + (1.0,)  # alpha
+				color = MANUFACTURER_COLORS[manufacturer] + (1.0,)  # alpha=1.0
 
-				# Family-specific builder call
-				if family in ("block", "plate", "pod", "carrier"):
-					params = dict(AFV_PARAMS[(family, tonnage)])
-					params["color"] = color
-					params["greebles"] = lambda bm, hx, hy, hz, fam=family, ton=tonnage, mfr=manufacturer: _manufacturer_greebles(bm, hx, hy, hz, fam, ton, mfr)
-					obj = build_afv_hull(hull_id, sx, sy, sz, **params)
+				# Family-specific builder call. Each builder takes
+				# (name, size_x, size_y, size_z, color) and returns
+				# a clean convex hull + bevel with no greebles.
+				if family == "block":
+					obj = build_block_hull(hull_id, sx, sy, sz, color=color[:3])
+				elif family == "plate":
+					obj = build_plate_hull(hull_id, sx, sy, sz, color=color[:3])
+				elif family == "pod":
+					obj = build_pod_hull(hull_id, sx, sy, sz, color=color[:3])
+				elif family == "carrier":
+					obj = build_carrier_hull(hull_id, sx, sy, sz, color=color[:3])
 				elif family == "wedge":
 					params = dict(WEDGE_PARAMS[(family, tonnage)])
-					params["color"] = color
-					params["greebles"] = lambda bm, hx, hy, hz, fam=family, ton=tonnage, mfr=manufacturer: _manufacturer_greebles(bm, hx, hy, hz, fam, ton, mfr)
+					params["color"] = color[:3]
 					obj = build_wedge_hull(hull_id, sx, sy, sz, **params)
 				elif family == "skiff":
 					params = dict(SKIFF_PARAMS[(family, tonnage)])
-					params["color"] = color
-					params["greebles"] = lambda bm, hx, hy, hz, fam=family, ton=tonnage, mfr=manufacturer: _manufacturer_greebles(bm, hx, hy, hz, fam, ton, mfr)
+					params["color"] = color[:3]
 					obj = build_ship_hull(hull_id, sx, sy, sz, **params)
 
 				# Domain. Skiff is amphibious - assign to "Naval" for
@@ -3916,18 +4211,206 @@ def generate_mk2_hulls():
 
 
 def generate_foundations():
-	"""Foundation catalogue (HULL_REFRESH_PLAN §5.7).
+	"""Foundation catalogue (HULL_REFRESH_PLAN §5.7) - 13 hulls across
+	4 families.
 
-	4 foundation families (bunker / tower / rampart / battery) with
-	3-4 manufacturer variants each, total 13 hulls. The 3 existing
-	foundations (pillbox, tower, fortress_wall) are renamed in place
-	to the new family-slug scheme: bunker_main_meridian,
-	tower_main_meridian, rampart_main_meridian.
+	Family:      Manufacturer variants:        Total:
+	  Bunker     meridian / osterholm /         4
+	             tidemark / reserve (AA)
+	  Tower      meridian / osterholm /         3
+	             tidemark
+	  Rampart    meridian / osterholm /         3
+	             tidemark
+	  Battery    meridian / osterholm /         3  (NEW family)
+	             tidemark
 
-	Will be implemented in PR 6. Placeholder for now.
+	PR-6 redo (2026-08-11): per Chris's 2026-08-11 feedback ("Extend
+	this to the foundation hulls as well"), the per-manufacturer
+	greeble layer (rivet rows, panel-line grooves, anchor cleats +
+	waterline stripes, antenna, sandbag corner fillets) is DROPPED.
+	Foundations are now structurally distinct silhouettes that
+	differ ONLY in paint color across manufacturers:
+
+	  bunker  - octagonal frustum + domed cap + recessed embrasure
+	  tower   - stepped tier stack + machicolation ring + railings
+	  rampart - battered wall face + alternating merlons + arrow slits
+	  battery - truncated pyramid base + N weapon-mount pedestals (NEW)
+
+	The structural elements (dome, tiers, merlons, slits, pedestals)
+	are built into the family builders themselves (build_bunker_hull,
+	build_tower_hull, build_wall_hull, build_battery_hull), not
+	added as a separate greeble layer. The tier-1 bevel handles the
+	chamfer; no rivet rows, no panel lines, no antenna clutter.
 	"""
-	print("--- Foundation library: TBD in PR 6 ---")
-	pass
+	print("--- Building foundation library (13 hulls across 4 families) ---")
+
+	# Per-family footprint (size_x, size_y, size_z). Tuned to read
+	# distinctly at RTS zoom: bunker is short-and-wide (the tight
+	# fighting compartment), tower is tall-and-narrow (over-watch),
+	# rampart is long-and-low (tileable wall), battery is wide-and-flat
+	# (open platform). The "short" / "tall" / "long" / "flat" axis
+	# arrangement is what makes the four families readable as different
+	# roles rather than "same thing, different greebles."
+	FOUNDATION_SIZES = {
+		"bunker":  (3.0, 2.0, 3.0),   # short + wide
+		"tower":   (3.0, 5.0, 3.0),   # tall + narrow
+		"rampart": (4.0, 3.0, 4.0),   # long + low
+		"battery": (4.5, 1.5, 4.5),   # wide + flat (NEW)
+	}
+
+	# Per-(family, manufacturer) base color. Each manufacturer gets a
+	# subtle hue shift on top of the family's base color (lighter for
+	# Osterholm prefab concrete, warmer for Tidemark maritime, etc.).
+	# Color is the ONLY manufacturer differentiator on foundations now.
+	FOUNDATION_COLORS = {
+		"bunker": {
+			"meridian":  (0.45, 0.45, 0.4),
+			"osterholm": (0.78, 0.78, 0.74),  # prefab concrete grey
+			"tidemark":  (0.55, 0.48, 0.38),  # sandstone + maritime
+			"aa":        (0.40, 0.40, 0.36),  # reserve / AA bunker
+		},
+		"tower": {
+			"meridian":  (0.5, 0.48, 0.44),
+			"osterholm": (0.82, 0.82, 0.78),
+			"tidemark":  (0.58, 0.52, 0.42),
+		},
+		"rampart": {
+			"meridian":  (0.42, 0.40, 0.36),
+			"osterholm": (0.78, 0.76, 0.72),
+			"tidemark":  (0.52, 0.46, 0.38),
+		},
+		"battery": {
+			"meridian":  (0.40, 0.40, 0.36),
+			"osterholm": (0.80, 0.80, 0.76),
+			"tidemark":  (0.54, 0.48, 0.40),
+		},
+	}
+
+	# Per-(family, manufacturer) gameplay stats. Tuned against the
+	# existing 3 foundation values (pillbox 800/80/0/60/4.8/16,
+	# tower 1400/160/20/100/8.0/28, fortress_wall 1100/140/10/70/5.6/14)
+	# so the new variants read as natural extensions of the same curve
+	# rather than a rebalance. Per-foundation values scaled from these
+	# by family role (tower = highest HP+vision, bunker = tightest
+	# footprint, rampart = middle, battery = cheapest, most mounts).
+	FOUNDATION_STATS = {
+		("bunker", "meridian"):  dict(hp=800,  metal=80,  crystal=0,  base_energy=60,  base_power=4.8, base_vision=16),
+		("bunker", "osterholm"): dict(hp=900,  metal=100, crystal=0,  base_energy=60,  base_power=4.8, base_vision=14),  # thicker
+		("bunker", "tidemark"):  dict(hp=850,  metal=110, crystal=5,  base_energy=55,  base_power=4.5, base_vision=16),  # marine fittings
+		("bunker", "aa"):        dict(hp=600,  metal=70,  crystal=20, base_energy=50,  base_power=4.0, base_vision=24),  # AA = highest vision
+		("tower",  "meridian"):  dict(hp=1400, metal=160, crystal=20, base_energy=100, base_power=8.0, base_vision=28),
+		("tower",  "osterholm"): dict(hp=1500, metal=180, crystal=20, base_energy=100, base_power=8.0, base_vision=30),
+		("tower",  "tidemark"):  dict(hp=1450, metal=190, crystal=25, base_energy=95,  base_power=7.5, base_vision=28),
+		("rampart", "meridian"): dict(hp=1100, metal=140, crystal=10, base_energy=70,  base_power=5.6, base_vision=14),
+		("rampart", "osterholm"):dict(hp=1200, metal=160, crystal=10, base_energy=70,  base_power=5.6, base_vision=12),  # taller merlons
+		("rampart", "tidemark"): dict(hp=1150, metal=170, crystal=15, base_energy=65,  base_power=5.4, base_vision=14),
+		("battery", "meridian"): dict(hp=700,  metal=120, crystal=10, base_energy=80,  base_power=6.4, base_vision=18),
+		("battery", "osterholm"):dict(hp=800,  metal=140, crystal=10, base_energy=80,  base_power=6.4, base_vision=16),
+		("battery", "tidemark"): dict(hp=750,  metal=150, crystal=15, base_energy=75,  base_power=6.0, base_vision=18),
+	}
+
+	# Manufacturer title-case for the display name field. "aa" -> "Aa"
+	# reads fine in the design lab; it's a role-based 4th bunker.
+	def mfr_title(mfr):
+		return "Aa" if mfr == "aa" else mfr.capitalize()
+
+	foundation_count = 0
+
+	# --- BUNKER (4 variants) ---
+	# The bunker is an octagonal frustum + domed cap (built into
+	# build_bunker_hull) + optional recessed embrasure on the front
+	# wall. The embrasure is structural (it's a real cut in the
+	# silhouette, not a proud greeble), so it stays. The 3 manufacturer
+	# variants get an embrasure; the AA reserve does NOT (the AA's
+	# autocannon pedestal is the firing position, not a slit in the
+	# wall - keeping the silhouette clean lets the pedestal read as
+	# the silhouette's focal point).
+	for mfr in ("meridian", "osterholm", "tidemark", "aa"):
+		hull_id = "bunker_main_%s" % mfr
+		sx, sy, sz = FOUNDATION_SIZES["bunker"]
+		color = FOUNDATION_COLORS["bunker"][mfr] + (1.0,)
+		hx, hy, hz = sx / 2.0, sy / 2.0, sz / 2.0
+		embrasure = {"center": (0, 0, hz * 0.95), "size": (hx * 0.3, hy * 0.25),
+			"depth_frac": 0.08} if mfr != "aa" else None
+		# greebles=None: structural shape only, no surface treatment.
+		obj = build_bunker_hull(hull_id, sx, sy, sz,
+			color=color[:3], greebles=None, embrasure=embrasure)
+		stats = FOUNDATION_STATS[("bunker", mfr)]
+		export_hull_with_sidecar(obj, HULLS_DIR, hull_id,
+			size=(sx, sy, sz), color=color, domain="Static Defense",
+			name="Bunker Main %s" % mfr_title(mfr),
+			hp=stats["hp"], weight=0.0, metal=stats["metal"], crystal=stats["crystal"],
+			base_energy=stats["base_energy"], base_vision=stats["base_vision"],
+			base_power=stats["base_power"], is_foundation=True, category="hull")
+		foundation_count += 1
+
+	# --- TOWER (3 variants) ---
+	# The tower is a stepped tier stack + corbelled machicolation ring
+	# + rooftop railings + antenna (all built into build_tower_hull).
+	# These are STRUCTURAL elements (a tower without railings reads as
+	# a stepped pyramid, not a tower), so they stay. The 3 manufacturer
+	# variants use the same builder, differing only in paint color.
+	for mfr in ("meridian", "osterholm", "tidemark"):
+		hull_id = "tower_main_%s" % mfr
+		sx, sy, sz = FOUNDATION_SIZES["tower"]
+		color = FOUNDATION_COLORS["tower"][mfr] + (1.0,)
+		# greebles=None: structural shape only.
+		obj = build_tower_hull(hull_id, sx, sy, sz, color=color[:3], greebles=None)
+		stats = FOUNDATION_STATS[("tower", mfr)]
+		export_hull_with_sidecar(obj, HULLS_DIR, hull_id,
+			size=(sx, sy, sz), color=color, domain="Static Defense",
+			name="Tower Main %s" % mfr_title(mfr),
+			hp=stats["hp"], weight=0.0, metal=stats["metal"], crystal=stats["crystal"],
+			base_energy=stats["base_energy"], base_vision=stats["base_vision"],
+			base_power=stats["base_power"], is_foundation=True, category="hull")
+		foundation_count += 1
+
+	# --- RAMPART (3 variants) ---
+	# The rampart is a battered (wider-at-base) wall face + 5
+	# alternating merlons + 3 recessed arrow slits, all built into
+	# build_wall_hull. The slits are a real cut in the silhouette,
+	# not a proud greeble. 3 manufacturer variants, color only.
+	for mfr in ("meridian", "osterholm", "tidemark"):
+		hull_id = "rampart_main_%s" % mfr
+		sx, sy, sz = FOUNDATION_SIZES["rampart"]
+		color = FOUNDATION_COLORS["rampart"][mfr] + (1.0,)
+		# greebles=None, arrow_slit_count=3 for the structural slits.
+		obj = build_wall_hull(hull_id, sx, sy, sz, merlons=5,
+			color=color[:3], greebles=None, arrow_slit_count=3)
+		stats = FOUNDATION_STATS[("rampart", mfr)]
+		export_hull_with_sidecar(obj, HULLS_DIR, hull_id,
+			size=(sx, sy, sz), color=color, domain="Static Defense",
+			name="Rampart Main %s" % mfr_title(mfr),
+			hp=stats["hp"], weight=0.0, metal=stats["metal"], crystal=stats["crystal"],
+			base_energy=stats["base_energy"], base_vision=stats["base_vision"],
+			base_power=stats["base_power"], is_foundation=True, category="hull")
+		foundation_count += 1
+
+	# --- BATTERY (3 variants) - NEW family ---
+	# The battery is a truncated pyramid base + N weapon-mount
+	# pedestals on top (built into build_battery_hull). 2 pedestals
+	# for the classic twin-gun battery, 3 for the spread-out
+	# fire-base. Meridian gets 2 (tight, low, defensive); Osterholm
+	# and Tidemark get 3 (open, modular).
+	for mfr in ("meridian", "osterholm", "tidemark"):
+		hull_id = "battery_main_%s" % mfr
+		sx, sy, sz = FOUNDATION_SIZES["battery"]
+		color = FOUNDATION_COLORS["battery"][mfr] + (1.0,)
+		mounts = 2 if mfr == "meridian" else 3
+		# greebles=None: structural shape only.
+		obj = build_battery_hull(hull_id, sx, sy, sz, mounts=mounts,
+			color=color[:3], greebles=None)
+		stats = FOUNDATION_STATS[("battery", mfr)]
+		export_hull_with_sidecar(obj, HULLS_DIR, hull_id,
+			size=(sx, sy, sz), color=color, domain="Static Defense",
+			name="Battery Main %s" % mfr_title(mfr),
+			hp=stats["hp"], weight=0.0, metal=stats["metal"], crystal=stats["crystal"],
+			base_energy=stats["base_energy"], base_vision=stats["base_vision"],
+			base_power=stats["base_power"], is_foundation=True, category="hull")
+		foundation_count += 1
+
+	print("--- Generated %d foundation hulls ---" % foundation_count)
+	print("--- Foundation library done ---")
 
 
 def generate_buildings():

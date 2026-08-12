@@ -1,0 +1,24 @@
+{
+  "name": "Bunker Main Tidemark",
+  "hp": 850,
+  "weight": 0.0,
+  "metal": 110,
+  "crystal": 5,
+  "size": [
+    3.0,
+    2.0,
+    3.0
+  ],
+  "color": [
+    0.55,
+    0.48,
+    0.38,
+    1.0
+  ],
+  "domain": "Static Defense",
+  "base_energy": 55,
+  "base_vision": 16,
+  "is_foundation": true,
+  "category": "hull",
+  "base_power": 4.5
+}

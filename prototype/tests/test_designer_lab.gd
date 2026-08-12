@@ -239,7 +239,7 @@ func test_no_dead_tweaks() -> bool:
 	# weight/dps/cost.x/cost.y. A tweak that changes neither is pure UI
 	# theater - exactly the "Forged Battalion trap" DESIGN_VISION.md warns
 	# about, just at the single-tweak level instead of whole-part level.
-	var StatCalcScript = preload("res://scripts/stat_calculator.gd")
+	var StatCalcScript = preload("res://scripts/lab_document.gd")
 	var VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 	var TWEAK_SPECS = StatCalcScript.TWEAK_SPECS
 
@@ -574,7 +574,7 @@ func test_foundation_design_lab_parity() -> bool:
 	placer.add_child(bm)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("pillbox_foundation")
+	placer._place_hull_from_ui("bunker_main_meridian")
 	await tree.process_frame
 
 	# Locomotion should now be ALLOWED on a foundation (no hard-blocking).
@@ -1636,7 +1636,7 @@ func test_hull_collider_matches_visual_aabb() -> bool:
 	# group.
 	var shaped_hulls: Array = [
 		"block_main_meridian_a",         # catalog [3, 1.8, 5.5]; .glb authored along X
-		"pillbox_foundation",  # short and wide, the "fits in a box" archetype
+		"bunker_main_meridian",  # short and wide, the "fits in a box" archetype
 	]
 	var cube_hulls: Array = [
 		"the_cube",

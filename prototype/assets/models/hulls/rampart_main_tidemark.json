@@ -1,0 +1,24 @@
+{
+  "name": "Rampart Main Tidemark",
+  "hp": 1150,
+  "weight": 0.0,
+  "metal": 170,
+  "crystal": 15,
+  "size": [
+    4.0,
+    3.0,
+    4.0
+  ],
+  "color": [
+    0.52,
+    0.46,
+    0.38,
+    1.0
+  ],
+  "domain": "Static Defense",
+  "base_energy": 65,
+  "base_vision": 14,
+  "is_foundation": true,
+  "category": "hull",
+  "base_power": 5.4
+}

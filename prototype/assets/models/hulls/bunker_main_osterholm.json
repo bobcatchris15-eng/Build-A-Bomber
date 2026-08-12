@@ -1,0 +1,24 @@
+{
+  "name": "Bunker Main Osterholm",
+  "hp": 900,
+  "weight": 0.0,
+  "metal": 100,
+  "crystal": 0,
+  "size": [
+    3.0,
+    2.0,
+    3.0
+  ],
+  "color": [
+    0.78,
+    0.78,
+    0.74,
+    1.0
+  ],
+  "domain": "Static Defense",
+  "base_energy": 60,
+  "base_vision": 14,
+  "is_foundation": true,
+  "category": "hull",
+  "base_power": 4.8
+}

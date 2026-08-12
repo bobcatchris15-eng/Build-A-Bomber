@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dltvby6xmr6hm"
-path="res://.godot/imported/tower_foundation.glb-fc4358875d549dcfe50d3d7171ad5806.scn"
+uid="uid://bb5dnrqs0donj"
+path="res://.godot/imported/bunker_main_aa.glb-3f79133deafe8f0c5bb832cfc65809c9.scn"
 
 [deps]
 
-source_file="res://assets/models/hulls/tower_foundation.glb"
-dest_files=["res://.godot/imported/tower_foundation.glb-fc4358875d549dcfe50d3d7171ad5806.scn"]
+source_file="res://assets/models/hulls/bunker_main_aa.glb"
+dest_files=["res://.godot/imported/bunker_main_aa.glb-3f79133deafe8f0c5bb832cfc65809c9.scn"]
 
 [params]
 
@@ -40,6 +40,6 @@ materials/extract=0
 materials/extract_format=0
 materials/extract_path=""
 _subresources={}
-gltf/naming_version=1
+gltf/naming_version=2
 gltf/embedded_image_handling=1
-gltf/texture_map_mode=0
+gltf/texture_map_mode=1

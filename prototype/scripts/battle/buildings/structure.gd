@@ -135,7 +135,7 @@ func setup_from_blueprint(blueprint: Dictionary, structure_team: int, bp_manager
 	if defense_hull == null:
 		return false
 
-	var hull_type: String = blueprint.get("hull_type", "pillbox_foundation")
+	var hull_type: String = blueprint.get("hull_type", "bunker_main_meridian")
 	var thickness: float = blueprint.get("armor_thickness", 1.0)
 	var material: String = blueprint.get("armor_material", "hardened_steel")
 	var hull_scale: Vector3 = Vector3.ONE
