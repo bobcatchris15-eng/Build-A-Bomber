@@ -142,3 +142,10 @@ scratch/probe_axes/_*.glb
 # intended to live long - once the user eyeballs the contents, the dir
 # can be removed wholesale.
 __cleanup_trash_*/
+
+# Local_Agent/ is the runtime data dir for one of the agent harnesses
+# running on this machine (config, hooks, cron state, scratch memory).
+# Not project source; same category as .hilo/ and .claude/ above. The
+# capitalization is the literal on-disk name (case-sensitive on Linux
+# CI), so the pattern has to match it.
+Local_Agent/
