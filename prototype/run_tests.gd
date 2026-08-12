@@ -256,6 +256,11 @@ const SUITE_ORDER := [
 	["designer_lab", "test_alpha_readout_surfaces_the_caliber_trade"],
 	["designer_lab", "test_alpha_block_never_re_derives_the_damage_math"],
 	["designer_lab", "test_alpha_verdict_only_scolds_a_design_that_chips_everything"],
+	# Hull collider / fitted-AABB refactor (PR1-PR4). Guard the move away
+	# from the catalog bounding box as the placement/click surface, and
+	# confirm the gizmo's scale path keeps the trimesh in sync.
+	["designer_lab", "test_hull_collider_matches_visual_aabb"],
+	["designer_lab", "test_hull_collider_rebuilt_on_scale"],
 	["base_building", "test_ui_flyout_placement"],
 	["ui_and_camera", "test_ui_no_overflow_or_offscreen"],
 	["ui_and_camera", "test_ui_audit_has_real_teeth"],

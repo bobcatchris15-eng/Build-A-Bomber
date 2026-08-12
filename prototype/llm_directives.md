@@ -1,4 +1,4 @@
-# LLM Directives & Coding Standards
+﻿# LLM Directives & Coding Standards
 
 This document defines the architectural guidelines, GDScript style guides, testing practices, and deprecated/superseded patterns for **Kitbash Command** prototype (a Godot 4.7 RTS project).
 
@@ -18,7 +18,7 @@ All future code changes and feature additions must adhere strictly to the rules 
 ---
 
 ## 2. GDScript Style Guide & Conventions
-Follow Godot’s official GDScript guidelines with the following additions:
+Follow Godotâ€™s official GDScript guidelines with the following additions:
 
 ### 2.1 Formatting & Indentation
 - **Indentation**: Use **tabs** for indentation (Godot editor default). Do not use spaces.
@@ -85,14 +85,22 @@ Organize script contents in this order:
 - **Scale Isolation**: Girders, wedges, blocks, and plates must not be scaled using standard `Node3D.scale` properties, as this stretches textures and hardware details (screws, collars).
 - **Rule**: Send structural scales to the `struct_scale` metadata/property, keep `Node3D.scale` at `(1.0, 1.0, 1.0)`, and trigger a mesh re-bake. The body re-tessellates procedurally, and structural details are instanced at a $1:1$ ratio.
 
-### 3.5 UI System & Polish Rules
-- **No Emoji/Dingbats in UI**: All textual UI components (labels, buttons, etc.) must not contain decorative emojis, checkboxes, or stars. Unicode arrows and box-drawing symbols are allowed as technical notation. This is strictly audited by `ui_audit.gd`.
-- **Theme Tokens**: Style custom elements using colors and sizes defined in `res://scripts/ui_tokens.gd` and `res://scripts/ui_theme.gd` rather than hardcoding values.
-- **HP Bars & Selection Rings**: Use `WorldHPBar` (`res://scripts/world_hp_bar.gd`) to construct billboarded health bars and flat selection rings. Do not write raw `Label3D` ASCII trackers (`■□`) or default `TorusMesh` shapes.
 
----
 
-## 4. Testing Guidelines & Practices
+### 3.6 Hull Data Flow (catalog size vs. fitted AABB)
+- **The catalog size field is REFERENCE metadata, not placement geometry.** It is used by weight tiers (get_hull_size_tier), the locomotion module-reference (catalog_size in layout ctx), REFERENCE_HULL_SIZE for legacy fallbacks, and a few stat-anchor roles. It is NOT used for the hull's collider, the ase_hull_size meta, or the visual mesh placement.
+- **The fitted AABB is the source of truth for placement.** Compute it via ModuleCatalog.get_hull_fitted_aabb(hull_type_id, mesh) (or get_fitted_aabb_from_fit(mesh, fit_dict) when the fit dict is already on hand). This is the AABB the visible mesh occupies in hull-local space, after get_hull_mesh_fit()'s orientation correction and per-axis scaling.
+- **Where the fitted AABB must flow:**
+  - BoxShape3D.size on the hull's CollisionShape3D
+  - hull.set_meta("base_hull_size", fitted_size) - every dimension consumer reads this
+  - hull.position.y = fitted_size.y / 2.0 - keep the hull on the ground
+- **Where the catalog size is still the right value:**
+  - Vector3(ModuleCatalog.REFERENCE_HULL_SIZE) for the "no hull loaded" safety-net default (was hard-coded Vector3(4, 1, 6))
+  - get_running_gear_size(hull_size) reads base_hull_size, not catalog
+  - Any new code that needs a hull dimension should ask hull.get_meta("base_hull_size") first; fall back to the catalog only if the meta is missing (which means the hull was constructed without going through _place_hull_from_ui or econstruct_vehicle)
+- **When refitting a hull (armor change, scale, hull swap), every consumer has to refit together.** The collider's BoxShape3D.size, the ase_hull_size meta, hull.position.y, and the HullSurface trimesh MUST be updated in the same call. update_hull_appearance() is the one place that handles visual + collider + meta together; the gizmo's _apply_scale_to_node is the one place that handles scale + trimesh-rebuild together. New code paths that change the hull's visual must go through one of these or follow the same pattern.
+
+ & Practices
 
 ### 4.1 Running Tests
 - **Wrapper Scripts**: Always run tests using `./run_tests.ps1` (Windows) or `./run_tests.sh` (Linux/Mac/Git Bash).
@@ -144,3 +152,4 @@ Be aware of superseded files and patterns. Do not use, revive, or replicate them
     - **Replacement**: The old procedural mounting columns and base plates on weapons were deleted. Do not double-mount or add procedural cylinders under weapon meshes.
 12. **Lambda Closure Primitive Captures**:
     - **Pitfall**: GDScript captures local primitives (like `float`, `int`, `bool`) **by value** in closures. If a lambda needs to mutate a captured variable and have it reflect outside, wrap it inside a reference type such as a single-element `Array`.
+

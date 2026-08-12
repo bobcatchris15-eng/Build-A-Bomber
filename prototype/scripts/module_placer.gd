@@ -127,11 +127,19 @@ func _ready():
 		hull = get_node("Hull")
 		if hull:
 			if not hull.has_meta("base_hull_size"):
-				hull.set_meta("base_hull_size", Vector3(4.0, 1.0, 6.0))
+				# No-hull-loaded safety net. Should never fire in normal use:
+				# MainLab's hand-authored startup Hull node never has
+				# base_hull_size set, and the freshly placed hull (the only
+				# other path that reaches this) sets it in
+				# _place_hull_from_ui before calling update_hull_appearance().
+				# The reference anchor (4, 1, 6) is the same size that drives
+				# auto_weapon.gd's miss-chance size_factor - if the fallback
+				# ever runs, it should at least look right at zoom-out.
+				hull.set_meta("base_hull_size", Vector3(ModuleCatalog.REFERENCE_HULL_SIZE))
 			if not hull.has_meta("hull_scale"):
 				hull.set_meta("hull_scale", Vector3(1.0, 1.0, 1.0))
 			if not hull.has_meta("type_id"):
-				hull.set_meta("type_id", "medium_hull")
+				hull.set_meta("type_id", "block_main_meridian_a")
 			if not hull.has_meta("armor_material"):
 				hull.set_meta("armor_material", "hardened_steel")
 			if not hull.has_meta("armor_thickness"):
@@ -476,8 +484,14 @@ func delete_selected_module():
 				var hull_scale = Vector3(1, 1, 1)
 				if hull.has_meta("hull_scale"):
 					hull_scale = hull.get_meta("hull_scale")
-				var hull_catalog_data = ModuleCatalog.get_module_data(hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull")
-				hull.position.y = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0
+				# base_hull_size is now the fitted AABB (set in _place_hull_from_ui
+				# / update_hull_appearance), so reading it here keeps this lift
+				# consistent with whatever the collider and meta report everywhere
+				# else - no separate catalog round-trip.
+				var base_hull_size: Vector3 = Vector3(ModuleCatalog.REFERENCE_HULL_SIZE)
+				if hull.has_meta("base_hull_size"):
+					base_hull_size = hull.get_meta("base_hull_size")
+				hull.position.y = (base_hull_size.y * hull_scale.y) / 2.0
 				hull.remove_meta("locomotion_type")
 				hull.remove_meta("locomotion_settings")
 		
@@ -505,28 +519,47 @@ func _place_hull_from_ui(type_id: String):
 	if hull:
 		_log("Hull already exists, cannot place another until deleted.")
 		return
-		
+
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
-	
+
 	hull = StaticBody3D.new()
 	hull.name = "Hull"
 	hull.collision_layer = 1
 	hull.collision_mask = 0
-	hull.position = Vector3(0, catalog_data.get("size", Vector3.ONE).y / 2.0, 0)
-	
-	hull.set_meta("base_hull_size", catalog_data.get("size", Vector3.ONE))
+	# Fitted AABB drives BOTH the height this sits at on the ground (y/2) and
+	# the meta every dimension consumer reads. See the "Hull-local AABB the
+	# visual mesh actually occupies" block in module_catalog.gd for the
+	# rationale; the short version is that the catalog `size` is a hand-tuned
+	# box the mesh is squashed to fit, and using it here made the hull float
+	# above or sink into the ground on every hull whose actual silhouette is
+	# smaller than the catalog box.
+	var fitted_size: Vector3 = catalog_data.get("size", Vector3.ONE)
+	hull.position = Vector3(0, fitted_size.y / 2.0, 0)
+
+	hull.set_meta("base_hull_size", fitted_size)
 	hull.set_meta("hull_scale", Vector3(1, 1, 1))
 	hull.set_meta("type_id", type_id)
-	
+
 	var phys_mesh = MeshInstance3D.new()
 	phys_mesh.name = "PhysicsMesh"
 	var authored_mesh = MeshAssetLoader.get_hull_mesh(type_id)
+	var fit: Dictionary = {}
 	if authored_mesh:
 		phys_mesh.mesh = authored_mesh
-		var fit = ModuleCatalog.get_hull_mesh_fit(type_id, authored_mesh)
+		fit = ModuleCatalog.get_hull_mesh_fit(type_id, authored_mesh)
 		phys_mesh.rotation = fit["rotation"]
 		phys_mesh.scale = fit["scale"]
 		phys_mesh.position = fit["position"]
+		# Re-derive the hull's footprint from the actual fitted mesh. For a
+		# primitive-shape hull (the_cube, the_orb, the_rod, the_slab) the
+		# fitted AABB is exactly the catalog box, so this is a no-op there;
+		# for any authored hull whose proportions disagree with the catalog
+		# box, this collapses the box down to the mesh's real extent.
+		var fitted_aabb: AABB = ModuleCatalog.get_fitted_aabb_from_fit(authored_mesh, fit)
+		if fitted_aabb.size.length_squared() > 0.0:
+			fitted_size = fitted_aabb.size
+			hull.set_meta("base_hull_size", fitted_size)
+			hull.position.y = fitted_size.y / 2.0
 	else:
 		var box = BoxMesh.new()
 		box.size = catalog_data.get("size", Vector3.ONE)
@@ -554,19 +587,23 @@ func _place_hull_from_ui(type_id: String):
 
 	_rebuild_surface_body(hull, phys_mesh)
 
-	# Axis-aligned in hull-local space, and NOT rotated to match the mesh:
-	# col_box.size is already expressed in the hull-local convention
-	# (x = width, z = length along the -Z front), and get_hull_mesh_fit() has
-	# just scaled the visual mesh to occupy exactly that box. Applying the
-	# mesh's orientation correction here as well used to rotate the collider
-	# 90 degrees away from the hull you can see - medium_hull rendered 3.0
-	# wide by 5.5 long while colliding as 5.5 wide by 3.0 long, which threw
-	# off click-to-select raycasts, locomotion mounting and armor auto-fit
-	# (all of which read this shape's size).
+	# Axis-aligned in hull-local space, and NOT rotated to match the mesh.
+	# get_hull_mesh_fit() recentres the visual on the hull's local origin, so
+	# this box is too - size is the fitted AABB's size, position stays at the
+	# hull node's local origin (the mesh's recentred centre). It used to be
+	# the CATALOG box, which (for every hull whose actual silhouette is
+	# smaller than the catalog box) was larger than the visible mesh - and
+	# every dimension consumer that read this shape (locomotion stations,
+	# armor auto-fit, hull.position.y in locomotion-cleared paths, unit.gd's
+	# separation/selection/cargo radii) silently read a value that disagreed
+	# with what the player could see. Worst on SDF-baked hulls, the spire/
+	# catamaran/pillbox/interceptor families, and airship_hull's curved
+	# envelope. Now matches the visible mesh, so module placement, click
+	# targets, locomotion layout and battle spawns all agree.
 	var col = CollisionShape3D.new()
 	col.name = "CollisionShape3D"
 	var col_box = BoxShape3D.new()
-	col_box.size = catalog_data.get("size", Vector3.ONE)
+	col_box.size = fitted_size
 	col.shape = col_box
 	hull.add_child(col)
 
@@ -849,8 +886,12 @@ func update_locomotion(type_id: String, settings: Dictionary):
 
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 
-	# Get actual hull size
-	var hull_size = Vector3(4.0, 1.0, 6.0)
+	# hull_size is the COLLIDER's box - the fitted AABB, since
+	# _place_hull_from_ui / update_hull_appearance set the box to the fitted
+	# size rather than the catalog box. The reference constant is the
+	# "no hull loaded" safety net: same as the pre-change (4, 1, 6) literal
+	# but now reads as the named anchor.
+	var hull_size: Vector3 = Vector3(ModuleCatalog.REFERENCE_HULL_SIZE)
 	var hull_scale = Vector3(1.0, 1.0, 1.0)
 	if hull.has_meta("hull_scale"):
 		hull_scale = hull.get_meta("hull_scale")
@@ -1011,9 +1052,14 @@ func update_locomotion(type_id: String, settings: Dictionary):
 	# it. Measuring where the geometry ACTUALLY ends and lifting the hull by that
 	# is both simpler and correct for every type, including the seven new ones
 	# that never had a constant of their own.
-	var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
-	var hull_catalog_data = ModuleCatalog.get_module_data(hull_type)
-	var default_lift: float = (hull_catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + running_gear_size.y
+	var hull_type = hull.get_meta("type_id") if hull.has_meta("type_id") else "block_main_meridian_a"
+	# default_lift comes off the COLLIDER (which is now the fitted AABB, set
+	# by _place_hull_from_ui / update_hull_appearance), not the catalog entry.
+	# Same source every station position above is derived from, and the same
+	# source blueprint_manager.gd's reconstruct_vehicle() uses for its matching
+	# "hull sits on the ground" lift - so a design sits at the same height in
+	# the lab, the test range, and a battle.
+	var default_lift: float = (hull_size.y * hull_scale.y) / 2.0 + running_gear_size.y
 	hull.position.y = default_lift
 	if ModuleCatalog.locomotion_touches_ground(type_id):
 		var lowest := INF
@@ -1307,7 +1353,10 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 				target_z = facet_meas["size"].z
 				armor_pos = facet_meas["center"]
 			else:
-				var hull_size = Vector3(4.0, 1.0, 6.0)
+				# Same fallback as update_locomotion's - the collider's box is
+				# the fitted AABB; the reference constant is the "no hull loaded"
+				# safety net.
+				var hull_size: Vector3 = Vector3(ModuleCatalog.REFERENCE_HULL_SIZE)
 				var hull_shape = hull.get_node_or_null("CollisionShape3D")
 				if hull_shape and hull_shape.shape is BoxShape3D:
 					hull_size = hull_shape.shape.size
@@ -1381,7 +1430,7 @@ func update_hull_appearance():
 		phys_mesh.visible = false
 		hull.add_child(phys_mesh)
 
-	var type_id = hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull"
+	var type_id = hull.get_meta("type_id") if hull.has_meta("type_id") else "block_main_meridian_a"
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	
 	var hull_scale = hull.get_meta("hull_scale") if hull.has_meta("hull_scale") else Vector3(1,1,1)
@@ -1390,6 +1439,7 @@ func update_hull_appearance():
 	# Bulk size based on thickness
 	var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
 	var authored_mesh = MeshAssetLoader.get_hull_mesh(type_id)
+	var fit: Dictionary = {}
 	if authored_mesh:
 		# Per-hull-type custom deform (MOUNTING_AND_ARMOR_SPEC.md #4),
 		# proof-of-concept for interceptor_hull only. Genuine regional
@@ -1398,7 +1448,7 @@ func update_hull_appearance():
 		# this never mutates MeshAssetLoader's cached shared resource.
 			# nose_taper removed with interceptor_hull - hook point for future per-hull mesh deform
 		phys_mesh.mesh = authored_mesh
-		var fit = ModuleCatalog.get_hull_mesh_fit(type_id, authored_mesh, hull_scale * armor_bulk)
+		fit = ModuleCatalog.get_hull_mesh_fit(type_id, authored_mesh, hull_scale * armor_bulk)
 		phys_mesh.rotation = fit["rotation"]
 		phys_mesh.scale = fit["scale"]
 		phys_mesh.position = fit["position"]
@@ -1413,6 +1463,30 @@ func update_hull_appearance():
 	mesh_inst.scale = phys_mesh.scale
 	mesh_inst.rotation = phys_mesh.rotation
 	mesh_inst.position = phys_mesh.position
+
+	# The box collider and the base_hull_size meta have to track the visual
+	# mesh's actual extent at the CURRENT (hull_scale * armor_bulk), not the
+	# catalog box - everything that reads hull_size (locomotion stations,
+	# armor auto-fit, unit.gd's separation / selection / cargo radii) flows
+	# off these, so leaving them stale at the catalog value made every later
+	# rebuild silently disagree with what the player could see.
+	#
+	# For an authored mesh, the fitted AABB at the current scale is the
+	# honest answer; for a primitive / no-mesh hull, the catalog box is the
+	# only answer, and the gizmo's BoxMesh path (which sets box.size to
+	# `base_hull_size * new_scale`) keeps the collider in sync with the
+	# visual mesh.
+	var current_size: Vector3 = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
+	if authored_mesh and not fit.is_empty():
+		var fitted_aabb: AABB = ModuleCatalog.get_fitted_aabb_from_fit(authored_mesh, fit)
+		if fitted_aabb.size.length_squared() > 0.0:
+			current_size = fitted_aabb.size
+	hull.set_meta("base_hull_size", current_size)
+	var col_shape_node := hull.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	if col_shape_node and col_shape_node.shape is BoxShape3D:
+		if not col_shape_node.shape.resource_local_to_scene:
+			col_shape_node.shape = col_shape_node.shape.duplicate()
+		(col_shape_node.shape as BoxShape3D).size = current_size
 
 	# Precise placement surface has to track every change to the visual mesh
 	# (hull swap, rescale, armor bulk, nose taper) or modules would snap to a
@@ -2561,7 +2635,9 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: b
 		return
 	var catalog_data = ModuleCatalog.get_module_data(data.type_id)
 
-	var hull_size = Vector3(4.0, 1.0, 6.0)
+	# collider's box is the fitted AABB; the reference constant is the
+	# "no hull loaded" safety net.
+	var hull_size: Vector3 = Vector3(ModuleCatalog.REFERENCE_HULL_SIZE)
 	var hull_shape = hull.get_node_or_null("CollisionShape3D")
 	if hull_shape and hull_shape.shape is BoxShape3D:
 		hull_size = hull_shape.shape.size

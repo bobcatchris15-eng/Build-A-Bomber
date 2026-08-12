@@ -2199,6 +2199,50 @@ static func get_hull_mesh_fit(hull_type_id: String, mesh: Mesh, extra_scale: Vec
 
 	return {"rotation": euler, "scale": final_scale, "position": position}
 
+# Hull-local AABB the visual mesh actually occupies, given the fit dict that
+# get_hull_mesh_fit() just produced. Centre is at (0, 0, 0) - the fit recentres
+# the mesh on the hull's local origin - and the size is the per-axis hull-local
+# extent of the rotated, scaled mesh.
+#
+# This is the hull's TRUE footprint. The catalog `size` field is a hand-tuned
+# bounding box the mesh is squashed to fit, not the mesh's actual extents, and
+# using it as the collider/source-of-truth made every dimension consumer
+# (locomotion station positions, armor auto-fit, running-gear placement,
+# hull.position.y, unit.gd's separation/selection/cargo radii) read a value
+# that disagreed with what the player could see. For hulls whose actual
+# silhouette is smaller than the catalog box along one axis (SDF-baked hulls,
+# tapered keels, airship envelopes, the spire/catamaran/pillbox/interceptor
+# families) the visual mesh sat well inside the box, and every module placed
+# against the box floated in air around the actual hull.
+#
+# `get_hull_fitted_aabb()` below is the convenience wrapper for callers that
+# don't already hold a fit dict. Both return an AABB; pass `.size` for the
+# box collider / base_hull_size / locomotion hull_size, and `.get_center()` is
+# (0, 0, 0) so the collider's position stays at the hull node's local origin
+# (the mesh's recentred centre, not its raw AABB corner).
+static func get_fitted_aabb_from_fit(mesh: Mesh, fit: Dictionary) -> AABB:
+	if not mesh:
+		return AABB(Vector3.ZERO, Vector3.ZERO)
+	var aabb: AABB = mesh.get_aabb()
+	if aabb.size.x <= 0.0001 or aabb.size.y <= 0.0001 or aabb.size.z <= 0.0001:
+		return AABB(Vector3.ZERO, Vector3.ZERO)
+	var euler: Vector3 = fit.get("rotation", Vector3.ZERO)
+	var final_scale: Vector3 = fit.get("scale", Vector3.ONE)
+	# _oriented_extents() takes a size vector and returns the AABB size after a
+	# rotation - which is exactly the per-axis hull-local extent of the mesh
+	# after final_scale is applied in mesh-local axes and then rotated.
+	var oriented_size: Vector3 = _oriented_extents(aabb.size * final_scale, euler)
+	return AABB(-oriented_size * 0.5, oriented_size)
+
+# Top-level convenience: one orientation search, then the AABB. Use this
+# unless the caller already called get_hull_mesh_fit() for the visual placement
+# (in which case get_fitted_aabb_from_fit() saves the duplicate search).
+static func get_hull_fitted_aabb(hull_type_id: String, mesh: Mesh, extra_scale: Vector3 = Vector3.ONE) -> AABB:
+	if not mesh:
+		return AABB(Vector3.ZERO, Vector3.ZERO)
+	var fit: Dictionary = get_hull_mesh_fit(hull_type_id, mesh, extra_scale)
+	return get_fitted_aabb_from_fit(mesh, fit)
+
 # Energy resource (ENERGY_AND_BALANCE_SPEC.md #1): a hull's base_energy is
 # the starting point for max_energy before any generator modules are
 # mounted. Defaults to 0.0 for anything without a base_energy field
@@ -2480,7 +2524,7 @@ static func get_module_role(type_id: String, category: String = "") -> String:
 
 # --- Tech Tree Building Prerequisites ---
 const HULL_REQUIREMENTS = {
-	"heavy_hull": "tech_lab",
+	"block_heavy_meridian_a": "tech_lab",
 	"interceptor_hull": "tech_lab",
 	"sponson_hull": "tech_lab",
 	"fuselage_hull": "tech_lab",

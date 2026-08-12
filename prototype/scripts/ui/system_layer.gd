@@ -22,6 +22,7 @@ signal closed()
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const SettingsPanelScript = preload("res://scripts/ui/settings_panel.gd")
+const MatchRuleSetScript = preload("res://scripts/match_rule_set.gd")
 
 const LAYER_INDEX := 120
 
@@ -164,6 +165,17 @@ func _build() -> void:
 # context-dependent: RESUME and CONCEDE only mean anything inside a match, and a
 # menu that offers "Concede" on the main menu is worse than one that is a frame
 # slower to appear.
+#
+# TEST-RANGE BRANCH. The Test Arena (MatchRuleSet.Mode.TEST_RANGE) is launched
+# from the Design Lab as a quick sandbox, so its menu is shaped around the
+# three ways a player leaves the test rig and nothing else. OBJECTIVES and
+# CONCEDE MATCH are skipped: there is no production (no queues, no HQ to lose,
+# no objective tracker to read) and Concede would just route to the Main Menu
+# - exactly what RETURN TO FRONT DESK already does one row down. Showing both
+# Concede and "Return to Main Menu" in the same menu is a two-ways-to-quit
+# pattern that reads as a bug, and a "Return to Lab" row is the one entry the
+# player actually came here from. Skirmish and Operations keep the full
+# layout.
 func _rebuild_menu() -> void:
 	for child in _menu_box.get_children():
 		child.queue_free()
@@ -175,16 +187,23 @@ func _rebuild_menu() -> void:
 	_menu_box.add_child(HSeparator.new())
 
 	var in_match := _in_match()
+	var in_test_range := _in_test_range()
 
 	if in_match:
 		_add_entry("RESUME", func(): close())
 	_add_entry("SETTINGS", func(): _open_settings())
-	if in_match:
+	if in_match and not in_test_range:
 		_add_entry("OBJECTIVES", func(): _show_objectives())
 
 	_menu_box.add_child(HSeparator.new())
 
-	if in_match:
+	if in_test_range:
+		# Lab is the screen the player launched from, so it is the path they
+		# most often want to take back. The lab_scratch.json round-trip
+		# (BlueprintManager.SCRATCH_PATH) means the design staged for the test
+		# is what the Lab picks up on next load - no manual re-export.
+		_add_entry("RETURN TO LAB", func(): _leave_to_lab())
+	elif in_match:
 		_add_entry("CONCEDE MATCH", func(): _leave("res://scenes/MainMenu.tscn"), "danger")
 	_add_entry("RETURN TO FRONT DESK", func(): _leave("res://scenes/MainMenu.tscn"))
 	_add_entry("QUIT", func(): get_tree().quit(), "danger")
@@ -214,6 +233,22 @@ func _in_match() -> bool:
 	return scene != null and scene.has_signal("world_ready")
 
 
+# True when the live match is the Test Arena. Read off the autoloaded
+# MatchConfig rather than the rule set on the current scene - a test path
+# boots without a real current_scene and the rule set lives there - so
+# the menu picks the test-range branch in every boot path that has one.
+# Returns false on the Main Menu (no MatchConfig.rule_set) and in unit
+# tests that mount the script outside a match.
+func _in_test_range() -> bool:
+	var mc := get_tree().root.get_node_or_null("MatchConfig")
+	if mc == null:
+		return false
+	var rs = mc.get("rule_set")
+	if rs == null:
+		return false
+	return int(rs.get("mode", -1)) == int(MatchRuleSetScript.Mode.TEST_RANGE)
+
+
 func _leave(path: String) -> void:
 	# Unpause BEFORE routing. A scene change while the tree is paused leaves the
 	# incoming scene frozen with nothing left on screen able to unfreeze it.
@@ -223,6 +258,23 @@ func _leave(path: String) -> void:
 		router.goto(path)
 	else:
 		get_tree().change_scene_to_file(path)
+
+
+# Test-Arena-only exit: hands the player back to the Design Lab with their
+# design still staged. Uses the same router-or-fallback split as _leave, and
+# the same fade the rest of the scene transitions go through, so the
+# player sees a clean reload of the Lab rather than a hard cut.
+#
+# WHAT THIS DOES NOT DO. It does not write scratch or call
+# BlueprintManager.mark_lab_restore_for_current - the launcher that built
+# the Test Arena (TestRangeLauncher, or the Design Lab's "Test in Arena"
+# button) already wrote the scratch slot before swapping scenes, and the
+# Lab reads the pending flag on its own next load. The launcher is the
+# only place that knows "the player just came from the Lab" and the rule
+# set is the only thing that records it; this menu just takes the
+# "back" path those two set up.
+func _leave_to_lab() -> void:
+	_leave("res://scenes/MainLab.tscn")
 
 
 func _open_settings() -> void:

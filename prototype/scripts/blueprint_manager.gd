@@ -92,7 +92,13 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 	if not hull:
 		return {}
 
-	var hull_size = Vector3(4.0, 1.0, 6.0)
+	# base_hull_size is the FITTED AABB (set in _place_hull_from_ui /
+	# update_hull_appearance / reconstruct_vehicle) - the actual mesh
+	# footprint, not the catalog box. Round-tripping it through the blueprint
+	# JSON is what keeps a loaded design's wheels, armor auto-fit, hull
+	# ride-height, and unit.gd's separation / selection / cargo radii on the
+	# same dimensions as the same design freshly built.
+	var hull_size = Vector3(ModuleCatalogScript.REFERENCE_HULL_SIZE)
 	if hull.has_meta("base_hull_size") and hull.has_meta("hull_scale"):
 		hull_size = hull.get_meta("base_hull_size") * hull.get_meta("hull_scale")
 
@@ -101,7 +107,7 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 
 	var blueprint = {
 		"version": 1.0,
-		"hull_type": hull.get_meta("type_id") if hull.has_meta("type_id") else "medium_hull",
+		"hull_type": hull.get_meta("type_id") if hull.has_meta("type_id") else "block_main_meridian_a",
 		"hull_scale": {"x": hull.get_meta("hull_scale").x, "y": hull.get_meta("hull_scale").y, "z": hull.get_meta("hull_scale").z} if hull.has_meta("hull_scale") else {"x": 1.0, "y": 1.0, "z": 1.0},
 		"hull_size": {"x": hull_size.x, "y": hull_size.y, "z": hull_size.z},
 		"armor_material": hull.get_meta("armor_material") if hull.has_meta("armor_material") else "hardened_steel",
@@ -335,7 +341,7 @@ func restore_scratch_into_designer() -> bool:
 	if data.is_empty():
 		return false
 
-	var hull_type = data.get("hull_type", "medium_hull")
+	var hull_type = data.get("hull_type", "block_main_meridian_a")
 	if not ModuleCatalogScript.hull_exists(hull_type):
 		last_load_error = "Couldn't restore your design: hull '%s' is not installed." % hull_type
 		_show_toast(last_load_error, true)
@@ -414,7 +420,7 @@ func list_blueprints(named_only: bool = false) -> Array:
 					results.append({
 						"id": data.get("id", file_name.get_basename()),
 						"name": data.get("name", "Untitled Design"),
-						"hull_type": data.get("hull_type", "medium_hull"),
+						"hull_type": data.get("hull_type", "block_main_meridian_a"),
 						"faction": data.get("faction", "industrialists"),
 						# Derived here rather than in the Library screen because
 						# `data` - the whole blueprint, modules and all - is in
@@ -424,7 +430,7 @@ func list_blueprints(named_only: bool = false) -> Array:
 						"is_harvester": ModuleCatalogScript.blueprint_is_harvester(data),
 						"cargo_capacity": HarvesterFSMScript.capacity_for(
 							ModuleCatalogScript.blueprint_harvester_modules(data),
-							str(data.get("hull_type", "medium_hull")),
+							str(data.get("hull_type", "block_main_meridian_a")),
 							ModuleCatalogScript.blueprint_bay_capacity(data)
 						) if ModuleCatalogScript.blueprint_is_harvester(data) else 0,
 						"modified_unix": data.get("modified_unix", 0),
@@ -446,7 +452,7 @@ func list_blueprints(named_only: bool = false) -> Array:
 					results.append({
 						"id": data.get("id", file_name.get_basename()),
 						"name": data.get("name", "Untitled Design"),
-						"hull_type": data.get("hull_type", "medium_hull"),
+						"hull_type": data.get("hull_type", "block_main_meridian_a"),
 						"faction": data.get("faction", "industrialists"),
 						# Derived here rather than in the Library screen because
 						# `data` - the whole blueprint, modules and all - is in
@@ -456,7 +462,7 @@ func list_blueprints(named_only: bool = false) -> Array:
 						"is_harvester": ModuleCatalogScript.blueprint_is_harvester(data),
 						"cargo_capacity": HarvesterFSMScript.capacity_for(
 							ModuleCatalogScript.blueprint_harvester_modules(data),
-							str(data.get("hull_type", "medium_hull")),
+							str(data.get("hull_type", "block_main_meridian_a")),
 							ModuleCatalogScript.blueprint_bay_capacity(data)
 						) if ModuleCatalogScript.blueprint_is_harvester(data) else 0,
 						"modified_unix": data.get("modified_unix", 0),
@@ -541,7 +547,7 @@ func load_blueprint_into_designer(id: String) -> bool:
 	# itself also refuses (returns null) as a second line of defense for
 	# every other caller (skirmish spawns, battlefield, defense buildings),
 	# but only this path can say exactly which design and which hull.
-	var hull_type = data.get("hull_type", "medium_hull")
+	var hull_type = data.get("hull_type", "block_main_meridian_a")
 	if not ModuleCatalogScript.hull_exists(hull_type):
 		var bp_name = data.get("name", "Untitled Design")
 		last_load_error = "Can't load '%s': hull '%s' is not installed. Reinstall the mod that adds it, or choose a different design." % [bp_name, hull_type]
@@ -610,7 +616,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	var ModuleCatalog = preload("res://scripts/module_catalog.gd")
 	var ModuleData = preload("res://scripts/module_data.gd")
 
-	var hull_type = blueprint_data.get("hull_type", "medium_hull")
+	var hull_type = blueprint_data.get("hull_type", "block_main_meridian_a")
 
 	# Hard-fail, not ModuleCatalog.get_module_data()'s always-succeeds
 	# fallback (which returns basic_cannon's WEAPON data for an unknown
@@ -633,9 +639,17 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	else:
 		hull = Node3D.new()
 	hull.name = "Hull"
-	
+
 	# Set metadata
-	hull.set_meta("base_hull_size", catalog_data.get("size", Vector3.ONE))
+	# base_hull_size is the FITTED AABB at (hull_scale * armor_bulk), not the
+	# catalog box - every dimension consumer (locomotion stations, armor
+	# auto-fit, unit.gd's separation / selection / cargo radii) reads it and
+	# would otherwise use the catalog box, which doesn't match the visible
+	# mesh for hulls whose silhouette disagrees with their sidecar size. The
+	# fallback to the catalog size only fires when there is no authored mesh
+	# to compute a fit from (e.g. the_cube / the_orb / the_rod / the_slab,
+	# whose fitted AABB happens to equal the catalog box anyway).
+	var base_hull_size: Vector3 = catalog_data.get("size", Vector3.ONE)
 	var hull_scale_dict = blueprint_data.get("hull_scale", {"x": 1.0, "y": 1.0, "z": 1.0})
 	var hull_scale = Vector3(hull_scale_dict.x, hull_scale_dict.y, hull_scale_dict.z)
 	hull.set_meta("hull_scale", hull_scale)
@@ -697,6 +711,7 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	var phys_mesh = MeshInstance3D.new()
 	phys_mesh.name = "PhysicsMesh"
 	var authored_hull_mesh = MeshAssetLoader.get_hull_mesh(hull_type)
+	var fit: Dictionary = {}
 	if authored_hull_mesh:
 		# nose_taper removed with interceptor_hull - hook point for future per-hull mesh deform
 		phys_mesh.mesh = authored_hull_mesh
@@ -705,14 +720,26 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# looks and collides identically whether it was just built in the lab
 		# or reconstructed from a saved blueprint. These two used to compute
 		# the orientation and fit separately and disagree.
-		var fit = ModuleCatalogScript.get_hull_mesh_fit(hull_type, authored_hull_mesh, hull_scale * armor_bulk)
+		fit = ModuleCatalogScript.get_hull_mesh_fit(hull_type, authored_hull_mesh, hull_scale * armor_bulk)
 		phys_mesh.rotation = fit["rotation"]
 		phys_mesh.scale = fit["scale"]
 		phys_mesh.position = fit["position"]
+
+		# base_hull_size is the fitted AABB at (hull_scale * armor_bulk), so
+		# every dimension consumer that reads it (locomotion stations, armor
+		# auto-fit, unit.gd's separation / selection / cargo radii) sees the
+		# actual mesh footprint rather than the catalog box. For primitive /
+		# no-mesh hulls the fitted AABB would be zero and we leave
+		# base_hull_size at the catalog fallback set just before this block.
+		var fitted_aabb: AABB = ModuleCatalogScript.get_fitted_aabb_from_fit(authored_hull_mesh, fit)
+		if fitted_aabb.size.length_squared() > 0.0:
+			base_hull_size = fitted_aabb.size
 	else:
 		var box = BoxMesh.new()
 		box.size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
 		phys_mesh.mesh = box
+
+	hull.set_meta("base_hull_size", base_hull_size)
 
 	# Never drawn - it duplicates the visual MeshInstance3D exactly, so
 	# showing it (which the designer used to do) only produced z-fighting
@@ -740,25 +767,36 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	else:
 		HullMaterialBuilderScript.apply_hull_materials(mesh_inst, faction_name)
 		HullDecalsScript.apply_decals(hull, faction_name, catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk)
-	
+
 	# Re-create Hull's CollisionShape3D (only in designer)
 	if is_designer:
 		# Same shape the Design Lab builds for a freshly placed hull (see
-		# module_placer.gd's _place_hull_from_ui): an axis-aligned box of the
-		# catalog size, NOT rotated to match the mesh's orientation
-		# correction. This used to be a convex hull of the authored mesh
-		# instead, which meant `shape is BoxShape3D` was false and every
-		# caller reading the hull's dimensions off this shape
+		# module_placer.gd's _place_hull_from_ui): an axis-aligned box in
+		# hull-local space (the fit recentred the visual on the origin, so
+		# the box's position stays at the origin too), NOT rotated to match
+		# the mesh's orientation correction. The size used to be the
+		# CATALOG box, which for every hull whose silhouette is smaller than
+		# the catalog box (SDF-baked hulls, spire/catamaran/pillbox/
+		# interceptor, airship envelopes) was larger than the visible mesh.
+		# Now sized to the fitted AABB so `shape is BoxShape3D` AND every
+		# caller that reads the hull's dimensions off this shape
 		# (update_locomotion, armor auto-fit, _reclassify_module_after_drag)
-		# silently fell back to a hardcoded 4 x 1 x 6 - so a loaded blueprint
-		# mounted its wheels and armor to different dimensions than the same
-		# design freshly built.
+		# agree with the visible mesh - a loaded blueprint mounts its wheels
+		# and armor to the same dimensions as the same design freshly built.
+		#
+		# This used to be a convex hull of the authored mesh, which was
+		# technically more accurate but made `shape is BoxShape3D` false
+		# and forced every consumer to fall back to a hardcoded 4 x 1 x 6.
+		# The precise mesh surface is still available as the HullSurface
+		# trimesh on layer 5 (HullSurfaceScript below); the box here stays
+		# the dimension oracle.
 		var col = CollisionShape3D.new()
 		col.name = "CollisionShape3D"
 		col.scale = Vector3.ONE
 		col.rotation = Vector3.ZERO
+		col.position = Vector3.ZERO
 		var col_box = BoxShape3D.new()
-		col_box.size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
+		col_box.size = base_hull_size
 		col.shape = col_box
 		hull.add_child(col)
 
@@ -803,7 +841,13 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	# the same metas off the hull it's actively editing.
 	hull.set_meta("locomotion_type", loc_type)
 	hull.set_meta("locomotion_settings", settings)
-	var hull_size = catalog_data.get("size", Vector3.ONE) * hull_scale * armor_bulk
+	# base_hull_size was set to the fitted AABB at the top of this function,
+	# so the running-gear and hull-position math below tracks the actual mesh
+	# rather than the catalog box - the same fix module_placer.gd's
+	# _place_hull_from_ui / update_hull_appearance already did for the
+	# Design Lab. A design's wheels and ride height are now identical whether
+	# it was just built, just loaded, or just battle-spawned.
+	var hull_size: Vector3 = base_hull_size
 	var running_gear_size = Vector3.ZERO
 	if ModuleCatalog.needs_running_gear(loc_type):
 		running_gear_size = ModuleCatalog.get_running_gear_size(hull_size)
@@ -822,14 +866,14 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		gear_body.position = Vector3(0, -hull_size.y / 2.0 - running_gear_size.y / 2.0, 0)
 
 	if running_gear_size.y > 0.0:
-		hull.position = Vector3(0, (catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + running_gear_size.y, 0)
+		hull.position = Vector3(0, (base_hull_size.y * hull_scale.y) / 2.0 + running_gear_size.y, 0)
 	else:
 		var wheels_offset = 0.0
 		if loc_type == "wheels":
 			wheels_offset = 0.8 * settings.get("size", 1.0)
 		elif loc_type == "legs":
 			wheels_offset = 1.6 * settings.get("size", 1.0)
-		hull.position = Vector3(0, (catalog_data.get("size", Vector3.ONE).y * hull_scale.y) / 2.0 + wheels_offset, 0)
+		hull.position = Vector3(0, (base_hull_size.y * hull_scale.y) / 2.0 + wheels_offset, 0)
 	
 	# Spawn modules
 	var modules = blueprint_data.get("modules", [])
@@ -1004,12 +1048,12 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			# module at local y=-0.4 inside a 1.0-tall hull, so the gear never
 			# reaches the hull's own underside and the measured lift put the
 			# hull bottom at -0.109.
-			# hull_size is the catalog size already multiplied by hull_scale and
-			# armor_bulk - the same figure the running-gear sizing above uses,
-			# and what unit.gd builds its hull collider from. Taking the
-			# half-height from anywhere else is how module_placer.gd's copy of
-			# this floor ended up reading a fallback catalog entry instead of
-			# the hull in front of it.
+			# hull_size is the FITTED AABB (not the catalog size), already the
+			# same figure the running-gear sizing above uses, and what
+			# unit.gd builds its hull collider from. Taking the half-height
+			# from anywhere else is how module_placer.gd's copy of this floor
+			# ended up reading a fallback catalog entry instead of the hull
+			# in front of it.
 			hull.position.y = maxf(-lowest, hull_size.y / 2.0)
 
 	# Matching clear for the set_livery() above. Must run on EVERY exit from

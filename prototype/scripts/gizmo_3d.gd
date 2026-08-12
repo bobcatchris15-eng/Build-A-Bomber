@@ -260,11 +260,18 @@ func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
 		# Scale Isolation: scale only the MeshInstance3D and CollisionShape3D directly.
 		# This keeps the parent Hull node scale at (1, 1, 1), avoiding module deformation.
 		node.set_meta("hull_scale", new_scale)
-		var base_size = Vector3(4.0, 1.0, 6.0)
+		# base_hull_size is the FITTED AABB (set by _place_hull_from_ui /
+		# update_hull_appearance), not the catalog box. Scaling it by
+		# new_scale gives the fitted AABB at the new scale, which is the
+		# size the collider needs to be so the surface a module snaps to
+		# (HullSurface trimesh) and the box it falls back to / reads as the
+		# dimension oracle still agree with each other and with the visible
+		# mesh.
+		var base_size: Vector3 = Vector3(ModuleCatalogScript.REFERENCE_HULL_SIZE)
 		if node.has_meta("base_hull_size"):
 			base_size = node.get_meta("base_hull_size")
 
-		var target_size = base_size * new_scale
+		var target_size: Vector3 = base_size * new_scale
 
 		# Resize MeshInstance3D. Authored .glb hulls are ArrayMeshes - they
 		# scale via mesh_inst.scale (same as update_hull_appearance() /
@@ -274,7 +281,7 @@ func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
 		# the visible mesh until some later full rebuild (FABLE_REVIEW.md 3.8).
 		var armor_thick = node.get_meta("armor_thickness") if node.has_meta("armor_thickness") else 1.0
 		var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
-		var hull_type = node.get_meta("type_id") if node.has_meta("type_id") else "medium_hull"
+		var hull_type = node.get_meta("type_id") if node.has_meta("type_id") else "block_main_meridian_a"
 		var mesh_inst = node.get_node_or_null("MeshInstance3D")
 		var phys_mesh = node.get_node_or_null("PhysicsMesh")
 		if mesh_inst and mesh_inst.mesh is BoxMesh:
@@ -301,22 +308,47 @@ func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
 				phys_mesh.scale = fit["scale"]
 				phys_mesh.position = fit["position"]
 
-		# Resize CollisionShape3D. Stays axis-aligned in hull-local space -
-		# see module_placer.gd's _place_hull_from_ui() for why it must not
-		# inherit the mesh's orientation correction.
+		# Resize CollisionShape3D. Stays axis-aligned in hull-local space
+		# (the fit recentred the visual on the origin, so the collider's
+		# position stays there too) - see module_placer.gd's
+		# _place_hull_from_ui for why it must not inherit the mesh's
+		# orientation correction.
 		var col_shape = node.get_node_or_null("CollisionShape3D")
 		if col_shape and col_shape.shape is BoxShape3D:
 			if not col_shape.shape.resource_local_to_scene:
 				col_shape.shape = col_shape.shape.duplicate()
 			col_shape.shape.size = target_size
-			
+			# The fit recentred the visual on the hull's local origin; the
+			# collider follows. Any drift here would put the box off the
+			# visual and every dimension consumer (locomotion stations,
+			# armor auto-fit, unit.gd's separation/selection/cargo radii)
+			# would read the box as a hull whose centre isn't where its
+			# mesh actually is.
+			col_shape.position = Vector3.ZERO
+		# base_hull_size has to scale with the collider - it is the fitted
+		# AABB at the CURRENT scale, and every dimension consumer that
+		# reads the meta (auto_weapon.gd's miss-chance size_factor,
+		# unit.gd's separation / selection / cargo radii, locomotion's
+		# layout) otherwise keeps using the pre-scale value while the
+		# collider reflects the post-scale one. Drift between the two is
+		# exactly the bug the catalog->AABB refactor was meant to retire,
+		# so the gizmo's scale path keeps them in sync.
+		node.set_meta("base_hull_size", target_size)
+		# Hull has to stay seated on the ground. _place_hull_from_ui sets
+		# hull.position.y = base_hull_size.y / 2.0 at placement, and a
+		# scale handle changes base_hull_size effectively, so update here
+		# too - otherwise a player who scales up finds their hull sunk
+		# into the terrain by half the scale delta, and a player who
+		# scales down finds it floating.
+		node.position.y = target_size.y / 2.0
+
 		# Shift child modules based on the scaling factor
 		var scale_factor = Vector3(
 			new_scale.x / start_scale.x if start_scale.x != 0.0 else 1.0,
 			new_scale.y / start_scale.y if start_scale.y != 0.0 else 1.0,
 			new_scale.z / start_scale.z if start_scale.z != 0.0 else 1.0
 		)
-		
+
 		for child in child_start_positions.keys():
 			if is_instance_valid(child):
 				var start_pos = child_start_positions[child]
@@ -343,6 +375,21 @@ func _on_drag_ended():
 		main_lab.refresh_locomotion()
 	if main_lab and main_lab.has_method("check_all_clipping"):
 		main_lab.check_all_clipping()
+
+	# The precise HullSurface trimesh is what initial-placement raycasts hit
+	# (see module_placer.gd's surface_raycast). It used to be built only in
+	# _place_hull_from_ui and update_hull_appearance, so a scale drag left
+	# it stale - modules dropped after the drag would snap to the hull's
+	# PRE-scale silhouette, and on hulls whose fit also rotates the mesh
+	# (every authored one), the surface silently disagreed with the visible
+	# mesh by the whole rotation. Rebuild from the visual mesh that's
+	# already at the new scale, on the same trimesh layer module_placer
+	# queries. Cheaper than re-running update_hull_appearance() (no greeble
+	# or material rebuild) and runs once per drag rather than per frame.
+	if target_module and target_module.name == "Hull":
+		var HullSurfaceScript = load("res://scripts/hull_surface.gd")
+		if HullSurfaceScript:
+			HullSurfaceScript.rebuild(target_module, target_module.get_node_or_null("MeshInstance3D"))
 
 func get_tweak_for_axis(type_id: String, axis: Vector3) -> String:
 	var abs_axis = axis.abs()

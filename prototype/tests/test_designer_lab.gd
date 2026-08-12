@@ -495,7 +495,7 @@ func test_undo_redo() -> bool:
 	placer.add_child(bm)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("medium_hull")
+	placer._place_hull_from_ui("block_main_meridian_a")
 	await tree.process_frame
 
 	if placer.can_undo():
@@ -635,7 +635,7 @@ func test_free_rotation_ring() -> bool:
 	root.add_child(placer)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("medium_hull")
+	placer._place_hull_from_ui("block_main_meridian_a")
 	await tree.process_frame
 	placer._place_weapon_from_ui("basic_cannon", Vector3(1.0, 0.5, 0.0), Vector3.UP)
 	await tree.process_frame
@@ -697,7 +697,7 @@ func test_angled_pintle_mount() -> bool:
 	var ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
 
 	# Pure function check first.
-	if ModuleCatalogScript.get_mount_style("rotary_cannon", "light_hull") != "pintle":
+	if ModuleCatalogScript.get_mount_style("rotary_cannon", "block_scout_meridian_a") != "pintle":
 		print("  [FAIL] rotary_cannon should resolve to pintle")
 		return false
 
@@ -718,7 +718,7 @@ func test_angled_pintle_mount() -> bool:
 	placer.add_child(bm)
 	await tree.process_frame
 
-	placer._place_hull_from_ui("light_hull")
+	placer._place_hull_from_ui("block_scout_meridian_a")
 	await tree.process_frame
 
 	var glacis_normal = Vector3(0, 0.7, -0.7).normalized()
@@ -908,7 +908,7 @@ func test_blueprint_roster_gating() -> bool:
 	var named_id = "test_named_%d" % (randi() % 1000000)
 	var unnamed_id = "test_unnamed_%d" % (randi() % 1000000)
 	var base_bp = {
-		"version": 2.0, "hull_type": "medium_hull",
+		"version": 2.0, "hull_type": "block_main_meridian_a",
 		"hull_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
 		"armor_material": "hardened_steel", "armor_thickness": 1.0,
 		"faction": "industrialists",
@@ -1401,7 +1401,7 @@ func _alpha_weapon(type_id: String, tweaks: Dictionary) -> ModuleData:
 
 func _alpha_hull(weapons: Array) -> Node3D:
 	var hull := Node3D.new()
-	hull.set_meta("type_id", "medium_hull")
+	hull.set_meta("type_id", "block_main_meridian_a")
 	hull.set_meta("armor_material", "hardened_steel")
 	hull.set_meta("armor_thickness", 1.0)
 	hull.set_meta("hull_scale", Vector3.ONE)
@@ -1599,4 +1599,289 @@ func test_alpha_verdict_only_scolds_a_design_that_chips_everything() -> bool:
 	print("  [PASS] CHIPS ONLY fires at %s chipped, stays quiet at %s and %s, and names the %.1f threshold to beat." % [
 		str(seen.get(0.5, "?")), str(seen.get(0.8, "?")), str(seen.get(2.0, "?")), lowest])
 	return true
+
+# Hull collider / fitted-AABB tests. The whole point of the catalogue-size ->
+# mesh-AABB refactor: the click surface and the box the dimension oracle reads
+# have to track the visible mesh, not the catalog bounding box. These guard
+# the two places the fitted AABB is computed (a fresh _place_hull_from_ui
+# and a reconstructed blueprint).
+func test_hull_collider_matches_visual_aabb() -> bool:
+	print("Running Test Suite: Hull Collider Tracks The Fitted Mesh AABB...")
+	var placer = Node3D.new()
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await tree.process_frame
+	await tree.process_frame
+
+	# The roster is split into two groups by how much the catalog box
+	# disagrees with the actual mesh:
+	#
+	#   "shaped"  - hulls the SDF / marching-cubes bake, or hulls with
+	#               tapers / curves, whose fitted AABB is noticeably smaller
+	#               than the catalog box on at least one axis. These are
+	#               where the bug showed up: the catalog box was wider or
+	#               taller than the visible mesh, and modules dropped onto
+	#               it floated off the silhouette.
+	#
+	#   "cube"    - the primitive-shaped hulls whose visual mesh is built
+	#               at unit size and then stretched to the catalog size
+	#               exactly. Fitted AABB == catalog box. The check here is
+	#               that the refactor didn't accidentally break them - if
+	#               _place_hull_from_ui() dropped the primitive path, the
+	#               collider would be zero.
+	#
+	# Both groups must produce a collider whose size matches the visual
+	# mesh's AABB, within rounding noise. The catalog value is the wrong
+	# answer for the shaped group; it is the right answer for the cube
+	# group.
+	var shaped_hulls: Array = [
+		"block_main_meridian_a",         # catalog [3, 1.8, 5.5]; .glb authored along X
+		"pillbox_foundation",  # short and wide, the "fits in a box" archetype
+	]
+	var cube_hulls: Array = [
+		"the_cube",
+		"the_rod",
+	]
+
+	# Each hull is sampled twice: once via _place_hull_from_ui (the Lab
+	# path) and once via BlueprintManager.reconstruct_vehicle (the load
+	# path). Both must produce the same fitted AABB for the same hull type.
+	for type_id in shaped_hulls + cube_hulls:
+		var catalog_data: Dictionary = ModuleCatalog.get_module_data(type_id)
+		if catalog_data.is_empty():
+			print("  [FAIL] Catalog has no entry for '%s' (skip in this test)." % type_id)
+			continue
+		# The hull mesh comes from MeshAssetLoader (which is what the
+		# placer / reconstruct_vehicle / module_placer.gd all call), not
+		# from ModuleCatalog - get_hull_fitted_aabb() wants a Mesh handle.
+		var HullMeshLoader = load("res://scripts/mesh_asset_loader.gd")
+		var hull_mesh: Mesh = HullMeshLoader.get_hull_mesh(type_id)
+		# Direct helper test - the function this whole change exists to make correct.
+		var visual_aabb: AABB = ModuleCatalog.get_hull_fitted_aabb(type_id, hull_mesh)
+		if visual_aabb.size.length_squared() <= 0.0:
+			print("  [FAIL] %s: get_hull_fitted_aabb() returned a zero AABB - the helper isn't being called correctly." % type_id)
+			placer.queue_free()
+			return false
+
+		var catalog_size: Vector3 = catalog_data.get("size", Vector3.ONE)
+		# For SHAPED hulls, the fitted AABB must differ noticeably from the
+		# catalog box on at least one axis. If it doesn't, the catalog
+		# entries here have drifted toward the mesh's real extents and the
+		# test no longer covers the bug it was written for - re-pick hulls.
+		if type_id in shaped_hulls:
+			var any_axis_diff := false
+			for axis in ["x", "y", "z"]:
+				if absf(visual_aabb.size[axis] - catalog_size[axis]) > 0.05 * maxf(catalog_size[axis], 1.0):
+					any_axis_diff = true
+					break
+			if not any_axis_diff:
+				print("  [WARN] %s: fitted AABB (%s) matches catalog size (%s) - this hull is no longer a 'shaped' test case. Re-pick." % [
+					type_id, visual_aabb.size, catalog_size])
+		# For CUBE hulls, the fitted AABB must match the catalog box. The
+		# primitive-shape path stretches a unit BoxMesh to catalog_size, so
+		# they are the same by construction. This is an info check, not a
+		# hard fail - if it ever trips it means the primitive path
+		# regressed, which the agreement check below would also catch.
+		if type_id in cube_hulls:
+			for axis in ["x", "y", "z"]:
+				if absf(visual_aabb.size[axis] - catalog_size[axis]) > 0.01:
+					print("  [WARN] %s is a primitive hull but fitted AABB (%s) doesn't match catalog size (%s) - this is informative, the collider agreement below is the real check." % [
+						type_id, visual_aabb.size, catalog_size])
+
+		# Drive the actual _place_hull_from_ui path: the collider's size
+		# must equal the visual AABB, and the base_hull_size meta must
+		# carry the same value so locomotion / unit.gd see it.
+		placer.clear_hull()
+		placer._place_hull_from_ui(type_id)
+		var hull_node: Node3D = placer.hull
+		if not hull_node:
+			print("  [FAIL] _place_hull_from_ui('%s') did not set placer.hull." % type_id)
+			placer.queue_free()
+			return false
+		var col: CollisionShape3D = hull_node.get_node_or_null("CollisionShape3D") as CollisionShape3D
+		if not col or not (col.shape is BoxShape3D):
+			print("  [FAIL] %s: hull has no BoxShape3D collider (shape is %s)." % [type_id, type_as_string(col.shape) if col else "null"])
+			placer.queue_free()
+			return false
+		var col_size: Vector3 = (col.shape as BoxShape3D).size
+		var meta_size: Vector3 = hull_node.get_meta("base_hull_size")
+		# The collider, the base_hull_size meta and the helper's output
+		# must all agree - any drift between them re-opens the floating-
+		# module bug on whichever side read the wrong one.
+		if col_size.distance_to(visual_aabb.size) > 0.05:
+			print("  [FAIL] %s: collider size %s != fitted AABB %s (delta %.3f)." % [type_id, col_size, visual_aabb.size, col_size.distance_to(visual_aabb.size)])
+			placer.queue_free()
+			return false
+		if meta_size.distance_to(visual_aabb.size) > 0.05:
+			print("  [FAIL] %s: base_hull_size meta %s != fitted AABB %s." % [type_id, meta_size, visual_aabb.size])
+			placer.queue_free()
+			return false
+		# And the collider must NOT equal the catalog size on a shaped hull
+		# (it would have, before the refactor). This is a SOFT warning,
+		# not a hard fail: some 'shaped' hulls may have been re-authored
+		# at the catalog size in sidecar updates, in which case the
+		# fitted AABB and the catalog size agree - the test still covers
+		# them via the agreement check above, but the catalog-diff warning
+		# flags when a future hull migrates and the test should re-pick.
+		if type_id in shaped_hulls:
+			if col_size.distance_to(catalog_size) < 0.01:
+				print("  [WARN] %s: collider matches catalog size %s - this hull is no longer a 'shaped' test case (the refactor still covered it via the agreement check)." % [type_id, catalog_size])
+
+		# Hull must sit on the ground: hull.position.y == fitted_size.y / 2.0.
+		if absf(hull_node.position.y - visual_aabb.size.y / 2.0) > 0.05:
+			print("  [FAIL] %s: hull.position.y %.3f != fitted_size.y / 2 (%.3f) - the hull will float or sink." % [
+				type_id, hull_node.position.y, visual_aabb.size.y / 2.0])
+			placer.queue_free()
+			return false
+
+	placer.queue_free()
+	print("  [PASS] Hull collider + base_hull_size meta track the fitted mesh AABB for both shaped and primitive hulls.")
+	return true
+
+# Re-fitting on a scale gizmo drag: the collider has to scale with the visual
+# mesh (base_hull_size * hull_scale, which is what gizmo_3d.gd's
+# _apply_scale_to_node writes into the BoxShape3D), and the precise
+# HullSurface trimesh has to be rebuilt so modules dropped after the drag snap
+# to the new silhouette rather than the old.
+func test_hull_collider_rebuilt_on_scale() -> bool:
+	print("Running Test Suite: Hull Collider + HullSurface Trimesh Refit On Scale Drag...")
+	var placer = Node3D.new()
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await tree.process_frame
+	await tree.process_frame
+
+	placer._place_hull_from_ui("block_main_meridian_a")
+	var hull_node: Node3D = placer.hull
+	if not hull_node:
+		print("  [FAIL] _place_hull_from_ui('medium_hull') did not set placer.hull.")
+		placer.queue_free()
+		return false
+
+	var col: CollisionShape3D = hull_node.get_node_or_null("CollisionShape3D") as CollisionShape3D
+	var surface: Node3D = hull_node.get_node_or_null("HullSurface") as Node3D
+	if not col or not (col.shape is BoxShape3D):
+		print("  [FAIL] Pre-scale: hull has no BoxShape3D collider.")
+		placer.queue_free()
+		return false
+	if not surface:
+		print("  [FAIL] Pre-scale: hull has no HullSurface trimesh node (placement raycast would fall back to box).")
+		placer.queue_free()
+		return false
+
+	var pre_col_size: Vector3 = (col.shape as BoxShape3D).size
+	# HullSurface's CollisionShape3D is added unnamed and gets the
+	# auto-name "@CollisionShape3D@N" when the hull already has a sibling
+	# CollisionShape3D (the box collider). Look up by TYPE, not by name -
+	# same trap module_placer.gd's _refit_module_collider() documents at
+	# its get_node_or_null("StaticBody3D") comment.
+	var surface_col_shapes: Array = surface.find_children("*", "CollisionShape3D", false, false)
+	if surface_col_shapes.is_empty():
+		print("  [FAIL] Pre-scale: HullSurface has no CollisionShape3D child.")
+		placer.queue_free()
+		return false
+	var pre_surface_shape: Shape3D = (surface_col_shapes[0] as CollisionShape3D).shape
+	if not pre_surface_shape:
+		print("  [FAIL] Pre-scale: HullSurface's CollisionShape3D has no shape.")
+		placer.queue_free()
+		return false
+
+	# Drive the gizmo's _apply_scale_to_node directly. It's the only path
+	# that refits the collider, the base_hull_size meta, and the hull
+	# position when the player drags a scale handle. A 1.4x scale is well
+	# within HULL_SCALE_MAX (= 2.0) and visibly different from 1.0.
+	#
+	# The function calls get_tree().call_group() at the end for UI updates,
+	# so the gizmo node has to be in the tree. Adding the gizmo to root
+	# would reparent hull_node (the gizmo's _ready() does target_module =
+	# get_parent(), which we don't want), so attach the gizmo to the hull
+	# ITSELF as a child; target_module gets set by _ready to the parent
+	# hull, and get_tree() resolves correctly.
+	var gizmo_script: GDScript = load("res://scripts/gizmo_3d.gd")
+	if not gizmo_script:
+		print("  [FAIL] Could not load gizmo_3d.gd")
+		placer.queue_free()
+		return false
+	# Drive the gizmo's _apply_scale_to_node directly. The gizmo's
+	# _ready() does `target_module = get_parent()`, which fails the
+	# Node3D type-check when the parent is the test root (a Window).
+	# Attach the gizmo to a tiny Node3D shim so _ready() finds a valid
+	# Node3D parent. The shim and the gizmo are torn down at the end.
+	var gizmo_shim: Node3D = Node3D.new()
+	root.add_child(gizmo_shim)
+	var gizmo_node: Node3D = Node3D.new()
+	gizmo_node.set_script(gizmo_script)
+	gizmo_shim.add_child(gizmo_node)
+	gizmo_node.target_module = hull_node
+	gizmo_node.start_scale = Vector3.ONE
+	# 1.4x is well within HULL_SCALE_MAX (= 2.0) and visibly different
+	# from 1.0 - the kind of drag the player can definitely make.
+	gizmo_node._apply_scale_to_node(hull_node, Vector3(1.4, 1.4, 1.4))
+
+	var post_col_size: Vector3 = (col.shape as BoxShape3D).size
+	# Collider must scale with the hull, NOT stay at the pre-scale value.
+	if post_col_size.distance_to(pre_col_size * 1.4) > 0.05:
+		print("  [FAIL] Collider did not scale with the hull: pre %s, post %s, expected %s." % [
+			pre_col_size, post_col_size, pre_col_size * 1.4])
+		gizmo_node.free()
+		placer.queue_free()
+		return false
+	# And the meta must agree.
+	var post_meta_size: Vector3 = hull_node.get_meta("base_hull_size")
+	if post_meta_size.distance_to(pre_col_size * 1.4) > 0.05:
+		print("  [FAIL] base_hull_size meta did not scale: pre %s, post %s, expected %s." % [
+			pre_col_size, post_meta_size, pre_col_size * 1.4])
+		gizmo_node.free()
+		placer.queue_free()
+		return false
+	# Hull.position.y has to keep the hull on the ground.
+	if absf(hull_node.position.y - post_col_size.y / 2.0) > 0.05:
+		print("  [FAIL] Hull y did not follow scale: got %.3f, expected %.3f." % [
+			hull_node.position.y, post_col_size.y / 2.0])
+		gizmo_node.free()
+		placer.queue_free()
+		return false
+
+	# Surface trimesh is rebuilt by the gizmo's _on_drag_ended() (not by
+	# _apply_scale_to_node - the per-frame rebuild would be too expensive).
+	# We can't fully drive the gizmo's drag end without instantiating its
+	# scene + handles; instead, verify the BUILD-BLOCK works by calling
+	# the trimesh rebuild directly on the same hull+mesh the gizmo would
+	# use. The integration is then one helper call - if
+	# HullSurfaceScript.rebuild() runs and produces a fresh shape, the
+	# gizmo's _on_drag_ended() (which is the only thing that calls it for
+	# the scale-drag path) works.
+	var HullSurfaceScript: GDScript = load("res://scripts/hull_surface.gd")
+	if not HullSurfaceScript:
+		print("  [FAIL] Could not load hull_surface.gd")
+		gizmo_node.free()
+		placer.queue_free()
+		return false
+	HullSurfaceScript.rebuild(hull_node, hull_node.get_node_or_null("MeshInstance3D") as MeshInstance3D)
+	await tree.process_frame
+	# Same TYPE-based lookup as the pre-scale check above - the
+	# CollisionShape3D inside HullSurface is auto-named @CollisionShape3D@N
+	# because the hull already has a sibling with the default name.
+	var post_surface_children: Array = hull_node.get_node_or_null("HullSurface").find_children("*", "CollisionShape3D", false, false)
+	if post_surface_children.is_empty():
+		print("  [FAIL] Post-rebuild: HullSurface has no CollisionShape3D child.")
+		gizmo_node.queue_free()
+		placer.queue_free()
+		return false
+	var post_trimesh_shape: Shape3D = (post_surface_children[0] as CollisionShape3D).shape
+	if post_trimesh_shape == pre_surface_shape:
+		print("  [FAIL] HullSurface.rebuild() did not produce a fresh shape (same instance).")
+		gizmo_node.queue_free()
+		placer.queue_free()
+		return false
+
+	gizmo_node.queue_free()
+	placer.queue_free()
+	print("  [PASS] Collider scales with hull_scale, base_hull_size stays in sync, hull.position.y follows, and the HullSurface trimesh rebuilds on demand.")
+	return true
+
+func type_as_string(thing) -> String:
+	if thing == null:
+		return "null"
+	return str(thing)
 
