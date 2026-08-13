@@ -47,15 +47,15 @@ const MATERIAL_DEFAULTS = {
 	# L0 workbench. Fields only - L0 is a backdrop register, not a control
 	# register, and these materials have no plates (see tools/generate_ui_plates.py,
 	# which is a separate script from the L0 field PNGs that exist on disk).
-	# Brightness 0.70 lands each L0 final luminance around 0.06-0.08, just below
-	# the standard 0.42 steel backdrop (which lands near 0.084) and well below
-	# the powdercoat panel body at ~0.110. The floor/surface/control stack stays
-	# strictly ascending.
-	"cutting_mat": {"wear": 0.10, "grime": 0.18, "scale": 1.2, "vignette": 0.18, "brightness": 0.70},
-	"cardboard":   {"wear": 0.12, "grime": 0.16, "scale": 1.0, "vignette": 0.20, "brightness": 0.70},
-	"kraft":       {"wear": 0.14, "grime": 0.18, "scale": 1.0, "vignette": 0.22, "brightness": 0.70},
-	"cork":        {"wear": 0.16, "grime": 0.14, "scale": 1.1, "vignette": 0.20, "brightness": 0.70},
-	"chipboard":   {"wear": 0.18, "grime": 0.16, "scale": 1.0, "vignette": 0.22, "brightness": 0.70},
+	# Brightness 0.85 lands each L0 final luminance in the 0.07-0.10 range -
+	# visible as a hobby desk, near the 0.42-brightness steel backdrop (which
+	# lands at 0.084), and well below the powdercoat panel body at ~0.110. The
+	# floor/surface/control stack stays strictly ascending.
+	"cutting_mat": {"wear": 0.10, "grime": 0.18, "scale": 1.2, "vignette": 0.18, "brightness": 0.85},
+	"cardboard":   {"wear": 0.12, "grime": 0.16, "scale": 1.0, "vignette": 0.20, "brightness": 0.85},
+	"kraft":       {"wear": 0.14, "grime": 0.18, "scale": 1.0, "vignette": 0.22, "brightness": 0.85},
+	"cork":        {"wear": 0.16, "grime": 0.14, "scale": 1.1, "vignette": 0.20, "brightness": 0.85},
+	"chipboard":   {"wear": 0.18, "grime": 0.16, "scale": 1.0, "vignette": 0.22, "brightness": 0.85},
 	# L1 equipment.
 	"powdercoat": {"wear": 0.25, "grime": 0.20, "scale": 1.0, "vignette": 0.30},
 	"steel":      {"wear": 0.35, "grime": 0.12, "scale": 1.0, "vignette": 0.22},
