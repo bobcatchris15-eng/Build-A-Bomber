@@ -59,6 +59,20 @@ const ELEVATION_Z := 1.0
 # Panel, not the gloss curve of a 3D mesh. Phase 2's per-prop
 # texture set owns the body colour; these are the substrate's defaults
 # underneath the bake.
+const PROP_SHADER: Shader = preload("res://shaders/ui_prop.gdshader")
+
+# The key light's Euler rotation, as a token rather than a literal in
+# _build_rig(), because the shader's self-shadow march needs the same
+# direction. Two copies of these three numbers is how a shadow ends up
+# disagreeing with the bevel it is supposed to belong to.
+const KEY_LIGHT_ROTATION := Vector3(-48, -32, 0)
+
+# POM depth, in tangent-space units. Small on purpose: these are 44 px tall
+# buttons under an orthographic camera, so the only grazing angles available
+# are on the mesh's own chamfer and dish (see Part 3.3 of the plan). A large
+# height_scale on a face-on surface buys nothing and costs a full march.
+const PROP_HEIGHT_SCALE := 0.035
+
 const VARIANT_MATERIALS := {
 	"default": {
 		"albedo": Color(0.42, 0.43, 0.45),
@@ -184,20 +198,7 @@ func attach(control: Control, prop_id: String) -> int:
 		push_warning("UIPropStage.attach: mesh asset missing at %s" % mesh_path)
 		return -1
 
-	var material := StandardMaterial3D.new()
-	var alb_path: String = String(entry.get("albedo_path", ""))
-	if alb_path != "" and ResourceLoader.exists(alb_path):
-		material.albedo_texture = load(alb_path) as Texture2D
-	var orm_path: String = String(entry.get("orm_path", ""))
-	if orm_path != "" and ResourceLoader.exists(orm_path):
-		var orm_tex = load(orm_path) as Texture2D
-		material.ao_enabled = true
-		material.ao_texture = orm_tex
-		material.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
-		material.roughness_texture = orm_tex
-		material.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
-		material.metallic_texture = orm_tex
-		material.metallic_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_BLUE
+	var material := _build_prop_material(entry)
 	_apply_variant(material, "default")
 
 	var mesh_instance := MeshInstance3D.new()
@@ -482,7 +483,7 @@ func _build_rig() -> void:
 	var key := DirectionalLight3D.new()
 	key.light_color = Color(1.0, 0.97, 0.90)
 	key.light_energy = 1.4
-	key.rotation_degrees = Vector3(-48, -32, 0)
+	key.rotation_degrees = KEY_LIGHT_ROTATION
 	_rig.add_child(key)
 
 	# The FILL. Opposite side, low intensity, so the chamfer's shaded
@@ -670,21 +671,83 @@ func _on_host_exiting(handle: int) -> void:
 
 # --- Material pipeline ------------------------------------------------------
 
-func _apply_variant(material: StandardMaterial3D, variant: String) -> void:
+# Builds the per-prop ShaderMaterial.
+#
+# THIS USED TO BE A StandardMaterial3D, AND THAT MADE ALL OF PHASE 3 DEAD CODE.
+# shaders/ui_prop.gdshader - the parallax occlusion, the self-shadowing, the
+# derivative normals, the world-normal dust - had zero references anywhere in
+# the project: the stage built a StandardMaterial3D, never bound the height
+# map, and every prop rendered as flat albedo + ORM. The textures were being
+# generated and two thirds of them were being thrown away.
+#
+# The five values the state pipeline drives (albedo, metallic, roughness,
+# emission colour, emission energy) map 1:1 onto shader uniforms, so the
+# swap changed the three _apply_* functions and nothing else. The shader's
+# roughness_scale / metallic_scale multiply the ORM channels exactly the way
+# StandardMaterial3D's roughness / metallic multiplied their texture channels.
+func _build_prop_material(entry: Dictionary) -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = PROP_SHADER
+
+	var alb_path: String = String(entry.get("albedo_path", ""))
+	if alb_path != "" and ResourceLoader.exists(alb_path):
+		material.set_shader_parameter("texture_albedo", load(alb_path) as Texture2D)
+	var orm_path: String = String(entry.get("orm_path", ""))
+	if orm_path != "" and ResourceLoader.exists(orm_path):
+		material.set_shader_parameter("texture_orm", load(orm_path) as Texture2D)
+
+	# The height map is what POM marches through. Without it the shader still
+	# renders (hint_default_black gives a flat field) but contributes no depth,
+	# so height_scale drops to zero rather than paying for a march that cannot
+	# find anything.
+	var height_path: String = String(entry.get("height_path", ""))
+	if height_path != "" and ResourceLoader.exists(height_path):
+		material.set_shader_parameter("texture_height", load(height_path) as Texture2D)
+		material.set_shader_parameter("height_scale", PROP_HEIGHT_SCALE)
+	else:
+		material.set_shader_parameter("height_scale", 0.0)
+
+	# The key light's world direction, so the shader's self-shadow march agrees
+	# with the rig instead of guessing. Recomputed from the same rotation the
+	# rig uses, so re-aiming the key light in one place re-aims the shadows.
+	material.set_shader_parameter("key_light_direction", key_light_direction())
+	return material
+
+
+# Direction FROM a surface TO the key light, in world space. The key light is a
+# DirectionalLight3D pointing along its own -Z, so the vector back toward it is
+# +Z of its basis.
+static func key_light_direction() -> Vector3:
+	var basis := Basis.from_euler(Vector3(
+		deg_to_rad(KEY_LIGHT_ROTATION.x),
+		deg_to_rad(KEY_LIGHT_ROTATION.y),
+		deg_to_rad(KEY_LIGHT_ROTATION.z)))
+	return (basis * Vector3(0, 0, 1)).normalized()
+
+
+func _apply_variant(material: ShaderMaterial, variant: String) -> void:
 	var m: Dictionary = VARIANT_MATERIALS.get(variant, VARIANT_MATERIALS["default"])
-	material.albedo_color = m["albedo"]
-	material.metallic = m["metallic"]
-	material.roughness = m["roughness"]
-	material.emission_enabled = float(m["emission_energy"]) > 0.0
-	material.emission = m["emission"]
-	material.emission_energy_multiplier = m["emission_energy"]
+	_set_body(material, m["albedo"], m["metallic"], m["roughness"], m["emission"], m["emission_energy"])
+
+
+# The one place the five body uniforms are written, so a state that forgets one
+# is impossible. The StandardMaterial3D version had emission_enabled as a
+# separate boolean and three of the four state branches had to remember to set
+# it; here an energy of zero is the off switch.
+func _set_body(material: ShaderMaterial, albedo: Color, metallic: float,
+		roughness: float, emission: Color, emission_energy: float) -> void:
+	material.set_shader_parameter("albedo_tint", albedo)
+	material.set_shader_parameter("metallic_scale", metallic)
+	material.set_shader_parameter("roughness_scale", roughness)
+	material.set_shader_parameter("emission_color", emission)
+	material.set_shader_parameter("emission_energy", emission_energy)
 
 
 # State deltas are applied on top of the variant's BASE values, so
 # hover-while-pressed still reads as the button moving down, not as a
 # colour reset. The variant passed in is the one currently active;
 # its base values are read from VARIANT_MATERIALS.
-func _apply_state(material: StandardMaterial3D, variant: String, state: String) -> void:
+func _apply_state(material: ShaderMaterial, variant: String, state: String) -> void:
 	var m: Dictionary = VARIANT_MATERIALS.get(variant, VARIANT_MATERIALS["default"])
 	var base_albedo: Color = m["albedo"]
 	var base_metallic: float = m["metallic"]
@@ -693,32 +756,21 @@ func _apply_state(material: StandardMaterial3D, variant: String, state: String) 
 	var base_emission_energy: float = m["emission_energy"]
 	match state:
 		"disabled":
-			material.albedo_color = base_albedo.darkened(0.20).lerp(Color(0.30, 0.30, 0.30), DISABLED_DESATURATE)
-			material.roughness = clampf(base_roughness + DISABLED_ROUGHNESS_LIFT, 0.0, 1.0)
-			material.metallic = base_metallic
-			material.emission_enabled = false
+			_set_body(material,
+				base_albedo.darkened(0.20).lerp(Color(0.30, 0.30, 0.30), DISABLED_DESATURATE),
+				base_metallic,
+				clampf(base_roughness + DISABLED_ROUGHNESS_LIFT, 0.0, 1.0),
+				base_emission, 0.0)
 		"pressed":
-			material.albedo_color = base_albedo.darkened(PRESS_DROP)
-			material.roughness = base_roughness
-			material.metallic = base_metallic
-			material.emission_enabled = base_emission_energy > 0.0
-			material.emission = base_emission
-			material.emission_energy_multiplier = base_emission_energy
+			_set_body(material, base_albedo.darkened(PRESS_DROP), base_metallic,
+				base_roughness, base_emission, base_emission_energy)
 		"hover":
-			material.albedo_color = base_albedo.lightened(HOVER_LIFT)
-			material.roughness = base_roughness
-			material.metallic = base_metallic
-			material.emission_enabled = base_emission_energy > 0.0
-			material.emission = base_emission
-			material.emission_energy_multiplier = base_emission_energy
+			_set_body(material, base_albedo.lightened(HOVER_LIFT), base_metallic,
+				base_roughness, base_emission, base_emission_energy)
 		_:
 			# "normal" and any unknown state lands here.
-			material.albedo_color = base_albedo
-			material.metallic = base_metallic
-			material.roughness = base_roughness
-			material.emission_enabled = base_emission_energy > 0.0
-			material.emission = base_emission
-			material.emission_energy_multiplier = base_emission_energy
+			_set_body(material, base_albedo, base_metallic, base_roughness,
+				base_emission, base_emission_energy)
 
 
 # Active look. The body shifts to a slightly cooler gunmetal, the
@@ -726,12 +778,11 @@ func _apply_state(material: StandardMaterial3D, variant: String, state: String) 
 # is intentionally a small body delta + an emission; the variant
 # already provides the body colour family, the active flag is what
 # makes the prop read as "engaged" at a glance.
-func _apply_active(material: StandardMaterial3D, active: bool) -> void:
+func _apply_active(material: ShaderMaterial, active: bool) -> void:
 	if active:
-		material.albedo_color = Color(0.30, 0.34, 0.30, 1.0)
-		material.emission_enabled = true
-		material.emission = Tokens.SIGNAL_GO
-		material.emission_energy_multiplier = 0.6
+		material.set_shader_parameter("albedo_tint", Color(0.30, 0.34, 0.30, 1.0))
+		material.set_shader_parameter("emission_color", Tokens.SIGNAL_GO)
+		material.set_shader_parameter("emission_energy", 0.6)
 	else:
-		material.albedo_color = Color(0.42, 0.43, 0.45, 1.0)
-		material.emission_enabled = false
+		material.set_shader_parameter("albedo_tint", Color(0.42, 0.43, 0.45, 1.0))
+		material.set_shader_parameter("emission_energy", 0.0)

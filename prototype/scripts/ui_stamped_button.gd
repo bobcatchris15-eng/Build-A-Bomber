@@ -93,8 +93,13 @@ const MIN_WIDTH := 132.0
 const MIN_HEIGHT := 44.0
 const COMPACT_HEIGHT := 36.0
 
+const UIPropRegistryScript = preload("res://scripts/ui/ui_prop_registry.gd")
+
 var _stage: UIPropStage = null
 var _stage_handle: int = -1
+# The prop_id currently attached, so a legend change can tell whether it
+# actually needs to re-point the stage or is a no-op.
+var _attached_prop_id: String = ""
 var _label: Control = null
 var _focus_ring: Control = null
 var _variant: int = Variant.DEFAULT
@@ -124,6 +129,13 @@ var legend: String = "":
 		legend = value
 		if _label != null:
 			_label.text = value
+		# The legend also picks the button's texture set (D1: unique
+		# textures per button, on the one shared mesh). Re-resolve on
+		# every change, because command_card.gd sets legend AFTER
+		# _ready when a selection swaps a cell's command - a button
+		# that only resolved at attach time would keep wearing the
+		# previous command's scuffs.
+		_resync_prop_variant()
 
 
 # The button's role. Setting this re-colours the mesh immediately on the
@@ -188,7 +200,8 @@ func _ready() -> void:
 		# double-paint. This is why the gating moved out of _init:
 		# a no-stage button NEEDS the theme stylebox.
 		_blank_styleboxes()
-		_stage_handle = _stage.attach(self, MESH_PROP_ID)
+		_stage_handle = _stage.attach(self, _variant_prop_id())
+		_attached_prop_id = _variant_prop_id()
 		# Push the initial variant so the mesh starts in the right
 		# colour, not the registry's default. attach() already set
 		# it to "default"; this overwrites if the caller set
@@ -207,6 +220,39 @@ func _ready() -> void:
 	mouse_exited.connect(_apply_state)
 	focus_entered.connect(_apply_state)
 	focus_exited.connect(_apply_state)
+
+
+# Which texture set this button wears. The legend is the identity: a
+# button named DEPLOY gets btn_deploy's baked wear, grime and stamp
+# placement, on the same ui_push_button.glb every other button uses.
+#
+# Falls back to the plain shared set for a legend with no baked variant
+# (a new button, a runtime-formatted legend, a headless fixture). That
+# fallback is deliberate - a button must never fail to render because
+# nobody ran the generator - but ui_audit.check_button_prop_coverage()
+# reports it, so the gap is visible rather than silent.
+func _variant_prop_id() -> String:
+	var variant_id := UIPropRegistryScript.variant_id_for_legend(legend)
+	return variant_id if variant_id != "" else MESH_PROP_ID
+
+
+# Re-point the stage at a different texture set when the legend changes
+# after attach. Detach-then-attach rather than a stage-side swap: the
+# mesh, material and host wiring are all built in attach(), and a
+# partial re-point would have to duplicate that. Variant and state are
+# re-pushed afterwards because a fresh attach starts at the defaults.
+func _resync_prop_variant() -> void:
+	if _stage == null or _stage_handle == -1:
+		return
+	var wanted := _variant_prop_id()
+	if wanted == _attached_prop_id:
+		return
+	_stage.detach(_stage_handle)
+	_stage_handle = _stage.attach(self, wanted)
+	_attached_prop_id = wanted
+	if _stage_handle != -1:
+		_stage.set_prop_variant(_stage_handle, _variant_to_stage_string(_variant))
+		_apply_state()
 
 
 # Walk the ancestor chain for a UIPropStage. Stops at the first one

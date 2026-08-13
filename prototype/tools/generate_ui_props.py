@@ -75,7 +75,19 @@ def _coords(h, w):
     return yy.astype(np.float32), xx.astype(np.float32)
 
 
-def generate_prop_textures(prop_id: str):
+def generate_prop_textures(prop_id: str, base_kind: str = None):
+    """Bake one texture set.
+
+    `prop_id` is the IDENTITY: it seeds the RNG and names the output files.
+    `base_kind` is the GEOMETRY: it selects which relief branch runs. They are
+    separate because D1 asks for "a reused mesh of a button, textures unique
+    per button" - every button variant shares push_button's chamfer and dish
+    but must not share its wear, grime, swirl angle or stamp placement.
+
+    Passing base_kind=None means identity and geometry are the same thing,
+    which is the case for the seven base props.
+    """
+    kind = base_kind if base_kind is not None else prop_id
     seed = zlib.crc32(prop_id.encode("utf-8"))
     rng = np.random.default_rng(seed)
 
@@ -104,7 +116,7 @@ def generate_prop_textures(prop_id: str):
     albedo = np.tile(BASE_GUNMETAL, (h, w, 1))
 
     # Prop-specific procedural masks and geometric details
-    if prop_id in ("push_button", "rotary", "knurled_dial", "dzus_fastener"):
+    if kind in ("push_button", "rotary", "knurled_dial", "dzus_fastener"):
         # Circular lathe machining swirl
         swirl = np.sin((r * 28.0 + theta * 2.0 + swirl_angle) * math.pi) * 0.5 + 0.5
         roughness += (swirl * 0.12 - 0.06) + (fine_noise * 0.14 - 0.07)
@@ -126,7 +138,7 @@ def generate_prop_textures(prop_id: str):
         ao = np.clip(1.0 - outer_crevice * 0.55 - (1.0 - macro_noise) * 0.2, 0.15, 1.0)
         albedo = albedo * (1.0 - outer_crevice[:, :, None] * 0.3) + GRIME_TINT * (outer_crevice[:, :, None] * 0.3)
 
-        if prop_id == "dzus_fastener":
+        if kind == "dzus_fastener":
             # Quarter-turn screwdriver slot across the center
             slot_w = np.abs(nx * math.cos(swirl_angle) + ny * math.sin(swirl_angle))
             slot_len = np.abs(-nx * math.sin(swirl_angle) + ny * math.cos(swirl_angle))
@@ -136,7 +148,7 @@ def generate_prop_textures(prop_id: str):
             roughness = np.clip(roughness + slot_mask * 0.25, 0.04, 0.95)
             metallic = np.full((h, w), 0.85, dtype=np.float32)
 
-        elif prop_id == "knurled_dial":
+        elif kind == "knurled_dial":
             # Radial knurling pattern around rim
             knurl_teeth = 36
             knurl = np.sin(theta * knurl_teeth) * np.cos(theta * knurl_teeth * 0.5)
@@ -147,7 +159,7 @@ def generate_prop_textures(prop_id: str):
             roughness = np.clip(roughness + knurl_pattern * 0.15, 0.04, 0.95)
             metallic = np.full((h, w), 0.75, dtype=np.float32)
 
-        elif prop_id == "rotary":
+        elif kind == "rotary":
             # Index pointer notch at top / angle
             pointer_ang = np.abs(theta - (-math.pi * 0.5))
             pointer_mask = (1.0 - smoothstep(0.04, 0.10, pointer_ang)) * smoothstep(0.35, 0.85, r)
@@ -171,14 +183,14 @@ def generate_prop_textures(prop_id: str):
         outer_crevice = smoothstep(0.88, 0.98, box_dist)
         ao = np.clip(1.0 - outer_crevice * 0.5 - (1.0 - macro_noise) * 0.2, 0.15, 1.0)
 
-        if prop_id == "toggle":
+        if kind == "toggle":
             metallic = np.full((h, w), 0.80, dtype=np.float32)
-        elif prop_id == "rocker":
+        elif kind == "rocker":
             metallic = np.full((h, w), 0.40, dtype=np.float32)
             # Center pivot ridge
             pivot_line = 1.0 - smoothstep(0.0, 0.15, np.abs(ny))
             height += pivot_line * 0.25
-        elif prop_id == "latch":
+        elif kind == "latch":
             metallic = np.full((h, w), 0.70, dtype=np.float32)
 
     # Global roughness floor to avoid GGX specular singularity
@@ -208,20 +220,72 @@ def generate_prop_textures(prop_id: str):
     print(f"  [prop] {prop_id:<16} -> albedo, orm, height generated (seed={seed})")
 
 
+# The seven base props: one per authored .glb under assets/models/ui/.
+BASE_PROPS = [
+    "push_button",
+    "toggle",
+    "rotary",
+    "rocker",
+    "knurled_dial",
+    "dzus_fastener",
+    "latch",
+]
+
+# THE BUTTON INVENTORY (D1: "textures can be unique per button").
+#
+# Every one of these shares ui_push_button.glb - the reused mesh - and gets its
+# own seeded texture set, so no two buttons in the game wear the same scuffs.
+# The ids are slugs of the button legends, because the legend is what already
+# distinguishes one button from another at every call site; StampedButton
+# derives the same slug at runtime (see _variant_prop_id there, and keep the
+# two slug rules identical).
+#
+# A legend with no entry here falls back to the plain `push_button` set rather
+# than failing, so adding a button is never a hard break - but the Phase 12
+# audit reports the fallback, so drift is visible instead of silent.
+#
+# "DEPLOY" and "DEPLOY >" both slug to `deploy` on purpose: they are the same
+# command wearing a different chevron, and giving them one identity is correct
+# rather than a collision to work around.
+BUTTON_LEGEND_SLUGS = [
+    # Out-of-match screen buttons
+    "back",
+    "back_to_main_menu",
+    "design_lab",
+    "abandon_operation",
+    "begin_operation",
+    "commit_livery",
+    "deploy",
+    "randomise",
+    "return",
+    "start_match",
+    # Command card cells (CommandRegistry labels)
+    "patrol",
+    "attack_move",
+    "stop",
+    "set_rally",
+    "aggressive",
+    "return_fire",
+    "hold",
+    "hold_fire",
+    "wedge",
+    "line",
+    "column",
+    "spread",
+]
+
+
 def main():
-    props = [
-        "push_button",
-        "toggle",
-        "rotary",
-        "rocker",
-        "knurled_dial",
-        "dzus_fastener",
-        "latch",
-    ]
     print(f"Generating procedural UI prop textures into {OUT}...")
-    for p in props:
+    for p in BASE_PROPS:
         generate_prop_textures(p)
-    print(f"All {len(props)} prop texture sets generated successfully.")
+
+    print(f"Generating {len(BUTTON_LEGEND_SLUGS)} per-button variants on the push_button mesh...")
+    for slug in BUTTON_LEGEND_SLUGS:
+        generate_prop_textures(f"btn_{slug}", base_kind="push_button")
+
+    total = len(BASE_PROPS) + len(BUTTON_LEGEND_SLUGS)
+    print(f"All {total} prop texture sets generated successfully.")
 
 
 if __name__ == "__main__":

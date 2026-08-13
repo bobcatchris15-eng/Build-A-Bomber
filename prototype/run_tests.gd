@@ -163,6 +163,8 @@ const SUITE_ORDER := [
 	["locomotion_mounting", "test_only_ground_and_hovering_types_seat_to_the_chine"],
 	["locomotion_mounting", "test_hull_carries_exactly_one_locomotion_chassis"],
 	["designer_lab", "test_clipping_detection"],
+	["designer_lab", "test_clipping_uses_oriented_volumes_not_axis_aligned_boxes"],
+	["designer_lab", "test_module_volume_tracks_geometry_not_catalog_size"],
 	["designer_lab", "test_rotation_popup_and_deforms"],
 	["designer_lab", "test_sensor_mast_tweak_and_proportions"],
 	["designer_lab", "test_no_dead_tweaks"],
@@ -489,6 +491,9 @@ const SUITE_ORDER := [
 
 	# Phase 12 Enforcement
 	["ui_and_camera", "test_probe_scene_loads"],
+	# APPENDED, never inserted - SUITE_ORDER is pinned because several
+	# navmesh/Recast suites flake depending on what ran before them.
+	["ui_and_camera", "test_installed_bindings_match_input_service"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

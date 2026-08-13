@@ -163,6 +163,16 @@ func _build_3d_background() -> void:
 	_turntable_node.add_child(_turntable_model_container)
 
 func _build_ui() -> void:
+	# L0 workbench (D7). This screen had NO backdrop at all - it went
+	# straight to screen_frame() - so its panels sat on whatever the scene
+	# root happened to clear to, and it was the only out-of-match screen
+	# with no surface under it. Cork because a library of saved designs is
+	# a pinboard of them; its only reuse is operations_draft, which is in a
+	# different flow and never adjacent to this screen.
+	#
+	# workbench() also creates the UIPropStage, which this screen's five
+	# StampedButton action controls need in their ancestor chain.
+	UIShell.workbench(self, "cork")
 	var frame := UIShell.screen_frame(self)
 
 	var hbox = HBoxContainer.new()
@@ -280,7 +290,12 @@ func _build_action_footer(parent: VBoxContainer) -> void:
 			"duplicate": btn.pressed.connect(_on_duplicate_pressed)
 			"rename": btn.pressed.connect(_on_rename_pressed)
 			"delete": btn.pressed.connect(_on_delete_pressed)
-		action_hbox.add_child(btn)
+		# NO add_child HERE. _make_toolbox_button() already parented the
+		# button into its wrapper Control and the wrapper into action_hbox;
+		# re-adding the button pushed an "already has a parent" error for
+		# every one of the five, fifteen per test run. The button was
+		# already in the right place - the second add was pure noise, and
+		# noise that test_probe_scene_loads was reporting as a clean load.
 		_action_buttons.append(btn)
 
 

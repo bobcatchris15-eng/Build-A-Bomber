@@ -205,7 +205,68 @@ func test_ui_audit_has_real_teeth() -> bool:
 		print("  [FAIL] Input binding collisions detected: ", binding_check["collisions"])
 		return false
 
-	print("  [PASS] UI audit tool correctly catches injected overflow/off-screen/emoji bugs and asserts zero binding collisions.")
+	# --- Material luminance stack (Phase 12 done-when 3) ---
+	# Measured from the field PNGs, not declared, so this catches a re-authored
+	# texture as well as a changed constant.
+	var lum_check = UIAuditScript.check_material_luminance_stack()
+	if not lum_check["valid"]:
+		print("  [FAIL] Material luminance stack: ", lum_check["problems"])
+		return false
+	if lum_check["measured"].size() < 9:
+		print("  [FAIL] Luminance stack measured only %d of 9 materials; a field PNG is missing or unreadable" % lum_check["measured"].size())
+		return false
+
+	# --- Layer discipline (Phase 12 done-when 2) ---
+	# Positive control: an L0 material tagged onto a control inside a panel is
+	# the violation the rule exists to prevent, so the check must catch it.
+	var layer_panel := PanelContainer.new()
+	var offender := ColorRect.new()
+	offender.set_meta("ui_material", "cutting_mat")
+	layer_panel.add_child(offender)
+	root.add_child(layer_panel)
+	var layer_hits = UIAuditScript.check_layer_discipline(layer_panel)
+	layer_panel.queue_free()
+	if layer_hits.is_empty():
+		print("  [FAIL] Layer discipline check missed an L0 material applied inside a panel")
+		return false
+
+	# Negative control: the same material as a bare backdrop is correct usage
+	# and must NOT be reported, or the check is just noise.
+	var bare := ColorRect.new()
+	bare.set_meta("ui_material", "cutting_mat")
+	root.add_child(bare)
+	var clean_hits = UIAuditScript.check_layer_discipline(bare)
+	bare.queue_free()
+	if not clean_hits.is_empty():
+		print("  [FAIL] Layer discipline check flagged a legitimate L0 backdrop: ", clean_hits)
+		return false
+
+	print("  [PASS] UI audit catches injected overflow/off-screen/emoji bugs, asserts zero binding collisions, measures an ascending luminance stack, and enforces layer discipline in both directions.")
+	return true
+
+
+# Phase 12: InputService must be the ONLY declaration of a binding.
+# See UIAudit.check_project_input_section() for why this reads the file
+# rather than the live InputMap.
+func test_installed_bindings_match_input_service() -> bool:
+	print("Running Test Suite: project.godot declares no bindings (Phase 12)...")
+	var UIAuditScript = preload("res://scripts/ui_audit.gd")
+	var check = UIAuditScript.check_project_input_section()
+	if not check["valid"]:
+		print("  [FAIL] project.godot [input] has declarations that InputService will erase at boot:")
+		for p in check["problems"]:
+			print("      %s" % p)
+		return false
+
+	# The bindings still have to actually exist at runtime - an empty section
+	# is only correct because InputService installs them. Spot-check the two
+	# that were colliding, which is what the whole exercise was about.
+	for action in ["cmd_attack_move", "cmd_stop", "cam_pan_left", "cam_pan_down"]:
+		if not InputMap.has_action(action):
+			print("  [FAIL] '%s' is not installed; InputService did not run" % action)
+			return false
+
+	print("  [PASS] project.godot declares no bindings and InputService's are installed.")
 	return true
 
 # --- Skirmish mode test suites ---
@@ -785,6 +846,28 @@ func test_probe_scene_loads() -> bool:
 		"res://scenes/OperationsSetup.tscn",
 		"res://scenes/Loading.tscn",
 	]
+	# "TICKED CLEANLY" USED TO MEAN "DID NOT CRASH", WHICH IS NOT THE SAME
+	# THING. This probe printed [PASS] while blueprint_library_screen.gd was
+	# pushing fifteen "Can't add child ... already has a parent" errors per
+	# run. Promoting the probe into SUITE_ORDER was Phase 12's whole point,
+	# and a probe that cannot fail on a pushed error is a green tick with
+	# nothing behind it.
+	#
+	# HOW THE ERRORS ARE SEEN. project.godot enables file logging to
+	# user://godot_master.log, and the engine flushes a pushed error to it
+	# immediately - verified, including reading the file while the engine
+	# still holds it open for writing. So the probe records the log length
+	# up front and scans everything appended during the run. This is the
+	# only channel GDScript has: there is no API to install an error handler.
+	var log_path := "user://godot_master.log"
+	var log_start: int = -1
+	var log_file := FileAccess.open(log_path, FileAccess.READ)
+	if log_file != null:
+		log_start = log_file.get_length()
+		log_file.close()
+	else:
+		print("  [warn] %s unreadable; error-gate disabled for this run" % log_path)
+
 	for path in SCENES:
 		if not ResourceLoader.exists(path):
 			print("  [skip] %s (missing)" % path)
@@ -802,8 +885,65 @@ func test_probe_scene_loads() -> bool:
 			await tree.process_frame
 		inst.queue_free()
 		await tree.process_frame
-	print("  [PASS] All probed scenes loaded, instantiated, and ticked cleanly.")
+
+	if log_start >= 0:
+		var errors := _errors_logged_since(log_path, log_start)
+		if not errors.is_empty():
+			print("  [FAIL] %d scene-construction error(s) while probing scenes:" % errors.size())
+			for line in errors:
+				print("      %s" % line)
+			return false
+
+	print("  [PASS] All probed scenes loaded, instantiated, and ticked without a scene-construction error.")
 	return true
+
+
+# SCENE-CONSTRUCTION errors appended to the log since `from_byte`.
+#
+# WHY THIS IS AN ALLOWLIST RATHER THAN "ANY ERROR". The log is a single
+# process-wide channel and the engine's file logger buffers, so errors from a
+# suite that ran earlier can land in this window after it. The first version
+# of this gate reported seven, and five were other suites' DELIBERATE negative
+# controls - SettingsService's unknown-key rejection, MapCatalog's broken-map
+# fixture. A gate that fires on those trains everyone to ignore it.
+#
+# So it matches ONLY node-parenting errors. That is a deliberately narrow net
+# and it is narrow for a measured reason: a wider one that also caught
+# "Attempt to call function ... on a null instance" and "Invalid access to
+# property or key" fired on four errors from the battle-HUD suites, which
+# drive the HUD with a bare Node3D standing in for the match director and
+# provoke exactly those two on purpose. Cross-suite contamination like that
+# is indistinguishable from a real hit here, so those classes are out.
+#
+# Parenting errors survive the cut because no suite provokes one deliberately,
+# they mean unambiguously "this scene did not assemble", and they are the class
+# the blueprint_library_screen double-parent bug fell into - verified by
+# reintroducing that bug and watching this gate fail, then reverting.
+const SCENE_CONSTRUCTION_ERRORS := [
+	"already has a parent",
+	"Can't add child",
+]
+
+
+static func _errors_logged_since(log_path: String, from_byte: int) -> Array:
+	var f := FileAccess.open(log_path, FileAccess.READ)
+	if f == null:
+		return []
+	f.seek(from_byte)
+	var text := f.get_as_text()
+	f.close()
+
+	var out: Array = []
+	for raw in text.split("\n"):
+		var line := raw.strip_edges()
+		if not (line.begins_with("ERROR:") or line.begins_with("SCRIPT ERROR:")):
+			continue
+		for needle in SCENE_CONSTRUCTION_ERRORS:
+			if line.find(needle) != -1:
+				if not out.has(line):
+					out.append(line)
+				break
+	return out
 
 
 # Tactile Interface Programme Phase 11 (D17).
