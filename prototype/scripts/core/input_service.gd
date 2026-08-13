@@ -235,6 +235,10 @@ const ACTIONS := {
 		"group": GROUP_LAB, "label": "Save design",
 		"events": [{"key": KEY_S, "ctrl": true}],
 	},
+	"manip_precision": {
+		"group": GROUP_LAB, "label": "Precision manipulation modifier",
+		"events": [{"key": KEY_SHIFT}],
+	},
 
 	# --- System ---------------------------------------------------------------
 	"sys_perf": {

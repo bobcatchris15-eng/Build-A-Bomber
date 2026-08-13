@@ -1722,10 +1722,11 @@ func test_hull_collider_matches_visual_aabb() -> bool:
 # Re-fitting on a scale gizmo drag: the collider has to scale with the visual
 # mesh (base_hull_size * hull_scale, which is what gizmo_3d.gd's
 # _apply_scale_to_node writes into the BoxShape3D), and the precise
-# HullSurface trimesh has to be rebuilt so modules dropped after the drag snap
-# to the new silhouette rather than the old.
+# Tactile Interface Programme Phase 5 (D10, D12).
+# The 3D Gizmo refuses attachment to Hull (D10 fixed size classes),
+# and scaling on standard modules functions accurately.
 func test_hull_collider_rebuilt_on_scale() -> bool:
-	print("Running Test Suite: Hull Collider + HullSurface Trimesh Refit On Scale Drag...")
+	print("Running Test Suite: Gizmo Refuses Hull (D10) & Module Scaling...")
 	var placer = Node3D.new()
 	placer.set_script(preload("res://scripts/module_placer.gd"))
 	root.add_child(placer)
@@ -1735,130 +1736,52 @@ func test_hull_collider_rebuilt_on_scale() -> bool:
 	placer._place_hull_from_ui("brenntal_medium_a")
 	var hull_node: Node3D = placer.hull
 	if not hull_node:
-		print("  [FAIL] _place_hull_from_ui('medium_hull') did not set placer.hull.")
+		print("  [FAIL] _place_hull_from_ui did not set placer.hull.")
 		placer.queue_free()
 		return false
 
-	var col: CollisionShape3D = hull_node.get_node_or_null("CollisionShape3D") as CollisionShape3D
-	var surface: Node3D = hull_node.get_node_or_null("HullSurface") as Node3D
-	if not col or not (col.shape is BoxShape3D):
-		print("  [FAIL] Pre-scale: hull has no BoxShape3D collider.")
-		placer.queue_free()
-		return false
-	if not surface:
-		print("  [FAIL] Pre-scale: hull has no HullSurface trimesh node (placement raycast would fall back to box).")
-		placer.queue_free()
-		return false
-
-	var pre_col_size: Vector3 = (col.shape as BoxShape3D).size
-	# HullSurface's CollisionShape3D is added unnamed and gets the
-	# auto-name "@CollisionShape3D@N" when the hull already has a sibling
-	# CollisionShape3D (the box collider). Look up by TYPE, not by name -
-	# same trap module_placer.gd's _refit_module_collider() documents at
-	# its get_node_or_null("StaticBody3D") comment.
-	var surface_col_shapes: Array = surface.find_children("*", "CollisionShape3D", false, false)
-	if surface_col_shapes.is_empty():
-		print("  [FAIL] Pre-scale: HullSurface has no CollisionShape3D child.")
-		placer.queue_free()
-		return false
-	var pre_surface_shape: Shape3D = (surface_col_shapes[0] as CollisionShape3D).shape
-	if not pre_surface_shape:
-		print("  [FAIL] Pre-scale: HullSurface's CollisionShape3D has no shape.")
-		placer.queue_free()
-		return false
-
-	# Drive the gizmo's _apply_scale_to_node directly. It's the only path
-	# that refits the collider, the base_hull_size meta, and the hull
-	# position when the player drags a scale handle. A 1.4x scale is well
-	# within HULL_SCALE_MAX (= 2.0) and visibly different from 1.0.
-	#
-	# The function calls get_tree().call_group() at the end for UI updates,
-	# so the gizmo node has to be in the tree. Adding the gizmo to root
-	# would reparent hull_node (the gizmo's _ready() does target_module =
-	# get_parent(), which we don't want), so attach the gizmo to the hull
-	# ITSELF as a child; target_module gets set by _ready to the parent
-	# hull, and get_tree() resolves correctly.
 	var gizmo_script: GDScript = load("res://scripts/gizmo_3d.gd")
 	if not gizmo_script:
 		print("  [FAIL] Could not load gizmo_3d.gd")
 		placer.queue_free()
 		return false
-	# Drive the gizmo's _apply_scale_to_node directly. The gizmo's
-	# _ready() does `target_module = get_parent()`, which fails the
-	# Node3D type-check when the parent is the test root (a Window).
-	# Attach the gizmo to a tiny Node3D shim so _ready() finds a valid
-	# Node3D parent. The shim and the gizmo are torn down at the end.
-	var gizmo_shim: Node3D = Node3D.new()
-	root.add_child(gizmo_shim)
-	var gizmo_node: Node3D = Node3D.new()
-	gizmo_node.set_script(gizmo_script)
-	gizmo_shim.add_child(gizmo_node)
-	gizmo_node.target_module = hull_node
-	gizmo_node.start_scale = Vector3.ONE
-	# 1.4x is well within HULL_SCALE_MAX (= 2.0) and visibly different
-	# from 1.0 - the kind of drag the player can definitely make.
-	gizmo_node._apply_scale_to_node(hull_node, Vector3(1.4, 1.4, 1.4))
 
-	var post_col_size: Vector3 = (col.shape as BoxShape3D).size
-	# Collider must scale with the hull, NOT stay at the pre-scale value.
-	if post_col_size.distance_to(pre_col_size * 1.4) > 0.05:
-		print("  [FAIL] Collider did not scale with the hull: pre %s, post %s, expected %s." % [
-			pre_col_size, post_col_size, pre_col_size * 1.4])
-		gizmo_node.free()
-		placer.queue_free()
-		return false
-	# And the meta must agree.
-	var post_meta_size: Vector3 = hull_node.get_meta("base_hull_size")
-	if post_meta_size.distance_to(pre_col_size * 1.4) > 0.05:
-		print("  [FAIL] base_hull_size meta did not scale: pre %s, post %s, expected %s." % [
-			pre_col_size, post_meta_size, pre_col_size * 1.4])
-		gizmo_node.free()
-		placer.queue_free()
-		return false
-	# Hull.position.y has to keep the hull on the ground.
-	if absf(hull_node.position.y - post_col_size.y / 2.0) > 0.05:
-		print("  [FAIL] Hull y did not follow scale: got %.3f, expected %.3f." % [
-			hull_node.position.y, post_col_size.y / 2.0])
-		gizmo_node.free()
-		placer.queue_free()
-		return false
-
-	# Surface trimesh is rebuilt by the gizmo's _on_drag_ended() (not by
-	# _apply_scale_to_node - the per-frame rebuild would be too expensive).
-	# We can't fully drive the gizmo's drag end without instantiating its
-	# scene + handles; instead, verify the BUILD-BLOCK works by calling
-	# the trimesh rebuild directly on the same hull+mesh the gizmo would
-	# use. The integration is then one helper call - if
-	# HullSurfaceScript.rebuild() runs and produces a fresh shape, the
-	# gizmo's _on_drag_ended() (which is the only thing that calls it for
-	# the scale-drag path) works.
-	var HullSurfaceScript: GDScript = load("res://scripts/hull_surface.gd")
-	if not HullSurfaceScript:
-		print("  [FAIL] Could not load hull_surface.gd")
-		gizmo_node.free()
-		placer.queue_free()
-		return false
-	HullSurfaceScript.rebuild(hull_node, hull_node.get_node_or_null("MeshInstance3D") as MeshInstance3D)
+	# 1. Assert gizmo refuses attachment to Hull
+	var hull_gizmo: Node3D = Node3D.new()
+	hull_gizmo.set_script(gizmo_script)
+	hull_node.add_child(hull_gizmo)
 	await tree.process_frame
-	# Same TYPE-based lookup as the pre-scale check above - the
-	# CollisionShape3D inside HullSurface is auto-named @CollisionShape3D@N
-	# because the hull already has a sibling with the default name.
-	var post_surface_children: Array = hull_node.get_node_or_null("HullSurface").find_children("*", "CollisionShape3D", false, false)
-	if post_surface_children.is_empty():
-		print("  [FAIL] Post-rebuild: HullSurface has no CollisionShape3D child.")
-		gizmo_node.queue_free()
-		placer.queue_free()
-		return false
-	var post_trimesh_shape: Shape3D = (post_surface_children[0] as CollisionShape3D).shape
-	if post_trimesh_shape == pre_surface_shape:
-		print("  [FAIL] HullSurface.rebuild() did not produce a fresh shape (same instance).")
-		gizmo_node.queue_free()
+	# Hull gizmo queues free immediately upon attachment
+	if hull_gizmo.is_queued_for_deletion() or not hull_gizmo.visible:
+		print("  [PASS] Gizmo refused attachment to Hull (D10).")
+	else:
+		print("  [FAIL] Gizmo should refuse attachment to Hull.")
 		placer.queue_free()
 		return false
 
-	gizmo_node.queue_free()
+	# 2. Assert module scaling works on a standard module
+	var mod: Node3D = Node3D.new()
+	var d = ModuleData.new()
+	d.type_id = "basic_cannon"
+	mod.set_meta("module_data", d)
+	hull_node.add_child(mod)
+
+	var mod_gizmo: Node3D = Node3D.new()
+	mod_gizmo.set_script(gizmo_script)
+	mod.add_child(mod_gizmo)
+	await tree.process_frame
+
+	mod_gizmo.target_module = mod
+	mod_gizmo.start_scale = Vector3.ONE
+	mod_gizmo._apply_scale_to_node(mod, Vector3(1.2, 1.2, 1.2))
+
+	if mod.scale.distance_to(Vector3(1.2, 1.2, 1.2)) > 0.01:
+		print("  [FAIL] Module scale not applied: got ", mod.scale)
+		placer.queue_free()
+		return false
+
 	placer.queue_free()
-	print("  [PASS] Collider scales with hull_scale, base_hull_size stays in sync, hull.position.y follows, and the HullSurface trimesh rebuilds on demand.")
+	print("  [PASS] Gizmo refuses Hull and scales modules correctly.")
 	return true
 
 func type_as_string(thing) -> String:

@@ -3,42 +3,24 @@ extends Node3D
 const LabDocumentScript = preload("res://scripts/lab_document.gd")
 const VisualBuilder = preload("res://scripts/visual_builder.gd")
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
+const GizmoHandleScript = preload("res://scripts/gizmo_handle.gd")
+const Tokens = preload("res://scripts/ui_tokens.gd")
 
 var target_module: Node3D
 var start_scale: Vector3
-var child_start_positions: Dictionary = {}
 var start_tweaks: Dictionary = {}
-
-const Tokens = preload("res://scripts/ui_tokens.gd")
 
 const HANDLE_COLORS := {
 	"HandleX": Color(0.95, 0.26, 0.30),
 	"HandleY": Color(0.42, 0.85, 0.32),
 	"HandleZ": Color(0.30, 0.55, 0.95),
-	# The rotate ring is not an axis, so it does not take an axis colour. It
-	# takes the interface's hazard signal, which is what every other
-	# "you are adjusting this right now" cue in the game uses.
 	"HandleRotate": Tokens.SIGNAL_HAZARD,
 }
 
-# The rotate ring is HIDDEN BY DEFAULT and summoned from the radial menu.
-#
-# Showing the stretch handles and a 1.1-unit rotation torus at the same time -
-# and then opening a radial action menu on top of both - put three overlapping
-# manipulators around one small part. They compete for the same clicks and the
-# ring in particular swallows drags meant for the model behind it. So the two
-# modes are now exclusive: stretch handles are the resting state, and Rotate on
-# the radial menu swaps to the ring. Clicking away, or finishing a rotation,
-# returns to the resting state.
 var _rotate_mode := false
+var _planar_handles: Array[Area3D] = []
 
-# The handle meshes ship with no material at all in Gizmo3D.tscn, so they used
-# to render flat white - and module_placer.gd's clipping pass then walked into
-# the gizmo and overwrote them with the module's own colour (or red). With that
-# pass no longer touching the gizmo, give the handles the conventional
-# red/green/blue per-axis colours so it reads as a manipulator rather than as
-# part of the model. Unshaded and drawn on top so it stays legible against a
-# dark hull or from inside a large module.
+
 func _paint_handles():
 	for handle_name in HANDLE_COLORS:
 		var handle = get_node_or_null(handle_name)
@@ -54,14 +36,23 @@ func _paint_handles():
 		mat.render_priority = 1
 		mesh_inst.material_override = mat
 
+
 func _ready():
 	target_module = get_parent()
+	if target_module != null and target_module.name == "Hull":
+		# Remove hull from gizmo entirely (D10). Hull uses fixed size classes.
+		visible = false
+		set_process(false)
+		set_physics_process(false)
+		queue_free()
+		return
+
 	_paint_handles()
 
 	# Connect to the 3 linear handles (X/Y/Z scale/tweak drag)
 	for child in get_children():
-		if child.name == "HandleRotate":
-			continue # wired separately below - no .axis, different signal shape
+		if child.name == "HandleRotate" or child.name.begins_with("Planar"):
+			continue
 		if child.has_signal("drag_started"):
 			child.drag_started.connect(_on_drag_started)
 			child.dragged.connect(_on_dragged.bind(child.axis))
@@ -73,20 +64,100 @@ func _ready():
 		ring.rotated.connect(_on_rotated)
 		ring.drag_ended.connect(_on_drag_ended)
 
+	_setup_planar_handles()
 	set_rotate_mode(false)
 
 
-# Swaps between the stretch handles and the rotation ring. See _rotate_mode.
+func _setup_planar_handles() -> void:
+	_create_planar_handle("PlanarXY", Vector3(1, 1, 0), Vector3(0, 0, 1), Vector3(0.35, 0.35, 0), Color(0.95, 0.95, 0.4, 0.45))
+	_create_planar_handle("PlanarXZ", Vector3(1, 0, 1), Vector3(0, 1, 0), Vector3(0.35, 0, 0.35), Color(0.95, 0.4, 0.95, 0.45))
+	_create_planar_handle("PlanarYZ", Vector3(0, 1, 1), Vector3(1, 0, 0), Vector3(0, 0.35, 0.35), Color(0.4, 0.95, 0.95, 0.45))
+
+
+func _create_planar_handle(handle_name: String, axes: Vector3, normal: Vector3, offset: Vector3, col: Color) -> void:
+	var existing = get_node_or_null(handle_name)
+	if existing:
+		return
+
+	var area := Area3D.new()
+	area.name = handle_name
+	area.set_script(GizmoHandleScript)
+	area.set("axis", axes)
+	area.position = offset
+
+	var col_shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(0.35, 0.35, 0.35)
+	col_shape.shape = box
+	area.add_child(col_shape)
+
+	var mesh_inst := MeshInstance3D.new()
+	mesh_inst.name = "MeshInstance3D"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.28, 0.28)
+	mesh_inst.mesh = quad
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = col
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.no_depth_test = true
+	mat.render_priority = 2
+	mesh_inst.material_override = mat
+
+	if normal.x != 0:
+		mesh_inst.rotation_degrees = Vector3(0, 90, 0)
+	elif normal.y != 0:
+		mesh_inst.rotation_degrees = Vector3(90, 0, 0)
+
+	area.add_child(mesh_inst)
+	add_child(area)
+
+	area.set_meta("plane_normal", normal)
+	area.set_meta("axes", axes)
+	_planar_handles.append(area)
+
+	area.drag_started.connect(_on_drag_started)
+	area.dragged.connect(_on_planar_dragged.bind(axes))
+	area.drag_ended.connect(_on_drag_ended)
+
+
+func _process(_delta: float) -> void:
+	var camera := get_viewport().get_camera_3d() if is_inside_tree() else null
+	if not camera:
+		return
+	var cam_forward := -camera.global_transform.basis.z
+
+	for p in _planar_handles:
+		if not is_instance_valid(p):
+			continue
+		if _rotate_mode:
+			p.visible = false
+			p.input_ray_pickable = false
+			continue
+
+		var norm: Vector3 = p.get_meta("plane_normal", Vector3.UP)
+		var world_norm: Vector3 = (global_transform.basis * norm).normalized()
+		var face_on: float = abs(world_norm.dot(cam_forward))
+		var is_visible: bool = face_on > 0.18
+		p.visible = is_visible
+		p.input_ray_pickable = is_visible
+		p.scale = Vector3.ONE * clampf(face_on * 1.2, 0.5, 1.0)
+
+
+# Swaps between the stretch handles and the rotation ring.
 func set_rotate_mode(enabled: bool) -> void:
 	_rotate_mode = enabled
 	for axis_name in ["HandleX", "HandleY", "HandleZ"]:
 		var h = get_node_or_null(axis_name)
 		if h:
 			h.visible = not enabled
-			# Visibility alone does not stop an Area3D from being picked, and a
-			# hidden-but-clickable handle is the worst of both.
 			h.set_deferred("monitorable", not enabled)
 			h.input_ray_pickable = not enabled
+	for p in _planar_handles:
+		if is_instance_valid(p):
+			p.visible = not enabled
+			p.input_ray_pickable = not enabled
 	var ring = get_node_or_null("HandleRotate")
 	if ring:
 		ring.visible = enabled
@@ -95,6 +166,7 @@ func set_rotate_mode(enabled: bool) -> void:
 
 
 var _telemetry_label: Label3D = null
+
 
 func _get_telemetry_label() -> Label3D:
 	if _telemetry_label != null:
@@ -107,9 +179,10 @@ func _get_telemetry_label() -> Label3D:
 	_telemetry_label.font_size = 18
 	_telemetry_label.outline_size = 4
 	_telemetry_label.outline_modulate = Color(0, 0, 0, 0.9)
-	_telemetry_label.modulate = Color(0.0, 0.95, 1.0, 1.0) # Glowing CAD cyan
+	_telemetry_label.modulate = Color(0.0, 0.95, 1.0, 1.0)
 	add_child(_telemetry_label)
 	return _telemetry_label
+
 
 func _show_telemetry_callout(text: String, pos_offset: Vector3):
 	var lbl = _get_telemetry_label()
@@ -117,21 +190,16 @@ func _show_telemetry_callout(text: String, pos_offset: Vector3):
 	lbl.position = pos_offset
 	lbl.visible = true
 
+
 func _on_rotated(delta_angle: float):
-	# Free-form yaw rotation from the ring handle - continuous, not snapped
-	# to 90 degrees like the old Rotate button/R-key (still available as a
-	# quick-align convenience, this doesn't replace it).
-	if not target_module or target_module.name == "Hull": return
+	if not target_module or target_module.name == "Hull":
+		return
 
 	target_module.rotate_object_local(Vector3.UP, delta_angle)
 	var yaw = wrapf(target_module.get_meta("yaw_offset", 0.0) + delta_angle, 0.0, 2.0 * PI)
 	target_module.set_meta("yaw_offset", yaw)
 	var yaw_deg = rad_to_deg(yaw)
 	_show_telemetry_callout("∠ YAW: %.1f°" % yaw_deg, Vector3(0, 1.5, 0))
-	# A sponson blister stays welded to the hull face while the gun traverses
-	# on it, so its counter-rotation is re-applied here rather than letting it
-	# orbit away with the module. Cheaper than a rebuild, which matters on a
-	# per-frame ring drag; no-ops on modules without a blister.
 	VisualBuilder.refresh_sponson_blister(target_module)
 
 	if target_module.has_meta("mirrored_counterpart"):
@@ -146,54 +214,58 @@ func _on_rotated(delta_angle: float):
 	if root and root.has_method("check_all_clipping"):
 		root.check_all_clipping()
 
+
 func _on_drag_started():
 	var root = get_node_or_null("/root/MainLab")
 	if root and root.has_method("push_undo_snapshot"):
 		root.push_undo_snapshot()
 	if target_module:
-		if target_module.name == "Hull" and target_module.has_meta("hull_scale"):
-			start_scale = target_module.get_meta("hull_scale")
-			# Store initial positions of all child modules at the start of drag
-			child_start_positions.clear()
-			for child in target_module.get_children():
-				if child.has_meta("module_data"):
-					child_start_positions[child] = child.position
-		else:
-			start_scale = target_module.scale
-			if target_module.has_meta("module_data"):
-				var data = target_module.get_meta("module_data")
-				start_tweaks = data.tweaks.duplicate()
+		start_scale = target_module.scale
+		start_tweaks = {}
+		if target_module.has_meta("tweaks"):
+			start_tweaks = target_module.get_meta("tweaks").duplicate(true)
+		elif target_module.has_meta("module_data"):
+			var data = target_module.get_meta("module_data")
+			if data.has("tweaks"):
+				start_tweaks = data["tweaks"].duplicate(true)
+
+
+func _on_planar_dragged(offset_3d: Vector3, axes: Vector3) -> void:
+	if axes.x != 0:
+		_on_dragged(Vector3(offset_3d.x, 0, 0), Vector3.RIGHT)
+	if axes.y != 0:
+		_on_dragged(Vector3(0, offset_3d.y, 0), Vector3.UP)
+	if axes.z != 0:
+		_on_dragged(Vector3(0, 0, offset_3d.z), Vector3.FORWARD)
+
 
 func _on_dragged(offset_3d: Vector3, axis: Vector3):
-	if not target_module: return
-	
-	# If this is a standard module with tweaks, map dragging to tweaks!
-	if target_module.name != "Hull" and target_module.has_meta("module_data"):
+	if not target_module or target_module.name == "Hull":
+		return
+
+	if target_module.has_meta("module_data"):
 		var data = target_module.get_meta("module_data")
 		var type_id = data.type_id
 		var tweak_name = get_tweak_for_axis(type_id, axis)
 		if tweak_name != "":
-			var specs = preload("res://scripts/lab_document.gd").TWEAK_SPECS
+			var specs = LabDocumentScript.TWEAK_SPECS
 			var spec = null
 			if type_id in specs:
 				for s in specs[type_id]:
 					if s.name == tweak_name:
 						spec = s
 						break
-			
+
 			if spec:
 				var start_val = start_tweaks.get(tweak_name, spec.default)
 				var local_offset = offset_3d.dot(axis)
-				# 1.0 world offset translates to 1.0 change in tweak value
 				var change = local_offset * 1.5
-				var new_val = start_val + change
-				new_val = clamp(new_val, spec.min, spec.max)
+				var new_val = clamp(start_val + change, spec.min, spec.max)
 				if spec.step > 0:
 					new_val = round(new_val / spec.step) * spec.step
-					
+
 				data.tweaks[tweak_name] = new_val
-				
-				# Rebuild primary and mirror visuals
+
 				VisualBuilder.rebuild_visual(target_module)
 				if target_module.has_meta("mirrored_counterpart"):
 					var mirror = target_module.get_meta("mirrored_counterpart")
@@ -202,10 +274,7 @@ func _on_dragged(offset_3d: Vector3, axis: Vector3):
 						if mirror_data:
 							mirror_data.tweaks[tweak_name] = new_val
 						VisualBuilder.rebuild_visual(mirror)
-						
-				# Update the UI
-				# No glyph (VISUAL/UI plan item 0). A live readout of a value being
-				# dragged is the plainest thing in the interface; it needs a number.
+
 				_show_telemetry_callout("%s: %.2f" % [spec.label if spec else tweak_name, new_val], Vector3(0, 1.5, 0))
 				get_tree().call_group("stat_ui", "on_module_selected", target_module)
 				var root = get_node_or_null("/root/MainLab")
@@ -216,227 +285,63 @@ func _on_dragged(offset_3d: Vector3, axis: Vector3):
 					root.check_all_clipping()
 				return
 
-	# Fallback: original scale behavior
+	# Fallback module scaling
 	var local_offset = offset_3d.dot(axis)
 	var scale_change = local_offset * 1.0
 	var new_scale = start_scale
-	if axis.x != 0: new_scale.x = max(0.1, start_scale.x + scale_change)
-	elif axis.y != 0: new_scale.y = max(0.1, start_scale.y + scale_change)
-	elif axis.z != 0: new_scale.z = max(0.1, start_scale.z + scale_change)
-	
+	if axis.x != 0:
+		new_scale.x = max(0.1, start_scale.x + scale_change)
+	elif axis.y != 0:
+		new_scale.y = max(0.1, start_scale.y + scale_change)
+	elif axis.z != 0:
+		new_scale.z = max(0.1, start_scale.z + scale_change)
+
 	_apply_scale_to_node(target_module, new_scale)
 	_show_telemetry_callout("SCALE: (%.1f, %.1f, %.1f)" % [new_scale.x, new_scale.y, new_scale.z], Vector3(0, 1.5, 0))
-	
-	# Mirror scaling propagation
+
 	if target_module.has_meta("mirrored_counterpart"):
 		var mirror = target_module.get_meta("mirrored_counterpart")
 		if is_instance_valid(mirror):
 			_apply_scale_to_node(mirror, new_scale)
-			# Chirality is no longer carried by a negative scale on the
-			# mirror's own node - module_placer.gd's _apply_mirror_flip()
-			# reflects the module's VISUAL CHILDREN in module space instead,
-			# which survives this scale write untouched and keeps the negative
-			# factor out of both the collision shape and
-			# module_data.scale_multiplier (which the stat maths reads).
-			# Re-asserting scale.x = -abs(scale.x) here would now double up
-			# with that child-level reflection and un-mirror the part.
-		
-	# Notify UI
-	get_tree().call_group("stat_ui", "update_stats", get_node("/root/MainLab/Hull"))
-	
+
+	get_tree().call_group("stat_ui", "update_stats", get_node_or_null("/root/MainLab/Hull"))
 	var main_lab = get_node_or_null("/root/MainLab")
 	if main_lab and main_lab.has_method("check_all_clipping"):
 		main_lab.check_all_clipping()
 
+
 func _apply_scale_to_node(node: Node3D, new_scale: Vector3):
-	if node.name == "Hull":
-		# Bounded scaling (FABLE_REVIEW.md 1.3): the concept doc always
-		# specced size-class bounds; the old code only clamped the low end,
-		# and since hull scale now drives real HP/weight/cost this needs a
-		# real ceiling too.
-		new_scale = new_scale.clamp(
-			Vector3.ONE * ModuleCatalogScript.HULL_SCALE_MIN,
-			Vector3.ONE * ModuleCatalogScript.HULL_SCALE_MAX)
-		# Scale Isolation: scale only the MeshInstance3D and CollisionShape3D directly.
-		# This keeps the parent Hull node scale at (1, 1, 1), avoiding module deformation.
-		node.set_meta("hull_scale", new_scale)
-		# base_hull_size is the FITTED AABB (set by _place_hull_from_ui /
-		# update_hull_appearance), not the catalog box. Scaling it by
-		# new_scale gives the fitted AABB at the new scale, which is the
-		# size the collider needs to be so the surface a module snaps to
-		# (HullSurface trimesh) and the box it falls back to / reads as the
-		# dimension oracle still agree with each other and with the visible
-		# mesh.
-		var base_size: Vector3 = Vector3(ModuleCatalogScript.REFERENCE_HULL_SIZE)
-		if node.has_meta("base_hull_size"):
-			base_size = node.get_meta("base_hull_size")
+	if node == null or node.name == "Hull":
+		return
+	node.scale = new_scale
+	if node.has_meta("module_data"):
+		var data = node.get_meta("module_data")
+		data.scale_multiplier = new_scale
 
-		var target_size: Vector3 = base_size * new_scale
-
-		# Resize MeshInstance3D. Authored .glb hulls are ArrayMeshes - they
-		# scale via mesh_inst.scale (same as update_hull_appearance() /
-		# reconstruct_vehicle() do), not via BoxMesh.size; previously the
-		# non-BoxMesh path was simply missing, so dragging a scale handle on
-		# any authored hull moved the collision box and the stats but not
-		# the visible mesh until some later full rebuild (FABLE_REVIEW.md 3.8).
-		var armor_thick = node.get_meta("armor_thickness") if node.has_meta("armor_thickness") else 1.0
-		var armor_bulk = Vector3(1.0 + (armor_thick - 1.0) * 0.15, 1.0 + (armor_thick - 1.0) * 0.15, 1.0)
-		var hull_type = node.get_meta("type_id") if node.has_meta("type_id") else "brenntal_medium_a"
-		var mesh_inst = node.get_node_or_null("MeshInstance3D")
-		var phys_mesh = node.get_node_or_null("PhysicsMesh")
-		if mesh_inst and mesh_inst.mesh is BoxMesh:
-			if not mesh_inst.mesh.resource_local_to_scene:
-				mesh_inst.mesh = mesh_inst.mesh.duplicate()
-			mesh_inst.mesh.size = target_size
-			if phys_mesh:
-				phys_mesh.mesh = mesh_inst.mesh
-		elif mesh_inst:
-			# An authored .glb needs the orientation + per-axis fit that maps
-			# it onto its catalog box folded in, exactly as
-			# update_hull_appearance() does. Assigning the raw hull_scale here
-			# dropped that factor entirely, so the hull's visible size jumped
-			# the instant a scale handle was grabbed and then tracked a
-			# different curve than the collider for the rest of the drag.
-			var fit = ModuleCatalogScript.get_hull_mesh_fit(hull_type, mesh_inst.mesh, new_scale * armor_bulk)
-			mesh_inst.rotation = fit["rotation"]
-			mesh_inst.scale = fit["scale"]
-			mesh_inst.position = fit["position"]
-			# The physics copy is never drawn but other code reads its
-			# transform, so it must not drift away from the visual one.
-			if phys_mesh:
-				phys_mesh.rotation = fit["rotation"]
-				phys_mesh.scale = fit["scale"]
-				phys_mesh.position = fit["position"]
-
-		# Resize CollisionShape3D. Stays axis-aligned in hull-local space
-		# (the fit recentred the visual on the origin, so the collider's
-		# position stays there too) - see module_placer.gd's
-		# _place_hull_from_ui for why it must not inherit the mesh's
-		# orientation correction.
-		var col_shape = node.get_node_or_null("CollisionShape3D")
-		if col_shape and col_shape.shape is BoxShape3D:
-			if not col_shape.shape.resource_local_to_scene:
-				col_shape.shape = col_shape.shape.duplicate()
-			col_shape.shape.size = target_size
-			# The fit recentred the visual on the hull's local origin; the
-			# collider follows. Any drift here would put the box off the
-			# visual and every dimension consumer (locomotion stations,
-			# armor auto-fit, unit.gd's separation/selection/cargo radii)
-			# would read the box as a hull whose centre isn't where its
-			# mesh actually is.
-			col_shape.position = Vector3.ZERO
-		# base_hull_size has to scale with the collider - it is the fitted
-		# AABB at the CURRENT scale, and every dimension consumer that
-		# reads the meta (auto_weapon.gd's miss-chance size_factor,
-		# unit.gd's separation / selection / cargo radii, locomotion's
-		# layout) otherwise keeps using the pre-scale value while the
-		# collider reflects the post-scale one. Drift between the two is
-		# exactly the bug the catalog->AABB refactor was meant to retire,
-		# so the gizmo's scale path keeps them in sync.
-		node.set_meta("base_hull_size", target_size)
-		# Hull has to stay seated on the ground. _place_hull_from_ui sets
-		# hull.position.y = base_hull_size.y / 2.0 at placement, and a
-		# scale handle changes base_hull_size effectively, so update here
-		# too - otherwise a player who scales up finds their hull sunk
-		# into the terrain by half the scale delta, and a player who
-		# scales down finds it floating.
-		node.position.y = target_size.y / 2.0
-
-		# Shift child modules based on the scaling factor
-		var scale_factor = Vector3(
-			new_scale.x / start_scale.x if start_scale.x != 0.0 else 1.0,
-			new_scale.y / start_scale.y if start_scale.y != 0.0 else 1.0,
-			new_scale.z / start_scale.z if start_scale.z != 0.0 else 1.0
-		)
-
-		for child in child_start_positions.keys():
-			if is_instance_valid(child):
-				var start_pos = child_start_positions[child]
-				child.position = start_pos * scale_factor
-	else:
-		# Standard module scaling
-		node.scale = new_scale
-		if node.has_meta("module_data"):
-			var data = node.get_meta("module_data")
-			data.scale_multiplier = new_scale
 
 func _on_drag_ended():
 	var main_lab = get_node_or_null("/root/MainLab")
-	# Locomotion is laid out FROM the hull's dimensions - wheel spacing, tread
-	# span, hover-ring radii and the screw drums' corner offsets all derive from
-	# hull_size. Nothing re-ran that layout when the hull itself was resized, so
-	# dragging a scale handle after choosing locomotion left the running gear
-	# spaced for the hull's previous size, drifting further the more you dragged.
-	#
-	# Done on drag END rather than per-frame: re-laying out is a full respawn of
-	# every locomotion instance, which is far too heavy to run on every mouse
-	# move. It no-ops on a hull with no locomotion chosen.
-	if main_lab and main_lab.has_method("refresh_locomotion"):
-		main_lab.refresh_locomotion()
 	if main_lab and main_lab.has_method("check_all_clipping"):
 		main_lab.check_all_clipping()
 
-	# The precise HullSurface trimesh is what initial-placement raycasts hit
-	# (see module_placer.gd's surface_raycast). It used to be built only in
-	# _place_hull_from_ui and update_hull_appearance, so a scale drag left
-	# it stale - modules dropped after the drag would snap to the hull's
-	# PRE-scale silhouette, and on hulls whose fit also rotates the mesh
-	# (every authored one), the surface silently disagreed with the visible
-	# mesh by the whole rotation. Rebuild from the visual mesh that's
-	# already at the new scale, on the same trimesh layer module_placer
-	# queries. Cheaper than re-running update_hull_appearance() (no greeble
-	# or material rebuild) and runs once per drag rather than per frame.
-	if target_module and target_module.name == "Hull":
-		var HullSurfaceScript = load("res://scripts/hull_surface.gd")
-		if HullSurfaceScript:
-			HullSurfaceScript.rebuild(target_module, target_module.get_node_or_null("MeshInstance3D"))
 
-func get_tweak_for_axis(type_id: String, axis: Vector3) -> String:
-	var abs_axis = axis.abs()
-	if abs_axis.x > 0.9:
-		match type_id:
-			"basic_cannon", "heavy_machine_gun", "rotary_cannon":
-				return "caliber"
-			"gauss_railgun":
-				return "rail_length"
-			"artillery":
-				return "barrel_length"
-			"spigot_mortar":
-				return "rod_thickness"
-			"guided_missile":
-				return "seeker_size"
-			"flamethrower":
-				return "nozzle_width"
-			"heavy_laser":
-				return "lens_aperture"
-			"plasma_lobber":
-				return "containment"
-			"ciws":
-				return "radar_dish"
-			"pd_laser":
-				return "cooling_jacket"
-			"flak_cannon":
-				return "fuse_setting"
-			"resource_harvester":
-				return "extractor_size"
-			"sensor_suite":
-				return "mast_height"
-			"mortar_array":
-				return "tube_count"
-			"cluster_dispenser":
-				return "dispersion"
-			"missile_pod":
-				return "grid_size"
-	elif abs_axis.z > 0.9:
-		match type_id:
-			"basic_cannon":
-				return "barrel_length"
-			"guided_missile":
-				return "engine_length"
-			"missile_pod":
-				return "motor_length"
-			"flamethrower":
-				return "pressure_valve"
-			"resource_harvester":
-				return "extractor_size"
-	return ""
+static func get_tweak_for_axis(type_id: String, axis: Vector3) -> String:
+	var specs = LabDocumentScript.TWEAK_SPECS
+	if not (type_id in specs):
+		return ""
+	var list: Array = specs[type_id]
+	if list.is_empty():
+		return ""
+	if axis.z != 0:
+		for s in list:
+			if s.name in ["barrel_length", "track_length", "pod_length", "mast_height"]:
+				return s.name
+	if axis.x != 0:
+		for s in list:
+			if s.name in ["caliber", "drum_radius", "dish_diameter", "shield_arc", "intake_size"]:
+				return s.name
+	if axis.y != 0:
+		for s in list:
+			if s.name in ["elevation", "vertical_arc", "aperture", "fins"]:
+				return s.name
+	return list[0].name
