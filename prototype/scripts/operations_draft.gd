@@ -46,7 +46,12 @@ func _ready() -> void:
 	add_child(bp_manager)
 	_ops = get_node_or_null("/root/OperationsManager")
 
-	UIShell.backdrop(self)
+	# Out-of-match screen - sits on the workbench, not on the in-match steel.
+	# Operations draft is the between-engagement screen, the paper the
+	# campaign is planned on. Cork fits better than the kraft paper of
+	# operations_setup (which is the pre-campaign planning) - cork is
+	# what a board you stick notes to is made of.
+	UIShell.workbench(self, "cork")
 	var frame := UIShell.screen_frame(self)
 
 	var vbox = VBoxContainer.new()
