@@ -270,6 +270,8 @@ func set_prop_state(handle: int, state: String) -> void:
 		return
 	entry["state"] = state
 	_apply_state(entry["material"], entry["variant"], state)
+	if bool(entry.get("active", false)):
+		_apply_active(entry["material"], true)
 	request_render()
 
 
@@ -291,6 +293,8 @@ func set_prop_variant(handle: int, variant: String) -> void:
 	entry["variant"] = variant
 	_apply_variant(entry["material"], variant)
 	_apply_state(entry["material"], variant, entry["state"])
+	if bool(entry.get("active", false)):
+		_apply_active(entry["material"], true)
 	request_render()
 
 
@@ -335,6 +339,27 @@ func set_prop_material_override(handle: int, material: Material) -> void:
 		mesh.material_override = entry["material"]
 		_apply_variant(entry["material"], entry["variant"])
 		_apply_state(entry["material"], entry["variant"], entry["state"])
+	request_render()
+
+
+# Per-instance "active" flag. MeshIcon uses this for the toggle/rotary
+# lit-vs-unlit look. The active look is the SIGNAL_GO emission on a
+# gunmetal body (matches the original MeshIcon.set_active()); the
+# inactive look is plain gunmetal with no emission. The flag is
+# checked at render time and applied ON TOP of the current variant +
+# state, so an active prop in the disabled state still desaturates
+# (the disabled delta wins for body colour, the active flag only
+# affects the emission).
+func set_prop_active(handle: int, active: bool) -> void:
+	if handle < 0 or handle >= _handles.size():
+		return
+	var entry = _handles[handle]
+	if entry == null:
+		return
+	if bool(entry.get("active", false)) == active:
+		return
+	entry["active"] = active
+	_apply_active(entry["material"], active)
 	request_render()
 
 
@@ -654,3 +679,19 @@ func _apply_state(material: StandardMaterial3D, variant: String, state: String) 
 			material.emission_enabled = base_emission_energy > 0.0
 			material.emission = base_emission
 			material.emission_energy_multiplier = base_emission_energy
+
+
+# Active look. The body shifts to a slightly cooler gunmetal, the
+# SIGNAL_GO emission turns on at moderate intensity. The active look
+# is intentionally a small body delta + an emission; the variant
+# already provides the body colour family, the active flag is what
+# makes the prop read as "engaged" at a glance.
+func _apply_active(material: StandardMaterial3D, active: bool) -> void:
+	if active:
+		material.albedo_color = Color(0.30, 0.34, 0.30, 1.0)
+		material.emission_enabled = true
+		material.emission = Tokens.SIGNAL_GO
+		material.emission_energy_multiplier = 0.6
+	else:
+		material.albedo_color = Color(0.42, 0.43, 0.45, 1.0)
+		material.emission_enabled = false

@@ -89,3 +89,24 @@ static func has(prop_id: String) -> bool:
 # tool Phase 12 will add ("every UI prop has a baked texture set").
 static func ids() -> Array:
 	return ENTRIES.keys()
+
+
+# Reverse lookup: mesh path -> prop_id. MeshIcon needs this so a caller
+# that sets `mesh_path = "res://.../ui_toggle_switch.glb"` ends up
+# attached to the stage under the right prop_id without having to
+# know the registry's internal naming. The mapping is derived from
+# ENTRIES at script load time so the two never drift - adding a new
+# prop to ENTRIES makes it discoverable here for free.
+#
+# NOT a const because the derivation would re-run on every engine
+# boot, and the const-derivation pattern ({} = ...) is the same cost
+# in disguise. A static var computed once on first read is cheaper
+# than a const and just as correct.
+static var _PATH_TO_ID: Dictionary = {}
+
+
+static func prop_id_for_path(path: String) -> String:
+	if _PATH_TO_ID.is_empty():
+		for prop_id in ENTRIES:
+			_PATH_TO_ID[ENTRIES[prop_id]["mesh_path"]] = prop_id
+	return String(_PATH_TO_ID.get(path, ""))
