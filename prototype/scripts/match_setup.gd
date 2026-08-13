@@ -71,7 +71,7 @@ func _ready():
 	#
 	#   brightness 0.56  lighter. This screen can afford it because it carries no
 	#                    powdercoat panels: the only things needing separation
-	#                    from the backdrop are controls (bakelite, ~0.145) and
+	#                    from the backdrop are controls (moulded, ~0.145) and
 	#                    text, so the usual "hold the backdrop well below panel
 	#                    luminance" constraint has slack here. Lands near 0.115.
 	#   wear  0.05       the scuffed bright patches are the least smooth thing in

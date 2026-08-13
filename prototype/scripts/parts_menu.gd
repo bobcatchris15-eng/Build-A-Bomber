@@ -554,7 +554,7 @@ func _populate(groups: Dictionary, order: Array, family: String) -> void:
 
 # A part card. Compact, gridded, and carrying its weight inline.
 #
-# Styling comes from the THEME (bakelite plates, from tools/build_ui_theme.gd),
+# Styling comes from the THEME (moulded plates, from tools/build_ui_theme.gd),
 # not from a local StyleBoxFlat. The previous version hand-rolled four
 # styleboxes per card here, which duplicated what the theme already builds for
 # Button and - because local overrides beat the theme - actively prevented the

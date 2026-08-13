@@ -21,11 +21,11 @@ const LiveryScript = preload("res://scripts/livery.gd")
 #
 #   POWDERCOAT  panel and dock bodies, HUD chrome
 #   STEEL       frames, rails, splitters, toolbars, dividers
-#   BAKELITE    buttons, tabs, toggles, the radial ring
+#   MOULDED     buttons, tabs, toggles, the radial ring
 #   CANVAS      drawer/flyout backing, tooltips
 #   CARBON      primary action only - SPARING, at most two per screen
 #   FIBERGLASS  hazard placards, alert states
-const MATERIALS = ["powdercoat", "steel", "bakelite", "canvas", "carbon", "fiberglass", "toolbox"]
+const MATERIALS = ["powdercoat", "steel", "moulded", "canvas", "carbon", "fiberglass", "toolbox"]
 
 const FIELD_DIR = "res://assets/textures/ui/"
 
@@ -35,7 +35,7 @@ const FIELD_DIR = "res://assets/textures/ui/"
 const MATERIAL_DEFAULTS = {
 	"powdercoat": {"wear": 0.25, "grime": 0.20, "scale": 1.0, "vignette": 0.30},
 	"steel":      {"wear": 0.35, "grime": 0.12, "scale": 1.0, "vignette": 0.22},
-	"bakelite":   {"wear": 0.10, "grime": 0.18, "scale": 0.8, "vignette": 0.18},
+	"moulded":    {"wear": 0.10, "grime": 0.18, "scale": 0.8, "vignette": 0.18},
 	# Cloth does not scuff to a bright edge and does not carry a corner
 	# falloff the way a curved metal plate does - it is matte and flat.
 	"canvas":     {"wear": 0.06, "grime": 0.30, "scale": 0.7, "vignette": 0.12},

@@ -37,17 +37,18 @@ MATERIAL VOCABULARY - see the plan and VISUAL_ART_DIRECTION.md. Six surfaces,
 each assigned a job:
     powdercoat  panel and dock bodies, HUD chrome
     steel       frames, rails, splitters, toolbars
-    bakelite    buttons, tabs, toggles, radial ring
+    moulded     buttons, tabs, toggles, radial ring
     canvas      drawer and flyout backing, tooltips
     carbon      primary action only - sparing
     fiberglass  hazard placards, alert states
 
-NOTE ON THE NAME "bakelite": it is now a misnomer. The material started as dark
-marbled phenolic and is now matte finely-stippled injection-moulded ABS /
-powdercoated aluminium (see mat_bakelite). The key was left alone deliberately -
-it appears in 24 committed PNG filenames, build_ui_theme.gd, ui_theme.gd's
-MATERIALS/MATERIAL_DEFAULTS and the style guide, so renaming it is a mechanical
-sweep worth doing on its own rather than buried in an appearance change.
+NOTE ON THE NAME: "moulded" replaced "bakelite" in Phase 4. The surface was
+dark marbled phenolic at first; it is now matte finely-stippled injection-
+moulded ABS / powdercoated aluminium (see mat_moulded). The old key stuck
+around through the original material pass because it appeared in 24 committed
+PNG filenames, build_ui_theme.gd, ui_theme.gd's MATERIALS/MATERIAL_DEFAULTS
+and the style guide - so the rename is its own commit rather than a side
+effect of an appearance change.
 
 Colours are the ui_tokens.gd palette. They are duplicated here as literals
 because this is a build-time Python script that cannot import GDScript - if
@@ -125,7 +126,7 @@ SHADOW_TIERS = {
 #
 # Every `pressed` state is flush by definition: a control that reads as pushed
 # IN must not simultaneously cast a shadow claiming it stands proud. Same for
-# `disabled`, which is meant to recede. `bakelite` is the button material and
+# `disabled`, which is meant to recede. `moulded` is the button material and
 # stays raised-only - buttons sit in dense rows (the parts bin, the build bar),
 # and a floating-strength shadow on each one turns a toolbar into mud.
 SHADOW_ASSIGNMENT = {
@@ -135,8 +136,8 @@ SHADOW_ASSIGNMENT = {
     ("steel", "hover"): "raised",
     ("canvas", "normal"): "floating",
     ("canvas", "hover"): "floating",
-    ("bakelite", "normal"): "raised",
-    ("bakelite", "hover"): "raised",
+    ("moulded", "normal"): "raised",
+    ("moulded", "hover"): "raised",
     ("carbon", "normal"): "raised",
     ("carbon", "hover"): "raised",
     ("fiberglass", "normal"): "raised",
@@ -265,7 +266,7 @@ def mat_powdercoat(h, w, rng):
     # BASE_800, the palette's "panel body". Was 0.150/0.148/0.132 (luminance
     # 0.147, i.e. BASE_700) which is the RAISED CONTROL value - so panels and
     # buttons were competing for the same tier. Dropping panels to BASE_800
-    # while bakelite rises to BASE_700 is what opens the gap that lets a button
+    # while moulded rises to BASE_700 is what opens the gap that lets a button
     # read as sitting on a panel rather than in it. Still comfortably above the
     # backdrop, which lands near 0.084 (steel field x apply_backdrop's 0.42
     # brightness), so the floor/surface/control stack stays strictly ascending.
@@ -291,7 +292,7 @@ def mat_steel(h, w, rng):
     return rgb, gloss
 
 
-def mat_bakelite(h, w, rng):
+def mat_moulded(h, w, rng):
     """
     Injection-moulded ABS / powdercoated aluminium. Matte, finely stippled.
 
@@ -327,6 +328,10 @@ def mat_bakelite(h, w, rng):
     # flattened every state: at base 0.075 the x1.18 hover reached 0.089, an
     # absolute delta of 0.014, which is invisible. The luminance stack now
     # ascends the way the palette intends - backdrop, then panel, then control.
+    #
+    # Named "moulded" rather than the historical "bakelite" because the surface
+    # is no longer dark marbled phenolic. See the material vocabulary comment
+    # at the top of this file.
     #
     # Neutral warm grey, NOT the old brown. Phenolic goes amber where it is thin;
     # ABS and powdercoated aluminium do not go anywhere - they are one colour all
@@ -384,10 +389,10 @@ def mat_carbon(h, w, rng):
     filament = fbm(h, w, octaves=2, base=48, rng=rng, aniso=8.0)
 
     # Lifted from 0.072 (BASE_900) to BASE_800. Carbon backs PrimaryButton, and
-    # once bakelite rose to BASE_700 a BASE_900 carbon made the PRIMARY action
+    # once moulded rose to BASE_700 a BASE_900 carbon made the PRIMARY action
     # the darkest control on the screen - it receded behind every ordinary
     # button, which is precisely backwards. It still reads as the dark premium
-    # material (it stays the darkest of the control materials, below bakelite),
+    # material (it stays the darkest of the control materials, below moulded),
     # and _plate_tinted's green cast lands it around panel luminance rather than
     # below it. Cool-biased blue channel kept: carbon weave is never warm.
     base = np.array([0.104, 0.104, 0.112])
@@ -534,7 +539,7 @@ def mat_toolbox(h, w, rng):
 MATERIALS = {
     "powdercoat": mat_powdercoat,
     "steel": mat_steel,
-    "bakelite": mat_bakelite,
+    "moulded": mat_moulded,
     "canvas": mat_canvas,
     "carbon": mat_carbon,
     "fiberglass": mat_fiberglass,
@@ -554,10 +559,10 @@ MATERIALS = {
 # is the same cue build_ui_theme.gd already gets from swapping border widths,
 # and the two reinforce each other.
 # Gaps widened from 1.18/0.82 to 1.28/0.74. The old spread was chosen when
-# bakelite sat at luminance 0.075, where even a large multiplier moved the
-# absolute value almost not at all; now that controls start at BASE_700 the
-# multiplier translates into a delta the eye actually resolves (~0.041 up on
-# hover, ~0.038 down on press, against ~0.014 before).
+# moulded (then called bakelite) sat at luminance 0.075, where even a large
+# multiplier moved the absolute value almost not at all; now that controls
+# start at BASE_700 the multiplier translates into a delta the eye actually
+# resolves (~0.041 up on hover, ~0.038 down on press, against ~0.014 before).
 #
 # Bevel strength rises with the state too, not just brightness. A hover that
 # only brightens reads as a lighting change on a flat card; a hover that also

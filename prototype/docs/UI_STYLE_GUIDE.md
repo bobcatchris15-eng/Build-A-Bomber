@@ -13,7 +13,7 @@ The units are cartoonish and loud; the terrain is realistic and grounded. The UI
 Three principles follow from that:
 
 1. **Signal colour is for state, not decoration.** Amber is not a design choice for a button you like; it means *attention is required here*. Red means damage or a destructive action. Green means ready. Blue-grey means informational only. These rules must not break.
-2. **Material, not colour, conveys surface identity.** Panels don't feel like panels because they're a dark rectangle; they feel like panels because they're finished in powdercoat, bakelite, or canvas. Colour follows from the material's light response.
+2. **Material, not colour, conveys surface identity.** Panels don't feel like panels because they're a dark rectangle; they feel like panels because they're finished in powdercoat, moulded, or canvas. Colour follows from the material's light response.
 3. **Readability over atmosphere.** The original theme ran a worn typewriter face at 13 px in a 24-row parts list. Beautiful in a screenshot, unreadable in play. The stencil face is now reserved for display headings only.
 
 ---
@@ -74,7 +74,7 @@ Six named surfaces, each with one job. Callers say what something is **made of**
 |---|---|---|
 | `powdercoat` | Matte aluminium with fine grain | Panel and dock bodies, HUD chrome |
 | `steel` | Brushed bare sheet, slightly cooler | Frames, rails, splitters, toolbars, backdrop |
-| `bakelite` | Heavy moulded phenolic | Buttons, tabs, toggles, radial ring |
+| `moulded` | Heavy injection-moulded ABS / powdercoated aluminium | Buttons, tabs, toggles, radial ring |
 | `canvas` | Matte woven cloth | Drawer/flyout backing, tooltips, callouts |
 | `carbon` | Dark carbon weave | Primary action only — at most two per screen |
 | `fiberglass` | Slightly translucent laminate | Hazard placards, alert states |
@@ -131,7 +131,7 @@ Set `theme_type_variation` — do not override individual font/color properties 
 | `CalloutPanel` | PanelContainer | Canvas, XS padding — annotation callouts |
 | `PrimaryButton` | Button | Carbon tinted go-green — one per screen maximum |
 | `DangerButton` | Button | Fiberglass tinted alert-red — destructive actions |
-| `TabButton` | Button | Bakelite — inactive tabs are PRESSED, active tab lifts. Also the header for a `UIToolbox` tier, so a closed tier reads as pressed shut |
+| `TabButton` | Button | Moulded — inactive tabs are PRESSED, active tab lifts. Also the header for a `UIToolbox` tier, so a closed tier reads as pressed shut |
 | `ListButton` | Button | Flat/borderless at rest, hazard left edge when selected |
 | `NavCard` | Button | Main-menu destination cards. The one **flat** stylebox variation: its identity is an asymmetric left gutter (5 px, 6 px on hover) that a 9-sliced plate cannot express, because `StyleBoxTexture` has no border properties |
 

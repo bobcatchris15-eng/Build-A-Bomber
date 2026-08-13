@@ -11,7 +11,7 @@ THE RULE (stated in full at scripts/blueprint_namer.gd:6-13): the interface
 plays it completely straight. The battle system is cartoonishly ridiculous and
 the chrome's entire job is to refuse to acknowledge that. Emoji are the joke
 written out loud - they collapse the deadpan, and they are also a
-consumer-software tell that fights the steel/bakelite/powdercoat material
+consumer-software tell that fights the steel/moulded/powdercoat material
 direction. Arrows and dingbats go for the same reason: where a direction cue is
 genuinely needed, scripts/ui_icons.gd already registers a real icon set
 (chevron_left, chevron_right, undo, redo, play) that renders as line art

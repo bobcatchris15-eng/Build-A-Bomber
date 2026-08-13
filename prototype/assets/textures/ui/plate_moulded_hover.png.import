@@ -3,15 +3,15 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://xspt0x4d2sfe"
-path="res://.godot/imported/plate_bakelite_hover.png-2392705e7f6a3a4febd3b9b43e7791fe.ctex"
+path="res://.godot/imported/plate_moulded_hover.png-1d1361d9b386e18a16555ba28ba365dd.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/textures/ui/plate_bakelite_hover.png"
-dest_files=["res://.godot/imported/plate_bakelite_hover.png-2392705e7f6a3a4febd3b9b43e7791fe.ctex"]
+source_file="res://assets/textures/ui/plate_moulded_hover.png"
+dest_files=["res://.godot/imported/plate_moulded_hover.png-1d1361d9b386e18a16555ba28ba365dd.ctex"]
 
 [params]
 

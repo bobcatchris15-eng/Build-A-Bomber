@@ -567,11 +567,11 @@ func _ready():
 	# Where the four states live now:
 	#   Delete  -> DangerButton  (FIBERGLASS hazard placard) - set in the .tscn
 	#   Save    -> PrimaryButton (CARBON, cast toward go-green) - set in the .tscn
-	#   Test    -> plain Button  (BAKELITE). Reclassified: it was marked
+	#   Test    -> plain Button  (MOULDED). Reclassified: it was marked
 	#              DangerButton in UI_StatBlock.tscn, but running a test is not
 	#              destructive, and spending alert red on it left nothing to
 	#              escalate to. It is navigation.
-	#   Library -> plain Button  (BAKELITE). Its cyan appears nowhere in
+	#   Library -> plain Button  (MOULDED). Its cyan appears nowhere in
 	#              ui_tokens.gd; it was the last survivor of the old sci-fi accent.
 	save_button.text = "SAVE BLUEPRINT"
 	test_button.text = "TEST IN ARENA"

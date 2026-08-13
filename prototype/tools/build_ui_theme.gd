@@ -63,7 +63,7 @@ func _pad(sb: StyleBox, h: int, v: int) -> StyleBox:
 # tools/generate_ui_plates.py, not from flat fills.
 #
 # WHY THIS IS THE HIGHEST-LEVERAGE PIECE OF THE WHOLE MATERIAL PASS: a Theme
-# resource can carry a StyleBoxTexture. So assigning a bakelite plate to
+# resource can carry a StyleBoxTexture. So assigning a moulded plate to
 # "Button" here repaints every Button in the game - in the Design Lab, in the
 # Skirmish HUD, in every dialog - with no call-site edits at all. Colour alone
 # could never have got the interface to read as physical; this is what does.
@@ -324,7 +324,7 @@ func _build_panels(theme: Theme) -> void:
 
 
 func _build_buttons(theme: Theme) -> void:
-	# BAKELITE. Heavy moulded phenolic switches.
+	# MOULDED. Heavy moulded mechanical switches.
 	#
 	# The physical press language survives the move off StyleBoxFlat, because
 	# it worked - it is just carried by the plate now instead of by border
@@ -343,10 +343,10 @@ func _build_buttons(theme: Theme) -> void:
 	# ~39px, clear of Tokens.HIT_TARGET_MIN (32) without needing a per-call
 	# custom_minimum_size. Theme has no minimum-height constant for Button, so
 	# content margins are the only place this can be expressed centrally.
-	var normal = _plate("bakelite", "normal", Tokens.SPACE_LG, Tokens.SPACE_MD)
-	var hover = _plate("bakelite", "hover", Tokens.SPACE_LG, Tokens.SPACE_MD)
-	var pressed = _plate("bakelite", "pressed", Tokens.SPACE_LG, Tokens.SPACE_MD)
-	var disabled = _plate("bakelite", "disabled", Tokens.SPACE_LG, Tokens.SPACE_MD)
+	var normal = _plate("moulded", "normal", Tokens.SPACE_LG, Tokens.SPACE_MD)
+	var hover = _plate("moulded", "hover", Tokens.SPACE_LG, Tokens.SPACE_MD)
+	var pressed = _plate("moulded", "pressed", Tokens.SPACE_LG, Tokens.SPACE_MD)
+	var disabled = _plate("moulded", "disabled", Tokens.SPACE_LG, Tokens.SPACE_MD)
 
 	# Focus stays a hazard hairline. Focus is a state of the INTERFACE - where
 	# keyboard attention is - not a property of the object, so it should not
@@ -473,12 +473,12 @@ func _build_buttons(theme: Theme) -> void:
 	# mechanically held-down control rather than just a recolor. This is the
 	# pattern the build tabs and the parts-catalog categories both use.
 	#
-	# Unselected tabs use the PRESSED bakelite plate and the selected one a
+	# Unselected tabs use the PRESSED moulded plate and the selected one a
 	# flat lifted fill - i.e. the inactive tabs are the ones sunk into the
 	# frame. That inversion is what makes a tab strip read as one control with
 	# a chosen position rather than as a row of independent buttons.
-	var tab = _plate("bakelite", "pressed", Tokens.SPACE_MD, Tokens.SPACE_SM)
-	var tab_hover = _plate("bakelite", "normal", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var tab = _plate("moulded", "pressed", Tokens.SPACE_MD, Tokens.SPACE_SM)
+	var tab_hover = _plate("moulded", "normal", Tokens.SPACE_MD, Tokens.SPACE_SM)
 	var tab_on = _flat(Tokens.BASE_600, Tokens.SIGNAL_HAZARD, 0, 0)
 	tab_on.border_width_bottom = 3
 	_pad(tab_on, Tokens.SPACE_MD, Tokens.SPACE_SM)

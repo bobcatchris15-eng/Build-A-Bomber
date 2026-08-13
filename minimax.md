@@ -445,11 +445,11 @@ When you change a screen, the discipline is:
    `UIFlyout`, not a `Popup`. The primitives encode the gotchas
    (clipping, auto-flip, dismiss, anchor — see §7).
 3. **Pick a material, not a colour.** `ui_theme.MATERIALS` is six
-   surfaces (powdercoat / steel / bakelite / canvas / carbon /
+   surfaces (powdercoat / steel / moulded / canvas / carbon /
    fiberglass), each with its own shader defaults. The colour *follows*
    the material. If you're reaching for `Color.RED` to "draw attention"
    to something, you almost certainly want `SIGNAL_HAZARD` and a
-   `bakelite` or `fiberglass` plate — and a real reason (state, not
+   `moulded` or `fiberglass` plate — and a real reason (state, not
    decoration).
 4. **Route SFX through `ui_feedback.gd`'s role table.** Audio manifests
    are the contract; the role table is what keeps a click sound

@@ -244,7 +244,7 @@ icons = {
 # ONE VISUAL LANGUAGE, so the picker reads as a set rather than 19 unrelated
 # marks:
 #   * Warm neutral stroke (#ADA9A0 = ui_tokens.gd TEXT_SECONDARY) rather than the
-#     per-icon saturated colours the older icons above use. These sit on bakelite
+#     per-icon saturated colours the older icons above use. These sit on moulded
 #     buttons in a dense grid; 19 saturated marks would be noise.
 #   * Solids that need a 3D read get a light isometric treatment with the top
 #     face drawn. Sections and profiles (I-Beam, L-Beam, Slope, Frustum) are

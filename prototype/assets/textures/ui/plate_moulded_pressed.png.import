@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://brb0jhtv4k8ik"
-path="res://.godot/imported/plate_bakelite_disabled.png-d8091068597dad15202232fcc1ed3374.ctex"
+uid="uid://c2lfkfm0daiwe"
+path="res://.godot/imported/plate_moulded_pressed.png-8fcd4ae39da6c68e11de3fa0ec0f1de4.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/textures/ui/plate_bakelite_disabled.png"
-dest_files=["res://.godot/imported/plate_bakelite_disabled.png-d8091068597dad15202232fcc1ed3374.ctex"]
+source_file="res://assets/textures/ui/plate_moulded_pressed.png"
+dest_files=["res://.godot/imported/plate_moulded_pressed.png-8fcd4ae39da6c68e11de3fa0ec0f1de4.ctex"]
 
 [params]
 
