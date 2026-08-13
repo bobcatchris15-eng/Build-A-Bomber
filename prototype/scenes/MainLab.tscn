@@ -18,9 +18,6 @@ sky_material = SubResource("ProceduralSkyMaterial_x3k")
 [sub_resource type="Environment" id="Environment_x3k"]
 background_mode = 2
 sky = SubResource("Sky_x3k")
-# AgX: same tonemapper as the battle scene for visual coherence across modes.
-# designer_camera.gd handles DOF here; no SDFGI/SSIL needed for close-up
-# Design Lab work.
 tonemap_mode = 4
 tonemap_exposure = 1.0
 ssao_enabled = true
@@ -29,7 +26,6 @@ ssao_intensity = 1.8
 glow_enabled = true
 glow_intensity = 0.85
 glow_bloom = 0.06
-# Saturation + contrast lift to compensate for AgX's peak desaturation.
 adjustment_enabled = true
 adjustment_saturation = 1.18
 adjustment_contrast = 1.06
