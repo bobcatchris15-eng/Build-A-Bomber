@@ -3173,6 +3173,23 @@ func _hide_selection_rect() -> void:
 func _set_armed(value: bool) -> void:
 	_attack_move_armed = value
 	_flash("ATTACK-MOVE: RIGHT-CLICK A DESTINATION" if value else "")
+	# X7 (Tactile Interface Programme Part 2.4): the hint label was the only
+	# feedback that attack-move was armed, and the player is looking at the
+	# battlefield, not at the hint. CursorManager is an autoload and has been
+	# since the old runtime; arming sets the cursor to ATTACK immediately so
+	# the cue lands without waiting for the next mouse motion. On disarm the
+	# cursor is re-resolved from the current hover position, which is what
+	# the next click will actually do. The flash text stays as the
+	# accessible-channel fallback under the captions setting.
+	var cm = get_node_or_null("/root/CursorManager")
+	if cm == null:
+		return
+	if value:
+		cm.set_cursor(cm.CursorType.ATTACK)
+	else:
+		var vp := get_viewport()
+		if vp != null:
+			_update_hover_cursor(vp.get_mouse_position())
 
 
 func _flash(text: String) -> void:
