@@ -632,13 +632,35 @@ var default_locomotion_settings = {
 	"screw_drive": {"drum_diameter": 1.0, "helix_depth": 1.0}
 }
 
-func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
+# `would_clip` is the drag ghost's OWN verdict, handed down by
+# drag_drop_manager rather than recomputed here - see _ghost_is_clipping for why
+# the answer has to be the same one that tinted the ghost red.
+#
+# A clipping drop is REFUSED. This is a second deliberate exception to the
+# no-hard-blocking rule at MOUNTING_AND_ARMOR_SPEC.md:58, alongside the
+# indirect-fire-on-a-wall refusal at :95, and Chris called it on 2026-08-13.
+# The rule protects janky-but-interesting outcomes; two parts occupying the same
+# cubic metre is not one of those. It previously placed anyway, and the overlap
+# was then "shown" by a CSG volume that was itself miscomputed into a duplicate
+# of both parts - so the only feedback the player got for a bad drop was the
+# vehicle appearing to grow a second copy of itself.
+#
+# Callers that place programmatically (the test suites, blueprint
+# reconstruction) leave `would_clip` false and are unaffected: nothing gates on
+# a recomputed overlap, so no existing placement path changes behaviour.
+func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3, would_clip: bool = false):
 	var catalog_data = ModuleCatalog.get_module_data(type_id)
 	var category = catalog_data.get("category", "module")
 
 	# Refused BEFORE push_undo_snapshot(), so a rejected click does not leave a
 	# do-nothing entry on the undo stack for the player to step back through.
 	var refusal = _placement_refusal_reason(type_id, category, normal)
+	# Not locomotion: a drive ignores `pos` entirely and re-lays its stations out
+	# across the hull (update_locomotion, below), so where the ghost happened to
+	# be hovering has no bearing on where the drive actually ends up. Refusing on
+	# that verdict would reject a perfectly good drive for hovering over a gun.
+	if refusal == "" and would_clip and category != "locomotion":
+		refusal = "%s would overlap a part already fitted." % catalog_data.get("name", type_id)
 	if refusal != "":
 		var bm_toast = get_node_or_null("BlueprintManager")
 		if bm_toast and bm_toast.has_method("_show_toast"):
@@ -660,29 +682,7 @@ func _place_weapon_from_ui(type_id: String, pos: Vector3, normal: Vector3):
 	else:
 		# Standard weapon/armor placement
 		var primary = _place_weapon(type_id, pos, normal)
-		var should_mirror = mirror_enabled
-		if category == "armor":
-			# Armor auto-fits and centers on its whole facet (see
-			# _place_weapon's "Auto-scale armor to fit facet" block, below).
-			# Only left/right facets have a distinct mirror position -
-			# top/bottom/front/back are already centered on the symmetry
-			# plane, so mirroring them would stack an identical duplicate
-			# plate directly on top of the original (MOUNTING_AND_ARMOR_SPEC.md #2).
-			var local_n = hull.global_transform.basis.inverse() * normal if hull else normal
-			var abs_n = local_n.abs()
-			should_mirror = mirror_enabled and abs_n.x > abs_n.y and abs_n.x > abs_n.z
-		elif should_mirror and hull:
-			# Same class of bug, general case: placing ANY module dead-center
-			# (local x ~= 0, e.g. a railgun/howitzer mounted on the front/
-			# back centerline - a very natural placement for "frame_built"
-			# weapons specifically) would otherwise mirror it onto its own
-			# position, producing a fully-overlapping duplicate that reads
-			# as a clipping-red bug. Surfaced by testing frame_built weapons
-			# for MOUNTING_AND_ARMOR_SPEC.md #3, but the underlying issue
-			# isn't mount-style-specific - skip mirroring for ANY module
-			# placed on the centerline.
-			var local_x = hull.to_local(pos).x
-			should_mirror = abs(local_x) > 0.15
+		var should_mirror = would_mirror(category, pos, normal)
 		if should_mirror:
 			var mirrored_pos = Vector3(-pos.x, pos.y, pos.z)
 			var mirrored_normal = Vector3(-normal.x, normal.y, normal.z)
@@ -2001,6 +2001,47 @@ static func _is_sponson_mount(category: String, mount_style: String,
 # exactly one combination - a weapon whose catalog says it cannot be sponsoned,
 # on a face steep enough to require one. Everything else, including every
 # genuinely weird trait combination the spec is protecting, still goes through.
+# Will placing this module at this point ALSO produce a mirrored copy?
+#
+# THE SINGLE PLACE THIS IS DECIDED, for the same reason _mount_transform is:
+# the rule had two implementations that disagreed, and the disagreement was
+# total rather than subtle.
+#
+# _place_weapon_from_ui asked THIS rule (mirror_enabled, off the centreline,
+# and for armor only on a left/right facet). drag_drop_manager's ghost asked a
+# different one - `catalog_data.get("is_symmetric", true)`, showing the mirror
+# preview only for a part whose catalog entry said it was asymmetric. No entry
+# in module_catalog.gd sets is_symmetric at all, so that default made the ghost
+# preview a mirrored copy for exactly zero parts in the game, while
+# mirror_enabled defaults to true and placement mirrored nearly everything.
+#
+# The player therefore never saw the second part they were about to get, and -
+# once drops started being refused for clipping - the mirrored half was the one
+# copy nobody had checked for overlaps. Both paths call this now.
+func would_mirror(category: String, pos: Vector3, normal: Vector3) -> bool:
+	if not mirror_enabled:
+		return false
+	if category == "armor":
+		# Armor auto-fits and centers on its whole facet (see _place_weapon's
+		# "Auto-scale armor to fit facet" block). Only left/right facets have a
+		# distinct mirror position - top/bottom/front/back are already centered
+		# on the symmetry plane, so mirroring them would stack an identical
+		# duplicate plate directly on top of the original
+		# (MOUNTING_AND_ARMOR_SPEC.md #2).
+		var local_n = hull.global_transform.basis.inverse() * normal if hull else normal
+		var abs_n = local_n.abs()
+		return abs_n.x > abs_n.y and abs_n.x > abs_n.z
+	if hull == null:
+		return true
+	# Placing ANY module dead-center (local x ~= 0, e.g. a railgun/howitzer on
+	# the front/back centerline - a very natural placement for "frame_built"
+	# weapons) would otherwise mirror it onto its own position, producing a
+	# fully-overlapping duplicate that reads as a clipping-red bug. Surfaced by
+	# testing frame_built weapons for MOUNTING_AND_ARMOR_SPEC.md #3, but the
+	# underlying issue isn't mount-style-specific.
+	return abs(hull.to_local(pos).x) > 0.15
+
+
 func _placement_refusal_reason(type_id: String, category: String, normal: Vector3) -> String:
 	if category != "weapon" or hull == null:
 		return ""
@@ -2157,15 +2198,25 @@ func check_all_clipping():
 				clipping_set[other_module] = true
 				clipping_detected = true
 				
-				# Generate CSG Intersection
+				# Generate CSG Intersection.
+				#
+				# THE OPERATION LIVES ON group_b, NOT ON THE ROOT. A CSG tree is
+				# evaluated by folding each child into the accumulated result using
+				# THAT CHILD's operation; the root's own operation only describes
+				# how the root would merge into a CSG parent, and this root has no
+				# CSG parent. Setting the root to INTERSECTION and leaving both
+				# children on UNION therefore computed A UNION B - a solid red
+				# duplicate of both clipping modules, hovering over the vehicle,
+				# which is exactly the "second instance of everything that's
+				# clipping" Chris reported on 2026-08-13.
 				var intersection_root = CSGCombiner3D.new()
-				intersection_root.operation = CSGShape3D.OPERATION_INTERSECTION
 				# We don't want the CSG to be solid, we want it glowing red.
 				var csg_mat = _clipping_material()
 				intersection_root.material_override = csg_mat
 				clipping_root.add_child(intersection_root)
-				
-				# Group A (Union)
+
+				# Group A is the BASE of the fold - first child, so its own
+				# operation is never consulted.
 				var group_a = CSGCombiner3D.new()
 				group_a.operation = CSGShape3D.OPERATION_UNION
 				intersection_root.add_child(group_a)
@@ -2177,9 +2228,10 @@ func check_all_clipping():
 					csg_m.global_transform = m_inst.global_transform
 					group_a.add_child(csg_m)
 					
-				# Group B (Union)
+				# Group B carries the INTERSECTION - folding B into A is what
+				# leaves only the overlapping volume behind.
 				var group_b = CSGCombiner3D.new()
-				group_b.operation = CSGShape3D.OPERATION_UNION
+				group_b.operation = CSGShape3D.OPERATION_INTERSECTION
 				intersection_root.add_child(group_b)
 				var meshes_b = []
 				_find_meshes_recursive(other_module, meshes_b)
@@ -2222,10 +2274,30 @@ func check_all_clipping():
 	_refresh_firing_arc()
 	_update_cog_crosshair()
 
+# Would a module of `ghost_type_id`, sitting at `ghost_transform`, overlap
+# anything already on the hull?
+#
+# `ghost_transform` is the DRAG GHOST's own transform, which drag_drop_manager
+# parents to MainLab - not to the hull. Every placed module is a child of the
+# hull, and _get_parent_space_aabb measures them in hull-local space. Those two
+# frames are not the same: _place_hull_from_ui sits the hull at
+# y = fitted_size.y / 2, so comparing the raw ghost transform against
+# hull-local AABBs tested the ghost against a copy of the vehicle floating half
+# a hull-height above where it really is. Near misses read as clips and real
+# overlaps read as clear, which is survivable while this only tints a ghost red
+# and is NOT survivable now that it also refuses the drop.
+#
+# So convert first. Both the ghost and the hull are children of MainLab, so the
+# hull's inverse takes the ghost the rest of the way into hull-local space.
 func is_ghost_clipping(ghost_transform: Transform3D, ghost_type_id: String) -> bool:
+	if hull == null:
+		return false
+
 	var my_catalog = ModuleCatalog.get_module_data(ghost_type_id)
 	var my_size = my_catalog.size
-	
+
+	var local_transform := hull.transform.affine_inverse() * ghost_transform
+
 	var extents = my_size / 2.0
 	var local_corners = [
 		Vector3(-extents.x, -extents.y, -extents.z),
@@ -2237,20 +2309,20 @@ func is_ghost_clipping(ghost_transform: Transform3D, ghost_type_id: String) -> b
 		Vector3(extents.x, extents.y, -extents.z),
 		Vector3(extents.x, extents.y, extents.z)
 	]
-	
-	var min_p = ghost_transform * local_corners[0]
+
+	var min_p = local_transform * local_corners[0]
 	var max_p = min_p
 	for i in range(1, 8):
-		var p = ghost_transform * local_corners[i]
+		var p = local_transform * local_corners[i]
 		min_p.x = min(min_p.x, p.x)
 		min_p.y = min(min_p.y, p.y)
 		min_p.z = min(min_p.z, p.z)
 		max_p.x = max(max_p.x, p.x)
 		max_p.y = max(max_p.y, p.y)
 		max_p.z = max(max_p.z, p.z)
-		
+
 	var aabb_a = AABB(min_p, max_p - min_p)
-	
+
 	var modules = hull.get_children().filter(func(c): return c is Node3D and c.has_meta("module_data"))
 	
 	for other_module in modules:

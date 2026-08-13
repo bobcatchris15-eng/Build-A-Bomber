@@ -11,6 +11,15 @@ var current_ghost_type: String = ""
 # Recomputed only when the type_id changes, not every mouse move - the
 # same part dragged across the whole hull has the same AABB.
 var _ghost_visual_bottom_y: float = 0.0
+# Whether the ghost, as last previewed, overlapped something already on the
+# hull - i.e. whether the player is currently looking at a RED ghost.
+#
+# Cached rather than recomputed at drop time on purpose. The drop must refuse
+# exactly when the preview said it would, and the only way to guarantee that is
+# to reuse the identical answer rather than ask the same question twice from a
+# slightly different transform. Recomputing gave "it was red but it placed
+# anyway" on the boundary cases, which is the worst possible read.
+var _ghost_is_clipping: bool = false
 var _cached_ghost_material: Material = null
 var _ghost_shader: Shader = null
 
@@ -184,6 +193,9 @@ func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 	return false
 
 func _drop_data(at_position: Vector2, data: Variant):
+	# Read BEFORE _destroy_ghost_mesh(), which clears it. This is the state the
+	# player was actually looking at when they let go of the mouse.
+	var was_clipping := _ghost_is_clipping
 	_destroy_ghost_mesh()
 
 	if typeof(data) == TYPE_DICTIONARY and data.has("type") and data["type"] == "module_part":
@@ -203,7 +215,7 @@ func _drop_data(at_position: Vector2, data: Variant):
 			if root and root.has_method("_place_weapon_from_ui"):
 				var result = _raycast_from_screen(at_position)
 				if result:
-					root._place_weapon_from_ui(type_id, result.position, result.normal)
+					root._place_weapon_from_ui(type_id, result.position, result.normal, was_clipping)
 
 func _collapse_parts_menu():
 	var root = get_node_or_null("/root/MainLab")
@@ -238,6 +250,9 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 	if not result:
 		if ghost_mesh: ghost_mesh.visible = false
 		if ghost_mesh_mirror: ghost_mesh_mirror.visible = false
+		# Nothing under the cursor is not the same as "clipping". Clearing it
+		# keeps a stale red from an earlier hover out of the next drop.
+		_ghost_is_clipping = false
 		return
 
 	var root = get_node_or_null("/root/MainLab")
@@ -278,8 +293,14 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 	# local origin.
 	ghost_mesh.position = result.position + Vector3(0, _ghost_visual_bottom_y, 0)
 	
-	var is_symmetric = catalog_data_for(type_id).get("is_symmetric", true)
-	if not is_symmetric and abs(result.position.x) > 0.1:
+	# ASK THE PLACER, don't re-derive. This used to test
+	# `catalog_data.get("is_symmetric", true)`, a key no catalog entry defines -
+	# so the preview showed a mirrored copy for no part in the game, while the
+	# placer went on to mirror nearly everything. See would_mirror().
+	var category := str(catalog_data_for(type_id).get("category", "module"))
+	var will_mirror: bool = root.would_mirror(category, result.position, result.normal) \
+		if root.has_method("would_mirror") else false
+	if will_mirror and abs(result.position.x) > 0.1:
 		if ghost_mesh_mirror == null:
 			ghost_mesh_mirror = _build_module_ghost_node(type_id)
 			root.add_child(ghost_mesh_mirror)
@@ -294,7 +315,9 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 		is_clipping = root.is_ghost_clipping(ghost_mesh.transform, type_id)
 		if not is_clipping and ghost_mesh_mirror and ghost_mesh_mirror.visible:
 			is_clipping = root.is_ghost_clipping(ghost_mesh_mirror.transform, type_id)
-			
+
+	_ghost_is_clipping = is_clipping
+
 	if is_clipping:
 		_apply_ghost_materials_recursive(ghost_mesh, _get_invalid_part_material())
 		if ghost_mesh_mirror and ghost_mesh_mirror.visible:
@@ -371,6 +394,7 @@ func _destroy_ghost_mesh():
 		cleared_something = true
 	current_ghost_type = ""
 	_ghost_visual_bottom_y = 0.0
+	_ghost_is_clipping = false
 	
 	if cleared_something:
 		var root = get_node_or_null("/root/MainLab")
