@@ -4,51 +4,39 @@ signal part_hovered(type_id: String)
 signal part_unhovered()
 
 # The Design Lab's hardware catalog.
-# REWRITTEN 2026-08-10. The previous incarnation parked the catalog in a
-# left-side UIDock, RAILED by default, with a TabContainer inside, a search
-# box at the top, and accordion-within-accordion drill-in. The dock took
-# a fifth of the screen from the model it was editing.
 #
-# The new shape is FOUR FLOATING TOOLBOXES along the bottom of the screen,
-# matching the Skirmish build queue (production_hud.gd): one per family
-# (Hulls / Weapons / Support / Drives), each with a chamfered ToolboxPlate
-# and a StampedLabel header. Aesthetically identical to the build queue
-# because they ARE the same chrome - the plate and the stamp were moved
-# out of battle/hud/ into scripts/ in the commit immediately before this
-# one, so the two screens cannot drift on the look.
+# THE SHAPE: a permanent LEFT VERTICAL DOCK, built to read as a mechanic's
+# steel toolbox standing on end. A 2x2 grid of family tabs (Hulls / Weapons /
+# Support / Drives) selects which family's category drawers are listed below
+# it; only one family is shown at a time, and within a family the category
+# drawers accordion among themselves (_open_category). A search field at the
+# top filters across all four families at once and opens whatever it finds.
 #
-# Cross-toolbox behaviour: only one family's body is open at a time.
-# Opening a family closes the other three. Within an open family, the
-# sub-family drawers accordion among themselves (the existing
-# _open_category behaviour, preserved from the previous build).
+# THE CHROME is three concentric layers, outermost first - a bare-steel lip,
+# a rubber gasket, and the chipped oxide-enamel body. See _build_shell for why
+# each is a plain Panel rather than a PanelContainer, and for why the body's
+# paint is a theme material (field_toolbox.png, authored by
+# tools/generate_ui_plates.py) rather than a bespoke shader.
 #
-# Search: previously the first control in the dock, it is now behind a
-# magnifying-glass icon at the right end of the bar. Clicking the icon
-# opens a UIFlyout containing the LineEdit. The search still filters
-# across all four toolboxes at once; on a hit, the family holding the
-# match opens and the relevant sub-family drawer opens. The user can
-# click another family header to see other matches.
+# A NOTE ON THIS FILE'S HISTORY, because it explains the names still in it.
+# A 2026-08-10 rewrite replaced the dock with four floating toolboxes along the
+# BOTTOM of the screen, mirroring the Skirmish build queue. That direction was
+# abandoned and the left dock reinstated, but the revert left the file
+# describing a layout it no longer built: _layout_bar() and _close_family()
+# were empty stubs, _family_widgets was declared and never written (which
+# silently broke get_bar_focus_rect - see there), and a dozen bar-geometry
+# constants had no readers. That wreckage is gone as of 2026-08-13. What
+# survives from the bottom-bar build is the vocabulary it introduced and the
+# dock still uses: ToolboxPlate + StampedLabel on the family tabs.
 #
-# PRESERVED FROM THE PREVIOUS IMPLEMENTATION:
-#   * All data logic: TIERS, HULL/LOCO grouping, light-to-heavy sort,
-#     search key derivation, _tier_for family->tier routing.
-#   * The drawer metadata contract (drawer_category, content_container,
-#     header_btn, drawer_open, family, tier) and _all_drawers - the test
-#     suites walk that array, not the node hierarchy, so they keep working.
-#   * Public API: sections_for(), reveal_part(), collapse_all_drawers(),
-#     _on_search_changed(), _force_open_family(), _open_category(),
-#     get_dock() (now returns null - see "WHAT DOES NOT COME BACK").
+# THE DRAWER METADATA CONTRACT is load-bearing and must not drift:
+# drawer_category, content_container, header_btn, drawer_open, family, tier,
+# plus the _all_drawers array. The test suites walk THAT, not the node
+# hierarchy, which is what lets this panel be rebuilt without rewriting suites
+# that only ever had an opinion about catalog data. _make_section sets them.
 #
-# WHAT DOES NOT COME BACK:
-#   * The left UIDock. The four floating toolboxes replace it.
-#   * The TabContainer. The four toolboxes ARE the family selector.
-#   * The family-chip filter row. The four toolboxes replace it.
-#   * get_dock() returns null. There is no UIDock to expose. Callers that
-#     wanted a rect to highlight should point at the parts menu's open
-#     family's body, not at a dock that no longer exists.
-#   * The old one-at-a-time open_drawer_hulls/modules/locomotion strings
-#     are kept as no-op compatibility vars; nothing in the UI reads them
-#     anymore.
+# get_dock() returns null and is kept only for callers that still ask. There is
+# no UIDock here; anything wanting a rect to highlight wants get_bar_focus_rect.
 
 const ModuleCatalog = preload("res://scripts/module_catalog.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
@@ -56,7 +44,6 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIAnim = preload("res://scripts/ui_anim.gd")
 const ToolboxPlateScript = preload("res://scripts/ui_toolbox_plate.gd")
 const StampedLabelScript = preload("res://scripts/ui_stamped_label.gd")
-const UIFlyoutScript = preload("res://scripts/ui_flyout.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 
 # --- Grouping (unchanged from the previous build) ----------------------------
@@ -127,53 +114,16 @@ const SUPPORT_ROLE_ORDER = ["Armor", "Power", "Support", "Propulsion"]
 const CARD_MIN_WIDTH := 80
 const CARD_HEIGHT := 100
 
-# --- Bar dimensions ---------------------------------------------------------
-# Wider than the Skirmish build queue's 264 because the design lab's part
-# cards run two to a row in a grid at a 132px minimum, and the 264 left
-# cards clipping in 4-toolbox mode. 4 * 288 = 1152, which fits a 1280
-# viewport with breathing room.
+# --- Dock dimensions --------------------------------------------------------
+# Wide enough for two part cards per row at CARD_MIN_WIDTH plus the concentric
+# lip/gasket/body insets and the scrollbar.
 const TOOLBOX_WIDTH := 320.0
-const PLATE_PADDING := 10.0
-const CONTENT_WIDTH := TOOLBOX_WIDTH - PLATE_PADDING * 2.0
-# Same as production_hud.gd's HEADER_HEIGHT - the header needs room to
-# read as a plate rather than a tab.
-const HEADER_HEIGHT := 44.0
-const HEADER_FONT_SIZE := 19
-# How tall a family's open sub-family list is allowed to get before it
-# scrolls rather than growing up off the top of the screen. 5 sub-families
-# in weapons, 4 in hulls/support/drives - this is comfortably above all of
-# them at their collapsed-drawer height.
-const LIST_MAX_HEIGHT := 360.0
-# Gap between adjacent toolboxes along the bar.
-const BAR_GAP := 14.0
-# How far above the screen bottom the bar's lowest edge sits, so the
-# toolboxes do not sit ON the edge.
-const BAR_BOTTOM_INSET := 8.0
-# The search "toolbox" is a 5th element in the row, treated as a peer of
-# the four family toolboxes - same plate, same StampedLabel, same height.
-# It is narrower because the lettering ("FIND") is short; 72px gives the
-# StampedLabel room to breathe at HEADER_FONT_SIZE without making the
-# right end of the bar feel lopsided.
-const SEARCH_WIDTH := 72.0
 
 # --- State ------------------------------------------------------------------
 var _filter: String = ""
 # Which family's body is currently open. "" means none - the very first
 # landing on the screen shows only the four headers, no body content.
 var _open_family: String = ""
-
-# tier_id -> {plate, slot, panel, header, body}.
-# `plate` is the sibling ToolBoxPlate that draws behind the controls.
-# `slot` is the VBox that parents the panel + header.
-# `panel` is the open list (recess, hidden when closed).
-# `header` is the closed-state trigger button (with StampedLabel on top).
-# `body` is the panel's ScrollContainer body (where sub-family sections live).
-# `is_open` mirrors `panel.visible`; kept separately so _layout_bar can
-# read it without poking at a control's visibility from a layout pass.
-var _family_widgets: Dictionary = {}
-
-# The horizontal row of plates + slots along the bottom.
-var _bar_row: Control
 
 var _family_vboxes: Dictionary = {}
 var _family_tabs: Dictionary = {}
@@ -182,9 +132,6 @@ var _family_tabs: Dictionary = {}
 # without re-walking the scene tree on each keystroke.
 var _all_drawers: Array = []
 
-# Magnifying glass + flyout for search.
-var _search_btn: Button
-var _search_flyout: Control
 var _search_box: LineEdit
 
 # Empty-state hint, shown when the search filters out every part.
@@ -235,8 +182,6 @@ func _ready() -> void:
 	if _family_tabs.has("hulls"):
 		_family_tabs["hulls"].button_pressed = true
 
-	# Fit the bar's first layout now that the size is real.
-	_layout_bar()
 	_apply_filters()
 
 
@@ -260,9 +205,9 @@ func _build_shell() -> void:
 	# The assembly, bottom-to-top in Z order (later child = on top):
 	#
 	#   outer  (Control)          — positions the whole block
-	#   ├─ steel_lip  (Panel)     — renders the outermost ring (dark red steel)
+	#   ├─ steel_lip  (Panel)     — outermost ring, BARE worn steel
 	#   ├─ gasket     (Panel)     — sits inside lip, shows as a rubber band
-	#   └─ _dock_panel (PanelContainer) — the red body; margin children go here
+	#   └─ _dock_panel (PanelContainer) — the chipped enamel body; children here
 	#
 	# Using Panel (NOT PanelContainer) for lip and gasket is critical:
 	# PanelContainer forces its ONE child into the content-margin rect,
@@ -287,6 +232,31 @@ func _build_shell() -> void:
 	outer.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(outer)
 
+	# A STOP filter ALONE DOES NOT DO IT, which is what Chris hit on 2026-08-13:
+	# scrolling the parts list also zoomed the viewport behind it.
+	#
+	# mouse_filter only decides whether a control is HIT by the pointer. What
+	# stops an event reaching designer_camera.gd's _unhandled_input is a control
+	# ACCEPTING it, and ScrollContainer accepts the wheel only when it can
+	# actually scroll that direction - so at either end of the range, or with a
+	# drawer short enough to fit, the wheel fell straight through to the camera.
+	# From the player's side that reads as the dock randomly losing the scroll.
+	#
+	# Godot offers unconsumed GUI events to each ancestor control in turn, so
+	# the whole dock gets one backstop here rather than needing every scrollable
+	# descendant to be airtight. Children still get first refusal, which is why
+	# this cannot swallow clicks meant for the tabs, the drawer headers or a
+	# part card's drag.
+	# Motion is swallowed too, so a right-drag that wanders over the dock does
+	# not orbit the model behind it - but NOT while a part is being dragged out
+	# of the bin, because that gesture starts inside this rect and has to keep
+	# being tracked as it leaves.
+	outer.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton:
+			outer.accept_event()
+		elif event is InputEventMouseMotion and not get_viewport().gui_is_dragging():
+			outer.accept_event())
+
 	# ---- 2. Stamped steel outer lip --------------------------------
 	var steel_lip = Panel.new()
 	steel_lip.name = "SteelLip"
@@ -294,19 +264,22 @@ func _build_shell() -> void:
 	steel_lip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 	var lip_style = StyleBoxFlat.new()
-	lip_style.bg_color = Color(0.18, 0.07, 0.06, 1.0)  # dark pressed steel
+	lip_style.bg_color = Color.WHITE  # the material shader drives the colour
 	lip_style.corner_radius_top_left    = 5
 	lip_style.corner_radius_top_right   = 5
 	lip_style.corner_radius_bottom_left = 8
 	lip_style.corner_radius_bottom_right = 8
 	# Thick bright highlight on the top edge — reads as the stamped lip catching light
 	lip_style.border_width_top = 3
-	lip_style.border_color = Color(0.55, 0.22, 0.17, 1.0)  # warm highlight
+	lip_style.border_color = Tokens.BASE_500
 	lip_style.set_content_margin_all(0)
 	steel_lip.add_theme_stylebox_override("panel", lip_style)
-	var lip_mat = ShaderMaterial.new()
-	lip_mat.shader = preload("res://shaders/red_steel.gdshader")
-	steel_lip.material = lip_mat
+	# BARE STEEL, not paint. The lip is the folded edge of the pressed box and
+	# the one part of a real toolbox that gets handled every time it is opened,
+	# so it is worn back to metal rather than carrying the enamel. It is also
+	# what gives the dock its "steel box" read at a glance - a body and a rim in
+	# the same paint reads as a flat red rectangle with a border.
+	UITheme.apply_material(steel_lip, "steel", {"brightness": 0.62, "grime": 0.40})
 	outer.add_child(steel_lip)
 
 	# ---- 3. Rubber gasket ring (inset from lip edge) ---------------
@@ -356,9 +329,14 @@ func _build_shell() -> void:
 	body_style.corner_radius_bottom_right = 3
 	body_style.set_content_margin_all(0)
 	_dock_panel.add_theme_stylebox_override("panel", body_style)
-	var body_mat = ShaderMaterial.new()
-	body_mat.shader = preload("res://shaders/red_steel.gdshader")
-	_dock_panel.material = body_mat
+	# THE CHIPPED ENAMEL, and the reason this dock stopped being a flat red
+	# rectangle. It replaces red_steel.gdshader, which generated its noise from
+	# FRAGCOORD - i.e. in SCREEN space - so the "texture" bore no relation to the
+	# panel at all: it did not move with the dock, did not scale with it, and
+	# tiled across the whole viewport, which is why the body read as a uniform
+	# wash rather than as a surface. field_toolbox.png is sampled in the panel's
+	# own space by ui_material.gdshader, so the chips sit ON the box.
+	UITheme.apply_material(_dock_panel, "toolbox")
 	outer.add_child(_dock_panel)
 
 	var margin = MarginContainer.new()
@@ -456,29 +434,7 @@ func _plates_set_defaults(plate: Control) -> void:
 	plate.edge_color = Tokens.BASE_500
 
 
-func _engrave(button: Button) -> void:
-	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
-		var empty := StyleBoxEmpty.new()
-		button.add_theme_stylebox_override(state, empty)
-
-
 # --- Layout -----------------------------------------------------------------
-
-# Hand-lays the 4 family toolboxes + the search toolbox along the bottom of
-# the screen, and sizes each plate to its slot.
-#
-# Why hand-laid: production_hud.gd:122-125 records the same decision. A
-# Container owns its children's positions, and even though we are NOT
-# animating vertical slide-off here, every layout pass would have to fight
-# a Container for the right thing - and any future change that wanted to
-# e.g. jitter the active family would have to swap out the container.
-# Two free passes beats one fix-later.
-#
-# The search is the 5th element in the row, with a normal BAR_GAP between
-# it and the Drives toolbox to its left. Same height as the closed family
-# toolboxes (HEADER_HEIGHT) so the row's lowest edge reads as one line.
-func _layout_bar() -> void:
-	pass
 
 func _show_family(tier_id: String) -> void:
 	for id in _family_vboxes.keys():
@@ -491,25 +447,12 @@ func _open_family_cross(tier_id: String) -> void:
 	_open_family = tier_id
 
 
-func _close_family(tier_id: String) -> void:
-	pass
-
-
 # --- Search widget ----------------------------------------------------------
 #
-# A 5th element in the bar, treated as a peer of the four family toolboxes:
-# same chamfered ToolboxPlate behind, same StampedLabel lettering on top,
-# same HEADER_HEIGHT hit target. The only difference is the body - the
-# search opens a UIFlyout containing a LineEdit, rather than an inline
-# sub-family list. The plate+stamp treatment is what makes it read as a
-# member of the row rather than as an appended "search" button.
-#
-# "FIND" instead of "SEARCH" because the box is narrow and the StampedLabel
-# centres its text. 4 letters at HEADER_FONT_SIZE (19) fit comfortably in
-# 72px with the chamfered plate's own padding, whereas "SEARCH" (6) starts
-# to crowd the chamfered corners.
-
-var _search_plate: Control
+# A plain LineEdit at the top of the dock. The abandoned bottom-toolbox build
+# put this behind a magnifying-glass button that opened a UIFlyout; with a
+# permanent left dock there is room for the field itself, and a search you can
+# see is worth more than a search you have to open.
 
 func _build_search_widget(parent: Control) -> void:
 	_search_box = LineEdit.new()
@@ -602,10 +545,9 @@ func _populate(groups: Dictionary, order: Array, family: String) -> void:
 		# The toolbox this group is filed under, kept separate from the `family`
 		# meta above - see the TIERS comment for why the two axes differ.
 		section.set_meta("tier", tier_id)
-		# Into the family's body rather than straight into _bar_row, which
-		# is what makes the hierarchy structural. _all_drawers still gets every
-		# section, so sections_for() and the test suites are unaffected by the
-		# re-parenting.
+		# Into the family's own tier body, which is what makes the hierarchy
+		# structural. _all_drawers still gets every section, so sections_for()
+		# and the test suites are unaffected by the re-parenting.
 		_family_tier_body(tier_id).add_child(section)
 		_all_drawers.append(section)
 
@@ -734,21 +676,30 @@ func _make_section(category: String, cards: Array, family: String) -> Control:
 	handle_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	
 	var handle_style = StyleBoxFlat.new()
-	# Gunmetal machined steel — darker and heavier than the tab row above.
-	handle_style.bg_color = Color(0.19, 0.19, 0.23, 1.0)
+	# Machined gunmetal, straight off the palette. This used to be a hardcoded
+	# Color(0.19, 0.19, 0.23) - a COOL blue-grey, on a palette that is warm
+	# olive-grey throughout and against a body that is now warm oxide red. That
+	# single literal is most of why the category rows in Chris's screenshot read
+	# as belonging to a different program than the box they sit in.
+	#
+	# NOT white-and-let-the-shader-colour-it, which is the trick the dock body
+	# uses: knurled_metal.gdshader MODULATES the incoming COLOR (x0.8..1.2, then
+	# a 0.7..1.1 vertical gradient) rather than replacing it, so a white plate
+	# comes out a blown-out silver bar.
+	handle_style.bg_color = Tokens.BASE_600
 	handle_style.corner_radius_top_left = 4
 	handle_style.corner_radius_top_right = 4
 	handle_style.corner_radius_bottom_left = 4
 	handle_style.corner_radius_bottom_right = 4
 	# Emboss: bright highlight on top edge, dark shadow on bottom — reads as raised
-	handle_style.border_color = Color(0.10, 0.10, 0.13, 1.0)  # groove edge
+	handle_style.border_color = Tokens.BASE_900  # groove edge
 	handle_style.border_width_top = 0    # highlight drawn below as separate rect
 	handle_style.border_width_bottom = 4  # heavy drawer-front lip
 	handle_style.border_width_left = 2
 	handle_style.border_width_right = 2
 	handle_style.set_content_margin_all(0)
 	handle_panel.add_theme_stylebox_override("panel", handle_style)
-	
+
 	var knurl_mat = ShaderMaterial.new()
 	knurl_mat.shader = preload("res://shaders/knurled_metal.gdshader")
 	handle_panel.material = knurl_mat
@@ -803,25 +754,57 @@ func _make_section(category: String, cards: Array, family: String) -> Control:
 		grid.add_child(c)
 	grid.visible = false
 
-	# Grimy open-state overlay — a dark rect almost entirely covered by the rubber
-	# shader so the "open" drawer interior looks like a dark, grimy toolbox recess,
-	# not a bright coloured surface. The overlay sits on top of the grid.
-	var drawer_body = Control.new()
+	# The open drawer's interior: a dark grimy recess the cards sit INSIDE.
+	#
+	# TWO BUGS DIED HERE, and together they are why an opened drawer looked
+	# broken rather than merely plain.
+	#
+	# 1. The body was a bare Control. A Control is not a Container: it computes
+	#    no minimum size from its children, so inside this VBoxContainer it was
+	#    allotted ZERO height no matter how many cards it held. The grid then
+	#    drew outside its parent's rect, overlapping the next drawer's header,
+	#    and the VBox reserved no room for it. PanelContainer is the fix - it
+	#    both draws the recess and propagates the grid's minimum size, so the
+	#    drawer actually pushes its siblings down when it opens.
+	#
+	# 2. The grime was added AFTER the grid, i.e. ON TOP of it, as a full-rect
+	#    ColorRect at 0.82 alpha. Every part card in an open drawer was sitting
+	#    under an almost-opaque brown sheet. It only escaped notice because bug 1
+	#    collapsed the overlay to zero size too - fixing the layout alone would
+	#    have made an invisible overlay suddenly visible and hidden the cards.
+	#    The recess is a STYLEBOX BEHIND the cards now, which is what it always
+	#    wanted to be.
+	var drawer_body = PanelContainer.new()
 	drawer_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	drawer_body.visible = false
+
+	var recess_style = StyleBoxFlat.new()
+	recess_style.bg_color = Tokens.BASE_900
+	recess_style.corner_radius_bottom_left = 4
+	recess_style.corner_radius_bottom_right = 4
+	# Inner shadow read: the drawer interior is sunk into the box, so its top
+	# edge is the darkest line on the panel.
+	recess_style.border_width_top = 2
+	recess_style.border_color = Color(0.0, 0.0, 0.0, 0.55)
+	recess_style.content_margin_left = Tokens.SPACE_XS
+	recess_style.content_margin_right = Tokens.SPACE_XS
+	recess_style.content_margin_top = Tokens.SPACE_XS
+	recess_style.content_margin_bottom = Tokens.SPACE_SM
+	drawer_body.add_theme_stylebox_override("panel", recess_style)
+
 	section.add_child(drawer_body)
-
-	var grimy_bg = ColorRect.new()
-	grimy_bg.color = Color(0.28, 0.14, 0.10, 1.0)  # dim warm red — like steel under grime
-	grimy_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	grimy_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var grimy_mat = ShaderMaterial.new()
-	grimy_mat.shader = preload("res://shaders/rubber_gasket.gdshader")
-	grimy_bg.material = grimy_mat
-	grimy_bg.modulate = Color(1.0, 1.0, 1.0, 0.82)  # heavy overlay, almost opaque
-
 	drawer_body.add_child(grid)
-	drawer_body.add_child(grimy_bg)
+
+	# The recess follows the GRID's visibility rather than being switched
+	# alongside it. `content_container` (the grid) is the drawer metadata
+	# contract - _open_category, _apply_filters, collapse_all_drawers and
+	# reveal_part all reach in and set grid.visible directly, and the test
+	# suites walk the same meta. Mirroring here means every one of those paths
+	# keeps working untouched; switching drawer_body at each call site instead
+	# would be five places to forget, and forgetting one leaves either an empty
+	# recess strip under a closed drawer or an open drawer with no backing.
+	grid.visibility_changed.connect(func():
+		drawer_body.visible = grid.visible)
 
 	section.set_meta("drawer_category", category)
 	section.set_meta("drawer_tab", family)
@@ -831,9 +814,7 @@ func _make_section(category: String, cards: Array, family: String) -> Control:
 	section.set_meta("family", family)
 
 	header_btn.toggled.connect(func(pressed: bool):
-		drawer_body.visible = pressed
 		grid.visible = pressed
-		grimy_bg.visible = pressed
 		if pressed:
 			_open_category(section)
 			UIAnim.stagger_in(grid)
@@ -975,33 +956,25 @@ func get_dock() -> Control:
 	return null
 
 
-# The screen rect occupied by the bar - everything the player can see
-# at the bottom of the screen (the 4 toolboxes + the magnifying glass).
-# Used by the tutorial to spotlight the bar; not useful for clicks,
-# since the toolboxes have their own per-rect hit targets.
+# The screen rect the catalogue occupies, for the tutorial to spotlight.
 #
-# Returns an empty Rect2 before _layout_bar has had a chance to run, which
-# is the same "target not resolvable" signal the tutorial treats as "draw
-# no hole at all" (tutorial_overlay.gd:33-35).
+# THIS WAS RETURNING AN EMPTY RECT ON EVERY CALL. It walked _family_widgets,
+# a dictionary the abandoned bottom-toolbox build populated and this one never
+# writes to, so `_family_widgets.is_empty()` was always true. tutorial_overlay
+# treats an empty rect as "target not resolvable, draw no hole at all"
+# (tutorial_overlay.gd:33-35), so the failure was silent: the tutorial step that
+# points at the parts bin simply pointed at nothing.
+#
+# The dock is one rect, so it is now read straight off the outer positioner
+# rather than reconstructed from per-family plates that no longer exist.
+#
+# Still returns an empty Rect2 before _build_shell has run, which is the signal
+# the tutorial already knows how to handle.
 func get_bar_focus_rect() -> Rect2:
-	if _family_widgets.is_empty():
+	var outer := get_node_or_null("ToolboxOuter") as Control
+	if outer == null or not is_instance_valid(outer):
 		return Rect2()
-	var min_pt: Vector2 = Vector2(INF, INF)
-	var max_pt: Vector2 = Vector2(-INF, -INF)
-	for tier_id in _family_widgets.keys():
-		var w: Dictionary = _family_widgets[tier_id]
-		if not is_instance_valid(w["plate"]):
-			continue
-		var r: Rect2 = w["plate"].get_global_rect()
-		min_pt = Vector2(minf(min_pt.x, r.position.x), minf(min_pt.y, r.position.y))
-		max_pt = Vector2(maxf(max_pt.x, r.end.x), maxf(max_pt.y, r.end.y))
-	if _search_btn and is_instance_valid(_search_btn):
-		var sr: Rect2 = _search_btn.get_global_rect()
-		min_pt = Vector2(minf(min_pt.x, sr.position.x), minf(min_pt.y, sr.position.y))
-		max_pt = Vector2(maxf(max_pt.x, sr.end.x), maxf(max_pt.y, sr.end.y))
-	if min_pt.x == INF:
-		return Rect2()
-	return Rect2(min_pt, max_pt - min_pt)
+	return outer.get_global_rect()
 
 
 # Opens the catalogue down to one specific part and hands back its card.

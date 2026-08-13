@@ -141,6 +141,10 @@ SHADOW_ASSIGNMENT = {
     ("carbon", "hover"): "raised",
     ("fiberglass", "normal"): "raised",
     ("fiberglass", "hover"): "raised",
+    # The dock shell is a physical box sitting on the screen, not a control
+    # resting on a panel, so it casts the heaviest tier available.
+    ("toolbox", "normal"): "floating",
+    ("toolbox", "hover"): "floating",
 }
 
 # Warm near-black, matching ui_tokens.gd SHADOW_COLOR. A neutral or cool shadow
@@ -415,6 +419,118 @@ def mat_fiberglass(h, w, rng):
     return rgb, gloss
 
 
+def mat_toolbox(h, w, rng):
+    """
+    Faded oxide-red enamel over steel, chipped and scratched back to bare metal.
+
+    The Design Lab's parts dock, and nothing else. It is the one surface in the
+    game that is supposed to read as a specific OBJECT - a beaten mechanic's
+    toolbox the player keeps their parts in - rather than as neutral chrome, so
+    it is the one material allowed to carry a hue of its own.
+
+    WHY THE RED IS THIS DULL. UI_STYLE_GUIDE.md:15 reserves red for damage and
+    destructive actions, and the dock is a large surface that must not read as
+    an alert. The separation is carried by VALUE and SATURATION, not by hue:
+    SIGNAL_ALERT is (0.784, 0.267, 0.196), this enamel sits at roughly a third
+    of that luminance and well under its saturation, which is the difference
+    between "aged brick" and "warning lamp". Anything brighter here and a real
+    alert has nothing left to be.
+
+    WHY THE CHIPS ARE HARD-EDGED. Paint is either on the steel or off it. The
+    existing wear_amount in ui_material.gdshader is a luminance scuff - it
+    brightens the coat but never breaks it - which is convincing for rubbed
+    powdercoat and completely unconvincing for a chipped toolbox, because a chip
+    is a DIFFERENT MATERIAL showing through with a crisp boundary. That is why
+    this is a material rather than a wear setting: the bare-steel layer has to
+    exist underneath before anything can be chipped off to reveal it.
+    """
+    # ---- The steel underneath -------------------------------------------
+    # Duller and darker than mat_steel: this is the inside of a chip, not a
+    # brushed face. It has oxidised slightly and it never gets polished.
+    under_grain = fbm(h, w, octaves=4, base=8, rng=rng, aniso=22.0)
+    under = np.array([0.225, 0.212, 0.196])[None, None, :] * (
+        1.0 + (under_grain - 0.5) * 0.30
+    )[:, :, None]
+
+    # ---- The enamel ------------------------------------------------------
+    # Brush-applied, so it carries broad thickness variation rather than the
+    # isotropic orange-peel dimple of a powder coat.
+    lay = fbm(h, w, octaves=3, base=6, rng=rng, aniso=9.0)
+    roll = fbm(h, w, octaves=2, base=2, rng=rng)
+    chalk = fbm(h, w, octaves=3, base=20, rng=rng)
+
+    enamel_base = np.array([0.300, 0.145, 0.115])
+    lum = 1.0 + (lay - 0.5) * 0.16 + (roll - 0.5) * 0.14 + (chalk - 0.5) * 0.07
+    enamel = enamel_base[None, None, :] * lum[:, :, None]
+    # Sun-bleached coats lose their red before they lose their darkness, so the
+    # thinnest, most exposed enamel desaturates toward the substrate rather than
+    # simply getting lighter.
+    bleach = smoothstep(0.55, 1.0, roll)[:, :, None]
+    enamel = enamel * (1.0 - bleach * 0.30) + enamel.mean(
+        axis=2, keepdims=True
+    ) * bleach * 0.30
+
+    # ---- Chips -----------------------------------------------------------
+    # Two frequencies multiplied: a broad "this corner of the box gets knocked"
+    # zone, times the individual chip shapes. Without the zone term the chips
+    # scatter evenly and read as noise or as a disease; real wear is clustered.
+    #
+    # BOTH FREQUENCIES MATTER AND THE FIRST PASS GOT THEM WRONG. At base 14 the
+    # chip shapes were the same scale as the wear zones, so the two multiplied
+    # into continent-sized blobs that read as camouflage. Chips have to be an
+    # order of magnitude smaller than the zone that clusters them - base 3 for
+    # "which end of the box gets knocked", base 30 for the chips themselves.
+    zone = fbm(h, w, octaves=2, base=3, rng=rng)
+    chips = fbm(h, w, octaves=4, base=30, rng=rng)
+    # The zone gates the chips rather than merely scaling them: raised to a
+    # power it is near zero across most of the panel, so paint survives
+    # everywhere except the few places that actually take knocks.
+    chip_field = chips * (0.25 + smoothstep(0.40, 0.95, zone) * 1.15)
+    # A DELIBERATELY NARROW smoothstep band. This is the crisp paint boundary -
+    # widen it and the chips turn into soft blotches that read as staining.
+    chip_mask = smoothstep(0.615, 0.645, chip_field)
+    # The lip of a chip: paint that has lifted but not yet flaked, slightly
+    # darker than the coat because it is shadowed and dirt has crept under it.
+    lip_mask = smoothstep(0.585, 0.615, chip_field) * (1.0 - chip_mask)
+
+    # ---- Scratches -------------------------------------------------------
+    # Long, thin, and shallow - these cut the gloss and skim the metal, they do
+    # not remove the coat the way a chip does. Two passes at different angles so
+    # the surface does not read as combed in one direction.
+    #
+    # THRESHOLDED HIGH AND NARROW. At 0.78 these came through as broad bands
+    # spanning the full width, which read as scanlines across the panel rather
+    # than as scratches on it. A scratch is a rare, thin, incidental mark: only
+    # the very top of the noise range should survive, and the anisotropy has to
+    # stay off the extreme end or every mark runs edge to edge.
+    # THINNESS COMES FROM `base`, LENGTH COMES FROM `aniso`, and they have to be
+    # pushed together. `base` is the cell count down Y, so it alone sets how
+    # thin a mark can be; `aniso` divides the cell count across X, so it alone
+    # sets how far one runs. Moderate values of either give the fat lozenges
+    # this produced twice - once as multi-octave smears, once as single-octave
+    # blobs. A scratch is ~1px of Y over most of a panel of X, which means a
+    # high base AND a high aniso, single octave so nothing broad rides beneath.
+    scr_a = fbm(h, w, octaves=1, base=110, rng=rng, aniso=36.0)
+    scr_b = fbm(h, w, octaves=1, base=150, rng=rng, aniso=52.0)
+    scratch = np.maximum(
+        smoothstep(0.90, 0.94, scr_a), smoothstep(0.91, 0.95, scr_b) * 0.7
+    )
+    # A scratch never shows on a surface that has already lost its paint.
+    scratch = scratch * (1.0 - chip_mask)
+
+    # ---- Composite -------------------------------------------------------
+    rgb = enamel * (1.0 - lip_mask[:, :, None] * 0.35)
+    rgb = rgb * (1.0 - chip_mask[:, :, None]) + under * chip_mask[:, :, None]
+    # Scratched enamel shows a bright metal skim, brighter than bare chip steel
+    # because it is freshly abraded rather than dulled.
+    rgb = rgb + (scratch * 0.10)[:, :, None]
+
+    # Bare steel is glossier than a chalky aged coat, which is what makes the
+    # bevel catch differently across a chip edge and sells the depth.
+    gloss = np.full((h, w), 0.26) + chip_mask * 0.34 + scratch * 0.20
+    return rgb, gloss
+
+
 MATERIALS = {
     "powdercoat": mat_powdercoat,
     "steel": mat_steel,
@@ -422,6 +538,7 @@ MATERIALS = {
     "canvas": mat_canvas,
     "carbon": mat_carbon,
     "fiberglass": mat_fiberglass,
+    "toolbox": mat_toolbox,
 }
 
 

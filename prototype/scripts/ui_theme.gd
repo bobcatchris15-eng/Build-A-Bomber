@@ -25,7 +25,7 @@ const LiveryScript = preload("res://scripts/livery.gd")
 #   CANVAS      drawer/flyout backing, tooltips
 #   CARBON      primary action only - SPARING, at most two per screen
 #   FIBERGLASS  hazard placards, alert states
-const MATERIALS = ["powdercoat", "steel", "bakelite", "canvas", "carbon", "fiberglass"]
+const MATERIALS = ["powdercoat", "steel", "bakelite", "canvas", "carbon", "fiberglass", "toolbox"]
 
 const FIELD_DIR = "res://assets/textures/ui/"
 
@@ -41,6 +41,12 @@ const MATERIAL_DEFAULTS = {
 	"canvas":     {"wear": 0.06, "grime": 0.30, "scale": 0.7, "vignette": 0.12},
 	"carbon":     {"wear": 0.04, "grime": 0.08, "scale": 0.6, "vignette": 0.20},
 	"fiberglass": {"wear": 0.15, "grime": 0.14, "scale": 1.0, "vignette": 0.24},
+	# The Design Lab parts dock, and nothing else. wear is LOW despite this
+	# being the most worn-looking surface in the game: the chips and scratches
+	# are baked into field_toolbox.png as actual bare metal, and stacking the
+	# shader's luminance scuff on top of them just washes the enamel out. grime
+	# runs high instead - a toolbox collects dirt in every recess.
+	"toolbox":    {"wear": 0.05, "grime": 0.34, "scale": 1.0, "vignette": 0.34},
 }
 
 static var _field_cache: Dictionary = {}
