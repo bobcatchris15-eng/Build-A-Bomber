@@ -87,7 +87,11 @@ func _ready() -> void:
 
 	MAP_IDS = MapCatalog.get_map_ids()
 
-	UIShell.backdrop(self)
+	# Out-of-match screen - sits on the workbench, not on the in-match steel.
+	# Kraft reads as a paper planning sheet, which fits a campaign-setup
+	# screen that lives on paper more than on hardware. A cutting mat
+	# would be too "modelling" for a screen that has no actual parts on it.
+	UIShell.workbench(self, "kraft")
 	var frame := UIShell.screen_frame(self)
 
 	var vbox = VBoxContainer.new()

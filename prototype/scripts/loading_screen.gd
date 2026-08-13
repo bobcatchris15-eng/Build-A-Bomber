@@ -36,7 +36,11 @@ func _ready() -> void:
 	if router and "pending_context" in router and router.pending_context != "":
 		_context = router.pending_context
 
-	UIShell.backdrop(self)
+	# Out-of-match screen - sits on the workbench, not on the in-match steel.
+	# Chipboard reads as the bench under the loading hardware, and the
+	# segment lamps / progress bar are easier to read against its visible
+	# grain than against the steel backdrop the in-match screens use.
+	UIShell.workbench(self, "chipboard")
 	# Canonical screen frame. Was 72/72/56/48 - none of those are spacing tokens,
 	# and it made the loading screen's content sit visibly further in than the
 	# screen it transitions to, so the frame appeared to jump on arrival.

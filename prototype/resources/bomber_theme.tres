@@ -1,9 +1,9 @@
 [gd_resource type="Theme" load_steps=66 format=4 uid="uid://dn01ill27sc6s"]
 
-[ext_resource type="Texture2D" uid="uid://brb0jhtv4k8ik" path="res://assets/textures/ui/plate_bakelite_disabled.png" id="1_m41ni"]
-[ext_resource type="Texture2D" uid="uid://xspt0x4d2sfe" path="res://assets/textures/ui/plate_bakelite_hover.png" id="2_rxfvg"]
-[ext_resource type="Texture2D" uid="uid://bp2u5xkymcl5c" path="res://assets/textures/ui/plate_bakelite_normal.png" id="3_oepos"]
-[ext_resource type="Texture2D" uid="uid://c2lfkfm0daiwe" path="res://assets/textures/ui/plate_bakelite_pressed.png" id="4_3h8s0"]
+[ext_resource type="Texture2D" uid="uid://brb0jhtv4k8ik" path="res://assets/textures/ui/plate_moulded_disabled.png" id="1_m41ni"]
+[ext_resource type="Texture2D" uid="uid://xspt0x4d2sfe" path="res://assets/textures/ui/plate_moulded_hover.png" id="2_rxfvg"]
+[ext_resource type="Texture2D" uid="uid://bp2u5xkymcl5c" path="res://assets/textures/ui/plate_moulded_normal.png" id="3_oepos"]
+[ext_resource type="Texture2D" uid="uid://c2lfkfm0daiwe" path="res://assets/textures/ui/plate_moulded_pressed.png" id="4_3h8s0"]
 [ext_resource type="Texture2D" uid="uid://djvwaxwu35244" path="res://assets/textures/ui/plate_powdercoat_normal.png" id="5_87h8u"]
 [ext_resource type="Texture2D" uid="uid://bxrn28tg7qaoj" path="res://assets/textures/ui/plate_fiberglass_hover.png" id="6_vlpy3"]
 [ext_resource type="Texture2D" uid="uid://bkp3ocwudm2tr" path="res://assets/textures/ui/plate_fiberglass_normal.png" id="7_mnstd"]

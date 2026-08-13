@@ -95,25 +95,25 @@ Bevel *strength* rises with state, not just brightness: a hover that only bright
 
 ### Material luminance stack
 
-This is load-bearing and was wrong for a long time. Bakelite — the **button** material — sat at 0.075, which is exactly `BASE_900`, the value reserved for the deepest recess. Buttons were therefore *darker than the panels they sat on*, and no bevel can make that read as raised. It also flattened every state: ×1.18 of 0.075 moves the absolute value by 0.014, which is invisible.
+This is load-bearing and was wrong for a long time. The button material — originally `bakelite`, now `moulded` — sat at 0.075, which is exactly `BASE_900`, the value reserved for the deepest recess. Buttons were therefore *darker than the panels they sat on*, and no bevel can make that read as raised. It also flattened every state: ×1.18 of 0.075 moves the absolute value by 0.014, which is invisible.
 
 | Surface | Material | Luminance |
 |---|---|---|
 | backdrop | steel field × 0.42 | 0.084 |
 | panel body | `powdercoat` | 0.103 |
 | flyout / tooltip | `canvas` | 0.121 |
-| **control body** | `bakelite` | **0.154** |
+| **control body** | `moulded` | **0.154** |
 | alert placard | `fiberglass` | 0.156 |
 | rails, frames | `steel` | 0.206 |
 | primary action | `carbon` | 0.107 |
 
-The stack must stay strictly ascending from backdrop to control. `carbon` sits low because it is the dark premium material, but it was raised from 0.072 for a related reason: once bakelite rose, a `BASE_900` carbon made `PrimaryButton` the *darkest* control on screen, so the primary action receded behind every ordinary button.
+The stack must stay strictly ascending from backdrop to control. `carbon` sits low because it is the dark premium material, but it was raised from 0.072 for a related reason: once moulded rose, a `BASE_900` carbon made `PrimaryButton` the *darkest* control on screen, so the primary action receded behind every ordinary button.
 
-### A note on the `bakelite` key
+### A note on the `moulded` key
 
-The material is no longer bakelite. It was dark marbled phenolic; it is now matte finely-stippled injection-moulded ABS, because at button size a low-frequency marble reads as a stain and fought every label on it. It stays distinct from `powdercoat` by **frequency, not amplitude** — powdercoat is sprayed over brushed metal so it keeps an anisotropic substrate grain and a broad thickness roll, while this is moulded and has neither.
+The surface is injection-moulded ABS / powdercoated aluminium, not phenolic. It stays distinct from `powdercoat` by **frequency, not amplitude** — powdercoat is sprayed over brushed metal so it keeps an anisotropic substrate grain and a broad thickness roll, while this is moulded and has neither.
 
-**The key is a misnomer and renaming it is outstanding** — see Priority 7.
+**The key was renamed from `bakelite` in Phase 4** — see the Tactile Interface Programme, Phase 4.
 
 ---
 
@@ -172,10 +172,9 @@ Not in the original plan, but the substance of the AAA polish pass.
 
 ## Priority 7 — Outstanding
 
-1. **Rename the `bakelite` material key.** A misnomer since the surface was re-authored. Touches 24 committed PNG filenames, `build_ui_theme.gd`, `ui_theme.gd`'s `MATERIALS`/`MATERIAL_DEFAULTS`, `generate_ui_plates.py` and the style guide. A mechanical sweep, worth its own commit.
-2. **Restructure the telemetry rail into toolbox tiers.** The `DOCUMENT` tier was added *above* the existing rail rather than re-homing it, because the readouts are positioned by index (`move_child(x, at + n)`) and re-parenting would silently reorder them. Needs its own verification.
-3. **Promote `tools/probe_scene_loads.gd` into `SUITE_ORDER`.** No suite instantiates `MainLab.tscn`, which is why a crash on the Design Lab's primary load path was invisible to an otherwise-green 211-suite run. A smoke test that every screen survives `_ready()` would have caught it in seconds. `SUITE_ORDER` is order-sensitive, so this is its own change.
-4. **`ui_audit.gd` does not enforce the no-emoji rule**, despite `CLAUDE.md` having claimed it did. It checks overflow, offscreen controls, theme validity, icons and cursors. The rule stands but is unenforced.
+1. **Restructure the telemetry rail into toolbox tiers.** The `DOCUMENT` tier was added *above* the existing rail rather than re-homing it, because the readouts are positioned by index (`move_child(x, at + n)`) and re-parenting would silently reorder them. Needs its own verification.
+2. **Promote `tools/probe_scene_loads.gd` into `SUITE_ORDER`.** No suite instantiates `MainLab.tscn`, which is why a crash on the Design Lab's primary load path was invisible to an otherwise-green 211-suite run. A smoke test that every screen survives `_ready()` would have caught it in seconds. `SUITE_ORDER` is order-sensitive, so this is its own change.
+3. **`ui_audit.gd` does not enforce the no-emoji rule**, despite `CLAUDE.md` having claimed it did. It checks overflow, offscreen controls, theme validity, icons and cursors. The rule stands but is unenforced.
 
 ---
 

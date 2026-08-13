@@ -557,3 +557,114 @@ func test_2d_ui_chrome_overhaul() -> bool:
 	print("  [PASS] 2D UI Chrome Overhaul: bomber_theme.tres, 35 SVG icons, 7 PNG cursors, and in-world shaders all present and valid.")
 	return true
 
+
+# Tactile Interface Programme Phase 4. The L0 workbench layer is registered
+# in UITheme.MATERIALS with five materials (cutting_mat, cardboard, kraft,
+# cork, chipboard); each must have a field asset on disk, and the layer
+# discipline rule (Part 0.5) means none of them may have plate assets - L0
+# is a backdrop register, not a control register.
+func test_l0_workbench_materials_have_fields_no_plates() -> bool:
+	print("Running Test Suite: L0 Workbench Material Assets (Tactile Interface Programme Phase 4)...")
+	var UITheme = preload("res://scripts/ui_theme.gd")
+	var L0 = ["cutting_mat", "cardboard", "kraft", "cork", "chipboard"]
+	# Sanity: L0 must be a subset of the registered MATERIALS, in the order
+	# declared in ui_theme.gd's header. Catches a future refactor that
+	# reorders or renames the layer without updating the tests.
+	for i in range(L0.size()):
+		if UITheme.MATERIALS[i] != L0[i]:
+			print("  [FAIL] UITheme.MATERIALS[", i, "] is '", UITheme.MATERIALS[i], "' but the L0 workbench prefix expected '", L0[i], "'. The layer ordering in ui_theme.gd's header has drifted from the test.")
+			return false
+	# Every L0 material must have a field_<name>.png on disk.
+	for m in L0:
+		var field_path := "res://assets/textures/ui/field_%s.png" % m
+		if not ResourceLoader.exists(field_path):
+			print("  [FAIL] L0 workbench material '", m, "' is missing its field asset at ", field_path)
+			return false
+	# No L0 material may have plate_<name>_<state>.png assets. The layer
+	# discipline rule (TACTILE_INTERFACE_PLAN.md Part 0.5) is that L0 is a
+	# backdrop register; a workbench material on a control would be a
+	# category error. The .import sidecars are part of the on-disk asset
+	# and have to be absent too, otherwise the importer re-creates them.
+	var plate_states = ["normal", "hover", "pressed", "disabled"]
+	for m in L0:
+		for s in plate_states:
+			var plate_png := "res://assets/textures/ui/plate_%s_%s.png" % [m, s]
+			var plate_imp := "res://assets/textures/ui/plate_%s_%s.png.import" % [m, s]
+			if ResourceLoader.exists(plate_png) or ResourceLoader.exists(plate_imp):
+				print("  [FAIL] L0 workbench material '", m, "' has a plate_", s, " asset; L0 is a backdrop register and must not carry plate files")
+				return false
+	# Every L1 equipment material keeps its plate assets, for symmetry -
+	# the layer discipline rule cuts both ways.
+	for m in ["powdercoat", "moulded", "canvas", "carbon", "fiberglass", "toolbox"]:
+		for s in plate_states:
+			var plate_png := "res://assets/textures/ui/plate_%s_%s.png" % [m, s]
+			if not ResourceLoader.exists(plate_png):
+				print("  [FAIL] L1 equipment material '", m, "' is missing plate_", s, ".png - L0 has no plates, but L1 must.")
+				return false
+	print("  [PASS] L0 workbench materials (cutting_mat, cardboard, kraft, cork, chipboard) are registered, each has a field asset, none have plate assets, and every L1 equipment material still has its plates.")
+	return true
+
+
+# Tactile Interface Programme Phase 4 (D7). The out-of-match screens must
+# call UIShell.workbench() and the in-match screens must NOT - the L0 layer
+# is registered for the pre-game chrome, the L1 equipment backdrop is
+# reserved for the in-match chrome.
+#
+# The screen paths below are the source files for every out-of-match and
+# in-match screen the project ships. A test that grepped the source would
+# also catch a comment that says "workbench" without calling it; a test
+# that loaded the scene would be more authoritative but those scenes pull
+# in full SubViewports and the test infra cannot drive a viewport. The
+# source-grep approach is the right tier for this contract.
+func test_workbench_backdrop_split() -> bool:
+	print("Running Test Suite: L0 Workbench vs Steel Backdrop (Tactile Interface Programme Phase 4, D7)...")
+	# Out-of-match screens. Each one must contain a call to UIShell.workbench()
+	# (or, for the one screen that builds its own ColorRect, an
+	# apply_material() with a L0 workbench material). A bare
+	# UIShell.backdrop() or a steel apply_material() here is the regression
+	# the test is there to catch.
+	const OUT_OF_MATCH := [
+		"res://scripts/loading_screen.gd",
+		"res://scripts/livery_screen.gd",
+		"res://scripts/operations_setup.gd",
+		"res://scripts/operations_draft.gd",
+	]
+	const MATCH_SETUP_SCRIPT := "res://scripts/match_setup.gd"
+	const L0_MATERIALS := ["cutting_mat", "cardboard", "kraft", "cork", "chipboard"]
+	for path in OUT_OF_MATCH:
+		var src := FileAccess.get_file_as_string(path)
+		if src.find("UIShell.workbench(") < 0:
+			print("  [FAIL] ", path, " is out-of-match and must call UIShell.workbench() - no workbench() call found")
+			return false
+		# Steel on an out-of-match screen is the regression we are catching.
+		if src.find("UIShell.backdrop(") >= 0:
+			print("  [FAIL] ", path, " is out-of-match and still calls UIShell.backdrop() (steel) - it should be on workbench()")
+			return false
+	# match_setup.gd builds its own ColorRect and calls apply_material()
+	# directly rather than going through UIShell.backdrop(). The test
+	# therefore has to inspect the material argument, not the helper.
+	var match_src := FileAccess.get_file_as_string(MATCH_SETUP_SCRIPT)
+	var found_l0 := false
+	for m in L0_MATERIALS:
+		if match_src.find('"%s"' % m) >= 0:
+			found_l0 = true
+			break
+	if not found_l0:
+		print("  [FAIL] ", MATCH_SETUP_SCRIPT, " is out-of-match and must apply an L0 workbench material (cutting_mat, cardboard, kraft, cork, or chipboard)")
+		return false
+	# In-match screens. Each one must NOT call UIShell.workbench() - the
+	# in-match chrome stays on steel. The list is the floor; new
+	# in-match screens added to the project should be added here.
+	const IN_MATCH := [
+		"res://scripts/battle/match_director.gd",
+		"res://scripts/battle/hud/battle_hud.gd",
+	]
+	for path in IN_MATCH:
+		var src := FileAccess.get_file_as_string(path)
+		if src.find("UIShell.workbench(") >= 0 or src.find('"cutting_mat"') >= 0 or src.find('"cardboard"') >= 0 or src.find('"kraft"') >= 0 or src.find('"cork"') >= 0 or src.find('"chipboard"') >= 0:
+			print("  [FAIL] ", path, " is in-match and must not use a workbench material - it stays on the in-match steel backdrop")
+			return false
+	print("  [PASS] All out-of-match screens call UIShell.workbench() with an L0 material; no in-match screen does. The L0 / in-match split is in place.")
+	return true
+
+

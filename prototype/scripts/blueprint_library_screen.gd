@@ -287,7 +287,7 @@ func _build_action_footer(parent: VBoxContainer) -> void:
 # The "toolbox button" assembly: a wrapper Control holding a flat
 # ToolboxPlate behind an engraved Button, with a StampedLabel as the
 # button's only child. The Button's own theme styleboxes are all blanked
-# so the theme's procedural bakelite does not double-paint over the
+# so the theme's procedural moulded does not double-paint over the
 # plate - the plate IS the visible chrome, the button is just a hit
 # target, the StampedLabel is the lettering.
 #

@@ -284,6 +284,15 @@ const SUITE_ORDER := [
 	["ui_and_camera", "test_ui_icons_share_one_stroke_colour"],
 	["ui_and_camera", "test_brushed_aluminum_ui_theme"],
 	["ui_and_camera", "test_screenshot_diff_tolerance"],
+	# 2026-08-13: the 2D UI Chrome Overhaul asset test was orphaned -
+	# present in test_ui_and_camera.gd but never registered, so the
+	# file's 35 SVG / 7 PNG / shader assets had not been verified by
+	# the runner in months. Brought online alongside Phase 4's two
+	# L0 workbench tests, all of which check the material layer rather
+	# than any single screen.
+	["ui_and_camera", "test_2d_ui_chrome_overhaul"],
+	["ui_and_camera", "test_l0_workbench_materials_have_fields_no_plates"],
+	["ui_and_camera", "test_workbench_backdrop_split"],
 	["terrain_and_maps", "test_terrain_builder_pure_functions"],
 	["terrain_and_maps", "test_b6_heightmap_plateau_approachable_from_any_side"],
 	["terrain_and_maps", "test_b7_open_plains_surfacemap_covers_all_7_surface_types"],

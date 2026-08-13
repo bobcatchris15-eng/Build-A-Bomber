@@ -62,32 +62,25 @@ func _ready():
 	bg_rect = ColorRect.new()
 	bg_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(bg_rect)
-	# Steel backdrop, applied once at build time. Faction-independent, so unlike
-	# the old _refresh_theme() this never needs re-running.
+	# Out-of-match screen - sits on the workbench, not on the in-match steel.
+	# The match setup screen is the per-match pre-game lobby: rules, map,
+	# roster, opponent. Cutting mat reads as the workbench surface you set a
+	# model down on while you decide what goes in the match - the most
+	# "kitbashing" of the L0 surfaces, and the right one for a screen whose
+	# job is configuring units.
 	#
-	# Deliberately NOT plain apply_backdrop(): this screen wants a smoother and
-	# lighter surface than the standard 0.42-brightness backdrop. Still steel, so
-	# the material vocabulary is unchanged - only its finish is.
-	#
-	#   brightness 0.56  lighter. This screen can afford it because it carries no
-	#                    powdercoat panels: the only things needing separation
-	#                    from the backdrop are controls (bakelite, ~0.145) and
-	#                    text, so the usual "hold the backdrop well below panel
-	#                    luminance" constraint has slack here. Lands near 0.115.
-	#   wear  0.05       the scuffed bright patches are the least smooth thing in
-	#   grime 0.06       the shader; both masks are broad blotches that read as
-	#                    dirt on a settings screen rather than as finish.
-	#   scale 2.4        zooms the brush grain so it reads as a soft sheen rather
-	#                    than as visible directional streaking (field_uv divides
-	#                    by 512 * scale, so a larger scale means larger, softer
-	#                    features - see ui_material.gdshader).
-	#   vignette 0.16    flatter corner falloff, so the field reads even.
-	UITheme.apply_material(bg_rect, "steel", {
-		"brightness": 0.56,
+	# Tuned a little lighter than the L0 default (0.85 vs 0.70). The screen
+	# is dominated by text and form controls, not by chrome panels, and a
+	# slightly lighter cutting mat keeps the controls reading as the
+	# subject. The brightness rule (UI_STYLE_GUIDE.md §3.2) still holds -
+	# moulded buttons land near 0.144 and the workbench lands near 0.10,
+	# so the floor is well below the control tier.
+	UITheme.apply_material(bg_rect, "cutting_mat", {
+		"brightness": 0.85,
 		"wear": 0.05,
-		"grime": 0.06,
-		"scale": 2.4,
-		"vignette": 0.16,
+		"grime": 0.04,
+		"scale": 2.0,
+		"vignette": 0.12,
 	})
 
 	var root_vbox = VBoxContainer.new()

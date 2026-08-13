@@ -50,7 +50,13 @@ func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	_livery = LiveryScript.load_player()
 
-	UIShell.backdrop(self)
+	# Out-of-match screen - sits on the workbench, not on the in-match steel.
+	# Cardboard reads as the sheet the paint pots are set out on. Kraft
+	# was the other candidate; cardboard wins because its visible fibre
+	# pattern is calmer, so the colour pickers in the grid below read as
+	# the loudest thing on the page (which is the right hierarchy for a
+	# screen whose entire job is colour choice).
+	UIShell.workbench(self, "cardboard")
 	var frame := UIShell.screen_frame(self)
 
 	var col := VBoxContainer.new()

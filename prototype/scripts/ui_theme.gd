@@ -14,18 +14,29 @@ const LiveryScript = preload("res://scripts/livery.gd")
 # ---------------------------------------------------------------------------
 # MATERIAL VOCABULARY
 # ---------------------------------------------------------------------------
-# Six surfaces, each with one job. This is the list that replaces "pick a
-# background colour" - a caller names what a thing is MADE OF and the
-# appearance follows. See tools/generate_ui_plates.py for how each is authored
-# and VISUAL_ART_DIRECTION.md for the wider material language.
+# Surfaces are grouped by layer (L0..L3 from TACTILE_INTERFACE_PLAN.md Part 0.5).
+# Each entry is what a thing is MADE OF; the appearance follows. The brightness
+# rule in UI_STYLE_GUIDE.md §3.2 governs every per-material default - the
+# backdrop is the floor of the luminance stack, and anything laid on top has to
+# sit above it.
 #
-#   POWDERCOAT  panel and dock bodies, HUD chrome
-#   STEEL       frames, rails, splitters, toolbars, dividers
-#   BAKELITE    buttons, tabs, toggles, the radial ring
-#   CANVAS      drawer/flyout backing, tooltips
-#   CARBON      primary action only - SPARING, at most two per screen
-#   FIBERGLASS  hazard placards, alert states
-const MATERIALS = ["powdercoat", "steel", "bakelite", "canvas", "carbon", "fiberglass", "toolbox"]
+#   L0 WORKBENCH (hobby desk - backdrop register, no plates)
+#     CUTTING_MAT, CARDBOARD, KRAFT, CORK, CHIPBOARD
+#
+#   L1 EQUIPMENT (cold-war hardware)
+#     POWDERCOAT  panel and dock bodies, HUD chrome
+#     STEEL       frames, rails, splitters, toolbars, dividers, the in-match backdrop
+#     MOULDED     buttons, tabs, toggles, the radial ring
+#     CANVAS      drawer/flyout backing, tooltips
+#     CARBON      primary action only - SPARING, at most two per screen
+#     FIBERGLASS  hazard placards, alert states
+#     TOOLBOX     Design Lab parts dock shell - and nothing else
+const MATERIALS = [
+	# L0 workbench
+	"cutting_mat", "cardboard", "kraft", "cork", "chipboard",
+	# L1 equipment
+	"powdercoat", "steel", "moulded", "canvas", "carbon", "fiberglass", "toolbox",
+]
 
 const FIELD_DIR = "res://assets/textures/ui/"
 
@@ -33,9 +44,22 @@ const FIELD_DIR = "res://assets/textures/ui/"
 # "canvas" looks like canvas everywhere without every caller remembering to
 # turn the vignette down on cloth.
 const MATERIAL_DEFAULTS = {
+	# L0 workbench. Fields only - L0 is a backdrop register, not a control
+	# register, and these materials have no plates (see tools/generate_ui_plates.py,
+	# which is a separate script from the L0 field PNGs that exist on disk).
+	# Brightness 0.85 lands each L0 final luminance in the 0.07-0.10 range -
+	# visible as a hobby desk, near the 0.42-brightness steel backdrop (which
+	# lands at 0.084), and well below the powdercoat panel body at ~0.110. The
+	# floor/surface/control stack stays strictly ascending.
+	"cutting_mat": {"wear": 0.10, "grime": 0.18, "scale": 1.2, "vignette": 0.18, "brightness": 0.85},
+	"cardboard":   {"wear": 0.12, "grime": 0.16, "scale": 1.0, "vignette": 0.20, "brightness": 0.85},
+	"kraft":       {"wear": 0.14, "grime": 0.18, "scale": 1.0, "vignette": 0.22, "brightness": 0.85},
+	"cork":        {"wear": 0.16, "grime": 0.14, "scale": 1.1, "vignette": 0.20, "brightness": 0.85},
+	"chipboard":   {"wear": 0.18, "grime": 0.16, "scale": 1.0, "vignette": 0.22, "brightness": 0.85},
+	# L1 equipment.
 	"powdercoat": {"wear": 0.25, "grime": 0.20, "scale": 1.0, "vignette": 0.30},
 	"steel":      {"wear": 0.35, "grime": 0.12, "scale": 1.0, "vignette": 0.22},
-	"bakelite":   {"wear": 0.10, "grime": 0.18, "scale": 0.8, "vignette": 0.18},
+	"moulded":    {"wear": 0.10, "grime": 0.18, "scale": 0.8, "vignette": 0.18},
 	# Cloth does not scuff to a bright edge and does not carry a corner
 	# falloff the way a curved metal plate does - it is matte and flat.
 	"canvas":     {"wear": 0.06, "grime": 0.30, "scale": 0.7, "vignette": 0.12},
@@ -96,7 +120,11 @@ static func apply_material(node: CanvasItem, material: String,
 	mat.set_shader_parameter("grime_amount", overrides.get("grime", d["grime"]))
 	mat.set_shader_parameter("field_scale", overrides.get("scale", d["scale"]))
 	mat.set_shader_parameter("vignette", overrides.get("vignette", d["vignette"]))
-	mat.set_shader_parameter("brightness", overrides.get("brightness", 1.0))
+	# brightness defaults to whatever the material's own entry says (L0 workbench
+	# materials carry 0.70 to keep the floor low), or 1.0 for materials that
+	# do not specify one (the L1 equipment, where panels and controls are at
+	# their authored luminance).
+	mat.set_shader_parameter("brightness", overrides.get("brightness", d.get("brightness", 1.0)))
 	mat.set_shader_parameter("tint_strength", overrides.get("tint_strength", 0.0))
 	if overrides.has("tint"):
 		mat.set_shader_parameter("accent_tint", overrides["tint"])

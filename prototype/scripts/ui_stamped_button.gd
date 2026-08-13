@@ -38,7 +38,7 @@ extends Button
 #
 # The Button is the structural root. The SubViewportContainer shows the
 # rendered mesh; the StampedLabel overlays the legend. The Button's own
-# theme styleboxes are blanked in _init, so the procedural bakelite the
+# theme styleboxes are blanked in _init, so the procedural moulded the
 # theme assigns to Button does not double-paint on top of the mesh.
 #
 # STATE-TO-LOOK PIPELINE:
@@ -151,7 +151,7 @@ func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	custom_minimum_size = Vector2(MIN_WIDTH, MIN_HEIGHT)
 	focus_mode = Control.FOCUS_ALL
-	# Blank out the theme's procedural bakelite. The mesh in the SubViewport
+	# Blank out the theme's procedural moulded. The mesh in the SubViewport
 	# IS the face; drawing a Button stylebox on top of it would double-paint.
 	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
 		add_theme_stylebox_override(state, StyleBoxEmpty.new())
