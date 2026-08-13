@@ -466,6 +466,13 @@ const SUITE_ORDER := [
 	["module_action_ring", "test_action_ring_wedge_order_is_fixed"],
 	["module_action_ring", "test_action_ring_persists_across_invocations"],
 	["module_action_ring", "test_action_ring_closes_when_target_freed"],
+
+	# Phase 7 MarkingMenu (Tactile Interface Programme Part 4 Phase 7, D9, D14)
+	["marking_menu", "test_marking_menu_fast_flick_commits_without_drawing"],
+	["marking_menu", "test_marking_menu_hold_reveals_dial"],
+	["marking_menu", "test_marking_menu_hub_release_cancels"],
+	["marking_menu", "test_marking_menu_unbounded_sector_release_commits"],
+	["marking_menu", "test_marking_menu_short_stroke_cancels"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist
