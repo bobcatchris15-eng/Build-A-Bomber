@@ -27,6 +27,20 @@ shader_type spatial;
 // Cost: three texture-set samples per pixel where there was one. Terrain is a
 // single opaque pass with no overdraw, so this is the cheapest place in the
 // frame to spend that.
+//
+// WHAT THIS REPLACES AND WHY (PR 3, 2026-08-12):
+// v1 used smoothstep interpolation and uncorrupted UV sampling for the blend
+// mask. Smoothstep's second derivative is not continuous — when the noise is
+// sampled at grazing angles for specular response, the non-smooth transitions
+// between cells become visible as a harsh "staircase" artifact. The uncorrupted
+// UV field also produces a regular, mechanical pattern that the eye reads as grid
+// structure rather than organic variation.
+// v2 replaces smoothstep with quintic Hermite interpolation (continuous second
+// derivative everywhere) and adds two-layer domain warping to the macro blend
+// noise so the transition boundaries between variants bend and flow organically.
+// A second fBM octave with non-integer frequencies breaks the remaining large-
+// scale periodicity. The result: no grid structure, no staircase transitions,
+// organic large-scale variation across the full map extent.
 
 uniform sampler2D albedo_0 : source_color, filter_linear_mipmap, repeat_enable;
 uniform sampler2D albedo_1 : source_color, filter_linear_mipmap, repeat_enable;
@@ -60,17 +74,27 @@ uniform float blend_contrast : hint_range(0.5, 8.0) = 2.2;
 uniform float terrain_desaturate : hint_range(0.0, 1.0) = 0.22;
 uniform float terrain_exposure_lift : hint_range(0.0, 0.5) = 0.09;
 
-// Standard hash-based periodic value noise. Cheap, and its exact character
-// doesn't matter here - it's a blend mask viewed at 100-world-unit
-// wavelengths, never seen directly.
+// --- Noise primitives (v2) ---
+
+// Standard hash-based periodic value noise. Used only for the blend mask
+// (viewed at 100-world-unit wavelengths, never seen directly), so exact
+// character doesn't matter — only cost and continuity matter.
 float hash21(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+// Quintic Hermite interpolation. Continuous first AND second derivative everywhere
+// (unlike smoothstep, which has a cusp in its second derivative at f=0.5).
+// This eliminates the "staircase" artifact that smoothstep produces when
+// viewed at grazing angles in specular response.
+vec2 quintic(vec2 f) {
+	return f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 }
 
 float value_noise(vec2 p) {
 	vec2 i = floor(p);
 	vec2 f = fract(p);
-	vec2 u = f * f * (3.0 - 2.0 * f);
+	vec2 u = quintic(f);
 	float a = hash21(i);
 	float b = hash21(i + vec2(1.0, 0.0));
 	float c = hash21(i + vec2(0.0, 1.0));
@@ -78,13 +102,44 @@ float value_noise(vec2 p) {
 	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
+// Two-layer domain warping. Samples two warp noise fields and uses them to
+// distort the input coordinates before sampling the primary noise. This bends
+// the noise grid out of alignment, making the blend boundaries flow organically
+// rather than forming regular geometric transition shapes.
+vec2 domain_warp(vec2 p, float freq) {
+	float wx = value_noise(p * freq + vec2(3.7, 9.1));
+	float wy = value_noise(p * freq + vec2(8.2, 4.3));
+	return p + vec2(wx, wy) * 0.31;
+}
+
+// Two-octave fBM using non-integer frequencies. Integer harmonics (1.0, 2.0,
+// 4.0...) align to the noise grid and reintroduce periodicity at large scales.
+// Irrational-ish multipliers (1.31, 1.73, 2.17) have no common integer
+// denominator with the grid, so octaves never re-align — the result has no
+// overall period regardless of how large the coordinate space grows.
+float fbm(vec2 p) {
+	float v = 0.0;
+	float amp = 0.5;
+	float freq = 1.0;
+	for (int i = 0; i < 2; i++) {
+		v += amp * value_noise(p * freq);
+		freq *= 1.73;  // non-integer so it never aligns to the grid
+		amp *= 0.5;
+	}
+	return v;
+}
+
 void fragment() {
 	vec2 uv = UV;
 
-	// Two independent noise fields (offset so they don't correlate) give a
-	// 2D weight space, which distributes three variants more evenly than
-	// slicing a single 1D noise value into thirds would.
-	float n_macro = value_noise(uv * macro_scale);
+	// Domain-warped macro blend: the warp bends the noise field so the
+	// transition boundaries between terrain variants flow organically rather
+	// than forming regular geometric shapes.
+	vec2 warped_uv = domain_warp(uv, macro_scale * 0.73);
+	float n_macro = fbm(warped_uv);
+
+	// Detail layer stays uncorrupted — its job is to break up the macro
+	// blobs with fine-scale texture, not to create its own large structure.
 	float n_detail = value_noise(uv * detail_scale + vec2(37.2, 11.7));
 	float m = clamp((n_macro * 0.75 + n_detail * 0.25 - 0.5) * blend_contrast + 0.5, 0.0, 1.0);
 

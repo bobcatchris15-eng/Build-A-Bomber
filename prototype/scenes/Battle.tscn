@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://scripts/battle/match_director.gd" id="1_director"]
 [ext_resource type="Script" path="res://scripts/rts_camera.gd" id="2_rtscam"]
@@ -11,16 +11,59 @@ ground_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
 [sub_resource type="Sky" id="Sky_bt"]
 sky_material = SubResource("ProceduralSkyMaterial_bt")
 
+[sub_resource type="CameraAttributesPractical" id="CameraAttributesPractical_bt"]
+auto_exposure_enabled = false
+auto_exposure_min_exposure_value = 10.0
+auto_exposure_max_exposure_value = 20.0
+# Tilt-shift band — miniature scale lens feel. Far blur only: near blur on
+# an RTS camera creates a double-blur artifact (near plane + camera pan) that
+# reads as a lens scratch rather than a depth effect. Tuned conservative to
+# avoid the 3 FPS regression rts_camera.gd's original DOF caused.
+dof_blur_far_enabled = true
+dof_blur_far_distance = 60.0
+dof_blur_far_transition = 20.0
+dof_blur_amount = 0.06
+
 [sub_resource type="Environment" id="Environment_bt"]
 background_mode = 2
 sky = SubResource("Sky_bt")
-tonemap_mode = 3
+# AgX: preserves hue under intense light without the cyan/yellow shifts ACES
+# produces — critical for bright saturated unit colors. Slightly desaturated
+# output is compensated by the post-process saturation boost below.
+tonemap_mode = 4
+tonemap_exposure = 1.0
+# RA2-style flat overcast: ambient from a neutral sky-grey flat source, not
+# from the sky itself (which would introduce directional colour variation the
+# bright flat brief doesn't want). Warm-neutral grey at moderate contribution
+# so unlit unit faces still read their colour rather than going dark.
+ambient_light_source = 1
+ambient_color = Color(0.60, 0.61, 0.62, 1)
+ambient_color_sun_energy = 0.35
 ssao_enabled = true
 ssao_radius = 0.8
-ssao_intensity = 2.5
+ssao_intensity = 1.8
 glow_enabled = true
-glow_intensity = 0.9
-glow_bloom = 0.08
+glow_intensity = 0.85
+glow_bloom = 0.06
+# SDFGI: macro-bounced GI from the entire static scene. Terrain normals only
+# resolve with GI that reacts to them — without this the ground reads as flat.
+sdfgi_enabled = true
+sdfgi_cell_size = 1.0
+sdfgi_cascades = 4
+sdfgi_max_distance = 200.0
+sdfgi_occlusion_fade = 0.2
+# SSIL: micro-bounces in crevices SDFGI's voxels can't resolve. SDFGI
+# handles the macro scale; SSIL fills in what SDFGI misses at normal zoom.
+ssil_enabled = true
+ssil_ray_count = 8
+ssil_samples = 4
+ssil_buffer_width = 0.5
+ssil_buffer_height = 0.5
+# Saturation + contrast lift to compensate for AgX's desaturation at peak
+# brightness, keeping the RA2 bright-and-smooth feel. Applied after tonemapping.
+adjustment_enabled = true
+adjustment_saturation = 1.18
+adjustment_contrast = 1.06
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
 size = Vector3(160, 1, 160)
@@ -37,9 +80,23 @@ environment = SubResource("Environment_bt")
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 20, 0)
 shadow_enabled = true
+shadow_bias = 0.04
+shadow_normal_bias = 0.8
+shadow_blur = 1.2
+# Physical Light Units — calibrated for bright overcast (not harsh clear sun).
+# Matches CORE_DESIGN_LANGUAGE §3.2: "high ambient, low directional, soft long
+# shadows, bright neutral grey sky." light_color and light_angular_distance
+# are for the sun disc in the sky; the overcast sky itself is ambient_color.
+light_3d_mode = 1
+light_color = Color(1, 0.97, 0.90, 1)
+light_energy = 0.8
+# Wide angular distance = softer disc, less harsh directional shadow. Paired
+# with shadow_blur above for the soft overcast shadow feel.
+light_angular_distance = 5.0
 
 [node name="Camera3D" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 26, 128)
+attributes = SubResource("CameraAttributesPractical_bt")
 script = ExtResource("2_rtscam")
 current = true
 

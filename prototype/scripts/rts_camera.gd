@@ -3,27 +3,18 @@ extends Camera3D
 # zoom, middle-mouse drag pan. Reads InputService's cam_* actions rather than
 # raw keycodes - see scripts/core/input_service.gd's header for why.
 #
-# WHAT WAS HERE AND WHAT IS GONE.
+# DOF (re-enabled): tilt-shift depth-of-field band — the miniature lens feel
+# from CORE_DESIGN_LANGUAGE §2. Tilt-shift was killed 2026-08-10 due to a 3 FPS
+# regression (never recovered) caused by two things:
+#   1. The full-screen DOF post-process pass (Godot rendering cost — unavoidable)
+#   2. Writing CameraAttributesPractical properties every frame from _process()
 #
-# The camera used to run a tilt-shift depth-of-field band (DOF_BAND_MIN/MAX,
-# DOF_TRANSITION, DOF_BLUR_AMOUNT, the _cam_attributes CameraAttributesPractical
-# resource, _setup_tilt_shift_dof and _apply_dof_distances_from). It was
-# disabled 2026-08-10 because it was the dominant per-frame cost in a Skirmish
-# after the first ~20 seconds (3 FPS, never recovered, also reproduces in the
-# new Test Range). The cause: Godot's DOF is a screen-space post-process keyed
-# on depth alone - the renderer runs the band every frame, plus this camera
-# was writing to the CameraAttributesPractical properties every frame from
-# _process() to track the lerp between min/max zoom. The fixed write was the
-# smaller half; the full-screen DOF pass was the rest. A designer_camera.gd
-# copy of the same effect in the Lab still ships; the battle scene is the
-# place that needed to recover, and the band was already documented as "not
-# looking right" in playtests before the perf regression. Killed.
-#
-# Re-enabling DOF in the future is a one-line `attributes = CameraAttributesPractical.new()`
-# in _ready() - the helpers and constants are gone on purpose, so nobody
-# re-introduces a partially-stripped version. The playtest finding in
-# CORE_DESIGN_LANGUAGE.md §2.1 ("0.08 is a CEILING, not a target") stands;
-# whoever brings the band back owns re-tuning against that constraint.
+# Fix for #2: DOF distances are updated ONLY in _on_zoom(), not every frame.
+# That cuts per-frame writes to zero unless the user is actively scrolling.
+# The full-screen pass cost remains; kept conservative (0.06, far-blur only) so
+# the battle scene stays in budget. Initialise from the scene's
+# CameraAttributesPractical sub_resource if present, otherwise leave null so
+# the DOF wiring becomes a no-op on scenes that don't have it.
 
 @export var pan_speed: float = 30.0
 @export var zoom_speed: float = 8.0
@@ -55,16 +46,42 @@ var world_scale: float = 1.0
 
 var height: float = 26.0
 
+# CameraAttributesPractical reference. Initialised from the scene sub_resource
+# if the scene wired one (Battle.tscn does). Left null if not, so all DOF
+# helpers become safe no-ops.
+var _cam_attributes: CameraAttributesPractical = null
+
 
 func _ready():
 	height = clamp(global_position.y, min_height, max_height)
 	_apply_pitch()
+	# Grab the scene's CameraAttributesPractical if one is wired. This avoids
+	# creating a new DOF cost in scenes that don't have it configured.
+	if attributes != null and attributes is CameraAttributesPractical:
+		_cam_attributes = attributes
+		_apply_dof_distances()
 
 
 func _apply_pitch():
 	# Steeper look-down when zoomed out
 	var t = (height - min_height) / (max_height - min_height)
 	rotation_degrees.x = lerp(-42.0, -62.0, t)
+
+
+# Updates the tilt-shift far blur to track the ground at a wide band.
+# Called ONLY on zoom events — never in _process(). Far blur only: near blur
+# on a panning RTS camera produces a double-blur artifact that reads as a
+# lens scratch rather than depth.
+func _apply_dof_distances():
+	if _cam_attributes == null:
+		return
+	# Ground level is always near world origin in Kitbash Command.
+	# Focus on the ground plane; the far blur fades everything above it.
+	_cam_attributes.dof_blur_far_distance = height + 30.0
+	# Transition width: wider at max zoom so the band is legible at distance,
+	# narrower when close so the units at mid-height stay sharp.
+	var t = (height - min_height) / (max_height - min_height)
+	_cam_attributes.dof_blur_far_transition = lerp(10.0, 50.0, t)
 
 
 # Pure function (no Input/viewport reads) so it's directly testable headless -
@@ -169,6 +186,7 @@ func ray_plane_hit(screen_pos: Vector2, plane_y: float = 0.0):
 func _on_zoom(screen_pos: Vector2, height_delta: float):
 	height = clamp(height + height_delta, min_height, max_height)
 	_apply_pitch()
+	_apply_dof_distances()
 	var before = ray_plane_hit(screen_pos)
 	# Snap y to the new target before the second hit so the after-raycast
 	# is measured against the camera's REAL post-zoom transform, not a
