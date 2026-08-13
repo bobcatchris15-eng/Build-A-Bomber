@@ -34,6 +34,7 @@ SettingsService="*res://scripts/core/settings_service.gd"
 InputService="*res://scripts/core/input_service.gd"
 SystemLayer="*res://scripts/ui/system_layer.gd"
 DesignRecord="*res://scripts/design_record.gd"
+CommandRegistry="*res://scripts/battle/orders/command_registry.gd"
 
 [debug]
 
