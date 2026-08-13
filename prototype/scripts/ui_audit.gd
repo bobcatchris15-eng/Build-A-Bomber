@@ -1,6 +1,14 @@
 class_name UIAudit
 extends RefCounted
 
+# Interface audit routines (Phase 12 enforcement).
+# Enforces mechanical constraints: overflow, offscreen controls, theme/icon/cursor
+# validity, no-emoji rule, layer discipline, and input binding collision checks.
+
+const UIIcons = preload("res://scripts/ui_icons.gd")
+const CursorManager = preload("res://scripts/cursor_manager.gd")
+
+
 static func find_overflowing_panels(node: Node, results: Array = []) -> Array:
 	if node is Control and node.is_visible_in_tree() and node.get_child_count() > 0:
 		var h_fixed = not (node.size_flags_horizontal & Control.SIZE_EXPAND)
@@ -8,18 +16,6 @@ static func find_overflowing_panels(node: Node, results: Array = []) -> Array:
 		if node.size.x < 4.0 and node.size.y < 4.0:
 			h_fixed = false
 			v_fixed = false
-		# Explicit opt-out for containers whose whole job is to clip. A
-		# collapsed drawer (parts_menu.gd) is a zero-height clip window around
-		# a full-height button list: correct behaviour that looks exactly like
-		# the bug this audit hunts for.
-		#
-		# Deliberately a meta flag and NOT a `clip_contents` check, which was
-		# the obvious version and is wrong: ScrollContainer sets clip_contents
-		# internally, so keying off it would have silently exempted every
-		# ScrollContainer in the project - the exact node type the real
-		# overflow bug this tool was written for lived in. Caught by
-		# test_ui_audit_has_real_teeth, which is what that suite is for.
-		# An opt-out has to be something a caller states on purpose.
 		if node.get_meta("ui_audit_clip_ok", false):
 			h_fixed = false
 			v_fixed = false
@@ -48,6 +44,7 @@ static func find_overflowing_panels(node: Node, results: Array = []) -> Array:
 		find_overflowing_panels(child, results)
 	return results
 
+
 static func find_offscreen_controls(node: Node, viewport_rect: Rect2, results: Array = []) -> Array:
 	if node is Control and node.is_visible_in_tree():
 		var rect = node.get_global_rect()
@@ -59,22 +56,6 @@ static func find_offscreen_controls(node: Node, viewport_rect: Rect2, results: A
 	return results
 
 
-# True if any ancestor is a ScrollContainer.
-#
-# WHY THIS EXEMPTION EXISTS. This check answers "can the player never reach this
-# control?", and content below a scroll container's fold is reachable by
-# definition - scrolling to it is the entire point. Without the exemption the
-# Design Lab's parts catalogue reported ~40 off-screen controls, because a
-# hardware list longer than the window is a correctly-working list.
-#
-# This was masked until the dock width fix landed: find_offscreen_controls() is
-# only reached after the overflow pass returns clean, and UI_PartsMenu was
-# failing the overflow pass first, so the whole off-screen half of
-# test_ui_no_overflow_or_offscreen had never actually run against MainLab.
-#
-# Deliberately NOT weakened past that: a control genuinely stranded outside the
-# viewport with no scrolling ancestor is still reported, which is what
-# test_ui_audit_has_real_teeth asserts with its bare (5000, 5000) rect.
 static func _is_inside_scroll(node: Node) -> bool:
 	var p := node.get_parent()
 	while p != null:
@@ -82,6 +63,7 @@ static func _is_inside_scroll(node: Node) -> bool:
 			return true
 		p = p.get_parent()
 	return false
+
 
 static func check_theme_resource_validity() -> Dictionary:
 	var res_path = "res://resources/bomber_theme.tres"
@@ -95,6 +77,7 @@ static func check_theme_resource_validity() -> Dictionary:
 	var has_button = theme.has_stylebox("normal", "Button")
 	return {"valid": has_panel and has_button, "reason": "Theme resource contains core styleboxes"}
 
+
 static func check_icon_assets() -> Dictionary:
 	var missing = []
 	for icon_name in UIIcons.ICON_PATHS:
@@ -103,6 +86,7 @@ static func check_icon_assets() -> Dictionary:
 			missing.append(icon_name)
 	return {"valid": missing.is_empty(), "missing": missing}
 
+
 static func check_cursor_assets() -> Dictionary:
 	var missing = []
 	for type in CursorManager.CURSOR_CONFIGS:
@@ -110,3 +94,68 @@ static func check_cursor_assets() -> Dictionary:
 		if not FileAccess.file_exists(path):
 			missing.append(path)
 	return {"valid": missing.is_empty(), "missing": missing}
+
+
+# Phase 12: No-emoji enforcement.
+# Scans text across controls to catch prohibited emoji ranges (e.g. 0x1F300-0x1FAFF).
+# Allows standard ASCII, Latin, Cyrillic, Greek, mathematical symbols, arrows (0x2190-0x21FF),
+# and box-drawing characters (0x2500-0x257F).
+static func find_emoji_usage(node: Node, results: Array = []) -> Array:
+	var text_to_check := ""
+	if node is Label:
+		text_to_check = (node as Label).text
+	elif node is Button:
+		text_to_check = (node as Button).text
+	elif node is RichTextLabel:
+		text_to_check = (node as RichTextLabel).text
+	elif node is LineEdit:
+		text_to_check = (node as LineEdit).text
+
+	if text_to_check != "":
+		for i in range(text_to_check.length()):
+			var code := text_to_check.unicode_at(i)
+			# Emoji block ranges: Miscellaneous Symbols and Pictographs (0x1F300-0x1F5FF),
+			# Emoticons (0x1F600-0x1F64F), Transport/Map (0x1F680-0x1F6FF), Supplemental (0x1F900-0x1FAFF)
+			if (code >= 0x1F300 and code <= 0x1FAFF) or (code >= 0x1F600 and code <= 0x1F64F):
+				results.append({
+					"path": str(node.get_path()),
+					"char": text_to_check[i],
+					"codepoint": code,
+					"text": text_to_check,
+				})
+				break
+
+	for child in node.get_children():
+		find_emoji_usage(child, results)
+	return results
+
+
+# Phase 12: Input binding collision check.
+# Asserts that no command or lab action shares a physical key with any camera action.
+static func check_input_binding_collisions() -> Dictionary:
+	var input_service_script = load("res://scripts/core/input_service.gd")
+	if input_service_script == null:
+		return {"valid": false, "collisions": ["Could not load input_service.gd"]}
+
+	var actions: Dictionary = input_service_script.ACTIONS
+	var cam_keys: Dictionary = {}
+
+	# Collect all keys used by camera actions
+	for action_name in actions.keys():
+		if action_name.begins_with("cam_"):
+			var entry: Dictionary = actions[action_name]
+			for ev in entry.get("events", []):
+				if "key" in ev:
+					cam_keys[ev["key"]] = action_name
+
+	var collisions: Array = []
+	for action_name in actions.keys():
+		if not action_name.begins_with("cam_"):
+			var entry: Dictionary = actions[action_name]
+			for ev in entry.get("events", []):
+				if "key" in ev and not bool(ev.get("ctrl", false)) and not bool(ev.get("alt", false)):
+					var k = ev["key"]
+					if cam_keys.has(k):
+						collisions.append("Action '%s' collides with camera action '%s' on key %s" % [action_name, cam_keys[k], str(k)])
+
+	return {"valid": collisions.is_empty(), "collisions": collisions}

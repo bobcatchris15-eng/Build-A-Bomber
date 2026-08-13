@@ -479,6 +479,13 @@ const SUITE_ORDER := [
 	["selection_panel", "test_selection_panel_ctrl_shift_deselect_group"],
 	["selection_panel", "test_selection_panel_priority_order"],
 	["selection_panel", "test_selection_panel_thumbnail_cache"],
+
+	# Phase 11 PointerGain (Tactile Interface Programme Part 4 Phase 11, D17)
+	["ui_and_camera", "test_pointer_gain_is_strictly_monotonic"],
+	["ui_and_camera", "test_pointer_gain_precision_mode"],
+
+	# Phase 12 Enforcement
+	["ui_and_camera", "test_probe_scene_loads"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

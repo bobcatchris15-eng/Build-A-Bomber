@@ -198,6 +198,12 @@ func _on_zoom(screen_pos: Vector2, height_delta: float):
 		global_position.z += before.z - after.z
 
 
+const PointerGainScript = preload("res://scripts/core/pointer_gain.gd")
+
+var _middle_drag_origin: Vector2 = Vector2.ZERO
+var _middle_drag_last: Vector2 = Vector2.ZERO
+
+
 func _unhandled_input(event):
 	if event.is_action_pressed("cam_zoom_in"):
 		_on_zoom(get_viewport().get_mouse_position(), -zoom_speed * world_scale)
@@ -208,13 +214,11 @@ func _unhandled_input(event):
 			_middle_drag_origin = event.position
 			_middle_drag_last = event.position
 	elif event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_MIDDLE:
-		var delta = event.position - _middle_drag_last
+		var raw_delta: Vector2 = event.position - _middle_drag_last
 		_middle_drag_last = event.position
-		if delta.length() == 0:
+		if raw_delta.length() == 0:
 			return
-		var world_move := pan_to_world(delta, rotation_degrees.y) * pan_speed * world_scale * 0.01
+		var scaled_delta: Vector2 = PointerGainScript.apply_gain(raw_delta)
+		var world_move := pan_to_world(scaled_delta, rotation_degrees.y) * pan_speed * world_scale * 0.01
 		global_position.x -= world_move.x
 		global_position.z -= world_move.y
-
-var _middle_drag_origin: Vector2 = Vector2.ZERO
-var _middle_drag_last: Vector2 = Vector2.ZERO

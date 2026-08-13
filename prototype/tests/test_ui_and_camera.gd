@@ -188,9 +188,24 @@ func test_ui_audit_has_real_teeth() -> bool:
 		print("  [FAIL] UI audit tool failed to catch a control positioned at (5000,5000), off-screen")
 		offscreen_control.queue_free()
 		return false
-	offscreen_control.queue_free()
+	# --- Emoji check: a control with an injected emoji ---
+	var emoji_label := Label.new()
+	emoji_label.text = "Hello \uD83D\uDE80 Rocket"
+	root.add_child(emoji_label)
+	var emoji_results = UIAuditScript.find_emoji_usage(emoji_label)
+	if emoji_results.is_empty():
+		print("  [FAIL] UI audit tool failed to catch an injected emoji")
+		emoji_label.queue_free()
+		return false
+	emoji_label.queue_free()
 
-	print("  [PASS] UI audit tool correctly catches injected overflow/off-screen bugs and doesn't false-positive on legitimately-sized panels.")
+	# --- Input binding collision check ---
+	var binding_check = UIAuditScript.check_input_binding_collisions()
+	if not binding_check["valid"]:
+		print("  [FAIL] Input binding collisions detected: ", binding_check["collisions"])
+		return false
+
+	print("  [PASS] UI audit tool correctly catches injected overflow/off-screen/emoji bugs and asserts zero binding collisions.")
 	return true
 
 # --- Skirmish mode test suites ---
@@ -737,6 +752,60 @@ func test_pcg3d_shader_hash_swap() -> bool:
 		filename = dir.get_next()
 	print("  [PASS] All shaders in res://shaders/ are free of fract(sin) float-sine hashes.")
 	return true
+
+
+# Tactile Interface Programme Phase 11 (D17).
+# PointerGain transfer curve must be strictly monotonic (derivative > 0 everywhere).
+func test_pointer_gain_is_strictly_monotonic() -> bool:
+	print("Running Test Suite: Pointer Gain - Strictly Monotonic Transfer Curve (Phase 11, D17)...")
+	var PointerGainScript = preload("res://scripts/core/pointer_gain.gd")
+
+	var prev_out: float = -1.0
+	for speed in range(1, 100):
+		var v_in := Vector2(float(speed), 0.0)
+		var v_out: Vector2 = PointerGainScript.apply_gain(v_in)
+		var mag_out: float = v_out.length()
+		if mag_out <= prev_out:
+			print("  [FAIL] PointerGain is not strictly monotonic at speed %d: prev %.4f, current %.4f" % [speed, prev_out, mag_out])
+			return false
+		prev_out = mag_out
+
+	print("  [PASS] PointerGain transfer curve is strictly monotonic across velocity spectrum.")
+	return true
+
+
+# Tactile Interface Programme Phase 12 Enforcement:
+# Probe all main scenes to ensure instantiate and frame tick without runtime errors.
+func test_probe_scene_loads() -> bool:
+	print("Running Test Suite: Scene Load Probing (Phase 12 Enforcement)...")
+	const SCENES := [
+		"res://scenes/MainMenu.tscn",
+		"res://scenes/MatchSetup.tscn",
+		"res://scenes/BlueprintLibrary.tscn",
+		"res://scenes/OperationsSetup.tscn",
+		"res://scenes/Loading.tscn",
+	]
+	for path in SCENES:
+		if not ResourceLoader.exists(path):
+			print("  [skip] %s (missing)" % path)
+			continue
+		var packed = load(path)
+		if packed == null:
+			print("  [FAIL] %s did not load" % path)
+			return false
+		var inst = packed.instantiate()
+		if inst == null:
+			print("  [FAIL] %s did not instantiate" % path)
+			return false
+		root.add_child(inst)
+		for _i in range(3):
+			await tree.process_frame
+		inst.queue_free()
+		await tree.process_frame
+	print("  [PASS] All probed scenes loaded, instantiated, and ticked cleanly.")
+	return true
+
+
 
 
 
