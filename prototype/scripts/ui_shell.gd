@@ -63,6 +63,35 @@ static func backdrop(parent: Node) -> ColorRect:
 	return bg
 
 
+# Full-bleed L0 workbench backdrop. The out-of-match screens sit on a hobby
+# desk - a cutting mat, a sheet of cardboard, kraft paper, a corkboard, or
+# chipboard - rather than on the steel the in-match screens use. The choice
+# is per-screen: matching_setup, livery_editor and operations_draft pick a
+# different L0 each, so the surfaces that surround the same match
+# configuration do not all read as one continuous desk.
+#
+# `material` must be one of UITheme.MATERIALS's L0 entries. Anything else
+# is a category error (workbench is a backdrop register, not a control
+# register) and is refused with a warning rather than silently falling
+# through to a flat colour.
+#
+# The brightness rule still governs: L0 materials carry their own per-
+# material brightness in UITheme.MATERIAL_DEFAULTS so the final luminance
+# lands below the powdercoat panel body. If a screen's panels sink into
+# the field, darken the field's brightness at the call site with an
+# override - do not raise the panels.
+static func workbench(parent: Node, material: String) -> ColorRect:
+	const L0_MATERIALS = ["cutting_mat", "cardboard", "kraft", "cork", "chipboard"]
+	if material not in L0_MATERIALS:
+		push_warning("UIShell.workbench: '%s' is not an L0 workbench material. Expected one of %s." % [material, L0_MATERIALS])
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(bg)
+	UITheme.apply_material(bg, material)
+	return bg
+
+
 # The margin frame content is laid out inside. Pass overrides only for a screen
 # that genuinely needs a different inset, and say why at the call site.
 static func screen_frame(parent: Node, margin_h: int = SCREEN_MARGIN_H,
