@@ -460,6 +460,12 @@ const SUITE_ORDER := [
 	["ui_and_camera", "test_ui_prop_textures_resolve"],
 	["ui_and_camera", "test_ui_prop_textures_are_distinct"],
 	["ui_and_camera", "test_pcg3d_shader_hash_swap"],
+
+	# Phase 6 ModuleActionRing (Tactile Interface Programme Part 4 Phase 6, D13)
+	["module_action_ring", "test_action_ring_inner_radius_clears_silhouette"],
+	["module_action_ring", "test_action_ring_wedge_order_is_fixed"],
+	["module_action_ring", "test_action_ring_persists_across_invocations"],
+	["module_action_ring", "test_action_ring_closes_when_target_freed"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

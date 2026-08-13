@@ -52,35 +52,23 @@ var popup_tweaks_container:
 # have been removed.
 var size_label_base := "Size"
 var count_label_base := "Count"
+
+const ModuleActionRingScript = preload("res://scripts/ui/module_action_ring.gd")
+
+
 func _open_action_ring(module: Node3D, designation: String) -> void:
 	_close_action_ring()
 	if tweak_canvas == null or module == null:
 		return
 
-	var ring = UIRadialMenu.new()
-	ring.target_node = module
-	ring.subject_label = designation
-	# TEXT LEGENDS, NOT ICONS, deliberately.
-	#
-	# The icons in scripts/ui_icons.gd carry their stroke colour baked into the
-	# SVG - rotate_right is cyan, close is red, and so on. draw_texture_rect's
-	# modulate MULTIPLIES, so there is no way to force a coloured icon to the
-	# ring's own tint; the first version put saturated cyan and red clip-art on
-	# a warm neutral dial and it fought the palette badly. Stencilled words are
-	# also simply more correct for this object: real equipment legends are
-	# words. A monochrome icon set would let icons back in here later.
+	var ring = ModuleActionRingScript.new()
 	ring.add_action("rotate", "Rotate", "", _module_can_rotate(module))
 	ring.add_action("mirror", "Mirror")
 	ring.add_action("arc", "Arc")
 	ring.add_action("discard", "Discard")
 	ring.action_invoked.connect(_on_ring_action)
 	tweak_canvas.add_child(ring)
-
-	var camera = lab.get_viewport().get_camera_3d()
-	var at = Vector2.ZERO
-	if camera and not camera.is_position_behind(module.global_position):
-		at = camera.unproject_position(module.global_position)
-	ring.open_at(at)
+	ring.open_for_module(module, designation)
 	_action_ring = ring
 
 
