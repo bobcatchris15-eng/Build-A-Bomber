@@ -70,6 +70,7 @@ const SUITE_FILES := {
 	"match_rule_set": preload("res://tests/test_match_rule_set.gd"),
 	"match_rule_set_integration": preload("res://tests/battle/test_match_rule_set_integration.gd"),
 	"semantic_zoom": preload("res://tests/test_semantic_zoom.gd"),
+	"command_card": preload("res://tests/test_command_card.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -411,6 +412,21 @@ const SUITE_ORDER := [
 	# after everything else means it cannot perturb the pinned navmesh order that
 	# the rest of SUITE_ORDER exists to protect.
 	["scene_loads", "test_every_screen_survives_ready"],
+
+	# Phase 8 command card and command bindings (Tactile Interface Programme
+	# Part 4). The X1 regression guard (test_command_card_lying_labels_are_gone)
+	# is the load-bearing one: the card used to claim A and S were the keys
+	# while the action table had them on F and G, and that lie is exactly
+	# what this entire phase exists to make impossible to reintroduce. The
+	# remaining suites pin Phase 8's invariants: registry-driven cells,
+	# 3x4 geometry, rebind refresh, the (row, col) uniqueness rule, and the
+	# X7 cursor change at attack-move arming.
+	["command_card", "test_command_card_lying_labels_are_gone"],
+	["command_card", "test_command_card_row_col_is_unique_per_entry"],
+	["command_card", "test_command_card_cells_are_data_driven"],
+	["command_card", "test_command_card_rebind_refreshes_label"],
+	["command_card", "test_command_card_geometry_is_3_by_4"],
+	["command_card", "test_attack_move_arming_changes_cursor"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist
