@@ -473,6 +473,12 @@ const SUITE_ORDER := [
 	["marking_menu", "test_marking_menu_hub_release_cancels"],
 	["marking_menu", "test_marking_menu_unbounded_sector_release_commits"],
 	["marking_menu", "test_marking_menu_short_stroke_cancels"],
+
+	# Phase 9 SelectionPanel (Tactile Interface Programme Part 4 Phase 9, D8, D15)
+	["selection_panel", "test_selection_panel_aggregates_rows_by_design"],
+	["selection_panel", "test_selection_panel_ctrl_shift_deselect_group"],
+	["selection_panel", "test_selection_panel_priority_order"],
+	["selection_panel", "test_selection_panel_thumbnail_cache"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist
