@@ -1,4 +1,3 @@
-class_name CommandRegistry
 extends Node
 # The single source of truth for what commands the command card, the
 # marking menu (Phase 7) and the tutorial may show.
