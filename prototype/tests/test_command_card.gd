@@ -41,11 +41,21 @@ func test_command_card_lying_labels_are_gone() -> bool:
 
 	for i in range(card._grid.get_child_count()):
 		var cell: Control = card._grid.get_child(i) as Control
-		var vbox: BoxContainer = cell.get_meta("vbox") as BoxContainer
-		var label: Label = vbox.get_node("Label") as Label
-		var key_label: Label = vbox.get_node("Key") as Label
-		var button: Button = cell.get_meta("button") as Button
-		for text in [label.text, key_label.text, button.tooltip_text]:
+		var key_label: Label = cell.get_node_or_null("Key") as Label
+		if key_label == null and cell.has_meta("vbox"):
+			var vbox = cell.get_meta("vbox")
+			if vbox is Node and vbox.has_node("Key"):
+				key_label = vbox.get_node("Key") as Label
+		var label_node = cell.get_node_or_null("Label")
+		var label_text = label_node.text if label_node is Label else ("" if not "legend" in cell else cell.legend)
+		var key_text = key_label.text if key_label != null else ""
+		var tooltip_text = cell.tooltip_text if "tooltip_text" in cell else ""
+		if cell.has_meta("button"):
+			var b = cell.get_meta("button")
+			if b is Button and b.tooltip_text != "":
+				tooltip_text = b.tooltip_text
+
+		for text in [label_text, key_text, tooltip_text]:
 			if text == null:
 				continue
 			if text.contains(" (A)") or text.contains(" (S)"):
@@ -127,9 +137,12 @@ func test_command_card_cells_are_data_driven() -> bool:
 	for i in range(positions.size()):
 		var pos: Vector2i = positions[i]
 		var cell: Control = card._grid.get_child(i) as Control
-		var vbox: BoxContainer = cell.get_meta("vbox") as BoxContainer
-		var key_label: Label = vbox.get_node("Key") as Label
-		var button: Button = cell.get_meta("button") as Button
+		var key_label: Label = cell.get_node_or_null("Key") as Label
+		if key_label == null and cell.has_meta("vbox"):
+			var vbox = cell.get_meta("vbox")
+			if vbox is Node and vbox.has_node("Key"):
+				key_label = vbox.get_node("Key") as Label
+		var button: Button = cell.get_meta("button") as Button if cell.has_meta("button") else cell as Button
 		if not by_pos.has(pos):
 			print("  [FAIL] cell (", pos.x, ",", pos.y, ") has no registry entry backing it")
 			card.queue_free()
@@ -139,7 +152,7 @@ func test_command_card_cells_are_data_driven() -> bool:
 		var action: String = String(entry["action"])
 		if action == "":
 			# Reserved row-3 placeholder: no key expected.
-			if key_label.text != "":
+			if key_label != null and key_label.text != "":
 				print("  [FAIL] placeholder cell (", pos.x, ",", pos.y,
 					") should have empty key label, got '", key_label.text, "'")
 				card.queue_free()
@@ -147,15 +160,17 @@ func test_command_card_cells_are_data_driven() -> bool:
 				return false
 			continue
 		var expected_key: String = input_svc.binding_label(action)
-		if key_label.text != expected_key:
+		var actual_key: String = key_label.text if key_label != null else ""
+		if actual_key != expected_key:
 			print("  [FAIL] cell (", pos.x, ",", pos.y, ") for action '", action,
-				"' shows key '", key_label.text, "' but InputService says '", expected_key, "'")
+				"' shows key '", actual_key, "' but InputService says '", expected_key, "'")
 			card.queue_free()
 			await tree.process_frame
 			return false
 		var expected_tooltip: String = "%s (%s)" % [String(entry["label"]), input_svc.binding_label_all(action)]
-		if button.tooltip_text != expected_tooltip:
-			print("  [FAIL] cell (", pos.x, ",", pos.y, ") tooltip '", button.tooltip_text,
+		var actual_tooltip: String = button.tooltip_text if button != null else cell.tooltip_text
+		if actual_tooltip != expected_tooltip:
+			print("  [FAIL] cell (", pos.x, ",", pos.y, ") tooltip '", actual_tooltip,
 				"' does not match '", expected_tooltip, "'")
 			card.queue_free()
 			await tree.process_frame
@@ -197,8 +212,11 @@ func test_command_card_rebind_refreshes_label() -> bool:
 		return false
 	var cell_index := CommandRegistryScript.all_positions().find(attack_pos)
 	var cell: Control = card._grid.get_child(cell_index) as Control
-	var vbox: BoxContainer = cell.get_meta("vbox") as BoxContainer
-	var key_label: Label = vbox.get_node("Key") as Label
+	var key_label: Label = cell.get_node_or_null("Key") as Label
+	if key_label == null and cell.has_meta("vbox"):
+		var vbox = cell.get_meta("vbox")
+		if vbox is Node and vbox.has_node("Key"):
+			key_label = vbox.get_node("Key") as Label
 
 	# Pre-rebind: F is the canonical default.
 	if key_label.text != "F":

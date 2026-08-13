@@ -2,16 +2,29 @@ class_name CommandCard
 extends MarginContainer
 # A positional command surface for the current selection.
 #
-# Each cell is data-driven from CommandRegistry (3x4 = 12 cells, D6).
-# The hotkey text on the cell and the binding in the tooltip are read
+# Each cell is a real StampedButton on the shared UIPropStage (D2,
+# D6): the 3D push-button mesh is the visible face, the stamped-enamel
+# legend carries the command name, and an icon + key overlay sit on
+# top of the mesh in 2D space. The cell's hotkey text and tooltip read
 # from InputService.binding_label(action) at render time, so a rebind
 # reflects on the card without a second source of truth. The card
 # subscribes to InputService.bindings_changed to refresh.
 #
-# STAGE WIRING DEFERRAL. The Tactile Interface Programme Part 4, Phase 8
-# intends the cells to be StampedButtons on a shared UIPropStage (Phase 1).
-# Until that lands, plain Button controls are used here. The header on
-# this file from the 3x3 rewrite had this note; it remains true at 3x4.
+# THE PHASE 1+8 CROSS. The earlier 3x3 cell was a flat PanelContainer
+# with a Button on top and a VBox of icon/label/key. Phase 1's
+# UIPropStage made the 3D push-button practical without per-control
+# SubViewports (X2), so the cells here are now StampedButton (a
+# Button that registers with the stage on _ready). The Button's
+# pressed signal replaces the manual Button.pressed dance the old
+# PanelContainer+Button cell needed.
+#
+# STAMPEDBUTTON + 2D OVERLAYS. The StampedLabel inside StampedButton
+# is at FULL_RECT and shows the command name in stamped-enamel. The
+# icon and key are added as child Controls on top of the label,
+# anchored to top-center and bottom-center respectively. The StampedLabel
+# is transparent between the glyphs, so the 3D mesh shows through
+# where the icon and key don't cover it. Z-order: mesh (stage) →
+# icon (top) → key (bottom) → StampedLabel (FULL_RECT, text only).
 #
 # WHY THIS REWRITE EXISTED. Before it, the labels were HARDCODED strings
 # like "Attack Move (A)" and "Stop (S)" - the card claimed A and S were
@@ -23,6 +36,7 @@ extends MarginContainer
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
+const StampedButtonScript = preload("res://scripts/ui_stamped_button.gd")
 const InputServiceScript = preload("res://scripts/core/input_service.gd")
 const UIIconsScript = preload("res://scripts/ui_icons.gd")
 const CommandRegistryScript = preload("res://scripts/battle/orders/command_registry.gd")
@@ -58,29 +72,30 @@ func _init() -> void:
 func setup(director: Node) -> void:
 	_director = director
 	_input_service = get_node_or_null("/root/InputService")
-	_registry = get_node_or_null("/root/CommandRegistry")
-	if _input_service == null:
-		_input_service = _resolve_input_service()
-	if _registry == null:
-		_registry = _resolve_registry()
 	if _input_service != null and not _input_service.bindings_changed.is_connected(_refresh_bindings):
 		_input_service.bindings_changed.connect(_refresh_bindings)
+
+	_registry = _resolve_registry() as CommandRegistryScript
 	if _registry != null and not _registry.registry_changed.is_connected(_refresh_registry):
 		_registry.registry_changed.connect(_refresh_registry)
-	_director.selection.selection_changed.connect(_on_selection_changed)
-	_on_selection_changed(_director.selection.selected)
+
+	# Listen to selection changes from the match director's selection service.
+	if _director != null and _director.selection != null:
+		var sel = _director.selection
+		if sel.has_signal("selection_changed") and not sel.selection_changed.is_connected(_on_selection_changed):
+			sel.selection_changed.connect(_on_selection_changed)
+
+	_refresh_cells()
 
 
 func _ready() -> void:
-	# Reconnect if the autoloads showed up after setup(). Also picks up
-	# bindings saved on a previous launch (saved overrides emit on rebind,
-	# not on load, so we render once unconditionally here).
+	# Late-bind InputService if setup() ran before the autoload was in tree.
 	if _input_service == null:
 		_input_service = _resolve_input_service()
 		if _input_service != null and not _input_service.bindings_changed.is_connected(_refresh_bindings):
 			_input_service.bindings_changed.connect(_refresh_bindings)
 	if _registry == null:
-		_registry = _resolve_registry()
+		_registry = _resolve_registry() as CommandRegistryScript
 		if _registry != null and not _registry.registry_changed.is_connected(_refresh_registry):
 			_registry.registry_changed.connect(_refresh_registry)
 	for child in _grid.get_children():
@@ -110,46 +125,56 @@ func _resolve_registry() -> Node:
 	return reg
 
 
+# A StampedButton cell. The 3D push-button mesh comes from the
+# shared UIPropStage; the stamped-enamel legend (StampedLabel child)
+# shows the command name; the icon and key are 2D overlays on top.
+#
+# Anchors on the overlays: icon at top-center (24x24, full cell width
+# to keep the visual margin), key at bottom-center (small text). The
+# StampedLabel is at FULL_RECT and only draws text, so the mesh shows
+# through the gaps.
 func _build_cell() -> Control:
-	# A VBox with the icon on top, the label, then the key. Plain Button
-	# cannot hold a child + a text label cleanly, so this is a PanelContainer
-	# with a real Button that does the click work sitting on top.
-	var cell := PanelContainer.new()
+	var cell := StampedButtonScript.new()
+	# Override the 132x44 minimum: command cells are 64x64. The
+	# StampedButton's natural_size is calibrated for 132x44, so the
+	# mesh is stretched slightly at this aspect ratio; see the file
+	# header. A future "command_button" prop_id with a square
+	# natural_size would make this cleaner, deferred to Phase 2.
 	cell.custom_minimum_size = Vector2(64, 64)
+	cell.focus_mode = Control.FOCUS_ALL
 
-	var vbox := VBoxContainer.new()
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	cell.add_child(vbox)
-
+	# Icon at the top. Anchored to top-center, 24x24. The cell is 64
+	# wide so an offset of 20 from the left puts the icon's center at
+	# the cell's center. MOUSE_FILTER_IGNORE so the click falls through
+	# to the StampedButton underneath.
 	var icon := TextureRect.new()
 	icon.name = "Icon"
+	icon.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	icon.offset_top = 4
+	icon.offset_bottom = 28
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.custom_minimum_size = Vector2(24, 24)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	vbox.add_child(icon)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cell.add_child(icon)
 
-	var label := Label.new()
-	label.name = "Label"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
-	vbox.add_child(label)
-
+	# Key at the bottom. Anchored to bottom-wide, with a fixed height
+	# for the text. TEXT_SECONDARY color so it reads as metadata, not
+	# the primary label. MOUSE_FILTER_IGNORE for the same reason.
 	var key_label := Label.new()
 	key_label.name = "Key"
+	key_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	key_label.offset_top = -16
+	key_label.offset_bottom = -2
 	key_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	key_label.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
 	key_label.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
-	vbox.add_child(key_label)
+	key_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	cell.add_child(key_label)
 
-	# The Button sits on top and is what receives the click. The VBox is
-	# mouse_filter=PASS so the click falls through.
-	var button := Button.new()
-	button.name = "Press"
-	button.flat = true
-	cell.add_child(button)
-	cell.set_meta("button", button)
-	cell.set_meta("vbox", vbox)
+	cell.set_meta("icon", icon)
+	cell.set_meta("key_label", key_label)
+	cell.set_meta("button", cell)
+	cell.set_meta("vbox", cell)
 	return cell
 
 
@@ -198,37 +223,41 @@ func _apply_cell(cell: Control, entry: Dictionary) -> void:
 	var icon_name: String = String(entry.get("icon", ""))
 	var enabled: bool = bool(entry.get("enabled", false))
 
-	var vbox: BoxContainer = cell.get_meta("vbox") as BoxContainer
-	var label: Label = vbox.get_node("Label") as Label
-	var key_label: Label = vbox.get_node("Key") as Label
-	var icon: TextureRect = vbox.get_node("Icon") as TextureRect
-	var button: Button = cell.get_meta("button") as Button
+	var icon: TextureRect = cell.get_meta("icon") as TextureRect
+	var key_label: Label = cell.get_meta("key_label") as Label
 
-	label.text = label_text
+	# The StampedButton's `legend` setter pushes the string into its
+	# own StampedLabel child. Setting the property here is the only
+	# path that avoids a duplicate "printed on" copy in the theme's
+	# stencil face (the trap the StampedButton header warns about).
+	if "legend" in cell:
+		cell.legend = label_text
+
 	icon.texture = UIIconsScript.get_icon(icon_name) if icon_name != "" else null
 	icon.visible = icon.texture != null
 
 	if action == "":
 		# Reserved placeholder. No key, no tooltip, no click.
 		key_label.text = ""
-		button.tooltip_text = ""
-		button.disabled = true
+		cell.tooltip_text = ""
+		cell.set("disabled", true)
 		cell.modulate = Color(1, 1, 1, 0.4)
-		if button.pressed.is_connected(_on_btn_pressed):
-			button.pressed.disconnect(_on_btn_pressed)
+		if cell.has_signal("pressed") and cell.pressed.is_connected(_on_btn_pressed):
+			cell.pressed.disconnect(_on_btn_pressed)
 		return
 
 	key_label.text = _binding_label_for(action)
-	button.tooltip_text = "%s (%s)" % [label_text, _binding_label_all_for(action)]
-	button.disabled = not enabled
+	cell.tooltip_text = "%s (%s)" % [label_text, _binding_label_all_for(action)]
+	cell.set("disabled", not enabled)
 	cell.modulate = Color(1, 1, 1, 1) if enabled else Color(1, 1, 1, 0.55)
 
 	# Re-wire pressed so a selection that swaps a cell's action (it cannot
 	# today, but CommandRegistry is the layer that decides) does not leave
 	# a stale binding behind.
-	if button.pressed.is_connected(_on_btn_pressed):
-		button.pressed.disconnect(_on_btn_pressed)
-	button.pressed.connect(_on_btn_pressed.bind(action))
+	if cell.has_signal("pressed"):
+		if cell.pressed.is_connected(_on_btn_pressed):
+			cell.pressed.disconnect(_on_btn_pressed)
+		cell.pressed.connect(_on_btn_pressed.bind(action))
 
 
 func _binding_label_for(action: String) -> String:
