@@ -170,11 +170,18 @@ Not in the original plan, but the substance of the AAA polish pass.
 
 ---
 
-## Priority 7 — Outstanding
+---
 
-1. **Restructure the telemetry rail into toolbox tiers.** The `DOCUMENT` tier was added *above* the existing rail rather than re-homing it, because the readouts are positioned by index (`move_child(x, at + n)`) and re-parenting would silently reorder them. Needs its own verification.
-2. **Promote `tools/probe_scene_loads.gd` into `SUITE_ORDER`.** No suite instantiates `MainLab.tscn`, which is why a crash on the Design Lab's primary load path was invisible to an otherwise-green 211-suite run. A smoke test that every screen survives `_ready()` would have caught it in seconds. `SUITE_ORDER` is order-sensitive, so this is its own change.
-3. **`ui_audit.gd` does not enforce the no-emoji rule**, despite `CLAUDE.md` having claimed it did. It checks overflow, offscreen controls, theme validity, icons and cursors. The rule stands but is unenforced.
+## Priority 7 — Tactile Interface Programme (Phases 1–12) — **DONE**
+
+1. **L0 Workbench Layer (Phase 4):** 5 desk backdrop materials (`cutting_mat`, `cardboard`, `kraft`, `cork`, `chipboard`) generated and registered.
+2. **UIPropStage & StampedButton (Phases 1 & 8):** Single shared SubViewport 3D hardware stage powering physical stamped buttons and switches.
+3. **Procedural Prop Textures & Depth/Wear (Phases 2 & 3):** Deterministic 256x256 albedo/ORM/height generation (`tools/generate_ui_props.py`), PCG3D integer hash swap in shaders, Parallax Occlusion Mapping (POM) raymarching with tangent-space normals, and world-normal equipment dust.
+4. **Lab Gizmo & Planar Handles (Phase 5):** Hull excluded from gizmo manipulation (`D10`), dynamic face-on planar handles (`PlanarXY`, `PlanarXZ`, `PlanarYZ`) with angle culling (`D12`), and precision modifier (5x reduction).
+5. **Machined Radials (Phases 6 & 7):** Shared `RingDraw` rendering library, silhouette-sized `ModuleActionRing` (`D13`) framing 3D modules, and transient stroke-driven `MarkingMenu` (`D9`, `D14`) with fast-flick and slow-hold paths.
+6. **Command Card & Selection Panels (Phases 8, 9, 10):** 3x4 positional command card backed by `CommandRegistry`, `SelectionPanel` and `ModuleSelectionPanel` with design aggregation and RTS sub-group grammar.
+7. **Unified Pointer & Camera Feel (Phase 11):** Monotonic `PointerGain` transfer function unified across `DesignerCamera` orbit and `RTSCamera` middle-drag pan.
+8. **Enforcement Audits (Phase 12):** `UIAudit` extended with no-emoji verification and keybinding collision assertions; scene load probing integrated into `run_tests.gd`.
 
 ---
 

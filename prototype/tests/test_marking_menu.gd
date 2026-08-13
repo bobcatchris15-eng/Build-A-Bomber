@@ -18,8 +18,8 @@ func test_marking_menu_fast_flick_commits_without_drawing() -> bool:
 		{"id": "west", "label": "WEST", "enabled": true},
 	]
 
-	var committed := ""
-	menu.action_committed.connect(func(id: String): committed = id)
+	var res := {"committed": ""}
+	menu.action_committed.connect(func(id: String): res["committed"] = id)
 
 	var origin := Vector2(200, 200)
 	menu.start_stroke(origin, actions, "NAV")
@@ -35,8 +35,8 @@ func test_marking_menu_fast_flick_commits_without_drawing() -> bool:
 
 	menu.end_stroke(flick_pos)
 
-	if committed != "east":
-		print("  [FAIL] Fast flick (+X) did not commit 'east', got: '%s'" % committed)
+	if res["committed"] != "east":
+		print("  [FAIL] Fast flick (+X) did not commit 'east', got: '%s'" % res["committed"])
 		return false
 
 	print("  [PASS] Fast flick committed 'east' without ever setting visible=true.")
@@ -73,10 +73,9 @@ func test_marking_menu_hub_release_cancels() -> bool:
 	root.add_child(menu)
 
 	var actions := [{"id": "cmd", "label": "CMD"}]
-	var committed := ""
-	var dismissed := false
-	menu.action_committed.connect(func(id: String): committed = id)
-	menu.dismissed.connect(func(): dismissed = true)
+	var res := {"committed": "", "dismissed": false}
+	menu.action_committed.connect(func(id: String): res["committed"] = id)
+	menu.dismissed.connect(func(): res["dismissed"] = true)
 
 	var origin := Vector2(200, 200)
 	menu.start_stroke(origin, actions)
@@ -86,8 +85,8 @@ func test_marking_menu_hub_release_cancels() -> bool:
 	# Release inside hub (< 30 px)
 	menu.end_stroke(origin + Vector2(10, 10))
 
-	if committed != "" or not dismissed:
-		print("  [FAIL] Hub release committed '%s' instead of cancelling" % committed)
+	if res["committed"] != "" or not res["dismissed"]:
+		print("  [FAIL] Hub release committed '%s' instead of cancelling" % res["committed"])
 		return false
 
 	print("  [PASS] Releasing inside the hub correctly cancels the action.")
@@ -106,8 +105,8 @@ func test_marking_menu_unbounded_sector_release_commits() -> bool:
 		{"id": "west", "label": "WEST", "enabled": true},
 	]
 
-	var committed := ""
-	menu.action_committed.connect(func(id: String): committed = id)
+	var res := {"committed": ""}
+	menu.action_committed.connect(func(id: String): res["committed"] = id)
 
 	var origin := Vector2(200, 200)
 	menu.start_stroke(origin, actions)
@@ -117,8 +116,8 @@ func test_marking_menu_unbounded_sector_release_commits() -> bool:
 	# Release far to the South (+Y, 300px out, far beyond outer radius)
 	menu.end_stroke(origin + Vector2(0, 300))
 
-	if committed != "south":
-		print("  [FAIL] Unbounded sector release did not commit 'south', got: '%s'" % committed)
+	if res["committed"] != "south":
+		print("  [FAIL] Unbounded sector release did not commit 'south', got: '%s'" % res["committed"])
 		return false
 
 	print("  [PASS] Releasing beyond outer radius commits the angular sector.")
@@ -131,18 +130,17 @@ func test_marking_menu_short_stroke_cancels() -> bool:
 	root.add_child(menu)
 
 	var actions := [{"id": "act", "label": "ACTION"}]
-	var committed := ""
-	var dismissed := false
-	menu.action_committed.connect(func(id: String): committed = id)
-	menu.dismissed.connect(func(): dismissed = true)
+	var res := {"committed": "", "dismissed": false}
+	menu.action_committed.connect(func(id: String): res["committed"] = id)
+	menu.dismissed.connect(func(): res["dismissed"] = true)
 
 	var origin := Vector2(200, 200)
 	menu.start_stroke(origin, actions)
 	# Short stroke: 8px (< 24px) released at 100ms
 	menu.end_stroke(origin + Vector2(8, 0))
 
-	if committed != "" or not dismissed:
-		print("  [FAIL] Short stroke should cancel without committing, got committed: '%s'" % committed)
+	if res["committed"] != "" or not res["dismissed"]:
+		print("  [FAIL] Short stroke should cancel without committing, got committed: '%s'" % res["committed"])
 		return false
 
 	print("  [PASS] Short stroke (< 24px) cancels safely.")

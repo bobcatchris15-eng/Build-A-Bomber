@@ -1752,7 +1752,7 @@ func test_hull_collider_rebuilt_on_scale() -> bool:
 	hull_node.add_child(hull_gizmo)
 	await tree.process_frame
 	# Hull gizmo queues free immediately upon attachment
-	if hull_gizmo.is_queued_for_deletion() or not hull_gizmo.visible:
+	if not is_instance_valid(hull_gizmo) or hull_gizmo.is_queued_for_deletion() or not hull_gizmo.visible:
 		print("  [PASS] Gizmo refused attachment to Hull (D10).")
 	else:
 		print("  [FAIL] Gizmo should refuse attachment to Hull.")

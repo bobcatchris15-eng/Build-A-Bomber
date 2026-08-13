@@ -82,8 +82,8 @@ func test_action_ring_persists_across_invocations() -> bool:
 	root.add_child(mod)
 	ring.open_for_module(mod, "TURRET")
 
-	var invoked_action := ""
-	ring.action_invoked.connect(func(id: String): invoked_action = id)
+	var res := {"action": ""}
+	ring.action_invoked.connect(func(id: String): res["action"] = id)
 
 	# Simulate clicking action 0
 	var mb = InputEventMouseButton.new()
@@ -96,8 +96,8 @@ func test_action_ring_persists_across_invocations() -> bool:
 	ring.add_action("mirror", "Mirror")
 	ring._gui_input(mb)
 
-	if invoked_action != "rotate":
-		print("  [FAIL] Action 'rotate' was not invoked, got: '%s'" % invoked_action)
+	if res["action"] != "rotate":
+		print("  [FAIL] Action 'rotate' was not invoked, got: '%s'" % res["action"])
 		ring.queue_free()
 		mod.queue_free()
 		return false

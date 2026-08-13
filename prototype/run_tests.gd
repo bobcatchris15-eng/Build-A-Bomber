@@ -72,6 +72,9 @@ const SUITE_FILES := {
 	"semantic_zoom": preload("res://tests/test_semantic_zoom.gd"),
 	"command_card": preload("res://tests/test_command_card.gd"),
 	"ui_prop_stage": preload("res://tests/test_ui_prop_stage.gd"),
+	"module_action_ring": preload("res://tests/test_module_action_ring.gd"),
+	"marking_menu": preload("res://tests/test_marking_menu.gd"),
+	"selection_panel": preload("res://tests/test_selection_panel.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -537,9 +540,19 @@ func _init():
 	var _total_suites: int = 0
 
 	for entry in SUITE_ORDER:
+		if not instances.has(entry[0]):
+			push_error("Missing suite file registration for key '%s'" % entry[0])
+			success = false
+			_failed.append("%s (missing key in SUITE_FILES)" % entry[0])
+			continue
 		var inst = instances[entry[0]]
 		var suite_name: String = entry[1]
 		_total_suites += 1
+		if not inst.has_method(suite_name):
+			push_error("Suite method '%s' not found on '%s'" % [suite_name, entry[0]])
+			success = false
+			_failed.append("%s:%s (method missing)" % [entry[0], suite_name])
+			continue
 		if not await _run_suite(Callable(inst, suite_name), suite_name):
 			success = false
 			_failed.append(suite_name)

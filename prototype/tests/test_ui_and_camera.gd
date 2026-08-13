@@ -806,6 +806,25 @@ func test_probe_scene_loads() -> bool:
 	return true
 
 
+# Tactile Interface Programme Phase 11 (D17).
+# Precision mode applies uniform 5x (0.2x) precision scaling.
+func test_pointer_gain_precision_mode() -> bool:
+	print("Running Test Suite: Pointer Gain - Precision Mode Scaling (Phase 11)...")
+	var PointerGainScript = preload("res://scripts/core/pointer_gain.gd")
+
+	var v_in := Vector2(25.0, 10.0)
+	var standard: Vector2 = PointerGainScript.compute_scaled_delta(v_in, 1.0, false)
+	var precision: Vector2 = PointerGainScript.compute_scaled_delta(v_in, 1.0, true)
+
+	var ratio: float = precision.length() / maxf(standard.length(), 0.0001)
+	if absf(ratio - 0.20) > 0.001:
+		print("  [FAIL] Precision mode ratio is %.4f, expected 0.20 (5x reduction)" % ratio)
+		return false
+
+	print("  [PASS] Precision mode applies exact 5x reduction ratio (0.20).")
+	return true
+
+
 
 
 

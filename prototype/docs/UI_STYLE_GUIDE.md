@@ -174,10 +174,29 @@ Surfaces sit at one of four heights. Before this existed nothing in the interfac
 
 | Tier | Blur | Offset | Used by |
 |---|---|---|---|
-| `flush` | 0 | 0 | `HUDPanel`, `InsetPanel` — recessed surfaces |
-| `raised` | 3 px | 1 px | `CardPanel`, `DockPanel`, `HeaderPanel`, `DockRail`, buttons |
-| `floating` | 8 px | 3 px | `FlyoutPanel`, `CalloutPanel`, `TooltipPanel` |
-| `modal` | 18 px | 6 px | dialogs over a scrim |
+| `workbench` (L0) | 0 | 0 | `cutting_mat`, `cardboard`, `kraft`, `cork`, `chipboard` — backdrop plane |
+| `flush` (L1) | 0 | 0 | `HUDPanel`, `InsetPanel` — recessed surfaces |
+| `raised` (L2) | 3 px | 1 px | `CardPanel`, `DockPanel`, `HeaderPanel`, `DockRail`, buttons |
+| `floating` (L3) | 8 px | 3 px | `FlyoutPanel`, `CalloutPanel`, `TooltipPanel` |
+| `modal` (L4) | 18 px | 6 px | dialogs over a scrim |
+
+---
+
+## 6b · Tactile Hardware & Radial Controls
+
+### L0 Workbench Layer
+The base layer (L0) establishes the physical desk surface behind schematic viewports and lab staging. Five materials are available: `cutting_mat` (green self-healing vinyl with grid), `cardboard`, `kraft`, `cork`, and `chipboard`. L0 materials are background planes only and must never be applied to a control descended from a panel.
+
+### UIPropStage & 3D Stamped Hardware
+Interactive buttons and switches can be physical 3D hardware rendered into a single shared `UIPropStage` SubViewport rather than flat 2D textures:
+- **`StampedButton`**: 2D control that binds a 3D prop mesh (e.g. `push_button`, `toggle`, `rotary`, `rocker`, `knurled_dial`, `dzus_fastener`, `latch`) on the screen's `UIPropStage`.
+- **Procedural PBR & POM**: Shaders utilize Parallax Occlusion Mapping (POM) raymarching with height maps, ORM channels, and equipment dust accumulation.
+- **Single SubViewport invariant**: Screens with multiple stamped controls share one viewport, updating only on dirty state changes.
+
+### Machined Radials & Gestures
+- **`RingDraw`**: Shared drawing library for machined dials, tick marks, bezels, and legend plates.
+- **`ModuleActionRing`**: Persistent radial ring centered on 3D modules with silhouette-sized inner clearance (`D13`) that never obscures the underlying module mesh.
+- **`MarkingMenu`**: Transient stroke-driven marking menu (`D9`, `D14`). Quick strokes (< 200 ms, > 24 px) commit immediately with zero visual pop; slow holds (>= 200 ms) reveal the dial. Releasing outside the outer radius commits the unbounded sector.
 
 Three rules, each of which cost something to learn:
 
