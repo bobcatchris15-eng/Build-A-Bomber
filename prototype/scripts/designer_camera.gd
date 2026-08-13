@@ -8,38 +8,22 @@ extends Camera3D
 
 var _pivot: Node3D
 var _distance: float = 15.0
-var _cam_attributes: CameraAttributesPractical = null
 var zoom_service: SemanticZoomService = SemanticZoomService.new()
 
 func _ready():
 	_pivot = Node3D.new()
 	get_parent().add_child.call_deferred(_pivot)
 	await get_tree().process_frame
-	
+
 	var original_pos = position
 	get_parent().remove_child(self)
 	_pivot.add_child(self)
-	
+
 	position = Vector3(0, 0, _distance)
 	look_at(_pivot.position)
-	_setup_tilt_shift_dof()
-
-func _setup_tilt_shift_dof():
-	_cam_attributes = CameraAttributesPractical.new()
-	_cam_attributes.dof_blur_far_enabled = true
-	_cam_attributes.dof_blur_far_distance = _distance + 4.0
-	_cam_attributes.dof_blur_far_transition = 6.0
-	_cam_attributes.dof_blur_near_enabled = true
-	_cam_attributes.dof_blur_near_distance = max(1.0, _distance - 4.0)
-	_cam_attributes.dof_blur_near_transition = 4.0
-	_cam_attributes.dof_blur_amount = 0.08 # Miniature scale tilt-shift lens blur
-	attributes = _cam_attributes
 
 func _process(delta):
 	position.z = lerp(position.z, _distance, 10.0 * delta)
-	if _cam_attributes:
-		_cam_attributes.dof_blur_far_distance = position.z + 4.0
-		_cam_attributes.dof_blur_near_distance = max(1.0, position.z - 4.0)
 	if zoom_service:
 		zoom_service.update_distance(position.z)
 
