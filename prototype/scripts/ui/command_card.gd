@@ -2,45 +2,36 @@ class_name CommandCard
 extends MarginContainer
 # A positional command surface for the current selection.
 #
-# Each cell is data-driven: {action, label, icon}. The hotkey text on the cell
-# and the binding in the tooltip are read from InputService.binding_label(action)
-# at render time, so a rebind reflects on the card without a second source of
-# truth. The card subscribes to InputService.bindings_changed to refresh.
+# Each cell is data-driven from CommandRegistry (3x4 = 12 cells, D6).
+# The hotkey text on the cell and the binding in the tooltip are read
+# from InputService.binding_label(action) at render time, so a rebind
+# reflects on the card without a second source of truth. The card
+# subscribes to InputService.bindings_changed to refresh.
 #
 # STAGE WIRING DEFERRAL. The Tactile Interface Programme Part 4, Phase 8
 # intends the cells to be StampedButtons on a shared UIPropStage (Phase 1).
-# Until that lands, plain Button controls are used here. The 3x3 geometry is
-# the pre-CommandRegistry shape; Phase 8's commit chain restructures it to
-# 3x4 = 12 cells (D6) sourced from CommandRegistry.
+# Until that lands, plain Button controls are used here. The header on
+# this file from the 3x3 rewrite had this note; it remains true at 3x4.
 #
-# WHY THIS REWRITE EXISTED. Before it, the labels were HARDCODED strings like
-# "Attack Move (A)" and "Stop (S)" - the card claimed A and S were the keys
-# while the camera owned them and the InputService canonical table put
-# attack-move and stop on F and G (the X1 fix). The card was lying, and the
-# lying was specifically the part a player could see. Reading the binding
-# from InputService here is the only way that can never happen again: the
-# card and the input table are the same source.
+# WHY THIS REWRITE EXISTED. Before it, the labels were HARDCODED strings
+# like "Attack Move (A)" and "Stop (S)" - the card claimed A and S were
+# the keys while the camera owned them and the InputService canonical
+# table put attack-move and stop on F and G (the X1 fix). The card was
+# lying, and the lying was specifically the part a player could see.
+# Reading the binding from InputService here is the only way that can
+# never happen again: the card and the input table are the same source.
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const InputServiceScript = preload("res://scripts/core/input_service.gd")
 const UIIconsScript = preload("res://scripts/ui_icons.gd")
-
-# Pre-CommandRegistry hand-authored set. The 3x3 grid is sized for nine cells;
-# only the five below are currently surfaced. Commit 2 replaces this with a
-# CommandRegistry-backed, 3x4 = 12-cell set.
-const _CELLS: Array = [
-	{"action": "cmd_attack_move", "label": "Attack-move", "icon": "cmd_attack_move"},
-	{"action": "cmd_stop", "label": "Stop", "icon": "cmd_stop"},
-	{"action": "cmd_hold", "label": "Hold", "icon": "cmd_hold"},
-	{"action": "cmd_stance_aggressive", "label": "Aggressive", "icon": "cmd_stance_aggressive"},
-	{"action": "cmd_stance_return_fire", "label": "Return Fire", "icon": "cmd_stance_return_fire"},
-]
+const CommandRegistryScript = preload("res://scripts/battle/orders/command_registry.gd")
 
 var _grid: GridContainer
 var _director: Node
 var _input_service: Node = null
-var _cells: Array = _CELLS
+var _registry: CommandRegistryScript = null
+var _cells: Array[Dictionary] = []  # one entry per grid child, in physical order
 
 
 func _init() -> void:
@@ -50,48 +41,79 @@ func _init() -> void:
 	add_child(panel)
 
 	_grid = GridContainer.new()
-	_grid.columns = 3
+	_grid.columns = CommandRegistryScript.COLUMNS
 	_grid.add_theme_constant_override("h_separation", Tokens.SPACE_SM)
 	_grid.add_theme_constant_override("v_separation", Tokens.SPACE_SM)
 	panel.add_child(_grid)
 
-	# Build one Button per cell up front. They are re-rendered in
-	# _render_selection() so the same slot can host different actions across
-	# selection profiles without the grid's child count changing.
-	for i in range(_cells.size()):
-		_grid.add_child(_build_cell(i))
+	# Build the full 3x4 cell set up front. Row 3 cells with action="" in
+	# the registry are rendered as disabled placeholders rather than gaps,
+	# because positional binding only pays off when the cell for a command
+	# is the same cell every time.
+	var positions: Array = CommandRegistryScript.all_positions()
+	for _pos in positions:
+		_grid.add_child(_build_cell())
 
 
 func setup(director: Node) -> void:
 	_director = director
 	_input_service = get_node_or_null("/root/InputService")
-	if _input_service != null:
-		# Refresh the card on rebind so a player who moves a key sees the new
-		# one on the card without restarting the match. Also wired in _ready
-		# because setup() may be called before the autoload is present in
-		# some test harnesses.
+	_registry = get_node_or_null("/root/CommandRegistry")
+	if _input_service == null:
+		_input_service = _resolve_input_service()
+	if _registry == null:
+		_registry = _resolve_registry()
+	if _input_service != null and not _input_service.bindings_changed.is_connected(_refresh_bindings):
 		_input_service.bindings_changed.connect(_refresh_bindings)
+	if _registry != null and not _registry.registry_changed.is_connected(_refresh_registry):
+		_registry.registry_changed.connect(_refresh_registry)
 	_director.selection.selection_changed.connect(_on_selection_changed)
 	_on_selection_changed(_director.selection.selected)
 
 
 func _ready() -> void:
-	# Reconnect if the autoload showed up after setup(). Also picks up bindings
-	# saved on a previous launch (saved overrides emit on rebind, not on load,
-	# so we render once unconditionally here).
+	# Reconnect if the autoloads showed up after setup(). Also picks up
+	# bindings saved on a previous launch (saved overrides emit on rebind,
+	# not on load, so we render once unconditionally here).
 	if _input_service == null:
-		_input_service = get_node_or_null("/root/InputService")
+		_input_service = _resolve_input_service()
 		if _input_service != null and not _input_service.bindings_changed.is_connected(_refresh_bindings):
 			_input_service.bindings_changed.connect(_refresh_bindings)
-	for i in range(_cells.size()):
-		UIFeedbackScript.wire(_grid.get_child(i) as Control)
+	if _registry == null:
+		_registry = _resolve_registry()
+		if _registry != null and not _registry.registry_changed.is_connected(_refresh_registry):
+			_registry.registry_changed.connect(_refresh_registry)
+	for child in _grid.get_children():
+		UIFeedbackScript.wire(child as Control)
 	_refresh_bindings("")
 
 
-func _build_cell(index: int) -> Control:
+# The two services we depend on. In a normal game they are autoloads; in
+# tests they may not be, in which case we instantiate them locally and
+# hold them for the lifetime of this card. The local instances are
+# discarded on free() — they are not singletons.
+func _resolve_input_service() -> Node:
+	var svc := get_node_or_null("/root/InputService")
+	if svc != null:
+		return svc
+	var s = InputServiceScript.new()
+	add_child(s)
+	return s
+
+
+func _resolve_registry() -> Node:
+	var r := get_node_or_null("/root/CommandRegistry")
+	if r != null:
+		return r
+	var reg = CommandRegistryScript.new()
+	add_child(reg)
+	return reg
+
+
+func _build_cell() -> Control:
 	# A VBox with the icon on top, the label, then the key. Plain Button
-	# cannot hold a child + a text label cleanly, so this is a Control with a
-	# real Button that does the click work.
+	# cannot hold a child + a text label cleanly, so this is a PanelContainer
+	# with a real Button that does the click work sitting on top.
 	var cell := PanelContainer.new()
 	cell.custom_minimum_size = Vector2(64, 64)
 
@@ -120,8 +142,8 @@ func _build_cell(index: int) -> Control:
 	key_label.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
 	vbox.add_child(key_label)
 
-	# The Button sits underneath the VBox and is what receives the click. The
-	# VBox is mouse_filter=PASS so the click falls through.
+	# The Button sits on top and is what receives the click. The VBox is
+	# mouse_filter=PASS so the click falls through.
 	var button := Button.new()
 	button.name = "Press"
 	button.flat = true
@@ -132,29 +154,49 @@ func _build_cell(index: int) -> Control:
 
 
 func _on_selection_changed(_selected: Array) -> void:
-	# Selection currently drives visibility but the cell set is fixed; the next
-	# phase introduces CommandRegistry.entries_for_selection() to filter per
-	# what the current selection can actually do.
-	for child in _grid.get_children():
-		child.visible = false
-	for i in range(_cells.size()):
-		var cell: Control = _grid.get_child(i) as Control
-		cell.visible = true
-		_apply_cell(cell, _cells[i])
+	_refresh_cells()
 
 
 func _refresh_bindings(_action: String) -> void:
-	# Re-apply every cell so the key label and tooltip pick up the rebind.
-	for i in range(_cells.size()):
+	_refresh_cells()
+
+
+func _refresh_registry() -> void:
+	_refresh_cells()
+
+
+func _refresh_cells() -> void:
+	if _registry == null:
+		# No registry yet: render all cells disabled with no label. A card
+		# that does not know its own layout would be worse than an empty
+		# one, so this only happens during the brief setup window before
+		# the autoload is wired in production.
+		_cells = []
+		for child in _grid.get_children():
+			(child as Control).visible = false
+		return
+	var entries: Array = _registry.entries_for_selection(_director.selection.selected if _director != null else [])
+	# entries() is already in (row, col) order. Build a map from the grid
+	# child's own (row, col) metadata back to the entry.
+	var by_position: Dictionary = {}
+	for e in entries:
+		by_position[Vector2i(int(e["row"]), int(e["col"]))] = e
+	var positions: Array = CommandRegistryScript.all_positions()
+	_cells = []
+	for i in range(positions.size()):
+		var pos: Vector2i = positions[i]
 		var cell: Control = _grid.get_child(i) as Control
-		if cell.visible:
-			_apply_cell(cell, _cells[i])
+		cell.visible = true
+		var entry: Dictionary = by_position.get(pos, {"row": pos.x, "col": pos.y, "enabled": false, "action": "", "label": "", "icon": ""})
+		_cells.append(entry)
+		_apply_cell(cell, entry)
 
 
 func _apply_cell(cell: Control, entry: Dictionary) -> void:
-	var action: String = entry["action"]
-	var label_text: String = entry["label"]
-	var icon_name: String = entry.get("icon", "")
+	var action: String = String(entry.get("action", ""))
+	var label_text: String = String(entry.get("label", ""))
+	var icon_name: String = String(entry.get("icon", ""))
+	var enabled: bool = bool(entry.get("enabled", false))
 
 	var vbox: BoxContainer = cell.get_meta("vbox") as BoxContainer
 	var label: Label = vbox.get_node("Label") as Label
@@ -166,12 +208,24 @@ func _apply_cell(cell: Control, entry: Dictionary) -> void:
 	icon.texture = UIIconsScript.get_icon(icon_name) if icon_name != "" else null
 	icon.visible = icon.texture != null
 
-	var key_text: String = _binding_label_for(action)
-	key_label.text = key_text
-	button.tooltip_text = "%s (%s)" % [label_text, _binding_label_all_for(action)]
+	if action == "":
+		# Reserved placeholder. No key, no tooltip, no click.
+		key_label.text = ""
+		button.tooltip_text = ""
+		button.disabled = true
+		cell.modulate = Color(1, 1, 1, 0.4)
+		if button.pressed.is_connected(_on_btn_pressed):
+			button.pressed.disconnect(_on_btn_pressed)
+		return
 
-	# Re-wire pressed if the action changed (it cannot in this revision, but
-	# the future CommandRegistry may swap entries by row/col).
+	key_label.text = _binding_label_for(action)
+	button.tooltip_text = "%s (%s)" % [label_text, _binding_label_all_for(action)]
+	button.disabled = not enabled
+	cell.modulate = Color(1, 1, 1, 1) if enabled else Color(1, 1, 1, 0.55)
+
+	# Re-wire pressed so a selection that swaps a cell's action (it cannot
+	# today, but CommandRegistry is the layer that decides) does not leave
+	# a stale binding behind.
 	if button.pressed.is_connected(_on_btn_pressed):
 		button.pressed.disconnect(_on_btn_pressed)
 	button.pressed.connect(_on_btn_pressed.bind(action))
