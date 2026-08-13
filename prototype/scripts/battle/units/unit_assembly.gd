@@ -186,23 +186,51 @@ static func build(body: CharacterBody3D, blueprint_data: Dictionary, team: int,
 	}
 
 
-# The body collider. A single CONVEX hull of the authored mesh, deliberately:
-# Godot only allows ConcavePolygonShape3D on a StaticBody3D, so a trimesh is not
-# a legal shape on a CharacterBody3D at all; and convex DECOMPOSITION (the usual
-# way to keep concavity on a moving body) hangs on these meshes - it never
-# returned on the smallest hull in the roster at max_convex_hulls as low as 4,
-# almost certainly because the SDF baker emits unwelded triangle soup with
-# T-junctions at the dual-contouring quads. Welding in tools/bake_hull_roster.gd
-# is the prerequisite for revisiting this.
+# The body collider. Godot only allows ConcavePolygonShape3D on a StaticBody3D,
+# so a trimesh is not a legal shape on a CharacterBody3D at all - the shape of a
+# MOVING hull has to be convex. Three tiers, best first:
 #
-# So deck wells, the gap under a tapered keel, and the space between sponsons all
-# collide as solid. That is a known inaccuracy, not an oversight - and it is
-# precisely why selection gets its own proxy below rather than reusing this.
+#   1. The BAKED DECOMPOSITION (assets/models/hulls/<id>_collision.res), a set
+#      of convex pieces that together keep the hull's concavities. This used to
+#      be impossible: convex decomposition hung on these meshes - it never
+#      returned on the smallest hull in the roster at max_convex_hulls as low as
+#      4 - because sdf_mesh_baker emits unwelded triangle soup and the
+#      decomposer had no vertex adjacency to work from. mesh_weld.gd fixed the
+#      input and tools/bake_hull_roster.gd now does the work at tool time, so a
+#      spawn pays only for mounting the shapes.
+#   2. A SINGLE CONVEX FIT of the authored mesh, for any hull not yet re-baked.
+#      This is what shipped before and it is still correct, just coarse: deck
+#      wells, the gap under a tapered keel and the space between sponsons all
+#      collide as solid.
+#   3. A BOX, when there is no authored mesh at all.
+#
+# The selection proxy below still does NOT reuse this, and the decomposition
+# does not change that: a hit volume that follows the silhouette into every
+# recess is exactly the wrong thing to click on. See its own header.
 static func _add_hull_collider(body: CharacterBody3D, hull_node: Node3D, hull_type: String,
 		base_size: Vector3, hull_scale: Vector3, bulk: Vector3) -> void:
+	var authored := MeshAssetLoader.get_hull_mesh(hull_type)
+
+	if authored:
+		var decomposed = MeshAssetLoader.get_hull_collision(hull_type)
+		var pieces: Array = decomposed.to_shapes() if decomposed != null else []
+		if not pieces.is_empty():
+			# One CollisionShape3D per piece - Godot requires them to be direct
+			# children of the body, so they cannot share a single transform
+			# node. All of them carry the SAME scale and position the single
+			# convex fit used, because the decomposition was baked in hull mesh
+			# local space precisely so this stayed a drop-in swap.
+			for i in range(pieces.size()):
+				var piece_col := CollisionShape3D.new()
+				piece_col.name = "HullCollider%d" % i
+				piece_col.shape = pieces[i]
+				piece_col.scale = hull_scale * bulk
+				piece_col.position = hull_node.position
+				body.add_child(piece_col)
+			return
+
 	var col := CollisionShape3D.new()
 	col.name = "HullCollider"
-	var authored := MeshAssetLoader.get_hull_mesh(hull_type)
 	if authored:
 		col.shape = authored.create_convex_shape()
 		col.scale = hull_scale * bulk

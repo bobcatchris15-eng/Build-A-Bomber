@@ -55,6 +55,33 @@ const RESOURCE_NODES := 1 << 4  # 16
 # 16 resource nodes, 32 smoke. 64 is the first free one.
 const SELECTION := 1 << 6  # 64 - click/frustum proxy, nothing else
 
+# Per-module hit volumes on a SPAWNED unit - the barrels, masts, sensors and
+# wheels a shot can actually connect with, built from module_volume.gd so they
+# match the silhouette instead of a catalog box.
+#
+# DELIBERATELY NOT `MODULES` (bit 2), even though that bit's own comment says
+# "per-module bodies, for subsystem-strip hits". Bit 2 is the DESIGN LAB's click
+# layer, and it is in auto_weapon's LOS mask (1 + 2 + 8 + smoke) so a weapon's
+# own sibling mast blocks its shot. Putting battle module bodies there too would
+# have made a THIRD unit's gun barrel block a shot that the same unit's HULL
+# does not - units are on bit 4 and are omitted from that mask on purpose, to
+# keep grouped formations from deadlocking. One layer for "geometry that exists
+# to be hit", separate from "geometry that occludes", is the distinction the
+# clash would have destroyed.
+#
+# Bits in use: 1 terrain, 2 lab modules, 4 units, 8 buildings, 16 resource
+# nodes, 32 smoke, 64 selection. 128 is this one; 512 is the first free one.
+const UNIT_MODULES := 1 << 7  # 128 - per-module hit volumes on a spawned unit
+
+# The spawned hull's precise trimesh skin (hull_surface.gd), for damage and LOS
+# rays that need the real surface normal rather than the convex movement fit.
+#
+# HullSurface's own default is bit 5 (16), which is fine in the Design Lab and
+# is RESOURCE_NODES here - a hull left on it would come back from the
+# right-click ore-patch pick, so every unit on the field would read as a
+# harvestable node. Same class of silent clash as the SELECTION/smoke one above.
+const HULL_SURFACE := 1 << 8  # 256 - precise hull skin on a spawned unit
+
 # What a selection frustum query should collide with: proxies only. Not UNITS -
 # hitting both would return each unit twice and make the caller dedupe.
 const SELECTION_QUERY_MASK := SELECTION

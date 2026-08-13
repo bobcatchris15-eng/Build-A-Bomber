@@ -57,6 +57,129 @@ func test_clipping_detection() -> bool:
 		print("  [FAIL] Clipping detection logic failed. Overlap clip: ", clip_close, " (expected true), Far clip: ", clip_far, " (expected false)")
 		return false
 
+const ModuleVolumeScript = preload("res://scripts/module_volume.gd")
+
+
+# A module node with one box mesh of `size`, posed by `xf`. Enough for
+# ModuleVolume, which measures MeshInstance3D children and nothing else.
+func _volume_stub(size: Vector3, xf: Transform3D) -> Node3D:
+	var node := Node3D.new()
+	var mi := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = size
+	mi.mesh = box
+	node.add_child(mi)
+	node.transform = xf
+	return node
+
+
+func test_clipping_uses_oriented_volumes_not_axis_aligned_boxes() -> bool:
+	print("Running Test Suite: Design Lab - Clipping Tests Oriented Volumes, Not AABBs...")
+
+	# A THIN ROD lying along the (1, 0, 1) diagonal, and a small cube parked on
+	# the OTHER diagonal. This is the shape of the false positive Chris reported
+	# on 2026-08-13: the rod's axis-aligned envelope is a 1.56-unit square in XZ
+	# that swallows both diagonals, so an AABB test calls the cube a clip even
+	# though the rod passes nowhere near it - the cube sits 0.85 units off the
+	# rod's centreline, and rod half-thickness plus cube half-width is 0.30.
+	var rod := _volume_stub(Vector3(2.0, 0.2, 0.2),
+		Transform3D(Basis(Vector3.UP, deg_to_rad(-45.0)), Vector3.ZERO))
+	var cube := _volume_stub(Vector3(0.4, 0.4, 0.4),
+		Transform3D(Basis.IDENTITY, Vector3(0.6, 0.0, -0.6)))
+
+	# The case has to actually DISCRIMINATE or the assertion below proves
+	# nothing - so first confirm the merged AABBs really do overlap here. If a
+	# future change to the stub sizes makes them miss, this fails loudly instead
+	# of passing vacuously.
+	var rod_aabb := ModuleVolumeScript.bounds_in_frame(rod, rod.transform)
+	var cube_aabb := ModuleVolumeScript.bounds_in_frame(cube, cube.transform)
+	if not rod_aabb.intersects(cube_aabb):
+		print("  [FAIL] Test fixture no longer discriminates - the AABBs do not overlap, so this proves nothing.")
+		rod.queue_free()
+		cube.queue_free()
+		return false
+
+	var apart: bool = ModuleVolumeScript.overlaps(
+		rod, rod.transform, cube, cube.transform)
+
+	# POSITIVE CONTROL. Slide the cube onto the rod's own diagonal, where it is
+	# genuinely impaled. A test that only ever asserts "not clipping" passes
+	# just as well against a function that always returns false.
+	cube.transform = Transform3D(Basis.IDENTITY, Vector3(0.6, 0.0, 0.6))
+	var together: bool = ModuleVolumeScript.overlaps(
+		rod, rod.transform, cube, cube.transform)
+
+	rod.queue_free()
+	cube.queue_free()
+
+	if apart:
+		print("  [FAIL] A rod and a cube 0.85 units off its centreline read as clipping - the test is still axis-aligned.")
+		return false
+	if not together:
+		print("  [FAIL] A cube sitting ON the rod did NOT read as clipping - the overlap test is not detecting real intersections.")
+		return false
+	print("  [PASS] Clipping follows the oriented mesh volumes; a rotated part no longer clips through its own diagonal envelope.")
+	return true
+
+
+func test_module_volume_tracks_geometry_not_catalog_size() -> bool:
+	print("Running Test Suite: Design Lab - Module Volume Measures Meshes And Invalidates On Rebuild...")
+	var VisualBuilder = preload("res://scripts/visual_builder.gd")
+
+	var module := VisualBuilder.build_module("heavy_machine_gun")
+	if module == null:
+		print("  [FAIL] build_module returned nothing for heavy_machine_gun")
+		return false
+	root.add_child(module)
+
+	var boxes: Array = ModuleVolumeScript.boxes(module)
+	if boxes.is_empty():
+		print("  [FAIL] A built heavy_machine_gun measured no volume at all")
+		module.queue_free()
+		return false
+
+	# The catalog `size` is a hand-tuned AUTHORING box, not the extent of what
+	# the builder actually produces - a gun's barrel, receiver and pintle land
+	# where the builder puts them, at whatever scale it fits them to. The
+	# measured bounds must therefore not simply be the catalog box back again;
+	# if they are, nothing is being measured and the clip test has quietly
+	# reverted to the estimate this whole change exists to stop trusting.
+	var measured := ModuleVolumeScript.bounds(module)
+	var catalog_size: Vector3 = ModuleCatalog.get_module_data("heavy_machine_gun").get("size", Vector3.ONE)
+	if measured.size.is_equal_approx(catalog_size):
+		print("  [FAIL] Measured bounds are exactly the catalog box - the measurement is not reading the mesh")
+		module.queue_free()
+		return false
+
+	# The cache must not outlive the geometry it describes. A tweak drag goes
+	# through build_visual(), which destroys every mesh child, so a stale cache
+	# here means every subsequent clip verdict is about a part that no longer
+	# exists at that size.
+	var cached_again: Array = ModuleVolumeScript.boxes(module)
+	if cached_again.size() != boxes.size():
+		print("  [FAIL] Two consecutive measurements disagreed")
+		module.queue_free()
+		return false
+	ModuleVolumeScript.invalidate(module)
+	if module.has_meta(ModuleVolumeScript.META_BOXES):
+		print("  [FAIL] invalidate() left the cached measurement in place")
+		module.queue_free()
+		return false
+
+	# And the real invalidation path: rebuilding the visual must clear it
+	# without anyone calling invalidate() by hand.
+	var _warm: Array = ModuleVolumeScript.boxes(module)
+	VisualBuilder.rebuild_visual(module)
+	if module.has_meta(ModuleVolumeScript.META_BOXES):
+		print("  [FAIL] build_visual() did not invalidate the cached module volume")
+		module.queue_free()
+		return false
+
+	module.queue_free()
+	print("  [PASS] Module volume measures real meshes and is invalidated by every geometry rebuild.")
+	return true
+
+
 func test_rotation_popup_and_deforms() -> bool:
 	print("Running Test Suite 7: Rotation, Popups, and Mesh Deformations...")
 	var hull = StaticBody3D.new()

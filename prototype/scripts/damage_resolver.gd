@@ -8,6 +8,10 @@ class_name DamageResolver
 # for the phased directional-armor build-out plan this is part of.
 
 const ModuleCatalogScript = preload("res://scripts/module_catalog.gd")
+# Preloaded rather than leaned on as a class_name global so the layer bit in
+# SLOPE_TRACE_MASK below cannot drift from its definition. battle_layers.gd has
+# no preloads of its own, so this closes no cycle.
+const BattleLayersScript = preload("res://scripts/battle/battle_layers.gd")
 
 # Elevation combat advantage (multi-map pass): shooting down at a target on
 # meaningfully lower ground pierces more easily - real armor doesn't
@@ -176,15 +180,31 @@ static func resolve(hull: Node3D, active_modules: Array, damage_type: String, de
 
 # Real raycast from the attacker to the defender's hull, reading the actual
 # surface normal at impact - not an analytical shortcut off the facet's
-# canonical axis. This matters because hull placement/collision is
-# currently a single BoxShape3D (see MOUNTING_AND_ARMOR_SPEC.md's "Known
-# architecture constraint"), so today this produces the same result as the
-# canonical-normal shortcut would - but a real raycast against the hull's
-# actual collision geometry means this starts reflecting true sloped
-# surfaces automatically the moment hull collision becomes mesh-accurate,
-# with no changes needed here. Effective thickness = base / cos(angle),
-# the standard sloped-armor formula; clamped so a razor-thin grazing angle
-# doesn't produce an absurd multiplier.
+# canonical axis. Effective thickness = base / cos(angle), the standard
+# sloped-armor formula; clamped so a razor-thin grazing angle doesn't produce
+# an absurd multiplier.
+#
+# THE MASK WAS WRONG IN BATTLE and this function was inert there. It asked for
+# layer 1 alone, which is the DESIGN LAB's hull (a real StaticBody3D on layer 1,
+# so the Lab and the headless tests worked) but in a match is TERRAIN: a spawned
+# unit's body is on UNITS (4), its running gear on 0, and nothing it owns is on
+# layer 1 at all. So every shot in every skirmish either hit the ground on the
+# way over and read the ground's normal, or hit nothing and fell through to 1.0.
+# Sloped armour has never actually applied in a battle.
+#
+# Both layers are masked now, plus BattleLayers.HULL_SURFACE - the precise
+# trimesh skin blueprint_manager builds on the battle path. This function's
+# previous note said it "starts reflecting true sloped surfaces automatically
+# the moment hull collision becomes mesh-accurate"; that is now true, because
+# the thing being traced is the visible mesh rather than a bounding box.
+#
+# The hit is REQUIRED to belong to the defender. Masking terrain is what makes
+# the Lab case work, and without an ownership check a ridge between attacker and
+# target would hand back the ridge's normal as if it were armour slope. A shot
+# that never reaches the defender gets the neutral 1.0, which is the right
+# conservative answer.
+const SLOPE_TRACE_MASK := 1 | BattleLayersScript.HULL_SURFACE
+
 static func compute_slope_multiplier(defender: Node3D, hit_origin: Vector3) -> float:
 	if not is_instance_valid(defender):
 		return 1.0
@@ -194,11 +214,32 @@ static func compute_slope_multiplier(defender: Node3D, hit_origin: Vector3) -> f
 	var space_state = world.direct_space_state
 	var target_point = defender.global_position + Vector3(0, 0.1, 0)
 	var query = PhysicsRayQueryParameters3D.create(hit_origin, target_point)
-	query.collision_mask = 1 # Hull layer
+	query.collision_mask = SLOPE_TRACE_MASK
 	var result = space_state.intersect_ray(query)
 	if result.is_empty() or not result.has("normal"):
+		return 1.0
+	if not _hit_belongs_to(result.get("collider"), defender):
 		return 1.0
 	var incoming_dir = (target_point - hit_origin).normalized()
 	var hit_normal = result.normal as Vector3
 	var cos_angle = clamp(abs(hit_normal.dot(-incoming_dir)), 0.15, 1.0)
 	return 1.0 / cos_angle
+
+
+# Is `collider` the defender, or something the defender owns?
+#
+# `defender` is the CharacterBody3D in battle and the hull StaticBody3D in the
+# Lab, and the thing the ray hits is a HullSurface body nested under the former
+# or the hull body itself in the latter - so this walks up rather than comparing
+# identity. Cheap: the tree between a hull surface and its unit is two nodes.
+static func _hit_belongs_to(collider, defender: Node3D) -> bool:
+	if collider == null or not is_instance_valid(defender):
+		return false
+	if not (collider is Node):
+		return false
+	var walker: Node = collider
+	while walker != null:
+		if walker == defender:
+			return true
+		walker = walker.get_parent()
+	return false

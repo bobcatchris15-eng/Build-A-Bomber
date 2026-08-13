@@ -104,6 +104,13 @@ cd prototype
 - Multiple navmeshes: ground, water, deep water, amphibious (combined ground+water for screw-drive).
 - Hull draught routes naval units onto deep_water_map vs water_map.
 
+**Collision Geometry** (`module_volume.gd`, `hull_surface.gd`, `mesh_weld.gd`, `hull_collision_shapes.gd`)
+- **`module_volume.gd` is the single source of a module's occupied space.** It measures each `MeshInstance3D` into a parallelepiped (centre + three half-edge vectors, so nested non-uniform scale shear survives) in module-local space, caches it on the node, and is invalidated by `VisualBuilder.build_visual()`. Both the Lab's click collider and the clipping test read it — they used to disagree, and the clip test was the one using `ModuleCatalog`'s authoring `size`.
+- Design Lab clipping is a merged-AABB broad phase then a 15-axis **separating-axis test per mesh pair**. A module with no meshes at all falls back to its catalog box (`clip_boxes()`); `boxes()`/`bounds()` deliberately do not, because callers rely on "empty means it draws nothing".
+- A battle module gets an **`Area3D` hit volume** (one box per visible mesh, capped at `BATTLE_MODULE_MAX_SHAPES`) on `BattleLayers.UNIT_MODULES`. Built before `bake_module_visual()` merges the sub-parts away. `Area3D` not `StaticBody3D`: it rides a moving unit, and `build_visual()` only spares `StaticBody3D` children when clearing.
+- **Layers are the trap here.** `UNIT_MODULES` (128) is deliberately not the Lab's modules bit (2), which is in `auto_weapon`'s LOS mask — a hit volume must not double as an occluder. `HULL_SURFACE` (256) is deliberately not `hull_surface.gd`'s own default (16), which is `RESOURCE_NODES` in a match.
+- Hull colliders are three tiers: the baked convex decomposition (`assets/models/hulls/<id>_collision.res`), else a single `create_convex_shape()` fit, else a box. See the Art Pipeline section for baking.
+
 **UI System** (`ui_shell.gd`, `ui_dock.gd`, `ui_flyout.gd`, `ui_theme.gd`, `ui_tokens.gd`, `bomber_theme.tres`)
 - Asymmetric command deck UI with animated cards, dock/flyout panels, control groups (assign/recall/double-tap recenter).
 - Theme system with tokens for spacing, colors, typography. No decorative glyphs/emoji in UI text.
@@ -178,6 +185,44 @@ went through that path.
 # Rebuild the vehicle hull catalogue, then reimport
 cd prototype && "/c/Program Files/Blender Foundation/Blender 5.2/blender.exe" --background --python tools/blender/build_vehicle_hulls.py
 ```
+
+### Hull collision shells
+
+Every hull ships a third file next to its mesh and sidecar:
+`assets/models/hulls/<id>_collision.res` — the convex **decomposition** of its
+welded shell, mounted by `unit_assembly._add_hull_collider()` as one
+`CollisionShape3D` per piece. Without it a unit falls back to a single convex
+fit, which fills deck wells, the gap under a tapered keel and the space between
+sponsons. 34 of the 94 hulls split into 2–5 pieces; the other 60 are genuinely
+convex and get one, i.e. no change.
+
+```bash
+# Re-derive collision for the whole roster WITHOUT touching hull geometry
+cd prototype && ./Godot_v4.7.1-stable_win64_console.exe --headless --path . --script res://tools/bake_hull_roster.gd --quit -- --collision-only
+```
+
+Three things about this are non-obvious and were each found the hard way:
+
+- **`--collision-only` exists so adding collision data never rewrites a hull
+  mesh.** A full bake regenerates every `<id>.res` — a large binary diff, and it
+  re-runs marching cubes on geometry that already shipped. It also enumerates a
+  *different set*: the shipped roster is 94 Blender-authored `.glb` hulls with
+  no assembly sources at all, so collision-only lists the OUT_DIR sidecars and
+  resolves each mesh through `MeshAssetLoader.get_hull_mesh()` — the same
+  precedence chain the game uses, which is what guarantees the shell matches
+  what a unit spawns with.
+- **The weld is mandatory and is not `SurfaceTool.index()`.** That dedupes on
+  the whole vertex tuple, and a faceted hull's coincident corners carry
+  different normals, so it merges nothing. `mesh_weld.gd` welds on position
+  only; measured, it takes the roster from ~18% to 100% shared topology. Without
+  it the decomposer has no vertex adjacency and hangs.
+- **`max_concavity` defaults to 1.0, which silently does nothing.** At the
+  default VHACD returns one piece for every hull in the roster — reproducing the
+  single convex fit exactly. `DECOMP_MAX_CONCAVITY = 0.05` is where the real
+  splits appear and stop changing. Also note there is no `Mesh.convex_decompose`
+  in Godot 4.7.1; the only decomposition entry point in ClassDB is
+  `MeshInstance3D.create_multiple_convex_collisions()`, which attaches a
+  `StaticBody3D` of shapes rather than returning them.
 
 Hull-specific gotcha when adding one: an element's **vertical extent must be a
 function of the hull's height alone**. Deriving it from width makes the

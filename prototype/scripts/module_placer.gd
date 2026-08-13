@@ -21,6 +21,7 @@ const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 const LocomotionLayoutScript = preload("res://scripts/locomotion_layout.gd")
 const LocomotionMountScript = preload("res://scripts/locomotion_mount.gd")
+const ModuleVolumeScript = preload("res://scripts/module_volume.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -849,11 +850,22 @@ static func _refit_module_collider(module: Node3D) -> void:
 		return
 	var body := bodies[0] as StaticBody3D
 	var shapes: Array = body.find_children("*", "CollisionShape3D", false, false)
+	var shape: CollisionShape3D
 	if shapes.is_empty():
-		return
-	var shape := shapes[0] as CollisionShape3D
-	if not (shape.shape is BoxShape3D):
-		return
+		# An EMPTY body is a legitimate starting state, not a broken one:
+		# blueprint_manager's reconstruction creates the body up front (so
+		# build_visual's "skip StaticBody3D children" rule preserves it through
+		# the rebuild) and leaves the fitting to this function, because the
+		# geometry to fit against does not exist yet at that point. Bailing out
+		# here left every module in a LOADED blueprint with a body and no shape,
+		# i.e. unclickable.
+		shape = CollisionShape3D.new()
+		shape.shape = BoxShape3D.new()
+		body.add_child(shape)
+	else:
+		shape = shapes[0] as CollisionShape3D
+		if not (shape.shape is BoxShape3D):
+			return
 	var bounds := _visual_bounds(module)
 	if bounds.size.length_squared() <= 0.0:
 		return
@@ -2107,35 +2119,25 @@ static func _mount_transform(local_pos: Vector3, local_normal: Vector3,
 	return Transform3D(Basis.looking_at(outboard, Vector3.UP),
 					   local_pos - outboard * depth)
 
-func _get_parent_space_aabb(module: Node3D, size: Vector3) -> AABB:
-	var extents = size / 2.0
-	var local_corners = [
-		Vector3(-extents.x, -extents.y, -extents.z),
-		Vector3(-extents.x, -extents.y, extents.z),
-		Vector3(-extents.x, extents.y, -extents.z),
-		Vector3(-extents.x, extents.y, extents.z),
-		Vector3(extents.x, -extents.y, -extents.z),
-		Vector3(extents.x, -extents.y, extents.z),
-		Vector3(extents.x, extents.y, -extents.z),
-		Vector3(extents.x, extents.y, extents.z)
-	]
-	
-	var t = module.transform
-	var first = t * local_corners[0]
-	var min_p = first
-	var max_p = first
-	
-	for i in range(1, 8):
-		var p = t * local_corners[i]
-		min_p.x = min(min_p.x, p.x)
-		min_p.y = min(min_p.y, p.y)
-		min_p.z = min(min_p.z, p.z)
-		max_p.x = max(max_p.x, p.x)
-		max_p.y = max(max_p.y, p.y)
-		max_p.z = max(max_p.z, p.z)
-		
-	return AABB(min_p, max_p - min_p)
-
+# Flags every pair of modules whose VISIBLE geometry actually intersects, and
+# draws the offending volume as a red CSG intersection.
+#
+# THE TEST USED TO BE THREE STACKED OVER-ESTIMATES, which is why parts read red
+# while visibly clear of each other (Chris, 2026-08-13):
+#
+#   1. It sized each module from ModuleCatalog's `size` - an AUTHORING box that,
+#      for a monolithic authored mesh, does not even share the mesh's
+#      ORIENTATION (build_visual yaws those 90 degrees about Y), so a gun was
+#      tested as a sliver lying ACROSS the gun.
+#   2. It transformed that box's eight corners and RE-AXIS-ALIGNED the result,
+#      so a module at 45 degrees was tested at its diagonal envelope.
+#   3. It multiplied by `get_meta("struct_scale", module.scale)` and then
+#      applied `module.transform`, which already carried that scale.
+#
+# Now: ModuleVolume measures the real meshes once, caches it, and runs a
+# merged-AABB broad phase followed by a per-mesh separating-axis test. A barrel
+# passing OVER a neighbour's base is no longer an overlap, because the barrel
+# and the receiver are separate volumes instead of one box around both.
 func check_all_clipping():
 	clipping_detected = false
 	if not hull:
@@ -2162,14 +2164,12 @@ func check_all_clipping():
 	for i in range(modules.size()):
 		var my_module = modules[i]
 		var my_data = my_module.get_meta("module_data")
-		var my_catalog = ModuleCatalog.get_module_data(my_data.type_id)
-		# Structural pieces keep node.scale at ONE and carry their resize in
-		# the struct_scale meta instead (scale isolation - see gizmo_3d.gd), so
-		# reading .scale alone would AABB every stretched structural piece at
-		# its original catalog size and miss real overlaps.
-		var my_size = my_catalog.size * my_module.get_meta("struct_scale", my_module.scale)
-		var aabb_a = _get_parent_space_aabb(my_module, my_size)
-		
+		# No size lookup any more. ModuleVolume measures the module's real
+		# meshes, which means struct_scale needs no special case either: a
+		# stretched structural piece is REBUILT at its new size by
+		# rebuild_visual(), so the measurement already carries the stretch and
+		# the old `catalog.size * struct_scale` correction would double it.
+
 		for j in range(i + 1, modules.size()):
 			var other_module = modules[j]
 			
@@ -2188,12 +2188,12 @@ func check_all_clipping():
 			if my_data.category == "armor" or other_data_early.category == "armor":
 				continue
 
-			var other_data = other_data_early
-			var other_catalog = ModuleCatalog.get_module_data(other_data.type_id)
-			var other_size = other_catalog.size * other_module.get_meta("struct_scale", other_module.scale)
-			var aabb_b = _get_parent_space_aabb(other_module, other_size)
-			
-			if aabb_a.grow(-0.05).intersects(aabb_b.grow(-0.05)):
+			# Both modules are children of the hull, so their own transforms are
+			# already in the shared frame. ModuleVolume runs the merged-AABB
+			# broad phase itself and only pays for the separating-axis test on
+			# pairs that are genuinely close.
+			if ModuleVolumeScript.overlaps(my_module, my_module.transform,
+					other_module, other_module.transform):
 				clipping_set[my_module] = true
 				clipping_set[other_module] = true
 				clipping_detected = true
@@ -2242,11 +2242,10 @@ func check_all_clipping():
 					group_b.add_child(csg_m)
 				
 	# Restore all visual materials (since we no longer override them for clipping)
+	# The clipping VERDICT is drawn by the CSG intersection volumes above, not by
+	# recolouring the modules, so this loop only ever restores - it read
+	# clipping_set/module_data/catalog into locals it never used.
 	for m in modules:
-		var is_clipping = clipping_set[m]
-		var my_data = m.get_meta("module_data")
-		var my_catalog = ModuleCatalog.get_module_data(my_data.type_id)
-		
 		var meshes = []
 		_find_meshes_recursive(m, meshes)
 
@@ -2288,54 +2287,66 @@ func check_all_clipping():
 #
 # So convert first. Both the ghost and the hull are children of MainLab, so the
 # hull's inverse takes the ghost the rest of the way into hull-local space.
-func is_ghost_clipping(ghost_transform: Transform3D, ghost_type_id: String) -> bool:
+#
+# `ghost_node` is the live ghost. Pass it whenever you have it: the ghost is a
+# real built module tree, so its own meshes can be measured exactly like a
+# placed module's, and the preview then agrees with what check_all_clipping()
+# will say a moment later about the same part in the same place. Without it this
+# falls back to a catalog-sized box, which is the estimate this whole change
+# exists to stop trusting - so the fallback is deliberately GENEROUS about
+# calling things clear rather than risk refusing a legal drop.
+func is_ghost_clipping(ghost_transform: Transform3D, ghost_type_id: String,
+		ghost_node: Node3D = null) -> bool:
 	if hull == null:
 		return false
 
 	var my_catalog = ModuleCatalog.get_module_data(ghost_type_id)
-	var my_size = my_catalog.size
-
 	var local_transform := hull.transform.affine_inverse() * ghost_transform
 
-	var extents = my_size / 2.0
-	var local_corners = [
-		Vector3(-extents.x, -extents.y, -extents.z),
-		Vector3(-extents.x, -extents.y, extents.z),
-		Vector3(-extents.x, extents.y, -extents.z),
-		Vector3(-extents.x, extents.y, extents.z),
-		Vector3(extents.x, -extents.y, -extents.z),
-		Vector3(extents.x, -extents.y, extents.z),
-		Vector3(extents.x, extents.y, -extents.z),
-		Vector3(extents.x, extents.y, extents.z)
-	]
+	# The ghost's measured volume, in the ghost's own local space. The fallback
+	# builds a single box from the catalog size so the shape of the test is
+	# identical either way and only its accuracy differs.
+	var my_boxes: Array = []
+	if ghost_node != null and is_instance_valid(ghost_node):
+		my_boxes = ModuleVolumeScript.clip_boxes(ghost_node)
+	if my_boxes.is_empty():
+		var half: Vector3 = (my_catalog.size as Vector3) * 0.5
+		my_boxes = [{
+			"c": Vector3.ZERO,
+			"h0": Vector3(half.x, 0, 0),
+			"h1": Vector3(0, half.y, 0),
+			"h2": Vector3(0, 0, half.z),
+		}]
 
-	var min_p = local_transform * local_corners[0]
-	var max_p = min_p
-	for i in range(1, 8):
-		var p = local_transform * local_corners[i]
-		min_p.x = min(min_p.x, p.x)
-		min_p.y = min(min_p.y, p.y)
-		min_p.z = min(min_p.z, p.z)
-		max_p.x = max(max_p.x, p.x)
-		max_p.y = max(max_p.y, p.y)
-		max_p.z = max(max_p.z, p.z)
-
-	var aabb_a = AABB(min_p, max_p - min_p)
+	var ghost_boxes: Array = []
+	for b in my_boxes:
+		ghost_boxes.append(ModuleVolumeScript.to_frame(b, local_transform))
+	var ghost_aabb := ModuleVolumeScript.merged_aabb(ghost_boxes)
 
 	var modules = hull.get_children().filter(func(c): return c is Node3D and c.has_meta("module_data"))
-	
+
 	for other_module in modules:
 		var other_data = other_module.get_meta("module_data")
 		if my_catalog.category == "armor" or other_data.category == "armor":
 			continue
-			
-		var other_catalog = ModuleCatalog.get_module_data(other_data.type_id)
-		var other_size = other_catalog.size * other_module.get_meta("struct_scale", other_module.scale)
-		var aabb_b = _get_parent_space_aabb(other_module, other_size)
-		
-		if aabb_a.grow(-0.05).intersects(aabb_b.grow(-0.05)):
-			return true
-			
+
+		# Broad phase, matching ModuleVolume.overlaps()' own structure. Derived
+		# from the SAME framed list the narrow phase then walks, so a module
+		# that fell back to its catalog box cannot be rejected here by an empty
+		# measured AABB it never used.
+		var framed_other: Array = []
+		for other_box in ModuleVolumeScript.clip_boxes(other_module):
+			framed_other.append(ModuleVolumeScript.to_frame(other_box, other_module.transform))
+		if framed_other.is_empty():
+			continue
+		if not ghost_aabb.intersects(ModuleVolumeScript.merged_aabb(framed_other)):
+			continue
+
+		for ob in framed_other:
+			for gb in ghost_boxes:
+				if ModuleVolumeScript.pair_overlaps_with_margin(gb, ob):
+					return true
+
 	return false
 
 # Collects the module's own body meshes for clipping recolouring. Skips the

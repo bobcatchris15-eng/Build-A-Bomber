@@ -106,6 +106,36 @@ static func get_hull_mesh(hull_type_id: String) -> Mesh:
 		return _load_and_cache_mesh_resource(builtin_res)
 	return _load_and_cache("res://assets/models/hulls/%s.glb" % hull_type_id)
 
+# The baked convex decomposition of a hull's collision shell, or null if that
+# hull has not been re-baked since tools/bake_hull_roster.gd started producing
+# them. Null is the normal, supported answer: unit_assembly falls back to the
+# single Mesh.create_convex_shape() fit that shipped before, so a roster can
+# migrate one hull at a time.
+#
+# Mod hulls are checked first for the same reason get_hull_mesh() checks them
+# first - a mod that overrides a built-in's geometry must be able to override
+# its collision too, or its units would collide as the hull they replaced.
+static func get_hull_collision(hull_type_id: String) -> Resource:
+	# A hull that IS a plain primitive has no baked shell and does not want one:
+	# a cube's convex fit is exact, so decomposing it can only add shapes.
+	if _primitive_shape_for(hull_type_id) != "":
+		return null
+	var mod_path := "user://mods/hulls/%s_collision.res" % hull_type_id
+	if ResourceLoader.exists(mod_path):
+		return _load_and_cache_resource(mod_path)
+	return _load_and_cache_resource("res://assets/models/hulls/%s_collision.res" % hull_type_id)
+
+
+static func _load_and_cache_resource(path: String) -> Resource:
+	if _cache.has(path):
+		return _cache[path]
+	var res: Resource = null
+	if ResourceLoader.exists(path):
+		res = load(path)
+	_cache[path] = res
+	return res
+
+
 static func _primitive_shape_for(hull_type_id: String) -> String:
 	# Runtime load rather than preload: module_catalog.gd sits upstream of
 	# this file in the preload graph, so a preload here would close a cycle.

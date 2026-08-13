@@ -365,6 +365,8 @@ const SUITE_ORDER := [
 	["battle_combat", "test_module_damage_uses_the_resolver_fraction"],
 	["battle_combat", "test_active_modules_excludes_dying_children"],
 	["battle_combat", "test_weapon_attachment_covers_non_weapon_combat_modules"],
+	["battle_combat", "test_spawned_unit_carries_mesh_matched_collision"],
+	["battle_combat", "test_shot_trace_narrows_strip_candidates_without_touching_the_rng"],
 	["battle_vision", "test_selection_layer_does_not_collide_with_smoke"],
 	["battle_vision", "test_vision_hides_the_distant_and_reveals_the_near"],
 	["battle_vision", "test_buildings_lift_fog_around_a_base"],

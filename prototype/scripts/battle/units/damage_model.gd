@@ -80,6 +80,82 @@ static func strippable(modules: Array, facet: String) -> Array:
 	return out
 
 
+# The modules a shot actually passes through, found by tracing the shot line
+# against the per-module hit volumes blueprint_manager builds on
+# BattleLayers.UNIT_MODULES - volumes that match each module's visible meshes
+# (module_volume.gd) rather than a catalog box.
+#
+# WHY THIS IS NOT JUST strippable(). That one filters by FACET: every module
+# classified onto the face the shot came from is an equally likely victim, so a
+# shot at the front of a tank was as likely to take a roof sensor at the back of
+# the front half as the mantlet it visibly struck. Tracing answers the question
+# the facet test was approximating.
+#
+# THE RNG CONTRACT IS UNCHANGED, and that is deliberate. unit.gd draws exactly
+# one randf() (does this hit strip?) and one randi() (which module?), and
+# SimRNG.pick() draws its randi() regardless of how long the array is - so
+# narrowing the candidate list changes WHICH module is taken without moving the
+# stream one step. Replays and the seeded-match tests stay valid.
+#
+# Falls back to strippable() whenever tracing cannot answer: no origin, no
+# physics world (every headless test that calls take_damage() directly), or a
+# ray that reaches the hull without crossing any of this unit's modules.
+const _TRACE_STEPS := 4
+
+static func strippable_along_shot(body: Node3D, hull_node: Node3D, modules: Array,
+		hit_origin, facet: String) -> Array:
+	var fallback := strippable(modules, facet)
+	if hit_origin == null or not is_instance_valid(body) or fallback.is_empty():
+		return fallback
+	var world := body.get_world_3d()
+	if world == null:
+		return fallback
+	var space := world.direct_space_state
+	if space == null:
+		return fallback
+
+	var from: Vector3 = hit_origin if hit_origin is Vector3 else hit_origin.global_position
+	# Aimed at the HULL's centre, not body.global_position - a ground unit's
+	# origin is its ground contact point, so a ray to it passes underneath
+	# everything mounted on the deck.
+	var to: Vector3 = hull_node.global_position if is_instance_valid(hull_node) \
+		else body.global_position + Vector3(0, 0.5, 0)
+	if from.is_equal_approx(to):
+		return fallback
+
+	# Membership is tested against every non-armour module, NOT against the
+	# facet-filtered fallback. The facet filter is an approximation of "which
+	# side did this come from"; the trace is the real answer, so constraining it
+	# to the approximation's verdict would throw away the improvement - a shot
+	# that visibly passes through a module classified onto a neighbouring facet
+	# still hit that module.
+	var own := strippable(modules, "")
+	var exclude: Array = []
+	for _step in range(_TRACE_STEPS):
+		var query := PhysicsRayQueryParameters3D.create(from, to)
+		query.collision_mask = BattleLayers.UNIT_MODULES
+		# The hit volumes are Area3Ds (blueprint_manager builds them that way so
+		# they can ride a moving unit without lying to the physics server about
+		# being static), and a ray ignores areas unless asked.
+		query.collide_with_areas = true
+		query.exclude = exclude
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			break
+		var collider = hit.get("collider")
+		if collider == null:
+			break
+		exclude.append(collider.get_rid())
+		var module = collider.get_parent()
+		# Not one of OUR modules - some other unit's gun between us and the
+		# target. Keep going rather than giving up: it is in the way of the
+		# trace, not of the shot (units do not block fire, see auto_weapon).
+		if module == null or not (module in own):
+			continue
+		return [module]
+	return fallback
+
+
 # Apply `amount` to one module and report whether it died. Damage is a FRACTION
 # of the raw hit (the resolver's MODULE_STRIP_DAMAGE_FACTOR), not the old flat
 # `amount - 5.0`, which rounded every rapid-fire weapon's strip damage to zero

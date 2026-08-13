@@ -238,3 +238,144 @@ func test_weapon_attachment_covers_non_weapon_combat_modules() -> bool:
 		return false
 	print("  [PASS] weapon attachment gating")
 	return true
+
+
+# --- Collision geometry ------------------------------------------------------
+#
+# A spawned unit's collision used to be three boxes and a convex blob: the hull
+# swallowed its own concavities, its modules had no hit volumes at all (the
+# per-module bodies were gated on `is_designer`), and nothing mesh-accurate
+# existed for a damage ray to trace. These assert the geometry a unit actually
+# spawns with, because every one of those was invisible to a test that only ever
+# checked numbers.
+
+const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
+const UnitScript = preload("res://scripts/battle/units/unit.gd")
+const MeshAssetLoaderScript = preload("res://scripts/mesh_asset_loader.gd")
+
+
+func _spawn_armed_unit(hull_type: String):
+	var bp_manager = BlueprintManagerScript.new()
+	root.add_child(bp_manager)
+	var unit = UnitScript.new()
+	root.add_child(unit)
+	var blueprint := {
+		"hull_type": hull_type,
+		"modules": [
+			{"type_id": "heavy_machine_gun", "position": {"x": 0.0, "y": 0.6, "z": -0.5}},
+			{"type_id": "sensor_suite", "position": {"x": 0.4, "y": 0.6, "z": 0.8}},
+		],
+		"locomotion": {"type_id": "wheels", "settings": {}},
+	}
+	if not unit.setup(blueprint, 0, bp_manager, null):
+		return null
+	return unit
+
+
+func test_spawned_unit_carries_mesh_matched_collision() -> bool:
+	print("Running Test Suite: Combat - a spawned unit's collision matches its meshes...")
+	var hull_type := "brenntal_medium_a"
+	var unit = _spawn_armed_unit(hull_type)
+	if unit == null:
+		print("  [FAIL] unit failed to assemble")
+		return false
+
+	# 1. The hull collider is the BAKED DECOMPOSITION when one exists. Asserted
+	#    against the resource rather than a hardcoded count, so a re-bake that
+	#    changes how a hull splits does not have to touch this test.
+	var decomposed = MeshAssetLoaderScript.get_hull_collision(hull_type)
+	var expected_pieces: int = decomposed.piece_count() if decomposed != null else 1
+	var hull_colliders := 0
+	for child in unit.get_children():
+		if child is CollisionShape3D and str(child.name).begins_with("HullCollider"):
+			hull_colliders += 1
+	if hull_colliders != expected_pieces:
+		print("  [FAIL] expected %d hull collider(s) from the baked decomposition, found %d" % [
+			expected_pieces, hull_colliders])
+		return false
+
+	# 2. Every module carries a hit volume on the units-module layer, with at
+	#    least one shape in it. An empty Area3D is the failure that would look
+	#    exactly like success from the outside.
+	var hull_node = unit.hull_node
+	var checked := 0
+	for child in hull_node.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		var volumes: Array = child.find_children("*", "Area3D", false, false)
+		if volumes.is_empty():
+			print("  [FAIL] module %s has no hit volume" % child.name)
+			return false
+		var area := volumes[0] as Area3D
+		if area.collision_layer != BattleLayers.UNIT_MODULES:
+			print("  [FAIL] module hit volume is on layer %d, expected UNIT_MODULES (%d)" % [
+				area.collision_layer, BattleLayers.UNIT_MODULES])
+			return false
+		var shapes: Array = area.find_children("*", "CollisionShape3D", false, false)
+		if shapes.is_empty():
+			print("  [FAIL] module %s has an EMPTY hit volume" % child.name)
+			return false
+		checked += 1
+	if checked == 0:
+		print("  [FAIL] the spawned unit had no modules to check")
+		return false
+
+	# 3. The precise skin exists, and NOT on the layer that means "ore patch"
+	#    in a match - HullSurface's own default (16) is RESOURCE_NODES here.
+	var surface = hull_node.get_node_or_null("HullSurface")
+	if surface == null:
+		print("  [FAIL] a battle-spawned hull has no HullSurface trimesh to trace")
+		return false
+	if surface.collision_layer != BattleLayers.HULL_SURFACE:
+		print("  [FAIL] HullSurface is on layer %d, expected HULL_SURFACE (%d)" % [
+			surface.collision_layer, BattleLayers.HULL_SURFACE])
+		return false
+	if surface.collision_layer == BattleLayers.RESOURCE_NODES:
+		print("  [FAIL] HullSurface is on the resource-node layer - units would be harvestable")
+		return false
+
+	print("  [PASS] %d hull piece(s), %d module hit volume(s), and a HullSurface on its own layer." % [
+		hull_colliders, checked])
+	return true
+
+
+# The trace narrows WHICH module a hit takes without changing how many random
+# draws it costs. SimRNG.pick() draws one randi() regardless of array length, so
+# a narrower candidate list must not move the stream - if it did, every seeded
+# match and every replay would diverge from this change alone.
+func test_shot_trace_narrows_strip_candidates_without_touching_the_rng() -> bool:
+	print("Running Test Suite: Combat - shot tracing picks the module without moving the sim stream...")
+	var modules := [
+		_module("heavy_machine_gun", "weapon", Vector3(0, 0.5, -1.0)),
+		_module("sensor_suite", "sensor", Vector3(0, 0.5, 1.0)),
+		_module("armor_plate", "armor", Vector3(0, 0.5, 0.0)),
+	]
+	var holder := Node3D.new()
+	root.add_child(holder)
+	for m in modules:
+		holder.add_child(m)
+
+	# No hit origin and no physics world to trace in: must fall back to the
+	# facet filter, unchanged. This is the path every headless take_damage()
+	# call and every direct scripted hit takes.
+	var fallback: Array = DamageModelScript.strippable_along_shot(
+		holder, holder, modules, null, "")
+	var expected: Array = DamageModelScript.strippable(modules, "")
+	if fallback.size() != expected.size():
+		print("  [FAIL] with no origin the trace must return exactly strippable()'s answer, got %d vs %d" % [
+			fallback.size(), expected.size()])
+		return false
+	for m in expected:
+		if not (m in fallback):
+			print("  [FAIL] fallback dropped a module strippable() kept")
+			return false
+
+	# Armour must stay out of it on both paths - it has its own facet-aware
+	# treatment in the resolver and being strippable too would double-count.
+	for m in fallback:
+		if m.get_meta("module_data").category == "armor":
+			print("  [FAIL] armour came back as a strip candidate")
+			return false
+
+	print("  [PASS] shot tracing falls back cleanly and never offers armour.")
+	return true

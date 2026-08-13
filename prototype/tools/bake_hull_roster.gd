@@ -19,11 +19,60 @@ extends SceneTree
 #
 # Passing hull ids after a bare `--` bakes only those (fast iteration on one
 # hull); with no ids, the whole directory is baked.
+#
+# Each bake also writes a third file:
+#     assets/models/hulls/<id>_collision.res  - convex decomposition of the
+#                                               welded shell (see _bake_collision)
+# `-- --collision-only` writes ONLY that, from the mesh already on disk, so
+# collision data can be added to a shipped roster without regenerating - and
+# therefore risking a change to - the hull geometry itself.
 
 const SDFMeshBaker = preload("res://scripts/sdf_mesh_baker.gd")
+const MeshWeld = preload("res://scripts/mesh_weld.gd")
+const HullCollisionShapes = preload("res://scripts/hull_collision_shapes.gd")
+const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
 
 const ASSEMBLY_DIR := "res://data/hull_assemblies"
 const OUT_DIR := "res://assets/models/hulls"
+
+# --- Collision decomposition ---------------------------------------------
+#
+# A spawned unit's body collider was a SINGLE convex fit of the hull mesh
+# (unit_assembly._add_hull_collider), which fills deck wells, the gap under a
+# tapered keel and the space between sponsons - all of it solid. The usual
+# answer is convex DECOMPOSITION, and that file records why it wasn't used:
+# it "never returned on the smallest hull in the roster at max_convex_hulls as
+# low as 4", because _build_faceted_mesh emits unwelded triangle soup and the
+# decomposer has no vertex adjacency to work from. mesh_weld.gd fixes the input;
+# this bakes the output so no unit ever pays for it at spawn time.
+#
+# 16 pieces is the ceiling. Each piece is a real shape in the physics server for
+# every unit alive, so this trades directly against how many units a match can
+# hold - and past a dozen or so the remaining error is deck greebles, not the
+# structural concavities that made shots land on empty air. Measured, the
+# roster does not come close: hulls decompose into 1-3 pieces.
+const MAX_CONVEX_HULLS := 16
+
+# VHACD's voxel budget. The default (10000) loses features around the size of a
+# sponson recess; 50000 keeps them and still finishes in ~150 ms per hull at
+# tool time, which is the only time it runs.
+const DECOMP_RESOLUTION := 50000
+
+# THE SETTING THAT ACTUALLY DOES THE WORK, and the one that is useless at its
+# default. max_concavity is "how much concavity may a piece keep", and it
+# defaults to 1.0 - which is to say "all of it", so VHACD hands back ONE piece
+# and the whole exercise reproduces the single convex fit that already shipped.
+# Measured across the roster: at 1.0 every hull returns 1 piece; at 0.25 some
+# return 2; at 0.05 they settle at 1-3 and stop changing by 0.01. So 0.05 is the
+# point where the concavities that matter have been split out and further
+# tightening only costs time.
+const DECOMP_MAX_CONCAVITY := 0.05
+
+# A weld that merges nothing means the mesh arrived already indexed OR the
+# tolerance missed, and a decomposition run on it will hang the way it always
+# did. Loud, because the failure mode it guards is "the baker appears to work
+# and the next person to run it waits forever".
+const WELD_RATIO_CEILING := 0.9
 
 # Baked-AABB vs declared-`size` tolerance. Below SOFT it's noise from the
 # skin-fit inset; above HARD the collision box is visibly wrong.
@@ -35,6 +84,18 @@ const HARD_DRIFT := 0.15
 # doesn't block unrelated work.
 var drifted := 0
 var strict := false
+
+# `-- --collision-only` skips the SDF bake and the sidecar entirely and just
+# (re)writes each hull's `_collision.res` from the mesh already on disk.
+#
+# This exists because adding the decomposition should not force a full roster
+# re-bake. Re-baking rewrites every `<id>.res`, which is a multi-megabyte binary
+# diff across the whole roster and re-runs marching cubes on geometry that is
+# already correct and already shipped - any drift in the baker since those files
+# were written would silently change hull SHAPES as a side effect of adding
+# collision data. Loading what is there and decomposing that changes nothing a
+# player can see.
+var collision_only := false
 
 # Must stay in sync with hull_builder.gd's PrimitiveType enum. Duplicated
 # here rather than imported because hull_builder.gd is a Node3D bound to a
@@ -50,9 +111,18 @@ const PRIMITIVE_TYPE_NAMES := [
 
 func _init() -> void:
 	var only_ids := _parse_id_filter()
-	var sources := _list_assemblies()
+
+	# --collision-only enumerates the SHIPPED roster (sidecars in OUT_DIR),
+	# every other mode enumerates the SOURCE assemblies. They are not the same
+	# set and cannot be: the assemblies are what this file bakes, the sidecars
+	# are what the game loads, and the Blender-authored hulls that make up the
+	# current roster have the latter without the former.
+	var sources: Array = _list_collision_ids() if collision_only else _list_assemblies()
 	if sources.is_empty():
-		printerr("No assemblies found in %s" % ASSEMBLY_DIR)
+		if collision_only:
+			printerr("No hull sidecars found in %s" % OUT_DIR)
+		else:
+			printerr("No assemblies found in %s" % ASSEMBLY_DIR)
 		quit(1)
 		return
 
@@ -61,10 +131,12 @@ func _init() -> void:
 	var total_tris := 0
 
 	for path in sources:
-		var stem: String = str(path).get_file().get_basename()
+		# In collision-only mode `path` IS the stem; otherwise it is a full
+		# assembly path to take the basename of.
+		var stem: String = str(path) if collision_only else str(path).get_file().get_basename()
 		if not only_ids.is_empty() and not only_ids.has(stem):
 			continue
-		var result := _bake_one(path, stem)
+		var result := _collision_only_one(stem) if collision_only else _bake_one(path, stem)
 		if result < 0:
 			failed += 1
 		else:
@@ -72,8 +144,12 @@ func _init() -> void:
 			total_tris += result
 
 	print("")
-	print("Baked %d hull(s), %d failed, %d with size drift. Total %d triangles." % [
-		baked, failed, drifted, total_tris])
+	if collision_only:
+		print("Wrote collision for %d hull(s), %d failed. Total %d triangles." % [
+			baked, failed, total_tris])
+	else:
+		print("Baked %d hull(s), %d failed, %d with size drift. Total %d triangles." % [
+			baked, failed, drifted, total_tris])
 	if drifted > 0 and not strict:
 		print("Re-run with `-- --strict` to make size drift fail the build.")
 	quit(1 if failed > 0 or (strict and drifted > 0) else 0)
@@ -84,6 +160,9 @@ func _parse_id_filter() -> Dictionary:
 	for a in args:
 		if a == "--strict":
 			strict = true
+			continue
+		if a == "--collision-only":
+			collision_only = true
 			continue
 		ids[a] = true
 	return ids
@@ -163,7 +242,133 @@ func _bake_one(path: String, stem: String) -> int:
 		_fmt_v3(aabb.size), str(sidecar.get("size", "?"))])
 	_check_size_drift(stem, aabb, sidecar)
 	_check_topology(stem, mesh, method)
+	_bake_collision(stem, mesh, tris)
 	return tris
+
+
+# Decomposition for a hull whose mesh is already on disk.
+#
+# RESOLVED THROUGH MeshAssetLoader, not by reading `<id>.res` directly, and that
+# is load-bearing rather than tidiness. The roster is NOT all one format: the
+# SDF pipeline in this file writes .res, but every hull currently shipping is a
+# Blender-authored .glb from tools/blender/build_vehicle_hulls.py, and a hull
+# can also declare `primitive_shape` in its sidecar and have no mesh file at
+# all. get_hull_mesh() is the precedence chain the GAME uses, so going through
+# it is what guarantees the collision shell describes the mesh a unit actually
+# spawns with. An earlier version of this looked for `<id>.res` and would have
+# reported "no baked mesh" for all 94 hulls.
+#
+# Returns the triangle count, or -1 if nothing resolved.
+func _collision_only_one(stem: String) -> int:
+	var mesh := MeshAssetLoader.get_hull_mesh(stem)
+	if mesh == null:
+		printerr("  %s: get_hull_mesh() resolved nothing - no mesh to decompose" % stem)
+		return -1
+	var tris := mesh.get_faces().size() / 3
+	if tris <= 0:
+		printerr("  %s: mesh has no triangles" % stem)
+		return -1
+	_bake_collision(stem, mesh, tris)
+	return tris
+
+
+# Hull ids for --collision-only, taken from the SIDECARS in the output dir
+# rather than from data/hull_assemblies. Both pipelines write a `<id>.json`
+# sidecar, so this covers the Blender-authored roster as well as the SDF one;
+# listing assemblies would have covered only hulls this file bakes itself.
+func _list_collision_ids() -> Array:
+	var out := []
+	var dir := DirAccess.open(OUT_DIR)
+	if not dir:
+		return out
+	dir.list_dir_begin()
+	var f := dir.get_next()
+	while f != "":
+		if not dir.current_is_dir() and f.get_extension() == "json":
+			out.append(f.get_basename())
+		f = dir.get_next()
+	dir.list_dir_end()
+	out.sort()
+	return out
+
+
+# Welds the render mesh into a manifold shell and saves its convex decomposition
+# alongside it. Never fails the bake: a hull with no `_collision.res` falls back
+# at runtime to the single convex fit that shipped before this existed
+# (unit_assembly._add_hull_collider), so a roster can migrate one hull at a time
+# exactly the way the .glb -> .res conversion did.
+func _bake_collision(stem: String, mesh: ArrayMesh, tris: int) -> void:
+	var path := "%s/%s_collision.res" % [OUT_DIR, stem]
+	var welded := MeshWeld.weld(mesh)
+	if welded == null:
+		printerr("  %s: weld produced no geometry - no collision decomposition written" % stem)
+		return
+	var ratio := MeshWeld.weld_ratio(welded)
+	if ratio > WELD_RATIO_CEILING:
+		printerr("  %s: WELD DID NOTHING (%.0f%% of vertices survived) - decomposition would hang, skipping." % [
+			stem, ratio * 100.0])
+		drifted += 1
+		return
+
+	# ClassDB/`call` rather than the literal type and method. This tool must
+	# PARSE on any engine build - a bare MeshConvexDecompositionSettings.new()
+	# is an "Identifier not declared" parse error if the class is absent, which
+	# would take the whole roster bake down rather than just this step.
+	#
+	# AND THE DECOMPOSER IS NOT ON Mesh. There is no Mesh.convex_decompose in
+	# 4.7.1 - Mesh exposes only create_convex_shape, and the only decomposition
+	# entry point in the whole of ClassDB is
+	# MeshInstance3D.create_multiple_convex_collisions, which does not return
+	# the shapes but attaches a StaticBody3D full of them as a child. So the
+	# shapes are harvested off a throwaway instance.
+	var settings = ClassDB.instantiate("MeshConvexDecompositionSettings")
+	var holder := MeshInstance3D.new()
+	holder.mesh = welded
+	root.add_child(holder)
+	if settings == null or not holder.has_method("create_multiple_convex_collisions"):
+		print("  %s: convex decomposition unavailable on this engine build - skipped." % stem)
+		root.remove_child(holder)
+		holder.free()
+		return
+	settings.set("max_convex_hulls", MAX_CONVEX_HULLS)
+	settings.set("resolution", DECOMP_RESOLUTION)
+	settings.set("max_concavity", DECOMP_MAX_CONCAVITY)
+
+	var t0 := Time.get_ticks_msec()
+	holder.call("create_multiple_convex_collisions", settings)
+	var elapsed := Time.get_ticks_msec() - t0
+
+	var res = HullCollisionShapes.new()
+	var points_total := 0
+	for holder_body in holder.find_children("*", "StaticBody3D", true, false):
+		for child in holder_body.get_children():
+			if not (child is CollisionShape3D):
+				continue
+			var shape = (child as CollisionShape3D).shape
+			if not (shape is ConvexPolygonShape3D):
+				continue
+			# Only the point cloud is stored - the Shape3D itself is rebuilt at
+			# load time so nothing shares a live physics shape with whatever the
+			# resource cache is holding.
+			var points: PackedVector3Array = (shape as ConvexPolygonShape3D).points
+			if points.size() < 4:
+				continue
+			res.hulls.append(points)
+			points_total += points.size()
+	root.remove_child(holder)
+	holder.free()
+	if res.hulls.is_empty():
+		printerr("  %s: every decomposed piece was degenerate - no collision written" % stem)
+		return
+	res.source_triangles = tris
+	res.max_convex_hulls = MAX_CONVEX_HULLS
+
+	var err := ResourceSaver.save(res, path)
+	if err != OK:
+		printerr("  %s: could not save collision decomposition (error %d)" % [stem, err])
+		return
+	print("  %s: collision %d hull(s), %d points, weld kept %.0f%%, %d ms" % [
+		stem, res.hulls.size(), points_total, ratio * 100.0, elapsed])
 
 # A hull must bake as ONE closed shell. Nothing checked this, and two hulls had
 # been shipping broken in a way no other check could see:

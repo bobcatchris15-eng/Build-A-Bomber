@@ -33,6 +33,19 @@ const HullSurfaceScript = preload("res://scripts/hull_surface.gd")
 # of that function runs after the loop, where that local is out of scope.
 const VisualBuilderScript = preload("res://scripts/visual_builder.gd")
 const ModuleMirrorScript = preload("res://scripts/module_mirror.gd")
+const ModuleVolumeScript = preload("res://scripts/module_volume.gd")
+# BattleLayers declares class_name, but this file is loaded by the Design Lab
+# too - preloaded rather than leaned on so it resolves the same way in a
+# headless run with no .godot cache, matching every other dependency here.
+const BattleLayersScript = preload("res://scripts/battle/battle_layers.gd")
+
+# Ceiling on the per-mesh hit volumes a battle module gets before it collapses
+# to one merged box. A spawned unit holds these for its whole life and a match
+# can field a hundred of them, so a 16-mesh multi-axle wheel set is not worth 16
+# shapes - the win is receiver/pintle/barrel instead of one envelope, and that
+# is already had by four. Most weapons never reach the cap: a monolithic
+# authored .glb is a single MeshInstance3D and therefore a single box.
+const BATTLE_MODULE_MAX_SHAPES := 8
 
 # Set by load_blueprint_into_designer() whenever it returns false, so
 # callers (blueprint_library_screen.gd) can show a specific reason instead of
@@ -831,7 +844,26 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# can see. Same mesh instance the visuals use, so the surface traced is
 		# the surface drawn.
 		HullSurfaceScript.rebuild(hull, mesh_inst)
-	
+	else:
+		# THE SAME PRECISE SURFACE, IN BATTLE. Damage and LOS rays had nothing
+		# mesh-accurate to trace against out here: a spawned unit's only hull
+		# collider is unit_assembly's single CONVEX fit, which fills deck wells
+		# and sponson gaps, and it lives on the UNITS layer where the raycasts
+		# that care are not looking. damage_resolver.compute_slope_multiplier
+		# says in its own comment that it "starts reflecting true sloped
+		# surfaces automatically the moment hull collision becomes
+		# mesh-accurate" - this is that moment.
+		#
+		# ON ITS OWN LAYER, not the Lab's. HullSurface's default layer is 16,
+		# which in a match is BattleLayers.RESOURCE_NODES - a hull on it would
+		# be returned by the right-click ore-patch pick, so every unit would
+		# read as a harvestable node.
+		#
+		# The shape resource is shared across every duplicate of a cached hull
+		# template (Node.duplicate() copies nodes, not resources), so a design
+		# pays for one trimesh no matter how many of it roll out of the factory.
+		HullSurfaceScript.rebuild(hull, mesh_inst, BattleLayersScript.HULL_SURFACE)
+
 	parent_node.add_child(hull)
 
 	# Raise hull height if wheels are present so they touch the ground (Y=0).
@@ -919,21 +951,22 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		var VisualBuilder = preload("res://scripts/visual_builder.gd")
 		VisualBuilder.build_visual(type_id, new_module, mod_catalog_data.get("size", Vector3.ONE), mod_catalog_data.color, mod.get("tweaks", {}))
 		
+		# THE DESIGN LAB's click body is created here but SIZED further down,
+		# after rebuild_visual() and the mirror flip have built the geometry it
+		# is supposed to describe. It used to be fitted right here, off the
+		# build_visual() call above - which runs BEFORE rebuild_visual() applies
+		# struct_scale, so every structural piece in a loaded blueprint carried a
+		# click collider measured at its un-stretched size.
+		#
+		# Creating it early is safe (and is why it is not deferred like the
+		# battle volume below): build_visual() deliberately skips StaticBody3D
+		# children when it clears a module, so this one survives the rebuild.
 		if is_designer:
 			var static_body = StaticBody3D.new()
-			static_body.collision_layer = 2 # Modules layer
 			static_body.collision_mask = 0
-			static_body.position = Vector3(0, mod_catalog_data.get("size", Vector3.ONE).y / 2.0, 0)
-			var collision_shape = CollisionShape3D.new()
-			var col_box_mod = BoxShape3D.new()
-			col_box_mod.size = mod_catalog_data.get("size", Vector3.ONE)
-			collision_shape.shape = col_box_mod
-			static_body.add_child(collision_shape)
+			static_body.collision_layer = 2 # Design Lab click/raycast layer
 			new_module.add_child(static_body)
-			
-			var ModulePlacerScript = preload("res://scripts/module_placer.gd")
-			ModulePlacerScript._refit_module_collider(new_module)
-		
+
 		var m_data = ModuleDataResource.new()
 		m_data.type_id = type_id
 		m_data.module_name = mod_catalog_data.name
@@ -995,11 +1028,53 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			new_module.set_meta("scale_flip_x", true)
 			_apply_mirror_flip_to(new_module)
 
+		# NOW build the collision volume, against the geometry that finally
+		# exists. The two modes want different shapes and it is not an
+		# inconsistency:
+		#
+		#   * The Lab's is a CLICK target. One box with a deliberate comfort
+		#     margin, because a player aiming at a thin barrel should not have
+		#     to hit it exactly - _refit_module_collider owns that policy.
+		#   * A battle module's is a HIT volume. One box per visible mesh, no
+		#     margin, so a shot connects with the barrel where the barrel is
+		#     drawn and passes through the gap between barrel and receiver.
+		if is_designer:
+			var ModulePlacerScript = preload("res://scripts/module_placer.gd")
+			ModulePlacerScript._refit_module_collider(new_module)
+		else:
+			# An Area3D, not a StaticBody3D, for two reasons. It rides a moving
+			# unit, and a static body is declared to the physics server as
+			# something that does not move. And build_visual() only spares
+			# StaticBody3D children when it clears a module - an Area3D created
+			# before rebuild_visual() above would have been destroyed by it,
+			# which is why this one is built here rather than with the Lab's.
+			#
+			# Same shape as the selection proxy's deal: monitoring OFF (nothing
+			# needs to react to things entering a barrel), monitorable ON so
+			# raycasts with collide_with_areas can find it.
+			var hit_volume := Area3D.new()
+			hit_volume.name = "HitVolume"
+			hit_volume.collision_mask = 0
+			# A separate layer from the Lab's, and NOT one auto_weapon's LOS
+			# query masks - see BattleLayers.UNIT_MODULES for why a hit volume
+			# must not double as an occluder.
+			hit_volume.collision_layer = BattleLayersScript.UNIT_MODULES
+			hit_volume.monitoring = false
+			hit_volume.monitorable = true
+			new_module.add_child(hit_volume)
+			ModuleVolumeScript.build_collision_shapes(
+				new_module, hit_volume, 0.0, BATTLE_MODULE_MAX_SHAPES)
+
 		# PERFORMANCE_PLAN.md P4: only a battle instance's module needs this -
 		# the Design Lab keeps the per-part nodes as the live-editable
 		# representation (gizmo handles, tweak deformation target them
 		# directly). Must run AFTER rebuild_visual and the mirror-flip above,
 		# both of which need the real, un-merged sub-part nodes to work on.
+		#
+		# And after the collider, which measures the individual sub-parts this
+		# is about to merge away. Baking first would collapse a gun's receiver,
+		# pintle and barrel into one material-grouped mesh and hand the collider
+		# back the single envelope it exists to avoid.
 		if not is_designer:
 			VisualBuilder.bake_module_visual(new_module)
 

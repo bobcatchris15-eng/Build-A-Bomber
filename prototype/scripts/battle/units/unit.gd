@@ -966,7 +966,12 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	# that module - it does not also come off the hull, which is what makes
 	# stripping a real trade for the attacker rather than a free bonus.
 	var facet := DamageModelScript.hit_facet(self, hit_origin)
-	var strippable := DamageModelScript.strippable(modules, facet)
+	# Traced against the per-module hit volumes when there is a physics world to
+	# trace in, so the module a shot takes is the one it visibly struck; falls
+	# back to the facet filter otherwise. Draw count is identical either way -
+	# see strippable_along_shot's header on why that had to be true.
+	var strippable := DamageModelScript.strippable_along_shot(
+		self, hull_node, modules, hit_origin, facet)
 	#
 	# SIM, twice over: whether this hit strips at all, and which of the exposed
 	# modules it takes. Both are outcome-defining - a strip consumes the hit

@@ -312,9 +312,15 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 			
 	var is_clipping = false
 	if root.has_method("is_ghost_clipping"):
-		is_clipping = root.is_ghost_clipping(ghost_mesh.transform, type_id)
+		# The ghost NODE goes with the transform. The ghost is a real built
+		# module tree, so passing it lets the test measure its actual meshes
+		# instead of a catalog-sized box - which is what makes the red preview
+		# agree with the verdict check_all_clipping() reaches about the same
+		# part once it is placed.
+		is_clipping = root.is_ghost_clipping(ghost_mesh.transform, type_id, ghost_mesh)
 		if not is_clipping and ghost_mesh_mirror and ghost_mesh_mirror.visible:
-			is_clipping = root.is_ghost_clipping(ghost_mesh_mirror.transform, type_id)
+			is_clipping = root.is_ghost_clipping(
+				ghost_mesh_mirror.transform, type_id, ghost_mesh_mirror)
 
 	_ghost_is_clipping = is_clipping
 

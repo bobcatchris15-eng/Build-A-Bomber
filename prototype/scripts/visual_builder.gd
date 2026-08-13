@@ -12,6 +12,7 @@ const GlobalConfigScript = preload("res://scripts/global_config.gd")
 const PartMaterialsScript = preload("res://scripts/part_materials.gd")
 const HullProjectionScript = preload("res://scripts/hull_projection.gd")
 const MountReachScript = preload("res://scripts/mount_reach.gd")
+const ModuleVolumeScript = preload("res://scripts/module_volume.gd")
 
 # mesh instance-id -> PartMaterials role, populated by _part() as assets load.
 #
@@ -87,25 +88,19 @@ static func _part(part_name: String) -> Mesh:
 ## Walks up through intermediate pivots deliberately: locomotion builders nest
 ## parts under named pivots (rotor hubs, leg knees) that carry real offsets, so
 ## a mesh's own AABB means nothing without them.
+##
+## DELEGATES to module_volume.gd, which owns the measurement now. This used to
+## be its own copy of the walk, and the copy had drifted: it skipped overlay
+## geometry by matching the MESH's name only, so a module that was SELECTED
+## measured its Gizmo3D handle meshes (all named plain "MeshInstance3D", parked
+## out at the module's extents) into its own bounds. module_volume filters by
+## the whole ancestor chain instead, which is what module_placer's separate
+## _find_meshes_recursive() had always done.
+##
+## Kept as the entry point because ride-height and click-collider callers want
+## the single merged box, not the parallelepiped list underneath it.
 static func measure_visual_bounds(module: Node3D) -> AABB:
-	var bounds := AABB()
-	var seen := false
-	for mesh_inst in module.find_children("*", "MeshInstance3D", true, false):
-		if mesh_inst.mesh == null:
-			continue
-		var m_name = mesh_inst.name
-		if m_name == "BarrierShield" or m_name.begins_with("BarrierShield") or m_name.begins_with("FiringArc") or m_name.begins_with("ArcCone"):
-			continue
-		var xf := Transform3D.IDENTITY
-		var walker: Node = mesh_inst
-		while walker != null and walker != module:
-			if walker is Node3D:
-				xf = walker.transform * xf
-			walker = walker.get_parent()
-		var part = xf * mesh_inst.mesh.get_aabb()
-		bounds = part if not seen else bounds.merge(part)
-		seen = true
-	return bounds if seen else AABB()
+	return ModuleVolumeScript.bounds(module)
 
 static func build_running_gear(parent_node: Node3D, dimensions: Vector3, base_color: Color, collision_layer: int = 1, type_id: String = "", hardpoints: Array = []) -> StaticBody3D:
 	var body = StaticBody3D.new()
@@ -618,6 +613,12 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			continue
 		parent_node.remove_child(child)
 		child.queue_free()
+
+	# Every mesh this module had is now gone, so the cached volume describes
+	# geometry that no longer exists. This is the ONLY invalidation point that
+	# matters: tweak drags, struct_scale resizes and sponson blister rebuilds
+	# all reach the module through here.
+	ModuleVolumeScript.invalidate(parent_node)
 
 	# Try to load a monolithic authored mesh for this entire module first (modular sub-part assemblies bypass this)
 	var monolithic_mesh = _part(type_id) if not MODULAR_ASSEMBLY_TYPES.has(type_id) else null
@@ -5937,6 +5938,12 @@ static func bake_module_visual(module: Node3D) -> void:
 	for part in to_remove:
 		module.remove_child(part)
 		part.queue_free()
+
+	# The measured volume described the sub-parts that were just merged away.
+	# Anything measuring after this gets the merged geometry instead - same
+	# union, coarser subdivision - which is why blueprint_manager builds a
+	# battle module's collision shapes BEFORE calling this.
+	ModuleVolumeScript.invalidate(module)
 
 
 # Regenerates level-of-detail data on a runtime-merged mesh.

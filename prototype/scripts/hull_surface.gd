@@ -25,7 +25,13 @@ const SURFACE_COLLISION_LAYER := 16
 # Replaces any existing HullSurface under `target_hull` with a fresh trimesh of
 # `source_mesh_inst`. Safe to call repeatedly; a no-op if there is no mesh to
 # trace against (the caller's bounding-box collider stays the fallback).
-static func rebuild(target_hull: Node3D, source_mesh_inst: MeshInstance3D) -> void:
+#
+# `layer` overrides SURFACE_COLLISION_LAYER. A battle spawn MUST pass its own
+# (BattleLayers.HULL_SURFACE): bit 5 is free in the Design Lab but is
+# RESOURCE_NODES in a match, so a hull left on the default would come back from
+# the right-click ore-patch pick as a harvestable node.
+static func rebuild(target_hull: Node3D, source_mesh_inst: MeshInstance3D,
+		layer: int = SURFACE_COLLISION_LAYER) -> void:
 	if not target_hull or not is_instance_valid(target_hull):
 		return
 	var existing = target_hull.get_node_or_null("HullSurface")
@@ -52,7 +58,7 @@ static func rebuild(target_hull: Node3D, source_mesh_inst: MeshInstance3D) -> vo
 
 	var body := StaticBody3D.new()
 	body.name = "HullSurface"
-	body.collision_layer = SURFACE_COLLISION_LAYER
+	body.collision_layer = layer
 	body.collision_mask = 0
 	var col := CollisionShape3D.new()
 	col.shape = tri_shape
