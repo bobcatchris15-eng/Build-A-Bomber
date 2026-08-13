@@ -71,6 +71,7 @@ const SUITE_FILES := {
 	"match_rule_set_integration": preload("res://tests/battle/test_match_rule_set_integration.gd"),
 	"semantic_zoom": preload("res://tests/test_semantic_zoom.gd"),
 	"command_card": preload("res://tests/test_command_card.gd"),
+	"ui_prop_stage": preload("res://tests/test_ui_prop_stage.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -436,6 +437,24 @@ const SUITE_ORDER := [
 	["command_card", "test_command_card_rebind_refreshes_label"],
 	["command_card", "test_command_card_geometry_is_3_by_4"],
 	["command_card", "test_attack_move_arming_changes_cursor"],
+
+	# Phase 1 UIPropStage suites (Tactile Interface Programme Part 4
+	# Phase 1). APPENDED, never interleaved. The five suites guard
+	# the load-bearing invariants of the shared 3D UI viewport:
+	# the rect-to-world mapping is exact, attach/detach is clean,
+	# state changes mark the stage dirty exactly once, N buttons
+	# share ONE SubViewport (the X2 regression guard), and the
+	# StampedButton fallback path still works without a stage
+	# ancestor (the migration safety net the headless test
+	# path depends on). Pure unit tests on the stage and the
+	# button - no scene, no navmesh, no autoload state - so
+	# they can run last without disturbing the pinned order
+	# above.
+	["ui_prop_stage", "test_rect_to_world_mapping_is_exact"],
+	["ui_prop_stage", "test_attach_detach_leaves_no_orphan_mesh"],
+	["ui_prop_stage", "test_state_change_marks_stage_dirty_exactly_once"],
+	["ui_prop_stage", "test_screen_with_n_buttons_has_one_subviewport"],
+	["ui_prop_stage", "test_stamped_button_without_stage_ancestor_still_renders"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

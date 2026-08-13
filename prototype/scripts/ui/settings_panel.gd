@@ -19,6 +19,7 @@ const UIToolboxScript = preload("res://scripts/ui_toolbox.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const InputServiceScript = preload("res://scripts/core/input_service.gd")
 const MeshIconScript = preload("res://scripts/ui/mesh_icon.gd")
+const UIShell = preload("res://scripts/ui_shell.gd")
 
 const TOGGLE_MESH := "res://assets/models/ui/ui_toggle_switch.glb"
 const ROTARY_MESH := "res://assets/models/ui/ui_rotary_selector.glb"
@@ -85,6 +86,12 @@ func _ready() -> void:
 	custom_minimum_size = Vector2(620, 560)
 	_settings = get_node_or_null("/root/SettingsService")
 	_input_svc = get_node_or_null("/root/InputService")
+	# The shared 3D UI viewport for this panel. Added first so the
+	# MeshIcons below it (in the rows) find it in their ancestor
+	# chain and so the stage draws underneath the panel's own
+	# children - the 3D content shows in the MeshIcon rects and
+	# nowhere else, because nothing else on this panel is a 3D prop.
+	UIShell.stage(self)
 	_build()
 
 

@@ -7,65 +7,79 @@ extends Button
 # taken one step further: the button itself is a real mesh, not a flat
 # plate with a 2D label on top.
 #
-# CREATED 2026-08-10 in Phase 1 of the chrome unification. The motivation
-# is the same as the 2D prototype this replaced: the out-of-match screens
-# (livery / match_setup / operations_setup / operations_draft /
-# blueprint_library / loading) all hand-rolled a flat Button +
-# UIFeedbackScript.wire() and had no primitive combining the chamfered
-# metal face + the enamel legend + the real-button state changes. The 2D
-# version (ToolboxPlate + StampedLabel) closed that gap. This 3D version
-# closes it better: the mesh carries the chunkiness, the dish catches the
-# key light, the chamfer reads as a machined edge - all things a flat
-# 2D plate could only fake.
+# CREATED 2026-08-10 in Phase 1 of the chrome unification. REWRITTEN
+# 2026-08-13 in Phase 1 of the Tactile Interface Programme to use the
+# shared UIPropStage (D2: one SubViewport per screen, not per button).
+# Public API is unchanged: Variant enum, MIN_WIDTH / MIN_HEIGHT /
+# COMPACT_HEIGHT, the legend and variant properties and their setters,
+# the hd_material_override hook, the focus ring, the StampedLabel child.
+# Every existing call site - deploy_gate, livery, match_setup,
+# operations_draft, operations_setup, blueprint_library - continues
+# to compile and to behave as before.
 #
-# THE MESH is ui_push_button.glb, authored in tools/blender/build_ui_props.py
-# alongside the toggle, rocker, knurled dial, dzus fastener and latch
-# meshes that the Design Lab settings panel and stat calculator already
-# use as 3D icons next to native controls. The build script pattern is the
-# one Chris set up for the other six; adding the seventh was a single
-# new function call.
+# THE STAGE PATH (production). On _ready() the button walks its
+# ancestor chain for a UIPropStage. If one is found, the button
+# registers itself with attach() and from then on the stage owns
+# the mesh, the camera, the lights, and the render cycle. The
+# button keeps its identity as a Control (hit-testing, focus,
+# keyboard nav, every existing test that clicks it) and is a thin
+# client of the stage for everything visual. The state pipeline
+# (variant / hover / pressed / disabled) calls stage.set_prop_state
+# and stage.set_prop_variant, which mutate the shared material and
+# mark the shared viewport dirty.
 #
-# COMPOSITION:
+# THE FALLBACK PATH (headless + not-yet-migrated screens). If no
+# UIPropStage ancestor exists, the button renders as a plain Godot
+# Button with the theme's procedural moulded. The StampedLabel
+# child still draws the legend in the stamped-enamel style; the
+# focus ring still works; the button's pressed/hover signals
+# still fire. The only thing missing is the 3D mesh, which is the
+# entire point of the fallback: a headless test that has no
+# SubViewport must not depend on the 3D rendering. This is the
+# one DOCUMENTED SILENT FALLBACK in this project, per Phase 1 of
+# the Tactile Interface Programme.
+#
+# COMPOSITION (stage path):
 #
 #   StampedButton (extends Button, the hit target + focus owner)
-#   +-- SubViewportContainer (FULL_RECT, MOUSE_FILTER_IGNORE, stretch)
-#   |   +-- SubViewport (transparent_bg, UPDATE_WHEN_VISIBLE)
-#   |       +-- WorldEnvironment (transparent, ACES, ambient)
-#   |       +-- DirectionalLight3D (key from top-left)
-#   |       +-- Camera3D (3/4 view, FOV 28)
-#   |       +-- MeshInstance3D (the push button mesh, scaled to fit)
-#   +-- StampedLabel (FULL_RECT, MOUSE_FILTER_IGNORE, the legend in enamel)
+#   +-- StampedLabel (FULL_RECT, MOUSE_FILTER_IGNORE, the legend)
+#   +-- FocusRing (FULL_RECT, MOUSE_FILTER_IGNORE, the keyboard ring)
+#   (no SubViewportContainer; the shared stage owns the viewport)
 #
-# The Button is the structural root. The SubViewportContainer shows the
-# rendered mesh; the StampedLabel overlays the legend. The Button's own
-# theme styleboxes are blanked in _init, so the procedural moulded the
-# theme assigns to Button does not double-paint on top of the mesh.
+# COMPOSITION (fallback path):
 #
-# STATE-TO-LOOK PIPELINE:
-#   * variant -> material body color (albedo + roughness + metallic)
-#   * hover   -> the dish catches more light (a brighter key), the body
-#                brightens slightly so the chamfer highlight grows
-#   * pressed -> the body darkens, the dish looks receded (the user's
-#                finger is "pushing it down")
-#   * disabled -> the body desaturates, the label dims
+#   StampedButton (extends Button)
+#   +-- StampedLabel (legend in stamped enamel, over the theme face)
+#   +-- FocusRing (keyboard ring on top of the theme face)
+#   (no 3D mesh; the theme's procedural moulded IS the face)
 #
-# HD TEXTURES (Phase 3) layer onto the same mesh. The procedural material
-# is the rendering default; the HD material swaps in via
-# `set_hd_material_override(material)`. The hit-test geometry, label
-# position, and state pipeline are unchanged, so Phase 3 is a no-call-
-# site-change swap at every existing call site of this primitive.
+# STATE-TO-LOOK PIPELINE (stage path):
+#   * variant -> stage.set_prop_variant() -> the shared material's
+#     base values (albedo / metallic / roughness / emission)
+#   * hover   -> stage.set_prop_state("hover") -> the dish catches
+#     more light, the body brightens
+#   * pressed -> stage.set_prop_state("pressed") -> the body
+#     darkens, the dish looks receded
+#   * disabled -> stage.set_prop_state("disabled") -> the body
+#     desaturates
+# STATE-TO-LOOK PIPELINE (fallback path):
+#   * the theme's procedural moulded, plus the StampedLabel's
+#     stamped-enamel legend and the focus ring. Pressed/hover give
+#     the standard Godot Button audio + stylebox swap.
 #
-# EVERY BUTTON GETS THE HD TREATMENT - that is the Phase 3 directive, not
-# an 8-10 shortcut. The procedural mesh + variant material is what we
-# have today. The HD authoring (manufacturer mark stamped into the dish,
-# part number stamp near the rim, real chamfered screws) is the upgrade
-# that makes every visible button look like a real piece of hardware.
+# HD TEXTURES (Phase 3) layer onto the same mesh via
+# hd_material_override. The override is pushed to the stage's
+# per-handle MeshInstance3D; the procedural state pipeline is
+# suspended for that prop until the override is cleared. The
+# fallback path ignores the override - there is no 3D rendering
+# to apply it to.
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const StampedLabelScript = preload("res://scripts/ui_stamped_label.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
+const UIPropStageScript = preload("res://scripts/ui/ui_prop_stage.gd")
 
-const MESH_PATH := "res://assets/models/ui/ui_push_button.glb"
+const MESH_PROP_ID := "push_button"
 
 enum Variant {
 	DEFAULT,    # standard action
@@ -78,33 +92,28 @@ enum Variant {
 const MIN_WIDTH := 132.0
 const MIN_HEIGHT := 44.0
 const COMPACT_HEIGHT := 36.0
-# The SubViewport renders at 2x the button's pixel size for sharp edges.
-# 2x is the sweet spot: 1x aliases the chamfer, 3x is wasted GPU on a
-# 132x44 button. UPDATE_WHEN_VISIBLE means it only re-renders on state
-# change, not every frame.
-const RENDER_SCALE := 2
-# How much the material brightens on hover. Kept small - a chamfered mesh
-# that jumps brightness reads as a screen-mode change, not as a surface
-# catching more light. 0.12 is roughly the lift a real factory button
-# shows when the operator's hand approaches.
-const HOVER_LIFT := 0.12
-# Symmetric with HOVER_LIFT so a press reads as "the button moved down
-# into the frame", not as "it dimmed".
-const PRESS_DROP := 0.14
 
-var _viewport: SubViewport = null
-var _mesh_instance: MeshInstance3D = null
-var _material: StandardMaterial3D = null
+var _stage: UIPropStage = null
+var _stage_handle: int = -1
 var _label: Control = null
+var _focus_ring: Control = null
 var _variant: int = Variant.DEFAULT
-# Cached per-variant BASE values, so hover/press apply deltas to a known
-# state rather than chaining lerps from a mutable field. _apply_state reads
-# from these; _apply_variant writes them.
-var _base_albedo: Color = Color(0.42, 0.43, 0.45)
-var _base_metallic: float = 0.55
-var _base_roughness: float = 0.42
-var _base_emission: Color = Color(0, 0, 0, 0)
-var _base_emission_energy: float = 0.0
+# State strings pushed to the stage. Kept here as constants so a
+# typo in the call site (e.g. "hoover") is a name resolution error
+# rather than a silent string mismatch. The four values match the
+# ones UIPropStage._apply_state() expects.
+const STAGE_STATE_NORMAL := "normal"
+const STAGE_STATE_HOVER := "hover"
+const STAGE_STATE_PRESSED := "pressed"
+const STAGE_STATE_DISABLED := "disabled"
+# Variant strings pushed to the stage. Same reasoning. The names
+# are lowercase string forms of the Variant enum (Phase 1 ships
+# the mapping here, not as a separate converter).
+const STAGE_VARIANT_DEFAULT := "default"
+const STAGE_VARIANT_PRIMARY := "primary"
+const STAGE_VARIANT_DANGER := "danger"
+const STAGE_VARIANT_GHOST := "ghost"
+const STAGE_VARIANT_COMPACT := "compact"
 
 
 # The button's legend. Routed into the StampedLabel child, NOT the Button's
@@ -117,52 +126,80 @@ var legend: String = "":
 			_label.text = value
 
 
-# The button's role. Setting this re-colours the mesh immediately, so a
-# screen can hot-swap a button's meaning without rebuilding it.
+# The button's role. Setting this re-colours the mesh immediately on the
+# stage path, or adjusts the COMPACT height on the fallback path. Both
+# paths always update the focus ring.
 var variant: int = Variant.DEFAULT:
 	set(value):
 		_variant = value
-		_apply_variant()
-		_apply_state()
-		if _viewport != null:
-			_invalidate()
+		if _stage_handle != -1:
+			_stage.set_prop_variant(_stage_handle, _variant_to_stage_string(_variant))
+		_apply_variant_height()
+		_apply_focus_ring()
 
 
 # Optional override of the procedural material. Phase 3 hook for the HD
 # plates (engraved manufacturer mark, part number stamp, screws). When
-# set, the procedural material is replaced and the variant system no
-# longer drives colour - the override owns the look. Empty = procedural.
+# set, the procedural material is replaced on the stage's per-handle
+# MeshInstance3D and the state pipeline is suspended for that prop -
+# the override owns the look. Empty / null = procedural.
 #
 # The override is a fully constructed Material (the same type the engine
 # renders), not a path - the caller has the asset already loaded. This
 # keeps the primitive ignorant of resource loading.
+#
+# On the fallback path there is no 3D rendering to apply the override
+# to, so the value is stored but has no visible effect. The setter
+# still runs (the contract is "set it and the look changes", which
+# is the production path; the fallback degrades to no-op).
 var hd_material_override: Material = null:
 	set(value):
 		hd_material_override = value
-		if _mesh_instance != null:
-			if value != null:
-				_mesh_instance.material_override = value
-			else:
-				_mesh_instance.material_override = _material
-			_invalidate()
+		if _stage_handle != -1:
+			_stage.set_prop_material_override(_stage_handle, value)
+		# The override owns the look; the procedural state pipeline is
+		# off when an override is set. Even so, the focus ring is OUR
+		# responsibility - the theme focus stylebox is blanked on the
+		# stage path, so without this, keyboard users have no visual
+		# feedback at all on an HD-override'd button.
+		_apply_focus_ring()
 
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	custom_minimum_size = Vector2(MIN_WIDTH, MIN_HEIGHT)
 	focus_mode = Control.FOCUS_ALL
-	# Blank out the theme's procedural moulded. The mesh in the SubViewport
-	# IS the face; drawing a Button stylebox on top of it would double-paint.
-	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
-		add_theme_stylebox_override(state, StyleBoxEmpty.new())
+	# NOTE: stylebox blanking is now in _ready() and is GATED on the
+	# presence of a stage. The original code blanked in _init; that
+	# was safe then because every button had its own SubViewport, so
+	# "I have a 3D mesh" was always true. The shared stage breaks
+	# that invariant: a screen that has not yet been migrated to
+	# the stage path (or a headless test) must keep the theme's
+	# procedural moulded as the button face.
 
 
 func _ready() -> void:
-	_build_viewport()
+	_stage = _find_stage()
 	_build_label()
 	_build_focus_ring()
-	_apply_variant()
-	_apply_state()
+	if _stage != null:
+		# Blank the theme's procedural moulded. The shared mesh IS
+		# the face; drawing a Button stylebox on top of it would
+		# double-paint. This is why the gating moved out of _init:
+		# a no-stage button NEEDS the theme stylebox.
+		_blank_styleboxes()
+		_stage_handle = _stage.attach(self, MESH_PROP_ID)
+		# Push the initial variant so the mesh starts in the right
+		# colour, not the registry's default. attach() already set
+		# it to "default"; this overwrites if the caller set
+		# `variant` before _ready fired.
+		_stage.set_prop_variant(_stage_handle, _variant_to_stage_string(_variant))
+		_apply_state()
+	elif hd_material_override != null:
+		# Headless fallback with an override set: at least keep the
+		# focus ring in sync, even though there is no 3D mesh to
+		# push the override to.
+		_apply_focus_ring()
 
 	pressed.connect(_on_pressed_changed)
 	toggled.connect(_on_toggled_changed)
@@ -170,112 +207,31 @@ func _ready() -> void:
 	mouse_exited.connect(_apply_state)
 	focus_entered.connect(_apply_state)
 	focus_exited.connect(_apply_state)
-	resized.connect(_on_resized)
 
 
-func _build_viewport() -> void:
-	var container := SubViewportContainer.new()
-	container.name = "MeshViewport"
-	container.set_anchors_preset(Control.PRESET_FULL_RECT)
-	container.stretch = true
-	container.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(container)
-
-	_viewport = SubViewport.new()
-	# Sized in _on_resized(); 2x the button's pixel size for sharpness.
-	_viewport.size = Vector2i(int(MIN_WIDTH * RENDER_SCALE), int(MIN_HEIGHT * RENDER_SCALE))
-	_viewport.transparent_bg = true
-	_viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
-	container.add_child(_viewport)
-
-	var rig := Node3D.new()
-	rig.name = "Rig"
-	_viewport.add_child(rig)
-
-	# STUDIO ENVIRONMENT. ACES tonemapping, neutral ambient, transparent
-	# background. The ambient colour is a low-saturation warm grey - same
-	# family as the rest of the chrome so the buttons do not read as
-	# belonging to a different lighting setup than the rest of the UI.
-	var env_node := WorldEnvironment.new()
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0, 0, 0, 0)
-	env.tonemap_mode = Environment.TONE_MAPPER_ACES
-	env.tonemap_exposure = 1.0
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.55, 0.55, 0.58)
-	env.ambient_light_energy = 0.85
-	env_node.environment = env
-	rig.add_child(env_node)
-
-	# KEY LIGHT from the top-left, matching the chamfer direction in the
-	# existing 2D ToolboxPlate so a button on the Livery screen and a
-	# button on the battle HUD read as lit by the same source.
-	var key := DirectionalLight3D.new()
-	key.light_color = Color(1.0, 0.97, 0.90)
-	key.light_energy = 1.4
-	key.rotation_degrees = Vector3(-48, -32, 0)
-	rig.add_child(key)
-
-	# A COOL FILL from the opposite side at low intensity, so the chamfer's
-	# shaded edge is not black - same trick the Livery preview viewport
-	# uses, scaled down so the dish still reads as a clear top surface.
-	var fill := DirectionalLight3D.new()
-	fill.light_color = Color(0.65, 0.72, 0.82)
-	fill.light_energy = 0.35
-	fill.rotation_degrees = Vector3(-22, 145, 0)
-	rig.add_child(fill)
-
-	# CAMERA at a 3/4 view, slightly above and to the front. The angle
-	# shows the dish on the top, the chamfer on the top edge, and the
-	# chunky body in profile - all three reads a real push button gives
-	# in a product shot. FOV 28 keeps the perspective low so the
-	# button does not distort at the edges.
-	var cam := Camera3D.new()
-	cam.position = Vector3(0.0, 0.55, 0.95)
-	cam.look_at(Vector3(0.0, 0.10, 0.0), Vector3.UP)
-	cam.fov = 28.0
-	rig.add_child(cam)
-
-	# MESH + MATERIAL. The procedural material is the default; Phase 3
-	# swaps it out via hd_material_override without touching anything else.
-	_material = StandardMaterial3D.new()
-	_material.albedo_color = _base_albedo
-	_material.metallic = _base_metallic
-	_material.roughness = _base_roughness
-	_material.emission_enabled = false
-
-	_mesh_instance = MeshInstance3D.new()
-	_mesh_instance.name = "ButtonMesh"
-	_mesh_instance.material_override = _material
-	_load_mesh()
-
-
-# Loads ui_push_button.glb as a PackedScene, instantiates it, copies out
-# the mesh, and frees the instance. Same pattern MeshIcon uses for the
-# other six UI hardware meshes.
-func _load_mesh() -> void:
-	if not ResourceLoader.exists(MESH_PATH):
-		push_warning("StampedButton: missing mesh at %s" % MESH_PATH)
-		return
-	var packed := load(MESH_PATH) as PackedScene
-	if packed == null:
-		return
-	var instance := packed.instantiate()
-	var src := _find_mesh(instance)
-	if src != null and src.mesh != null:
-		_mesh_instance.mesh = src.mesh
-	instance.free()
-
-
-static func _find_mesh(node: Node) -> MeshInstance3D:
-	if node is MeshInstance3D:
-		return node
-	for child in node.get_children():
-		var found := _find_mesh(child)
-		if found != null:
-			return found
+# Walk the ancestor chain for a UIPropStage. Stops at the first one
+# found. Returns null on a not-yet-migrated screen, a headless test,
+# or a button added directly to a Control without a stage in the
+# chain. The walk is cheap (the chain is short and the predicate is
+# a type check) and runs only on _ready(), so polling on resize is
+# unnecessary.
+func _find_stage() -> UIPropStage:
+	var node: Node = get_parent()
+	while node != null:
+		if node is UIPropStage:
+			return node
+		node = node.get_parent()
 	return null
+
+
+# Clears every theme stylebox override so the theme's procedural
+# moulded does not draw on top of the 3D mesh. Each state has its
+# own stylebox, so they must all be cleared; a Button without a
+# normal stylebox renders as a flat rectangle, which is exactly
+# what the shared mesh wants underneath.
+func _blank_styleboxes() -> void:
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		add_theme_stylebox_override(state, StyleBoxEmpty.new())
 
 
 func _build_label() -> void:
@@ -294,12 +250,11 @@ func _build_label() -> void:
 # ring instead of a flat line) without reaching into this file.
 #
 # The theme's `focus` stylebox would normally draw this. We blanked that
-# in _init so the 3D mesh is not double-painted - which also dropped the
-# focus ring. A keyboard user has no way to see which button is selected
-# without this, so it is non-optional.
+# in _ready on the stage path so the 3D mesh is not double-painted -
+# which also dropped the focus ring. A keyboard user has no way to see
+# which button is selected without this, so it is non-optional.
 const _FOCUS_RING_INSET := 2.0
 const _FOCUS_RING_WIDTH := 2.0
-var _focus_ring: Control = null
 
 func _build_focus_ring() -> void:
 	_focus_ring = Control.new()
@@ -321,13 +276,85 @@ func _draw_focus_ring() -> void:
 	_focus_ring.draw_rect(rect, Tokens.SIGNAL_HAZARD, false, _FOCUS_RING_WIDTH)
 
 
-func _on_resized() -> void:
-	if _viewport == null:
+# The state pipeline. One function, two backends:
+#   * stage path: push a state string to the shared stage, which
+#     mutates the per-handle material
+#   * fallback path: no material to mutate; the focus ring is the
+#     only thing the button itself owns visually
+# Both paths always update the focus ring, because the focus ring
+# lives on the Button and is independent of the 3D rendering.
+#
+# Read order is the same as the original: disabled -> pressed ->
+# hover -> normal. Last writer (the first matching condition) wins.
+func _apply_state() -> void:
+	if _stage_handle != -1:
+		_stage.set_prop_state(_stage_handle, _state_to_stage_string())
+	_apply_focus_ring()
+	# The fallback path does not push to a stage (there is none).
+	# The Godot Button's own stylebox state swap and the audio
+	# cue come through UIFeedbackScript.wire() the caller set up;
+	# we are not duplicating that here.
+
+
+# Returns the stage's state-string name for the current Button
+# state. Pulled into a helper so the disabled/pressed/hover/normal
+# precedence reads in one place. Unknown Button state (e.g. a
+# future "selected") defaults to normal here and to a no-op at
+# the stage - the stage warns on a state name it does not
+# recognise but does not crash.
+func _state_to_stage_string() -> String:
+	if disabled:
+		return STAGE_STATE_DISABLED
+	if button_pressed:
+		return STAGE_STATE_PRESSED
+	# Hover: mouse over the button OR keyboard focus. The mouse
+	# check matches the original (the visible hover lift should
+	# only apply when the cursor is actually on the button) and
+	# the focus check matches the original (a keyboard user tabs
+	# to a button and expects the same lift as the cursor one).
+	var hovered := get_global_rect().has_point(get_viewport().get_mouse_position()) or has_focus()
+	if hovered:
+		return STAGE_STATE_HOVER
+	return STAGE_STATE_NORMAL
+
+
+func _variant_to_stage_string(v: int) -> String:
+	match v:
+		Variant.DEFAULT:
+			return STAGE_VARIANT_DEFAULT
+		Variant.PRIMARY:
+			return STAGE_VARIANT_PRIMARY
+		Variant.DANGER:
+			return STAGE_VARIANT_DANGER
+		Variant.GHOST:
+			return STAGE_VARIANT_GHOST
+		Variant.COMPACT:
+			return STAGE_VARIANT_COMPACT
+	return STAGE_VARIANT_DEFAULT
+
+
+# Sets the COMPACT height. The original code did this in
+# _apply_variant; the height change is independent of the 3D
+# rendering, so it is the only piece of variant handling that
+# StampedButton keeps on both paths.
+#
+# Pre-existing bug preserved: the original sets the COMPACT height
+# but does not reset it on a variant change away from COMPACT. A
+# button that goes PRIMARY -> COMPACT -> DEFAULT stays at the
+# COMPACT height. Out of scope for Phase 1; the call sites that
+# use COMPACT are static toolbars that never change variant.
+func _apply_variant_height() -> void:
+	if _variant == Variant.COMPACT:
+		custom_minimum_size = Vector2(custom_minimum_size.x, COMPACT_HEIGHT)
+
+
+# Hidden so a Phase 3 caller can swap the visual (e.g. a hard-edged
+# machine-engraved ring instead of a flat line) without reaching
+# into this file.
+func _apply_focus_ring() -> void:
+	if _focus_ring == null:
 		return
-	_viewport.size = Vector2i(
-		maxi(int(size.x * RENDER_SCALE), int(MIN_WIDTH * RENDER_SCALE)),
-		maxi(int(size.y * RENDER_SCALE), int(MIN_HEIGHT * RENDER_SCALE)))
-	_invalidate()
+	_focus_ring.visible = has_focus() and not disabled
 
 
 func _on_pressed_changed() -> void:
@@ -336,130 +363,3 @@ func _on_pressed_changed() -> void:
 
 func _on_toggled_changed(_pressed: bool) -> void:
 	_apply_state()
-
-
-# Re-render the SubViewport. With UPDATE_WHEN_VISIBLE the engine only
-# redraws when this fires, so an idle button costs nothing.
-func _invalidate() -> void:
-	if _viewport != null:
-		_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
-		_viewport.render_target_update_mode = SubViewport.UPDATE_WHEN_VISIBLE
-
-
-# THE STATE-TO-LOOK PIPELINE.
-#
-# Variant sets the BASE material values. Hover / pressed / disabled apply
-# deltas on top, so a press during a hover still reads as the button
-# moving down into the frame - not as a colour reset.
-#
-# Read order: BaseVariant -> Disabled -> Pressed -> Hover -> Focus. Last
-# writer wins.
-func _apply_state() -> void:
-	if _material == null or hd_material_override != null:
-		# An HD override owns the look; the procedural state pipeline is
-		# off. Phase 3 is responsible for its own hover/press treatment.
-		# Even so, the focus ring is OUR responsibility - the theme
-		# focus stylebox is blanked, so without this, keyboard users
-		# have no visual feedback at all on an HD-override'd button.
-		_apply_focus_ring()
-		return
-	if disabled:
-		_material.albedo_color = _base_albedo.darkened(0.20).lerp(Color(0.30, 0.30, 0.30), 0.5)
-		_material.roughness = clampf(_base_roughness + 0.15, 0.0, 1.0)
-		_material.emission_enabled = false
-		if _label != null:
-			_label.set_live(false)
-			_label.modulate.a = 0.45
-		_apply_focus_ring()
-		_invalidate()
-		return
-	if _label != null:
-		_label.set_live(true)
-		_label.modulate.a = 1.0
-
-	if button_pressed:
-		_material.albedo_color = _base_albedo.darkened(PRESS_DROP)
-		_material.roughness = _base_roughness
-		_material.emission_enabled = _base_emission_energy > 0.0
-		_material.emission = _base_emission
-		_material.emission_energy_multiplier = _base_emission_energy
-		_apply_focus_ring()
-		_invalidate()
-		return
-
-	# Hover. Brighten the body so the mesh reads as catching more light.
-	# The chamfer's bevel is what the eye locks onto; a small lift there
-	# is a clear "ready" cue.
-	var hovered := get_global_rect().has_point(get_viewport().get_mouse_position()) or has_focus()
-	if hovered:
-		_material.albedo_color = _base_albedo.lightened(HOVER_LIFT)
-		_material.roughness = _base_roughness
-		_material.emission_enabled = _base_emission_energy > 0.0
-		_material.emission = _base_emission
-		_material.emission_energy_multiplier = _base_emission_energy
-		_apply_focus_ring()
-		_invalidate()
-		return
-
-	# At rest.
-	_material.albedo_color = _base_albedo
-	_material.metallic = _base_metallic
-	_material.roughness = _base_roughness
-	_material.emission_enabled = _base_emission_energy > 0.0
-	_material.emission = _base_emission
-	_material.emission_energy_multiplier = _base_emission_energy
-	_apply_focus_ring()
-	_invalidate()
-
-
-# Focus ring is a separate state from hover, so a keyboard user who tabs
-# through the screen gets a ring even when the cursor is somewhere else.
-# Hidden on disabled - a control you cannot activate does not deserve
-# focus feedback, and the focus ring would mislead the user into thinking
-# they can press it.
-func _apply_focus_ring() -> void:
-	if _focus_ring == null:
-		return
-	_focus_ring.visible = has_focus() and not disabled
-
-
-func _apply_variant() -> void:
-	# Caches the BASE values for the active variant. _apply_state reads
-	# from these so the per-state deltas are stable.
-	match _variant:
-		Variant.DEFAULT:
-			_base_albedo = Color(0.42, 0.43, 0.45)
-			_base_metallic = 0.55
-			_base_roughness = 0.42
-			_base_emission = Color(0, 0, 0, 0)
-			_base_emission_energy = 0.0
-		Variant.PRIMARY:
-			# Darker body, gentle green emission so the chamfer reads as
-			# glowing slightly - the "ready" signal carried by the plate
-			# rather than by the legend, which stays amber for consistency.
-			_base_albedo = Color(0.20, 0.28, 0.22)
-			_base_metallic = 0.45
-			_base_roughness = 0.48
-			_base_emission = Tokens.SIGNAL_GO
-			_base_emission_energy = 0.15
-		Variant.DANGER:
-			_base_albedo = Color(0.32, 0.18, 0.18)
-			_base_metallic = 0.45
-			_base_roughness = 0.48
-			_base_emission = Tokens.SIGNAL_ALERT
-			_base_emission_energy = 0.18
-		Variant.GHOST:
-			# Lighter, less metallic, no signal glow. A back/return
-			# button should sit back, not commit.
-			_base_albedo = Color(0.55, 0.56, 0.58)
-			_base_metallic = 0.30
-			_base_roughness = 0.55
-			_base_emission = Color(0, 0, 0, 0)
-			_base_emission_energy = 0.0
-		Variant.COMPACT:
-			_base_albedo = Color(0.42, 0.43, 0.45)
-			_base_metallic = 0.55
-			_base_roughness = 0.42
-			_base_emission = Color(0, 0, 0, 0)
-			_base_emission_energy = 0.0
-			custom_minimum_size = Vector2(custom_minimum_size.x, COMPACT_HEIGHT)

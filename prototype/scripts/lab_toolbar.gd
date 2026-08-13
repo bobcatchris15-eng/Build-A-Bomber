@@ -9,11 +9,21 @@ const MeshIconScript = preload("res://scripts/ui/mesh_icon.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const UIIconsScript = preload("res://scripts/ui_icons.gd")
+const UIShell = preload("res://scripts/ui_shell.gd")
 
 var lab: Node
 
 func _init(p_lab: Node):
 	lab = p_lab
+	# The shared 3D UI viewport for the Lab. Added here rather than
+	# in the lab's own _ready() because lab_document.gd is mid-rewrite
+	# by Chris and the toolbar is the only consumer of UIPropStage
+	# features in the Lab today (the mirror MeshIcon). Any future
+	# 3D-prop Control on the Lab will find this stage in its
+	# ancestor chain automatically. UIShell.stage() is idempotent, so
+	# if a future refactor of the Lab adds its own stage, this call
+	# becomes a no-op.
+	UIShell.stage(lab)
 
 # --- Live read-throughs to `lab` (nodes the LAB owns) -----------------------
 #

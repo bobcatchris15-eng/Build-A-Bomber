@@ -20,6 +20,7 @@ extends RefCounted
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UITheme = preload("res://scripts/ui_theme.gd")
+const UIPropStageScript = preload("res://scripts/ui/ui_prop_stage.gd")
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,15 @@ const SCREEN_MARGIN_V := Tokens.SPACE_LG
 # Full-bleed steel backdrop. Returns it so a caller that wants a non-default
 # finish can re-apply a material over the top (match_setup does, deliberately -
 # see its own comment).
+#
+# AUTOMATIC STAGE. Creates a UIPropStage as a sibling of the backdrop so
+# every StampedButton and MeshIcon on the screen can find it in their
+# ancestor chain. The stage sits between the backdrop and the controls in
+# draw order: under the controls (so the 3D content shows through where
+# the controls are transparent) and over the backdrop (so the 3D content
+# is not eaten by the steel). Its mouse_filter is IGNORE (set on the
+# stage itself in _init) so it does not steal clicks - that is the
+# documented failure mode in TACTILE_INTERFACE_PLAN.md Part 4 Phase 1.
 static func backdrop(parent: Node) -> ColorRect:
 	var bg := ColorRect.new()
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -60,6 +70,7 @@ static func backdrop(parent: Node) -> ColorRect:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(bg)
 	UITheme.apply_backdrop(bg)
+	stage(parent)
 	return bg
 
 
@@ -80,6 +91,11 @@ static func backdrop(parent: Node) -> ColorRect:
 # lands below the powdercoat panel body. If a screen's panels sink into
 # the field, darken the field's brightness at the call site with an
 # override - do not raise the panels.
+#
+# AUTOMATIC STAGE. Same as backdrop(): creates a UIPropStage alongside
+# the field so every StampedButton / MeshIcon on the screen finds it in
+# their ancestor chain. See backdrop()'s note on ordering and the
+# IGNORE mouse_filter.
 static func workbench(parent: Node, material: String) -> ColorRect:
 	const L0_MATERIALS = ["cutting_mat", "cardboard", "kraft", "cork", "chipboard"]
 	if material not in L0_MATERIALS:
@@ -89,7 +105,47 @@ static func workbench(parent: Node, material: String) -> ColorRect:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(bg)
 	UITheme.apply_material(bg, material)
+	stage(parent)
 	return bg
+
+
+# The shared 3D UI viewport for the screen. One per screen, sitting
+# between the backdrop and the controls in draw order. Every
+# StampedButton and MeshIcon on the screen looks up the stage via
+# _find_stage() in their own _ready and uses it for the 3D rendering
+# of their prop.
+#
+# Idempotent: a second call on the same parent returns the existing
+# stage. backdrop() and workbench() both call this on the way out,
+# so any screen that uses one of them already has a stage by the
+# time its own _ready runs the rest of its UI assembly. A screen
+# that does not call UIShell.backdrop() or workbench() (match_setup,
+# the Settings panel, the Lab toolbar) calls stage() explicitly
+# after it builds its own backdrop.
+#
+# WHY A FULL-BLEED STAGE INSTEAD OF A SMALLER ONE: the stage's rect
+# IS the screen rect, by design. The ortho camera in the stage
+# (see UIPropStage for the math) uses the stage's size to set the
+# world-to-pixel ratio, and every prop on the stage is positioned
+# relative to the stage's centre. A non-full-bleed stage would
+# shift the world origin and break the rect-to-world mapping the
+# test suite asserts on.
+static func stage(parent: Node) -> UIPropStage:
+	# Check for an existing stage first. A second call on the same
+	# parent is a no-op, which makes the API safe to call from
+	# both UIShell.backdrop() AND a screen's own _ready().
+	for child in parent.get_children():
+		if child is UIPropStage:
+			return child
+	var s := UIPropStageScript.new()
+	s.name = "PropStage"
+	s.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# mouse_filter is MOUSE_FILTER_IGNORE - set in the stage's _init;
+	# re-asserting here is cheap and documents the invariant at the
+	# call site that installs the stage.
+	s.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(s)
+	return s
 
 
 # The margin frame content is laid out inside. Pass overrides only for a screen

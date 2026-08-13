@@ -21,6 +21,7 @@ const RosterPickerScript = preload("res://scripts/roster_picker.gd")
 const UIFeedbackScript = preload("res://scripts/ui_feedback.gd")
 const MatchRuleSetScript = preload("res://scripts/match_rule_set.gd")
 const StampedButtonScript = preload("res://scripts/ui_stamped_button.gd")
+const UIShell = preload("res://scripts/ui_shell.gd")
 
 var bg_rect: ColorRect
 
@@ -82,6 +83,13 @@ func _ready():
 		"scale": 2.0,
 		"vignette": 0.12,
 	})
+
+	# The shared 3D UI viewport for this screen. match_setup builds
+	# its own backdrop rather than calling UIShell.workbench(), so
+	# the stage does not get auto-installed the way backdrop() /
+	# workbench() would have installed it. Adding it here so the
+	# StampedButton instances below find it in their ancestor chain.
+	UIShell.stage(self)
 
 	var root_vbox = VBoxContainer.new()
 	root_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
