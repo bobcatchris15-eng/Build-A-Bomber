@@ -310,6 +310,34 @@ func set_prop_transform(handle: int, xform: Transform3D) -> void:
 	request_render()
 
 
+# Per-instance material override. StampedButton uses this for the
+# hd_material_override() hook (Phase 3 hero props), where a
+# fully-baked material replaces the procedural variant+state pipeline
+# wholesale. The override is a Material, not a path - the caller has
+# the asset already loaded. Passing null restores the procedural
+# material and re-applies the current variant+state to it.
+func set_prop_material_override(handle: int, material: Material) -> void:
+	if handle < 0 or handle >= _handles.size():
+		return
+	var entry = _handles[handle]
+	if entry == null:
+		return
+	var mesh: MeshInstance3D = entry["mesh"]
+	if mesh == null or not is_instance_valid(mesh):
+		return
+	if material != null:
+		mesh.material_override = material
+	else:
+		# Restoring the procedural material: re-apply variant + state
+		# so the values on disk match what would have been there if
+		# the override had never been set. The state pipeline still
+		# drives the procedural look, the override is just turned off.
+		mesh.material_override = entry["material"]
+		_apply_variant(entry["material"], entry["variant"])
+		_apply_state(entry["material"], entry["variant"], entry["state"])
+	request_render()
+
+
 # Marks the viewport dirty. One request_render per logical change is
 # the documented pattern; clients should batch multiple state/variant
 # changes and call request_render() once at the end. The dirty
