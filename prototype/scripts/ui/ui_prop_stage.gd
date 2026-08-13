@@ -432,6 +432,13 @@ func _build_viewport() -> void:
 	# top of the rendered mesh (the legend sits on top of the button);
 	# both happen via the standard CanvasItem compositing order.
 	_viewport.transparent_bg = true
+	# OWN WORLD. Without this the SubViewport shares the host viewport's
+	# World3D, so the rig - props, camera, key light, WorldEnvironment -
+	# is also present in whatever 3D scene the UI is layered over. In the
+	# Design Lab that reads as a tiny duplicate of the stage floating at
+	# the world origin, i.e. inside the hull.
+	_viewport.own_world_3d = true
+	_viewport.world_3d = World3D.new()
 	# Dirty-driven. UPDATE_ONCE is the engine's signal to render on
 	# the next frame and then revert to "do not render"; the request_
 	# render() method on the stage is the only path that flips it on.

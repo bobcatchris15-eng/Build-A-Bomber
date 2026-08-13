@@ -157,6 +157,11 @@ func _build_fallback() -> void:
 	_viewport = SubViewport.new()
 	_viewport.size = icon_size
 	_viewport.transparent_bg = true
+	# Own World3D - otherwise the rig below lands in the host viewport's
+	# world and renders as a miniature scene at the origin (see the same
+	# note in ui_prop_stage.gd).
+	_viewport.own_world_3d = true
+	_viewport.world_3d = World3D.new()
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	add_child(_viewport)
 
