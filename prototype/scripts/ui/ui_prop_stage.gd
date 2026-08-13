@@ -388,6 +388,26 @@ func render_count() -> int:
 	return _render_count
 
 
+# Test-visible: the current world transform for a prop. Returns the
+# MeshInstance3D's local transform within the rig, which is the
+# stage's world space (the rig lives at the origin of the SubViewport).
+# Used by tests/test_ui_prop_stage.gd to assert the rect-to-world
+# mapping at the four viewport corners and at centre. The return
+# value is the transform AFTER the transform_override has been
+# composed, so a MeshIcon's set_turn_degrees() shows up in the
+# returned basis.
+func get_prop_transform(handle: int) -> Transform3D:
+	if handle < 0 or handle >= _handles.size():
+		return Transform3D.IDENTITY
+	var entry = _handles[handle]
+	if entry == null:
+		return Transform3D.IDENTITY
+	var mesh: MeshInstance3D = entry["mesh"]
+	if mesh == null or not is_instance_valid(mesh):
+		return Transform3D.IDENTITY
+	return mesh.transform
+
+
 # --- Construction -----------------------------------------------------------
 
 func _build_viewport() -> void:
