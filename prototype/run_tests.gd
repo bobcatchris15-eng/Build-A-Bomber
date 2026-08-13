@@ -455,6 +455,11 @@ const SUITE_ORDER := [
 	["ui_prop_stage", "test_state_change_marks_stage_dirty_exactly_once"],
 	["ui_prop_stage", "test_screen_with_n_buttons_has_one_subviewport"],
 	["ui_prop_stage", "test_stamped_button_without_stage_ancestor_still_renders"],
+
+	# Phase 2 procedural prop textures & PCG3D hash swap (Tactile Interface Programme Part 4 Phase 2)
+	["ui_and_camera", "test_ui_prop_textures_resolve"],
+	["ui_and_camera", "test_ui_prop_textures_are_distinct"],
+	["ui_and_camera", "test_pcg3d_shader_hash_swap"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

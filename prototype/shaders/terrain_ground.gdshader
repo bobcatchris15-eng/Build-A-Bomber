@@ -76,11 +76,19 @@ uniform float terrain_exposure_lift : hint_range(0.0, 0.5) = 0.09;
 
 // --- Noise primitives (v2) ---
 
-// Standard hash-based periodic value noise. Used only for the blend mask
-// (viewed at 100-world-unit wavelengths, never seen directly), so exact
-// character doesn't matter — only cost and continuity matter.
+// PCG3D integer hash (X5 fix): Bit-exact on every GPU and immune to coordinate precision loss.
+uvec3 pcg3d(uvec3 v) {
+	v = v * 1664525u + 1013904223u;
+	v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+	v ^= v >> 16u;
+	v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+	return v;
+}
+
 float hash21(vec2 p) {
-	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+	uvec2 u = uvec2(ivec2(p));
+	uvec3 h = pcg3d(uvec3(u, 0u));
+	return float(h.x) * (1.0 / 4294967295.0);
 }
 
 // Quintic Hermite interpolation. Continuous first AND second derivative everywhere

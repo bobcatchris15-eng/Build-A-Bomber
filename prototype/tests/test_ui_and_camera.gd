@@ -668,3 +668,75 @@ func test_workbench_backdrop_split() -> bool:
 	return true
 
 
+# Tactile Interface Programme Phase 2. Every UI prop registered in UIPropRegistry
+# must have all three generated texture assets (albedo, ORM, height) present on disk.
+func test_ui_prop_textures_resolve() -> bool:
+	print("Running Test Suite: UI Props - Texture Assets Resolve (Phase 2)...")
+	var PropRegistry = preload("res://scripts/ui/ui_prop_registry.gd")
+	var ids: Array = PropRegistry.ids()
+	if ids.is_empty():
+		print("  [FAIL] UIPropRegistry.ids() returned no prop IDs")
+		return false
+
+	for prop_id in ids:
+		var entry: Dictionary = PropRegistry.entry_for(prop_id)
+		var alb: String = entry.get("albedo_path", "")
+		var orm: String = entry.get("orm_path", "")
+		var height: String = entry.get("height_path", "")
+		if not ResourceLoader.exists(alb):
+			print("  [FAIL] Missing albedo texture for prop '%s': %s" % [prop_id, alb])
+			return false
+		if not ResourceLoader.exists(orm):
+			print("  [FAIL] Missing orm texture for prop '%s': %s" % [prop_id, orm])
+			return false
+		if not ResourceLoader.exists(height):
+			print("  [FAIL] Missing height texture for prop '%s': %s" % [prop_id, height])
+			return false
+	print("  [PASS] All %d registered UI props resolve albedo, ORM, and height texture assets." % ids.size())
+	return true
+
+
+# Tactile Interface Programme Phase 2. Distinct prop IDs must produce distinct texture
+# content (asserting unique per-prop seed variation).
+func test_ui_prop_textures_are_distinct() -> bool:
+	print("Running Test Suite: UI Props - Textures Are Distinct Per Prop (Phase 2)...")
+	var PropRegistry = preload("res://scripts/ui/ui_prop_registry.gd")
+	var btn_entry: Dictionary = PropRegistry.entry_for("push_button")
+	var tgl_entry: Dictionary = PropRegistry.entry_for("toggle")
+
+	var btn_bytes := FileAccess.get_file_as_bytes(btn_entry.get("albedo_path", ""))
+	var tgl_bytes := FileAccess.get_file_as_bytes(tgl_entry.get("albedo_path", ""))
+	if btn_bytes.is_empty() or tgl_bytes.is_empty():
+		print("  [FAIL] Could not read albedo texture bytes for push_button or toggle")
+		return false
+	if btn_bytes == tgl_bytes:
+		print("  [FAIL] push_button and toggle produced identical albedo bytes - seeds must vary output")
+		return false
+
+	print("  [PASS] Prop textures produce distinct per-prop byte data.")
+	return true
+
+
+# Tactile Interface Programme Phase 2 (X5 fix). No fract(sin(...)) float-sine hashes
+# may remain in any shader under res://shaders/.
+func test_pcg3d_shader_hash_swap() -> bool:
+	print("Running Test Suite: Shader PCG3D Hash Swap - No fract(sin) In Shaders (X5)...")
+	var dir := DirAccess.open("res://shaders")
+	if dir == null:
+		print("  [FAIL] Could not open res://shaders directory")
+		return false
+	dir.list_dir_begin()
+	var filename := dir.get_next()
+	while filename != "":
+		if filename.ends_with(".gdshader"):
+			var full_path := "res://shaders/" + filename
+			var src := FileAccess.get_file_as_string(full_path)
+			if src.find("fract(sin(") >= 0:
+				print("  [FAIL] %s still contains float-sine hash 'fract(sin(' - must use integer PCG3D" % full_path)
+				return false
+		filename = dir.get_next()
+	print("  [PASS] All shaders in res://shaders/ are free of fract(sin) float-sine hashes.")
+	return true
+
+
+

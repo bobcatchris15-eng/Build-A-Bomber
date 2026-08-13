@@ -34,30 +34,51 @@ const ENTRIES := {
 	"push_button": {
 		"mesh_path": "res://assets/models/ui/ui_push_button.glb",
 		"natural_size": Vector2(100.0, 44.0),
+		"albedo_path": "res://assets/textures/ui/props/push_button_albedo.png",
+		"orm_path": "res://assets/textures/ui/props/push_button_orm.png",
+		"height_path": "res://assets/textures/ui/props/push_button_height.png",
 	},
 	"toggle": {
 		"mesh_path": "res://assets/models/ui/ui_toggle_switch.glb",
 		"natural_size": Vector2(40.0, 40.0),
+		"albedo_path": "res://assets/textures/ui/props/toggle_albedo.png",
+		"orm_path": "res://assets/textures/ui/props/toggle_orm.png",
+		"height_path": "res://assets/textures/ui/props/toggle_height.png",
 	},
 	"rotary": {
 		"mesh_path": "res://assets/models/ui/ui_rotary_selector.glb",
 		"natural_size": Vector2(40.0, 40.0),
+		"albedo_path": "res://assets/textures/ui/props/rotary_albedo.png",
+		"orm_path": "res://assets/textures/ui/props/rotary_orm.png",
+		"height_path": "res://assets/textures/ui/props/rotary_height.png",
 	},
 	"rocker": {
 		"mesh_path": "res://assets/models/ui/ui_rocker_switch.glb",
 		"natural_size": Vector2(40.0, 40.0),
+		"albedo_path": "res://assets/textures/ui/props/rocker_albedo.png",
+		"orm_path": "res://assets/textures/ui/props/rocker_orm.png",
+		"height_path": "res://assets/textures/ui/props/rocker_height.png",
 	},
 	"knurled_dial": {
 		"mesh_path": "res://assets/models/ui/ui_knurled_dial.glb",
 		"natural_size": Vector2(40.0, 40.0),
+		"albedo_path": "res://assets/textures/ui/props/knurled_dial_albedo.png",
+		"orm_path": "res://assets/textures/ui/props/knurled_dial_orm.png",
+		"height_path": "res://assets/textures/ui/props/knurled_dial_height.png",
 	},
 	"dzus_fastener": {
 		"mesh_path": "res://assets/models/ui/ui_dzus_fastener.glb",
 		"natural_size": Vector2(40.0, 40.0),
+		"albedo_path": "res://assets/textures/ui/props/dzus_fastener_albedo.png",
+		"orm_path": "res://assets/textures/ui/props/dzus_fastener_orm.png",
+		"height_path": "res://assets/textures/ui/props/dzus_fastener_height.png",
 	},
 	"latch": {
 		"mesh_path": "res://assets/models/ui/ui_latch.glb",
 		"natural_size": Vector2(40.0, 40.0),
+		"albedo_path": "res://assets/textures/ui/props/latch_albedo.png",
+		"orm_path": "res://assets/textures/ui/props/latch_orm.png",
+		"height_path": "res://assets/textures/ui/props/latch_height.png",
 	},
 }
 

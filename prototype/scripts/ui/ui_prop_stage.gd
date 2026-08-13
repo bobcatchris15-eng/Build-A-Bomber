@@ -185,6 +185,19 @@ func attach(control: Control, prop_id: String) -> int:
 		return -1
 
 	var material := StandardMaterial3D.new()
+	var alb_path: String = String(entry.get("albedo_path", ""))
+	if alb_path != "" and ResourceLoader.exists(alb_path):
+		material.albedo_texture = load(alb_path) as Texture2D
+	var orm_path: String = String(entry.get("orm_path", ""))
+	if orm_path != "" and ResourceLoader.exists(orm_path):
+		var orm_tex = load(orm_path) as Texture2D
+		material.ao_enabled = true
+		material.ao_texture = orm_tex
+		material.ao_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_RED
+		material.roughness_texture = orm_tex
+		material.roughness_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_GREEN
+		material.metallic_texture = orm_tex
+		material.metallic_texture_channel = BaseMaterial3D.TEXTURE_CHANNEL_BLUE
 	_apply_variant(material, "default")
 
 	var mesh_instance := MeshInstance3D.new()
