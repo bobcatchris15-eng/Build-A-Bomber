@@ -171,6 +171,18 @@ const ACTIONS := {
 		"group": GROUP_COMMAND, "label": "Hold position",
 		"events": [{"key": KEY_C}],
 	},
+	# New in Phase 8 (the Tactile Interface Programme, Part 4). The card cell at
+	# 2,4 (V) needs a fourth stance; HOLD_FIRE is the RTS-canon counterpart to
+	# the existing HOLD_POSITION / RETURN_FIRE / AGGRESSIVE. The order path is
+	# the one OrderService owns - declaring the binding here without changing
+	# the order layer means the card lights up but the order is currently a
+	# no-op; that is the same pattern cmd_jump_alert and cmd_idle_worker use
+	# above, and keeps the table as the single source of truth without
+	# dragging every other phase into this commit.
+	"cmd_hold_fire": {
+		"group": GROUP_COMMAND, "label": "Stance: hold fire",
+		"events": [{"key": KEY_V}],
+	},
 	# New in this phase, and both are RTS table stakes the build did not have.
 	# They are bound but inert until the alert and idle-worker services land in
 	# Phase 5 - declaring them now means the Controls screen ships complete and
