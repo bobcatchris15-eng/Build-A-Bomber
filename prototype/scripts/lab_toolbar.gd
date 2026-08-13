@@ -379,7 +379,21 @@ func _build_toolbar() -> void:
 	if menu_btn:
 		menu_btn.reparent(row)
 
+	_toolbar_row = row
+
 	UIFeedbackScript.wire_tree(row)
+
+	# The row must survive a viewport narrower than its natural width. Deferred
+	# for the same reason _verify_toolbar_height is: size is not final until
+	# layout has run, and the first pass needs a real width to measure against.
+	# Both, and for different reasons: `lab` resizing is the event that changes
+	# how much room the bar HAS, while the bar's own resize catches the case
+	# where it is pinned at its minimum and the parent signal alone would leave
+	# a stale tier applied.
+	toolbar.resized.connect(_apply_toolbar_density)
+	if lab is Control:
+		(lab as Control).resized.connect(_apply_toolbar_density)
+	call_deferred("_apply_toolbar_density")
 	# The docks inset their top by Tokens.TOOLBAR_HEIGHT, but nothing forces the
 	# BAR to that height - a PanelContainer cannot render shorter than its content,
 	# so a change to button padding silently makes the bar taller and the rails
@@ -388,6 +402,109 @@ func _build_toolbar() -> void:
 	# unclickable - looks like an input bug rather than a layout one. Deferred
 	# because size is not final until layout has run.
 	call_deferred("_verify_toolbar_height")
+
+
+# --- Adaptive density -------------------------------------------------------
+#
+# THE TOOLBAR MUST FIT WHATEVER VIEWPORT IT IS GIVEN. It did not: the row's
+# combined minimum reached 1975px against a 1920 viewport, so the right-hand
+# controls (SAVE, TEST, MENU) sat off-screen entirely and the UI overflow audit
+# failed on it.
+#
+# This is the SECOND time that happened. The first was fixed by shortening the
+# view-mode item labels (see the OptionButton's comment above, which records the
+# row hitting 1936px), and the fix lasted exactly until COMPARE and INSTRUCTIONS
+# were added. Trimming text buys a few dozen pixels and defers the problem to
+# whoever adds the next button; it is not a fix, because nothing stops the row
+# exceeding the screen again and nothing catches it until the audit runs.
+#
+# So the row now DEGRADES instead of overflowing, in tiers, cheapest first:
+#
+#   0  everything at full width - icon and text on every button
+#   1  action buttons drop to ICON ONLY, their label moving to the tooltip.
+#      This is where nearly all the width comes back, because the labels
+#      (AUTO-ARMOR, INSTRUCTIONS) are far wider than their glyphs.
+#   2  the read-only info slots give up their fixed minimum width too.
+#
+# Measured rather than keyed to hardcoded breakpoints: the row is asked what it
+# actually needs after each tier is applied, and the first tier that fits wins.
+# A breakpoint constant would be one more number to get wrong at a resolution
+# nobody tested, and it would not know about theme or font changes that move the
+# real width.
+const TOOLBAR_DENSITY_TIERS := 3
+
+var _toolbar_row: HBoxContainer = null
+var _toolbar_density: int = -1
+
+
+func _apply_toolbar_density() -> void:
+	if not is_instance_valid(toolbar) or not is_instance_valid(_toolbar_row):
+		return
+	# THE PARENT'S WIDTH, NOT THE BAR'S OWN. Godot clamps a Control's size up to
+	# its combined minimum, so an overflowing toolbar reports the very width it
+	# is overflowing BY - measuring toolbar.size.x asked "does 1975px fit in
+	# 1975px", concluded yes, and never collapsed anything. get_parent_area_size
+	# is the rect the bar is actually anchored into, which is the constraint the
+	# overflow audit checks against too.
+	var avail: float = toolbar.get_parent_area_size().x
+	# Before the first layout there is no parent area yet. Measuring against
+	# zero would collapse everything to the tightest tier and stay there.
+	if avail <= 0.0:
+		return
+
+	for tier in range(TOOLBAR_DENSITY_TIERS):
+		_set_toolbar_density(tier)
+		if _toolbar_row.get_combined_minimum_size().x <= avail:
+			return
+	# Ran out of tiers - the tightest one is already applied and is the best
+	# available. No warning: a viewport too narrow for icon-only controls is the
+	# player's window choice, not a defect to log on every resize frame.
+
+
+func _set_toolbar_density(tier: int) -> void:
+	if tier == _toolbar_density:
+		return
+	_toolbar_density = tier
+
+	for child in _toolbar_row.get_children():
+		if child is CheckBox:
+			# A latched state needs a readable label; an unlabelled checkbox is
+			# not a smaller control, it is an unidentifiable one.
+			continue
+		if child is MenuButton or child is OptionButton:
+			# Both size themselves from their longest POPUP item, not from the
+			# text on the control, so blanking that text costs the label and
+			# saves nothing.
+			continue
+		if child is Button:
+			_set_button_collapsed(child, tier >= 1)
+
+	for slot in _toolbar_row.get_children():
+		if slot is VBoxContainer:
+			# _info_slot's fixed minimum (SPACE_XL * 3) is what keeps the
+			# readouts from jittering as their values change width. Worth giving
+			# up only when the alternative is losing controls off the edge.
+			var slot_w: float = 0.0 if tier >= 2 else float(Tokens.SPACE_XL * 3)
+			slot.custom_minimum_size = Vector2(slot_w, slot.custom_minimum_size.y)
+
+
+# Collapsing is only ever offered to a button that HAS an icon - a button with
+# neither text nor icon is an invisible hit target, which is worse than an
+# overflowing bar.
+func _set_button_collapsed(btn: Button, collapsed: bool) -> void:
+	if btn.icon == null:
+		return
+	if collapsed:
+		if btn.text != "":
+			btn.set_meta("full_label", btn.text)
+			# The label has to survive somewhere reachable, or the icons become
+			# a guessing game. Only set it if the button has no more specific
+			# tooltip of its own already.
+			if btn.tooltip_text == "":
+				btn.tooltip_text = btn.text
+			btn.text = ""
+	elif btn.has_meta("full_label"):
+		btn.text = str(btn.get_meta("full_label"))
 
 
 func _verify_toolbar_height() -> void:

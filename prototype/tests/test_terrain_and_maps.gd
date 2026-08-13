@@ -568,10 +568,19 @@ func test_b10_spawn_fairness_lint_passes_real_maps_and_catches_bad_ones() -> boo
 	MapCatalogScript.reset_cache_for_tests()
 	TerrainBuilderScript.reset_heightmap_cache_for_tests()
 
-	# Every bundled map should already clear the lint - it's meant to
+	# Every bundled SKIRMISH map should already clear the lint - it's meant to
 	# generalize the checks _smoke_test_map already proves per-map, not
 	# introduce a new bar the existing roster hasn't cleared.
+	#
+	# test_range is excluded because it is not a skirmish map. It is a
+	# miniature arena used only by the Design Lab's "Test in Arena" trip, where
+	# the player drives one design against target dummies - there is no second
+	# team to be fair to. Its spawns are not mutually reachable on the ground
+	# navmesh and that is correct for what it is; linting it as though two
+	# armies had to meet across it only ever produced a false positive.
 	for map_id in MapCatalogScript.get_map_ids():
+		if map_id == "test_range":
+			continue
 		var map_def = MapCatalogScript.get_map(map_id)
 		var nav = TerrainBuilderScript.build_navmeshes(map_def)
 		await _await_nav_map(nav.ground_map)
