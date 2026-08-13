@@ -176,6 +176,9 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 	if hull.has_meta("blueprint_id"):
 		blueprint["id"] = hull.get_meta("blueprint_id")
 	blueprint["name"] = hull.get_meta("blueprint_name") if hull.has_meta("blueprint_name") and hull.get_meta("blueprint_name") != "" else "Untitled Design"
+	
+	if hull.has_meta("derived_from"):
+		blueprint["derived_from"] = hull.get_meta("derived_from")
 
 	return blueprint
 
@@ -249,11 +252,21 @@ func save_blueprint() -> bool:
 	var bp_id = ""
 	if hull.has_meta("blueprint_id"):
 		bp_id = hull.get_meta("blueprint_id")
-	if bp_id == "":
-		bp_id = _generate_blueprint_id()
+		
 	var bp_name = ""
 	if hull.has_meta("blueprint_name"):
 		bp_name = str(hull.get_meta("blueprint_name")).strip_edges()
+		
+	var old_name = str(hull.get_meta("original_blueprint_name", "")).strip_edges()
+	
+	# If the user changed the name of an existing loaded design, treat it as a "Save As"
+	if bp_id != "" and old_name != "" and bp_name != old_name:
+		hull.set_meta("derived_from", bp_id)
+		blueprint["derived_from"] = bp_id
+		bp_id = "" # Force new generation
+		
+	if bp_id == "":
+		bp_id = _generate_blueprint_id()
 
 	# Refuse rather than substituting a placeholder. Saving is what puts a
 	# design in front of the player in a match, so it needs a deliberate
@@ -269,6 +282,7 @@ func save_blueprint() -> bool:
 
 	hull.set_meta("blueprint_id", bp_id)
 	hull.set_meta("blueprint_name", bp_name)
+	hull.set_meta("original_blueprint_name", bp_name)
 
 	var json_string = JSON.stringify(blueprint, "\t")
 
@@ -368,6 +382,9 @@ func restore_scratch_into_designer() -> bool:
 		new_hull.set_meta("blueprint_id", data["id"])
 	if data.get("name", "") != "":
 		new_hull.set_meta("blueprint_name", data["name"])
+		new_hull.set_meta("original_blueprint_name", data["name"])
+	if data.get("derived_from", "") != "":
+		new_hull.set_meta("derived_from", data["derived_from"])
 
 	get_tree().call_group("stat_ui", "update_stats", new_hull)
 	get_tree().call_group("stat_ui", "sync_hull_ui", new_hull)

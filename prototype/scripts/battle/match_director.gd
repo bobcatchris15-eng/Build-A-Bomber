@@ -146,6 +146,54 @@ var admin_menu: Control = null
 # signal that never arrives, and awaiting one hangs forever.
 signal world_ready
 var world_is_ready: bool = false
+
+# Build progress, emitted during the world build phase that runs inside
+# _ready() between the scene swap and world_ready. The SceneRouter's
+# old load_progress stream was fraction 0..1 across the warm-list only;
+# the world's own build (terrain bake, roster, units, HUD, AI) was an
+# unaccounted-for middle. A new subscriber (the deploy gate's glass
+# overlay) needs fraction 0..1 across the WHOLE sequence, so the
+# match director publishes its own progress at each known milestone
+# in _ready(). The 0..0.05 slice is the warm-list; this signal owns
+# 0.05..1.00.
+#
+# Emissions land at the 8 milestones documented in
+# docs/design/DEPLOY_GATE_REDESIGN.md §3.1 (resource nodes, bases,
+# per-tile terrain, terrain done, roster, units, HUD, AI, ready).
+# The 1.00 emission is the same moment world_is_ready flips, so a
+# subscriber can use either as "the world is fully built" - the
+# signal is the one that arrives on every subscriber, the flag is
+# the one that handles the race where the router polled before
+# the signal had a chance to land.
+signal progress(fraction: float, label: String)
+
+# Last emission of the progress signal, kept as a member so a
+# late subscriber (e.g. the deploy gate, which is created after
+# the first few emissions have already fired during _ready)
+# can read the current value on connect rather than sitting
+# at 0.0 until the next emission lands. The progress signal
+# itself is fire-and-forget; this is the replay buffer.
+var _last_progress_fraction: float = 0.0
+var _last_progress_label: String = ""
+
+# Public so a late subscriber can read the most recent progress
+# value on connect. The pair is the same dict-shaped read the
+# signal carries; the deploy gate uses it to seed its bar before
+# the next live emission lands.
+func get_last_progress() -> Dictionary:
+	return {"fraction": _last_progress_fraction, "label": _last_progress_label}
+
+
+# Internal: emit progress and update the replay buffer in one
+# step. Every emission site in _ready() goes through this so
+# the buffer and the signal cannot drift. Sites are
+# documented in the table at the top of this file.
+func _emit_progress(fraction: float, label: String) -> void:
+	_last_progress_fraction = fraction
+	_last_progress_label = label
+	progress.emit(fraction, label)
+
+
 var vision: VisionService = null
 var battle_hud: BattleHUD = null
 var commander: Commander = null
@@ -344,9 +392,18 @@ func _ready() -> void:
 	# startup frames leaves a window where a unit's very first path query runs
 	# before NavigationServer3D has resynced, and the unit drives into the lake.
 	_spawn_resource_nodes()
+	# 2026-08-13: deploy-gate progress emissions. See the `progress` signal
+	# header at :147-160 for the 0..1 fraction contract. Fractions below
+	# under-weight the early build steps (resource nodes, bases) so the
+	# deploy gate's bar does not stall at 10% for 3 seconds while the
+	# terrain bake runs - the bake is the wall-clock-dominant phase and
+	# owns 0.10..0.55 of the bar.
+	_emit_progress(0.05, "Locating resource deposits")
 	_spawn_bases()
+	_emit_progress(0.10, "Surveying build sites")
 
 	await _setup_terrain()
+	_emit_progress(0.60, "Plotting movement lanes")
 
 	# After the bake: the flow field samples the ground navmesh for passability,
 	# so it needs the map RID that _setup_terrain() just produced.
@@ -362,8 +419,11 @@ func _ready() -> void:
 	_setup_vision()
 
 	_load_roster()
+	_emit_progress(0.70, "Indexing designs")
 	_spawn_starting_units()
+	_emit_progress(0.80, "Preparing vehicle systems")
 	_build_hud()
+	_emit_progress(0.90, "Raising command deck")
 
 	stats = MatchStatsScript.new()
 	# Battle-system unification (Phase 2). Test Range's rule set has
@@ -385,9 +445,22 @@ func _ready() -> void:
 	if ai_enabled:
 		commander = CommanderScript.new()
 		commander.setup(self, ENEMY_TEAM, ai_diff)
+	# Always emit the 0.95 step, even when the AI is disabled (Test
+	# Range's rule set has enable_ai=false). The label is the
+	# "briefing" beat regardless of whether there is an opponent
+	# commander to brief; the jump from 0.90 to 1.00 without it
+	# would be a 10% step the bar smooths over awkwardly.
+	_emit_progress(0.95, "Briefing opposition")
 
+	# 1.00 is the LAST emission. world_is_ready flips first so the
+	# flag-based poll in scene_router.gd:_await_world_ready exits on
+	# its next tick; world_ready signal fires next for any direct
+	# subscribers; the progress(1.0, "Ready") emission lands last so
+	# the deploy gate transitions to its ready state in the same
+	# order it was reading the rest of the stream.
 	world_is_ready = true
 	world_ready.emit()
+	_emit_progress(1.0, "Ready")
 
 	_setup_audio()
 
@@ -577,8 +650,21 @@ func _setup_terrain() -> void:
 		# test_battle_combat.gd's own `deaths` comment already documents,
 		# just hit for real instead of in a test.
 		var remaining := {"n": nav["pending"].size()}
+		# 2026-08-13: per-tile progress for the deploy gate. Maps the
+		# terrain-bake stretch of the bar (0.10..0.55) onto the bake's
+		# own progress. The fraction is computed inside the lambda so
+		# `done` / `total` can be captured by value without going stale
+		# (the `done` counter is a Dictionary member, so the lambda
+		# mutates the same reference the loop reads - the same pattern
+		# the existing `remaining` dict already uses for the wait loop).
+		var total_tiles: int = remaining["n"]
+		var done: Dictionary = {"n": 0}
 		for entry in nav["pending"]:
 			TerrainBuilder.bake_pending_entry_async(entry, nav["cell_size"], func():
+				done["n"] += 1
+				if total_tiles > 0:
+					var tile_frac: float = float(done["n"]) / float(total_tiles)
+					_emit_progress(0.10 + tile_frac * 0.45, "Surveying terrain")
 				remaining["n"] -= 1)
 		while remaining["n"] > 0:
 			await get_tree().process_frame

@@ -457,7 +457,6 @@ var armor_thick_slider: HSlider
 # under whichever faction they actually picked at match setup. The Lab now
 # shows an unpainted design at its base stats, and both the paint and the
 # passives are applied once, at battle time.
-var hull_spec_btn: Button
 var hull_spec_stash: VBoxContainer
 var _hull_spec_flyout: Node = null
 
@@ -823,11 +822,7 @@ func _ready():
 	#
 	# Deadpan procurement register per the plan's item 0 - this opens a hull's
 	# specification, so it says so, and it carries no glyph.
-	hull_spec_btn = Button.new()
-	hull_spec_btn.text = "HULL SPECIFICATION"
-	hull_spec_btn.tooltip_text = "Armor material and thickness"
-	_rail_vbox.add_child(hull_spec_btn)
-	hull_spec_btn.pressed.connect(_on_hull_spec_pressed)
+	# (hull_spec_btn removed as it is no longer used)
 
 	# Create Module Tweaks container
 	module_tweaks_container = VBoxContainer.new()
@@ -1221,7 +1216,7 @@ func _on_hull_spec_pressed() -> void:
 	# the top of close(), ahead of the queue_free, which is the only point where
 	# reparenting is still safe.
 	flyout.closed.connect(_on_hull_spec_closed)
-	flyout.open_from(hull_spec_btn, UIFlyoutScript.Align.LEFT_OF)
+	# (Flyout positioning removed since hull_spec_btn is gone)
 
 
 func _on_hull_spec_closed() -> void:

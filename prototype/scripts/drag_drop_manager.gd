@@ -142,6 +142,24 @@ func _build_hull_ghost_node(type_id: String) -> Node3D:
 	_apply_ghost_materials_recursive(container, _get_foggy_part_material())
 	return container
 
+# Called by the parts menu as soon as the cursor leaves the toolbox during a drag,
+# so the 3D ghost appears the moment the user moves toward the viewport.
+func show_ghost_for_drag(type_id: String, screen_pos: Vector2) -> void:
+	if type_id.is_empty():
+		return
+	var catalog_data = ModuleCatalog.get_module_data(type_id)
+	if catalog_data.is_empty():
+		return
+	var category = catalog_data.get("category", "module")
+	var root = get_node_or_null("/root/MainLab")
+	if not root:
+		return
+	if category == "hull":
+		_update_ghost_mesh_hull(type_id)
+	else:
+		if root.get_node_or_null("Hull") != null:
+			_update_ghost_mesh(screen_pos, type_id)
+
 func _can_drop_data(at_position: Vector2, data: Variant) -> bool:
 	if typeof(data) == TYPE_DICTIONARY and data.has("type") and data["type"] == "module_part":
 		var type_id = data["id"]

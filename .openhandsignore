@@ -1,0 +1,60 @@
+# =====================================================================
+#  .openhandsignore
+#  Paths the OpenHands agent must NOT see, read, or modify.
+#  Syntax is .gitignore-compatible.
+#
+#  Lives at E:\Kitbash-Command\.openhandsignore — one level above
+#  Local_Agent\, alongside the project the agent will work on.
+# =====================================================================
+
+# ---- Build artifacts and stale directories --------------------------
+# Anything from old_builds/ is a historical artifact. The agent
+# should not be poking around in old Godot exports.
+old_builds/
+__cleanup_trash_*/
+__cleanup_trash_*/
+builds/
+
+# NEW_LEGS is a separate project under development — not the agent's
+# scope.
+NEW_LEGS/
+
+# ---- Agent contexts --------------------------------------------------
+# We have two other AI agent contexts in this repo (Claude and Hilo).
+# The OpenHands agent should not see or modify them — they're for
+# other assistants and may have conflicting instructions.
+.claude/
+.hilo/
+
+# ---- Godot engine + import cache ------------------------------------
+# The bundled Godot binary and its per-project import cache are
+# large, get rewritten constantly, and are not the agent's code.
+prototype/Godot_v4.7.1-stable_win64.exe
+prototype/Godot_v4.7.1-stable_win64.pck
+prototype/Godot_v4.7.1-stable_win64.console.exe
+prototype/.godot/
+prototype/.import/
+prototype/.editor/
+
+# ---- Local_Agent lives outside the agent's blast radius -------------
+# This is the dev-suite config the user is currently building. Keep
+# the agent from accidentally editing its own infrastructure.
+Local_Agent/
+
+# ---- VCS noise ------------------------------------------------------
+# The agent can read the working tree but should never modify .git/
+# directly. It uses the Git tool for commits.
+.git/hooks/
+.git/logs/
+
+# ---- IDE / OS junk --------------------------------------------------
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ---- This file itself -----------------------------------------------
+# Don't let the agent self-modify its own ignore list.
+.openhandsignore

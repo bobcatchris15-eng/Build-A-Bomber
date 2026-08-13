@@ -2591,41 +2591,7 @@ func _apply_mirror_flip(module: Node3D):
 var instructions_canvas_layer: CanvasLayer = null
 
 func _setup_instructions_ui() -> void:
-	var ui_layer = CanvasLayer.new()
-	ui_layer.name = "InstructionsUILayer"
-	ui_layer.layer = 90
-	add_child(ui_layer)
-
-	var btn = Button.new()
-	btn.name = "InstructionsButton"
-	btn.text = "Instructions"
-	btn.position = Vector2(16, 16)
-	btn.custom_minimum_size = Vector2(120, 32)
-	
-	var style_normal = StyleBoxFlat.new()
-	style_normal.bg_color = UITokens.BASE_700
-	style_normal.border_width_left = 1
-	style_normal.border_width_top = 1
-	style_normal.border_width_right = 1
-	style_normal.border_width_bottom = 1
-	style_normal.border_color = UITokens.BASE_500
-	style_normal.set_corner_radius_all(4)
-
-	var style_hover = StyleBoxFlat.new()
-	style_hover.bg_color = UITokens.BASE_600
-	style_hover.border_width_left = 1
-	style_hover.border_width_top = 1
-	style_hover.border_width_right = 1
-	style_hover.border_width_bottom = 1
-	style_hover.border_color = UITokens.SIGNAL_HAZARD
-	style_hover.set_corner_radius_all(4)
-
-	btn.add_theme_stylebox_override("normal", style_normal)
-	btn.add_theme_stylebox_override("hover", style_hover)
-	btn.add_theme_color_override("font_color", UITokens.TEXT_PRIMARY)
-	btn.add_theme_color_override("font_hover_color", Color.WHITE)
-	btn.pressed.connect(func(): show_instructions_dialog(true))
-	ui_layer.add_child(btn)
+	pass
 
 # On a first visit the player is now OFFERED THE TUTORIAL rather than shown the
 # manual. The manual is not gone - _setup_instructions_ui() still builds its

@@ -107,6 +107,13 @@ const LAYOUTS := {
 		"normal_is_side": true,
 		"mirror": true,
 	},
+	"heavy_quad_tracks": {
+		"pattern": Pattern.SIDE_PAIRS, "per_side": 2,
+		"geo_keys": {"tread_width": 1.5, "drive_sprocket": true},
+		"geo_aliases": {"tread_width": ["width", "size"]},
+		"normal_is_side": true,
+		"mirror": true,
+	},
 	"legs": {
 		"pattern": Pattern.SIDE_PAIRS,
 		"count_key": "leg_count", "count_fallback": "count", "count_default": 4,

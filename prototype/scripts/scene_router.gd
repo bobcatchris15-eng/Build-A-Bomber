@@ -35,6 +35,7 @@ const LOADING_SCENE := "res://scenes/Loading.tscn"
 
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIAnimScript = preload("res://scripts/ui_anim.gd")
+const DeployGateScript = preload("res://scripts/deploy_gate.gd")
 
 # ---------------------------------------------------------------------------
 # TRANSITION FADE
@@ -213,7 +214,16 @@ func run_load() -> void:
 
 	# Cache is warm now, so this is fast.
 	var packed: PackedScene = load(_target_path)
-	load_progress.emit(1.0, "Ready")
+	# 2026-08-13: the old 1.0 emission here was a latent bug exposed
+	# by the new deploy gate's glass overlay. The bar would hit 100%
+	# the moment the warm-list finished, then sit there while the
+	# world assembled behind the glass. The match director now owns
+	# the 0.05..1.00 stretch (see MatchDirector.progress and the
+	# emission sites at the milestones in _ready()), and emits 1.0
+	# at the same world_is_ready flip. The router's load_progress
+	# signal is the warm-list stream only (0.0 -> warm/total); a
+	# new subscriber (the deploy gate) reads match_director.progress
+	# for the world-build stretch.
 
 	_loading = false
 	if packed == null:
@@ -239,108 +249,41 @@ func run_load() -> void:
 	# on an empty stage that then pops into existence.
 	await get_tree().process_frame
 	await get_tree().process_frame
-	# The world finishes building BEHIND the black, then the player chooses when
-	# to drop in. Both are no-ops for a scene that does not declare `world_ready`.
-	await _await_world_ready()
-	await _deploy_gate()
-	await fade_in()
+	# 2026-08-13: hide the fade rect NOW. Its purpose was to hide
+	# the loading-screen -> battle scene swap, which is already
+	# done. Leaving it opaque (alpha 1.0) would block the new
+	# deploy gate's glass overlay from showing the world behind it
+	# - the gate sits on top of the fade rect on the same canvas
+	# layer (the gate is added after the fade rect, so the gate
+	# draws on top, but the fade rect's 1.0 alpha is what the
+	# player's eye reads through the gate's 0.45 alpha glass).
+	# Hiding it here means the gate's glass is the only overlay
+	# between the player and the world during the build.
+	_fade_rect.modulate.a = 0.0
+	_fade_rect.visible = false
+
+	# Deploy gate is specifically for battle deployment (e.g. Battle.tscn).
+	# Non-battle scenes (like MainLab.tscn) fade in directly without waiting for a battle deploy signal.
+	if _target_path == "res://scenes/Battle.tscn":
+		var gate = DeployGateScript.new()
+		_fade_layer.add_child(gate)
+		gate.start()
+		await gate.deploy_pressed
+		gate.dismiss()
+	else:
+		await fade_in()
+
 	_transitioning = false
 	_target_path = ""
 
 
-# Holds the fade until the incoming scene says it is playable.
-#
-# TWO FRAMES IS NOT A UNIVERSAL RULE. It is enough for a scene whose _ready()
-# runs to completion synchronously, and wrong for one that awaits inside it:
-# match_director._ready() awaits its terrain bake, so it RETURNS at that await
-# and finishes many frames later. The fade lifted on a half-built Battle - bases
-# spawned and floating over an unbuilt map, no terrain, no HUD - because the
-# router had counted two frames and declared victory.
-#
-# Opt-in by convention rather than by type: any scene that declares `world_ready`
-# gets waited on, and everything else keeps the old behaviour. The router does
-# not need to know what a match is.
-#
-# THE TIMEOUT IS NOT OPTIONAL. If a scene errors out partway through its own
-# setup the signal never fires, and without a ceiling the player sits on a black
-# screen forever with no way back. Arriving early on a half-built map is bad;
-# arriving never is worse.
-const WORLD_READY_TIMEOUT := 30.0
-
-func _await_world_ready() -> void:
-	var scene := get_tree().current_scene
-	if scene == null or not scene.has_signal("world_ready"):
-		return
-	# Already finished while the fade was running. Awaiting a signal that has
-	# ALREADY been emitted hangs forever, which is why the scene carries a flag
-	# as well as a signal.
-	if "world_is_ready" in scene and scene.world_is_ready:
-		return
-	# POLLED RATHER THAN AWAITED ON THE SIGNAL. `await` takes exactly one signal
-	# and there is no "first of these two" form, so racing the signal against a
-	# timeout means watching the flag the scene sets alongside it. That flag is
-	# needed regardless - see the comment above - so this costs nothing extra.
-	var waited := 0.0
-	while not scene.world_is_ready and waited < WORLD_READY_TIMEOUT:
-		await get_tree().process_frame
-		waited += get_process_delta_time()
-		if not is_instance_valid(scene):
-			return
-
-
-# The DEPLOY gate: the last beat of the loading sequence.
-#
-# The alternative is dropping the player straight into a live match the instant
-# it finishes building, which is worse than it sounds - the match is REAL from
-# frame one, the AI commander is already deciding and harvesters are already
-# moving, so a player still reading the map is a player already behind. A button
-# makes entry deliberate.
-#
-# It is drawn on the router's own fade overlay rather than on the loading screen,
-# because by this point the loading screen has been freed: the world has to exist
-# in order to be ready, and it cannot exist until the scene swap. The overlay is
-# the only thing that survives that swap.
-func _deploy_gate() -> void:
-	var scene := get_tree().current_scene
-	if scene == null or not scene.has_signal("world_ready"):
-		return
-
-	var gate := CenterContainer.new()
-	gate.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# STOP so nothing behind the curtain can be clicked through it. The match is
-	# already live at this point - a stray click landing on the battlefield would
-	# issue a real order before the player has seen the map.
-	gate.mouse_filter = Control.MOUSE_FILTER_STOP
-	_fade_layer.add_child(gate)
-
-	var col := VBoxContainer.new()
-	col.add_theme_constant_override("separation", Tokens.SPACE_MD)
-	gate.add_child(col)
-
-	var ready_label := Label.new()
-	ready_label.text = "ALL SYSTEMS READY"
-	ready_label.theme_type_variation = "HintLabel"
-	ready_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	col.add_child(ready_label)
-
-	var button := Button.new()
-	button.text = "DEPLOY"
-	button.custom_minimum_size = Vector2(260, 56)
-	col.add_child(button)
-	button.grab_focus()
-
-	# HOLDS THE MATCH, not just the view. Without this the comment above is only
-	# half-solved: the world would be built AND RUNNING while the player looked at
-	# a DEPLOY button, so the AI commander would take its first decisions and the
-	# harvesters their first trips before anyone had pressed anything.
-	#
-	# The overlay opts out of the pause it causes - a paused pause-screen cannot
-	# be dismissed - and so does its own layer, or the button would not repaint.
-	_fade_layer.process_mode = Node.PROCESS_MODE_ALWAYS
-	get_tree().paused = true
-	await button.pressed
-	get_tree().paused = false
-	gate.queue_free()
+# The DEPLOY gate is now a self-contained component
+# (scripts/deploy_gate.gd). The router no longer owns the
+# world-readiness polling, the tree pause, or the bezel/glass
+# visuals - the gate does. The router's only job during this
+# beat is to create the gate, await its deploy_pressed signal,
+# and dismiss it. The fade rect is hidden at the moment the
+# gate is created so the gate's glass can show the world.
 
 
 # Extracts a scene's heavy preload targets from its script SOURCE.

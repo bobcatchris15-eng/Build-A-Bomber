@@ -3,6 +3,7 @@ extends RefCounted
 
 const UIStampScript = preload("res://scripts/ui_stamp.gd")
 const BlueprintNamerScript = preload("res://scripts/blueprint_namer.gd")
+const BlueprintManagerScript = preload("res://scripts/blueprint_manager.gd")
 const TestRangeLauncherScript = preload("res://scripts/test_range_launcher.gd")
 const MeshIconScript = preload("res://scripts/ui/mesh_icon.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
@@ -40,8 +41,6 @@ var blueprint_name_edit:
 	get: return lab.blueprint_name_edit
 var mirror_checkbox:
 	get: return lab.mirror_checkbox
-var hull_spec_btn:
-	get: return lab.hull_spec_btn
 var _rail_vbox:
 	get: return lab._rail_vbox
 
@@ -73,6 +72,7 @@ var _slot_cost_label:
 # Lab holds nothing for them at that point and this class overwrites them.
 var _undo_btn
 var _redo_btn
+var _compare_btn: MenuButton
 var _mirror_icon
 var _name_roll_button
 var toolbar
@@ -148,6 +148,22 @@ func _on_roll_name_pressed() -> void:
 	blueprint_name_edit.text = rolled
 	_on_blueprint_name_changed(rolled)
 	_reroll_name_suggestion()
+
+func _process(delta: float) -> void:
+	if not _undo_btn or not _redo_btn: return
+	var root = lab.get_node_or_null("/root/MainLab")
+	if not root: return
+	var placer = root.get_node_or_null("ModulePlacer")
+	if not placer: return
+	
+	var u_count = placer.undo_stack.size()
+	var r_count = placer.redo_stack.size()
+	
+	_undo_btn.text = "UNDO" + (" (" + str(u_count) + ")" if u_count > 0 else "")
+	_undo_btn.disabled = u_count == 0
+	
+	_redo_btn.text = "REDO" + (" (" + str(r_count) + ")" if r_count > 0 else "")
+	_redo_btn.disabled = r_count == 0
 
 func _on_blueprint_name_changed(new_text: String):
 	var root = lab.get_node_or_null("/root/MainLab")
@@ -277,6 +293,24 @@ func _build_toolbar() -> void:
 	# the fact that they are the two most-used controls in the Lab.
 	_undo_btn = _toolbar_button(row, "UNDO", "undo", func(): _toolbar_undo())
 	_redo_btn = _toolbar_button(row, "REDO", "redo", func(): _toolbar_redo())
+	
+	row.add_child(VSeparator.new())
+	
+	# Font family and size intentionally left to the theme / _toolbar_button()
+	# helper. Tokens.FONT_* are size values, not Font resources, so the previous
+	# "add_theme_font_override(..., Tokens.FONT_HEADING)" passed an int to a slot
+	# that requires a Font. COMPARE inherits the toolbar's default treatment on
+	# purpose, matching UNDO/REDO/AUTO-ARMOR.
+	_compare_btn = MenuButton.new()
+	_compare_btn.text = "COMPARE"
+	_compare_btn.theme_type_variation = "FlatButton"
+	row.add_child(_compare_btn)
+	
+	var compare_popup = _compare_btn.get_popup()
+	compare_popup.about_to_popup.connect(_populate_compare_menu)
+	compare_popup.id_focused.connect(_on_compare_item_focused)
+	compare_popup.popup_hide.connect(_on_compare_popup_hidden)
+	compare_popup.id_pressed.connect(_on_compare_item_pressed)
 
 	row.add_child(VSeparator.new())
 
@@ -315,14 +349,21 @@ func _build_toolbar() -> void:
 	# The flyout trigger, and then the document actions. Save last-but-one and
 	# Test last, so the two that leave or commit the screen sit furthest from
 	# Undo/Redo and cannot be hit by accident on the way to them.
-	if hull_spec_btn:
-		hull_spec_btn.reparent(row)
 	if library_button:
 		library_button.reparent(row)
 
 	var spacer = Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(spacer)
+
+	# The Instructions button (manual)
+	var instructions_btn = _toolbar_button(row, "INSTRUCTIONS", "instructions", func():
+		var root = lab.get_node_or_null("/root/MainLab")
+		if root:
+			var placer = root.get_node_or_null("ModulePlacer")
+			if placer and placer.has_method("show_instructions_dialog"):
+				placer.show_instructions_dialog(true)
+	)
 
 	if save_button:
 		save_button.reparent(row)
@@ -375,6 +416,67 @@ func _toolbar_redo() -> void:
 	if root and root.has_method("redo"):
 		root.redo()
 
+var _compare_blueprint_list: Array = []
+
+func _populate_compare_menu() -> void:
+	var popup = _compare_btn.get_popup()
+	popup.clear()
+
+	# Only list named blueprints for comparison. list_blueprints is a non-static
+	# instance method on BlueprintManager (a Node) - calling it on the script
+	# class is a parse error, so we instantiate and use the instance. Same
+	# pattern as main_menu.gd:214-215.
+	var mgr = BlueprintManagerScript.new()
+	_compare_blueprint_list = mgr.list_blueprints(true)
+	if _compare_blueprint_list.is_empty():
+		popup.add_item("No designs available")
+		popup.set_item_disabled(0, true)
+		return
+
+	for i in range(_compare_blueprint_list.size()):
+		var bp = _compare_blueprint_list[i]
+		popup.add_item(bp["name"], i)
+
+func _on_compare_item_focused(id: int) -> void:
+	if id < 0 or id >= _compare_blueprint_list.size(): return
+	var root = lab.get_node_or_null("/root/MainLab")
+	if not root or not root.telemetry_rail: return
+	
+	var bp_path = _compare_blueprint_list[id].get("path", "")
+	if bp_path == "":
+		bp_path = "user://blueprints/" + _compare_blueprint_list[id]["id"] + ".json"
+	var data = BlueprintManagerScript.new().load_blueprint(bp_path)
+	if not data.is_empty():
+		var modules = data.get("modules", [])
+		var hp = 0
+		var weight = 0
+		var cost = 0
+		var dps = 0
+		for m in modules:
+			var s = m.get("stats", {})
+			hp += s.get("hp", 0)
+			weight += s.get("weight", 0)
+			cost += s.get("cost_metal", 0) + s.get("cost_crystal", 0)
+			dps += s.get("dps", 0)
+		
+		# Build a minimal stats dict. We don't have full DesignStats for it,
+		# but hp, weight, and dps are the main ones telemetry compares.
+		var bp_stats = {
+			"hp": hp,
+			"weight": weight,
+			"dps": dps,
+			# missing power/drivetrain since we don't have a live hull
+			# this will just fallback to not showing diffs for those
+		}
+		root.telemetry_rail.compare_against_blueprint(bp_stats)
+
+func _on_compare_item_pressed(id: int) -> void:
+	_on_compare_item_focused(id)
+	
+func _on_compare_popup_hidden() -> void:
+	var root = lab.get_node_or_null("/root/MainLab")
+	if root and root.telemetry_rail:
+		root.telemetry_rail.clear_comparison()
 
 func _toolbar_button(parent: Container, label: String, icon_name: String, cb: Callable) -> Button:
 	var b = Button.new()

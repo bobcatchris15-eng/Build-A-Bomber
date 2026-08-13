@@ -349,7 +349,7 @@ const MONOLITHIC_ANIMATION_PIVOTS := {
 }
 
 const LOCOMOTION_MODULAR_TYPES := {
-	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
+	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "heavy_quad_tracks": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
 	"buoyant_envelope": true, "screw_drive": true,
 	"half_track": true, "rocker_bogie": true, "air_cushion_skirt": true,
@@ -431,7 +431,7 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"chaff_dispenser": true, "laser_dazzler": true, "aps_interceptor": true,
 	"aa_autocannon": true, "jammer_mast": true, "sentry_deployer": true,
 	"sensor_beacon_launcher": true, "decoy_projector": true,
-	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "legs": true,
+	"wheels": true, "helicopter_rotors": true, "tracked_treads": true, "heavy_quad_tracks": true, "legs": true,
 	"hover_engine": true, "fixed_wing_engine": true, "ornithopter_wing": true,
 	"buoyant_envelope": true, "screw_drive": true,
 	"half_track": true, "rocker_bogie": true, "air_cushion_skirt": true,
@@ -492,6 +492,7 @@ const MODULAR_AUTHORED_SIZES := {
 	"wheels": Vector3(0.6, 0.6, 0.6),
 	"helicopter_rotors": Vector3(4.0, 0.2, 4.0),
 	"tracked_treads": Vector3(0.8, 0.6, 2.5),
+	"heavy_quad_tracks": Vector3(0.9, 0.7, 1.4),
 	"legs": Vector3(0.5, 1.5, 0.5),
 	"hover_engine": Vector3(1.2, 0.3, 1.2),
 	"fixed_wing_engine": Vector3(1.0, 0.5, 1.5),
@@ -703,6 +704,7 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 		match type_id:
 			"wheels": _build_wheels(parent_node, base_size, base_color, tweaks)
 			"tracked_treads": _build_tracked_treads(parent_node, base_size, base_color, tweaks)
+			"heavy_quad_tracks": _build_tracked_treads(parent_node, base_size, base_color, tweaks)
 			"helicopter_rotors": _build_helicopter_rotors(parent_node, base_size, base_color, tweaks)
 			"hover_engine": _build_hover_engine(parent_node, base_size, base_color, tweaks)
 			"legs": _build_legs(parent_node, base_size, base_color, tweaks)
@@ -3391,7 +3393,7 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 						tube.rotation = Vector3(deg_to_rad(-55.0), splay, 0)
 						parent_node.add_child(tube)
 
-	elif type_id in ["turbocharger", "overdrive_gearbox", "hub_motor_array", "nitrous_injector", "booster_rack"]:
+	elif type_id in ["turbocharger", "overdrive_gearbox", "hub_motor_array", "nitrous_injector", "booster_rack", "grav_lifter_assist", "jet_thrusters"]:
 		# --- Propulsion modules (speed pass, 2026-08-08) -----------------
 		# Same sub-part-per-tweak convention as recoilless_rifle above: the
 		# detail being tweaked is the piece that scales, nothing else. Parts
@@ -6226,13 +6228,69 @@ static func _build_propulsion_module(type_id: String, parent_node: Node3D, base_
 				tube.rotation = Vector3(PI / 2, 0, 0)
 				parent_node.add_child(tube)
 
+		"grav_lifter_assist":
+			var mesh = _part("grav_lifter_dome")
+			if mesh:
+				var dome = _mesh_inst(mesh, base_color)
+				dome.position = Vector3(0, 0.17, 0)
+				parent_node.add_child(dome)
+			else:
+				var dome = MeshInstance3D.new()
+				var d_sphere = SphereMesh.new()
+				d_sphere.radius = 0.35
+				d_sphere.height = 0.35
+				dome.mesh = d_sphere
+				dome.material_override = _flat_mat(base_color)
+				dome.position = Vector3(0, 0.17, 0)
+				parent_node.add_child(dome)
+			
+			# Animation ring
+			var ring_mesh = _part("agp_ring")
+			if ring_mesh:
+				var ring_pivot = Node3D.new()
+				ring_pivot.name = SPIN_PIVOT_TURBINE
+				ring_pivot.position = Vector3(0, 0.2, 0)
+				ring_pivot.rotation = Vector3(PI / 2.0, 0, 0)
+				parent_node.add_child(ring_pivot)
+				var ring = _mesh_inst(ring_mesh, base_color.darkened(0.45), Color(0.35, 0.75, 1.0), 0.5)
+				ring.scale = Vector3.ONE * 0.9
+				ring_pivot.add_child(ring)
+
+		"jet_thrusters":
+			var mesh = _part("jet_thruster_nozzle")
+			if mesh:
+				var nozzle = _mesh_inst(mesh, base_color.darkened(0.2))
+				nozzle.position = Vector3(0, 0.2, 0.2)
+				nozzle.rotation = Vector3(PI / 2, 0, 0)
+				parent_node.add_child(nozzle)
+			else:
+				var nozzle = MeshInstance3D.new()
+				var n_cyl = CylinderMesh.new()
+				n_cyl.top_radius = 0.4
+				n_cyl.bottom_radius = 0.4
+				n_cyl.height = 0.8
+				nozzle.mesh = n_cyl
+				nozzle.material_override = _flat_mat(base_color.darkened(0.2))
+				nozzle.position = Vector3(0, 0.2, 0.2)
+				nozzle.rotation = Vector3(PI / 2, 0, 0)
+				parent_node.add_child(nozzle)
+
+		_:
+			# Fallback for generic propulsion/support modules that lack a specific hand-authored builder
+			var frame = MeshInstance3D.new()
+			var fr_box = BoxMesh.new()
+			fr_box.size = Vector3(0.6, 0.4, 0.6)
+			frame.mesh = fr_box
+			frame.material_override = _flat_mat(base_color.darkened(0.1))
+			frame.position = Vector3(0, 0.2, 0)
+			parent_node.add_child(frame)
 
 static func _apply_tweak_deformations(type_id: String, parent: Node3D, tweaks: Dictionary, base_size: Vector3):
 	var children = parent.get_children().filter(func(c): return c is MeshInstance3D)
 	if children.is_empty(): return
 
 	match type_id:
-		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle", "arc_projector", "microwave_emitter", "particle_lance", "spigot_mortar", "rocket_artillery", "hypervelocity_missile", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile", "chaff_dispenser", "laser_dazzler", "aps_interceptor", "aa_autocannon", "jammer_mast", "sentry_deployer", "sensor_beacon_launcher", "decoy_projector", "turbocharger", "overdrive_gearbox", "hub_motor_array", "nitrous_injector", "booster_rack":
+		"basic_cannon", "heavy_machine_gun", "rotary_cannon", "gauss_railgun", "artillery", "mortar_array", "guided_missile", "missile_pod", "cluster_dispenser", "flamethrower", "tesla_coil", "ion_cannon", "heavy_laser", "laser_cannon", "plasma_lobber", "plasma_launcher", "ciws", "pd_laser", "point_defense_laser", "flak_cannon", "flak_battery", "drone_carrier", "resource_harvester", "repair_array", "sensor_suite", "smoke_discharger", "mk19_grenade_launcher", "recoilless_rifle", "coil_gun", "autocannon", "napalm_mortar", "mine_layer", "ballista", "anti_materiel_rifle", "arc_projector", "microwave_emitter", "particle_lance", "spigot_mortar", "rocket_artillery", "hypervelocity_missile", "sam_launcher", "loitering_munition", "anti_radiation_missile", "bunker_buster", "cruise_missile", "chaff_dispenser", "laser_dazzler", "aps_interceptor", "aa_autocannon", "jammer_mast", "sentry_deployer", "sensor_beacon_launcher", "decoy_projector", "turbocharger", "overdrive_gearbox", "hub_motor_array", "nitrous_injector", "booster_rack", "grav_lifter_assist", "jet_thrusters":
 			return
 
 # Builds a wedge (triangular prism) mesh from a base_size Vector3.

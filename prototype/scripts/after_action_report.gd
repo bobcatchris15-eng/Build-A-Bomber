@@ -20,6 +20,11 @@ func setup(p_victory: bool, p_duration: float, p_stats: Dictionary, p_is_op: boo
 	match_duration = p_duration
 	bp_stats = p_stats
 	is_operation = p_is_op
+	
+	if get_tree().root.has_node("DesignRecord"):
+		var dr = get_tree().root.get_node("DesignRecord")
+		dr.add_match_results(bp_stats)
+		
 	_build_ui()
 
 func _build_ui() -> void:

@@ -19,17 +19,14 @@ extends Control
 const UITheme = preload("res://scripts/ui_theme.gd")
 const UIShell = preload("res://scripts/ui_shell.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
+const UILampsScript = preload("res://scripts/ui_lamps.gd")
 
 var _context: String = ""
 var _bar: ProgressBar
-var _lamps: Control
-var _phase: float = 0.0
+var _lamps: UILamps
 var _elapsed: float = 0.0
 var _status_label: Label
 var _step_label: Label
-
-const LAMP_COUNT := 24
-const LAMP_SWEEP_SPEED := 1.5  # sweeps per second
 
 
 func _ready() -> void:
@@ -75,10 +72,7 @@ func _ready() -> void:
 	_step_label.theme_type_variation = "StatLabel"
 	col.add_child(_step_label)
 
-	_lamps = Control.new()
-	_lamps.custom_minimum_size = Vector2(0, 18)
-	_lamps.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_lamps.draw.connect(_draw_lamps)
+	_lamps = UILampsScript.new()
 	col.add_child(_lamps)
 
 	_bar = ProgressBar.new()
@@ -112,36 +106,11 @@ func _on_progress(fraction: float, label: String = "") -> void:
 
 func _process(delta: float) -> void:
 	_elapsed += delta
-	_phase = fmod(_phase + delta * LAMP_SWEEP_SPEED, 1.0)
-	# queue_redraw every frame is fine here - this is the only thing on
-	# screen, and the whole point is visible motion.
-	if is_instance_valid(_lamps):
-		_lamps.queue_redraw()
+	# Lamps own their own _process / queue_redraw since the 2026-08-13
+	# lift into scripts/ui_lamps.gd - this function is just the
+	# "STAND BY" text escalation now.
 
 	# After a few seconds, say something rather than leaving the player
 	# staring at an unexplained wait.
 	if _elapsed > 4.0 and is_instance_valid(_status_label):
 		_status_label.text = "PREPARING DEPLOYMENT - STAND BY"
-
-
-# A row of rectangular indicator lamps with a lit band sweeping across them,
-# drawn rather than assembled from nodes so the sweep can be a continuous
-# function of time instead of N animated children.
-func _draw_lamps() -> void:
-	var w := _lamps.size.x
-	var h := _lamps.size.y
-	if w <= 0.0:
-		return
-	var gap := 3.0
-	var lamp_w: float = maxf((w - gap * (LAMP_COUNT - 1)) / float(LAMP_COUNT), 1.0)
-
-	for i in range(LAMP_COUNT):
-		var x := i * (lamp_w + gap)
-		var t := float(i) / float(LAMP_COUNT)
-		# Distance from the sweep head, wrapped, so the band runs off one
-		# end and reappears at the other without a seam.
-		var d: float = fposmod(t - _phase, 1.0)
-		# Short bright head with a tail behind it.
-		var lit: float = clampf(1.0 - d * 6.0, 0.0, 1.0)
-		var col: Color = Tokens.BASE_600.lerp(Tokens.SIGNAL_HAZARD, lit)
-		_lamps.draw_rect(Rect2(x, 0.0, lamp_w, h), col)

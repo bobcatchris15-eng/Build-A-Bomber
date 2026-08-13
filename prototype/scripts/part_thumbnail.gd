@@ -62,8 +62,9 @@ var _cache: Dictionary = {}
 # Without this, a hovered card that fails to render would re-allocate
 # the rig every frame.
 var _failures: Dictionary = {}
-
-
+var _bake_queue: Array[String] = []
+var _is_baking: bool = false
+signal queue_advanced
 func _ready() -> void:
 	_build_rig()
 
@@ -138,17 +139,42 @@ func get_thumbnail(type_id: String) -> Texture2D:
 		return _cache[type_id]
 	if _failures.has(type_id):
 		return null
+	
+	if not _bake_queue.has(type_id):
+		_bake_queue.append(type_id)
+		
+	if not _is_baking:
+		_process_queue()
+		
+	while not _cache.has(type_id) and not _failures.has(type_id):
+		await queue_advanced
+		
+	if _cache.has(type_id):
+		return _cache[type_id]
+	return null
+
+func _process_queue() -> void:
+	_is_baking = true
 	if _viewport == null:
 		# Tests that construct a cache without _ready() running (e.g. add_child
 		# + immediate get) hit this path. The rig is cheap to build, so build
 		# it on demand rather than failing the call.
 		_build_rig()
-	var tex := await _bake(type_id)
-	if tex == null:
-		_failures[type_id] = true
-		return null
-	_cache[type_id] = tex
-	return tex
+		
+	while _bake_queue.size() > 0:
+		var current_id = _bake_queue.pop_front()
+		if _cache.has(current_id) or _failures.has(current_id):
+			continue
+			
+		var tex := await _bake(current_id)
+		if tex == null:
+			_failures[current_id] = true
+		else:
+			_cache[current_id] = tex
+			
+		queue_advanced.emit()
+		
+	_is_baking = false
 
 
 # Synchronous variant. Used when the caller knows the bake is already

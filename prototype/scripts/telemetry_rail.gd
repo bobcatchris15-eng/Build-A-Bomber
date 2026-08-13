@@ -82,6 +82,10 @@ var _verdict_panel
 var _verdict_headline
 var _verdict_detail
 
+var _lifetime_panel
+var _lifetime_headline
+var _lifetime_detail
+
 var _range_label
 var _vision_label
 var _spotter_panel
@@ -153,10 +157,20 @@ func update_preview_stats(ghost_mesh: Node3D, mirror_mesh: Node3D = null):
 	_previewing = true
 	_apply_stats(preview_stats, _base_stats)
 
+func compare_against_blueprint(bp_stats: Dictionary):
+	if _base_stats.is_empty():
+		return
+	_previewing = true
+	# _apply_stats(current, baseline). We want baseline to be bp_stats.
+	_apply_stats(_base_stats, bp_stats)
+
 func clear_preview():
 	if _previewing:
 		_previewing = false
 		_apply_stats(_base_stats)
+
+func clear_comparison():
+	clear_preview()
 
 func _format_delta(current: float, base: float, invert_good: bool = false, is_int: bool = false) -> String:
 	if absf(current - base) < 0.05:
@@ -1083,6 +1097,63 @@ func _update_alpha_readout(wa: Dictionary) -> void:
 # tweak_callout.gd may flip a direction horizontally to keep its line on the
 # same side as the geometry it points at; the vertical spread here is what stops
 # same-side callouts from piling up.
+func _build_lifetime_stats_block() -> void:
+	if _lifetime_panel != null and is_instance_valid(_lifetime_panel):
+		return
+	var parent = hp_label.get_parent()
+	if parent == null:
+		return
+
+	_lifetime_panel = PhosphorPanelScript.new()
+	_lifetime_panel.tube = PhosphorPanelScript.Tube.GREEN
+	parent.add_child(_lifetime_panel)
+	
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	_lifetime_panel.add_child(stack)
+
+	_lifetime_headline = Label.new()
+	_lifetime_headline.theme_type_variation = "HeadingLabel"
+	_lifetime_headline.add_theme_color_override("font_color", Color.WHITE)
+	_lifetime_headline.text = "LIFETIME COMBAT RECORD"
+	stack.add_child(_lifetime_headline)
+
+	var rule := HSeparator.new()
+	rule.add_theme_constant_override("separation", Tokens.SPACE_XS)
+	stack.add_child(rule)
+
+	_lifetime_detail = Label.new()
+	_lifetime_detail.theme_type_variation = "StatLabel"
+	_lifetime_detail.add_theme_color_override("font_color", Color.WHITE)
+	_lifetime_detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(_lifetime_detail)
+
+func _update_lifetime_stats(hull: Node3D) -> void:
+	_build_lifetime_stats_block()
+	if _lifetime_panel == null or not is_instance_valid(_lifetime_panel):
+		return
+		
+	var dr = lab.get_tree().root.get_node_or_null("DesignRecord")
+	if not dr:
+		_lifetime_panel.visible = false
+		return
+		
+	var bp_name = hull.get_meta("blueprint_name", "") if hull else ""
+	var record = dr.get_record(bp_name)
+	
+	if record.is_empty() or record.get("built", 0) == 0:
+		_lifetime_panel.visible = false
+		return
+		
+	_lifetime_panel.visible = true
+	
+	var text = "Units Fielded: %d\n" % record.get("built", 0)
+	text += "Total Kills: %d\n" % record.get("kills", 0)
+	text += "Total Damage: %d\n" % record.get("damage_dealt", 0)
+	text += "Credits Spent: %d" % record.get("credits_spent", 0)
+	
+	_lifetime_detail.text = text
+
 func _build_verdict_block() -> void:
 	if _verdict_panel != null and is_instance_valid(_verdict_panel):
 		return

@@ -283,7 +283,23 @@ def export_glb(obj, filepath):
 	print("Exported: " + filepath)
 
 
+import sys
+
+TARGET_MESHES = []
+if "--" in sys.argv:
+	idx = sys.argv.index("--")
+	if "--only" in sys.argv[idx:]:
+		only_idx = sys.argv.index("--only", idx)
+		TARGET_MESHES = sys.argv[only_idx+1:]
+
 def export_and_cleanup(obj, out_dir, filename):
+	if TARGET_MESHES and filename not in TARGET_MESHES:
+		mesh_data = obj.data
+		bpy.data.objects.remove(obj, do_unlink=True)
+		if mesh_data and mesh_data.users == 0:
+			bpy.data.meshes.remove(mesh_data)
+		return
+
 	path = os.path.join(out_dir, filename + ".glb")
 	export_glb(obj, path)
 	mesh_data = obj.data
@@ -1691,6 +1707,22 @@ def build_exhaust_cone(name, radius=0.25, length=0.3, color=(0.15, 0.15, 0.16)):
 	obj = make_object_from_bmesh(bm, name)
 	finalize(obj, name, color=color, metallic=0.75, roughness=0.3)
 	return obj
+
+
+def build_jet_thruster_nozzle(name, radius=0.4, length=0.8, color=(0.8, 0.3, 0.1)):
+	bm = bmesh.new()
+	# Main engine body (tapered)
+	add_cyl_axis(bm, (0, 0, 0), radius, length * 0.6, 'x', segments=20, radius2=radius * 0.7)
+	# Rear nozzle flare
+	add_cyl_axis(bm, (0, 0, length * 0.4), radius * 0.85, length * 0.2, 'x', segments=20, radius2=radius * 0.7)
+	# Inner dark exhaust area
+	add_cyl_axis(bm, (0, 0, length * 0.45), radius * 0.75, length * 0.1, 'x', segments=16, radius2=radius * 0.6)
+	
+	obj = make_object_from_bmesh(bm, name)
+	# Use multiple material indices if possible? Just one material is fine, Godot colors it.
+	finalize(obj, name, color=color, metallic=0.8, roughness=0.2)
+	return obj
+
 
 
 def build_wing_shoulder(name, size=(0.3, 0.2, 0.7), color=(0.3, 0.3, 0.33)):
@@ -4284,6 +4316,9 @@ def generate_parts():
 	export_and_cleanup(build_barrel("nitrous_feed_line", length=0.4, radius=0.025, muzzle_radius=0.025, segments=8, fins=0), PARTS_DIR, "nitrous_feed_line")
 	export_and_cleanup(build_barrel("booster_tube", length=0.7, radius=0.09, muzzle_radius=0.09, segments=12, fins=0), PARTS_DIR, "booster_tube")
 	export_and_cleanup(build_box_part("booster_rack_frame", size=(0.85, 0.12, 0.5), bolts=True, color=(0.4, 0.15, 0.12)), PARTS_DIR, "booster_rack_frame")
+
+	export_and_cleanup(build_dome("grav_lifter_dome", radius=0.35, squash=0.5, color=(0.3, 0.7, 0.9)), PARTS_DIR, "grav_lifter_dome")
+	export_and_cleanup(build_jet_thruster_nozzle("jet_thruster_nozzle", radius=0.4, length=0.8, color=(0.8, 0.3, 0.1)), PARTS_DIR, "jet_thruster_nozzle")
 
 	print("--- Parts library done ---")
 

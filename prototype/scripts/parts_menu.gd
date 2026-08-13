@@ -114,20 +114,25 @@ const WEAPON_ROLES = [
 	"Missiles", "Point Defense", "Deployables",
 ]
 
-# Propulsion parts route to the Drives toolbox rather than Support - a player
-# looking to make a design faster looks where the locomotion types already
-# live, not in a generators drawer.
-const DRIVE_ROLES = ["Propulsion"]
+# Propulsion routes to Support — speed upgrades live with their sibling
+# utilities (Power, Armor) rather than with locomotion drive types.
+# DRIVE_ROLES kept as empty to avoid breaking any callers.
+const DRIVE_ROLES: Array = []
 
-const CARD_MIN_WIDTH := 132
-const CARD_HEIGHT := 46
+# Display order within the Support tab. Propulsion sits last so the
+# utility/infrastructure groupings (Armor, Power, general Support) read
+# first and the speed-modifiers are a logical follow-on.
+const SUPPORT_ROLE_ORDER = ["Armor", "Power", "Support", "Propulsion"]
+
+const CARD_MIN_WIDTH := 80
+const CARD_HEIGHT := 100
 
 # --- Bar dimensions ---------------------------------------------------------
 # Wider than the Skirmish build queue's 264 because the design lab's part
 # cards run two to a row in a grid at a 132px minimum, and the 264 left
 # cards clipping in 4-toolbox mode. 4 * 288 = 1152, which fits a 1280
 # viewport with breathing room.
-const TOOLBOX_WIDTH := 288.0
+const TOOLBOX_WIDTH := 320.0
 const PLATE_PADDING := 10.0
 const CONTENT_WIDTH := TOOLBOX_WIDTH - PLATE_PADDING * 2.0
 # Same as production_hud.gd's HEADER_HEIGHT - the header needs room to
@@ -169,6 +174,9 @@ var _family_widgets: Dictionary = {}
 
 # The horizontal row of plates + slots along the bottom.
 var _bar_row: Control
+
+var _family_vboxes: Dictionary = {}
+var _family_tabs: Dictionary = {}
 
 # Every section built, across all three families, so search can sweep them
 # without re-walking the scene tree on each keystroke.
@@ -218,8 +226,14 @@ func _ready() -> void:
 			_bucket(module_groups, ModuleCatalog.get_module_role(type_id, category), type_id, data)
 
 	_populate(hull_groups, HULL_GROUP_ORDER, "hulls")
-	_populate(module_groups, ModuleCatalog.MODULE_ROLE_ORDER, "modules")
+	# Weapons roles first, then support roles with Propulsion last
+	var combined_order = ModuleCatalog.MODULE_ROLE_ORDER.filter(func(r): return r in WEAPON_ROLES)
+	combined_order.append_array(SUPPORT_ROLE_ORDER)
+	_populate(module_groups, combined_order, "modules")
 	_populate(loco_groups, LOCO_GROUP_ORDER, "locomotion")
+
+	if _family_tabs.has("hulls"):
+		_family_tabs["hulls"].button_pressed = true
 
 	# Fit the bar's first layout now that the size is real.
 	_layout_bar()
@@ -228,48 +242,207 @@ func _ready() -> void:
 
 # --- Shell ------------------------------------------------------------------
 
+var _dock_panel: PanelContainer
+var _main_vbox: VBoxContainer
+var _dock_scroll: ScrollContainer
+
+# Gap between toolbar bottom and our dock top, and left inset from screen edge.
+const DOCK_GAP := 10.0
+const DOCK_LEFT_INSET := 20.0   # inset from screen edge
+
+# Border widths — read as concentric rings visible between each layer
+const LIP_WIDTH := 16.0   # outer stamped steel ring — wide enough to read at a glance
+const GASKET_WIDTH := 6.0 # rubber gasket ring, sits inside the lip
+# Body starts inset by LIP_WIDTH + GASKET_WIDTH from the steel lip outer edge
+
 func _build_shell() -> void:
-	_bar_row = Control.new()
-	_bar_row.name = "Toolboxes"
-	_bar_row.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_bar_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_bar_row)
+	# ----------------------------------------------------------------
+	# The assembly, bottom-to-top in Z order (later child = on top):
+	#
+	#   outer  (Control)          — positions the whole block
+	#   ├─ steel_lip  (Panel)     — renders the outermost ring (dark red steel)
+	#   ├─ gasket     (Panel)     — sits inside lip, shows as a rubber band
+	#   └─ _dock_panel (PanelContainer) — the red body; margin children go here
+	#
+	# Using Panel (NOT PanelContainer) for lip and gasket is critical:
+	# PanelContainer forces its ONE child into the content-margin rect,
+	# which would eat our manual anchor+offset positioning. Plain Panel
+	# is just a Node2D with a StyleBox drawn behind; children lay out freely.
+	# ----------------------------------------------------------------
 
-	# ALL PLATES FIRST, THEN ALL SLOTS. Godot picks siblings in REVERSE child
-	# order, so an interleaved plate/slot/plate/slot arrangement puts one
-	# toolbox's decorative plate ahead of the NEXT toolbox's controls in the
-	# pick order - measured by production_hud.gd's own comment on this trap.
+	const TOTAL_INSET := LIP_WIDTH + GASKET_WIDTH
+
+	# ---- 1. Outer positioner ----------------------------------------
+	var outer = Control.new()
+	outer.name = "ToolboxOuter"
+	outer.anchor_left   = 0.0
+	outer.anchor_top    = 0.0
+	outer.anchor_right  = 0.0
+	outer.anchor_bottom = 1.0
+	outer.offset_left   = DOCK_LEFT_INSET
+	outer.offset_right  = DOCK_LEFT_INSET + TOOLBOX_WIDTH
+	outer.offset_top    = Tokens.TOOLBAR_HEIGHT + DOCK_GAP
+	outer.offset_bottom = -DOCK_GAP
+	# STOP so scroll wheel events don't fall through to the 3D camera
+	outer.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(outer)
+
+	# ---- 2. Stamped steel outer lip --------------------------------
+	var steel_lip = Panel.new()
+	steel_lip.name = "SteelLip"
+	steel_lip.set_anchors_preset(Control.PRESET_FULL_RECT)
+	steel_lip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var lip_style = StyleBoxFlat.new()
+	lip_style.bg_color = Color(0.18, 0.07, 0.06, 1.0)  # dark pressed steel
+	lip_style.corner_radius_top_left    = 5
+	lip_style.corner_radius_top_right   = 5
+	lip_style.corner_radius_bottom_left = 8
+	lip_style.corner_radius_bottom_right = 8
+	# Thick bright highlight on the top edge — reads as the stamped lip catching light
+	lip_style.border_width_top = 3
+	lip_style.border_color = Color(0.55, 0.22, 0.17, 1.0)  # warm highlight
+	lip_style.set_content_margin_all(0)
+	steel_lip.add_theme_stylebox_override("panel", lip_style)
+	var lip_mat = ShaderMaterial.new()
+	lip_mat.shader = preload("res://shaders/red_steel.gdshader")
+	steel_lip.material = lip_mat
+	outer.add_child(steel_lip)
+
+	# ---- 3. Rubber gasket ring (inset from lip edge) ---------------
+	var gasket = Panel.new()
+	gasket.name = "RubberGasket"
+	gasket.anchor_left   = 0.0
+	gasket.anchor_top    = 0.0
+	gasket.anchor_right  = 1.0
+	gasket.anchor_bottom = 1.0
+	gasket.offset_left   = LIP_WIDTH
+	gasket.offset_top    = LIP_WIDTH
+	gasket.offset_right  = -LIP_WIDTH
+	gasket.offset_bottom = -LIP_WIDTH
+	gasket.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var gasket_style = StyleBoxFlat.new()
+	gasket_style.bg_color = Color(0.07, 0.07, 0.08, 1.0)  # dark matte rubber
+	gasket_style.corner_radius_top_left    = 3
+	gasket_style.corner_radius_top_right   = 3
+	gasket_style.corner_radius_bottom_left = 5
+	gasket_style.corner_radius_bottom_right = 5
+	gasket_style.set_content_margin_all(0)
+	gasket.add_theme_stylebox_override("panel", gasket_style)
+	var gasket_mat = ShaderMaterial.new()
+	gasket_mat.shader = preload("res://shaders/rubber_gasket.gdshader")
+	gasket.material = gasket_mat
+	outer.add_child(gasket)
+
+	# ---- 4. Red-steel body panel (inset from gasket edge) ----------
+	_dock_panel = PanelContainer.new()
+	_dock_panel.name = "Toolboxes"
+	_dock_panel.anchor_left   = 0.0
+	_dock_panel.anchor_top    = 0.0
+	_dock_panel.anchor_right  = 1.0
+	_dock_panel.anchor_bottom = 1.0
+	_dock_panel.offset_left   = TOTAL_INSET
+	_dock_panel.offset_top    = TOTAL_INSET
+	_dock_panel.offset_right  = -TOTAL_INSET
+	_dock_panel.offset_bottom = -TOTAL_INSET
+	_dock_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var body_style = StyleBoxFlat.new()
+	body_style.bg_color = Color.WHITE  # shader drives colour
+	body_style.corner_radius_top_left    = 2
+	body_style.corner_radius_top_right   = 2
+	body_style.corner_radius_bottom_left = 3
+	body_style.corner_radius_bottom_right = 3
+	body_style.set_content_margin_all(0)
+	_dock_panel.add_theme_stylebox_override("panel", body_style)
+	var body_mat = ShaderMaterial.new()
+	body_mat.shader = preload("res://shaders/red_steel.gdshader")
+	_dock_panel.material = body_mat
+	outer.add_child(_dock_panel)
+
+	var margin = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 8)
+	margin.add_theme_constant_override("margin_right", 8)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	_dock_panel.add_child(margin)
+
+	var layout_vbox = VBoxContainer.new()
+	layout_vbox.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	margin.add_child(layout_vbox)
+
+	_build_search_widget(layout_vbox)
+
+	# 2×2 grid of tabs — each tab fits its text naturally
+	var tab_row = GridContainer.new()
+	tab_row.name = "FamilyTabs"
+	tab_row.columns = 2
+	tab_row.add_theme_constant_override("h_separation", Tokens.SPACE_XS)
+	tab_row.add_theme_constant_override("v_separation", Tokens.SPACE_XS)
+	layout_vbox.add_child(tab_row)
+
+	_dock_scroll = ScrollContainer.new()
+	_dock_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_dock_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	_dock_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# Explicit STOP so the scroll container swallows wheel events completely
+	_dock_scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	layout_vbox.add_child(_dock_scroll)
+
+	_main_vbox = VBoxContainer.new()
+	_main_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_main_vbox.add_theme_constant_override("separation", Tokens.SPACE_SM)
+	_dock_scroll.add_child(_main_vbox)
+
+	var button_group = ButtonGroup.new()
+
 	for tier in TIERS:
-		var plate: Control = ToolboxPlateScript.new()
-		plate.name = tier["id"] + "Plate"
+		var tier_id = tier["id"]
+		
+		var tier_vbox = VBoxContainer.new()
+		tier_vbox.name = "Tier_" + tier_id
+		tier_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tier_vbox.add_theme_constant_override("separation", Tokens.SPACE_SM)
+		tier_vbox.visible = false
+		_main_vbox.add_child(tier_vbox)
+		_family_vboxes[tier_id] = tier_vbox
+		
+		var tab_btn = Button.new()
+		tab_btn.custom_minimum_size = Vector2(0, 36)
+		# EXPAND_FILL in both axes so each cell in the 2×2 grid fills equally
+		tab_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tab_btn.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		tab_btn.toggle_mode = true
+		tab_btn.button_group = button_group
+		for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+			tab_btn.add_theme_stylebox_override(state, StyleBoxEmpty.new())
+			
+		var plate = ToolboxPlateScript.new()
+		plate.set_anchors_preset(Control.PRESET_FULL_RECT)
+		plate.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_plates_set_defaults(plate)
-		_bar_row.add_child(plate)
-	# The search gets its own plate too, before any slot, for the same reason.
-	var search_plate: Control = ToolboxPlateScript.new()
-	search_plate.name = "SearchPlate"
-	_plates_set_defaults(search_plate)
-	_bar_row.add_child(search_plate)
+		tab_btn.add_child(plate)
+		
+		var stamp = StampedLabelScript.new()
+		stamp.text = tier["label"]
+		stamp.font_size = 13
+		stamp.set_anchors_preset(Control.PRESET_FULL_RECT)
+		plate.add_child(stamp)
+		
+		tab_row.add_child(tab_btn)
+		_family_tabs[tier_id] = tab_btn
+		
+		tab_btn.toggled.connect(func(pressed: bool):
+			if pressed:
+				_show_family(tier_id)
+		)
 
-	for tier in TIERS:
-		_build_family_toolbox(tier["id"], tier["label"])
-
-	# Layout the toolboxes in _ready() once the row has a size, and any time
-	# the viewport resizes.
-	_bar_row.resized.connect(_layout_bar)
-
-	# Magnifying glass + search flyout.
-	_build_search_widget()
-
-	# The empty hint (shown when no parts match the search).
 	_empty_hint = Label.new()
 	_empty_hint.text = "No parts match."
 	_empty_hint.theme_type_variation = "HintLabel"
 	_empty_hint.visible = false
-	# Anchored just above the bar; preset CENTER sizes around the
-	# parent, so the position has to be set explicitly afterwards.
-	_empty_hint.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	_empty_hint.size = Vector2(160.0, 24.0)
-	add_child(_empty_hint)
+	layout_vbox.add_child(_empty_hint)
 
 
 # Stamps the chrome defaults onto a ToolboxPlate. The plate's own constructor
@@ -283,99 +456,6 @@ func _plates_set_defaults(plate: Control) -> void:
 	plate.edge_color = Tokens.BASE_500
 
 
-func _build_family_toolbox(tier_id: String, label: String) -> void:
-	var plate: Control = _bar_row.get_node(tier_id + "Plate")
-
-	# The slot is the VBox that parents the panel (above) and header (below).
-	# Its size is what the plate is sized to match - so the chamfered outline
-	# frames both.
-	var slot := VBoxContainer.new()
-	slot.name = tier_id
-	slot.add_theme_constant_override("separation", 0)
-	slot.custom_minimum_size = Vector2(TOOLBOX_WIDTH, 0)
-	# STOP, so the slot absorbs mouse-wheel events that the list's own
-	# ScrollContainer declines (at the top or bottom of a scrollable range).
-	# Without this, a wheel in a closed drawer still reaches the designer
-	# camera and zooms the world out from under the player. This is the
-	# exact problem production_hud.gd:189-214 documents, in the same words.
-	slot.mouse_filter = Control.MOUSE_FILTER_STOP
-	slot.gui_input.connect(func(event: InputEvent):
-		if event is InputEventMouseButton and (
-				event.button_index == MOUSE_BUTTON_WHEEL_UP
-				or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
-			slot.accept_event())
-	_bar_row.add_child(slot)
-
-	# --- Panel: a recess inside the plate, hidden when the family is closed.
-	# It comes FIRST in the slot's child order so it renders ABOVE the
-	# header - the panel opens upward from the bottom of the screen.
-	var panel := PanelContainer.new()
-	panel.visible = false
-	# A recess, not another raised surface. The list opens INTO the plate,
-	# so it is darker than the plate body with a hairline rim rather than
-	# a bevel - the same well production_hud.gd:223-229 uses.
-	var well := StyleBoxFlat.new()
-	well.bg_color = Tokens.BASE_900
-	well.border_color = Tokens.BASE_500
-	well.set_border_width_all(Tokens.BORDER_HAIRLINE)
-	well.set_content_margin_all(Tokens.SPACE_XS)
-	panel.add_theme_stylebox_override("panel", well)
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
-	panel.add_child(scroll)
-	var body := VBoxContainer.new()
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", Tokens.SPACE_XS)
-	scroll.add_child(body)
-	slot.add_child(panel)
-
-	# Cap the panel's height at LIST_MAX_HEIGHT, but let it shrink when its
-	# content is shorter. minf() is a floor for the panel, not a clamp on
-	# the scroll content; the ScrollContainer's auto-resize still works.
-	scroll.custom_minimum_size = Vector2(0, 0)
-
-	# --- Header: the closed-state trigger button, with the family label
-	# stamped on top of it. Identical pattern to production_hud.gd:239-260.
-	var header := Button.new()
-	header.alignment = HORIZONTAL_ALIGNMENT_CENTER
-	header.toggle_mode = true
-	header.focus_mode = Control.FOCUS_NONE
-	header.custom_minimum_size = Vector2(0, HEADER_HEIGHT)
-	_engrave(header)
-	slot.add_child(header)
-
-	var stamp: Control = StampedLabelScript.new()
-	stamp.text = label.to_upper()
-	stamp.font_size = HEADER_FONT_SIZE
-	stamp.set_anchors_preset(Control.PRESET_FULL_RECT)
-	header.add_child(stamp)
-	UIFeedbackScript.wire(header, "select")
-
-	_family_widgets[tier_id] = {
-		"plate": plate,
-		"slot": slot,
-		"panel": panel,
-		"header": header,
-		"body": body,
-		"is_open": false,
-	}
-
-	# The cross-toolbox accordion: opening one family closes the others.
-	# Toggling the currently-open family OFF closes everything - which
-	# reads as "click the active header to dismiss" rather than "I have
-	# to find a tiny X to close this", matching the Skirmish build queue.
-	header.toggled.connect(func(pressed: bool):
-		if pressed:
-			_open_family_cross(tier_id)
-		elif _open_family == tier_id:
-			_close_family(tier_id))
-
-
-# Strips a header Button back to a bare hit target, exactly as
-# production_hud.gd:286-298 does. The plate is the surface, the
-# StampedLabel is the lettering, and any theme overrides on the button
-# would just be a second copy of both.
 func _engrave(button: Button) -> void:
 	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
 		var empty := StyleBoxEmpty.new()
@@ -398,85 +478,21 @@ func _engrave(button: Button) -> void:
 # it and the Drives toolbox to its left. Same height as the closed family
 # toolboxes (HEADER_HEIGHT) so the row's lowest edge reads as one line.
 func _layout_bar() -> void:
-	if _bar_row == null or _family_widgets.is_empty():
-		return
-	var bar_w: float = size.x
-	var n: int = TIERS.size()
-	var total_w: float = TOOLBOX_WIDTH * float(n) + BAR_GAP * float(n - 1) + SEARCH_WIDTH + BAR_GAP
-	var left: float = maxf(Tokens.SPACE_LG, (bar_w - total_w) * 0.5)
-	var bottom_y: float = size.y - BAR_BOTTOM_INSET
+	pass
 
-	var x: float = left
-	for tier in TIERS:
-		var w: Dictionary = _family_widgets[tier["id"]]
-		var is_open: bool = w["is_open"]
-		var h: float = HEADER_HEIGHT + (LIST_MAX_HEIGHT + Tokens.SPACE_XS if is_open else 0.0)
-		w["plate"].position = Vector2(x, bottom_y - h)
-		w["plate"].size = Vector2(TOOLBOX_WIDTH, h)
-		w["slot"].position = Vector2(x, bottom_y - h)
-		w["slot"].size = Vector2(TOOLBOX_WIDTH, h)
-		# Cap the open panel to LIST_MAX_HEIGHT; the scroll container does
-		# the right thing on its own for shorter content.
-		w["panel"].custom_minimum_size = Vector2(0, LIST_MAX_HEIGHT if is_open else 0)
-		x += TOOLBOX_WIDTH + BAR_GAP
-
-	# Search toolbox: 5th element, treated as a peer of the four above.
-	# Same plate chrome, same height, same gap to its left. The body is
-	# always invisible (the search opens a flyout instead), so the height
-	# is just HEADER_HEIGHT.
-	if _search_plate and is_instance_valid(_search_plate):
-		var search_x: float = x + BAR_GAP
-		_search_plate.position = Vector2(search_x, bottom_y - HEADER_HEIGHT)
-		_search_plate.size = Vector2(SEARCH_WIDTH, HEADER_HEIGHT)
-		var search_slot: Control = _bar_row.get_node_or_null("search")
-		if search_slot:
-			search_slot.position = Vector2(search_x, bottom_y - HEADER_HEIGHT)
-			search_slot.size = Vector2(SEARCH_WIDTH, HEADER_HEIGHT)
-
-	# Re-anchor the empty hint so it floats above the bar's centre, just
-	# below where the search flyout opens. set_anchors_preset(0) leaves
-	# offsets at their defaults, so the explicit position/size stick.
-	if _empty_hint:
-		_empty_hint.position = Vector2(
-			(bar_w - _empty_hint.size.x) * 0.5,
-			bottom_y - HEADER_HEIGHT - LIST_MAX_HEIGHT - 32.0)
-
-
-# --- Cross-toolbox accordion ------------------------------------------------
-
-# Opens one family and closes the rest. The first call lands the first
-# family (we never open one on its own without the user asking), so the
-# "open on _ready" path is just an explicit _open_family_cross("hulls")
-# at the end of _ready if we ever want a default-open state.
-func _open_family_cross(tier_id: String) -> void:
-	if not _family_widgets.has(tier_id):
-		return
-	for other_id in _family_widgets.keys():
-		var w: Dictionary = _family_widgets[other_id]
-		var should_be_open: bool = other_id == tier_id
-		if w["is_open"] == should_be_open:
-			continue
-		w["is_open"] = should_be_open
-		w["panel"].visible = should_be_open
-		# set_pressed_no_signal, or closing a sibling re-enters this function
-		# through its own toggled handler and the loop fights itself. Same
-		# trap the existing UIToolbox.open() avoids.
-		w["header"].set_pressed_no_signal(should_be_open)
-		if should_be_open:
-			UIAnim.stagger_in(w["body"], Vector2(0, -8))
+func _show_family(tier_id: String) -> void:
+	for id in _family_vboxes.keys():
+		_family_vboxes[id].visible = (id == tier_id)
 	_open_family = tier_id
-	_layout_bar()
+
+func _open_family_cross(tier_id: String) -> void:
+	if _family_tabs.has(tier_id):
+		_family_tabs[tier_id].button_pressed = true
+	_open_family = tier_id
 
 
 func _close_family(tier_id: String) -> void:
-	if not _family_widgets.has(tier_id):
-		return
-	var w: Dictionary = _family_widgets[tier_id]
-	w["is_open"] = false
-	w["panel"].visible = false
-	w["header"].set_pressed_no_signal(false)
-	_open_family = ""
-	_layout_bar()
+	pass
 
 
 # --- Search widget ----------------------------------------------------------
@@ -495,71 +511,22 @@ func _close_family(tier_id: String) -> void:
 
 var _search_plate: Control
 
-func _build_search_widget() -> void:
-	_search_plate = _bar_row.get_node("SearchPlate")
-
-	# The slot is a VBox holding just the header button (no panel - the
-	# search opens a flyout, not an inline list). Same shape as a closed
-	# family toolbox.
-	var slot := VBoxContainer.new()
-	slot.name = "search"
-	slot.add_theme_constant_override("separation", 0)
-	slot.custom_minimum_size = Vector2(SEARCH_WIDTH, 0)
-	# STOP + gui_input, same wheel-stealing pattern as the family slots -
-	# without it, a wheel over the search bar would reach the camera and
-	# zoom the model. The family slots have this for the same reason.
-	slot.mouse_filter = Control.MOUSE_FILTER_STOP
-	slot.gui_input.connect(func(event: InputEvent):
-		if event is InputEventMouseButton and (
-				event.button_index == MOUSE_BUTTON_WHEEL_UP
-				or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
-			slot.accept_event())
-	_bar_row.add_child(slot)
-
-	# The header button - engraved, same as the family headers.
-	_search_btn = Button.new()
-	_search_btn.name = "SearchButton"
-	_search_btn.toggle_mode = true
-	_search_btn.focus_mode = Control.FOCUS_NONE
-	_search_btn.custom_minimum_size = Vector2(0, HEADER_HEIGHT)
-	_engrave(_search_btn)
-	slot.add_child(_search_btn)
-
-	# StampedLabel lettering - identical to production_hud.gd:250-254 and
-	# to the four family toolboxes above. Same "FIND" rendered in the same
-	# enamel-and-wall style, so the row reads as one row of five.
-	var stamp: Control = StampedLabelScript.new()
-	stamp.text = "FIND"
-	stamp.font_size = HEADER_FONT_SIZE
-	stamp.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_search_btn.add_child(stamp)
-
-	UIFeedbackScript.wire(_search_btn, "select")
-
-	# The flyout. Anchored to the search button, opens ABOVE so it does not
-	# fall off the bottom of the screen. UIFlyout auto-flips when it would
-	# leave the viewport (ui_flyout.gd:133-141), so this is the only
-	# direction we have to name.
-	_search_flyout = UIFlyoutScript.create(self, "Search")
-
+func _build_search_widget(parent: Control) -> void:
 	_search_box = LineEdit.new()
-	_search_box.placeholder_text = "Search parts"
+	_search_box.placeholder_text = "Search parts..."
 	_search_box.clear_button_enabled = true
-	_search_box.custom_minimum_size = Vector2(280, Tokens.HIT_TARGET_MIN)
+	_search_box.custom_minimum_size = Vector2(0, Tokens.HIT_TARGET_MIN)
 	_search_box.text_changed.connect(_on_search_changed)
-	_search_flyout.body().add_child(_search_box)
-
-	_search_btn.toggled.connect(func(pressed: bool):
-		if pressed:
-			_search_flyout.open_from(_search_btn, UIFlyoutScript.Align.ABOVE)
-			_search_box.grab_focus()
-		else:
-			_search_flyout.close())
-
-	# Mirror close-on-outside-click back to the button so the toggle state
-	# stays in step with the flyout's actual visibility.
-	_search_flyout.closed.connect(func():
-		_search_btn.set_pressed_no_signal(false))
+	
+	var style = StyleBoxFlat.new()
+	style.bg_color = Tokens.BASE_900
+	style.border_color = Tokens.BASE_500
+	style.set_border_width_all(2)
+	style.set_content_margin_all(8)
+	_search_box.add_theme_stylebox_override("normal", style)
+	_search_box.add_theme_stylebox_override("focus", style)
+	
+	parent.add_child(_search_box)
 
 
 # --- Grouping helpers (unchanged) -------------------------------------------
@@ -657,91 +624,176 @@ func _build_part_card(type_id: String, data: Dictionary) -> Button:
 	btn.module_type_id = type_id
 	btn.mouse_entered.connect(func(): part_hovered.emit(type_id))
 	btn.mouse_exited.connect(func(): part_unhovered.emit())
-	btn.text = data["name"]
-	btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	btn.clip_text = true
-	btn.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	btn.custom_minimum_size = Vector2(CARD_MIN_WIDTH, CARD_HEIGHT)
 	btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	btn.add_theme_font_size_override("font_size", Tokens.FONT_SMALL)
+	btn.focus_mode = Control.FOCUS_NONE
 
-	# The catalog accent as a painted stripe on the switch body. A StyleBox
-	# override would lose the plate texture, so the stripe is a child ColorRect
-	# drawn over the button's left edge instead.
+	# Clear out the normal button styling completely so it's just a transparent hit target
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		btn.add_theme_stylebox_override(state, StyleBoxEmpty.new())
+		
+	# The Spore-style item grid
+	var vbox = VBoxContainer.new()
+	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	vbox.add_theme_constant_override("separation", 2)
+	vbox.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(vbox)
+
+	# 1. Top space for the 3D rendered icon (drag out)
+	var icon_rect = ColorRect.new()
+	icon_rect.color = Color(0,0,0, 0.2) # Dim placeholder for 3D render
+	icon_rect.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	icon_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(icon_rect)
+	
+	# Actual TextureRect for the 3D model thumbnail
+	var icon_tex = TextureRect.new()
+	icon_tex.name = "Thumbnail"
+	icon_tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon_tex.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon_tex.set_anchors_preset(Control.PRESET_FULL_RECT)
+	icon_tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	icon_rect.add_child(icon_tex)
+	btn.set_meta("thumbnail_rect", icon_tex)
+	
+	# The catalog accent as a painted stripe inside the icon area
 	var stripe = ColorRect.new()
 	stripe.color = data["color"]
+	stripe.custom_minimum_size = Vector2(4, 0)
 	stripe.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	stripe.offset_right = 4.0
 	stripe.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn.add_child(stripe)
+	icon_rect.add_child(stripe)
 
-	var weight_label = Label.new()
-	weight_label.text = "%.0f kg" % float(data.get("weight", 0.0))
-	weight_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	weight_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	weight_label.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
-	weight_label.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
-	weight_label.set_anchors_preset(Control.PRESET_FULL_RECT)
-	weight_label.offset_right = -6
-	weight_label.offset_bottom = -3
-	weight_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	btn.add_child(weight_label)
+	# 2. Bottom tag — stamped metal label, sized to be readable
+	var tag_rect = ColorRect.new()
+	tag_rect.color = Color(0.10, 0.04, 0.04, 0.92)  # deep dark steel, near-black
+	tag_rect.custom_minimum_size = Vector2(0, 34)
+	tag_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	vbox.add_child(tag_rect)
+
+	var name_lbl = Label.new()
+	name_lbl.text = data["name"]
+	name_lbl.add_theme_font_size_override("font_size", 13)
+	name_lbl.add_theme_color_override("font_color", Color(0.90, 0.82, 0.72, 1.0))  # warm ivory stamp
+	name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_lbl.clip_text = true
+	name_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+	name_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tag_rect.add_child(name_lbl)
+	
+	# Focus ring for hover
+	var focus_ring = ReferenceRect.new()
+	focus_ring.border_width = 2.0
+	focus_ring.editor_only = false
+	focus_ring.visible = false
+	focus_ring.set_anchors_preset(Control.PRESET_FULL_RECT)
+	focus_ring.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	btn.add_child(focus_ring)
+	
+	btn.mouse_entered.connect(func(): focus_ring.visible = true)
+	btn.mouse_exited.connect(func(): focus_ring.visible = false)
 
 	if data.get("category", "") == "hull":
 		var size = data.get("size", Vector3.ZERO)
 		var domain = "Static Building" if data.get("is_foundation", false) else "Vehicle"
-		# Name first - see _stat_tooltip()'s comment for why line 0 is
-		# load-bearing.
-		btn.tooltip_text = "%s\n%s hull\nHP: %.0f | Weight: %.0f\nCost: %d Metal, %d Crystal\nSize: %.1f x %.1f x %.1f" % [
+		btn.tooltip_text = "%s
+%s hull
+HP: %.0f | Weight: %.0f
+Cost: %d Metal, %d Crystal
+Size: %.1f x %.1f x %.1f" % [
 			data["name"], domain, data.get("hp", 0.0), data.get("weight", 0.0),
 			data.get("metal", 0), data.get("crystal", 0),
 			size.x, size.y, size.z]
 	else:
 		btn.tooltip_text = _stat_tooltip(data)
 
-	# Cached for search - matching on the visible name plus the id means typing
-	# "mk19" or "Grenade" both work.
 	btn.set_meta("search_key", ("%s %s" % [data.get("name", ""), type_id]).to_lower())
 	return btn
 
 
-# A titled group of cards. Independently collapsible - opening one no longer
-# closes another, because comparing two groups is a normal thing to want.
+# A titled group of cards — styled as a physical drawer handle.
+# The header is a knurled-metal bar, lighter than the family tabs above,
+# with the category name stamped on it and a count badge at the right.
 func _make_section(category: String, cards: Array, family: String) -> Control:
 	var section = VBoxContainer.new()
 	section.name = "Drawer_%s" % category.replace(" ", "_").replace("&", "and")
 	section.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 	var header_btn = Button.new()
-	header_btn.theme_type_variation = "ListButton"
-	header_btn.custom_minimum_size = Vector2(0, 28)
-	header_btn.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	header_btn.text = category
+	header_btn.custom_minimum_size = Vector2(0, 38)  # taller = more physical handle feel
 	header_btn.focus_mode = Control.FOCUS_NONE
 	header_btn.toggle_mode = true
-	# Closed at rest now that categories sit inside a family tier - opening a
-	# family should reveal its category list, not its every part at once.
 	header_btn.button_pressed = false
+	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
+		header_btn.add_theme_stylebox_override(state, StyleBoxEmpty.new())
 
-	# Count badge. With sections collapsed the player otherwise has no idea
-	# whether a group holds two parts or twelve, which makes deciding where to
-	# look a coin flip.
+	# Knurled handle backing — lighter steel-grey, shinier than the red family tabs
+	var handle_panel = PanelContainer.new()
+	handle_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	handle_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	
+	var handle_style = StyleBoxFlat.new()
+	# Gunmetal machined steel — darker and heavier than the tab row above.
+	handle_style.bg_color = Color(0.19, 0.19, 0.23, 1.0)
+	handle_style.corner_radius_top_left = 4
+	handle_style.corner_radius_top_right = 4
+	handle_style.corner_radius_bottom_left = 4
+	handle_style.corner_radius_bottom_right = 4
+	# Emboss: bright highlight on top edge, dark shadow on bottom — reads as raised
+	handle_style.border_color = Color(0.10, 0.10, 0.13, 1.0)  # groove edge
+	handle_style.border_width_top = 0    # highlight drawn below as separate rect
+	handle_style.border_width_bottom = 4  # heavy drawer-front lip
+	handle_style.border_width_left = 2
+	handle_style.border_width_right = 2
+	handle_style.set_content_margin_all(0)
+	handle_panel.add_theme_stylebox_override("panel", handle_style)
+	
+	var knurl_mat = ShaderMaterial.new()
+	knurl_mat.shader = preload("res://shaders/knurled_metal.gdshader")
+	handle_panel.material = knurl_mat
+	header_btn.add_child(handle_panel)
+
+	# Row inside the handle: label on left, count on right
+	var inner_row = HBoxContainer.new()
+	inner_row.set_anchors_preset(Control.PRESET_FULL_RECT)
+	inner_row.add_theme_constant_override("separation", 4)
+	inner_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	handle_panel.add_child(inner_row)
+
+	var pad_left = Control.new()
+	pad_left.custom_minimum_size = Vector2(8, 0)
+	pad_left.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inner_row.add_child(pad_left)
+
+	# The stamped category name — bigger, brighter, reads as a stencil label
+	var name_label = Label.new()
+	name_label.text = category.to_upper()
+	name_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	name_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.add_theme_font_size_override("font_size", 14)
+	name_label.add_theme_color_override("font_color", Color(0.88, 0.85, 0.80, 1.0))
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inner_row.add_child(name_label)
+
+	# Count badge — lighter, right-aligned
 	var count_label = Label.new()
 	count_label.text = str(cards.size())
-	count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	count_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	count_label.add_theme_font_size_override("font_size", Tokens.FONT_MICRO)
-	count_label.add_theme_color_override("font_color", Tokens.TEXT_SECONDARY)
-	count_label.set_anchors_preset(Control.PRESET_FULL_RECT)
-	count_label.offset_right = -10
+	count_label.add_theme_color_override("font_color", Color(0.55, 0.55, 0.60, 1.0))  # muted but legible
 	count_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	header_btn.add_child(count_label)
+	inner_row.add_child(count_label)
+
+	var pad_right = Control.new()
+	pad_right.custom_minimum_size = Vector2(8, 0)
+	pad_right.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	inner_row.add_child(pad_right)
 
 	section.add_child(header_btn)
 
-	# The cards live in a GridContainer so a group reads as a block to scan
-	# rather than as a column to walk. Two columns at the toolbox's default
-	# width; the grid reflows if the toolbox is ever wider.
 	var grid = GridContainer.new()
 	grid.columns = 2
 	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -750,13 +802,27 @@ func _make_section(category: String, cards: Array, family: String) -> Control:
 	for c in cards:
 		grid.add_child(c)
 	grid.visible = false
-	section.add_child(grid)
 
-	# METADATA CONTRACT. run_tests.gd reads these to check that roles, weight
-	# classes and locomotion traits put every part in the right group; keeping
-	# the names stable is what let the presentation be rebuilt without
-	# rewriting those suites. "content_container" is the card list;
-	# "drawer_category" and "drawer_tab" identify the group.
+	# Grimy open-state overlay — a dark rect almost entirely covered by the rubber
+	# shader so the "open" drawer interior looks like a dark, grimy toolbox recess,
+	# not a bright coloured surface. The overlay sits on top of the grid.
+	var drawer_body = Control.new()
+	drawer_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	drawer_body.visible = false
+	section.add_child(drawer_body)
+
+	var grimy_bg = ColorRect.new()
+	grimy_bg.color = Color(0.28, 0.14, 0.10, 1.0)  # dim warm red — like steel under grime
+	grimy_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	grimy_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var grimy_mat = ShaderMaterial.new()
+	grimy_mat.shader = preload("res://shaders/rubber_gasket.gdshader")
+	grimy_bg.material = grimy_mat
+	grimy_bg.modulate = Color(1.0, 1.0, 1.0, 0.82)  # heavy overlay, almost opaque
+
+	drawer_body.add_child(grid)
+	drawer_body.add_child(grimy_bg)
+
 	section.set_meta("drawer_category", category)
 	section.set_meta("drawer_tab", family)
 	section.set_meta("drawer_open", false)
@@ -765,12 +831,13 @@ func _make_section(category: String, cards: Array, family: String) -> Control:
 	section.set_meta("family", family)
 
 	header_btn.toggled.connect(func(pressed: bool):
+		drawer_body.visible = pressed
+		grid.visible = pressed
+		grimy_bg.visible = pressed
 		if pressed:
-			# Accordion within the family, so a three-deep column stays short.
 			_open_category(section)
 			UIAnim.stagger_in(grid)
 		else:
-			grid.visible = false
 			section.set_meta("drawer_open", false))
 	UIFeedbackScript.wire(header_btn, "select")
 
@@ -787,8 +854,7 @@ func _make_section(category: String, cards: Array, family: String) -> Control:
 func _tier_for(family: String, group: String) -> String:
 	if family != "modules":
 		return family
-	if group in DRIVE_ROLES:
-		return "locomotion"
+	# Propulsion is now grouped with Support
 	return "weapons" if group in WEAPON_ROLES else "support"
 
 
@@ -797,9 +863,9 @@ func _tier_for(family: String, group: String) -> String:
 # the first time a section asks - in practice all four families are
 # seeded in _build_shell, so this is just a defensive null check.
 func _family_tier_body(tier_id: String) -> VBoxContainer:
-	if not _family_widgets.has(tier_id):
-		return null
-	return _family_widgets[tier_id]["body"]
+	if _family_vboxes.has(tier_id):
+		return _family_vboxes[tier_id]
+	return _main_vbox
 
 
 # Opens a family tier in the cross-toolbox sense, used by search and by

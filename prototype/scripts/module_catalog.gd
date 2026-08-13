@@ -1493,6 +1493,37 @@ static func _build_catalog_literal() -> Dictionary:
 			"color": Color(0.75, 0.25, 0.2)
 		},
 
+		"grav_lifter_assist": {
+			"name": "Grav-Lifter Assist",
+			"category": "module",
+			"required_building": "exotics_lab",
+			"description": "Provides a clean 25% boost to load capacity with no speed penalty.",
+			"hp": 55.0,
+			"weight": 35.0,
+			"metal": 40,
+			"crystal": 85,
+			"dps": 0.0,
+			"capacity_mult": 1.25,
+			"size": Vector3(0.7, 0.3, 0.7),
+			"color": Color(0.3, 0.7, 0.9)
+		},
+		"jet_thrusters": {
+			"name": "Jet Thrusters",
+			"category": "module",
+			"required_building": "tech_lab",
+			"description": "Extreme speed upgrade. High thrust and raises the chassis speed ceiling, at the cost of high energy drain.",
+			"hp": 60.0,
+			"weight": 75.0,
+			"metal": 60,
+			"crystal": 40,
+			"dps": 0.0,
+			"thrust_bonus": 150.0,
+			"top_speed_mult": 1.25,
+			"capacity_mult": 0.90,
+			"size": Vector3(0.8, 0.6, 1.2),
+			"color": Color(0.8, 0.3, 0.1)
+		},
+
 		# --- LOCOMOTION ARCHETYPES ---
 		"wheels": {
 			"name": "Wheels",
@@ -1549,6 +1580,20 @@ static func _build_catalog_literal() -> Dictionary:
 			"base_top_speed": 9.0,
 			"size": Vector3(0.8, 0.6, 2.5),
 			"color": Color.DARK_OLIVE_GREEN,
+			"traits": ["ground_contact"]
+		},
+		"heavy_quad_tracks": {
+			"name": "Heavy Quad Tracks",
+			"category": "locomotion",
+			"hp": 250.0,
+			"weight": 180.0,
+			"metal": 60,
+			"crystal": 10,
+			"dps": 0.0,
+			"base_weight_capacity": 1500.0,
+			"base_top_speed": 7.5,
+			"size": Vector3(0.9, 0.7, 1.4),
+			"color": Color.DARK_SLATE_GRAY,
 			"traits": ["ground_contact"]
 		},
 		"helicopter_rotors": {
@@ -2495,6 +2540,7 @@ const MODULE_ROLES = {
 	"hub_motor_array": "Propulsion",
 	"nitrous_injector": "Propulsion",
 	"booster_rack": "Propulsion",
+	"jet_thrusters": "Propulsion",
 }
 
 # Display order for the module tab's drawers. Roughly "things that shoot" ->
