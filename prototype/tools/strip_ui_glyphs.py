@@ -67,9 +67,6 @@ REPLACEMENTS = [
     ("match_setup.gd", '"◀ Back"', '"Back"'),
     ("match_setup.gd", '"Start Match ▶"', '"Start Match"'),
 
-    # --- module_placer.gd --------------------------------------------------
-    ("module_placer.gd", '"⊕ COG TELEMETRY"', '"CENTRE OF GRAVITY"'),
-
     # --- skirmish.gd -------------------------------------------------------
     ("skirmish.gd", '"\U0001f441 No enemies sighted"', '"No enemies sighted"'),
     ("skirmish.gd", '"\U0001f441 Enemy sighted: %d%s"', '"Enemy sighted: %d%s"'),

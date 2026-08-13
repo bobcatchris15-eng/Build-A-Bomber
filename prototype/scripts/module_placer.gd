@@ -2272,7 +2272,6 @@ func check_all_clipping():
 			mesh.material_override = mesh.get_meta("base_material")
 
 	_refresh_firing_arc()
-	_update_cog_crosshair()
 
 # Would a module of `ghost_type_id`, sitting at `ghost_transform`, overlap
 # anything already on the hull?
@@ -2338,68 +2337,6 @@ func is_ghost_clipping(ghost_transform: Transform3D, ghost_type_id: String) -> b
 			return true
 			
 	return false
-
-var _cog_node: Node3D = null
-
-func _update_cog_crosshair():
-	if not hull:
-		if _cog_node: _cog_node.visible = false
-		return
-
-	var total_mass: float = 250.0 # base hull mass
-	if hull.has_meta("weight"):
-		total_mass = float(hull.get_meta("weight"))
-
-	var weighted_pos = hull.global_position * total_mass
-
-	for child in hull.get_children():
-		if child.has_meta("module_data") and not child.is_queued_for_deletion():
-			var mdata = child.get_meta("module_data")
-			var m_weight = 20.0
-			if "weight" in mdata:
-				m_weight = float(mdata.weight)
-			total_mass += m_weight
-			weighted_pos += child.global_position * m_weight
-
-	var cog_pos = weighted_pos / max(1.0, total_mass)
-
-	if not _cog_node:
-		_cog_node = Node3D.new()
-		add_child(_cog_node)
-
-		# Build 3D crosshair lines
-		for axis in [Vector3.RIGHT, Vector3.UP, Vector3.BACK]:
-			var line_inst = MeshInstance3D.new()
-			var cylinder = CylinderMesh.new()
-			cylinder.top_radius = 0.02
-			cylinder.bottom_radius = 0.02
-			cylinder.height = 1.6
-			line_inst.mesh = cylinder
-			if axis == Vector3.RIGHT:
-				line_inst.rotation.z = PI / 2.0
-			elif axis == Vector3.BACK:
-				line_inst.rotation.x = PI / 2.0
-
-			var mat = StandardMaterial3D.new()
-			mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			mat.albedo_color = Color(0.0, 0.95, 1.0, 0.9) # Bright CAD cyan
-			mat.no_depth_test = true
-			mat.render_priority = 8
-			line_inst.material_override = mat
-			_cog_node.add_child(line_inst)
-
-		var lbl = Label3D.new()
-		lbl.text = "CENTRE OF GRAVITY"
-		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		lbl.no_depth_test = true
-		lbl.render_priority = 9
-		lbl.font_size = 15
-		lbl.modulate = Color(0.0, 0.95, 1.0)
-		lbl.position = Vector3(0, 0.9, 0)
-		_cog_node.add_child(lbl)
-
-	_cog_node.visible = true
-	_cog_node.global_position = cog_pos
 
 # Collects the module's own body meshes for clipping recolouring. Skips the
 # editor-overlay subtrees entirely: "ArcCone" (firing-arc wedges, which carry
