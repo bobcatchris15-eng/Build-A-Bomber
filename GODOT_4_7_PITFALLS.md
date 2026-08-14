@@ -580,6 +580,80 @@ re-applies** before running the heavy async terrain bake.
 
 ---
 
+## 19. `Image.blend_rect` / `blit_rect` fail on a format mismatch — by doing nothing  <a id="image-blend-rect-format-mismatch"></a>
+
+`Image.blend_rect()` and `blit_rect()` do **not** convert between pixel
+formats. They assert that source and destination match:
+
+```cpp
+// core/io/image.cpp
+ERR_FAIL_COND(format != p_src->format);
+```
+
+The trap is the failure mode, not the restriction. `ERR_FAIL_COND`
+pushes an error and **returns** — it does not crash, and it does not
+partially draw. The call silently becomes a no-op, so a feature built on
+it renders exactly as it did before and looks like it was never wired
+up rather than like it failed.
+
+Hit while compositing fog onto the minimap (`battle_hud.gd`): the
+minimap baked at `FORMAT_RGB8`, the fog source was `FORMAT_RGBA8`
+(it needs the alpha channel to blend at all), and the composite did
+nothing. The minimap is now `FORMAT_RGBA8` throughout — the alpha is
+unused by the terrain bake itself, it exists purely so the formats
+agree.
+
+Two follow-on notes:
+
+- `ImageTexture.update()` requires the image to keep the **same format
+  and size** it was created with, so changing an image's format means
+  changing it everywhere in that pipeline, including `_static_image`
+  and the initial `create_from_image()`.
+- `Image.resize()` preserves format, so a duplicate-resize-blend chain
+  is safe once the formats agree.
+
+**Verify a compositing path with a pixel readback, not a clean log.** An
+`Image` op that no-ops leaves no visible trace in a passing test run.
+
+## 20. Headless never compiles shaders, so a broken shader passes the whole test suite  <a id="headless-does-not-compile-shaders"></a>
+
+`--headless` selects the **dummy rasterizer**. It creates no rendering
+device and compiles no shader. A `Shader` whose GLSL does not compile is
+therefore completely invisible to `run_tests.ps1` — the resource loads,
+the `ShaderMaterial` is assigned, every suite passes, and the failure
+first appears as untextured or missing geometry in a playtest.
+
+This bites hardest for shaders built as string constants in GDScript
+(`vision_service.gd`'s `SHROUD_SHADER`), because there is no `.gdshader`
+file for the editor to have validated either.
+
+The check is to render on a real driver, briefly, and assert on pixels:
+
+```bash
+# NOT --headless - that is the whole point
+./Godot_v4.7.1-stable_win64_console.exe --path . \
+    --script tools/probe_shroud_shader_compiles.gd
+```
+
+Two things that make such a probe trustworthy:
+
+- **Assert pixels, not absence of errors.** A shader that compiles can
+  still draw nothing (frustum-culled, wrong render priority, a depth
+  guard that rejects every fragment). `probe_shroud_shader_compiles.gd`
+  samples the framebuffer with the effect toggled off and on.
+- **`get_texture().get_image()` reads back sRGB-encoded**, while shader
+  uniforms are linear. `sRGB(0.015)` is about `0.14`, not `0.015`, so an
+  absolute threshold picked against the linear value will look like a
+  failure when the shader is perfectly correct. Compare against a
+  converted expectation, or A/B the same pixel.
+
+Related: `Camera3D.unproject_position()` returns `(0, 0)` before the
+root viewport has a size, which in a `--script` probe is most of setup.
+Locate a sample point by searching the rendered frame for a distinctly
+coloured marker object instead of computing it.
+
+---
+
 ## Project-specific risk register
 
 Tracks the current state of which pitfalls the project has already hit,
@@ -593,7 +667,8 @@ matching row.
 | **Design Lab (SDF hull baking)** | 1069ms first-spawn hitch already mitigated by `_hull_cache` | [#hitches-first-frame-first-shot-first-spawn] | Cache works; do not break the "metadata must survive duplication" invariant at `unit_assembly.gd:53-58`. |
 | **Skirmish / Operations (RTS scale, 200+ units planned)** | NavigationServer3D perf cliff, avoidance jitter | [#navigation-agent-perf-cliff], [#navigation-agent-avoidance-correct-flow] | Flow field + steering separation is the correct architecture; do not enable RVO without a measured reason. |
 | **UI (HUD shells, Design Lab chrome)** | Control offset transforms (4.7 new), HDR-aware material selection | (4.7 feature, not a pitfall) | Control offset transforms in 4.7 are a deliberate improvement over hand-rolled `Vector2` offsets. Track in the UI polish backlog. |
-| **Test suite (211 suites, 10 area files)** | `.godot` cache staleness, NavServer3D first-sync timing in headless | [#class-name-uid-cache-staleness], [#navigation-server-async-sync] | The `run_tests.ps1` reimport covers (a); the explicit `await world_ready` pattern covers (b). If new tests flake on a "first query" pattern, see (b). |
+| **Test suite (211 suites, 10 area files)** | `.godot` cache staleness, NavServer3D first-sync timing in headless, **shaders never compiled** | [#class-name-uid-cache-staleness], [#navigation-server-async-sync], [#headless-does-not-compile-shaders] | The `run_tests.ps1` reimport covers (a); the explicit `await world_ready` pattern covers (b). (c) is not coverable headlessly at all — any shader work needs a windowed probe alongside the suite. |
+| **Fog of war (world shroud + minimap)** | Shader is a GDScript string constant, so neither the editor nor the suite validates it; minimap fog is an `Image` composite | [#headless-does-not-compile-shaders], [#image-blend-rect-format-mismatch] | Covered by `tools/probe_shroud_shader_compiles.gd` (windowed, pixel-asserting) and `tools/probe_minimap_fog.gd`. Run both after touching `vision_service.gd`'s `SHROUD_SHADER` or the minimap image pipeline. |
 | **Hull loader (`user://mods/hulls/`)** | Same `.uid` discipline as the rest of the project | [#class-name-uid-cache-staleness] | Mods that ship without `.uid` sidecars will fail to load under 4.4+; document this for the modding API. |
 | **Audio (procedural + curated)** | Curated music licensing — see `CREDITS.md` | not a Godot pitfall | Procedural alternative is `--procedural-music` flag. Cross-link to the CREDITS.md warning. |
 | **Curated vs procedural music fork** | Two parallel pipelines with one shipping | (process, not engine) | Listed in the top-of-tree doc drift; resolve before any release. |

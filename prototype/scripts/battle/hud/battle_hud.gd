@@ -53,6 +53,19 @@ const BLIP_RADIUS := 1
 
 const WATER_COLOR := Color(0.15, 0.32, 0.55)
 
+# Fog on the minimap is RE-SHADED, not copied straight from the world shroud.
+#
+# The world shroud dims explored-but-not-currently-seen ground to 26% of its
+# colour (vision_service.gd's EXPLORED_ALPHA 0.74). That reads fine across a
+# lit 3D scene, but the minimap is a 180px swatch of flat colour, and at 26%
+# the difference between water, sand and marsh collapses - which would cost the
+# player the map silhouette across most of the board, since most of the board
+# is explored-but-unseen at any given moment. The distinction actually needed
+# here is revealed vs not, so that is where the contrast is spent: never-seen
+# goes fully black, explored stays legible, currently-seen is untouched.
+const MINIMAP_UNEXPLORED_ALPHA := 1.0
+const MINIMAP_EXPLORED_ALPHA := 0.42
+
 # One flat colour per surface - a swatch, not a material. Echoes the per-surface
 # tints the terrain generator uses so the minimap reads as the same map.
 const SURFACE_COLORS := {
@@ -78,6 +91,10 @@ var _dim: int = 0
 var _static_image: Image = null
 var _image: Image = null
 var _texture: ImageTexture = null
+# The re-shaded fog layer, cached against vision.shroud_version - see
+# _composite_fog().
+var _fog_image: Image = null
+var _fog_version: int = -1
 var minimap_rect: TextureRect = null
 var command_card: Control = null
 var placard: Control = null
@@ -174,7 +191,13 @@ func _bake_minimap(current_map: Dictionary) -> void:
 	# side of the parse this dictionary came from.
 	var raw = current_map.get("ground_color", Color(0.2, 0.25, 0.2))
 	var ground_color: Color = raw if raw is Color else Color(raw[0], raw[1], raw[2])
-	_static_image = Image.create(_dim, _dim, false, Image.FORMAT_RGB8)
+	# RGBA8, not RGB8: _refresh_minimap() composites the fog with
+	# Image.blend_rect(), which hard-fails on a format mismatch between source
+	# and destination (core/io/image.cpp's `format != p_src->format`) rather
+	# than converting - and it fails by pushing an error and doing NOTHING, so
+	# an RGB8 minimap would silently render with no fog at all. The alpha
+	# channel itself is unused here; every pixel written below is opaque.
+	_static_image = Image.create(_dim, _dim, false, Image.FORMAT_RGBA8)
 	for gz in range(_dim):
 		var wz := -_half + (gz + 0.5) * cell
 		for gx in range(_dim):
@@ -261,6 +284,44 @@ func _blip(world_x: float, world_z: float, color: Color) -> void:
 			_image.set_pixel(gx, gz, color)
 
 
+func _composite_fog() -> void:
+	var vision = _director.vision if _director != null and "vision" in _director else null
+	if vision == null:
+		return
+	# Cheat/debug reveal shows the whole map, same as the world view.
+	if "reveal_all" in vision and vision.reveal_all:
+		return
+	var src: Image = vision.shroud_image()
+	if src == null or src.get_width() == 0:
+		return
+
+	# The re-shade is per-pixel, so it runs only when the fog actually moved -
+	# hence shroud_version. On the ticks where nothing was uncovered (most of
+	# them) this is just the blend below, which is a single C++ call.
+	var version: int = vision.shroud_version
+	if _fog_image == null or _fog_version != version:
+		_fog_version = version
+		# Re-shade at the SOURCE resolution, which is coarser than the minimap
+		# (the vision grid is 4 world units per cell against the minimap's 2),
+		# so the per-pixel loop is roughly a quarter the size. Resizing after
+		# the remap also lets the interpolation soften the cell edges.
+		var shaded := src.duplicate()
+		for y in range(shaded.get_height()):
+			for x in range(shaded.get_width()):
+				var a: float = shaded.get_pixel(x, y).a
+				var out: float = 0.0
+				if a >= 0.99:
+					out = MINIMAP_UNEXPLORED_ALPHA
+				elif a > 0.01:
+					out = MINIMAP_EXPLORED_ALPHA
+				shaded.set_pixel(x, y, Color(0.0, 0.0, 0.0, out))
+		if shaded.get_width() != _dim or shaded.get_height() != _dim:
+			shaded.resize(_dim, _dim, Image.INTERPOLATE_BILINEAR)
+		_fog_image = shaded
+
+	_image.blend_rect(_fog_image, Rect2i(Vector2i.ZERO, Vector2i(_dim, _dim)), Vector2i.ZERO)
+
+
 # The image, for tests to read pixels back out of.
 func minimap_image() -> Image:
 	return _image
@@ -343,6 +404,12 @@ func _refresh_minimap() -> void:
 	if _texture == null:
 		return
 	_image.blit_rect(_static_image, Rect2i(Vector2i.ZERO, Vector2i(_dim, _dim)), Vector2i.ZERO)
+	# BEFORE the blips, deliberately. Fog shades the TERRAIN; the blips drawn
+	# after it stay at full brightness, which keeps the existing rule that a
+	# resource node is map knowledge rather than something you have to hold
+	# ground to keep seeing. Compositing the other way round would quietly
+	# reverse that.
+	_composite_fog()
 
 	# Resource nodes are map knowledge, not scouting-gated, so they are always
 	# drawn - the same rule resource_node.gd already follows everywhere else.

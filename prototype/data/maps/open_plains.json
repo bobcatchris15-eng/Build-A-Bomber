@@ -118,7 +118,6 @@
   {"center": [114, 0, -150], "half_extents": [27, 27], "surface_type": "forest"},
   {"center": [0, 0, 174], "half_extents": [18, 18], "surface_type": "ice"},
   {"center": [0, 0, -174], "half_extents": [18, 18], "surface_type": "ice"},
-  {"center": [0, 0, 0], "half_extents": [22, 22], "surface_type": "sand"},
   {"center": [-170, 0, 0], "half_extents": [20, 40], "surface_type": "rocky"},
   {"center": [170, 0, 0], "half_extents": [20, 40], "surface_type": "rocky"}
  ],

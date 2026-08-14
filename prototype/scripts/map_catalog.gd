@@ -440,7 +440,7 @@ const FIELD_SPEC: Dictionary = {
 	"obstacles": {"type": "array", "required": false, "item": {
 		"center": {"type": "vector3", "required": true, "scale": true},
 		"half_extents": {"type": "vector2", "required": true, "scale": true},
-		"type": {"type": "string", "required": false, "enum": ["rock", "building"]},
+		"type": {"type": "string", "required": false, "enum": ["rock", "building", "fortification", "depot", "relay", "crater"]},
 		"building_height": {"type": "number", "required": false, "min": 0.01, "scale": true},
 	}},
 	# Never previously in FIELD_SPEC at all, despite terrain_builder.gd's
@@ -464,7 +464,7 @@ const FIELD_SPEC: Dictionary = {
 	"surface_zones": {"type": "array", "required": false, "item": {
 		"center": {"type": "vector3", "required": true, "scale": true},
 		"half_extents": {"type": "vector2", "required": true, "scale": true},
-		"surface_type": {"type": "string", "required": true, "enum": ["marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice"]},
+		"surface_type": {"type": "string", "required": true, "enum": ["marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice", "dirt", "steppe_grass", "dry_grass", "mud", "cobble", "scree", "volcanic"]},
 	}},
 	"bridges": {"type": "array", "required": false, "item": {
 		"center": {"type": "vector3", "required": true, "scale": true},
@@ -552,6 +552,20 @@ const FIELD_SPEC: Dictionary = {
 		"surfacemap": {"type": "string", "required": false},
 		"height_scale": {"type": "number", "required": false, "min": 0.01, "scale": true},
 		"features": {"type": "array", "required": false},
+		"noise": {"type": "dictionary", "required": false},
+		"erosion": {"type": "dictionary", "required": false},
+	}},
+	"environment": {"type": "dictionary", "required": false, "item": {
+		"sky_color": {"type": "color", "required": false},
+		"horizon_color": {"type": "color", "required": false},
+		"sun_color": {"type": "color", "required": false},
+		"sun_energy": {"type": "number", "required": false, "min": 0.0},
+		"ambient_light_energy": {"type": "number", "required": false, "min": 0.0},
+		"fog_enabled": {"type": "bool", "required": false},
+		"fog_density": {"type": "number", "required": false, "min": 0.0},
+		"fog_aerial_perspective": {"type": "number", "required": false, "min": 0.0},
+		"dof_blur_far_enabled": {"type": "bool", "required": false},
+		"dof_blur_far_distance": {"type": "number", "required": false, "min": 0.0},
 	}},
 }
 

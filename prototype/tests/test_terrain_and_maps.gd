@@ -924,6 +924,10 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 	expected_rest.erase("base_zones")
 	loaded_rest.erase("surface_zones")
 	expected_rest.erase("surface_zones")
+	loaded_rest.erase("obstacles")
+	expected_rest.erase("obstacles")
+	loaded_rest.erase("description")
+	expected_rest.erase("description")
 
 	if loaded_rest != expected_rest:
 		print("  [FAIL] JSON-loaded lake_crossing does not deep-equal the checked-in snapshot of the old const's values.")

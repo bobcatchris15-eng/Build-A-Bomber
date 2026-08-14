@@ -1,7 +1,6 @@
 class_name VisionService
 extends RefCounted
 
-const TerrainBuilderScript = preload("res://scripts/terrain_builder.gd")
 # Who can see what, and the grey sheet drawn over what they cannot.
 #
 # PORTED, NOT REDESIGNED. The old implementation (skirmish.gd:735-1017) is good
@@ -81,40 +80,78 @@ const GRID_CELL := 4.0
 # read as unmistakably the live one.
 const EXPLORED_ALPHA := 0.74
 const UNEXPLORED_ALPHA := 1.0
-# Clearance above the terrain AT EACH POINT, not above the map maximum.
+# THE SHROUD IS SCREEN-SPACE, and this is its third design. The history is
+# worth keeping because each step failed for a reason the next one had to fix:
 #
-# The shroud used to be a flat plane, which forced it to sit above the highest
-# ground anywhere on the map or hilltops would render through it. That worked
-# while maps were nearly flat. With real hills and ravines it means the fog
-# floats far above the floor of every low-lying area - a ceiling over the map
-# rather than a layer on the ground - which is what the playtest reported. The
-# mesh now follows height_at() and needs only a hair of local clearance, so
-# max_height() is no longer involved in placing it at all.
-const SHROUD_CLEARANCE := 1.0
-# Grid spacing for the shroud mesh, in world units before world_scale. The
-# ground mesh's own 3-unit grid would be ~1.8M verts across an 840 half-extent
-# map, and the shroud does not need it: it is following the same low-frequency
-# relief the ground noise produces, not rendering detail.
-const SHROUD_MESH_RESOLUTION := 3.0
-
+#   1. A flat plane. Had to sit above the HIGHEST ground anywhere on the map or
+#      hilltops rendered through it. Fine while maps were nearly flat.
+#   2. A mesh conforming to height_at() at a small local clearance, because (1)
+#      left the fog floating like a ceiling over every low-lying area once maps
+#      had real hills and ravines.
+#
+# (2) fixed the terrain, but a sheet lying ON the ground can only ever hide the
+# ground. Anything TALLER than its clearance punches straight through, and the
+# terrain layer is now full of exactly that: trees, boulders, rock spires,
+# cliff facades, buildings, resource nodes. The playtest report - fog "only
+# covers the base ground" - is that geometry, not a bug in the sheet.
+#
+# Raising the sheet cannot fix it. Any clearance high enough to cover the
+# tallest prop is a ceiling again, and the cure re-introduces (1).
+#
+# So the fog is no longer geometry in the world at all. It is a fullscreen pass
+# that reads the depth buffer, reconstructs each pixel's world position, and
+# looks that up in the same shroud texture as before. Whatever is nearest the
+# camera at that pixel gets fogged, at any height - ground, a tree's canopy, a
+# cliff face, a unit - because the test is "where is this pixel in the world",
+# not "is this pixel under the sheet".
+#
+# Two consequences worth knowing:
+#   - The conforming mesh, and with it the per-map shroud mesh build, is gone.
+#     One quad replaces a grid that spanned the entire map.
+#   - Sky pixels are skipped (nothing was drawn there to fog), so the horizon
+#     stays clear instead of the fog climbing up it.
 const SHROUD_SHADER := """
 shader_type spatial;
-render_mode unshaded, blend_mix, cull_disabled, depth_draw_never, shadows_disabled, fog_disabled;
+render_mode unshaded, blend_mix, cull_disabled, depth_draw_never, depth_test_disabled, shadows_disabled, fog_disabled;
 
-varying vec3 world_pos;
-
-uniform sampler2D shroud_tex : hint_default_black, filter_linear;
+// repeat_disable matters: a pixel off the edge of the map produces a UV
+// outside 0..1, and with repeat on that wraps to fog from the opposite side.
+uniform sampler2D shroud_tex : hint_default_black, filter_linear, repeat_disable;
+uniform sampler2D depth_tex : hint_depth_texture, filter_nearest;
 uniform float map_half = 80.0;
+uniform vec3 fog_color = vec3(0.015, 0.015, 0.02);
 
 void vertex() {
-	world_pos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	// Drive clip space directly so the quad covers the viewport wherever the
+	// instance happens to sit in the scene tree. QuadMesh spans -0.5..0.5, so
+	// x2 fills -1..1. z = 1.0 is the near plane under Godot's reverse-Z, which
+	// with depth_test_disabled just guarantees it is never clipped away.
+	POSITION = vec4(VERTEX.xy * 2.0, 1.0, 1.0);
 }
 
 void fragment() {
-	vec2 uv = (world_pos.xz + vec2(map_half)) / (2.0 * map_half);
-	vec4 c = texture(shroud_tex, uv);
-	ALBEDO = vec3(0.015, 0.015, 0.02);
-	ALPHA = c.a;
+	float d = texture(depth_tex, SCREEN_UV).r;
+	// Both extremes are rejected on purpose, rather than just the far plane.
+	// One of them IS the far plane - the sky, where nothing was drawn and
+	// fogging would paint a grey wall up the horizon - but WHICH one depends
+	// on whether the renderer is using reverse-Z, and that is a detail of the
+	// engine build rather than something this shader should encode. Nothing
+	// legitimately renders exactly at the near plane either, so discarding
+	// both is correct under either convention.
+	if (d <= 0.000001 || d >= 0.999999) {
+		discard;
+	}
+	vec3 ndc = vec3(SCREEN_UV * 2.0 - 1.0, d);
+	vec4 view = INV_PROJECTION_MATRIX * vec4(ndc, 1.0);
+	view.xyz /= view.w;
+	vec3 world = (INV_VIEW_MATRIX * vec4(view.xyz, 1.0)).xyz;
+	vec2 uv = (world.xz + vec2(map_half)) / (2.0 * map_half);
+	// Off the edge of the map there is no fog state to read.
+	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+		discard;
+	}
+	ALBEDO = fog_color;
+	ALPHA = texture(shroud_tex, uv).a;
 }
 """
 
@@ -130,6 +167,9 @@ var reveal_all: bool = false
 var _team_visible: Dictionary = {}
 
 var _beacons: Array = []
+
+# Increments whenever the shroud image actually changes. See _update_shroud().
+var shroud_version: int = 0
 
 var _half: float = 80.0
 var _dim: int = 0
@@ -163,31 +203,34 @@ func setup(controller: Node, local_team: int, map_half_extents: float, world_sca
 func build_shroud() -> MeshInstance3D:
 	var inst := MeshInstance3D.new()
 	inst.name = "FogShroud"
-	inst.mesh = _shroud_mesh()
+	inst.mesh = QuadMesh.new()
+	# The vertex shader writes POSITION directly, so this instance's transform
+	# never reaches the rasterizer - but the CULLER still uses its AABB, and a
+	# unit quad parked at the origin is culled the moment the camera looks away
+	# from it, taking the whole fog pass with it. An AABB larger than any map
+	# keeps it permanently in frame.
+	inst.custom_aabb = AABB(Vector3(-1e6, -1e6, -1e6), Vector3(2e6, 2e6, 2e6))
+	inst.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	var shader := Shader.new()
 	shader.code = SHROUD_SHADER
 	var mat := ShaderMaterial.new()
 	mat.shader = shader
 	mat.set_shader_parameter("shroud_tex", _texture)
 	mat.set_shader_parameter("map_half", _half)
+	# Last of the transparent pass. Water and the shallow-water markers are
+	# transparent too, and the fog has to land on top of them rather than
+	# underneath.
+	mat.render_priority = 127
 	inst.material_override = mat
 	return inst
 
 
-# A shroud that lies ON the terrain. Falls back to the old flat plane at a
-# fixed clearance when there is no map to sample - a test stub or a controller
-# without current_map - rather than to nothing, same degrade contract the rest
-# of the terrain code uses.
-func _shroud_mesh() -> Mesh:
-	var map_def: Dictionary = {}
-	if _controller != null and "current_map" in _controller:
-		map_def = _controller.current_map
-	if map_def.is_empty():
-		var plane := PlaneMesh.new()
-		plane.size = Vector2(_half * 2.0, _half * 2.0)
-		return plane
-	return TerrainBuilderScript.build_conforming_overlay_mesh(
-		map_def, _half, SHROUD_CLEARANCE, SHROUD_MESH_RESOLUTION * _world_scale)
+# The live fog image: alpha 0 where currently seen, EXPLORED_ALPHA where seen
+# before, UNEXPLORED_ALPHA where never seen. Exposed so the minimap can shade
+# itself from the SAME source the world shroud uses, rather than keeping a
+# second copy of the rules that could drift out of step with this one.
+func shroud_image() -> Image:
+	return _image
 
 
 # --- Queries -----------------------------------------------------------------
@@ -452,6 +495,10 @@ func _update_shroud(local_constructs: Array, beacons: Array) -> void:
 	_prev_cells = now_visible
 	if changed:
 		_texture.update(_image)
+		# Bumped only on a real change so readers that keep a derived copy (the
+		# minimap builds a re-shaded one) can skip rebuilding on the many ticks
+		# where nothing moved far enough to uncover a new cell.
+		shroud_version += 1
 
 
 # Whether a map cell has ever been seen. Exposed for the minimap, which draws

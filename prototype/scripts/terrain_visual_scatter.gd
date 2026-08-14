@@ -212,48 +212,72 @@ func _load_gltf_parts(scene_path: String) -> Array:
 # Core MultiMesh Creation Helper
 # ------------------------------------------------------------------------------
 
-func _add_multimesh_batch(mesh: Mesh, material: Material, transforms: Array[Transform3D], batch_name: String) -> MultiMeshInstance3D:
+# ------------------------------------------------------------------------------
+# Core MultiMesh Creation Helper
+# ------------------------------------------------------------------------------
+
+func _add_multimesh_batch(mesh: Mesh, material: Material, transforms: Array[Transform3D], colors: Array[Color], batch_name: String, vis_begin: float = 0.0, vis_end: float = 0.0) -> MultiMeshInstance3D:
 	if transforms.is_empty() or mesh == null:
 		return null
 	var mm = MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
 	mm.mesh = mesh
 	mm.instance_count = transforms.size()
 	for i in range(transforms.size()):
 		mm.set_instance_transform(i, transforms[i])
+		if i < colors.size():
+			mm.set_instance_color(i, colors[i])
+		else:
+			mm.set_instance_color(i, Color.WHITE)
 	
 	var mmi = MultiMeshInstance3D.new()
 	mmi.multimesh = mm
 	if material != null:
 		mmi.material_override = material
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	if vis_end > 0.0:
+		mmi.visibility_range_begin = vis_begin
+		mmi.visibility_range_end = vis_end
+		mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
 	mmi.name = batch_name
 	add_child(mmi)
 	return mmi
 
 
-func _add_gltf_variant_batches(model_template_path: String, pool_size: int, variant_xforms: Dictionary, fallback_mesh: Mesh, fallback_mat: Material, batch_prefix: String) -> void:
+func _add_gltf_variant_batches(model_template_path: String, pool_size: int, variant_xforms: Dictionary, variant_colors: Dictionary, fallback_mesh: Mesh, fallback_mat: Material, batch_prefix: String, vis_begin: float = 0.0, vis_end: float = 0.0) -> void:
 	for var_idx in variant_xforms.keys():
 		var xf_list: Array = variant_xforms[var_idx]
 		if xf_list.is_empty():
 			continue
+		var col_list: Array = variant_colors.get(var_idx, [])
 		var glb_path = model_template_path % var_idx
 		var parts = _load_gltf_parts(glb_path)
 		if parts.is_empty():
 			if fallback_mesh != null:
 				var casted_xforms: Array[Transform3D] = []
-				for xf in xf_list:
-					casted_xforms.append(xf)
-				_add_multimesh_batch(fallback_mesh, fallback_mat, casted_xforms, "%s_Fallback_%d" % [batch_prefix, var_idx])
+				var casted_cols: Array[Color] = []
+				for i in range(xf_list.size()):
+					casted_xforms.append(xf_list[i])
+					if i < col_list.size():
+						casted_cols.append(col_list[i])
+					else:
+						casted_cols.append(Color.WHITE)
+				_add_multimesh_batch(fallback_mesh, fallback_mat, casted_xforms, casted_cols, "%s_Fallback_%d" % [batch_prefix, var_idx], vis_begin, vis_end)
 			continue
 		for p_idx in range(parts.size()):
 			var part = parts[p_idx]
 			var mesh: Mesh = part["mesh"]
 			var local_xform: Transform3D = part["xform"]
 			var composed_xforms: Array[Transform3D] = []
-			for xf in xf_list:
-				composed_xforms.append((xf as Transform3D) * local_xform)
-			_add_multimesh_batch(mesh, null, composed_xforms, "%s_%d_%d" % [batch_prefix, var_idx, p_idx])
+			var composed_cols: Array[Color] = []
+			for i in range(xf_list.size()):
+				composed_xforms.append((xf_list[i] as Transform3D) * local_xform)
+				if i < col_list.size():
+					composed_cols.append(col_list[i])
+				else:
+					composed_cols.append(Color.WHITE)
+			_add_multimesh_batch(mesh, null, composed_xforms, composed_cols, "%s_%d_%d" % [batch_prefix, var_idx, p_idx], vis_begin, vis_end)
 
 
 # ------------------------------------------------------------------------------
@@ -287,111 +311,196 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 	var ground_color_arr = map_def.get("ground_color", [0.24, 0.28, 0.18])
 	var base_green = Color(ground_color_arr[0], ground_color_arr[1], ground_color_arr[2])
 	
+	# Height and slope memoization cache to eliminate ~100k noise evals on load
+	var height_cache: Dictionary = {}
+	var slope_cache: Dictionary = {}
+	var _h = func(pos: Vector3) -> float:
+		var key = Vector2(round(pos.x * 2.0) / 2.0, round(pos.z * 2.0) / 2.0)
+		if height_cache.has(key): return height_cache[key]
+		var v = TerrainBuilderScript.terrain_height_at(map_def, pos)
+		height_cache[key] = v
+		return v
+
+	var _sl = func(sx: float, sz: float) -> float:
+		var key = Vector2(round(sx * 2.0) / 2.0, round(sz * 2.0) / 2.0)
+		if slope_cache.has(key): return slope_cache[key]
+		var v = TerrainBuilderScript.slope_at(map_def, sx, sz)
+		slope_cache[key] = v
+		return v
+
+	var _norm = func(nx: float, nz: float) -> Vector3:
+		var eps = 1.0
+		var h_px = _h.call(Vector3(nx + eps, 0, nz))
+		var h_mx = _h.call(Vector3(nx - eps, 0, nz))
+		var h_pz = _h.call(Vector3(nx, 0, nz + eps))
+		var h_mz = _h.call(Vector3(nx, 0, nz - eps))
+		return Vector3(-(h_px - h_mx) / (2.0 * eps), 1.0, -(h_pz - h_mz) / (2.0 * eps)).normalized()
+
+	var _make_xform = func(pos: Vector3, yaw: float, scale_jitter: float, normal_blend: float = 0.5) -> Transform3D:
+		var norm = _norm.call(pos.x, pos.z)
+		var up = (Vector3.UP * (1.0 - normal_blend) + norm * normal_blend).normalized()
+		var forward = Vector3(cos(yaw), 0, sin(yaw))
+		var right = up.cross(forward).normalized()
+		if right.is_zero_approx():
+			right = up.cross(Vector3.FORWARD).normalized()
+		var fwd = right.cross(up).normalized()
+		var basis = Basis(right, up, fwd)
+		var t = Transform3D(basis, pos).scaled_local(Vector3.ONE * scale_jitter)
+		return t
+
 	# --------------------------------------------------------------------------
-	# 1. DENSE AUTHORED GRASS TUFTS & WILDFLOWERS (1,200 - 14,000 instances)
+	# 1. DENSE AUTHORED GRASS TUFTS & WILDFLOWERS (Clustered + Scale-aware)
 	# --------------------------------------------------------------------------
-	var grass_count = clampi(int(area / 16.0), 1200, 14000)
+	var grass_count = clampi(int(area / 20.0), 1200, maxi(14000, int(area / 8.0)))
 	var grass_rng = RandomNumberGenerator.new()
 	grass_rng.seed = hash(map_name + "_grass_dense")
 	
 	var grass_xforms_by_variant: Dictionary = {}
+	var grass_colors_by_variant: Dictionary = {}
 	for v in range(GRASS_TUFT_POOL_SIZE):
 		grass_xforms_by_variant[v] = []
+		grass_colors_by_variant[v] = []
 		
 	var flower_xforms_by_variant: Dictionary = {}
+	var flower_colors_by_variant: Dictionary = {}
 	for v in range(WILDFLOWER_POOL_SIZE):
 		flower_xforms_by_variant[v] = []
+		flower_colors_by_variant[v] = []
 	
-	for i in range(grass_count):
-		var gx = grass_rng.randf_range(-half * 0.96, half * 0.96)
-		var gz = grass_rng.randf_range(-half * 0.96, half * 0.96)
-		var pos = Vector3(gx, 0.0, gz)
+	# Cluster grass in organic patches
+	var num_grass_clusters = maxi(12, int(grass_count / 35))
+	var items_per_cluster = int(grass_count / num_grass_clusters)
+	
+	for c_idx in range(num_grass_clusters):
+		var cluster_cx = grass_rng.randf_range(-half * 0.94, half * 0.94)
+		var cluster_cz = grass_rng.randf_range(-half * 0.94, half * 0.94)
+		var cluster_radius = grass_rng.randf_range(16.0, 38.0) * prop_scale
+		var is_flower_cluster = grass_rng.randf() < 0.18
 		
-		var too_close = false
-		for cp in clear_points:
-			if Vector2(pos.x - cp.x, pos.z - cp.z).length() < 6.5:
-				too_close = true
-				break
-		if too_close or _is_in_water(pos, water_areas, bridges):
-			continue
+		for i in range(items_per_cluster):
+			var r_jitter = (grass_rng.randf_range(-1.0, 1.0) + grass_rng.randf_range(-1.0, 1.0)) * 0.5 * cluster_radius
+			var theta = grass_rng.randf_range(0, TAU)
+			var gx = cluster_cx + cos(theta) * r_jitter
+			var gz = cluster_cz + sin(theta) * r_jitter
+			if absf(gx) > half * 0.96 or absf(gz) > half * 0.96:
+				continue
+			var pos = Vector3(gx, 0.0, gz)
 			
-		pos.y = TerrainBuilderScript.terrain_height_at(map_def, pos)
-		var slope = TerrainBuilderScript.slope_at(map_def, pos.x, pos.z)
-		if slope > 0.65:
-			continue
+			var too_close = false
+			for cp in clear_points:
+				if Vector2(pos.x - cp.x, pos.z - cp.z).length() < 6.5:
+					too_close = true
+					break
+			if too_close or _is_in_water(pos, water_areas, bridges):
+				continue
+				
+			pos.y = _h.call(pos)
+			var slope = _sl.call(pos.x, pos.z)
+			if slope > 0.65:
+				continue
+				
+			var yaw = grass_rng.randf_range(0, TAU)
+			var scale_jitter = grass_rng.randf_range(0.8, 1.4) * prop_scale
+			var t = _make_xform.call(pos, yaw, scale_jitter, 0.45)
 			
-		var yaw = grass_rng.randf_range(0, TAU)
-		var scale_jitter = grass_rng.randf_range(0.8, 1.4) * prop_scale
-		var t = Transform3D().rotated(Vector3.UP, yaw).scaled(Vector3.ONE * scale_jitter)
-		t.origin = pos
-		
-		# 10% chance of wildflower cluster in meadow areas
-		if grass_rng.randf() < 0.10:
-			var flower_var = grass_rng.randi() % WILDFLOWER_POOL_SIZE
-			flower_xforms_by_variant[flower_var].append(t)
-		else:
-			var grass_var = grass_rng.randi() % GRASS_TUFT_POOL_SIZE
-			grass_xforms_by_variant[grass_var].append(t)
+			var tint = Color(
+				1.0 + grass_rng.randf_range(-0.12, 0.12),
+				1.0 + grass_rng.randf_range(-0.08, 0.10),
+				1.0 + grass_rng.randf_range(-0.15, 0.08),
+				1.0
+			)
+			
+			if is_flower_cluster and grass_rng.randf() < 0.45:
+				var flower_var = grass_rng.randi() % WILDFLOWER_POOL_SIZE
+				flower_xforms_by_variant[flower_var].append(t)
+				flower_colors_by_variant[flower_var].append(tint)
+			else:
+				var grass_var = grass_rng.randi() % GRASS_TUFT_POOL_SIZE
+				grass_xforms_by_variant[grass_var].append(t)
+				grass_colors_by_variant[grass_var].append(tint)
 		
 	var fallback_grass_mesh = _build_grass_mesh(prop_scale)
 	var fallback_grass_mat = _get_material(base_green.lightened(0.12), 0.8)
-	_add_gltf_variant_batches(GRASS_TUFT_MODEL_DIR, GRASS_TUFT_POOL_SIZE, grass_xforms_by_variant,
-		fallback_grass_mesh, fallback_grass_mat, "Batch_GrassTuft")
-	_add_gltf_variant_batches(WILDFLOWER_MODEL_DIR, WILDFLOWER_POOL_SIZE, flower_xforms_by_variant,
-		fallback_grass_mesh, fallback_grass_mat, "Batch_Wildflower")
+	_add_gltf_variant_batches(GRASS_TUFT_MODEL_DIR, GRASS_TUFT_POOL_SIZE, grass_xforms_by_variant, grass_colors_by_variant,
+		fallback_grass_mesh, fallback_grass_mat, "Batch_GrassTuft", 0.0, 220.0)
+	_add_gltf_variant_batches(WILDFLOWER_MODEL_DIR, WILDFLOWER_POOL_SIZE, flower_xforms_by_variant, flower_colors_by_variant,
+		fallback_grass_mesh, fallback_grass_mat, "Batch_Wildflower", 0.0, 220.0)
 	
 	# --------------------------------------------------------------------------
-	# 2. AUTHORED SHRUBS & BUSHES (300 - 2,500 instances)
+	# 2. AUTHORED SHRUBS & BUSHES (Clustered + Scale-aware)
 	# --------------------------------------------------------------------------
-	var shrub_count = clampi(int(area / 110.0), 300, 2500)
+	var shrub_count = clampi(int(area / 100.0), 300, maxi(2500, int(area / 40.0)))
 	var shrub_rng = RandomNumberGenerator.new()
 	shrub_rng.seed = hash(map_name + "_shrubs_v2")
 	
 	var shrub_xforms_by_variant: Dictionary = {}
+	var shrub_colors_by_variant: Dictionary = {}
 	for v in range(SHRUB_POOL_SIZE):
 		shrub_xforms_by_variant[v] = []
+		shrub_colors_by_variant[v] = []
 	
-	for i in range(shrub_count):
-		var sx = shrub_rng.randf_range(-half * 0.95, half * 0.95)
-		var sz = shrub_rng.randf_range(-half * 0.95, half * 0.95)
-		var pos = Vector3(sx, 0.0, sz)
+	var num_shrub_clusters = maxi(8, int(shrub_count / 18))
+	var shrubs_per_cluster = int(shrub_count / num_shrub_clusters)
+	
+	for c_idx in range(num_shrub_clusters):
+		var cluster_cx = shrub_rng.randf_range(-half * 0.93, half * 0.93)
+		var cluster_cz = shrub_rng.randf_range(-half * 0.93, half * 0.93)
+		var cluster_radius = shrub_rng.randf_range(14.0, 32.0) * prop_scale
 		
-		var too_close = false
-		for cp in clear_points:
-			if Vector2(pos.x - cp.x, pos.z - cp.z).length() < 8.5:
-				too_close = true
-				break
-		if too_close or _is_in_water(pos, water_areas, bridges):
-			continue
+		for i in range(shrubs_per_cluster):
+			var r_jitter = (shrub_rng.randf_range(-1.0, 1.0) + shrub_rng.randf_range(-1.0, 1.0)) * 0.5 * cluster_radius
+			var theta = shrub_rng.randf_range(0, TAU)
+			var sx = cluster_cx + cos(theta) * r_jitter
+			var sz = cluster_cz + sin(theta) * r_jitter
+			if absf(sx) > half * 0.95 or absf(sz) > half * 0.95:
+				continue
+			var pos = Vector3(sx, 0.0, sz)
 			
-		pos.y = TerrainBuilderScript.terrain_height_at(map_def, pos)
-		var slope = TerrainBuilderScript.slope_at(map_def, pos.x, pos.z)
-		if slope > 0.60:
-			continue
+			var too_close = false
+			for cp in clear_points:
+				if Vector2(pos.x - cp.x, pos.z - cp.z).length() < 8.5:
+					too_close = true
+					break
+			if too_close or _is_in_water(pos, water_areas, bridges):
+				continue
+				
+			pos.y = _h.call(pos)
+			var slope = _sl.call(pos.x, pos.z)
+			if slope > 0.60:
+				continue
+				
+			var yaw = shrub_rng.randf_range(0, TAU)
+			var scale_jitter = shrub_rng.randf_range(0.85, 1.5) * prop_scale
+			var t = _make_xform.call(pos, yaw, scale_jitter, 0.4)
 			
-		var yaw = shrub_rng.randf_range(0, TAU)
-		var scale_jitter = shrub_rng.randf_range(0.85, 1.5) * prop_scale
-		var t = Transform3D().rotated(Vector3.UP, yaw).scaled(Vector3.ONE * scale_jitter)
-		t.origin = pos
-		
-		var shrub_var = shrub_rng.randi() % SHRUB_POOL_SIZE
-		shrub_xforms_by_variant[shrub_var].append(t)
+			var tint = Color(
+				1.0 + shrub_rng.randf_range(-0.10, 0.10),
+				1.0 + shrub_rng.randf_range(-0.08, 0.08),
+				1.0 + shrub_rng.randf_range(-0.12, 0.08),
+				1.0
+			)
+			
+			var shrub_var = shrub_rng.randi() % SHRUB_POOL_SIZE
+			shrub_xforms_by_variant[shrub_var].append(t)
+			shrub_colors_by_variant[shrub_var].append(tint)
 		
 	var fallback_shrub_mesh = _build_shrub_mesh(prop_scale)
 	var fallback_shrub_mat = _get_material(base_green.darkened(0.08), 0.85)
-	_add_gltf_variant_batches(SHRUB_MODEL_DIR, SHRUB_POOL_SIZE, shrub_xforms_by_variant,
-		fallback_shrub_mesh, fallback_shrub_mat, "Batch_Shrub")
+	_add_gltf_variant_batches(SHRUB_MODEL_DIR, SHRUB_POOL_SIZE, shrub_xforms_by_variant, shrub_colors_by_variant,
+		fallback_shrub_mesh, fallback_shrub_mat, "Batch_Shrub", 0.0, 320.0)
 	
 	# --------------------------------------------------------------------------
-	# 3. AUTHORED VISUAL TREES (150 - 1,200 instances)
+	# 3. AUTHORED VISUAL TREES (Scale-aware)
 	# --------------------------------------------------------------------------
-	var tree_count = clampi(int(area / 240.0), 150, 1200)
+	var tree_count = clampi(int(area / 200.0), 150, maxi(1200, int(area / 80.0)))
 	var tree_rng = RandomNumberGenerator.new()
 	tree_rng.seed = hash(map_name + "_visual_trees")
 	
 	var tree_xforms_by_variant: Dictionary = {}
+	var tree_colors_by_variant: Dictionary = {}
 	for sp_idx in range(AMBIENT_TREE_POOL_SIZE):
 		tree_xforms_by_variant[sp_idx] = []
+		tree_colors_by_variant[sp_idx] = []
 		
 	for i in range(tree_count):
 		var tx = tree_rng.randf_range(-half * 0.92, half * 0.92)
@@ -406,8 +515,8 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		if too_close or _is_in_water(pos, water_areas, bridges):
 			continue
 			
-		pos.y = TerrainBuilderScript.terrain_height_at(map_def, pos)
-		var slope = TerrainBuilderScript.slope_at(map_def, pos.x, pos.z)
+		pos.y = _h.call(pos)
+		var slope = _sl.call(pos.x, pos.z)
 		if slope > 0.55:
 			continue
 			
@@ -416,21 +525,31 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		var scale_jitter = tree_rng.randf_range(0.85, 1.3) * prop_scale
 		var t = Transform3D().rotated(Vector3.UP, yaw).scaled(Vector3.ONE * scale_jitter)
 		t.origin = pos
-		tree_xforms_by_variant[sp_choice].append(t)
 		
-	_add_gltf_variant_batches(AMBIENT_TREE_MODEL_DIR, AMBIENT_TREE_POOL_SIZE, tree_xforms_by_variant,
-		null, null, "Batch_VisualTree")
+		var tint = Color(
+			1.0 + tree_rng.randf_range(-0.10, 0.08),
+			1.0 + tree_rng.randf_range(-0.08, 0.08),
+			1.0 + tree_rng.randf_range(-0.10, 0.08),
+			1.0
+		)
+		tree_xforms_by_variant[sp_choice].append(t)
+		tree_colors_by_variant[sp_choice].append(tint)
+		
+	_add_gltf_variant_batches(AMBIENT_TREE_MODEL_DIR, AMBIENT_TREE_POOL_SIZE, tree_xforms_by_variant, tree_colors_by_variant,
+		null, null, "Batch_VisualTree", 0.0, 550.0)
 	
 	# --------------------------------------------------------------------------
-	# 4. AUTHORED SLOPE SCREE, TALUS & PEBBLES (200 - 2,000 instances)
+	# 4. AUTHORED SLOPE SCREE, TALUS & PEBBLES (Normal-aligned + Clustered)
 	# --------------------------------------------------------------------------
-	var scree_count = clampi(int(area / 140.0), 200, 2000)
+	var scree_count = clampi(int(area / 120.0), 200, maxi(2000, int(area / 50.0)))
 	var scree_rng = RandomNumberGenerator.new()
 	scree_rng.seed = hash(map_name + "_scree_talus")
 	
 	var pebble_xforms_by_variant: Dictionary = {}
+	var pebble_colors_by_variant: Dictionary = {}
 	for v in range(PEBBLE_POOL_SIZE):
 		pebble_xforms_by_variant[v] = []
+		pebble_colors_by_variant[v] = []
 	
 	for i in range(scree_count):
 		var rx = scree_rng.randf_range(-half * 0.98, half * 0.98)
@@ -440,34 +559,44 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		if _is_in_water(pos, water_areas, bridges):
 			continue
 			
-		var slope = TerrainBuilderScript.slope_at(map_def, pos.x, pos.z)
+		var slope = _sl.call(pos.x, pos.z)
 		if slope < 0.12:
 			continue
 			
-		pos.y = TerrainBuilderScript.terrain_height_at(map_def, pos)
+		pos.y = _h.call(pos)
 		var yaw = scree_rng.randf_range(0, TAU)
 		var scale_jitter = scree_rng.randf_range(0.7, 1.8) * prop_scale
-		var t = Transform3D().rotated(Vector3.UP, yaw).scaled(Vector3.ONE * scale_jitter)
-		t.origin = pos
+		# Align completely to terrain slope normal
+		var t = _make_xform.call(pos, yaw, scale_jitter, 1.0)
+		
+		var tint = Color(
+			1.0 + scree_rng.randf_range(-0.14, 0.12),
+			1.0 + scree_rng.randf_range(-0.14, 0.12),
+			1.0 + scree_rng.randf_range(-0.14, 0.12),
+			1.0
+		)
 		
 		var p_var = scree_rng.randi() % PEBBLE_POOL_SIZE
 		pebble_xforms_by_variant[p_var].append(t)
+		pebble_colors_by_variant[p_var].append(tint)
 		
 	var fallback_pebble_mesh = _build_pebble_mesh(prop_scale)
 	var fallback_pebble_mat = _get_material(Color(0.38, 0.36, 0.33), 0.95)
-	_add_gltf_variant_batches(PEBBLE_MODEL_DIR, PEBBLE_POOL_SIZE, pebble_xforms_by_variant,
-		fallback_pebble_mesh, fallback_pebble_mat, "Batch_PebbleCluster")
+	_add_gltf_variant_batches(PEBBLE_MODEL_DIR, PEBBLE_POOL_SIZE, pebble_xforms_by_variant, pebble_colors_by_variant,
+		fallback_pebble_mesh, fallback_pebble_mat, "Batch_PebbleCluster", 0.0, 220.0)
 	
 	# --------------------------------------------------------------------------
-	# 5. AUTHORED ROCK SPIRES & MONOLITHS (20 - 180 instances)
+	# 5. AUTHORED ROCK SPIRES & MONOLITHS (Scale-aware)
 	# --------------------------------------------------------------------------
-	var spire_count = clampi(int(area / 1800.0), 20, 180)
+	var spire_count = clampi(int(area / 1500.0), 20, maxi(180, int(area / 600.0)))
 	var spire_rng = RandomNumberGenerator.new()
 	spire_rng.seed = hash(map_name + "_rock_spires")
 	
 	var spire_xforms_by_variant: Dictionary = {}
+	var spire_colors_by_variant: Dictionary = {}
 	for v in range(ROCK_SPIRE_POOL_SIZE):
 		spire_xforms_by_variant[v] = []
+		spire_colors_by_variant[v] = []
 		
 	for i in range(spire_count):
 		var rx = spire_rng.randf_range(-half * 0.94, half * 0.94)
@@ -482,33 +611,47 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		if too_close or _is_in_water(pos, water_areas, bridges):
 			continue
 			
-		pos.y = TerrainBuilderScript.terrain_height_at(map_def, pos)
-		var slope = TerrainBuilderScript.slope_at(map_def, pos.x, pos.z)
-		# Spires placed on hills / moderate slopes (0.20 - 0.55)
+		pos.y = _h.call(pos)
+		var slope = _sl.call(pos.x, pos.z)
 		if slope < 0.20 or slope > 0.55:
 			continue
 			
 		var yaw = spire_rng.randf_range(0, TAU)
 		var scale_jitter = spire_rng.randf_range(0.8, 1.4) * prop_scale
-		var t = Transform3D().rotated(Vector3.UP, yaw).scaled(Vector3.ONE * scale_jitter)
-		t.origin = pos
+		var t = _make_xform.call(pos, yaw, scale_jitter, 0.3)
+		
+		var tint = Color(
+			1.0 + spire_rng.randf_range(-0.12, 0.12),
+			1.0 + spire_rng.randf_range(-0.12, 0.12),
+			1.0 + spire_rng.randf_range(-0.12, 0.12),
+			1.0
+		)
 		
 		var sp_var = spire_rng.randi() % ROCK_SPIRE_POOL_SIZE
 		spire_xforms_by_variant[sp_var].append(t)
+		spire_colors_by_variant[sp_var].append(tint)
 		
-	_add_gltf_variant_batches(ROCK_SPIRE_MODEL_DIR, ROCK_SPIRE_POOL_SIZE, spire_xforms_by_variant,
-		fallback_pebble_mesh, fallback_pebble_mat, "Batch_RockSpire")
+	_add_gltf_variant_batches(ROCK_SPIRE_MODEL_DIR, ROCK_SPIRE_POOL_SIZE, spire_xforms_by_variant, spire_colors_by_variant,
+		fallback_pebble_mesh, fallback_pebble_mat, "Batch_RockSpire", 0.0, 650.0)
 	
 	# --------------------------------------------------------------------------
-	# 6. AUTHORED CLIFF FACADES ON STEEP ESCARPMENTS (30 - 250 instances)
+	# 6. AUTHORED CLIFF FACADES & CORNERS ON STEEP ESCARPMENTS
 	# --------------------------------------------------------------------------
-	var cliff_count = clampi(int(area / 1200.0), 30, 250)
+	var cliff_count = clampi(int(area / 1000.0), 30, maxi(250, int(area / 400.0)))
 	var cliff_rng = RandomNumberGenerator.new()
 	cliff_rng.seed = hash(map_name + "_cliff_facades")
 	
 	var cliff_xforms_by_variant: Dictionary = {}
+	var cliff_colors_by_variant: Dictionary = {}
 	for v in range(CLIFF_FACE_POOL_SIZE):
 		cliff_xforms_by_variant[v] = []
+		cliff_colors_by_variant[v] = []
+		
+	var cliff_corner_xforms: Dictionary = {}
+	var cliff_corner_colors: Dictionary = {}
+	for v in range(CLIFF_CORNER_POOL_SIZE):
+		cliff_corner_xforms[v] = []
+		cliff_corner_colors[v] = []
 		
 	for i in range(cliff_count):
 		var cx = cliff_rng.randf_range(-half * 0.94, half * 0.94)
@@ -518,19 +661,17 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		if _is_in_water(pos, water_areas, bridges):
 			continue
 			
-		var slope = TerrainBuilderScript.slope_at(map_def, pos.x, pos.z)
-		# Cliff facades dress steep ground (slope > 0.55)
+		var slope = _sl.call(pos.x, pos.z)
 		if slope < 0.55:
 			continue
 			
-		pos.y = TerrainBuilderScript.terrain_height_at(map_def, pos)
+		pos.y = _h.call(pos)
 		
-		# Compute slope facing angle
 		var eps = 1.0
-		var h_px = TerrainBuilderScript.terrain_height_at(map_def, Vector3(pos.x + eps, 0, pos.z))
-		var h_mx = TerrainBuilderScript.terrain_height_at(map_def, Vector3(pos.x - eps, 0, pos.z))
-		var h_pz = TerrainBuilderScript.terrain_height_at(map_def, Vector3(pos.x, 0, pos.z + eps))
-		var h_mz = TerrainBuilderScript.terrain_height_at(map_def, Vector3(pos.x, 0, pos.z - eps))
+		var h_px = _h.call(Vector3(pos.x + eps, 0, pos.z))
+		var h_mx = _h.call(Vector3(pos.x - eps, 0, pos.z))
+		var h_pz = _h.call(Vector3(pos.x, 0, pos.z + eps))
+		var h_mz = _h.call(Vector3(pos.x, 0, pos.z - eps))
 		var grad_x = (h_px - h_mx) / (2.0 * eps)
 		var grad_z = (h_pz - h_mz) / (2.0 * eps)
 		var cliff_yaw = atan2(-grad_x, -grad_z)
@@ -539,19 +680,37 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 		var t = Transform3D().rotated(Vector3.UP, cliff_yaw).scaled(Vector3.ONE * scale_jitter)
 		t.origin = pos
 		
-		var c_var = cliff_rng.randi() % CLIFF_FACE_POOL_SIZE
-		cliff_xforms_by_variant[c_var].append(t)
+		var tint = Color(
+			1.0 + cliff_rng.randf_range(-0.12, 0.12),
+			1.0 + cliff_rng.randf_range(-0.12, 0.12),
+			1.0 + cliff_rng.randf_range(-0.12, 0.12),
+			1.0
+		)
 		
-	_add_gltf_variant_batches(CLIFF_FACE_MODEL_DIR, CLIFF_FACE_POOL_SIZE, cliff_xforms_by_variant,
-		null, null, "Batch_CliffFace")
+		# Wire cliff corners alongside cliff facades (30% corners, 70% straight facades)
+		if cliff_rng.randf() < 0.30:
+			var cc_var = cliff_rng.randi() % CLIFF_CORNER_POOL_SIZE
+			cliff_corner_xforms[cc_var].append(t)
+			cliff_corner_colors[cc_var].append(tint)
+		else:
+			var c_var = cliff_rng.randi() % CLIFF_FACE_POOL_SIZE
+			cliff_xforms_by_variant[c_var].append(t)
+			cliff_colors_by_variant[c_var].append(tint)
+		
+	_add_gltf_variant_batches(CLIFF_FACE_MODEL_DIR, CLIFF_FACE_POOL_SIZE, cliff_xforms_by_variant, cliff_colors_by_variant,
+		null, null, "Batch_CliffFace", 0.0, 650.0)
+	_add_gltf_variant_batches(CLIFF_CORNER_MODEL_DIR, CLIFF_CORNER_POOL_SIZE, cliff_corner_xforms, cliff_corner_colors,
+		null, null, "Batch_CliffCorner", 0.0, 650.0)
 	
 	# --------------------------------------------------------------------------
 	# 7. AUTHORED WETLAND REEDS (Near water edges & marsh zones)
 	# --------------------------------------------------------------------------
 	if not water_areas.is_empty() or _has_marsh_zones(surface_zones):
 		var reed_xforms_by_variant: Dictionary = {}
+		var reed_colors_by_variant: Dictionary = {}
 		for v in range(REEDS_POOL_SIZE):
 			reed_xforms_by_variant[v] = []
+			reed_colors_by_variant[v] = []
 			
 		var reed_rng = RandomNumberGenerator.new()
 		reed_rng.seed = hash(map_name + "_wetland_reeds")
@@ -578,17 +737,25 @@ func scatter_all(map_def: Dictionary, prop_scale: float = 1.0) -> void:
 						ox = -he.x - reed_rng.randf_range(-1.0, 2.5)
 						oz = reed_rng.randf_range(-he.y, he.y)
 				var pos = Vector3(c.x + ox, 0.0, c.z + oz)
-				pos.y = TerrainBuilderScript.terrain_height_at(map_def, pos)
+				pos.y = _h.call(pos)
 				var yaw = reed_rng.randf_range(0, TAU)
-				var t = Transform3D().rotated(Vector3.UP, yaw).scaled(Vector3.ONE * reed_rng.randf_range(0.8, 1.4) * prop_scale)
-				t.origin = pos
+				var scale_jitter = reed_rng.randf_range(0.8, 1.4) * prop_scale
+				var t = _make_xform.call(pos, yaw, scale_jitter, 0.3)
+				
+				var tint = Color(
+					1.0 + reed_rng.randf_range(-0.10, 0.10),
+					1.0 + reed_rng.randf_range(-0.08, 0.10),
+					1.0 + reed_rng.randf_range(-0.12, 0.08),
+					1.0
+				)
 				var r_var = reed_rng.randi() % REEDS_POOL_SIZE
 				reed_xforms_by_variant[r_var].append(t)
+				reed_colors_by_variant[r_var].append(tint)
 				
 		var fallback_reed_mesh = _build_reed_mesh(prop_scale)
 		var fallback_reed_mat = _get_material(Color(0.28, 0.36, 0.18), 0.75)
-		_add_gltf_variant_batches(REEDS_MODEL_DIR, REEDS_POOL_SIZE, reed_xforms_by_variant,
-			fallback_reed_mesh, fallback_reed_mat, "Batch_WetlandReeds")
+		_add_gltf_variant_batches(REEDS_MODEL_DIR, REEDS_POOL_SIZE, reed_xforms_by_variant, reed_colors_by_variant,
+			fallback_reed_mesh, fallback_reed_mat, "Batch_WetlandReeds", 0.0, 250.0)
 
 static func _is_in_water(pos: Vector3, water_areas: Array, bridges: Array) -> bool:
 	for b in bridges:
@@ -608,3 +775,4 @@ static func _has_marsh_zones(surface_zones: Array) -> bool:
 		if z.get("surface_type", "") == "marsh":
 			return true
 	return false
+

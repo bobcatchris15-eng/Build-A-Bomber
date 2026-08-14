@@ -633,12 +633,32 @@ const SSAO_RADIUS_BASE: float = 0.8
 
 func _scale_lighting_to_world() -> void:
 	var scale: float = WorldScaleScript.for_map(current_map)
+	var env_data: Dictionary = current_map.get("environment", {})
 	var light := get_node_or_null("DirectionalLight3D") as DirectionalLight3D
 	if light:
 		light.directional_shadow_max_distance = SHADOW_DISTANCE_BASE * scale
+		if env_data.has("sun_color"):
+			light.light_color = env_data["sun_color"]
+		if env_data.has("sun_energy"):
+			light.light_energy = float(env_data["sun_energy"])
+
 	var world_env := get_node_or_null("WorldEnvironment") as WorldEnvironment
 	if world_env and world_env.environment:
-		world_env.environment.ssao_radius = SSAO_RADIUS_BASE * scale
+		var env := world_env.environment
+		env.ssao_radius = SSAO_RADIUS_BASE * scale
+		if env_data.has("ambient_light_energy"):
+			env.ambient_light_energy = float(env_data["ambient_light_energy"])
+		if env_data.has("fog_enabled"):
+			env.fog_enabled = bool(env_data["fog_enabled"])
+			if env_data.has("fog_density"):
+				env.fog_density = float(env_data["fog_density"])
+			if env_data.has("fog_aerial_perspective"):
+				env.fog_aerial_perspective = float(env_data["fog_aerial_perspective"])
+		if env_data.has("sky_color") and env.sky and env.sky.sky_material is ProceduralSkyMaterial:
+			var sky_mat := env.sky.sky_material as ProceduralSkyMaterial
+			sky_mat.sky_top_color = env_data["sky_color"]
+			if env_data.has("horizon_color"):
+				sky_mat.sky_horizon_color = env_data["horizon_color"]
 
 func _setup_terrain() -> void:
 	var nav: Dictionary
@@ -706,7 +726,7 @@ func _setup_terrain() -> void:
 		if mesh_inst:
 			mesh_inst.mesh = generated.mesh
 			mesh_inst.material_override = TerrainBuilder.build_ground_material_heightmap(
-				current_map.get("ground_color", Color(0.2, 0.26, 0.21)))
+				current_map.get("ground_color", Color(0.2, 0.26, 0.21)), current_map)
 		var col: CollisionShape3D = ground.get_node_or_null("CollisionShape3D")
 		if col:
 			col.shape = generated.shape

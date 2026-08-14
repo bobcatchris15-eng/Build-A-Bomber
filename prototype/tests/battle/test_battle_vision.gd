@@ -436,17 +436,29 @@ func test_shroud_grid_cell_scales_keeping_image_size_bounded() -> bool:
 		print("  [FAIL] Scaling both map_half_extents and world_scale by 4x should hold _dim roughly constant, expected ", expected_dim_1x, ", got ", vision_4x._dim)
 		return false
 
-	# The shroud plane's own world-space footprint must still track the
-	# REAL (unscaled-cell) half-extent, not shrink just because the grid
-	# got coarser - build_shroud() reads _half directly, independent of
-	# _dim/GRID_CELL.
+	# The shroud no longer has a world-space footprint to check. It used to be
+	# a plane sized to the map, and this test asserted that size; it is now a
+	# fullscreen pass that resolves world position from the depth buffer, so
+	# the map extent reaches the shader as the map_half uniform instead of as
+	# geometry. That uniform is what has to track the REAL half-extent, and it
+	# must not shrink just because the grid cell got coarser - build_shroud()
+	# reads _half directly, independent of _dim/GRID_CELL.
 	var shroud := vision_4x.build_shroud()
-	var plane: PlaneMesh = shroud.mesh
-	if not plane.size.is_equal_approx(Vector2(1600.0, 1600.0)):
-		print("  [FAIL] Shroud plane size should match the real map footprint (800*2), got ", plane.size)
+	var mat: ShaderMaterial = shroud.material_override
+	if mat == null:
+		print("  [FAIL] Shroud should carry a ShaderMaterial override, got ", shroud.material_override)
+		return false
+	var half_param = mat.get_shader_parameter("map_half")
+	if not is_equal_approx(float(half_param), 800.0):
+		print("  [FAIL] Shroud map_half uniform should match the real map half-extent (800), got ", half_param)
+		return false
+	# A fullscreen pass that gets frustum-culled draws nothing, and the bug is
+	# invisible until the camera happens to look away from the origin.
+	if shroud.custom_aabb.size.x < 1000.0:
+		print("  [FAIL] Shroud needs an AABB large enough never to be culled, got ", shroud.custom_aabb)
 		return false
 
-	print("  [PASS] The shroud grid cell scales with world_scale, keeping fog image size bounded regardless of map size, while the shroud plane itself still covers the real map footprint.")
+	print("  [PASS] The shroud grid cell scales with world_scale, keeping fog image size bounded regardless of map size, while the shroud still covers the real map footprint.")
 	return true
 
 

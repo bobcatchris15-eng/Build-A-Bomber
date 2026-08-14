@@ -3442,13 +3442,20 @@ static func _leg_stat_mult(type_id: String, tweaks: Dictionary, key: String) -> 
 # it now ignores what a wheel sinks into (marsh, snow, sand) and hates what a
 # skirt catches on (rocky, forest).
 const TERRAIN_SPEED_MULTIPLIERS = {
-	"marsh":    {"wheels": 0.25, "tracked_treads": 0.45, "legs": 0.6,  "screw_drive": 1.1, "hover_engine": 1.15, "half_track": 0.4,  "rocker_bogie": 0.5,  "air_cushion_skirt": 1.2,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.9},
-	"rocky":    {"wheels": 0.35, "tracked_treads": 0.75, "legs": 1.1,  "screw_drive": 0.5, "hover_engine": 0.55, "half_track": 0.5,  "rocker_bogie": 1.15, "air_cushion_skirt": 0.4,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.35},
-	"snow_mud": {"wheels": 0.2,  "tracked_treads": 0.8,  "legs": 0.75, "screw_drive": 0.7, "hover_engine": 1.1,  "half_track": 0.6,  "rocker_bogie": 0.6,  "air_cushion_skirt": 1.15, "anti_grav_plate": 1.0, "pontoon_wheels": 0.5},
-	"sand":     {"wheels": 0.3,  "tracked_treads": 0.85, "legs": 0.8,  "screw_drive": 0.6, "hover_engine": 1.15, "half_track": 0.55, "rocker_bogie": 0.7,  "air_cushion_skirt": 1.1,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.45},
-	"gravel":   {"wheels": 1.25, "tracked_treads": 1.1,  "legs": 1.02, "screw_drive": 1.0, "hover_engine": 0.95, "half_track": 1.1,  "rocker_bogie": 0.8,  "air_cushion_skirt": 0.85, "anti_grav_plate": 1.0, "pontoon_wheels": 1.05},
-	"forest":   {"wheels": 0.3,  "tracked_treads": 0.65, "legs": 0.95, "screw_drive": 0.55, "hover_engine": 0.45, "half_track": 0.5,  "rocker_bogie": 1.0,  "air_cushion_skirt": 0.35, "anti_grav_plate": 1.0, "pontoon_wheels": 0.4},
-	"ice":      {"wheels": 0.45, "tracked_treads": 0.5,  "legs": 0.4,  "screw_drive": 0.75, "hover_engine": 1.2,  "half_track": 0.5,  "rocker_bogie": 0.55, "air_cushion_skirt": 1.25, "anti_grav_plate": 1.0, "pontoon_wheels": 0.5},
+	"marsh":        {"wheels": 0.25, "tracked_treads": 0.45, "legs": 0.6,  "screw_drive": 1.1,  "hover_engine": 1.15, "half_track": 0.4,  "rocker_bogie": 0.5,  "air_cushion_skirt": 1.2,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.9},
+	"rocky":        {"wheels": 0.35, "tracked_treads": 0.75, "legs": 1.1,  "screw_drive": 0.5,  "hover_engine": 0.55, "half_track": 0.5,  "rocker_bogie": 1.15, "air_cushion_skirt": 0.4,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.35},
+	"snow_mud":     {"wheels": 0.2,  "tracked_treads": 0.8,  "legs": 0.75, "screw_drive": 0.7,  "hover_engine": 1.1,  "half_track": 0.6,  "rocker_bogie": 0.6,  "air_cushion_skirt": 1.15, "anti_grav_plate": 1.0, "pontoon_wheels": 0.5},
+	"sand":         {"wheels": 0.3,  "tracked_treads": 0.85, "legs": 0.8,  "screw_drive": 0.6,  "hover_engine": 1.15, "half_track": 0.55, "rocker_bogie": 0.7,  "air_cushion_skirt": 1.1,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.45},
+	"gravel":       {"wheels": 1.25, "tracked_treads": 1.1,  "legs": 1.02, "screw_drive": 1.0,  "hover_engine": 0.95, "half_track": 1.1,  "rocker_bogie": 0.8,  "air_cushion_skirt": 0.85, "anti_grav_plate": 1.0, "pontoon_wheels": 1.05},
+	"forest":       {"wheels": 0.3,  "tracked_treads": 0.65, "legs": 0.95, "screw_drive": 0.55, "hover_engine": 0.45, "half_track": 0.5,  "rocker_bogie": 1.0,  "air_cushion_skirt": 0.35, "anti_grav_plate": 1.0, "pontoon_wheels": 0.4},
+	"ice":          {"wheels": 0.45, "tracked_treads": 0.5,  "legs": 0.4,  "screw_drive": 0.75, "hover_engine": 1.2,  "half_track": 0.5,  "rocker_bogie": 0.55, "air_cushion_skirt": 1.25, "anti_grav_plate": 1.0, "pontoon_wheels": 0.5},
+	"dirt":         {"wheels": 1.05, "tracked_treads": 1.0,  "legs": 1.0,  "screw_drive": 0.9,  "hover_engine": 1.0,  "half_track": 1.0,  "rocker_bogie": 1.0,  "air_cushion_skirt": 1.0,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.95},
+	"steppe_grass": {"wheels": 1.0,  "tracked_treads": 1.0,  "legs": 1.0,  "screw_drive": 0.95, "hover_engine": 1.0,  "half_track": 1.0,  "rocker_bogie": 1.0,  "air_cushion_skirt": 1.0,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.95},
+	"dry_grass":    {"wheels": 1.02, "tracked_treads": 1.0,  "legs": 1.0,  "screw_drive": 0.95, "hover_engine": 1.0,  "half_track": 1.0,  "rocker_bogie": 1.0,  "air_cushion_skirt": 1.0,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.95},
+	"mud":          {"wheels": 0.25, "tracked_treads": 0.6,  "legs": 0.65, "screw_drive": 1.05, "hover_engine": 1.15, "half_track": 0.45, "rocker_bogie": 0.55, "air_cushion_skirt": 1.15, "anti_grav_plate": 1.0, "pontoon_wheels": 0.75},
+	"cobble":       {"wheels": 1.3,  "tracked_treads": 1.15, "legs": 1.05, "screw_drive": 0.9,  "hover_engine": 0.9,  "half_track": 1.15, "rocker_bogie": 0.9,  "air_cushion_skirt": 0.8,  "anti_grav_plate": 1.0, "pontoon_wheels": 1.1},
+	"scree":        {"wheels": 0.35, "tracked_treads": 0.7,  "legs": 0.95, "screw_drive": 0.5,  "hover_engine": 0.6,  "half_track": 0.5,  "rocker_bogie": 1.1,  "air_cushion_skirt": 0.4,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.35},
+	"volcanic":     {"wheels": 0.4,  "tracked_treads": 0.75, "legs": 1.0,  "screw_drive": 0.6,  "hover_engine": 0.7,  "half_track": 0.55, "rocker_bogie": 1.05, "air_cushion_skirt": 0.5,  "anti_grav_plate": 1.0, "pontoon_wheels": 0.4},
 }
 
 # A locomotion type carrying any of these never touches a ground surface, so it

@@ -384,8 +384,9 @@ static func _sample_heightmap_bilinear(img: Image, half_extents: float, x: float
 	var original_x = x / world_scale
 	var original_z = z / world_scale
 	# World -> pixel space (float, sub-pixel precision for the bilinear lerp).
-	var fx = clamp(original_x + original_half, 0.0, float(dim - 1))
-	var fz = clamp(original_z + original_half, 0.0, float(dim - 1))
+	# Scale-aware mapping so explicit pixels_per_unit or custom resolution sample accurately.
+	var fx = clamp((original_x + original_half) / max(2.0 * original_half, 1e-6) * float(dim - 1), 0.0, float(dim - 1))
+	var fz = clamp((original_z + original_half) / max(2.0 * original_half, 1e-6) * float(dim - 1), 0.0, float(dim - 1))
 	var x0 = int(floor(fx))
 	var z0 = int(floor(fz))
 	var x1 = min(x0 + 1, dim - 1)
@@ -415,7 +416,7 @@ static func _decode_heightmap_pixel(color: Color) -> float:
 # Nearest-sample (not bilinear - a surface TYPE can't be interpolated)
 # palette index -> name. Must match build_terrain.py's SURFACE_PALETTE
 # order exactly.
-const SURFACE_PALETTE: Array = ["", "marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice"]
+const SURFACE_PALETTE: Array = ["", "marsh", "rocky", "snow_mud", "sand", "gravel", "forest", "ice", "dirt", "steppe_grass", "dry_grass", "mud", "cobble", "scree", "volcanic"]
 
 # Same "baked asset, not re-derived" reasoning as _sample_heightmap_
 # bilinear() above - see that function's comment.
@@ -424,8 +425,10 @@ static func _sample_surfacemap(img: Image, half_extents: float, x: float, z: flo
 	var original_half = half_extents / world_scale
 	var original_x = x / world_scale
 	var original_z = z / world_scale
-	var px = int(round(clamp(original_x + original_half, 0.0, float(dim - 1))))
-	var pz = int(round(clamp(original_z + original_half, 0.0, float(dim - 1))))
+	var fx = clamp((original_x + original_half) / max(2.0 * original_half, 1e-6) * float(dim - 1), 0.0, float(dim - 1))
+	var fz = clamp((original_z + original_half) / max(2.0 * original_half, 1e-6) * float(dim - 1), 0.0, float(dim - 1))
+	var px = int(round(fx))
+	var pz = int(round(fz))
 	var index = int(round(img.get_pixel(px, pz).r * 255.0))
 	if index < 0 or index >= SURFACE_PALETTE.size():
 		return ""
@@ -975,12 +978,27 @@ const NAV_CELL_HEIGHT: float = 0.25
 
 # 2026-08-10 (Chris playtest): harvesters were driving into the SIDE of
 # buildings and stopping, instead of routing around. The cause was a
-# 0.1 m agent_radius on the baked navmesh - Recast uses that radius to
-# erode walkable area near walls and buildings, so the resulting paths
-# had 10 cm clearance to a structure. A harvester hull is ~3 m wide; it
+# WAS 0.1 m, and that was the bug: Recast uses this radius to erode
+# walkable area near walls and buildings, so the resulting paths had
+# 10 cm clearance to a structure. A harvester hull is ~3 m wide; it
 # could not fit through the gap the path reserved, so it followed the
 # path until its own CharacterBody3D (collision_mask = TERRAIN |
 # BUILDINGS) physically stopped it against the wall.
+#
+# The fix below originally reached only ONE of the three bake sites in
+# this file - the synchronous one, which is the path the TEST SUITE
+# uses. Both async paths kept 0.1, and those are the paths a real match
+# uses for its initial load AND its mid-match rebake, so the shipping
+# game went on pathing at 10 cm clearance while every test validated
+# 1.0 m. All three now go through _configure_nav_mesh().
+#
+# Measured before changing it (tools/probe_agent_radius_effect.gd):
+# because Recast quantises the radius to whole cell_size voxels, 1.0 and
+# 0.1 are IDENTICAL on 24 of the roster's 28 ground/amphibious surfaces -
+# every map whose cell_size is >= 1.0 collapses both to a single voxel.
+# Only close_quarters (cell 0.97) and test_range (cell 0.25) move, each
+# losing under 1% of walkable area, which is precisely the intended
+# clearance appearing around obstacles.
 #
 # 1.0 m. Recast quantises agent_radius to whole cell_size voxels and
 # warns about it ("agent_radius is ceiled to cell_size voxel units and
@@ -1005,12 +1023,53 @@ const NAV_CELL_HEIGHT: float = 0.25
 # and the per-actor-types refactor is a much bigger lift.
 const NAV_AGENT_RADIUS: float = 1.0
 
-static func _bake_nav_mesh(verts: PackedVector3Array, cell_size: float) -> NavigationMesh:
-	var nav_mesh = NavigationMesh.new()
+# Recast quantises agent_radius UP to whole cell_size voxels and
+# agent_max_climb DOWN to whole cell_height voxels, and Godot 4.7.1 warns
+# about each every single bake ("Property agent_radius is ceiled to
+# cell_size voxel units and loses precision",
+# nav_mesh_generator_3d.cpp:370/373). Both warnings are accurate and both
+# are harmless - but build_ground_amphibious_tiles() bakes 12x12 tiles x 2
+# surfaces = 288 navmeshes per map load, so "harmless" arrives as several
+# hundred lines of stderr per match and buries real errors in the test log.
+#
+# Passing the ALREADY-quantised value silences both without moving a single
+# baked polygon: ceil(r / cell_size) * cell_size re-ceils to the same
+# integer voxel count Recast would have computed itself, and likewise
+# floor(c / cell_height) * cell_height. tools/probe_agent_radius_warning.gd
+# verifies this across every cell_size the project actually produces (0.25,
+# the small-map floor, through 5.95, scattered_peaks' open water) and
+# asserts the re-ceil never drifts a voxel WIDER. Drifting wider is the
+# thing to fear here: a wider effective radius eats corridor clearance,
+# which is exactly what broke test_spawn_fairness_lint_passes_a_real_map_
+# scaled_up_4x when NAV_AGENT_RADIUS was tried at 1.5 (see that constant).
+#
+# All three call sites now pass NAV_AGENT_RADIUS. They did not always -
+# see that constant's comment for the split this closed and what it was
+# measured to cost.
+static func _snap_up_to_voxel(value: float, unit: float) -> float:
+	if value <= 0.0 or unit <= 0.0:
+		return maxf(value, 0.0)
+	return float(maxi(1, int(ceil(value / unit)))) * unit
+
+static func _snap_down_to_voxel(value: float, unit: float) -> float:
+	if value <= 0.0 or unit <= 0.0:
+		return maxf(value, 0.0)
+	return float(maxi(1, int(floor(value / unit)))) * unit
+
+# The single place a NavigationMesh's shared bake parameters are set. There
+# are three construction sites in this file (sync, the async mid-match
+# rebake, and the async tiled load path) and they have already drifted apart
+# once - the comment in _bake_region_async() recording that the same fixes
+# were needed in both places is what this exists to make unnecessary.
+static func _configure_nav_mesh(nav_mesh: NavigationMesh, cell_size: float, agent_radius: float) -> void:
 	nav_mesh.cell_size = cell_size
 	nav_mesh.cell_height = NAV_CELL_HEIGHT
-	nav_mesh.agent_max_climb = cell_size * AGENT_MAX_CLIMB_CELLS
-	nav_mesh.agent_radius = NAV_AGENT_RADIUS
+	nav_mesh.agent_max_climb = _snap_down_to_voxel(cell_size * AGENT_MAX_CLIMB_CELLS, NAV_CELL_HEIGHT)
+	nav_mesh.agent_radius = _snap_up_to_voxel(agent_radius, cell_size)
+
+static func _bake_nav_mesh(verts: PackedVector3Array, cell_size: float) -> NavigationMesh:
+	var nav_mesh = NavigationMesh.new()
+	_configure_nav_mesh(nav_mesh, cell_size, NAV_AGENT_RADIUS)
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(verts, Transform3D.IDENTITY)
 	NavigationServer3D.bake_from_source_geometry_data(nav_mesh, source)
@@ -1066,15 +1125,7 @@ static func rebake_ground_and_amphibious_async(map_def: Dictionary, extra_holes:
 
 static func _bake_region_async(region: RID, verts: PackedVector3Array, cell_size: float, remaining: Dictionary, on_ready: Callable) -> void:
 	var nav_mesh = NavigationMesh.new()
-	nav_mesh.cell_size = cell_size
-	# See _bake_nav_mesh()'s comments (both NAV_CELL_HEIGHT and
-	# agent_max_climb) - the same fixes are needed here, since this is the
-	# SECOND, independent NavigationMesh construction site (the async
-	# mid-match rebake path for buildings going up/down), not a call through
-	# the other one.
-	nav_mesh.cell_height = NAV_CELL_HEIGHT
-	nav_mesh.agent_max_climb = cell_size * AGENT_MAX_CLIMB_CELLS
-	nav_mesh.agent_radius = 0.1
+	_configure_nav_mesh(nav_mesh, cell_size, NAV_AGENT_RADIUS)
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(verts, Transform3D.IDENTITY)
 	NavigationServer3D.bake_from_source_geometry_data_async(nav_mesh, source, func():
@@ -1302,10 +1353,7 @@ static func bake_pending_entry_async(entry: Dictionary, cell_size: float, on_don
 	# longer share one.
 	var effective: float = entry.get("cell_size", cell_size)
 	var nav_mesh = NavigationMesh.new()
-	nav_mesh.cell_size = effective
-	nav_mesh.cell_height = NAV_CELL_HEIGHT
-	nav_mesh.agent_max_climb = effective * AGENT_MAX_CLIMB_CELLS
-	nav_mesh.agent_radius = 0.1
+	_configure_nav_mesh(nav_mesh, effective, NAV_AGENT_RADIUS)
 	var source = NavigationMeshSourceGeometryData3D.new()
 	source.add_faces(entry["verts"], Transform3D.IDENTITY)
 	var region: RID = entry["region"]
@@ -1316,16 +1364,8 @@ static func bake_pending_entry_async(entry: Dictionary, cell_size: float, on_don
 # --- Visuals ---
 
 static func spawn_visuals(map_def: Dictionary, parent: Node3D):
-	# CORE_DESIGN_LANGUAGE.md §3.1/§3.2: every greeble call below gets the
-	# map's resolved world scale, so a pebble stands in for a boulder at the
-	# ratio the map actually declares (WorldScaleScript.for_map() falls back
-	# to DEFAULT_WORLD_SCALE=1.0 for any map without a "world_scale" key -
-	# today's exact, unchanged appearance until that default itself moves).
 	var prop_scale = WorldScaleScript.for_map(map_def)
-	for w in map_def.get("water_areas", []):
-		_spawn_water_plane(w, parent, prop_scale)
-	for blob in map_def.get("water_blobs", []):
-		_spawn_water_blob(blob, parent, prop_scale)
+	_spawn_merged_water(map_def, parent, prop_scale)
 	for o in map_def.get("obstacles", []):
 		_spawn_obstacle(o, parent, map_def)
 	for s in map_def.get("surface_zones", []):
@@ -1431,14 +1471,20 @@ static func _variant_for_position(surface_type: String, x: float, z: float) -> S
 	return variants[abs(seed_val) % variants.size()]
 
 static func _get_terrain_textures(surface_type: String, variant: String = "") -> Dictionary:
-	var key = surface_type + variant
+	var v_suffix = ""
+	if variant != "" and variant != "base":
+		v_suffix = variant if variant.begins_with("_") else ("_" + variant)
+	var key = surface_type + v_suffix
 	if _terrain_texture_cache.has(key):
 		return _terrain_texture_cache[key]
-	var base = TERRAIN_TEXTURE_DIR + surface_type + variant
+	var base = TERRAIN_TEXTURE_DIR + surface_type + v_suffix
+	var alb_path = base + "_albedo.png"
+	var nrm_path = base + "_normal.png"
+	var rgh_path = base + "_roughness.png"
 	var textures = {
-		"albedo": load(base + "_albedo.png"),
-		"normal": load(base + "_normal.png"),
-		"roughness": load(base + "_roughness.png"),
+		"albedo": load(alb_path) if ResourceLoader.exists(alb_path) else null,
+		"normal": load(nrm_path) if ResourceLoader.exists(nrm_path) else null,
+		"roughness": load(rgh_path) if ResourceLoader.exists(rgh_path) else null,
 	}
 	_terrain_texture_cache[key] = textures
 	return textures
@@ -1491,18 +1537,41 @@ static func build_ground_material(ground_color: Color, footprint: Vector2) -> St
 # material_override, which is typed Material anyway.
 const GROUND_BLEND_SHADER = preload("res://shaders/terrain_ground.gdshader")
 
-static func build_ground_material_heightmap(ground_color: Color) -> Material:
-	return build_blended_surface_material("grassland", ground_color.lightened(0.55))
+static func build_ground_material_heightmap(ground_color: Color, map_def: Dictionary = {}) -> Material:
+	var mat: ShaderMaterial = build_blended_surface_material("grassland", ground_color.lightened(0.55), map_def) as ShaderMaterial
+	var rock_tex = _get_terrain_textures("rocky", "base")
+	mat.set_shader_parameter("rock_albedo", rock_tex.albedo)
+	mat.set_shader_parameter("rock_normal", rock_tex.normal)
+	mat.set_shader_parameter("rock_rough", rock_tex.roughness)
+	
+	if not map_def.is_empty():
+		var half = map_def.get("map_half_extents", 100.0)
+		mat.set_shader_parameter("map_half_extents", half)
+		var map_id = map_def.get("id", "")
+		if map_id != "":
+			var wet_path = "res://data/maps/%s_wetness.png" % map_id
+			if ResourceLoader.exists(wet_path):
+				mat.set_shader_parameter("wetness_tex", load(wet_path))
+				mat.set_shader_parameter("use_wetness", true)
+			var macro_path = "res://data/maps/%s_macro.png" % map_id
+			if ResourceLoader.exists(macro_path):
+				mat.set_shader_parameter("macro_tex", load(macro_path))
+				mat.set_shader_parameter("use_macro", true)
+			var curv_path = "res://data/maps/%s_curvature.png" % map_id
+			if ResourceLoader.exists(curv_path):
+				mat.set_shader_parameter("curvature_tex", load(curv_path))
+				mat.set_shader_parameter("use_curvature", true)
+	return mat
 
 # Builds a variant-blending material for any surface type. Falls back to
 # whatever variants actually exist - a surface with only its procedural bake
 # gets variant_count 1 and behaves exactly as before, so this is safe to point
 # at a surface no photographic plate has been produced for yet.
-static func build_blended_surface_material(surface_type: String, tint: Color = Color.WHITE) -> Material:
+static func build_blended_surface_material(surface_type: String, tint: Color = Color.WHITE, _map_def: Dictionary = {}) -> Material:
 	var variants = _get_terrain_variants(surface_type)
 	var mat = ShaderMaterial.new()
 	mat.shader = GROUND_BLEND_SHADER
-	var count = mini(variants.size(), 3)
+	var count = mini(variants.size(), 8)
 	mat.set_shader_parameter("variant_count", count)
 	for i in range(count):
 		var tex = _get_terrain_textures(surface_type, variants[i])
@@ -1550,13 +1619,13 @@ const COLLISION_HEIGHTMAP_STEP: float = 3.0
 static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 	var half: float = map_def.get("map_half_extents", 80.0)
 
-	# height_at() is genuinely expensive at scale (noise sample + hill/blob
-	# loops) and every interior grid corner is shared by up to 4 quads in
-	# this non-indexed triangle list - memoizing within this one build call
-	# cuts the visual mesh's height_at() calls by roughly 4x for free.
+	# Scale resolution dynamically with extent so large maps don't explode into millions of quads
+	var mesh_step: float = maxf(GROUND_MESH_RESOLUTION, (half * 2.0) / 280.0)
+	var col_step: float = maxf(COLLISION_HEIGHTMAP_STEP, (half * 2.0) / 180.0)
+
 	var h_cache: Dictionary = {}
 	var _h = func(hx: float, hz: float) -> float:
-		var key = Vector2(hx, hz)
+		var key = Vector2(round(hx * 4.0) / 4.0, round(hz * 4.0) / 4.0)
 		if h_cache.has(key): return h_cache[key]
 		var v = height_at(map_def, hx, hz)
 		h_cache[key] = v
@@ -1566,10 +1635,10 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var x = -half
 	while x < half:
-		var x1 = min(x + GROUND_MESH_RESOLUTION, half)
+		var x1 = min(x + mesh_step, half)
 		var z = -half
 		while z < half:
-			var z1 = min(z + GROUND_MESH_RESOLUTION, half)
+			var z1 = min(z + mesh_step, half)
 			var a = Vector3(x, _h.call(x, z), z)
 			var b = Vector3(x1, _h.call(x1, z), z)
 			var c = Vector3(x1, _h.call(x1, z1), z1)
@@ -1579,23 +1648,25 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 				st.add_vertex(v)
 			z = z1
 		x = x1
+	st.index()
 	st.generate_normals()
 	var mesh = st.commit()
 
-	var samples = int(half * 2.0 / COLLISION_HEIGHTMAP_STEP) + 1
+	var samples = int(half * 2.0 / col_step) + 1
 	var height_data = PackedFloat32Array()
 	height_data.resize(samples * samples)
 	for row in range(samples):
-		var wz = -half + row * COLLISION_HEIGHTMAP_STEP
+		var wz = -half + row * col_step
 		for col in range(samples):
-			var wx = -half + col * COLLISION_HEIGHTMAP_STEP
+			var wx = -half + col * col_step
 			height_data[row * samples + col] = height_at(map_def, wx, wz)
 	var shape = HeightMapShape3D.new()
 	shape.map_width = samples
 	shape.map_depth = samples
 	shape.map_data = height_data
 
-	return {"mesh": mesh, "shape": shape, "samples": samples, "collision_scale": Vector3(COLLISION_HEIGHTMAP_STEP, 1.0, COLLISION_HEIGHTMAP_STEP)}
+	return {"mesh": mesh, "shape": shape, "samples": samples, "collision_scale": Vector3(col_step, 1.0, col_step)}
+
 
 # A rectangular zone footprint as a real subdivided mesh whose every vertex
 # samples height_at() - the same one source of truth build_ground_visual_mesh(),
@@ -1736,14 +1807,14 @@ static func _spawn_surface_zone(zone: Dictionary, parent: Node3D, prop_scale: fl
 		mesh_inst.material_override = mat
 		parent.add_child(mesh_inst)
 
-	TerrainGreeblesScript.scatter(zone, parent, prop_scale)
+	TerrainGreeblesScript.scatter(zone, parent, prop_scale, map_def)
 
 # A lighter, sandier-toned marker over the shallow sub-area of a water
 # zone (drawn on top of the main water plane, slightly higher Y) - purely
 # a visual cue that this patch is shallow-draught-only; the real
 # passability distinction lives in the deep_water_map navmesh (see
 # build_navmeshes()).
-static func _spawn_shallow_water_marker(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0):
+static func _spawn_shallow_water_marker(zone: Dictionary, parent: Node3D, prop_scale: float = 1.0, map_def: Dictionary = {}):
 	var mesh_inst = MeshInstance3D.new()
 	var plane = PlaneMesh.new()
 	var footprint = Vector2(zone.half_extents.x * 2.0, zone.half_extents.y * 2.0)
@@ -1756,65 +1827,72 @@ static func _spawn_shallow_water_marker(zone: Dictionary, parent: Node3D, prop_s
 	parent.add_child(mesh_inst)
 	mesh_inst.global_position = Vector3(zone.center.x, 0.06, zone.center.z)
 
-	TerrainGreeblesScript.scatter_shallow_water(zone, parent, prop_scale)
+	TerrainGreeblesScript.scatter_shallow_water(zone, parent, prop_scale, map_def)
 
-# Baseline deep water - the baked "blue_water" texture (deeper, more
-# desaturated, subtle current/glint - see generate_terrain_textures.gd)
-# replaces the old flat albedo_color, with a HIGHER alpha than
-# shallow_water's marker (0.93 vs 0.8) so it deliberately reads more
-# opaque/deep rather than shallow_water's see-through/sandy-bed look, per
-# the two types' whole point of contrast.
-static func _spawn_water_plane(water: Dictionary, parent: Node3D, prop_scale: float = 1.0):
-	var mesh_inst = MeshInstance3D.new()
-	var plane = PlaneMesh.new()
-	var footprint = Vector2(water.half_extents.x * 2.0, water.half_extents.y * 2.0)
-	plane.size = footprint
-	mesh_inst.mesh = plane
-	var mat = _build_terrain_material("blue_water", footprint, Color.WHITE, "", prop_scale)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(1, 1, 1, 0.93)
-	mat.emission_enabled = true
-	mat.emission = Color(0.06, 0.13, 0.22)
-	mesh_inst.material_override = mat
-	parent.add_child(mesh_inst)
-	mesh_inst.global_position = Vector3(water.center.x, 0.05, water.center.z)
+const WATER_SHADER = preload("res://shaders/water.gdshader")
 
-	TerrainGreeblesScript.scatter_blue_water(water, parent, prop_scale)
+static func _spawn_merged_water(map_def: Dictionary, parent: Node3D, prop_scale: float = 1.0) -> void:
+	var water_areas = map_def.get("water_areas", [])
+	var water_blobs = map_def.get("water_blobs", [])
+	if water_areas.is_empty() and water_blobs.is_empty():
+		return
 
-# Organic counterpart to _spawn_water_plane() - a real triangle-fan mesh
-# matching the blob's per-angle coastline (same geometry the navmesh hole
-# and terrain dip use, see _water_blob_fan_verts()) instead of a rectangular
-# PlaneMesh, so the visible water shape actually reads as a natural lake
-# rather than a blocky rectangle. UVs are baked directly from absolute
-# world position (no per-mesh footprint to scale against, unlike a
-# PlaneMesh's built-in 0..1 UV), same tiling density as every other terrain
-# material via TERRAIN_TILE_WORLD_SIZE.
-static func _spawn_water_blob(blob: Dictionary, parent: Node3D, prop_scale: float = 1.0):
-	var verts = _water_blob_fan_verts(blob, 0.05)
 	var st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for v in verts:
-		st.set_uv(Vector2(v.x, v.z) / (TERRAIN_TILE_WORLD_SIZE * prop_scale))
-		st.add_vertex(v)
-	st.generate_normals()
+	var vert_count = 0
 
-	var mesh_inst = MeshInstance3D.new()
-	mesh_inst.mesh = st.commit()
-	var tex = _get_terrain_textures("blue_water")
-	var mat = StandardMaterial3D.new()
-	mat.albedo_texture = tex.albedo
-	mat.roughness_texture = tex.roughness
-	mat.roughness = 1.0
-	mat.normal_enabled = true
-	mat.normal_texture = tex.normal
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.albedo_color = Color(1, 1, 1, 0.93)
-	mat.emission_enabled = true
-	mat.emission = Color(0.06, 0.13, 0.22)
-	mesh_inst.material_override = mat
-	parent.add_child(mesh_inst)
+	for w in water_areas:
+		var c: Vector3 = w.center
+		var h: Vector2 = w.half_extents
+		var y = 0.05
+		var v0 = Vector3(c.x - h.x, y, c.z - h.y)
+		var v1 = Vector3(c.x + h.x, y, c.z - h.y)
+		var v2 = Vector3(c.x + h.x, y, c.z + h.y)
+		var v3 = Vector3(c.x - h.x, y, c.z + h.y)
 
-	TerrainGreeblesScript.scatter_blue_water({"center": blob.center, "half_extents": Vector2(blob.get("radius", 10.0), blob.get("radius", 10.0))}, parent, prop_scale)
+		st.set_normal(Vector3.UP)
+		st.set_uv(Vector2(v0.x, v0.z) / (TERRAIN_TILE_WORLD_SIZE * prop_scale))
+		st.add_vertex(v0)
+		st.set_uv(Vector2(v1.x, v1.z) / (TERRAIN_TILE_WORLD_SIZE * prop_scale))
+		st.add_vertex(v1)
+		st.set_uv(Vector2(v2.x, v2.z) / (TERRAIN_TILE_WORLD_SIZE * prop_scale))
+		st.add_vertex(v2)
+
+		st.set_uv(Vector2(v0.x, v0.z) / (TERRAIN_TILE_WORLD_SIZE * prop_scale))
+		st.add_vertex(v0)
+		st.set_uv(Vector2(v2.x, v2.z) / (TERRAIN_TILE_WORLD_SIZE * prop_scale))
+		st.add_vertex(v2)
+		st.set_uv(Vector2(v3.x, v3.z) / (TERRAIN_TILE_WORLD_SIZE * prop_scale))
+		st.add_vertex(v3)
+		vert_count += 6
+
+		TerrainGreeblesScript.scatter_blue_water(w, parent, prop_scale)
+
+	for blob in water_blobs:
+		var verts = _water_blob_fan_verts(blob, 0.05)
+		for v in verts:
+			st.set_normal(Vector3.UP)
+			st.set_uv(Vector2(v.x, v.z) / (TERRAIN_TILE_WORLD_SIZE * prop_scale))
+			st.add_vertex(v)
+			vert_count += 1
+
+		TerrainGreeblesScript.scatter_blue_water({"center": blob.center, "half_extents": Vector2(blob.get("radius", 10.0), blob.get("radius", 10.0))}, parent, prop_scale)
+
+	if vert_count > 0:
+		st.generate_normals()
+		st.generate_tangents()
+		var mesh_inst = MeshInstance3D.new()
+		mesh_inst.mesh = st.commit()
+		mesh_inst.name = "MergedWaterVisuals"
+		
+		var mat = ShaderMaterial.new()
+		mat.shader = WATER_SHADER
+		var tex_a = _get_terrain_textures("blue_water")
+		mat.set_shader_parameter("normal_map_a", tex_a.normal)
+		var tex_b = _get_terrain_textures("blue_water", "v1")
+		mat.set_shader_parameter("normal_map_b", tex_b.normal if tex_b.normal else tex_a.normal)
+		mesh_inst.material_override = mat
+		parent.add_child(mesh_inst)
 
 # Ground level under an obstacle/prop, or 0 when no map_def was threaded
 # through (direct callers in probes and test fixtures).
@@ -1836,20 +1914,17 @@ static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D, map_def: Dicti
 	var collider_height = 3.0
 	if obstacle_type == "building":
 		collider_height = _spawn_building_obstacle(obstacle, parent, base_y)
+	elif obstacle_type == "fortification":
+		collider_height = _spawn_fortification_obstacle(obstacle, parent, base_y)
+	elif obstacle_type == "depot":
+		collider_height = _spawn_depot_obstacle(obstacle, parent, base_y)
+	elif obstacle_type == "relay":
+		collider_height = _spawn_relay_obstacle(obstacle, parent, base_y)
+	elif obstacle_type == "crater":
+		collider_height = _spawn_crater_obstacle(obstacle, parent, base_y)
 	else:
 		collider_height = _spawn_rock_obstacle(obstacle, parent, base_y)
 
-	# Real collision (same "Ground only" layer as the flat terrain) so units
-	# physically can't clip through even if steering pushes them off-path,
-	# and the build-placement raycast can't resolve a spot inside the
-	# footprint to a flat position either - belt-and-suspenders on top of
-	# the navmesh hole and the explicit is_position_blocked() reject. This
-	# is also what makes obstacles (rock clusters AND buildings alike) real
-	# COVER, not just movement blockers: auto_weapon.gd's own line-of-sight
-	# raycast already checks this same collision_layer (1) for weapon fire,
-	# and skirmish.gd's fog-of-war vision check now does too (see
-	# _recalc_fog_of_war()'s LOS raycast) - a tall obstacle on this layer
-	# blocks both automatically, no obstacle-type-specific wiring needed.
 	var body = StaticBody3D.new()
 	body.collision_layer = 1
 	body.collision_mask = 0
@@ -1860,6 +1935,81 @@ static func _spawn_obstacle(obstacle: Dictionary, parent: Node3D, map_def: Dicti
 	body.add_child(shape)
 	parent.add_child(body)
 	body.global_position = Vector3(obstacle.center.x, base_y + collider_height / 2.0, obstacle.center.z)
+
+static func _spawn_fortification_obstacle(obstacle: Dictionary, parent: Node3D, base_y: float = 0.0) -> float:
+	var h: float = obstacle.get("building_height", 3.2)
+	var mesh_inst = MeshInstance3D.new()
+	var box = BoxMesh.new()
+	box.size = Vector3(obstacle.half_extents.x * 1.8, h, obstacle.half_extents.y * 1.8)
+	mesh_inst.mesh = box
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.28, 0.29, 0.28)
+	mat.roughness = 0.92
+	mesh_inst.material_override = mat
+	mesh_inst.position = Vector3(obstacle.center.x, base_y + h / 2.0, obstacle.center.z)
+	parent.add_child(mesh_inst)
+	return h
+
+static func _spawn_depot_obstacle(obstacle: Dictionary, parent: Node3D, base_y: float = 0.0) -> float:
+	var h: float = 2.4
+	var mesh_inst = MeshInstance3D.new()
+	var box = BoxMesh.new()
+	box.size = Vector3(obstacle.half_extents.x * 2.0, 0.4, obstacle.half_extents.y * 2.0)
+	mesh_inst.mesh = box
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.32, 0.31, 0.29)
+	mat.roughness = 0.88
+	mesh_inst.material_override = mat
+	mesh_inst.position = Vector3(obstacle.center.x, base_y + 0.2, obstacle.center.z)
+	parent.add_child(mesh_inst)
+
+	# Fuel drums on slab
+	for ox in [-obstacle.half_extents.x * 0.4, obstacle.half_extents.x * 0.4]:
+		var tank_inst = MeshInstance3D.new()
+		var cyl = CylinderMesh.new()
+		cyl.top_radius = 1.0
+		cyl.bottom_radius = 1.0
+		cyl.height = 2.0
+		tank_inst.mesh = cyl
+		var tank_mat = StandardMaterial3D.new()
+		tank_mat.albedo_color = Color(0.22, 0.26, 0.28)
+		tank_mat.roughness = 0.65
+		tank_inst.material_override = tank_mat
+		tank_inst.position = Vector3(obstacle.center.x + ox, base_y + 1.2, obstacle.center.z)
+		parent.add_child(tank_inst)
+	return h
+
+static func _spawn_relay_obstacle(obstacle: Dictionary, parent: Node3D, base_y: float = 0.0) -> float:
+	var h: float = 5.0
+	var mesh_inst = MeshInstance3D.new()
+	var cyl = CylinderMesh.new()
+	cyl.top_radius = 0.8
+	cyl.bottom_radius = 1.4
+	cyl.height = h
+	mesh_inst.mesh = cyl
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.35, 0.36, 0.38)
+	mat.roughness = 0.7
+	mesh_inst.material_override = mat
+	mesh_inst.position = Vector3(obstacle.center.x, base_y + h / 2.0, obstacle.center.z)
+	parent.add_child(mesh_inst)
+	return h
+
+static func _spawn_crater_obstacle(obstacle: Dictionary, parent: Node3D, base_y: float = 0.0) -> float:
+	var h: float = 1.8
+	var mesh_inst = MeshInstance3D.new()
+	var cyl = CylinderMesh.new()
+	cyl.top_radius = maxf(obstacle.half_extents.x, obstacle.half_extents.y) * 0.9
+	cyl.bottom_radius = maxf(obstacle.half_extents.x, obstacle.half_extents.y) * 1.1
+	cyl.height = h
+	mesh_inst.mesh = cyl
+	var mat = StandardMaterial3D.new()
+	mat.albedo_color = Color(0.15, 0.14, 0.13)
+	mat.roughness = 0.95
+	mesh_inst.material_override = mat
+	mesh_inst.position = Vector3(obstacle.center.x, base_y + h / 2.0, obstacle.center.z)
+	parent.add_child(mesh_inst)
+	return h
 
 # Authored boulders now exist (tools/blender/build_terrain_props.py) - a
 # rock cluster prefers a pool of 4 real boulder_N.glb variants, picked
@@ -1966,34 +2116,11 @@ static func _spawn_building_obstacle(obstacle: Dictionary, parent: Node3D, base_
 	roof.material_override = roof_mat
 	parent.add_child(roof)
 	roof.global_position = Vector3(obstacle.center.x, base_y + height + 0.15, obstacle.center.z)
-
-	# Window-slit greebles on the two long faces - purely cosmetic, no
-	# collision of their own (the single wall box above already owns it).
-	var rows = int(height / 1.6)
-	var cols = 3
-	for row in range(rows):
-		for col in range(cols):
-			var window = MeshInstance3D.new()
-			var wbox = BoxMesh.new()
-			wbox.size = Vector3(0.6, 0.7, 0.05)
-			window.mesh = wbox
-			var wmat = StandardMaterial3D.new()
-			wmat.albedo_color = Color(0.55, 0.6, 0.45)
-			wmat.emission_enabled = true
-			wmat.emission = Color(0.4, 0.42, 0.3)
-			window.material_override = wmat
-			parent.add_child(window)
-			var wx = obstacle.center.x + (col - (cols - 1) / 2.0) * (obstacle.half_extents.x * 2.0 / (cols + 1))
-			var wy = base_y + 1.2 + row * 1.6
-			window.global_position = Vector3(wx, wy, obstacle.center.z + obstacle.half_extents.y + 0.03)
 	return height
 
 # A raised deck spanning the bridge's full footprint (real geometry, not
 # just a color patch - it's the visual proof the navmesh carve-out actually
-# corresponds to a walkable structure) plus two low guard-rail strips along
-# the long edges. The crossing axis is whichever of half_extents is larger
-# (a bridge is always longer than it is wide), so the rails run parallel to
-# travel regardless of whether the map orients the crossing along X or Z.
+# corresponds to a walkable structure).
 static func _spawn_bridge(bridge: Dictionary, parent: Node3D):
 	var c: Vector3 = bridge.center
 	var he: Vector2 = bridge.half_extents
@@ -2009,38 +2136,6 @@ static func _spawn_bridge(bridge: Dictionary, parent: Node3D):
 	deck.material_override = mat
 	parent.add_child(deck)
 	deck.global_position = Vector3(c.x, deck_h / 2.0, c.z)
-
-	var long_axis_x = he.x >= he.y
-	var rail_h = 0.5
-	var rail_thickness = 0.3
-	for side in [-1.0, 1.0]:
-		var rail = MeshInstance3D.new()
-		# add_child BEFORE assigning global_position, matching the deck above.
-		# The rails used to be added at the end of this loop body, after their
-		# global_position was set - and a Node3D outside the tree has no global
-		# transform, so each assignment logged "Condition !is_inside_tree() is
-		# true" and was applied to the LOCAL position instead. That happened to
-		# land the rails correctly anyway, purely because `parent` here is the
-		# Skirmish scene root (terrain_builder.spawn_visuals(current_map, self)),
-		# which sits at the origin with an identity transform - so local and
-		# global coincided. Reordering is therefore visually identical today;
-		# it removes two spurious errors per bridge at map load and the latent
-		# trap that the moment terrain is ever parented under an offset node,
-		# the rails would silently jump while the deck stayed put.
-		parent.add_child(rail)
-		var rail_box = BoxMesh.new()
-		if long_axis_x:
-			rail_box.size = Vector3(he.x * 2.0, rail_h, rail_thickness)
-			rail.mesh = rail_box
-			rail.global_position = Vector3(c.x, deck_h + rail_h / 2.0, c.z + side * (he.y - rail_thickness / 2.0))
-		else:
-			rail_box.size = Vector3(rail_thickness, rail_h, he.y * 2.0)
-			rail.mesh = rail_box
-			rail.global_position = Vector3(c.x + side * (he.x - rail_thickness / 2.0), deck_h + rail_h / 2.0, c.z)
-		var rail_mat = StandardMaterial3D.new()
-		rail_mat.albedo_color = Color(0.35, 0.32, 0.28)
-		rail_mat.roughness = 0.7
-		rail.material_override = rail_mat
 
 # Sparse grassland ground clutter (grass tufts/rocks/brush) scattered
 # across the WHOLE map's baseline ground - deliberately not per-area-dense

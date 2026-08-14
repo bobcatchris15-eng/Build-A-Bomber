@@ -1,7 +1,9 @@
 """Authored Organic Terrain Assets Generator (Trees, Boulders, Spires, Scree, Cliffs, Grass, Shrubs).
 
-Generates real, beautiful, organic low-poly 3D meshes using Blender's bmesh API and exports
-them as .glb binaries into assets/models/terrain/ for Kitbash Command.
+Generates real, beautiful, organic low-poly 3D meshes with complete UV coordinates,
+tangent normal maps, roughness variation, and PBR material setup using Blender's bmesh
+and shader node API, and exports them as .glb binaries into assets/models/terrain/
+for Kitbash Command.
 
 COORDINATE CONVENTION:
   - In Blender native space: Z is UP, X is RIGHT, Y is FORWARD.
@@ -9,7 +11,7 @@ COORDINATE CONVENTION:
   - export_yup=True automatically maps Blender +Z to Godot +Y (Up) so all models stand perfectly upright.
 
 Run via:
-    blender.exe --background --python tools/blender/build_terrain_props.py
+    "C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe" --background --python tools/blender/build_terrain_props.py
 """
 
 import os
@@ -18,6 +20,7 @@ import math
 import random
 import bpy
 import bmesh
+import numpy as np
 from mathutils import Vector, Matrix
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -49,6 +52,7 @@ def organic_noise_3d(x, y, z, seed=0):
 
 
 def clear_scene():
+    """Purges all objects, meshes, materials, textures, and images between prop builds."""
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete(use_global=False)
     for block in (bpy.data.meshes, bpy.data.materials, bpy.data.textures, bpy.data.images):
@@ -57,26 +61,285 @@ def clear_scene():
                 block.remove(item)
 
 
-def new_material(name, color=(0.5, 0.5, 0.5), metallic=0.0, roughness=0.9):
-    mat = bpy.data.materials.get(name)
-    if mat is None:
-        mat = bpy.data.materials.new(name=name)
+# ---------------------------------------------------------------------------
+# Procedural PBR Texture & Material Engine
+# ---------------------------------------------------------------------------
+
+def make_pbr_image(name, width, height, pixels_rgba, is_data=False):
+    """Creates a Blender image datablock, populates pixel float buffer, sets color space, and packs it."""
+    img = bpy.data.images.new(name, width=width, height=height)
+    img.pixels.foreach_set(np.ascontiguousarray(pixels_rgba, dtype=np.float32).flatten())
+    if is_data:
+        img.colorspace_settings.name = 'Non-Color'
+    img.pack()
+    return img
+
+
+def create_node_material(name, img_albedo, img_rough, img_norm, metallic=0.0, normal_strength=0.85):
+    """Assembles a full PBR Principled BSDF material node tree with Albedo, Roughness, and Normal maps."""
+    mat = bpy.data.materials.new(name=name)
     mat.use_nodes = True
-    bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    if bsdf:
-        base_color_input = bsdf.inputs.get("Base Color")
-        if base_color_input:
-            base_color_input.default_value = (color[0], color[1], color[2], 1.0)
-        roughness_input = bsdf.inputs.get("Roughness")
-        if roughness_input:
-            roughness_input.default_value = roughness
-        metallic_input = bsdf.inputs.get("Metallic")
-        if metallic_input:
-            metallic_input.default_value = metallic
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
+
+    # 1. Albedo map
+    tex_alb = nodes.new("ShaderNodeTexImage")
+    tex_alb.image = img_albedo
+    links.new(tex_alb.outputs["Color"], bsdf.inputs["Base Color"])
+
+    # 2. Roughness map
+    tex_r = nodes.new("ShaderNodeTexImage")
+    tex_r.image = img_rough
+    links.new(tex_r.outputs["Color"], bsdf.inputs["Roughness"])
+
+    # 3. Normal map
+    tex_n = nodes.new("ShaderNodeTexImage")
+    tex_n.image = img_norm
+    norm_map = nodes.new("ShaderNodeNormalMap")
+    norm_map.inputs["Strength"].default_value = normal_strength
+    links.new(tex_n.outputs["Color"], norm_map.inputs["Color"])
+    links.new(norm_map.outputs["Normal"], bsdf.inputs["Normal"])
+
+    # 4. Metallic constant
+    if "Metallic" in bsdf.inputs:
+        bsdf.inputs["Metallic"].default_value = metallic
+
     return mat
 
 
-def finalize_mesh(bm, name, color=(0.42, 0.40, 0.38), metallic=0.05, roughness=0.9, smooth=True, auto_smooth_angle=35):
+def build_bark_pbr_material(name, base_color=(0.28, 0.20, 0.14), roughness=0.92, seed=0, is_birch=False):
+    """Generates procedural bark PBR textures with vertical fibrous striations, knurls, and normal furrowing."""
+    rng = np.random.default_rng(seed)
+    w, h = 128, 128
+    y, x = np.mgrid[0:h, 0:w]
+
+    grain_freq = 14.0
+    grain = np.sin(x * (2.0 * math.pi / w * grain_freq) + np.sin(y * 0.25) * 1.8) * 0.045
+    furrow = np.sin(x * (2.0 * math.pi / w * 3.5) + rng.uniform(-1, 1)) * 0.065
+    noise = rng.normal(0, 0.02, (h, w))
+
+    albedo = np.zeros((h, w, 4), dtype=np.float32)
+    if is_birch:
+        # Birch: pale paper bark with dark horizontal lenticel notches
+        lenticels = np.zeros((h, w), dtype=np.float32)
+        for _ in range(14):
+            ly = rng.integers(6, h - 6)
+            lx = rng.integers(0, w)
+            lw = rng.integers(6, 22)
+            lh = rng.integers(1, 3)
+            for dy in range(-lh, lh + 1):
+                for dx in range(-lw, lw + 1):
+                    px = (lx + dx) % w
+                    py = np.clip(ly + dy, 0, h - 1)
+                    dist = (dx / (lw + 0.1))**2 + (dy / (lh + 0.1))**2
+                    if dist <= 1.0:
+                        lenticels[py, px] = max(lenticels[py, px], (1.0 - dist) * 0.48)
+        for c in range(3):
+            albedo[:, :, c] = np.clip(base_color[c] + grain * 0.4 + noise - lenticels, 0.08, 0.95)
+    else:
+        for c in range(3):
+            albedo[:, :, c] = np.clip(base_color[c] + grain + furrow + noise, 0.03, 0.95)
+    albedo[:, :, 3] = 1.0
+
+    img_albedo = make_pbr_image(name + "_albedo", w, h, albedo, is_data=False)
+
+    rough_val = np.clip(roughness + furrow * 0.8 + noise * 1.4, 0.70, 0.98).astype(np.float32)
+    rough_data = np.dstack([rough_val, rough_val, rough_val, np.ones((h, w), dtype=np.float32)])
+    img_rough = make_pbr_image(name + "_rough", w, h, rough_data, is_data=True)
+
+    height_map = grain * 1.8 + furrow * 2.8 + noise * 1.0
+    dx = np.roll(height_map, -1, axis=1) - np.roll(height_map, 1, axis=1)
+    dy = np.roll(height_map, -1, axis=0) - np.roll(height_map, 1, axis=0)
+    nx = -dx * 3.2
+    ny = -dy * 3.2
+    nz = np.ones((h, w), dtype=np.float32)
+    n_len = np.sqrt(nx*nx + ny*ny + nz*nz)
+    nx /= n_len
+    ny /= n_len
+    nz /= n_len
+
+    norm_data = np.dstack([nx*0.5 + 0.5, ny*0.5 + 0.5, nz*0.5 + 0.5, np.ones((h, w), dtype=np.float32)])
+    img_norm = make_pbr_image(name + "_norm", w, h, norm_data, is_data=True)
+
+    return create_node_material(name, img_albedo, img_rough, img_norm, metallic=0.0, normal_strength=0.85)
+
+
+def build_foliage_pbr_material(name, base_color=(0.18, 0.35, 0.15), roughness=0.86, seed=0):
+    """Generates procedural foliage PBR textures with soft cellular dapple and micro-surface bump."""
+    rng = np.random.default_rng(seed)
+    w, h = 128, 128
+
+    noise1 = rng.normal(0, 0.035, (h, w))
+    noise2 = rng.uniform(-0.025, 0.025, (h, w))
+    dapple = (noise1 + noise2).astype(np.float32)
+
+    albedo = np.zeros((h, w, 4), dtype=np.float32)
+    for c in range(3):
+        c_mult = 1.25 if c == 1 else 0.85
+        albedo[:, :, c] = np.clip(base_color[c] + dapple * c_mult, 0.03, 0.95)
+    albedo[:, :, 3] = 1.0
+    img_albedo = make_pbr_image(name + "_albedo", w, h, albedo, is_data=False)
+
+    rough_val = np.clip(roughness + dapple * 0.8, 0.72, 0.96).astype(np.float32)
+    rough_data = np.dstack([rough_val, rough_val, rough_val, np.ones((h, w), dtype=np.float32)])
+    img_rough = make_pbr_image(name + "_rough", w, h, rough_data, is_data=True)
+
+    dx = np.roll(dapple, -1, axis=1) - np.roll(dapple, 1, axis=1)
+    dy = np.roll(dapple, -1, axis=0) - np.roll(dapple, 1, axis=0)
+    nx = -dx * 2.2
+    ny = -dy * 2.2
+    nz = np.ones((h, w), dtype=np.float32)
+    n_len = np.sqrt(nx*nx + ny*ny + nz*nz)
+    nx /= n_len
+    ny /= n_len
+    nz /= n_len
+
+    norm_data = np.dstack([nx*0.5 + 0.5, ny*0.5 + 0.5, nz*0.5 + 0.5, np.ones((h, w), dtype=np.float32)])
+    img_norm = make_pbr_image(name + "_norm", w, h, norm_data, is_data=True)
+
+    return create_node_material(name, img_albedo, img_rough, img_norm, metallic=0.0, normal_strength=0.70)
+
+
+def build_rock_pbr_material(name, base_color=(0.42, 0.40, 0.38), roughness=0.92, metallic=0.04, seed=0):
+    """Generates procedural stone PBR textures with strata layering, mineral flecks, and chiseled facets."""
+    rng = np.random.default_rng(seed)
+    w, h = 128, 128
+    y, x = np.mgrid[0:h, 0:w]
+
+    strata = np.sin(y * (2.0 * math.pi / 28.0) + rng.uniform(-0.5, 0.5)) * 0.035
+    fine_noise = rng.normal(0, 0.03, (h, w))
+    coarse_noise = rng.uniform(-0.025, 0.025, (h, w))
+    flecks = (rng.uniform(0, 1, (h, w)) > 0.95).astype(np.float32) * 0.07
+
+    albedo = np.zeros((h, w, 4), dtype=np.float32)
+    for c in range(3):
+        albedo[:, :, c] = np.clip(base_color[c] + strata + fine_noise + coarse_noise + flecks, 0.05, 0.95)
+    albedo[:, :, 3] = 1.0
+    img_albedo = make_pbr_image(name + "_albedo", w, h, albedo, is_data=False)
+
+    rough_val = np.clip(roughness + fine_noise * 1.2 - flecks * 2.0, 0.65, 0.98).astype(np.float32)
+    rough_data = np.dstack([rough_val, rough_val, rough_val, np.ones((h, w), dtype=np.float32)])
+    img_rough = make_pbr_image(name + "_rough", w, h, rough_data, is_data=True)
+
+    height_map = strata * 2.5 + fine_noise * 2.5 + coarse_noise * 3.0
+    dx = np.roll(height_map, -1, axis=1) - np.roll(height_map, 1, axis=1)
+    dy = np.roll(height_map, -1, axis=0) - np.roll(height_map, 1, axis=0)
+    nx = -dx * 3.0
+    ny = -dy * 3.0
+    nz = np.ones((h, w), dtype=np.float32)
+    n_len = np.sqrt(nx*nx + ny*ny + nz*nz)
+    nx /= n_len
+    ny /= n_len
+    nz /= n_len
+
+    norm_data = np.dstack([nx*0.5 + 0.5, ny*0.5 + 0.5, nz*0.5 + 0.5, np.ones((h, w), dtype=np.float32)])
+    img_norm = make_pbr_image(name + "_norm", w, h, norm_data, is_data=True)
+
+    return create_node_material(name, img_albedo, img_rough, img_norm, metallic=metallic, normal_strength=0.90)
+
+
+def build_grass_pbr_material(name, base_color=(0.22, 0.38, 0.15), roughness=0.88, seed=0):
+    """Generates procedural grass blade PBR textures with longitudinal veining and tip gradients."""
+    rng = np.random.default_rng(seed)
+    w, h = 128, 128
+    y, x = np.mgrid[0:h, 0:w]
+
+    blade_vein = np.sin(x * (2.0 * math.pi / 8.0)) * 0.035
+    length_grad = (y / float(h) - 0.5) * 0.05
+    noise = rng.normal(0, 0.02, (h, w))
+
+    albedo = np.zeros((h, w, 4), dtype=np.float32)
+    for c in range(3):
+        albedo[:, :, c] = np.clip(base_color[c] + blade_vein + length_grad + noise, 0.05, 0.95)
+    albedo[:, :, 3] = 1.0
+    img_albedo = make_pbr_image(name + "_albedo", w, h, albedo, is_data=False)
+
+    rough_val = np.clip(roughness + noise * 0.8, 0.75, 0.95).astype(np.float32)
+    rough_data = np.dstack([rough_val, rough_val, rough_val, np.ones((h, w), dtype=np.float32)])
+    img_rough = make_pbr_image(name + "_rough", w, h, rough_data, is_data=True)
+
+    height_map = blade_vein * 2.2 + noise * 1.2
+    dx = np.roll(height_map, -1, axis=1) - np.roll(height_map, 1, axis=1)
+    dy = np.roll(height_map, -1, axis=0) - np.roll(height_map, 1, axis=0)
+    nx = -dx * 2.5
+    ny = -dy * 2.5
+    nz = np.ones((h, w), dtype=np.float32)
+    n_len = np.sqrt(nx*nx + ny*ny + nz*nz)
+    nx /= n_len
+    ny /= n_len
+    nz /= n_len
+
+    norm_data = np.dstack([nx*0.5 + 0.5, ny*0.5 + 0.5, nz*0.5 + 0.5, np.ones((h, w), dtype=np.float32)])
+    img_norm = make_pbr_image(name + "_norm", w, h, norm_data, is_data=True)
+
+    return create_node_material(name, img_albedo, img_rough, img_norm, metallic=0.0, normal_strength=0.70)
+
+
+def build_flower_pbr_material(name, flower_color=(0.92, 0.78, 0.15), roughness=0.82, seed=0):
+    """Generates procedural wildflower petal PBR textures with radial stamen shading."""
+    rng = np.random.default_rng(seed)
+    w, h = 128, 128
+    y, x = np.mgrid[0:h, 0:w]
+
+    cx, cy = w / 2.0, h / 2.0
+    r = np.sqrt((x - cx)**2 + (y - cy)**2) / (w * 0.5)
+    angle = np.arctan2(y - cy, x - cx)
+    petals = np.sin(angle * 6.0) * 0.05 * (1.0 - np.clip(r, 0, 1))
+    center_glow = np.clip(1.0 - r * 2.0, 0, 1) * 0.08
+    noise = rng.normal(0, 0.015, (h, w))
+
+    albedo = np.zeros((h, w, 4), dtype=np.float32)
+    for c in range(3):
+        albedo[:, :, c] = np.clip(flower_color[c] + petals + noise - center_glow * (0.2 if c == 2 else -0.1), 0.05, 0.98)
+    albedo[:, :, 3] = 1.0
+    img_albedo = make_pbr_image(name + "_albedo", w, h, albedo, is_data=False)
+
+    rough_val = np.clip(roughness + noise * 0.6, 0.70, 0.90).astype(np.float32)
+    rough_data = np.dstack([rough_val, rough_val, rough_val, np.ones((h, w), dtype=np.float32)])
+    img_rough = make_pbr_image(name + "_rough", w, h, rough_data, is_data=True)
+
+    height_map = petals * 3.0 + center_glow * 2.0 + noise
+    dx = np.roll(height_map, -1, axis=1) - np.roll(height_map, 1, axis=1)
+    dy = np.roll(height_map, -1, axis=0) - np.roll(height_map, 1, axis=0)
+    nx = -dx * 2.5
+    ny = -dy * 2.5
+    nz = np.ones((h, w), dtype=np.float32)
+    n_len = np.sqrt(nx*nx + ny*ny + nz*nz)
+    nx /= n_len
+    ny /= n_len
+    nz /= n_len
+
+    norm_data = np.dstack([nx*0.5 + 0.5, ny*0.5 + 0.5, nz*0.5 + 0.5, np.ones((h, w), dtype=np.float32)])
+    img_norm = make_pbr_image(name + "_norm", w, h, norm_data, is_data=True)
+
+    return create_node_material(name, img_albedo, img_rough, img_norm, metallic=0.0, normal_strength=0.60)
+
+
+# ---------------------------------------------------------------------------
+# Mesh Finalization & UV Unwrapping
+# ---------------------------------------------------------------------------
+
+def unwrap_mesh(obj):
+    """Applies smart UV projection across all faces to provide continuous non-overlapping UV coordinates."""
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.select_all(action='DESELECT')
+    obj.select_set(True)
+
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.uv.smart_project(
+        angle_limit=math.radians(66.0),
+        island_margin=0.02,
+        area_weight=0.0,
+        correct_aspect=True,
+        scale_to_bounds=False
+    )
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+
+def finalize_mesh(bm, name, mat_builder, smooth=True, auto_smooth_angle=35):
+    """Finalizes a single-material bmesh into an object with UV unwrapping and PBR material."""
     mesh_data = bpy.data.meshes.new(name + "_mesh")
     bm.to_mesh(mesh_data)
     bm.free()
@@ -96,13 +359,15 @@ def finalize_mesh(bm, name, color=(0.42, 0.40, 0.38), metallic=0.05, roughness=0
     else:
         bpy.ops.object.shade_flat()
 
-    mat = new_material(name + "_mat", color=color, metallic=metallic, roughness=roughness)
+    unwrap_mesh(obj)
+
+    mat = mat_builder(name + "_mat")
     obj.data.materials.append(mat)
     return obj
 
 
-def finalize_mesh_dual(bm, name, mat0_color=(0.32, 0.22, 0.15), mat1_color=(0.18, 0.35, 0.15),
-                       mat0_roughness=0.95, mat1_roughness=0.85, smooth=True, auto_smooth_angle=35):
+def finalize_mesh_dual(bm, name, mat0_builder, mat1_builder, smooth=True, auto_smooth_angle=35):
+    """Finalizes a dual-material bmesh into an object with UV unwrapping and both PBR materials."""
     mesh_data = bpy.data.meshes.new(name + "_mesh")
     bm.to_mesh(mesh_data)
     bm.free()
@@ -122,14 +387,17 @@ def finalize_mesh_dual(bm, name, mat0_color=(0.32, 0.22, 0.15), mat1_color=(0.18
     else:
         bpy.ops.object.shade_flat()
 
-    mat0 = new_material(name + "_mat0", color=mat0_color, roughness=mat0_roughness)
-    mat1 = new_material(name + "_mat1", color=mat1_color, roughness=mat1_roughness)
+    unwrap_mesh(obj)
+
+    mat0 = mat0_builder(name + "_mat0")
+    mat1 = mat1_builder(name + "_mat1")
     obj.data.materials.append(mat0)
     obj.data.materials.append(mat1)
     return obj
 
 
 def export_glb(obj, filepath):
+    """Exports the active object to standard GLB with embedded PBR textures and UV layers."""
     bpy.ops.object.select_all(action='DESELECT')
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
@@ -265,7 +533,7 @@ def build_organic_tree(name, seed=0):
     else:
         species = 5  # Juvenile Sapling
 
-    # Natural palettes
+    # Natural palettes sitting comfortably below unit paint saturation
     bark_palettes = [
         (0.28, 0.20, 0.14),  # Spruce brown
         (0.24, 0.18, 0.12),  # Fir dark bark
@@ -431,7 +699,9 @@ def build_organic_tree(name, seed=0):
     if min_z != 0.0:
         bmesh.ops.translate(bm, verts=bm.verts, vec=(0, 0, -min_z))
 
-    return finalize_mesh_dual(bm, name, mat0_color=trunk_col, mat1_color=canopy_col, smooth=True, auto_smooth_angle=40)
+    mat0_fn = lambda mat_name: build_bark_pbr_material(mat_name, base_color=trunk_col, roughness=0.92, seed=seed, is_birch=(species == 3))
+    mat1_fn = lambda mat_name: build_foliage_pbr_material(mat_name, base_color=canopy_col, roughness=0.86, seed=seed + 10)
+    return finalize_mesh_dual(bm, name, mat0_builder=mat0_fn, mat1_builder=mat1_fn, smooth=True, auto_smooth_angle=40)
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +742,8 @@ def build_organic_boulder(name, radius=1.0, seed=0, style="weathered"):
     bmesh.ops.translate(bm, verts=bm.verts, vec=(0, 0, -min_z))
 
     col = (rng.uniform(0.38, 0.46), rng.uniform(0.37, 0.44), rng.uniform(0.35, 0.42))
-    return finalize_mesh(bm, name, color=col, metallic=0.05, roughness=0.92, smooth=True, auto_smooth_angle=42)
+    mat_fn = lambda mat_name: build_rock_pbr_material(mat_name, base_color=col, roughness=0.92, metallic=0.04, seed=seed)
+    return finalize_mesh(bm, name, mat_builder=mat_fn, smooth=True, auto_smooth_angle=42)
 
 
 def build_organic_rock_spire(name, seed=0):
@@ -497,7 +768,6 @@ def build_organic_rock_spire(name, seed=0):
             theta = (2.0 * math.pi * i) / segments
             cx = math.cos(theta) * r
             cy = math.sin(theta) * r
-            # Organic displacement
             disp = organic_noise_3d(cx, cy, z, seed=seed) * 0.3
             tier_verts.append(bm.verts.new((cx * (1.0 + disp), cy * (1.0 + disp), z)))
         
@@ -517,7 +787,8 @@ def build_organic_rock_spire(name, seed=0):
     bmesh.ops.translate(bm, verts=bm.verts, vec=(0, 0, -min_z))
 
     col = (0.42, 0.40, 0.37)
-    return finalize_mesh(bm, name, color=col, metallic=0.06, roughness=0.90, smooth=True, auto_smooth_angle=38)
+    mat_fn = lambda mat_name: build_rock_pbr_material(mat_name, base_color=col, roughness=0.90, metallic=0.05, seed=seed)
+    return finalize_mesh(bm, name, mat_builder=mat_fn, smooth=True, auto_smooth_angle=38)
 
 
 def build_organic_pebble_cluster(name, seed=0):
@@ -535,7 +806,6 @@ def build_organic_pebble_cluster(name, seed=0):
 
         ret = bmesh.ops.create_icosphere(bm, subdivisions=2, radius=p_rad)
         p_verts = ret["verts"]
-        # Organic scale & noise
         bmesh.ops.scale(bm, verts=p_verts, vec=(rng.uniform(0.8, 1.3), rng.uniform(0.8, 1.3), rng.uniform(0.5, 0.8)))
         for v in p_verts:
             n = organic_noise_3d(v.co.x, v.co.y, v.co.z, seed=seed + i * 5)
@@ -546,7 +816,8 @@ def build_organic_pebble_cluster(name, seed=0):
     bmesh.ops.translate(bm, verts=bm.verts, vec=(0, 0, -min_z))
 
     col = (0.42, 0.40, 0.38)
-    return finalize_mesh(bm, name, color=col, metallic=0.05, roughness=0.95, smooth=True, auto_smooth_angle=45)
+    mat_fn = lambda mat_name: build_rock_pbr_material(mat_name, base_color=col, roughness=0.94, metallic=0.04, seed=seed)
+    return finalize_mesh(bm, name, mat_builder=mat_fn, smooth=True, auto_smooth_angle=45)
 
 
 def build_organic_cliff_face(name, seed=0, width=8.0, height=5.5, depth=2.8):
@@ -554,17 +825,14 @@ def build_organic_cliff_face(name, seed=0, width=8.0, height=5.5, depth=2.8):
     rng = random.Random(seed)
     bm = bmesh.new()
 
-    # Subdivided grid front face with horizontal bedding strata
     nx, nz = 12, 8
     grid_verts = []
     for iz in range(nz + 1):
         z = (float(iz) / nz) * height
-        # Strata overhang rhythm
         strata_bulge = 0.4 * math.sin((z / height) * math.pi * 4.0)
         row = []
         for ix in range(nx + 1):
             x = (float(ix) / nx - 0.5) * width
-            # Front face depth with multi-octave relief
             disp = organic_noise_3d(x, 0, z, seed=seed) * 0.6
             y = depth * 0.5 + strata_bulge + disp
             v = bm.verts.new((x, y, z))
@@ -572,7 +840,6 @@ def build_organic_cliff_face(name, seed=0, width=8.0, height=5.5, depth=2.8):
         grid_verts.append(row)
 
     bm.verts.ensure_lookup_table()
-    # Front quad faces
     for iz in range(nz):
         for ix in range(nx):
             v0 = grid_verts[iz][ix]
@@ -581,26 +848,24 @@ def build_organic_cliff_face(name, seed=0, width=8.0, height=5.5, depth=2.8):
             v3 = grid_verts[iz + 1][ix]
             bm.faces.new([v0, v1, v2, v3])
 
-    # Rear flat backing vertices
     back_v0 = bm.verts.new((-width * 0.5, -depth * 0.5, 0))
     back_v1 = bm.verts.new((width * 0.5, -depth * 0.5, 0))
     back_v2 = bm.verts.new((width * 0.5, -depth * 0.5, height))
     back_v3 = bm.verts.new((-width * 0.5, -depth * 0.5, height))
     bm.faces.new([back_v0, back_v3, back_v2, back_v1])
 
-    # Connect top, bottom, and side perimeter faces
     for ix in range(nx):
         bm.faces.new([grid_verts[0][ix + 1], grid_verts[0][ix], back_v0, back_v1])
         bm.faces.new([grid_verts[nz][ix], grid_verts[nz][ix + 1], back_v2, back_v3])
 
-    # Fracture chisel cuts for sharp joint edges
     fracture_mesh_z(bm, cuts=6, radius=max(width, height) * 0.6, rng=rng, bias_horizontal=0.25)
 
     min_z = min(v.co.z for v in bm.verts)
     bmesh.ops.translate(bm, verts=bm.verts, vec=(0, 0, -min_z))
 
     col = (0.38, 0.36, 0.34)
-    return finalize_mesh(bm, name, color=col, metallic=0.06, roughness=0.92, smooth=True, auto_smooth_angle=36)
+    mat_fn = lambda mat_name: build_rock_pbr_material(mat_name, base_color=col, roughness=0.92, metallic=0.05, seed=seed)
+    return finalize_mesh(bm, name, mat_builder=mat_fn, smooth=True, auto_smooth_angle=36)
 
 
 def build_organic_cliff_corner(name, seed=0, size=6.0, height=5.0):
@@ -610,7 +875,6 @@ def build_organic_cliff_corner(name, seed=0, size=6.0, height=5.0):
 
     bmesh.ops.create_cube(bm, size=1.0)
     bmesh.ops.scale(bm, verts=bm.verts, vec=(size, size, height))
-    # Deform with organic 3D noise
     for v in bm.verts:
         n = organic_noise_3d(v.co.x, v.co.y, v.co.z, seed=seed)
         v.co += v.co.normalized() * (n * 0.45)
@@ -621,7 +885,8 @@ def build_organic_cliff_corner(name, seed=0, size=6.0, height=5.0):
     bmesh.ops.translate(bm, verts=bm.verts, vec=(0, 0, -min_z))
 
     col = (0.39, 0.37, 0.35)
-    return finalize_mesh(bm, name, color=col, metallic=0.06, roughness=0.92, smooth=True, auto_smooth_angle=36)
+    mat_fn = lambda mat_name: build_rock_pbr_material(mat_name, base_color=col, roughness=0.92, metallic=0.05, seed=seed)
+    return finalize_mesh(bm, name, mat_builder=mat_fn, smooth=True, auto_smooth_angle=36)
 
 
 def build_organic_cliff_strata(name, seed=0, length=10.0, height=1.4, depth=2.0):
@@ -642,7 +907,8 @@ def build_organic_cliff_strata(name, seed=0, length=10.0, height=1.4, depth=2.0)
     bmesh.ops.translate(bm, verts=bm.verts, vec=(0, 0, -min_z))
 
     col = (0.40, 0.38, 0.36)
-    return finalize_mesh(bm, name, color=col, metallic=0.05, roughness=0.94, smooth=True, auto_smooth_angle=38)
+    mat_fn = lambda mat_name: build_rock_pbr_material(mat_name, base_color=col, roughness=0.94, metallic=0.04, seed=seed)
+    return finalize_mesh(bm, name, mat_builder=mat_fn, smooth=True, auto_smooth_angle=38)
 
 
 # ---------------------------------------------------------------------------
@@ -700,8 +966,17 @@ def build_organic_grass_tuft(name, seed=0, style="prairie"):
             except ValueError:
                 pass
 
-    col = (0.22, 0.38, 0.15)
-    return finalize_mesh(bm, name, color=col, metallic=0.0, roughness=0.9, smooth=True)
+    col_map = {
+        "prairie": (0.22, 0.38, 0.15),
+        "dense": (0.18, 0.34, 0.13),
+        "fescue": (0.26, 0.36, 0.18),
+        "windswept": (0.24, 0.35, 0.14),
+        "tussock": (0.28, 0.34, 0.16),
+        "tall": (0.20, 0.36, 0.14)
+    }
+    col = col_map.get(style, (0.22, 0.38, 0.15))
+    mat_fn = lambda mat_name: build_grass_pbr_material(mat_name, base_color=col, roughness=0.88, seed=seed)
+    return finalize_mesh(bm, name, mat_builder=mat_fn, smooth=True)
 
 
 def build_organic_shrub(name, seed=0, style="dense"):
@@ -738,7 +1013,9 @@ def build_organic_shrub(name, seed=0, style="dense"):
 
     stem_col = (0.28, 0.20, 0.14)
     leaf_col = (0.18, 0.34, 0.14)
-    return finalize_mesh_dual(bm, name, mat0_color=stem_col, mat1_color=leaf_col, smooth=True)
+    mat0_fn = lambda mat_name: build_bark_pbr_material(mat_name, base_color=stem_col, roughness=0.92, seed=seed)
+    mat1_fn = lambda mat_name: build_foliage_pbr_material(mat_name, base_color=leaf_col, roughness=0.86, seed=seed + 1)
+    return finalize_mesh_dual(bm, name, mat0_builder=mat0_fn, mat1_builder=mat1_fn, smooth=True)
 
 
 def build_organic_reeds(name, seed=0):
@@ -764,7 +1041,9 @@ def build_organic_reeds(name, seed=0):
             for f in head:
                 f.material_index = 1
 
-    return finalize_mesh_dual(bm, name, mat0_color=(0.24, 0.38, 0.16), mat1_color=(0.28, 0.16, 0.10), smooth=True)
+    mat0_fn = lambda mat_name: build_grass_pbr_material(mat_name, base_color=(0.24, 0.38, 0.16), roughness=0.90, seed=seed)
+    mat1_fn = lambda mat_name: build_bark_pbr_material(mat_name, base_color=(0.28, 0.16, 0.10), roughness=0.95, seed=seed + 2)
+    return finalize_mesh_dual(bm, name, mat0_builder=mat0_fn, mat1_builder=mat1_fn, smooth=True)
 
 
 def build_organic_wildflower(name, seed=0, flower_color=(0.92, 0.78, 0.15)):
@@ -795,7 +1074,9 @@ def build_organic_wildflower(name, seed=0, flower_color=(0.92, 0.78, 0.15)):
         for f in b_faces:
             f.material_index = 1
 
-    return finalize_mesh_dual(bm, name, mat0_color=(0.22, 0.38, 0.16), mat1_color=flower_color, smooth=True)
+    mat0_fn = lambda mat_name: build_grass_pbr_material(mat_name, base_color=(0.22, 0.38, 0.16), roughness=0.88, seed=seed)
+    mat1_fn = lambda mat_name: build_flower_pbr_material(mat_name, flower_color=flower_color, roughness=0.82, seed=seed + 3)
+    return finalize_mesh_dual(bm, name, mat0_builder=mat0_fn, mat1_builder=mat1_fn, smooth=True)
 
 
 # ---------------------------------------------------------------------------
