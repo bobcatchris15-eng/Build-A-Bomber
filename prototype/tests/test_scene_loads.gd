@@ -25,6 +25,7 @@ const SCENES := [
 	"res://scenes/OperationsSetup.tscn",
 	"res://scenes/OperationsDraft.tscn",
 	"res://scenes/HullBuilder.tscn",
+	"res://scenes/Livery.tscn",
 	"res://scenes/Loading.tscn",
 ]
 

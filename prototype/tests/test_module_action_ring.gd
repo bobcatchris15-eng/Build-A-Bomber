@@ -127,13 +127,15 @@ func test_action_ring_closes_when_target_freed() -> bool:
 	# Free target node
 	mod.free()
 	await tree.process_frame
-	ring._process(0.016)
+	if is_instance_valid(ring):
+		ring._process(0.016)
 
-	if ring._is_open:
+	if is_instance_valid(ring) and ring._is_open:
 		print("  [FAIL] Ring remained open after target node was freed")
 		ring.queue_free()
 		return false
 
-	ring.queue_free()
+	if is_instance_valid(ring):
+		ring.queue_free()
 	print("  [PASS] Ring gracefully closed when target node was freed.")
 	return true

@@ -4,6 +4,7 @@ const TerrainGreeblesScript = preload("res://scripts/terrain_greebles.gd")
 const WorldScaleScript = preload("res://scripts/world_scale.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const AmbientScatterScript = preload("res://scripts/ambient_scatter.gd")
+const TerrainVisualScatterScript = preload("res://scripts/terrain_visual_scatter.gd")
 # Turns a MapCatalog map Dictionary into: baked NavigationServer3D ground/
 # water maps, decorative terrain meshes (water planes, rock-cluster
 # obstacles), and pure query functions (terrain_height_at / is_position_
@@ -552,6 +553,9 @@ static func height_at(map_def: Dictionary, x: float, z: float) -> float:
 	for blob in map_def.get("water_blobs", []):
 		h += _water_blob_height_contribution(blob, x, z)
 	return h
+
+static func slope_at(map_def: Dictionary, x: float, z: float) -> float:
+	return _slope_at(map_def, x, z)
 
 static func _slope_at(map_def: Dictionary, x: float, z: float) -> float:
 	const D = 0.5
@@ -1352,6 +1356,9 @@ static func spawn_visuals(map_def: Dictionary, parent: Node3D):
 	var scatter := AmbientScatterScript.get_or_create(parent)
 	if scatter != null:
 		scatter.commit()
+	var visual_scatter = TerrainVisualScatterScript.get_or_create(parent)
+	if visual_scatter != null:
+		visual_scatter.scatter_all(map_def, prop_scale)
 	_spawn_slope_rocks(map_def, parent)
 
 # Real baked ground textures (see tools/generate_terrain_textures.gd) tiled

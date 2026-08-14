@@ -25,6 +25,7 @@
 	"modules": [
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -43,18 +44,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.921476185321808,
+				"y": 0.921476185321808,
+				"z": 0.921476185321808
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 44,
+				"cost_metal": 36,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 110.0
+				"hp": 82.5,
+				"weight": 86.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.0,
@@ -85,6 +86,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -103,18 +105,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.921476185321808,
+				"y": 0.921476185321808,
+				"z": 0.921476185321808
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 44,
+				"cost_metal": 36,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 110.0
+				"hp": 82.5,
+				"weight": 86.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.0428051948547363,
@@ -145,6 +147,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -163,18 +166,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.921476185321808,
+				"y": 0.921476185321808,
+				"z": 0.921476185321808
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 44,
+				"cost_metal": 36,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 110.0
+				"hp": 82.5,
+				"weight": 86.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.0923735499382019,
@@ -205,6 +208,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -223,18 +227,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.921476185321808,
+				"y": 0.921476185321808,
+				"z": 0.921476185321808
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 44,
+				"cost_metal": 36,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 110.0
+				"hp": 82.5,
+				"weight": 86.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.00675201416015625,
@@ -265,6 +269,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -283,18 +288,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.921476185321808,
+				"y": 0.921476185321808,
+				"z": 0.921476185321808
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 44,
+				"cost_metal": 36,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 110.0
+				"hp": 82.5,
+				"weight": 86.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.00676321983337402,
@@ -325,6 +330,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -343,18 +349,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.921476185321808,
+				"y": 0.921476185321808,
+				"z": 0.921476185321808
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 44,
+				"cost_metal": 36,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 110.0
+				"hp": 82.5,
+				"weight": 86.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.0923947691917419,
@@ -385,6 +391,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -403,18 +410,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.921476185321808,
+				"y": 0.921476185321808,
+				"z": 0.921476185321808
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 44,
+				"cost_metal": 36,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 110.0
+				"hp": 82.5,
+				"weight": 86.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.0428264141082764,
@@ -445,6 +452,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -463,18 +471,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.921476185321808,
+				"y": 0.921476185321808,
+				"z": 0.921476185321808
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 44,
+				"cost_metal": 36,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 110.0
+				"hp": 82.5,
+				"weight": 86.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.128447949886322,
@@ -504,7 +512,11 @@
 			"yaw_offset": 0.0
 		},
 		{
-			"facet": "",
+			"facet": "front",
+			"facet_size": {
+				"x": 3.5206151008606,
+				"y": 1.32199096679688
+			},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -513,19 +525,19 @@
 			"mount_style": "",
 			"name": "Resource Harvester",
 			"position": {
-				"x": 0.0,
-				"y": 0.801510691642761,
-				"z": 0.75
+				"x": -0.0000484585762023926,
+				"y": -0.168753460049629,
+				"z": -3.81187534332275
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": -0.291768461465836,
 				"y": 0.0,
 				"z": 0.0
 			},
 			"scale": {
 				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"y": 0.999999940395355,
+				"z": 0.999999940395355
 			},
 			"scale_flip_x": false,
 			"sponson": false,
@@ -542,6 +554,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -551,7 +564,7 @@
 			"name": "Resource Bay",
 			"position": {
 				"x": -1.0,
-				"y": 0.801510691642761,
+				"y": 0.801511168479919,
 				"z": 3.0
 			},
 			"rotation": {
@@ -579,6 +592,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -588,7 +602,7 @@
 			"name": "Resource Bay",
 			"position": {
 				"x": 1.0,
-				"y": 0.801510691642761,
+				"y": 0.801511168479919,
 				"z": 3.0
 			},
 			"rotation": {
@@ -616,6 +630,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -653,6 +668,7 @@
 		},
 		{
 			"facet": "top",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 0.96582156419754,
@@ -662,7 +678,7 @@
 			"name": "Heavy Machine Gun",
 			"position": {
 				"x": 1.0,
-				"y": -0.0272713899612427,
+				"y": -0.0272722244262695,
 				"z": -3.0
 			},
 			"rotation": {

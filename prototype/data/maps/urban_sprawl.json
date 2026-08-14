@@ -1,9 +1,9 @@
 {
- "description": "A city block grid fills the middle of the map - real buildings that block movement AND sightlines, not just decoration. Fight street to street; a contested resource sits in the central plaza, hidden from both bases until someone scouts it.",
+ "description": "Metropolis Ruins: A dense grid of ruined multi-story structures forms tight urban canyons that block both movement and line-of-sight. Fight block-by-block through narrow streets; a rich crystal cache sits in the central plaza, shielded by heavy concrete ruins.",
  "ground_color": [
-  0.200000002980232,
-  0.200000002980232,
-  0.219999998807907
+  0.22,
+  0.22,
+  0.24
  ],
  "map_half_extents": 204.0,
  "name": "Urban Sprawl",
@@ -22,37 +22,11 @@
    "type": "building"
   },
   {
-   "building_height": 7.0,
-   "center": [
-    0.0,
-    0.0,
-    -60.0
-   ],
-   "half_extents": [
-    15.0,
-    15.0
-   ],
-   "type": "building"
-  },
-  {
-   "building_height": 5.0,
-   "center": [
-    60.0,
-    0.0,
-    -60.0
-   ],
-   "half_extents": [
-    15.0,
-    15.0
-   ],
-   "type": "building"
-  },
-  {
    "building_height": 8.0,
    "center": [
-    -60.0,
     0.0,
-    0.0
+    0.0,
+    -60.0
    ],
    "half_extents": [
     15.0,
@@ -65,6 +39,19 @@
    "center": [
     60.0,
     0.0,
+    -60.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  },
+  {
+   "building_height": 9.0,
+   "center": [
+    -60.0,
+    0.0,
     0.0
    ],
    "half_extents": [
@@ -74,7 +61,20 @@
    "type": "building"
   },
   {
-   "building_height": 5.0,
+   "building_height": 9.0,
+   "center": [
+    60.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    15.0,
+    15.0
+   ],
+   "type": "building"
+  },
+  {
+   "building_height": 6.0,
    "center": [
     -60.0,
     0.0,
@@ -87,7 +87,7 @@
    "type": "building"
   },
   {
-   "building_height": 7.0,
+   "building_height": 8.0,
    "center": [
     0.0,
     0.0,
@@ -225,9 +225,9 @@
   {
    "amount": 1400,
    "position": [
-    -79.3923034667969,
+    -80.0,
     0.0,
-    6.0
+    0.0
    ],
    "type": "oil"
   }
@@ -241,8 +241,8 @@
     150.0
    ],
    "half_extents": [
-    15.0,
-    15.0
+    16.0,
+    16.0
    ]
   },
   {
@@ -253,8 +253,8 @@
     -150.0
    ],
    "half_extents": [
-    15.0,
-    15.0
+    16.0,
+    16.0
    ]
   }
  ],
@@ -262,14 +262,14 @@
  "spawns": [
   {
    "factory": [
-    -30.0,
+    -28.0,
     0.0,
-    132.0
+    136.0
    ],
    "harvester": [
     18.0,
     1.5,
-    108.0
+    118.0
    ],
    "hq": [
     0.0,
@@ -278,21 +278,21 @@
    ],
    "id": "player",
    "refinery": [
-    27.0,
+    24.0,
     0.0,
-    126.0
+    130.0
    ]
   },
   {
    "factory": [
-    30.0,
+    28.0,
     0.0,
-    -132.0
+    -136.0
    ],
    "harvester": [
     -18.0,
     1.5,
-    -108.0
+    -118.0
    ],
    "hq": [
     0.0,
@@ -301,53 +301,47 @@
    ],
    "id": "enemy",
    "refinery": [
-    -27.0,
+    -24.0,
     0.0,
-    -126.0
+    -130.0
    ]
+  }
+ ],
+ "surface_zones": [
+  {
+   "center": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    40.0,
+    40.0
+   ],
+   "surface_type": "gravel"
   }
  ],
  "water_areas": [],
  "hills": [
   {
    "center": [
-    -140,
+    -120,
     0,
-    75
+    60
    ],
-   "radius": 16,
    "falloff": 20,
-   "height": 8
+   "height": 6,
+   "radius": 14
   },
   {
    "center": [
-    -140,
+    120,
     0,
-    -75
+    -60
    ],
-   "radius": 16,
    "falloff": 20,
-   "height": 8
-  },
-  {
-   "center": [
-    140,
-    0,
-    75
-   ],
-   "radius": 13,
-   "falloff": 17,
-   "height": -6
-  },
-  {
-   "center": [
-    140,
-    0,
-    -75
-   ],
-   "radius": 13,
-   "falloff": 17,
-   "height": -6
+   "height": 6,
+   "radius": 14
   }
  ]
 }

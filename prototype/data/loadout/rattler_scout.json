@@ -25,6 +25,7 @@
 	"modules": [
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -43,18 +44,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.901418685913086,
+				"y": 0.901418685913086,
+				"z": 0.901418685913086
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 18,
+				"cost_metal": 14,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 45.0
+				"hp": 78.5,
+				"weight": 33.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.123686671257019,
@@ -85,6 +86,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -103,18 +105,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.901418685913086,
+				"y": 0.901418685913086,
+				"z": 0.901418685913086
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 18,
+				"cost_metal": 14,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 45.0
+				"hp": 78.5,
+				"weight": 33.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.00649112462997437,
@@ -145,6 +147,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -163,18 +166,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.901418685913086,
+				"y": 0.901418685913086,
+				"z": 0.901418685913086
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 18,
+				"cost_metal": 14,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 45.0
+				"hp": 78.5,
+				"weight": 33.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.00651335716247559,
@@ -205,6 +208,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -223,18 +227,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 1.0,
-				"y": 1.0,
-				"z": 1.0
+				"x": 0.901418685913086,
+				"y": 0.901418685913086,
+				"z": 0.901418685913086
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 18,
+				"cost_metal": 14,
 				"dps": 0.0,
-				"hp": 100.0,
-				"weight": 45.0
+				"hp": 78.5,
+				"weight": 33.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.12370890378952,
@@ -265,6 +269,7 @@
 		},
 		{
 			"facet": "top",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 0.99547153711319,
@@ -274,7 +279,7 @@
 			"name": "Heavy Machine Gun",
 			"position": {
 				"x": 0.0,
-				"y": -0.0587800741195679,
+				"y": -0.0587804317474365,
 				"z": -1.0
 			},
 			"rotation": {
@@ -302,6 +307,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -311,7 +317,7 @@
 			"name": "Radar Mast Suite",
 			"position": {
 				"x": 0.0,
-				"y": 0.125349760055542,
+				"y": 0.1253502368927,
 				"z": 1.0
 			},
 			"rotation": {

@@ -21,6 +21,7 @@
 	"modules": [
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -71,6 +72,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -121,6 +123,7 @@
 		},
 		{
 			"facet": "top",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -158,6 +161,7 @@
 		},
 		{
 			"facet": "top",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 0.997561633586884,

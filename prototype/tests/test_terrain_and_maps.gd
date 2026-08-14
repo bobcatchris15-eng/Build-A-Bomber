@@ -922,6 +922,8 @@ func test_b3_maps_are_json_and_byte_identical_to_the_old_const() -> bool:
 	expected_rest.erase("hills")
 	loaded_rest.erase("base_zones")
 	expected_rest.erase("base_zones")
+	loaded_rest.erase("surface_zones")
+	expected_rest.erase("surface_zones")
 
 	if loaded_rest != expected_rest:
 		print("  [FAIL] JSON-loaded lake_crossing does not deep-equal the checked-in snapshot of the old const's values.")
@@ -3064,6 +3066,143 @@ func test_ambient_ore_does_not_regrow() -> bool:
 		return false
 	node.queue_free()
 	print("  [PASS] Ambient ore stays at 0 and out of resource_nodes after a full harvest.")
+	return true
+
+
+func test_visual_scatter_creates_multimesh_batches_with_shadows_off() -> bool:
+	print("Running Test Suite: Visual Scatter Creates MultiMesh Batches with Shadows Off...")
+	var TerrainVisualScatterScript = preload("res://scripts/terrain_visual_scatter.gd")
+	var holder = Node3D.new()
+	root.add_child(holder)
+	var scatter = TerrainVisualScatterScript.get_or_create(holder)
+	var map_def = {
+		"name": "test_scatter_perf",
+		"map_half_extents": 100.0,
+		"ground_color": [0.25, 0.25, 0.25],
+		"water_areas": [],
+		"base_zones": [{"id": "a", "center": Vector3(0, 0, 0), "half_extents": Vector2(10, 10)}],
+		"spawns": [{"id": "player", "hq": Vector3(0, 0, 0)}],
+		"resource_nodes": []
+	}
+	scatter.scatter_all(map_def, 1.0)
+	await tree.process_frame
+	
+	var batches: Array = []
+	var total_instances = 0
+	for child in scatter.get_children():
+		if child is MultiMeshInstance3D:
+			batches.append(child)
+			if child.multimesh != null:
+				total_instances += child.multimesh.instance_count
+			if child.cast_shadow != GeometryInstance3D.SHADOW_CASTING_SETTING_OFF:
+				print("  [FAIL] MultiMeshInstance3D '", child.name, "' must have cast_shadow=OFF for performance.")
+				holder.queue_free()
+				return false
+				
+	if batches.is_empty():
+		print("  [FAIL] Visual scatter produced no MultiMeshInstance3D batches.")
+		holder.queue_free()
+		return false
+	if total_instances < 500:
+		print("  [FAIL] Visual scatter should produce thousands of instances across the map, got ", total_instances)
+		holder.queue_free()
+		return false
+		
+	holder.queue_free()
+	print("  [PASS] Visual scatter created ", batches.size(), " MultiMesh batches with ", total_instances, " instances and shadows OFF.")
+	return true
+
+
+func test_visual_scatter_is_pure_visual_without_colliders_or_groups() -> bool:
+	print("Running Test Suite: Visual Scatter Is Pure Visual (No Collision, No Resource Group)...")
+	var TerrainVisualScatterScript = preload("res://scripts/terrain_visual_scatter.gd")
+	var holder = Node3D.new()
+	root.add_child(holder)
+	var scatter = TerrainVisualScatterScript.get_or_create(holder)
+	var map_def = {
+		"name": "test_scatter_pure_visual",
+		"map_half_extents": 80.0,
+		"ground_color": [0.25, 0.25, 0.25],
+		"water_areas": [],
+		"base_zones": [],
+		"spawns": [],
+		"resource_nodes": []
+	}
+	scatter.scatter_all(map_def, 1.0)
+	await tree.process_frame
+	
+	var stack: Array = [scatter]
+	while not stack.is_empty():
+		var n = stack.pop_back()
+		if n is CollisionObject3D:
+			print("  [FAIL] Visual scatter must NOT create any CollisionObject3D nodes (got ", n.get_class(), ")")
+			holder.queue_free()
+			return false
+		if n.is_in_group("resource_nodes"):
+			print("  [FAIL] Visual scatter must NOT join the resource_nodes group")
+			holder.queue_free()
+			return false
+		for c in n.get_children():
+			stack.append(c)
+			
+	holder.queue_free()
+	print("  [PASS] Visual scatter contains zero colliders and zero gameplay group memberships.")
+	return true
+
+
+func test_visual_scatter_is_deterministic_by_map_name() -> bool:
+	print("Running Test Suite: Visual Scatter Determinism - Identical Output For Same Map Name...")
+	var TerrainVisualScatterScript = preload("res://scripts/terrain_visual_scatter.gd")
+	var holder_a = Node3D.new()
+	var holder_b = Node3D.new()
+	root.add_child(holder_a)
+	root.add_child(holder_b)
+	
+	var scatter_a = TerrainVisualScatterScript.get_or_create(holder_a)
+	var scatter_b = TerrainVisualScatterScript.get_or_create(holder_b)
+	
+	var map_def = {
+		"name": "deterministic_map_test",
+		"map_half_extents": 90.0,
+		"ground_color": [0.25, 0.25, 0.25],
+		"water_areas": [],
+		"base_zones": [],
+		"spawns": [],
+		"resource_nodes": []
+	}
+	scatter_a.scatter_all(map_def, 1.0)
+	scatter_b.scatter_all(map_def, 1.0)
+	await tree.process_frame
+	
+	var children_a = holder_a.get_node("TerrainVisualScatter").get_children()
+	var children_b = holder_b.get_node("TerrainVisualScatter").get_children()
+	
+	if children_a.size() != children_b.size():
+		print("  [FAIL] Batch count differs between runs: ", children_a.size(), " vs ", children_b.size())
+		holder_a.queue_free()
+		holder_b.queue_free()
+		return false
+		
+	for i in range(children_a.size()):
+		var ma: MultiMesh = children_a[i].multimesh
+		var mb: MultiMesh = children_b[i].multimesh
+		if ma == null or mb == null or ma.instance_count != mb.instance_count:
+			print("  [FAIL] Batch ", i, " instance counts mismatch")
+			holder_a.queue_free()
+			holder_b.queue_free()
+			return false
+		for j in range(ma.instance_count):
+			var ta = ma.get_instance_transform(j)
+			var tb = mb.get_instance_transform(j)
+			if ta.origin != tb.origin:
+				print("  [FAIL] Instance ", j, " transform mismatch: ", ta.origin, " vs ", tb.origin)
+				holder_a.queue_free()
+				holder_b.queue_free()
+				return false
+				
+	holder_a.queue_free()
+	holder_b.queue_free()
+	print("  [PASS] Visual scatter produces identical batch counts and instance transforms across runs.")
 	return true
 
 

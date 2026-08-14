@@ -1,13 +1,38 @@
 {
- "description": "Two hills, not one - each sits closer to one side's own territory. Grab yours quickly, then decide whether to contest the other deep in enemy ground. No water; open lanes connect everything.",
+ "description": "Obsidian Caldera: Two dominant plateau peaks rise over a sunken central pass. Secure your natural summit fortress, then launch armored thrusts through the central defile or contest the high ground in enemy territory.",
  "ground_color": [
-  0.25,
-  0.239999994635582,
-  0.189999997615814
+  0.24,
+  0.22,
+  0.18
  ],
  "map_half_extents": 234,
  "name": "Twin Summits",
- "obstacles": [],
+ "obstacles": [
+  {
+   "center": [
+    -40.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    10.0,
+    14.0
+   ],
+   "type": "rock"
+  },
+  {
+   "center": [
+    40.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    10.0,
+    14.0
+   ],
+   "type": "rock"
+  }
+ ],
  "resource_nodes": [
   {
    "amount": 900,
@@ -229,6 +254,44 @@
    ]
   }
  ],
+ "surface_zones": [
+  {
+   "center": [
+    -84.0,
+    0.0,
+    54.0
+   ],
+   "half_extents": [
+    30.0,
+    30.0
+   ],
+   "surface_type": "rocky"
+  },
+  {
+   "center": [
+    84.0,
+    0.0,
+    -54.0
+   ],
+   "half_extents": [
+    30.0,
+    30.0
+   ],
+   "surface_type": "rocky"
+  },
+  {
+   "center": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    24.0,
+    80.0
+   ],
+   "surface_type": "gravel"
+  }
+ ],
  "terrain": {
   "features": [
    {
@@ -238,8 +301,8 @@
     ],
     "falloff": 24,
     "half_extents": [
-     27,
-     27
+     28,
+     28
     ],
     "height": 10,
     "type": "plateau"
@@ -251,11 +314,25 @@
     ],
     "falloff": 24,
     "half_extents": [
-     27,
-     27
+     28,
+     28
     ],
     "height": 10,
     "type": "plateau"
+   },
+   {
+    "end": [
+     110.0,
+     50.0
+    ],
+    "falloff": 14.0,
+    "start": [
+     -110.0,
+     -50.0
+    ],
+    "depth": 4.5,
+    "type": "ravine",
+    "width": 24.0
    }
   ],
   "height_scale": 10.0,

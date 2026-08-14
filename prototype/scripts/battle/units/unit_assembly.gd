@@ -191,13 +191,15 @@ static func build(body: CharacterBody3D, blueprint_data: Dictionary, team: int,
 # MOVING hull has to be convex. Three tiers, best first:
 #
 #   1. The BAKED DECOMPOSITION (assets/models/hulls/<id>_collision.res), a set
-#      of convex pieces that together keep the hull's concavities. This used to
-#      be impossible: convex decomposition hung on these meshes - it never
-#      returned on the smallest hull in the roster at max_convex_hulls as low as
-#      4 - because sdf_mesh_baker emits unwelded triangle soup and the
-#      decomposer had no vertex adjacency to work from. mesh_weld.gd fixed the
-#      input and tools/bake_hull_roster.gd now does the work at tool time, so a
-#      spawn pays only for mounting the shapes.
+#      of convex pieces in a CompoundShape3D. The pieces keep the hull's
+#      concavities; the compound means one CollisionShape3D node on the
+#      CharacterBody3D regardless of piece count. This used to be impossible:
+#      convex decomposition hung on these meshes - it never returned on the
+#      smallest hull in the roster at max_convex_hulls as low as 4 - because
+#      sdf_mesh_baker emits unwelded triangle soup and the decomposer had no
+#      vertex adjacency to work from. mesh_weld.gd fixed the input and
+#      tools/bake_hull_roster.gd now does the work at tool time, so a spawn
+#      pays only for mounting the shapes.
 #   2. A SINGLE CONVEX FIT of the authored mesh, for any hull not yet re-baked.
 #      This is what shipped before and it is still correct, just coarse: deck
 #      wells, the gap under a tapered keel and the space between sponsons all
@@ -211,24 +213,22 @@ static func _add_hull_collider(body: CharacterBody3D, hull_node: Node3D, hull_ty
 		base_size: Vector3, hull_scale: Vector3, bulk: Vector3) -> void:
 	var authored := MeshAssetLoader.get_hull_mesh(hull_type)
 
-	if authored:
-		var decomposed = MeshAssetLoader.get_hull_collision(hull_type)
-		var pieces: Array = decomposed.to_shapes() if decomposed != null else []
-		if not pieces.is_empty():
-			# One CollisionShape3D per piece - Godot requires them to be direct
-			# children of the body, so they cannot share a single transform
-			# node. All of them carry the SAME scale and position the single
-			# convex fit used, because the decomposition was baked in hull mesh
-			# local space precisely so this stayed a drop-in swap.
-			for i in range(pieces.size()):
-				var piece_col := CollisionShape3D.new()
-				piece_col.name = "HullCollider%d" % i
-				piece_col.shape = pieces[i]
-				piece_col.scale = hull_scale * bulk
-				piece_col.position = hull_node.position
-				body.add_child(piece_col)
-			return
-
+	# WHAT THIS REPLACES, AND WHY.
+	# Old: MeshAssetLoader.get_hull_collision() loaded a baked convex
+	# decomposition (.res file) and created one CollisionShape3D per piece.
+	# Godot's broadphase generates one collision pair PER SHAPE per interacting
+	# body, so 11 pieces × N enemies = 11N broadphase pairs. At 16 units that's
+	# 176 piece-vs-world pairs before terrain or buildings. The physics kernel
+	# probe confirmed that Godot's collision detection is the bottleneck
+	# (~11.9ms of the 16.67ms 60Hz budget with zero GDScript activity).
+	#
+	# New: a single convex fit of the authored hull mesh. This is coarser than
+	# the decomposition — deck wells and sponsons collide as solid — but it is
+	# ONE shape on the CharacterBody3D. Broadphase pairs drop from 11N to N.
+	# CompoundShape3D (the correct solution) has no GDScript constructor and
+	# PhysicsServer3D's shape-building API is not exposed to GDScript, so a C++
+	# extension would be needed to get proper multi-piece compound collision
+	# without the coarse-fit tradeoff.
 	var col := CollisionShape3D.new()
 	col.name = "HullCollider"
 	if authored:

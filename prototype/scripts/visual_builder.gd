@@ -2243,65 +2243,65 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 		parent_node.add_child(dish)
 
 	elif type_id == "resource_harvester":
-		var ext_size = tweaks.get("extractor_size", 1.0)
+		var cutter_scale = clampf(tweaks.get("cutter_head", tweaks.get("extractor_size", 1.0)), 0.5, 2.0)
+		var mount_depth = 0.45 * clampf(tweaks.get("mount_extension", 1.0), 0.6, 1.5)
 
-		# 1. TURNTABLE MOUNT BASE (resource_harvester_mount.glb)
-		var mount_mesh = _part("resource_harvester_mount")
-		if not mount_mesh:
-			mount_mesh = _part("pintle_mount")
-		var mount: MeshInstance3D
-		if mount_mesh:
-			mount = _mesh_inst(mount_mesh, base_color.darkened(0.2))
-			mount.scale = Vector3(1.0, 1.0, 1.0)
-			mount.position = Vector3(0, 0, 0)
-		else:
-			mount = MeshInstance3D.new()
-			var m_box = BoxMesh.new()
-			m_box.size = Vector3(0.56, 0.16, 0.56)
-			mount.mesh = m_box
-			var m_mat = StandardMaterial3D.new()
-			m_mat.albedo_color = base_color.darkened(0.2)
-			mount.material_override = m_mat
-			mount.position = Vector3(0, 0.08, 0)
-		parent_node.add_child(mount)
+		# 1. MEASURE FACET OR READ METADATA
+		var facet_w = 2.0
+		var facet_h = 1.0
+		if parent_node.has_meta("facet_size"):
+			var fs = parent_node.get_meta("facet_size")
+			if fs is Vector2 and fs.x > 0.1 and fs.y > 0.1:
+				facet_w = fs.x
+				facet_h = fs.y
+		elif parent_node.get_parent() != null and is_instance_valid(parent_node.get_parent()):
+			var p = parent_node.get_parent()
+			if p.has_node("CollisionShape3D"):
+				var cshape = p.get_node("CollisionShape3D")
+				if cshape.shape is BoxShape3D:
+					facet_w = cshape.shape.size.x
+					facet_h = cshape.shape.size.y
 
-		# 2. EXTRACTOR BOOM ARM (resource_harvester_arm.glb)
-		var arm_mesh = _part("resource_harvester_arm")
-		var arm: MeshInstance3D
-		if arm_mesh:
-			arm = _mesh_inst(arm_mesh, Color(0.75, 0.50, 0.15))
-			arm.scale = Vector3(1.0, 1.0, ext_size)
-			arm.position = Vector3(0, 0, 0)
-		else:
-			arm = MeshInstance3D.new()
-			var a_box = BoxMesh.new()
-			a_box.size = Vector3(0.16, 0.40, 0.14 * ext_size)
-			arm.mesh = a_box
-			var a_mat = StandardMaterial3D.new()
-			a_mat.albedo_color = Color(0.75, 0.50, 0.15)
-			arm.material_override = a_mat
-			arm.position = Vector3(0, 0.20, -0.20 * ext_size)
-		parent_node.add_child(arm)
+		# 2. PROCEDURAL SOLID TAPERED MOUNTING BLOCK
+		var mount_inst = MeshInstance3D.new()
+		mount_inst.name = "HarvesterMountBlock"
+		var w_tip = clampf(0.96 * cutter_scale, 0.6, maxf(facet_w, 0.96 * cutter_scale))
+		var h_tip = clampf(0.96 * cutter_scale, 0.6, maxf(facet_h, 0.96 * cutter_scale))
+		mount_inst.mesh = _build_frustum_block_mesh(facet_w, facet_h, w_tip, h_tip, mount_depth)
+		mount_inst.material_override = PartMaterialsScript.get_material("painted", base_color.darkened(0.25))
+		parent_node.add_child(mount_inst)
 
-		# 3. ROTARY DRILL BIT (resource_harvester_drill.glb)
+		# Perimeter mounting flange trim at the hull contact base
+		var flange_inst = MeshInstance3D.new()
+		flange_inst.name = "HarvesterMountFlange"
+		var f_box = BoxMesh.new()
+		f_box.size = Vector3(facet_w + 0.04, 0.04, facet_h + 0.04)
+		flange_inst.mesh = f_box
+		flange_inst.material_override = PartMaterialsScript.get_material("painted", base_color.darkened(0.35))
+		flange_inst.position = Vector3(0, 0.02, 0)
+		parent_node.add_child(flange_inst)
+
+		# 3. TRICONE DRILL HEAD WITH PROTECTIVE CAGE SHROUD (resource_harvester_drill.glb)
 		var drill_mesh = _part("resource_harvester_drill")
 		var drill: MeshInstance3D
 		if drill_mesh:
-			drill = _mesh_inst(drill_mesh, Color(0.35, 0.38, 0.42))
-			drill.scale = Vector3(ext_size, ext_size, ext_size)
-			drill.position = Vector3(0, 0, -0.28 * ext_size)
+			drill = _mesh_inst(drill_mesh, Color(0.30, 0.32, 0.35))
+			drill.name = "HarvesterDrillHead"
+			drill.scale = Vector3(cutter_scale, cutter_scale, cutter_scale)
+			drill.position = Vector3(0, mount_depth, 0)
+			drill.rotation = Vector3.ZERO
 		else:
 			drill = MeshInstance3D.new()
+			drill.name = "HarvesterDrillHead"
 			var d_cyl = CylinderMesh.new()
-			d_cyl.top_radius = 0.14 * ext_size
-			d_cyl.bottom_radius = 0.02 * ext_size
-			d_cyl.height = 0.28 * ext_size
+			d_cyl.top_radius = 0.04 * cutter_scale
+			d_cyl.bottom_radius = 0.45 * cutter_scale
+			d_cyl.height = 0.90 * cutter_scale
 			drill.mesh = d_cyl
 			var d_mat = StandardMaterial3D.new()
-			d_mat.albedo_color = Color(0.35, 0.38, 0.42)
+			d_mat.albedo_color = Color(0.30, 0.32, 0.35)
 			drill.material_override = d_mat
-			drill.position = Vector3(0, 0.10, -0.45 * ext_size)
-			drill.rotation = Vector3(PI / 2, 0, 0)
+			drill.position = Vector3(0, mount_depth + 0.45 * cutter_scale, 0)
 		parent_node.add_child(drill)
 
 	elif type_id == "resource_bay":
@@ -5617,6 +5617,57 @@ static func _build_tapered_blade_mesh(thickness: float, root_chord: float, tip_c
 	st.generate_normals()
 	return st.commit()
 
+## Procedural solid tapered block mesh (frustum/prism) for front facet mounting hardware.
+## Snaps to front facet (w_base, h_base) at y=0 and tapers forward to (w_tip, h_tip) at y=depth.
+static func _build_frustum_block_mesh(w_base: float, h_base: float, w_tip: float, h_tip: float, depth: float) -> ArrayMesh:
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+
+	var hw0 = w_base * 0.5
+	var hh0 = h_base * 0.5
+	var hw1 = w_tip * 0.5
+	var hh1 = h_tip * 0.5
+
+	# Base vertices (at y = 0)
+	var b0 = Vector3(-hw0, 0.0, -hh0)
+	var b1 = Vector3( hw0, 0.0, -hh0)
+	var b2 = Vector3( hw0, 0.0,  hh0)
+	var b3 = Vector3(-hw0, 0.0,  hh0)
+
+	# Tip vertices (at y = depth)
+	var t0 = Vector3(-hw1, depth, -hh1)
+	var t1 = Vector3( hw1, depth, -hh1)
+	var t2 = Vector3( hw1, depth,  hh1)
+	var t3 = Vector3(-hw1, depth,  hh1)
+
+	# 4 Tapered Side Quads
+	# Bottom face (-Z side)
+	st.add_vertex(b0); st.add_vertex(t1); st.add_vertex(b1)
+	st.add_vertex(b0); st.add_vertex(t0); st.add_vertex(t1)
+
+	# Right face (+X side)
+	st.add_vertex(b1); st.add_vertex(t2); st.add_vertex(b2)
+	st.add_vertex(b1); st.add_vertex(t1); st.add_vertex(t2)
+
+	# Top face (+Z side)
+	st.add_vertex(b2); st.add_vertex(t3); st.add_vertex(b3)
+	st.add_vertex(b2); st.add_vertex(t2); st.add_vertex(t3)
+
+	# Left face (-X side)
+	st.add_vertex(b3); st.add_vertex(t0); st.add_vertex(b0)
+	st.add_vertex(b3); st.add_vertex(t3); st.add_vertex(t0)
+
+	# Tip / Front face (at y = depth)
+	st.add_vertex(t0); st.add_vertex(t2); st.add_vertex(t1)
+	st.add_vertex(t0); st.add_vertex(t3); st.add_vertex(t2)
+
+	# Base / Back face (at y = 0)
+	st.add_vertex(b0); st.add_vertex(b1); st.add_vertex(b2)
+	st.add_vertex(b0); st.add_vertex(b2); st.add_vertex(b3)
+
+	st.generate_normals()
+	return st.commit()
+
 
 # 3-blade tractor/pusher fan, wrapped under a "PropBlades" pivot so it can
 # spin (about local Z, matching the rotate_z fan arrangement below)
@@ -6009,7 +6060,7 @@ const MONOLITHIC_TWEAK_AXES := {
 	"pd_laser": {"cooling_jacket": Vector3(1, 1, 1), "barrel_length": Vector3(0, 0, 1), "tracking_speed": Vector3(1, 0, 0)},
 	"flak_cannon": {"caliber": Vector3(1, 1, 0), "barrel_length": Vector3(0, 0, 1), "barrel_count": Vector3(1, 0, 0), "fuse_setting": Vector3(1, 1, 1), "burst_size": Vector3(0, 0, 1)},
 	"drone_carrier": {"hangar_size": Vector3(1, 0, 0), "launch_catapult": Vector3(0, 0, 1)},
-	"resource_harvester": {"extractor_size": Vector3(1, 1, 1)},
+	"resource_harvester": {"cutter_head": Vector3(1, 1, 1), "extractor_size": Vector3(1, 1, 1), "mount_extension": Vector3(0, 1, 0)},
 	# Which axis each bay tweak grows, for the footprint/clipping side. The
 	# builder applies the same mapping to the meshes; this is what makes a
 	# deeper hopper actually claim more deck height in the Lab, so "does a

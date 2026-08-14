@@ -21,6 +21,7 @@
 	"modules": [
 		{
 			"facet": "top",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0458947122097015,
 				"y": 0.99179345369339,

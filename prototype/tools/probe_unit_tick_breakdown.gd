@@ -63,6 +63,10 @@ func _init():
 	for _i in range(60):
 		await physics_frame
 
+	# Force 30Hz for 30Hz baseline numbers
+	Engine.physics_ticks_per_second = 30
+	print("  (30Hz physics tick)")
+
 	BattleProfiler.enabled = true
 	BattleProfiler.reset()
 	for _i in range(MEASURE_FRAMES):

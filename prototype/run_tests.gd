@@ -75,6 +75,7 @@ const SUITE_FILES := {
 	"module_action_ring": preload("res://tests/test_module_action_ring.gd"),
 	"marking_menu": preload("res://tests/test_marking_menu.gd"),
 	"selection_panel": preload("res://tests/test_selection_panel.gd"),
+	"livery_customization": preload("res://tests/test_livery_customization.gd"),
 }
 
 # Exact execution order of the pre-split runner. Do not sort this.
@@ -99,6 +100,8 @@ const SUITE_ORDER := [
 	["semantic_zoom", "test_semantic_zoom_service_thresholds"],
 	["semantic_zoom", "test_semantic_zoom_signal_emission"],
 	["semantic_zoom", "test_lab_view_modes"],
+	["livery_customization", "test_livery_data_roundtrip_and_patterns"],
+	["livery_customization", "test_hull_material_builder_shader_uniforms"],
 
 	# REGISTERED 2026-08-11, having never run. test_design_verdict.gd was in
 	# SUITE_FILES but its only manifest row named a function that does not
@@ -244,6 +247,9 @@ const SUITE_ORDER := [
 	["terrain_and_maps", "test_ambient_trees_scatter_is_deterministic"],
 	["terrain_and_maps", "test_ambient_ore_picks_from_resource_ore_pool"],
 	["terrain_and_maps", "test_ambient_ore_does_not_regrow"],
+	["terrain_and_maps", "test_visual_scatter_creates_multimesh_batches_with_shadows_off"],
+	["terrain_and_maps", "test_visual_scatter_is_pure_visual_without_colliders_or_groups"],
+	["terrain_and_maps", "test_visual_scatter_is_deterministic_by_map_name"],
 	# 2026-08-11 REMOVED (rows + functions): test_ambient_trees_respect_avoid_
 	# radii and test_ambient_ores_respect_avoid_radii_and_dont_overlap_trees.
 	# Both encoded the PRE-cluster random-scatter separation guarantees: every
@@ -496,6 +502,7 @@ const SUITE_ORDER := [
 	# APPENDED, never inserted - SUITE_ORDER is pinned because several
 	# navmesh/Recast suites flake depending on what ran before them.
 	["ui_and_camera", "test_installed_bindings_match_input_service"],
+	["designer_lab", "test_resource_harvester_mounting_restrictions_and_procedural_hardware"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist
@@ -546,14 +553,25 @@ func _init():
 	var _failed: Array = []
 	var _total_suites: int = 0
 
+	var filter_pattern: String = ""
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--filter="):
+			filter_pattern = arg.substr(9)
+	if filter_pattern == "":
+		for arg in OS.get_cmdline_args():
+			if arg.begins_with("--filter="):
+				filter_pattern = arg.substr(9)
+
 	for entry in SUITE_ORDER:
+		var suite_name: String = entry[1]
+		if filter_pattern != "" and suite_name.find(filter_pattern) < 0 and entry[0].find(filter_pattern) < 0:
+			continue
 		if not instances.has(entry[0]):
 			push_error("Missing suite file registration for key '%s'" % entry[0])
 			success = false
 			_failed.append("%s (missing key in SUITE_FILES)" % entry[0])
 			continue
 		var inst = instances[entry[0]]
-		var suite_name: String = entry[1]
 		_total_suites += 1
 		if not inst.has_method(suite_name):
 			push_error("Suite method '%s' not found on '%s'" % [suite_name, entry[0]])

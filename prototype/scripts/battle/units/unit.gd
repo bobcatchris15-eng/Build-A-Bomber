@@ -495,10 +495,18 @@ func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 	var _t := Profiler.start()
+	var _p := Profiler.start()
 	_tick_power(delta)
+	Profiler.stop("unit.tick_power", _p)
+	_p = Profiler.start()
 	_recalculate_terrain_speed_multiplier()
+	Profiler.stop("unit.terrain_speed", _p)
+	_p = Profiler.start()
 	_advance_orders()
+	Profiler.stop("unit.advance_orders", _p)
+	_p = Profiler.start()
 	_tick_economy(delta)
+	Profiler.stop("unit.tick_economy", _p)
 
 	# Tick boost controller - must run before _apply_movement so its multiplier
 	# applies to this frame's speed.
@@ -649,7 +657,9 @@ func _apply_movement(delta: float, boost_mult: float = 1.0) -> void:
 		velocity.x = 0.0
 		velocity.z = 0.0
 		return
+	var _st := Profiler.start()
 	var to_point := _steer_direction(destination)
+	Profiler.stop("unit.steer_nav", _st)
 	if to_point.length() < 0.05:
 		velocity.x = 0.0
 		velocity.z = 0.0
@@ -659,7 +669,9 @@ func _apply_movement(delta: float, boost_mult: float = 1.0) -> void:
 	# velocity. Added afterwards it would slide the unit sideways while it still
 	# faced straight ahead, which for a tracked vehicle looks like ice; blended
 	# into the direction, the unit turns out of the crowd and drives out of it.
+	var _sp := Profiler.start()
 	var crowd := _separation_push()
+	Profiler.stop("unit.separation", _sp)
 	if crowd != Vector3.ZERO:
 		to_point = (to_point.normalized() + crowd * SEPARATION_WEIGHT).normalized() * to_point.length()
 

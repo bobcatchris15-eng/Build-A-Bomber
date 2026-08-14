@@ -1,88 +1,114 @@
 {
- "description": "A single dominant hill splits the map, flanked by rock walls that narrow the approach to two lanes. No water. Hold the hill for real vision and combat advantages, or fight through the flanks.",
+ "description": "Iron Ridge Valley: A dominant fortified mesa commands two low-lying flanking ravines. Tactical rock outcroppings provide cover along the approach ramps. Hold the high ground for superior vision and firing arcs, or maneuver armored columns through the ravines.",
  "ground_color": [
-  0.239999994635582,
-  0.239999994635582,
-  0.200000002980232
+  0.24,
+  0.26,
+  0.19
  ],
  "map_half_extents": 225.0,
  "name": "Highland Chokepoint",
  "obstacles": [
   {
    "center": [
-    -84.0,
+    -60.0,
     0.0,
-    0.0
+    20.0
    ],
    "half_extents": [
-    18.0,
-    66.0
-   ]
+    10.0,
+    14.0
+   ],
+   "type": "rock"
   },
   {
    "center": [
-    84.0,
+    60.0,
     0.0,
-    0.0
+    -20.0
    ],
    "half_extents": [
-    18.0,
-    66.0
-   ]
+    10.0,
+    14.0
+   ],
+   "type": "rock"
+  },
+  {
+   "center": [
+    -88.0,
+    0.0,
+    -40.0
+   ],
+   "half_extents": [
+    12.0,
+    24.0
+   ],
+   "type": "rock"
+  },
+  {
+   "center": [
+    88.0,
+    0.0,
+    40.0
+   ],
+   "half_extents": [
+    12.0,
+    24.0
+   ],
+   "type": "rock"
   }
  ],
  "resource_nodes": [
   {
    "amount": 1100,
    "position": [
-    -90.0,
+    -70.0,
     0.0,
-    72.0
+    70.0
    ],
    "type": "metal"
   },
   {
    "amount": 1100,
    "position": [
-    90.0,
+    70.0,
     0.0,
-    -72.0
+    -70.0
    ],
    "type": "metal"
   },
   {
    "amount": 900,
    "position": [
-    -60.0,
+    -50.0,
     0.0,
-    90.0
+    95.0
    ],
    "type": "metal"
   },
   {
    "amount": 900,
    "position": [
-    60.0,
+    50.0,
     0.0,
-    -90.0
+    -95.0
    ],
    "type": "metal"
   },
   {
-   "amount": 700,
+   "amount": 750,
    "position": [
-    -48.0,
-    0.0,
-    42.0
+    -24.0,
+    8.0,
+    0.0
    ],
    "type": "crystal"
   },
   {
-   "amount": 700,
+   "amount": 750,
    "position": [
-    48.0,
-    0.0,
-    -42.0
+    24.0,
+    8.0,
+    0.0
    ],
    "type": "crystal"
   },
@@ -143,16 +169,16 @@
   {
    "amount": 1400,
    "position": [
-    64.0,
+    70.0,
     0.0,
-    1.46952762458685e-15
+    0.0
    ],
    "type": "oil"
   },
   {
    "amount": 1400,
    "position": [
-    -64.0,
+    -70.0,
     0.0,
     0.0
    ],
@@ -168,8 +194,8 @@
     120.0
    ],
    "half_extents": [
-    17.5,
-    17.5
+    18.0,
+    18.0
    ]
   },
   {
@@ -180,8 +206,8 @@
     -120.0
    ],
    "half_extents": [
-    17.5,
-    17.5
+    18.0,
+    18.0
    ]
   }
  ],
@@ -234,6 +260,44 @@
    ]
   }
  ],
+ "surface_zones": [
+  {
+   "center": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    34.0,
+    34.0
+   ],
+   "surface_type": "rocky"
+  },
+  {
+   "center": [
+    -110.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    20.0,
+    80.0
+   ],
+   "surface_type": "marsh"
+  },
+  {
+   "center": [
+    110.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    20.0,
+    80.0
+   ],
+   "surface_type": "marsh"
+  }
+ ],
  "terrain": {
   "features": [
    {
@@ -243,14 +307,42 @@
     ],
     "falloff": 24.0,
     "half_extents": [
-     30.0,
-     30.0
+     28.0,
+     28.0
     ],
-    "height": 10.0,
+    "height": 8.0,
     "type": "plateau"
+   },
+   {
+    "end": [
+     -110.0,
+     120.0
+    ],
+    "falloff": 16.0,
+    "start": [
+     -110.0,
+     -120.0
+    ],
+    "depth": 3.0,
+    "type": "ravine",
+    "width": 20.0
+   },
+   {
+    "end": [
+     110.0,
+     120.0
+    ],
+    "falloff": 16.0,
+    "start": [
+     110.0,
+     -120.0
+    ],
+    "depth": 3.0,
+    "type": "ravine",
+    "width": 20.0
    }
   ],
-  "height_scale": 10.0,
+  "height_scale": 8.0,
   "heightmap": "res://data/maps/highland_chokepoint_height.png",
   "surfacemap": "res://data/maps/highland_chokepoint_surface.png"
  },

@@ -449,14 +449,20 @@ func _init():
 			var hull_size: Vector3 = placer.hull.get_meta("base_hull_size", Vector3.ONE)
 			var placed := 0
 			for mount in spec["mounts"]:
-				var mx := float(mount["x"])
-				var mz := float(mount["z"])
-				var origin: Vector3 = placer.hull.global_position \
-					+ Vector3(mx, hull_size.y * 2.0 + 4.0, mz)
-				var hit = placer.surface_raycast(origin, Vector3.DOWN, 1000.0)
+				var mx := float(mount.get("x", 0.0))
+				var mz := float(mount.get("z", 0.0))
+				var hit: Dictionary
+				if str(mount["type"]) == "resource_harvester":
+					var origin: Vector3 = placer.hull.global_position \
+						+ Vector3(0.0, 0.0, -hull_size.z - 4.0)
+					hit = placer.surface_raycast(origin, Vector3(0, 0, 1), 1000.0)
+				else:
+					var origin: Vector3 = placer.hull.global_position \
+						+ Vector3(mx, hull_size.y * 2.0 + 4.0, mz)
+					hit = placer.surface_raycast(origin, Vector3.DOWN, 1000.0)
 				if hit.is_empty():
-					_say("  [FAIL] %s: no surface under (%.2f, %.2f)"
-						% [mount["type"], mx, mz])
+					_say("  [FAIL] %s: no surface found"
+						% [mount["type"]])
 					failed += 1
 					continue
 				var node = placer._place_weapon(str(mount["type"]),

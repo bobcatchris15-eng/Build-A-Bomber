@@ -56,23 +56,6 @@ import/blender/enabled=false
 
 theme/custom="res://resources/bomber_theme.tres"
 
-[input]
-
-; DELIBERATELY EMPTY. scripts/core/input_service.gd is the single source of
-; truth for every action in this game, and its install_all() calls
-; InputMap.action_erase_events() on each one at boot - so anything declared
-; here is erased before a single scene loads.
-;
-; It was not empty, and that cost real confusion: this section still bound
-; cmd_attack_move to A (against cam_pan_left) and cmd_stop to S (against
-; cam_pan_down) long after InputService had moved them to F and G, and it had
-; never heard of cmd_hold_fire at all. Anyone opening this file to fix a
-; binding would have been editing dead data.
-;
-; Add actions to InputService.ACTIONS. ui_audit.check_project_input_section()
-; asserts this section stays empty, so the editor's Input Map panel writing
-; entries back here is caught rather than silently reintroducing the drift.
-
 [rendering]
 
 textures/vram_compression/import_etc2_astc=true

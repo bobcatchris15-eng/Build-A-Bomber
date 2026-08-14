@@ -25,6 +25,7 @@
 	"modules": [
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -85,6 +86,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -145,6 +147,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -205,6 +208,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -265,6 +269,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -325,6 +330,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -385,6 +391,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -445,6 +452,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -504,7 +512,11 @@
 			"yaw_offset": 0.0
 		},
 		{
-			"facet": "",
+			"facet": "front",
+			"facet_size": {
+				"x": 3.3594012260437,
+				"y": 2.78706526756287
+			},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -513,12 +525,12 @@
 			"mount_style": "",
 			"name": "Resource Harvester",
 			"position": {
-				"x": 0.0,
-				"y": 0.699662089347839,
-				"z": 1.0
+				"x": -0.0304095149040222,
+				"y": 0.289661347866058,
+				"z": -2.75697493553162
 			},
 			"rotation": {
-				"x": 0.0,
+				"x": -0.371717721223831,
 				"y": 0.0,
 				"z": 0.0
 			},
@@ -542,6 +554,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -551,7 +564,7 @@
 			"name": "Resource Bay",
 			"position": {
 				"x": -1.0,
-				"y": 0.699662089347839,
+				"y": 0.69966197013855,
 				"z": 2.75
 			},
 			"rotation": {
@@ -579,6 +592,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -588,7 +602,7 @@
 			"name": "Resource Bay",
 			"position": {
 				"x": 1.0,
-				"y": 0.699662089347839,
+				"y": 0.69966197013855,
 				"z": 2.75
 			},
 			"rotation": {
@@ -616,6 +630,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -625,7 +640,7 @@
 			"name": "Radar Mast Suite",
 			"position": {
 				"x": 0.0,
-				"y": 0.514574408531189,
+				"y": 0.514574289321899,
 				"z": -1.5
 			},
 			"rotation": {
@@ -653,6 +668,7 @@
 		},
 		{
 			"facet": "top",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 0.950019598007202,
@@ -662,7 +678,7 @@
 			"name": "Heavy Machine Gun",
 			"position": {
 				"x": 0.0,
-				"y": 0.25626814365387,
+				"y": 0.256268262863159,
 				"z": -3.0
 			},
 			"rotation": {

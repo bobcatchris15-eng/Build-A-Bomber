@@ -133,6 +133,13 @@ var operation_id: String = ""                   # Operations only
 var stage_index: int = 0                        # Operations only (0..N-1)
 var ai_difficulty: String = "normal"
 
+# Physics. PERF_TESTING_RIG.md Fix A: 30Hz halves the per-unit cost of
+# unit.gd::_physics_process, which at ~2.4ms/unit headless means 60fps is
+# only achievable for ~7 units at 60Hz. 30Hz doubles that to ~14 — within
+# range of a typical Skirmish mid-game — while visually imperceptible for
+# an RTS. Test Range stays at 60 so unit responsiveness feels snappy.
+var physics_ticks_per_second: int = 60
+
 # --- Simulation seed ----------------------------------------------------------
 #
 # The seed for the simulation random stream (scripts/battle/sim_rng.gd). This
@@ -223,6 +230,7 @@ static func skirmish(map_id: String, player_faction: String,
 	rs.enemy_faction = enemy_faction
 	rs.selected_blueprint_paths = blueprint_paths.duplicate()
 	rs.ai_difficulty = difficulty
+	rs.physics_ticks_per_second = 30   # Fix A: double the unit ceiling
 	# Defaults are the Skirmish values; nothing else to flip.
 	return rs
 
@@ -251,6 +259,7 @@ static func operations(map_id: String, player_faction: String,
 	# + after_match_action from these fields.
 	rs.win_condition = WinCondition.DESTROY_HQ
 	rs.after_match_action = AfterMatchAction.SHOW_AAR
+	rs.physics_ticks_per_second = 30   # Fix A: double the unit ceiling
 	return rs
 
 

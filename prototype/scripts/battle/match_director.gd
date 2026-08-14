@@ -309,6 +309,20 @@ func _ready() -> void:
 	# ONCE at the top so the camera pick and the rule set lookup cannot
 	# disagree about whether the autoload is mounted.
 	var match_config := get_node_or_null("/root/MatchConfig")
+
+	# PERF_TESTING_RIG.md Fix A. Applied before any physics work, so all
+	# subsequent await physics_frame calls in this scene inherit the rate.
+	# Skirmish/Operations set 30; Test Range stays at 60 (rule-set default).
+	# Resolved from match_config.rule_set directly because _match_rule_set
+	# (the member) is not assigned until the blocks below.
+	var tick_rate := 60
+	if match_config != null and "rule_set" in match_config \
+			and match_config.rule_set != null:
+		tick_rate = match_config.rule_set.physics_ticks_per_second
+	Engine.physics_ticks_per_second = tick_rate
+	if tick_rate != 60:
+		print("[match_director] physics_ticks_per_second = %d" % tick_rate)
+
 	# Battle-system unification (Phase 3). The rule set, when set,
 	# picks which camera is `current`. Test Range activates the chase
 	# camera and wires it to the player unit; Skirmish and Operations
@@ -816,8 +830,10 @@ func _load_roster() -> void:
 	# of truth - 2026-08-10: legacy MatchConfig.player_faction fallback gone.
 	if rs != null and rs.player_faction != "":
 		player_faction = rs.player_faction
-	elif not roster.is_empty():
-		player_faction = roster[0].get("faction", "industrialists")
+	elif not roster.is_empty() and roster[0].get("faction", "") != "":
+		player_faction = roster[0].get("faction", "")
+	else:
+		player_faction = "industrialists"
 
 	# Test Range's enemy roster comes from the rule set rather than from
 	# the bundled defaults. The legacy code path (Skirmish, Operations)
@@ -847,10 +863,12 @@ func _load_roster() -> void:
 	# clobbered it. Guarded now; the test_range block already handles the
 	# harvester fallback. `is_test_range` is the function-top local declared
 	# above - not redeclared here, to keep the test-range gate one source.
-	if not is_test_range:
+	elif rs == null or rs.mode != MatchRuleSetScript.Mode.TEST_RANGE:
 		enemy_roster.clear()
 		for path in _bundled_loadout_paths():
 			_append_design(enemy_roster, bp_manager.load_blueprint(path))
+		if enemy_roster.size() > ROSTER_LIMIT:
+			enemy_roster = enemy_roster.slice(0, ROSTER_LIMIT)
 		if _harvester_in(enemy_roster).is_empty():
 			_append_design(enemy_roster, bp_manager.load_blueprint(FALLBACK_HARVESTER))
 
@@ -862,7 +880,7 @@ func _load_roster() -> void:
 	# enemy_roster matching a role, so changing the order is the whole mechanism;
 	# no design is added or dropped, and the AI plays exactly as it always did.
 	# Outside an operation, or on round one, this is a no-op.
-	var ops = get_node_or_null("/root/OperationsManager")
+	var ops = get_node_or_null("/root/OperationsService")
 	if ops != null and ops.is_active_operation:
 		var history: Array = ops.fielded_history()
 		if not history.is_empty():
@@ -871,8 +889,10 @@ func _load_roster() -> void:
 
 	if rs != null and rs.enemy_faction != "":
 		enemy_faction = rs.enemy_faction
-	elif not enemy_roster.is_empty():
-		enemy_faction = enemy_roster[0].get("faction", "technocrats")
+	elif not enemy_roster.is_empty() and enemy_roster[0].get("faction", "") != "":
+		enemy_faction = enemy_roster[0].get("faction", "")
+	else:
+		enemy_faction = "technocrats"
 
 
 # Skips empties rather than making every caller check. reconstruct_vehicle()
@@ -1113,6 +1133,8 @@ func _spawn_bases() -> void:
 	# in _spawn_starting_units so the two are consistent. _match_rule_set is
 	# the cached rule set from _ready(); reading from the member is what every
 	# other phase of the director does, no need to re-resolve off /root here.
+	# Also guard on null: headless test paths that instantiate Battle.tscn
+	# without the MatchConfig autoload have no roster and no bases to place.
 	if _match_rule_set != null and _match_rule_set.mode == MatchRuleSetScript.Mode.TEST_RANGE:
 		return
 
@@ -2099,7 +2121,7 @@ func _enter_hq_placement() -> void:
 	# own spawn flow and expects the player HQ to be live from frame 1.
 	# _match_rule_set is the cached rule set from _ready(); reading from
 	# the member is the same pattern _spawn_bases() and _setup_vision()
-	# use to gate on mode.
+	# use to gate on mode. Also guard on null for headless test paths.
 	if _match_rule_set != null and _match_rule_set.mode == MatchRuleSetScript.Mode.TEST_RANGE:
 		return
 	placing_hq = true

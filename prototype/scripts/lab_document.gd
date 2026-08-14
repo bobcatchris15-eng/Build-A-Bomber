@@ -325,8 +325,8 @@ const TWEAK_SPECS = {
 		{"name": "protectedness", "label": "Armor Level", "min": 0.0, "max": 2.0, "step": 1.0, "default": 0.0}
 	],
 	"resource_harvester": [
-		{"name": "extractor_size", "label": "Extractor Arm Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
-		{"name": "cutter_head", "label": "Cutter Head Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+		{"name": "cutter_head", "label": "Drill Head Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "mount_extension", "label": "Mount Extension", "min": 0.6, "max": 1.5, "step": 0.1, "default": 1.0}
 	],
 	# Three levers, and they are deliberately not three flavours of the same one.
 	# bay_volume is the stat that matters (cargo carried, and the weight paid for

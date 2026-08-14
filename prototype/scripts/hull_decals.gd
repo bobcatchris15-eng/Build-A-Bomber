@@ -223,7 +223,11 @@ const MASCOT_SHAPES: Array = [
 ]
 
 static func _get_mascot_texture(faction: String) -> ImageTexture:
-	var shape: String = MASCOT_SHAPES[abs(hash(faction)) % MASCOT_SHAPES.size()]
+	var shape: String = ""
+	if faction != "":
+		shape = LiveryScript.decal_icon(faction)
+	if shape == "" or not MASCOT_SHAPES.has(shape):
+		shape = MASCOT_SHAPES[abs(hash(faction)) % MASCOT_SHAPES.size()]
 	match shape:
 		"gear": return _get_texture("mascot_gear", _draw_gear)
 		"hex": return _get_texture("mascot_hex", _draw_hex)
@@ -300,55 +304,39 @@ static func apply_decals(hull: Node3D, faction: String, hull_size: Vector3):
 	if surface["tris"].size() >= 3:
 		extents = (surface["aabb"] as AABB).size
 	else:
-		# No mesh to project onto (a bare host, or a hull built before its
-		# MeshInstance3D exists). Synthesise the box the old code assumed,
-		# centred on the origin the way ModuleCatalog.get_hull_mesh_fit()
-		# recentres real hull geometry, so the fallback is at least
-		# self-consistent instead of hovering above the roof.
 		surface["aabb"] = AABB(-hull_size * 0.5, hull_size)
 
 	var tint = LiveryScript.zone_color(faction, "hull_stripe")
 	var hazard_tex = _get_texture("hazard", _draw_hazard)
 
-	# 2 hazard-stripe strips near the top edge of the tail panel (a real cut
-	# stencil's most common placement - a warning strip along an edge),
-	# projected onto whatever that panel actually is: a flat plate on a boxy
-	# hull, a sloped one on a wedge, a curved one on the airship.
-	var stripe_size = Vector2(extents.x * 0.18, extents.y * 0.16)
-	for side in [-1.0, 1.0]:
-		_project_decal(container, surface, hazard_tex, tint, stripe_size,
-			Vector3(0.5 + side * 0.18, 0.78, 1.0), Vector3.BACK)
+	# 2 hazard-stripe strips near the top edge of the tail panel
+	if LiveryScript.decal_show_hazard(faction):
+		var stripe_size = Vector2(extents.x * 0.18, extents.y * 0.16)
+		for side in [-1.0, 1.0]:
+			_project_decal(container, surface, hazard_tex, tint, stripe_size,
+				Vector3(0.5 + side * 0.18, 0.78, 1.0), Vector3.BACK)
 
-	# 1 stencil serial number, small, on the starboard flank near the front.
-	var serial = _get_faction_serial(faction)
+	# 1 stencil serial number on the starboard flank
+	var serial = LiveryScript.decal_serial(faction)
+	if serial == "":
+		serial = _get_faction_serial(faction)
 	var serial_tex = _get_texture("serial_%s" % serial, func(img): _draw_serial(img, serial))
 	_project_decal(container, surface, serial_tex, tint,
 		Vector2(extents.z * 0.32, extents.y * 0.14),
 		Vector3(1.0, 0.6, 0.6), Vector3.RIGHT)
 
-	# 1 mascot/insignia icon, small and fixed - never more than ~12% of the
-	# hull's own footprint width, well under the "silhouette-scale" line
-	# these are deliberately kept clear of (unlike hull_greebles.gd's 5
-	# treated factions). A dark circular badge sits just behind it (offset
-	# slightly lower so the two cards don't z-fight) and slightly larger,
-	# so the mascot icon reads as a bold graphic badge - "a star icon in a
-	# dark circle" - instead of a bare tinted silhouette floating with
-	# nothing behind it. The badge itself is a fixed dark neutral color,
-	# not faction-tinted - every reference badge is dark regardless of the
-	# unit's own paint scheme, same convention a real insignia patch uses.
-	# Badge and mascot are projected onto the roof as a pair from the SAME
-	# anchor, so they share one surface point and one normal and therefore stay
-	# concentric on a sloped or curved roof - the old pair used two hardcoded
-	# positions differing only in world Y, which slid apart the moment the roof
-	# was not horizontal. They are separated along the surface normal instead
-	# of along world Y, which is what "just behind it" actually means.
+	# 1 mascot/insignia icon on roof
 	var mascot_tex = _get_mascot_texture(faction)
 	var mascot_span: float = min(extents.x, extents.z) * 0.22
 	var mascot_size = Vector2(mascot_span, mascot_span)
-	var badge_tex = _get_texture("circle_badge", _draw_circle_badge)
-	var badge_size = mascot_size * 1.4
 	var mascot_anchor := Vector3(0.5, 1.0, 0.58)
-	_project_decal(container, surface, badge_tex, Color(0.07, 0.07, 0.08), badge_size,
-		mascot_anchor, Vector3.UP)
+
+	var badge_style = LiveryScript.decal_badge(faction)
+	if badge_style != "none":
+		var badge_tex = _get_texture("circle_badge", _draw_circle_badge)
+		var badge_size = mascot_size * 1.4
+		_project_decal(container, surface, badge_tex, Color(0.07, 0.07, 0.08), badge_size,
+			mascot_anchor, Vector3.UP)
+
 	_project_decal(container, surface, mascot_tex, tint, mascot_size,
 		mascot_anchor, Vector3.UP, mascot_span * 0.02)

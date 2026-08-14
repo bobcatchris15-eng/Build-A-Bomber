@@ -1,241 +1,155 @@
 {
- "schema_version": 1,
- "name": "Scattered Peaks",
- "description": "The roster's first big map: nearly double Twin Bridges' size, with four distinct plateaus scattered off-center (not one dominant hill) rewarding spread-out map control over turtling on a single objective. A long open march separates both bases from the first contested high ground, land-only - real terrain does the chokepoint work here, not rock-cluster props.",
- "map_half_extents": 550,
+ "description": "Whispering Highlands: An expansive Scottish/Nordic highland landscape featuring four fortified plateaus, sunken stream defiles, and pine forest belts. Vast distances demand mobile reconnaissance while controlling the plateaus guarantees artillery dominance.",
  "ground_color": [
   0.23,
-  0.22,
-  0.17
+  0.24,
+  0.18
  ],
- "water_areas": [],
- "obstacles": [],
- "terrain": {
-  "heightmap": "res://data/maps/scattered_peaks_height.png",
-  "surfacemap": "res://data/maps/scattered_peaks_surface.png",
-  "height_scale": 18.0,
-  "features": [
-   {
-    "type": "plateau",
-    "center": [
-     -220,
-     140
-    ],
-    "half_extents": [
-     40,
-     40
-    ],
-    "height": 18,
-    "falloff": 42
-   },
-   {
-    "type": "plateau",
-    "center": [
-     220,
-     -140
-    ],
-    "half_extents": [
-     40,
-     40
-    ],
-    "height": 18,
-    "falloff": 42
-   },
-   {
-    "type": "plateau",
-    "center": [
-     220,
-     140
-    ],
-    "half_extents": [
-     25,
-     25
-    ],
-    "height": 12,
-    "falloff": 28
-   },
-   {
-    "type": "plateau",
-    "center": [
-     -220,
-     -140
-    ],
-    "half_extents": [
-     25,
-     25
-    ],
-    "height": 12,
-    "falloff": 28
-   }
-  ]
- },
- "surface_zones": [
+ "map_half_extents": 550,
+ "name": "Scattered Peaks",
+ "obstacles": [
   {
    "center": [
-    -220,
+    -120,
     0,
-    140
+    0
    ],
    "half_extents": [
-    46,
-    46
+    14,
+    20
    ],
-   "surface_type": "rocky"
+   "type": "rock"
   },
   {
    "center": [
-    220,
+    120,
     0,
-    -140
+    0
    ],
    "half_extents": [
-    46,
-    46
+    14,
+    20
    ],
-   "surface_type": "rocky"
-  },
-  {
-   "center": [
-    220,
-    0,
-    140
-   ],
-   "half_extents": [
-    31,
-    31
-   ],
-   "surface_type": "gravel"
-  },
-  {
-   "center": [
-    -220,
-    0,
-    -140
-   ],
-   "half_extents": [
-    31,
-    31
-   ],
-   "surface_type": "gravel"
+   "type": "rock"
   }
  ],
  "resource_nodes": [
   {
+   "amount": 1200,
    "position": [
     -60,
     0,
     400
    ],
-   "type": "metal",
-   "amount": 1200
+   "type": "metal"
   },
   {
+   "amount": 900,
    "position": [
     60,
     0,
     400
    ],
-   "type": "crystal",
-   "amount": 900
+   "type": "crystal"
   },
   {
+   "amount": 1200,
    "position": [
     60,
     0,
     -400
    ],
-   "type": "metal",
-   "amount": 1200
+   "type": "metal"
   },
   {
+   "amount": 900,
    "position": [
     -60,
     0,
     -400
    ],
-   "type": "crystal",
-   "amount": 900
+   "type": "crystal"
   },
   {
+   "amount": 1000,
    "position": [
     -100,
     0,
     250
    ],
-   "type": "metal",
-   "amount": 1000
+   "type": "metal"
   },
   {
+   "amount": 1000,
    "position": [
     100,
     0,
     -250
    ],
-   "type": "metal",
-   "amount": 1000
+   "type": "metal"
   },
   {
+   "amount": 1100,
    "position": [
     -380,
     0,
     250
    ],
-   "type": "metal",
-   "amount": 1100
+   "type": "metal"
   },
   {
+   "amount": 1100,
    "position": [
     380,
     0,
     -250
    ],
-   "type": "metal",
-   "amount": 1100
+   "type": "metal"
   },
   {
+   "amount": 800,
    "position": [
     350,
     0,
     180
    ],
-   "type": "crystal",
-   "amount": 800
+   "type": "crystal"
   },
   {
+   "amount": 800,
    "position": [
     -350,
     0,
     -180
    ],
-   "type": "crystal",
-   "amount": 800
+   "type": "crystal"
   },
   {
+   "amount": 1000,
    "position": [
     0,
     0,
     0
    ],
-   "type": "crystal",
-   "amount": 1000
+   "type": "crystal"
   },
   {
+   "amount": 900,
    "position": [
     450,
     0,
     300
    ],
-   "type": "metal",
-   "amount": 900
+   "type": "metal"
   },
   {
+   "amount": 900,
    "position": [
     -450,
     0,
     -300
    ],
-   "type": "metal",
-   "amount": 900
+   "type": "metal"
   },
   {
    "amount": 900,
@@ -318,52 +232,191 @@
    ]
   }
  ],
+ "schema_version": 1,
  "spawns": [
   {
-   "id": "player",
-   "hq": [
-    0,
-    0,
-    480
-   ],
    "factory": [
     -30,
     0,
     462
    ],
-   "refinery": [
-    27,
-    0,
-    456
-   ],
    "harvester": [
     18,
     1.5,
     438
-   ]
-  },
-  {
-   "id": "enemy",
+   ],
    "hq": [
     0,
     0,
-    -480
+    480
    ],
+   "id": "player",
+   "refinery": [
+    27,
+    0,
+    456
+   ]
+  },
+  {
    "factory": [
     30,
     0,
     -462
    ],
-   "refinery": [
-    -27,
-    0,
-    -456
-   ],
    "harvester": [
     -18,
     1.5,
     -438
+   ],
+   "hq": [
+    0,
+    0,
+    -480
+   ],
+   "id": "enemy",
+   "refinery": [
+    -27,
+    0,
+    -456
    ]
   }
- ]
+ ],
+ "surface_zones": [
+  {
+   "center": [
+    -220,
+    0,
+    140
+   ],
+   "half_extents": [
+    46,
+    46
+   ],
+   "surface_type": "rocky"
+  },
+  {
+   "center": [
+    220,
+    0,
+    -140
+   ],
+   "half_extents": [
+    46,
+    46
+   ],
+   "surface_type": "rocky"
+  },
+  {
+   "center": [
+    220,
+    0,
+    140
+   ],
+   "half_extents": [
+    31,
+    31
+   ],
+   "surface_type": "gravel"
+  },
+  {
+   "center": [
+    -220,
+    0,
+    -140
+   ],
+   "half_extents": [
+    31,
+    31
+   ],
+   "surface_type": "gravel"
+  }
+ ],
+ "terrain": {
+  "features": [
+   {
+    "center": [
+     -220,
+     140
+    ],
+    "falloff": 42,
+    "half_extents": [
+     40,
+     40
+    ],
+    "height": 18,
+    "type": "plateau"
+   },
+   {
+    "center": [
+     220,
+     -140
+    ],
+    "falloff": 42,
+    "half_extents": [
+     40,
+     40
+    ],
+    "height": 18,
+    "type": "plateau"
+   },
+   {
+    "center": [
+     220,
+     140
+    ],
+    "falloff": 28,
+    "half_extents": [
+     25,
+     25
+    ],
+    "height": 12,
+    "type": "plateau"
+   },
+   {
+    "center": [
+     -220,
+     -140
+    ],
+    "falloff": 28,
+    "half_extents": [
+     25,
+     25
+    ],
+    "height": 12,
+    "type": "plateau"
+   },
+   {
+    "end": [
+     200,
+     60
+    ],
+    "falloff": 24,
+    "start": [
+     -200,
+     60
+    ],
+    "depth": 3.5,
+    "type": "ravine",
+    "width": 24
+   },
+   {
+    "end": [
+     200,
+     -60
+    ],
+    "falloff": 24,
+    "start": [
+     -200,
+     -60
+    ],
+    "depth": 3.5,
+    "type": "ravine",
+    "width": 24
+   }
+  ],
+  "height_scale": 18.0,
+  "heightmap": "res://data/maps/scattered_peaks_height.png",
+  "surfacemap": "res://data/maps/scattered_peaks_surface.png"
+ },
+ "water_areas": []
 }

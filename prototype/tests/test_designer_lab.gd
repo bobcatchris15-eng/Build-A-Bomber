@@ -1907,8 +1907,94 @@ func test_hull_collider_rebuilt_on_scale() -> bool:
 	print("  [PASS] Gizmo refuses Hull and scales modules correctly.")
 	return true
 
+func test_resource_harvester_mounting_restrictions_and_procedural_hardware() -> bool:
+	print("Running Test Suite: Resource Harvester Placement Restrictions & Procedural Mounting Block...")
+	var placer = Node3D.new()
+	placer.set_script(preload("res://scripts/module_placer.gd"))
+	root.add_child(placer)
+	await tree.process_frame
+	await tree.process_frame
+
+	placer._place_hull_from_ui("brenntal_medium_a")
+	var hull_node: Node3D = placer.hull
+	if not is_instance_valid(hull_node):
+		print("  [FAIL] Failed to spawn brenntal_medium_a hull.")
+		placer.queue_free()
+		return false
+
+	var d = ModuleData.new()
+	d.type_id = "resource_harvester"
+
+	# 1. Reject deck, side, aft faces
+	var deck_normal = Vector3(0, 1, 0)
+	var deck_refusal = placer._placement_refusal_reason("resource_harvester", "weapon", deck_normal)
+	if deck_refusal == "":
+		print("  [FAIL] Harvester on deck facet was not refused.")
+		placer.queue_free()
+		return false
+
+	var side_normal = Vector3(1, 0, 0)
+	var side_refusal = placer._placement_refusal_reason("resource_harvester", "weapon", side_normal)
+	if side_refusal == "":
+		print("  [FAIL] Harvester on side facet was not refused.")
+		placer.queue_free()
+		return false
+
+	var aft_normal = Vector3(0, 0, 1)
+	var aft_refusal = placer._placement_refusal_reason("resource_harvester", "weapon", aft_normal)
+	if aft_refusal == "":
+		print("  [FAIL] Harvester on aft facet was not refused.")
+		placer.queue_free()
+		return false
+
+	# 2. Reject pointed prow / angled normal
+	var angled_normal = Vector3(0.5, 0, -0.7).normalized()
+	var prow_refusal = placer._placement_refusal_reason("resource_harvester", "weapon", angled_normal)
+	if prow_refusal == "":
+		print("  [FAIL] Harvester on pointed prow / angled facet was not refused.")
+		placer.queue_free()
+		return false
+
+	# 3. Allow flat front facet
+	var front_normal = Vector3(0, 0, -1)
+	var front_refusal = placer._placement_refusal_reason("resource_harvester", "weapon", front_normal)
+	if front_refusal != "":
+		print("  [FAIL] Harvester on flat front facet was unexpectedly refused: ", front_refusal)
+		placer.queue_free()
+		return false
+
+	# 4. Place on front facet and verify snapping & procedural mounting block
+	var placed_mod = placer._place_weapon("resource_harvester", Vector3(0.3, 0.2, -3.0), front_normal)
+	if not is_instance_valid(placed_mod):
+		print("  [FAIL] Harvester could not be placed on front facet.")
+		placer.queue_free()
+		return false
+
+	var facet_size: Vector2 = placed_mod.get_meta("facet_size", Vector2.ZERO)
+	if facet_size == Vector2.ZERO:
+		print("  [FAIL] Harvester placed on front facet has no facet_size metadata.")
+		placer.queue_free()
+		return false
+
+	var mount_block = placed_mod.get_node_or_null("HarvesterMountBlock")
+	if not mount_block or not (mount_block is MeshInstance3D):
+		print("  [FAIL] Harvester did not generate a HarvesterMountBlock MeshInstance3D.")
+		placer.queue_free()
+		return false
+
+	var drill_head = placed_mod.get_node_or_null("HarvesterDrillHead")
+	if not drill_head:
+		print("  [FAIL] Harvester did not instantiate HarvesterDrillHead.")
+		placer.queue_free()
+		return false
+
+	placer.queue_free()
+	print("  [PASS] Resource Harvester enforces front-facet restriction, rejects angled prows, and generates procedural mounting block with tricone drill head.")
+	return true
+
 func type_as_string(thing) -> String:
 	if thing == null:
 		return "null"
 	return str(thing)
+
 

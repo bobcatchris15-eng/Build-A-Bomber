@@ -444,47 +444,156 @@ def build_resource_harvester_arm():
 
 def build_resource_harvester_drill():
     """
-    Rotary auger / drill head.
-    Origin at the spin axis centre, top face at Blender Z=0 (attaches to arm wrist).
-    Drill body extends in Blender -Z (downward / Godot -Y), which is the boring direction.
-    auto_weapon.gd / battle code expected to spin this part.
-    Auger flights are baked in as static twisted fins for a readable 'drill' silhouette.
+    Heavy-duty Tricone Rotary Drill Head with Protective Cage Shroud.
+    Origin at base attachment plate (Blender Z=0).
+    Drill bores forward along Blender +Z (Godot +Y outward normal).
     """
     bm = bmesh.new()
 
-    # Drive hub / gearbox at top (connects to wrist)
-    add_cyl_z(bm, (0, 0, -0.04), 0.078, 0.08, segments=16)
-    # Gearbox housing detail
-    add_box(bm, (0.06, 0.0, -0.05), (0.04, 0.06, 0.06), bevel=0.005)
-    # Bolt ring on gearbox flange
-    bolt_ring_z(bm, -0.005, 0.068, count=8, bolt_r=0.007, bolt_h=0.010)
+    # 1. BASE MOUNTING COLLAR (Z = 0.0 to 0.08)
+    add_cyl_z(bm, (0, 0, 0.04), radius=0.48, height=0.08, segments=24)
+    add_cyl_z(bm, (0, 0, 0.07), radius=0.44, height=0.04, segments=24)
+    bolt_ring_z(bm, 0.082, 0.44, count=12, bolt_r=0.012, bolt_h=0.016)
 
-    # Main drill shank — tapers from hub to tip
-    add_cone_z(bm, (0, 0, -0.19), 0.048, 0.035, 0.22, segments=16)
+    # 2. ROTARY TRANSMISSION & DRIVE MOTOR HOUSING (Z = 0.08 to 0.35)
+    add_cyl_z(bm, (0, 0, 0.20), radius=0.41, height=0.24, segments=24)
+    add_cyl_z(bm, (0, 0, 0.33), radius=0.43, height=0.04, segments=24)
+    bolt_ring_z(bm, 0.34, 0.40, count=12, bolt_r=0.009, bolt_h=0.012)
 
-    # Pilot point (carbide tip)
-    add_cone_z(bm, (0, 0, -0.325), 0.020, 0.004, 0.045, segments=10)
+    # Dual hydraulic drive motor pods (left / right)
+    for sx in (-0.38, 0.38):
+        add_cyl_z(bm, (sx, 0.0, 0.20), radius=0.075, height=0.18, segments=14)
+        add_box(bm, (sx * 0.90, 0.0, 0.20), (0.08, 0.12, 0.14), bevel=0.008)
+        add_tube_between(bm, (sx, 0.0, 0.27), (sx * 0.65, 0.20, 0.12), radius=0.012, segments=6)
+        add_tube_between(bm, (sx, 0.0, 0.13), (sx * 0.65, -0.20, 0.12), radius=0.012, segments=6)
 
-    # Three carbide cutter blades (auger flights) at 120-degree spacing
-    # These are elongated angled boxes — twisted appearance comes from progressive Z position
+    # Lubrication / grease manifold on top
+    add_box(bm, (0.0, 0.36, 0.20), (0.16, 0.08, 0.12), bevel=0.008)
+    for px in (-0.04, 0.04):
+        add_cyl_y(bm, (px, 0.40, 0.20), radius=0.010, height=0.03, segments=8)
+
+    # 3. TRICONE JOURNAL LUG ASSEMBLY (Z = 0.35 to 0.72)
+    add_cone_z(bm, (0, 0, 0.48), r_bot=0.38, r_top=0.27, height=0.26, segments=24)
+
     for i in range(3):
-        angle = math.radians(i * 120)
-        # Each flight sweeps from near hub to near tip across ~0.22 units of Z
-        for seg in range(5):
-            frac = seg / 4.0
-            t_angle = angle + frac * math.radians(120)  # one full twist over the flight
-            r = 0.042 - frac * 0.012      # taper in radius
-            bz = -0.08 - frac * 0.19
-            fx = math.cos(t_angle) * (r + 0.052)
-            fy = math.sin(t_angle) * (r + 0.052)
-            # Blade segment box — angled by rotation
-            add_box(bm, (fx, fy, bz),
-                    (0.045, 0.010, 0.038),
-                    bevel=0.003, bevel_segments=1,
-                    rot_z=t_angle + math.pi * 0.5)
+        angle = i * (math.tau / 3.0)
+        ca = math.cos(angle)
+        sa = math.sin(angle)
+
+        lug_base = mathutils.Vector((ca * 0.32, sa * 0.32, 0.42))
+        lug_knuckle = mathutils.Vector((ca * 0.36, sa * 0.36, 0.62))
+        cone_apex_target = mathutils.Vector((ca * 0.08, sa * 0.08, 0.98))
+
+        add_box(bm, ((lug_base.x + lug_knuckle.x)*0.5, (lug_base.y + lug_knuckle.y)*0.5, 0.52),
+                (0.12, 0.14, 0.24), bevel=0.010, rot_z=angle)
+        add_tube_between(bm, lug_knuckle, cone_apex_target, radius=0.055, segments=12)
+
+        for bz in (0.48, 0.56, 0.64):
+            stud_pos = mathutils.Vector((ca * 0.40, sa * 0.40, bz))
+            add_cyl_z(bm, stud_pos, radius=0.010, height=0.016, segments=6)
+
+    # Slurry flush nozzles between lugs
+    for i in range(3):
+        angle = (i * 120.0 + 60.0) * (math.pi / 180.0)
+        nx = math.cos(angle) * 0.16
+        ny = math.sin(angle) * 0.16
+        add_cone_z(bm, (nx, ny, 0.60), r_bot=0.024, r_top=0.014, height=0.10, segments=8)
+
+    # 4. 3 CONICAL ROLLER CUTTERS (TRICONE CONES) (Z = 0.58 to 1.08)
+    for i in range(3):
+        angle = i * (math.tau / 3.0)
+        ca = math.cos(angle)
+        sa = math.sin(angle)
+
+        p_base = mathutils.Vector((ca * 0.32, sa * 0.32, 0.62))
+        p_tip = mathutils.Vector((ca * 0.06, sa * 0.06, 1.02))
+        cone_axis = (p_tip - p_base).normalized()
+        cone_len = (p_tip - p_base).length
+
+        add_tube_between(bm, p_base, p_tip, radius=0.14, segments=16)
+
+        # Heel row (8 carbide gauge teeth)
+        r1_pos = p_base + cone_axis * (cone_len * 0.20)
+        add_tube_between(bm, r1_pos - cone_axis * 0.03, r1_pos + cone_axis * 0.03, radius=0.165, segments=16)
+        for t in range(8):
+            ta = t * (math.tau / 8.0)
+            up_v = mathutils.Vector((0, 0, 1))
+            rad_u = cone_axis.cross(up_v).normalized()
+            rad_v = cone_axis.cross(rad_u).normalized()
+            t_offset = (rad_u * math.cos(ta) + rad_v * math.sin(ta)) * 0.165
+            add_box(bm, r1_pos + t_offset, (0.022, 0.022, 0.035), bevel=0.004)
+
+        # Middle row (6 chisel teeth)
+        r2_pos = p_base + cone_axis * (cone_len * 0.55)
+        add_tube_between(bm, r2_pos - cone_axis * 0.025, r2_pos + cone_axis * 0.025, radius=0.125, segments=14)
+        for t in range(6):
+            ta = (t + 0.5) * (math.tau / 6.0)
+            rad_u = cone_axis.cross(mathutils.Vector((0, 0, 1))).normalized()
+            rad_v = cone_axis.cross(rad_u).normalized()
+            t_offset = (rad_u * math.cos(ta) + rad_v * math.sin(ta)) * 0.125
+            add_box(bm, r2_pos + t_offset, (0.020, 0.020, 0.032), bevel=0.003)
+
+        # Apex row (4 chisel teeth)
+        r3_pos = p_base + cone_axis * (cone_len * 0.85)
+        add_tube_between(bm, r3_pos - cone_axis * 0.02, r3_pos + cone_axis * 0.02, radius=0.080, segments=12)
+        for t in range(4):
+            ta = t * (math.tau / 4.0)
+            rad_u = cone_axis.cross(mathutils.Vector((0, 0, 1))).normalized()
+            rad_v = cone_axis.cross(rad_u).normalized()
+            t_offset = (rad_u * math.cos(ta) + rad_v * math.sin(ta)) * 0.080
+            add_box(bm, r3_pos + t_offset, (0.016, 0.016, 0.028), bevel=0.002)
+
+    # Pilot tip
+    add_cone_z(bm, (0, 0, 1.08), r_bot=0.045, r_top=0.008, height=0.06, segments=10)
+
+    # 5. HEAVY DUTY PROTECTIVE CAGE SHROUD (Z = 0.05 to 0.82)
+    for a_deg in (45, 135, 225, 315):
+        a = math.radians(a_deg)
+        gx = math.cos(a) * 0.46
+        gy = math.sin(a) * 0.46
+        add_box(bm, (gx, gy, 0.10), (0.08, 0.08, 0.12), bevel=0.006, rot_z=a)
+
+    hoop_segs = 12
+    for i in range(hoop_segs):
+        t0 = (i / float(hoop_segs)) * math.pi
+        t1 = ((i + 1) / float(hoop_segs)) * math.pi
+        add_tube_between(bm, (math.cos(t0) * 0.54, math.sin(t0) * 0.54, 0.16),
+                             (math.cos(t1) * 0.54, math.sin(t1) * 0.54, 0.16), radius=0.022, segments=8)
+        add_tube_between(bm, (math.cos(t0) * 0.52, math.sin(t0) * 0.52, 0.46),
+                             (math.cos(t1) * 0.52, math.sin(t1) * 0.52, 0.46), radius=0.020, segments=8)
+        add_tube_between(bm, (math.cos(t0) * 0.47, math.sin(t0) * 0.47, 0.76),
+                             (math.cos(t1) * 0.47, math.sin(t1) * 0.47, 0.76), radius=0.018, segments=8)
+
+    for ang_deg in (15, 50, 90, 130, 165):
+        a = math.radians(ang_deg)
+        ca = math.cos(a)
+        sa = math.sin(a)
+        p_base = (ca * 0.48, sa * 0.48, 0.06)
+        p_h1 = (ca * 0.54, sa * 0.54, 0.16)
+        p_h2 = (ca * 0.52, sa * 0.52, 0.46)
+        p_h3 = (ca * 0.47, sa * 0.47, 0.76)
+        add_tube_between(bm, p_base, p_h1, radius=0.018, segments=8)
+        add_tube_between(bm, p_h1, p_h2, radius=0.018, segments=8)
+        add_tube_between(bm, p_h2, p_h3, radius=0.018, segments=8)
+
+    cowl_segs = 6
+    for i in range(cowl_segs):
+        frac = i / float(cowl_segs)
+        a = math.radians(35.0 + frac * 110.0)
+        cowl_pos = (math.cos(a) * 0.52, math.sin(a) * 0.52, 0.44)
+        add_box(bm, cowl_pos, (0.12, 0.024, 0.52), bevel=0.004, rot_z=a + math.pi*0.5)
+
+    for ang_deg in (30, 70, 110, 150):
+        a = math.radians(ang_deg)
+        tx = math.cos(a) * 0.48
+        ty = math.sin(a) * 0.48
+        add_box(bm, (tx, ty, 0.81), (0.035, 0.050, 0.080), bevel=0.004, rot_z=a)
+
+    for sx in (-0.38, 0.38):
+        add_tube_between(bm, (sx, 0.0, 0.32), (sx * 1.35, 0.0, 0.46), radius=0.018, segments=6)
 
     export_bmesh(bm, "resource_harvester_drill", "resource_harvester_drill.glb",
-                 color=(0.30, 0.32, 0.35), metallic=0.78, roughness=0.30)
+                 color=(0.28, 0.30, 0.33, 1.0), metallic=0.82, roughness=0.32)
 
 
 # ---------------------------------------------------------------------------

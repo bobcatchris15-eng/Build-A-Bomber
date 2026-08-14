@@ -23,15 +23,64 @@
    ]
   }
  ],
- "description": "A river spans the entire map with exactly two bridges crossing it, well apart - fight for one crossing or split your force across both. The largest map in the roster; resources stay on your own bank, but taking a bridge means taking the fight to the enemy's.",
+ "description": "Shattered Arch: A grand river gorge spans the map with two reinforced bridge crossings. Defensive bluffs overlook each riverbank; secure a bridgehead with armored units or flank with amphibious vehicles across the shallow sandbars.",
  "ground_color": [
-  0.219999998807907,
-  0.25,
-  0.200000002980232
+  0.22,
+  0.26,
+  0.20
  ],
  "map_half_extents": 300,
  "name": "Twin Bridges",
- "obstacles": [],
+ "obstacles": [
+  {
+   "center": [
+    -120.0,
+    0.0,
+    55.0
+   ],
+   "half_extents": [
+    8.0,
+    8.0
+   ],
+   "type": "rock"
+  },
+  {
+   "center": [
+    -120.0,
+    0.0,
+    -55.0
+   ],
+   "half_extents": [
+    8.0,
+    8.0
+   ],
+   "type": "rock"
+  },
+  {
+   "center": [
+    120.0,
+    0.0,
+    55.0
+   ],
+   "half_extents": [
+    8.0,
+    8.0
+   ],
+   "type": "rock"
+  },
+  {
+   "center": [
+    120.0,
+    0.0,
+    -55.0
+   ],
+   "half_extents": [
+    8.0,
+    8.0
+   ],
+   "type": "rock"
+  }
+ ],
  "resource_nodes": [
   {
    "amount": 1200,
@@ -194,6 +243,24 @@
     -192
    ],
    "type": "lumber"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    180,
+    0,
+    80
+   ],
+   "type": "oil"
+  },
+  {
+   "amount": 1400,
+   "position": [
+    -180,
+    0,
+    -80
+   ],
+   "type": "oil"
   }
  ],
  "base_zones": [
@@ -271,6 +338,20 @@
    ]
   }
  ],
+ "surface_zones": [
+  {
+   "center": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "half_extents": [
+    60.0,
+    25.0
+   ],
+   "surface_type": "marsh"
+  }
+ ],
  "water_areas": [
   {
    "center": [
@@ -280,50 +361,8 @@
    ],
    "half_extents": [
     300,
-    30
+    26
    ]
-  }
- ],
- "hills": [
-  {
-   "center": [
-    -210,
-    0,
-    130
-   ],
-   "radius": 20,
-   "falloff": 26,
-   "height": 10
-  },
-  {
-   "center": [
-    -210,
-    0,
-    -130
-   ],
-   "radius": 20,
-   "falloff": 26,
-   "height": 10
-  },
-  {
-   "center": [
-    210,
-    0,
-    130
-   ],
-   "radius": 16,
-   "falloff": 20,
-   "height": -7
-  },
-  {
-   "center": [
-    210,
-    0,
-    -130
-   ],
-   "radius": 16,
-   "falloff": 20,
-   "height": -7
   }
  ]
 }

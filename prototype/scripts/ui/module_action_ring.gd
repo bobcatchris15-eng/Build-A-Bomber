@@ -94,7 +94,7 @@ func close() -> void:
 func _process(delta: float) -> void:
 	if not _is_open:
 		return
-	if target_node == null or not is_instance_valid(target_node) or not target_node.is_inside_tree():
+	if not is_instance_valid(target_node) or not target_node.is_inside_tree():
 		close()
 		return
 

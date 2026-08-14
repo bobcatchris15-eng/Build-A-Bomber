@@ -159,6 +159,7 @@ func serialize_hull(hull: Node3D) -> Dictionary:
 				"mount_style": child.get_meta("mount_style", ""),
 				"mount_normal": _vec3_to_dict(child.get_meta("mount_normal", Vector3.UP)),
 				"facet": child.get_meta("facet", ""),
+				"facet_size": {"x": child.get_meta("facet_size").x, "y": child.get_meta("facet_size").y} if child.has_meta("facet_size") and child.get_meta("facet_size") is Vector2 else {},
 				# Whether this weapon is embedded in a near-vertical face and
 				# fires out through a blister housing (module_placer's
 				# _is_sponson_mount). Optional and defaulting to false, so a
@@ -1008,6 +1009,9 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 			new_module.set_meta("mount_normal", Vector3(mn.x, mn.y, mn.z))
 		if mod.get("facet", "") != "":
 			new_module.set_meta("facet", mod["facet"])
+		if mod.has("facet_size") and mod["facet_size"] is Dictionary and not mod["facet_size"].is_empty():
+			var fsd = mod["facet_size"]
+			new_module.set_meta("facet_size", Vector2(fsd.get("x", 0.0), fsd.get("y", 0.0)))
 		# Absent on every blueprint written before sponsons existed, which is
 		# exactly the right default. Must be set BEFORE rebuild_visual() below -
 		# that is what reads it and rebuilds the blister housing.

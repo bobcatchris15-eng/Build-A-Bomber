@@ -25,6 +25,7 @@
 	"modules": [
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -43,18 +44,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 0.845940947532654,
-				"y": 0.845940947532654,
-				"z": 0.845940947532654
+				"x": 0.641251146793365,
+				"y": 0.641251146793365,
+				"z": 0.641251146793365
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 13,
+				"cost_metal": 7,
 				"dps": 0.0,
-				"hp": 68.5,
-				"weight": 30.5
+				"hp": 41.0,
+				"weight": 13.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.191520035266876,
@@ -85,6 +86,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -103,18 +105,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 0.845940947532654,
-				"y": 0.845940947532654,
-				"z": 0.845940947532654
+				"x": 0.641251146793365,
+				"y": 0.641251146793365,
+				"z": 0.641251146793365
 			},
 			"scale_flip_x": true,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 13,
+				"cost_metal": 7,
 				"dps": 0.0,
-				"hp": 68.5,
-				"weight": 30.5
+				"hp": 41.0,
+				"weight": 13.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.0100511908531189,
@@ -145,6 +147,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -163,18 +166,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 0.845940947532654,
-				"y": 0.845940947532654,
-				"z": 0.845940947532654
+				"x": 0.641251146793365,
+				"y": 0.641251146793365,
+				"z": 0.641251146793365
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 13,
+				"cost_metal": 7,
 				"dps": 0.0,
-				"hp": 68.5,
-				"weight": 30.5
+				"hp": 41.0,
+				"weight": 13.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.0100799798965454,
@@ -205,6 +208,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -223,18 +227,18 @@
 				"z": 0.0
 			},
 			"scale": {
-				"x": 0.845940947532654,
-				"y": 0.845940947532654,
-				"z": 0.845940947532654
+				"x": 0.641251146793365,
+				"y": 0.641251146793365,
+				"z": 0.641251146793365
 			},
 			"scale_flip_x": false,
 			"sponson": false,
 			"stats": {
 				"cost_crystal": 0,
-				"cost_metal": 13,
+				"cost_metal": 7,
 				"dps": 0.0,
-				"hp": 68.5,
-				"weight": 30.5
+				"hp": 41.0,
+				"weight": 13.0
 			},
 			"tweaks": {
 				"chine_belly_drop": 0.0,
@@ -265,6 +269,7 @@
 		},
 		{
 			"facet": "top",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
@@ -302,6 +307,7 @@
 		},
 		{
 			"facet": "",
+			"facet_size": {},
 			"mount_normal": {
 				"x": 0.0,
 				"y": 1.0,
