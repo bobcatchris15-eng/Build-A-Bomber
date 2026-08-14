@@ -1062,6 +1062,17 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 		new_weapon.global_position = pos
 	new_weapon.transform.basis = mount_xf.basis
 
+	# Bottom-facet vertical flip: mirrors _update_module_placement()'s treatment so
+	# the initial-drop path matches the drag-and-place path exactly. Weapons need
+	# rebuild_visual() + _refit_module_collider() because their collider was sized
+	# from the upright geometry before the flip was applied; the rebuild re-measures
+	# the now-correctly-oriented visual and the refit re-sizes the collider to it.
+	if local_normal.y < -0.7:
+		new_weapon.transform.basis = new_weapon.transform.basis * Basis(Vector3.UP, PI)
+		if category == "weapon":
+			VisualBuilder.rebuild_visual(new_weapon)
+			_refit_module_collider(new_weapon)
+
 	# Auto-scale armor to fit facet
 	if category == "armor":
 		if hull:
@@ -1122,6 +1133,31 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 			new_weapon.set_meta("facet", ModuleCatalog.classify_facet(local_normal))
 			if type_id == "energy_barrier_projector":
 				VisualBuilder.build_visual(type_id, new_weapon, catalog_data.size, catalog_data.color, tweaks)
+
+	elif type_id == "resource_harvester":
+		if hull:
+			var facet_meas = _measure_hull_facet(hull, new_weapon.position, local_normal, new_weapon.transform.basis)
+			var target_x = 1.0
+			var target_z = 1.0
+			var harvester_pos = new_weapon.position
+
+			if facet_meas["valid"]:
+				target_x = facet_meas["size"].x
+				target_z = facet_meas["size"].z
+				harvester_pos = facet_meas["center"]
+			else:
+				var hull_size: Vector3 = Vector3(ModuleCatalog.REFERENCE_HULL_SIZE)
+				var hull_shape = hull.get_node_or_null("CollisionShape3D")
+				if hull_shape and hull_shape.shape is BoxShape3D:
+					hull_size = hull_shape.shape.size
+				target_x = hull_size.x
+				target_z = hull_size.y
+				harvester_pos = Vector3(0, 0, -hull_size.z / 2.0)
+
+			new_weapon.position = harvester_pos
+			new_weapon.set_meta("facet_size", Vector2(target_x, target_z))
+			new_weapon.set_meta("facet", "front")
+			VisualBuilder.build_visual(type_id, new_weapon, catalog_data.get("size", Vector3.ONE), catalog_data.color, tweaks)
 
 	# The weapon mount metas (mount_style, mount_normal, facet, sponson) are
 	# set at the TOP of this function, not here: build_visual() needs the
@@ -2055,7 +2091,14 @@ func would_mirror(category: String, pos: Vector3, normal: Vector3) -> bool:
 
 
 func _placement_refusal_reason(type_id: String, category: String, normal: Vector3) -> String:
-	if category != "weapon" or hull == null:
+	if hull == null:
+		return ""
+	if type_id == "resource_harvester":
+		var local_normal = (hull.global_transform.basis.inverse() * normal).normalized()
+		if ModuleCatalog.classify_facet(local_normal) != "front" or local_normal.z > -0.85:
+			return "Resource Harvester can only be mounted on a flat front facet."
+		return ""
+	if category != "weapon":
 		return ""
 	if ModuleCatalog.is_sponson_capable(type_id):
 		return ""
@@ -2439,7 +2482,16 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 
 	var yaw_offset = module.get_meta("yaw_offset", 0.0)
 	module.rotate_object_local(Vector3.UP, yaw_offset)
-	
+
+	# Vertical flip for bottom facets: a 180° rotation about the module's local Z
+	# (which is perpendicular to the surface normal, pointing INTO the surface).
+	# On the belly of a helicopter, this makes a missile pod face the correct
+	# direction instead of upside-down / backward relative to the hull. Applied
+	# as a basis modification in module-local space so it composes correctly
+	# with yaw, mirroring, and the mount orientation.
+	if local_normal.y < -0.7:
+		module.transform.basis = module.transform.basis * Basis(Vector3.UP, PI)
+
 	if category == "weapon":
 		var VisualBuilder = preload("res://scripts/visual_builder.gd")
 		VisualBuilder.rebuild_visual(module)
@@ -2475,10 +2527,17 @@ func _update_module_placement(module: Node3D, world_pos: Vector3, normal: Vector
 			mirror.transform.basis = mirror_xf.basis
 
 			mirror.rotate_object_local(Vector3.UP, -yaw_offset)
+			if local_mirrored_normal.y < -0.7:
+				mirror.transform.basis = mirror.transform.basis * Basis(Vector3.UP, PI)
 			if category == "weapon":
 				var VisualBuilder = preload("res://scripts/visual_builder.gd")
 				VisualBuilder.rebuild_visual(mirror)
 			_apply_mirror_flip(mirror)
+
+# Non-static wrapper around the static _mount_transform, so drag_drop_manager.gd
+# can call it via root.ghost_mount_transform() without needing to preload the script.
+func ghost_mount_transform(local_pos: Vector3, local_normal: Vector3, type_id: String) -> Transform3D:
+	return _mount_transform(local_pos, local_normal, type_id, false, false)
 
 # Re-runs the same facet/mount classification _place_weapon() does at initial placement.
 func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: bool = false):
@@ -2541,6 +2600,29 @@ func _reclassify_module_after_drag(module: Node3D, normal: Vector3, is_mirror: b
 			mod_data.scale_multiplier = Vector3(module.scale.x, 1.0, module.scale.z)
 
 		module.set_meta("facet", ModuleCatalog.classify_facet(local_normal))
+
+	elif data.type_id == "resource_harvester":
+		var facet_meas = _measure_hull_facet(hull, module.position, local_normal, module.transform.basis)
+		var target_x = 1.0
+		var target_z = 1.0
+		var harvester_pos = module.position
+
+		if facet_meas["valid"]:
+			target_x = facet_meas["size"].x
+			target_z = facet_meas["size"].z
+			harvester_pos = facet_meas["center"]
+		else:
+			target_x = hull_size.x
+			target_z = hull_size.y
+			harvester_pos = Vector3(0, 0, -hull_size.z / 2.0)
+
+		module.position = harvester_pos
+		module.set_meta("facet_size", Vector2(target_x, target_z))
+		module.set_meta("facet", "front")
+
+		var VisualBuilder = preload("res://scripts/visual_builder.gd")
+		VisualBuilder.rebuild_visual(module)
+		_refit_module_collider(module)
 
 	elif category == "weapon":
 		var hull_type_for_mount = hull.get_meta("type_id", "") if hull else ""

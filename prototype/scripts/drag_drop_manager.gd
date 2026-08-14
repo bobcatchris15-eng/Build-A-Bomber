@@ -292,6 +292,20 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 	# the ghost by however far the visual's bottom is above the
 	# local origin.
 	ghost_mesh.position = result.position + Vector3(0, _ghost_visual_bottom_y, 0)
+
+	# Apply the same mount + bottom-facet-flip transform the placer uses,
+	# so the ghost preview shows the module's correct orientation before the
+	# drop rather than the ghost-builder's default upright frame.
+	var hull_ghost: Node3D = null
+	if root and root.has_method("ghost_mount_transform") and root.has_node("Hull"):
+		hull_ghost = root.get_node("Hull")
+		if hull_ghost:
+			var local_normal: Vector3 = hull_ghost.global_transform.basis.inverse() * result.normal
+			var mount_xf: Transform3D = root.ghost_mount_transform(
+				hull_ghost.to_local(result.position), local_normal, type_id)
+			ghost_mesh.transform.basis = mount_xf.basis
+			if local_normal.y < -0.7:
+				ghost_mesh.transform.basis = ghost_mesh.transform.basis * Basis(Vector3.UP, PI)
 	
 	# ASK THE PLACER, don't re-derive. This used to test
 	# `catalog_data.get("is_symmetric", true)`, a key no catalog entry defines -
@@ -306,6 +320,17 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 			root.add_child(ghost_mesh_mirror)
 		ghost_mesh_mirror.visible = true
 		ghost_mesh_mirror.position = Vector3(-result.position.x, ghost_mesh.position.y, result.position.z)
+		# Same mount + bottom-facet-flip as the primary ghost.
+		if hull_ghost:
+			var mirrored_normal := Vector3(-result.normal.x, result.normal.y, result.normal.z)
+			var local_mirrored_normal: Vector3 = hull_ghost.global_transform.basis.inverse() * mirrored_normal
+			var mirrored_local_pos := hull_ghost.to_local(result.position)
+			mirrored_local_pos.x = -mirrored_local_pos.x
+			var mirror_xf: Transform3D = root.ghost_mount_transform(
+				mirrored_local_pos, local_mirrored_normal, type_id)
+			ghost_mesh_mirror.transform.basis = mirror_xf.basis
+			if local_mirrored_normal.y < -0.7:
+				ghost_mesh_mirror.transform.basis = ghost_mesh_mirror.transform.basis * Basis(Vector3.UP, PI)
 	else:
 		if ghost_mesh_mirror:
 			ghost_mesh_mirror.visible = false
@@ -321,6 +346,11 @@ func _update_ghost_mesh(screen_pos: Vector2, type_id: String):
 		if not is_clipping and ghost_mesh_mirror and ghost_mesh_mirror.visible:
 			is_clipping = root.is_ghost_clipping(
 				ghost_mesh_mirror.transform, type_id, ghost_mesh_mirror)
+
+	if not is_clipping and root.has_method("_placement_refusal_reason"):
+		var refusal: String = root._placement_refusal_reason(type_id, category, result.normal)
+		if refusal != "":
+			is_clipping = true
 
 	_ghost_is_clipping = is_clipping
 
@@ -430,4 +460,3 @@ func _raycast_from_screen(screen_pos: Vector2):
 	var query = PhysicsRayQueryParameters3D.create(ray_origin, ray_origin + ray_dir * 1000.0)
 	query.collision_mask = 3 # Hits Hull (1) and Modules (2)
 	return space_state.intersect_ray(query)
-
