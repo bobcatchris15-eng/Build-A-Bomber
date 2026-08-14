@@ -151,7 +151,7 @@ Set `theme_type_variation` — do not override individual font/color properties 
 
 **Minimum hit target:** `HIT_TARGET_MIN = 32 px`. Nothing interactive should be smaller during real-time play.
 
-**Toolbar height:** `TOOLBAR_HEIGHT = 44 px`. The Design Lab top toolbar owns this slot; no dock or panel should begin above it.
+**Toolbar height:** `TOOLBAR_HEIGHT = 64 px`. The Design Lab top toolbar owns this slot; no dock or panel should begin above it.
 
 ---
 

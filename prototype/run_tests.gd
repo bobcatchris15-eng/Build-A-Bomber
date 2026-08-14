@@ -503,6 +503,13 @@ const SUITE_ORDER := [
 	# navmesh/Recast suites flake depending on what ran before them.
 	["ui_and_camera", "test_installed_bindings_match_input_service"],
 	["designer_lab", "test_resource_harvester_mounting_restrictions_and_procedural_hardware"],
+
+	# Instrument Console Pass, Phase A (ui/lab-01-station-ring): the ring's
+	# silhouette clearance is re-verified against an independent computation
+	# rather than its own helper, and tweak stations get an identity +
+	# coverage guard.
+	["module_action_ring", "test_tweak_station_angle_is_identity_of_name_not_index"],
+	["module_action_ring", "test_tweak_station_coverage_guards_every_tweak_spec_entry"],
 ]
 
 # Quarantine, applied uniformly rather than via a hand-maintained allowlist

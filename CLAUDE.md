@@ -86,8 +86,8 @@ cd prototype
 - Fog-of-war: vision range from hull base + sensor modules; `fog_hidden` gates rendering and targetability.
 - Navigation: uses `NavigationAgent3D` when a real Skirmish match controller exists; falls back to direct-line steering in tests.
 
-**Design Lab** (`stat_calculator.gd`, `parts_menu.gd`, `gizmo_3d.gd`, `module_placer.gd`, `visual_builder.gd`)
-- There is no `main_lab.gd`. `scenes/MainLab.tscn` is only the 3D world plus two UI sub-scenes: `UI_StatBlock.tscn` (script `stat_calculator.gd` — the right-hand stat/tweak rail) and `UI_PartsMenu.tscn` (script `parts_menu.gd` — the parts bin).
+**Design Lab** (`lab_document.gd`, `telemetry_rail.gd`, `lab_toolbar.gd`, `parts_menu.gd`, `gizmo_3d.gd`, `module_placer.gd`, `visual_builder.gd`)
+- There is no `main_lab.gd` and no `stat_calculator.gd`. `scenes/MainLab.tscn` is only the 3D world plus two UI sub-scenes: `UI_StatBlock.tscn` (script `telemetry_rail.gd` — the right-hand stat/tweak rail, backed by `lab_document.gd`'s `LabDocument` model and `lab_toolbar.gd`'s toolbar) and `UI_PartsMenu.tscn` (script `parts_menu.gd` — the parts bin).
 - 3D canvas for building blueprints. Drag parts from parts menu onto hull facets.
 - Gizmo handles for stretching barrels/calibers (live stat updates), bilateral symmetry (M), free rotation (R).
 - Clipping detection prevents overlapping modules.
@@ -121,7 +121,9 @@ cd prototype
 |---|---|
 | `scripts/module_catalog.gd` | All hull types, modules, locomotion, armor materials, weapon archetypes |
 | `scripts/damage_resolver.gd` | ARMOR_TABLE, damage math (threshold, chip, brute-force, module strip) |
-| `scripts/stat_calculator.gd` | Live stat computation from blueprint (weight, speed, range, DPS, etc.) |
+| `scripts/lab_document.gd` | LabDocument: live stat computation from blueprint (weight, speed, range, DPS, etc.) plus TWEAK_SPECS |
+| `scripts/telemetry_rail.gd` | The right-hand telemetry rail UI (readouts, cards, verdict) |
+| `scripts/lab_toolbar.gd` | The Design Lab top toolbar |
 | `scripts/drivetrain.gd` | Drivetrain analysis: weight capacity, overload penalty, top speed |
 | `scripts/faction_catalog.gd` | Faction passives (Industrialists: −20% armor weight, Technocrats: +5% speed, etc.) |
 | `data/loadout/` | Default player blueprints (JSON) |

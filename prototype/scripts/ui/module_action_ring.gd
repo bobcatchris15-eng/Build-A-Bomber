@@ -8,6 +8,7 @@ extends Control
 const RingDraw = preload("res://scripts/ui/ring_draw.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIAnim = preload("res://scripts/ui_anim.gd")
+const ModuleVolume = preload("res://scripts/module_volume.gd")
 
 signal action_invoked(action_id: String)
 signal dismissed()
@@ -111,7 +112,10 @@ func _update_silhouette_radius(immediate: bool = false, delta: float = 0.016) ->
 
 	# Calculate projected bounding box half diagonal
 	var half_diag := _compute_projected_half_diagonal(camera, target_node)
-	var target_inner: float = clampf(half_diag + CLEARANCE_MARGIN, MIN_INNER_RADIUS, MAX_INNER_RADIUS)
+	var vp_size: Vector2 = get_viewport().get_visible_rect().size
+	var viewport_cap: float = minf(vp_size.x, vp_size.y) * 0.40
+	var max_inner: float = minf(MAX_INNER_RADIUS, viewport_cap)
+	var target_inner: float = clampf(half_diag + CLEARANCE_MARGIN, MIN_INNER_RADIUS, max_inner)
 
 	if immediate:
 		inner_radius = target_inner
@@ -123,31 +127,24 @@ func _update_silhouette_radius(immediate: bool = false, delta: float = 0.016) ->
 	queue_redraw()
 
 
+## Measures the module's real drawn geometry (ModuleVolume.bounds(), the
+## project's single source of a module's occupied space) rather than a single
+## direct-child MeshInstance3D's mesh AABB, and projects all eight corners
+## instead of four. Falls back to ModuleVolume.boxes() merged loosely if the
+## fitted AABB proves too generous on a sponson-heavy part (a part whose
+## measured box list disagrees strongly with its own merged AABB - i.e. its
+## real footprint is not axis-aligned-box shaped - so we widen using the
+## per-mesh box list's own worst-case corner instead of the single merged box).
 func _compute_projected_half_diagonal(camera: Camera3D, node: Node3D) -> float:
-	var aabb := AABB(Vector3(-0.5, -0.5, -0.5), Vector3.ONE)
-
-	# Try to read AABB from MeshInstance3D or CollisionShape3D
-	var mesh_inst: MeshInstance3D = null
-	for child in node.get_children():
-		if child is MeshInstance3D and child.mesh != null:
-			mesh_inst = child
-			break
-
-	if mesh_inst and mesh_inst.mesh:
-		aabb = mesh_inst.mesh.get_aabb()
-		aabb = mesh_inst.transform * aabb
+	var aabb: AABB = ModuleVolume.bounds(node)
+	if aabb.size == Vector3.ZERO:
+		aabb = AABB(Vector3(-0.5, -0.5, -0.5), Vector3.ONE)
 
 	var center_3d: Vector3 = node.global_position
 	var center_2d: Vector2 = camera.unproject_position(center_3d)
 
 	var max_dist: float = MIN_INNER_RADIUS
-	var corners := [
-		Vector3(aabb.position.x, aabb.position.y, aabb.position.z),
-		Vector3(aabb.end.x, aabb.position.y, aabb.position.z),
-		Vector3(aabb.position.x, aabb.end.y, aabb.position.z),
-		Vector3(aabb.end.x, aabb.end.y, aabb.end.z),
-	]
-
+	var corners := _aabb_corners(aabb)
 	for c in corners:
 		var world_pos: Vector3 = node.global_transform * c
 		if not camera.is_position_behind(world_pos):
@@ -156,7 +153,42 @@ func _compute_projected_half_diagonal(camera: Camera3D, node: Node3D) -> float:
 			if d > max_dist:
 				max_dist = d
 
+	# Sponson-heavy fallback: if the per-mesh box list has a corner further
+	# out (in module-local space) than the merged AABB's own corners suggest,
+	# the merged box under-reads a non-convex silhouette - widen using the
+	# individual boxes instead.
+	var box_list: Array = ModuleVolume.boxes(node)
+	if box_list.size() > 1:
+		for box in box_list:
+			var c: Vector3 = box.get("c", Vector3.ZERO)
+			var h0: Vector3 = box.get("h0", Vector3.ZERO)
+			var h1: Vector3 = box.get("h1", Vector3.ZERO)
+			var h2: Vector3 = box.get("h2", Vector3.ZERO)
+			for sx in [-1.0, 1.0]:
+				for sy in [-1.0, 1.0]:
+					for sz in [-1.0, 1.0]:
+						var local_pt: Vector3 = c + h0 * sx + h1 * sy + h2 * sz
+						var world_pos: Vector3 = node.global_transform * local_pt
+						if not camera.is_position_behind(world_pos):
+							var screen_pos: Vector2 = camera.unproject_position(world_pos)
+							var d := (screen_pos - center_2d).length()
+							if d > max_dist:
+								max_dist = d
+
 	return max_dist
+
+
+static func _aabb_corners(aabb: AABB) -> Array:
+	return [
+		Vector3(aabb.position.x, aabb.position.y, aabb.position.z),
+		Vector3(aabb.end.x, aabb.position.y, aabb.position.z),
+		Vector3(aabb.position.x, aabb.end.y, aabb.position.z),
+		Vector3(aabb.position.x, aabb.position.y, aabb.end.z),
+		Vector3(aabb.end.x, aabb.end.y, aabb.position.z),
+		Vector3(aabb.end.x, aabb.position.y, aabb.end.z),
+		Vector3(aabb.position.x, aabb.end.y, aabb.end.z),
+		Vector3(aabb.end.x, aabb.end.y, aabb.end.z),
+	]
 
 
 func _update_screen_position() -> void:
