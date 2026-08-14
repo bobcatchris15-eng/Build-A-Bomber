@@ -1842,14 +1842,17 @@ func test_hull_collider_matches_visual_aabb() -> bool:
 	print("  [PASS] Collider, base_hull_size meta and get_hull_fitted_aabb() agree across %d hulls, and each sits on the ground." % sample_hulls.size())
 	return true
 
-# Re-fitting on a scale gizmo drag: the collider has to scale with the visual
-# mesh (base_hull_size * hull_scale, which is what gizmo_3d.gd's
-# _apply_scale_to_node writes into the BoxShape3D), and the precise
-# Tactile Interface Programme Phase 5 (D10, D12).
-# The 3D Gizmo refuses attachment to Hull (D10 fixed size classes),
-# and scaling on standard modules functions accurately.
+# Tactile Interface Programme Phase 5 (D10). The 3D Gizmo refuses
+# attachment to Hull (fixed size classes).
+#
+# The former second half of this test drove module scaling directly through
+# gizmo_3d.gd's _apply_scale_to_node(), which the Instrument Console Pass
+# Phase B retired along with the rest of the stretch-handle path (radial
+# tweak stations at scripts/ui/tweak_stations.gd are now the only route to a
+# dimension) - deleted rather than updated, since it exercised removed
+# machinery.
 func test_hull_collider_rebuilt_on_scale() -> bool:
-	print("Running Test Suite: Gizmo Refuses Hull (D10) & Module Scaling...")
+	print("Running Test Suite: Gizmo Refuses Hull (D10)...")
 	var placer = Node3D.new()
 	placer.set_script(preload("res://scripts/module_placer.gd"))
 	root.add_child(placer)
@@ -1869,7 +1872,7 @@ func test_hull_collider_rebuilt_on_scale() -> bool:
 		placer.queue_free()
 		return false
 
-	# 1. Assert gizmo refuses attachment to Hull
+	# Assert gizmo refuses attachment to Hull
 	var hull_gizmo: Node3D = Node3D.new()
 	hull_gizmo.set_script(gizmo_script)
 	hull_node.add_child(hull_gizmo)
@@ -1882,29 +1885,8 @@ func test_hull_collider_rebuilt_on_scale() -> bool:
 		placer.queue_free()
 		return false
 
-	# 2. Assert module scaling works on a standard module
-	var mod: Node3D = Node3D.new()
-	var d = ModuleData.new()
-	d.type_id = "basic_cannon"
-	mod.set_meta("module_data", d)
-	hull_node.add_child(mod)
-
-	var mod_gizmo: Node3D = Node3D.new()
-	mod_gizmo.set_script(gizmo_script)
-	mod.add_child(mod_gizmo)
-	await tree.process_frame
-
-	mod_gizmo.target_module = mod
-	mod_gizmo.start_scale = Vector3.ONE
-	mod_gizmo._apply_scale_to_node(mod, Vector3(1.2, 1.2, 1.2))
-
-	if mod.scale.distance_to(Vector3(1.2, 1.2, 1.2)) > 0.01:
-		print("  [FAIL] Module scale not applied: got ", mod.scale)
-		placer.queue_free()
-		return false
-
 	placer.queue_free()
-	print("  [PASS] Gizmo refuses Hull and scales modules correctly.")
+	print("  [PASS] Gizmo refuses Hull (D10).")
 	return true
 
 func test_resource_harvester_mounting_restrictions_and_procedural_hardware() -> bool:

@@ -422,31 +422,17 @@ func _select_module(module: Node3D):
 				var data = selected_module.get_meta("module_data")
 				cat = data.get("category") if "category" in data else "module"
 			
-			var hx = new_gizmo.get_node_or_null("HandleX")
-			var hy = new_gizmo.get_node_or_null("HandleY")
-			var hz = new_gizmo.get_node_or_null("HandleZ")
+			# Stretch handles (X/Y/Z scale) are retired - Instrument Console
+			# Pass Phase B - so HandleRotate is now the only handle a
+			# category decision can gate. Armor stays facet-fitted rather
+			# than freely rotatable (MOUNTING_AND_ARMOR_SPEC.md #2); the
+			# whole hull's orientation isn't a placement tweak either.
 			var hrot = new_gizmo.get_node_or_null("HandleRotate")
 
-			if cat == "locomotion":
-				if hx: hx.queue_free()
-				if hy: hy.queue_free()
-				if hz: hz.queue_free()
+			if cat == "locomotion" or cat == "armor" or cat == "hull":
 				if hrot: hrot.queue_free()
-			elif cat == "armor":
-				# Armor only scales in thickness (Y axis); facet-fitted, not
-				# freely rotatable (see MOUNTING_AND_ARMOR_SPEC.md #2).
-				if hx: hx.queue_free()
-				if hz: hz.queue_free()
-				if hrot: hrot.queue_free()
-			elif cat == "weapon" or cat == "module":
-				# Weapons/Modules scale in X and Z, but not thickness (Y).
-				# Free-form yaw rotation ring (MOUNTING_AND_ARMOR_SPEC.md #3)
-				# replaces the old fixed-90-degree-only rotation for these.
-				if hy: hy.queue_free()
-			elif cat == "hull":
-				# Hull scales in all 3 directions; whole-vehicle orientation
-				# isn't a placement tweak, so no rotation ring.
-				if hrot: hrot.queue_free()
+			# cat == "weapon" or "module": keep the free-form yaw rotation
+			# ring (MOUNTING_AND_ARMOR_SPEC.md #3).
 				
 		# Firing Arc Visualization ("Radar Sweep", Design_Lab_UI_UX.md): a
 		# horizontal wedge spanning the weapon's actual traverse_limit_angle
