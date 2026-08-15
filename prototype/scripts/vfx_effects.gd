@@ -254,6 +254,47 @@ static func smoke_puff(parent: Node3D, world_pos: Vector3, radius: float = 1.5,
 	return p
 
 
+# Persistent billowing black diesel smoke plume rising from a destroyed vehicle carcass.
+static func wreck_smoke_column(parent: Node3D, world_pos: Vector3, duration: float = 60.0, height: float = 12.0) -> GPUParticles3D:
+	var p = GPUParticles3D.new()
+	p.name = "WreckSmokeColumn"
+	p.amount = 28
+	p.lifetime = 2.8
+	p.emitting = false
+	p.draw_pass_1 = _get_quad()
+	p.material_override = _billboard_material(SMOKE_TEX, false, Color(0.12, 0.11, 0.10, 0.75))
+	var speed = height / p.lifetime
+	p.process_material = _process_material(
+		"wrecksmoke|%.1f" % height,
+		Vector3(0, 1, 0), 28.0, speed * 0.7, speed * 1.2,
+		Vector3(0.5, 0.8, 0.2), 2.2, 5.0, 0.4, 2.8, 1.4)
+	parent.add_child(p)
+	p.global_position = world_pos
+	p.emitting = true
+	_stop_and_free_after(p, duration)
+	return p
+
+
+# Internal flickering fire escaping from an engine bay or breached hull.
+static func wreck_fire(parent: Node3D, world_pos: Vector3, duration: float = 45.0, radius: float = 1.2) -> GPUParticles3D:
+	var p = GPUParticles3D.new()
+	p.name = "WreckFire"
+	p.amount = 18
+	p.lifetime = 0.85
+	p.emitting = false
+	p.draw_pass_1 = _get_quad()
+	p.material_override = _billboard_material(FLAME_TEX, true, Color(1, 0.8, 0.4, 1))
+	p.process_material = _process_material(
+		"wreckfire|%.1f" % radius,
+		Vector3(0, 1, 0), 22.0, 1.5, 3.2,
+		Vector3(0, 1.8, 0), radius * 0.8, radius * 1.8, 0.6, 2.2, 1.0)
+	parent.add_child(p)
+	p.global_position = world_pos
+	p.emitting = true
+	_stop_and_free_after(p, duration)
+	return p
+
+
 # Flames licking up off a burning area (a napalm pool, a wreck). Emits for
 # `duration` and then frees itself - a pool that outlives its weapon needs a
 # visual that outlives it too, which is why this parents to the caller's
@@ -360,6 +401,21 @@ static func crater(parent: Node3D, world_pos: Vector3, radius: float = 2.0,
 	return d
 
 
+const MAX_ACTIVE_DECALS := 36
+static var _active_decals: Array = []
+
+
+static func _register_decal(d: Decal) -> void:
+	for i in range(_active_decals.size() - 1, -1, -1):
+		if not is_instance_valid(_active_decals[i]):
+			_active_decals.remove_at(i)
+	while _active_decals.size() >= MAX_ACTIVE_DECALS:
+		var oldest: Decal = _active_decals.pop_front()
+		if is_instance_valid(oldest):
+			oldest.queue_free()
+	_active_decals.append(d)
+
+
 # Shared Decal setup for anything stamped on the ground.
 static func _ground_decal(parent: Node3D, world_pos: Vector3, radius: float, set: Dictionary) -> Decal:
 	var d = Decal.new()
@@ -385,4 +441,6 @@ static func _ground_decal(parent: Node3D, world_pos: Vector3, radius: float, set
 	d.rotation.y = randf() * TAU
 	parent.add_child(d)
 	d.global_position = world_pos
+	_register_decal(d)
 	return d
+

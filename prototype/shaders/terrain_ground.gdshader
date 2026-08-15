@@ -66,8 +66,8 @@ uniform float macro_scale = 0.06;
 uniform float detail_scale = 0.19;
 uniform float blend_contrast : hint_range(0.5, 8.0) = 2.2;
 
-uniform float terrain_desaturate : hint_range(0.0, 1.0) = 0.22;
-uniform float terrain_exposure_lift : hint_range(0.0, 0.5) = 0.09;
+uniform float terrain_desaturate : hint_range(0.0, 1.0) = 0.28;
+uniform float terrain_exposure_lift : hint_range(0.0, 0.5) = 0.0;
 
 varying vec3 v_world_pos;
 varying vec3 v_world_normal;

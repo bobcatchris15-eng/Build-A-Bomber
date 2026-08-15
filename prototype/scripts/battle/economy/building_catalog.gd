@@ -10,10 +10,10 @@ extends RefCounted
 # Placeholder box geometry is deliberate and inherited: Chris is replacing every
 # building mesh with authored art later, so this is data and wiring only.
 
-const DEFAULT_ADJACENT_M := 8.0
+const DEFAULT_ADJACENT_M := 24.0
 # A defence reaches further from the base than anything else, matching OpenRA's
 # long-range defence class - a wall of turrets should be able to picket forward.
-const DEFENSE_ADJACENT_M := 28.0
+const DEFENSE_ADJACENT_M := 84.0
 
 # THE FIVE PRODUCTION QUEUES (Chris's model, this rebuild).
 #

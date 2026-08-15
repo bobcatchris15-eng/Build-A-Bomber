@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bqqmlxgfvvj1c"
-path="res://.godot/imported/pebble_cluster_3_pebble_cluster_3_mat_rough.png-f71f6117e0a982f869d89334ea4bd84d.ctex"
+path.s3tc="res://.godot/imported/pebble_cluster_3_pebble_cluster_3_mat_rough.png-f71f6117e0a982f869d89334ea4bd84d.s3tc.ctex"
+path.etc2="res://.godot/imported/pebble_cluster_3_pebble_cluster_3_mat_rough.png-f71f6117e0a982f869d89334ea4bd84d.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "a25a350c94b22c206ea5ec328ce2155e"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/terrain/pebble_cluster_3_pebble_cluster_3_mat_rough.png"
-dest_files=["res://.godot/imported/pebble_cluster_3_pebble_cluster_3_mat_rough.png-f71f6117e0a982f869d89334ea4bd84d.ctex"]
+dest_files=["res://.godot/imported/pebble_cluster_3_pebble_cluster_3_mat_rough.png-f71f6117e0a982f869d89334ea4bd84d.s3tc.ctex", "res://.godot/imported/pebble_cluster_3_pebble_cluster_3_mat_rough.png-f71f6117e0a982f869d89334ea4bd84d.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +42,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

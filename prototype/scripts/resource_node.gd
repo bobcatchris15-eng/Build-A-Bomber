@@ -365,6 +365,9 @@ func setup(res_type: String, res_amount: int):
 		fallback.material_override = mat
 		mesh_inst = fallback
 	if mesh_inst != null:
+		var finish_script = load("res://scripts/battle/battle_finish.gd")
+		if finish_script != null:
+			finish_script.apply(mesh_inst)
 		add_child(mesh_inst)
 
 	# Per-tree collider: NON-AMBIENT ONLY. See the collision_layer gate

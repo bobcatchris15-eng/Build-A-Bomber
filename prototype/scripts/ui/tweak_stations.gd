@@ -108,6 +108,7 @@ const TWEAK_ANGLES := {
 	"launch_catapult": CLOCK_10,
 	"leg_count": CLOCK_11,
 	"leg_length": CLOCK_1,
+	"leg_type": CLOCK_12,
 	"leg_width": CLOCK_2,
 	"lens_aperture": CLOCK_4,
 	"lift_fan_count": CLOCK_5,

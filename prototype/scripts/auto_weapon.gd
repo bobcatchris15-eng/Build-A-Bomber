@@ -3165,19 +3165,26 @@ func _spawn_illumination_flare(pos: Vector3):
 	ft.finished.connect(func(): if is_instance_valid(flare): flare.queue_free())
 
 func _spawn_explosion_visual(pos: Vector3, custom_scale: float = 0.6, color: Color = Color.ORANGE):
+	var parent := _effects_parent()
+	# Concussive explosive burst with flying shrapnel sparks
+	VFXBurstScript.spawn(parent, pos, color, int(maxf(8.0, custom_scale * 16.0)), 0.25, 45.0, 3.0, 7.0)
+	VFXEffects.smoke_puff(parent, pos, custom_scale * 1.4, 8, Color(0.20, 0.19, 0.18, 0.65))
+
+	# Heavy detonations leave persistent terrain craters and scorch
+	if custom_scale >= 1.0:
+		VFXEffects.crater(parent, pos, custom_scale * 1.2, 35.0)
+		VFXEffects.scorch(parent, pos, custom_scale * 1.4, 2.0, 15.0)
+
 	var exp = MeshInstance3D.new()
 	exp.mesh = MunitionPool.unit_sphere()
-	# custom_scale was the sphere's RADIUS (with height 2x it, i.e. a true
-	# sphere), so the equivalent uniform scale on a unit-diameter sphere is
-	# twice it.
 	exp.scale = Vector3.ONE * (custom_scale * 2.0)
 	exp.material_override = MunitionPool.emissive(color, color)
-	_effects_parent().add_child(exp)
+	parent.add_child(exp)
 	exp.global_position = pos
 	
 	var tween = create_tween()
-	tween.tween_property(exp, "scale", Vector3.ZERO, 0.15)
-	tween.finished.connect(func(): exp.queue_free())
+	tween.tween_property(exp, "scale", Vector3.ZERO, 0.12)
+	tween.finished.connect(func(): if is_instance_valid(exp): exp.queue_free())
 
 func _fire_standard_laser():
 	var laser = MeshInstance3D.new()

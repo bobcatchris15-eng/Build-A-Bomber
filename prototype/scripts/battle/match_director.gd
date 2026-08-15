@@ -416,6 +416,15 @@ func _ready() -> void:
 	_spawn_bases()
 	_emit_progress(0.10, "Surveying build sites")
 
+	# Center the camera on the player's base zone or origin
+	var target_focus := Vector3.ZERO
+	var player_zone_id: String = _team_base_zone.get(PLAYER_TEAM, "")
+	if player_zone_id != "":
+		var zone: Dictionary = MapCatalog.get_base_zone(current_map, player_zone_id)
+		target_focus = zone.get("center", Vector3.ZERO)
+	_on_group_recentre(target_focus)
+	await get_tree().process_frame
+
 	await _setup_terrain()
 	_emit_progress(0.60, "Plotting movement lanes")
 
@@ -661,36 +670,30 @@ func _scale_lighting_to_world() -> void:
 				sky_mat.sky_horizon_color = env_data["horizon_color"]
 
 func _setup_terrain() -> void:
+	# Build visual ground mesh and surrounding terrain skirt first
+	var ground := get_node_or_null("Ground")
+	if ground:
+		ground.position = Vector3.ZERO
+		var generated: Dictionary = TerrainBuilder.build_ground_visual_mesh(current_map)
+		var mesh_inst: MeshInstance3D = ground.get_node_or_null("MeshInstance3D")
+		if mesh_inst:
+			mesh_inst.mesh = generated.mesh
+			mesh_inst.material_override = TerrainBuilder.build_ground_material_heightmap(
+				current_map.get("ground_color", Color(0.2, 0.26, 0.21)), current_map)
+		var col: CollisionShape3D = ground.get_node_or_null("CollisionShape3D")
+		if col:
+			col.shape = generated.shape
+			col.scale = generated.get("collision_scale", Vector3.ONE)
+
+	await get_tree().process_frame
+
 	var nav: Dictionary
 	var holes := _building_holes()
-	if DisplayServer.get_name() == "headless":
+	if DisplayServer.get_name() in ["headless", "dummy"] or "--headless" in OS.get_cmdline_args() or "--headless" in OS.get_cmdline_user_args():
 		nav = TerrainBuilder.build_navmeshes(current_map, holes)
 	else:
-		# Genuinely async, not just spread across frames - see
-		# bake_pending_entry_async()'s header for why the per-frame version
-		# still blocked long enough to trip Windows' Not Responding watchdog.
-		# Safe specifically because scene_router.gd's Deploy gate already
-		# withholds player control until world_is_ready (set below, only
-		# after every surface reports back), so nothing can query a region
-		# whose mesh has not landed yet.
 		nav = TerrainBuilder.build_navmeshes_deferred(current_map, holes)
-		# `remaining` MUST be a Dictionary (or other reference type), not a
-		# bool - GDScript closures capture locals BY VALUE. A `var done :=
-		# false` set from inside the callback below mutates only that
-		# lambda's own copy; the `while not done` loop below reads a
-		# never-updated outer copy and spins forever. That silently hung
-		# _setup_terrain() before world_is_ready could ever flip, so the
-		# HUD and map never appeared - the same lambda-capture bug
-		# test_battle_combat.gd's own `deaths` comment already documents,
-		# just hit for real instead of in a test.
 		var remaining := {"n": nav["pending"].size()}
-		# 2026-08-13: per-tile progress for the deploy gate. Maps the
-		# terrain-bake stretch of the bar (0.10..0.55) onto the bake's
-		# own progress. The fraction is computed inside the lambda so
-		# `done` / `total` can be captured by value without going stale
-		# (the `done` counter is a Dictionary member, so the lambda
-		# mutates the same reference the loop reads - the same pattern
-		# the existing `remaining` dict already uses for the wait loop).
 		var total_tiles: int = remaining["n"]
 		var done: Dictionary = {"n": 0}
 		for entry in nav["pending"]:
@@ -707,32 +710,14 @@ func _setup_terrain() -> void:
 	water_nav_map = nav.water_map
 	amphibious_nav_map = nav.amphibious_map
 	deep_water_nav_map = nav.deep_water_map
-	# Chunk 21: one region per navmesh TILE now, not one region for the
-	# whole map - see terrain_builder.gd's NAV_TILE_SIZE header comment.
 	_ground_nav_regions = nav.ground_regions
 	_amphibious_nav_regions = nav.amphibious_regions
 	_nav_tile_rects = nav.tile_rects
 	_water_nav_region = nav.water_region
 	_deep_water_nav_region = nav.deep_water_region
 
-	var ground := get_node_or_null("Ground")
-	if ground:
-		# The heightmap mesh's vertices already carry absolute world Y, so the
-		# scene's placeholder slab offset has to be cleared or every terrain
-		# query sits half a unit off what units and buildings actually see.
-		ground.position = Vector3.ZERO
-		var generated: Dictionary = TerrainBuilder.build_ground_visual_mesh(current_map)
-		var mesh_inst: MeshInstance3D = ground.get_node_or_null("MeshInstance3D")
-		if mesh_inst:
-			mesh_inst.mesh = generated.mesh
-			mesh_inst.material_override = TerrainBuilder.build_ground_material_heightmap(
-				current_map.get("ground_color", Color(0.2, 0.26, 0.21)), current_map)
-		var col: CollisionShape3D = ground.get_node_or_null("CollisionShape3D")
-		if col:
-			col.shape = generated.shape
-			col.scale = generated.get("collision_scale", Vector3.ONE)
-
 	TerrainBuilder.spawn_visuals(current_map, self)
+	await get_tree().process_frame
 
 
 # NavigationServer3D RIDs are not owned by the scene tree the way child nodes
@@ -1279,11 +1264,11 @@ func place_hq_for_human(at: Vector3) -> bool:
 	return true
 
 
-func _place_structure(kind: String, structure_team: int, at: Vector3) -> Structure:
+func _place_structure(kind: String, structure_team: int, at: Vector3, under_construction: bool = false) -> Structure:
 	var _prof := Profiler.start()
 	var s := StructureScript.new()
 	add_child(s)
-	s.global_position = Vector3(at.x, terrain_height_at(at), at.z)
+	s.position = Vector3(at.x, terrain_height_at(at), at.z)
 	s.setup(kind, structure_team)
 	s.died.connect(_on_structure_died)
 	Profiler.stop("place_structure", _prof)
@@ -1295,14 +1280,17 @@ func _place_structure(kind: String, structure_team: int, at: Vector3) -> Structu
 	# Emitting here lets ProductionHUD re-evaluate the gates immediately on
 	# structure placement, rather than on the next 5 Hz refresh tick (200 ms
 	# of stale UI is the failure mode the playtest hit).
-	structure_built.emit(structure_team, kind)
+	if not under_construction:
+		structure_built.emit(structure_team, kind)
 	return s
 
 
-func get_team_structures(for_team: int) -> Array:
+func get_team_structures(for_team: int, include_incomplete: bool = false) -> Array:
 	var out: Array = []
 	for s in get_tree().get_nodes_in_group("structures"):
 		if is_instance_valid(s) and not s.is_dead and s.team == for_team:
+			if not include_incomplete and s.build_incomplete:
+				continue
 			out.append(s)
 	return out
 
@@ -1449,6 +1437,13 @@ func _on_navmesh_rebaked() -> void:
 
 
 func _on_structure_died(structure) -> void:
+	if "build_incomplete" in structure and structure.build_incomplete:
+		for q_name in BuildingCatalogScript.QUEUES:
+			var q := production.queue(structure.team, q_name)
+			for i in range(q.size() - 1, -1, -1):
+				if q[i].get("structure_node") == structure:
+					production.cancel(structure.team, q_name, i)
+
 	economy.recalculate_power(structure.team, get_team_structures(structure.team))
 	# Losing the last contributor to a queue refunds everything in it: that line
 	# can never advance again, so holding the money is a bug with extra steps.
@@ -1891,20 +1886,21 @@ func _exit_structure(for_team: int, queue_name: String) -> Structure:
 
 
 # A finished building, waiting for somewhere to go.
-#
-# The AI sites its own immediately. The PLAYER's raises a ghost and waits for a
-# click - the player chooses where their buildings go, and until they do the job
-# stays at the head of its queue, paid for and blocking that line. That block is
-# deliberate (see ProductionService.claim_structure) and is now visible to the
-# player as a ghost on their cursor rather than as a queue that silently stopped.
 func _on_structure_ready(for_team: int, queue_name: String, job: Dictionary) -> void:
+	var s_node = job.get("structure_node", null)
+	if s_node != null and is_instance_valid(s_node):
+		# Pre-placed building that just completed construction on-site
+		economy.recalculate_power(for_team, get_team_structures(for_team))
+		_mark_navmesh_dirty()
+		structure_built.emit(for_team, job.get("kind", ""))
+		return
+
+	# Fallback for jobs without a pre-placed structure node
 	if for_team == PLAYER_TEAM:
 		begin_placement(queue_name, job)
 		return
 	var site := _ai_placement_site(for_team, job.get("kind", ""), job.get("blueprint", {}))
 	if site == Vector3.INF:
-		# Nowhere to put it. Leave it claimed-but-unplaced rather than dropping
-		# the money; the site may open up when something dies.
 		return
 	production.claim_structure(for_team, queue_name)
 	var blueprint: Dictionary = job.get("blueprint", {})
@@ -1917,37 +1913,17 @@ func _on_structure_ready(for_team: int, queue_name: String, job: Dictionary) -> 
 
 
 # --- Player ghost placement ---------------------------------------------------
-#
-# A finished player building follows the cursor until it is put somewhere. This
-# is the flow the rebuild was missing entirely: the AI sited its own buildings
-# and the player's completed jobs parked their queue forever.
-#
-# THE MONEY IS ALREADY SPENT by the time a ghost appears. Production drip-feeds
-# cost across the build, so a job that reached `done` has paid in full - the
-# ghost is not a purchase prompt, it is a delivery waiting for an address.
-# Cancelling therefore does NOT refund; it leaves the job at the head of its
-# queue for the player to place later, which is also what happens if they simply
-# ignore it. Refunding on Escape would let a player bank a completed building at
-# no tempo cost, which is a money printer with extra steps.
 
 const GHOST_COLOR_VALID := Color(0.35, 0.85, 0.45, 0.45)
 const GHOST_COLOR_INVALID := Color(0.9, 0.3, 0.25, 0.45)
 
 var placing: Dictionary = {}
 var placement_ghost: MeshInstance3D = null
+var _radius_indicators_root: Node3D = null
 
 signal placement_started(kind: String)
 signal placement_finished(kind: String, placed: bool)
 
-# A live structure was just added (post-_place_structure) or just lost
-# (post-_on_structure_died, before the queue cancellation runs). The HUD
-# listens to this to re-evaluate its tech-tree gates - a placed tech_lab
-# flips every tech_lab-gated design from "disabled" to "live", and a lost
-# tech_lab flips them back. team is the owning team, kind is the catalog
-# id of the structure (so the HUD can filter on tech_lab/physics_lab/
-# exotics_lab if it ever wants to - the current re-eval runs over the
-# full set, which is correct because any structure can in principle
-# unblock some gate).
 signal structure_built(team: int, kind: String)
 signal structure_lost(team: int, kind: String)
 
@@ -1956,28 +1932,60 @@ func is_placing() -> bool:
 	return not placing.is_empty()
 
 
-# Raises the ghost for a finished job. Public because the probe and the tests
-# drive it directly - a placement flow that can only be entered by waiting out a
-# real build is a placement flow nothing can assert.
+# Entry point when the user orders a structure from the build menu.
+# Sets up placement mode immediately so the user chooses where to build before work begins.
+func start_building_placement(queue_name: String, item: Dictionary) -> void:
+	if is_placing():
+		_clear_ghost()
+		_clear_radius_indicators()
+		placing = {}
+
+	var blueprint: Dictionary = item.get("blueprint", {})
+	var kind: String = item.get("kind", "power_plant")
+	var cost: int = int(item.get("cost", 100))
+	var base_time: float = float(item.get("time", 10.0))
+
+	# Tech tree / contributor gate check before raising ghost
+	if production.contributor_count(PLAYER_TEAM, queue_name) <= 0:
+		_flash("NO FACTORY FOR %s QUEUE" % queue_name.to_upper())
+		return
+	if not blueprint.is_empty() and not production.missing_required_buildings(PLAYER_TEAM, blueprint).is_empty():
+		_flash("TECH PREREQUISITES NOT MET")
+		return
+
+	placing = {
+		"queue": queue_name,
+		"kind": kind,
+		"blueprint": blueprint,
+		"cost": cost,
+		"time": base_time,
+		"from_order": true,
+	}
+	_build_ghost()
+	_build_radius_indicators()
+	placement_started.emit(placing["kind"])
+	_flash("PLACE %s  -  LEFT CLICK TO SITE, RIGHT CLICK / ESC TO CANCEL" % kind.replace("_", " ").to_upper())
+
+
+# Legacy/fallback entry point for a completed job waiting to be placed
 func begin_placement(queue_name: String, job: Dictionary) -> void:
-	# One at a time. A second finished building while the first is still in hand
-	# waits its turn at the head of its own queue rather than replacing the ghost,
-	# which would silently strand the first one.
 	if is_placing():
 		return
 	placing = {
 		"queue": queue_name,
 		"kind": job.get("kind", "power_plant"),
 		"blueprint": job.get("blueprint", {}),
+		"cost": job.get("total_cost", 100),
+		"time": job.get("total_time", 10.0),
+		"from_order": false,
+		"job": job,
 	}
 	_build_ghost()
+	_build_radius_indicators()
 	placement_started.emit(placing["kind"])
 	_flash("PLACE BUILDING  -  LEFT CLICK TO SITE, ESC TO HOLD")
 
 
-# Picks a held building back up. A player who pressed Escape, or who was busy
-# when the job finished, needs a way back to the ghost - without this the "hold"
-# in cancel_placement() is indistinguishable from losing the building.
 func resume_placement(queue_name: String) -> bool:
 	if is_placing():
 		return false
@@ -2002,9 +2010,6 @@ func _build_ghost() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = GHOST_COLOR_INVALID
-	# Unshaded so the tint reads as a validity signal rather than as lighting. A
-	# green ghost in shadow and a red one in sun are otherwise hard to tell apart,
-	# which defeats the entire point of colouring it.
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	placement_ghost.material_override = mat
 	add_child(placement_ghost)
@@ -2016,9 +2021,51 @@ func _clear_ghost() -> void:
 	placement_ghost = null
 
 
-# Moves the ghost to wherever the cursor is over the ground, and recolours it by
-# the SAME validity call the click uses - so the ghost can never show green over
-# a spot the click then refuses.
+# Visual build-radius rings rendered around all friendly structures that provide buildable area
+func _build_radius_indicators() -> void:
+	_clear_radius_indicators()
+	_radius_indicators_root = Node3D.new()
+	_radius_indicators_root.name = "BuildRadiusIndicators"
+	add_child(_radius_indicators_root)
+
+	var reach: float = PlacementServiceScript.adjacency_for(
+		placing.get("kind", "power_plant"), placing.get("blueprint", {}))
+	
+	var ring_mat := StandardMaterial3D.new()
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ring_mat.albedo_color = Color(0.2, 0.8, 1.0, 0.3)
+	ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	for s in get_tree().get_nodes_in_group("structures"):
+		if not is_instance_valid(s) or s.is_dead or not s.is_inside_tree():
+			continue
+		if s.team != PLAYER_TEAM:
+			continue
+		if not BuildingCatalogScript.get_stat(s.kind, "gives_buildable_area", false):
+			continue
+		var s_half: float = maxf(s.footprint.x, s.footprint.z) * 0.5
+		var total_radius: float = s_half + reach
+		
+		var ring := MeshInstance3D.new()
+		var torus := TorusMesh.new()
+		torus.inner_radius = total_radius - 0.4
+		torus.outer_radius = total_radius + 0.4
+		torus.rings = 48
+		torus.ring_segments = 4
+		ring.mesh = torus
+		ring.material_override = ring_mat
+		ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		_radius_indicators_root.add_child(ring)
+		ring.global_position = Vector3(s.global_position.x, terrain_height_at(s.global_position) + 0.08, s.global_position.z)
+
+
+func _clear_radius_indicators() -> void:
+	if _radius_indicators_root != null and is_instance_valid(_radius_indicators_root):
+		_radius_indicators_root.queue_free()
+	_radius_indicators_root = null
+
+
 func update_placement(screen_pos: Vector2) -> void:
 	if not is_placing() or not is_instance_valid(placement_ghost):
 		return
@@ -2028,8 +2075,6 @@ func update_placement(screen_pos: Vector2) -> void:
 	var at: Vector3 = hit.position
 	at.y = terrain_height_at(at)
 	var result := placement_validity(at)
-	# Sat on the ground rather than centred in it, or half of every building is
-	# buried and the footprint reads as too small.
 	placement_ghost.global_position = at + Vector3(0, placement_ghost.mesh.size.y * 0.5, 0)
 	placement_ghost.material_override.albedo_color = \
 		GHOST_COLOR_VALID if result["valid"] else GHOST_COLOR_INVALID
@@ -2042,8 +2087,6 @@ func placement_validity(at: Vector3) -> Dictionary:
 		self, PLAYER_TEAM, at, placing["kind"], placing["blueprint"])
 
 
-# Commits the ghost. Returns false and leaves the job in hand if the spot is
-# illegal, so a misclick costs nothing.
 func confirm_placement(at: Vector3) -> bool:
 	if not is_placing():
 		return false
@@ -2053,18 +2096,43 @@ func confirm_placement(at: Vector3) -> bool:
 		_flash(result["reason"])
 		return false
 
-	# Claim only once the site is known good. Claiming first and then failing to
-	# place would pop the job off its queue and destroy a paid-for building.
+	var blueprint: Dictionary = placing.get("blueprint", {})
+	var kind: String = placing.get("kind", "power_plant")
+	var queue_name: String = placing.get("queue", "building")
+	var from_order: bool = placing.get("from_order", false)
+
+	if from_order:
+		# User-driven placement on order: spawn under-construction structure and start queue job
+		var cost: int = placing.get("cost", 100)
+		var base_time: float = placing.get("time", 10.0)
+
+		var s: Structure = null
+		if not blueprint.is_empty():
+			s = _place_defence(blueprint, PLAYER_TEAM, at, true)
+		else:
+			s = _place_structure(kind, PLAYER_TEAM, at, true)
+
+		if s == null:
+			_end_placement(false)
+			return false
+
+		var job := production.enqueue_structure(PLAYER_TEAM, queue_name, kind, cost, base_time, blueprint, s)
+		if job.is_empty():
+			s.queue_free()
+			_end_placement(false)
+			return false
+
+		s.begin_construction(job.get("total_time", base_time))
+		_mark_navmesh_dirty()
+		_end_placement(true)
+		return true
+
+	# Legacy post-build placement
 	var job: Dictionary = production.claim_structure(PLAYER_TEAM, placing["queue"])
 	if job.is_empty():
-		# The queue moved under us - the job was cancelled, or its last contributor
-		# died and refunded the line. Drop the ghost rather than placing a building
-		# nothing is paying for.
 		_end_placement(false)
 		return false
 
-	var blueprint: Dictionary = placing["blueprint"]
-	var kind: String = placing["kind"]
 	if not blueprint.is_empty():
 		_place_defence(blueprint, PLAYER_TEAM, at)
 	else:
@@ -2075,12 +2143,13 @@ func confirm_placement(at: Vector3) -> bool:
 	return true
 
 
-# Puts the ghost down without placing. The job stays at the head of its queue,
-# still paid for - see the note above on why this does not refund.
 func cancel_placement() -> void:
 	if not is_placing():
 		return
-	_flash("BUILDING HELD  -  CLICK ITS QUEUE TO PLACE")
+	if placing.get("from_order", false):
+		_flash("PLACEMENT CANCELLED")
+	else:
+		_flash("BUILDING HELD  -  CLICK ITS QUEUE TO PLACE")
 	_end_placement(false)
 
 
@@ -2088,6 +2157,7 @@ func _end_placement(placed: bool) -> void:
 	var kind: String = placing.get("kind", "")
 	placing = {}
 	_clear_ghost()
+	_clear_radius_indicators()
 	placement_finished.emit(kind, placed)
 
 
@@ -2242,11 +2312,9 @@ func _build_hq_zone_outline() -> void:
 	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	mat.albedo_color = Color(0.35, 0.85, 0.45, 0.25)  # green tint, transparent
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	outline.material_override = mat
-	outline.global_position = Vector3(center.x, terrain_height_at(center) + 0.03, center.z)
-	# No shadow casting. The wireframe is a UI affordance, not a 3D object.
 	outline.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(outline)
+	outline.global_position = Vector3(center.x, terrain_height_at(center) + 0.03, center.z)
 	hq_zone_outline = outline
 
 
@@ -2308,16 +2376,18 @@ func _is_inside_player_zone(p: Vector3) -> bool:
 # A blueprint-built turret. Same lifecycle as any other structure - it carves the
 # navmesh, it dies through the same signal, it ends the match if it were an HQ -
 # it just gets its geometry and its guns from a design instead of the catalog.
-func _place_defence(blueprint: Dictionary, structure_team: int, at: Vector3) -> Structure:
+func _place_defence(blueprint: Dictionary, structure_team: int, at: Vector3, under_construction: bool = false) -> Structure:
 	var s := StructureScript.new()
 	add_child(s)
-	s.global_position = Vector3(at.x, terrain_height_at(at), at.z)
+	s.position = Vector3(at.x, terrain_height_at(at), at.z)
 	if not s.setup_from_blueprint(blueprint, structure_team, bp_manager):
 		# The design names a hull the catalog no longer has. A half-built turret
 		# is worse than none, and the money is already spent either way.
 		s.queue_free()
 		return null
 	s.died.connect(_on_structure_died)
+	if not under_construction:
+		structure_built.emit(structure_team, "defense")
 	return s
 
 
@@ -2327,9 +2397,25 @@ func ai_build_defence(for_team: int) -> bool:
 	if design.is_empty():
 		return false
 	var cost: int = DesignCostingScript.blueprint_cost(design)
+	var b_time: float = DesignCostingScript.build_time_for_cost(cost)
+	var site := _ai_placement_site(for_team, "defense", design)
+	if site != Vector3.INF:
+		var s := _place_defence(design, for_team, site, true)
+		if s == null:
+			return false
+		s.begin_construction(b_time)
+		var job := production.enqueue_structure(for_team,
+			BuildingCatalogScript.QUEUE_DEFENSE, "defense",
+			cost, b_time, design, s)
+		if job.is_empty():
+			s.queue_free()
+			return false
+		_mark_navmesh_dirty()
+		return true
+
 	return not production.enqueue_structure(for_team,
 		BuildingCatalogScript.QUEUE_DEFENSE, "defense",
-		cost, DesignCostingScript.build_time_for_cost(cost), design).is_empty()
+		cost, b_time, design).is_empty()
 
 
 # Where the AI puts its next building. Delegates to PlacementService, which is
@@ -2512,11 +2598,26 @@ func ai_build_structure(for_team: int, kind: String) -> bool:
 	var stats := BuildingCatalogScript.get_stats(kind)
 	if stats.is_empty():
 		return false
+	var cost: int = ResourceCatalogScript.credits_from_materials(Vector2i(
+		stats.get("cost_metal", 0), stats.get("cost_crystal", 0)))
+	var b_time: float = stats.get("build_time", 10.0)
+	var site := _ai_placement_site(for_team, kind, {})
+	if site != Vector3.INF:
+		var s := _place_structure(kind, for_team, site, true)
+		if s == null:
+			return false
+		s.begin_construction(b_time)
+		var job := production.enqueue_structure(for_team,
+			BuildingCatalogScript.QUEUE_BUILDING, kind, cost, b_time, {}, s)
+		if job.is_empty():
+			s.queue_free()
+			return false
+		_mark_navmesh_dirty()
+		return true
+
 	return not production.enqueue_structure(for_team,
 		BuildingCatalogScript.QUEUE_BUILDING, kind,
-		ResourceCatalogScript.credits_from_materials(Vector2i(
-			stats.get("cost_metal", 0), stats.get("cost_crystal", 0))),
-		stats.get("build_time", 10.0)).is_empty()
+		cost, b_time).is_empty()
 
 
 # Pull everything home. The rally is the AI's own HQ, which is the thing worth

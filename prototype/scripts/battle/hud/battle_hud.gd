@@ -227,6 +227,18 @@ func _build_minimap() -> void:
 	minimap_rect.offset_bottom = Tokens.SPACE_MD + 64 + UI_SIZE
 	minimap_rect.mouse_filter = Control.MOUSE_FILTER_STOP
 	minimap_rect.gui_input.connect(_on_minimap_input)
+
+	var radar_shader := load("res://shaders/phosphor_display.gdshader") as Shader
+	if radar_shader != null:
+		var smat := ShaderMaterial.new()
+		smat.shader = radar_shader
+		smat.set_shader_parameter("enable_radar_sweep", true)
+		smat.set_shader_parameter("show_range_rings", true)
+		smat.set_shader_parameter("sweep_speed", 0.75)
+		smat.set_shader_parameter("lit_color", Color(0.35, 0.95, 0.45, 1.0))
+		smat.set_shader_parameter("unlit_color", Color(0.04, 0.12, 0.05, 1.0))
+		minimap_rect.material = smat
+
 	add_child(minimap_rect)
 
 

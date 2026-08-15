@@ -1,137 +1,104 @@
 shader_type canvas_item;
-// The deploy gate's diffuse-glass layer.
+// The deploy gate's heavy diffuse-glass layer.
 //
 // WHAT THIS IS. A fullscreen overlay that sits between the camera
 // and the world during the build phase, and a frosted-glass
 // backdrop for the DEPLOY button once the world is ready. The
-// player's eye reads it as "looking through a darkened, slightly
-// fogged window at the map" - the world is dimmed and softened,
-// not hidden.
-//
-// WHAT IT REPLACES. The old deploy gate was a CenterContainer
-// with a plain HintLabel and a Button; there was no glass at all,
-// and the player spent the ~4s terrain bake staring at a half-
-// built map with no overlay. The glass is the missing visual
-// presence the hitch needed - see
-// docs/design/DEPLOY_GATE_REDESIGN.md §1.
-//
-// BLUR OPTIONS. Three options were on the table (§4 of the
-// design doc). The locked decision was Option 1 - a real
-// `CompositorEffect` with a separable Gaussian compute shader.
-// That needs WorldEnvironment plumbing and engine-side
-// integration that is out of scope for the structural pass.
-//
-// THIS SHADER IS OPTION 3: no real blur, just dim+noise. The
-// `blur_amount` uniform is a per-pixel Gaussian of 9 samples
-// at 1px offsets - cheap, looks "frosted", and the gate's
-// glass alpha (0.45 in build, 0.0 dismissed) means the visual
-// difference vs a true blur is hard to spot. The upgrade path
-// is documented but not shipped: when the CompositorEffect is
-// wired into WorldEnvironment, this shader's `blur_amount` is
-// set to 0 and the back buffer is sampled from the effect's
-// output texture instead.
-//
-// FROST. A small noise pattern multiplies the dark tint so the
-// glass reads as "frosted" rather than as "tinted". Without
-// it, the glass is a flat translucent black; with it, the glass
-// has visible character. The noise is procedural (no texture
-// dependency) so the shader is self-contained and survives the
-// texture pipeline being absent (a test scene that does not
-// import the back-buffer texture would otherwise crash here).
-//
-// UNIFORMS
-//   alpha        glass alpha. 0.45 in build (world shows through
-//                dimmed), 0.0 dismissed (match is live).
-//   tint         the dark colour the world is multiplied by.
-//                BASE_900 (deepest recess, modal scrim) is the
-//                design language's "modal scrim" colour, the
-//                same one the scene router's fade rect uses.
-//   blur_amount  per-pixel Gaussian strength. 1.0 = 9-tap blur,
-//                0.0 = no blur. The build state uses 0.6, the
-//                ready state uses 0.85 (more frosted, since
-//                the world is now the focus of the player's
-//                attention behind the glass).
-//   frost_amount noise strength. 0.05 = subtle, 0.15 = heavy
-//                static. 0.10 is the default; below 0.05 the
-//                glass reads as flat, above 0.15 the noise
-//                overpowers the dim.
+// player's eye reads it as looking through a heavily frosted,
+// darkened industrial visor at the map - the world is heavily
+// diffused, softened, and dimmed with authentic glass refraction.
 
-uniform float alpha : hint_range(0.0, 1.0) = 0.45;
+uniform sampler2D SCREEN_TEXTURE : hint_screen_texture, filter_linear_mipmap;
+
+uniform float alpha : hint_range(0.0, 1.0) = 0.70;
 uniform vec4 tint : source_color = vec4(0.075, 0.074, 0.068, 1.0);
-uniform float blur_amount : hint_range(0.0, 1.0) = 0.6;
-uniform float frost_amount : hint_range(0.0, 0.3) = 0.10;
+uniform float blur_amount : hint_range(0.0, 2.0) = 1.0;
+uniform float blur_radius : hint_range(0.0, 40.0) = 16.0;
+uniform float frost_amount : hint_range(0.0, 0.5) = 0.20;
+uniform float refraction_amount : hint_range(0.0, 0.03) = 0.007;
+uniform float vignette_amount : hint_range(0.0, 1.0) = 0.40;
 
-// 9-tap Gaussian offsets, normalised to a 1px radius. Cheap
-// enough to run per-fragment on a 1080p overlay; the radius
-// scales with the back buffer's actual screen-space pixel
-// size, so a 4K screen is also 9 taps and not 4x as expensive.
-const vec2 OFFSETS[9] = vec2[](
-	vec2(-1.0, -1.0), vec2( 0.0, -1.0), vec2( 1.0, -1.0),
-	vec2(-1.0,  0.0), vec2( 0.0,  0.0), vec2( 1.0,  0.0),
-	vec2(-1.0,  1.0), vec2( 0.0,  1.0), vec2( 1.0,  1.0)
+// 16-tap Poisson-disk sampling offsets
+const vec2 POISSON_16[16] = vec2[](
+	vec2(-0.326212, -0.405805),
+	vec2(-0.840144, -0.073580),
+	vec2(-0.695914,  0.457137),
+	vec2(-0.203345,  0.620716),
+	vec2( 0.962340, -0.194983),
+	vec2( 0.473434, -0.480026),
+	vec2( 0.519456,  0.767022),
+	vec2( 0.185461, -0.893124),
+	vec2( 0.507431,  0.064425),
+	vec2( 0.896420,  0.412458),
+	vec2(-0.321940, -0.932615),
+	vec2(-0.791559, -0.597705),
+	vec2( 0.057799,  0.228185),
+	vec2(-0.160167, -0.193231),
+	vec2( 0.134591,  0.923485),
+	vec2(-0.528489,  0.136742)
 );
 
-// Gaussian weights. The 0.227 is the centre tap; the 0.094s
-// are the orthogonals; the 0.054s are the diagonals. Sum to
-// 0.998 (close enough to 1.0; the missing 0.002 is rounding).
-const float WEIGHTS[9] = float[](
-	0.054, 0.094, 0.054,
-	0.094, 0.227, 0.094,
-	0.054, 0.094, 0.054
-);
-
-// Cheap pseudo-noise. Not a texture sample - we want the
-// shader self-contained so a headless test scene that does
-// not have the back-buffer texture can still load it. The
-// function is the standard 2D hash from the shader cookbook.
 float hash21(vec2 p) {
 	p = fract(p * vec2(123.34, 456.21));
 	p += dot(p, p + 45.32);
 	return fract(p.x * p.y);
 }
 
+float noise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	float a = hash21(i);
+	float b = hash21(i + vec2(1.0, 0.0));
+	float c = hash21(i + vec2(0.0, 1.0));
+	float d = hash21(i + vec2(1.0, 1.0));
+	return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
 
 void fragment() {
-	// The back buffer sample point. SCREEN_TEXTURE is the
-	// resolved colour buffer - what the player sees minus
-	// this overlay. SCREEN_UV is the screen-space coordinate
-	// of the current fragment, which is what samples the
-	// back buffer.
 	vec2 screen_uv = SCREEN_UV;
+	vec2 tex_size = vec2(textureSize(SCREEN_TEXTURE, 0));
+	vec2 pixel_size = 1.0 / max(tex_size, vec2(1.0));
 
-	// 9-tap Gaussian. mix() with the un-blurred sample gives
-	// a smooth ramp from blur_amount=0 (no blur) to
-	// blur_amount=1 (full 9-tap). Below 0.05 the blur is
-	// imperceptible, which is what the CompositorEffect
-	// upgrade path wants (set blur_amount=0 and the shader
-	// is a plain tinted overlay).
+	// Fine frosted refraction jitter
+	float n1 = noise(screen_uv * 180.0);
+	float n2 = noise(screen_uv * 180.0 + vec2(37.1, 92.7));
+	vec2 refract_offset = (vec2(n1, n2) - 0.5) * 2.0 * refraction_amount * frost_amount;
+	vec2 base_uv = screen_uv + refract_offset;
+
+	// Multi-tap Poisson blurred sampling with LOD weighting
 	vec3 blurred = vec3(0.0);
-	for (int i = 0; i < 9; i++) {
-		vec2 offset_px = OFFSETS[i] * blur_amount;
-		vec2 sample_uv = screen_uv + offset_px / vec2(textureSize(SCREEN_TEXTURE, 0));
-		blurred += WEIGHTS[i] * texture(SCREEN_TEXTURE, sample_uv).rgb;
+	float total_weight = 0.0;
+	float effective_radius = blur_radius * blur_amount;
+
+	for (int i = 0; i < 16; i++) {
+		vec2 sample_offset = POISSON_16[i] * effective_radius * pixel_size;
+		float sample_jitter = hash21(screen_uv * 400.0 + POISSON_16[i]);
+		vec2 jittered_uv = base_uv + sample_offset * (0.8 + 0.4 * sample_jitter);
+		
+		float lod = clamp(effective_radius * 0.20, 0.0, 2.5);
+		vec3 s = textureLod(SCREEN_TEXTURE, jittered_uv, lod).rgb;
+		blurred += s;
+		total_weight += 1.0;
 	}
+	blurred /= total_weight;
+
 	vec3 unblurred = texture(SCREEN_TEXTURE, screen_uv).rgb;
-	vec3 world = mix(unblurred, blurred, blur_amount);
+	vec3 world = mix(unblurred, blurred, clamp(blur_amount, 0.0, 1.0));
 
-	// Apply the tint. The world is multiplied by the tint,
-	// so a 0.45 alpha overlay over a bright map is dimmed
-	// to about 45% of the original luma, and a dark map
-	// stays dark.
-	vec3 dimmed = world * tint.rgb;
+	// Deep industrial modal tint
+	vec3 dimmed = world * tint.rgb * 1.15;
 
-	// Frost noise. A small per-fragment offset on the dim
-	// multiplier, driven from the screen-space UV so the
-	// pattern is stable as the gate moves. frost_amount=0
-	// gives a perfectly clean dim; frost_amount=0.10 is
-	// the default; the maximum of 0.15 is "dirty glass".
-	float noise = hash21(floor(screen_uv * 800.0));
-	float frost = 1.0 - frost_amount * (noise - 0.5) * 2.0;
-	dimmed *= frost;
+	// Surface frost micro-noise & grain texture
+	float grain = hash21(floor(screen_uv * tex_size * 0.5));
+	float surface_frost = 1.0 - frost_amount * 0.4 * (grain - 0.5);
+	dimmed *= surface_frost;
 
-	// Alpha is the gate's own (0.45 in build, 0.0 dismissed).
-	// The Color we return is premultiplied: the shader's
-	// output alpha is what `modulate.a` would set, and the
-	// gate's existing modulate.a remains the master control.
+	// Vignette around screen edges
+	vec2 v_uv = screen_uv * (1.0 - screen_uv.yx);
+	float vig = v_uv.x * v_uv.y * 15.0;
+	vig = clamp(pow(vig, vignette_amount * 0.5), 0.0, 1.0);
+	dimmed *= vig;
+
 	COLOR = vec4(dimmed, alpha);
 }

@@ -1,47 +1,61 @@
 class_name ModuleActionRing
 extends Control
 
-# Module action ring for Design Lab parts manipulation (Phase 6, D13).
-# Sized dynamically to clear the module's projected silhouette,
-# persistent across actions until deselection or escape.
+# Module action ring & radial tweak console for Design Lab parts manipulation.
+# Sized dynamically to clear the module's projected silhouette.
+# Combines inner verb wedges with outer clock-face tweak stations and a docked 6:00 spec plate.
 
 const RingDraw = preload("res://scripts/ui/ring_draw.gd")
 const Tokens = preload("res://scripts/ui_tokens.gd")
 const UIAnim = preload("res://scripts/ui_anim.gd")
 const ModuleVolume = preload("res://scripts/module_volume.gd")
+const TweakStations = preload("res://scripts/ui/tweak_stations.gd")
 
 signal action_invoked(action_id: String)
 signal dismissed()
 
 const MIN_INNER_RADIUS := 42.0
-const MAX_INNER_RADIUS := 160.0
+const MAX_INNER_RADIUS := 400.0
 const BAND_WIDTH := 44.0
 const CLEARANCE_MARGIN := 16.0
 const HUB_RADIUS := 28.0
+const STATION_RADIAL_OFFSET := 56.0
+const ORBIT_MARGIN := 120.0
 
 var target_node: Node3D = null
 var subject_label: String = ""
+var spec_stats_text: String = ""
 var max_zoom_distance: float = 40.0
 
 var inner_radius: float = MIN_INNER_RADIUS
 var outer_radius: float = MIN_INNER_RADIUS + BAND_WIDTH
 
 var _actions: Array = []  # [{id, label, icon, enabled}]
+var _tweak_stations: Array = [] # [{name, label, control, angle, tier}]
 var _hovered: int = -1
 var _is_open: bool = false
 var _target_screen_center: Vector2 = Vector2.ZERO
+var _station_container: Control = null
+var _spec_card: PanelContainer = null
 
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	_station_container = Control.new()
+	_station_container.name = "StationContainer"
+	_station_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_station_container)
 	_update_canvas_size()
 
 
 func _update_canvas_size() -> void:
-	var span := (outer_radius + 64.0) * 2.0
+	var span := (outer_radius + ORBIT_MARGIN) * 2.0
 	custom_minimum_size = Vector2(span, span)
 	size = custom_minimum_size
 	pivot_offset = custom_minimum_size * 0.5
+	if _station_container:
+		_station_container.custom_minimum_size = size
+		_station_container.size = size
 
 
 func set_actions(actions: Array) -> void:
@@ -68,6 +82,70 @@ func set_action_enabled(id: String, enabled: bool) -> void:
 			break
 
 
+func add_tweak_station(tweak_name: String, label: String, control: Control, angle: float = -1.0) -> void:
+	if angle < 0.0:
+		angle = TweakStations.angle_for(tweak_name)
+		if angle < 0.0:
+			angle = TweakStations.CLOCK_1
+	
+	_tweak_stations.append({
+		"name": tweak_name,
+		"label": label,
+		"control": control,
+		"angle": angle,
+	})
+	_station_container.add_child(control)
+	_update_station_positions()
+
+
+func clear_tweak_stations() -> void:
+	for st in _tweak_stations:
+		var ctrl: Control = st.get("control")
+		if is_instance_valid(ctrl) and ctrl.get_parent() == _station_container:
+			ctrl.queue_free()
+	_tweak_stations.clear()
+
+
+func set_spec_info(stats_text: String) -> void:
+	spec_stats_text = stats_text
+	_update_spec_card()
+
+
+func _update_spec_card() -> void:
+	if spec_stats_text == "":
+		if is_instance_valid(_spec_card):
+			_spec_card.visible = false
+		return
+	
+	if _spec_card == null or not is_instance_valid(_spec_card):
+		_spec_card = PanelContainer.new()
+		_spec_card.name = "SpecPlate"
+		_spec_card.theme_type_variation = "CalloutPanel"
+		_station_container.add_child(_spec_card)
+		
+		var vbox = VBoxContainer.new()
+		vbox.add_theme_constant_override("separation", 2)
+		_spec_card.add_child(vbox)
+		
+		var title_lbl = Label.new()
+		title_lbl.name = "TitleLabel"
+		title_lbl.theme_type_variation = "HintLabel"
+		vbox.add_child(title_lbl)
+		
+		var stats_lbl = Label.new()
+		stats_lbl.name = "StatsLabel"
+		stats_lbl.theme_type_variation = "HUDValueLabel"
+		vbox.add_child(stats_lbl)
+	
+	_spec_card.visible = true
+	var title_lbl = _spec_card.find_child("TitleLabel", true, false) as Label
+	if title_lbl:
+		title_lbl.text = subject_label
+	var stats_lbl = _spec_card.find_child("StatsLabel", true, false) as Label
+	if stats_lbl:
+		stats_lbl.text = spec_stats_text
+
+
 func open_for_module(module: Node3D, label_text: String = "") -> void:
 	target_node = module
 	subject_label = label_text
@@ -75,6 +153,7 @@ func open_for_module(module: Node3D, label_text: String = "") -> void:
 	visible = true
 	_update_silhouette_radius(true)
 	_update_screen_position()
+	_update_station_positions()
 	UIAnim.ring_pop(self)
 
 
@@ -101,6 +180,7 @@ func _process(delta: float) -> void:
 
 	_update_silhouette_radius(false, delta)
 	_update_screen_position()
+	_update_station_positions()
 
 
 func _update_silhouette_radius(immediate: bool = false, delta: float = 0.016) -> void:
@@ -110,11 +190,10 @@ func _update_silhouette_radius(immediate: bool = false, delta: float = 0.016) ->
 	if not camera or camera.is_position_behind(target_node.global_position):
 		return
 
-	# Calculate projected bounding box half diagonal
 	var half_diag := _compute_projected_half_diagonal(camera, target_node)
 	var vp_size: Vector2 = get_viewport().get_visible_rect().size
 	var viewport_cap: float = minf(vp_size.x, vp_size.y) * 0.40
-	var max_inner: float = minf(MAX_INNER_RADIUS, viewport_cap)
+	var max_inner: float = maxf(minf(MAX_INNER_RADIUS, viewport_cap), half_diag + CLEARANCE_MARGIN)
 	var target_inner: float = clampf(half_diag + CLEARANCE_MARGIN, MIN_INNER_RADIUS, max_inner)
 
 	if immediate:
@@ -127,14 +206,6 @@ func _update_silhouette_radius(immediate: bool = false, delta: float = 0.016) ->
 	queue_redraw()
 
 
-## Measures the module's real drawn geometry (ModuleVolume.bounds(), the
-## project's single source of a module's occupied space) rather than a single
-## direct-child MeshInstance3D's mesh AABB, and projects all eight corners
-## instead of four. Falls back to ModuleVolume.boxes() merged loosely if the
-## fitted AABB proves too generous on a sponson-heavy part (a part whose
-## measured box list disagrees strongly with its own merged AABB - i.e. its
-## real footprint is not axis-aligned-box shaped - so we widen using the
-## per-mesh box list's own worst-case corner instead of the single merged box).
 func _compute_projected_half_diagonal(camera: Camera3D, node: Node3D) -> float:
 	var aabb: AABB = ModuleVolume.bounds(node)
 	if aabb.size == Vector3.ZERO:
@@ -153,10 +224,6 @@ func _compute_projected_half_diagonal(camera: Camera3D, node: Node3D) -> float:
 			if d > max_dist:
 				max_dist = d
 
-	# Sponson-heavy fallback: if the per-mesh box list has a corner further
-	# out (in module-local space) than the merged AABB's own corners suggest,
-	# the merged box under-reads a non-convex silhouette - widen using the
-	# individual boxes instead.
 	var box_list: Array = ModuleVolume.boxes(node)
 	if box_list.size() > 1:
 		for box in box_list:
@@ -209,10 +276,43 @@ func _update_screen_position() -> void:
 	position = _target_screen_center - size * 0.5
 
 
+func _update_station_positions() -> void:
+	var center := size * 0.5
+	var station_r := outer_radius + STATION_RADIAL_OFFSET
+
+	for st in _tweak_stations:
+		var ctrl: Control = st.get("control")
+		if not is_instance_valid(ctrl):
+			continue
+		var angle_frac: float = st.get("angle", 0.0)
+		# 0.0 is 12 o'clock (-PI/2), clockwise
+		var rad := angle_frac * TAU - PI * 0.5
+		var dir := Vector2(cos(rad), sin(rad))
+		var pos := center + dir * station_r - ctrl.size * 0.5
+		ctrl.position = pos
+
+	if is_instance_valid(_spec_card) and _spec_card.visible:
+		# Docked at 6:00 (bottom)
+		var spec_pos := center + Vector2(-_spec_card.size.x * 0.5, outer_radius + 18.0)
+		_spec_card.position = spec_pos
+
+
 func _has_point(point: Vector2) -> bool:
 	var offset := point - size * 0.5
 	var r := offset.length()
-	return r >= inner_radius and r <= outer_radius
+	if r >= inner_radius and r <= outer_radius:
+		return true
+	
+	# Also capture if inside any orbital station control
+	for st in _tweak_stations:
+		var ctrl: Control = st.get("control")
+		if is_instance_valid(ctrl) and ctrl.get_rect().has_point(point):
+			return true
+	
+	if is_instance_valid(_spec_card) and _spec_card.visible and _spec_card.get_rect().has_point(point):
+		return true
+
+	return false
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -232,7 +332,6 @@ func _gui_input(event: InputEvent) -> void:
 			var action: Dictionary = _actions[hit]
 			if action.get("enabled", true):
 				action_invoked.emit(action["id"])
-				# Persistent until deselect (D13): do NOT close here!
 				accept_event()
 
 
@@ -248,14 +347,31 @@ func _draw() -> void:
 	var font := get_theme_font("font", "Label")
 	if font == null:
 		font = ThemeDB.fallback_font
+	
+	var center := size * 0.5
+	
+	# Draw spoke connector lines to active tweak stations
+	for st in _tweak_stations:
+		var ctrl: Control = st.get("control")
+		if not is_instance_valid(ctrl):
+			continue
+		var angle_frac: float = st.get("angle", 0.0)
+		var rad := angle_frac * TAU - PI * 0.5
+		var dir := Vector2(cos(rad), sin(rad))
+		var p_ring := center + dir * outer_radius
+		var p_station := center + dir * (outer_radius + STATION_RADIAL_OFFSET - 8.0)
+		draw_line(p_ring, p_station, Color(Tokens.BASE_600, 0.7), 1.0, true)
+		# Spoke node dot on outer bezel
+		draw_circle(p_ring, 2.5, Tokens.SIGNAL_HAZARD)
+
 	RingDraw.draw_ring(
 		self,
-		size * 0.5,
+		center,
 		inner_radius,
 		outer_radius,
 		HUB_RADIUS,
 		_actions,
 		_hovered,
-		subject_label,
+		subject_label if (_spec_card == null or not _spec_card.visible) else "",
 		font
 	)

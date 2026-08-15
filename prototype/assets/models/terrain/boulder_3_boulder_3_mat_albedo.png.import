@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://8uo6okehlt8s"
-path="res://.godot/imported/boulder_3_boulder_3_mat_albedo.png-8b4aeaf77ae7176a9b213600927b1214.ctex"
+path.s3tc="res://.godot/imported/boulder_3_boulder_3_mat_albedo.png-8b4aeaf77ae7176a9b213600927b1214.s3tc.ctex"
+path.etc2="res://.godot/imported/boulder_3_boulder_3_mat_albedo.png-8b4aeaf77ae7176a9b213600927b1214.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "36cf0dcbf456ffa33f28d08e2347f1a0"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/terrain/boulder_3_boulder_3_mat_albedo.png"
-dest_files=["res://.godot/imported/boulder_3_boulder_3_mat_albedo.png-8b4aeaf77ae7176a9b213600927b1214.ctex"]
+dest_files=["res://.godot/imported/boulder_3_boulder_3_mat_albedo.png-8b4aeaf77ae7176a9b213600927b1214.s3tc.ctex", "res://.godot/imported/boulder_3_boulder_3_mat_albedo.png-8b4aeaf77ae7176a9b213600927b1214.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +42,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

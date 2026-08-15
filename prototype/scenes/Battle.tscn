@@ -5,8 +5,13 @@
 [ext_resource type="Script" path="res://scripts/chase_camera.gd" id="3_chasecam"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_bt"]
-sky_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
-ground_horizon_color = Color(0.64625, 0.65575, 0.67075, 1)
+sky_top_color = Color(0.36, 0.40, 0.44, 1)
+sky_horizon_color = Color(0.50, 0.52, 0.54, 1)
+sky_curve = 0.12
+ground_bottom_color = Color(0.16, 0.18, 0.17, 1)
+ground_horizon_color = Color(0.46, 0.48, 0.48, 1)
+ground_curve = 0.14
+sun_angle_max = 30.0
 
 [sub_resource type="Sky" id="Sky_bt"]
 sky_material = SubResource("ProceduralSkyMaterial_bt")
@@ -18,41 +23,37 @@ auto_exposure_max_exposure_value = 20.0
 dof_blur_far_enabled = true
 dof_blur_far_distance = 60.0
 dof_blur_far_transition = 20.0
-dof_blur_amount = 0.06
+dof_blur_amount = 0.05
 
 [sub_resource type="Environment" id="Environment_bt"]
 background_mode = 2
 sky = SubResource("Sky_bt")
-tonemap_mode = 4
-tonemap_exposure = 1.0
-ambient_light_source = 1
-ambient_color = Color(0.60, 0.61, 0.62, 1)
-ambient_color_sun_energy = 0.35
+tonemap_mode = 3
+tonemap_exposure = 0.95
+ambient_light_source = 2
+ambient_color = Color(0.40, 0.42, 0.44, 1)
+ambient_color_sun_energy = 0.20
 ssao_enabled = true
-ssao_radius = 0.8
-ssao_intensity = 1.8
+ssao_radius = 1.2
+ssao_intensity = 2.2
+ssao_power = 1.5
+ssao_detail = 0.8
 glow_enabled = true
-glow_intensity = 0.85
-glow_bloom = 0.06
-sdfgi_enabled = true
-sdfgi_cell_size = 1.0
-sdfgi_cascades = 4
-sdfgi_max_distance = 200.0
-sdfgi_occlusion_fade = 0.2
-ssil_enabled = true
-ssil_ray_count = 8
-ssil_samples = 4
-ssil_buffer_width = 0.5
-ssil_buffer_height = 0.5
+glow_intensity = 0.35
+glow_bloom = 0.03
+volumetric_fog_enabled = true
+volumetric_fog_density = 0.0025
+volumetric_fog_albedo = Color(0.62, 0.65, 0.68, 1)
+volumetric_fog_emission = Color(0.04, 0.04, 0.04, 1)
 adjustment_enabled = true
-adjustment_saturation = 1.18
-adjustment_contrast = 1.06
+adjustment_saturation = 0.88
+adjustment_contrast = 1.08
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
-size = Vector3(160, 1, 160)
+size = Vector3(1200, 1, 1200)
 
 [sub_resource type="BoxMesh" id="BoxMesh_ground"]
-size = Vector3(160, 1, 160)
+size = Vector3(1200, 1, 1200)
 
 [node name="Battle" type="Node3D"]
 script = ExtResource("1_director")
@@ -61,18 +62,18 @@ script = ExtResource("1_director")
 environment = SubResource("Environment_bt")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
-transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 20, 0)
+transform = Transform3D(-0.75, -0.433013, 0.5, 0.216506, 0.642788, 0.735077, -0.625, 0.631853, -0.453154, 0, 25, 0)
 shadow_enabled = true
-shadow_bias = 0.04
-shadow_normal_bias = 0.8
-shadow_blur = 1.2
+shadow_bias = 0.02
+shadow_normal_bias = 1.0
+shadow_blur = 1.5
 light_3d_mode = 1
-light_color = Color(1, 0.97, 0.90, 1)
-light_energy = 0.8
-light_angular_distance = 5.0
+light_color = Color(0.95, 0.93, 0.88, 1)
+light_energy = 0.85
+light_angular_distance = 4.0
 
 [node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 26, 128)
+transform = Transform3D(1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 26, 26)
 attributes = SubResource("CameraAttributesPractical_bt")
 script = ExtResource("2_rtscam")
 current = true

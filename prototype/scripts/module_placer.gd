@@ -204,6 +204,8 @@ func _log(msg: String):
 	WorkerThreadPool.add_task(Callable(self, "_async_write_log").bind(msg))
 
 func _async_write_log(msg: String):
+	if log_mutex == null:
+		return
 	log_mutex.lock()
 	var file = FileAccess.open("user://game_log.txt", FileAccess.READ_WRITE)
 	if not file:
@@ -212,7 +214,8 @@ func _async_write_log(msg: String):
 		file.seek_end()
 		file.store_line(msg)
 		file.close()
-	log_mutex.unlock()
+	if log_mutex != null:
+		log_mutex.unlock()
 
 func _unhandled_input(event):
 	if event is InputEventKey and event.pressed and not event.echo:
@@ -785,23 +788,13 @@ func refresh_locomotion() -> void:
 func update_locomotion(type_id: String, settings: Dictionary) -> void:
 	if not hull:
 		return
-	# Locomotion mounting lives in locomotion_mount.gd now. What used to be ~490
-	# lines here - clear, lay out, place, clamp, lift, group - is one call, and
-	# every station it places is SEATED onto the hull's real lower chine instead of
-	# onto the fitted collision box. See that file's header, and hull_chine.gd for
-	# the geometry.
-	#
-	# The RunningGear teardown stays here rather than moving with the rest. The
-	# chassis slab is a retired concept - LocomotionLayout.SUBFRAME_TYPES is empty
-	# and ModuleCatalog.needs_running_gear() hard-returns false - so nothing builds
-	# one any more, and the only reason to still tear one down is a blueprint saved
-	# before it was retired. That is a load-compatibility concern, not part of
-	# mounting, and putting it in the new file would have implied the slab was
-	# still live.
+	var had_loco_selection: bool = (selected_module != null and is_instance_valid(selected_module) and selected_module.has_meta("module_data") and selected_module.get_meta("module_data").category == "locomotion")
 	var existing_gear := hull.get_node_or_null("RunningGear")
 	if existing_gear:
 		existing_gear.queue_free()
-	LocomotionMountScript.rebuild(self, type_id, settings)
+	var spawned = LocomotionMountScript.rebuild(self, type_id, settings)
+	if had_loco_selection and spawned is Array and not spawned.is_empty():
+		_select_module(spawned[0])
 	
 ## The bounds of everything a module actually renders, in the module's own
 ## local space. Empty AABB if it has no meshes yet.

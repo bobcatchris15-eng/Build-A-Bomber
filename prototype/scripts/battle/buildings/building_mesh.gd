@@ -101,22 +101,36 @@ static func _collect(node: Node, into: Array) -> void:
 		_collect(child, into)
 
 
-# Argument order is (armor_material, faction). Passing these swapped is a silent
-# failure in both directions - the armor lookup misses and returns hardened_steel,
-# the faction lookup misses and returns DEFAULT_FACTION - so every building
-# renders plausibly while ignoring both inputs. building.gd shipped that bug for
-# months; the order is spelled out here so this copy does not reintroduce it.
 static func _apply_material(node: Node, faction: String, team: int) -> void:
-	var mat := HullMaterialBuilder.build_hull_material(faction)
-	if team != 0 and mat is ShaderMaterial:
-		var tint: Color = LiveryScript.zone_color(faction, "hull_upper").lerp(
-			Color(0.85, 0.2, 0.2), 0.45)
-		mat.set_shader_parameter("base_color", tint)
-	_assign(node, mat)
+	var team_tint: Color = LiveryScript.zone_color(faction, "hull_upper")
+	if team != 0:
+		team_tint = team_tint.lerp(Color(0.85, 0.2, 0.2), 0.45)
+	_assign_materials(node, team_tint)
 
 
-static func _assign(node: Node, mat: Material) -> void:
-	if node is MeshInstance3D:
-		node.material_override = mat
+static func _assign_materials(node: Node, team_tint: Color) -> void:
+	if node is MeshInstance3D and node.mesh != null:
+		var count: int = node.mesh.get_surface_count()
+		for i in range(count):
+			var src_mat = node.get_surface_override_material(i)
+			if src_mat == null:
+				src_mat = node.mesh.surface_get_material(i)
+			if src_mat is StandardMaterial3D or src_mat is ORMMaterial3D or src_mat is BaseMaterial3D:
+				var m := StandardMaterial3D.new()
+				if src_mat is StandardMaterial3D or src_mat is ORMMaterial3D:
+					m.albedo_color = src_mat.albedo_color
+					m.roughness = maxf(src_mat.roughness, 0.75)
+					m.metallic = src_mat.metallic
+					m.metallic_specular = 0.1
+				else:
+					m.albedo_color = Color(0.5, 0.5, 0.5)
+					m.roughness = 0.8
+					m.metallic = 0.2
+					m.metallic_specular = 0.1
+				var mat_name: String = str(src_mat.resource_name) if src_mat != null else ""
+				if i == 1 or ("Metal" in mat_name) or ("Panel" in mat_name):
+					m.albedo_color = team_tint
+				node.set_surface_override_material(i, m)
 	for child in node.get_children():
-		_assign(child, mat)
+		_assign_materials(child, team_tint)
+

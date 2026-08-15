@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://jq5uih3t041a"
-path="res://.godot/imported/wildflower_tuft_2_wildflower_tuft_2_mat0_albedo.png-3a6b590ae791b960f94a6acad8571d8b.ctex"
+path.s3tc="res://.godot/imported/wildflower_tuft_2_wildflower_tuft_2_mat0_albedo.png-3a6b590ae791b960f94a6acad8571d8b.s3tc.ctex"
+path.etc2="res://.godot/imported/wildflower_tuft_2_wildflower_tuft_2_mat0_albedo.png-3a6b590ae791b960f94a6acad8571d8b.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "c2e0469a3ec8a8683b548e5039dcd20b"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/terrain/wildflower_tuft_2_wildflower_tuft_2_mat0_albedo.png"
-dest_files=["res://.godot/imported/wildflower_tuft_2_wildflower_tuft_2_mat0_albedo.png-3a6b590ae791b960f94a6acad8571d8b.ctex"]
+dest_files=["res://.godot/imported/wildflower_tuft_2_wildflower_tuft_2_mat0_albedo.png-3a6b590ae791b960f94a6acad8571d8b.s3tc.ctex", "res://.godot/imported/wildflower_tuft_2_wildflower_tuft_2_mat0_albedo.png-3a6b590ae791b960f94a6acad8571d8b.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +42,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

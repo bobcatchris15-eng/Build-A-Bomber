@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://crdutjyr8qga1"
-path="res://.godot/imported/ambient_tree_8_ambient_tree_8_mat0_albedo.png-1d8e9e5c313b818d428b590c697d878c.ctex"
+path.s3tc="res://.godot/imported/ambient_tree_8_ambient_tree_8_mat0_albedo.png-1d8e9e5c313b818d428b590c697d878c.s3tc.ctex"
+path.etc2="res://.godot/imported/ambient_tree_8_ambient_tree_8_mat0_albedo.png-1d8e9e5c313b818d428b590c697d878c.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "6df1461ac0586c661dc79f127d036b32"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/terrain/ambient_tree_8_ambient_tree_8_mat0_albedo.png"
-dest_files=["res://.godot/imported/ambient_tree_8_ambient_tree_8_mat0_albedo.png-1d8e9e5c313b818d428b590c697d878c.ctex"]
+dest_files=["res://.godot/imported/ambient_tree_8_ambient_tree_8_mat0_albedo.png-1d8e9e5c313b818d428b590c697d878c.s3tc.ctex", "res://.godot/imported/ambient_tree_8_ambient_tree_8_mat0_albedo.png-1d8e9e5c313b818d428b590c697d878c.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +42,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

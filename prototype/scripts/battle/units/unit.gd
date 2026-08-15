@@ -28,6 +28,7 @@ const FlowFieldServiceScript = preload("res://scripts/battle/movement/flow_field
 const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 const HarvesterFSMScript = preload("res://scripts/battle/economy/harvester_fsm.gd")
 const DamageModelScript = preload("res://scripts/battle/units/damage_model.gd")
+const BattleWreckScript = preload("res://scripts/battle/units/battle_wreck.gd")
 # The simulation random stream - see its header. This file's only draws are the
 # subsystem-strip roll and the choice of which module it takes, both of which
 # change the outcome of a fight, so both are SIM.
@@ -180,6 +181,12 @@ var drivetrain_analysis: Dictionary = {}
 # a boosting group down.
 var _boost_vfx_timer: float = 0.0
 const BOOST_VFX_INTERVAL := 0.12
+
+# Cold-War vehicle suspension & chassis pitch/roll state
+var _suspension_pitch: float = 0.0
+var _suspension_roll: float = 0.0
+var _prev_speed: float = 0.0
+var _prev_yaw: float = 0.0
 
 
 func _ready() -> void:
@@ -719,6 +726,21 @@ func _apply_movement(delta: float, boost_mult: float = 1.0) -> void:
 	velocity.x = forward.x * speed
 	velocity.z = forward.z * speed
 
+	# Cold-War vehicle suspension physics (chassis squat/dip on accel/brake and roll into turns)
+	if is_instance_valid(hull_node) and not is_flying:
+		var accel: float = (speed - _prev_speed) / maxf(delta, 0.001)
+		_prev_speed = speed
+		var target_pitch: float = clampf(-accel * 0.006, -0.05, 0.05)
+		_suspension_pitch = lerpf(_suspension_pitch, target_pitch, 8.0 * delta)
+
+		var yaw_rate: float = wrapf(rotation.y - _prev_yaw, -PI, PI) / maxf(delta, 0.001)
+		_prev_yaw = rotation.y
+		var target_roll: float = clampf(yaw_rate * 0.012, -0.06, 0.06)
+		_suspension_roll = lerpf(_suspension_roll, target_roll, 8.0 * delta)
+
+		hull_node.rotation.x = _suspension_pitch
+		hull_node.rotation.z = _suspension_roll
+
 
 # Which way to head this tick, resolved across three sources in priority order.
 #
@@ -1025,6 +1047,7 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 			_controller.apply_explosion(global_position, radius, damage, self)
 
 	died.emit(self)
+	BattleWreckScript.spawn_from_unit(self, hit_origin)
 	queue_free()
 
 

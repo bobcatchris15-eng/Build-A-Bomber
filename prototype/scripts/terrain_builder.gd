@@ -770,13 +770,22 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) ->
 	var x = -half
 	while x < half:
 		var x1 = min(x + cell, half)
+		var col_hard_holes: Array = []
+		for h in hard_holes:
+			if x < h.x1 and x1 > h.x0:
+				col_hard_holes.append(h)
+		var col_water_holes: Array = []
+		for w in water_holes:
+			if x < w.x1 and x1 > w.x0:
+				col_water_holes.append(w)
+
 		var zi = 0
 		var z = -half
 		while z < half:
 			var z1 = min(z + cell, half)
 			var hard_blocked = false
-			for h in hard_holes:
-				if _rect_overlaps(x, x1, z, z1, h):
+			for h in col_hard_holes:
+				if z < h.z1 and z1 > h.z0:
 					hard_blocked = true
 					break
 			if hard_blocked and cell > HOLE_SUBDIVISION_CELL:
@@ -784,14 +793,14 @@ static func _build_ground_faces(map_def: Dictionary, extra_holes: Array = []) ->
 				# quads even on a heightmap map - a small, known imprecision
 				# right at a building edge, far preferable to omitting the
 				# whole coarse quad the building only clips a corner of.
-				_emit_subdivided_ground_quad(verts, x, x1, z, z1, hard_holes, water_holes, bridges, has_blobs, map_def)
+				_emit_subdivided_ground_quad(verts, x, x1, z, z1, col_hard_holes, col_water_holes, bridges, has_blobs, map_def)
 				z = z1
 				zi += 1
 				continue
 			var blocked = hard_blocked
 			if not blocked:
-				for w in water_holes:
-					if _rect_overlaps(x, x1, z, z1, w) and not _cell_on_bridge(x, x1, z, z1, bridges):
+				for w in col_water_holes:
+					if z < w.z1 and z1 > w.z0 and not _cell_on_bridge(x, x1, z, z1, bridges):
 						blocked = true
 						break
 			if not blocked and has_blobs and _cell_on_water_blob(x, x1, z, z1, map_def):
@@ -878,19 +887,23 @@ static func _build_amphibious_faces(map_def: Dictionary, extra_holes: Array = []
 	var x = -half
 	while x < half:
 		var x1 = min(x + cell, half)
+		var col_holes: Array = []
+		for h in holes:
+			if x < h.x1 and x1 > h.x0:
+				col_holes.append(h)
 		var z = -half
 		while z < half:
 			var z1 = min(z + cell, half)
 			var blocked = false
-			for h in holes:
-				if _rect_overlaps(x, x1, z, z1, h):
+			for h in col_holes:
+				if z < h.z1 and z1 > h.z0:
 					blocked = true
 					break
 			if blocked and cell > HOLE_SUBDIVISION_CELL:
 				# Same fix as _build_ground_faces() - see that function's
 				# header comment. A screw_drive unit hits the exact same
 				# building-swallows-a-whole-coarse-quad failure on land.
-				_emit_subdivided_ground_quad(verts, x, x1, z, z1, holes, [], [], false, map_def)
+				_emit_subdivided_ground_quad(verts, x, x1, z, z1, col_holes, [], [], false, map_def)
 			elif not blocked:
 				_add_nav_quad(verts, Vector3(x, 0, z), Vector3(x1, 0, z), Vector3(x1, 0, z1), Vector3(x, 0, z1))
 			z = z1
@@ -1633,6 +1646,8 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 
 	var st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+
+	# 1. Playable ground surface
 	var x = -half
 	while x < half:
 		var x1 = min(x + mesh_step, half)
@@ -1648,6 +1663,36 @@ static func build_ground_visual_mesh(map_def: Dictionary) -> Dictionary:
 				st.add_vertex(v)
 			z = z1
 		x = x1
+
+	# 2. Outer terrain skirt: extends outward to the horizon so map borders never expose empty void
+	var skirt_dist: float = maxf(half * 3.5, 450.0)
+	var skirt_step: float = maxf(mesh_step * 3.0, 32.0)
+	var outer_min: float = -half - skirt_dist
+	var outer_max: float = half + skirt_dist
+
+	var _add_skirt_rect = func(sx0: float, sx1: float, sz0: float, sz1: float) -> void:
+		var curr_x = sx0
+		while curr_x < sx1:
+			var next_x = min(curr_x + skirt_step, sx1)
+			var curr_z = sz0
+			while curr_z < sz1:
+				var next_z = min(curr_z + skirt_step, sz1)
+				var sa = Vector3(curr_x, _h.call(curr_x, curr_z), curr_z)
+				var sb = Vector3(next_x, _h.call(next_x, curr_z), curr_z)
+				var sc = Vector3(next_x, _h.call(next_x, next_z), next_z)
+				var sd = Vector3(curr_x, _h.call(curr_x, next_z), next_z)
+				for sv in [sa, sb, sc, sa, sc, sd]:
+					st.set_uv(Vector2(sv.x, sv.z) / TERRAIN_TILE_WORLD_SIZE)
+					st.add_vertex(sv)
+				curr_z = next_z
+			curr_x = next_x
+
+	# North, South, West, East perimeter skirt sections
+	_add_skirt_rect.call(outer_min, outer_max, outer_min, -half)
+	_add_skirt_rect.call(outer_min, outer_max, half, outer_max)
+	_add_skirt_rect.call(outer_min, -half, -half, half)
+	_add_skirt_rect.call(half, outer_max, -half, half)
+
 	st.index()
 	st.generate_normals()
 	var mesh = st.commit()

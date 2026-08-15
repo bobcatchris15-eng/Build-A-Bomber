@@ -397,6 +397,8 @@ const SUITE_ORDER := [
 	["battle_placement", "test_placement_rejects_bounds_water_and_overlap"],
 	["battle_placement", "test_placement_excludes_resource_nodes"],
 	["battle_placement", "test_ai_siting_and_player_ghost_share_one_rule_set"],
+	["battle_placement", "test_expanded_build_radius_tripled"],
+	["battle_placement", "test_structure_construction_animation_lifecycle"],
 	["battle_hud", "test_every_queue_has_a_visible_toolbox"],
 	["battle_hud", "test_the_build_bar_is_actually_on_screen"],
 	["battle_hud", "test_opening_a_queue_is_an_accordion"],

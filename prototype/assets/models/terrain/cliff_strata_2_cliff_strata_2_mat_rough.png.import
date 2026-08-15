@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://dc2hmxee68y11"
-path="res://.godot/imported/cliff_strata_2_cliff_strata_2_mat_rough.png-ba4b71a884e76e6a959bc0e1a5ba7ece.ctex"
+path.s3tc="res://.godot/imported/cliff_strata_2_cliff_strata_2_mat_rough.png-ba4b71a884e76e6a959bc0e1a5ba7ece.s3tc.ctex"
+path.etc2="res://.godot/imported/cliff_strata_2_cliff_strata_2_mat_rough.png-ba4b71a884e76e6a959bc0e1a5ba7ece.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "a25a350c94b22c206ea5ec328ce2155e"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/terrain/cliff_strata_2_cliff_strata_2_mat_rough.png"
-dest_files=["res://.godot/imported/cliff_strata_2_cliff_strata_2_mat_rough.png-ba4b71a884e76e6a959bc0e1a5ba7ece.ctex"]
+dest_files=["res://.godot/imported/cliff_strata_2_cliff_strata_2_mat_rough.png-ba4b71a884e76e6a959bc0e1a5ba7ece.s3tc.ctex", "res://.godot/imported/cliff_strata_2_cliff_strata_2_mat_rough.png-ba4b71a884e76e6a959bc0e1a5ba7ece.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +42,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

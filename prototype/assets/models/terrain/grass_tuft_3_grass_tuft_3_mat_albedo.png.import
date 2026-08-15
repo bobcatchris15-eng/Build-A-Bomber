@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://d2amgcdbhn41u"
-path="res://.godot/imported/grass_tuft_3_grass_tuft_3_mat_albedo.png-cc77826e46f7425701fc42aecd273fb6.ctex"
+path.s3tc="res://.godot/imported/grass_tuft_3_grass_tuft_3_mat_albedo.png-cc77826e46f7425701fc42aecd273fb6.s3tc.ctex"
+path.etc2="res://.godot/imported/grass_tuft_3_grass_tuft_3_mat_albedo.png-cc77826e46f7425701fc42aecd273fb6.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "a95edb9389950c5706302956caa56a37"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/terrain/grass_tuft_3_grass_tuft_3_mat_albedo.png"
-dest_files=["res://.godot/imported/grass_tuft_3_grass_tuft_3_mat_albedo.png-cc77826e46f7425701fc42aecd273fb6.ctex"]
+dest_files=["res://.godot/imported/grass_tuft_3_grass_tuft_3_mat_albedo.png-cc77826e46f7425701fc42aecd273fb6.s3tc.ctex", "res://.godot/imported/grass_tuft_3_grass_tuft_3_mat_albedo.png-cc77826e46f7425701fc42aecd273fb6.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +42,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

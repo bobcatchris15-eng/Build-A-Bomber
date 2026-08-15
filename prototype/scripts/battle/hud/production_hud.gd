@@ -751,13 +751,13 @@ func _re_evaluate_gates() -> void:
 func _enqueue(queue_name: String, item: Dictionary) -> void:
 	var team: int = _director.PLAYER_TEAM
 	if item["structure"]:
-		# The blueprint rides along for defences and is empty for prefab kinds -
-		# that is what _on_structure_ready reads to decide between a catalog
-		# building and a design-built turret. Dropping it here produced a power
-		# plant where the player ordered a gun turret.
-		_director.production.enqueue_structure(
-			team, queue_name, item["kind"], item["cost"], item["time"],
-			item.get("blueprint", {}))
+		# User-driven placement on order: choose site on battlefield first
+		if _director.has_method("start_building_placement"):
+			_director.start_building_placement(queue_name, item)
+		else:
+			_director.production.enqueue_structure(
+				team, queue_name, item["kind"], item["cost"], item["time"],
+				item.get("blueprint", {}))
 	else:
 		_director.production.enqueue_unit(
 			team, item["blueprint"], item["cost"], item["time"], queue_name)

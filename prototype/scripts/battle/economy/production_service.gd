@@ -87,7 +87,8 @@ func enqueue_unit(team: int, blueprint: Dictionary, cost: int,
 # Adds a structure. `kind` is a BuildingCatalog key for the Building queue, or
 # the blueprint is a custom defence design for the Defense queue.
 func enqueue_structure(team: int, queue_name: String, kind: String,
-		cost: int, base_time: float, blueprint: Dictionary = {}) -> Dictionary:
+		cost: int, base_time: float, blueprint: Dictionary = {},
+		structure_node: Node = null) -> Dictionary:
 	var contributors := _contributor_count(team, queue_name)
 	if contributors <= 0:
 		return {}
@@ -100,6 +101,7 @@ func enqueue_structure(team: int, queue_name: String, kind: String,
 	job["kind"] = kind
 	job["blueprint"] = blueprint
 	job["is_structure"] = true
+	job["structure_node"] = structure_node
 	queue(team, queue_name).append(job)
 	queue_changed.emit(team, queue_name)
 	return job
@@ -160,6 +162,9 @@ func cancel(team: int, queue_name: String, index: int) -> Dictionary:
 	if index < 0 or index >= q.size():
 		return {}
 	var job: Dictionary = q[index]
+	var s_node = job.get("structure_node", null)
+	if s_node != null and is_instance_valid(s_node):
+		s_node.queue_free()
 	# Refund what was actually DRAWN, not the full price. Under the drip-fed
 	# model a job part-way through has only paid part of its cost, and refunding
 	# the whole thing would make queue-and-cancel a money printer.
@@ -207,6 +212,11 @@ func _tick_queue(team: int, queue_name: String, delta: float) -> void:
 	var job: Dictionary = q[0]
 	if job["paused"]:
 		job["stalled"] = true
+		if job.get("is_structure", false):
+			var s_node = job.get("structure_node", null)
+			if s_node != null and is_instance_valid(s_node):
+				var progress: float = 1.0 - (job["time_left"] / job["total_time"])
+				s_node.update_construction_progress(progress, true)
 		return
 
 	# DRIP-FED COST, from OpenRA's ProductionItem.Tick adapted to continuous
@@ -227,22 +237,51 @@ func _tick_queue(team: int, queue_name: String, delta: float) -> void:
 		# remaining cost both stay exactly where they were, so a team that comes
 		# into money resumes rather than having silently lost ground.
 		job["stalled"] = true
+		if job.get("is_structure", false):
+			var s_node = job.get("structure_node", null)
+			if s_node != null and is_instance_valid(s_node):
+				var progress: float = 1.0 - (job["time_left"] / job["total_time"])
+				s_node.update_construction_progress(progress, true)
 		return
 
 	job["stalled"] = false
 	job["remaining_cost"] -= draw
 	job["time_left"] = new_time_left
+
+	if job.get("is_structure", false):
+		var s_node = job.get("structure_node", null)
+		if s_node != null and is_instance_valid(s_node):
+			var progress: float = 1.0 - (job["time_left"] / job["total_time"])
+			s_node.update_construction_progress(progress, false)
+
 	if job["time_left"] > 0.0:
 		return
 
 	# --- Complete ---
 	job["done"] = true
 	if job["is_structure"]:
-		# Structures never auto-place. The job sits here, genuinely finished,
-		# until the match director claims it and hands off to ghost placement -
-		# the player chooses where it goes.
+		var s_node = job.get("structure_node", null)
+		if s_node != null and is_instance_valid(s_node):
+			s_node.finish_construction()
+			q.pop_front()
+			structure_ready.emit(team, queue_name, job)
+			queue_changed.emit(team, queue_name)
+			return
 		structure_ready.emit(team, queue_name, job)
 		return
+
+	# A finished unit waits for a clear exit rather than spawning on top of
+	# whatever is parked there. Blockers get a real nudge instead of being
+	# silently phased through.
+	if _world != null and _world.has_method("exit_blockers_for"):
+		var blockers: Array = _world.exit_blockers_for(team, queue_name)
+		if not blockers.is_empty():
+			if _world.has_method("nudge_blockers"):
+				_world.nudge_blockers(team, queue_name, blockers)
+			return
+	q.pop_front()
+	unit_completed.emit(team, queue_name, job["blueprint"])
+	queue_changed.emit(team, queue_name)
 
 	# A finished unit waits for a clear exit rather than spawning on top of
 	# whatever is parked there. Blockers get a real nudge instead of being

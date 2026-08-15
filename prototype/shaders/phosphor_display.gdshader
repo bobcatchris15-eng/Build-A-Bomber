@@ -63,6 +63,11 @@ uniform float flicker_speed : hint_range(0.0, 200.0) = 87.0;
 // on the other axis, so together they read as a mask rather than as stripes.
 uniform float grille_depth : hint_range(0.0, 0.5) = 0.08;
 
+// --- Cold-War Radar / PPI Sweep Mode ---
+uniform bool enable_radar_sweep = false;
+uniform float sweep_speed : hint_range(0.1, 5.0) = 0.8;
+uniform bool show_range_rings = false;
+
 
 float luminance(vec3 c) {
 	return dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -72,17 +77,30 @@ void fragment() {
 	vec4 src = texture(TEXTURE, UV);
 
 	// --- Emission ------------------------------------------------------------
-	// The source texture is treated as a MASK, not as colour. Whatever the
-	// control drew (text, a bar, a blip) becomes tube excitation, and the tube
-	// decides what colour that is. This is why a phosphor panel cannot show a
-	// multi-coloured readout - which is correct: a single-gun tube physically
-	// cannot either, and pretending otherwise is what makes fake-CRT effects
-	// look like a filter laid over a normal UI.
 	float excite = luminance(src.rgb) * src.a;
 
+	// --- Radar PPI Sweep Simulation ---
+	if (enable_radar_sweep) {
+		vec2 d_center = UV - vec2(0.5);
+		float dist = length(d_center) * 2.0;
+		float angle = atan(d_center.y, d_center.x);
+		float sweep_phase = fract(TIME * sweep_speed * 0.18);
+		float angle_phase = fract((angle + 3.14159265) / 6.2831853);
+		float sweep_diff = fract(sweep_phase - angle_phase);
+		float sweep_beam = exp(-sweep_diff * 12.0) * float(dist <= 1.0);
+		excite = max(excite * (0.3 + 0.7 * sweep_beam), sweep_beam * 0.35);
+
+		// Tactical range rings
+		if (show_range_rings && dist <= 1.0) {
+			float ring1 = abs(dist - 0.33);
+			float ring2 = abs(dist - 0.66);
+			float ring3 = abs(dist - 0.98);
+			float ring_signal = smoothstep(0.015, 0.0, min(min(ring1, ring2), ring3));
+			excite += ring_signal * 0.15;
+		}
+	}
+
 	// --- Bloom from lit pixels only -----------------------------------------
-	// Four taps in a diamond. Cheap, and enough at these sizes - this runs on
-	// small readouts, not fullscreen.
 	vec2 r = SCREEN_PIXEL_SIZE * bloom_radius_px;
 	float glow = 0.0;
 	glow += luminance(texture(TEXTURE, UV + vec2(r.x, 0.0)).rgb);
@@ -94,12 +112,10 @@ void fragment() {
 	float energy = clamp(excite + glow, 0.0, 1.5);
 
 	// --- Scanlines, in SCREEN pixels ----------------------------------------
-	// FRAGCOORD is in physical pixels, so the pitch is genuinely constant no
-	// matter how large the control is or what UI scale is active. See note 1.
 	float line_phase = FRAGCOORD.y / max(scanline_pitch, 0.5);
 	float scan = 1.0 - scanline_depth * (0.5 + 0.5 * cos(line_phase * 6.2831853));
 
-	// Vertical grille, on the other axis and much shallower.
+	// Vertical grille
 	float grille_phase = FRAGCOORD.x / max(scanline_pitch, 0.5);
 	float grille = 1.0 - grille_depth * (0.5 + 0.5 * cos(grille_phase * 6.2831853));
 
@@ -107,9 +123,6 @@ void fragment() {
 	float flicker = 1.0 - flicker_amount * (0.5 + 0.5 * sin(TIME * flicker_speed));
 
 	// --- Compose -------------------------------------------------------------
-	// Unlit phosphor over glass, then emission added on top. ADDED, not mixed,
-	// because a tube emits - the lit areas do not replace the glass, they light
-	// it up. Mixing is what makes the bright parts look like paint.
 	vec3 base = mix(glass_color.rgb, unlit_color.rgb, 0.35);
 	vec3 col = base + lit_color.rgb * energy;
 
@@ -120,11 +133,5 @@ void fragment() {
 	float vig = 1.0 - vignette_strength * dot(d, d) * 4.0;
 	col *= clamp(vig, 0.0, 1.0);
 
-	// ALPHA IS THE CONTROL'S, NOT THE SOURCE'S. COLOR.a arrives carrying the
-	// canvas item's modulate, and using it means the glass fills the entire
-	// readout rect even where nothing was drawn. Taking src.a instead would
-	// leave the panel transparent between glyphs, so the battlefield would show
-	// through the screen - which is the single most common way a CRT effect
-	// gives itself away as a filter rather than a surface.
 	COLOR = vec4(col, COLOR.a);
 }

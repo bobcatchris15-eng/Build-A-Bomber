@@ -338,51 +338,55 @@ void fragment() {
 	// Multiplicative tints
 	vec3 color = tex_albedo * zone_albedo * base_color.rgb * accent_color.rgb;
 
-	// Comic-color grade
+	// Cold-War military color grading & desaturation
 	float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-	color = mix(vec3(luma), color, color_saturation);
-	color = color * (1.0 - color_lift) + color_lift;
+	color = mix(vec3(luma), color, min(color_saturation, 1.05));
 	color = clamp(color, vec3(0.0), vec3(1.0));
 
-	// Cel-shaded ink border
+	// Multi-tiered service weathering & edge wear (red-lead primer + dark oxidized steel)
 	vec3 d_normal = fwidth(world_normal);
 	vec3 d_pos = fwidth(world_pos);
 	float curvature = length(d_normal) / max(length(d_pos), 0.0001);
-	float edge_curvature = clamp(curvature * ink_curvature_gain, 0.0, 1.0);
-	vec3 view_dir_world = normalize(CAMERA_POSITION_WORLD - world_pos);
-	float fresnel_rim = pow(1.0 - clamp(dot(view_dir_world, geo_normal), 0.0, 1.0), 3.0) * ink_rim_strength;
-	float edge_signal = max(edge_curvature, fresnel_rim);
-	float edge_ink = smoothstep(0.05, max(ink_width, 0.06), edge_signal) * edge_ink_strength;
-	color = mix(color, ink_color, edge_ink);
+	float edge_curvature = clamp(curvature * 0.05, 0.0, 1.0);
 
-	// Service Weathering (Edge chipping and crevice grime)
-	if (weathering > 0.01) {
-		float chip_threshold = 1.0 - weathering * 0.72;
-		float chip_noise = tex_roughness + (hash2d(floor(tex_pos.xz * 24.0)) - 0.5) * 0.3;
-		float chip_mask = smoothstep(chip_threshold - 0.08, chip_threshold + 0.08, edge_curvature * chip_noise * 1.5);
-		vec3 bare_metal = vec3(0.22, 0.23, 0.25);
-		color = mix(color, bare_metal, chip_mask * 0.90);
-		zone_metallic = mix(zone_metallic, 0.85, chip_mask);
-		zone_roughness = mix(zone_roughness, 0.55, chip_mask);
+	float effective_weathering = max(weathering, 0.15); // Authentic baseline military service wear
+	float chip_threshold = 1.0 - effective_weathering * 0.65;
+	float chip_noise = tex_roughness + (hash2d(floor(tex_pos.xz * 32.0)) - 0.5) * 0.4;
+	float chip_mask = smoothstep(chip_threshold - 0.08, chip_threshold + 0.08, edge_curvature * chip_noise * 1.6);
 
-		// Recess grime accumulation
-		float grime_mask = (1.0 - edge_curvature) * (1.0 - tex_albedo.r) * weathering * 0.75;
-		color = mix(color, color * 0.35, grime_mask);
-	}
+	vec3 red_primer = vec3(0.38, 0.16, 0.11);
+	vec3 oxidized_steel = vec3(0.16, 0.17, 0.18);
+	vec3 wear_color = mix(red_primer, oxidized_steel, smoothstep(0.4, 0.8, chip_mask));
+
+	color = mix(color, wear_color, chip_mask * 0.92);
+	zone_metallic = mix(zone_metallic, 0.75, chip_mask);
+	zone_roughness = mix(zone_roughness, 0.62, chip_mask);
+
+	// Lower hull mud & dirt accumulation gradient
+	float ground_clearance = clamp((model_pos.y - local_bounds_y.x) / max(local_bounds_y.y - local_bounds_y.x, 0.01), 0.0, 1.0);
+	float mud_mask = (1.0 - smoothstep(0.0, 0.45, ground_clearance)) * (0.65 + 0.35 * tex_roughness);
+	vec3 mud_color = vec3(0.20, 0.17, 0.13);
+	color = mix(color, mud_color, mud_mask * 0.85);
+	zone_metallic = mix(zone_metallic, 0.05, mud_mask);
+	zone_roughness = mix(zone_roughness, 0.95, mud_mask);
+
+	// Recess grease and crevice grime
+	float grime_mask = (1.0 - edge_curvature) * (1.0 - tex_albedo.r) * effective_weathering * 0.65;
+	color = mix(color, color * 0.28, grime_mask);
 
 	color = mix(color, vec3(1.0, 0.05, 0.05), flash_amount);
 	ALBEDO = color;
 
-	// Procedural Micro-Surface Synthesis
+	// Procedural Micro-Surface Synthesis (Pitted cast steel & rolled armor)
 	float rough_mod = 0.0;
 	float metal_mod = 0.0;
 	vec3 micro_pert = synthesize_micro_surface(zone_surface, tex_pos, geo_normal, tri_w, rough_mod, metal_mod);
 
-	METALLIC = clamp((zone_metallic + metal_mod) * metallic * (1.0 - edge_ink * 0.85), 0.0, 1.0);
+	METALLIC = clamp((zone_metallic + metal_mod) * metallic, 0.0, 1.0);
 
 	float base_roughness = mix(roughness, zone_roughness + rough_mod, livery_mix);
-	float rough_floor = mix(0.0, 0.35, livery_mix);
-	ROUGHNESS = clamp(base_roughness + roughness_bias + (tex_roughness - 0.5) * 0.85 + edge_ink * 0.45, rough_floor, 1.0);
+	float rough_floor = mix(0.15, 0.40, livery_mix);
+	ROUGHNESS = clamp(base_roughness + roughness_bias + (tex_roughness - 0.5) * 0.65, rough_floor, 1.0);
 
 	// Combined normal
 	vec3 tex_world_normal = triplanar_normal(normal_tex, tex_pos, geo_normal, tri_w);
@@ -395,42 +399,4 @@ void fragment() {
 	} else if (emissive_strength > 0.0) {
 		EMISSION = emissive_color.rgb * emissive_strength;
 	}
-}
-
-float toon_quantize(float t) {
-	float bands = max(toon_bands, 1.0);
-	float scaled = clamp(t, 0.0, 1.0) * bands;
-	float idx = floor(scaled);
-	float f = scaled - idx;
-	float w = max(toon_softness, 0.001);
-	return (idx + smoothstep(0.5 - w, 0.5 + w, f)) / bands;
-}
-
-// Custom Toon Lighting with True Metallic Differentiation
-void light() {
-	vec3 N = normalize(NORMAL);
-	vec3 L = normalize(LIGHT);
-
-	float ndotl = dot(N, L) * 0.5 + 0.5;
-	float banded = toon_quantize(ndotl);
-
-	float lit = mix(toon_shadow_floor, 1.0, banded);
-	vec3 shadow_tinted = mix(toon_shadow_tint, vec3(1.0), banded);
-
-	// In real PBR, metallic surfaces absorb diffuse light. Under toon cel-shading,
-	// suppressing diffuse for metals produces authentic metallic body and prevents
-	// shiny metals looking like painted plastic.
-	float metallic_diffuse_factor = mix(1.0, 0.28, METALLIC);
-	DIFFUSE_LIGHT += ALBEDO * LIGHT_COLOR * ATTENUATION * lit * shadow_tinted * metallic_diffuse_factor;
-
-	// Specular highlight response
-	vec3 H = normalize(L + normalize(VIEW));
-	float spec_power = mix(72.0, 6.0, clamp(ROUGHNESS, 0.0, 1.0));
-	float spec = pow(max(dot(N, H), 0.0), spec_power);
-	float spec_blob = smoothstep(0.25, 0.25 + max(toon_softness, 0.02) * 2.0, spec);
-
-	// Metals exhibit colored specular reflections tinted by ALBEDO; dielectrics exhibit neutral white glints
-	vec3 spec_tint = mix(vec3(1.0), ALBEDO, METALLIC);
-	float gloss_gain = mix(0.25, 1.6, 1.0 - clamp(ROUGHNESS, 0.0, 1.0)) * mix(0.8, 1.5, METALLIC);
-	SPECULAR_LIGHT += LIGHT_COLOR * ATTENUATION * spec_blob * toon_specular_strength * gloss_gain * spec_tint;
 }

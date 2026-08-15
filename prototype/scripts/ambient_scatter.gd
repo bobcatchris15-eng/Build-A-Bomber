@@ -48,7 +48,7 @@ extends Node3D
 # the only handle resource_node.gd has at setup() time.
 const NODE_NAME := "AmbientScatter"
 
-static func get_or_create(parent: Node3D) -> Node3D:
+static func get_or_create(parent: Node) -> Node:
 	if parent == null:
 		return null
 	var existing := parent.get_node_or_null(NODE_NAME)
@@ -107,12 +107,8 @@ func commit() -> void:
 				mm.set_instance_transform(i, (xforms[i] as Transform3D) * local)
 			var mmi := MultiMeshInstance3D.new()
 			mmi.multimesh = mm
-			# Same call as the per-tree path made: the top-down camera looks
-			# straight down on a tree's own canopy, so its shadow is a smudge
-			# on itself that also darkens the ground pixels where a unit's
-			# gameplay-relevant shadow lands. See resource_node.gd's own
-			# AMBIENT SHADOWS ARE OFF note - this is that decision preserved
-			# through the batching change, not a new one.
+			if part.has("material") and part["material"] != null:
+				mmi.material_override = part["material"]
 			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			mmi.name = "Scatter_%s_%d" % [path.get_file().get_basename(), made.size()]
 			add_child(mmi)
@@ -139,17 +135,6 @@ func set_node_transform(handle, xform: Transform3D) -> void:
 			mm.set_instance_transform(slot, xform * (parts[i]["xform"] as Transform3D))
 
 
-# Instantiates the scene once, walks it for MeshInstance3D descendants, and
-# records each one's mesh plus its transform RELATIVE TO THE SCENE ROOT. That
-# relative transform is what lets a multi-part asset (a trunk mesh and a
-# canopy mesh sitting at different heights) survive batching: each part
-# becomes its own MultiMesh, and the parts stay welded because every one of
-# them is placed by the same per-item transform composed with its own offset.
-#
-# Surface materials come along for free - they live on the Mesh resource
-# itself, which is what MultiMesh draws with. That preserves the "authored
-# assets keep their baked-in glTF materials" contract resource_node.gd's
-# spawn path documents (a tree's trunk vs. canopy are separate surfaces).
 func _build_template(scene_path: String) -> Array:
 	if not ResourceLoader.exists(scene_path):
 		return []
@@ -160,12 +145,6 @@ func _build_template(scene_path: String) -> Array:
 	if probe == null:
 		return []
 	var parts: Array = []
-	# Transform is accumulated down the walk rather than read from
-	# global_transform: the probe is deliberately never added to the
-	# SceneTree (instantiating 20 species is cheap, adding and removing them
-	# is not), and global_transform is only meaningful for a node that is
-	# inside a tree. Composing local transforms by hand is exact here and
-	# needs no tree at all.
 	var stack: Array = [{"node": probe, "xform": Transform3D.IDENTITY}]
 	while not stack.is_empty():
 		var entry: Dictionary = stack.pop_back()
@@ -176,6 +155,23 @@ func _build_template(scene_path: String) -> Array:
 		for c in node.get_children():
 			stack.append({"node": c, "xform": xform})
 		if node is MeshInstance3D and node.mesh != null:
-			parts.append({"mesh": node.mesh, "xform": xform})
+			var mat: Material = node.material_override
+			if mat == null and node.get_surface_override_material_count() > 0:
+				mat = node.get_surface_override_material(0)
+			if mat == null and node.mesh.get_surface_count() > 0:
+				mat = node.mesh.surface_get_material(0)
+
+			# Ensure trees and foliage have non-glossy, light-absorbing organic roughness
+			var matte_mat := StandardMaterial3D.new()
+			if mat is StandardMaterial3D or mat is ORMMaterial3D or mat is BaseMaterial3D:
+				matte_mat.albedo_color = mat.albedo_color
+				matte_mat.albedo_texture = mat.albedo_texture
+			else:
+				matte_mat.albedo_color = Color(0.22, 0.28, 0.18)
+			matte_mat.roughness = 0.98
+			matte_mat.metallic = 0.0
+			matte_mat.metallic_specular = 0.0
+
+			parts.append({"mesh": node.mesh, "xform": xform, "material": matte_mat})
 	probe.free()
 	return parts

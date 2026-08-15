@@ -169,9 +169,9 @@ static func adjacency_for(kind: String, blueprint: Dictionary = {}) -> float:
 #
 # It resolves through validity() above, so the AI is held to the player's rules -
 # including the buildable-area adjacency it was previously ignoring.
-const RING_STEP := 9.0
-const RINGS := 8
-const SAMPLES := 12
+const RING_STEP := 10.0
+const RINGS := 12
+const SAMPLES := 16
 
 
 static func find_site(world, team: int, home: Vector3, kind: String,

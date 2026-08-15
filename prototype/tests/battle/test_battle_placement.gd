@@ -160,3 +160,88 @@ func test_ai_siting_and_player_ghost_share_one_rule_set() -> bool:
 	print("  [PASS] one rule set for both")
 	w.queue_free()
 	return true
+
+
+func test_expanded_build_radius_tripled() -> bool:
+	print("Running Test Suite: Placement - expanded 3x build radius (24m base, 84m defense)...")
+	var w := _world()
+	_structure(w, "hq", 0, Vector3.ZERO)
+
+	# 20m from HQ: with 24m radius (plus footprints), this is valid!
+	var site_20m := Vector3(20.0, 0.0, 0.0)
+	var ok_20m: Dictionary = PlacementServiceScript.validity(w, 0, site_20m, "power_plant")
+	if not ok_20m["valid"]:
+		print("  [FAIL] 20m site should be valid within 24m build radius: %s" % ok_20m["reason"])
+		w.queue_free()
+		return false
+
+	# 35m from HQ: beyond standard 24m building radius, so power_plant should be NOT_ADJACENT
+	var site_35m := Vector3(35.0, 0.0, 0.0)
+	var check_35m: Dictionary = PlacementServiceScript.validity(w, 0, site_35m, "power_plant")
+	if check_35m["valid"]:
+		print("  [FAIL] 35m site should be too far for a standard building")
+		w.queue_free()
+		return false
+	if check_35m["reason"] != PlacementServiceScript.NOT_ADJACENT:
+		print("  [FAIL] expected NOT_ADJACENT, got %s" % check_35m["reason"])
+		w.queue_free()
+		return false
+
+	# 35m from HQ: for a defense structure (84m reach), 35m IS legal
+	var def_35m: Dictionary = PlacementServiceScript.validity(w, 0, site_35m, "defense", {"hull_type": "foundation_small"})
+	if not def_35m["valid"]:
+		print("  [FAIL] 35m site should be valid for a defense structure (84m reach): %s" % def_35m["reason"])
+		w.queue_free()
+		return false
+
+	print("  [PASS] expanded 3x build radius (24m base, 84m defense)")
+	w.queue_free()
+	return true
+
+
+func test_structure_construction_animation_lifecycle() -> bool:
+	print("Running Test Suite: Structure - construction animation lifecycle & progress...")
+	var w := _world()
+	var s := StructureScript.new()
+	w.add_child(s)
+	s.setup("power_plant", 0)
+
+	# Initially complete
+	if s.build_incomplete:
+		print("  [FAIL] fresh default setup should not be build_incomplete")
+		w.queue_free()
+		return false
+
+	# Start construction
+	s.begin_construction(10.0)
+	if not s.build_incomplete or not s.is_under_construction:
+		print("  [FAIL] begin_construction should mark build_incomplete and is_under_construction")
+		w.queue_free()
+		return false
+	if s.construction_progress != 0.0:
+		print("  [FAIL] construction_progress should start at 0.0, got ", s.construction_progress)
+		w.queue_free()
+		return false
+
+	# Update progress to 50%
+	s.update_construction_progress(0.5, false)
+	if not is_equal_approx(s.construction_progress, 0.5):
+		print("  [FAIL] construction_progress should be 0.5, got ", s.construction_progress)
+		w.queue_free()
+		return false
+
+	# Complete construction
+	s.finish_construction()
+	if s.build_incomplete or s.is_under_construction:
+		print("  [FAIL] finish_construction should clear build_incomplete and is_under_construction")
+		w.queue_free()
+		return false
+	if not is_equal_approx(s.construction_progress, 1.0):
+		print("  [FAIL] construction_progress should be 1.0 on completion, got ", s.construction_progress)
+		w.queue_free()
+		return false
+
+	print("  [PASS] structure construction animation lifecycle")
+	w.queue_free()
+	return true
+

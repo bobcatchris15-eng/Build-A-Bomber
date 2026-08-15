@@ -29,6 +29,16 @@ var hp: float = 1000.0
 var is_dead: bool = false
 var footprint := Vector3(5, 3, 5)
 
+# Construction lifecycle
+var build_incomplete: bool = false
+var construction_progress: float = 1.0
+var is_under_construction: bool = false
+var _construction_root: Node3D = null
+var _progress_label: Label3D = null
+var _progress_bar_fill: MeshInstance3D = null
+var _spark_particles: CPUParticles3D = null
+var _visual_nodes: Array[Node3D] = []
+
 # Set only on blueprint-built defences: the reconstructed hull carrying the
 # weapon modules. Null on every catalog building.
 var defense_hull: Node3D = null
@@ -338,3 +348,203 @@ func set_fog_visible(value: bool) -> void:
 	if value:
 		fog_ever_seen = true
 	visible = value or fog_ever_seen
+
+
+# --- Construction Animation and Lifecycle ------------------------------------
+
+func begin_construction(_build_time: float = 0.0) -> void:
+	build_incomplete = true
+	is_under_construction = true
+	construction_progress = 0.0
+	_gather_visual_nodes()
+	_build_construction_visuals()
+	update_construction_progress(0.0, false)
+
+
+func _gather_visual_nodes() -> void:
+	_visual_nodes.clear()
+	var b_mesh = get_node_or_null("BuildingMesh")
+	if b_mesh is Node3D:
+		_visual_nodes.append(b_mesh)
+	if _mesh != null and is_instance_valid(_mesh):
+		_visual_nodes.append(_mesh)
+	if defense_hull != null and is_instance_valid(defense_hull):
+		_visual_nodes.append(defense_hull)
+
+
+func _build_construction_visuals() -> void:
+	if _construction_root != null and is_instance_valid(_construction_root):
+		_construction_root.queue_free()
+	
+	_construction_root = Node3D.new()
+	_construction_root.name = "ConstructionVisuals"
+	add_child(_construction_root)
+
+	# 1. Scaffolding cage around the footprint
+	var scaffold := MeshInstance3D.new()
+	scaffold.name = "ScaffoldMesh"
+	var box_mesh := BoxMesh.new()
+	box_mesh.size = footprint + Vector3(0.4, 0.4, 0.4)
+	scaffold.mesh = box_mesh
+	scaffold.position = Vector3(0, footprint.y * 0.5, 0)
+	
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(1.0, 0.75, 0.2, 0.2)
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	scaffold.material_override = mat
+	_construction_root.add_child(scaffold)
+
+	# 2. Corner steel posts for industrial scaffolding feel
+	var half_x: float = footprint.x * 0.5 + 0.2
+	var half_z: float = footprint.z * 0.5 + 0.2
+	var corners = [
+		Vector3(-half_x, footprint.y * 0.5, -half_z),
+		Vector3(half_x, footprint.y * 0.5, -half_z),
+		Vector3(-half_x, footprint.y * 0.5, half_z),
+		Vector3(half_x, footprint.y * 0.5, half_z),
+	]
+	var post_mat := StandardMaterial3D.new()
+	post_mat.albedo_color = Color(0.9, 0.7, 0.1)
+	post_mat.roughness = 0.6
+	for c_pos in corners:
+		var post := MeshInstance3D.new()
+		var p_mesh := BoxMesh.new()
+		p_mesh.size = Vector3(0.2, footprint.y + 0.5, 0.2)
+		post.mesh = p_mesh
+		post.material_override = post_mat
+		post.position = c_pos
+		_construction_root.add_child(post)
+
+	# 3. Welding sparks particles
+	_spark_particles = CPUParticles3D.new()
+	_spark_particles.name = "WeldingSparks"
+	_spark_particles.amount = 32
+	_spark_particles.lifetime = 0.5
+	_spark_particles.explosiveness = 0.1
+	_spark_particles.randomness = 0.5
+	_spark_particles.lifetime_randomness = 0.4
+	_spark_particles.direction = Vector3(0, 1, 0)
+	_spark_particles.spread = 160.0
+	_spark_particles.gravity = Vector3(0, -12.0, 0)
+	_spark_particles.initial_velocity_min = 2.5
+	_spark_particles.initial_velocity_max = 6.0
+	_spark_particles.color = Color(1.0, 0.85, 0.35, 1.0)
+	_spark_particles.position = Vector3(0, 0.5, 0)
+	_spark_particles.emitting = true
+	_construction_root.add_child(_spark_particles)
+
+	# 4. 3D Diegetic Progress Display (Label + Progress Bar)
+	var ui_anchor := Node3D.new()
+	ui_anchor.name = "ProgressUI"
+	ui_anchor.position = Vector3(0, footprint.y + 1.2, 0)
+	_construction_root.add_child(ui_anchor)
+
+	_progress_label = Label3D.new()
+	_progress_label.name = "ProgressLabel"
+	_progress_label.text = "CONSTRUCTING 0%"
+	_progress_label.font_size = 28
+	_progress_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	_progress_label.outline_size = 6
+	_progress_label.modulate = Color(0.4, 0.9, 1.0)
+	_progress_label.position = Vector3(0, 0.4, 0)
+	ui_anchor.add_child(_progress_label)
+
+	# Background bar
+	var bar_bg := MeshInstance3D.new()
+	var bg_mesh := BoxMesh.new()
+	bg_mesh.size = Vector3(2.4, 0.18, 0.04)
+	bar_bg.mesh = bg_mesh
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.albedo_color = Color(0.05, 0.06, 0.08, 0.85)
+	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bar_bg.material_override = bg_mat
+	ui_anchor.add_child(bar_bg)
+
+	# Fill bar
+	_progress_bar_fill = MeshInstance3D.new()
+	var fill_mesh := BoxMesh.new()
+	fill_mesh.size = Vector3(2.36, 0.14, 0.06)
+	_progress_bar_fill.mesh = fill_mesh
+	var fill_mat := StandardMaterial3D.new()
+	fill_mat.albedo_color = Color(0.2, 0.85, 0.95, 1.0)
+	fill_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_progress_bar_fill.material_override = fill_mat
+	ui_anchor.add_child(_progress_bar_fill)
+
+
+func update_construction_progress(progress: float, is_stalled: bool = false) -> void:
+	construction_progress = clampf(progress, 0.0, 1.0)
+	
+	# Animate the visual model rising / scaling from foundation
+	var y_scale = clampf(construction_progress, 0.04, 1.0)
+	for node in _visual_nodes:
+		if is_instance_valid(node):
+			node.scale = Vector3(1.0, y_scale, 1.0)
+			# Anchor base to ground during scale
+			node.position = Vector3(node.position.x, 0.0, node.position.z)
+
+	# Move welding spark height with the rising roof
+	if _spark_particles != null and is_instance_valid(_spark_particles):
+		_spark_particles.position.y = footprint.y * construction_progress + 0.2
+		_spark_particles.emitting = not is_stalled and construction_progress < 1.0
+
+	# Update 3D Progress readout
+	if _progress_label != null and is_instance_valid(_progress_label):
+		var pct := int(round(construction_progress * 100.0))
+		if is_stalled:
+			_progress_label.text = "STALLED (%d%%)" % pct
+			_progress_label.modulate = Color(1.0, 0.4, 0.3)
+		else:
+			_progress_label.text = "BUILDING %d%%" % pct
+			_progress_label.modulate = Color(0.35, 0.9, 1.0)
+
+	if _progress_bar_fill != null and is_instance_valid(_progress_bar_fill):
+		var fill_pct = maxf(0.01, construction_progress)
+		_progress_bar_fill.scale = Vector3(fill_pct, 1.0, 1.0)
+		_progress_bar_fill.position.x = -1.18 * (1.0 - fill_pct)
+		if _progress_bar_fill.material_override != null:
+			_progress_bar_fill.material_override.albedo_color = (
+				Color(1.0, 0.4, 0.2) if is_stalled else Color(0.2, 0.85, 0.95)
+			)
+
+
+func finish_construction() -> void:
+	build_incomplete = false
+	is_under_construction = false
+	construction_progress = 1.0
+
+	# Restore full mesh transforms
+	for node in _visual_nodes:
+		if is_instance_valid(node):
+			node.scale = Vector3.ONE
+			node.position = Vector3(node.position.x, 0.0, node.position.z)
+
+	# Remove scaffolding and progress UI
+	if _construction_root != null and is_instance_valid(_construction_root):
+		_construction_root.queue_free()
+		_construction_root = null
+
+	# Spawn brief completion burst particles
+	var burst := CPUParticles3D.new()
+	burst.amount = 24
+	burst.lifetime = 0.8
+	burst.one_shot = true
+	burst.explosiveness = 0.9
+	burst.direction = Vector3(0, 1, 0)
+	burst.spread = 180.0
+	burst.gravity = Vector3(0, -9.8, 0)
+	burst.initial_velocity_min = 3.0
+	burst.initial_velocity_max = 7.0
+	burst.color = Color(0.4, 1.0, 0.6, 0.9)
+	burst.position = Vector3(0, footprint.y * 0.5, 0)
+	burst.emitting = true
+	add_child(burst)
+	
+	# Auto-free completion burst
+	get_tree().create_timer(1.2).timeout.connect(func():
+		if is_instance_valid(burst):
+			burst.queue_free()
+	)
+

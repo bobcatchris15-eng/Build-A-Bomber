@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://cnpu7ar8bu6d3"
-path="res://.godot/imported/cliff_face_2_cliff_face_2_mat_albedo.png-a8c911eff6d012d5bfdf191ff523d703.ctex"
+path.s3tc="res://.godot/imported/cliff_face_2_cliff_face_2_mat_albedo.png-a8c911eff6d012d5bfdf191ff523d703.s3tc.ctex"
+path.etc2="res://.godot/imported/cliff_face_2_cliff_face_2_mat_albedo.png-a8c911eff6d012d5bfdf191ff523d703.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "14cfd991a96c039d54688c8b843cf9b6"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/terrain/cliff_face_2_cliff_face_2_mat_albedo.png"
-dest_files=["res://.godot/imported/cliff_face_2_cliff_face_2_mat_albedo.png-a8c911eff6d012d5bfdf191ff523d703.ctex"]
+dest_files=["res://.godot/imported/cliff_face_2_cliff_face_2_mat_albedo.png-a8c911eff6d012d5bfdf191ff523d703.s3tc.ctex", "res://.godot/imported/cliff_face_2_cliff_face_2_mat_albedo.png-a8c911eff6d012d5bfdf191ff523d703.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
@@ -40,4 +42,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0
