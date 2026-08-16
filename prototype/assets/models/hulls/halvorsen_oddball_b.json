@@ -16,7 +16,8 @@
     1.0
   ],
   "domain": "Ground",
-  "base_energy": 0.0,
+  "base_energy": 92.0,
+  "base_power": 6.96,
   "base_vision": 20.0,
   "is_foundation": false,
   "category": "hull",

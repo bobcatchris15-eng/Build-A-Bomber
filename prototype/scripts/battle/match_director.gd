@@ -45,8 +45,17 @@ const MatchStatsScript = preload("res://scripts/battle/match_stats.gd")
 const AfterActionReportScript = preload("res://scripts/after_action_report.gd")
 const PerfHUDScript = preload("res://scripts/perf_hud.gd")
 const AdminMenuScript = preload("res://scripts/battle/hud/admin_menu.gd")
+const DebugOverlayScript = preload("res://scripts/battle/hud/debug_overlay.gd")
 const BattleFinishScript = preload("res://scripts/battle/battle_finish.gd")
 const Profiler = preload("res://scripts/battle/battle_profiler.gd")
+# Per-match structured log file. The file logger is opt-in via
+# BattleLogger.enabled; the flip happens at the bottom of _ready() so a
+# single Skirmish / Test Range / Operations run produces a log without
+# the caller (match_setup, operations_draft, test_range_launcher) having
+# to remember to enable it. The harness script tools/profile_battle_run.gd
+# flips it off for its control run by calling BattleLogger.enabled = false
+# before instantiating Battle.tscn.
+const BattleLogger = preload("res://scripts/battle/battle_logger.gd")
 const UnitAssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
 const ResourceNodeScript = preload("res://scripts/resource_node.gd")
 const ResourceFieldScript = preload("res://scripts/battle/economy/resource_field.gd")
@@ -130,6 +139,7 @@ var production_hud: ProductionHUD = null
 var stats = null
 var _perf_hud: CanvasLayer = null
 var admin_menu: Control = null
+var debug_overlay: Control = null
 
 # Emitted once the match is genuinely playable: terrain baked, units spawned, HUD
 # built. SceneRouter waits on this before lifting its fade.
@@ -297,6 +307,12 @@ func _ready() -> void:
 	# the start of every one, so a design re-saved in the Lab between matches is
 	# rebuilt rather than served from the previous match's geometry.
 	UnitAssemblyScript.clear_hull_cache()
+
+	# End the previous match's log (if any) when re-entering the scene. A
+	# crash-and-reload returns to Battle.tscn without an explicit
+	# end_match, so _ready acts as the safety net. BattleLogger is robust to
+	# _file being null.
+	BattleLogger.end_match()
 
 	bp_manager = BlueprintManagerScript.new()
 	bp_manager.name = "BlueprintManager"
@@ -484,6 +500,22 @@ func _ready() -> void:
 	world_is_ready = true
 	world_ready.emit()
 	_emit_progress(1.0, "Ready")
+
+	# Start the match instrumentation HERE - after world_ready, so the
+	# section-timing profile covers only the live match and not the
+	# one-time build phase inside _ready. The build phase is fast but it
+	# dominates "first frame" timings (terrain bake, mesh bakes, unit
+	# spawns), which would otherwise make every section look expensive
+	# and drown out the live-match stutter the logger exists to find.
+	Profiler.reset()
+	Profiler.enabled = true
+	BattleLogger.enabled = true
+	BattleLogger.begin_match(_rule_set_label(), {
+		"map_id": map_id,
+		"player_faction": player_faction,
+		"enemy_faction": enemy_faction,
+		"build_path": _match_build_path(),
+	})
 
 	_setup_audio()
 
@@ -730,6 +762,18 @@ func _exit_tree() -> void:
 			ground_nav_map, water_nav_map, amphibious_nav_map, deep_water_nav_map]:
 		if rid.is_valid():
 			NavigationServer3D.free_rid(rid)
+	# Close the match log on the way out, AFTER the navmesh teardown.
+	# Pairs with the begin_match() in _ready(): the log opens when the
+	# match is live and closes when the director leaves the tree, which
+	# is the same condition the RID cleanup runs on. BattleLogger is
+	# robust to a null _file (a scene that never opened one is a no-op),
+	# and end_match() is idempotent (it closes and nulls the file).
+	if BattleLogger.enabled:
+		BattleLogger.end_match()
+		# Stop profiling so a follow-up scene (Lab, Main Menu) does not
+		# pay the per-section start/stop cost. Static vars are process-
+		# global, and the next _ready() will reset() and re-enable.
+		Profiler.enabled = false
 
 
 # --- Duck-typed contracts the unit runtime looks for -------------------------
@@ -1100,6 +1144,13 @@ func spawn_unit(blueprint: Dictionary, unit_team: int, at: Vector3) -> Node3D:
 	# The battlefield finish. Applied after assembly, because the materials do not
 	# exist until reconstruct_vehicle() has built the hull and its modules.
 	BattleFinishScript.apply(unit)
+	# Lifecycle log line. unit_spawned is a no-op when BattleLogger is
+	# disabled, so the cost in the production build is one static-bool
+	# read plus two string lookups.
+	BattleLogger.unit_spawned(
+		String(blueprint.get("name", "?")),
+		unit_team,
+		String(blueprint.get("hull_type", blueprint.get("kind", "?"))))
 	Profiler.stop("spawn_unit", _prof)
 	return unit
 
@@ -1271,6 +1322,19 @@ func _place_structure(kind: String, structure_team: int, at: Vector3, under_cons
 	s.position = Vector3(at.x, terrain_height_at(at), at.z)
 	s.setup(kind, structure_team)
 	s.died.connect(_on_structure_died)
+	# structure_built is logged on both paths (under construction and
+	# finished) so the post-match report can correlate structure deaths
+	# with the spawn that made them. The HUD's signal listener is still
+	# gated to `not under_construction` below.
+	BattleLogger.structure_built(kind, structure_team)
+	# PR4 (2026-08-15). Apply the same distance-based visibility range to
+	# the structure's GeometryInstance3D subtree that unit.gd uses for
+	# units. A 50-structure base at max-zoom-out is the worst case for
+	# this in Skirmish, and per-frame frustum culling on a 2660x1080
+	# viewport is what was paying for itself in the perf log. The
+	# fade width is 6 m here (a bit wider than units) because a
+	# building popping in is more visible than a unit popping in.
+	_apply_structure_visibility_range(s)
 	Profiler.stop("place_structure", _prof)
 	# A new live structure can change which designs pass the tech-tree gate
 	# (a fresh tech_lab unlocks every tech_lab-gated design, a fresh refinery
@@ -1293,6 +1357,25 @@ func get_team_structures(for_team: int, include_incomplete: bool = false) -> Arr
 				continue
 			out.append(s)
 	return out
+
+
+# PR4 (2026-08-15). Walks a structure's subtree and applies the same
+# visibility_range pattern that unit.gd uses, with a wider fade band
+# to soften the pop-in for buildings. Cheap: one pass at placement time.
+const STRUCTURE_VISIBILITY_END: float = 110.0
+const STRUCTURE_VISIBILITY_FADE: float = 6.0
+
+
+func _apply_structure_visibility_range(node: Node) -> void:
+	if node is GeometryInstance3D:
+		var gi: GeometryInstance3D = node
+		gi.visibility_range_begin = 0.0
+		gi.visibility_range_end = STRUCTURE_VISIBILITY_END
+		gi.visibility_range_begin_margin = 0.0
+		gi.visibility_range_end_margin = STRUCTURE_VISIBILITY_FADE
+		gi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+	for child in node.get_children():
+		_apply_structure_visibility_range(child)
 
 
 # How far past its own footprint a building's navmesh hole extends.
@@ -1437,6 +1520,7 @@ func _on_navmesh_rebaked() -> void:
 
 
 func _on_structure_died(structure) -> void:
+	BattleLogger.structure_died(String(structure.kind), int(structure.team))
 	if "build_incomplete" in structure and structure.build_incomplete:
 		for q_name in BuildingCatalogScript.QUEUES:
 			var q := production.queue(structure.team, q_name)
@@ -1642,6 +1726,20 @@ func record_combat_damage(victim, source, amount: float, damage_class: String) -
 func record_unit_lost(victim, source) -> void:
 	if _audio != null and "team" in victim and victim.team == PLAYER_TEAM:
 		_audio.play_voice("radio_unit_lost")
+
+	# Lifecycle log line. Source may be null (death by self-destruct, a
+	# wreck, a no-killer kill) - the log records whatever the engine
+	# gave us rather than guessing. Cause is the source's class_name
+	# when it has one, "unknown" otherwise.
+	var cause := "unknown"
+	if is_instance_valid(source):
+		cause = source.get_script().resource_path.get_file() if source.get_script() != null else "engine"
+	var victim_name := String(victim.design_name) if "design_name" in victim \
+		else String(victim.name) if "name" in victim else "?"
+	var victim_kind := String(victim._hull_type) if "_hull_type" in victim \
+		else "unknown"
+	var victim_team := int(victim.team) if "team" in victim else -1
+	BattleLogger.unit_died(victim_name, victim_team, victim_kind, cause)
 
 	if stats == null:
 		return
@@ -2728,7 +2826,9 @@ func get_nearby_damageable(pos: Vector3, radius: float) -> Array:
 func _physics_process(delta: float) -> void:
 	if game_over:
 		return
+	var _t_audio := Profiler.start()
 	_tick_audio(delta)
+	Profiler.stop("audio", _t_audio)
 
 	var t := Profiler.start()
 	_rebuild_neighbour_grid()
@@ -2766,6 +2866,17 @@ func _physics_process(delta: float) -> void:
 	# closes the frame on everything: whatever the sections above do not account
 	# for shows up as the gap between their sum and the frame total.
 	Profiler.end_frame()
+	# Mirror the per-frame profile into the structured log. Runs after
+	# end_frame() so the snapshot BattleLogger reads is the one the
+	# profiler just finished writing. log_section / log_hitch both check
+	# enabled and the _file handle before doing any work.
+	if BattleLogger.enabled:
+		BattleLogger.begin_frame()
+		for section_name in Profiler.last_sections:
+			BattleLogger.log_section(section_name, Profiler.last_sections[section_name])
+		if Profiler.last_frame_ms >= BattleLogger.HITCH_THRESHOLD_MS:
+			BattleLogger.log_hitch(Profiler.last_frame_ms,
+				Profiler.last_dominant, Profiler.last_dominant_ms)
 
 
 # A coarse bucket grid, rebuilt from scratch each tick rather than maintained
@@ -2969,6 +3080,8 @@ func _handle_key(event: InputEventKey) -> void:
 			camera.global_position.z = latest.world_pos.z
 	elif event.is_action_pressed("sys_perf"):
 		_toggle_perf_hud()
+	elif event.is_action_pressed("sys_perf_dump"):
+		_dump_perf_now()
 	elif event.is_action_pressed("ui_cancel"):
 		if admin_menu != null and admin_menu.is_open():
 			admin_menu.toggle()
@@ -2997,6 +3110,61 @@ func _toggle_perf_hud() -> void:
 	_perf_hud = PerfHUDScript.new()
 	_perf_hud.name = "PerfHUD"
 	add_child(_perf_hud)
+
+
+# F4, while a match is live. Writes the current profiler state, the
+# performance-monitor snapshot, and the per-frame distribution to a fresh
+# file under user://logs/dump_*.log. Lets a player capture the moment a
+# stutter lands without having to wait for the match to end - the
+# end-of-match dump is the comprehensive version, this is the in-the-moment
+# version. The path is printed to the console so the player can find it.
+func _dump_perf_now() -> void:
+	if not BattleLogger.enabled:
+		print("[match_director] BattleLogger is disabled - nothing to dump")
+		return
+	var path := BattleLogger.dump_now("manual")
+	if path.is_empty():
+		print("[match_director] dump failed (no live match)")
+		return
+	print("[match_director] perf dump written to %s"
+		% ProjectSettings.globalize_path(path))
+
+
+# The match-mode label used in the log filename. Driven by the rule set
+# when available; falls back to "match" so a script that instantiates
+# Battle.tscn without MatchConfig (the test harness does this) still gets
+# a usable name. The label is short on purpose - the log file's full
+# timestamp and the rule_set's own fields land in the MATCH_BEGIN record.
+func _rule_set_label() -> String:
+	if _match_rule_set == null:
+		return "match"
+	if _match_rule_set.camera_mode == MatchRuleSetScript.CameraMode.CHASE:
+		return "test_range"
+	# Operations has its own launcher; Skirmish is the default.
+	var mc := get_node_or_null("/root/MatchConfig")
+	if mc != null and "rule_set" in mc and mc.rule_set == _match_rule_set \
+			and "preset" in mc:
+		var preset_raw: Variant = mc.get("preset")
+		if preset_raw != null:
+			var preset: String = str(preset_raw)
+			if preset != "":
+				return preset
+	return "skirmish"
+
+
+# Where this match was launched from, for the log header. The same
+# information lives in the rule set itself but the operations_draft /
+# match_setup / test_range_launcher distinction is the one a stutter
+# report cites first ("was it the operations build or the skirmish
+# build?"), so it gets its own field in the header.
+func _match_build_path() -> String:
+	var tree := get_tree()
+	if tree == null:
+		return "headless"
+	var info_raw: Variant = Engine.get_meta("kitbash_match_origin", "")
+	if info_raw is String and info_raw != "":
+		return info_raw
+	return "scene"
 
 
 # A left release is a drag if the mouse actually travelled, a click otherwise.
@@ -3297,6 +3465,16 @@ func _build_hud() -> void:
 			else:
 				get_tree().change_scene_to_file("res://scenes/MainMenu.tscn"))
 		admin_menu.quit_requested.connect(func(): get_tree().quit())
+
+	# Dev-only: the F2 Debug overlay (infinite resources / instant build /
+	# reveal all fog). Same is_debug gate the admin menu uses so a release
+	# build never ships with the cheats on screen. The toggles write to
+	# the DebugSettings autoload; gameplay services read it defensively
+	# (economy_service.gd:70, production_service.gd:114, vision_service.gd:258).
+	if is_debug:
+		debug_overlay = DebugOverlayScript.new()
+		debug_overlay.name = "DebugOverlay"
+		layer.add_child(debug_overlay)
 
 
 func _update_selection_rect(at: Vector2) -> void:

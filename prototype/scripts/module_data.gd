@@ -220,27 +220,22 @@ func get_energy_capacity() -> float:
 	var vol = _get_volume_mult()
 	var cap = base_energy_capacity + (base_energy_capacity * (vol - 1.0) * GlobalConfig.hp_scale_factor)
 	if tweaks.has("bank_capacity"):
-		# capacitor_bank's declared default IS 4, so this reads identically to
-		# the literal it replaces. Routed through the shared normalizer anyway,
-		# so that a second module gaining a cell-count slider cannot quietly
-		# inherit capacitor_bank's default the way nine weapons inherited
-		# rotary_cannon's six barrels.
 		cap *= float(tweaks["bank_capacity"]) / ModuleCatalogScript.count_tweak_normalizer(type_id, "bank_capacity")
 	if tweaks.has("busbar_gauge"):
 		cap *= tweaks["busbar_gauge"]
+	if tweaks.has("rotor_mass"):
+		cap *= tweaks["rotor_mass"]
+	if tweaks.has("containment_armor"):
+		cap *= tweaks["containment_armor"]
+	if tweaks.has("cell_layers"):
+		cap *= float(tweaks["cell_layers"]) / ModuleCatalogScript.count_tweak_normalizer(type_id, "cell_layers")
+	if tweaks.has("dielectric_thickness"):
+		cap *= tweaks["dielectric_thickness"]
 	return GlobalConfig.round_to_half(cap)
 
 # GENERATION - energy per second this module contributes to its unit's refill
 # rate. Renamed from get_energy_regen() when generation and storage were split
-# into separate stats (see the generator entries in module_catalog.gd): "regen"
-# described a property of the POOL, which is exactly the conflation the split
-# exists to end. A generator does not regenerate a buffer it has no part of; it
-# produces power, and the buffer is somewhere else entirely.
-#
-# The two tweaks are unchanged and were always the right ones - they have only
-# ever scaled this quantity. What changed is that fusion_generator, the module
-# that owns them, now has generation as its ONLY output, so both are load
-# bearing rather than tuning one of its two stats while the other sat inert.
+# into separate stats (see the generator entries in module_catalog.gd).
 func get_power_output() -> float:
 	var vol = _get_volume_mult()
 	var out = base_power_output + (base_power_output * (vol - 1.0) * GlobalConfig.hp_scale_factor)
@@ -248,6 +243,14 @@ func get_power_output() -> float:
 		out *= tweaks["reactor_length"]
 	if tweaks.has("cooling_radiator"):
 		out *= tweaks["cooling_radiator"]
+	if tweaks.has("engine_displacement"):
+		out *= tweaks["engine_displacement"]
+	if tweaks.has("radiator_fins"):
+		out *= tweaks["radiator_fins"]
+	if tweaks.has("core_diameter"):
+		out *= tweaks["core_diameter"]
+	if tweaks.has("heatsink_fins"):
+		out *= tweaks["heatsink_fins"]
 	return GlobalConfig.round_to_half(out)
 
 # Dedicated stat, not a reuse of dps (see DECISIONS_NEEDED.md for why that

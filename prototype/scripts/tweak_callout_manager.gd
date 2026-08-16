@@ -614,6 +614,20 @@ func _generate_custom_tweaks(module: Node3D, data: ModuleDataResource):
 		)
 		_action_ring.add_tweak_station(ModuleCatalog.AMMO_TWEAK_KEY, "Ammo", ammo_selector, TweakStations.CLOCK_12)
 
+	# drone_carrier's drone_type selector at 12:00 (sits above ammo if both exist).
+	# Placed after the ammo branch so both can occupy CLOCK_12; the ring stacks them.
+	if type_id == "drone_carrier":
+		var drone_options = ModuleCatalog.get_drone_options()
+		var current_drone = data.tweaks.get("drone_type", "attack")
+		var drone_selector = RadialAmmoSelectorScript.new()
+		drone_selector.set_options(drone_options, current_drone, ModuleCatalog, "DRONE PROFILE")
+		drone_selector.ammo_selected.connect(func(picked: String):
+			lab._push_undo()
+			data.tweaks["drone_type"] = picked
+			_on_tweak_changed()
+		)
+		_action_ring.add_tweak_station("drone_type", "Drone Type", drone_selector, TweakStations.CLOCK_12)
+
 	if not LabDocument.TWEAK_SPECS.has(type_id):
 		return
 

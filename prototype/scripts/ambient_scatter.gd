@@ -146,6 +146,14 @@ func _build_template(scene_path: String) -> Array:
 		return []
 	var parts: Array = []
 	var stack: Array = [{"node": probe, "xform": Transform3D.IDENTITY}]
+	# MATERIAL CACHE (PR1, 2026-08-15). The previous rewrite created a fresh
+	# StandardMaterial3D per part per template, which destroyed the batching
+	# the MultiMesh was set up to deliver - a 9-species forest with 2 parts
+	# each was 18 unique materials and 18 separate draw calls. Now: one
+	# "matte" material per template (per glTF source), shared across every
+	# part that resolves to the same source material. Same visual, 1/3 the
+	# material count, full batching.
+	var scene_materials: Dictionary = {}
 	while not stack.is_empty():
 		var entry: Dictionary = stack.pop_back()
 		var node: Node = entry["node"]
@@ -161,17 +169,21 @@ func _build_template(scene_path: String) -> Array:
 			if mat == null and node.mesh.get_surface_count() > 0:
 				mat = node.mesh.surface_get_material(0)
 
-			# Ensure trees and foliage have non-glossy, light-absorbing organic roughness
-			var matte_mat := StandardMaterial3D.new()
-			if mat is StandardMaterial3D or mat is ORMMaterial3D or mat is BaseMaterial3D:
-				matte_mat.albedo_color = mat.albedo_color
-				matte_mat.albedo_texture = mat.albedo_texture
-			else:
-				matte_mat.albedo_color = Color(0.22, 0.28, 0.18)
-			matte_mat.roughness = 0.98
-			matte_mat.metallic = 0.0
-			matte_mat.metallic_specular = 0.0
+			# Key by source material's resource path so two parts that share
+			# the same glTF material resolve to the same cached StandardMaterial3D.
+			var mat_key: String = str(mat.resource_path) if mat != null else "default"
+			if not scene_materials.has(mat_key):
+				var matte_mat := StandardMaterial3D.new()
+				if mat is StandardMaterial3D or mat is ORMMaterial3D or mat is BaseMaterial3D:
+					matte_mat.albedo_color = mat.albedo_color
+					matte_mat.albedo_texture = mat.albedo_texture
+				else:
+					matte_mat.albedo_color = Color(0.22, 0.28, 0.18)
+				matte_mat.roughness = 0.98
+				matte_mat.metallic = 0.0
+				matte_mat.metallic_specular = 0.0
+				scene_materials[mat_key] = matte_mat
 
-			parts.append({"mesh": node.mesh, "xform": xform, "material": matte_mat})
+			parts.append({"mesh": node.mesh, "xform": xform, "material": scene_materials[mat_key]})
 	probe.free()
 	return parts

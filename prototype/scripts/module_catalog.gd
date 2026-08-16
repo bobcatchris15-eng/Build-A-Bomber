@@ -72,6 +72,33 @@ static func get_catalog() -> Dictionary:
 static func module_exists(type_id: String) -> bool:
 	return get_catalog().has(type_id)
 
+# --- Drone carrier profiles (DEPLOYABLE_MODULES_OVERHAUL.md §1) ---
+# drone_type is the 12 o'clock tweak on the drone_carrier in the Design Lab.
+# Each profile overrides speed, damage, and the state machine behaviour in drone_unit.gd.
+const DRONE_PROFILES = {
+	"attack": {
+		"label": "Attack Drone",
+		"desc": "Strikes hostile target with kinetic/explosive damage on arrival, loiters briefly, and returns.",
+		"speed": 14.0,
+	},
+	"scout": {
+		"label": "Scout Drone",
+		"desc": "High-speed reconnaissance. Orbits target area, reveals fog of war across a wide radius, then returns.",
+		"speed": 18.0,
+	},
+	"repair": {
+		"label": "Repair Drone",
+		"desc": "Seeks damaged friendly units, channels repair HP while tethered, then returns.",
+		"speed": 12.0,
+	},
+}
+
+static func get_drone_profile(drone_type: String) -> Dictionary:
+	return DRONE_PROFILES.get(drone_type, DRONE_PROFILES.get("attack", {}))
+
+static func get_drone_options() -> Array:
+	return DRONE_PROFILES.keys()
+
 # --- Weapon fire profiles (balance harness migration) ---
 # fire_rate/fire_range/laser_color used to live in a ~120-line if/elif chain
 # in auto_weapon.gd's _ready(), which made them invisible to every balance
@@ -1366,14 +1393,36 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 90,
 			"crystal": 60,
 			"dps": 0.0,
-			# 12.8, not the old 8.0: it absorbs the generation its 60 capacity
-			# used to imply through the `capacity * 0.08` derivation, so a design
-			# that mounted one before generates the same amount now. What it no
-			# longer does is silently grow the buffer as well.
 			"energy_capacity": 0.0,
-			"power_output": 12.8,
-			"size": Vector3(1.4, 1.2, 1.8),
+			"power_output": 14.0,
+			"size": Vector3(0.56, 0.48, 0.72),
 			"color": Color.ORANGE_RED
+		},
+		"diesel_generator": {
+			"name": "Turbine Generator",
+			"category": "generator",
+			"hp": 110.0,
+			"weight": 110.0,
+			"metal": 60,
+			"crystal": 10,
+			"dps": 0.0,
+			"energy_capacity": 0.0,
+			"power_output": 8.5,
+			"size": Vector3(0.48, 0.36, 0.60),
+			"color": Color.SLATE_GRAY
+		},
+		"thermo_generator": {
+			"name": "Stirling Generator",
+			"category": "generator",
+			"hp": 70.0,
+			"weight": 55.0,
+			"metal": 40,
+			"crystal": 20,
+			"dps": 0.0,
+			"energy_capacity": 0.0,
+			"power_output": 4.5,
+			"size": Vector3(0.36, 0.28, 0.40),
+			"color": Color.PERU
 		},
 		"capacitor_bank": {
 			"name": "Capacitor Bank",
@@ -1383,15 +1432,36 @@ static func _build_catalog_literal() -> Dictionary:
 			"metal": 35,
 			"crystal": 25,
 			"dps": 0.0,
-			# 45, up from 25. It has to be worth fitting for storage ALONE now
-			# that it no longer smuggles in 4 regen plus another 2 from its own
-			# capacity - at 25 it would have been a strictly worse generator
-			# rather than a different answer. 45 against medium_hull's 70 base
-			# means one capacitor is a substantial extension of the buffer.
 			"energy_capacity": 45.0,
 			"power_output": 0.0,
-			"size": Vector3(0.8, 0.8, 1.0),
+			"size": Vector3(0.32, 0.32, 0.40),
 			"color": Color.GOLD
+		},
+		"flywheel_storage": {
+			"name": "Flywheel Battery",
+			"category": "generator",
+			"hp": 130.0,
+			"weight": 140.0,
+			"metal": 80,
+			"crystal": 15,
+			"dps": 0.0,
+			"energy_capacity": 85.0,
+			"power_output": 0.0,
+			"size": Vector3(0.48, 0.36, 0.48),
+			"color": Color.CADET_BLUE
+		},
+		"solid_state_battery": {
+			"name": "Solid-State Battery",
+			"category": "generator",
+			"hp": 80.0,
+			"weight": 70.0,
+			"metal": 45,
+			"crystal": 40,
+			"dps": 0.0,
+			"energy_capacity": 60.0,
+			"power_output": 0.0,
+			"size": Vector3(0.44, 0.24, 0.56),
+			"color": Color.STEEL_BLUE
 		},
 
 		# --- PROPULSION MODULES ---
@@ -2054,8 +2124,12 @@ const MODULE_FLAVOR = {
 	"sensor_suite": "Extends detection range. Emits constantly, and is therefore also easily detected.",
 	"armor_plating": "Additional plate. Adds mass. Physics has been consulted and remains unsympathetic.",
 	# Power
-	"fusion_generator": "Supplies base power. Rated safe. Rating issued by the manufacturer.",
+	"fusion_generator": "Supplies heavy base power. Rated safe. Rating issued by the manufacturer.",
+	"diesel_generator": "Internal combustion turbine. Rugged, thirsty, and loud enough to mask minor engineering errors.",
+	"thermo_generator": "Thermoelectric Stirling generator. Compact trickle output scavenged from core temperature differential.",
 	"capacitor_bank": "Stores surplus power for demand spikes. Discharges spectacularly when destroyed.",
+	"flywheel_storage": "High-velocity kinetic storage rotor. Armored containment ring doubles as structural ballistic reinforcement.",
+	"solid_state_battery": "Matrix energy cell array. Flat hull-conforming profile with modular cell banks.",
 	# Locomotion
 	"wheels": "Fast on hard ground. Enthusiasm for soft ground is not shared by the wheels.",
 	"tracked_treads": "Slow, heavy, and indifferent to terrain. Throws a track at the worst opportunity.",
@@ -2527,6 +2601,10 @@ const MODULE_ROLES = {
 	"armor_plating": "Armor",
 	"capacitor_bank": "Power",
 	"fusion_generator": "Power",
+	"diesel_generator": "Power",
+	"thermo_generator": "Power",
+	"flywheel_storage": "Power",
+	"solid_state_battery": "Power",
 	"repair_array": "Support",
 	"resource_harvester": "Support",
 	"sensor_suite": "Support",
@@ -3732,6 +3810,7 @@ const COUNT_TWEAK_DEFAULTS := {
 	"hub_motor_array":          {"coil_count": 4.0},
 	"fire_control_radar":       {"array_faces": 2.0},
 	"capacitor_bank":           {"bank_capacity": 4.0},
+	"solid_state_battery":      {"cell_layers": 4.0},
 	"booster_rack":             {"nozzle_count": 3.0},
 }
 

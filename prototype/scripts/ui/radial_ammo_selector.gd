@@ -43,12 +43,22 @@ func set_options(options: Array, current_id: String, catalog_script = null, p_he
 	ammo_profiles.clear()
 	header_text = p_header
 	if catalog_script:
+		# Header-gated profile lookup. Without these guards, ModuleCatalog's
+		# get_leg_profile would catch drone keys (returning the stryker
+		# default for "attack"/"scout"/"repair") and get_drone_profile would
+		# catch leg keys. Each profile source is now matched to its own
+		# header prefix, in priority order.
+		var is_ammo := p_header.begins_with("LOADED") or p_header.begins_with("AMMO")
+		var is_leg := p_header.begins_with("LEG")
+		var is_drone := p_header.begins_with("DRONE")
 		for opt in options:
-			if catalog_script.has_method("get_ammo_profile") and (p_header.begins_with("LOADED") or p_header.begins_with("AMMO")):
-				ammo_profiles[opt] = catalog_script.get_ammo_profile(opt)
-			elif catalog_script.has_method("get_leg_profile"):
+			if is_drone and catalog_script.has_method("get_drone_profile"):
+				ammo_profiles[opt] = catalog_script.get_drone_profile(opt)
+			elif is_leg and catalog_script.has_method("get_leg_profile"):
 				ammo_profiles[opt] = catalog_script.get_leg_profile(opt)
-	
+			elif is_ammo and catalog_script.has_method("get_ammo_profile"):
+				ammo_profiles[opt] = catalog_script.get_ammo_profile(opt)
+
 	selected_index = max(options.find(current_id), 0)
 
 

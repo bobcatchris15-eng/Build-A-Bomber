@@ -436,6 +436,9 @@ const MODULAR_ASSEMBLY_TYPES := {
 	"sensor_suite": true, "resource_harvester": true, "resource_bay": true,
 	"repair_array": true, "drone_carrier": true,
 	"laser_designator": true, "energy_barrier_projector": true, "fire_control_radar": true,
+	# Power & energy generation / storage modules
+	"fusion_generator": true, "diesel_generator": true, "thermo_generator": true,
+	"capacitor_bank": true, "flywheel_storage": true, "solid_state_battery": true,
 }
 
 const MODULAR_AUTHORED_SIZES := {
@@ -506,7 +509,13 @@ const MODULAR_AUTHORED_SIZES := {
 	"drone_carrier": Vector3(2.0, 1.2, 3.0),
 	"laser_designator": Vector3(0.6, 0.7, 0.6),
 	"energy_barrier_projector": Vector3(1.0, 0.4, 1.0),
-	"fire_control_radar": Vector3(0.7, 1.8, 0.7)
+	"fire_control_radar": Vector3(0.7, 1.8, 0.7),
+	"fusion_generator": Vector3(0.56, 0.48, 0.72),
+	"diesel_generator": Vector3(0.48, 0.36, 0.60),
+	"thermo_generator": Vector3(0.36, 0.28, 0.40),
+	"capacitor_bank": Vector3(0.32, 0.32, 0.40),
+	"flywheel_storage": Vector3(0.48, 0.36, 0.48),
+	"solid_state_battery": Vector3(0.44, 0.24, 0.56)
 }
 
 static func _repeat_along_axis(parent: Node3D, count: int, spacing: float, axis_vec: Vector3, builder_func: Callable):
@@ -2350,6 +2359,178 @@ static func _build_visual_body(type_id: String, parent_node: Node3D, base_size: 
 			# scale exactly rather than needing its own constant.
 			lid.position = Vector3(0, vol_lin * depth_t * 1.03, 0)
 			parent_node.add_child(lid)
+
+	elif type_id == "fusion_generator":
+		# Fusion reactor with embedded hull collar, magnetic containment core,
+		# and cooling radiator fins (compact 0.40 scale).
+		var r_len: float = clampf(tweaks.get("reactor_length", 1.0), 0.5, 2.0)
+		var r_fins: float = clampf(tweaks.get("cooling_radiator", 1.0), 0.5, 2.0)
+		const S_PWR := 0.40
+		
+		# Embedded hull collar/blister base
+		var collar = MeshInstance3D.new()
+		var col_box = BoxMesh.new()
+		col_box.size = Vector3(1.4 * S_PWR, 0.25 * S_PWR, 1.6 * r_len * S_PWR)
+		collar.mesh = col_box
+		collar.material_override = _structural_body_mat(base_color)
+		collar.position = Vector3(0, 0.08 * S_PWR, 0)
+		parent_node.add_child(collar)
+
+		var core_mesh = _part("fusion_generator_core")
+		if core_mesh:
+			var core = _mesh_inst(core_mesh, base_color)
+			core.scale = Vector3(S_PWR, S_PWR, r_len * S_PWR)
+			core.position = Vector3.ZERO
+			parent_node.add_child(core)
+
+		var rad_mesh = _part("fusion_generator_radiator")
+		if rad_mesh:
+			var rad = _mesh_inst(rad_mesh, base_color.darkened(0.25))
+			rad.scale = Vector3(r_fins * S_PWR, S_PWR, r_len * S_PWR)
+			rad.position = Vector3.ZERO
+			parent_node.add_child(rad)
+
+	elif type_id == "diesel_generator":
+		# Combustion turbine generator: heavy cast engine block with exhaust stacks and louvers.
+		var disp: float = clampf(tweaks.get("engine_displacement", 1.0), 0.5, 2.0)
+		var fins: float = clampf(tweaks.get("radiator_fins", 1.0), 0.5, 2.0)
+		const S_PWR := 0.40
+
+		var collar = MeshInstance3D.new()
+		var col_box = BoxMesh.new()
+		col_box.size = Vector3(1.3 * disp * S_PWR, 0.22 * S_PWR, 1.6 * disp * S_PWR)
+		collar.mesh = col_box
+		collar.material_override = _structural_body_mat(base_color)
+		collar.position = Vector3(0, 0.07 * S_PWR, 0)
+		parent_node.add_child(collar)
+
+		var block_mesh = _part("diesel_generator_block")
+		if block_mesh:
+			var block = _mesh_inst(block_mesh, base_color)
+			block.scale = Vector3(disp * S_PWR, disp * S_PWR, disp * S_PWR)
+			block.position = Vector3.ZERO
+			parent_node.add_child(block)
+
+		var vent_mesh = _part("diesel_generator_vents")
+		if vent_mesh:
+			var vents = _mesh_inst(vent_mesh, Color(0.2, 0.2, 0.22))
+			vents.scale = Vector3(fins * S_PWR, disp * S_PWR, fins * S_PWR)
+			vents.position = Vector3.ZERO
+			parent_node.add_child(vents)
+
+	elif type_id == "thermo_generator":
+		# Thermoelectric Stirling generator: compact heat sink casing with copper pipe runners.
+		var core_d: float = clampf(tweaks.get("core_diameter", 1.0), 0.5, 2.0)
+		var hs_fins: float = clampf(tweaks.get("heatsink_fins", 1.0), 0.5, 2.0)
+		const S_PWR := 0.40
+
+		var collar = MeshInstance3D.new()
+		var col_box = BoxMesh.new()
+		col_box.size = Vector3(1.0 * core_d * S_PWR, 0.18 * S_PWR, 1.1 * core_d * S_PWR)
+		collar.mesh = col_box
+		collar.material_override = _structural_body_mat(base_color)
+		collar.position = Vector3(0, 0.06 * S_PWR, 0)
+		parent_node.add_child(collar)
+
+		var case_mesh = _part("thermo_generator_casing")
+		if case_mesh:
+			var casing = _mesh_inst(case_mesh, base_color)
+			casing.scale = Vector3(core_d * S_PWR, S_PWR, core_d * S_PWR)
+			casing.position = Vector3.ZERO
+			parent_node.add_child(casing)
+
+		var pipe_mesh = _part("thermo_generator_pipes")
+		if pipe_mesh:
+			var pipes = _mesh_inst(pipe_mesh, Color(0.65, 0.45, 0.25))
+			pipes.scale = Vector3(hs_fins * S_PWR, S_PWR, hs_fins * S_PWR)
+			pipes.position = Vector3.ZERO
+			parent_node.add_child(pipes)
+
+	elif type_id == "capacitor_bank":
+		# Segmented cylindrical supercapacitor cells with heavy busbars.
+		var cells_t: float = clampf(tweaks.get("bank_capacity", 4.0), 2.0, 6.0)
+		var busbar_t: float = clampf(tweaks.get("busbar_gauge", 1.0), 0.5, 2.0)
+		var cell_scale_z = cells_t / 4.0
+		const S_PWR := 0.40
+
+		var collar = MeshInstance3D.new()
+		var col_box = BoxMesh.new()
+		col_box.size = Vector3(1.0 * S_PWR, 0.16 * S_PWR, 1.2 * cell_scale_z * S_PWR)
+		collar.mesh = col_box
+		collar.material_override = _structural_body_mat(base_color)
+		collar.position = Vector3(0, 0.05 * S_PWR, 0)
+		parent_node.add_child(collar)
+
+		var cells_mesh = _part("capacitor_bank_cells")
+		if cells_mesh:
+			var cells = _mesh_inst(cells_mesh, Color(0.22, 0.24, 0.28))
+			cells.scale = Vector3(S_PWR, S_PWR, cell_scale_z * S_PWR)
+			cells.position = Vector3.ZERO
+			parent_node.add_child(cells)
+
+		var bus_mesh = _part("capacitor_bank_busbar")
+		if bus_mesh:
+			var bus = _mesh_inst(bus_mesh, Color(0.72, 0.55, 0.20))
+			bus.scale = Vector3(busbar_t * S_PWR, busbar_t * S_PWR, cell_scale_z * S_PWR)
+			bus.position = Vector3.ZERO
+			parent_node.add_child(bus)
+
+	elif type_id == "flywheel_storage":
+		# High-velocity kinetic storage rotor with vacuum containment ring.
+		var r_mass: float = clampf(tweaks.get("rotor_mass", 1.0), 0.5, 2.0)
+		var c_armor: float = clampf(tweaks.get("containment_armor", 1.0), 0.5, 2.0)
+		const S_PWR := 0.40
+
+		var collar = MeshInstance3D.new()
+		var col_box = BoxMesh.new()
+		col_box.size = Vector3(1.3 * c_armor * S_PWR, 0.20 * S_PWR, 1.3 * c_armor * S_PWR)
+		collar.mesh = col_box
+		collar.material_override = _structural_body_mat(base_color)
+		collar.position = Vector3(0, 0.06 * S_PWR, 0)
+		parent_node.add_child(collar)
+
+		var house_mesh = _part("flywheel_storage_housing")
+		if house_mesh:
+			var housing = _mesh_inst(house_mesh, base_color)
+			housing.scale = Vector3(c_armor * S_PWR, S_PWR, c_armor * S_PWR)
+			housing.position = Vector3.ZERO
+			parent_node.add_child(housing)
+
+		var rotor_mesh = _part("flywheel_storage_rotor")
+		if rotor_mesh:
+			var rotor = _mesh_inst(rotor_mesh, Color(0.35, 0.37, 0.40))
+			rotor.scale = Vector3(r_mass * S_PWR, r_mass * S_PWR, r_mass * S_PWR)
+			rotor.position = Vector3.ZERO
+			parent_node.add_child(rotor)
+
+	elif type_id == "solid_state_battery":
+		# Matrix cell array: low-profile hull-conforming tray with modular packs.
+		var layers_t: float = clampf(tweaks.get("cell_layers", 4.0), 2.0, 6.0)
+		var thick_t: float = clampf(tweaks.get("dielectric_thickness", 1.0), 0.5, 2.0)
+		var layer_scale_z = layers_t / 4.0
+		const S_PWR := 0.40
+
+		var collar = MeshInstance3D.new()
+		var col_box = BoxMesh.new()
+		col_box.size = Vector3(1.2 * S_PWR, 0.14 * S_PWR, 1.4 * layer_scale_z * S_PWR)
+		collar.mesh = col_box
+		collar.material_override = _structural_body_mat(base_color)
+		collar.position = Vector3(0, 0.05 * S_PWR, 0)
+		parent_node.add_child(collar)
+
+		var tray_mesh = _part("solid_state_battery_tray")
+		if tray_mesh:
+			var tray = _mesh_inst(tray_mesh, base_color)
+			tray.scale = Vector3(S_PWR, thick_t * S_PWR, layer_scale_z * S_PWR)
+			tray.position = Vector3.ZERO
+			parent_node.add_child(tray)
+
+		var cell_mesh = _part("solid_state_battery_cells")
+		if cell_mesh:
+			var cells = _mesh_inst(cell_mesh, Color(0.18, 0.20, 0.24))
+			cells.scale = Vector3(S_PWR, thick_t * S_PWR, layer_scale_z * S_PWR)
+			cells.position = Vector3.ZERO
+			parent_node.add_child(cells)
 
 	elif type_id == "tesla_coil":
 		# Chris explicitly invited some fun/silly weapons alongside the

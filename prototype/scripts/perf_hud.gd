@@ -46,12 +46,19 @@ var _shown_50: int = 0
 
 func _ready() -> void:
 	layer = 128 # above the match HUD
+	# Anchored to the LEFT edge, not the right. BattleHUD's minimap is in the
+	# top-right at offset_top = SPACE_MD + 64 (battle_hud.gd:225), and the old
+	# right-side placement sat directly on top of it - the perf HUD is for
+	# diagnosing live stutters and is most useful when the player is ALSO looking
+	# at the minimap to see what is happening, which they cannot do when the
+	# overlay is in the way. Same vertical position as the minimap (top 74) so
+	# the two read as a matched pair along the upper edge.
 	var panel := PanelContainer.new()
-	panel.anchor_left = 1.0
-	panel.anchor_right = 1.0
-	panel.offset_left = -330
+	panel.anchor_left = 0.0
+	panel.anchor_right = 0.0
+	panel.offset_left = 8
 	panel.offset_top = 74 # clear of skirmish.gd's 68px top info strip
-	panel.offset_right = -8
+	panel.offset_right = 330
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# HUDPanel, the recessed plate the rest of the in-match chrome uses. The old
 	# inline box was a 62%-opacity pure black with hand-picked margins, which is the

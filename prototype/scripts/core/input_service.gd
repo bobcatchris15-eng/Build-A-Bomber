@@ -245,6 +245,14 @@ const ACTIONS := {
 		"group": GROUP_SYSTEM, "label": "Performance overlay",
 		"events": [{"key": KEY_F3}],
 	},
+	"sys_perf_dump": {
+		"group": GROUP_SYSTEM, "label": "Performance dump",
+		"events": [{"key": KEY_F4}],
+	},
+	"sys_debug": {
+		"group": GROUP_SYSTEM, "label": "Debug overlay",
+		"events": [{"key": KEY_F2}],
+	},
 	"sys_console": {
 		"group": GROUP_SYSTEM, "label": "Debug menu",
 		"events": [{"key": KEY_F10}, {"key": KEY_QUOTELEFT}],

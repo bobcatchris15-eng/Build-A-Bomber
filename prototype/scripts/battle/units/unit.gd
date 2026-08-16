@@ -137,6 +137,18 @@ var is_fixed_wing: bool = false
 var is_naval: bool = false
 var is_amphibious: bool = false
 
+# DISTANCE-BASED VISIBILITY (PR3, 2026-08-15). Godot's built-in
+# `visibility_range_end` culls a GeometryInstance3D beyond the end distance
+# without forcing the per-frame frustum cull cost, which is what we want
+# for the units out at the edge of a max-zoom-out Skirmish. The fade
+# band at the end is a 4 m linear alpha so a unit does not pop out at
+# the camera's exact transition point. Tuned for a 2660x1080 viewport:
+# at the camera's max zoom-out (height = max_height), the playable map
+# is ~120 m across, so 110 m is "off the field" for a single frame and
+# well beyond the fog of war's reach.
+const UNIT_VISIBILITY_END: float = 110.0
+const UNIT_VISIBILITY_FADE: float = 4.0
+
 var locomotion_type: String = ""
 var locomotion_settings: Dictionary = {}
 
@@ -188,10 +200,24 @@ var _suspension_roll: float = 0.0
 var _prev_speed: float = 0.0
 var _prev_yaw: float = 0.0
 
+# DEPLOYABLE_MODULES_OVERHAUL.md §4: mine layer movement-distance tracking.
+# Accumulates ground distance travelled; drops a mine every ~4.5× hull length.
+var _mine_distance_accum: float = 0.0
+var _prev_mine_pos: Vector3 = Vector3.ZERO
+const MINE_DROP_DISTANCE_MULT: float = 4.5
+# PR5 (2026-08-15). Cached at setup() so the per-tick _tick_mine_layer_tracking
+# can short-circuit for the 90%+ of units that have no mine_layer weapon,
+# instead of walking the hull subtree every physics tick to find out. Without
+# this gate, every unit paid the meta-lookup cost on every tick (the function
+# is called from _physics_process, so 30 Hz × 12 units = 360 wasted lookups/sec
+# in a typical Skirmish, plus the hull_node.has_meta reads).
+var _has_mine_layer: bool = false
+
 
 func _ready() -> void:
 	add_to_group("units")
 	add_to_group("damageable")
+	_prev_mine_pos = global_position   # seed so first tick has zero delta
 
 
 # `controller` is the match director. Passed explicitly rather than read from
@@ -236,6 +262,11 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	attack_range = AssemblyScript.attach_weapons(hull_node)
 	Profiler.stop("spawn.weapons", _p)
 	_hull_type = facts["hull_type"]
+	# PR5 (2026-08-15). Cache the mine_layer presence at spawn so the per-tick
+	# distance tracker can short-circuit without re-walking the hull subtree.
+	# Single hull_node iteration at setup time; zero per-tick cost for the
+	# 90%+ of units that have no mine_layer.
+	_has_mine_layer = _has_weapon_of_type(hull_node, "mine_layer")
 	_recalculate_energy()
 	_recalculate_vision()
 
@@ -266,7 +297,33 @@ func setup(blueprint_data: Dictionary, unit_team: int, bp_manager: Node,
 	Profiler.stop("spawn.selection_ring", _p)
 	_detect_harvester(controller)
 	_create_cargo_bar(base_size)
+
+	# PR3 (2026-08-15). Apply the distance-based visibility range to every
+	# GeometryInstance3D under the hull. Walks the subtree once, sets the
+	# range begin (no fade-in from zero - units at spawn distance always
+	# render), range end, and a 4 m linear fade. The 4 m fade width is
+	# measured against the camera's worst-case zoom speed (a 0.2 s
+	# fast-zoom at 60 fps travels 12 frames over the fade band, so
+	# alpha-0 is reached before the unit's silhouette would have popped
+	# if the fade were a hard cut).
+	if is_instance_valid(hull_node):
+		_apply_unit_visibility_range(hull_node)
 	return true
+
+
+# Walks a node subtree and sets visibility_range_end on every
+# GeometryInstance3D. Cheap (one pass at spawn time), and a unit's hull
+# subtree is shallow enough that the recursion is not worth refactoring.
+func _apply_unit_visibility_range(node: Node) -> void:
+	if node is GeometryInstance3D:
+		var gi: GeometryInstance3D = node
+		gi.visibility_range_begin = 0.0
+		gi.visibility_range_end = UNIT_VISIBILITY_END
+		gi.visibility_range_begin_margin = 0.0
+		gi.visibility_range_end_margin = UNIT_VISIBILITY_FADE
+		gi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+	for child in node.get_children():
+		_apply_unit_visibility_range(child)
 
 
 # Capacity and regen from hull base plus generators. Called again when a
@@ -524,6 +581,7 @@ func _physics_process(delta: float) -> void:
 
 	_apply_movement(delta, boost_mult)
 	_apply_vertical(delta)
+	_tick_mine_layer_tracking(delta)
 	# Kept as its own section: this call was 52 ms of a 56 ms frame until
 	# _resolve_terrain_collision() landed, and it is the one line here whose
 	# cost is set by physics state rather than by anything visible in this
@@ -561,6 +619,120 @@ func _tick_economy(delta: float) -> void:
 		harvester.state = HarvesterFSMScript.State.MOVING_TO_NODE
 		set_internal_destination(current_order.target.global_position)
 	harvester.tick(delta)
+
+
+# DEPLOYABLE_MODULES_OVERHAUL.md §4: mine layer distance-based auto-fire.
+# Each physics tick accumulates ground distance travelled. When it reaches
+# ~4.5× the unit's hull length, drops a proximity mine if the weapon is ready.
+# PR5 (2026-08-15). Short-circuits on _has_mine_layer (cached at setup) so
+# the 90%+ of units that have no mine_layer weapon pay nothing here.
+func _tick_mine_layer_tracking(delta: float) -> void:
+	if not _has_mine_layer or is_dead or move_speed <= 0.0:
+		return
+
+	var moved := global_position - _prev_mine_pos
+	moved.y = 0.0
+	_mine_distance_accum += moved.length()
+	_prev_mine_pos = global_position
+
+	var hull_len := 5.0  # fallback
+	if is_instance_valid(hull_node):
+		if hull_node.has_meta("base_hull_size"):
+			hull_len = hull_node.get_meta("base_hull_size").z
+		if hull_node.has_meta("hull_scale"):
+			hull_len *= hull_node.get_meta("hull_scale").z
+
+	var drop_threshold := hull_len * MINE_DROP_DISTANCE_MULT
+	if _mine_distance_accum < drop_threshold:
+		return
+
+	# Find the first ready mine_layer weapon on this unit.
+	var mine_wpn = _get_ready_mine_layer_weapon()
+	if mine_wpn == null:
+		_mine_distance_accum = 0.0
+		return
+
+	# Fire the mine layer toward the threat (or forward if no threat).
+	# _find_nearest_target() is not called here — we just trigger the
+	# existing _fire_mine_layer() on whichever weapon is ready.
+	var aim_pos: Vector3
+	var t = mine_wpn.target if "target" in mine_wpn else null
+	if t != null and is_instance_valid(t):
+		aim_pos = t.global_position
+	else:
+		var range_val: float = 14.0
+		if "fire_range" in mine_wpn:
+			range_val = float(mine_wpn.fire_range)
+		aim_pos = global_position - global_transform.basis.z.normalized() * range_val
+
+	# Hand the target to the weapon and fire.
+	mine_wpn.set("target", _mine_layer_target_marker(aim_pos))
+	mine_wpn._fire_mine_layer()
+	_mine_distance_accum = 0.0
+
+# Returns the first mine_layer weapon on this unit whose cooldown has expired,
+# or null if none are ready.
+func _get_ready_mine_layer_weapon() -> Node:
+	if not is_instance_valid(hull_node):
+		return null
+	for child in hull_node.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		var data = child.get_meta("module_data")
+		if data == null or data.type_id != "mine_layer":
+			continue
+		# auto_weapon-scripted weapons expose time_since_last_shot and fire_rate.
+		var tsls: float = float(child.time_since_last_shot) if "time_since_last_shot" in child else 0.0
+		var fr: float = float(child.fire_rate) if "fire_rate" in child else 3.5
+		if tsls >= fr:
+			return child
+	return null
+
+# Creates a brief world-space marker Node3D at aim_pos so _fire_mine_layer()
+# has a valid Vector3 target without polluting the weapon's own target slot.
+func _mine_layer_target_marker(aim_pos: Vector3) -> Node3D:
+	var m = Node3D.new()
+	m.name = "MineLayerTarget"
+	var scene = get_tree().current_scene
+	if scene:
+		scene.add_child(m)
+	else:
+		get_parent().add_child(m)
+	m.global_position = aim_pos
+	# PR5 (2026-08-15). The previous version used get_tree().create_timer(3.0)
+	# for cleanup, which works, but a per-timer SceneTreeTimer is a heap
+	# allocation and the lambda closure adds more. A child Timer node
+	# shares the SceneTree's timer and frees itself when it fires. The
+	# 3 s window is the same: long enough for _fire_mine_layer() to have
+	# read the marker, short enough that an orphaned marker from a
+	# match-end mid-throw cannot outlive the match.
+	var cleanup_timer := Timer.new()
+	cleanup_timer.one_shot = true
+	cleanup_timer.wait_time = 3.0
+	cleanup_timer.autostart = true
+	cleanup_timer.timeout.connect(func():
+		if is_instance_valid(m):
+			m.queue_free()
+		if is_instance_valid(cleanup_timer):
+			cleanup_timer.queue_free())
+	m.add_child(cleanup_timer)
+	return m
+
+
+# Walks the hull subtree once and returns true if any weapon has
+# module_data.type_id == type_id. PR5 (2026-08-15) introduced this to cache
+# the mine_layer presence at setup time. Used elsewhere it would do the
+# same for smoke_discharger (auto-pop at <10% HP), but that path is
+# already gated on the actual take_damage call so caching is unnecessary.
+func _has_weapon_of_type(node: Node, type_id: String) -> bool:
+	if node.has_meta("module_data"):
+		var data = node.get_meta("module_data")
+		if data != null and data.type_id == type_id:
+			return true
+	for child in node.get_children():
+		if _has_weapon_of_type(child, type_id):
+			return true
+	return false
 
 
 # Pops the queue when the current order finishes. Phase 0 only resolves
@@ -727,19 +899,44 @@ func _apply_movement(delta: float, boost_mult: float = 1.0) -> void:
 	velocity.z = forward.z * speed
 
 	# Cold-War vehicle suspension physics (chassis squat/dip on accel/brake and roll into turns)
+	# DIRTY-TRANSFORM GATE (PR1, 2026-08-15). The old code wrote
+	# hull_node.rotation on every physics tick, even for stationary units
+	# whose target_pitch and target_roll had already converged to 0. The
+	# write still marks the transform tree dirty and forces every child
+	# mesh and weapon module to re-evaluate their global transform, which
+	# the renderer cannot batch across. The fix: only write when the
+	# value actually changes, and skip the entire block when the unit is
+	# effectively at rest. The lerp continues to update internally so
+	# the next acceleration snaps the suspension in the right direction.
 	if is_instance_valid(hull_node) and not is_flying:
 		var accel: float = (speed - _prev_speed) / maxf(delta, 0.001)
 		_prev_speed = speed
 		var target_pitch: float = clampf(-accel * 0.006, -0.05, 0.05)
+		var pitch_delta: float = target_pitch - _suspension_pitch
 		_suspension_pitch = lerpf(_suspension_pitch, target_pitch, 8.0 * delta)
 
 		var yaw_rate: float = wrapf(rotation.y - _prev_yaw, -PI, PI) / maxf(delta, 0.001)
 		_prev_yaw = rotation.y
 		var target_roll: float = clampf(yaw_rate * 0.012, -0.06, 0.06)
+		var roll_delta: float = target_roll - _suspension_roll
 		_suspension_roll = lerpf(_suspension_roll, target_roll, 8.0 * delta)
 
-		hull_node.rotation.x = _suspension_pitch
-		hull_node.rotation.z = _suspension_roll
+		# Combined gate: the unit is at rest when the deltas to the targets
+		# are both below one milli-radian AND the unit is not moving.
+		# Writing to hull_node.rotation in that case costs a tree-wide
+		# dirty propagation for zero visible change.
+		var resting: bool = absf(pitch_delta) < 0.001 \
+				and absf(roll_delta) < 0.001 \
+				and absf(speed) < 0.05 \
+				and absf(yaw_rate) < 0.01
+		if not resting:
+			hull_node.rotation.x = _suspension_pitch
+			hull_node.rotation.z = _suspension_roll
+		elif hull_node.rotation.x != 0.0 or hull_node.rotation.z != 0.0:
+			# One last write to reset to neutral once the suspension has
+			# settled, then stay clean until the next acceleration.
+			hull_node.rotation.x = 0.0
+			hull_node.rotation.z = 0.0
 
 
 # Which way to head this tick, resolved across three sources in priority order.
@@ -1026,6 +1223,13 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	hp = maxf(0.0, hp - dealt)
 	if _controller != null and _controller.has_method("record_combat_damage"):
 		_controller.record_combat_damage(self, hit_origin, dealt, damage_type)
+
+	# DEPLOYABLE_MODULES_OVERHAUL.md §2: emergency smoke auto-pop at <10% HP.
+	# Fires the smoke_discharger toward the hit origin if the weapon is ready.
+	# Gated on hp > 0 (don't double-trigger on the killing blow) and cooldown.
+	if hp > 0.0 and max_hp > 0.0 and hp / max_hp <= 0.10:
+		_try_emergency_smoke(hit_origin)
+
 	if hp > 0.0:
 		return
 	is_dead = true
@@ -1049,6 +1253,32 @@ func take_damage(amount: float, damage_type: String = "kinetic", hit_origin = nu
 	died.emit(self)
 	BattleWreckScript.spawn_from_unit(self, hit_origin)
 	queue_free()
+
+
+# DEPLOYABLE_MODULES_OVERHAUL.md §2: finds the unit's smoke_discharger and fires
+# an emergency screen toward hit_origin if the weapon is off cooldown.
+func _try_emergency_smoke(hit_origin) -> void:
+	if not is_instance_valid(hull_node):
+		return
+	for child in hull_node.get_children():
+		if not child.has_meta("module_data"):
+			continue
+		var data = child.get_meta("module_data")
+		if data == null or data.type_id != "smoke_discharger":
+			continue
+		# Guard: only fire if the weapon is off cooldown.
+		var tsls: float = float(child.time_since_last_shot) if "time_since_last_shot" in child else 0.0
+		var fr: float = float(child.fire_rate) if "fire_rate" in child else 2.5
+		if tsls < fr:
+			continue
+		if child.has_method("request_screen") and hit_origin != null:
+			var origin_vec: Vector3
+			if hit_origin is Vector3:
+				origin_vec = hit_origin
+			else:
+				origin_vec = global_position  # fallback; should not happen
+			child.request_screen(origin_vec)
+			return   # one smoke pop per hit; stop after the first ready weapon
 
 
 # Spend the capacitor to absorb a frontal hit, returning what is left of it.

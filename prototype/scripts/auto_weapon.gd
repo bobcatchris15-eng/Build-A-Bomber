@@ -7,6 +7,10 @@ const WeaponRange = preload("res://scripts/weapon_range.gd")
 # run has switched it on; auto_weapon.gd is shared with the old runtime, which
 # never enables it.
 const Profiler = preload("res://scripts/battle/battle_profiler.gd")
+# Lifecycle log lines. Mirror to BattleLogger for the structured log
+# (beacon, drone, mine, smoke) - one line per fire. Inert when the
+# logger is off.
+const BattleLogger = preload("res://scripts/battle/battle_logger.gd")
 const VFXBurstScript = preload("res://scripts/vfx_burst.gd")
 # Shared unit meshes + cached materials for every munition visual below. See
 # munition_pool.gd's header for the measurements that motivated it; the short
@@ -94,6 +98,8 @@ const LOS_CACHE_TTL: float = 0.15
 # into every weapon re-scanning on the same physics frame.
 var _reacquire_timer: float = 0.0
 const REACQUIRE_INTERVAL: float = 0.2
+var _fog_scan_timer: float = 0.0
+const FOG_SCAN_INTERVAL: float = 1.8   # seconds between fog scans
 
 # frame_built weapons (ModuleCatalog.get_traverse_limit_angle == 0.0 exactly -
 # the barrel is fixed to the hull, so the whole vehicle aims instead, see
@@ -1216,6 +1222,13 @@ func _find_nearest_target(delta: float = -1.0):
 		target = null
 		return
 
+	# sensor_beacon_launcher does not auto-acquire combat targets — it fires
+	# into fog of war instead. A separate throttle prevents scanning every tick.
+	if type_id == "sensor_beacon_launcher":
+		target = null
+		_scan_fog_and_fire_beacon(delta)
+		return
+
 	var resting_forward = get_parent().global_transform.basis * resting_transform.basis * Vector3.FORWARD
 
 	if _is_current_target_still_valid(resting_forward):
@@ -2080,12 +2093,93 @@ func _fire_sentry_deployer():
 # skirmish.reveal_area(), the same beacon system illumination ammo uses.
 const BEACON_REVEAL_RADIUS: float = 9.0
 const BEACON_REVEAL_DURATION: float = 18.0
+# The single beacon's sensor bubble is 9m. The launcher's *firing* range
+# (how far it can lob a beacon into unexplored territory) is much further:
+# ~11x that, so a launcher can paint fog across a real chunk of map instead
+# of just over the next berm. The previous fire_range*0.75 (~34m) was the
+# reason the launcher appeared to never fire at all in testing - in any map
+# with a fog line further than that, every probe landed on explored ground.
+const BEACON_SCAN_RANGE: float = 100.0
+# Probe at three distances per direction so we don't miss fog that falls
+# between the near ring and the far ring. Closest-first, so the beacon
+# lands on the nearest unexplored tile we can reach.
+const BEACON_SCAN_DISTANCES: Array[float] = [40.0, 70.0, 100.0]
+
+# DEPLOYABLE_MODULES_OVERHAUL.md §3: when idle, the sensor beacon launcher
+# scans 8 radial directions for unexplored fog and fires a beacon to reveal it.
+func _scan_fog_and_fire_beacon(delta: float):
+	_fog_scan_timer -= delta
+	if _fog_scan_timer > 0.0:
+		return
+	_fog_scan_timer = FOG_SCAN_INTERVAL
+
+	var scene = get_tree().current_scene
+	if scene == null or not scene.has_method("cell_explored"):
+		return
+
+	var my_team = get_team()
+	var directions := [
+		Vector3(0, 0, -1), Vector3(0, 0, 1), Vector3(-1, 0, 0), Vector3(1, 0, 0),
+		(Vector3(0, 0, -1) + Vector3(1, 0, 0)).normalized(),
+		(Vector3(0, 0, -1) + Vector3(-1, 0, 0)).normalized(),
+		(Vector3(0, 0, 1) + Vector3(1, 0, 0)).normalized(),
+		(Vector3(0, 0, 1) + Vector3(-1, 0, 0)).normalized(),
+	]
+
+	for d in directions:
+		var world_dir: Vector3 = (global_transform.basis * d).normalized()
+		for dist in BEACON_SCAN_DISTANCES:
+			var probe_pos: Vector3 = global_position + world_dir * dist
+			probe_pos.y = global_position.y  # same elevation
+
+			# cell_explored is team-aware — returns false for cells the team
+			# has never seen, which is exactly "fog of war".
+			if not scene.cell_explored(probe_pos.x, probe_pos.z):
+				# Found unexplored fog. Fire a beacon to this point.
+				_fire_sensor_beacon_toward(probe_pos)
+				return   # one beacon per scan tick; throttle handles repetition
+
+# Fires a sensor beacon toward an arbitrary world point (used by fog scan).
+func _fire_sensor_beacon_toward(fog_point: Vector3):
+	var parent = _effects_parent()
+	if parent == null:
+		return
+	# Place the beacon slightly above the target so it lands on the ground.
+	var aim = fog_point + Vector3(0.0, 0.5, 0.0)
+	var beacon = MeshInstance3D.new()
+	beacon.mesh = MunitionPool.unit_sphere()
+	beacon.material_override = MunitionPool.emissive(laser_color, laser_color, 1.2)
+	beacon.scale = Vector3.ONE * 0.18
+	parent.add_child(beacon)
+	var start = global_position
+	var tween = create_tween()
+	tween.tween_method(func(v: float):
+		if not is_instance_valid(beacon):
+			return
+		var pos = start.lerp(aim, v)
+		pos.y += sin(v * PI) * 5.0
+		beacon.global_position = pos
+	, 0.0, 1.0, 0.9)
+	var team = get_team()
+	tween.finished.connect(func():
+		if is_instance_valid(beacon):
+			beacon.queue_free()
+		var sk = get_tree().current_scene
+		if sk and sk.has_method("reveal_area"):
+			sk.reveal_area(team, aim, BEACON_REVEAL_RADIUS, BEACON_REVEAL_DURATION)
+	)
 
 func _fire_sensor_beacon_launcher():
 	var parent = _effects_parent()
 	if parent == null: return
 	var aim = target.global_position if is_instance_valid(target) else \
 		global_position - global_transform.basis.z.normalized() * fire_range
+	# One line per beacon, with the unit name and aim point. Pairs with
+	# the deployable-modules investigation: the launcher's firing cadence
+	# and the per-tick fog scan it now owns (see _scan_fog_and_fire_beacon)
+	# are the kind of thing a stutter report needs to see.
+	var _carrier_name := String(get_parent().name) if get_parent() != null else "?"
+	BattleLogger.beacon_fired(_carrier_name, aim)
 	var beacon = MeshInstance3D.new()
 	beacon.mesh = MunitionPool.unit_sphere()
 	beacon.material_override = MunitionPool.emissive(laser_color, laser_color, 1.2)
@@ -2124,14 +2218,33 @@ func _fire_drone_swarm():
 	# tweak (previously documented in Arsenal_Weapons_List.md but missing
 	# from TWEAK_SPECS entirely).
 	var count = 2
+	var drone_type = "attack"
+	var drone_speed = 14.0
 	if has_meta("module_data"):
 		var data = get_meta("module_data")
 		count = int(data.tweaks.get("hangar_size", 2.0))
+		drone_type = data.tweaks.get("drone_type", "attack")
+		var profile = ModuleCatalog.get_drone_profile(drone_type)
+		drone_speed = profile.get("speed", 14.0)
 	count = max(1, count)
 	var per_drone_damage = (dps * fire_rate) / count
 	var my_team = get_team()
 	var vehicle_root = get_vehicle_root()
 	var carrier = vehicle_root if is_instance_valid(vehicle_root) else self
+
+	# For repair drones the carrier weapon targets damaged allies so the
+	# swarm launches toward useful repair candidates rather than enemies.
+	if drone_type == "repair":
+		targets_allies = true
+
+	# Lifecycle log line: one per drone launch, with the carrier's name
+	# and the type (attack / scout / repair). Lets a playtest report
+	# correlate "X drones were in the air when the stutter hit" with
+	# the actual spawn events rather than a count derived from
+	# the "missiles" group at a later frame.
+	BattleLogger.drone_launched(
+		String(carrier.name) if is_instance_valid(carrier) else "?", drone_type, count)
+
 	for i in range(count):
 		var drone = Node3D.new()
 		drone.set_script(load("res://scripts/drone_unit.gd"))
@@ -2141,7 +2254,8 @@ func _fire_drone_swarm():
 		drone.global_position = global_position + SimRNG.scatter_xz(0.5) + Vector3(0.0, 1.0, 0.0)
 		drone.carrier = carrier
 		drone.target = target
-		drone.speed = 14.0
+		drone.drone_type = drone_type
+		drone.speed = drone_speed
 		drone.damage_per_hit = per_drone_damage
 		drone.damage_class = damage_class
 		drone.team = my_team
@@ -2681,6 +2795,14 @@ func _fire_mine_layer():
 	var aim = target.global_position if is_instance_valid(target) else (global_position - global_transform.basis.z * fire_range)
 	var drop = global_position.lerp(aim, 0.45)
 
+	# One log line per drop so the post-mortem can correlate a frame
+	# where many mines landed (e.g. a layered minefield) with any
+	# hitch. Carrier name comes from get_vehicle_root() so it is the
+	# unit name, not the per-mount weapon node.
+	var _carrier := get_vehicle_root()
+	BattleLogger.mine_dropped(
+		String(_carrier.name) if is_instance_valid(_carrier) else "?", drop)
+
 	for i in range(count):
 		# SIM. A proximity mine is a persistent world entity that outlives its
 		# layer and detonates on whatever drives over it - where it comes to
@@ -2740,9 +2862,9 @@ func _fire_ballista():
 # The dedicated obscurant launcher. Lobs a canister short of the target
 # rather than at it: a screen is only useful BETWEEN you and them, so
 # putting the cloud on top of the enemy would defeat the entire purpose.
-# Deliberately screens at 70% of the way out, which for a unit backing off
-# under fire puts the smoke between the shooter and the threat.
-const SMOKE_SCREEN_STANDOFF: float = 0.7
+# 0.5 = midway between unit and threat (DEPLOYABLE_MODULES_OVERHAUL.md §2).
+# 1.0 = player-triggered forced-target case; the aim point is already chosen.
+const SMOKE_SCREEN_STANDOFF: float = 0.5
 
 func _fire_smoke_discharger():
 	# More tubes lay a wider screen. This is also why tube_count lengthens
@@ -2753,6 +2875,18 @@ func _fire_smoke_discharger():
 	if has_meta("module_data"):
 		tube_count = get_meta("module_data").tweaks.get("tube_count", 4.0)
 	var spread_mult = sqrt(max(tube_count, 1.0) / 4.0)
+
+	# Lifecycle log line. _try_emergency_smoke() in unit.gd also calls
+	# this for the auto-pop at <10% HP, so the count covers BOTH the
+	# player-triggered discharge and the unit's defensive pop - useful
+	# when smoke volume dominates the renderer's batched draw list.
+	var _smoke_carrier := get_vehicle_root()
+	var _smoke_carrier_name := String(_smoke_carrier.name) if is_instance_valid(_smoke_carrier) else "?"
+	var _smoke_hp_pct: float = 0.0
+	if is_instance_valid(_smoke_carrier) and "hp" in _smoke_carrier and "max_hp" in _smoke_carrier \
+			and _smoke_carrier.max_hp > 0.0:
+		_smoke_hp_pct = float(_smoke_carrier.hp) / float(_smoke_carrier.max_hp) * 100.0
+	BattleLogger.smoke_popped(_smoke_carrier_name, _smoke_hp_pct)
 
 	var start = global_position + Vector3(0, 0.4, 0)
 	var aim = target.global_position if is_instance_valid(target) else (start - global_transform.basis.z * fire_range)

@@ -365,13 +365,33 @@ const TWEAK_SPECS = {
 		{"name": "bank_capacity", "label": "Capacitor Cell Count", "min": 2.0, "max": 6.0, "step": 1.0, "default": 4.0},
 		{"name": "busbar_gauge", "label": "Busbar Gauge", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
+	"flywheel_storage": [
+		{"name": "rotor_mass", "label": "Flywheel Rotor Mass", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "containment_armor", "label": "Containment Armor", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"solid_state_battery": [
+		{"name": "cell_layers", "label": "Cell Pack Layers", "min": 2.0, "max": 6.0, "step": 1.0, "default": 4.0},
+		{"name": "dielectric_thickness", "label": "Dielectric Density", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
 	"fusion_generator": [
 		{"name": "reactor_length", "label": "Reactor Core Length", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
 		{"name": "cooling_radiator", "label": "Cooling Radiator Fins", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
 	],
+	"diesel_generator": [
+		{"name": "engine_displacement", "label": "Turbine Displacement", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "radiator_fins", "label": "Exhaust & Cooling Louvers", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
+	"thermo_generator": [
+		{"name": "core_diameter", "label": "Thermal Core Diameter", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0},
+		{"name": "heatsink_fins", "label": "Heat Pipe Runners", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}
+	],
 	# Previously documented in Arsenal_Weapons_List.md but missing from this
 	# dict entirely - drone_carrier rendered zero tweak sliders in the
 	# Design Lab (ENERGY_AND_BALANCE_SPEC.md #3).
+	# drone_type is handled by a dedicated RadialAmmoSelector in
+	# tweak_callout_manager.gd (see the drone_carrier branch in
+	# _generate_custom_tweaks) and must NOT be included here — the
+	# parametric loop only handles numeric and bool specs.
 	"drone_carrier": [
 		{"name": "hangar_size", "label": "Hangar Size (Drone Count)", "min": 1.0, "max": 5.0, "step": 1.0, "default": 2.0},
 		{"name": "launch_catapult", "label": "Launch Catapult", "min": 0.5, "max": 2.0, "step": 0.1, "default": 1.0}

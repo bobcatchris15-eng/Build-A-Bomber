@@ -30,6 +30,15 @@ static var _totals: Dictionary = {}
 static var _frames: Array = []
 static var _frame_start: int = 0
 
+# The last frame's totals, written by end_frame() and read by BattleLogger
+# to mirror per-section timings and hitch events to the structured log.
+# Snapshot rather than live `_frame` so the read happens AFTER end_frame
+# has cleared the dict.
+static var last_frame_ms: float = 0.0
+static var last_dominant: String = ""
+static var last_dominant_ms: float = 0.0
+static var last_sections: Dictionary = {}
+
 # How much of a frame a section must account for before it is named as the cause.
 const DOMINANCE_SHARE := 0.5
 
@@ -39,6 +48,10 @@ static func reset() -> void:
 	_totals.clear()
 	_frames.clear()
 	_frame_start = Time.get_ticks_usec()
+	last_frame_ms = 0.0
+	last_dominant = ""
+	last_dominant_ms = 0.0
+	last_sections.clear()
 
 
 # Returns a token to hand back to stop(). Zero when disabled, which stop() reads
@@ -78,6 +91,14 @@ static func end_frame() -> void:
 		_totals[section] = row
 
 	_frames.append([total_ms, dominant, float(dominant_us) / 1000.0])
+	# Snapshot for BattleLogger to read. The mirror (per-section log lines
+	# and hitch detection) lives in match_director.gd so the profiler
+	# itself stays free of a logger dependency - the previous preload was
+	# circular.
+	last_frame_ms = total_ms
+	last_dominant = dominant
+	last_dominant_ms = float(dominant_us) / 1000.0
+	last_sections = _frame.duplicate()
 	_frame.clear()
 
 

@@ -19,12 +19,33 @@ extends RefCounted
 # It lives here, in the battle layer, rather than being imported from
 # building.gd, because building.gd is scheduled for deletion in the retirement
 # commit and a dependency on it would block that.
+#
+# MATERIAL SHARING (PR1, 2026-08-15). The previous rewrite created a fresh
+# StandardMaterial3D per surface per building, which prevented the renderer
+# from batching across the 50+ structures a typical Skirmish builds. With 9
+# building kinds x 2 teams x ~5 surfaces per GLB, that was up to 90 unique
+# materials per match, AND each was only used by ONE building - the renderer
+# saw every surface as a fresh state change. The fix is a static cache keyed
+# by (kind, team, surface_index, source_material_path): the first building of
+# a (kind, team, surface) pays the material-construction cost, every
+# subsequent one reuses the same material. Net: 53 buildings x ~5 surfaces
+# -> 90 unique materials SHARED across all buildings of the same (kind,
+# team, surface). Batching is restored, draw-call cost drops proportionally,
+# and the visual is identical because the materials are the same object
+# references, not duplicates.
 
 const HullMaterialBuilder = preload("res://scripts/hull_material_builder.gd")
 const LiveryScript = preload("res://scripts/livery.gd")
 const HullDecalsScript = preload("res://scripts/hull_decals.gd")
 
 const MODEL_DIR := "res://assets/models/buildings/%s.glb"
+
+# (kind, team, surface_index, source_material_path) -> StandardMaterial3D
+# Populated lazily by _assign_materials() and survives for the lifetime of
+# the process. Survives scene reloads because it is a static on a RefCounted
+# - the dictionary is process-global, which is what we want: a Skirmish
+# played after another in the same Godot run reuses materials and stays fast.
+static var _material_cache: Dictionary = {}
 
 
 # Builds the visual for `kind` under `parent`, fitted to `footprint`.
@@ -62,7 +83,7 @@ static func build(parent: Node3D, kind: String, footprint: Vector3,
 	inst.position = Vector3(0, footprint.y * 0.5, 0) \
 		- (box.position + box.size * 0.5) * fit
 
-	_apply_material(inst, faction, team)
+	_apply_material(inst, kind, faction, team)
 	HullDecalsScript.apply_decals(inst, faction, footprint * 1.5)
 	# NOT finished here. apply_decals() adds further MeshInstance3Ds with their
 	# own materials, so a finish applied at this point misses every one of them -
@@ -101,14 +122,21 @@ static func _collect(node: Node, into: Array) -> void:
 		_collect(child, into)
 
 
-static func _apply_material(node: Node, faction: String, team: int) -> void:
+static func _apply_material(node: Node, kind: String, faction: String, team: int) -> void:
 	var team_tint: Color = LiveryScript.zone_color(faction, "hull_upper")
 	if team != 0:
 		team_tint = team_tint.lerp(Color(0.85, 0.2, 0.2), 0.45)
-	_assign_materials(node, team_tint)
+	_assign_materials(node, kind, team, team_tint)
 
 
-static func _assign_materials(node: Node, team_tint: Color) -> void:
+# Per-instance material assignment is now per-(kind, team, surface) shared.
+# The cache key encodes everything that distinguishes two surface materials:
+# the building kind (different GLBs have different source materials), the team
+# (so team 1 gets the red-tint variant), the surface index (different slots
+# on the same mesh can have different base colors), and the source material's
+# resource_path so two GLBs that share a material still resolve to the same
+# cached entry.
+static func _assign_materials(node: Node, kind: String, team: int, team_tint: Color) -> void:
 	if node is MeshInstance3D and node.mesh != null:
 		var count: int = node.mesh.get_surface_count()
 		for i in range(count):
@@ -116,21 +144,32 @@ static func _assign_materials(node: Node, team_tint: Color) -> void:
 			if src_mat == null:
 				src_mat = node.mesh.surface_get_material(i)
 			if src_mat is StandardMaterial3D or src_mat is ORMMaterial3D or src_mat is BaseMaterial3D:
-				var m := StandardMaterial3D.new()
-				if src_mat is StandardMaterial3D or src_mat is ORMMaterial3D:
-					m.albedo_color = src_mat.albedo_color
-					m.roughness = maxf(src_mat.roughness, 0.75)
-					m.metallic = src_mat.metallic
-					m.metallic_specular = 0.1
-				else:
-					m.albedo_color = Color(0.5, 0.5, 0.5)
-					m.roughness = 0.8
-					m.metallic = 0.2
-					m.metallic_specular = 0.1
-				var mat_name: String = str(src_mat.resource_name) if src_mat != null else ""
-				if i == 1 or ("Metal" in mat_name) or ("Panel" in mat_name):
-					m.albedo_color = team_tint
+				var cache_key := "%s|t%d|i%d|%s" % [kind, team, i, str(src_mat.resource_path)]
+				var m: StandardMaterial3D = _material_cache.get(cache_key, null)
+				if m == null:
+					m = _build_surface_material(src_mat, team_tint, i)
+					_material_cache[cache_key] = m
 				node.set_surface_override_material(i, m)
 	for child in node.get_children():
-		_assign_materials(child, team_tint)
+		_assign_materials(child, kind, team, team_tint)
 
+
+# The actual material construction. Same logic the old per-instance version
+# ran, but called once per (kind, team, surface) rather than once per
+# building.
+static func _build_surface_material(src_mat, team_tint: Color, surface_index: int) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	if src_mat is StandardMaterial3D or src_mat is ORMMaterial3D:
+		m.albedo_color = src_mat.albedo_color
+		m.roughness = maxf(src_mat.roughness, 0.75)
+		m.metallic = src_mat.metallic
+		m.metallic_specular = 0.1
+	else:
+		m.albedo_color = Color(0.5, 0.5, 0.5)
+		m.roughness = 0.8
+		m.metallic = 0.2
+		m.metallic_specular = 0.1
+	var mat_name: String = str(src_mat.resource_name) if src_mat != null else ""
+	if surface_index == 1 or ("Metal" in mat_name) or ("Panel" in mat_name):
+		m.albedo_color = team_tint
+	return m

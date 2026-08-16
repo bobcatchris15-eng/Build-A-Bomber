@@ -14,6 +14,7 @@ prototype/.godot/
 # Transient
 prototype/log.txt
 prototype/test_output.txt
+prototype/compile_check_*.txt
 
 # Visual regression: baselines/ is the checked-in reference set; captures/
 # is regenerated fresh every run and would just be diff noise.

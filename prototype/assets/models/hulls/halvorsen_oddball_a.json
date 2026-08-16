@@ -16,7 +16,8 @@
     1.0
   ],
   "domain": "Naval",
-  "base_energy": 0.0,
+  "base_energy": 114.7,
+  "base_power": 8.77,
   "base_vision": 20.0,
   "is_foundation": false,
   "category": "hull",

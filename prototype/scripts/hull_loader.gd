@@ -45,12 +45,9 @@ const NUMERIC_TYPES = [TYPE_INT, TYPE_FLOAT]
 const PROTECTED_DEFAULT_HULL_ID := "brenntal_medium_a"
 const PROTECTED_DEFAULT_HULL_FALLBACK = {
 	"name": "Brenntal Casemate Medium", "hp": 694.7, "weight": 496.0, "metal": 168, "crystal": 34,
-	# base_energy (storage) and base_power (generation) are both 0 across the
-	# whole vehicle catalogue - hulls store and generate nothing, and a design
-	# that wants energy weapons carries a generator module. base_power is
-	# absent from REQUIRED_FIELDS below on purpose: a mod hull without it
-	# should load and generate nothing, not fail validation.
-	"dps": 0.0, "is_foundation": false, "base_energy": 0.0, "base_power": 0.0,
+	# base_energy (storage) and base_power (generation) are scaled off the
+	# hull's volume so every hull has an intrinsic baseline power budget.
+	"dps": 0.0, "is_foundation": false, "base_energy": 74.6, "base_power": 5.57,
 	"base_vision": 20.0,
 	"draught": 0.5, "underside_y_bias": 0.0, "turreted_capable": true, "category": "hull",
 	# Authored nose-at--Z with the AABB already equal to `size`, so the
