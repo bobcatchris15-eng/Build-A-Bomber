@@ -2,15 +2,12 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://byibnsvlwc2rf"
+uid="uid://bllhdug1ffh6l"
 path.s3tc="res://.godot/imported/boulder_4_boulder_4_mat_rough.png-3764598a2910b6c2244e8f2eceb775d0.s3tc.ctex"
 path.etc2="res://.godot/imported/boulder_4_boulder_4_mat_rough.png-3764598a2910b6c2244e8f2eceb775d0.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
-}
-generator_parameters={
-"md5": "a25a350c94b22c206ea5ec328ce2155e"
 }
 
 [deps]
