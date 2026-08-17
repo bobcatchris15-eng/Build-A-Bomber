@@ -845,12 +845,14 @@ static func _build_catalog_literal() -> Dictionary:
 			"color": Color(0.38, 0.39, 0.32)
 		},
 
-		# --- BOLT-ON ARMOR EXPANSION ---------------------------------------
-		# Three plates that bias toward a damage class each, mirroring the
-		# hull material rock-paper-scissors WITHOUT touching ARMOR_TABLE -
-		# FABLE_REVIEW.md 1.2 deliberately balanced those four materials
-		# against the four damage classes and a fifth row would muddy it.
-		# See ModuleCatalog.ARMOR_MODULE_BIAS for the actual numbers.
+		# --- PAINT REFERENCE PATCHES (non-placeable) -------------------------
+		# Stats source for ArmorPaint.PAINT_TYPE_IDS: a row per paintable armor
+		# material, kept here so designers can tune hp/weight/metal/crystal in
+		# one place. NOT placeable as modules - module_placer.gd:1061 skips
+		# everything in PAINT_TYPE_IDS, leaving only energy_barrier_projector as
+		# a real "category: armor" module. Three of the four damage-class biases
+		# (FABLE_REVIEW.md 1.2) live in ARMOR_MODULE_BIAS, not on these rows -
+		# the rows carry the patch cost, the resolver reads the bias.
 		"slat_armor": {
 			"name": "Slat Armor",
 			"category": "armor",

@@ -24,8 +24,9 @@ const Tokens = preload("res://scripts/ui_tokens.gd")
 # ones. The version check below surfaces that instead of loading silently.
 # Bumped 2.0 -> 3.0 when armor stopped being placed modules and became painted
 # per-facet coverage: armor entries moved out of "modules" into a top-level
-# "armor" block, so a v2 design's armor has to be migrated rather than loaded
-# (_migrate_armor_modules).
+# "armor" block. v2 designs without an "armor" block are no longer auto-
+# migrated - they load as-is and any old armor entries in "modules" are
+# silently dropped, same as a hand-edited save with a typo would be.
 const CURRENT_BLUEPRINT_VERSION: float = 3.0
 
 const MeshAssetLoader = preload("res://scripts/mesh_asset_loader.gd")
@@ -260,106 +261,6 @@ func _reresolve_armor(saved: Array, table: Dictionary, count: int, hull_type: St
 		push_warning("Armor: %d of %d painted facets on '%s' could not be matched to the current hull mesh and were dropped." % [
 			dropped, saved.size(), hull_type])
 	return out
-
-
-# Converts a pre-v3 design's armor MODULES into facet assignments, in place.
-#
-# Runs on load, never on disk. A v2 design placed one plate per side, snapped to
-# the facet's centre, carrying a `facet` meta naming the six-way side. Two cases:
-#
-#   * The module knows its side -> paint the baked facet on that side whose
-#     centroid is nearest the module's saved position. That is the single facet
-#     the plate actually covered.
-#   * It does not (a v1 design, from before the facet meta existed) -> paint
-#     EVERY facet on the side its mount normal implies. That is exactly what a
-#     side-brush stroke does now, so the migrated design reads the way its
-#     author would have painted it rather than losing armor outright.
-#
-# Material and thickness come from the hull-global values, which is where they
-# lived before they became per-facet.
-func _migrate_armor_modules(blueprint_data: Dictionary) -> void:
-	if float(blueprint_data.get("version", 1.0)) >= 3.0:
-		return
-	if blueprint_data.has("armor") and not (blueprint_data["armor"].get("assignments", []) as Array).is_empty():
-		return
-	var modules: Array = blueprint_data.get("modules", [])
-	if modules.is_empty():
-		return
-
-	var hull_type := str(blueprint_data.get("hull_type", "brenntal_medium_a"))
-	var table := HullFacetsScript.load_map(hull_type)
-	var count := int(table.get("facet_count", 0))
-	var normals: PackedVector3Array = table.get("normal", PackedVector3Array())
-	var centroids: PackedVector3Array = table.get("centroid", PackedVector3Array())
-	var areas: PackedFloat32Array = table.get("area", PackedFloat32Array())
-	var side_names = table.get("side", [])
-
-	var material := str(blueprint_data.get("armor_material", "hardened_steel"))
-	var thickness := float(blueprint_data.get("armor_thickness", 1.0))
-
-	var kept := []
-	var by_facet := {}
-	for m in modules:
-		if not (m is Dictionary):
-			kept.append(m)
-			continue
-		var type_id := str(m.get("type_id", ""))
-		if not ArmorPaintScript.PAINT_TYPE_IDS.has(type_id):
-			kept.append(m)
-			continue
-		if count <= 0:
-			# No baked table for this hull - drop the plate rather than keep a
-			# module the rest of the pipeline no longer knows how to build.
-			continue
-
-		var side := str(m.get("facet", ""))
-		if side == "":
-			side = ModuleCatalogScript.classify_facet(_dict_to_vec3(m.get("mount_normal", {})))
-		var targets := PackedInt32Array()
-		if m.has("facet") and side != "":
-			# Nearest facet ON THAT SIDE to where the plate sat.
-			var pos := _dict_to_vec3(m.get("position", {}))
-			var best := -1
-			var best_d := INF
-			for f in ArmorPaintScript.facets_for_side(hull_type, side):
-				if f >= centroids.size():
-					continue
-				var d: float = centroids[f].distance_to(pos)
-				if d < best_d:
-					best_d = d
-					best = f
-			if best >= 0:
-				targets.append(best)
-		if targets.is_empty():
-			targets = ArmorPaintScript.facets_for_side(hull_type, side)
-
-		for f in targets:
-			if f < 0 or f >= count:
-				continue
-			# Last writer wins, matching the old "a facet only ever has one
-			# plate" invariant that damage_resolver relied on.
-			by_facet[f] = {
-				"facet_id": f,
-				"side": str(side_names[f]) if f < side_names.size() else side,
-				"type_id": type_id,
-				"material": material,
-				"thickness": thickness,
-				"normal": _vec3_to_dict(normals[f]) if f < normals.size() else _vec3_to_dict(Vector3.UP),
-				"centroid": _vec3_to_dict(centroids[f]) if f < centroids.size() else _vec3_to_dict(Vector3.ZERO),
-				"area": float(areas[f]) if f < areas.size() else 0.0,
-			}
-
-	if by_facet.is_empty():
-		return
-	var rows := by_facet.values()
-	rows.sort_custom(func(x, y): return int(x["facet_id"]) < int(y["facet_id"]))
-	blueprint_data["modules"] = kept
-	blueprint_data["armor"] = {
-		"hull_type": hull_type,
-		"hull_tri_count": int(table.get("tri_count", 0)),
-		"facet_count": count,
-		"assignments": rows,
-	}
 
 
 func _dict_to_vec3(d) -> Vector3:
@@ -1002,12 +903,11 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 	hull.set_meta("blueprint_id", blueprint_data.get("id", ""))
 	hull.set_meta("blueprint_name", blueprint_data.get("name", "Untitled Design"))
 
-	# Painted armor. Migration runs first so a pre-v3 design that placed armor
-	# MODULES arrives here as assignments and its armor stops being spawned as
-	# geometry in the module loop below. Deliberately does NOT rewrite the file
-	# on disk: a design re-stamps itself on the next explicit Save, so a bad
-	# migration can never destroy the original.
-	_migrate_armor_modules(blueprint_data)
+	# Painted armor. _deserialize_armor reads the v3 "armor" block (assignments
+	# keyed by baked facet id) and resolves them against the CURRENT bake; v2
+	# designs without an "armor" block load as-is and any orphan "modules"
+	# entries in PAINT_TYPE_IDS are silently ignored (treated as unknown types
+	# by the module loop below).
 	var armor_assignments := _deserialize_armor(blueprint_data, str(hull_type))
 	hull.set_meta("armor_assignments", armor_assignments)
 
@@ -1337,8 +1237,8 @@ func reconstruct_vehicle(blueprint_data: Dictionary, parent_node: Node3D, is_des
 		# Armor is no longer a module here. It became painted per-facet coverage
 		# (ArmorPaint), so there is nothing on this path to re-measure and
 		# re-conform - the skins are built once from the plan, above, before the
-		# module loop starts. _migrate_armor_modules() has already lifted any
-		# pre-v3 armor entries out of "modules", so a plate cannot reach here.
+		# module loop starts. Any v2-era armor MODULES that survived a save
+		# are now silently ignored (the loop hits an unknown type_id and skips).
 		#
 		# The paragraph this replaces is worth keeping in one line: a facet skin
 		# is GEOMETRY, not a node scale, which is why it is derived rather than

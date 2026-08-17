@@ -27,6 +27,7 @@ const ModuleVolumeScript = preload("res://scripts/module_volume.gd")
 # already applied.
 const PartMaterialsScript = preload("res://scripts/part_materials.gd")
 const HullFacetsScript = preload("res://scripts/hull_facets.gd")
+const ArmorPaintScript = preload("res://scripts/armor_paint.gd")
 
 @export var hull_path: NodePath
 var hull: Node3D
@@ -1057,8 +1058,12 @@ func _place_weapon(type_id: String, pos: Vector3, normal: Vector3, is_mirror: bo
 			VisualBuilder.rebuild_visual(new_weapon)
 			_refit_module_collider(new_weapon)
 
-	# Auto-scale armor to fit facet
-	if category == "armor":
+	# Auto-scale armor to fit facet.
+	# The 4 PAINT_TYPE_IDS rows (armor_plating, slat_armor, spaced_composite,
+	# ablative_foam) live in the catalog as paint reference patches only - they
+	# are not placeable. The only real "category: armor" module is the energy
+	# barrier projector, which is filtered through this branch.
+	if category == "armor" and not ArmorPaintScript.PAINT_TYPE_IDS.has(type_id):
 		if hull:
 			var facet_meas = _measure_hull_facet(hull, new_weapon.position, local_normal, new_weapon.transform.basis)
 			var target_x = 1.0
