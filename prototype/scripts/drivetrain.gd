@@ -19,6 +19,16 @@ extends RefCounted
 ## FABLE_REVIEW.md 2.6, which fixed exactly this class of bug for those three
 ## stats); speed and load were the stats that pass missed.
 ##
+## TUNED FOR THE UNIT (Chris, 2026-08-16). The locomotor is treated as a
+## self-contained system whose carrying capacity is for what it carries
+## beyond the chassis baseline, not for the chassis itself. `weight` (the
+## design's total mass) is still reported, but `load_ratio` and
+## `power_top_speed` are off `carried_weight` (= weapons, generators,
+## sensors, harvesters, propulsion parts - everything that is NOT the hull
+## or its locomotion). The chassis/loco split is also exposed as
+## `carried_weight` and `loco_weight` so the Design Lab can show "this
+## drive is N kg, the chassis M kg" without re-summing module weights.
+##
 ## This is a static-only helper in the damage_resolver.gd mould - no state, no
 ## instance, nothing to add to a tree.
 
@@ -353,6 +363,16 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	# cost nothing in combat.
 	var armor_wt_mult: float = 1.0
 	var weight: float = ModuleCatalog.compute_hull_weight(hull_type, thickness, material, hull_scale, armor_wt_mult)
+	# The locomotor is treated as a self-contained system "tuned for the
+	# unit" (Chris, 2026-08-16): its carrying capacity is for what it
+	# carries beyond the chassis baseline, not for the chassis itself.
+	# Tracked separately here so `load_ratio` and `power_top_speed` can use
+	# `carried_weight` (= everything except hull + locomotion) while `weight`
+	# still reports the full design mass to the rest of the game.
+	#   `loco_weight`     - one or more locomotion children, summed
+	#   `carried_weight`  - weapons/generators/sensors/harvesters/propulsion parts
+	var loco_weight: float = 0.0
+	var carried_weight: float = 0.0
 
 	var thrust := BASE_THRUST
 	var capacity := 0.0
@@ -397,6 +417,12 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 			var footprint: float = child.scale.x * child.scale.z
 			if data.category == "locomotion":
 				has_locomotion = true
+				# Hull + locomotion is the "free baseline" the locomotor is
+				# tuned for; carried_weight only accumulates non-locomotion
+				# children. `loco_weight` is recorded so callers (e.g. the
+				# Design Lab) can show "this drive is N kg, the chassis M
+				# kg, you have K kg of payload" if they want to.
+				loco_weight += data.get_weight()
 				thrust += ModuleCatalog.get_thrust_coefficient(data.type_id) * footprint * factors["thrust"]
 				# tweaks passed through so a legged chassis is rated for the leg
 				# set actually fitted - an Excavator walker carries far more
@@ -405,6 +431,11 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 				var chassis_top: float = ModuleCatalog.get_base_top_speed(data.type_id, data.tweaks)
 				if slowest_top_speed <= 0.0 or chassis_top < slowest_top_speed:
 					slowest_top_speed = chassis_top
+			else:
+				# Propulsion parts, weapons, generators, sensors, harvesters,
+				# hull extensions - everything the locomotor is actually
+				# CARRIES. This is what the capacity is rated against.
+				carried_weight += data.get_weight()
 			# Mobility ADD-ONS (wing/thruster/propeller_prop/pusher_prop/
 			# paddle_wheel/ship_screw/propulsion parts) are attachable parts,
 			# not a primary locomotion choice, so they contribute from any
@@ -444,6 +475,13 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	if not has_locomotion:
 		return {
 			"has_locomotion": false, "weight": weight, "capacity": 0.0,
+			# Hull + any modules, then the chassis/loco split. Both are 0
+			# when there is no locomotion; carried_weight would equal the
+			# sum of every other child, which a player sees as the design
+			# mass minus an unplaced chassis - same number they'd get from
+			# `weight` minus nothing, but spelled out so consumers can read
+			# into it unconditionally.
+			"carried_weight": carried_weight, "loco_weight": loco_weight,
 			"thrust": thrust, "load_ratio": 0.0, "is_overloaded": false,
 			"overload_multiplier": 1.0, "chassis_top_speed": 0.0,
 			"underload_multiplier": 1.0, "is_underloaded": false,
@@ -453,10 +491,27 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 			"chassis_speed_mult": 1.0, "boost": {},
 		}
 
-	# What the engines alone would deliver against this much mass.
+	# What the engines alone would deliver against the carried load.
+	#
+	# Driven off `carried_weight`, not `weight`, because the locomotor is
+	# "tuned for the unit" (see header on `carried_weight` above). A heavy
+	# hull + light chassis + light weapons is exactly the load the
+	# locomotor is calibrated for, and the thrust/weight term says so -
+	# a unit on the same chassis always hits the same power_top_speed for
+	# the same weapons load, regardless of hull size. The chassis_top_speed
+	# cap is still per-type, so the locomotor's hardware ceiling is the
+	# binding constraint on a typical design.
+	#
+	# `carried_weight` of 0 (a bare hull) is a real input: the engines have
+	# no load to push, so power_top_speed runs to infinity, and `minf` with
+	# chassis_top_speed below picks the chassis cap as the design's
+	# top_speed. SPEED_FLOOR is a separate underload for a unit that
+	# overloads past the floor, not a guard here.
 	var power_top_speed := 0.0
-	if weight > 0.0:
-		power_top_speed = maxf(SPEED_FLOOR, (thrust / weight) * TW_GAIN)
+	if carried_weight > 0.0:
+		power_top_speed = maxf(SPEED_FLOOR, (thrust / carried_weight) * TW_GAIN)
+	else:
+		power_top_speed = INF
 
 	# Propulsion parts' capacity trade (overdrive_gearbox's tall gearing, for
 	# instance) lands on the raw chassis capacity, same place the leg-set and
@@ -480,7 +535,10 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 
 	var load_ratio := 0.0
 	if capacity > 0.0:
-		load_ratio = weight / capacity
+		# `carried_weight`, not `weight` - the locomotor's capacity is for
+		# what it carries beyond the chassis baseline. See `carried_weight`'s
+		# header for the design rationale.
+		load_ratio = carried_weight / capacity
 	var overload_multiplier := 1.0
 	if load_ratio > 1.0:
 		overload_multiplier = maxf(OVERLOAD_FLOOR, pow(1.0 / load_ratio, OVERLOAD_EXPONENT))
@@ -515,6 +573,14 @@ static func analyze(hull_node: Node3D, locomotion_type: String = "", locomotion_
 	return {
 		"has_locomotion": true,
 		"weight": weight,
+		# Chassis/loco split. `weight` is still the design's total mass for
+		# the rest of the game (fleet panel, harvester cargo math, etc.) -
+		# these two are published alongside it so the Lab can show "this
+		# drive is N kg, the chassis M kg" without re-summing module
+		# weights. The drivetrain's own speed and load math above is
+		# already off `carried_weight`.
+		"carried_weight": carried_weight,
+		"loco_weight": loco_weight,
 		"capacity": capacity,
 		"thrust": thrust,
 		"load_ratio": load_ratio,

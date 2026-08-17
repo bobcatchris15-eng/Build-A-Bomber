@@ -194,7 +194,17 @@ static func analyze(hull: Node3D) -> Dictionary:
 	# ranges, vision, has_weapons) are already set above, before the validity
 	# guard, so they are correct for an empty hull too. Weight in particular is
 	# taken from the drivetrain analysis rather than re-added here, so the
-	# displayed weight and the displayed load percentage can never disagree.
+	# displayed weight is the same number Drivetrain.analyze() reports.
+	#
+	# On weight vs the load ratio: since the "tuned for the unit" change
+	# (Chris, 2026-08-16), Drivetrain's `weight` is the design's total mass
+	# and `load_ratio` is off `carried_weight` (= total - hull - locomotion).
+	# The Lab shows both: the unit weighs X (the total) and is at Y% of its
+	# drive's load rating (carried/total). The two intentionally can
+	# disagree - a heavy hull on light treads shows "this weighs a lot" and
+	# "you're nowhere near capacity" at the same time.
+	out["carried_weight"] = float(dt.get("carried_weight", 0.0))
+	out["loco_weight"] = float(dt.get("loco_weight", 0.0))
 	#
 	# On move_speed vs top_speed: move_speed is COMBAT speed, after the overload
 	# penalty and faction passives. top_speed is the design's clean figure before

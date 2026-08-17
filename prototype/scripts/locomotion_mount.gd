@@ -134,8 +134,10 @@ static func rebuild(placer: Node3D, type_id: String, settings: Dictionary) -> Ar
 		"underside_y_bias": underside_y_bias,
 		"catalog_size": catalog_data.get("size", Vector3.ONE),
 	}
-	var node_scale: Vector3 = LocomotionLayoutScript.node_scale_for(type_id, hull_height_factor)
-	var scale_mult: Vector3 = LocomotionLayoutScript.scale_multiplier_for(type_id)
+	var node_scale: Vector3 = LocomotionLayoutScript.node_scale_for(type_id,
+		hull_height_factor, hull_footprint_factor)
+	var scale_mult: Vector3 = LocomotionLayoutScript.scale_multiplier_for(type_id,
+		hull_height_factor, hull_footprint_factor)
 
 	var spawned: Array = []
 	for station in LocomotionLayoutScript.stations(type_id, settings, layout_ctx):

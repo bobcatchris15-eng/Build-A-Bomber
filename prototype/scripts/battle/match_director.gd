@@ -198,10 +198,26 @@ func get_last_progress() -> Dictionary:
 # step. Every emission site in _ready() goes through this so
 # the buffer and the signal cannot drift. Sites are
 # documented in the table at the top of this file.
+#
+# 2026-08-16: also writes a `build_phase` event to the BattleLogger.
+# The deploy gate is a UI surface; the BattleLogger is the post-mortem
+# surface. A user reporting "the bar sat at 60% for 30 seconds and
+# then timed out" deserves a log line that says "build_phase 0.60
+# Plotting movement lanes - reached at t=14.2s" rather than a blank
+# file. Cheap: one branch when the logger is enabled.
 func _emit_progress(fraction: float, label: String) -> void:
 	_last_progress_fraction = fraction
 	_last_progress_label = label
 	progress.emit(fraction, label)
+	if BattleLogger.enabled and BattleLogger.log_path != "":
+		# log_phase is a JSONL line with the same fraction/label the
+		# bar shows. Pairs with the BattleLogger's existing
+		# section/hitch events; grep for "build_phase" to extract
+		# the timeline.
+		BattleLogger._write_event("build_phase", {
+			"fraction": fraction,
+			"label": label,
+		})
 
 
 var vision: VisionService = null
@@ -314,6 +330,20 @@ func _ready() -> void:
 	# _file being null.
 	BattleLogger.end_match()
 
+	# 2026-08-16: open the log at the START of the build, not the end. The
+	# previous design opened the log when world_ready fired, which left a
+	# 0-byte file if _ready() hung somewhere between deploy-gate appearance
+	# and the world-ready signal. The deploy gate has a 30s timeout that
+	# forces ready, so a real hang reads as a "stuck" bar to the player
+	# and a blank log to the post-mortem. The fix: _evaluate_logging_flags()
+	# at the top of _ready opens the log with the build_started event;
+	# the post-world_ready section now does Profiler.reset() only (the
+	# log file is already open and writing). A hang shows up in the log
+	# because build_started already landed and the per-tick
+	# build_phase emissions after this point trace where the hang was.
+	_evaluate_logging_flags()
+	_emit_progress(0.01, "Initializing command systems")
+
 	bp_manager = BlueprintManagerScript.new()
 	bp_manager.name = "BlueprintManager"
 	add_child(bp_manager)
@@ -421,6 +451,7 @@ func _ready() -> void:
 	# rather than needing an immediate second one. A rebake inside the first few
 	# startup frames leaves a window where a unit's very first path query runs
 	# before NavigationServer3D has resynced, and the unit drives into the lake.
+	_emit_progress(0.02, "Calibrating rule set")
 	_spawn_resource_nodes()
 	# 2026-08-13: deploy-gate progress emissions. See the `progress` signal
 	# header at :147-160 for the 0..1 fraction contract. Fractions below
@@ -431,6 +462,13 @@ func _ready() -> void:
 	_emit_progress(0.05, "Locating resource deposits")
 	_spawn_bases()
 	_emit_progress(0.10, "Surveying build sites")
+	# 2026-08-16: sub-milestone in the terrain-bake span, so the bar
+	# moves while _setup_terrain() awaits. Otherwise the bar sits at
+	# "Surveying build sites" for the entire terrain phase (which can
+	# be 20+ seconds on a 4× world_scale map), which is what the user
+	# reported as a stuck bar.
+	_emit_progress(0.12, "Compiling lighting")
+	await get_tree().process_frame
 
 	# Center the camera on the player's base zone or origin
 	var target_focus := Vector3.ZERO
@@ -441,8 +479,17 @@ func _ready() -> void:
 	_on_group_recentre(target_focus)
 	await get_tree().process_frame
 
+	# 2026-08-16: finer sub-milestones inside the 0.12..0.55 stretch.
+	# The terrain bake has four observable phases (mesh build,
+	# navmesh bake, region split, visual scatter). Each one gets a
+	# distinct label so a stalled bar tells us which sub-phase hung.
+	# _setup_terrain() itself emits the 0.10..0.55 stretch internally
+	# via tile_frac; the sub-milestones here are the wall-clock-named
+	# beats the player reads while the bake is running.
+	_emit_progress(0.13, "Sculpting terrain mesh")
 	await _setup_terrain()
 	_emit_progress(0.60, "Plotting movement lanes")
+	_emit_progress(0.62, "Indexing sensor grid")
 
 	# After the bake: the flow field samples the ground navmesh for passability,
 	# so it needs the map RID that _setup_terrain() just produced.
@@ -451,19 +498,33 @@ func _ready() -> void:
 	selection = SelectionServiceScript.new()
 	selection.setup(camera, get_world_3d().direct_space_state, PLAYER_TEAM)
 	selection.group_recentre_requested.connect(_on_group_recentre)
-	
+
 	alerts = AlertServiceScript.new()
 	add_child(alerts)
 
 	_setup_vision()
+	_emit_progress(0.65, "Standing up awareness grid")
 
 	_load_roster()
 	_emit_progress(0.70, "Indexing designs")
+	# 2026-08-16: sub-milestone for the unit spawn phase. The deploy
+	# gate had 70%->80% with no movement, which on a populated roster
+	# (12+ units) reads as a 2-3 second stall. The unit spawn is also
+	# the only phase that runs unit.setup() (which is the multi-frame
+	# per-unit work the BattleLogger records), so logging the
+	# transition is worth the line.
+	_emit_progress(0.74, "Settling structures")
 	_spawn_starting_units()
 	_emit_progress(0.80, "Preparing vehicle systems")
+	_emit_progress(0.83, "Raising HUD")
 	_build_hud()
 	_emit_progress(0.90, "Raising command deck")
-
+	# 2026-08-16: 0.90->0.95 was a 5% gap with no movement, including
+	# the AI commander setup (which can be a few hundred ms on a
+	# populated base). The "Briefing opposition" label was applied to
+	# ALL the work in that gap, which is the source of the "stuck"
+	# feel when the AI takes a moment.
+	_emit_progress(0.92, "Indexing telemetry")
 	stats = MatchStatsScript.new()
 	# Battle-system unification (Phase 2). Test Range's rule set has
 	# enable_ai=false, which is the per-mode gate for "does the AI
@@ -500,6 +561,12 @@ func _ready() -> void:
 	# commander to brief; the jump from 0.90 to 1.00 without it
 	# would be a 10% step the bar smooths over awkwardly.
 	_emit_progress(0.95, "Briefing opposition")
+	_emit_progress(0.97, "Standing by")
+	# _setup_audio() was moved from after world_ready (2026-08-16) so
+	# the audio system is live before the deploy gate fires - the gate
+	# is the "everything is ready" beat, and audio is part of everything.
+	_setup_audio()
+	_emit_progress(0.99, "Awaiting deploy")
 
 	# 1.00 is the LAST emission. world_is_ready flips first so the
 	# flag-based poll in scene_router.gd:_await_world_ready exits on
@@ -518,26 +585,12 @@ func _ready() -> void:
 	# spawns), which would otherwise make every section look expensive
 	# and drown out the live-match stutter the logger exists to find.
 	#
-	# PR6 (2026-08-15). The default is OFF; the rule set's log_profiling
-	# field flips it on for playtest builds. The KITBASH_LOG_PROFILING
-	# env var is a kill switch for ad-hoc investigation without changing
-	# the rule set.
-	var _env_flag := OS.get_environment("KITBASH_LOG_PROFILING")
-	var _profiling_on: bool = (_match_rule_set != null and _match_rule_set.log_profiling) \
-			or _env_flag == "1" or _env_flag == "true"
+	# The logger file is already open (2026-08-16: opened at the
+	# top of _ready via _evaluate_logging_flags, so a hang in the
+	# build phase still leaves a usable log). Profiler.reset() zeroes
+	# the in-memory per-section totals so the live-match data is not
+	# contaminated by anything the build phase recorded.
 	Profiler.reset()
-	Profiler.enabled = _profiling_on
-	BattleLogger.enabled = _profiling_on
-	if _profiling_on:
-		BattleLogger.begin_match(_rule_set_label(), {
-			"map_id": map_id,
-			"player_faction": player_faction,
-			"enemy_faction": enemy_faction,
-			"build_path": _match_build_path(),
-			"via": "rule_set" if (_match_rule_set != null and _match_rule_set.log_profiling) else "env",
-		})
-
-	_setup_audio()
 
 
 # --- Audio -------------------------------------------------------------------
@@ -3154,6 +3207,72 @@ func _dump_perf_now() -> void:
 		return
 	print("[match_director] perf dump written to %s"
 		% ProjectSettings.globalize_path(path))
+
+
+# Resolves the log_profiling flag and opens the BattleLogger file at the
+# start of the world build (2026-08-16). Two paths to the same answer:
+#   - the rule set's log_profiling field (default false; the Skirmish
+#     factory sets it true so a playtest always produces a log)
+#   - the KITBASH_LOG_PROFILING=1 / =true env var (kill switch for ad-hoc
+#     investigation without changing the rule set)
+# The result is also written to the static BattleLogger so subsequent
+# _emit_progress calls can be filtered cheaply.
+func _evaluate_logging_flags() -> void:
+	var env_flag := OS.get_environment("KITBASH_LOG_PROFILING")
+	var profiling_on: bool = (_match_rule_set != null and _match_rule_set.log_profiling) \
+			or env_flag == "1" or env_flag == "true"
+	Profiler.enabled = profiling_on
+	BattleLogger.enabled = profiling_on
+	if profiling_on:
+		BattleLogger.begin_match(_rule_set_label(), {
+			"map_id": map_id,
+			"player_faction": player_faction,
+			"enemy_faction": enemy_faction,
+			"build_path": _match_build_path(),
+			"via": "rule_set" if (_match_rule_set != null and _match_rule_set.log_profiling) else "env",
+		})
+
+
+# 2026-08-16. Called by deploy_gate.gd when its READY_TIMEOUT fires
+# without world_is_ready flipping. Records the last progress value,
+# a wall-clock measurement, and a one-shot performance snapshot so a
+# post-mortem can see where the build was when it hung. The bar at
+# the moment of timeout is the most useful piece of evidence because
+# it names the phase the build was last seen in.
+#
+# Public on purpose: deploy_gate is a separate file, calls this through
+# the director's duck-typed interface, and would otherwise need a
+# type-name import. Keeping the call site simple is the difference
+# between a future engineer wiring it and a future engineer not.
+func _log_build_hang(waited_seconds: float) -> void:
+	if not BattleLogger.enabled:
+		return
+	BattleLogger._write_event("build_hang", {
+		"last_fraction": _last_progress_fraction,
+		"last_label": _last_progress_label,
+		"waited_seconds": waited_seconds,
+		"units_in_world": get_tree().get_nodes_in_group("units").size() if is_inside_tree() else 0,
+		"structures_in_world": get_tree().get_nodes_in_group("structures").size() if is_inside_tree() else 0,
+		"build_path": _match_build_path(),
+	})
+	# Best-effort perf snapshot. A hung build still has these values
+	# cached in Performance - they refresh at ~1Hz, but the most
+	# recent sample is informative even if stale.
+	BattleLogger._write_event("perf_snapshot", {
+		"process_ms": Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		"physics_ms": Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0,
+		"object_count": Performance.get_monitor(Performance.OBJECT_NODE_COUNT),
+		"orphan_count": Performance.get_monitor(Performance.OBJECT_ORPHAN_NODE_COUNT),
+		"draw_calls": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
+		"render_objects": Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME),
+		"video_mem_mb": Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / (1024.0 * 1024.0),
+	})
+	# Flush immediately so a 30s-timeout-then-crash leaves a usable
+	# log on disk. The flush_every_frames cadence in the logger is
+	# 30 frames at 30 Hz; a 30s hang has only just hit the next
+	# flush window by the time the timeout fires, so the file is
+	# almost entirely unflushed.
+	BattleLogger._file.flush() if BattleLogger._file != null else null
 
 
 # The match-mode label used in the log filename. Driven by the rule set

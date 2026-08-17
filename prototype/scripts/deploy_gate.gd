@@ -369,7 +369,20 @@ func _poll_world_is_ready() -> void:
 			mark_ready()
 			return
 		if waited >= READY_TIMEOUT:
+			# 2026-08-16: on timeout, capture what we know before forcing
+			# ready. The deploy gate is the player's last view of the
+			# build; the BattleLogger is the post-mortem's only view.
+			# Without this dump, a hung build leaves a stuck bar AND a
+			# blank log, which is the failure mode the user reported
+			# (long sit-and-wait with no movement, 0-byte log file).
 			push_warning("DeployGate: world_is_ready timed out after %.1fs, forcing ready" % READY_TIMEOUT)
+			if _director.has_method("get_last_progress"):
+				var last: Dictionary = _director.get_last_progress()
+				print("[DeployGate] hang detected at fraction=%.2f label=%s" % [
+					float(last.get("fraction", 0.0)),
+					str(last.get("label", ""))])
+			if _director.has_method("_log_build_hang"):
+				_director._log_build_hang(waited)
 			mark_ready()
 			return
 		await get_tree().process_frame

@@ -53,9 +53,29 @@ enum Pattern {
 }
 
 ## How a placed instance's node.scale is decided.
+##
+## HULL_RELATIVE is the default. The locomotor is treated as a self-contained
+## system "tuned for the unit" (Chris, 2026-08-16): when a player drops a hull
+## into the Lab, the running gear grows or shrinks to fit it, so a 2x tall hull
+## on wheels gets 2x diameter wheels and a 2x wide hull on treads gets a 2x
+## long belt. The visual is the only thing that changes - the catalog's own
+## part weight scales with the hull, and the chassis/loco mass is the
+## "free baseline" excluded from the locomotor's load and speed math (see
+## Drivetrain.analyze(), `carried_weight`).
+##
+## FIXED opts out. `legs` opts out because a taller hull on legs gives
+## proportionally taller legs, which raises the body, which is the
+## giant-spider-legs problem (Chris, 2026-08-02). `ornithopter_wing` opts out
+## with a deliberate `node_scale = (2, 1, 2)` because "impractically long
+## wings" is the archetype and a hull-relative scale would compound it.
+##
+## HULL_HEIGHT is the older "Y only" mode. None of the shipped types use it
+## (HULL_RELATIVE replaces it), but the enum is kept because external callers
+## could still reference it by name.
 enum ScaleMode {
-	FIXED,        ## Use the layout's `node_scale` verbatim.
-	HULL_HEIGHT,  ## Vector3(1, hull_height_factor, 1) - the part tracks ground clearance.
+	FIXED,          ## Use the layout's `node_scale` verbatim, no hull-relative scale.
+	HULL_HEIGHT,    ## Vector3(1, hull_height_factor, 1) - Y only, kept for compat.
+	HULL_RELATIVE,  ## Vector3(hull_footprint_factor, hull_height_factor, hull_footprint_factor).
 }
 
 ## Which spelling of the reach vector this type's mesh builder expects. The
@@ -96,6 +116,9 @@ const LAYOUTS := {
 		"geo_aliases": {"wheel_size": ["size"]},
 		"normal": Vector3.UP,
 		"mirror": true, "override_pos": true,
+		# Default HULL_RELATIVE - a 2x bigger hull gets 2x bigger wheels. The
+		# wheel_size tweak is then a DELTA on top of the hull-relative baseline.
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"tracked_treads": {
 		"pattern": Pattern.SIDE_PAIRS, "per_side": 1,
@@ -106,6 +129,7 @@ const LAYOUTS := {
 		"hull_length_geo_key": "target_length",
 		"normal_is_side": true,
 		"mirror": true,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"heavy_quad_tracks": {
 		"pattern": Pattern.SIDE_PAIRS, "per_side": 2,
@@ -113,6 +137,7 @@ const LAYOUTS := {
 		"geo_aliases": {"tread_width": ["width", "size"]},
 		"normal_is_side": true,
 		"mirror": true,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"legs": {
 		"pattern": Pattern.SIDE_PAIRS,
@@ -138,11 +163,13 @@ const LAYOUTS := {
 		# driveshaft reaching up into empty air.
 		"normal_is_side": true,
 		"mirror": true, "override_pos": true,
-		# FIXED, not HULL_HEIGHT. Scaling the whole leg by the hull's height
-		# was the other half of the giant-spider-legs problem (Chris,
-		# 2026-08-02): a taller body got taller legs, which raised the body
-		# further. Ride height belongs to the running gear - see the DROP
-		# comment in visual_builder.gd's _build_legs().
+		# FIXED, not HULL_RELATIVE. Scaling the leg by hull_height_factor is
+		# the giant-spider-legs problem (Chris, 2026-08-02): a taller body
+		# gets taller legs, which raises the body further, in a feedback loop
+		# that left every tall hull on legs floating half a hull above the
+		# ground. Ride height belongs to the running gear - see the DROP
+		# comment in visual_builder.gd's _build_legs() - and the leg_length
+		# tweak is the only way to scale a leg.
 		"scale_mode": ScaleMode.FIXED,
 	},
 	"helicopter_rotors": {
@@ -152,6 +179,7 @@ const LAYOUTS := {
 		"geo_keys": {"blade_count": 4.0, "blade_length": 1.0, "duct": false},
 		"geo_aliases": {"blade_length": ["size"]},
 		"normal": Vector3.UP, "reach_keys": ReachKeys.SIDE_XY,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"ornithopter_wing": {
 		"pattern": Pattern.SIDE_PAIRS, "per_side": 1,
@@ -163,6 +191,12 @@ const LAYOUTS := {
 		"hull_length_geo_key": "target_length",
 		"stance_geo_key": "roof_reach", "stance_frac": 0.5,
 		"mirror": true, "node_scale": Vector3(2.0, 1.0, 2.0),
+		# FIXED, not HULL_RELATIVE. "Impractically long wings" is the
+		# archetype (Chris, 2026-08-02), and the 2x node_scale is sized to
+		# land just inside the 5.5x width clamp at hull x=1.0. A
+		# hull-relative scale would compound the 2x with the hull's own
+		# footprint and overshoot the clamp on any non-reference hull.
+		"scale_mode": ScaleMode.FIXED,
 	},
 	"hover_engine": {
 		"pattern": Pattern.RING_XZ,
@@ -170,6 +204,7 @@ const LAYOUTS := {
 		"geo_keys": {"emv_level": 1.0},
 		"geo_aliases": {"emv_level": ["size"]},
 		"normal": Vector3.DOWN, "reach_keys": ReachKeys.XYZ,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"fixed_wing_engine": {
 		"pattern": Pattern.RING_XY,
@@ -177,6 +212,7 @@ const LAYOUTS := {
 		"count_min": 2, "count_max": 6,
 		"geo_keys": {"turbine_compression": 1.0, "afterburner": false},
 		"normal": Vector3.RIGHT, "reach_keys": ReachKeys.XYZ,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"buoyant_envelope": {
 		# SIDE_PODS, not STERN_ROW. An airship's cruise engines hang off
@@ -187,6 +223,7 @@ const LAYOUTS := {
 		"count_min": 1, "count_max": 6,
 		"geo_keys": {"blade_count": 3.0, "blade_pitch": 1.0},
 		"normal_is_side": true, "mirror": true,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	# --- Expansion types (LOCOMOTION_EXPANSION_PLAN.md 4) ---
 	# Every one of these is a data declaration and nothing else - no new branch
@@ -199,6 +236,7 @@ const LAYOUTS := {
 		"hull_length_geo_key": "target_length",
 		"normal_is_side": true,
 		"mirror": true,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"rocker_bogie": {
 		"pattern": Pattern.SIDE_PAIRS, "per_side": 1,
@@ -206,6 +244,7 @@ const LAYOUTS := {
 		"hull_length_geo_key": "target_length",
 		"normal_is_side": true,
 		"mirror": true,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"pontoon_wheels": {
 		"pattern": Pattern.SIDE_PAIRS,
@@ -214,6 +253,7 @@ const LAYOUTS := {
 		"geo_keys": {"pontoon_size": 1.0, "paddle_vanes": true},
 		"normal": Vector3.UP,
 		"mirror": true, "override_pos": true,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"air_cushion_skirt": {
 		# FOOTPRINT, not RING_XZ. A hovercraft's bag is ONE continuous loop
@@ -225,12 +265,14 @@ const LAYOUTS := {
 		"count_key": "lift_fan_count", "count_default": 3, "count_min": 2, "count_max": 6,
 		"geo_keys": {"skirt_diameter": 1.0, "plenum_pressure": 1.0},
 		"normal": Vector3.DOWN, "reach_keys": ReachKeys.XYZ,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"anti_grav_plate": {
 		"pattern": Pattern.RING_XZ,
 		"count_key": "plate_count", "count_default": 4, "count_min": 3, "count_max": 8,
 		"geo_keys": {"field_strength": 1.0, "stabilizer_ring": true},
 		"normal": Vector3.DOWN, "reach_keys": ReachKeys.XYZ,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 	"screw_drive": {
 		"pattern": Pattern.CORNER_SPAN,
@@ -243,6 +285,7 @@ const LAYOUTS := {
 		# away from the hull instead of into it (Chris). Every other type that
 		# uses that mount already sets this.
 		"mirror": true,
+		"scale_mode": ScaleMode.HULL_RELATIVE,
 	},
 }
 
@@ -420,21 +463,44 @@ static func max_width_factor(type_id: String) -> float:
 static func has_layout(type_id: String) -> bool:
 	return LAYOUTS.has(type_id)
 
-static func node_scale_for(type_id: String, hull_height_factor: float) -> Vector3:
+## The node scale the placed instance will be given.
+##
+## HULL_RELATIVE is the default, so the visual grows with the hull it lands on.
+## FIXED types (legs, ornithopter_wing) use their own `node_scale` verbatim;
+## `legs` because scaling it raised the body (giant-spider-legs) and
+## `ornithopter_wing` because its 2x is the design intent, not a hull-relative
+## auto-scale.
+static func node_scale_for(type_id: String, hull_height_factor: float,
+		hull_footprint_factor: float = 1.0) -> Vector3:
 	var spec: Dictionary = LAYOUTS.get(type_id, {})
-	if int(spec.get("scale_mode", ScaleMode.FIXED)) == ScaleMode.HULL_HEIGHT:
-		return Vector3(1.0, hull_height_factor, 1.0)
-	return spec.get("node_scale", Vector3.ONE)
+	match int(spec.get("scale_mode", ScaleMode.FIXED)):
+		ScaleMode.HULL_RELATIVE:
+			return Vector3(hull_footprint_factor, hull_height_factor, hull_footprint_factor)
+		ScaleMode.HULL_HEIGHT:
+			return Vector3(1.0, hull_height_factor, 1.0)
+		_:
+			return spec.get("node_scale", Vector3.ONE)
 
 ## scale_multiplier exists so module_data's weight/cost read the same factor the
-## geometry got. A hull-relative factor is NOT a design choice the player made,
-## so it stays out; a deliberate whole-assembly enlargement (ornithopter_wing's
-## 2x) is one, so it goes in. That split used to be a per-branch judgement call.
-static func scale_multiplier_for(type_id: String) -> Vector3:
+## geometry got. A HULL_RELATIVE factor IS folded in here, because the
+## auto-scaled part is a real physical object of the auto-scaled size - a 2x
+## bigger wheel weighs more than a 1x wheel, whether the size was a player
+## choice or a consequence of the hull. The reverse is also true: a 0.5x
+## smaller wheel weighs less. Folding it in means the catalog weight of the
+## locomotor tracks its actual rendered size, and the chassis/loco mass scales
+## with the hull - which is what Drivetrain.analyze() then subtracts to get
+## `carried_weight`. FIXED types (legs, ornithopter) get their `node_scale`
+## verbatim - same as before.
+static func scale_multiplier_for(type_id: String, hull_height_factor: float = 1.0,
+		hull_footprint_factor: float = 1.0) -> Vector3:
 	var spec: Dictionary = LAYOUTS.get(type_id, {})
-	if int(spec.get("scale_mode", ScaleMode.FIXED)) == ScaleMode.HULL_HEIGHT:
-		return Vector3.ONE
-	return spec.get("node_scale", Vector3.ONE)
+	match int(spec.get("scale_mode", ScaleMode.FIXED)):
+		ScaleMode.HULL_RELATIVE:
+			return Vector3(hull_footprint_factor, hull_height_factor, hull_footprint_factor)
+		ScaleMode.HULL_HEIGHT:
+			return Vector3.ONE
+		_:
+			return spec.get("node_scale", Vector3.ONE)
 
 static func _resolve_count(spec: Dictionary, settings: Dictionary) -> int:
 	if not spec.has("count_key"):
