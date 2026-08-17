@@ -457,18 +457,27 @@ func _build_rig() -> void:
 	_rig.name = "Rig"
 	_viewport.add_child(_rig)
 
-	# The ENVIRONMENT. AgX tonemapping - the unification StampedButton
-	# and MeshIcon both call out (Part 3.2 of the plan). The previous
-	# per-button setup used ACES; with the chrome now reading as part
-	# of the same lighting pipeline as the in-match world (b2340f4
-	# landed AgX globally), the buttons have to match. Transparent
-	# background so the mesh composites over the 2D backdrop rather
-	# than a coloured quad.
+	# The ENVIRONMENT. AgX was the intent - b2340f4 landed it across the
+	# three in-match scenes (Battle / HullBuilder / MainLab) so the chrome
+	# would read as part of the same lighting pipeline as the world - but
+	# `Environment.TONE_MAPPER_AGX` was added in a later Godot minor than
+	# 4.7.1 ships with; the enum on this engine only goes up to
+	# TONE_MAPPER_ACES. ACES is the next-closest film-like curve and is
+	# what the other UI environments already use
+	# (main_menu.gd:285, blueprint_library_screen.gd:114, mesh_icon.gd:175),
+	# so the chrome is at least internally consistent until the engine
+	# bump. The .tscn files in b2340f4 set `tonemap_mode = 4` directly as
+	# an integer, which does not parse-fail and so was not caught - that
+	# path will silently clamp to LINEAR at runtime and is a separate
+	# visual regression to revisit when the engine is upgraded.
+	#
+	# Transparent background so the mesh composites over the 2D backdrop
+	# rather than a coloured quad.
 	var env_node := WorldEnvironment.new()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_CLEAR_COLOR
 	env.background_color = Color(0, 0, 0, 0)
-	env.tonemap_mode = Environment.TONE_MAPPER_AGX
+	env.tonemap_mode = Environment.TONE_MAPPER_ACES
 	env.tonemap_exposure = 1.0
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.55, 0.55, 0.58)
