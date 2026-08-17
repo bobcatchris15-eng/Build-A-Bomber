@@ -196,9 +196,34 @@ func setup_from_blueprint(blueprint: Dictionary, structure_team: int, bp_manager
 const DOCK_PAD_SIZE := Vector3(7.0, 0.08, 9.0)
 const DOCK_PAD_KERB := 0.6
 
+# PR8 (2026-08-16). The dock pad materials used to be a per-instance
+# StandardMaterial3D.new() per kerb, per pad, per bay. With a refinery
+# running 2 bays, that's 4 unique materials per refinery; with 50
+# structures, that's 200+ unique materials, each a fresh state
+# change for the renderer. The fix: build the kerb and pad
+# materials ONCE per process (static, so they survive scene reloads
+# the same way the building material cache does) and share them
+# across every structure. Visual is identical; draw-call cost
+# collapses to 2 draw calls (one per material) for every dock pad
+# on the field.
+static var _kerb_material: StandardMaterial3D = null
+static var _pad_material: StandardMaterial3D = null
+
 func _add_dock_pads() -> void:
 	if _bay_offsets.is_empty():
 		return
+	# Lazy-init the shared materials. Doing it lazily rather than at
+	# class load avoids paying for the materials when no structure
+	# ever builds (e.g. Test Range, which uses defenses not catalog
+	# buildings with bays).
+	if _kerb_material == null:
+		_kerb_material = StandardMaterial3D.new()
+		_kerb_material.albedo_color = Color(0.62, 0.60, 0.54)
+		_kerb_material.roughness = 0.95
+	if _pad_material == null:
+		_pad_material = StandardMaterial3D.new()
+		_pad_material.albedo_color = Color(0.17, 0.17, 0.19)
+		_pad_material.roughness = 0.98
 	for offset in _bay_offsets:
 		var bay: Vector3 = offset
 		# The pad's long axis points at the building, so it reads as a bay you
@@ -212,10 +237,7 @@ func _add_dock_pads() -> void:
 		var kerb_mesh := BoxMesh.new()
 		kerb_mesh.size = pad_size + Vector3(DOCK_PAD_KERB * 2.0, -0.02, DOCK_PAD_KERB * 2.0)
 		kerb.mesh = kerb_mesh
-		var kerb_mat := StandardMaterial3D.new()
-		kerb_mat.albedo_color = Color(0.62, 0.60, 0.54)
-		kerb_mat.roughness = 0.95
-		kerb.material_override = kerb_mat
+		kerb.material_override = _kerb_material
 		kerb.position = Vector3(bay.x, 0.03, bay.z)
 		add_child(kerb)
 
@@ -223,10 +245,7 @@ func _add_dock_pads() -> void:
 		var pad_mesh := BoxMesh.new()
 		pad_mesh.size = pad_size
 		pad.mesh = pad_mesh
-		var pad_mat := StandardMaterial3D.new()
-		pad_mat.albedo_color = Color(0.17, 0.17, 0.19)
-		pad_mat.roughness = 0.98
-		pad.material_override = pad_mat
+		pad.material_override = _pad_material
 		pad.position = Vector3(bay.x, 0.07, bay.z)
 		add_child(pad)
 

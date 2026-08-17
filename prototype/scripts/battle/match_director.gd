@@ -44,6 +44,7 @@ const PlacementServiceScript = preload("res://scripts/battle/buildings/placement
 const MatchStatsScript = preload("res://scripts/battle/match_stats.gd")
 const AfterActionReportScript = preload("res://scripts/after_action_report.gd")
 const PerfHUDScript = preload("res://scripts/perf_hud.gd")
+const PerfToastScript = preload("res://scripts/battle/perf_toast.gd")
 const AdminMenuScript = preload("res://scripts/battle/hud/admin_menu.gd")
 const DebugOverlayScript = preload("res://scripts/battle/hud/debug_overlay.gd")
 const BattleFinishScript = preload("res://scripts/battle/battle_finish.gd")
@@ -138,6 +139,7 @@ var production: ProductionService = null
 var production_hud: ProductionHUD = null
 var stats = null
 var _perf_hud: CanvasLayer = null
+var _perf_toast: CanvasLayer = null
 var admin_menu: Control = null
 var debug_overlay: Control = null
 
@@ -847,6 +849,14 @@ func _exit_tree() -> void:
 		# pay the per-section start/stop cost. Static vars are process-
 		# global, and the next _ready() will reset() and re-enable.
 		Profiler.enabled = false
+	# Drop the toast CanvasLayer. queue_free() in _exit_tree is safe
+	# (the node is already being removed); not freeing it leaves a
+	# dangling reference on _perf_toast for the next match, and the
+	# next _show_perf_toast() would is_instance_valid() it as true
+	# and try to add a fresh child to a freed node.
+	if is_instance_valid(_perf_toast):
+		_perf_toast.queue_free()
+		_perf_toast = null
 
 
 # --- Duck-typed contracts the unit runtime looks for -------------------------
@@ -1523,8 +1533,22 @@ var _nav_lazy_pending: bool = false
 var _nav_lazy_timer: float = 0.0
 
 
-# `urgent` carves immediately at end of frame; the default defers and coalesces.
+# `urgent` carves immediately; the default defers and coalesces.
 # Callers that make ground IMPASSABLE must pass true.
+#
+# PR8 (2026-08-16). The urgent case used to schedule the rebake via
+# call_deferred, which left a 100-200ms window where the new
+# building's footprint was in the structures group but NOT in
+# the live navmesh. A unit with a path that crossed the new
+# building would head for the wall, hit the collider, and stop -
+# which the player read as 'the unit drove into the building'.
+# The fix: for the urgent case, do a SYNCHRONOUS, AFFECTED-TILES-
+# ONLY rebake inline. Each Recast bake runs on a worker
+# internally, so the main-thread block is on the result, not on
+# the work. With 1-4 affected tiles out of 16 (lake_crossing
+# default), the block is ~50-200ms. The player sees one short
+# hitch when they place a building; in exchange, the unit paths
+# around the new obstacle immediately.
 func _mark_navmesh_dirty(urgent: bool = true) -> void:
 	if not urgent:
 		_nav_lazy_pending = true
@@ -1532,10 +1556,59 @@ func _mark_navmesh_dirty(urgent: bool = true) -> void:
 		return
 	if _nav_rebake_pending:
 		return
+	if _ground_nav_regions.is_empty():
+		# The boot-time navmesh hasn't been built yet. Fall through
+		# to the async path; _setup_terrain() will fill the regions
+		# from scratch.
+		_nav_rebake_pending = true
+		_nav_lazy_pending = false
+		_rebake_navmesh.call_deferred()
+		return
+	# Find the new structure(s) whose footprint triggered this
+	# rebake. The non-urgent case (death) does not need this -
+	# the carving is "open this ground", which the existing
+	# flow already handles asynchronously. The urgent case is
+	# always a single new placement, so the affected tile set
+	# is "all tiles overlapping the most recently placed live
+	# structure that wasn't live when the last rebake ran".
+	# Simpler: take the most recent structure (sorted by index
+	# in the structures group) as the culprit. With 50+ structures,
+	# the "most recent" heuristic is correct because the player
+	# is the only entity triggering urgent placement.
+	var new_holes := _building_holes()
+	if new_holes.is_empty():
+		# Defensive: nothing to carve. The lazy path can handle it
+		# later if it ever becomes a real case.
+		_nav_lazy_pending = true
+		return
+	var affected: Array = []
+	for hole in new_holes:
+		var tiles := TerrainBuilder.tiles_overlapping_hole(current_map, hole)
+		for t in tiles:
+			if t not in affected:
+				affected.append(t)
 	_nav_rebake_pending = true
-	# An urgent bake satisfies any lazy one already waiting.
 	_nav_lazy_pending = false
-	_rebake_navmesh.call_deferred()
+	# Sync rebake of the affected tiles. This is the urgent path:
+	# the player just placed a building and the unit paths need
+	# to update before the next physics tick. The cost is on
+	# the main thread (Recast dispatches the actual bake to a
+	# worker internally, so the main thread blocks on the result,
+	# not on the work).
+	TerrainBuilder.rebake_ground_amphibious_tiles_sync(
+		current_map, new_holes, _ground_nav_regions, _amphibious_nav_regions,
+		_nav_tile_rects, affected)
+	_nav_rebake_pending = false
+	# Flow fields are sampled against the old passability, and
+	# every live agent is following a path through what may now
+	# be a wall. Invalidate both immediately. This is the
+	# second half of the urgent-path fix: even if a unit's
+	# existing path is now invalid, the new navmesh is in
+	# place so the next path request goes around.
+	flow_fields.invalidate()
+	for u in get_tree().get_nodes_in_group("units"):
+		if is_instance_valid(u) and not u.is_dead and u.has_method("request_repath"):
+			u.request_repath()
 
 
 # Runs the deferred bake once the map has been quiet for NAV_LAZY_REBAKE_DELAY.
@@ -3200,13 +3273,32 @@ func _toggle_perf_hud() -> void:
 func _dump_perf_now() -> void:
 	if not BattleLogger.enabled:
 		print("[match_director] BattleLogger is disabled - nothing to dump")
+		_show_perf_toast("Profiler log is disabled (set MatchRuleSet.log_profiling or KITBASH_LOG_PROFILING=1)")
 		return
 	var path := BattleLogger.dump_now("manual")
 	if path.is_empty():
 		print("[match_director] dump failed (no live match)")
+		_show_perf_toast("Perf dump failed: no live match")
 		return
 	print("[match_director] perf dump written to %s"
 		% ProjectSettings.globalize_path(path))
+	# On-screen feedback. print() in a windowed build is invisible; the
+	# whole point of F4 is to be told THAT the dump happened and WHERE
+	# to find it. The basename is enough to identify the file without
+	# spamming the user with a full path on every press.
+	_show_perf_toast("Perf dump written: %s" % path.get_file())
+
+
+# Lazily add the toast CanvasLayer on first use. Mirrors _toggle_perf_hud's
+# pattern; kept on a single instance for the duration of the match so a
+# burst of F4s during a hitch investigation reuses the same panel and the
+# timer reset above.
+func _show_perf_toast(text: String) -> void:
+	if not is_instance_valid(_perf_toast):
+		_perf_toast = PerfToastScript.new()
+		_perf_toast.name = "PerfToast"
+		add_child(_perf_toast)
+	_perf_toast.show_message(text)
 
 
 # Resolves the log_profiling flag and opens the BattleLogger file at the

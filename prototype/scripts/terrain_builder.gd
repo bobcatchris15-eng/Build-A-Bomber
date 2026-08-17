@@ -1169,6 +1169,66 @@ static func rebake_ground_amphibious_tiles_async(map_def: Dictionary, extra_hole
 		_bake_region_async(amphibious_regions[i], amphibious_buckets[i], tile_cell_size, remaining, on_ready)
 
 
+# PR8 (2026-08-16). Sync twin of rebake_ground_amphibious_tiles_async().
+# Used by the urgent navmesh-dirty path so a freshly placed building
+# has its carve applied to the live navmesh RID IMMEDIATELY rather
+# than 100-200ms later when the async bake finishes. The previous
+# design was a unit heading for a path that routed through the new
+# building for that 100-200ms window: the unit's collider would
+# stop it at the wall, which read to the player as 'the unit drove
+# into the building'. The fix: for the urgent case, block the
+# main thread until the bake completes. Each region's bake runs
+# on a Recast worker (NavigationServer3D.bake_from_source_geometry_data
+# dispatches internally), so the block is on the result, not on
+# the work; the bakes themselves are parallel and finish in
+# roughly the time of one bake.
+#
+# `affected_tile_indices` lets the caller scope the rebake to
+# only the tiles the new building actually touches. With a small
+# structure (3x3 to 8x8 m footprint) on a 4-tile-per-side map
+# (the lake_crossing default), that's 1-4 tiles out of 16 - so
+# the bake time is 1/16th of a full rebake. The cost is paid
+# once per structure placement; a player spamming the build
+# menu sees N frames of N/60 sec hitch, which is acceptable for
+# the correctness it buys.
+static func rebake_ground_amphibious_tiles_sync(map_def: Dictionary, extra_holes: Array,
+		ground_regions: Array, amphibious_regions: Array, tile_rects: Array,
+		affected_tile_indices: Array = []) -> void:
+	var tile_cell_size = _nav_tile_cell_size(map_def)
+	var ground_verts = _build_ground_faces(map_def, extra_holes)
+	var amphibious_verts = _build_amphibious_faces(map_def, extra_holes)
+	var ground_buckets = _bucket_verts_by_tile(ground_verts, map_def, tile_rects)
+	var amphibious_buckets = _bucket_verts_by_tile(amphibious_verts, map_def, tile_rects)
+	# Empty list means "rebuild all tiles" - the path a full-rebake
+	# caller would take, used for the boot path or for the "I
+	# destroyed a building, refresh everything" case.
+	var indices: Array = affected_tile_indices
+	if indices.is_empty():
+		indices = []
+		for i in range(tile_rects.size()):
+			indices.append(i)
+	for i in indices:
+		var g_nav := _bake_nav_mesh(ground_buckets[i], tile_cell_size)
+		NavigationServer3D.region_set_navigation_mesh(ground_regions[i], g_nav)
+		var a_nav := _bake_nav_mesh(amphibious_buckets[i], tile_cell_size)
+		NavigationServer3D.region_set_navigation_mesh(amphibious_regions[i], a_nav)
+
+
+# Returns the indices of navmesh tiles that overlap `hole` (a
+# {_building_holes()-shaped} rect). Used by the urgent placement
+# path to scope a sync rebake to only the tiles the new building
+# actually carves, so the 100-200ms block scales with the building
+# size, not the whole map.
+static func tiles_overlapping_hole(map_def: Dictionary, hole: Dictionary) -> Array:
+	var tile_rects = _nav_tile_rects(map_def)
+	var out: Array = []
+	for i in range(tile_rects.size()):
+		var t = tile_rects[i]
+		if hole.x1 > t.x0 and hole.x0 < t.x1 and hole.z1 > t.z0 and hole.z0 < t.z1:
+			out.append(i)
+	return out
+
+
 # Ground+amphibious halves of build_navmeshes()/build_navmeshes_deferred(),
 # tiled - see NAV_TILE_SIZE's own header comment for why. `ground_map` and
 # `amphibious_map` must already exist (map_create() + map_set_cell_size(...,
