@@ -14,6 +14,8 @@ const FILES := [
 	"res://scripts/battle/buildings/building_mesh.gd",
 	"res://scripts/ambient_scatter.gd",
 	"res://scripts/battle/units/unit.gd",
+	"res://scripts/battle/ai/commander.gd",
+	"res://scripts/match_rule_set.gd",
 ]
 
 func _init():
