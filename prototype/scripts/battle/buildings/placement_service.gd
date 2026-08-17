@@ -57,7 +57,8 @@ const NOT_ADJACENT := "TOO FAR FROM YOUR BASE"
 #
 # Returns {"valid": bool, "reason": String}.
 static func validity(world, team: int, at: Vector3, kind: String,
-		blueprint: Dictionary = {}) -> Dictionary:
+		blueprint: Dictionary = {}, structures: Array = [],
+		resource_nodes: Array = []) -> Dictionary:
 	var footprint := footprint_for(kind, blueprint)
 	var half: float = maxf(footprint.x, footprint.z) * 0.5
 
@@ -68,33 +69,29 @@ static func validity(world, team: int, at: Vector3, kind: String,
 	if TerrainBuilder.is_water_at(world.current_map, at.x, at.z):
 		return _no(ON_WATER)
 
-	# Explicitly typed, not inferred: `world` is duck-typed, so `:=` has nothing to
-	# infer from and the file fails to parse.
-	var tree: SceneTree = world.get_tree()
-
-	for n in tree.get_nodes_in_group("resource_nodes"):
+	# AMBIENT SCATTER DOES NOT VETO A BUILD SITE.
+	#
+	# The rule above is about DEPOSITS: a player should not be able to wall
+	# in an ore patch, and a building on one strands the harvesters routed
+	# to it. Both of those are arguments about the ~36 nodes belonging to
+	# the four harvestable fields.
+	#
+	# The ambient forest/ore pass scatters up to 1000 trees + 800 ore at
+	# roughly one per 82 m2 of map, with a floor of 8 m between them - and
+	# every one of those joined this same group. With NODE_EXCLUSION 6.0
+	# plus a building's own half-footprint, each scattered tree vetoes a
+	# disc about as wide as the gap between trees, so the exclusion discs
+	# tile the entire playable area and there is essentially nowhere legal
+	# left to build. That is what these three placement suites were
+	# reporting ("a clear spot beside the HQ was rejected: ON A RESOURCE
+	# NODE", "the control site was not clear to begin with").
+	#
+	# A scattered tree is scenery you clear to build, not a deposit you
+	# must not bury - so it is skipped here. It stays fully harvestable;
+	# only its veto over construction goes away.
+	for n in resource_nodes:
 		if not is_instance_valid(n):
 			continue
-		# AMBIENT SCATTER DOES NOT VETO A BUILD SITE.
-		#
-		# The rule above is about DEPOSITS: a player should not be able to wall
-		# in an ore patch, and a building on one strands the harvesters routed
-		# to it. Both of those are arguments about the ~36 nodes belonging to
-		# the four harvestable fields.
-		#
-		# The ambient forest/ore pass scatters up to 1000 trees + 800 ore at
-		# roughly one per 82 m2 of map, with a floor of 8 m between them - and
-		# every one of those joined this same group. With NODE_EXCLUSION 6.0
-		# plus a building's own half-footprint, each scattered tree vetoes a
-		# disc about as wide as the gap between trees, so the exclusion discs
-		# tile the entire playable area and there is essentially nowhere legal
-		# left to build. That is what these three placement suites were
-		# reporting ("a clear spot beside the HQ was rejected: ON A RESOURCE
-		# NODE", "the control site was not clear to begin with").
-		#
-		# A scattered tree is scenery you clear to build, not a deposit you
-		# must not bury - so it is skipped here. It stays fully harvestable;
-		# only its veto over construction goes away.
 		if n.get("is_ambient"):
 			continue
 		if at.distance_to(n.global_position) < half + NODE_EXCLUSION:
@@ -106,7 +103,7 @@ static func validity(world, team: int, at: Vector3, kind: String,
 	var near_base := not requires_area(kind, blueprint)
 	var reach := adjacency_for(kind, blueprint)
 
-	for s in tree.get_nodes_in_group("structures"):
+	for s in structures:
 		if not is_instance_valid(s) or s.is_dead or not s.is_inside_tree():
 			continue
 		var other_half: float = maxf(s.footprint.x, s.footprint.z) * 0.5
@@ -176,12 +173,23 @@ const SAMPLES := 16
 
 static func find_site(world, team: int, home: Vector3, kind: String,
 		blueprint: Dictionary = {}) -> Vector3:
+	# PR8 perf (2026-08-16). Hoist the structures / resource_nodes lookups
+	# OUT of the per-candidate loop. The 12 rings x 16 samples grid is
+	# 192 candidates per build attempt, and each used to call
+	# get_nodes_in_group() and walk the full structure / resource_nodes
+	# lists. With 30-50 structures and 1000+ resource_nodes, that is
+	# ~200K node-iterations per AI build. A 1120ms worst frame in the
+	# commander section was this loop on a busy match; the unit cost
+	# is now amortised to a single fetch per build attempt.
+	var tree: SceneTree = world.get_tree()
+	var structures: Array = tree.get_nodes_in_group("structures")
+	var resource_nodes: Array = tree.get_nodes_in_group("resource_nodes")
 	for ring in range(1, RINGS + 1):
 		var radius := RING_STEP * float(ring)
 		for i in range(SAMPLES):
 			var angle := TAU * float(i) / float(SAMPLES)
 			var candidate := home + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
 			candidate.y = world.terrain_height_at(candidate)
-			if validity(world, team, candidate, kind, blueprint)["valid"]:
+			if validity(world, team, candidate, kind, blueprint, structures, resource_nodes)["valid"]:
 				return candidate
 	return Vector3.INF

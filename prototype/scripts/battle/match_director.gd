@@ -2991,12 +2991,16 @@ func _physics_process(delta: float) -> void:
 	Profiler.stop("navmesh", t)
 
 	if stats:
+		var _t_stats := Profiler.start()
 		stats.tick(delta)
+		Profiler.stop("stats", _t_stats)
 	if economy:
 		# Ages the income accumulators. Must run BEFORE production draws this tick's
 		# cost, so the rate reflects what came in rather than what is left after
 		# spending it - the distinction the whole measure exists to make.
+		var _t_econ := Profiler.start()
 		economy.tick_income(delta)
+		Profiler.stop("economy", _t_econ)
 	if production:
 		t = Profiler.start()
 		production.tick(delta)

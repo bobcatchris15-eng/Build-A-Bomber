@@ -20,6 +20,7 @@ const FILES := [
 	"res://scripts/terrain_builder.gd",
 	"res://scripts/battle/buildings/structure.gd",
 	"res://scripts/battle/perf_toast.gd",
+	"res://scripts/battle/buildings/placement_service.gd",
 ]
 
 func _init():
