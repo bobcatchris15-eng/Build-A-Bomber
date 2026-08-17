@@ -1,4 +1,5 @@
 extends StaticBody3D
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 # An autonomous turret dropped by the sentry_deployer.
 #
 # Modelled on proximity_mine.gd's shape rather than on a module: it has to
@@ -104,9 +105,11 @@ func _destroy():
 
 func _physics_process(delta):
 	if is_dead: return
+	var _p := Profiler.start()
 	_age += delta
 	if _age >= SENTRY_LIFETIME:
 		_destroy()
+		Profiler.stop("sentries", _p)
 		return
 
 	if _deploy_timer < DEPLOY_TIME:
@@ -114,6 +117,7 @@ func _physics_process(delta):
 		var t = clampf(_deploy_timer / DEPLOY_TIME, 0.0, 1.0)
 		if _turret:
 			_turret.scale = Vector3(1.0, lerpf(0.25, 1.0, t), 1.0)
+		Profiler.stop("sentries", _p)
 		return
 
 	_scan_timer -= delta
@@ -122,6 +126,7 @@ func _physics_process(delta):
 		_acquire()
 
 	if not is_instance_valid(_target):
+		Profiler.stop("sentries", _p)
 		return
 
 	if _turret:
@@ -134,6 +139,7 @@ func _physics_process(delta):
 	if _fire_timer <= 0.0:
 		_fire_timer = FIRE_INTERVAL
 		_shoot()
+	Profiler.stop("sentries", _p)
 
 func _acquire():
 	_target = null

@@ -1,4 +1,5 @@
 extends Area3D
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 
 # Persistent proximity mine, laid by the mine_layer weapon.
 #
@@ -83,14 +84,17 @@ func _ready():
 func _process(delta):
 	if _detonated:
 		return
+	var _p := Profiler.start()
 	_age += delta
 	if _age >= MINE_LIFETIME:
 		queue_free()
+		Profiler.stop("mines", _p)
 		return
 
 	if not _armed:
 		if _age >= ARM_TIME:
 			_armed = true
+		Profiler.stop("mines", _p)
 		return
 
 	# Slow pulse on the indicator light.
@@ -99,6 +103,7 @@ func _process(delta):
 
 	_poll_timer -= delta
 	if _poll_timer > 0.0:
+		Profiler.stop("mines", _p)
 		return
 	_poll_timer = POLL_INTERVAL
 
@@ -117,7 +122,9 @@ func _process(delta):
 			continue
 		if global_position.distance_to(c.global_position) <= TRIGGER_RADIUS:
 			_detonate()
+			Profiler.stop("mines", _p)
 			return
+	Profiler.stop("mines", _p)
 
 func _detonate():
 	if _detonated:

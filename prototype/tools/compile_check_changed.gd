@@ -21,6 +21,13 @@ const FILES := [
 	"res://scripts/battle/buildings/structure.gd",
 	"res://scripts/battle/perf_toast.gd",
 	"res://scripts/battle/buildings/placement_service.gd",
+	"res://scripts/incoming_missile.gd",
+	"res://scripts/weapon_missile.gd",
+	"res://scripts/proximity_mine.gd",
+	"res://scripts/decoy_contact.gd",
+	"res://scripts/deployed_sentry.gd",
+	"res://scripts/resource_node.gd",
+	"res://scripts/battle/economy/resource_field.gd",
 ]
 
 func _init():

@@ -1,6 +1,7 @@
 extends Node3D
 const MunitionPool = preload("res://scripts/munition_pool.gd")
 const SimRNG = preload("res://scripts/battle/sim_rng.gd")
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 # Real, interceptable weapon missile (FABLE_REVIEW.md 2.2). Fired by
 # guided_missile / dual_stage_missile / missile_pod instead of the old
 # cosmetic tweened meshes - those never registered in the "missiles" group,
@@ -107,7 +108,21 @@ func _spawn_trail_puff():
 
 func _physics_process(delta):
 	if is_destroyed: return
+	var _p := Profiler.start()
+	# Profiler.stop("missiles", _p) is wired at every return below; the
+	# single-entry/single-exit rewrite would have been clearer but the
+	# function is hot enough that the per-call dict alloc for an extra
+	# local would show up in the section's mean time.
+	# Early-return helpers route through _missile_tick() so each path
+	# only has to remember one Profiler.stop. Kept as a method rather
+	# than an inline closure so the profiler section is the SAME name
+	# the incoming_missile / decoy / sentry / proximity_mine wrappers
+	# use, and a F4 dump can sum them into one "missiles" row.
+	_missile_tick(delta)
+	Profiler.stop("missiles", _p)
 
+
+func _missile_tick(delta: float) -> void:
 	# Gone dumb (lock broken by smoke): coast on the last heading, then
 	# self-destruct. It can still be shot down by PD during this, and it
 	# still explodes - it just isn't aimed at anything any more.

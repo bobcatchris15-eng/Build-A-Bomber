@@ -1,5 +1,6 @@
 extends Node3D
 const MunitionPool = preload("res://scripts/munition_pool.gd")
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 
 var target_node: Node3D = null
 var speed: float = 9.0
@@ -18,23 +19,26 @@ func _ready():
 
 func _physics_process(delta):
 	if is_destroyed: return
-	
+	var _p := Profiler.start()
+
 	if not is_instance_valid(target_node):
 		destroy_missile(false)
+		Profiler.stop("missiles", _p)
 		return
-		
+
 	# Move towards target
 	var dest = target_node.global_position + Vector3(0, 0.5, 0) # Hit center
 	look_at(dest, Vector3.UP)
 	var dir = (dest - global_position).normalized()
 	global_position += dir * speed * delta
-	
+
 	# Check distance
 	if global_position.distance_to(dest) < 1.2:
 		# Hit player!
 		if target_node.has_method("take_damage"):
 			target_node.take_damage(damage_amount, "explosive", global_position)
 		destroy_missile(false)
+	Profiler.stop("missiles", _p)
 
 func destroy_missile(intercepted: bool):
 	if is_destroyed: return

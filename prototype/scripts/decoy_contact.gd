@@ -1,4 +1,5 @@
 extends StaticBody3D
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 # A false contact deployed by decoy_projector: an inflatable/holographic
 # vehicle silhouette that draws enemy fire.
 #
@@ -116,12 +117,15 @@ func _pop():
 
 func _physics_process(delta):
 	if is_dead: return
+	var _p := Profiler.start()
 	_age += delta
 	if _age >= DECOY_LIFETIME:
 		_pop()
+		Profiler.stop("decoys", _p)
 		return
 	if _inflate < INFLATE_TIME:
 		_inflate += delta
 		var t = clampf(_inflate / INFLATE_TIME, 0.0, 1.0)
 		if _shell:
 			_shell.scale = Vector3(lerpf(0.2, 1.0, t), lerpf(0.05, 1.0, t), lerpf(0.2, 1.0, t))
+	Profiler.stop("decoys", _p)

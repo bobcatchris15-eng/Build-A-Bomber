@@ -1,4 +1,5 @@
 extends StaticBody3D
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 # One harvestable collectible: a rock, a crystal cluster, a tree, a well.
 #
 # WHAT CHANGED, 2026-08-07. These used to BE the deposit - one node at one
@@ -473,20 +474,25 @@ func _physics_process(delta: float) -> void:
 	# Bailing out before the regrow tick is what makes that contract
 	# enforceable; the alternative (setting regrow rate to 0) would
 	# still tick the timer and waste cycles.
+	var _p := Profiler.start()
 	if is_ambient:
 		set_physics_process(false)
+		Profiler.stop("resource_node", _p)
 		return
 	if amount >= start_amount:
 		# Fully regrown - nothing left to do until the next harvest()
 		# re-arms us. Stop being dispatched rather than early-returning
 		# forever; see setup()'s note on why the dispatch is the cost.
 		set_physics_process(false)
+		Profiler.stop("resource_node", _p)
 		return
 	_time_since_harvest += delta
 	if _time_since_harvest < REGROW_DELAY:
+		Profiler.stop("resource_node", _p)
 		return
 	_regrow_accum += start_amount * REGROW_RATE_FRACTION * delta
 	if _regrow_accum < 1.0:
+		Profiler.stop("resource_node", _p)
 		return
 	var whole = int(_regrow_accum)
 	_regrow_accum -= whole
@@ -496,3 +502,4 @@ func _physics_process(delta: float) -> void:
 		add_to_group("resource_nodes")
 	_update_label()
 	_update_visual_scale()
+	Profiler.stop("resource_node", _p)

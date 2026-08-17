@@ -1,4 +1,5 @@
 extends Node3D
+const Profiler = preload("res://scripts/battle/battle_profiler.gd")
 # A resource FIELD: a central point that scatters collectible nodes around it and
 # replaces them as they are worked out.
 #
@@ -94,6 +95,7 @@ func _spawn_into(index: int) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	var _p := Profiler.start()
 	for i in range(_slots.size()):
 		var slot: Dictionary = _slots[i]
 		var node = slot["node"]
@@ -108,6 +110,7 @@ func _physics_process(delta: float) -> void:
 		slot["timer"] += delta
 		if slot["timer"] >= respawn_seconds:
 			_spawn_into(i)
+	Profiler.stop("resource_field", _p)
 
 
 # Live collectibles. Used by tests and by the minimap, which draws the field's
