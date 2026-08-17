@@ -350,7 +350,7 @@ static func lint_spawn_fairness(map_def: Dictionary, ground_nav_map: RID) -> Arr
 	var half: float = map_def.get("map_half_extents", 80.0)
 	var resource_radius: float = half * FAIRNESS_RESOURCE_RADIUS_FRACTION
 	var resources: Array = map_def.get("resource_nodes", [])
-	var reachable_margin: float = FAIRNESS_HQ_REACHABLE_MARGIN * WorldScaleScript.for_map(map_def)
+	var reachable_margin: float = WorldScaleScript.scaled_f(FAIRNESS_HQ_REACHABLE_MARGIN, map_def)
 
 	var distances: Array = []
 	for i in range(spawns.size()):

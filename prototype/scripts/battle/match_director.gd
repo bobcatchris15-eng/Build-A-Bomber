@@ -769,11 +769,10 @@ const SHADOW_DISTANCE_BASE: float = 320.0
 const SSAO_RADIUS_BASE: float = 0.8
 
 func _scale_lighting_to_world() -> void:
-	var scale: float = WorldScaleScript.for_map(current_map)
 	var env_data: Dictionary = current_map.get("environment", {})
 	var light := get_node_or_null("DirectionalLight3D") as DirectionalLight3D
 	if light:
-		light.directional_shadow_max_distance = SHADOW_DISTANCE_BASE * scale
+		light.directional_shadow_max_distance = WorldScaleScript.scaled_f(SHADOW_DISTANCE_BASE, current_map)
 		if env_data.has("sun_color"):
 			light.light_color = env_data["sun_color"]
 		if env_data.has("sun_energy"):
@@ -782,7 +781,7 @@ func _scale_lighting_to_world() -> void:
 	var world_env := get_node_or_null("WorldEnvironment") as WorldEnvironment
 	if world_env and world_env.environment:
 		var env := world_env.environment
-		env.ssao_radius = SSAO_RADIUS_BASE * scale
+		env.ssao_radius = WorldScaleScript.scaled_f(SSAO_RADIUS_BASE, current_map)
 		if env_data.has("ambient_light_energy"):
 			env.ambient_light_energy = float(env_data["ambient_light_energy"])
 		if env_data.has("fog_enabled"):

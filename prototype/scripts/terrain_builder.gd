@@ -501,11 +501,10 @@ static func _water_blob_height_contribution(blob: Dictionary, x: float, z: float
 # Deliberately an upper BOUND rather than a measured maximum: cheap, stable,
 # and erring high only lifts the shroud slightly.
 static func max_height(map_def: Dictionary) -> float:
-	var scale: float = WorldScaleScript.for_map(map_def)
 	if _get_heightmap_image(map_def):
 		# Heightmap samples are normalized 0..1, so height_scale IS the ceiling.
 		return float(map_def.get("terrain", {}).get("height_scale", 20.0))
-	var h: float = GROUND_NOISE_AMPLITUDE * scale
+	var h: float = WorldScaleScript.scaled_f(GROUND_NOISE_AMPLITUDE, map_def)
 	for hill in map_def.get("hills", []):
 		h += absf(float(hill.get("height", 0.0)))
 	return h
@@ -550,7 +549,7 @@ static func height_at(map_def: Dictionary, x: float, z: float) -> float:
 		# world_scale correction below, not the height magnitude.
 		return _sample_heightmap_bilinear(heightmap_img, half, x, z, WorldScaleScript.for_map(map_def)) * height_scale
 
-	var h = _get_noise(map_def).get_noise_2d(x, z) * GROUND_NOISE_AMPLITUDE * WorldScaleScript.for_map(map_def)
+	var h = _get_noise(map_def).get_noise_2d(x, z) * WorldScaleScript.scaled_f(GROUND_NOISE_AMPLITUDE, map_def)
 	for hill in map_def.get("hills", []):
 		h += _hill_contribution(hill, x, z)
 	for blob in map_def.get("water_blobs", []):

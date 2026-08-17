@@ -47,9 +47,3 @@ static func for_map(map_def) -> float:
 
 static func scaled_f(value: float, map_def = null) -> float:
 	return value * for_map(map_def)
-
-static func scaled_v2(value: Vector2, map_def = null) -> Vector2:
-	return value * for_map(map_def)
-
-static func scaled_v3(value: Vector3, map_def = null) -> Vector3:
-	return value * for_map(map_def)

@@ -1186,15 +1186,12 @@ func test_world_scale_default_and_per_map_override() -> bool:
 		print("  [FAIL] A negative world_scale should fall back to the default, got ", WorldScaleScript.for_map(negative_map))
 		return false
 
-	# The scaled_* helpers multiply by the resolved factor.
+	# The scaled_f helper multiplies by the resolved factor. (scaled_v2/scaled_v3
+	# existed as a sibling API for Vector2/Vector3 consumers but every production
+	# consumer migrates through for_map() directly, so they were removed in the
+	# 2026-08 cleanup - re-add here if a Vector2/Vector3 consumer ever lands.)
 	if WorldScaleScript.scaled_f(6.0, overridden_map) != 48.0:
 		print("  [FAIL] scaled_f(6.0) at world_scale=8.0 should be 48.0, got ", WorldScaleScript.scaled_f(6.0, overridden_map))
-		return false
-	if WorldScaleScript.scaled_v2(Vector2(1.0, 2.0), overridden_map) != Vector2(8.0, 16.0):
-		print("  [FAIL] scaled_v2 did not scale both axes by the resolved factor.")
-		return false
-	if WorldScaleScript.scaled_v3(Vector3(1.0, 2.0, 3.0), overridden_map) != Vector3(8.0, 16.0, 24.0):
-		print("  [FAIL] scaled_v3 did not scale all three axes by the resolved factor.")
 		return false
 
 	# Chunk 19: DEFAULT_WORLD_SCALE flipped from the Phase-1 inert 1.0 to
@@ -1209,7 +1206,7 @@ func test_world_scale_default_and_per_map_override() -> bool:
 		print("  [FAIL] scaled_f with no map context should apply the current default (4.0), got ", WorldScaleScript.scaled_f(6.0, null))
 		return false
 
-	print("  [PASS] WorldScale defaults to 4.0 (Chunk 19), honours a valid per-map override, rejects malformed overrides, and its scaled_* helpers multiply correctly.")
+	print("  [PASS] WorldScale defaults to 4.0 (Chunk 19), honours a valid per-map override, rejects malformed overrides, and scaled_f multiplies correctly.")
 	return true
 
 # Deterministic per-zone RNG (_seeded_rng() hashes zone.center) means two

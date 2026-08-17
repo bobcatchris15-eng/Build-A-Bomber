@@ -297,7 +297,7 @@ func _base_threatened() -> bool:
 	# size.
 	var threat_radius := 45.0
 	if _world != null and "current_map" in _world:
-		threat_radius *= WorldScaleScript.for_map(_world.current_map)
+		threat_radius = WorldScaleScript.scaled_f(threat_radius, _world.current_map)
 	for s in _world.get_team_structures(team):
 		for u in _world.get_team_units(0):
 			if not is_instance_valid(u) or u.is_dead or u.is_harvester:
