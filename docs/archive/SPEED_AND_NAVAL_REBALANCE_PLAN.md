@@ -12,8 +12,8 @@ Speed is currently the least interesting number a design has. Three things cause
 2. **Nothing a player bolts on makes a unit faster.** Weight, armour and modules only ever
    *cost* speed. There is no "go faster" decision anywhere in the Design Lab.
 3. **Most of the speed system is dead in the live battle.** `Drivetrain.analyze()` is the shared
-   source of truth, but the live runtime (`BattleUnitV2`) reads the wrong key out of it and never
-   computes terrain speed at all â€” so overload penalties, underload bonuses, faction speed
+   source of truth, but the live runtime (`BattleUnit`) reads the wrong key out of it and never
+   computes terrain speed at all â€" so overload penalties, underload bonuses, faction speed
    passives, and the entire 7-surface Ã— 10-locomotor terrain table have no effect in Skirmish.
 
 Separately, the three pure-naval drives are dead weight in the roster: naval units and naval
@@ -281,7 +281,7 @@ New suites in `tests/test_locomotion.gd`, each registered in `SUITE_ORDER` in `r
    the ceiling and lowers capacity, and `MAX_CHASSIS_SPEED_MULT` caps a stack of six.
 3. `test_boost_controller_engages_and_expires` â€” engages on a long run, refuses mid-turn and near
    an enemy, burns charges, respects cooldown.
-4. `test_live_runtime_uses_combat_speed_and_terrain` â€” a `BattleUnitV2` built overloaded moves
+4. `test_live_runtime_uses_combat_speed_and_terrain` â€" a `BattleUnit` built overloaded moves
    slower than its `top_speed`, and the same unit covers measurably less ground on `snow_mud`
    than on `gravel`. This is the regression guard for Â§3 and the one that would have caught the
    original defect.

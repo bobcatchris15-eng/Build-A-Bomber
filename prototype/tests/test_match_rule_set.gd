@@ -18,7 +18,7 @@ const RuleSetScript = preload("res://scripts/match_rule_set.gd")
 # A bare Node stand-in for the `unit` parameter. The current
 # is_order_legal does not read any unit metadata, but the signature is
 # future-proof; this prevents a future "harvester-only" branch from
-# having to be tested with a real BattleUnitV2 in Phase 2.
+# having to be tested with a real BattleUnit in Phase 2.
 func _stub_unit() -> Node:
 	return Node.new()
 

@@ -319,7 +319,7 @@ func exit_position() -> Vector3:
 
 # --- Damage ------------------------------------------------------------------
 
-# Same three-argument contract as BattleUnitV2, because auto_weapon.gd does not
+# Same three-argument contract as BattleUnit, because auto_weapon.gd does not
 # know or care which one it hit - it duck-types anything in the `damageable`
 # group. A one-argument version here is a runtime error on every shell that lands
 # on a building.

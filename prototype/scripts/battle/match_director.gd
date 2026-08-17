@@ -1123,7 +1123,7 @@ func _spawn_starting_units() -> void:
 #
 # The player unit is captured into focus_unit so the chase camera
 # has a target. The dummies are not auto-engaging on spawn - their
-# normal BattleUnitV2 AI runs from the moment they are on the map,
+# normal BattleUnit AI runs from the moment they are on the map,
 # which is what the player wanted when they picked the COMBAT-flagged
 # dummies; the legacy TARGET_DUMMY_SCRIPT hover-and-pace is gone
 # with the battlefield.gd retirement.

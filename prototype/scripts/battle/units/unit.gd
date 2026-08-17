@@ -1,4 +1,4 @@
-class_name BattleUnitV2
+class_name BattleUnit
 extends CharacterBody3D
 # A mobile unit: intent in, movement out.
 #
@@ -15,11 +15,10 @@ extends CharacterBody3D
 # function and were fixed by editing the same lines. This file's whole job is to
 # hold the current Order, ask Steering what velocity that implies, and apply it.
 #
-# NAME. `BattleUnitV2` rather than `BattleUnit` because battle_unit.gd already
-# claims that class_name and was still running the old Skirmish scene when
-# this file was first authored. battle_unit.gd was retired 2026-08-10 in the
-# unification's Phase 4; the V2 name is now historical and tracked in
-# PROGRESS.md as a follow-up rename to `BattleUnit`.
+# NAME. Was `BattleUnitV2` through 2026-08-17 because the original
+# `battle_unit.gd` (now retired) still claimed the bare `BattleUnit`
+# class_name. Renamed after battle_unit.gd was deleted in the unification's
+# Phase 4. PROGRESS.md entry: "follow-up rename to BattleUnit" (2026-08-17).
 
 const SteeringScript = preload("res://scripts/battle/movement/steering.gd")
 const AssemblyScript = preload("res://scripts/battle/units/unit_assembly.gd")
