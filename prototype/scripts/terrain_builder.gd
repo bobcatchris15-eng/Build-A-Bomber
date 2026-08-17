@@ -1215,16 +1215,29 @@ static func rebake_ground_amphibious_tiles_sync(map_def: Dictionary, extra_holes
 
 
 # Returns the indices of navmesh tiles that overlap `hole` (a
-# {_building_holes()-shaped} rect). Used by the urgent placement
-# path to scope a sync rebake to only the tiles the new building
-# actually carves, so the 100-200ms block scales with the building
-# size, not the whole map.
+# {_building_holes()-shaped} rect, i.e. {center: Vector3,
+# half_extents: Vector2}). Used by the urgent placement path to
+# scope a sync rebake to only the tiles the new building actually
+# carves, so the 100-200ms block scales with the building size, not
+# the whole map.
 static func tiles_overlapping_hole(map_def: Dictionary, hole: Dictionary) -> Array:
 	var tile_rects = _nav_tile_rects(map_def)
+	# Unwrap the {center, half_extents} shape into the AABB the overlap
+	# test wants. center is XZ, half_extents is the X/Z half-size in
+	# metres. The Y axis does not matter for tile overlap - tiles are
+	# vertical columns in the navmesh layout.
+	var cx: float = float(hole["center"].x)
+	var cz: float = float(hole["center"].z)
+	var hx: float = float(hole["half_extents"].x)
+	var hz: float = float(hole["half_extents"].y)
+	var hole_x0: float = cx - hx
+	var hole_x1: float = cx + hx
+	var hole_z0: float = cz - hz
+	var hole_z1: float = cz + hz
 	var out: Array = []
 	for i in range(tile_rects.size()):
 		var t = tile_rects[i]
-		if hole.x1 > t.x0 and hole.x0 < t.x1 and hole.z1 > t.z0 and hole.z0 < t.z1:
+		if hole_x1 > t.x0 and hole_x0 < t.x1 and hole_z1 > t.z0 and hole_z0 < t.z1:
 			out.append(i)
 	return out
 
